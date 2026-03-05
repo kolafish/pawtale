@@ -128,10 +128,12 @@ class AISceneService:
         for block in content_blocks:
             if not isinstance(block, dict):
                 continue
-            if block.get("type") == "text" and isinstance(block.get("text"), str):
-                texts.append(block["text"])
-            elif isinstance(block.get("text"), str):
-                texts.append(block["text"])
+            text = block.get("text")
+            if not isinstance(text, str):
+                continue
+            block_type = block.get("type")
+            if block_type in (None, "text"):
+                texts.append(text)
 
         content = "\n".join(t.strip() for t in texts if t and t.strip()).strip()
         if not content:
