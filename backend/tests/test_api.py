@@ -1,5 +1,6 @@
 import pytest
 from unittest.mock import AsyncMock, patch
+from app.services.ai_scene import AISceneParseError, AISceneProviderError, AISceneTimeoutError
 
 
 class TestCharacterAPI:
@@ -187,6 +188,57 @@ class TestSceneAPI:
 
         get_response = await client.get(f"/api/scenes/{scene_id}")
         assert get_response.status_code == 404
+
+    async def test_ai_generate_scene_parse_error_mapping(self, client):
+        """测试场景 AI 解析错误映射为 502"""
+        with patch("app.routers.scenes.ai_scene_service.generate_scene_candidates") as mock_generate:
+            mock_generate.side_effect = AISceneParseError("模型输出无效")
+            response = await client.post(
+                "/api/scenes/ai-generate",
+                json={
+                    "category": "初遇",
+                    "mood_keywords": ["雨夜"],
+                    "count": 3,
+                    "ai_model": "claude-opus-4",
+                },
+            )
+
+        assert response.status_code == 502
+        assert "模型返回格式异常" in response.json()["detail"]
+
+    async def test_ai_generate_scene_timeout_error_mapping(self, client):
+        """测试场景 AI 超时映射为 504"""
+        with patch("app.routers.scenes.ai_scene_service.generate_scene_candidates") as mock_generate:
+            mock_generate.side_effect = AISceneTimeoutError("请求超时")
+            response = await client.post(
+                "/api/scenes/ai-generate",
+                json={
+                    "category": "初遇",
+                    "mood_keywords": ["雨夜"],
+                    "count": 3,
+                    "ai_model": "deepseek",
+                },
+            )
+
+        assert response.status_code == 504
+        assert "模型响应超时" in response.json()["detail"]
+
+    async def test_ai_generate_scene_provider_error_mapping(self, client):
+        """测试场景 AI 上游错误映射为 502"""
+        with patch("app.routers.scenes.ai_scene_service.generate_scene_candidates") as mock_generate:
+            mock_generate.side_effect = AISceneProviderError("上游服务异常")
+            response = await client.post(
+                "/api/scenes/ai-generate",
+                json={
+                    "category": "初遇",
+                    "mood_keywords": ["雨夜"],
+                    "count": 3,
+                    "ai_model": "deepseek",
+                },
+            )
+
+        assert response.status_code == 502
+        assert "上游模型服务异常" in response.json()["detail"]
 
 
 class TestStoryAPI:
