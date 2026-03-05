@@ -1,16 +1,18 @@
-import { Users, MapPin, BookOpen, PanelLeft, PanelRight, Columns2, FileText } from 'lucide-react';
+import { Users, MapPin, BookOpen, PanelLeft, PanelRight, Columns2, FileText, PenSquare } from 'lucide-react';
 import { useAppStore } from '../stores/appStore';
 import { CharacterPanel } from './CharacterPanel';
 import { ScenePanel } from './ScenePanel';
 import { StoryListPanel } from './StoryListPanel';
 import { StoryPreview } from './StoryPreview';
 import { OutlinePanel } from './OutlinePanel';
+import { StoryEditorWorkspace } from './StoryEditorWorkspace';
 import { AI_MODEL_OPTIONS } from '../constants/aiModels';
 
 export function Layout() {
   const { viewMode, setViewMode, editTab, setEditTab, defaultAiModel, setDefaultAiModel } = useAppStore();
 
   const tabs = [
+    { id: 'writing' as const, label: '写作', icon: PenSquare },
     { id: 'characters' as const, label: '角色', icon: Users },
     { id: 'scenes' as const, label: '场景', icon: MapPin },
     { id: 'outlines' as const, label: '大纲', icon: FileText },
@@ -105,6 +107,7 @@ export function Layout() {
 
             {/* Tab 内容 */}
             <div className="flex-1 overflow-hidden">
+              {editTab === 'writing' && <StoryEditorWorkspace />}
               {editTab === 'characters' && <CharacterPanel />}
               {editTab === 'scenes' && <ScenePanel />}
               {editTab === 'outlines' && <OutlinePanel />}

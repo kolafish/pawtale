@@ -19,6 +19,10 @@ from app.schemas.schemas import (
     RegenerateChoicesRequest, RegenerateChoicesResponse,
     PolishChaptersRequest, PolishChaptersResponse,
     OutlineGuidedCreateRequest, OutlineGuidedCreateResponse,
+    ExtractedCharacter, ExtractedScene, ExtractedOutlinePoint,
+    StoryWorkspaceCreateRequest, StoryWorkspaceUpdateRequest,
+    StoryWorkspaceExtractRequest, StoryWorkspaceAIContinueRequest, StoryWorkspaceExtractionUpdateRequest,
+    StoryWorkspaceResponse, StoryWorkspaceAIContinueResponse, StoryWorkspaceExtractResponse,
 )
 
 __all__ = [
@@ -42,4 +46,8 @@ __all__ = [
     "RegenerateChoicesRequest", "RegenerateChoicesResponse",
     "PolishChaptersRequest", "PolishChaptersResponse",
     "OutlineGuidedCreateRequest", "OutlineGuidedCreateResponse",
+    "ExtractedCharacter", "ExtractedScene", "ExtractedOutlinePoint",
+    "StoryWorkspaceCreateRequest", "StoryWorkspaceUpdateRequest",
+    "StoryWorkspaceExtractRequest", "StoryWorkspaceAIContinueRequest", "StoryWorkspaceExtractionUpdateRequest",
+    "StoryWorkspaceResponse", "StoryWorkspaceAIContinueResponse", "StoryWorkspaceExtractResponse",
 ]

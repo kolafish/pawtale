@@ -418,6 +418,105 @@ class TestStoryAPI:
         data = response.json()
         assert "debug_info" not in data
 
+    async def test_create_story_workspace(self, client):
+        """测试创建编辑器优先工作区"""
+        response = await client.post(
+            "/api/stories/workspace",
+            json={
+                "title": "编辑器模式测试",
+                "content": "这是我自己先写的开头。",
+                "ai_model": "deepseek",
+            },
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["title"] == "编辑器模式测试"
+        assert data["editor_content"] == "这是我自己先写的开头。"
+        assert data["story_id"]
+        assert data["extracted_characters"] == []
+
+    async def test_workspace_ai_continue(self, client):
+        """测试工作区 AI 续写"""
+        create_resp = await client.post(
+            "/api/stories/workspace",
+            json={
+                "title": "续写测试",
+                "content": "窗外下着雨，她站在便利店门口。",
+            },
+        )
+        story_id = create_resp.json()["story_id"]
+
+        with patch("app.routers.stories.get_ai_service") as mock_get_service:
+            mock_service = AsyncMock()
+            mock_service.generate_story = AsyncMock(return_value={
+                "content": "他把伞递过来，却没说一句话。",
+                "choices": [{"label": "A. 接过伞", "next_node": None}],
+            })
+            mock_get_service.return_value = mock_service
+
+            response = await client.post(
+                f"/api/stories/{story_id}/workspace/ai-continue",
+                json={"instruction": "继续写一段重逢感", "append": True},
+            )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["generated_chunk"] == "他把伞递过来，却没说一句话。"
+        assert "他把伞递过来" in data["editor_content"]
+        assert len(data["choices"]) == 1
+
+    async def test_workspace_extract_and_manual_update(self, client):
+        """测试工作区自动提炼与手工修改"""
+        create_resp = await client.post(
+            "/api/stories/workspace",
+            json={
+                "title": "提炼测试",
+                "content": "林晚在天台遇见周彻，两人因旧事争执。",
+            },
+        )
+        story_id = create_resp.json()["story_id"]
+
+        with patch("app.routers.stories.get_ai_service") as mock_get_service:
+            mock_service = AsyncMock()
+            mock_service.extract_story_context = AsyncMock(return_value={
+                "extracted_characters": [
+                    {"name": "林晚", "role_hint": "主角", "traits": ["倔强"], "summary": "摄影师"}
+                ],
+                "extracted_scenes": [
+                    {"name": "天台", "description": "夜风很大", "keywords": ["夜晚", "争执"]}
+                ],
+                "extracted_outline_points": [
+                    {"stage": "开端", "summary": "两人重逢并发生争执"}
+                ],
+                "extraction_notes": ["可能存在时间线跳跃"],
+            })
+            mock_get_service.return_value = mock_service
+
+            extract_resp = await client.post(
+                f"/api/stories/{story_id}/workspace/extract",
+                json={"debug": False},
+            )
+
+        assert extract_resp.status_code == 200
+        extracted = extract_resp.json()
+        assert extracted["extracted_characters"][0]["name"] == "林晚"
+        assert extracted["extracted_scenes"][0]["name"] == "天台"
+
+        update_resp = await client.put(
+            f"/api/stories/{story_id}/workspace/extracted",
+            json={
+                "extracted_characters": [
+                    {"name": "林晚", "role_hint": "主角", "traits": ["冷静"], "summary": "纪录片导演"}
+                ],
+                "extraction_notes": ["已手工校准角色职业"],
+            },
+        )
+        assert update_resp.status_code == 200
+        updated = update_resp.json()
+        assert updated["extracted_characters"][0]["traits"] == ["冷静"]
+        assert updated["extraction_notes"] == ["已手工校准角色职业"]
+
 
 class TestHealthCheck:
     """健康检查测试"""

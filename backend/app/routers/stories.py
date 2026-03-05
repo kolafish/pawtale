@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from app.database import get_db
-from app.models import Story, Character, Scene, StoryCharacter, StoryOutline
+from app.models import Story, Character, Scene, StoryCharacter, StoryOutline, StoryWorkspace
 from app.schemas import (
     StoryCreate, StoryResponse, StoryUpdate,
     StoryGenerateRequest, StoryBranchRequest, StoryGenerateResponse,
@@ -13,10 +13,89 @@ from app.schemas import (
     PresentCharacter,
     RegenerateChoicesRequest, RegenerateChoicesResponse,
     PolishChaptersRequest, PolishChaptersResponse,
+    StoryWorkspaceCreateRequest, StoryWorkspaceUpdateRequest,
+    StoryWorkspaceExtractRequest, StoryWorkspaceAIContinueRequest, StoryWorkspaceExtractionUpdateRequest,
+    StoryWorkspaceResponse, StoryWorkspaceAIContinueResponse, StoryWorkspaceExtractResponse,
 )
 from app.services import get_ai_service
 
 router = APIRouter(prefix="/api/stories", tags=["stories"])
+
+
+def _default_story_nodes(initial_content: str = "") -> dict:
+    return {
+        "node_1": {
+            "title": "第一章",
+            "content": initial_content,
+            "word_count": len(initial_content),
+            "ai_model": "manual",
+            "choices": [],
+        }
+    }
+
+
+def _normalize_workspace_list(raw_items: list, kind: str) -> list[dict]:
+    normalized: list[dict] = []
+    for item in raw_items:
+        if not isinstance(item, dict):
+            continue
+        if kind == "characters":
+            name = str(item.get("name", "")).strip()
+            if not name:
+                continue
+            traits_raw = item.get("traits", [])
+            traits = [str(x).strip() for x in traits_raw if str(x).strip()] if isinstance(traits_raw, list) else []
+            normalized.append({
+                "name": name,
+                "role_hint": str(item.get("role_hint", "")).strip() or None,
+                "traits": traits[:6],
+                "summary": str(item.get("summary", "")).strip() or None,
+            })
+        elif kind == "scenes":
+            name = str(item.get("name", "")).strip()
+            if not name:
+                continue
+            keywords_raw = item.get("keywords", [])
+            keywords = [str(x).strip() for x in keywords_raw if str(x).strip()] if isinstance(keywords_raw, list) else []
+            normalized.append({
+                "name": name,
+                "description": str(item.get("description", "")).strip() or None,
+                "keywords": keywords[:6],
+            })
+        elif kind == "outline":
+            stage = str(item.get("stage", "")).strip()
+            summary = str(item.get("summary", "")).strip()
+            if not stage or not summary:
+                continue
+            normalized.append({
+                "stage": stage,
+                "summary": summary,
+            })
+    return normalized[:8]
+
+
+def _normalize_workspace_notes(raw_items: list) -> list[str]:
+    if not isinstance(raw_items, list):
+        return []
+    return [str(item).strip() for item in raw_items if str(item).strip()][:8]
+
+
+def _workspace_response(story: Story, workspace: StoryWorkspace) -> StoryWorkspaceResponse:
+    return StoryWorkspaceResponse(
+        story_id=story.id,
+        title=story.title,
+        mood=story.mood,
+        writing_style=story.writing_style,
+        chapter_length=story.chapter_length,
+        ai_model=story.ai_model,
+        editor_content=workspace.editor_content or "",
+        extracted_characters=(workspace.extracted_characters or []),
+        extracted_scenes=(workspace.extracted_scenes or []),
+        extracted_outline_points=(workspace.extracted_outline_points or []),
+        extraction_notes=(workspace.extraction_notes or []),
+        created_at=workspace.created_at,
+        updated_at=workspace.updated_at,
+    )
 
 
 @router.get("", response_model=list[StoryResponse])
@@ -29,6 +108,356 @@ async def get_stories(db: AsyncSession = Depends(get_db)):
     )
     stories = result.scalars().all()
     return stories
+
+
+@router.post("/workspace", response_model=StoryWorkspaceResponse)
+async def create_story_workspace(
+    request: StoryWorkspaceCreateRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """创建编辑器优先的故事工作区（无需预设角色/场景/大纲）"""
+    initial_content = request.content.strip()
+    story = Story(
+        title=(request.title or "未命名作品").strip() or "未命名作品",
+        mood=request.mood,
+        writing_style=request.writing_style,
+        chapter_length=request.chapter_length,
+        ai_model=request.ai_model or "deepseek",
+        nodes=_default_story_nodes(initial_content),
+        current_node_id="node_1",
+        current_path=["node_1"],
+    )
+    db.add(story)
+    await db.flush()
+
+    workspace = StoryWorkspace(
+        story_id=story.id,
+        editor_content=initial_content,
+        extracted_characters=[],
+        extracted_scenes=[],
+        extracted_outline_points=[],
+        extraction_notes=[],
+    )
+    db.add(workspace)
+    await db.commit()
+    await db.refresh(story)
+    await db.refresh(workspace)
+
+    return _workspace_response(story, workspace)
+
+
+@router.get("/{story_id}/workspace", response_model=StoryWorkspaceResponse)
+async def get_story_workspace(story_id: str, db: AsyncSession = Depends(get_db)):
+    """获取编辑器工作区"""
+    result = await db.execute(select(Story).where(Story.id == story_id))
+    story = result.scalar_one_or_none()
+    if not story:
+        raise HTTPException(status_code=404, detail="故事不存在")
+
+    workspace_result = await db.execute(
+        select(StoryWorkspace).where(StoryWorkspace.story_id == story_id)
+    )
+    workspace = workspace_result.scalar_one_or_none()
+
+    if not workspace:
+        current_node_id = story.current_node_id or "node_1"
+        node = story.nodes.get(current_node_id, {}) if isinstance(story.nodes, dict) else {}
+        bootstrap_content = str(node.get("content", "")) if isinstance(node, dict) else ""
+        workspace = StoryWorkspace(
+            story_id=story.id,
+            editor_content=bootstrap_content,
+            extracted_characters=[],
+            extracted_scenes=[],
+            extracted_outline_points=[],
+            extraction_notes=[],
+        )
+        db.add(workspace)
+        await db.commit()
+        await db.refresh(workspace)
+
+    return _workspace_response(story, workspace)
+
+
+@router.put("/{story_id}/workspace", response_model=StoryWorkspaceResponse)
+async def update_story_workspace(
+    story_id: str,
+    request: StoryWorkspaceUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """更新工作区文本和故事基础设置"""
+    result = await db.execute(select(Story).where(Story.id == story_id))
+    story = result.scalar_one_or_none()
+    if not story:
+        raise HTTPException(status_code=404, detail="故事不存在")
+
+    workspace_result = await db.execute(
+        select(StoryWorkspace).where(StoryWorkspace.story_id == story_id)
+    )
+    workspace = workspace_result.scalar_one_or_none()
+    if not workspace:
+        workspace = StoryWorkspace(story_id=story_id, editor_content="")
+        db.add(workspace)
+        await db.flush()
+
+    if request.title is not None:
+        story.title = request.title.strip() or story.title
+    if request.mood is not None:
+        story.mood = request.mood
+    if request.writing_style is not None:
+        story.writing_style = request.writing_style
+    if request.chapter_length is not None:
+        story.chapter_length = request.chapter_length
+    if request.ai_model is not None:
+        story.ai_model = request.ai_model
+
+    if request.content is not None:
+        new_content = request.content
+        workspace.editor_content = new_content
+        nodes = dict(story.nodes or {})
+        if "node_1" not in nodes:
+            nodes["node_1"] = {
+                "title": "第一章",
+                "content": new_content,
+                "word_count": len(new_content),
+                "ai_model": "manual",
+                "choices": [],
+            }
+        else:
+            node = dict(nodes["node_1"])
+            node["content"] = new_content
+            node["word_count"] = len(new_content)
+            nodes["node_1"] = node
+        story.nodes = nodes
+        if not story.current_node_id:
+            story.current_node_id = "node_1"
+        if not story.current_path:
+            story.current_path = ["node_1"]
+
+    await db.commit()
+    await db.refresh(story)
+    await db.refresh(workspace)
+    return _workspace_response(story, workspace)
+
+
+@router.post(
+    "/{story_id}/workspace/ai-continue",
+    response_model=StoryWorkspaceAIContinueResponse,
+    response_model_exclude_none=True,
+)
+async def continue_story_workspace(
+    story_id: str,
+    request: StoryWorkspaceAIContinueRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """基于当前编辑文本进行 AI 续写"""
+    result = await db.execute(select(Story).where(Story.id == story_id))
+    story = result.scalar_one_or_none()
+    if not story:
+        raise HTTPException(status_code=404, detail="故事不存在")
+
+    workspace_result = await db.execute(
+        select(StoryWorkspace).where(StoryWorkspace.story_id == story_id)
+    )
+    workspace = workspace_result.scalar_one_or_none()
+    if not workspace:
+        workspace = StoryWorkspace(story_id=story_id, editor_content="")
+        db.add(workspace)
+        await db.flush()
+
+    base_content = (workspace.editor_content or "").strip()
+    if not base_content:
+        raise HTTPException(status_code=400, detail="请先在编辑器里写一些内容")
+
+    selected_ai_model = request.ai_model or story.ai_model or "deepseek"
+    ai_service = get_ai_service(selected_ai_model)
+
+    extracted_characters = workspace.extracted_characters or []
+    extracted_scenes = workspace.extracted_scenes or []
+    character_payload = []
+    for char in extracted_characters:
+        if not isinstance(char, dict):
+            continue
+        name = str(char.get("name", "")).strip()
+        if not name:
+            continue
+        character_payload.append({
+            "name": name,
+            "identity": char.get("role_hint"),
+            "personality": char.get("traits") or [],
+            "background": char.get("summary"),
+        })
+
+    primary_scene = extracted_scenes[0] if extracted_scenes and isinstance(extracted_scenes[0], dict) else {}
+    scene_payload = {
+        "name": str(primary_scene.get("name", "当前文本")).strip() or "当前文本",
+        "description": str(primary_scene.get("description", "基于已有正文续写")).strip() or "基于已有正文续写",
+        "location": None,
+        "time_weather": None,
+        "sensory_details": {},
+        "props": [],
+    }
+
+    try:
+        story_result = await ai_service.generate_story(
+            characters=character_payload,
+            scene=scene_payload,
+            mood=story.mood or "甜",
+            writing_style=story.writing_style or "细腻",
+            chapter_length=story.chapter_length or "中",
+            previous_content=base_content[-4000:],
+            custom_direction=request.instruction,
+            chapter_number=max(len(story.current_path or []), 1),
+            debug=request.debug,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"AI续写失败: {str(e)}")
+
+    generated_chunk = (story_result.get("content") or "").strip()
+    if not generated_chunk:
+        raise HTTPException(status_code=502, detail="AI未返回可用续写内容")
+
+    if request.append:
+        if workspace.editor_content.strip():
+            workspace.editor_content = f"{workspace.editor_content.rstrip()}\n\n{generated_chunk}"
+        else:
+            workspace.editor_content = generated_chunk
+    else:
+        workspace.editor_content = generated_chunk
+
+    nodes = dict(story.nodes or {})
+    node = dict(nodes.get("node_1", {}))
+    node["title"] = node.get("title") or "第一章"
+    node["content"] = workspace.editor_content
+    node["word_count"] = len(workspace.editor_content)
+    node["ai_model"] = selected_ai_model
+    node["choices"] = story_result.get("choices", [])
+    nodes["node_1"] = node
+    story.nodes = nodes
+    story.current_node_id = "node_1"
+    story.current_path = ["node_1"]
+    story.ai_model = selected_ai_model
+
+    await db.commit()
+
+    return StoryWorkspaceAIContinueResponse(
+        story_id=story.id,
+        editor_content=workspace.editor_content,
+        generated_chunk=generated_chunk,
+        choices=story_result.get("choices", []),
+        ai_model=selected_ai_model,
+        debug_info=story_result.get("debug_info") if request.debug else None,
+    )
+
+
+@router.post(
+    "/{story_id}/workspace/extract",
+    response_model=StoryWorkspaceExtractResponse,
+    response_model_exclude_none=True,
+)
+async def extract_story_workspace(
+    story_id: str,
+    request: StoryWorkspaceExtractRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """从编辑内容自动提炼角色/场景/情节大纲"""
+    result = await db.execute(select(Story).where(Story.id == story_id))
+    story = result.scalar_one_or_none()
+    if not story:
+        raise HTTPException(status_code=404, detail="故事不存在")
+
+    workspace_result = await db.execute(
+        select(StoryWorkspace).where(StoryWorkspace.story_id == story_id)
+    )
+    workspace = workspace_result.scalar_one_or_none()
+    if not workspace:
+        workspace = StoryWorkspace(story_id=story_id, editor_content="")
+        db.add(workspace)
+        await db.flush()
+
+    source_text = (request.content if request.content is not None else workspace.editor_content or "").strip()
+    if not source_text:
+        raise HTTPException(status_code=400, detail="没有可提炼的文本内容")
+
+    selected_ai_model = request.ai_model or story.ai_model or "deepseek"
+    ai_service = get_ai_service(selected_ai_model)
+
+    try:
+        extraction_result = await ai_service.extract_story_context(
+            content=source_text,
+            debug=request.debug,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"提炼失败: {str(e)}")
+
+    workspace.extracted_characters = _normalize_workspace_list(
+        extraction_result.get("extracted_characters", []),
+        kind="characters",
+    )
+    workspace.extracted_scenes = _normalize_workspace_list(
+        extraction_result.get("extracted_scenes", []),
+        kind="scenes",
+    )
+    workspace.extracted_outline_points = _normalize_workspace_list(
+        extraction_result.get("extracted_outline_points", []),
+        kind="outline",
+    )
+    workspace.extraction_notes = _normalize_workspace_notes(
+        extraction_result.get("extraction_notes", []),
+    )
+    await db.commit()
+
+    return StoryWorkspaceExtractResponse(
+        story_id=story.id,
+        extracted_characters=workspace.extracted_characters,
+        extracted_scenes=workspace.extracted_scenes,
+        extracted_outline_points=workspace.extracted_outline_points,
+        extraction_notes=workspace.extraction_notes,
+        debug_info=extraction_result.get("debug_info") if request.debug else None,
+    )
+
+
+@router.put("/{story_id}/workspace/extracted", response_model=StoryWorkspaceResponse)
+async def update_story_workspace_extracted(
+    story_id: str,
+    request: StoryWorkspaceExtractionUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """手工修改提炼出的角色/场景/大纲信息"""
+    result = await db.execute(select(Story).where(Story.id == story_id))
+    story = result.scalar_one_or_none()
+    if not story:
+        raise HTTPException(status_code=404, detail="故事不存在")
+
+    workspace_result = await db.execute(
+        select(StoryWorkspace).where(StoryWorkspace.story_id == story_id)
+    )
+    workspace = workspace_result.scalar_one_or_none()
+    if not workspace:
+        workspace = StoryWorkspace(story_id=story_id, editor_content="")
+        db.add(workspace)
+        await db.flush()
+
+    if request.extracted_characters is not None:
+        workspace.extracted_characters = _normalize_workspace_list(
+            [item.model_dump() if hasattr(item, "model_dump") else item for item in request.extracted_characters],
+            kind="characters",
+        )
+    if request.extracted_scenes is not None:
+        workspace.extracted_scenes = _normalize_workspace_list(
+            [item.model_dump() if hasattr(item, "model_dump") else item for item in request.extracted_scenes],
+            kind="scenes",
+        )
+    if request.extracted_outline_points is not None:
+        workspace.extracted_outline_points = _normalize_workspace_list(
+            [item.model_dump() if hasattr(item, "model_dump") else item for item in request.extracted_outline_points],
+            kind="outline",
+        )
+    if request.extraction_notes is not None:
+        workspace.extraction_notes = _normalize_workspace_notes(request.extraction_notes)
+
+    await db.commit()
+    await db.refresh(workspace)
+    return _workspace_response(story, workspace)
 
 
 @router.post(

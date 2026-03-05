@@ -160,6 +160,12 @@ class Story(Base):
         secondary="story_characters",
         back_populates="stories"
     )
+    workspace: Mapped["StoryWorkspace | None"] = relationship(
+        "StoryWorkspace",
+        back_populates="story",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
 
 
 class StoryCharacter(Base):
@@ -168,3 +174,19 @@ class StoryCharacter(Base):
 
     story_id: Mapped[str] = mapped_column(String(36), ForeignKey("stories.id"), primary_key=True)
     character_id: Mapped[str] = mapped_column(String(36), ForeignKey("characters.id"), primary_key=True)
+
+
+class StoryWorkspace(Base):
+    """编辑器优先的故事工作区"""
+    __tablename__ = "story_workspaces"
+
+    story_id: Mapped[str] = mapped_column(String(36), ForeignKey("stories.id"), primary_key=True)
+    editor_content: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    extracted_characters: Mapped[list] = mapped_column(JSON, default=list)
+    extracted_scenes: Mapped[list] = mapped_column(JSON, default=list)
+    extracted_outline_points: Mapped[list] = mapped_column(JSON, default=list)
+    extraction_notes: Mapped[list] = mapped_column(JSON, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    story: Mapped["Story"] = relationship("Story", back_populates="workspace")

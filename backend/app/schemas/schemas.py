@@ -325,6 +325,97 @@ class OutlineTemplatesResponse(BaseModel):
     templates: list[OutlineTemplate]
 
 
+# Editor-first Story Workspace Schemas
+class ExtractedCharacter(BaseModel):
+    name: str
+    role_hint: str | None = None
+    traits: list[str] = []
+    summary: str | None = None
+
+
+class ExtractedScene(BaseModel):
+    name: str
+    description: str | None = None
+    keywords: list[str] = []
+
+
+class ExtractedOutlinePoint(BaseModel):
+    stage: str
+    summary: str
+
+
+class StoryWorkspaceCreateRequest(BaseModel):
+    title: str = "未命名作品"
+    content: str = ""
+    mood: str | None = "甜"
+    writing_style: str | None = "细腻"
+    chapter_length: str | None = "中"
+    ai_model: str | None = "deepseek"
+
+
+class StoryWorkspaceUpdateRequest(BaseModel):
+    title: str | None = None
+    content: str | None = None
+    mood: str | None = None
+    writing_style: str | None = None
+    chapter_length: str | None = None
+    ai_model: str | None = None
+
+
+class StoryWorkspaceExtractRequest(BaseModel):
+    content: str | None = None
+    ai_model: str | None = None
+    debug: bool = False
+
+
+class StoryWorkspaceAIContinueRequest(BaseModel):
+    instruction: str | None = None
+    ai_model: str | None = None
+    append: bool = True
+    debug: bool = False
+
+
+class StoryWorkspaceExtractionUpdateRequest(BaseModel):
+    extracted_characters: list[ExtractedCharacter] | None = None
+    extracted_scenes: list[ExtractedScene] | None = None
+    extracted_outline_points: list[ExtractedOutlinePoint] | None = None
+    extraction_notes: list[str] | None = None
+
+
+class StoryWorkspaceResponse(BaseModel):
+    story_id: str
+    title: str
+    mood: str | None = None
+    writing_style: str | None = None
+    chapter_length: str | None = None
+    ai_model: str | None = None
+    editor_content: str
+    extracted_characters: list[ExtractedCharacter] = []
+    extracted_scenes: list[ExtractedScene] = []
+    extracted_outline_points: list[ExtractedOutlinePoint] = []
+    extraction_notes: list[str] = []
+    created_at: datetime
+    updated_at: datetime
+
+
+class StoryWorkspaceAIContinueResponse(BaseModel):
+    story_id: str
+    editor_content: str
+    generated_chunk: str
+    choices: list[dict]
+    ai_model: str
+    debug_info: AIDebugInfo | None = None
+
+
+class StoryWorkspaceExtractResponse(BaseModel):
+    story_id: str
+    extracted_characters: list[ExtractedCharacter]
+    extracted_scenes: list[ExtractedScene]
+    extracted_outline_points: list[ExtractedOutlinePoint]
+    extraction_notes: list[str]
+    debug_info: AIDebugInfo | None = None
+
+
 # Story Schemas
 class PresentCharacter(BaseModel):
     """节点中出场的角色"""
