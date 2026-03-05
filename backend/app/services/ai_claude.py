@@ -1,5 +1,6 @@
 import httpx
 import json
+import re
 from app.config import get_settings
 from app.services.ai_base import AITextServiceBase
 from app.services.ai_debug import build_debug_info
@@ -745,3 +746,153 @@ B. 选项描述"""
                 "plot_hints": ["初次相遇", "逐渐了解", "产生情愫", "克服障碍"],
                 "forbidden_elements": [],
             }
+
+    async def extract_story_context(
+        self,
+        content: str,
+        debug: bool = False,
+    ) -> dict:
+        """从当前文本提炼角色/场景/剧情要点"""
+        system_prompt = """你是小说策划编辑。请从用户给出的小说正文中提炼结构化信息。
+
+输出必须是严格 JSON：
+{
+  "characters": [
+    {"name":"角色名","role_hint":"主角/配角/反派/未知","traits":["特征1","特征2"],"summary":"不超过40字"}
+  ],
+  "scenes": [
+    {"name":"场景名","description":"不超过40字","keywords":["关键词1","关键词2"]}
+  ],
+  "outline_points": [
+    {"stage":"开端/发展/转折/高潮/结局","summary":"该阶段发生了什么，不超过50字"}
+  ],
+  "consistency_notes": ["可选：视角/设定矛盾提醒"]
+}
+
+规则：
+1. 只提炼文本里真实出现或可明确推断的信息，不要杜撰。
+2. 角色、场景最多各 8 个，按重要程度排序。
+3. 如果某类信息不足，返回空数组。
+4. 只输出 JSON，不要额外解释。"""
+
+        clipped_content = (content or "").strip()
+        if len(clipped_content) > 12000:
+            clipped_content = clipped_content[:12000]
+
+        user_prompt = f"请提炼以下正文：\n\n{clipped_content}"
+        raw_response = await self._call_claude(
+            system_prompt,
+            user_prompt,
+            temperature=0.3,
+            max_tokens=1800,
+            return_raw=debug,
+        )
+
+        if debug:
+            raw_text, response_json = raw_response  # type: ignore[misc]
+        else:
+            raw_text = raw_response  # type: ignore[assignment]
+            response_json = None
+
+        parsed = self._extract_json_payload(raw_text)
+        normalized = self._normalize_extracted_context(parsed)
+
+        if debug:
+            normalized["debug_info"] = build_debug_info(
+                request_info={
+                    "provider": "claude",
+                    "model": self.model,
+                    "temperature": 0.3,
+                    "max_tokens": 1800,
+                    "system_prompt": system_prompt,
+                    "user_prompt": user_prompt,
+                },
+                response_text=raw_text,
+                response_json=response_json,
+            )
+
+        return normalized
+
+    def _extract_json_payload(self, content: str) -> dict:
+        text = (content or "").strip()
+        if not text:
+            return {}
+
+        fenced_match = re.search(r"```(?:json)?\s*(\{[\s\S]*\})\s*```", text)
+        if fenced_match:
+            text = fenced_match.group(1).strip()
+
+        try:
+            parsed = json.loads(text)
+            return parsed if isinstance(parsed, dict) else {}
+        except json.JSONDecodeError:
+            pass
+
+        start = text.find("{")
+        end = text.rfind("}")
+        if start >= 0 and end > start:
+            snippet = text[start:end + 1]
+            try:
+                parsed = json.loads(snippet)
+                return parsed if isinstance(parsed, dict) else {}
+            except json.JSONDecodeError:
+                return {}
+        return {}
+
+    def _normalize_extracted_context(self, data: dict) -> dict:
+        characters: list[dict] = []
+        scenes: list[dict] = []
+        outline_points: list[dict] = []
+        notes: list[str] = []
+
+        for item in data.get("characters", []):
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("name", "")).strip()
+            if not name:
+                continue
+            traits_raw = item.get("traits", [])
+            traits = [str(t).strip() for t in traits_raw if str(t).strip()] if isinstance(traits_raw, list) else []
+            characters.append({
+                "name": name,
+                "role_hint": str(item.get("role_hint", "")).strip() or None,
+                "traits": traits[:6],
+                "summary": str(item.get("summary", "")).strip() or None,
+            })
+
+        for item in data.get("scenes", []):
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("name", "")).strip()
+            if not name:
+                continue
+            keywords_raw = item.get("keywords", [])
+            keywords = [str(k).strip() for k in keywords_raw if str(k).strip()] if isinstance(keywords_raw, list) else []
+            scenes.append({
+                "name": name,
+                "description": str(item.get("description", "")).strip() or None,
+                "keywords": keywords[:6],
+            })
+
+        for item in data.get("outline_points", []):
+            if not isinstance(item, dict):
+                continue
+            stage = str(item.get("stage", "")).strip()
+            summary = str(item.get("summary", "")).strip()
+            if not stage or not summary:
+                continue
+            outline_points.append({
+                "stage": stage,
+                "summary": summary,
+            })
+
+        notes_raw = data.get("consistency_notes", [])
+        if isinstance(notes_raw, list):
+            notes = [str(n).strip() for n in notes_raw if str(n).strip()]
+
+        return {
+            "extracted_characters": characters[:8],
+            "extracted_scenes": scenes[:8],
+            "extracted_outline_points": outline_points[:8],
+            "extraction_notes": notes[:8],
+        }

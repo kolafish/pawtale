@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Character, Scene, Story, StoryGenerateResponse, StoryOutline } from '../types';
+import type { Character, Scene, Story, StoryGenerateResponse, StoryOutline, StoryWorkspace } from '../types';
 
 interface AppState {
   // 当前选中
@@ -7,6 +7,7 @@ interface AppState {
   selectedScene: Scene | null;
   currentStory: Story | null;
   currentNode: StoryGenerateResponse | null;
+  currentWorkspace: StoryWorkspace | null;
 
   // 大纲相关
   currentOutline: StoryOutline | null;
@@ -17,7 +18,7 @@ interface AppState {
 
   // 视图模式
   viewMode: 'dual' | 'edit' | 'preview';
-  editTab: 'characters' | 'scenes' | 'stories' | 'outlines';
+  editTab: 'writing' | 'characters' | 'scenes' | 'stories' | 'outlines';
 
   // 加载状态
   isGenerating: boolean;
@@ -30,13 +31,14 @@ interface AppState {
   setSelectedScene: (scene: Scene | null) => void;
   setCurrentStory: (story: Story | null) => void;
   setCurrentNode: (node: StoryGenerateResponse | null) => void;
+  setCurrentWorkspace: (workspace: StoryWorkspace | null) => void;
   setCurrentOutline: (outline: StoryOutline | null) => void;
   setCurrentSceneInStory: (scene: Scene | null) => void;
   setPresentCharacters: (characters: Character[]) => void;
   addPresentCharacter: (character: Character) => void;
   removePresentCharacter: (characterId: string) => void;
   setViewMode: (mode: 'dual' | 'edit' | 'preview') => void;
-  setEditTab: (tab: 'characters' | 'scenes' | 'stories' | 'outlines') => void;
+  setEditTab: (tab: 'writing' | 'characters' | 'scenes' | 'stories' | 'outlines') => void;
   setIsGenerating: (isGenerating: boolean) => void;
   setDefaultAiModel: (model: 'deepseek' | 'claude-opus-4' | 'claude-sonnet-4') => void;
   reset: () => void;
@@ -47,11 +49,12 @@ export const useAppStore = create<AppState>((set) => ({
   selectedScene: null,
   currentStory: null,
   currentNode: null,
+  currentWorkspace: null,
   currentOutline: null,
   currentSceneInStory: null,
   presentCharacters: [],
-  viewMode: 'dual',
-  editTab: 'characters',
+  viewMode: 'edit',
+  editTab: 'writing',
   isGenerating: false,
   defaultAiModel: 'deepseek',
 
@@ -67,6 +70,7 @@ export const useAppStore = create<AppState>((set) => ({
   setSelectedScene: (scene) => set({ selectedScene: scene }),
   setCurrentStory: (story) => set({ currentStory: story }),
   setCurrentNode: (node) => set({ currentNode: node }),
+  setCurrentWorkspace: (workspace) => set({ currentWorkspace: workspace }),
   setCurrentOutline: (outline) => set({ currentOutline: outline }),
   setCurrentSceneInStory: (scene) => set({ currentSceneInStory: scene }),
   setPresentCharacters: (characters) => set({ presentCharacters: characters }),
@@ -87,6 +91,7 @@ export const useAppStore = create<AppState>((set) => ({
     selectedScene: null,
     currentStory: null,
     currentNode: null,
+    currentWorkspace: null,
     currentOutline: null,
     currentSceneInStory: null,
     presentCharacters: [],

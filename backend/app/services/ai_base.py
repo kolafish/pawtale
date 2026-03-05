@@ -96,3 +96,12 @@ class AITextServiceBase(ABC):
     ) -> dict:
         """基于引导流程生成大纲草稿"""
         pass
+
+    @abstractmethod
+    async def extract_story_context(
+        self,
+        content: str,
+        debug: bool = False,
+    ) -> dict:
+        """从已写文本中提炼角色/场景/剧情要点"""
+        pass

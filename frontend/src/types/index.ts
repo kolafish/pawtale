@@ -303,6 +303,96 @@ export interface StoryExportResponse {
   total_words: number;
 }
 
+export interface ExtractedCharacter {
+  name: string;
+  role_hint?: string;
+  traits: string[];
+  summary?: string;
+}
+
+export interface ExtractedScene {
+  name: string;
+  description?: string;
+  keywords: string[];
+}
+
+export interface ExtractedOutlinePoint {
+  stage: string;
+  summary: string;
+}
+
+export interface StoryWorkspace {
+  story_id: string;
+  title: string;
+  mood?: string;
+  writing_style?: string;
+  chapter_length?: string;
+  ai_model?: string;
+  editor_content: string;
+  extracted_characters: ExtractedCharacter[];
+  extracted_scenes: ExtractedScene[];
+  extracted_outline_points: ExtractedOutlinePoint[];
+  extraction_notes: string[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface StoryWorkspaceCreateRequest {
+  title?: string;
+  content?: string;
+  mood?: string;
+  writing_style?: string;
+  chapter_length?: string;
+  ai_model?: string;
+}
+
+export interface StoryWorkspaceUpdateRequest {
+  title?: string;
+  content?: string;
+  mood?: string;
+  writing_style?: string;
+  chapter_length?: string;
+  ai_model?: string;
+}
+
+export interface StoryWorkspaceAIContinueRequest {
+  instruction?: string;
+  ai_model?: string;
+  append?: boolean;
+  debug?: boolean;
+}
+
+export interface StoryWorkspaceAIContinueResponse {
+  story_id: string;
+  editor_content: string;
+  generated_chunk: string;
+  choices: { label: string; next_node: string | null }[];
+  ai_model: string;
+  debug_info?: AIDebugInfo;
+}
+
+export interface StoryWorkspaceExtractRequest {
+  content?: string;
+  ai_model?: string;
+  debug?: boolean;
+}
+
+export interface StoryWorkspaceExtractResponse {
+  story_id: string;
+  extracted_characters: ExtractedCharacter[];
+  extracted_scenes: ExtractedScene[];
+  extracted_outline_points: ExtractedOutlinePoint[];
+  extraction_notes: string[];
+  debug_info?: AIDebugInfo;
+}
+
+export interface StoryWorkspaceExtractionUpdateRequest {
+  extracted_characters?: ExtractedCharacter[];
+  extracted_scenes?: ExtractedScene[];
+  extracted_outline_points?: ExtractedOutlinePoint[];
+  extraction_notes?: string[];
+}
+
 // 大纲相关请求类型
 export interface OutlineCharacterCreate {
   character_id: string;

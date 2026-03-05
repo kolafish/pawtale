@@ -8,7 +8,7 @@ import { AI_MODEL_OPTIONS } from '../constants/aiModels';
 
 export function StoryListPanel() {
   const queryClient = useQueryClient();
-  const { setCurrentStory, setCurrentNode } = useAppStore();
+  const { setCurrentStory, setCurrentNode, setCurrentWorkspace, setEditTab } = useAppStore();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState('');
 
@@ -39,6 +39,13 @@ export function StoryListPanel() {
         ai_model: node.ai_model || story.ai_model,
         choices: node.choices,
       });
+    }
+    try {
+      const workspace = await storiesApi.getWorkspace(story.id);
+      setCurrentWorkspace(workspace);
+      setEditTab('writing');
+    } catch {
+      // 忽略工作区加载失败，不影响传统故事预览模式
     }
   };
 

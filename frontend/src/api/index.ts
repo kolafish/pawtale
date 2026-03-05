@@ -30,6 +30,14 @@ import type {
   RegenerateChoicesResponse,
   PolishChaptersRequest,
   PolishChaptersResponse,
+  StoryWorkspace,
+  StoryWorkspaceCreateRequest,
+  StoryWorkspaceUpdateRequest,
+  StoryWorkspaceAIContinueRequest,
+  StoryWorkspaceAIContinueResponse,
+  StoryWorkspaceExtractRequest,
+  StoryWorkspaceExtractResponse,
+  StoryWorkspaceExtractionUpdateRequest,
 } from '../types';
 
 const api = axios.create({
@@ -105,6 +113,19 @@ export const storiesApi = {
   // 角色管理
   updateCharacters: (storyId: string, request: StoryUpdateCharactersRequest) =>
     api.post<Story>(`/stories/${storyId}/update-characters`, request).then(res => res.data),
+  // 编辑器优先工作区
+  createWorkspace: (request: StoryWorkspaceCreateRequest) =>
+    api.post<StoryWorkspace>('/stories/workspace', request).then(res => res.data),
+  getWorkspace: (storyId: string) =>
+    api.get<StoryWorkspace>(`/stories/${storyId}/workspace`).then(res => res.data),
+  updateWorkspace: (storyId: string, request: StoryWorkspaceUpdateRequest) =>
+    api.put<StoryWorkspace>(`/stories/${storyId}/workspace`, request).then(res => res.data),
+  continueWorkspace: (storyId: string, request: StoryWorkspaceAIContinueRequest) =>
+    api.post<StoryWorkspaceAIContinueResponse>(`/stories/${storyId}/workspace/ai-continue`, request).then(res => res.data),
+  extractWorkspace: (storyId: string, request: StoryWorkspaceExtractRequest) =>
+    api.post<StoryWorkspaceExtractResponse>(`/stories/${storyId}/workspace/extract`, request).then(res => res.data),
+  updateWorkspaceExtraction: (storyId: string, request: StoryWorkspaceExtractionUpdateRequest) =>
+    api.put<StoryWorkspace>(`/stories/${storyId}/workspace/extracted`, request).then(res => res.data),
 };
 
 // Outlines API
