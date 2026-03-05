@@ -2,6 +2,7 @@ import httpx
 import json
 from app.config import get_settings
 from app.services.ai_base import AITextServiceBase
+from app.services.ai_debug import build_debug_info
 
 settings = get_settings()
 
@@ -113,6 +114,7 @@ class DeepSeekTextService(AITextServiceBase):
         outline_context: dict | None = None,
         # 新增：故事状态追踪
         story_state: dict | None = None,
+        debug: bool = False,
     ) -> dict:
         """生成故事内容和分支选项"""
 
@@ -298,7 +300,21 @@ C. 选项描述（可选）
             result = response.json()
 
         content = result["choices"][0]["message"]["content"]
-        return self._parse_story_response(content)
+        parsed_result = self._parse_story_response(content)
+        if debug:
+            parsed_result["debug_info"] = build_debug_info(
+                request_info={
+                    "provider": "deepseek",
+                    "model": "deepseek-chat",
+                    "temperature": 0.85,
+                    "max_tokens": 3000,
+                    "system_prompt": system_prompt,
+                    "user_prompt": user_prompt,
+                },
+                response_text=content,
+                response_json=result,
+            )
+        return parsed_result
 
     def _get_story_stage(self, chapter_number: int) -> dict:
         """根据章节数判断故事阶段"""
@@ -412,6 +428,7 @@ C. 选项描述（可选）
         characters: list[dict],
         writing_style: str = "细腻",
         chapter_length: str = "中",
+        debug: bool = False,
     ) -> dict:
         """根据修改意见重新生成章节内容"""
 
@@ -498,7 +515,21 @@ C. 选项描述（可选）"""
             result = response.json()
 
         content = result["choices"][0]["message"]["content"]
-        return self._parse_story_response(content)
+        parsed_result = self._parse_story_response(content)
+        if debug:
+            parsed_result["debug_info"] = build_debug_info(
+                request_info={
+                    "provider": "deepseek",
+                    "model": "deepseek-chat",
+                    "temperature": 0.8,
+                    "max_tokens": 3000,
+                    "system_prompt": system_prompt,
+                    "user_prompt": user_prompt,
+                },
+                response_text=content,
+                response_json=result,
+            )
+        return parsed_result
 
     def _parse_story_response(self, content: str) -> dict:
         """解析 AI 返回的故事内容和分支选项"""
@@ -677,7 +708,8 @@ C. 选项描述（可选）"""
         characters: list[dict],
         mood: str = "甜",
         hint: str | None = None,
-    ) -> list[dict]:
+        debug: bool = False,
+    ) -> list[dict] | dict:
         """重新生成分支选项"""
 
         system_prompt = f"""你是一个专业的言情小说作家。
@@ -738,6 +770,20 @@ C. 选项描述（可选）"""
             result = response.json()
 
         content = result["choices"][0]["message"]["content"]
+        debug_info = None
+        if debug:
+            debug_info = build_debug_info(
+                request_info={
+                    "provider": "deepseek",
+                    "model": "deepseek-chat",
+                    "temperature": 0.9,
+                    "max_tokens": 500,
+                    "system_prompt": system_prompt,
+                    "user_prompt": user_prompt,
+                },
+                response_text=content,
+                response_json=result,
+            )
 
         # 解析 JSON
         try:
@@ -748,13 +794,19 @@ C. 选项描述（可选）"""
             parsed = json.loads(content.strip())
             choices = parsed.get("choices", [])
             # 添加 next_node: None
-            return [{"label": c["label"], "next_node": None} for c in choices]
+            choice_items = [{"label": c["label"], "next_node": None} for c in choices]
+            if debug:
+                return {"choices": choice_items, "debug_info": debug_info}
+            return choice_items
         except json.JSONDecodeError:
-            return [
+            fallback = [
                 {"label": "A. 继续发展", "next_node": None},
                 {"label": "B. 出现转折", "next_node": None},
                 {"label": "C. 意外惊喜", "next_node": None},
             ]
+            if debug:
+                return {"choices": fallback, "debug_info": debug_info}
+            return fallback
 
     async def polish_chapters(
         self,
@@ -762,7 +814,8 @@ C. 选项描述（可选）"""
         characters: list[dict],
         writing_style: str = "细腻",
         instruction: str | None = None,
-    ) -> str:
+        debug: bool = False,
+    ) -> str | dict:
         """整体润色多个章节，使其更通顺连贯"""
 
         # 文字风格映射
@@ -839,7 +892,24 @@ C. 选项描述（可选）"""
             response.raise_for_status()
             result = response.json()
 
-        return result["choices"][0]["message"]["content"]
+        content = result["choices"][0]["message"]["content"]
+        if debug:
+            return {
+                "polished_text": content,
+                "debug_info": build_debug_info(
+                    request_info={
+                        "provider": "deepseek",
+                        "model": "deepseek-chat",
+                        "temperature": 0.7,
+                        "max_tokens": 4000,
+                        "system_prompt": system_prompt,
+                        "user_prompt": user_prompt,
+                    },
+                    response_text=content,
+                    response_json=result,
+                ),
+            }
+        return content
 
     async def generate_outline_draft(
         self,

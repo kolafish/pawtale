@@ -2,12 +2,17 @@ import httpx
 import json
 from collections.abc import Iterable
 from app.config import get_settings
+from app.services.ai_debug import build_debug_info
 
 settings = get_settings()
 
 
 class AISceneError(Exception):
     """场景 AI 生成基础异常"""
+
+    def __init__(self, message: str, debug_info: dict | None = None):
+        super().__init__(message)
+        self.debug_info = debug_info
 
 
 class AISceneTimeoutError(AISceneError):
@@ -39,7 +44,7 @@ class AISceneService:
         self,
         system_prompt: str,
         user_prompt: str,
-    ) -> str:
+    ) -> tuple[str, dict]:
         if not self.deepseek_api_key:
             raise AISceneProviderError("DeepSeek API key 未配置")
 
@@ -73,7 +78,7 @@ class AISceneService:
             raise AISceneProviderError("DeepSeek 服务连接失败") from exc
 
         try:
-            return result["choices"][0]["message"]["content"]
+            return result["choices"][0]["message"]["content"], result
         except (KeyError, IndexError, TypeError) as exc:
             raise AISceneParseError("DeepSeek 返回内容缺失") from exc
 
@@ -82,7 +87,7 @@ class AISceneService:
         model: str,
         system_prompt: str,
         user_prompt: str,
-    ) -> str:
+    ) -> tuple[str, dict]:
         if not self.anthropic_auth_token:
             raise AISceneProviderError("Anthropic auth token 未配置")
 
@@ -138,7 +143,12 @@ class AISceneService:
         content = "\n".join(t.strip() for t in texts if t and t.strip()).strip()
         if not content:
             raise AISceneParseError("Claude 返回为空")
-        return content
+        return content, result
+
+    def _unpack_model_response(self, result: str | tuple[str, dict]) -> tuple[str, dict | None]:
+        if isinstance(result, tuple) and len(result) == 2:
+            return result[0], result[1]
+        return result, None
 
     def _extract_json_payload(self, content: str) -> list | dict:
         decoder = json.JSONDecoder()
@@ -251,7 +261,8 @@ class AISceneService:
         custom_prompt: str | None = None,
         count: int = 3,
         ai_model: str | None = None,
-    ) -> list[dict]:
+        debug: bool = False,
+    ) -> tuple[list[dict], dict | None]:
         """生成场景候选"""
 
         system_prompt = """你是一个专业的言情小说场景设计师。你必须严格围绕用户给定的场景类型和关键词生成候选场景，不得偏题。
@@ -298,20 +309,50 @@ class AISceneService:
 
         user_prompt = "\n".join(user_parts)
         selected_model = (ai_model or "deepseek").lower()
+        provider = "deepseek"
+        request_model = "deepseek-chat"
+        temperature = 0.55
+        max_tokens = 1400
         if selected_model in self.claude_model_map:
-            content = await self._call_claude(
+            provider = "claude"
+            request_model = self.claude_model_map[selected_model]
+            temperature = 0.6
+            max_tokens = 1600
+            model_result = await self._call_claude(
                 model=selected_model,
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
             )
         else:
-            content = await self._call_deepseek(
+            model_result = await self._call_deepseek(
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
             )
 
-        payload = self._extract_json_payload(content)
-        return self._parse_candidates_payload(payload, count)
+        content, raw_json = self._unpack_model_response(model_result)
+        debug_info = None
+        if debug:
+            debug_info = build_debug_info(
+                request_info={
+                    "provider": provider,
+                    "model": request_model,
+                    "temperature": temperature,
+                    "max_tokens": max_tokens,
+                    "system_prompt": system_prompt,
+                    "user_prompt": user_prompt,
+                },
+                response_text=content,
+                response_json=raw_json,
+            )
+
+        try:
+            payload = self._extract_json_payload(content)
+            candidates = self._parse_candidates_payload(payload, count)
+            return candidates, debug_info
+        except AISceneParseError as exc:
+            if debug:
+                raise AISceneParseError(str(exc), debug_info=debug_info) from exc
+            raise
 
 
 ai_scene_service = AISceneService()

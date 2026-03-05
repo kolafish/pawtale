@@ -40,6 +40,26 @@ export interface CharacterAutoComplete {
   secret?: string;
 }
 
+export interface AIDebugInfo {
+  request: {
+    provider: string;
+    model: string;
+    temperature?: number;
+    max_tokens?: number;
+    system_prompt?: string;
+    user_prompt?: string;
+  };
+  response: {
+    raw_text?: string;
+    raw_json?: Record<string, any> | any[] | string | null;
+  };
+  meta: {
+    truncated: boolean;
+    max_chars?: number;
+    generated_at?: string;
+  };
+}
+
 export interface Scene {
   id: string;
   name: string;
@@ -64,6 +84,7 @@ export interface SceneAIGenerateRequest {
   custom_prompt?: string;
   count: number;
   ai_model?: string;
+  debug?: boolean;
 }
 
 export interface SceneCandidate {
@@ -79,6 +100,7 @@ export interface SceneCandidate {
 
 export interface SceneAIGenerateResponse {
   candidates: SceneCandidate[];
+  debug_info?: AIDebugInfo;
 }
 
 // 故事大纲
@@ -188,6 +210,7 @@ export interface StoryGenerateRequest {
   custom_direction?: string;
   outline_id?: string;
   ai_model?: string; // AI模型选择
+  debug?: boolean;
 }
 
 export interface StoryBranchRequest {
@@ -198,6 +221,7 @@ export interface StoryBranchRequest {
   switch_scene_id?: string;
   add_character_ids?: string[];
   remove_character_ids?: string[];
+  debug?: boolean;
 }
 
 export interface StoryGenerateResponse {
@@ -212,12 +236,14 @@ export interface StoryGenerateResponse {
   scene_id?: string;
   scene_name?: string;
   present_characters?: PresentCharacter[];
+  debug_info?: AIDebugInfo;
 }
 
 export interface StorySwitchSceneRequest {
   scene_id: string;
   transition_type?: string;
   ai_model?: string;
+  debug?: boolean;
 }
 
 export interface StoryUpdateCharactersRequest {
@@ -232,21 +258,25 @@ export interface StoryNodeUpdateRequest {
 
 export interface StoryNodeRegenerateRequest {
   ai_model?: string;
+  debug?: boolean;
 }
 
 export interface StoryNodeReviseRequest {
   instruction: string;
   ai_model?: string;
+  debug?: boolean;
 }
 
 // 重新生成分支选项
 export interface RegenerateChoicesRequest {
   hint?: string;
   ai_model?: string;
+  debug?: boolean;
 }
 
 export interface RegenerateChoicesResponse {
   choices: { label: string; next_node: string | null }[];
+  debug_info?: AIDebugInfo;
 }
 
 // 润色章节
@@ -254,10 +284,12 @@ export interface PolishChaptersRequest {
   node_ids: string[];
   instruction?: string;  // 用户的润色意见（可选）
   ai_model?: string;
+  debug?: boolean;
 }
 
 export interface PolishChaptersResponse {
   polished_contents: { node_id: string; content: string; ai_model?: string }[];
+  debug_info?: AIDebugInfo;
 }
 
 export interface StoryExportResponse {

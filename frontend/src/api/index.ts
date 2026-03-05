@@ -81,12 +81,12 @@ export const storiesApi = {
     api.put<StoryGenerateResponse>(`/stories/${storyId}/nodes/${nodeId}`, data).then(res => res.data),
   deleteNode: (storyId: string, nodeId: string) =>
     api.delete(`/stories/${storyId}/nodes/${nodeId}`).then(res => res.data),
-  regenerateNode: (storyId: string, nodeId: string, request?: { ai_model?: string }) =>
+  regenerateNode: (storyId: string, nodeId: string, request?: { ai_model?: string; debug?: boolean }) =>
     api.post<StoryGenerateResponse>(`/stories/${storyId}/nodes/${nodeId}/regenerate`, request).then(res => res.data),
-  reviseNode: (storyId: string, nodeId: string, instruction: string, aiModel?: string) =>
+  reviseNode: (storyId: string, nodeId: string, instruction: string, aiModel?: string, debug?: boolean) =>
     api.post<StoryGenerateResponse>(
       `/stories/${storyId}/nodes/${nodeId}/revise`,
-      { instruction, ai_model: aiModel }
+      { instruction, ai_model: aiModel, debug }
     ).then(res => res.data),
   // 重新生成分支选项
   regenerateChoices: (storyId: string, nodeId: string, request: RegenerateChoicesRequest) =>

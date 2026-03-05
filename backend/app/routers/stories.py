@@ -31,7 +31,11 @@ async def get_stories(db: AsyncSession = Depends(get_db)):
     return stories
 
 
-@router.post("/generate", response_model=StoryGenerateResponse)
+@router.post(
+    "/generate",
+    response_model=StoryGenerateResponse,
+    response_model_exclude_none=True,
+)
 async def generate_story(
     request: StoryGenerateRequest,
     db: AsyncSession = Depends(get_db),
@@ -108,6 +112,7 @@ async def generate_story(
             custom_direction=request.custom_direction,
             chapter_number=1,
             outline_context=outline_context,
+            debug=request.debug,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"故事生成失败: {str(e)}")
@@ -160,10 +165,15 @@ async def generate_story(
         word_count=story_result.get("word_count"),
         ai_model=selected_ai_model,
         choices=story_result["choices"],
+        debug_info=story_result.get("debug_info") if request.debug else None,
     )
 
 
-@router.post("/{story_id}/choose", response_model=StoryGenerateResponse)
+@router.post(
+    "/{story_id}/choose",
+    response_model=StoryGenerateResponse,
+    response_model_exclude_none=True,
+)
 async def choose_branch(
     story_id: str,
     request: StoryBranchRequest,
@@ -282,6 +292,7 @@ async def choose_branch(
             custom_direction=request.custom_direction,
             chapter_number=chapter_number,
             outline_context=outline_context,
+            debug=request.debug,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"故事生成失败: {str(e)}")
@@ -322,6 +333,7 @@ async def choose_branch(
         word_count=story_result.get("word_count"),
         ai_model=selected_ai_model,
         choices=story_result["choices"],
+        debug_info=story_result.get("debug_info") if request.debug else None,
     )
 
 
@@ -542,7 +554,11 @@ async def delete_node(
     return {"message": "删除成功", "deleted_nodes": list(nodes_to_delete)}
 
 
-@router.post("/{story_id}/nodes/{node_id}/regenerate", response_model=StoryGenerateResponse)
+@router.post(
+    "/{story_id}/nodes/{node_id}/regenerate",
+    response_model=StoryGenerateResponse,
+    response_model_exclude_none=True,
+)
 async def regenerate_node(
     story_id: str,
     node_id: str,
@@ -609,6 +625,7 @@ async def regenerate_node(
             chapter_length=story.chapter_length or "中",
             previous_content=previous_content,
             chapter_number=chapter_number,
+            debug=(request.debug if request else False),
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"重新生成失败: {str(e)}")
@@ -635,6 +652,7 @@ async def regenerate_node(
         word_count=story_result.get("word_count"),
         ai_model=selected_ai_model,
         choices=story_result["choices"],
+        debug_info=story_result.get("debug_info") if (request.debug if request else False) else None,
     )
 
 
@@ -673,7 +691,11 @@ async def export_story(
     )
 
 
-@router.post("/{story_id}/nodes/{node_id}/revise", response_model=StoryGenerateResponse)
+@router.post(
+    "/{story_id}/nodes/{node_id}/revise",
+    response_model=StoryGenerateResponse,
+    response_model_exclude_none=True,
+)
 async def revise_node(
     story_id: str,
     node_id: str,
@@ -719,6 +741,7 @@ async def revise_node(
             characters=characters,
             writing_style=story.writing_style or "细腻",
             chapter_length=story.chapter_length or "中",
+            debug=request.debug,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"修改失败: {str(e)}")
@@ -744,10 +767,15 @@ async def revise_node(
         word_count=story_result.get("word_count"),
         ai_model=selected_ai_model,
         choices=story_result["choices"],
+        debug_info=story_result.get("debug_info") if request.debug else None,
     )
 
 
-@router.post("/{story_id}/switch-scene", response_model=StoryGenerateResponse)
+@router.post(
+    "/{story_id}/switch-scene",
+    response_model=StoryGenerateResponse,
+    response_model_exclude_none=True,
+)
 async def switch_scene(
     story_id: str,
     request: StorySwitchSceneRequest,
@@ -826,6 +854,7 @@ async def switch_scene(
             chapter_length=story.chapter_length or "中",
             previous_content=previous_content,
             chapter_number=chapter_number,
+            debug=request.debug,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"故事生成失败: {str(e)}")
@@ -877,6 +906,7 @@ async def switch_scene(
         scene_id=new_scene.id,
         scene_name=new_scene.name,
         present_characters=present_characters,
+        debug_info=story_result.get("debug_info") if request.debug else None,
     )
 
 
@@ -939,7 +969,11 @@ async def update_story_characters(
     return result.scalar_one()
 
 
-@router.post("/{story_id}/nodes/{node_id}/regenerate-choices", response_model=RegenerateChoicesResponse)
+@router.post(
+    "/{story_id}/nodes/{node_id}/regenerate-choices",
+    response_model=RegenerateChoicesResponse,
+    response_model_exclude_none=True,
+)
 async def regenerate_choices(
     story_id: str,
     node_id: str,
@@ -977,14 +1011,22 @@ async def regenerate_choices(
     ai_service = get_ai_service(selected_ai_model)
 
     try:
-        new_choices = await ai_service.regenerate_choices(
+        regenerate_result = await ai_service.regenerate_choices(
             current_content=current_content,
             characters=characters,
             mood=story.mood or "甜",
             hint=request.hint,
+            debug=request.debug,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"生成选项失败: {str(e)}")
+
+    debug_info = None
+    if isinstance(regenerate_result, dict):
+        new_choices = regenerate_result.get("choices", [])
+        debug_info = regenerate_result.get("debug_info")
+    else:
+        new_choices = regenerate_result
 
     # 更新节点的选项（保留已有的 next_node 链接）
     new_nodes = dict(story.nodes)
@@ -1003,10 +1045,17 @@ async def regenerate_choices(
     story.nodes = new_nodes
     await db.commit()
 
-    return RegenerateChoicesResponse(choices=preserved_choices + new_choices)
+    return RegenerateChoicesResponse(
+        choices=preserved_choices + new_choices,
+        debug_info=debug_info if request.debug else None,
+    )
 
 
-@router.post("/{story_id}/polish", response_model=PolishChaptersResponse)
+@router.post(
+    "/{story_id}/polish",
+    response_model=PolishChaptersResponse,
+    response_model_exclude_none=True,
+)
 async def polish_chapters(
     story_id: str,
     request: PolishChaptersRequest,
@@ -1051,14 +1100,22 @@ async def polish_chapters(
     ai_service = get_ai_service(selected_ai_model)
 
     try:
-        polished_text = await ai_service.polish_chapters(
+        polish_result = await ai_service.polish_chapters(
             chapters=chapters,
             characters=characters,
             writing_style=story.writing_style or "细腻",
             instruction=request.instruction,
+            debug=request.debug,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"润色失败: {str(e)}")
+
+    debug_info = None
+    if isinstance(polish_result, dict):
+        polished_text = polish_result.get("polished_text", "")
+        debug_info = polish_result.get("debug_info")
+    else:
+        polished_text = polish_result
 
     # 解析润色结果，按 "---" 分隔
     polished_parts = polished_text.split("---")
@@ -1084,7 +1141,10 @@ async def polish_chapters(
                 "ai_model": selected_ai_model,
             })
 
-    return PolishChaptersResponse(polished_contents=polished_contents)
+    return PolishChaptersResponse(
+        polished_contents=polished_contents,
+        debug_info=debug_info if request.debug else None,
+    )
 
 
 @router.post("/{story_id}/apply-polish")

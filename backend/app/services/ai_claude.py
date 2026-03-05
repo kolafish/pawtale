@@ -2,6 +2,7 @@ import httpx
 import json
 from app.config import get_settings
 from app.services.ai_base import AITextServiceBase
+from app.services.ai_debug import build_debug_info
 
 settings = get_settings()
 
@@ -25,7 +26,8 @@ class ClaudeTextService(AITextServiceBase):
         user_prompt: str,
         temperature: float = 0.7,
         max_tokens: int = 4000,
-    ) -> str:
+        return_raw: bool = False,
+    ) -> str | tuple[str, dict]:
         """调用Claude API"""
         async with httpx.AsyncClient() as client:
             response = await client.post(
@@ -48,7 +50,27 @@ class ClaudeTextService(AITextServiceBase):
             )
             response.raise_for_status()
             result = response.json()
-            return result["content"][0]["text"]
+
+        content_blocks = result.get("content")
+        if not isinstance(content_blocks, list):
+            raise ValueError("Claude 返回格式异常：缺少 content 数组")
+        text_parts: list[str] = []
+        for block in content_blocks:
+            if not isinstance(block, dict):
+                continue
+            text = block.get("text")
+            if isinstance(text, str):
+                block_type = block.get("type")
+                if block_type in (None, "text"):
+                    text_parts.append(text)
+
+        content = "\n".join(t.strip() for t in text_parts if t and t.strip()).strip()
+        if not content:
+            raise ValueError("Claude 返回内容为空")
+
+        if return_raw:
+            return content, result
+        return content
 
     async def auto_complete_character(
         self,
@@ -124,6 +146,7 @@ class ClaudeTextService(AITextServiceBase):
         chapter_number: int = 1,
         outline_context: dict | None = None,
         story_state: dict | None = None,
+        debug: bool = False,
     ) -> dict:
         """生成故事内容和分支选项"""
         # 构建角色描述
@@ -244,8 +267,34 @@ C. 选项描述（可选）"""
             if custom_direction:
                 user_prompt += f"\n用户希望的开篇方向：{custom_direction}\n"
 
-        content = await self._call_claude(system_prompt, user_prompt, temperature=0.85, max_tokens=3000)
-        return self._parse_story_response(content)
+        raw_response = await self._call_claude(
+            system_prompt,
+            user_prompt,
+            temperature=0.85,
+            max_tokens=3000,
+            return_raw=debug,
+        )
+        if debug:
+            content, response_json = raw_response  # type: ignore[misc]
+        else:
+            content = raw_response  # type: ignore[assignment]
+            response_json = None
+
+        parsed_result = self._parse_story_response(content)
+        if debug:
+            parsed_result["debug_info"] = build_debug_info(
+                request_info={
+                    "provider": "claude",
+                    "model": self.model,
+                    "temperature": 0.85,
+                    "max_tokens": 3000,
+                    "system_prompt": system_prompt,
+                    "user_prompt": user_prompt,
+                },
+                response_text=content,
+                response_json=response_json,
+            )
+        return parsed_result
 
     def _get_story_stage(self, chapter_number: int) -> dict:
         """根据章节数判断故事阶段"""
@@ -293,6 +342,7 @@ C. 选项描述（可选）"""
         characters: list[dict],
         writing_style: str = "细腻",
         chapter_length: str = "中",
+        debug: bool = False,
     ) -> dict:
         """根据修改意见重新生成章节内容"""
         style_prompts = {
@@ -345,8 +395,34 @@ B. 选项描述"""
 
 请根据修改意见重新生成这段内容。"""
 
-        content = await self._call_claude(system_prompt, user_prompt, temperature=0.8, max_tokens=3000)
-        return self._parse_story_response(content)
+        raw_response = await self._call_claude(
+            system_prompt,
+            user_prompt,
+            temperature=0.8,
+            max_tokens=3000,
+            return_raw=debug,
+        )
+        if debug:
+            content, response_json = raw_response  # type: ignore[misc]
+        else:
+            content = raw_response  # type: ignore[assignment]
+            response_json = None
+
+        parsed_result = self._parse_story_response(content)
+        if debug:
+            parsed_result["debug_info"] = build_debug_info(
+                request_info={
+                    "provider": "claude",
+                    "model": self.model,
+                    "temperature": 0.8,
+                    "max_tokens": 3000,
+                    "system_prompt": system_prompt,
+                    "user_prompt": user_prompt,
+                },
+                response_text=content,
+                response_json=response_json,
+            )
+        return parsed_result
 
     def _parse_story_response(self, content: str) -> dict:
         """解析 AI 返回的故事内容和分支选项"""
@@ -456,7 +532,8 @@ B. 选项描述"""
         characters: list[dict],
         mood: str = "甜",
         hint: str | None = None,
-    ) -> list[dict]:
+        debug: bool = False,
+    ) -> list[dict] | dict:
         """重新生成分支选项"""
         system_prompt = f"""你是一个专业的言情小说作家。
 请根据当前的故事内容，生成2-3个不同方向的剧情分支选项。
@@ -487,7 +564,33 @@ B. 选项描述"""
         if hint:
             user_prompt += f"\n用户希望的方向：{hint}\n"
 
-        content = await self._call_claude(system_prompt, user_prompt, temperature=0.9, max_tokens=500)
+        raw_response = await self._call_claude(
+            system_prompt,
+            user_prompt,
+            temperature=0.9,
+            max_tokens=500,
+            return_raw=debug,
+        )
+        if debug:
+            content, response_json = raw_response  # type: ignore[misc]
+        else:
+            content = raw_response  # type: ignore[assignment]
+            response_json = None
+
+        debug_info = None
+        if debug:
+            debug_info = build_debug_info(
+                request_info={
+                    "provider": "claude",
+                    "model": self.model,
+                    "temperature": 0.9,
+                    "max_tokens": 500,
+                    "system_prompt": system_prompt,
+                    "user_prompt": user_prompt,
+                },
+                response_text=content,
+                response_json=response_json,
+            )
 
         try:
             if "```json" in content:
@@ -496,12 +599,18 @@ B. 选项描述"""
                 content = content.split("```")[1].split("```")[0]
             parsed = json.loads(content.strip())
             choices = parsed.get("choices", [])
-            return [{"label": c["label"], "next_node": None} for c in choices]
+            choice_items = [{"label": c["label"], "next_node": None} for c in choices]
+            if debug:
+                return {"choices": choice_items, "debug_info": debug_info}
+            return choice_items
         except json.JSONDecodeError:
-            return [
+            fallback = [
                 {"label": "A. 继续发展", "next_node": None},
                 {"label": "B. 出现转折", "next_node": None},
             ]
+            if debug:
+                return {"choices": fallback, "debug_info": debug_info}
+            return fallback
 
     async def polish_chapters(
         self,
@@ -509,7 +618,8 @@ B. 选项描述"""
         characters: list[dict],
         writing_style: str = "细腻",
         instruction: str | None = None,
-    ) -> str:
+        debug: bool = False,
+    ) -> str | dict:
         """整体润色多个章节，使其更通顺连贯"""
         style_prompts = {
             "细腻": "文字风格要细腻，注重心理描写和情感刻画。",
@@ -544,8 +654,31 @@ B. 选项描述"""
 
 {chr(10).join(chapters_text)}"""
 
-        content = await self._call_claude(system_prompt, user_prompt, temperature=0.7, max_tokens=4000)
-        return content
+        raw_response = await self._call_claude(
+            system_prompt,
+            user_prompt,
+            temperature=0.7,
+            max_tokens=4000,
+            return_raw=debug,
+        )
+        if debug:
+            content, response_json = raw_response  # type: ignore[misc]
+            return {
+                "polished_text": content,
+                "debug_info": build_debug_info(
+                    request_info={
+                        "provider": "claude",
+                        "model": self.model,
+                        "temperature": 0.7,
+                        "max_tokens": 4000,
+                        "system_prompt": system_prompt,
+                        "user_prompt": user_prompt,
+                    },
+                    response_text=content,
+                    response_json=response_json,
+                ),
+            }
+        return raw_response
 
     async def generate_outline_draft(
         self,

@@ -2,6 +2,33 @@ from pydantic import BaseModel
 from datetime import datetime
 
 
+# AI Debug Schemas
+class AIDebugRequestInfo(BaseModel):
+    provider: str
+    model: str
+    temperature: float | None = None
+    max_tokens: int | None = None
+    system_prompt: str | None = None
+    user_prompt: str | None = None
+
+
+class AIDebugResponseInfo(BaseModel):
+    raw_text: str | None = None
+    raw_json: dict | list | str | None = None
+
+
+class AIDebugMetaInfo(BaseModel):
+    truncated: bool = False
+    max_chars: int | None = None
+    generated_at: str | None = None
+
+
+class AIDebugInfo(BaseModel):
+    request: AIDebugRequestInfo
+    response: AIDebugResponseInfo
+    meta: AIDebugMetaInfo
+
+
 # Character Schemas
 class CharacterBase(BaseModel):
     name: str
@@ -130,6 +157,7 @@ class SceneAIGenerateRequest(BaseModel):
     custom_prompt: str | None = None  # 用户自定义提示
     count: int = 3  # 生成候选数量
     ai_model: str | None = None  # deepseek/claude-opus-4/claude-sonnet-4
+    debug: bool = False
 
 
 class SceneCandidate(BaseModel):
@@ -145,6 +173,7 @@ class SceneCandidate(BaseModel):
 
 class SceneAIGenerateResponse(BaseModel):
     candidates: list[SceneCandidate]
+    debug_info: AIDebugInfo | None = None
 
 
 # StoryOutline Schemas
@@ -385,6 +414,7 @@ class StoryGenerateRequest(BaseModel):
     custom_direction: str | None = None  # 用户自定义方向
     outline_id: str | None = None  # 关联的故事大纲ID
     ai_model: str | None = None  # AI模型选择
+    debug: bool = False
 
 
 class StoryBranchRequest(BaseModel):
@@ -395,6 +425,7 @@ class StoryBranchRequest(BaseModel):
     switch_scene_id: str | None = None  # 切换到新场景
     add_character_ids: list[str] = []  # 添加角色
     remove_character_ids: list[str] = []  # 移除角色
+    debug: bool = False
 
 
 class StoryGenerateResponse(BaseModel):
@@ -409,6 +440,7 @@ class StoryGenerateResponse(BaseModel):
     scene_id: str | None = None
     scene_name: str | None = None
     present_characters: list[PresentCharacter] = []
+    debug_info: AIDebugInfo | None = None
 
 
 class StorySwitchSceneRequest(BaseModel):
@@ -416,6 +448,7 @@ class StorySwitchSceneRequest(BaseModel):
     scene_id: str
     transition_type: str | None = None  # 时间跳跃/空间转换/自然过渡
     ai_model: str | None = None  # 可覆盖故事默认模型
+    debug: bool = False
 
 
 class StoryUpdateCharactersRequest(BaseModel):
@@ -431,22 +464,26 @@ class StoryNodeUpdateRequest(BaseModel):
 
 class StoryNodeRegenerateRequest(BaseModel):
     ai_model: str | None = None  # 可覆盖故事默认模型
+    debug: bool = False
 
 
 class StoryNodeReviseRequest(BaseModel):
     instruction: str  # 修改意见
     ai_model: str | None = None  # 可覆盖故事默认模型
+    debug: bool = False
 
 
 class RegenerateChoicesRequest(BaseModel):
     """重新生成分支选项请求"""
     hint: str | None = None  # 用户提示的方向
     ai_model: str | None = None  # 可覆盖故事默认模型
+    debug: bool = False
 
 
 class RegenerateChoicesResponse(BaseModel):
     """重新生成分支选项响应"""
     choices: list[dict]
+    debug_info: AIDebugInfo | None = None
 
 
 class PolishChaptersRequest(BaseModel):
@@ -454,11 +491,13 @@ class PolishChaptersRequest(BaseModel):
     node_ids: list[str]  # 要润色的节点 ID 列表
     instruction: str | None = None  # 用户的润色意见（可选）
     ai_model: str | None = None  # 可覆盖故事默认模型
+    debug: bool = False
 
 
 class PolishChaptersResponse(BaseModel):
     """润色章节响应"""
     polished_contents: list[dict]  # [{"node_id": "...", "content": "..."}]
+    debug_info: AIDebugInfo | None = None
 
 
 class StoryExportResponse(BaseModel):
