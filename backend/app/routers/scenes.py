@@ -190,6 +190,7 @@ async def ai_generate_scenes(request: SceneAIGenerateRequest):
             character_context=request.character_context,
             custom_prompt=request.custom_prompt,
             count=request.count,
+            ai_model=request.ai_model,
         )
 
         return SceneAIGenerateResponse(

@@ -38,7 +38,7 @@ async def create_character(
 @router.post("/auto-complete", response_model=CharacterAutoCompleteResponse)
 async def auto_complete_character(request: CharacterAutoCompleteRequest):
     """AI 辅助填写角色设定"""
-    ai_service = get_ai_service()  # 使用默认模型
+    ai_service = get_ai_service(request.ai_model)
     try:
         result = await ai_service.auto_complete_character(
             name=request.name,

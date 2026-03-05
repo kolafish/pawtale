@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, ArrowRight, Sparkles, X, Loader2 } from 'lucide-react';
 import { outlinesApi, charactersApi } from '../api';
+import { useAppStore } from '../stores/appStore';
 
 interface OutlineGuidedWizardProps {
   onClose: () => void;
@@ -18,6 +19,7 @@ const MOOD_OPTIONS = ['甜', '虐', '搞笑', '治愈'];
 
 export function OutlineGuidedWizard({ onClose, onSuccess }: OutlineGuidedWizardProps) {
   const queryClient = useQueryClient();
+  const { defaultAiModel } = useAppStore();
   const [step, setStep] = useState(1);
   const [formData, setFormData] = useState({
     story_goal: '',
@@ -25,7 +27,7 @@ export function OutlineGuidedWizard({ onClose, onSuccess }: OutlineGuidedWizardP
     central_conflict: '',
     character_ids: [] as string[],
     mood: '',
-    ai_model: 'deepseek',
+    ai_model: defaultAiModel,
   });
   const [generatedOutline, setGeneratedOutline] = useState<any>(null);
 
@@ -186,7 +188,10 @@ export function OutlineGuidedWizard({ onClose, onSuccess }: OutlineGuidedWizardP
                 </label>
                 <select
                   value={formData.ai_model}
-                  onChange={(e) => setFormData({ ...formData, ai_model: e.target.value })}
+                  onChange={(e) => setFormData({
+                    ...formData,
+                    ai_model: e.target.value as 'deepseek' | 'claude-opus-4' | 'claude-sonnet-4',
+                  })}
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-pink-500 focus:border-transparent"
                 >
                   {AI_MODEL_OPTIONS.map((option) => (

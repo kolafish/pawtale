@@ -4,6 +4,7 @@ import { Sparkles, User, Loader2, PenLine, BookOpen, MessageSquare, X, MapPin, U
 import { storiesApi, scenesApi, charactersApi } from '../api';
 import { useAppStore } from '../stores/appStore';
 import type { Scene, Character } from '../types';
+import { AI_MODEL_OPTIONS } from '../constants/aiModels';
 
 // 字符级别的 diff 算法
 function computeDiff(oldText: string, newText: string): { type: 'same' | 'add' | 'remove'; text: string }[] {
@@ -150,6 +151,7 @@ export function StoryPreview() {
     currentStory,
     currentNode,
     isGenerating,
+    defaultAiModel,
     setCurrentStory,
     setCurrentNode,
     setIsGenerating,
@@ -160,9 +162,11 @@ export function StoryPreview() {
   const [selectedStyle, setSelectedStyle] = useState('细腻');
   const [selectedLength, setSelectedLength] = useState('中');
   const [customDirection, setCustomDirection] = useState('');
+  const [aiModelOverride, setAiModelOverride] = useState('');
   const [showFullView, setShowFullView] = useState(false);
   const [showSceneSwitcher, setShowSceneSwitcher] = useState(false);
   const [showCharacterManager, setShowCharacterManager] = useState(false);
+  const resolvedAiModel = aiModelOverride || currentStory?.ai_model || defaultAiModel;
 
   // 获取所有场景和角色用于切换
   const { data: allScenes = [] } = useQuery({
@@ -185,7 +189,7 @@ export function StoryPreview() {
   });
 
   const chooseMutation = useMutation({
-    mutationFn: ({ storyId, request }: { storyId: string; request: { choice_index?: number; custom_direction?: string } }) =>
+    mutationFn: ({ storyId, request }: { storyId: string; request: { choice_index?: number; custom_direction?: string; ai_model?: string } }) =>
       storiesApi.chooseBranch(storyId, request),
     onSuccess: (data) => {
       setCurrentNode(data);
@@ -197,7 +201,11 @@ export function StoryPreview() {
 
   const switchSceneMutation = useMutation({
     mutationFn: ({ storyId, sceneId, transitionType }: { storyId: string; sceneId: string; transitionType?: string }) =>
-      storiesApi.switchScene(storyId, { scene_id: sceneId, transition_type: transitionType }),
+      storiesApi.switchScene(storyId, {
+        scene_id: sceneId,
+        transition_type: transitionType,
+        ai_model: resolvedAiModel,
+      }),
     onSuccess: (data) => {
       setCurrentNode(data);
       setShowSceneSwitcher(false);
@@ -218,7 +226,7 @@ export function StoryPreview() {
 
   const regenerateChoicesMutation = useMutation({
     mutationFn: ({ storyId, nodeId, hint }: { storyId: string; nodeId: string; hint?: string }) =>
-      storiesApi.regenerateChoices(storyId, nodeId, { hint }),
+      storiesApi.regenerateChoices(storyId, nodeId, { hint, ai_model: resolvedAiModel }),
     onSuccess: (data) => {
       // 更新当前节点的选项
       if (currentNode) {
@@ -251,6 +259,7 @@ export function StoryPreview() {
         writing_style: selectedStyle,
         chapter_length: selectedLength,
         custom_direction: customDirection || undefined,
+        ai_model: resolvedAiModel,
       });
       setCustomDirection('');
     } finally {
@@ -265,7 +274,7 @@ export function StoryPreview() {
     try {
       await chooseMutation.mutateAsync({
         storyId: currentNode.story_id,
-        request: { choice_index: choiceIndex },
+        request: { choice_index: choiceIndex, ai_model: resolvedAiModel },
       });
     } finally {
       setIsGenerating(false);
@@ -279,7 +288,7 @@ export function StoryPreview() {
     try {
       await chooseMutation.mutateAsync({
         storyId: currentNode.story_id,
-        request: { custom_direction: customDirection.trim() },
+        request: { custom_direction: customDirection.trim(), ai_model: resolvedAiModel },
       });
     } finally {
       setIsGenerating(false);
@@ -306,6 +315,7 @@ export function StoryPreview() {
     return (
       <StoryFullView
         story={currentStory}
+        defaultAiModel={resolvedAiModel}
         onClose={() => setShowFullView(false)}
         onNodeClick={(nodeId) => {
           storiesApi.gotoNode(currentStory.id, nodeId).then((data) => {
@@ -409,6 +419,21 @@ export function StoryPreview() {
             </div>
           </div>
 
+          {/* AI 模型 */}
+          <div>
+            <p className="text-sm font-medium text-gray-700 mb-3">AI 模型</p>
+            <select
+              value={aiModelOverride}
+              onChange={(e) => setAiModelOverride(e.target.value)}
+              className="w-full px-4 py-2 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-pink-500"
+            >
+              <option value="">跟随故事/全局</option>
+              {AI_MODEL_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+          </div>
+
           {/* 自定义开篇方向 */}
           <div>
             <p className="text-sm font-medium text-gray-700 mb-3">开篇方向（可选）</p>
@@ -469,15 +494,34 @@ export function StoryPreview() {
               {currentNode.word_count && (
                 <span className="text-xs text-gray-400">{currentNode.word_count}字</span>
               )}
+              {(currentNode.ai_model || currentStory?.ai_model) && (
+                <span className="px-2 py-0.5 bg-blue-100 text-blue-600 rounded-full text-xs">
+                  {AI_MODEL_OPTIONS.find((m) => m.value === (currentNode.ai_model || currentStory?.ai_model))
+                    ?.label || currentNode.ai_model || currentStory?.ai_model}
+                </span>
+              )}
             </div>
           </div>
-          <button
-            onClick={() => setShowFullView(true)}
-            className="p-2 text-gray-500 hover:text-pink-500 hover:bg-pink-50 rounded-lg transition-colors"
-            title="查看全文"
-          >
-            <BookOpen size={20} />
-          </button>
+          <div className="flex items-center gap-2">
+            <select
+              value={aiModelOverride}
+              onChange={(e) => setAiModelOverride(e.target.value)}
+              className="text-xs px-2 py-1.5 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+              title="AI 模型（留空=跟随故事/全局）"
+            >
+              <option value="">跟随故事/全局</option>
+              {AI_MODEL_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+            <button
+              onClick={() => setShowFullView(true)}
+              className="p-2 text-gray-500 hover:text-pink-500 hover:bg-pink-50 rounded-lg transition-colors"
+              title="查看全文"
+            >
+              <BookOpen size={20} />
+            </button>
+          </div>
         </div>
       </div>
 
@@ -907,22 +951,25 @@ interface StoryFullViewProps {
     mood?: string;
     writing_style?: string;
   };
+  defaultAiModel: string;
   onClose: () => void;
   onNodeClick: (nodeId: string) => void;
 }
 
-function StoryFullView({ story, onClose, onNodeClick }: StoryFullViewProps) {
+function StoryFullView({ story, defaultAiModel, onClose, onNodeClick }: StoryFullViewProps) {
   const [editingNode, setEditingNode] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState('');
   const [editContent, setEditContent] = useState('');
+  const [aiModelOverride, setAiModelOverride] = useState('');
   const [revisingNode, setRevisingNode] = useState<string | null>(null);
   const [reviseInstruction, setReviseInstruction] = useState('');
   const [isPolishMode, setIsPolishMode] = useState(false);
   const [selectedForPolish, setSelectedForPolish] = useState<Set<string>>(new Set());
   const [polishInstruction, setPolishInstruction] = useState('');
-  const [polishPreview, setPolishPreview] = useState<{ node_id: string; content: string }[] | null>(null);
+  const [polishPreview, setPolishPreview] = useState<{ node_id: string; content: string; ai_model?: string }[] | null>(null);
   const [acceptedPolish, setAcceptedPolish] = useState<Set<string>>(new Set());
   const [showDiffView, setShowDiffView] = useState(true);
+  const resolvedActionAiModel = aiModelOverride || defaultAiModel;
   const queryClient = useQueryClient();
   const { setCurrentStory, setCurrentNode } = useAppStore();
 
@@ -937,7 +984,7 @@ function StoryFullView({ story, onClose, onNodeClick }: StoryFullViewProps) {
   });
 
   const regenerateNodeMutation = useMutation({
-    mutationFn: (nodeId: string) => storiesApi.regenerateNode(story.id, nodeId),
+    mutationFn: (nodeId: string) => storiesApi.regenerateNode(story.id, nodeId, { ai_model: resolvedActionAiModel }),
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['stories'] });
       storiesApi.getById(story.id).then(setCurrentStory);
@@ -947,7 +994,7 @@ function StoryFullView({ story, onClose, onNodeClick }: StoryFullViewProps) {
 
   const reviseNodeMutation = useMutation({
     mutationFn: ({ nodeId, instruction }: { nodeId: string; instruction: string }) =>
-      storiesApi.reviseNode(story.id, nodeId, instruction),
+      storiesApi.reviseNode(story.id, nodeId, instruction, resolvedActionAiModel),
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['stories'] });
       storiesApi.getById(story.id).then(setCurrentStory);
@@ -973,6 +1020,7 @@ function StoryFullView({ story, onClose, onNodeClick }: StoryFullViewProps) {
           title: node.title,
           content: node.content,
           word_count: node.word_count,
+          ai_model: node.ai_model || updatedStory.ai_model,
           choices: node.choices,
         });
       }
@@ -1001,7 +1049,11 @@ function StoryFullView({ story, onClose, onNodeClick }: StoryFullViewProps) {
 
   const polishMutation = useMutation({
     mutationFn: ({ nodeIds, instruction }: { nodeIds: string[]; instruction?: string }) =>
-      storiesApi.polishChapters(story.id, { node_ids: nodeIds, instruction }),
+      storiesApi.polishChapters(story.id, {
+        node_ids: nodeIds,
+        instruction,
+        ai_model: resolvedActionAiModel,
+      }),
     onSuccess: (data) => {
       setPolishPreview(data.polished_contents);
       // 默认全部采纳
@@ -1010,7 +1062,7 @@ function StoryFullView({ story, onClose, onNodeClick }: StoryFullViewProps) {
   });
 
   const applyPolishMutation = useMutation({
-    mutationFn: (polishedContents: { node_id: string; content: string }[]) =>
+    mutationFn: (polishedContents: { node_id: string; content: string; ai_model?: string }[]) =>
       storiesApi.applyPolish(story.id, { polished_contents: polishedContents }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['stories'] });
@@ -1124,6 +1176,17 @@ function StoryFullView({ story, onClose, onNodeClick }: StoryFullViewProps) {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <select
+            value={aiModelOverride}
+            onChange={(e) => setAiModelOverride(e.target.value)}
+            className="text-xs px-2 py-1.5 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+            title="AI 模型（留空=跟随上一级）"
+          >
+            <option value="">跟随上一级</option>
+            {AI_MODEL_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
           {isPolishMode ? (
             <>
               <button

@@ -6,11 +6,83 @@ settings = get_settings()
 
 
 class AISceneService:
-    """DeepSeek 场景生成服务"""
+    """多模型场景生成服务（DeepSeek / Claude）"""
 
     def __init__(self):
-        self.api_key = settings.deepseek_api_key
-        self.base_url = settings.deepseek_base_url
+        self.deepseek_api_key = settings.deepseek_api_key
+        self.deepseek_base_url = settings.deepseek_base_url
+        self.anthropic_auth_token = settings.anthropic_auth_token
+        self.anthropic_base_url = settings.anthropic_base_url
+        self.claude_model_map = {
+            "claude-opus-4": "claude-opus-4-20250514",
+            "claude-sonnet-4": "claude-sonnet-4-20250514",
+        }
+
+    async def _call_deepseek(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+    ) -> str:
+        if not self.deepseek_api_key:
+            raise ValueError("DeepSeek API key 未配置")
+
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{self.deepseek_base_url}/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {self.deepseek_api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": "deepseek-chat",
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    "temperature": 0.8,
+                    "max_tokens": 3000,
+                },
+                timeout=60.0,
+            )
+            response.raise_for_status()
+            result = response.json()
+            return result["choices"][0]["message"]["content"]
+
+    async def _call_claude(
+        self,
+        model: str,
+        system_prompt: str,
+        user_prompt: str,
+    ) -> str:
+        if not self.anthropic_auth_token:
+            raise ValueError("Anthropic auth token 未配置")
+
+        claude_model = self.claude_model_map.get(model)
+        if not claude_model:
+            raise ValueError(f"不支持的 Claude 模型: {model}")
+
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{self.anthropic_base_url}/v1/messages",
+                headers={
+                    "Authorization": f"Bearer {self.anthropic_auth_token}",
+                    "Content-Type": "application/json",
+                    "anthropic-version": "2023-06-01",
+                },
+                json={
+                    "model": claude_model,
+                    "max_tokens": 2000,
+                    "temperature": 0.8,
+                    "system": system_prompt,
+                    "messages": [
+                        {"role": "user", "content": user_prompt},
+                    ],
+                },
+                timeout=90.0,
+            )
+            response.raise_for_status()
+            result = response.json()
+            return result["content"][0]["text"]
 
     async def generate_scene_candidates(
         self,
@@ -19,6 +91,7 @@ class AISceneService:
         character_context: dict | None = None,
         custom_prompt: str | None = None,
         count: int = 3,
+        ai_model: str | None = None,
     ) -> list[dict]:
         """生成场景候选"""
 
@@ -61,29 +134,18 @@ class AISceneService:
         user_parts.append(f"请生成 {count} 个不同的场景候选。")
 
         user_prompt = "\n".join(user_parts)
-
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"{self.base_url}/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {self.api_key}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": "deepseek-chat",
-                    "messages": [
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt},
-                    ],
-                    "temperature": 0.8,
-                    "max_tokens": 3000,
-                },
-                timeout=60.0,
+        selected_model = (ai_model or "deepseek").lower()
+        if selected_model in self.claude_model_map:
+            content = await self._call_claude(
+                model=selected_model,
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
             )
-            response.raise_for_status()
-            result = response.json()
-
-        content = result["choices"][0]["message"]["content"]
+        else:
+            content = await self._call_deepseek(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+            )
 
         # 解析 JSON
         try:

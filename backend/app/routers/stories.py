@@ -8,7 +8,7 @@ from app.models import Story, Character, Scene, StoryCharacter, StoryOutline
 from app.schemas import (
     StoryCreate, StoryResponse, StoryUpdate,
     StoryGenerateRequest, StoryBranchRequest, StoryGenerateResponse,
-    StoryNodeUpdateRequest, StoryNodeReviseRequest, StoryExportResponse,
+    StoryNodeUpdateRequest, StoryNodeRegenerateRequest, StoryNodeReviseRequest, StoryExportResponse,
     StorySwitchSceneRequest, StoryUpdateCharactersRequest,
     PresentCharacter,
     RegenerateChoicesRequest, RegenerateChoicesResponse,
@@ -75,6 +75,7 @@ async def generate_story(
 
     # 获取大纲上下文（如果有）
     outline_context = None
+    outline = None
     if request.outline_id:
         result = await db.execute(
             select(StoryOutline).where(StoryOutline.id == request.outline_id)
@@ -94,7 +95,8 @@ async def generate_story(
     if not ai_model and request.outline_id and outline:
         ai_model = outline.ai_model
 
-    ai_service = get_ai_service(ai_model)
+    selected_ai_model = ai_model or "deepseek"
+    ai_service = get_ai_service(selected_ai_model)
 
     try:
         story_result = await ai_service.generate_story(
@@ -117,6 +119,7 @@ async def generate_story(
             "title": story_result.get("title") or "第一章",
             "content": story_result["content"],
             "word_count": story_result.get("word_count", len(story_result["content"])),
+            "ai_model": selected_ai_model,
             "choices": story_result["choices"],
         }
     }
@@ -133,7 +136,7 @@ async def generate_story(
         mood=request.mood,
         writing_style=request.writing_style,
         chapter_length=request.chapter_length,
-        ai_model=ai_model or "deepseek",
+        ai_model=selected_ai_model,
         outline_id=request.outline_id,
         nodes=nodes,
         current_node_id=node_id,
@@ -155,6 +158,7 @@ async def generate_story(
         title=story_result.get("title"),
         content=story_result["content"],
         word_count=story_result.get("word_count"),
+        ai_model=selected_ai_model,
         choices=story_result["choices"],
     )
 
@@ -180,6 +184,7 @@ async def choose_branch(
     current_node = story.nodes.get(story.current_node_id)
     if not current_node:
         raise HTTPException(status_code=400, detail="当前节点不存在")
+    selected_ai_model = request.ai_model or story.ai_model or "deepseek"
 
     # 确定选择方式
     choice_label = None
@@ -209,6 +214,7 @@ async def choose_branch(
                 title=next_node.get("title"),
                 content=next_node["content"],
                 word_count=next_node.get("word_count"),
+                ai_model=next_node.get("ai_model") or story.ai_model,
                 choices=next_node["choices"],
             )
     else:
@@ -263,7 +269,7 @@ async def choose_branch(
     chapter_number = len(story.nodes) + 1
 
     # 生成新内容
-    ai_service = get_ai_service(story.ai_model)
+    ai_service = get_ai_service(selected_ai_model)
 
     try:
         story_result = await ai_service.generate_story(
@@ -287,6 +293,7 @@ async def choose_branch(
         "title": story_result.get("title") or f"第{chapter_number}章",
         "content": story_result["content"],
         "word_count": story_result.get("word_count", len(story_result["content"])),
+        "ai_model": selected_ai_model,
         "choices": story_result["choices"],
     }
 
@@ -313,6 +320,7 @@ async def choose_branch(
         title=story_result.get("title"),
         content=story_result["content"],
         word_count=story_result.get("word_count"),
+        ai_model=selected_ai_model,
         choices=story_result["choices"],
     )
 
@@ -423,6 +431,7 @@ async def goto_node(
         title=node.get("title"),
         content=node["content"],
         word_count=node.get("word_count"),
+        ai_model=node.get("ai_model") or story.ai_model,
         choices=node["choices"],
     )
 
@@ -462,6 +471,7 @@ async def update_node(
         title=node.get("title"),
         content=node["content"],
         word_count=node.get("word_count"),
+        ai_model=node.get("ai_model") or story.ai_model,
         choices=node["choices"],
     )
 
@@ -536,6 +546,7 @@ async def delete_node(
 async def regenerate_node(
     story_id: str,
     node_id: str,
+    request: StoryNodeRegenerateRequest | None = None,
     db: AsyncSession = Depends(get_db),
 ):
     """重新生成节点内容"""
@@ -586,7 +597,8 @@ async def regenerate_node(
     chapter_number = list(story.nodes.keys()).index(node_id) + 1
 
     # 重新生成
-    ai_service = get_ai_service(story.ai_model)
+    selected_ai_model = (request.ai_model if request else None) or story.ai_model or "deepseek"
+    ai_service = get_ai_service(selected_ai_model)
 
     try:
         story_result = await ai_service.generate_story(
@@ -608,6 +620,7 @@ async def regenerate_node(
         "title": story_result.get("title") or old_node.get("title"),
         "content": story_result["content"],
         "word_count": story_result.get("word_count", len(story_result["content"])),
+        "ai_model": selected_ai_model,
         "choices": story_result["choices"],  # 新的选项
     }
 
@@ -620,6 +633,7 @@ async def regenerate_node(
         title=story_result.get("title"),
         content=story_result["content"],
         word_count=story_result.get("word_count"),
+        ai_model=selected_ai_model,
         choices=story_result["choices"],
     )
 
@@ -695,7 +709,8 @@ async def revise_node(
         })
 
     # 调用 AI 修改
-    ai_service = get_ai_service(story.ai_model)
+    selected_ai_model = request.ai_model or story.ai_model or "deepseek"
+    ai_service = get_ai_service(selected_ai_model)
 
     try:
         story_result = await ai_service.revise_chapter(
@@ -714,6 +729,7 @@ async def revise_node(
         "title": story_result.get("title") or original_node.get("title"),
         "content": story_result["content"],
         "word_count": story_result.get("word_count", len(story_result["content"])),
+        "ai_model": selected_ai_model,
         "choices": story_result["choices"],
     }
 
@@ -726,6 +742,7 @@ async def revise_node(
         title=story_result.get("title"),
         content=story_result["content"],
         word_count=story_result.get("word_count"),
+        ai_model=selected_ai_model,
         choices=story_result["choices"],
     )
 
@@ -797,7 +814,8 @@ async def switch_scene(
     chapter_number = len(story.nodes) + 1
 
     # 生成新内容
-    ai_service = get_ai_service(story.ai_model)
+    selected_ai_model = request.ai_model or story.ai_model or "deepseek"
+    ai_service = get_ai_service(selected_ai_model)
 
     try:
         story_result = await ai_service.generate_story(
@@ -819,6 +837,7 @@ async def switch_scene(
         "title": story_result.get("title") or f"第{chapter_number}章",
         "content": story_result["content"],
         "word_count": story_result.get("word_count", len(story_result["content"])),
+        "ai_model": selected_ai_model,
         "choices": story_result["choices"],
         "scene_id": new_scene.id,
         "scene_name": new_scene.name,
@@ -853,6 +872,7 @@ async def switch_scene(
         title=story_result.get("title"),
         content=story_result["content"],
         word_count=story_result.get("word_count"),
+        ai_model=selected_ai_model,
         choices=story_result["choices"],
         scene_id=new_scene.id,
         scene_name=new_scene.name,
@@ -953,7 +973,8 @@ async def regenerate_choices(
         })
 
     # 调用 AI 生成新选项
-    ai_service = get_ai_service(story.ai_model)
+    selected_ai_model = request.ai_model or story.ai_model or "deepseek"
+    ai_service = get_ai_service(selected_ai_model)
 
     try:
         new_choices = await ai_service.regenerate_choices(
@@ -975,6 +996,7 @@ async def regenerate_choices(
     # 合并：保留的 + 新生成的
     new_nodes[node_id] = {
         **new_nodes[node_id],
+        "last_choices_ai_model": selected_ai_model,
         "choices": preserved_choices + new_choices,
     }
 
@@ -1025,7 +1047,8 @@ async def polish_chapters(
         })
 
     # 调用 AI 润色
-    ai_service = get_ai_service(story.ai_model)
+    selected_ai_model = request.ai_model or story.ai_model or "deepseek"
+    ai_service = get_ai_service(selected_ai_model)
 
     try:
         polished_text = await ai_service.polish_chapters(
@@ -1051,12 +1074,14 @@ async def polish_chapters(
             polished_contents.append({
                 "node_id": node_id,
                 "content": content,
+                "ai_model": selected_ai_model,
             })
         else:
             # 如果分隔不够，保留原内容
             polished_contents.append({
                 "node_id": node_id,
                 "content": chapters[i]["content"],
+                "ai_model": selected_ai_model,
             })
 
     return PolishChaptersResponse(polished_contents=polished_contents)
@@ -1082,6 +1107,7 @@ async def apply_polish(
                 **new_nodes[node_id],
                 "content": item["content"],
                 "word_count": len(item["content"]),
+                "ai_model": item.get("ai_model", new_nodes[node_id].get("ai_model")),
             }
 
     story.nodes = new_nodes

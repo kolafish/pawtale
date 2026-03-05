@@ -8,6 +8,7 @@ import { outlinesApi, charactersApi, scenesApi, storiesApi } from '../api';
 import { useAppStore } from '../stores/appStore';
 import { OutlineGuidedWizard } from './OutlineGuidedWizard';
 import type { StoryOutline, Character, Scene, OutlineTemplate } from '../types';
+import { AI_MODEL_OPTIONS } from '../constants/aiModels';
 
 const MOOD_OPTIONS = ['甜', '虐', '搞笑', '治愈'];
 const STYLE_OPTIONS = ['细腻', '白描', '诗意', '轻松'];
@@ -22,7 +23,7 @@ const ROLE_TYPE_OPTIONS = [
 
 export function OutlinePanel() {
   const queryClient = useQueryClient();
-  const { setCurrentStory, setCurrentNode } = useAppStore();
+  const { setCurrentStory, setCurrentNode, defaultAiModel } = useAppStore();
   const [isCreating, setIsCreating] = useState(false);
   const [showGuidedWizard, setShowGuidedWizard] = useState(false);
   const [editingOutline, setEditingOutline] = useState<StoryOutline | null>(null);
@@ -77,7 +78,7 @@ export function OutlinePanel() {
   });
 
   const generateMutation = useMutation({
-    mutationFn: ({ outlineId, request }: { outlineId: string; request: { custom_direction?: string } }) =>
+    mutationFn: ({ outlineId, request }: { outlineId: string; request: { custom_direction?: string; ai_model?: string } }) =>
       outlinesApi.generateStory(outlineId, request),
     onSuccess: async (data) => {
       setCurrentNode(data);
@@ -95,6 +96,7 @@ export function OutlinePanel() {
       central_conflict: template.central_conflict,
       ending_type: template.ending_type,
       plot_hints: template.plot_hints,
+      ai_model: defaultAiModel,
     });
   };
 
@@ -170,6 +172,7 @@ export function OutlinePanel() {
             onSubmit={(data) => createMutation.mutate(data as StoryOutline)}
             onCancel={() => setIsCreating(false)}
             isLoading={createMutation.isPending}
+            defaultAiModel={defaultAiModel}
           />
         )}
 
@@ -190,6 +193,7 @@ export function OutlinePanel() {
                 onCancel={() => setEditingOutline(null)}
                 isLoading={updateMutation.isPending}
                 isEditing
+                defaultAiModel={defaultAiModel}
               />
             ) : (
               <OutlineCard
@@ -203,10 +207,11 @@ export function OutlinePanel() {
                     deleteMutation.mutate(outline.id);
                   }
                 }}
-                onGenerate={() => generateMutation.mutate({ outlineId: outline.id, request: {} })}
+                onGenerate={(aiModel) => generateMutation.mutate({ outlineId: outline.id, request: { ai_model: aiModel } })}
                 isGenerating={generateMutation.isPending}
                 characters={characters}
                 scenes={scenes}
+                defaultAiModel={defaultAiModel}
               />
             )
           ))
@@ -232,10 +237,11 @@ interface OutlineCardProps {
   onToggleExpand: () => void;
   onEdit: () => void;
   onDelete: () => void;
-  onGenerate: () => void;
+  onGenerate: (aiModel?: string) => void;
   isGenerating: boolean;
   characters: Character[];
   scenes: Scene[];
+  defaultAiModel: 'deepseek' | 'claude-opus-4' | 'claude-sonnet-4';
 }
 
 function OutlineCard({
@@ -248,8 +254,11 @@ function OutlineCard({
   isGenerating,
   characters,
   scenes,
+  defaultAiModel,
 }: OutlineCardProps) {
   const queryClient = useQueryClient();
+  const [actionAiModel, setActionAiModel] = useState('');
+  const resolvedAiModel = actionAiModel || outline.ai_model || defaultAiModel;
 
   const addCharacterMutation = useMutation({
     mutationFn: (data: { character_id: string; role_type: string }) =>
@@ -292,7 +301,7 @@ function OutlineCard({
   });
 
   const aiEnhanceMutation = useMutation({
-    mutationFn: () => outlinesApi.aiEnhance(outline.id),
+    mutationFn: () => outlinesApi.aiEnhance(outline.id, { ai_model: resolvedAiModel }),
     onSuccess: (data) => {
       // 更新大纲
       outlinesApi.update(outline.id, {
@@ -347,6 +356,11 @@ function OutlineCard({
                     {outline.ending_type}
                   </span>
                 )}
+                {outline.ai_model && (
+                  <span className="px-2 py-0.5 bg-blue-100 text-blue-600 rounded-full text-xs">
+                    {AI_MODEL_OPTIONS.find((m) => m.value === outline.ai_model)?.label || outline.ai_model}
+                  </span>
+                )}
               </div>
             </div>
           </div>
@@ -360,7 +374,7 @@ function OutlineCard({
               {aiEnhanceMutation.isPending ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
             </button>
             <button
-              onClick={onGenerate}
+              onClick={() => onGenerate(resolvedAiModel)}
               disabled={isGenerating || !canGenerate}
               className="p-1.5 text-gray-400 hover:text-green-500 hover:bg-green-50 rounded-lg transition-colors disabled:opacity-50"
               title={canGenerate ? "生成故事" : "请先添加角色和场景"}
@@ -382,6 +396,19 @@ function OutlineCard({
               <Trash2 size={16} />
             </button>
           </div>
+        </div>
+        <div className="mt-2 pl-7 pr-2" onClick={(e) => e.stopPropagation()}>
+          <select
+            value={actionAiModel}
+            onChange={(e) => setActionAiModel(e.target.value)}
+            className="text-xs px-2 py-1 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+            title="本大纲 AI 动作模型（留空=按大纲/全局）"
+          >
+            <option value="">跟随大纲/全局</option>
+            {AI_MODEL_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
         </div>
       </div>
 
@@ -542,9 +569,10 @@ interface OutlineFormProps {
   isLoading: boolean;
   initialData?: StoryOutline;
   isEditing?: boolean;
+  defaultAiModel: 'deepseek' | 'claude-opus-4' | 'claude-sonnet-4';
 }
 
-function OutlineForm({ onSubmit, onCancel, isLoading, initialData, isEditing }: OutlineFormProps) {
+function OutlineForm({ onSubmit, onCancel, isLoading, initialData, isEditing, defaultAiModel }: OutlineFormProps) {
   const [formData, setFormData] = useState({
     title: initialData?.title || '',
     mood: initialData?.mood || '',
@@ -554,6 +582,7 @@ function OutlineForm({ onSubmit, onCancel, isLoading, initialData, isEditing }: 
     ending_type: initialData?.ending_type || '',
     plot_hints: (initialData?.plot_hints || []).join('，'),
     forbidden_elements: (initialData?.forbidden_elements || []).join('，'),
+    ai_model: initialData?.ai_model || defaultAiModel,
   });
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -576,6 +605,7 @@ function OutlineForm({ onSubmit, onCancel, isLoading, initialData, isEditing }: 
       ending_type: formData.ending_type || undefined,
       plot_hints: plotHints,
       forbidden_elements: forbiddenElements,
+      ai_model: formData.ai_model || undefined,
     });
   };
 
@@ -653,6 +683,19 @@ function OutlineForm({ onSubmit, onCancel, isLoading, initialData, isEditing }: 
             ))}
           </select>
         </div>
+      </div>
+
+      <div>
+        <label className="block text-sm font-medium text-gray-700 mb-1">默认 AI 模型</label>
+        <select
+          value={formData.ai_model}
+          onChange={(e) => setFormData({ ...formData, ai_model: e.target.value })}
+          className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+        >
+          {AI_MODEL_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>{option.label}</option>
+          ))}
+        </select>
       </div>
 
       <div>

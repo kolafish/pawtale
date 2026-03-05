@@ -23,6 +23,7 @@ import type {
   OutlineSceneUpdate,
   StorySwitchSceneRequest,
   StoryUpdateCharactersRequest,
+  OutlineEnhanceRequest,
   OutlineEnhanceResponse,
   OutlineTemplatesResponse,
   RegenerateChoicesRequest,
@@ -44,7 +45,7 @@ export const charactersApi = {
   delete: (id: string) => api.delete(`/characters/${id}`),
   generateAvatar: (id: string, style: string) =>
     api.post<{ avatar_url: string; base_image_url: string }>(`/characters/${id}/avatar`, { style }).then(res => res.data),
-  autoComplete: (data: { name?: string; gender?: string; inspiration?: string }) =>
+  autoComplete: (data: { name?: string; gender?: string; inspiration?: string; ai_model?: string }) =>
     api.post<CharacterAutoComplete>('/characters/auto-complete', data).then(res => res.data),
 };
 
@@ -80,10 +81,13 @@ export const storiesApi = {
     api.put<StoryGenerateResponse>(`/stories/${storyId}/nodes/${nodeId}`, data).then(res => res.data),
   deleteNode: (storyId: string, nodeId: string) =>
     api.delete(`/stories/${storyId}/nodes/${nodeId}`).then(res => res.data),
-  regenerateNode: (storyId: string, nodeId: string) =>
-    api.post<StoryGenerateResponse>(`/stories/${storyId}/nodes/${nodeId}/regenerate`).then(res => res.data),
-  reviseNode: (storyId: string, nodeId: string, instruction: string) =>
-    api.post<StoryGenerateResponse>(`/stories/${storyId}/nodes/${nodeId}/revise`, { instruction }).then(res => res.data),
+  regenerateNode: (storyId: string, nodeId: string, request?: { ai_model?: string }) =>
+    api.post<StoryGenerateResponse>(`/stories/${storyId}/nodes/${nodeId}/regenerate`, request).then(res => res.data),
+  reviseNode: (storyId: string, nodeId: string, instruction: string, aiModel?: string) =>
+    api.post<StoryGenerateResponse>(
+      `/stories/${storyId}/nodes/${nodeId}/revise`,
+      { instruction, ai_model: aiModel }
+    ).then(res => res.data),
   // 重新生成分支选项
   regenerateChoices: (storyId: string, nodeId: string, request: RegenerateChoicesRequest) =>
     api.post<RegenerateChoicesResponse>(`/stories/${storyId}/nodes/${nodeId}/regenerate-choices`, request).then(res => res.data),
@@ -128,8 +132,8 @@ export const outlinesApi = {
   generateStory: (outlineId: string, request: StoryOutlineGenerateRequest) =>
     api.post<StoryGenerateResponse>(`/outlines/${outlineId}/generate`, request).then(res => res.data),
   // AI 增强
-  aiEnhance: (outlineId: string) =>
-    api.post<OutlineEnhanceResponse>(`/outlines/${outlineId}/ai-enhance`, {}).then(res => res.data),
+  aiEnhance: (outlineId: string, request?: OutlineEnhanceRequest) =>
+    api.post<OutlineEnhanceResponse>(`/outlines/${outlineId}/ai-enhance`, request || {}).then(res => res.data),
   // 模板
   getTemplates: () =>
     api.get<OutlineTemplatesResponse>('/outlines/templates').then(res => res.data),
