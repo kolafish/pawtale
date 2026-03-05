@@ -397,6 +397,7 @@ function SceneAIGenerator({ onSave, onClose, defaultAiModel }: SceneAIGeneratorP
   const [aiModelOverride, setAiModelOverride] = useState('');
   const [candidates, setCandidates] = useState<SceneCandidate[]>([]);
   const [selectedCandidate, setSelectedCandidate] = useState<SceneCandidate | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const generateMutation = useMutation({
     mutationFn: () => scenesApi.aiGenerate({
@@ -406,8 +407,19 @@ function SceneAIGenerator({ onSave, onClose, defaultAiModel }: SceneAIGeneratorP
       count: 3,
       ai_model: aiModelOverride || defaultAiModel,
     }),
+    onMutate: () => {
+      setErrorMessage(null);
+    },
     onSuccess: (data) => {
       setCandidates(data.candidates);
+      setErrorMessage(null);
+    },
+    onError: (error: unknown) => {
+      const detail = (error as any)?.response?.data?.detail;
+      const fallback = (error as Error)?.message || '场景生成失败，请稍后重试';
+      setErrorMessage(typeof detail === 'string' && detail ? detail : fallback);
+      setCandidates([]);
+      setSelectedCandidate(null);
     },
   });
 
@@ -428,6 +440,12 @@ function SceneAIGenerator({ onSave, onClose, defaultAiModel }: SceneAIGeneratorP
 
       {candidates.length === 0 ? (
         <>
+          {errorMessage && (
+            <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">
+              {errorMessage}
+            </div>
+          )}
+
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">场景类型</label>
@@ -539,6 +557,7 @@ function SceneAIGenerator({ onSave, onClose, defaultAiModel }: SceneAIGeneratorP
               onClick={() => {
                 setCandidates([]);
                 setSelectedCandidate(null);
+                setErrorMessage(null);
               }}
               className="px-4 py-2 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
             >

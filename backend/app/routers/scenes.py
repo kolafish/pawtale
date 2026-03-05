@@ -8,6 +8,11 @@ from app.schemas import (
     SceneAIGenerateRequest, SceneAIGenerateResponse, SceneCandidate,
 )
 from app.services import ai_scene_service
+from app.services.ai_scene import (
+    AISceneParseError,
+    AISceneProviderError,
+    AISceneTimeoutError,
+)
 
 router = APIRouter(prefix="/api/scenes", tags=["scenes"])
 
@@ -196,5 +201,11 @@ async def ai_generate_scenes(request: SceneAIGenerateRequest):
         return SceneAIGenerateResponse(
             candidates=[SceneCandidate(**c) for c in candidates]
         )
+    except AISceneParseError as e:
+        raise HTTPException(status_code=502, detail=f"场景生成失败：模型返回格式异常（{str(e)}）")
+    except AISceneTimeoutError as e:
+        raise HTTPException(status_code=504, detail=f"场景生成失败：模型响应超时（{str(e)}）")
+    except AISceneProviderError as e:
+        raise HTTPException(status_code=502, detail=f"场景生成失败：上游模型服务异常（{str(e)}）")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"场景生成失败: {str(e)}")

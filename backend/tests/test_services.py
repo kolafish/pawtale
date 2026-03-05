@@ -1,6 +1,7 @@
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 from app.services.ai_text import AITextService
+from app.services.ai_scene import AISceneService, AISceneParseError
 
 
 class TestAITextService:
@@ -135,3 +136,110 @@ B. 选项二"""
             # 应该返回默认值
             assert "gender" in result
             assert "age" in result
+
+
+class TestAISceneService:
+    """场景 AI 服务测试"""
+
+    @pytest.mark.asyncio
+    async def test_claude_extracts_text_from_multiple_blocks(self):
+        service = AISceneService()
+        service.anthropic_auth_token = "test-token"
+        service.anthropic_base_url = "https://example.com"
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "content": [
+                {"type": "thinking", "text": "分析中"},
+                {
+                    "type": "text",
+                    "text": '```json\n[{"name":"雨夜旧街","description":"雨夜中两人在旧街重逢，氛围紧张又暧昧。"}]\n```',
+                },
+            ]
+        }
+        mock_response.raise_for_status = MagicMock()
+
+        with patch("httpx.AsyncClient") as mock_client:
+            mock_instance = AsyncMock()
+            mock_instance.post = AsyncMock(return_value=mock_response)
+            mock_instance.__aenter__ = AsyncMock(return_value=mock_instance)
+            mock_instance.__aexit__ = AsyncMock(return_value=None)
+            mock_client.return_value = mock_instance
+
+            content = await service._call_claude(
+                model="claude-opus-4",
+                system_prompt="system",
+                user_prompt="user",
+            )
+
+            assert '"name":"雨夜旧街"' in content
+
+    @pytest.mark.asyncio
+    async def test_generate_scene_candidates_supports_candidates_wrapper(self):
+        service = AISceneService()
+        with patch.object(
+            service,
+            "_call_deepseek",
+            AsyncMock(
+                return_value='{"candidates":[{"name":"雨夜旧街","description":"雨夜里的旧街，适合重逢与试探。","mood_keywords":["雨夜","重逢"]}]}'
+            ),
+        ):
+            result = await service.generate_scene_candidates(
+                category="暧昧",
+                mood_keywords=["雨夜", "重逢"],
+                count=3,
+                ai_model="deepseek",
+            )
+
+        assert len(result) == 1
+        assert result[0]["name"] == "雨夜旧街"
+        assert "重逢" in result[0]["description"]
+
+    @pytest.mark.asyncio
+    async def test_generate_scene_candidates_supports_scenes_wrapper(self):
+        service = AISceneService()
+        with patch.object(
+            service,
+            "_call_deepseek",
+            AsyncMock(
+                return_value='{"scenes":[{"name":"夜色天台","description":"风从夜色里吹来，两人靠近又沉默。"}]}'
+            ),
+        ):
+            result = await service.generate_scene_candidates(
+                category="甜蜜",
+                mood_keywords=["夜色"],
+                count=3,
+                ai_model="deepseek",
+            )
+
+        assert len(result) == 1
+        assert result[0]["name"] == "夜色天台"
+
+    @pytest.mark.asyncio
+    async def test_generate_scene_candidates_raises_when_json_invalid(self):
+        service = AISceneService()
+        with patch.object(service, "_call_deepseek", AsyncMock(return_value="这不是 JSON")):
+            with pytest.raises(AISceneParseError):
+                await service.generate_scene_candidates(
+                    category="初遇",
+                    mood_keywords=["意外"],
+                    count=3,
+                    ai_model="deepseek",
+                )
+
+    @pytest.mark.asyncio
+    async def test_generate_scene_candidates_raises_when_missing_required_fields(self):
+        service = AISceneService()
+        with patch.object(
+            service,
+            "_call_deepseek",
+            AsyncMock(return_value='[{"name":"","description":""}]'),
+        ):
+            with pytest.raises(AISceneParseError):
+                await service.generate_scene_candidates(
+                    category="初遇",
+                    mood_keywords=["意外"],
+                    count=3,
+                    ai_model="deepseek",
+                )
