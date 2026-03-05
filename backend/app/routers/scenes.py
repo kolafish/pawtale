@@ -185,27 +185,45 @@ async def init_preset_scenes(db: AsyncSession = Depends(get_db)):
     return {"message": f"已创建 {len(PRESET_SCENES)} 个预设场景"}
 
 
-@router.post("/ai-generate", response_model=SceneAIGenerateResponse)
+@router.post(
+    "/ai-generate",
+    response_model=SceneAIGenerateResponse,
+    response_model_exclude_none=True,
+)
 async def ai_generate_scenes(request: SceneAIGenerateRequest):
     """AI 生成场景候选"""
     try:
-        candidates = await ai_scene_service.generate_scene_candidates(
+        candidates, debug_info = await ai_scene_service.generate_scene_candidates(
             category=request.category,
             mood_keywords=request.mood_keywords,
             character_context=request.character_context,
             custom_prompt=request.custom_prompt,
             count=request.count,
             ai_model=request.ai_model,
+            debug=request.debug,
         )
 
         return SceneAIGenerateResponse(
-            candidates=[SceneCandidate(**c) for c in candidates]
+            candidates=[SceneCandidate(**c) for c in candidates],
+            debug_info=debug_info if request.debug else None,
         )
     except AISceneParseError as e:
-        raise HTTPException(status_code=502, detail=f"场景生成失败：模型返回格式异常（{str(e)}）")
+        detail: str | dict = f"场景生成失败：模型返回格式异常（{str(e)}）"
+        if request.debug:
+            detail = {"message": detail, "debug_info": getattr(e, "debug_info", None)}
+        raise HTTPException(status_code=502, detail=detail)
     except AISceneTimeoutError as e:
-        raise HTTPException(status_code=504, detail=f"场景生成失败：模型响应超时（{str(e)}）")
+        detail: str | dict = f"场景生成失败：模型响应超时（{str(e)}）"
+        if request.debug:
+            detail = {"message": detail, "debug_info": getattr(e, "debug_info", None)}
+        raise HTTPException(status_code=504, detail=detail)
     except AISceneProviderError as e:
-        raise HTTPException(status_code=502, detail=f"场景生成失败：上游模型服务异常（{str(e)}）")
+        detail: str | dict = f"场景生成失败：上游模型服务异常（{str(e)}）"
+        if request.debug:
+            detail = {"message": detail, "debug_info": getattr(e, "debug_info", None)}
+        raise HTTPException(status_code=502, detail=detail)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"场景生成失败: {str(e)}")
+        detail: str | dict = f"场景生成失败: {str(e)}"
+        if request.debug:
+            detail = {"message": detail, "debug_info": None}
+        raise HTTPException(status_code=500, detail=detail)

@@ -3,8 +3,9 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Sparkles, User, Loader2, PenLine, BookOpen, MessageSquare, X, MapPin, Users, ArrowRight, RefreshCw, Lightbulb, Wand2, CheckSquare, Square } from 'lucide-react';
 import { storiesApi, scenesApi, charactersApi } from '../api';
 import { useAppStore } from '../stores/appStore';
-import type { Scene, Character } from '../types';
+import type { Scene, Character, AIDebugInfo } from '../types';
 import { AI_MODEL_OPTIONS } from '../constants/aiModels';
+import { AIDebugPanel } from './AIDebugPanel';
 
 // 字符级别的 diff 算法
 function computeDiff(oldText: string, newText: string): { type: 'same' | 'add' | 'remove'; text: string }[] {
@@ -166,6 +167,8 @@ export function StoryPreview() {
   const [showFullView, setShowFullView] = useState(false);
   const [showSceneSwitcher, setShowSceneSwitcher] = useState(false);
   const [showCharacterManager, setShowCharacterManager] = useState(false);
+  const [debugMode, setDebugMode] = useState(false);
+  const [debugInfo, setDebugInfo] = useState<AIDebugInfo | null>(null);
   const resolvedAiModel = aiModelOverride || currentStory?.ai_model || defaultAiModel;
 
   // 获取所有场景和角色用于切换
@@ -183,16 +186,18 @@ export function StoryPreview() {
     mutationFn: storiesApi.generate,
     onSuccess: (data) => {
       setCurrentNode(data);
+      setDebugInfo(data.debug_info || null);
       queryClient.invalidateQueries({ queryKey: ['stories'] });
       storiesApi.getById(data.story_id).then(setCurrentStory);
     },
   });
 
   const chooseMutation = useMutation({
-    mutationFn: ({ storyId, request }: { storyId: string; request: { choice_index?: number; custom_direction?: string; ai_model?: string } }) =>
+    mutationFn: ({ storyId, request }: { storyId: string; request: { choice_index?: number; custom_direction?: string; ai_model?: string; debug?: boolean } }) =>
       storiesApi.chooseBranch(storyId, request),
     onSuccess: (data) => {
       setCurrentNode(data);
+      setDebugInfo(data.debug_info || null);
       setCustomDirection('');
       queryClient.invalidateQueries({ queryKey: ['stories'] });
       storiesApi.getById(data.story_id).then(setCurrentStory);
@@ -205,9 +210,11 @@ export function StoryPreview() {
         scene_id: sceneId,
         transition_type: transitionType,
         ai_model: resolvedAiModel,
+        debug: debugMode,
       }),
     onSuccess: (data) => {
       setCurrentNode(data);
+      setDebugInfo(data.debug_info || null);
       setShowSceneSwitcher(false);
       queryClient.invalidateQueries({ queryKey: ['stories'] });
       storiesApi.getById(data.story_id).then(setCurrentStory);
@@ -226,7 +233,11 @@ export function StoryPreview() {
 
   const regenerateChoicesMutation = useMutation({
     mutationFn: ({ storyId, nodeId, hint }: { storyId: string; nodeId: string; hint?: string }) =>
-      storiesApi.regenerateChoices(storyId, nodeId, { hint, ai_model: resolvedAiModel }),
+      storiesApi.regenerateChoices(storyId, nodeId, {
+        hint,
+        ai_model: resolvedAiModel,
+        debug: debugMode,
+      }),
     onSuccess: (data) => {
       // 更新当前节点的选项
       if (currentNode) {
@@ -235,6 +246,7 @@ export function StoryPreview() {
           choices: data.choices,
         });
       }
+      setDebugInfo(data.debug_info || null);
       queryClient.invalidateQueries({ queryKey: ['stories'] });
       if (currentStory) {
         storiesApi.getById(currentStory.id).then(setCurrentStory);
@@ -260,6 +272,7 @@ export function StoryPreview() {
         chapter_length: selectedLength,
         custom_direction: customDirection || undefined,
         ai_model: resolvedAiModel,
+        debug: debugMode,
       });
       setCustomDirection('');
     } finally {
@@ -274,7 +287,7 @@ export function StoryPreview() {
     try {
       await chooseMutation.mutateAsync({
         storyId: currentNode.story_id,
-        request: { choice_index: choiceIndex, ai_model: resolvedAiModel },
+        request: { choice_index: choiceIndex, ai_model: resolvedAiModel, debug: debugMode },
       });
     } finally {
       setIsGenerating(false);
@@ -288,7 +301,7 @@ export function StoryPreview() {
     try {
       await chooseMutation.mutateAsync({
         storyId: currentNode.story_id,
-        request: { custom_direction: customDirection.trim(), ai_model: resolvedAiModel },
+        request: { custom_direction: customDirection.trim(), ai_model: resolvedAiModel, debug: debugMode },
       });
     } finally {
       setIsGenerating(false);
@@ -434,6 +447,19 @@ export function StoryPreview() {
             </select>
           </div>
 
+          <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={debugMode}
+              onChange={(e) => {
+                setDebugMode(e.target.checked);
+                if (!e.target.checked) setDebugInfo(null);
+              }}
+              className="rounded border-gray-300 text-pink-600 focus:ring-pink-500"
+            />
+            Debug 模式（查看提示词与模型原始回复）
+          </label>
+
           {/* 自定义开篇方向 */}
           <div>
             <p className="text-sm font-medium text-gray-700 mb-3">开篇方向（可选）</p>
@@ -464,6 +490,8 @@ export function StoryPreview() {
               </>
             )}
           </button>
+
+          <AIDebugPanel debugInfo={debugInfo} title="故事链路 Debug" />
         </div>
       </div>
     );
@@ -514,6 +542,18 @@ export function StoryPreview() {
                 <option key={option.value} value={option.value}>{option.label}</option>
               ))}
             </select>
+            <label className="flex items-center gap-1 text-xs text-gray-600 cursor-pointer select-none px-2 py-1.5 border border-gray-200 rounded-lg">
+              <input
+                type="checkbox"
+                checked={debugMode}
+                onChange={(e) => {
+                  setDebugMode(e.target.checked);
+                  if (!e.target.checked) setDebugInfo(null);
+                }}
+                className="rounded border-gray-300 text-pink-600 focus:ring-pink-500"
+              />
+              Debug
+            </label>
             <button
               onClick={() => setShowFullView(true)}
               className="p-2 text-gray-500 hover:text-pink-500 hover:bg-pink-50 rounded-lg transition-colors"
@@ -566,6 +606,9 @@ export function StoryPreview() {
               </p>
             )
           ))}
+        </div>
+        <div className="mt-4">
+          <AIDebugPanel debugInfo={debugInfo} title="故事链路 Debug" />
         </div>
       </div>
 
@@ -961,6 +1004,8 @@ function StoryFullView({ story, defaultAiModel, onClose, onNodeClick }: StoryFul
   const [editTitle, setEditTitle] = useState('');
   const [editContent, setEditContent] = useState('');
   const [aiModelOverride, setAiModelOverride] = useState('');
+  const [debugMode, setDebugMode] = useState(false);
+  const [actionDebugInfo, setActionDebugInfo] = useState<AIDebugInfo | null>(null);
   const [revisingNode, setRevisingNode] = useState<string | null>(null);
   const [reviseInstruction, setReviseInstruction] = useState('');
   const [isPolishMode, setIsPolishMode] = useState(false);
@@ -984,21 +1029,27 @@ function StoryFullView({ story, defaultAiModel, onClose, onNodeClick }: StoryFul
   });
 
   const regenerateNodeMutation = useMutation({
-    mutationFn: (nodeId: string) => storiesApi.regenerateNode(story.id, nodeId, { ai_model: resolvedActionAiModel }),
+    mutationFn: (nodeId: string) =>
+      storiesApi.regenerateNode(story.id, nodeId, {
+        ai_model: resolvedActionAiModel,
+        debug: debugMode,
+      }),
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['stories'] });
       storiesApi.getById(story.id).then(setCurrentStory);
       setCurrentNode(data);
+      setActionDebugInfo(data.debug_info || null);
     },
   });
 
   const reviseNodeMutation = useMutation({
     mutationFn: ({ nodeId, instruction }: { nodeId: string; instruction: string }) =>
-      storiesApi.reviseNode(story.id, nodeId, instruction, resolvedActionAiModel),
+      storiesApi.reviseNode(story.id, nodeId, instruction, resolvedActionAiModel, debugMode),
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['stories'] });
       storiesApi.getById(story.id).then(setCurrentStory);
       setCurrentNode(data);
+      setActionDebugInfo(data.debug_info || null);
       setRevisingNode(null);
       setReviseInstruction('');
     },
@@ -1053,9 +1104,11 @@ function StoryFullView({ story, defaultAiModel, onClose, onNodeClick }: StoryFul
         node_ids: nodeIds,
         instruction,
         ai_model: resolvedActionAiModel,
+        debug: debugMode,
       }),
     onSuccess: (data) => {
       setPolishPreview(data.polished_contents);
+      setActionDebugInfo(data.debug_info || null);
       // 默认全部采纳
       setAcceptedPolish(new Set(data.polished_contents.map(p => p.node_id)));
     },
@@ -1187,6 +1240,18 @@ function StoryFullView({ story, defaultAiModel, onClose, onNodeClick }: StoryFul
               <option key={option.value} value={option.value}>{option.label}</option>
             ))}
           </select>
+          <label className="flex items-center gap-1 text-xs text-gray-600 cursor-pointer select-none px-2 py-1.5 border border-gray-200 rounded-lg">
+            <input
+              type="checkbox"
+              checked={debugMode}
+              onChange={(e) => {
+                setDebugMode(e.target.checked);
+                if (!e.target.checked) setActionDebugInfo(null);
+              }}
+              className="rounded border-gray-300 text-pink-600 focus:ring-pink-500"
+            />
+            Debug
+          </label>
           {isPolishMode ? (
             <>
               <button
@@ -1266,6 +1331,10 @@ function StoryFullView({ story, defaultAiModel, onClose, onNodeClick }: StoryFul
           </div>
         </div>
       )}
+
+      <div className="px-6 pt-4">
+        <AIDebugPanel debugInfo={actionDebugInfo} title="故事动作 Debug" />
+      </div>
 
       {/* 章节列表 */}
       <div className="flex-1 overflow-y-auto p-6 space-y-6">

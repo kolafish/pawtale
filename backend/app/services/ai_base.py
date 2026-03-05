@@ -27,6 +27,7 @@ class AITextServiceBase(ABC):
         chapter_number: int = 1,
         outline_context: dict | None = None,
         story_state: dict | None = None,
+        debug: bool = False,
     ) -> dict:
         """生成故事内容和分支选项"""
         pass
@@ -44,6 +45,7 @@ class AITextServiceBase(ABC):
         characters: list[dict],
         writing_style: str = "细腻",
         chapter_length: str = "中",
+        debug: bool = False,
     ) -> dict:
         """根据修改意见重新生成章节内容"""
         pass
@@ -66,7 +68,8 @@ class AITextServiceBase(ABC):
         characters: list[dict],
         mood: str = "甜",
         hint: str | None = None,
-    ) -> list[dict]:
+        debug: bool = False,
+    ) -> list[dict] | dict:
         """重新生成分支选项"""
         pass
 
@@ -77,7 +80,8 @@ class AITextServiceBase(ABC):
         characters: list[dict],
         writing_style: str = "细腻",
         instruction: str | None = None,
-    ) -> str:
+        debug: bool = False,
+    ) -> str | dict:
         """整体润色多个章节，使其更通顺连贯"""
         pass
 

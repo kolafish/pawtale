@@ -3,8 +3,9 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { MapPin, Check, Plus, Pencil, Trash2, Wand2, Loader2, X } from 'lucide-react';
 import { scenesApi } from '../api';
 import { useAppStore } from '../stores/appStore';
-import type { Scene, SceneCandidate } from '../types';
+import type { Scene, SceneCandidate, AIDebugInfo } from '../types';
 import { AI_MODEL_OPTIONS } from '../constants/aiModels';
+import { AIDebugPanel } from './AIDebugPanel';
 
 const CATEGORY_COLORS: Record<string, string> = {
   '初遇': 'bg-blue-100 text-blue-600',
@@ -398,6 +399,8 @@ function SceneAIGenerator({ onSave, onClose, defaultAiModel }: SceneAIGeneratorP
   const [candidates, setCandidates] = useState<SceneCandidate[]>([]);
   const [selectedCandidate, setSelectedCandidate] = useState<SceneCandidate | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [debugEnabled, setDebugEnabled] = useState(false);
+  const [debugInfo, setDebugInfo] = useState<AIDebugInfo | null>(null);
 
   const generateMutation = useMutation({
     mutationFn: () => scenesApi.aiGenerate({
@@ -406,18 +409,29 @@ function SceneAIGenerator({ onSave, onClose, defaultAiModel }: SceneAIGeneratorP
       custom_prompt: customPrompt || undefined,
       count: 3,
       ai_model: aiModelOverride || defaultAiModel,
+      debug: debugEnabled,
     }),
     onMutate: () => {
       setErrorMessage(null);
+      if (!debugEnabled) {
+        setDebugInfo(null);
+      }
     },
     onSuccess: (data) => {
       setCandidates(data.candidates);
       setErrorMessage(null);
+      setDebugInfo(data.debug_info || null);
     },
     onError: (error: unknown) => {
       const detail = (error as any)?.response?.data?.detail;
       const fallback = (error as Error)?.message || '场景生成失败，请稍后重试';
-      setErrorMessage(typeof detail === 'string' && detail ? detail : fallback);
+      if (detail && typeof detail === 'object') {
+        setErrorMessage((detail as any).message || fallback);
+        setDebugInfo(((detail as any).debug_info as AIDebugInfo) || null);
+      } else {
+        setErrorMessage(typeof detail === 'string' && detail ? detail : fallback);
+        setDebugInfo(null);
+      }
       setCandidates([]);
       setSelectedCandidate(null);
     },
@@ -487,6 +501,16 @@ function SceneAIGenerator({ onSave, onClose, defaultAiModel }: SceneAIGeneratorP
             </select>
           </div>
 
+          <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={debugEnabled}
+              onChange={(e) => setDebugEnabled(e.target.checked)}
+              className="rounded border-gray-300 text-purple-600 focus:ring-purple-500"
+            />
+            Debug 模式（查看提示词与模型原始回复）
+          </label>
+
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">自定义提示（可选）</label>
             <textarea
@@ -515,6 +539,8 @@ function SceneAIGenerator({ onSave, onClose, defaultAiModel }: SceneAIGeneratorP
               </>
             )}
           </button>
+
+          <AIDebugPanel debugInfo={debugInfo} title="场景生成 Debug" />
         </>
       ) : (
         <>
@@ -558,12 +584,15 @@ function SceneAIGenerator({ onSave, onClose, defaultAiModel }: SceneAIGeneratorP
                 setCandidates([]);
                 setSelectedCandidate(null);
                 setErrorMessage(null);
+                setDebugInfo(null);
               }}
               className="px-4 py-2 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
             >
               重新生成
             </button>
           </div>
+
+          <AIDebugPanel debugInfo={debugInfo} title="场景生成 Debug" />
         </>
       )}
     </div>

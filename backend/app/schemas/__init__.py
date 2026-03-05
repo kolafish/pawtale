@@ -1,4 +1,5 @@
 from app.schemas.schemas import (
+    AIDebugRequestInfo, AIDebugResponseInfo, AIDebugMetaInfo, AIDebugInfo,
     CharacterBase, CharacterCreate, CharacterUpdate, CharacterResponse,
     CharacterAutoCompleteRequest, CharacterAutoCompleteResponse,
     SceneBase, SceneCreate, SceneUpdate, SceneResponse,
@@ -21,6 +22,7 @@ from app.schemas.schemas import (
 )
 
 __all__ = [
+    "AIDebugRequestInfo", "AIDebugResponseInfo", "AIDebugMetaInfo", "AIDebugInfo",
     "CharacterBase", "CharacterCreate", "CharacterUpdate", "CharacterResponse",
     "CharacterAutoCompleteRequest", "CharacterAutoCompleteResponse",
     "SceneBase", "SceneCreate", "SceneUpdate", "SceneResponse",

@@ -240,6 +240,67 @@ class TestSceneAPI:
         assert response.status_code == 502
         assert "上游模型服务异常" in response.json()["detail"]
 
+    async def test_ai_generate_scene_debug_true_returns_debug_info(self, client):
+        """测试场景 AI debug=true 时返回 debug_info"""
+        with patch("app.routers.scenes.ai_scene_service.generate_scene_candidates") as mock_generate:
+            mock_generate.return_value = (
+                [
+                    {
+                        "name": "雨夜旧街",
+                        "description": "雨夜中的旧街，适合重逢与试探。",
+                        "mood_keywords": ["雨夜", "重逢"],
+                    }
+                ],
+                {
+                    "request": {"provider": "claude", "model": "claude-opus-4-20250514"},
+                    "response": {"raw_text": "[]", "raw_json": {"content": []}},
+                    "meta": {"truncated": False},
+                },
+            )
+            response = await client.post(
+                "/api/scenes/ai-generate",
+                json={
+                    "category": "初遇",
+                    "mood_keywords": ["雨夜"],
+                    "count": 1,
+                    "ai_model": "claude-opus-4",
+                    "debug": True,
+                },
+            )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "debug_info" in data
+        assert data["debug_info"]["request"]["provider"] == "claude"
+
+    async def test_ai_generate_scene_debug_false_hides_debug_info(self, client):
+        """测试场景 AI debug=false 时不返回 debug_info"""
+        with patch("app.routers.scenes.ai_scene_service.generate_scene_candidates") as mock_generate:
+            mock_generate.return_value = (
+                [
+                    {
+                        "name": "雨夜旧街",
+                        "description": "雨夜中的旧街，适合重逢与试探。",
+                        "mood_keywords": ["雨夜", "重逢"],
+                    }
+                ],
+                None,
+            )
+            response = await client.post(
+                "/api/scenes/ai-generate",
+                json={
+                    "category": "初遇",
+                    "mood_keywords": ["雨夜"],
+                    "count": 1,
+                    "ai_model": "claude-opus-4",
+                    "debug": False,
+                },
+            )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "debug_info" not in data
+
 
 class TestStoryAPI:
     """故事 API 测试"""
@@ -276,6 +337,86 @@ class TestStoryAPI:
             "mood": "甜",
         })
         assert response.status_code == 404
+
+    async def test_generate_story_debug_true_returns_debug_info(self, client):
+        """测试故事生成 debug=true 时返回 debug_info"""
+        char_response = await client.post("/api/characters", json={"name": "测试角色"})
+        char_id = char_response.json()["id"]
+
+        scene_response = await client.post(
+            "/api/scenes",
+            json={"name": "测试场景", "category": "初遇", "description": "测试描述"},
+        )
+        scene_id = scene_response.json()["id"]
+
+        with patch("app.routers.stories.get_ai_service") as mock_get_service:
+            mock_service = AsyncMock()
+            mock_service.generate_story = AsyncMock(return_value={
+                "title": "第一章",
+                "content": "故事内容",
+                "word_count": 4,
+                "choices": [{"label": "A. 继续发展", "next_node": None}],
+                "debug_info": {
+                    "request": {"provider": "deepseek", "model": "deepseek-chat"},
+                    "response": {"raw_text": "原始内容"},
+                    "meta": {"truncated": False},
+                },
+            })
+            mock_get_service.return_value = mock_service
+
+            response = await client.post(
+                "/api/stories/generate",
+                json={
+                    "character_ids": [char_id],
+                    "scene_id": scene_id,
+                    "mood": "甜",
+                    "writing_style": "细腻",
+                    "chapter_length": "中",
+                    "debug": True,
+                },
+            )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "debug_info" in data
+        assert data["debug_info"]["request"]["provider"] == "deepseek"
+
+    async def test_generate_story_debug_false_hides_debug_info(self, client):
+        """测试故事生成 debug=false 时不返回 debug_info"""
+        char_response = await client.post("/api/characters", json={"name": "测试角色"})
+        char_id = char_response.json()["id"]
+
+        scene_response = await client.post(
+            "/api/scenes",
+            json={"name": "测试场景", "category": "初遇", "description": "测试描述"},
+        )
+        scene_id = scene_response.json()["id"]
+
+        with patch("app.routers.stories.get_ai_service") as mock_get_service:
+            mock_service = AsyncMock()
+            mock_service.generate_story = AsyncMock(return_value={
+                "title": "第一章",
+                "content": "故事内容",
+                "word_count": 4,
+                "choices": [{"label": "A. 继续发展", "next_node": None}],
+            })
+            mock_get_service.return_value = mock_service
+
+            response = await client.post(
+                "/api/stories/generate",
+                json={
+                    "character_ids": [char_id],
+                    "scene_id": scene_id,
+                    "mood": "甜",
+                    "writing_style": "细腻",
+                    "chapter_length": "中",
+                    "debug": False,
+                },
+            )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "debug_info" not in data
 
 
 class TestHealthCheck:

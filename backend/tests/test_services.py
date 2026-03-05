@@ -2,6 +2,7 @@ import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 from app.services.ai_text import AITextService
 from app.services.ai_scene import AISceneService, AISceneParseError
+from app.services.ai_debug import build_debug_info
 
 
 class TestAITextService:
@@ -167,7 +168,7 @@ class TestAISceneService:
             mock_instance.__aexit__ = AsyncMock(return_value=None)
             mock_client.return_value = mock_instance
 
-            content = await service._call_claude(
+            content, _ = await service._call_claude(
                 model="claude-opus-4",
                 system_prompt="system",
                 user_prompt="user",
@@ -185,7 +186,7 @@ class TestAISceneService:
                 return_value='{"candidates":[{"name":"雨夜旧街","description":"雨夜里的旧街，适合重逢与试探。","mood_keywords":["雨夜","重逢"]}]}'
             ),
         ):
-            result = await service.generate_scene_candidates(
+            result, _ = await service.generate_scene_candidates(
                 category="暧昧",
                 mood_keywords=["雨夜", "重逢"],
                 count=3,
@@ -206,7 +207,7 @@ class TestAISceneService:
                 return_value='{"scenes":[{"name":"夜色天台","description":"风从夜色里吹来，两人靠近又沉默。"}]}'
             ),
         ):
-            result = await service.generate_scene_candidates(
+            result, _ = await service.generate_scene_candidates(
                 category="甜蜜",
                 mood_keywords=["夜色"],
                 count=3,
@@ -227,6 +228,26 @@ class TestAISceneService:
                     count=3,
                     ai_model="deepseek",
                 )
+
+
+class TestAIDebugHelpers:
+    def test_build_debug_info_masks_sensitive_and_truncates(self):
+        debug_info = build_debug_info(
+            request_info={
+                "provider": "deepseek",
+                "model": "deepseek-chat",
+                "authorization": "Bearer very-secret-token",
+                "nested": {"api_key": "abc123456789"},
+            },
+            response_text="x" * 9000,
+            response_json={"token": "resp-secret-token"},
+        )
+
+        assert debug_info["request"]["authorization"] != "Bearer very-secret-token"
+        assert "***" in debug_info["request"]["authorization"]
+        assert debug_info["request"]["nested"]["api_key"] != "abc123456789"
+        assert "***" in debug_info["response"]["raw_json"]["token"]
+        assert debug_info["meta"]["truncated"] is True
 
     @pytest.mark.asyncio
     async def test_generate_scene_candidates_raises_when_missing_required_fields(self):
