@@ -4,6 +4,7 @@ import { BookOpen, Heart, Trash2, Pencil, Check, X } from 'lucide-react';
 import { storiesApi } from '../api';
 import { useAppStore } from '../stores/appStore';
 import type { Story } from '../types';
+import { AI_MODEL_OPTIONS } from '../constants/aiModels';
 
 export function StoryListPanel() {
   const queryClient = useQueryClient();
@@ -35,6 +36,7 @@ export function StoryListPanel() {
         title: node.title,
         content: node.content,
         word_count: node.word_count,
+        ai_model: node.ai_model || story.ai_model,
         choices: node.choices,
       });
     }
@@ -141,6 +143,11 @@ export function StoryListPanel() {
                     {story.writing_style && (
                       <span className="px-2 py-0.5 text-xs bg-purple-100 text-purple-600 rounded-full">
                         {story.writing_style}
+                      </span>
+                    )}
+                    {story.ai_model && (
+                      <span className="px-2 py-0.5 text-xs bg-blue-100 text-blue-600 rounded-full">
+                        {AI_MODEL_OPTIONS.find((m) => m.value === story.ai_model)?.label || story.ai_model}
                       </span>
                     )}
                     <span className="text-xs text-gray-400">

@@ -63,6 +63,7 @@ export interface SceneAIGenerateRequest {
   character_context?: { character_ids: string[]; relationship?: string };
   custom_prompt?: string;
   count: number;
+  ai_model?: string;
 }
 
 export interface SceneCandidate {
@@ -149,6 +150,7 @@ export interface StoryNode {
   title?: string;
   content: string;
   word_count?: number;
+  ai_model?: string;
   choices: { label: string; next_node: string | null }[];
   // 新增场景和角色信息
   scene_id?: string;
@@ -191,6 +193,7 @@ export interface StoryGenerateRequest {
 export interface StoryBranchRequest {
   choice_index?: number;
   custom_direction?: string;
+  ai_model?: string;
   // 新增场景切换和角色管理
   switch_scene_id?: string;
   add_character_ids?: string[];
@@ -203,6 +206,7 @@ export interface StoryGenerateResponse {
   title?: string;
   content: string;
   word_count?: number;
+  ai_model?: string;
   choices: { label: string; next_node: string | null }[];
   // 新增场景和角色信息
   scene_id?: string;
@@ -213,6 +217,7 @@ export interface StoryGenerateResponse {
 export interface StorySwitchSceneRequest {
   scene_id: string;
   transition_type?: string;
+  ai_model?: string;
 }
 
 export interface StoryUpdateCharactersRequest {
@@ -225,13 +230,19 @@ export interface StoryNodeUpdateRequest {
   content?: string;
 }
 
+export interface StoryNodeRegenerateRequest {
+  ai_model?: string;
+}
+
 export interface StoryNodeReviseRequest {
   instruction: string;
+  ai_model?: string;
 }
 
 // 重新生成分支选项
 export interface RegenerateChoicesRequest {
   hint?: string;
+  ai_model?: string;
 }
 
 export interface RegenerateChoicesResponse {
@@ -242,10 +253,11 @@ export interface RegenerateChoicesResponse {
 export interface PolishChaptersRequest {
   node_ids: string[];
   instruction?: string;  // 用户的润色意见（可选）
+  ai_model?: string;
 }
 
 export interface PolishChaptersResponse {
-  polished_contents: { node_id: string; content: string }[];
+  polished_contents: { node_id: string; content: string; ai_model?: string }[];
 }
 
 export interface StoryExportResponse {
@@ -326,9 +338,14 @@ export interface StoryOutlineUpdate {
 export interface StoryOutlineGenerateRequest {
   custom_direction?: string;
   starting_scene_id?: string;
+  ai_model?: string;
 }
 
 // AI 增强大纲
+export interface OutlineEnhanceRequest {
+  ai_model?: string;
+}
+
 export interface OutlineEnhanceResponse {
   central_conflict: string;
   plot_hints: string[];
@@ -374,4 +391,3 @@ export interface OutlineGuidedCreateResponse {
   story_goal: string; // 原始故事目标
   character_tension: string; // 原始角色张力
 }
-

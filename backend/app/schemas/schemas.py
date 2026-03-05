@@ -62,6 +62,7 @@ class CharacterAutoCompleteRequest(BaseModel):
     name: str | None = None
     gender: str | None = None
     inspiration: str | None = None  # 灵感来源，如 "何以琛"
+    ai_model: str | None = None  # deepseek/claude-opus-4/claude-sonnet-4
 
 
 class CharacterAutoCompleteResponse(BaseModel):
@@ -128,6 +129,7 @@ class SceneAIGenerateRequest(BaseModel):
     character_context: dict | None = None  # {"character_ids": [...], "relationship": "陌生人"}
     custom_prompt: str | None = None  # 用户自定义提示
     count: int = 3  # 生成候选数量
+    ai_model: str | None = None  # deepseek/claude-opus-4/claude-sonnet-4
 
 
 class SceneCandidate(BaseModel):
@@ -260,11 +262,12 @@ class StoryOutlineGenerateRequest(BaseModel):
     """基于大纲生成故事的请求"""
     custom_direction: str | None = None  # 用户自定义开篇方向
     starting_scene_id: str | None = None  # 指定起始场景（可选，默认使用大纲中标记的起始场景）
+    ai_model: str | None = None  # 可覆盖大纲默认模型
 
 
 class OutlineEnhanceRequest(BaseModel):
     """AI 增强大纲请求"""
-    pass  # 不需要额外参数，使用大纲现有信息
+    ai_model: str | None = None  # 可覆盖大纲默认模型
 
 
 class OutlineEnhanceResponse(BaseModel):
@@ -318,6 +321,7 @@ class StoryNode(BaseModel):
     title: str | None = None  # 章节标题
     content: str
     word_count: int | None = None  # 实际字数
+    ai_model: str | None = None  # 本章节生成使用模型
     choices: list[dict] = []  # [{"label": "A. xxx", "next_node": "node_2"}]
     # 新增场景和角色信息
     scene_id: str | None = None  # 当前场景ID
@@ -358,6 +362,7 @@ class StoryResponse(BaseModel):
     mood: str | None = None
     writing_style: str | None = None
     chapter_length: str | None = None
+    ai_model: str | None = None
     nodes: dict
     current_node_id: str | None = None
     current_path: list[str] = []
@@ -385,6 +390,7 @@ class StoryGenerateRequest(BaseModel):
 class StoryBranchRequest(BaseModel):
     choice_index: int | None = None  # 用户选择的分支索引
     custom_direction: str | None = None  # 用户自定义方向（二选一）
+    ai_model: str | None = None  # 可覆盖故事默认模型
     # 新增场景切换和角色管理
     switch_scene_id: str | None = None  # 切换到新场景
     add_character_ids: list[str] = []  # 添加角色
@@ -397,6 +403,7 @@ class StoryGenerateResponse(BaseModel):
     title: str | None = None  # 章节标题
     content: str
     word_count: int | None = None
+    ai_model: str | None = None  # 本次生成使用模型
     choices: list[dict]
     # 新增场景和角色信息
     scene_id: str | None = None
@@ -408,6 +415,7 @@ class StorySwitchSceneRequest(BaseModel):
     """切换场景请求"""
     scene_id: str
     transition_type: str | None = None  # 时间跳跃/空间转换/自然过渡
+    ai_model: str | None = None  # 可覆盖故事默认模型
 
 
 class StoryUpdateCharactersRequest(BaseModel):
@@ -421,13 +429,19 @@ class StoryNodeUpdateRequest(BaseModel):
     content: str | None = None
 
 
+class StoryNodeRegenerateRequest(BaseModel):
+    ai_model: str | None = None  # 可覆盖故事默认模型
+
+
 class StoryNodeReviseRequest(BaseModel):
     instruction: str  # 修改意见
+    ai_model: str | None = None  # 可覆盖故事默认模型
 
 
 class RegenerateChoicesRequest(BaseModel):
     """重新生成分支选项请求"""
     hint: str | None = None  # 用户提示的方向
+    ai_model: str | None = None  # 可覆盖故事默认模型
 
 
 class RegenerateChoicesResponse(BaseModel):
@@ -439,6 +453,7 @@ class PolishChaptersRequest(BaseModel):
     """润色章节请求"""
     node_ids: list[str]  # 要润色的节点 ID 列表
     instruction: str | None = None  # 用户的润色意见（可选）
+    ai_model: str | None = None  # 可覆盖故事默认模型
 
 
 class PolishChaptersResponse(BaseModel):
@@ -484,4 +499,3 @@ class OutlineGuidedCreateResponse(BaseModel):
     forbidden_elements: list[str]  # 禁止元素
     story_goal: str  # 原始故事目标
     character_tension: str  # 原始角色张力
-

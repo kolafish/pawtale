@@ -21,6 +21,7 @@ interface AppState {
 
   // 加载状态
   isGenerating: boolean;
+  defaultAiModel: 'deepseek' | 'claude-opus-4' | 'claude-sonnet-4';
 
   // Actions
   setSelectedCharacters: (characters: Character[]) => void;
@@ -37,6 +38,7 @@ interface AppState {
   setViewMode: (mode: 'dual' | 'edit' | 'preview') => void;
   setEditTab: (tab: 'characters' | 'scenes' | 'stories' | 'outlines') => void;
   setIsGenerating: (isGenerating: boolean) => void;
+  setDefaultAiModel: (model: 'deepseek' | 'claude-opus-4' | 'claude-sonnet-4') => void;
   reset: () => void;
 }
 
@@ -51,6 +53,7 @@ export const useAppStore = create<AppState>((set) => ({
   viewMode: 'dual',
   editTab: 'characters',
   isGenerating: false,
+  defaultAiModel: 'deepseek',
 
   setSelectedCharacters: (characters) => set({ selectedCharacters: characters }),
   addSelectedCharacter: (character) => set((state) => ({
@@ -78,6 +81,7 @@ export const useAppStore = create<AppState>((set) => ({
   setViewMode: (mode) => set({ viewMode: mode }),
   setEditTab: (tab) => set({ editTab: tab }),
   setIsGenerating: (isGenerating) => set({ isGenerating }),
+  setDefaultAiModel: (model) => set({ defaultAiModel: model }),
   reset: () => set({
     selectedCharacters: [],
     selectedScene: null,

@@ -538,8 +538,9 @@ async def generate_story_from_outline(
         "props": starting_scene.props,
     }
 
-    # 调用 AI 生成故事
-    ai_service = get_ai_service(outline.ai_model)
+    # 调用 AI 生成故事（支持本次覆盖模型）
+    selected_ai_model = request.ai_model or outline.ai_model
+    ai_service = get_ai_service(selected_ai_model)
 
     try:
         story_result = await ai_service.generate_story(
@@ -561,6 +562,7 @@ async def generate_story_from_outline(
             "title": story_result.get("title") or "第一章",
             "content": story_result["content"],
             "word_count": story_result.get("word_count", len(story_result["content"])),
+            "ai_model": selected_ai_model or "deepseek",
             "choices": story_result["choices"],
             "scene_id": starting_scene.id,
             "scene_name": starting_scene.name,
@@ -579,7 +581,7 @@ async def generate_story_from_outline(
         mood=outline.mood,
         writing_style=outline.writing_style,
         chapter_length=outline.chapter_length,
-        ai_model=outline.ai_model,
+        ai_model=selected_ai_model or outline.ai_model or "deepseek",
         nodes=nodes,
         current_node_id=node_id,
         current_path=[node_id],
@@ -600,6 +602,7 @@ async def generate_story_from_outline(
         title=story_result.get("title"),
         content=story_result["content"],
         word_count=story_result.get("word_count"),
+        ai_model=selected_ai_model or "deepseek",
         choices=story_result["choices"],
         scene_id=starting_scene.id,
         scene_name=starting_scene.name,
@@ -649,8 +652,9 @@ async def ai_enhance_outline(
             "category": scene.category,
         })
 
-    # 调用 AI 服务
-    ai_service = get_ai_service(outline.ai_model)
+    # 调用 AI 服务（支持本次覆盖模型）
+    selected_ai_model = request.ai_model or outline.ai_model
+    ai_service = get_ai_service(selected_ai_model)
 
     try:
         result = await ai_service.enhance_outline(
@@ -715,4 +719,3 @@ async def guided_create_outline(
         story_goal=request.story_goal,
         character_tension=request.character_tension,
     )
-

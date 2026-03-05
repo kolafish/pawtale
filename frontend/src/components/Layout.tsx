@@ -5,9 +5,10 @@ import { ScenePanel } from './ScenePanel';
 import { StoryListPanel } from './StoryListPanel';
 import { StoryPreview } from './StoryPreview';
 import { OutlinePanel } from './OutlinePanel';
+import { AI_MODEL_OPTIONS } from '../constants/aiModels';
 
 export function Layout() {
-  const { viewMode, setViewMode, editTab, setEditTab } = useAppStore();
+  const { viewMode, setViewMode, editTab, setEditTab, defaultAiModel, setDefaultAiModel } = useAppStore();
 
   const tabs = [
     { id: 'characters' as const, label: '角色', icon: Users },
@@ -28,35 +29,52 @@ export function Layout() {
           <span className="text-sm text-gray-400">是我的CP呀</span>
         </div>
 
-        {/* 视图切换 */}
-        <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1">
-          <button
-            onClick={() => setViewMode('edit')}
-            className={`p-1.5 rounded-md transition-colors ${
-              viewMode === 'edit' ? 'bg-white shadow-sm' : 'hover:bg-gray-200'
-            }`}
-            title="仅编辑"
-          >
-            <PanelLeft size={18} className="text-gray-600" />
-          </button>
-          <button
-            onClick={() => setViewMode('dual')}
-            className={`p-1.5 rounded-md transition-colors ${
-              viewMode === 'dual' ? 'bg-white shadow-sm' : 'hover:bg-gray-200'
-            }`}
-            title="双栏"
-          >
-            <Columns2 size={18} className="text-gray-600" />
-          </button>
-          <button
-            onClick={() => setViewMode('preview')}
-            className={`p-1.5 rounded-md transition-colors ${
-              viewMode === 'preview' ? 'bg-white shadow-sm' : 'hover:bg-gray-200'
-            }`}
-            title="仅预览"
-          >
-            <PanelRight size={18} className="text-gray-600" />
-          </button>
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-gray-500">默认模型</span>
+            <select
+              value={defaultAiModel}
+              onChange={(e) => setDefaultAiModel(e.target.value as typeof defaultAiModel)}
+              className="text-sm px-2 py-1.5 border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-pink-500"
+            >
+              {AI_MODEL_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* 视图切换 */}
+          <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1">
+            <button
+              onClick={() => setViewMode('edit')}
+              className={`p-1.5 rounded-md transition-colors ${
+                viewMode === 'edit' ? 'bg-white shadow-sm' : 'hover:bg-gray-200'
+              }`}
+              title="仅编辑"
+            >
+              <PanelLeft size={18} className="text-gray-600" />
+            </button>
+            <button
+              onClick={() => setViewMode('dual')}
+              className={`p-1.5 rounded-md transition-colors ${
+                viewMode === 'dual' ? 'bg-white shadow-sm' : 'hover:bg-gray-200'
+              }`}
+              title="双栏"
+            >
+              <Columns2 size={18} className="text-gray-600" />
+            </button>
+            <button
+              onClick={() => setViewMode('preview')}
+              className={`p-1.5 rounded-md transition-colors ${
+                viewMode === 'preview' ? 'bg-white shadow-sm' : 'hover:bg-gray-200'
+              }`}
+              title="仅预览"
+            >
+              <PanelRight size={18} className="text-gray-600" />
+            </button>
+          </div>
         </div>
       </header>
 

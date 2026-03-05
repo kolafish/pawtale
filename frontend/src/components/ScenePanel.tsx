@@ -4,6 +4,7 @@ import { MapPin, Check, Plus, Pencil, Trash2, Wand2, Loader2, X } from 'lucide-r
 import { scenesApi } from '../api';
 import { useAppStore } from '../stores/appStore';
 import type { Scene, SceneCandidate } from '../types';
+import { AI_MODEL_OPTIONS } from '../constants/aiModels';
 
 const CATEGORY_COLORS: Record<string, string> = {
   '初遇': 'bg-blue-100 text-blue-600',
@@ -15,7 +16,7 @@ const CATEGORY_COLORS: Record<string, string> = {
 
 export function ScenePanel() {
   const queryClient = useQueryClient();
-  const { selectedScene, setSelectedScene } = useAppStore();
+  const { selectedScene, setSelectedScene, defaultAiModel } = useAppStore();
   const [isCreating, setIsCreating] = useState(false);
   const [editingScene, setEditingScene] = useState<Scene | null>(null);
   const [showAIGenerator, setShowAIGenerator] = useState(false);
@@ -106,7 +107,7 @@ export function ScenePanel() {
             onSave={(candidate) => {
               createMutation.mutate({
                 name: candidate.name,
-                category: '初遇', // 默认分类，用户可以在生成时选择
+                category: candidate.category,
                 description: candidate.description,
                 location: candidate.location,
                 time_weather: candidate.time_weather,
@@ -118,6 +119,7 @@ export function ScenePanel() {
               setShowAIGenerator(false);
             }}
             onClose={() => setShowAIGenerator(false)}
+            defaultAiModel={defaultAiModel}
           />
         )}
         {isCreating && (
@@ -385,12 +387,14 @@ function SceneForm({ onSubmit, onCancel, isLoading, initialData, isEditing }: Sc
 interface SceneAIGeneratorProps {
   onSave: (candidate: SceneCandidate & { category: string }) => void;
   onClose: () => void;
+  defaultAiModel: 'deepseek' | 'claude-opus-4' | 'claude-sonnet-4';
 }
 
-function SceneAIGenerator({ onSave, onClose }: SceneAIGeneratorProps) {
+function SceneAIGenerator({ onSave, onClose, defaultAiModel }: SceneAIGeneratorProps) {
   const [category, setCategory] = useState('初遇');
   const [moodKeywords, setMoodKeywords] = useState('');
   const [customPrompt, setCustomPrompt] = useState('');
+  const [aiModelOverride, setAiModelOverride] = useState('');
   const [candidates, setCandidates] = useState<SceneCandidate[]>([]);
   const [selectedCandidate, setSelectedCandidate] = useState<SceneCandidate | null>(null);
 
@@ -400,6 +404,7 @@ function SceneAIGenerator({ onSave, onClose }: SceneAIGeneratorProps) {
       mood_keywords: moodKeywords.split(/[，,]/).map(s => s.trim()).filter(Boolean),
       custom_prompt: customPrompt || undefined,
       count: 3,
+      ai_model: aiModelOverride || defaultAiModel,
     }),
     onSuccess: (data) => {
       setCandidates(data.candidates);
@@ -448,6 +453,20 @@ function SceneAIGenerator({ onSave, onClose }: SceneAIGeneratorProps) {
                 className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
               />
             </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">AI模型</label>
+            <select
+              value={aiModelOverride}
+              onChange={(e) => setAiModelOverride(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+            >
+              <option value="">跟随全局</option>
+              {AI_MODEL_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
           </div>
 
           <div>

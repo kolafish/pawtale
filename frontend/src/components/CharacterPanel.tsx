@@ -4,6 +4,7 @@ import { Plus, User, Sparkles, Trash2, Check, Wand2, Loader2, Pencil, ChevronDow
 import { charactersApi } from '../api';
 import { useAppStore } from '../stores/appStore';
 import type { Character } from '../types';
+import { AI_MODEL_OPTIONS } from '../constants/aiModels';
 
 // 通用性格标签
 const COMMON_PERSONALITY = ['温柔', '高冷', '傲娇', '腹黑', '阳光', '毒舌'];
@@ -29,7 +30,7 @@ const GENDER_OPTIONS = ['男', '女'];
 
 export function CharacterPanel() {
   const queryClient = useQueryClient();
-  const { selectedCharacters, addSelectedCharacter, removeSelectedCharacter } = useAppStore();
+  const { selectedCharacters, addSelectedCharacter, removeSelectedCharacter, defaultAiModel } = useAppStore();
   const [isCreating, setIsCreating] = useState(false);
   const [editingCharacter, setEditingCharacter] = useState<Character | null>(null);
 
@@ -99,6 +100,7 @@ export function CharacterPanel() {
             onSubmit={(data) => createMutation.mutate(data)}
             onCancel={() => setIsCreating(false)}
             isLoading={createMutation.isPending}
+            defaultAiModel={defaultAiModel}
           />
         )}
 
@@ -119,6 +121,7 @@ export function CharacterPanel() {
                 onCancel={() => setEditingCharacter(null)}
                 isLoading={updateMutation.isPending}
                 isEditing
+                defaultAiModel={defaultAiModel}
               />
             ) : (
               <CharacterCard
@@ -249,9 +252,10 @@ interface CharacterFormProps {
   isLoading: boolean;
   initialData?: Character;
   isEditing?: boolean;
+  defaultAiModel: 'deepseek' | 'claude-opus-4' | 'claude-sonnet-4';
 }
 
-function CharacterForm({ onSubmit, onCancel, isLoading, initialData, isEditing }: CharacterFormProps) {
+function CharacterForm({ onSubmit, onCancel, isLoading, initialData, isEditing, defaultAiModel }: CharacterFormProps) {
   const [formData, setFormData] = useState({
     name: initialData?.name || '',
     gender: initialData?.gender || '',
@@ -273,6 +277,7 @@ function CharacterForm({ onSubmit, onCancel, isLoading, initialData, isEditing }
   });
   const [isAutoCompleting, setIsAutoCompleting] = useState(false);
   const [showDepthFields, setShowDepthFields] = useState(false);
+  const [autoCompleteModel, setAutoCompleteModel] = useState('');
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -315,6 +320,7 @@ function CharacterForm({ onSubmit, onCancel, isLoading, initialData, isEditing }
         name: formData.name || undefined,
         gender: formData.gender || undefined,
         inspiration: formData.inspiration || undefined,
+        ai_model: autoCompleteModel || defaultAiModel,
       });
 
       setFormData((prev) => ({
@@ -392,6 +398,17 @@ function CharacterForm({ onSubmit, onCancel, isLoading, initialData, isEditing }
             placeholder="如：何以琛、肖奈、顾漫笔下的男主"
             className="flex-1 px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
           />
+          <select
+            value={autoCompleteModel}
+            onChange={(e) => setAutoCompleteModel(e.target.value)}
+            className="px-2 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500"
+            title="AI模型（留空=跟随全局）"
+          >
+            <option value="">跟随全局</option>
+            {AI_MODEL_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
           <button
             type="button"
             onClick={handleAutoComplete}
@@ -407,7 +424,7 @@ function CharacterForm({ onSubmit, onCancel, isLoading, initialData, isEditing }
             AI 补全
           </button>
         </div>
-        <p className="text-xs text-gray-400 mt-1">填写灵感来源后点击「AI 补全」，自动生成角色设定</p>
+        <p className="text-xs text-gray-400 mt-1">填写灵感来源后点击「AI 补全」，模型默认跟随全局，也可临时覆盖</p>
       </div>
 
       <div className="grid grid-cols-2 gap-4">
