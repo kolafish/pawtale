@@ -124,6 +124,18 @@ API 端点: `POST /api/outlines/guided-create`
 - **场景切换**: 通过 `/api/stories/{id}/switch-scene` 在故事进行中切换场景
 - **角色管理**: 通过 `/api/stories/{id}/update-characters` 添加/移除角色
 
+### 双创作模式
+前端支持两种创作模式，通过 Header 顶部切换：
+- **自由写作** (`creationMode: 'writing'`)：`WritingWorkspace` 占满主区域，右侧可折叠边栏（提炼/资源/作品）
+- **互动创作** (`creationMode: 'structured'`)：左侧 Tab 栏（角色/场景/大纲/故事）+ 右侧 `StoryPreview`
+
+写作模式核心逻辑封装在 `useWorkspaceState` hook 中，包含：
+- 自动保存（3秒 debounce）、Cmd+S 快捷键
+- 字数统计（中文字符 + 英文单词）
+- AI 续写（带 `--- AI 续写 ---` 分隔符）
+- 提炼结果可一键存入全局角色库/场景库
+- 导出 .txt
+
 ### 前端状态同步
 修改故事后需要同时更新 Zustand store 中的 `currentStory` 和 `currentNode` 状态。`StoryPreview.tsx` 是核心组件，负责故事渲染、分支选择、场景切换和角色管理。
 
@@ -148,12 +160,20 @@ API 端点: `POST /api/outlines/guided-create`
 - `backend/app/services/ai_image.py` - GPT-4o 图像生成服务
 
 ### 前端
+- `frontend/src/components/Layout.tsx` - 顶层布局（模式切换、视图切换、互动创作 Tab 栏）
+- `frontend/src/components/WritingWorkspace.tsx` - 自由写作模式顶层容器
+- `frontend/src/components/EditorMain.tsx` - 编辑器（工具栏 + 编辑区 + 状态栏）
+- `frontend/src/components/WritingSidebar.tsx` - 可折叠右侧边栏（提炼/资源/作品 Tab）
+- `frontend/src/components/WorkspaceHome.tsx` - 写作模式首页（新建/打开作品）
+- `frontend/src/components/ExtractionPanel.tsx` - 提炼编辑面板（角色/场景/大纲提炼 + 存入库）
+- `frontend/src/components/ResourceLinker.tsx` - 资源关联面板（关联角色/场景/大纲）
+- `frontend/src/hooks/useWorkspaceState.ts` - 写作工作区状态 Hook（状态、mutations、auto-save、导出）
 - `frontend/src/components/StoryPreview.tsx` - 故事预览/生成核心组件（含场景切换器、角色管理器）
 - `frontend/src/components/OutlinePanel.tsx` - 故事大纲管理面板
 - `frontend/src/components/OutlineGuidedWizard.tsx` - 引导式创建向导（4步流程）
 - `frontend/src/components/CharacterPanel.tsx` - 角色管理（含深度字段编辑）
 - `frontend/src/components/ScenePanel.tsx` - 场景管理（含 AI 生成）
-- `frontend/src/stores/appStore.ts` - Zustand 全局状态
+- `frontend/src/stores/appStore.ts` - Zustand 全局状态（含 creationMode、writingSidebarTab）
 - `frontend/src/api/index.ts` - API 客户端（charactersApi, scenesApi, storiesApi, outlinesApi）
 
 ### 测试

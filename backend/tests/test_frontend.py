@@ -16,8 +16,17 @@ class TestFrontendCompilation:
 
     def test_typescript_type_check(self, frontend_dir):
         """测试 TypeScript 类型检查"""
+        tsc_bin = os.path.join(frontend_dir, "node_modules", ".bin", "tsc")
+        tsconfig = os.path.join(frontend_dir, "tsconfig.app.json")
+
+        # 优先使用本地 tsc 二进制（避免 npx 在某些 shell 环境下失败）
+        if os.path.exists(tsc_bin):
+            cmd = [tsc_bin, "--noEmit", "--project", tsconfig]
+        else:
+            cmd = ["npx", "tsc", "-b"]
+
         result = subprocess.run(
-            ["npx", "tsc", "-b"],
+            cmd,
             cwd=frontend_dir,
             capture_output=True,
             text=True,
@@ -32,8 +41,17 @@ class TestFrontendCompilation:
 
     def test_vite_build(self, frontend_dir):
         """测试 Vite 构建"""
+        vite_bin = os.path.join(frontend_dir, "node_modules", ".bin", "vite")
+        build_dir = "/tmp/pawtale-test-build"
+
+        # 优先使用本地 vite 二进制
+        if os.path.exists(vite_bin):
+            cmd = [vite_bin, "build", "--outDir", build_dir]
+        else:
+            cmd = ["npm", "run", "build"]
+
         result = subprocess.run(
-            ["npm", "run", "build"],
+            cmd,
             cwd=frontend_dir,
             capture_output=True,
             text=True,
@@ -47,6 +65,9 @@ class TestFrontendCompilation:
         )
 
         # 检查构建产物是否存在
-        dist_dir = Path(frontend_dir) / "dist"
-        assert dist_dir.exists(), "构建产物目录 dist 不存在"
+        if os.path.exists(vite_bin):
+            dist_dir = Path(build_dir)
+        else:
+            dist_dir = Path(frontend_dir) / "dist"
+        assert dist_dir.exists(), "构建产物目录不存在"
         assert (dist_dir / "index.html").exists(), "构建产物 index.html 不存在"

@@ -804,6 +804,28 @@ async def update_story(
         story.writing_style = request.writing_style
     if request.chapter_length is not None:
         story.chapter_length = request.chapter_length
+    if request.ai_model is not None:
+        story.ai_model = request.ai_model
+    if request.scene_id is not None:
+        if request.scene_id:
+            scene_result = await db.execute(select(Scene).where(Scene.id == request.scene_id))
+            scene = scene_result.scalar_one_or_none()
+            if not scene:
+                raise HTTPException(status_code=404, detail="场景不存在")
+            story.scene_id = request.scene_id
+        else:
+            story.scene_id = None
+    if request.outline_id is not None:
+        if request.outline_id:
+            outline_result = await db.execute(
+                select(StoryOutline).where(StoryOutline.id == request.outline_id)
+            )
+            outline = outline_result.scalar_one_or_none()
+            if not outline:
+                raise HTTPException(status_code=404, detail="大纲不存在")
+            story.outline_id = request.outline_id
+        else:
+            story.outline_id = None
 
     await db.commit()
     await db.refresh(story)
