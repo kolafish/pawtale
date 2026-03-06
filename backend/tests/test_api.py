@@ -517,6 +517,37 @@ class TestStoryAPI:
         assert updated["extracted_characters"][0]["traits"] == ["冷静"]
         assert updated["extraction_notes"] == ["已手工校准角色职业"]
 
+    async def test_workspace_extract_debug_true_returns_fallback_debug_info(self, client):
+        """测试工作区提炼 debug=true 时即使服务未返回 debug_info 也有兜底信息"""
+        create_resp = await client.post(
+            "/api/stories/workspace",
+            json={
+                "title": "提炼调试测试",
+                "content": "林晚在天台遇见周彻，两人因旧事争执。",
+            },
+        )
+        story_id = create_resp.json()["story_id"]
+
+        with patch("app.routers.stories.get_ai_service") as mock_get_service:
+            mock_service = AsyncMock()
+            mock_service.extract_story_context = AsyncMock(return_value={
+                "extracted_characters": [{"name": "林晚"}],
+                "extracted_scenes": [{"name": "天台"}],
+                "extracted_outline_points": [],
+                "extraction_notes": [],
+            })
+            mock_get_service.return_value = mock_service
+
+            extract_resp = await client.post(
+                f"/api/stories/{story_id}/workspace/extract",
+                json={"debug": True},
+            )
+
+        assert extract_resp.status_code == 200
+        data = extract_resp.json()
+        assert "debug_info" in data
+        assert data["debug_info"]["request"]["provider"] == "unknown"
+
     async def test_update_story_scene_id(self, client):
         """测试更新故事关联场景"""
         char_response = await client.post("/api/characters", json={"name": "测试角色"})

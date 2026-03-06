@@ -60,6 +60,7 @@ export function useWorkspaceState() {
   const [continueInstruction, setContinueInstruction] = useState('');
   const [debugMode, setDebugMode] = useState(false);
   const [debugInfo, setDebugInfo] = useState<AIDebugInfo | null>(null);
+  const [extractDebugInfo, setExtractDebugInfo] = useState<AIDebugInfo | null>(null);
 
   // Extraction state
   const [extractedCharacters, setExtractedCharacters] = useState<ExtractedCharacter[]>([]);
@@ -107,6 +108,7 @@ export function useWorkspaceState() {
     onSuccess: (workspace) => {
       setCurrentWorkspace(workspace);
       setDebugInfo(null);
+      setExtractDebugInfo(null);
       setSaveStatus('saved');
       queryClient.invalidateQueries({ queryKey: ['stories'] });
       queryClient.invalidateQueries({ queryKey: ['story', workspace.story_id] });
@@ -118,6 +120,7 @@ export function useWorkspaceState() {
     onSuccess: (workspace) => {
       setCurrentWorkspace(workspace);
       setDebugInfo(null);
+      setExtractDebugInfo(null);
       setSaveStatus('saved');
       queryClient.invalidateQueries({ queryKey: ['story', workspace.story_id] });
     },
@@ -164,6 +167,7 @@ export function useWorkspaceState() {
       setExtractedOutlinePoints(result.extracted_outline_points || []);
       setExtractionNotesText((result.extraction_notes || []).join('\n'));
       setDebugInfo(result.debug_info || null);
+      setExtractDebugInfo(result.debug_info || null);
     },
   });
 
@@ -481,6 +485,7 @@ export function useWorkspaceState() {
     debugMode,
     setDebugMode,
     debugInfo,
+    extractDebugInfo,
     extractedCharacters,
     setExtractedCharacters,
     extractedScenes,

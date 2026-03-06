@@ -18,6 +18,7 @@ from app.schemas import (
     StoryWorkspaceResponse, StoryWorkspaceAIContinueResponse, StoryWorkspaceExtractResponse,
 )
 from app.services import get_ai_service
+from app.services.ai_debug import build_debug_info
 
 router = APIRouter(prefix="/api/stories", tags=["stories"])
 
@@ -95,6 +96,23 @@ def _workspace_response(story: Story, workspace: StoryWorkspace) -> StoryWorkspa
         extraction_notes=(workspace.extraction_notes or []),
         created_at=workspace.created_at,
         updated_at=workspace.updated_at,
+    )
+
+
+def _build_extract_fallback_debug_info(
+    model: str,
+    content_preview: str,
+    extraction_result: dict | None = None,
+) -> dict:
+    return build_debug_info(
+        request_info={
+            "provider": "unknown",
+            "model": model,
+            "operation": "workspace_extract",
+            "note": "fallback_debug_info_generated_in_router",
+            "user_prompt": content_preview,
+        },
+        response_json=extraction_result,
     )
 
 
@@ -406,13 +424,23 @@ async def extract_story_workspace(
     )
     await db.commit()
 
+    debug_info = None
+    if request.debug:
+        debug_info = extraction_result.get("debug_info")
+        if debug_info is None:
+            debug_info = _build_extract_fallback_debug_info(
+                model=selected_ai_model,
+                content_preview=source_text[:1000],
+                extraction_result=extraction_result,
+            )
+
     return StoryWorkspaceExtractResponse(
         story_id=story.id,
         extracted_characters=workspace.extracted_characters,
         extracted_scenes=workspace.extracted_scenes,
         extracted_outline_points=workspace.extracted_outline_points,
         extraction_notes=workspace.extraction_notes,
-        debug_info=extraction_result.get("debug_info") if request.debug else None,
+        debug_info=debug_info,
     )
 
 
