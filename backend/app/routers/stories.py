@@ -81,7 +81,19 @@ def _normalize_workspace_notes(raw_items: list) -> list[str]:
     return [str(item).strip() for item in raw_items if str(item).strip()][:8]
 
 
+def _ensure_chapters(workspace: StoryWorkspace) -> list[dict]:
+    """Ensure workspace has chapters; backfill from editor_content if needed."""
+    chapters = workspace.chapters or []
+    if chapters:
+        return chapters
+    content = (workspace.editor_content or "").strip()
+    if content:
+        return [{"id": "ch_1", "title": "第一章", "content": content}]
+    return [{"id": "ch_1", "title": "第一章", "content": ""}]
+
+
 def _workspace_response(story: Story, workspace: StoryWorkspace) -> StoryWorkspaceResponse:
+    chapters = _ensure_chapters(workspace)
     return StoryWorkspaceResponse(
         story_id=story.id,
         title=story.title,
@@ -90,6 +102,7 @@ def _workspace_response(story: Story, workspace: StoryWorkspace) -> StoryWorkspa
         chapter_length=story.chapter_length,
         ai_model=story.ai_model,
         editor_content=workspace.editor_content or "",
+        chapters=chapters,
         extracted_characters=(workspace.extracted_characters or []),
         extracted_scenes=(workspace.extracted_scenes or []),
         extracted_outline_points=(workspace.extracted_outline_points or []),
@@ -151,6 +164,7 @@ async def create_story_workspace(
     workspace = StoryWorkspace(
         story_id=story.id,
         editor_content=initial_content,
+        chapters=[{"id": "ch_1", "title": "第一章", "content": initial_content}],
         extracted_characters=[],
         extracted_scenes=[],
         extracted_outline_points=[],
@@ -228,7 +242,32 @@ async def update_story_workspace(
     if request.ai_model is not None:
         story.ai_model = request.ai_model
 
-    if request.content is not None:
+    if request.chapters is not None:
+        workspace.chapters = request.chapters
+        # Merge all chapter contents into editor_content
+        merged = "\n\n".join(ch.get("content", "") for ch in request.chapters if isinstance(ch, dict))
+        workspace.editor_content = merged
+        # Sync to story nodes
+        nodes = dict(story.nodes or {})
+        if "node_1" not in nodes:
+            nodes["node_1"] = {
+                "title": "第一章",
+                "content": merged,
+                "word_count": len(merged),
+                "ai_model": "manual",
+                "choices": [],
+            }
+        else:
+            node = dict(nodes["node_1"])
+            node["content"] = merged
+            node["word_count"] = len(merged)
+            nodes["node_1"] = node
+        story.nodes = nodes
+        if not story.current_node_id:
+            story.current_node_id = "node_1"
+        if not story.current_path:
+            story.current_path = ["node_1"]
+    elif request.content is not None:
         new_content = request.content
         workspace.editor_content = new_content
         nodes = dict(story.nodes or {})
@@ -335,10 +374,29 @@ async def continue_story_workspace(
         raise HTTPException(status_code=502, detail="AI未返回可用续写内容")
 
     if request.append:
-        if workspace.editor_content.strip():
-            workspace.editor_content = f"{workspace.editor_content.rstrip()}\n\n{generated_chunk}"
+        # If chapter_id provided, append to that specific chapter
+        chapters = list(workspace.chapters or [])
+        target_chapter = None
+        if request.chapter_id and chapters:
+            for ch in chapters:
+                if isinstance(ch, dict) and ch.get("id") == request.chapter_id:
+                    target_chapter = ch
+                    break
+        if target_chapter is not None:
+            old = (target_chapter.get("content") or "").rstrip()
+            if old:
+                target_chapter["content"] = f"{old}\n\n{generated_chunk}"
+            else:
+                target_chapter["content"] = generated_chunk
+            workspace.chapters = chapters
+            workspace.editor_content = "\n\n".join(
+                ch.get("content", "") for ch in chapters if isinstance(ch, dict)
+            )
         else:
-            workspace.editor_content = generated_chunk
+            if workspace.editor_content.strip():
+                workspace.editor_content = f"{workspace.editor_content.rstrip()}\n\n{generated_chunk}"
+            else:
+                workspace.editor_content = generated_chunk
     else:
         workspace.editor_content = generated_chunk
 
