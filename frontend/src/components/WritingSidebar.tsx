@@ -71,6 +71,8 @@ export function WritingSidebar({ ws }: WritingSidebarProps) {
                 setExtractedOutlinePoints={ws.setExtractedOutlinePoints}
                 extractionNotesText={ws.extractionNotesText}
                 setExtractionNotesText={ws.setExtractionNotesText}
+                debugMode={ws.debugMode}
+                extractDebugInfo={ws.extractDebugInfo}
                 isSavingExtraction={ws.isSavingExtraction}
                 onSaveExtraction={ws.handleSaveExtraction}
                 onSaveCharacterToLibrary={ws.handleSaveCharacterToLibrary}

@@ -1,6 +1,7 @@
 import { Plus, RefreshCw, Save, Trash2, ArrowDownToLine } from 'lucide-react';
 import { splitTokens } from '../hooks/useWorkspaceState';
-import type { ExtractedCharacter, ExtractedScene, ExtractedOutlinePoint } from '../types';
+import { AIDebugPanel } from './AIDebugPanel';
+import type { AIDebugInfo, ExtractedCharacter, ExtractedScene, ExtractedOutlinePoint } from '../types';
 
 interface ExtractionPanelProps {
   extractedCharacters: ExtractedCharacter[];
@@ -11,6 +12,8 @@ interface ExtractionPanelProps {
   setExtractedOutlinePoints: (v: ExtractedOutlinePoint[]) => void;
   extractionNotesText: string;
   setExtractionNotesText: (v: string) => void;
+  debugMode: boolean;
+  extractDebugInfo: AIDebugInfo | null;
   isSavingExtraction: boolean;
   onSaveExtraction: () => void;
   onSaveCharacterToLibrary: (char: ExtractedCharacter) => Promise<void>;
@@ -29,6 +32,8 @@ export function ExtractionPanel({
   setExtractedOutlinePoints,
   extractionNotesText,
   setExtractionNotesText,
+  debugMode,
+  extractDebugInfo,
   isSavingExtraction,
   onSaveExtraction,
   onSaveCharacterToLibrary,
@@ -50,6 +55,16 @@ export function ExtractionPanel({
           保存修改
         </button>
       </div>
+
+      {debugMode && (
+        extractDebugInfo ? (
+          <AIDebugPanel debugInfo={extractDebugInfo} title="提炼 Debug" />
+        ) : (
+          <div className="text-xs text-amber-700 border border-amber-200 bg-amber-50 rounded-lg px-3 py-2">
+            已开启 Debug。本次提炼尚未返回调试信息，请重新点击一次“自动提炼”。
+          </div>
+        )
+      )}
 
       {/* Characters */}
       <section className="space-y-2">
