@@ -14,12 +14,12 @@ class ClaudeTextService(AITextServiceBase):
     def __init__(self, model: str = "claude-opus-4"):
         self.auth_token = settings.anthropic_auth_token
         self.base_url = settings.anthropic_base_url
-        # 模型映射
+        # 模型映射（使用代理支持的短格式 model ID）
         model_map = {
-            "claude-opus-4": "claude-opus-4-20250514",
-            "claude-sonnet-4": "claude-sonnet-4-20250514",
+            "claude-opus-4": "claude-opus-4-6",
+            "claude-sonnet-4": "claude-sonnet-4-6",
         }
-        self.model = model_map.get(model, "claude-opus-4-20250514")
+        self.model = model_map.get(model, "claude-opus-4-6")
 
     async def _call_claude(
         self,
@@ -29,22 +29,21 @@ class ClaudeTextService(AITextServiceBase):
         max_tokens: int = 4000,
         return_raw: bool = False,
     ) -> str | tuple[str, dict]:
-        """调用Claude API"""
+        """调用Claude API（通过 OpenAI 兼容格式）"""
         async with httpx.AsyncClient() as client:
             response = await client.post(
-                f"{self.base_url}/v1/messages",
+                f"{self.base_url}/v1/chat/completions",
                 headers={
                     "Authorization": f"Bearer {self.auth_token}",
                     "Content-Type": "application/json",
-                    "anthropic-version": "2023-06-01",
                 },
                 json={
                     "model": self.model,
                     "max_tokens": max_tokens,
                     "temperature": temperature,
-                    "system": system_prompt,
                     "messages": [
-                        {"role": "user", "content": user_prompt}
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt},
                     ],
                 },
                 timeout=90.0,
@@ -52,26 +51,71 @@ class ClaudeTextService(AITextServiceBase):
             response.raise_for_status()
             result = response.json()
 
-        content_blocks = result.get("content")
-        if not isinstance(content_blocks, list):
-            raise ValueError("Claude 返回格式异常：缺少 content 数组")
-        text_parts: list[str] = []
-        for block in content_blocks:
-            if not isinstance(block, dict):
-                continue
-            text = block.get("text")
-            if isinstance(text, str):
-                block_type = block.get("type")
-                if block_type in (None, "text"):
-                    text_parts.append(text)
-
-        content = "\n".join(t.strip() for t in text_parts if t and t.strip()).strip()
+        # 兼容 OpenAI 与 Anthropic 返回格式
+        content = self._extract_response_text(result)
         if not content:
-            raise ValueError("Claude 返回内容为空")
+            raise ValueError("Claude 返回内容为空或格式无法解析")
 
         if return_raw:
             return content, result
         return content
+
+    def _extract_response_text(self, result: dict) -> str:
+        """兼容不同代理/网关返回的 Claude 内容格式"""
+        # OpenAI 兼容格式：choices[0].message.content
+        choices = result.get("choices", [])
+        if isinstance(choices, list) and choices:
+            first_choice = choices[0] if isinstance(choices[0], dict) else {}
+            message = first_choice.get("message", {}) if isinstance(first_choice, dict) else {}
+            raw_content = message.get("content") if isinstance(message, dict) else None
+            content = self._normalize_message_content(raw_content)
+            if content:
+                return content
+
+            # 兼容少数网关把文本放在 choices[0].text
+            text = first_choice.get("text") if isinstance(first_choice, dict) else None
+            if isinstance(text, str) and text.strip():
+                return text.strip()
+
+        # Anthropic 原生格式：content: [{type:'text', text:'...'}]
+        content_blocks = result.get("content")
+        if isinstance(content_blocks, list):
+            parts: list[str] = []
+            for block in content_blocks:
+                if not isinstance(block, dict):
+                    continue
+                block_type = block.get("type")
+                text = block.get("text")
+                if isinstance(text, str) and text.strip() and block_type in (None, "text"):
+                    parts.append(text.strip())
+            if parts:
+                return "\n".join(parts).strip()
+
+        # 兜底：content 是纯字符串
+        if isinstance(content_blocks, str) and content_blocks.strip():
+            return content_blocks.strip()
+
+        return ""
+
+    def _normalize_message_content(self, raw_content: str | list | dict | None) -> str:
+        if isinstance(raw_content, str):
+            return raw_content.strip()
+        if isinstance(raw_content, list):
+            parts: list[str] = []
+            for item in raw_content:
+                if isinstance(item, str) and item.strip():
+                    parts.append(item.strip())
+                    continue
+                if isinstance(item, dict):
+                    text = item.get("text")
+                    if isinstance(text, str) and text.strip():
+                        parts.append(text.strip())
+            return "\n".join(parts).strip()
+        if isinstance(raw_content, dict):
+            text = raw_content.get("text")
+            if isinstance(text, str):
+                return text.strip()
+        return ""
 
     async def auto_complete_character(
         self,
