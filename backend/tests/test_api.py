@@ -517,6 +517,50 @@ class TestStoryAPI:
         assert updated["extracted_characters"][0]["traits"] == ["冷静"]
         assert updated["extraction_notes"] == ["已手工校准角色职业"]
 
+    async def test_update_story_scene_id(self, client):
+        """测试更新故事关联场景"""
+        char_response = await client.post("/api/characters", json={"name": "测试角色"})
+        char_id = char_response.json()["id"]
+        scene_1 = await client.post(
+            "/api/scenes",
+            json={"name": "场景一", "category": "初遇", "description": "描述一"},
+        )
+        scene_2 = await client.post(
+            "/api/scenes",
+            json={"name": "场景二", "category": "暧昧", "description": "描述二"},
+        )
+        scene_1_id = scene_1.json()["id"]
+        scene_2_id = scene_2.json()["id"]
+
+        with patch("app.routers.stories.get_ai_service") as mock_get_service:
+            mock_service = AsyncMock()
+            mock_service.generate_story = AsyncMock(return_value={
+                "title": "第一章",
+                "content": "故事内容",
+                "word_count": 4,
+                "choices": [{"label": "A. 继续发展", "next_node": None}],
+            })
+            mock_get_service.return_value = mock_service
+
+            create_story_resp = await client.post(
+                "/api/stories/generate",
+                json={
+                    "character_ids": [char_id],
+                    "scene_id": scene_1_id,
+                    "mood": "甜",
+                    "writing_style": "细腻",
+                    "chapter_length": "中",
+                },
+            )
+        story_id = create_story_resp.json()["story_id"]
+
+        update_resp = await client.put(
+            f"/api/stories/{story_id}",
+            json={"scene_id": scene_2_id},
+        )
+        assert update_resp.status_code == 200
+        assert update_resp.json()["scene_id"] == scene_2_id
+
 
 class TestHealthCheck:
     """健康检查测试"""

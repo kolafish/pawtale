@@ -80,7 +80,18 @@ export const storiesApi = {
     api.post<StoryGenerateResponse>(`/stories/${storyId}/choose`, request).then(res => res.data),
   gotoNode: (storyId: string, nodeId: string) =>
     api.post<StoryGenerateResponse>(`/stories/${storyId}/goto/${nodeId}`).then(res => res.data),
-  update: (id: string, data: { title?: string; mood?: string; writing_style?: string; chapter_length?: string }) =>
+  update: (
+    id: string,
+    data: {
+      title?: string;
+      mood?: string;
+      writing_style?: string;
+      chapter_length?: string;
+      ai_model?: string;
+      scene_id?: string | null;
+      outline_id?: string | null;
+    }
+  ) =>
     api.put<Story>(`/stories/${id}`, data).then(res => res.data),
   toggleFavorite: (id: string) => api.put(`/stories/${id}/favorite`),
   delete: (id: string) => api.delete(`/stories/${id}`),

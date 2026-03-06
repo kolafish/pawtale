@@ -16,9 +16,13 @@ interface AppState {
   currentSceneInStory: Scene | null;
   presentCharacters: Character[];
 
-  // 视图模式
+  // 创作模式
+  creationMode: 'writing' | 'structured';
+  writingSidebarTab: 'extraction' | 'resources' | 'works';
+
+  // 视图模式（仅互动创作模式下使用）
   viewMode: 'dual' | 'edit' | 'preview';
-  editTab: 'writing' | 'characters' | 'scenes' | 'stories' | 'outlines';
+  editTab: 'characters' | 'scenes' | 'stories' | 'outlines';
 
   // 加载状态
   isGenerating: boolean;
@@ -37,8 +41,10 @@ interface AppState {
   setPresentCharacters: (characters: Character[]) => void;
   addPresentCharacter: (character: Character) => void;
   removePresentCharacter: (characterId: string) => void;
+  setCreationMode: (mode: 'writing' | 'structured') => void;
+  setWritingSidebarTab: (tab: 'extraction' | 'resources' | 'works') => void;
   setViewMode: (mode: 'dual' | 'edit' | 'preview') => void;
-  setEditTab: (tab: 'writing' | 'characters' | 'scenes' | 'stories' | 'outlines') => void;
+  setEditTab: (tab: 'characters' | 'scenes' | 'stories' | 'outlines') => void;
   setIsGenerating: (isGenerating: boolean) => void;
   setDefaultAiModel: (model: 'deepseek' | 'claude-opus-4' | 'claude-sonnet-4') => void;
   reset: () => void;
@@ -53,8 +59,10 @@ export const useAppStore = create<AppState>((set) => ({
   currentOutline: null,
   currentSceneInStory: null,
   presentCharacters: [],
-  viewMode: 'edit',
-  editTab: 'writing',
+  creationMode: 'writing',
+  writingSidebarTab: 'extraction',
+  viewMode: 'dual',
+  editTab: 'characters',
   isGenerating: false,
   defaultAiModel: 'deepseek',
 
@@ -82,6 +90,8 @@ export const useAppStore = create<AppState>((set) => ({
   removePresentCharacter: (characterId) => set((state) => ({
     presentCharacters: state.presentCharacters.filter(c => c.id !== characterId)
   })),
+  setCreationMode: (mode) => set({ creationMode: mode }),
+  setWritingSidebarTab: (tab) => set({ writingSidebarTab: tab }),
   setViewMode: (mode) => set({ viewMode: mode }),
   setEditTab: (tab) => set({ editTab: tab }),
   setIsGenerating: (isGenerating) => set({ isGenerating }),

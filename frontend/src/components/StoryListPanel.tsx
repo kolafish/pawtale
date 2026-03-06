@@ -8,7 +8,7 @@ import { AI_MODEL_OPTIONS } from '../constants/aiModels';
 
 export function StoryListPanel() {
   const queryClient = useQueryClient();
-  const { setCurrentStory, setCurrentNode, setCurrentWorkspace, setEditTab } = useAppStore();
+  const { setCurrentStory, setCurrentNode, setCurrentWorkspace, setCreationMode } = useAppStore();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState('');
 
@@ -43,7 +43,7 @@ export function StoryListPanel() {
     try {
       const workspace = await storiesApi.getWorkspace(story.id);
       setCurrentWorkspace(workspace);
-      setEditTab('writing');
+      setCreationMode('writing');
     } catch {
       // 忽略工作区加载失败，不影响传统故事预览模式
     }

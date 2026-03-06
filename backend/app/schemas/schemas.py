@@ -472,6 +472,8 @@ class StoryUpdate(BaseModel):
     writing_style: str | None = None
     chapter_length: str | None = None
     ai_model: str | None = None
+    scene_id: str | None = None
+    outline_id: str | None = None
 
 
 class StoryResponse(BaseModel):
