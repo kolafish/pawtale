@@ -42,8 +42,7 @@ class ClaudeTextService(AITextServiceBase):
                     "max_tokens": max_tokens,
                     "temperature": temperature,
                     "messages": [
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt},
+                        {"role": "user", "content": f"{system_prompt}\n\n{user_prompt}"},
                     ],
                 },
                 timeout=90.0,
