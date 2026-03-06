@@ -28,12 +28,14 @@ class TestMultiModelSupport:
     def test_get_default_service(self):
         """测试获取默认服务"""
         service = get_ai_service()
-        assert isinstance(service, DeepSeekTextService)
+        assert isinstance(service, ClaudeTextService)
+        assert service.model == "claude-opus-4-6"
 
     def test_get_invalid_model(self):
         """测试获取无效模型时返回默认服务"""
         service = get_ai_service("invalid-model")
-        assert isinstance(service, DeepSeekTextService)
+        assert isinstance(service, ClaudeTextService)
+        assert service.model == "claude-opus-4-6"
 
 
 class TestClaudeResponseCompatibility:

@@ -38,19 +38,7 @@
 
 系统支持三种 AI 模型，用户可根据需求选择：
 
-#### DeepSeek（默认）
-
-**选择理由：**
-- 中文写作能力强
-- API 价格便宜（性价比最高）
-- 国内直连，无需海外服务器
-
-**适用场景：**
-- 日常故事创作
-- 快速原型验证
-- 成本敏感的批量生成
-
-#### Claude Opus 4.6
+#### Claude Opus 4.6（默认）
 
 **选择理由：**
 - 顶级创作质量
@@ -61,6 +49,18 @@
 - 高质量长篇创作
 - 复杂角色关系处理
 - 深度情感描写
+
+#### DeepSeek
+
+**选择理由：**
+- 中文写作能力强
+- API 价格便宜（性价比最高）
+- 国内直连，无需海外服务器
+
+**适用场景：**
+- 日常故事创作
+- 快速原型验证
+- 成本敏感的批量生成
 
 #### Claude Sonnet 4.6
 
@@ -414,7 +414,7 @@ POST   /api/outlines/guided-create        # 引导式 4 步创建
     "title": "咖啡馆偶遇",
     "content": "你在咖啡馆看到他和另一个女生在一起...",
     "word_count": 120,
-    "ai_model": "deepseek",
+    "ai_model": "claude-opus-4",
     "scene_id": "...",
     "scene_name": "咖啡馆",
     "present_characters": [{ "character_id": "...", "name": "陆辰" }],
@@ -461,7 +461,7 @@ ANTHROPIC_BASE_URL=https://api.anthropic.com
 OPENAI_API_KEY=your-openai-key
 
 # 默认 AI 模型
-DEFAULT_AI_MODEL=deepseek    # 可选: deepseek, claude-opus-4, claude-sonnet-4
+DEFAULT_AI_MODEL=claude-opus-4    # 可选: deepseek, claude-opus-4, claude-sonnet-4
 ```
 
 ## 待解决技术问题

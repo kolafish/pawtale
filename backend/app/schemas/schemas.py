@@ -244,7 +244,7 @@ class StoryOutlineBase(BaseModel):
     ending_type: str | None = None  # HE/BE/OE
     plot_hints: list[str] = []  # 剧情走向提示
     forbidden_elements: list[str] = []  # 禁止元素
-    ai_model: str | None = "deepseek"  # AI模型选择
+    ai_model: str | None = "claude-opus-4"  # AI模型选择
     # 引导流程字段
     story_goal: str | None = None  # 故事目标与读者感受
     character_tension: str | None = None  # 角色关系与核心张力
@@ -278,7 +278,7 @@ class StoryOutlineResponse(StoryOutlineBase):
     updated_at: datetime
     outline_characters: list[OutlineCharacterResponse] = []
     outline_scenes: list[OutlineSceneResponse] = []
-    ai_model: str | None = "deepseek"
+    ai_model: str | None = "claude-opus-4"
     story_goal: str | None = None
     character_tension: str | None = None
     creation_stage: str | None = "draft"
@@ -350,7 +350,7 @@ class StoryWorkspaceCreateRequest(BaseModel):
     mood: str | None = "甜"
     writing_style: str | None = "细腻"
     chapter_length: str | None = "中"
-    ai_model: str | None = "deepseek"
+    ai_model: str | None = "claude-opus-4"
 
 
 class StoryWorkspaceUpdateRequest(BaseModel):
@@ -458,7 +458,7 @@ class StoryBase(BaseModel):
     mood: str | None = None
     writing_style: str | None = None  # 文字风格
     chapter_length: str | None = None  # 章节长度
-    ai_model: str | None = "deepseek"  # AI模型选择
+    ai_model: str | None = "claude-opus-4"  # AI模型选择
     character_ids: list[str] = []
 
 
@@ -617,7 +617,7 @@ class OutlineGuidedCreateRequest(BaseModel):
     central_conflict: str  # 剧情核心冲突
     character_ids: list[str] = []  # 已有角色ID列表
     mood: str | None = None  # 期望的情绪基调
-    ai_model: str | None = "deepseek"  # 使用的AI模型
+    ai_model: str | None = "claude-opus-4"  # 使用的AI模型
 
 
 class OutlineGuidedCreateResponse(BaseModel):

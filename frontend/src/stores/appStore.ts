@@ -64,7 +64,7 @@ export const useAppStore = create<AppState>((set) => ({
   viewMode: 'dual',
   editTab: 'characters',
   isGenerating: false,
-  defaultAiModel: 'deepseek',
+  defaultAiModel: 'claude-opus-4',
 
   setSelectedCharacters: (characters) => set({ selectedCharacters: characters }),
   addSelectedCharacter: (character) => set((state) => ({
