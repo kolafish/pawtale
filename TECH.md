@@ -196,12 +196,12 @@
 - **认证**: JWT
 
 ### 前端
-- **框架**: React 18 + TypeScript
+- **框架**: React 19 + TypeScript
 - **构建**: Vite
-- **UI 组件**: Shadcn/ui（基于 Radix）
 - **样式**: TailwindCSS
 - **状态管理**: Zustand
 - **请求**: TanStack Query
+- **图标**: Lucide React
 
 ### 部署
 - **服务器**: 国内云服务器即可（所有 API 都支持国内直连）
@@ -216,27 +216,51 @@ Pawtale/
 │   ├── app/
 │   │   ├── main.py           # FastAPI 入口
 │   │   ├── config.py         # 配置管理
+│   │   ├── database.py       # 数据库连接
 │   │   ├── models/           # 数据库模型
-│   │   │   ├── user.py
-│   │   │   ├── character.py
-│   │   │   ├── scene.py
-│   │   │   └── story.py
+│   │   │   └── models.py     # Character, Scene, Story, StoryOutline 等
 │   │   ├── schemas/          # Pydantic 模型
+│   │   │   └── schemas.py
 │   │   ├── routers/          # API 路由
-│   │   │   ├── auth.py
 │   │   │   ├── characters.py
 │   │   │   ├── scenes.py
-│   │   │   ├── stories.py
-│   │   │   └── media.py
-│   │   ├── services/         # 业务逻辑
-│   │   │   ├── ai_text.py    # 文本生成服务
-│   │   │   ├── ai_image.py   # 图像生成服务
-│   │   │   └── ai_video.py   # 视频生成服务
-│   │   └── utils/            # 工具函数
-│   ├── requirements.txt
-│   └── Dockerfile
+│   │   │   ├── stories.py    # 含编辑器工作区 API
+│   │   │   └── outlines.py   # 故事大纲 + 引导式创建
+│   │   └── services/         # 业务逻辑
+│   │       ├── ai_factory.py # AI 服务工厂（多模型）
+│   │       ├── ai_base.py    # AI 服务抽象基类
+│   │       ├── ai_text.py    # DeepSeek 文本生成
+│   │       ├── ai_claude.py  # Claude 文本生成
+│   │       ├── ai_scene.py   # AI 场景生成
+│   │       └── ai_image.py   # GPT-4o 图像生成
+│   ├── tests/
+│   └── requirements.txt
 ├── frontend/
-│   └── (待创建)
+│   └── src/
+│       ├── components/
+│       │   ├── Layout.tsx              # 顶层布局（模式切换）
+│       │   ├── WritingWorkspace.tsx     # 自由写作模式容器
+│       │   ├── EditorMain.tsx          # 编辑器 + 工具栏 + 状态栏
+│       │   ├── WritingSidebar.tsx       # 可折叠右侧边栏
+│       │   ├── WorkspaceHome.tsx        # 新建/打开作品首页
+│       │   ├── ExtractionPanel.tsx      # 提炼编辑 + 存入库
+│       │   ├── ResourceLinker.tsx       # 资源关联面板
+│       │   ├── StoryPreview.tsx         # 故事预览/分支选择
+│       │   ├── CharacterPanel.tsx       # 角色管理
+│       │   ├── ScenePanel.tsx           # 场景管理
+│       │   ├── OutlinePanel.tsx         # 大纲管理
+│       │   ├── OutlineGuidedWizard.tsx  # 引导式创建向导
+│       │   └── StoryListPanel.tsx       # 故事列表
+│       ├── hooks/
+│       │   └── useWorkspaceState.ts     # 写作工作区状态 Hook
+│       ├── stores/
+│       │   └── appStore.ts              # Zustand 全局状态
+│       ├── constants/
+│       │   └── aiModels.ts
+│       ├── api/
+│       │   └── index.ts
+│       └── types/
+│           └── index.ts
 ├── data/
 │   └── pawtale.db            # SQLite 数据库
 ├── PRODUCT.md                # 产品文档
@@ -246,149 +270,198 @@ Pawtale/
 
 ## API 设计
 
-### 认证
-```
-POST /api/auth/register    # 注册
-POST /api/auth/login       # 登录
-POST /api/auth/refresh     # 刷新 token
-```
-
 ### 角色
 ```
-GET    /api/characters           # 获取角色列表
-POST   /api/characters           # 创建角色
-GET    /api/characters/{id}      # 获取角色详情
-PUT    /api/characters/{id}      # 更新角色
-DELETE /api/characters/{id}      # 删除角色
-POST   /api/characters/{id}/avatar  # 生成角色头像
+GET    /api/characters                    # 获取角色列表
+POST   /api/characters                    # 创建角色
+GET    /api/characters/{id}               # 获取角色详情
+PUT    /api/characters/{id}               # 更新角色
+DELETE /api/characters/{id}               # 删除角色
+POST   /api/characters/{id}/avatar        # 生成角色头像
+POST   /api/characters/auto-complete      # AI 自动补全角色设定
 ```
 
 ### 场景
 ```
-GET    /api/scenes               # 获取场景列表
-POST   /api/scenes               # 创建场景
-GET    /api/scenes/{id}          # 获取场景详情
+GET    /api/scenes                        # 获取场景列表
+POST   /api/scenes                        # 创建场景
+GET    /api/scenes/{id}                   # 获取场景详情
+PUT    /api/scenes/{id}                   # 更新场景
+DELETE /api/scenes/{id}                   # 删除场景
+POST   /api/scenes/init-presets           # 初始化预设场景
+POST   /api/scenes/ai-generate            # AI 生成场景
 ```
 
 ### 故事
 ```
-POST   /api/stories/generate     # 生成故事（首段）
-POST   /api/stories/{id}/branch  # 生成分支选项
-POST   /api/stories/{id}/choose  # 选择分支继续生成
-GET    /api/stories              # 获取故事列表
-GET    /api/stories/{id}         # 获取故事详情
-PUT    /api/stories/{id}         # 更新故事
-DELETE /api/stories/{id}         # 删除故事
+GET    /api/stories                       # 获取故事列表
+GET    /api/stories/{id}                  # 获取故事详情
+POST   /api/stories/generate              # 生成故事（首段）
+POST   /api/stories/{id}/choose           # 选择分支继续生成
+PUT    /api/stories/{id}                  # 更新故事
+DELETE /api/stories/{id}                  # 删除故事
+PUT    /api/stories/{id}/favorite         # 切换收藏
+POST   /api/stories/{id}/switch-scene     # 故事中切换场景
+POST   /api/stories/{id}/update-characters # 故事中添加/移除角色
+PUT    /api/stories/{id}/nodes/{nodeId}   # 编辑节点
+POST   /api/stories/{id}/nodes/{nodeId}/regenerate        # 重新生成节点
+POST   /api/stories/{id}/nodes/{nodeId}/revise            # 润色节点
+POST   /api/stories/{id}/nodes/{nodeId}/regenerate-choices # 重新生成分支选项
+POST   /api/stories/{id}/polish           # 批量润色章节
+GET    /api/stories/{id}/export           # 导出故事
 ```
 
-### 媒体
+### 编辑器工作区
 ```
-POST   /api/media/image          # 生成图像
-POST   /api/media/video          # 生成视频
-GET    /api/media/{id}           # 获取媒体文件
-GET    /api/media/{id}/status    # 获取生成状态（视频生成是异步的）
+POST   /api/stories/workspace             # 创建写作工作区
+GET    /api/stories/{id}/workspace        # 获取工作区
+PUT    /api/stories/{id}/workspace        # 更新工作区（标题/正文/模型）
+POST   /api/stories/{id}/workspace/ai-continue    # AI 续写
+POST   /api/stories/{id}/workspace/extract        # AI 自动提炼
+PUT    /api/stories/{id}/workspace/extracted       # 手动修改提炼结果
+```
+
+### 故事大纲
+```
+GET    /api/outlines                      # 获取大纲列表
+POST   /api/outlines                      # 创建大纲
+GET    /api/outlines/{id}                 # 获取大纲详情
+PUT    /api/outlines/{id}                 # 更新大纲
+DELETE /api/outlines/{id}                 # 删除大纲
+POST   /api/outlines/{id}/characters      # 添加角色配置
+PUT    /api/outlines/{id}/characters/{cid} # 更新角色配置
+DELETE /api/outlines/{id}/characters/{cid} # 移除角色配置
+POST   /api/outlines/{id}/scenes          # 添加场景配置
+PUT    /api/outlines/{id}/scenes/{sid}    # 更新场景配置
+DELETE /api/outlines/{id}/scenes/{sid}    # 移除场景配置
+POST   /api/outlines/{id}/generate        # 基于大纲生成故事
+POST   /api/outlines/{id}/ai-enhance      # AI 增强大纲
+GET    /api/outlines/templates            # 获取大纲模板
+POST   /api/outlines/guided-create        # 引导式 4 步创建
 ```
 
 ## 数据库模型
-
-### User
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| id | UUID | 主键 |
-| email | String | 邮箱 |
-| password_hash | String | 密码哈希 |
-| nickname | String | 昵称 |
-| created_at | DateTime | 创建时间 |
 
 ### Character
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | id | UUID | 主键 |
-| user_id | UUID | 所属用户 |
 | name | String | 角色名 |
+| gender | String | 性别 |
 | age | Integer | 年龄 |
 | identity | String | 身份 |
 | appearance | Text | 外貌描述 |
 | personality | JSON | 性格标签 |
 | speaking_style | Text | 说话风格 |
 | background | Text | 背景故事 |
-| inspiration | Text | 灵感来源（参考的影视剧角色） |
+| inspiration | Text | 灵感来源 |
 | avatar_url | String | 头像 URL |
-| base_image_url | String | 基准图 URL（用于保持一致性） |
+| base_image_url | String | 基准图 URL |
 | is_preset | Boolean | 是否预设角色 |
+| role_type | String | 角色类型 (protagonist/supporting/antagonist) |
+| core_trait | String | 核心性格驱动力 |
+| life_goal | String | 目标追求 |
+| fatal_flaw | String | 致命弱点 |
+| growth_hint | String | 成长弧线提示 |
+| habits | JSON | 行为习惯 |
+| secret | String | 秘密 |
 | created_at | DateTime | 创建时间 |
 
 ### Scene
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | id | UUID | 主键 |
-| user_id | UUID | 所属用户（null 为预设）|
 | name | String | 场景名 |
-| category | String | 分类（初遇/暧昧/表白等）|
+| category | String | 分类 |
 | description | Text | 场景描述 |
 | location | String | 地点 |
 | time_weather | String | 时间/天气 |
 | mood_keywords | JSON | 氛围关键词 |
 | is_preset | Boolean | 是否预设场景 |
+| dramatic_potential | String | 戏剧潜力 |
+| sensory_details | JSON | 感官细节 (visual/auditory/olfactory) |
+| props | JSON | 可能的道具/元素 |
+| created_at | DateTime | 创建时间 |
 
 ### Story
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | id | UUID | 主键 |
-| user_id | UUID | 所属用户（MVP-1 可为空） |
 | title | String | 标题 |
-| character_ids | JSON | 相关角色 ID |
-| scene_id | UUID | 场景 ID |
+| outline_id | UUID | 关联大纲 |
+| scene_id | UUID | 关联场景 |
 | mood | String | 情绪标签 |
-| nodes | JSON | 剧情节点树（见下方结构） |
+| writing_style | String | 文字风格 |
+| chapter_length | String | 章节长度 |
+| ai_model | String | AI 模型 |
+| nodes | JSON | 剧情节点树 |
 | current_node_id | String | 当前所在节点 |
+| current_path | JSON | 当前阅读路径 |
+| editor_content | Text | 编辑器正文内容 |
+| extracted_characters | JSON | 提炼的角色 |
+| extracted_scenes | JSON | 提炼的场景 |
+| extracted_outline_points | JSON | 提炼的大纲 |
+| extraction_notes | JSON | 一致性提醒 |
 | is_favorite | Boolean | 是否收藏 |
 | created_at | DateTime | 创建时间 |
+| updated_at | DateTime | 更新时间 |
+| characters | M2M | 关联角色（多对多） |
 
 **nodes 结构示例：**
 ```json
 {
   "node_1": {
+    "title": "咖啡馆偶遇",
     "content": "你在咖啡馆看到他和另一个女生在一起...",
+    "word_count": 120,
+    "ai_model": "deepseek",
+    "scene_id": "...",
+    "scene_name": "咖啡馆",
+    "present_characters": [{ "character_id": "...", "name": "陆辰" }],
     "choices": [
       { "label": "A. 转身离开", "next_node": "node_2" },
-      { "label": "B. 走过去打招呼", "next_node": "node_3" },
-      { "label": "C. 找个角落观察", "next_node": "node_4" }
+      { "label": "B. 走过去打招呼", "next_node": "node_3" }
     ]
-  },
-  "node_2": {
-    "content": "你转身离开，心里五味杂陈...",
-    "choices": [...]
   }
 }
 ```
 
-### Media
+### StoryOutline
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | id | UUID | 主键 |
-| user_id | UUID | 所属用户 |
-| type | String | 类型（image/video） |
-| story_id | UUID | 关联故事（可选） |
-| character_id | UUID | 关联角色（可选） |
-| url | String | 文件 URL |
-| status | String | 状态（pending/processing/completed/failed） |
-| created_at | DateTime | 创建时间 |
+| title | String | 大纲标题 |
+| mood | String | 情绪基调 |
+| writing_style | String | 文字风格 |
+| chapter_length | String | 章节长度 |
+| central_conflict | String | 核心冲突 |
+| ending_type | String | 结局类型 (HE/BE/OE) |
+| plot_hints | JSON | 剧情走向提示 |
+| forbidden_elements | JSON | 禁止元素 |
+| ai_model | String | AI 模型选择 |
+| story_goal | String | 故事目标 |
+| character_tension | String | 角色张力 |
+| creation_stage | String | 创建阶段 (draft/confirmed) |
+| is_active | Boolean | 是否激活 |
+| outline_characters | Rel | 角色配置列表 |
+| outline_scenes | Rel | 场景配置列表 |
 
 ## 环境变量
 
 ```bash
-# 应用配置
-APP_ENV=development
-APP_SECRET_KEY=your-secret-key
-
-# 数据库
-DATABASE_URL=sqlite:///./data/pawtale.db
-
-# AI 模型 API
+# AI 文本生成服务
 DEEPSEEK_API_KEY=your-deepseek-key
+DEEPSEEK_BASE_URL=https://api.deepseek.com
+
+# Claude API 配置（可选，用于多模型支持）
+ANTHROPIC_AUTH_TOKEN=your-claude-token
+ANTHROPIC_BASE_URL=https://api.anthropic.com
+
+# 图像生成服务
 OPENAI_API_KEY=your-openai-key
-KLING_API_KEY=your-kling-key
+
+# 默认 AI 模型
+DEFAULT_AI_MODEL=deepseek    # 可选: deepseek, claude-opus-4, claude-sonnet-4
 ```
 
 ## 待解决技术问题
