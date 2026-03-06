@@ -1,17 +1,44 @@
 import json
+import re
 from datetime import datetime, timezone
 from typing import Any
 
 MAX_DEBUG_TEXT_CHARS = 8192
-SENSITIVE_KEYWORDS = (
+SENSITIVE_EXACT_KEYS = {
     "authorization",
     "token",
+    "access_token",
+    "refresh_token",
+    "auth_token",
     "api_key",
     "apikey",
-    "key",
     "secret",
     "password",
-)
+    "key",
+}
+
+
+def _is_sensitive_key(key: str) -> bool:
+    lower_key = str(key).lower()
+    if "authorization" in lower_key:
+        return True
+    if lower_key in SENSITIVE_EXACT_KEYS:
+        return True
+
+    # 拆分字段名，避免把 max_tokens / keywords 这类误判为敏感字段
+    tokens = [t for t in re.split(r"[^a-z0-9]+|_+", lower_key) if t]
+    if not tokens:
+        return False
+
+    # token（单数）属于敏感；tokens（复数）通常是计数字段
+    if "token" in tokens and "tokens" not in tokens:
+        return True
+    if "secret" in tokens or "password" in tokens:
+        return True
+    if "key" in tokens and any(t in tokens for t in ("api", "auth", "access", "secret")):
+        return True
+
+    return False
 
 
 def _mask_value(value: Any) -> Any:
@@ -28,8 +55,7 @@ def mask_sensitive(data: Any) -> Any:
     if isinstance(data, dict):
         masked: dict[str, Any] = {}
         for key, value in data.items():
-            lower_key = str(key).lower()
-            if any(keyword in lower_key for keyword in SENSITIVE_KEYWORDS):
+            if _is_sensitive_key(str(key)):
                 masked[key] = _mask_value(value)
             else:
                 masked[key] = mask_sensitive(value)

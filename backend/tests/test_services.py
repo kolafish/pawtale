@@ -274,6 +274,7 @@ class TestAIDebugHelpers:
                 "provider": "deepseek",
                 "model": "deepseek-chat",
                 "authorization": "Bearer very-secret-token",
+                "max_tokens": 3000,
                 "nested": {"api_key": "abc123456789"},
             },
             response_text="x" * 9000,
@@ -282,6 +283,7 @@ class TestAIDebugHelpers:
 
         assert debug_info["request"]["authorization"] != "Bearer very-secret-token"
         assert "***" in debug_info["request"]["authorization"]
+        assert debug_info["request"]["max_tokens"] == 3000
         assert debug_info["request"]["nested"]["api_key"] != "abc123456789"
         assert "***" in debug_info["response"]["raw_json"]["token"]
         assert debug_info["meta"]["truncated"] is True

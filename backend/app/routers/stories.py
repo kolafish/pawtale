@@ -140,7 +140,7 @@ async def create_story_workspace(
         mood=request.mood,
         writing_style=request.writing_style,
         chapter_length=request.chapter_length,
-        ai_model=request.ai_model or "deepseek",
+        ai_model=request.ai_model or "claude-opus-4",
         nodes=_default_story_nodes(initial_content),
         current_node_id="node_1",
         current_path=["node_1"],
@@ -286,7 +286,7 @@ async def continue_story_workspace(
     if not base_content:
         raise HTTPException(status_code=400, detail="请先在编辑器里写一些内容")
 
-    selected_ai_model = request.ai_model or story.ai_model or "deepseek"
+    selected_ai_model = request.ai_model or story.ai_model or "claude-opus-4"
     ai_service = get_ai_service(selected_ai_model)
 
     extracted_characters = workspace.extracted_characters or []
@@ -396,7 +396,7 @@ async def extract_story_workspace(
     if not source_text:
         raise HTTPException(status_code=400, detail="没有可提炼的文本内容")
 
-    selected_ai_model = request.ai_model or story.ai_model or "deepseek"
+    selected_ai_model = request.ai_model or story.ai_model or "claude-opus-4"
     ai_service = get_ai_service(selected_ai_model)
 
     try:
@@ -556,7 +556,7 @@ async def generate_story(
     if not ai_model and request.outline_id and outline:
         ai_model = outline.ai_model
 
-    selected_ai_model = ai_model or "deepseek"
+    selected_ai_model = ai_model or "claude-opus-4"
     ai_service = get_ai_service(selected_ai_model)
 
     try:
@@ -651,7 +651,7 @@ async def choose_branch(
     current_node = story.nodes.get(story.current_node_id)
     if not current_node:
         raise HTTPException(status_code=400, detail="当前节点不存在")
-    selected_ai_model = request.ai_model or story.ai_model or "deepseek"
+    selected_ai_model = request.ai_model or story.ai_model or "claude-opus-4"
 
     # 确定选择方式
     choice_label = None
@@ -1092,7 +1092,7 @@ async def regenerate_node(
     chapter_number = list(story.nodes.keys()).index(node_id) + 1
 
     # 重新生成
-    selected_ai_model = (request.ai_model if request else None) or story.ai_model or "deepseek"
+    selected_ai_model = (request.ai_model if request else None) or story.ai_model or "claude-opus-4"
     ai_service = get_ai_service(selected_ai_model)
 
     try:
@@ -1210,7 +1210,7 @@ async def revise_node(
         })
 
     # 调用 AI 修改
-    selected_ai_model = request.ai_model or story.ai_model or "deepseek"
+    selected_ai_model = request.ai_model or story.ai_model or "claude-opus-4"
     ai_service = get_ai_service(selected_ai_model)
 
     try:
@@ -1321,7 +1321,7 @@ async def switch_scene(
     chapter_number = len(story.nodes) + 1
 
     # 生成新内容
-    selected_ai_model = request.ai_model or story.ai_model or "deepseek"
+    selected_ai_model = request.ai_model or story.ai_model or "claude-opus-4"
     ai_service = get_ai_service(selected_ai_model)
 
     try:
@@ -1486,7 +1486,7 @@ async def regenerate_choices(
         })
 
     # 调用 AI 生成新选项
-    selected_ai_model = request.ai_model or story.ai_model or "deepseek"
+    selected_ai_model = request.ai_model or story.ai_model or "claude-opus-4"
     ai_service = get_ai_service(selected_ai_model)
 
     try:
@@ -1575,7 +1575,7 @@ async def polish_chapters(
         })
 
     # 调用 AI 润色
-    selected_ai_model = request.ai_model or story.ai_model or "deepseek"
+    selected_ai_model = request.ai_model or story.ai_model or "claude-opus-4"
     ai_service = get_ai_service(selected_ai_model)
 
     try:

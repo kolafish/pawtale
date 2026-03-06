@@ -32,7 +32,7 @@ ANTHROPIC_BASE_URL=https://api.anthropic.com
 OPENAI_API_KEY=your-openai-key
 
 # 默认 AI 模型
-DEFAULT_AI_MODEL=deepseek  # 可选: deepseek, claude-opus-4, claude-sonnet-4
+DEFAULT_AI_MODEL=claude-opus-4  # 可选: deepseek, claude-opus-4, claude-sonnet-4
 ```
 
 ## 运行

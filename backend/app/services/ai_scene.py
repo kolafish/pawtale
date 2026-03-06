@@ -308,7 +308,7 @@ class AISceneService:
         user_parts.append(f"请生成 {count} 个不同的场景候选，且全部紧扣「{category}」。")
 
         user_prompt = "\n".join(user_parts)
-        selected_model = (ai_model or "deepseek").lower()
+        selected_model = (ai_model or "claude-opus-4").lower()
         provider = "deepseek"
         request_model = "deepseek-chat"
         temperature = 0.55

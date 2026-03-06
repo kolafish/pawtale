@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     anthropic_base_url: str = "https://cursor.scihub.edu.kg/api"
 
     # Default AI Model
-    default_ai_model: str = "deepseek"  # deepseek / claude-opus-4 / claude-sonnet-4
+    default_ai_model: str = "claude-opus-4"  # deepseek / claude-opus-4 / claude-sonnet-4
 
     class Config:
         env_file = str(BACKEND_DIR / ".env")

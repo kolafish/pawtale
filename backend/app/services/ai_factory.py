@@ -10,6 +10,16 @@ class AIServiceFactory:
     """AI服务工厂"""
 
     @staticmethod
+    def _get_default_service() -> AITextServiceBase:
+        default_model = (settings.default_ai_model or "claude-opus-4").lower()
+
+        if default_model == "deepseek":
+            return DeepSeekTextService()
+        if default_model == "claude-sonnet-4":
+            return ClaudeTextService(model="claude-sonnet-4")
+        return ClaudeTextService(model="claude-opus-4")
+
+    @staticmethod
     def get_service(model: str | None = None) -> AITextServiceBase:
         """
         根据模型名称返回对应的AI服务实例
@@ -22,7 +32,7 @@ class AIServiceFactory:
             AI服务实例
         """
         if model is None:
-            model = settings.default_ai_model
+            return AIServiceFactory._get_default_service()
 
         model = model.lower()
 
@@ -33,8 +43,7 @@ class AIServiceFactory:
         elif model == "claude-sonnet-4":
             return ClaudeTextService(model="claude-sonnet-4")
         else:
-            # 默认使用DeepSeek
-            return DeepSeekTextService()
+            return AIServiceFactory._get_default_service()
 
 
 # 便捷函数

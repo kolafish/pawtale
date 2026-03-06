@@ -380,6 +380,7 @@ class TestStoryAPI:
         data = response.json()
         assert "debug_info" in data
         assert data["debug_info"]["request"]["provider"] == "deepseek"
+        mock_get_service.assert_called_with("claude-opus-4")
 
     async def test_generate_story_debug_false_hides_debug_info(self, client):
         """测试故事生成 debug=false 时不返回 debug_info"""
@@ -445,6 +446,7 @@ class TestStoryAPI:
                 "content": "窗外下着雨，她站在便利店门口。",
             },
         )
+        assert create_resp.json()["ai_model"] == "claude-opus-4"
         story_id = create_resp.json()["story_id"]
 
         with patch("app.routers.stories.get_ai_service") as mock_get_service:
@@ -465,6 +467,7 @@ class TestStoryAPI:
         assert data["generated_chunk"] == "他把伞递过来，却没说一句话。"
         assert "他把伞递过来" in data["editor_content"]
         assert len(data["choices"]) == 1
+        mock_get_service.assert_called_with("claude-opus-4")
 
     async def test_workspace_extract_and_manual_update(self, client):
         """测试工作区自动提炼与手工修改"""

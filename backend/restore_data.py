@@ -82,7 +82,7 @@ async def restore_data():
                 mood=story_data['mood'],
                 writing_style=story_data['writing_style'],
                 chapter_length=story_data['chapter_length'],
-                ai_model='deepseek',  # 默认使用deepseek
+                ai_model='claude-opus-4',  # 默认使用 Claude Opus 4.6
                 nodes=nodes,
                 current_node_id=story_data['current_node_id'],
                 current_path=current_path,

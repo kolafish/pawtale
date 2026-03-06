@@ -64,15 +64,15 @@ ANTHROPIC_BASE_URL=xxx         # Claude API 地址
 OPENAI_API_KEY=xxx             # OpenAI API 密钥
 
 # 默认 AI 模型
-DEFAULT_AI_MODEL=deepseek      # 可选: deepseek, claude-opus-4, claude-sonnet-4
+DEFAULT_AI_MODEL=claude-opus-4  # 可选: deepseek, claude-opus-4, claude-sonnet-4
 ```
 
 ## 架构要点
 
 ### 多模型 AI 支持
 系统支持多个 AI 模型进行文本生成，通过工厂模式实现：
-- **DeepSeek**: 默认模型，性价比高
-- **Claude Opus 4.6**: 高质量创作，适合复杂剧情
+- **Claude Opus 4.6**: 默认模型，适合复杂剧情
+- **DeepSeek**: 性价比高，适合成本敏感场景
 - **Claude Sonnet 4.6**: 平衡性能与质量
 
 用户可在创建大纲和生成故事时选择 AI 模型。工厂模式位于 `backend/app/services/ai_factory.py`。

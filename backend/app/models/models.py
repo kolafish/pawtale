@@ -74,7 +74,7 @@ class StoryOutline(Base):
     forbidden_elements: Mapped[list] = mapped_column(JSON, default=list)  # 禁止元素
 
     # AI模型选择
-    ai_model: Mapped[str | None] = mapped_column(String(50), nullable=True, default="deepseek")  # deepseek/claude-opus-4/claude-sonnet-4
+    ai_model: Mapped[str | None] = mapped_column(String(50), nullable=True, default="claude-opus-4")  # deepseek/claude-opus-4/claude-sonnet-4
 
     # 引导流程字段
     story_goal: Mapped[str | None] = mapped_column(Text, nullable=True)  # 故事目标与读者感受
@@ -144,7 +144,7 @@ class Story(Base):
     mood: Mapped[str | None] = mapped_column(String(50), nullable=True)  # 甜/虐/搞笑/治愈
     writing_style: Mapped[str | None] = mapped_column(String(50), nullable=True)  # 文字风格: 细腻/白描/诗意/轻松
     chapter_length: Mapped[str | None] = mapped_column(String(20), nullable=True)  # 章节长度: 短/中/长
-    ai_model: Mapped[str | None] = mapped_column(String(50), nullable=True, default="deepseek")  # AI模型选择
+    ai_model: Mapped[str | None] = mapped_column(String(50), nullable=True, default="claude-opus-4")  # AI模型选择
     nodes: Mapped[dict] = mapped_column(JSON, default=dict)  # 剧情节点树（增强结构）
     current_node_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
     current_path: Mapped[list] = mapped_column(JSON, default=list)  # 当前阅读路径

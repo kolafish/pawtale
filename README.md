@@ -84,7 +84,7 @@ npm run dev
 | ANTHROPIC_AUTH_TOKEN | Claude API 认证令牌（可选） |
 | ANTHROPIC_BASE_URL | Claude API 地址（可选） |
 | OPENAI_API_KEY | OpenAI API 密钥（用于图像生成） |
-| DEFAULT_AI_MODEL | 默认 AI 模型（deepseek / claude-opus-4 / claude-sonnet-4） |
+| DEFAULT_AI_MODEL | 默认 AI 模型（默认 `claude-opus-4`；可选 `deepseek` / `claude-opus-4` / `claude-sonnet-4`） |
 
 ## 文档
 
