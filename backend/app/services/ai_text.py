@@ -460,8 +460,7 @@ C. 选项描述（可选）
                 char_descriptions.append(desc)
             char_section = f"\n角色设定：\n{chr(10).join(char_descriptions)}\n"
 
-        system_prompt = "你是一位专业的文字编辑，擅长根据修改意见润色和重写文本内容。直接输出修改后的正文，不添加标题或格式标签。"
-
+        # Task-oriented prompt — no role redefinition
         user_prompt = f"""请根据修改意见，对以下文本内容进行修改和重写。
 
 要求：
@@ -490,7 +489,7 @@ C. 选项描述（可选）
                 json={
                     "model": "deepseek-chat",
                     "messages": [
-                        {"role": "system", "content": system_prompt},
+                        {"role": "system", "content": "你是一位专业的文字编辑。"},
                         {"role": "user", "content": user_prompt},
                     ],
                     "temperature": 0.8,
@@ -510,7 +509,7 @@ C. 选项描述（可选）
                     "model": "deepseek-chat",
                     "temperature": 0.8,
                     "max_tokens": 3000,
-                    "system_prompt": system_prompt,
+                    "system_prompt": "你是一位专业的文字编辑。",
                     "user_prompt": user_prompt,
                 },
                 response_text=content,
