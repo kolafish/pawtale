@@ -433,66 +433,51 @@ C. 选项描述（可选）
     ) -> dict:
         """根据修改意见重新生成章节内容"""
 
-        # 文字风格映射
         style_prompts = {
-            "细腻": "文字风格要细腻，注重心理描写和情感刻画。",
-            "白描": "文字风格要简洁白描，用简练的语言勾勒场景和人物。",
-            "诗意": "文字风格要诗意唯美，运用优美的比喻和意象。",
-            "轻松": "文字风格要轻松活泼，语言俏皮有趣。",
+            "细腻": "文字风格要细腻，注重心理描写和情感刻画",
+            "白描": "文字风格要简洁白描，用简练的语言勾勒场景和人物",
+            "诗意": "文字风格要诗意唯美，运用优美的比喻和意象",
+            "轻松": "文字风格要轻松活泼，语言俏皮有趣",
         }
 
-        # 章节长度映射
         length_prompts = {
-            "短": "请控制在200-300字左右。",
-            "中": "请控制在400-600字左右。",
-            "长": "请控制在800-1200字左右。",
+            "短": "修改后控制在200-300字左右",
+            "中": "修改后控制在400-600字左右",
+            "长": "修改后控制在800-1200字左右",
         }
 
-        # 构建角色描述
-        char_descriptions = []
-        for char in characters:
-            desc = f"【{char['name']}】"
-            if char.get('identity'):
-                desc += f" {char['identity']}"
-            if char.get('personality'):
-                desc += f"，性格：{'、'.join(char['personality'])}"
-            if char.get('speaking_style'):
-                desc += f"，说话风格：{char['speaking_style']}"
-            char_descriptions.append(desc)
+        char_section = ""
+        if characters:
+            char_descriptions = []
+            for char in characters:
+                desc = f"【{char['name']}】"
+                if char.get('identity'):
+                    desc += f" {char['identity']}"
+                if char.get('personality'):
+                    desc += f"，性格：{'、'.join(char['personality'])}"
+                if char.get('speaking_style'):
+                    desc += f"，说话风格：{char['speaking_style']}"
+                char_descriptions.append(desc)
+            char_section = f"\n角色设定：\n{chr(10).join(char_descriptions)}\n"
 
-        system_prompt = f"""你是一个专业的言情小说作家和编辑。
-用户会给你一段原始故事内容和修改意见，请根据修改意见重新生成这段内容。
-
-{style_prompts.get(writing_style, style_prompts['细腻'])}
-{length_prompts.get(chapter_length, length_prompts['中'])}
-
-角色设定：
-{chr(10).join(char_descriptions)}
+        # Task-oriented prompt — no role redefinition
+        user_prompt = f"""请根据修改意见，对以下文本内容进行修改和重写。
 
 要求：
-1. 保持故事的连贯性和角色性格的一致性
-2. 根据修改意见调整内容，但保留原有的核心情节
-3. 在故事结尾提供2-3个新的分支选项
-
-输出格式：
-【章节标题】
-（给这一章起一个有意境的标题，4-8个字）
-
-【故事内容】
-（这里是修改后的故事正文）
-
-【分支选项】
-A. 选项描述
-B. 选项描述
-C. 选项描述（可选）"""
-
-        user_prompt = f"""原始内容：
+- {style_prompts.get(writing_style, style_prompts['细腻'])}
+- {length_prompts.get(chapter_length, length_prompts['中'])}
+- 保持故事的连贯性和角色性格的一致性
+- 直接输出修改后的正文内容，不要添加标题、标记或格式标签
+{char_section}
+---
+原始内容：
 {original_content}
 
 修改意见：
 {revision_instruction}
+---
 
-请根据修改意见重新生成这段内容。"""
+请直接输出修改后的内容："""
 
         async with httpx.AsyncClient() as client:
             response = await client.post(
@@ -504,7 +489,7 @@ C. 选项描述（可选）"""
                 json={
                     "model": "deepseek-chat",
                     "messages": [
-                        {"role": "system", "content": system_prompt},
+                        {"role": "system", "content": "你是一位专业的文字编辑。"},
                         {"role": "user", "content": user_prompt},
                     ],
                     "temperature": 0.8,
@@ -516,21 +501,21 @@ C. 选项描述（可选）"""
             result = response.json()
 
         content = result["choices"][0]["message"]["content"]
-        parsed_result = self._parse_story_response(content)
+        revised = {"content": content.strip()}
         if debug:
-            parsed_result["debug_info"] = build_debug_info(
+            revised["debug_info"] = build_debug_info(
                 request_info={
                     "provider": "deepseek",
                     "model": "deepseek-chat",
                     "temperature": 0.8,
                     "max_tokens": 3000,
-                    "system_prompt": system_prompt,
+                    "system_prompt": "你是一位专业的文字编辑。",
                     "user_prompt": user_prompt,
                 },
                 response_text=content,
                 response_json=result,
             )
-        return parsed_result
+        return revised
 
     def _parse_story_response(self, content: str) -> dict:
         """解析 AI 返回的故事内容和分支选项"""

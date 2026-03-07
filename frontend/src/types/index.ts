@@ -522,3 +522,108 @@ export interface OutlineGuidedCreateResponse {
   story_goal: string; // 原始故事目标
   character_tension: string; // 原始角色张力
 }
+
+// ── Project-based writing types ──────────────────────
+
+export interface Project {
+  id: string;
+  title: string;
+  description?: string;
+  word_count_target?: number;
+  daily_word_goal?: number;
+  total_word_count: number;
+  groups: DocumentGroup[];
+  references: ReferenceItemBrief[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProjectListItem {
+  id: string;
+  title: string;
+  description?: string;
+  word_count_target?: number;
+  total_word_count: number;
+  updated_at: string;
+}
+
+export interface DocumentGroup {
+  id: string;
+  name: string;
+  sort_order: number;
+  documents: DocumentMeta[];
+}
+
+export interface DocumentMeta {
+  id: string;
+  group_id: string;
+  name: string;
+  status: string;
+  label?: string;
+  word_count: number;
+  sort_order: number;
+  updated_at: string;
+}
+
+export interface WritingDocument {
+  id: string;
+  group_id: string;
+  name: string;
+  content: string;
+  synopsis?: string;
+  status: string;
+  label?: string;
+  word_count_target?: number;
+  word_count: number;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ReferenceItemBrief {
+  id: string;
+  type: string;
+  name: string;
+  sort_order: number;
+}
+
+export interface ReferenceItem {
+  id: string;
+  project_id: string;
+  type: string;  // character/location/note
+  name: string;
+  content: string;
+  metadata_json: Record<string, any>;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WritingSession {
+  id: string;
+  project_id: string;
+  date: string;
+  words_written: number;
+  created_at: string;
+}
+
+export interface ProjectExportResponse {
+  title: string;
+  sections: { group: string; documents: { name: string; content: string; word_count: number }[] }[];
+  total_words: number;
+}
+
+// ── AI Revision / Diff ────────────────────────────
+
+export interface DiffChunk {
+  id: string;
+  type: 'equal' | 'insert' | 'delete';
+  text: string;
+  accepted: boolean | null; // null=pending, true=accepted, false=rejected
+}
+
+export interface SelectionRange {
+  start: number;
+  end: number;
+  text: string;
+}

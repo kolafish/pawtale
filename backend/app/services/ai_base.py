@@ -4,6 +4,17 @@ from abc import ABC, abstractmethod
 class AITextServiceBase(ABC):
     """AI文本生成服务基类"""
 
+    def merge_system_into_user(self, system_prompt: str, user_prompt: str) -> str:
+        """
+        Merge system prompt into user prompt for proxies that ignore system role.
+
+        This is a helper for Claude proxies using OpenAI-compatible format that
+        ignore system role messages. Override this in subclasses if needed.
+        """
+        if not system_prompt or not system_prompt.strip():
+            return user_prompt
+        return f"{system_prompt.strip()}\n\n{user_prompt.strip()}"
+
     @abstractmethod
     async def auto_complete_character(
         self,

@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Character, Scene, Story, StoryGenerateResponse, StoryOutline, StoryWorkspace } from '../types';
+import type { Character, Scene, Story, StoryGenerateResponse, StoryOutline, StoryWorkspace, Project } from '../types';
 
 interface AppState {
   // 当前选中
@@ -28,6 +28,10 @@ interface AppState {
   isGenerating: boolean;
   defaultAiModel: 'deepseek' | 'claude-opus-4' | 'claude-sonnet-4';
 
+  // Project-based writing
+  currentProject: Project | null;
+  currentDocumentId: string | null;
+
   // Actions
   setSelectedCharacters: (characters: Character[]) => void;
   addSelectedCharacter: (character: Character) => void;
@@ -47,6 +51,8 @@ interface AppState {
   setEditTab: (tab: 'characters' | 'scenes' | 'stories' | 'outlines') => void;
   setIsGenerating: (isGenerating: boolean) => void;
   setDefaultAiModel: (model: 'deepseek' | 'claude-opus-4' | 'claude-sonnet-4') => void;
+  setCurrentProject: (project: Project | null) => void;
+  setCurrentDocumentId: (docId: string | null) => void;
   reset: () => void;
 }
 
@@ -65,6 +71,8 @@ export const useAppStore = create<AppState>((set) => ({
   editTab: 'characters',
   isGenerating: false,
   defaultAiModel: 'claude-opus-4',
+  currentProject: null,
+  currentDocumentId: null,
 
   setSelectedCharacters: (characters) => set({ selectedCharacters: characters }),
   addSelectedCharacter: (character) => set((state) => ({
@@ -96,6 +104,8 @@ export const useAppStore = create<AppState>((set) => ({
   setEditTab: (tab) => set({ editTab: tab }),
   setIsGenerating: (isGenerating) => set({ isGenerating }),
   setDefaultAiModel: (model) => set({ defaultAiModel: model }),
+  setCurrentProject: (project) => set({ currentProject: project }),
+  setCurrentDocumentId: (docId) => set({ currentDocumentId: docId }),
   reset: () => set({
     selectedCharacters: [],
     selectedScene: null,
@@ -105,5 +115,7 @@ export const useAppStore = create<AppState>((set) => ({
     currentOutline: null,
     currentSceneInStory: null,
     presentCharacters: [],
+    currentProject: null,
+    currentDocumentId: null,
   }),
 }));
