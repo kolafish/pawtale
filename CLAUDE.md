@@ -100,12 +100,26 @@ Layout (h-screen flex flex-col)
 - **`useProjectState` hook**: 文档内容、auto-save (3s debounce)、Cmd+S、CRUD 操作、AI 续写、导出
 - **TanStack Query**: 项目列表、参考资料列表、文档关联等服务端数据
 
-### AI 续写
+### AI 功能
 
+**AI 续写**：
 - 用户在编辑器中写作，点击"AI 续写"按钮
 - 可输入续写指令引导 AI 方向
-- AI 生成内容追加到文档末尾，自动插入 `--- AI 续写 ---` 分隔符
+- AI 生成内容追加到文档末尾
 - 多模型支持：Claude Opus 4.6 / Sonnet 4.6 / DeepSeek，通过工厂模式切换
+
+**AI 修改**：
+- 选中文本或全文，点击"AI 修改"按钮
+- 输入修改意见（如"改得更诗意"、"缩短到 300 字"）
+- AI 返回修改建议（不自动保存，由用户决定是否接受）
+- 支持 diff 对比查看修改前后差异
+
+**AI 服务架构**：
+- 工厂模式：`get_ai_service(model)` 返回对应服务实例
+- 统一接口：`AITextServiceBase` 定义所有 AI 方法
+- Claude 代理限制：system role 被忽略 → 合并到 user message
+- DeepSeek：原生 API，支持 system role（但保持简短）
+- 详见 `backend/docs/AI_ARCHITECTURE.md`
 
 ### API 路由注册顺序
 
@@ -124,13 +138,15 @@ Layout (h-screen flex flex-col)
 ### 后端
 - `backend/app/models/projects.py` - 项目系统模型（Project, DocumentGroup, Document, ReferenceItem, WritingSession）
 - `backend/app/schemas/projects.py` - 项目系统 Pydantic schemas
-- `backend/app/routers/projects.py` - 项目 API 端点（`/api/projects/*`）
+- `backend/app/routers/projects.py` - 项目 API 端点（`/api/projects/*`，包括 AI 续写/修改）
 - `backend/app/models/models.py` - 旧模型（Character, Scene, Story 等，仍在使用 Character/Scene）
 - `backend/app/routers/characters.py` - 全局角色库 API
 - `backend/app/routers/scenes.py` - 全局场景库 API
 - `backend/app/services/ai_factory.py` - AI 服务工厂
+- `backend/app/services/ai_base.py` - AI 服务抽象基类
 - `backend/app/services/ai_claude.py` - Claude 文本生成服务
 - `backend/app/services/ai_text.py` - DeepSeek 文本生成服务
+- `backend/docs/AI_ARCHITECTURE.md` - AI 服务架构完整文档
 - `backend/scripts/migrate_to_projects.py` - 数据迁移脚本
 
 ### 前端
@@ -149,7 +165,7 @@ Layout (h-screen flex flex-col)
 - `frontend/src/components/ScenePanel.tsx` - 全局场景库管理
 
 ### 测试
-- `backend/tests/test_projects.py` - 项目 API 测试（23 tests）
+- `backend/tests/test_projects.py` - 项目 API 测试（32 tests，包括 AI 续写/修改）
 - `backend/tests/test_api.py` - 旧 API 端点测试（角色、场景、故事）
 - `backend/tests/test_services.py` - AI 服务测试
 - `backend/tests/test_frontend.py` - 前端编译测试（TypeScript + Vite）
