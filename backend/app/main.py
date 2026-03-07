@@ -1,14 +1,26 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.database import init_db
+from sqlalchemy import text
+from app.database import init_db, engine
 from app.routers import characters_router, scenes_router, stories_router, outlines_router
+
+
+async def _auto_migrate():
+    """Add missing columns to existing tables."""
+    async with engine.begin() as conn:
+        # Check if story_workspaces has chapters column
+        result = await conn.execute(text("PRAGMA table_info(story_workspaces)"))
+        columns = {row[1] for row in result.fetchall()}
+        if "chapters" not in columns:
+            await conn.execute(text("ALTER TABLE story_workspaces ADD COLUMN chapters JSON DEFAULT '[]'"))
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # 启动时初始化数据库
     await init_db()
+    await _auto_migrate()
     yield
 
 

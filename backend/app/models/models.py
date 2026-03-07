@@ -182,6 +182,7 @@ class StoryWorkspace(Base):
 
     story_id: Mapped[str] = mapped_column(String(36), ForeignKey("stories.id"), primary_key=True)
     editor_content: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    chapters: Mapped[list] = mapped_column(JSON, default=list)
     extracted_characters: Mapped[list] = mapped_column(JSON, default=list)
     extracted_scenes: Mapped[list] = mapped_column(JSON, default=list)
     extracted_outline_points: Mapped[list] = mapped_column(JSON, default=list)

@@ -551,6 +551,87 @@ class TestStoryAPI:
         assert "debug_info" in data
         assert data["debug_info"]["request"]["provider"] == "unknown"
 
+    async def test_workspace_chapters_initialized_on_create(self, client):
+        """测试创建工作区时 chapters 字段被正确初始化"""
+        response = await client.post(
+            "/api/stories/workspace",
+            json={
+                "title": "章节测试",
+                "content": "第一章的内容。",
+            },
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "chapters" in data
+        assert len(data["chapters"]) == 1
+        assert data["chapters"][0]["id"] == "ch_1"
+        assert data["chapters"][0]["title"] == "第一章"
+        assert data["chapters"][0]["content"] == "第一章的内容。"
+
+    async def test_workspace_update_with_chapters(self, client):
+        """测试通过 chapters 更新工作区"""
+        create_resp = await client.post(
+            "/api/stories/workspace",
+            json={"title": "多章节测试", "content": "初始内容"},
+        )
+        story_id = create_resp.json()["story_id"]
+
+        new_chapters = [
+            {"id": "ch_1", "title": "第一章", "content": "改过的第一章"},
+            {"id": "ch_2", "title": "第二章", "content": "新增第二章"},
+        ]
+        update_resp = await client.put(
+            f"/api/stories/{story_id}/workspace",
+            json={"chapters": new_chapters},
+        )
+        assert update_resp.status_code == 200
+        data = update_resp.json()
+        assert len(data["chapters"]) == 2
+        assert data["chapters"][1]["title"] == "第二章"
+        # editor_content should be merged from all chapters
+        assert "改过的第一章" in data["editor_content"]
+        assert "新增第二章" in data["editor_content"]
+
+    async def test_workspace_get_backfills_chapters(self, client):
+        """测试获取工作区时自动补全 chapters（兼容旧数据）"""
+        create_resp = await client.post(
+            "/api/stories/workspace",
+            json={"title": "旧数据兼容", "content": "一段旧内容"},
+        )
+        story_id = create_resp.json()["story_id"]
+
+        get_resp = await client.get(f"/api/stories/{story_id}/workspace")
+        assert get_resp.status_code == 200
+        data = get_resp.json()
+        assert len(data["chapters"]) >= 1
+        assert data["chapters"][0]["content"] == "一段旧内容"
+
+    async def test_workspace_ai_continue_with_chapter_id(self, client):
+        """测试 AI 续写时指定 chapter_id"""
+        create_resp = await client.post(
+            "/api/stories/workspace",
+            json={"title": "续写章节测试", "content": "窗外下着雨。"},
+        )
+        story_id = create_resp.json()["story_id"]
+
+        with patch("app.routers.stories.get_ai_service") as mock_get_service:
+            mock_service = AsyncMock()
+            mock_service.generate_story = AsyncMock(return_value={
+                "content": "他走进来了。",
+                "choices": [],
+            })
+            mock_get_service.return_value = mock_service
+
+            response = await client.post(
+                f"/api/stories/{story_id}/workspace/ai-continue",
+                json={"append": True, "chapter_id": "ch_1"},
+            )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "他走进来了。" in data["editor_content"]
+
     async def test_update_story_scene_id(self, client):
         """测试更新故事关联场景"""
         char_response = await client.post("/api/characters", json={"name": "测试角色"})

@@ -303,6 +303,12 @@ export interface StoryExportResponse {
   total_words: number;
 }
 
+export interface WorkspaceChapter {
+  id: string;       // "ch_" + random ID
+  title: string;    // "第一章"
+  content: string;
+}
+
 export interface ExtractedCharacter {
   name: string;
   role_hint?: string;
@@ -329,6 +335,7 @@ export interface StoryWorkspace {
   chapter_length?: string;
   ai_model?: string;
   editor_content: string;
+  chapters: WorkspaceChapter[];
   extracted_characters: ExtractedCharacter[];
   extracted_scenes: ExtractedScene[];
   extracted_outline_points: ExtractedOutlinePoint[];
@@ -349,6 +356,7 @@ export interface StoryWorkspaceCreateRequest {
 export interface StoryWorkspaceUpdateRequest {
   title?: string;
   content?: string;
+  chapters?: WorkspaceChapter[];
   mood?: string;
   writing_style?: string;
   chapter_length?: string;
@@ -360,6 +368,7 @@ export interface StoryWorkspaceAIContinueRequest {
   ai_model?: string;
   append?: boolean;
   debug?: boolean;
+  chapter_id?: string;
 }
 
 export interface StoryWorkspaceAIContinueResponse {

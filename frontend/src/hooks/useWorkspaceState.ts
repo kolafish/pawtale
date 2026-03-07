@@ -11,6 +11,7 @@ import type {
   Scene,
   Story,
   StoryOutline,
+  WorkspaceChapter,
 } from '../types';
 
 function emptyCharacter(): ExtractedCharacter {
@@ -34,12 +35,23 @@ export function splitTokens(value: string): string[] {
 
 function countWords(text: string): number {
   if (!text) return 0;
-  // Count Chinese characters
   const chineseChars = (text.match(/[\u4e00-\u9fff\u3400-\u4dbf]/g) || []).length;
-  // Count English words (sequences of non-CJK, non-whitespace)
   const stripped = text.replace(/[\u4e00-\u9fff\u3400-\u4dbf]/g, ' ');
   const englishWords = stripped.split(/\s+/).filter((w) => w.length > 0).length;
   return chineseChars + englishWords;
+}
+
+function generateChapterId(): string {
+  return `ch_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function chineseNumber(n: number): string {
+  const nums = ['零', '一', '二', '三', '四', '五', '六', '七', '八', '九', '十'];
+  if (n <= 10) return nums[n];
+  if (n < 20) return `十${nums[n - 10]}`;
+  const tens = Math.floor(n / 10);
+  const ones = n % 10;
+  return `${nums[tens]}十${ones > 0 ? nums[ones] : ''}`;
 }
 
 export type SaveStatus = 'saved' | 'saving' | 'unsaved';
@@ -62,6 +74,10 @@ export function useWorkspaceState() {
   const [debugInfo, setDebugInfo] = useState<AIDebugInfo | null>(null);
   const [extractDebugInfo, setExtractDebugInfo] = useState<AIDebugInfo | null>(null);
 
+  // Chapter state
+  const [chapters, setChapters] = useState<WorkspaceChapter[]>([]);
+  const [currentChapterId, setCurrentChapterId] = useState('');
+
   // Extraction state
   const [extractedCharacters, setExtractedCharacters] = useState<ExtractedCharacter[]>([]);
   const [extractedScenes, setExtractedScenes] = useState<ExtractedScene[]>([]);
@@ -76,7 +92,7 @@ export function useWorkspaceState() {
   // Save status
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('saved');
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastSavedContentRef = useRef<string>('');
+  const lastSavedChaptersRef = useRef<string>('');
   const lastSavedTitleRef = useRef<string>('');
 
   // ─── Queries ───
@@ -101,6 +117,24 @@ export function useWorkspaceState() {
     queryFn: () => storiesApi.getById(currentWorkspace!.story_id),
     enabled: Boolean(currentWorkspace?.story_id),
   });
+
+  // ─── Helper: serialize chapters for dirty check ───
+  const serializeChapters = useCallback((chs: WorkspaceChapter[]) => {
+    return JSON.stringify(chs.map((ch) => ({ id: ch.id, title: ch.title, content: ch.content })));
+  }, []);
+
+  // ─── editorContent ↔ chapter sync ───
+  // When editorContent changes (user typing), sync to current chapter
+  const handleSetEditorContent = useCallback(
+    (value: string) => {
+      setEditorContent(value);
+      if (!currentChapterId) return;
+      setChapters((prev) =>
+        prev.map((ch) => (ch.id === currentChapterId ? { ...ch, content: value } : ch)),
+      );
+    },
+    [currentChapterId],
+  );
 
   // ─── Mutations ───
   const createWorkspaceMutation = useMutation({
@@ -127,33 +161,43 @@ export function useWorkspaceState() {
   });
 
   const saveWorkspaceMutation = useMutation({
-    mutationFn: ({ storyId, payload }: { storyId: string; payload: { title?: string; content?: string; ai_model?: string } }) =>
+    mutationFn: ({ storyId, payload }: { storyId: string; payload: { title?: string; content?: string; chapters?: WorkspaceChapter[]; ai_model?: string } }) =>
       storiesApi.updateWorkspace(storyId, payload),
     onSuccess: (workspace) => {
       setCurrentWorkspace(workspace);
       setSaveStatus('saved');
-      lastSavedContentRef.current = editorContent;
+      lastSavedChaptersRef.current = serializeChapters(chapters);
       lastSavedTitleRef.current = title;
       queryClient.invalidateQueries({ queryKey: ['stories'] });
     },
   });
 
   const continueMutation = useMutation({
-    mutationFn: ({ storyId, payload }: { storyId: string; payload: { instruction?: string; ai_model?: string; append?: boolean; debug?: boolean } }) =>
+    mutationFn: ({ storyId, payload }: { storyId: string; payload: { instruction?: string; ai_model?: string; append?: boolean; debug?: boolean; chapter_id?: string } }) =>
       storiesApi.continueWorkspace(storyId, payload),
     onSuccess: async (result) => {
-      // Insert separator before AI-generated content
       const separator = '\n\n--- AI 续写 ---\n\n';
-      const newContent = editorContent.trimEnd() + separator + result.generated_chunk;
-      setEditorContent(newContent);
-      setDebugInfo(result.debug_info || null);
-      // Save with separator included
-      if (currentWorkspace) {
-        await saveWorkspaceMutation.mutateAsync({
-          storyId: currentWorkspace.story_id,
-          payload: { content: newContent },
+      const generatedChunk = result.generated_chunk;
+      // Update current chapter content
+      setChapters((prev) => {
+        const updated = prev.map((ch) => {
+          if (ch.id === currentChapterId) {
+            const newContent = ch.content.trimEnd() + separator + generatedChunk;
+            setEditorContent(newContent);
+            return { ...ch, content: newContent };
+          }
+          return ch;
         });
-      }
+        // Save with updated chapters
+        if (currentWorkspace) {
+          saveWorkspaceMutation.mutate({
+            storyId: currentWorkspace.story_id,
+            payload: { chapters: updated },
+          });
+        }
+        return updated;
+      });
+      setDebugInfo(result.debug_info || null);
       queryClient.invalidateQueries({ queryKey: ['stories'] });
     },
   });
@@ -223,16 +267,39 @@ export function useWorkspaceState() {
   useEffect(() => {
     if (!currentWorkspace) return;
     setTitle(currentWorkspace.title || '未命名作品');
-    setEditorContent(currentWorkspace.editor_content || '');
     setAiModel((currentWorkspace.ai_model as typeof defaultAiModel) || defaultAiModel);
     setExtractedCharacters(currentWorkspace.extracted_characters || []);
     setExtractedScenes(currentWorkspace.extracted_scenes || []);
     setExtractedOutlinePoints(currentWorkspace.extracted_outline_points || []);
     setExtractionNotesText((currentWorkspace.extraction_notes || []).join('\n'));
-    lastSavedContentRef.current = currentWorkspace.editor_content || '';
     lastSavedTitleRef.current = currentWorkspace.title || '未命名作品';
     setSaveStatus('saved');
-  }, [currentWorkspace, defaultAiModel]);
+
+    // Initialize chapters
+    const wsChapters = currentWorkspace.chapters;
+    if (wsChapters && wsChapters.length > 0) {
+      setChapters(wsChapters);
+      setCurrentChapterId(wsChapters[0].id);
+      setEditorContent(wsChapters[0].content || '');
+    } else {
+      // Backfill from editor_content
+      const fallback: WorkspaceChapter[] = [{
+        id: 'ch_1',
+        title: '第一章',
+        content: currentWorkspace.editor_content || '',
+      }];
+      setChapters(fallback);
+      setCurrentChapterId('ch_1');
+      setEditorContent(currentWorkspace.editor_content || '');
+    }
+    lastSavedChaptersRef.current = serializeChapters(
+      currentWorkspace.chapters?.length ? currentWorkspace.chapters : [{
+        id: 'ch_1',
+        title: '第一章',
+        content: currentWorkspace.editor_content || '',
+      }],
+    );
+  }, [currentWorkspace, defaultAiModel, serializeChapters]);
 
   useEffect(() => {
     setLinkedSceneId(currentStory?.scene_id || '');
@@ -243,18 +310,20 @@ export function useWorkspaceState() {
   const doSave = useCallback(async () => {
     if (!currentWorkspace) return;
     const trimmedTitle = title.trim() || '未命名作品';
-    if (editorContent === lastSavedContentRef.current && trimmedTitle === lastSavedTitleRef.current) return;
+    const currentSerialized = serializeChapters(chapters);
+    if (currentSerialized === lastSavedChaptersRef.current && trimmedTitle === lastSavedTitleRef.current) return;
     setSaveStatus('saving');
     await saveWorkspaceMutation.mutateAsync({
       storyId: currentWorkspace.story_id,
-      payload: { title: trimmedTitle, content: editorContent, ai_model: aiModel },
+      payload: { title: trimmedTitle, chapters, ai_model: aiModel },
     });
-  }, [currentWorkspace, title, editorContent, aiModel, saveWorkspaceMutation]);
+  }, [currentWorkspace, title, chapters, aiModel, saveWorkspaceMutation, serializeChapters]);
 
   useEffect(() => {
     if (!currentWorkspace) return;
     const trimmedTitle = title.trim() || '未命名作品';
-    if (editorContent === lastSavedContentRef.current && trimmedTitle === lastSavedTitleRef.current) return;
+    const currentSerialized = serializeChapters(chapters);
+    if (currentSerialized === lastSavedChaptersRef.current && trimmedTitle === lastSavedTitleRef.current) return;
     setSaveStatus('unsaved');
     if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
     autoSaveTimerRef.current = setTimeout(() => {
@@ -263,7 +332,7 @@ export function useWorkspaceState() {
     return () => {
       if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
     };
-  }, [editorContent, title, currentWorkspace, doSave]);
+  }, [chapters, title, currentWorkspace, doSave, serializeChapters]);
 
   // Cmd+S keyboard shortcut
   useEffect(() => {
@@ -293,6 +362,56 @@ export function useWorkspaceState() {
     [allOutlines, linkedOutlineId],
   );
   const wordCount = useMemo(() => countWords(editorContent), [editorContent]);
+  const totalWordCount = useMemo(
+    () => chapters.reduce((sum, ch) => sum + countWords(ch.content), 0),
+    [chapters],
+  );
+
+  // ─── Chapter handlers ───
+  const addChapter = useCallback(() => {
+    const newId = generateChapterId();
+    const num = chapters.length + 1;
+    const newTitle = `第${chineseNumber(num)}章`;
+    const newChapter: WorkspaceChapter = { id: newId, title: newTitle, content: '' };
+    setChapters((prev) => [...prev, newChapter]);
+    setCurrentChapterId(newId);
+    setEditorContent('');
+  }, [chapters.length]);
+
+  const deleteChapter = useCallback(
+    (chapterId: string) => {
+      if (chapters.length <= 1) return; // keep at least one
+      const idx = chapters.findIndex((ch) => ch.id === chapterId);
+      const next = chapters.filter((ch) => ch.id !== chapterId);
+      setChapters(next);
+      if (currentChapterId === chapterId) {
+        const newIdx = Math.min(idx, next.length - 1);
+        setCurrentChapterId(next[newIdx].id);
+        setEditorContent(next[newIdx].content);
+      }
+    },
+    [chapters, currentChapterId],
+  );
+
+  const renameChapter = useCallback(
+    (chapterId: string, newTitle: string) => {
+      setChapters((prev) =>
+        prev.map((ch) => (ch.id === chapterId ? { ...ch, title: newTitle } : ch)),
+      );
+    },
+    [],
+  );
+
+  const switchChapter = useCallback(
+    (chapterId: string) => {
+      if (chapterId === currentChapterId) return;
+      const target = chapters.find((ch) => ch.id === chapterId);
+      if (!target) return;
+      setCurrentChapterId(chapterId);
+      setEditorContent(target.content);
+    },
+    [chapters, currentChapterId],
+  );
 
   // ─── Handlers ───
   const handleCreateWorkspace = async () => {
@@ -352,17 +471,10 @@ export function useWorkspaceState() {
       storyId: currentWorkspace.story_id,
       payload: {
         title: title.trim() || '未命名作品',
-        content: editorContent,
+        chapters,
         ai_model: aiModel,
       },
     });
-
-    if (editorContent.trim().length >= 60) {
-      await extractMutation.mutateAsync({
-        storyId: currentWorkspace.story_id,
-        payload: { content: editorContent, ai_model: aiModel, debug: debugMode },
-      });
-    }
   };
 
   const handleContinue = async () => {
@@ -374,6 +486,7 @@ export function useWorkspaceState() {
         ai_model: aiModel,
         append: true,
         debug: debugMode,
+        chapter_id: currentChapterId || undefined,
       },
     });
     setContinueInstruction('');
@@ -381,9 +494,11 @@ export function useWorkspaceState() {
 
   const handleExtract = async () => {
     if (!currentWorkspace) return;
+    // Extract from all chapters combined
+    const allContent = chapters.map((ch) => ch.content).join('\n\n');
     await extractMutation.mutateAsync({
       storyId: currentWorkspace.story_id,
-      payload: { content: editorContent, ai_model: aiModel, debug: debugMode },
+      payload: { content: allContent, ai_model: aiModel, debug: debugMode },
     });
   };
 
@@ -432,7 +547,10 @@ export function useWorkspaceState() {
 
   const handleExportTxt = () => {
     if (!currentWorkspace) return;
-    const blob = new Blob([editorContent], { type: 'text/plain;charset=utf-8' });
+    const fullText = chapters
+      .map((ch) => `${ch.title}\n\n${ch.content}`)
+      .join('\n\n---\n\n');
+    const blob = new Blob([fullText], { type: 'text/plain;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -477,7 +595,7 @@ export function useWorkspaceState() {
     title,
     setTitle,
     editorContent,
-    setEditorContent,
+    setEditorContent: handleSetEditorContent,
     aiModel,
     setAiModel,
     continueInstruction,
@@ -500,6 +618,15 @@ export function useWorkspaceState() {
     linkedOutlineId,
     saveStatus,
     wordCount,
+    totalWordCount,
+
+    // Chapter state
+    chapters,
+    currentChapterId,
+    addChapter,
+    deleteChapter,
+    renameChapter,
+    switchChapter,
 
     // Queries
     storyOptions,

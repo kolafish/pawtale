@@ -25,31 +25,36 @@ export function WritingWorkspace() {
   }
 
   return (
-    <div className="h-full flex">
-      <div className="flex-1 min-w-0">
-        <EditorMain
-          title={ws.title}
-          setTitle={ws.setTitle}
-          editorContent={ws.editorContent}
-          setEditorContent={ws.setEditorContent}
-          aiModel={ws.aiModel}
-          setAiModel={(v) => ws.setAiModel(v as typeof ws.aiModel)}
-          continueInstruction={ws.continueInstruction}
-          setContinueInstruction={ws.setContinueInstruction}
-          debugMode={ws.debugMode}
-          setDebugMode={ws.setDebugMode}
-          debugInfo={ws.debugInfo}
-          saveStatus={ws.saveStatus}
-          wordCount={ws.wordCount}
-          isSaving={ws.isSaving}
-          isContinuing={ws.isContinuing}
-          isExtracting={ws.isExtracting}
-          onSave={ws.handleSaveContent}
-          onContinue={ws.handleContinue}
-          onExtract={ws.handleExtract}
-          onSwitchWorkspace={() => ws.setCurrentWorkspace(null)}
-        />
-      </div>
+    <div className="h-full relative">
+      <EditorMain
+        title={ws.title}
+        setTitle={ws.setTitle}
+        editorContent={ws.editorContent}
+        setEditorContent={ws.setEditorContent}
+        aiModel={ws.aiModel}
+        setAiModel={(v) => ws.setAiModel(v as typeof ws.aiModel)}
+        continueInstruction={ws.continueInstruction}
+        setContinueInstruction={ws.setContinueInstruction}
+        debugMode={ws.debugMode}
+        setDebugMode={ws.setDebugMode}
+        debugInfo={ws.debugInfo}
+        saveStatus={ws.saveStatus}
+        wordCount={ws.wordCount}
+        totalWordCount={ws.totalWordCount}
+        isSaving={ws.isSaving}
+        isContinuing={ws.isContinuing}
+        isExtracting={ws.isExtracting}
+        onSave={ws.handleSaveContent}
+        onContinue={ws.handleContinue}
+        onExtract={ws.handleExtract}
+        onSwitchWorkspace={() => ws.setCurrentWorkspace(null)}
+        chapters={ws.chapters}
+        currentChapterId={ws.currentChapterId}
+        onAddChapter={ws.addChapter}
+        onDeleteChapter={ws.deleteChapter}
+        onRenameChapter={ws.renameChapter}
+        onSwitchChapter={ws.switchChapter}
+      />
       <WritingSidebar ws={ws} />
     </div>
   );

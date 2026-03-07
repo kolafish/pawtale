@@ -30,7 +30,7 @@ export function WorkspaceHome({
 }: WorkspaceHomeProps) {
   return (
     <div className="h-full overflow-y-auto p-6 bg-gradient-to-b from-white to-pink-50/40">
-      <div className="max-w-5xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-6">
         <section className="rounded-2xl border border-pink-100 bg-white p-5">
           <h2 className="text-lg font-semibold text-gray-800">新建作品</h2>
           <p className="text-sm text-gray-500 mt-1">不需要先配角色/场景，直接开写。</p>

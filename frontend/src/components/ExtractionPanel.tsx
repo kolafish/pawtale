@@ -1,4 +1,5 @@
-import { Plus, RefreshCw, Save, Trash2, ArrowDownToLine } from 'lucide-react';
+import { useCallback } from 'react';
+import { Plus, RefreshCw, Save, Trash2, BookmarkPlus } from 'lucide-react';
 import { splitTokens } from '../hooks/useWorkspaceState';
 import { AIDebugPanel } from './AIDebugPanel';
 import type { AIDebugInfo, ExtractedCharacter, ExtractedScene, ExtractedOutlinePoint } from '../types';
@@ -21,6 +22,37 @@ interface ExtractionPanelProps {
   emptyCharacter: () => ExtractedCharacter;
   emptyScene: () => ExtractedScene;
   emptyOutlinePoint: () => ExtractedOutlinePoint;
+}
+
+function AutoTextarea({
+  value,
+  onChange,
+  placeholder,
+  className = '',
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+  className?: string;
+}) {
+  const handleInput = useCallback((el: HTMLTextAreaElement) => {
+    el.style.height = 'auto';
+    el.style.height = el.scrollHeight + 'px';
+  }, []);
+
+  return (
+    <textarea
+      value={value}
+      onChange={(e) => {
+        onChange(e.target.value);
+        handleInput(e.target);
+      }}
+      onFocus={(e) => handleInput(e.target)}
+      placeholder={placeholder}
+      rows={1}
+      className={`w-full px-2 py-1.5 text-sm rounded-lg border border-gray-200 focus:outline-none focus:ring-1 focus:ring-pink-300 overflow-hidden resize-none ${className}`}
+    />
+  );
 }
 
 export function ExtractionPanel({
@@ -61,7 +93,7 @@ export function ExtractionPanel({
           <AIDebugPanel debugInfo={extractDebugInfo} title="提炼 Debug" />
         ) : (
           <div className="text-xs text-amber-700 border border-amber-200 bg-amber-50 rounded-lg px-3 py-2">
-            已开启 Debug。本次提炼尚未返回调试信息，请重新点击一次“自动提炼”。
+            已开启 Debug。本次提炼尚未返回调试信息，请重新点击一次"自动提炼"。
           </div>
         )
       )}
@@ -78,64 +110,69 @@ export function ExtractionPanel({
           </button>
         </div>
         {extractedCharacters.map((item, index) => (
-          <div key={`char-${index}`} className="rounded-lg border border-gray-100 p-2 space-y-1">
-            <div className="flex gap-1">
-              <input
+          <div key={`char-${index}`} className="bg-gray-50 rounded-xl p-3 space-y-2 relative">
+            <button
+              onClick={() => setExtractedCharacters(extractedCharacters.filter((_, i) => i !== index))}
+              className="absolute top-2 right-2 p-1 text-gray-400 hover:text-red-500 rounded-full hover:bg-red-50"
+            >
+              <Trash2 size={14} />
+            </button>
+            <div>
+              <label className="text-xs font-bold text-gray-600 mb-0.5 block">角色名</label>
+              <AutoTextarea
                 value={item.name}
-                onChange={(e) => {
+                onChange={(v) => {
                   const next = [...extractedCharacters];
-                  next[index] = { ...next[index], name: e.target.value };
+                  next[index] = { ...next[index], name: v };
                   setExtractedCharacters(next);
                 }}
                 placeholder="角色名"
-                className="flex-1 px-2 py-1 text-sm rounded border border-gray-200"
               />
-              <button
-                onClick={() => onSaveCharacterToLibrary(item)}
-                disabled={!item.name.trim()}
-                className="p-1 text-gray-400 hover:text-green-600 disabled:opacity-40"
-                title="存入角色库"
-              >
-                <ArrowDownToLine size={14} />
-              </button>
-              <button
-                onClick={() => setExtractedCharacters(extractedCharacters.filter((_, i) => i !== index))}
-                className="p-1 text-gray-400 hover:text-red-500"
-              >
-                <Trash2 size={14} />
-              </button>
             </div>
-            <input
-              value={item.role_hint || ''}
-              onChange={(e) => {
-                const next = [...extractedCharacters];
-                next[index] = { ...next[index], role_hint: e.target.value };
-                setExtractedCharacters(next);
-              }}
-              placeholder="角色定位"
-              className="w-full px-2 py-1 text-sm rounded border border-gray-200"
-            />
-            <input
-              value={(item.traits || []).join('，')}
-              onChange={(e) => {
-                const next = [...extractedCharacters];
-                next[index] = { ...next[index], traits: splitTokens(e.target.value) };
-                setExtractedCharacters(next);
-              }}
-              placeholder="特征（逗号分隔）"
-              className="w-full px-2 py-1 text-sm rounded border border-gray-200"
-            />
-            <textarea
-              value={item.summary || ''}
-              onChange={(e) => {
-                const next = [...extractedCharacters];
-                next[index] = { ...next[index], summary: e.target.value };
-                setExtractedCharacters(next);
-              }}
-              placeholder="备注"
-              rows={2}
-              className="w-full px-2 py-1 text-sm rounded border border-gray-200"
-            />
+            <div>
+              <label className="text-xs font-bold text-gray-600 mb-0.5 block">定位</label>
+              <AutoTextarea
+                value={item.role_hint || ''}
+                onChange={(v) => {
+                  const next = [...extractedCharacters];
+                  next[index] = { ...next[index], role_hint: v };
+                  setExtractedCharacters(next);
+                }}
+                placeholder="角色定位"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-bold text-gray-600 mb-0.5 block">性格特征</label>
+              <AutoTextarea
+                value={(item.traits || []).join('，')}
+                onChange={(v) => {
+                  const next = [...extractedCharacters];
+                  next[index] = { ...next[index], traits: splitTokens(v) };
+                  setExtractedCharacters(next);
+                }}
+                placeholder="特征（逗号分隔）"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-bold text-gray-600 mb-0.5 block">备注</label>
+              <AutoTextarea
+                value={item.summary || ''}
+                onChange={(v) => {
+                  const next = [...extractedCharacters];
+                  next[index] = { ...next[index], summary: v };
+                  setExtractedCharacters(next);
+                }}
+                placeholder="备注"
+              />
+            </div>
+            <button
+              onClick={() => onSaveCharacterToLibrary(item)}
+              disabled={!item.name.trim()}
+              className="inline-flex items-center gap-1.5 text-sm text-green-700 hover:text-green-800 disabled:opacity-40 disabled:cursor-not-allowed font-medium pt-1"
+            >
+              <BookmarkPlus size={14} />
+              存入角色库
+            </button>
           </div>
         ))}
       </section>
@@ -152,53 +189,57 @@ export function ExtractionPanel({
           </button>
         </div>
         {extractedScenes.map((item, index) => (
-          <div key={`scene-${index}`} className="rounded-lg border border-gray-100 p-2 space-y-1">
-            <div className="flex gap-1">
-              <input
+          <div key={`scene-${index}`} className="bg-gray-50 rounded-xl p-3 space-y-2 relative">
+            <button
+              onClick={() => setExtractedScenes(extractedScenes.filter((_, i) => i !== index))}
+              className="absolute top-2 right-2 p-1 text-gray-400 hover:text-red-500 rounded-full hover:bg-red-50"
+            >
+              <Trash2 size={14} />
+            </button>
+            <div>
+              <label className="text-xs font-bold text-gray-600 mb-0.5 block">场景名</label>
+              <AutoTextarea
                 value={item.name}
-                onChange={(e) => {
+                onChange={(v) => {
                   const next = [...extractedScenes];
-                  next[index] = { ...next[index], name: e.target.value };
+                  next[index] = { ...next[index], name: v };
                   setExtractedScenes(next);
                 }}
                 placeholder="场景名"
-                className="flex-1 px-2 py-1 text-sm rounded border border-gray-200"
               />
-              <button
-                onClick={() => onSaveSceneToLibrary(item)}
-                disabled={!item.name.trim()}
-                className="p-1 text-gray-400 hover:text-green-600 disabled:opacity-40"
-                title="存入场景库"
-              >
-                <ArrowDownToLine size={14} />
-              </button>
-              <button
-                onClick={() => setExtractedScenes(extractedScenes.filter((_, i) => i !== index))}
-                className="p-1 text-gray-400 hover:text-red-500"
-              >
-                <Trash2 size={14} />
-              </button>
             </div>
-            <input
-              value={item.description || ''}
-              onChange={(e) => {
-                const next = [...extractedScenes];
-                next[index] = { ...next[index], description: e.target.value };
-                setExtractedScenes(next);
-              }}
-              placeholder="场景描述"
-              className="w-full px-2 py-1 text-sm rounded border border-gray-200"
-            />
-            <input
-              value={(item.keywords || []).join('，')}
-              onChange={(e) => {
-                const next = [...extractedScenes];
-                next[index] = { ...next[index], keywords: splitTokens(e.target.value) };
-                setExtractedScenes(next);
-              }}
-              placeholder="关键词（逗号分隔）"
-              className="w-full px-2 py-1 text-sm rounded border border-gray-200"
-            />
+            <div>
+              <label className="text-xs font-bold text-gray-600 mb-0.5 block">描述</label>
+              <AutoTextarea
+                value={item.description || ''}
+                onChange={(v) => {
+                  const next = [...extractedScenes];
+                  next[index] = { ...next[index], description: v };
+                  setExtractedScenes(next);
+                }}
+                placeholder="场景描述"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-bold text-gray-600 mb-0.5 block">关键词</label>
+              <AutoTextarea
+                value={(item.keywords || []).join('，')}
+                onChange={(v) => {
+                  const next = [...extractedScenes];
+                  next[index] = { ...next[index], keywords: splitTokens(v) };
+                  setExtractedScenes(next);
+                }}
+                placeholder="关键词（逗号分隔）"
+              />
+            </div>
+            <button
+              onClick={() => onSaveSceneToLibrary(item)}
+              disabled={!item.name.trim()}
+              className="inline-flex items-center gap-1.5 text-sm text-green-700 hover:text-green-800 disabled:opacity-40 disabled:cursor-not-allowed font-medium pt-1"
+            >
+              <BookmarkPlus size={14} />
+              存入场景库
+            </button>
           </div>
         ))}
       </section>
@@ -215,36 +256,37 @@ export function ExtractionPanel({
           </button>
         </div>
         {extractedOutlinePoints.map((item, index) => (
-          <div key={`outline-${index}`} className="rounded-lg border border-gray-100 p-2 space-y-1">
-            <div className="flex gap-1">
-              <input
+          <div key={`outline-${index}`} className="bg-gray-50 rounded-xl p-3 space-y-2 relative">
+            <button
+              onClick={() => setExtractedOutlinePoints(extractedOutlinePoints.filter((_, i) => i !== index))}
+              className="absolute top-2 right-2 p-1 text-gray-400 hover:text-red-500 rounded-full hover:bg-red-50"
+            >
+              <Trash2 size={14} />
+            </button>
+            <div>
+              <label className="text-xs font-bold text-gray-600 mb-0.5 block">阶段</label>
+              <AutoTextarea
                 value={item.stage}
-                onChange={(e) => {
+                onChange={(v) => {
                   const next = [...extractedOutlinePoints];
-                  next[index] = { ...next[index], stage: e.target.value };
+                  next[index] = { ...next[index], stage: v };
                   setExtractedOutlinePoints(next);
                 }}
                 placeholder="阶段"
-                className="w-28 px-2 py-1 text-sm rounded border border-gray-200"
               />
-              <button
-                onClick={() => setExtractedOutlinePoints(extractedOutlinePoints.filter((_, i) => i !== index))}
-                className="p-1 text-gray-400 hover:text-red-500"
-              >
-                <Trash2 size={14} />
-              </button>
             </div>
-            <textarea
-              value={item.summary}
-              onChange={(e) => {
-                const next = [...extractedOutlinePoints];
-                next[index] = { ...next[index], summary: e.target.value };
-                setExtractedOutlinePoints(next);
-              }}
-              placeholder="该阶段情节"
-              rows={2}
-              className="w-full px-2 py-1 text-sm rounded border border-gray-200"
-            />
+            <div>
+              <label className="text-xs font-bold text-gray-600 mb-0.5 block">情节概要</label>
+              <AutoTextarea
+                value={item.summary}
+                onChange={(v) => {
+                  const next = [...extractedOutlinePoints];
+                  next[index] = { ...next[index], summary: v };
+                  setExtractedOutlinePoints(next);
+                }}
+                placeholder="该阶段情节"
+              />
+            </div>
           </div>
         ))}
       </section>
@@ -252,12 +294,10 @@ export function ExtractionPanel({
       {/* Consistency Notes */}
       <section className="space-y-2">
         <h4 className="text-sm font-medium text-gray-700">一致性提醒</h4>
-        <textarea
+        <AutoTextarea
           value={extractionNotesText}
-          onChange={(e) => setExtractionNotesText(e.target.value)}
+          onChange={setExtractionNotesText}
           placeholder="每行一条提醒"
-          rows={5}
-          className="w-full px-2 py-1 text-sm rounded border border-gray-200"
         />
       </section>
     </div>

@@ -356,6 +356,7 @@ class StoryWorkspaceCreateRequest(BaseModel):
 class StoryWorkspaceUpdateRequest(BaseModel):
     title: str | None = None
     content: str | None = None
+    chapters: list[dict] | None = None
     mood: str | None = None
     writing_style: str | None = None
     chapter_length: str | None = None
@@ -373,6 +374,7 @@ class StoryWorkspaceAIContinueRequest(BaseModel):
     ai_model: str | None = None
     append: bool = True
     debug: bool = False
+    chapter_id: str | None = None
 
 
 class StoryWorkspaceExtractionUpdateRequest(BaseModel):
@@ -390,6 +392,7 @@ class StoryWorkspaceResponse(BaseModel):
     chapter_length: str | None = None
     ai_model: str | None = None
     editor_content: str
+    chapters: list[dict] = []
     extracted_characters: list[ExtractedCharacter] = []
     extracted_scenes: list[ExtractedScene] = []
     extracted_outline_points: list[ExtractedOutlinePoint] = []
