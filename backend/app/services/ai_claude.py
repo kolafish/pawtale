@@ -390,57 +390,51 @@ C. 选项描述（可选）"""
     ) -> dict:
         """根据修改意见重新生成章节内容"""
         style_prompts = {
-            "细腻": "文字风格要细腻，注重心理描写和情感刻画。",
-            "白描": "文字风格要简洁白描，用简练的语言勾勒场景和人物。",
-            "诗意": "文字风格要诗意唯美，运用优美的比喻和意象。",
-            "轻松": "文字风格要轻松活泼，语言俏皮有趣。",
+            "细腻": "文字风格要细腻，注重心理描写和情感刻画",
+            "白描": "文字风格要简洁白描，用简练的语言勾勒场景和人物",
+            "诗意": "文字风格要诗意唯美，运用优美的比喻和意象",
+            "轻松": "文字风格要轻松活泼，语言俏皮有趣",
         }
 
         length_prompts = {
-            "短": "请控制在200-300字左右。",
-            "中": "请控制在400-600字左右。",
-            "长": "请控制在800-1200字左右。",
+            "短": "修改后控制在200-300字左右",
+            "中": "修改后控制在400-600字左右",
+            "长": "修改后控制在800-1200字左右",
         }
 
-        char_descriptions = []
-        for char in characters:
-            desc = f"【{char['name']}】"
-            if char.get('identity'):
-                desc += f" {char['identity']}"
-            if char.get('personality'):
-                desc += f"，性格：{'、'.join(char['personality'])}"
-            char_descriptions.append(desc)
+        char_section = ""
+        if characters:
+            char_descriptions = []
+            for char in characters:
+                desc = f"【{char['name']}】"
+                if char.get('identity'):
+                    desc += f" {char['identity']}"
+                if char.get('personality'):
+                    desc += f"，性格：{'、'.join(char['personality'])}"
+                char_descriptions.append(desc)
+            char_section = f"\n角色设定：\n{chr(10).join(char_descriptions)}\n"
 
-        system_prompt = f"""你是一个专业的言情小说作家和编辑。
-用户会给你一段原始故事内容和修改意见，请根据修改意见重新生成这段内容。
+        # Task-oriented prompt — no role redefinition to avoid proxy system prompt conflicts
+        user_prompt = f"""请根据修改意见，对以下文本内容进行修改和重写。
 
-{style_prompts.get(writing_style, style_prompts['细腻'])}
-{length_prompts.get(chapter_length, length_prompts['中'])}
-
-角色设定：
-{chr(10).join(char_descriptions)}
-
-输出格式：
-【章节标题】
-（标题）
-
-【故事内容】
-（正文）
-
-【分支选项】
-A. 选项描述
-B. 选项描述"""
-
-        user_prompt = f"""原始内容：
+要求：
+- {style_prompts.get(writing_style, style_prompts['细腻'])}
+- {length_prompts.get(chapter_length, length_prompts['中'])}
+- 保持故事的连贯性和角色性格的一致性
+- 直接输出修改后的正文内容，不要添加标题、标记或格式标签
+{char_section}
+---
+原始内容：
 {original_content}
 
 修改意见：
 {revision_instruction}
+---
 
-请根据修改意见重新生成这段内容。"""
+请直接输出修改后的内容："""
 
         raw_response = await self._call_claude(
-            system_prompt,
+            "",  # No system prompt — merged into user_prompt to work with proxy
             user_prompt,
             temperature=0.8,
             max_tokens=3000,
@@ -452,21 +446,21 @@ B. 选项描述"""
             content = raw_response  # type: ignore[assignment]
             response_json = None
 
-        parsed_result = self._parse_story_response(content)
+        result = {"content": content.strip()}
         if debug:
-            parsed_result["debug_info"] = build_debug_info(
+            result["debug_info"] = build_debug_info(
                 request_info={
                     "provider": "claude",
                     "model": self.model,
                     "temperature": 0.8,
                     "max_tokens": 3000,
-                    "system_prompt": system_prompt,
+                    "system_prompt": "(merged into user prompt)",
                     "user_prompt": user_prompt,
                 },
                 response_text=content,
                 response_json=response_json,
             )
-        return parsed_result
+        return result
 
     def _parse_story_response(self, content: str) -> dict:
         """解析 AI 返回的故事内容和分支选项"""

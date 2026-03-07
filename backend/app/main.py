@@ -3,7 +3,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from app.database import init_db, engine
-from app.routers import characters_router, scenes_router, stories_router, outlines_router
+from app.routers import characters_router, scenes_router, stories_router, outlines_router, projects_router
 
 
 async def _auto_migrate():
@@ -45,6 +45,7 @@ app.include_router(characters_router)
 app.include_router(scenes_router)
 app.include_router(stories_router)
 app.include_router(outlines_router)
+app.include_router(projects_router)
 
 
 @app.get("/")

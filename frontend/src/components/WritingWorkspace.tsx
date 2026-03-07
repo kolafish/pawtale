@@ -1,61 +1,140 @@
-import { useWorkspaceState } from '../hooks/useWorkspaceState';
-import { WorkspaceHome } from './WorkspaceHome';
+import { useEffect } from 'react';
+import { useAppStore } from '../stores/appStore';
+import { useProjectState } from '../hooks/useProjectState';
+import { useAIRevision } from '../hooks/useAIRevision';
+import { ProjectHome } from './ProjectHome';
+import { Binder } from './Binder';
 import { EditorMain } from './EditorMain';
-import { WritingSidebar } from './WritingSidebar';
+import { Inspector } from './Inspector';
+import { AIAssistPanel } from './AIAssistPanel';
 
 export function WritingWorkspace() {
-  const ws = useWorkspaceState();
+  const { currentProject } = useAppStore();
+  const ps = useProjectState();
+  const revision = useAIRevision();
 
-  if (!ws.currentWorkspace) {
-    return (
-      <WorkspaceHome
-        newTitle={ws.newTitle}
-        setNewTitle={ws.setNewTitle}
-        newContent={ws.newContent}
-        setNewContent={ws.setNewContent}
-        selectedExistingStoryId={ws.selectedExistingStoryId}
-        setSelectedExistingStoryId={ws.setSelectedExistingStoryId}
-        storyOptions={ws.storyOptions}
-        isCreating={ws.isCreating}
-        isLoading={ws.isLoading}
-        onCreateWorkspace={ws.handleCreateWorkspace}
-        onOpenExistingStory={ws.handleOpenExistingStory}
-      />
-    );
+  // Sync reviewing state to pause auto-save during diff review
+  useEffect(() => {
+    ps.setIsReviewing(revision.isReviewing);
+  }, [revision.isReviewing]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (!currentProject) {
+    return <ProjectHome />;
   }
 
+  const handleRequestRevision = async () => {
+    if (!currentProject || !ps.currentDocumentId) return;
+    await revision.requestRevision(
+      currentProject.id,
+      ps.currentDocumentId,
+      ps.documentContent,
+      ps.aiModel,
+      ps.debugMode,
+    );
+  };
+
+  const handleApplyRevision = () => {
+    const result = revision.applyRevision();
+    if (result !== null) {
+      if (revision.revisionScope === 'selection' && revision.selection) {
+        // Replace only the selected portion in the full document
+        const before = ps.documentContent.substring(0, revision.selection.start);
+        const after = ps.documentContent.substring(revision.selection.end);
+        ps.setDocumentContent(before + result + after);
+      } else {
+        ps.setDocumentContent(result);
+      }
+      revision.clearRevision();
+    }
+  };
+
   return (
-    <div className="h-full relative">
-      <EditorMain
-        title={ws.title}
-        setTitle={ws.setTitle}
-        editorContent={ws.editorContent}
-        setEditorContent={ws.setEditorContent}
-        aiModel={ws.aiModel}
-        setAiModel={(v) => ws.setAiModel(v as typeof ws.aiModel)}
-        continueInstruction={ws.continueInstruction}
-        setContinueInstruction={ws.setContinueInstruction}
-        debugMode={ws.debugMode}
-        setDebugMode={ws.setDebugMode}
-        debugInfo={ws.debugInfo}
-        saveStatus={ws.saveStatus}
-        wordCount={ws.wordCount}
-        totalWordCount={ws.totalWordCount}
-        isSaving={ws.isSaving}
-        isContinuing={ws.isContinuing}
-        isExtracting={ws.isExtracting}
-        onSave={ws.handleSaveContent}
-        onContinue={ws.handleContinue}
-        onExtract={ws.handleExtract}
-        onSwitchWorkspace={() => ws.setCurrentWorkspace(null)}
-        chapters={ws.chapters}
-        currentChapterId={ws.currentChapterId}
-        onAddChapter={ws.addChapter}
-        onDeleteChapter={ws.deleteChapter}
-        onRenameChapter={ws.renameChapter}
-        onSwitchChapter={ws.switchChapter}
+    <div className="h-full w-full flex">
+      <Binder
+        project={currentProject}
+        currentDocumentId={ps.currentDocumentId}
+        onSelectDocument={ps.switchDocument}
+        onCreateGroup={ps.createGroup}
+        onRenameGroup={ps.renameGroup}
+        onDeleteGroup={ps.deleteGroup}
+        onCreateDocument={ps.createDocument}
+        onRenameDocument={ps.renameDocument}
+        onDeleteDocument={ps.deleteDocument}
       />
-      <WritingSidebar ws={ws} />
+      <div className="flex-1 min-w-0 relative">
+        {ps.currentDocumentId ? (
+          <EditorMain
+            title={ps.documentName}
+            setTitle={ps.setDocumentName}
+            editorContent={ps.documentContent}
+            setEditorContent={ps.setDocumentContent}
+            saveStatus={ps.saveStatus}
+            wordCount={ps.wordCount}
+            totalWordCount={ps.totalWordCount}
+            isSaving={ps.isSaving}
+            onSave={ps.handleSave}
+            onCloseProject={ps.closeProject}
+            // Selection
+            onSelectionChange={revision.setSelection}
+            // Diff review
+            diffChunks={revision.diffChunks}
+            onAcceptChunk={revision.acceptChunk}
+            onRejectChunk={revision.rejectChunk}
+            onToggleChunk={revision.toggleChunk}
+            onAcceptAll={revision.acceptAll}
+            onRejectAll={revision.rejectAll}
+            onApplyRevision={handleApplyRevision}
+            onCancelRevision={revision.clearRevision}
+            // AI panel
+            isAIPanelOpen={revision.isOpen}
+            onToggleAIPanel={() => revision.setIsOpen(!revision.isOpen)}
+          />
+        ) : (
+          <div className="h-full flex items-center justify-center text-gray-400">
+            <p>选择一个文档开始写作</p>
+          </div>
+        )}
+        <Inspector
+          project={currentProject}
+          currentDocumentId={ps.currentDocumentId}
+          synopsis={ps.synopsis}
+          setSynopsis={ps.setSynopsis}
+          status={ps.status}
+          setStatus={ps.setStatus}
+          label={ps.label}
+          setLabel={ps.setLabel}
+          wordCount={ps.wordCount}
+          totalWordCount={ps.totalWordCount}
+          onExport={ps.handleExportTxt}
+        />
+      </div>
+      {revision.isOpen && ps.currentDocumentId && (
+        <AIAssistPanel
+          onClose={() => revision.setIsOpen(false)}
+          // Revision
+          revisionInstruction={revision.revisionInstruction}
+          setRevisionInstruction={revision.setRevisionInstruction}
+          revisionScope={revision.revisionScope}
+          setRevisionScope={revision.setRevisionScope}
+          selection={revision.selection}
+          isRevising={revision.isRevising}
+          isReviewing={revision.isReviewing}
+          onRequestRevision={handleRequestRevision}
+          // Continue
+          continueInstruction={ps.continueInstruction}
+          setContinueInstruction={ps.setContinueInstruction}
+          isContinuing={ps.isContinuing}
+          onContinue={ps.handleContinue}
+          hasContent={!!ps.documentContent.trim()}
+          // Model & debug
+          aiModel={ps.aiModel}
+          setAiModel={(v) => ps.setAiModel(v as typeof ps.aiModel)}
+          debugMode={ps.debugMode}
+          setDebugMode={ps.setDebugMode}
+          debugInfo={ps.debugInfo}
+          revisionDebugInfo={revision.debugInfo}
+        />
+      )}
     </div>
   );
 }

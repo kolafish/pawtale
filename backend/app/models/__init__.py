@@ -9,6 +9,14 @@ from app.models.models import (
     OutlineCharacter,
     OutlineScene,
 )
+from app.models.projects import (
+    Project,
+    DocumentGroup,
+    Document,
+    ReferenceItem,
+    DocumentReference,
+    WritingSession,
+)
 
 __all__ = [
     "Base",
@@ -20,4 +28,10 @@ __all__ = [
     "StoryOutline",
     "OutlineCharacter",
     "OutlineScene",
+    "Project",
+    "DocumentGroup",
+    "Document",
+    "ReferenceItem",
+    "DocumentReference",
+    "WritingSession",
 ]

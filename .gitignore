@@ -12,6 +12,7 @@ backend/venv/
 backend/.env
 
 # Node
+node_modules/
 frontend/node_modules/
 frontend/dist/
 frontend/.env
@@ -21,3 +22,7 @@ frontend/.env
 
 # Local temp / runtime files
 *.pid
+
+data/pawtale.db
+data/pawtale.db.bak_*
+backend/data/
