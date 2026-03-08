@@ -269,6 +269,12 @@ export function useProjectState() {
     await refreshProject();
   };
 
+  const reorderGroups = async (items: { id: string; sort_order: number }[]) => {
+    if (!currentProject) return;
+    await projectsApi.reorderGroups(currentProject.id, items);
+    await refreshProject();
+  };
+
   return {
     // Project
     currentProject,
@@ -324,5 +330,6 @@ export function useProjectState() {
     renameDocument,
     deleteDocument,
     reorderDocuments,
+    reorderGroups,
   };
 }

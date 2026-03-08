@@ -22,6 +22,13 @@ export function WritingWorkspace() {
     return <ProjectHome />;
   }
 
+  console.log('[WritingWorkspace] Rendering with project:', currentProject.title);
+  console.log('[WritingWorkspace] Project state:', {
+    hasGroups: !!currentProject.groups,
+    groupsLength: currentProject.groups?.length,
+    currentDocId: ps.currentDocumentId,
+  });
+
   const handleRequestRevision = async () => {
     if (!currentProject || !ps.currentDocumentId) return;
     await revision.requestRevision(
@@ -60,6 +67,8 @@ export function WritingWorkspace() {
         onCreateDocument={ps.createDocument}
         onRenameDocument={ps.renameDocument}
         onDeleteDocument={ps.deleteDocument}
+        onReorderGroups={ps.reorderGroups}
+        onReorderDocuments={ps.reorderDocuments}
       />
       <div className="flex-1 min-w-0 relative">
         {ps.currentDocumentId ? (
