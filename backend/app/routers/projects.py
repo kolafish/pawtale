@@ -1,5 +1,8 @@
 import re
+import logging
 from fastapi import APIRouter, Depends, HTTPException
+
+logger = logging.getLogger(__name__)
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
@@ -675,6 +678,7 @@ async def ai_revise_document(
             debug=req.debug,
         )
     except Exception as e:
+        logger.exception("AI revise failed for doc=%s project=%s", document_id, project_id)
         raise HTTPException(status_code=500, detail=f"AI修改失败: {str(e)}")
 
     revised_text = (revise_result.get("content") or "").strip()
