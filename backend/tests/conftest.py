@@ -1,5 +1,8 @@
 import pytest
 import pytest_asyncio
+import tempfile
+from pathlib import Path
+from unittest.mock import patch
 from httpx import AsyncClient, ASGITransport
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 
@@ -30,15 +33,16 @@ async def test_db():
 
 
 @pytest_asyncio.fixture
-async def client(test_db):
-    """创建测试客户端"""
+async def client(test_db, tmp_path):
+    """创建测试客户端（文件存储重定向到临时目录）"""
     async def override_get_db():
         yield test_db
 
     app.dependency_overrides[get_db] = override_get_db
 
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        yield ac
+    with patch("app.services.content_storage.PROJECTS_DIR", tmp_path / "projects"):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+            yield ac
 
     app.dependency_overrides.clear()

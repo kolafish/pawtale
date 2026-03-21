@@ -23,6 +23,10 @@ from app.schemas.projects import (
     DocumentAIReviseRequest, DocumentAIReviseResponse,
 )
 from app.services import get_ai_service
+from app.services.content_storage import (
+    read_content, write_content, delete_content,
+    ensure_project_dir, delete_project_dir, delete_group_documents,
+)
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
 
@@ -36,15 +40,11 @@ def _count_words(text: str) -> int:
     return chinese + english
 
 
-def _doc_word_count(doc: Document) -> int:
-    return _count_words(doc.content)
-
-
 def _project_total_words(project: Project) -> int:
     total = 0
     for g in (project.groups or []):
         for d in (g.documents or []):
-            total += _count_words(d.content)
+            total += d.word_count
     return total
 
 
@@ -55,7 +55,7 @@ def _doc_meta(doc: Document) -> DocumentMeta:
         name=doc.name,
         status=doc.status or "draft",
         label=doc.label,
-        word_count=_count_words(doc.content),
+        word_count=doc.word_count,
         sort_order=doc.sort_order,
         updated_at=doc.updated_at,
     )
@@ -141,10 +141,12 @@ async def create_project(req: ProjectCreate, db: AsyncSession = Depends(get_db))
     db.add(group)
     await db.flush()
 
-    doc = Document(group_id=group.id, name="未命名文档", sort_order=0)
+    doc = Document(group_id=group.id, name="未命名文档", sort_order=0, word_count=0)
     db.add(doc)
 
     await db.commit()
+    await ensure_project_dir(project.id)
+    await write_content(project.id, doc.id, "")
     project = await _load_project(db, project.id)
     return _project_resp(project)
 
@@ -172,6 +174,7 @@ async def delete_project(project_id: str, db: AsyncSession = Depends(get_db)):
     project = await _load_project(db, project_id)
     await db.delete(project)
     await db.commit()
+    await delete_project_dir(project_id)
 
 
 # ── Groups ───────────────────────────────────────────
@@ -220,13 +223,17 @@ async def update_group(project_id: str, group_id: str, req: GroupUpdate, db: Asy
 @router.delete("/{project_id}/groups/{group_id}", status_code=204)
 async def delete_group(project_id: str, group_id: str, db: AsyncSession = Depends(get_db)):
     result = await db.execute(
-        select(DocumentGroup).where(DocumentGroup.id == group_id, DocumentGroup.project_id == project_id)
+        select(DocumentGroup)
+        .where(DocumentGroup.id == group_id, DocumentGroup.project_id == project_id)
+        .options(selectinload(DocumentGroup.documents))
     )
     group = result.scalar_one_or_none()
     if not group:
         raise HTTPException(status_code=404, detail="分组不存在")
+    doc_ids = [d.id for d in group.documents]
     await db.delete(group)
     await db.commit()
+    await delete_group_documents(project_id, doc_ids)
 
 
 # ── Documents ────────────────────────────────────────
@@ -247,12 +254,13 @@ async def create_document(
     if not group:
         raise HTTPException(status_code=404, detail="分组不存在")
     max_order = max((d.sort_order for d in group.documents), default=-1)
-    doc = Document(group_id=group_id, name=req.name, sort_order=max_order + 1)
+    doc = Document(group_id=group_id, name=req.name, sort_order=max_order + 1, word_count=0)
     db.add(doc)
     await db.commit()
     await db.refresh(doc)
+    await write_content(project_id, doc.id, "")
     return DocumentResponse(
-        id=doc.id, group_id=doc.group_id, name=doc.name, content=doc.content,
+        id=doc.id, group_id=doc.group_id, name=doc.name, content="",
         synopsis=doc.synopsis, status=doc.status, label=doc.label,
         word_count_target=doc.word_count_target, word_count=0,
         sort_order=doc.sort_order, created_at=doc.created_at, updated_at=doc.updated_at,
@@ -287,10 +295,11 @@ async def get_document(project_id: str, document_id: str, db: AsyncSession = Dep
     doc = result.scalar_one_or_none()
     if not doc:
         raise HTTPException(status_code=404, detail="文档不存在")
+    content = await read_content(project_id, doc.id)
     return DocumentResponse(
-        id=doc.id, group_id=doc.group_id, name=doc.name, content=doc.content,
+        id=doc.id, group_id=doc.group_id, name=doc.name, content=content,
         synopsis=doc.synopsis, status=doc.status, label=doc.label,
-        word_count_target=doc.word_count_target, word_count=_doc_word_count(doc),
+        word_count_target=doc.word_count_target, word_count=doc.word_count,
         sort_order=doc.sort_order, created_at=doc.created_at, updated_at=doc.updated_at,
     )
 
@@ -307,16 +316,20 @@ async def update_document(
     doc = result.scalar_one_or_none()
     if not doc:
         raise HTTPException(status_code=404, detail="文档不存在")
-    for field in ["name", "content", "synopsis", "status", "label", "word_count_target"]:
+    if req.content is not None:
+        await write_content(project_id, doc.id, req.content)
+        doc.word_count = _count_words(req.content)
+    for field in ["name", "synopsis", "status", "label", "word_count_target"]:
         val = getattr(req, field, None)
         if val is not None:
             setattr(doc, field, val)
     await db.commit()
     await db.refresh(doc)
+    content = await read_content(project_id, doc.id)
     return DocumentResponse(
-        id=doc.id, group_id=doc.group_id, name=doc.name, content=doc.content,
+        id=doc.id, group_id=doc.group_id, name=doc.name, content=content,
         synopsis=doc.synopsis, status=doc.status, label=doc.label,
-        word_count_target=doc.word_count_target, word_count=_doc_word_count(doc),
+        word_count_target=doc.word_count_target, word_count=doc.word_count,
         sort_order=doc.sort_order, created_at=doc.created_at, updated_at=doc.updated_at,
     )
 
@@ -333,6 +346,7 @@ async def delete_document(project_id: str, document_id: str, db: AsyncSession = 
         raise HTTPException(status_code=404, detail="文档不存在")
     await db.delete(doc)
     await db.commit()
+    await delete_content(project_id, document_id)
 
 
 # ── References ───────────────────────────────────────
@@ -556,9 +570,10 @@ async def export_project(project_id: str, db: AsyncSession = Depends(get_db)):
     for g in project.groups:
         docs = []
         for d in g.documents:
-            wc = _count_words(d.content)
+            content = await read_content(project_id, d.id)
+            wc = _count_words(content)
             total += wc
-            docs.append({"name": d.name, "content": d.content, "word_count": wc})
+            docs.append({"name": d.name, "content": content, "word_count": wc})
         sections.append({"group": g.name, "documents": docs})
     return ProjectExportResponse(title=project.title, sections=sections, total_words=total)
 
@@ -584,7 +599,8 @@ async def ai_continue_document(
     if not doc:
         raise HTTPException(status_code=404, detail="文档不存在")
 
-    base_content = (doc.content or "").strip()
+    content = await read_content(project_id, doc.id)
+    base_content = content.strip()
     if not base_content:
         raise HTTPException(status_code=400, detail="请先写一些内容")
 
@@ -619,13 +635,14 @@ async def ai_continue_document(
     if not generated_chunk:
         raise HTTPException(status_code=502, detail="AI未返回可用续写内容")
 
-    doc.content = f"{doc.content.rstrip()}\n\n{generated_chunk}"
+    new_content = f"{content.rstrip()}\n\n{generated_chunk}"
+    await write_content(project_id, doc.id, new_content)
+    doc.word_count = _count_words(new_content)
     await db.commit()
-    await db.refresh(doc)
 
     return DocumentAIContinueResponse(
         document_id=doc.id,
-        content=doc.content,
+        content=new_content,
         generated_chunk=generated_chunk,
         ai_model=selected_ai_model,
         debug_info=story_result.get("debug_info") if req.debug else None,
@@ -657,12 +674,11 @@ async def ai_revise_document(
     ai_service = get_ai_service(selected_ai_model)
 
     if req.selected_text:
-        # Selection mode: revise only the selected text
         original_text = req.selected_text
         scope = "selection"
     else:
-        # Full document mode
-        original_text = (doc.content or "").strip()
+        content = await read_content(project_id, doc.id)
+        original_text = content.strip()
         scope = "full"
 
     if not original_text:

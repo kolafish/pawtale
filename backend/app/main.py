@@ -15,6 +15,12 @@ async def _auto_migrate():
         if "chapters" not in columns:
             await conn.execute(text("ALTER TABLE story_workspaces ADD COLUMN chapters JSON DEFAULT '[]'"))
 
+        # Add word_count column to documents if missing
+        result = await conn.execute(text("PRAGMA table_info(documents)"))
+        doc_columns = {row[1] for row in result.fetchall()}
+        if "word_count" not in doc_columns:
+            await conn.execute(text("ALTER TABLE documents ADD COLUMN word_count INTEGER DEFAULT 0"))
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

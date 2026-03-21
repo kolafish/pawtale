@@ -32,16 +32,19 @@ async def test_db():
 
 
 @pytest_asyncio.fixture
-async def client(test_db):
+async def client(test_db, tmp_path):
     """Create test client with in-memory database."""
+    from unittest.mock import patch
+
     async def override_get_db():
         yield test_db
 
     app.dependency_overrides[get_db] = override_get_db
 
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        yield ac
+    with patch("app.services.content_storage.PROJECTS_DIR", tmp_path / "projects"):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+            yield ac
 
     app.dependency_overrides.clear()
 
@@ -74,19 +77,19 @@ async def sample_project(test_db):
     doc1 = Document(
         group_id=group1.id,
         name="开端",
-        content="这是第一章的内容",
+        word_count=7,
         sort_order=0,
     )
     doc2 = Document(
         group_id=group1.id,
         name="发展",
-        content="这是第二章的内容",
+        word_count=7,
         sort_order=1,
     )
     doc3 = Document(
         group_id=group2.id,
         name="高潮",
-        content="这是第三章的内容",
+        word_count=7,
         sort_order=0,
     )
     test_db.add_all([doc1, doc2, doc3])
