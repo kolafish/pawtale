@@ -50,8 +50,9 @@
 - **图标**: Lucide React
 
 ### AI 服务
-- **文本生成**: DeepSeek、Claude Opus 4.6、Claude Sonnet 4.6（工厂模式切换）
+- **文本生成**: DeepSeek、Claude Opus 4.6、Claude Sonnet 4.6（工厂模式 + 模板方法模式）
 - **图像生成**: GPT-4o（角色头像）
+- **架构**: `AITextServiceBase` 基类包含所有 prompt 构建和响应解析，子类只实现 `_call_llm()`
 
 ## 数据模型
 
@@ -145,8 +146,9 @@ POST   /api/projects/{id}/sessions
 # 导出
 GET    /api/projects/{id}/export                   # 导出 TXT
 
-# AI 续写
-POST   /api/projects/{id}/documents/{did}/ai-continue
+# AI 辅助
+POST   /api/projects/{id}/documents/{did}/ai-continue    # AI 续写
+POST   /api/projects/{id}/documents/{did}/ai-revise      # AI 修改（返回 diff）
 ```
 
 ### 全局资料库 API（保留）
@@ -193,17 +195,20 @@ Pawtale/
 │   │   │   └── outlines.py      # 旧大纲（保留）
 │   │   └── services/
 │   │       ├── ai_factory.py    # AI 服务工厂
-│   │       ├── ai_base.py       # AI 服务基类
-│   │       ├── ai_text.py       # DeepSeek 文本生成
-│   │       ├── ai_claude.py     # Claude 文本生成
+│   │       ├── ai_base.py       # AI 服务基类（模板方法，含所有 prompt 和解析逻辑）
+│   │       ├── ai_text.py       # DeepSeek 文本生成（仅 _call_llm）
+│   │       ├── ai_claude.py     # Claude 文本生成（仅 _call_llm + 响应格式兼容）
 │   │       ├── ai_scene.py      # AI 场景生成
 │   │       └── ai_image.py      # GPT-4o 图像生成
 │   ├── scripts/
 │   │   └── migrate_to_projects.py  # 数据迁移脚本
 │   └── tests/
+│       ├── conftest.py          # 测试配置（内存数据库 + dependency_overrides）
 │       ├── test_api.py          # 旧 API 测试
-│       ├── test_projects.py     # 项目 API 测试 (23 tests)
+│       ├── test_projects.py     # 项目 API 测试 (32 tests)
+│       ├── test_ai_base.py      # AI 基类测试 (51 tests，覆盖 helper + 模板方法)
 │       ├── test_services.py     # AI 服务测试
+│       ├── test_binder_rendering.py  # Binder 渲染测试
 │       ├── test_frontend.py     # 前端编译测试
 │       └── test_new_features.py # 多模型等功能测试
 ├── frontend/
@@ -212,19 +217,27 @@ Pawtale/
 │       │   ├── Layout.tsx          # 顶层布局（写作/全局资料库切换）
 │       │   ├── WritingWorkspace.tsx # 写作模式容器
 │       │   ├── ProjectHome.tsx     # 项目列表/创建
-│       │   ├── Binder.tsx          # 左侧文档树 (250px)
+│       │   ├── Binder.tsx          # 左侧文档树 (250px，@dnd-kit 拖拽排序)
+│       │   ├── Binder.drag.tsx     # Binder 拖拽实现（备用）
+│       │   ├── Binder.simple.tsx   # Binder 简化版（备用）
 │       │   ├── EditorMain.tsx      # 编辑器 + 工具栏 + 状态栏
+│       │   ├── AIAssistPanel.tsx   # AI 续写/修改 入口面板
+│       │   ├── DiffReviewView.tsx  # AI 修改 diff 对比视图
 │       │   ├── Inspector.tsx       # 右侧浮层面板（文档/资料/项目）
 │       │   ├── ReferenceSheet.tsx  # 参考资料编辑表单
+│       │   ├── ErrorBoundary.tsx   # React 错误边界
 │       │   ├── CharacterPanel.tsx  # 全局角色库管理
 │       │   ├── ScenePanel.tsx      # 全局场景库管理
 │       │   └── AIDebugPanel.tsx    # AI 调试信息展示
 │       ├── hooks/
-│       │   └── useProjectState.ts  # 项目状态 Hook（auto-save, CRUD, AI）
+│       │   ├── useProjectState.ts  # 项目状态 Hook（auto-save, CRUD, AI, 拖拽排序）
+│       │   └── useAIRevision.ts    # AI 修改 Hook（选段/全文修改，diff 对比）
 │       ├── stores/
 │       │   └── appStore.ts         # Zustand 全局状态
 │       ├── constants/
 │       │   └── aiModels.ts         # AI 模型选项
+│       ├── utils/
+│       │   └── numberUtils.ts      # 中文数字转换、分组/文档编号
 │       ├── api/
 │       │   └── index.ts            # API 客户端（projectsApi, charactersApi, scenesApi）
 │       └── types/
@@ -238,6 +251,21 @@ Pawtale/
 ```
 
 ## 关键设计决策
+
+### AI 服务架构（模板方法模式）
+
+```
+AITextServiceBase (ai_base.py, ~600行)
+├─ 抽象接口: _call_llm(), provider_name, model_name
+├─ 9 个公共方法: generate_story(), revise_chapter(), extract_story_context() 等
+└─ 共享 helper: _extract_json(), _build_char_descriptions(), _parse_story_response() 等
+
+DeepSeekTextService (ai_text.py, ~65行)    ← 原生 system/user 分离
+ClaudeTextService (ai_claude.py, ~125行)   ← system 合并到 user（代理限制）
+```
+
+- 新增模型只需实现 `_call_llm()` + 两个属性
+- 工厂模式：`get_ai_service(model)` 返回对应服务实例
 
 ### 项目加载策略
 - `GET /api/projects/{id}` 返回 groups 和 documents **元数据**（name, word_count, status），但**不含 content**
