@@ -1,4 +1,4 @@
-import { Bot, Bug, RefreshCw, Wand2, X } from 'lucide-react';
+import { Bot, Bug, Columns, RefreshCw, Wand2, X } from 'lucide-react';
 import { AI_MODEL_OPTIONS } from '../constants/aiModels';
 import { AIDebugPanel } from './AIDebugPanel';
 import type { AIDebugInfo, SelectionRange } from '../types';
@@ -13,8 +13,10 @@ interface AIAssistPanelProps {
   setRevisionScope: (v: 'full' | 'selection') => void;
   selection: SelectionRange | null;
   isRevising: boolean;
+  isMultiRevising: boolean;
   isReviewing: boolean;
   onRequestRevision: () => void;
+  onRequestMultiRevision: () => void;
   // Continue
   continueInstruction: string;
   setContinueInstruction: (v: string) => void;
@@ -38,8 +40,10 @@ export function AIAssistPanel({
   setRevisionScope,
   selection,
   isRevising,
+  isMultiRevising,
   isReviewing,
   onRequestRevision,
+  onRequestMultiRevision,
   continueInstruction,
   setContinueInstruction,
   isContinuing,
@@ -116,15 +120,25 @@ export function AIAssistPanel({
             className="w-full px-3 py-2 text-sm rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-pink-500 resize-none mb-3"
           />
 
-          {/* Revise button */}
-          <button
-            onClick={onRequestRevision}
-            disabled={isRevising || isReviewing || !revisionInstruction.trim() || (revisionScope === 'selection' && !selection)}
-            className="w-full inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-pink-500 text-white text-sm hover:bg-pink-600 disabled:opacity-60 transition-colors"
-          >
-            {isRevising ? <RefreshCw size={14} className="animate-spin" /> : <Wand2 size={14} />}
-            {isRevising ? 'AI 修改中...' : '开始修改'}
-          </button>
+          {/* Revise buttons */}
+          <div className="flex gap-2">
+            <button
+              onClick={onRequestRevision}
+              disabled={isRevising || isMultiRevising || isReviewing || !revisionInstruction.trim() || (revisionScope === 'selection' && !selection)}
+              className="flex-1 inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-pink-500 text-white text-sm hover:bg-pink-600 disabled:opacity-60 transition-colors"
+            >
+              {isRevising ? <RefreshCw size={14} className="animate-spin" /> : <Wand2 size={14} />}
+              {isRevising ? '修改中...' : '单模型修改'}
+            </button>
+            <button
+              onClick={onRequestMultiRevision}
+              disabled={isRevising || isMultiRevising || isReviewing || !revisionInstruction.trim() || (revisionScope === 'selection' && !selection)}
+              className="flex-1 inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg border border-pink-300 text-pink-600 text-sm hover:bg-pink-50 disabled:opacity-60 transition-colors"
+            >
+              {isMultiRevising ? <RefreshCw size={14} className="animate-spin" /> : <Columns size={14} />}
+              {isMultiRevising ? '修改中...' : '多模型对比'}
+            </button>
+          </div>
         </div>
 
         {/* AI Continue Section */}

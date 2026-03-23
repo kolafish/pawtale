@@ -1,9 +1,20 @@
 import { useState, useCallback } from 'react';
 import DiffMatchPatch from 'diff-match-patch';
 import { projectsApi } from '../api';
-import type { DiffChunk, SelectionRange, AIDebugInfo } from '../types';
+import type { DiffChunk, SelectionRange, AIDebugInfo, MultiReviseResultItem } from '../types';
 
 const dmp = new DiffMatchPatch();
+
+function computeDiff(orig: string, revised: string): DiffChunk[] {
+  const diffs = dmp.diff_main(orig, revised);
+  dmp.diff_cleanupSemantic(diffs);
+  return diffs.map(([op, text], i) => ({
+    id: `chunk-${i}`,
+    type: op === 0 ? 'equal' : op === 1 ? 'insert' : 'delete',
+    text,
+    accepted: null,
+  }));
+}
 
 export function useAIRevision() {
   const [isOpen, setIsOpen] = useState(false);
@@ -16,7 +27,12 @@ export function useAIRevision() {
   const [revisionScope, setRevisionScope] = useState<'full' | 'selection'>('full');
   const [debugInfo, setDebugInfo] = useState<AIDebugInfo | null>(null);
 
-  const isReviewing = diffChunks !== null;
+  // Multi-model state
+  const [multiResults, setMultiResults] = useState<MultiReviseResultItem[] | null>(null);
+  const [activeTabIndex, setActiveTabIndex] = useState(0);
+  const [isMultiRevising, setIsMultiRevising] = useState(false);
+
+  const isReviewing = diffChunks !== null || multiResults !== null;
 
   const requestRevision = useCallback(async (
     projectId: string,
@@ -41,19 +57,7 @@ export function useAIRevision() {
       setOriginalText(orig);
       setRevisedText(revised);
       setDebugInfo(result.debug_info || null);
-
-      // Compute diff
-      const diffs = dmp.diff_main(orig, revised);
-      dmp.diff_cleanupSemantic(diffs);
-
-      const chunks: DiffChunk[] = diffs.map(([op, text], i) => ({
-        id: `chunk-${i}`,
-        type: op === 0 ? 'equal' : op === 1 ? 'insert' : 'delete',
-        text,
-        accepted: null,
-      }));
-
-      setDiffChunks(chunks);
+      setDiffChunks(computeDiff(orig, revised));
     } catch (e) {
       console.error('AI revision failed:', e);
       throw e;
@@ -61,6 +65,65 @@ export function useAIRevision() {
       setIsRevising(false);
     }
   }, [revisionInstruction, revisionScope, selection]);
+
+  const requestMultiRevision = useCallback(async (
+    projectId: string,
+    docId: string,
+    content: string,
+    models: string[],
+    debug: boolean,
+  ) => {
+    if (!revisionInstruction.trim()) return;
+    setIsMultiRevising(true);
+    try {
+      const result = await projectsApi.aiReviseMulti(projectId, docId, {
+        instruction: revisionInstruction.trim(),
+        selected_text: revisionScope === 'selection' && selection ? selection.text : undefined,
+        full_content: revisionScope === 'selection' ? content : undefined,
+        models,
+        debug,
+      });
+
+      setOriginalText(result.original_text);
+      setMultiResults(result.results);
+
+      // Auto-select first successful result
+      const firstSuccess = result.results.findIndex(r => r.revised_text);
+      const idx = firstSuccess >= 0 ? firstSuccess : 0;
+      setActiveTabIndex(idx);
+
+      const item = result.results[idx];
+      if (item?.revised_text) {
+        setRevisedText(item.revised_text);
+        setDiffChunks(computeDiff(result.original_text, item.revised_text));
+        setDebugInfo(item.debug_info || null);
+      } else {
+        setRevisedText(null);
+        setDiffChunks(null);
+        setDebugInfo(null);
+      }
+    } catch (e) {
+      console.error('AI multi-revision failed:', e);
+      throw e;
+    } finally {
+      setIsMultiRevising(false);
+    }
+  }, [revisionInstruction, revisionScope, selection]);
+
+  const switchTab = useCallback((index: number) => {
+    if (!multiResults || !originalText) return;
+    setActiveTabIndex(index);
+    const item = multiResults[index];
+    if (item?.revised_text) {
+      setRevisedText(item.revised_text);
+      setDiffChunks(computeDiff(originalText, item.revised_text));
+      setDebugInfo(item.debug_info || null);
+    } else {
+      setRevisedText(null);
+      setDiffChunks(null);
+      setDebugInfo(null);
+    }
+  }, [multiResults, originalText]);
 
   const acceptChunk = useCallback((chunkId: string) => {
     setDiffChunks(prev => prev?.map(c =>
@@ -77,7 +140,6 @@ export function useAIRevision() {
   const toggleChunk = useCallback((chunkId: string) => {
     setDiffChunks(prev => prev?.map(c => {
       if (c.id !== chunkId || c.type === 'equal') return c;
-      // Cycle: null → true → false → null
       const next = c.accepted === null ? true : c.accepted === true ? false : null;
       return { ...c, accepted: next };
     }) ?? null);
@@ -102,12 +164,10 @@ export function useAIRevision() {
       if (chunk.type === 'equal') {
         parts.push(chunk.text);
       } else if (chunk.type === 'insert') {
-        // Include if accepted (or still pending — treat pending as accepted)
         if (chunk.accepted !== false) {
           parts.push(chunk.text);
         }
       } else if (chunk.type === 'delete') {
-        // Keep original text if rejected (or still pending — treat pending as deleted)
         if (chunk.accepted === false) {
           parts.push(chunk.text);
         }
@@ -121,6 +181,8 @@ export function useAIRevision() {
     setOriginalText(null);
     setRevisedText(null);
     setDebugInfo(null);
+    setMultiResults(null);
+    setActiveTabIndex(0);
   }, []);
 
   return {
@@ -142,8 +204,14 @@ export function useAIRevision() {
     originalText,
     revisedText,
     debugInfo,
+    // Multi-model
+    multiResults,
+    activeTabIndex,
+    isMultiRevising,
     // Actions
     requestRevision,
+    requestMultiRevision,
+    switchTab,
     acceptChunk,
     rejectChunk,
     toggleChunk,

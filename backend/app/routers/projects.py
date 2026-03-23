@@ -1,4 +1,5 @@
 import re
+import asyncio
 import logging
 from fastapi import APIRouter, Depends, HTTPException
 
@@ -21,6 +22,7 @@ from app.schemas.projects import (
     ProjectExportResponse,
     DocumentAIContinueRequest, DocumentAIContinueResponse,
     DocumentAIReviseRequest, DocumentAIReviseResponse,
+    DocumentAIReviseMultiRequest, DocumentAIReviseMultiResultItem, DocumentAIReviseMultiResponse,
 )
 from app.services import get_ai_service
 from app.services.content_storage import (
@@ -120,6 +122,8 @@ async def list_projects(db: AsyncSession = Depends(get_db)):
             description=p.description,
             word_count_target=p.word_count_target,
             total_word_count=_project_total_words(p),
+            group_count=len(p.groups or []),
+            document_count=sum(len(g.documents or []) for g in (p.groups or [])),
             updated_at=p.updated_at,
         )
         for p in projects
@@ -709,4 +713,69 @@ async def ai_revise_document(
         scope=scope,
         ai_model=selected_ai_model,
         debug_info=revise_result.get("debug_info") if req.debug else None,
+    )
+
+
+# ── AI Revise Multi-model ─────────────────────────
+
+@router.post(
+    "/{project_id}/documents/{document_id}/ai-revise-multi",
+    response_model=DocumentAIReviseMultiResponse,
+    response_model_exclude_none=True,
+)
+async def ai_revise_document_multi(
+    project_id: str, document_id: str,
+    req: DocumentAIReviseMultiRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(Document)
+        .join(DocumentGroup)
+        .where(Document.id == document_id, DocumentGroup.project_id == project_id)
+    )
+    doc = result.scalar_one_or_none()
+    if not doc:
+        raise HTTPException(status_code=404, detail="文档不存在")
+
+    if req.selected_text:
+        original_text = req.selected_text
+        scope = "selection"
+    else:
+        content = await read_content(project_id, doc.id)
+        original_text = content.strip()
+        scope = "full"
+
+    if not original_text:
+        raise HTTPException(status_code=400, detail="没有可修改的内容")
+
+    async def _revise_with_model(model: str) -> DocumentAIReviseMultiResultItem:
+        try:
+            ai_service = get_ai_service(model)
+            revise_result = await ai_service.revise_chapter(
+                original_content=original_text,
+                revision_instruction=req.instruction,
+                characters=[],
+                writing_style="细腻",
+                chapter_length="长",
+                debug=req.debug,
+            )
+            revised = (revise_result.get("content") or "").strip()
+            if not revised:
+                return DocumentAIReviseMultiResultItem(ai_model=model, error="AI未返回可用修改内容")
+            return DocumentAIReviseMultiResultItem(
+                ai_model=model,
+                revised_text=revised,
+                debug_info=revise_result.get("debug_info") if req.debug else None,
+            )
+        except Exception as e:
+            logger.exception("AI revise-multi failed for model=%s doc=%s", model, document_id)
+            return DocumentAIReviseMultiResultItem(ai_model=model, error=str(e))
+
+    results = await asyncio.gather(*[_revise_with_model(m) for m in req.models])
+
+    return DocumentAIReviseMultiResponse(
+        document_id=doc.id,
+        original_text=original_text,
+        scope=scope,
+        results=list(results),
     )

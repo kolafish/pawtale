@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { useAppStore } from '../stores/appStore';
 import { useProjectState } from '../hooks/useProjectState';
 import { useAIRevision } from '../hooks/useAIRevision';
+import { AI_MODEL_OPTIONS } from '../constants/aiModels';
 import { ProjectHome } from './ProjectHome';
 import { Binder } from './Binder';
 import { EditorMain } from './EditorMain';
@@ -40,11 +41,22 @@ export function WritingWorkspace() {
     );
   };
 
+  const handleRequestMultiRevision = async () => {
+    if (!currentProject || !ps.currentDocumentId) return;
+    const models = AI_MODEL_OPTIONS.map(m => m.value);
+    await revision.requestMultiRevision(
+      currentProject.id,
+      ps.currentDocumentId,
+      ps.documentContent,
+      models,
+      ps.debugMode,
+    );
+  };
+
   const handleApplyRevision = () => {
     const result = revision.applyRevision();
     if (result !== null) {
       if (revision.revisionScope === 'selection' && revision.selection) {
-        // Replace only the selected portion in the full document
         const before = ps.documentContent.substring(0, revision.selection.start);
         const after = ps.documentContent.substring(revision.selection.end);
         ps.setDocumentContent(before + result + after);
@@ -94,6 +106,10 @@ export function WritingWorkspace() {
             onRejectAll={revision.rejectAll}
             onApplyRevision={handleApplyRevision}
             onCancelRevision={revision.clearRevision}
+            // Multi-model
+            multiResults={revision.multiResults}
+            activeTabIndex={revision.activeTabIndex}
+            onSwitchTab={revision.switchTab}
             // AI panel
             isAIPanelOpen={revision.isOpen}
             onToggleAIPanel={() => revision.setIsOpen(!revision.isOpen)}
@@ -127,8 +143,10 @@ export function WritingWorkspace() {
           setRevisionScope={revision.setRevisionScope}
           selection={revision.selection}
           isRevising={revision.isRevising}
+          isMultiRevising={revision.isMultiRevising}
           isReviewing={revision.isReviewing}
           onRequestRevision={handleRequestRevision}
+          onRequestMultiRevision={handleRequestMultiRevision}
           // Continue
           continueInstruction={ps.continueInstruction}
           setContinueInstruction={ps.setContinueInstruction}

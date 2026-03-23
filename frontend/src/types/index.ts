@@ -544,6 +544,8 @@ export interface ProjectListItem {
   description?: string;
   word_count_target?: number;
   total_word_count: number;
+  group_count: number;
+  document_count: number;
   updated_at: string;
 }
 
@@ -626,4 +628,18 @@ export interface SelectionRange {
   start: number;
   end: number;
   text: string;
+}
+
+export interface MultiReviseResultItem {
+  ai_model: string;
+  revised_text: string | null;
+  error: string | null;
+  debug_info?: AIDebugInfo;
+}
+
+export interface MultiReviseResponse {
+  document_id: string;
+  original_text: string;
+  scope: string;
+  results: MultiReviseResultItem[];
 }

@@ -45,6 +45,7 @@ import type {
   WritingSession,
   ProjectExportResponse,
   DocumentGroup,
+  MultiReviseResponse,
 } from '../types';
 
 const api = axios.create({
@@ -270,4 +271,16 @@ export const projectsApi = {
       ai_model: string;
       debug_info?: any;
     }>(`/projects/${projectId}/documents/${docId}/ai-revise`, data).then(r => r.data),
+
+  // AI Revise Multi-model
+  aiReviseMulti: (projectId: string, docId: string, data: {
+    instruction: string;
+    selected_text?: string;
+    full_content?: string;
+    models: string[];
+    debug?: boolean;
+  }) =>
+    api.post<MultiReviseResponse>(
+      `/projects/${projectId}/documents/${docId}/ai-revise-multi`, data
+    ).then(r => r.data),
 };

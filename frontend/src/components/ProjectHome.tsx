@@ -112,7 +112,7 @@ export function ProjectHome() {
             </button>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="flex flex-col gap-4">
             {projects.map((proj) => (
               <div
                 key={proj.id}
@@ -137,6 +137,7 @@ export function ProjectHome() {
                   <p className="text-sm text-gray-500 mt-1 line-clamp-2">{proj.description}</p>
                 )}
                 <div className="flex items-center gap-3 mt-3 text-xs text-gray-400">
+                  <span>{proj.group_count} 卷 · {proj.document_count} 章</span>
                   <span>{proj.total_word_count.toLocaleString()} 字</span>
                   {proj.word_count_target && (
                     <span>/ {proj.word_count_target.toLocaleString()} 目标</span>

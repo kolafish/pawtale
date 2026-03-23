@@ -10,6 +10,8 @@ interface DiffReviewViewProps {
   onRejectAll: () => void;
   onApply: () => void;
   onCancel: () => void;
+  applyLabel?: string;
+  cancelLabel?: string;
 }
 
 export function DiffReviewView({
@@ -21,6 +23,8 @@ export function DiffReviewView({
   onRejectAll,
   onApply,
   onCancel,
+  applyLabel = '应用修改',
+  cancelLabel = '取消',
 }: DiffReviewViewProps) {
   const pendingCount = chunks.filter(c => c.type !== 'equal' && c.accepted === null).length;
   const changeCount = chunks.filter(c => c.type !== 'equal').length;
@@ -55,14 +59,14 @@ export function DiffReviewView({
             className="inline-flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-md bg-pink-500 text-white hover:bg-pink-600"
           >
             <Check size={12} />
-            应用修改
+            {applyLabel}
           </button>
           <button
             onClick={onCancel}
             className="inline-flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-md border border-gray-200 text-gray-600 hover:bg-gray-50"
           >
             <ArrowLeft size={12} />
-            取消
+            {cancelLabel}
           </button>
         </div>
       </div>

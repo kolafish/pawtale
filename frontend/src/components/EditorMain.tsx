@@ -1,6 +1,7 @@
 import { RefreshCw, Save, Wand2 } from 'lucide-react';
 import { DiffReviewView } from './DiffReviewView';
-import type { DiffChunk, SelectionRange } from '../types';
+import { MultiModelTabBar } from './MultiModelTabBar';
+import type { DiffChunk, SelectionRange, MultiReviseResultItem } from '../types';
 import type { SaveStatus } from '../hooks/useProjectState';
 
 interface EditorMainProps {
@@ -25,6 +26,10 @@ interface EditorMainProps {
   onRejectAll: () => void;
   onApplyRevision: () => void;
   onCancelRevision: () => void;
+  // Multi-model
+  multiResults: MultiReviseResultItem[] | null;
+  activeTabIndex: number;
+  onSwitchTab: (index: number) => void;
   // AI Panel toggle
   isAIPanelOpen: boolean;
   onToggleAIPanel: () => void;
@@ -50,6 +55,9 @@ export function EditorMain({
   onRejectAll,
   onApplyRevision,
   onCancelRevision,
+  multiResults,
+  activeTabIndex,
+  onSwitchTab,
   isAIPanelOpen,
   onToggleAIPanel,
 }: EditorMainProps) {
@@ -80,11 +88,11 @@ export function EditorMain({
           onChange={(e) => setTitle(e.target.value)}
           placeholder="文档名称"
           className="flex-1 px-3 py-2 rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-pink-500"
-          disabled={diffChunks !== null}
+          disabled={diffChunks !== null || multiResults !== null}
         />
         <button
           onClick={onSave}
-          disabled={isSaving || diffChunks !== null}
+          disabled={isSaving || diffChunks !== null || multiResults !== null}
           className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-200 hover:bg-gray-50 disabled:opacity-60"
         >
           {isSaving ? <RefreshCw size={16} className="animate-spin" /> : <Save size={16} />}
@@ -111,18 +119,33 @@ export function EditorMain({
 
       {/* Editor area */}
       <div className="flex-1 min-h-0 p-4 flex flex-col">
-        {diffChunks ? (
+        {(diffChunks || multiResults) ? (
           <div className="flex-1 rounded-xl border border-amber-200 overflow-hidden flex flex-col">
-            <DiffReviewView
-              chunks={diffChunks}
-              onAcceptChunk={onAcceptChunk}
-              onRejectChunk={onRejectChunk}
-              onToggleChunk={onToggleChunk}
-              onAcceptAll={onAcceptAll}
-              onRejectAll={onRejectAll}
-              onApply={onApplyRevision}
-              onCancel={onCancelRevision}
-            />
+            {multiResults && (
+              <MultiModelTabBar
+                results={multiResults}
+                activeIndex={activeTabIndex}
+                onSwitchTab={onSwitchTab}
+              />
+            )}
+            {diffChunks ? (
+              <DiffReviewView
+                chunks={diffChunks}
+                onAcceptChunk={onAcceptChunk}
+                onRejectChunk={onRejectChunk}
+                onToggleChunk={onToggleChunk}
+                onAcceptAll={onAcceptAll}
+                onRejectAll={onRejectAll}
+                onApply={onApplyRevision}
+                onCancel={onCancelRevision}
+                applyLabel={multiResults ? '采纳此版本' : undefined}
+                cancelLabel={multiResults ? '全部放弃' : undefined}
+              />
+            ) : (
+              <div className="flex-1 flex items-center justify-center text-gray-400 p-8">
+                <p>{multiResults?.[activeTabIndex]?.error || 'AI 修改失败'}</p>
+              </div>
+            )}
           </div>
         ) : (
           <textarea

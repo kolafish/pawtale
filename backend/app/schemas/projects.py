@@ -59,6 +59,8 @@ class ProjectListItem(BaseModel):
     description: str | None = None
     word_count_target: int | None = None
     total_word_count: int = 0
+    group_count: int = 0
+    document_count: int = 0
     updated_at: datetime
 
     class Config:
@@ -235,3 +237,27 @@ class DocumentAIReviseResponse(BaseModel):
     scope: str              # "full" | "selection"
     ai_model: str
     debug_info: dict | None = None
+
+
+# ── AI Revise Multi-model ─────────────────────────
+
+class DocumentAIReviseMultiRequest(BaseModel):
+    instruction: str
+    selected_text: str | None = None
+    full_content: str | None = None
+    models: list[str] = ["claude-opus-4", "claude-sonnet-4", "deepseek"]
+    debug: bool = False
+
+
+class DocumentAIReviseMultiResultItem(BaseModel):
+    ai_model: str
+    revised_text: str | None = None   # None if failed
+    error: str | None = None          # None if succeeded
+    debug_info: dict | None = None
+
+
+class DocumentAIReviseMultiResponse(BaseModel):
+    document_id: str
+    original_text: str
+    scope: str
+    results: list[DocumentAIReviseMultiResultItem]

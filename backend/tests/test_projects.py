@@ -457,3 +457,83 @@ class TestAIRevise:
         data = response.json()
         assert data["debug_info"] is not None
         assert data["debug_info"]["request"]["provider"] == "claude"
+
+
+@pytest.mark.asyncio
+class TestAIReviseMulti:
+    async def _setup(self, client):
+        resp = await client.post("/api/projects", json={"title": "多模型测试"})
+        pid = resp.json()["id"]
+        gid = resp.json()["groups"][0]["id"]
+        did = resp.json()["groups"][0]["documents"][0]["id"]
+        await client.put(
+            f"/api/projects/{pid}/documents/{did}",
+            json={"content": "她走进咖啡馆，看到了他。"},
+        )
+        return pid, did
+
+    async def test_multi_all_succeed(self, client):
+        pid, did = await self._setup(client)
+        with patch("app.routers.projects.get_ai_service") as mock_get_service:
+            mock_service = AsyncMock()
+            mock_service.revise_chapter = AsyncMock(return_value={"content": "修改后内容"})
+            mock_get_service.return_value = mock_service
+
+            response = await client.post(
+                f"/api/projects/{pid}/documents/{did}/ai-revise-multi",
+                json={"instruction": "改得更好", "models": ["claude-opus-4", "deepseek"]},
+            )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data["results"]) == 2
+        assert data["scope"] == "full"
+        for item in data["results"]:
+            assert item["revised_text"] is not None
+            assert item.get("error") is None
+
+    async def test_multi_partial_failure(self, client):
+        pid, did = await self._setup(client)
+        with patch("app.routers.projects.get_ai_service") as mock_get_service:
+            ok_service = AsyncMock()
+            ok_service.revise_chapter = AsyncMock(return_value={"content": "好的内容"})
+            fail_service = AsyncMock()
+            fail_service.revise_chapter = AsyncMock(side_effect=Exception("API timeout"))
+
+            def _pick(model):
+                return ok_service if model == "deepseek" else fail_service
+            mock_get_service.side_effect = _pick
+
+            response = await client.post(
+                f"/api/projects/{pid}/documents/{did}/ai-revise-multi",
+                json={"instruction": "改", "models": ["claude-opus-4", "deepseek"]},
+            )
+
+        assert response.status_code == 200
+        data = response.json()
+        claude_r = next(r for r in data["results"] if r["ai_model"] == "claude-opus-4")
+        ds_r = next(r for r in data["results"] if r["ai_model"] == "deepseek")
+        assert claude_r["error"] is not None
+        assert claude_r.get("revised_text") is None
+        assert ds_r["revised_text"] == "好的内容"
+
+    async def test_multi_with_selection(self, client):
+        pid, did = await self._setup(client)
+        with patch("app.routers.projects.get_ai_service") as mock_get_service:
+            mock_service = AsyncMock()
+            mock_service.revise_chapter = AsyncMock(return_value={"content": "修改片段"})
+            mock_get_service.return_value = mock_service
+
+            response = await client.post(
+                f"/api/projects/{pid}/documents/{did}/ai-revise-multi",
+                json={
+                    "instruction": "更好",
+                    "selected_text": "看到了他",
+                    "models": ["deepseek"],
+                },
+            )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["scope"] == "selection"
+        assert data["original_text"] == "看到了他"
