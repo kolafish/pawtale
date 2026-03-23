@@ -1,18 +1,25 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useAppStore } from '../stores/appStore';
 import { useProjectState } from '../hooks/useProjectState';
 import { useAIRevision } from '../hooks/useAIRevision';
+import { useReferenceEditor } from '../hooks/useReferenceEditor';
 import { AI_MODEL_OPTIONS } from '../constants/aiModels';
 import { ProjectHome } from './ProjectHome';
 import { Binder } from './Binder';
 import { EditorMain } from './EditorMain';
 import { Inspector } from './Inspector';
 import { AIAssistPanel } from './AIAssistPanel';
+import { CharacterEditor } from './CharacterEditor';
+import { OutlineEditor } from './OutlineEditor';
+import { NoteEditor } from './NoteEditor';
+import { AnalyzeDialog } from './AnalyzeDialog';
 
 export function WritingWorkspace() {
-  const { currentProject } = useAppStore();
+  const { currentProject, currentReferenceId } = useAppStore();
   const ps = useProjectState();
   const revision = useAIRevision();
+  const refEditor = useReferenceEditor();
+  const [showAnalyze, setShowAnalyze] = useState(false);
 
   // Sync reviewing state to pause auto-save during diff review
   useEffect(() => {
@@ -22,13 +29,6 @@ export function WritingWorkspace() {
   if (!currentProject) {
     return <ProjectHome />;
   }
-
-  console.log('[WritingWorkspace] Rendering with project:', currentProject.title);
-  console.log('[WritingWorkspace] Project state:', {
-    hasGroups: !!currentProject.groups,
-    groupsLength: currentProject.groups?.length,
-    currentDocId: ps.currentDocumentId,
-  });
 
   const handleRequestRevision = async () => {
     if (!currentProject || !ps.currentDocumentId) return;
@@ -67,12 +67,94 @@ export function WritingWorkspace() {
     }
   };
 
+  // Determine which editor to show
+  const renderEditor = () => {
+    if (ps.currentDocumentId) {
+      return (
+        <EditorMain
+          title={ps.documentName}
+          setTitle={ps.setDocumentName}
+          editorContent={ps.documentContent}
+          setEditorContent={ps.setDocumentContent}
+          saveStatus={ps.saveStatus}
+          wordCount={ps.wordCount}
+          totalWordCount={ps.totalWordCount}
+          isSaving={ps.isSaving}
+          onSave={ps.handleSave}
+          onCloseProject={ps.closeProject}
+          onSelectionChange={revision.setSelection}
+          diffChunks={revision.diffChunks}
+          onAcceptChunk={revision.acceptChunk}
+          onRejectChunk={revision.rejectChunk}
+          onToggleChunk={revision.toggleChunk}
+          onAcceptAll={revision.acceptAll}
+          onRejectAll={revision.rejectAll}
+          onApplyRevision={handleApplyRevision}
+          onCancelRevision={revision.clearRevision}
+          multiResults={revision.multiResults}
+          activeTabIndex={revision.activeTabIndex}
+          onSwitchTab={revision.switchTab}
+          isAIPanelOpen={revision.isOpen}
+          onToggleAIPanel={() => revision.setIsOpen(!revision.isOpen)}
+        />
+      );
+    }
+
+    if (currentReferenceId && refEditor.referenceData) {
+      const refType = refEditor.referenceType;
+      if (refType === 'character') {
+        return (
+          <CharacterEditor
+            data={refEditor.referenceData}
+            saveStatus={refEditor.saveStatus}
+            onUpdate={refEditor.updateField}
+            onUpdateMeta={refEditor.updateMeta}
+            onSave={refEditor.handleSave}
+            onSyncGlobal={refEditor.syncFromGlobal}
+            onExportGlobal={refEditor.exportToGlobal}
+            isExporting={refEditor.isExporting}
+          />
+        );
+      }
+      if (refType === 'outline') {
+        return (
+          <OutlineEditor
+            data={refEditor.referenceData}
+            saveStatus={refEditor.saveStatus}
+            onUpdate={refEditor.updateField}
+            onSave={refEditor.handleSave}
+          />
+        );
+      }
+      // location / note
+      return (
+        <NoteEditor
+          data={refEditor.referenceData}
+          saveStatus={refEditor.saveStatus}
+          onUpdate={refEditor.updateField}
+          onUpdateMeta={refEditor.updateMeta}
+          onSave={refEditor.handleSave}
+          onExportGlobal={refEditor.referenceData.type === 'location' ? refEditor.exportToGlobal : undefined}
+          isExporting={refEditor.isExporting}
+        />
+      );
+    }
+
+    return (
+      <div className="h-full flex items-center justify-center text-gray-400">
+        <p>选择一个条目开始编辑</p>
+      </div>
+    );
+  };
+
   return (
     <div className="h-full w-full flex">
       <Binder
         project={currentProject}
         currentDocumentId={ps.currentDocumentId}
+        currentReferenceId={currentReferenceId}
         onSelectDocument={ps.switchDocument}
+        onSelectReference={ps.selectReference}
         onCreateGroup={ps.createGroup}
         onRenameGroup={ps.renameGroup}
         onDeleteGroup={ps.deleteGroup}
@@ -81,62 +163,32 @@ export function WritingWorkspace() {
         onDeleteDocument={ps.deleteDocument}
         onReorderGroups={ps.reorderGroups}
         onReorderDocuments={ps.reorderDocuments}
+        onCreateReference={ps.createReference}
+        onRenameReference={ps.renameReference}
+        onDeleteReference={ps.deleteReference}
+        onAnalyzeProject={() => setShowAnalyze(true)}
       />
       <div className="flex-1 min-w-0 relative">
-        {ps.currentDocumentId ? (
-          <EditorMain
-            title={ps.documentName}
-            setTitle={ps.setDocumentName}
-            editorContent={ps.documentContent}
-            setEditorContent={ps.setDocumentContent}
-            saveStatus={ps.saveStatus}
+        {renderEditor()}
+        {ps.currentDocumentId && (
+          <Inspector
+            project={currentProject}
+            currentDocumentId={ps.currentDocumentId}
+            synopsis={ps.synopsis}
+            setSynopsis={ps.setSynopsis}
+            status={ps.status}
+            setStatus={ps.setStatus}
+            label={ps.label}
+            setLabel={ps.setLabel}
             wordCount={ps.wordCount}
             totalWordCount={ps.totalWordCount}
-            isSaving={ps.isSaving}
-            onSave={ps.handleSave}
-            onCloseProject={ps.closeProject}
-            // Selection
-            onSelectionChange={revision.setSelection}
-            // Diff review
-            diffChunks={revision.diffChunks}
-            onAcceptChunk={revision.acceptChunk}
-            onRejectChunk={revision.rejectChunk}
-            onToggleChunk={revision.toggleChunk}
-            onAcceptAll={revision.acceptAll}
-            onRejectAll={revision.rejectAll}
-            onApplyRevision={handleApplyRevision}
-            onCancelRevision={revision.clearRevision}
-            // Multi-model
-            multiResults={revision.multiResults}
-            activeTabIndex={revision.activeTabIndex}
-            onSwitchTab={revision.switchTab}
-            // AI panel
-            isAIPanelOpen={revision.isOpen}
-            onToggleAIPanel={() => revision.setIsOpen(!revision.isOpen)}
+            onExport={ps.handleExportTxt}
           />
-        ) : (
-          <div className="h-full flex items-center justify-center text-gray-400">
-            <p>选择一个文档开始写作</p>
-          </div>
         )}
-        <Inspector
-          project={currentProject}
-          currentDocumentId={ps.currentDocumentId}
-          synopsis={ps.synopsis}
-          setSynopsis={ps.setSynopsis}
-          status={ps.status}
-          setStatus={ps.setStatus}
-          label={ps.label}
-          setLabel={ps.setLabel}
-          wordCount={ps.wordCount}
-          totalWordCount={ps.totalWordCount}
-          onExport={ps.handleExportTxt}
-        />
       </div>
       {revision.isOpen && ps.currentDocumentId && (
         <AIAssistPanel
           onClose={() => revision.setIsOpen(false)}
-          // Revision
           revisionInstruction={revision.revisionInstruction}
           setRevisionInstruction={revision.setRevisionInstruction}
           revisionScope={revision.revisionScope}
@@ -147,19 +199,24 @@ export function WritingWorkspace() {
           isReviewing={revision.isReviewing}
           onRequestRevision={handleRequestRevision}
           onRequestMultiRevision={handleRequestMultiRevision}
-          // Continue
           continueInstruction={ps.continueInstruction}
           setContinueInstruction={ps.setContinueInstruction}
           isContinuing={ps.isContinuing}
           onContinue={ps.handleContinue}
           hasContent={!!ps.documentContent.trim()}
-          // Model & debug
           aiModel={ps.aiModel}
           setAiModel={(v) => ps.setAiModel(v as typeof ps.aiModel)}
           debugMode={ps.debugMode}
           setDebugMode={ps.setDebugMode}
           debugInfo={ps.debugInfo}
           revisionDebugInfo={revision.debugInfo}
+        />
+      )}
+      {showAnalyze && currentProject && (
+        <AnalyzeDialog
+          projectId={currentProject.id}
+          onClose={() => setShowAnalyze(false)}
+          onComplete={() => ps.refreshProject()}
         />
       )}
     </div>

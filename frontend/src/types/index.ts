@@ -587,6 +587,7 @@ export interface ReferenceItemBrief {
   type: string;
   name: string;
   sort_order: number;
+  global_id?: string;
 }
 
 export interface ReferenceItem {
@@ -642,4 +643,80 @@ export interface MultiReviseResponse {
   original_text: string;
   scope: string;
   results: MultiReviseResultItem[];
+}
+
+// ── Project Analysis (AI extract from manuscript) ──
+
+export interface AnalyzedCharacter {
+  name: string;
+  gender?: string | null;
+  identity?: string | null;
+  personality?: string[];
+  appearance?: string | null;
+  relationships?: string | null;
+  summary?: string | null;
+}
+
+export interface AnalyzedOutline {
+  name: string;
+  content: string;
+}
+
+export interface AnalyzedSetting {
+  name: string;
+  type: string; // location / note
+  content: string;
+}
+
+export interface ProjectAnalyzeResponse {
+  characters: AnalyzedCharacter[];
+  outlines: AnalyzedOutline[];
+  settings: AnalyzedSetting[];
+  total_words_analyzed: number;
+  debug_info?: AIDebugInfo;
+}
+
+export interface AnalyzeApplyRequest {
+  characters: AnalyzedCharacter[];
+  outlines: AnalyzedOutline[];
+  settings: AnalyzedSetting[];
+}
+
+export interface AnalyzeApplyResponse {
+  created_count: number;
+  references: ReferenceItemBrief[];
+}
+
+// ── Export to Global Library ──────────────────────
+
+export interface ExportGlobalRequest {
+  action: 'preview' | 'create' | 'update';
+  global_id?: string;
+}
+
+export interface ExportGlobalMatch {
+  global_id: string;
+  global_name: string;
+  global_type: string;
+}
+
+export interface ExportGlobalResponse {
+  status: 'preview' | 'created' | 'updated' | 'no_match';
+  match?: ExportGlobalMatch;
+  global_id?: string;
+}
+
+// ── Import Preview ────────────────────────────────
+
+export interface ImportPreviewItem {
+  global_id: string;
+  global_name: string;
+  global_type: string;
+  existing_ref_id?: string;
+  existing_ref_name?: string;
+  match_by?: string;
+}
+
+export interface ImportPreviewResponse {
+  items: ImportPreviewItem[];
 }

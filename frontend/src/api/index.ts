@@ -46,6 +46,12 @@ import type {
   ProjectExportResponse,
   DocumentGroup,
   MultiReviseResponse,
+  ProjectAnalyzeResponse,
+  AnalyzeApplyRequest,
+  AnalyzeApplyResponse,
+  ExportGlobalRequest,
+  ExportGlobalResponse,
+  ImportPreviewResponse,
 } from '../types';
 
 const api = axios.create({
@@ -232,6 +238,12 @@ export const projectsApi = {
     api.delete(`/projects/${projectId}/references/${refId}`),
   importGlobal: (projectId: string, data: { character_ids?: string[]; scene_ids?: string[] }) =>
     api.post<ReferenceItem[]>(`/projects/${projectId}/references/import-global`, data).then(r => r.data),
+  syncGlobal: (projectId: string, refId: string) =>
+    api.post<ReferenceItem>(`/projects/${projectId}/references/${refId}/sync-global`).then(r => r.data),
+  exportGlobal: (projectId: string, refId: string, data: ExportGlobalRequest) =>
+    api.post<ExportGlobalResponse>(`/projects/${projectId}/references/${refId}/export-global`, data).then(r => r.data),
+  importPreview: (projectId: string, data: { character_ids?: string[]; scene_ids?: string[] }) =>
+    api.post<ImportPreviewResponse>(`/projects/${projectId}/references/import-preview`, data).then(r => r.data),
 
   // Document-Reference links
   getDocumentReferences: (projectId: string, docId: string) =>
@@ -271,6 +283,12 @@ export const projectsApi = {
       ai_model: string;
       debug_info?: any;
     }>(`/projects/${projectId}/documents/${docId}/ai-revise`, data).then(r => r.data),
+
+  // Project Analysis
+  analyzeProject: (projectId: string, data: { ai_model?: string; debug?: boolean }) =>
+    api.post<ProjectAnalyzeResponse>(`/projects/${projectId}/analyze`, data).then(r => r.data),
+  applyAnalysis: (projectId: string, data: AnalyzeApplyRequest) =>
+    api.post<AnalyzeApplyResponse>(`/projects/${projectId}/analyze/apply`, data).then(r => r.data),
 
   // AI Revise Multi-model
   aiReviseMulti: (projectId: string, docId: string, data: {

@@ -1,7 +1,10 @@
 import json
+import logging
 import re
 from abc import ABC, abstractmethod
 from app.services.ai_debug import build_debug_info
+
+logger = logging.getLogger(__name__)
 
 
 class AITextServiceBase(ABC):
@@ -75,31 +78,49 @@ class AITextServiceBase(ABC):
         return content.strip()
 
     @staticmethod
-    def _extract_json_payload(content: str) -> dict:
-        """更健壮的 JSON 提取（支持 fenced block、裸 JSON、首尾匹配）"""
+    def _strip_json_trailing_commas(text: str) -> str:
+        """Remove trailing commas before } or ] (common LLM JSON error)."""
+        return re.sub(r",\s*([}\]])", r"\1", text)
+
+    @classmethod
+    def _try_parse_json(cls, text: str) -> dict | None:
+        """Try json.loads, with fallback for trailing commas."""
+        for candidate in (text, cls._strip_json_trailing_commas(text)):
+            try:
+                parsed = json.loads(candidate)
+                return parsed if isinstance(parsed, dict) else None
+            except (json.JSONDecodeError, ValueError):
+                continue
+        return None
+
+    @classmethod
+    def _extract_json_payload(cls, content: str) -> dict:
+        """更健壮的 JSON 提取（支持 fenced block、裸 JSON、首尾匹配、trailing commas）"""
         text = (content or "").strip()
         if not text:
             return {}
 
+        # Try closed fenced block first
         fenced_match = re.search(r"```(?:json)?\s*(\{[\s\S]*\})\s*```", text)
         if fenced_match:
             text = fenced_match.group(1).strip()
+        else:
+            # Also handle unclosed fenced block (truncated response)
+            open_match = re.search(r"```(?:json)?\s*(\{[\s\S]*)", text)
+            if open_match:
+                text = open_match.group(1).strip()
 
-        try:
-            parsed = json.loads(text)
-            return parsed if isinstance(parsed, dict) else {}
-        except json.JSONDecodeError:
-            pass
+        parsed = cls._try_parse_json(text)
+        if parsed is not None:
+            return parsed
 
         start = text.find("{")
         end = text.rfind("}")
         if start >= 0 and end > start:
             snippet = text[start:end + 1]
-            try:
-                parsed = json.loads(snippet)
-                return parsed if isinstance(parsed, dict) else {}
-            except json.JSONDecodeError:
-                return {}
+            parsed = cls._try_parse_json(snippet)
+            if parsed is not None:
+                return parsed
         return {}
 
     @staticmethod
@@ -912,3 +933,115 @@ C. 选项描述（可选）
         if debug:
             normalized["debug_info"] = self._wrap_debug(system_prompt, user_prompt, temp, 1800, raw_text, response_json)
         return normalized
+
+    async def analyze_project_content(
+        self,
+        content: str,
+        debug: bool = False,
+    ) -> dict:
+        """从项目手稿中深度提取人物、大纲、设定信息"""
+        # Keep system prompt minimal — it gets merged into user message for Claude proxy,
+        # and the proxy has input size limits. Put the JSON schema in user_prompt instead.
+        system_prompt = "你是专业的小说策划编辑。只输出JSON，不要任何额外文字。"
+
+        clipped = (content or "").strip()
+        if len(clipped) > 12000:
+            clipped = clipped[:12000]
+
+        user_prompt = f"""从以下小说正文中提取人物、大纲、设定，输出严格JSON：
+{{"characters":[{{"name":"角色名","gender":"男/女/null","identity":"身份","personality":["性格"],"appearance":"外貌","relationships":"关系","summary":"概述100字内"}}],"outlines":[{{"name":"大纲名","content":"梗概300字内"}}],"settings":[{{"name":"设定名","type":"location或note","content":"描述"}}]}}
+
+规则：只提炼文本中真实出现的信息。characters最多10个。outlines至少1个总结已有剧情。settings最多8个。
+
+正文：
+{clipped}"""
+        temp = 0.3
+
+        # Retry up to 3 times — proxy/network may drop connections on large requests
+        import asyncio as _asyncio
+        max_attempts = 3
+        raw_text = ""
+        response_json = None
+        parsed: dict = {}
+        last_error: Exception | None = None
+        for attempt in range(max_attempts):
+            try:
+                raw_response = await self._call_llm(
+                    system_prompt, user_prompt,
+                    temperature=temp, max_tokens=3000, timeout=120.0, return_raw=debug,
+                )
+            except Exception as e:
+                last_error = e
+                # Log full details for proxy/network errors
+                err_detail = str(e)
+                if hasattr(e, 'response') and e.response is not None:
+                    err_detail += f" | status={e.response.status_code} body={e.response.text[:500]}"
+                logger.warning("analyze_project_content attempt %d/%d [%s/%s]: %s",
+                               attempt + 1, max_attempts, self.provider_name, self.model_name, err_detail)
+                if attempt < max_attempts - 1:
+                    await _asyncio.sleep(3 + attempt * 2)
+                continue
+
+            if debug:
+                raw_text, response_json = raw_response  # type: ignore[misc]
+            else:
+                raw_text = raw_response  # type: ignore[assignment]
+                response_json = None
+
+            parsed = self._extract_json_payload(raw_text)
+            has_data = bool(
+                parsed.get("characters") or parsed.get("outlines") or parsed.get("settings")
+            )
+            if has_data:
+                last_error = None
+                break
+            logger.warning(
+                "analyze_project_content attempt %d/%d: JSON parse yielded empty result. "
+                "raw_text[:200]=%s",
+                attempt + 1, max_attempts,
+                (raw_text or "")[:200],
+            )
+            if attempt < max_attempts - 1:
+                await _asyncio.sleep(2)
+
+        if last_error is not None:
+            raise last_error
+
+        # Normalize output
+        result: dict = {
+            "characters": [],
+            "outlines": [],
+            "settings": [],
+        }
+        if isinstance(parsed, dict):
+            for char in (parsed.get("characters") or [])[:10]:
+                if isinstance(char, dict) and char.get("name"):
+                    result["characters"].append({
+                        "name": str(char["name"]).strip(),
+                        "gender": char.get("gender"),
+                        "identity": char.get("identity"),
+                        "personality": char.get("personality") or [],
+                        "appearance": char.get("appearance"),
+                        "relationships": char.get("relationships"),
+                        "summary": char.get("summary"),
+                    })
+            for outline in (parsed.get("outlines") or [])[:5]:
+                if isinstance(outline, dict) and outline.get("name"):
+                    result["outlines"].append({
+                        "name": str(outline["name"]).strip(),
+                        "content": str(outline.get("content") or "").strip(),
+                    })
+            for setting in (parsed.get("settings") or [])[:8]:
+                if isinstance(setting, dict) and setting.get("name"):
+                    s_type = setting.get("type", "note")
+                    if s_type not in ("location", "note"):
+                        s_type = "note"
+                    result["settings"].append({
+                        "name": str(setting["name"]).strip(),
+                        "type": s_type,
+                        "content": str(setting.get("content") or "").strip(),
+                    })
+
+        if debug:
+            result["debug_info"] = self._wrap_debug(system_prompt, user_prompt, temp, 4096, raw_text, response_json)
+        return result

@@ -23,6 +23,10 @@ from app.schemas.projects import (
     DocumentAIContinueRequest, DocumentAIContinueResponse,
     DocumentAIReviseRequest, DocumentAIReviseResponse,
     DocumentAIReviseMultiRequest, DocumentAIReviseMultiResultItem, DocumentAIReviseMultiResponse,
+    ProjectAnalyzeRequest, ProjectAnalyzeResponse,
+    AnalyzeApplyRequest, AnalyzeApplyResponse, AnalyzedCharacter, AnalyzedOutline, AnalyzedSetting,
+    ExportGlobalRequest, ExportGlobalResponse, ExportGlobalMatch,
+    ImportPreviewItem, ImportPreviewResponse,
 )
 from app.services import get_ai_service
 from app.services.content_storage import (
@@ -82,7 +86,10 @@ def _project_resp(project: Project) -> ProjectResponse:
         total_word_count=_project_total_words(project),
         groups=[_group_resp(g) for g in (project.groups or [])],
         references=[
-            ReferenceItemBrief(id=r.id, type=r.type, name=r.name, sort_order=r.sort_order)
+            ReferenceItemBrief(
+                id=r.id, type=r.type, name=r.name, sort_order=r.sort_order,
+                global_id=(r.metadata_json or {}).get("global_character_id") or (r.metadata_json or {}).get("global_scene_id"),
+            )
             for r in (project.references or [])
         ],
         created_at=project.created_at,
@@ -482,6 +489,302 @@ async def import_from_global(
     return [ReferenceItemResponse.model_validate(r) for r in created]
 
 
+# ── Import Preview (duplicate detection) ───────────
+
+@router.post("/{project_id}/references/import-preview", response_model=ImportPreviewResponse)
+async def import_preview(
+    project_id: str, req: ImportGlobalRequest, db: AsyncSession = Depends(get_db),
+):
+    """Preview import: check for duplicates before importing from global library."""
+    proj = await db.get(Project, project_id)
+    if not proj:
+        raise HTTPException(status_code=404, detail="项目不存在")
+
+    # Load all project references for matching
+    refs_result = await db.execute(
+        select(ReferenceItem).where(ReferenceItem.project_id == project_id)
+    )
+    project_refs = refs_result.scalars().all()
+
+    items: list[ImportPreviewItem] = []
+
+    for cid in req.character_ids:
+        char = await db.get(Character, cid)
+        if not char:
+            continue
+        existing = _find_matching_ref(project_refs, "character", char.id, char.name)
+        items.append(ImportPreviewItem(
+            global_id=char.id,
+            global_name=char.name,
+            global_type="character",
+            existing_ref_id=existing["ref_id"] if existing else None,
+            existing_ref_name=existing["ref_name"] if existing else None,
+            match_by=existing["match_by"] if existing else None,
+        ))
+
+    for sid in req.scene_ids:
+        scene = await db.get(Scene, sid)
+        if not scene:
+            continue
+        existing = _find_matching_ref(project_refs, "location", scene.id, scene.name)
+        items.append(ImportPreviewItem(
+            global_id=scene.id,
+            global_name=scene.name,
+            global_type="scene",
+            existing_ref_id=existing["ref_id"] if existing else None,
+            existing_ref_name=existing["ref_name"] if existing else None,
+            match_by=existing["match_by"] if existing else None,
+        ))
+
+    return ImportPreviewResponse(items=items)
+
+
+def _find_matching_ref(
+    refs: list[ReferenceItem], ref_type: str, global_id: str, name: str,
+) -> dict | None:
+    """Find existing project reference matching a global record."""
+    global_key = "global_character_id" if ref_type == "character" else "global_scene_id"
+    # Match by linked global_id first
+    for r in refs:
+        if r.type == ref_type and (r.metadata_json or {}).get(global_key) == global_id:
+            return {"ref_id": r.id, "ref_name": r.name, "match_by": "global_id"}
+    # Match by name (case-insensitive)
+    for r in refs:
+        if r.type == ref_type and r.name.strip().lower() == name.strip().lower():
+            return {"ref_id": r.id, "ref_name": r.name, "match_by": "name"}
+    return None
+
+
+# ── Export Reference to Global Library ────────────
+
+@router.post("/{project_id}/references/{ref_id}/export-global", response_model=ExportGlobalResponse)
+async def export_to_global(
+    project_id: str, ref_id: str, req: ExportGlobalRequest, db: AsyncSession = Depends(get_db),
+):
+    """Export a project reference to the global library (character/scene)."""
+    result = await db.execute(
+        select(ReferenceItem).where(ReferenceItem.id == ref_id, ReferenceItem.project_id == project_id)
+    )
+    ref = result.scalar_one_or_none()
+    if not ref:
+        raise HTTPException(status_code=404, detail="参考资料不存在")
+
+    meta = ref.metadata_json or {}
+
+    if ref.type == "character":
+        return await _export_character(ref, meta, req, db)
+    elif ref.type == "location":
+        return await _export_scene(ref, meta, req, db)
+    else:
+        raise HTTPException(status_code=400, detail=f"类型 '{ref.type}' 不支持导出到全局库")
+
+
+async def _export_character(
+    ref: ReferenceItem, meta: dict, req: ExportGlobalRequest, db: AsyncSession,
+) -> ExportGlobalResponse:
+    """Handle export of a character reference to global Character table."""
+    # Project-specific fields that should NOT be exported
+    project_only_keys = {"story_name", "role_in_story", "relationships", "character_arc",
+                         "global_character_id", "global_scene_id"}
+
+    # Check for existing link
+    linked_id = meta.get("global_character_id")
+
+    if req.action == "preview":
+        # Check linked first
+        if linked_id:
+            char = await db.get(Character, linked_id)
+            if char:
+                return ExportGlobalResponse(
+                    status="preview",
+                    match=ExportGlobalMatch(global_id=char.id, global_name=char.name, global_type="character"),
+                )
+        # Name match
+        result = await db.execute(
+            select(Character).where(func.lower(Character.name) == ref.name.strip().lower())
+        )
+        match = result.scalar_one_or_none()
+        if match:
+            return ExportGlobalResponse(
+                status="preview",
+                match=ExportGlobalMatch(global_id=match.id, global_name=match.name, global_type="character"),
+            )
+        return ExportGlobalResponse(status="no_match")
+
+    # Build character fields from reference
+    char_data = {
+        "name": ref.name,
+        "background": ref.content or "",
+        "gender": meta.get("gender"),
+        "age": meta.get("age"),
+        "identity": meta.get("identity"),
+        "appearance": meta.get("appearance"),
+        "personality": meta.get("personality") or [],
+        "speaking_style": meta.get("speaking_style"),
+        "core_trait": meta.get("core_trait"),
+        "life_goal": meta.get("life_goal"),
+        "fatal_flaw": meta.get("fatal_flaw"),
+        "growth_hint": meta.get("growth_hint"),
+        "habits": meta.get("habits") or [],
+        "secret": meta.get("secret"),
+    }
+
+    if req.action == "update":
+        target_id = req.global_id or linked_id
+        if not target_id:
+            raise HTTPException(status_code=400, detail="更新操作需要指定 global_id")
+        char = await db.get(Character, target_id)
+        if not char:
+            raise HTTPException(status_code=404, detail="全局角色不存在")
+        for k, v in char_data.items():
+            setattr(char, k, v)
+        # Link back
+        ref.metadata_json = {**meta, "global_character_id": char.id}
+        await db.commit()
+        return ExportGlobalResponse(status="updated", global_id=char.id)
+
+    elif req.action == "create":
+        char = Character(**char_data)
+        db.add(char)
+        await db.flush()
+        # Link back
+        ref.metadata_json = {**meta, "global_character_id": char.id}
+        await db.commit()
+        return ExportGlobalResponse(status="created", global_id=char.id)
+
+    raise HTTPException(status_code=400, detail=f"未知操作: {req.action}")
+
+
+async def _export_scene(
+    ref: ReferenceItem, meta: dict, req: ExportGlobalRequest, db: AsyncSession,
+) -> ExportGlobalResponse:
+    """Handle export of a location reference to global Scene table."""
+    linked_id = meta.get("global_scene_id")
+
+    if req.action == "preview":
+        if linked_id:
+            scene = await db.get(Scene, linked_id)
+            if scene:
+                return ExportGlobalResponse(
+                    status="preview",
+                    match=ExportGlobalMatch(global_id=scene.id, global_name=scene.name, global_type="scene"),
+                )
+        result = await db.execute(
+            select(Scene).where(func.lower(Scene.name) == ref.name.strip().lower())
+        )
+        match = result.scalar_one_or_none()
+        if match:
+            return ExportGlobalResponse(
+                status="preview",
+                match=ExportGlobalMatch(global_id=match.id, global_name=match.name, global_type="scene"),
+            )
+        return ExportGlobalResponse(status="no_match")
+
+    scene_data = {
+        "name": ref.name,
+        "description": ref.content or "",
+        "category": meta.get("category") or "自定义",
+        "location": meta.get("location"),
+        "time_weather": meta.get("time_weather"),
+        "mood_keywords": meta.get("mood_keywords") or [],
+        "dramatic_potential": meta.get("dramatic_potential"),
+        "sensory_details": meta.get("sensory_details") or {},
+        "props": meta.get("props") or [],
+        "is_preset": False,
+    }
+
+    if req.action == "update":
+        target_id = req.global_id or linked_id
+        if not target_id:
+            raise HTTPException(status_code=400, detail="更新操作需要指定 global_id")
+        scene = await db.get(Scene, target_id)
+        if not scene:
+            raise HTTPException(status_code=404, detail="全局场景不存在")
+        for k, v in scene_data.items():
+            setattr(scene, k, v)
+        ref.metadata_json = {**meta, "global_scene_id": scene.id}
+        await db.commit()
+        return ExportGlobalResponse(status="updated", global_id=scene.id)
+
+    elif req.action == "create":
+        scene = Scene(**scene_data)
+        db.add(scene)
+        await db.flush()
+        ref.metadata_json = {**meta, "global_scene_id": scene.id}
+        await db.commit()
+        return ExportGlobalResponse(status="created", global_id=scene.id)
+
+    raise HTTPException(status_code=400, detail=f"未知操作: {req.action}")
+
+
+# ── Sync Reference from Global Library ──────────────
+
+@router.post("/{project_id}/references/{ref_id}/sync-global", response_model=ReferenceItemResponse)
+async def sync_reference_from_global(
+    project_id: str, ref_id: str, db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(ReferenceItem).where(ReferenceItem.id == ref_id, ReferenceItem.project_id == project_id)
+    )
+    ref = result.scalar_one_or_none()
+    if not ref:
+        raise HTTPException(status_code=404, detail="参考资料不存在")
+
+    meta = ref.metadata_json or {}
+    # Project-specific fields to preserve across sync
+    project_fields = {"story_name", "role_in_story", "relationships", "character_arc"}
+    preserved = {k: meta[k] for k in project_fields if k in meta}
+
+    global_char_id = meta.get("global_character_id")
+    global_scene_id = meta.get("global_scene_id")
+
+    if global_char_id:
+        char = await db.get(Character, global_char_id)
+        if not char:
+            raise HTTPException(status_code=404, detail="全局角色已被删除")
+        ref.name = char.name
+        ref.content = char.background or ""
+        ref.metadata_json = {
+            "global_character_id": char.id,
+            "gender": char.gender,
+            "age": char.age,
+            "identity": char.identity,
+            "appearance": char.appearance,
+            "personality": char.personality or [],
+            "speaking_style": char.speaking_style,
+            "core_trait": char.core_trait,
+            "life_goal": char.life_goal,
+            "fatal_flaw": char.fatal_flaw,
+            "growth_hint": char.growth_hint,
+            "habits": char.habits or [],
+            "secret": char.secret,
+            **preserved,
+        }
+    elif global_scene_id:
+        scene = await db.get(Scene, global_scene_id)
+        if not scene:
+            raise HTTPException(status_code=404, detail="全局场景已被删除")
+        ref.name = scene.name
+        ref.content = scene.description or ""
+        ref.metadata_json = {
+            "global_scene_id": scene.id,
+            "category": scene.category,
+            "location": scene.location,
+            "time_weather": scene.time_weather,
+            "mood_keywords": scene.mood_keywords or [],
+            "dramatic_potential": scene.dramatic_potential,
+            "sensory_details": scene.sensory_details or {},
+            "props": scene.props or [],
+            **preserved,
+        }
+    else:
+        raise HTTPException(status_code=400, detail="此资料未关联全局库")
+
+    await db.commit()
+    await db.refresh(ref)
+    return ReferenceItemResponse.model_validate(ref)
+
+
 # ── Document-Reference Links ────────────────────────
 
 @router.get(
@@ -580,6 +883,122 @@ async def export_project(project_id: str, db: AsyncSession = Depends(get_db)):
             docs.append({"name": d.name, "content": content, "word_count": wc})
         sections.append({"group": g.name, "documents": docs})
     return ProjectExportResponse(title=project.title, sections=sections, total_words=total)
+
+
+# ── Project Analysis (AI extract from manuscript) ──
+
+@router.post("/{project_id}/analyze", response_model=ProjectAnalyzeResponse, response_model_exclude_none=True)
+async def analyze_project(
+    project_id: str, req: ProjectAnalyzeRequest, db: AsyncSession = Depends(get_db),
+):
+    project = await _load_project(db, project_id)
+
+    # Gather all manuscript content (full text for word count)
+    raw_parts: list[tuple[str, str]] = []  # (header, content)
+    for g in project.groups:
+        for d in (g.documents or []):
+            content = await read_content(project_id, d.id)
+            if content.strip():
+                raw_parts.append((f"【{g.name} - {d.name}】", content.strip()))
+
+    if not raw_parts:
+        raise HTTPException(status_code=400, detail="项目中没有手稿内容可供分析")
+
+    full_combined = "\n\n".join(f"{h}\n{c}" for h, c in raw_parts)
+    total_words = _count_words(full_combined)
+
+    # Truncate each chapter proportionally to fit within AI context limits
+    # Claude proxy has input size constraints; keep total content reasonable
+    max_total_chars = 4000
+    total_raw = sum(len(c) for _, c in raw_parts)
+    if total_raw > max_total_chars:
+        per_doc = max(500, max_total_chars // len(raw_parts))
+        clipped_parts = [f"{h}\n{c[:per_doc]}..." for h, c in raw_parts]
+    else:
+        clipped_parts = [f"{h}\n{c}" for h, c in raw_parts]
+    combined = "\n\n---\n\n".join(clipped_parts)
+
+    selected_ai_model = req.ai_model or "claude-opus-4"
+    ai_service = get_ai_service(selected_ai_model)
+
+    try:
+        result = await ai_service.analyze_project_content(combined, debug=req.debug)
+    except Exception as e:
+        logger.exception("AI analyze failed for project=%s", project_id)
+        raise HTTPException(status_code=500, detail=f"AI分析失败: {str(e)}")
+
+    return ProjectAnalyzeResponse(
+        characters=[AnalyzedCharacter(**c) for c in result.get("characters", [])],
+        outlines=[AnalyzedOutline(**o) for o in result.get("outlines", [])],
+        settings=[AnalyzedSetting(**s) for s in result.get("settings", [])],
+        total_words_analyzed=total_words,
+        debug_info=result.get("debug_info"),
+    )
+
+
+@router.post("/{project_id}/analyze/apply", response_model=AnalyzeApplyResponse)
+async def apply_analysis(
+    project_id: str, req: AnalyzeApplyRequest, db: AsyncSession = Depends(get_db),
+):
+    proj = await db.get(Project, project_id)
+    if not proj:
+        raise HTTPException(status_code=404, detail="项目不存在")
+
+    created: list[ReferenceItem] = []
+
+    for char in req.characters:
+        ref = ReferenceItem(
+            project_id=project_id,
+            type="character",
+            name=char.name,
+            content=char.summary or "",
+            metadata_json={
+                "gender": char.gender,
+                "identity": char.identity,
+                "personality": char.personality or [],
+                "appearance": char.appearance,
+                "relationships": char.relationships,
+            },
+            sort_order=len(created),
+        )
+        db.add(ref)
+        created.append(ref)
+
+    for outline in req.outlines:
+        ref = ReferenceItem(
+            project_id=project_id,
+            type="outline",
+            name=outline.name,
+            content=outline.content,
+            metadata_json={},
+            sort_order=len(created),
+        )
+        db.add(ref)
+        created.append(ref)
+
+    for setting in req.settings:
+        ref = ReferenceItem(
+            project_id=project_id,
+            type=setting.type if setting.type in ("location", "note") else "note",
+            name=setting.name,
+            content=setting.content,
+            metadata_json={},
+            sort_order=len(created),
+        )
+        db.add(ref)
+        created.append(ref)
+
+    await db.commit()
+    for ref in created:
+        await db.refresh(ref)
+
+    return AnalyzeApplyResponse(
+        created_count=len(created),
+        references=[
+            ReferenceItemBrief(id=r.id, type=r.type, name=r.name, sort_order=r.sort_order)
+            for r in created
+        ],
+    )
 
 
 # ── AI Continue ─────────────────────────────────────

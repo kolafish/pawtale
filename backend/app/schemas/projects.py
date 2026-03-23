@@ -48,6 +48,7 @@ class ReferenceItemBrief(BaseModel):
     type: str
     name: str
     sort_order: int = 0
+    global_id: str | None = None  # linked global character/scene id
 
     class Config:
         from_attributes = True
@@ -261,3 +262,84 @@ class DocumentAIReviseMultiResponse(BaseModel):
     original_text: str
     scope: str
     results: list[DocumentAIReviseMultiResultItem]
+
+
+# ── Project Analysis (AI extract from manuscript) ──
+
+class ProjectAnalyzeRequest(BaseModel):
+    ai_model: str | None = None
+    debug: bool = False
+
+
+class AnalyzedCharacter(BaseModel):
+    name: str
+    gender: str | None = None
+    identity: str | None = None
+    personality: list[str] = []
+    appearance: str | None = None
+    relationships: str | None = None
+    summary: str | None = None
+
+
+class AnalyzedOutline(BaseModel):
+    name: str
+    content: str = ""
+
+
+class AnalyzedSetting(BaseModel):
+    name: str
+    type: str = "note"  # location / note
+    content: str = ""
+
+
+class ProjectAnalyzeResponse(BaseModel):
+    characters: list[AnalyzedCharacter] = []
+    outlines: list[AnalyzedOutline] = []
+    settings: list[AnalyzedSetting] = []
+    total_words_analyzed: int = 0
+    debug_info: dict | None = None
+
+
+class AnalyzeApplyRequest(BaseModel):
+    characters: list[AnalyzedCharacter] = []
+    outlines: list[AnalyzedOutline] = []
+    settings: list[AnalyzedSetting] = []
+
+
+class AnalyzeApplyResponse(BaseModel):
+    created_count: int
+    references: list[ReferenceItemBrief]
+
+
+# ── Export to Global Library ───────────────────────
+
+class ExportGlobalRequest(BaseModel):
+    action: str  # "preview" | "create" | "update"
+    global_id: str | None = None  # required when action="update"
+
+
+class ExportGlobalMatch(BaseModel):
+    global_id: str
+    global_name: str
+    global_type: str  # "character" | "scene"
+
+
+class ExportGlobalResponse(BaseModel):
+    status: str  # "preview" | "created" | "updated" | "no_match"
+    match: ExportGlobalMatch | None = None
+    global_id: str | None = None
+
+
+# ── Import with duplicate detection ───────────────
+
+class ImportPreviewItem(BaseModel):
+    global_id: str
+    global_name: str
+    global_type: str  # "character" | "scene"
+    existing_ref_id: str | None = None
+    existing_ref_name: str | None = None
+    match_by: str | None = None  # "global_id" | "name" | None
+
+
+class ImportPreviewResponse(BaseModel):
+    items: list[ImportPreviewItem]

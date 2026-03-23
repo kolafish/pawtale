@@ -31,6 +31,7 @@ interface AppState {
   // Project-based writing
   currentProject: Project | null;
   currentDocumentId: string | null;
+  currentReferenceId: string | null;
 
   // Actions
   setSelectedCharacters: (characters: Character[]) => void;
@@ -53,6 +54,7 @@ interface AppState {
   setDefaultAiModel: (model: 'deepseek' | 'claude-opus-4' | 'claude-sonnet-4') => void;
   setCurrentProject: (project: Project | null) => void;
   setCurrentDocumentId: (docId: string | null) => void;
+  setCurrentReferenceId: (refId: string | null) => void;
   reset: () => void;
 }
 
@@ -73,6 +75,7 @@ export const useAppStore = create<AppState>((set) => ({
   defaultAiModel: 'claude-opus-4',
   currentProject: null,
   currentDocumentId: null,
+  currentReferenceId: null,
 
   setSelectedCharacters: (characters) => set({ selectedCharacters: characters }),
   addSelectedCharacter: (character) => set((state) => ({
@@ -105,7 +108,8 @@ export const useAppStore = create<AppState>((set) => ({
   setIsGenerating: (isGenerating) => set({ isGenerating }),
   setDefaultAiModel: (model) => set({ defaultAiModel: model }),
   setCurrentProject: (project) => set({ currentProject: project }),
-  setCurrentDocumentId: (docId) => set({ currentDocumentId: docId }),
+  setCurrentDocumentId: (docId) => set({ currentDocumentId: docId, currentReferenceId: null }),
+  setCurrentReferenceId: (refId) => set({ currentReferenceId: refId, currentDocumentId: null }),
   reset: () => set({
     selectedCharacters: [],
     selectedScene: null,
@@ -117,5 +121,6 @@ export const useAppStore = create<AppState>((set) => ({
     presentCharacters: [],
     currentProject: null,
     currentDocumentId: null,
+    currentReferenceId: null,
   }),
 }));

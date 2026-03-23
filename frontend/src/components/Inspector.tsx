@@ -340,6 +340,8 @@ function GlobalImportPanel({ projectId, onDone }: { projectId: string; onDone: (
   });
   const [selectedChars, setSelectedChars] = useState<Set<string>>(new Set());
   const [selectedScenes, setSelectedScenes] = useState<Set<string>>(new Set());
+  const [importing, setImporting] = useState(false);
+  const [duplicateWarning, setDuplicateWarning] = useState<string[]>([]);
 
   const toggle = (set: Set<string>, id: string, setter: (s: Set<string>) => void) => {
     const next = new Set(set);
@@ -349,11 +351,33 @@ function GlobalImportPanel({ projectId, onDone }: { projectId: string; onDone: (
   };
 
   const handleImport = async () => {
-    await projectsApi.importGlobal(projectId, {
-      character_ids: [...selectedChars],
-      scene_ids: [...selectedScenes],
-    });
-    onDone();
+    if (importing) return;
+    setImporting(true);
+    setDuplicateWarning([]);
+    try {
+      // Preview for duplicates
+      const preview = await projectsApi.importPreview(projectId, {
+        character_ids: [...selectedChars],
+        scene_ids: [...selectedScenes],
+      });
+      const dupes = preview.items.filter((it) => it.existing_ref_id);
+      if (dupes.length > 0 && duplicateWarning.length === 0) {
+        // Show warning, let user confirm
+        setDuplicateWarning(dupes.map((d) =>
+          `「${d.global_name}」已存在 (${d.match_by === 'global_id' ? '已关联' : '同名'}：${d.existing_ref_name})`
+        ));
+        setImporting(false);
+        return;
+      }
+      // Proceed with import
+      await projectsApi.importGlobal(projectId, {
+        character_ids: [...selectedChars],
+        scene_ids: [...selectedScenes],
+      });
+      onDone();
+    } catch {
+      setImporting(false);
+    }
   };
 
   return (
@@ -394,13 +418,22 @@ function GlobalImportPanel({ projectId, onDone }: { projectId: string; onDone: (
           ))}
         </div>
       )}
+      {duplicateWarning.length > 0 && (
+        <div className="bg-amber-50 border border-amber-200 rounded-lg p-2 space-y-1">
+          <p className="text-xs font-medium text-amber-700">以下项目已存在：</p>
+          {duplicateWarning.map((w, i) => (
+            <p key={i} className="text-xs text-amber-600">{w}</p>
+          ))}
+          <p className="text-xs text-amber-500">点击「继续导入」仍会创建新的引用。</p>
+        </div>
+      )}
       <div className="flex gap-2">
         <button
           onClick={handleImport}
-          disabled={selectedChars.size === 0 && selectedScenes.size === 0}
+          disabled={(selectedChars.size === 0 && selectedScenes.size === 0) || importing}
           className="flex-1 text-xs px-2 py-1.5 rounded bg-pink-500 text-white hover:bg-pink-600 disabled:opacity-60"
         >
-          导入 ({selectedChars.size + selectedScenes.size})
+          {duplicateWarning.length > 0 ? '继续导入' : '导入'} ({selectedChars.size + selectedScenes.size})
         </button>
         <button onClick={onDone} className="text-xs px-2 py-1.5 rounded border border-gray-200 hover:bg-gray-50">
           取消

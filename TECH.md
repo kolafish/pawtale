@@ -134,6 +134,9 @@ POST   /api/projects/{id}/references               # 新建
 PUT    /api/projects/{id}/references/{rid}          # 更新
 DELETE /api/projects/{id}/references/{rid}          # 删除
 POST   /api/projects/{id}/references/import-global  # 从全局库导入
+POST   /api/projects/{id}/references/import-preview # 导入前重复检测
+POST   /api/projects/{id}/references/{rid}/export-global  # 导出到全局库
+POST   /api/projects/{id}/references/{rid}/sync-global    # 从全局库同步最新数据
 
 # 文档-资料关联
 GET    /api/projects/{id}/documents/{did}/references
@@ -149,6 +152,9 @@ GET    /api/projects/{id}/export                   # 导出 TXT
 # AI 辅助
 POST   /api/projects/{id}/documents/{did}/ai-continue    # AI 续写
 POST   /api/projects/{id}/documents/{did}/ai-revise      # AI 修改（返回 diff）
+POST   /api/projects/{id}/documents/{did}/ai-revise-multi # AI 多模型对比修改
+POST   /api/projects/{id}/analyze                         # AI 分析提取人物/大纲/设定
+POST   /api/projects/{id}/analyze/apply                   # 应用分析结果到项目
 ```
 
 ### 全局资料库 API（保留）
@@ -205,7 +211,7 @@ Pawtale/
 │   └── tests/
 │       ├── conftest.py          # 测试配置（内存数据库 + dependency_overrides）
 │       ├── test_api.py          # 旧 API 测试
-│       ├── test_projects.py     # 项目 API 测试 (32 tests)
+│       ├── test_projects.py     # 项目 API 测试 (35 tests)
 │       ├── test_ai_base.py      # AI 基类测试 (51 tests，覆盖 helper + 模板方法)
 │       ├── test_services.py     # AI 服务测试
 │       ├── test_binder_rendering.py  # Binder 渲染测试
@@ -223,15 +229,20 @@ Pawtale/
 │       │   ├── EditorMain.tsx      # 编辑器 + 工具栏 + 状态栏
 │       │   ├── AIAssistPanel.tsx   # AI 续写/修改 入口面板
 │       │   ├── DiffReviewView.tsx  # AI 修改 diff 对比视图
-│       │   ├── Inspector.tsx       # 右侧浮层面板（文档/资料/项目）
+│       │   ├── Inspector.tsx       # 右侧浮层面板（文档/资料/项目）+ 全局库导入（含重复检测）
 │       │   ├── ReferenceSheet.tsx  # 参考资料编辑表单
+│       │   ├── CharacterEditor.tsx # 角色编辑器（含导出到全局库）
+│       │   ├── NoteEditor.tsx      # 笔记/地点编辑器（地点支持导出到全局库）
+│       │   ├── OutlineEditor.tsx   # 大纲编辑器
+│       │   ├── AnalyzeDialog.tsx   # AI 分析提取对话框
 │       │   ├── ErrorBoundary.tsx   # React 错误边界
 │       │   ├── CharacterPanel.tsx  # 全局角色库管理
 │       │   ├── ScenePanel.tsx      # 全局场景库管理
 │       │   └── AIDebugPanel.tsx    # AI 调试信息展示
 │       ├── hooks/
 │       │   ├── useProjectState.ts  # 项目状态 Hook（auto-save, CRUD, AI, 拖拽排序）
-│       │   └── useAIRevision.ts    # AI 修改 Hook（选段/全文修改，diff 对比）
+│       │   ├── useAIRevision.ts    # AI 修改 Hook（选段/全文修改，diff 对比）
+│       │   └── useReferenceEditor.ts # 参考资料编辑 Hook（auto-save, 同步/导出全局库）
 │       ├── stores/
 │       │   └── appStore.ts         # Zustand 全局状态
 │       ├── constants/

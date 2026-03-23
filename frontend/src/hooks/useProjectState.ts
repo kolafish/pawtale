@@ -275,6 +275,54 @@ export function useProjectState() {
     await refreshProject();
   };
 
+  // ─── Reference operations (for Binder) ───
+  const { setCurrentReferenceId } = useAppStore();
+
+  const createReference = async (type: string) => {
+    if (!currentProject) return;
+    const nameMap: Record<string, string> = {
+      character: '新角色', location: '新地点', note: '新笔记', outline: '新大纲',
+    };
+    const ref = await projectsApi.createReference(currentProject.id, { type, name: nameMap[type] || '未命名' });
+    await refreshProject();
+    setCurrentReferenceId(ref.id);
+  };
+
+  const renameReference = async (refId: string, name: string) => {
+    if (!currentProject) return;
+    await projectsApi.updateReference(currentProject.id, refId, { name });
+    await refreshProject();
+  };
+
+  const deleteReference = async (refId: string) => {
+    if (!currentProject) return;
+    await projectsApi.deleteReference(currentProject.id, refId);
+    const { currentReferenceId: activeRefId } = useAppStore.getState();
+    if (refId === activeRefId) {
+      setCurrentReferenceId(null);
+    }
+    await refreshProject();
+  };
+
+  const selectReference = async (refId: string) => {
+    const { currentReferenceId: activeRefId } = useAppStore.getState();
+    if (refId === activeRefId) return;
+    // Save current document if dirty before switching
+    if (currentProject && currentDocumentId) {
+      const isDirty = documentContent !== lastSavedContentRef.current ||
+                      documentName !== lastSavedNameRef.current;
+      if (isDirty) {
+        setSaveStatus('saving');
+        await saveMutation.mutateAsync({
+          projectId: currentProject.id,
+          docId: currentDocumentId,
+          payload: { name: documentName, content: documentContent, synopsis, status, label: label || undefined },
+        });
+      }
+    }
+    setCurrentReferenceId(refId);
+  };
+
   return {
     // Project
     currentProject,
@@ -331,5 +379,11 @@ export function useProjectState() {
     deleteDocument,
     reorderDocuments,
     reorderGroups,
+
+    // Reference operations
+    createReference,
+    renameReference,
+    deleteReference,
+    selectReference,
   };
 }
