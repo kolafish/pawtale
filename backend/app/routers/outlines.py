@@ -1,12 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import selectinload
 from app.auth import get_current_user
 from app.database import get_db
 from app.models import (
     StoryOutline, OutlineCharacter, OutlineScene,
-    Character, Scene, Story, StoryCharacter,
+    Character, Scene, Story, StoryCharacter, User,
 )
 from app.schemas import (
     StoryOutlineCreate, StoryOutlineUpdate, StoryOutlineResponse,
@@ -21,6 +21,18 @@ from app.schemas import (
 from app.services import get_ai_service
 
 router = APIRouter(prefix="/api/outlines", tags=["outlines"], dependencies=[Depends(get_current_user)])
+
+
+def _owned_outline_filter(outline_id: str, user_id: str):
+    return StoryOutline.id == outline_id, StoryOutline.user_id == user_id
+
+
+def _accessible_character_filter(user_id: str):
+    return or_(Character.user_id == user_id, Character.is_preset == True)
+
+
+def _accessible_scene_filter(user_id: str):
+    return or_(Scene.user_id == user_id, Scene.is_preset == True)
 
 
 # 预设模板数据
@@ -121,10 +133,14 @@ async def get_outline_templates():
 
 
 @router.get("", response_model=list[StoryOutlineResponse])
-async def get_outlines(db: AsyncSession = Depends(get_db)):
+async def get_outlines(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """获取所有故事大纲"""
     result = await db.execute(
         select(StoryOutline)
+        .where(StoryOutline.user_id == current_user.id)
         .options(
             selectinload(StoryOutline.outline_characters).selectinload(OutlineCharacter.character),
             selectinload(StoryOutline.outline_scenes).selectinload(OutlineScene.scene),
@@ -139,9 +155,10 @@ async def get_outlines(db: AsyncSession = Depends(get_db)):
 async def create_outline(
     outline: StoryOutlineCreate,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """创建故事大纲"""
-    db_outline = StoryOutline(**outline.model_dump())
+    db_outline = StoryOutline(**outline.model_dump(), user_id=current_user.id)
     db.add(db_outline)
     await db.commit()
     await db.refresh(db_outline)
@@ -153,13 +170,17 @@ async def create_outline(
             selectinload(StoryOutline.outline_characters).selectinload(OutlineCharacter.character),
             selectinload(StoryOutline.outline_scenes).selectinload(OutlineScene.scene),
         )
-        .where(StoryOutline.id == db_outline.id)
+        .where(*_owned_outline_filter(db_outline.id, current_user.id))
     )
     return result.scalar_one()
 
 
 @router.get("/{outline_id}", response_model=StoryOutlineResponse)
-async def get_outline(outline_id: str, db: AsyncSession = Depends(get_db)):
+async def get_outline(
+    outline_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """获取大纲详情"""
     result = await db.execute(
         select(StoryOutline)
@@ -167,7 +188,7 @@ async def get_outline(outline_id: str, db: AsyncSession = Depends(get_db)):
             selectinload(StoryOutline.outline_characters).selectinload(OutlineCharacter.character),
             selectinload(StoryOutline.outline_scenes).selectinload(OutlineScene.scene),
         )
-        .where(StoryOutline.id == outline_id)
+        .where(*_owned_outline_filter(outline_id, current_user.id))
     )
     outline = result.scalar_one_or_none()
     if not outline:
@@ -180,10 +201,11 @@ async def update_outline(
     outline_id: str,
     outline_update: StoryOutlineUpdate,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """更新大纲"""
     result = await db.execute(
-        select(StoryOutline).where(StoryOutline.id == outline_id)
+        select(StoryOutline).where(*_owned_outline_filter(outline_id, current_user.id))
     )
     outline = result.scalar_one_or_none()
     if not outline:
@@ -202,16 +224,20 @@ async def update_outline(
             selectinload(StoryOutline.outline_characters).selectinload(OutlineCharacter.character),
             selectinload(StoryOutline.outline_scenes).selectinload(OutlineScene.scene),
         )
-        .where(StoryOutline.id == outline_id)
+        .where(*_owned_outline_filter(outline_id, current_user.id))
     )
     return result.scalar_one()
 
 
 @router.delete("/{outline_id}")
-async def delete_outline(outline_id: str, db: AsyncSession = Depends(get_db)):
+async def delete_outline(
+    outline_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """删除大纲"""
     result = await db.execute(
-        select(StoryOutline).where(StoryOutline.id == outline_id)
+        select(StoryOutline).where(*_owned_outline_filter(outline_id, current_user.id))
     )
     outline = result.scalar_one_or_none()
     if not outline:
@@ -228,18 +254,19 @@ async def add_character_to_outline(
     outline_id: str,
     char_config: OutlineCharacterCreate,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """添加角色到大纲"""
     # 验证大纲存在
     result = await db.execute(
-        select(StoryOutline).where(StoryOutline.id == outline_id)
+        select(StoryOutline).where(*_owned_outline_filter(outline_id, current_user.id))
     )
     if not result.scalar_one_or_none():
         raise HTTPException(status_code=404, detail="大纲不存在")
 
     # 验证角色存在
     result = await db.execute(
-        select(Character).where(Character.id == char_config.character_id)
+        select(Character).where(Character.id == char_config.character_id, _accessible_character_filter(current_user.id))
     )
     character = result.scalar_one_or_none()
     if not character:
@@ -278,12 +305,14 @@ async def update_outline_character(
     character_id: str,
     char_update: OutlineCharacterUpdate,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """更新大纲中的角色配置"""
     result = await db.execute(
-        select(OutlineCharacter).where(
+        select(OutlineCharacter).join(StoryOutline, StoryOutline.id == OutlineCharacter.outline_id).where(
             OutlineCharacter.outline_id == outline_id,
             OutlineCharacter.character_id == character_id,
+            StoryOutline.user_id == current_user.id,
         )
     )
     outline_char = result.scalar_one_or_none()
@@ -310,12 +339,14 @@ async def remove_character_from_outline(
     outline_id: str,
     character_id: str,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """从大纲移除角色"""
     result = await db.execute(
-        select(OutlineCharacter).where(
+        select(OutlineCharacter).join(StoryOutline, StoryOutline.id == OutlineCharacter.outline_id).where(
             OutlineCharacter.outline_id == outline_id,
             OutlineCharacter.character_id == character_id,
+            StoryOutline.user_id == current_user.id,
         )
     )
     outline_char = result.scalar_one_or_none()
@@ -333,18 +364,19 @@ async def add_scene_to_outline(
     outline_id: str,
     scene_config: OutlineSceneCreate,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """添加场景到大纲"""
     # 验证大纲存在
     result = await db.execute(
-        select(StoryOutline).where(StoryOutline.id == outline_id)
+        select(StoryOutline).where(*_owned_outline_filter(outline_id, current_user.id))
     )
     if not result.scalar_one_or_none():
         raise HTTPException(status_code=404, detail="大纲不存在")
 
     # 验证场景存在
     result = await db.execute(
-        select(Scene).where(Scene.id == scene_config.scene_id)
+        select(Scene).where(Scene.id == scene_config.scene_id, _accessible_scene_filter(current_user.id))
     )
     scene = result.scalar_one_or_none()
     if not scene:
@@ -401,12 +433,14 @@ async def update_outline_scene(
     scene_id: str,
     scene_update: OutlineSceneUpdate,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """更新大纲中的场景配置"""
     result = await db.execute(
-        select(OutlineScene).where(
+        select(OutlineScene).join(StoryOutline, StoryOutline.id == OutlineScene.outline_id).where(
             OutlineScene.outline_id == outline_id,
             OutlineScene.scene_id == scene_id,
+            StoryOutline.user_id == current_user.id,
         )
     )
     outline_scene = result.scalar_one_or_none()
@@ -445,12 +479,14 @@ async def remove_scene_from_outline(
     outline_id: str,
     scene_id: str,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """从大纲移除场景"""
     result = await db.execute(
-        select(OutlineScene).where(
+        select(OutlineScene).join(StoryOutline, StoryOutline.id == OutlineScene.outline_id).where(
             OutlineScene.outline_id == outline_id,
             OutlineScene.scene_id == scene_id,
+            StoryOutline.user_id == current_user.id,
         )
     )
     outline_scene = result.scalar_one_or_none()
@@ -468,6 +504,7 @@ async def generate_story_from_outline(
     outline_id: str,
     request: StoryOutlineGenerateRequest,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """基于大纲生成故事"""
     # 获取大纲及其关联数据
@@ -477,7 +514,7 @@ async def generate_story_from_outline(
             selectinload(StoryOutline.outline_characters).selectinload(OutlineCharacter.character),
             selectinload(StoryOutline.outline_scenes).selectinload(OutlineScene.scene),
         )
-        .where(StoryOutline.id == outline_id)
+        .where(*_owned_outline_filter(outline_id, current_user.id))
     )
     outline = result.scalar_one_or_none()
     if not outline:
@@ -576,6 +613,7 @@ async def generate_story_from_outline(
     title = f"{char_names}的故事"
 
     story = Story(
+        user_id=current_user.id,
         title=title,
         outline_id=outline_id,
         scene_id=starting_scene.id,
@@ -616,6 +654,7 @@ async def ai_enhance_outline(
     outline_id: str,
     request: OutlineEnhanceRequest,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """AI 生成大纲的核心冲突和剧情提示"""
     # 获取大纲及其关联数据
@@ -625,7 +664,7 @@ async def ai_enhance_outline(
             selectinload(StoryOutline.outline_characters).selectinload(OutlineCharacter.character),
             selectinload(StoryOutline.outline_scenes).selectinload(OutlineScene.scene),
         )
-        .where(StoryOutline.id == outline_id)
+        .where(*_owned_outline_filter(outline_id, current_user.id))
     )
     outline = result.scalar_one_or_none()
     if not outline:
@@ -679,6 +718,7 @@ async def ai_enhance_outline(
 async def guided_create_outline(
     request: OutlineGuidedCreateRequest,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """引导式创建大纲 - 基于用户的故事目标、角色张力和核心冲突生成大纲草稿"""
 
@@ -686,7 +726,9 @@ async def guided_create_outline(
     characters = []
     if request.character_ids:
         for char_id in request.character_ids:
-            result = await db.execute(select(Character).where(Character.id == char_id))
+            result = await db.execute(
+                select(Character).where(Character.id == char_id, _accessible_character_filter(current_user.id))
+            )
             char = result.scalar_one_or_none()
             if char:
                 characters.append({

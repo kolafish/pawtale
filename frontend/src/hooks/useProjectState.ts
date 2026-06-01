@@ -40,6 +40,9 @@ export function useProjectState() {
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSavedContentRef = useRef('');
   const lastSavedNameRef = useRef('');
+  const lastSavedSynopsisRef = useRef('');
+  const lastSavedStatusRef = useRef('draft');
+  const lastSavedLabelRef = useRef('');
   const isLoadingDocRef = useRef(false);
   const isReviewingRef = useRef(false);
 
@@ -61,6 +64,9 @@ export function useProjectState() {
       setSaveStatus('saved');
       lastSavedContentRef.current = documentContent;
       lastSavedNameRef.current = documentName;
+      lastSavedSynopsisRef.current = synopsis;
+      lastSavedStatusRef.current = status;
+      lastSavedLabelRef.current = label;
       refreshProject();
     },
   });
@@ -94,6 +100,9 @@ export function useProjectState() {
       setLabel(doc.label || '');
       lastSavedContentRef.current = doc.content;
       lastSavedNameRef.current = doc.name;
+      lastSavedSynopsisRef.current = doc.synopsis || '';
+      lastSavedStatusRef.current = doc.status;
+      lastSavedLabelRef.current = doc.label || '';
       setSaveStatus('saved');
       setCurrentDocumentId(docId);
     } finally {
@@ -107,13 +116,16 @@ export function useProjectState() {
     // Save current if dirty
     if (currentProject && currentDocumentId) {
       const isDirty = documentContent !== lastSavedContentRef.current ||
-                      documentName !== lastSavedNameRef.current;
+                      documentName !== lastSavedNameRef.current ||
+                      synopsis !== lastSavedSynopsisRef.current ||
+                      status !== lastSavedStatusRef.current ||
+                      label !== lastSavedLabelRef.current;
       if (isDirty) {
         setSaveStatus('saving');
         await saveMutation.mutateAsync({
           projectId: currentProject.id,
           docId: currentDocumentId,
-          payload: { name: documentName, content: documentContent, synopsis, status, label: label || undefined },
+          payload: { name: documentName, content: documentContent, synopsis, status, label },
         });
       }
     }
@@ -123,26 +135,36 @@ export function useProjectState() {
   // ─── Auto-save ───
   const doSave = useCallback(async () => {
     if (!currentProject || !currentDocumentId || isLoadingDocRef.current) return;
-    if (documentContent === lastSavedContentRef.current && documentName === lastSavedNameRef.current) return;
+    const isDirty = documentContent !== lastSavedContentRef.current ||
+                    documentName !== lastSavedNameRef.current ||
+                    synopsis !== lastSavedSynopsisRef.current ||
+                    status !== lastSavedStatusRef.current ||
+                    label !== lastSavedLabelRef.current;
+    if (!isDirty) return;
     setSaveStatus('saving');
     await saveMutation.mutateAsync({
       projectId: currentProject.id,
       docId: currentDocumentId,
-      payload: { name: documentName, content: documentContent, synopsis, status, label: label || undefined },
+      payload: { name: documentName, content: documentContent, synopsis, status, label },
     });
   }, [currentProject, currentDocumentId, documentContent, documentName, synopsis, status, label, saveMutation]);
 
   useEffect(() => {
     if (!currentProject || !currentDocumentId || isLoadingDocRef.current) return;
     if (isReviewingRef.current) return; // Pause auto-save during diff review
-    if (documentContent === lastSavedContentRef.current && documentName === lastSavedNameRef.current) return;
+    const isDirty = documentContent !== lastSavedContentRef.current ||
+                    documentName !== lastSavedNameRef.current ||
+                    synopsis !== lastSavedSynopsisRef.current ||
+                    status !== lastSavedStatusRef.current ||
+                    label !== lastSavedLabelRef.current;
+    if (!isDirty) return;
     setSaveStatus('unsaved');
     if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
     autoSaveTimerRef.current = setTimeout(() => doSave(), 3000);
     return () => {
       if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
     };
-  }, [documentContent, documentName, currentProject, currentDocumentId, doSave]);
+  }, [documentContent, documentName, synopsis, status, label, currentProject, currentDocumentId, doSave]);
 
   // Cmd+S
   useEffect(() => {
@@ -310,13 +332,16 @@ export function useProjectState() {
     // Save current document if dirty before switching
     if (currentProject && currentDocumentId) {
       const isDirty = documentContent !== lastSavedContentRef.current ||
-                      documentName !== lastSavedNameRef.current;
+                      documentName !== lastSavedNameRef.current ||
+                      synopsis !== lastSavedSynopsisRef.current ||
+                      status !== lastSavedStatusRef.current ||
+                      label !== lastSavedLabelRef.current;
       if (isDirty) {
         setSaveStatus('saving');
         await saveMutation.mutateAsync({
           projectId: currentProject.id,
           docId: currentDocumentId,
-          payload: { name: documentName, content: documentContent, synopsis, status, label: label || undefined },
+          payload: { name: documentName, content: documentContent, synopsis, status, label },
         });
       }
     }

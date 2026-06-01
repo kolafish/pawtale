@@ -1,4 +1,5 @@
 #!/bin/bash
+set -euo pipefail
 
 echo "🧪 Pawtale 前端快速测试"
 echo "========================"
@@ -15,8 +16,7 @@ echo "✅ 依赖检查通过"
 echo ""
 
 echo "🔍 TypeScript 类型检查..."
-npx tsc --noEmit
-if [ $? -ne 0 ]; then
+if ! npx tsc --noEmit; then
     echo "❌ TypeScript 类型检查失败"
     exit 1
 fi
@@ -24,8 +24,7 @@ echo "✅ TypeScript 类型检查通过"
 echo ""
 
 echo "🏗️  Vite 构建测试（不输出文件）..."
-npx vite build --mode development --logLevel error 2>&1 | head -50
-if [ $? -ne 0 ]; then
+if ! npx vite build --mode development --logLevel error; then
     echo "❌ Vite 构建失败"
     exit 1
 fi

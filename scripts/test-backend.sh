@@ -1,4 +1,5 @@
 #!/bin/bash
+set -euo pipefail
 
 echo "🧪 Pawtale 后端快速测试"
 echo "========================"
@@ -15,8 +16,7 @@ echo "✅ 虚拟环境检查通过"
 echo ""
 
 echo "🔍 Python 导入测试..."
-PYTHONPATH=. venv/bin/python -c "from app.main import app; print('✅ 主应用导入成功')" 2>&1
-if [ $? -ne 0 ]; then
+if ! PYTHONPATH=. venv/bin/python -c "from app.main import app; print('✅ 主应用导入成功')" 2>&1; then
     echo "❌ Python 导入失败"
     exit 1
 fi
@@ -47,9 +47,9 @@ echo ""
 
 echo "🧪 运行 pytest 测试（如果存在）..."
 if [ -d "tests" ]; then
-    PYTHONPATH=. venv/bin/python -m pytest tests/ -v --tb=short 2>&1 | head -50
-    if [ $? -ne 0 ]; then
-        echo "⚠️  部分测试失败，但不影响启动"
+    if ! PYTHONPATH=. venv/bin/python -m pytest -p no:capture tests/ -v --tb=short; then
+        echo "❌ pytest 测试失败"
+        exit 1
     else
         echo "✅ 所有测试通过"
     fi
