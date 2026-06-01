@@ -178,6 +178,7 @@ Pawtale/
 │   │   ├── main.py              # FastAPI 入口
 │   │   ├── config.py            # 配置管理
 │   │   ├── database.py          # 数据库连接
+│   │   ├── domain/              # 产品类型和默认项目模板
 │   │   ├── models/
 │   │   │   ├── models.py        # 全局角色/场景模型
 │   │   │   └── projects.py      # 项目写作模型 (Project, DocumentGroup, Document 等)

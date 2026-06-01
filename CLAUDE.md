@@ -138,6 +138,7 @@ Layout (h-screen flex flex-col)
 ### 后端
 - `backend/app/models/projects.py` - 项目系统模型（Project, DocumentGroup, Document, ReferenceItem, WritingSession）
 - `backend/app/schemas/projects.py` - 项目系统 Pydantic schemas
+- `backend/app/domain/` - 产品类型和默认项目模板（novel/article/memoir）
 - `backend/app/routers/projects/` - 项目 API 端点（按 core/structure/references/activity/ai 拆分）
 - `backend/app/services/projects/` - 项目业务编排（权限校验、文档树、参考资料、统计导出、AI 工作流）
 - `backend/app/models/models.py` - 全局资料库模型（Character, Scene）
