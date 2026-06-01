@@ -168,6 +168,7 @@ Layout (h-screen flex flex-col)
 - `frontend/src/domain/projectProfiles.ts` - 前端产品类型配置（创建入口、结构单位、Binder 分区）
 - `frontend/src/hooks/useProjectState.ts` - 项目状态 facade（组合文档草稿、结构、资料、AI 续写、导出）
 - `frontend/src/hooks/project/useDocumentDraft.ts` - 文档草稿状态（加载、快照、auto-save、Cmd+S、切换文档）
+- `frontend/src/hooks/project/useProjectStructure.ts` - 项目结构操作（分组/文档 CRUD 和排序）
 - `frontend/src/stores/appStore.ts` - Zustand 全局状态
 - `frontend/src/api/index.ts` - API 客户端（projectsApi, charactersApi, scenesApi）
 - `frontend/src/types/index.ts` - TypeScript 类型定义
