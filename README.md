@@ -50,12 +50,15 @@ Pawtale/
 
 ```bash
 cd backend
-python -m venv venv
+python3.12 -m venv venv
 source venv/bin/activate
-pip install -r requirements.txt
+pip install -r requirements-dev.txt
 cp .env.example .env
 PYTHONPATH=. uvicorn app.main:app --reload --port 8000
 ```
+
+macOS 上如果 `python3.12` 指向 Miniforge/Conda，建议用 Homebrew Python 创建 venv：
+`/opt/homebrew/opt/python@3.12/bin/python3.12 -m venv venv`。
 
 ### 前端
 
@@ -90,7 +93,7 @@ cd frontend && npm run lint
 cd frontend && npm run build
 
 # 后端测试
-cd backend && PYTHONFAULTHANDLER=1 venv/bin/python -m pytest -q -p no:capture
+cd backend && venv/bin/python -m pytest -q
 ```
 
 ## 文档

@@ -15,12 +15,15 @@ FastAPI 后端，提供认证、项目写作系统、项目资料和 AI 辅助 A
 
 ```bash
 cd backend
-python -m venv venv
+python3.12 -m venv venv
 source venv/bin/activate
-pip install -r requirements.txt
+pip install -r requirements-dev.txt
 cp .env.example .env
 PYTHONPATH=. uvicorn app.main:app --reload --port 8000
 ```
+
+macOS 上如果 `python3.12` 指向 Miniforge/Conda，建议用 Homebrew Python 创建 venv：
+`/opt/homebrew/opt/python@3.12/bin/python3.12 -m venv venv`。
 
 API 文档：
 
@@ -31,16 +34,16 @@ API 文档：
 
 ```bash
 cd backend
-PYTHONFAULTHANDLER=1 venv/bin/python -m pytest -q -p no:capture
+venv/bin/python -m pytest -q
 ```
 
 常用定向测试：
 
 ```bash
-PYTHONFAULTHANDLER=1 venv/bin/python -m pytest tests/test_project_core.py -q -p no:capture
-PYTHONFAULTHANDLER=1 venv/bin/python -m pytest tests/test_project_structure.py -q -p no:capture
-PYTHONFAULTHANDLER=1 venv/bin/python -m pytest tests/test_project_references.py -q -p no:capture
-PYTHONFAULTHANDLER=1 venv/bin/python -m pytest tests/test_project_ai.py -q -p no:capture
+venv/bin/python -m pytest tests/test_project_core.py -q
+venv/bin/python -m pytest tests/test_project_structure.py -q
+venv/bin/python -m pytest tests/test_project_references.py -q
+venv/bin/python -m pytest tests/test_project_ai.py -q
 ```
 
 ## 核心结构
