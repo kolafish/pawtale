@@ -187,7 +187,7 @@ Pawtale/
 │   │   ├── routers/
 │   │   │   ├── characters.py    # 全局角色库
 │   │   │   ├── scenes.py        # 全局场景库
-│   │   │   └── projects.py      # 项目系统（主要）
+│   │   │   └── projects/        # 项目系统路由（core/structure/references/activity/ai）
 │   │   └── services/
 │   │       ├── ai_factory.py    # AI 服务工厂
 │   │       ├── ai_base.py       # AI 服务基类（模板方法，含所有 prompt 和解析逻辑）
@@ -196,6 +196,8 @@ Pawtale/
 │   │       ├── ai_scene.py      # AI 场景生成
 │   │       ├── content_storage.py # 文档文件存储
 │   │       ├── project_documents.py # 项目文档服务（事务补偿 + 响应构造）
+│   │       ├── project_references.py # 项目/全局资料转换 helper
+│   │       ├── projects/        # 项目业务编排服务
 │   │       └── ai_image.py      # GPT-4o 图像生成
 │   └── tests/
 │       ├── conftest.py          # 测试配置（内存数据库 + dependency_overrides）
@@ -284,6 +286,7 @@ ClaudeTextService (ai_claude.py, ~125行)   ← system 合并到 user（代理�
 - 新表通过 `Base.metadata.create_all` 自动创建
 - 文档正文存放在 `data/projects/{project_id}/{document_id}.md`
 - 项目文档创建、更新、删除通过 `project_documents.py` 统一处理文件与数据库提交
+- `/api/projects/*` 的 HTTP 路由只保留请求/响应边界，业务编排放在 `services/projects/`
 
 ## 环境变量
 
