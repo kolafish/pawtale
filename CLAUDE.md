@@ -138,7 +138,8 @@ Layout (h-screen flex flex-col)
 ### 后端
 - `backend/app/models/projects.py` - 项目系统模型（Project, DocumentGroup, Document, ReferenceItem, WritingSession）
 - `backend/app/schemas/projects.py` - 项目系统 Pydantic schemas
-- `backend/app/routers/projects.py` - 项目 API 端点（`/api/projects/*`，包括 AI 续写/修改）
+- `backend/app/routers/projects/` - 项目 API 端点（按 core/structure/references/activity/ai 拆分）
+- `backend/app/services/projects/` - 项目业务编排（权限校验、文档树、参考资料、统计导出、AI 工作流）
 - `backend/app/models/models.py` - 全局资料库模型（Character, Scene）
 - `backend/app/routers/characters.py` - 全局角色库 API
 - `backend/app/routers/scenes.py` - 全局场景库 API
@@ -165,7 +166,7 @@ Layout (h-screen flex flex-col)
 - `frontend/src/components/ScenePanel.tsx` - 全局场景库管理
 
 ### 测试
-- `backend/tests/test_projects.py` - 项目 API 测试（32 tests，包括 AI 续写/修改）
+- `backend/tests/test_projects.py` - 项目 API 测试（包括 AI 续写/修改）
 - `backend/tests/test_api.py` - 旧 API 端点测试（角色、场景、故事）
 - `backend/tests/test_services.py` - AI 服务测试
 - `backend/tests/test_frontend.py` - 前端编译测试（TypeScript + Vite）

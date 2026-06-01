@@ -319,7 +319,7 @@ class TestAIContinue:
 
     async def test_ai_continue_success(self, client):
         pid, did = await self._setup(client)
-        with patch("app.routers.projects.get_ai_service") as mock_get_service:
+        with patch("app.services.projects.ai.get_ai_service") as mock_get_service:
             mock_service = AsyncMock()
             mock_service.generate_story = AsyncMock(return_value={
                 "content": "他走过来递了把伞。",
@@ -339,7 +339,7 @@ class TestAIContinue:
 
     async def test_ai_continue_with_instruction(self, client):
         pid, did = await self._setup(client)
-        with patch("app.routers.projects.get_ai_service") as mock_get_service:
+        with patch("app.services.projects.ai.get_ai_service") as mock_get_service:
             mock_service = AsyncMock()
             mock_service.generate_story = AsyncMock(return_value={
                 "content": "突然一辆车停在她面前。",
@@ -392,7 +392,7 @@ class TestAIRevise:
 
     async def test_ai_revise_full_document(self, client):
         pid, did = await self._setup(client)
-        with patch("app.routers.projects.get_ai_service") as mock_get_service:
+        with patch("app.services.projects.ai.get_ai_service") as mock_get_service:
             mock_service = AsyncMock()
             mock_service.revise_chapter = AsyncMock(return_value={
                 "content": "她推开咖啡馆的玻璃门，一眼便看到了坐在角落的他。两人目光交错，随即默契地各自移开。",
@@ -413,7 +413,7 @@ class TestAIRevise:
 
     async def test_ai_revise_selection(self, client):
         pid, did = await self._setup(client)
-        with patch("app.routers.projects.get_ai_service") as mock_get_service:
+        with patch("app.services.projects.ai.get_ai_service") as mock_get_service:
             mock_service = AsyncMock()
             mock_service.revise_chapter = AsyncMock(return_value={
                 "content": "两人目光交汇的瞬间，时间仿佛静止了。",
@@ -455,7 +455,7 @@ class TestAIRevise:
 
     async def test_ai_revise_debug_mode(self, client):
         pid, did = await self._setup(client)
-        with patch("app.routers.projects.get_ai_service") as mock_get_service:
+        with patch("app.services.projects.ai.get_ai_service") as mock_get_service:
             mock_service = AsyncMock()
             mock_service.revise_chapter = AsyncMock(return_value={
                 "content": "修改后的内容",
@@ -493,7 +493,7 @@ class TestAIReviseMulti:
 
     async def test_multi_all_succeed(self, client):
         pid, did = await self._setup(client)
-        with patch("app.routers.projects.get_ai_service") as mock_get_service:
+        with patch("app.services.projects.ai.get_ai_service") as mock_get_service:
             mock_service = AsyncMock()
             mock_service.revise_chapter = AsyncMock(return_value={"content": "修改后内容"})
             mock_get_service.return_value = mock_service
@@ -513,7 +513,7 @@ class TestAIReviseMulti:
 
     async def test_multi_partial_failure(self, client):
         pid, did = await self._setup(client)
-        with patch("app.routers.projects.get_ai_service") as mock_get_service:
+        with patch("app.services.projects.ai.get_ai_service") as mock_get_service:
             ok_service = AsyncMock()
             ok_service.revise_chapter = AsyncMock(return_value={"content": "好的内容"})
             fail_service = AsyncMock()
@@ -538,7 +538,7 @@ class TestAIReviseMulti:
 
     async def test_multi_with_selection(self, client):
         pid, did = await self._setup(client)
-        with patch("app.routers.projects.get_ai_service") as mock_get_service:
+        with patch("app.services.projects.ai.get_ai_service") as mock_get_service:
             mock_service = AsyncMock()
             mock_service.revise_chapter = AsyncMock(return_value={"content": "修改片段"})
             mock_get_service.return_value = mock_service

@@ -100,14 +100,13 @@ response = await client.post(
 2. **所有指令放在 user message** - 确保代理能看到完整指令
 3. **统一处理** - 所有 AI 调用方法都遵循相同模式
 
-## 路由层调用
+## 服务层调用
 
 ### 项目文档 AI 功能
 
 ```python
-# backend/app/routers/projects.py
+# backend/app/services/projects/ai.py
 
-@router.post("/{project_id}/documents/{document_id}/ai-continue")
 async def ai_continue_document(...):
     """AI 续写文档"""
     ai_service = get_ai_service(req.ai_model or "claude-opus-4")
