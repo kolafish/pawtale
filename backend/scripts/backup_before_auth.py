@@ -28,6 +28,7 @@ BACKUPS_DIR = DATA_DIR / "backups"
 
 
 TABLES_TO_COUNT = [
+    "users",
     "projects",
     "document_groups",
     "documents",
@@ -36,9 +37,6 @@ TABLES_TO_COUNT = [
     "writing_sessions",
     "characters",
     "scenes",
-    "stories",
-    "story_workspaces",
-    "story_outlines",
 ]
 
 
