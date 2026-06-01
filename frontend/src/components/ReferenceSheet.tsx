@@ -1,5 +1,6 @@
 import { ArrowLeft, Save } from 'lucide-react';
 import type { ReferenceItem } from '../types';
+import { metadataString, metadataStringArray } from '../utils/metadata';
 
 interface ReferenceSheetProps {
   ref_item: ReferenceItem;
@@ -10,7 +11,7 @@ interface ReferenceSheetProps {
 
 export function ReferenceSheet({ ref_item, onChange, onSave, onCancel }: ReferenceSheetProps) {
   const update = (patch: Partial<ReferenceItem>) => onChange({ ...ref_item, ...patch });
-  const updateMeta = (key: string, value: any) =>
+  const updateMeta = (key: string, value: unknown) =>
     onChange({ ...ref_item, metadata_json: { ...ref_item.metadata_json, [key]: value } });
 
   return (
@@ -45,7 +46,7 @@ export function ReferenceSheet({ ref_item, onChange, onSave, onCancel }: Referen
           <div>
             <label className="text-xs font-medium text-gray-500 mb-1 block">定位</label>
             <input
-              value={ref_item.metadata_json.identity || ''}
+              value={metadataString(ref_item.metadata_json, 'identity')}
               onChange={(e) => updateMeta('identity', e.target.value)}
               placeholder="如：CEO、大学生..."
               className="w-full px-2 py-1.5 text-sm rounded border border-gray-200 focus:outline-none focus:ring-1 focus:ring-pink-400"
@@ -54,7 +55,7 @@ export function ReferenceSheet({ ref_item, onChange, onSave, onCancel }: Referen
           <div>
             <label className="text-xs font-medium text-gray-500 mb-1 block">性格特征</label>
             <input
-              value={(ref_item.metadata_json.personality || []).join(', ')}
+              value={metadataStringArray(ref_item.metadata_json, 'personality').join(', ')}
               onChange={(e) => updateMeta('personality', e.target.value.split(/[,，]/).map((s: string) => s.trim()).filter(Boolean))}
               placeholder="用逗号分隔"
               className="w-full px-2 py-1.5 text-sm rounded border border-gray-200 focus:outline-none focus:ring-1 focus:ring-pink-400"
@@ -68,7 +69,7 @@ export function ReferenceSheet({ ref_item, onChange, onSave, onCancel }: Referen
           <div>
             <label className="text-xs font-medium text-gray-500 mb-1 block">地点</label>
             <input
-              value={ref_item.metadata_json.location || ''}
+              value={metadataString(ref_item.metadata_json, 'location')}
               onChange={(e) => updateMeta('location', e.target.value)}
               className="w-full px-2 py-1.5 text-sm rounded border border-gray-200 focus:outline-none focus:ring-1 focus:ring-pink-400"
             />
@@ -76,7 +77,7 @@ export function ReferenceSheet({ ref_item, onChange, onSave, onCancel }: Referen
           <div>
             <label className="text-xs font-medium text-gray-500 mb-1 block">氛围关键词</label>
             <input
-              value={(ref_item.metadata_json.mood_keywords || []).join(', ')}
+              value={metadataStringArray(ref_item.metadata_json, 'mood_keywords').join(', ')}
               onChange={(e) => updateMeta('mood_keywords', e.target.value.split(/[,，]/).map((s: string) => s.trim()).filter(Boolean))}
               placeholder="用逗号分隔"
               className="w-full px-2 py-1.5 text-sm rounded border border-gray-200 focus:outline-none focus:ring-1 focus:ring-pink-400"

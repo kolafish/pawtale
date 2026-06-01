@@ -1,10 +1,13 @@
 from pydantic import BaseModel
 from datetime import datetime, date
 
+from app.domain.projects.types import ProjectType
+
 
 # ── Project ──────────────────────────────────────────
 
 class ProjectCreate(BaseModel):
+    type: ProjectType
     title: str
     description: str | None = None
     word_count_target: int | None = None
@@ -56,6 +59,7 @@ class ReferenceItemBrief(BaseModel):
 
 class ProjectListItem(BaseModel):
     id: str
+    type: ProjectType
     title: str
     description: str | None = None
     word_count_target: int | None = None
@@ -70,6 +74,7 @@ class ProjectListItem(BaseModel):
 
 class ProjectResponse(BaseModel):
     id: str
+    type: ProjectType
     title: str
     description: str | None = None
     word_count_target: int | None = None

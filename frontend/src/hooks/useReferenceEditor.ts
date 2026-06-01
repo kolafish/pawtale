@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { projectsApi } from '../api';
 import { useAppStore } from '../stores/appStore';
 import type { ReferenceItem } from '../types';
+import { getErrorMessage } from '../utils/apiError';
 
 export type RefSaveStatus = 'saved' | 'saving' | 'unsaved';
 
@@ -133,9 +134,8 @@ export function useReferenceEditor() {
       // Reload reference to pick up the new global link
       await loadReference(referenceData.id);
       alert(result.status === 'created' ? '已创建全局记录' : '已更新全局记录');
-    } catch (e: any) {
-      const msg = e?.response?.data?.detail || (e instanceof Error ? e.message : String(e));
-      alert(`导出失败: ${msg}`);
+    } catch (e: unknown) {
+      alert(`导出失败: ${getErrorMessage(e, '导出失败')}`);
     } finally {
       setIsExporting(false);
     }

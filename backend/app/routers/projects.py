@@ -8,6 +8,7 @@ from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
 from app.auth import get_current_user
 from app.database import get_db
+from app.domain.projects.templates import initialize_project_template
 from app.models.projects import (
     Project, DocumentGroup, Document, ReferenceItem, DocumentReference, WritingSession,
 )
@@ -69,6 +70,7 @@ async def list_projects(
     return [
         ProjectListItem(
             id=p.id,
+            type=p.type,
             title=p.title,
             description=p.description,
             word_count_target=p.word_count_target,
@@ -89,6 +91,7 @@ async def create_project(
 ):
     project = Project(
         user_id=current_user.id,
+        type=req.type.value,
         title=req.title,
         description=req.description,
         word_count_target=req.word_count_target,
@@ -97,15 +100,7 @@ async def create_project(
     db.add(project)
     await db.flush()
 
-    group = DocumentGroup(project_id=project.id, name="第一卷", sort_order=0)
-    db.add(group)
-    await db.flush()
-
-    doc = Document(group_id=group.id, name="未命名文档", sort_order=0, word_count=0)
-    db.add(doc)
-    await db.flush()
-
-    await project_docs.commit_created_document(db, project.id, doc)
+    await initialize_project_template(db, project)
     project = await _load_project(db, project.id, current_user.id)
     return project_docs.project_response(project)
 

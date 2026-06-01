@@ -44,14 +44,7 @@ const STATUS_COLORS: Record<string, string> = {
   done: 'bg-green-400',
 };
 
-const SECTION_CONFIG = [
-  { key: 'manuscript', label: '手稿', icon: FileText },
-  { key: 'character', label: '人物', icon: User },
-  { key: 'outline', label: '大纲', icon: Map },
-  { key: 'notes', label: '设定', icon: StickyNote },
-] as const;
-
-type SectionKey = typeof SECTION_CONFIG[number]['key'];
+type SectionKey = 'manuscript' | 'character' | 'outline' | 'notes';
 
 // ── SortableGroup (unchanged) ──────────────────────
 

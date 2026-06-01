@@ -5,6 +5,12 @@ import { projectsApi } from '../api';
 import { useAppStore } from '../stores/appStore';
 import type { ProjectListItem } from '../types';
 
+const PROJECT_TYPE_LABELS: Record<ProjectListItem['type'], string> = {
+  novel: '小说',
+  article: '公众号',
+  memoir: '回忆录',
+};
+
 export function ProjectHome() {
   const queryClient = useQueryClient();
   const { setCurrentProject, setCurrentDocumentId } = useAppStore();
@@ -17,7 +23,7 @@ export function ProjectHome() {
   });
 
   const createMutation = useMutation({
-    mutationFn: (title: string) => projectsApi.create({ title }),
+    mutationFn: (title: string) => projectsApi.create({ type: 'novel', title }),
     onSuccess: (project) => {
       queryClient.invalidateQueries({ queryKey: ['projects'] });
       setCurrentProject(project);
@@ -137,7 +143,10 @@ export function ProjectHome() {
                   <p className="text-sm text-gray-500 mt-1 line-clamp-2">{proj.description}</p>
                 )}
                 <div className="flex items-center gap-3 mt-3 text-xs text-gray-400">
-                  <span>{proj.group_count} 卷 · {proj.document_count} 章</span>
+                  <span>{PROJECT_TYPE_LABELS[proj.type]}</span>
+                  {proj.type === 'novel' && (
+                    <span>{proj.group_count} 卷 · {proj.document_count} 章</span>
+                  )}
                   <span>{proj.total_word_count.toLocaleString()} 字</span>
                   {proj.word_count_target && (
                     <span>/ {proj.word_count_target.toLocaleString()} 目标</span>

@@ -9,6 +9,7 @@ import type {
 } from '../types';
 import { useAppStore } from '../stores/appStore';
 import { AI_MODEL_OPTIONS, type AiModelValue } from '../constants/aiModels';
+import { getErrorMessage } from '../utils/apiError';
 
 interface AnalyzeDialogProps {
   projectId: string;
@@ -43,10 +44,8 @@ export function AnalyzeDialog({ projectId, onClose, onComplete }: AnalyzeDialogP
       setSelectedOutlines(new Set(data.outlines.map((_, i) => i)));
       setSelectedSettings(new Set(data.settings.map((_, i) => i)));
       setStage('preview');
-    } catch (e: any) {
-      const detail = e?.response?.data?.detail;
-      const msg = detail || (e instanceof Error ? e.message : String(e));
-      setError(msg);
+    } catch (e: unknown) {
+      setError(getErrorMessage(e, '项目分析失败'));
       setStage('idle');
     }
   };

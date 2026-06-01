@@ -36,7 +36,10 @@ class TestAuthAPI:
         )
         assert first_register.status_code == 201
 
-        create_project = await anonymous_client.post("/api/projects", json={"title": "第一位作者的项目"})
+        create_project = await anonymous_client.post(
+            "/api/projects",
+            json={"type": "novel", "title": "第一位作者的项目"},
+        )
         assert create_project.status_code == 201
         project_id = create_project.json()["id"]
 
