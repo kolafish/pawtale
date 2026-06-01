@@ -1,8 +1,8 @@
 import json
 import logging
-import re
 from abc import ABC, abstractmethod
 from app.services.ai_debug import build_debug_info
+from app.services.json_utils import extract_json_payload, strip_json_trailing_commas, try_parse_json
 
 logger = logging.getLogger(__name__)
 
@@ -80,48 +80,19 @@ class AITextServiceBase(ABC):
     @staticmethod
     def _strip_json_trailing_commas(text: str) -> str:
         """Remove trailing commas before } or ] (common LLM JSON error)."""
-        return re.sub(r",\s*([}\]])", r"\1", text)
+        return strip_json_trailing_commas(text)
 
     @classmethod
     def _try_parse_json(cls, text: str) -> dict | None:
         """Try json.loads, with fallback for trailing commas."""
-        for candidate in (text, cls._strip_json_trailing_commas(text)):
-            try:
-                parsed = json.loads(candidate)
-                return parsed if isinstance(parsed, dict) else None
-            except (json.JSONDecodeError, ValueError):
-                continue
-        return None
+        parsed = try_parse_json(text)
+        return parsed if isinstance(parsed, dict) else None
 
     @classmethod
     def _extract_json_payload(cls, content: str) -> dict:
         """更健壮的 JSON 提取（支持 fenced block、裸 JSON、首尾匹配、trailing commas）"""
-        text = (content or "").strip()
-        if not text:
-            return {}
-
-        # Try closed fenced block first
-        fenced_match = re.search(r"```(?:json)?\s*(\{[\s\S]*\})\s*```", text)
-        if fenced_match:
-            text = fenced_match.group(1).strip()
-        else:
-            # Also handle unclosed fenced block (truncated response)
-            open_match = re.search(r"```(?:json)?\s*(\{[\s\S]*)", text)
-            if open_match:
-                text = open_match.group(1).strip()
-
-        parsed = cls._try_parse_json(text)
-        if parsed is not None:
-            return parsed
-
-        start = text.find("{")
-        end = text.rfind("}")
-        if start >= 0 and end > start:
-            snippet = text[start:end + 1]
-            parsed = cls._try_parse_json(snippet)
-            if parsed is not None:
-                return parsed
-        return {}
+        parsed = extract_json_payload(content)
+        return parsed if isinstance(parsed, dict) else {}
 
     @staticmethod
     def _build_char_descriptions(characters: list[dict]) -> list[str]:
@@ -277,62 +248,6 @@ class AITextServiceBase(ABC):
             "content": story_content,
             "word_count": len(story_content),
             "choices": choices,
-        }
-
-    @staticmethod
-    def _normalize_extracted_context(data: dict) -> dict:
-        characters: list[dict] = []
-        scenes: list[dict] = []
-        outline_points: list[dict] = []
-        notes: list[str] = []
-
-        for item in data.get("characters", []):
-            if not isinstance(item, dict):
-                continue
-            name = str(item.get("name", "")).strip()
-            if not name:
-                continue
-            traits_raw = item.get("traits", [])
-            traits = [str(t).strip() for t in traits_raw if str(t).strip()] if isinstance(traits_raw, list) else []
-            characters.append({
-                "name": name,
-                "role_hint": str(item.get("role_hint", "")).strip() or None,
-                "traits": traits[:6],
-                "summary": str(item.get("summary", "")).strip() or None,
-            })
-
-        for item in data.get("scenes", []):
-            if not isinstance(item, dict):
-                continue
-            name = str(item.get("name", "")).strip()
-            if not name:
-                continue
-            keywords_raw = item.get("keywords", [])
-            keywords = [str(k).strip() for k in keywords_raw if str(k).strip()] if isinstance(keywords_raw, list) else []
-            scenes.append({
-                "name": name,
-                "description": str(item.get("description", "")).strip() or None,
-                "keywords": keywords[:6],
-            })
-
-        for item in data.get("outline_points", []):
-            if not isinstance(item, dict):
-                continue
-            stage = str(item.get("stage", "")).strip()
-            summary = str(item.get("summary", "")).strip()
-            if not stage or not summary:
-                continue
-            outline_points.append({"stage": stage, "summary": summary})
-
-        notes_raw = data.get("consistency_notes", [])
-        if isinstance(notes_raw, list):
-            notes = [str(n).strip() for n in notes_raw if str(n).strip()]
-
-        return {
-            "extracted_characters": characters[:8],
-            "extracted_scenes": scenes[:8],
-            "extracted_outline_points": outline_points[:8],
-            "extraction_notes": notes[:8],
         }
 
     # ── 公开 API 方法（模板方法模式） ─────────────
@@ -534,16 +449,6 @@ C. 选项描述（可选）
             parsed_result["debug_info"] = self._wrap_debug(system_prompt, user_prompt, temp, 3000, content, response_json)
         return parsed_result
 
-    async def generate_chapter_title(self, content: str) -> str:
-        """为已有内容生成章节标题"""
-        system_prompt = """你是一个专业的言情小说编辑。
-请根据给定的故事内容，生成一个有意境的章节标题。
-标题要求：4-8个字，能概括本章主要内容或情感，有文学性。
-只输出标题，不要有其他内容。"""
-
-        result = await self._call_llm(system_prompt, f"故事内容：\n{content[:500]}", temperature=0.7, max_tokens=50, timeout=15.0)
-        return result.strip()
-
     async def revise_chapter(
         self,
         original_content: str,
@@ -611,328 +516,6 @@ C. 选项描述（可选）
         if debug:
             result["debug_info"] = self._wrap_debug(system_prompt, user_prompt, temp, 3000, content, response_json)
         return result
-
-    async def enhance_outline(
-        self,
-        title: str,
-        mood: str | None = None,
-        characters: list[dict] | None = None,
-        scenes: list[dict] | None = None,
-    ) -> dict:
-        """根据大纲标题和已有信息，AI生成核心冲突、剧情提示等"""
-        system_prompt = """你是一个专业的言情小说策划师，擅长设计引人入胜的故事大纲。
-请根据用户提供的信息，生成故事的核心冲突和剧情提示。
-
-输出必须是严格的 JSON 格式：
-{
-  "central_conflict": "核心冲突描述（50-100字，描述主角之间的主要矛盾或障碍）",
-  "plot_hints": ["剧情提示1", "剧情提示2", "剧情提示3"],
-  "suggested_mood": "建议的情绪基调（甜/虐/搞笑/治愈）",
-  "suggested_ending": "建议的结局类型（HE/BE/OE）"
-}
-
-剧情提示要求：
-1. 每条提示是一个可能的剧情转折点或关键事件
-2. 提示之间要有递进关系，从相识到发展到高潮
-3. 要与核心冲突呼应
-4. 3-5条提示为宜
-
-核心冲突设计原则：
-1. 要有足够的戏剧张力
-2. 要与角色性格和背景相关
-3. 要有解决的可能性（除非是 BE 结局）
-
-只输出 JSON，不要有其他内容。"""
-
-        user_parts = [f"故事标题/主题：{title}"]
-        if mood:
-            user_parts.append(f"期望的情绪基调：{mood}")
-        if characters:
-            char_desc = []
-            for c in characters:
-                desc = f"- {c.get('name', '未命名')}"
-                if c.get('role_type'):
-                    role_map = {'protagonist': '主角', 'deuteragonist': '第二主角', 'supporting': '配角', 'antagonist': '反派'}
-                    desc += f"（{role_map.get(c['role_type'], c['role_type'])}）"
-                if c.get('personality'):
-                    desc += f"，性格：{'、'.join(c['personality'][:3])}"
-                if c.get('identity'):
-                    desc += f"，身份：{c['identity']}"
-                if c.get('core_trait'):
-                    desc += f"，核心特质：{c['core_trait']}"
-                char_desc.append(desc)
-            user_parts.append(f"\n已有角色：\n" + "\n".join(char_desc))
-        if scenes:
-            scene_desc = []
-            for s in scenes:
-                desc = f"- {s.get('name', '未命名')}"
-                if s.get('category'):
-                    desc += f"（{s['category']}）"
-                scene_desc.append(desc)
-            user_parts.append(f"\n已有场景：\n" + "\n".join(scene_desc))
-
-        user_prompt = "\n".join(user_parts)
-        content = await self._call_llm(system_prompt, user_prompt, temperature=0.8, max_tokens=1000, timeout=30.0)
-
-        try:
-            return json.loads(self._extract_json(content))
-        except json.JSONDecodeError:
-            return {
-                "central_conflict": "两人因误会而分离，需要跨越重重障碍才能重逢",
-                "plot_hints": ["初次相遇产生误会", "在意外中逐渐了解", "关键时刻做出选择"],
-                "suggested_mood": mood or "甜",
-                "suggested_ending": "HE",
-            }
-
-    async def regenerate_choices(
-        self,
-        current_content: str,
-        characters: list[dict],
-        mood: str = "甜",
-        hint: str | None = None,
-        debug: bool = False,
-    ) -> list[dict] | dict:
-        """重新生成分支选项"""
-        system_prompt = f"""你是一个专业的言情小说作家。
-请根据当前的故事内容，生成2-3个不同方向的剧情分支选项。
-
-要求：
-1. 每个选项要有明显不同的走向
-2. 选项要符合当前的情绪基调（{mood}）
-3. 选项要与角色性格相符
-4. 选项描述要简洁有吸引力（10-20字）
-
-输出格式（严格 JSON）：
-{{
-  "choices": [
-    {{"label": "A. 选项描述"}},
-    {{"label": "B. 选项描述"}},
-    {{"label": "C. 选项描述"}}
-  ]
-}}
-
-只输出 JSON，不要有其他内容。"""
-
-        char_desc = []
-        for char in characters[:3]:
-            desc = f"{char.get('name', '未命名')}"
-            if char.get('personality'):
-                desc += f"（{'、'.join(char['personality'][:2])}）"
-            char_desc.append(desc)
-
-        user_prompt = f"""当前故事内容：
-{current_content[-500:]}
-
-角色：{', '.join(char_desc)}
-"""
-        if hint:
-            user_prompt += f"\n用户希望的方向：{hint}\n请根据这个方向生成选项。"
-
-        temp = 0.9
-        raw_response = await self._call_llm(system_prompt, user_prompt, temperature=temp, max_tokens=500, timeout=20.0, return_raw=debug)
-        if debug:
-            content, response_json = raw_response  # type: ignore[misc]
-        else:
-            content = raw_response  # type: ignore[assignment]
-            response_json = None
-
-        debug_info = None
-        if debug:
-            debug_info = self._wrap_debug(system_prompt, user_prompt, temp, 500, content, response_json)
-
-        try:
-            parsed = json.loads(self._extract_json(content))
-            choices = parsed.get("choices", [])
-            choice_items = [{"label": c["label"], "next_node": None} for c in choices]
-            if debug:
-                return {"choices": choice_items, "debug_info": debug_info}
-            return choice_items
-        except json.JSONDecodeError:
-            fallback = [
-                {"label": "A. 继续发展", "next_node": None},
-                {"label": "B. 出现转折", "next_node": None},
-                {"label": "C. 意外惊喜", "next_node": None},
-            ]
-            if debug:
-                return {"choices": fallback, "debug_info": debug_info}
-            return fallback
-
-    async def polish_chapters(
-        self,
-        chapters: list[dict],
-        characters: list[dict],
-        writing_style: str = "细腻",
-        instruction: str | None = None,
-        debug: bool = False,
-    ) -> str | dict:
-        """整体润色多个章节，使其更通顺连贯"""
-        style_prompts = {
-            "细腻": "文字风格要细腻，注重心理描写和情感刻画。",
-            "白描": "文字风格要简洁白描，用简练的语言勾勒场景和人物。",
-            "诗意": "文字风格要诗意唯美，运用优美的比喻和意象。",
-            "轻松": "文字风格要轻松活泼，语言俏皮有趣。",
-        }
-        instruction_text = ""
-        if instruction:
-            instruction_text = f"\n6. 用户特别要求：{instruction}"
-
-        system_prompt = f"""你是一个专业的言情小说编辑，擅长润色和修改文章。
-用户会给你若干段故事内容，请将它们整体润色，使文字更加通顺连贯。
-
-润色要求：
-1. 保持原有剧情和对话不变
-2. 优化段落之间的衔接，消除重复描述
-3. 统一文风和用词习惯
-4. 调整节奏，删减冗余，强化情感高潮
-5. {style_prompts.get(writing_style, style_prompts['细腻'])}{instruction_text}
-
-注意：
-- 不要改变故事走向和人物性格
-- 不要添加新的剧情
-- 保留原有的对话内容
-- 输出润色后的完整内容，用 "---" 分隔各章节
-
-只输出润色后的内容，不要有其他说明。"""
-
-        char_desc = []
-        for char in characters[:4]:
-            desc = f"{char.get('name', '未命名')}"
-            if char.get('personality'):
-                desc += f"（{'、'.join(char['personality'][:2])}）"
-            char_desc.append(desc)
-
-        chapters_text = []
-        for i, chapter in enumerate(chapters):
-            t = chapter.get('title', f'第{i+1}章')
-            c = chapter.get('content', '')
-            chapters_text.append(f"【{t}】\n{c}")
-
-        user_prompt = f"""角色：{', '.join(char_desc)}
-
-以下是需要润色的章节内容：
-
-{chr(10).join(chapters_text)}
-
-请整体润色以上内容，使其更加通顺连贯。用 "---" 分隔各章节。"""
-
-        temp = 0.7
-        raw_response = await self._call_llm(system_prompt, user_prompt, temperature=temp, max_tokens=4000, timeout=90.0, return_raw=debug)
-        if debug:
-            content, response_json = raw_response  # type: ignore[misc]
-            return {
-                "polished_text": content,
-                "debug_info": self._wrap_debug(system_prompt, user_prompt, temp, 4000, content, response_json),
-            }
-        return raw_response
-
-    async def generate_outline_draft(
-        self,
-        story_goal: str,
-        character_tension: str,
-        central_conflict: str,
-        characters: list[dict] | None = None,
-        mood: str | None = None,
-    ) -> dict:
-        """基于引导流程生成大纲草稿"""
-        system_prompt = """你是一个专业的言情小说策划师。
-根据用户提供的故事目标、角色张力和核心冲突，生成一个完整的故事大纲草稿。
-
-输出必须是严格的 JSON 格式：
-{
-  "title": "故事标题建议",
-  "mood": "情绪基调（甜/虐/搞笑/治愈）",
-  "writing_style": "文字风格建议（细腻/白描/诗意/轻松）",
-  "central_conflict": "核心冲突（整理后）",
-  "ending_type": "结局类型（HE/BE/OE）",
-  "plot_hints": ["剧情提示1", "剧情提示2", "剧情提示3", "剧情提示4"],
-  "forbidden_elements": ["禁止元素1", "禁止元素2"]
-}
-
-只输出 JSON，不要有其他内容。"""
-
-        user_prompt = f"""## 故事目标与读者感受
-{story_goal}
-
-## 角色关系与核心张力
-{character_tension}
-
-## 剧情核心冲突
-{central_conflict}
-"""
-        if characters:
-            char_desc = []
-            for c in characters:
-                desc = f"- {c.get('name', '未命名')}"
-                if c.get('personality'):
-                    desc += f"，性格：{'、'.join(c['personality'][:2])}"
-                char_desc.append(desc)
-            user_prompt += f"\n## 已有角色\n" + "\n".join(char_desc)
-        if mood:
-            user_prompt += f"\n\n用户期望的情绪基调：{mood}"
-
-        content = await self._call_llm(system_prompt, user_prompt, temperature=0.8, max_tokens=1500, timeout=30.0)
-
-        try:
-            return json.loads(self._extract_json(content))
-        except json.JSONDecodeError:
-            return {
-                "title": "未命名故事",
-                "mood": mood or "甜",
-                "writing_style": "细腻",
-                "central_conflict": central_conflict,
-                "ending_type": "HE",
-                "plot_hints": ["初次相遇", "逐渐了解", "产生情愫", "克服障碍"],
-                "forbidden_elements": [],
-            }
-
-    async def extract_story_context(
-        self,
-        content: str,
-        debug: bool = False,
-    ) -> dict:
-        """从已写文本中提炼角色/场景/剧情要点"""
-        system_prompt = """你是小说策划编辑。请从用户给出的小说正文中提炼结构化信息。
-
-输出必须是严格 JSON：
-{
-  "characters": [
-    {"name":"角色名","role_hint":"主角/配角/反派/未知","traits":["特征1","特征2"],"summary":"不超过40字"}
-  ],
-  "scenes": [
-    {"name":"场景名","description":"不超过40字","keywords":["关键词1","关键词2"]}
-  ],
-  "outline_points": [
-    {"stage":"开端/发展/转折/高潮/结局","summary":"该阶段发生了什么，不超过50字"}
-  ],
-  "consistency_notes": ["可选：视角/设定矛盾提醒"]
-}
-
-规则：
-1. 只提炼文本里真实出现或可明确推断的信息，不要杜撰。
-2. 角色、场景最多各 8 个，按重要程度排序。
-3. 如果某类信息不足，返回空数组。
-4. 只输出 JSON，不要额外解释。"""
-
-        clipped_content = (content or "").strip()
-        if len(clipped_content) > 12000:
-            clipped_content = clipped_content[:12000]
-
-        user_prompt = f"请提炼以下正文：\n\n{clipped_content}"
-        temp = 0.3
-        raw_response = await self._call_llm(system_prompt, user_prompt, temperature=temp, max_tokens=1800, timeout=60.0, return_raw=debug)
-
-        if debug:
-            raw_text, response_json = raw_response  # type: ignore[misc]
-        else:
-            raw_text = raw_response  # type: ignore[assignment]
-            response_json = None
-
-        parsed = self._extract_json_payload(raw_text)
-        normalized = self._normalize_extracted_context(parsed)
-
-        if debug:
-            normalized["debug_info"] = self._wrap_debug(system_prompt, user_prompt, temp, 1800, raw_text, response_json)
-        return normalized
 
     async def analyze_project_content(
         self,

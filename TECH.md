@@ -94,14 +94,10 @@ writing_sessions            # 写作记录
 └─ created_at
 ```
 
-### 全局资料库（旧，保留使用）
+### 全局资料库
 
 - **characters**: 全局角色库（name, gender, age, identity, personality, background 等）
 - **scenes**: 全局场景库（name, category, description, location, mood_keywords 等）
-
-### 旧表（保留但不再被前端使用）
-
-- stories, story_characters, story_workspaces, story_outlines, outline_characters, outline_scenes
 
 ## API 设计
 
@@ -173,11 +169,6 @@ POST               /api/scenes/init-presets
 POST               /api/scenes/ai-generate
 ```
 
-### 旧 API（保留但不再被前端使用）
-
-- `/api/stories/*` — 互动故事相关
-- `/api/outlines/*` — 故事大纲相关
-
 ## 目录结构
 
 ```
@@ -188,29 +179,27 @@ Pawtale/
 │   │   ├── config.py            # 配置管理
 │   │   ├── database.py          # 数据库连接
 │   │   ├── models/
-│   │   │   ├── models.py        # 旧模型 (Character, Scene, Story 等)
-│   │   │   └── projects.py      # 新模型 (Project, DocumentGroup, Document 等)
+│   │   │   ├── models.py        # 全局角色/场景模型
+│   │   │   └── projects.py      # 项目写作模型 (Project, DocumentGroup, Document 等)
 │   │   ├── schemas/
-│   │   │   ├── schemas.py       # 旧 schema
-│   │   │   └── projects.py      # 新 schema
+│   │   │   ├── schemas.py       # 全局资料库 schema
+│   │   │   └── projects.py      # 项目写作 schema
 │   │   ├── routers/
 │   │   │   ├── characters.py    # 全局角色库
 │   │   │   ├── scenes.py        # 全局场景库
-│   │   │   ├── projects.py      # 项目系统（主要）
-│   │   │   ├── stories.py       # 旧互动故事（保留）
-│   │   │   └── outlines.py      # 旧大纲（保留）
+│   │   │   └── projects.py      # 项目系统（主要）
 │   │   └── services/
 │   │       ├── ai_factory.py    # AI 服务工厂
 │   │       ├── ai_base.py       # AI 服务基类（模板方法，含所有 prompt 和解析逻辑）
 │   │       ├── ai_text.py       # DeepSeek 文本生成（仅 _call_llm）
 │   │       ├── ai_claude.py     # Claude 文本生成（仅 _call_llm + 响应格式兼容）
 │   │       ├── ai_scene.py      # AI 场景生成
+│   │       ├── content_storage.py # 文档文件存储
+│   │       ├── project_documents.py # 项目文档服务（事务补偿 + 响应构造）
 │   │       └── ai_image.py      # GPT-4o 图像生成
-│   ├── scripts/
-│   │   └── migrate_to_projects.py  # 数据迁移脚本
 │   └── tests/
 │       ├── conftest.py          # 测试配置（内存数据库 + dependency_overrides）
-│       ├── test_api.py          # 旧 API 测试
+│       ├── test_api.py          # 全局资料库 API 测试
 │       ├── test_projects.py     # 项目 API 测试 (35 tests)
 │       ├── test_ai_base.py      # AI 基类测试 (51 tests，覆盖 helper + 模板方法)
 │       ├── test_services.py     # AI 服务测试
@@ -224,8 +213,6 @@ Pawtale/
 │       │   ├── WritingWorkspace.tsx # 写作模式容器
 │       │   ├── ProjectHome.tsx     # 项目列表/创建
 │       │   ├── Binder.tsx          # 左侧文档树 (250px，@dnd-kit 拖拽排序)
-│       │   ├── Binder.drag.tsx     # Binder 拖拽实现（备用）
-│       │   ├── Binder.simple.tsx   # Binder 简化版（备用）
 │       │   ├── EditorMain.tsx      # 编辑器 + 工具栏 + 状态栏
 │       │   ├── AIAssistPanel.tsx   # AI 续写/修改 入口面板
 │       │   ├── DiffReviewView.tsx  # AI 修改 diff 对比视图
@@ -266,9 +253,9 @@ Pawtale/
 ### AI 服务架构（模板方法模式）
 
 ```
-AITextServiceBase (ai_base.py, ~600行)
+AITextServiceBase (ai_base.py)
 ├─ 抽象接口: _call_llm(), provider_name, model_name
-├─ 9 个公共方法: generate_story(), revise_chapter(), extract_story_context() 等
+├─ 公共方法: auto_complete_character(), generate_story(), revise_chapter(), analyze_project_content()
 └─ 共享 helper: _extract_json(), _build_char_descriptions(), _parse_story_response() 等
 
 DeepSeekTextService (ai_text.py, ~65行)    ← 原生 system/user 分离
@@ -293,10 +280,10 @@ ClaudeTextService (ai_claude.py, ~125行)   ← system 合并到 user（代理�
 - 切换文档时自动保存当前文档
 - 保存状态显示：已保存 / 保存中 / 未保存
 
-### 数据迁移
-- `backend/scripts/migrate_to_projects.py` 将旧 StoryWorkspace 数据转换为新 Project
-- 旧表保留不删除，旧后端路由保留不删除
+### 数据持久化
 - 新表通过 `Base.metadata.create_all` 自动创建
+- 文档正文存放在 `data/projects/{project_id}/{document_id}.md`
+- 项目文档创建、更新、删除通过 `project_documents.py` 统一处理文件与数据库提交
 
 ## 环境变量
 
@@ -333,7 +320,4 @@ cd frontend && npm run dev
 # 后端测试
 PYTHONPATH=backend backend/venv/bin/python -m pytest backend/tests -v
 
-# 数据迁移
-cp data/pawtale.db data/pawtale.db.bak
-PYTHONPATH=backend backend/venv/bin/python backend/scripts/migrate_to_projects.py
 ```

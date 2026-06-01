@@ -1,8 +1,7 @@
 import httpx
-import json
-from collections.abc import Iterable
 from app.config import get_settings
 from app.services.ai_debug import build_debug_info
+from app.services.json_utils import extract_json_payload
 
 settings = get_settings()
 
@@ -151,49 +150,10 @@ class AISceneService:
         return result, None
 
     def _extract_json_payload(self, content: str) -> list | dict:
-        decoder = json.JSONDecoder()
-        text = content.strip()
-
-        # 1) 先尝试整体 JSON
-        try:
-            return json.loads(text)
-        except json.JSONDecodeError:
-            pass
-
-        # 2) 尝试 fenced code block
-        for block in self._iter_fenced_blocks(text):
-            try:
-                return json.loads(block.strip())
-            except json.JSONDecodeError:
-                continue
-
-        # 3) 从任意噪音文本中查找首个可解析 JSON 片段
-        for idx, ch in enumerate(text):
-            if ch not in "[{":
-                continue
-            try:
-                parsed, _ = decoder.raw_decode(text[idx:])
-                if isinstance(parsed, (list, dict)):
-                    return parsed
-            except json.JSONDecodeError:
-                continue
-
+        payload = extract_json_payload(content, allow_array=True)
+        if isinstance(payload, (list, dict)):
+            return payload
         raise AISceneParseError("模型返回不是可解析的 JSON")
-
-    def _iter_fenced_blocks(self, text: str) -> Iterable[str]:
-        parts = text.split("```")
-        for i in range(1, len(parts), 2):
-            block = parts[i]
-            lowered = block.lower().lstrip()
-            if lowered.startswith("json"):
-                # 去掉首行 json 标识
-                lines = block.splitlines()
-                if lines:
-                    yield "\n".join(lines[1:])
-                else:
-                    yield ""
-            else:
-                yield block
 
     def _parse_candidates_payload(self, payload: list | dict, count: int) -> list[dict]:
         raw_candidates: list

@@ -181,58 +181,6 @@ B. 选项二"""
         assert len(result["choices"]) == 3
 
 
-class TestNormalizeExtractedContext:
-    def test_valid_data(self):
-        data = {
-            "characters": [
-                {"name": "林晚", "role_hint": "主角", "traits": ["克制"], "summary": "导演"},
-            ],
-            "scenes": [
-                {"name": "天台", "description": "夜风", "keywords": ["重逢"]},
-            ],
-            "outline_points": [
-                {"stage": "开端", "summary": "重逢"},
-            ],
-            "consistency_notes": ["注意时间线"],
-        }
-        result = AITextServiceBase._normalize_extracted_context(data)
-        assert len(result["extracted_characters"]) == 1
-        assert result["extracted_characters"][0]["name"] == "林晚"
-        assert len(result["extracted_scenes"]) == 1
-        assert len(result["extracted_outline_points"]) == 1
-        assert result["extraction_notes"] == ["注意时间线"]
-
-    def test_empty_data(self):
-        result = AITextServiceBase._normalize_extracted_context({})
-        assert result["extracted_characters"] == []
-        assert result["extracted_scenes"] == []
-        assert result["extracted_outline_points"] == []
-        assert result["extraction_notes"] == []
-
-    def test_filters_invalid_entries(self):
-        data = {
-            "characters": [
-                {"name": "", "traits": []},  # empty name — should be skipped
-                {"name": "有效", "traits": ["a"]},
-                "not a dict",  # invalid type — should be skipped
-            ],
-            "scenes": [{"name": "", "description": "x"}],  # empty name
-            "outline_points": [{"stage": "", "summary": ""}],  # empty both
-        }
-        result = AITextServiceBase._normalize_extracted_context(data)
-        assert len(result["extracted_characters"]) == 1
-        assert result["extracted_characters"][0]["name"] == "有效"
-        assert result["extracted_scenes"] == []
-        assert result["extracted_outline_points"] == []
-
-    def test_limits_to_8(self):
-        data = {
-            "characters": [{"name": f"角色{i}", "traits": []} for i in range(20)],
-        }
-        result = AITextServiceBase._normalize_extracted_context(data)
-        assert len(result["extracted_characters"]) == 8
-
-
 # ── Template Method Pattern Tests ──────────────
 
 def _make_mock_response(content: str):
@@ -267,12 +215,6 @@ class TestTemplateMethodBothServices:
             result = await service.auto_complete_character(name="小雨")
         assert result["gender"] == "女"
         assert result["age"] == 22
-
-    @pytest.mark.asyncio
-    async def test_generate_chapter_title(self, service):
-        with patch.object(service, "_call_llm", _make_mock_response("月下重逢")):
-            result = await service.generate_chapter_title("两人在月光下重逢的故事")
-        assert result == "月下重逢"
 
     @pytest.mark.asyncio
     async def test_revise_chapter(self, service):
@@ -319,44 +261,6 @@ B. 转身离开"""
         assert result["title"] == "初见"
         assert "咖啡馆" in result["content"]
         assert len(result["choices"]) == 2
-
-    @pytest.mark.asyncio
-    async def test_extract_story_context(self, service):
-        json_response = '{"characters": [{"name": "A", "role_hint": "主角", "traits": ["勇敢"], "summary": "英雄"}], "scenes": [], "outline_points": [], "consistency_notes": []}'
-        with patch.object(service, "_call_llm", _make_mock_response(json_response)):
-            result = await service.extract_story_context("正文内容")
-        assert result["extracted_characters"][0]["name"] == "A"
-
-    @pytest.mark.asyncio
-    async def test_enhance_outline(self, service):
-        with patch.object(service, "_call_llm", _make_mock_response(
-            '{"central_conflict": "冲突", "plot_hints": ["提示"], "suggested_mood": "甜", "suggested_ending": "HE"}'
-        )):
-            result = await service.enhance_outline(title="测试故事")
-        assert result["central_conflict"] == "冲突"
-
-    @pytest.mark.asyncio
-    async def test_generate_outline_draft(self, service):
-        with patch.object(service, "_call_llm", _make_mock_response(
-            '{"title": "T", "mood": "甜", "writing_style": "细腻", "central_conflict": "C", "ending_type": "HE", "plot_hints": ["a"], "forbidden_elements": []}'
-        )):
-            result = await service.generate_outline_draft(
-                story_goal="目标", character_tension="张力", central_conflict="冲突",
-            )
-        assert result["title"] == "T"
-
-    @pytest.mark.asyncio
-    async def test_regenerate_choices(self, service):
-        with patch.object(service, "_call_llm", _make_mock_response(
-            '{"choices": [{"label": "A. 继续"}, {"label": "B. 转折"}]}'
-        )):
-            result = await service.regenerate_choices(
-                current_content="故事内容",
-                characters=[{"name": "角色", "personality": ["温柔"]}],
-            )
-        assert len(result) == 2
-        assert "A. 继续" in result[0]["label"]
-
 
 class TestCallLlmContract:
     """Verify _call_llm implementations on both subclasses."""

@@ -6,6 +6,36 @@ import type { AIDebugInfo } from '../types';
 
 export type SaveStatus = 'saved' | 'saving' | 'unsaved';
 
+type DocumentSnapshot = {
+  name: string;
+  content: string;
+  synopsis: string;
+  status: string;
+  label: string;
+};
+
+function createSnapshot(
+  name: string,
+  content: string,
+  synopsis: string,
+  status: string,
+  label: string,
+): DocumentSnapshot {
+  return { name, content, synopsis, status, label };
+}
+
+function emptySnapshot(): DocumentSnapshot {
+  return createSnapshot('', '', '', 'draft', '');
+}
+
+function snapshotsEqual(a: DocumentSnapshot, b: DocumentSnapshot): boolean {
+  return a.name === b.name &&
+    a.content === b.content &&
+    a.synopsis === b.synopsis &&
+    a.status === b.status &&
+    a.label === b.label;
+}
+
 function countWords(text: string): number {
   if (!text) return 0;
   const chineseChars = (text.match(/[\u4e00-\u9fff\u3400-\u4dbf]/g) || []).length;
@@ -38,13 +68,44 @@ export function useProjectState() {
   // Save state
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('saved');
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastSavedContentRef = useRef('');
-  const lastSavedNameRef = useRef('');
-  const lastSavedSynopsisRef = useRef('');
-  const lastSavedStatusRef = useRef('draft');
-  const lastSavedLabelRef = useRef('');
+  const currentSnapshotRef = useRef<DocumentSnapshot>(emptySnapshot());
+  const lastSavedSnapshotRef = useRef<DocumentSnapshot>(emptySnapshot());
   const isLoadingDocRef = useRef(false);
   const isReviewingRef = useRef(false);
+
+  const getCurrentSnapshot = useCallback(
+    () => createSnapshot(documentName, documentContent, synopsis, status, label),
+    [documentName, documentContent, synopsis, status, label],
+  );
+
+  useEffect(() => {
+    currentSnapshotRef.current = getCurrentSnapshot();
+  }, [getCurrentSnapshot]);
+
+  const updateDocumentName = useCallback((name: string) => {
+    currentSnapshotRef.current = { ...currentSnapshotRef.current, name };
+    setDocumentName(name);
+  }, []);
+
+  const updateDocumentContent = useCallback((content: string) => {
+    currentSnapshotRef.current = { ...currentSnapshotRef.current, content };
+    setDocumentContent(content);
+  }, []);
+
+  const updateSynopsis = useCallback((nextSynopsis: string) => {
+    currentSnapshotRef.current = { ...currentSnapshotRef.current, synopsis: nextSynopsis };
+    setSynopsis(nextSynopsis);
+  }, []);
+
+  const updateStatus = useCallback((nextStatus: string) => {
+    currentSnapshotRef.current = { ...currentSnapshotRef.current, status: nextStatus };
+    setStatus(nextStatus);
+  }, []);
+
+  const updateLabel = useCallback((nextLabel: string) => {
+    currentSnapshotRef.current = { ...currentSnapshotRef.current, label: nextLabel };
+    setLabel(nextLabel);
+  }, []);
 
   // ─── Refresh project data ───
   const refreshProject = useCallback(async () => {
@@ -53,20 +114,24 @@ export function useProjectState() {
     setCurrentProject(updated);
   }, [currentProject, setCurrentProject]);
 
-  // ─── Save mutation ───
+	  // ─── Save mutation ───
   const saveMutation = useMutation({
-    mutationFn: async ({ projectId, docId, payload }: {
+    mutationFn: async ({ projectId, docId, snapshot }: {
       projectId: string;
       docId: string;
-      payload: { name?: string; content?: string; synopsis?: string; status?: string; label?: string };
-    }) => projectsApi.updateDocument(projectId, docId, payload),
-    onSuccess: () => {
-      setSaveStatus('saved');
-      lastSavedContentRef.current = documentContent;
-      lastSavedNameRef.current = documentName;
-      lastSavedSynopsisRef.current = synopsis;
-      lastSavedStatusRef.current = status;
-      lastSavedLabelRef.current = label;
+      snapshot: DocumentSnapshot;
+    }) => projectsApi.updateDocument(projectId, docId, {
+      name: snapshot.name,
+      content: snapshot.content,
+      synopsis: snapshot.synopsis,
+      status: snapshot.status,
+      label: snapshot.label,
+    }),
+    onSuccess: (_doc, variables) => {
+      lastSavedSnapshotRef.current = variables.snapshot;
+      setSaveStatus(
+        snapshotsEqual(currentSnapshotRef.current, variables.snapshot) ? 'saved' : 'unsaved',
+      );
       refreshProject();
     },
   });
@@ -79,9 +144,11 @@ export function useProjectState() {
       payload: { instruction?: string; ai_model?: string; debug?: boolean };
     }) => projectsApi.aiContinue(projectId, docId, payload),
     onSuccess: (result) => {
+      const snapshot = { ...currentSnapshotRef.current, content: result.content };
+      currentSnapshotRef.current = snapshot;
+      lastSavedSnapshotRef.current = snapshot;
       setDocumentContent(result.content);
       setDebugInfo(result.debug_info || null);
-      lastSavedContentRef.current = result.content;
       setSaveStatus('saved');
       refreshProject();
     },
@@ -98,11 +165,9 @@ export function useProjectState() {
       setSynopsis(doc.synopsis || '');
       setStatus(doc.status);
       setLabel(doc.label || '');
-      lastSavedContentRef.current = doc.content;
-      lastSavedNameRef.current = doc.name;
-      lastSavedSynopsisRef.current = doc.synopsis || '';
-      lastSavedStatusRef.current = doc.status;
-      lastSavedLabelRef.current = doc.label || '';
+      const snapshot = createSnapshot(doc.name, doc.content, doc.synopsis || '', doc.status, doc.label || '');
+      currentSnapshotRef.current = snapshot;
+      lastSavedSnapshotRef.current = snapshot;
       setSaveStatus('saved');
       setCurrentDocumentId(docId);
     } finally {
@@ -115,56 +180,44 @@ export function useProjectState() {
     if (docId === currentDocumentId) return;
     // Save current if dirty
     if (currentProject && currentDocumentId) {
-      const isDirty = documentContent !== lastSavedContentRef.current ||
-                      documentName !== lastSavedNameRef.current ||
-                      synopsis !== lastSavedSynopsisRef.current ||
-                      status !== lastSavedStatusRef.current ||
-                      label !== lastSavedLabelRef.current;
-      if (isDirty) {
+      const snapshot = getCurrentSnapshot();
+      if (!snapshotsEqual(snapshot, lastSavedSnapshotRef.current)) {
         setSaveStatus('saving');
         await saveMutation.mutateAsync({
           projectId: currentProject.id,
           docId: currentDocumentId,
-          payload: { name: documentName, content: documentContent, synopsis, status, label },
+          snapshot,
         });
       }
     }
     await loadDocument(docId);
-  }, [currentProject, currentDocumentId, documentContent, documentName, synopsis, status, label, saveMutation, loadDocument]);
+  }, [currentProject, currentDocumentId, getCurrentSnapshot, saveMutation, loadDocument]);
 
   // ─── Auto-save ───
   const doSave = useCallback(async () => {
     if (!currentProject || !currentDocumentId || isLoadingDocRef.current) return;
-    const isDirty = documentContent !== lastSavedContentRef.current ||
-                    documentName !== lastSavedNameRef.current ||
-                    synopsis !== lastSavedSynopsisRef.current ||
-                    status !== lastSavedStatusRef.current ||
-                    label !== lastSavedLabelRef.current;
-    if (!isDirty) return;
+    const snapshot = getCurrentSnapshot();
+    if (snapshotsEqual(snapshot, lastSavedSnapshotRef.current)) return;
     setSaveStatus('saving');
     await saveMutation.mutateAsync({
       projectId: currentProject.id,
       docId: currentDocumentId,
-      payload: { name: documentName, content: documentContent, synopsis, status, label },
+      snapshot,
     });
-  }, [currentProject, currentDocumentId, documentContent, documentName, synopsis, status, label, saveMutation]);
+  }, [currentProject, currentDocumentId, getCurrentSnapshot, saveMutation]);
 
   useEffect(() => {
     if (!currentProject || !currentDocumentId || isLoadingDocRef.current) return;
     if (isReviewingRef.current) return; // Pause auto-save during diff review
-    const isDirty = documentContent !== lastSavedContentRef.current ||
-                    documentName !== lastSavedNameRef.current ||
-                    synopsis !== lastSavedSynopsisRef.current ||
-                    status !== lastSavedStatusRef.current ||
-                    label !== lastSavedLabelRef.current;
-    if (!isDirty) return;
+    const snapshot = getCurrentSnapshot();
+    if (snapshotsEqual(snapshot, lastSavedSnapshotRef.current)) return;
     setSaveStatus('unsaved');
     if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
     autoSaveTimerRef.current = setTimeout(() => doSave(), 3000);
     return () => {
       if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
     };
-  }, [documentContent, documentName, synopsis, status, label, currentProject, currentDocumentId, doSave]);
+  }, [getCurrentSnapshot, currentProject, currentDocumentId, doSave]);
 
   // Cmd+S
   useEffect(() => {
@@ -264,7 +317,13 @@ export function useProjectState() {
     if (!currentProject) return;
     await projectsApi.updateDocument(currentProject.id, docId, { name });
     await refreshProject();
-    if (docId === currentDocumentId) setDocumentName(name);
+    if (docId === currentDocumentId) {
+      const snapshot = { ...currentSnapshotRef.current, name };
+      currentSnapshotRef.current = snapshot;
+      lastSavedSnapshotRef.current = snapshot;
+      setDocumentName(name);
+      setSaveStatus('saved');
+    }
   };
 
   const deleteDocument = async (docId: string) => {
@@ -280,6 +339,12 @@ export function useProjectState() {
         setCurrentDocumentId(null);
         setDocumentName('');
         setDocumentContent('');
+        setSynopsis('');
+        setStatus('draft');
+        setLabel('');
+        currentSnapshotRef.current = emptySnapshot();
+        lastSavedSnapshotRef.current = emptySnapshot();
+        setSaveStatus('saved');
       }
     }
     await refreshProject();
@@ -331,17 +396,13 @@ export function useProjectState() {
     if (refId === activeRefId) return;
     // Save current document if dirty before switching
     if (currentProject && currentDocumentId) {
-      const isDirty = documentContent !== lastSavedContentRef.current ||
-                      documentName !== lastSavedNameRef.current ||
-                      synopsis !== lastSavedSynopsisRef.current ||
-                      status !== lastSavedStatusRef.current ||
-                      label !== lastSavedLabelRef.current;
-      if (isDirty) {
+      const snapshot = getCurrentSnapshot();
+      if (!snapshotsEqual(snapshot, lastSavedSnapshotRef.current)) {
         setSaveStatus('saving');
         await saveMutation.mutateAsync({
           projectId: currentProject.id,
           docId: currentDocumentId,
-          payload: { name: documentName, content: documentContent, synopsis, status, label },
+          snapshot,
         });
       }
     }
@@ -357,15 +418,15 @@ export function useProjectState() {
     // Document
     currentDocumentId,
     documentName,
-    setDocumentName,
+    setDocumentName: updateDocumentName,
     documentContent,
-    setDocumentContent,
+    setDocumentContent: updateDocumentContent,
     synopsis,
-    setSynopsis,
+    setSynopsis: updateSynopsis,
     status,
-    setStatus,
+    setStatus: updateStatus,
     label,
-    setLabel,
+    setLabel: updateLabel,
     switchDocument,
     loadDocument,
 

@@ -60,6 +60,6 @@ class DeepSeekTextService(AITextServiceBase):
         return content
 
 
-# 保持向后兼容
+# 默认文本服务实例
 AITextService = DeepSeekTextService
 ai_text_service = DeepSeekTextService()
