@@ -24,7 +24,7 @@ interface BinderProps {
   onCreateReference: (type: string) => void;
   onRenameReference: (refId: string, name: string) => void;
   onDeleteReference: (refId: string) => void;
-  onAnalyzeProject: () => void;
+  onAnalyzeProject?: () => void;
 }
 
 type SectionKey = 'manuscript' | ReferenceSectionKey;
@@ -124,13 +124,15 @@ export function Binder({
         <div className="px-3 py-2 border-b border-gray-200 flex items-center justify-between">
           <span className="text-sm font-semibold text-gray-700 truncate">{project.title}</span>
           <div className="flex items-center gap-1">
-            <button
-              onClick={onAnalyzeProject}
-              className="p-1 rounded hover:bg-purple-100 text-gray-400 hover:text-purple-500"
-              title="AI 分析项目"
-            >
-              <Sparkles size={14} />
-            </button>
+            {onAnalyzeProject && (
+              <button
+                onClick={onAnalyzeProject}
+                className="p-1 rounded hover:bg-purple-100 text-gray-400 hover:text-purple-500"
+                title="AI 分析项目"
+              >
+                <Sparkles size={14} />
+              </button>
+            )}
             <button
               onClick={() => {
                 const name = prompt('分组名称', defaultGroupName(project.type, project.groups.length));
