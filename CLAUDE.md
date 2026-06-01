@@ -129,9 +129,9 @@ Layout (h-screen flex flex-col)
 
 保留旧的 Character 和 Scene 表及 API，通过顶部 Tab 切换到"全局资料库"视图访问。项目可从全局库导入角色/场景作为项目内参考资料。
 
-### 旧代码保留
+### 旧表清理
 
-后端旧路由（stories, outlines）和旧模型保留在代码中，不被新前端调用。旧前端组件（StoryPreview, OutlinePanel 等）已删除。
+旧 stories/outlines 工作区已经移除。当前数据库只保留项目系统、全局资料库和用户相关表，不要重新引入 `stories`、`story_outlines` 等旧表。
 
 ## 关键文件
 
@@ -139,7 +139,7 @@ Layout (h-screen flex flex-col)
 - `backend/app/models/projects.py` - 项目系统模型（Project, DocumentGroup, Document, ReferenceItem, WritingSession）
 - `backend/app/schemas/projects.py` - 项目系统 Pydantic schemas
 - `backend/app/routers/projects.py` - 项目 API 端点（`/api/projects/*`，包括 AI 续写/修改）
-- `backend/app/models/models.py` - 旧模型（Character, Scene, Story 等，仍在使用 Character/Scene）
+- `backend/app/models/models.py` - 全局资料库模型（Character, Scene）
 - `backend/app/routers/characters.py` - 全局角色库 API
 - `backend/app/routers/scenes.py` - 全局场景库 API
 - `backend/app/services/ai_factory.py` - AI 服务工厂
