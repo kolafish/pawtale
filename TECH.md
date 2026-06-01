@@ -334,7 +334,7 @@ npm run build
 
 # 后端测试
 cd backend
-PYTHONFAULTHANDLER=1 venv/bin/python -m pytest -q -p no:capture
+venv/bin/python -m pytest -q
 ```
 
 ## 测试结构
@@ -362,10 +362,10 @@ backend/tests/
 cd frontend && npm run lint && npm run build
 
 # 项目 API 全量
-cd backend && PYTHONFAULTHANDLER=1 venv/bin/python -m pytest tests/test_project_*.py -q -p no:capture
+cd backend && venv/bin/python -m pytest tests/test_project_*.py -q
 
 # 全量
-cd backend && PYTHONFAULTHANDLER=1 venv/bin/python -m pytest -q -p no:capture
+cd backend && venv/bin/python -m pytest -q
 ```
 
 ## 环境变量
