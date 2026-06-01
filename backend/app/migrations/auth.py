@@ -10,7 +10,7 @@ from app.auth import hash_password, normalize_email
 from app.config import get_settings
 
 
-OWNED_TABLES = ["projects", "characters", "scenes"]
+OWNED_TABLES = ["projects"]
 
 
 async def _table_columns(conn, table: str) -> set[str]:
@@ -78,26 +78,6 @@ async def migrate_auth_schema(engine: AsyncEngine) -> dict:
                     text(f"UPDATE {table} SET user_id = :user_id WHERE user_id IS NULL"),
                     {"user_id": default_user_id},
                 )
-
-        for table in ("characters", "scenes"):
-            if await _table_exists(conn, table):
-                columns = await _table_columns(conn, table)
-                if "is_preset" in columns:
-                    await conn.execute(
-                        text(
-                            f"""
-                            UPDATE {table}
-                            SET user_id = :user_id
-                            WHERE user_id IS NULL AND COALESCE(is_preset, 0) = 0
-                            """
-                        ),
-                        {"user_id": default_user_id},
-                    )
-                else:
-                    await conn.execute(
-                        text(f"UPDATE {table} SET user_id = :user_id WHERE user_id IS NULL"),
-                        {"user_id": default_user_id},
-                    )
 
     return {
         "default_user_id": default_user_id,

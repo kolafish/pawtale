@@ -1,4 +1,4 @@
-import { BookOpen, ChevronDown, ChevronRight, Link2, Map, Plus, StickyNote, Trash2, User } from 'lucide-react';
+import { BookOpen, ChevronDown, ChevronRight, Map, Plus, StickyNote, Trash2, User } from 'lucide-react';
 import type { ProjectProfile, ProjectReferenceSection, ReferenceSectionKey } from '../../domain/projectProfiles';
 import type { ReferenceItemBrief } from '../../types';
 
@@ -205,9 +205,6 @@ function ReferenceRow({
         />
       ) : (
         <span className="flex-1 text-sm truncate">{reference.name}</span>
-      )}
-      {reference.global_id && (
-        <Link2 size={10} className="text-blue-400 flex-shrink-0" />
       )}
       <button
         onClick={(event) => {

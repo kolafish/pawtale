@@ -19,17 +19,11 @@ app/services/
 
 ### 2. 统一接口（AITextServiceBase）
 
-所有 AI 服务必须实现以下方法：
+`AITextServiceBase` 提供以下公共能力，具体模型服务只需要实现 `_call_llm()`：
 
-- `auto_complete_character()` - 角色设定自动补全
 - `generate_story()` - 生成故事内容和分支选项
-- `generate_chapter_title()` - 生成章节标题
 - `revise_chapter()` - 根据修改意见重写内容
-- `enhance_outline()` - 生成大纲核心冲突和剧情提示
-- `regenerate_choices()` - 重新生成分支选项
-- `polish_chapters()` - 整体润色多个章节
-- `generate_outline_draft()` - 基于引导流程生成大纲草稿
-- `extract_story_context()` - 从文本提炼角色/场景/剧情要点
+- `analyze_project_content()` - 从项目手稿提取人物、大纲和设定
 
 ### 3. 工厂模式
 
@@ -167,7 +161,7 @@ DEFAULT_AI_MODEL=claude-opus-4  # 可选: deepseek, claude-opus-4, claude-sonnet
 ## 添加新 AI 服务
 
 1. 创建新服务类继承 `AITextServiceBase`
-2. 实现所有抽象方法
+2. 实现 `_call_llm()`、`provider_name` 和 `model_name`
 3. 在 `ai_factory.py` 中注册新模型
 4. 更新环境变量配置
 

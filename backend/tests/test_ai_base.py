@@ -207,16 +207,6 @@ class TestTemplateMethodBothServices:
         return DeepSeekTextService()
 
     @pytest.mark.asyncio
-    async def test_auto_complete_character(self, service):
-        with patch.object(service, "_call_llm", _make_mock_response(
-            '{"gender": "女", "age": 22, "identity": "画家", "appearance": "短发", '
-            '"personality": ["温柔"], "speaking_style": "轻声", "background": "艺术生"}'
-        )):
-            result = await service.auto_complete_character(name="小雨")
-        assert result["gender"] == "女"
-        assert result["age"] == 22
-
-    @pytest.mark.asyncio
     async def test_revise_chapter(self, service):
         with patch.object(service, "_call_llm", _make_mock_response("修改后的内容")):
             result = await service.revise_chapter(

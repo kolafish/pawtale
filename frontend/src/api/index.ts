@@ -1,11 +1,6 @@
 import axios from 'axios';
 import type {
   User,
-  Character,
-  CharacterAutoComplete,
-  Scene,
-  SceneAIGenerateRequest,
-  SceneAIGenerateResponse,
   AIDebugInfo,
   Project,
   ProjectType,
@@ -19,9 +14,6 @@ import type {
   ProjectAnalyzeResponse,
   AnalyzeApplyRequest,
   AnalyzeApplyResponse,
-  ExportGlobalRequest,
-  ExportGlobalResponse,
-  ImportPreviewResponse,
 } from '../types';
 
 const api = axios.create({
@@ -37,32 +29,6 @@ export const authApi = {
   register: (data: { email: string; password: string; display_name?: string }) =>
     api.post<{ user: User }>('/auth/register', data).then(res => res.data),
   logout: () => api.post('/auth/logout'),
-};
-
-// Characters API
-export const charactersApi = {
-  getAll: () => api.get<Character[]>('/characters').then(res => res.data),
-  getById: (id: string) => api.get<Character>(`/characters/${id}`).then(res => res.data),
-  create: (data: Partial<Character>) => api.post<Character>('/characters', data).then(res => res.data),
-  update: (id: string, data: Partial<Character>) => api.put<Character>(`/characters/${id}`, data).then(res => res.data),
-  delete: (id: string) => api.delete(`/characters/${id}`),
-  generateAvatar: (id: string, style: string) =>
-    api.post<{ avatar_url: string; base_image_url: string }>(`/characters/${id}/avatar`, { style }).then(res => res.data),
-  autoComplete: (data: { name?: string; gender?: string; inspiration?: string; ai_model?: string }) =>
-    api.post<CharacterAutoComplete>('/characters/auto-complete', data).then(res => res.data),
-};
-
-// Scenes API
-export const scenesApi = {
-  getAll: () => api.get<Scene[]>('/scenes').then(res => res.data),
-  getById: (id: string) => api.get<Scene>(`/scenes/${id}`).then(res => res.data),
-  create: (data: Partial<Scene>) => api.post<Scene>('/scenes', data).then(res => res.data),
-  update: (id: string, data: Partial<Scene>) => api.put<Scene>(`/scenes/${id}`, data).then(res => res.data),
-  delete: (id: string) => api.delete(`/scenes/${id}`),
-  initPresets: () => api.post('/scenes/init-presets'),
-  // AI 生成场景
-  aiGenerate: (data: SceneAIGenerateRequest) =>
-    api.post<SceneAIGenerateResponse>('/scenes/ai-generate', data).then(res => res.data),
 };
 
 // Projects API
@@ -106,14 +72,6 @@ export const projectsApi = {
     api.put<ReferenceItem>(`/projects/${projectId}/references/${refId}`, data).then(r => r.data),
   deleteReference: (projectId: string, refId: string) =>
     api.delete(`/projects/${projectId}/references/${refId}`),
-  importGlobal: (projectId: string, data: { character_ids?: string[]; scene_ids?: string[] }) =>
-    api.post<ReferenceItem[]>(`/projects/${projectId}/references/import-global`, data).then(r => r.data),
-  syncGlobal: (projectId: string, refId: string) =>
-    api.post<ReferenceItem>(`/projects/${projectId}/references/${refId}/sync-global`).then(r => r.data),
-  exportGlobal: (projectId: string, refId: string, data: ExportGlobalRequest) =>
-    api.post<ExportGlobalResponse>(`/projects/${projectId}/references/${refId}/export-global`, data).then(r => r.data),
-  importPreview: (projectId: string, data: { character_ids?: string[]; scene_ids?: string[] }) =>
-    api.post<ImportPreviewResponse>(`/projects/${projectId}/references/import-preview`, data).then(r => r.data),
 
   // Document-Reference links
   getDocumentReferences: (projectId: string, docId: string) =>

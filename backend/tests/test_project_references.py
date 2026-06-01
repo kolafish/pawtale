@@ -47,20 +47,25 @@ class TestReferenceAPI:
         response = await client.delete(f"/api/projects/{project_id}/references/{reference_id}")
         assert response.status_code == 204
 
-    async def test_import_global_characters(self, client):
-        char_response = await client.post("/api/characters", json={"name": "全局角色", "gender": "女"})
-        character_id = char_response.json()["id"]
+    async def test_global_library_routes_are_removed(self, client):
         project_id = await create_project_id(client)
-        response = await client.post(
-            f"/api/projects/{project_id}/references/import-global",
-            json={"character_ids": [character_id], "scene_ids": []},
+        create = await client.post(
+            f"/api/projects/{project_id}/references",
+            json={"type": "character", "name": "本作角色"},
         )
-        assert response.status_code == 200
-        data = response.json()
-        assert len(data) == 1
-        assert data[0]["type"] == "character"
-        assert data[0]["name"] == "全局角色"
-        assert data[0]["metadata_json"]["global_character_id"] == character_id
+        reference_id = create.json()["id"]
+
+        removed_routes = [
+            ("get", "/api/characters"),
+            ("get", "/api/scenes"),
+            ("post", f"/api/projects/{project_id}/references/import-global"),
+            ("post", f"/api/projects/{project_id}/references/import-preview"),
+            ("post", f"/api/projects/{project_id}/references/{reference_id}/export-global"),
+            ("post", f"/api/projects/{project_id}/references/{reference_id}/sync-global"),
+        ]
+        for method, path in removed_routes:
+            response = await client.request(method.upper(), path, json={})
+            assert response.status_code in (404, 405)
 
 
 class TestDocumentReferenceLinks:
