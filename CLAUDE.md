@@ -155,7 +155,8 @@ Layout (h-screen flex flex-col)
 - `frontend/src/components/Layout.tsx` - 顶层布局（写作 / 全局资料库视图切换）
 - `frontend/src/components/WritingWorkspace.tsx` - 写作模式容器（ProjectHome 或 Binder+Editor+Inspector）
 - `frontend/src/components/ProjectHome.tsx` - 项目列表/创建页面
-- `frontend/src/components/Binder.tsx` - 左侧文档树（250px，flex-shrink-0）
+- `frontend/src/components/Binder.tsx` - 左侧 Binder 装配层（项目标题、菜单、拖拽上下文）
+- `frontend/src/components/binder/` - Binder 子组件和 hook（文档树、资料分区、拖拽重排）
 - `frontend/src/components/EditorMain.tsx` - 编辑器（工具栏 + textarea + AI 续写 + 状态栏）
 - `frontend/src/components/Inspector.tsx` - 右侧浮层面板（文档/资料/项目 Tab）
 - `frontend/src/components/ReferenceSheet.tsx` - 参考资料编辑表单
