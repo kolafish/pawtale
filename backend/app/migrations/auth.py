@@ -10,7 +10,7 @@ from app.auth import hash_password, normalize_email
 from app.config import get_settings
 
 
-OWNED_TABLES = ["projects", "characters", "scenes", "stories", "story_outlines"]
+OWNED_TABLES = ["projects", "characters", "scenes"]
 
 
 async def _table_columns(conn, table: str) -> set[str]:
@@ -72,7 +72,7 @@ async def migrate_auth_schema(engine: AsyncEngine) -> dict:
                 text(f"CREATE INDEX IF NOT EXISTS ix_{table}_user_id ON {table} (user_id)")
             )
 
-        for table in ("projects", "stories", "story_outlines"):
+        for table in ("projects",):
             if await _table_exists(conn, table):
                 await conn.execute(
                     text(f"UPDATE {table} SET user_id = :user_id WHERE user_id IS NULL"),

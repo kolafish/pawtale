@@ -1,11 +1,10 @@
-import re
 import asyncio
 import logging
 from fastapi import APIRouter, Depends, HTTPException
 
 logger = logging.getLogger(__name__)
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import or_, select, func
+from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
 from app.auth import get_current_user
 from app.database import get_db
@@ -17,7 +16,7 @@ from app.models.users import User
 from app.schemas.projects import (
     ProjectCreate, ProjectUpdate, ProjectListItem, ProjectResponse,
     GroupCreate, GroupUpdate, GroupResponse, GroupReorderItem,
-    DocumentCreate, DocumentUpdate, DocumentResponse, DocumentMeta, DocumentReorderItem,
+    DocumentCreate, DocumentUpdate, DocumentResponse, DocumentReorderItem,
     ReferenceItemCreate, ReferenceItemUpdate, ReferenceItemResponse, ReferenceItemBrief,
     ImportGlobalRequest, DocumentReferencesUpdate,
     WritingSessionCreate, WritingSessionResponse,
@@ -31,80 +30,11 @@ from app.schemas.projects import (
     ImportPreviewItem, ImportPreviewResponse,
 )
 from app.services import get_ai_service
-from app.services.content_storage import (
-    read_content, write_content, delete_content,
-    ensure_project_dir, delete_project_dir, delete_group_documents,
-)
+from app.services import project_documents as project_docs
+from app.services import project_references as project_refs
+from app.services.content_storage import read_content
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
-
-
-def _count_words(text: str) -> int:
-    """Count words: Chinese characters + English words."""
-    if not text:
-        return 0
-    chinese = len(re.findall(r'[\u4e00-\u9fff]', text))
-    english = len(re.findall(r'[a-zA-Z]+', text))
-    return chinese + english
-
-
-def _project_total_words(project: Project) -> int:
-    total = 0
-    for g in (project.groups or []):
-        for d in (g.documents or []):
-            total += d.word_count
-    return total
-
-
-def _doc_meta(doc: Document) -> DocumentMeta:
-    return DocumentMeta(
-        id=doc.id,
-        group_id=doc.group_id,
-        name=doc.name,
-        status=doc.status or "draft",
-        label=doc.label,
-        word_count=doc.word_count,
-        sort_order=doc.sort_order,
-        updated_at=doc.updated_at,
-    )
-
-
-def _group_resp(g: DocumentGroup) -> GroupResponse:
-    return GroupResponse(
-        id=g.id,
-        name=g.name,
-        sort_order=g.sort_order,
-        documents=[_doc_meta(d) for d in (g.documents or [])],
-    )
-
-
-def _project_resp(project: Project) -> ProjectResponse:
-    return ProjectResponse(
-        id=project.id,
-        title=project.title,
-        description=project.description,
-        word_count_target=project.word_count_target,
-        daily_word_goal=project.daily_word_goal,
-        total_word_count=_project_total_words(project),
-        groups=[_group_resp(g) for g in (project.groups or [])],
-        references=[
-            ReferenceItemBrief(
-                id=r.id, type=r.type, name=r.name, sort_order=r.sort_order,
-                global_id=(r.metadata_json or {}).get("global_character_id") or (r.metadata_json or {}).get("global_scene_id"),
-            )
-            for r in (project.references or [])
-        ],
-        created_at=project.created_at,
-        updated_at=project.updated_at,
-    )
-
-
-def _global_character_filter(user_id: str):
-    return or_(Character.user_id == user_id, Character.is_preset == True)
-
-
-def _global_scene_filter(user_id: str):
-    return or_(Scene.user_id == user_id, Scene.is_preset == True)
 
 
 async def _load_project(db: AsyncSession, project_id: str, user_id: str) -> Project:
@@ -142,7 +72,7 @@ async def list_projects(
             title=p.title,
             description=p.description,
             word_count_target=p.word_count_target,
-            total_word_count=_project_total_words(p),
+            total_word_count=project_docs.project_total_words(p),
             group_count=len(p.groups or []),
             document_count=sum(len(g.documents or []) for g in (p.groups or [])),
             updated_at=p.updated_at,
@@ -173,12 +103,11 @@ async def create_project(
 
     doc = Document(group_id=group.id, name="未命名文档", sort_order=0, word_count=0)
     db.add(doc)
+    await db.flush()
 
-    await db.commit()
-    await ensure_project_dir(project.id)
-    await write_content(project.id, doc.id, "")
+    await project_docs.commit_created_document(db, project.id, doc)
     project = await _load_project(db, project.id, current_user.id)
-    return _project_resp(project)
+    return project_docs.project_response(project)
 
 
 @router.get("/{project_id}", response_model=ProjectResponse)
@@ -188,7 +117,7 @@ async def get_project(
     current_user: User = Depends(get_current_user),
 ):
     project = await _load_project(db, project_id, current_user.id)
-    return _project_resp(project)
+    return project_docs.project_response(project)
 
 
 @router.put("/{project_id}", response_model=ProjectResponse)
@@ -205,7 +134,7 @@ async def update_project(
             setattr(project, field, val)
     await db.commit()
     project = await _load_project(db, project.id, current_user.id)
-    return _project_resp(project)
+    return project_docs.project_response(project)
 
 
 @router.delete("/{project_id}", status_code=204)
@@ -215,9 +144,7 @@ async def delete_project(
     current_user: User = Depends(get_current_user),
 ):
     project = await _load_project(db, project_id, current_user.id)
-    await db.delete(project)
-    await db.commit()
-    await delete_project_dir(project_id)
+    await project_docs.delete_project(db, project)
 
 
 # ── Groups ───────────────────────────────────────────
@@ -278,7 +205,7 @@ async def update_group(
         group.name = req.name
     await db.commit()
     await db.refresh(group)
-    return _group_resp(group)
+    return project_docs.group_response(group)
 
 
 @router.delete("/{project_id}/groups/{group_id}", status_code=204)
@@ -297,10 +224,7 @@ async def delete_group(
     group = result.scalar_one_or_none()
     if not group:
         raise HTTPException(status_code=404, detail="分组不存在")
-    doc_ids = [d.id for d in group.documents]
-    await db.delete(group)
-    await db.commit()
-    await delete_group_documents(project_id, doc_ids)
+    await project_docs.delete_group(db, project_id, group)
 
 
 # ── Documents ────────────────────────────────────────
@@ -328,15 +252,10 @@ async def create_document(
     max_order = max((d.sort_order for d in group.documents), default=-1)
     doc = Document(group_id=group_id, name=req.name, sort_order=max_order + 1, word_count=0)
     db.add(doc)
-    await db.commit()
+    await db.flush()
+    await project_docs.commit_created_document(db, project_id, doc)
     await db.refresh(doc)
-    await write_content(project_id, doc.id, "")
-    return DocumentResponse(
-        id=doc.id, group_id=doc.group_id, name=doc.name, content="",
-        synopsis=doc.synopsis, status=doc.status, label=doc.label,
-        word_count_target=doc.word_count_target, word_count=0,
-        sort_order=doc.sort_order, created_at=doc.created_at, updated_at=doc.updated_at,
-    )
+    return project_docs.document_response(doc, "")
 
 
 @router.put("/{project_id}/documents/reorder", status_code=200)
@@ -378,12 +297,7 @@ async def get_document(
     if not doc:
         raise HTTPException(status_code=404, detail="文档不存在")
     content = await read_content(project_id, doc.id)
-    return DocumentResponse(
-        id=doc.id, group_id=doc.group_id, name=doc.name, content=content,
-        synopsis=doc.synopsis, status=doc.status, label=doc.label,
-        word_count_target=doc.word_count_target, word_count=doc.word_count,
-        sort_order=doc.sort_order, created_at=doc.created_at, updated_at=doc.updated_at,
-    )
+    return project_docs.document_response(doc, content)
 
 
 @router.put("/{project_id}/documents/{document_id}", response_model=DocumentResponse)
@@ -403,22 +317,14 @@ async def update_document(
     doc = result.scalar_one_or_none()
     if not doc:
         raise HTTPException(status_code=404, detail="文档不存在")
-    if req.content is not None:
-        await write_content(project_id, doc.id, req.content)
-        doc.word_count = _count_words(req.content)
     for field in ["name", "synopsis", "status", "label", "word_count_target"]:
         val = getattr(req, field, None)
         if val is not None:
             setattr(doc, field, val)
-    await db.commit()
+    await project_docs.commit_document_update(db, project_id, doc, req.content)
     await db.refresh(doc)
     content = await read_content(project_id, doc.id)
-    return DocumentResponse(
-        id=doc.id, group_id=doc.group_id, name=doc.name, content=content,
-        synopsis=doc.synopsis, status=doc.status, label=doc.label,
-        word_count_target=doc.word_count_target, word_count=doc.word_count,
-        sort_order=doc.sort_order, created_at=doc.created_at, updated_at=doc.updated_at,
-    )
+    return project_docs.document_response(doc, content)
 
 
 @router.delete("/{project_id}/documents/{document_id}", status_code=204)
@@ -437,9 +343,7 @@ async def delete_document(
     doc = result.scalar_one_or_none()
     if not doc:
         raise HTTPException(status_code=404, detail="文档不存在")
-    await db.delete(doc)
-    await db.commit()
-    await delete_content(project_id, document_id)
+    await project_docs.delete_document(db, project_id, doc)
 
 
 # ── References ───────────────────────────────────────
@@ -536,57 +440,22 @@ async def import_from_global(
     created = []
     for cid in req.character_ids:
         result = await db.execute(
-            select(Character).where(Character.id == cid, _global_character_filter(current_user.id))
+            select(Character).where(Character.id == cid, project_refs.global_character_filter(current_user.id))
         )
         char = result.scalar_one_or_none()
         if not char:
             continue
-        ref = ReferenceItem(
-            project_id=project_id,
-            type="character",
-            name=char.name,
-            content=char.background or "",
-            metadata_json={
-                "global_character_id": char.id,
-                "gender": char.gender,
-                "age": char.age,
-                "identity": char.identity,
-                "appearance": char.appearance,
-                "personality": char.personality or [],
-                "speaking_style": char.speaking_style,
-                "core_trait": char.core_trait,
-                "life_goal": char.life_goal,
-                "fatal_flaw": char.fatal_flaw,
-                "growth_hint": char.growth_hint,
-                "habits": char.habits or [],
-                "secret": char.secret,
-            },
-        )
+        ref = project_refs.character_reference(project_id, char)
         db.add(ref)
         created.append(ref)
     for sid in req.scene_ids:
         result = await db.execute(
-            select(Scene).where(Scene.id == sid, _global_scene_filter(current_user.id))
+            select(Scene).where(Scene.id == sid, project_refs.global_scene_filter(current_user.id))
         )
         scene = result.scalar_one_or_none()
         if not scene:
             continue
-        ref = ReferenceItem(
-            project_id=project_id,
-            type="location",
-            name=scene.name,
-            content=scene.description or "",
-            metadata_json={
-                "global_scene_id": scene.id,
-                "category": scene.category,
-                "location": scene.location,
-                "time_weather": scene.time_weather,
-                "mood_keywords": scene.mood_keywords or [],
-                "dramatic_potential": scene.dramatic_potential,
-                "sensory_details": scene.sensory_details or {},
-                "props": scene.props or [],
-            },
-        )
+        ref = project_refs.scene_reference(project_id, scene)
         db.add(ref)
         created.append(ref)
     await db.commit()
@@ -611,18 +480,18 @@ async def import_preview(
     refs_result = await db.execute(
         select(ReferenceItem).where(ReferenceItem.project_id == project_id)
     )
-    project_refs = refs_result.scalars().all()
+    project_ref_items = refs_result.scalars().all()
 
     items: list[ImportPreviewItem] = []
 
     for cid in req.character_ids:
         result = await db.execute(
-            select(Character).where(Character.id == cid, _global_character_filter(current_user.id))
+            select(Character).where(Character.id == cid, project_refs.global_character_filter(current_user.id))
         )
         char = result.scalar_one_or_none()
         if not char:
             continue
-        existing = _find_matching_ref(project_refs, "character", char.id, char.name)
+        existing = project_refs.find_matching_reference(project_ref_items, "character", char.id, char.name)
         items.append(ImportPreviewItem(
             global_id=char.id,
             global_name=char.name,
@@ -634,12 +503,12 @@ async def import_preview(
 
     for sid in req.scene_ids:
         result = await db.execute(
-            select(Scene).where(Scene.id == sid, _global_scene_filter(current_user.id))
+            select(Scene).where(Scene.id == sid, project_refs.global_scene_filter(current_user.id))
         )
         scene = result.scalar_one_or_none()
         if not scene:
             continue
-        existing = _find_matching_ref(project_refs, "location", scene.id, scene.name)
+        existing = project_refs.find_matching_reference(project_ref_items, "location", scene.id, scene.name)
         items.append(ImportPreviewItem(
             global_id=scene.id,
             global_name=scene.name,
@@ -650,23 +519,6 @@ async def import_preview(
         ))
 
     return ImportPreviewResponse(items=items)
-
-
-def _find_matching_ref(
-    refs: list[ReferenceItem], ref_type: str, global_id: str, name: str,
-) -> dict | None:
-    """Find existing project reference matching a global record."""
-    global_key = "global_character_id" if ref_type == "character" else "global_scene_id"
-    # Match by linked global_id first
-    for r in refs:
-        if r.type == ref_type and (r.metadata_json or {}).get(global_key) == global_id:
-            return {"ref_id": r.id, "ref_name": r.name, "match_by": "global_id"}
-    # Match by name (case-insensitive)
-    for r in refs:
-        if r.type == ref_type and r.name.strip().lower() == name.strip().lower():
-            return {"ref_id": r.id, "ref_name": r.name, "match_by": "name"}
-    return None
-
 
 # ── Export Reference to Global Library ────────────
 
@@ -701,18 +553,12 @@ async def _export_character(
     ref: ReferenceItem, meta: dict, req: ExportGlobalRequest, db: AsyncSession, user_id: str,
 ) -> ExportGlobalResponse:
     """Handle export of a character reference to global Character table."""
-    # Project-specific fields that should NOT be exported
-    project_only_keys = {"story_name", "role_in_story", "relationships", "character_arc",
-                         "global_character_id", "global_scene_id"}
-
-    # Check for existing link
     linked_id = meta.get("global_character_id")
 
     if req.action == "preview":
-        # Check linked first
         if linked_id:
             result = await db.execute(
-                select(Character).where(Character.id == linked_id, _global_character_filter(user_id))
+                select(Character).where(Character.id == linked_id, project_refs.global_character_filter(user_id))
             )
             char = result.scalar_one_or_none()
             if char:
@@ -724,7 +570,7 @@ async def _export_character(
         result = await db.execute(
             select(Character).where(
                 func.lower(Character.name) == ref.name.strip().lower(),
-                _global_character_filter(user_id),
+                project_refs.global_character_filter(user_id),
             )
         )
         match = result.scalar_one_or_none()
@@ -735,23 +581,7 @@ async def _export_character(
             )
         return ExportGlobalResponse(status="no_match")
 
-    # Build character fields from reference
-    char_data = {
-        "name": ref.name,
-        "background": ref.content or "",
-        "gender": meta.get("gender"),
-        "age": meta.get("age"),
-        "identity": meta.get("identity"),
-        "appearance": meta.get("appearance"),
-        "personality": meta.get("personality") or [],
-        "speaking_style": meta.get("speaking_style"),
-        "core_trait": meta.get("core_trait"),
-        "life_goal": meta.get("life_goal"),
-        "fatal_flaw": meta.get("fatal_flaw"),
-        "growth_hint": meta.get("growth_hint"),
-        "habits": meta.get("habits") or [],
-        "secret": meta.get("secret"),
-    }
+    char_data = project_refs.character_data_from_reference(ref, meta)
 
     if req.action == "update":
         target_id = req.global_id or linked_id
@@ -765,7 +595,6 @@ async def _export_character(
             raise HTTPException(status_code=404, detail="全局角色不存在")
         for k, v in char_data.items():
             setattr(char, k, v)
-        # Link back
         ref.metadata_json = {**meta, "global_character_id": char.id}
         await db.commit()
         return ExportGlobalResponse(status="updated", global_id=char.id)
@@ -774,7 +603,6 @@ async def _export_character(
         char = Character(**char_data, user_id=user_id)
         db.add(char)
         await db.flush()
-        # Link back
         ref.metadata_json = {**meta, "global_character_id": char.id}
         await db.commit()
         return ExportGlobalResponse(status="created", global_id=char.id)
@@ -791,7 +619,7 @@ async def _export_scene(
     if req.action == "preview":
         if linked_id:
             result = await db.execute(
-                select(Scene).where(Scene.id == linked_id, _global_scene_filter(user_id))
+                select(Scene).where(Scene.id == linked_id, project_refs.global_scene_filter(user_id))
             )
             scene = result.scalar_one_or_none()
             if scene:
@@ -802,7 +630,7 @@ async def _export_scene(
         result = await db.execute(
             select(Scene).where(
                 func.lower(Scene.name) == ref.name.strip().lower(),
-                _global_scene_filter(user_id),
+                project_refs.global_scene_filter(user_id),
             )
         )
         match = result.scalar_one_or_none()
@@ -813,18 +641,7 @@ async def _export_scene(
             )
         return ExportGlobalResponse(status="no_match")
 
-    scene_data = {
-        "name": ref.name,
-        "description": ref.content or "",
-        "category": meta.get("category") or "自定义",
-        "location": meta.get("location"),
-        "time_weather": meta.get("time_weather"),
-        "mood_keywords": meta.get("mood_keywords") or [],
-        "dramatic_potential": meta.get("dramatic_potential"),
-        "sensory_details": meta.get("sensory_details") or {},
-        "props": meta.get("props") or [],
-        "is_preset": False,
-    }
+    scene_data = project_refs.scene_data_from_reference(ref, meta)
 
     if req.action == "update":
         target_id = req.global_id or linked_id
@@ -871,58 +688,31 @@ async def sync_reference_from_global(
         raise HTTPException(status_code=404, detail="参考资料不存在")
 
     meta = ref.metadata_json or {}
-    # Project-specific fields to preserve across sync
-    project_fields = {"story_name", "role_in_story", "relationships", "character_arc"}
-    preserved = {k: meta[k] for k in project_fields if k in meta}
+    preserved = project_refs.project_character_metadata(meta)
 
     global_char_id = meta.get("global_character_id")
     global_scene_id = meta.get("global_scene_id")
 
     if global_char_id:
         result = await db.execute(
-            select(Character).where(Character.id == global_char_id, _global_character_filter(current_user.id))
+            select(Character).where(Character.id == global_char_id, project_refs.global_character_filter(current_user.id))
         )
         char = result.scalar_one_or_none()
         if not char:
             raise HTTPException(status_code=404, detail="全局角色已被删除")
         ref.name = char.name
         ref.content = char.background or ""
-        ref.metadata_json = {
-            "global_character_id": char.id,
-            "gender": char.gender,
-            "age": char.age,
-            "identity": char.identity,
-            "appearance": char.appearance,
-            "personality": char.personality or [],
-            "speaking_style": char.speaking_style,
-            "core_trait": char.core_trait,
-            "life_goal": char.life_goal,
-            "fatal_flaw": char.fatal_flaw,
-            "growth_hint": char.growth_hint,
-            "habits": char.habits or [],
-            "secret": char.secret,
-            **preserved,
-        }
+        ref.metadata_json = {**project_refs.character_metadata(char), **preserved}
     elif global_scene_id:
         result = await db.execute(
-            select(Scene).where(Scene.id == global_scene_id, _global_scene_filter(current_user.id))
+            select(Scene).where(Scene.id == global_scene_id, project_refs.global_scene_filter(current_user.id))
         )
         scene = result.scalar_one_or_none()
         if not scene:
             raise HTTPException(status_code=404, detail="全局场景已被删除")
         ref.name = scene.name
         ref.content = scene.description or ""
-        ref.metadata_json = {
-            "global_scene_id": scene.id,
-            "category": scene.category,
-            "location": scene.location,
-            "time_weather": scene.time_weather,
-            "mood_keywords": scene.mood_keywords or [],
-            "dramatic_potential": scene.dramatic_potential,
-            "sensory_details": scene.sensory_details or {},
-            "props": scene.props or [],
-            **preserved,
-        }
+        ref.metadata_json = {**project_refs.scene_metadata(scene), **preserved}
     else:
         raise HTTPException(status_code=400, detail="此资料未关联全局库")
 
@@ -1051,7 +841,7 @@ async def export_project(
         docs = []
         for d in g.documents:
             content = await read_content(project_id, d.id)
-            wc = _count_words(content)
+            wc = project_docs.count_words(content)
             total += wc
             docs.append({"name": d.name, "content": content, "word_count": wc})
         sections.append({"group": g.name, "documents": docs})
@@ -1079,7 +869,7 @@ async def analyze_project(
         raise HTTPException(status_code=400, detail="项目中没有手稿内容可供分析")
 
     full_combined = "\n\n".join(f"{h}\n{c}" for h, c in raw_parts)
-    total_words = _count_words(full_combined)
+    total_words = project_docs.count_words(full_combined)
 
     # Truncate each chapter proportionally to fit within AI context limits
     # Claude proxy has input size constraints; keep total content reasonable
@@ -1234,9 +1024,7 @@ async def ai_continue_document(
         raise HTTPException(status_code=502, detail="AI未返回可用续写内容")
 
     new_content = f"{content.rstrip()}\n\n{generated_chunk}"
-    await write_content(project_id, doc.id, new_content)
-    doc.word_count = _count_words(new_content)
-    await db.commit()
+    await project_docs.commit_document_update(db, project_id, doc, new_content)
 
     return DocumentAIContinueResponse(
         document_id=doc.id,

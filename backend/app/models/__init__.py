@@ -2,12 +2,6 @@ from app.models.models import (
     Base,
     Character,
     Scene,
-    Story,
-    StoryCharacter,
-    StoryWorkspace,
-    StoryOutline,
-    OutlineCharacter,
-    OutlineScene,
 )
 from app.models.users import User
 from app.models.projects import (
@@ -24,12 +18,6 @@ __all__ = [
     "User",
     "Character",
     "Scene",
-    "Story",
-    "StoryCharacter",
-    "StoryWorkspace",
-    "StoryOutline",
-    "OutlineCharacter",
-    "OutlineScene",
     "Project",
     "DocumentGroup",
     "Document",

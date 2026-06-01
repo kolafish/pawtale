@@ -4,18 +4,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from app.database import init_db, engine
 from app.migrations.auth import migrate_auth_schema
-from app.routers import auth_router, characters_router, scenes_router, stories_router, outlines_router, projects_router
+from app.routers import auth_router, characters_router, scenes_router, projects_router
 
 
 async def _auto_migrate():
     """Add missing columns to existing tables."""
     async with engine.begin() as conn:
-        # Check if story_workspaces has chapters column
-        result = await conn.execute(text("PRAGMA table_info(story_workspaces)"))
-        columns = {row[1] for row in result.fetchall()}
-        if "chapters" not in columns:
-            await conn.execute(text("ALTER TABLE story_workspaces ADD COLUMN chapters JSON DEFAULT '[]'"))
-
         # Add word_count column to documents if missing
         result = await conn.execute(text("PRAGMA table_info(documents)"))
         doc_columns = {row[1] for row in result.fetchall()}
@@ -52,8 +46,6 @@ app.add_middleware(
 app.include_router(auth_router)
 app.include_router(characters_router)
 app.include_router(scenes_router)
-app.include_router(stories_router)
-app.include_router(outlines_router)
 app.include_router(projects_router)
 
 

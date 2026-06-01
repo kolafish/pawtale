@@ -95,31 +95,6 @@ B. 选项二"""
         assert "gender" in result
         assert "age" in result
 
-    @pytest.mark.asyncio
-    async def test_extract_story_context_with_fenced_json(self):
-        """测试从 markdown json 代码块中提炼上下文"""
-        service = AITextService()
-
-        fenced_response = """```json
-{
-  "characters": [{"name": "林晚", "role_hint": "主角", "traits": ["克制"], "summary": "纪录片导演"}],
-  "scenes": [{"name": "旧天台", "description": "夜风很大", "keywords": ["重逢"]}],
-  "outline_points": [{"stage": "开端", "summary": "重逢并争执"}],
-  "consistency_notes": ["注意时间线"]
-}
-```"""
-        with patch.object(
-            service, "_call_llm",
-            AsyncMock(return_value=fenced_response),
-        ):
-            result = await service.extract_story_context("正文内容")
-
-        assert result["extracted_characters"][0]["name"] == "林晚"
-        assert result["extracted_scenes"][0]["name"] == "旧天台"
-        assert result["extracted_outline_points"][0]["stage"] == "开端"
-        assert result["extraction_notes"][0] == "注意时间线"
-
-
 class TestAISceneService:
     """场景 AI 服务测试"""
 

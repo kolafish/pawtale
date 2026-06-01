@@ -16,6 +16,10 @@ def _doc_path(project_id: str, document_id: str) -> Path:
     return PROJECTS_DIR / project_id / f"{document_id}.md"
 
 
+def content_exists(project_id: str, document_id: str) -> bool:
+    return _doc_path(project_id, document_id).exists()
+
+
 async def ensure_project_dir(project_id: str) -> None:
     d = PROJECTS_DIR / project_id
     d.mkdir(parents=True, exist_ok=True)
@@ -46,8 +50,3 @@ async def delete_project_dir(project_id: str) -> None:
     d = PROJECTS_DIR / project_id
     if d.exists():
         shutil.rmtree(d)
-
-
-async def delete_group_documents(project_id: str, document_ids: list[str]) -> None:
-    for doc_id in document_ids:
-        await delete_content(project_id, doc_id)
