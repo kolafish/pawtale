@@ -159,6 +159,7 @@ Layout (h-screen flex flex-col)
 - `frontend/src/components/EditorMain.tsx` - 编辑器（工具栏 + textarea + AI 续写 + 状态栏）
 - `frontend/src/components/Inspector.tsx` - 右侧浮层面板（文档/资料/项目 Tab）
 - `frontend/src/components/ReferenceSheet.tsx` - 参考资料编辑表单
+- `frontend/src/domain/projectProfiles.ts` - 前端产品类型配置（创建入口、结构单位、Binder 分区）
 - `frontend/src/hooks/useProjectState.ts` - 项目状态管理 Hook（auto-save、CRUD、AI 续写、导出）
 - `frontend/src/stores/appStore.ts` - Zustand 全局状态
 - `frontend/src/api/index.ts` - API 客户端（projectsApi, charactersApi, scenesApi）

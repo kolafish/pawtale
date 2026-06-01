@@ -229,6 +229,8 @@ Pawtale/
 │       │   ├── CharacterPanel.tsx  # 全局角色库管理
 │       │   ├── ScenePanel.tsx      # 全局场景库管理
 │       │   └── AIDebugPanel.tsx    # AI 调试信息展示
+│       ├── domain/
+│       │   └── projectProfiles.ts  # 前端产品类型配置（创建入口、结构单位、Binder 分区）
 │       ├── hooks/
 │       │   ├── useProjectState.ts  # 项目状态 Hook（auto-save, CRUD, AI, 拖拽排序）
 │       │   ├── useAIRevision.ts    # AI 修改 Hook（选段/全文修改，diff 对比）
@@ -238,7 +240,7 @@ Pawtale/
 │       ├── constants/
 │       │   └── aiModels.ts         # AI 模型选项
 │       ├── utils/
-│       │   └── numberUtils.ts      # 中文数字转换、分组/文档编号
+│       │   └── numberUtils.ts      # 中文数字转换
 │       ├── api/
 │       │   └── index.ts            # API 客户端（projectsApi, charactersApi, scenesApi）
 │       └── types/

@@ -16,7 +16,14 @@ import {
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import type { Project, DocumentMeta, ReferenceItemBrief } from '../types';
-import { getGroupLabel, getDocumentLabel } from '../utils/numberUtils';
+import {
+  defaultGroupName,
+  formatDocumentTitle,
+  formatGroupTitle,
+  getProjectProfile,
+  type ProjectReferenceSection,
+  type ReferenceSectionKey,
+} from '../domain/projectProfiles';
 
 interface BinderProps {
   project: Project;
@@ -44,11 +51,16 @@ const STATUS_COLORS: Record<string, string> = {
   done: 'bg-green-400',
 };
 
-type SectionKey = 'manuscript' | 'character' | 'outline' | 'notes';
+type SectionKey = 'manuscript' | ReferenceSectionKey;
 
-// ── SortableGroup (unchanged) ──────────────────────
+const REFERENCE_SECTION_ICONS: Record<ReferenceSectionKey, typeof User> = {
+  character: User,
+  outline: Map,
+  notes: StickyNote,
+};
 
 interface SortableGroupProps {
+  projectType: Project['type'];
   group: { id: string; name: string; documents: DocumentMeta[] };
   groupIndex: number;
   isCollapsed: boolean;
@@ -73,7 +85,7 @@ interface SortableGroupProps {
 }
 
 function SortableGroup({
-  group, groupIndex, isCollapsed, isEditing, editValue,
+  projectType, group, groupIndex, isCollapsed, isEditing, editValue,
   currentDocumentId, editingDocId, docEditValue,
   onToggle, onStartRename, onCommitRename, onSetEditValue, onCancelEdit,
   onContextMenu, onCreateDocument, onSelectDocument,
@@ -123,7 +135,7 @@ function SortableGroup({
               className="flex-1 text-sm font-medium text-gray-600 truncate"
               onDoubleClick={(e) => { e.stopPropagation(); onStartRename(group.name); }}
             >
-              {getGroupLabel(groupIndex)} {group.name}
+              {formatGroupTitle(projectType, groupIndex, group.name)}
             </span>
           )}
         </div>
@@ -142,6 +154,7 @@ function SortableGroup({
             {(group.documents || []).map((doc, docIndex) => (
               <SortableDocument
                 key={doc.id}
+                projectType={projectType}
                 doc={doc}
                 docIndex={docIndex}
                 isSelected={doc.id === currentDocumentId}
@@ -170,9 +183,8 @@ function SortableGroup({
   );
 }
 
-// ── SortableDocument (unchanged) ───────────────────
-
 interface SortableDocumentProps {
+  projectType: Project['type'];
   doc: DocumentMeta;
   docIndex: number;
   isSelected: boolean;
@@ -187,7 +199,7 @@ interface SortableDocumentProps {
 }
 
 function SortableDocument({
-  doc, docIndex, isSelected, isEditing, editValue,
+  projectType, doc, docIndex, isSelected, isEditing, editValue,
   onSelect, onContextMenu, onStartRename, onCommitRename, onSetEditValue, onCancelEdit,
 }: SortableDocumentProps) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
@@ -231,7 +243,7 @@ function SortableDocument({
         />
       ) : (
         <span className="flex-1 text-sm truncate">
-          {getDocumentLabel(docIndex)} {doc.name}
+          {formatDocumentTitle(projectType, docIndex, doc.name)}
         </span>
       )}
       <div className={`w-2 h-2 rounded-full flex-shrink-0 ${STATUS_COLORS[doc.status] || 'bg-gray-300'}`} />
@@ -346,11 +358,13 @@ export function Binder({
     );
   }
 
+  const profile = getProjectProfile(project.type);
+
   // Group references by section
   const refs = project.references || [];
-  const characterRefs = refs.filter((r) => r.type === 'character');
-  const outlineRefs = refs.filter((r) => r.type === 'outline');
-  const noteRefs = refs.filter((r) => r.type === 'location' || r.type === 'note');
+  const getSectionItems = (section: ProjectReferenceSection) => (
+    refs.filter((ref) => section.types.includes(ref.type))
+  );
 
   const toggleSection = (key: SectionKey) => {
     setCollapsedSections((prev) => {
@@ -457,12 +471,13 @@ export function Binder({
 
   // Render a reference section
   const renderRefSection = (
-    sectionKey: SectionKey,
-    label: string,
-    Icon: typeof User,
+    section: ProjectReferenceSection,
     items: ReferenceItemBrief[],
-    createTypes: string[],
   ) => {
+    const Icon = REFERENCE_SECTION_ICONS[section.key];
+    const createType = section.createType;
+    const label = section.label;
+    const sectionKey = section.key;
     const isCollapsed = collapsedSections.has(sectionKey);
     return (
       <div key={sectionKey}>
@@ -478,27 +493,12 @@ export function Binder({
           <Icon size={13} className="text-gray-400" />
           <span className="flex-1 text-xs font-semibold text-gray-500 uppercase tracking-wider">{label}</span>
           <span className="text-[10px] text-gray-400 mr-0.5">{items.length}</span>
-          {createTypes.length === 1 ? (
-            <button
-              onClick={(e) => { e.stopPropagation(); onCreateReference(createTypes[0]); }}
-              className="opacity-0 group-hover/sec:opacity-100 p-0.5 rounded hover:bg-gray-200 text-gray-400"
-            >
-              <Plus size={12} />
-            </button>
-          ) : (
-            <div className="relative opacity-0 group-hover/sec:opacity-100">
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  // For notes section: show dropdown or just create 'note' by default
-                  onCreateReference('note');
-                }}
-                className="p-0.5 rounded hover:bg-gray-200 text-gray-400"
-              >
-                <Plus size={12} />
-              </button>
-            </div>
-          )}
+          <button
+            onClick={(e) => { e.stopPropagation(); onCreateReference(createType); }}
+            className="opacity-0 group-hover/sec:opacity-100 p-0.5 rounded hover:bg-gray-200 text-gray-400"
+          >
+            <Plus size={12} />
+          </button>
         </div>
         {!isCollapsed && (
           <div>
@@ -519,7 +519,7 @@ export function Binder({
             ))}
             {items.length === 0 && (
               <div
-                onClick={() => onCreateReference(createTypes[0])}
+                onClick={() => onCreateReference(createType)}
                 className="pl-5 pr-2 py-2 text-xs text-gray-400 hover:text-pink-500 cursor-pointer"
               >
                 + 新建{label}
@@ -556,8 +556,7 @@ export function Binder({
             <button
               onClick={() => {
                 const nextIndex = project.groups.length;
-                const defaultName = getGroupLabel(nextIndex).replace('第', '').replace('卷', '');
-                const name = prompt('分组名称', defaultName);
+                const name = prompt('分组名称', defaultGroupName(project.type, nextIndex));
                 if (name?.trim()) onCreateGroup(name.trim());
               }}
               className="p-1 rounded hover:bg-gray-200 text-gray-500"
@@ -582,13 +581,16 @@ export function Binder({
                 <ChevronDown size={14} className="text-gray-400" />
               )}
               <FileText size={13} className="text-gray-400" />
-              <span className="flex-1 text-xs font-semibold text-gray-500 uppercase tracking-wider">手稿</span>
+              <span className="flex-1 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                {profile.manuscriptLabel}
+              </span>
             </div>
             {!collapsedSections.has('manuscript') && (
               <SortableContext items={project.groups.map((g) => g.id)} strategy={verticalListSortingStrategy}>
                 {project.groups.map((group, groupIndex) => (
                   <SortableGroup
                     key={group.id}
+                    projectType={project.type}
                     group={group}
                     groupIndex={groupIndex}
                     isCollapsed={collapsedGroups.has(group.id)}
@@ -620,9 +622,7 @@ export function Binder({
           <div className="mx-2 my-1 border-t border-gray-200" />
 
           {/* Reference Sections */}
-          {renderRefSection('character', '人物', User, characterRefs, ['character'])}
-          {renderRefSection('outline', '大纲', Map, outlineRefs, ['outline'])}
-          {renderRefSection('notes', '设定', StickyNote, noteRefs, ['note', 'location'])}
+          {profile.referenceSections.map((section) => renderRefSection(section, getSectionItems(section)))}
         </div>
 
         {/* Bottom summary */}

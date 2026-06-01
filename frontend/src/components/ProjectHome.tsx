@@ -2,48 +2,9 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, FolderOpen, Trash2, RefreshCw, Pencil, Check, X } from 'lucide-react';
 import { projectsApi } from '../api';
+import { formatProjectStructure, getProjectProfile, PROJECT_TYPE_OPTIONS } from '../domain/projectProfiles';
 import { useAppStore } from '../stores/appStore';
 import type { ProjectListItem, ProjectType } from '../types';
-
-const PROJECT_TYPE_OPTIONS: {
-  type: ProjectType;
-  label: string;
-  description: string;
-  placeholder: string;
-}[] = [
-  {
-    type: 'novel',
-    label: '小说',
-    description: '长篇结构，适合章节、大纲、人物设定。',
-    placeholder: '例如：雨夜便利店',
-  },
-  {
-    type: 'article',
-    label: '公众号',
-    description: '短篇文章，适合选题、正文和发布稿。',
-    placeholder: '例如：写给焦虑创作者的一封信',
-  },
-  {
-    type: 'memoir',
-    label: '回忆录',
-    description: '问题驱动，适合记录人生片段和真实经历。',
-    placeholder: '例如：外婆家的夏天',
-  },
-];
-
-const PROJECT_TYPE_LABELS = Object.fromEntries(
-  PROJECT_TYPE_OPTIONS.map((option) => [option.type, option.label])
-) as Record<ProjectType, string>;
-
-function projectStructureLabel(project: ProjectListItem): string {
-  if (project.type === 'novel') {
-    return `${project.group_count} 卷 · ${project.document_count} 章`;
-  }
-  if (project.type === 'article') {
-    return `${project.document_count} 篇`;
-  }
-  return `${project.document_count} 段`;
-}
 
 export function ProjectHome() {
   const queryClient = useQueryClient();
@@ -53,7 +14,7 @@ export function ProjectHome() {
   const [showCreate, setShowCreate] = useState(false);
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState('');
-  const selectedType = PROJECT_TYPE_OPTIONS.find((option) => option.type === newType) ?? PROJECT_TYPE_OPTIONS[0];
+  const selectedType = getProjectProfile(newType);
 
   const { data: projects = [], isLoading } = useQuery({
     queryKey: ['projects'],
@@ -271,8 +232,8 @@ export function ProjectHome() {
                   <p className="text-sm text-gray-500 mt-1 line-clamp-2">{proj.description}</p>
                 )}
                 <div className="flex items-center gap-3 mt-3 text-xs text-gray-400">
-                  <span>{PROJECT_TYPE_LABELS[proj.type]}</span>
-                  <span>{projectStructureLabel(proj)}</span>
+                  <span>{getProjectProfile(proj.type).label}</span>
+                  <span>{formatProjectStructure(proj)}</span>
                   <span>{proj.total_word_count.toLocaleString()} 字</span>
                   {proj.word_count_target && (
                     <span>/ {proj.word_count_target.toLocaleString()} 目标</span>
