@@ -215,7 +215,9 @@ Pawtale/
 │       │   ├── Layout.tsx          # 顶层布局（写作/全局资料库切换）
 │       │   ├── WritingWorkspace.tsx # 写作模式路由（ProjectHome / 产品 workspace）
 │       │   ├── workspaces/
-│       │   │   └── NovelWorkspace.tsx # 小说工作台（Binder + Editor + Inspector + AI）
+│       │   │   ├── ProjectDraftWorkspace.tsx # 共享草稿工作台（Binder + Editor + AI 修改）
+│       │   │   ├── NovelWorkspace.tsx # 小说工作台（含 Inspector / AI 分析）
+│       │   │   └── ArticleWorkspace.tsx # 公众号工作台（正文 / 素材入口）
 │       │   ├── ProjectHome.tsx     # 项目列表/创建
 │       │   ├── Binder.tsx          # 左侧 Binder 装配层
 │       │   ├── binder/             # Binder 子组件和 hook（文档树、资料分区、拖拽重排）
