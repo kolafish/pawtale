@@ -17,6 +17,7 @@ interface AppState {
   setCurrentProject: (project: Project | null) => void;
   setCurrentDocumentId: (docId: string | null) => void;
   setCurrentReferenceId: (refId: string | null) => void;
+  closeProject: () => void;
   reset: () => void;
 }
 
@@ -42,6 +43,11 @@ export const useAppStore = create<AppState>((set) => ({
   setCurrentProject: (project) => set({ currentProject: project }),
   setCurrentDocumentId: (docId) => set({ currentDocumentId: docId, currentReferenceId: null }),
   setCurrentReferenceId: (refId) => set({ currentReferenceId: refId, currentDocumentId: null }),
+  closeProject: () => set({
+    currentProject: null,
+    currentDocumentId: null,
+    currentReferenceId: null,
+  }),
   reset: () => set({
     selectedCharacters: [],
     selectedScene: null,

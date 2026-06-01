@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { LogOut, MapPin, UserCircle, Users, BookOpen } from 'lucide-react';
 import { useAppStore } from '../stores/appStore';
 import { WritingWorkspace } from './WritingWorkspace';
@@ -16,19 +17,34 @@ interface LayoutProps {
 }
 
 export function Layout({ user, onLogout }: LayoutProps) {
-  const { defaultAiModel, setDefaultAiModel } = useAppStore();
+  const queryClient = useQueryClient();
+  const { defaultAiModel, setDefaultAiModel, closeProject } = useAppStore();
   const [view, setView] = useState<AppView>('writing');
   const [libraryTab, setLibraryTab] = useState<LibraryTab>('characters');
+
+  const handleLogoClick = () => {
+    setView('writing');
+    closeProject();
+    queryClient.invalidateQueries({ queryKey: ['projects'] });
+  };
 
   return (
     <div className="h-screen flex flex-col bg-gradient-to-br from-pink-50 to-purple-50">
       {/* Header */}
       <header className="h-14 bg-white border-b border-pink-100 flex items-center justify-between px-4 flex-shrink-0">
         <div className="flex items-center gap-3">
-          <img src="/logo.png" alt="Pawtale" className="h-8 w-8 object-contain" />
-          <h1 className="text-xl font-bold bg-gradient-to-r from-pink-500 to-purple-500 bg-clip-text text-transparent">
-            Pawtale
-          </h1>
+          <button
+            type="button"
+            onClick={handleLogoClick}
+            className="flex items-center gap-3 rounded-lg px-1.5 py-1 transition-colors hover:bg-pink-50 focus:outline-none focus:ring-2 focus:ring-pink-500"
+            aria-label="返回我的项目"
+            title="返回我的项目"
+          >
+            <img src="/logo.png" alt="" className="h-8 w-8 object-contain" />
+            <span className="text-xl font-bold bg-gradient-to-r from-pink-500 to-purple-500 bg-clip-text text-transparent">
+              Pawtale
+            </span>
+          </button>
 
           {/* View toggle */}
           <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1 ml-2">
