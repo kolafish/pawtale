@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 项目概述
 
-**Pawtale** 是一个 AI 辅助的小说写作工具，定位类似 Scrivener / Ulysses。以项目为单位管理写作，支持两层文档树（分组 → 文档）、项目内参考资料系统、全局角色/场景资料库、AI 续写等功能。
+**Pawtale** 是一个 AI 辅助内容创作工作台。当前以项目为单位管理写作，支持小说、公众号、回忆录三个项目类型，以及两层文档树（分组 → 文档）、项目内参考资料、全局角色/场景资料库、AI 续写和 AI 修改。
 
 ## 技术栈
 
@@ -42,14 +42,10 @@ cd frontend && npm run dev
 /Users/jin/Desktop/Pawtale/frontend/node_modules/.bin/tsc --noEmit --project /Users/jin/Desktop/Pawtale/frontend/tsconfig.app.json
 
 # Vite 构建
-/Users/jin/Desktop/Pawtale/frontend/node_modules/.bin/vite build --outDir /tmp/pawtale-build /Users/jin/Desktop/Pawtale/frontend
+cd frontend && npm run build
 
 # 运行所有后端测试
-PYTHONPATH=/Users/jin/Desktop/Pawtale/backend /Users/jin/Desktop/Pawtale/backend/venv/bin/python -m pytest /Users/jin/Desktop/Pawtale/backend/tests -v
-
-# 数据迁移（旧数据 → 新项目格式）
-cp data/pawtale.db data/pawtale.db.bak
-PYTHONPATH=backend backend/venv/bin/python backend/scripts/migrate_to_projects.py
+cd backend && PYTHONFAULTHANDLER=1 venv/bin/python -m pytest -q -p no:capture
 ```
 
 ## 环境变量
@@ -79,7 +75,9 @@ DEFAULT_AI_MODEL=claude-opus-4  # 可选: deepseek, claude-opus-4, claude-sonnet
 
 - 项目加载时只返回文档元数据（name, word_count, status），不含 content
 - 文档内容按需加载（点击 Binder 中的文档时请求）
+- 文档正文由 `content_storage.py` 存到 `data/projects/{project_id}/{document_id}.md`
 - 参考资料（ReferenceItem）绑定到项目，可通过 document_references 关联到文档
+- `Project.type` 支持 `novel`、`article`、`memoir`，默认模板位于 `backend/app/domain/`
 - 新表通过 `Base.metadata.create_all` 自动创建，无需手动迁移
 
 ### 前端布局
@@ -91,14 +89,15 @@ Layout (h-screen flex flex-col)
    ├─ 写作视图: WritingWorkspace
    │   ├─ 无项目 → ProjectHome（项目卡片网格）
    │   └─ 有项目 → 产品 workspace（novel/article/memoir）
-   │       └─ ProjectDraftWorkspace → Binder (250px) + EditorMain (flex-1) + 可选产品面板
+   │       └─ WorkspaceShell → Binder + ProjectDraftWorkspace + 可选产品面板
    └─ 全局资料库视图: CharacterPanel / ScenePanel（Tab 切换）
 ```
 
 ### 状态管理
 
-- **Zustand (`appStore.ts`)**: `currentProject`, `currentDocumentId`, `defaultAiModel`, `isGenerating`
-- **`useProjectState` hook**: 文档内容、auto-save (3s debounce)、Cmd+S、CRUD 操作、AI 续写、导出
+- **Zustand (`appStore.ts`)**: `currentProject`, `currentDocumentId`, `currentReferenceId`, `defaultAiModel`
+- **`useProjectState` hook**: 项目 workspace facade，组合文档草稿、结构、资料、AI 续写、导出
+- **`frontend/src/hooks/project/`**: 文档草稿、项目结构、项目资料、AI 修改编排的细分 hook
 - **TanStack Query**: 项目列表、参考资料列表、文档关联等服务端数据
 
 ### AI 功能
@@ -150,7 +149,6 @@ Layout (h-screen flex flex-col)
 - `backend/app/services/ai_claude.py` - Claude 文本生成服务
 - `backend/app/services/ai_text.py` - DeepSeek 文本生成服务
 - `backend/docs/AI_ARCHITECTURE.md` - AI 服务架构完整文档
-- `backend/scripts/migrate_to_projects.py` - 数据迁移脚本
 
 ### 前端
 - `frontend/src/components/Layout.tsx` - 顶层布局（写作 / 全局资料库视图切换）
@@ -180,7 +178,7 @@ Layout (h-screen flex flex-col)
 
 ### 测试
 - `backend/tests/test_project_*.py` - 项目 API 分组测试（core/structure/references/activity/ai）
-- `backend/tests/test_api.py` - 旧 API 端点测试（角色、场景、故事）
+- `backend/tests/test_api.py` - 全局角色/场景 API 测试
 - `backend/tests/test_services.py` - AI 服务测试
 - `backend/tests/test_frontend.py` - 前端编译测试（TypeScript + Vite）
 - `backend/tests/test_new_features.py` - 多模型等功能测试
