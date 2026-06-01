@@ -23,13 +23,21 @@ class TestProjectAPI:
         response = await client.post("/api/projects", json={"title": "缺少类型"})
         assert response.status_code == 422
 
-    async def test_non_novel_projects_start_without_novel_template(self, client):
-        for project_type in ("article", "memoir"):
+    async def test_project_type_templates(self, client):
+        cases = {
+            "novel": ("第一卷", "未命名文档"),
+            "article": ("正文", "未命名文章"),
+            "memoir": ("回忆片段", "第一次记录"),
+        }
+        for project_type, (group_name, document_name) in cases.items():
             response = await client.post("/api/projects", json=project_payload(f"{project_type} 项目", project_type))
             assert response.status_code == 201
             data = response.json()
             assert data["type"] == project_type
-            assert data["groups"] == []
+            assert len(data["groups"]) == 1
+            assert data["groups"][0]["name"] == group_name
+            assert len(data["groups"][0]["documents"]) == 1
+            assert data["groups"][0]["documents"][0]["name"] == document_name
             assert data["references"] == []
 
     async def test_get_project(self, client):
