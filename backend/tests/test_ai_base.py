@@ -1,7 +1,9 @@
-"""Tests for AITextServiceBase shared helpers and template method pattern."""
+"""Tests for AI text provider contracts and use-case helpers."""
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 from app.services.ai_base import AITextServiceBase
+from app.services import ai_story
+from app.services.ai_project_analysis import normalize_project_analysis
 from app.services.ai_text import DeepSeekTextService
 from app.services.ai_claude import ClaudeTextService
 
@@ -60,7 +62,7 @@ class TestBuildCharDescriptions:
             "core_trait": "追求真相",
             "fatal_flaw": "不信任他人",
         }]
-        result = AITextServiceBase._build_char_descriptions(chars)
+        result = ai_story.build_char_descriptions(chars)
         assert len(result) == 1
         assert "【林晚】" in result[0]
         assert "导演" in result[0]
@@ -71,18 +73,18 @@ class TestBuildCharDescriptions:
 
     def test_minimal_character(self):
         chars = [{"name": "小明"}]
-        result = AITextServiceBase._build_char_descriptions(chars)
+        result = ai_story.build_char_descriptions(chars)
         assert result == ["【小明】"]
 
     def test_multiple_characters(self):
         chars = [{"name": "A"}, {"name": "B"}]
-        assert len(AITextServiceBase._build_char_descriptions(chars)) == 2
+        assert len(ai_story.build_char_descriptions(chars)) == 2
 
 
 class TestBuildSceneDescription:
     def test_basic_scene(self):
         scene = {"name": "咖啡馆", "description": "安静的角落"}
-        result = AITextServiceBase._build_scene_description(scene)
+        result = ai_story.build_scene_description(scene)
         assert "场景：咖啡馆" in result
         assert "安静的角落" in result
 
@@ -99,7 +101,7 @@ class TestBuildSceneDescription:
             },
             "props": ["雨伞", "外套"],
         }
-        result = AITextServiceBase._build_scene_description(scene)
+        result = ai_story.build_scene_description(scene)
         assert "街角" in result
         assert "霓虹灯倒影" in result
         assert "雨声" in result
@@ -109,50 +111,44 @@ class TestBuildSceneDescription:
 
 class TestGetStoryStage:
     def test_chapter_1(self):
-        stage = AITextServiceBase._get_story_stage(1)
+        stage = ai_story.get_story_stage(1)
         assert stage["name"] == "开篇"
 
     def test_chapters_2_3(self):
         for ch in [2, 3]:
-            assert AITextServiceBase._get_story_stage(ch)["name"] == "铺垫期"
+            assert ai_story.get_story_stage(ch)["name"] == "铺垫期"
 
     def test_chapters_4_6(self):
         for ch in [4, 5, 6]:
-            assert AITextServiceBase._get_story_stage(ch)["name"] == "发展期"
+            assert ai_story.get_story_stage(ch)["name"] == "发展期"
 
     def test_chapters_7_9(self):
         for ch in [7, 8, 9]:
-            assert AITextServiceBase._get_story_stage(ch)["name"] == "高潮期"
+            assert ai_story.get_story_stage(ch)["name"] == "高潮期"
 
     def test_chapters_10_plus(self):
         for ch in [10, 15, 100]:
-            assert AITextServiceBase._get_story_stage(ch)["name"] == "收尾期"
+            assert ai_story.get_story_stage(ch)["name"] == "收尾期"
 
 
 class TestBuildStyleGuide:
     def test_known_styles(self):
-        stage = AITextServiceBase._get_story_stage(1)
         for style in ["细腻", "白描", "诗意", "轻松"]:
-            result = AITextServiceBase._build_style_guide(style, "甜", stage)
+            result = ai_story.build_style_guide(style, "甜")
             assert len(result) > 20
 
     def test_mood_additions(self):
-        stage = AITextServiceBase._get_story_stage(1)
-        sweet = AITextServiceBase._build_style_guide("细腻", "甜", stage)
-        sad = AITextServiceBase._build_style_guide("细腻", "虐", stage)
+        sweet = ai_story.build_style_guide("细腻", "甜")
+        sad = ai_story.build_style_guide("细腻", "虐")
         assert "心动" in sweet
         assert "误会" in sad
 
     def test_unknown_style_falls_back(self):
-        stage = AITextServiceBase._get_story_stage(1)
-        result = AITextServiceBase._build_style_guide("未知风格", "甜", stage)
+        result = ai_story.build_style_guide("未知风格", "甜")
         assert "内心戏" in result  # falls back to 细腻
 
 
 class TestParseStoryResponse:
-    def setup_method(self):
-        self.service = DeepSeekTextService()
-
     def test_with_title_and_choices(self):
         content = """【章节标题】
 初见
@@ -163,22 +159,41 @@ class TestParseStoryResponse:
 【分支选项】
 A. 选项一
 B. 选项二"""
-        result = self.service._parse_story_response(content)
+        result = ai_story.parse_story_response(content)
         assert result["title"] == "初见"
         assert "故事正文在这里" in result["content"]
         assert len(result["choices"]) == 2
         assert result["word_count"] > 0
 
     def test_without_markers(self):
-        result = self.service._parse_story_response("纯文本内容")
+        result = ai_story.parse_story_response("纯文本内容")
         assert result["content"] == "纯文本内容"
         assert result["title"] is None
         assert len(result["choices"]) == 2  # defaults
 
     def test_alternative_choice_marker(self):
         content = "正文\n\n【选择】\nA. 甲\nB. 乙\nC. 丙"
-        result = self.service._parse_story_response(content)
+        result = ai_story.parse_story_response(content)
         assert len(result["choices"]) == 3
+
+
+class TestNormalizeProjectAnalysis:
+    def test_normalizes_settings_and_limits_items(self):
+        parsed = {
+            "characters": [{"name": f"角色{i}"} for i in range(12)],
+            "outlines": [{"name": f"大纲{i}", "content": f"内容{i}"} for i in range(6)],
+            "settings": [
+                {"name": "地点", "type": "location", "content": "街角"},
+                {"name": "非法类型", "type": "scene", "content": "旧类型"},
+            ],
+        }
+
+        result = normalize_project_analysis(parsed)
+
+        assert len(result["characters"]) == 10
+        assert len(result["outlines"]) == 5
+        assert result["settings"][0]["type"] == "location"
+        assert result["settings"][1]["type"] == "note"
 
 
 # ── Template Method Pattern Tests ──────────────

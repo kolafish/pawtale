@@ -10,7 +10,11 @@ Pawtale 使用多 AI 模型支持文本生成，通过工厂模式统一管理�
 
 ```
 app/services/
-├── ai_base.py          # 抽象基类，定义统一接口
+├── ai_base.py          # Provider 抽象基类和公共方法代理
+├── ai_story.py         # 故事生成 prompt、解析和分支选项
+├── ai_revision.py      # 文本修订 prompt
+├── ai_project_analysis.py # 项目分析 prompt、重试和结构化清洗
+├── ai_types.py         # AITextClient 协议
 ├── ai_factory.py       # 工厂函数，根据模型名返回服务实例
 ├── ai_claude.py        # Claude 服务实现（通过代理）
 ├── ai_text.py          # DeepSeek 服务实现
@@ -19,7 +23,8 @@ app/services/
 
 ### 2. 统一接口（AITextServiceBase）
 
-`AITextServiceBase` 提供以下公共能力，具体模型服务只需要实现 `_call_llm()`：
+`AITextServiceBase` 定义 provider 合约，具体模型服务只需要实现 `_call_llm()`、`provider_name` 和 `model_name`。
+产品能力由独立 use-case 模块实现，基类只保留薄代理：
 
 - `generate_story()` - 生成故事内容和分支选项
 - `revise_chapter()` - 根据修改意见重写内容
@@ -168,10 +173,17 @@ DEFAULT_AI_MODEL=claude-opus-4  # 可选: deepseek, claude-opus-4, claude-sonnet
 ```python
 # 示例：添加 GPT-4 支持
 class GPT4TextService(AITextServiceBase):
-    async def revise_chapter(self, ...):
-        # 实现逻辑
-        pass
-    # ... 实现其他方法
+    @property
+    def provider_name(self) -> str:
+        return "openai"
+
+    @property
+    def model_name(self) -> str:
+        return "gpt-4"
+
+    async def _call_llm(self, system_prompt: str, user_prompt: str, ...):
+        # 只实现模型传输逻辑；prompt/use-case 复用现有模块
+        ...
 
 # ai_factory.py
 def get_ai_service(model: str) -> AITextServiceBase:

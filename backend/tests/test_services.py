@@ -1,5 +1,5 @@
-from app.services.ai_text import AITextService
 from app.services.ai_debug import build_debug_info
+from app.services.ai_story import parse_story_response
 
 
 class TestAITextService:
@@ -7,7 +7,6 @@ class TestAITextService:
 
     def test_parse_story_response_with_choices(self):
         """测试解析带分支选项的故事响应"""
-        service = AITextService()
         content = """【故事内容】
 你在咖啡馆看到他坐在角落，阳光洒在他身上。
 
@@ -16,7 +15,7 @@ A. 走过去打招呼
 B. 假装没看到
 C. 找个位置偷偷观察"""
 
-        result = service._parse_story_response(content)
+        result = parse_story_response(content)
 
         assert "咖啡馆" in result["content"]
         assert len(result["choices"]) == 3
@@ -24,24 +23,22 @@ C. 找个位置偷偷观察"""
 
     def test_parse_story_response_without_choices(self):
         """测试解析没有分支选项的故事响应"""
-        service = AITextService()
         content = "这是一段没有分支选项的故事内容。"
 
-        result = service._parse_story_response(content)
+        result = parse_story_response(content)
 
         assert result["content"] == content
         assert len(result["choices"]) == 2
 
     def test_parse_story_response_alternative_format(self):
         """测试解析替代格式的分支选项"""
-        service = AITextService()
         content = """故事内容在这里。
 
 【选择】
 A. 选项一
 B. 选项二"""
 
-        result = service._parse_story_response(content)
+        result = parse_story_response(content)
 
         assert len(result["choices"]) == 2
 
