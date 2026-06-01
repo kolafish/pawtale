@@ -42,7 +42,7 @@ Pawtale 当前是单仓库、前后端分离架构。后端提供项目、文档
 ### AI
 
 - 文本：DeepSeek、Claude Opus 4.6、Claude Sonnet 4.6
-- 服务边界：`AITextServiceBase` 提供 prompt 构建、响应解析和通用能力，具体模型服务只实现 `_call_llm()`
+- 服务边界：`AITextServiceBase` 定义 provider 合约和薄代理；prompt/use-case 逻辑在 `ai_story.py`、`ai_revision.py`、`ai_project_analysis.py`
 
 ## 后端结构
 
@@ -87,6 +87,9 @@ backend/app/
     ├── project_documents.py
     ├── content_storage.py
     ├── ai_base.py
+    ├── ai_story.py
+    ├── ai_revision.py
+    ├── ai_project_analysis.py
     ├── ai_factory.py
     ├── ai_text.py
     └── ai_claude.py

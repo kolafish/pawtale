@@ -111,7 +111,8 @@ Layout (h-screen flex flex-col)
 
 **AI 服务架构**：
 - 工厂模式：`get_ai_service(model)` 返回对应服务实例
-- 统一接口：`AITextServiceBase` 定义所有 AI 方法
+- 统一接口：`AITextServiceBase` 定义 provider 合约和公共 AI 方法代理
+- Use-case 模块：`ai_story.py`、`ai_revision.py`、`ai_project_analysis.py` 承载 prompt 构建、解析和重试逻辑
 - Claude 代理限制：system role 被忽略 → 合并到 user message
 - DeepSeek：原生 API，支持 system role（但保持简短）
 - 详见 `backend/docs/AI_ARCHITECTURE.md`
@@ -133,7 +134,8 @@ Layout (h-screen flex flex-col)
 - `backend/app/routers/projects/` - 项目 API 端点（按 core/structure/references/activity/ai 拆分）
 - `backend/app/services/projects/` - 项目业务编排（权限校验、文档树、参考资料、统计导出、AI 工作流）
 - `backend/app/services/ai_factory.py` - AI 服务工厂
-- `backend/app/services/ai_base.py` - AI 服务抽象基类
+- `backend/app/services/ai_base.py` - AI provider 抽象基类和 use-case 代理
+- `backend/app/services/ai_story.py` / `ai_revision.py` / `ai_project_analysis.py` - AI 产品能力模块
 - `backend/app/services/ai_claude.py` - Claude 文本生成服务
 - `backend/app/services/ai_text.py` - DeepSeek 文本生成服务
 - `backend/docs/AI_ARCHITECTURE.md` - AI 服务架构完整文档
