@@ -156,6 +156,7 @@ Layout (h-screen flex flex-col)
 - `frontend/src/components/Layout.tsx` - 顶层布局（写作 / 全局资料库视图切换）
 - `frontend/src/components/WritingWorkspace.tsx` - 写作模式路由（ProjectHome 或产品 workspace）
 - `frontend/src/components/workspaces/ProjectDraftWorkspace.tsx` - Binder + Editor + AI 修改的共享草稿工作台
+- `frontend/src/components/workspaces/WorkspaceShell.tsx` - 工作台布局骨架（Binder、移动端目录、右侧面板、弹窗槽位）
 - `frontend/src/components/workspaces/NovelWorkspace.tsx` - 小说工作台（共享草稿工作台 + Inspector + AI 分析）
 - `frontend/src/components/workspaces/ArticleWorkspace.tsx` - 公众号工作台（共享草稿工作台，正文/素材入口）
 - `frontend/src/components/workspaces/MemoirWorkspace.tsx` - 回忆录工作台（共享草稿工作台 + 问题驱动面板）
