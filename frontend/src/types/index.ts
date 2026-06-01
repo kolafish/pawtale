@@ -1,3 +1,7 @@
+import type { ReferenceType, SettingReferenceType } from '../domain/references';
+
+export type { ReferenceType, SettingReferenceType } from '../domain/references';
+
 export interface User {
   id: string;
   email: string;
@@ -91,7 +95,7 @@ export interface WritingDocument {
 
 export interface ReferenceItemBrief {
   id: string;
-  type: string;
+  type: ReferenceType;
   name: string;
   sort_order: number;
 }
@@ -99,7 +103,7 @@ export interface ReferenceItemBrief {
 export interface ReferenceItem {
   id: string;
   project_id: string;
-  type: string;  // character/location/note
+  type: ReferenceType;
   name: string;
   content: string;
   metadata_json: Record<string, unknown>;
@@ -170,7 +174,7 @@ export interface AnalyzedOutline {
 
 export interface AnalyzedSetting {
   name: string;
-  type: string; // location / note
+  type: SettingReferenceType;
   content: string;
 }
 

@@ -1,13 +1,14 @@
 import type { ProjectListItem, ProjectType } from '../types';
 import { toChineseNumber } from '../utils/numberUtils';
+import { REFERENCE_TYPES, type ReferenceType } from './references';
 
 export type ReferenceSectionKey = 'character' | 'outline' | 'notes';
 
 export interface ProjectReferenceSection {
   key: ReferenceSectionKey;
   label: string;
-  types: string[];
-  createType: string;
+  types: ReferenceType[];
+  createType: ReferenceType;
 }
 
 export interface ProjectProfile {
@@ -22,19 +23,19 @@ export interface ProjectProfile {
 }
 
 const NOVEL_REFERENCE_SECTIONS: ProjectReferenceSection[] = [
-  { key: 'character', label: '人物', types: ['character'], createType: 'character' },
-  { key: 'outline', label: '大纲', types: ['outline'], createType: 'outline' },
-  { key: 'notes', label: '设定', types: ['location', 'note'], createType: 'note' },
+  { key: 'character', label: '人物', types: [REFERENCE_TYPES.CHARACTER], createType: REFERENCE_TYPES.CHARACTER },
+  { key: 'outline', label: '大纲', types: [REFERENCE_TYPES.OUTLINE], createType: REFERENCE_TYPES.OUTLINE },
+  { key: 'notes', label: '设定', types: [REFERENCE_TYPES.LOCATION, REFERENCE_TYPES.NOTE], createType: REFERENCE_TYPES.NOTE },
 ];
 
 const ARTICLE_REFERENCE_SECTIONS: ProjectReferenceSection[] = [
-  { key: 'outline', label: '选题', types: ['outline'], createType: 'outline' },
-  { key: 'notes', label: '素材', types: ['location', 'note'], createType: 'note' },
+  { key: 'outline', label: '选题', types: [REFERENCE_TYPES.OUTLINE], createType: REFERENCE_TYPES.OUTLINE },
+  { key: 'notes', label: '素材', types: [REFERENCE_TYPES.LOCATION, REFERENCE_TYPES.NOTE], createType: REFERENCE_TYPES.NOTE },
 ];
 
 const MEMOIR_REFERENCE_SECTIONS: ProjectReferenceSection[] = [
-  { key: 'character', label: '人物', types: ['character'], createType: 'character' },
-  { key: 'notes', label: '素材', types: ['location', 'note'], createType: 'note' },
+  { key: 'character', label: '人物', types: [REFERENCE_TYPES.CHARACTER], createType: REFERENCE_TYPES.CHARACTER },
+  { key: 'notes', label: '素材', types: [REFERENCE_TYPES.LOCATION, REFERENCE_TYPES.NOTE], createType: REFERENCE_TYPES.NOTE },
 ];
 
 export const PROJECT_PROFILES: Record<ProjectType, ProjectProfile> = {

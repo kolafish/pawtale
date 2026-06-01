@@ -129,7 +129,7 @@ Layout (h-screen flex flex-col)
 ### 后端
 - `backend/app/models/projects.py` - 项目系统模型（Project, DocumentGroup, Document, ReferenceItem, WritingSession）
 - `backend/app/schemas/projects.py` - 项目系统 Pydantic schemas
-- `backend/app/domain/` - 产品类型和默认项目模板（novel/article/memoir）
+- `backend/app/domain/` - 产品类型、Reference 类型和默认项目模板（novel/article/memoir）
 - `backend/app/routers/projects/` - 项目 API 端点（按 core/structure/references/activity/ai 拆分）
 - `backend/app/services/projects/` - 项目业务编排（权限校验、文档树、参考资料、统计导出、AI 工作流）
 - `backend/app/services/ai_factory.py` - AI 服务工厂
@@ -152,6 +152,7 @@ Layout (h-screen flex flex-col)
 - `frontend/src/components/EditorMain.tsx` - 编辑器（工具栏 + textarea + AI 续写 + 状态栏）
 - `frontend/src/components/Inspector.tsx` - 右侧浮层面板（文档属性、文档关联资料、项目信息）
 - `frontend/src/domain/projectProfiles.ts` - 前端产品类型配置（创建入口、结构单位、Binder 分区）
+- `frontend/src/domain/references.ts` - 前端 Reference 类型、默认命名和展示文案
 - `frontend/src/hooks/useProjectState.ts` - 项目状态 facade（组合文档草稿、结构、资料、AI 续写、导出）
 - `frontend/src/hooks/project/useDocumentDraft.ts` - 文档草稿状态（加载、快照、auto-save、Cmd+S、切换文档）
 - `frontend/src/hooks/project/useProjectStructure.ts` - 项目结构操作（分组/文档 CRUD 和排序）

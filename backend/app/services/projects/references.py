@@ -35,7 +35,7 @@ async def create_reference(
     await load_project(db, project_id, user_id)
     ref = ReferenceItem(
         project_id=project_id,
-        type=req.type,
+        type=req.type.value,
         name=req.name,
         content=req.content,
         metadata_json=req.metadata_json,

@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from 'react';
+import { REFERENCE_TYPES } from '../../domain/references';
 import { useDraftRevision } from '../../hooks/project/useDraftRevision';
 import { useProjectState } from '../../hooks/useProjectState';
 import { useReferenceEditor } from '../../hooks/useReferenceEditor';
@@ -75,7 +76,7 @@ export function ProjectDraftWorkspace({
 
     if (currentReferenceId && refEditor.referenceData) {
       const refType = refEditor.referenceType;
-      if (refType === 'character') {
+      if (refType === REFERENCE_TYPES.CHARACTER) {
         return (
           <CharacterEditor
             data={refEditor.referenceData}
@@ -86,7 +87,7 @@ export function ProjectDraftWorkspace({
           />
         );
       }
-      if (refType === 'outline') {
+      if (refType === REFERENCE_TYPES.OUTLINE) {
         return (
           <OutlineEditor
             data={refEditor.referenceData}

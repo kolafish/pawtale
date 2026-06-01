@@ -1,4 +1,5 @@
 import { Save } from 'lucide-react';
+import { REFERENCE_TYPES, REFERENCE_TYPE_LABELS } from '../domain/references';
 import type { ReferenceItem } from '../types';
 import type { RefSaveStatus } from '../hooks/useReferenceEditor';
 import { metadataString, metadataStringArray } from '../utils/metadata';
@@ -13,8 +14,8 @@ interface NoteEditorProps {
 
 export function NoteEditor({ data, saveStatus, onUpdate, onUpdateMeta, onSave }: NoteEditorProps) {
   const meta = data.metadata_json || {};
-  const isLocation = data.type === 'location';
-  const typeLabel = isLocation ? '地点' : '笔记';
+  const isLocation = data.type === REFERENCE_TYPES.LOCATION;
+  const typeLabel = REFERENCE_TYPE_LABELS[data.type];
   const statusLabel = saveStatus === 'saved' ? '已保存' : saveStatus === 'saving' ? '保存中...' : '未保存';
 
   return (

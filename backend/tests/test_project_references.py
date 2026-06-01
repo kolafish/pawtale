@@ -15,6 +15,14 @@ class TestReferenceAPI:
         assert data["type"] == "character"
         assert data["name"] == "陆辰"
 
+    async def test_create_reference_rejects_unknown_type(self, client):
+        project_id = await create_project_id(client)
+        response = await client.post(
+            f"/api/projects/{project_id}/references",
+            json={"type": "scene", "name": "旧场景类型"},
+        )
+        assert response.status_code == 422
+
     async def test_list_references(self, client):
         project_id = await create_project_id(client)
         await client.post(f"/api/projects/{project_id}/references", json={"type": "note", "name": "笔记1"})

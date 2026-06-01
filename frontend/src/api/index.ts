@@ -14,6 +14,7 @@ import type {
   ProjectAnalyzeResponse,
   AnalyzeApplyRequest,
   AnalyzeApplyResponse,
+  ReferenceType,
 } from '../types';
 
 const api = axios.create({
@@ -66,7 +67,7 @@ export const projectsApi = {
   // References
   listReferences: (projectId: string) =>
     api.get<ReferenceItem[]>(`/projects/${projectId}/references`).then(r => r.data),
-  createReference: (projectId: string, data: { type: string; name: string; content?: string; metadata_json?: Record<string, unknown> }) =>
+  createReference: (projectId: string, data: { type: ReferenceType; name: string; content?: string; metadata_json?: Record<string, unknown> }) =>
     api.post<ReferenceItem>(`/projects/${projectId}/references`, data).then(r => r.data),
   updateReference: (projectId: string, refId: string, data: { name?: string; content?: string; metadata_json?: Record<string, unknown> }) =>
     api.put<ReferenceItem>(`/projects/${projectId}/references/${refId}`, data).then(r => r.data),

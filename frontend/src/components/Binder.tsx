@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { ChevronDown, ChevronRight, FileText, FolderPlus, Sparkles } from 'lucide-react';
 import { DndContext, DragOverlay, closestCenter } from '@dnd-kit/core';
+import type { ReferenceType } from '../domain/references';
 import type { Project } from '../types';
 import { defaultGroupName, getProjectProfile, type ReferenceSectionKey } from '../domain/projectProfiles';
 import { ManuscriptTree } from './binder/ManuscriptTree';
@@ -21,7 +22,7 @@ interface BinderProps {
   onDeleteDocument: (docId: string) => void;
   onReorderGroups: (items: { id: string; sort_order: number }[]) => void;
   onReorderDocuments: (items: { id: string; group_id: string; sort_order: number }[]) => void;
-  onCreateReference: (type: string) => void;
+  onCreateReference: (type: ReferenceType) => void;
   onRenameReference: (refId: string, name: string) => void;
   onDeleteReference: (refId: string) => void;
   onAnalyzeProject?: () => void;
