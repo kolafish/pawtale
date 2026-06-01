@@ -150,8 +150,7 @@ Layout (h-screen flex flex-col)
 - `frontend/src/components/Binder.tsx` - 左侧 Binder 装配层（项目标题、菜单、拖拽上下文）
 - `frontend/src/components/binder/` - Binder 子组件和 hook（文档树、资料分区、拖拽重排）
 - `frontend/src/components/EditorMain.tsx` - 编辑器（工具栏 + textarea + AI 续写 + 状态栏）
-- `frontend/src/components/Inspector.tsx` - 右侧浮层面板（文档/资料/项目 Tab）
-- `frontend/src/components/ReferenceSheet.tsx` - 参考资料编辑表单
+- `frontend/src/components/Inspector.tsx` - 右侧浮层面板（文档属性、文档关联资料、项目信息）
 - `frontend/src/domain/projectProfiles.ts` - 前端产品类型配置（创建入口、结构单位、Binder 分区）
 - `frontend/src/hooks/useProjectState.ts` - 项目状态 facade（组合文档草稿、结构、资料、AI 续写、导出）
 - `frontend/src/hooks/project/useDocumentDraft.ts` - 文档草稿状态（加载、快照、auto-save、Cmd+S、切换文档）

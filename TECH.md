@@ -153,6 +153,7 @@ frontend/src/
 - `useProjectReferences` 管理项目资料 CRUD 与选中
 - `useDraftRevision` 连接当前草稿和 AI 修改流程
 - `useAIRevision` 只负责 AI 修改的 diff/review 状态
+- 项目资料只通过 Binder + 主编辑区创建和编辑；Inspector 只负责文档属性、文档关联资料和项目信息
 
 ## 数据模型
 
