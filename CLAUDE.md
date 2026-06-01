@@ -166,7 +166,7 @@ Layout (h-screen flex flex-col)
 - `frontend/src/components/ScenePanel.tsx` - 全局场景库管理
 
 ### 测试
-- `backend/tests/test_projects.py` - 项目 API 测试（包括 AI 续写/修改）
+- `backend/tests/test_project_*.py` - 项目 API 分组测试（core/structure/references/activity/ai）
 - `backend/tests/test_api.py` - 旧 API 端点测试（角色、场景、故事）
 - `backend/tests/test_services.py` - AI 服务测试
 - `backend/tests/test_frontend.py` - 前端编译测试（TypeScript + Vite）

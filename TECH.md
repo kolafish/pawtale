@@ -202,7 +202,7 @@ Pawtale/
 │   └── tests/
 │       ├── conftest.py          # 测试配置（内存数据库 + dependency_overrides）
 │       ├── test_api.py          # 全局资料库 API 测试
-│       ├── test_projects.py     # 项目 API 测试 (35 tests)
+│       ├── test_project_*.py    # 项目 API 分组测试
 │       ├── test_ai_base.py      # AI 基类测试 (51 tests，覆盖 helper + 模板方法)
 │       ├── test_services.py     # AI 服务测试
 │       ├── test_binder_rendering.py  # Binder 渲染测试
