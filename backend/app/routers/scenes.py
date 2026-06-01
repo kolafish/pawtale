@@ -1,8 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import or_, select
+from app.auth import get_current_user
 from app.database import get_db
-from app.models import Scene
+from app.models import Scene, User
 from app.schemas import (
     SceneCreate, SceneUpdate, SceneResponse,
     SceneAIGenerateRequest, SceneAIGenerateResponse, SceneCandidate,
@@ -103,9 +104,16 @@ PRESET_SCENES = [
 
 
 @router.get("", response_model=list[SceneResponse])
-async def get_scenes(db: AsyncSession = Depends(get_db)):
+async def get_scenes(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """获取所有场景"""
-    result = await db.execute(select(Scene).order_by(Scene.category, Scene.name))
+    result = await db.execute(
+        select(Scene)
+        .where(or_(Scene.user_id == current_user.id, Scene.is_preset == True))
+        .order_by(Scene.category, Scene.name)
+    )
     scenes = result.scalars().all()
     return scenes
 
@@ -114,9 +122,10 @@ async def get_scenes(db: AsyncSession = Depends(get_db)):
 async def create_scene(
     scene: SceneCreate,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """创建自定义场景"""
-    db_scene = Scene(**scene.model_dump(), is_preset=False)
+    db_scene = Scene(**scene.model_dump(), is_preset=False, user_id=current_user.id)
     db.add(db_scene)
     await db.commit()
     await db.refresh(db_scene)
@@ -124,9 +133,18 @@ async def create_scene(
 
 
 @router.get("/{scene_id}", response_model=SceneResponse)
-async def get_scene(scene_id: str, db: AsyncSession = Depends(get_db)):
+async def get_scene(
+    scene_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """获取场景详情"""
-    result = await db.execute(select(Scene).where(Scene.id == scene_id))
+    result = await db.execute(
+        select(Scene).where(
+            Scene.id == scene_id,
+            or_(Scene.user_id == current_user.id, Scene.is_preset == True),
+        )
+    )
     scene = result.scalar_one_or_none()
     if not scene:
         raise HTTPException(status_code=404, detail="场景不存在")
@@ -138,9 +156,12 @@ async def update_scene(
     scene_id: str,
     scene_update: SceneUpdate,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """更新场景"""
-    result = await db.execute(select(Scene).where(Scene.id == scene_id))
+    result = await db.execute(
+        select(Scene).where(Scene.id == scene_id, Scene.user_id == current_user.id)
+    )
     scene = result.scalar_one_or_none()
     if not scene:
         raise HTTPException(status_code=404, detail="场景不存在")
@@ -155,9 +176,15 @@ async def update_scene(
 
 
 @router.delete("/{scene_id}")
-async def delete_scene(scene_id: str, db: AsyncSession = Depends(get_db)):
+async def delete_scene(
+    scene_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """删除场景"""
-    result = await db.execute(select(Scene).where(Scene.id == scene_id))
+    result = await db.execute(
+        select(Scene).where(Scene.id == scene_id, Scene.user_id == current_user.id)
+    )
     scene = result.scalar_one_or_none()
     if not scene:
         raise HTTPException(status_code=404, detail="场景不存在")
@@ -168,7 +195,10 @@ async def delete_scene(scene_id: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/init-presets")
-async def init_preset_scenes(db: AsyncSession = Depends(get_db)):
+async def init_preset_scenes(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """初始化预设场景（仅首次运行）"""
     # 检查是否已有预设场景
     result = await db.execute(select(Scene).where(Scene.is_preset == True))
@@ -190,7 +220,10 @@ async def init_preset_scenes(db: AsyncSession = Depends(get_db)):
     response_model=SceneAIGenerateResponse,
     response_model_exclude_none=True,
 )
-async def ai_generate_scenes(request: SceneAIGenerateRequest):
+async def ai_generate_scenes(
+    request: SceneAIGenerateRequest,
+    current_user: User = Depends(get_current_user),
+):
     """AI 生成场景候选"""
     try:
         candidates, debug_info = await ai_scene_service.generate_scene_candidates(

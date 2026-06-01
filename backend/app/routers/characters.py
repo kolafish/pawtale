@@ -1,8 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import or_, select
+from app.auth import get_current_user
 from app.database import get_db
-from app.models import Character
+from app.models import Character, User
 from app.schemas import (
     CharacterCreate, CharacterUpdate, CharacterResponse,
     AvatarGenerateRequest, AvatarGenerateResponse,
@@ -14,9 +15,16 @@ router = APIRouter(prefix="/api/characters", tags=["characters"])
 
 
 @router.get("", response_model=list[CharacterResponse])
-async def get_characters(db: AsyncSession = Depends(get_db)):
+async def get_characters(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """获取所有角色"""
-    result = await db.execute(select(Character).order_by(Character.created_at.desc()))
+    result = await db.execute(
+        select(Character)
+        .where(or_(Character.user_id == current_user.id, Character.is_preset == True))
+        .order_by(Character.created_at.desc())
+    )
     characters = result.scalars().all()
     return characters
 
@@ -25,9 +33,10 @@ async def get_characters(db: AsyncSession = Depends(get_db)):
 async def create_character(
     character: CharacterCreate,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """创建角色"""
-    db_character = Character(**character.model_dump())
+    db_character = Character(**character.model_dump(), user_id=current_user.id)
     db.add(db_character)
     await db.commit()
     await db.refresh(db_character)
@@ -36,7 +45,10 @@ async def create_character(
 
 # 注意：这个路由必须在 /{character_id} 之前，否则会被错误匹配
 @router.post("/auto-complete", response_model=CharacterAutoCompleteResponse)
-async def auto_complete_character(request: CharacterAutoCompleteRequest):
+async def auto_complete_character(
+    request: CharacterAutoCompleteRequest,
+    current_user: User = Depends(get_current_user),
+):
     """AI 辅助填写角色设定"""
     ai_service = get_ai_service(request.ai_model)
     try:
@@ -51,9 +63,18 @@ async def auto_complete_character(request: CharacterAutoCompleteRequest):
 
 
 @router.get("/{character_id}", response_model=CharacterResponse)
-async def get_character(character_id: str, db: AsyncSession = Depends(get_db)):
+async def get_character(
+    character_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """获取角色详情"""
-    result = await db.execute(select(Character).where(Character.id == character_id))
+    result = await db.execute(
+        select(Character).where(
+            Character.id == character_id,
+            or_(Character.user_id == current_user.id, Character.is_preset == True),
+        )
+    )
     character = result.scalar_one_or_none()
     if not character:
         raise HTTPException(status_code=404, detail="角色不存在")
@@ -65,9 +86,12 @@ async def update_character(
     character_id: str,
     character_update: CharacterUpdate,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """更新角色"""
-    result = await db.execute(select(Character).where(Character.id == character_id))
+    result = await db.execute(
+        select(Character).where(Character.id == character_id, Character.user_id == current_user.id)
+    )
     character = result.scalar_one_or_none()
     if not character:
         raise HTTPException(status_code=404, detail="角色不存在")
@@ -82,9 +106,15 @@ async def update_character(
 
 
 @router.delete("/{character_id}")
-async def delete_character(character_id: str, db: AsyncSession = Depends(get_db)):
+async def delete_character(
+    character_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """删除角色"""
-    result = await db.execute(select(Character).where(Character.id == character_id))
+    result = await db.execute(
+        select(Character).where(Character.id == character_id, Character.user_id == current_user.id)
+    )
     character = result.scalar_one_or_none()
     if not character:
         raise HTTPException(status_code=404, detail="角色不存在")
@@ -99,9 +129,12 @@ async def generate_avatar(
     character_id: str,
     request: AvatarGenerateRequest,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """生成角色头像"""
-    result = await db.execute(select(Character).where(Character.id == character_id))
+    result = await db.execute(
+        select(Character).where(Character.id == character_id, Character.user_id == current_user.id)
+    )
     character = result.scalar_one_or_none()
     if not character:
         raise HTTPException(status_code=404, detail="角色不存在")

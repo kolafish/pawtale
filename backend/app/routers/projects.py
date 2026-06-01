@@ -5,13 +5,15 @@ from fastapi import APIRouter, Depends, HTTPException
 
 logger = logging.getLogger(__name__)
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+from sqlalchemy import or_, select, func
 from sqlalchemy.orm import selectinload
+from app.auth import get_current_user
 from app.database import get_db
 from app.models.projects import (
     Project, DocumentGroup, Document, ReferenceItem, DocumentReference, WritingSession,
 )
 from app.models.models import Character, Scene
+from app.models.users import User
 from app.schemas.projects import (
     ProjectCreate, ProjectUpdate, ProjectListItem, ProjectResponse,
     GroupCreate, GroupUpdate, GroupResponse, GroupReorderItem,
@@ -97,10 +99,18 @@ def _project_resp(project: Project) -> ProjectResponse:
     )
 
 
-async def _load_project(db: AsyncSession, project_id: str) -> Project:
+def _global_character_filter(user_id: str):
+    return or_(Character.user_id == user_id, Character.is_preset == True)
+
+
+def _global_scene_filter(user_id: str):
+    return or_(Scene.user_id == user_id, Scene.is_preset == True)
+
+
+async def _load_project(db: AsyncSession, project_id: str, user_id: str) -> Project:
     result = await db.execute(
         select(Project)
-        .where(Project.id == project_id)
+        .where(Project.id == project_id, Project.user_id == user_id)
         .options(
             selectinload(Project.groups).selectinload(DocumentGroup.documents),
             selectinload(Project.references),
@@ -115,9 +125,13 @@ async def _load_project(db: AsyncSession, project_id: str) -> Project:
 # ── Project CRUD ─────────────────────────────────────
 
 @router.get("", response_model=list[ProjectListItem])
-async def list_projects(db: AsyncSession = Depends(get_db)):
+async def list_projects(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     result = await db.execute(
         select(Project)
+        .where(Project.user_id == current_user.id)
         .options(selectinload(Project.groups).selectinload(DocumentGroup.documents))
         .order_by(Project.updated_at.desc())
     )
@@ -138,8 +152,13 @@ async def list_projects(db: AsyncSession = Depends(get_db)):
 
 
 @router.post("", response_model=ProjectResponse, status_code=201)
-async def create_project(req: ProjectCreate, db: AsyncSession = Depends(get_db)):
+async def create_project(
+    req: ProjectCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     project = Project(
+        user_id=current_user.id,
         title=req.title,
         description=req.description,
         word_count_target=req.word_count_target,
@@ -158,31 +177,44 @@ async def create_project(req: ProjectCreate, db: AsyncSession = Depends(get_db))
     await db.commit()
     await ensure_project_dir(project.id)
     await write_content(project.id, doc.id, "")
-    project = await _load_project(db, project.id)
+    project = await _load_project(db, project.id, current_user.id)
     return _project_resp(project)
 
 
 @router.get("/{project_id}", response_model=ProjectResponse)
-async def get_project(project_id: str, db: AsyncSession = Depends(get_db)):
-    project = await _load_project(db, project_id)
+async def get_project(
+    project_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    project = await _load_project(db, project_id, current_user.id)
     return _project_resp(project)
 
 
 @router.put("/{project_id}", response_model=ProjectResponse)
-async def update_project(project_id: str, req: ProjectUpdate, db: AsyncSession = Depends(get_db)):
-    project = await _load_project(db, project_id)
+async def update_project(
+    project_id: str,
+    req: ProjectUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    project = await _load_project(db, project_id, current_user.id)
     for field in ["title", "description", "word_count_target", "daily_word_goal"]:
         val = getattr(req, field, None)
         if val is not None:
             setattr(project, field, val)
     await db.commit()
-    project = await _load_project(db, project.id)
+    project = await _load_project(db, project.id, current_user.id)
     return _project_resp(project)
 
 
 @router.delete("/{project_id}", status_code=204)
-async def delete_project(project_id: str, db: AsyncSession = Depends(get_db)):
-    project = await _load_project(db, project_id)
+async def delete_project(
+    project_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    project = await _load_project(db, project_id, current_user.id)
     await db.delete(project)
     await db.commit()
     await delete_project_dir(project_id)
@@ -191,8 +223,13 @@ async def delete_project(project_id: str, db: AsyncSession = Depends(get_db)):
 # ── Groups ───────────────────────────────────────────
 
 @router.post("/{project_id}/groups", response_model=GroupResponse, status_code=201)
-async def create_group(project_id: str, req: GroupCreate, db: AsyncSession = Depends(get_db)):
-    project = await _load_project(db, project_id)
+async def create_group(
+    project_id: str,
+    req: GroupCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    project = await _load_project(db, project_id, current_user.id)
     max_order = max((g.sort_order for g in project.groups), default=-1)
     group = DocumentGroup(project_id=project_id, name=req.name, sort_order=max_order + 1)
     db.add(group)
@@ -202,7 +239,13 @@ async def create_group(project_id: str, req: GroupCreate, db: AsyncSession = Dep
 
 
 @router.put("/{project_id}/groups/reorder", status_code=200)
-async def reorder_groups(project_id: str, items: list[GroupReorderItem], db: AsyncSession = Depends(get_db)):
+async def reorder_groups(
+    project_id: str,
+    items: list[GroupReorderItem],
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    await _load_project(db, project_id, current_user.id)
     for item in items:
         result = await db.execute(
             select(DocumentGroup).where(DocumentGroup.id == item.id, DocumentGroup.project_id == project_id)
@@ -215,7 +258,14 @@ async def reorder_groups(project_id: str, items: list[GroupReorderItem], db: Asy
 
 
 @router.put("/{project_id}/groups/{group_id}", response_model=GroupResponse)
-async def update_group(project_id: str, group_id: str, req: GroupUpdate, db: AsyncSession = Depends(get_db)):
+async def update_group(
+    project_id: str,
+    group_id: str,
+    req: GroupUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    await _load_project(db, project_id, current_user.id)
     result = await db.execute(
         select(DocumentGroup)
         .where(DocumentGroup.id == group_id, DocumentGroup.project_id == project_id)
@@ -232,7 +282,13 @@ async def update_group(project_id: str, group_id: str, req: GroupUpdate, db: Asy
 
 
 @router.delete("/{project_id}/groups/{group_id}", status_code=204)
-async def delete_group(project_id: str, group_id: str, db: AsyncSession = Depends(get_db)):
+async def delete_group(
+    project_id: str,
+    group_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    await _load_project(db, project_id, current_user.id)
     result = await db.execute(
         select(DocumentGroup)
         .where(DocumentGroup.id == group_id, DocumentGroup.project_id == project_id)
@@ -255,8 +311,13 @@ async def delete_group(project_id: str, group_id: str, db: AsyncSession = Depend
     status_code=201,
 )
 async def create_document(
-    project_id: str, group_id: str, req: DocumentCreate, db: AsyncSession = Depends(get_db),
+    project_id: str,
+    group_id: str,
+    req: DocumentCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
+    await _load_project(db, project_id, current_user.id)
     result = await db.execute(
         select(DocumentGroup).where(DocumentGroup.id == group_id, DocumentGroup.project_id == project_id)
         .options(selectinload(DocumentGroup.documents))
@@ -280,8 +341,12 @@ async def create_document(
 
 @router.put("/{project_id}/documents/reorder", status_code=200)
 async def reorder_documents(
-    project_id: str, items: list[DocumentReorderItem], db: AsyncSession = Depends(get_db),
+    project_id: str,
+    items: list[DocumentReorderItem],
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
+    await _load_project(db, project_id, current_user.id)
     for item in items:
         result = await db.execute(
             select(Document)
@@ -297,7 +362,13 @@ async def reorder_documents(
 
 
 @router.get("/{project_id}/documents/{document_id}", response_model=DocumentResponse)
-async def get_document(project_id: str, document_id: str, db: AsyncSession = Depends(get_db)):
+async def get_document(
+    project_id: str,
+    document_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    await _load_project(db, project_id, current_user.id)
     result = await db.execute(
         select(Document)
         .join(DocumentGroup)
@@ -317,8 +388,13 @@ async def get_document(project_id: str, document_id: str, db: AsyncSession = Dep
 
 @router.put("/{project_id}/documents/{document_id}", response_model=DocumentResponse)
 async def update_document(
-    project_id: str, document_id: str, req: DocumentUpdate, db: AsyncSession = Depends(get_db),
+    project_id: str,
+    document_id: str,
+    req: DocumentUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
+    await _load_project(db, project_id, current_user.id)
     result = await db.execute(
         select(Document)
         .join(DocumentGroup)
@@ -346,7 +422,13 @@ async def update_document(
 
 
 @router.delete("/{project_id}/documents/{document_id}", status_code=204)
-async def delete_document(project_id: str, document_id: str, db: AsyncSession = Depends(get_db)):
+async def delete_document(
+    project_id: str,
+    document_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    await _load_project(db, project_id, current_user.id)
     result = await db.execute(
         select(Document)
         .join(DocumentGroup)
@@ -363,7 +445,12 @@ async def delete_document(project_id: str, document_id: str, db: AsyncSession = 
 # ── References ───────────────────────────────────────
 
 @router.get("/{project_id}/references", response_model=list[ReferenceItemResponse])
-async def list_references(project_id: str, db: AsyncSession = Depends(get_db)):
+async def list_references(
+    project_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    await _load_project(db, project_id, current_user.id)
     result = await db.execute(
         select(ReferenceItem)
         .where(ReferenceItem.project_id == project_id)
@@ -376,12 +463,13 @@ async def list_references(project_id: str, db: AsyncSession = Depends(get_db)):
 
 @router.post("/{project_id}/references", response_model=ReferenceItemResponse, status_code=201)
 async def create_reference(
-    project_id: str, req: ReferenceItemCreate, db: AsyncSession = Depends(get_db),
+    project_id: str,
+    req: ReferenceItemCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     # verify project exists
-    proj = await db.get(Project, project_id)
-    if not proj:
-        raise HTTPException(status_code=404, detail="项目不存在")
+    await _load_project(db, project_id, current_user.id)
     ref = ReferenceItem(
         project_id=project_id,
         type=req.type,
@@ -397,8 +485,13 @@ async def create_reference(
 
 @router.put("/{project_id}/references/{ref_id}", response_model=ReferenceItemResponse)
 async def update_reference(
-    project_id: str, ref_id: str, req: ReferenceItemUpdate, db: AsyncSession = Depends(get_db),
+    project_id: str,
+    ref_id: str,
+    req: ReferenceItemUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
+    await _load_project(db, project_id, current_user.id)
     result = await db.execute(
         select(ReferenceItem).where(ReferenceItem.id == ref_id, ReferenceItem.project_id == project_id)
     )
@@ -415,7 +508,13 @@ async def update_reference(
 
 
 @router.delete("/{project_id}/references/{ref_id}", status_code=204)
-async def delete_reference(project_id: str, ref_id: str, db: AsyncSession = Depends(get_db)):
+async def delete_reference(
+    project_id: str,
+    ref_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    await _load_project(db, project_id, current_user.id)
     result = await db.execute(
         select(ReferenceItem).where(ReferenceItem.id == ref_id, ReferenceItem.project_id == project_id)
     )
@@ -428,14 +527,18 @@ async def delete_reference(project_id: str, ref_id: str, db: AsyncSession = Depe
 
 @router.post("/{project_id}/references/import-global", response_model=list[ReferenceItemResponse])
 async def import_from_global(
-    project_id: str, req: ImportGlobalRequest, db: AsyncSession = Depends(get_db),
+    project_id: str,
+    req: ImportGlobalRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    proj = await db.get(Project, project_id)
-    if not proj:
-        raise HTTPException(status_code=404, detail="项目不存在")
+    await _load_project(db, project_id, current_user.id)
     created = []
     for cid in req.character_ids:
-        char = await db.get(Character, cid)
+        result = await db.execute(
+            select(Character).where(Character.id == cid, _global_character_filter(current_user.id))
+        )
+        char = result.scalar_one_or_none()
         if not char:
             continue
         ref = ReferenceItem(
@@ -462,7 +565,10 @@ async def import_from_global(
         db.add(ref)
         created.append(ref)
     for sid in req.scene_ids:
-        scene = await db.get(Scene, sid)
+        result = await db.execute(
+            select(Scene).where(Scene.id == sid, _global_scene_filter(current_user.id))
+        )
+        scene = result.scalar_one_or_none()
         if not scene:
             continue
         ref = ReferenceItem(
@@ -493,12 +599,13 @@ async def import_from_global(
 
 @router.post("/{project_id}/references/import-preview", response_model=ImportPreviewResponse)
 async def import_preview(
-    project_id: str, req: ImportGlobalRequest, db: AsyncSession = Depends(get_db),
+    project_id: str,
+    req: ImportGlobalRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Preview import: check for duplicates before importing from global library."""
-    proj = await db.get(Project, project_id)
-    if not proj:
-        raise HTTPException(status_code=404, detail="项目不存在")
+    await _load_project(db, project_id, current_user.id)
 
     # Load all project references for matching
     refs_result = await db.execute(
@@ -509,7 +616,10 @@ async def import_preview(
     items: list[ImportPreviewItem] = []
 
     for cid in req.character_ids:
-        char = await db.get(Character, cid)
+        result = await db.execute(
+            select(Character).where(Character.id == cid, _global_character_filter(current_user.id))
+        )
+        char = result.scalar_one_or_none()
         if not char:
             continue
         existing = _find_matching_ref(project_refs, "character", char.id, char.name)
@@ -523,7 +633,10 @@ async def import_preview(
         ))
 
     for sid in req.scene_ids:
-        scene = await db.get(Scene, sid)
+        result = await db.execute(
+            select(Scene).where(Scene.id == sid, _global_scene_filter(current_user.id))
+        )
+        scene = result.scalar_one_or_none()
         if not scene:
             continue
         existing = _find_matching_ref(project_refs, "location", scene.id, scene.name)
@@ -559,9 +672,14 @@ def _find_matching_ref(
 
 @router.post("/{project_id}/references/{ref_id}/export-global", response_model=ExportGlobalResponse)
 async def export_to_global(
-    project_id: str, ref_id: str, req: ExportGlobalRequest, db: AsyncSession = Depends(get_db),
+    project_id: str,
+    ref_id: str,
+    req: ExportGlobalRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Export a project reference to the global library (character/scene)."""
+    await _load_project(db, project_id, current_user.id)
     result = await db.execute(
         select(ReferenceItem).where(ReferenceItem.id == ref_id, ReferenceItem.project_id == project_id)
     )
@@ -572,15 +690,15 @@ async def export_to_global(
     meta = ref.metadata_json or {}
 
     if ref.type == "character":
-        return await _export_character(ref, meta, req, db)
+        return await _export_character(ref, meta, req, db, current_user.id)
     elif ref.type == "location":
-        return await _export_scene(ref, meta, req, db)
+        return await _export_scene(ref, meta, req, db, current_user.id)
     else:
         raise HTTPException(status_code=400, detail=f"类型 '{ref.type}' 不支持导出到全局库")
 
 
 async def _export_character(
-    ref: ReferenceItem, meta: dict, req: ExportGlobalRequest, db: AsyncSession,
+    ref: ReferenceItem, meta: dict, req: ExportGlobalRequest, db: AsyncSession, user_id: str,
 ) -> ExportGlobalResponse:
     """Handle export of a character reference to global Character table."""
     # Project-specific fields that should NOT be exported
@@ -593,7 +711,10 @@ async def _export_character(
     if req.action == "preview":
         # Check linked first
         if linked_id:
-            char = await db.get(Character, linked_id)
+            result = await db.execute(
+                select(Character).where(Character.id == linked_id, _global_character_filter(user_id))
+            )
+            char = result.scalar_one_or_none()
             if char:
                 return ExportGlobalResponse(
                     status="preview",
@@ -601,7 +722,10 @@ async def _export_character(
                 )
         # Name match
         result = await db.execute(
-            select(Character).where(func.lower(Character.name) == ref.name.strip().lower())
+            select(Character).where(
+                func.lower(Character.name) == ref.name.strip().lower(),
+                _global_character_filter(user_id),
+            )
         )
         match = result.scalar_one_or_none()
         if match:
@@ -633,7 +757,10 @@ async def _export_character(
         target_id = req.global_id or linked_id
         if not target_id:
             raise HTTPException(status_code=400, detail="更新操作需要指定 global_id")
-        char = await db.get(Character, target_id)
+        result = await db.execute(
+            select(Character).where(Character.id == target_id, Character.user_id == user_id)
+        )
+        char = result.scalar_one_or_none()
         if not char:
             raise HTTPException(status_code=404, detail="全局角色不存在")
         for k, v in char_data.items():
@@ -644,7 +771,7 @@ async def _export_character(
         return ExportGlobalResponse(status="updated", global_id=char.id)
 
     elif req.action == "create":
-        char = Character(**char_data)
+        char = Character(**char_data, user_id=user_id)
         db.add(char)
         await db.flush()
         # Link back
@@ -656,21 +783,27 @@ async def _export_character(
 
 
 async def _export_scene(
-    ref: ReferenceItem, meta: dict, req: ExportGlobalRequest, db: AsyncSession,
+    ref: ReferenceItem, meta: dict, req: ExportGlobalRequest, db: AsyncSession, user_id: str,
 ) -> ExportGlobalResponse:
     """Handle export of a location reference to global Scene table."""
     linked_id = meta.get("global_scene_id")
 
     if req.action == "preview":
         if linked_id:
-            scene = await db.get(Scene, linked_id)
+            result = await db.execute(
+                select(Scene).where(Scene.id == linked_id, _global_scene_filter(user_id))
+            )
+            scene = result.scalar_one_or_none()
             if scene:
                 return ExportGlobalResponse(
                     status="preview",
                     match=ExportGlobalMatch(global_id=scene.id, global_name=scene.name, global_type="scene"),
                 )
         result = await db.execute(
-            select(Scene).where(func.lower(Scene.name) == ref.name.strip().lower())
+            select(Scene).where(
+                func.lower(Scene.name) == ref.name.strip().lower(),
+                _global_scene_filter(user_id),
+            )
         )
         match = result.scalar_one_or_none()
         if match:
@@ -697,7 +830,10 @@ async def _export_scene(
         target_id = req.global_id or linked_id
         if not target_id:
             raise HTTPException(status_code=400, detail="更新操作需要指定 global_id")
-        scene = await db.get(Scene, target_id)
+        result = await db.execute(
+            select(Scene).where(Scene.id == target_id, Scene.user_id == user_id)
+        )
+        scene = result.scalar_one_or_none()
         if not scene:
             raise HTTPException(status_code=404, detail="全局场景不存在")
         for k, v in scene_data.items():
@@ -707,7 +843,7 @@ async def _export_scene(
         return ExportGlobalResponse(status="updated", global_id=scene.id)
 
     elif req.action == "create":
-        scene = Scene(**scene_data)
+        scene = Scene(**scene_data, user_id=user_id)
         db.add(scene)
         await db.flush()
         ref.metadata_json = {**meta, "global_scene_id": scene.id}
@@ -721,8 +857,12 @@ async def _export_scene(
 
 @router.post("/{project_id}/references/{ref_id}/sync-global", response_model=ReferenceItemResponse)
 async def sync_reference_from_global(
-    project_id: str, ref_id: str, db: AsyncSession = Depends(get_db),
+    project_id: str,
+    ref_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
+    await _load_project(db, project_id, current_user.id)
     result = await db.execute(
         select(ReferenceItem).where(ReferenceItem.id == ref_id, ReferenceItem.project_id == project_id)
     )
@@ -739,7 +879,10 @@ async def sync_reference_from_global(
     global_scene_id = meta.get("global_scene_id")
 
     if global_char_id:
-        char = await db.get(Character, global_char_id)
+        result = await db.execute(
+            select(Character).where(Character.id == global_char_id, _global_character_filter(current_user.id))
+        )
+        char = result.scalar_one_or_none()
         if not char:
             raise HTTPException(status_code=404, detail="全局角色已被删除")
         ref.name = char.name
@@ -761,7 +904,10 @@ async def sync_reference_from_global(
             **preserved,
         }
     elif global_scene_id:
-        scene = await db.get(Scene, global_scene_id)
+        result = await db.execute(
+            select(Scene).where(Scene.id == global_scene_id, _global_scene_filter(current_user.id))
+        )
+        scene = result.scalar_one_or_none()
         if not scene:
             raise HTTPException(status_code=404, detail="全局场景已被删除")
         ref.name = scene.name
@@ -792,8 +938,12 @@ async def sync_reference_from_global(
     response_model=list[ReferenceItemResponse],
 )
 async def get_document_references(
-    project_id: str, document_id: str, db: AsyncSession = Depends(get_db),
+    project_id: str,
+    document_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
+    await _load_project(db, project_id, current_user.id)
     # verify doc belongs to project
     result = await db.execute(
         select(Document)
@@ -814,7 +964,9 @@ async def get_document_references(
 async def set_document_references(
     project_id: str, document_id: str, req: DocumentReferencesUpdate,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
+    await _load_project(db, project_id, current_user.id)
     result = await db.execute(
         select(Document)
         .join(DocumentGroup)
@@ -829,6 +981,17 @@ async def set_document_references(
         await db.delete(link)
     await db.flush()
     # Add new links
+    if req.reference_ids:
+        ref_result = await db.execute(
+            select(ReferenceItem.id).where(
+                ReferenceItem.project_id == project_id,
+                ReferenceItem.id.in_(req.reference_ids),
+            )
+        )
+        valid_ids = {row[0] for row in ref_result.fetchall()}
+        invalid_ids = set(req.reference_ids) - valid_ids
+        if invalid_ids:
+            raise HTTPException(status_code=404, detail="部分参考资料不存在")
     for rid in req.reference_ids:
         link = DocumentReference(document_id=document_id, reference_id=rid)
         db.add(link)
@@ -839,7 +1002,12 @@ async def set_document_references(
 # ── Writing Sessions ────────────────────────────────
 
 @router.get("/{project_id}/sessions", response_model=list[WritingSessionResponse])
-async def list_sessions(project_id: str, db: AsyncSession = Depends(get_db)):
+async def list_sessions(
+    project_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    await _load_project(db, project_id, current_user.id)
     result = await db.execute(
         select(WritingSession)
         .where(WritingSession.project_id == project_id)
@@ -851,11 +1019,12 @@ async def list_sessions(project_id: str, db: AsyncSession = Depends(get_db)):
 
 @router.post("/{project_id}/sessions", response_model=WritingSessionResponse, status_code=201)
 async def create_session(
-    project_id: str, req: WritingSessionCreate, db: AsyncSession = Depends(get_db),
+    project_id: str,
+    req: WritingSessionCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    proj = await db.get(Project, project_id)
-    if not proj:
-        raise HTTPException(status_code=404, detail="项目不存在")
+    await _load_project(db, project_id, current_user.id)
     session = WritingSession(
         project_id=project_id,
         date=req.date,
@@ -870,8 +1039,12 @@ async def create_session(
 # ── Export ───────────────────────────────────────────
 
 @router.get("/{project_id}/export", response_model=ProjectExportResponse)
-async def export_project(project_id: str, db: AsyncSession = Depends(get_db)):
-    project = await _load_project(db, project_id)
+async def export_project(
+    project_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    project = await _load_project(db, project_id, current_user.id)
     sections = []
     total = 0
     for g in project.groups:
@@ -890,8 +1063,9 @@ async def export_project(project_id: str, db: AsyncSession = Depends(get_db)):
 @router.post("/{project_id}/analyze", response_model=ProjectAnalyzeResponse, response_model_exclude_none=True)
 async def analyze_project(
     project_id: str, req: ProjectAnalyzeRequest, db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    project = await _load_project(db, project_id)
+    project = await _load_project(db, project_id, current_user.id)
 
     # Gather all manuscript content (full text for word count)
     raw_parts: list[tuple[str, str]] = []  # (header, content)
@@ -939,10 +1113,9 @@ async def analyze_project(
 @router.post("/{project_id}/analyze/apply", response_model=AnalyzeApplyResponse)
 async def apply_analysis(
     project_id: str, req: AnalyzeApplyRequest, db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    proj = await db.get(Project, project_id)
-    if not proj:
-        raise HTTPException(status_code=404, detail="项目不存在")
+    await _load_project(db, project_id, current_user.id)
 
     created: list[ReferenceItem] = []
 
@@ -1012,7 +1185,9 @@ async def ai_continue_document(
     project_id: str, document_id: str,
     req: DocumentAIContinueRequest,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
+    await _load_project(db, project_id, current_user.id)
     result = await db.execute(
         select(Document)
         .join(DocumentGroup)
@@ -1083,7 +1258,9 @@ async def ai_revise_document(
     project_id: str, document_id: str,
     req: DocumentAIReviseRequest,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
+    await _load_project(db, project_id, current_user.id)
     result = await db.execute(
         select(Document)
         .join(DocumentGroup)
@@ -1146,7 +1323,9 @@ async def ai_revise_document_multi(
     project_id: str, document_id: str,
     req: DocumentAIReviseMultiRequest,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
+    await _load_project(db, project_id, current_user.id)
     result = await db.execute(
         select(Document)
         .join(DocumentGroup)

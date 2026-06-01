@@ -82,38 +82,38 @@ export function EditorMain({
   return (
     <div className="h-full flex flex-col">
       {/* Top bar */}
-      <div className="px-4 py-3 border-b border-pink-100 bg-white flex items-center gap-3">
+      <div className="px-2 md:px-4 py-2 md:py-3 border-b border-pink-100 bg-white flex items-center gap-2 md:gap-3">
         <input
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           placeholder="文档名称"
-          className="flex-1 px-3 py-2 rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-pink-500"
+          className="flex-1 min-w-0 px-2 md:px-3 py-2 rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-pink-500 text-sm md:text-base"
           disabled={diffChunks !== null || multiResults !== null}
         />
         <button
           onClick={onSave}
           disabled={isSaving || diffChunks !== null || multiResults !== null}
-          className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-200 hover:bg-gray-50 disabled:opacity-60"
+          className="inline-flex items-center gap-1 px-2 md:px-3 py-2 rounded-lg border border-gray-200 hover:bg-gray-50 disabled:opacity-60 flex-shrink-0"
         >
           {isSaving ? <RefreshCw size={16} className="animate-spin" /> : <Save size={16} />}
-          保存
+          <span className="hidden md:inline">保存</span>
         </button>
         <button
           onClick={onToggleAIPanel}
-          className={`inline-flex items-center gap-2 px-3 py-2 rounded-lg border transition-colors ${
+          className={`inline-flex items-center gap-1 px-2 md:px-3 py-2 rounded-lg border transition-colors flex-shrink-0 ${
             isAIPanelOpen
               ? 'border-pink-300 bg-pink-50 text-pink-600'
               : 'border-gray-200 hover:bg-gray-50 text-gray-600'
           }`}
         >
           <Wand2 size={16} />
-          AI
+          <span className="hidden md:inline">AI</span>
         </button>
         <button
           onClick={onCloseProject}
-          className="text-sm px-3 py-2 rounded-lg border border-gray-200 hover:bg-gray-50"
+          className="text-sm px-2 md:px-3 py-2 rounded-lg border border-gray-200 hover:bg-gray-50 flex-shrink-0"
         >
-          返回项目
+          返回
         </button>
       </div>
 
@@ -160,12 +160,12 @@ export function EditorMain({
       </div>
 
       {/* Status bar */}
-      <div className="px-4 py-2 border-t border-pink-100 bg-white flex items-center justify-between text-xs text-gray-500">
-        <div className="flex items-center gap-4">
-          <span>本文档 {wordCount} 字 / 全文 {totalWordCount} 字</span>
+      <div className="px-2 md:px-4 py-2 border-t border-pink-100 bg-white flex items-center justify-between text-xs text-gray-500">
+        <div className="flex items-center gap-2 md:gap-4">
+          <span>{wordCount} 字 <span className="hidden md:inline">/ 全文 {totalWordCount} 字</span></span>
           <span className={saveStatusColor}>{saveStatusLabel}</span>
         </div>
-        <span className="text-gray-400">Cmd+S 保存</span>
+        <span className="text-gray-400 hidden md:inline">Cmd+S 保存</span>
       </div>
     </div>
   );

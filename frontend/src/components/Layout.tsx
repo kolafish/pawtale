@@ -1,15 +1,21 @@
 import { useState } from 'react';
-import { Users, MapPin, BookOpen } from 'lucide-react';
+import { LogOut, MapPin, UserCircle, Users, BookOpen } from 'lucide-react';
 import { useAppStore } from '../stores/appStore';
 import { WritingWorkspace } from './WritingWorkspace';
 import { CharacterPanel } from './CharacterPanel';
 import { ScenePanel } from './ScenePanel';
 import { AI_MODEL_OPTIONS } from '../constants/aiModels';
+import type { User } from '../types';
 
 type AppView = 'writing' | 'library';
 type LibraryTab = 'characters' | 'scenes';
 
-export function Layout() {
+interface LayoutProps {
+  user: User;
+  onLogout: () => void;
+}
+
+export function Layout({ user, onLogout }: LayoutProps) {
   const { defaultAiModel, setDefaultAiModel } = useAppStore();
   const [view, setView] = useState<AppView>('writing');
   const [libraryTab, setLibraryTab] = useState<LibraryTab>('characters');
@@ -62,6 +68,17 @@ export function Layout() {
               ))}
             </select>
           </div>
+          <div className="hidden items-center gap-1.5 text-sm text-gray-600 md:flex">
+            <UserCircle size={16} />
+            <span className="max-w-28 truncate">{user.display_name}</span>
+          </div>
+          <button
+            onClick={onLogout}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 px-2.5 py-1.5 text-sm text-gray-600 transition-colors hover:bg-gray-50"
+          >
+            <LogOut size={15} />
+            <span className="hidden md:inline">退出</span>
+          </button>
         </div>
       </header>
 

@@ -9,6 +9,7 @@ class Character(Base):
     __tablename__ = "characters"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id"), nullable=True, index=True)
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     gender: Mapped[str | None] = mapped_column(String(10), nullable=True)  # 男/女/其他
     age: Mapped[int | None] = mapped_column(nullable=True)
@@ -44,6 +45,7 @@ class Scene(Base):
     __tablename__ = "scenes"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id"), nullable=True, index=True)
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     category: Mapped[str] = mapped_column(String(50), nullable=False)  # 初遇/暧昧/表白/甜蜜/虐心
     description: Mapped[str] = mapped_column(Text, nullable=False)
@@ -64,6 +66,7 @@ class StoryOutline(Base):
     __tablename__ = "story_outlines"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id"), nullable=True, index=True)
     title: Mapped[str] = mapped_column(String(200), nullable=False)  # 大纲标题
     mood: Mapped[str | None] = mapped_column(String(50), nullable=True)  # 甜/虐/搞笑/治愈
     writing_style: Mapped[str | None] = mapped_column(String(50), nullable=True)  # 细腻/白描/诗意/轻松
@@ -138,6 +141,7 @@ class Story(Base):
     __tablename__ = "stories"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id"), nullable=True, index=True)
     title: Mapped[str] = mapped_column(String(200), nullable=False)
     outline_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("story_outlines.id"), nullable=True)  # 关联大纲
     scene_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("scenes.id"), nullable=True)  # 保留用于快速创作

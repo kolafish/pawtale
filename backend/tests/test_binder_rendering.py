@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sess
 
 from app.main import app
 from app.database import Base, get_db
+from app.models.users import User
 from app.models.projects import Project, DocumentGroup, Document
 
 
@@ -44,15 +45,30 @@ async def client(test_db, tmp_path):
     with patch("app.services.content_storage.PROJECTS_DIR", tmp_path / "projects"):
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as ac:
+            response = await ac.post(
+                "/api/auth/register",
+                json={
+                    "email": "binder@example.com",
+                    "password": "password123",
+                    "display_name": "Binder 用户",
+                },
+            )
+            assert response.status_code == 201
             yield ac
 
     app.dependency_overrides.clear()
 
 
 @pytest_asyncio.fixture
-async def sample_project(test_db):
+async def sample_project(test_db, client):
     """Create a sample project with groups and documents."""
+    from sqlalchemy import select
+
+    result = await test_db.execute(select(User).where(User.email == "binder@example.com"))
+    user = result.scalar_one()
+
     project = Project(
+        user_id=user.id,
         title="测试项目",
         description="测试描述",
         word_count_target=50000,
