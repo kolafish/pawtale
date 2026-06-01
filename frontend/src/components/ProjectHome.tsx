@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, FolderOpen, Trash2, RefreshCw } from 'lucide-react';
+import { Plus, FolderOpen, Trash2, RefreshCw, Pencil, Check, X } from 'lucide-react';
 import { projectsApi } from '../api';
 import { useAppStore } from '../stores/appStore';
 import type { ProjectListItem } from '../types';
@@ -16,6 +16,8 @@ export function ProjectHome() {
   const { setCurrentProject, setCurrentDocumentId } = useAppStore();
   const [newTitle, setNewTitle] = useState('');
   const [showCreate, setShowCreate] = useState(false);
+  const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
+  const [editingTitle, setEditingTitle] = useState('');
 
   const { data: projects = [], isLoading } = useQuery({
     queryKey: ['projects'],
@@ -39,7 +41,36 @@ export function ProjectHome() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['projects'] }),
   });
 
+  const renameMutation = useMutation({
+    mutationFn: ({ id, title }: { id: string; title: string }) => projectsApi.update(id, { title }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['projects'] });
+      setEditingProjectId(null);
+      setEditingTitle('');
+    },
+  });
+
+  const startRename = (project: ProjectListItem) => {
+    setEditingProjectId(project.id);
+    setEditingTitle(project.title);
+  };
+
+  const cancelRename = () => {
+    setEditingProjectId(null);
+    setEditingTitle('');
+  };
+
+  const commitRename = (project: ProjectListItem) => {
+    const title = editingTitle.trim();
+    if (!title || title === project.title || renameMutation.isPending) {
+      cancelRename();
+      return;
+    }
+    renameMutation.mutate({ id: project.id, title });
+  };
+
   const openProject = async (item: ProjectListItem) => {
+    if (editingProjectId) return;
     const project = await projectsApi.get(item.id);
     setCurrentProject(project);
     const firstDoc = project.groups?.[0]?.documents?.[0];
@@ -126,18 +157,61 @@ export function ProjectHome() {
                 className="group rounded-2xl border border-gray-100 bg-white p-5 hover:border-pink-200 hover:shadow-md transition-all cursor-pointer"
               >
                 <div className="flex items-start justify-between">
-                  <h3 className="font-semibold text-gray-800 group-hover:text-pink-600 transition-colors truncate flex-1">
-                    {proj.title}
-                  </h3>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      if (confirm('确定删除该项目？')) deleteMutation.mutate(proj.id);
-                    }}
-                    className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-red-50 text-gray-400 hover:text-red-500 transition-all"
-                  >
-                    <Trash2 size={14} />
-                  </button>
+                  {editingProjectId === proj.id ? (
+                    <div className="flex flex-1 items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                      <input
+                        value={editingTitle}
+                        onChange={(e) => setEditingTitle(e.target.value)}
+                        autoFocus
+                        className="flex-1 rounded-md border border-pink-200 px-2 py-1 text-sm font-semibold text-gray-800 focus:outline-none focus:ring-2 focus:ring-pink-400"
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') commitRename(proj);
+                          if (e.key === 'Escape') cancelRename();
+                        }}
+                      />
+                      <button
+                        onClick={() => commitRename(proj)}
+                        disabled={!editingTitle.trim() || renameMutation.isPending}
+                        className="p-1 rounded text-green-600 hover:bg-green-50 disabled:opacity-40"
+                        title="保存名称"
+                      >
+                        {renameMutation.isPending ? <RefreshCw size={14} className="animate-spin" /> : <Check size={14} />}
+                      </button>
+                      <button
+                        onClick={cancelRename}
+                        className="p-1 rounded text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+                        title="取消"
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <h3 className="font-semibold text-gray-800 group-hover:text-pink-600 transition-colors truncate flex-1">
+                        {proj.title}
+                      </h3>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          startRename(proj);
+                        }}
+                        className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-all"
+                        title="重命名项目"
+                      >
+                        <Pencil size={14} />
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (confirm('确定删除该项目？')) deleteMutation.mutate(proj.id);
+                        }}
+                        className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-red-50 text-gray-400 hover:text-red-500 transition-all"
+                        title="删除项目"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </>
+                  )}
                 </div>
                 {proj.description && (
                   <p className="text-sm text-gray-500 mt-1 line-clamp-2">{proj.description}</p>
