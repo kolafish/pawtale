@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { FileText } from 'lucide-react';
 import { AI_MODEL_OPTIONS } from '../../constants/aiModels';
 import { useAIRevision } from '../../hooks/useAIRevision';
@@ -19,12 +19,14 @@ interface ProjectDraftWorkspaceProps {
   project: Project;
   showInspector?: boolean;
   enableAnalyze?: boolean;
+  workspacePanel?: ReactNode;
 }
 
 export function ProjectDraftWorkspace({
   project,
   showInspector = false,
   enableAnalyze = false,
+  workspacePanel,
 }: ProjectDraftWorkspaceProps) {
   const currentReferenceId = useAppStore((state) => state.currentReferenceId);
   const ps = useProjectState();
@@ -195,14 +197,21 @@ export function ProjectDraftWorkspace({
           onAnalyzeProject={enableAnalyze ? () => setShowAnalyze(true) : undefined}
         />
       </div>
-      <div className="flex-1 min-w-0 relative">
+      <div className="flex-1 min-w-0 relative flex flex-col">
         <button
           onClick={() => setMobileBinderOpen(true)}
           className="md:hidden fixed bottom-4 left-4 z-30 w-12 h-12 rounded-full bg-pink-500 text-white shadow-lg flex items-center justify-center"
         >
           <FileText size={20} />
         </button>
-        {renderEditor()}
+        {workspacePanel && (
+          <div className="flex-shrink-0 border-b border-pink-100 bg-white">
+            {workspacePanel}
+          </div>
+        )}
+        <div className="flex-1 min-h-0">
+          {renderEditor()}
+        </div>
         {showInspector && ps.currentDocumentId && (
           <Inspector
             project={project}

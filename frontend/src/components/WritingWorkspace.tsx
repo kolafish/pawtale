@@ -3,6 +3,7 @@ import { useAppStore } from '../stores/appStore';
 import type { Project, ProjectType } from '../types';
 import { ProjectHome } from './ProjectHome';
 import { ArticleWorkspace } from './workspaces/ArticleWorkspace';
+import { MemoirWorkspace } from './workspaces/MemoirWorkspace';
 import { NovelWorkspace } from './workspaces/NovelWorkspace';
 
 interface ProjectWorkspaceProps {
@@ -12,6 +13,7 @@ interface ProjectWorkspaceProps {
 const PRODUCT_WORKSPACES: Partial<Record<ProjectType, ComponentType<ProjectWorkspaceProps>>> = {
   novel: NovelWorkspace,
   article: ArticleWorkspace,
+  memoir: MemoirWorkspace,
 };
 
 export function WritingWorkspace() {
