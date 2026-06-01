@@ -49,6 +49,7 @@ export function useProjectState() {
   const {
     currentProject, setCurrentProject,
     currentDocumentId, setCurrentDocumentId,
+    closeProject: clearCurrentProject,
     defaultAiModel,
   } = useAppStore();
 
@@ -282,8 +283,7 @@ export function useProjectState() {
   };
 
   const closeProject = () => {
-    setCurrentProject(null);
-    setCurrentDocumentId(null);
+    clearCurrentProject();
     queryClient.invalidateQueries({ queryKey: ['projects'] });
   };
 
