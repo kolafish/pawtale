@@ -1,7 +1,13 @@
-from pydantic import BaseModel
-from datetime import datetime, date
+from datetime import date, datetime
+
+from pydantic import BaseModel, Field, field_validator
 
 from app.domain.projects.types import ProjectType
+from app.domain.references import (
+    ReferenceType,
+    SettingReferenceType,
+    coerce_setting_reference_type,
+)
 
 
 # ── Project ──────────────────────────────────────────
@@ -40,7 +46,7 @@ class GroupResponse(BaseModel):
     id: str
     name: str
     sort_order: int = 0
-    documents: list[DocumentMeta] = []
+    documents: list[DocumentMeta] = Field(default_factory=list)
 
     class Config:
         from_attributes = True
@@ -48,7 +54,7 @@ class GroupResponse(BaseModel):
 
 class ReferenceItemBrief(BaseModel):
     id: str
-    type: str
+    type: ReferenceType
     name: str
     sort_order: int = 0
 
@@ -79,8 +85,8 @@ class ProjectResponse(BaseModel):
     word_count_target: int | None = None
     daily_word_goal: int | None = None
     total_word_count: int = 0
-    groups: list[GroupResponse] = []
-    references: list[ReferenceItemBrief] = []
+    groups: list[GroupResponse] = Field(default_factory=list)
+    references: list[ReferenceItemBrief] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
 
@@ -145,10 +151,10 @@ class DocumentReorderItem(BaseModel):
 # ── Reference Item ──────────────────────────────────
 
 class ReferenceItemCreate(BaseModel):
-    type: str  # character/location/note
+    type: ReferenceType
     name: str
     content: str = ""
-    metadata_json: dict = {}
+    metadata_json: dict = Field(default_factory=dict)
 
 
 class ReferenceItemUpdate(BaseModel):
@@ -160,10 +166,10 @@ class ReferenceItemUpdate(BaseModel):
 class ReferenceItemResponse(BaseModel):
     id: str
     project_id: str
-    type: str
+    type: ReferenceType
     name: str
     content: str
-    metadata_json: dict = {}
+    metadata_json: dict = Field(default_factory=dict)
     sort_order: int = 0
     created_at: datetime
     updated_at: datetime
@@ -245,7 +251,9 @@ class DocumentAIReviseMultiRequest(BaseModel):
     instruction: str
     selected_text: str | None = None
     full_content: str | None = None
-    models: list[str] = ["claude-opus-4", "claude-sonnet-4", "deepseek"]
+    models: list[str] = Field(
+        default_factory=lambda: ["claude-opus-4", "claude-sonnet-4", "deepseek"]
+    )
     debug: bool = False
 
 
@@ -274,7 +282,7 @@ class AnalyzedCharacter(BaseModel):
     name: str
     gender: str | None = None
     identity: str | None = None
-    personality: list[str] = []
+    personality: list[str] = Field(default_factory=list)
     appearance: str | None = None
     relationships: str | None = None
     summary: str | None = None
@@ -287,22 +295,27 @@ class AnalyzedOutline(BaseModel):
 
 class AnalyzedSetting(BaseModel):
     name: str
-    type: str = "note"  # location / note
+    type: SettingReferenceType = SettingReferenceType.NOTE
     content: str = ""
+
+    @field_validator("type", mode="before")
+    @classmethod
+    def normalize_type(cls, value):
+        return coerce_setting_reference_type(value)
 
 
 class ProjectAnalyzeResponse(BaseModel):
-    characters: list[AnalyzedCharacter] = []
-    outlines: list[AnalyzedOutline] = []
-    settings: list[AnalyzedSetting] = []
+    characters: list[AnalyzedCharacter] = Field(default_factory=list)
+    outlines: list[AnalyzedOutline] = Field(default_factory=list)
+    settings: list[AnalyzedSetting] = Field(default_factory=list)
     total_words_analyzed: int = 0
     debug_info: dict | None = None
 
 
 class AnalyzeApplyRequest(BaseModel):
-    characters: list[AnalyzedCharacter] = []
-    outlines: list[AnalyzedOutline] = []
-    settings: list[AnalyzedSetting] = []
+    characters: list[AnalyzedCharacter] = Field(default_factory=list)
+    outlines: list[AnalyzedOutline] = Field(default_factory=list)
+    settings: list[AnalyzedSetting] = Field(default_factory=list)
 
 
 class AnalyzeApplyResponse(BaseModel):

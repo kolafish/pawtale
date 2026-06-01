@@ -4,6 +4,7 @@ import logging
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domain.references import ReferenceType, coerce_setting_reference_type
 from app.models.projects import ReferenceItem
 from app.schemas.projects import (
     AnalyzeApplyRequest,
@@ -90,7 +91,7 @@ async def apply_analysis(
     for char in req.characters:
         ref = ReferenceItem(
             project_id=project_id,
-            type="character",
+            type=ReferenceType.CHARACTER.value,
             name=char.name,
             content=char.summary or "",
             metadata_json={
@@ -108,7 +109,7 @@ async def apply_analysis(
     for outline in req.outlines:
         ref = ReferenceItem(
             project_id=project_id,
-            type="outline",
+            type=ReferenceType.OUTLINE.value,
             name=outline.name,
             content=outline.content,
             metadata_json={},
@@ -120,7 +121,7 @@ async def apply_analysis(
     for setting in req.settings:
         ref = ReferenceItem(
             project_id=project_id,
-            type=setting.type if setting.type in ("location", "note") else "note",
+            type=coerce_setting_reference_type(setting.type).value,
             name=setting.name,
             content=setting.content,
             metadata_json={},

@@ -1,5 +1,7 @@
 import logging
 from abc import ABC, abstractmethod
+
+from app.domain.references import coerce_setting_reference_type
 from app.services.ai_debug import build_debug_info
 from app.services.json_utils import extract_json_payload, strip_json_trailing_commas, try_parse_json
 
@@ -560,9 +562,7 @@ C. 选项描述（可选）
                     })
             for setting in (parsed.get("settings") or [])[:8]:
                 if isinstance(setting, dict) and setting.get("name"):
-                    s_type = setting.get("type", "note")
-                    if s_type not in ("location", "note"):
-                        s_type = "note"
+                    s_type = coerce_setting_reference_type(setting.get("type")).value
                     result["settings"].append({
                         "name": str(setting["name"]).strip(),
                         "type": s_type,

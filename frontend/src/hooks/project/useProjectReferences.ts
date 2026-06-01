@@ -1,13 +1,7 @@
 import { projectsApi } from '../../api';
+import { DEFAULT_REFERENCE_NAMES, type ReferenceType } from '../../domain/references';
 import { useAppStore } from '../../stores/appStore';
 import type { Project } from '../../types';
-
-const DEFAULT_REFERENCE_NAMES: Record<string, string> = {
-  character: '新角色',
-  location: '新地点',
-  note: '新笔记',
-  outline: '新大纲',
-};
 
 interface UseProjectReferencesArgs {
   currentProject: Project | null;
@@ -22,12 +16,12 @@ export function useProjectReferences({
 }: UseProjectReferencesArgs) {
   const { setCurrentReferenceId } = useAppStore();
 
-  const createReference = async (type: string) => {
+  const createReference = async (type: ReferenceType) => {
     if (!currentProject) return;
     await saveCurrentIfDirty();
     const ref = await projectsApi.createReference(currentProject.id, {
       type,
-      name: DEFAULT_REFERENCE_NAMES[type] || '未命名',
+      name: DEFAULT_REFERENCE_NAMES[type],
     });
     await refreshProject();
     setCurrentReferenceId(ref.id);

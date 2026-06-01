@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { X, Loader2, User, Map, StickyNote, Check } from 'lucide-react';
 import { projectsApi } from '../api';
+import { REFERENCE_TYPE_LABELS } from '../domain/references';
 import type {
   ProjectAnalyzeResponse,
   AnalyzedCharacter,
@@ -252,7 +253,7 @@ export function AnalyzeDialog({ projectId, onClose, onComplete }: AnalyzeDialogP
                         <div className="flex-1 min-w-0">
                           <span className="text-sm font-medium text-gray-800">{s.name}</span>
                           <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-400">
-                            {s.type === 'location' ? '地点' : '笔记'}
+                            {REFERENCE_TYPE_LABELS[s.type]}
                           </span>
                           <p className="text-xs text-gray-500 mt-0.5 line-clamp-2">{s.content}</p>
                         </div>

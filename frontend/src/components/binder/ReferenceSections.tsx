@@ -1,4 +1,5 @@
 import { BookOpen, ChevronDown, ChevronRight, Map, Plus, StickyNote, Trash2, User } from 'lucide-react';
+import type { ReferenceType } from '../../domain/references';
 import type { ProjectProfile, ProjectReferenceSection, ReferenceSectionKey } from '../../domain/projectProfiles';
 import type { ReferenceItemBrief } from '../../types';
 
@@ -21,7 +22,7 @@ interface ReferenceSectionsProps {
   onCommitRename: (referenceId: string) => void;
   onSetEditValue: (value: string) => void;
   onCancelEdit: () => void;
-  onCreateReference: (type: string) => void;
+  onCreateReference: (type: ReferenceType) => void;
   onDeleteReference: (referenceId: string) => void;
 }
 
@@ -79,7 +80,7 @@ interface ReferenceSectionProps {
   onCommitRename: (referenceId: string) => void;
   onSetEditValue: (value: string) => void;
   onCancelEdit: () => void;
-  onCreateReference: (type: string) => void;
+  onCreateReference: (type: ReferenceType) => void;
   onDeleteReference: (referenceId: string) => void;
 }
 

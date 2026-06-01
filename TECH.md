@@ -55,6 +55,7 @@ backend/app/
 ├── migrations/
 │   └── auth.py
 ├── domain/
+│   ├── references.py
 │   ├── projects/
 │   │   ├── types.py
 │   │   └── templates.py
@@ -98,6 +99,7 @@ backend/app/
 - `services/projects/access.py` 统一做项目归属校验
 - `services/project_documents.py` 统一处理文档正文文件、数据库提交和回滚补偿
 - `domain/projects/templates.py` 按项目类型分发默认模板
+- `domain/references.py` 统一定义 Reference 类型和值清洗
 
 ## 前端结构
 
@@ -105,7 +107,9 @@ backend/app/
 frontend/src/
 ├── api/index.ts
 ├── constants/aiModels.ts
-├── domain/projectProfiles.ts
+├── domain/
+│   ├── projectProfiles.ts
+│   └── references.ts
 ├── stores/appStore.ts
 ├── types/index.ts
 ├── utils/
@@ -201,7 +205,7 @@ writing_sessions
 
 - `projects.type` 当前支持 `novel`、`article`、`memoir`
 - `documents.content` 保留数据库兼容字段，正文实际由 `content_storage.py` 存到 `data/projects/{project_id}/{document_id}.md`
-- `reference_items.type` 当前常用值为 `character`、`location`、`note`、`outline`
+- `reference_items.type` 由 `domain/references.py` 约束，当前支持 `character`、`location`、`note`、`outline`
 - `writing_sessions` 是写作记录能力，目前保留 API 和表结构
 
 ## API
