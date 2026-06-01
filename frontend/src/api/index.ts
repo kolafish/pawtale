@@ -6,7 +6,9 @@ import type {
   Scene,
   SceneAIGenerateRequest,
   SceneAIGenerateResponse,
+  AIDebugInfo,
   Project,
+  ProjectType,
   ProjectListItem,
   WritingDocument,
   ReferenceItem,
@@ -66,7 +68,7 @@ export const scenesApi = {
 // Projects API
 export const projectsApi = {
   list: () => api.get<ProjectListItem[]>('/projects').then(r => r.data),
-  create: (data: { title: string; description?: string; word_count_target?: number; daily_word_goal?: number }) =>
+  create: (data: { type: ProjectType; title: string; description?: string; word_count_target?: number; daily_word_goal?: number }) =>
     api.post<Project>('/projects', data).then(r => r.data),
   get: (id: string) => api.get<Project>(`/projects/${id}`).then(r => r.data),
   update: (id: string, data: { title?: string; description?: string; word_count_target?: number; daily_word_goal?: number }) =>
@@ -98,9 +100,9 @@ export const projectsApi = {
   // References
   listReferences: (projectId: string) =>
     api.get<ReferenceItem[]>(`/projects/${projectId}/references`).then(r => r.data),
-  createReference: (projectId: string, data: { type: string; name: string; content?: string; metadata_json?: Record<string, any> }) =>
+  createReference: (projectId: string, data: { type: string; name: string; content?: string; metadata_json?: Record<string, unknown> }) =>
     api.post<ReferenceItem>(`/projects/${projectId}/references`, data).then(r => r.data),
-  updateReference: (projectId: string, refId: string, data: { name?: string; content?: string; metadata_json?: Record<string, any> }) =>
+  updateReference: (projectId: string, refId: string, data: { name?: string; content?: string; metadata_json?: Record<string, unknown> }) =>
     api.put<ReferenceItem>(`/projects/${projectId}/references/${refId}`, data).then(r => r.data),
   deleteReference: (projectId: string, refId: string) =>
     api.delete(`/projects/${projectId}/references/${refId}`),
@@ -131,7 +133,7 @@ export const projectsApi = {
 
   // AI Continue
   aiContinue: (projectId: string, docId: string, data: { instruction?: string; ai_model?: string; debug?: boolean }) =>
-    api.post<{ document_id: string; content: string; generated_chunk: string; ai_model: string; debug_info?: any }>(
+    api.post<{ document_id: string; content: string; generated_chunk: string; ai_model: string; debug_info?: AIDebugInfo }>(
       `/projects/${projectId}/documents/${docId}/ai-continue`, data
     ).then(r => r.data),
 
@@ -149,7 +151,7 @@ export const projectsApi = {
       original_text: string;
       scope: string;
       ai_model: string;
-      debug_info?: any;
+      debug_info?: AIDebugInfo;
     }>(`/projects/${projectId}/documents/${docId}/ai-revise`, data).then(r => r.data),
 
   // Project Analysis

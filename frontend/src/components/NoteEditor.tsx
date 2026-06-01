@@ -1,6 +1,7 @@
 import { Save, Upload, Loader2 } from 'lucide-react';
 import type { ReferenceItem } from '../types';
 import type { RefSaveStatus } from '../hooks/useReferenceEditor';
+import { metadataString, metadataStringArray } from '../utils/metadata';
 
 interface NoteEditorProps {
   data: ReferenceItem;
@@ -58,7 +59,7 @@ export function NoteEditor({ data, saveStatus, onUpdate, onUpdateMeta, onSave, o
             <div>
               <label className="text-xs font-medium text-gray-500 mb-1 block">地点</label>
               <input
-                value={meta.location || ''}
+                value={metadataString(meta, 'location')}
                 onChange={(e) => onUpdateMeta('location', e.target.value)}
                 placeholder="具体位置..."
                 className="w-full px-3 py-2 text-sm rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-pink-400"
@@ -67,7 +68,7 @@ export function NoteEditor({ data, saveStatus, onUpdate, onUpdateMeta, onSave, o
             <div>
               <label className="text-xs font-medium text-gray-500 mb-1 block">时间/天气</label>
               <input
-                value={meta.time_weather || ''}
+                value={metadataString(meta, 'time_weather')}
                 onChange={(e) => onUpdateMeta('time_weather', e.target.value)}
                 placeholder="如：深夜、暴雨..."
                 className="w-full px-3 py-2 text-sm rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-pink-400"
@@ -77,7 +78,7 @@ export function NoteEditor({ data, saveStatus, onUpdate, onUpdateMeta, onSave, o
           <div>
             <label className="text-xs font-medium text-gray-500 mb-1 block">氛围关键词</label>
             <input
-              value={(meta.mood_keywords || []).join(', ')}
+              value={metadataStringArray(meta, 'mood_keywords').join(', ')}
               onChange={(e) => onUpdateMeta('mood_keywords', e.target.value.split(/[,，]/).map((s: string) => s.trim()).filter(Boolean))}
               placeholder="用逗号分隔，如：阴森、寂静..."
               className="w-full px-3 py-2 text-sm rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-pink-400"

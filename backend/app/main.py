@@ -15,6 +15,10 @@ async def _auto_migrate():
         doc_columns = {row[1] for row in result.fetchall()}
         if "word_count" not in doc_columns:
             await conn.execute(text("ALTER TABLE documents ADD COLUMN word_count INTEGER DEFAULT 0"))
+        result = await conn.execute(text("PRAGMA table_info(projects)"))
+        project_columns = {row[1] for row in result.fetchall()}
+        if "type" not in project_columns:
+            await conn.execute(text("ALTER TABLE projects ADD COLUMN type VARCHAR(20) NOT NULL DEFAULT 'novel'"))
     await migrate_auth_schema(engine)
 
 

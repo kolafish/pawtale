@@ -59,7 +59,7 @@ export interface AIDebugInfo {
   };
   response: {
     raw_text?: string;
-    raw_json?: Record<string, any> | any[] | string | null;
+    raw_json?: Record<string, unknown> | unknown[] | string | null;
   };
   meta: {
     truncated: boolean;
@@ -113,8 +113,11 @@ export interface SceneAIGenerateResponse {
 
 // ── Project-based writing types ──────────────────────
 
+export type ProjectType = 'novel' | 'article' | 'memoir';
+
 export interface Project {
   id: string;
+  type: ProjectType;
   title: string;
   description?: string;
   word_count_target?: number;
@@ -128,6 +131,7 @@ export interface Project {
 
 export interface ProjectListItem {
   id: string;
+  type: ProjectType;
   title: string;
   description?: string;
   word_count_target?: number;
@@ -184,7 +188,7 @@ export interface ReferenceItem {
   type: string;  // character/location/note
   name: string;
   content: string;
-  metadata_json: Record<string, any>;
+  metadata_json: Record<string, unknown>;
   sort_order: number;
   created_at: string;
   updated_at: string;

@@ -6,6 +6,7 @@ import { useAppStore } from '../stores/appStore';
 import type { Scene, SceneCandidate, AIDebugInfo } from '../types';
 import { AI_MODEL_OPTIONS } from '../constants/aiModels';
 import { AIDebugPanel } from './AIDebugPanel';
+import { getApiErrorDetail, getErrorDetailRecord } from '../utils/apiError';
 
 const CATEGORY_COLORS: Record<string, string> = {
   '初遇': 'bg-blue-100 text-blue-600',
@@ -423,11 +424,12 @@ function SceneAIGenerator({ onSave, onClose, defaultAiModel }: SceneAIGeneratorP
       setDebugInfo(data.debug_info || null);
     },
     onError: (error: unknown) => {
-      const detail = (error as any)?.response?.data?.detail;
+      const detail = getApiErrorDetail(error);
       const fallback = (error as Error)?.message || '场景生成失败，请稍后重试';
-      if (detail && typeof detail === 'object') {
-        setErrorMessage((detail as any).message || fallback);
-        setDebugInfo(((detail as any).debug_info as AIDebugInfo) || null);
+      const detailRecord = getErrorDetailRecord(error);
+      if (detailRecord) {
+        setErrorMessage(typeof detailRecord.message === 'string' ? detailRecord.message : fallback);
+        setDebugInfo((detailRecord.debug_info as AIDebugInfo | undefined) || null);
       } else {
         setErrorMessage(typeof detail === 'string' && detail ? detail : fallback);
         setDebugInfo(null);

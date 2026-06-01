@@ -1,6 +1,9 @@
 import pytest
-from datetime import date
 from unittest.mock import AsyncMock, patch
+
+
+def project_payload(title: str = "测试", project_type: str = "novel", **overrides):
+    return {"type": project_type, "title": title, **overrides}
 
 
 class TestProjectAPI:
@@ -12,23 +15,39 @@ class TestProjectAPI:
         assert response.json() == []
 
     async def test_create_project(self, client):
-        response = await client.post("/api/projects", json={"title": "我的小说"})
+        response = await client.post("/api/projects", json=project_payload("我的小说"))
         assert response.status_code == 201
         data = response.json()
+        assert data["type"] == "novel"
         assert data["title"] == "我的小说"
         assert len(data["groups"]) == 1
         assert data["groups"][0]["name"] == "第一卷"
         assert len(data["groups"][0]["documents"]) == 1
 
+    async def test_create_project_requires_type(self, client):
+        response = await client.post("/api/projects", json={"title": "缺少类型"})
+        assert response.status_code == 422
+
+    async def test_non_novel_projects_start_without_novel_template(self, client):
+        for project_type in ("article", "memoir"):
+            response = await client.post("/api/projects", json=project_payload(f"{project_type} 项目", project_type))
+            assert response.status_code == 201
+            data = response.json()
+            assert data["type"] == project_type
+            assert data["groups"] == []
+            assert data["references"] == []
+
     async def test_get_project(self, client):
-        create = await client.post("/api/projects", json={"title": "测试项目"})
+        create = await client.post("/api/projects", json=project_payload("测试项目"))
         pid = create.json()["id"]
         response = await client.get(f"/api/projects/{pid}")
         assert response.status_code == 200
-        assert response.json()["title"] == "测试项目"
+        data = response.json()
+        assert data["type"] == "novel"
+        assert data["title"] == "测试项目"
 
     async def test_update_project(self, client):
-        create = await client.post("/api/projects", json={"title": "原标题"})
+        create = await client.post("/api/projects", json=project_payload("原标题"))
         pid = create.json()["id"]
         response = await client.put(f"/api/projects/{pid}", json={"title": "新标题", "word_count_target": 50000})
         assert response.status_code == 200
@@ -37,7 +56,7 @@ class TestProjectAPI:
         assert data["word_count_target"] == 50000
 
     async def test_delete_project(self, client):
-        create = await client.post("/api/projects", json={"title": "将被删除"})
+        create = await client.post("/api/projects", json=project_payload("将被删除"))
         pid = create.json()["id"]
         response = await client.delete(f"/api/projects/{pid}")
         assert response.status_code == 204
@@ -53,7 +72,7 @@ class TestGroupAPI:
     """Document group tests."""
 
     async def _create_project(self, client) -> str:
-        resp = await client.post("/api/projects", json={"title": "测试"})
+        resp = await client.post("/api/projects", json=project_payload("测试"))
         return resp.json()["id"]
 
     async def test_create_group(self, client):
@@ -94,7 +113,7 @@ class TestDocumentAPI:
     """Document CRUD tests."""
 
     async def _create_project_and_group(self, client):
-        resp = await client.post("/api/projects", json={"title": "测试"})
+        resp = await client.post("/api/projects", json=project_payload("测试"))
         proj = resp.json()
         return proj["id"], proj["groups"][0]["id"]
 
@@ -156,7 +175,7 @@ class TestReferenceAPI:
     """Reference item tests."""
 
     async def _create_project(self, client) -> str:
-        resp = await client.post("/api/projects", json={"title": "测试"})
+        resp = await client.post("/api/projects", json=project_payload("测试"))
         return resp.json()["id"]
 
     async def test_create_reference(self, client):
@@ -220,7 +239,7 @@ class TestDocumentReferenceLinks:
     """Document-reference link tests."""
 
     async def _setup(self, client):
-        resp = await client.post("/api/projects", json={"title": "测试"})
+        resp = await client.post("/api/projects", json=project_payload("测试"))
         proj = resp.json()
         pid = proj["id"]
         did = proj["groups"][0]["documents"][0]["id"]
@@ -250,7 +269,7 @@ class TestWritingSession:
     """Writing session tests."""
 
     async def test_create_and_list_sessions(self, client):
-        resp = await client.post("/api/projects", json={"title": "测试"})
+        resp = await client.post("/api/projects", json=project_payload("测试"))
         pid = resp.json()["id"]
         create = await client.post(
             f"/api/projects/{pid}/sessions",
@@ -268,7 +287,7 @@ class TestExport:
     """Export tests."""
 
     async def test_export_project(self, client):
-        resp = await client.post("/api/projects", json={"title": "导出测试"})
+        resp = await client.post("/api/projects", json=project_payload("导出测试"))
         proj = resp.json()
         pid = proj["id"]
         did = proj["groups"][0]["documents"][0]["id"]
@@ -288,7 +307,7 @@ class TestAIContinue:
     """AI continue endpoint tests."""
 
     async def _setup(self, client):
-        resp = await client.post("/api/projects", json={"title": "AI测试"})
+        resp = await client.post("/api/projects", json=project_payload("AI测试"))
         proj = resp.json()
         pid = proj["id"]
         did = proj["groups"][0]["documents"][0]["id"]
@@ -336,7 +355,7 @@ class TestAIContinue:
         mock_get_service.assert_called_with("deepseek")
 
     async def test_ai_continue_empty_document(self, client):
-        resp = await client.post("/api/projects", json={"title": "空文档"})
+        resp = await client.post("/api/projects", json=project_payload("空文档"))
         proj = resp.json()
         pid = proj["id"]
         did = proj["groups"][0]["documents"][0]["id"]
@@ -348,7 +367,7 @@ class TestAIContinue:
         assert response.status_code == 400
 
     async def test_ai_continue_document_not_found(self, client):
-        resp = await client.post("/api/projects", json={"title": "测试"})
+        resp = await client.post("/api/projects", json=project_payload("测试"))
         pid = resp.json()["id"]
         response = await client.post(
             f"/api/projects/{pid}/documents/nonexistent/ai-continue",
@@ -361,7 +380,7 @@ class TestAIRevise:
     """AI revise endpoint tests."""
 
     async def _setup(self, client):
-        resp = await client.post("/api/projects", json={"title": "修改测试"})
+        resp = await client.post("/api/projects", json=project_payload("修改测试"))
         proj = resp.json()
         pid = proj["id"]
         did = proj["groups"][0]["documents"][0]["id"]
@@ -426,7 +445,7 @@ class TestAIRevise:
         assert response.status_code == 422
 
     async def test_ai_revise_document_not_found(self, client):
-        resp = await client.post("/api/projects", json={"title": "测试"})
+        resp = await client.post("/api/projects", json=project_payload("测试"))
         pid = resp.json()["id"]
         response = await client.post(
             f"/api/projects/{pid}/documents/nonexistent/ai-revise",
@@ -462,7 +481,7 @@ class TestAIRevise:
 @pytest.mark.asyncio
 class TestAIReviseMulti:
     async def _setup(self, client):
-        resp = await client.post("/api/projects", json={"title": "多模型测试"})
+        resp = await client.post("/api/projects", json=project_payload("多模型测试"))
         pid = resp.json()["id"]
         gid = resp.json()["groups"][0]["id"]
         did = resp.json()["groups"][0]["documents"][0]["id"]

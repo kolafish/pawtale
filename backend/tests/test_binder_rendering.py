@@ -69,6 +69,7 @@ async def sample_project(test_db, client):
 
     project = Project(
         user_id=user.id,
+        type="novel",
         title="测试项目",
         description="测试描述",
         word_count_target=50000,

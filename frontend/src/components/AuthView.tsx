@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { BookOpen, LogIn, RefreshCw, UserPlus } from 'lucide-react';
 import { authApi } from '../api';
 import type { User } from '../types';
+import { getErrorMessage } from '../utils/apiError';
 
 interface AuthViewProps {
   onAuthenticated: (user: User) => void;
@@ -31,8 +32,8 @@ export function AuthView({ onAuthenticated }: AuthViewProps) {
           display_name: displayName.trim() || undefined,
         });
       onAuthenticated(result.user);
-    } catch (err: any) {
-      setError(err?.response?.data?.detail || '登录失败，请检查邮箱和密码');
+    } catch (err: unknown) {
+      setError(getErrorMessage(err, '登录失败，请检查邮箱和密码'));
     } finally {
       setIsSubmitting(false);
     }

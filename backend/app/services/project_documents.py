@@ -57,6 +57,7 @@ def group_response(group: DocumentGroup) -> GroupResponse:
 def project_response(project: Project) -> ProjectResponse:
     return ProjectResponse(
         id=project.id,
+        type=project.type,
         title=project.title,
         description=project.description,
         word_count_target=project.word_count_target,
