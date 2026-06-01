@@ -1,17 +1,15 @@
-import uuid
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import selectinload
 from app.auth import get_current_user
 from app.database import get_db
-from app.models import Story, Character, Scene, StoryCharacter, StoryOutline, StoryWorkspace
+from app.models import Story, Character, Scene, StoryCharacter, StoryOutline, StoryWorkspace, User
 from app.schemas import (
     StoryCreate, StoryResponse, StoryUpdate,
     StoryGenerateRequest, StoryBranchRequest, StoryGenerateResponse,
     StoryNodeUpdateRequest, StoryNodeRegenerateRequest, StoryNodeReviseRequest, StoryExportResponse,
     StorySwitchSceneRequest, StoryUpdateCharactersRequest,
-    PresentCharacter,
     RegenerateChoicesRequest, RegenerateChoicesResponse,
     PolishChaptersRequest, PolishChaptersResponse,
     StoryWorkspaceCreateRequest, StoryWorkspaceUpdateRequest,
@@ -22,6 +20,22 @@ from app.services import get_ai_service
 from app.services.ai_debug import build_debug_info
 
 router = APIRouter(prefix="/api/stories", tags=["stories"], dependencies=[Depends(get_current_user)])
+
+
+def _owned_story_filter(story_id: str, user_id: str):
+    return Story.id == story_id, Story.user_id == user_id
+
+
+def _owned_outline_filter(outline_id: str, user_id: str):
+    return StoryOutline.id == outline_id, StoryOutline.user_id == user_id
+
+
+def _accessible_character_filter(user_id: str):
+    return or_(Character.user_id == user_id, Character.is_preset == True)
+
+
+def _accessible_scene_filter(user_id: str):
+    return or_(Scene.user_id == user_id, Scene.is_preset == True)
 
 
 def _default_story_nodes(initial_content: str = "") -> dict:
@@ -131,10 +145,14 @@ def _build_extract_fallback_debug_info(
 
 
 @router.get("", response_model=list[StoryResponse])
-async def get_stories(db: AsyncSession = Depends(get_db)):
+async def get_stories(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """获取所有故事"""
     result = await db.execute(
         select(Story)
+        .where(Story.user_id == current_user.id)
         .options(selectinload(Story.characters))
         .order_by(Story.updated_at.desc())
     )
@@ -146,10 +164,12 @@ async def get_stories(db: AsyncSession = Depends(get_db)):
 async def create_story_workspace(
     request: StoryWorkspaceCreateRequest,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """创建编辑器优先的故事工作区（无需预设角色/场景/大纲）"""
     initial_content = request.content.strip()
     story = Story(
+        user_id=current_user.id,
         title=(request.title or "未命名作品").strip() or "未命名作品",
         mood=request.mood,
         writing_style=request.writing_style,
@@ -180,9 +200,13 @@ async def create_story_workspace(
 
 
 @router.get("/{story_id}/workspace", response_model=StoryWorkspaceResponse)
-async def get_story_workspace(story_id: str, db: AsyncSession = Depends(get_db)):
+async def get_story_workspace(
+    story_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """获取编辑器工作区"""
-    result = await db.execute(select(Story).where(Story.id == story_id))
+    result = await db.execute(select(Story).where(*_owned_story_filter(story_id, current_user.id)))
     story = result.scalar_one_or_none()
     if not story:
         raise HTTPException(status_code=404, detail="故事不存在")
@@ -216,9 +240,10 @@ async def update_story_workspace(
     story_id: str,
     request: StoryWorkspaceUpdateRequest,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """更新工作区文本和故事基础设置"""
-    result = await db.execute(select(Story).where(Story.id == story_id))
+    result = await db.execute(select(Story).where(*_owned_story_filter(story_id, current_user.id)))
     story = result.scalar_one_or_none()
     if not story:
         raise HTTPException(status_code=404, detail="故事不存在")
@@ -306,9 +331,10 @@ async def continue_story_workspace(
     story_id: str,
     request: StoryWorkspaceAIContinueRequest,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """基于当前编辑文本进行 AI 续写"""
-    result = await db.execute(select(Story).where(Story.id == story_id))
+    result = await db.execute(select(Story).where(*_owned_story_filter(story_id, current_user.id)))
     story = result.scalar_one_or_none()
     if not story:
         raise HTTPException(status_code=404, detail="故事不存在")
@@ -435,9 +461,10 @@ async def extract_story_workspace(
     story_id: str,
     request: StoryWorkspaceExtractRequest,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """从编辑内容自动提炼角色/场景/情节大纲"""
-    result = await db.execute(select(Story).where(Story.id == story_id))
+    result = await db.execute(select(Story).where(*_owned_story_filter(story_id, current_user.id)))
     story = result.scalar_one_or_none()
     if not story:
         raise HTTPException(status_code=404, detail="故事不存在")
@@ -508,9 +535,10 @@ async def update_story_workspace_extracted(
     story_id: str,
     request: StoryWorkspaceExtractionUpdateRequest,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """手工修改提炼出的角色/场景/大纲信息"""
-    result = await db.execute(select(Story).where(Story.id == story_id))
+    result = await db.execute(select(Story).where(*_owned_story_filter(story_id, current_user.id)))
     story = result.scalar_one_or_none()
     if not story:
         raise HTTPException(status_code=404, detail="故事不存在")
@@ -555,12 +583,15 @@ async def update_story_workspace_extracted(
 async def generate_story(
     request: StoryGenerateRequest,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """生成新故事（首段）"""
     # 获取角色信息（包含深度字段）
     characters = []
     for char_id in request.character_ids:
-        result = await db.execute(select(Character).where(Character.id == char_id))
+        result = await db.execute(
+            select(Character).where(Character.id == char_id, _accessible_character_filter(current_user.id))
+        )
         char = result.scalar_one_or_none()
         if not char:
             raise HTTPException(status_code=404, detail=f"角色 {char_id} 不存在")
@@ -577,7 +608,9 @@ async def generate_story(
         })
 
     # 获取场景信息（包含增强字段）
-    result = await db.execute(select(Scene).where(Scene.id == request.scene_id))
+    result = await db.execute(
+        select(Scene).where(Scene.id == request.scene_id, _accessible_scene_filter(current_user.id))
+    )
     scene = result.scalar_one_or_none()
     if not scene:
         raise HTTPException(status_code=404, detail="场景不存在")
@@ -598,7 +631,7 @@ async def generate_story(
     outline = None
     if request.outline_id:
         result = await db.execute(
-            select(StoryOutline).where(StoryOutline.id == request.outline_id)
+            select(StoryOutline).where(*_owned_outline_filter(request.outline_id, current_user.id))
         )
         outline = result.scalar_one_or_none()
         if outline:
@@ -652,6 +685,7 @@ async def generate_story(
         title = f"{char_names}的{scene.name}"
 
     story = Story(
+        user_id=current_user.id,
         title=title,
         scene_id=request.scene_id,
         mood=request.mood,
@@ -694,13 +728,14 @@ async def choose_branch(
     story_id: str,
     request: StoryBranchRequest,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """选择分支继续生成（支持自定义方向）"""
     # 获取故事
     result = await db.execute(
         select(Story)
         .options(selectinload(Story.characters))
-        .where(Story.id == story_id)
+        .where(*_owned_story_filter(story_id, current_user.id))
     )
     story = result.scalar_one_or_none()
     if not story:
@@ -761,7 +796,9 @@ async def choose_branch(
             "life_goal": char.life_goal,
         })
 
-    result = await db.execute(select(Scene).where(Scene.id == story.scene_id))
+    result = await db.execute(
+        select(Scene).where(Scene.id == story.scene_id, _accessible_scene_filter(current_user.id))
+    )
     scene = result.scalar_one_or_none()
     scene_dict = {
         "name": scene.name if scene else "未知场景",
@@ -777,7 +814,7 @@ async def choose_branch(
     outline_context = None
     if story.outline_id:
         result = await db.execute(
-            select(StoryOutline).where(StoryOutline.id == story.outline_id)
+            select(StoryOutline).where(*_owned_outline_filter(story.outline_id, current_user.id))
         )
         outline = result.scalar_one_or_none()
         if outline:
@@ -854,12 +891,16 @@ async def choose_branch(
 
 
 @router.get("/{story_id}", response_model=StoryResponse)
-async def get_story(story_id: str, db: AsyncSession = Depends(get_db)):
+async def get_story(
+    story_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """获取故事详情"""
     result = await db.execute(
         select(Story)
         .options(selectinload(Story.characters))
-        .where(Story.id == story_id)
+        .where(*_owned_story_filter(story_id, current_user.id))
     )
     story = result.scalar_one_or_none()
     if not story:
@@ -872,12 +913,13 @@ async def update_story(
     story_id: str,
     request: StoryUpdate,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """更新故事基本信息"""
     result = await db.execute(
         select(Story)
         .options(selectinload(Story.characters))
-        .where(Story.id == story_id)
+        .where(*_owned_story_filter(story_id, current_user.id))
     )
     story = result.scalar_one_or_none()
     if not story:
@@ -895,7 +937,9 @@ async def update_story(
         story.ai_model = request.ai_model
     if request.scene_id is not None:
         if request.scene_id:
-            scene_result = await db.execute(select(Scene).where(Scene.id == request.scene_id))
+            scene_result = await db.execute(
+                select(Scene).where(Scene.id == request.scene_id, _accessible_scene_filter(current_user.id))
+            )
             scene = scene_result.scalar_one_or_none()
             if not scene:
                 raise HTTPException(status_code=404, detail="场景不存在")
@@ -905,7 +949,7 @@ async def update_story(
     if request.outline_id is not None:
         if request.outline_id:
             outline_result = await db.execute(
-                select(StoryOutline).where(StoryOutline.id == request.outline_id)
+                select(StoryOutline).where(*_owned_outline_filter(request.outline_id, current_user.id))
             )
             outline = outline_result.scalar_one_or_none()
             if not outline:
@@ -920,9 +964,13 @@ async def update_story(
 
 
 @router.put("/{story_id}/favorite")
-async def toggle_favorite(story_id: str, db: AsyncSession = Depends(get_db)):
+async def toggle_favorite(
+    story_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """切换收藏状态"""
-    result = await db.execute(select(Story).where(Story.id == story_id))
+    result = await db.execute(select(Story).where(*_owned_story_filter(story_id, current_user.id)))
     story = result.scalar_one_or_none()
     if not story:
         raise HTTPException(status_code=404, detail="故事不存在")
@@ -933,9 +981,13 @@ async def toggle_favorite(story_id: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.delete("/{story_id}")
-async def delete_story(story_id: str, db: AsyncSession = Depends(get_db)):
+async def delete_story(
+    story_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """删除故事"""
-    result = await db.execute(select(Story).where(Story.id == story_id))
+    result = await db.execute(select(Story).where(*_owned_story_filter(story_id, current_user.id)))
     story = result.scalar_one_or_none()
     if not story:
         raise HTTPException(status_code=404, detail="故事不存在")
@@ -950,9 +1002,10 @@ async def goto_node(
     story_id: str,
     node_id: str,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """跳转到指定节点（回溯功能）"""
-    result = await db.execute(select(Story).where(Story.id == story_id))
+    result = await db.execute(select(Story).where(*_owned_story_filter(story_id, current_user.id)))
     story = result.scalar_one_or_none()
     if not story:
         raise HTTPException(status_code=404, detail="故事不存在")
@@ -992,9 +1045,10 @@ async def update_node(
     node_id: str,
     request: StoryNodeUpdateRequest,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """编辑单个节点"""
-    result = await db.execute(select(Story).where(Story.id == story_id))
+    result = await db.execute(select(Story).where(*_owned_story_filter(story_id, current_user.id)))
     story = result.scalar_one_or_none()
     if not story:
         raise HTTPException(status_code=404, detail="故事不存在")
@@ -1031,9 +1085,10 @@ async def delete_node(
     story_id: str,
     node_id: str,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """删除节点及其所有子节点"""
-    result = await db.execute(select(Story).where(Story.id == story_id))
+    result = await db.execute(select(Story).where(*_owned_story_filter(story_id, current_user.id)))
     story = result.scalar_one_or_none()
     if not story:
         raise HTTPException(status_code=404, detail="故事不存在")
@@ -1102,12 +1157,13 @@ async def regenerate_node(
     node_id: str,
     request: StoryNodeRegenerateRequest | None = None,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """重新生成节点内容"""
     result = await db.execute(
         select(Story)
         .options(selectinload(Story.characters))
-        .where(Story.id == story_id)
+        .where(*_owned_story_filter(story_id, current_user.id))
     )
     story = result.scalar_one_or_none()
     if not story:
@@ -1127,7 +1183,9 @@ async def regenerate_node(
             "background": char.background,
         })
 
-    result = await db.execute(select(Scene).where(Scene.id == story.scene_id))
+    result = await db.execute(
+        select(Scene).where(Scene.id == story.scene_id, _accessible_scene_filter(current_user.id))
+    )
     scene = result.scalar_one_or_none()
     scene_dict = {
         "name": scene.name if scene else "未知场景",
@@ -1198,9 +1256,10 @@ async def regenerate_node(
 async def export_story(
     story_id: str,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """导出故事全文（按当前路径）"""
-    result = await db.execute(select(Story).where(Story.id == story_id))
+    result = await db.execute(select(Story).where(*_owned_story_filter(story_id, current_user.id)))
     story = result.scalar_one_or_none()
     if not story:
         raise HTTPException(status_code=404, detail="故事不存在")
@@ -1239,12 +1298,13 @@ async def revise_node(
     node_id: str,
     request: StoryNodeReviseRequest,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """根据修改意见重新生成节点内容"""
     result = await db.execute(
         select(Story)
         .options(selectinload(Story.characters))
-        .where(Story.id == story_id)
+        .where(*_owned_story_filter(story_id, current_user.id))
     )
     story = result.scalar_one_or_none()
     if not story:
@@ -1318,20 +1378,23 @@ async def switch_scene(
     story_id: str,
     request: StorySwitchSceneRequest,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """切换故事场景并生成新章节"""
     # 获取故事
     result = await db.execute(
         select(Story)
         .options(selectinload(Story.characters))
-        .where(Story.id == story_id)
+        .where(*_owned_story_filter(story_id, current_user.id))
     )
     story = result.scalar_one_or_none()
     if not story:
         raise HTTPException(status_code=404, detail="故事不存在")
 
     # 获取新场景
-    result = await db.execute(select(Scene).where(Scene.id == request.scene_id))
+    result = await db.execute(
+        select(Scene).where(Scene.id == request.scene_id, _accessible_scene_filter(current_user.id))
+    )
     new_scene = result.scalar_one_or_none()
     if not new_scene:
         raise HTTPException(status_code=404, detail="场景不存在")
@@ -1453,13 +1516,14 @@ async def update_story_characters(
     story_id: str,
     request: StoryUpdateCharactersRequest,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """添加或移除故事角色"""
     # 获取故事
     result = await db.execute(
         select(Story)
         .options(selectinload(Story.characters))
-        .where(Story.id == story_id)
+        .where(*_owned_story_filter(story_id, current_user.id))
     )
     story = result.scalar_one_or_none()
     if not story:
@@ -1480,7 +1544,9 @@ async def update_story_characters(
     # 添加角色
     for char_id in request.add_character_ids:
         # 验证角色存在
-        result = await db.execute(select(Character).where(Character.id == char_id))
+        result = await db.execute(
+            select(Character).where(Character.id == char_id, _accessible_character_filter(current_user.id))
+        )
         char = result.scalar_one_or_none()
         if not char:
             raise HTTPException(status_code=404, detail=f"角色 {char_id} 不存在")
@@ -1502,7 +1568,7 @@ async def update_story_characters(
     result = await db.execute(
         select(Story)
         .options(selectinload(Story.characters))
-        .where(Story.id == story_id)
+        .where(*_owned_story_filter(story_id, current_user.id))
     )
     return result.scalar_one()
 
@@ -1517,13 +1583,14 @@ async def regenerate_choices(
     node_id: str,
     request: RegenerateChoicesRequest,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """重新生成当前节点的分支选项"""
     # 获取故事
     result = await db.execute(
         select(Story)
         .options(selectinload(Story.characters))
-        .where(Story.id == story_id)
+        .where(*_owned_story_filter(story_id, current_user.id))
     )
     story = result.scalar_one_or_none()
     if not story:
@@ -1598,13 +1665,14 @@ async def polish_chapters(
     story_id: str,
     request: PolishChaptersRequest,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """整体润色选中的章节"""
     # 获取故事
     result = await db.execute(
         select(Story)
         .options(selectinload(Story.characters))
-        .where(Story.id == story_id)
+        .where(*_owned_story_filter(story_id, current_user.id))
     )
     story = result.scalar_one_or_none()
     if not story:
@@ -1690,9 +1758,10 @@ async def apply_polish(
     story_id: str,
     request: PolishChaptersResponse,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """应用润色结果到故事"""
-    result = await db.execute(select(Story).where(Story.id == story_id))
+    result = await db.execute(select(Story).where(*_owned_story_filter(story_id, current_user.id)))
     story = result.scalar_one_or_none()
     if not story:
         raise HTTPException(status_code=404, detail="故事不存在")
