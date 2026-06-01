@@ -241,7 +241,8 @@ Pawtale/
 │       │   ├── useProjectState.ts  # 项目状态 facade
 │       │   ├── project/
 │       │   │   ├── useDocumentDraft.ts # 文档草稿状态（加载、快照、auto-save、Cmd+S）
-│       │   │   └── useProjectStructure.ts # 项目结构操作（分组/文档 CRUD 和排序）
+│       │   │   ├── useProjectStructure.ts # 项目结构操作（分组/文档 CRUD 和排序）
+│       │   │   └── useProjectReferences.ts # 项目资料操作（新增/重命名/删除/选中）
 │       │   ├── useAIRevision.ts    # AI 修改 Hook（选段/全文修改，diff 对比）
 │       │   └── useReferenceEditor.ts # 参考资料编辑 Hook（auto-save, 同步/导出全局库）
 │       ├── stores/
