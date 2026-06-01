@@ -1,11 +1,10 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { ChevronRight, FileText, BookOpen, FolderOpen, Trash2, Download, X } from 'lucide-react';
+import { ChevronRight, FileText, FolderOpen, Download, X } from 'lucide-react';
 import { projectsApi } from '../api';
-import { ReferenceSheet } from './ReferenceSheet';
-import type { ReferenceItem, Project } from '../types';
+import type { Project } from '../types';
 
-type InspectorTab = 'document' | 'references' | 'project';
+type InspectorTab = 'document' | 'project';
 
 interface InspectorProps {
   project: Project;
@@ -36,12 +35,11 @@ export function Inspector({
 }: InspectorProps) {
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<InspectorTab>('document');
-  const [editingRef, setEditingRef] = useState<ReferenceItem | null>(null);
 
-  const { data: references = [], refetch: refetchRefs } = useQuery({
+  const { data: references = [] } = useQuery({
     queryKey: ['references', project.id],
     queryFn: () => projectsApi.listReferences(project.id),
-    enabled: open,
+    enabled: open && tab === 'document',
   });
 
   const { data: docRefs = [], refetch: refetchDocRefs } = useQuery({
@@ -52,32 +50,8 @@ export function Inspector({
 
   const tabs: { id: InspectorTab; label: string; icon: typeof FileText }[] = [
     { id: 'document', label: '文档', icon: FileText },
-    { id: 'references', label: '资料', icon: BookOpen },
     { id: 'project', label: '项目', icon: FolderOpen },
   ];
-
-  const handleCreateRef = async (type: string) => {
-    const name = type === 'character' ? '新角色' : type === 'location' ? '新地点' : '新笔记';
-    const ref = await projectsApi.createReference(project.id, { type, name });
-    setEditingRef(ref);
-    refetchRefs();
-  };
-
-  const handleUpdateRef = async (ref: ReferenceItem) => {
-    await projectsApi.updateReference(project.id, ref.id, {
-      name: ref.name,
-      content: ref.content,
-      metadata_json: ref.metadata_json,
-    });
-    refetchRefs();
-    setEditingRef(null);
-  };
-
-  const handleDeleteRef = async (refId: string) => {
-    await projectsApi.deleteReference(project.id, refId);
-    refetchRefs();
-    if (editingRef?.id === refId) setEditingRef(null);
-  };
 
   const toggleDocRef = async (refId: string) => {
     if (!currentDocumentId) return;
@@ -202,69 +176,6 @@ export function Inspector({
                 </select>
               )}
             </div>
-          </div>
-        )}
-
-        {tab === 'references' && (
-          <div className="space-y-3">
-            {editingRef ? (
-              <ReferenceSheet
-                ref_item={editingRef}
-                onChange={setEditingRef}
-                onSave={() => handleUpdateRef(editingRef)}
-                onCancel={() => setEditingRef(null)}
-              />
-            ) : (
-              <>
-                <div className="flex items-center gap-2 mb-2">
-                  <button
-                    onClick={() => handleCreateRef('character')}
-                    className="flex-1 text-xs px-2 py-1.5 rounded border border-gray-200 hover:bg-gray-50"
-                  >
-                    + 角色
-                  </button>
-                  <button
-                    onClick={() => handleCreateRef('location')}
-                    className="flex-1 text-xs px-2 py-1.5 rounded border border-gray-200 hover:bg-gray-50"
-                  >
-                    + 地点
-                  </button>
-                  <button
-                    onClick={() => handleCreateRef('note')}
-                    className="flex-1 text-xs px-2 py-1.5 rounded border border-gray-200 hover:bg-gray-50"
-                  >
-                    + 笔记
-                  </button>
-                </div>
-                {references.length === 0 ? (
-                  <p className="text-xs text-gray-400 text-center py-4">暂无参考资料</p>
-                ) : (
-                  <div className="space-y-1">
-                    {references.map((ref) => (
-                      <div
-                        key={ref.id}
-                        className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-gray-50 cursor-pointer group"
-                        onClick={() => setEditingRef(ref)}
-                      >
-                        <span className="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-500">
-                          {ref.type === 'character' ? '角色' : ref.type === 'location' ? '地点' : '笔记'}
-                        </span>
-                        <span className="flex-1 text-sm text-gray-700 truncate">{ref.name}</span>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleDeleteRef(ref.id);
-                          }}
-                          className="opacity-0 group-hover:opacity-100 p-0.5 text-gray-400 hover:text-red-500"
-                        >
-                          <Trash2 size={12} />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </>
-            )}
           </div>
         )}
 
