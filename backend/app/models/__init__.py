@@ -9,6 +9,7 @@ from app.models.models import (
     OutlineCharacter,
     OutlineScene,
 )
+from app.models.users import User
 from app.models.projects import (
     Project,
     DocumentGroup,
@@ -20,6 +21,7 @@ from app.models.projects import (
 
 __all__ = [
     "Base",
+    "User",
     "Character",
     "Scene",
     "Story",

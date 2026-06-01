@@ -4,6 +4,7 @@ import { useProjectState } from '../hooks/useProjectState';
 import { useAIRevision } from '../hooks/useAIRevision';
 import { useReferenceEditor } from '../hooks/useReferenceEditor';
 import { AI_MODEL_OPTIONS } from '../constants/aiModels';
+import { FileText } from 'lucide-react';
 import { ProjectHome } from './ProjectHome';
 import { Binder } from './Binder';
 import { EditorMain } from './EditorMain';
@@ -20,6 +21,7 @@ export function WritingWorkspace() {
   const revision = useAIRevision();
   const refEditor = useReferenceEditor();
   const [showAnalyze, setShowAnalyze] = useState(false);
+  const [mobileBinderOpen, setMobileBinderOpen] = useState(false);
 
   // Sync reviewing state to pause auto-save during diff review
   useEffect(() => {
@@ -147,28 +149,57 @@ export function WritingWorkspace() {
     );
   };
 
+  const handleSelectDocument = (docId: string) => {
+    ps.switchDocument(docId);
+    setMobileBinderOpen(false);
+  };
+
+  const handleSelectReference = (refId: string) => {
+    ps.selectReference(refId);
+    setMobileBinderOpen(false);
+  };
+
   return (
-    <div className="h-full w-full flex">
-      <Binder
-        project={currentProject}
-        currentDocumentId={ps.currentDocumentId}
-        currentReferenceId={currentReferenceId}
-        onSelectDocument={ps.switchDocument}
-        onSelectReference={ps.selectReference}
-        onCreateGroup={ps.createGroup}
-        onRenameGroup={ps.renameGroup}
-        onDeleteGroup={ps.deleteGroup}
-        onCreateDocument={ps.createDocument}
-        onRenameDocument={ps.renameDocument}
-        onDeleteDocument={ps.deleteDocument}
-        onReorderGroups={ps.reorderGroups}
-        onReorderDocuments={ps.reorderDocuments}
-        onCreateReference={ps.createReference}
-        onRenameReference={ps.renameReference}
-        onDeleteReference={ps.deleteReference}
-        onAnalyzeProject={() => setShowAnalyze(true)}
-      />
+    <div className="h-full w-full flex relative">
+      {/* Mobile Binder overlay */}
+      {mobileBinderOpen && (
+        <div
+          className="md:hidden fixed inset-0 bg-black/30 z-40"
+          onClick={() => setMobileBinderOpen(false)}
+        />
+      )}
+      <div className={`
+        ${mobileBinderOpen ? 'fixed inset-y-0 left-0 z-50' : 'hidden'}
+        md:relative md:block
+      `}>
+        <Binder
+          project={currentProject}
+          currentDocumentId={ps.currentDocumentId}
+          currentReferenceId={currentReferenceId}
+          onSelectDocument={handleSelectDocument}
+          onSelectReference={handleSelectReference}
+          onCreateGroup={ps.createGroup}
+          onRenameGroup={ps.renameGroup}
+          onDeleteGroup={ps.deleteGroup}
+          onCreateDocument={ps.createDocument}
+          onRenameDocument={ps.renameDocument}
+          onDeleteDocument={ps.deleteDocument}
+          onReorderGroups={ps.reorderGroups}
+          onReorderDocuments={ps.reorderDocuments}
+          onCreateReference={ps.createReference}
+          onRenameReference={ps.renameReference}
+          onDeleteReference={ps.deleteReference}
+          onAnalyzeProject={() => setShowAnalyze(true)}
+        />
+      </div>
       <div className="flex-1 min-w-0 relative">
+        {/* Mobile Binder toggle button */}
+        <button
+          onClick={() => setMobileBinderOpen(true)}
+          className="md:hidden fixed bottom-4 left-4 z-30 w-12 h-12 rounded-full bg-pink-500 text-white shadow-lg flex items-center justify-center"
+        >
+          <FileText size={20} />
+        </button>
         {renderEditor()}
         {ps.currentDocumentId && (
           <Inspector

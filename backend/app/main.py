@@ -3,7 +3,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from app.database import init_db, engine
-from app.routers import characters_router, scenes_router, stories_router, outlines_router, projects_router
+from app.migrations.auth import migrate_auth_schema
+from app.routers import auth_router, characters_router, scenes_router, stories_router, outlines_router, projects_router
 
 
 async def _auto_migrate():
@@ -20,6 +21,7 @@ async def _auto_migrate():
         doc_columns = {row[1] for row in result.fetchall()}
         if "word_count" not in doc_columns:
             await conn.execute(text("ALTER TABLE documents ADD COLUMN word_count INTEGER DEFAULT 0"))
+    await migrate_auth_schema(engine)
 
 
 @asynccontextmanager
@@ -47,6 +49,7 @@ app.add_middleware(
 )
 
 # 注册路由
+app.include_router(auth_router)
 app.include_router(characters_router)
 app.include_router(scenes_router)
 app.include_router(stories_router)

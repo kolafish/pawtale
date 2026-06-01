@@ -24,8 +24,10 @@ from app.schemas.schemas import (
     StoryWorkspaceExtractRequest, StoryWorkspaceAIContinueRequest, StoryWorkspaceExtractionUpdateRequest,
     StoryWorkspaceResponse, StoryWorkspaceAIContinueResponse, StoryWorkspaceExtractResponse,
 )
+from app.schemas.auth import AuthLoginRequest, AuthRegisterRequest, AuthResponse, UserResponse
 
 __all__ = [
+    "AuthLoginRequest", "AuthRegisterRequest", "AuthResponse", "UserResponse",
     "AIDebugRequestInfo", "AIDebugResponseInfo", "AIDebugMetaInfo", "AIDebugInfo",
     "CharacterBase", "CharacterCreate", "CharacterUpdate", "CharacterResponse",
     "CharacterAutoCompleteRequest", "CharacterAutoCompleteResponse",

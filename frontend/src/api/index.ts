@@ -1,5 +1,6 @@
 import axios from 'axios';
 import type {
+  User,
   Character,
   CharacterAutoComplete,
   Scene,
@@ -56,7 +57,18 @@ import type {
 
 const api = axios.create({
   baseURL: '/api',
+  withCredentials: true,
 });
+
+// Auth API
+export const authApi = {
+  me: () => api.get<User>('/auth/me').then(res => res.data),
+  login: (data: { email: string; password: string }) =>
+    api.post<{ user: User }>('/auth/login', data).then(res => res.data),
+  register: (data: { email: string; password: string; display_name?: string }) =>
+    api.post<{ user: User }>('/auth/register', data).then(res => res.data),
+  logout: () => api.post('/auth/logout'),
+};
 
 // Characters API
 export const charactersApi = {

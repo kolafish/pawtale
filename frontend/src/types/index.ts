@@ -1,3 +1,11 @@
+export interface User {
+  id: string;
+  email: string;
+  display_name: string;
+  avatar_url?: string;
+  created_at: string;
+}
+
 export interface Character {
   id: string;
   name: string;

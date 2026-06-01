@@ -11,6 +11,9 @@ class Settings(BaseSettings):
     app_env: str = "development"
     app_secret_key: str = "dev-secret-key-change-in-production"
     database_url: str = f"sqlite+aiosqlite:///{DATA_DIR}/pawtale.db"
+    local_default_user_email: str = "local@pawtale.local"
+    local_default_user_password: str = "pawtale-local"
+    local_default_user_display_name: str = "本地作者"
 
     # AI API Keys
     deepseek_api_key: str = ""

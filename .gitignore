@@ -26,4 +26,5 @@ frontend/.env
 data/pawtale.db
 data/pawtale.db.bak_*
 data/projects/
+data/backups/
 backend/data/

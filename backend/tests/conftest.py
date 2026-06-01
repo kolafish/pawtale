@@ -33,8 +33,8 @@ async def test_db():
 
 
 @pytest_asyncio.fixture
-async def client(test_db, tmp_path):
-    """创建测试客户端（文件存储重定向到临时目录）"""
+async def anonymous_client(test_db, tmp_path):
+    """创建未登录测试客户端（文件存储重定向到临时目录）"""
     async def override_get_db():
         yield test_db
 
@@ -46,3 +46,18 @@ async def client(test_db, tmp_path):
             yield ac
 
     app.dependency_overrides.clear()
+
+
+@pytest_asyncio.fixture
+async def client(anonymous_client):
+    """创建已登录测试客户端，保持既有业务测试聚焦业务行为。"""
+    response = await anonymous_client.post(
+        "/api/auth/register",
+        json={
+            "email": "tester@example.com",
+            "password": "password123",
+            "display_name": "测试用户",
+        },
+    )
+    assert response.status_code == 201
+    yield anonymous_client

@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
+from app.auth import get_current_user
 from app.database import get_db
 from app.models import (
     StoryOutline, OutlineCharacter, OutlineScene,
@@ -19,7 +20,7 @@ from app.schemas import (
 )
 from app.services import get_ai_service
 
-router = APIRouter(prefix="/api/outlines", tags=["outlines"])
+router = APIRouter(prefix="/api/outlines", tags=["outlines"], dependencies=[Depends(get_current_user)])
 
 
 # 预设模板数据

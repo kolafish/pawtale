@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
+from app.auth import get_current_user
 from app.database import get_db
 from app.models import Story, Character, Scene, StoryCharacter, StoryOutline, StoryWorkspace
 from app.schemas import (
@@ -20,7 +21,7 @@ from app.schemas import (
 from app.services import get_ai_service
 from app.services.ai_debug import build_debug_info
 
-router = APIRouter(prefix="/api/stories", tags=["stories"])
+router = APIRouter(prefix="/api/stories", tags=["stories"], dependencies=[Depends(get_current_user)])
 
 
 def _default_story_nodes(initial_content: str = "") -> dict:
