@@ -90,7 +90,8 @@ Layout (h-screen flex flex-col)
 └─ Main (flex-1 flex overflow-hidden)
    ├─ 写作视图: WritingWorkspace
    │   ├─ 无项目 → ProjectHome（项目卡片网格）
-   │   └─ 有项目 → Binder (250px) + EditorMain (flex-1) + Inspector (浮层)
+   │   └─ 有项目 → 产品 workspace（当前 novel → NovelWorkspace）
+   │       └─ NovelWorkspace → Binder (250px) + EditorMain (flex-1) + Inspector (浮层)
    └─ 全局资料库视图: CharacterPanel / ScenePanel（Tab 切换）
 ```
 
@@ -153,7 +154,8 @@ Layout (h-screen flex flex-col)
 
 ### 前端
 - `frontend/src/components/Layout.tsx` - 顶层布局（写作 / 全局资料库视图切换）
-- `frontend/src/components/WritingWorkspace.tsx` - 写作模式容器（ProjectHome 或 Binder+Editor+Inspector）
+- `frontend/src/components/WritingWorkspace.tsx` - 写作模式路由（ProjectHome 或产品 workspace）
+- `frontend/src/components/workspaces/NovelWorkspace.tsx` - 小说工作台（Binder + Editor + Inspector + AI 面板）
 - `frontend/src/components/ProjectHome.tsx` - 项目列表/创建页面
 - `frontend/src/components/Binder.tsx` - 左侧 Binder 装配层（项目标题、菜单、拖拽上下文）
 - `frontend/src/components/binder/` - Binder 子组件和 hook（文档树、资料分区、拖拽重排）
