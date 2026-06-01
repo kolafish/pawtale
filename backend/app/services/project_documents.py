@@ -70,8 +70,6 @@ def project_response(project: Project) -> ProjectResponse:
                 type=ref.type,
                 name=ref.name,
                 sort_order=ref.sort_order,
-                global_id=(ref.metadata_json or {}).get("global_character_id")
-                or (ref.metadata_json or {}).get("global_scene_id"),
             )
             for ref in (project.references or [])
         ],

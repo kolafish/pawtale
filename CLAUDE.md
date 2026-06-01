@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 项目概述
 
-**Pawtale** 是一个 AI 辅助内容创作工作台。当前以项目为单位管理写作，支持小说、公众号、回忆录三个项目类型，以及两层文档树（分组 → 文档）、项目内参考资料、全局角色/场景资料库、AI 续写和 AI 修改。
+**Pawtale** 是一个 AI 辅助内容创作工作台。当前以项目为单位管理写作，支持小说、公众号、回忆录三个项目类型，以及两层文档树（分组 → 文档）、项目内参考资料、AI 续写和 AI 修改。
 
 ## 技术栈
 
@@ -12,7 +12,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **前端**: React 19 + TypeScript + Vite，TailwindCSS，Zustand 状态管理，TanStack Query
 - **AI 服务**:
   - 文本生成：Claude Opus 4.6（默认）、Claude Sonnet 4.6、DeepSeek（多模型工厂模式）
-  - 图像生成：OpenAI GPT-4o
 
 ## Python 虚拟环境
 
@@ -60,9 +59,6 @@ ANTHROPIC_BASE_URL=xxx         # 代理地址
 DEEPSEEK_API_KEY=xxx
 DEEPSEEK_BASE_URL=xxx
 
-# 图像生成
-OPENAI_API_KEY=xxx
-
 # 默认 AI 模型
 DEFAULT_AI_MODEL=claude-opus-4  # 可选: deepseek, claude-opus-4, claude-sonnet-4
 ```
@@ -84,13 +80,12 @@ DEFAULT_AI_MODEL=claude-opus-4  # 可选: deepseek, claude-opus-4, claude-sonnet
 
 ```
 Layout (h-screen flex flex-col)
-├─ Header: [Pawtale] [写作 | 全局资料库] ... [默认模型▾]
+├─ Header: [Pawtale] ... [默认模型▾]
 └─ Main (flex-1 flex overflow-hidden)
-   ├─ 写作视图: WritingWorkspace
-   │   ├─ 无项目 → ProjectHome（项目卡片网格）
-   │   └─ 有项目 → 产品 workspace（novel/article/memoir）
-   │       └─ WorkspaceShell → Binder + ProjectDraftWorkspace + 可选产品面板
-   └─ 全局资料库视图: CharacterPanel / ScenePanel（Tab 切换）
+   └─ WritingWorkspace
+      ├─ 无项目 → ProjectHome（项目卡片网格）
+      └─ 有项目 → 产品 workspace（novel/article/memoir）
+          └─ WorkspaceShell → Binder + ProjectDraftWorkspace + 可选产品面板
 ```
 
 ### 状态管理
@@ -125,13 +120,9 @@ Layout (h-screen flex flex-col)
 
 **重要**：FastAPI 路由按注册顺序匹配。字面路径（如 `/reorder`）必须在参数路径（如 `/{id}`）之前注册，否则字面量会被当作参数值。
 
-### 全局资料库
-
-保留旧的 Character 和 Scene 表及 API，通过顶部 Tab 切换到"全局资料库"视图访问。项目可从全局库导入角色/场景作为项目内参考资料。
-
 ### 旧表清理
 
-旧 stories/outlines 工作区已经移除。当前数据库只保留项目系统、全局资料库和用户相关表，不要重新引入 `stories`、`story_outlines` 等旧表。
+旧 stories/outlines 工作区和全局资料库 API 已经移除。当前代码只保留项目系统和用户相关模型，不要重新引入 `stories`、`story_outlines`、全局 `characters`、全局 `scenes` 等旧表。
 
 ## 关键文件
 
@@ -141,9 +132,6 @@ Layout (h-screen flex flex-col)
 - `backend/app/domain/` - 产品类型和默认项目模板（novel/article/memoir）
 - `backend/app/routers/projects/` - 项目 API 端点（按 core/structure/references/activity/ai 拆分）
 - `backend/app/services/projects/` - 项目业务编排（权限校验、文档树、参考资料、统计导出、AI 工作流）
-- `backend/app/models/models.py` - 全局资料库模型（Character, Scene）
-- `backend/app/routers/characters.py` - 全局角色库 API
-- `backend/app/routers/scenes.py` - 全局场景库 API
 - `backend/app/services/ai_factory.py` - AI 服务工厂
 - `backend/app/services/ai_base.py` - AI 服务抽象基类
 - `backend/app/services/ai_claude.py` - Claude 文本生成服务
@@ -151,7 +139,7 @@ Layout (h-screen flex flex-col)
 - `backend/docs/AI_ARCHITECTURE.md` - AI 服务架构完整文档
 
 ### 前端
-- `frontend/src/components/Layout.tsx` - 顶层布局（写作 / 全局资料库视图切换）
+- `frontend/src/components/Layout.tsx` - 顶层布局
 - `frontend/src/components/WritingWorkspace.tsx` - 写作模式路由（ProjectHome 或产品 workspace）
 - `frontend/src/components/workspaces/ProjectDraftWorkspace.tsx` - Binder + Editor + AI 修改的共享草稿工作台
 - `frontend/src/components/workspaces/WorkspaceShell.tsx` - 工作台布局骨架（Binder、移动端目录、右侧面板、弹窗槽位）
@@ -171,14 +159,11 @@ Layout (h-screen flex flex-col)
 - `frontend/src/hooks/project/useProjectReferences.ts` - 项目资料操作（新增、重命名、删除、选中）
 - `frontend/src/hooks/project/useDraftRevision.ts` - 草稿 AI 修改编排（请求、应用、review 状态同步）
 - `frontend/src/stores/appStore.ts` - Zustand 全局状态
-- `frontend/src/api/index.ts` - API 客户端（projectsApi, charactersApi, scenesApi）
+- `frontend/src/api/index.ts` - API 客户端（authApi, projectsApi）
 - `frontend/src/types/index.ts` - TypeScript 类型定义
-- `frontend/src/components/CharacterPanel.tsx` - 全局角色库管理
-- `frontend/src/components/ScenePanel.tsx` - 全局场景库管理
 
 ### 测试
 - `backend/tests/test_project_*.py` - 项目 API 分组测试（core/structure/references/activity/ai）
-- `backend/tests/test_api.py` - 全局角色/场景 API 测试
 - `backend/tests/test_services.py` - AI 服务测试
 - `backend/tests/test_frontend.py` - 前端编译测试（TypeScript + Vite）
 - `backend/tests/test_new_features.py` - 多模型等功能测试

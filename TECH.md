@@ -13,10 +13,9 @@ SQLite + file-backed document content
         |
         +-- DeepSeek
         +-- Claude Opus 4.6 / Sonnet 4.6
-        +-- OpenAI GPT-4o image generation
 ```
 
-Pawtale 当前是单仓库、前后端分离架构。后端提供项目、文档、资料、AI 和全局资料库 API；前端按项目类型分发到不同 workspace，并复用一套草稿编辑和资料编辑基础能力。
+Pawtale 当前是单仓库、前后端分离架构。后端提供项目、文档、项目资料和 AI API；前端按项目类型分发到不同 workspace，并复用一套草稿编辑和资料编辑基础能力。
 
 ## 技术栈
 
@@ -43,7 +42,6 @@ Pawtale 当前是单仓库、前后端分离架构。后端提供项目、文档
 ### AI
 
 - 文本：DeepSeek、Claude Opus 4.6、Claude Sonnet 4.6
-- 图像：OpenAI GPT-4o
 - 服务边界：`AITextServiceBase` 提供 prompt 构建、响应解析和通用能力，具体模型服务只实现 `_call_llm()`
 
 ## 后端结构
@@ -65,16 +63,12 @@ backend/app/
 │   └── memoir/template.py
 ├── models/
 │   ├── users.py
-│   ├── models.py
 │   └── projects.py
 ├── schemas/
 │   ├── auth.py
-│   ├── schemas.py
 │   └── projects.py
 ├── routers/
 │   ├── auth.py
-│   ├── characters.py
-│   ├── scenes.py
 │   └── projects/
 │       ├── core.py
 │       ├── structure.py
@@ -90,14 +84,11 @@ backend/app/
     │   ├── activity.py
     │   └── ai.py
     ├── project_documents.py
-    ├── project_references.py
     ├── content_storage.py
     ├── ai_base.py
     ├── ai_factory.py
     ├── ai_text.py
-    ├── ai_claude.py
-    ├── ai_scene.py
-    └── ai_image.py
+    └── ai_claude.py
 ```
 
 ### 后端边界
@@ -212,15 +203,6 @@ writing_sessions
 - `reference_items.type` 当前常用值为 `character`、`location`、`note`、`outline`
 - `writing_sessions` 是写作记录能力，目前保留 API 和表结构
 
-### 全局资料库
-
-```text
-characters
-scenes
-```
-
-全局资料库独立于项目。项目资料可以从全局角色/场景导入，也可以把项目角色/地点导出回全局库。
-
 ## API
 
 ### Auth
@@ -265,11 +247,6 @@ POST   /api/projects/{project_id}/references
 PUT    /api/projects/{project_id}/references/{reference_id}
 DELETE /api/projects/{project_id}/references/{reference_id}
 
-POST   /api/projects/{project_id}/references/import-preview
-POST   /api/projects/{project_id}/references/import-global
-POST   /api/projects/{project_id}/references/{reference_id}/export-global
-POST   /api/projects/{project_id}/references/{reference_id}/sync-global
-
 GET    /api/projects/{project_id}/documents/{document_id}/references
 PUT    /api/projects/{project_id}/documents/{document_id}/references
 ```
@@ -290,20 +267,6 @@ POST /api/projects/{project_id}/documents/{document_id}/ai-revise
 POST /api/projects/{project_id}/documents/{document_id}/ai-revise-multi
 POST /api/projects/{project_id}/analyze
 POST /api/projects/{project_id}/analyze/apply
-```
-
-### Global library
-
-```text
-GET/POST       /api/characters
-GET/PUT/DELETE /api/characters/{id}
-POST           /api/characters/{id}/avatar
-POST           /api/characters/auto-complete
-
-GET/POST       /api/scenes
-GET/PUT/DELETE /api/scenes/{id}
-POST           /api/scenes/init-presets
-POST           /api/scenes/ai-generate
 ```
 
 ## 关键设计决策
@@ -330,7 +293,7 @@ POST           /api/scenes/ai-generate
 
 ### 路由注册顺序
 
-FastAPI 按注册顺序匹配路由。`/reorder`、`/import-global`、`/import-preview` 等字面路径必须注册在 `/{id}` 参数路径之前。
+FastAPI 按注册顺序匹配路由。`/reorder` 等字面路径必须注册在 `/{id}` 参数路径之前。
 
 ### 文件存储和事务补偿
 
@@ -371,7 +334,6 @@ PYTHONFAULTHANDLER=1 venv/bin/python -m pytest -q -p no:capture
 ```text
 backend/tests/
 ├── test_auth.py
-├── test_api.py
 ├── test_ai_base.py
 ├── test_services.py
 ├── test_new_features.py
@@ -412,8 +374,6 @@ DEEPSEEK_BASE_URL=xxx
 
 ANTHROPIC_AUTH_TOKEN=xxx
 ANTHROPIC_BASE_URL=xxx
-
-OPENAI_API_KEY=xxx
 
 DEFAULT_AI_MODEL=claude-opus-4
 ```

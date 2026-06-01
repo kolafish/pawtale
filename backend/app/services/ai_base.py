@@ -1,4 +1,3 @@
-import json
 import logging
 from abc import ABC, abstractmethod
 from app.services.ai_debug import build_debug_info
@@ -251,61 +250,6 @@ class AITextServiceBase(ABC):
         }
 
     # ── 公开 API 方法（模板方法模式） ─────────────
-
-    async def auto_complete_character(
-        self,
-        name: str | None = None,
-        gender: str | None = None,
-        inspiration: str | None = None,
-    ) -> dict:
-        """根据已有信息自动补全角色设定"""
-        system_prompt = """你是一个专业的角色设定师，擅长创建言情小说中的角色。
-请根据用户提供的信息，补全角色的其他设定。
-
-输出必须是严格的 JSON 格式，包含以下字段：
-{
-  "gender": "男/女",
-  "age": 数字,
-  "identity": "身份/职业",
-  "appearance": "外貌描述，包括身高、发型、五官特点等",
-  "personality": ["性格标签1", "性格标签2", "性格标签3"],
-  "speaking_style": "说话风格描述",
-  "background": "简短的背景故事"
-}
-
-性格标签请从以下选项中选择：温柔、高冷、傲娇、腹黑、阳光、忠犬、病娇、天然呆、毒舌、闷骚、霸总、奶狗、狼狗、禁欲系
-
-注意：
-1. 如果用户提供了灵感来源（如某个影视剧角色），请参考该角色的特点，但不要完全复制
-2. 外貌描述要具体，便于后续生成图片
-3. 背景故事要简洁，50字以内
-4. 只输出 JSON，不要有其他内容"""
-
-        user_parts = []
-        if name:
-            user_parts.append(f"角色名：{name}")
-        if gender:
-            user_parts.append(f"性别：{gender}")
-        if inspiration:
-            user_parts.append(f"灵感来源：{inspiration}（请参考这个角色的特点）")
-        if not user_parts:
-            user_parts.append("请创建一个适合言情小说的男主角色")
-
-        user_prompt = "\n".join(user_parts)
-        content = await self._call_llm(system_prompt, user_prompt, temperature=0.7, max_tokens=1000, timeout=30.0)
-
-        try:
-            return json.loads(self._extract_json(content))
-        except json.JSONDecodeError:
-            return {
-                "gender": gender or "男",
-                "age": 28,
-                "identity": "公司高管",
-                "appearance": "身高180cm，短发，五官深邃",
-                "personality": ["高冷", "深情"],
-                "speaking_style": "言简意赅，偶尔毒舌",
-                "background": "商业精英，事业有成",
-            }
 
     async def generate_story(
         self,

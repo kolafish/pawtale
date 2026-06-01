@@ -1,4 +1,4 @@
-import { Save, Upload, Loader2 } from 'lucide-react';
+import { Save } from 'lucide-react';
 import type { ReferenceItem } from '../types';
 import type { RefSaveStatus } from '../hooks/useReferenceEditor';
 import { metadataString, metadataStringArray } from '../utils/metadata';
@@ -9,11 +9,9 @@ interface NoteEditorProps {
   onUpdate: (patch: Partial<ReferenceItem>) => void;
   onUpdateMeta: (key: string, value: unknown) => void;
   onSave: () => void;
-  onExportGlobal?: () => Promise<void>;
-  isExporting?: boolean;
 }
 
-export function NoteEditor({ data, saveStatus, onUpdate, onUpdateMeta, onSave, onExportGlobal, isExporting }: NoteEditorProps) {
+export function NoteEditor({ data, saveStatus, onUpdate, onUpdateMeta, onSave }: NoteEditorProps) {
   const meta = data.metadata_json || {};
   const isLocation = data.type === 'location';
   const typeLabel = isLocation ? '地点' : '笔记';
@@ -30,16 +28,6 @@ export function NoteEditor({ data, saveStatus, onUpdate, onUpdateMeta, onSave, o
           className="text-lg font-semibold text-gray-800 flex-1 bg-transparent border-none outline-none focus:ring-0 placeholder-gray-300"
           placeholder="标题..."
         />
-        {isLocation && onExportGlobal && (
-          <button
-            onClick={onExportGlobal}
-            disabled={isExporting}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border border-purple-200 text-purple-600 hover:bg-purple-50 disabled:opacity-50"
-          >
-            {isExporting ? <Loader2 size={12} className="animate-spin" /> : <Upload size={12} />}
-            导出到全局库
-          </button>
-        )}
         <span className={`text-xs ${saveStatus === 'saved' ? 'text-gray-400' : 'text-amber-500'}`}>
           {statusLabel}
         </span>

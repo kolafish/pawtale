@@ -1,13 +1,12 @@
 # Pawtale
 
-AI 辅助内容创作工作台。当前核心是以项目为单位管理写作，支持小说、公众号文章、回忆录三个创作方向，并保留全局角色/场景资料库作为可复用素材来源。
+AI 辅助内容创作工作台。当前核心是以项目为单位管理写作，支持小说、公众号文章、回忆录三个创作方向。
 
 ## 当前能力
 
 - 项目类型：小说、公众号、回忆录
 - 项目结构：Project -> DocumentGroup -> Document
 - 项目内参考资料：角色、地点、笔记、大纲
-- 全局资料库：角色库、场景库，可导入到项目资料，也可从项目资料导出
 - 写作编辑器：自动保存、Cmd+S、字数统计、TXT 导出
 - AI 辅助：续写、单模型修改、多模型修改对比、diff review、项目内容分析
 - 多模型：Claude Opus 4.6、Claude Sonnet 4.6、DeepSeek
@@ -81,7 +80,6 @@ npm run dev
 | `DEEPSEEK_BASE_URL` | DeepSeek API 地址 |
 | `ANTHROPIC_AUTH_TOKEN` | Claude 代理认证 token |
 | `ANTHROPIC_BASE_URL` | Claude 代理地址，OpenAI 兼容格式 |
-| `OPENAI_API_KEY` | OpenAI key，用于图像生成 |
 | `DEFAULT_AI_MODEL` | 默认模型：`claude-opus-4` / `claude-sonnet-4` / `deepseek` |
 
 ## 常用命令

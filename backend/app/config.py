@@ -18,7 +18,6 @@ class Settings(BaseSettings):
     # AI API Keys
     deepseek_api_key: str = ""
     deepseek_base_url: str = "https://api.deepseek.com"
-    openai_api_key: str = ""
 
     # Claude API Keys
     anthropic_auth_token: str = ""
@@ -29,6 +28,7 @@ class Settings(BaseSettings):
 
     class Config:
         env_file = str(BACKEND_DIR / ".env")
+        extra = "ignore"
 
 
 @lru_cache()

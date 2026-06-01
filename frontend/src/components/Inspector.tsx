@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { ChevronRight, FileText, BookOpen, FolderOpen, Trash2, Download, X } from 'lucide-react';
-import { projectsApi, charactersApi, scenesApi } from '../api';
+import { projectsApi } from '../api';
 import { ReferenceSheet } from './ReferenceSheet';
 import type { ReferenceItem, Project } from '../types';
 
@@ -37,7 +37,6 @@ export function Inspector({
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<InspectorTab>('document');
   const [editingRef, setEditingRef] = useState<ReferenceItem | null>(null);
-  const [showImport, setShowImport] = useState(false);
 
   const { data: references = [], refetch: refetchRefs } = useQuery({
     queryKey: ['references', project.id],
@@ -237,21 +236,6 @@ export function Inspector({
                     + 笔记
                   </button>
                 </div>
-                <button
-                  onClick={() => setShowImport(true)}
-                  className="w-full text-xs px-2 py-1.5 rounded border border-dashed border-pink-300 text-pink-500 hover:bg-pink-50"
-                >
-                  从全局库导入
-                </button>
-                {showImport && (
-                  <GlobalImportPanel
-                    projectId={project.id}
-                    onDone={() => {
-                      setShowImport(false);
-                      refetchRefs();
-                    }}
-                  />
-                )}
                 {references.length === 0 ? (
                   <p className="text-xs text-gray-400 text-center py-4">暂无参考资料</p>
                 ) : (
@@ -322,122 +306,6 @@ export function Inspector({
             </button>
           </div>
         )}
-      </div>
-    </div>
-  );
-}
-
-// ── Global Import Panel ────────────────────────────
-
-function GlobalImportPanel({ projectId, onDone }: { projectId: string; onDone: () => void }) {
-  const { data: characters = [] } = useQuery({
-    queryKey: ['characters'],
-    queryFn: charactersApi.getAll,
-  });
-  const { data: scenes = [] } = useQuery({
-    queryKey: ['scenes'],
-    queryFn: scenesApi.getAll,
-  });
-  const [selectedChars, setSelectedChars] = useState<Set<string>>(new Set());
-  const [selectedScenes, setSelectedScenes] = useState<Set<string>>(new Set());
-  const [importing, setImporting] = useState(false);
-  const [duplicateWarning, setDuplicateWarning] = useState<string[]>([]);
-
-  const toggle = (set: Set<string>, id: string, setter: (s: Set<string>) => void) => {
-    const next = new Set(set);
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
-    setter(next);
-  };
-
-  const handleImport = async () => {
-    if (importing) return;
-    setImporting(true);
-    setDuplicateWarning([]);
-    try {
-      // Preview for duplicates
-      const preview = await projectsApi.importPreview(projectId, {
-        character_ids: [...selectedChars],
-        scene_ids: [...selectedScenes],
-      });
-      const dupes = preview.items.filter((it) => it.existing_ref_id);
-      if (dupes.length > 0 && duplicateWarning.length === 0) {
-        // Show warning, let user confirm
-        setDuplicateWarning(dupes.map((d) =>
-          `「${d.global_name}」已存在 (${d.match_by === 'global_id' ? '已关联' : '同名'}：${d.existing_ref_name})`
-        ));
-        setImporting(false);
-        return;
-      }
-      // Proceed with import
-      await projectsApi.importGlobal(projectId, {
-        character_ids: [...selectedChars],
-        scene_ids: [...selectedScenes],
-      });
-      onDone();
-    } catch {
-      setImporting(false);
-    }
-  };
-
-  return (
-    <div className="border border-pink-200 rounded-lg p-2 space-y-2">
-      <p className="text-xs font-medium text-gray-600">全局角色</p>
-      {characters.length === 0 ? (
-        <p className="text-xs text-gray-400">暂无</p>
-      ) : (
-        <div className="space-y-1 max-h-32 overflow-y-auto">
-          {characters.map((c) => (
-            <label key={c.id} className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={selectedChars.has(c.id)}
-                onChange={() => toggle(selectedChars, c.id, setSelectedChars)}
-                className="rounded"
-              />
-              {c.name}
-            </label>
-          ))}
-        </div>
-      )}
-      <p className="text-xs font-medium text-gray-600">全局场景</p>
-      {scenes.length === 0 ? (
-        <p className="text-xs text-gray-400">暂无</p>
-      ) : (
-        <div className="space-y-1 max-h-32 overflow-y-auto">
-          {scenes.map((s) => (
-            <label key={s.id} className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={selectedScenes.has(s.id)}
-                onChange={() => toggle(selectedScenes, s.id, setSelectedScenes)}
-                className="rounded"
-              />
-              {s.name}
-            </label>
-          ))}
-        </div>
-      )}
-      {duplicateWarning.length > 0 && (
-        <div className="bg-amber-50 border border-amber-200 rounded-lg p-2 space-y-1">
-          <p className="text-xs font-medium text-amber-700">以下项目已存在：</p>
-          {duplicateWarning.map((w, i) => (
-            <p key={i} className="text-xs text-amber-600">{w}</p>
-          ))}
-          <p className="text-xs text-amber-500">点击「继续导入」仍会创建新的引用。</p>
-        </div>
-      )}
-      <div className="flex gap-2">
-        <button
-          onClick={handleImport}
-          disabled={(selectedChars.size === 0 && selectedScenes.size === 0) || importing}
-          className="flex-1 text-xs px-2 py-1.5 rounded bg-pink-500 text-white hover:bg-pink-600 disabled:opacity-60"
-        >
-          {duplicateWarning.length > 0 ? '继续导入' : '导入'} ({selectedChars.size + selectedScenes.size})
-        </button>
-        <button onClick={onDone} className="text-xs px-2 py-1.5 rounded border border-gray-200 hover:bg-gray-50">
-          取消
-        </button>
       </div>
     </div>
   );

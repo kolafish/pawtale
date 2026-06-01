@@ -67,8 +67,6 @@ Pawtale 是一个 AI 辅助内容创作工作台。核心不是单次生成内�
   - 地点/笔记：名称、内容、结构化 metadata
   - 大纲：名称、内容
 - 文档和资料多对多关联
-- 全局角色/场景可导入项目，支持重复检测
-- 项目角色/地点可导出到全局库，支持后续同步
 
 ### AI 辅助
 
@@ -100,27 +98,16 @@ Project
 └── WritingSession
 ```
 
-全局资料库独立于项目存在：
-
-```text
-Global Library
-├── Character
-└── Scene
-```
-
 ## 主要页面
 
 ```text
 Layout
-├── 写作
-│   ├── ProjectHome
-│   └── Workspace by project.type
-│       ├── NovelWorkspace
-│       ├── ArticleWorkspace
-│       └── MemoirWorkspace
-└── 全局资料库
-    ├── CharacterPanel
-    └── ScenePanel
+└── WritingWorkspace
+    ├── ProjectHome
+    └── Workspace by project.type
+        ├── NovelWorkspace
+        ├── ArticleWorkspace
+        └── MemoirWorkspace
 ```
 
 ## 三个产品方向的边界

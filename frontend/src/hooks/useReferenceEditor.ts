@@ -2,13 +2,11 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { projectsApi } from '../api';
 import { useAppStore } from '../stores/appStore';
 import type { ReferenceItem } from '../types';
-import { getErrorMessage } from '../utils/apiError';
 
 export type RefSaveStatus = 'saved' | 'saving' | 'unsaved';
 
 export function useReferenceEditor() {
   const { currentProject, currentReferenceId } = useAppStore();
-  const [isExporting, setIsExporting] = useState(false);
 
   const [referenceData, setReferenceData] = useState<ReferenceItem | null>(null);
   const [saveStatus, setSaveStatus] = useState<RefSaveStatus>('saved');
@@ -93,65 +91,14 @@ export function useReferenceEditor() {
     );
   }, []);
 
-  // ─── Sync from global ───
-  const syncFromGlobal = useCallback(async () => {
-    if (!currentProject || !referenceData) return;
-    const updated = await projectsApi.syncGlobal(currentProject.id, referenceData.id);
-    setReferenceData(updated);
-    lastSavedRef.current = JSON.stringify(updated);
-    setSaveStatus('saved');
-  }, [currentProject, referenceData]);
-
-  // ─── Export to global library ───
-  const exportToGlobal = useCallback(async () => {
-    if (!currentProject || !referenceData) return;
-    setIsExporting(true);
-    try {
-      // Save first to ensure latest data
-      await doSave();
-      // Preview for matches
-      const preview = await projectsApi.exportGlobal(currentProject.id, referenceData.id, { action: 'preview' });
-      let action: 'create' | 'update' | null = null;
-      let globalId: string | undefined;
-
-      if (preview.match) {
-        const ok = confirm(`发现同名全局记录「${preview.match.global_name}」，是否更新？\n\n点击「确定」更新已有记录，「取消」新建一个。`);
-        if (ok) {
-          action = 'update';
-          globalId = preview.match.global_id;
-        } else {
-          action = 'create';
-        }
-      } else {
-        action = 'create';
-      }
-
-      const result = await projectsApi.exportGlobal(currentProject.id, referenceData.id, {
-        action,
-        global_id: globalId,
-      });
-
-      // Reload reference to pick up the new global link
-      await loadReference(referenceData.id);
-      alert(result.status === 'created' ? '已创建全局记录' : '已更新全局记录');
-    } catch (e: unknown) {
-      alert(`导出失败: ${getErrorMessage(e, '导出失败')}`);
-    } finally {
-      setIsExporting(false);
-    }
-  }, [currentProject, referenceData, doSave, loadReference]);
-
   return {
     referenceData,
     referenceType: referenceData?.type || null,
     saveStatus,
     isSaving: saveStatus === 'saving',
-    isExporting,
     updateField,
     updateMeta,
     handleSave: doSave,
-    syncFromGlobal,
-    exportToGlobal,
     reloadReference: () => currentReferenceId ? loadReference(currentReferenceId) : undefined,
   };
 }

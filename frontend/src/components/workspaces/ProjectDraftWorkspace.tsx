@@ -83,9 +83,6 @@ export function ProjectDraftWorkspace({
             onUpdate={refEditor.updateField}
             onUpdateMeta={refEditor.updateMeta}
             onSave={refEditor.handleSave}
-            onSyncGlobal={refEditor.syncFromGlobal}
-            onExportGlobal={refEditor.exportToGlobal}
-            isExporting={refEditor.isExporting}
           />
         );
       }
@@ -106,8 +103,6 @@ export function ProjectDraftWorkspace({
           onUpdate={refEditor.updateField}
           onUpdateMeta={refEditor.updateMeta}
           onSave={refEditor.handleSave}
-          onExportGlobal={refEditor.referenceData.type === 'location' ? refEditor.exportToGlobal : undefined}
-          isExporting={refEditor.isExporting}
         />
       );
     }

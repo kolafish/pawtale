@@ -51,7 +51,6 @@ class ReferenceItemBrief(BaseModel):
     type: str
     name: str
     sort_order: int = 0
-    global_id: str | None = None  # linked global character/scene id
 
     class Config:
         from_attributes = True
@@ -171,11 +170,6 @@ class ReferenceItemResponse(BaseModel):
 
     class Config:
         from_attributes = True
-
-
-class ImportGlobalRequest(BaseModel):
-    character_ids: list[str] = []
-    scene_ids: list[str] = []
 
 
 # ── Document References (links) ────────────────────
@@ -314,37 +308,3 @@ class AnalyzeApplyRequest(BaseModel):
 class AnalyzeApplyResponse(BaseModel):
     created_count: int
     references: list[ReferenceItemBrief]
-
-
-# ── Export to Global Library ───────────────────────
-
-class ExportGlobalRequest(BaseModel):
-    action: str  # "preview" | "create" | "update"
-    global_id: str | None = None  # required when action="update"
-
-
-class ExportGlobalMatch(BaseModel):
-    global_id: str
-    global_name: str
-    global_type: str  # "character" | "scene"
-
-
-class ExportGlobalResponse(BaseModel):
-    status: str  # "preview" | "created" | "updated" | "no_match"
-    match: ExportGlobalMatch | None = None
-    global_id: str | None = None
-
-
-# ── Import with duplicate detection ───────────────
-
-class ImportPreviewItem(BaseModel):
-    global_id: str
-    global_name: str
-    global_type: str  # "character" | "scene"
-    existing_ref_id: str | None = None
-    existing_ref_name: str | None = None
-    match_by: str | None = None  # "global_id" | "name" | None
-
-
-class ImportPreviewResponse(BaseModel):
-    items: list[ImportPreviewItem]

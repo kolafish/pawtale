@@ -1,4 +1,4 @@
-import { Link2, RefreshCw, Save, Upload, Loader2 } from 'lucide-react';
+import { Save } from 'lucide-react';
 import type { ReferenceItem } from '../types';
 import type { RefSaveStatus } from '../hooks/useReferenceEditor';
 import { metadataString, metadataStringArray } from '../utils/metadata';
@@ -18,14 +18,10 @@ interface CharacterEditorProps {
   onUpdate: (patch: Partial<ReferenceItem>) => void;
   onUpdateMeta: (key: string, value: unknown) => void;
   onSave: () => void;
-  onSyncGlobal: () => void;
-  onExportGlobal: () => Promise<void>;
-  isExporting?: boolean;
 }
 
-export function CharacterEditor({ data, saveStatus, onUpdate, onUpdateMeta, onSave, onSyncGlobal, onExportGlobal, isExporting }: CharacterEditorProps) {
+export function CharacterEditor({ data, saveStatus, onUpdate, onUpdateMeta, onSave }: CharacterEditorProps) {
   const meta = data.metadata_json || {};
-  const hasGlobalLink = !!meta.global_character_id;
   const personality = metadataStringArray(meta, 'personality');
 
   const togglePersonality = (tag: string) => {
@@ -49,25 +45,6 @@ export function CharacterEditor({ data, saveStatus, onUpdate, onUpdateMeta, onSa
       {/* Header */}
       <div className="flex items-center gap-3 px-6 py-3 border-b border-gray-200">
         <h2 className="text-lg font-semibold text-gray-800 flex-1 truncate">{data.name}</h2>
-        {hasGlobalLink ? (
-          <button
-            onClick={onSyncGlobal}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border border-blue-200 text-blue-600 hover:bg-blue-50"
-          >
-            <Link2 size={12} />
-            已关联全局角色
-            <RefreshCw size={12} />
-          </button>
-        ) : null}
-        <button
-          onClick={onExportGlobal}
-          disabled={isExporting}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border border-purple-200 text-purple-600 hover:bg-purple-50 disabled:opacity-50"
-          title={hasGlobalLink ? '更新全局角色' : '导出到全局资料库'}
-        >
-          {isExporting ? <Loader2 size={12} className="animate-spin" /> : <Upload size={12} />}
-          {hasGlobalLink ? '同步到全局' : '导出到全局库'}
-        </button>
         <span className={`text-xs ${saveStatus === 'saved' ? 'text-gray-400' : 'text-amber-500'}`}>
           {statusLabel}
         </span>

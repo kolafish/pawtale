@@ -6,10 +6,6 @@ from app.database import get_db
 from app.models.users import User
 from app.schemas.projects import (
     DocumentReferencesUpdate,
-    ExportGlobalRequest,
-    ExportGlobalResponse,
-    ImportGlobalRequest,
-    ImportPreviewResponse,
     ReferenceItemCreate,
     ReferenceItemResponse,
     ReferenceItemUpdate,
@@ -37,47 +33,6 @@ async def create_reference(
     current_user: User = Depends(get_current_user),
 ):
     return await project_references.create_reference(db, project_id, current_user.id, req)
-
-
-@router.post("/{project_id}/references/import-global", response_model=list[ReferenceItemResponse])
-async def import_from_global(
-    project_id: str,
-    req: ImportGlobalRequest,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    return await project_references.import_from_global(db, project_id, current_user.id, req)
-
-
-@router.post("/{project_id}/references/import-preview", response_model=ImportPreviewResponse)
-async def import_preview(
-    project_id: str,
-    req: ImportGlobalRequest,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    return await project_references.import_preview(db, project_id, current_user.id, req)
-
-
-@router.post("/{project_id}/references/{ref_id}/export-global", response_model=ExportGlobalResponse)
-async def export_to_global(
-    project_id: str,
-    ref_id: str,
-    req: ExportGlobalRequest,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    return await project_references.export_to_global(db, project_id, ref_id, current_user.id, req)
-
-
-@router.post("/{project_id}/references/{ref_id}/sync-global", response_model=ReferenceItemResponse)
-async def sync_reference_from_global(
-    project_id: str,
-    ref_id: str,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    return await project_references.sync_reference_from_global(db, project_id, ref_id, current_user.id)
 
 
 @router.put("/{project_id}/references/{ref_id}", response_model=ReferenceItemResponse)

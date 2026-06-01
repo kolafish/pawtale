@@ -1,6 +1,6 @@
 # Pawtale Backend
 
-FastAPI 后端，提供认证、项目写作系统、全局资料库和 AI 辅助 API。
+FastAPI 后端，提供认证、项目写作系统、项目资料和 AI 辅助 API。
 
 ## 技术栈
 
@@ -10,7 +10,6 @@ FastAPI 后端，提供认证、项目写作系统、全局资料库和 AI 辅�
 - Pydantic
 - pytest
 - DeepSeek / Claude 文本模型
-- OpenAI GPT-4o 图像生成
 
 ## 运行
 
@@ -59,13 +58,10 @@ app/
 ├── schemas/
 ├── routers/
 │   ├── auth.py
-│   ├── characters.py
-│   ├── scenes.py
 │   └── projects/
 └── services/
     ├── projects/
     ├── project_documents.py
-    ├── project_references.py
     ├── content_storage.py
     └── ai_*.py
 ```
@@ -92,8 +88,6 @@ DEEPSEEK_BASE_URL=xxx
 
 ANTHROPIC_AUTH_TOKEN=xxx
 ANTHROPIC_BASE_URL=xxx
-
-OPENAI_API_KEY=xxx
 
 DEFAULT_AI_MODEL=claude-opus-4
 ```

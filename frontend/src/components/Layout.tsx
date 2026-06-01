@@ -1,15 +1,9 @@
-import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { LogOut, MapPin, UserCircle, Users, BookOpen } from 'lucide-react';
+import { LogOut, UserCircle } from 'lucide-react';
 import { useAppStore } from '../stores/appStore';
 import { WritingWorkspace } from './WritingWorkspace';
-import { CharacterPanel } from './CharacterPanel';
-import { ScenePanel } from './ScenePanel';
 import { AI_MODEL_OPTIONS } from '../constants/aiModels';
 import type { User } from '../types';
-
-type AppView = 'writing' | 'library';
-type LibraryTab = 'characters' | 'scenes';
 
 interface LayoutProps {
   user: User;
@@ -19,11 +13,8 @@ interface LayoutProps {
 export function Layout({ user, onLogout }: LayoutProps) {
   const queryClient = useQueryClient();
   const { defaultAiModel, setDefaultAiModel, closeProject } = useAppStore();
-  const [view, setView] = useState<AppView>('writing');
-  const [libraryTab, setLibraryTab] = useState<LibraryTab>('characters');
 
   const handleLogoClick = () => {
-    setView('writing');
     closeProject();
     queryClient.invalidateQueries({ queryKey: ['projects'] });
   };
@@ -45,28 +36,6 @@ export function Layout({ user, onLogout }: LayoutProps) {
               Pawtale
             </span>
           </button>
-
-          {/* View toggle */}
-          <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1 ml-2">
-            <button
-              onClick={() => setView('writing')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
-                view === 'writing' ? 'bg-white shadow-sm text-pink-600' : 'text-gray-500 hover:text-gray-700'
-              }`}
-            >
-              <BookOpen size={14} />
-              写作
-            </button>
-            <button
-              onClick={() => setView('library')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
-                view === 'library' ? 'bg-white shadow-sm text-pink-600' : 'text-gray-500 hover:text-gray-700'
-              }`}
-            >
-              <Users size={14} />
-              全局资料库
-            </button>
-          </div>
         </div>
 
         <div className="flex items-center gap-3">
@@ -100,43 +69,7 @@ export function Layout({ user, onLogout }: LayoutProps) {
 
       {/* Main content */}
       <main className="flex-1 flex overflow-hidden">
-        {view === 'writing' ? (
-          <WritingWorkspace />
-        ) : (
-          <div className="flex-1 flex flex-col bg-white">
-            {/* Library tabs */}
-            <div className="flex border-b border-pink-100">
-              <button
-                onClick={() => setLibraryTab('characters')}
-                className={`flex-1 flex items-center justify-center gap-2 py-3 text-sm font-medium transition-colors ${
-                  libraryTab === 'characters'
-                    ? 'text-pink-600 border-b-2 border-pink-500'
-                    : 'text-gray-500 hover:text-gray-700'
-                }`}
-              >
-                <Users size={16} />
-                角色库
-              </button>
-              <button
-                onClick={() => setLibraryTab('scenes')}
-                className={`flex-1 flex items-center justify-center gap-2 py-3 text-sm font-medium transition-colors ${
-                  libraryTab === 'scenes'
-                    ? 'text-pink-600 border-b-2 border-pink-500'
-                    : 'text-gray-500 hover:text-gray-700'
-                }`}
-              >
-                <MapPin size={16} />
-                场景库
-              </button>
-            </div>
-
-            {/* Library content */}
-            <div className="flex-1 overflow-hidden">
-              {libraryTab === 'characters' && <CharacterPanel />}
-              {libraryTab === 'scenes' && <ScenePanel />}
-            </div>
-          </div>
-        )}
+        <WritingWorkspace />
       </main>
     </div>
   );

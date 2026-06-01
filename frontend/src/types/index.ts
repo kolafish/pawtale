@@ -6,48 +6,6 @@ export interface User {
   created_at: string;
 }
 
-export interface Character {
-  id: string;
-  name: string;
-  gender?: string;
-  age?: number;
-  identity?: string;
-  appearance?: string;
-  personality: string[];
-  speaking_style?: string;
-  background?: string;
-  inspiration?: string;
-  avatar_url?: string;
-  base_image_url?: string;
-  is_preset: boolean;
-  created_at: string;
-  // 新增深度字段
-  role_type?: string; // protagonist/supporting/antagonist
-  core_trait?: string; // 底色 - 核心性格驱动力
-  life_goal?: string; // 目标追求
-  fatal_flaw?: string; // 致命弱点
-  growth_hint?: string; // 成长弧线提示
-  habits: string[]; // 行为习惯
-  secret?: string; // 秘密
-}
-
-export interface CharacterAutoComplete {
-  gender?: string;
-  age?: number;
-  identity?: string;
-  appearance?: string;
-  personality: string[];
-  speaking_style?: string;
-  background?: string;
-  // 新增深度字段
-  core_trait?: string;
-  life_goal?: string;
-  fatal_flaw?: string;
-  growth_hint?: string;
-  habits: string[];
-  secret?: string;
-}
-
 export interface AIDebugInfo {
   request: {
     provider: string;
@@ -66,49 +24,6 @@ export interface AIDebugInfo {
     max_chars?: number;
     generated_at?: string;
   };
-}
-
-export interface Scene {
-  id: string;
-  name: string;
-  category: string;
-  description: string;
-  location?: string;
-  time_weather?: string;
-  mood_keywords: string[];
-  is_preset: boolean;
-  created_at: string;
-  // 新增增强字段
-  dramatic_potential?: string; // 戏剧潜力
-  sensory_details: { visual?: string; auditory?: string; olfactory?: string };
-  props: string[]; // 可能的道具/元素
-}
-
-// AI 场景生成
-export interface SceneAIGenerateRequest {
-  category: string;
-  mood_keywords: string[];
-  character_context?: { character_ids: string[]; relationship?: string };
-  custom_prompt?: string;
-  count: number;
-  ai_model?: string;
-  debug?: boolean;
-}
-
-export interface SceneCandidate {
-  name: string;
-  description: string;
-  location?: string;
-  time_weather?: string;
-  mood_keywords: string[];
-  dramatic_potential?: string;
-  sensory_details: { visual?: string; auditory?: string; olfactory?: string };
-  props: string[];
-}
-
-export interface SceneAIGenerateResponse {
-  candidates: SceneCandidate[];
-  debug_info?: AIDebugInfo;
 }
 
 // ── Project-based writing types ──────────────────────
@@ -179,7 +94,6 @@ export interface ReferenceItemBrief {
   type: string;
   name: string;
   sort_order: number;
-  global_id?: string;
 }
 
 export interface ReferenceItem {
@@ -277,38 +191,4 @@ export interface AnalyzeApplyRequest {
 export interface AnalyzeApplyResponse {
   created_count: number;
   references: ReferenceItemBrief[];
-}
-
-// ── Export to Global Library ──────────────────────
-
-export interface ExportGlobalRequest {
-  action: 'preview' | 'create' | 'update';
-  global_id?: string;
-}
-
-export interface ExportGlobalMatch {
-  global_id: string;
-  global_name: string;
-  global_type: string;
-}
-
-export interface ExportGlobalResponse {
-  status: 'preview' | 'created' | 'updated' | 'no_match';
-  match?: ExportGlobalMatch;
-  global_id?: string;
-}
-
-// ── Import Preview ────────────────────────────────
-
-export interface ImportPreviewItem {
-  global_id: string;
-  global_name: string;
-  global_type: string;
-  existing_ref_id?: string;
-  existing_ref_name?: string;
-  match_by?: string;
-}
-
-export interface ImportPreviewResponse {
-  items: ImportPreviewItem[];
 }

@@ -77,6 +77,4 @@ src/
 前端通过 `src/api/index.ts` 访问后端：
 
 - `projectsApi`
-- `charactersApi`
-- `scenesApi`
 - `authApi`
