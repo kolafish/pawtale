@@ -238,7 +238,9 @@ Pawtale/
 │       ├── domain/
 │       │   └── projectProfiles.ts  # 前端产品类型配置（创建入口、结构单位、Binder 分区）
 │       ├── hooks/
-│       │   ├── useProjectState.ts  # 项目状态 Hook（auto-save, CRUD, AI, 拖拽排序）
+│       │   ├── useProjectState.ts  # 项目状态 facade
+│       │   ├── project/
+│       │   │   └── useDocumentDraft.ts # 文档草稿状态（加载、快照、auto-save、Cmd+S）
 │       │   ├── useAIRevision.ts    # AI 修改 Hook（选段/全文修改，diff 对比）
 │       │   └── useReferenceEditor.ts # 参考资料编辑 Hook（auto-save, 同步/导出全局库）
 │       ├── stores/
