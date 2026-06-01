@@ -1,79 +1,105 @@
 # Pawtale Backend
 
+FastAPI 后端，提供认证、项目写作系统、全局资料库和 AI 辅助 API。
+
 ## 技术栈
 
-- FastAPI + async SQLAlchemy + aiosqlite
-- 多模型 AI 支持：DeepSeek、Claude Opus 4.6、Claude Sonnet 4.6
+- FastAPI
+- async SQLAlchemy
+- SQLite + aiosqlite
+- Pydantic
+- pytest
+- DeepSeek / Claude 文本模型
 - OpenAI GPT-4o 图像生成
-
-## 安装依赖
-
-```bash
-cd backend
-python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
-pip install -r requirements.txt
-```
-
-## 配置环境变量
-
-创建 `.env` 文件：
-
-```bash
-# AI 文本生成服务
-DEEPSEEK_API_KEY=your-deepseek-key
-DEEPSEEK_BASE_URL=https://api.deepseek.com
-
-# Claude API 配置（可选，用于多模型支持）
-ANTHROPIC_AUTH_TOKEN=your-claude-token
-ANTHROPIC_BASE_URL=https://api.anthropic.com
-
-# 图像生成服务
-OPENAI_API_KEY=your-openai-key
-
-# 默认 AI 模型
-DEFAULT_AI_MODEL=claude-opus-4  # 可选: deepseek, claude-opus-4, claude-sonnet-4
-```
 
 ## 运行
 
 ```bash
-uvicorn app.main:app --reload --port 8000
+cd backend
+python -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+PYTHONPATH=. uvicorn app.main:app --reload --port 8000
 ```
+
+API 文档：
+
+- Swagger UI: http://localhost:8000/docs
+- ReDoc: http://localhost:8000/redoc
 
 ## 测试
 
 ```bash
-# 运行所有测试
-pytest -v
-
-# 运行特定测试文件
-pytest tests/test_api.py -v
-pytest tests/test_new_features.py -v
-pytest tests/test_frontend.py -v
-
-# 运行特定测试
-pytest tests/test_api.py::TestCharacterAPI::test_create_character -v
+cd backend
+PYTHONFAULTHANDLER=1 venv/bin/python -m pytest -q -p no:capture
 ```
 
-## 核心功能
+常用定向测试：
 
-### 多模型 AI 支持
-- 支持 DeepSeek、Claude Opus 4.6、Claude Sonnet 4.6
-- 工厂模式实现，易于扩展
-- 用户可在创建大纲和生成故事时选择模型
+```bash
+PYTHONFAULTHANDLER=1 venv/bin/python -m pytest tests/test_project_core.py -q -p no:capture
+PYTHONFAULTHANDLER=1 venv/bin/python -m pytest tests/test_project_structure.py -q -p no:capture
+PYTHONFAULTHANDLER=1 venv/bin/python -m pytest tests/test_project_references.py -q -p no:capture
+PYTHONFAULTHANDLER=1 venv/bin/python -m pytest tests/test_project_ai.py -q -p no:capture
+```
 
-### 引导式创建
-- 4步向导流程：故事目标 → 角色张力 → 核心冲突 → AI 生成预览
-- API: `POST /api/outlines/guided-create`
+## 核心结构
 
-### 故事大纲系统
-- 角色配置（类型、称呼、关系）
-- 场景配置（可用场景、起始场景）
-- 故事参数（情绪、风格、冲突、结局）
+```text
+app/
+├── main.py
+├── auth.py
+├── domain/
+│   ├── projects/
+│   ├── novel/
+│   ├── article/
+│   └── memoir/
+├── models/
+├── schemas/
+├── routers/
+│   ├── auth.py
+│   ├── characters.py
+│   ├── scenes.py
+│   └── projects/
+└── services/
+    ├── projects/
+    ├── project_documents.py
+    ├── project_references.py
+    ├── content_storage.py
+    └── ai_*.py
+```
 
-## API 文档
+## 项目系统
 
-启动后访问：
-- Swagger UI: http://localhost:8000/docs
-- ReDoc: http://localhost:8000/redoc
+- `Project.type` 支持 `novel`、`article`、`memoir`
+- 默认模板由 `app/domain/projects/templates.py` 分发
+- `/api/projects` 路由按 `core`、`structure`、`references`、`activity`、`ai` 拆分
+- 项目业务编排放在 `app/services/projects/`
+- 文档正文由 `content_storage.py` 存在 `data/projects/{project_id}/{document_id}.md`
+
+## 环境变量
+
+`backend/.env`：
+
+```bash
+APP_ENV=development
+APP_SECRET_KEY=xxx
+# DATABASE_URL=sqlite+aiosqlite:///../data/pawtale.db
+
+DEEPSEEK_API_KEY=xxx
+DEEPSEEK_BASE_URL=xxx
+
+ANTHROPIC_AUTH_TOKEN=xxx
+ANTHROPIC_BASE_URL=xxx
+
+OPENAI_API_KEY=xxx
+
+DEFAULT_AI_MODEL=claude-opus-4
+```
+
+`DEFAULT_AI_MODEL` 可选：
+
+- `claude-opus-4`
+- `claude-sonnet-4`
+- `deepseek`

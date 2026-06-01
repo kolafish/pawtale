@@ -1,54 +1,64 @@
-# Pawtale - 是我的CP呀
+# Pawtale
 
-AI 辅助内容创作平台，降低内容创作的门槛。
+AI 辅助内容创作工作台。当前核心是以项目为单位管理写作，支持小说、公众号文章、回忆录三个创作方向，并保留全局角色/场景资料库作为可复用素材来源。
+
+## 当前能力
+
+- 项目类型：小说、公众号、回忆录
+- 项目结构：Project -> DocumentGroup -> Document
+- 项目内参考资料：角色、地点、笔记、大纲
+- 全局资料库：角色库、场景库，可导入到项目资料，也可从项目资料导出
+- 写作编辑器：自动保存、Cmd+S、字数统计、TXT 导出
+- AI 辅助：续写、单模型修改、多模型修改对比、diff review、项目内容分析
+- 多模型：Claude Opus 4.6、Claude Sonnet 4.6、DeepSeek
+- 登录与用户隔离：项目、资料和 API 均基于当前用户访问
+
+## 产品方向
+
+Pawtale 目前保留在一个代码库中，通过项目类型和 workspace 边界拆分产品体验：
+
+- 小说创作：章节结构、大纲、人物设定、Inspector、项目分析
+- 公众号创作：较短篇幅，当前复用共享草稿工作台
+- 回忆录创作：问题驱动，当前已有回忆问题面板；后续会偏移动端和语音输入
 
 ## 项目结构
 
-```
+```text
 Pawtale/
-├── backend/          # FastAPI 后端
+├── backend/                    # FastAPI + async SQLAlchemy
 │   ├── app/
-│   │   ├── main.py
-│   │   ├── config.py
-│   │   ├── database.py
-│   │   ├── models/
-│   │   ├── schemas/
-│   │   ├── routers/
-│   │   └── services/
-│   ├── tests/
-│   └── requirements.txt
-├── frontend/         # React 前端
+│   │   ├── domain/             # 项目类型和默认模板
+│   │   ├── models/             # SQLAlchemy models
+│   │   ├── routers/            # API routers
+│   │   ├── schemas/            # Pydantic schemas
+│   │   └── services/           # 业务服务和 AI 服务
+│   └── tests/
+├── frontend/                   # React + TypeScript + Vite
 │   └── src/
 │       ├── components/
+│       ├── domain/
 │       ├── hooks/
 │       ├── stores/
-│       ├── constants/
-│       ├── api/
-│       └── types/
-├── data/             # SQLite 数据库
-├── PRODUCT.md        # 产品文档
-└── TECH.md           # 技术文档
+│       └── api/
+├── data/                       # SQLite 数据库和项目文档文件
+├── PRODUCT.md                  # 产品文档
+└── TECH.md                     # 技术文档
 ```
 
 ## 快速开始
 
-### 1. 启动后端
+### 后端
 
 ```bash
 cd backend
 python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
+source venv/bin/activate
 pip install -r requirements.txt
-
-# 配置环境变量
 cp .env.example .env
-# 编辑 .env 填入 API keys
-
-# 启动服务
 PYTHONPATH=. uvicorn app.main:app --reload --port 8000
 ```
 
-### 2. 启动前端
+### 前端
 
 ```bash
 cd frontend
@@ -56,37 +66,38 @@ npm install
 npm run dev
 ```
 
-### 3. 访问应用
-
-打开浏览器访问 http://localhost:5173
-
-## 已实现功能
-
-- [x] 角色创建和管理（含深度字段：核心性格、致命弱点、成长弧线等）
-- [x] 场景库（预设 + 自定义 + AI 生成）
-- [x] 多模型支持（DeepSeek / Claude Opus 4.6 / Claude Sonnet 4.6）
-- [x] 故事大纲系统（引导式 4 步创建向导）
-- [x] 故事生成与剧情分支选择
-- [x] 角色头像生成（GPT-4o）
-- [x] 双创作模式
-  - 自由写作：全宽编辑器 + 可折叠侧边栏（提炼/资源/作品）
-  - 互动创作：左栏 Tab（角色/场景/大纲/故事）+ 右栏故事预览
-- [x] 写作增强功能：自动保存、字数统计、Cmd+S、AI 续写分隔符、导出 .txt
-- [x] AI 自动提炼（角色/场景/大纲），可一键存入全局库
-- [x] 故事中动态场景切换和角色管理
+访问 http://localhost:5173
 
 ## 环境变量
 
+后端读取 `backend/.env`：
+
 | 变量 | 说明 |
-|------|------|
-| DEEPSEEK_API_KEY | DeepSeek API 密钥 |
-| DEEPSEEK_BASE_URL | DeepSeek API 地址 |
-| ANTHROPIC_AUTH_TOKEN | Claude API 认证令牌（可选） |
-| ANTHROPIC_BASE_URL | Claude API 地址（可选） |
-| OPENAI_API_KEY | OpenAI API 密钥（用于图像生成） |
-| DEFAULT_AI_MODEL | 默认 AI 模型（默认 `claude-opus-4`；可选 `deepseek` / `claude-opus-4` / `claude-sonnet-4`） |
+| --- | --- |
+| `APP_ENV` | 应用环境，默认 `development` |
+| `APP_SECRET_KEY` | session cookie 签名密钥 |
+| `DATABASE_URL` | 可选数据库连接；不设置时使用 `data/pawtale.db` |
+| `DEEPSEEK_API_KEY` | DeepSeek API key |
+| `DEEPSEEK_BASE_URL` | DeepSeek API 地址 |
+| `ANTHROPIC_AUTH_TOKEN` | Claude 代理认证 token |
+| `ANTHROPIC_BASE_URL` | Claude 代理地址，OpenAI 兼容格式 |
+| `OPENAI_API_KEY` | OpenAI key，用于图像生成 |
+| `DEFAULT_AI_MODEL` | 默认模型：`claude-opus-4` / `claude-sonnet-4` / `deepseek` |
+
+## 常用命令
+
+```bash
+# 前端检查
+cd frontend && npm run lint
+cd frontend && npm run build
+
+# 后端测试
+cd backend && PYTHONFAULTHANDLER=1 venv/bin/python -m pytest -q -p no:capture
+```
 
 ## 文档
 
-- [产品文档](./PRODUCT.md)
-- [技术文档](./TECH.md)
+- [PRODUCT.md](./PRODUCT.md)
+- [TECH.md](./TECH.md)
+- [backend/README.md](./backend/README.md)
+- [frontend/README.md](./frontend/README.md)
