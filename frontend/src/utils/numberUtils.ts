@@ -16,17 +16,3 @@ export function toChineseNumber(num: number): string {
   // For larger numbers, just use Arabic numerals
   return num.toString();
 }
-
-/**
- * Generate group label (第一卷, 第二卷, etc.)
- */
-export function getGroupLabel(index: number): string {
-  return `第${toChineseNumber(index + 1)}卷`;
-}
-
-/**
- * Generate document label (第一章, 第二章, etc.)
- */
-export function getDocumentLabel(index: number): string {
-  return `第${toChineseNumber(index + 1)}章`;
-}
