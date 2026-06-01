@@ -1,7 +1,6 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { FileText } from 'lucide-react';
-import { AI_MODEL_OPTIONS } from '../../constants/aiModels';
-import { useAIRevision } from '../../hooks/useAIRevision';
+import { useDraftRevision } from '../../hooks/project/useDraftRevision';
 import { useProjectState } from '../../hooks/useProjectState';
 import { useReferenceEditor } from '../../hooks/useReferenceEditor';
 import { useAppStore } from '../../stores/appStore';
@@ -30,51 +29,18 @@ export function ProjectDraftWorkspace({
 }: ProjectDraftWorkspaceProps) {
   const currentReferenceId = useAppStore((state) => state.currentReferenceId);
   const ps = useProjectState();
-  const revision = useAIRevision();
+  const revision = useDraftRevision({
+    projectId: project.id,
+    currentDocumentId: ps.currentDocumentId,
+    documentContent: ps.documentContent,
+    aiModel: ps.aiModel,
+    debugMode: ps.debugMode,
+    setDocumentContent: ps.setDocumentContent,
+    setIsReviewing: ps.setIsReviewing,
+  });
   const refEditor = useReferenceEditor();
   const [showAnalyze, setShowAnalyze] = useState(false);
   const [mobileBinderOpen, setMobileBinderOpen] = useState(false);
-
-  useEffect(() => {
-    ps.setIsReviewing(revision.isReviewing);
-  }, [revision.isReviewing]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const handleRequestRevision = async () => {
-    if (!ps.currentDocumentId) return;
-    await revision.requestRevision(
-      project.id,
-      ps.currentDocumentId,
-      ps.documentContent,
-      ps.aiModel,
-      ps.debugMode,
-    );
-  };
-
-  const handleRequestMultiRevision = async () => {
-    if (!ps.currentDocumentId) return;
-    const models = AI_MODEL_OPTIONS.map(m => m.value);
-    await revision.requestMultiRevision(
-      project.id,
-      ps.currentDocumentId,
-      ps.documentContent,
-      models,
-      ps.debugMode,
-    );
-  };
-
-  const handleApplyRevision = () => {
-    const result = revision.applyRevision();
-    if (result !== null) {
-      if (revision.revisionScope === 'selection' && revision.selection) {
-        const before = ps.documentContent.substring(0, revision.selection.start);
-        const after = ps.documentContent.substring(revision.selection.end);
-        ps.setDocumentContent(before + result + after);
-      } else {
-        ps.setDocumentContent(result);
-      }
-      revision.clearRevision();
-    }
-  };
 
   const renderEditor = () => {
     if (ps.currentDocumentId) {
@@ -97,7 +63,7 @@ export function ProjectDraftWorkspace({
           onToggleChunk={revision.toggleChunk}
           onAcceptAll={revision.acceptAll}
           onRejectAll={revision.rejectAll}
-          onApplyRevision={handleApplyRevision}
+          onApplyRevision={revision.applyRevision}
           onCancelRevision={revision.clearRevision}
           multiResults={revision.multiResults}
           activeTabIndex={revision.activeTabIndex}
@@ -239,8 +205,8 @@ export function ProjectDraftWorkspace({
           isRevising={revision.isRevising}
           isMultiRevising={revision.isMultiRevising}
           isReviewing={revision.isReviewing}
-          onRequestRevision={handleRequestRevision}
-          onRequestMultiRevision={handleRequestMultiRevision}
+          onRequestRevision={revision.requestRevision}
+          onRequestMultiRevision={revision.requestMultiRevision}
           continueInstruction={ps.continueInstruction}
           setContinueInstruction={ps.setContinueInstruction}
           isContinuing={ps.isContinuing}
