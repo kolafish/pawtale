@@ -152,6 +152,10 @@ export function useDocumentDraft({
     markSnapshotSaved(emptySnapshot());
   }, [markSnapshotSaved, setCurrentDocumentId]);
 
+  const setIsReviewing = useCallback((value: boolean) => {
+    isReviewingRef.current = value;
+  }, []);
+
   const saveCurrentIfDirty = useCallback(async () => {
     if (!currentProject || !currentDocumentId || isLoadingDocRef.current) return;
     const snapshot = getCurrentSnapshot();
@@ -242,6 +246,6 @@ export function useDocumentDraft({
     replaceContentAsSaved,
     markCurrentDocumentRenamed,
     resetDraft,
-    setIsReviewing: (value: boolean) => { isReviewingRef.current = value; },
+    setIsReviewing,
   };
 }
