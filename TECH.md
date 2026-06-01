@@ -216,6 +216,7 @@ Pawtale/
 │       │   ├── WritingWorkspace.tsx # 写作模式路由（ProjectHome / 产品 workspace）
 │       │   ├── workspaces/
 │       │   │   ├── ProjectDraftWorkspace.tsx # 共享草稿工作台（Binder + Editor + AI 修改 + 可选产品面板）
+│       │   │   ├── WorkspaceShell.tsx # 工作台布局骨架（Binder/移动端目录/右侧面板/弹窗槽位）
 │       │   │   ├── NovelWorkspace.tsx # 小说工作台（含 Inspector / AI 分析）
 │       │   │   ├── ArticleWorkspace.tsx # 公众号工作台（正文 / 素材入口）
 │       │   │   └── MemoirWorkspace.tsx # 回忆录工作台（问题驱动面板）
