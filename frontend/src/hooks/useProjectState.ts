@@ -4,6 +4,7 @@ import { projectsApi } from '../api';
 import { useAppStore } from '../stores/appStore';
 import type { AIDebugInfo } from '../types';
 import { useDocumentDraft } from './project/useDocumentDraft';
+import { useProjectStructure } from './project/useProjectStructure';
 
 export type { SaveStatus } from './project/useDocumentDraft';
 
@@ -33,6 +34,15 @@ export function useProjectState() {
     currentDocumentId,
     setCurrentDocumentId,
     refreshProject,
+  });
+
+  const structure = useProjectStructure({
+    currentProject,
+    currentDocumentId,
+    refreshProject,
+    loadDocument: draft.loadDocument,
+    markCurrentDocumentRenamed: draft.markCurrentDocumentRenamed,
+    resetDraft: draft.resetDraft,
   });
 
   // ─── AI continue mutation ───
@@ -85,69 +95,6 @@ export function useProjectState() {
   const closeProject = () => {
     clearCurrentProject();
     queryClient.invalidateQueries({ queryKey: ['projects'] });
-  };
-
-  // ─── Binder operations ───
-  const createGroup = async (name: string) => {
-    if (!currentProject) return;
-    await projectsApi.createGroup(currentProject.id, name);
-    await refreshProject();
-  };
-
-  const renameGroup = async (groupId: string, name: string) => {
-    if (!currentProject) return;
-    await projectsApi.updateGroup(currentProject.id, groupId, name);
-    await refreshProject();
-  };
-
-  const deleteGroup = async (groupId: string) => {
-    if (!currentProject) return;
-    await projectsApi.deleteGroup(currentProject.id, groupId);
-    await refreshProject();
-  };
-
-  const createDocument = async (groupId: string, name?: string) => {
-    if (!currentProject) return;
-    const doc = await projectsApi.createDocument(currentProject.id, groupId, name);
-    await refreshProject();
-    await draft.loadDocument(doc.id);
-  };
-
-  const renameDocument = async (docId: string, name: string) => {
-    if (!currentProject) return;
-    await projectsApi.updateDocument(currentProject.id, docId, { name });
-    await refreshProject();
-    if (docId === currentDocumentId) {
-      draft.markCurrentDocumentRenamed(name);
-    }
-  };
-
-  const deleteDocument = async (docId: string) => {
-    if (!currentProject) return;
-    await projectsApi.deleteDocument(currentProject.id, docId);
-    if (docId === currentDocumentId) {
-      // Switch to another document
-      const allDocs = currentProject.groups.flatMap((g) => g.documents);
-      const remaining = allDocs.filter((d) => d.id !== docId);
-      if (remaining.length > 0) {
-        await draft.loadDocument(remaining[0].id);
-      } else {
-        draft.resetDraft();
-      }
-    }
-    await refreshProject();
-  };
-
-  const reorderDocuments = async (items: { id: string; group_id: string; sort_order: number }[]) => {
-    if (!currentProject) return;
-    await projectsApi.reorderDocuments(currentProject.id, items);
-    await refreshProject();
-  };
-
-  const reorderGroups = async (items: { id: string; sort_order: number }[]) => {
-    if (!currentProject) return;
-    await projectsApi.reorderGroups(currentProject.id, items);
-    await refreshProject();
   };
 
   // ─── Reference operations (for Binder) ───
@@ -234,14 +181,14 @@ export function useProjectState() {
     setIsReviewing: draft.setIsReviewing,
 
     // Binder operations
-    createGroup,
-    renameGroup,
-    deleteGroup,
-    createDocument,
-    renameDocument,
-    deleteDocument,
-    reorderDocuments,
-    reorderGroups,
+    createGroup: structure.createGroup,
+    renameGroup: structure.renameGroup,
+    deleteGroup: structure.deleteGroup,
+    createDocument: structure.createDocument,
+    renameDocument: structure.renameDocument,
+    deleteDocument: structure.deleteDocument,
+    reorderDocuments: structure.reorderDocuments,
+    reorderGroups: structure.reorderGroups,
 
     // Reference operations
     createReference,
