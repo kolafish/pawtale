@@ -29,6 +29,9 @@ class Project(Base):
     sessions: Mapped[list["WritingSession"]] = relationship(
         "WritingSession", back_populates="project", cascade="all, delete-orphan",
     )
+    memoir_sessions: Mapped[list["MemoirSession"]] = relationship(
+        "MemoirSession", back_populates="project", cascade="all, delete-orphan",
+    )
 
 
 class DocumentGroup(Base):
