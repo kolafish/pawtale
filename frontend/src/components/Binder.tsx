@@ -57,6 +57,13 @@ export function Binder({
   const [contextMenu, setContextMenu] = useState<ContextMenuState>(null);
   const profile = getProjectProfile(project.type);
   const drag = useBinderDrag({ project, onReorderGroups, onReorderDocuments });
+  const groupActionName = project.type === 'novel' ? '卷' : profile.groupUnit;
+  const createGroupTitle = `新建${groupActionName}`;
+
+  const requestCreateGroup = () => {
+    const name = prompt(`${groupActionName}名称`, defaultGroupName(project.type, project.groups.length));
+    if (name?.trim()) onCreateGroup(name.trim());
+  };
 
   const toggleSection = (key: SectionKey) => {
     setCollapsedSections((prev) => {
@@ -135,12 +142,9 @@ export function Binder({
               </button>
             )}
             <button
-              onClick={() => {
-                const name = prompt('分组名称', defaultGroupName(project.type, project.groups.length));
-                if (name?.trim()) onCreateGroup(name.trim());
-              }}
+              onClick={requestCreateGroup}
               className="p-1 rounded hover:bg-gray-200 text-gray-500"
-              title="新建分组"
+              title={createGroupTitle}
             >
               <FolderPlus size={14} />
             </button>
@@ -162,6 +166,17 @@ export function Binder({
               <span className="flex-1 text-xs font-semibold text-gray-500 uppercase tracking-wider">
                 {profile.manuscriptLabel}
               </span>
+              <button
+                onClick={(event) => {
+                  event.stopPropagation();
+                  requestCreateGroup();
+                }}
+                className="p-0.5 rounded hover:bg-gray-200 text-gray-400 hover:text-gray-600"
+                title={createGroupTitle}
+                aria-label={createGroupTitle}
+              >
+                <FolderPlus size={12} />
+              </button>
             </div>
             {!collapsedSections.has('manuscript') && (
               <ManuscriptTree
