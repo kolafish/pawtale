@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from app.database import init_db, engine
 from app.migrations.auth import migrate_auth_schema
-from app.routers import auth_router, projects_router
+from app.routers import auth_router, memoir_router, projects_router
 
 
 async def _auto_migrate():
@@ -48,6 +48,7 @@ app.add_middleware(
 
 # 注册路由
 app.include_router(auth_router)
+app.include_router(memoir_router)
 app.include_router(projects_router)
 
 
