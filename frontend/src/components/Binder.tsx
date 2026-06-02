@@ -126,7 +126,7 @@ export function Binder({
       onDragEnd={drag.handleDragEnd}
     >
       <div
-        className="w-[250px] flex-shrink-0 h-full flex flex-col bg-gray-50 border-r border-gray-200 select-none"
+        className="w-full flex-shrink-0 h-full flex flex-col bg-gray-50 border-r border-gray-200 select-none"
         onClick={() => setContextMenu(null)}
       >
         <div className="px-3 py-2 border-b border-gray-200 flex items-center justify-between">
