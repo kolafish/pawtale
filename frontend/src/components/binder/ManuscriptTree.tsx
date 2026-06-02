@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronRight, FilePlus, FileText, GripVertical } from 'lucide-react';
+import { ChevronDown, ChevronRight, FilePlus, FileText, GripVertical, Trash2 } from 'lucide-react';
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import type { DocumentGroup, DocumentMeta, ProjectType } from '../../types';
@@ -26,6 +26,7 @@ interface ManuscriptTreeProps {
   onGroupContextMenu: (event: React.MouseEvent, groupId: string) => void;
   onDocumentContextMenu: (event: React.MouseEvent, documentId: string) => void;
   onCreateDocument: (groupId: string) => void;
+  onDeleteDocument: (documentId: string) => void;
   onSelectDocument: (documentId: string) => void;
 }
 
@@ -45,6 +46,7 @@ export function ManuscriptTree({
   onGroupContextMenu,
   onDocumentContextMenu,
   onCreateDocument,
+  onDeleteDocument,
   onSelectDocument,
 }: ManuscriptTreeProps) {
   return (
@@ -69,6 +71,7 @@ export function ManuscriptTree({
           onCreateDocument={() => onCreateDocument(group.id)}
           onSelectDocument={onSelectDocument}
           onDocumentContextMenu={onDocumentContextMenu}
+          onDeleteDocument={onDeleteDocument}
           onDocumentStartRename={onStartRename}
           onCommitDocumentRename={onCommitDocumentRename}
         />
@@ -95,6 +98,7 @@ interface SortableGroupProps {
   onCreateDocument: () => void;
   onSelectDocument: (documentId: string) => void;
   onDocumentContextMenu: (event: React.MouseEvent, documentId: string) => void;
+  onDeleteDocument: (documentId: string) => void;
   onDocumentStartRename: (documentId: string, name: string) => void;
   onCommitDocumentRename: (documentId: string) => void;
 }
@@ -117,6 +121,7 @@ function SortableGroup({
   onCreateDocument,
   onSelectDocument,
   onDocumentContextMenu,
+  onDeleteDocument,
   onDocumentStartRename,
   onCommitDocumentRename,
 }: SortableGroupProps) {
@@ -192,6 +197,7 @@ function SortableGroup({
                 onSelect={() => onSelectDocument(doc.id)}
                 onContextMenu={(event) => onDocumentContextMenu(event, doc.id)}
                 onStartRename={() => onDocumentStartRename(doc.id, doc.name)}
+                onDelete={() => onDeleteDocument(doc.id)}
                 onCommitRename={() => onCommitDocumentRename(doc.id)}
                 onSetEditValue={onSetEditValue}
                 onCancelEdit={onCancelEdit}
@@ -222,6 +228,7 @@ interface SortableDocumentProps {
   onSelect: () => void;
   onContextMenu: (event: React.MouseEvent) => void;
   onStartRename: () => void;
+  onDelete: () => void;
   onCommitRename: () => void;
   onSetEditValue: (value: string) => void;
   onCancelEdit: () => void;
@@ -237,6 +244,7 @@ function SortableDocument({
   onSelect,
   onContextMenu,
   onStartRename,
+  onDelete,
   onCommitRename,
   onSetEditValue,
   onCancelEdit,
@@ -251,6 +259,7 @@ function SortableDocument({
     transition,
     opacity: isDragging ? 0.5 : 1,
   };
+  const deleteTitle = projectType === 'novel' ? '删除章节' : '删除文档';
 
   return (
     <div
@@ -283,6 +292,17 @@ function SortableDocument({
       <span className="text-[10px] text-gray-400 flex-shrink-0 w-8 text-right">
         {doc.word_count > 0 ? (doc.word_count >= 1000 ? `${(doc.word_count / 1000).toFixed(1)}k` : doc.word_count) : ''}
       </span>
+      <button
+        onClick={(event) => {
+          event.stopPropagation();
+          onDelete();
+        }}
+        className="opacity-0 group-hover/doc:opacity-100 p-0.5 rounded hover:bg-red-50 text-gray-300 hover:text-red-500"
+        title={deleteTitle}
+        aria-label={deleteTitle}
+      >
+        <Trash2 size={11} />
+      </button>
     </div>
   );
 }

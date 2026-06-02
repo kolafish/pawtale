@@ -180,6 +180,7 @@ export function Binder({
                 onGroupContextMenu={(event, groupId) => openContextMenu(event, groupId, 'group')}
                 onDocumentContextMenu={(event, documentId) => openContextMenu(event, documentId, 'doc')}
                 onCreateDocument={onCreateDocument}
+                onDeleteDocument={onDeleteDocument}
                 onSelectDocument={onSelectDocument}
               />
             )}
