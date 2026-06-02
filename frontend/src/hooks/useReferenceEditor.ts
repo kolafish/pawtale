@@ -6,7 +6,7 @@ import type { ReferenceItem } from '../types';
 export type RefSaveStatus = 'saved' | 'saving' | 'unsaved';
 
 export function useReferenceEditor() {
-  const { currentProject, currentReferenceId } = useAppStore();
+  const { currentProject, currentReferenceId, setCurrentProject } = useAppStore();
 
   const [referenceData, setReferenceData] = useState<ReferenceItem | null>(null);
   const [saveStatus, setSaveStatus] = useState<RefSaveStatus>('saved');
@@ -41,19 +41,40 @@ export function useReferenceEditor() {
   }, [currentReferenceId, loadReference]);
 
   // ─── Save ───
+  const syncProjectReference = useCallback((saved: ReferenceItem) => {
+    const project = useAppStore.getState().currentProject;
+    if (!project) return;
+
+    setCurrentProject({
+      ...project,
+      references: project.references.map((ref) =>
+        ref.id === saved.id
+          ? {
+              id: saved.id,
+              type: saved.type,
+              name: saved.name,
+              sort_order: saved.sort_order,
+            }
+          : ref,
+      ),
+    });
+  }, [setCurrentProject]);
+
   const doSave = useCallback(async () => {
     if (!currentProject || !referenceData || isLoadingRef.current) return;
     const current = JSON.stringify(referenceData);
     if (current === lastSavedRef.current) return;
     setSaveStatus('saving');
-    await projectsApi.updateReference(currentProject.id, referenceData.id, {
+    const saved = await projectsApi.updateReference(currentProject.id, referenceData.id, {
       name: referenceData.name,
       content: referenceData.content,
       metadata_json: referenceData.metadata_json,
     });
-    lastSavedRef.current = JSON.stringify(referenceData);
+    lastSavedRef.current = JSON.stringify(saved);
+    setReferenceData(saved);
+    syncProjectReference(saved);
     setSaveStatus('saved');
-  }, [currentProject, referenceData]);
+  }, [currentProject, referenceData, syncProjectReference]);
 
   // Auto-save (3s debounce)
   useEffect(() => {
