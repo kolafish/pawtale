@@ -64,9 +64,18 @@ class MemoirAnswerCreate(BaseModel):
     duration_seconds: int | None = None
 
 
+class MemoirTextAnswerCreate(BaseModel):
+    question_id: str
+    text: str
+
+
 class MemoirAnswerUpdate(BaseModel):
     transcript_edited: str | None = None
     status: MemoirAnswerStatus | None = None
+
+
+class MemoirTextAnswerUpdate(BaseModel):
+    text: str
 
 
 class MemoirAnswerResponse(BaseModel):

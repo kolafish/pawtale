@@ -1,7 +1,9 @@
 from app.routers.auth import router as auth_router
+from app.routers.memoir import router as memoir_router
 from app.routers.projects import router as projects_router
 
 __all__ = [
     "auth_router",
+    "memoir_router",
     "projects_router",
 ]
