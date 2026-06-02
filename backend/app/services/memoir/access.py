@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.domain.projects.types import ProjectType
-from app.models.memoir import MemoirAnswer, MemoirQuestion, MemoirSession
+from app.models.memoir import MemoirAnswer, MemoirDraft, MemoirQuestion, MemoirSession
 from app.models.projects import Project
 
 
@@ -71,3 +71,19 @@ async def load_answer(db: AsyncSession, answer_id: str, user_id: str) -> MemoirA
     if not answer:
         raise HTTPException(status_code=404, detail="回答不存在")
     return answer
+
+
+async def load_draft(db: AsyncSession, draft_id: str, user_id: str) -> MemoirDraft:
+    result = await db.execute(
+        select(MemoirDraft)
+        .join(MemoirAnswer, MemoirDraft.answer_id == MemoirAnswer.id)
+        .join(MemoirQuestion, MemoirAnswer.question_id == MemoirQuestion.id)
+        .join(MemoirSession, MemoirQuestion.session_id == MemoirSession.id)
+        .join(Project, MemoirSession.project_id == Project.id)
+        .where(MemoirDraft.id == draft_id, Project.user_id == user_id)
+        .options(selectinload(MemoirDraft.answer))
+    )
+    draft = result.scalar_one_or_none()
+    if not draft:
+        raise HTTPException(status_code=404, detail="整理稿不存在")
+    return draft

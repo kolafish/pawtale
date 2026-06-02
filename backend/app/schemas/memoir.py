@@ -98,6 +98,14 @@ class MemoirDraftCreate(BaseModel):
     content_edited: str = ""
 
 
+class MemoirDraftGenerateRequest(BaseModel):
+    ai_model: str | None = None
+
+
+class MemoirDraftEditRequest(BaseModel):
+    content_edited: str
+
+
 class MemoirDraftUpdate(BaseModel):
     content_edited: str | None = None
     status: MemoirDraftStatus | None = None

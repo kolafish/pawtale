@@ -6,6 +6,9 @@ from app.database import get_db
 from app.models.users import User
 from app.schemas.memoir import (
     MemoirAnswerResponse,
+    MemoirDraftEditRequest,
+    MemoirDraftGenerateRequest,
+    MemoirDraftResponse,
     MemoirInterviewState,
     MemoirQuestionResponse,
     MemoirSessionCreate,
@@ -14,6 +17,7 @@ from app.schemas.memoir import (
 )
 from app.schemas.projects import ProjectResponse
 from app.services.memoir import answers as memoir_answers
+from app.services.memoir import drafting as memoir_drafting
 from app.services.memoir import interview as memoir_interview
 from app.services.memoir import projects as memoir_projects
 
@@ -93,3 +97,37 @@ async def update_mobile_memoir_answer(
     current_user: User = Depends(get_current_user),
 ):
     return await memoir_answers.update_answer_text(db, answer_id, current_user.id, req.text)
+
+
+@router.post("/answers/{answer_id}/draft", response_model=MemoirDraftResponse)
+async def generate_mobile_memoir_draft(
+    answer_id: str,
+    req: MemoirDraftGenerateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await memoir_drafting.generate_draft_for_answer(
+        db,
+        answer_id,
+        current_user.id,
+        req,
+    )
+
+
+@router.patch("/drafts/{draft_id}", response_model=MemoirDraftResponse)
+async def update_mobile_memoir_draft(
+    draft_id: str,
+    req: MemoirDraftEditRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await memoir_drafting.update_draft_content(db, draft_id, current_user.id, req)
+
+
+@router.post("/drafts/{draft_id}/accept", response_model=MemoirDraftResponse)
+async def accept_mobile_memoir_draft(
+    draft_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await memoir_drafting.accept_draft(db, draft_id, current_user.id)

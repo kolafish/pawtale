@@ -1,0 +1,135 @@
+from fastapi import HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.domain.memoir import MemoirAnswerStatus, MemoirDraftStatus
+from app.models.memoir import MemoirDraft
+from app.schemas.memoir import (
+    MemoirDraftEditRequest,
+    MemoirDraftGenerateRequest,
+    MemoirDraftResponse,
+)
+from app.services import get_ai_service
+from app.services.ai_types import AITextClient
+from app.services.memoir.access import load_answer, load_draft
+
+
+SYSTEM_PROMPT = "你是一位专业的回忆录写作助手，擅长把口述回答整理成真实、克制、自然的回忆录片段。"
+
+
+def _answer_text(raw: str, edited: str) -> str:
+    text = (edited or raw or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="回答内容为空，无法整理")
+    return text
+
+
+def _build_user_prompt(question_prompt: str, answer_text: str) -> str:
+    return f"""请根据下面的访谈问题和用户回答，整理成一段第一人称回忆录正文。
+
+要求：
+- 保留用户回答中的事实，不编造具体人物、时间、地点或事件
+- 可以补足自然衔接和情绪表达，但不要过度文学化
+- 用第一人称
+- 控制在 150 到 300 字
+- 直接输出正文，不要标题、列表、解释或引号
+
+访谈问题：
+{question_prompt}
+
+用户回答：
+{answer_text}
+"""
+
+
+async def _generate_draft_text(
+    answer_text: str,
+    question_prompt: str,
+    req: MemoirDraftGenerateRequest,
+    ai_client: AITextClient | None,
+) -> str:
+    client = ai_client or get_ai_service(req.ai_model)
+    try:
+        content = await client._call_llm(
+            SYSTEM_PROMPT,
+            _build_user_prompt(question_prompt, answer_text),
+            temperature=0.6,
+            max_tokens=1200,
+            timeout=90.0,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"AI整理失败: {str(exc)}") from exc
+    draft_text = str(content).strip()
+    if not draft_text:
+        raise HTTPException(status_code=502, detail="AI未返回可用整理稿")
+    return draft_text
+
+
+async def generate_draft_for_answer(
+    db: AsyncSession,
+    answer_id: str,
+    user_id: str,
+    req: MemoirDraftGenerateRequest,
+    ai_client: AITextClient | None = None,
+) -> MemoirDraftResponse:
+    answer = await load_answer(db, answer_id, user_id)
+    if answer.status == MemoirAnswerStatus.CONFIRMED.value:
+        raise HTTPException(status_code=409, detail="已确认的回答不能重新整理")
+
+    answer_text = _answer_text(answer.transcript_raw, answer.transcript_edited)
+    draft_text = await _generate_draft_text(
+        answer_text,
+        answer.question.prompt,
+        req,
+        ai_client,
+    )
+
+    if answer.draft:
+        draft = answer.draft
+        draft.content_raw = draft_text
+        draft.content_edited = draft_text
+        draft.status = MemoirDraftStatus.DRAFT.value
+    else:
+        draft = MemoirDraft(
+            answer_id=answer.id,
+            content_raw=draft_text,
+            content_edited=draft_text,
+            status=MemoirDraftStatus.DRAFT.value,
+        )
+        db.add(draft)
+
+    answer.status = MemoirAnswerStatus.DRAFTED.value
+    await db.commit()
+    return MemoirDraftResponse.model_validate(draft)
+
+
+async def update_draft_content(
+    db: AsyncSession,
+    draft_id: str,
+    user_id: str,
+    req: MemoirDraftEditRequest,
+) -> MemoirDraftResponse:
+    draft = await load_draft(db, draft_id, user_id)
+    if draft.status == MemoirDraftStatus.ACCEPTED.value:
+        raise HTTPException(status_code=409, detail="已确认的整理稿不能编辑")
+    content = req.content_edited.strip()
+    if not content:
+        raise HTTPException(status_code=400, detail="整理稿不能为空")
+    draft.content_edited = content
+    await db.commit()
+    return MemoirDraftResponse.model_validate(draft)
+
+
+async def accept_draft(
+    db: AsyncSession,
+    draft_id: str,
+    user_id: str,
+) -> MemoirDraftResponse:
+    draft = await load_draft(db, draft_id, user_id)
+    if not draft.content_edited.strip():
+        raise HTTPException(status_code=400, detail="整理稿不能为空")
+    draft.status = MemoirDraftStatus.ACCEPTED.value
+    draft.answer.status = MemoirAnswerStatus.CONFIRMED.value
+    await db.commit()
+    return MemoirDraftResponse.model_validate(draft)
