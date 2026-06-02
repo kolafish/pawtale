@@ -1,3 +1,14 @@
+class FakeAIClient:
+    provider_name = "fake"
+    model_name = "fake-model"
+
+    async def _call_llm(self, *args, **kwargs):
+        return "外婆家的院子，是我童年里最清晰的地方。"
+
+    def _wrap_debug(self, *args, **kwargs):
+        return {}
+
+
 async def test_mobile_memoir_routes_require_login(anonymous_client):
     response = await anonymous_client.get("/api/mobile/memoir/project")
 
@@ -68,6 +79,47 @@ async def test_mobile_memoir_text_answer_flow(client):
     next_response = await client.get("/api/mobile/memoir/questions/next")
     assert next_response.status_code == 200
     assert next_response.json()["id"] != question_id
+
+
+async def test_mobile_memoir_draft_flow(client, monkeypatch):
+    monkeypatch.setattr(
+        "app.services.memoir.drafting.get_ai_service",
+        lambda ai_model=None: FakeAIClient(),
+    )
+    session_response = await client.get("/api/mobile/memoir/sessions/current")
+    question_id = session_response.json()["current_question"]["id"]
+    answer_response = await client.post(
+        "/api/mobile/memoir/answers",
+        json={"question_id": question_id, "text": "我记得外婆家的院子。"},
+    )
+    answer_id = answer_response.json()["id"]
+
+    draft_response = await client.post(
+        f"/api/mobile/memoir/answers/{answer_id}/draft",
+        json={"ai_model": "deepseek"},
+    )
+    assert draft_response.status_code == 200
+    draft = draft_response.json()
+    assert draft["status"] == "draft"
+    assert draft["content_raw"] == "外婆家的院子，是我童年里最清晰的地方。"
+    assert draft["content_edited"] == draft["content_raw"]
+
+    edit_response = await client.patch(
+        f"/api/mobile/memoir/drafts/{draft['id']}",
+        json={"content_edited": "编辑后的回忆录正文"},
+    )
+    assert edit_response.status_code == 200
+    assert edit_response.json()["content_edited"] == "编辑后的回忆录正文"
+
+    accept_response = await client.post(f"/api/mobile/memoir/drafts/{draft['id']}/accept")
+    assert accept_response.status_code == 200
+    assert accept_response.json()["status"] == "accepted"
+
+    regenerate_response = await client.post(
+        f"/api/mobile/memoir/answers/{answer_id}/draft",
+        json={},
+    )
+    assert regenerate_response.status_code == 409
 
 
 async def test_mobile_memoir_rejects_blank_answer(client):
