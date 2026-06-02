@@ -143,6 +143,8 @@ Layout
 - AI 将回答整理成段落和章节
 - 小程序端优先的简化交互
 
+回忆录微信小程序的产品边界、数据组织、页面设计和实施顺序见 [docs/MEMOIR_MINIPROGRAM_PRODUCT.md](docs/MEMOIR_MINIPROGRAM_PRODUCT.md)。
+
 ## 路线图
 
 ### 当前阶段
