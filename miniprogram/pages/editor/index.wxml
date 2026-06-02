@@ -1,0 +1,37 @@
+<view class="page stack">
+  <view class="stack">
+    <text class="eyebrow">编辑</text>
+    <text class="title">调整回答和正文</text>
+  </view>
+
+  <view wx:if="{{error}}" class="error">{{error}}</view>
+
+  <view class="stack">
+    <text class="eyebrow">我的回答</text>
+    <textarea
+      class="textarea"
+      value="{{transcriptText}}"
+      maxlength="-1"
+      bindinput="onTranscriptInput"
+    />
+  </view>
+
+  <view class="stack">
+    <text class="eyebrow">整理后的正文</text>
+    <textarea
+      class="textarea editor-draft"
+      value="{{draftText}}"
+      maxlength="-1"
+      bindinput="onDraftInput"
+    />
+  </view>
+
+  <view class="button-row">
+    <button class="button button-secondary" loading="{{saving}}" bindtap="saveEditsOnly">
+      保存
+    </button>
+    <button class="button button-primary" loading="{{saving}}" bindtap="saveAndContinue">
+      保存并继续
+    </button>
+  </view>
+</view>

@@ -1,0 +1,7 @@
+.editor-draft {
+  min-height: 360rpx;
+}
+
+.button-row .button {
+  flex: 1;
+}
