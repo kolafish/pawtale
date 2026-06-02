@@ -20,6 +20,10 @@ class Base(DeclarativeBase):
     pass
 
 
+def register_models() -> None:
+    import app.models  # noqa: F401
+
+
 async def get_db():
     async with async_session_maker() as session:
         try:
@@ -29,5 +33,6 @@ async def get_db():
 
 
 async def init_db():
+    register_models()
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)

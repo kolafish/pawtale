@@ -8,6 +8,13 @@ from app.models.projects import (
     DocumentReference,
     WritingSession,
 )
+from app.models.memoir import (
+    AudioFile,
+    MemoirAnswer,
+    MemoirDraft,
+    MemoirQuestion,
+    MemoirSession,
+)
 
 __all__ = [
     "Base",
@@ -18,4 +25,9 @@ __all__ = [
     "ReferenceItem",
     "DocumentReference",
     "WritingSession",
+    "AudioFile",
+    "MemoirAnswer",
+    "MemoirDraft",
+    "MemoirQuestion",
+    "MemoirSession",
 ]
