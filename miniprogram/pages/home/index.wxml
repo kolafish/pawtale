@@ -1,0 +1,29 @@
+<view class="page stack">
+  <view class="stack">
+    <text class="eyebrow">Pawtale Memoir</text>
+    <text class="title">{{projectTitle || "我的回忆录"}}</text>
+    <text class="subtitle">当前访谈：{{sessionTitle || "准备中"}}</text>
+  </view>
+
+  <view wx:if="{{error}}" class="error">{{error}}</view>
+
+  <view class="stat-row">
+    <view class="stat">
+      <view class="stat-value">{{completedCount}}</view>
+      <view class="stat-label">已完成</view>
+    </view>
+    <view class="stat">
+      <view class="stat-value">{{pendingCount}}</view>
+      <view class="stat-label">待回答</view>
+    </view>
+  </view>
+
+  <view class="surface stack" wx:if="{{latestDraftPreview}}">
+    <text class="eyebrow">最近片段</text>
+    <text class="body-text">{{latestDraftPreview}}</text>
+  </view>
+
+  <button class="button button-primary" loading="{{loading}}" bindtap="continueInterview">
+    继续回答
+  </button>
+</view>

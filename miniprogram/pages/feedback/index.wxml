@@ -1,0 +1,32 @@
+<view class="page stack">
+  <view class="stack">
+    <text class="eyebrow">回答已整理</text>
+    <text class="title">确认这段回忆</text>
+  </view>
+
+  <view wx:if="{{error}}" class="error">{{error}}</view>
+
+  <view class="surface stack">
+    <text class="eyebrow">我的回答</text>
+    <text class="body-text">{{transcript || "暂无回答文本"}}</text>
+  </view>
+
+  <view class="surface stack">
+    <text class="eyebrow">整理成文</text>
+    <text wx:if="{{generating}}" class="muted">整理中...</text>
+    <text wx:else class="body-text">{{draftText || "等待整理结果"}}</text>
+  </view>
+
+  <view class="button-row">
+    <button class="button button-secondary" disabled="{{!draftId || generating}}" bindtap="openEditor">
+      编辑
+    </button>
+    <button class="button button-primary" loading="{{accepting}}" disabled="{{!draftId || generating}}" bindtap="acceptCurrentDraft">
+      继续下一问
+    </button>
+  </view>
+
+  <button class="button button-quiet" loading="{{generating}}" bindtap="retryGenerate">
+    重新整理
+  </button>
+</view>

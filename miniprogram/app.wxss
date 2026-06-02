@@ -1,0 +1,141 @@
+page {
+  min-height: 100vh;
+  background: #f6f7f9;
+  color: #17212b;
+  font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Helvetica, Arial, sans-serif;
+}
+
+view,
+text,
+button,
+textarea {
+  box-sizing: border-box;
+}
+
+.page {
+  min-height: 100vh;
+  padding: 40rpx 32rpx 56rpx;
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 28rpx;
+}
+
+.surface {
+  background: #ffffff;
+  border: 1rpx solid #e5e7eb;
+  border-radius: 16rpx;
+  padding: 32rpx;
+}
+
+.eyebrow {
+  color: #0f766e;
+  font-size: 24rpx;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+.title {
+  color: #111827;
+  font-size: 42rpx;
+  font-weight: 800;
+  line-height: 1.25;
+  letter-spacing: 0;
+}
+
+.subtitle {
+  color: #5b6573;
+  font-size: 28rpx;
+  line-height: 1.6;
+}
+
+.body-text {
+  color: #273445;
+  font-size: 30rpx;
+  line-height: 1.75;
+}
+
+.muted {
+  color: #6b7280;
+  font-size: 26rpx;
+}
+
+.textarea {
+  width: 100%;
+  min-height: 260rpx;
+  padding: 26rpx;
+  border: 1rpx solid #d1d5db;
+  border-radius: 14rpx;
+  background: #ffffff;
+  color: #111827;
+  font-size: 30rpx;
+  line-height: 1.6;
+}
+
+.button-row {
+  display: flex;
+  gap: 20rpx;
+}
+
+.button {
+  min-height: 92rpx;
+  border-radius: 999rpx;
+  font-size: 30rpx;
+  font-weight: 700;
+  line-height: 92rpx;
+}
+
+.button-primary {
+  background: #0f766e;
+  color: #ffffff;
+}
+
+.button-secondary {
+  background: #e8faf7;
+  color: #0f766e;
+}
+
+.button-quiet {
+  background: #f3f4f6;
+  color: #374151;
+}
+
+.button-danger {
+  background: #fff1f2;
+  color: #be123c;
+}
+
+.stat-row {
+  display: flex;
+  gap: 16rpx;
+}
+
+.stat {
+  flex: 1;
+  padding: 24rpx;
+  border-radius: 14rpx;
+  background: #eef8f6;
+}
+
+.stat-value {
+  color: #0f766e;
+  font-size: 38rpx;
+  font-weight: 800;
+}
+
+.stat-label {
+  margin-top: 6rpx;
+  color: #5b6573;
+  font-size: 24rpx;
+}
+
+.error {
+  padding: 24rpx;
+  border-radius: 14rpx;
+  background: #fff1f2;
+  color: #be123c;
+  font-size: 26rpx;
+  line-height: 1.5;
+}

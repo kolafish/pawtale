@@ -39,6 +39,7 @@ Pawtale/
 │       ├── hooks/
 │       ├── stores/
 │       └── api/
+├── miniprogram/                # 微信小程序回忆录采集端
 ├── data/                       # SQLite 数据库和项目文档文件
 ├── PRODUCT.md                  # 产品文档
 └── TECH.md                     # 技术文档
@@ -101,5 +102,6 @@ cd backend && venv/bin/python -m pytest -q
 - [PRODUCT.md](./PRODUCT.md)
 - [TECH.md](./TECH.md)
 - [docs/MEMOIR_MINIPROGRAM_PRODUCT.md](./docs/MEMOIR_MINIPROGRAM_PRODUCT.md)
+- [miniprogram/README.md](./miniprogram/README.md)
 - [backend/README.md](./backend/README.md)
 - [frontend/README.md](./frontend/README.md)
