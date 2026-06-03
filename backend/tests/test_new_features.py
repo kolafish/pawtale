@@ -23,17 +23,28 @@ class TestMultiModelSupport:
         assert isinstance(service, ClaudeTextService)
         assert service.model == "claude-sonnet-4-6"
 
-    def test_get_default_service(self):
+    def test_get_default_service(self, monkeypatch):
         """测试获取默认服务"""
+        monkeypatch.setattr("app.services.ai_factory.settings.default_ai_model", "claude-opus-4")
+
         service = get_ai_service()
         assert isinstance(service, ClaudeTextService)
         assert service.model == "claude-opus-4-6"
 
-    def test_get_invalid_model(self):
+    def test_get_invalid_model(self, monkeypatch):
         """测试获取无效模型时返回默认服务"""
+        monkeypatch.setattr("app.services.ai_factory.settings.default_ai_model", "claude-opus-4")
+
         service = get_ai_service("invalid-model")
         assert isinstance(service, ClaudeTextService)
         assert service.model == "claude-opus-4-6"
+
+    def test_default_service_can_be_deepseek(self, monkeypatch):
+        """测试默认模型配置为 DeepSeek 时返回 DeepSeek 服务"""
+        monkeypatch.setattr("app.services.ai_factory.settings.default_ai_model", "deepseek")
+
+        service = get_ai_service()
+        assert isinstance(service, DeepSeekTextService)
 
 
 class TestClaudeResponseCompatibility:
@@ -79,5 +90,4 @@ class TestClaudeResponseCompatibility:
         }
         text = service._extract_response_text(result)
         assert "顾言" in text
-
 

@@ -27,12 +27,6 @@ class MemoirSessionResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-class MemoirQuestionCreate(BaseModel):
-    prompt: str
-    source: MemoirQuestionSource = MemoirQuestionSource.TEMPLATE
-    sort_order: int = 0
-
-
 class MemoirQuestionResponse(BaseModel):
     id: str
     session_id: str
@@ -47,8 +41,6 @@ class MemoirQuestionResponse(BaseModel):
 
 class AudioFileResponse(BaseModel):
     id: str
-    user_id: str
-    storage_path: str
     mime_type: str
     size_bytes: int
     duration_seconds: int | None = None
@@ -57,21 +49,9 @@ class AudioFileResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-class MemoirAnswerCreate(BaseModel):
-    question_id: str
-    transcript_edited: str = ""
-    audio_file_id: str | None = None
-    duration_seconds: int | None = None
-
-
 class MemoirTextAnswerCreate(BaseModel):
     question_id: str
     text: str
-
-
-class MemoirAnswerUpdate(BaseModel):
-    transcript_edited: str | None = None
-    status: MemoirAnswerStatus | None = None
 
 
 class MemoirTextAnswerUpdate(BaseModel):
@@ -92,23 +72,12 @@ class MemoirAnswerResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-class MemoirDraftCreate(BaseModel):
-    answer_id: str
-    content_raw: str = ""
-    content_edited: str = ""
-
-
 class MemoirDraftGenerateRequest(BaseModel):
     ai_model: str | None = None
 
 
 class MemoirDraftEditRequest(BaseModel):
     content_edited: str
-
-
-class MemoirDraftUpdate(BaseModel):
-    content_edited: str | None = None
-    status: MemoirDraftStatus | None = None
 
 
 class MemoirDraftResponse(BaseModel):
