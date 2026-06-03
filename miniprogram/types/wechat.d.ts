@@ -35,6 +35,48 @@ declare namespace WechatMiniprogram {
     complete?(result: GeneralCallbackResult): void;
   }
 
+  interface UploadFileSuccessCallbackResult {
+    data: string;
+    statusCode: number;
+    header: Record<string, string | string[] | undefined>;
+    cookies?: string[];
+  }
+
+  interface UploadFileOption {
+    url: string;
+    filePath: string;
+    name: string;
+    header?: Record<string, string>;
+    formData?: Record<string, string>;
+    timeout?: number;
+    success?(result: UploadFileSuccessCallbackResult): void;
+    fail?(result: GeneralCallbackResult): void;
+    complete?(result: GeneralCallbackResult): void;
+  }
+
+  interface RecorderManagerStartOption {
+    duration?: number;
+    sampleRate?: number;
+    numberOfChannels?: number;
+    encodeBitRate?: number;
+    format?: "mp3" | "aac" | "wav";
+    frameSize?: number;
+  }
+
+  interface RecorderManagerStopCallbackResult {
+    tempFilePath: string;
+    duration: number;
+    fileSize: number;
+  }
+
+  interface RecorderManager {
+    start(option?: RecorderManagerStartOption): void;
+    stop(): void;
+    onStart(callback: () => void): void;
+    onStop(callback: (result: RecorderManagerStopCallbackResult) => void): void;
+    onError(callback: (result: GeneralCallbackResult) => void): void;
+  }
+
   interface NavigateOption {
     url: string;
   }
@@ -52,6 +94,8 @@ declare namespace WechatMiniprogram {
 
   interface Wx {
     request<T = unknown>(option: RequestOption<T>): void;
+    uploadFile(option: UploadFileOption): void;
+    getRecorderManager(): RecorderManager;
     navigateTo(option: NavigateOption): void;
     redirectTo(option: NavigateOption): void;
     reLaunch(option: NavigateOption): void;

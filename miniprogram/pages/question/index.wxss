@@ -1,3 +1,50 @@
+.recorder {
+  gap: 20rpx;
+}
+
+.record-button {
+  width: 100%;
+  min-height: 104rpx;
+  border-radius: 52rpx;
+  background: #111827;
+  color: #ffffff;
+  font-size: 32rpx;
+  font-weight: 800;
+  line-height: 104rpx;
+}
+
+.record-button-active {
+  background: #be123c;
+}
+
+.record-button::after,
+.text-button::after {
+  border: 0;
+}
+
+.audio-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20rpx;
+}
+
+.audio-state {
+  flex: 1;
+  color: #0f766e;
+  font-size: 26rpx;
+  font-weight: 700;
+}
+
+.text-button {
+  margin: 0;
+  padding: 0 8rpx;
+  background: transparent;
+  color: #0f766e;
+  font-size: 26rpx;
+  line-height: 44rpx;
+}
+
 .button-row .button {
   flex: 1;
 }

@@ -1,5 +1,5 @@
 import type { MemoirQuestion } from "../../domain/memoir";
-import { createTextAnswer, getCurrentSession, skipQuestion } from "../../services/memoir";
+import { createTextAnswer, getCurrentSession, skipQuestion, uploadMemoirAudioFile } from "../../services/memoir";
 import { clearMemoirDraft, writeMemoirStore } from "../../stores/session";
 
 interface InputEvent {
@@ -11,38 +11,122 @@ interface InputEvent {
 interface QuestionData {
   loading: boolean;
   submitting: boolean;
+  recording: boolean;
+  uploadingAudio: boolean;
   error: string;
   sessionTitle: string;
   question?: MemoirQuestion;
   prompt: string;
   answerText: string;
+  audioSummary: string;
   isCompleted: boolean;
+}
+
+const recorderManager = wx.getRecorderManager();
+const MAX_RECORDING_MS = 60000;
+let recorderBound = false;
+let recordingStartedAt = 0;
+let activePage: { setData(data: Partial<QuestionData>): void } | null = null;
+
+function durationSeconds(durationMs: number): number {
+  return Math.max(0, Math.round(durationMs / 1000));
+}
+
+function durationText(seconds: number): string {
+  const minutes = Math.floor(seconds / 60);
+  const rest = seconds % 60;
+  return `${minutes}:${rest < 10 ? "0" : ""}${rest}`;
+}
+
+function bindRecorderEvents(): void {
+  if (recorderBound) {
+    return;
+  }
+  recorderManager.onStart(() => {
+    recordingStartedAt = Date.now();
+    activePage?.setData({ recording: true, error: "" });
+  });
+  recorderManager.onStop(async (result) => {
+    const page = activePage;
+    if (!page) {
+      return;
+    }
+    page.setData({ recording: false });
+    if (!result.tempFilePath) {
+      page.setData({ error: "录音保存失败" });
+      return;
+    }
+
+    const seconds = durationSeconds(result.duration || Date.now() - recordingStartedAt);
+    page.setData({ uploadingAudio: true, error: "" });
+    try {
+      const audioFile = await uploadMemoirAudioFile(result.tempFilePath, seconds);
+      page.setData({
+        audioSummary: `已保存 ${durationText(audioFile.duration_seconds ?? seconds)}`,
+      });
+    } catch (error) {
+      page.setData({ error: error instanceof Error ? error.message : "录音上传失败" });
+    } finally {
+      page.setData({ uploadingAudio: false });
+    }
+  });
+  recorderManager.onError((error) => {
+    activePage?.setData({
+      recording: false,
+      uploadingAudio: false,
+      error: error.errMsg || "录音失败",
+    });
+  });
+  recorderBound = true;
 }
 
 Page<QuestionData, {
   onLoad(): Promise<void>;
+  onUnload(): void;
   loadQuestion(): Promise<void>;
   onAnswerInput(event: InputEvent): void;
+  startRecording(): void;
+  stopRecording(): void;
+  clearRecordedAudio(): void;
   submitAnswer(): Promise<void>;
   skipCurrentQuestion(): Promise<void>;
 }>({
   data: {
     loading: false,
     submitting: false,
+    recording: false,
+    uploadingAudio: false,
     error: "",
     sessionTitle: "回忆录访谈",
     question: undefined,
     prompt: "",
     answerText: "",
+    audioSummary: "",
     isCompleted: false,
   },
 
   async onLoad() {
+    activePage = this;
+    bindRecorderEvents();
     await this.loadQuestion();
   },
 
+  onUnload() {
+    if (activePage === this) {
+      activePage = null;
+    }
+    if (this.data.recording) {
+      recorderManager.stop();
+    }
+  },
+
   async loadQuestion() {
-    this.setData({ loading: true, error: "", answerText: "" });
+    this.setData({
+      loading: true,
+      error: "",
+      answerText: "",
+      audioSummary: "",
+    });
     try {
       const interview = await getCurrentSession();
       writeMemoirStore({ interview });
@@ -64,11 +148,44 @@ Page<QuestionData, {
     this.setData({ answerText: event.detail.value });
   },
 
+  startRecording() {
+    if (this.data.loading || this.data.isCompleted || this.data.submitting || this.data.uploadingAudio) {
+      return;
+    }
+    this.setData({ error: "", audioSummary: "" });
+    recorderManager.start({
+      duration: MAX_RECORDING_MS,
+      sampleRate: 16000,
+      numberOfChannels: 1,
+      encodeBitRate: 48000,
+      format: "mp3",
+    });
+  },
+
+  stopRecording() {
+    if (!this.data.recording) {
+      return;
+    }
+    recorderManager.stop();
+  },
+
+  clearRecordedAudio() {
+    if (this.data.recording || this.data.uploadingAudio) {
+      return;
+    }
+    this.setData({ audioSummary: "" });
+  },
+
   async submitAnswer() {
     const text = this.data.answerText.trim();
     const question = this.data.question;
     if (!question || !text) {
       wx.showToast({ title: "请先输入回答", icon: "none" });
+      return;
+    }
+
+    if (this.data.recording || this.data.uploadingAudio) {
+      wx.showToast({ title: "录音处理中", icon: "none" });
       return;
     }
 
@@ -87,6 +204,10 @@ Page<QuestionData, {
 
   async skipCurrentQuestion() {
     const question = this.data.question;
+    if (this.data.recording || this.data.uploadingAudio) {
+      wx.showToast({ title: "录音处理中", icon: "none" });
+      return;
+    }
     if (!question) {
       return;
     }

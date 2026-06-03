@@ -1,6 +1,6 @@
 export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
-const API_BASE_URL = "http://127.0.0.1:8000";
+export const API_BASE_URL = "http://127.0.0.1:8000";
 const COOKIE_STORAGE_KEY = "pawtale_miniprogram_cookie";
 
 export class ApiError extends Error {
@@ -20,7 +20,7 @@ function cookiePairs(lines: string[]): string {
     .join("; ");
 }
 
-function extractCookies(result: WechatMiniprogram.RequestSuccessCallbackResult): string {
+function extractCookies(result: WechatMiniprogram.RequestSuccessCallbackResult | WechatMiniprogram.UploadFileSuccessCallbackResult): string {
   if (result.cookies?.length) {
     return cookiePairs(result.cookies);
   }
@@ -39,6 +39,33 @@ function apiMessage(data: unknown): string {
   return "请求失败";
 }
 
+function requestHeaders(contentType?: string): Record<string, string> {
+  const cookie = wx.getStorageSync<string>(COOKIE_STORAGE_KEY);
+  const headers: Record<string, string> = {};
+  if (contentType) {
+    headers["Content-Type"] = contentType;
+  }
+  if (cookie) {
+    headers.Cookie = cookie;
+  }
+  return headers;
+}
+
+function persistCookies(result: WechatMiniprogram.RequestSuccessCallbackResult | WechatMiniprogram.UploadFileSuccessCallbackResult): void {
+  const responseCookie = extractCookies(result);
+  if (responseCookie) {
+    wx.setStorageSync(COOKIE_STORAGE_KEY, responseCookie);
+  }
+}
+
+function parseJson(data: string): unknown {
+  try {
+    return JSON.parse(data);
+  } catch {
+    return data;
+  }
+}
+
 export function clearSessionCookie(): void {
   wx.removeStorageSync(COOKIE_STORAGE_KEY);
 }
@@ -51,14 +78,10 @@ export function request<T>(
     header?: Record<string, string>;
   } = {},
 ): Promise<T> {
-  const cookie = wx.getStorageSync<string>(COOKIE_STORAGE_KEY);
   const headers: Record<string, string> = {
-    "Content-Type": "application/json",
+    ...requestHeaders("application/json"),
     ...(options.header || {}),
   };
-  if (cookie) {
-    headers.Cookie = cookie;
-  }
 
   return new Promise<T>((resolve, reject) => {
     wx.request<T>({
@@ -68,10 +91,7 @@ export function request<T>(
       header: headers,
       timeout: 120000,
       success: (result) => {
-        const responseCookie = extractCookies(result);
-        if (responseCookie) {
-          wx.setStorageSync(COOKIE_STORAGE_KEY, responseCookie);
-        }
+        persistCookies(result);
         if (result.statusCode >= 200 && result.statusCode < 300) {
           resolve(result.data);
           return;
@@ -80,6 +100,38 @@ export function request<T>(
       },
       fail: (error) => {
         reject(new ApiError(0, error.errMsg || "网络请求失败", error));
+      },
+    });
+  });
+}
+
+export function uploadFile<T>(
+  path: string,
+  options: {
+    filePath: string;
+    name: string;
+    formData?: Record<string, string>;
+  },
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    wx.uploadFile({
+      url: `${API_BASE_URL}${path}`,
+      filePath: options.filePath,
+      name: options.name,
+      formData: options.formData,
+      header: requestHeaders(),
+      timeout: 120000,
+      success: (result) => {
+        persistCookies(result);
+        const data = parseJson(result.data);
+        if (result.statusCode >= 200 && result.statusCode < 300) {
+          resolve(data as T);
+          return;
+        }
+        reject(new ApiError(result.statusCode, apiMessage(data), data));
+      },
+      fail: (error) => {
+        reject(new ApiError(0, error.errMsg || "文件上传失败", error));
       },
     });
   });

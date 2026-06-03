@@ -74,6 +74,14 @@ export interface MemoirAnswer {
   updated_at: string;
 }
 
+export interface MemoirAudioFile {
+  id: string;
+  mime_type: string;
+  size_bytes: number;
+  duration_seconds?: number;
+  created_at: string;
+}
+
 export interface MemoirDraft {
   id: string;
   answer_id: string;
