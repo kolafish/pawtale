@@ -1,6 +1,7 @@
 import type {
   MemoirAnswer,
   MemoirAudioFile,
+  MemoirAudioTranscription,
   MemoirDraft,
   MemoirInterviewState,
   MemoirQuestion,
@@ -42,6 +43,12 @@ export function uploadMemoirAudioFile(filePath: string, durationSeconds?: number
     filePath,
     name: "file",
     formData,
+  });
+}
+
+export function transcribeMemoirAudioFile(audioFileId: string): Promise<MemoirAudioTranscription> {
+  return request<MemoirAudioTranscription>(`/api/mobile/memoir/audio-files/${audioFileId}/transcribe`, {
+    method: "POST",
   });
 }
 

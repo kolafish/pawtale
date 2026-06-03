@@ -1,6 +1,6 @@
 # Pawtale 回忆录小程序
 
-这是 Pawtale 回忆录微信小程序的本地开发骨架。当前覆盖文字回答流程，并支持在问题页保存录音：
+这是 Pawtale 回忆录微信小程序的本地开发骨架。当前覆盖文字回答流程，并支持在问题页录音转写：
 
 ```text
 进入小程序
@@ -8,7 +8,7 @@
  -> 获取默认回忆录项目
  -> 获取当前问题
  -> 录音上传
- -> 输入文字回答
+ -> 语音转写并编辑回答
  -> AI 整理成文
  -> 查看反馈
  -> 编辑
@@ -47,6 +47,7 @@ GET  /api/mobile/memoir/sessions/current
 GET  /api/mobile/memoir/questions/next
 POST /api/mobile/memoir/questions/{question_id}/skip
 POST /api/mobile/memoir/audio-files
+POST /api/mobile/memoir/audio-files/{audio_file_id}/transcribe
 POST /api/mobile/memoir/answers
 PATCH /api/mobile/memoir/answers/{answer_id}
 POST /api/mobile/memoir/answers/{answer_id}/draft
@@ -57,7 +58,6 @@ POST /api/mobile/memoir/drafts/{draft_id}/accept
 ## 当前不包含
 
 - 微信 openid/unionid 登录
-- 语音转写
 - accepted draft 同步到 Web 正文
 - 云托管部署配置
 

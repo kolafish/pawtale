@@ -15,11 +15,13 @@
     <button
       wx:if="{{!recording}}"
       class="record-button"
-      disabled="{{isCompleted || submitting || uploadingAudio}}"
-      loading="{{uploadingAudio}}"
+      disabled="{{isCompleted || submitting || uploadingAudio || transcribingAudio}}"
+      loading="{{uploadingAudio || transcribingAudio}}"
       bindtap="startRecording"
     >
-      {{uploadingAudio ? "保存中" : "开始录音"}}
+      <block wx:if="{{uploadingAudio}}">保存中</block>
+      <block wx:elif="{{transcribingAudio}}">转写中</block>
+      <block wx:else>开始录音</block>
     </button>
     <button
       wx:else
@@ -31,7 +33,7 @@
 
     <view wx:if="{{audioSummary}}" class="audio-row">
       <text class="audio-state">{{audioSummary}}</text>
-      <button class="text-button" disabled="{{submitting}}" bindtap="clearRecordedAudio">重新录音</button>
+      <button class="text-button" disabled="{{submitting || uploadingAudio || transcribingAudio}}" bindtap="clearRecordedAudio">重新录音</button>
     </view>
   </view>
 
@@ -40,15 +42,15 @@
     value="{{answerText}}"
     placeholder="写下你的回答"
     maxlength="-1"
-    disabled="{{isCompleted || submitting || recording || uploadingAudio}}"
+    disabled="{{isCompleted || submitting || recording || uploadingAudio || transcribingAudio}}"
     bindinput="onAnswerInput"
   />
 
   <view class="button-row">
-    <button class="button button-secondary" disabled="{{isCompleted || submitting || recording || uploadingAudio}}" bindtap="skipCurrentQuestion">
+    <button class="button button-secondary" disabled="{{isCompleted || submitting || recording || uploadingAudio || transcribingAudio}}" bindtap="skipCurrentQuestion">
       跳过
     </button>
-    <button class="button button-primary" loading="{{submitting}}" disabled="{{isCompleted || recording || uploadingAudio}}" bindtap="submitAnswer">
+    <button class="button button-primary" loading="{{submitting}}" disabled="{{isCompleted || recording || uploadingAudio || transcribingAudio}}" bindtap="submitAnswer">
       提交回答
     </button>
   </view>

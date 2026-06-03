@@ -1,5 +1,11 @@
 import type { MemoirQuestion } from "../../domain/memoir";
-import { createTextAnswer, getCurrentSession, skipQuestion, uploadMemoirAudioFile } from "../../services/memoir";
+import {
+  createTextAnswer,
+  getCurrentSession,
+  skipQuestion,
+  transcribeMemoirAudioFile,
+  uploadMemoirAudioFile,
+} from "../../services/memoir";
 import { clearMemoirDraft, writeMemoirStore } from "../../stores/session";
 
 interface InputEvent {
@@ -13,6 +19,7 @@ interface QuestionData {
   submitting: boolean;
   recording: boolean;
   uploadingAudio: boolean;
+  transcribingAudio: boolean;
   error: string;
   sessionTitle: string;
   question?: MemoirQuestion;
@@ -27,6 +34,10 @@ const MAX_RECORDING_MS = 60000;
 let recorderBound = false;
 let recordingStartedAt = 0;
 let activePage: { setData(data: Partial<QuestionData>): void } | null = null;
+
+function isAudioBusy(data: Pick<QuestionData, "recording" | "uploadingAudio" | "transcribingAudio">): boolean {
+  return data.recording || data.uploadingAudio || data.transcribingAudio;
+}
 
 function durationSeconds(durationMs: number): number {
   return Math.max(0, Math.round(durationMs / 1000));
@@ -58,22 +69,35 @@ function bindRecorderEvents(): void {
     }
 
     const seconds = durationSeconds(result.duration || Date.now() - recordingStartedAt);
-    page.setData({ uploadingAudio: true, error: "" });
+    page.setData({ uploadingAudio: true, error: "", audioSummary: "正在保存录音" });
+    let savedDurationText = "";
     try {
       const audioFile = await uploadMemoirAudioFile(result.tempFilePath, seconds);
+      savedDurationText = durationText(audioFile.duration_seconds ?? seconds);
       page.setData({
-        audioSummary: `已保存 ${durationText(audioFile.duration_seconds ?? seconds)}`,
+        uploadingAudio: false,
+        transcribingAudio: true,
+        audioSummary: "正在转写",
+      });
+      const transcription = await transcribeMemoirAudioFile(audioFile.id);
+      page.setData({
+        answerText: transcription.text,
+        audioSummary: `已转写 ${savedDurationText}`,
       });
     } catch (error) {
-      page.setData({ error: error instanceof Error ? error.message : "录音上传失败" });
+      page.setData({
+        error: error instanceof Error ? error.message : "录音处理失败",
+        audioSummary: savedDurationText ? `已保存 ${savedDurationText}` : "",
+      });
     } finally {
-      page.setData({ uploadingAudio: false });
+      page.setData({ uploadingAudio: false, transcribingAudio: false });
     }
   });
   recorderManager.onError((error) => {
     activePage?.setData({
       recording: false,
       uploadingAudio: false,
+      transcribingAudio: false,
       error: error.errMsg || "录音失败",
     });
   });
@@ -96,6 +120,7 @@ Page<QuestionData, {
     submitting: false,
     recording: false,
     uploadingAudio: false,
+    transcribingAudio: false,
     error: "",
     sessionTitle: "回忆录访谈",
     question: undefined,
@@ -149,7 +174,7 @@ Page<QuestionData, {
   },
 
   startRecording() {
-    if (this.data.loading || this.data.isCompleted || this.data.submitting || this.data.uploadingAudio) {
+    if (this.data.loading || this.data.isCompleted || this.data.submitting || isAudioBusy(this.data)) {
       return;
     }
     this.setData({ error: "", audioSummary: "" });
@@ -170,7 +195,7 @@ Page<QuestionData, {
   },
 
   clearRecordedAudio() {
-    if (this.data.recording || this.data.uploadingAudio) {
+    if (isAudioBusy(this.data)) {
       return;
     }
     this.setData({ audioSummary: "" });
@@ -184,7 +209,7 @@ Page<QuestionData, {
       return;
     }
 
-    if (this.data.recording || this.data.uploadingAudio) {
+    if (isAudioBusy(this.data)) {
       wx.showToast({ title: "录音处理中", icon: "none" });
       return;
     }
@@ -204,7 +229,7 @@ Page<QuestionData, {
 
   async skipCurrentQuestion() {
     const question = this.data.question;
-    if (this.data.recording || this.data.uploadingAudio) {
+    if (isAudioBusy(this.data)) {
       wx.showToast({ title: "录音处理中", icon: "none" });
       return;
     }
