@@ -1,11 +1,12 @@
 import type {
   MemoirAnswer,
+  MemoirAudioFile,
   MemoirDraft,
   MemoirInterviewState,
   MemoirQuestion,
   Project,
 } from "../domain/memoir";
-import { request } from "./request";
+import { request, uploadFile } from "./request";
 
 export function getMemoirProject(): Promise<Project> {
   return request<Project>("/api/mobile/memoir/project");
@@ -29,6 +30,18 @@ export function createTextAnswer(questionId: string, text: string): Promise<Memo
   return request<MemoirAnswer>("/api/mobile/memoir/answers", {
     method: "POST",
     data: { question_id: questionId, text },
+  });
+}
+
+export function uploadMemoirAudioFile(filePath: string, durationSeconds?: number): Promise<MemoirAudioFile> {
+  const formData: Record<string, string> = {};
+  if (durationSeconds !== undefined) {
+    formData.duration_seconds = String(durationSeconds);
+  }
+  return uploadFile<MemoirAudioFile>("/api/mobile/memoir/audio-files", {
+    filePath,
+    name: "file",
+    formData,
   });
 }
 
