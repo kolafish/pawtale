@@ -1,10 +1,11 @@
-import type { MemoirAnswer, MemoirDraft, MemoirInterviewState, Project } from "../domain/memoir";
+import type { MemoirAnswer, MemoirDraft, MemoirInterviewState, MemoirQuestion, Project } from "../domain/memoir";
 
 const STORE_KEY = "pawtale_memoir_session";
 
 export interface MemoirSessionStore {
   project?: Project;
   interview?: MemoirInterviewState;
+  question?: MemoirQuestion;
   answer?: MemoirAnswer;
   draft?: MemoirDraft;
 }

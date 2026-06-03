@@ -218,7 +218,7 @@ Page<QuestionData, {
     try {
       const answer = await createTextAnswer(question.id, text);
       clearMemoirDraft();
-      writeMemoirStore({ answer });
+      writeMemoirStore({ question, answer });
       wx.navigateTo({ url: `/pages/feedback/index?answerId=${answer.id}` });
     } catch (error) {
       this.setData({ error: error instanceof Error ? error.message : "提交失败" });

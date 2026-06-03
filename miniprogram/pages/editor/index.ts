@@ -10,6 +10,7 @@ interface InputEvent {
 interface EditorData {
   answerId: string;
   draftId: string;
+  questionPrompt: string;
   transcriptText: string;
   draftText: string;
   saving: boolean;
@@ -27,6 +28,7 @@ Page<EditorData, {
   data: {
     answerId: "",
     draftId: "",
+    questionPrompt: "",
     transcriptText: "",
     draftText: "",
     saving: false,
@@ -37,9 +39,14 @@ Page<EditorData, {
     const state = readMemoirStore();
     const answerId = query?.answerId || state.answer?.id || "";
     const draftId = query?.draftId || state.draft?.id || "";
+    const answerQuestionId = state.answer?.question_id || "";
+    const question = state.question?.id === answerQuestionId
+      ? state.question
+      : state.interview?.questions.find((item) => item.id === answerQuestionId);
     this.setData({
       answerId,
       draftId,
+      questionPrompt: question?.prompt || "",
       transcriptText: state.answer?.transcript_edited || state.answer?.transcript_raw || "",
       draftText: state.draft?.content_edited || state.draft?.content_raw || "",
       error: !answerId || !draftId ? "缺少编辑内容" : "",
