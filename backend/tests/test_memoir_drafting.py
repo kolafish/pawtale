@@ -93,7 +93,15 @@ async def test_generate_draft_for_answer_creates_draft(test_db):
     assert draft.content_raw == "外婆家的院子，是我童年里最清晰的地方。"
     assert draft.content_edited == draft.content_raw
     assert fake_ai.calls
-    assert "外婆家的院子" in fake_ai.calls[0]["user_prompt"]
+    call = fake_ai.calls[0]
+    assert "忠于原话" in call["system_prompt"]
+    assert "外婆家的院子" in call["user_prompt"]
+    assert "ASR" in call["user_prompt"]
+    assert "口头填充词" in call["user_prompt"]
+    assert "不扩写" in call["user_prompt"]
+    assert "不文学化" in call["user_prompt"]
+    assert "150 到 300 字" not in call["user_prompt"]
+    assert call["temperature"] == 0.2
 
 
 async def test_generate_draft_replaces_existing_draft(test_db):
