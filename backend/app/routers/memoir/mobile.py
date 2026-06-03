@@ -6,6 +6,7 @@ from app.database import get_db
 from app.models.users import User
 from app.schemas.memoir import (
     AudioFileResponse,
+    MemoirAudioTranscriptionResponse,
     MemoirAnswerResponse,
     MemoirDraftEditRequest,
     MemoirDraftGenerateRequest,
@@ -22,6 +23,7 @@ from app.services.memoir import audio_files as memoir_audio_files
 from app.services.memoir import drafting as memoir_drafting
 from app.services.memoir import interview as memoir_interview
 from app.services.memoir import projects as memoir_projects
+from app.services.memoir import transcription as memoir_transcription
 
 
 router = APIRouter()
@@ -90,6 +92,15 @@ async def upload_mobile_memoir_audio_file(
         file,
         duration_seconds,
     )
+
+
+@router.post("/audio-files/{audio_file_id}/transcribe", response_model=MemoirAudioTranscriptionResponse)
+async def transcribe_mobile_memoir_audio_file(
+    audio_file_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await memoir_transcription.transcribe_audio_file(db, audio_file_id, current_user.id)
 
 
 @router.post("/answers", response_model=MemoirAnswerResponse, status_code=201)

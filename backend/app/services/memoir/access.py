@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.domain.projects.types import ProjectType
-from app.models.memoir import MemoirAnswer, MemoirDraft, MemoirQuestion, MemoirSession
+from app.models.memoir import AudioFile, MemoirAnswer, MemoirDraft, MemoirQuestion, MemoirSession
 from app.models.projects import Project
 
 
@@ -71,6 +71,16 @@ async def load_answer(db: AsyncSession, answer_id: str, user_id: str) -> MemoirA
     if not answer:
         raise HTTPException(status_code=404, detail="回答不存在")
     return answer
+
+
+async def load_audio_file(db: AsyncSession, audio_file_id: str, user_id: str) -> AudioFile:
+    result = await db.execute(
+        select(AudioFile).where(AudioFile.id == audio_file_id, AudioFile.user_id == user_id)
+    )
+    audio_file = result.scalar_one_or_none()
+    if not audio_file:
+        raise HTTPException(status_code=404, detail="音频文件不存在")
+    return audio_file
 
 
 async def load_draft(db: AsyncSession, draft_id: str, user_id: str) -> MemoirDraft:
