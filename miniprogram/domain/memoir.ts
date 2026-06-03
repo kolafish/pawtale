@@ -82,6 +82,12 @@ export interface MemoirAudioFile {
   created_at: string;
 }
 
+export interface MemoirAudioTranscription {
+  audio_file_id: string;
+  text: string;
+  usage?: Record<string, unknown>;
+}
+
 export interface MemoirDraft {
   id: string;
   answer_id: string;
