@@ -1,10 +1,11 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, File, Form, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_user
 from app.database import get_db
 from app.models.users import User
 from app.schemas.memoir import (
+    AudioFileResponse,
     MemoirAnswerResponse,
     MemoirDraftEditRequest,
     MemoirDraftGenerateRequest,
@@ -17,6 +18,7 @@ from app.schemas.memoir import (
 )
 from app.schemas.projects import ProjectResponse
 from app.services.memoir import answers as memoir_answers
+from app.services.memoir import audio_files as memoir_audio_files
 from app.services.memoir import drafting as memoir_drafting
 from app.services.memoir import interview as memoir_interview
 from app.services.memoir import projects as memoir_projects
@@ -73,6 +75,21 @@ async def skip_mobile_memoir_question(
     current_user: User = Depends(get_current_user),
 ):
     return await memoir_interview.skip_question(db, question_id, current_user.id)
+
+
+@router.post("/audio-files", response_model=AudioFileResponse, status_code=201)
+async def upload_mobile_memoir_audio_file(
+    file: UploadFile = File(...),
+    duration_seconds: int | None = Form(None),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await memoir_audio_files.save_audio_file(
+        db,
+        current_user.id,
+        file,
+        duration_seconds,
+    )
 
 
 @router.post("/answers", response_model=MemoirAnswerResponse, status_code=201)

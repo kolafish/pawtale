@@ -1,3 +1,8 @@
+from sqlalchemy import select
+
+from app.models.memoir import AudioFile
+
+
 class FakeAIClient:
     provider_name = "fake"
     model_name = "fake-model"
@@ -21,6 +26,12 @@ async def test_mobile_memoir_routes_require_login(anonymous_client):
     response = await anonymous_client.get("/api/mobile/memoir/project")
 
     assert response.status_code == 401
+
+    upload_response = await anonymous_client.post(
+        "/api/mobile/memoir/audio-files",
+        files={"file": ("answer.mp3", b"audio bytes", "audio/mpeg")},
+    )
+    assert upload_response.status_code == 401
 
 
 async def test_mobile_memoir_project_is_created_once(client):
@@ -177,6 +188,81 @@ async def test_mobile_memoir_skip_question(client):
     assert data["questions"][0]["status"] == "skipped"
     assert data["completed_question_count"] == 1
     assert data["pending_question_count"] == 4
+
+
+async def test_mobile_memoir_uploads_audio_file(client, test_db, tmp_path, monkeypatch):
+    monkeypatch.setattr("app.services.memoir.audio_files.MEMOIR_AUDIO_DIR", tmp_path / "audio")
+
+    response = await client.post(
+        "/api/mobile/memoir/audio-files",
+        data={"duration_seconds": "7"},
+        files={"file": ("answer.mp3", b"audio bytes", "audio/mpeg")},
+    )
+
+    assert response.status_code == 201
+    data = response.json()
+    assert data["mime_type"] == "audio/mpeg"
+    assert data["size_bytes"] == len(b"audio bytes")
+    assert data["duration_seconds"] == 7
+    assert "storage_path" not in data
+    assert "user_id" not in data
+
+    audio_file = await test_db.scalar(select(AudioFile).where(AudioFile.id == data["id"]))
+    assert audio_file is not None
+    assert audio_file.storage_path.endswith(f"{audio_file.id}.mp3")
+    assert (tmp_path / "audio" / audio_file.user_id / f"{audio_file.id}.mp3").read_bytes() == b"audio bytes"
+
+
+async def test_mobile_memoir_upload_accepts_generic_mime_with_supported_extension(
+    client,
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr("app.services.memoir.audio_files.MEMOIR_AUDIO_DIR", tmp_path / "audio")
+
+    response = await client.post(
+        "/api/mobile/memoir/audio-files",
+        files={"file": ("answer.mp3", b"audio bytes", "application/octet-stream")},
+    )
+
+    assert response.status_code == 201
+    assert response.json()["mime_type"] == "audio/mpeg"
+
+
+async def test_mobile_memoir_rejects_unsupported_audio_format(client):
+    response = await client.post(
+        "/api/mobile/memoir/audio-files",
+        files={"file": ("answer.aac", b"audio bytes", "audio/aac")},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "仅支持 mp3、wav、ogg、pcm 音频文件"
+
+
+async def test_mobile_memoir_rejects_negative_audio_duration(client):
+    response = await client.post(
+        "/api/mobile/memoir/audio-files",
+        data={"duration_seconds": "-1"},
+        files={"file": ("answer.mp3", b"audio bytes", "audio/mpeg")},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "音频时长不能为负数"
+
+
+async def test_mobile_memoir_rejects_oversized_audio_file(client, test_db, tmp_path, monkeypatch):
+    monkeypatch.setattr("app.services.memoir.audio_files.MEMOIR_AUDIO_DIR", tmp_path / "audio")
+    monkeypatch.setattr("app.services.memoir.audio_files.MAX_AUDIO_BYTES", 3)
+
+    response = await client.post(
+        "/api/mobile/memoir/audio-files",
+        files={"file": ("answer.mp3", b"audio", "audio/mpeg")},
+    )
+
+    assert response.status_code == 413
+    assert response.json()["detail"] == "音频文件不能超过 20MB"
+    assert await test_db.scalar(select(AudioFile)) is None
+    assert not any(path.is_file() for path in (tmp_path / "audio").rglob("*"))
 
 
 async def test_mobile_memoir_hides_other_users_questions(anonymous_client):
