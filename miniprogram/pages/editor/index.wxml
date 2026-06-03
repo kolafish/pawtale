@@ -1,7 +1,7 @@
 <view class="page stack">
   <view class="stack">
     <text class="eyebrow">编辑</text>
-    <text class="title">调整回答和正文</text>
+    <text class="title">调整回答和校正稿</text>
   </view>
 
   <view wx:if="{{error}}" class="error">{{error}}</view>
@@ -17,7 +17,7 @@
   </view>
 
   <view class="stack">
-    <text class="eyebrow">整理后的正文</text>
+    <text class="eyebrow">校正后的回答</text>
     <textarea
       class="textarea editor-draft"
       value="{{draftText}}"

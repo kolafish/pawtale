@@ -15,7 +15,7 @@ from app.services.ai_types import AITextClient
 from app.services.memoir.access import load_answer, load_draft
 
 
-SYSTEM_PROMPT = "你是一位专业的回忆录写作助手，擅长把口述回答整理成真实、克制、自然的回忆录片段。"
+SYSTEM_PROMPT = "你是一位谨慎的中文口述稿校对助手，只做忠于原话的转写校正和口头语清理。"
 AI_DRAFT_UNAVAILABLE_MESSAGE = "AI 服务暂时不可用，请稍后重试。"
 logger = logging.getLogger(__name__)
 
@@ -28,16 +28,18 @@ def _answer_text(raw: str, edited: str) -> str:
 
 
 def _build_user_prompt(question_prompt: str, answer_text: str) -> str:
-    return f"""请根据下面的访谈问题和用户回答，整理成一段第一人称回忆录正文。
+    return f"""请根据访谈问题上下文，对用户回答做一次忠于原文的口述稿校正。
 
 要求：
-- 保留用户回答中的事实，不编造具体人物、时间、地点或事件
-- 可以补足自然衔接和情绪表达，但不要过度文学化
-- 用第一人称
-- 控制在 150 到 300 字
-- 直接输出正文，不要标题、列表、解释或引号
+- 只修正 ASR 可能因方言、口音、同音词造成的明显错字或错词；无法确定时保留原文
+- 去掉明显的口头填充词，比如“嗯”“啊”“呃”“那个”“就是”等不承载信息的重复语气词
+- 可以整理基础标点和极少量语序，使句子可读
+- 不新增事实、人物、时间、地点、事件或情绪
+- 不扩写、不总结、不文学化、不替用户补充细节
+- 输出长度应接近用户回答；短回答保持短
+- 直接输出清理后的第一人称回答正文，不要标题、列表、解释或引号
 
-访谈问题：
+访谈问题（仅用于判断转写纠错上下文，不用于扩写）：
 {question_prompt}
 
 用户回答：
@@ -56,7 +58,7 @@ async def _generate_draft_text(
         content = await client._call_llm(
             SYSTEM_PROMPT,
             _build_user_prompt(question_prompt, answer_text),
-            temperature=0.6,
+            temperature=0.2,
             max_tokens=1200,
             timeout=90.0,
         )

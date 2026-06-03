@@ -1,6 +1,6 @@
 <view class="page stack">
   <view class="stack">
-    <text class="eyebrow">回答已整理</text>
+    <text class="eyebrow">回答已校正</text>
     <text class="title">确认这段回忆</text>
   </view>
 
@@ -12,9 +12,9 @@
   </view>
 
   <view class="surface stack">
-    <text class="eyebrow">整理成文</text>
-    <text wx:if="{{generating}}" class="muted">整理中...</text>
-    <text wx:else class="body-text">{{draftText || "等待整理结果"}}</text>
+    <text class="eyebrow">校正结果</text>
+    <text wx:if="{{generating}}" class="muted">校正中...</text>
+    <text wx:else class="body-text">{{draftText || "等待校正结果"}}</text>
   </view>
 
   <view class="button-row">
@@ -27,6 +27,6 @@
   </view>
 
   <button class="button button-quiet" loading="{{generating}}" bindtap="retryGenerate">
-    重新整理
+    重新校正
   </button>
 </view>
