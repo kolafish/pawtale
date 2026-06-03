@@ -1,6 +1,8 @@
 from sqlalchemy import select
 
 from app.models.memoir import AudioFile
+from app.services.asr import ASRTranscriptionResult, StepFunASRError
+from app.services.memoir.audio_files import audio_file_path
 
 
 class FakeAIClient:
@@ -32,6 +34,11 @@ async def test_mobile_memoir_routes_require_login(anonymous_client):
         files={"file": ("answer.mp3", b"audio bytes", "audio/mpeg")},
     )
     assert upload_response.status_code == 401
+
+    transcribe_response = await anonymous_client.post(
+        "/api/mobile/memoir/audio-files/missing/transcribe",
+    )
+    assert transcribe_response.status_code == 401
 
 
 async def test_mobile_memoir_project_is_created_once(client):
@@ -213,6 +220,107 @@ async def test_mobile_memoir_uploads_audio_file(client, test_db, tmp_path, monke
     assert (tmp_path / "audio" / audio_file.user_id / f"{audio_file.id}.mp3").read_bytes() == b"audio bytes"
 
 
+async def test_mobile_memoir_transcribes_audio_file(client, tmp_path, monkeypatch):
+    monkeypatch.setattr("app.services.memoir.audio_files.MEMOIR_AUDIO_DIR", tmp_path / "audio")
+    captured = {}
+
+    class FakeASRService:
+        async def transcribe(self, audio_bytes, audio_format):
+            captured["audio_bytes"] = audio_bytes
+            captured["audio_format"] = audio_format
+            return ASRTranscriptionResult(
+                text=" 外婆家的院子。 ",
+                deltas=("外婆", "家的院子。"),
+                usage={"total_tokens": 6},
+            )
+
+    monkeypatch.setattr(
+        "app.services.memoir.transcription.StepFunASRService",
+        lambda: FakeASRService(),
+    )
+
+    upload_response = await client.post(
+        "/api/mobile/memoir/audio-files",
+        files={"file": ("answer.mp3", b"audio bytes", "audio/mpeg")},
+    )
+    audio_id = upload_response.json()["id"]
+
+    response = await client.post(f"/api/mobile/memoir/audio-files/{audio_id}/transcribe")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "audio_file_id": audio_id,
+        "text": "外婆家的院子。",
+        "usage": {"total_tokens": 6},
+    }
+    assert captured["audio_bytes"] == b"audio bytes"
+    assert captured["audio_format"].type == "mp3"
+
+
+async def test_mobile_memoir_transcribe_rejects_pcm_until_metadata_is_stored(
+    client,
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr("app.services.memoir.audio_files.MEMOIR_AUDIO_DIR", tmp_path / "audio")
+    upload_response = await client.post(
+        "/api/mobile/memoir/audio-files",
+        files={"file": ("answer.pcm", b"audio bytes", "audio/pcm")},
+    )
+    audio_id = upload_response.json()["id"]
+
+    response = await client.post(f"/api/mobile/memoir/audio-files/{audio_id}/transcribe")
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "PCM 音频暂不支持转写"
+
+
+async def test_mobile_memoir_transcribe_returns_404_when_file_is_missing(
+    client,
+    test_db,
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr("app.services.memoir.audio_files.MEMOIR_AUDIO_DIR", tmp_path / "audio")
+    upload_response = await client.post(
+        "/api/mobile/memoir/audio-files",
+        files={"file": ("answer.mp3", b"audio bytes", "audio/mpeg")},
+    )
+    audio_id = upload_response.json()["id"]
+    audio_file = await test_db.scalar(select(AudioFile).where(AudioFile.id == audio_id))
+    audio_file_path(audio_file).unlink()
+
+    response = await client.post(f"/api/mobile/memoir/audio-files/{audio_id}/transcribe")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "音频文件不存在"
+
+
+async def test_mobile_memoir_transcribe_hides_upstream_errors(client, tmp_path, monkeypatch):
+    monkeypatch.setattr("app.services.memoir.audio_files.MEMOIR_AUDIO_DIR", tmp_path / "audio")
+
+    class FailingASRService:
+        async def transcribe(self, audio_bytes, audio_format):
+            raise StepFunASRError("upstream api token rejected")
+
+    monkeypatch.setattr(
+        "app.services.memoir.transcription.StepFunASRService",
+        lambda: FailingASRService(),
+    )
+    upload_response = await client.post(
+        "/api/mobile/memoir/audio-files",
+        files={"file": ("answer.mp3", b"audio bytes", "audio/mpeg")},
+    )
+    audio_id = upload_response.json()["id"]
+
+    response = await client.post(f"/api/mobile/memoir/audio-files/{audio_id}/transcribe")
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "语音转写服务暂时不可用，请稍后重试。"
+    assert "upstream" not in response.text
+    assert "token" not in response.text
+
+
 async def test_mobile_memoir_upload_accepts_generic_mime_with_supported_extension(
     client,
     tmp_path,
@@ -294,5 +402,39 @@ async def test_mobile_memoir_hides_other_users_questions(anonymous_client):
         "/api/mobile/memoir/answers",
         json={"question_id": question_id, "text": "越权回答"},
     )
+
+    assert response.status_code == 404
+
+
+async def test_mobile_memoir_hides_other_users_audio_files(anonymous_client, tmp_path, monkeypatch):
+    monkeypatch.setattr("app.services.memoir.audio_files.MEMOIR_AUDIO_DIR", tmp_path / "audio")
+    first_register = await anonymous_client.post(
+        "/api/auth/register",
+        json={
+            "email": "audio-first@example.com",
+            "password": "password123",
+            "display_name": "第一位作者",
+        },
+    )
+    assert first_register.status_code == 201
+    upload_response = await anonymous_client.post(
+        "/api/mobile/memoir/audio-files",
+        files={"file": ("answer.mp3", b"audio bytes", "audio/mpeg")},
+    )
+    audio_id = upload_response.json()["id"]
+
+    await anonymous_client.post("/api/auth/logout")
+
+    second_register = await anonymous_client.post(
+        "/api/auth/register",
+        json={
+            "email": "audio-second@example.com",
+            "password": "password123",
+            "display_name": "第二位作者",
+        },
+    )
+    assert second_register.status_code == 201
+
+    response = await anonymous_client.post(f"/api/mobile/memoir/audio-files/{audio_id}/transcribe")
 
     assert response.status_code == 404

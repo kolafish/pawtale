@@ -36,6 +36,15 @@ def _storage_path(user_id: str, filename: str) -> str:
     return f"memoir/audio/{user_id}/{filename}"
 
 
+def audio_file_path(audio_file: AudioFile) -> Path:
+    storage_path = Path(audio_file.storage_path)
+    try:
+        relative_path = storage_path.relative_to(Path("memoir") / "audio")
+    except ValueError:
+        return DATA_DIR / storage_path
+    return MEMOIR_AUDIO_DIR / relative_path
+
+
 def _normalize_audio_type(upload: UploadFile) -> tuple[str, str]:
     content_type = (upload.content_type or "").split(";")[0].lower()
     suffix = Path(upload.filename or "").suffix.lower()
