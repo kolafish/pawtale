@@ -9,6 +9,14 @@ class FakeAIClient:
         return {}
 
 
+class FailingAIClient(FakeAIClient):
+    async def _call_llm(self, *args, **kwargs):
+        raise RuntimeError(
+            "Server error '503 Service Unavailable' for url "
+            "'https://cursor.scihub.edu.kg/api/v1/chat/completions'"
+        )
+
+
 async def test_mobile_memoir_routes_require_login(anonymous_client):
     response = await anonymous_client.get("/api/mobile/memoir/project")
 
@@ -120,6 +128,29 @@ async def test_mobile_memoir_draft_flow(client, monkeypatch):
         json={},
     )
     assert regenerate_response.status_code == 409
+
+
+async def test_mobile_memoir_draft_failure_returns_public_message(client, monkeypatch):
+    monkeypatch.setattr(
+        "app.services.memoir.drafting.get_ai_service",
+        lambda ai_model=None: FailingAIClient(),
+    )
+    session_response = await client.get("/api/mobile/memoir/sessions/current")
+    question_id = session_response.json()["current_question"]["id"]
+    answer_response = await client.post(
+        "/api/mobile/memoir/answers",
+        json={"question_id": question_id, "text": "我记得外婆家的院子。"},
+    )
+    answer_id = answer_response.json()["id"]
+
+    draft_response = await client.post(
+        f"/api/mobile/memoir/answers/{answer_id}/draft",
+        json={},
+    )
+
+    assert draft_response.status_code == 503
+    assert draft_response.json()["detail"] == "AI 服务暂时不可用，请稍后重试。"
+    assert "cursor.scihub" not in draft_response.text
 
 
 async def test_mobile_memoir_rejects_blank_answer(client):

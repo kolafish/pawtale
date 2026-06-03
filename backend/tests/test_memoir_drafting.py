@@ -50,7 +50,10 @@ class FakeAIClient:
 
 class FailingAIClient(FakeAIClient):
     async def _call_llm(self, *args, **kwargs):
-        raise RuntimeError("AI unavailable")
+        raise RuntimeError(
+            "Server error '503 Service Unavailable' for url "
+            "'https://cursor.scihub.edu.kg/api/v1/chat/completions'"
+        )
 
 
 def _user(email: str) -> User:
@@ -210,6 +213,8 @@ async def test_ai_failure_does_not_change_answer_status(test_db):
             FailingAIClient(),
         )
 
-    assert exc.value.status_code == 500
+    assert exc.value.status_code == 503
+    assert exc.value.detail == "AI 服务暂时不可用，请稍后重试。"
+    assert "cursor.scihub" not in str(exc.value.detail)
     saved_answer = await test_db.scalar(select(MemoirAnswer).where(MemoirAnswer.id == answer.id))
     assert saved_answer.status == MemoirAnswerStatus.ANSWERED.value

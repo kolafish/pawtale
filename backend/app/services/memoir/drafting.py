@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,6 +16,8 @@ from app.services.memoir.access import load_answer, load_draft
 
 
 SYSTEM_PROMPT = "你是一位专业的回忆录写作助手，擅长把口述回答整理成真实、克制、自然的回忆录片段。"
+AI_DRAFT_UNAVAILABLE_MESSAGE = "AI 服务暂时不可用，请稍后重试。"
+logger = logging.getLogger(__name__)
 
 
 def _answer_text(raw: str, edited: str) -> str:
@@ -56,10 +60,22 @@ async def _generate_draft_text(
             max_tokens=1200,
             timeout=90.0,
         )
-    except HTTPException:
-        raise
+    except HTTPException as exc:
+        if exc.status_code < 500:
+            raise
+        logger.exception(
+            "AI memoir draft failed provider=%s model=%s",
+            client.provider_name,
+            client.model_name,
+        )
+        raise HTTPException(status_code=503, detail=AI_DRAFT_UNAVAILABLE_MESSAGE) from exc
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"AI整理失败: {str(exc)}") from exc
+        logger.exception(
+            "AI memoir draft failed provider=%s model=%s",
+            client.provider_name,
+            client.model_name,
+        )
+        raise HTTPException(status_code=503, detail=AI_DRAFT_UNAVAILABLE_MESSAGE) from exc
     draft_text = str(content).strip()
     if not draft_text:
         raise HTTPException(status_code=502, detail="AI未返回可用整理稿")
