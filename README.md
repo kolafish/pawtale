@@ -40,6 +40,7 @@ Pawtale/
 │       ├── stores/
 │       └── api/
 ├── miniprogram/                # 微信小程序回忆录采集端
+├── cloud-functions/            # 微信云函数，供小程序云端链路使用
 ├── data/                       # SQLite 数据库和项目文档文件
 ├── PRODUCT.md                  # 产品文档
 └── TECH.md                     # 技术文档

@@ -46,7 +46,7 @@
  -> 展示系统问题
  -> 用户语音回答
  -> 上传音频
- -> 后端转写
+ -> 云函数转写
  -> AI 整理成文
  -> 用户查看反馈
  -> 用户编辑或确认
@@ -148,7 +148,22 @@ wechat_identities
 
 这样可以保留完整过程，也避免把临时转写、追问、重录状态污染现有文档模型。
 
-## 后端模块规划
+## 云端模块规划
+
+小程序上线链路使用微信云开发，不依赖云托管容器：
+
+```text
+miniprogram
+ -> wx.cloud.callFunction("memoir-api")
+ -> 云数据库
+ -> 云存储
+ -> StepFun ASR
+ -> DeepSeek
+```
+
+本地 FastAPI 继续用于 Web 工作台和本地小程序调试。小程序云端能力独立放在 `cloud-functions/memoir-api`，避免把所有平台差异塞进 FastAPI 或小程序页面。
+
+## FastAPI 本地模块规划
 
 ```text
 backend/app/
@@ -173,7 +188,7 @@ backend/app/
 - `services/memoir/transcription.py`：语音转写 provider 抽象
 - `services/memoir/drafting.py`：将回答整理成回忆录片段
 
-后端应该复用现有认证、用户、AI provider、文件存储能力，但回忆录访谈业务保持独立边界。
+FastAPI 本地链路应该复用现有认证、用户、AI provider、文件存储能力，但回忆录访谈业务保持独立边界。云函数链路复用同一 API contract 和领域状态，不直接复用 SQLite model。
 
 ## API 规划
 
@@ -201,11 +216,10 @@ POST /api/mobile/memoir/drafts/{draft_id}/accept
 
 ```text
 小程序录音
- -> 上传音频
- -> 创建 answer
- -> 后端保存 audio_file
- -> 转写服务写入 transcript_raw
- -> AI 整理服务写入 memoir_drafts
+ -> 上传音频到云存储
+ -> 云函数创建 audio_file
+ -> 云函数调用转写服务写入 transcript_raw
+ -> 云函数调用 AI 整理服务写入 memoir_drafts
  -> 小程序轮询 answer 状态
  -> 用户进入反馈页
 ```
