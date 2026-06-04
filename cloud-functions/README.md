@@ -31,6 +31,8 @@ memoir-api
 }
 ```
 
+collection schema 和建议索引见 [memoir-api/docs/collections.md](memoir-api/docs/collections.md)。
+
 ## Local Checks
 
 ```bash
