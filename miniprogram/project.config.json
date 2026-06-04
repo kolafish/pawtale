@@ -1,5 +1,6 @@
 {
   "appid": "wx71acdf73e2ba7067",
+  "cloudfunctionRoot": "../cloud-functions/",
   "compileType": "miniprogram",
   "miniprogramRoot": "./",
   "projectname": "PawtaleMemoir",
