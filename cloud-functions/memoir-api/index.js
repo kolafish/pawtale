@@ -1,3 +1,4 @@
+const { createDeepSeekDraftService } = require("./src/ai/deepseek");
 const cloud = require("wx-server-sdk");
 const { createStepFunASRService } = require("./src/asr/stepfun");
 const { handleMemoirApiRequest } = require("./src/router");
@@ -26,6 +27,7 @@ exports.main = async (event, context) => {
         },
       },
       asr: createStepFunASRService(),
+      drafting: createDeepSeekDraftService(),
     },
   );
 };

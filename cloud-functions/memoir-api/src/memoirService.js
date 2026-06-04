@@ -19,6 +19,13 @@ const MemoirSessionStatus = Object.freeze({
 const MemoirAnswerStatus = Object.freeze({
   UPLOADED: "uploaded",
   ANSWERED: "answered",
+  DRAFTED: "drafted",
+  CONFIRMED: "confirmed",
+});
+
+const MemoirDraftStatus = Object.freeze({
+  DRAFT: "draft",
+  ACCEPTED: "accepted",
 });
 
 function nowIso() {
@@ -52,6 +59,22 @@ function cleanAnswerText(text) {
     throw new ApiError(400, "回答不能为空");
   }
   return value;
+}
+
+function cleanDraftText(text) {
+  const value = String(text || "").trim();
+  if (!value) {
+    throw new ApiError(400, "整理稿不能为空");
+  }
+  return value;
+}
+
+function answerText(answer) {
+  const text = String(answer.transcript_edited || answer.transcript_raw || "").trim();
+  if (!text) {
+    throw new ApiError(400, "回答内容为空，无法整理");
+  }
+  return text;
 }
 
 function cleanPositiveNumber(value, fallback = null) {
@@ -178,6 +201,17 @@ async function loadAnswer(store, openid, answerId) {
     throw new ApiError(404, "回答不存在");
   }
   return answer;
+}
+
+async function loadDraft(store, openid, draftId) {
+  const draft = await store.findOne(COLLECTIONS.drafts, {
+    openid,
+    _id: draftId,
+  });
+  if (!draft) {
+    throw new ApiError(404, "整理稿不存在");
+  }
+  return draft;
 }
 
 async function getOrderedQuestions(store, openid, sessionId) {
@@ -377,6 +411,79 @@ async function transcribeAudioFile(store, openid, audioFileId, dependencies) {
   };
 }
 
+async function generateDraft(store, openid, answerId, dependencies) {
+  if (!dependencies.drafting?.generate) {
+    throw new ApiError(500, "AI 整理服务未配置");
+  }
+
+  const answer = await loadAnswer(store, openid, answerId);
+  if (answer.status === MemoirAnswerStatus.CONFIRMED) {
+    throw new ApiError(409, "已确认的回答不能重新整理");
+  }
+
+  const question = await loadQuestion(store, openid, answer.question_id);
+  const generated = await dependencies.drafting.generate({
+    questionPrompt: question.prompt,
+    answerText: answerText(answer),
+  });
+  const draftText = cleanDraftText(generated.text);
+  const now = nowIso();
+  const existing = await store.findOne(COLLECTIONS.drafts, {
+    openid,
+    answer_id: answer.id,
+  });
+
+  const draft = existing
+    ? await store.updateById(COLLECTIONS.drafts, existing.id, {
+      content_raw: draftText,
+      content_edited: draftText,
+      status: MemoirDraftStatus.DRAFT,
+      updated_at: now,
+    })
+    : await store.insert(COLLECTIONS.drafts, {
+      openid,
+      answer_id: answer.id,
+      content_raw: draftText,
+      content_edited: draftText,
+      status: MemoirDraftStatus.DRAFT,
+      created_at: now,
+      updated_at: now,
+    });
+
+  await store.updateById(COLLECTIONS.answers, answer.id, {
+    status: MemoirAnswerStatus.DRAFTED,
+    updated_at: now,
+  });
+  return draft;
+}
+
+async function updateDraftContent(store, openid, draftId, data) {
+  const draft = await loadDraft(store, openid, draftId);
+  if (draft.status === MemoirDraftStatus.ACCEPTED) {
+    throw new ApiError(409, "已确认的整理稿不能编辑");
+  }
+
+  return store.updateById(COLLECTIONS.drafts, draft.id, {
+    content_edited: cleanDraftText(data.content_edited),
+    updated_at: nowIso(),
+  });
+}
+
+async function acceptDraft(store, openid, draftId) {
+  const draft = await loadDraft(store, openid, draftId);
+  cleanDraftText(draft.content_edited);
+  const now = nowIso();
+  const acceptedDraft = await store.updateById(COLLECTIONS.drafts, draft.id, {
+    status: MemoirDraftStatus.ACCEPTED,
+    updated_at: now,
+  });
+  await store.updateById(COLLECTIONS.answers, draft.answer_id, {
+    status: MemoirAnswerStatus.CONFIRMED,
+    updated_at: now,
+  });
+  return acceptedDraft;
+}
+
 function createMemoirService(store, context, dependencies = {}) {
   const openid = requireOpenId(context);
 
@@ -389,12 +496,16 @@ function createMemoirService(store, context, dependencies = {}) {
     updateAnswerText: async (answerId, data) => updateAnswerText(store, openid, answerId, data),
     registerAudioFile: async (data) => registerAudioFile(store, openid, data),
     transcribeAudioFile: async (audioFileId) => transcribeAudioFile(store, openid, audioFileId, dependencies),
+    generateDraft: async (answerId) => generateDraft(store, openid, answerId, dependencies),
+    updateDraftContent: async (draftId, data) => updateDraftContent(store, openid, draftId, data),
+    acceptDraft: async (draftId) => acceptDraft(store, openid, draftId),
   };
 }
 
 module.exports = {
   createMemoirService,
   MemoirAnswerStatus,
+  MemoirDraftStatus,
   MemoirQuestionStatus,
   MemoirSessionStatus,
 };
