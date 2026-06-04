@@ -44,19 +44,25 @@ password: password123
 `config.ts` 集中管理请求目标：
 
 ```ts
-export const API_TRANSPORT = "local";
+export const API_TRANSPORT = "cloudFunction";
 export const LOCAL_API_BASE_URL = "http://127.0.0.1:8000";
 export const CLOUD_ENV_ID = "cloud1-d6gmxffp0ea48aa1a";
 export const CLOUD_FUNCTION_NAME = "memoir-api";
 ```
 
-本地开发保持 `API_TRANSPORT = "local"`。完成 `memoir-api` 云函数部署后，再切到：
+真机调试和发布使用：
 
 ```ts
 export const API_TRANSPORT = "cloudFunction";
 ```
 
-云端路线使用微信云函数、云数据库和云存储，不使用云托管容器。现阶段 `local` 仍连接本地 FastAPI；切到 `cloudFunction` 后，JSON API 会通过 `wx.cloud.callFunction` 请求 `memoir-api`，录音会先上传到云存储，再由云函数登记音频元数据。
+云端路线使用微信云函数、云数据库和云存储，不使用云托管容器。切到 `cloudFunction` 后，JSON API 会通过 `wx.cloud.callFunction` 请求 `memoir-api`，录音会先上传到云存储，再由云函数登记音频元数据。
+
+如需临时连接本地 FastAPI 调试，再改回：
+
+```ts
+export const API_TRANSPORT = "local";
+```
 
 ## 当前 API
 
