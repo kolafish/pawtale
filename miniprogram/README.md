@@ -37,7 +37,7 @@ password: password123
 
 如果用户不存在，会自动注册；如果已存在，会登录。
 
-## 微信云托管配置
+## 微信云开发配置
 
 小程序 AppID 已配置为 `wx71acdf73e2ba7067`。
 
@@ -46,19 +46,17 @@ password: password123
 ```ts
 export const API_TRANSPORT = "local";
 export const LOCAL_API_BASE_URL = "http://127.0.0.1:8000";
-export const CLOUD_ENV_ID = "";
-export const CLOUD_SERVICE_NAME = "pawtale-api";
+export const CLOUD_ENV_ID = "cloud1-d6gmxffp0ea48aa1a";
+export const CLOUD_FUNCTION_NAME = "memoir-api";
 ```
 
-本地开发保持 `API_TRANSPORT = "local"`。创建微信云托管环境和服务后，再切到：
+本地开发保持 `API_TRANSPORT = "local"`。完成 `memoir-api` 云函数部署后，再切到：
 
 ```ts
-export const API_TRANSPORT = "cloud";
-export const CLOUD_ENV_ID = "你的云开发环境 ID";
-export const CLOUD_SERVICE_NAME = "云托管服务名";
+export const API_TRANSPORT = "cloudFunction";
 ```
 
-云托管 JSON API 通过 `wx.cloud.callContainer` 调用。音频上传还需要后续接入云存储/对象存储后再切换到云模式。
+云端路线使用微信云函数、云数据库和云存储，不使用云托管容器。现阶段 `local` 仍连接本地 FastAPI，后续 PR 会补齐云函数 API、云存储音频上传、ASR 和整理成文。
 
 ## 当前 API
 
@@ -82,7 +80,7 @@ POST /api/mobile/memoir/drafts/{draft_id}/accept
 
 - 微信 openid/unionid 登录
 - accepted draft 同步到 Web 正文
-- 云托管音频云存储
-- 后端云托管容器配置
+- 云函数 API 实现
+- 云存储音频上传
 
 这些能力会在后续 PR 分别接入。

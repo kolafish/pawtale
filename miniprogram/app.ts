@@ -1,10 +1,10 @@
-import { API_TRANSPORT, CLOUD_ENV_ID, CLOUD_SERVICE_NAME, LOCAL_API_BASE_URL } from "./config";
+import { API_TRANSPORT, CLOUD_ENV_ID, CLOUD_FUNCTION_NAME, LOCAL_API_BASE_URL } from "./config";
 
 App({
   onLaunch() {
-    if (API_TRANSPORT === "cloud") {
+    if (API_TRANSPORT === "cloudFunction") {
       wx.cloud.init({
-        env: CLOUD_ENV_ID || undefined,
+        env: CLOUD_ENV_ID,
       });
     }
   },
@@ -12,6 +12,6 @@ App({
     apiTransport: API_TRANSPORT,
     apiBaseUrl: LOCAL_API_BASE_URL,
     cloudEnvId: CLOUD_ENV_ID,
-    cloudServiceName: CLOUD_SERVICE_NAME,
+    cloudFunctionName: CLOUD_FUNCTION_NAME,
   }
 });

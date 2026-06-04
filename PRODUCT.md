@@ -143,7 +143,7 @@ Layout
 - AI 将回答整理成段落和章节
 - 小程序端优先的简化交互
 
-回忆录微信小程序的产品边界、数据组织、页面设计和实施顺序见 [docs/MEMOIR_MINIPROGRAM_PRODUCT.md](docs/MEMOIR_MINIPROGRAM_PRODUCT.md)。
+回忆录微信小程序的产品边界、数据组织、页面设计和实施顺序见 [docs/MEMOIR_MINIPROGRAM_PRODUCT.md](docs/MEMOIR_MINIPROGRAM_PRODUCT.md)。小程序上线链路优先采用微信云函数、云数据库和云存储，不使用云托管作为 MVP 默认方案。
 
 ## 路线图
 

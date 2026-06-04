@@ -13,9 +13,16 @@ SQLite + file-backed document content
         |
         +-- DeepSeek
         +-- Claude Opus 4.6 / Sonnet 4.6
+
+WeChat Mini Program
+        |
+        +-- Local dev: FastAPI
+        +-- Cloud: WeChat cloud functions + cloud database + cloud storage
 ```
 
 Pawtale 当前是单仓库、前后端分离架构。后端提供项目、文档、项目资料和 AI API；前端按项目类型分发到不同 workspace，并复用一套草稿编辑和资料编辑基础能力。
+
+回忆录小程序不是 Web 工作台的移动版。上线链路优先使用微信云函数、云数据库和云存储，避免为了小程序 MVP 引入常驻云托管容器成本。本地开发仍可连接 FastAPI，云函数只承载小程序回忆录采集闭环。
 
 ## 技术栈
 
@@ -38,6 +45,14 @@ Pawtale 当前是单仓库、前后端分离架构。后端提供项目、文档
 - TanStack Query
 - Lucide React
 - @dnd-kit
+
+### 微信小程序
+
+- 微信开发者工具
+- TypeScript
+- 微信云开发环境：`cloud1-d6gmxffp0ea48aa1a`
+- 云函数：`memoir-api`
+- 云数据库 + 云存储
 
 ### AI
 
@@ -161,6 +176,31 @@ frontend/src/
 - `useDraftRevision` 连接当前草稿和 AI 修改流程
 - `useAIRevision` 只负责 AI 修改的 diff/review 状态
 - 项目资料只通过 Binder + 主编辑区创建和编辑；Inspector 只负责文档属性、文档关联资料和项目信息
+
+## 小程序云端结构
+
+```text
+miniprogram/
+├── config.ts
+├── services/
+│   ├── request.ts
+│   └── memoir.ts
+└── pages/
+    ├── home/
+    ├── question/
+    ├── feedback/
+    └── editor/
+
+cloud-functions/
+└── memoir-api/
+```
+
+边界约定：
+
+- `miniprogram/` 只负责页面状态、录音、上传和调用云函数
+- `cloud-functions/memoir-api/` 负责小程序的微信身份、云数据库读写、云存储音频读取、ASR 和整理成文
+- Web/FastAPI 继续服务桌面创作工作台，不作为小程序上线的必需后端
+- 只有能被小程序和云函数共同验证的 API contract 才放入共享文档，避免跨端胶水过早膨胀
 
 ## 数据模型
 

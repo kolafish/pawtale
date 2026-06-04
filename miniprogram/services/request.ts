@@ -1,4 +1,4 @@
-import { API_TRANSPORT, CLOUD_ENV_ID, CLOUD_SERVICE_NAME, LOCAL_API_BASE_URL } from "../config";
+import { API_TRANSPORT, LOCAL_API_BASE_URL } from "../config";
 
 export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
@@ -60,19 +60,6 @@ function persistCookies(result: WechatMiniprogram.RequestSuccessCallbackResult |
   }
 }
 
-function requireCloudConfig(): { env: string; serviceName: string } {
-  if (!CLOUD_ENV_ID || !CLOUD_SERVICE_NAME) {
-    throw new ApiError(0, "云托管环境未配置", {
-      cloudEnvId: Boolean(CLOUD_ENV_ID),
-      cloudServiceName: Boolean(CLOUD_SERVICE_NAME),
-    });
-  }
-  return {
-    env: CLOUD_ENV_ID,
-    serviceName: CLOUD_SERVICE_NAME,
-  };
-}
-
 function parseJson(data: string): unknown {
   try {
     return JSON.parse(data);
@@ -93,8 +80,11 @@ export function request<T>(
     header?: Record<string, string>;
   } = {},
 ): Promise<T> {
-  if (API_TRANSPORT === "cloud") {
-    return cloudRequest<T>(path, options);
+  if (API_TRANSPORT === "cloudFunction") {
+    return Promise.reject(new ApiError(0, "云函数请求尚未接入", {
+      transport: API_TRANSPORT,
+      path,
+    }));
   }
 
   const headers: Record<string, string> = {
@@ -124,46 +114,6 @@ export function request<T>(
   });
 }
 
-async function cloudRequest<T>(
-  path: string,
-  options: {
-    method?: HttpMethod;
-    data?: unknown;
-    header?: Record<string, string>;
-  } = {},
-): Promise<T> {
-  const cloudConfig = requireCloudConfig();
-  const headers: Record<string, string> = {
-    ...requestHeaders("application/json"),
-    "X-WX-SERVICE": cloudConfig.serviceName,
-    ...(options.header || {}),
-  };
-
-  try {
-    const result = await wx.cloud.callContainer<T>({
-      config: {
-        env: cloudConfig.env,
-      },
-      path,
-      method: options.method || "GET",
-      data: options.data,
-      header: headers,
-      timeout: 120000,
-    });
-    persistCookies(result);
-    if (result.statusCode >= 200 && result.statusCode < 300) {
-      return result.data;
-    }
-    throw new ApiError(result.statusCode, apiMessage(result.data), result.data);
-  } catch (error) {
-    if (error instanceof ApiError) {
-      throw error;
-    }
-    const message = error instanceof Error ? error.message : "云托管请求失败";
-    throw new ApiError(0, message, error);
-  }
-}
-
 export function uploadFile<T>(
   path: string,
   options: {
@@ -172,8 +122,8 @@ export function uploadFile<T>(
     formData?: Record<string, string>;
   },
 ): Promise<T> {
-  if (API_TRANSPORT === "cloud") {
-    return Promise.reject(new ApiError(0, "云托管音频上传需要先接入云存储", {
+  if (API_TRANSPORT === "cloudFunction") {
+    return Promise.reject(new ApiError(0, "云存储音频上传尚未接入", {
       transport: API_TRANSPORT,
     }));
   }
