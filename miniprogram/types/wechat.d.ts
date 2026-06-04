@@ -54,6 +54,28 @@ declare namespace WechatMiniprogram {
     complete?(result: GeneralCallbackResult): void;
   }
 
+  interface CloudInitOption {
+    env?: string;
+  }
+
+  interface CloudCallContainerOption<T = unknown> {
+    config?: CloudInitOption;
+    path: string;
+    data?: unknown;
+    header?: Record<string, string>;
+    method?: RequestMethod;
+    timeout?: number;
+    dataType?: "json" | "text";
+    success?(result: RequestSuccessCallbackResult<T>): void;
+    fail?(result: GeneralCallbackResult): void;
+    complete?(result: GeneralCallbackResult): void;
+  }
+
+  interface Cloud {
+    init(option?: CloudInitOption): void;
+    callContainer<T = unknown>(option: CloudCallContainerOption<T>): Promise<RequestSuccessCallbackResult<T>>;
+  }
+
   interface RecorderManagerStartOption {
     duration?: number;
     sampleRate?: number;
@@ -93,6 +115,7 @@ declare namespace WechatMiniprogram {
   }
 
   interface Wx {
+    cloud: Cloud;
     request<T = unknown>(option: RequestOption<T>): void;
     uploadFile(option: UploadFileOption): void;
     getRecorderManager(): RecorderManager;

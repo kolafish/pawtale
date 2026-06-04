@@ -5,6 +5,7 @@
     "pages/feedback/index",
     "pages/editor/index"
   ],
+  "cloud": true,
   "window": {
     "navigationBarTitleText": "Pawtale 回忆录",
     "navigationBarBackgroundColor": "#0f766e",
