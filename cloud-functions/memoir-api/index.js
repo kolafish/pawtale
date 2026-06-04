@@ -1,4 +1,5 @@
 const cloud = require("wx-server-sdk");
+const { createStepFunASRService } = require("./src/asr/stepfun");
 const { handleMemoirApiRequest } = require("./src/router");
 const { CloudStore } = require("./src/store");
 
@@ -18,6 +19,13 @@ exports.main = async (event, context) => {
     },
     {
       store: new CloudStore(cloud.database()),
+      storage: {
+        async downloadFile(fileID) {
+          const result = await cloud.downloadFile({ fileID });
+          return result.fileContent;
+        },
+      },
+      asr: createStepFunASRService(),
     },
   );
 };

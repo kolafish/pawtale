@@ -9,7 +9,11 @@ function request(event, options = {}) {
   return handleMemoirApiRequest(
     event,
     { openid: options.openid || "openid_a" },
-    { store: options.store || new MemoryStore() },
+    {
+      asr: options.asr,
+      storage: options.storage,
+      store: options.store || new MemoryStore(),
+    },
   );
 }
 
@@ -158,4 +162,53 @@ test("registers a cloud audio file for the current user", async () => {
   const files = await store.findMany(COLLECTIONS.audioFiles, { openid: "openid_a" });
   assert.equal(files.length, 1);
   assert.equal(files[0].file_id, "cloud://file-id");
+});
+
+test("transcribes a registered cloud audio file", async () => {
+  const store = new MemoryStore();
+  const audioFile = await request({
+    method: "POST",
+    path: "/api/mobile/memoir/audio-files",
+    data: {
+      file_id: "cloud://file-id",
+      cloud_path: "memoir/audio/sample.mp3",
+      mime_type: "audio/mpeg",
+      size_bytes: 1200,
+      duration_seconds: 9,
+    },
+  }, { store });
+
+  const response = await request({
+    method: "POST",
+    path: `/api/mobile/memoir/audio-files/${audioFile.data.id}/transcribe`,
+  }, {
+    store,
+    storage: {
+      async downloadFile(fileID) {
+        assert.equal(fileID, "cloud://file-id");
+        return Buffer.from("audio-bytes");
+      },
+    },
+    asr: {
+      async transcribe(audioBytes, file) {
+        assert.equal(audioBytes.toString(), "audio-bytes");
+        assert.equal(file.mime_type, "audio/mpeg");
+        return {
+          text: "我的爸爸呀呀呀",
+          usage: { total_tokens: 12 },
+        };
+      },
+    },
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.data, {
+    audio_file_id: audioFile.data.id,
+    text: "我的爸爸呀呀呀",
+    usage: { total_tokens: 12 },
+  });
+
+  const files = await store.findMany(COLLECTIONS.audioFiles, { openid: "openid_a" });
+  assert.equal(files[0].transcript_text, "我的爸爸呀呀呀");
+  assert.deepEqual(files[0].transcript_usage, { total_tokens: 12 });
 });
