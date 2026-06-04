@@ -43,6 +43,8 @@ node --test cloud-functions/memoir-api/test/*.test.js
 
 用微信开发者工具打开仓库根目录 `Pawtale/` 后，在云开发面板中选择环境 `cloud1`，上传并部署 `cloud-functions/memoir-api`。
 
+`memoir-api/config.json` 将云函数超时时间设置为 60 秒。修改配置或依赖后，需要重新选择 **上传并部署：云端安装依赖**。
+
 云函数需要配置这些环境变量：
 
 | Name | Required | Notes |
@@ -53,3 +55,32 @@ node --test cloud-functions/memoir-api/test/*.test.js
 | `DEEPSEEK_API_KEY` | Yes | DeepSeek chat completion API key |
 | `DEEPSEEK_MODEL` | No | Defaults to `deepseek-chat` |
 | `DEEPSEEK_BASE_URL` | No | Defaults to `https://api.deepseek.com` |
+
+## Smoke Test
+
+部署后可以在微信开发者工具 Console 中验证云函数是否可达：
+
+```js
+wx.cloud.callFunction({
+  name: "memoir-api",
+  data: {
+    method: "GET",
+    path: "/api/mobile/memoir/health",
+    data: {}
+  }
+}).then(console.log).catch(console.error)
+```
+
+期望返回：
+
+```js
+{
+  result: {
+    statusCode: 200,
+    data: {
+      ok: true,
+      service: "memoir-api"
+    }
+  }
+}
+```
