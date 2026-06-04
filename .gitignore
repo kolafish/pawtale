@@ -2,6 +2,8 @@
 .DS_Store
 .vscode/
 .idea/
+project.private.config.json
+miniprogram/project.private.config.json
 
 # Python
 __pycache__/

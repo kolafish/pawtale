@@ -41,7 +41,7 @@ node --test cloud-functions/memoir-api/test/*.test.js
 
 ## Deploy
 
-用微信开发者工具打开 `miniprogram/` 后，在云开发面板中选择环境 `cloud1`，上传并部署 `cloud-functions/memoir-api`。
+用微信开发者工具打开仓库根目录 `Pawtale/` 后，在云开发面板中选择环境 `cloud1`，上传并部署 `cloud-functions/memoir-api`。
 
 云函数需要配置这些环境变量：
 
