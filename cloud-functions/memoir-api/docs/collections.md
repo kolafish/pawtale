@@ -85,8 +85,17 @@ Recommended index: `openid,answer_id,updated_at`.
 | `size_bytes` | number | Uploaded audio size |
 | `duration_seconds` | number/null | Optional duration |
 | `transcript_text` | string | Last ASR result |
-| `transcript_usage` | object/null | ASR usage payload |
+| `transcript_usage_json` | string | JSON-encoded ASR usage payload |
 | `transcribed_at` | string/null | Last ASR timestamp |
 | `created_at` | string | ISO timestamp |
 
 Recommended index: `openid,created_at`.
+
+`transcript_usage_json` is only for diagnostics and should not be queried or indexed. Keep indexes on ownership and workflow fields instead:
+
+- `memoir_projects`: `openid,type,updated_at`
+- `memoir_sessions`: `openid,project_id,status,updated_at`
+- `memoir_questions`: `openid,session_id,sort_order`
+- `memoir_answers`: `openid,question_id,updated_at`
+- `memoir_drafts`: `openid,answer_id,updated_at`
+- `memoir_audio_files`: `openid,created_at`

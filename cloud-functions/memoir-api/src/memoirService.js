@@ -96,6 +96,13 @@ function cleanRequiredText(value, message) {
   return text;
 }
 
+function serializeJsonField(value) {
+  if (value === undefined || value === null) {
+    return "";
+  }
+  return JSON.stringify(value);
+}
+
 async function getOrCreateProject(store, openid) {
   const existing = await store.findOne(COLLECTIONS.projects, {
     openid,
@@ -362,7 +369,7 @@ async function registerAudioFile(store, openid, data) {
     size_bytes: cleanPositiveNumber(data.size_bytes, 0),
     duration_seconds: cleanPositiveNumber(data.duration_seconds),
     transcript_text: "",
-    transcript_usage: null,
+    transcript_usage_json: "",
     transcribed_at: null,
     created_at: now,
   });
@@ -400,7 +407,7 @@ async function transcribeAudioFile(store, openid, audioFileId, dependencies) {
   const result = await dependencies.asr.transcribe(audioBytes, audioFile);
   await store.updateById(COLLECTIONS.audioFiles, audioFile.id, {
     transcript_text: result.text,
-    transcript_usage: result.usage || null,
+    transcript_usage_json: serializeJsonField(result.usage),
     transcribed_at: nowIso(),
   });
 
