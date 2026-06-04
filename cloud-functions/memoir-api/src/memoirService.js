@@ -327,6 +327,9 @@ async function registerAudioFile(store, openid, data) {
     mime_type: String(data.mime_type || "audio/mpeg"),
     size_bytes: cleanPositiveNumber(data.size_bytes, 0),
     duration_seconds: cleanPositiveNumber(data.duration_seconds),
+    transcript_text: "",
+    transcript_usage: null,
+    transcribed_at: null,
     created_at: now,
   });
 
@@ -339,7 +342,42 @@ async function registerAudioFile(store, openid, data) {
   };
 }
 
-function createMemoirService(store, context) {
+async function loadAudioFile(store, openid, audioFileId) {
+  const audioFile = await store.findOne(COLLECTIONS.audioFiles, {
+    openid,
+    _id: audioFileId,
+  });
+  if (!audioFile) {
+    throw new ApiError(404, "音频文件不存在");
+  }
+  return audioFile;
+}
+
+async function transcribeAudioFile(store, openid, audioFileId, dependencies) {
+  if (!dependencies.storage?.downloadFile) {
+    throw new ApiError(500, "云存储未配置");
+  }
+  if (!dependencies.asr?.transcribe) {
+    throw new ApiError(500, "语音转写服务未配置");
+  }
+
+  const audioFile = await loadAudioFile(store, openid, audioFileId);
+  const audioBytes = await dependencies.storage.downloadFile(audioFile.file_id);
+  const result = await dependencies.asr.transcribe(audioBytes, audioFile);
+  await store.updateById(COLLECTIONS.audioFiles, audioFile.id, {
+    transcript_text: result.text,
+    transcript_usage: result.usage || null,
+    transcribed_at: nowIso(),
+  });
+
+  return {
+    audio_file_id: audioFile.id,
+    text: result.text,
+    usage: result.usage || null,
+  };
+}
+
+function createMemoirService(store, context, dependencies = {}) {
   const openid = requireOpenId(context);
 
   return {
@@ -350,6 +388,7 @@ function createMemoirService(store, context) {
     createTextAnswer: async (data) => createTextAnswer(store, openid, data),
     updateAnswerText: async (answerId, data) => updateAnswerText(store, openid, answerId, data),
     registerAudioFile: async (data) => registerAudioFile(store, openid, data),
+    transcribeAudioFile: async (audioFileId) => transcribeAudioFile(store, openid, audioFileId, dependencies),
   };
 }
 

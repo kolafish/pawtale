@@ -84,6 +84,9 @@ Recommended index: `openid,answer_id,updated_at`.
 | `mime_type` | string | Uploaded audio mime type |
 | `size_bytes` | number | Uploaded audio size |
 | `duration_seconds` | number/null | Optional duration |
+| `transcript_text` | string | Last ASR result |
+| `transcript_usage` | object/null | ASR usage payload |
+| `transcribed_at` | string/null | Last ASR timestamp |
 | `created_at` | string | ISO timestamp |
 
 Recommended index: `openid,created_at`.

@@ -16,7 +16,10 @@ function requireStore(request) {
 }
 
 function memoirService(request) {
-  return createMemoirService(requireStore(request), request.context || {});
+  return createMemoirService(requireStore(request), request.context || {}, {
+    asr: request.asr,
+    storage: request.storage,
+  });
 }
 
 const routes = {
@@ -51,6 +54,10 @@ const routes = {
       201,
       await memoirService(request).registerAudioFile(request.data),
     )),
+    route("/api/mobile/memoir/audio-files/:audioFileId/transcribe", async (request) => jsonResponse(
+      200,
+      await memoirService(request).transcribeAudioFile(request.params.audioFileId),
+    )),
   ],
   PATCH: [
     route("/api/mobile/memoir/answers/:answerId", async (request) => jsonResponse(
@@ -70,7 +77,9 @@ async function handleMemoirApiRequest(event = {}, context = {}, dependencies = {
       data: event.data || {},
       context,
       event,
+      asr: dependencies.asr,
       store: dependencies.store,
+      storage: dependencies.storage,
     };
 
     for (const routeConfig of routes[method] || []) {
