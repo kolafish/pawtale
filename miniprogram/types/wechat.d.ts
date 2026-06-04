@@ -58,8 +58,39 @@ declare namespace WechatMiniprogram {
     env?: string;
   }
 
+  interface CloudCallFunctionResult<T = unknown> {
+    result: T;
+    errMsg?: string;
+  }
+
+  interface CloudCallFunctionOption<T = unknown> {
+    name: string;
+    data?: unknown;
+    config?: CloudInitOption;
+    success?(result: CloudCallFunctionResult<T>): void;
+    fail?(result: GeneralCallbackResult): void;
+    complete?(result: GeneralCallbackResult): void;
+  }
+
+  interface CloudUploadFileResult {
+    fileID: string;
+    statusCode?: number;
+    errMsg?: string;
+  }
+
+  interface CloudUploadFileOption {
+    cloudPath: string;
+    filePath: string;
+    config?: CloudInitOption;
+    success?(result: CloudUploadFileResult): void;
+    fail?(result: GeneralCallbackResult): void;
+    complete?(result: GeneralCallbackResult): void;
+  }
+
   interface Cloud {
     init(option?: CloudInitOption): void;
+    callFunction<T = unknown>(option: CloudCallFunctionOption<T>): Promise<CloudCallFunctionResult<T>>;
+    uploadFile(option: CloudUploadFileOption): Promise<CloudUploadFileResult>;
   }
 
   interface RecorderManagerStartOption {

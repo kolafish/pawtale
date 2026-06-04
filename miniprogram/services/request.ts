@@ -1,9 +1,15 @@
-import { API_TRANSPORT, LOCAL_API_BASE_URL } from "../config";
+import { API_TRANSPORT, CLOUD_ENV_ID, CLOUD_FUNCTION_NAME, LOCAL_API_BASE_URL } from "../config";
 
 export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
 export const API_BASE_URL = LOCAL_API_BASE_URL;
 const COOKIE_STORAGE_KEY = "pawtale_miniprogram_cookie";
+const CLOUD_AUDIO_ROOT = "memoir/audio";
+
+interface CloudApiResponse<T> {
+  statusCode: number;
+  data: T;
+}
 
 export class ApiError extends Error {
   constructor(
@@ -68,6 +74,35 @@ function parseJson(data: string): unknown {
   }
 }
 
+function cloudApiMessage(data: unknown): string {
+  return apiMessage(data);
+}
+
+function fileExtension(filePath: string): string {
+  const cleanPath = filePath.split("?")[0] || "";
+  const match = /\.([a-zA-Z0-9]+)$/.exec(cleanPath);
+  return match ? match[1].toLowerCase() : "mp3";
+}
+
+function audioMimeType(extension: string): string {
+  if (extension === "wav") {
+    return "audio/wav";
+  }
+  if (extension === "ogg") {
+    return "audio/ogg";
+  }
+  if (extension === "pcm") {
+    return "audio/pcm";
+  }
+  return "audio/mpeg";
+}
+
+function uniqueCloudAudioPath(filePath: string): string {
+  const extension = fileExtension(filePath);
+  const random = Math.random().toString(36).slice(2, 10);
+  return `${CLOUD_AUDIO_ROOT}/${Date.now()}-${random}.${extension}`;
+}
+
 export function clearSessionCookie(): void {
   wx.removeStorageSync(COOKIE_STORAGE_KEY);
 }
@@ -81,10 +116,7 @@ export function request<T>(
   } = {},
 ): Promise<T> {
   if (API_TRANSPORT === "cloudFunction") {
-    return Promise.reject(new ApiError(0, "云函数请求尚未接入", {
-      transport: API_TRANSPORT,
-      path,
-    }));
+    return cloudFunctionRequest<T>(path, options);
   }
 
   const headers: Record<string, string> = {
@@ -114,6 +146,39 @@ export function request<T>(
   });
 }
 
+async function cloudFunctionRequest<T>(
+  path: string,
+  options: {
+    method?: HttpMethod;
+    data?: unknown;
+  } = {},
+): Promise<T> {
+  try {
+    const result = await wx.cloud.callFunction<CloudApiResponse<T>>({
+      name: CLOUD_FUNCTION_NAME,
+      config: {
+        env: CLOUD_ENV_ID,
+      },
+      data: {
+        path,
+        method: options.method || "GET",
+        data: options.data || {},
+      },
+    });
+    const response = result.result;
+    if (response.statusCode >= 200 && response.statusCode < 300) {
+      return response.data;
+    }
+    throw new ApiError(response.statusCode, cloudApiMessage(response.data), response.data);
+  } catch (error) {
+    if (error instanceof ApiError) {
+      throw error;
+    }
+    const message = error instanceof Error ? error.message : "云函数请求失败";
+    throw new ApiError(0, message, error);
+  }
+}
+
 export function uploadFile<T>(
   path: string,
   options: {
@@ -123,9 +188,7 @@ export function uploadFile<T>(
   },
 ): Promise<T> {
   if (API_TRANSPORT === "cloudFunction") {
-    return Promise.reject(new ApiError(0, "云存储音频上传尚未接入", {
-      transport: API_TRANSPORT,
-    }));
+    return uploadCloudAudioFile<T>(path, options);
   }
 
   return new Promise<T>((resolve, reject) => {
@@ -150,4 +213,48 @@ export function uploadFile<T>(
       },
     });
   });
+}
+
+async function uploadCloudAudioFile<T>(
+  path: string,
+  options: {
+    filePath: string;
+    formData?: Record<string, string>;
+  },
+): Promise<T> {
+  const cloudPath = uniqueCloudAudioPath(options.filePath);
+  const extension = fileExtension(options.filePath);
+  const durationSeconds = options.formData?.duration_seconds
+    ? Number(options.formData.duration_seconds)
+    : undefined;
+  const sizeBytes = options.formData?.size_bytes
+    ? Number(options.formData.size_bytes)
+    : 0;
+
+  try {
+    const uploadResult = await wx.cloud.uploadFile({
+      config: {
+        env: CLOUD_ENV_ID,
+      },
+      cloudPath,
+      filePath: options.filePath,
+    });
+
+    return cloudFunctionRequest<T>(path, {
+      method: "POST",
+      data: {
+        file_id: uploadResult.fileID,
+        cloud_path: cloudPath,
+        mime_type: audioMimeType(extension),
+        size_bytes: Number.isFinite(sizeBytes) ? sizeBytes : 0,
+        duration_seconds: Number.isFinite(durationSeconds) ? durationSeconds : undefined,
+      },
+    });
+  } catch (error) {
+    if (error instanceof ApiError) {
+      throw error;
+    }
+    const message = error instanceof Error ? error.message : "云存储上传失败";
+    throw new ApiError(0, message, error);
+  }
 }

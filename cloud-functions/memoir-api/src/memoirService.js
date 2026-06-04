@@ -17,6 +17,7 @@ const MemoirSessionStatus = Object.freeze({
 });
 
 const MemoirAnswerStatus = Object.freeze({
+  UPLOADED: "uploaded",
   ANSWERED: "answered",
 });
 
@@ -51,6 +52,25 @@ function cleanAnswerText(text) {
     throw new ApiError(400, "回答不能为空");
   }
   return value;
+}
+
+function cleanPositiveNumber(value, fallback = null) {
+  if (value === undefined || value === null || value === "") {
+    return fallback;
+  }
+  const numberValue = Number(value);
+  if (!Number.isFinite(numberValue) || numberValue < 0) {
+    return fallback;
+  }
+  return Math.round(numberValue);
+}
+
+function cleanRequiredText(value, message) {
+  const text = String(value || "").trim();
+  if (!text) {
+    throw new ApiError(400, message);
+  }
+  return text;
 }
 
 async function getOrCreateProject(store, openid) {
@@ -298,6 +318,27 @@ async function updateAnswerText(store, openid, answerId, data) {
   return updated;
 }
 
+async function registerAudioFile(store, openid, data) {
+  const now = nowIso();
+  const audioFile = await store.insert(COLLECTIONS.audioFiles, {
+    openid,
+    file_id: cleanRequiredText(data.file_id, "缺少云存储文件 ID"),
+    cloud_path: cleanRequiredText(data.cloud_path, "缺少云存储路径"),
+    mime_type: String(data.mime_type || "audio/mpeg"),
+    size_bytes: cleanPositiveNumber(data.size_bytes, 0),
+    duration_seconds: cleanPositiveNumber(data.duration_seconds),
+    created_at: now,
+  });
+
+  return {
+    id: audioFile.id,
+    mime_type: audioFile.mime_type,
+    size_bytes: audioFile.size_bytes,
+    duration_seconds: audioFile.duration_seconds,
+    created_at: audioFile.created_at,
+  };
+}
+
 function createMemoirService(store, context) {
   const openid = requireOpenId(context);
 
@@ -308,6 +349,7 @@ function createMemoirService(store, context) {
     skipQuestion: async (questionId) => skipQuestion(store, openid, questionId),
     createTextAnswer: async (data) => createTextAnswer(store, openid, data),
     updateAnswerText: async (answerId, data) => updateAnswerText(store, openid, answerId, data),
+    registerAudioFile: async (data) => registerAudioFile(store, openid, data),
   };
 }
 

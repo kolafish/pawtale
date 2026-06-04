@@ -72,7 +72,7 @@ function bindRecorderEvents(): void {
     page.setData({ uploadingAudio: true, error: "", audioSummary: "正在保存录音" });
     let savedDurationText = "";
     try {
-      const audioFile = await uploadMemoirAudioFile(result.tempFilePath, seconds);
+      const audioFile = await uploadMemoirAudioFile(result.tempFilePath, seconds, result.fileSize);
       savedDurationText = durationText(audioFile.duration_seconds ?? seconds);
       page.setData({
         uploadingAudio: false,

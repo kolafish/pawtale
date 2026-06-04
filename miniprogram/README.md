@@ -56,7 +56,7 @@ export const CLOUD_FUNCTION_NAME = "memoir-api";
 export const API_TRANSPORT = "cloudFunction";
 ```
 
-云端路线使用微信云函数、云数据库和云存储，不使用云托管容器。现阶段 `local` 仍连接本地 FastAPI，后续 PR 会补齐云函数 API、云存储音频上传、ASR 和整理成文。
+云端路线使用微信云函数、云数据库和云存储，不使用云托管容器。现阶段 `local` 仍连接本地 FastAPI；切到 `cloudFunction` 后，JSON API 会通过 `wx.cloud.callFunction` 请求 `memoir-api`，录音会先上传到云存储，再由云函数登记音频元数据。
 
 ## 当前 API
 
@@ -80,7 +80,7 @@ POST /api/mobile/memoir/drafts/{draft_id}/accept
 
 - 微信 openid/unionid 登录
 - accepted draft 同步到 Web 正文
-- 云函数 API 实现
-- 云存储音频上传
+- 云函数 ASR 转写
+- 云函数 AI 整理成文
 
 这些能力会在后续 PR 分别接入。

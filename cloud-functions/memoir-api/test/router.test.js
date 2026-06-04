@@ -135,3 +135,27 @@ test("skips a pending question", async () => {
   assert.equal(response.data.completed_question_count, 1);
   assert.notEqual(response.data.current_question.id, firstQuestionId);
 });
+
+test("registers a cloud audio file for the current user", async () => {
+  const store = new MemoryStore();
+  const response = await request({
+    method: "POST",
+    path: "/api/mobile/memoir/audio-files",
+    data: {
+      file_id: "cloud://file-id",
+      cloud_path: "memoir/audio/sample.mp3",
+      mime_type: "audio/mpeg",
+      size_bytes: 1200,
+      duration_seconds: 9,
+    },
+  }, { store });
+
+  assert.equal(response.statusCode, 201);
+  assert.equal(response.data.mime_type, "audio/mpeg");
+  assert.equal(response.data.size_bytes, 1200);
+  assert.equal(response.data.duration_seconds, 9);
+
+  const files = await store.findMany(COLLECTIONS.audioFiles, { openid: "openid_a" });
+  assert.equal(files.length, 1);
+  assert.equal(files[0].file_id, "cloud://file-id");
+});

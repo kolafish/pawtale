@@ -34,10 +34,13 @@ export function createTextAnswer(questionId: string, text: string): Promise<Memo
   });
 }
 
-export function uploadMemoirAudioFile(filePath: string, durationSeconds?: number): Promise<MemoirAudioFile> {
+export function uploadMemoirAudioFile(filePath: string, durationSeconds?: number, sizeBytes?: number): Promise<MemoirAudioFile> {
   const formData: Record<string, string> = {};
   if (durationSeconds !== undefined) {
     formData.duration_seconds = String(durationSeconds);
+  }
+  if (sizeBytes !== undefined) {
+    formData.size_bytes = String(sizeBytes);
   }
   return uploadFile<MemoirAudioFile>("/api/mobile/memoir/audio-files", {
     filePath,

@@ -47,6 +47,10 @@ const routes = {
       200,
       await memoirService(request).createTextAnswer(request.data),
     )),
+    route("/api/mobile/memoir/audio-files", async (request) => jsonResponse(
+      201,
+      await memoirService(request).registerAudioFile(request.data),
+    )),
   ],
   PATCH: [
     route("/api/mobile/memoir/answers/:answerId", async (request) => jsonResponse(
