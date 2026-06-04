@@ -1,42 +1,73 @@
-<view class="page stack">
-  <view class="stack">
-    <text class="eyebrow">编辑</text>
-    <text class="title">调整回答和校正稿</text>
+<view class="editor-page">
+  <view class="editor-nav">
+    <view class="back-hit" bindtap="goBack">
+      <text class="back-mark">‹</text>
+    </view>
+    <text class="screen-title">调整回答和校正稿</text>
   </view>
 
   <view wx:if="{{error}}" class="error">{{error}}</view>
 
-  <view class="surface stack">
-    <text class="eyebrow">访谈问题</text>
-    <text class="body-text">{{questionPrompt || "暂无问题"}}</text>
+  <view class="question-panel">
+    <view class="panel-label label-warm">
+      <view class="question-icon">?</view>
+      <text>访谈问题</text>
+    </view>
+    <text class="question-text">{{questionPrompt || "暂无问题"}}</text>
   </view>
 
-  <view class="stack">
-    <text class="eyebrow">我的回答</text>
+  <view class="content-panel answer-panel">
+    <view class="panel-label label-green">
+      <view class="bubble-icon">
+        <view></view>
+        <view></view>
+        <view></view>
+      </view>
+      <text>我的回答</text>
+    </view>
     <textarea
-      class="textarea"
+      class="editor-textarea answer-textarea"
       value="{{transcriptText}}"
       maxlength="-1"
+      focus="{{transcriptFocus}}"
+      cursor-spacing="80"
       bindinput="onTranscriptInput"
     />
   </view>
 
-  <view class="stack">
-    <text class="eyebrow">校正后的回答</text>
+  <view class="content-panel draft-panel">
+    <view class="panel-label label-green">
+      <view class="doc-icon">
+        <view class="doc-line"></view>
+        <view class="doc-line short"></view>
+      </view>
+      <text>校正稿</text>
+    </view>
     <textarea
-      class="textarea editor-draft"
+      class="editor-textarea draft-textarea"
       value="{{draftText}}"
       maxlength="-1"
+      focus="{{draftFocus}}"
+      cursor-spacing="80"
       bindinput="onDraftInput"
     />
   </view>
 
-  <view class="button-row">
-    <button class="button button-secondary" loading="{{saving}}" bindtap="saveEditsOnly">
+  <view class="edit-actions">
+    <button class="action-button action-quiet" disabled="{{saving}}" bindtap="focusTranscript">
+      改回答
+    </button>
+    <button class="action-button action-warm" disabled="{{saving}}" bindtap="focusDraft">
+      改校正稿
+    </button>
+  </view>
+
+  <view class="bottom-actions">
+    <button class="save-button secondary-save" loading="{{saving}}" bindtap="saveEditsOnly">
       保存
     </button>
-    <button class="button button-primary" loading="{{saving}}" bindtap="saveAndContinue">
-      保存并继续
+    <button class="save-button primary-save" loading="{{saving}}" bindtap="saveAndContinue">
+      确认继续
     </button>
   </view>
 </view>
