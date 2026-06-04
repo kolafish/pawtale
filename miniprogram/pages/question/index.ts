@@ -25,6 +25,8 @@ interface QuestionData {
   question?: MemoirQuestion;
   prompt: string;
   answerText: string;
+  audioFileId: string;
+  audioDurationSeconds: number | null;
   audioSummary: string;
   isCompleted: boolean;
 }
@@ -73,8 +75,11 @@ function bindRecorderEvents(): void {
     let savedDurationText = "";
     try {
       const audioFile = await uploadMemoirAudioFile(result.tempFilePath, seconds, result.fileSize);
-      savedDurationText = durationText(audioFile.duration_seconds ?? seconds);
+      const savedSeconds = audioFile.duration_seconds ?? seconds;
+      savedDurationText = durationText(savedSeconds);
       page.setData({
+        audioFileId: audioFile.id,
+        audioDurationSeconds: savedSeconds,
         uploadingAudio: false,
         transcribingAudio: true,
         audioSummary: "正在转写",
@@ -126,6 +131,8 @@ Page<QuestionData, {
     question: undefined,
     prompt: "",
     answerText: "",
+    audioFileId: "",
+    audioDurationSeconds: null,
     audioSummary: "",
     isCompleted: false,
   },
@@ -150,6 +157,8 @@ Page<QuestionData, {
       loading: true,
       error: "",
       answerText: "",
+      audioFileId: "",
+      audioDurationSeconds: null,
       audioSummary: "",
     });
     try {
@@ -177,7 +186,7 @@ Page<QuestionData, {
     if (this.data.loading || this.data.isCompleted || this.data.submitting || isAudioBusy(this.data)) {
       return;
     }
-    this.setData({ error: "", audioSummary: "" });
+    this.setData({ error: "", audioFileId: "", audioDurationSeconds: null, audioSummary: "" });
     recorderManager.start({
       duration: MAX_RECORDING_MS,
       sampleRate: 16000,
@@ -198,7 +207,7 @@ Page<QuestionData, {
     if (isAudioBusy(this.data)) {
       return;
     }
-    this.setData({ audioSummary: "" });
+    this.setData({ audioFileId: "", audioDurationSeconds: null, audioSummary: "" });
   },
 
   async submitAnswer() {
@@ -216,7 +225,12 @@ Page<QuestionData, {
 
     this.setData({ submitting: true, error: "" });
     try {
-      const answer = await createTextAnswer(question.id, text);
+      const answer = await createTextAnswer(
+        question.id,
+        text,
+        this.data.audioFileId || undefined,
+        this.data.audioDurationSeconds ?? undefined,
+      );
       clearMemoirDraft();
       writeMemoirStore({ question, answer });
       wx.navigateTo({ url: `/pages/feedback/index?answerId=${answer.id}` });

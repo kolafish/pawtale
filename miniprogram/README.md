@@ -82,6 +82,9 @@ PATCH /api/mobile/memoir/drafts/{draft_id}
 POST /api/mobile/memoir/drafts/{draft_id}/accept
 ```
 
+`POST /api/mobile/memoir/answers` 支持纯文本回答，也支持带上刚上传录音的
+`audio_file_id` 和 `duration_seconds`，用于后续播放原话或重录。
+
 ## 当前不包含
 
 - accepted draft 同步到 Web 正文

@@ -114,6 +114,8 @@ async def create_mobile_memoir_answer(
         req.question_id,
         current_user.id,
         req.text,
+        audio_file_id=req.audio_file_id,
+        duration_seconds=req.duration_seconds,
     )
 
 

@@ -1,6 +1,6 @@
 from sqlalchemy import select
 
-from app.models.memoir import AudioFile
+from app.models.memoir import AudioFile, MemoirAnswer
 from app.services.asr import ASRTranscriptionResult, StepFunASRError
 from app.services.memoir.audio_files import audio_file_path
 
@@ -182,6 +182,40 @@ async def test_mobile_memoir_rejects_blank_answer(client):
 
     assert response.status_code == 400
     assert response.json()["detail"] == "回答不能为空"
+
+
+async def test_mobile_memoir_text_answer_links_uploaded_audio_file(
+    client,
+    test_db,
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr("app.services.memoir.audio_files.MEMOIR_AUDIO_DIR", tmp_path / "audio")
+    upload_response = await client.post(
+        "/api/mobile/memoir/audio-files",
+        data={"duration_seconds": "7"},
+        files={"file": ("answer.mp3", b"audio bytes", "audio/mpeg")},
+    )
+    audio_id = upload_response.json()["id"]
+    session_response = await client.get("/api/mobile/memoir/sessions/current")
+    question_id = session_response.json()["current_question"]["id"]
+
+    response = await client.post(
+        "/api/mobile/memoir/answers",
+        json={
+            "question_id": question_id,
+            "text": "我小时候经常去外婆家。",
+            "audio_file_id": audio_id,
+        },
+    )
+
+    assert response.status_code == 201
+    answer = response.json()
+    assert answer["audio_file_id"] == audio_id
+    assert answer["duration_seconds"] == 7
+    stored = await test_db.scalar(select(MemoirAnswer).where(MemoirAnswer.id == answer["id"]))
+    assert stored.audio_file_id == audio_id
+    assert stored.duration_seconds == 7
 
 
 async def test_mobile_memoir_skip_question(client):

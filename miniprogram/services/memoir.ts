@@ -27,10 +27,23 @@ export function skipQuestion(questionId: string): Promise<MemoirInterviewState> 
   });
 }
 
-export function createTextAnswer(questionId: string, text: string): Promise<MemoirAnswer> {
+export function createTextAnswer(
+  questionId: string,
+  text: string,
+  audioFileId?: string,
+  durationSeconds?: number,
+): Promise<MemoirAnswer> {
+  const data: Record<string, string | number> = { question_id: questionId, text };
+  if (audioFileId) {
+    data.audio_file_id = audioFileId;
+  }
+  if (durationSeconds !== undefined) {
+    data.duration_seconds = durationSeconds;
+  }
+
   return request<MemoirAnswer>("/api/mobile/memoir/answers", {
     method: "POST",
-    data: { question_id: questionId, text },
+    data,
   });
 }
 

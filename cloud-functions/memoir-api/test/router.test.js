@@ -123,6 +123,43 @@ test("answers a question and advances to the next pending question", async () =>
   assert.equal(questions.find((question) => question.id === firstQuestionId).status, "answered");
 });
 
+test("answers a question with a linked audio file", async () => {
+  const store = new MemoryStore();
+  const state = await request({
+    method: "GET",
+    path: "/api/mobile/memoir/sessions/current",
+  }, { store });
+  const audioFile = await request({
+    method: "POST",
+    path: "/api/mobile/memoir/audio-files",
+    data: {
+      file_id: "cloud://answer-audio",
+      cloud_path: "memoir/audio/answer.mp3",
+      mime_type: "audio/mpeg",
+      size_bytes: 128,
+      duration_seconds: 7,
+    },
+  }, { store });
+
+  const answer = await request({
+    method: "POST",
+    path: "/api/mobile/memoir/answers",
+    data: {
+      question_id: state.data.current_question.id,
+      text: "我小时候经常去外婆家。",
+      audio_file_id: audioFile.data.id,
+    },
+  }, { store });
+
+  assert.equal(answer.statusCode, 200);
+  assert.equal(answer.data.audio_file_id, audioFile.data.id);
+  assert.equal(answer.data.duration_seconds, 7);
+
+  const answers = await store.findMany(COLLECTIONS.answers, { openid: "openid_a" });
+  assert.equal(answers[0].audio_file_id, audioFile.data.id);
+  assert.equal(answers[0].duration_seconds, 7);
+});
+
 test("skips a pending question", async () => {
   const store = new MemoryStore();
   const state = await request({
