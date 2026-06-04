@@ -50,7 +50,7 @@ Recommended index: `openid,session_id,sort_order`.
 | --- | --- | --- |
 | `openid` | string | Owner |
 | `question_id` | string | `memoir_questions` id |
-| `audio_file_id` | string/null | Optional cloud audio record |
+| `audio_file_id` | string/null | Optional `memoir_audio_files` id |
 | `transcript_raw` | string | ASR/raw text |
 | `transcript_edited` | string | Corrected user answer |
 | `status` | string | `uploaded` / `transcribing` / `answered` / `drafted` / `confirmed` |

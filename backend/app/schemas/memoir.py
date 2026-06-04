@@ -58,6 +58,8 @@ class MemoirAudioTranscriptionResponse(BaseModel):
 class MemoirTextAnswerCreate(BaseModel):
     question_id: str
     text: str
+    audio_file_id: str | None = None
+    duration_seconds: int | None = Field(default=None, ge=0)
 
 
 class MemoirTextAnswerUpdate(BaseModel):

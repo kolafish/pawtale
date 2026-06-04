@@ -4,7 +4,7 @@ from sqlalchemy import func, select
 
 from app.domain.memoir import MemoirAnswerStatus, MemoirQuestionStatus, MemoirSessionStatus
 from app.domain.projects.types import ProjectType
-from app.models.memoir import MemoirAnswer, MemoirQuestion
+from app.models.memoir import AudioFile, MemoirAnswer, MemoirQuestion
 from app.models.projects import Project
 from app.models.users import User
 from app.services.memoir.answers import answer_question_with_text, update_answer_text
@@ -78,6 +78,63 @@ async def test_text_answer_creates_answer_and_advances_question(test_db):
     assert next_state.current_question.id == next_state.questions[1].id
     assert next_state.completed_question_count == 1
     assert next_state.pending_question_count == 4
+
+
+async def test_text_answer_links_owned_audio_file(test_db):
+    user, project = await _create_user_and_project(test_db)
+    audio_file = AudioFile(
+        user_id=user.id,
+        storage_path=f"memoir/audio/{user.id}/answer.mp3",
+        mime_type="audio/mpeg",
+        size_bytes=123,
+        duration_seconds=9,
+    )
+    test_db.add(audio_file)
+    state = await get_or_create_current_session(test_db, project.id, user.id)
+    await test_db.flush()
+
+    answer = await answer_question_with_text(
+        test_db,
+        state.current_question.id,
+        user.id,
+        "我小时候经常去外婆家。",
+        audio_file_id=audio_file.id,
+    )
+
+    assert answer.audio_file_id == audio_file.id
+    assert answer.duration_seconds == 9
+    stored = await test_db.scalar(select(MemoirAnswer).where(MemoirAnswer.id == answer.id))
+    assert stored.audio_file_id == audio_file.id
+    assert stored.duration_seconds == 9
+
+
+async def test_text_answer_rejects_other_users_audio_file(test_db):
+    owner, project = await _create_user_and_project(test_db)
+    other = _user("memoir-audio-owner@example.com")
+    test_db.add(other)
+    await test_db.flush()
+    other_audio = AudioFile(
+        user_id=other.id,
+        storage_path=f"memoir/audio/{other.id}/answer.mp3",
+        mime_type="audio/mpeg",
+        size_bytes=123,
+        duration_seconds=9,
+    )
+    test_db.add(other_audio)
+    state = await get_or_create_current_session(test_db, project.id, owner.id)
+    await test_db.flush()
+
+    with pytest.raises(HTTPException) as exc:
+        await answer_question_with_text(
+            test_db,
+            state.current_question.id,
+            owner.id,
+            "我小时候经常去外婆家。",
+            audio_file_id=other_audio.id,
+        )
+
+    assert exc.value.status_code == 404
+    assert exc.value.detail == "音频文件不存在"
 
 
 async def test_answering_existing_question_updates_single_answer(test_db):

@@ -303,6 +303,18 @@ async function skipQuestion(store, openid, questionId) {
   return getSessionState(store, openid, question.session_id);
 }
 
+async function answerAudioPatch(store, openid, data) {
+  if (!data.audio_file_id) {
+    return {};
+  }
+
+  const audioFile = await loadAudioFile(store, openid, data.audio_file_id);
+  return {
+    audio_file_id: audioFile.id,
+    duration_seconds: cleanPositiveNumber(data.duration_seconds, audioFile.duration_seconds),
+  };
+}
+
 async function createTextAnswer(store, openid, data) {
   const question = await loadQuestion(store, openid, data.question_id);
   if (question.status === MemoirQuestionStatus.SKIPPED) {
@@ -310,6 +322,7 @@ async function createTextAnswer(store, openid, data) {
   }
 
   const transcript = cleanAnswerText(data.text);
+  const audioPatch = await answerAudioPatch(store, openid, data);
   const now = nowIso();
   const existing = await store.findOne(COLLECTIONS.answers, {
     openid,
@@ -322,15 +335,16 @@ async function createTextAnswer(store, openid, data) {
       transcript_edited: transcript,
       status: MemoirAnswerStatus.ANSWERED,
       updated_at: now,
+      ...audioPatch,
     })
     : await store.insert(COLLECTIONS.answers, {
       openid,
       question_id: question.id,
-      audio_file_id: null,
+      audio_file_id: audioPatch.audio_file_id || null,
       transcript_raw: transcript,
       transcript_edited: transcript,
       status: MemoirAnswerStatus.ANSWERED,
-      duration_seconds: null,
+      duration_seconds: audioPatch.duration_seconds ?? null,
       created_at: now,
       updated_at: now,
     });
