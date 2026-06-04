@@ -306,3 +306,63 @@ test("generates, edits, and accepts a memoir draft", async () => {
   const answers = await store.findMany(COLLECTIONS.answers, { openid: "openid_a" });
   assert.equal(answers[0].status, "confirmed");
 });
+
+test("returns memoir story cards and summary", async () => {
+  const store = new MemoryStore();
+  const state = await request({
+    method: "GET",
+    path: "/api/mobile/memoir/sessions/current",
+  }, { store });
+  const answer = await request({
+    method: "POST",
+    path: "/api/mobile/memoir/answers",
+    data: {
+      question_id: state.data.current_question.id,
+      text: "我记得外婆家的院子。",
+    },
+  }, { store });
+  const draft = await request({
+    method: "POST",
+    path: `/api/mobile/memoir/answers/${answer.data.id}/draft`,
+  }, {
+    store,
+    drafting: {
+      async generate() {
+        return { text: "外婆家的院子，是我童年里最清晰的地方。" };
+      },
+    },
+  });
+
+  const stories = await request({
+    method: "GET",
+    path: "/api/mobile/memoir/stories",
+  }, { store });
+
+  assert.equal(stories.statusCode, 200);
+  assert.equal(stories.data.total, 1);
+  assert.equal(stories.data.stories[0].id, answer.data.id);
+  assert.equal(stories.data.stories[0].answer_id, answer.data.id);
+  assert.equal(stories.data.stories[0].question_id, state.data.current_question.id);
+  assert.equal(stories.data.stories[0].question_prompt, state.data.current_question.prompt);
+  assert.equal(stories.data.stories[0].answer_preview, "我记得外婆家的院子。");
+  assert.equal(stories.data.stories[0].answer_status, "drafted");
+  assert.equal(stories.data.stories[0].draft_id, draft.data.id);
+  assert.equal(stories.data.stories[0].draft_status, "draft");
+  assert.equal(stories.data.stories[0].draft_preview, "外婆家的院子，是我童年里最清晰的地方。");
+
+  const summary = await request({
+    method: "GET",
+    path: "/api/mobile/memoir/summary",
+  }, { store });
+
+  assert.equal(summary.statusCode, 200);
+  assert.deepEqual(summary.data, {
+    total_story_count: 1,
+    weekly_story_count: 1,
+    pending_review_count: 1,
+    confirmed_story_count: 0,
+    total_question_count: 5,
+    completed_question_count: 1,
+    progress_percent: 20,
+  });
+});

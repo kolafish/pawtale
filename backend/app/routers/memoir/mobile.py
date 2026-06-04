@@ -14,6 +14,8 @@ from app.schemas.memoir import (
     MemoirInterviewState,
     MemoirQuestionResponse,
     MemoirSessionCreate,
+    MemoirStoryListResponse,
+    MemoirSummaryResponse,
     MemoirTextAnswerCreate,
     MemoirTextAnswerUpdate,
 )
@@ -23,6 +25,7 @@ from app.services.memoir import audio_files as memoir_audio_files
 from app.services.memoir import drafting as memoir_drafting
 from app.services.memoir import interview as memoir_interview
 from app.services.memoir import projects as memoir_projects
+from app.services.memoir import story_cards as memoir_story_cards
 from app.services.memoir import transcription as memoir_transcription
 
 
@@ -68,6 +71,24 @@ async def get_next_mobile_memoir_question(
 ):
     project_id = await _default_memoir_project_id(db, current_user.id)
     return await memoir_interview.get_next_question(db, project_id, current_user.id)
+
+
+@router.get("/summary", response_model=MemoirSummaryResponse)
+async def get_mobile_memoir_summary(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    project_id = await _default_memoir_project_id(db, current_user.id)
+    return await memoir_story_cards.get_summary(db, project_id, current_user.id)
+
+
+@router.get("/stories", response_model=MemoirStoryListResponse)
+async def list_mobile_memoir_stories(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    project_id = await _default_memoir_project_id(db, current_user.id)
+    return await memoir_story_cards.list_story_cards(db, project_id, current_user.id)
 
 
 @router.post("/questions/{question_id}/skip", response_model=MemoirInterviewState)

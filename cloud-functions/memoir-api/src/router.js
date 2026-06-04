@@ -41,6 +41,14 @@ const routes = {
       200,
       await memoirService(request).getNextQuestion(),
     )),
+    route("/api/mobile/memoir/summary", async (request) => jsonResponse(
+      200,
+      await memoirService(request).getSummary(),
+    )),
+    route("/api/mobile/memoir/stories", async (request) => jsonResponse(
+      200,
+      await memoirService(request).listStoryCards(),
+    )),
   ],
   POST: [
     route("/api/mobile/memoir/questions/:questionId/skip", async (request) => jsonResponse(

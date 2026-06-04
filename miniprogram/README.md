@@ -72,6 +72,8 @@ export const API_TRANSPORT = "local";
 GET  /api/mobile/memoir/project
 GET  /api/mobile/memoir/sessions/current
 GET  /api/mobile/memoir/questions/next
+GET  /api/mobile/memoir/summary
+GET  /api/mobile/memoir/stories
 POST /api/mobile/memoir/questions/{question_id}/skip
 POST /api/mobile/memoir/audio-files
 POST /api/mobile/memoir/audio-files/{audio_file_id}/transcribe
