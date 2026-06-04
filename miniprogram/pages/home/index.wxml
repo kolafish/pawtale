@@ -1,29 +1,76 @@
-<view class="page stack">
-  <view class="stack">
-    <text class="eyebrow">Pawtale Memoir</text>
-    <text class="title">{{projectTitle || "我的回忆录"}}</text>
-    <text class="subtitle">当前访谈：{{sessionTitle || "准备中"}}</text>
+<view class="home-page">
+  <view class="home-header">
+    <view class="avatar-mark">
+      <text class="avatar-initial">余</text>
+    </view>
+    <view class="header-copy">
+      <text class="host-name">余主任</text>
+      <text class="host-note">今天只讲一个小故事</text>
+    </view>
   </view>
 
   <view wx:if="{{error}}" class="error">{{error}}</view>
 
-  <view class="stat-row">
-    <view class="stat">
-      <view class="stat-value">{{completedCount}}</view>
-      <view class="stat-label">已完成</view>
+  <view class="question-card">
+    <view class="card-label">
+      <view class="label-dot"></view>
+      <text>{{sessionTitle || "回忆录访谈"}}</text>
     </view>
-    <view class="stat">
-      <view class="stat-value">{{pendingCount}}</view>
-      <view class="stat-label">待回答</view>
+    <text class="question-text">{{currentPrompt || "正在获取问题"}}</text>
+
+    <button
+      class="primary-action"
+      loading="{{loading}}"
+      disabled="{{loading}}"
+      bindtap="continueInterview"
+    >
+      <view class="mic-icon">
+        <view class="mic-head"></view>
+        <view class="mic-stem"></view>
+      </view>
+      <text>开始讲述</text>
+    </button>
+  </view>
+
+  <view class="weekly-card" bindtap="continueInterview">
+    <view class="clipboard-icon">
+      <view class="clip-top"></view>
+      <view class="clip-line"></view>
+      <view class="clip-line short"></view>
+    </view>
+    <view class="weekly-copy">
+      <text class="weekly-title">本周已留下 <text class="accent">{{weeklyStoryCount}}</text> 个故事</text>
+      <text class="weekly-subtitle">还有 {{pendingCount}} 个问题可以继续回答</text>
+    </view>
+    <text class="chevron">›</text>
+  </view>
+
+  <view class="progress-panel">
+    <view class="progress-row">
+      <text>我的回忆录</text>
+      <text>{{progressPercent}}%</text>
+    </view>
+    <view class="progress-track">
+      <view class="progress-fill" style="width: {{progressPercent}}%;"></view>
+    </view>
+    <view class="mini-stats">
+      <view class="mini-stat">
+        <text class="mini-value">{{completedCount}}</text>
+        <text class="mini-label">已回答</text>
+      </view>
+      <view class="mini-stat">
+        <text class="mini-value">{{pendingReviewCount}}</text>
+        <text class="mini-label">待确认</text>
+      </view>
+      <view class="mini-stat">
+        <text class="mini-value">{{confirmedStoryCount}}</text>
+        <text class="mini-label">已成章</text>
+      </view>
     </view>
   </view>
 
-  <view class="surface stack" wx:if="{{latestDraftPreview}}">
-    <text class="eyebrow">最近片段</text>
-    <text class="body-text">{{latestDraftPreview}}</text>
+  <view class="latest-card" wx:if="{{latestDraftPreview}}">
+    <text class="latest-label">最近整理</text>
+    <text class="latest-text">{{latestDraftPreview}}</text>
   </view>
-
-  <button class="button button-primary" loading="{{loading}}" bindtap="continueInterview">
-    继续回答
-  </button>
 </view>
