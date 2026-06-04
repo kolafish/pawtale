@@ -24,7 +24,7 @@ cd backend
 venv/bin/python -m uvicorn app.main:app --reload --port 8000
 ```
 
-2. 用微信开发者工具打开 `miniprogram/` 目录。
+2. 用微信开发者工具打开仓库根目录 `Pawtale/`。根目录的 `project.config.json` 会把 `miniprogram/` 识别为小程序根目录，并把 `cloud-functions/` 识别为云函数根目录。
 
 3. 在微信开发者工具里关闭本地调试的合法域名校验，或确保 `http://127.0.0.1:8000` 可访问。
 
