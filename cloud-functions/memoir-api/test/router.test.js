@@ -211,7 +211,7 @@ test("transcribes a registered cloud audio file", async () => {
 
   const files = await store.findMany(COLLECTIONS.audioFiles, { openid: "openid_a" });
   assert.equal(files[0].transcript_text, "我的爸爸呀呀呀");
-  assert.deepEqual(files[0].transcript_usage, { total_tokens: 12 });
+  assert.equal(files[0].transcript_usage_json, JSON.stringify({ total_tokens: 12 }));
 });
 
 test("generates, edits, and accepts a memoir draft", async () => {
