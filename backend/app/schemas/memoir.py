@@ -100,6 +100,38 @@ class MemoirDraftResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class MemoirStoryCardResponse(BaseModel):
+    id: str
+    answer_id: str
+    question_id: str
+    session_id: str
+    session_title: str
+    question_prompt: str
+    answer_preview: str
+    answer_status: MemoirAnswerStatus
+    draft_id: str | None = None
+    draft_status: MemoirDraftStatus | None = None
+    draft_preview: str | None = None
+    duration_seconds: int | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class MemoirStoryListResponse(BaseModel):
+    stories: list[MemoirStoryCardResponse] = Field(default_factory=list)
+    total: int = 0
+
+
+class MemoirSummaryResponse(BaseModel):
+    total_story_count: int = 0
+    weekly_story_count: int = 0
+    pending_review_count: int = 0
+    confirmed_story_count: int = 0
+    total_question_count: int = 0
+    completed_question_count: int = 0
+    progress_percent: int = 0
+
+
 class MemoirInterviewState(BaseModel):
     session: MemoirSessionResponse
     current_question: MemoirQuestionResponse | None = None

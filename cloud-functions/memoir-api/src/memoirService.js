@@ -28,8 +28,18 @@ const MemoirDraftStatus = Object.freeze({
   ACCEPTED: "accepted",
 });
 
+const STORY_PREVIEW_LIMIT = 80;
+
 function nowIso() {
   return new Date().toISOString();
+}
+
+function weekStartIso(now = new Date()) {
+  const date = new Date(now);
+  const daysSinceMonday = (date.getUTCDay() + 6) % 7;
+  date.setUTCDate(date.getUTCDate() - daysSinceMonday);
+  date.setUTCHours(0, 0, 0, 0);
+  return date.toISOString();
 }
 
 function requireOpenId(context) {
@@ -75,6 +85,14 @@ function answerText(answer) {
     throw new ApiError(400, "回答内容为空，无法整理");
   }
   return text;
+}
+
+function previewText(text) {
+  const value = String(text || "").trim().replace(/\s+/g, " ");
+  if (value.length <= STORY_PREVIEW_LIMIT) {
+    return value;
+  }
+  return `${value.slice(0, STORY_PREVIEW_LIMIT)}...`;
 }
 
 function cleanPositiveNumber(value, fallback = null) {
@@ -245,6 +263,96 @@ async function getLatestDraft(store, openid, answers) {
   }
 
   return drafts.sort((left, right) => right.updated_at.localeCompare(left.updated_at))[0] || null;
+}
+
+async function getProjectRows(store, openid) {
+  const project = await getOrCreateProject(store, openid);
+  const sessions = await store.findMany(COLLECTIONS.sessions, {
+    openid,
+    project_id: project.id,
+  });
+  const questions = [];
+  for (const session of sessions) {
+    questions.push(...await getOrderedQuestions(store, openid, session.id));
+  }
+
+  const questionIds = new Set(questions.map((question) => question.id));
+  const answers = (await store.findMany(COLLECTIONS.answers, { openid }))
+    .filter((answer) => questionIds.has(answer.question_id));
+  const answerIds = new Set(answers.map((answer) => answer.id));
+  const drafts = (await store.findMany(COLLECTIONS.drafts, { openid }))
+    .filter((draft) => answerIds.has(draft.answer_id));
+
+  return { project, sessions, questions, answers, drafts };
+}
+
+function storyCardsFromRows(rows) {
+  const sessionById = new Map(rows.sessions.map((session) => [session.id, session]));
+  const questionById = new Map(rows.questions.map((question) => [question.id, question]));
+  const draftByAnswerId = new Map(rows.drafts.map((draft) => [draft.answer_id, draft]));
+
+  return rows.answers
+    .map((answer) => {
+      const question = questionById.get(answer.question_id);
+      const session = question ? sessionById.get(question.session_id) : null;
+      if (!question || !session) {
+        return null;
+      }
+      const draft = draftByAnswerId.get(answer.id) || null;
+      return {
+        id: answer.id,
+        answer_id: answer.id,
+        question_id: question.id,
+        session_id: session.id,
+        session_title: session.title,
+        question_prompt: question.prompt,
+        answer_preview: previewText(answer.transcript_edited || answer.transcript_raw),
+        answer_status: answer.status,
+        draft_id: draft ? draft.id : null,
+        draft_status: draft ? draft.status : null,
+        draft_preview: draft ? previewText(draft.content_edited || draft.content_raw) : null,
+        duration_seconds: answer.duration_seconds ?? null,
+        created_at: answer.created_at,
+        updated_at: answer.updated_at,
+      };
+    })
+    .filter(Boolean)
+    .sort((left, right) => String(right.updated_at).localeCompare(String(left.updated_at)));
+}
+
+async function listStoryCards(store, openid) {
+  const stories = storyCardsFromRows(await getProjectRows(store, openid));
+  return {
+    stories,
+    total: stories.length,
+  };
+}
+
+async function getSummary(store, openid) {
+  await getOrCreateCurrentSession(store, openid);
+  const rows = await getProjectRows(store, openid);
+  const stories = storyCardsFromRows(rows);
+  const completedStatuses = new Set([
+    MemoirQuestionStatus.ANSWERED,
+    MemoirQuestionStatus.SKIPPED,
+  ]);
+  const completedQuestionCount = rows.questions
+    .filter((question) => completedStatuses.has(question.status))
+    .length;
+  const totalQuestionCount = rows.questions.length;
+  const weekStart = weekStartIso();
+
+  return {
+    total_story_count: stories.length,
+    weekly_story_count: stories.filter((story) => String(story.created_at) >= weekStart).length,
+    pending_review_count: stories.filter((story) => story.draft_status === MemoirDraftStatus.DRAFT).length,
+    confirmed_story_count: stories.filter((story) => story.draft_status === MemoirDraftStatus.ACCEPTED).length,
+    total_question_count: totalQuestionCount,
+    completed_question_count: completedQuestionCount,
+    progress_percent: totalQuestionCount
+      ? Math.round((completedQuestionCount * 100) / totalQuestionCount)
+      : 0,
+  };
 }
 
 async function advanceSession(store, openid, sessionId) {
@@ -512,6 +620,8 @@ function createMemoirService(store, context, dependencies = {}) {
     getProject: async () => createProjectResponse(await getOrCreateProject(store, openid)),
     getCurrentSession: async () => getOrCreateCurrentSession(store, openid),
     getNextQuestion: async () => getNextQuestion(store, openid),
+    getSummary: async () => getSummary(store, openid),
+    listStoryCards: async () => listStoryCards(store, openid),
     skipQuestion: async (questionId) => skipQuestion(store, openid, questionId),
     createTextAnswer: async (data) => createTextAnswer(store, openid, data),
     updateAnswerText: async (answerId, data) => updateAnswerText(store, openid, answerId, data),

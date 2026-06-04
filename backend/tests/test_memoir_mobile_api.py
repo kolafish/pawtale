@@ -148,6 +148,61 @@ async def test_mobile_memoir_draft_flow(client, monkeypatch):
     assert regenerate_response.status_code == 409
 
 
+async def test_mobile_memoir_story_cards_and_summary(client, monkeypatch):
+    monkeypatch.setattr(
+        "app.services.memoir.drafting.get_ai_service",
+        lambda ai_model=None: FakeAIClient(),
+    )
+    session_response = await client.get("/api/mobile/memoir/sessions/current")
+    question = session_response.json()["current_question"]
+    answer_response = await client.post(
+        "/api/mobile/memoir/answers",
+        json={"question_id": question["id"], "text": "我记得外婆家的院子。"},
+    )
+    answer = answer_response.json()
+    draft_response = await client.post(
+        f"/api/mobile/memoir/answers/{answer['id']}/draft",
+        json={},
+    )
+    draft = draft_response.json()
+
+    stories_response = await client.get("/api/mobile/memoir/stories")
+
+    assert stories_response.status_code == 200
+    stories = stories_response.json()
+    assert stories["total"] == 1
+    card = stories["stories"][0]
+    assert card["id"] == answer["id"]
+    assert card["answer_id"] == answer["id"]
+    assert card["question_id"] == question["id"]
+    assert card["question_prompt"] == question["prompt"]
+    assert card["answer_preview"] == "我记得外婆家的院子。"
+    assert card["answer_status"] == "drafted"
+    assert card["draft_id"] == draft["id"]
+    assert card["draft_status"] == "draft"
+    assert card["draft_preview"] == "外婆家的院子，是我童年里最清晰的地方。"
+
+    summary_response = await client.get("/api/mobile/memoir/summary")
+
+    assert summary_response.status_code == 200
+    summary = summary_response.json()
+    assert summary["total_story_count"] == 1
+    assert summary["weekly_story_count"] == 1
+    assert summary["pending_review_count"] == 1
+    assert summary["confirmed_story_count"] == 0
+    assert summary["total_question_count"] == 5
+    assert summary["completed_question_count"] == 1
+    assert summary["progress_percent"] == 20
+
+    accept_response = await client.post(f"/api/mobile/memoir/drafts/{draft['id']}/accept")
+    assert accept_response.status_code == 200
+
+    updated_summary_response = await client.get("/api/mobile/memoir/summary")
+    updated_summary = updated_summary_response.json()
+    assert updated_summary["pending_review_count"] == 0
+    assert updated_summary["confirmed_story_count"] == 1
+
+
 async def test_mobile_memoir_draft_failure_returns_public_message(client, monkeypatch):
     monkeypatch.setattr(
         "app.services.memoir.drafting.get_ai_service",

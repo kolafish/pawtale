@@ -5,6 +5,8 @@ import type {
   MemoirDraft,
   MemoirInterviewState,
   MemoirQuestion,
+  MemoirStoryList,
+  MemoirSummary,
   Project,
 } from "../domain/memoir";
 import { request, uploadFile } from "./request";
@@ -19,6 +21,14 @@ export function getCurrentSession(): Promise<MemoirInterviewState> {
 
 export function getNextQuestion(): Promise<MemoirQuestion | null> {
   return request<MemoirQuestion | null>("/api/mobile/memoir/questions/next");
+}
+
+export function getMemoirSummary(): Promise<MemoirSummary> {
+  return request<MemoirSummary>("/api/mobile/memoir/summary");
+}
+
+export function getMemoirStories(): Promise<MemoirStoryList> {
+  return request<MemoirStoryList>("/api/mobile/memoir/stories");
 }
 
 export function skipQuestion(questionId: string): Promise<MemoirInterviewState> {

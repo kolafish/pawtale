@@ -98,6 +98,38 @@ export interface MemoirDraft {
   updated_at: string;
 }
 
+export interface MemoirStoryCard {
+  id: string;
+  answer_id: string;
+  question_id: string;
+  session_id: string;
+  session_title: string;
+  question_prompt: string;
+  answer_preview: string;
+  answer_status: MemoirAnswerStatus;
+  draft_id?: string;
+  draft_status?: MemoirDraftStatus;
+  draft_preview?: string;
+  duration_seconds?: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MemoirStoryList {
+  stories: MemoirStoryCard[];
+  total: number;
+}
+
+export interface MemoirSummary {
+  total_story_count: number;
+  weekly_story_count: number;
+  pending_review_count: number;
+  confirmed_story_count: number;
+  total_question_count: number;
+  completed_question_count: number;
+  progress_percent: number;
+}
+
 export interface MemoirInterviewState {
   session: MemoirSession;
   current_question?: MemoirQuestion;
