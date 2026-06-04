@@ -1,4 +1,5 @@
 import type { User } from "../domain/memoir";
+import { API_TRANSPORT } from "../config";
 import { ApiError, request } from "./request";
 
 interface AuthResponse {
@@ -12,6 +13,16 @@ const DEV_USER = {
 };
 
 export async function ensureLocalDevSession(): Promise<User> {
+  if (API_TRANSPORT === "cloudFunction") {
+    const now = new Date().toISOString();
+    return {
+      id: "wechat-cloud-user",
+      email: "",
+      display_name: "微信用户",
+      created_at: now,
+    };
+  }
+
   try {
     return await request<User>("/api/auth/me");
   } catch (error) {

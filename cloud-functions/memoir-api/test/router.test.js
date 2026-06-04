@@ -11,6 +11,7 @@ function request(event, options = {}) {
     { openid: options.openid || "openid_a" },
     {
       asr: options.asr,
+      drafting: options.drafting,
       storage: options.storage,
       store: options.store || new MemoryStore(),
     },
@@ -211,4 +212,60 @@ test("transcribes a registered cloud audio file", async () => {
   const files = await store.findMany(COLLECTIONS.audioFiles, { openid: "openid_a" });
   assert.equal(files[0].transcript_text, "我的爸爸呀呀呀");
   assert.deepEqual(files[0].transcript_usage, { total_tokens: 12 });
+});
+
+test("generates, edits, and accepts a memoir draft", async () => {
+  const store = new MemoryStore();
+  const state = await request({
+    method: "GET",
+    path: "/api/mobile/memoir/sessions/current",
+  }, { store });
+  const answer = await request({
+    method: "POST",
+    path: "/api/mobile/memoir/answers",
+    data: {
+      question_id: state.data.current_question.id,
+      text: "嗯，我小时候总去外婆家啊。",
+    },
+  }, { store });
+
+  const draft = await request({
+    method: "POST",
+    path: `/api/mobile/memoir/answers/${answer.data.id}/draft`,
+  }, {
+    store,
+    drafting: {
+      async generate(input) {
+        assert.equal(input.questionPrompt, state.data.current_question.prompt);
+        assert.equal(input.answerText, "嗯，我小时候总去外婆家啊。");
+        return {
+          text: "我小时候总去外婆家。",
+          usage: { total_tokens: 18 },
+        };
+      },
+    },
+  });
+
+  assert.equal(draft.statusCode, 200);
+  assert.equal(draft.data.content_raw, "我小时候总去外婆家。");
+  assert.equal(draft.data.status, "draft");
+
+  const edited = await request({
+    method: "PATCH",
+    path: `/api/mobile/memoir/drafts/${draft.data.id}`,
+    data: {
+      content_edited: "我小时候常去外婆家。",
+    },
+  }, { store });
+
+  assert.equal(edited.data.content_edited, "我小时候常去外婆家。");
+
+  const accepted = await request({
+    method: "POST",
+    path: `/api/mobile/memoir/drafts/${draft.data.id}/accept`,
+  }, { store });
+
+  assert.equal(accepted.data.status, "accepted");
+  const answers = await store.findMany(COLLECTIONS.answers, { openid: "openid_a" });
+  assert.equal(answers[0].status, "confirmed");
 });

@@ -4,7 +4,7 @@
 
 ```text
 进入小程序
- -> 本地开发登录
+ -> 本地开发登录 / 云函数 openid
  -> 获取默认回忆录项目
  -> 获取当前问题
  -> 录音上传
@@ -78,8 +78,6 @@ POST /api/mobile/memoir/drafts/{draft_id}/accept
 
 ## 当前不包含
 
-- 微信 openid/unionid 登录
 - accepted draft 同步到 Web 正文
-- 云函数 AI 整理成文
 
 这些能力会在后续 PR 分别接入。

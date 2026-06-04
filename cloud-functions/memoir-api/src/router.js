@@ -18,6 +18,7 @@ function requireStore(request) {
 function memoirService(request) {
   return createMemoirService(requireStore(request), request.context || {}, {
     asr: request.asr,
+    drafting: request.drafting,
     storage: request.storage,
   });
 }
@@ -58,11 +59,23 @@ const routes = {
       200,
       await memoirService(request).transcribeAudioFile(request.params.audioFileId),
     )),
+    route("/api/mobile/memoir/answers/:answerId/draft", async (request) => jsonResponse(
+      200,
+      await memoirService(request).generateDraft(request.params.answerId),
+    )),
+    route("/api/mobile/memoir/drafts/:draftId/accept", async (request) => jsonResponse(
+      200,
+      await memoirService(request).acceptDraft(request.params.draftId),
+    )),
   ],
   PATCH: [
     route("/api/mobile/memoir/answers/:answerId", async (request) => jsonResponse(
       200,
       await memoirService(request).updateAnswerText(request.params.answerId, request.data),
+    )),
+    route("/api/mobile/memoir/drafts/:draftId", async (request) => jsonResponse(
+      200,
+      await memoirService(request).updateDraftContent(request.params.draftId, request.data),
     )),
   ],
 };
@@ -78,6 +91,7 @@ async function handleMemoirApiRequest(event = {}, context = {}, dependencies = {
       context,
       event,
       asr: dependencies.asr,
+      drafting: dependencies.drafting,
       store: dependencies.store,
       storage: dependencies.storage,
     };
