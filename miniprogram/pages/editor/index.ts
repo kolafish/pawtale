@@ -13,14 +13,19 @@ interface EditorData {
   questionPrompt: string;
   transcriptText: string;
   draftText: string;
+  transcriptFocus: boolean;
+  draftFocus: boolean;
   saving: boolean;
   error: string;
 }
 
 Page<EditorData, {
   onLoad(query?: Record<string, string | undefined>): void;
+  goBack(): void;
   onTranscriptInput(event: InputEvent): void;
   onDraftInput(event: InputEvent): void;
+  focusTranscript(): void;
+  focusDraft(): void;
   saveEdits(showToast: boolean): Promise<boolean>;
   saveEditsOnly(): Promise<void>;
   saveAndContinue(): Promise<void>;
@@ -31,6 +36,8 @@ Page<EditorData, {
     questionPrompt: "",
     transcriptText: "",
     draftText: "",
+    transcriptFocus: false,
+    draftFocus: false,
     saving: false,
     error: "",
   },
@@ -53,12 +60,28 @@ Page<EditorData, {
     });
   },
 
+  goBack() {
+    if (this.data.answerId) {
+      wx.redirectTo({ url: `/pages/feedback/index?answerId=${this.data.answerId}` });
+      return;
+    }
+    wx.redirectTo({ url: "/pages/home/index" });
+  },
+
   onTranscriptInput(event) {
-    this.setData({ transcriptText: event.detail.value });
+    this.setData({ transcriptText: event.detail.value, transcriptFocus: false });
   },
 
   onDraftInput(event) {
-    this.setData({ draftText: event.detail.value });
+    this.setData({ draftText: event.detail.value, draftFocus: false });
+  },
+
+  focusTranscript() {
+    this.setData({ transcriptFocus: true, draftFocus: false });
+  },
+
+  focusDraft() {
+    this.setData({ transcriptFocus: false, draftFocus: true });
   },
 
   async saveEdits(showToast) {
