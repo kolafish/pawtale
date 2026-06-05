@@ -67,7 +67,7 @@
       保存
     </button>
     <button class="save-button primary-save" loading="{{saving}}" bindtap="saveAndContinue">
-      确认继续
+      {{returnTo === "stories" ? "确认成章" : "确认并继续"}}
     </button>
   </view>
 </view>

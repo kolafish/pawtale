@@ -28,7 +28,7 @@
       编辑
     </button>
     <button class="button button-primary" loading="{{accepting}}" disabled="{{!draftId || generating}}" bindtap="acceptCurrentDraft">
-      继续下一问
+      {{returnTo === "stories" ? "确认成章" : "确认并继续"}}
     </button>
   </view>
 
