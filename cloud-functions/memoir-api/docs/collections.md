@@ -91,6 +91,11 @@ Recommended index: `openid,answer_id,updated_at`.
 
 Recommended index: `openid,created_at`.
 
+Cloud audio registrations must use `memoir/audio/{storage_owner_id}/...` paths, where
+`storage_owner_id` is returned by `GET /api/mobile/memoir/me`. The cloud API rejects
+paths outside the current user's directory, unsupported extensions, MIME/extension
+mismatches, empty files, and files over 20MB.
+
 `transcript_usage_json` is only for diagnostics and should not be queried or indexed. Keep indexes on ownership and workflow fields instead:
 
 - `memoir_projects`: `openid,type,updated_at`

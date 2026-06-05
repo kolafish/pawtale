@@ -14,13 +14,7 @@ const DEV_USER = {
 
 export async function ensureLocalDevSession(): Promise<User> {
   if (API_TRANSPORT === "cloudFunction") {
-    const now = new Date().toISOString();
-    return {
-      id: "wechat-cloud-user",
-      email: "",
-      display_name: "微信用户",
-      created_at: now,
-    };
+    return request<User>("/api/mobile/memoir/me");
   }
 
   try {

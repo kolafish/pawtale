@@ -97,10 +97,19 @@ function audioMimeType(extension: string): string {
   return "audio/mpeg";
 }
 
-function uniqueCloudAudioPath(filePath: string): string {
+interface CloudUser {
+  id: string;
+  storage_owner_id?: string;
+}
+
+function safePathSegment(value: string): string {
+  return value.replace(/[^a-zA-Z0-9_-]/g, "_");
+}
+
+function uniqueCloudAudioPath(filePath: string, ownerId: string): string {
   const extension = fileExtension(filePath);
   const random = Math.random().toString(36).slice(2, 10);
-  return `${CLOUD_AUDIO_ROOT}/${Date.now()}-${random}.${extension}`;
+  return `${CLOUD_AUDIO_ROOT}/${safePathSegment(ownerId)}/${Date.now()}-${random}.${extension}`;
 }
 
 export function clearSessionCookie(): void {
@@ -222,14 +231,16 @@ async function uploadCloudAudioFile<T>(
     formData?: Record<string, string>;
   },
 ): Promise<T> {
-  const cloudPath = uniqueCloudAudioPath(options.filePath);
+  const cloudUser = await cloudFunctionRequest<CloudUser>("/api/mobile/memoir/me");
+  const ownerId = cloudUser.storage_owner_id || cloudUser.id;
+  const cloudPath = uniqueCloudAudioPath(options.filePath, ownerId);
   const extension = fileExtension(options.filePath);
   const durationSeconds = options.formData?.duration_seconds
     ? Number(options.formData.duration_seconds)
     : undefined;
   const sizeBytes = options.formData?.size_bytes
     ? Number(options.formData.size_bytes)
-    : 0;
+    : undefined;
 
   try {
     const uploadResult = await wx.cloud.uploadFile({
@@ -246,7 +257,7 @@ async function uploadCloudAudioFile<T>(
         file_id: uploadResult.fileID,
         cloud_path: cloudPath,
         mime_type: audioMimeType(extension),
-        size_bytes: Number.isFinite(sizeBytes) ? sizeBytes : 0,
+        size_bytes: Number.isFinite(sizeBytes) ? sizeBytes : undefined,
         duration_seconds: Number.isFinite(durationSeconds) ? durationSeconds : undefined,
       },
     });
