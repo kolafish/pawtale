@@ -144,7 +144,7 @@ test("answers a question with a linked audio file", async () => {
     method: "POST",
     path: "/api/mobile/memoir/audio-files",
     data: {
-      file_id: "cloud://answer-audio",
+      file_id: "cloud://env/memoir/audio/openid_a/answer.mp3",
       cloud_path: "memoir/audio/openid_a/answer.mp3",
       mime_type: "audio/mpeg",
       size_bytes: 128,
@@ -195,7 +195,7 @@ test("registers a cloud audio file for the current user", async () => {
     method: "POST",
     path: "/api/mobile/memoir/audio-files",
     data: {
-      file_id: "cloud://file-id",
+      file_id: "cloud://env/memoir/audio/openid_a/sample.mp3",
       cloud_path: "memoir/audio/openid_a/sample.mp3",
       mime_type: "audio/mpeg",
       size_bytes: 1200,
@@ -210,7 +210,7 @@ test("registers a cloud audio file for the current user", async () => {
 
   const files = await store.findMany(COLLECTIONS.audioFiles, { openid: "openid_a" });
   assert.equal(files.length, 1);
-  assert.equal(files[0].file_id, "cloud://file-id");
+  assert.equal(files[0].file_id, "cloud://env/memoir/audio/openid_a/sample.mp3");
 });
 
 test("rejects cloud audio paths outside the current user directory", async () => {
@@ -218,7 +218,7 @@ test("rejects cloud audio paths outside the current user directory", async () =>
     method: "POST",
     path: "/api/mobile/memoir/audio-files",
     data: {
-      file_id: "cloud://file-id",
+      file_id: "cloud://env/memoir/audio/openid_b/sample.mp3",
       cloud_path: "memoir/audio/openid_b/sample.mp3",
       mime_type: "audio/mpeg",
       size_bytes: 1200,
@@ -234,7 +234,7 @@ test("rejects unsupported cloud audio formats", async () => {
     method: "POST",
     path: "/api/mobile/memoir/audio-files",
     data: {
-      file_id: "cloud://file-id",
+      file_id: "cloud://env/memoir/audio/openid_a/sample.aac",
       cloud_path: "memoir/audio/openid_a/sample.aac",
       mime_type: "audio/aac",
       size_bytes: 1200,
@@ -250,7 +250,7 @@ test("rejects cloud audio mime types that do not match the extension", async () 
     method: "POST",
     path: "/api/mobile/memoir/audio-files",
     data: {
-      file_id: "cloud://file-id",
+      file_id: "cloud://env/memoir/audio/openid_a/sample.mp3",
       cloud_path: "memoir/audio/openid_a/sample.mp3",
       mime_type: "audio/wav",
       size_bytes: 1200,
@@ -266,7 +266,7 @@ test("rejects oversized cloud audio files", async () => {
     method: "POST",
     path: "/api/mobile/memoir/audio-files",
     data: {
-      file_id: "cloud://file-id",
+      file_id: "cloud://env/memoir/audio/openid_a/sample.mp3",
       cloud_path: "memoir/audio/openid_a/sample.mp3",
       mime_type: "audio/mpeg",
       size_bytes: 20 * 1024 * 1024 + 1,
@@ -277,13 +277,29 @@ test("rejects oversized cloud audio files", async () => {
   assert.equal(response.data.detail, "音频文件不能超过 20MB");
 });
 
+test("rejects cloud file ids that do not match the registered path", async () => {
+  const response = await request({
+    method: "POST",
+    path: "/api/mobile/memoir/audio-files",
+    data: {
+      file_id: "cloud://env/memoir/audio/openid_a/other.mp3",
+      cloud_path: "memoir/audio/openid_a/sample.mp3",
+      mime_type: "audio/mpeg",
+      size_bytes: 1200,
+    },
+  });
+
+  assert.equal(response.statusCode, 403);
+  assert.equal(response.data.detail, "云存储文件 ID 与音频路径不匹配");
+});
+
 test("transcribes a registered cloud audio file", async () => {
   const store = new MemoryStore();
   const audioFile = await request({
     method: "POST",
     path: "/api/mobile/memoir/audio-files",
     data: {
-      file_id: "cloud://file-id",
+      file_id: "cloud://env/memoir/audio/openid_a/sample.mp3",
       cloud_path: "memoir/audio/openid_a/sample.mp3",
       mime_type: "audio/mpeg",
       size_bytes: 1200,
@@ -298,7 +314,7 @@ test("transcribes a registered cloud audio file", async () => {
     store,
     storage: {
       async downloadFile(fileID) {
-        assert.equal(fileID, "cloud://file-id");
+        assert.equal(fileID, "cloud://env/memoir/audio/openid_a/sample.mp3");
         return Buffer.from("audio-bytes");
       },
     },
@@ -332,7 +348,7 @@ test("does not transcribe another user's registered cloud audio file", async () 
     method: "POST",
     path: "/api/mobile/memoir/audio-files",
     data: {
-      file_id: "cloud://file-id",
+      file_id: "cloud://env/memoir/audio/openid_a/sample.mp3",
       cloud_path: "memoir/audio/openid_a/sample.mp3",
       mime_type: "audio/mpeg",
       size_bytes: 1200,

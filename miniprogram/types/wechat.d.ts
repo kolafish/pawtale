@@ -54,6 +54,20 @@ declare namespace WechatMiniprogram {
     complete?(result: GeneralCallbackResult): void;
   }
 
+  interface GetFileInfoSuccessCallbackResult {
+    size: number;
+    digest?: string;
+    errMsg?: string;
+  }
+
+  interface GetFileInfoOption {
+    filePath: string;
+    digestAlgorithm?: "md5" | "sha1";
+    success?(result: GetFileInfoSuccessCallbackResult): void;
+    fail?(result: GeneralCallbackResult): void;
+    complete?(result: GeneralCallbackResult): void;
+  }
+
   interface CloudInitOption {
     env?: string;
   }
@@ -135,6 +149,7 @@ declare namespace WechatMiniprogram {
     cloud: Cloud;
     request<T = unknown>(option: RequestOption<T>): void;
     uploadFile(option: UploadFileOption): void;
+    getFileInfo(option: GetFileInfoOption): void;
     getRecorderManager(): RecorderManager;
     navigateTo(option: NavigateOption): void;
     redirectTo(option: NavigateOption): void;

@@ -142,10 +142,13 @@ function audioExtension(cloudPath) {
   return match ? match[1] : "";
 }
 
-function cleanCloudFileId(value) {
+function cleanCloudFileId(value, cloudPath) {
   const fileId = cleanRequiredText(value, "缺少云存储文件 ID");
   if (!fileId.startsWith("cloud://")) {
     throw new ApiError(400, "云存储文件 ID 无效");
+  }
+  if (!fileId.endsWith(`/${cloudPath}`)) {
+    throw new ApiError(403, "云存储文件 ID 与音频路径不匹配");
   }
   return fileId;
 }
@@ -593,7 +596,7 @@ async function registerAudioFile(store, openid, data) {
   const extension = audioExtension(cloudPath);
   const audioFile = await store.insert(COLLECTIONS.audioFiles, {
     openid,
-    file_id: cleanCloudFileId(data.file_id),
+    file_id: cleanCloudFileId(data.file_id, cloudPath),
     cloud_path: cloudPath,
     mime_type: cleanAudioMimeType(data.mime_type, extension),
     size_bytes: cleanAudioSizeBytes(data.size_bytes),

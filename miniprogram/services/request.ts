@@ -112,6 +112,20 @@ function uniqueCloudAudioPath(filePath: string, ownerId: string): string {
   return `${CLOUD_AUDIO_ROOT}/${safePathSegment(ownerId)}/${Date.now()}-${random}.${extension}`;
 }
 
+function localFileSize(filePath: string): Promise<number> {
+  return new Promise((resolve, reject) => {
+    wx.getFileInfo({
+      filePath,
+      success: (result) => {
+        resolve(result.size);
+      },
+      fail: (error) => {
+        reject(new ApiError(0, error.errMsg || "音频文件信息读取失败", error));
+      },
+    });
+  });
+}
+
 export function clearSessionCookie(): void {
   wx.removeStorageSync(COOKIE_STORAGE_KEY);
 }
@@ -240,7 +254,7 @@ async function uploadCloudAudioFile<T>(
     : undefined;
   const sizeBytes = options.formData?.size_bytes
     ? Number(options.formData.size_bytes)
-    : undefined;
+    : await localFileSize(options.filePath);
 
   try {
     const uploadResult = await wx.cloud.uploadFile({
