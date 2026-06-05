@@ -22,22 +22,17 @@
   flex: 0 0 136rpx;
 }
 
-.avatar-initial {
-  color: #25100b;
-  font-size: 62rpx;
-  font-weight: 900;
-  line-height: 1;
-}
-
 .profile-copy {
   display: flex;
+  flex: 1;
+  min-width: 0;
   flex-direction: column;
   gap: 12rpx;
 }
 
 .profile-name {
   color: #24100b;
-  font-size: 54rpx;
+  font-size: 50rpx;
   font-weight: 900;
   line-height: 1.15;
 }
@@ -45,6 +40,7 @@
 .profile-note {
   color: #70625d;
   font-size: 28rpx;
+  line-height: 1.45;
 }
 
 .summary-panel,

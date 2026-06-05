@@ -2,7 +2,7 @@
   <view class="feedback-header">
     <text class="page-title">意见反馈</text>
     <view class="avatar-mark">
-      <text class="avatar-initial">余</text>
+      <image class="avatar-logo" src="/assets/memoir-gramophone.png" mode="aspectFit" />
     </view>
   </view>
 
@@ -35,10 +35,7 @@
   />
 
   <view class="primary-action {{submitting ? 'primary-action-disabled' : ''}}" bindtap="submitFeedback">
-    <view class="mic-icon">
-      <view class="mic-head"></view>
-      <view class="mic-stem"></view>
-    </view>
+    <image class="action-art-icon" src="/assets/memoir-microphone.png" mode="aspectFit" />
     <text>语音反馈</text>
   </view>
 

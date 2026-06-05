@@ -33,10 +33,7 @@
     </view>
     <text class="panel-subtitle">接着上次的内容，继续记录您的故事吧</text>
     <view class="primary-action {{loading ? 'primary-action-disabled' : ''}}" bindtap="continueInterview">
-      <view class="mic-icon">
-        <view class="mic-head"></view>
-        <view class="mic-stem"></view>
-      </view>
+      <image class="action-art-icon" src="/assets/memoir-microphone.png" mode="aspectFit" />
       <text class="primary-action-text">{{loading ? "加载中" : "继续讲述"}}</text>
     </view>
   </view>
