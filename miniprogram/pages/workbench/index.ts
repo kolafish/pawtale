@@ -1,10 +1,17 @@
 import type { MemoirInterviewState, MemoirStoryCard, MemoirSummary } from "../../domain/memoir";
 import { ensureLocalDevSession } from "../../services/auth";
-import { getCurrentSession, getMemoirStories, getMemoirSummary } from "../../services/memoir";
-import { writeMemoirStore } from "../../stores/session";
+import { loadMemoirStories, loadMemoirSummary } from "../../services/memoir-dashboard";
+import { getCurrentSession } from "../../services/memoir";
+import {
+  readMemoirDashboardSnapshot,
+  writeMemoirDashboardSnapshot,
+} from "../../stores/memoir-cache";
 
 interface WorkbenchData {
   loading: boolean;
+  refreshing: boolean;
+  hasDashboardData: boolean;
+  hasStoryData: boolean;
   error: string;
   weeklyStoryCount: number;
   pendingReviewCount: number;
@@ -14,47 +21,19 @@ interface WorkbenchData {
   stories: MemoirStoryCard[];
 }
 
-function answeredQuestionCount(interview: MemoirInterviewState): number {
-  return interview.questions.filter((question) => question.status === "answered").length;
-}
-
-function fallbackSummary(interview: MemoirInterviewState): MemoirSummary {
-  const totalQuestionCount = interview.questions.length;
-  const answeredCount = answeredQuestionCount(interview);
-  return {
-    total_story_count: answeredCount,
-    weekly_story_count: answeredCount,
-    pending_review_count: interview.latest_draft?.status === "draft" ? 1 : 0,
-    confirmed_story_count: interview.latest_draft?.status === "accepted" ? 1 : 0,
-    total_question_count: totalQuestionCount,
-    completed_question_count: interview.completed_question_count,
-    progress_percent: totalQuestionCount
-      ? Math.round((interview.completed_question_count * 100) / totalQuestionCount)
-      : 0,
-  };
-}
-
-async function loadSummary(interview: MemoirInterviewState): Promise<MemoirSummary> {
-  try {
-    return await getMemoirSummary();
-  } catch {
-    return fallbackSummary(interview);
-  }
-}
-
-async function loadStories(): Promise<MemoirStoryCard[]> {
-  try {
-    return (await getMemoirStories()).stories;
-  } catch {
-    return [];
-  }
-}
-
 Page<WorkbenchData, {
   onLoad(): Promise<void>;
-  onShow(): Promise<void>;
+  onShow(): void;
+  hydrateFromCache(): void;
+  applySnapshot(
+    interview: MemoirInterviewState,
+    summary: MemoirSummary,
+    stories: MemoirStoryCard[],
+    hasStoryData: boolean,
+  ): void;
   loadWorkbench(): Promise<void>;
   continueInterview(): void;
+  openStories(): void;
   backHome(): void;
   openHome(): void;
   openWorkbench(): void;
@@ -63,6 +42,9 @@ Page<WorkbenchData, {
 }>({
   data: {
     loading: false,
+    refreshing: false,
+    hasDashboardData: false,
+    hasStoryData: false,
     error: "",
     weeklyStoryCount: 0,
     pendingReviewCount: 0,
@@ -73,38 +55,64 @@ Page<WorkbenchData, {
   },
 
   async onLoad() {
+    this.hydrateFromCache();
     await this.loadWorkbench();
   },
 
-  async onShow() {
-    await this.loadWorkbench();
+  onShow() {
+    this.hydrateFromCache();
+    if (!this.data.refreshing) {
+      void this.loadWorkbench();
+    }
+  },
+
+  hydrateFromCache() {
+    const snapshot = readMemoirDashboardSnapshot();
+    if (!snapshot.interview || !snapshot.summary) {
+      return;
+    }
+    this.applySnapshot(snapshot.interview, snapshot.summary, snapshot.stories, snapshot.hasStories);
+  },
+
+  applySnapshot(interview, summary, stories, hasStoryData) {
+    this.setData({
+      weeklyStoryCount: summary.weekly_story_count,
+      pendingReviewCount: summary.pending_review_count,
+      confirmedStoryCount: summary.confirmed_story_count,
+      progressPercent: summary.progress_percent,
+      pendingCount: interview.pending_question_count,
+      stories,
+      hasDashboardData: true,
+      hasStoryData,
+    });
   },
 
   async loadWorkbench() {
-    this.setData({ loading: true, error: "" });
+    if (this.data.refreshing) {
+      return;
+    }
+    const loading = !this.data.hasDashboardData;
+    this.setData({ loading, refreshing: true, error: "" });
     try {
       await ensureLocalDevSession();
       const interview = await getCurrentSession();
-      const summary = await loadSummary(interview);
-      const stories = await loadStories();
-      writeMemoirStore({ interview });
-      this.setData({
-        weeklyStoryCount: summary.weekly_story_count,
-        pendingReviewCount: summary.pending_review_count,
-        confirmedStoryCount: summary.confirmed_story_count,
-        progressPercent: summary.progress_percent,
-        pendingCount: interview.pending_question_count,
-        stories,
-      });
+      const summary = await loadMemoirSummary(interview);
+      const stories = await loadMemoirStories();
+      writeMemoirDashboardSnapshot({ interview, summary, stories });
+      this.applySnapshot(interview, summary, stories, true);
     } catch (error) {
       this.setData({ error: error instanceof Error ? error.message : "工作台加载失败" });
     } finally {
-      this.setData({ loading: false });
+      this.setData({ loading: false, refreshing: false });
     }
   },
 
   continueInterview() {
     wx.navigateTo({ url: "/pages/question/index" });
+  },
+
+  openStories() {
+    wx.navigateTo({ url: "/pages/stories/index" });
   },
 
   backHome() {
