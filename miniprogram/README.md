@@ -37,6 +37,14 @@ password: password123
 
 如果用户不存在，会自动注册；如果已存在，会登录。
 
+## 类型检查
+
+```bash
+cd miniprogram
+npm install
+npm run typecheck
+```
+
 ## 微信云开发配置
 
 小程序 AppID 已配置为 `wx71acdf73e2ba7067`。
