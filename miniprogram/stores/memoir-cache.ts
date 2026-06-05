@@ -1,4 +1,5 @@
 import type {
+  MemoirDraft,
   MemoirInterviewState,
   MemoirStoryCard,
   MemoirSummary,
@@ -62,4 +63,40 @@ export function writeMemoirDashboardSnapshot(snapshot: Partial<MemoirDashboardSn
     patch.stories = snapshot.stories;
   }
   writeMemoirStore(patch);
+}
+
+function previewText(text: string): string {
+  const value = text.trim().replace(/\s+/g, " ");
+  return value.length > 80 ? `${value.slice(0, 80)}...` : value;
+}
+
+export function updateMemoirCachedStoryDraft(draft: MemoirDraft): void {
+  const store = readMemoirStore();
+  if (!store.stories) {
+    return;
+  }
+
+  const stories = store.stories.map((story) => {
+    if (story.answer_id !== draft.answer_id) {
+      return story;
+    }
+    return {
+      ...story,
+      answer_status: draft.status === "accepted" ? "confirmed" : story.answer_status,
+      draft_id: draft.id,
+      draft_status: draft.status,
+      draft_preview: previewText(draft.content_edited || draft.content_raw),
+      updated_at: draft.updated_at,
+    };
+  });
+  const summary = store.summary
+    ? {
+      ...store.summary,
+      total_story_count: stories.length,
+      pending_review_count: stories.filter((story) => story.draft_status === "draft").length,
+      confirmed_story_count: stories.filter((story) => story.draft_status === "accepted").length,
+    }
+    : undefined;
+
+  writeMemoirDashboardSnapshot({ stories, summary });
 }

@@ -1,5 +1,6 @@
 from datetime import UTC, datetime, timedelta
 
+from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -8,7 +9,11 @@ from app.domain.memoir import MemoirDraftStatus, MemoirQuestionStatus
 from app.models.memoir import MemoirAnswer, MemoirQuestion, MemoirSession
 from app.models.projects import Project
 from app.schemas.memoir import (
+    MemoirAnswerResponse,
+    MemoirDraftResponse,
+    MemoirQuestionResponse,
     MemoirStoryCardResponse,
+    MemoirStoryDetailResponse,
     MemoirStoryListResponse,
     MemoirSummaryResponse,
 )
@@ -57,6 +62,15 @@ def _story_card(answer: MemoirAnswer) -> MemoirStoryCardResponse:
     )
 
 
+def _story_detail(answer: MemoirAnswer) -> MemoirStoryDetailResponse:
+    return MemoirStoryDetailResponse(
+        story=_story_card(answer),
+        question=MemoirQuestionResponse.model_validate(answer.question),
+        answer=MemoirAnswerResponse.model_validate(answer),
+        draft=MemoirDraftResponse.model_validate(answer.draft) if answer.draft else None,
+    )
+
+
 async def list_story_cards(
     db: AsyncSession,
     project_id: str,
@@ -76,6 +90,29 @@ async def list_story_cards(
     )
     stories = [_story_card(answer) for answer in result.scalars().all()]
     return MemoirStoryListResponse(stories=stories, total=len(stories))
+
+
+async def get_story_detail(
+    db: AsyncSession,
+    project_id: str,
+    user_id: str,
+    answer_id: str,
+) -> MemoirStoryDetailResponse:
+    await load_memoir_project(db, project_id, user_id)
+    result = await db.execute(
+        select(MemoirAnswer)
+        .join(MemoirQuestion, MemoirAnswer.question_id == MemoirQuestion.id)
+        .join(MemoirSession, MemoirQuestion.session_id == MemoirSession.id)
+        .where(MemoirAnswer.id == answer_id, MemoirSession.project_id == project_id)
+        .options(
+            selectinload(MemoirAnswer.question).selectinload(MemoirQuestion.session),
+            selectinload(MemoirAnswer.draft),
+        )
+    )
+    answer = result.scalar_one_or_none()
+    if not answer:
+        raise HTTPException(status_code=404, detail="故事不存在")
+    return _story_detail(answer)
 
 
 async def get_summary(

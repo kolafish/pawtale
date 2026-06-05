@@ -66,6 +66,10 @@
   background: #fff6eb;
 }
 
+.summary-item.selected {
+  border: 4rpx solid #128577;
+}
+
 .summary-value {
   color: #128577;
   font-size: 50rpx;
@@ -159,6 +163,11 @@
   margin-top: 18rpx;
   color: #70625d;
   font-size: 24rpx;
+}
+
+.story-action {
+  color: #128577;
+  font-weight: 900;
 }
 
 .primary-action {

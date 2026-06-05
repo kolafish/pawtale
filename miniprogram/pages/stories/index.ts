@@ -7,25 +7,57 @@ import {
   writeMemoirDashboardSnapshot,
 } from "../../stores/memoir-cache";
 
+type StoryStatusFilter = "all" | "pending" | "accepted";
+
+interface StoryTapEvent {
+  currentTarget: {
+    dataset: {
+      answerId?: string;
+    };
+  };
+}
+
 interface StoriesData {
   loading: boolean;
   refreshing: boolean;
   hasDashboardData: boolean;
   hasStoryData: boolean;
   error: string;
+  totalStoryCount: number;
   weeklyStoryCount: number;
   pendingReviewCount: number;
   confirmedStoryCount: number;
   progressPercent: number;
+  activeStatus: StoryStatusFilter;
   stories: MemoirStoryCard[];
+  visibleStories: MemoirStoryCard[];
+}
+
+function statusFromQuery(status?: string): StoryStatusFilter {
+  return status === "pending" || status === "accepted" ? status : "all";
+}
+
+function filterStories(stories: MemoirStoryCard[], status: StoryStatusFilter): MemoirStoryCard[] {
+  if (status === "pending") {
+    return stories.filter((story) => story.draft_status === "draft");
+  }
+  if (status === "accepted") {
+    return stories.filter((story) => story.draft_status === "accepted");
+  }
+  return stories;
 }
 
 Page<StoriesData, {
-  onLoad(): Promise<void>;
+  onLoad(query?: Record<string, string | undefined>): Promise<void>;
   onShow(): void;
   hydrateFromCache(): void;
   applySnapshot(summary: MemoirSummary, stories: MemoirStoryCard[], hasStoryData: boolean): void;
   loadStoriesPage(): Promise<void>;
+  selectAll(): void;
+  selectPending(): void;
+  selectAccepted(): void;
+  setActiveStatus(status: StoryStatusFilter): void;
+  openStory(event: StoryTapEvent): void;
   continueInterview(): void;
   backWorkbench(): void;
   openHome(): void;
@@ -39,14 +71,18 @@ Page<StoriesData, {
     hasDashboardData: false,
     hasStoryData: false,
     error: "",
+    totalStoryCount: 0,
     weeklyStoryCount: 0,
     pendingReviewCount: 0,
     confirmedStoryCount: 0,
     progressPercent: 0,
+    activeStatus: "all",
     stories: [],
+    visibleStories: [],
   },
 
-  async onLoad() {
+  async onLoad(query) {
+    this.setData({ activeStatus: statusFromQuery(query?.status) });
     this.hydrateFromCache();
     await this.loadStoriesPage();
   },
@@ -68,11 +104,13 @@ Page<StoriesData, {
 
   applySnapshot(summary, stories, hasStoryData) {
     this.setData({
+      totalStoryCount: summary.total_story_count,
       weeklyStoryCount: summary.weekly_story_count,
       pendingReviewCount: summary.pending_review_count,
       confirmedStoryCount: summary.confirmed_story_count,
       progressPercent: summary.progress_percent,
       stories,
+      visibleStories: filterStories(stories, this.data.activeStatus),
       hasDashboardData: true,
       hasStoryData,
     });
@@ -96,6 +134,33 @@ Page<StoriesData, {
     } finally {
       this.setData({ loading: false, refreshing: false });
     }
+  },
+
+  selectAll() {
+    this.setActiveStatus("all");
+  },
+
+  selectPending() {
+    this.setActiveStatus("pending");
+  },
+
+  selectAccepted() {
+    this.setActiveStatus("accepted");
+  },
+
+  setActiveStatus(status) {
+    this.setData({
+      activeStatus: status,
+      visibleStories: filterStories(this.data.stories, status),
+    });
+  },
+
+  openStory(event) {
+    const answerId = event.currentTarget.dataset.answerId;
+    if (!answerId) {
+      return;
+    }
+    wx.navigateTo({ url: `/pages/review/index?answerId=${answerId}&returnTo=stories` });
   },
 
   continueInterview() {

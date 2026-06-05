@@ -120,6 +120,13 @@ export interface MemoirStoryList {
   total: number;
 }
 
+export interface MemoirStoryDetail {
+  story: MemoirStoryCard;
+  question: MemoirQuestion;
+  answer: MemoirAnswer;
+  draft?: MemoirDraft;
+}
+
 export interface MemoirSummary {
   total_story_count: number;
   weekly_story_count: number;

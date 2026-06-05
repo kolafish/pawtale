@@ -182,6 +182,17 @@ async def test_mobile_memoir_story_cards_and_summary(client, monkeypatch):
     assert card["draft_status"] == "draft"
     assert card["draft_preview"] == "外婆家的院子，是我童年里最清晰的地方。"
 
+    detail_response = await client.get(f"/api/mobile/memoir/stories/{answer['id']}")
+
+    assert detail_response.status_code == 200
+    detail = detail_response.json()
+    assert detail["story"]["answer_id"] == answer["id"]
+    assert detail["question"]["id"] == question["id"]
+    assert detail["answer"]["id"] == answer["id"]
+    assert detail["answer"]["transcript_edited"] == "我记得外婆家的院子。"
+    assert detail["draft"]["id"] == draft["id"]
+    assert detail["draft"]["content_edited"] == "外婆家的院子，是我童年里最清晰的地方。"
+
     summary_response = await client.get("/api/mobile/memoir/summary")
 
     assert summary_response.status_code == 200
@@ -201,6 +212,10 @@ async def test_mobile_memoir_story_cards_and_summary(client, monkeypatch):
     updated_summary = updated_summary_response.json()
     assert updated_summary["pending_review_count"] == 0
     assert updated_summary["confirmed_story_count"] == 1
+
+    accepted_detail_response = await client.get(f"/api/mobile/memoir/stories/{answer['id']}")
+    assert accepted_detail_response.status_code == 200
+    assert accepted_detail_response.json()["draft"]["status"] == "accepted"
 
 
 async def test_mobile_memoir_draft_failure_returns_public_message(client, monkeypatch):

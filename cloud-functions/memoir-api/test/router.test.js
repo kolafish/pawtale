@@ -350,6 +350,19 @@ test("returns memoir story cards and summary", async () => {
   assert.equal(stories.data.stories[0].draft_status, "draft");
   assert.equal(stories.data.stories[0].draft_preview, "外婆家的院子，是我童年里最清晰的地方。");
 
+  const detail = await request({
+    method: "GET",
+    path: `/api/mobile/memoir/stories/${answer.data.id}`,
+  }, { store });
+
+  assert.equal(detail.statusCode, 200);
+  assert.equal(detail.data.story.answer_id, answer.data.id);
+  assert.equal(detail.data.question.id, state.data.current_question.id);
+  assert.equal(detail.data.answer.id, answer.data.id);
+  assert.equal(detail.data.answer.transcript_edited, "我记得外婆家的院子。");
+  assert.equal(detail.data.draft.id, draft.data.id);
+  assert.equal(detail.data.draft.content_edited, "外婆家的院子，是我童年里最清晰的地方。");
+
   const summary = await request({
     method: "GET",
     path: "/api/mobile/memoir/summary",

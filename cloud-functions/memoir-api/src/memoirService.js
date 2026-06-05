@@ -320,12 +320,38 @@ function storyCardsFromRows(rows) {
     .sort((left, right) => String(right.updated_at).localeCompare(String(left.updated_at)));
 }
 
+function storyDetailFromRows(rows, answerId) {
+  const cards = storyCardsFromRows(rows);
+  const story = cards.find((card) => card.answer_id === answerId);
+  if (!story) {
+    throw new ApiError(404, "故事不存在");
+  }
+
+  const question = rows.questions.find((item) => item.id === story.question_id);
+  const answer = rows.answers.find((item) => item.id === story.answer_id);
+  const draft = rows.drafts.find((item) => item.answer_id === story.answer_id) || null;
+  if (!question || !answer) {
+    throw new ApiError(404, "故事不存在");
+  }
+
+  return {
+    story,
+    question,
+    answer,
+    draft,
+  };
+}
+
 async function listStoryCards(store, openid) {
   const stories = storyCardsFromRows(await getProjectRows(store, openid));
   return {
     stories,
     total: stories.length,
   };
+}
+
+async function getStoryDetail(store, openid, answerId) {
+  return storyDetailFromRows(await getProjectRows(store, openid), answerId);
 }
 
 async function getSummary(store, openid) {
@@ -622,6 +648,7 @@ function createMemoirService(store, context, dependencies = {}) {
     getNextQuestion: async () => getNextQuestion(store, openid),
     getSummary: async () => getSummary(store, openid),
     listStoryCards: async () => listStoryCards(store, openid),
+    getStoryDetail: async (answerId) => getStoryDetail(store, openid, answerId),
     skipQuestion: async (questionId) => skipQuestion(store, openid, questionId),
     createTextAnswer: async (data) => createTextAnswer(store, openid, data),
     updateAnswerText: async (answerId, data) => updateAnswerText(store, openid, answerId, data),
