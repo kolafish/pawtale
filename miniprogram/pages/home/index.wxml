@@ -18,18 +18,16 @@
     </view>
     <text class="question-text">{{currentPrompt || "正在获取问题"}}</text>
 
-    <button
-      class="primary-action"
-      loading="{{loading}}"
-      disabled="{{loading}}"
+    <view
+      class="primary-action {{loading ? 'primary-action-disabled' : ''}}"
       bindtap="continueInterview"
     >
       <view class="mic-icon">
         <view class="mic-head"></view>
         <view class="mic-stem"></view>
       </view>
-      <text>开始讲述</text>
-    </button>
+      <text class="primary-action-text">{{loading ? "加载中" : "开始讲述"}}</text>
+    </view>
   </view>
 
   <view class="weekly-card" bindtap="continueInterview">
