@@ -30,6 +30,7 @@
       value="{{transcriptText}}"
       maxlength="-1"
       focus="{{transcriptFocus}}"
+      disabled="{{loading || saving || !contentReady}}"
       cursor-spacing="80"
       bindinput="onTranscriptInput"
     />
@@ -48,25 +49,26 @@
       value="{{draftText}}"
       maxlength="-1"
       focus="{{draftFocus}}"
+      disabled="{{loading || saving || !contentReady}}"
       cursor-spacing="80"
       bindinput="onDraftInput"
     />
   </view>
 
   <view class="edit-actions">
-    <button class="action-button action-quiet" disabled="{{saving}}" bindtap="focusTranscript">
+    <button class="action-button action-quiet" disabled="{{loading || saving || !contentReady}}" bindtap="focusTranscript">
       改回答
     </button>
-    <button class="action-button action-warm" disabled="{{saving}}" bindtap="focusDraft">
+    <button class="action-button action-warm" disabled="{{loading || saving || !contentReady}}" bindtap="focusDraft">
       改校正稿
     </button>
   </view>
 
   <view class="bottom-actions">
-    <button class="save-button secondary-save" loading="{{saving}}" bindtap="saveEditsOnly">
+    <button class="save-button secondary-save" loading="{{saving}}" disabled="{{loading || !contentReady}}" bindtap="saveEditsOnly">
       保存
     </button>
-    <button class="save-button primary-save" loading="{{saving}}" bindtap="saveAndContinue">
+    <button class="save-button primary-save" loading="{{saving}}" disabled="{{loading || !contentReady}}" bindtap="saveAndContinue">
       {{returnTo === "stories" ? "确认成章" : "确认并继续"}}
     </button>
   </view>
