@@ -1,0 +1,10 @@
+.launch-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #fffaf2;
+  color: #128577;
+  font-size: 30rpx;
+  font-weight: 800;
+}
