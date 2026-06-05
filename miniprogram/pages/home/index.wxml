@@ -30,7 +30,7 @@
     </view>
   </view>
 
-  <view class="weekly-card" bindtap="continueInterview">
+  <view class="weekly-card" bindtap="openWorkbench">
     <view class="clipboard-icon">
       <view class="clip-top"></view>
       <view class="clip-line"></view>

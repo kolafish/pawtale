@@ -50,6 +50,7 @@ Page<HomeData, {
   onLoad(): Promise<void>;
   loadHome(): Promise<void>;
   continueInterview(): Promise<void>;
+  openWorkbench(): void;
 }>({
   data: {
     loading: false,
@@ -105,5 +106,9 @@ Page<HomeData, {
       await this.loadHome();
     }
     wx.navigateTo({ url: "/pages/question/index" });
+  },
+
+  openWorkbench() {
+    wx.navigateTo({ url: "/pages/workbench/index" });
   },
 });
