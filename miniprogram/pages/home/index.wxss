@@ -101,13 +101,17 @@
   align-items: center;
   justify-content: center;
   gap: 24rpx;
-  font-size: 44rpx;
+  font-size: 40rpx;
   font-weight: 900;
-  line-height: 108rpx;
+  line-height: 1;
 }
 
-.primary-action::after {
-  border: 0;
+.primary-action-disabled {
+  opacity: 0.7;
+}
+
+.primary-action-text {
+  white-space: nowrap;
 }
 
 .mic-icon {
