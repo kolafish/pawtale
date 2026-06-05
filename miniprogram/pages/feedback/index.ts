@@ -1,116 +1,99 @@
-import { acceptDraft, generateDraft } from "../../services/memoir";
-import { readMemoirStore, writeMemoirStore } from "../../stores/session";
+export {};
+
+interface InputEvent {
+  detail: {
+    value: string;
+  };
+}
+
+interface FeedbackItem {
+  issueType: string;
+  content: string;
+  createdAt: string;
+}
 
 interface FeedbackData {
-  answerId: string;
-  draftId: string;
-  transcript: string;
-  draftText: string;
-  generating: boolean;
-  accepting: boolean;
-  error: string;
+  issueType: string;
+  content: string;
+  submitting: boolean;
+}
+
+const FEEDBACK_STORAGE_KEY = "pawtale_feedback_items";
+
+function readFeedbackItems(): FeedbackItem[] {
+  return wx.getStorageSync<FeedbackItem[]>(FEEDBACK_STORAGE_KEY) || [];
 }
 
 Page<FeedbackData, {
-  onLoad(query?: Record<string, string | undefined>): Promise<void>;
-  onShow(): void;
-  hydrateFromStore(answerId: string): boolean;
-  generate(answerId: string): Promise<void>;
-  retryGenerate(): Promise<void>;
-  openEditor(): void;
-  acceptCurrentDraft(): Promise<void>;
+  selectFontIssue(): void;
+  selectAudioIssue(): void;
+  selectOperationIssue(): void;
+  onContentInput(event: InputEvent): void;
+  submitFeedback(): void;
+  contactService(): void;
+  openHome(): void;
+  openWorkbench(): void;
+  openFeedback(): void;
+  openProfile(): void;
 }>({
   data: {
-    answerId: "",
-    draftId: "",
-    transcript: "",
-    draftText: "",
-    generating: false,
-    accepting: false,
-    error: "",
+    issueType: "",
+    content: "",
+    submitting: false,
   },
 
-  async onLoad(query) {
-    const answerId = query?.answerId || readMemoirStore().answer?.id || "";
-    this.setData({ answerId });
-    if (!answerId) {
-      this.setData({ error: "缺少回答信息" });
+  selectFontIssue() {
+    this.setData({ issueType: "字太小" });
+  },
+
+  selectAudioIssue() {
+    this.setData({ issueType: "听不清" });
+  },
+
+  selectOperationIssue() {
+    this.setData({ issueType: "不好操作" });
+  },
+
+  onContentInput(event) {
+    this.setData({ content: event.detail.value });
+  },
+
+  submitFeedback() {
+    const content = this.data.content.trim();
+    if (!this.data.issueType && !content) {
+      wx.showToast({ title: "请先说说问题", icon: "none" });
       return;
     }
-    const hasDraft = this.hydrateFromStore(answerId);
-    if (!hasDraft) {
-      await this.generate(answerId);
-    }
+    this.setData({ submitting: true });
+    const items = readFeedbackItems();
+    wx.setStorageSync(FEEDBACK_STORAGE_KEY, [
+      {
+        issueType: this.data.issueType,
+        content,
+        createdAt: new Date().toISOString(),
+      },
+      ...items,
+    ]);
+    this.setData({ submitting: false, issueType: "", content: "" });
+    wx.showToast({ title: "已记录", icon: "success" });
   },
 
-  onShow() {
-    if (this.data.answerId) {
-      this.hydrateFromStore(this.data.answerId);
-    }
+  contactService() {
+    wx.showToast({ title: "客服稍后接入", icon: "none" });
   },
 
-  hydrateFromStore(answerId) {
-    const state = readMemoirStore();
-    const answer = state.answer;
-    const draft = state.draft;
-    this.setData({
-      transcript: answer?.transcript_edited || answer?.transcript_raw || "",
-    });
-    if (draft && draft.answer_id === answerId) {
-      this.setData({
-        draftId: draft.id,
-        draftText: draft.content_edited || draft.content_raw,
-      });
-      return true;
-    }
-    return false;
+  openHome() {
+    wx.redirectTo({ url: "/pages/home/index" });
   },
 
-  async generate(answerId) {
-    this.setData({ generating: true, error: "" });
-    try {
-      const draft = await generateDraft(answerId);
-      writeMemoirStore({ draft });
-      this.setData({
-        draftId: draft.id,
-        draftText: draft.content_edited || draft.content_raw,
-      });
-    } catch (error) {
-      this.setData({ error: error instanceof Error ? error.message : "整理失败" });
-    } finally {
-      this.setData({ generating: false });
-    }
+  openWorkbench() {
+    wx.redirectTo({ url: "/pages/workbench/index" });
   },
 
-  async retryGenerate() {
-    if (!this.data.answerId) {
-      return;
-    }
-    await this.generate(this.data.answerId);
+  openFeedback() {
   },
 
-  openEditor() {
-    if (!this.data.answerId || !this.data.draftId) {
-      return;
-    }
-    wx.navigateTo({
-      url: `/pages/editor/index?answerId=${this.data.answerId}&draftId=${this.data.draftId}`,
-    });
-  },
-
-  async acceptCurrentDraft() {
-    if (!this.data.draftId) {
-      return;
-    }
-    this.setData({ accepting: true, error: "" });
-    try {
-      const draft = await acceptDraft(this.data.draftId);
-      writeMemoirStore({ draft });
-      wx.redirectTo({ url: "/pages/question/index" });
-    } catch (error) {
-      this.setData({ error: error instanceof Error ? error.message : "确认失败" });
-    } finally {
-      this.setData({ accepting: false });
-    }
+  openProfile() {
+    wx.redirectTo({ url: "/pages/profile/index" });
   },
 });

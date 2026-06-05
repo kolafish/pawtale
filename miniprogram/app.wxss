@@ -139,3 +139,128 @@ textarea {
   font-size: 26rpx;
   line-height: 1.5;
 }
+
+.bottom-nav {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  min-height: 132rpx;
+  padding: 14rpx 18rpx 26rpx;
+  border-top: 1rpx solid #e5ded2;
+  background: rgba(255, 255, 255, 0.96);
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  z-index: 20;
+}
+
+.bottom-nav-item {
+  color: #74706c;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8rpx;
+  font-size: 24rpx;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.bottom-nav-item.active {
+  color: #128577;
+}
+
+.nav-mark {
+  width: 42rpx;
+  height: 42rpx;
+  position: relative;
+}
+
+.home-mark::before {
+  content: "";
+  position: absolute;
+  left: 9rpx;
+  top: 15rpx;
+  width: 24rpx;
+  height: 22rpx;
+  border: 4rpx solid currentColor;
+  border-top: 0;
+  border-radius: 4rpx;
+}
+
+.home-mark::after {
+  content: "";
+  position: absolute;
+  left: 8rpx;
+  top: 4rpx;
+  width: 24rpx;
+  height: 24rpx;
+  border-left: 4rpx solid currentColor;
+  border-top: 4rpx solid currentColor;
+  transform: rotate(45deg);
+}
+
+.grid-mark {
+  display: grid;
+  grid-template-columns: repeat(2, 14rpx);
+  grid-template-rows: repeat(2, 14rpx);
+  gap: 8rpx;
+  justify-content: center;
+  align-content: center;
+}
+
+.grid-mark::before,
+.grid-mark::after {
+  content: "";
+  width: 14rpx;
+  height: 14rpx;
+  border-radius: 5rpx;
+  background: currentColor;
+  box-shadow: 22rpx 0 0 currentColor, 0 22rpx 0 currentColor, 22rpx 22rpx 0 currentColor;
+}
+
+.chat-mark::before {
+  content: "";
+  position: absolute;
+  left: 5rpx;
+  top: 7rpx;
+  width: 32rpx;
+  height: 26rpx;
+  border: 4rpx solid currentColor;
+  border-radius: 18rpx;
+}
+
+.chat-mark::after {
+  content: "";
+  position: absolute;
+  left: 24rpx;
+  top: 29rpx;
+  width: 10rpx;
+  height: 10rpx;
+  border-right: 4rpx solid currentColor;
+  border-bottom: 4rpx solid currentColor;
+  transform: rotate(20deg);
+}
+
+.user-mark::before {
+  content: "";
+  position: absolute;
+  left: 13rpx;
+  top: 4rpx;
+  width: 16rpx;
+  height: 16rpx;
+  border: 4rpx solid currentColor;
+  border-radius: 50%;
+}
+
+.user-mark::after {
+  content: "";
+  position: absolute;
+  left: 7rpx;
+  top: 26rpx;
+  width: 28rpx;
+  height: 16rpx;
+  border: 4rpx solid currentColor;
+  border-radius: 24rpx 24rpx 0 0;
+  border-bottom: 0;
+}

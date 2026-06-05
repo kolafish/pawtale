@@ -1,6 +1,6 @@
 .workbench-page {
   min-height: 100vh;
-  padding: 32rpx 36rpx 56rpx;
+  padding: 32rpx 36rpx 190rpx;
   background: #fffaf2;
 }
 

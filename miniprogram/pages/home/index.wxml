@@ -71,4 +71,23 @@
     <text class="latest-label">最近整理</text>
     <text class="latest-text">{{latestDraftPreview}}</text>
   </view>
+
+  <view class="bottom-nav">
+    <view class="bottom-nav-item active">
+      <view class="nav-mark home-mark"></view>
+      <text>首页</text>
+    </view>
+    <view class="bottom-nav-item" bindtap="openWorkbench">
+      <view class="nav-mark grid-mark"></view>
+      <text>工作台</text>
+    </view>
+    <view class="bottom-nav-item" bindtap="openFeedback">
+      <view class="nav-mark chat-mark"></view>
+      <text>反馈</text>
+    </view>
+    <view class="bottom-nav-item" bindtap="openProfile">
+      <view class="nav-mark user-mark"></view>
+      <text>我的</text>
+    </view>
+  </view>
 </view>

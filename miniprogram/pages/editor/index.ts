@@ -62,7 +62,7 @@ Page<EditorData, {
 
   goBack() {
     if (this.data.answerId) {
-      wx.redirectTo({ url: `/pages/feedback/index?answerId=${this.data.answerId}` });
+      wx.redirectTo({ url: `/pages/review/index?answerId=${this.data.answerId}` });
       return;
     }
     wx.redirectTo({ url: "/pages/home/index" });

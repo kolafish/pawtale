@@ -3,8 +3,10 @@
     "pages/index/index",
     "pages/home/index",
     "pages/workbench/index",
-    "pages/question/index",
     "pages/feedback/index",
+    "pages/profile/index",
+    "pages/question/index",
+    "pages/review/index",
     "pages/editor/index"
   ],
   "cloud": true,

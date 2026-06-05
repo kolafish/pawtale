@@ -56,6 +56,10 @@ Page<WorkbenchData, {
   loadWorkbench(): Promise<void>;
   continueInterview(): void;
   backHome(): void;
+  openHome(): void;
+  openWorkbench(): void;
+  openFeedback(): void;
+  openProfile(): void;
 }>({
   data: {
     loading: false,
@@ -105,5 +109,20 @@ Page<WorkbenchData, {
 
   backHome() {
     wx.redirectTo({ url: "/pages/home/index" });
+  },
+
+  openHome() {
+    wx.redirectTo({ url: "/pages/home/index" });
+  },
+
+  openWorkbench() {
+  },
+
+  openFeedback() {
+    wx.redirectTo({ url: "/pages/feedback/index" });
+  },
+
+  openProfile() {
+    wx.redirectTo({ url: "/pages/profile/index" });
   },
 });
