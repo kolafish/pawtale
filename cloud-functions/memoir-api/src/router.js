@@ -7,6 +7,12 @@ const {
   route,
 } = require("./http");
 const { createMemoirService } = require("./memoirService");
+const {
+  createTextAnswerRequest,
+  registerAudioFileRequest,
+  updateAnswerTextRequest,
+  updateDraftContentRequest,
+} = require("./schemas");
 
 function requireStore(request) {
   if (!request.store) {
@@ -82,12 +88,12 @@ const routes = {
       await memoirService(request).skipQuestion(request.params.questionId),
     )),
     route("/api/mobile/memoir/answers", async (request) => jsonResponse(
-      200,
-      await memoirService(request).createTextAnswer(request.data),
+      201,
+      await memoirService(request).createTextAnswer(createTextAnswerRequest(request.data)),
     )),
     route("/api/mobile/memoir/audio-files", async (request) => jsonResponse(
       201,
-      await memoirService(request).registerAudioFile(request.data),
+      await memoirService(request).registerAudioFile(registerAudioFileRequest(request.data)),
     )),
     route("/api/mobile/memoir/audio-files/:audioFileId/transcribe", async (request) => jsonResponse(
       200,
@@ -105,11 +111,11 @@ const routes = {
   PATCH: [
     route("/api/mobile/memoir/answers/:answerId", async (request) => jsonResponse(
       200,
-      await memoirService(request).updateAnswerText(request.params.answerId, request.data),
+      await memoirService(request).updateAnswerText(request.params.answerId, updateAnswerTextRequest(request.data)),
     )),
     route("/api/mobile/memoir/drafts/:draftId", async (request) => jsonResponse(
       200,
-      await memoirService(request).updateDraftContent(request.params.draftId, request.data),
+      await memoirService(request).updateDraftContent(request.params.draftId, updateDraftContentRequest(request.data)),
     )),
   ],
 };

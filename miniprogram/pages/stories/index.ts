@@ -1,10 +1,7 @@
 import type { MemoirStoryCard, MemoirSummary } from "../../domain/memoir";
-import { ensureLocalDevSession } from "../../services/auth";
-import { loadMemoirStories, loadMemoirSummary } from "../../services/memoir-dashboard";
-import { getCurrentSession } from "../../services/memoir";
+import { loadMemoirDashboard } from "../../services/memoir-dashboard";
 import {
   readMemoirDashboardSnapshot,
-  writeMemoirDashboardSnapshot,
 } from "../../stores/memoir-cache";
 
 type StoryStatusFilter = "all" | "pending" | "accepted";
@@ -123,11 +120,7 @@ Page<StoriesData, {
     const loading = !this.data.hasDashboardData;
     this.setData({ loading, refreshing: true, error: "" });
     try {
-      await ensureLocalDevSession();
-      const interview = await getCurrentSession();
-      const summary = await loadMemoirSummary(interview);
-      const stories = await loadMemoirStories();
-      writeMemoirDashboardSnapshot({ interview, summary, stories });
+      const { summary, stories } = await loadMemoirDashboard({ includeStories: true });
       this.applySnapshot(summary, stories, true);
     } catch (error) {
       this.setData({ error: error instanceof Error ? error.message : "故事卡加载失败" });

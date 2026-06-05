@@ -1,11 +1,8 @@
-import { ensureLocalDevSession } from "../../services/auth";
 import type { MemoirInterviewState, MemoirSummary } from "../../domain/memoir";
-import { loadMemoirSummary } from "../../services/memoir-dashboard";
-import { getCurrentSession, getMemoirProject } from "../../services/memoir";
+import { loadMemoirDashboard } from "../../services/memoir-dashboard";
 import {
   answeredQuestionCount,
   readMemoirDashboardSnapshot,
-  writeMemoirDashboardSnapshot,
 } from "../../stores/memoir-cache";
 
 interface HomeData {
@@ -100,13 +97,9 @@ Page<HomeData, {
     const loading = !this.data.hasDashboardData;
     this.setData({ loading, refreshing: true, error: "" });
     try {
-      await ensureLocalDevSession();
-      const project = await getMemoirProject();
-      const interview = await getCurrentSession();
-      const summary = await loadMemoirSummary(interview);
-      writeMemoirDashboardSnapshot({ project, interview, summary });
+      const { project, interview, summary } = await loadMemoirDashboard({ includeProject: true });
       this.setData({
-        projectTitle: project.title,
+        projectTitle: project?.title || "",
       });
       this.applySnapshot(interview, summary);
     } catch (error) {
