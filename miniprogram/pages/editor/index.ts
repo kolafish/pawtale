@@ -1,4 +1,4 @@
-import { acceptDraft, updateDraft, updateTextAnswer } from "../../services/memoir";
+import { acceptDraft, getMemoirStoryDetail, updateDraft, updateTextAnswer } from "../../services/memoir";
 import { updateMemoirCachedStoryAnswer, updateMemoirCachedStoryDraft } from "../../stores/memoir-cache";
 import { readMemoirStore, writeMemoirStore } from "../../stores/session";
 
@@ -17,12 +17,16 @@ interface EditorData {
   returnTo: string;
   transcriptFocus: boolean;
   draftFocus: boolean;
+  loading: boolean;
+  contentReady: boolean;
   saving: boolean;
   error: string;
 }
 
 Page<EditorData, {
-  onLoad(query?: Record<string, string | undefined>): void;
+  onLoad(query?: Record<string, string | undefined>): Promise<void>;
+  hydrateFromMatchingStore(answerId: string, draftId: string): boolean;
+  loadEditorContent(answerId: string, draftId: string): Promise<void>;
   goBack(): void;
   onTranscriptInput(event: InputEvent): void;
   onDraftInput(event: InputEvent): void;
@@ -41,28 +45,74 @@ Page<EditorData, {
     returnTo: "",
     transcriptFocus: false,
     draftFocus: false,
+    loading: false,
+    contentReady: false,
     saving: false,
     error: "",
   },
 
-  onLoad(query) {
+  async onLoad(query) {
     const state = readMemoirStore();
     const answerId = query?.answerId || state.answer?.id || "";
     const draftId = query?.draftId || state.draft?.id || "";
     const returnTo = query?.returnTo || "";
-    const answerQuestionId = state.answer?.question_id || "";
-    const question = state.question?.id === answerQuestionId
-      ? state.question
-      : state.interview?.questions.find((item) => item.id === answerQuestionId);
     this.setData({
       answerId,
       draftId,
       returnTo,
-      questionPrompt: question?.prompt || "",
-      transcriptText: state.answer?.transcript_edited || state.answer?.transcript_raw || "",
-      draftText: state.draft?.content_edited || state.draft?.content_raw || "",
       error: !answerId || !draftId ? "缺少编辑内容" : "",
     });
+    if (!answerId || !draftId) {
+      return;
+    }
+    this.hydrateFromMatchingStore(answerId, draftId);
+    await this.loadEditorContent(answerId, draftId);
+  },
+
+  hydrateFromMatchingStore(answerId, draftId) {
+    const state = readMemoirStore();
+    const answer = state.answer?.id === answerId ? state.answer : undefined;
+    const draft = state.draft?.id === draftId && state.draft.answer_id === answerId
+      ? state.draft
+      : undefined;
+    if (!answer || !draft) {
+      return false;
+    }
+    const question = state.question?.id === answer.question_id
+      ? state.question
+      : state.interview?.questions.find((item) => item.id === answer.question_id);
+    this.setData({
+      questionPrompt: question?.prompt || "",
+      transcriptText: answer.transcript_edited || answer.transcript_raw || "",
+      draftText: draft.content_edited || draft.content_raw || "",
+    });
+    return true;
+  },
+
+  async loadEditorContent(answerId, draftId) {
+    this.setData({ loading: true, contentReady: false, error: "" });
+    try {
+      const detail = await getMemoirStoryDetail(answerId);
+      if (!detail.draft || detail.draft.id !== draftId || detail.draft.answer_id !== answerId) {
+        this.setData({ error: "编辑内容已更新，请返回重试" });
+        return;
+      }
+      writeMemoirStore({
+        question: detail.question,
+        answer: detail.answer,
+        draft: detail.draft,
+      });
+      this.setData({
+        questionPrompt: detail.question.prompt,
+        transcriptText: detail.answer.transcript_edited || detail.answer.transcript_raw,
+        draftText: detail.draft.content_edited || detail.draft.content_raw,
+        contentReady: true,
+      });
+    } catch (error) {
+      this.setData({ error: error instanceof Error ? error.message : "编辑内容加载失败" });
+    } finally {
+      this.setData({ loading: false });
+    }
   },
 
   goBack() {
@@ -91,6 +141,9 @@ Page<EditorData, {
   },
 
   async saveEdits(showToast) {
+    if (this.data.loading || !this.data.contentReady) {
+      return false;
+    }
     const answerText = this.data.transcriptText.trim();
     const draftText = this.data.draftText.trim();
     if (!answerText || !draftText) {
