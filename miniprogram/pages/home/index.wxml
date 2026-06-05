@@ -30,15 +30,15 @@
     </view>
   </view>
 
-  <view class="weekly-card" bindtap="openWorkbench">
+  <view class="weekly-card" bindtap="openStories" hover-class="tap-hover">
     <view class="clipboard-icon">
       <view class="clip-top"></view>
       <view class="clip-line"></view>
       <view class="clip-line short"></view>
     </view>
     <view class="weekly-copy">
-      <text class="weekly-title">本周已留下 <text class="accent">{{weeklyStoryCount}}</text> 个故事</text>
-      <text class="weekly-subtitle">还有 {{pendingCount}} 个问题可以继续回答</text>
+      <text class="weekly-title">本周已留下 <text class="accent">{{hasDashboardData ? weeklyStoryCount : "..."}}</text> 个故事</text>
+      <text class="weekly-subtitle">还有 {{hasDashboardData ? pendingCount : "..."}} 个问题可以继续回答</text>
     </view>
     <text class="chevron">›</text>
   </view>
@@ -46,22 +46,23 @@
   <view class="progress-panel">
     <view class="progress-row">
       <text>我的回忆录</text>
-      <text>{{progressPercent}}%</text>
+      <text wx:if="{{hasDashboardData}}">{{progressPercent}}%</text>
+      <text wx:else>加载中</text>
     </view>
     <view class="progress-track">
-      <view class="progress-fill" style="width: {{progressPercent}}%;"></view>
+      <view class="progress-fill" style="width: {{hasDashboardData ? progressPercent : 0}}%;"></view>
     </view>
     <view class="mini-stats">
       <view class="mini-stat">
-        <text class="mini-value">{{completedCount}}</text>
+        <text class="mini-value">{{hasDashboardData ? completedCount : "..."}}</text>
         <text class="mini-label">已回答</text>
       </view>
       <view class="mini-stat">
-        <text class="mini-value">{{pendingReviewCount}}</text>
+        <text class="mini-value">{{hasDashboardData ? pendingReviewCount : "..."}}</text>
         <text class="mini-label">待确认</text>
       </view>
       <view class="mini-stat">
-        <text class="mini-value">{{confirmedStoryCount}}</text>
+        <text class="mini-value">{{hasDashboardData ? confirmedStoryCount : "..."}}</text>
         <text class="mini-label">已成章</text>
       </view>
     </view>

@@ -9,20 +9,20 @@
   <view wx:if="{{error}}" class="error">{{error}}</view>
 
   <view class="stat-grid">
-    <view class="stat-card">
+    <view class="stat-card" bindtap="openStories" hover-class="tap-hover">
       <view class="stat-icon book-icon"></view>
       <text class="stat-label">本周故事</text>
-      <text class="stat-value">{{weeklyStoryCount}}</text>
+      <text class="stat-value">{{hasDashboardData ? weeklyStoryCount : "..."}}</text>
     </view>
-    <view class="stat-card warm">
+    <view class="stat-card warm" bindtap="openStories" hover-class="tap-hover">
       <view class="stat-icon hourglass-icon"></view>
       <text class="stat-label">待确认</text>
-      <text class="stat-value warm-text">{{pendingReviewCount}}</text>
+      <text class="stat-value warm-text">{{hasDashboardData ? pendingReviewCount : "..."}}</text>
     </view>
-    <view class="stat-card">
+    <view class="stat-card" bindtap="openStories" hover-class="tap-hover">
       <view class="stat-icon bookmark-icon"></view>
       <text class="stat-label">已成章节</text>
-      <text class="stat-value">{{confirmedStoryCount}}</text>
+      <text class="stat-value">{{hasDashboardData ? confirmedStoryCount : "..."}}</text>
     </view>
   </view>
 
@@ -41,7 +41,7 @@
     </view>
   </view>
 
-  <view class="memoir-panel">
+  <view class="memoir-panel" bindtap="openStories" hover-class="tap-hover">
     <view class="memoir-row">
       <view>
         <text class="memoir-title">我的回忆录</text>
@@ -50,17 +50,21 @@
       <text class="chevron">›</text>
     </view>
     <view class="progress-track">
-      <view class="progress-fill" style="width: {{progressPercent}}%;"></view>
+      <view class="progress-fill" style="width: {{hasDashboardData ? progressPercent : 0}}%;"></view>
     </view>
-    <view class="progress-value">{{progressPercent}}%</view>
+    <view wx:if="{{hasDashboardData}}" class="progress-value">{{progressPercent}}%</view>
+    <view wx:else class="progress-value">加载中</view>
   </view>
 
   <view class="story-list">
-    <view class="story-list-header">
+    <view class="story-list-header" bindtap="openStories" hover-class="tap-hover">
       <text>故事卡</text>
-      <text class="story-count">{{stories.length}}</text>
+      <text class="story-count">{{hasStoryData ? stories.length : "..."}}</text>
     </view>
-    <view wx:if="{{!stories.length}}" class="empty-state">
+    <view wx:if="{{!hasStoryData && loading || !hasStoryData && refreshing}}" class="empty-state">
+      <text>正在加载故事卡</text>
+    </view>
+    <view wx:elif="{{hasStoryData && !stories.length}}" class="empty-state">
       <text>还没有故事卡。先回答一个问题，工作台会自动整理到这里。</text>
     </view>
     <view wx:for="{{stories}}" wx:key="id" class="story-card">

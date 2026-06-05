@@ -140,6 +140,10 @@ textarea {
   line-height: 1.5;
 }
 
+.tap-hover {
+  opacity: 0.82;
+}
+
 .bottom-nav {
   position: fixed;
   left: 0;
