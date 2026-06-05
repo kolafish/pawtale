@@ -15,6 +15,24 @@ function requireStore(request) {
   return request.store;
 }
 
+function safePathSegment(value) {
+  return String(value || "").replace(/[^a-zA-Z0-9_-]/g, "_");
+}
+
+function cloudUserResponse(context = {}) {
+  if (!context.openid) {
+    throw new ApiError(401, "缺少微信登录身份");
+  }
+  const now = new Date().toISOString();
+  return {
+    id: context.openid,
+    email: "",
+    display_name: "微信用户",
+    storage_owner_id: safePathSegment(context.openid),
+    created_at: now,
+  };
+}
+
 function memoirService(request) {
   return createMemoirService(requireStore(request), request.context || {}, {
     asr: request.asr,
@@ -29,6 +47,10 @@ const routes = {
       ok: true,
       service: "memoir-api",
     })),
+    route("/api/mobile/memoir/me", async (request) => jsonResponse(
+      200,
+      cloudUserResponse(request.context),
+    )),
     route("/api/mobile/memoir/project", async (request) => jsonResponse(
       200,
       await memoirService(request).getProject(),
@@ -111,7 +133,7 @@ async function handleMemoirApiRequest(event = {}, context = {}, dependencies = {
     for (const routeConfig of routes[method] || []) {
       const params = routeConfig.match(path);
       if (params) {
-        return routeConfig.handler({ ...request, params });
+        return await routeConfig.handler({ ...request, params });
       }
     }
 

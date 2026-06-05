@@ -40,6 +40,17 @@ test("normalizes method and path", async () => {
   assert.equal(response.statusCode, 200);
 });
 
+test("returns the current cloud user identity", async () => {
+  const response = await request({
+    method: "GET",
+    path: "/api/mobile/memoir/me",
+  }, { openid: "openid.with/slash" });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.data.id, "openid.with/slash");
+  assert.equal(response.data.storage_owner_id, "openid_with_slash");
+});
+
 test("returns 400 when path is missing", async () => {
   const response = await handleMemoirApiRequest({ method: "GET" });
 
@@ -133,8 +144,8 @@ test("answers a question with a linked audio file", async () => {
     method: "POST",
     path: "/api/mobile/memoir/audio-files",
     data: {
-      file_id: "cloud://answer-audio",
-      cloud_path: "memoir/audio/answer.mp3",
+      file_id: "cloud://env/memoir/audio/openid_a/answer.mp3",
+      cloud_path: "memoir/audio/openid_a/answer.mp3",
       mime_type: "audio/mpeg",
       size_bytes: 128,
       duration_seconds: 7,
@@ -184,8 +195,8 @@ test("registers a cloud audio file for the current user", async () => {
     method: "POST",
     path: "/api/mobile/memoir/audio-files",
     data: {
-      file_id: "cloud://file-id",
-      cloud_path: "memoir/audio/sample.mp3",
+      file_id: "cloud://env/memoir/audio/openid_a/sample.mp3",
+      cloud_path: "memoir/audio/openid_a/sample.mp3",
       mime_type: "audio/mpeg",
       size_bytes: 1200,
       duration_seconds: 9,
@@ -199,7 +210,87 @@ test("registers a cloud audio file for the current user", async () => {
 
   const files = await store.findMany(COLLECTIONS.audioFiles, { openid: "openid_a" });
   assert.equal(files.length, 1);
-  assert.equal(files[0].file_id, "cloud://file-id");
+  assert.equal(files[0].file_id, "cloud://env/memoir/audio/openid_a/sample.mp3");
+});
+
+test("rejects cloud audio paths outside the current user directory", async () => {
+  const response = await request({
+    method: "POST",
+    path: "/api/mobile/memoir/audio-files",
+    data: {
+      file_id: "cloud://env/memoir/audio/openid_b/sample.mp3",
+      cloud_path: "memoir/audio/openid_b/sample.mp3",
+      mime_type: "audio/mpeg",
+      size_bytes: 1200,
+    },
+  });
+
+  assert.equal(response.statusCode, 403);
+  assert.equal(response.data.detail, "音频路径不属于当前用户");
+});
+
+test("rejects unsupported cloud audio formats", async () => {
+  const response = await request({
+    method: "POST",
+    path: "/api/mobile/memoir/audio-files",
+    data: {
+      file_id: "cloud://env/memoir/audio/openid_a/sample.aac",
+      cloud_path: "memoir/audio/openid_a/sample.aac",
+      mime_type: "audio/aac",
+      size_bytes: 1200,
+    },
+  });
+
+  assert.equal(response.statusCode, 400);
+  assert.equal(response.data.detail, "仅支持 mp3、wav、ogg、pcm 音频文件");
+});
+
+test("rejects cloud audio mime types that do not match the extension", async () => {
+  const response = await request({
+    method: "POST",
+    path: "/api/mobile/memoir/audio-files",
+    data: {
+      file_id: "cloud://env/memoir/audio/openid_a/sample.mp3",
+      cloud_path: "memoir/audio/openid_a/sample.mp3",
+      mime_type: "audio/wav",
+      size_bytes: 1200,
+    },
+  });
+
+  assert.equal(response.statusCode, 400);
+  assert.equal(response.data.detail, "音频类型与文件扩展名不匹配");
+});
+
+test("rejects oversized cloud audio files", async () => {
+  const response = await request({
+    method: "POST",
+    path: "/api/mobile/memoir/audio-files",
+    data: {
+      file_id: "cloud://env/memoir/audio/openid_a/sample.mp3",
+      cloud_path: "memoir/audio/openid_a/sample.mp3",
+      mime_type: "audio/mpeg",
+      size_bytes: 20 * 1024 * 1024 + 1,
+    },
+  });
+
+  assert.equal(response.statusCode, 413);
+  assert.equal(response.data.detail, "音频文件不能超过 20MB");
+});
+
+test("rejects cloud file ids that do not match the registered path", async () => {
+  const response = await request({
+    method: "POST",
+    path: "/api/mobile/memoir/audio-files",
+    data: {
+      file_id: "cloud://env/memoir/audio/openid_a/other.mp3",
+      cloud_path: "memoir/audio/openid_a/sample.mp3",
+      mime_type: "audio/mpeg",
+      size_bytes: 1200,
+    },
+  });
+
+  assert.equal(response.statusCode, 403);
+  assert.equal(response.data.detail, "云存储文件 ID 与音频路径不匹配");
 });
 
 test("transcribes a registered cloud audio file", async () => {
@@ -208,8 +299,8 @@ test("transcribes a registered cloud audio file", async () => {
     method: "POST",
     path: "/api/mobile/memoir/audio-files",
     data: {
-      file_id: "cloud://file-id",
-      cloud_path: "memoir/audio/sample.mp3",
+      file_id: "cloud://env/memoir/audio/openid_a/sample.mp3",
+      cloud_path: "memoir/audio/openid_a/sample.mp3",
       mime_type: "audio/mpeg",
       size_bytes: 1200,
       duration_seconds: 9,
@@ -223,7 +314,7 @@ test("transcribes a registered cloud audio file", async () => {
     store,
     storage: {
       async downloadFile(fileID) {
-        assert.equal(fileID, "cloud://file-id");
+        assert.equal(fileID, "cloud://env/memoir/audio/openid_a/sample.mp3");
         return Buffer.from("audio-bytes");
       },
     },
@@ -249,6 +340,41 @@ test("transcribes a registered cloud audio file", async () => {
   const files = await store.findMany(COLLECTIONS.audioFiles, { openid: "openid_a" });
   assert.equal(files[0].transcript_text, "我的爸爸呀呀呀");
   assert.equal(files[0].transcript_usage_json, JSON.stringify({ total_tokens: 12 }));
+});
+
+test("does not transcribe another user's registered cloud audio file", async () => {
+  const store = new MemoryStore();
+  const audioFile = await request({
+    method: "POST",
+    path: "/api/mobile/memoir/audio-files",
+    data: {
+      file_id: "cloud://env/memoir/audio/openid_a/sample.mp3",
+      cloud_path: "memoir/audio/openid_a/sample.mp3",
+      mime_type: "audio/mpeg",
+      size_bytes: 1200,
+    },
+  }, { store, openid: "openid_a" });
+
+  const response = await request({
+    method: "POST",
+    path: `/api/mobile/memoir/audio-files/${audioFile.data.id}/transcribe`,
+  }, {
+    store,
+    openid: "openid_b",
+    storage: {
+      async downloadFile() {
+        throw new Error("should not download another user's file");
+      },
+    },
+    asr: {
+      async transcribe() {
+        throw new Error("should not transcribe another user's file");
+      },
+    },
+  });
+
+  assert.equal(response.statusCode, 404);
+  assert.equal(response.data.detail, "音频文件不存在");
 });
 
 test("generates, edits, and accepts a memoir draft", async () => {

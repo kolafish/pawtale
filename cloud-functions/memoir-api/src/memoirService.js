@@ -29,6 +29,25 @@ const MemoirDraftStatus = Object.freeze({
 });
 
 const STORY_PREVIEW_LIMIT = 80;
+const MAX_AUDIO_BYTES = 20 * 1024 * 1024;
+const CLOUD_AUDIO_ROOT = "memoir/audio";
+const AUDIO_MIME_BY_EXTENSION = Object.freeze({
+  mp3: "audio/mpeg",
+  wav: "audio/wav",
+  ogg: "audio/ogg",
+  pcm: "audio/pcm",
+});
+const AUDIO_EXTENSION_BY_MIME = Object.freeze({
+  "audio/mpeg": "mp3",
+  "audio/mp3": "mp3",
+  "audio/wav": "wav",
+  "audio/x-wav": "wav",
+  "audio/wave": "wav",
+  "audio/ogg": "ogg",
+  "audio/pcm": "pcm",
+  "audio/x-pcm": "pcm",
+});
+const GENERIC_AUDIO_MIME_TYPES = new Set(["", "application/octet-stream"]);
 
 function nowIso() {
   return new Date().toISOString();
@@ -112,6 +131,70 @@ function cleanRequiredText(value, message) {
     throw new ApiError(400, message);
   }
   return text;
+}
+
+function safePathSegment(value) {
+  return String(value || "").replace(/[^a-zA-Z0-9_-]/g, "_");
+}
+
+function audioExtension(cloudPath) {
+  const match = String(cloudPath || "").toLowerCase().match(/\.([a-z0-9]+)$/);
+  return match ? match[1] : "";
+}
+
+function cleanCloudFileId(value, cloudPath) {
+  const fileId = cleanRequiredText(value, "缺少云存储文件 ID");
+  if (!fileId.startsWith("cloud://")) {
+    throw new ApiError(400, "云存储文件 ID 无效");
+  }
+  if (!fileId.endsWith(`/${cloudPath}`)) {
+    throw new ApiError(403, "云存储文件 ID 与音频路径不匹配");
+  }
+  return fileId;
+}
+
+function cleanCloudAudioPath(openid, value) {
+  const cloudPath = cleanRequiredText(value, "缺少云存储路径");
+  if (cloudPath.includes("..") || cloudPath.includes("//")) {
+    throw new ApiError(400, "云存储路径无效");
+  }
+
+  const ownerPrefix = `${CLOUD_AUDIO_ROOT}/${safePathSegment(openid)}/`;
+  if (!cloudPath.startsWith(ownerPrefix)) {
+    throw new ApiError(403, "音频路径不属于当前用户");
+  }
+
+  const extension = audioExtension(cloudPath);
+  if (!AUDIO_MIME_BY_EXTENSION[extension]) {
+    throw new ApiError(400, "仅支持 mp3、wav、ogg、pcm 音频文件");
+  }
+  return cloudPath;
+}
+
+function cleanAudioMimeType(value, extension) {
+  const mimeType = String(value || "").split(";")[0].trim().toLowerCase();
+  const expectedMimeType = AUDIO_MIME_BY_EXTENSION[extension];
+  if (GENERIC_AUDIO_MIME_TYPES.has(mimeType)) {
+    return expectedMimeType;
+  }
+  if (AUDIO_EXTENSION_BY_MIME[mimeType] !== extension) {
+    throw new ApiError(400, "音频类型与文件扩展名不匹配");
+  }
+  return expectedMimeType;
+}
+
+function cleanAudioSizeBytes(value) {
+  if (value === undefined || value === null || value === "") {
+    throw new ApiError(400, "缺少音频大小");
+  }
+  const sizeBytes = Number(value);
+  if (!Number.isFinite(sizeBytes) || sizeBytes <= 0) {
+    throw new ApiError(400, "音频文件不能为空");
+  }
+  if (sizeBytes > MAX_AUDIO_BYTES) {
+    throw new ApiError(413, "音频文件不能超过 20MB");
+  }
+  return Math.round(sizeBytes);
 }
 
 function serializeJsonField(value) {
@@ -509,12 +592,14 @@ async function updateAnswerText(store, openid, answerId, data) {
 
 async function registerAudioFile(store, openid, data) {
   const now = nowIso();
+  const cloudPath = cleanCloudAudioPath(openid, data.cloud_path);
+  const extension = audioExtension(cloudPath);
   const audioFile = await store.insert(COLLECTIONS.audioFiles, {
     openid,
-    file_id: cleanRequiredText(data.file_id, "缺少云存储文件 ID"),
-    cloud_path: cleanRequiredText(data.cloud_path, "缺少云存储路径"),
-    mime_type: String(data.mime_type || "audio/mpeg"),
-    size_bytes: cleanPositiveNumber(data.size_bytes, 0),
+    file_id: cleanCloudFileId(data.file_id, cloudPath),
+    cloud_path: cloudPath,
+    mime_type: cleanAudioMimeType(data.mime_type, extension),
+    size_bytes: cleanAudioSizeBytes(data.size_bytes),
     duration_seconds: cleanPositiveNumber(data.duration_seconds),
     transcript_text: "",
     transcript_usage_json: "",

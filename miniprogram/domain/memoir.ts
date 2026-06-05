@@ -9,6 +9,7 @@ export interface User {
   email: string;
   display_name: string;
   avatar_url?: string;
+  storage_owner_id?: string;
   created_at: string;
 }
 
