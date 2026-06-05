@@ -233,7 +233,7 @@ Page<QuestionData, {
       );
       clearMemoirDraft();
       writeMemoirStore({ question, answer });
-      wx.navigateTo({ url: `/pages/feedback/index?answerId=${answer.id}` });
+      wx.navigateTo({ url: `/pages/review/index?answerId=${answer.id}` });
     } catch (error) {
       this.setData({ error: error instanceof Error ? error.message : "提交失败" });
     } finally {

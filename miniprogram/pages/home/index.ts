@@ -51,6 +51,9 @@ Page<HomeData, {
   loadHome(): Promise<void>;
   continueInterview(): Promise<void>;
   openWorkbench(): void;
+  openHome(): void;
+  openFeedback(): void;
+  openProfile(): void;
 }>({
   data: {
     loading: false,
@@ -109,6 +112,17 @@ Page<HomeData, {
   },
 
   openWorkbench() {
-    wx.navigateTo({ url: "/pages/workbench/index" });
+    wx.redirectTo({ url: "/pages/workbench/index" });
+  },
+
+  openHome() {
+  },
+
+  openFeedback() {
+    wx.redirectTo({ url: "/pages/feedback/index" });
+  },
+
+  openProfile() {
+    wx.redirectTo({ url: "/pages/profile/index" });
   },
 });

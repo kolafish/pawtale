@@ -1,32 +1,70 @@
-<view class="page stack">
-  <view class="stack">
-    <text class="eyebrow">回答已校正</text>
-    <text class="title">确认这段回忆</text>
+<view class="feedback-page">
+  <view class="feedback-header">
+    <text class="page-title">意见反馈</text>
+    <view class="avatar-mark">
+      <text class="avatar-initial">余</text>
+    </view>
   </view>
 
-  <view wx:if="{{error}}" class="error">{{error}}</view>
-
-  <view class="surface stack">
-    <text class="eyebrow">我的回答</text>
-    <text class="body-text">{{transcript || "暂无回答文本"}}</text>
+  <view class="prompt-card">
+    <text>哪里不方便用？</text>
+    <text>告诉我们，我们会慢慢改好。</text>
   </view>
 
-  <view class="surface stack">
-    <text class="eyebrow">校正结果</text>
-    <text wx:if="{{generating}}" class="muted">校正中...</text>
-    <text wx:else class="body-text">{{draftText || "等待校正结果"}}</text>
+  <view class="issue-grid">
+    <view class="issue-card {{issueType === '字太小' ? 'active' : ''}}" bindtap="selectFontIssue">
+      <text class="issue-icon">Aa</text>
+      <text>字太小</text>
+    </view>
+    <view class="issue-card {{issueType === '听不清' ? 'active' : ''}}" bindtap="selectAudioIssue">
+      <view class="speaker-icon"></view>
+      <text>听不清</text>
+    </view>
+    <view class="issue-card {{issueType === '不好操作' ? 'active' : ''}}" bindtap="selectOperationIssue">
+      <view class="tap-icon"></view>
+      <text>不好操作</text>
+    </view>
   </view>
 
-  <view class="button-row">
-    <button class="button button-secondary" disabled="{{!draftId || generating}}" bindtap="openEditor">
-      编辑
-    </button>
-    <button class="button button-primary" loading="{{accepting}}" disabled="{{!draftId || generating}}" bindtap="acceptCurrentDraft">
-      继续下一问
-    </button>
+  <textarea
+    class="feedback-textarea"
+    value="{{content}}"
+    maxlength="-1"
+    placeholder="也可以直接写下你遇到的问题"
+    bindinput="onContentInput"
+  />
+
+  <view class="primary-action {{submitting ? 'primary-action-disabled' : ''}}" bindtap="submitFeedback">
+    <view class="mic-icon">
+      <view class="mic-head"></view>
+      <view class="mic-stem"></view>
+    </view>
+    <text>语音反馈</text>
   </view>
 
-  <button class="button button-quiet" loading="{{generating}}" bindtap="retryGenerate">
-    重新校正
-  </button>
+  <view class="service-action" bindtap="contactService">
+    <view class="headset-icon"></view>
+    <text>联系客服</text>
+  </view>
+
+  <text class="footer-note">感谢您的帮助，我们会认真听，慢慢改。</text>
+
+  <view class="bottom-nav">
+    <view class="bottom-nav-item" bindtap="openHome">
+      <view class="nav-mark home-mark"></view>
+      <text>首页</text>
+    </view>
+    <view class="bottom-nav-item" bindtap="openWorkbench">
+      <view class="nav-mark grid-mark"></view>
+      <text>工作台</text>
+    </view>
+    <view class="bottom-nav-item active">
+      <view class="nav-mark chat-mark"></view>
+      <text>反馈</text>
+    </view>
+    <view class="bottom-nav-item" bindtap="openProfile">
+      <view class="nav-mark user-mark"></view>
+      <text>我的</text>
+    </view>
+  </view>
 </view>

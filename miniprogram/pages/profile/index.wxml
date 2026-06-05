@@ -1,0 +1,67 @@
+<view class="profile-page">
+  <view class="profile-head">
+    <view class="avatar-mark">
+      <text class="avatar-initial">余</text>
+    </view>
+    <view class="profile-copy">
+      <text class="profile-name">余主任</text>
+      <text class="profile-note">回忆录正在慢慢成形</text>
+    </view>
+  </view>
+
+  <view class="summary-panel">
+    <view>
+      <text class="summary-value">{{storyCount}}</text>
+      <text class="summary-label">故事卡</text>
+    </view>
+    <view>
+      <text class="summary-value">{{progressPercent}}%</text>
+      <text class="summary-label">完成度</text>
+    </view>
+  </view>
+
+  <view class="settings-panel">
+    <text class="section-title">字体大小</text>
+    <view class="font-options">
+      <view class="font-option {{fontSize === 'standard' ? 'active' : ''}}" bindtap="setStandardFont">
+        <text class="font-sample standard">A</text>
+        <text>标准</text>
+      </view>
+      <view class="font-option {{fontSize === 'large' ? 'active' : ''}}" bindtap="setLargeFont">
+        <text class="font-sample large">A</text>
+        <text>大字</text>
+      </view>
+      <view class="font-option {{fontSize === 'extra' ? 'active' : ''}}" bindtap="setExtraFont">
+        <text class="font-sample extra">A</text>
+        <text>特大</text>
+      </view>
+    </view>
+  </view>
+
+  <view class="settings-panel">
+    <text class="section-title">服务</text>
+    <view class="service-row" bindtap="openFeedback">
+      <text>意见反馈</text>
+      <text class="chevron">›</text>
+    </view>
+  </view>
+
+  <view class="bottom-nav">
+    <view class="bottom-nav-item" bindtap="openHome">
+      <view class="nav-mark home-mark"></view>
+      <text>首页</text>
+    </view>
+    <view class="bottom-nav-item" bindtap="openWorkbench">
+      <view class="nav-mark grid-mark"></view>
+      <text>工作台</text>
+    </view>
+    <view class="bottom-nav-item" bindtap="openFeedback">
+      <view class="nav-mark chat-mark"></view>
+      <text>反馈</text>
+    </view>
+    <view class="bottom-nav-item active">
+      <view class="nav-mark user-mark"></view>
+      <text>我的</text>
+    </view>
+  </view>
+</view>
