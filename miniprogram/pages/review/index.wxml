@@ -1,23 +1,29 @@
 <view class="page stack">
   <view class="stack">
-    <text class="eyebrow">回答已校正</text>
-    <text class="title">确认这段回忆</text>
+    <text class="eyebrow">{{isAccepted ? "已成章" : "回答已校正"}}</text>
+    <text class="title">{{isAccepted ? "查看这段回忆" : "确认这段回忆"}}</text>
   </view>
 
   <view wx:if="{{error}}" class="error">{{error}}</view>
 
-  <view class="surface stack">
-    <text class="eyebrow">我的回答</text>
-    <text class="body-text">{{transcript || "暂无回答文本"}}</text>
+  <view wx:if="{{questionPrompt}}" class="surface stack">
+    <text class="eyebrow">访谈问题</text>
+    <text class="body-text">{{questionPrompt}}</text>
   </view>
 
   <view class="surface stack">
-    <text class="eyebrow">校正结果</text>
+    <text class="eyebrow">我的回答</text>
+    <text wx:if="{{loading && !transcript}}" class="muted">加载中...</text>
+    <text wx:else class="body-text">{{transcript || "暂无回答文本"}}</text>
+  </view>
+
+  <view class="surface stack">
+    <text class="eyebrow">{{isAccepted ? "已成章正文" : "校正结果"}}</text>
     <text wx:if="{{generating}}" class="muted">校正中...</text>
     <text wx:else class="body-text">{{draftText || "等待校正结果"}}</text>
   </view>
 
-  <view class="button-row">
+  <view wx:if="{{!isAccepted}}" class="button-row">
     <button class="button button-secondary" disabled="{{!draftId || generating}}" bindtap="openEditor">
       编辑
     </button>
@@ -26,7 +32,11 @@
     </button>
   </view>
 
-  <button class="button button-quiet" loading="{{generating}}" bindtap="retryGenerate">
+  <button wx:if="{{!isAccepted}}" class="button button-quiet" loading="{{generating}}" bindtap="retryGenerate">
     重新校正
+  </button>
+
+  <button wx:if="{{isAccepted}}" class="button button-quiet" bindtap="backToStories">
+    返回故事卡
   </button>
 </view>

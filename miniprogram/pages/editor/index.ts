@@ -1,4 +1,5 @@
 import { acceptDraft, updateDraft, updateTextAnswer } from "../../services/memoir";
+import { updateMemoirCachedStoryAnswer, updateMemoirCachedStoryDraft } from "../../stores/memoir-cache";
 import { readMemoirStore, writeMemoirStore } from "../../stores/session";
 
 interface InputEvent {
@@ -13,6 +14,7 @@ interface EditorData {
   questionPrompt: string;
   transcriptText: string;
   draftText: string;
+  returnTo: string;
   transcriptFocus: boolean;
   draftFocus: boolean;
   saving: boolean;
@@ -36,6 +38,7 @@ Page<EditorData, {
     questionPrompt: "",
     transcriptText: "",
     draftText: "",
+    returnTo: "",
     transcriptFocus: false,
     draftFocus: false,
     saving: false,
@@ -46,6 +49,7 @@ Page<EditorData, {
     const state = readMemoirStore();
     const answerId = query?.answerId || state.answer?.id || "";
     const draftId = query?.draftId || state.draft?.id || "";
+    const returnTo = query?.returnTo || "";
     const answerQuestionId = state.answer?.question_id || "";
     const question = state.question?.id === answerQuestionId
       ? state.question
@@ -53,6 +57,7 @@ Page<EditorData, {
     this.setData({
       answerId,
       draftId,
+      returnTo,
       questionPrompt: question?.prompt || "",
       transcriptText: state.answer?.transcript_edited || state.answer?.transcript_raw || "",
       draftText: state.draft?.content_edited || state.draft?.content_raw || "",
@@ -62,7 +67,8 @@ Page<EditorData, {
 
   goBack() {
     if (this.data.answerId) {
-      wx.redirectTo({ url: `/pages/review/index?answerId=${this.data.answerId}` });
+      const returnTo = this.data.returnTo ? `&returnTo=${this.data.returnTo}` : "";
+      wx.redirectTo({ url: `/pages/review/index?answerId=${this.data.answerId}${returnTo}` });
       return;
     }
     wx.redirectTo({ url: "/pages/home/index" });
@@ -96,6 +102,8 @@ Page<EditorData, {
       const answer = await updateTextAnswer(this.data.answerId, answerText);
       const draft = await updateDraft(this.data.draftId, draftText);
       writeMemoirStore({ answer, draft });
+      updateMemoirCachedStoryAnswer(answer);
+      updateMemoirCachedStoryDraft(draft);
       if (showToast) {
         wx.showToast({ title: "已保存", icon: "success" });
       }
@@ -121,6 +129,11 @@ Page<EditorData, {
     try {
       const draft = await acceptDraft(this.data.draftId);
       writeMemoirStore({ draft });
+      updateMemoirCachedStoryDraft(draft);
+      if (this.data.returnTo === "stories") {
+        wx.redirectTo({ url: "/pages/stories/index?status=accepted" });
+        return;
+      }
       wx.redirectTo({ url: "/pages/question/index" });
     } catch (error) {
       this.setData({ error: error instanceof Error ? error.message : "确认失败" });

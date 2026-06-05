@@ -14,6 +14,7 @@ from app.schemas.memoir import (
     MemoirInterviewState,
     MemoirQuestionResponse,
     MemoirSessionCreate,
+    MemoirStoryDetailResponse,
     MemoirStoryListResponse,
     MemoirSummaryResponse,
     MemoirTextAnswerCreate,
@@ -89,6 +90,16 @@ async def list_mobile_memoir_stories(
 ):
     project_id = await _default_memoir_project_id(db, current_user.id)
     return await memoir_story_cards.list_story_cards(db, project_id, current_user.id)
+
+
+@router.get("/stories/{answer_id}", response_model=MemoirStoryDetailResponse)
+async def get_mobile_memoir_story(
+    answer_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    project_id = await _default_memoir_project_id(db, current_user.id)
+    return await memoir_story_cards.get_story_detail(db, project_id, current_user.id, answer_id)
 
 
 @router.post("/questions/{question_id}/skip", response_model=MemoirInterviewState)

@@ -122,6 +122,13 @@ class MemoirStoryListResponse(BaseModel):
     total: int = 0
 
 
+class MemoirStoryDetailResponse(BaseModel):
+    story: MemoirStoryCardResponse
+    question: MemoirQuestionResponse
+    answer: MemoirAnswerResponse
+    draft: MemoirDraftResponse | None = None
+
+
 class MemoirSummaryResponse(BaseModel):
     total_story_count: int = 0
     weekly_story_count: int = 0

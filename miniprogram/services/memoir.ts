@@ -6,6 +6,7 @@ import type {
   MemoirInterviewState,
   MemoirQuestion,
   MemoirStoryList,
+  MemoirStoryDetail,
   MemoirSummary,
   Project,
 } from "../domain/memoir";
@@ -29,6 +30,10 @@ export function getMemoirSummary(): Promise<MemoirSummary> {
 
 export function getMemoirStories(): Promise<MemoirStoryList> {
   return request<MemoirStoryList>("/api/mobile/memoir/stories");
+}
+
+export function getMemoirStoryDetail(answerId: string): Promise<MemoirStoryDetail> {
+  return request<MemoirStoryDetail>(`/api/mobile/memoir/stories/${answerId}`);
 }
 
 export function skipQuestion(questionId: string): Promise<MemoirInterviewState> {
