@@ -192,33 +192,6 @@
   white-space: nowrap;
 }
 
-.mic-icon {
-  width: 50rpx;
-  height: 58rpx;
-  position: relative;
-  flex: 0 0 50rpx;
-}
-
-.mic-head {
-  position: absolute;
-  left: 13rpx;
-  top: 0;
-  width: 26rpx;
-  height: 40rpx;
-  border-radius: 18rpx;
-  background: #ffffff;
-}
-
-.mic-stem {
-  position: absolute;
-  left: 23rpx;
-  bottom: 0;
-  width: 8rpx;
-  height: 22rpx;
-  border-radius: 8rpx;
-  background: #ffffff;
-}
-
 .error {
   margin: 20rpx 0 28rpx;
   padding: 24rpx;

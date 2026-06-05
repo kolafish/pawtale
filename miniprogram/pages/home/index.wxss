@@ -22,13 +22,6 @@
   justify-content: center;
 }
 
-.avatar-initial {
-  color: #25100b;
-  font-size: 64rpx;
-  font-weight: 900;
-  line-height: 1;
-}
-
 .header-copy {
   display: flex;
   flex: 1;
@@ -39,9 +32,9 @@
 
 .host-name {
   color: #24100b;
-  font-size: 62rpx;
+  font-size: 54rpx;
   font-weight: 900;
-  line-height: 1.08;
+  line-height: 1.16;
 }
 
 .host-note {
@@ -112,33 +105,6 @@
 
 .primary-action-text {
   white-space: nowrap;
-}
-
-.mic-icon {
-  width: 56rpx;
-  height: 64rpx;
-  position: relative;
-  flex: 0 0 56rpx;
-}
-
-.mic-head {
-  position: absolute;
-  left: 14rpx;
-  top: 0;
-  width: 28rpx;
-  height: 42rpx;
-  border-radius: 18rpx;
-  background: #ffffff;
-}
-
-.mic-stem {
-  position: absolute;
-  left: 25rpx;
-  bottom: 0;
-  width: 8rpx;
-  height: 24rpx;
-  border-radius: 8rpx;
-  background: #ffffff;
 }
 
 .weekly-card {

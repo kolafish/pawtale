@@ -29,13 +29,6 @@
   justify-content: center;
 }
 
-.avatar-initial {
-  color: #25100b;
-  font-size: 66rpx;
-  font-weight: 900;
-  line-height: 1;
-}
-
 .prompt-card {
   margin-top: 48rpx;
   padding: 40rpx 36rpx;
@@ -132,33 +125,6 @@
   border: 2rpx solid #128577;
   background: rgba(255, 255, 255, 0.76);
   color: #128577;
-}
-
-.mic-icon {
-  width: 54rpx;
-  height: 62rpx;
-  position: relative;
-  flex: 0 0 54rpx;
-}
-
-.mic-head {
-  position: absolute;
-  left: 14rpx;
-  top: 0;
-  width: 28rpx;
-  height: 42rpx;
-  border-radius: 18rpx;
-  background: #ffffff;
-}
-
-.mic-stem {
-  position: absolute;
-  left: 25rpx;
-  bottom: 0;
-  width: 8rpx;
-  height: 24rpx;
-  border-radius: 8rpx;
-  background: #ffffff;
 }
 
 .headset-icon {

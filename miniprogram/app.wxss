@@ -8,8 +8,29 @@ page {
 view,
 text,
 button,
-textarea {
+textarea,
+image {
   box-sizing: border-box;
+}
+
+.avatar-mark {
+  overflow: hidden;
+}
+
+.avatar-logo {
+  width: 88%;
+  height: 88%;
+  display: block;
+}
+
+.action-art-icon {
+  width: 76rpx;
+  height: 76rpx;
+  display: block;
+  padding: 8rpx;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.96);
+  flex: 0 0 76rpx;
 }
 
 .page {

@@ -173,33 +173,6 @@
   white-space: nowrap;
 }
 
-.mic-icon {
-  width: 54rpx;
-  height: 62rpx;
-  position: relative;
-  flex: 0 0 54rpx;
-}
-
-.mic-head {
-  position: absolute;
-  left: 14rpx;
-  top: 0;
-  width: 28rpx;
-  height: 42rpx;
-  border-radius: 18rpx;
-  background: #ffffff;
-}
-
-.mic-stem {
-  position: absolute;
-  left: 25rpx;
-  bottom: 0;
-  width: 8rpx;
-  height: 24rpx;
-  border-radius: 8rpx;
-  background: #ffffff;
-}
-
 .memoir-row,
 .story-list-header,
 .story-meta {
