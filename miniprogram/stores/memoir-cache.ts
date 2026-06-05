@@ -1,4 +1,5 @@
 import type {
+  MemoirAnswer,
   MemoirDraft,
   MemoirInterviewState,
   MemoirStoryCard,
@@ -99,4 +100,24 @@ export function updateMemoirCachedStoryDraft(draft: MemoirDraft): void {
     : undefined;
 
   writeMemoirDashboardSnapshot({ stories, summary });
+}
+
+export function updateMemoirCachedStoryAnswer(answer: MemoirAnswer): void {
+  const store = readMemoirStore();
+  if (!store.stories) {
+    return;
+  }
+
+  const stories = store.stories.map((story) => {
+    if (story.answer_id !== answer.id) {
+      return story;
+    }
+    return {
+      ...story,
+      answer_preview: previewText(answer.transcript_edited || answer.transcript_raw),
+      answer_status: answer.status,
+      updated_at: answer.updated_at,
+    };
+  });
+  writeMemoirDashboardSnapshot({ stories });
 }

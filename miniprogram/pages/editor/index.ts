@@ -1,5 +1,5 @@
 import { acceptDraft, updateDraft, updateTextAnswer } from "../../services/memoir";
-import { updateMemoirCachedStoryDraft } from "../../stores/memoir-cache";
+import { updateMemoirCachedStoryAnswer, updateMemoirCachedStoryDraft } from "../../stores/memoir-cache";
 import { readMemoirStore, writeMemoirStore } from "../../stores/session";
 
 interface InputEvent {
@@ -102,6 +102,8 @@ Page<EditorData, {
       const answer = await updateTextAnswer(this.data.answerId, answerText);
       const draft = await updateDraft(this.data.draftId, draftText);
       writeMemoirStore({ answer, draft });
+      updateMemoirCachedStoryAnswer(answer);
+      updateMemoirCachedStoryDraft(draft);
       if (showToast) {
         wx.showToast({ title: "已保存", icon: "success" });
       }
