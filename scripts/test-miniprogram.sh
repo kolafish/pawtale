@@ -1,0 +1,10 @@
+#!/bin/bash
+set -euo pipefail
+
+cd "$(dirname "$0")/../miniprogram"
+
+if [ ! -d "node_modules" ]; then
+    npm install
+fi
+
+npm run typecheck
