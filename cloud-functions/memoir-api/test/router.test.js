@@ -118,7 +118,7 @@ test("answers a question and advances to the next pending question", async () =>
     },
   }, { store });
 
-  assert.equal(answer.statusCode, 200);
+  assert.equal(answer.statusCode, 201);
   assert.equal(answer.data.transcript_raw, "我小时候经常去外婆家。");
   assert.equal(answer.data.status, "answered");
 
@@ -162,13 +162,26 @@ test("answers a question with a linked audio file", async () => {
     },
   }, { store });
 
-  assert.equal(answer.statusCode, 200);
+  assert.equal(answer.statusCode, 201);
   assert.equal(answer.data.audio_file_id, audioFile.data.id);
   assert.equal(answer.data.duration_seconds, 7);
 
   const answers = await store.findMany(COLLECTIONS.answers, { openid: "openid_a" });
   assert.equal(answers[0].audio_file_id, audioFile.data.id);
   assert.equal(answers[0].duration_seconds, 7);
+});
+
+test("rejects malformed answer request bodies", async () => {
+  const response = await request({
+    method: "POST",
+    path: "/api/mobile/memoir/answers",
+    data: {
+      text: "缺少问题 ID",
+    },
+  });
+
+  assert.equal(response.statusCode, 400);
+  assert.equal(response.data.detail, "缺少问题 ID");
 });
 
 test("skips a pending question", async () => {

@@ -196,6 +196,7 @@ FastAPI 本地链路应该复用现有认证、用户、AI provider、文件存�
 POST /api/mobile/wechat/login
 
 GET  /api/mobile/memoir/project
+GET  /api/mobile/memoir/me
 
 GET  /api/mobile/memoir/sessions/current
 POST /api/mobile/memoir/sessions

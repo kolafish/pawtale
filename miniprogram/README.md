@@ -77,6 +77,7 @@ export const API_TRANSPORT = "local";
 当前小程序只调用这些后端 API：
 
 ```text
+GET  /api/mobile/memoir/me
 GET  /api/mobile/memoir/project
 GET  /api/mobile/memoir/sessions/current
 GET  /api/mobile/memoir/questions/next
