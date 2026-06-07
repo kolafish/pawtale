@@ -84,9 +84,12 @@ export interface MemoirAnswer {
 
 export interface MemoirAudioFile {
   id: string;
+  file_id?: string;
   mime_type: string;
   size_bytes: number;
   duration_seconds?: number;
+  transcript_text?: string;
+  transcribed_at?: string | null;
   created_at: string;
 }
 
@@ -113,6 +116,7 @@ export interface MemoirStoryCard {
   session_id: string;
   session_title: string;
   question_prompt: string;
+  audio_file_id?: string | null;
   answer_preview: string;
   answer_status: MemoirAnswerStatus;
   draft_id?: string;
@@ -132,6 +136,7 @@ export interface MemoirStoryDetail {
   story: MemoirStoryCard;
   question: MemoirQuestion;
   answer: MemoirAnswer;
+  audio_file?: MemoirAudioFile | null;
   draft?: MemoirDraft;
 }
 

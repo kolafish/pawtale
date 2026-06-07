@@ -639,8 +639,11 @@ async function getProjectRows(store, openid) {
   const answerIds = new Set(answers.map((answer) => answer.id));
   const drafts = (await store.findMany(COLLECTIONS.drafts, { openid }))
     .filter((draft) => answerIds.has(draft.answer_id));
+  const audioFileIds = new Set(answers.map((answer) => answer.audio_file_id).filter(Boolean));
+  const audioFiles = (await store.findMany(COLLECTIONS.audioFiles, { openid }))
+    .filter((audioFile) => audioFileIds.has(audioFile.id));
 
-  return { project, sessions, questions, answers, drafts };
+  return { project, sessions, questions, answers, drafts, audioFiles };
 }
 
 function storyCardsFromRows(rows) {
@@ -663,6 +666,7 @@ function storyCardsFromRows(rows) {
         session_id: session.id,
         session_title: session.title,
         question_prompt: question.prompt,
+        audio_file_id: answer.audio_file_id || null,
         answer_preview: previewText(answer.transcript_edited || answer.transcript_raw),
         answer_status: answer.status,
         draft_id: draft ? draft.id : null,
@@ -687,6 +691,7 @@ function storyDetailFromRows(rows, answerId) {
   const question = rows.questions.find((item) => item.id === story.question_id);
   const answer = rows.answers.find((item) => item.id === story.answer_id);
   const draft = rows.drafts.find((item) => item.answer_id === story.answer_id) || null;
+  const audioFile = rows.audioFiles.find((item) => item.id === answer?.audio_file_id) || null;
   if (!question || !answer) {
     throw new ApiError(404, "故事不存在");
   }
@@ -695,6 +700,16 @@ function storyDetailFromRows(rows, answerId) {
     story,
     question,
     answer,
+    audio_file: audioFile ? {
+      id: audioFile.id,
+      file_id: audioFile.file_id,
+      mime_type: audioFile.mime_type,
+      size_bytes: audioFile.size_bytes,
+      duration_seconds: audioFile.duration_seconds ?? null,
+      transcript_text: audioFile.transcript_text || "",
+      transcribed_at: audioFile.transcribed_at || null,
+      created_at: audioFile.created_at,
+    } : null,
     draft,
   };
 }

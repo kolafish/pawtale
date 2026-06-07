@@ -65,9 +65,9 @@
       <view class="nav-mark grid-mark"></view>
       <text>工作台</text>
     </view>
-    <view class="bottom-nav-item" bindtap="openFeedback">
+    <view class="bottom-nav-item" bindtap="openQa">
       <view class="nav-mark chat-mark"></view>
-      <text>反馈</text>
+      <text>问答</text>
     </view>
     <view class="bottom-nav-item" bindtap="openProfile">
       <view class="nav-mark user-mark"></view>

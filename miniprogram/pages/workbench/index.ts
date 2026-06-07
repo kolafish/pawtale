@@ -137,7 +137,7 @@ Page<WorkbenchData, {
   backHome(): void;
   openHome(): void;
   openWorkbench(): void;
-  openFeedback(): void;
+  openQa(): void;
   openProfile(): void;
 }>({
   data: {
@@ -309,8 +309,8 @@ Page<WorkbenchData, {
   openWorkbench() {
   },
 
-  openFeedback() {
-    wx.redirectTo({ url: "/pages/feedback/index" });
+  openQa() {
+    wx.redirectTo({ url: "/pages/qa/index" });
   },
 
   openProfile() {
