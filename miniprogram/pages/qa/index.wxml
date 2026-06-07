@@ -1,6 +1,7 @@
 <view class="qa-page">
   <view class="top-bar">
     <text class="page-title">问答记录</text>
+    <text class="top-action" bindtap="toggleSelectionMode">{{selectionMode ? "取消" : "选择"}}</text>
   </view>
 
   <view wx:if="{{error}}" class="error">{{error}}</view>
@@ -16,9 +17,21 @@
     </view>
   </view>
 
+  <view wx:if="{{selectionMode}}" class="selection-toolbar">
+    <text class="selection-count">已选 {{selectedCount}}</text>
+    <view class="toolbar-actions">
+      <button class="toolbar-button" bindtap="selectAllRecords">
+        {{allSelected ? "取消全选" : "全选"}}
+      </button>
+      <button class="toolbar-button danger" loading="{{deleting}}" disabled="{{!selectedCount || deleting}}" bindtap="deleteSelectedRecords">
+        删除
+      </button>
+    </view>
+  </view>
+
   <view class="qa-list">
     <view class="list-header">
-      <text>访问问答</text>
+      <text>访谈问答</text>
       <text class="record-count">{{records.length}}</text>
     </view>
 
@@ -29,52 +42,23 @@
       <text>还没有问答记录。先完成一次访谈，语音和转写文字会整理到这里。</text>
     </view>
 
-    <view wx:for="{{records}}" wx:key="id" class="qa-card">
+    <view wx:for="{{records}}" wx:key="id" class="qa-card {{item.selected ? 'selected' : ''}}" data-id="{{item.id}}" bindtap="openRecord" hover-class="tap-hover">
       <view class="record-meta">
         <text>{{item.sessionTitle}}</text>
         <text>{{item.createdAtText}}</text>
       </view>
-      <text class="question-text">{{item.question}}</text>
-      <text class="answer-preview">{{item.transcriptEdited || item.answerPreview || "暂无转写文字"}}</text>
-
-      <view class="record-footer">
-        <text class="audio-pill {{item.hasAudio ? '' : 'muted'}}">
-          {{item.audioLabel}}
-        </text>
-        <text class="detail-link" data-id="{{item.id}}" bindtap="toggleRecord">
-          {{item.expanded ? "收起" : "查看全文"}}
-        </text>
-      </view>
-
-      <view wx:if="{{item.expanded}}" class="detail-panel">
-        <view wx:if="{{item.detailLoading}}" class="detail-loading">正在加载完整问答</view>
-        <view wx:else>
-          <text class="detail-label">转写文字</text>
-          <text class="detail-text">{{item.transcriptEdited || item.answerPreview || "暂无转写文字"}}</text>
-
-          <view wx:if="{{item.transcriptRaw && item.transcriptRaw !== item.transcriptEdited}}" class="raw-block">
-            <text class="detail-label">ASR 原文</text>
-            <text class="detail-text muted-text">{{item.transcriptRaw}}</text>
-          </view>
-
-          <view class="audio-row">
-            <view>
-              <text class="detail-label">语音</text>
-              <text class="audio-state">{{item.hasAudio ? (item.audioDurationText || "已保存录音") : "未录音"}}</text>
-            </view>
-            <button
-              wx:if="{{item.hasAudio}}"
-              class="play-button"
-              data-id="{{item.id}}"
-              loading="{{item.detailLoading}}"
-              bindtap="playAudio"
-            >
-              {{item.playing ? "停止" : "播放"}}
-            </button>
-          </view>
-
-          <text wx:if="{{item.audioError}}" class="audio-error">{{item.audioError}}</text>
+      <view class="record-main">
+        <view wx:if="{{selectionMode}}" class="select-mark {{item.selected ? 'checked' : ''}}"></view>
+        <view class="record-copy">
+          <text class="question-text">{{item.question}}</text>
+          <text class="answer-preview">{{item.answerPreview || "暂无转写文字"}}</text>
         </view>
+      </view>
+      <view class="record-footer">
+        <text class="audio-pill {{item.hasAudio ? '' : 'muted'}}">{{item.audioLabel}}</text>
+        <text wx:if="{{selectionMode && item.selected}}" class="detail-link">已选择</text>
+        <text wx:elif="{{selectionMode}}" class="detail-link">选择</text>
+        <text wx:else class="detail-link">详情</text>
       </view>
     </view>
   </view>

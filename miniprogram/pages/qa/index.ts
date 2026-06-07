@@ -1,5 +1,5 @@
-import type { MemoirStoryCard, MemoirStoryDetail } from "../../domain/memoir";
-import { getMemoirStories, getMemoirStoryDetail } from "../../services/memoir";
+import type { MemoirStoryCard } from "../../domain/memoir";
+import { deleteMemoirAnswer, getMemoirStories } from "../../services/memoir";
 import { writeMemoirDashboardSnapshot } from "../../stores/memoir-cache";
 
 interface DatasetEvent {
@@ -15,72 +15,51 @@ interface QaRecord {
   question: string;
   sessionTitle: string;
   answerPreview: string;
-  transcriptRaw: string;
-  transcriptEdited: string;
-  audioFileId: string;
-  audioCloudFileId: string;
-  audioDurationText: string;
   audioLabel: string;
   hasAudio: boolean;
   createdAtText: string;
-  expanded: boolean;
-  detailLoaded: boolean;
-  detailLoading: boolean;
-  playing: boolean;
-  audioTempUrl: string;
-  audioError: string;
+  selected: boolean;
 }
 
 interface QaData {
   loading: boolean;
   refreshing: boolean;
+  deleting: boolean;
+  selectionMode: boolean;
   error: string;
   totalCount: number;
   audioCount: number;
+  selectedCount: number;
+  allSelected: boolean;
   records: QaRecord[];
 }
 
 interface QaMethods {
   onLoad(): Promise<void>;
-  onUnload(): void;
+  onShow(): void;
   loadQaRecords(): Promise<void>;
-  toggleRecord(event: DatasetEvent): Promise<void>;
-  loadRecordDetail(answerId: string): Promise<void>;
-  playAudio(event: DatasetEvent): Promise<void>;
-  stopAudio(): void;
-  patchRecord(answerId: string, patch: Partial<QaRecord>): void;
-  setPlaying(answerId: string): void;
-  setAudioError(answerId: string, message: string): void;
+  openRecord(event: DatasetEvent): void;
+  toggleSelectionMode(): void;
+  toggleRecordSelection(event: DatasetEvent): void;
+  selectAllRecords(): void;
+  deleteSelectedRecords(): Promise<void>;
+  applyRecords(records: QaRecord[]): void;
   openHome(): void;
   openWorkbench(): void;
   openQa(): void;
   openProfile(): void;
 }
 
-interface AudioContextLike {
-  src: string;
-  play(): void;
-  stop(): void;
-  destroy(): void;
-  onEnded(callback: () => void): void;
-  onError(callback: (error: { errMsg?: string }) => void): void;
-}
-
-interface CloudWithTempFileUrl {
-  getTempFileURL(options: {
-    fileList: string[];
-    success(result: { fileList: Array<{ tempFileURL?: string }> }): void;
-    fail(error: { errMsg?: string }): void;
+interface WxWithModal {
+  showModal(options: {
+    title: string;
+    content: string;
+    confirmText: string;
+    confirmColor: string;
+    success(result: { confirm: boolean }): void;
+    fail(): void;
   }): void;
 }
-
-interface WxWithAudioContext {
-  createInnerAudioContext(): AudioContextLike;
-}
-
-let audioContext: AudioContextLike | null = null;
-let playingAnswerId = "";
-let activePage: Pick<QaMethods, "setPlaying" | "setAudioError"> | null = null;
 
 function formatDate(value: string): string {
   if (!value) {
@@ -121,103 +100,35 @@ function recordFromStory(story: MemoirStoryCard): QaRecord {
     question: story.question_prompt,
     sessionTitle: story.session_title,
     answerPreview: story.answer_preview,
-    transcriptRaw: "",
-    transcriptEdited: "",
-    audioFileId: story.audio_file_id || "",
-    audioCloudFileId: "",
-    audioDurationText,
     audioLabel: audioLabel(hasAudio, audioDurationText),
     hasAudio,
     createdAtText: formatDate(story.created_at),
-    expanded: false,
-    detailLoaded: false,
-    detailLoading: false,
-    playing: false,
-    audioTempUrl: "",
-    audioError: "",
+    selected: false,
   };
-}
-
-function detailPatch(detail: MemoirStoryDetail, audioTempUrl: string, audioError: string): Partial<QaRecord> {
-  const audioFile = detail.audio_file || null;
-  const audioDurationText = formatDuration(audioFile?.duration_seconds ?? detail.answer.duration_seconds);
-  const hasAudio = Boolean(audioFile?.file_id || detail.answer.audio_file_id);
-  return {
-    transcriptRaw: detail.answer.transcript_raw || "",
-    transcriptEdited: detail.answer.transcript_edited || "",
-    audioFileId: audioFile?.id || detail.answer.audio_file_id || "",
-    audioCloudFileId: audioFile?.file_id || "",
-    audioDurationText,
-    audioLabel: audioLabel(hasAudio, audioDurationText),
-    hasAudio,
-    audioTempUrl,
-    audioError,
-    detailLoaded: true,
-  };
-}
-
-function getTempFileUrl(fileId: string): Promise<string> {
-  return new Promise((resolve, reject) => {
-    (wx.cloud as unknown as CloudWithTempFileUrl).getTempFileURL({
-      fileList: [fileId],
-      success: (result) => {
-        const file = result.fileList[0];
-        if (file?.tempFileURL) {
-          resolve(file.tempFileURL);
-          return;
-        }
-        reject(new Error("录音播放地址生成失败"));
-      },
-      fail: (error) => {
-        reject(new Error(error.errMsg || "录音播放地址生成失败"));
-      },
-    });
-  });
-}
-
-function ensureAudioContext(): AudioContextLike {
-  if (audioContext) {
-    return audioContext;
-  }
-  audioContext = (wx as unknown as WxWithAudioContext).createInnerAudioContext();
-  audioContext.onEnded(() => {
-    playingAnswerId = "";
-    activePage?.setPlaying("");
-  });
-  audioContext.onError((error) => {
-    const failedAnswerId = playingAnswerId;
-    playingAnswerId = "";
-    activePage?.setPlaying("");
-    if (failedAnswerId) {
-      activePage?.setAudioError(failedAnswerId, error.errMsg || "录音播放失败");
-    }
-  });
-  return audioContext;
 }
 
 Page<QaData, QaMethods>({
   data: {
     loading: false,
     refreshing: false,
+    deleting: false,
+    selectionMode: false,
     error: "",
     totalCount: 0,
     audioCount: 0,
+    selectedCount: 0,
+    allSelected: false,
     records: [],
   },
 
   async onLoad() {
-    activePage = this;
     await this.loadQaRecords();
   },
 
-  onUnload() {
-    activePage = null;
-    if (audioContext) {
-      audioContext.stop();
-      audioContext.destroy();
-      audioContext = null;
+  onShow() {
+    if (!this.data.refreshing) {
+      void this.loadQaRecords();
     }
-    playingAnswerId = "";
   },
 
   async loadQaRecords() {
@@ -230,8 +141,8 @@ Page<QaData, QaMethods>({
       const result = await getMemoirStories();
       const records = result.stories.map(recordFromStory);
       writeMemoirDashboardSnapshot({ stories: result.stories });
+      this.applyRecords(records);
       this.setData({
-        records,
         totalCount: result.total,
         audioCount: records.filter((record) => record.hasAudio).length,
       });
@@ -242,106 +153,84 @@ Page<QaData, QaMethods>({
     }
   },
 
-  async toggleRecord(event) {
+  openRecord(event) {
     const answerId = event.currentTarget.dataset.id;
     if (!answerId) {
       return;
     }
-    const record = this.data.records.find((item) => item.id === answerId);
-    if (!record) {
+    if (this.data.selectionMode) {
+      this.toggleRecordSelection(event);
       return;
     }
-    this.patchRecord(answerId, { expanded: !record.expanded });
-    if (!record.expanded && !record.detailLoaded) {
-      await this.loadRecordDetail(answerId);
-    }
+    wx.navigateTo({ url: `/pages/qa-detail/index?answerId=${encodeURIComponent(answerId)}` });
   },
 
-  async loadRecordDetail(answerId) {
-    const record = this.data.records.find((item) => item.id === answerId);
-    if (!record || record.detailLoading) {
+  toggleSelectionMode() {
+    const selectionMode = !this.data.selectionMode;
+    const records = selectionMode
+      ? this.data.records
+      : this.data.records.map((record) => ({ ...record, selected: false }));
+    this.applyRecords(records);
+    this.setData({ selectionMode });
+  },
+
+  toggleRecordSelection(event) {
+    const answerId = event.currentTarget.dataset.id;
+    if (!answerId) {
       return;
     }
-    this.patchRecord(answerId, { detailLoading: true, audioError: "" });
-    try {
-      const detail = await getMemoirStoryDetail(answerId);
-      let audioTempUrl = "";
-      let audioError = "";
-      if (detail.audio_file?.file_id) {
-        try {
-          audioTempUrl = await getTempFileUrl(detail.audio_file.file_id);
-        } catch (error) {
-          audioError = error instanceof Error ? error.message : "录音播放地址生成失败";
-        }
-      }
-      this.patchRecord(answerId, detailPatch(detail, audioTempUrl, audioError));
-    } catch (error) {
-      this.patchRecord(answerId, {
-        audioError: error instanceof Error ? error.message : "问答详情加载失败",
+    const records = this.data.records.map((record) => (
+      record.id === answerId ? { ...record, selected: !record.selected } : record
+    ));
+    this.applyRecords(records);
+  },
+
+  selectAllRecords() {
+    const shouldSelectAll = this.data.selectedCount < this.data.records.length;
+    this.applyRecords(this.data.records.map((record) => ({ ...record, selected: shouldSelectAll })));
+  },
+
+  async deleteSelectedRecords() {
+    const selected = this.data.records.filter((record) => record.selected);
+    if (!selected.length || this.data.deleting) {
+      return;
+    }
+    const confirmed = await new Promise<boolean>((resolve) => {
+      (wx as unknown as WxWithModal).showModal({
+        title: "删除问答",
+        content: `确定删除选中的 ${selected.length} 条问答吗？删除后问题会回到待回答。`,
+        confirmText: "删除",
+        confirmColor: "#be123c",
+        success: (result) => resolve(result.confirm),
+        fail: () => resolve(false),
       });
+    });
+    if (!confirmed) {
+      return;
+    }
+
+    this.setData({ deleting: true, error: "" });
+    try {
+      for (const record of selected) {
+        await deleteMemoirAnswer(record.id);
+      }
+      wx.showToast({ title: "已删除", icon: "success" });
+      this.setData({ selectionMode: false });
+      await this.loadQaRecords();
+    } catch (error) {
+      this.setData({ error: error instanceof Error ? error.message : "删除失败" });
     } finally {
-      this.patchRecord(answerId, { detailLoading: false });
+      this.setData({ deleting: false });
     }
   },
 
-  async playAudio(event) {
-    const answerId = event.currentTarget.dataset.id;
-    if (!answerId) {
-      return;
-    }
-    if (playingAnswerId === answerId) {
-      this.stopAudio();
-      return;
-    }
-
-    let record = this.data.records.find((item) => item.id === answerId);
-    if (!record) {
-      return;
-    }
-    if (!record.detailLoaded) {
-      await this.loadRecordDetail(answerId);
-      record = this.data.records.find((item) => item.id === answerId);
-    }
-    if (!record?.audioTempUrl) {
-      this.setAudioError(answerId, record?.audioError || "这条问答没有可播放的录音");
-      return;
-    }
-
-    const context = ensureAudioContext();
-    context.stop();
-    context.src = record.audioTempUrl;
-    playingAnswerId = answerId;
-    this.setPlaying(answerId);
-    context.play();
-  },
-
-  stopAudio() {
-    if (audioContext) {
-      audioContext.stop();
-    }
-    playingAnswerId = "";
-    this.setPlaying("");
-  },
-
-  patchRecord(answerId, patch) {
+  applyRecords(records) {
+    const selectedCount = records.filter((record) => record.selected).length;
     this.setData({
-      records: this.data.records.map((record) => (
-        record.id === answerId ? { ...record, ...patch } : record
-      )),
+      records,
+      selectedCount,
+      allSelected: Boolean(records.length && selectedCount === records.length),
     });
-  },
-
-  setPlaying(answerId) {
-    this.setData({
-      records: this.data.records.map((record) => ({
-        ...record,
-        playing: Boolean(answerId && record.id === answerId),
-      })),
-    });
-  },
-
-  setAudioError(answerId, message) {
-    this.patchRecord(answerId, { audioError: message });
   },
 
   openHome() {

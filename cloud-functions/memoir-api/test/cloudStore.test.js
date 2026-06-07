@@ -68,6 +68,21 @@ class FakeCollection extends FakeQuery {
     }));
     return new FakeQuery(filtered, this.tracker);
   }
+
+  doc(id) {
+    return {
+      get: async () => ({
+        data: this.rows.find((row) => row._id === id || row.id === id) || null,
+      }),
+      remove: async () => {
+        const index = this.rows.findIndex((row) => row._id === id || row.id === id);
+        if (index !== -1) {
+          this.rows.splice(index, 1);
+        }
+        return {};
+      },
+    };
+  }
 }
 
 function fakeDatabase(seed) {
@@ -160,4 +175,20 @@ test("CloudStore.findMany rejects undefined filter values", async () => {
     /undefined filter value for "_id"/,
   );
   assert.deepEqual(db.collection("things").whereCalls, []);
+});
+
+test("CloudStore.deleteById removes and returns the existing row", async () => {
+  const db = fakeDatabase({
+    things: [
+      { _id: "row_a", openid: "openid_a" },
+      { _id: "row_b", openid: "openid_a" },
+    ],
+  });
+  const store = new CloudStore(db);
+
+  const deleted = await store.deleteById("things", "row_a");
+
+  assert.equal(deleted.id, "row_a");
+  assert.equal(await store.getById("things", "row_a"), null);
+  assert.equal((await store.findMany("things", {})).length, 1);
 });

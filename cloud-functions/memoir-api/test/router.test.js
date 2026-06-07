@@ -481,6 +481,54 @@ test("generates, edits, and accepts a memoir draft", async () => {
   assert.equal(answers[0].status, "confirmed");
 });
 
+test("deletes a memoir answer and its draft", async () => {
+  const store = new MemoryStore();
+  const state = await request({
+    method: "GET",
+    path: "/api/mobile/memoir/sessions/current",
+  }, { store });
+  const questionId = state.data.current_question.id;
+  const answer = await request({
+    method: "POST",
+    path: "/api/mobile/memoir/answers",
+    data: {
+      question_id: questionId,
+      text: "我想重新回答这件事。",
+    },
+  }, { store });
+  const draft = await request({
+    method: "POST",
+    path: `/api/mobile/memoir/answers/${answer.data.id}/draft`,
+  }, {
+    store,
+    drafting: {
+      async generate() {
+        return { text: "这件事需要重新整理。" };
+      },
+    },
+  });
+
+  const deleted = await request({
+    method: "DELETE",
+    path: `/api/mobile/memoir/answers/${answer.data.id}`,
+  }, { store });
+
+  assert.equal(deleted.statusCode, 200);
+  assert.equal(deleted.data.id, answer.data.id);
+  assert.equal(deleted.data.question_id, questionId);
+  assert.equal(deleted.data.deleted, true);
+
+  const stories = await request({
+    method: "GET",
+    path: "/api/mobile/memoir/stories",
+  }, { store });
+  assert.equal(stories.data.total, 0);
+  assert.equal(await store.getById(COLLECTIONS.answers, answer.data.id), null);
+  assert.equal(await store.getById(COLLECTIONS.drafts, draft.data.id), null);
+  const question = await store.getById(COLLECTIONS.questions, questionId);
+  assert.equal(question.status, "pending");
+});
+
 test("returns memoir story cards and summary", async () => {
   const store = new MemoryStore();
   const state = await request({

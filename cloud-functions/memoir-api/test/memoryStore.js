@@ -76,6 +76,16 @@ class MemoryStore {
     };
     return { ...rows[index], id: rows[index].id || rows[index]._id };
   }
+
+  async deleteById(collection, id) {
+    const rows = this.collectionRows(collection);
+    const index = rows.findIndex((row) => row._id === id || row.id === id);
+    if (index === -1) {
+      return null;
+    }
+    const [deleted] = rows.splice(index, 1);
+    return { ...deleted, id: deleted.id || deleted._id };
+  }
 }
 
 module.exports = {

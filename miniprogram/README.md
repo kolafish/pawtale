@@ -89,6 +89,7 @@ POST /api/mobile/memoir/audio-files
 POST /api/mobile/memoir/audio-files/{audio_file_id}/transcribe
 POST /api/mobile/memoir/answers
 PATCH /api/mobile/memoir/answers/{answer_id}
+DELETE /api/mobile/memoir/answers/{answer_id}
 POST /api/mobile/memoir/answers/{answer_id}/draft
 PATCH /api/mobile/memoir/drafts/{draft_id}
 POST /api/mobile/memoir/drafts/{draft_id}/accept
