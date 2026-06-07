@@ -15,7 +15,10 @@ import type {
 import { loadMemoirDashboard } from "../../services/memoir-dashboard";
 import { selectQuestionCandidate } from "../../services/memoir";
 import {
+  markMemoirDashboardSnapshotStale,
+  type MemoirDashboardSnapshot,
   readMemoirDashboardSnapshot,
+  shouldRefreshMemoirDashboardSnapshot,
 } from "../../stores/memoir-cache";
 
 const REVIEW_NAVIGATION_WAIT_MS = 100;
@@ -112,7 +115,7 @@ function buildMemoryCards(
 Page<WorkbenchData, {
   onLoad(): Promise<void>;
   onShow(): void;
-  hydrateFromCache(): void;
+  hydrateFromCache(): MemoirDashboardSnapshot;
   applySnapshot(
     interview: MemoirInterviewState,
     summary: MemoirSummary,
@@ -162,13 +165,15 @@ Page<WorkbenchData, {
   },
 
   async onLoad() {
-    this.hydrateFromCache();
-    await this.loadWorkbench();
+    const snapshot = this.hydrateFromCache();
+    if (shouldRefreshMemoirDashboardSnapshot(snapshot)) {
+      await this.loadWorkbench();
+    }
   },
 
   onShow() {
-    this.hydrateFromCache();
-    if (!this.data.refreshing) {
+    const snapshot = this.hydrateFromCache();
+    if (!this.data.refreshing && shouldRefreshMemoirDashboardSnapshot(snapshot)) {
       void this.loadWorkbench();
     }
   },
@@ -176,7 +181,7 @@ Page<WorkbenchData, {
   hydrateFromCache() {
     const snapshot = readMemoirDashboardSnapshot();
     if (!snapshot.interview || !snapshot.summary) {
-      return;
+      return snapshot;
     }
     this.applySnapshot(snapshot.interview, snapshot.summary, {
       summaryText: snapshot.sessionSummary?.summary || "",
@@ -190,6 +195,7 @@ Page<WorkbenchData, {
       outputs: snapshot.outputs,
       memoryStats: snapshot.memoryStats,
     });
+    return snapshot;
   },
 
   applySnapshot(interview, summary, memory) {
@@ -263,6 +269,7 @@ Page<WorkbenchData, {
     this.setData({ selecting: true, error: "" });
     try {
       await selectQuestionCandidate(id);
+      markMemoirDashboardSnapshotStale();
       wx.navigateTo({ url: "/pages/question/index" });
     } catch (error) {
       this.setData({ error: error instanceof Error ? error.message : "下一问选择失败" });

@@ -26,7 +26,11 @@ import {
   updateMemoryStatus,
   updateOpenQuestionStatus,
 } from "../../services/memoir";
-import { writeMemoirDashboardSnapshot } from "../../stores/memoir-cache";
+import {
+  markMemoirDashboardSnapshotStale,
+  writeMemoirStoryDetailSnapshot,
+  writeMemoirDashboardSnapshot,
+} from "../../stores/memoir-cache";
 import { readMemoirStore, writeMemoirStore } from "../../stores/session";
 
 type MemoryCard =
@@ -209,6 +213,7 @@ Page<ReviewData, {
         answer: detail.answer,
         draft: detail.draft,
       });
+      writeMemoirStoryDetailSnapshot(detail);
       this.setData({
         questionPrompt: detail.question.prompt,
         transcript: detail.answer.transcript_edited || detail.answer.transcript_raw,
@@ -229,6 +234,7 @@ Page<ReviewData, {
     this.setData({ processing: true, error: "" });
     try {
       await processSessionMemory(this.data.sessionId);
+      markMemoirDashboardSnapshotStale();
       await this.loadReviewData();
     } catch (error) {
       this.setData({ error: error instanceof Error ? error.message : "结构化处理失败" });
@@ -318,6 +324,7 @@ Page<ReviewData, {
     }
     try {
       await updateMemoryStatus(type, id, status);
+      markMemoirDashboardSnapshotStale();
       const memoryCards = this.data.memoryCards.map((item) => (
         item.id === id && item.type === type ? { ...item, status } : item
       ));
@@ -331,6 +338,7 @@ Page<ReviewData, {
     const id = event.currentTarget.dataset.id;
     if (!id) return;
     await updateOpenQuestionStatus(id, "answered");
+    markMemoirDashboardSnapshotStale();
     await this.loadReviewData();
   },
 
@@ -338,6 +346,7 @@ Page<ReviewData, {
     const id = event.currentTarget.dataset.id;
     if (!id) return;
     await updateOpenQuestionStatus(id, "dismissed");
+    markMemoirDashboardSnapshotStale();
     await this.loadReviewData();
   },
 
@@ -357,6 +366,7 @@ Page<ReviewData, {
         return;
       }
       await selectQuestionCandidate(candidate.id);
+      markMemoirDashboardSnapshotStale();
       wx.redirectTo({ url: "/pages/question/index" });
     } catch (error) {
       this.setData({ error: error instanceof Error ? error.message : "下一问选择失败" });
@@ -373,6 +383,7 @@ Page<ReviewData, {
     this.setData({ selecting: true, error: "" });
     try {
       await selectQuestionCandidate(id);
+      markMemoirDashboardSnapshotStale();
       wx.redirectTo({ url: "/pages/question/index" });
     } catch (error) {
       this.setData({ error: error instanceof Error ? error.message : "下一问选择失败" });

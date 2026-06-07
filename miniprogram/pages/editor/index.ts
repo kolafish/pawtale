@@ -1,5 +1,10 @@
 import { acceptDraft, getMemoirStoryDetail, updateDraft, updateTextAnswer } from "../../services/memoir";
-import { updateMemoirCachedStoryAnswer, updateMemoirCachedStoryDraft } from "../../stores/memoir-cache";
+import {
+  markMemoirDashboardSnapshotStale,
+  updateMemoirCachedStoryAnswer,
+  updateMemoirCachedStoryDraft,
+  writeMemoirStoryDetailSnapshot,
+} from "../../stores/memoir-cache";
 import { readMemoirStore, writeMemoirStore } from "../../stores/session";
 
 interface InputEvent {
@@ -102,6 +107,7 @@ Page<EditorData, {
         answer: detail.answer,
         draft: detail.draft,
       });
+      writeMemoirStoryDetailSnapshot(detail);
       this.setData({
         questionPrompt: detail.question.prompt,
         transcriptText: detail.answer.transcript_edited || detail.answer.transcript_raw,
@@ -157,6 +163,7 @@ Page<EditorData, {
       writeMemoirStore({ answer, draft });
       updateMemoirCachedStoryAnswer(answer);
       updateMemoirCachedStoryDraft(draft);
+      markMemoirDashboardSnapshotStale();
       if (showToast) {
         wx.showToast({ title: "已保存", icon: "success" });
       }
@@ -183,6 +190,7 @@ Page<EditorData, {
       const draft = await acceptDraft(this.data.draftId);
       writeMemoirStore({ draft });
       updateMemoirCachedStoryDraft(draft);
+      markMemoirDashboardSnapshotStale();
       if (this.data.returnTo === "stories") {
         wx.redirectTo({ url: "/pages/stories/index?status=accepted" });
         return;

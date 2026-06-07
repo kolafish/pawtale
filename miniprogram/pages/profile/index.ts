@@ -1,4 +1,8 @@
 import { loadMemoirDashboard } from "../../services/memoir-dashboard";
+import {
+  readMemoirDashboardSnapshot,
+  shouldRefreshMemoirDashboardSnapshot,
+} from "../../stores/memoir-cache";
 
 type FontSize = "standard" | "large" | "extra";
 
@@ -22,6 +26,7 @@ function writeFontSize(fontSize: FontSize): void {
 
 Page<ProfileData, {
   onLoad(): Promise<void>;
+  hydrateFromCache(): boolean;
   loadProfile(): Promise<void>;
   setStandardFont(): void;
   setLargeFont(): void;
@@ -39,7 +44,22 @@ Page<ProfileData, {
   },
 
   async onLoad() {
-    await this.loadProfile();
+    this.setData({ fontSize: readFontSize() });
+    if (!this.hydrateFromCache()) {
+      await this.loadProfile();
+    }
+  },
+
+  hydrateFromCache() {
+    const snapshot = readMemoirDashboardSnapshot();
+    if (!snapshot.summary || shouldRefreshMemoirDashboardSnapshot(snapshot)) {
+      return false;
+    }
+    this.setData({
+      storyCount: snapshot.summary.total_story_count,
+      progressPercent: snapshot.memoryStats?.coverage_average ?? snapshot.summary.progress_percent,
+    });
+    return true;
   },
 
   async loadProfile() {

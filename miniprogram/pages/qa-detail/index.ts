@@ -6,6 +6,15 @@ import {
   updateTextAnswer,
   uploadMemoirAudioFile,
 } from "../../services/memoir";
+import {
+  markMemoirDashboardSnapshotStale,
+  markMemoirStoriesSnapshotStale,
+  readMemoirStoryDetailSnapshot,
+  shouldRefreshMemoirStoryDetailSnapshot,
+  type MemoirStoryDetailSnapshot,
+  updateMemoirCachedStoryAnswer,
+  writeMemoirStoryDetailSnapshot,
+} from "../../stores/memoir-cache";
 
 interface InputEvent {
   detail: {
@@ -40,6 +49,7 @@ interface QaDetailData {
 interface QaDetailMethods {
   onLoad(query?: Record<string, string | undefined>): Promise<void>;
   onUnload(): void;
+  hydrateFromCache(): Promise<MemoirStoryDetailSnapshot>;
   loadDetail(): Promise<void>;
   applyDetail(detail: MemoirStoryDetail, audioTempUrl: string, audioError: string): void;
   onAnswerInput(event: InputEvent): void;
@@ -234,7 +244,10 @@ Page<QaDetailData, QaDetailMethods>({
     bindRecorderEvents();
     const answerId = query?.answerId || "";
     this.setData({ answerId });
-    await this.loadDetail();
+    const snapshot = await this.hydrateFromCache();
+    if (shouldRefreshMemoirStoryDetailSnapshot(answerId) || !snapshot.hasDetail) {
+      await this.loadDetail();
+    }
   },
 
   onUnload() {
@@ -249,6 +262,24 @@ Page<QaDetailData, QaDetailMethods>({
       audioContext.destroy();
       audioContext = null;
     }
+  },
+
+  async hydrateFromCache() {
+    const snapshot = readMemoirStoryDetailSnapshot(this.data.answerId);
+    if (!snapshot.detail) {
+      return snapshot;
+    }
+    let audioTempUrl = "";
+    let audioError = "";
+    if (snapshot.detail.audio_file?.file_id) {
+      try {
+        audioTempUrl = await getTempFileUrl(snapshot.detail.audio_file.file_id);
+      } catch (error) {
+        audioError = error instanceof Error ? error.message : "录音播放地址生成失败";
+      }
+    }
+    this.applyDetail(snapshot.detail, audioTempUrl, audioError);
+    return snapshot;
   },
 
   async loadDetail() {
@@ -268,6 +299,7 @@ Page<QaDetailData, QaDetailMethods>({
           audioError = error instanceof Error ? error.message : "录音播放地址生成失败";
         }
       }
+      writeMemoirStoryDetailSnapshot(detail);
       this.applyDetail(detail, audioTempUrl, audioError);
     } catch (error) {
       this.setData({ error: error instanceof Error ? error.message : "问答详情加载失败" });
@@ -304,6 +336,8 @@ Page<QaDetailData, QaDetailMethods>({
     this.setData({ saving: true, error: "" });
     try {
       const answer = await updateTextAnswer(this.data.answerId, text);
+      updateMemoirCachedStoryAnswer(answer);
+      markMemoirDashboardSnapshotStale();
       this.setData({
         transcriptRaw: answer.transcript_raw || this.data.transcriptRaw,
         answerText: answer.transcript_edited || text,
@@ -329,6 +363,9 @@ Page<QaDetailData, QaDetailMethods>({
         this.data.newAudioFileId || undefined,
         this.data.newAudioDurationSeconds ?? undefined,
       );
+      updateMemoirCachedStoryAnswer(answer);
+      markMemoirDashboardSnapshotStale();
+      markMemoirStoriesSnapshotStale();
       this.setData({
         answerId: answer.id,
         newAudioFileId: "",

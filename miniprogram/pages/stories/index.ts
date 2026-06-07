@@ -1,7 +1,9 @@
 import type { MemoirMemoryStats, MemoirOutput } from "../../domain/memoir";
 import { loadMemoirDashboard } from "../../services/memoir-dashboard";
 import {
+  type MemoirDashboardSnapshot,
   readMemoirDashboardSnapshot,
+  shouldRefreshMemoirDashboardSnapshot,
 } from "../../stores/memoir-cache";
 
 type OutputFilter = "all" | "story_fragment";
@@ -39,7 +41,7 @@ function pendingReviewCount(stats?: MemoirMemoryStats): number {
 Page<StoriesData, {
   onLoad(query?: Record<string, string | undefined>): Promise<void>;
   onShow(): void;
-  hydrateFromCache(): void;
+  hydrateFromCache(): MemoirDashboardSnapshot;
   applySnapshot(outputs: MemoirOutput[], memoryStats?: MemoirMemoryStats): void;
   loadStoriesPage(): Promise<void>;
   selectAll(): void;
@@ -69,13 +71,15 @@ Page<StoriesData, {
 
   async onLoad(query) {
     this.setData({ activeFilter: filterFromQuery(query?.status) });
-    this.hydrateFromCache();
-    await this.loadStoriesPage();
+    const snapshot = this.hydrateFromCache();
+    if (shouldRefreshMemoirDashboardSnapshot(snapshot)) {
+      await this.loadStoriesPage();
+    }
   },
 
   onShow() {
-    this.hydrateFromCache();
-    if (!this.data.refreshing) {
+    const snapshot = this.hydrateFromCache();
+    if (!this.data.refreshing && shouldRefreshMemoirDashboardSnapshot(snapshot)) {
       void this.loadStoriesPage();
     }
   },
@@ -83,9 +87,10 @@ Page<StoriesData, {
   hydrateFromCache() {
     const snapshot = readMemoirDashboardSnapshot();
     if (!snapshot.interview) {
-      return;
+      return snapshot;
     }
     this.applySnapshot(snapshot.outputs, snapshot.memoryStats);
+    return snapshot;
   },
 
   applySnapshot(outputs, memoryStats) {

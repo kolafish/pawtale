@@ -13,6 +13,7 @@ import type {
   MemoirQuestionCandidate,
   MemoirSessionSummary,
   MemoirStoryCard,
+  MemoirStoryDetail,
   MemoirSummary,
   MemoirThemeMemory,
   Project,
@@ -21,6 +22,9 @@ import type {
 const STORE_KEY = "pawtale_memoir_session";
 
 export interface MemoirSessionStore {
+  dashboard_cache?: MemoirCacheMetadata;
+  stories_cache?: MemoirCacheMetadata;
+  story_detail_cache?: MemoirStoryDetailCache;
   project?: Project;
   interview?: MemoirInterviewState;
   question?: MemoirQuestion;
@@ -38,7 +42,23 @@ export interface MemoirSessionStore {
   outputs?: MemoirOutput[];
   memoryStats?: MemoirMemoryStats;
   stories?: MemoirStoryCard[];
-  cached_at?: string;
+}
+
+export interface MemoirCacheMetadata {
+  version: number;
+  cached_at: string;
+  stale?: boolean;
+}
+
+export interface MemoirCachedStoryDetail {
+  detail: MemoirStoryDetail;
+  cached_at: string;
+  stale?: boolean;
+}
+
+export interface MemoirStoryDetailCache {
+  version: number;
+  details: Record<string, MemoirCachedStoryDetail>;
 }
 
 export function readMemoirStore(): MemoirSessionStore {
@@ -71,6 +91,8 @@ export function clearMemoirDraft(): void {
     outputs: current.outputs,
     memoryStats: current.memoryStats,
     stories: current.stories,
-    cached_at: current.cached_at,
+    dashboard_cache: current.dashboard_cache,
+    stories_cache: current.stories_cache,
+    story_detail_cache: current.story_detail_cache,
   });
 }
