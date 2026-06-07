@@ -11,7 +11,14 @@
 
   <view wx:if="{{error}}" class="error">{{error}}</view>
 
-  <view class="question-card">
+  <view
+    class="question-card {{questionCardDragging ? 'question-card-dragging' : ''}} {{questionCardLeaving ? 'question-card-leaving' : ''}} {{questionSwipeReady ? 'question-card-ready' : ''}}"
+    style="transform: translateX({{questionCardTranslateX}}px) rotate({{questionCardRotate}}deg);"
+    bindtouchstart="onQuestionTouchStart"
+    bindtouchmove="onQuestionTouchMove"
+    bindtouchend="onQuestionTouchEnd"
+    bindtouchcancel="onQuestionTouchCancel"
+  >
     <view class="card-label">
       <view class="label-dot"></view>
       <text>{{sessionTitle || "回忆录访谈"}}</text>
@@ -19,11 +26,11 @@
     <text class="question-text">{{currentPrompt || "正在获取问题"}}</text>
 
     <view
-      class="primary-action {{loading ? 'primary-action-disabled' : ''}}"
+      class="primary-action {{loading || skippingQuestion ? 'primary-action-disabled' : ''}}"
       bindtap="continueInterview"
     >
       <image class="action-art-icon" src="/assets/memoir-microphone.png" mode="aspectFit" />
-      <text class="primary-action-text">{{loading ? "加载中" : "开始讲述"}}</text>
+      <text class="primary-action-text">{{skippingQuestion ? "换题中" : loading ? "加载中" : "开始讲述"}}</text>
     </view>
   </view>
 
