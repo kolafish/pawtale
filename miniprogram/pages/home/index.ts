@@ -14,13 +14,6 @@ import {
   shouldRefreshMemoirDashboardSnapshot,
 } from "../../stores/memoir-cache";
 
-const REVIEW_NAVIGATION_WAIT_MS = 100;
-const REVIEW_NAVIGATION_MAX_ATTEMPTS = 600;
-
-function wait(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 interface HomeData {
   loading: boolean;
   refreshing: boolean;
@@ -171,22 +164,21 @@ Page<HomeData, {
   },
 
   async openPendingReview() {
-    for (
-      let attempt = 0;
-      this.data.refreshing && !this.data.reviewSessionId && attempt < REVIEW_NAVIGATION_MAX_ATTEMPTS;
-      attempt += 1
-    ) {
-      await wait(REVIEW_NAVIGATION_WAIT_MS);
-    }
-    if (!this.data.reviewSessionId && !this.data.refreshing) {
-      await this.loadHome();
-    }
-    const sessionId = this.data.reviewSessionId || readMemoirDashboardSnapshot().interview?.session.id || "";
-    if (!sessionId) {
-      this.setData({ error: this.data.refreshing ? "访谈信息仍在加载，请稍后再试" : "缺少访谈信息" });
+    const snapshot = readMemoirDashboardSnapshot();
+    const sessionId = this.data.reviewSessionId || snapshot.interview?.session.id || "";
+    if (sessionId) {
+      wx.navigateTo({ url: `/pages/review/index?sessionId=${encodeURIComponent(sessionId)}` });
       return;
     }
-    wx.navigateTo({ url: `/pages/review/index?sessionId=${encodeURIComponent(sessionId)}` });
+    if (!this.data.refreshing) {
+      await this.loadHome();
+    }
+    const fallbackSessionId = this.data.reviewSessionId || readMemoirDashboardSnapshot().interview?.session.id || "";
+    if (!fallbackSessionId) {
+      this.setData({ error: "缺少访谈信息" });
+      return;
+    }
+    wx.navigateTo({ url: `/pages/review/index?sessionId=${encodeURIComponent(fallbackSessionId)}` });
   },
 
   openStories() {

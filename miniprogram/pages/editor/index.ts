@@ -1,6 +1,8 @@
 import { acceptDraft, getMemoirStoryDetail, updateDraft, updateTextAnswer } from "../../services/memoir";
 import {
   markMemoirDashboardSnapshotStale,
+  readMemoirStoryDetailSnapshot,
+  shouldRefreshMemoirStoryDetailSnapshot,
   updateMemoirCachedStoryAnswer,
   updateMemoirCachedStoryDraft,
   writeMemoirStoryDetailSnapshot,
@@ -51,6 +53,7 @@ Page<EditorData, {
   onHide(): void;
   onUnload(): void;
   hydrateFromMatchingStore(answerId: string, draftId: string): boolean;
+  hydrateFromStoryDetailSnapshot(answerId: string, draftId: string): boolean;
   applyInputDraft(answerId: string, draftId: string): boolean;
   persistInputDraft(): void;
   loadEditorContent(answerId: string, draftId: string): Promise<void>;
@@ -94,8 +97,11 @@ Page<EditorData, {
       return;
     }
     this.hydrateFromMatchingStore(answerId, draftId);
+    const hasFreshDetail = this.hydrateFromStoryDetailSnapshot(answerId, draftId);
     this.applyInputDraft(answerId, draftId);
-    await this.loadEditorContent(answerId, draftId);
+    if (!hasFreshDetail || shouldRefreshMemoirStoryDetailSnapshot(answerId)) {
+      await this.loadEditorContent(answerId, draftId);
+    }
   },
 
   onHide() {
@@ -124,6 +130,26 @@ Page<EditorData, {
       draftText: draft.content_edited || draft.content_raw || "",
     });
     return true;
+  },
+
+  hydrateFromStoryDetailSnapshot(answerId, draftId) {
+    const snapshot = readMemoirStoryDetailSnapshot(answerId);
+    const detail = snapshot.detail;
+    if (!detail?.draft || detail.draft.id !== draftId || detail.draft.answer_id !== answerId) {
+      return false;
+    }
+    writeMemoirStore({
+      question: detail.question,
+      answer: detail.answer,
+      draft: detail.draft,
+    });
+    this.setData({
+      questionPrompt: detail.question.prompt,
+      transcriptText: detail.answer.transcript_edited || detail.answer.transcript_raw,
+      draftText: detail.draft.content_edited || detail.draft.content_raw,
+      contentReady: true,
+    });
+    return snapshot.isFresh;
   },
 
   applyInputDraft(answerId, draftId) {

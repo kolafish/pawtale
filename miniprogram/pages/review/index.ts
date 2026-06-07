@@ -9,18 +9,10 @@ import type {
   MemoirQuestionCandidate,
   MemoirThemeMemory,
 } from "../../domain/memoir";
+import { loadMemoirDashboard } from "../../services/memoir-dashboard";
 import {
   generateQuestionCandidates,
   getMemoirStoryDetail,
-  getCoverageMap,
-  getSessionSummary,
-  listEventMemories,
-  listMemoirOutputs,
-  listOpenQuestions,
-  listPeopleMemories,
-  listPlaceMemories,
-  listQuestionCandidates,
-  listThemeMemories,
   processSessionMemory,
   selectQuestionCandidate,
   updateMemoryStatus,
@@ -28,8 +20,9 @@ import {
 } from "../../services/memoir";
 import {
   markMemoirDashboardSnapshotStale,
+  readMemoirDashboardSnapshot,
+  shouldRefreshMemoirDashboardSnapshot,
   writeMemoirStoryDetailSnapshot,
-  writeMemoirDashboardSnapshot,
 } from "../../stores/memoir-cache";
 import { readMemoirStore, writeMemoirStore } from "../../stores/session";
 
@@ -129,6 +122,7 @@ function buildMemoryCards(
 Page<ReviewData, {
   onLoad(query?: Record<string, string | undefined>): Promise<void>;
   hydrateFromStore(answerId: string): string;
+  hydrateFromDashboardSnapshot(sessionId: string): boolean;
   loadStoryDetail(answerId: string): Promise<string>;
   processAndLoad(): Promise<void>;
   loadReviewData(): Promise<void>;
@@ -188,7 +182,15 @@ Page<ReviewData, {
       await this.processAndLoad();
       return;
     }
-    await this.loadReviewData();
+    const hydrated = this.hydrateFromDashboardSnapshot(sessionId);
+    const snapshot = readMemoirDashboardSnapshot();
+    if (!hydrated) {
+      await this.loadReviewData();
+      return;
+    }
+    if (shouldRefreshMemoirDashboardSnapshot(snapshot)) {
+      void this.loadReviewData();
+    }
   },
 
   hydrateFromStore(answerId) {
@@ -202,6 +204,28 @@ Page<ReviewData, {
       questionPrompt: question?.prompt || this.data.questionPrompt,
     });
     return question?.session_id || state.interview?.session.id || "";
+  },
+
+  hydrateFromDashboardSnapshot(sessionId) {
+    const snapshot = readMemoirDashboardSnapshot();
+    if (!snapshot.interview || !snapshot.summary) {
+      return false;
+    }
+    if (sessionId && snapshot.interview.session.id !== sessionId && snapshot.sessionSummary?.session_id !== sessionId) {
+      return false;
+    }
+    this.applyReviewData({
+      people: snapshot.people,
+      events: snapshot.events,
+      places: snapshot.places,
+      themes: snapshot.themes,
+      openQuestions: snapshot.openQuestions,
+      coverage: snapshot.coverage,
+      candidates: snapshot.candidates,
+      outputs: snapshot.outputs,
+      summaryText: snapshot.sessionSummary?.session_id === sessionId ? snapshot.sessionSummary.summary : "",
+    });
+    return true;
   },
 
   async loadStoryDetail(answerId) {
@@ -249,7 +273,7 @@ Page<ReviewData, {
     }
     this.setData({ refreshing: true, error: "" });
     try {
-      const [
+      const {
         sessionSummary,
         people,
         events,
@@ -258,17 +282,8 @@ Page<ReviewData, {
         openQuestions,
         candidates,
         outputs,
-      ] = await Promise.all([
-        getSessionSummary(this.data.sessionId),
-        listPeopleMemories(),
-        listEventMemories(),
-        listPlaceMemories(),
-        listThemeMemories(),
-        listOpenQuestions(),
-        listQuestionCandidates(),
-        listMemoirOutputs(),
-      ]);
-      const coverage = await getCoverageMap();
+        coverage,
+      } = await loadMemoirDashboard({ includeMemory: true });
       this.applyReviewData({
         people,
         events,
@@ -278,18 +293,7 @@ Page<ReviewData, {
         coverage,
         candidates,
         outputs,
-        summaryText: sessionSummary?.summary || "",
-      });
-      writeMemoirDashboardSnapshot({
-        sessionSummary,
-        people,
-        events,
-        places,
-        themes,
-        openQuestions,
-        coverage,
-        candidates,
-        outputs,
+        summaryText: sessionSummary?.session_id === this.data.sessionId ? sessionSummary.summary : "",
       });
     } catch (error) {
       this.setData({ error: error instanceof Error ? error.message : "记忆面板加载失败" });
