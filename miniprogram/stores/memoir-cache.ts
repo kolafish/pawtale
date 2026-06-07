@@ -26,7 +26,7 @@ import {
   type MemoirStoryDetailCache,
 } from "./session";
 
-const MEMOIR_CACHE_VERSION = 2;
+const MEMOIR_CACHE_VERSION = 3;
 const DASHBOARD_CACHE_MAX_AGE_MS = 10 * 60 * 1000;
 const STORIES_CACHE_MAX_AGE_MS = 10 * 60 * 1000;
 const STORY_DETAIL_CACHE_MAX_AGE_MS = 30 * 60 * 1000;

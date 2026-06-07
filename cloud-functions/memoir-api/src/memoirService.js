@@ -78,6 +78,7 @@ const MemoirOutputStatus = Object.freeze({
 });
 
 const STORY_PREVIEW_LIMIT = 80;
+const DEFAULT_MEMOIR_QUESTION_PROMPTS = new Set(DEFAULT_MEMOIR_QUESTIONS);
 const MAX_AUDIO_BYTES = 20 * 1024 * 1024;
 const CLOUD_AUDIO_ROOT = "memoir/audio";
 const DEFAULT_WECHAT_DISPLAY_NAME = "微信用户";
@@ -599,6 +600,7 @@ async function getOrCreateCurrentSession(store, openid) {
   });
 
   const session = existing || await createSession(store, openid, project.id);
+  await syncSessionTemplateQuestions(store, openid, session);
   return getSessionState(store, openid, session.id);
 }
 
@@ -637,6 +639,57 @@ async function createSession(store, openid, projectId) {
   }
 
   return session;
+}
+
+async function syncSessionTemplateQuestions(store, openid, session) {
+  const questions = await getOrderedQuestions(store, openid, session.id, session.project_id);
+  const existingDefaultPrompts = new Set();
+  const removedQuestionIds = new Set();
+
+  for (const question of questions) {
+    if (question.source !== "template") {
+      continue;
+    }
+    if (DEFAULT_MEMOIR_QUESTION_PROMPTS.has(question.prompt)) {
+      existingDefaultPrompts.add(question.prompt);
+      const sortOrder = DEFAULT_MEMOIR_QUESTIONS.indexOf(question.prompt);
+      if (question.sort_order !== sortOrder) {
+        await store.updateById(COLLECTIONS.questions, question.id, {
+          sort_order: sortOrder,
+        });
+      }
+      continue;
+    }
+    if (question.status === MemoirQuestionStatus.ANSWERED) {
+      continue;
+    }
+    await store.deleteById(COLLECTIONS.questions, question.id);
+    removedQuestionIds.add(question.id);
+  }
+
+  for (const [index, prompt] of DEFAULT_MEMOIR_QUESTIONS.entries()) {
+    if (existingDefaultPrompts.has(prompt)) {
+      continue;
+    }
+    await store.insert(COLLECTIONS.questions, {
+      openid,
+      project_id: session.project_id,
+      session_id: session.id,
+      prompt,
+      source: "template",
+      sort_order: index,
+      status: MemoirQuestionStatus.PENDING,
+      created_at: nowIso(),
+    });
+  }
+
+  if (session.current_question_id && removedQuestionIds.has(session.current_question_id)) {
+    await store.updateById(COLLECTIONS.sessions, session.id, {
+      current_question_id: null,
+      status: MemoirSessionStatus.ACTIVE,
+      updated_at: nowIso(),
+    });
+  }
 }
 
 async function loadSession(store, openid, sessionId, projectId = null) {
@@ -1782,7 +1835,7 @@ async function listQuestionCandidates(store, openid) {
   });
 }
 
-async function selectCandidateAsQuestion(store, openid, candidateId) {
+async function selectCandidateAsQuestion(store, openid, candidateId, options = {}) {
   const project = await getOrCreateProject(store, openid);
   const candidate = await store.findOne(COLLECTIONS.questionCandidates, {
     openid,
@@ -1807,7 +1860,9 @@ async function selectCandidateAsQuestion(store, openid, candidateId) {
   let question = existingQuestion;
   if (!question) {
     const questions = await getOrderedQuestions(store, openid, candidate.session_id, project.id);
-    const sortOrder = questions.reduce((max, item) => Math.max(max, Number(item.sort_order) || 0), 0) + 1;
+    const sortOrder = options.preferNow
+      ? -1
+      : questions.reduce((max, item) => Math.max(max, Number(item.sort_order) || 0), 0) + 1;
     question = await store.insert(COLLECTIONS.questions, {
       openid,
       project_id: project.id,
@@ -1817,6 +1872,10 @@ async function selectCandidateAsQuestion(store, openid, candidateId) {
       sort_order: sortOrder,
       status: MemoirQuestionStatus.PENDING,
       created_at: nowIso(),
+    });
+  } else if (options.preferNow && Number(question.sort_order) >= 0) {
+    question = await store.updateById(COLLECTIONS.questions, question.id, {
+      sort_order: -1,
     });
   }
   await store.updateById(COLLECTIONS.questionCandidates, candidate.id, {
@@ -1881,7 +1940,17 @@ async function advanceSession(store, openid, sessionId) {
     question.source === "ai_generated"
     && question.status === MemoirQuestionStatus.PENDING
   ));
-  const nextQuestion = currentPendingQuestion
+  const templateQuestion = questions.find((question) => (
+    question.source === "template"
+    && question.status === MemoirQuestionStatus.PENDING
+  ));
+  const keepCurrentQuestion = Boolean(
+    currentPendingQuestion
+    && (!templateQuestion || Number(currentPendingQuestion.sort_order) <= Number(templateQuestion.sort_order)),
+  );
+  const nextQuestion = keepCurrentQuestion
+    ? currentPendingQuestion
+    : templateQuestion
     || plannedQuestion
     || questions.find((question) => question.status === MemoirQuestionStatus.PENDING)
     || null;
@@ -1932,8 +2001,11 @@ async function getSessionState(store, openid, sessionId) {
 
 async function getNextQuestion(store, openid) {
   const state = await getOrCreateCurrentSession(store, openid);
+  if (state.current_question) {
+    return state.current_question;
+  }
   const plannedQuestion = await getOrCreatePlannedQuestion(store, openid, state.session.id);
-  return plannedQuestion || state.current_question;
+  return plannedQuestion;
 }
 
 async function skipQuestion(store, openid, questionId) {
@@ -2410,7 +2482,9 @@ function createMemoirService(store, context, dependencies = {}) {
       await generateQuestionCandidates(store, openid);
       return listQuestionCandidates(store, openid);
     },
-    selectCandidateAsQuestion: async (candidateId) => selectCandidateAsQuestion(store, openid, candidateId),
+    selectCandidateAsQuestion: async (candidateId) => selectCandidateAsQuestion(store, openid, candidateId, {
+      preferNow: true,
+    }),
     listOutputs: async () => listOutputs(store, openid),
     getOutput: async (outputId) => getOutput(store, openid, outputId),
     skipQuestion: async (questionId) => skipQuestion(store, openid, questionId),

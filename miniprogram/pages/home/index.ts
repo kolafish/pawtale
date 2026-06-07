@@ -219,7 +219,7 @@ Page<HomeData, {
       questionCardDragging: false,
       questionCardLeaving: false,
       questionSwipeReady: false,
-      completedCount: Math.max(summary.completed_question_count, answeredQuestionCount(interview)),
+      completedCount: answeredQuestionCount(interview),
       pendingCount: interview.pending_question_count,
       weeklyStoryCount: memoryStats?.output_count ?? summary.weekly_story_count,
       pendingReviewCount,
