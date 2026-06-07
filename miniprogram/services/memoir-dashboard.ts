@@ -16,6 +16,7 @@ import type {
 import { ensureLocalDevSession } from "./auth";
 import { getMemoirDashboard } from "./memoir";
 import { writeMemoirDashboardSnapshot } from "../stores/memoir-cache";
+import { cacheIdentityFromUser, ensureMemoirStoreIdentity } from "../stores/session";
 
 export interface MemoirDashboardLoadOptions {
   includeProject?: boolean;
@@ -40,8 +41,9 @@ export interface MemoirDashboardData {
 
 export async function loadMemoirDashboard(options: MemoirDashboardLoadOptions = {}): Promise<MemoirDashboardData> {
   void options;
-  await ensureLocalDevSession();
+  const user = await ensureLocalDevSession();
   const dashboard = await getMemoirDashboard();
+  ensureMemoirStoreIdentity(cacheIdentityFromUser(user, dashboard.project));
   const sessionSummary = dashboard.session_summary;
   const people = dashboard.people;
   const events = dashboard.events;

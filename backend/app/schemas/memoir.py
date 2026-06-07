@@ -156,6 +156,7 @@ class MemoirStoryCardResponse(BaseModel):
     session_id: str
     session_title: str
     question_prompt: str
+    audio_file_id: str | None = None
     answer_preview: str
     answer_status: MemoirAnswerStatus
     draft_id: str | None = None

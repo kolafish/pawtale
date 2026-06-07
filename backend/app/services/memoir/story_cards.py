@@ -51,6 +51,7 @@ def _story_card(answer: MemoirAnswer) -> MemoirStoryCardResponse:
         session_id=session.id,
         session_title=session.title,
         question_prompt=question.prompt,
+        audio_file_id=answer.audio_file_id,
         answer_preview=_preview(answer.transcript_edited or answer.transcript_raw),
         answer_status=answer.status,
         draft_id=draft.id if draft else None,

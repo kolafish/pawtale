@@ -8,6 +8,11 @@ import {
   uploadMemoirAudioFile,
 } from "../../services/memoir";
 import { markMemoirDataSnapshotsStale } from "../../stores/memoir-cache";
+import {
+  clearMemoirQuestionInputDraft,
+  readMemoirQuestionInputDraft,
+  writeMemoirQuestionInputDraft,
+} from "../../stores/memoir-input-drafts";
 import { clearMemoirDraft, writeMemoirStore } from "../../stores/session";
 
 interface InputEvent {
@@ -37,7 +42,12 @@ const recorderManager = wx.getRecorderManager();
 const MAX_RECORDING_MS = 60000;
 let recorderBound = false;
 let recordingStartedAt = 0;
-let activePage: { setData(data: Partial<QuestionData>): void } | null = null;
+type QuestionPageInstance = {
+  data: QuestionData;
+  setData(data: Partial<QuestionData>): void;
+  persistInputDraft(): void;
+};
+let activePage: QuestionPageInstance | null = null;
 
 function isAudioBusy(data: Pick<QuestionData, "recording" | "uploadingAudio" | "transcribingAudio">): boolean {
   return data.recording || data.uploadingAudio || data.transcribingAudio;
@@ -51,6 +61,19 @@ function durationText(seconds: number): string {
   const minutes = Math.floor(seconds / 60);
   const rest = seconds % 60;
   return `${minutes}:${rest < 10 ? "0" : ""}${rest}`;
+}
+
+function inputDraftFromData(data: QuestionData): Parameters<typeof writeMemoirQuestionInputDraft>[0] | null {
+  if (!data.question) {
+    return null;
+  }
+  return {
+    question_id: data.question.id,
+    answer_text: data.answerText,
+    audio_file_id: data.audioFileId || undefined,
+    audio_duration_seconds: data.audioDurationSeconds,
+    audio_summary: data.audioSummary || undefined,
+  };
 }
 
 function bindRecorderEvents(): void {
@@ -86,16 +109,19 @@ function bindRecorderEvents(): void {
         transcribingAudio: true,
         audioSummary: "正在转写",
       });
+      page.persistInputDraft();
       const transcription = await transcribeMemoirAudioFile(audioFile.id);
       page.setData({
         answerText: transcription.text,
         audioSummary: `已转写 ${savedDurationText}`,
       });
+      page.persistInputDraft();
     } catch (error) {
       page.setData({
         error: error instanceof Error ? error.message : "录音处理失败",
         audioSummary: savedDurationText ? `已保存 ${savedDurationText}` : "",
       });
+      page.persistInputDraft();
     } finally {
       page.setData({ uploadingAudio: false, transcribingAudio: false });
     }
@@ -113,8 +139,10 @@ function bindRecorderEvents(): void {
 
 Page<QuestionData, {
   onLoad(): Promise<void>;
+  onHide(): void;
   onUnload(): void;
   loadQuestion(): Promise<void>;
+  persistInputDraft(): void;
   onAnswerInput(event: InputEvent): void;
   startRecording(): void;
   stopRecording(): void;
@@ -145,7 +173,12 @@ Page<QuestionData, {
     await this.loadQuestion();
   },
 
+  onHide() {
+    this.persistInputDraft();
+  },
+
   onUnload() {
+    this.persistInputDraft();
     if (activePage === this) {
       activePage = null;
     }
@@ -188,6 +221,17 @@ Page<QuestionData, {
         prompt: current?.prompt || "",
         isCompleted: !current,
       });
+      if (current) {
+        const inputDraft = readMemoirQuestionInputDraft(current.id);
+        if (inputDraft) {
+          this.setData({
+            answerText: inputDraft.answer_text,
+            audioFileId: inputDraft.audio_file_id || "",
+            audioDurationSeconds: inputDraft.audio_duration_seconds ?? null,
+            audioSummary: inputDraft.audio_summary || "",
+          });
+        }
+      }
     } catch (error) {
       this.setData({ error: error instanceof Error ? error.message : "问题加载失败" });
     } finally {
@@ -195,8 +239,16 @@ Page<QuestionData, {
     }
   },
 
+  persistInputDraft() {
+    const inputDraft = inputDraftFromData(this.data);
+    if (inputDraft) {
+      writeMemoirQuestionInputDraft(inputDraft);
+    }
+  },
+
   onAnswerInput(event) {
     this.setData({ answerText: event.detail.value });
+    this.persistInputDraft();
   },
 
   startRecording() {
@@ -204,6 +256,7 @@ Page<QuestionData, {
       return;
     }
     this.setData({ error: "", audioFileId: "", audioDurationSeconds: null, audioSummary: "" });
+    this.persistInputDraft();
     recorderManager.start({
       duration: MAX_RECORDING_MS,
       sampleRate: 16000,
@@ -225,6 +278,7 @@ Page<QuestionData, {
       return;
     }
     this.setData({ audioFileId: "", audioDurationSeconds: null, audioSummary: "" });
+    this.persistInputDraft();
   },
 
   async submitAnswer() {
@@ -251,6 +305,8 @@ Page<QuestionData, {
       clearMemoirDraft();
       markMemoirDataSnapshotsStale();
       writeMemoirStore({ question, answer });
+      clearMemoirQuestionInputDraft(question.id);
+      this.setData({ answerText: "", audioFileId: "", audioDurationSeconds: null, audioSummary: "" });
       wx.navigateTo({ url: `/pages/review/index?answerId=${answer.id}` });
     } catch (error) {
       this.setData({ error: error instanceof Error ? error.message : "提交失败" });
@@ -273,6 +329,7 @@ Page<QuestionData, {
       const interview = await skipQuestion(question.id);
       markMemoirDataSnapshotsStale();
       writeMemoirStore({ interview });
+      clearMemoirQuestionInputDraft(question.id);
       await this.loadQuestion();
     } catch (error) {
       this.setData({ error: error instanceof Error ? error.message : "跳过失败" });

@@ -20,6 +20,7 @@ import type {
 import {
   readMemoirStore,
   writeMemoirStore,
+  type MemoirCachedStoryDetail,
   type MemoirCacheMetadata,
   type MemoirSessionStore,
   type MemoirStoryDetailCache,
@@ -29,6 +30,7 @@ const MEMOIR_CACHE_VERSION = 2;
 const DASHBOARD_CACHE_MAX_AGE_MS = 10 * 60 * 1000;
 const STORIES_CACHE_MAX_AGE_MS = 10 * 60 * 1000;
 const STORY_DETAIL_CACHE_MAX_AGE_MS = 30 * 60 * 1000;
+const STORY_DETAIL_CACHE_MAX_ITEMS = 20;
 
 export interface MemoirDashboardSnapshot {
   project?: Project;
@@ -138,6 +140,24 @@ function cachedStories(store: MemoirSessionStore): MemoirStoryCard[] | null {
   return isMetaFresh(store.stories_cache, STORIES_CACHE_MAX_AGE_MS) ? store.stories || [] : null;
 }
 
+function compactStoryDetailEntries(
+  details: Record<string, MemoirCachedStoryDetail>,
+): Record<string, MemoirCachedStoryDetail> {
+  return Object.fromEntries(
+    Object.entries(details)
+      .filter(([, entry]) => cacheAgeMs(entry.cached_at) <= STORY_DETAIL_CACHE_MAX_AGE_MS)
+      .sort(([, left], [, right]) => String(right.cached_at).localeCompare(String(left.cached_at)))
+      .slice(0, STORY_DETAIL_CACHE_MAX_ITEMS),
+  );
+}
+
+function storyDetailCacheWith(details: Record<string, MemoirCachedStoryDetail>): MemoirStoryDetailCache {
+  return {
+    version: MEMOIR_CACHE_VERSION,
+    details: compactStoryDetailEntries(details),
+  };
+}
+
 function storySummary(stories: MemoirStoryCard[], summary?: MemoirSummary): MemoirSummary | undefined {
   if (!summary) {
     return undefined;
@@ -182,7 +202,23 @@ export function shouldRefreshMemoirDashboardSnapshot(snapshot = readMemoirDashbo
 }
 
 export function writeMemoirDashboardSnapshot(snapshot: Partial<MemoirDashboardSnapshot>): void {
+  const store = readMemoirStore();
   const patch: MemoirSessionStore = {};
+  const hasDashboardFields = Boolean(
+    snapshot.project !== undefined
+    || snapshot.interview !== undefined
+    || snapshot.summary !== undefined
+    || snapshot.sessionSummary !== undefined
+    || snapshot.people !== undefined
+    || snapshot.events !== undefined
+    || snapshot.places !== undefined
+    || snapshot.themes !== undefined
+    || snapshot.openQuestions !== undefined
+    || snapshot.coverage !== undefined
+    || snapshot.candidates !== undefined
+    || snapshot.outputs !== undefined
+    || snapshot.memoryStats !== undefined,
+  );
   if (snapshot.project !== undefined) {
     patch.project = snapshot.project;
   }
@@ -224,6 +260,11 @@ export function writeMemoirDashboardSnapshot(snapshot: Partial<MemoirDashboardSn
   }
   if (snapshot.interview !== undefined && snapshot.summary !== undefined) {
     patch.dashboard_cache = freshCacheMeta();
+  } else if (hasDashboardFields && validCacheMeta(store.dashboard_cache)) {
+    patch.dashboard_cache = {
+      ...store.dashboard_cache,
+      stale: true,
+    };
   }
   if (snapshot.stories !== undefined) {
     patch.stories = snapshot.stories;
@@ -313,7 +354,7 @@ export function shouldRefreshMemoirStoryDetailSnapshot(answerId: string): boolea
 
 function readStoryDetailCache(): MemoirStoryDetailCache {
   const cache = readMemoirStore().story_detail_cache;
-  return validStoryDetailCache(cache) ? cache : {
+  return validStoryDetailCache(cache) ? storyDetailCacheWith(cache.details) : {
     version: MEMOIR_CACHE_VERSION,
     details: {},
   };
@@ -321,17 +362,14 @@ function readStoryDetailCache(): MemoirStoryDetailCache {
 
 export function writeMemoirStoryDetailSnapshot(detail: MemoirStoryDetail): void {
   const cache = readStoryDetailCache();
-  const nextCache: MemoirStoryDetailCache = {
-    version: MEMOIR_CACHE_VERSION,
-    details: {
-      ...cache.details,
-      [detail.answer.id]: {
-        detail,
-        cached_at: new Date().toISOString(),
-        stale: false,
-      },
+  const nextCache = storyDetailCacheWith({
+    ...cache.details,
+    [detail.answer.id]: {
+      detail,
+      cached_at: new Date().toISOString(),
+      stale: false,
     },
-  };
+  });
   const store = readMemoirStore();
   const stories = cachedStories(store);
   const patch: MemoirSessionStore = {
@@ -356,16 +394,13 @@ export function markMemoirStoryDetailSnapshotStale(answerId: string): void {
     return;
   }
   writeMemoirStore({
-    story_detail_cache: {
-      version: MEMOIR_CACHE_VERSION,
-      details: {
-        ...cache.details,
-        [answerId]: {
-          ...entry,
-          stale: true,
-        },
+    story_detail_cache: storyDetailCacheWith({
+      ...cache.details,
+      [answerId]: {
+        ...entry,
+        stale: true,
       },
-    },
+    }),
   });
 }
 
@@ -386,10 +421,7 @@ export function removeMemoirCachedStoryAnswers(answerIds: string[]): MemoirStory
     for (const answerId of answerIds) {
       delete details[answerId];
     }
-    patch.story_detail_cache = {
-      version: MEMOIR_CACHE_VERSION,
-      details,
-    };
+    patch.story_detail_cache = storyDetailCacheWith(details);
   }
   if (Object.keys(patch).length) {
     writeMemoirStore(patch);
@@ -425,28 +457,25 @@ export function updateMemoirCachedStoryDraft(draft: MemoirDraft): void {
   if (validStoryDetailCache(store.story_detail_cache)) {
     const entry = store.story_detail_cache.details[draft.answer_id];
     if (entry) {
-      patch.story_detail_cache = {
-        version: MEMOIR_CACHE_VERSION,
-        details: {
-          ...store.story_detail_cache.details,
-          [draft.answer_id]: {
-            detail: {
-              ...entry.detail,
-              draft,
-              story: {
-                ...entry.detail.story,
-                answer_status: draft.status === "accepted" ? "confirmed" : entry.detail.story.answer_status,
-                draft_id: draft.id,
-                draft_status: draft.status,
-                draft_preview: storyPreviewFromDraft(draft),
-                updated_at: draft.updated_at,
-              },
+      patch.story_detail_cache = storyDetailCacheWith({
+        ...store.story_detail_cache.details,
+        [draft.answer_id]: {
+          detail: {
+            ...entry.detail,
+            draft,
+            story: {
+              ...entry.detail.story,
+              answer_status: draft.status === "accepted" ? "confirmed" : entry.detail.story.answer_status,
+              draft_id: draft.id,
+              draft_status: draft.status,
+              draft_preview: storyPreviewFromDraft(draft),
+              updated_at: draft.updated_at,
             },
-            cached_at: new Date().toISOString(),
-            stale: false,
           },
+          cached_at: new Date().toISOString(),
+          stale: false,
         },
-      };
+      });
     }
   }
 
@@ -481,28 +510,25 @@ export function updateMemoirCachedStoryAnswer(answer: MemoirAnswer): void {
   if (validStoryDetailCache(store.story_detail_cache)) {
     const entry = store.story_detail_cache.details[answer.id];
     if (entry) {
-      patch.story_detail_cache = {
-        version: MEMOIR_CACHE_VERSION,
-        details: {
-          ...store.story_detail_cache.details,
-          [answer.id]: {
-            detail: {
-              ...entry.detail,
-              answer,
-              story: {
-                ...entry.detail.story,
-                audio_file_id: answer.audio_file_id ?? entry.detail.story.audio_file_id,
-                answer_preview: storyPreviewFromAnswer(answer),
-                answer_status: answer.status,
-                duration_seconds: answer.duration_seconds ?? entry.detail.story.duration_seconds,
-                updated_at: answer.updated_at,
-              },
+      patch.story_detail_cache = storyDetailCacheWith({
+        ...store.story_detail_cache.details,
+        [answer.id]: {
+          detail: {
+            ...entry.detail,
+            answer,
+            story: {
+              ...entry.detail.story,
+              audio_file_id: answer.audio_file_id ?? entry.detail.story.audio_file_id,
+              answer_preview: storyPreviewFromAnswer(answer),
+              answer_status: answer.status,
+              duration_seconds: answer.duration_seconds ?? entry.detail.story.duration_seconds,
+              updated_at: answer.updated_at,
             },
-            cached_at: new Date().toISOString(),
-            stale: false,
           },
+          cached_at: new Date().toISOString(),
+          stale: false,
         },
-      };
+      });
     }
   }
 
