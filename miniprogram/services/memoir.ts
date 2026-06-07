@@ -24,6 +24,7 @@ import type {
   MemoirThemeMemory,
   Project,
 } from "../domain/memoir";
+import { getMemoirIdentity } from "./auth";
 import { request, uploadFile } from "./request";
 
 export function getMemoirProject(): Promise<Project> {
@@ -59,7 +60,8 @@ export function getMemoirDashboard(): Promise<MemoirDashboardResponse> {
   return request<MemoirDashboardResponse>("/api/mobile/memoir/dashboard");
 }
 
-export function getCurrentSession(): Promise<MemoirInterviewState> {
+export async function getCurrentSession(): Promise<MemoirInterviewState> {
+  await getMemoirIdentity();
   return request<MemoirInterviewState>("/api/mobile/memoir/sessions/current");
 }
 
@@ -78,11 +80,13 @@ export function getSessionSummary(sessionId: string): Promise<MemoirSessionSumma
   return request<MemoirSessionSummary | null>(`/api/mobile/memoir/sessions/${sessionId}/summary`);
 }
 
-export function getMemoirStories(): Promise<MemoirStoryList> {
+export async function getMemoirStories(): Promise<MemoirStoryList> {
+  await getMemoirIdentity();
   return request<MemoirStoryList>("/api/mobile/memoir/stories");
 }
 
-export function getMemoirStoryDetail(answerId: string): Promise<MemoirStoryDetail> {
+export async function getMemoirStoryDetail(answerId: string): Promise<MemoirStoryDetail> {
+  await getMemoirIdentity();
   return request<MemoirStoryDetail>(`/api/mobile/memoir/stories/${answerId}`);
 }
 

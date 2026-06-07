@@ -123,7 +123,12 @@ function sameCacheIdentity(current: MemoirCacheIdentity | undefined, next: Memoi
   if ((current.storage_owner_id || "") !== (next.storage_owner_id || "")) {
     return false;
   }
-  return !(current.project_id && next.project_id && current.project_id !== next.project_id);
+  const currentProjectId = current.project_id || "";
+  const nextProjectId = next.project_id || "";
+  if ((currentProjectId || nextProjectId) && currentProjectId !== nextProjectId) {
+    return false;
+  }
+  return true;
 }
 
 export function ensureMemoirStoreIdentity(identity: MemoirCacheIdentity): MemoirSessionStore {

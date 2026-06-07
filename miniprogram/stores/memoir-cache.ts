@@ -119,6 +119,36 @@ function isMetaFresh(meta: MemoirCacheMetadata | undefined, maxAgeMs: number): b
   return Boolean(validCacheMeta(meta) && !meta.stale && cacheAgeMs(meta.cached_at) <= maxAgeMs);
 }
 
+function activeProjectId(store: MemoirSessionStore): string {
+  return store.cache_identity?.project_id || "";
+}
+
+function cacheMatchesActiveProject(store: MemoirSessionStore): boolean {
+  const projectId = activeProjectId(store);
+  if (!projectId) {
+    return false;
+  }
+  if (store.project?.id && store.project.id !== projectId) {
+    return false;
+  }
+  if (store.interview?.session.project_id && store.interview.session.project_id !== projectId) {
+    return false;
+  }
+  return true;
+}
+
+function cacheIdentityPatch(store: MemoirSessionStore, project?: Project): Partial<MemoirSessionStore> {
+  if (!project || !store.cache_identity || store.cache_identity.project_id === project.id) {
+    return {};
+  }
+  return {
+    cache_identity: {
+      ...store.cache_identity,
+      project_id: project.id,
+    },
+  };
+}
+
 function previewText(text: string): string {
   const value = text.trim().replace(/\s+/g, " ");
   return value.length > 80 ? `${value.slice(0, 80)}...` : value;
@@ -137,7 +167,9 @@ function sortStories(stories: MemoirStoryCard[]): MemoirStoryCard[] {
 }
 
 function cachedStories(store: MemoirSessionStore): MemoirStoryCard[] | null {
-  return isMetaFresh(store.stories_cache, STORIES_CACHE_MAX_AGE_MS) ? store.stories || [] : null;
+  return cacheMatchesActiveProject(store) && isMetaFresh(store.stories_cache, STORIES_CACHE_MAX_AGE_MS)
+    ? store.stories || []
+    : null;
 }
 
 function compactStoryDetailEntries(
@@ -172,8 +204,9 @@ function storySummary(stories: MemoirStoryCard[], summary?: MemoirSummary): Memo
 
 export function readMemoirDashboardSnapshot(): MemoirDashboardSnapshot {
   const store = readMemoirStore();
-  const hasDashboard = validCacheMeta(store.dashboard_cache) && Boolean(store.interview);
-  const hasStories = validCacheMeta(store.stories_cache);
+  const matchesProject = cacheMatchesActiveProject(store);
+  const hasDashboard = matchesProject && validCacheMeta(store.dashboard_cache) && Boolean(store.interview);
+  const hasStories = matchesProject && validCacheMeta(store.stories_cache);
   const interview = hasDashboard ? store.interview : undefined;
   return {
     project: hasDashboard ? store.project : undefined,
@@ -203,7 +236,9 @@ export function shouldRefreshMemoirDashboardSnapshot(snapshot = readMemoirDashbo
 
 export function writeMemoirDashboardSnapshot(snapshot: Partial<MemoirDashboardSnapshot>): void {
   const store = readMemoirStore();
-  const patch: MemoirSessionStore = {};
+  const patch: MemoirSessionStore = {
+    ...cacheIdentityPatch(store, snapshot.project),
+  };
   const hasDashboardFields = Boolean(
     snapshot.project !== undefined
     || snapshot.interview !== undefined
@@ -288,7 +323,7 @@ export function markMemoirDashboardSnapshotStale(): void {
 
 export function readMemoirStoriesSnapshot(): MemoirStoriesSnapshot {
   const store = readMemoirStore();
-  const hasStories = validCacheMeta(store.stories_cache);
+  const hasStories = cacheMatchesActiveProject(store) && validCacheMeta(store.stories_cache);
   const stories = hasStories ? store.stories || [] : [];
   return {
     stories,
@@ -305,6 +340,9 @@ export function shouldRefreshMemoirStoriesSnapshot(snapshot = readMemoirStoriesS
 
 export function writeMemoirStoriesSnapshot(stories: MemoirStoryCard[]): void {
   const store = readMemoirStore();
+  if (!activeProjectId(store)) {
+    return;
+  }
   writeMemoirStore({
     stories: sortStories(stories),
     stories_cache: freshCacheMeta(),
@@ -331,7 +369,11 @@ export function markMemoirDataSnapshotsStale(): void {
 }
 
 export function readMemoirStoryDetailSnapshot(answerId: string): MemoirStoryDetailSnapshot {
-  const cache = readMemoirStore().story_detail_cache;
+  const store = readMemoirStore();
+  if (!cacheMatchesActiveProject(store)) {
+    return { hasDetail: false, isFresh: false };
+  }
+  const cache = store.story_detail_cache;
   if (!validStoryDetailCache(cache)) {
     return { hasDetail: false, isFresh: false };
   }
@@ -353,7 +395,14 @@ export function shouldRefreshMemoirStoryDetailSnapshot(answerId: string): boolea
 }
 
 function readStoryDetailCache(): MemoirStoryDetailCache {
-  const cache = readMemoirStore().story_detail_cache;
+  const store = readMemoirStore();
+  if (!cacheMatchesActiveProject(store)) {
+    return {
+      version: MEMOIR_CACHE_VERSION,
+      details: {},
+    };
+  }
+  const cache = store.story_detail_cache;
   return validStoryDetailCache(cache) ? storyDetailCacheWith(cache.details) : {
     version: MEMOIR_CACHE_VERSION,
     details: {},
@@ -361,6 +410,10 @@ function readStoryDetailCache(): MemoirStoryDetailCache {
 }
 
 export function writeMemoirStoryDetailSnapshot(detail: MemoirStoryDetail): void {
+  const store = readMemoirStore();
+  if (!activeProjectId(store)) {
+    return;
+  }
   const cache = readStoryDetailCache();
   const nextCache = storyDetailCacheWith({
     ...cache.details,
@@ -370,7 +423,6 @@ export function writeMemoirStoryDetailSnapshot(detail: MemoirStoryDetail): void 
       stale: false,
     },
   });
-  const store = readMemoirStore();
   const stories = cachedStories(store);
   const patch: MemoirSessionStore = {
     question: detail.question,
@@ -388,6 +440,9 @@ export function writeMemoirStoryDetailSnapshot(detail: MemoirStoryDetail): void 
 }
 
 export function markMemoirStoryDetailSnapshotStale(answerId: string): void {
+  if (!cacheMatchesActiveProject(readMemoirStore())) {
+    return;
+  }
   const cache = readStoryDetailCache();
   const entry = cache.details[answerId];
   if (!entry) {
@@ -407,6 +462,10 @@ export function markMemoirStoryDetailSnapshotStale(answerId: string): void {
 export function removeMemoirCachedStoryAnswers(answerIds: string[]): MemoirStoryCard[] {
   const removeIds = new Set(answerIds);
   const store = readMemoirStore();
+  if (!cacheMatchesActiveProject(store)) {
+    markMemoirDashboardSnapshotStale();
+    return [];
+  }
   const stories = cachedStories(store);
   const patch: MemoirSessionStore = {};
   let nextStories: MemoirStoryCard[] = stories || [];
@@ -432,6 +491,9 @@ export function removeMemoirCachedStoryAnswers(answerIds: string[]): MemoirStory
 
 export function updateMemoirCachedStoryDraft(draft: MemoirDraft): void {
   const store = readMemoirStore();
+  if (!cacheMatchesActiveProject(store)) {
+    return;
+  }
   const stories = cachedStories(store);
   const patch: MemoirSessionStore = {};
 
@@ -486,6 +548,9 @@ export function updateMemoirCachedStoryDraft(draft: MemoirDraft): void {
 
 export function updateMemoirCachedStoryAnswer(answer: MemoirAnswer): void {
   const store = readMemoirStore();
+  if (!cacheMatchesActiveProject(store)) {
+    return;
+  }
   const stories = cachedStories(store);
   const patch: MemoirSessionStore = {};
 
