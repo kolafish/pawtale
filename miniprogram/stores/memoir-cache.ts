@@ -12,11 +12,23 @@ import type {
   MemoirQuestionCandidate,
   MemoirSessionSummary,
   MemoirStoryCard,
+  MemoirStoryDetail,
   MemoirSummary,
   MemoirThemeMemory,
   Project,
 } from "../domain/memoir";
-import { readMemoirStore, writeMemoirStore, type MemoirSessionStore } from "./session";
+import {
+  readMemoirStore,
+  writeMemoirStore,
+  type MemoirCacheMetadata,
+  type MemoirSessionStore,
+  type MemoirStoryDetailCache,
+} from "./session";
+
+const MEMOIR_CACHE_VERSION = 2;
+const DASHBOARD_CACHE_MAX_AGE_MS = 10 * 60 * 1000;
+const STORIES_CACHE_MAX_AGE_MS = 10 * 60 * 1000;
+const STORY_DETAIL_CACHE_MAX_AGE_MS = 30 * 60 * 1000;
 
 export interface MemoirDashboardSnapshot {
   project?: Project;
@@ -33,7 +45,25 @@ export interface MemoirDashboardSnapshot {
   outputs: MemoirOutput[];
   memoryStats?: MemoirMemoryStats;
   stories: MemoirStoryCard[];
+  hasDashboard: boolean;
   hasStories: boolean;
+  cachedAt?: string;
+  isFresh: boolean;
+}
+
+export interface MemoirStoriesSnapshot {
+  stories: MemoirStoryCard[];
+  total: number;
+  hasStories: boolean;
+  cachedAt?: string;
+  isFresh: boolean;
+}
+
+export interface MemoirStoryDetailSnapshot {
+  detail?: MemoirStoryDetail;
+  hasDetail: boolean;
+  cachedAt?: string;
+  isFresh: boolean;
 }
 
 export function answeredQuestionCount(interview: MemoirInterviewState): number {
@@ -56,31 +86,103 @@ export function fallbackSummary(interview: MemoirInterviewState): MemoirSummary 
   };
 }
 
-export function readMemoirDashboardSnapshot(): MemoirDashboardSnapshot {
-  const store = readMemoirStore();
+function freshCacheMeta(): MemoirCacheMetadata {
   return {
-    project: store.project,
-    interview: store.interview,
-    summary: store.summary || (store.interview ? fallbackSummary(store.interview) : undefined),
-    sessionSummary: store.sessionSummary,
-    people: store.people || [],
-    events: store.events || [],
-    places: store.places || [],
-    themes: store.themes || [],
-    openQuestions: store.openQuestions || [],
-    coverage: store.coverage || [],
-    candidates: store.candidates || [],
-    outputs: store.outputs || [],
-    memoryStats: store.memoryStats,
-    stories: store.stories || [],
-    hasStories: store.stories !== undefined,
+    version: MEMOIR_CACHE_VERSION,
+    cached_at: new Date().toISOString(),
+    stale: false,
   };
 }
 
-export function writeMemoirDashboardSnapshot(snapshot: Partial<MemoirDashboardSnapshot>): void {
-  const patch: MemoirSessionStore = {
-    cached_at: new Date().toISOString(),
+function validCacheMeta(meta?: MemoirCacheMetadata): meta is MemoirCacheMetadata {
+  return Boolean(meta && meta.version === MEMOIR_CACHE_VERSION && meta.cached_at);
+}
+
+function validStoryDetailCache(cache?: MemoirStoryDetailCache): cache is MemoirStoryDetailCache {
+  return Boolean(cache && cache.version === MEMOIR_CACHE_VERSION && cache.details);
+}
+
+function cacheAgeMs(cachedAt?: string): number {
+  if (!cachedAt) {
+    return Number.POSITIVE_INFINITY;
+  }
+  const timestamp = new Date(cachedAt).getTime();
+  if (Number.isNaN(timestamp)) {
+    return Number.POSITIVE_INFINITY;
+  }
+  return Date.now() - timestamp;
+}
+
+function isMetaFresh(meta: MemoirCacheMetadata | undefined, maxAgeMs: number): boolean {
+  return Boolean(validCacheMeta(meta) && !meta.stale && cacheAgeMs(meta.cached_at) <= maxAgeMs);
+}
+
+function previewText(text: string): string {
+  const value = text.trim().replace(/\s+/g, " ");
+  return value.length > 80 ? `${value.slice(0, 80)}...` : value;
+}
+
+function storyPreviewFromAnswer(answer: MemoirAnswer): string {
+  return previewText(answer.transcript_edited || answer.transcript_raw);
+}
+
+function storyPreviewFromDraft(draft: MemoirDraft): string {
+  return previewText(draft.content_edited || draft.content_raw);
+}
+
+function sortStories(stories: MemoirStoryCard[]): MemoirStoryCard[] {
+  return [...stories].sort((left, right) => String(right.updated_at).localeCompare(String(left.updated_at)));
+}
+
+function cachedStories(store: MemoirSessionStore): MemoirStoryCard[] | null {
+  return isMetaFresh(store.stories_cache, STORIES_CACHE_MAX_AGE_MS) ? store.stories || [] : null;
+}
+
+function storySummary(stories: MemoirStoryCard[], summary?: MemoirSummary): MemoirSummary | undefined {
+  if (!summary) {
+    return undefined;
+  }
+  return {
+    ...summary,
+    total_story_count: stories.length,
+    pending_review_count: stories.filter((story) => story.draft_status === "draft").length,
+    confirmed_story_count: stories.filter((story) => story.draft_status === "accepted").length,
   };
+}
+
+export function readMemoirDashboardSnapshot(): MemoirDashboardSnapshot {
+  const store = readMemoirStore();
+  const hasDashboard = validCacheMeta(store.dashboard_cache) && Boolean(store.interview);
+  const hasStories = validCacheMeta(store.stories_cache);
+  const interview = hasDashboard ? store.interview : undefined;
+  return {
+    project: hasDashboard ? store.project : undefined,
+    interview,
+    summary: hasDashboard ? (store.summary || (interview ? fallbackSummary(interview) : undefined)) : undefined,
+    sessionSummary: hasDashboard ? store.sessionSummary : undefined,
+    people: hasDashboard ? store.people || [] : [],
+    events: hasDashboard ? store.events || [] : [],
+    places: hasDashboard ? store.places || [] : [],
+    themes: hasDashboard ? store.themes || [] : [],
+    openQuestions: hasDashboard ? store.openQuestions || [] : [],
+    coverage: hasDashboard ? store.coverage || [] : [],
+    candidates: hasDashboard ? store.candidates || [] : [],
+    outputs: hasDashboard ? store.outputs || [] : [],
+    memoryStats: hasDashboard ? store.memoryStats : undefined,
+    stories: hasStories ? store.stories || [] : [],
+    hasDashboard,
+    hasStories,
+    cachedAt: hasDashboard ? store.dashboard_cache?.cached_at : undefined,
+    isFresh: isMetaFresh(store.dashboard_cache, DASHBOARD_CACHE_MAX_AGE_MS),
+  };
+}
+
+export function shouldRefreshMemoirDashboardSnapshot(snapshot = readMemoirDashboardSnapshot()): boolean {
+  return !snapshot.hasDashboard || !snapshot.isFresh;
+}
+
+export function writeMemoirDashboardSnapshot(snapshot: Partial<MemoirDashboardSnapshot>): void {
+  const patch: MemoirSessionStore = {};
   if (snapshot.project !== undefined) {
     patch.project = snapshot.project;
   }
@@ -120,64 +222,291 @@ export function writeMemoirDashboardSnapshot(snapshot: Partial<MemoirDashboardSn
   if (snapshot.memoryStats !== undefined) {
     patch.memoryStats = snapshot.memoryStats;
   }
+  if (snapshot.interview !== undefined && snapshot.summary !== undefined) {
+    patch.dashboard_cache = freshCacheMeta();
+  }
   if (snapshot.stories !== undefined) {
     patch.stories = snapshot.stories;
+    patch.stories_cache = freshCacheMeta();
   }
   writeMemoirStore(patch);
 }
 
-function previewText(text: string): string {
-  const value = text.trim().replace(/\s+/g, " ");
-  return value.length > 80 ? `${value.slice(0, 80)}...` : value;
+export function markMemoirDashboardSnapshotStale(): void {
+  const store = readMemoirStore();
+  if (!validCacheMeta(store.dashboard_cache)) {
+    return;
+  }
+  writeMemoirStore({
+    dashboard_cache: {
+      ...store.dashboard_cache,
+      stale: true,
+    },
+  });
+}
+
+export function readMemoirStoriesSnapshot(): MemoirStoriesSnapshot {
+  const store = readMemoirStore();
+  const hasStories = validCacheMeta(store.stories_cache);
+  const stories = hasStories ? store.stories || [] : [];
+  return {
+    stories,
+    total: stories.length,
+    hasStories,
+    cachedAt: hasStories ? store.stories_cache?.cached_at : undefined,
+    isFresh: isMetaFresh(store.stories_cache, STORIES_CACHE_MAX_AGE_MS),
+  };
+}
+
+export function shouldRefreshMemoirStoriesSnapshot(snapshot = readMemoirStoriesSnapshot()): boolean {
+  return !snapshot.hasStories || !snapshot.isFresh;
+}
+
+export function writeMemoirStoriesSnapshot(stories: MemoirStoryCard[]): void {
+  const store = readMemoirStore();
+  writeMemoirStore({
+    stories: sortStories(stories),
+    stories_cache: freshCacheMeta(),
+    summary: storySummary(stories, store.summary),
+  });
+}
+
+export function markMemoirStoriesSnapshotStale(): void {
+  const store = readMemoirStore();
+  if (!validCacheMeta(store.stories_cache)) {
+    return;
+  }
+  writeMemoirStore({
+    stories_cache: {
+      ...store.stories_cache,
+      stale: true,
+    },
+  });
+}
+
+export function markMemoirDataSnapshotsStale(): void {
+  markMemoirDashboardSnapshotStale();
+  markMemoirStoriesSnapshotStale();
+}
+
+export function readMemoirStoryDetailSnapshot(answerId: string): MemoirStoryDetailSnapshot {
+  const cache = readMemoirStore().story_detail_cache;
+  if (!validStoryDetailCache(cache)) {
+    return { hasDetail: false, isFresh: false };
+  }
+  const entry = cache.details[answerId];
+  if (!entry) {
+    return { hasDetail: false, isFresh: false };
+  }
+  return {
+    detail: entry.detail,
+    hasDetail: true,
+    cachedAt: entry.cached_at,
+    isFresh: !entry.stale && cacheAgeMs(entry.cached_at) <= STORY_DETAIL_CACHE_MAX_AGE_MS,
+  };
+}
+
+export function shouldRefreshMemoirStoryDetailSnapshot(answerId: string): boolean {
+  const snapshot = readMemoirStoryDetailSnapshot(answerId);
+  return !snapshot.hasDetail || !snapshot.isFresh;
+}
+
+function readStoryDetailCache(): MemoirStoryDetailCache {
+  const cache = readMemoirStore().story_detail_cache;
+  return validStoryDetailCache(cache) ? cache : {
+    version: MEMOIR_CACHE_VERSION,
+    details: {},
+  };
+}
+
+export function writeMemoirStoryDetailSnapshot(detail: MemoirStoryDetail): void {
+  const cache = readStoryDetailCache();
+  const nextCache: MemoirStoryDetailCache = {
+    version: MEMOIR_CACHE_VERSION,
+    details: {
+      ...cache.details,
+      [detail.answer.id]: {
+        detail,
+        cached_at: new Date().toISOString(),
+        stale: false,
+      },
+    },
+  };
+  const store = readMemoirStore();
+  const stories = cachedStories(store);
+  const patch: MemoirSessionStore = {
+    question: detail.question,
+    answer: detail.answer,
+    draft: detail.draft,
+    story_detail_cache: nextCache,
+  };
+  if (stories) {
+    const existing = stories.filter((story) => story.answer_id !== detail.story.answer_id);
+    patch.stories = sortStories([detail.story, ...existing]);
+    patch.stories_cache = freshCacheMeta();
+    patch.summary = storySummary(patch.stories, store.summary);
+  }
+  writeMemoirStore(patch);
+}
+
+export function markMemoirStoryDetailSnapshotStale(answerId: string): void {
+  const cache = readStoryDetailCache();
+  const entry = cache.details[answerId];
+  if (!entry) {
+    return;
+  }
+  writeMemoirStore({
+    story_detail_cache: {
+      version: MEMOIR_CACHE_VERSION,
+      details: {
+        ...cache.details,
+        [answerId]: {
+          ...entry,
+          stale: true,
+        },
+      },
+    },
+  });
+}
+
+export function removeMemoirCachedStoryAnswers(answerIds: string[]): MemoirStoryCard[] {
+  const removeIds = new Set(answerIds);
+  const store = readMemoirStore();
+  const stories = cachedStories(store);
+  const patch: MemoirSessionStore = {};
+  let nextStories: MemoirStoryCard[] = stories || [];
+  if (stories) {
+    nextStories = stories.filter((story) => !removeIds.has(story.answer_id));
+    patch.stories = nextStories;
+    patch.stories_cache = freshCacheMeta();
+    patch.summary = storySummary(nextStories, store.summary);
+  }
+  if (validStoryDetailCache(store.story_detail_cache)) {
+    const details = { ...store.story_detail_cache.details };
+    for (const answerId of answerIds) {
+      delete details[answerId];
+    }
+    patch.story_detail_cache = {
+      version: MEMOIR_CACHE_VERSION,
+      details,
+    };
+  }
+  if (Object.keys(patch).length) {
+    writeMemoirStore(patch);
+  }
+  markMemoirDashboardSnapshotStale();
+  return nextStories;
 }
 
 export function updateMemoirCachedStoryDraft(draft: MemoirDraft): void {
   const store = readMemoirStore();
-  if (!store.stories) {
-    return;
+  const stories = cachedStories(store);
+  const patch: MemoirSessionStore = {};
+
+  if (stories) {
+    const nextStories = stories.map((story) => {
+      if (story.answer_id !== draft.answer_id) {
+        return story;
+      }
+      return {
+        ...story,
+        answer_status: draft.status === "accepted" ? "confirmed" : story.answer_status,
+        draft_id: draft.id,
+        draft_status: draft.status,
+        draft_preview: storyPreviewFromDraft(draft),
+        updated_at: draft.updated_at,
+      };
+    });
+    patch.stories = sortStories(nextStories);
+    patch.stories_cache = freshCacheMeta();
+    patch.summary = storySummary(patch.stories, store.summary);
   }
 
-  const stories = store.stories.map((story) => {
-    if (story.answer_id !== draft.answer_id) {
-      return story;
+  if (validStoryDetailCache(store.story_detail_cache)) {
+    const entry = store.story_detail_cache.details[draft.answer_id];
+    if (entry) {
+      patch.story_detail_cache = {
+        version: MEMOIR_CACHE_VERSION,
+        details: {
+          ...store.story_detail_cache.details,
+          [draft.answer_id]: {
+            detail: {
+              ...entry.detail,
+              draft,
+              story: {
+                ...entry.detail.story,
+                answer_status: draft.status === "accepted" ? "confirmed" : entry.detail.story.answer_status,
+                draft_id: draft.id,
+                draft_status: draft.status,
+                draft_preview: storyPreviewFromDraft(draft),
+                updated_at: draft.updated_at,
+              },
+            },
+            cached_at: new Date().toISOString(),
+            stale: false,
+          },
+        },
+      };
     }
-    return {
-      ...story,
-      answer_status: draft.status === "accepted" ? "confirmed" : story.answer_status,
-      draft_id: draft.id,
-      draft_status: draft.status,
-      draft_preview: previewText(draft.content_edited || draft.content_raw),
-      updated_at: draft.updated_at,
-    };
-  });
-  const summary = store.summary
-    ? {
-      ...store.summary,
-      total_story_count: stories.length,
-      pending_review_count: stories.filter((story) => story.draft_status === "draft").length,
-      confirmed_story_count: stories.filter((story) => story.draft_status === "accepted").length,
-    }
-    : undefined;
+  }
 
-  writeMemoirDashboardSnapshot({ stories, summary });
+  if (Object.keys(patch).length) {
+    writeMemoirStore(patch);
+  }
 }
 
 export function updateMemoirCachedStoryAnswer(answer: MemoirAnswer): void {
   const store = readMemoirStore();
-  if (!store.stories) {
-    return;
+  const stories = cachedStories(store);
+  const patch: MemoirSessionStore = {};
+
+  if (stories) {
+    const nextStories = stories.map((story) => {
+      if (story.answer_id !== answer.id) {
+        return story;
+      }
+      return {
+        ...story,
+        audio_file_id: answer.audio_file_id ?? story.audio_file_id,
+        answer_preview: storyPreviewFromAnswer(answer),
+        answer_status: answer.status,
+        duration_seconds: answer.duration_seconds ?? story.duration_seconds,
+        updated_at: answer.updated_at,
+      };
+    });
+    patch.stories = sortStories(nextStories);
+    patch.stories_cache = freshCacheMeta();
   }
 
-  const stories = store.stories.map((story) => {
-    if (story.answer_id !== answer.id) {
-      return story;
+  if (validStoryDetailCache(store.story_detail_cache)) {
+    const entry = store.story_detail_cache.details[answer.id];
+    if (entry) {
+      patch.story_detail_cache = {
+        version: MEMOIR_CACHE_VERSION,
+        details: {
+          ...store.story_detail_cache.details,
+          [answer.id]: {
+            detail: {
+              ...entry.detail,
+              answer,
+              story: {
+                ...entry.detail.story,
+                audio_file_id: answer.audio_file_id ?? entry.detail.story.audio_file_id,
+                answer_preview: storyPreviewFromAnswer(answer),
+                answer_status: answer.status,
+                duration_seconds: answer.duration_seconds ?? entry.detail.story.duration_seconds,
+                updated_at: answer.updated_at,
+              },
+            },
+            cached_at: new Date().toISOString(),
+            stale: false,
+          },
+        },
+      };
     }
-    return {
-      ...story,
-      answer_preview: previewText(answer.transcript_edited || answer.transcript_raw),
-      answer_status: answer.status,
-      updated_at: answer.updated_at,
-    };
-  });
-  writeMemoirDashboardSnapshot({ stories });
+  }
+
+  if (Object.keys(patch).length) {
+    writeMemoirStore(patch);
+  }
 }

@@ -1,6 +1,12 @@
 import type { MemoirStoryCard } from "../../domain/memoir";
 import { deleteMemoirAnswer, getMemoirStories } from "../../services/memoir";
-import { writeMemoirDashboardSnapshot } from "../../stores/memoir-cache";
+import {
+  readMemoirStoriesSnapshot,
+  removeMemoirCachedStoryAnswers,
+  shouldRefreshMemoirStoriesSnapshot,
+  type MemoirStoriesSnapshot,
+  writeMemoirStoriesSnapshot,
+} from "../../stores/memoir-cache";
 
 interface DatasetEvent {
   currentTarget: {
@@ -37,6 +43,7 @@ interface QaData {
 interface QaMethods {
   onLoad(): Promise<void>;
   onShow(): void;
+  hydrateFromCache(): MemoirStoriesSnapshot;
   loadQaRecords(): Promise<void>;
   openRecord(event: DatasetEvent): void;
   toggleSelectionMode(): void;
@@ -122,13 +129,31 @@ Page<QaData, QaMethods>({
   },
 
   async onLoad() {
-    await this.loadQaRecords();
+    const snapshot = this.hydrateFromCache();
+    if (shouldRefreshMemoirStoriesSnapshot(snapshot)) {
+      await this.loadQaRecords();
+    }
   },
 
   onShow() {
-    if (!this.data.refreshing) {
+    const snapshot = this.hydrateFromCache();
+    if (!this.data.refreshing && shouldRefreshMemoirStoriesSnapshot(snapshot)) {
       void this.loadQaRecords();
     }
+  },
+
+  hydrateFromCache() {
+    const snapshot = readMemoirStoriesSnapshot();
+    if (!snapshot.hasStories) {
+      return snapshot;
+    }
+    const records = snapshot.stories.map(recordFromStory);
+    this.applyRecords(records);
+    this.setData({
+      totalCount: snapshot.total,
+      audioCount: records.filter((record) => record.hasAudio).length,
+    });
+    return snapshot;
   },
 
   async loadQaRecords() {
@@ -140,7 +165,7 @@ Page<QaData, QaMethods>({
     try {
       const result = await getMemoirStories();
       const records = result.stories.map(recordFromStory);
-      writeMemoirDashboardSnapshot({ stories: result.stories });
+      writeMemoirStoriesSnapshot(result.stories);
       this.applyRecords(records);
       this.setData({
         totalCount: result.total,
@@ -214,8 +239,18 @@ Page<QaData, QaMethods>({
       for (const record of selected) {
         await deleteMemoirAnswer(record.id);
       }
+      const stories = removeMemoirCachedStoryAnswers(selected.map((record) => record.id));
       wx.showToast({ title: "已删除", icon: "success" });
       this.setData({ selectionMode: false });
+      if (stories.length || this.data.records.length === selected.length) {
+        const records = stories.map(recordFromStory);
+        this.applyRecords(records);
+        this.setData({
+          totalCount: stories.length,
+          audioCount: records.filter((record) => record.hasAudio).length,
+        });
+        return;
+      }
       await this.loadQaRecords();
     } catch (error) {
       this.setData({ error: error instanceof Error ? error.message : "删除失败" });

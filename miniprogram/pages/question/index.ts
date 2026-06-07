@@ -7,6 +7,7 @@ import {
   transcribeMemoirAudioFile,
   uploadMemoirAudioFile,
 } from "../../services/memoir";
+import { markMemoirDataSnapshotsStale } from "../../stores/memoir-cache";
 import { clearMemoirDraft, writeMemoirStore } from "../../stores/session";
 
 interface InputEvent {
@@ -248,6 +249,7 @@ Page<QuestionData, {
         this.data.audioDurationSeconds ?? undefined,
       );
       clearMemoirDraft();
+      markMemoirDataSnapshotsStale();
       writeMemoirStore({ question, answer });
       wx.navigateTo({ url: `/pages/review/index?answerId=${answer.id}` });
     } catch (error) {
@@ -269,6 +271,7 @@ Page<QuestionData, {
     this.setData({ submitting: true, error: "" });
     try {
       const interview = await skipQuestion(question.id);
+      markMemoirDataSnapshotsStale();
       writeMemoirStore({ interview });
       await this.loadQuestion();
     } catch (error) {

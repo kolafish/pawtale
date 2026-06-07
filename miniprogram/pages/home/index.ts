@@ -9,7 +9,9 @@ import type {
 import { loadMemoirDashboard } from "../../services/memoir-dashboard";
 import {
   answeredQuestionCount,
+  type MemoirDashboardSnapshot,
   readMemoirDashboardSnapshot,
+  shouldRefreshMemoirDashboardSnapshot,
 } from "../../stores/memoir-cache";
 
 const REVIEW_NAVIGATION_WAIT_MS = 100;
@@ -40,7 +42,7 @@ interface HomeData {
 Page<HomeData, {
   onLoad(): Promise<void>;
   onShow(): void;
-  hydrateFromCache(): void;
+  hydrateFromCache(): MemoirDashboardSnapshot;
   applySnapshot(
     interview: MemoirInterviewState,
     summary: MemoirSummary,
@@ -77,13 +79,15 @@ Page<HomeData, {
   },
 
   async onLoad() {
-    this.hydrateFromCache();
-    await this.loadHome();
+    const snapshot = this.hydrateFromCache();
+    if (shouldRefreshMemoirDashboardSnapshot(snapshot)) {
+      await this.loadHome();
+    }
   },
 
   onShow() {
-    this.hydrateFromCache();
-    if (!this.data.refreshing) {
+    const snapshot = this.hydrateFromCache();
+    if (!this.data.refreshing && shouldRefreshMemoirDashboardSnapshot(snapshot)) {
       void this.loadHome();
     }
   },
@@ -91,7 +95,7 @@ Page<HomeData, {
   hydrateFromCache() {
     const snapshot = readMemoirDashboardSnapshot();
     if (!snapshot.interview || !snapshot.summary) {
-      return;
+      return snapshot;
     }
     this.setData({
       projectTitle: snapshot.project?.title || this.data.projectTitle,
@@ -104,6 +108,7 @@ Page<HomeData, {
       snapshot.memoryStats,
       snapshot.sessionSummary,
     );
+    return snapshot;
   },
 
   applySnapshot(interview, summary, coverage = [], outputs = [], memoryStats, sessionSummary = null) {
