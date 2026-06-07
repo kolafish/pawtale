@@ -47,7 +47,10 @@ async def load_question(db: AsyncSession, question_id: str, user_id: str) -> Mem
         .join(MemoirSession, MemoirQuestion.session_id == MemoirSession.id)
         .join(Project, MemoirSession.project_id == Project.id)
         .where(MemoirQuestion.id == question_id, Project.user_id == user_id)
-        .options(selectinload(MemoirQuestion.answer).selectinload(MemoirAnswer.draft))
+        .options(
+            selectinload(MemoirQuestion.session),
+            selectinload(MemoirQuestion.answer).selectinload(MemoirAnswer.draft),
+        )
     )
     question = result.scalar_one_or_none()
     if not question:
@@ -63,7 +66,7 @@ async def load_answer(db: AsyncSession, answer_id: str, user_id: str) -> MemoirA
         .join(Project, MemoirSession.project_id == Project.id)
         .where(MemoirAnswer.id == answer_id, Project.user_id == user_id)
         .options(
-            selectinload(MemoirAnswer.question),
+            selectinload(MemoirAnswer.question).selectinload(MemoirQuestion.session),
             selectinload(MemoirAnswer.draft),
         )
     )

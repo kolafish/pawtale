@@ -1,4 +1,5 @@
 from fastapi import HTTPException
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.memoir import MemoirAnswerStatus, MemoirQuestionStatus
@@ -49,7 +50,9 @@ async def answer_question_with_text(
 
     transcript = _clean_answer_text(text)
     audio_fields = await _answer_audio_fields(db, user_id, audio_file_id, duration_seconds)
-    answer = question.answer
+    answer = await db.scalar(
+        select(MemoirAnswer).where(MemoirAnswer.question_id == question.id)
+    )
     if answer:
         answer.transcript_edited = transcript
         if not answer.transcript_raw:
