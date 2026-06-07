@@ -57,6 +57,7 @@ const COLLECTION_SCHEMA = Object.freeze({
   ],
   memoir_questions: [
     "openid",
+    "project_id",
     "session_id",
     "prompt",
     "source",
@@ -66,6 +67,8 @@ const COLLECTION_SCHEMA = Object.freeze({
   ],
   memoir_answers: [
     "openid",
+    "project_id",
+    "session_id",
     "question_id",
     "audio_file_id",
     "transcript_raw",
@@ -77,6 +80,9 @@ const COLLECTION_SCHEMA = Object.freeze({
   ],
   memoir_drafts: [
     "openid",
+    "project_id",
+    "session_id",
+    "question_id",
     "answer_id",
     "content_raw",
     "content_edited",
@@ -86,6 +92,7 @@ const COLLECTION_SCHEMA = Object.freeze({
   ],
   memoir_audio_files: [
     "openid",
+    "project_id",
     "file_id",
     "cloud_path",
     "mime_type",
@@ -250,6 +257,7 @@ const COLLECTION_SCHEMA = Object.freeze({
   ],
   memoir_output_versions: [
     "openid",
+    "project_id",
     "output_id",
     "version",
     "content",
