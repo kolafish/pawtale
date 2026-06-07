@@ -10,8 +10,6 @@ function normalizeDoc(doc) {
   };
 }
 
-const CLOUD_PAGE_SIZE = 100;
-
 function cleanFilters(filters = {}) {
   const entries = Object.entries(filters || {});
   const undefinedFilter = entries.find(([, value]) => value === undefined);
@@ -21,46 +19,7 @@ function cleanFilters(filters = {}) {
   return Object.fromEntries(entries);
 }
 
-function compareValues(left, right) {
-  if (left === right) {
-    return 0;
-  }
-  return left > right ? 1 : -1;
-}
-
-function isMissing(value) {
-  return value === undefined || value === null;
-}
-
-function sortRows(rows, orderBy = []) {
-  if (!orderBy.length) {
-    return rows;
-  }
-
-  return [...rows].sort((left, right) => {
-    for (const order of orderBy) {
-      const direction = order.direction === "desc" ? -1 : 1;
-      const leftValue = left[order.field];
-      const rightValue = right[order.field];
-      const leftMissing = isMissing(leftValue);
-      const rightMissing = isMissing(rightValue);
-      if (leftMissing && rightMissing) {
-        continue;
-      }
-      if (leftMissing) {
-        return 1;
-      }
-      if (rightMissing) {
-        return -1;
-      }
-      const result = compareValues(leftValue, rightValue);
-      if (result !== 0) {
-        return result * direction;
-      }
-    }
-    return 0;
-  });
-}
+const CLOUD_PAGE_SIZE = 100;
 
 class CloudStore {
   constructor(database) {
@@ -75,31 +34,34 @@ class CloudStore {
     const sanitizedFilters = cleanFilters(filters);
     const collection = this.collection(name);
     const hasFilters = Object.keys(sanitizedFilters).length > 0;
-    const baseQuery = hasFilters ? collection.where(sanitizedFilters) : collection;
-    let rows = [];
+    let query = hasFilters ? collection.where(sanitizedFilters) : collection;
+    for (const order of options.orderBy || []) {
+      query = query.orderBy(order.field, order.direction || "asc");
+    }
+
+    const requestedLimit = Number.isInteger(options.limit) && options.limit > 0
+      ? options.limit
+      : null;
+    const pageSize = requestedLimit ? Math.min(requestedLimit, CLOUD_PAGE_SIZE) : CLOUD_PAGE_SIZE;
+    const rows = [];
     let offset = 0;
 
     while (true) {
-      let query = baseQuery;
-      if (offset > 0 && typeof query.skip === "function") {
-        query = query.skip(offset);
+      let pageQuery = query;
+      if (offset > 0) {
+        pageQuery = pageQuery.skip(offset);
       }
-      if (typeof query.limit === "function") {
-        query = query.limit(CLOUD_PAGE_SIZE);
-      }
+      const result = await pageQuery.limit(pageSize).get();
+      const pageRows = result.data || [];
+      rows.push(...pageRows);
 
-      const result = await query.get();
-      const page = result.data || [];
-      rows = rows.concat(page.map(normalizeDoc));
-
-      if (page.length < CLOUD_PAGE_SIZE || typeof baseQuery.skip !== "function") {
+      if (pageRows.length < pageSize || (requestedLimit && rows.length >= requestedLimit)) {
         break;
       }
-      offset += CLOUD_PAGE_SIZE;
+      offset += pageRows.length;
     }
 
-    rows = sortRows(rows, options.orderBy || []);
-    return options.limit ? rows.slice(0, options.limit) : rows;
+    return rows.slice(0, requestedLimit || rows.length).map(normalizeDoc);
   }
 
   async findOne(name, filters = {}, options = {}) {

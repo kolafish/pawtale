@@ -230,6 +230,11 @@
   justify-content: center;
 }
 
+.mini-stat.action-stat {
+  border: 2rpx solid #f2d2bb;
+  background: #fff6eb;
+}
+
 .mini-value {
   color: #128577;
   font-size: 40rpx;

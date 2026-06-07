@@ -54,7 +54,7 @@
         <text class="mini-value">{{hasDashboardData ? completedCount : "..."}}</text>
         <text class="mini-label">已回答</text>
       </view>
-      <view class="mini-stat">
+      <view class="mini-stat action-stat" bindtap="openPendingReview" hover-class="tap-hover">
         <text class="mini-value">{{hasDashboardData ? pendingReviewCount : "..."}}</text>
         <text class="mini-label">待确认</text>
       </view>

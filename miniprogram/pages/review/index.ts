@@ -19,6 +19,7 @@ import {
   listOpenQuestions,
   listPeopleMemories,
   listPlaceMemories,
+  listQuestionCandidates,
   listThemeMemories,
   processSessionMemory,
   selectQuestionCandidate,
@@ -167,16 +168,23 @@ Page<ReviewData, {
   },
 
   async onLoad(query) {
-    const answerId = query?.answerId || readMemoirStore().answer?.id || "";
+    const routeSessionId = query?.sessionId || "";
+    const answerId = query?.answerId || (routeSessionId ? "" : readMemoirStore().answer?.id || "");
     this.setData({ answerId });
     const cachedSessionId = answerId ? this.hydrateFromStore(answerId) : "";
-    const sessionId = cachedSessionId || (answerId ? await this.loadStoryDetail(answerId) : "");
+    const sessionId = routeSessionId
+      || cachedSessionId
+      || (answerId ? await this.loadStoryDetail(answerId) : readMemoirStore().interview?.session.id || "");
     if (!sessionId) {
       this.setData({ error: "缺少访谈信息" });
       return;
     }
     this.setData({ sessionId });
-    await this.processAndLoad();
+    if (answerId) {
+      await this.processAndLoad();
+      return;
+    }
+    await this.loadReviewData();
   },
 
   hydrateFromStore(answerId) {
@@ -251,7 +259,7 @@ Page<ReviewData, {
         listPlaceMemories(),
         listThemeMemories(),
         listOpenQuestions(),
-        generateQuestionCandidates(),
+        listQuestionCandidates(),
         listMemoirOutputs(),
       ]);
       const coverage = await getCoverageMap();

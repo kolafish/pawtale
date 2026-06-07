@@ -43,7 +43,16 @@ node --test cloud-functions/memoir-api/test/*.test.js
 
 用微信开发者工具打开仓库根目录 `Pawtale/` 后，在云开发面板中选择环境 `cloud1`，上传并部署 `cloud-functions/memoir-api`。
 
-`memoir-api/config.json` 将云函数超时时间设置为 60 秒。修改配置或依赖后，需要重新选择 **上传并部署：云端安装依赖**。
+`memoir-api/config.json` 将云函数超时时间设置为 60 秒。修改配置或依赖后，需要重新选择 **上传并部署：云端安装依赖**。如果线上函数仍然显示 3 秒，需要在开发者工具或云开发控制台进入 `memoir-api` 函数配置，手动把超时时间改为 60 秒并保存。
+
+部署后必须确认线上 timeout 也是 60 秒：
+
+```bash
+/Applications/wechatwebdevtools.app/Contents/MacOS/cli cloud functions info \
+  --project /path/to/Pawtale \
+  --env cloud1-d6gmxffp0ea48aa1a \
+  --names memoir-api
+```
 
 云函数需要配置这些环境变量：
 

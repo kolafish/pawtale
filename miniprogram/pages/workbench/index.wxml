@@ -14,7 +14,7 @@
       <text class="stat-label">记忆卡片</text>
       <text class="stat-value">{{hasDashboardData ? weeklyStoryCount : "..."}}</text>
     </view>
-    <view class="stat-card warm" bindtap="openStories" hover-class="tap-hover">
+    <view class="stat-card warm" bindtap="openPendingReview" hover-class="tap-hover">
       <view class="stat-icon hourglass-icon"></view>
       <text class="stat-label">待确认</text>
       <text class="stat-value warm-text">{{hasDashboardData ? pendingReviewCount : "..."}}</text>
@@ -82,12 +82,15 @@
   <view class="memory-panel">
     <view class="story-list-header">
       <text>记忆卡片</text>
-      <text class="story-count">{{memoryCards.length}}</text>
+      <view class="header-action" bindtap="openPendingReview" hover-class="tap-hover">
+        <text class="story-count">{{memoryCards.length}}</text>
+        <text class="header-action-text">去确认</text>
+      </view>
     </view>
     <view wx:if="{{!memoryCards.length}}" class="empty-state">
       <text>还没有人物、事件、地点和主题记忆。</text>
     </view>
-    <view wx:for="{{memoryCards}}" wx:key="title" class="memory-card">
+    <view wx:for="{{memoryCards}}" wx:key="title" class="memory-card" bindtap="openPendingReview" hover-class="tap-hover">
       <view class="memoir-row">
         <text class="memory-status">{{item.typeLabel}}</text>
         <text class="memory-status">{{item.status === "confirmed" ? "已确认" : item.status === "rejected" ? "已拒绝" : "待确认"}}</text>
@@ -102,14 +105,18 @@
   <view class="memory-panel">
     <view class="story-list-header">
       <text>待确认与下一问</text>
-      <text class="story-count">{{openQuestions.length + candidates.length}}</text>
+      <view class="header-action" bindtap="openPendingReview" hover-class="tap-hover">
+        <text class="story-count">{{openQuestions.length + candidates.length}}</text>
+        <text class="header-action-text">去确认</text>
+      </view>
     </view>
     <view wx:if="{{!openQuestions.length && !candidates.length}}" class="empty-state">
       <text>暂无待确认问题或推荐下一问。</text>
     </view>
-    <view wx:for="{{openQuestions}}" wx:key="id" class="memory-card">
+    <view wx:for="{{openQuestions}}" wx:key="id" class="memory-card" bindtap="openPendingReview" hover-class="tap-hover">
       <text class="story-question">{{item.question}}</text>
       <text class="story-preview">{{item.reason || item.question_type}}</text>
+      <text class="candidate-action">去确认</text>
     </view>
     <view wx:for="{{candidates}}" wx:key="id" class="candidate-card" data-id="{{item.id}}" bindtap="askCandidate" hover-class="tap-hover">
       <text class="story-question">{{item.question}}</text>

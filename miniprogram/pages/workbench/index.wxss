@@ -240,6 +240,18 @@
   color: #ef6f2e;
 }
 
+.header-action {
+  display: flex;
+  align-items: center;
+  gap: 14rpx;
+}
+
+.header-action-text {
+  color: #128577;
+  font-size: 24rpx;
+  font-weight: 900;
+}
+
 .empty-state {
   margin-top: 26rpx;
   padding: 28rpx;

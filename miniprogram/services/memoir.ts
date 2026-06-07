@@ -20,7 +20,6 @@ import type {
   MemoirSessionSummary,
   MemoirStoryList,
   MemoirStoryDetail,
-  MemoirSummary,
   MemoirThemeMemory,
   Project,
 } from "../domain/memoir";
@@ -51,10 +50,6 @@ export function processSessionMemory(sessionId: string): Promise<MemoirSessionPr
 
 export function getSessionSummary(sessionId: string): Promise<MemoirSessionSummary | null> {
   return request<MemoirSessionSummary | null>(`/api/mobile/memoir/sessions/${sessionId}/summary`);
-}
-
-export function getMemoirSummary(): Promise<MemoirSummary> {
-  return request<MemoirSummary>("/api/mobile/memoir/summary");
 }
 
 export function getMemoirStories(): Promise<MemoirStoryList> {
