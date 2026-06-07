@@ -57,6 +57,10 @@ function draftAgeMs(updatedAt: string): number {
   return Number.isNaN(timestamp) ? Number.POSITIVE_INFINITY : Date.now() - timestamp;
 }
 
+function expiredDraft(draft?: TimedDraft): boolean {
+  return Boolean(draft && draftAgeMs(draft.updated_at) > INPUT_DRAFT_MAX_AGE_MS);
+}
+
 function pruneDrafts<T extends TimedDraft>(drafts: Record<string, T>): Record<string, T> {
   return Object.fromEntries(
     Object.entries(drafts)
@@ -92,7 +96,14 @@ function editorKey(answerId: string, draftId: string): string {
 }
 
 export function readMemoirQuestionInputDraft(questionId: string): MemoirQuestionInputDraft | undefined {
-  return readStore().questions[questionId];
+  const store = readStore();
+  const draft = store.questions[questionId];
+  if (expiredDraft(draft)) {
+    delete store.questions[questionId];
+    persistStore(store);
+    return undefined;
+  }
+  return draft;
 }
 
 export function writeMemoirQuestionInputDraft(input: Omit<MemoirQuestionInputDraft, "updated_at">): void {
@@ -116,7 +127,14 @@ export function clearMemoirQuestionInputDraft(questionId: string): void {
 }
 
 export function readMemoirQaDetailInputDraft(answerId: string): MemoirQaDetailInputDraft | undefined {
-  return readStore().qa_details[answerId];
+  const store = readStore();
+  const draft = store.qa_details[answerId];
+  if (expiredDraft(draft)) {
+    delete store.qa_details[answerId];
+    persistStore(store);
+    return undefined;
+  }
+  return draft;
 }
 
 export function writeMemoirQaDetailInputDraft(input: Omit<MemoirQaDetailInputDraft, "updated_at">): void {
@@ -135,7 +153,15 @@ export function clearMemoirQaDetailInputDraft(answerId: string): void {
 }
 
 export function readMemoirEditorInputDraft(answerId: string, draftId: string): MemoirEditorInputDraft | undefined {
-  return readStore().editors[editorKey(answerId, draftId)];
+  const store = readStore();
+  const key = editorKey(answerId, draftId);
+  const draft = store.editors[key];
+  if (expiredDraft(draft)) {
+    delete store.editors[key];
+    persistStore(store);
+    return undefined;
+  }
+  return draft;
 }
 
 export function writeMemoirEditorInputDraft(input: Omit<MemoirEditorInputDraft, "updated_at">): void {

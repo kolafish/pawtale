@@ -287,6 +287,15 @@ async def test_mobile_memoir_text_answer_links_uploaded_audio_file(
     assert stored.audio_file_id == audio_id
     assert stored.duration_seconds == 7
 
+    stories_response = await client.get("/api/mobile/memoir/stories")
+    assert stories_response.status_code == 200
+    story = stories_response.json()["stories"][0]
+    assert story["audio_file_id"] == audio_id
+
+    detail_response = await client.get(f"/api/mobile/memoir/stories/{answer['id']}")
+    assert detail_response.status_code == 200
+    assert detail_response.json()["story"]["audio_file_id"] == audio_id
+
 
 async def test_mobile_memoir_skip_question(client):
     session_response = await client.get("/api/mobile/memoir/sessions/current")

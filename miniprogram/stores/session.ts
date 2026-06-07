@@ -145,8 +145,9 @@ export function ensureMemoirStoreIdentity(identity: MemoirCacheIdentity): Memoir
     return replaceMemoirStore({ cache_identity: identity });
   }
   const nextIdentity = {
-    ...current.cache_identity,
-    ...identity,
+    user_id: identity.user_id,
+    storage_owner_id: identity.storage_owner_id,
+    project_id: identity.project_id ?? current.cache_identity?.project_id,
   };
   if (
     current.cache_identity?.user_id === nextIdentity.user_id
