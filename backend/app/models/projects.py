@@ -32,6 +32,45 @@ class Project(Base):
     memoir_sessions: Mapped[list["MemoirSession"]] = relationship(
         "MemoirSession", back_populates="project", cascade="all, delete-orphan",
     )
+    memoir_source_artifacts: Mapped[list["MemoirSourceArtifact"]] = relationship(
+        "MemoirSourceArtifact", back_populates="project", cascade="all, delete-orphan",
+    )
+    memoir_person_memories: Mapped[list["MemoirPersonMemory"]] = relationship(
+        "MemoirPersonMemory", back_populates="project", cascade="all, delete-orphan",
+    )
+    memoir_event_memories: Mapped[list["MemoirEventMemory"]] = relationship(
+        "MemoirEventMemory", back_populates="project", cascade="all, delete-orphan",
+    )
+    memoir_place_memories: Mapped[list["MemoirPlaceMemory"]] = relationship(
+        "MemoirPlaceMemory", back_populates="project", cascade="all, delete-orphan",
+    )
+    memoir_theme_memories: Mapped[list["MemoirThemeMemory"]] = relationship(
+        "MemoirThemeMemory", back_populates="project", cascade="all, delete-orphan",
+    )
+    memoir_memory_links: Mapped[list["MemoirMemoryLink"]] = relationship(
+        "MemoirMemoryLink", back_populates="project", cascade="all, delete-orphan",
+    )
+    memoir_memory_evidence: Mapped[list["MemoirMemoryEvidence"]] = relationship(
+        "MemoirMemoryEvidence", back_populates="project", cascade="all, delete-orphan",
+    )
+    memoir_open_questions: Mapped[list["MemoirOpenQuestion"]] = relationship(
+        "MemoirOpenQuestion", back_populates="project", cascade="all, delete-orphan",
+    )
+    memoir_coverage_topics: Mapped[list["MemoirCoverageTopic"]] = relationship(
+        "MemoirCoverageTopic", back_populates="project", cascade="all, delete-orphan",
+    )
+    memoir_coverage_snapshots: Mapped[list["MemoirCoverageSnapshot"]] = relationship(
+        "MemoirCoverageSnapshot", back_populates="project", cascade="all, delete-orphan",
+    )
+    memoir_question_candidates: Mapped[list["MemoirQuestionCandidate"]] = relationship(
+        "MemoirQuestionCandidate", back_populates="project", cascade="all, delete-orphan",
+    )
+    memoir_session_summaries: Mapped[list["MemoirSessionSummary"]] = relationship(
+        "MemoirSessionSummary", back_populates="project", cascade="all, delete-orphan",
+    )
+    memoir_outputs: Mapped[list["MemoirOutput"]] = relationship(
+        "MemoirOutput", back_populates="project", cascade="all, delete-orphan",
+    )
 
 
 class DocumentGroup(Base):
