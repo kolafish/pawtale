@@ -145,6 +145,8 @@ Layout
 
 回忆录微信小程序的产品边界、数据组织、页面设计和实施顺序见 [docs/MEMOIR_MINIPROGRAM_PRODUCT.md](docs/MEMOIR_MINIPROGRAM_PRODUCT.md)。小程序上线链路优先采用微信云函数、云数据库和云存储，不使用云托管作为 MVP 默认方案。
 
+回忆录长期会从“固定问题 + 回答整理”演进为记忆优先的聊天式人生采访系统。长期后台架构、结构化多层级记忆、多 agent 分工和证据链设计见 [docs/MEMOIR_MEMORY_ARCHITECTURE.md](docs/MEMOIR_MEMORY_ARCHITECTURE.md)。第一期 Memory-first Interview 的产品形态、数据结构、服务拆分和 PR 计划见 [docs/MEMOIR_MEMORY_FIRST_V1_PLAN.md](docs/MEMOIR_MEMORY_FIRST_V1_PLAN.md)。
+
 ## 路线图
 
 ### 当前阶段
@@ -158,11 +160,14 @@ Layout
 - 继续拆小前端工作台组件
 - 完善产品类型下的专属能力
 - 为微信小程序抽取可复用 API 和状态边界
+- 建立回忆录原始材料、结构化记忆、证据链和覆盖度地图
+- 将回忆录下一问从固定题库升级为记忆缺口和覆盖度驱动
 - 增加前端组件和核心 hook 的测试覆盖
 
 ### 更后续
 
 - 回忆录移动端 MVP
+- 回忆录 multi-agent 访谈、记忆整理、问题规划和写作层
 - 公众号专属写作流
 - 小说长篇一致性工具
 - 更多导出格式和发布链路

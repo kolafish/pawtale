@@ -107,6 +107,8 @@ cd backend && venv/bin/python -m pytest -q
 - [PRODUCT.md](./PRODUCT.md)
 - [TECH.md](./TECH.md)
 - [docs/MEMOIR_MINIPROGRAM_PRODUCT.md](./docs/MEMOIR_MINIPROGRAM_PRODUCT.md)
+- [docs/MEMOIR_MEMORY_ARCHITECTURE.md](./docs/MEMOIR_MEMORY_ARCHITECTURE.md)
+- [docs/MEMOIR_MEMORY_FIRST_V1_PLAN.md](./docs/MEMOIR_MEMORY_FIRST_V1_PLAN.md)
 - [miniprogram/README.md](./miniprogram/README.md)
 - [backend/README.md](./backend/README.md)
 - [frontend/README.md](./frontend/README.md)

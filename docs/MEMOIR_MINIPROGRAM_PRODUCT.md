@@ -8,6 +8,8 @@
 
 小程序不提供小说入口，不提供公众号入口，也不承载桌面端的章节树、资料库、Inspector、多模型对比等复杂能力。
 
+长期产品形态不是把小程序做成聊天机器人，而是让小程序成为回忆录的低门槛采集端。后台会演进为记忆优先的聊天式人生采访系统：原始材料、转写版本、结构化人物/事件/地点/主题记忆、证据链、覆盖度地图、问题规划和写作产物分层处理。完整长期架构见 [MEMOIR_MEMORY_ARCHITECTURE.md](MEMOIR_MEMORY_ARCHITECTURE.md)，第一期落地计划见 [MEMOIR_MEMORY_FIRST_V1_PLAN.md](MEMOIR_MEMORY_FIRST_V1_PLAN.md)。
+
 ## 产品边界
 
 ### 小程序负责
