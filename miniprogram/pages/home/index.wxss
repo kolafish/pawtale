@@ -55,6 +55,26 @@
 
 .question-card {
   padding: 40rpx 36rpx;
+  position: relative;
+  overflow: hidden;
+  transform-origin: center;
+  transition: transform 180ms ease, opacity 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+  will-change: transform;
+}
+
+.question-card-dragging {
+  transition: none;
+}
+
+.question-card-ready {
+  border-color: #20a090;
+  box-shadow: 0 22rpx 54rpx rgba(18, 133, 119, 0.18);
+}
+
+.question-card-leaving {
+  opacity: 0;
+  pointer-events: none;
+  transition: transform 220ms ease, opacity 160ms ease;
 }
 
 .card-label {
