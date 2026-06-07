@@ -22,6 +22,7 @@ function errorResponse(error) {
     });
   }
 
+  console.error("[memoir-api] unhandled error", error);
   return jsonResponse(500, {
     detail: "云函数内部错误",
   });
