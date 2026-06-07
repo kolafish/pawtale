@@ -83,7 +83,24 @@ test("CloudStore.findMany avoids empty where and sorts in memory", async () => {
   assert.deepEqual(db.collection("things").whereCalls, []);
 });
 
-test("CloudStore.findMany sanitizes filters and normalizes ids", async () => {
+test("CloudStore.findMany keeps missing sort values last", async () => {
+  const db = fakeDatabase({
+    things: [
+      { _id: "row_missing", openid: "openid_a" },
+      { _id: "row_old", openid: "openid_a", updated_at: "2026-01-01T00:00:00.000Z" },
+      { _id: "row_new", openid: "openid_a", updated_at: "2026-01-02T00:00:00.000Z" },
+    ],
+  });
+  const store = new CloudStore(db);
+
+  const row = await store.findOne("things", { openid: "openid_a" }, {
+    orderBy: [{ field: "updated_at", direction: "desc" }],
+  });
+
+  assert.equal(row.id, "row_new");
+});
+
+test("CloudStore.findMany filters and normalizes ids", async () => {
   const db = fakeDatabase({
     things: [
       { _id: "row_a", openid: "openid_a", created_at: "2026-01-02T00:00:00.000Z" },
@@ -95,11 +112,25 @@ test("CloudStore.findMany sanitizes filters and normalizes ids", async () => {
 
   const rows = await store.findMany("things", {
     openid: "openid_a",
-    ignored: undefined,
   }, {
     orderBy: [{ field: "created_at", direction: "asc" }],
   });
 
   assert.deepEqual(db.collection("things").whereCalls, [{ openid: "openid_a" }]);
   assert.deepEqual(rows.map((row) => row.id), ["row_c", "row_a"]);
+});
+
+test("CloudStore.findMany rejects undefined filter values", async () => {
+  const db = fakeDatabase({
+    things: [
+      { _id: "row_a", openid: "openid_a" },
+    ],
+  });
+  const store = new CloudStore(db);
+
+  await assert.rejects(
+    () => store.findMany("things", { openid: "openid_a", _id: undefined }),
+    /undefined filter value for "_id"/,
+  );
+  assert.deepEqual(db.collection("things").whereCalls, []);
 });

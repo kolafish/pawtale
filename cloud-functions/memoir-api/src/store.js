@@ -13,22 +13,23 @@ function normalizeDoc(doc) {
 const CLOUD_PAGE_SIZE = 100;
 
 function cleanFilters(filters = {}) {
-  return Object.fromEntries(
-    Object.entries(filters || {}).filter(([, value]) => value !== undefined),
-  );
+  const entries = Object.entries(filters || {});
+  const undefinedFilter = entries.find(([, value]) => value === undefined);
+  if (undefinedFilter) {
+    throw new Error(`CloudStore received undefined filter value for "${undefinedFilter[0]}"`);
+  }
+  return Object.fromEntries(entries);
 }
 
 function compareValues(left, right) {
   if (left === right) {
     return 0;
   }
-  if (left === undefined || left === null) {
-    return 1;
-  }
-  if (right === undefined || right === null) {
-    return -1;
-  }
   return left > right ? 1 : -1;
+}
+
+function isMissing(value) {
+  return value === undefined || value === null;
 }
 
 function sortRows(rows, orderBy = []) {
@@ -39,7 +40,20 @@ function sortRows(rows, orderBy = []) {
   return [...rows].sort((left, right) => {
     for (const order of orderBy) {
       const direction = order.direction === "desc" ? -1 : 1;
-      const result = compareValues(left[order.field], right[order.field]);
+      const leftValue = left[order.field];
+      const rightValue = right[order.field];
+      const leftMissing = isMissing(leftValue);
+      const rightMissing = isMissing(rightValue);
+      if (leftMissing && rightMissing) {
+        continue;
+      }
+      if (leftMissing) {
+        return 1;
+      }
+      if (rightMissing) {
+        return -1;
+      }
+      const result = compareValues(leftValue, rightValue);
       if (result !== 0) {
         return result * direction;
       }
