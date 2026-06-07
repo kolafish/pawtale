@@ -3,61 +3,55 @@
     <view class="back-hit" bindtap="backWorkbench">
       <text class="back-mark">‹</text>
     </view>
-    <text class="page-title">故事卡</text>
+    <text class="page-title">写作片段</text>
   </view>
 
   <view wx:if="{{error}}" class="error">{{error}}</view>
 
   <view class="summary-panel">
     <view class="summary-row">
-      <view class="summary-item {{activeStatus === 'all' ? 'selected' : ''}}" bindtap="selectAll" hover-class="tap-hover">
-        <text class="summary-value">{{hasDashboardData ? totalStoryCount : "..."}}</text>
-        <text class="summary-label">全部故事</text>
+      <view class="summary-item {{activeFilter === 'all' ? 'selected' : ''}}" bindtap="selectAll" hover-class="tap-hover">
+        <text class="summary-value">{{hasDashboardData ? outputCount : "..."}}</text>
+        <text class="summary-label">全部片段</text>
       </view>
-      <view class="summary-item warm {{activeStatus === 'pending' ? 'selected' : ''}}" bindtap="selectPending" hover-class="tap-hover">
-        <text class="summary-value warm-text">{{hasDashboardData ? pendingReviewCount : "..."}}</text>
+      <view class="summary-item warm {{activeFilter === 'story_fragment' ? 'selected' : ''}}" bindtap="selectFragments" hover-class="tap-hover">
+        <text class="summary-value warm-text">{{hasDashboardData ? storyFragmentCount : "..."}}</text>
+        <text class="summary-label">故事片段</text>
+      </view>
+      <view class="summary-item">
+        <text class="summary-value">{{hasDashboardData ? pendingReviewCount : "..."}}</text>
         <text class="summary-label">待确认</text>
-      </view>
-      <view class="summary-item {{activeStatus === 'accepted' ? 'selected' : ''}}" bindtap="selectAccepted" hover-class="tap-hover">
-        <text class="summary-value">{{hasDashboardData ? confirmedStoryCount : "..."}}</text>
-        <text class="summary-label">已成章</text>
       </view>
     </view>
     <view class="progress-track">
       <view class="progress-fill" style="width: {{hasDashboardData ? progressPercent : 0}}%;"></view>
     </view>
-    <view wx:if="{{hasDashboardData}}" class="progress-value">{{progressPercent}}%</view>
+    <view wx:if="{{hasDashboardData}}" class="progress-value">覆盖度 {{progressPercent}}%</view>
     <view wx:else class="progress-value">加载中</view>
   </view>
 
   <view class="story-list">
     <view class="story-list-header">
-      <text>{{activeStatus === "pending" ? "待确认" : activeStatus === "accepted" ? "已成章" : "全部故事"}}</text>
-      <text class="story-count">{{hasStoryData ? visibleStories.length : "..."}}</text>
+      <text>{{activeFilter === "story_fragment" ? "故事片段" : "全部片段"}}</text>
+      <text class="story-count">{{hasOutputData ? visibleOutputs.length : "..."}}</text>
     </view>
-    <view wx:if="{{!hasStoryData && loading || !hasStoryData && refreshing}}" class="empty-state">
-      <text>正在加载故事卡</text>
+    <view wx:if="{{!hasOutputData && loading || !hasOutputData && refreshing}}" class="empty-state">
+      <text>正在加载写作片段</text>
     </view>
-    <view wx:elif="{{hasStoryData && !visibleStories.length}}" class="empty-state">
-      <text>{{activeStatus === "pending" ? "现在没有待确认的故事。" : activeStatus === "accepted" ? "还没有已成章的故事。" : "还没有故事卡。先回答一个问题，这里会自动整理每段回忆。"}}</text>
-      <view wx:if="{{activeStatus === 'all'}}" class="primary-action small-action" bindtap="continueInterview">
+    <view wx:elif="{{hasOutputData && !visibleOutputs.length}}" class="empty-state">
+      <text>{{activeFilter === "story_fragment" ? "还没有故事片段。" : "还没有写作片段。先回答一个问题，系统会根据结构化记忆整理到这里。"}}</text>
+      <view wx:if="{{activeFilter === 'all'}}" class="primary-action small-action" bindtap="continueInterview">
         <image class="action-art-icon" src="/assets/memoir-microphone.png" mode="aspectFit" />
         <text class="primary-action-text">开始讲述</text>
       </view>
     </view>
-    <view
-      wx:for="{{visibleStories}}"
-      wx:key="id"
-      class="story-card"
-      data-answer-id="{{item.answer_id}}"
-      bindtap="openStory"
-      hover-class="tap-hover"
-    >
-      <text class="story-question">{{item.question_prompt}}</text>
-      <text class="story-preview">{{item.draft_preview || item.answer_preview}}</text>
+    <view wx:for="{{visibleOutputs}}" wx:key="id" class="story-card">
+      <text class="story-question">{{item.title}}</text>
+      <text class="story-preview">{{item.content_preview || "暂无片段预览"}}</text>
       <view class="story-meta">
-        <text>{{item.draft_status === "accepted" ? "已成章" : item.draft_status === "draft" ? "待确认" : "已回答"}}</text>
-        <text class="story-action">{{item.draft_status === "draft" ? "去确认" : "查看"}}</text>
+        <text>{{item.output_type === "story_fragment" ? "故事片段" : item.output_type}}</text>
+        <text wx:if="{{item.version_count}}" class="story-action">第 {{item.latest_version}} 版</text>
+        <text wx:else class="story-action">草稿</text>
       </view>
     </view>
   </view>

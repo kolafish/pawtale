@@ -4,6 +4,7 @@ import type {
   MemoirDraft,
   MemoirEventMemory,
   MemoirInterviewState,
+  MemoirMemoryStats,
   MemoirOpenQuestion,
   MemoirOutput,
   MemoirPersonMemory,
@@ -35,6 +36,7 @@ export interface MemoirSessionStore {
   coverage?: MemoirCoverageItem[];
   candidates?: MemoirQuestionCandidate[];
   outputs?: MemoirOutput[];
+  memoryStats?: MemoirMemoryStats;
   stories?: MemoirStoryCard[];
   cached_at?: string;
 }
@@ -67,6 +69,7 @@ export function clearMemoirDraft(): void {
     coverage: current.coverage,
     candidates: current.candidates,
     outputs: current.outputs,
+    memoryStats: current.memoryStats,
     stories: current.stories,
     cached_at: current.cached_at,
   });

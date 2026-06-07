@@ -34,7 +34,7 @@
       <view class="clip-line short"></view>
     </view>
     <view class="weekly-copy">
-      <text class="weekly-title">本周已留下 <text class="accent">{{hasDashboardData ? weeklyStoryCount : "..."}}</text> 个故事</text>
+      <text class="weekly-title">已整理 <text class="accent">{{hasDashboardData ? weeklyStoryCount : "..."}}</text> 个片段</text>
       <text class="weekly-subtitle">还有 {{hasDashboardData ? pendingCount : "..."}} 个问题可以继续回答</text>
     </view>
     <text class="chevron">›</text>
@@ -60,14 +60,14 @@
       </view>
       <view class="mini-stat">
         <text class="mini-value">{{hasDashboardData ? confirmedStoryCount : "..."}}</text>
-        <text class="mini-label">已成章</text>
+        <text class="mini-label">已确认</text>
       </view>
     </view>
   </view>
 
-  <view class="latest-card" wx:if="{{latestDraftPreview}}">
+  <view class="latest-card" wx:if="{{latestOutputPreview}}">
     <text class="latest-label">最近整理</text>
-    <text class="latest-text">{{latestDraftPreview}}</text>
+    <text class="latest-text">{{latestOutputPreview}}</text>
   </view>
 
   <view class="bottom-nav">
