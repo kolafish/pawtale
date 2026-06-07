@@ -1,60 +1,50 @@
-import type { MemoirStoryCard, MemoirSummary } from "../../domain/memoir";
+import type { MemoirMemoryStats, MemoirOutput } from "../../domain/memoir";
 import { loadMemoirDashboard } from "../../services/memoir-dashboard";
 import {
   readMemoirDashboardSnapshot,
 } from "../../stores/memoir-cache";
 
-type StoryStatusFilter = "all" | "pending" | "accepted";
-
-interface StoryTapEvent {
-  currentTarget: {
-    dataset: {
-      answerId?: string;
-    };
-  };
-}
+type OutputFilter = "all" | "story_fragment";
 
 interface StoriesData {
   loading: boolean;
   refreshing: boolean;
   hasDashboardData: boolean;
-  hasStoryData: boolean;
+  hasOutputData: boolean;
   error: string;
-  totalStoryCount: number;
-  weeklyStoryCount: number;
+  outputCount: number;
+  storyFragmentCount: number;
   pendingReviewCount: number;
-  confirmedStoryCount: number;
   progressPercent: number;
-  activeStatus: StoryStatusFilter;
-  stories: MemoirStoryCard[];
-  visibleStories: MemoirStoryCard[];
+  activeFilter: OutputFilter;
+  outputs: MemoirOutput[];
+  visibleOutputs: MemoirOutput[];
 }
 
-function statusFromQuery(status?: string): StoryStatusFilter {
-  return status === "pending" || status === "accepted" ? status : "all";
+function filterFromQuery(status?: string): OutputFilter {
+  return status === "story_fragment" || status === "fragments" ? "story_fragment" : "all";
 }
 
-function filterStories(stories: MemoirStoryCard[], status: StoryStatusFilter): MemoirStoryCard[] {
-  if (status === "pending") {
-    return stories.filter((story) => story.draft_status === "draft");
+function filterOutputs(outputs: MemoirOutput[], filter: OutputFilter): MemoirOutput[] {
+  if (filter === "story_fragment") {
+    return outputs.filter((output) => output.output_type === "story_fragment");
   }
-  if (status === "accepted") {
-    return stories.filter((story) => story.draft_status === "accepted");
-  }
-  return stories;
+  return outputs;
+}
+
+function pendingReviewCount(stats?: MemoirMemoryStats): number {
+  return stats ? stats.draft_memory_count + stats.open_question_count : 0;
 }
 
 Page<StoriesData, {
   onLoad(query?: Record<string, string | undefined>): Promise<void>;
   onShow(): void;
   hydrateFromCache(): void;
-  applySnapshot(summary: MemoirSummary, stories: MemoirStoryCard[], hasStoryData: boolean): void;
+  applySnapshot(outputs: MemoirOutput[], memoryStats?: MemoirMemoryStats): void;
   loadStoriesPage(): Promise<void>;
   selectAll(): void;
-  selectPending(): void;
-  selectAccepted(): void;
-  setActiveStatus(status: StoryStatusFilter): void;
-  openStory(event: StoryTapEvent): void;
+  selectFragments(): void;
+  setActiveFilter(filter: OutputFilter): void;
   continueInterview(): void;
   backWorkbench(): void;
   openHome(): void;
@@ -66,20 +56,19 @@ Page<StoriesData, {
     loading: false,
     refreshing: false,
     hasDashboardData: false,
-    hasStoryData: false,
+    hasOutputData: false,
     error: "",
-    totalStoryCount: 0,
-    weeklyStoryCount: 0,
+    outputCount: 0,
+    storyFragmentCount: 0,
     pendingReviewCount: 0,
-    confirmedStoryCount: 0,
     progressPercent: 0,
-    activeStatus: "all",
-    stories: [],
-    visibleStories: [],
+    activeFilter: "all",
+    outputs: [],
+    visibleOutputs: [],
   },
 
   async onLoad(query) {
-    this.setData({ activeStatus: statusFromQuery(query?.status) });
+    this.setData({ activeFilter: filterFromQuery(query?.status) });
     this.hydrateFromCache();
     await this.loadStoriesPage();
   },
@@ -93,23 +82,22 @@ Page<StoriesData, {
 
   hydrateFromCache() {
     const snapshot = readMemoirDashboardSnapshot();
-    if (!snapshot.summary) {
+    if (!snapshot.interview) {
       return;
     }
-    this.applySnapshot(snapshot.summary, snapshot.stories, snapshot.hasStories);
+    this.applySnapshot(snapshot.outputs, snapshot.memoryStats);
   },
 
-  applySnapshot(summary, stories, hasStoryData) {
+  applySnapshot(outputs, memoryStats) {
     this.setData({
-      totalStoryCount: summary.total_story_count,
-      weeklyStoryCount: summary.weekly_story_count,
-      pendingReviewCount: summary.pending_review_count,
-      confirmedStoryCount: summary.confirmed_story_count,
-      progressPercent: summary.progress_percent,
-      stories,
-      visibleStories: filterStories(stories, this.data.activeStatus),
+      outputCount: memoryStats?.output_count ?? outputs.length,
+      storyFragmentCount: outputs.filter((output) => output.output_type === "story_fragment").length,
+      pendingReviewCount: pendingReviewCount(memoryStats),
+      progressPercent: memoryStats?.coverage_average ?? 0,
+      outputs,
+      visibleOutputs: filterOutputs(outputs, this.data.activeFilter),
       hasDashboardData: true,
-      hasStoryData,
+      hasOutputData: true,
     });
   },
 
@@ -120,40 +108,28 @@ Page<StoriesData, {
     const loading = !this.data.hasDashboardData;
     this.setData({ loading, refreshing: true, error: "" });
     try {
-      const { summary, stories } = await loadMemoirDashboard({ includeStories: true });
-      this.applySnapshot(summary, stories, true);
+      const { outputs, memoryStats } = await loadMemoirDashboard({ includeMemory: true });
+      this.applySnapshot(outputs, memoryStats);
     } catch (error) {
-      this.setData({ error: error instanceof Error ? error.message : "故事卡加载失败" });
+      this.setData({ error: error instanceof Error ? error.message : "写作片段加载失败" });
     } finally {
       this.setData({ loading: false, refreshing: false });
     }
   },
 
   selectAll() {
-    this.setActiveStatus("all");
+    this.setActiveFilter("all");
   },
 
-  selectPending() {
-    this.setActiveStatus("pending");
+  selectFragments() {
+    this.setActiveFilter("story_fragment");
   },
 
-  selectAccepted() {
-    this.setActiveStatus("accepted");
-  },
-
-  setActiveStatus(status) {
+  setActiveFilter(filter) {
     this.setData({
-      activeStatus: status,
-      visibleStories: filterStories(this.data.stories, status),
+      activeFilter: filter,
+      visibleOutputs: filterOutputs(this.data.outputs, filter),
     });
-  },
-
-  openStory(event) {
-    const answerId = event.currentTarget.dataset.answerId;
-    if (!answerId) {
-      return;
-    }
-    wx.navigateTo({ url: `/pages/review/index?answerId=${answerId}&returnTo=stories` });
   },
 
   continueInterview() {

@@ -2,12 +2,13 @@ import type {
   MemoirCoverageItem,
   MemoirEventMemory,
   MemoirInterviewState,
+  MemoirMemoryStats,
   MemoirMemoryStatus,
   MemoirOpenQuestion,
+  MemoirOutput,
   MemoirPersonMemory,
   MemoirPlaceMemory,
   MemoirQuestionCandidate,
-  MemoirStoryCard,
   MemoirSummary,
   MemoirThemeMemory,
 } from "../../domain/memoir";
@@ -20,7 +21,7 @@ interface WorkbenchData {
   loading: boolean;
   refreshing: boolean;
   hasDashboardData: boolean;
-  hasStoryData: boolean;
+  hasOutputData: boolean;
   error: string;
   weeklyStoryCount: number;
   pendingReviewCount: number;
@@ -32,7 +33,7 @@ interface WorkbenchData {
   memoryCards: Array<{ title: string; detail: string; status: MemoirMemoryStatus }>;
   openQuestions: MemoirOpenQuestion[];
   candidates: MemoirQuestionCandidate[];
-  stories: MemoirStoryCard[];
+  outputs: MemoirOutput[];
 }
 
 function buildMemoryCards(
@@ -72,8 +73,6 @@ Page<WorkbenchData, {
   applySnapshot(
     interview: MemoirInterviewState,
     summary: MemoirSummary,
-    stories: MemoirStoryCard[],
-    hasStoryData: boolean,
     memory?: {
       summaryText?: string;
       coverage: MemoirCoverageItem[];
@@ -83,6 +82,8 @@ Page<WorkbenchData, {
       themes: MemoirThemeMemory[];
       openQuestions: MemoirOpenQuestion[];
       candidates: MemoirQuestionCandidate[];
+      outputs: MemoirOutput[];
+      memoryStats?: MemoirMemoryStats;
     },
   ): void;
   loadWorkbench(): Promise<void>;
@@ -98,7 +99,7 @@ Page<WorkbenchData, {
     loading: false,
     refreshing: false,
     hasDashboardData: false,
-    hasStoryData: false,
+    hasOutputData: false,
     error: "",
     weeklyStoryCount: 0,
     pendingReviewCount: 0,
@@ -110,7 +111,7 @@ Page<WorkbenchData, {
     memoryCards: [],
     openQuestions: [],
     candidates: [],
-    stories: [],
+    outputs: [],
   },
 
   async onLoad() {
@@ -130,7 +131,7 @@ Page<WorkbenchData, {
     if (!snapshot.interview || !snapshot.summary) {
       return;
     }
-    this.applySnapshot(snapshot.interview, snapshot.summary, snapshot.stories, snapshot.hasStories, {
+    this.applySnapshot(snapshot.interview, snapshot.summary, {
       summaryText: snapshot.sessionSummary?.summary || "",
       coverage: snapshot.coverage,
       people: snapshot.people,
@@ -139,24 +140,30 @@ Page<WorkbenchData, {
       themes: snapshot.themes,
       openQuestions: snapshot.openQuestions,
       candidates: snapshot.candidates,
+      outputs: snapshot.outputs,
+      memoryStats: snapshot.memoryStats,
     });
   },
 
-  applySnapshot(interview, summary, stories, hasStoryData, memory) {
+  applySnapshot(interview, summary, memory) {
+    const memoryStats = memory?.memoryStats;
+    const pendingReviewCount = memoryStats
+      ? memoryStats.draft_memory_count + memoryStats.open_question_count
+      : summary.pending_review_count;
     this.setData({
-      weeklyStoryCount: summary.weekly_story_count,
-      pendingReviewCount: summary.pending_review_count,
-      confirmedStoryCount: summary.confirmed_story_count,
-      progressPercent: summary.progress_percent,
+      weeklyStoryCount: memoryStats?.total_memory_count ?? summary.weekly_story_count,
+      pendingReviewCount,
+      confirmedStoryCount: memoryStats?.output_count ?? summary.confirmed_story_count,
+      progressPercent: memoryStats?.coverage_average ?? summary.progress_percent,
       pendingCount: interview.pending_question_count,
       summaryText: memory?.summaryText || this.data.summaryText,
       coverage: memory?.coverage || this.data.coverage,
       memoryCards: memory ? buildMemoryCards(memory.people, memory.events, memory.places, memory.themes) : this.data.memoryCards,
       openQuestions: (memory?.openQuestions || this.data.openQuestions).filter((item) => item.status === "open"),
       candidates: memory?.candidates || this.data.candidates,
-      stories,
+      outputs: memory?.outputs || this.data.outputs,
       hasDashboardData: true,
-      hasStoryData,
+      hasOutputData: true,
     });
   },
 
@@ -170,7 +177,6 @@ Page<WorkbenchData, {
       const {
         interview,
         summary,
-        stories,
         sessionSummary,
         people,
         events,
@@ -179,8 +185,10 @@ Page<WorkbenchData, {
         openQuestions,
         coverage,
         candidates,
-      } = await loadMemoirDashboard({ includeStories: true, includeMemory: true });
-      this.applySnapshot(interview, summary, stories, true, {
+        outputs,
+        memoryStats,
+      } = await loadMemoirDashboard({ includeMemory: true });
+      this.applySnapshot(interview, summary, {
         summaryText: sessionSummary?.summary || "",
         coverage,
         people,
@@ -189,6 +197,8 @@ Page<WorkbenchData, {
         themes,
         openQuestions,
         candidates,
+        outputs,
+        memoryStats,
       });
     } catch (error) {
       this.setData({ error: error instanceof Error ? error.message : "工作台加载失败" });

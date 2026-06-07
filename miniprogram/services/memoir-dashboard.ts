@@ -2,32 +2,21 @@ import type {
   MemoirCoverageItem,
   MemoirEventMemory,
   MemoirInterviewState,
+  MemoirMemoryStats,
   MemoirOpenQuestion,
   MemoirOutput,
   MemoirPersonMemory,
   MemoirPlaceMemory,
   MemoirQuestionCandidate,
   MemoirSessionSummary,
-  MemoirStoryCard,
   MemoirSummary,
   MemoirThemeMemory,
   Project,
 } from "../domain/memoir";
 import { ensureLocalDevSession } from "./auth";
 import {
-  getCoverageMap,
-  getCurrentSession,
-  getMemoirProject,
-  getMemoirStories,
+  getMemoirDashboard,
   getMemoirSummary,
-  getSessionSummary,
-  listEventMemories,
-  listMemoirOutputs,
-  listOpenQuestions,
-  listPeopleMemories,
-  listPlaceMemories,
-  listQuestionCandidates,
-  listThemeMemories,
 } from "./memoir";
 import {
   fallbackSummary,
@@ -37,7 +26,6 @@ import {
 
 export interface MemoirDashboardLoadOptions {
   includeProject?: boolean;
-  includeStories?: boolean;
   includeMemory?: boolean;
 }
 
@@ -54,8 +42,7 @@ export interface MemoirDashboardData {
   coverage: MemoirCoverageItem[];
   candidates: MemoirQuestionCandidate[];
   outputs: MemoirOutput[];
-  stories: MemoirStoryCard[];
-  hasStoryData: boolean;
+  memoryStats?: MemoirMemoryStats;
 }
 
 export async function loadMemoirSummary(interview: MemoirInterviewState): Promise<MemoirSummary> {
@@ -66,65 +53,25 @@ export async function loadMemoirSummary(interview: MemoirInterviewState): Promis
   }
 }
 
-export async function loadMemoirStories(): Promise<MemoirStoryCard[]> {
-  try {
-    return (await getMemoirStories()).stories;
-  } catch (error) {
-    const snapshot = readMemoirDashboardSnapshot();
-    if (snapshot.hasStories) {
-      return snapshot.stories;
-    }
-    throw error;
-  }
-}
-
 export async function loadMemoirDashboard(options: MemoirDashboardLoadOptions = {}): Promise<MemoirDashboardData> {
+  void options;
   await ensureLocalDevSession();
-  const snapshot = readMemoirDashboardSnapshot();
-  const project = options.includeProject ? await getMemoirProject() : snapshot.project;
-  const interview = await getCurrentSession();
-  const summary = await loadMemoirSummary(interview);
-  const memory = options.includeMemory
-    ? await Promise.all([
-      getSessionSummary(interview.session.id),
-      listPeopleMemories(),
-      listEventMemories(),
-      listPlaceMemories(),
-      listThemeMemories(),
-      listOpenQuestions(),
-      getCoverageMap(),
-      listQuestionCandidates(),
-      listMemoirOutputs(),
-    ])
-    : [
-      snapshot.sessionSummary,
-      snapshot.people,
-      snapshot.events,
-      snapshot.places,
-      snapshot.themes,
-      snapshot.openQuestions,
-      snapshot.coverage,
-      snapshot.candidates,
-      snapshot.outputs,
-    ] as const;
-  const stories = options.includeStories ? await loadMemoirStories() : snapshot.stories;
-  const hasStoryData = options.includeStories ? true : snapshot.hasStories;
-  const [
-    sessionSummary,
-    people,
-    events,
-    places,
-    themes,
-    openQuestions,
-    coverage,
-    candidates,
-    outputs,
-  ] = memory;
+  const dashboard = await getMemoirDashboard();
+  const sessionSummary = dashboard.session_summary;
+  const people = dashboard.people;
+  const events = dashboard.events;
+  const places = dashboard.places;
+  const themes = dashboard.themes;
+  const openQuestions = dashboard.open_questions;
+  const coverage = dashboard.coverage;
+  const candidates = dashboard.candidates;
+  const outputs = dashboard.outputs;
+  const memoryStats = dashboard.memory_stats;
 
   writeMemoirDashboardSnapshot({
-    project,
-    interview,
-    summary,
+    project: dashboard.project,
+    interview: dashboard.interview,
+    summary: dashboard.summary,
     sessionSummary,
     people,
     events,
@@ -134,13 +81,13 @@ export async function loadMemoirDashboard(options: MemoirDashboardLoadOptions = 
     coverage,
     candidates,
     outputs,
-    stories: options.includeStories ? stories : undefined,
+    memoryStats,
   });
 
   return {
-    project,
-    interview,
-    summary,
+    project: dashboard.project,
+    interview: dashboard.interview,
+    summary: dashboard.summary,
     sessionSummary,
     people,
     events,
@@ -150,7 +97,6 @@ export async function loadMemoirDashboard(options: MemoirDashboardLoadOptions = 
     coverage,
     candidates,
     outputs,
-    stories,
-    hasStoryData,
+    memoryStats,
   };
 }

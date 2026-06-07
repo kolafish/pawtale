@@ -11,7 +11,7 @@
   <view class="stat-grid">
     <view class="stat-card" bindtap="openStories" hover-class="tap-hover">
       <view class="stat-icon book-icon"></view>
-      <text class="stat-label">本周故事</text>
+      <text class="stat-label">记忆卡片</text>
       <text class="stat-value">{{hasDashboardData ? weeklyStoryCount : "..."}}</text>
     </view>
     <view class="stat-card warm" bindtap="openStories" hover-class="tap-hover">
@@ -21,7 +21,7 @@
     </view>
     <view class="stat-card" bindtap="openStories" hover-class="tap-hover">
       <view class="stat-icon bookmark-icon"></view>
-      <text class="stat-label">已成章节</text>
+      <text class="stat-label">写作片段</text>
       <text class="stat-value">{{hasDashboardData ? confirmedStoryCount : "..."}}</text>
     </view>
   </view>
@@ -114,21 +114,21 @@
 
   <view class="story-list">
     <view class="story-list-header" bindtap="openStories" hover-class="tap-hover">
-      <text>故事卡</text>
-      <text class="story-count">{{hasStoryData ? stories.length : "..."}}</text>
+      <text>写作片段</text>
+      <text class="story-count">{{hasOutputData ? outputs.length : "..."}}</text>
     </view>
-    <view wx:if="{{!hasStoryData && loading || !hasStoryData && refreshing}}" class="empty-state">
-      <text>正在加载故事卡</text>
+    <view wx:if="{{!hasOutputData && loading || !hasOutputData && refreshing}}" class="empty-state">
+      <text>正在加载写作片段</text>
     </view>
-    <view wx:elif="{{hasStoryData && !stories.length}}" class="empty-state">
-      <text>还没有故事卡。先回答一个问题，工作台会自动整理到这里。</text>
+    <view wx:elif="{{hasOutputData && !outputs.length}}" class="empty-state">
+      <text>还没有写作片段。先回答一个问题，系统会根据记忆生成可回读的片段。</text>
     </view>
-    <view wx:for="{{stories}}" wx:key="id" class="story-card">
-      <text class="story-question">{{item.question_prompt}}</text>
-      <text class="story-preview">{{item.draft_preview || item.answer_preview}}</text>
+    <view wx:for="{{outputs}}" wx:key="id" class="story-card">
+      <text class="story-question">{{item.title}}</text>
+      <text class="story-preview">{{item.content_preview || "暂无片段预览"}}</text>
       <view class="story-meta">
-        <text>{{item.draft_status === "accepted" ? "已成章" : item.draft_status === "draft" ? "待确认" : "已回答"}}</text>
-        <text wx:if="{{item.duration_seconds}}">{{item.duration_seconds}} 秒</text>
+        <text>{{item.output_type === "story_fragment" ? "故事片段" : item.output_type}}</text>
+        <text wx:if="{{item.version_count}}">第 {{item.latest_version}} 版</text>
       </view>
     </view>
   </view>

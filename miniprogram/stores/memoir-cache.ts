@@ -4,6 +4,7 @@ import type {
   MemoirDraft,
   MemoirEventMemory,
   MemoirInterviewState,
+  MemoirMemoryStats,
   MemoirOpenQuestion,
   MemoirOutput,
   MemoirPersonMemory,
@@ -30,6 +31,7 @@ export interface MemoirDashboardSnapshot {
   coverage: MemoirCoverageItem[];
   candidates: MemoirQuestionCandidate[];
   outputs: MemoirOutput[];
+  memoryStats?: MemoirMemoryStats;
   stories: MemoirStoryCard[];
   hasStories: boolean;
 }
@@ -69,6 +71,7 @@ export function readMemoirDashboardSnapshot(): MemoirDashboardSnapshot {
     coverage: store.coverage || [],
     candidates: store.candidates || [],
     outputs: store.outputs || [],
+    memoryStats: store.memoryStats,
     stories: store.stories || [],
     hasStories: store.stories !== undefined,
   };
@@ -113,6 +116,9 @@ export function writeMemoirDashboardSnapshot(snapshot: Partial<MemoirDashboardSn
   }
   if (snapshot.outputs !== undefined) {
     patch.outputs = snapshot.outputs;
+  }
+  if (snapshot.memoryStats !== undefined) {
+    patch.memoryStats = snapshot.memoryStats;
   }
   if (snapshot.stories !== undefined) {
     patch.stories = snapshot.stories;
