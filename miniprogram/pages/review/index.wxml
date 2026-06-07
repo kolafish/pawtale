@@ -6,7 +6,7 @@
 
   <view wx:if="{{error}}" class="error">{{error}}</view>
 
-  <view class="surface stack">
+  <view wx:if="{{answerId || questionPrompt || transcript}}" class="surface stack">
     <text class="section-title">访谈回答</text>
     <text wx:if="{{questionPrompt}}" class="muted">{{questionPrompt}}</text>
     <text class="body-text">{{transcript || "暂无回答文本"}}</text>

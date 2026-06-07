@@ -18,6 +18,13 @@ import {
   readMemoirDashboardSnapshot,
 } from "../../stores/memoir-cache";
 
+const REVIEW_NAVIGATION_WAIT_MS = 100;
+const REVIEW_NAVIGATION_MAX_ATTEMPTS = 600;
+
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 type WorkbenchMemoryCard = {
   title: string;
   detail: string;
@@ -48,6 +55,7 @@ interface WorkbenchData {
   progressPercent: number;
   pendingCount: number;
   summaryText: string;
+  reviewSessionId: string;
   coverage: MemoirCoverageItem[];
   memoryCards: WorkbenchMemoryCard[];
   openQuestions: MemoirOpenQuestion[];
@@ -124,6 +132,7 @@ Page<WorkbenchData, {
   loadWorkbench(): Promise<void>;
   askCandidate(event: DatasetEvent): Promise<void>;
   continueInterview(): void;
+  openPendingReview(): Promise<void>;
   openStories(): void;
   backHome(): void;
   openHome(): void;
@@ -144,6 +153,7 @@ Page<WorkbenchData, {
     progressPercent: 0,
     pendingCount: 0,
     summaryText: "",
+    reviewSessionId: "",
     coverage: [],
     memoryCards: [],
     openQuestions: [],
@@ -193,6 +203,7 @@ Page<WorkbenchData, {
       confirmedStoryCount: memoryStats?.output_count ?? summary.confirmed_story_count,
       progressPercent: memoryStats?.coverage_average ?? summary.progress_percent,
       pendingCount: interview.pending_question_count,
+      reviewSessionId: interview.session.id,
       summaryText: memory?.summaryText || this.data.summaryText,
       coverage: memory?.coverage || this.data.coverage,
       memoryCards: memory ? buildMemoryCards(memory.people, memory.events, memory.places, memory.themes) : this.data.memoryCards,
@@ -262,6 +273,25 @@ Page<WorkbenchData, {
 
   continueInterview() {
     wx.navigateTo({ url: "/pages/question/index" });
+  },
+
+  async openPendingReview() {
+    for (
+      let attempt = 0;
+      this.data.refreshing && !this.data.reviewSessionId && attempt < REVIEW_NAVIGATION_MAX_ATTEMPTS;
+      attempt += 1
+    ) {
+      await wait(REVIEW_NAVIGATION_WAIT_MS);
+    }
+    if (!this.data.reviewSessionId && !this.data.refreshing) {
+      await this.loadWorkbench();
+    }
+    const sessionId = this.data.reviewSessionId || readMemoirDashboardSnapshot().interview?.session.id || "";
+    if (!sessionId) {
+      this.setData({ error: this.data.refreshing ? "访谈信息仍在加载，请稍后再试" : "缺少访谈信息" });
+      return;
+    }
+    wx.navigateTo({ url: `/pages/review/index?sessionId=${encodeURIComponent(sessionId)}` });
   },
 
   openStories() {

@@ -14,15 +14,8 @@ import type {
   Project,
 } from "../domain/memoir";
 import { ensureLocalDevSession } from "./auth";
-import {
-  getMemoirDashboard,
-  getMemoirSummary,
-} from "./memoir";
-import {
-  fallbackSummary,
-  readMemoirDashboardSnapshot,
-  writeMemoirDashboardSnapshot,
-} from "../stores/memoir-cache";
+import { getMemoirDashboard } from "./memoir";
+import { writeMemoirDashboardSnapshot } from "../stores/memoir-cache";
 
 export interface MemoirDashboardLoadOptions {
   includeProject?: boolean;
@@ -43,14 +36,6 @@ export interface MemoirDashboardData {
   candidates: MemoirQuestionCandidate[];
   outputs: MemoirOutput[];
   memoryStats?: MemoirMemoryStats;
-}
-
-export async function loadMemoirSummary(interview: MemoirInterviewState): Promise<MemoirSummary> {
-  try {
-    return await getMemoirSummary();
-  } catch {
-    return readMemoirDashboardSnapshot().summary || fallbackSummary(interview);
-  }
 }
 
 export async function loadMemoirDashboard(options: MemoirDashboardLoadOptions = {}): Promise<MemoirDashboardData> {

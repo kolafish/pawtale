@@ -12,6 +12,13 @@ import {
   readMemoirDashboardSnapshot,
 } from "../../stores/memoir-cache";
 
+const REVIEW_NAVIGATION_WAIT_MS = 100;
+const REVIEW_NAVIGATION_MAX_ATTEMPTS = 600;
+
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 interface HomeData {
   loading: boolean;
   refreshing: boolean;
@@ -27,6 +34,7 @@ interface HomeData {
   confirmedStoryCount: number;
   progressPercent: number;
   latestOutputPreview: string;
+  reviewSessionId: string;
 }
 
 Page<HomeData, {
@@ -43,6 +51,7 @@ Page<HomeData, {
   ): void;
   loadHome(): Promise<void>;
   continueInterview(): Promise<void>;
+  openPendingReview(): Promise<void>;
   openStories(): void;
   openWorkbench(): void;
   openHome(): void;
@@ -64,6 +73,7 @@ Page<HomeData, {
     confirmedStoryCount: 0,
     progressPercent: 0,
     latestOutputPreview: "",
+    reviewSessionId: "",
   },
 
   async onLoad() {
@@ -105,6 +115,7 @@ Page<HomeData, {
       : summary.pending_review_count;
     this.setData({
       sessionTitle: interview.session.title,
+      reviewSessionId: interview.session.id,
       currentPrompt: interview.current_question?.prompt || "本轮访谈已经完成，可以先看看整理好的记忆。",
       completedCount: Math.max(summary.completed_question_count, answeredQuestionCount(interview)),
       pendingCount: interview.pending_question_count,
@@ -152,6 +163,25 @@ Page<HomeData, {
       await this.loadHome();
     }
     wx.navigateTo({ url: "/pages/question/index" });
+  },
+
+  async openPendingReview() {
+    for (
+      let attempt = 0;
+      this.data.refreshing && !this.data.reviewSessionId && attempt < REVIEW_NAVIGATION_MAX_ATTEMPTS;
+      attempt += 1
+    ) {
+      await wait(REVIEW_NAVIGATION_WAIT_MS);
+    }
+    if (!this.data.reviewSessionId && !this.data.refreshing) {
+      await this.loadHome();
+    }
+    const sessionId = this.data.reviewSessionId || readMemoirDashboardSnapshot().interview?.session.id || "";
+    if (!sessionId) {
+      this.setData({ error: this.data.refreshing ? "访谈信息仍在加载，请稍后再试" : "缺少访谈信息" });
+      return;
+    }
+    wx.navigateTo({ url: `/pages/review/index?sessionId=${encodeURIComponent(sessionId)}` });
   },
 
   openStories() {

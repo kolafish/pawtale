@@ -4,36 +4,55 @@ const test = require("node:test");
 const { CloudStore } = require("../src/store");
 
 class FakeQuery {
-  constructor(rows, offset = 0, count = null) {
+  constructor(rows, tracker = null, orderBy = [], count = null, offset = 0) {
     this.rows = rows;
-    this.offset = offset;
+    this.tracker = tracker || { orderByCalls: [], limitCalls: [], skipCalls: [] };
+    this.orderByRules = orderBy;
     this.count = count;
-  }
-
-  skip(offset) {
-    return new FakeQuery(this.rows, offset, this.count);
+    this.offset = offset;
   }
 
   limit(count) {
-    return new FakeQuery(this.rows, this.offset, count);
+    this.tracker.limitCalls.push(count);
+    return new FakeQuery(this.rows, this.tracker, this.orderByRules, count, this.offset);
   }
 
-  orderBy() {
-    throw new Error("CloudStore should sort rows in memory");
+  skip(offset) {
+    this.tracker.skipCalls.push(offset);
+    return new FakeQuery(this.rows, this.tracker, this.orderByRules, this.count, offset);
+  }
+
+  orderBy(field, direction = "asc") {
+    this.tracker.orderByCalls.push({ field, direction });
+    return new FakeQuery(this.rows, this.tracker, [
+      ...this.orderByRules,
+      { field, direction },
+    ], this.count, this.offset);
   }
 
   async get() {
-    const end = this.count ? this.offset + this.count : undefined;
+    const sorted = [...this.rows].sort((left, right) => {
+      for (const order of this.orderByRules) {
+        if (left[order.field] === right[order.field]) {
+          continue;
+        }
+        const result = left[order.field] > right[order.field] ? 1 : -1;
+        return order.direction === "desc" ? -result : result;
+      }
+      return 0;
+    });
     return {
-      data: this.rows.slice(this.offset, end).map((row) => ({ ...row })),
+      data: sorted.slice(this.offset, this.offset + (this.count || 100)).map((row) => ({ ...row })),
     };
   }
 }
 
 class FakeCollection extends FakeQuery {
   constructor(rows) {
-    super(rows);
+    const tracker = { orderByCalls: [], limitCalls: [], skipCalls: [] };
+    super(rows, tracker);
     this.whereCalls = [];
+    this.tracker = tracker;
   }
 
   where(filters) {
@@ -41,12 +60,13 @@ class FakeCollection extends FakeQuery {
       throw new Error("empty where should not be called");
     }
     this.whereCalls.push(filters);
-    return new FakeQuery(this.rows.filter((row) => Object.entries(filters).every(([key, value]) => {
+    const filtered = this.rows.filter((row) => Object.entries(filters).every(([key, value]) => {
       if (key === "_id") {
         return row._id === value || row.id === value;
       }
       return row[key] === value;
-    })));
+    }));
+    return new FakeQuery(filtered, this.tracker);
   }
 }
 
@@ -64,7 +84,7 @@ function fakeDatabase(seed) {
   };
 }
 
-test("CloudStore.findMany avoids empty where and sorts in memory", async () => {
+test("CloudStore.findMany avoids empty where and delegates order and limit", async () => {
   const db = fakeDatabase({
     things: Array.from({ length: 105 }, (_, index) => ({
       _id: `row_${index}`,
@@ -81,23 +101,30 @@ test("CloudStore.findMany avoids empty where and sorts in memory", async () => {
 
   assert.deepEqual(rows.map((row) => row.id), ["row_104", "row_103"]);
   assert.deepEqual(db.collection("things").whereCalls, []);
+  assert.deepEqual(db.collection("things").tracker.orderByCalls, [{ field: "score", direction: "desc" }]);
+  assert.deepEqual(db.collection("things").tracker.limitCalls, [2]);
+  assert.deepEqual(db.collection("things").tracker.skipCalls, []);
 });
 
-test("CloudStore.findMany keeps missing sort values last", async () => {
+test("CloudStore.findMany paginates unbounded reads using database order", async () => {
   const db = fakeDatabase({
-    things: [
-      { _id: "row_missing", openid: "openid_a" },
-      { _id: "row_old", openid: "openid_a", updated_at: "2026-01-01T00:00:00.000Z" },
-      { _id: "row_new", openid: "openid_a", updated_at: "2026-01-02T00:00:00.000Z" },
-    ],
+    things: Array.from({ length: 205 }, (_, index) => ({
+      _id: `row_${index}`,
+      score: index,
+    })),
   });
   const store = new CloudStore(db);
 
-  const row = await store.findOne("things", { openid: "openid_a" }, {
-    orderBy: [{ field: "updated_at", direction: "desc" }],
+  const rows = await store.findMany("things", {}, {
+    orderBy: [{ field: "score", direction: "desc" }],
   });
 
-  assert.equal(row.id, "row_new");
+  assert.equal(rows.length, 205);
+  assert.equal(rows[0].id, "row_204");
+  assert.equal(rows[204].id, "row_0");
+  assert.deepEqual(db.collection("things").tracker.orderByCalls, [{ field: "score", direction: "desc" }]);
+  assert.deepEqual(db.collection("things").tracker.limitCalls, [100, 100, 100]);
+  assert.deepEqual(db.collection("things").tracker.skipCalls, [100, 200]);
 });
 
 test("CloudStore.findMany filters and normalizes ids", async () => {

@@ -3,6 +3,7 @@ import { API_TRANSPORT, CLOUD_ENV_ID, CLOUD_FUNCTION_NAME, LOCAL_API_BASE_URL } 
 export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
 export const API_BASE_URL = LOCAL_API_BASE_URL;
+const API_TIMEOUT_MS = 60000;
 const COOKIE_STORAGE_KEY = "pawtale_miniprogram_cookie";
 const CLOUD_AUDIO_ROOT = "memoir/audio";
 
@@ -153,7 +154,7 @@ export function request<T>(
       method: options.method || "GET",
       data: options.data,
       header: headers,
-      timeout: 120000,
+      timeout: API_TIMEOUT_MS,
       success: (result) => {
         persistCookies(result);
         if (result.statusCode >= 200 && result.statusCode < 300) {
@@ -221,7 +222,7 @@ export function uploadFile<T>(
       name: options.name,
       formData: options.formData,
       header: requestHeaders(),
-      timeout: 120000,
+      timeout: API_TIMEOUT_MS,
       success: (result) => {
         persistCookies(result);
         const data = parseJson(result.data);
