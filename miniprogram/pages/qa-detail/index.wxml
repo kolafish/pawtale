@@ -1,0 +1,101 @@
+<view class="qa-detail-page">
+  <view class="top-bar">
+    <view class="back-hit" bindtap="backQa">
+      <text class="back-mark">‹</text>
+    </view>
+    <text class="page-title">问答详情</text>
+  </view>
+
+  <view wx:if="{{error}}" class="error">{{error}}</view>
+
+  <view class="surface">
+    <text class="eyebrow">{{sessionTitle || "访谈问答"}}</text>
+    <text class="question-text">{{questionPrompt || "正在加载问题"}}</text>
+  </view>
+
+  <view class="surface">
+    <view class="section-row">
+      <text class="section-title">已保存语音</text>
+      <text class="muted">{{audioLabel}}</text>
+    </view>
+    <button
+      class="play-button"
+      disabled="{{!hasAudio || loading}}"
+      bindtap="playAudio"
+    >
+      {{playing ? "停止播放" : "播放录音"}}
+    </button>
+    <text wx:if="{{audioError}}" class="audio-error">{{audioError}}</text>
+  </view>
+
+  <view class="surface">
+    <view class="section-row">
+      <text class="section-title">转写文字</text>
+      <text wx:if="{{saving}}" class="muted">保存中</text>
+    </view>
+    <textarea
+      class="textarea"
+      value="{{answerText}}"
+      placeholder="编辑这条回答的文字"
+      maxlength="-1"
+      disabled="{{loading || saving || submitting || recording || uploadingAudio || transcribingAudio}}"
+      bindinput="onAnswerInput"
+    />
+    <view wx:if="{{transcriptRaw && transcriptRaw !== answerText}}" class="raw-block">
+      <text class="detail-label">ASR 原文</text>
+      <text class="raw-text">{{transcriptRaw}}</text>
+    </view>
+  </view>
+
+  <view class="surface">
+    <view class="section-row">
+      <text class="section-title">重新回答</text>
+      <text wx:if="{{newAudioSummary}}" class="muted">{{newAudioSummary}}</text>
+    </view>
+    <button
+      wx:if="{{!recording}}"
+      class="record-button"
+      disabled="{{loading || saving || submitting || uploadingAudio || transcribingAudio}}"
+      loading="{{uploadingAudio || transcribingAudio}}"
+      bindtap="startRecording"
+    >
+      <block wx:if="{{uploadingAudio}}">保存中</block>
+      <block wx:elif="{{transcribingAudio}}">转写中</block>
+      <block wx:else>重新录音</block>
+    </button>
+    <button
+      wx:else
+      class="record-button record-button-active"
+      bindtap="stopRecording"
+    >
+      停止录音
+    </button>
+    <button
+      wx:if="{{newAudioSummary && !recording && !uploadingAudio && !transcribingAudio}}"
+      class="text-button"
+      disabled="{{saving || submitting}}"
+      bindtap="clearRecordedAudio"
+    >
+      清除新录音
+    </button>
+  </view>
+
+  <view class="button-row">
+    <button
+      class="action-button secondary"
+      loading="{{saving}}"
+      disabled="{{loading || saving || submitting || recording || uploadingAudio || transcribingAudio}}"
+      bindtap="saveText"
+    >
+      保存文字
+    </button>
+    <button
+      class="action-button primary"
+      loading="{{submitting}}"
+      disabled="{{loading || saving || submitting || recording || uploadingAudio || transcribingAudio}}"
+      bindtap="submitReanswer"
+    >
+      提交重答
+    </button>
+  </view>
+</view>

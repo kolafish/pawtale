@@ -187,6 +187,12 @@ const routes = {
       await memoirService(request).updateDraftContent(request.params.draftId, updateDraftContentRequest(request.data)),
     )),
   ],
+  DELETE: [
+    route("/api/mobile/memoir/answers/:answerId", async (request) => jsonResponse(
+      200,
+      await memoirService(request).deleteAnswer(request.params.answerId),
+    )),
+  ],
 };
 
 async function handleMemoirApiRequest(event = {}, context = {}, dependencies = {}) {

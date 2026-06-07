@@ -1691,6 +1691,30 @@ async function updateAnswerText(store, openid, answerId, data) {
   return updated;
 }
 
+async function deleteAnswer(store, openid, answerId) {
+  const answer = await loadAnswer(store, openid, answerId);
+  const question = await loadQuestion(store, openid, answer.question_id);
+  const drafts = await store.findMany(COLLECTIONS.drafts, {
+    openid,
+    answer_id: answer.id,
+  });
+
+  for (const draft of drafts) {
+    await store.deleteById(COLLECTIONS.drafts, draft.id);
+  }
+  await store.deleteById(COLLECTIONS.answers, answer.id);
+  await store.updateById(COLLECTIONS.questions, question.id, {
+    status: MemoirQuestionStatus.PENDING,
+  });
+  await advanceSession(store, openid, question.session_id);
+
+  return {
+    id: answer.id,
+    question_id: question.id,
+    deleted: true,
+  };
+}
+
 async function registerAudioFile(store, openid, data) {
   const now = nowIso();
   const cloudPath = cleanCloudAudioPath(openid, data.cloud_path);
@@ -1992,6 +2016,7 @@ function createMemoirService(store, context, dependencies = {}) {
     skipQuestion: async (questionId) => skipQuestion(store, openid, questionId),
     createTextAnswer: async (data) => createTextAnswer(store, openid, data),
     updateAnswerText: async (answerId, data) => updateAnswerText(store, openid, answerId, data),
+    deleteAnswer: async (answerId) => deleteAnswer(store, openid, answerId),
     registerAudioFile: async (data) => registerAudioFile(store, openid, data),
     transcribeAudioFile: async (audioFileId) => transcribeAudioFile(store, openid, audioFileId, dependencies),
     generateDraft: async (answerId) => generateDraft(store, openid, answerId, dependencies),

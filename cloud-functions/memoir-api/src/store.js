@@ -93,6 +93,15 @@ class CloudStore {
     await this.collection(name).doc(id).update({ data });
     return this.getById(name, id);
   }
+
+  async deleteById(name, id) {
+    const existing = await this.getById(name, id);
+    if (!existing) {
+      return null;
+    }
+    await this.collection(name).doc(id).remove();
+    return existing;
+  }
 }
 
 module.exports = {

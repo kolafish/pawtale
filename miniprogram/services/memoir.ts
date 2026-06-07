@@ -185,6 +185,12 @@ export function updateTextAnswer(answerId: string, text: string): Promise<Memoir
   });
 }
 
+export function deleteMemoirAnswer(answerId: string): Promise<{ id: string; question_id: string; deleted: boolean }> {
+  return request<{ id: string; question_id: string; deleted: boolean }>(`/api/mobile/memoir/answers/${answerId}`, {
+    method: "DELETE",
+  });
+}
+
 export function generateDraft(answerId: string): Promise<MemoirDraft> {
   return request<MemoirDraft>(`/api/mobile/memoir/answers/${answerId}/draft`, {
     method: "POST",
