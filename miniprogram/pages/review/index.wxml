@@ -15,7 +15,8 @@
   <view class="surface stack">
     <view class="section-row">
       <text class="section-title">本次摘要</text>
-      <text wx:if="{{processing || refreshing}}" class="muted">处理中...</text>
+      <text wx:if="{{processing}}" class="muted">处理中...</text>
+      <text wx:elif="{{refreshing}}" class="muted">同步中...</text>
     </view>
     <text class="body-text">{{summaryText || "正在提取结构化记忆"}}</text>
   </view>
