@@ -1,6 +1,7 @@
 import type { User } from "../domain/memoir";
 import { API_TRANSPORT } from "../config";
 import { ApiError, request } from "./request";
+import { cacheIdentityFromUser, ensureMemoirStoreIdentity } from "../stores/session";
 
 interface AuthResponse {
   user: User;
@@ -12,13 +13,18 @@ const DEV_USER = {
   display_name: "小程序测试用户",
 };
 
+function rememberSessionUser(user: User): User {
+  ensureMemoirStoreIdentity(cacheIdentityFromUser(user));
+  return user;
+}
+
 export async function ensureLocalDevSession(): Promise<User> {
   if (API_TRANSPORT === "cloudFunction") {
-    return request<User>("/api/mobile/memoir/me");
+    return rememberSessionUser(await request<User>("/api/mobile/memoir/me"));
   }
 
   try {
-    return await request<User>("/api/auth/me");
+    return rememberSessionUser(await request<User>("/api/auth/me"));
   } catch (error) {
     if (!(error instanceof ApiError) || error.statusCode !== 401) {
       throw error;
@@ -30,7 +36,7 @@ export async function ensureLocalDevSession(): Promise<User> {
       method: "POST",
       data: DEV_USER,
     });
-    return registered.user;
+    return rememberSessionUser(registered.user);
   } catch (error) {
     if (!(error instanceof ApiError) || error.statusCode !== 409) {
       throw error;
@@ -44,5 +50,5 @@ export async function ensureLocalDevSession(): Promise<User> {
       password: DEV_USER.password,
     },
   });
-  return loggedIn.user;
+  return rememberSessionUser(loggedIn.user);
 }

@@ -15,6 +15,11 @@ import {
   updateMemoirCachedStoryAnswer,
   writeMemoirStoryDetailSnapshot,
 } from "../../stores/memoir-cache";
+import {
+  clearMemoirQaDetailInputDraft,
+  readMemoirQaDetailInputDraft,
+  writeMemoirQaDetailInputDraft,
+} from "../../stores/memoir-input-drafts";
 
 interface InputEvent {
   detail: {
@@ -44,12 +49,16 @@ interface QaDetailData {
   newAudioFileId: string;
   newAudioDurationSeconds: number | null;
   newAudioSummary: string;
+  inputDraftDirty: boolean;
 }
 
 interface QaDetailMethods {
   onLoad(query?: Record<string, string | undefined>): Promise<void>;
+  onHide(): void;
   onUnload(): void;
   hydrateFromCache(): Promise<MemoirStoryDetailSnapshot>;
+  applyInputDraft(answerId: string): boolean;
+  persistInputDraft(): void;
   loadDetail(): Promise<void>;
   applyDetail(detail: MemoirStoryDetail, audioTempUrl: string, audioError: string): void;
   onAnswerInput(event: InputEvent): void;
@@ -95,7 +104,12 @@ const recorderManager = wx.getRecorderManager();
 const MAX_RECORDING_MS = 60000;
 let recorderBound = false;
 let recordingStartedAt = 0;
-let activePage: { setData(data: Partial<QaDetailData>): void } | null = null;
+type QaDetailPageInstance = {
+  data: QaDetailData;
+  setData(data: Partial<QaDetailData>): void;
+  persistInputDraft(): void;
+};
+let activePage: QaDetailPageInstance | null = null;
 let audioContext: AudioContextLike | null = null;
 
 function durationSeconds(durationMs: number): number {
@@ -121,6 +135,20 @@ function audioLabel(hasAudio: boolean, seconds?: number | null): string {
 
 function isAudioBusy(data: Pick<QaDetailData, "recording" | "uploadingAudio" | "transcribingAudio">): boolean {
   return data.recording || data.uploadingAudio || data.transcribingAudio;
+}
+
+function inputDraftFromData(data: QaDetailData): Parameters<typeof writeMemoirQaDetailInputDraft>[0] | null {
+  if (!data.answerId) {
+    return null;
+  }
+  return {
+    answer_id: data.answerId,
+    question_id: data.questionId || undefined,
+    answer_text: data.answerText,
+    new_audio_file_id: data.newAudioFileId || undefined,
+    new_audio_duration_seconds: data.newAudioDurationSeconds,
+    new_audio_summary: data.newAudioSummary || undefined,
+  };
 }
 
 function getTempFileUrl(fileId: string): Promise<string> {
@@ -188,17 +216,23 @@ function bindRecorderEvents(): void {
         uploadingAudio: false,
         transcribingAudio: true,
         newAudioSummary: "正在转写",
+        inputDraftDirty: true,
       });
+      page.persistInputDraft();
       const transcription = await transcribeMemoirAudioFile(audioFile.id);
       page.setData({
         answerText: transcription.text,
         newAudioSummary: `已转写 ${savedDurationText}`,
+        inputDraftDirty: true,
       });
+      page.persistInputDraft();
     } catch (error) {
       page.setData({
         error: error instanceof Error ? error.message : "录音处理失败",
         newAudioSummary: savedDurationText ? `已保存 ${savedDurationText}` : "",
+        inputDraftDirty: true,
       });
+      page.persistInputDraft();
     } finally {
       page.setData({ uploadingAudio: false, transcribingAudio: false });
     }
@@ -237,6 +271,7 @@ Page<QaDetailData, QaDetailMethods>({
     newAudioFileId: "",
     newAudioDurationSeconds: null,
     newAudioSummary: "",
+    inputDraftDirty: false,
   },
 
   async onLoad(query) {
@@ -250,7 +285,12 @@ Page<QaDetailData, QaDetailMethods>({
     }
   },
 
+  onHide() {
+    this.persistInputDraft();
+  },
+
   onUnload() {
+    this.persistInputDraft();
     if (activePage === this) {
       activePage = null;
     }
@@ -279,7 +319,33 @@ Page<QaDetailData, QaDetailMethods>({
       }
     }
     this.applyDetail(snapshot.detail, audioTempUrl, audioError);
+    this.applyInputDraft(this.data.answerId);
     return snapshot;
+  },
+
+  applyInputDraft(answerId) {
+    const inputDraft = readMemoirQaDetailInputDraft(answerId);
+    if (!inputDraft) {
+      return false;
+    }
+    this.setData({
+      answerText: inputDraft.answer_text,
+      newAudioFileId: inputDraft.new_audio_file_id || "",
+      newAudioDurationSeconds: inputDraft.new_audio_duration_seconds ?? null,
+      newAudioSummary: inputDraft.new_audio_summary || "",
+      inputDraftDirty: true,
+    });
+    return true;
+  },
+
+  persistInputDraft() {
+    if (!this.data.inputDraftDirty) {
+      return;
+    }
+    const inputDraft = inputDraftFromData(this.data);
+    if (inputDraft) {
+      writeMemoirQaDetailInputDraft(inputDraft);
+    }
   },
 
   async loadDetail() {
@@ -301,6 +367,7 @@ Page<QaDetailData, QaDetailMethods>({
       }
       writeMemoirStoryDetailSnapshot(detail);
       this.applyDetail(detail, audioTempUrl, audioError);
+      this.applyInputDraft(detail.answer.id);
     } catch (error) {
       this.setData({ error: error instanceof Error ? error.message : "问答详情加载失败" });
     } finally {
@@ -321,11 +388,13 @@ Page<QaDetailData, QaDetailMethods>({
       audioLabel: audioLabel(Boolean(audioFile?.file_id || detail.answer.audio_file_id), audioFile?.duration_seconds ?? detail.answer.duration_seconds),
       audioTempUrl,
       audioError,
+      inputDraftDirty: false,
     });
   },
 
   onAnswerInput(event) {
-    this.setData({ answerText: event.detail.value });
+    this.setData({ answerText: event.detail.value, inputDraftDirty: true });
+    this.persistInputDraft();
   },
 
   async saveText() {
@@ -342,6 +411,13 @@ Page<QaDetailData, QaDetailMethods>({
         transcriptRaw: answer.transcript_raw || this.data.transcriptRaw,
         answerText: answer.transcript_edited || text,
       });
+      if (this.data.newAudioFileId || this.data.newAudioSummary) {
+        this.setData({ inputDraftDirty: true });
+        this.persistInputDraft();
+      } else {
+        clearMemoirQaDetailInputDraft(this.data.answerId);
+        this.setData({ inputDraftDirty: false });
+      }
       wx.showToast({ title: "已保存", icon: "success" });
     } catch (error) {
       this.setData({ error: error instanceof Error ? error.message : "文字保存失败" });
@@ -357,6 +433,7 @@ Page<QaDetailData, QaDetailMethods>({
     }
     this.setData({ submitting: true, error: "" });
     try {
+      const previousAnswerId = this.data.answerId;
       const answer = await createTextAnswer(
         this.data.questionId,
         text,
@@ -371,7 +448,10 @@ Page<QaDetailData, QaDetailMethods>({
         newAudioFileId: "",
         newAudioDurationSeconds: null,
         newAudioSummary: "",
+        inputDraftDirty: false,
       });
+      clearMemoirQaDetailInputDraft(previousAnswerId);
+      clearMemoirQaDetailInputDraft(answer.id);
       await this.loadDetail();
       wx.showToast({ title: "已重答", icon: "success" });
     } catch (error) {
@@ -390,7 +470,9 @@ Page<QaDetailData, QaDetailMethods>({
       newAudioFileId: "",
       newAudioDurationSeconds: null,
       newAudioSummary: "",
+      inputDraftDirty: true,
     });
+    this.persistInputDraft();
     recorderManager.start({
       duration: MAX_RECORDING_MS,
       sampleRate: 16000,
@@ -411,7 +493,13 @@ Page<QaDetailData, QaDetailMethods>({
     if (isAudioBusy(this.data)) {
       return;
     }
-    this.setData({ newAudioFileId: "", newAudioDurationSeconds: null, newAudioSummary: "" });
+    this.setData({
+      newAudioFileId: "",
+      newAudioDurationSeconds: null,
+      newAudioSummary: "",
+      inputDraftDirty: true,
+    });
+    this.persistInputDraft();
   },
 
   playAudio() {

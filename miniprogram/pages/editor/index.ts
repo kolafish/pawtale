@@ -5,6 +5,11 @@ import {
   updateMemoirCachedStoryDraft,
   writeMemoirStoryDetailSnapshot,
 } from "../../stores/memoir-cache";
+import {
+  clearMemoirEditorInputDraft,
+  readMemoirEditorInputDraft,
+  writeMemoirEditorInputDraft,
+} from "../../stores/memoir-input-drafts";
 import { readMemoirStore, writeMemoirStore } from "../../stores/session";
 
 interface InputEvent {
@@ -26,11 +31,28 @@ interface EditorData {
   contentReady: boolean;
   saving: boolean;
   error: string;
+  inputDraftDirty: boolean;
+}
+
+function editorInputDraftFromData(data: EditorData): Parameters<typeof writeMemoirEditorInputDraft>[0] | null {
+  if (!data.answerId || !data.draftId) {
+    return null;
+  }
+  return {
+    answer_id: data.answerId,
+    draft_id: data.draftId,
+    transcript_text: data.transcriptText,
+    draft_text: data.draftText,
+  };
 }
 
 Page<EditorData, {
   onLoad(query?: Record<string, string | undefined>): Promise<void>;
+  onHide(): void;
+  onUnload(): void;
   hydrateFromMatchingStore(answerId: string, draftId: string): boolean;
+  applyInputDraft(answerId: string, draftId: string): boolean;
+  persistInputDraft(): void;
   loadEditorContent(answerId: string, draftId: string): Promise<void>;
   goBack(): void;
   onTranscriptInput(event: InputEvent): void;
@@ -54,6 +76,7 @@ Page<EditorData, {
     contentReady: false,
     saving: false,
     error: "",
+    inputDraftDirty: false,
   },
 
   async onLoad(query) {
@@ -71,7 +94,16 @@ Page<EditorData, {
       return;
     }
     this.hydrateFromMatchingStore(answerId, draftId);
+    this.applyInputDraft(answerId, draftId);
     await this.loadEditorContent(answerId, draftId);
+  },
+
+  onHide() {
+    this.persistInputDraft();
+  },
+
+  onUnload() {
+    this.persistInputDraft();
   },
 
   hydrateFromMatchingStore(answerId, draftId) {
@@ -94,6 +126,29 @@ Page<EditorData, {
     return true;
   },
 
+  applyInputDraft(answerId, draftId) {
+    const inputDraft = readMemoirEditorInputDraft(answerId, draftId);
+    if (!inputDraft) {
+      return false;
+    }
+    this.setData({
+      transcriptText: inputDraft.transcript_text,
+      draftText: inputDraft.draft_text,
+      inputDraftDirty: true,
+    });
+    return true;
+  },
+
+  persistInputDraft() {
+    if (!this.data.inputDraftDirty) {
+      return;
+    }
+    const inputDraft = editorInputDraftFromData(this.data);
+    if (inputDraft) {
+      writeMemoirEditorInputDraft(inputDraft);
+    }
+  },
+
   async loadEditorContent(answerId, draftId) {
     this.setData({ loading: true, contentReady: false, error: "" });
     try {
@@ -114,6 +169,7 @@ Page<EditorData, {
         draftText: detail.draft.content_edited || detail.draft.content_raw,
         contentReady: true,
       });
+      this.applyInputDraft(answerId, draftId);
     } catch (error) {
       this.setData({ error: error instanceof Error ? error.message : "编辑内容加载失败" });
     } finally {
@@ -131,11 +187,13 @@ Page<EditorData, {
   },
 
   onTranscriptInput(event) {
-    this.setData({ transcriptText: event.detail.value, transcriptFocus: false });
+    this.setData({ transcriptText: event.detail.value, transcriptFocus: false, inputDraftDirty: true });
+    this.persistInputDraft();
   },
 
   onDraftInput(event) {
-    this.setData({ draftText: event.detail.value, draftFocus: false });
+    this.setData({ draftText: event.detail.value, draftFocus: false, inputDraftDirty: true });
+    this.persistInputDraft();
   },
 
   focusTranscript() {
@@ -164,6 +222,8 @@ Page<EditorData, {
       updateMemoirCachedStoryAnswer(answer);
       updateMemoirCachedStoryDraft(draft);
       markMemoirDashboardSnapshotStale();
+      clearMemoirEditorInputDraft(this.data.answerId, this.data.draftId);
+      this.setData({ inputDraftDirty: false });
       if (showToast) {
         wx.showToast({ title: "已保存", icon: "success" });
       }
