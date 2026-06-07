@@ -1,9 +1,12 @@
+from fastapi import HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.domain.memoir import MemoirOutputStatus, MemoirOutputType
 from app.models.memoir import MemoirOutput, MemoirOutputVersion
-from app.schemas.memoir import MemoirOutputResponse
+from app.schemas.memoir import MemoirOutputDetailResponse, MemoirOutputResponse
+from app.services.memoir.access import load_memoir_project
 
 
 async def upsert_session_output_version(
@@ -54,3 +57,34 @@ async def upsert_session_output_version(
     )
     await db.flush()
     return MemoirOutputResponse.model_validate(output)
+
+
+async def list_outputs(
+    db: AsyncSession,
+    user_id: str,
+    project_id: str,
+) -> list[MemoirOutputResponse]:
+    await load_memoir_project(db, project_id, user_id)
+    result = await db.execute(
+        select(MemoirOutput)
+        .where(MemoirOutput.project_id == project_id)
+        .order_by(MemoirOutput.updated_at.desc(), MemoirOutput.created_at.desc())
+    )
+    return [MemoirOutputResponse.model_validate(output) for output in result.scalars()]
+
+
+async def get_output(
+    db: AsyncSession,
+    user_id: str,
+    project_id: str,
+    output_id: str,
+) -> MemoirOutputDetailResponse:
+    await load_memoir_project(db, project_id, user_id)
+    output = await db.scalar(
+        select(MemoirOutput)
+        .where(MemoirOutput.project_id == project_id, MemoirOutput.id == output_id)
+        .options(selectinload(MemoirOutput.versions))
+    )
+    if not output:
+        raise HTTPException(status_code=404, detail="回忆录输出不存在")
+    return MemoirOutputDetailResponse.model_validate(output)

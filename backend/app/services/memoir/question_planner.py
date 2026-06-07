@@ -321,6 +321,29 @@ async def best_question_candidate(
     return max(eligible, key=lambda candidate: (candidate.priority, candidate.created_at))
 
 
+async def list_question_candidates(
+    db: AsyncSession,
+    user_id: str,
+    project_id: str,
+    session_id: str | None = None,
+) -> list[MemoirQuestionCandidateResponse]:
+    await load_memoir_project(db, project_id, user_id)
+    await generate_question_candidates(db, user_id, project_id, session_id)
+    filters = [
+        MemoirQuestionCandidate.project_id == project_id,
+        MemoirQuestionCandidate.status == MemoirQuestionCandidateStatus.CANDIDATE.value,
+    ]
+    if session_id:
+        filters.append(MemoirQuestionCandidate.session_id == session_id)
+    result = await db.execute(
+        select(MemoirQuestionCandidate)
+        .where(*filters)
+        .order_by(MemoirQuestionCandidate.priority.desc(), MemoirQuestionCandidate.created_at)
+    )
+    await db.flush()
+    return [_candidate_response(candidate) for candidate in result.scalars()]
+
+
 async def select_candidate_as_question(
     db: AsyncSession,
     user_id: str,

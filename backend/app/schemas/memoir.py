@@ -101,6 +101,38 @@ class MemoirSessionProcessRequest(BaseModel):
     ai_model: str | None = None
 
 
+class MemoirMemoryUpdateRequest(BaseModel):
+    status: MemoirMemoryStatus | None = None
+    canonical_name: str | None = None
+    aliases_json: list[str] | None = None
+    relationship: str | None = None
+    title: str | None = None
+    life_stage: str | None = None
+    time_text: str | None = None
+    place_text: str | None = None
+    cause: str | None = None
+    process: str | None = None
+    result: str | None = None
+    emotion: str | None = None
+    importance: float | None = Field(default=None, ge=0, le=1)
+    name: str | None = None
+    elder_alias: str | None = None
+    modern_name: str | None = None
+    place_type: str | None = None
+    description: str | None = None
+    strength: float | None = Field(default=None, ge=0, le=1)
+    mention_count: int | None = Field(default=None, ge=1)
+    confidence: float | None = Field(default=None, ge=0, le=1)
+
+
+class MemoirOpenQuestionUpdateRequest(BaseModel):
+    question: str | None = None
+    reason: str | None = None
+    sensitivity: MemoirSensitivity | None = None
+    priority: float | None = Field(default=None, ge=0, le=1)
+    status: MemoirOpenQuestionStatus | None = None
+
+
 class MemoirDraftEditRequest(BaseModel):
     content_edited: str
 
@@ -444,6 +476,22 @@ class MemoirCoverageSnapshotResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class MemoirCoverageItemResponse(BaseModel):
+    topic_id: str
+    key: str
+    name: str
+    life_stage: str | None = None
+    description: str
+    sort_order: int
+    answered_count: int
+    memory_count: int
+    open_question_count: int
+    coverage_score: float
+    status: MemoirCoverageStatus
+    signals_json: dict[str, object] = Field(default_factory=dict)
+    calculated_at: datetime
+
+
 class MemoirQuestionCandidateResponse(BaseModel):
     id: str
     project_id: str
@@ -492,6 +540,23 @@ class MemoirOutputResponse(BaseModel):
     updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class MemoirOutputVersionResponse(BaseModel):
+    id: str
+    output_id: str
+    version: int
+    content: str
+    model: str | None = None
+    prompt_snapshot: str
+    feedback: str | None = None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class MemoirOutputDetailResponse(MemoirOutputResponse):
+    versions: list[MemoirOutputVersionResponse] = Field(default_factory=list)
 
 
 class MemoirSessionProcessResponse(BaseModel):

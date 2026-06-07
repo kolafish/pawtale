@@ -3,6 +3,26 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.memoir import MemoirSession, MemoirSessionSummary
 from app.schemas.memoir import MemoirSessionSummaryResponse
+from app.services.memoir.access import load_session
+
+
+async def get_session_summary(
+    db: AsyncSession,
+    user_id: str,
+    session_id: str,
+) -> MemoirSessionSummaryResponse | None:
+    session = await load_session(db, session_id, user_id)
+    session_summary = await db.scalar(
+        select(MemoirSessionSummary).where(
+            MemoirSessionSummary.project_id == session.project_id,
+            MemoirSessionSummary.session_id == session_id,
+        )
+    )
+    return (
+        MemoirSessionSummaryResponse.model_validate(session_summary)
+        if session_summary
+        else None
+    )
 
 
 async def upsert_session_summary(
