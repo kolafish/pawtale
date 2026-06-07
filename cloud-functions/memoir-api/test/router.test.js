@@ -102,6 +102,23 @@ test("seeds a current session with template questions", async () => {
   assert.equal(response.data.current_question.prompt, "你小时候最常去的一个地方是哪里？那里有什么声音、气味，或者你现在还记得的细节？");
 });
 
+test("returns a memory-first dashboard with default coverage topics", async () => {
+  const store = new MemoryStore();
+  const response = await request({
+    method: "GET",
+    path: "/api/mobile/memoir/dashboard",
+  }, { store });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.data.project.type, "memoir");
+  assert.equal(response.data.coverage.length, 10);
+  assert.equal(response.data.coverage[0].coverage_score, 0);
+  assert.equal(response.data.coverage[0].status, "red");
+  assert.equal(response.data.memory_stats.total_memory_count, 0);
+  assert.equal(response.data.memory_stats.coverage_average, 0);
+  assert.equal(response.data.outputs.length, 0);
+});
+
 test("answers a question and advances to the next pending question", async () => {
   const store = new MemoryStore();
   const state = await request({
@@ -658,6 +675,16 @@ test("processes session memory surfaces coverage and question candidates", async
 
   const outputs = await request({ method: "GET", path: "/api/mobile/memoir/outputs" }, { store });
   assert.equal(outputs.data[0].output_type, "story_fragment");
+  assert.equal(outputs.data[0].version_count, 2);
+  assert.ok(outputs.data[0].content_preview.includes("第一次去重庆厂里上班"));
+
+  const dashboard = await request({ method: "GET", path: "/api/mobile/memoir/dashboard" }, { store });
+  assert.equal(dashboard.data.memory_stats.total_memory_count, 4);
+  assert.equal(dashboard.data.memory_stats.draft_memory_count, 4);
+  assert.equal(dashboard.data.memory_stats.open_question_count, 0);
+  assert.equal(dashboard.data.outputs[0].content_preview, outputs.data[0].content_preview);
+  assert.equal(dashboard.data.coverage.length, 10);
+  assert.ok(dashboard.data.coverage.some((item) => item.key === "first_job" && item.coverage_score > 0));
 
   assert.equal((await store.findMany(COLLECTIONS.personMemories, { openid: "openid_a" })).length, 1);
   assert.equal((await store.findMany(COLLECTIONS.memoryEvidence, { openid: "openid_a" })).length, 5);

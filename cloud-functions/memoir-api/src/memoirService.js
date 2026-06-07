@@ -1101,6 +1101,7 @@ async function processSessionMemory(store, openid, sessionId, dependencies) {
       prompt_snapshot: extraction.prompt || "",
     });
   }
+  await calculateCoverageSnapshots(store, openid);
 
   return {
     session_summary: sessionSummary,
@@ -1239,18 +1240,33 @@ async function latestCoverageSnapshots(store, openid, projectId) {
 
 async function getCoverageMap(store, openid) {
   const project = await getOrCreateProject(store, openid);
-  const topics = await store.findMany(COLLECTIONS.coverageTopics, {
-    openid,
-    project_id: project.id,
-  }, {
-    orderBy: [{ field: "sort_order", direction: "asc" }],
-  });
-  const topicById = new Map(topics.map((topic) => [topic.id, topic]));
+  const topics = await initializeDefaultCoverageTopics(store, openid, project.id);
   const snapshots = await latestCoverageSnapshots(store, openid, project.id);
-  return snapshots.map((snapshot) => {
-    const topic = topicById.get(snapshot.topic_id);
-    if (!topic) {
-      return null;
+  const snapshotByTopicId = new Map(snapshots.map((snapshot) => [snapshot.topic_id, snapshot]));
+  return topics.map((topic) => {
+    const snapshot = snapshotByTopicId.get(topic.id);
+    const keywords = parseJsonArray(topic.keywords_json);
+    if (!snapshot) {
+      return {
+        topic_id: topic.id,
+        key: topic.key,
+        name: topic.name,
+        life_stage: topic.life_stage,
+        description: topic.description,
+        sort_order: topic.sort_order,
+        answered_count: 0,
+        memory_count: 0,
+        open_question_count: 0,
+        coverage_score: 0,
+        status: MemoirCoverageStatus.RED,
+        signals_json: {
+          topic_key: topic.key,
+          topic_name: topic.name,
+          keywords,
+          has_open_questions: false,
+        },
+        calculated_at: "",
+      };
     }
     return {
       topic_id: topic.id,
@@ -1267,7 +1283,7 @@ async function getCoverageMap(store, openid) {
       signals_json: parseJsonObject(snapshot.signals_json),
       calculated_at: snapshot.calculated_at,
     };
-  }).filter(Boolean);
+  });
 }
 
 async function existingCandidateQuestions(store, openid, projectId) {
@@ -1777,12 +1793,30 @@ async function acceptDraft(store, openid, draftId) {
 
 async function listOutputs(store, openid) {
   const project = await getOrCreateProject(store, openid);
-  return store.findMany(COLLECTIONS.outputs, {
+  const outputs = await store.findMany(COLLECTIONS.outputs, {
     openid,
     project_id: project.id,
   }, {
     orderBy: [{ field: "updated_at", direction: "desc" }],
   });
+  const enriched = [];
+  for (const output of outputs) {
+    const versions = await store.findMany(COLLECTIONS.outputVersions, {
+      openid,
+      output_id: output.id,
+    }, {
+      orderBy: [{ field: "version", direction: "desc" }],
+    });
+    const latestVersion = versions[0] || null;
+    enriched.push({
+      ...output,
+      content_preview: latestVersion ? previewText(latestVersion.content) : "",
+      latest_version: latestVersion ? latestVersion.version : null,
+      latest_version_created_at: latestVersion ? latestVersion.created_at : null,
+      version_count: versions.length,
+    });
+  }
+  return enriched;
 }
 
 async function getOutput(store, openid, outputId) {
@@ -1807,11 +1841,93 @@ async function getOutput(store, openid, outputId) {
   };
 }
 
+function countRows(rows, predicate) {
+  return rows.filter(predicate).length;
+}
+
+function averageCoverage(coverage) {
+  if (!coverage.length) {
+    return 0;
+  }
+  return Math.round(coverage.reduce((total, item) => total + (Number(item.coverage_score) || 0), 0) / coverage.length);
+}
+
+function memoryStats({ people, events, places, themes, openQuestions, coverage, candidates, outputs }) {
+  const memories = [...people, ...events, ...places, ...themes];
+  return {
+    total_memory_count: memories.length,
+    draft_memory_count: countRows(memories, (item) => item.status === MemoirMemoryStatus.DRAFT),
+    confirmed_memory_count: countRows(memories, (item) => item.status === MemoirMemoryStatus.CONFIRMED),
+    rejected_memory_count: countRows(memories, (item) => item.status === MemoirMemoryStatus.REJECTED),
+    open_question_count: countRows(openQuestions, (item) => item.status === MemoirOpenQuestionStatus.OPEN),
+    asked_open_question_count: countRows(openQuestions, (item) => item.status === MemoirOpenQuestionStatus.ASKED),
+    answered_open_question_count: countRows(openQuestions, (item) => item.status === MemoirOpenQuestionStatus.ANSWERED),
+    dismissed_open_question_count: countRows(openQuestions, (item) => item.status === MemoirOpenQuestionStatus.DISMISSED),
+    question_candidate_count: candidates.length,
+    output_count: outputs.length,
+    coverage_average: averageCoverage(coverage),
+    low_coverage_count: countRows(coverage, (item) => item.status !== MemoirCoverageStatus.GREEN),
+  };
+}
+
+async function getMemoryDashboard(store, openid) {
+  const project = await getOrCreateProject(store, openid);
+  const interview = await getOrCreateCurrentSession(store, openid);
+  const [
+    summary,
+    sessionSummary,
+    people,
+    events,
+    places,
+    themes,
+    openQuestions,
+    coverage,
+    candidates,
+    outputs,
+  ] = await Promise.all([
+    getSummary(store, openid),
+    getSessionSummary(store, openid, interview.session.id),
+    listMemoryRows(store, openid, project.id, MemoirMemoryType.PERSON),
+    listMemoryRows(store, openid, project.id, MemoirMemoryType.EVENT),
+    listMemoryRows(store, openid, project.id, MemoirMemoryType.PLACE),
+    listMemoryRows(store, openid, project.id, MemoirMemoryType.THEME),
+    listOpenQuestions(store, openid),
+    getCoverageMap(store, openid),
+    listQuestionCandidates(store, openid),
+    listOutputs(store, openid),
+  ]);
+  return {
+    project: createProjectResponse(project),
+    interview,
+    summary,
+    session_summary: sessionSummary,
+    people,
+    events,
+    places,
+    themes,
+    open_questions: openQuestions,
+    coverage,
+    candidates,
+    outputs,
+    memory_stats: memoryStats({
+      people,
+      events,
+      places,
+      themes,
+      openQuestions,
+      coverage,
+      candidates,
+      outputs,
+    }),
+  };
+}
+
 function createMemoirService(store, context, dependencies = {}) {
   const openid = requireOpenId(context);
 
   return {
     getProject: async () => createProjectResponse(await getOrCreateProject(store, openid)),
+    getMemoryDashboard: async () => getMemoryDashboard(store, openid),
     getCurrentSession: async () => getOrCreateCurrentSession(store, openid),
     getNextQuestion: async () => getNextQuestion(store, openid),
     getSummary: async () => getSummary(store, openid),
