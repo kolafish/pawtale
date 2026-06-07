@@ -498,6 +498,19 @@ async function getOrCreateProject(store, openid) {
   return getActiveProject(store, openid, user);
 }
 
+async function updateProjectScopedRow(store, collection, row, projectId, patch = {}) {
+  const nextPatch = { ...patch };
+  if (projectId && !row.project_id) {
+    nextPatch.project_id = projectId;
+  }
+  const entries = Object.entries(nextPatch)
+    .filter(([, value]) => value !== undefined);
+  if (!entries.length) {
+    return row;
+  }
+  return store.updateById(collection, row.id, Object.fromEntries(entries));
+}
+
 async function getMemoirIdentity(store, openid) {
   const user = await getOrCreateMemoirUser(store, openid);
   const activeProject = await getActiveProject(store, openid, user);
@@ -591,6 +604,7 @@ async function createSession(store, openid, projectId) {
   for (const [index, prompt] of DEFAULT_MEMOIR_QUESTIONS.entries()) {
     const question = await store.insert(COLLECTIONS.questions, {
       openid,
+      project_id: projectId,
       session_id: session.id,
       prompt,
       source: "template",
@@ -611,18 +625,18 @@ async function createSession(store, openid, projectId) {
   return session;
 }
 
-async function loadSession(store, openid, sessionId) {
+async function loadSession(store, openid, sessionId, projectId = null) {
   const session = await store.findOne(COLLECTIONS.sessions, {
     openid,
     _id: sessionId,
   });
-  if (!session) {
+  if (!session || (projectId && session.project_id !== projectId)) {
     throw new ApiError(404, "访谈会话不存在");
   }
   return session;
 }
 
-async function loadQuestion(store, openid, questionId) {
+async function loadQuestion(store, openid, questionId, projectId = null) {
   const question = await store.findOne(COLLECTIONS.questions, {
     openid,
     _id: questionId,
@@ -630,10 +644,22 @@ async function loadQuestion(store, openid, questionId) {
   if (!question) {
     throw new ApiError(404, "问题不存在");
   }
+  if (!projectId) {
+    return question;
+  }
+  if (question.project_id && question.project_id !== projectId) {
+    throw new ApiError(404, "问题不存在");
+  }
+  if (!question.project_id) {
+    const session = await loadSession(store, openid, question.session_id, projectId);
+    return updateProjectScopedRow(store, COLLECTIONS.questions, question, projectId, {
+      session_id: session.id,
+    });
+  }
   return question;
 }
 
-async function loadAnswer(store, openid, answerId) {
+async function loadAnswer(store, openid, answerId, projectId = null) {
   const answer = await store.findOne(COLLECTIONS.answers, {
     openid,
     _id: answerId,
@@ -641,10 +667,22 @@ async function loadAnswer(store, openid, answerId) {
   if (!answer) {
     throw new ApiError(404, "回答不存在");
   }
+  if (!projectId) {
+    return answer;
+  }
+  if (answer.project_id && answer.project_id !== projectId) {
+    throw new ApiError(404, "回答不存在");
+  }
+  if (!answer.project_id) {
+    const question = await loadQuestion(store, openid, answer.question_id, projectId);
+    return updateProjectScopedRow(store, COLLECTIONS.answers, answer, projectId, {
+      session_id: answer.session_id || question.session_id,
+    });
+  }
   return answer;
 }
 
-async function loadDraft(store, openid, draftId) {
+async function loadDraft(store, openid, draftId, projectId = null) {
   const draft = await store.findOne(COLLECTIONS.drafts, {
     openid,
     _id: draftId,
@@ -652,19 +690,43 @@ async function loadDraft(store, openid, draftId) {
   if (!draft) {
     throw new ApiError(404, "整理稿不存在");
   }
+  if (!projectId) {
+    return draft;
+  }
+  if (draft.project_id && draft.project_id !== projectId) {
+    throw new ApiError(404, "整理稿不存在");
+  }
+  if (!draft.project_id) {
+    const answer = await loadAnswer(store, openid, draft.answer_id, projectId);
+    return updateProjectScopedRow(store, COLLECTIONS.drafts, draft, projectId, {
+      session_id: draft.session_id || answer.session_id,
+      question_id: draft.question_id || answer.question_id,
+    });
+  }
   return draft;
 }
 
-async function getOrderedQuestions(store, openid, sessionId) {
-  return store.findMany(COLLECTIONS.questions, {
+async function getOrderedQuestions(store, openid, sessionId, projectId = null) {
+  const rows = await store.findMany(COLLECTIONS.questions, {
     openid,
     session_id: sessionId,
   }, {
     orderBy: [{ field: "sort_order", direction: "asc" }],
   });
+  if (!projectId) {
+    return rows;
+  }
+  const questions = [];
+  for (const question of rows) {
+    if (question.project_id && question.project_id !== projectId) {
+      continue;
+    }
+    questions.push(await updateProjectScopedRow(store, COLLECTIONS.questions, question, projectId));
+  }
+  return questions;
 }
 
-async function getLatestDraft(store, openid, answers) {
+async function getLatestDraft(store, openid, answers, projectId = null) {
   const drafts = [];
   for (const answer of answers) {
     const draft = await store.findOne(COLLECTIONS.drafts, {
@@ -674,7 +736,13 @@ async function getLatestDraft(store, openid, answers) {
       orderBy: [{ field: "updated_at", direction: "desc" }],
     });
     if (draft) {
-      drafts.push(draft);
+      if (projectId && draft.project_id && draft.project_id !== projectId) {
+        continue;
+      }
+      drafts.push(await updateProjectScopedRow(store, COLLECTIONS.drafts, draft, projectId, {
+        session_id: draft.session_id || answer.session_id,
+        question_id: draft.question_id || answer.question_id,
+      }));
     }
   }
 
@@ -817,18 +885,40 @@ async function getProjectRows(store, openid) {
   });
   const questions = [];
   for (const session of sessions) {
-    questions.push(...await getOrderedQuestions(store, openid, session.id));
+    questions.push(...await getOrderedQuestions(store, openid, session.id, project.id));
   }
 
   const questionIds = new Set(questions.map((question) => question.id));
-  const answers = (await store.findMany(COLLECTIONS.answers, { openid }))
-    .filter((answer) => questionIds.has(answer.question_id));
+  const answers = [];
+  for (const answer of await store.findMany(COLLECTIONS.answers, { openid })) {
+    if (!questionIds.has(answer.question_id) || (answer.project_id && answer.project_id !== project.id)) {
+      continue;
+    }
+    const question = questions.find((item) => item.id === answer.question_id);
+    answers.push(await updateProjectScopedRow(store, COLLECTIONS.answers, answer, project.id, {
+      session_id: answer.session_id || question?.session_id,
+    }));
+  }
   const answerIds = new Set(answers.map((answer) => answer.id));
-  const drafts = (await store.findMany(COLLECTIONS.drafts, { openid }))
-    .filter((draft) => answerIds.has(draft.answer_id));
+  const drafts = [];
+  for (const draft of await store.findMany(COLLECTIONS.drafts, { openid })) {
+    if (!answerIds.has(draft.answer_id) || (draft.project_id && draft.project_id !== project.id)) {
+      continue;
+    }
+    const answer = answers.find((item) => item.id === draft.answer_id);
+    drafts.push(await updateProjectScopedRow(store, COLLECTIONS.drafts, draft, project.id, {
+      session_id: draft.session_id || answer?.session_id,
+      question_id: draft.question_id || answer?.question_id,
+    }));
+  }
   const audioFileIds = new Set(answers.map((answer) => answer.audio_file_id).filter(Boolean));
-  const audioFiles = (await store.findMany(COLLECTIONS.audioFiles, { openid }))
-    .filter((audioFile) => audioFileIds.has(audioFile.id));
+  const audioFiles = [];
+  for (const audioFile of await store.findMany(COLLECTIONS.audioFiles, { openid })) {
+    if (!audioFileIds.has(audioFile.id) || (audioFile.project_id && audioFile.project_id !== project.id)) {
+      continue;
+    }
+    audioFiles.push(await updateProjectScopedRow(store, COLLECTIONS.audioFiles, audioFile, project.id));
+  }
 
   return { project, sessions, questions, answers, drafts, audioFiles };
 }
@@ -941,21 +1031,28 @@ async function getSummary(store, openid) {
 }
 
 async function collectSessionTurns(store, openid, sessionId) {
-  const questions = await getOrderedQuestions(store, openid, sessionId);
+  const session = await loadSession(store, openid, sessionId);
+  const questions = await getOrderedQuestions(store, openid, session.id, session.project_id);
   const turns = [];
   for (const question of questions) {
     const answer = await store.findOne(COLLECTIONS.answers, {
       openid,
       question_id: question.id,
     });
+    if (answer?.project_id && answer.project_id !== session.project_id) {
+      continue;
+    }
     const text = cleanText(answer?.transcript_edited || answer?.transcript_raw);
     if (!answer || !text) {
       continue;
     }
+    const scopedAnswer = await updateProjectScopedRow(store, COLLECTIONS.answers, answer, session.project_id, {
+      session_id: answer.session_id || session.id,
+    });
     turns.push({
       session_id: sessionId,
       question_id: question.id,
-      answer_id: answer.id,
+      answer_id: scopedAnswer.id,
       question: question.prompt,
       answer_text: text,
     });
@@ -1107,10 +1204,11 @@ function slimOpenQuestions(rows) {
 
 async function upsertSessionSummary(store, openid, projectId, sessionId, data) {
   const now = nowIso();
-  const existing = await store.findOne(COLLECTIONS.sessionSummaries, {
+  const existingRows = await store.findMany(COLLECTIONS.sessionSummaries, {
     openid,
     session_id: sessionId,
   });
+  const existing = existingRows.find((row) => !row.project_id || row.project_id === projectId) || null;
   const patch = {
     project_id: projectId,
     summary: data.summary,
@@ -1134,11 +1232,16 @@ async function upsertSessionSummary(store, openid, projectId, sessionId, data) {
 }
 
 async function getSessionSummary(store, openid, sessionId) {
-  const summary = await store.findOne(COLLECTIONS.sessionSummaries, {
+  const project = await getOrCreateProject(store, openid);
+  await loadSession(store, openid, sessionId, project.id);
+  const summaries = await store.findMany(COLLECTIONS.sessionSummaries, {
     openid,
     session_id: sessionId,
   });
-  return summary || null;
+  const summary = summaries.find((row) => !row.project_id || row.project_id === project.id) || null;
+  return summary
+    ? updateProjectScopedRow(store, COLLECTIONS.sessionSummaries, summary, project.id)
+    : null;
 }
 
 async function upsertSessionOutputVersion(store, openid, projectId, sessionId, data) {
@@ -1169,11 +1272,19 @@ async function upsertSessionOutputVersion(store, openid, projectId, sessionId, d
     openid,
     output_id: output.id,
   });
-  const version = versions.length
-    ? Math.max(...versions.map((item) => Number(item.version) || 0)) + 1
+  const scopedVersions = [];
+  for (const row of versions) {
+    if (row.project_id && row.project_id !== projectId) {
+      continue;
+    }
+    scopedVersions.push(await updateProjectScopedRow(store, COLLECTIONS.outputVersions, row, projectId));
+  }
+  const version = scopedVersions.length
+    ? Math.max(...scopedVersions.map((item) => Number(item.version) || 0)) + 1
     : 1;
   await store.insert(COLLECTIONS.outputVersions, {
     openid,
+    project_id: projectId,
     output_id: output.id,
     version,
     content: data.content,
@@ -1186,7 +1297,8 @@ async function upsertSessionOutputVersion(store, openid, projectId, sessionId, d
 }
 
 async function processSessionMemory(store, openid, sessionId, dependencies) {
-  const session = await loadSession(store, openid, sessionId);
+  const project = await getOrCreateProject(store, openid);
+  const session = await loadSession(store, openid, sessionId, project.id);
   const turns = await collectSessionTurns(store, openid, session.id);
   if (!turns.length) {
     throw new ApiError(400, "本次访谈没有可处理的回答");
@@ -1657,8 +1769,10 @@ async function listQuestionCandidates(store, openid) {
 }
 
 async function selectCandidateAsQuestion(store, openid, candidateId) {
+  const project = await getOrCreateProject(store, openid);
   const candidate = await store.findOne(COLLECTIONS.questionCandidates, {
     openid,
+    project_id: project.id,
     _id: candidateId,
   });
   if (!candidate) {
@@ -1670,18 +1784,19 @@ async function selectCandidateAsQuestion(store, openid, candidateId) {
   if (!candidate.session_id) {
     throw new ApiError(400, "问题候选未关联访谈");
   }
-  const existingQuestion = await store.findOne(COLLECTIONS.questions, {
-    openid,
-    session_id: candidate.session_id,
-    prompt: candidate.question,
-    status: MemoirQuestionStatus.PENDING,
-  });
+  await loadSession(store, openid, candidate.session_id, project.id);
+  const existingQuestion = (await getOrderedQuestions(store, openid, candidate.session_id, project.id))
+    .find((question) => (
+      question.prompt === candidate.question
+      && question.status === MemoirQuestionStatus.PENDING
+    ));
   let question = existingQuestion;
   if (!question) {
-    const questions = await getOrderedQuestions(store, openid, candidate.session_id);
+    const questions = await getOrderedQuestions(store, openid, candidate.session_id, project.id);
     const sortOrder = questions.reduce((max, item) => Math.max(max, Number(item.sort_order) || 0), 0) + 1;
     question = await store.insert(COLLECTIONS.questions, {
       openid,
+      project_id: project.id,
       session_id: candidate.session_id,
       prompt: candidate.question,
       source: "ai_generated",
@@ -1708,12 +1823,13 @@ async function selectCandidateAsQuestion(store, openid, candidateId) {
 }
 
 async function getOrCreatePlannedQuestion(store, openid, sessionId) {
-  const existing = await store.findOne(COLLECTIONS.questions, {
-    openid,
-    session_id: sessionId,
-    source: "ai_generated",
-    status: MemoirQuestionStatus.PENDING,
-  });
+  const project = await getOrCreateProject(store, openid);
+  await loadSession(store, openid, sessionId, project.id);
+  const existing = (await getOrderedQuestions(store, openid, sessionId, project.id))
+    .find((question) => (
+      question.source === "ai_generated"
+      && question.status === MemoirQuestionStatus.PENDING
+    ));
   if (existing) {
     await store.updateById(COLLECTIONS.sessions, sessionId, {
       current_question_id: existing.id,
@@ -1740,8 +1856,9 @@ async function getOrCreatePlannedQuestion(store, openid, sessionId) {
 }
 
 async function advanceSession(store, openid, sessionId) {
-  const session = await loadSession(store, openid, sessionId);
-  const questions = await getOrderedQuestions(store, openid, sessionId);
+  const project = await getOrCreateProject(store, openid);
+  const session = await loadSession(store, openid, sessionId, project.id);
+  const questions = await getOrderedQuestions(store, openid, sessionId, project.id);
   const currentPendingQuestion = questions.find((question) => (
     question.id === session.current_question_id
     && question.status === MemoirQuestionStatus.PENDING
@@ -1763,9 +1880,10 @@ async function advanceSession(store, openid, sessionId) {
 }
 
 async function getSessionState(store, openid, sessionId) {
-  const session = await loadSession(store, openid, sessionId);
+  const project = await getOrCreateProject(store, openid);
+  const session = await loadSession(store, openid, sessionId, project.id);
   const advancedSession = await advanceSession(store, openid, session.id);
-  const questions = await getOrderedQuestions(store, openid, session.id);
+  const questions = await getOrderedQuestions(store, openid, session.id, project.id);
   const currentQuestion = questions.find((question) => question.id === advancedSession.current_question_id) || null;
   const completedStatuses = new Set([
     MemoirQuestionStatus.ANSWERED,
@@ -1774,11 +1892,19 @@ async function getSessionState(store, openid, sessionId) {
   const answers = await store.findMany(COLLECTIONS.answers, {
     openid,
   });
-  const latestDraft = await getLatestDraft(
-    store,
-    openid,
-    answers.filter((answer) => questions.some((question) => question.id === answer.question_id)),
-  );
+  const sessionAnswers = [];
+  for (const answer of answers) {
+    if (!questions.some((question) => question.id === answer.question_id)) {
+      continue;
+    }
+    if (answer.project_id && answer.project_id !== project.id) {
+      continue;
+    }
+    sessionAnswers.push(await updateProjectScopedRow(store, COLLECTIONS.answers, answer, project.id, {
+      session_id: answer.session_id || session.id,
+    }));
+  }
+  const latestDraft = await getLatestDraft(store, openid, sessionAnswers, project.id);
 
   return {
     session: advancedSession,
@@ -1797,7 +1923,8 @@ async function getNextQuestion(store, openid) {
 }
 
 async function skipQuestion(store, openid, questionId) {
-  const question = await loadQuestion(store, openid, questionId);
+  const project = await getOrCreateProject(store, openid);
+  const question = await loadQuestion(store, openid, questionId, project.id);
   if (question.status === MemoirQuestionStatus.ANSWERED) {
     throw new ApiError(409, "已回答的问题不能跳过");
   }
@@ -1808,12 +1935,12 @@ async function skipQuestion(store, openid, questionId) {
   return getSessionState(store, openid, question.session_id);
 }
 
-async function answerAudioPatch(store, openid, data) {
+async function answerAudioPatch(store, openid, projectId, data) {
   if (!data.audio_file_id) {
     return {};
   }
 
-  const audioFile = await loadAudioFile(store, openid, data.audio_file_id);
+  const audioFile = await loadAudioFile(store, openid, data.audio_file_id, projectId);
   return {
     audio_file_id: audioFile.id,
     duration_seconds: cleanPositiveNumber(data.duration_seconds, audioFile.duration_seconds),
@@ -1821,21 +1948,27 @@ async function answerAudioPatch(store, openid, data) {
 }
 
 async function createTextAnswer(store, openid, data) {
-  const question = await loadQuestion(store, openid, data.question_id);
+  const project = await getOrCreateProject(store, openid);
+  const question = await loadQuestion(store, openid, data.question_id, project.id);
   if (question.status === MemoirQuestionStatus.SKIPPED) {
     throw new ApiError(409, "已跳过的问题不能回答");
   }
 
   const transcript = cleanAnswerText(data.text);
-  const audioPatch = await answerAudioPatch(store, openid, data);
+  const audioPatch = await answerAudioPatch(store, openid, project.id, data);
   const now = nowIso();
   const existing = await store.findOne(COLLECTIONS.answers, {
     openid,
     question_id: question.id,
   });
+  if (existing?.project_id && existing.project_id !== project.id) {
+    throw new ApiError(404, "回答不存在");
+  }
 
   const answer = existing
     ? await store.updateById(COLLECTIONS.answers, existing.id, {
+      project_id: project.id,
+      session_id: question.session_id,
       transcript_raw: existing.transcript_raw || transcript,
       transcript_edited: transcript,
       status: MemoirAnswerStatus.ANSWERED,
@@ -1844,6 +1977,8 @@ async function createTextAnswer(store, openid, data) {
     })
     : await store.insert(COLLECTIONS.answers, {
       openid,
+      project_id: project.id,
+      session_id: question.session_id,
       question_id: question.id,
       audio_file_id: audioPatch.audio_file_id || null,
       transcript_raw: transcript,
@@ -1862,15 +1997,17 @@ async function createTextAnswer(store, openid, data) {
 }
 
 async function updateAnswerText(store, openid, answerId, data) {
-  const answer = await loadAnswer(store, openid, answerId);
+  const project = await getOrCreateProject(store, openid);
+  const answer = await loadAnswer(store, openid, answerId, project.id);
   const text = cleanAnswerText(data.text);
   const updated = await store.updateById(COLLECTIONS.answers, answer.id, {
+    project_id: project.id,
     transcript_edited: text,
     status: MemoirAnswerStatus.ANSWERED,
     updated_at: nowIso(),
   });
 
-  const question = await loadQuestion(store, openid, updated.question_id);
+  const question = await loadQuestion(store, openid, updated.question_id, project.id);
   await store.updateById(COLLECTIONS.questions, question.id, {
     status: MemoirQuestionStatus.ANSWERED,
   });
@@ -1879,12 +2016,13 @@ async function updateAnswerText(store, openid, answerId, data) {
 }
 
 async function deleteAnswer(store, openid, answerId) {
-  const answer = await loadAnswer(store, openid, answerId);
-  const question = await loadQuestion(store, openid, answer.question_id);
-  const drafts = await store.findMany(COLLECTIONS.drafts, {
+  const project = await getOrCreateProject(store, openid);
+  const answer = await loadAnswer(store, openid, answerId, project.id);
+  const question = await loadQuestion(store, openid, answer.question_id, project.id);
+  const drafts = (await store.findMany(COLLECTIONS.drafts, {
     openid,
     answer_id: answer.id,
-  });
+  })).filter((draft) => !draft.project_id || draft.project_id === project.id);
 
   for (const draft of drafts) {
     await store.deleteById(COLLECTIONS.drafts, draft.id);
@@ -1903,11 +2041,13 @@ async function deleteAnswer(store, openid, answerId) {
 }
 
 async function registerAudioFile(store, openid, data) {
+  const project = await getOrCreateProject(store, openid);
   const now = nowIso();
   const cloudPath = cleanCloudAudioPath(openid, data.cloud_path);
   const extension = audioExtension(cloudPath);
   const audioFile = await store.insert(COLLECTIONS.audioFiles, {
     openid,
+    project_id: project.id,
     file_id: cleanCloudFileId(data.file_id, cloudPath),
     cloud_path: cloudPath,
     mime_type: cleanAudioMimeType(data.mime_type, extension),
@@ -1928,7 +2068,7 @@ async function registerAudioFile(store, openid, data) {
   };
 }
 
-async function loadAudioFile(store, openid, audioFileId) {
+async function loadAudioFile(store, openid, audioFileId, projectId = null) {
   const audioFile = await store.findOne(COLLECTIONS.audioFiles, {
     openid,
     _id: audioFileId,
@@ -1936,7 +2076,13 @@ async function loadAudioFile(store, openid, audioFileId) {
   if (!audioFile) {
     throw new ApiError(404, "音频文件不存在");
   }
-  return audioFile;
+  if (!projectId) {
+    return audioFile;
+  }
+  if (audioFile.project_id && audioFile.project_id !== projectId) {
+    throw new ApiError(404, "音频文件不存在");
+  }
+  return updateProjectScopedRow(store, COLLECTIONS.audioFiles, audioFile, projectId);
 }
 
 async function transcribeAudioFile(store, openid, audioFileId, dependencies) {
@@ -1947,7 +2093,8 @@ async function transcribeAudioFile(store, openid, audioFileId, dependencies) {
     throw new ApiError(500, "语音转写服务未配置");
   }
 
-  const audioFile = await loadAudioFile(store, openid, audioFileId);
+  const project = await getOrCreateProject(store, openid);
+  const audioFile = await loadAudioFile(store, openid, audioFileId, project.id);
   const audioBytes = await dependencies.storage.downloadFile(audioFile.file_id);
   const result = await dependencies.asr.transcribe(audioBytes, audioFile);
   await store.updateById(COLLECTIONS.audioFiles, audioFile.id, {
@@ -1968,12 +2115,13 @@ async function generateDraft(store, openid, answerId, dependencies) {
     throw new ApiError(500, "AI 整理服务未配置");
   }
 
-  const answer = await loadAnswer(store, openid, answerId);
+  const project = await getOrCreateProject(store, openid);
+  const answer = await loadAnswer(store, openid, answerId, project.id);
   if (answer.status === MemoirAnswerStatus.CONFIRMED) {
     throw new ApiError(409, "已确认的回答不能重新整理");
   }
 
-  const question = await loadQuestion(store, openid, answer.question_id);
+  const question = await loadQuestion(store, openid, answer.question_id, project.id);
   const generated = await dependencies.drafting.generate({
     questionPrompt: question.prompt,
     answerText: answerText(answer),
@@ -1984,9 +2132,15 @@ async function generateDraft(store, openid, answerId, dependencies) {
     openid,
     answer_id: answer.id,
   });
+  if (existing?.project_id && existing.project_id !== project.id) {
+    throw new ApiError(404, "整理稿不存在");
+  }
 
   const draft = existing
     ? await store.updateById(COLLECTIONS.drafts, existing.id, {
+      project_id: project.id,
+      session_id: answer.session_id || question.session_id,
+      question_id: question.id,
       content_raw: draftText,
       content_edited: draftText,
       status: MemoirDraftStatus.DRAFT,
@@ -1994,6 +2148,9 @@ async function generateDraft(store, openid, answerId, dependencies) {
     })
     : await store.insert(COLLECTIONS.drafts, {
       openid,
+      project_id: project.id,
+      session_id: answer.session_id || question.session_id,
+      question_id: question.id,
       answer_id: answer.id,
       content_raw: draftText,
       content_edited: draftText,
@@ -2010,7 +2167,8 @@ async function generateDraft(store, openid, answerId, dependencies) {
 }
 
 async function updateDraftContent(store, openid, draftId, data) {
-  const draft = await loadDraft(store, openid, draftId);
+  const project = await getOrCreateProject(store, openid);
+  const draft = await loadDraft(store, openid, draftId, project.id);
   if (draft.status === MemoirDraftStatus.ACCEPTED) {
     throw new ApiError(409, "已确认的整理稿不能编辑");
   }
@@ -2022,7 +2180,9 @@ async function updateDraftContent(store, openid, draftId, data) {
 }
 
 async function acceptDraft(store, openid, draftId) {
-  const draft = await loadDraft(store, openid, draftId);
+  const project = await getOrCreateProject(store, openid);
+  const draft = await loadDraft(store, openid, draftId, project.id);
+  await loadAnswer(store, openid, draft.answer_id, project.id);
   cleanDraftText(draft.content_edited);
   const now = nowIso();
   const acceptedDraft = await store.updateById(COLLECTIONS.drafts, draft.id, {
@@ -2052,13 +2212,20 @@ async function listOutputs(store, openid) {
     }, {
       orderBy: [{ field: "version", direction: "desc" }],
     });
-    const latestVersion = versions[0] || null;
+    const scopedVersions = [];
+    for (const version of versions) {
+      if (version.project_id && version.project_id !== project.id) {
+        continue;
+      }
+      scopedVersions.push(await updateProjectScopedRow(store, COLLECTIONS.outputVersions, version, project.id));
+    }
+    const latestVersion = scopedVersions[0] || null;
     enriched.push({
       ...output,
       content_preview: latestVersion ? previewText(latestVersion.content) : "",
       latest_version: latestVersion ? latestVersion.version : null,
       latest_version_created_at: latestVersion ? latestVersion.created_at : null,
-      version_count: versions.length,
+      version_count: scopedVersions.length,
     });
   }
   return enriched;
@@ -2080,9 +2247,16 @@ async function getOutput(store, openid, outputId) {
   }, {
     orderBy: [{ field: "version", direction: "asc" }],
   });
+  const scopedVersions = [];
+  for (const version of versions) {
+    if (version.project_id && version.project_id !== project.id) {
+      continue;
+    }
+    scopedVersions.push(await updateProjectScopedRow(store, COLLECTIONS.outputVersions, version, project.id));
+  }
   return {
     ...output,
-    versions,
+    versions: scopedVersions,
   };
 }
 

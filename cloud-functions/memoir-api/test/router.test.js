@@ -153,6 +153,98 @@ test("creates renames and activates multiple memoir projects", async () => {
   assert.equal(current.data.id, first.data.id);
 });
 
+test("scopes interview rows and stories to the active memoir project", async () => {
+  const store = new MemoryStore();
+  const firstState = await request({
+    method: "GET",
+    path: "/api/mobile/memoir/sessions/current",
+  }, { store });
+  const firstProjectId = firstState.data.session.project_id;
+  const firstQuestionId = firstState.data.current_question.id;
+
+  const firstAnswer = await request({
+    method: "POST",
+    path: "/api/mobile/memoir/answers",
+    data: {
+      question_id: firstQuestionId,
+      text: "第一本回忆录里的回答。",
+    },
+  }, { store });
+  assert.equal(firstAnswer.statusCode, 201);
+  assert.equal(firstAnswer.data.project_id, firstProjectId);
+
+  const secondProject = await request({
+    method: "POST",
+    path: "/api/mobile/memoir/projects",
+    data: {
+      title: "第二本回忆录",
+    },
+  }, { store });
+  assert.equal(secondProject.statusCode, 201);
+
+  const secondStoriesBeforeAnswer = await request({
+    method: "GET",
+    path: "/api/mobile/memoir/stories",
+  }, { store });
+  assert.equal(secondStoriesBeforeAnswer.data.total, 0);
+
+  const rejectedCrossProjectAnswer = await request({
+    method: "POST",
+    path: "/api/mobile/memoir/answers",
+    data: {
+      question_id: firstQuestionId,
+      text: "不应该写入第二本。",
+    },
+  }, { store });
+  assert.equal(rejectedCrossProjectAnswer.statusCode, 404);
+
+  const secondState = await request({
+    method: "GET",
+    path: "/api/mobile/memoir/sessions/current",
+  }, { store });
+  assert.equal(secondState.data.session.project_id, secondProject.data.id);
+  assert.notEqual(secondState.data.current_question.id, firstQuestionId);
+
+  const secondAnswer = await request({
+    method: "POST",
+    path: "/api/mobile/memoir/answers",
+    data: {
+      question_id: secondState.data.current_question.id,
+      text: "第二本回忆录里的回答。",
+    },
+  }, { store });
+  assert.equal(secondAnswer.statusCode, 201);
+  assert.equal(secondAnswer.data.project_id, secondProject.data.id);
+
+  const secondStories = await request({
+    method: "GET",
+    path: "/api/mobile/memoir/stories",
+  }, { store });
+  assert.equal(secondStories.data.total, 1);
+  assert.equal(secondStories.data.stories[0].answer_id, secondAnswer.data.id);
+
+  await request({
+    method: "POST",
+    path: `/api/mobile/memoir/projects/${firstProjectId}/activate`,
+  }, { store });
+
+  const firstStories = await request({
+    method: "GET",
+    path: "/api/mobile/memoir/stories",
+  }, { store });
+  assert.equal(firstStories.data.total, 1);
+  assert.equal(firstStories.data.stories[0].answer_id, firstAnswer.data.id);
+
+  const hiddenSecondStory = await request({
+    method: "GET",
+    path: `/api/mobile/memoir/stories/${secondAnswer.data.id}`,
+  }, { store });
+  assert.equal(hiddenSecondStory.statusCode, 404);
+
+  const answers = await store.findMany(COLLECTIONS.answers, { openid: "openid_a" });
+  assert.deepEqual(new Set(answers.map((answer) => answer.project_id)), new Set([firstProjectId, secondProject.data.id]));
+});
+
 test("seeds a current session with template questions", async () => {
   const store = new MemoryStore();
   const response = await request({
