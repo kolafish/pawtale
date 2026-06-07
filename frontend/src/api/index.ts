@@ -15,6 +15,20 @@ import type {
   AnalyzeApplyRequest,
   AnalyzeApplyResponse,
   ReferenceType,
+  MemoirCoverageItem,
+  MemoirEventMemory,
+  MemoirInterviewState,
+  MemoirMemoryStatus,
+  MemoirMemoryType,
+  MemoirOpenQuestion,
+  MemoirOpenQuestionStatus,
+  MemoirOutput,
+  MemoirPersonMemory,
+  MemoirPlaceMemory,
+  MemoirQuestionCandidate,
+  MemoirQuestionResponse,
+  MemoirSessionSummary,
+  MemoirThemeMemory,
 } from '../types';
 
 const api = axios.create({
@@ -130,4 +144,40 @@ export const projectsApi = {
     api.post<MultiReviseResponse>(
       `/projects/${projectId}/documents/${docId}/ai-revise-multi`, data
     ).then(r => r.data),
+};
+
+export const memoirApi = {
+  currentSession: () =>
+    api.get<MemoirInterviewState>('/mobile/memoir/sessions/current').then(r => r.data),
+  processSession: (sessionId: string, data: { ai_model?: string | null } = {}) =>
+    api.post(`/mobile/memoir/sessions/${sessionId}/process`, data).then(r => r.data),
+  getSessionSummary: (sessionId: string) =>
+    api.get<MemoirSessionSummary | null>(`/mobile/memoir/sessions/${sessionId}/summary`).then(r => r.data),
+  listPeople: () =>
+    api.get<MemoirPersonMemory[]>('/mobile/memoir/memories/people').then(r => r.data),
+  listEvents: () =>
+    api.get<MemoirEventMemory[]>('/mobile/memoir/memories/events').then(r => r.data),
+  listPlaces: () =>
+    api.get<MemoirPlaceMemory[]>('/mobile/memoir/memories/places').then(r => r.data),
+  listThemes: () =>
+    api.get<MemoirThemeMemory[]>('/mobile/memoir/memories/themes').then(r => r.data),
+  updateMemory: (
+    memoryType: Exclude<MemoirMemoryType, 'open_question'>,
+    memoryId: string,
+    data: { status?: MemoirMemoryStatus; [key: string]: unknown },
+  ) => api.patch(`/mobile/memoir/memories/${memoryType}/${memoryId}`, data).then(r => r.data),
+  listOpenQuestions: () =>
+    api.get<MemoirOpenQuestion[]>('/mobile/memoir/open-questions').then(r => r.data),
+  updateOpenQuestion: (
+    questionId: string,
+    data: { status?: MemoirOpenQuestionStatus; reason?: string },
+  ) => api.patch<MemoirOpenQuestion>(`/mobile/memoir/open-questions/${questionId}`, data).then(r => r.data),
+  getCoverage: () =>
+    api.get<MemoirCoverageItem[]>('/mobile/memoir/coverage').then(r => r.data),
+  listQuestionCandidates: () =>
+    api.get<MemoirQuestionCandidate[]>('/mobile/memoir/question-candidates').then(r => r.data),
+  selectQuestionCandidate: (candidateId: string) =>
+    api.post<MemoirQuestionResponse>(`/mobile/memoir/question-candidates/${candidateId}/select`).then(r => r.data),
+  listOutputs: () =>
+    api.get<MemoirOutput[]>('/mobile/memoir/outputs').then(r => r.data),
 };

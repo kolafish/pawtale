@@ -15,6 +15,7 @@ from app.models.memoir import (
     MemoirThemeMemory,
 )
 from app.schemas.memoir import (
+    MemoirCoverageItemResponse,
     MemoirCoverageSnapshotResponse,
     MemoirCoverageTopicCreate,
     MemoirCoverageTopicResponse,
@@ -213,3 +214,40 @@ async def latest_coverage_snapshots(
         if snapshot:
             responses.append(MemoirCoverageSnapshotResponse.model_validate(snapshot))
     return responses
+
+
+async def get_coverage_map(
+    db: AsyncSession,
+    user_id: str,
+    project_id: str,
+) -> list[MemoirCoverageItemResponse]:
+    snapshots = await calculate_coverage_snapshots(db, user_id, project_id)
+    topics = await db.execute(
+        select(MemoirCoverageTopic)
+        .where(MemoirCoverageTopic.project_id == project_id)
+        .order_by(MemoirCoverageTopic.sort_order, MemoirCoverageTopic.created_at)
+    )
+    topic_by_id = {topic.id: topic for topic in topics.scalars()}
+    items: list[MemoirCoverageItemResponse] = []
+    for snapshot in snapshots:
+        topic = topic_by_id.get(snapshot.topic_id)
+        if not topic:
+            continue
+        items.append(
+            MemoirCoverageItemResponse(
+                topic_id=topic.id,
+                key=topic.key,
+                name=topic.name,
+                life_stage=topic.life_stage,
+                description=topic.description,
+                sort_order=topic.sort_order,
+                answered_count=snapshot.answered_count,
+                memory_count=snapshot.memory_count,
+                open_question_count=snapshot.open_question_count,
+                coverage_score=snapshot.coverage_score,
+                status=snapshot.status,
+                signals_json=snapshot.signals_json,
+                calculated_at=snapshot.calculated_at,
+            )
+        )
+    return items

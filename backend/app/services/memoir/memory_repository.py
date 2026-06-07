@@ -20,10 +20,12 @@ from app.models.memoir import (
 from app.schemas.memoir import (
     MemoirEventMemoryCreate,
     MemoirEventMemoryResponse,
+    MemoirMemoryUpdateRequest,
     MemoirMemoryEvidenceCreate,
     MemoirMemoryEvidenceResponse,
     MemoirOpenQuestionCreate,
     MemoirOpenQuestionResponse,
+    MemoirOpenQuestionUpdateRequest,
     MemoirPersonMemoryCreate,
     MemoirPersonMemoryResponse,
     MemoirPlaceMemoryCreate,
@@ -297,6 +299,66 @@ async def update_memory_status(
     return memory
 
 
+def _memory_response(memory_type: MemoirMemoryType, memory: object) -> object:
+    response_by_type = {
+        MemoirMemoryType.PERSON: MemoirPersonMemoryResponse,
+        MemoirMemoryType.EVENT: MemoirEventMemoryResponse,
+        MemoirMemoryType.PLACE: MemoirPlaceMemoryResponse,
+        MemoirMemoryType.THEME: MemoirThemeMemoryResponse,
+        MemoirMemoryType.OPEN_QUESTION: MemoirOpenQuestionResponse,
+    }
+    return response_by_type[memory_type].model_validate(memory)
+
+
+async def update_memory(
+    db: AsyncSession,
+    user_id: str,
+    project_id: str,
+    memory_type: MemoirMemoryType,
+    memory_id: str,
+    req: MemoirMemoryUpdateRequest,
+) -> object:
+    await _ensure_project(db, project_id, user_id)
+    if memory_type == MemoirMemoryType.OPEN_QUESTION:
+        raise HTTPException(status_code=400, detail="待确认问题请使用 open questions 接口")
+    memory = await _load_memory(db, project_id, memory_type, memory_id)
+    if req.status is not None:
+        memory.status = req.status.value
+
+    fields_by_type = {
+        MemoirMemoryType.PERSON: ("canonical_name", "aliases_json", "relationship", "description", "confidence"),
+        MemoirMemoryType.EVENT: (
+            "title",
+            "life_stage",
+            "time_text",
+            "place_text",
+            "cause",
+            "process",
+            "result",
+            "emotion",
+            "importance",
+            "confidence",
+        ),
+        MemoirMemoryType.PLACE: (
+            "name",
+            "elder_alias",
+            "modern_name",
+            "place_type",
+            "description",
+            "confidence",
+        ),
+        MemoirMemoryType.THEME: ("name", "description", "strength", "mention_count", "confidence"),
+    }
+    for field in fields_by_type[memory_type]:
+        value = getattr(req, field)
+        if value is None:
+            continue
+        setattr(memory, field, value.strip() if isinstance(value, str) else value)
+
+    await db.flush()
+    return _memory_response(memory_type, memory)
+
+
 async def list_person_memories(
     db: AsyncSession,
     user_id: str,
@@ -309,3 +371,92 @@ async def list_person_memories(
         .order_by(MemoirPersonMemory.created_at)
     )
     return [MemoirPersonMemoryResponse.model_validate(row) for row in result.scalars()]
+
+
+async def list_event_memories(
+    db: AsyncSession,
+    user_id: str,
+    project_id: str,
+) -> list[MemoirEventMemoryResponse]:
+    await _ensure_project(db, project_id, user_id)
+    result = await db.execute(
+        select(MemoirEventMemory)
+        .where(MemoirEventMemory.project_id == project_id)
+        .order_by(MemoirEventMemory.created_at)
+    )
+    return [MemoirEventMemoryResponse.model_validate(row) for row in result.scalars()]
+
+
+async def list_place_memories(
+    db: AsyncSession,
+    user_id: str,
+    project_id: str,
+) -> list[MemoirPlaceMemoryResponse]:
+    await _ensure_project(db, project_id, user_id)
+    result = await db.execute(
+        select(MemoirPlaceMemory)
+        .where(MemoirPlaceMemory.project_id == project_id)
+        .order_by(MemoirPlaceMemory.created_at)
+    )
+    return [MemoirPlaceMemoryResponse.model_validate(row) for row in result.scalars()]
+
+
+async def list_theme_memories(
+    db: AsyncSession,
+    user_id: str,
+    project_id: str,
+) -> list[MemoirThemeMemoryResponse]:
+    await _ensure_project(db, project_id, user_id)
+    result = await db.execute(
+        select(MemoirThemeMemory)
+        .where(MemoirThemeMemory.project_id == project_id)
+        .order_by(MemoirThemeMemory.created_at)
+    )
+    return [MemoirThemeMemoryResponse.model_validate(row) for row in result.scalars()]
+
+
+async def list_open_questions(
+    db: AsyncSession,
+    user_id: str,
+    project_id: str,
+) -> list[MemoirOpenQuestionResponse]:
+    await _ensure_project(db, project_id, user_id)
+    result = await db.execute(
+        select(MemoirOpenQuestion)
+        .where(MemoirOpenQuestion.project_id == project_id)
+        .order_by(MemoirOpenQuestion.priority.desc(), MemoirOpenQuestion.created_at)
+    )
+    return [MemoirOpenQuestionResponse.model_validate(row) for row in result.scalars()]
+
+
+async def update_open_question(
+    db: AsyncSession,
+    user_id: str,
+    project_id: str,
+    question_id: str,
+    req: MemoirOpenQuestionUpdateRequest,
+) -> MemoirOpenQuestionResponse:
+    await _ensure_project(db, project_id, user_id)
+    open_question = await db.scalar(
+        select(MemoirOpenQuestion).where(
+            MemoirOpenQuestion.project_id == project_id,
+            MemoirOpenQuestion.id == question_id,
+        )
+    )
+    if not open_question:
+        raise HTTPException(status_code=404, detail="待确认问题不存在")
+    if req.question is not None:
+        value = req.question.strip()
+        if not value:
+            raise HTTPException(status_code=400, detail="问题不能为空")
+        open_question.question = value
+    if req.reason is not None:
+        open_question.reason = req.reason.strip()
+    if req.sensitivity is not None:
+        open_question.sensitivity = req.sensitivity.value
+    if req.priority is not None:
+        open_question.priority = req.priority
+    if req.status is not None:
+        open_question.status = req.status.value
+    await db.flush()
+    return MemoirOpenQuestionResponse.model_validate(open_question)
