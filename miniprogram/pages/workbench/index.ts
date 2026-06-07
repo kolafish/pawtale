@@ -130,6 +130,7 @@ Page<WorkbenchData, {
   askCandidate(event: DatasetEvent): Promise<void>;
   continueInterview(): void;
   openPendingReview(): Promise<void>;
+  openProjects(): void;
   openStories(): void;
   backHome(): void;
   openHome(): void;
@@ -300,6 +301,10 @@ Page<WorkbenchData, {
       return;
     }
     wx.navigateTo({ url: `/pages/review/index?sessionId=${encodeURIComponent(fallbackSessionId)}` });
+  },
+
+  openProjects() {
+    wx.navigateTo({ url: "/pages/projects/index" });
   },
 
   openStories() {

@@ -1,5 +1,5 @@
 import { loadMemoirDashboard } from "../../services/memoir-dashboard";
-import { getMemoirIdentity, updateWechatUserProfile } from "../../services/auth";
+import { getMemoirIdentity, updateWechatUserProfile, uploadWechatAvatar } from "../../services/auth";
 import {
   readMemoirDashboardSnapshot,
   shouldRefreshMemoirDashboardSnapshot,
@@ -14,6 +14,9 @@ interface ProfileData {
   fontSize: FontSize;
   userName: string;
   avatarUrl: string;
+  profileNameDraft: string;
+  avatarDraftUrl: string;
+  avatarChanged: boolean;
   activeProjectTitle: string;
   projectCount: number;
   syncingProfile: boolean;
@@ -31,14 +34,16 @@ function writeFontSize(fontSize: FontSize): void {
   wx.setStorageSync(SETTINGS_KEY, { fontSize });
 }
 
-function getWechatProfile(): Promise<WechatMiniprogram.GetUserProfileSuccessCallbackResult> {
-  return new Promise((resolve, reject) => {
-    wx.getUserProfile({
-      desc: "用于显示微信昵称和头像",
-      success: resolve,
-      fail: reject,
-    });
-  });
+interface AvatarEvent {
+  detail: {
+    avatarUrl?: string;
+  };
+}
+
+interface InputEvent {
+  detail: {
+    value: string;
+  };
 }
 
 Page<ProfileData, {
@@ -46,7 +51,9 @@ Page<ProfileData, {
   hydrateFromCache(): boolean;
   loadIdentity(): Promise<void>;
   loadProfile(): Promise<void>;
-  syncWechatProfile(): Promise<void>;
+  chooseAvatar(event: AvatarEvent): void;
+  onNicknameInput(event: InputEvent): void;
+  saveWechatProfile(): Promise<void>;
   setStandardFont(): void;
   setLargeFont(): void;
   setExtraFont(): void;
@@ -63,6 +70,9 @@ Page<ProfileData, {
     fontSize: "large",
     userName: "微信用户",
     avatarUrl: "",
+    profileNameDraft: "",
+    avatarDraftUrl: "",
+    avatarChanged: false,
     activeProjectTitle: "",
     projectCount: 0,
     syncingProfile: false,
@@ -93,9 +103,14 @@ Page<ProfileData, {
   async loadIdentity() {
     try {
       const identity = await getMemoirIdentity();
+      const displayName = identity.display_name || identity.wechat_nickname || "微信用户";
+      const avatarUrl = identity.wechat_avatar_url || identity.avatar_url || "";
       this.setData({
-        userName: identity.display_name || identity.wechat_nickname || "微信用户",
-        avatarUrl: identity.wechat_avatar_url || identity.avatar_url || "",
+        userName: displayName,
+        avatarUrl,
+        profileNameDraft: displayName,
+        avatarDraftUrl: avatarUrl,
+        avatarChanged: false,
         activeProjectTitle: identity.active_project?.title || "",
         projectCount: identity.projects.length,
         error: "",
@@ -119,26 +134,55 @@ Page<ProfileData, {
     }
   },
 
-  async syncWechatProfile() {
+  chooseAvatar(event) {
+    const avatarUrl = event.detail.avatarUrl || "";
+    if (!avatarUrl) {
+      return;
+    }
+    this.setData({
+      avatarDraftUrl: avatarUrl,
+      avatarChanged: true,
+      error: "",
+    });
+  },
+
+  onNicknameInput(event) {
+    this.setData({
+      profileNameDraft: event.detail.value,
+      error: "",
+    });
+  },
+
+  async saveWechatProfile() {
     if (this.data.syncingProfile) {
       return;
     }
     this.setData({ syncingProfile: true, error: "" });
     try {
-      const profile = await getWechatProfile();
-      const nickName = profile.userInfo.nickName || "";
-      const avatarUrl = profile.userInfo.avatarUrl || "";
-      const user = await updateWechatUserProfile({
+      const nickName = this.data.profileNameDraft.trim();
+      if (!nickName) {
+        this.setData({ error: "昵称不能为空" });
+        return;
+      }
+      const identity = await getMemoirIdentity();
+      const avatarUrl = this.data.avatarChanged && this.data.avatarDraftUrl
+        ? await uploadWechatAvatar(this.data.avatarDraftUrl, identity.storage_owner_id || identity.openid || identity.id)
+        : this.data.avatarDraftUrl || identity.wechat_avatar_url || "";
+      const nextIdentity = await updateWechatUserProfile({
         display_name: nickName,
         wechat_nickname: nickName,
         wechat_avatar_url: avatarUrl,
       });
       this.setData({
-        userName: user.display_name || nickName || "微信用户",
-        avatarUrl,
+        userName: nextIdentity.display_name || nickName,
+        avatarUrl: nextIdentity.wechat_avatar_url || avatarUrl,
+        profileNameDraft: nextIdentity.display_name || nickName,
+        avatarDraftUrl: nextIdentity.wechat_avatar_url || avatarUrl,
+        avatarChanged: false,
+        activeProjectTitle: nextIdentity.active_project?.title || this.data.activeProjectTitle,
+        projectCount: nextIdentity.projects.length,
       });
       wx.showToast({ title: "已更新", icon: "success" });
-      void this.loadIdentity();
     } catch (error) {
       this.setData({ error: error instanceof Error ? error.message : "微信资料同步失败" });
     } finally {
