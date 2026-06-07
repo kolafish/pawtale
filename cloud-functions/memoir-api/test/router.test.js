@@ -278,9 +278,9 @@ test("seeds a current session with template questions", async () => {
 
   assert.equal(response.statusCode, 200);
   assert.equal(response.data.session.status, "active");
-  assert.equal(response.data.questions.length, 5);
-  assert.equal(response.data.pending_question_count, 5);
-  assert.equal(response.data.current_question.prompt, "你小时候最常去的一个地方是哪里？那里有什么声音、气味，或者你现在还记得的细节？");
+  assert.equal(response.data.questions.length, 12);
+  assert.equal(response.data.pending_question_count, 12);
+  assert.equal(response.data.current_question.prompt, "今天我们从哪一段开始讲比较轻松？小时候、年轻时候，还是工作以后？");
 });
 
 test("returns a memory-first dashboard with default coverage topics", async () => {
@@ -777,9 +777,9 @@ test("returns memoir story cards and summary", async () => {
     weekly_story_count: 1,
     pending_review_count: 1,
     confirmed_story_count: 0,
-    total_question_count: 5,
+    total_question_count: 12,
     completed_question_count: 1,
-    progress_percent: 20,
+    progress_percent: 8,
   });
 });
 

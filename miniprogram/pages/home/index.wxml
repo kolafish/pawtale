@@ -30,7 +30,7 @@
       bindtap="continueInterview"
     >
       <image class="action-art-icon" src="/assets/memoir-microphone.png" mode="aspectFit" />
-      <text class="primary-action-text">{{skippingQuestion ? "换题中" : loading ? "加载中" : "开始讲述"}}</text>
+      <text class="primary-action-text">{{loading ? "加载中" : "开始讲述"}}</text>
     </view>
   </view>
 
