@@ -3,6 +3,7 @@ const test = require("node:test");
 
 const { handleMemoirApiRequest } = require("../src/router");
 const { COLLECTIONS } = require("../src/collections");
+const { DEFAULT_MEMOIR_QUESTIONS } = require("../src/memoirTemplate");
 const { MemoryStore } = require("./memoryStore");
 
 function request(event, options = {}) {
@@ -281,6 +282,107 @@ test("seeds a current session with template questions", async () => {
   assert.equal(response.data.questions.length, 12);
   assert.equal(response.data.pending_question_count, 12);
   assert.equal(response.data.current_question.prompt, "今天我们从哪一段开始讲比较轻松？小时候、年轻时候，还是工作以后？");
+});
+
+test("replaces stale unanswered template questions in an existing session", async () => {
+  const store = new MemoryStore();
+  const project = await request({
+    method: "GET",
+    path: "/api/mobile/memoir/project",
+  }, { store });
+  const session = await store.insert(COLLECTIONS.sessions, {
+    openid: "openid_a",
+    project_id: project.data.id,
+    title: "回忆录访谈",
+    status: "active",
+    current_question_id: null,
+    created_at: "2026-01-01T00:00:00.000Z",
+    updated_at: "2026-01-01T00:00:00.000Z",
+  });
+  const stale = await store.insert(COLLECTIONS.questions, {
+    openid: "openid_a",
+    project_id: project.data.id,
+    session_id: session.id,
+    prompt: "你小时候最常去的一个地方是哪里？那里有什么声音、气味，或者你现在还记得的细节？",
+    source: "template",
+    sort_order: 0,
+    status: "pending",
+    created_at: "2026-01-01T00:00:00.000Z",
+  });
+  await store.updateById(COLLECTIONS.sessions, session.id, {
+    current_question_id: stale.id,
+  });
+
+  const response = await request({
+    method: "GET",
+    path: "/api/mobile/memoir/sessions/current",
+  }, { store });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.data.session.id, session.id);
+  assert.equal(response.data.questions.length, DEFAULT_MEMOIR_QUESTIONS.length);
+  assert.equal(response.data.pending_question_count, DEFAULT_MEMOIR_QUESTIONS.length);
+  assert.equal(response.data.current_question.prompt, DEFAULT_MEMOIR_QUESTIONS[0]);
+  assert.deepEqual(
+    response.data.questions.map((question) => question.prompt),
+    DEFAULT_MEMOIR_QUESTIONS,
+  );
+});
+
+test("keeps default template questions ahead of planned AI questions", async () => {
+  const store = new MemoryStore();
+  const project = await request({
+    method: "GET",
+    path: "/api/mobile/memoir/project",
+  }, { store });
+  const session = await store.insert(COLLECTIONS.sessions, {
+    openid: "openid_a",
+    project_id: project.data.id,
+    title: "回忆录访谈",
+    status: "active",
+    current_question_id: null,
+    created_at: "2026-01-01T00:00:00.000Z",
+    updated_at: "2026-01-01T00:00:00.000Z",
+  });
+  await store.insert(COLLECTIONS.questions, {
+    openid: "openid_a",
+    project_id: project.data.id,
+    session_id: session.id,
+    prompt: DEFAULT_MEMOIR_QUESTIONS[0],
+    source: "template",
+    sort_order: 0,
+    status: "pending",
+    created_at: "2026-01-01T00:00:00.000Z",
+  });
+  const plannedQuestion = await store.insert(COLLECTIONS.questions, {
+    openid: "openid_a",
+    project_id: project.data.id,
+    session_id: session.id,
+    prompt: "AI 规划的追问",
+    source: "ai_generated",
+    sort_order: 100,
+    status: "pending",
+    created_at: "2026-01-01T00:00:00.000Z",
+  });
+  await store.updateById(COLLECTIONS.sessions, session.id, {
+    current_question_id: plannedQuestion.id,
+  });
+
+  const current = await request({
+    method: "GET",
+    path: "/api/mobile/memoir/sessions/current",
+  }, { store });
+  const next = await request({
+    method: "GET",
+    path: "/api/mobile/memoir/questions/next",
+  }, { store });
+
+  assert.equal(current.statusCode, 200);
+  assert.equal(current.data.current_question.prompt, DEFAULT_MEMOIR_QUESTIONS[0]);
+  assert.equal(current.data.current_question.source, "template");
+  assert.equal(next.statusCode, 200);
+  assert.equal(next.data.prompt, DEFAULT_MEMOIR_QUESTIONS[0]);
+  assert.equal(next.data.source, "template");
 });
 
 test("returns a memory-first dashboard with default coverage topics", async () => {

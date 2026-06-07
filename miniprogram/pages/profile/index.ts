@@ -5,13 +5,10 @@ import {
   shouldRefreshMemoirDashboardSnapshot,
 } from "../../stores/memoir-cache";
 
-type FontSize = "standard" | "large" | "extra";
-
 interface ProfileData {
   loading: boolean;
   storyCount: number;
   progressPercent: number;
-  fontSize: FontSize;
   userName: string;
   avatarUrl: string;
   profileNameDraft: string;
@@ -21,17 +18,6 @@ interface ProfileData {
   projectCount: number;
   syncingProfile: boolean;
   error: string;
-}
-
-const SETTINGS_KEY = "pawtale_display_settings";
-
-function readFontSize(): FontSize {
-  const settings = wx.getStorageSync<{ fontSize?: FontSize }>(SETTINGS_KEY) || {};
-  return settings.fontSize || "large";
-}
-
-function writeFontSize(fontSize: FontSize): void {
-  wx.setStorageSync(SETTINGS_KEY, { fontSize });
 }
 
 interface AvatarEvent {
@@ -54,9 +40,6 @@ Page<ProfileData, {
   chooseAvatar(event: AvatarEvent): void;
   onNicknameInput(event: InputEvent): void;
   saveWechatProfile(): Promise<void>;
-  setStandardFont(): void;
-  setLargeFont(): void;
-  setExtraFont(): void;
   openProjects(): void;
   openHome(): void;
   openWorkbench(): void;
@@ -67,7 +50,6 @@ Page<ProfileData, {
     loading: false,
     storyCount: 0,
     progressPercent: 0,
-    fontSize: "large",
     userName: "微信用户",
     avatarUrl: "",
     profileNameDraft: "",
@@ -80,7 +62,6 @@ Page<ProfileData, {
   },
 
   async onLoad() {
-    this.setData({ fontSize: readFontSize() });
     void this.loadIdentity();
     if (!this.hydrateFromCache()) {
       await this.loadProfile();
@@ -121,7 +102,7 @@ Page<ProfileData, {
   },
 
   async loadProfile() {
-    this.setData({ loading: true, fontSize: readFontSize() });
+    this.setData({ loading: true });
     try {
       const { project, summary } = await loadMemoirDashboard();
       this.setData({
@@ -188,21 +169,6 @@ Page<ProfileData, {
     } finally {
       this.setData({ syncingProfile: false });
     }
-  },
-
-  setStandardFont() {
-    writeFontSize("standard");
-    this.setData({ fontSize: "standard" });
-  },
-
-  setLargeFont() {
-    writeFontSize("large");
-    this.setData({ fontSize: "large" });
-  },
-
-  setExtraFont() {
-    writeFontSize("extra");
-    this.setData({ fontSize: "extra" });
   },
 
   openProjects() {
