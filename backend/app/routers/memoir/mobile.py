@@ -14,6 +14,8 @@ from app.schemas.memoir import (
     MemoirInterviewState,
     MemoirQuestionResponse,
     MemoirSessionCreate,
+    MemoirSessionProcessRequest,
+    MemoirSessionProcessResponse,
     MemoirStoryDetailResponse,
     MemoirStoryListResponse,
     MemoirSummaryResponse,
@@ -25,6 +27,7 @@ from app.services.memoir import answers as memoir_answers
 from app.services.memoir import audio_files as memoir_audio_files
 from app.services.memoir import drafting as memoir_drafting
 from app.services.memoir import interview as memoir_interview
+from app.services.memoir import memory_extraction as memoir_memory_extraction
 from app.services.memoir import projects as memoir_projects
 from app.services.memoir import story_cards as memoir_story_cards
 from app.services.memoir import transcription as memoir_transcription
@@ -63,6 +66,21 @@ async def get_current_mobile_memoir_session(
 ):
     project_id = await _default_memoir_project_id(db, current_user.id)
     return await memoir_interview.get_or_create_current_session(db, project_id, current_user.id)
+
+
+@router.post("/sessions/{session_id}/process", response_model=MemoirSessionProcessResponse)
+async def process_mobile_memoir_session(
+    session_id: str,
+    req: MemoirSessionProcessRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await memoir_memory_extraction.process_session_memory(
+        db,
+        session_id,
+        current_user.id,
+        req,
+    )
 
 
 @router.get("/questions/next", response_model=MemoirQuestionResponse | None)
