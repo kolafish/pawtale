@@ -48,8 +48,11 @@ test("returns the current cloud user identity", async () => {
   }, { openid: "openid.with/slash" });
 
   assert.equal(response.statusCode, 200);
-  assert.equal(response.data.id, "openid.with/slash");
+  assert.equal(response.data.openid, "openid.with/slash");
+  assert.equal(response.data.display_name, "微信用户");
   assert.equal(response.data.storage_owner_id, "openid_with_slash");
+  assert.equal(response.data.active_project.title, "微信用户的回忆录");
+  assert.equal(response.data.projects.length, 1);
 });
 
 test("returns 400 when path is missing", async () => {
@@ -78,7 +81,8 @@ test("creates the current user's default memoir project", async () => {
 
   assert.equal(response.statusCode, 200);
   assert.equal(response.data.type, "memoir");
-  assert.equal(response.data.title, "我的回忆录");
+  assert.equal(response.data.title, "微信用户的回忆录");
+  assert.ok(response.data.user_id);
 
   const otherUserResponse = await request({
     method: "GET",
@@ -86,6 +90,67 @@ test("creates the current user's default memoir project", async () => {
   }, { store, openid: "openid_b" });
 
   assert.notEqual(otherUserResponse.data.id, response.data.id);
+});
+
+test("creates renames and activates multiple memoir projects", async () => {
+  const store = new MemoryStore();
+  const renamedUser = await request({
+    method: "PATCH",
+    path: "/api/mobile/memoir/me",
+    data: {
+      wechat_nickname: "王阿姨",
+      wechat_avatar_url: "https://example.com/avatar.png",
+    },
+  }, { store });
+
+  assert.equal(renamedUser.statusCode, 200);
+  assert.equal(renamedUser.data.display_name, "王阿姨");
+
+  const first = await request({
+    method: "GET",
+    path: "/api/mobile/memoir/project",
+  }, { store });
+  assert.equal(first.data.title, "王阿姨的回忆录");
+
+  const second = await request({
+    method: "POST",
+    path: "/api/mobile/memoir/projects",
+    data: {
+      title: "父亲的故事",
+      elder_name: "父亲",
+    },
+  }, { store });
+  assert.equal(second.statusCode, 201);
+  assert.equal(second.data.title, "父亲的故事");
+  assert.equal(second.data.elder_name, "父亲");
+
+  const renamed = await request({
+    method: "PATCH",
+    path: `/api/mobile/memoir/projects/${second.data.id}`,
+    data: {
+      title: "父亲的回忆录",
+    },
+  }, { store });
+  assert.equal(renamed.data.title, "父亲的回忆录");
+
+  const projects = await request({
+    method: "GET",
+    path: "/api/mobile/memoir/projects",
+  }, { store });
+  assert.equal(projects.data.projects.length, 2);
+  assert.equal(projects.data.active_project_id, second.data.id);
+
+  const activated = await request({
+    method: "POST",
+    path: `/api/mobile/memoir/projects/${first.data.id}/activate`,
+  }, { store });
+  assert.equal(activated.data.active_project_id, first.data.id);
+
+  const current = await request({
+    method: "GET",
+    path: "/api/mobile/memoir/project",
+  }, { store });
+  assert.equal(current.data.id, first.data.id);
 });
 
 test("seeds a current session with template questions", async () => {

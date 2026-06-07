@@ -1,4 +1,5 @@
 const COLLECTIONS = Object.freeze({
+  users: "memoir_users",
   projects: "memoir_projects",
   sessions: "memoir_sessions",
   questions: "memoir_questions",
@@ -20,12 +21,28 @@ const COLLECTIONS = Object.freeze({
 });
 
 const COLLECTION_SCHEMA = Object.freeze({
+  memoir_users: [
+    "openid",
+    "unionid",
+    "wechat_nickname",
+    "wechat_avatar_url",
+    "display_name",
+    "active_project_id",
+    "created_at",
+    "updated_at",
+    "last_login_at",
+  ],
   memoir_projects: [
     "openid",
+    "user_id",
     "type",
     "title",
     "description",
     "total_word_count",
+    "status",
+    "elder_name",
+    "is_default",
+    "last_opened_at",
     "created_at",
     "updated_at",
   ],

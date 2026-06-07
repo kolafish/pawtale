@@ -8,10 +8,13 @@ const {
 } = require("./http");
 const { createMemoirService } = require("./memoirService");
 const {
+  createProjectRequest,
   createTextAnswerRequest,
   registerAudioFileRequest,
   updateAnswerTextRequest,
   updateDraftContentRequest,
+  updateProjectRequest,
+  updateWechatUserRequest,
 } = require("./schemas");
 
 function requireStore(request) {
@@ -19,24 +22,6 @@ function requireStore(request) {
     throw new ApiError(500, "云数据库未配置");
   }
   return request.store;
-}
-
-function safePathSegment(value) {
-  return String(value || "").replace(/[^a-zA-Z0-9_-]/g, "_");
-}
-
-function cloudUserResponse(context = {}) {
-  if (!context.openid) {
-    throw new ApiError(401, "缺少微信登录身份");
-  }
-  const now = new Date().toISOString();
-  return {
-    id: context.openid,
-    email: "",
-    display_name: "微信用户",
-    storage_owner_id: safePathSegment(context.openid),
-    created_at: now,
-  };
 }
 
 function memoirService(request) {
@@ -56,7 +41,11 @@ const routes = {
     })),
     route("/api/mobile/memoir/me", async (request) => jsonResponse(
       200,
-      cloudUserResponse(request.context),
+      await memoirService(request).getMe(),
+    )),
+    route("/api/mobile/memoir/projects", async (request) => jsonResponse(
+      200,
+      await memoirService(request).listProjects(),
     )),
     route("/api/mobile/memoir/project", async (request) => jsonResponse(
       200,
@@ -128,6 +117,14 @@ const routes = {
     )),
   ],
   POST: [
+    route("/api/mobile/memoir/projects", async (request) => jsonResponse(
+      201,
+      await memoirService(request).createProject(createProjectRequest(request.data)),
+    )),
+    route("/api/mobile/memoir/projects/:projectId/activate", async (request) => jsonResponse(
+      200,
+      await memoirService(request).activateProject(request.params.projectId),
+    )),
     route("/api/mobile/memoir/sessions/:sessionId/process", async (request) => jsonResponse(
       200,
       await memoirService(request).processSessionMemory(request.params.sessionId),
@@ -170,6 +167,14 @@ const routes = {
     )),
   ],
   PATCH: [
+    route("/api/mobile/memoir/me", async (request) => jsonResponse(
+      200,
+      await memoirService(request).updateMe(updateWechatUserRequest(request.data)),
+    )),
+    route("/api/mobile/memoir/projects/:projectId", async (request) => jsonResponse(
+      200,
+      await memoirService(request).updateProject(request.params.projectId, updateProjectRequest(request.data)),
+    )),
     route("/api/mobile/memoir/memories/:memoryType/:memoryId", async (request) => jsonResponse(
       200,
       await memoirService(request).updateMemory(request.params.memoryType, request.params.memoryId, request.data),
