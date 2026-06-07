@@ -521,12 +521,31 @@ async function loadMemory(store, openid, projectId, memoryType, memoryId) {
 }
 
 async function listMemoryRows(store, openid, projectId, memoryType) {
-  return store.findMany(memoryCollection(memoryType), {
+  const rows = await store.findMany(memoryCollection(memoryType), {
     openid,
     project_id: projectId,
   }, {
     orderBy: [{ field: "created_at", direction: "asc" }],
   });
+  const enriched = [];
+  for (const row of rows) {
+    const evidenceRows = await store.findMany(COLLECTIONS.memoryEvidence, {
+      openid,
+      project_id: projectId,
+      memory_type: memoryType,
+      memory_id: row.id,
+    }, {
+      orderBy: [{ field: "created_at", direction: "asc" }],
+    });
+    const firstEvidence = evidenceRows[0] || null;
+    enriched.push({
+      ...row,
+      evidence_quote: firstEvidence?.quote || "",
+      evidence_count: evidenceRows.length,
+      source_answer_id: firstEvidence?.answer_id || null,
+    });
+  }
+  return enriched;
 }
 
 async function listOpenQuestions(store, openid) {

@@ -29,10 +29,10 @@ import { writeMemoirDashboardSnapshot } from "../../stores/memoir-cache";
 import { readMemoirStore, writeMemoirStore } from "../../stores/session";
 
 type MemoryCard =
-  | { type: "person"; id: string; title: string; detail: string; status: MemoirMemoryStatus }
-  | { type: "event"; id: string; title: string; detail: string; status: MemoirMemoryStatus }
-  | { type: "place"; id: string; title: string; detail: string; status: MemoirMemoryStatus }
-  | { type: "theme"; id: string; title: string; detail: string; status: MemoirMemoryStatus };
+  | { type: "person"; typeLabel: string; id: string; title: string; detail: string; status: MemoirMemoryStatus; confidenceText: string; evidence: string }
+  | { type: "event"; typeLabel: string; id: string; title: string; detail: string; status: MemoirMemoryStatus; confidenceText: string; evidence: string }
+  | { type: "place"; typeLabel: string; id: string; title: string; detail: string; status: MemoirMemoryStatus; confidenceText: string; evidence: string }
+  | { type: "theme"; typeLabel: string; id: string; title: string; detail: string; status: MemoirMemoryStatus; confidenceText: string; evidence: string };
 
 interface DatasetEvent {
   currentTarget: {
@@ -67,6 +67,10 @@ function memoryStatusText(status: MemoirMemoryStatus): string {
   return "待确认";
 }
 
+function confidenceText(value?: number | null): string {
+  return typeof value === "number" ? `${Math.round(value * 100)}%` : "待确认";
+}
+
 function buildMemoryCards(
   people: MemoirPersonMemory[],
   events: MemoirEventMemory[],
@@ -76,31 +80,43 @@ function buildMemoryCards(
   return [
     ...people.map((item): MemoryCard => ({
       type: "person",
+      typeLabel: "人物",
       id: item.id,
       title: item.canonical_name,
       detail: item.relationship || item.description || "人物",
       status: item.status,
+      confidenceText: confidenceText(item.confidence),
+      evidence: item.evidence_quote || "",
     })),
     ...events.map((item): MemoryCard => ({
       type: "event",
+      typeLabel: "事件",
       id: item.id,
       title: item.title,
-      detail: [item.time_text, item.place_text, item.emotion].filter(Boolean).join(" · ") || "事件",
+      detail: [item.time_text, item.place_text, item.emotion, item.process].filter(Boolean).join(" · ") || "事件",
       status: item.status,
+      confidenceText: confidenceText(item.confidence),
+      evidence: item.evidence_quote || "",
     })),
     ...places.map((item): MemoryCard => ({
       type: "place",
+      typeLabel: "地点",
       id: item.id,
       title: item.name,
       detail: item.elder_alias || item.place_type || "地点",
       status: item.status,
+      confidenceText: confidenceText(item.confidence),
+      evidence: item.evidence_quote || "",
     })),
     ...themes.map((item): MemoryCard => ({
       type: "theme",
+      typeLabel: "主题",
       id: item.id,
       title: item.name,
       detail: item.description || `提到 ${item.mention_count} 次`,
       status: item.status,
+      confidenceText: confidenceText(item.confidence),
+      evidence: item.evidence_quote || "",
     })),
   ];
 }
@@ -127,6 +143,7 @@ Page<ReviewData, {
   updateMemory(event: DatasetEvent, status: MemoirMemoryStatus): Promise<void>;
   markOpenQuestionAnswered(event: DatasetEvent): Promise<void>;
   dismissOpenQuestion(event: DatasetEvent): Promise<void>;
+  askOpenQuestion(event: DatasetEvent): Promise<void>;
   askCandidate(event: DatasetEvent): Promise<void>;
   continueInterview(): void;
   openStories(): void;
@@ -314,6 +331,30 @@ Page<ReviewData, {
     if (!id) return;
     await updateOpenQuestionStatus(id, "dismissed");
     await this.loadReviewData();
+  },
+
+  async askOpenQuestion(event) {
+    const id = event.currentTarget.dataset.id;
+    if (!id || this.data.selecting) return;
+    this.setData({ selecting: true, error: "" });
+    try {
+      const openQuestion = this.data.openQuestions.find((item) => item.id === id);
+      const candidates = await generateQuestionCandidates();
+      const candidate = candidates.find((item) => (
+        item.target_memory_type === "open_question"
+        && item.target_memory_id === id
+      )) || candidates.find((item) => item.question === openQuestion?.question);
+      if (!candidate) {
+        this.setData({ error: "没有找到可用的下一问候选" });
+        return;
+      }
+      await selectQuestionCandidate(candidate.id);
+      wx.redirectTo({ url: "/pages/question/index" });
+    } catch (error) {
+      this.setData({ error: error instanceof Error ? error.message : "下一问选择失败" });
+    } finally {
+      this.setData({ selecting: false });
+    }
   },
 
   async askCandidate(event) {

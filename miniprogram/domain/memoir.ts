@@ -155,6 +155,9 @@ export interface MemoirPersonMemory {
   description: string;
   confidence?: number | null;
   status: MemoirMemoryStatus;
+  evidence_quote?: string;
+  evidence_count?: number;
+  source_answer_id?: string | null;
 }
 
 export interface MemoirEventMemory {
@@ -171,6 +174,9 @@ export interface MemoirEventMemory {
   importance?: number | null;
   confidence?: number | null;
   status: MemoirMemoryStatus;
+  evidence_quote?: string;
+  evidence_count?: number;
+  source_answer_id?: string | null;
 }
 
 export interface MemoirPlaceMemory {
@@ -183,6 +189,9 @@ export interface MemoirPlaceMemory {
   description: string;
   confidence?: number | null;
   status: MemoirMemoryStatus;
+  evidence_quote?: string;
+  evidence_count?: number;
+  source_answer_id?: string | null;
 }
 
 export interface MemoirThemeMemory {
@@ -194,6 +203,9 @@ export interface MemoirThemeMemory {
   mention_count: number;
   confidence?: number | null;
   status: MemoirMemoryStatus;
+  evidence_quote?: string;
+  evidence_count?: number;
+  source_answer_id?: string | null;
 }
 
 export interface MemoirOpenQuestion {
