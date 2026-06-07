@@ -3,6 +3,7 @@ import type {
   MemoirInterviewState,
   MemoirMemoryStats,
   MemoirOutput,
+  MemoirQuestion,
   MemoirSessionSummary,
   MemoirSummary,
 } from "../../domain/memoir";
@@ -53,19 +54,30 @@ interface HomeData {
   reviewSessionId: string;
 }
 
+const HOME_EMPTY_PROMPT = "今天想从哪一段继续讲？小时候、年轻时候，还是工作以后？";
 const QUESTION_SWIPE_THRESHOLD_PX = 90;
 const QUESTION_SWIPE_MAX_TRANSLATE_PX = 160;
 const QUESTION_SWIPE_EXIT_TRANSLATE_PX = 420;
 const QUESTION_SWIPE_MAX_ROTATE_DEG = 8;
 const QUESTION_VERTICAL_CANCEL_PX = 18;
+const QUESTION_SWIPE_REVEAL_DELAY_MS = 180;
 
 let questionSwipeStartX = 0;
 let questionSwipeStartY = 0;
 let questionSwipeDeltaX = 0;
 let questionSwipeTracking = false;
+let questionSwipeRevealTimer: ReturnType<typeof setTimeout> | null = null;
 
 function firstTouch(points?: TouchPoint[]): TouchPoint | null {
   return points && points.length ? points[0] : null;
+}
+
+function clearQuestionSwipeRevealTimer(): void {
+  if (questionSwipeRevealTimer === null) {
+    return;
+  }
+  clearTimeout(questionSwipeRevealTimer);
+  questionSwipeRevealTimer = null;
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -78,6 +90,28 @@ function cardTranslate(deltaX: number): number {
 
 function cardRotate(translateX: number): number {
   return Math.round((translateX / QUESTION_SWIPE_MAX_TRANSLATE_PX) * QUESTION_SWIPE_MAX_ROTATE_DEG);
+}
+
+function promptForQuestion(question?: MemoirQuestion | null): string {
+  return question?.prompt || HOME_EMPTY_PROMPT;
+}
+
+function nextPendingQuestionAfter(interview: MemoirInterviewState | undefined, questionId: string): MemoirQuestion | null {
+  if (!interview) {
+    return null;
+  }
+  const orderedQuestions = [...interview.questions].sort((left, right) => left.sort_order - right.sort_order);
+  const currentIndex = orderedQuestions.findIndex((question) => question.id === questionId);
+  const pendingQuestions = orderedQuestions.filter((question) => (
+    question.id !== questionId
+    && question.status === "pending"
+  ));
+  if (currentIndex === -1) {
+    return pendingQuestions[0] || null;
+  }
+  return pendingQuestions.find((question) => question.sort_order > orderedQuestions[currentIndex].sort_order)
+    || pendingQuestions[0]
+    || null;
 }
 
 Page<HomeData, {
@@ -98,6 +132,7 @@ Page<HomeData, {
   onQuestionTouchMove(event: TouchEvent): void;
   onQuestionTouchEnd(): Promise<void>;
   onQuestionTouchCancel(): void;
+  showQuestionCard(question?: MemoirQuestion | null): void;
   resetQuestionSwipe(): void;
   skipCurrentQuestionBySwipe(direction: number): Promise<void>;
   openPendingReview(): Promise<void>;
@@ -167,6 +202,7 @@ Page<HomeData, {
   },
 
   applySnapshot(interview, summary, coverage = [], outputs = [], memoryStats, sessionSummary = null) {
+    clearQuestionSwipeRevealTimer();
     const coveragePercent = memoryStats?.coverage_average ?? (coverage.length
       ? Math.round(coverage.reduce((total, item) => total + item.coverage_score, 0) / coverage.length)
       : summary.progress_percent);
@@ -177,7 +213,7 @@ Page<HomeData, {
       sessionTitle: interview.session.title,
       reviewSessionId: interview.session.id,
       currentQuestionId: interview.current_question?.id || "",
-      currentPrompt: interview.current_question?.prompt || "本轮访谈已经完成，可以先看看整理好的记忆。",
+      currentPrompt: promptForQuestion(interview.current_question),
       questionCardTranslateX: 0,
       questionCardRotate: 0,
       questionCardDragging: false,
@@ -293,6 +329,21 @@ Page<HomeData, {
     this.resetQuestionSwipe();
   },
 
+  showQuestionCard(question) {
+    clearQuestionSwipeRevealTimer();
+    questionSwipeDeltaX = 0;
+    questionSwipeTracking = false;
+    this.setData({
+      currentQuestionId: question?.id || "",
+      currentPrompt: promptForQuestion(question),
+      questionCardTranslateX: 0,
+      questionCardRotate: 0,
+      questionCardDragging: false,
+      questionCardLeaving: false,
+      questionSwipeReady: false,
+    });
+  },
+
   resetQuestionSwipe() {
     questionSwipeDeltaX = 0;
     questionSwipeTracking = false;
@@ -307,11 +358,16 @@ Page<HomeData, {
 
   async skipCurrentQuestionBySwipe(direction) {
     const questionId = this.data.currentQuestionId;
+    const previousPrompt = this.data.currentPrompt;
     if (!questionId || this.data.skippingQuestion) {
       this.resetQuestionSwipe();
       return;
     }
 
+    const snapshotBeforeSkip = readMemoirDashboardSnapshot();
+    const optimisticQuestion = nextPendingQuestionAfter(snapshotBeforeSkip.interview, questionId);
+
+    clearQuestionSwipeRevealTimer();
     this.setData({
       skippingQuestion: true,
       error: "",
@@ -321,6 +377,13 @@ Page<HomeData, {
       questionCardRotate: direction > 0 ? 12 : -12,
       questionSwipeReady: false,
     });
+    questionSwipeRevealTimer = setTimeout(() => {
+      questionSwipeRevealTimer = null;
+      if (this.data.skippingQuestion && this.data.currentQuestionId === questionId) {
+        this.showQuestionCard(optimisticQuestion);
+      }
+    }, QUESTION_SWIPE_REVEAL_DELAY_MS);
+
     try {
       const interview = await skipQuestion(questionId);
       markMemoirDataSnapshotsStale();
@@ -336,13 +399,20 @@ Page<HomeData, {
           snapshot.memoryStats,
           snapshot.sessionSummary,
         );
+      } else {
+        this.showQuestionCard(interview.current_question);
       }
-      await this.loadHome();
+      void this.loadHome();
     } catch (error) {
-      this.setData({ error: error instanceof Error ? error.message : "换题失败" });
+      clearQuestionSwipeRevealTimer();
+      this.setData({
+        currentQuestionId: questionId,
+        currentPrompt: previousPrompt,
+        error: error instanceof Error ? error.message : "换题失败",
+      });
+      this.resetQuestionSwipe();
     } finally {
       this.setData({ skippingQuestion: false });
-      this.resetQuestionSwipe();
     }
   },
 

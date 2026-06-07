@@ -8,7 +8,7 @@
 
   <view class="surface stack">
     <text class="body-text">{{prompt || "正在获取问题"}}</text>
-    <text wx:if="{{isCompleted}}" class="muted">本轮访谈已经完成。</text>
+    <text wx:if="{{isCompleted}}" class="muted">暂时没有新的问题，可以先回首页看看整理结果。</text>
   </view>
 
   <view class="recorder surface">
