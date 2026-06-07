@@ -2,12 +2,25 @@ import type {
   MemoirAnswer,
   MemoirAudioFile,
   MemoirAudioTranscription,
+  MemoirCoverageItem,
   MemoirDraft,
+  MemoirEventMemory,
   MemoirInterviewState,
+  MemoirMemoryStatus,
+  MemoirMemoryType,
+  MemoirOpenQuestion,
+  MemoirOpenQuestionStatus,
+  MemoirOutput,
+  MemoirPersonMemory,
+  MemoirPlaceMemory,
   MemoirQuestion,
+  MemoirQuestionCandidate,
+  MemoirSessionProcessResponse,
+  MemoirSessionSummary,
   MemoirStoryList,
   MemoirStoryDetail,
   MemoirSummary,
+  MemoirThemeMemory,
   Project,
 } from "../domain/memoir";
 import { request, uploadFile } from "./request";
@@ -24,6 +37,17 @@ export function getNextQuestion(): Promise<MemoirQuestion | null> {
   return request<MemoirQuestion | null>("/api/mobile/memoir/questions/next");
 }
 
+export function processSessionMemory(sessionId: string): Promise<MemoirSessionProcessResponse> {
+  return request<MemoirSessionProcessResponse>(`/api/mobile/memoir/sessions/${sessionId}/process`, {
+    method: "POST",
+    data: {},
+  });
+}
+
+export function getSessionSummary(sessionId: string): Promise<MemoirSessionSummary | null> {
+  return request<MemoirSessionSummary | null>(`/api/mobile/memoir/sessions/${sessionId}/summary`);
+}
+
 export function getMemoirSummary(): Promise<MemoirSummary> {
   return request<MemoirSummary>("/api/mobile/memoir/summary");
 }
@@ -34,6 +58,77 @@ export function getMemoirStories(): Promise<MemoirStoryList> {
 
 export function getMemoirStoryDetail(answerId: string): Promise<MemoirStoryDetail> {
   return request<MemoirStoryDetail>(`/api/mobile/memoir/stories/${answerId}`);
+}
+
+export function listPeopleMemories(): Promise<MemoirPersonMemory[]> {
+  return request<MemoirPersonMemory[]>("/api/mobile/memoir/memories/people");
+}
+
+export function listEventMemories(): Promise<MemoirEventMemory[]> {
+  return request<MemoirEventMemory[]>("/api/mobile/memoir/memories/events");
+}
+
+export function listPlaceMemories(): Promise<MemoirPlaceMemory[]> {
+  return request<MemoirPlaceMemory[]>("/api/mobile/memoir/memories/places");
+}
+
+export function listThemeMemories(): Promise<MemoirThemeMemory[]> {
+  return request<MemoirThemeMemory[]>("/api/mobile/memoir/memories/themes");
+}
+
+export function updateMemoryStatus(
+  memoryType: Exclude<MemoirMemoryType, "open_question">,
+  memoryId: string,
+  status: MemoirMemoryStatus,
+): Promise<unknown> {
+  return request(`/api/mobile/memoir/memories/${memoryType}/${memoryId}`, {
+    method: "PATCH",
+    data: { status },
+  });
+}
+
+export function listOpenQuestions(): Promise<MemoirOpenQuestion[]> {
+  return request<MemoirOpenQuestion[]>("/api/mobile/memoir/open-questions");
+}
+
+export function updateOpenQuestionStatus(questionId: string, status: MemoirOpenQuestionStatus): Promise<MemoirOpenQuestion> {
+  return request<MemoirOpenQuestion>(`/api/mobile/memoir/open-questions/${questionId}`, {
+    method: "PATCH",
+    data: { status },
+  });
+}
+
+export function getCoverageMap(): Promise<MemoirCoverageItem[]> {
+  return request<MemoirCoverageItem[]>("/api/mobile/memoir/coverage");
+}
+
+export function recalculateCoverage(): Promise<MemoirCoverageItem[]> {
+  return request<MemoirCoverageItem[]>("/api/mobile/memoir/coverage/recalculate", {
+    method: "POST",
+    data: {},
+  });
+}
+
+export function listQuestionCandidates(): Promise<MemoirQuestionCandidate[]> {
+  return request<MemoirQuestionCandidate[]>("/api/mobile/memoir/question-candidates");
+}
+
+export function generateQuestionCandidates(): Promise<MemoirQuestionCandidate[]> {
+  return request<MemoirQuestionCandidate[]>("/api/mobile/memoir/question-candidates/generate", {
+    method: "POST",
+    data: {},
+  });
+}
+
+export function selectQuestionCandidate(candidateId: string): Promise<MemoirQuestion> {
+  return request<MemoirQuestion>(`/api/mobile/memoir/question-candidates/${candidateId}/select`, {
+    method: "POST",
+    data: {},
+  });
+}
+
+export function listMemoirOutputs(): Promise<MemoirOutput[]> {
+  return request<MemoirOutput[]>("/api/mobile/memoir/outputs");
 }
 
 export function skipQuestion(questionId: string): Promise<MemoirInterviewState> {

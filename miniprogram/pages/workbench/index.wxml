@@ -53,6 +53,65 @@
     <view wx:else class="progress-value">加载中</view>
   </view>
 
+  <view class="memory-panel">
+    <view class="story-list-header">
+      <text>访谈摘要</text>
+    </view>
+    <text class="memory-summary">{{summaryText || "回答后会在这里生成本次访谈摘要。"}}</text>
+  </view>
+
+  <view class="memory-panel">
+    <view class="story-list-header">
+      <text>覆盖度地图</text>
+      <text class="story-count">{{coverage.length}}</text>
+    </view>
+    <view wx:if="{{!coverage.length}}" class="empty-state">
+      <text>还没有覆盖度数据。完成一次访谈整理后会自动更新。</text>
+    </view>
+    <view wx:for="{{coverage}}" wx:key="topic_id" class="coverage-item">
+      <view class="memoir-row">
+        <text class="coverage-title">{{item.name}}</text>
+        <text class="coverage-score">{{item.coverage_score}}%</text>
+      </view>
+      <view class="progress-track compact-track">
+        <view class="progress-fill {{item.status}}" style="width: {{item.coverage_score}}%;"></view>
+      </view>
+    </view>
+  </view>
+
+  <view class="memory-panel">
+    <view class="story-list-header">
+      <text>记忆卡片</text>
+      <text class="story-count">{{memoryCards.length}}</text>
+    </view>
+    <view wx:if="{{!memoryCards.length}}" class="empty-state">
+      <text>还没有人物、事件、地点和主题记忆。</text>
+    </view>
+    <view wx:for="{{memoryCards}}" wx:key="title" class="memory-card">
+      <text class="story-question">{{item.title}}</text>
+      <text class="story-preview">{{item.detail}}</text>
+      <text class="memory-status">{{item.status === "confirmed" ? "已确认" : item.status === "rejected" ? "已拒绝" : "待确认"}}</text>
+    </view>
+  </view>
+
+  <view class="memory-panel">
+    <view class="story-list-header">
+      <text>待确认与下一问</text>
+      <text class="story-count">{{openQuestions.length + candidates.length}}</text>
+    </view>
+    <view wx:if="{{!openQuestions.length && !candidates.length}}" class="empty-state">
+      <text>暂无待确认问题或推荐下一问。</text>
+    </view>
+    <view wx:for="{{openQuestions}}" wx:key="id" class="memory-card">
+      <text class="story-question">{{item.question}}</text>
+      <text class="story-preview">{{item.reason || item.question_type}}</text>
+    </view>
+    <view wx:for="{{candidates}}" wx:key="id" class="candidate-card">
+      <text class="story-question">{{item.question}}</text>
+      <text class="story-preview">{{item.reason}}</text>
+    </view>
+  </view>
+
   <view class="story-list">
     <view class="story-list-header" bindtap="openStories" hover-class="tap-hover">
       <text>故事卡</text>

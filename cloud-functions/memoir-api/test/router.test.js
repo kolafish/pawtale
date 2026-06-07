@@ -12,6 +12,7 @@ function request(event, options = {}) {
     {
       asr: options.asr,
       drafting: options.drafting,
+      memoryExtraction: options.memoryExtraction,
       storage: options.storage,
       store: options.store || new MemoryStore(),
     },
@@ -517,4 +518,134 @@ test("returns memoir story cards and summary", async () => {
     completed_question_count: 1,
     progress_percent: 20,
   });
+});
+
+test("processes session memory surfaces coverage and question candidates", async () => {
+  const store = new MemoryStore();
+  const state = await request({
+    method: "GET",
+    path: "/api/mobile/memoir/sessions/current",
+  }, { store });
+  const answer = await request({
+    method: "POST",
+    path: "/api/mobile/memoir/answers",
+    data: {
+      question_id: state.data.current_question.id,
+      text: "我第一次去重庆厂里上班，是老张带我去的。",
+    },
+  }, { store });
+  const payload = {
+    people: [{
+      canonical_name: "老张",
+      relationship: "同事",
+      description: "带受访者去重庆厂里的人",
+      confidence: 0.85,
+      evidence_quote: "老张带我去的",
+      answer_id: answer.data.id,
+    }],
+    events: [{
+      title: "第一次去重庆工作",
+      life_stage: "青年",
+      time_text: "第一次去重庆厂里上班",
+      process: "老张带受访者去重庆厂里上班",
+      emotion: "骄傲",
+      importance: 0.9,
+      confidence: 0.9,
+      evidence_quote: "第一次去重庆厂里上班",
+      answer_id: answer.data.id,
+    }],
+    places: [{
+      name: "重庆厂",
+      place_type: "工作地点",
+      evidence_quote: "重庆厂里上班",
+      answer_id: answer.data.id,
+    }],
+    themes: [{
+      name: "离乡",
+      description: "离开家去外地工作",
+      strength: 0.8,
+      mention_count: 1,
+      evidence_quote: "去重庆厂里上班",
+      answer_id: answer.data.id,
+    }],
+    open_questions: [{
+      question: "第一次去重庆厂那天，是谁送你出门的？",
+      question_type: "scene_detail",
+      reason: "关键事件缺少出发场景",
+      priority: 0.82,
+      target_memory_type: "event",
+      target_title: "第一次去重庆工作",
+      evidence_quote: "老张带我去的",
+      answer_id: answer.data.id,
+    }],
+    session_summary: "本次访谈沉淀了第一次去重庆工作的经历。",
+    story_fragment: "第一次去重庆厂里上班，是老张带我去的。",
+  };
+  const extraction = {
+    async extract(input) {
+      assert.equal(input.session.id, state.data.session.id);
+      assert.equal(input.turns[0].answer_id, answer.data.id);
+      return {
+        payload,
+        model: "fake-memory",
+        prompt: "prompt",
+      };
+    },
+  };
+
+  const first = await request({
+    method: "POST",
+    path: `/api/mobile/memoir/sessions/${state.data.session.id}/process`,
+  }, { store, memoryExtraction: extraction });
+  const second = await request({
+    method: "POST",
+    path: `/api/mobile/memoir/sessions/${state.data.session.id}/process`,
+  }, { store, memoryExtraction: extraction });
+
+  assert.equal(first.statusCode, 200);
+  assert.equal(first.data.people[0].canonical_name, "老张");
+  assert.equal(first.data.events[0].title, "第一次去重庆工作");
+  assert.equal(first.data.open_questions[0].question_type, "scene");
+  assert.equal(second.data.people[0].id, first.data.people[0].id);
+
+  const summary = await request({
+    method: "GET",
+    path: `/api/mobile/memoir/sessions/${state.data.session.id}/summary`,
+  }, { store });
+  assert.equal(summary.data.summary, "本次访谈沉淀了第一次去重庆工作的经历。");
+
+  const people = await request({ method: "GET", path: "/api/mobile/memoir/memories/people" }, { store });
+  const events = await request({ method: "GET", path: "/api/mobile/memoir/memories/events" }, { store });
+  const places = await request({ method: "GET", path: "/api/mobile/memoir/memories/places" }, { store });
+  const themes = await request({ method: "GET", path: "/api/mobile/memoir/memories/themes" }, { store });
+  assert.equal(people.data.length, 1);
+  assert.equal(events.data.length, 1);
+  assert.equal(places.data.length, 1);
+  assert.equal(themes.data.length, 1);
+
+  const coverage = await request({
+    method: "POST",
+    path: "/api/mobile/memoir/coverage/recalculate",
+  }, { store });
+  assert.equal(coverage.data.length, 10);
+  assert.ok(coverage.data.some((item) => item.key === "first_job" && item.coverage_score > 0));
+
+  const candidates = await request({
+    method: "POST",
+    path: "/api/mobile/memoir/question-candidates/generate",
+  }, { store });
+  assert.ok(candidates.data.some((item) => item.question.startsWith("第一次去重庆厂")));
+
+  const selected = await request({
+    method: "POST",
+    path: `/api/mobile/memoir/question-candidates/${candidates.data[0].id}/select`,
+  }, { store });
+  assert.equal(selected.statusCode, 200);
+  assert.equal(selected.data.source, "ai_generated");
+
+  const outputs = await request({ method: "GET", path: "/api/mobile/memoir/outputs" }, { store });
+  assert.equal(outputs.data[0].output_type, "story_fragment");
+
+  assert.equal((await store.findMany(COLLECTIONS.personMemories, { openid: "openid_a" })).length, 1);
+  assert.equal((await store.findMany(COLLECTIONS.memoryEvidence, { openid: "openid_a" })).length, 5);
 });

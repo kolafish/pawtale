@@ -1,4 +1,4 @@
-import type { MemoirInterviewState, MemoirSummary } from "../../domain/memoir";
+import type { MemoirCoverageItem, MemoirInterviewState, MemoirSummary } from "../../domain/memoir";
 import { loadMemoirDashboard } from "../../services/memoir-dashboard";
 import {
   answeredQuestionCount,
@@ -26,7 +26,7 @@ Page<HomeData, {
   onLoad(): Promise<void>;
   onShow(): void;
   hydrateFromCache(): void;
-  applySnapshot(interview: MemoirInterviewState, summary: MemoirSummary): void;
+  applySnapshot(interview: MemoirInterviewState, summary: MemoirSummary, coverage?: MemoirCoverageItem[]): void;
   loadHome(): Promise<void>;
   continueInterview(): Promise<void>;
   openStories(): void;
@@ -72,10 +72,13 @@ Page<HomeData, {
     this.setData({
       projectTitle: snapshot.project?.title || this.data.projectTitle,
     });
-    this.applySnapshot(snapshot.interview, snapshot.summary);
+    this.applySnapshot(snapshot.interview, snapshot.summary, snapshot.coverage);
   },
 
-  applySnapshot(interview, summary) {
+  applySnapshot(interview, summary, coverage = []) {
+    const coveragePercent = coverage.length
+      ? Math.round(coverage.reduce((total, item) => total + item.coverage_score, 0) / coverage.length)
+      : summary.progress_percent;
     this.setData({
       sessionTitle: interview.session.title,
       currentPrompt: interview.current_question?.prompt || "本轮访谈已经完成，可以先看看整理好的故事。",
@@ -84,7 +87,7 @@ Page<HomeData, {
       weeklyStoryCount: summary.weekly_story_count,
       pendingReviewCount: summary.pending_review_count,
       confirmedStoryCount: summary.confirmed_story_count,
-      progressPercent: summary.progress_percent,
+      progressPercent: coveragePercent,
       latestDraftPreview: interview.latest_draft?.content_edited || "",
       hasDashboardData: true,
     });
@@ -97,11 +100,11 @@ Page<HomeData, {
     const loading = !this.data.hasDashboardData;
     this.setData({ loading, refreshing: true, error: "" });
     try {
-      const { project, interview, summary } = await loadMemoirDashboard({ includeProject: true });
+      const { project, interview, summary, coverage } = await loadMemoirDashboard({ includeProject: true, includeMemory: true });
       this.setData({
         projectTitle: project?.title || "",
       });
-      this.applySnapshot(interview, summary);
+      this.applySnapshot(interview, summary, coverage);
     } catch (error) {
       this.setData({ error: error instanceof Error ? error.message : "加载失败" });
     } finally {
