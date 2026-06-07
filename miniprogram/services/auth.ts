@@ -1,7 +1,7 @@
 import type { MemoirIdentity, User } from "../domain/memoir";
-import { API_TRANSPORT } from "../config";
+import { API_TRANSPORT, CLOUD_ENV_ID } from "../config";
 import { ApiError, request } from "./request";
-import { cacheIdentityFromUser, ensureMemoirStoreIdentity } from "../stores/session";
+import { cacheIdentityFromUser, ensureMemoirStoreIdentity, writeMemoirStore } from "../stores/session";
 
 interface AuthResponse {
   user: User;
@@ -12,6 +12,8 @@ export interface WechatProfilePatch {
   wechat_nickname?: string;
   wechat_avatar_url?: string;
 }
+
+const CLOUD_AVATAR_ROOT = "memoir/avatars";
 
 const DEV_USER = {
   email: "miniprogram-dev@example.com",
@@ -26,6 +28,7 @@ function rememberSessionUser(user: User): User {
 
 function rememberMemoirIdentity(identity: MemoirIdentity): MemoirIdentity {
   ensureMemoirStoreIdentity(cacheIdentityFromUser(identity, identity.active_project));
+  writeMemoirStore({ project: identity.active_project });
   return identity;
 }
 
@@ -33,13 +36,39 @@ export async function getMemoirIdentity(): Promise<MemoirIdentity> {
   return rememberMemoirIdentity(await request<MemoirIdentity>("/api/mobile/memoir/me"));
 }
 
-export async function updateWechatUserProfile(data: WechatProfilePatch): Promise<User> {
-  const user = await request<User>("/api/mobile/memoir/me", {
+function safePathSegment(value: string): string {
+  return value.replace(/[^a-zA-Z0-9_-]/g, "_");
+}
+
+function fileExtension(filePath: string): string {
+  const cleanPath = filePath.split("?")[0] || "";
+  const match = /\.([a-zA-Z0-9]+)$/.exec(cleanPath);
+  return match ? match[1].toLowerCase() : "jpg";
+}
+
+export async function uploadWechatAvatar(filePath: string, ownerId: string): Promise<string> {
+  if (/^(cloud|https?):\/\//.test(filePath)) {
+    return filePath;
+  }
+  const extension = fileExtension(filePath);
+  const random = Math.random().toString(36).slice(2, 10);
+  const cloudPath = `${CLOUD_AVATAR_ROOT}/${safePathSegment(ownerId)}/${Date.now()}-${random}.${extension}`;
+  const result = await wx.cloud.uploadFile({
+    config: {
+      env: CLOUD_ENV_ID,
+    },
+    cloudPath,
+    filePath,
+  });
+  return result.fileID;
+}
+
+export async function updateWechatUserProfile(data: WechatProfilePatch): Promise<MemoirIdentity> {
+  await request<User>("/api/mobile/memoir/me", {
     method: "PATCH",
     data,
   });
-  ensureMemoirStoreIdentity(cacheIdentityFromUser(user));
-  return user;
+  return getMemoirIdentity();
 }
 
 export async function ensureLocalDevSession(): Promise<User> {

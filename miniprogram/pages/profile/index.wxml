@@ -61,8 +61,28 @@
 
   <view class="settings-panel">
     <text class="section-title">微信资料</text>
-    <button class="profile-action" bindtap="syncWechatProfile" loading="{{syncingProfile}}">
-      {{syncingProfile ? "更新中" : "同步昵称头像"}}
+    <view class="profile-edit-row">
+      <button class="avatar-picker" open-type="chooseAvatar" bindchooseavatar="chooseAvatar">
+        <image
+          class="avatar-picker-image"
+          src="{{avatarDraftUrl || avatarUrl || '/assets/memoir-gramophone.png'}}"
+          mode="aspectFill"
+        />
+      </button>
+      <view class="profile-edit-main">
+        <input
+          class="nickname-input"
+          type="nickname"
+          value="{{profileNameDraft}}"
+          placeholder="填写微信昵称"
+          maxlength="24"
+          bindinput="onNicknameInput"
+        />
+        <text class="profile-edit-note">头像和昵称会用于默认回忆录名称</text>
+      </view>
+    </view>
+    <button class="profile-action" bindtap="saveWechatProfile" loading="{{syncingProfile}}">
+      {{syncingProfile ? "保存中" : "保存微信资料"}}
     </button>
   </view>
 

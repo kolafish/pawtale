@@ -47,6 +47,7 @@ Page<HomeData, {
   loadHome(): Promise<void>;
   continueInterview(): Promise<void>;
   openPendingReview(): Promise<void>;
+  openProjects(): void;
   openStories(): void;
   openWorkbench(): void;
   openHome(): void;
@@ -179,6 +180,10 @@ Page<HomeData, {
       return;
     }
     wx.navigateTo({ url: `/pages/review/index?sessionId=${encodeURIComponent(fallbackSessionId)}` });
+  },
+
+  openProjects() {
+    wx.navigateTo({ url: "/pages/projects/index" });
   },
 
   openStories() {

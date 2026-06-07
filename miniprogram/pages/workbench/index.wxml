@@ -38,7 +38,7 @@
     </view>
   </view>
 
-  <view class="memoir-panel" bindtap="openStories" hover-class="tap-hover">
+  <view class="memoir-panel" bindtap="openProjects" hover-class="tap-hover">
     <view class="memoir-row">
       <view>
         <text class="memoir-title">{{projectTitle || "我的回忆录"}}</text>

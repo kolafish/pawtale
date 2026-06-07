@@ -41,7 +41,7 @@
   </view>
 
   <view class="progress-panel">
-    <view class="progress-row">
+    <view class="progress-row" bindtap="openProjects" hover-class="tap-hover">
       <text>{{projectTitle || "我的回忆录"}}</text>
       <text wx:if="{{hasDashboardData}}">{{progressPercent}}%</text>
       <text wx:else>加载中</text>
