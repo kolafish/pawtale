@@ -6,7 +6,7 @@ from enum import Enum
 from typing import Any
 
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.memoir import (
@@ -16,16 +16,30 @@ from app.domain.memoir import (
     MemoirQuestionType,
     MemoirSensitivity,
 )
-from app.models.memoir import MemoirAnswer, MemoirQuestion, MemoirSession
+from app.models.memoir import (
+    MemoirAnswer,
+    MemoirEventMemory,
+    MemoirOpenQuestion,
+    MemoirPersonMemory,
+    MemoirPlaceMemory,
+    MemoirQuestion,
+    MemoirSession,
+    MemoirThemeMemory,
+)
 from app.schemas.memoir import (
     MemoirEventMemoryCreate,
+    MemoirEventMemoryResponse,
     MemoirMemoryEvidenceCreate,
     MemoirOpenQuestionCreate,
+    MemoirOpenQuestionResponse,
     MemoirPersonMemoryCreate,
+    MemoirPersonMemoryResponse,
     MemoirPlaceMemoryCreate,
+    MemoirPlaceMemoryResponse,
     MemoirSessionProcessRequest,
     MemoirSessionProcessResponse,
     MemoirThemeMemoryCreate,
+    MemoirThemeMemoryResponse,
 )
 from app.services import get_ai_service
 from app.services.ai_types import AITextClient
@@ -282,6 +296,31 @@ def _quote(item: dict[str, Any], turn: SessionTurn) -> str:
     return _text(item, "evidence_quote", "quote") or turn.answer_text[:300]
 
 
+async def _find_response_by_label(
+    db: AsyncSession,
+    model,
+    response_model,
+    project_id: str,
+    column,
+    label: str,
+):
+    normalized = label.strip().lower()
+    if not normalized:
+        return None
+    existing = await db.scalar(
+        select(model)
+        .where(
+            model.project_id == project_id,
+            func.lower(column) == normalized,
+        )
+        .order_by(model.created_at)
+        .limit(1)
+    )
+    if not existing:
+        return None
+    return response_model.model_validate(existing)
+
+
 async def _add_evidence(
     db: AsyncSession,
     user_id: str,
@@ -463,19 +502,27 @@ async def process_session_memory(
         canonical_name = _text(item, "canonical_name", "name")
         if not canonical_name:
             continue
-        person = await create_person_memory(
+        person_req = MemoirPersonMemoryCreate(
+            project_id=project_id,
+            canonical_name=canonical_name,
+            aliases_json=_text_list(item, "aliases", "aliases_json"),
+            relationship=_text(item, "relationship") or None,
+            first_seen_session_id=session.id,
+            description=_text(item, "description"),
+            confidence=_bounded_float(item, "confidence"),
+            created_by=MemoirCreatedBy.AI,
+        )
+        person = await _find_response_by_label(
+            db,
+            MemoirPersonMemory,
+            MemoirPersonMemoryResponse,
+            project_id,
+            MemoirPersonMemory.canonical_name,
+            canonical_name,
+        ) or await create_person_memory(
             db,
             user_id,
-            MemoirPersonMemoryCreate(
-                project_id=project_id,
-                canonical_name=canonical_name,
-                aliases_json=_text_list(item, "aliases", "aliases_json"),
-                relationship=_text(item, "relationship") or None,
-                first_seen_session_id=session.id,
-                description=_text(item, "description"),
-                confidence=_bounded_float(item, "confidence"),
-                created_by=MemoirCreatedBy.AI,
-            ),
+            person_req,
         )
         people.append(person)
         created_memory_ids[_memory_lookup_key(MemoirMemoryType.PERSON, person.canonical_name)] = person.id
@@ -486,23 +533,31 @@ async def process_session_memory(
         title = _text(item, "title", "event_title")
         if not title:
             continue
-        event = await create_event_memory(
+        event_req = MemoirEventMemoryCreate(
+            project_id=project_id,
+            title=title,
+            life_stage=_text(item, "life_stage") or None,
+            time_text=_text(item, "time_text", "time") or None,
+            place_text=_text(item, "place_text", "place") or None,
+            cause=_text(item, "cause"),
+            process=_text(item, "process", "description"),
+            result=_text(item, "result"),
+            emotion=_text(item, "emotion") or None,
+            importance=_bounded_float(item, "importance"),
+            confidence=_bounded_float(item, "confidence"),
+            created_by=MemoirCreatedBy.AI,
+        )
+        event = await _find_response_by_label(
+            db,
+            MemoirEventMemory,
+            MemoirEventMemoryResponse,
+            project_id,
+            MemoirEventMemory.title,
+            title,
+        ) or await create_event_memory(
             db,
             user_id,
-            MemoirEventMemoryCreate(
-                project_id=project_id,
-                title=title,
-                life_stage=_text(item, "life_stage") or None,
-                time_text=_text(item, "time_text", "time") or None,
-                place_text=_text(item, "place_text", "place") or None,
-                cause=_text(item, "cause"),
-                process=_text(item, "process", "description"),
-                result=_text(item, "result"),
-                emotion=_text(item, "emotion") or None,
-                importance=_bounded_float(item, "importance"),
-                confidence=_bounded_float(item, "confidence"),
-                created_by=MemoirCreatedBy.AI,
-            ),
+            event_req,
         )
         events.append(event)
         created_memory_ids[_memory_lookup_key(MemoirMemoryType.EVENT, event.title)] = event.id
@@ -513,19 +568,27 @@ async def process_session_memory(
         name = _text(item, "name", "place_name")
         if not name:
             continue
-        place = await create_place_memory(
+        place_req = MemoirPlaceMemoryCreate(
+            project_id=project_id,
+            name=name,
+            elder_alias=_text(item, "elder_alias", "alias") or None,
+            modern_name=_text(item, "modern_name") or None,
+            place_type=_text(item, "place_type", "type") or None,
+            description=_text(item, "description"),
+            confidence=_bounded_float(item, "confidence"),
+            created_by=MemoirCreatedBy.AI,
+        )
+        place = await _find_response_by_label(
+            db,
+            MemoirPlaceMemory,
+            MemoirPlaceMemoryResponse,
+            project_id,
+            MemoirPlaceMemory.name,
+            name,
+        ) or await create_place_memory(
             db,
             user_id,
-            MemoirPlaceMemoryCreate(
-                project_id=project_id,
-                name=name,
-                elder_alias=_text(item, "elder_alias", "alias") or None,
-                modern_name=_text(item, "modern_name") or None,
-                place_type=_text(item, "place_type", "type") or None,
-                description=_text(item, "description"),
-                confidence=_bounded_float(item, "confidence"),
-                created_by=MemoirCreatedBy.AI,
-            ),
+            place_req,
         )
         places.append(place)
         created_memory_ids[_memory_lookup_key(MemoirMemoryType.PLACE, place.name)] = place.id
@@ -536,18 +599,26 @@ async def process_session_memory(
         name = _text(item, "name", "theme")
         if not name:
             continue
-        theme = await create_theme_memory(
+        theme_req = MemoirThemeMemoryCreate(
+            project_id=project_id,
+            name=name,
+            description=_text(item, "description"),
+            strength=_bounded_float(item, "strength"),
+            mention_count=_positive_int(item, "mention_count"),
+            confidence=_bounded_float(item, "confidence"),
+            created_by=MemoirCreatedBy.AI,
+        )
+        theme = await _find_response_by_label(
+            db,
+            MemoirThemeMemory,
+            MemoirThemeMemoryResponse,
+            project_id,
+            MemoirThemeMemory.name,
+            name,
+        ) or await create_theme_memory(
             db,
             user_id,
-            MemoirThemeMemoryCreate(
-                project_id=project_id,
-                name=name,
-                description=_text(item, "description"),
-                strength=_bounded_float(item, "strength"),
-                mention_count=_positive_int(item, "mention_count"),
-                confidence=_bounded_float(item, "confidence"),
-                created_by=MemoirCreatedBy.AI,
-            ),
+            theme_req,
         )
         themes.append(theme)
         created_memory_ids[_memory_lookup_key(MemoirMemoryType.THEME, theme.name)] = theme.id
@@ -559,29 +630,37 @@ async def process_session_memory(
         if not question:
             continue
         target_memory_type, target_memory_id = _resolve_target(item, created_memory_ids)
-        open_question = await create_open_question(
+        open_question_req = MemoirOpenQuestionCreate(
+            project_id=project_id,
+            session_id=session.id,
+            target_memory_type=target_memory_type,
+            target_memory_id=target_memory_id,
+            question=question,
+            question_type=_enum_value(
+                MemoirQuestionType,
+                item.get("question_type") or item.get("type"),
+                MemoirQuestionType.CLARIFICATION,
+            ),
+            reason=_text(item, "reason"),
+            sensitivity=_enum_value(
+                MemoirSensitivity,
+                item.get("sensitivity"),
+                MemoirSensitivity.LOW,
+            ),
+            priority=_bounded_float(item, "priority"),
+            created_by=MemoirCreatedBy.AI,
+        )
+        open_question = await _find_response_by_label(
+            db,
+            MemoirOpenQuestion,
+            MemoirOpenQuestionResponse,
+            project_id,
+            MemoirOpenQuestion.question,
+            question,
+        ) or await create_open_question(
             db,
             user_id,
-            MemoirOpenQuestionCreate(
-                project_id=project_id,
-                session_id=session.id,
-                target_memory_type=target_memory_type,
-                target_memory_id=target_memory_id,
-                question=question,
-                question_type=_enum_value(
-                    MemoirQuestionType,
-                    item.get("question_type") or item.get("type"),
-                    MemoirQuestionType.CLARIFICATION,
-                ),
-                reason=_text(item, "reason"),
-                sensitivity=_enum_value(
-                    MemoirSensitivity,
-                    item.get("sensitivity"),
-                    MemoirSensitivity.LOW,
-                ),
-                priority=_bounded_float(item, "priority"),
-                created_by=MemoirCreatedBy.AI,
-            ),
+            open_question_req,
         )
         open_questions.append(open_question)
         await _add_evidence(

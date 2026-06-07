@@ -49,6 +49,7 @@ from app.services.memoir import question_planner as memoir_question_planner
 from app.services.memoir import session_summary as memoir_session_summary
 from app.services.memoir import story_cards as memoir_story_cards
 from app.services.memoir import transcription as memoir_transcription
+from app.services.memoir.access import load_memoir_project
 
 
 router = APIRouter()
@@ -57,6 +58,17 @@ router = APIRouter()
 async def _default_memoir_project_id(db: AsyncSession, user_id: str) -> str:
     project = await memoir_projects.get_or_create_mobile_memoir_project(db, user_id)
     return project.id
+
+
+async def _memoir_project_id(
+    db: AsyncSession,
+    user_id: str,
+    project_id: str | None = None,
+) -> str:
+    if project_id:
+        project = await load_memoir_project(db, project_id, user_id)
+        return project.id
+    return await _default_memoir_project_id(db, user_id)
 
 
 @router.get("/project", response_model=ProjectResponse)
@@ -70,19 +82,21 @@ async def get_mobile_memoir_project(
 @router.post("/sessions", response_model=MemoirInterviewState, status_code=201)
 async def create_mobile_memoir_session(
     req: MemoirSessionCreate,
+    project_id: str | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    project_id = await _default_memoir_project_id(db, current_user.id)
+    project_id = await _memoir_project_id(db, current_user.id, project_id)
     return await memoir_interview.create_session(db, project_id, current_user.id, req)
 
 
 @router.get("/sessions/current", response_model=MemoirInterviewState)
 async def get_current_mobile_memoir_session(
+    project_id: str | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    project_id = await _default_memoir_project_id(db, current_user.id)
+    project_id = await _memoir_project_id(db, current_user.id, project_id)
     return await memoir_interview.get_or_create_current_session(db, project_id, current_user.id)
 
 
@@ -112,46 +126,51 @@ async def get_mobile_memoir_session_summary(
 
 @router.get("/questions/next", response_model=MemoirQuestionResponse | None)
 async def get_next_mobile_memoir_question(
+    project_id: str | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    project_id = await _default_memoir_project_id(db, current_user.id)
+    project_id = await _memoir_project_id(db, current_user.id, project_id)
     return await memoir_interview.get_next_question(db, project_id, current_user.id)
 
 
 @router.get("/memories/people", response_model=list[MemoirPersonMemoryResponse])
 async def list_mobile_memoir_people(
+    project_id: str | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    project_id = await _default_memoir_project_id(db, current_user.id)
+    project_id = await _memoir_project_id(db, current_user.id, project_id)
     return await memoir_memory_repository.list_person_memories(db, current_user.id, project_id)
 
 
 @router.get("/memories/events", response_model=list[MemoirEventMemoryResponse])
 async def list_mobile_memoir_events(
+    project_id: str | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    project_id = await _default_memoir_project_id(db, current_user.id)
+    project_id = await _memoir_project_id(db, current_user.id, project_id)
     return await memoir_memory_repository.list_event_memories(db, current_user.id, project_id)
 
 
 @router.get("/memories/places", response_model=list[MemoirPlaceMemoryResponse])
 async def list_mobile_memoir_places(
+    project_id: str | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    project_id = await _default_memoir_project_id(db, current_user.id)
+    project_id = await _memoir_project_id(db, current_user.id, project_id)
     return await memoir_memory_repository.list_place_memories(db, current_user.id, project_id)
 
 
 @router.get("/memories/themes", response_model=list[MemoirThemeMemoryResponse])
 async def list_mobile_memoir_themes(
+    project_id: str | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    project_id = await _default_memoir_project_id(db, current_user.id)
+    project_id = await _memoir_project_id(db, current_user.id, project_id)
     return await memoir_memory_repository.list_theme_memories(db, current_user.id, project_id)
 
 
@@ -160,10 +179,11 @@ async def update_mobile_memoir_memory(
     memory_type: MemoirMemoryType,
     memory_id: str,
     req: MemoirMemoryUpdateRequest,
+    project_id: str | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    project_id = await _default_memoir_project_id(db, current_user.id)
+    project_id = await _memoir_project_id(db, current_user.id, project_id)
     result = await memoir_memory_repository.update_memory(
         db,
         current_user.id,
@@ -178,10 +198,11 @@ async def update_mobile_memoir_memory(
 
 @router.get("/open-questions", response_model=list[MemoirOpenQuestionResponse])
 async def list_mobile_memoir_open_questions(
+    project_id: str | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    project_id = await _default_memoir_project_id(db, current_user.id)
+    project_id = await _memoir_project_id(db, current_user.id, project_id)
     return await memoir_memory_repository.list_open_questions(db, current_user.id, project_id)
 
 
@@ -189,10 +210,11 @@ async def list_mobile_memoir_open_questions(
 async def update_mobile_memoir_open_question(
     question_id: str,
     req: MemoirOpenQuestionUpdateRequest,
+    project_id: str | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    project_id = await _default_memoir_project_id(db, current_user.id)
+    project_id = await _memoir_project_id(db, current_user.id, project_id)
     result = await memoir_memory_repository.update_open_question(
         db,
         current_user.id,
@@ -206,30 +228,63 @@ async def update_mobile_memoir_open_question(
 
 @router.get("/coverage", response_model=list[MemoirCoverageItemResponse])
 async def get_mobile_memoir_coverage(
+    project_id: str | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    project_id = await _default_memoir_project_id(db, current_user.id)
-    result = await memoir_coverage.get_coverage_map(db, current_user.id, project_id)
+    project_id = await _memoir_project_id(db, current_user.id, project_id)
+    return await memoir_coverage.get_coverage_map(db, current_user.id, project_id)
+
+
+@router.post("/coverage/recalculate", response_model=list[MemoirCoverageItemResponse])
+async def recalculate_mobile_memoir_coverage(
+    project_id: str | None = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    project_id = await _memoir_project_id(db, current_user.id, project_id)
+    await memoir_coverage.calculate_coverage_snapshots(db, current_user.id, project_id)
     await db.commit()
-    return result
+    return await memoir_coverage.get_coverage_map(db, current_user.id, project_id)
 
 
 @router.get("/question-candidates", response_model=list[MemoirQuestionCandidateResponse])
 async def list_mobile_memoir_question_candidates(
+    project_id: str | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    project_id = await _default_memoir_project_id(db, current_user.id)
+    project_id = await _memoir_project_id(db, current_user.id, project_id)
+    session_id = await memoir_interview.current_session_id(db, project_id, current_user.id)
+    return await memoir_question_planner.list_question_candidates(
+        db,
+        current_user.id,
+        project_id,
+        session_id,
+    )
+
+
+@router.post("/question-candidates/generate", response_model=list[MemoirQuestionCandidateResponse])
+async def generate_mobile_memoir_question_candidates(
+    project_id: str | None = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    project_id = await _memoir_project_id(db, current_user.id, project_id)
     state = await memoir_interview.get_or_create_current_session(db, project_id, current_user.id)
-    result = await memoir_question_planner.list_question_candidates(
+    await memoir_question_planner.generate_question_candidates(
         db,
         current_user.id,
         project_id,
         state.session.id,
     )
     await db.commit()
-    return result
+    return await memoir_question_planner.list_question_candidates(
+        db,
+        current_user.id,
+        project_id,
+        state.session.id,
+    )
 
 
 @router.post("/question-candidates/{candidate_id}/select", response_model=MemoirQuestionResponse)
@@ -243,48 +298,53 @@ async def select_mobile_memoir_question_candidate(
 
 @router.get("/outputs", response_model=list[MemoirOutputResponse])
 async def list_mobile_memoir_outputs(
+    project_id: str | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    project_id = await _default_memoir_project_id(db, current_user.id)
+    project_id = await _memoir_project_id(db, current_user.id, project_id)
     return await memoir_outputs.list_outputs(db, current_user.id, project_id)
 
 
 @router.get("/outputs/{output_id}", response_model=MemoirOutputDetailResponse)
 async def get_mobile_memoir_output(
     output_id: str,
+    project_id: str | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    project_id = await _default_memoir_project_id(db, current_user.id)
+    project_id = await _memoir_project_id(db, current_user.id, project_id)
     return await memoir_outputs.get_output(db, current_user.id, project_id, output_id)
 
 
 @router.get("/summary", response_model=MemoirSummaryResponse)
 async def get_mobile_memoir_summary(
+    project_id: str | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    project_id = await _default_memoir_project_id(db, current_user.id)
+    project_id = await _memoir_project_id(db, current_user.id, project_id)
     return await memoir_story_cards.get_summary(db, project_id, current_user.id)
 
 
 @router.get("/stories", response_model=MemoirStoryListResponse)
 async def list_mobile_memoir_stories(
+    project_id: str | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    project_id = await _default_memoir_project_id(db, current_user.id)
+    project_id = await _memoir_project_id(db, current_user.id, project_id)
     return await memoir_story_cards.list_story_cards(db, project_id, current_user.id)
 
 
 @router.get("/stories/{answer_id}", response_model=MemoirStoryDetailResponse)
 async def get_mobile_memoir_story(
     answer_id: str,
+    project_id: str | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    project_id = await _default_memoir_project_id(db, current_user.id)
+    project_id = await _memoir_project_id(db, current_user.id, project_id)
     return await memoir_story_cards.get_story_detail(db, project_id, current_user.id, answer_id)
 
 

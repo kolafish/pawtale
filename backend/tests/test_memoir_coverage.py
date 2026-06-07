@@ -1,13 +1,14 @@
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.domain.memoir import MemoirCoverageStatus
 from app.domain.projects.types import ProjectType
+from app.models.memoir import MemoirCoverageSnapshot
 from app.models.projects import Project
 from app.models.users import User
 from app.schemas.memoir import MemoirEventMemoryCreate, MemoirOpenQuestionCreate
 from app.domain.memoir import MemoirMemoryType, MemoirQuestionType
 from app.services.memoir.answers import answer_question_with_text
-from app.services.memoir.coverage import calculate_coverage_snapshots, latest_coverage_snapshots
+from app.services.memoir.coverage import calculate_coverage_snapshots, get_coverage_map, latest_coverage_snapshots
 from app.services.memoir.interview import get_or_create_current_session
 from app.services.memoir.memory_repository import create_event_memory, create_open_question
 
@@ -89,3 +90,21 @@ async def test_latest_coverage_snapshots_are_empty_before_calculation(test_db):
     result = await test_db.execute(select(Project).where(Project.id == project.id))
     assert result.scalar_one().id == project.id
     assert len(await latest_coverage_snapshots(test_db, user.id, project.id)) == 10
+
+
+async def test_get_coverage_map_reads_latest_snapshots_without_writes(test_db):
+    user = _user("coverage-readonly@example.com")
+    test_db.add(user)
+    await test_db.flush()
+    project = await _create_project(test_db, user)
+
+    assert await get_coverage_map(test_db, user.id, project.id) == []
+    assert await test_db.scalar(select(func.count()).select_from(MemoirCoverageSnapshot)) == 0
+
+    await calculate_coverage_snapshots(test_db, user.id, project.id)
+    first = await get_coverage_map(test_db, user.id, project.id)
+    second = await get_coverage_map(test_db, user.id, project.id)
+
+    assert len(first) == 10
+    assert [item.topic_id for item in second] == [item.topic_id for item in first]
+    assert await test_db.scalar(select(func.count()).select_from(MemoirCoverageSnapshot)) == 10

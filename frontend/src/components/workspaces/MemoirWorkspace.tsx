@@ -44,56 +44,62 @@ export function MemoirWorkspace({ project }: MemoirWorkspaceProps) {
   return (
     <ProjectDraftWorkspace
       project={project}
-      workspacePanel={<MemoirReviewPanel />}
+      workspacePanel={<MemoirReviewPanel projectId={project.id} />}
     />
   );
 }
 
-function MemoirReviewPanel() {
+function MemoirReviewPanel({ projectId }: { projectId: string }) {
   const queryClient = useQueryClient();
-  const invalidateMemoir = () => queryClient.invalidateQueries({ queryKey: ['memoir'] });
+  const invalidateMemoir = () => queryClient.invalidateQueries({ queryKey: ['memoir', projectId] });
 
   const sessionQuery = useQuery({
-    queryKey: ['memoir', 'session'],
-    queryFn: memoirApi.currentSession,
+    queryKey: ['memoir', projectId, 'session'],
+    queryFn: () => memoirApi.currentSession(projectId),
   });
   const sessionId = sessionQuery.data?.session.id;
 
   const summaryQuery = useQuery({
-    queryKey: ['memoir', 'summary', sessionId],
+    queryKey: ['memoir', projectId, 'summary', sessionId],
     queryFn: () => memoirApi.getSessionSummary(sessionId!),
     enabled: Boolean(sessionId),
   });
   const coverageQuery = useQuery({
-    queryKey: ['memoir', 'coverage'],
-    queryFn: memoirApi.getCoverage,
+    queryKey: ['memoir', projectId, 'coverage'],
+    queryFn: () => memoirApi.getCoverage(projectId),
   });
-  const peopleQuery = useQuery({ queryKey: ['memoir', 'people'], queryFn: memoirApi.listPeople });
-  const eventsQuery = useQuery({ queryKey: ['memoir', 'events'], queryFn: memoirApi.listEvents });
-  const placesQuery = useQuery({ queryKey: ['memoir', 'places'], queryFn: memoirApi.listPlaces });
-  const themesQuery = useQuery({ queryKey: ['memoir', 'themes'], queryFn: memoirApi.listThemes });
+  const peopleQuery = useQuery({ queryKey: ['memoir', projectId, 'people'], queryFn: () => memoirApi.listPeople(projectId) });
+  const eventsQuery = useQuery({ queryKey: ['memoir', projectId, 'events'], queryFn: () => memoirApi.listEvents(projectId) });
+  const placesQuery = useQuery({ queryKey: ['memoir', projectId, 'places'], queryFn: () => memoirApi.listPlaces(projectId) });
+  const themesQuery = useQuery({ queryKey: ['memoir', projectId, 'themes'], queryFn: () => memoirApi.listThemes(projectId) });
   const openQuestionsQuery = useQuery({
-    queryKey: ['memoir', 'openQuestions'],
-    queryFn: memoirApi.listOpenQuestions,
+    queryKey: ['memoir', projectId, 'openQuestions'],
+    queryFn: () => memoirApi.listOpenQuestions(projectId),
   });
   const candidatesQuery = useQuery({
-    queryKey: ['memoir', 'candidates'],
-    queryFn: memoirApi.listQuestionCandidates,
+    queryKey: ['memoir', projectId, 'candidates'],
+    queryFn: () => memoirApi.listQuestionCandidates(projectId),
   });
-  const outputsQuery = useQuery({ queryKey: ['memoir', 'outputs'], queryFn: memoirApi.listOutputs });
+  const outputsQuery = useQuery({ queryKey: ['memoir', projectId, 'outputs'], queryFn: () => memoirApi.listOutputs(projectId) });
 
   const processMutation = useMutation({
     mutationFn: () => memoirApi.processSession(sessionId!, {}),
-    onSuccess: invalidateMemoir,
+    onSuccess: async () => {
+      await Promise.all([
+        memoirApi.recalculateCoverage(projectId),
+        memoirApi.generateQuestionCandidates(projectId),
+      ]);
+      await invalidateMemoir();
+    },
   });
   const updateMemoryMutation = useMutation({
     mutationFn: (input: { type: MemoryCard['type']; id: string; status: MemoirMemoryStatus }) =>
-      memoirApi.updateMemory(input.type, input.id, { status: input.status }),
+      memoirApi.updateMemory(input.type, input.id, { status: input.status }, projectId),
     onSuccess: invalidateMemoir,
   });
   const updateOpenQuestionMutation = useMutation({
     mutationFn: (input: { id: string; status: 'answered' | 'dismissed' }) =>
-      memoirApi.updateOpenQuestion(input.id, { status: input.status }),
+      memoirApi.updateOpenQuestion(input.id, { status: input.status }, projectId),
     onSuccess: invalidateMemoir,
   });
   const selectCandidateMutation = useMutation({

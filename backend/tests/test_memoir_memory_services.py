@@ -345,6 +345,111 @@ async def test_memory_services_enforce_project_boundaries(test_db):
     assert evidence_exc.value.status_code == 400
 
 
+async def test_source_artifact_rejects_same_project_session_answer_mismatch(test_db):
+    user = _user("source-chain@example.com")
+    test_db.add(user)
+    await test_db.flush()
+    project = await _create_project(test_db, user)
+    session, _, _ = await _create_interview_answer(test_db, project, "第一场访谈")
+    _, _, other_answer = await _create_interview_answer(test_db, project, "第二场访谈")
+
+    with pytest.raises(HTTPException) as exc:
+        await create_source_artifact(
+            test_db,
+            user.id,
+            MemoirSourceArtifactCreate(
+                project_id=project.id,
+                session_id=session.id,
+                answer_id=other_answer.id,
+                artifact_type=MemoirSourceArtifactType.TEXT,
+            ),
+        )
+
+    assert exc.value.status_code == 400
+    assert exc.value.detail == "回答不属于该访谈"
+
+
+async def test_memory_evidence_rejects_same_project_broken_source_chain(test_db):
+    user = _user("evidence-chain@example.com")
+    test_db.add(user)
+    await test_db.flush()
+    project = await _create_project(test_db, user)
+    session, question, answer = await _create_interview_answer(test_db, project, "第一场访谈")
+    other_session, other_question, other_answer = await _create_interview_answer(
+        test_db,
+        project,
+        "第二场访谈",
+    )
+    artifact = await create_source_artifact(
+        test_db,
+        user.id,
+        MemoirSourceArtifactCreate(
+            project_id=project.id,
+            session_id=other_session.id,
+            answer_id=other_answer.id,
+            artifact_type=MemoirSourceArtifactType.TEXT,
+        ),
+    )
+    transcript = await create_transcript_version(
+        test_db,
+        user.id,
+        MemoirTranscriptVersionCreate(
+            answer_id=other_answer.id,
+            source_artifact_id=artifact.id,
+            version_type=MemoirTranscriptVersionType.FINAL,
+            content=other_answer.transcript_edited,
+        ),
+    )
+    event = await create_event_memory(
+        test_db,
+        user.id,
+        MemoirEventMemoryCreate(project_id=project.id, title="第一次去重庆工作"),
+    )
+
+    with pytest.raises(HTTPException) as question_exc:
+        await add_memory_evidence(
+            test_db,
+            user.id,
+            MemoirMemoryEvidenceCreate(
+                project_id=project.id,
+                memory_type=MemoirMemoryType.EVENT,
+                memory_id=event.id,
+                session_id=session.id,
+                question_id=other_question.id,
+            ),
+        )
+
+    with pytest.raises(HTTPException) as answer_exc:
+        await add_memory_evidence(
+            test_db,
+            user.id,
+            MemoirMemoryEvidenceCreate(
+                project_id=project.id,
+                memory_type=MemoirMemoryType.EVENT,
+                memory_id=event.id,
+                question_id=question.id,
+                answer_id=other_answer.id,
+            ),
+        )
+
+    with pytest.raises(HTTPException) as transcript_exc:
+        await add_memory_evidence(
+            test_db,
+            user.id,
+            MemoirMemoryEvidenceCreate(
+                project_id=project.id,
+                memory_type=MemoirMemoryType.EVENT,
+                memory_id=event.id,
+                answer_id=answer.id,
+                transcript_version_id=transcript.id,
+            ),
+        )
+
+    assert question_exc.value.detail == "问题不属于该访谈"
+    assert answer_exc.value.detail == "回答不属于该问题"
+    assert transcript_exc.value.detail == "转写版本不属于该回答"
+
+
 async def test_default_coverage_topics_are_idempotent(test_db):
     user = _user("coverage-service@example.com")
     test_db.add(user)

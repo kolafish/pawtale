@@ -1,4 +1,4 @@
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.domain.memoir import (
     MemoirMemoryType,
@@ -20,6 +20,7 @@ from app.services.memoir.memory_repository import create_event_memory, create_op
 from app.services.memoir.question_planner import (
     best_question_candidate,
     generate_question_candidates,
+    list_question_candidates,
     select_candidate_as_question,
 )
 
@@ -104,6 +105,21 @@ async def test_generate_question_candidates_from_open_questions_event_gaps_and_c
     event_gap = next(candidate for candidate in candidates if "大概是在什么时候" in candidate.question)
     assert event_gap.target_memory_type == MemoirMemoryType.EVENT.value
     assert event_gap.target_memory_id == event_id
+
+
+async def test_list_question_candidates_is_read_only(test_db):
+    user, project, session_id, _, _ = await _seed_planner_context(test_db)
+
+    candidates = await list_question_candidates(test_db, user.id, project.id, session_id)
+
+    assert candidates == []
+    assert await test_db.scalar(select(func.count()).select_from(MemoirQuestionCandidate)) == 0
+
+    await generate_question_candidates(test_db, user.id, project.id, session_id)
+    listed = await list_question_candidates(test_db, user.id, project.id, session_id)
+
+    assert listed
+    assert await test_db.scalar(select(func.count()).select_from(MemoirQuestionCandidate)) == len(listed)
 
 
 async def test_best_question_candidate_prefers_non_sensitive_specific_gap(test_db):
