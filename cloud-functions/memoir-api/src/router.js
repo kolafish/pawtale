@@ -62,6 +62,10 @@ const routes = {
       200,
       await memoirService(request).getProject(),
     )),
+    route("/api/mobile/memoir/dashboard", async (request) => jsonResponse(
+      200,
+      await memoirService(request).getMemoryDashboard(),
+    )),
     route("/api/mobile/memoir/sessions/current", async (request) => jsonResponse(
       200,
       await memoirService(request).getCurrentSession(),

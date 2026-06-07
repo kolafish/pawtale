@@ -3,6 +3,7 @@ import type {
   MemoirAudioFile,
   MemoirAudioTranscription,
   MemoirCoverageItem,
+  MemoirDashboardResponse,
   MemoirDraft,
   MemoirEventMemory,
   MemoirInterviewState,
@@ -27,6 +28,10 @@ import { request, uploadFile } from "./request";
 
 export function getMemoirProject(): Promise<Project> {
   return request<Project>("/api/mobile/memoir/project");
+}
+
+export function getMemoirDashboard(): Promise<MemoirDashboardResponse> {
+  return request<MemoirDashboardResponse>("/api/mobile/memoir/dashboard");
 }
 
 export function getCurrentSession(): Promise<MemoirInterviewState> {

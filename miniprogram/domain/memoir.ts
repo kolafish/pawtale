@@ -263,6 +263,41 @@ export interface MemoirOutput {
   source_session_id?: string | null;
   status: "draft" | "accepted" | "archived";
   updated_at: string;
+  content_preview?: string;
+  latest_version?: number | null;
+  latest_version_created_at?: string | null;
+  version_count?: number;
+}
+
+export interface MemoirMemoryStats {
+  total_memory_count: number;
+  draft_memory_count: number;
+  confirmed_memory_count: number;
+  rejected_memory_count: number;
+  open_question_count: number;
+  asked_open_question_count: number;
+  answered_open_question_count: number;
+  dismissed_open_question_count: number;
+  question_candidate_count: number;
+  output_count: number;
+  coverage_average: number;
+  low_coverage_count: number;
+}
+
+export interface MemoirDashboardResponse {
+  project: Project;
+  interview: MemoirInterviewState;
+  summary: MemoirSummary;
+  session_summary?: MemoirSessionSummary | null;
+  people: MemoirPersonMemory[];
+  events: MemoirEventMemory[];
+  places: MemoirPlaceMemory[];
+  themes: MemoirThemeMemory[];
+  open_questions: MemoirOpenQuestion[];
+  coverage: MemoirCoverageItem[];
+  candidates: MemoirQuestionCandidate[];
+  outputs: MemoirOutput[];
+  memory_stats: MemoirMemoryStats;
 }
 
 export interface MemoirSessionProcessResponse {
