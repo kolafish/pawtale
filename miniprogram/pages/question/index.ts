@@ -172,6 +172,11 @@ Page<QuestionData, {
       writeMemoirStore({
         interview: {
           ...interview,
+          session: {
+            ...interview.session,
+            current_question_id: current?.id,
+            status: current ? "active" : "completed",
+          },
           current_question: current,
           questions,
         },

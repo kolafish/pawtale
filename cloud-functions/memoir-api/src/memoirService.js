@@ -1478,6 +1478,11 @@ async function getOrCreatePlannedQuestion(store, openid, sessionId) {
     status: MemoirQuestionStatus.PENDING,
   });
   if (existing) {
+    await store.updateById(COLLECTIONS.sessions, sessionId, {
+      current_question_id: existing.id,
+      status: MemoirSessionStatus.ACTIVE,
+      updated_at: nowIso(),
+    });
     return existing;
   }
   await generateQuestionCandidates(store, openid);
@@ -1498,8 +1503,20 @@ async function getOrCreatePlannedQuestion(store, openid, sessionId) {
 }
 
 async function advanceSession(store, openid, sessionId) {
+  const session = await loadSession(store, openid, sessionId);
   const questions = await getOrderedQuestions(store, openid, sessionId);
-  const nextQuestion = questions.find((question) => question.status === MemoirQuestionStatus.PENDING) || null;
+  const currentPendingQuestion = questions.find((question) => (
+    question.id === session.current_question_id
+    && question.status === MemoirQuestionStatus.PENDING
+  ));
+  const plannedQuestion = questions.find((question) => (
+    question.source === "ai_generated"
+    && question.status === MemoirQuestionStatus.PENDING
+  ));
+  const nextQuestion = currentPendingQuestion
+    || plannedQuestion
+    || questions.find((question) => question.status === MemoirQuestionStatus.PENDING)
+    || null;
   const status = nextQuestion ? MemoirSessionStatus.ACTIVE : MemoirSessionStatus.COMPLETED;
   return store.updateById(COLLECTIONS.sessions, sessionId, {
     current_question_id: nextQuestion ? nextQuestion.id : null,

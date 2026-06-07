@@ -643,6 +643,19 @@ test("processes session memory surfaces coverage and question candidates", async
   assert.equal(selected.statusCode, 200);
   assert.equal(selected.data.source, "ai_generated");
 
+  const currentAfterSelect = await request({
+    method: "GET",
+    path: "/api/mobile/memoir/sessions/current",
+  }, { store });
+  assert.equal(currentAfterSelect.data.current_question.id, selected.data.id);
+  assert.equal(currentAfterSelect.data.session.current_question_id, selected.data.id);
+
+  const nextAfterSelect = await request({
+    method: "GET",
+    path: "/api/mobile/memoir/questions/next",
+  }, { store });
+  assert.equal(nextAfterSelect.data.id, selected.data.id);
+
   const outputs = await request({ method: "GET", path: "/api/mobile/memoir/outputs" }, { store });
   assert.equal(outputs.data[0].output_type, "story_fragment");
 
