@@ -15,7 +15,8 @@
 .section-row,
 .coverage-row,
 .memory-card,
-.memory-actions {
+.memory-actions,
+.memory-head {
   display: flex;
   align-items: center;
 }
@@ -25,6 +26,10 @@
 .memory-card {
   justify-content: space-between;
   gap: 20rpx;
+}
+
+.memory-card-vertical {
+  display: block;
 }
 
 .section-title {
@@ -50,9 +55,16 @@
 .coverage-row,
 .memory-card,
 .question-card,
-.candidate-card {
+.candidate-card,
+.output-card {
   padding: 24rpx 0;
   border-top: 2rpx solid #f5eadc;
+}
+
+.memory-head {
+  justify-content: space-between;
+  gap: 14rpx;
+  margin-bottom: 14rpx;
 }
 
 .coverage-copy,
@@ -115,6 +127,16 @@
   font-weight: 900;
 }
 
+.type-pill {
+  flex-shrink: 0;
+  padding: 8rpx 14rpx;
+  border-radius: 999rpx;
+  color: #128577;
+  background: #e6f6f2;
+  font-size: 22rpx;
+  font-weight: 900;
+}
+
 .status-pill.confirmed {
   color: #0d6b5f;
   background: #dff5ef;
@@ -126,8 +148,19 @@
 }
 
 .memory-actions {
-  flex-shrink: 0;
+  margin-top: 18rpx;
   gap: 10rpx;
+}
+
+.evidence-text {
+  display: block;
+  margin-top: 12rpx;
+  padding: 18rpx;
+  border-radius: 16rpx;
+  background: #fff8ee;
+  color: #6f574f;
+  font-size: 26rpx;
+  line-height: 1.5;
 }
 
 .mini-button {
@@ -154,6 +187,14 @@
 .candidate-card .muted {
   display: block;
   margin-top: 10rpx;
+}
+
+.candidate-action {
+  display: block;
+  margin-top: 12rpx;
+  color: #128577;
+  font-size: 26rpx;
+  font-weight: 900;
 }
 
 .compact {

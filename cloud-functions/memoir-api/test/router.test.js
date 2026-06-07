@@ -636,6 +636,8 @@ test("processes session memory surfaces coverage and question candidates", async
   const places = await request({ method: "GET", path: "/api/mobile/memoir/memories/places" }, { store });
   const themes = await request({ method: "GET", path: "/api/mobile/memoir/memories/themes" }, { store });
   assert.equal(people.data.length, 1);
+  assert.equal(people.data[0].evidence_quote, "老张带我去的");
+  assert.equal(people.data[0].evidence_count, 1);
   assert.equal(events.data.length, 1);
   assert.equal(places.data.length, 1);
   assert.equal(themes.data.length, 1);

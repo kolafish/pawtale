@@ -316,6 +316,25 @@
   font-size: 24rpx;
 }
 
+.evidence-preview {
+  display: block;
+  margin-top: 14rpx;
+  padding: 18rpx;
+  border-radius: 16rpx;
+  background: #fffaf2;
+  color: #6f574f;
+  font-size: 26rpx;
+  line-height: 1.5;
+}
+
+.candidate-action {
+  display: block;
+  margin-top: 14rpx;
+  color: #128577;
+  font-size: 26rpx;
+  font-weight: 900;
+}
+
 .error {
   margin: 20rpx 0 28rpx;
   padding: 24rpx;

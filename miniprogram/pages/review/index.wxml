@@ -22,6 +22,19 @@
 
   <view class="surface stack">
     <view class="section-row">
+      <text class="section-title">写作片段</text>
+      <text class="count-text">{{outputs.length}}</text>
+    </view>
+    <view wx:if="{{!outputs.length}}" class="empty-state">暂无写作片段</view>
+    <view wx:for="{{outputs}}" wx:key="id" class="output-card">
+      <text class="memory-title">{{item.title}}</text>
+      <text class="body-text">{{item.content_preview || "暂无片段预览"}}</text>
+      <text class="muted">{{item.output_type === "story_fragment" ? "故事片段" : item.output_type}}</text>
+    </view>
+  </view>
+
+  <view class="surface stack">
+    <view class="section-row">
       <text class="section-title">覆盖度地图</text>
       <text class="count-text">{{coverage.length}}</text>
     </view>
@@ -46,15 +59,20 @@
       <text class="count-text">{{memoryCards.length}}</text>
     </view>
     <view wx:if="{{!memoryCards.length}}" class="empty-state">暂无结构化记忆</view>
-    <view wx:for="{{memoryCards}}" wx:key="id" class="memory-card">
+    <view wx:for="{{memoryCards}}" wx:key="id" class="memory-card memory-card-vertical">
+      <view class="memory-head">
+        <text class="type-pill">{{item.typeLabel}}</text>
+        <text class="status-pill {{item.status}}">{{item.status === "confirmed" ? "已确认" : item.status === "rejected" ? "已拒绝" : "待确认"}}</text>
+      </view>
       <view class="memory-main">
         <text class="memory-title">{{item.title}}</text>
         <text class="muted">{{item.detail}}</text>
+        <text class="muted">置信度 {{item.confidenceText}}</text>
+        <text wx:if="{{item.evidence}}" class="evidence-text">证据：{{item.evidence}}</text>
       </view>
-      <text class="status-pill {{item.status}}">{{item.status === "confirmed" ? "已确认" : item.status === "rejected" ? "已拒绝" : "待确认"}}</text>
       <view class="memory-actions">
-        <button class="mini-button confirm" data-id="{{item.id}}" data-type="{{item.type}}" bindtap="confirmMemory">确认</button>
-        <button class="mini-button reject" data-id="{{item.id}}" data-type="{{item.type}}" bindtap="rejectMemory">拒绝</button>
+        <button class="mini-button confirm" disabled="{{item.status === 'confirmed'}}" data-id="{{item.id}}" data-type="{{item.type}}" bindtap="confirmMemory">确认</button>
+        <button class="mini-button reject" disabled="{{item.status === 'rejected'}}" data-id="{{item.id}}" data-type="{{item.type}}" bindtap="rejectMemory">拒绝</button>
       </view>
     </view>
   </view>
@@ -69,8 +87,9 @@
       <text class="body-text">{{item.question}}</text>
       <text class="muted">{{item.reason || item.question_type}}</text>
       <view class="button-row compact">
-        <button class="mini-button confirm" data-id="{{item.id}}" bindtap="markOpenQuestionAnswered">已回答</button>
-        <button class="mini-button reject" data-id="{{item.id}}" bindtap="dismissOpenQuestion">忽略</button>
+        <button class="mini-button confirm" data-id="{{item.id}}" bindtap="askOpenQuestion">作为下一问</button>
+        <button class="mini-button confirm" data-id="{{item.id}}" bindtap="markOpenQuestionAnswered">已解决</button>
+        <button class="mini-button reject" data-id="{{item.id}}" bindtap="dismissOpenQuestion">暂时跳过</button>
       </view>
     </view>
   </view>
@@ -84,11 +103,12 @@
     <view wx:for="{{candidates}}" wx:key="id" class="candidate-card" data-id="{{item.id}}" bindtap="askCandidate" hover-class="tap-hover">
       <text class="body-text">{{item.question}}</text>
       <text class="muted">{{item.reason}}</text>
+      <text class="candidate-action">作为下一问</text>
     </view>
   </view>
 
   <view class="button-row">
-    <button class="button button-secondary" bindtap="openStories">故事卡</button>
+    <button class="button button-secondary" bindtap="openStories">写作片段</button>
     <button class="button button-primary" loading="{{processing || selecting}}" bindtap="continueInterview">继续讲述</button>
   </view>
 </view>

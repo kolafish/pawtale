@@ -13,13 +13,32 @@ import type {
   MemoirThemeMemory,
 } from "../../domain/memoir";
 import { loadMemoirDashboard } from "../../services/memoir-dashboard";
+import { selectQuestionCandidate } from "../../services/memoir";
 import {
   readMemoirDashboardSnapshot,
 } from "../../stores/memoir-cache";
 
+type WorkbenchMemoryCard = {
+  title: string;
+  detail: string;
+  typeLabel: string;
+  status: MemoirMemoryStatus;
+  confidenceText: string;
+  evidence: string;
+};
+
+interface DatasetEvent {
+  currentTarget: {
+    dataset: {
+      id?: string;
+    };
+  };
+}
+
 interface WorkbenchData {
   loading: boolean;
   refreshing: boolean;
+  selecting: boolean;
   hasDashboardData: boolean;
   hasOutputData: boolean;
   error: string;
@@ -30,10 +49,14 @@ interface WorkbenchData {
   pendingCount: number;
   summaryText: string;
   coverage: MemoirCoverageItem[];
-  memoryCards: Array<{ title: string; detail: string; status: MemoirMemoryStatus }>;
+  memoryCards: WorkbenchMemoryCard[];
   openQuestions: MemoirOpenQuestion[];
   candidates: MemoirQuestionCandidate[];
   outputs: MemoirOutput[];
+}
+
+function confidenceText(value?: number | null): string {
+  return typeof value === "number" ? `${Math.round(value * 100)}%` : "待确认";
 }
 
 function buildMemoryCards(
@@ -41,27 +64,39 @@ function buildMemoryCards(
   events: MemoirEventMemory[],
   places: MemoirPlaceMemory[],
   themes: MemoirThemeMemory[],
-): Array<{ title: string; detail: string; status: MemoirMemoryStatus }> {
+): WorkbenchMemoryCard[] {
   return [
     ...people.map((item) => ({
       title: item.canonical_name,
       detail: item.relationship || item.description || "人物",
+      typeLabel: "人物",
       status: item.status,
+      confidenceText: confidenceText(item.confidence),
+      evidence: item.evidence_quote || "",
     })),
     ...events.map((item) => ({
       title: item.title,
       detail: [item.time_text, item.place_text, item.emotion].filter(Boolean).join(" · ") || "事件",
+      typeLabel: "事件",
       status: item.status,
+      confidenceText: confidenceText(item.confidence),
+      evidence: item.evidence_quote || "",
     })),
     ...places.map((item) => ({
       title: item.name,
       detail: item.elder_alias || item.place_type || "地点",
+      typeLabel: "地点",
       status: item.status,
+      confidenceText: confidenceText(item.confidence),
+      evidence: item.evidence_quote || "",
     })),
     ...themes.map((item) => ({
       title: item.name,
       detail: item.description || `提到 ${item.mention_count} 次`,
+      typeLabel: "主题",
       status: item.status,
+      confidenceText: confidenceText(item.confidence),
+      evidence: item.evidence_quote || "",
     })),
   ];
 }
@@ -87,6 +122,7 @@ Page<WorkbenchData, {
     },
   ): void;
   loadWorkbench(): Promise<void>;
+  askCandidate(event: DatasetEvent): Promise<void>;
   continueInterview(): void;
   openStories(): void;
   backHome(): void;
@@ -98,6 +134,7 @@ Page<WorkbenchData, {
   data: {
     loading: false,
     refreshing: false,
+    selecting: false,
     hasDashboardData: false,
     hasOutputData: false,
     error: "",
@@ -204,6 +241,22 @@ Page<WorkbenchData, {
       this.setData({ error: error instanceof Error ? error.message : "工作台加载失败" });
     } finally {
       this.setData({ loading: false, refreshing: false });
+    }
+  },
+
+  async askCandidate(event) {
+    const id = event.currentTarget.dataset.id;
+    if (!id || this.data.selecting) {
+      return;
+    }
+    this.setData({ selecting: true, error: "" });
+    try {
+      await selectQuestionCandidate(id);
+      wx.navigateTo({ url: "/pages/question/index" });
+    } catch (error) {
+      this.setData({ error: error instanceof Error ? error.message : "下一问选择失败" });
+    } finally {
+      this.setData({ selecting: false });
     }
   },
 

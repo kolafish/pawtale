@@ -88,9 +88,14 @@
       <text>还没有人物、事件、地点和主题记忆。</text>
     </view>
     <view wx:for="{{memoryCards}}" wx:key="title" class="memory-card">
+      <view class="memoir-row">
+        <text class="memory-status">{{item.typeLabel}}</text>
+        <text class="memory-status">{{item.status === "confirmed" ? "已确认" : item.status === "rejected" ? "已拒绝" : "待确认"}}</text>
+      </view>
       <text class="story-question">{{item.title}}</text>
       <text class="story-preview">{{item.detail}}</text>
-      <text class="memory-status">{{item.status === "confirmed" ? "已确认" : item.status === "rejected" ? "已拒绝" : "待确认"}}</text>
+      <text class="story-meta">置信度 {{item.confidenceText}}</text>
+      <text wx:if="{{item.evidence}}" class="evidence-preview">证据：{{item.evidence}}</text>
     </view>
   </view>
 
@@ -106,9 +111,10 @@
       <text class="story-question">{{item.question}}</text>
       <text class="story-preview">{{item.reason || item.question_type}}</text>
     </view>
-    <view wx:for="{{candidates}}" wx:key="id" class="candidate-card">
+    <view wx:for="{{candidates}}" wx:key="id" class="candidate-card" data-id="{{item.id}}" bindtap="askCandidate" hover-class="tap-hover">
       <text class="story-question">{{item.question}}</text>
       <text class="story-preview">{{item.reason}}</text>
+      <text class="candidate-action">作为下一问</text>
     </view>
   </view>
 
