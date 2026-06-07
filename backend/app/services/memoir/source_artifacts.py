@@ -1,19 +1,9 @@
 from fastapi import HTTPException
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.memoir import MemoirAnswer, MemoirQuestion, MemoirSession, MemoirSourceArtifact
+from app.models.memoir import MemoirSourceArtifact
 from app.schemas.memoir import MemoirSourceArtifactCreate, MemoirSourceArtifactResponse
 from app.services.memoir.access import load_answer, load_memoir_project, load_session
-
-
-async def _answer_project_id(db: AsyncSession, answer_id: str) -> str | None:
-    return await db.scalar(
-        select(MemoirSession.project_id)
-        .join(MemoirQuestion, MemoirQuestion.session_id == MemoirSession.id)
-        .join(MemoirAnswer, MemoirAnswer.question_id == MemoirQuestion.id)
-        .where(MemoirAnswer.id == answer_id)
-    )
 
 
 async def create_source_artifact(
@@ -29,10 +19,11 @@ async def create_source_artifact(
             raise HTTPException(status_code=400, detail="访谈不属于该回忆录项目")
 
     if req.answer_id:
-        await load_answer(db, req.answer_id, user_id)
-        answer_project_id = await _answer_project_id(db, req.answer_id)
-        if answer_project_id != req.project_id:
+        answer = await load_answer(db, req.answer_id, user_id)
+        if answer.question.session.project_id != req.project_id:
             raise HTTPException(status_code=400, detail="回答不属于该回忆录项目")
+        if req.session_id and answer.question.session_id != req.session_id:
+            raise HTTPException(status_code=400, detail="回答不属于该访谈")
 
     artifact = MemoirSourceArtifact(
         project_id=req.project_id,

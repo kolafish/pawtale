@@ -221,7 +221,7 @@ async def get_coverage_map(
     user_id: str,
     project_id: str,
 ) -> list[MemoirCoverageItemResponse]:
-    snapshots = await calculate_coverage_snapshots(db, user_id, project_id)
+    snapshots = await latest_coverage_snapshots(db, user_id, project_id)
     topics = await db.execute(
         select(MemoirCoverageTopic)
         .where(MemoirCoverageTopic.project_id == project_id)

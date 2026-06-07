@@ -1,5 +1,12 @@
 import json
 
+from sqlalchemy import func, select
+
+from app.domain.projects.types import ProjectType
+from app.models.memoir import MemoirCoverageSnapshot, MemoirPersonMemory, MemoirQuestionCandidate, MemoirSession
+from app.models.projects import Project
+from app.models.users import User
+
 
 class FakeReviewAIClient:
     provider_name = "fake"
@@ -94,11 +101,15 @@ async def test_mobile_memoir_review_surfaces(client, monkeypatch):
     places_response = await client.get("/api/mobile/memoir/memories/places")
     themes_response = await client.get("/api/mobile/memoir/memories/themes")
     open_questions_response = await client.get("/api/mobile/memoir/open-questions")
+    recalculate_response = await client.post("/api/mobile/memoir/coverage/recalculate")
+    generate_candidates_response = await client.post("/api/mobile/memoir/question-candidates/generate")
     coverage_response = await client.get("/api/mobile/memoir/coverage")
     candidates_response = await client.get("/api/mobile/memoir/question-candidates")
     outputs_response = await client.get("/api/mobile/memoir/outputs")
 
     assert summary_response.status_code == 200
+    assert recalculate_response.status_code == 200
+    assert generate_candidates_response.status_code == 200
     assert summary_response.json()["summary"] == "本次访谈沉淀了第一次去重庆工作的经历。"
     assert people_response.json()[0]["canonical_name"] == "老张"
     assert events_response.json()[0]["title"] == "第一次去重庆工作"
@@ -137,3 +148,39 @@ async def test_mobile_memoir_review_surfaces(client, monkeypatch):
     output_detail_response = await client.get(f"/api/mobile/memoir/outputs/{output_id}")
     assert output_detail_response.status_code == 200
     assert output_detail_response.json()["versions"][0]["content"].startswith("第一次去重庆厂")
+
+
+async def test_mobile_memoir_review_respects_explicit_project_id(client, test_db):
+    user = await test_db.scalar(select(User).where(User.email == "tester@example.com"))
+    first = Project(user_id=user.id, type=ProjectType.MEMOIR.value, title="第一本回忆录")
+    second = Project(user_id=user.id, type=ProjectType.MEMOIR.value, title="第二本回忆录")
+    test_db.add_all([first, second])
+    await test_db.flush()
+    test_db.add_all([
+        MemoirPersonMemory(project_id=first.id, canonical_name="第一本的人"),
+        MemoirPersonMemory(project_id=second.id, canonical_name="第二本的人"),
+    ])
+    await test_db.flush()
+
+    first_response = await client.get(f"/api/mobile/memoir/memories/people?project_id={first.id}")
+    second_response = await client.get(f"/api/mobile/memoir/memories/people?project_id={second.id}")
+
+    assert first_response.status_code == 200
+    assert second_response.status_code == 200
+    assert [item["canonical_name"] for item in first_response.json()] == ["第一本的人"]
+    assert [item["canonical_name"] for item in second_response.json()] == ["第二本的人"]
+
+
+async def test_mobile_question_candidates_get_is_read_only_without_current_session(client, test_db):
+    user = await test_db.scalar(select(User).where(User.email == "tester@example.com"))
+    project = Project(user_id=user.id, type=ProjectType.MEMOIR.value, title="空回忆录")
+    test_db.add(project)
+    await test_db.flush()
+
+    response = await client.get(f"/api/mobile/memoir/question-candidates?project_id={project.id}")
+
+    assert response.status_code == 200
+    assert response.json() == []
+    assert await test_db.scalar(select(func.count()).select_from(MemoirSession)) == 0
+    assert await test_db.scalar(select(func.count()).select_from(MemoirQuestionCandidate)) == 0
+    assert await test_db.scalar(select(func.count()).select_from(MemoirCoverageSnapshot)) == 0

@@ -11,10 +11,13 @@ from app.models.memoir import (
     MemoirAnswer,
     MemoirEventMemory,
     MemoirMemoryEvidence,
+    MemoirOpenQuestion,
     MemoirOutput,
     MemoirPersonMemory,
+    MemoirPlaceMemory,
     MemoirQuestion,
     MemoirSessionSummary,
+    MemoirThemeMemory,
 )
 from app.models.projects import Project
 from app.models.users import User
@@ -223,6 +226,38 @@ async def test_process_session_memory_extracts_memories_summary_and_output(test_
     assert output is not None
     assert output.versions[0].content.startswith("第一次去重庆厂里上班")
     assert output.versions[0].model == "fake-extractor"
+
+
+async def test_process_session_memory_reuses_existing_extraction_rows(test_db):
+    user, _, session_id, answer_ids = await _create_answered_session(test_db)
+    fake_ai = FakeExtractionAIClient(_payload(answer_ids[0]))
+
+    first = await process_session_memory(
+        test_db,
+        session_id,
+        user.id,
+        MemoirSessionProcessRequest(),
+        fake_ai,
+    )
+    second = await process_session_memory(
+        test_db,
+        session_id,
+        user.id,
+        MemoirSessionProcessRequest(),
+        fake_ai,
+    )
+
+    assert first.people[0].id == second.people[0].id
+    assert first.events[0].id == second.events[0].id
+    assert first.places[0].id == second.places[0].id
+    assert first.themes[0].id == second.themes[0].id
+    assert first.open_questions[0].id == second.open_questions[0].id
+    assert await _count(test_db, MemoirPersonMemory) == 1
+    assert await _count(test_db, MemoirEventMemory) == 1
+    assert await _count(test_db, MemoirPlaceMemory) == 1
+    assert await _count(test_db, MemoirThemeMemory) == 1
+    assert await _count(test_db, MemoirOpenQuestion) == 1
+    assert await _count(test_db, MemoirMemoryEvidence) == 5
 
 
 async def test_process_session_memory_rejects_empty_session_without_ai_call(test_db):

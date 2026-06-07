@@ -140,6 +140,23 @@ async def get_or_create_current_session(
     return await get_session_state(db, session.id, user_id)
 
 
+async def current_session_id(
+    db: AsyncSession,
+    project_id: str,
+    user_id: str,
+) -> str | None:
+    await load_memoir_project(db, project_id, user_id)
+    return await db.scalar(
+        select(MemoirSession.id)
+        .where(
+            MemoirSession.project_id == project_id,
+            MemoirSession.status == MemoirSessionStatus.ACTIVE.value,
+        )
+        .order_by(MemoirSession.updated_at.desc())
+        .limit(1)
+    )
+
+
 async def get_session_state(
     db: AsyncSession,
     session_id: str,

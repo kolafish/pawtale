@@ -63,12 +63,13 @@ async def _ensure_optional_session(
     project_id: str,
     user_id: str,
     session_id: str | None,
-) -> None:
+) -> MemoirSession | None:
     if not session_id:
-        return
+        return None
     session = await load_session(db, session_id, user_id)
     if session.project_id != project_id:
         raise HTTPException(status_code=400, detail="访谈不属于该回忆录项目")
+    return session
 
 
 async def _ensure_optional_question(
@@ -76,12 +77,13 @@ async def _ensure_optional_question(
     project_id: str,
     user_id: str,
     question_id: str | None,
-) -> None:
+) -> MemoirQuestion | None:
     if not question_id:
-        return
+        return None
     question = await load_question(db, question_id, user_id)
     if question.session.project_id != project_id:
         raise HTTPException(status_code=400, detail="问题不属于该回忆录项目")
+    return question
 
 
 async def _ensure_optional_answer(
@@ -89,32 +91,36 @@ async def _ensure_optional_answer(
     project_id: str,
     user_id: str,
     answer_id: str | None,
-) -> None:
+) -> MemoirAnswer | None:
     if not answer_id:
-        return
+        return None
     answer = await load_answer(db, answer_id, user_id)
     if answer.question.session.project_id != project_id:
         raise HTTPException(status_code=400, detail="回答不属于该回忆录项目")
+    return answer
 
 
 async def _ensure_optional_transcript_version(
     db: AsyncSession,
     project_id: str,
     transcript_version_id: str | None,
-) -> None:
+) -> tuple[MemoirTranscriptVersion, MemoirAnswer, MemoirQuestion] | None:
     if not transcript_version_id:
-        return
-    version_project_id = await db.scalar(
-        select(MemoirSession.project_id)
-        .join(MemoirQuestion, MemoirQuestion.session_id == MemoirSession.id)
-        .join(MemoirAnswer, MemoirAnswer.question_id == MemoirQuestion.id)
-        .join(MemoirTranscriptVersion, MemoirTranscriptVersion.answer_id == MemoirAnswer.id)
+        return None
+    result = await db.execute(
+        select(MemoirTranscriptVersion, MemoirAnswer, MemoirQuestion, MemoirSession.project_id)
+        .join(MemoirAnswer, MemoirTranscriptVersion.answer_id == MemoirAnswer.id)
+        .join(MemoirQuestion, MemoirAnswer.question_id == MemoirQuestion.id)
+        .join(MemoirSession, MemoirQuestion.session_id == MemoirSession.id)
         .where(MemoirTranscriptVersion.id == transcript_version_id)
     )
-    if not version_project_id:
+    row = result.one_or_none()
+    if not row:
         raise HTTPException(status_code=404, detail="转写版本不存在")
+    version, answer, question, version_project_id = row
     if version_project_id != project_id:
         raise HTTPException(status_code=400, detail="转写版本不属于该回忆录项目")
+    return version, answer, question
 
 
 async def _load_memory(
@@ -260,10 +266,45 @@ async def add_memory_evidence(
 ) -> MemoirMemoryEvidenceResponse:
     await _ensure_project(db, req.project_id, user_id)
     await _load_memory(db, req.project_id, req.memory_type, req.memory_id)
-    await _ensure_optional_session(db, req.project_id, user_id, req.session_id)
-    await _ensure_optional_question(db, req.project_id, user_id, req.question_id)
-    await _ensure_optional_answer(db, req.project_id, user_id, req.answer_id)
-    await _ensure_optional_transcript_version(db, req.project_id, req.transcript_version_id)
+    session = await _ensure_optional_session(db, req.project_id, user_id, req.session_id)
+    question = await _ensure_optional_question(db, req.project_id, user_id, req.question_id)
+    answer = await _ensure_optional_answer(db, req.project_id, user_id, req.answer_id)
+    transcript_context = await _ensure_optional_transcript_version(
+        db,
+        req.project_id,
+        req.transcript_version_id,
+    )
+
+    if session and question and question.session_id != session.id:
+        raise HTTPException(status_code=400, detail="问题不属于该访谈")
+    if session and answer and answer.question.session_id != session.id:
+        raise HTTPException(status_code=400, detail="回答不属于该访谈")
+    if question and answer and answer.question_id != question.id:
+        raise HTTPException(status_code=400, detail="回答不属于该问题")
+    if transcript_context:
+        transcript, transcript_answer, transcript_question = transcript_context
+        if session and transcript_question.session_id != session.id:
+            raise HTTPException(status_code=400, detail="转写版本不属于该访谈")
+        if question and transcript_answer.question_id != question.id:
+            raise HTTPException(status_code=400, detail="转写版本不属于该问题")
+        if answer and transcript.answer_id != answer.id:
+            raise HTTPException(status_code=400, detail="转写版本不属于该回答")
+
+    existing = await db.scalar(
+        select(MemoirMemoryEvidence).where(
+            MemoirMemoryEvidence.project_id == req.project_id,
+            MemoirMemoryEvidence.memory_type == req.memory_type.value,
+            MemoirMemoryEvidence.memory_id == req.memory_id,
+            MemoirMemoryEvidence.session_id == req.session_id,
+            MemoirMemoryEvidence.question_id == req.question_id,
+            MemoirMemoryEvidence.answer_id == req.answer_id,
+            MemoirMemoryEvidence.transcript_version_id == req.transcript_version_id,
+            MemoirMemoryEvidence.quote == req.quote,
+        )
+    )
+    if existing:
+        return MemoirMemoryEvidenceResponse.model_validate(existing)
+
     evidence = MemoirMemoryEvidence(
         project_id=req.project_id,
         memory_type=req.memory_type.value,

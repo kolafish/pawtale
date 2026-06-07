@@ -328,7 +328,6 @@ async def list_question_candidates(
     session_id: str | None = None,
 ) -> list[MemoirQuestionCandidateResponse]:
     await load_memoir_project(db, project_id, user_id)
-    await generate_question_candidates(db, user_id, project_id, session_id)
     filters = [
         MemoirQuestionCandidate.project_id == project_id,
         MemoirQuestionCandidate.status == MemoirQuestionCandidateStatus.CANDIDATE.value,
@@ -340,7 +339,6 @@ async def list_question_candidates(
         .where(*filters)
         .order_by(MemoirQuestionCandidate.priority.desc(), MemoirQuestionCandidate.created_at)
     )
-    await db.flush()
     return [_candidate_response(candidate) for candidate in result.scalars()]
 
 
