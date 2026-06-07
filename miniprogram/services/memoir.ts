@@ -16,6 +16,7 @@ import type {
   MemoirPlaceMemory,
   MemoirQuestion,
   MemoirQuestionCandidate,
+  MemoirProjectListResponse,
   MemoirSessionProcessResponse,
   MemoirSessionSummary,
   MemoirStoryList,
@@ -27,6 +28,31 @@ import { request, uploadFile } from "./request";
 
 export function getMemoirProject(): Promise<Project> {
   return request<Project>("/api/mobile/memoir/project");
+}
+
+export function listMemoirProjects(): Promise<MemoirProjectListResponse> {
+  return request<MemoirProjectListResponse>("/api/mobile/memoir/projects");
+}
+
+export function createMemoirProject(data: { title?: string; description?: string; elder_name?: string } = {}): Promise<Project> {
+  return request<Project>("/api/mobile/memoir/projects", {
+    method: "POST",
+    data,
+  });
+}
+
+export function updateMemoirProject(projectId: string, data: { title?: string; description?: string; elder_name?: string }): Promise<Project> {
+  return request<Project>(`/api/mobile/memoir/projects/${projectId}`, {
+    method: "PATCH",
+    data,
+  });
+}
+
+export function activateMemoirProject(projectId: string): Promise<MemoirProjectListResponse> {
+  return request<MemoirProjectListResponse>(`/api/mobile/memoir/projects/${projectId}/activate`, {
+    method: "POST",
+    data: {},
+  });
 }
 
 export function getMemoirDashboard(): Promise<MemoirDashboardResponse> {

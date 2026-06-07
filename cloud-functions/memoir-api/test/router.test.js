@@ -92,6 +92,30 @@ test("creates the current user's default memoir project", async () => {
   assert.notEqual(otherUserResponse.data.id, response.data.id);
 });
 
+test("renames the generic default project when WeChat profile arrives", async () => {
+  const store = new MemoryStore();
+  const initialProject = await request({
+    method: "GET",
+    path: "/api/mobile/memoir/project",
+  }, { store });
+  assert.equal(initialProject.data.title, "微信用户的回忆录");
+
+  await request({
+    method: "PATCH",
+    path: "/api/mobile/memoir/me",
+    data: {
+      wechat_nickname: "李阿姨",
+    },
+  }, { store });
+
+  const updatedProject = await request({
+    method: "GET",
+    path: "/api/mobile/memoir/project",
+  }, { store });
+  assert.equal(updatedProject.data.id, initialProject.data.id);
+  assert.equal(updatedProject.data.title, "李阿姨的回忆录");
+});
+
 test("creates renames and activates multiple memoir projects", async () => {
   const store = new MemoryStore();
   const renamedUser = await request({

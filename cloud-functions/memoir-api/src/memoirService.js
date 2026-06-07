@@ -474,6 +474,20 @@ async function createMemoirProject(store, openid, data = {}) {
   return project;
 }
 
+async function renameDefaultProjectForUser(store, openid, user) {
+  const nextTitle = defaultProjectTitle(user);
+  const genericTitle = `${DEFAULT_WECHAT_DISPLAY_NAME}的回忆录`;
+  const projects = await listUserProjects(store, openid, user);
+  const defaultProject = projects.find((project) => project.is_default) || projects[0];
+  if (!defaultProject || defaultProject.title !== genericTitle || nextTitle === genericTitle) {
+    return null;
+  }
+  return store.updateById(COLLECTIONS.projects, defaultProject.id, {
+    title: nextTitle,
+    updated_at: nowIso(),
+  });
+}
+
 async function getActiveProject(store, openid, user) {
   let projects = await listUserProjects(store, openid, user);
   if (!projects.length) {
@@ -2346,7 +2360,11 @@ function createMemoirService(store, context, dependencies = {}) {
 
   return {
     getMe: async () => getMemoirIdentity(store, openid),
-    updateMe: async (data) => createUserResponse(await getOrCreateMemoirUser(store, openid, data)),
+    updateMe: async (data) => {
+      const user = await getOrCreateMemoirUser(store, openid, data);
+      await renameDefaultProjectForUser(store, openid, user);
+      return createUserResponse(user);
+    },
     getProject: async () => createProjectResponse(await getOrCreateProject(store, openid)),
     listProjects: async () => {
       const user = await getOrCreateMemoirUser(store, openid);
