@@ -13,19 +13,31 @@ export type MemoirQuestionCandidateStatus = "candidate" | "selected" | "asked" |
 
 export interface User {
   id: string;
+  openid?: string;
+  unionid?: string;
   email: string;
   display_name: string;
   avatar_url?: string;
+  wechat_nickname?: string;
+  wechat_avatar_url?: string;
   storage_owner_id?: string;
+  active_project_id?: string | null;
   created_at: string;
+  updated_at?: string;
+  last_login_at?: string;
 }
 
 export interface Project {
   id: string;
+  user_id?: string | null;
   type: ProjectType;
   title: string;
   description?: string;
   total_word_count: number;
+  status?: "active" | "archived";
+  elder_name?: string;
+  is_default?: boolean;
+  last_opened_at?: string;
   groups: Array<{
     id: string;
     name: string;
@@ -48,6 +60,18 @@ export interface Project {
   }>;
   created_at: string;
   updated_at: string;
+}
+
+export interface MemoirIdentity extends User {
+  active_project_id: string;
+  active_project: Project;
+  projects: Project[];
+}
+
+export interface MemoirProjectListResponse {
+  active_project_id: string;
+  active_project: Project;
+  projects: Project[];
 }
 
 export interface MemoirSession {

@@ -41,7 +41,7 @@
   <view class="memoir-panel" bindtap="openStories" hover-class="tap-hover">
     <view class="memoir-row">
       <view>
-        <text class="memoir-title">我的回忆录</text>
+        <text class="memoir-title">{{projectTitle || "我的回忆录"}}</text>
         <text class="memoir-subtitle">童年、求学、成家</text>
       </view>
       <text class="chevron">›</text>

@@ -45,6 +45,7 @@ interface WorkbenchData {
   hasDashboardData: boolean;
   hasOutputData: boolean;
   error: string;
+  projectTitle: string;
   weeklyStoryCount: number;
   pendingReviewCount: number;
   confirmedStoryCount: number;
@@ -143,6 +144,7 @@ Page<WorkbenchData, {
     hasDashboardData: false,
     hasOutputData: false,
     error: "",
+    projectTitle: "",
     weeklyStoryCount: 0,
     pendingReviewCount: 0,
     confirmedStoryCount: 0,
@@ -176,6 +178,9 @@ Page<WorkbenchData, {
     if (!snapshot.interview || !snapshot.summary) {
       return snapshot;
     }
+    this.setData({
+      projectTitle: snapshot.project?.title || this.data.projectTitle,
+    });
     this.applySnapshot(snapshot.interview, snapshot.summary, {
       summaryText: snapshot.sessionSummary?.summary || "",
       coverage: snapshot.coverage,
@@ -222,6 +227,7 @@ Page<WorkbenchData, {
     this.setData({ loading, refreshing: true, error: "" });
     try {
       const {
+        project,
         interview,
         summary,
         sessionSummary,
@@ -235,6 +241,9 @@ Page<WorkbenchData, {
         outputs,
         memoryStats,
       } = await loadMemoirDashboard({ includeMemory: true });
+      this.setData({
+        projectTitle: project?.title || this.data.projectTitle,
+      });
       this.applySnapshot(interview, summary, {
         summaryText: sessionSummary?.summary || "",
         coverage,

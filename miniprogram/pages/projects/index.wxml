@@ -1,0 +1,55 @@
+<view class="projects-page">
+  <view class="top-row">
+    <view class="back-hit" bindtap="openProfile">
+      <text class="back-mark">‹</text>
+    </view>
+    <text class="page-title">我的回忆录</text>
+  </view>
+
+  <view wx:if="{{error}}" class="error">{{error}}</view>
+
+  <view class="action-bar">
+    <button class="primary-button" bindtap="createProject" loading="{{busy}}">
+      {{busy ? "处理中" : "新建回忆录"}}
+    </button>
+  </view>
+
+  <view wx:if="{{loading && !projects.length}}" class="empty-panel">
+    <text>正在加载</text>
+  </view>
+
+  <view wx:elif="{{!projects.length}}" class="empty-panel">
+    <text>暂无回忆录</text>
+  </view>
+
+  <view wx:for="{{projects}}" wx:key="id" class="project-card {{item.active ? 'active' : ''}}">
+    <view class="project-main">
+      <view class="project-title-row">
+        <text class="project-title">{{item.title}}</text>
+        <text wx:if="{{item.active}}" class="active-badge">当前</text>
+      </view>
+      <text class="project-meta">{{item.elder_name || "未填写主人公"}} · {{item.updatedText || "刚刚"}}</text>
+    </view>
+
+    <view wx:if="{{item.editing}}" class="rename-box">
+      <input class="rename-input" value="{{item.editTitle}}" bindinput="changeRenameTitle" maxlength="40" focus />
+      <view class="rename-actions">
+        <button class="ghost-button" bindtap="cancelRename">取消</button>
+        <button class="small-primary" data-id="{{item.id}}" bindtap="saveRename" loading="{{busy}}">保存</button>
+      </view>
+    </view>
+
+    <view wx:else class="project-actions">
+      <button class="ghost-button" data-id="{{item.id}}" bindtap="startRename">重命名</button>
+      <button
+        class="small-primary {{item.active ? 'disabled' : ''}}"
+        data-id="{{item.id}}"
+        bindtap="activateProject"
+      >
+        {{item.active ? "使用中" : "切换"}}
+      </button>
+    </view>
+  </view>
+
+  <view class="bottom-spacer"></view>
+</view>

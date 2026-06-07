@@ -1,10 +1,16 @@
-import type { User } from "../domain/memoir";
+import type { MemoirIdentity, User } from "../domain/memoir";
 import { API_TRANSPORT } from "../config";
 import { ApiError, request } from "./request";
 import { cacheIdentityFromUser, ensureMemoirStoreIdentity } from "../stores/session";
 
 interface AuthResponse {
   user: User;
+}
+
+export interface WechatProfilePatch {
+  display_name?: string;
+  wechat_nickname?: string;
+  wechat_avatar_url?: string;
 }
 
 const DEV_USER = {
@@ -18,9 +24,27 @@ function rememberSessionUser(user: User): User {
   return user;
 }
 
+function rememberMemoirIdentity(identity: MemoirIdentity): MemoirIdentity {
+  ensureMemoirStoreIdentity(cacheIdentityFromUser(identity, identity.active_project));
+  return identity;
+}
+
+export async function getMemoirIdentity(): Promise<MemoirIdentity> {
+  return rememberMemoirIdentity(await request<MemoirIdentity>("/api/mobile/memoir/me"));
+}
+
+export async function updateWechatUserProfile(data: WechatProfilePatch): Promise<User> {
+  const user = await request<User>("/api/mobile/memoir/me", {
+    method: "PATCH",
+    data,
+  });
+  ensureMemoirStoreIdentity(cacheIdentityFromUser(user));
+  return user;
+}
+
 export async function ensureLocalDevSession(): Promise<User> {
   if (API_TRANSPORT === "cloudFunction") {
-    return rememberSessionUser(await request<User>("/api/mobile/memoir/me"));
+    return getMemoirIdentity();
   }
 
   try {

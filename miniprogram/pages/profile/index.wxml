@@ -1,13 +1,19 @@
 <view class="profile-page">
   <view class="profile-head">
     <view class="avatar-mark">
-      <image class="avatar-logo" src="/assets/memoir-gramophone.png" mode="aspectFit" />
+      <image
+        class="avatar-logo {{avatarUrl ? 'avatar-photo' : ''}}"
+        src="{{avatarUrl || '/assets/memoir-gramophone.png'}}"
+        mode="aspectFill"
+      />
     </view>
     <view class="profile-copy">
-      <text class="profile-name">余主任留声机</text>
-      <text class="profile-note">那些曾经热闹的日子，俯仰之间，已成陈迹。</text>
+      <text class="profile-name">{{userName}}</text>
+      <text class="profile-note">{{activeProjectTitle || "微信用户的回忆录"}}</text>
     </view>
   </view>
+
+  <view wx:if="{{error}}" class="error">{{error}}</view>
 
   <view class="summary-panel">
     <view>
@@ -40,10 +46,24 @@
 
   <view class="settings-panel">
     <text class="section-title">服务</text>
+    <view class="service-row" bindtap="openProjects">
+      <view class="service-main">
+        <text>我的回忆录</text>
+        <text class="service-note">{{projectCount ? projectCount + " 本" : "加载中"}}</text>
+      </view>
+      <text class="chevron">›</text>
+    </view>
     <view class="service-row" bindtap="openQa">
       <text>问答记录</text>
       <text class="chevron">›</text>
     </view>
+  </view>
+
+  <view class="settings-panel">
+    <text class="section-title">微信资料</text>
+    <button class="profile-action" bindtap="syncWechatProfile" loading="{{syncingProfile}}">
+      {{syncingProfile ? "更新中" : "同步昵称头像"}}
+    </button>
   </view>
 
   <view class="bottom-nav">

@@ -42,7 +42,7 @@
 
   <view class="progress-panel">
     <view class="progress-row">
-      <text>我的回忆录</text>
+      <text>{{projectTitle || "我的回忆录"}}</text>
       <text wx:if="{{hasDashboardData}}">{{progressPercent}}%</text>
       <text wx:else>加载中</text>
     </view>

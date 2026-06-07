@@ -68,6 +68,22 @@ declare namespace WechatMiniprogram {
     complete?(result: GeneralCallbackResult): void;
   }
 
+  interface UserInfo {
+    nickName?: string;
+    avatarUrl?: string;
+  }
+
+  interface GetUserProfileSuccessCallbackResult extends GeneralCallbackResult {
+    userInfo: UserInfo;
+  }
+
+  interface GetUserProfileOption {
+    desc: string;
+    success?(result: GetUserProfileSuccessCallbackResult): void;
+    fail?(result: GeneralCallbackResult): void;
+    complete?(result: GeneralCallbackResult): void;
+  }
+
   interface CloudInitOption {
     env?: string;
   }
@@ -149,6 +165,7 @@ declare namespace WechatMiniprogram {
     cloud: Cloud;
     request<T = unknown>(option: RequestOption<T>): void;
     uploadFile(option: UploadFileOption): void;
+    getUserProfile(option: GetUserProfileOption): void;
     getFileInfo(option: GetFileInfoOption): void;
     getRecorderManager(): RecorderManager;
     navigateTo(option: NavigateOption): void;
