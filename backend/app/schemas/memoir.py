@@ -97,6 +97,10 @@ class MemoirDraftGenerateRequest(BaseModel):
     ai_model: str | None = None
 
 
+class MemoirSessionProcessRequest(BaseModel):
+    ai_model: str | None = None
+
+
 class MemoirDraftEditRequest(BaseModel):
     content_edited: str
 
@@ -488,3 +492,13 @@ class MemoirOutputResponse(BaseModel):
     updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class MemoirSessionProcessResponse(BaseModel):
+    session_summary: MemoirSessionSummaryResponse
+    story_fragment: MemoirOutputResponse | None = None
+    people: list[MemoirPersonMemoryResponse] = Field(default_factory=list)
+    events: list[MemoirEventMemoryResponse] = Field(default_factory=list)
+    places: list[MemoirPlaceMemoryResponse] = Field(default_factory=list)
+    themes: list[MemoirThemeMemoryResponse] = Field(default_factory=list)
+    open_questions: list[MemoirOpenQuestionResponse] = Field(default_factory=list)

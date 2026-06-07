@@ -27,6 +27,9 @@ from app.services.memoir.memory_repository import (
     list_person_memories,
     update_memory_status,
 )
+from app.services.memoir.memory_extraction import process_session_memory
+from app.services.memoir.outputs import upsert_session_output_version
+from app.services.memoir.session_summary import upsert_session_summary
 from app.services.memoir.source_artifacts import create_source_artifact
 from app.services.memoir.transcript_versions import create_transcript_version
 
@@ -51,8 +54,11 @@ __all__ = [
     "initialize_default_coverage_topics",
     "list_coverage_topics",
     "list_person_memories",
+    "process_session_memory",
     "skip_question",
     "update_answer_text",
     "update_draft_content",
     "update_memory_status",
+    "upsert_session_output_version",
+    "upsert_session_summary",
 ]
