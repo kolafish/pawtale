@@ -21,6 +21,16 @@
   - 最终 merge 结果（含 commit SHA）。
 - 如测试因环境问题无法正常执行，必须明确说明原因、影响和替代验证方式，再等待用户确认是否继续 merge。
 
+## Default Git Delivery Preference
+
+除非用户明确说明“只本地提交”“不要开 PR”“不要 merge”或有测试/环境阻塞，本仓库的提交类任务默认按以下交付：
+
+1. 从当前改动创建独立 `codex/*` 分支。
+2. push 到 `origin`。
+3. 创建指向远端 `main` 的 PR。
+4. 在测试/验证结论明确后 merge 到 `main`。
+5. 最终汇报包含 PR 链接、测试或验证结果、merge commit SHA。
+
 ## Long-Term Code Quality Principles
 
 - 产品边界优先：小说、公众号、回忆录必须作为清晰的产品模块演进，不把不同业务强行塞进一个万能模型。

@@ -24,6 +24,8 @@ Pawtale 当前是单仓库、前后端分离架构。后端提供项目、文档
 
 回忆录小程序不是 Web 工作台的移动版。上线链路优先使用微信云函数、云数据库和云存储，避免为了小程序 MVP 引入常驻云托管容器成本。本地开发仍可连接 FastAPI，云函数只承载小程序回忆录采集闭环。
 
+回忆录后端长期会演进为 Memory-first Conversational Interview System：原始材料、转写版本、结构化长期记忆、证据链、覆盖度地图、问题规划和写作产物分层处理。完整架构见 [docs/MEMOIR_MEMORY_ARCHITECTURE.md](docs/MEMOIR_MEMORY_ARCHITECTURE.md)，第一期落地计划见 [docs/MEMOIR_MEMORY_FIRST_V1_PLAN.md](docs/MEMOIR_MEMORY_FIRST_V1_PLAN.md)。
+
 ## 技术栈
 
 ### 后端
@@ -118,6 +120,23 @@ backend/app/
 - `services/project_documents.py` 统一处理文档正文文件、数据库提交和回滚补偿
 - `domain/projects/templates.py` 按项目类型分发默认模板
 - `domain/references.py` 统一定义 Reference 类型和值清洗
+
+回忆录 memory-first 能力继续放在 `app/services/memoir/` 下演进。第一期计划新增：
+
+```text
+app/services/memoir/
+├── source_artifacts.py
+├── transcript_versions.py
+├── memory_extraction.py
+├── memory_repository.py
+├── memory_resolution.py
+├── coverage.py
+├── question_planner.py
+├── session_summary.py
+└── outputs.py
+```
+
+这些 service 复用现有认证、项目归属校验、AI provider 和数据库层，不引入独立后端框架。
 
 ## 前端结构
 
@@ -250,6 +269,45 @@ writing_sessions
 - `documents.content` 保留数据库兼容字段，正文实际由 `content_storage.py` 存到 `data/projects/{project_id}/{document_id}.md`
 - `reference_items.type` 由 `domain/references.py` 约束，当前支持 `character`、`location`、`note`、`outline`
 - `writing_sessions` 是写作记录能力，目前保留 API 和表结构
+
+### 回忆录 Memory-first 数据层规划
+
+采集流程保留现有回忆录表：
+
+```text
+memoir_sessions
+memoir_questions
+memoir_answers
+memoir_drafts
+audio_files
+```
+
+长期记忆层计划新增：
+
+```text
+memoir_source_artifacts
+memoir_transcript_versions
+memoir_person_memories
+memoir_event_memories
+memoir_place_memories
+memoir_theme_memories
+memoir_memory_links
+memoir_memory_evidence
+memoir_open_questions
+memoir_coverage_topics
+memoir_coverage_snapshots
+memoir_question_candidates
+memoir_session_summaries
+memoir_outputs
+memoir_output_versions
+```
+
+设计原则：
+
+- 原始材料、转写版本、结构化记忆和写作产物是不同生命周期对象。
+- 每条 AI 提取的 memory 默认是 `draft`，必须有 `memoir_memory_evidence` 指回原始回答。
+- `memoir_questions` 继续表示实际要问的问题；`memoir_question_candidates` 表示规划器生成的候选问题和排序理由。
+- 覆盖度地图由 `memoir_coverage_topics` 和 `memoir_coverage_snapshots` 表达，第一期以固定人生维度为主。
 
 ## API
 
