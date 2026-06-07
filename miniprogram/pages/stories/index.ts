@@ -49,7 +49,7 @@ Page<StoriesData, {
   backWorkbench(): void;
   openHome(): void;
   openWorkbench(): void;
-  openFeedback(): void;
+  openQa(): void;
   openProfile(): void;
 }>({
   data: {
@@ -148,8 +148,8 @@ Page<StoriesData, {
     wx.redirectTo({ url: "/pages/workbench/index" });
   },
 
-  openFeedback() {
-    wx.redirectTo({ url: "/pages/feedback/index" });
+  openQa() {
+    wx.redirectTo({ url: "/pages/qa/index" });
   },
 
   openProfile() {

@@ -28,7 +28,7 @@ Page<ProfileData, {
   setExtraFont(): void;
   openHome(): void;
   openWorkbench(): void;
-  openFeedback(): void;
+  openQa(): void;
   openProfile(): void;
 }>({
   data: {
@@ -78,8 +78,8 @@ Page<ProfileData, {
     wx.redirectTo({ url: "/pages/workbench/index" });
   },
 
-  openFeedback() {
-    wx.redirectTo({ url: "/pages/feedback/index" });
+  openQa() {
+    wx.redirectTo({ url: "/pages/qa/index" });
   },
 
   openProfile() {

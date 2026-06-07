@@ -187,6 +187,23 @@ test("answers a question with a linked audio file", async () => {
   const answers = await store.findMany(COLLECTIONS.answers, { openid: "openid_a" });
   assert.equal(answers[0].audio_file_id, audioFile.data.id);
   assert.equal(answers[0].duration_seconds, 7);
+
+  const stories = await request({
+    method: "GET",
+    path: "/api/mobile/memoir/stories",
+  }, { store });
+  assert.equal(stories.data.stories[0].audio_file_id, audioFile.data.id);
+
+  const detail = await request({
+    method: "GET",
+    path: `/api/mobile/memoir/stories/${answer.data.id}`,
+  }, { store });
+
+  assert.equal(detail.statusCode, 200);
+  assert.equal(detail.data.audio_file.id, audioFile.data.id);
+  assert.equal(detail.data.audio_file.file_id, "cloud://env/memoir/audio/openid_a/answer.mp3");
+  assert.equal(detail.data.audio_file.mime_type, "audio/mpeg");
+  assert.equal(detail.data.audio_file.duration_seconds, 7);
 });
 
 test("rejects malformed answer request bodies", async () => {

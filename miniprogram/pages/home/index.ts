@@ -55,7 +55,7 @@ Page<HomeData, {
   openStories(): void;
   openWorkbench(): void;
   openHome(): void;
-  openFeedback(): void;
+  openQa(): void;
   openProfile(): void;
 }>({
   data: {
@@ -195,8 +195,8 @@ Page<HomeData, {
   openHome() {
   },
 
-  openFeedback() {
-    wx.redirectTo({ url: "/pages/feedback/index" });
+  openQa() {
+    wx.redirectTo({ url: "/pages/qa/index" });
   },
 
   openProfile() {
