@@ -1,10 +1,19 @@
 import type {
   MemoirAnswer,
+  MemoirCoverageItem,
   MemoirDraft,
+  MemoirEventMemory,
   MemoirInterviewState,
+  MemoirOpenQuestion,
+  MemoirOutput,
+  MemoirPersonMemory,
+  MemoirPlaceMemory,
   MemoirQuestion,
+  MemoirQuestionCandidate,
+  MemoirSessionSummary,
   MemoirStoryCard,
   MemoirSummary,
+  MemoirThemeMemory,
   Project,
 } from "../domain/memoir";
 
@@ -17,6 +26,15 @@ export interface MemoirSessionStore {
   answer?: MemoirAnswer;
   draft?: MemoirDraft;
   summary?: MemoirSummary;
+  sessionSummary?: MemoirSessionSummary | null;
+  people?: MemoirPersonMemory[];
+  events?: MemoirEventMemory[];
+  places?: MemoirPlaceMemory[];
+  themes?: MemoirThemeMemory[];
+  openQuestions?: MemoirOpenQuestion[];
+  coverage?: MemoirCoverageItem[];
+  candidates?: MemoirQuestionCandidate[];
+  outputs?: MemoirOutput[];
   stories?: MemoirStoryCard[];
   cached_at?: string;
 }
@@ -40,6 +58,15 @@ export function clearMemoirDraft(): void {
     project: current.project,
     interview: current.interview,
     summary: current.summary,
+    sessionSummary: current.sessionSummary,
+    people: current.people,
+    events: current.events,
+    places: current.places,
+    themes: current.themes,
+    openQuestions: current.openQuestions,
+    coverage: current.coverage,
+    candidates: current.candidates,
+    outputs: current.outputs,
     stories: current.stories,
     cached_at: current.cached_at,
   });

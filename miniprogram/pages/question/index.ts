@@ -2,6 +2,7 @@ import type { MemoirQuestion } from "../../domain/memoir";
 import {
   createTextAnswer,
   getCurrentSession,
+  getNextQuestion,
   skipQuestion,
   transcribeMemoirAudioFile,
   uploadMemoirAudioFile,
@@ -163,8 +164,18 @@ Page<QuestionData, {
     });
     try {
       const interview = await getCurrentSession();
-      writeMemoirStore({ interview });
-      const current = interview.current_question;
+      const nextQuestion = await getNextQuestion();
+      const current = nextQuestion || interview.current_question;
+      const questions = current && !interview.questions.some((item) => item.id === current.id)
+        ? [...interview.questions, current]
+        : interview.questions;
+      writeMemoirStore({
+        interview: {
+          ...interview,
+          current_question: current,
+          questions,
+        },
+      });
       this.setData({
         sessionTitle: interview.session.title,
         question: current,

@@ -1,9 +1,18 @@
 import type {
   MemoirAnswer,
+  MemoirCoverageItem,
   MemoirDraft,
+  MemoirEventMemory,
   MemoirInterviewState,
+  MemoirOpenQuestion,
+  MemoirOutput,
+  MemoirPersonMemory,
+  MemoirPlaceMemory,
+  MemoirQuestionCandidate,
+  MemoirSessionSummary,
   MemoirStoryCard,
   MemoirSummary,
+  MemoirThemeMemory,
   Project,
 } from "../domain/memoir";
 import { readMemoirStore, writeMemoirStore, type MemoirSessionStore } from "./session";
@@ -12,6 +21,15 @@ export interface MemoirDashboardSnapshot {
   project?: Project;
   interview?: MemoirInterviewState;
   summary?: MemoirSummary;
+  sessionSummary?: MemoirSessionSummary | null;
+  people: MemoirPersonMemory[];
+  events: MemoirEventMemory[];
+  places: MemoirPlaceMemory[];
+  themes: MemoirThemeMemory[];
+  openQuestions: MemoirOpenQuestion[];
+  coverage: MemoirCoverageItem[];
+  candidates: MemoirQuestionCandidate[];
+  outputs: MemoirOutput[];
   stories: MemoirStoryCard[];
   hasStories: boolean;
 }
@@ -42,6 +60,15 @@ export function readMemoirDashboardSnapshot(): MemoirDashboardSnapshot {
     project: store.project,
     interview: store.interview,
     summary: store.summary || (store.interview ? fallbackSummary(store.interview) : undefined),
+    sessionSummary: store.sessionSummary,
+    people: store.people || [],
+    events: store.events || [],
+    places: store.places || [],
+    themes: store.themes || [],
+    openQuestions: store.openQuestions || [],
+    coverage: store.coverage || [],
+    candidates: store.candidates || [],
+    outputs: store.outputs || [],
     stories: store.stories || [],
     hasStories: store.stories !== undefined,
   };
@@ -59,6 +86,33 @@ export function writeMemoirDashboardSnapshot(snapshot: Partial<MemoirDashboardSn
   }
   if (snapshot.summary !== undefined) {
     patch.summary = snapshot.summary;
+  }
+  if (snapshot.sessionSummary !== undefined) {
+    patch.sessionSummary = snapshot.sessionSummary;
+  }
+  if (snapshot.people !== undefined) {
+    patch.people = snapshot.people;
+  }
+  if (snapshot.events !== undefined) {
+    patch.events = snapshot.events;
+  }
+  if (snapshot.places !== undefined) {
+    patch.places = snapshot.places;
+  }
+  if (snapshot.themes !== undefined) {
+    patch.themes = snapshot.themes;
+  }
+  if (snapshot.openQuestions !== undefined) {
+    patch.openQuestions = snapshot.openQuestions;
+  }
+  if (snapshot.coverage !== undefined) {
+    patch.coverage = snapshot.coverage;
+  }
+  if (snapshot.candidates !== undefined) {
+    patch.candidates = snapshot.candidates;
+  }
+  if (snapshot.outputs !== undefined) {
+    patch.outputs = snapshot.outputs;
   }
   if (snapshot.stories !== undefined) {
     patch.stories = snapshot.stories;

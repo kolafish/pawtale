@@ -1,3 +1,170 @@
+.review-page {
+  min-height: 100vh;
+  padding: 32rpx 36rpx 56rpx;
+  background: #fffaf2;
+}
+
+.surface {
+  margin-top: 24rpx;
+  padding: 28rpx;
+  border: 2rpx solid #f0dac0;
+  border-radius: 24rpx;
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.section-row,
+.coverage-row,
+.memory-card,
+.memory-actions {
+  display: flex;
+  align-items: center;
+}
+
+.section-row,
+.coverage-row,
+.memory-card {
+  justify-content: space-between;
+  gap: 20rpx;
+}
+
+.section-title {
+  color: #24100b;
+  font-size: 34rpx;
+  font-weight: 900;
+}
+
+.count-text {
+  color: #128577;
+  font-size: 28rpx;
+  font-weight: 900;
+}
+
+.empty-state {
+  padding: 24rpx;
+  border-radius: 18rpx;
+  background: #f3fbf8;
+  color: #60716d;
+  font-size: 28rpx;
+}
+
+.coverage-row,
+.memory-card,
+.question-card,
+.candidate-card {
+  padding: 24rpx 0;
+  border-top: 2rpx solid #f5eadc;
+}
+
+.coverage-copy,
+.memory-main {
+  min-width: 0;
+  flex: 1;
+}
+
+.coverage-name,
+.memory-title {
+  display: block;
+  color: #24100b;
+  font-size: 30rpx;
+  font-weight: 900;
+  line-height: 1.45;
+}
+
+.coverage-meter {
+  width: 220rpx;
+  flex-shrink: 0;
+}
+
+.coverage-track {
+  height: 14rpx;
+  overflow: hidden;
+  border-radius: 999rpx;
+  background: #d7eee7;
+}
+
+.coverage-fill {
+  height: 100%;
+  border-radius: 999rpx;
+  background: #e35d4f;
+}
+
+.coverage-fill.yellow {
+  background: #ef9b35;
+}
+
+.coverage-fill.green {
+  background: #128577;
+}
+
+.coverage-score {
+  display: block;
+  margin-top: 8rpx;
+  color: #128577;
+  font-size: 24rpx;
+  font-weight: 900;
+  text-align: right;
+}
+
+.status-pill {
+  flex-shrink: 0;
+  padding: 8rpx 14rpx;
+  border-radius: 999rpx;
+  color: #8a5b12;
+  background: #fff0c2;
+  font-size: 22rpx;
+  font-weight: 900;
+}
+
+.status-pill.confirmed {
+  color: #0d6b5f;
+  background: #dff5ef;
+}
+
+.status-pill.rejected {
+  color: #b83c35;
+  background: #ffe4df;
+}
+
+.memory-actions {
+  flex-shrink: 0;
+  gap: 10rpx;
+}
+
+.mini-button {
+  min-width: 88rpx;
+  height: 52rpx;
+  margin: 0;
+  padding: 0 14rpx;
+  border-radius: 14rpx;
+  font-size: 24rpx;
+  line-height: 52rpx;
+}
+
+.mini-button.confirm {
+  color: #0d6b5f;
+  background: #e9f7f2;
+}
+
+.mini-button.reject {
+  color: #9c4033;
+  background: #fff0eb;
+}
+
+.question-card .muted,
+.candidate-card .muted {
+  display: block;
+  margin-top: 10rpx;
+}
+
+.compact {
+  margin-top: 16rpx;
+  justify-content: flex-start;
+}
+
+.button-row {
+  margin-top: 28rpx;
+}
+
 .button-row .button {
   flex: 1;
 }

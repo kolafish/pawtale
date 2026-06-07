@@ -116,6 +116,7 @@
 
 .continue-panel,
 .memoir-panel,
+.memory-panel,
 .story-list {
   margin-top: 34rpx;
   padding: 34rpx 30rpx;
@@ -215,6 +216,18 @@
   background: #128577;
 }
 
+.progress-fill.red {
+  background: #e35d4f;
+}
+
+.progress-fill.yellow {
+  background: #ef9b35;
+}
+
+.progress-fill.green {
+  background: #128577;
+}
+
 .progress-value {
   margin-top: 14rpx;
   color: #128577;
@@ -240,6 +253,44 @@
 .story-card {
   margin-top: 24rpx;
   padding: 26rpx;
+  border-radius: 20rpx;
+  background: #fff8ee;
+}
+
+.memory-summary {
+  display: block;
+  margin-top: 22rpx;
+  color: #2d1710;
+  font-size: 30rpx;
+  line-height: 1.65;
+}
+
+.coverage-item {
+  margin-top: 24rpx;
+}
+
+.coverage-title {
+  color: #24100b;
+  font-size: 30rpx;
+  font-weight: 900;
+}
+
+.coverage-score,
+.memory-status {
+  color: #128577;
+  font-size: 26rpx;
+  font-weight: 900;
+}
+
+.compact-track {
+  height: 14rpx;
+  margin-top: 14rpx;
+}
+
+.memory-card,
+.candidate-card {
+  margin-top: 22rpx;
+  padding: 24rpx;
   border-radius: 20rpx;
   background: #fff8ee;
 }

@@ -43,6 +43,7 @@ function memoirService(request) {
   return createMemoirService(requireStore(request), request.context || {}, {
     asr: request.asr,
     drafting: request.drafting,
+    memoryExtraction: request.memoryExtraction,
     storage: request.storage,
   });
 }
@@ -81,8 +82,64 @@ const routes = {
       200,
       await memoirService(request).getStoryDetail(request.params.answerId),
     )),
+    route("/api/mobile/memoir/sessions/:sessionId/summary", async (request) => jsonResponse(
+      200,
+      await memoirService(request).getSessionSummary(request.params.sessionId),
+    )),
+    route("/api/mobile/memoir/memories/people", async (request) => jsonResponse(
+      200,
+      await memoirService(request).listPersonMemories(),
+    )),
+    route("/api/mobile/memoir/memories/events", async (request) => jsonResponse(
+      200,
+      await memoirService(request).listEventMemories(),
+    )),
+    route("/api/mobile/memoir/memories/places", async (request) => jsonResponse(
+      200,
+      await memoirService(request).listPlaceMemories(),
+    )),
+    route("/api/mobile/memoir/memories/themes", async (request) => jsonResponse(
+      200,
+      await memoirService(request).listThemeMemories(),
+    )),
+    route("/api/mobile/memoir/open-questions", async (request) => jsonResponse(
+      200,
+      await memoirService(request).listOpenQuestions(),
+    )),
+    route("/api/mobile/memoir/coverage", async (request) => jsonResponse(
+      200,
+      await memoirService(request).getCoverageMap(),
+    )),
+    route("/api/mobile/memoir/question-candidates", async (request) => jsonResponse(
+      200,
+      await memoirService(request).listQuestionCandidates(),
+    )),
+    route("/api/mobile/memoir/outputs", async (request) => jsonResponse(
+      200,
+      await memoirService(request).listOutputs(),
+    )),
+    route("/api/mobile/memoir/outputs/:outputId", async (request) => jsonResponse(
+      200,
+      await memoirService(request).getOutput(request.params.outputId),
+    )),
   ],
   POST: [
+    route("/api/mobile/memoir/sessions/:sessionId/process", async (request) => jsonResponse(
+      200,
+      await memoirService(request).processSessionMemory(request.params.sessionId),
+    )),
+    route("/api/mobile/memoir/coverage/recalculate", async (request) => jsonResponse(
+      200,
+      await memoirService(request).recalculateCoverage(),
+    )),
+    route("/api/mobile/memoir/question-candidates/generate", async (request) => jsonResponse(
+      200,
+      await memoirService(request).generateQuestionCandidates(),
+    )),
+    route("/api/mobile/memoir/question-candidates/:candidateId/select", async (request) => jsonResponse(
+      200,
+      await memoirService(request).selectCandidateAsQuestion(request.params.candidateId),
+    )),
     route("/api/mobile/memoir/questions/:questionId/skip", async (request) => jsonResponse(
       200,
       await memoirService(request).skipQuestion(request.params.questionId),
@@ -109,6 +166,14 @@ const routes = {
     )),
   ],
   PATCH: [
+    route("/api/mobile/memoir/memories/:memoryType/:memoryId", async (request) => jsonResponse(
+      200,
+      await memoirService(request).updateMemory(request.params.memoryType, request.params.memoryId, request.data),
+    )),
+    route("/api/mobile/memoir/open-questions/:questionId", async (request) => jsonResponse(
+      200,
+      await memoirService(request).updateOpenQuestion(request.params.questionId, request.data),
+    )),
     route("/api/mobile/memoir/answers/:answerId", async (request) => jsonResponse(
       200,
       await memoirService(request).updateAnswerText(request.params.answerId, updateAnswerTextRequest(request.data)),
@@ -132,6 +197,7 @@ async function handleMemoirApiRequest(event = {}, context = {}, dependencies = {
       event,
       asr: dependencies.asr,
       drafting: dependencies.drafting,
+      memoryExtraction: dependencies.memoryExtraction,
       store: dependencies.store,
       storage: dependencies.storage,
     };
