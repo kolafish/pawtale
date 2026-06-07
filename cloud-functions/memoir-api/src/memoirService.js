@@ -80,6 +80,7 @@ const MemoirOutputStatus = Object.freeze({
 const STORY_PREVIEW_LIMIT = 80;
 const MAX_AUDIO_BYTES = 20 * 1024 * 1024;
 const CLOUD_AUDIO_ROOT = "memoir/audio";
+const DEFAULT_WECHAT_DISPLAY_NAME = "微信用户";
 const AUDIO_MIME_BY_EXTENSION = Object.freeze({
   mp3: "audio/mpeg",
   wav: "audio/wav",
@@ -120,14 +121,36 @@ function requireOpenId(context) {
 function createProjectResponse(project) {
   return {
     id: project.id,
+    user_id: project.user_id || null,
     type: "memoir",
     title: project.title,
     description: project.description || "",
     total_word_count: project.total_word_count || 0,
+    status: project.status || "active",
+    elder_name: project.elder_name || "",
+    is_default: Boolean(project.is_default),
+    last_opened_at: project.last_opened_at || project.updated_at || project.created_at,
     groups: [],
     references: [],
     created_at: project.created_at,
     updated_at: project.updated_at,
+  };
+}
+
+function createUserResponse(user) {
+  return {
+    id: user.id,
+    openid: user.openid,
+    unionid: user.unionid || "",
+    email: "",
+    display_name: user.display_name || user.wechat_nickname || DEFAULT_WECHAT_DISPLAY_NAME,
+    wechat_nickname: user.wechat_nickname || "",
+    wechat_avatar_url: user.wechat_avatar_url || "",
+    storage_owner_id: safePathSegment(user.openid),
+    active_project_id: user.active_project_id || null,
+    created_at: user.created_at,
+    updated_at: user.updated_at,
+    last_login_at: user.last_login_at || user.updated_at,
   };
 }
 
@@ -350,28 +373,192 @@ function serializeJsonField(value) {
   return JSON.stringify(value);
 }
 
-async function getOrCreateProject(store, openid) {
-  const existing = await store.findOne(COLLECTIONS.projects, {
+function cleanOptionalText(value) {
+  return String(value || "").trim();
+}
+
+function defaultProjectTitle(user) {
+  return `${user.display_name || user.wechat_nickname || DEFAULT_WECHAT_DISPLAY_NAME}的回忆录`;
+}
+
+async function getOrCreateMemoirUser(store, openid, data = {}) {
+  const now = nowIso();
+  const existing = await store.findOne(COLLECTIONS.users, { openid });
+  const wechatNickname = cleanOptionalText(data.wechat_nickname || data.nickname || data.nickName);
+  const wechatAvatarUrl = cleanOptionalText(data.wechat_avatar_url || data.avatar_url || data.avatarUrl);
+  const displayName = cleanOptionalText(data.display_name) || wechatNickname;
+  const unionid = cleanOptionalText(data.unionid);
+
+  if (existing) {
+    const patch = {
+      last_login_at: now,
+      updated_at: now,
+    };
+    if (unionid) {
+      patch.unionid = unionid;
+    }
+    if (wechatNickname) {
+      patch.wechat_nickname = wechatNickname;
+      patch.display_name = displayName || existing.display_name || wechatNickname;
+    } else if (displayName) {
+      patch.display_name = displayName;
+    }
+    if (wechatAvatarUrl) {
+      patch.wechat_avatar_url = wechatAvatarUrl;
+    }
+    return store.updateById(COLLECTIONS.users, existing.id, patch);
+  }
+
+  return store.insert(COLLECTIONS.users, {
+    openid,
+    unionid: unionid || null,
+    wechat_nickname: wechatNickname || "",
+    wechat_avatar_url: wechatAvatarUrl || "",
+    display_name: displayName || DEFAULT_WECHAT_DISPLAY_NAME,
+    active_project_id: null,
+    created_at: now,
+    updated_at: now,
+    last_login_at: now,
+  });
+}
+
+async function listUserProjects(store, openid, user) {
+  const rows = await store.findMany(COLLECTIONS.projects, {
     openid,
     type: "memoir",
   }, {
     orderBy: [{ field: "updated_at", direction: "desc" }],
   });
 
-  if (existing) {
-    return existing;
+  const projects = [];
+  for (const [index, row] of rows.entries()) {
+    if (!row.user_id || row.status === undefined || row.is_default === undefined) {
+      projects.push(await store.updateById(COLLECTIONS.projects, row.id, {
+        user_id: user.id,
+        status: row.status || "active",
+        elder_name: row.elder_name || "",
+        is_default: row.is_default === undefined ? index === 0 : Boolean(row.is_default),
+        last_opened_at: row.last_opened_at || row.updated_at || row.created_at,
+        updated_at: row.updated_at || nowIso(),
+      }));
+      continue;
+    }
+    projects.push(row);
   }
+  return projects.filter(Boolean);
+}
 
+async function createMemoirProject(store, openid, data = {}) {
+  const user = await getOrCreateMemoirUser(store, openid);
+  const existing = await listUserProjects(store, openid, user);
   const now = nowIso();
-  return store.insert(COLLECTIONS.projects, {
+  const title = cleanOptionalText(data.title) || defaultProjectTitle(user);
+  const project = await store.insert(COLLECTIONS.projects, {
     openid,
+    user_id: user.id,
     type: "memoir",
-    title: "我的回忆录",
-    description: "",
+    title,
+    description: cleanOptionalText(data.description),
     total_word_count: 0,
+    status: "active",
+    elder_name: cleanOptionalText(data.elder_name),
+    is_default: existing.length === 0,
+    last_opened_at: now,
     created_at: now,
     updated_at: now,
   });
+  await store.updateById(COLLECTIONS.users, user.id, {
+    active_project_id: project.id,
+    updated_at: now,
+  });
+  return project;
+}
+
+async function getActiveProject(store, openid, user) {
+  let projects = await listUserProjects(store, openid, user);
+  if (!projects.length) {
+    const project = await createMemoirProject(store, openid);
+    projects = [project];
+  }
+  const activeProject = projects.find((project) => project.id === user.active_project_id)
+    || projects.find((project) => project.is_default)
+    || projects[0];
+
+  if (!user.active_project_id || user.active_project_id !== activeProject.id) {
+    await store.updateById(COLLECTIONS.users, user.id, {
+      active_project_id: activeProject.id,
+      updated_at: nowIso(),
+    });
+  }
+  return activeProject;
+}
+
+async function getOrCreateProject(store, openid) {
+  const user = await getOrCreateMemoirUser(store, openid);
+  return getActiveProject(store, openid, user);
+}
+
+async function getMemoirIdentity(store, openid) {
+  const user = await getOrCreateMemoirUser(store, openid);
+  const activeProject = await getActiveProject(store, openid, user);
+  const projects = await listUserProjects(store, openid, user);
+  const freshUser = await store.getById(COLLECTIONS.users, user.id) || user;
+  return {
+    ...createUserResponse(freshUser),
+    active_project_id: activeProject.id,
+    active_project: createProjectResponse(activeProject),
+    projects: projects.map(createProjectResponse),
+  };
+}
+
+async function loadUserProject(store, openid, projectId) {
+  const user = await getOrCreateMemoirUser(store, openid);
+  const project = await store.findOne(COLLECTIONS.projects, {
+    openid,
+    _id: projectId,
+  });
+  if (!project || (project.user_id && project.user_id !== user.id)) {
+    throw new ApiError(404, "回忆录不存在");
+  }
+  if (!project.user_id) {
+    return store.updateById(COLLECTIONS.projects, project.id, {
+      user_id: user.id,
+      updated_at: nowIso(),
+    });
+  }
+  return project;
+}
+
+async function updateMemoirProject(store, openid, projectId, data = {}) {
+  const project = await loadUserProject(store, openid, projectId);
+  const patch = {
+    updated_at: nowIso(),
+  };
+  if (data.title !== undefined) {
+    patch.title = cleanRequiredText(data.title, "回忆录名称不能为空");
+  }
+  if (data.description !== undefined) {
+    patch.description = cleanOptionalText(data.description);
+  }
+  if (data.elder_name !== undefined) {
+    patch.elder_name = cleanOptionalText(data.elder_name);
+  }
+  return store.updateById(COLLECTIONS.projects, project.id, patch);
+}
+
+async function activateMemoirProject(store, openid, projectId) {
+  const user = await getOrCreateMemoirUser(store, openid);
+  const project = await loadUserProject(store, openid, projectId);
+  const now = nowIso();
+  const updatedProject = await store.updateById(COLLECTIONS.projects, project.id, {
+    last_opened_at: now,
+    updated_at: now,
+  });
+  await store.updateById(COLLECTIONS.users, user.id, {
+    active_project_id: project.id,
+    updated_at: now,
+  });
+  return updatedProject;
 }
 
 async function getOrCreateCurrentSession(store, openid) {
@@ -1984,7 +2171,28 @@ function createMemoirService(store, context, dependencies = {}) {
   const openid = requireOpenId(context);
 
   return {
+    getMe: async () => getMemoirIdentity(store, openid),
+    updateMe: async (data) => createUserResponse(await getOrCreateMemoirUser(store, openid, data)),
     getProject: async () => createProjectResponse(await getOrCreateProject(store, openid)),
+    listProjects: async () => {
+      const user = await getOrCreateMemoirUser(store, openid);
+      const activeProject = await getActiveProject(store, openid, user);
+      const projects = await listUserProjects(store, openid, user);
+      return {
+        active_project_id: activeProject.id,
+        active_project: createProjectResponse(activeProject),
+        projects: projects.map(createProjectResponse),
+      };
+    },
+    createProject: async (data) => createProjectResponse(await createMemoirProject(store, openid, data)),
+    updateProject: async (projectId, data) => createProjectResponse(await updateMemoirProject(store, openid, projectId, data)),
+    activateProject: async (projectId) => {
+      const project = await activateMemoirProject(store, openid, projectId);
+      return {
+        active_project_id: project.id,
+        active_project: createProjectResponse(project),
+      };
+    },
     getMemoryDashboard: async () => getMemoryDashboard(store, openid),
     getCurrentSession: async () => getOrCreateCurrentSession(store, openid),
     getNextQuestion: async () => getNextQuestion(store, openid),

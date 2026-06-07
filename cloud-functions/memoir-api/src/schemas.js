@@ -73,9 +73,40 @@ function updateDraftContentRequest(data) {
   };
 }
 
+function updateWechatUserRequest(data) {
+  const body = objectData(data);
+  return {
+    display_name: optionalString(body, "display_name"),
+    wechat_nickname: optionalString(body, "wechat_nickname"),
+    wechat_avatar_url: optionalString(body, "wechat_avatar_url"),
+    unionid: optionalString(body, "unionid"),
+  };
+}
+
+function createProjectRequest(data) {
+  const body = objectData(data);
+  return {
+    title: optionalString(body, "title"),
+    description: optionalString(body, "description"),
+    elder_name: optionalString(body, "elder_name"),
+  };
+}
+
+function updateProjectRequest(data) {
+  const body = objectData(data);
+  return {
+    title: optionalString(body, "title"),
+    description: optionalString(body, "description"),
+    elder_name: optionalString(body, "elder_name"),
+  };
+}
+
 module.exports = {
+  createProjectRequest,
   createTextAnswerRequest,
   registerAudioFileRequest,
   updateAnswerTextRequest,
   updateDraftContentRequest,
+  updateProjectRequest,
+  updateWechatUserRequest,
 };
