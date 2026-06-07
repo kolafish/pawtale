@@ -13,6 +13,7 @@ from app.schemas.memoir import (
     MemoirSessionResponse,
 )
 from app.services.memoir.access import load_memoir_project, load_question, load_session
+from app.services.memoir.question_planner import get_or_create_planned_question
 
 
 DEFAULT_SESSION_TITLE = "回忆录访谈"
@@ -165,6 +166,14 @@ async def get_next_question(
     user_id: str,
 ) -> MemoirQuestionResponse | None:
     state = await get_or_create_current_session(db, project_id, user_id)
+    planned_question = await get_or_create_planned_question(
+        db,
+        project_id,
+        user_id,
+        state.session.id,
+    )
+    if planned_question:
+        return planned_question
     return state.current_question
 
 
