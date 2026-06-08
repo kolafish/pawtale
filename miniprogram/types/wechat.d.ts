@@ -84,8 +84,20 @@ declare namespace WechatMiniprogram {
     complete?(result: GeneralCallbackResult): void;
   }
 
+  interface LoginSuccessCallbackResult extends GeneralCallbackResult {
+    code: string;
+  }
+
+  interface LoginOption {
+    timeout?: number;
+    success?(result: LoginSuccessCallbackResult): void;
+    fail?(result: GeneralCallbackResult): void;
+    complete?(result: GeneralCallbackResult): void;
+  }
+
   interface CloudInitOption {
     env?: string;
+    traceUser?: boolean;
   }
 
   interface CloudCallFunctionResult<T = unknown> {
@@ -165,6 +177,7 @@ declare namespace WechatMiniprogram {
     cloud: Cloud;
     request<T = unknown>(option: RequestOption<T>): void;
     uploadFile(option: UploadFileOption): void;
+    login(option?: LoginOption): void;
     getUserProfile(option: GetUserProfileOption): void;
     getFileInfo(option: GetFileInfoOption): void;
     getRecorderManager(): RecorderManager;

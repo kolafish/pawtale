@@ -1,12 +1,16 @@
 import { loadMemoirDashboard } from "../../services/memoir-dashboard";
-import { getMemoirIdentity, updateWechatUserProfile, uploadWechatAvatar } from "../../services/auth";
+import { getMemoirIdentity, loginWithWechat, updateWechatUserProfile, uploadWechatAvatar } from "../../services/auth";
 import {
+  markMemoirDataSnapshotsStale,
   readMemoirDashboardSnapshot,
   shouldRefreshMemoirDashboardSnapshot,
 } from "../../stores/memoir-cache";
+import type { MemoirIdentity } from "../../domain/memoir";
 
 interface ProfileData {
   loading: boolean;
+  loadingIdentity: boolean;
+  identityReady: boolean;
   storyCount: number;
   progressPercent: number;
   userName: string;
@@ -35,8 +39,10 @@ interface InputEvent {
 Page<ProfileData, {
   onLoad(): Promise<void>;
   hydrateFromCache(): boolean;
-  loadIdentity(): Promise<void>;
+  applyIdentity(identity: MemoirIdentity): void;
+  loadIdentity(forceLogin?: boolean): Promise<boolean>;
   loadProfile(): Promise<void>;
+  loginWechat(): Promise<void>;
   chooseAvatar(event: AvatarEvent): void;
   onNicknameInput(event: InputEvent): void;
   saveWechatProfile(): Promise<void>;
@@ -48,6 +54,8 @@ Page<ProfileData, {
 }>({
   data: {
     loading: false,
+    loadingIdentity: false,
+    identityReady: false,
     storyCount: 0,
     progressPercent: 0,
     userName: "微信用户",
@@ -62,7 +70,10 @@ Page<ProfileData, {
   },
 
   async onLoad() {
-    void this.loadIdentity();
+    const identityLoaded = await this.loadIdentity();
+    if (!identityLoaded) {
+      return;
+    }
     if (!this.hydrateFromCache()) {
       await this.loadProfile();
     }
@@ -81,28 +92,44 @@ Page<ProfileData, {
     return true;
   },
 
-  async loadIdentity() {
+  applyIdentity(identity) {
+    const displayName = identity.display_name || identity.wechat_nickname || "微信用户";
+    const avatarUrl = identity.wechat_avatar_url || identity.avatar_url || "";
+    this.setData({
+      userName: displayName,
+      avatarUrl,
+      profileNameDraft: displayName,
+      avatarDraftUrl: avatarUrl,
+      avatarChanged: false,
+      activeProjectTitle: identity.active_project?.title || "",
+      projectCount: identity.projects.length,
+      identityReady: true,
+      error: "",
+    });
+  },
+
+  async loadIdentity(forceLogin = false) {
+    if (this.data.loadingIdentity) {
+      return false;
+    }
+    this.setData({ loadingIdentity: true, error: "" });
     try {
-      const identity = await getMemoirIdentity();
-      const displayName = identity.display_name || identity.wechat_nickname || "微信用户";
-      const avatarUrl = identity.wechat_avatar_url || identity.avatar_url || "";
-      this.setData({
-        userName: displayName,
-        avatarUrl,
-        profileNameDraft: displayName,
-        avatarDraftUrl: avatarUrl,
-        avatarChanged: false,
-        activeProjectTitle: identity.active_project?.title || "",
-        projectCount: identity.projects.length,
-        error: "",
-      });
+      const identity = forceLogin ? await loginWithWechat() : await getMemoirIdentity();
+      this.applyIdentity(identity);
+      return true;
     } catch (error) {
-      this.setData({ error: error instanceof Error ? error.message : "身份加载失败" });
+      this.setData({
+        identityReady: false,
+        error: error instanceof Error ? error.message : "身份加载失败",
+      });
+      return false;
+    } finally {
+      this.setData({ loadingIdentity: false });
     }
   },
 
   async loadProfile() {
-    this.setData({ loading: true });
+    this.setData({ loading: true, error: "" });
     try {
       const { project, summary } = await loadMemoirDashboard();
       this.setData({
@@ -110,8 +137,17 @@ Page<ProfileData, {
         progressPercent: summary.progress_percent,
         activeProjectTitle: project?.title || this.data.activeProjectTitle,
       });
+    } catch (error) {
+      this.setData({ error: error instanceof Error ? error.message : "资料加载失败" });
     } finally {
       this.setData({ loading: false });
+    }
+  },
+
+  async loginWechat() {
+    const ok = await this.loadIdentity(true);
+    if (ok) {
+      wx.showToast({ title: "已登录", icon: "success" });
     }
   },
 
@@ -145,7 +181,14 @@ Page<ProfileData, {
         this.setData({ error: "昵称不能为空" });
         return;
       }
-      const identity = await getMemoirIdentity();
+      let identity: MemoirIdentity;
+      if (!this.data.identityReady) {
+        const ok = await this.loadIdentity(true);
+        if (!ok) {
+          return;
+        }
+      }
+      identity = await getMemoirIdentity();
       const avatarUrl = this.data.avatarChanged && this.data.avatarDraftUrl
         ? await uploadWechatAvatar(this.data.avatarDraftUrl, identity.storage_owner_id || identity.openid || identity.id)
         : this.data.avatarDraftUrl || identity.wechat_avatar_url || "";
@@ -162,7 +205,9 @@ Page<ProfileData, {
         avatarChanged: false,
         activeProjectTitle: nextIdentity.active_project?.title || this.data.activeProjectTitle,
         projectCount: nextIdentity.projects.length,
+        identityReady: true,
       });
+      markMemoirDataSnapshotsStale();
       wx.showToast({ title: "已更新", icon: "success" });
     } catch (error) {
       this.setData({ error: error instanceof Error ? error.message : "微信资料同步失败" });
