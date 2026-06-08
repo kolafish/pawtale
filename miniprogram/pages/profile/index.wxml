@@ -12,9 +12,11 @@
         class="profile-name-input"
         type="nickname"
         value="{{profileNameDraft}}"
-        placeholder="填写微信昵称"
+        placeholder="点击填写微信昵称"
+        placeholder-class="profile-name-placeholder"
         maxlength="24"
         bindinput="onNicknameInput"
+        bindblur="onNicknameInput"
       />
       <text class="profile-note">{{activeProjectTitle || "微信用户的回忆录"}}</text>
       <button
@@ -23,7 +25,7 @@
         loading="{{syncingProfile}}"
         disabled="{{syncingProfile || loadingIdentity}}"
       >
-        {{syncingProfile ? "保存中" : "保存资料"}}
+        {{syncingProfile ? "保存中" : "保存头像昵称"}}
       </button>
     </view>
   </view>

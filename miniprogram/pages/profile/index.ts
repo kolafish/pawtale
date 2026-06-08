@@ -13,7 +13,6 @@ interface ProfileData {
   identityReady: boolean;
   storyCount: number;
   progressPercent: number;
-  userName: string;
   avatarUrl: string;
   profileNameDraft: string;
   avatarDraftUrl: string;
@@ -35,6 +34,8 @@ interface InputEvent {
     value: string;
   };
 }
+
+const DEFAULT_WECHAT_DISPLAY_NAME = "微信用户";
 
 Page<ProfileData, {
   onLoad(): Promise<void>;
@@ -58,7 +59,6 @@ Page<ProfileData, {
     identityReady: false,
     storyCount: 0,
     progressPercent: 0,
-    userName: "微信用户",
     avatarUrl: "",
     profileNameDraft: "",
     avatarDraftUrl: "",
@@ -93,12 +93,12 @@ Page<ProfileData, {
   },
 
   applyIdentity(identity) {
-    const displayName = identity.display_name || identity.wechat_nickname || "微信用户";
+    const displayName = identity.display_name || identity.wechat_nickname || DEFAULT_WECHAT_DISPLAY_NAME;
+    const savedName = displayName === DEFAULT_WECHAT_DISPLAY_NAME ? "" : displayName;
     const avatarUrl = identity.wechat_avatar_url || identity.avatar_url || "";
     this.setData({
-      userName: displayName,
       avatarUrl,
-      profileNameDraft: displayName,
+      profileNameDraft: savedName,
       avatarDraftUrl: avatarUrl,
       avatarChanged: false,
       activeProjectTitle: identity.active_project?.title || "",
@@ -198,7 +198,6 @@ Page<ProfileData, {
         wechat_avatar_url: avatarUrl,
       });
       this.setData({
-        userName: nextIdentity.display_name || nickName,
         avatarUrl: nextIdentity.wechat_avatar_url || avatarUrl,
         profileNameDraft: nextIdentity.display_name || nickName,
         avatarDraftUrl: nextIdentity.wechat_avatar_url || avatarUrl,
