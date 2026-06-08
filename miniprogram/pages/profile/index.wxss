@@ -61,6 +61,11 @@
   line-height: 1.15;
 }
 
+.profile-name-placeholder {
+  color: #8b7d77;
+  font-weight: 800;
+}
+
 .profile-note {
   color: #70625d;
   font-size: 28rpx;
@@ -68,7 +73,7 @@
 }
 
 .profile-save-action {
-  width: 184rpx;
+  width: 236rpx;
   height: 64rpx;
   margin: 6rpx 0 0;
   padding: 0 24rpx;
