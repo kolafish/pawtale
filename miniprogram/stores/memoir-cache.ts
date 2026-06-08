@@ -3,6 +3,7 @@ import type {
   MemoirCoverageItem,
   MemoirDraft,
   MemoirEventMemory,
+  MemoirIdentity,
   MemoirInterviewState,
   MemoirMemoryStats,
   MemoirOpenQuestion,
@@ -27,6 +28,7 @@ import {
 } from "./session";
 
 const MEMOIR_CACHE_VERSION = 3;
+const IDENTITY_CACHE_MAX_AGE_MS = 30 * 60 * 1000;
 const DASHBOARD_CACHE_MAX_AGE_MS = 10 * 60 * 1000;
 const STORIES_CACHE_MAX_AGE_MS = 10 * 60 * 1000;
 const STORY_DETAIL_CACHE_MAX_AGE_MS = 30 * 60 * 1000;
@@ -49,6 +51,13 @@ export interface MemoirDashboardSnapshot {
   stories: MemoirStoryCard[];
   hasDashboard: boolean;
   hasStories: boolean;
+  cachedAt?: string;
+  isFresh: boolean;
+}
+
+export interface MemoirIdentitySnapshot {
+  identity?: MemoirIdentity;
+  hasIdentity: boolean;
   cachedAt?: string;
   isFresh: boolean;
 }
@@ -135,6 +144,18 @@ function cacheMatchesActiveProject(store: MemoirSessionStore): boolean {
     return false;
   }
   return true;
+}
+
+function cacheMatchesIdentity(store: MemoirSessionStore): boolean {
+  if (!store.cache_identity || !store.identity) {
+    return false;
+  }
+  if (store.identity.id !== store.cache_identity.user_id) {
+    return false;
+  }
+  const cachedProjectId = store.cache_identity.project_id || "";
+  const identityProjectId = store.identity.active_project_id || store.identity.active_project?.id || "";
+  return !cachedProjectId || !identityProjectId || cachedProjectId === identityProjectId;
 }
 
 function cacheIdentityPatch(store: MemoirSessionStore, project?: Project): Partial<MemoirSessionStore> {
@@ -232,6 +253,25 @@ export function readMemoirDashboardSnapshot(): MemoirDashboardSnapshot {
 
 export function shouldRefreshMemoirDashboardSnapshot(snapshot = readMemoirDashboardSnapshot()): boolean {
   return !snapshot.hasDashboard || !snapshot.isFresh;
+}
+
+export function readMemoirIdentitySnapshot(): MemoirIdentitySnapshot {
+  const store = readMemoirStore();
+  const hasIdentity = cacheMatchesIdentity(store) && validCacheMeta(store.identity_cache);
+  return {
+    identity: hasIdentity ? store.identity : undefined,
+    hasIdentity,
+    cachedAt: hasIdentity ? store.identity_cache?.cached_at : undefined,
+    isFresh: hasIdentity ? isMetaFresh(store.identity_cache, IDENTITY_CACHE_MAX_AGE_MS) : false,
+  };
+}
+
+export function writeMemoirIdentitySnapshot(identity: MemoirIdentity): void {
+  writeMemoirStore({
+    identity,
+    identity_cache: freshCacheMeta(),
+    project: identity.active_project,
+  });
 }
 
 export function writeMemoirDashboardSnapshot(snapshot: Partial<MemoirDashboardSnapshot>): void {
