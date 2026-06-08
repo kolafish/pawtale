@@ -197,7 +197,6 @@ export function uploadMemoirAudioFile(filePath: string, durationSeconds?: number
   }
   return uploadFile<MemoirAudioFile>("/api/mobile/memoir/audio-files", {
     filePath,
-    name: "file",
     formData,
   });
 }

@@ -241,7 +241,7 @@ Page<WorkbenchData, {
         candidates,
         outputs,
         memoryStats,
-      } = await loadMemoirDashboard({ includeMemory: true });
+      } = await loadMemoirDashboard();
       this.setData({
         projectTitle: project?.title || this.data.projectTitle,
       });

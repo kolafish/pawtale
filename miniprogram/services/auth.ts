@@ -1,12 +1,8 @@
-import type { MemoirIdentity, User } from "../domain/memoir";
-import { API_TRANSPORT, CLOUD_ENV_ID } from "../config";
+import type { MemoirIdentity } from "../domain/memoir";
+import { CLOUD_ENV_ID } from "../config";
 import { ApiError, request } from "./request";
 import { writeMemoirIdentitySnapshot } from "../stores/memoir-cache";
 import { cacheIdentityFromUser, ensureMemoirStoreIdentity } from "../stores/session";
-
-interface AuthResponse {
-  user: User;
-}
 
 export interface WechatProfilePatch {
   display_name?: string;
@@ -16,17 +12,6 @@ export interface WechatProfilePatch {
 
 const CLOUD_AVATAR_ROOT = "memoir/avatars";
 const WECHAT_LOGIN_TIMEOUT_MS = 60000;
-
-const DEV_USER = {
-  email: "miniprogram-dev@example.com",
-  password: "password123",
-  display_name: "小程序测试用户",
-};
-
-function rememberSessionUser(user: User): User {
-  ensureMemoirStoreIdentity(cacheIdentityFromUser(user));
-  return user;
-}
 
 function rememberMemoirIdentity(identity: MemoirIdentity): MemoirIdentity {
   ensureMemoirStoreIdentity(cacheIdentityFromUser(identity, identity.active_project));
@@ -55,9 +40,6 @@ function runWechatLogin(): Promise<void> {
 let wechatLoginPromise: Promise<void> | null = null;
 
 function ensureWechatLogin(): Promise<void> {
-  if (API_TRANSPORT !== "cloudFunction") {
-    return Promise.resolve();
-  }
   if (!wechatLoginPromise) {
     wechatLoginPromise = runWechatLogin().catch((error) => {
       wechatLoginPromise = null;
@@ -100,44 +82,9 @@ export async function uploadWechatAvatar(filePath: string, ownerId: string): Pro
 }
 
 export async function updateWechatUserProfile(data: WechatProfilePatch): Promise<MemoirIdentity> {
-  await request<User>("/api/mobile/memoir/me", {
+  await request<unknown>("/api/mobile/memoir/me", {
     method: "PATCH",
     data,
   });
   return getMemoirIdentity();
-}
-
-export async function ensureLocalDevSession(): Promise<User> {
-  if (API_TRANSPORT === "cloudFunction") {
-    return getMemoirIdentity();
-  }
-
-  try {
-    return rememberSessionUser(await request<User>("/api/auth/me"));
-  } catch (error) {
-    if (!(error instanceof ApiError) || error.statusCode !== 401) {
-      throw error;
-    }
-  }
-
-  try {
-    const registered = await request<AuthResponse>("/api/auth/register", {
-      method: "POST",
-      data: DEV_USER,
-    });
-    return rememberSessionUser(registered.user);
-  } catch (error) {
-    if (!(error instanceof ApiError) || error.statusCode !== 409) {
-      throw error;
-    }
-  }
-
-  const loggedIn = await request<AuthResponse>("/api/auth/login", {
-    method: "POST",
-    data: {
-      email: DEV_USER.email,
-      password: DEV_USER.password,
-    },
-  });
-  return rememberSessionUser(loggedIn.user);
 }

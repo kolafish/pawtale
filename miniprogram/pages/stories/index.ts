@@ -113,7 +113,7 @@ Page<StoriesData, {
     const loading = !this.data.hasDashboardData;
     this.setData({ loading, refreshing: true, error: "" });
     try {
-      const { outputs, memoryStats } = await loadMemoirDashboard({ includeMemory: true });
+      const { outputs, memoryStats } = await loadMemoirDashboard();
       this.applySnapshot(outputs, memoryStats);
     } catch (error) {
       this.setData({ error: error instanceof Error ? error.message : "写作片段加载失败" });

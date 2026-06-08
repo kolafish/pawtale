@@ -13,15 +13,10 @@ import type {
   MemoirThemeMemory,
   Project,
 } from "../domain/memoir";
-import { ensureLocalDevSession } from "./auth";
+import { getMemoirIdentity } from "./auth";
 import { getMemoirDashboard } from "./memoir";
 import { writeMemoirDashboardSnapshot } from "../stores/memoir-cache";
 import { cacheIdentityFromUser, ensureMemoirStoreIdentity } from "../stores/session";
-
-export interface MemoirDashboardLoadOptions {
-  includeProject?: boolean;
-  includeMemory?: boolean;
-}
 
 export interface MemoirDashboardData {
   project?: Project;
@@ -39,9 +34,8 @@ export interface MemoirDashboardData {
   memoryStats?: MemoirMemoryStats;
 }
 
-export async function loadMemoirDashboard(options: MemoirDashboardLoadOptions = {}): Promise<MemoirDashboardData> {
-  void options;
-  const user = await ensureLocalDevSession();
+export async function loadMemoirDashboard(): Promise<MemoirDashboardData> {
+  const user = await getMemoirIdentity();
   const dashboard = await getMemoirDashboard();
   ensureMemoirStoreIdentity(cacheIdentityFromUser(user, dashboard.project));
   const sessionSummary = dashboard.session_summary;

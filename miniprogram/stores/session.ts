@@ -48,6 +48,7 @@ export interface MemoirSessionStore {
   outputs?: MemoirOutput[];
   memoryStats?: MemoirMemoryStats;
   stories?: MemoirStoryCard[];
+  cache_write_failed_at?: string;
 }
 
 export interface MemoirCacheIdentity {
@@ -83,15 +84,19 @@ function persistMemoirStore(store: MemoirSessionStore): MemoirSessionStore {
     return store;
   } catch {
     if (!store.story_detail_cache) {
-      return store;
+      return {
+        ...store,
+        cache_write_failed_at: new Date().toISOString(),
+      };
     }
     const fallback = { ...store };
     delete fallback.story_detail_cache;
+    fallback.cache_write_failed_at = new Date().toISOString();
     try {
       wx.setStorageSync(STORE_KEY, fallback);
       return fallback;
     } catch {
-      return store;
+      return fallback;
     }
   }
 }
@@ -101,10 +106,12 @@ export function writeMemoirStore(patch: MemoirSessionStore): MemoirSessionStore 
     ...readMemoirStore(),
     ...patch,
   };
+  delete next.cache_write_failed_at;
   return persistMemoirStore(next);
 }
 
 export function replaceMemoirStore(next: MemoirSessionStore): MemoirSessionStore {
+  delete next.cache_write_failed_at;
   return persistMemoirStore(next);
 }
 
