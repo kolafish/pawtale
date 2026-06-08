@@ -1,7 +1,8 @@
 import type { MemoirIdentity, User } from "../domain/memoir";
 import { API_TRANSPORT, CLOUD_ENV_ID } from "../config";
 import { ApiError, request } from "./request";
-import { cacheIdentityFromUser, ensureMemoirStoreIdentity, writeMemoirStore } from "../stores/session";
+import { writeMemoirIdentitySnapshot } from "../stores/memoir-cache";
+import { cacheIdentityFromUser, ensureMemoirStoreIdentity } from "../stores/session";
 
 interface AuthResponse {
   user: User;
@@ -29,7 +30,7 @@ function rememberSessionUser(user: User): User {
 
 function rememberMemoirIdentity(identity: MemoirIdentity): MemoirIdentity {
   ensureMemoirStoreIdentity(cacheIdentityFromUser(identity, identity.active_project));
-  writeMemoirStore({ project: identity.active_project });
+  writeMemoirIdentitySnapshot(identity);
   return identity;
 }
 
@@ -68,17 +69,6 @@ function ensureWechatLogin(): Promise<void> {
 
 export async function getMemoirIdentity(): Promise<MemoirIdentity> {
   await ensureWechatLogin();
-  return rememberMemoirIdentity(await request<MemoirIdentity>("/api/mobile/memoir/me"));
-}
-
-export async function loginWithWechat(): Promise<MemoirIdentity> {
-  if (API_TRANSPORT === "cloudFunction") {
-    wechatLoginPromise = runWechatLogin().catch((error) => {
-      wechatLoginPromise = null;
-      throw error;
-    });
-    await wechatLoginPromise;
-  }
   return rememberMemoirIdentity(await request<MemoirIdentity>("/api/mobile/memoir/me"));
 }
 

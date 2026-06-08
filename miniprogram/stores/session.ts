@@ -3,6 +3,7 @@ import type {
   MemoirCoverageItem,
   MemoirDraft,
   MemoirEventMemory,
+  MemoirIdentity,
   MemoirInterviewState,
   MemoirMemoryStats,
   MemoirOpenQuestion,
@@ -25,9 +26,11 @@ const STORE_KEY = "pawtale_memoir_session";
 
 export interface MemoirSessionStore {
   cache_identity?: MemoirCacheIdentity;
+  identity_cache?: MemoirCacheMetadata;
   dashboard_cache?: MemoirCacheMetadata;
   stories_cache?: MemoirCacheMetadata;
   story_detail_cache?: MemoirStoryDetailCache;
+  identity?: MemoirIdentity;
   project?: Project;
   interview?: MemoirInterviewState;
   question?: MemoirQuestion;
@@ -135,7 +138,9 @@ export function ensureMemoirStoreIdentity(identity: MemoirCacheIdentity): Memoir
   const current = readMemoirStore();
   const hasCachedMemoirData = Boolean(
     current.project
+    || current.identity
     || current.interview
+    || current.identity_cache
     || current.dashboard_cache
     || current.stories_cache
     || current.story_detail_cache
@@ -168,6 +173,8 @@ export function clearMemoirDraft(): void {
   const current = readMemoirStore();
   replaceMemoirStore({
     cache_identity: current.cache_identity,
+    identity: current.identity,
+    identity_cache: current.identity_cache,
     project: current.project,
     interview: current.interview,
     summary: current.summary,
