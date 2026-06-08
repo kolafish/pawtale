@@ -65,6 +65,7 @@
 }
 
 .summary-panel,
+.login-panel,
 .settings-panel {
   margin-top: 34rpx;
   padding: 32rpx;
@@ -79,6 +80,54 @@
   grid-template-columns: 1fr 1fr;
   gap: 20rpx;
   text-align: center;
+}
+
+.login-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24rpx;
+}
+
+.login-main {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 12rpx;
+}
+
+.login-status {
+  color: #b4234a;
+  font-size: 26rpx;
+  font-weight: 800;
+  line-height: 1.25;
+}
+
+.login-status-ready {
+  color: #128577;
+}
+
+.login-action {
+  min-width: 176rpx;
+  height: 72rpx;
+  margin: 0;
+  padding: 0 28rpx;
+  border: 0;
+  border-radius: 18rpx;
+  background: #128577;
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 26rpx;
+  font-weight: 900;
+  line-height: 1;
+  flex: 0 0 auto;
+}
+
+.login-action::after {
+  border: 0;
 }
 
 .summary-value {

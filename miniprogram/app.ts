@@ -5,6 +5,7 @@ App({
     if (API_TRANSPORT === "cloudFunction") {
       wx.cloud.init({
         env: CLOUD_ENV_ID,
+        traceUser: true,
       });
     }
   },

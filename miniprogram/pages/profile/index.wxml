@@ -15,6 +15,16 @@
 
   <view wx:if="{{error}}" class="error">{{error}}</view>
 
+  <view class="login-panel">
+    <view class="login-main">
+      <text class="section-title">微信登录</text>
+      <text class="login-status {{identityReady ? 'login-status-ready' : ''}}">{{loadingIdentity ? "登录中" : (identityReady ? "已登录" : "未登录")}}</text>
+    </view>
+    <button class="login-action" bindtap="loginWechat" loading="{{loadingIdentity}}" disabled="{{loadingIdentity}}">
+      {{identityReady ? "刷新登录" : "微信登录"}}
+    </button>
+  </view>
+
   <view class="summary-panel">
     <view>
       <text class="summary-value">{{storyCount}}</text>

@@ -14,6 +14,7 @@ export interface WechatProfilePatch {
 }
 
 const CLOUD_AVATAR_ROOT = "memoir/avatars";
+const WECHAT_LOGIN_TIMEOUT_MS = 60000;
 
 const DEV_USER = {
   email: "miniprogram-dev@example.com",
@@ -32,7 +33,52 @@ function rememberMemoirIdentity(identity: MemoirIdentity): MemoirIdentity {
   return identity;
 }
 
+function runWechatLogin(): Promise<void> {
+  return new Promise((resolve, reject) => {
+    wx.login({
+      timeout: WECHAT_LOGIN_TIMEOUT_MS,
+      success: (result) => {
+        if (result.code) {
+          resolve();
+          return;
+        }
+        reject(new ApiError(0, result.errMsg || "微信登录失败", result));
+      },
+      fail: (error) => {
+        reject(new ApiError(0, error.errMsg || "微信登录失败", error));
+      },
+    });
+  });
+}
+
+let wechatLoginPromise: Promise<void> | null = null;
+
+function ensureWechatLogin(): Promise<void> {
+  if (API_TRANSPORT !== "cloudFunction") {
+    return Promise.resolve();
+  }
+  if (!wechatLoginPromise) {
+    wechatLoginPromise = runWechatLogin().catch((error) => {
+      wechatLoginPromise = null;
+      throw error;
+    });
+  }
+  return wechatLoginPromise;
+}
+
 export async function getMemoirIdentity(): Promise<MemoirIdentity> {
+  await ensureWechatLogin();
+  return rememberMemoirIdentity(await request<MemoirIdentity>("/api/mobile/memoir/me"));
+}
+
+export async function loginWithWechat(): Promise<MemoirIdentity> {
+  if (API_TRANSPORT === "cloudFunction") {
+    wechatLoginPromise = runWechatLogin().catch((error) => {
+      wechatLoginPromise = null;
+      throw error;
+    });
+    await wechatLoginPromise;
+  }
   return rememberMemoirIdentity(await request<MemoirIdentity>("/api/mobile/memoir/me"));
 }
 
