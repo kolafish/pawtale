@@ -17,6 +17,7 @@ interface ProfileData {
   profileNameDraft: string;
   avatarDraftUrl: string;
   avatarChanged: boolean;
+  canSaveProfile: boolean;
   activeProjectTitle: string;
   projectCount: number;
   syncingProfile: boolean;
@@ -63,6 +64,7 @@ Page<ProfileData, {
     profileNameDraft: "",
     avatarDraftUrl: "",
     avatarChanged: false,
+    canSaveProfile: false,
     activeProjectTitle: "",
     projectCount: 0,
     syncingProfile: false,
@@ -101,6 +103,7 @@ Page<ProfileData, {
       profileNameDraft: savedName,
       avatarDraftUrl: avatarUrl,
       avatarChanged: false,
+      canSaveProfile: false,
       activeProjectTitle: identity.active_project?.title || "",
       projectCount: identity.projects.length,
       identityReady: true,
@@ -159,13 +162,16 @@ Page<ProfileData, {
     this.setData({
       avatarDraftUrl: avatarUrl,
       avatarChanged: true,
+      canSaveProfile: true,
       error: "",
     });
   },
 
   onNicknameInput(event) {
+    const value = event.detail.value;
     this.setData({
-      profileNameDraft: event.detail.value,
+      profileNameDraft: value,
+      canSaveProfile: Boolean(value.trim()) || this.data.avatarChanged,
       error: "",
     });
   },
@@ -177,8 +183,9 @@ Page<ProfileData, {
     this.setData({ syncingProfile: true, error: "" });
     try {
       const nickName = this.data.profileNameDraft.trim();
-      if (!nickName) {
-        this.setData({ error: "昵称不能为空" });
+      const hasAvatarChange = Boolean(this.data.avatarChanged && this.data.avatarDraftUrl);
+      if (!nickName && !hasAvatarChange) {
+        this.setData({ error: "请先选择头像或填写昵称" });
         return;
       }
       let identity: MemoirIdentity;
@@ -189,23 +196,17 @@ Page<ProfileData, {
         }
       }
       identity = await getMemoirIdentity();
-      const avatarUrl = this.data.avatarChanged && this.data.avatarDraftUrl
+      const avatarUrl = hasAvatarChange
         ? await uploadWechatAvatar(this.data.avatarDraftUrl, identity.storage_owner_id || identity.openid || identity.id)
         : this.data.avatarDraftUrl || identity.wechat_avatar_url || "";
       const nextIdentity = await updateWechatUserProfile({
-        display_name: nickName,
-        wechat_nickname: nickName,
-        wechat_avatar_url: avatarUrl,
+        ...(nickName ? {
+          display_name: nickName,
+          wechat_nickname: nickName,
+        } : {}),
+        ...(avatarUrl ? { wechat_avatar_url: avatarUrl } : {}),
       });
-      this.setData({
-        avatarUrl: nextIdentity.wechat_avatar_url || avatarUrl,
-        profileNameDraft: nextIdentity.display_name || nickName,
-        avatarDraftUrl: nextIdentity.wechat_avatar_url || avatarUrl,
-        avatarChanged: false,
-        activeProjectTitle: nextIdentity.active_project?.title || this.data.activeProjectTitle,
-        projectCount: nextIdentity.projects.length,
-        identityReady: true,
-      });
+      this.applyIdentity(nextIdentity);
       markMemoirDataSnapshotsStale();
       wx.showToast({ title: "已更新", icon: "success" });
     } catch (error) {
