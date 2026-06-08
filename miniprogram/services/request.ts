@@ -1,10 +1,7 @@
-import { API_TRANSPORT, CLOUD_ENV_ID, CLOUD_FUNCTION_NAME, LOCAL_API_BASE_URL } from "../config";
+import { CLOUD_ENV_ID, CLOUD_FUNCTION_NAME } from "../config";
 
 export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
-export const API_BASE_URL = LOCAL_API_BASE_URL;
-const API_TIMEOUT_MS = 60000;
-const COOKIE_STORAGE_KEY = "pawtale_miniprogram_cookie";
 const CLOUD_AUDIO_ROOT = "memoir/audio";
 
 interface CloudApiResponse<T> {
@@ -22,61 +19,12 @@ export class ApiError extends Error {
   }
 }
 
-function cookiePairs(lines: string[]): string {
-  return lines
-    .map((line) => line.split(";")[0]?.trim())
-    .filter((line): line is string => Boolean(line))
-    .join("; ");
-}
-
-function extractCookies(result: WechatMiniprogram.RequestSuccessCallbackResult | WechatMiniprogram.UploadFileSuccessCallbackResult): string {
-  if (result.cookies?.length) {
-    return cookiePairs(result.cookies);
-  }
-  const raw = result.header["Set-Cookie"] || result.header["set-cookie"];
-  if (Array.isArray(raw)) {
-    return cookiePairs(raw);
-  }
-  return raw ? cookiePairs([raw]) : "";
-}
-
 function apiMessage(data: unknown): string {
   if (data && typeof data === "object" && "detail" in data) {
     const detail = (data as { detail?: unknown }).detail;
     return typeof detail === "string" ? detail : "请求失败";
   }
   return "请求失败";
-}
-
-function requestHeaders(contentType?: string): Record<string, string> {
-  const cookie = wx.getStorageSync<string>(COOKIE_STORAGE_KEY);
-  const headers: Record<string, string> = {};
-  if (contentType) {
-    headers["Content-Type"] = contentType;
-  }
-  if (cookie) {
-    headers.Cookie = cookie;
-  }
-  return headers;
-}
-
-function persistCookies(result: WechatMiniprogram.RequestSuccessCallbackResult | WechatMiniprogram.UploadFileSuccessCallbackResult): void {
-  const responseCookie = extractCookies(result);
-  if (responseCookie) {
-    wx.setStorageSync(COOKIE_STORAGE_KEY, responseCookie);
-  }
-}
-
-function parseJson(data: string): unknown {
-  try {
-    return JSON.parse(data);
-  } catch {
-    return data;
-  }
-}
-
-function cloudApiMessage(data: unknown): string {
-  return apiMessage(data);
 }
 
 function fileExtension(filePath: string): string {
@@ -127,47 +75,14 @@ function localFileSize(filePath: string): Promise<number> {
   });
 }
 
-export function clearSessionCookie(): void {
-  wx.removeStorageSync(COOKIE_STORAGE_KEY);
-}
-
 export function request<T>(
   path: string,
   options: {
     method?: HttpMethod;
     data?: unknown;
-    header?: Record<string, string>;
   } = {},
 ): Promise<T> {
-  if (API_TRANSPORT === "cloudFunction") {
-    return cloudFunctionRequest<T>(path, options);
-  }
-
-  const headers: Record<string, string> = {
-    ...requestHeaders("application/json"),
-    ...(options.header || {}),
-  };
-
-  return new Promise<T>((resolve, reject) => {
-    wx.request<T>({
-      url: `${API_BASE_URL}${path}`,
-      method: options.method || "GET",
-      data: options.data,
-      header: headers,
-      timeout: API_TIMEOUT_MS,
-      success: (result) => {
-        persistCookies(result);
-        if (result.statusCode >= 200 && result.statusCode < 300) {
-          resolve(result.data);
-          return;
-        }
-        reject(new ApiError(result.statusCode, apiMessage(result.data), result.data));
-      },
-      fail: (error) => {
-        reject(new ApiError(0, error.errMsg || "网络请求失败", error));
-      },
-    });
-  });
+  return cloudFunctionRequest<T>(path, options);
 }
 
 async function cloudFunctionRequest<T>(
@@ -186,14 +101,14 @@ async function cloudFunctionRequest<T>(
       data: {
         path,
         method: options.method || "GET",
-        data: options.data || {},
+        data: options.data ?? {},
       },
     });
     const response = result.result;
     if (response.statusCode >= 200 && response.statusCode < 300) {
       return response.data;
     }
-    throw new ApiError(response.statusCode, cloudApiMessage(response.data), response.data);
+    throw new ApiError(response.statusCode, apiMessage(response.data), response.data);
   } catch (error) {
     if (error instanceof ApiError) {
       throw error;
@@ -207,36 +122,10 @@ export function uploadFile<T>(
   path: string,
   options: {
     filePath: string;
-    name: string;
     formData?: Record<string, string>;
   },
 ): Promise<T> {
-  if (API_TRANSPORT === "cloudFunction") {
-    return uploadCloudAudioFile<T>(path, options);
-  }
-
-  return new Promise<T>((resolve, reject) => {
-    wx.uploadFile({
-      url: `${API_BASE_URL}${path}`,
-      filePath: options.filePath,
-      name: options.name,
-      formData: options.formData,
-      header: requestHeaders(),
-      timeout: API_TIMEOUT_MS,
-      success: (result) => {
-        persistCookies(result);
-        const data = parseJson(result.data);
-        if (result.statusCode >= 200 && result.statusCode < 300) {
-          resolve(data as T);
-          return;
-        }
-        reject(new ApiError(result.statusCode, apiMessage(data), data));
-      },
-      fail: (error) => {
-        reject(new ApiError(0, error.errMsg || "文件上传失败", error));
-      },
-    });
-  });
+  return uploadCloudAudioFile<T>(path, options);
 }
 
 async function uploadCloudAudioFile<T>(

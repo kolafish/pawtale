@@ -95,8 +95,7 @@ cd frontend && npm run lint
 cd frontend && npm run build
 
 # 小程序检查
-cd miniprogram && npm install
-cd miniprogram && npm run typecheck
+./scripts/test-miniprogram.sh
 
 # 后端测试
 cd backend && venv/bin/python -m pytest -q

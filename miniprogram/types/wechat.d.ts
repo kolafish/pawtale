@@ -129,10 +129,27 @@ declare namespace WechatMiniprogram {
     complete?(result: GeneralCallbackResult): void;
   }
 
+  interface CloudGetTempFileURLResult extends GeneralCallbackResult {
+    fileList: Array<{
+      fileID?: string;
+      tempFileURL?: string;
+      status?: number;
+      errMsg?: string;
+    }>;
+  }
+
+  interface CloudGetTempFileURLOption {
+    fileList: string[];
+    success?(result: CloudGetTempFileURLResult): void;
+    fail?(result: GeneralCallbackResult): void;
+    complete?(result: GeneralCallbackResult): void;
+  }
+
   interface Cloud {
     init(option?: CloudInitOption): void;
     callFunction<T = unknown>(option: CloudCallFunctionOption<T>): Promise<CloudCallFunctionResult<T>>;
     uploadFile(option: CloudUploadFileOption): Promise<CloudUploadFileResult>;
+    getTempFileURL(option: CloudGetTempFileURLOption): void;
   }
 
   interface RecorderManagerStartOption {
@@ -158,8 +175,24 @@ declare namespace WechatMiniprogram {
     onError(callback: (result: GeneralCallbackResult) => void): void;
   }
 
+  interface InnerAudioContext {
+    src: string;
+    play(): void;
+    stop(): void;
+    destroy(): void;
+    onEnded(callback: () => void): void;
+    onError(callback: (error: GeneralCallbackResult) => void): void;
+  }
+
   interface NavigateOption {
     url: string;
+  }
+
+  interface NavigateBackOption {
+    delta?: number;
+    success?(result: GeneralCallbackResult): void;
+    fail?(result: GeneralCallbackResult): void;
+    complete?(result: GeneralCallbackResult): void;
   }
 
   interface ToastOption {
@@ -173,6 +206,19 @@ declare namespace WechatMiniprogram {
     mask?: boolean;
   }
 
+  interface ModalOption {
+    title?: string;
+    content?: string;
+    confirmText?: string;
+    confirmColor?: string;
+    cancelText?: string;
+    cancelColor?: string;
+    showCancel?: boolean;
+    success?(result: { confirm: boolean; cancel: boolean; errMsg?: string }): void;
+    fail?(result: GeneralCallbackResult): void;
+    complete?(result: GeneralCallbackResult): void;
+  }
+
   interface Wx {
     cloud: Cloud;
     request<T = unknown>(option: RequestOption<T>): void;
@@ -181,9 +227,12 @@ declare namespace WechatMiniprogram {
     getUserProfile(option: GetUserProfileOption): void;
     getFileInfo(option: GetFileInfoOption): void;
     getRecorderManager(): RecorderManager;
+    createInnerAudioContext(): InnerAudioContext;
     navigateTo(option: NavigateOption): void;
     redirectTo(option: NavigateOption): void;
     reLaunch(option: NavigateOption): void;
+    navigateBack(option?: NavigateBackOption): void;
+    showModal(option: ModalOption): void;
     showToast(option: ToastOption): void;
     showLoading(option: LoadingOption): void;
     hideLoading(): void;

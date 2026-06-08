@@ -2,10 +2,15 @@ import type { MemoirStoryDetail } from "../../domain/memoir";
 import {
   createTextAnswer,
   getMemoirStoryDetail,
-  transcribeMemoirAudioFile,
   updateTextAnswer,
-  uploadMemoirAudioFile,
 } from "../../services/memoir";
+import {
+  clearMemoirAudioRecordingSession,
+  durationText,
+  type MemoirAudioRecorderSession,
+  startMemoirAudioRecording,
+  stopMemoirAudioRecording,
+} from "../../services/memoir-audio-recorder";
 import {
   markMemoirDashboardSnapshotStale,
   markMemoirStoriesSnapshotStale,
@@ -53,6 +58,7 @@ interface QaDetailData {
 }
 
 interface QaDetailMethods {
+  audioRecordingSession?: MemoirAudioRecorderSession;
   onLoad(query?: Record<string, string | undefined>): Promise<void>;
   onHide(): void;
   onUnload(): void;
@@ -72,58 +78,13 @@ interface QaDetailMethods {
   backQa(): void;
 }
 
-interface AudioContextLike {
-  src: string;
-  play(): void;
-  stop(): void;
-  destroy(): void;
-  onEnded(callback: () => void): void;
-  onError(callback: (error: { errMsg?: string }) => void): void;
-}
-
-interface CloudWithTempFileUrl {
-  getTempFileURL(options: {
-    fileList: string[];
-    success(result: { fileList: Array<{ tempFileURL?: string }> }): void;
-    fail(error: { errMsg?: string }): void;
-  }): void;
-}
-
-interface WxWithAudioContext {
-  createInnerAudioContext(): AudioContextLike;
-}
-
-interface WxWithNavigation {
-  navigateBack(options: {
-    delta: number;
-    fail(): void;
-  }): void;
-}
-
-const recorderManager = wx.getRecorderManager();
-const MAX_RECORDING_MS = 60000;
-let recorderBound = false;
-let recordingStartedAt = 0;
 type QaDetailPageInstance = {
   data: QaDetailData;
   setData(data: Partial<QaDetailData>): void;
   persistInputDraft(): void;
+  audioRecordingSession?: MemoirAudioRecorderSession;
 };
-let activePage: QaDetailPageInstance | null = null;
-let audioContext: AudioContextLike | null = null;
-
-function durationSeconds(durationMs: number): number {
-  return Math.max(0, Math.round(durationMs / 1000));
-}
-
-function durationText(seconds?: number | null): string {
-  if (typeof seconds !== "number" || seconds <= 0) {
-    return "";
-  }
-  const minutes = Math.floor(seconds / 60);
-  const rest = Math.round(seconds % 60);
-  return `${minutes}:${rest < 10 ? "0" : ""}${rest}`;
-}
+let audioContext: WechatMiniprogram.InnerAudioContext | null = null;
 
 function audioLabel(hasAudio: boolean, seconds?: number | null): string {
   if (!hasAudio) {
@@ -153,7 +114,7 @@ function inputDraftFromData(data: QaDetailData): Parameters<typeof writeMemoirQa
 
 function getTempFileUrl(fileId: string): Promise<string> {
   return new Promise((resolve, reject) => {
-    (wx.cloud as unknown as CloudWithTempFileUrl).getTempFileURL({
+    wx.cloud.getTempFileURL({
       fileList: [fileId],
       success: (result) => {
         const file = result.fileList[0];
@@ -170,11 +131,11 @@ function getTempFileUrl(fileId: string): Promise<string> {
   });
 }
 
-function ensureAudioContext(page: { setData(data: Partial<QaDetailData>): void }): AudioContextLike {
+function ensureAudioContext(page: { setData(data: Partial<QaDetailData>): void }): WechatMiniprogram.InnerAudioContext {
   if (audioContext) {
     return audioContext;
   }
-  audioContext = (wx as unknown as WxWithAudioContext).createInnerAudioContext();
+  audioContext = wx.createInnerAudioContext();
   audioContext.onEnded(() => {
     page.setData({ playing: false });
   });
@@ -184,68 +145,59 @@ function ensureAudioContext(page: { setData(data: Partial<QaDetailData>): void }
   return audioContext;
 }
 
-function bindRecorderEvents(): void {
-  if (recorderBound) {
-    return;
-  }
-  recorderManager.onStart(() => {
-    recordingStartedAt = Date.now();
-    activePage?.setData({ recording: true, error: "" });
-  });
-  recorderManager.onStop(async (result) => {
-    const page = activePage;
-    if (!page) {
-      return;
-    }
-    page.setData({ recording: false });
-    if (!result.tempFilePath) {
+function createQaDetailRecorderSession(page: QaDetailPageInstance): MemoirAudioRecorderSession {
+  return {
+    onStart() {
+      page.setData({ recording: true, error: "" });
+    },
+    onStop() {
+      page.setData({ recording: false });
+    },
+    onMissingFile() {
       page.setData({ error: "录音保存失败" });
-      return;
-    }
-
-    const seconds = durationSeconds(result.duration || Date.now() - recordingStartedAt);
-    page.setData({ uploadingAudio: true, error: "", newAudioSummary: "正在保存录音" });
-    let savedDurationText = "";
-    try {
-      const audioFile = await uploadMemoirAudioFile(result.tempFilePath, seconds, result.fileSize);
-      const savedSeconds = audioFile.duration_seconds ?? seconds;
-      savedDurationText = durationText(savedSeconds);
+    },
+    onUploadStart() {
+      page.setData({ uploadingAudio: true, error: "", newAudioSummary: "正在保存录音" });
+    },
+    onUploaded(result) {
       page.setData({
-        newAudioFileId: audioFile.id,
-        newAudioDurationSeconds: savedSeconds,
+        newAudioFileId: result.audioFile.id,
+        newAudioDurationSeconds: result.durationSeconds,
         uploadingAudio: false,
         transcribingAudio: true,
         newAudioSummary: "正在转写",
         inputDraftDirty: true,
       });
       page.persistInputDraft();
-      const transcription = await transcribeMemoirAudioFile(audioFile.id);
+    },
+    onTranscribed(result) {
       page.setData({
-        answerText: transcription.text,
-        newAudioSummary: `已转写 ${savedDurationText}`,
+        answerText: result.transcription.text,
+        newAudioSummary: `已转写 ${result.durationText}`,
         inputDraftDirty: true,
       });
       page.persistInputDraft();
-    } catch (error) {
+    },
+    onProcessingError(message, uploaded) {
       page.setData({
-        error: error instanceof Error ? error.message : "录音处理失败",
-        newAudioSummary: savedDurationText ? `已保存 ${savedDurationText}` : "",
+        error: message,
+        newAudioSummary: uploaded?.durationText ? `已保存 ${uploaded.durationText}` : "",
         inputDraftDirty: true,
       });
       page.persistInputDraft();
-    } finally {
+    },
+    onProcessingDone() {
       page.setData({ uploadingAudio: false, transcribingAudio: false });
-    }
-  });
-  recorderManager.onError((error) => {
-    activePage?.setData({
-      recording: false,
-      uploadingAudio: false,
-      transcribingAudio: false,
-      error: error.errMsg || "录音失败",
-    });
-  });
-  recorderBound = true;
+    },
+    onRecorderError(message) {
+      page.setData({
+        recording: false,
+        uploadingAudio: false,
+        transcribingAudio: false,
+        error: message,
+      });
+    },
+  };
 }
 
 Page<QaDetailData, QaDetailMethods>({
@@ -275,8 +227,6 @@ Page<QaDetailData, QaDetailMethods>({
   },
 
   async onLoad(query) {
-    activePage = this;
-    bindRecorderEvents();
     const answerId = query?.answerId || "";
     this.setData({ answerId });
     const snapshot = await this.hydrateFromCache();
@@ -291,11 +241,12 @@ Page<QaDetailData, QaDetailMethods>({
 
   onUnload() {
     this.persistInputDraft();
-    if (activePage === this) {
-      activePage = null;
+    if (this.audioRecordingSession) {
+      clearMemoirAudioRecordingSession(this.audioRecordingSession);
+      this.audioRecordingSession = undefined;
     }
     if (this.data.recording) {
-      recorderManager.stop();
+      stopMemoirAudioRecording();
     }
     if (audioContext) {
       audioContext.stop();
@@ -473,20 +424,15 @@ Page<QaDetailData, QaDetailMethods>({
       inputDraftDirty: true,
     });
     this.persistInputDraft();
-    recorderManager.start({
-      duration: MAX_RECORDING_MS,
-      sampleRate: 16000,
-      numberOfChannels: 1,
-      encodeBitRate: 48000,
-      format: "mp3",
-    });
+    this.audioRecordingSession = createQaDetailRecorderSession(this);
+    startMemoirAudioRecording(this.audioRecordingSession);
   },
 
   stopRecording() {
     if (!this.data.recording) {
       return;
     }
-    recorderManager.stop();
+    stopMemoirAudioRecording();
   },
 
   clearRecordedAudio() {
@@ -526,7 +472,7 @@ Page<QaDetailData, QaDetailMethods>({
   },
 
   backQa() {
-    (wx as unknown as WxWithNavigation).navigateBack({
+    wx.navigateBack({
       delta: 1,
       fail: () => wx.redirectTo({ url: "/pages/qa/index" }),
     });

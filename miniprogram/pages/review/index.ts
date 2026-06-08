@@ -283,7 +283,7 @@ Page<ReviewData, {
         candidates,
         outputs,
         coverage,
-      } = await loadMemoirDashboard({ includeMemory: true });
+      } = await loadMemoirDashboard();
       this.applyReviewData({
         people,
         events,

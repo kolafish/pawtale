@@ -248,7 +248,7 @@ Page<HomeData, {
         outputs,
         memoryStats,
         sessionSummary,
-      } = await loadMemoirDashboard({ includeProject: true, includeMemory: true });
+      } = await loadMemoirDashboard();
       this.setData({
         projectTitle: project?.title || "",
       });

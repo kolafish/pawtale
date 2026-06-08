@@ -57,17 +57,6 @@ interface QaMethods {
   openProfile(): void;
 }
 
-interface WxWithModal {
-  showModal(options: {
-    title: string;
-    content: string;
-    confirmText: string;
-    confirmColor: string;
-    success(result: { confirm: boolean }): void;
-    fail(): void;
-  }): void;
-}
-
 function formatDate(value: string): string {
   if (!value) {
     return "";
@@ -221,7 +210,7 @@ Page<QaData, QaMethods>({
       return;
     }
     const confirmed = await new Promise<boolean>((resolve) => {
-      (wx as unknown as WxWithModal).showModal({
+      wx.showModal({
         title: "删除问答",
         content: `确定删除选中的 ${selected.length} 条问答吗？删除后问题会回到待回答。`,
         confirmText: "删除",
