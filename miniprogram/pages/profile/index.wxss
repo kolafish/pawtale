@@ -24,6 +24,7 @@
   justify-content: center;
   flex: 0 0 136rpx;
   overflow: hidden;
+  position: relative;
 }
 
 .avatar-mark::after {
@@ -38,6 +39,22 @@
 .avatar-photo {
   width: 136rpx;
   height: 136rpx;
+}
+
+.avatar-hint {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 34rpx;
+  background: rgba(18, 133, 119, 0.88);
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20rpx;
+  font-weight: 800;
+  line-height: 1;
 }
 
 .profile-copy {
@@ -91,6 +108,11 @@
 
 .profile-save-action::after {
   border: 0;
+}
+
+.profile-save-action[disabled] {
+  background: #d9d2ca;
+  color: #7d736d;
 }
 
 .error {
