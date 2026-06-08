@@ -1,15 +1,30 @@
 <view class="profile-page">
   <view class="profile-head">
-    <view class="avatar-mark">
+    <button class="avatar-mark" open-type="chooseAvatar" bindchooseavatar="chooseAvatar">
       <image
-        class="avatar-logo {{avatarUrl ? 'avatar-photo' : ''}}"
-        src="{{avatarUrl || '/assets/memoir-gramophone.png'}}"
+        class="avatar-logo {{avatarDraftUrl || avatarUrl ? 'avatar-photo' : ''}}"
+        src="{{avatarDraftUrl || avatarUrl || '/assets/memoir-gramophone.png'}}"
         mode="aspectFill"
       />
-    </view>
+    </button>
     <view class="profile-copy">
-      <text class="profile-name">{{userName}}</text>
+      <input
+        class="profile-name-input"
+        type="nickname"
+        value="{{profileNameDraft}}"
+        placeholder="填写微信昵称"
+        maxlength="24"
+        bindinput="onNicknameInput"
+      />
       <text class="profile-note">{{activeProjectTitle || "微信用户的回忆录"}}</text>
+      <button
+        class="profile-save-action"
+        bindtap="saveWechatProfile"
+        loading="{{syncingProfile}}"
+        disabled="{{syncingProfile || loadingIdentity}}"
+      >
+        {{syncingProfile ? "保存中" : "保存资料"}}
+      </button>
     </view>
   </view>
 
@@ -49,33 +64,6 @@
       <text>问答记录</text>
       <text class="chevron">›</text>
     </view>
-  </view>
-
-  <view class="settings-panel">
-    <text class="section-title">微信资料</text>
-    <view class="profile-edit-row">
-      <button class="avatar-picker" open-type="chooseAvatar" bindchooseavatar="chooseAvatar">
-        <image
-          class="avatar-picker-image"
-          src="{{avatarDraftUrl || avatarUrl || '/assets/memoir-gramophone.png'}}"
-          mode="aspectFill"
-        />
-      </button>
-      <view class="profile-edit-main">
-        <input
-          class="nickname-input"
-          type="nickname"
-          value="{{profileNameDraft}}"
-          placeholder="填写微信昵称"
-          maxlength="24"
-          bindinput="onNicknameInput"
-        />
-        <text class="profile-edit-note">头像和昵称会用于默认回忆录名称</text>
-      </view>
-    </view>
-    <button class="profile-action" bindtap="saveWechatProfile" loading="{{syncingProfile}}">
-      {{syncingProfile ? "保存中" : "保存微信资料"}}
-    </button>
   </view>
 
   <view class="bottom-nav">
