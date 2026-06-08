@@ -42,7 +42,6 @@ interface HomeData {
   questionSwipeReady: boolean;
   switchingQuestion: boolean;
   completedCount: number;
-  pendingCount: number;
   weeklyStoryCount: number;
   pendingReviewCount: number;
   confirmedStoryCount: number;
@@ -165,7 +164,6 @@ Page<HomeData, {
     questionSwipeReady: false,
     switchingQuestion: false,
     completedCount: 0,
-    pendingCount: 0,
     weeklyStoryCount: 0,
     pendingReviewCount: 0,
     confirmedStoryCount: 0,
@@ -226,7 +224,6 @@ Page<HomeData, {
       questionCardLeaving: false,
       questionSwipeReady: false,
       completedCount: answeredQuestionCount(interview),
-      pendingCount: interview.pending_question_count,
       weeklyStoryCount: memoryStats?.output_count ?? summary.weekly_story_count,
       pendingReviewCount,
       confirmedStoryCount: memoryStats?.confirmed_memory_count ?? summary.confirmed_story_count,
