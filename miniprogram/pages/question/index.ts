@@ -21,6 +21,10 @@ interface InputEvent {
   };
 }
 
+interface QuestionPageOptions {
+  questionId?: string;
+}
+
 interface QuestionData {
   loading: boolean;
   submitting: boolean;
@@ -138,10 +142,10 @@ function bindRecorderEvents(): void {
 }
 
 Page<QuestionData, {
-  onLoad(): Promise<void>;
+  onLoad(options?: QuestionPageOptions): Promise<void>;
   onHide(): void;
   onUnload(): void;
-  loadQuestion(): Promise<void>;
+  loadQuestion(preferredQuestionId?: string): Promise<void>;
   persistInputDraft(): void;
   onAnswerInput(event: InputEvent): void;
   startRecording(): void;
@@ -167,10 +171,10 @@ Page<QuestionData, {
     isCompleted: false,
   },
 
-  async onLoad() {
+  async onLoad(options = {}) {
     activePage = this;
     bindRecorderEvents();
-    await this.loadQuestion();
+    await this.loadQuestion(options.questionId);
   },
 
   onHide() {
@@ -187,7 +191,7 @@ Page<QuestionData, {
     }
   },
 
-  async loadQuestion() {
+  async loadQuestion(preferredQuestionId = "") {
     this.setData({
       loading: true,
       error: "",
@@ -198,8 +202,11 @@ Page<QuestionData, {
     });
     try {
       const interview = await getCurrentSession();
-      const nextQuestion = await getNextQuestion();
-      const current = nextQuestion || interview.current_question;
+      const preferredQuestion = preferredQuestionId
+        ? interview.questions.find((item) => item.id === preferredQuestionId && item.status === "pending")
+        : undefined;
+      const nextQuestion = preferredQuestion ? null : await getNextQuestion();
+      const current = preferredQuestion || nextQuestion || interview.current_question;
       const questions = current && !interview.questions.some((item) => item.id === current.id)
         ? [...interview.questions, current]
         : interview.questions;

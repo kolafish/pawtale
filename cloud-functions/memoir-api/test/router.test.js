@@ -309,6 +309,16 @@ test("replaces stale unanswered template questions in an existing session", asyn
     status: "pending",
     created_at: "2026-01-01T00:00:00.000Z",
   });
+  await store.insert(COLLECTIONS.questions, {
+    openid: "openid_a",
+    project_id: project.data.id,
+    session_id: session.id,
+    prompt: DEFAULT_MEMOIR_QUESTIONS[1],
+    source: "template",
+    sort_order: 1,
+    status: "skipped",
+    created_at: "2026-01-01T00:00:00.000Z",
+  });
   await store.updateById(COLLECTIONS.sessions, session.id, {
     current_question_id: stale.id,
   });
@@ -326,6 +336,10 @@ test("replaces stale unanswered template questions in an existing session", asyn
   assert.deepEqual(
     response.data.questions.map((question) => question.prompt),
     DEFAULT_MEMOIR_QUESTIONS,
+  );
+  assert.deepEqual(
+    response.data.questions.map((question) => question.status),
+    DEFAULT_MEMOIR_QUESTIONS.map(() => "pending"),
   );
 });
 

@@ -8,15 +8,12 @@ import type {
   MemoirSummary,
 } from "../../domain/memoir";
 import { loadMemoirDashboard } from "../../services/memoir-dashboard";
-import { skipQuestion } from "../../services/memoir";
 import {
   answeredQuestionCount,
-  markMemoirDataSnapshotsStale,
   type MemoirDashboardSnapshot,
   readMemoirDashboardSnapshot,
   shouldRefreshMemoirDashboardSnapshot,
 } from "../../stores/memoir-cache";
-import { clearMemoirQuestionInputDraft } from "../../stores/memoir-input-drafts";
 import { writeMemoirStore } from "../../stores/session";
 
 interface TouchPoint {
@@ -43,7 +40,7 @@ interface HomeData {
   questionCardDragging: boolean;
   questionCardLeaving: boolean;
   questionSwipeReady: boolean;
-  skippingQuestion: boolean;
+  switchingQuestion: boolean;
   completedCount: number;
   pendingCount: number;
   weeklyStoryCount: number;
@@ -60,24 +57,33 @@ const QUESTION_SWIPE_MAX_TRANSLATE_PX = 160;
 const QUESTION_SWIPE_EXIT_TRANSLATE_PX = 420;
 const QUESTION_SWIPE_MAX_ROTATE_DEG = 8;
 const QUESTION_VERTICAL_CANCEL_PX = 18;
-const QUESTION_SWIPE_REVEAL_DELAY_MS = 180;
+const QUESTION_SWIPE_SWITCH_DELAY_MS = 170;
 
 let questionSwipeStartX = 0;
 let questionSwipeStartY = 0;
 let questionSwipeDeltaX = 0;
 let questionSwipeTracking = false;
-let questionSwipeRevealTimer: ReturnType<typeof setTimeout> | null = null;
+let questionSwipeSwitchTimer: ReturnType<typeof setTimeout> | null = null;
+let questionSwipeLastTranslateX = 0;
+let questionSwipeLastReady = false;
 
 function firstTouch(points?: TouchPoint[]): TouchPoint | null {
   return points && points.length ? points[0] : null;
 }
 
-function clearQuestionSwipeRevealTimer(): void {
-  if (questionSwipeRevealTimer === null) {
+function clearQuestionSwipeSwitchTimer(): void {
+  if (questionSwipeSwitchTimer === null) {
     return;
   }
-  clearTimeout(questionSwipeRevealTimer);
-  questionSwipeRevealTimer = null;
+  clearTimeout(questionSwipeSwitchTimer);
+  questionSwipeSwitchTimer = null;
+}
+
+function resetSwipeTracking(): void {
+  questionSwipeDeltaX = 0;
+  questionSwipeTracking = false;
+  questionSwipeLastTranslateX = 0;
+  questionSwipeLastReady = false;
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -134,7 +140,7 @@ Page<HomeData, {
   onQuestionTouchCancel(): void;
   showQuestionCard(question?: MemoirQuestion | null): void;
   resetQuestionSwipe(): void;
-  skipCurrentQuestionBySwipe(direction: number): Promise<void>;
+  switchQuestionBySwipe(direction: number): void;
   openPendingReview(): Promise<void>;
   openProjects(): void;
   openStories(): void;
@@ -157,7 +163,7 @@ Page<HomeData, {
     questionCardDragging: false,
     questionCardLeaving: false,
     questionSwipeReady: false,
-    skippingQuestion: false,
+    switchingQuestion: false,
     completedCount: 0,
     pendingCount: 0,
     weeklyStoryCount: 0,
@@ -202,7 +208,7 @@ Page<HomeData, {
   },
 
   applySnapshot(interview, summary, coverage = [], outputs = [], memoryStats, sessionSummary = null) {
-    clearQuestionSwipeRevealTimer();
+    clearQuestionSwipeSwitchTimer();
     const coveragePercent = memoryStats?.coverage_average ?? (coverage.length
       ? Math.round(coverage.reduce((total, item) => total + item.coverage_score, 0) / coverage.length)
       : summary.progress_percent);
@@ -258,17 +264,22 @@ Page<HomeData, {
   },
 
   async continueInterview() {
-    if (this.data.loading || this.data.skippingQuestion) {
+    if (this.data.loading || this.data.switchingQuestion) {
       return;
     }
     if (!this.data.projectTitle) {
       await this.loadHome();
     }
-    wx.navigateTo({ url: "/pages/question/index" });
+    const questionId = this.data.currentQuestionId;
+    wx.navigateTo({
+      url: questionId
+        ? `/pages/question/index?questionId=${encodeURIComponent(questionId)}`
+        : "/pages/question/index",
+    });
   },
 
   onQuestionTouchStart(event) {
-    if (!this.data.currentQuestionId || this.data.loading || this.data.refreshing || this.data.skippingQuestion) {
+    if (!this.data.currentQuestionId || this.data.loading || this.data.refreshing || this.data.switchingQuestion) {
       return;
     }
     const touch = firstTouch(event.touches);
@@ -277,12 +288,12 @@ Page<HomeData, {
     }
     questionSwipeStartX = touch.clientX;
     questionSwipeStartY = touch.clientY;
-    questionSwipeDeltaX = 0;
+    resetSwipeTracking();
     questionSwipeTracking = true;
   },
 
   onQuestionTouchMove(event) {
-    if (!questionSwipeTracking || !this.data.currentQuestionId || this.data.skippingQuestion) {
+    if (!questionSwipeTracking || !this.data.currentQuestionId || this.data.switchingQuestion) {
       return;
     }
     const touch = firstTouch(event.touches);
@@ -297,13 +308,19 @@ Page<HomeData, {
     }
 
     questionSwipeDeltaX = deltaX;
-    const translateX = cardTranslate(deltaX);
+    const translateX = Math.round(cardTranslate(deltaX));
+    const swipeReady = Math.abs(deltaX) >= QUESTION_SWIPE_THRESHOLD_PX;
+    if (Math.abs(translateX - questionSwipeLastTranslateX) < 2 && swipeReady === questionSwipeLastReady) {
+      return;
+    }
+    questionSwipeLastTranslateX = translateX;
+    questionSwipeLastReady = swipeReady;
     this.setData({
       questionCardTranslateX: translateX,
       questionCardRotate: cardRotate(translateX),
       questionCardDragging: true,
       questionCardLeaving: false,
-      questionSwipeReady: Math.abs(deltaX) >= QUESTION_SWIPE_THRESHOLD_PX,
+      questionSwipeReady: swipeReady,
     });
   },
 
@@ -317,9 +334,9 @@ Page<HomeData, {
       && this.data.currentQuestionId
       && !this.data.loading
       && !this.data.refreshing
-      && !this.data.skippingQuestion
+      && !this.data.switchingQuestion
     ) {
-      await this.skipCurrentQuestionBySwipe(questionSwipeDeltaX >= 0 ? 1 : -1);
+      this.switchQuestionBySwipe(questionSwipeDeltaX >= 0 ? 1 : -1);
       return;
     }
     this.resetQuestionSwipe();
@@ -330,9 +347,26 @@ Page<HomeData, {
   },
 
   showQuestionCard(question) {
-    clearQuestionSwipeRevealTimer();
-    questionSwipeDeltaX = 0;
-    questionSwipeTracking = false;
+    clearQuestionSwipeSwitchTimer();
+    resetSwipeTracking();
+    const snapshot = readMemoirDashboardSnapshot();
+    if (snapshot.interview) {
+      const questions = question && !snapshot.interview.questions.some((item) => item.id === question.id)
+        ? [...snapshot.interview.questions, question]
+        : snapshot.interview.questions;
+      writeMemoirStore({
+        interview: {
+          ...snapshot.interview,
+          session: {
+            ...snapshot.interview.session,
+            current_question_id: question?.id,
+            status: question ? "active" : snapshot.interview.session.status,
+          },
+          current_question: question || undefined,
+          questions,
+        },
+      });
+    }
     this.setData({
       currentQuestionId: question?.id || "",
       currentPrompt: promptForQuestion(question),
@@ -341,12 +375,12 @@ Page<HomeData, {
       questionCardDragging: false,
       questionCardLeaving: false,
       questionSwipeReady: false,
+      switchingQuestion: false,
     });
   },
 
   resetQuestionSwipe() {
-    questionSwipeDeltaX = 0;
-    questionSwipeTracking = false;
+    resetSwipeTracking();
     this.setData({
       questionCardTranslateX: 0,
       questionCardRotate: 0,
@@ -356,20 +390,23 @@ Page<HomeData, {
     });
   },
 
-  async skipCurrentQuestionBySwipe(direction) {
+  switchQuestionBySwipe(direction) {
     const questionId = this.data.currentQuestionId;
-    const previousPrompt = this.data.currentPrompt;
-    if (!questionId || this.data.skippingQuestion) {
+    if (!questionId || this.data.switchingQuestion) {
       this.resetQuestionSwipe();
       return;
     }
 
     const snapshotBeforeSkip = readMemoirDashboardSnapshot();
-    const optimisticQuestion = nextPendingQuestionAfter(snapshotBeforeSkip.interview, questionId);
+    const nextQuestion = nextPendingQuestionAfter(snapshotBeforeSkip.interview, questionId);
+    if (!nextQuestion) {
+      this.resetQuestionSwipe();
+      return;
+    }
 
-    clearQuestionSwipeRevealTimer();
+    clearQuestionSwipeSwitchTimer();
     this.setData({
-      skippingQuestion: true,
+      switchingQuestion: true,
       error: "",
       questionCardDragging: false,
       questionCardLeaving: true,
@@ -377,43 +414,12 @@ Page<HomeData, {
       questionCardRotate: direction > 0 ? 12 : -12,
       questionSwipeReady: false,
     });
-    questionSwipeRevealTimer = setTimeout(() => {
-      questionSwipeRevealTimer = null;
-      if (this.data.skippingQuestion && this.data.currentQuestionId === questionId) {
-        this.showQuestionCard(optimisticQuestion);
+    questionSwipeSwitchTimer = setTimeout(() => {
+      questionSwipeSwitchTimer = null;
+      if (this.data.switchingQuestion && this.data.currentQuestionId === questionId) {
+        this.showQuestionCard(nextQuestion);
       }
-    }, QUESTION_SWIPE_REVEAL_DELAY_MS);
-
-    try {
-      const interview = await skipQuestion(questionId);
-      markMemoirDataSnapshotsStale();
-      writeMemoirStore({ interview });
-      clearMemoirQuestionInputDraft(questionId);
-      const snapshot = readMemoirDashboardSnapshot();
-      if (snapshot.summary) {
-        this.applySnapshot(
-          interview,
-          snapshot.summary,
-          snapshot.coverage,
-          snapshot.outputs,
-          snapshot.memoryStats,
-          snapshot.sessionSummary,
-        );
-      } else {
-        this.showQuestionCard(interview.current_question);
-      }
-      void this.loadHome();
-    } catch (error) {
-      clearQuestionSwipeRevealTimer();
-      this.setData({
-        currentQuestionId: questionId,
-        currentPrompt: previousPrompt,
-        error: error instanceof Error ? error.message : "换题失败",
-      });
-      this.resetQuestionSwipe();
-    } finally {
-      this.setData({ skippingQuestion: false });
-    }
+    }, QUESTION_SWIPE_SWITCH_DELAY_MS);
   },
 
   async openPendingReview() {
