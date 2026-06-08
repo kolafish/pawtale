@@ -42,7 +42,6 @@
     </view>
     <view class="weekly-copy">
       <text class="weekly-title">已整理 <text class="accent">{{hasDashboardData ? weeklyStoryCount : "..."}}</text> 个片段</text>
-      <text class="weekly-subtitle">还有 {{hasDashboardData ? pendingCount : "..."}} 个问题可以继续回答</text>
     </view>
     <text class="chevron">›</text>
   </view>
