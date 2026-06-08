@@ -653,10 +653,15 @@ async function syncSessionTemplateQuestions(store, openid, session) {
     if (DEFAULT_MEMOIR_QUESTION_PROMPTS.has(question.prompt)) {
       existingDefaultPrompts.add(question.prompt);
       const sortOrder = DEFAULT_MEMOIR_QUESTIONS.indexOf(question.prompt);
+      const patch = {};
       if (question.sort_order !== sortOrder) {
-        await store.updateById(COLLECTIONS.questions, question.id, {
-          sort_order: sortOrder,
-        });
+        patch.sort_order = sortOrder;
+      }
+      if (question.status === MemoirQuestionStatus.SKIPPED) {
+        patch.status = MemoirQuestionStatus.PENDING;
+      }
+      if (Object.keys(patch).length) {
+        await store.updateById(COLLECTIONS.questions, question.id, patch);
       }
       continue;
     }
