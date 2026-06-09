@@ -14,11 +14,12 @@ export interface MemoirAudioRecorderTranscribed extends MemoirAudioRecorderUploa
 }
 
 export interface MemoirAudioRecorderSession {
+  transcribeAfterUpload?: boolean;
   onStart(): void;
   onStop(): void;
   onMissingFile(): void;
   onUploadStart(): void;
-  onUploaded(result: MemoirAudioRecorderUploaded): void;
+  onUploaded(result: MemoirAudioRecorderUploaded): void | Promise<void>;
   onTranscribed(result: MemoirAudioRecorderTranscribed): void;
   onProcessingError(message: string, uploaded?: MemoirAudioRecorderUploaded): void;
   onProcessingDone(): void;
@@ -92,7 +93,13 @@ function bindRecorderEvents(): void {
         durationText: durationText(savedSeconds),
       };
       uploaded = uploadedResult;
-      callActive(session, () => session.onUploaded(uploadedResult));
+      if (activeSession === session) {
+        await session.onUploaded(uploadedResult);
+      }
+
+      if (session.transcribeAfterUpload === false) {
+        return;
+      }
 
       const transcription = await transcribeMemoirAudioFile(audioFile.id);
       callActive(session, () => session.onTranscribed({

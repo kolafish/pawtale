@@ -641,6 +641,148 @@ test("rejects empty or cross-user answer sessions", async () => {
   assert.equal(hiddenAppend.statusCode, 404);
 });
 
+test("processes ASR jobs for answer session segments", async () => {
+  const store = new MemoryStore();
+  const state = await request({
+    method: "GET",
+    path: "/api/mobile/memoir/sessions/current",
+  }, { store });
+  const answerSession = await request({
+    method: "POST",
+    path: `/api/mobile/memoir/questions/${state.data.current_question.id}/answer-session`,
+  }, { store });
+  const audioFile = await request({
+    method: "POST",
+    path: "/api/mobile/memoir/audio-files",
+    data: {
+      file_id: "cloud://env/memoir/audio/openid_a/job.mp3",
+      cloud_path: "memoir/audio/openid_a/job.mp3",
+      mime_type: "audio/mpeg",
+      size_bytes: 256,
+      duration_seconds: 12,
+    },
+  }, { store });
+  const segment = await request({
+    method: "POST",
+    path: `/api/mobile/memoir/answer-sessions/${answerSession.data.id}/segments`,
+    data: {
+      audio_file_id: audioFile.data.id,
+      duration_seconds: 12,
+    },
+  }, { store });
+  assert.equal(segment.statusCode, 201);
+  assert.equal(segment.data.status, "uploaded");
+
+  const job = await request({
+    method: "POST",
+    path: `/api/mobile/memoir/answer-segments/${segment.data.id}/transcription-job`,
+  }, { store });
+  assert.equal(job.statusCode, 201);
+  assert.equal(job.data.status, "queued");
+  assert.equal(job.data.segment.id, segment.data.id);
+
+  const hiddenJob = await request({
+    method: "GET",
+    path: `/api/mobile/memoir/asr-jobs/${job.data.id}`,
+  }, { store, openid: "openid_b" });
+  assert.equal(hiddenJob.statusCode, 404);
+
+  const processed = await request({
+    method: "POST",
+    path: `/api/mobile/memoir/asr-jobs/${job.data.id}/process`,
+  }, {
+    store,
+    storage: {
+      downloadFile: async (fileId) => Buffer.from(fileId),
+    },
+    asr: {
+      transcribe: async () => ({
+        text: "这是异步转写出来的一段。",
+        usage: { audio_seconds: 12 },
+      }),
+    },
+  });
+
+  assert.equal(processed.statusCode, 200);
+  assert.equal(processed.data.status, "completed");
+  assert.equal(processed.data.transcript_text, "这是异步转写出来的一段。");
+  assert.deepEqual(processed.data.usage, { audio_seconds: 12 });
+  assert.equal(processed.data.segment.status, "transcribed");
+  assert.equal(processed.data.segment.transcript_edited, "这是异步转写出来的一段。");
+
+  const detail = await request({
+    method: "GET",
+    path: `/api/mobile/memoir/answer-sessions/${answerSession.data.id}`,
+  }, { store });
+  assert.equal(detail.data.transcript_edited, "这是异步转写出来的一段。");
+
+  await request({
+    method: "POST",
+    path: `/api/mobile/memoir/answer-sessions/${answerSession.data.id}/submit`,
+  }, { store });
+  const replay = await request({
+    method: "POST",
+    path: `/api/mobile/memoir/asr-jobs/${job.data.id}/process`,
+  }, { store });
+  assert.equal(replay.statusCode, 200);
+  assert.equal(replay.data.status, "completed");
+});
+
+test("marks ASR jobs and segments failed when transcription fails", async () => {
+  const store = new MemoryStore();
+  const state = await request({
+    method: "GET",
+    path: "/api/mobile/memoir/sessions/current",
+  }, { store });
+  const answerSession = await request({
+    method: "POST",
+    path: `/api/mobile/memoir/questions/${state.data.current_question.id}/answer-session`,
+  }, { store });
+  const audioFile = await request({
+    method: "POST",
+    path: "/api/mobile/memoir/audio-files",
+    data: {
+      file_id: "cloud://env/memoir/audio/openid_a/fail.mp3",
+      cloud_path: "memoir/audio/openid_a/fail.mp3",
+      mime_type: "audio/mpeg",
+      size_bytes: 256,
+      duration_seconds: 12,
+    },
+  }, { store });
+  const segment = await request({
+    method: "POST",
+    path: `/api/mobile/memoir/answer-sessions/${answerSession.data.id}/segments`,
+    data: {
+      audio_file_id: audioFile.data.id,
+    },
+  }, { store });
+  const job = await request({
+    method: "POST",
+    path: `/api/mobile/memoir/answer-segments/${segment.data.id}/transcription-job`,
+  }, { store });
+
+  const processed = await request({
+    method: "POST",
+    path: `/api/mobile/memoir/asr-jobs/${job.data.id}/process`,
+  }, {
+    store,
+    storage: {
+      downloadFile: async () => Buffer.from("audio"),
+    },
+    asr: {
+      transcribe: async () => {
+        throw new Error("ASR 服务超时");
+      },
+    },
+  });
+
+  assert.equal(processed.statusCode, 200);
+  assert.equal(processed.data.status, "failed");
+  assert.equal(processed.data.error_message, "ASR 服务超时");
+  assert.equal(processed.data.segment.status, "failed");
+  assert.equal(processed.data.segment.error_message, "ASR 服务超时");
+});
+
 test("rejects malformed answer request bodies", async () => {
   const response = await request({
     method: "POST",

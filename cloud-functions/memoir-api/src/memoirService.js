@@ -32,7 +32,15 @@ const MemoirAnswerSessionStatus = Object.freeze({
 const MemoirAnswerSegmentStatus = Object.freeze({
   DRAFT: "draft",
   UPLOADED: "uploaded",
+  TRANSCRIBING: "transcribing",
   TRANSCRIBED: "transcribed",
+  FAILED: "failed",
+});
+
+const MemoirAsrJobStatus = Object.freeze({
+  QUEUED: "queued",
+  RUNNING: "running",
+  COMPLETED: "completed",
   FAILED: "failed",
 });
 
@@ -803,6 +811,20 @@ async function loadAnswerSegment(store, openid, answerSegmentId, projectId = nul
     throw new ApiError(404, "回答分段不存在");
   }
   return segment;
+}
+
+async function loadAsrJob(store, openid, asrJobId, projectId = null) {
+  const job = await store.findOne(COLLECTIONS.asrJobs, {
+    openid,
+    _id: asrJobId,
+  });
+  if (!job) {
+    throw new ApiError(404, "转写任务不存在");
+  }
+  if (projectId && job.project_id !== projectId) {
+    throw new ApiError(404, "转写任务不存在");
+  }
+  return job;
 }
 
 async function loadDraft(store, openid, draftId, projectId = null) {
@@ -2379,6 +2401,144 @@ async function updateAnswerSegment(store, openid, answerSegmentId, data) {
   return updated;
 }
 
+function asrJobResponse(job, segment = null) {
+  const usage = parseJsonObject(job.transcript_usage_json);
+  return {
+    ...job,
+    usage: Object.keys(usage).length ? usage : null,
+    segment: segment || undefined,
+  };
+}
+
+function asrErrorMessage(error) {
+  return error instanceof Error ? error.message : "转写失败";
+}
+
+async function createSegmentTranscriptionJob(store, openid, answerSegmentId) {
+  const project = await getOrCreateProject(store, openid);
+  const segment = await loadAnswerSegment(store, openid, answerSegmentId, project.id);
+  const answerSession = await loadAnswerSession(store, openid, segment.answer_session_id, project.id);
+  ensureEditableAnswerSession(answerSession);
+  if (!segment.audio_file_id) {
+    throw new ApiError(400, "回答分段没有可转写的音频");
+  }
+
+  const jobs = await store.findMany(COLLECTIONS.asrJobs, {
+    openid,
+    answer_segment_id: segment.id,
+  }, {
+    orderBy: [{ field: "updated_at", direction: "desc" }],
+  });
+  const reusableJob = jobs.find((job) => (
+    job.project_id === project.id
+    && job.status !== MemoirAsrJobStatus.FAILED
+  ));
+  if (reusableJob) {
+    return asrJobResponse(reusableJob, segment);
+  }
+
+  const now = nowIso();
+  const job = await store.insert(COLLECTIONS.asrJobs, {
+    openid,
+    project_id: project.id,
+    answer_session_id: answerSession.id,
+    answer_segment_id: segment.id,
+    audio_file_id: segment.audio_file_id,
+    status: MemoirAsrJobStatus.QUEUED,
+    transcript_text: "",
+    transcript_usage_json: "",
+    error_message: "",
+    created_at: now,
+    updated_at: now,
+    started_at: null,
+    completed_at: null,
+  });
+  return asrJobResponse(job, segment);
+}
+
+async function getAsrJob(store, openid, asrJobId) {
+  const project = await getOrCreateProject(store, openid);
+  const job = await loadAsrJob(store, openid, asrJobId, project.id);
+  const segment = await loadAnswerSegment(store, openid, job.answer_segment_id, project.id);
+  return asrJobResponse(job, segment);
+}
+
+async function processAsrJob(store, openid, asrJobId, dependencies) {
+  const project = await getOrCreateProject(store, openid);
+  const job = await loadAsrJob(store, openid, asrJobId, project.id);
+  const segment = await loadAnswerSegment(store, openid, job.answer_segment_id, project.id);
+  if (job.status === MemoirAsrJobStatus.COMPLETED || job.status === MemoirAsrJobStatus.FAILED) {
+    return asrJobResponse(job, segment);
+  }
+  const answerSession = await loadAnswerSession(store, openid, segment.answer_session_id, project.id);
+  ensureEditableAnswerSession(answerSession);
+  if (!dependencies.storage?.downloadFile) {
+    throw new ApiError(500, "云存储未配置");
+  }
+  if (!dependencies.asr?.transcribe) {
+    throw new ApiError(500, "语音转写服务未配置");
+  }
+
+  const audioFile = await loadAudioFile(store, openid, job.audio_file_id || segment.audio_file_id, project.id);
+  const startedAt = nowIso();
+  await store.updateById(COLLECTIONS.asrJobs, job.id, {
+    status: MemoirAsrJobStatus.RUNNING,
+    error_message: "",
+    started_at: job.started_at || startedAt,
+    updated_at: startedAt,
+  });
+  await store.updateById(COLLECTIONS.answerSegments, segment.id, {
+    status: MemoirAnswerSegmentStatus.TRANSCRIBING,
+    error_message: "",
+    updated_at: startedAt,
+  });
+
+  try {
+    const audioBytes = await dependencies.storage.downloadFile(audioFile.file_id);
+    const result = await dependencies.asr.transcribe(audioBytes, audioFile);
+    const text = cleanAnswerText(result.text);
+    const completedAt = nowIso();
+    await store.updateById(COLLECTIONS.audioFiles, audioFile.id, {
+      transcript_text: text,
+      transcript_usage_json: serializeJsonField(result.usage),
+      transcribed_at: completedAt,
+    });
+    const updatedSegment = await store.updateById(COLLECTIONS.answerSegments, segment.id, {
+      transcript_raw: text,
+      transcript_edited: text,
+      status: MemoirAnswerSegmentStatus.TRANSCRIBED,
+      error_message: "",
+      updated_at: completedAt,
+    });
+    const segments = await listAnswerSegments(store, openid, answerSession.id, project.id);
+    await updateAnswerSessionRollup(store, answerSession, segments);
+    const completedJob = await store.updateById(COLLECTIONS.asrJobs, job.id, {
+      status: MemoirAsrJobStatus.COMPLETED,
+      transcript_text: text,
+      transcript_usage_json: serializeJsonField(result.usage),
+      error_message: "",
+      completed_at: completedAt,
+      updated_at: completedAt,
+    });
+    return asrJobResponse(completedJob, updatedSegment);
+  } catch (error) {
+    const failedAt = nowIso();
+    const message = asrErrorMessage(error);
+    const failedSegment = await store.updateById(COLLECTIONS.answerSegments, segment.id, {
+      status: MemoirAnswerSegmentStatus.FAILED,
+      error_message: message,
+      updated_at: failedAt,
+    });
+    const failedJob = await store.updateById(COLLECTIONS.asrJobs, job.id, {
+      status: MemoirAsrJobStatus.FAILED,
+      error_message: message,
+      completed_at: failedAt,
+      updated_at: failedAt,
+    });
+    return asrJobResponse(failedJob, failedSegment);
+  }
+}
+
 async function submitAnswerSession(store, openid, answerSessionId) {
   const project = await getOrCreateProject(store, openid);
   const answerSession = await loadAnswerSession(store, openid, answerSessionId, project.id);
@@ -2815,6 +2975,7 @@ function createMemoirService(store, context, dependencies = {}) {
     listStoryCards: async () => listStoryCards(store, openid),
     getStoryDetail: async (answerId) => getStoryDetail(store, openid, answerId),
     getAnswerSession: async (answerSessionId) => getAnswerSessionDetail(store, openid, answerSessionId),
+    getAsrJob: async (asrJobId) => getAsrJob(store, openid, asrJobId),
     getSessionSummary: async (sessionId) => getSessionSummary(store, openid, sessionId),
     processSessionMemory: async (sessionId) => processSessionMemory(store, openid, sessionId, dependencies),
     listPersonMemories: async () => listMemoryRows(store, openid, (await getOrCreateProject(store, openid)).id, MemoirMemoryType.PERSON),
@@ -2843,6 +3004,8 @@ function createMemoirService(store, context, dependencies = {}) {
     createAnswerSession: async (questionId) => createAnswerSession(store, openid, questionId),
     appendAnswerSegment: async (answerSessionId, data) => appendAnswerSegment(store, openid, answerSessionId, data),
     updateAnswerSegment: async (answerSegmentId, data) => updateAnswerSegment(store, openid, answerSegmentId, data),
+    createSegmentTranscriptionJob: async (answerSegmentId) => createSegmentTranscriptionJob(store, openid, answerSegmentId),
+    processAsrJob: async (asrJobId) => processAsrJob(store, openid, asrJobId, dependencies),
     submitAnswerSession: async (answerSessionId) => submitAnswerSession(store, openid, answerSessionId),
     createTextAnswer: async (data) => createTextAnswer(store, openid, data),
     updateAnswerText: async (answerId, data) => updateAnswerText(store, openid, answerId, data),
@@ -2860,6 +3023,7 @@ module.exports = {
   MemoirAnswerStatus,
   MemoirAnswerSegmentStatus,
   MemoirAnswerSessionStatus,
+  MemoirAsrJobStatus,
   MemoirDraftStatus,
   MemoirQuestionStatus,
   MemoirSessionStatus,

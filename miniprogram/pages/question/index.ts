@@ -6,8 +6,10 @@ import type {
 import {
   appendMemoirAnswerSegment,
   createMemoirAnswerSession,
+  createMemoirSegmentTranscriptionJob,
   getCurrentSession,
   getNextQuestion,
+  processMemoirAsrJob,
   skipQuestion,
   submitMemoirAnswerSession,
   updateMemoirAnswerSegment,
@@ -192,6 +194,20 @@ function sortSegments(segments: QuestionAnswerSegmentView[]): QuestionAnswerSegm
   return [...segments].sort((left, right) => left.sortOrder - right.sortOrder);
 }
 
+function upsertSegmentView(
+  segments: QuestionAnswerSegmentView[],
+  segment: MemoirAnswerSegment,
+): QuestionAnswerSegmentView[] {
+  const view = segmentViewFromRemote(segment);
+  const index = segments.findIndex((item) => item.answerSegmentId === segment.id);
+  if (index === -1) {
+    return sortSegments([...segments, view]);
+  }
+  const nextSegments = [...segments];
+  nextSegments[index] = view;
+  return sortSegments(nextSegments);
+}
+
 function inputDraftFromData(data: QuestionData): Parameters<typeof writeMemoirQuestionInputDraft>[0] | null {
   if (!data.question) {
     return null;
@@ -207,6 +223,7 @@ function inputDraftFromData(data: QuestionData): Parameters<typeof writeMemoirQu
 
 function createQuestionRecorderSession(page: QuestionPageInstance): MemoirAudioRecorderSession {
   return {
+    transcribeAfterUpload: false,
     onStart() {
       page.setData({ recording: true, error: "", audioSummary: "正在录音" });
     },
@@ -219,12 +236,8 @@ function createQuestionRecorderSession(page: QuestionPageInstance): MemoirAudioR
     onUploadStart() {
       page.setData({ uploadingAudio: true, error: "", audioSummary: "正在保存录音" });
     },
-    onUploaded(result) {
-      page.setData({
-        uploadingAudio: false,
-        transcribingAudio: true,
-        audioSummary: `已保存 ${result.durationText}，正在转写`,
-      });
+    async onUploaded(result) {
+      await page.appendRecordedSegment(result, "");
     },
     onTranscribed(result) {
       void page.appendRecordedSegment(result, result.transcription.text);
@@ -422,7 +435,8 @@ Page<QuestionData, {
     this.setData({ syncingSegment: true });
     try {
       const answerSessionId = await this.ensureAnswerSession();
-      const status: MemoirAnswerSegmentStatus = transcriptText.trim()
+      const hasTranscript = Boolean(transcriptText.trim());
+      const status: MemoirAnswerSegmentStatus = hasTranscript
         ? "transcribed"
         : errorMessage
           ? "failed"
@@ -430,17 +444,41 @@ Page<QuestionData, {
       const segment = await appendMemoirAnswerSegment(answerSessionId, {
         audio_file_id: uploaded.audioFile.id,
         duration_seconds: uploaded.durationSeconds,
-        transcript_text: transcriptText || undefined,
-        transcript_edited: transcriptText || undefined,
+        transcript_text: hasTranscript ? transcriptText : undefined,
+        transcript_edited: hasTranscript ? transcriptText : undefined,
         status,
         error_message: errorMessage || undefined,
       });
-      const nextSegments = sortSegments([...this.data.answerSegments, segmentViewFromRemote(segment)]);
+      const nextSegments = upsertSegmentView(this.data.answerSegments, segment);
       this.setData({
         answerSegments: nextSegments,
-        audioSummary: transcriptText.trim() ? `已添加一段 ${uploaded.durationText}` : "录音已保存，转写失败",
+        uploadingAudio: false,
+        transcribingAudio: !hasTranscript && !errorMessage,
+        audioSummary: hasTranscript ? `已添加一段 ${uploaded.durationText}` : `已保存 ${uploaded.durationText}，正在转写`,
       });
       this.persistAnswerSessionDraft();
+      if (hasTranscript || errorMessage) {
+        return;
+      }
+
+      const job = await createMemoirSegmentTranscriptionJob(segment.id);
+      if (job.segment) {
+        this.setData({
+          answerSegments: upsertSegmentView(this.data.answerSegments, {
+            ...job.segment,
+            status: job.segment.status === "uploaded" ? "transcribing" : job.segment.status,
+          }),
+        });
+      }
+      const processedJob = await processMemoirAsrJob(job.id);
+      if (processedJob.segment) {
+        this.setData({
+          answerSegments: upsertSegmentView(this.data.answerSegments, processedJob.segment),
+          audioSummary: processedJob.status === "completed" ? `已添加一段 ${uploaded.durationText}` : "录音已保存，转写失败",
+          error: processedJob.status === "failed" ? processedJob.error_message || "转写失败" : this.data.error,
+        });
+        this.persistAnswerSessionDraft();
+      }
     } catch (error) {
       this.setData({ error: error instanceof Error ? error.message : "录音分段保存失败" });
     } finally {

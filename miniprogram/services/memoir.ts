@@ -3,6 +3,7 @@ import type {
   MemoirAnswerSegment,
   MemoirAnswerSegmentStatus,
   MemoirAnswerSession,
+  MemoirAsrJob,
   MemoirAudioFile,
   MemoirAudioTranscription,
   MemoirCoverageItem,
@@ -229,6 +230,24 @@ export function updateMemoirAnswerSegment(
   return request<MemoirAnswerSegment>(`/api/mobile/memoir/answer-segments/${answerSegmentId}`, {
     method: "PATCH",
     data,
+  });
+}
+
+export function createMemoirSegmentTranscriptionJob(answerSegmentId: string): Promise<MemoirAsrJob> {
+  return request<MemoirAsrJob>(`/api/mobile/memoir/answer-segments/${answerSegmentId}/transcription-job`, {
+    method: "POST",
+    data: {},
+  });
+}
+
+export function getMemoirAsrJob(asrJobId: string): Promise<MemoirAsrJob> {
+  return request<MemoirAsrJob>(`/api/mobile/memoir/asr-jobs/${asrJobId}`);
+}
+
+export function processMemoirAsrJob(asrJobId: string): Promise<MemoirAsrJob> {
+  return request<MemoirAsrJob>(`/api/mobile/memoir/asr-jobs/${asrJobId}/process`, {
+    method: "POST",
+    data: {},
   });
 }
 
