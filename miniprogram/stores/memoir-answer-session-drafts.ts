@@ -29,6 +29,7 @@ export interface MemoirAnswerSessionDraftSegment {
   transcript_raw: string;
   transcript_edited: string;
   error_message?: string;
+  dirty?: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -154,6 +155,7 @@ function draftSegmentFromRemote(segment: MemoirAnswerSegment): MemoirAnswerSessi
     transcript_raw: segment.transcript_raw || "",
     transcript_edited: segment.transcript_edited || "",
     error_message: segment.error_message || "",
+    dirty: false,
     created_at: segment.created_at,
     updated_at: segment.updated_at,
   };
