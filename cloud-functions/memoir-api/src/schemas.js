@@ -48,6 +48,32 @@ function createTextAnswerRequest(data) {
   };
 }
 
+function createAnswerSegmentRequest(data) {
+  const body = objectData(data);
+  return {
+    audio_file_id: optionalString(body, "audio_file_id"),
+    duration_seconds: optionalNumber(body, "duration_seconds"),
+    sort_order: optionalNumber(body, "sort_order"),
+    status: optionalString(body, "status"),
+    transcript_raw: optionalString(body, "transcript_raw") || optionalString(body, "transcript_text"),
+    transcript_edited: optionalString(body, "transcript_edited"),
+    error_message: optionalString(body, "error_message"),
+  };
+}
+
+function updateAnswerSegmentRequest(data) {
+  const body = objectData(data);
+  return {
+    audio_file_id: optionalString(body, "audio_file_id"),
+    duration_seconds: optionalNumber(body, "duration_seconds"),
+    sort_order: optionalNumber(body, "sort_order"),
+    status: optionalString(body, "status"),
+    transcript_raw: optionalString(body, "transcript_raw") || optionalString(body, "transcript_text"),
+    transcript_edited: optionalString(body, "transcript_edited"),
+    error_message: optionalString(body, "error_message"),
+  };
+}
+
 function registerAudioFileRequest(data) {
   const body = objectData(data);
   return {
@@ -102,9 +128,11 @@ function updateProjectRequest(data) {
 }
 
 module.exports = {
+  createAnswerSegmentRequest,
   createProjectRequest,
   createTextAnswerRequest,
   registerAudioFileRequest,
+  updateAnswerSegmentRequest,
   updateAnswerTextRequest,
   updateDraftContentRequest,
   updateProjectRequest,
