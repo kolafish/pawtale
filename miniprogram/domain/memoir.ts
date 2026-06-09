@@ -386,6 +386,7 @@ export interface MemoirMemoryStats {
 export interface MemoirDashboardResponse {
   project: Project;
   interview: MemoirInterviewState;
+  active_answer_session?: MemoirAnswerSession | null;
   summary: MemoirSummary;
   session_summary?: MemoirSessionSummary | null;
   people: MemoirPersonMemory[];

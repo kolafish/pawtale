@@ -607,6 +607,37 @@ test("builds and submits a multi-segment answer session", async () => {
   assert.equal(appendAfterSubmit.statusCode, 409);
 });
 
+test("includes the active draft answer session in the dashboard", async () => {
+  const store = new MemoryStore();
+  const state = await request({
+    method: "GET",
+    path: "/api/mobile/memoir/sessions/current",
+  }, { store });
+  const questionId = state.data.current_question.id;
+  const answerSession = await request({
+    method: "POST",
+    path: `/api/mobile/memoir/questions/${questionId}/answer-session`,
+  }, { store });
+  await request({
+    method: "POST",
+    path: `/api/mobile/memoir/answer-sessions/${answerSession.data.id}/segments`,
+    data: {
+      transcript_text: "这段还没有提交。",
+    },
+  }, { store });
+
+  const dashboard = await request({
+    method: "GET",
+    path: "/api/mobile/memoir/dashboard",
+  }, { store });
+
+  assert.equal(dashboard.statusCode, 200);
+  assert.equal(dashboard.data.active_answer_session.id, answerSession.data.id);
+  assert.equal(dashboard.data.active_answer_session.question_id, questionId);
+  assert.equal(dashboard.data.active_answer_session.segment_count, 1);
+  assert.equal(dashboard.data.active_answer_session.transcript_edited, "这段还没有提交。");
+});
+
 test("rejects empty or cross-user answer sessions", async () => {
   const store = new MemoryStore();
   const state = await request({
