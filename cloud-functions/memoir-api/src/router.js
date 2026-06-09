@@ -8,9 +8,11 @@ const {
 } = require("./http");
 const { createMemoirService } = require("./memoirService");
 const {
+  createAnswerSegmentRequest,
   createProjectRequest,
   createTextAnswerRequest,
   registerAudioFileRequest,
+  updateAnswerSegmentRequest,
   updateAnswerTextRequest,
   updateDraftContentRequest,
   updateProjectRequest,
@@ -74,6 +76,10 @@ const routes = {
     route("/api/mobile/memoir/stories/:answerId", async (request) => jsonResponse(
       200,
       await memoirService(request).getStoryDetail(request.params.answerId),
+    )),
+    route("/api/mobile/memoir/answer-sessions/:answerSessionId", async (request) => jsonResponse(
+      200,
+      await memoirService(request).getAnswerSession(request.params.answerSessionId),
     )),
     route("/api/mobile/memoir/sessions/:sessionId/summary", async (request) => jsonResponse(
       200,
@@ -145,6 +151,21 @@ const routes = {
       200,
       await memoirService(request).skipQuestion(request.params.questionId),
     )),
+    route("/api/mobile/memoir/questions/:questionId/answer-session", async (request) => jsonResponse(
+      201,
+      await memoirService(request).createAnswerSession(request.params.questionId),
+    )),
+    route("/api/mobile/memoir/answer-sessions/:answerSessionId/segments", async (request) => jsonResponse(
+      201,
+      await memoirService(request).appendAnswerSegment(
+        request.params.answerSessionId,
+        createAnswerSegmentRequest(request.data),
+      ),
+    )),
+    route("/api/mobile/memoir/answer-sessions/:answerSessionId/submit", async (request) => jsonResponse(
+      200,
+      await memoirService(request).submitAnswerSession(request.params.answerSessionId),
+    )),
     route("/api/mobile/memoir/answers", async (request) => jsonResponse(
       201,
       await memoirService(request).createTextAnswer(createTextAnswerRequest(request.data)),
@@ -186,6 +207,13 @@ const routes = {
     route("/api/mobile/memoir/answers/:answerId", async (request) => jsonResponse(
       200,
       await memoirService(request).updateAnswerText(request.params.answerId, updateAnswerTextRequest(request.data)),
+    )),
+    route("/api/mobile/memoir/answer-segments/:answerSegmentId", async (request) => jsonResponse(
+      200,
+      await memoirService(request).updateAnswerSegment(
+        request.params.answerSegmentId,
+        updateAnswerSegmentRequest(request.data),
+      ),
     )),
     route("/api/mobile/memoir/drafts/:draftId", async (request) => jsonResponse(
       200,

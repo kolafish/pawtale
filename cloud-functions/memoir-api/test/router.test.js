@@ -503,6 +503,144 @@ test("answers a question with a linked audio file", async () => {
   assert.equal(detail.data.audio_file.duration_seconds, 7);
 });
 
+test("builds and submits a multi-segment answer session", async () => {
+  const store = new MemoryStore();
+  const state = await request({
+    method: "GET",
+    path: "/api/mobile/memoir/sessions/current",
+  }, { store });
+  const questionId = state.data.current_question.id;
+
+  const answerSession = await request({
+    method: "POST",
+    path: `/api/mobile/memoir/questions/${questionId}/answer-session`,
+  }, { store });
+
+  assert.equal(answerSession.statusCode, 201);
+  assert.equal(answerSession.data.status, "draft");
+  assert.equal(answerSession.data.question_id, questionId);
+  assert.equal(answerSession.data.segment_count, 0);
+
+  const reusedSession = await request({
+    method: "POST",
+    path: `/api/mobile/memoir/questions/${questionId}/answer-session`,
+  }, { store });
+  assert.equal(reusedSession.data.id, answerSession.data.id);
+
+  const firstSegment = await request({
+    method: "POST",
+    path: `/api/mobile/memoir/answer-sessions/${answerSession.data.id}/segments`,
+    data: {
+      transcript_text: "第一段，我想先从小时候说起。",
+      duration_seconds: 90,
+    },
+  }, { store });
+  assert.equal(firstSegment.statusCode, 201);
+  assert.equal(firstSegment.data.status, "transcribed");
+  assert.equal(firstSegment.data.sort_order, 0);
+
+  const secondSegment = await request({
+    method: "POST",
+    path: `/api/mobile/memoir/answer-sessions/${answerSession.data.id}/segments`,
+    data: {
+      transcript_text: "第二段，后来我去了外婆家。",
+      duration_seconds: 120,
+    },
+  }, { store });
+  assert.equal(secondSegment.data.sort_order, 1);
+
+  const editedSegment = await request({
+    method: "PATCH",
+    path: `/api/mobile/memoir/answer-segments/${secondSegment.data.id}`,
+    data: {
+      transcript_edited: "第二段，后来我常常去外婆家。",
+      status: "transcribed",
+    },
+  }, { store });
+  assert.equal(editedSegment.statusCode, 200);
+  assert.equal(editedSegment.data.transcript_edited, "第二段，后来我常常去外婆家。");
+
+  const detail = await request({
+    method: "GET",
+    path: `/api/mobile/memoir/answer-sessions/${answerSession.data.id}`,
+  }, { store });
+  assert.equal(detail.statusCode, 200);
+  assert.equal(detail.data.segment_count, 2);
+  assert.equal(detail.data.duration_seconds, 210);
+  assert.equal(
+    detail.data.transcript_edited,
+    "第一段，我想先从小时候说起。\n\n第二段，后来我常常去外婆家。",
+  );
+
+  const submitted = await request({
+    method: "POST",
+    path: `/api/mobile/memoir/answer-sessions/${answerSession.data.id}/submit`,
+  }, { store });
+  assert.equal(submitted.statusCode, 200);
+  assert.equal(submitted.data.status, "submitted");
+  assert.ok(submitted.data.answer_id);
+  assert.equal(submitted.data.segment_count, 2);
+
+  const answers = await store.findMany(COLLECTIONS.answers, { openid: "openid_a" });
+  assert.equal(answers.length, 1);
+  assert.equal(answers[0].answer_session_id, answerSession.data.id);
+  assert.equal(answers[0].duration_seconds, 210);
+  assert.equal(
+    answers[0].transcript_edited,
+    "第一段，我想先从小时候说起。\n\n第二段，后来我常常去外婆家。",
+  );
+
+  const stories = await request({
+    method: "GET",
+    path: "/api/mobile/memoir/stories",
+  }, { store });
+  assert.equal(stories.data.total, 1);
+  assert.equal(stories.data.stories[0].answer_id, answers[0].id);
+
+  const appendAfterSubmit = await request({
+    method: "POST",
+    path: `/api/mobile/memoir/answer-sessions/${answerSession.data.id}/segments`,
+    data: {
+      transcript_text: "提交后不允许继续追加。",
+    },
+  }, { store });
+  assert.equal(appendAfterSubmit.statusCode, 409);
+});
+
+test("rejects empty or cross-user answer sessions", async () => {
+  const store = new MemoryStore();
+  const state = await request({
+    method: "GET",
+    path: "/api/mobile/memoir/sessions/current",
+  }, { store });
+  const answerSession = await request({
+    method: "POST",
+    path: `/api/mobile/memoir/questions/${state.data.current_question.id}/answer-session`,
+  }, { store });
+
+  const emptySubmit = await request({
+    method: "POST",
+    path: `/api/mobile/memoir/answer-sessions/${answerSession.data.id}/submit`,
+  }, { store });
+  assert.equal(emptySubmit.statusCode, 400);
+  assert.equal(emptySubmit.data.detail, "回答会话没有可提交的文字");
+
+  const hiddenSession = await request({
+    method: "GET",
+    path: `/api/mobile/memoir/answer-sessions/${answerSession.data.id}`,
+  }, { store, openid: "openid_b" });
+  assert.equal(hiddenSession.statusCode, 404);
+
+  const hiddenAppend = await request({
+    method: "POST",
+    path: `/api/mobile/memoir/answer-sessions/${answerSession.data.id}/segments`,
+    data: {
+      transcript_text: "不属于当前用户。",
+    },
+  }, { store, openid: "openid_b" });
+  assert.equal(hiddenAppend.statusCode, 404);
+});
+
 test("rejects malformed answer request bodies", async () => {
   const response = await request({
     method: "POST",

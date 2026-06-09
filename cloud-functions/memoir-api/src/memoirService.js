@@ -24,6 +24,18 @@ const MemoirAnswerStatus = Object.freeze({
   CONFIRMED: "confirmed",
 });
 
+const MemoirAnswerSessionStatus = Object.freeze({
+  DRAFT: "draft",
+  SUBMITTED: "submitted",
+});
+
+const MemoirAnswerSegmentStatus = Object.freeze({
+  DRAFT: "draft",
+  UPLOADED: "uploaded",
+  TRANSCRIBED: "transcribed",
+  FAILED: "failed",
+});
+
 const MemoirDraftStatus = Object.freeze({
   DRAFT: "draft",
   ACCEPTED: "accepted",
@@ -188,6 +200,17 @@ function previewText(text) {
 }
 
 function cleanPositiveNumber(value, fallback = null) {
+  if (value === undefined || value === null || value === "") {
+    return fallback;
+  }
+  const numberValue = Number(value);
+  if (!Number.isFinite(numberValue) || numberValue < 0) {
+    return fallback;
+  }
+  return Math.round(numberValue);
+}
+
+function cleanNonNegativeInteger(value, fallback = 0) {
   if (value === undefined || value === null || value === "") {
     return fallback;
   }
@@ -752,6 +775,34 @@ async function loadAnswer(store, openid, answerId, projectId = null) {
     });
   }
   return answer;
+}
+
+async function loadAnswerSession(store, openid, answerSessionId, projectId = null) {
+  const answerSession = await store.findOne(COLLECTIONS.answerSessions, {
+    openid,
+    _id: answerSessionId,
+  });
+  if (!answerSession) {
+    throw new ApiError(404, "回答会话不存在");
+  }
+  if (projectId && answerSession.project_id !== projectId) {
+    throw new ApiError(404, "回答会话不存在");
+  }
+  return answerSession;
+}
+
+async function loadAnswerSegment(store, openid, answerSegmentId, projectId = null) {
+  const segment = await store.findOne(COLLECTIONS.answerSegments, {
+    openid,
+    _id: answerSegmentId,
+  });
+  if (!segment) {
+    throw new ApiError(404, "回答分段不存在");
+  }
+  if (projectId && segment.project_id !== projectId) {
+    throw new ApiError(404, "回答分段不存在");
+  }
+  return segment;
 }
 
 async function loadDraft(store, openid, draftId, projectId = null) {
@@ -2087,6 +2138,301 @@ async function createTextAnswer(store, openid, data) {
   return answer;
 }
 
+function cleanAnswerSegmentStatus(value, fallback = MemoirAnswerSegmentStatus.DRAFT) {
+  const status = cleanText(value || fallback);
+  if (!Object.values(MemoirAnswerSegmentStatus).includes(status)) {
+    throw new ApiError(400, "回答分段状态不支持");
+  }
+  return status;
+}
+
+function answerSegmentText(segment) {
+  return cleanText(segment.transcript_edited || segment.transcript_raw);
+}
+
+function mergeAnswerSegments(segments) {
+  return segments
+    .map(answerSegmentText)
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+function answerSegmentsDuration(segments) {
+  const durations = segments
+    .map((segment) => Number(segment.duration_seconds))
+    .filter((duration) => Number.isFinite(duration) && duration > 0);
+  if (!durations.length) {
+    return null;
+  }
+  return durations.reduce((total, duration) => total + duration, 0);
+}
+
+function answerSessionResponse(answerSession, segments = []) {
+  const mergedText = mergeAnswerSegments(segments);
+  return {
+    ...answerSession,
+    segment_count: segments.length,
+    duration_seconds: answerSession.duration_seconds ?? answerSegmentsDuration(segments),
+    transcript_raw: answerSession.transcript_raw || mergedText,
+    transcript_edited: answerSession.transcript_edited || mergedText,
+    segments,
+  };
+}
+
+async function listAnswerSegments(store, openid, answerSessionId, projectId) {
+  const rows = await store.findMany(COLLECTIONS.answerSegments, {
+    openid,
+    answer_session_id: answerSessionId,
+  }, {
+    orderBy: [{ field: "sort_order", direction: "asc" }, { field: "created_at", direction: "asc" }],
+  });
+  return rows.filter((segment) => !projectId || segment.project_id === projectId);
+}
+
+async function getAnswerSessionDetail(store, openid, answerSessionId) {
+  const project = await getOrCreateProject(store, openid);
+  const answerSession = await loadAnswerSession(store, openid, answerSessionId, project.id);
+  const segments = await listAnswerSegments(store, openid, answerSession.id, project.id);
+  return answerSessionResponse(answerSession, segments);
+}
+
+async function updateAnswerSessionRollup(store, answerSession, segments = null) {
+  const sessionSegments = segments || await listAnswerSegments(
+    store,
+    answerSession.openid,
+    answerSession.id,
+    answerSession.project_id,
+  );
+  const mergedText = mergeAnswerSegments(sessionSegments);
+  return store.updateById(COLLECTIONS.answerSessions, answerSession.id, {
+    segment_count: sessionSegments.length,
+    duration_seconds: answerSegmentsDuration(sessionSegments),
+    transcript_raw: mergedText,
+    transcript_edited: mergedText,
+    updated_at: nowIso(),
+  });
+}
+
+function ensureEditableAnswerSession(answerSession) {
+  if (answerSession.status !== MemoirAnswerSessionStatus.DRAFT) {
+    throw new ApiError(409, "已提交的回答会话不能修改");
+  }
+}
+
+async function createAnswerSession(store, openid, questionId) {
+  const project = await getOrCreateProject(store, openid);
+  const question = await loadQuestion(store, openid, questionId, project.id);
+  if (question.status === MemoirQuestionStatus.SKIPPED) {
+    throw new ApiError(409, "已跳过的问题不能回答");
+  }
+
+  const existingRows = await store.findMany(COLLECTIONS.answerSessions, {
+    openid,
+    question_id: question.id,
+    status: MemoirAnswerSessionStatus.DRAFT,
+  }, {
+    orderBy: [{ field: "updated_at", direction: "desc" }],
+  });
+  const existing = existingRows.find((row) => row.project_id === project.id) || null;
+  if (existing) {
+    return getAnswerSessionDetail(store, openid, existing.id);
+  }
+
+  const now = nowIso();
+  const answerSession = await store.insert(COLLECTIONS.answerSessions, {
+    openid,
+    project_id: project.id,
+    session_id: question.session_id,
+    question_id: question.id,
+    answer_id: null,
+    status: MemoirAnswerSessionStatus.DRAFT,
+    segment_count: 0,
+    duration_seconds: null,
+    transcript_raw: "",
+    transcript_edited: "",
+    submitted_at: null,
+    created_at: now,
+    updated_at: now,
+  });
+  return answerSessionResponse(answerSession, []);
+}
+
+function nextAnswerSegmentSortOrder(segments) {
+  if (!segments.length) {
+    return 0;
+  }
+  return Math.max(...segments.map((segment) => cleanNonNegativeInteger(segment.sort_order))) + 1;
+}
+
+async function answerSegmentAudioPatch(store, openid, projectId, data) {
+  if (!data.audio_file_id) {
+    return {};
+  }
+  const audioFile = await loadAudioFile(store, openid, data.audio_file_id, projectId);
+  return {
+    audio_file_id: audioFile.id,
+    duration_seconds: cleanPositiveNumber(data.duration_seconds, audioFile.duration_seconds),
+  };
+}
+
+function cleanSegmentTextPatch(data) {
+  const transcriptRaw = data.transcript_raw === undefined ? undefined : cleanText(data.transcript_raw);
+  const transcriptEdited = data.transcript_edited === undefined ? undefined : cleanText(data.transcript_edited);
+  return {
+    transcript_raw: transcriptRaw,
+    transcript_edited: transcriptEdited,
+  };
+}
+
+function validateSegmentTextStatus(status, transcriptRaw, transcriptEdited) {
+  const text = cleanText(transcriptEdited || transcriptRaw);
+  if (status === MemoirAnswerSegmentStatus.TRANSCRIBED && !text) {
+    throw new ApiError(400, "已转写分段不能为空");
+  }
+}
+
+async function appendAnswerSegment(store, openid, answerSessionId, data) {
+  const project = await getOrCreateProject(store, openid);
+  const answerSession = await loadAnswerSession(store, openid, answerSessionId, project.id);
+  ensureEditableAnswerSession(answerSession);
+  const existingSegments = await listAnswerSegments(store, openid, answerSession.id, project.id);
+  const audioPatch = await answerSegmentAudioPatch(store, openid, project.id, data);
+  const textPatch = cleanSegmentTextPatch(data);
+  const transcriptRaw = textPatch.transcript_raw || "";
+  const transcriptEdited = textPatch.transcript_edited || transcriptRaw;
+  const defaultStatus = cleanText(transcriptEdited || transcriptRaw)
+    ? MemoirAnswerSegmentStatus.TRANSCRIBED
+    : audioPatch.audio_file_id
+      ? MemoirAnswerSegmentStatus.UPLOADED
+      : MemoirAnswerSegmentStatus.DRAFT;
+  const status = cleanAnswerSegmentStatus(data.status, defaultStatus);
+  validateSegmentTextStatus(status, transcriptRaw, transcriptEdited);
+
+  const now = nowIso();
+  const segment = await store.insert(COLLECTIONS.answerSegments, {
+    openid,
+    project_id: project.id,
+    session_id: answerSession.session_id,
+    question_id: answerSession.question_id,
+    answer_session_id: answerSession.id,
+    audio_file_id: audioPatch.audio_file_id || null,
+    sort_order: data.sort_order === undefined
+      ? nextAnswerSegmentSortOrder(existingSegments)
+      : cleanNonNegativeInteger(data.sort_order),
+    status,
+    duration_seconds: audioPatch.duration_seconds ?? cleanPositiveNumber(data.duration_seconds),
+    transcript_raw: transcriptRaw,
+    transcript_edited: transcriptEdited,
+    error_message: data.error_message ? cleanText(data.error_message) : "",
+    created_at: now,
+    updated_at: now,
+  });
+  await updateAnswerSessionRollup(store, answerSession, [...existingSegments, segment]);
+  return segment;
+}
+
+async function updateAnswerSegment(store, openid, answerSegmentId, data) {
+  const project = await getOrCreateProject(store, openid);
+  const segment = await loadAnswerSegment(store, openid, answerSegmentId, project.id);
+  const answerSession = await loadAnswerSession(store, openid, segment.answer_session_id, project.id);
+  ensureEditableAnswerSession(answerSession);
+
+  const patch = {
+    updated_at: nowIso(),
+  };
+  if (data.sort_order !== undefined) {
+    patch.sort_order = cleanNonNegativeInteger(data.sort_order);
+  }
+  if (data.duration_seconds !== undefined) {
+    patch.duration_seconds = cleanPositiveNumber(data.duration_seconds);
+  }
+  if (data.error_message !== undefined) {
+    patch.error_message = cleanText(data.error_message);
+  }
+  if (data.audio_file_id !== undefined) {
+    const audioPatch = await answerSegmentAudioPatch(store, openid, project.id, data);
+    patch.audio_file_id = audioPatch.audio_file_id || null;
+    if (audioPatch.duration_seconds !== undefined) {
+      patch.duration_seconds = audioPatch.duration_seconds;
+    }
+  }
+
+  const textPatch = cleanSegmentTextPatch(data);
+  if (textPatch.transcript_raw !== undefined) {
+    patch.transcript_raw = textPatch.transcript_raw;
+  }
+  if (textPatch.transcript_edited !== undefined) {
+    patch.transcript_edited = textPatch.transcript_edited;
+  }
+  if (data.status !== undefined) {
+    patch.status = cleanAnswerSegmentStatus(data.status);
+  }
+
+  const nextStatus = patch.status || segment.status;
+  const nextTranscriptRaw = patch.transcript_raw === undefined ? segment.transcript_raw : patch.transcript_raw;
+  const nextTranscriptEdited = patch.transcript_edited === undefined ? segment.transcript_edited : patch.transcript_edited;
+  validateSegmentTextStatus(nextStatus, nextTranscriptRaw, nextTranscriptEdited);
+
+  const updated = await store.updateById(COLLECTIONS.answerSegments, segment.id, patch);
+  const segments = await listAnswerSegments(store, openid, answerSession.id, project.id);
+  await updateAnswerSessionRollup(store, answerSession, segments);
+  return updated;
+}
+
+async function submitAnswerSession(store, openid, answerSessionId) {
+  const project = await getOrCreateProject(store, openid);
+  const answerSession = await loadAnswerSession(store, openid, answerSessionId, project.id);
+  if (answerSession.status === MemoirAnswerSessionStatus.SUBMITTED) {
+    return getAnswerSessionDetail(store, openid, answerSession.id);
+  }
+
+  const question = await loadQuestion(store, openid, answerSession.question_id, project.id);
+  if (question.status === MemoirQuestionStatus.SKIPPED) {
+    throw new ApiError(409, "已跳过的问题不能回答");
+  }
+
+  const segments = await listAnswerSegments(store, openid, answerSession.id, project.id);
+  const mergedText = mergeAnswerSegments(segments);
+  if (!mergedText) {
+    throw new ApiError(400, "回答会话没有可提交的文字");
+  }
+
+  const audioFileIds = [...new Set(segments.map((segment) => segment.audio_file_id).filter(Boolean))];
+  const primaryAudioFileId = audioFileIds.length === 1 ? audioFileIds[0] : null;
+  const durationSeconds = answerSegmentsDuration(segments);
+  const answer = await createTextAnswer(store, openid, {
+    question_id: question.id,
+    text: mergedText,
+    audio_file_id: primaryAudioFileId || undefined,
+    duration_seconds: durationSeconds,
+  });
+  const now = nowIso();
+  const updatedAnswer = await store.updateById(COLLECTIONS.answers, answer.id, {
+    project_id: project.id,
+    session_id: question.session_id,
+    question_id: question.id,
+    answer_session_id: answerSession.id,
+    audio_file_id: primaryAudioFileId,
+    transcript_raw: mergedText,
+    transcript_edited: mergedText,
+    status: MemoirAnswerStatus.ANSWERED,
+    duration_seconds: durationSeconds,
+    updated_at: now,
+  });
+  const submittedSession = await store.updateById(COLLECTIONS.answerSessions, answerSession.id, {
+    answer_id: updatedAnswer.id,
+    status: MemoirAnswerSessionStatus.SUBMITTED,
+    segment_count: segments.length,
+    duration_seconds: durationSeconds,
+    transcript_raw: mergedText,
+    transcript_edited: mergedText,
+    submitted_at: now,
+    updated_at: now,
+  });
+
+  return answerSessionResponse(submittedSession, segments);
+}
+
 async function updateAnswerText(store, openid, answerId, data) {
   const project = await getOrCreateProject(store, openid);
   const answer = await loadAnswer(store, openid, answerId, project.id);
@@ -2468,6 +2814,7 @@ function createMemoirService(store, context, dependencies = {}) {
     getSummary: async () => getSummary(store, openid),
     listStoryCards: async () => listStoryCards(store, openid),
     getStoryDetail: async (answerId) => getStoryDetail(store, openid, answerId),
+    getAnswerSession: async (answerSessionId) => getAnswerSessionDetail(store, openid, answerSessionId),
     getSessionSummary: async (sessionId) => getSessionSummary(store, openid, sessionId),
     processSessionMemory: async (sessionId) => processSessionMemory(store, openid, sessionId, dependencies),
     listPersonMemories: async () => listMemoryRows(store, openid, (await getOrCreateProject(store, openid)).id, MemoirMemoryType.PERSON),
@@ -2493,6 +2840,10 @@ function createMemoirService(store, context, dependencies = {}) {
     listOutputs: async () => listOutputs(store, openid),
     getOutput: async (outputId) => getOutput(store, openid, outputId),
     skipQuestion: async (questionId) => skipQuestion(store, openid, questionId),
+    createAnswerSession: async (questionId) => createAnswerSession(store, openid, questionId),
+    appendAnswerSegment: async (answerSessionId, data) => appendAnswerSegment(store, openid, answerSessionId, data),
+    updateAnswerSegment: async (answerSegmentId, data) => updateAnswerSegment(store, openid, answerSegmentId, data),
+    submitAnswerSession: async (answerSessionId) => submitAnswerSession(store, openid, answerSessionId),
     createTextAnswer: async (data) => createTextAnswer(store, openid, data),
     updateAnswerText: async (answerId, data) => updateAnswerText(store, openid, answerId, data),
     deleteAnswer: async (answerId) => deleteAnswer(store, openid, answerId),
@@ -2507,6 +2858,8 @@ function createMemoirService(store, context, dependencies = {}) {
 module.exports = {
   createMemoirService,
   MemoirAnswerStatus,
+  MemoirAnswerSegmentStatus,
+  MemoirAnswerSessionStatus,
   MemoirDraftStatus,
   MemoirQuestionStatus,
   MemoirSessionStatus,
