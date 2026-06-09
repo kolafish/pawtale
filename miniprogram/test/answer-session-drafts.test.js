@@ -136,6 +136,7 @@ test("tracks local pending answer session draft segments", () => {
         duration_seconds: 80,
         transcript_raw: "已经转写",
         transcript_edited: "已经修订",
+        dirty: true,
         created_at: "2026-06-01T00:00:00.000Z",
         updated_at: "2026-06-01T00:00:00.000Z",
       },
@@ -144,6 +145,7 @@ test("tracks local pending answer session draft segments", () => {
 
   assert.equal(draft.pending_upload_count, 1);
   assert.equal(draft.merged_text, "已经修订");
+  assert.equal(draft.segments[0].dirty, true);
   assert.deepEqual(draft.segments.map((segment) => segment.local_id), ["local_1", "local_2"]);
 
   clearMemoirAnswerSessionDraft("project_1", "question_1");
