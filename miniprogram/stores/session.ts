@@ -20,6 +20,7 @@ import type {
   Project,
   User,
 } from "../domain/memoir";
+import { clearMemoirAnswerSessionDrafts } from "./memoir-answer-session-drafts";
 import { clearMemoirInputDrafts } from "./memoir-input-drafts";
 
 const STORE_KEY = "pawtale_memoir_session";
@@ -154,10 +155,12 @@ export function ensureMemoirStoreIdentity(identity: MemoirCacheIdentity): Memoir
     || current.stories,
   );
   if (!current.cache_identity && hasCachedMemoirData) {
+    clearMemoirAnswerSessionDrafts();
     clearMemoirInputDrafts();
     return replaceMemoirStore({ cache_identity: identity });
   }
   if (!sameCacheIdentity(current.cache_identity, identity)) {
+    clearMemoirAnswerSessionDrafts();
     clearMemoirInputDrafts();
     return replaceMemoirStore({ cache_identity: identity });
   }

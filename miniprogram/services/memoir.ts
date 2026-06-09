@@ -1,5 +1,8 @@
 import type {
   MemoirAnswer,
+  MemoirAnswerSegment,
+  MemoirAnswerSegmentStatus,
+  MemoirAnswerSession,
   MemoirAudioFile,
   MemoirAudioTranscription,
   MemoirCoverageItem,
@@ -184,6 +187,55 @@ export function createTextAnswer(
   return request<MemoirAnswer>("/api/mobile/memoir/answers", {
     method: "POST",
     data,
+  });
+}
+
+export function createMemoirAnswerSession(questionId: string): Promise<MemoirAnswerSession> {
+  return request<MemoirAnswerSession>(`/api/mobile/memoir/questions/${questionId}/answer-session`, {
+    method: "POST",
+    data: {},
+  });
+}
+
+export function getMemoirAnswerSession(answerSessionId: string): Promise<MemoirAnswerSession> {
+  return request<MemoirAnswerSession>(`/api/mobile/memoir/answer-sessions/${answerSessionId}`);
+}
+
+export interface MemoirAnswerSegmentInput {
+  audio_file_id?: string;
+  duration_seconds?: number;
+  sort_order?: number;
+  status?: MemoirAnswerSegmentStatus;
+  transcript_raw?: string;
+  transcript_text?: string;
+  transcript_edited?: string;
+  error_message?: string;
+}
+
+export function appendMemoirAnswerSegment(
+  answerSessionId: string,
+  data: MemoirAnswerSegmentInput,
+): Promise<MemoirAnswerSegment> {
+  return request<MemoirAnswerSegment>(`/api/mobile/memoir/answer-sessions/${answerSessionId}/segments`, {
+    method: "POST",
+    data,
+  });
+}
+
+export function updateMemoirAnswerSegment(
+  answerSegmentId: string,
+  data: MemoirAnswerSegmentInput,
+): Promise<MemoirAnswerSegment> {
+  return request<MemoirAnswerSegment>(`/api/mobile/memoir/answer-segments/${answerSegmentId}`, {
+    method: "PATCH",
+    data,
+  });
+}
+
+export function submitMemoirAnswerSession(answerSessionId: string): Promise<MemoirAnswerSession> {
+  return request<MemoirAnswerSession>(`/api/mobile/memoir/answer-sessions/${answerSessionId}/submit`, {
+    method: "POST",
+    data: {},
   });
 }
 
