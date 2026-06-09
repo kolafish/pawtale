@@ -3,7 +3,8 @@ export type MemoirSessionStatus = "active" | "completed";
 export type MemoirQuestionStatus = "pending" | "answered" | "skipped";
 export type MemoirAnswerStatus = "uploaded" | "transcribing" | "answered" | "drafted" | "confirmed";
 export type MemoirAnswerSessionStatus = "draft" | "submitted";
-export type MemoirAnswerSegmentStatus = "draft" | "uploaded" | "transcribed" | "failed";
+export type MemoirAnswerSegmentStatus = "draft" | "uploaded" | "transcribing" | "transcribed" | "failed";
+export type MemoirAsrJobStatus = "queued" | "running" | "completed" | "failed";
 export type MemoirDraftStatus = "draft" | "accepted";
 export type MemoirMemoryStatus = "draft" | "confirmed" | "rejected";
 export type MemoirMemoryType = "person" | "event" | "place" | "theme" | "open_question";
@@ -143,6 +144,24 @@ export interface MemoirAnswerSession {
   created_at: string;
   updated_at: string;
   segments: MemoirAnswerSegment[];
+}
+
+export interface MemoirAsrJob {
+  id: string;
+  project_id: string;
+  answer_session_id: string;
+  answer_segment_id: string;
+  audio_file_id: string;
+  status: MemoirAsrJobStatus;
+  transcript_text: string;
+  transcript_usage_json?: string;
+  usage?: Record<string, unknown> | null;
+  error_message?: string;
+  created_at: string;
+  updated_at: string;
+  started_at?: string | null;
+  completed_at?: string | null;
+  segment?: MemoirAnswerSegment;
 }
 
 export interface MemoirAudioFile {

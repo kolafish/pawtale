@@ -81,6 +81,10 @@ const routes = {
       200,
       await memoirService(request).getAnswerSession(request.params.answerSessionId),
     )),
+    route("/api/mobile/memoir/asr-jobs/:asrJobId", async (request) => jsonResponse(
+      200,
+      await memoirService(request).getAsrJob(request.params.asrJobId),
+    )),
     route("/api/mobile/memoir/sessions/:sessionId/summary", async (request) => jsonResponse(
       200,
       await memoirService(request).getSessionSummary(request.params.sessionId),
@@ -165,6 +169,14 @@ const routes = {
     route("/api/mobile/memoir/answer-sessions/:answerSessionId/submit", async (request) => jsonResponse(
       200,
       await memoirService(request).submitAnswerSession(request.params.answerSessionId),
+    )),
+    route("/api/mobile/memoir/answer-segments/:answerSegmentId/transcription-job", async (request) => jsonResponse(
+      201,
+      await memoirService(request).createSegmentTranscriptionJob(request.params.answerSegmentId),
+    )),
+    route("/api/mobile/memoir/asr-jobs/:asrJobId/process", async (request) => jsonResponse(
+      200,
+      await memoirService(request).processAsrJob(request.params.asrJobId),
     )),
     route("/api/mobile/memoir/answers", async (request) => jsonResponse(
       201,
