@@ -2218,6 +2218,26 @@ async function getAnswerSessionDetail(store, openid, answerSessionId) {
   return answerSessionResponse(answerSession, segments);
 }
 
+async function getDraftAnswerSessionForQuestion(store, openid, projectId, questionId) {
+  if (!questionId) {
+    return null;
+  }
+  const rows = await store.findMany(COLLECTIONS.answerSessions, {
+    openid,
+    project_id: projectId,
+    question_id: questionId,
+    status: MemoirAnswerSessionStatus.DRAFT,
+  }, {
+    orderBy: [{ field: "updated_at", direction: "desc" }],
+  });
+  const answerSession = rows[0] || null;
+  if (!answerSession) {
+    return null;
+  }
+  const segments = await listAnswerSegments(store, openid, answerSession.id, projectId);
+  return answerSessionResponse(answerSession, segments);
+}
+
 async function updateAnswerSessionRollup(store, answerSession, segments = null) {
   const sessionSegments = segments || await listAnswerSegments(
     store,
@@ -2889,6 +2909,12 @@ function memoryStats({ people, events, places, themes, openQuestions, coverage, 
 async function getMemoryDashboard(store, openid) {
   const project = await getOrCreateProject(store, openid);
   const interview = await getOrCreateCurrentSession(store, openid);
+  const activeAnswerSession = await getDraftAnswerSessionForQuestion(
+    store,
+    openid,
+    project.id,
+    interview.current_question?.id,
+  );
   const [
     summary,
     sessionSummary,
@@ -2915,6 +2941,7 @@ async function getMemoryDashboard(store, openid) {
   return {
     project: createProjectResponse(project),
     interview,
+    active_answer_session: activeAnswerSession,
     summary,
     session_summary: sessionSummary,
     people,

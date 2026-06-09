@@ -14,6 +14,10 @@ import {
   readMemoirDashboardSnapshot,
   shouldRefreshMemoirDashboardSnapshot,
 } from "../../stores/memoir-cache";
+import {
+  readMemoirAnswerSessionDraft,
+  type MemoirAnswerSessionDraft,
+} from "../../stores/memoir-answer-session-drafts";
 import { writeMemoirStore } from "../../stores/session";
 
 interface TouchPoint {
@@ -31,10 +35,15 @@ interface HomeData {
   refreshing: boolean;
   hasDashboardData: boolean;
   error: string;
+  projectId: string;
   projectTitle: string;
   sessionTitle: string;
   currentQuestionId: string;
   currentPrompt: string;
+  hasAnswerDraft: boolean;
+  answerDraftLabel: string;
+  answerDraftPendingLabel: string;
+  primaryActionText: string;
   questionCardTranslateX: number;
   questionCardRotate: number;
   questionCardDragging: boolean;
@@ -101,6 +110,39 @@ function promptForQuestion(question?: MemoirQuestion | null): string {
   return question?.prompt || HOME_EMPTY_PROMPT;
 }
 
+function answerDraftForQuestion(projectId: string, question?: MemoirQuestion | null): MemoirAnswerSessionDraft | undefined {
+  return projectId && question ? readMemoirAnswerSessionDraft(projectId, question.id) : undefined;
+}
+
+function answerDraftLabel(draft?: MemoirAnswerSessionDraft): string {
+  if (!draft) {
+    return "";
+  }
+  const segmentText = draft.segments.length ? `${draft.segments.length} 段` : "未提交";
+  return draft.merged_text ? `已暂存 ${segmentText}` : `已创建 ${segmentText}`;
+}
+
+function answerDraftPendingLabel(draft?: MemoirAnswerSessionDraft): string {
+  if (!draft?.pending_upload_count) {
+    return "";
+  }
+  return `${draft.pending_upload_count} 段待上传`;
+}
+
+function answerDraftState(projectId: string, question?: MemoirQuestion | null): Pick<
+  HomeData,
+  "hasAnswerDraft" | "answerDraftLabel" | "answerDraftPendingLabel" | "primaryActionText"
+> {
+  const draft = answerDraftForQuestion(projectId, question);
+  const hasAnswerDraft = Boolean(draft && (draft.answer_session_id || draft.segments.length || draft.merged_text));
+  return {
+    hasAnswerDraft,
+    answerDraftLabel: answerDraftLabel(draft),
+    answerDraftPendingLabel: answerDraftPendingLabel(draft),
+    primaryActionText: hasAnswerDraft ? "继续讲述" : "开始讲述",
+  };
+}
+
 function nextPendingQuestionAfter(interview: MemoirInterviewState | undefined, questionId: string): MemoirQuestion | null {
   if (!interview) {
     return null;
@@ -153,10 +195,15 @@ Page<HomeData, {
     refreshing: false,
     hasDashboardData: false,
     error: "",
+    projectId: "",
     projectTitle: "",
     sessionTitle: "",
     currentQuestionId: "",
     currentPrompt: "",
+    hasAnswerDraft: false,
+    answerDraftLabel: "",
+    answerDraftPendingLabel: "",
+    primaryActionText: "开始讲述",
     questionCardTranslateX: 0,
     questionCardRotate: 0,
     questionCardDragging: false,
@@ -192,6 +239,7 @@ Page<HomeData, {
       return snapshot;
     }
     this.setData({
+      projectId: snapshot.project?.id || this.data.projectId,
       projectTitle: snapshot.project?.title || this.data.projectTitle,
     });
     this.applySnapshot(
@@ -207,6 +255,7 @@ Page<HomeData, {
 
   applySnapshot(interview, summary, coverage = [], outputs = [], memoryStats, sessionSummary = null) {
     clearQuestionSwipeSwitchTimer();
+    const draftState = answerDraftState(this.data.projectId, interview.current_question);
     const coveragePercent = memoryStats?.coverage_average ?? (coverage.length
       ? Math.round(coverage.reduce((total, item) => total + item.coverage_score, 0) / coverage.length)
       : summary.progress_percent);
@@ -218,6 +267,7 @@ Page<HomeData, {
       reviewSessionId: interview.session.id,
       currentQuestionId: interview.current_question?.id || "",
       currentPrompt: promptForQuestion(interview.current_question),
+      ...draftState,
       questionCardTranslateX: 0,
       questionCardRotate: 0,
       questionCardDragging: false,
@@ -250,6 +300,7 @@ Page<HomeData, {
         sessionSummary,
       } = await loadMemoirDashboard();
       this.setData({
+        projectId: project?.id || "",
         projectTitle: project?.title || "",
       });
       this.applySnapshot(interview, summary, coverage, outputs, memoryStats, sessionSummary);
@@ -364,9 +415,13 @@ Page<HomeData, {
         },
       });
     }
+    const projectId = snapshot.project?.id || this.data.projectId;
+    const draftState = answerDraftState(projectId, question);
     this.setData({
+      projectId,
       currentQuestionId: question?.id || "",
       currentPrompt: promptForQuestion(question),
+      ...draftState,
       questionCardTranslateX: 0,
       questionCardRotate: 0,
       questionCardDragging: false,
