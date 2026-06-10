@@ -363,7 +363,7 @@ image {
 }
 
 .user-mark::before {
-  left: 15rpx;
+  left: 16rpx;
   top: 6rpx;
   width: 16rpx;
   height: 16rpx;
