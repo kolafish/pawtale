@@ -50,36 +50,46 @@
       <view class="record-main">
         <view wx:if="{{selectionMode}}" class="select-mark {{item.selected ? 'checked' : ''}}"></view>
         <view class="record-copy">
-          <text class="question-text">{{item.question}}</text>
-          <text class="answer-preview">{{item.answerPreview || "暂无转写文字"}}</text>
-          <view wx:if="{{!selectionMode}}" class="tts-actions">
+          <view class="readable-row">
+            <text class="question-text">{{item.question}}</text>
             <button
-              class="tts-button {{ttsSourceKey === item.questionTtsSourceKey && ttsPlaying ? 'active' : ''}}"
+              wx:if="{{!selectionMode}}"
+              class="tts-icon-button {{ttsSourceKey === item.questionTtsSourceKey && ttsPlaying ? 'active' : ''}}"
               disabled="{{ttsBusy}}"
               data-source-type="question"
               data-source-id="{{item.questionId}}"
               data-label="问题"
               catchtap="toggleTtsSource"
             >
-              {{ttsSourceKey === item.questionTtsSourceKey && ttsPlaying ? "暂停问题" : "朗读问题"}}
+              <image class="tts-icon" src="/assets/tts-speaker.png" mode="aspectFit" />
             </button>
+          </view>
+          <view class="readable-row answer-row">
+            <text class="answer-preview">{{item.answerPreview || "暂无转写文字"}}</text>
             <button
-              class="tts-button {{ttsSourceKey === item.answerTtsSourceKey && ttsPlaying ? 'active' : ''}}"
+              wx:if="{{!selectionMode}}"
+              class="tts-icon-button {{ttsSourceKey === item.answerTtsSourceKey && ttsPlaying ? 'active' : ''}}"
               disabled="{{ttsBusy}}"
               data-source-type="answer"
               data-source-id="{{item.id}}"
               data-label="回答"
               catchtap="toggleTtsSource"
             >
-              {{ttsSourceKey === item.answerTtsSourceKey && ttsPlaying ? "暂停回答" : "朗读回答"}}
+              <image class="tts-icon" src="/assets/tts-speaker.png" mode="aspectFit" />
             </button>
-            <button class="tts-speed-button" catchtap="cycleTtsSpeed">{{ttsSpeedLabel}}</button>
           </view>
+          <button
+            wx:if="{{!selectionMode && (ttsSourceKey === item.questionTtsSourceKey || ttsSourceKey === item.answerTtsSourceKey)}}"
+            class="tts-speed-chip"
+            catchtap="cycleTtsSpeed"
+          >
+            {{ttsSpeedLabel}}
+          </button>
           <text
-            wx:if="{{!selectionMode && (ttsSourceKey === item.questionTtsSourceKey || ttsSourceKey === item.answerTtsSourceKey) && (ttsMessage || ttsError)}}"
+            wx:if="{{!selectionMode && (ttsSourceKey === item.questionTtsSourceKey || ttsSourceKey === item.answerTtsSourceKey) && ttsError}}"
             class="tts-status {{ttsError ? 'tts-error' : ''}}"
           >
-            {{ttsError || ttsMessage}}
+            {{ttsError}}
           </text>
         </view>
       </view>

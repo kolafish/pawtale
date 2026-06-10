@@ -48,24 +48,24 @@
     <view wx:for="{{visibleOutputs}}" wx:key="id" class="story-card">
       <text class="story-question">{{item.title}}</text>
       <text class="story-preview">{{item.content_preview || "暂无片段预览"}}</text>
-      <view class="tts-actions">
+      <view class="tts-inline">
         <button
-          class="tts-button {{ttsSourceKey === item.ttsSourceKey && ttsPlaying ? 'active' : ''}}"
+          class="tts-icon-button {{ttsSourceKey === item.ttsSourceKey && ttsPlaying ? 'active' : ''}}"
           disabled="{{ttsBusy}}"
           data-source-type="output"
           data-source-id="{{item.id}}"
           data-label="写作片段"
           bindtap="toggleTtsSource"
         >
-          {{ttsSourceKey === item.ttsSourceKey && ttsPlaying ? "暂停朗读" : "朗读片段"}}
+          <image class="tts-icon" src="/assets/tts-speaker.png" mode="aspectFit" />
         </button>
-        <button class="tts-speed-button" bindtap="cycleTtsSpeed">{{ttsSpeedLabel}}</button>
+        <button class="tts-speed-chip" bindtap="cycleTtsSpeed">{{ttsSpeedLabel}}</button>
       </view>
       <text
-        wx:if="{{ttsSourceKey === item.ttsSourceKey && (ttsMessage || ttsError)}}"
+        wx:if="{{ttsSourceKey === item.ttsSourceKey && ttsError}}"
         class="tts-status {{ttsError ? 'tts-error' : ''}}"
       >
-        {{ttsError || ttsMessage}}
+        {{ttsError}}
       </text>
       <view class="story-meta">
         <text>{{item.output_type === "story_fragment" ? "故事片段" : item.output_type}}</text>
