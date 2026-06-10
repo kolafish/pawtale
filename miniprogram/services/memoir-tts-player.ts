@@ -45,8 +45,19 @@ export interface MemoirTtsPlaybackState {
 
 type MemoirTtsPlaybackListener = (state: MemoirTtsPlaybackState) => void;
 
+interface PreparedMemoirTtsPlayback {
+  source_key: string;
+  source_label: string;
+  voice: string;
+  asset: MemoirTtsAsset;
+  temp_url: string;
+}
+
 let audioContext: WechatMiniprogram.InnerAudioContext | null = null;
 const listeners = new Set<MemoirTtsPlaybackListener>();
+const preparedCache = new Map<string, PreparedMemoirTtsPlayback>();
+const preparedInFlight = new Map<string, Promise<PreparedMemoirTtsPlayback>>();
+let preparedCacheRevision = 0;
 let prepareSequence = 0;
 const initialSettings = readMemoirTtsSettings();
 
@@ -167,6 +178,113 @@ function playbackOptions(options: Omit<MemoirTtsAssetInput, "source_type" | "sou
   };
 }
 
+function preparedCacheKey(sourceKey: string, voice: string): string {
+  return `${sourceKey}:${voice}`;
+}
+
+async function loadPreparedMemoirTtsPlayback(
+  source: MemoirTtsPlaybackSource,
+  options: Omit<MemoirTtsAssetInput, "source_type" | "source_id">,
+  onGenerating?: () => void,
+): Promise<PreparedMemoirTtsPlayback> {
+  const sourceKey = memoirTtsSourceKey(source);
+  const voice = normalizeMemoirTtsVoice(options.voice);
+  const cacheKey = preparedCacheKey(sourceKey, voice);
+  const cached = preparedCache.get(cacheKey);
+  if (cached) {
+    return cached;
+  }
+  const inFlight = preparedInFlight.get(cacheKey);
+  if (inFlight) {
+    return inFlight;
+  }
+
+  const cacheRevision = preparedCacheRevision;
+  const preparedPromise = (async () => {
+    const created = await createMemoirTtsAsset({
+      source_type: source.source_type,
+      source_id: source.source_id,
+      ...options,
+    });
+    let asset = created.asset || null;
+    if (!asset && created.job) {
+      onGenerating?.();
+      const job = await processMemoirTtsJob(created.job.id);
+      if (job.status !== "completed" || !job.asset) {
+        throw new Error(job.error_message || "朗读生成失败");
+      }
+      asset = job.asset;
+    }
+    if (!asset) {
+      throw new Error("朗读生成失败");
+    }
+
+    const prepared = {
+      source_key: sourceKey,
+      source_label: source.label || "",
+      voice,
+      asset,
+      temp_url: await getTempFileUrl(asset.file_id),
+    };
+    if (cacheRevision === preparedCacheRevision) {
+      preparedCache.set(cacheKey, prepared);
+    }
+    return prepared;
+  })();
+
+  preparedInFlight.set(cacheKey, preparedPromise);
+  try {
+    return await preparedPromise;
+  } finally {
+    preparedInFlight.delete(cacheKey);
+  }
+}
+
+export async function preloadMemoirTtsPlayback(
+  source: MemoirTtsPlaybackSource,
+  options: Omit<MemoirTtsAssetInput, "source_type" | "source_id"> = {},
+): Promise<void> {
+  try {
+    await loadPreparedMemoirTtsPlayback(source, playbackOptions(options));
+  } catch {
+    // Preload is opportunistic. User-triggered playback still reports the real error.
+  }
+}
+
+export function invalidateMemoirTtsPlayback(source: MemoirTtsPlaybackSource): MemoirTtsPlaybackState {
+  const sourceKey = memoirTtsSourceKey(source);
+  preparedCacheRevision += 1;
+  for (const cacheKey of preparedCache.keys()) {
+    if (cacheKey.startsWith(`${sourceKey}:`)) {
+      preparedCache.delete(cacheKey);
+    }
+  }
+  for (const cacheKey of preparedInFlight.keys()) {
+    if (cacheKey.startsWith(`${sourceKey}:`)) {
+      preparedInFlight.delete(cacheKey);
+    }
+  }
+  if (state.source_key !== sourceKey) {
+    return readMemoirTtsPlaybackState();
+  }
+
+  prepareSequence += 1;
+  if (audioContext) {
+    audioContext.stop();
+  }
+  return patchState({
+    status: "idle",
+    source_key: "",
+    source_label: "",
+    asset: undefined,
+    temp_url: "",
+    position_seconds: 0,
+    duration_seconds: 0,
+    message: "",
+    error: "",
+  });
+}
+
 export async function prepareMemoirTtsPlayback(
   source: MemoirTtsPlaybackSource,
   options: Omit<MemoirTtsAssetInput, "source_type" | "source_id"> = {},
@@ -189,32 +307,18 @@ export async function prepareMemoirTtsPlayback(
   });
 
   try {
-    const created = await createMemoirTtsAsset({
-      source_type: source.source_type,
-      source_id: source.source_id,
-      ...resolvedOptions,
-    });
-    let asset = created.asset || null;
-    if (!asset && created.job) {
-      patchState({ status: "generating", message: "" });
-      const job = await processMemoirTtsJob(created.job.id);
-      if (job.status !== "completed" || !job.asset) {
-        throw new Error(job.error_message || "朗读生成失败");
+    const prepared = await loadPreparedMemoirTtsPlayback(source, resolvedOptions, () => {
+      if (sequence === prepareSequence && state.source_key === sourceKey) {
+        patchState({ status: "generating", message: "" });
       }
-      asset = job.asset;
-    }
-    if (!asset) {
-      throw new Error("朗读生成失败");
-    }
-
-    const tempUrl = await getTempFileUrl(asset.file_id);
+    });
     if (sequence !== prepareSequence || state.source_key !== sourceKey) {
       return readMemoirTtsPlaybackState();
     }
     return patchState({
       status: "ready",
-      asset,
-      temp_url: tempUrl,
+      asset: prepared.asset,
+      temp_url: prepared.temp_url,
       message: "",
       error: "",
     });
@@ -285,6 +389,9 @@ export function setMemoirTtsPlaybackVoice(voice: string): MemoirTtsPlaybackState
   if (state.voice === normalized) {
     return readMemoirTtsPlaybackState();
   }
+  preparedCache.clear();
+  preparedInFlight.clear();
+  preparedCacheRevision += 1;
   prepareSequence += 1;
   if (audioContext) {
     audioContext.stop();

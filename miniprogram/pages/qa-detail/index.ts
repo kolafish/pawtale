@@ -26,9 +26,11 @@ import {
   writeMemoirQaDetailInputDraft,
 } from "../../stores/memoir-input-drafts";
 import {
+  invalidateMemoirTtsPlayback,
   memoirTtsSourceKey,
   pauseMemoirTtsPlayback,
   playMemoirTtsPlayback,
+  preloadMemoirTtsPlayback,
   readMemoirTtsPlaybackState,
   subscribeMemoirTtsPlayback,
 } from "../../services/memoir-tts-player";
@@ -129,6 +131,17 @@ function audioLabel(hasAudio: boolean, seconds?: number | null): string {
 
 function isAudioBusy(data: Pick<QaDetailData, "recording" | "uploadingAudio" | "transcribingAudio">): boolean {
   return data.recording || data.uploadingAudio || data.transcribingAudio;
+}
+
+function preloadTtsSource(sourceType: MemoirTtsSourceType, sourceId: string, label: string): void {
+  if (!sourceId) {
+    return;
+  }
+  void preloadMemoirTtsPlayback({
+    source_type: sourceType,
+    source_id: sourceId,
+    label,
+  });
 }
 
 function inputDraftFromData(data: QaDetailData): Parameters<typeof writeMemoirQaDetailInputDraft>[0] | null {
@@ -399,6 +412,9 @@ Page<QaDetailData, QaDetailMethods>({
       draftTtsSourceKey: detail.draft?.id ? memoirTtsSourceKey({ source_type: "draft", source_id: detail.draft.id }) : "",
       inputDraftDirty: false,
     });
+    preloadTtsSource("question", detail.question.id, "问题");
+    preloadTtsSource("answer", detail.answer.id, "回答");
+    preloadTtsSource("draft", detail.draft?.id || "", "整理稿");
   },
 
   onAnswerInput(event) {
@@ -414,12 +430,14 @@ Page<QaDetailData, QaDetailMethods>({
     this.setData({ saving: true, error: "" });
     try {
       const answer = await updateTextAnswer(this.data.answerId, text);
+      invalidateMemoirTtsPlayback({ source_type: "answer", source_id: answer.id });
       updateMemoirCachedStoryAnswer(answer);
       markMemoirDashboardSnapshotStale();
       this.setData({
         transcriptRaw: answer.transcript_raw || this.data.transcriptRaw,
         answerText: answer.transcript_edited || text,
       });
+      preloadTtsSource("answer", answer.id, "回答");
       if (this.data.newAudioFileId || this.data.newAudioSummary) {
         this.setData({ inputDraftDirty: true });
         this.persistInputDraft();
@@ -459,6 +477,7 @@ Page<QaDetailData, QaDetailMethods>({
         newAudioSummary: "",
         inputDraftDirty: false,
       });
+      invalidateMemoirTtsPlayback({ source_type: "answer", source_id: previousAnswerId });
       clearMemoirQaDetailInputDraft(previousAnswerId);
       clearMemoirQaDetailInputDraft(answer.id);
       await this.loadDetail();
