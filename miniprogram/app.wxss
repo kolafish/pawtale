@@ -257,67 +257,79 @@ image {
   background: rgba(255, 255, 255, 0.96);
   display: grid;
   grid-template-columns: repeat(4, 1fr);
+  align-items: center;
   z-index: 20;
 }
 
 .bottom-nav-item {
+  min-width: 0;
+  height: 92rpx;
   color: #74706c;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 8rpx;
+  gap: 6rpx;
   font-size: 24rpx;
   font-weight: 700;
-  line-height: 1.2;
+  line-height: 30rpx;
 }
 
 .bottom-nav-item.active {
   color: #9f4a3c;
 }
 
+.bottom-nav-item text {
+  display: block;
+  height: 30rpx;
+  line-height: 30rpx;
+  text-align: center;
+}
+
 .nav-mark {
-  width: 42rpx;
-  height: 42rpx;
+  width: 46rpx;
+  height: 46rpx;
+  flex: 0 0 46rpx;
   position: relative;
+  display: block;
+}
+
+.nav-mark::before,
+.nav-mark::after {
+  content: "";
+  position: absolute;
+  box-sizing: border-box;
 }
 
 .home-mark::before {
-  content: "";
-  position: absolute;
-  left: 9rpx;
-  top: 15rpx;
+  left: 11rpx;
+  top: 20rpx;
   width: 24rpx;
-  height: 22rpx;
+  height: 18rpx;
   border: 4rpx solid currentColor;
   border-top: 0;
-  border-radius: 4rpx;
+  border-radius: 0 0 5rpx 5rpx;
 }
 
 .home-mark::after {
-  content: "";
-  position: absolute;
-  left: 8rpx;
-  top: 4rpx;
-  width: 24rpx;
-  height: 24rpx;
+  left: 10rpx;
+  top: 7rpx;
+  width: 26rpx;
+  height: 26rpx;
   border-left: 4rpx solid currentColor;
   border-top: 4rpx solid currentColor;
+  border-radius: 5rpx 0 0 0;
   transform: rotate(45deg);
+  transform-origin: center;
 }
 
 .grid-mark {
-  display: grid;
-  grid-template-columns: repeat(2, 14rpx);
-  grid-template-rows: repeat(2, 14rpx);
-  gap: 8rpx;
-  justify-content: center;
-  align-content: center;
+  display: block;
 }
 
-.grid-mark::before,
-.grid-mark::after {
-  content: "";
+.grid-mark::before {
+  left: 5rpx;
+  top: 5rpx;
   width: 14rpx;
   height: 14rpx;
   border-radius: 5rpx;
@@ -326,33 +338,28 @@ image {
 }
 
 .chat-mark::before {
-  content: "";
-  position: absolute;
-  left: 5rpx;
-  top: 7rpx;
-  width: 32rpx;
+  left: 6rpx;
+  top: 8rpx;
+  width: 34rpx;
   height: 26rpx;
   border: 4rpx solid currentColor;
   border-radius: 18rpx;
 }
 
 .chat-mark::after {
-  content: "";
-  position: absolute;
-  left: 24rpx;
+  left: 27rpx;
   top: 29rpx;
   width: 10rpx;
   height: 10rpx;
   border-right: 4rpx solid currentColor;
   border-bottom: 4rpx solid currentColor;
-  transform: rotate(20deg);
+  transform: rotate(24deg);
+  transform-origin: center;
 }
 
 .user-mark::before {
-  content: "";
-  position: absolute;
-  left: 13rpx;
-  top: 4rpx;
+  left: 15rpx;
+  top: 6rpx;
   width: 16rpx;
   height: 16rpx;
   border: 4rpx solid currentColor;
@@ -360,11 +367,9 @@ image {
 }
 
 .user-mark::after {
-  content: "";
-  position: absolute;
-  left: 7rpx;
-  top: 26rpx;
-  width: 28rpx;
+  left: 8rpx;
+  top: 28rpx;
+  width: 30rpx;
   height: 16rpx;
   border: 4rpx solid currentColor;
   border-radius: 24rpx 24rpx 0 0;
