@@ -35,7 +35,6 @@
       >
         <image class="tts-icon" src="/assets/tts-speaker.png" mode="aspectFit" />
       </button>
-      <button class="tts-settings-chip" catchtap="openTtsSettings">{{ttsSettingsLabel}}</button>
     </view>
     <text
       wx:if="{{ttsSourceKey === currentQuestionTtsSourceKey && ttsError}}"
@@ -108,7 +107,6 @@
       >
         <image class="tts-icon" src="/assets/tts-speaker.png" mode="aspectFit" />
       </button>
-      <button class="tts-settings-chip" catchtap="openTtsSettings">{{ttsSettingsLabel}}</button>
     </view>
     <text
       wx:if="{{ttsSourceKey === latestOutputTtsSourceKey && ttsError}}"

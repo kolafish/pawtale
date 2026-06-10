@@ -35,7 +35,6 @@ import {
   readMemoirTtsPlaybackState,
   subscribeMemoirTtsPlayback,
 } from "../../services/memoir-tts-player";
-import { openMemoirTtsSettingsSheet } from "../../services/memoir-tts-settings-sheet";
 import { memoirTtsViewPatch } from "../../services/memoir-tts-view";
 
 type MemoryCard =
@@ -96,11 +95,6 @@ interface ReviewData {
   ttsSourceKey: string;
   ttsMessage: string;
   ttsError: string;
-  ttsSpeed: number;
-  ttsSpeedLabel: string;
-  ttsVoice: string;
-  ttsVoiceLabel: string;
-  ttsSettingsLabel: string;
   ttsPlaying: boolean;
   ttsBusy: boolean;
 }
@@ -213,7 +207,6 @@ Page<ReviewData, {
     sessionSummaryTtsSourceKey: string;
   }): void;
   toggleTtsSource(event: TtsSourceEvent): Promise<void>;
-  openTtsSettings(): Promise<void>;
   confirmMemory(event: DatasetEvent): Promise<void>;
   rejectMemory(event: DatasetEvent): Promise<void>;
   updateMemory(event: DatasetEvent, status: MemoirMemoryStatus): Promise<void>;
@@ -447,10 +440,6 @@ Page<ReviewData, {
       source_id: sourceId,
       label: event.currentTarget.dataset.label || "",
     });
-  },
-
-  async openTtsSettings() {
-    await openMemoirTtsSettingsSheet();
   },
 
   async confirmMemory(event) {

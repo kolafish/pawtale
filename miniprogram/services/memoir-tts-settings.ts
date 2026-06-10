@@ -44,10 +44,6 @@ export function memoirTtsSpeedLabel(speed: number): string {
   return `${normalizeMemoirTtsPlaybackSpeed(speed)}x`;
 }
 
-export function memoirTtsSettingsLabel(settings: MemoirTtsSettings): string {
-  return `${memoirTtsSpeedLabel(settings.speed)} · ${memoirTtsVoiceLabel(settings.voice)}`;
-}
-
 function readStoredSettings(): Partial<MemoirTtsSettings> {
   if (typeof wx === "undefined" || !wx.getStorageSync) {
     return {};

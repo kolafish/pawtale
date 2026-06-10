@@ -27,7 +27,6 @@ import {
   readMemoirTtsPlaybackState,
   subscribeMemoirTtsPlayback,
 } from "../../services/memoir-tts-player";
-import { openMemoirTtsSettingsSheet } from "../../services/memoir-tts-settings-sheet";
 import { memoirTtsViewPatch } from "../../services/memoir-tts-view";
 
 interface TouchPoint {
@@ -85,11 +84,6 @@ interface HomeData {
   ttsSourceKey: string;
   ttsMessage: string;
   ttsError: string;
-  ttsSpeed: number;
-  ttsSpeedLabel: string;
-  ttsVoice: string;
-  ttsVoiceLabel: string;
-  ttsSettingsLabel: string;
   ttsPlaying: boolean;
   ttsBusy: boolean;
 }
@@ -222,7 +216,6 @@ Page<HomeData, {
   switchQuestionBySwipe(direction: number): void;
   openPendingReview(): Promise<void>;
   toggleTtsSource(event: TtsSourceEvent): Promise<void>;
-  openTtsSettings(): Promise<void>;
   openProjects(): void;
   openStories(): void;
   openWorkbench(): void;
@@ -590,10 +583,6 @@ Page<HomeData, {
       source_id: sourceId,
       label: event.currentTarget.dataset.label || "",
     });
-  },
-
-  async openTtsSettings() {
-    await openMemoirTtsSettingsSheet();
   },
 
   openProjects() {

@@ -138,8 +138,7 @@ image {
   vertical-align: middle;
 }
 
-.tts-icon-button,
-.tts-settings-chip {
+.tts-icon-button {
   min-height: 62rpx;
   margin: 0;
   border-radius: 999rpx;
@@ -179,21 +178,7 @@ image {
   display: block;
 }
 
-.tts-settings-chip {
-  max-width: 320rpx;
-  height: 62rpx;
-  padding: 0 22rpx;
-  flex: 0 1 auto;
-  background: #fff6eb;
-  color: #7f3b32;
-  border: 1rpx solid #f0dac0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.tts-icon-button::after,
-.tts-settings-chip::after {
+.tts-icon-button::after {
   border: 0;
 }
 

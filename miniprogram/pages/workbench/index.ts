@@ -28,7 +28,6 @@ import {
   readMemoirTtsPlaybackState,
   subscribeMemoirTtsPlayback,
 } from "../../services/memoir-tts-player";
-import { openMemoirTtsSettingsSheet } from "../../services/memoir-tts-settings-sheet";
 import { memoirTtsViewPatch } from "../../services/memoir-tts-view";
 
 type WorkbenchMemoryCard = {
@@ -92,11 +91,6 @@ interface WorkbenchData {
   ttsSourceKey: string;
   ttsMessage: string;
   ttsError: string;
-  ttsSpeed: number;
-  ttsSpeedLabel: string;
-  ttsVoice: string;
-  ttsVoiceLabel: string;
-  ttsSettingsLabel: string;
   ttsPlaying: boolean;
   ttsBusy: boolean;
 }
@@ -188,7 +182,6 @@ Page<WorkbenchData, {
   loadWorkbench(): Promise<void>;
   askCandidate(event: DatasetEvent): Promise<void>;
   toggleTtsSource(event: TtsSourceEvent): Promise<void>;
-  openTtsSettings(): Promise<void>;
   continueInterview(): void;
   openPendingReview(): Promise<void>;
   openProjects(): void;
@@ -386,10 +379,6 @@ Page<WorkbenchData, {
       source_id: sourceId,
       label: event.currentTarget.dataset.label || "",
     });
-  },
-
-  async openTtsSettings() {
-    await openMemoirTtsSettingsSheet();
   },
 
   continueInterview() {

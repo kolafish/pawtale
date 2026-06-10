@@ -47,7 +47,6 @@ import {
   readMemoirTtsPlaybackState,
   subscribeMemoirTtsPlayback,
 } from "../../services/memoir-tts-player";
-import { openMemoirTtsSettingsSheet } from "../../services/memoir-tts-settings-sheet";
 import { memoirTtsViewPatch } from "../../services/memoir-tts-view";
 
 interface InputEvent {
@@ -124,11 +123,6 @@ interface QuestionData {
   ttsSourceKey: string;
   ttsMessage: string;
   ttsError: string;
-  ttsSpeed: number;
-  ttsSpeedLabel: string;
-  ttsVoice: string;
-  ttsVoiceLabel: string;
-  ttsSettingsLabel: string;
   ttsPlaying: boolean;
   ttsBusy: boolean;
 }
@@ -385,7 +379,6 @@ Page<QuestionData, {
   startRecording(): void;
   stopRecording(): void;
   toggleTtsSource(event: TtsSourceEvent): Promise<void>;
-  openTtsSettings(): Promise<void>;
   submitAnswer(): Promise<void>;
   skipCurrentQuestion(): Promise<void>;
 }>({
@@ -753,10 +746,6 @@ Page<QuestionData, {
       source_id: sourceId,
       label: event.currentTarget.dataset.label || "",
     });
-  },
-
-  async openTtsSettings() {
-    await openMemoirTtsSettingsSheet();
   },
 
   async submitAnswer() {
