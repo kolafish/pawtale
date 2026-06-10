@@ -52,7 +52,7 @@ image {
 }
 
 .eyebrow {
-  color: #0f766e;
+  color: #9f4a3c;
   font-size: 24rpx;
   font-weight: 700;
   letter-spacing: 0;
@@ -109,13 +109,13 @@ image {
 }
 
 .button-primary {
-  background: #0f766e;
+  background: #9f4a3c;
   color: #ffffff;
 }
 
 .button-secondary {
-  background: #e8faf7;
-  color: #0f766e;
+  background: #fff1ec;
+  color: #9f4a3c;
 }
 
 .button-quiet {
@@ -153,7 +153,7 @@ image {
   min-height: 64rpx;
   padding: 0;
   background: rgba(255, 255, 255, 0.88);
-  border: 2rpx solid #d7ebe4;
+  border: 2rpx solid #f2cbbb;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -161,9 +161,9 @@ image {
 }
 
 .tts-icon-button.active {
-  background: #e8faf7;
-  border-color: #128577;
-  box-shadow: 0 0 0 4rpx rgba(18, 133, 119, 0.12);
+  background: #fff1ec;
+  border-color: #9f4a3c;
+  box-shadow: 0 0 0 4rpx rgba(159, 74, 60, 0.12);
 }
 
 .tts-icon-button[disabled] {
@@ -196,8 +196,8 @@ image {
   margin-top: 16rpx;
   padding: 18rpx 20rpx;
   border-radius: 16rpx;
-  background: #ecfdf5;
-  color: #0f766e;
+  background: #fff6f1;
+  color: #9f4a3c;
   font-size: 24rpx;
   font-weight: 700;
   line-height: 1.45;
@@ -217,11 +217,11 @@ image {
   flex: 1;
   padding: 24rpx;
   border-radius: 14rpx;
-  background: #eef8f6;
+  background: #fff6f1;
 }
 
 .stat-value {
-  color: #0f766e;
+  color: #9f4a3c;
   font-size: 38rpx;
   font-weight: 800;
 }
@@ -272,7 +272,7 @@ image {
 }
 
 .bottom-nav-item.active {
-  color: #128577;
+  color: #9f4a3c;
 }
 
 .nav-mark {

@@ -23,7 +23,7 @@
   position: absolute;
   right: 0;
   top: 24rpx;
-  color: #128577;
+  color: #9f4a3c;
   font-size: 28rpx;
   font-weight: 900;
 }
@@ -48,7 +48,7 @@
 .summary-item {
   min-height: 138rpx;
   border-radius: 20rpx;
-  background: #f3fbf8;
+  background: #fff6f1;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -60,7 +60,7 @@
 }
 
 .summary-value {
-  color: #128577;
+  color: #9f4a3c;
   font-size: 50rpx;
   font-weight: 900;
   line-height: 1;
@@ -107,8 +107,8 @@
   margin: 0;
   padding: 0 28rpx;
   border-radius: 18rpx;
-  background: #e8f6f1;
-  color: #128577;
+  background: #fff1ec;
+  color: #9f4a3c;
   font-size: 26rpx;
   font-weight: 900;
   line-height: 68rpx;
@@ -137,7 +137,7 @@
   margin-top: 26rpx;
   padding: 28rpx;
   border-radius: 18rpx;
-  background: #f3fbf8;
+  background: #fff6f1;
   color: #60716d;
   font-size: 28rpx;
   line-height: 1.55;
@@ -151,8 +151,8 @@
 }
 
 .qa-card.selected {
-  outline: 4rpx solid #128577;
-  background: #f3fbf8;
+  outline: 4rpx solid #9f4a3c;
+  background: #fff6f1;
 }
 
 .record-meta {
@@ -176,8 +176,8 @@
 }
 
 .select-mark.checked {
-  border-color: #128577;
-  background: #128577;
+  border-color: #9f4a3c;
+  background: #9f4a3c;
   box-shadow: inset 0 0 0 8rpx #ffffff;
 }
 
@@ -204,7 +204,7 @@
   display: block;
   flex: 1;
   margin-top: 18rpx;
-  color: #128577;
+  color: #9f4a3c;
   font-size: 30rpx;
   font-weight: 900;
   line-height: 1.5;
@@ -234,8 +234,8 @@
 .audio-pill {
   padding: 10rpx 18rpx;
   border-radius: 999rpx;
-  background: #e8f6f1;
-  color: #128577;
+  background: #fff1ec;
+  color: #9f4a3c;
   font-size: 24rpx;
   font-weight: 900;
 }
@@ -246,7 +246,7 @@
 }
 
 .detail-link {
-  color: #128577;
+  color: #9f4a3c;
   font-size: 26rpx;
   font-weight: 900;
 }

@@ -24,7 +24,7 @@
 }
 
 .back-mark {
-  color: #128577;
+  color: #9f4a3c;
   font-size: 70rpx;
   font-weight: 300;
   line-height: 1;
@@ -70,8 +70,8 @@
   color: #ef7b32;
 }
 
-.label-green {
-  color: #128577;
+.label-primary {
+  color: #9f4a3c;
 }
 
 .question-icon {
@@ -90,7 +90,7 @@
 .bubble-icon {
   width: 50rpx;
   height: 42rpx;
-  border: 4rpx solid #128577;
+  border: 4rpx solid #9f4a3c;
   border-radius: 24rpx;
   display: flex;
   align-items: center;
@@ -102,13 +102,13 @@
   width: 6rpx;
   height: 6rpx;
   border-radius: 50%;
-  background: #128577;
+  background: #9f4a3c;
 }
 
 .doc-icon {
   width: 46rpx;
   height: 52rpx;
-  border: 4rpx solid #128577;
+  border: 4rpx solid #9f4a3c;
   border-radius: 8rpx;
   position: relative;
 }
@@ -120,7 +120,7 @@
   top: 16rpx;
   height: 5rpx;
   border-radius: 5rpx;
-  background: #128577;
+  background: #9f4a3c;
 }
 
 .doc-line.short {
@@ -178,9 +178,9 @@
 }
 
 .action-quiet {
-  border: 2rpx solid #b8ddd6;
-  background: #effbf8;
-  color: #128577;
+  border: 2rpx solid #f2cbbb;
+  background: #fff6f1;
+  color: #9f4a3c;
 }
 
 .action-warm {
@@ -211,13 +211,13 @@
 }
 
 .secondary-save {
-  border: 2rpx solid #b8ddd6;
-  background: #effbf8;
-  color: #128577;
+  border: 2rpx solid #f2cbbb;
+  background: #fff6f1;
+  color: #9f4a3c;
 }
 
 .primary-save {
-  background: #128577;
+  background: #9f4a3c;
   color: #ffffff;
 }
 

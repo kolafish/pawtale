@@ -17,7 +17,7 @@
   </view>
 
   <view class="content-panel answer-panel">
-    <view class="panel-label label-green">
+    <view class="panel-label label-primary">
       <view class="bubble-icon">
         <view></view>
         <view></view>
@@ -37,7 +37,7 @@
   </view>
 
   <view class="content-panel draft-panel">
-    <view class="panel-label label-green">
+    <view class="panel-label label-primary">
       <view class="doc-icon">
         <view class="doc-line"></view>
         <view class="doc-line short"></view>

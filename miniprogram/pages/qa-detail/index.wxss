@@ -24,7 +24,7 @@
 }
 
 .back-mark {
-  color: #128577;
+  color: #9f4a3c;
   font-size: 70rpx;
   line-height: 1;
 }
@@ -56,7 +56,7 @@
 .question-text {
   display: block;
   margin-top: 18rpx;
-  color: #128577;
+  color: #9f4a3c;
   font-size: 34rpx;
   font-weight: 900;
   line-height: 1.5;
@@ -81,7 +81,7 @@
   min-height: 96rpx;
   margin-top: 26rpx;
   border-radius: 24rpx;
-  background: #128577;
+  background: #9f4a3c;
   color: #ffffff;
   font-size: 32rpx;
   font-weight: 900;
@@ -143,7 +143,7 @@
   margin: 24rpx 0 0;
   padding: 0;
   background: transparent;
-  color: #128577;
+  color: #9f4a3c;
   font-size: 26rpx;
   font-weight: 900;
   line-height: 44rpx;
@@ -166,13 +166,13 @@
 }
 
 .action-button.primary {
-  background: #128577;
+  background: #9f4a3c;
   color: #ffffff;
 }
 
 .action-button.secondary {
-  background: #e8f6f1;
-  color: #128577;
+  background: #fff1ec;
+  color: #9f4a3c;
 }
 
 .audio-error,

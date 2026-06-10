@@ -57,11 +57,11 @@
   align-items: flex-start;
   flex-direction: column;
   gap: 8rpx;
-  background: #ecfdf5;
+  background: #fff6f1;
 }
 
 .processing-title {
-  color: #0f766e;
+  color: #9f4a3c;
   font-size: 26rpx;
   font-weight: 900;
 }
@@ -81,7 +81,7 @@
 
 .audio-state {
   flex: 1;
-  color: #0f766e;
+  color: #9f4a3c;
   font-size: 26rpx;
   font-weight: 700;
 }
@@ -139,8 +139,8 @@
 .segment-duration {
   padding: 4rpx 12rpx;
   border-radius: 999rpx;
-  background: #eef8f6;
-  color: #0f766e;
+  background: #fff6f1;
+  color: #9f4a3c;
   font-size: 22rpx;
   font-weight: 700;
 }
@@ -172,7 +172,7 @@
   margin: 0;
   padding: 0 8rpx;
   background: transparent;
-  color: #0f766e;
+  color: #9f4a3c;
   font-size: 26rpx;
   line-height: 44rpx;
 }

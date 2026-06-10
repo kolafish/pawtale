@@ -20,7 +20,7 @@
 }
 
 .back-mark {
-  color: #128577;
+  color: #9f4a3c;
   font-size: 72rpx;
   line-height: 1;
 }
@@ -66,7 +66,7 @@
 .primary-button {
   width: 100%;
   height: 96rpx;
-  background: #128577;
+  background: #9f4a3c;
   color: #ffffff;
   font-size: 32rpx;
 }
@@ -82,8 +82,8 @@
 }
 
 .project-card.active {
-  border-color: #128577;
-  background: #f3fbf8;
+  border-color: #9f4a3c;
+  background: #fff6f1;
 }
 
 .project-main {
@@ -109,8 +109,8 @@
   flex: 0 0 auto;
   padding: 8rpx 16rpx;
   border-radius: 999rpx;
-  background: #dff5ef;
-  color: #128577;
+  background: #fde5dc;
+  color: #9f4a3c;
   font-size: 22rpx;
   font-weight: 900;
 }
@@ -138,17 +138,17 @@
 }
 
 .ghost-button {
-  background: #e8f7f3;
-  color: #128577;
+  background: #fff1ec;
+  color: #9f4a3c;
 }
 
 .small-primary {
-  background: #128577;
+  background: #9f4a3c;
   color: #ffffff;
 }
 
 .small-primary.disabled {
-  background: #d7eee7;
+  background: #f6d7ca;
   color: #6d817d;
 }
 
@@ -159,7 +159,7 @@
 .rename-input {
   height: 88rpx;
   padding: 0 22rpx;
-  border: 2rpx solid #d7ebe4;
+  border: 2rpx solid #f2cbbb;
   border-radius: 18rpx;
   background: #ffffff;
   color: #24100b;

@@ -4,7 +4,7 @@
   align-items: center;
   justify-content: center;
   background: #fffaf2;
-  color: #128577;
+  color: #9f4a3c;
   font-size: 30rpx;
   font-weight: 800;
 }
