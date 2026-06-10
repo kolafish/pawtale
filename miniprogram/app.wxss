@@ -348,10 +348,10 @@ image {
 }
 
 .user-mark::before {
-  left: 16rpx;
-  top: 6rpx;
-  width: 16rpx;
-  height: 16rpx;
+  left: 14rpx;
+  top: 5rpx;
+  width: 18rpx;
+  height: 18rpx;
   border: 4rpx solid currentColor;
   border-radius: 50%;
 }
