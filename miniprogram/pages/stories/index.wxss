@@ -171,14 +171,14 @@
 }
 
 .primary-action {
-  height: 96rpx;
-  border-radius: 24rpx;
+  height: 108rpx;
+  border-radius: 30rpx;
   background: #9f4a3c;
   color: #ffffff;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 22rpx;
+  gap: 24rpx;
   font-size: 34rpx;
   font-weight: 900;
   line-height: 1;
