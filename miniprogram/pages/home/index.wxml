@@ -24,6 +24,25 @@
       <text>{{sessionTitle || "回忆录访谈"}}</text>
     </view>
     <text class="question-text">{{currentPrompt || "正在获取问题"}}</text>
+    <view wx:if="{{currentQuestionTtsSourceKey}}" class="tts-actions">
+      <button
+        class="tts-button {{ttsSourceKey === currentQuestionTtsSourceKey && ttsPlaying ? 'active' : ''}}"
+        disabled="{{ttsBusy}}"
+        data-source-type="question"
+        data-source-id="{{currentQuestionId}}"
+        data-label="问题"
+        catchtap="toggleTtsSource"
+      >
+        {{ttsSourceKey === currentQuestionTtsSourceKey && ttsPlaying ? "暂停朗读" : "朗读问题"}}
+      </button>
+      <button class="tts-speed-button" catchtap="cycleTtsSpeed">{{ttsSpeedLabel}}</button>
+    </view>
+    <text
+      wx:if="{{ttsSourceKey === currentQuestionTtsSourceKey && (ttsMessage || ttsError)}}"
+      class="tts-status {{ttsError ? 'tts-error' : ''}}"
+    >
+      {{ttsError || ttsMessage}}
+    </text>
     <view wx:if="{{hasAnswerDraft}}" class="draft-state">
       <text class="draft-label">{{answerDraftLabel}}</text>
       <text wx:if="{{answerDraftPendingLabel}}" class="draft-pending">{{answerDraftPendingLabel}}</text>
@@ -78,6 +97,25 @@
   <view class="latest-card" wx:if="{{latestOutputPreview}}">
     <text class="latest-label">最近整理</text>
     <text class="latest-text">{{latestOutputPreview}}</text>
+    <view wx:if="{{latestOutputTtsSourceKey}}" class="tts-actions">
+      <button
+        class="tts-button {{ttsSourceKey === latestOutputTtsSourceKey && ttsPlaying ? 'active' : ''}}"
+        disabled="{{ttsBusy}}"
+        data-source-type="{{latestOutputTtsSourceType}}"
+        data-source-id="{{latestOutputId}}"
+        data-label="最近整理"
+        catchtap="toggleTtsSource"
+      >
+        {{ttsSourceKey === latestOutputTtsSourceKey && ttsPlaying ? "暂停朗读" : "朗读整理"}}
+      </button>
+      <button class="tts-speed-button" catchtap="cycleTtsSpeed">{{ttsSpeedLabel}}</button>
+    </view>
+    <text
+      wx:if="{{ttsSourceKey === latestOutputTtsSourceKey && (ttsMessage || ttsError)}}"
+      class="tts-status {{ttsError ? 'tts-error' : ''}}"
+    >
+      {{ttsError || ttsMessage}}
+    </text>
   </view>
 
   <view class="bottom-nav">

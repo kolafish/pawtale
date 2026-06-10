@@ -6,8 +6,11 @@ import type {
   MemoirOutput,
   MemoirPersonMemory,
   MemoirPlaceMemory,
+  MemoirQuestion,
   MemoirQuestionCandidate,
+  MemoirSessionSummary,
   MemoirThemeMemory,
+  MemoirTtsSourceType,
 } from "../../domain/memoir";
 import { loadMemoirDashboard } from "../../services/memoir-dashboard";
 import {
@@ -25,12 +28,29 @@ import {
   writeMemoirStoryDetailSnapshot,
 } from "../../stores/memoir-cache";
 import { readMemoirStore, writeMemoirStore } from "../../stores/session";
+import {
+  cycleMemoirTtsPlaybackSpeed,
+  memoirTtsSourceKey,
+  pauseMemoirTtsPlayback,
+  playMemoirTtsPlayback,
+  readMemoirTtsPlaybackState,
+  subscribeMemoirTtsPlayback,
+} from "../../services/memoir-tts-player";
+import { memoirTtsViewPatch } from "../../services/memoir-tts-view";
 
 type MemoryCard =
   | { type: "person"; typeLabel: string; id: string; title: string; detail: string; status: MemoirMemoryStatus; confidenceText: string; evidence: string }
   | { type: "event"; typeLabel: string; id: string; title: string; detail: string; status: MemoirMemoryStatus; confidenceText: string; evidence: string }
   | { type: "place"; typeLabel: string; id: string; title: string; detail: string; status: MemoirMemoryStatus; confidenceText: string; evidence: string }
   | { type: "theme"; typeLabel: string; id: string; title: string; detail: string; status: MemoirMemoryStatus; confidenceText: string; evidence: string };
+
+type ReviewOpenQuestion = MemoirOpenQuestion & {
+  ttsSourceKey: string;
+};
+
+type ReviewOutput = MemoirOutput & {
+  ttsSourceKey: string;
+};
 
 interface DatasetEvent {
   currentTarget: {
@@ -41,22 +61,45 @@ interface DatasetEvent {
   };
 }
 
+interface TtsSourceEvent {
+  currentTarget: {
+    dataset: {
+      sourceType?: MemoirTtsSourceType;
+      sourceId?: string;
+      label?: string;
+    };
+  };
+}
+
 interface ReviewData {
   answerId: string;
   sessionId: string;
+  questionId: string;
   questionPrompt: string;
+  questionTtsSourceKey: string;
+  answerTtsSourceKey: string;
   transcript: string;
   summaryText: string;
+  sessionSummaryId: string;
+  sessionSummaryTtsSourceKey: string;
   loading: boolean;
   processing: boolean;
   refreshing: boolean;
   selecting: boolean;
   error: string;
   memoryCards: MemoryCard[];
-  openQuestions: MemoirOpenQuestion[];
+  openQuestions: ReviewOpenQuestion[];
   coverage: MemoirCoverageItem[];
   candidates: MemoirQuestionCandidate[];
-  outputs: MemoirOutput[];
+  outputs: ReviewOutput[];
+  ttsStatus: string;
+  ttsSourceKey: string;
+  ttsMessage: string;
+  ttsError: string;
+  ttsSpeed: number;
+  ttsSpeedLabel: string;
+  ttsPlaying: boolean;
+  ttsBusy: boolean;
 }
 
 function memoryStatusText(status: MemoirMemoryStatus): string {
@@ -119,8 +162,35 @@ function buildMemoryCards(
   ];
 }
 
+function openQuestionView(item: MemoirOpenQuestion): ReviewOpenQuestion {
+  return {
+    ...item,
+    ttsSourceKey: memoirTtsSourceKey({ source_type: "open_question", source_id: item.id }),
+  };
+}
+
+function outputView(item: MemoirOutput): ReviewOutput {
+  return {
+    ...item,
+    ttsSourceKey: memoirTtsSourceKey({ source_type: "output", source_id: item.id }),
+  };
+}
+
+function questionTtsSourceKey(question?: MemoirQuestion): string {
+  return question ? memoirTtsSourceKey({ source_type: "question", source_id: question.id }) : "";
+}
+
+function summaryTtsSourceKey(sessionSummary?: MemoirSessionSummary | null): string {
+  return sessionSummary?.id
+    ? memoirTtsSourceKey({ source_type: "session_summary", source_id: sessionSummary.id })
+    : "";
+}
+
 Page<ReviewData, {
+  unsubscribeTtsPlayback?: () => void;
   onLoad(query?: Record<string, string | undefined>): Promise<void>;
+  onUnload(): void;
+  registerTtsPlayback(): void;
   hydrateFromStore(answerId: string): string;
   hydrateFromDashboardSnapshot(sessionId: string): boolean;
   loadStoryDetail(answerId: string): Promise<string>;
@@ -136,7 +206,11 @@ Page<ReviewData, {
     candidates: MemoirQuestionCandidate[];
     outputs: MemoirOutput[];
     summaryText: string;
+    sessionSummaryId: string;
+    sessionSummaryTtsSourceKey: string;
   }): void;
+  toggleTtsSource(event: TtsSourceEvent): Promise<void>;
+  cycleTtsSpeed(): void;
   confirmMemory(event: DatasetEvent): Promise<void>;
   rejectMemory(event: DatasetEvent): Promise<void>;
   updateMemory(event: DatasetEvent, status: MemoirMemoryStatus): Promise<void>;
@@ -150,9 +224,14 @@ Page<ReviewData, {
   data: {
     answerId: "",
     sessionId: "",
+    questionId: "",
     questionPrompt: "",
+    questionTtsSourceKey: "",
+    answerTtsSourceKey: "",
     transcript: "",
     summaryText: "",
+    sessionSummaryId: "",
+    sessionSummaryTtsSourceKey: "",
     loading: false,
     processing: false,
     refreshing: false,
@@ -163,9 +242,11 @@ Page<ReviewData, {
     coverage: [],
     candidates: [],
     outputs: [],
+    ...memoirTtsViewPatch(readMemoirTtsPlaybackState()),
   },
 
   async onLoad(query) {
+    this.registerTtsPlayback();
     const routeSessionId = query?.sessionId || "";
     const answerId = query?.answerId || (routeSessionId ? "" : readMemoirStore().answer?.id || "");
     this.setData({ answerId });
@@ -193,6 +274,22 @@ Page<ReviewData, {
     }
   },
 
+  onUnload() {
+    if (this.unsubscribeTtsPlayback) {
+      this.unsubscribeTtsPlayback();
+      this.unsubscribeTtsPlayback = undefined;
+    }
+  },
+
+  registerTtsPlayback() {
+    if (this.unsubscribeTtsPlayback) {
+      return;
+    }
+    this.unsubscribeTtsPlayback = subscribeMemoirTtsPlayback((playbackState) => {
+      this.setData(memoirTtsViewPatch(playbackState));
+    });
+  },
+
   hydrateFromStore(answerId) {
     const state = readMemoirStore();
     const answer = state.answer?.id === answerId ? state.answer : undefined;
@@ -200,8 +297,13 @@ Page<ReviewData, {
       ? state.question
       : state.interview?.questions.find((item) => item.id === answer?.question_id);
     this.setData({
+      questionId: question?.id || this.data.questionId,
       transcript: answer?.transcript_edited || answer?.transcript_raw || "",
       questionPrompt: question?.prompt || this.data.questionPrompt,
+      questionTtsSourceKey: questionTtsSourceKey(question) || this.data.questionTtsSourceKey,
+      answerTtsSourceKey: answer?.id
+        ? memoirTtsSourceKey({ source_type: "answer", source_id: answer.id })
+        : this.data.answerTtsSourceKey,
     });
     return question?.session_id || state.interview?.session.id || "";
   },
@@ -224,6 +326,10 @@ Page<ReviewData, {
       candidates: snapshot.candidates,
       outputs: snapshot.outputs,
       summaryText: snapshot.sessionSummary?.session_id === sessionId ? snapshot.sessionSummary.summary : "",
+      sessionSummaryId: snapshot.sessionSummary?.session_id === sessionId ? snapshot.sessionSummary.id : "",
+      sessionSummaryTtsSourceKey: snapshot.sessionSummary?.session_id === sessionId
+        ? summaryTtsSourceKey(snapshot.sessionSummary)
+        : "",
     });
     return true;
   },
@@ -239,7 +345,10 @@ Page<ReviewData, {
       });
       writeMemoirStoryDetailSnapshot(detail);
       this.setData({
+        questionId: detail.question.id,
         questionPrompt: detail.question.prompt,
+        questionTtsSourceKey: questionTtsSourceKey(detail.question),
+        answerTtsSourceKey: memoirTtsSourceKey({ source_type: "answer", source_id: detail.answer.id }),
         transcript: detail.answer.transcript_edited || detail.answer.transcript_raw,
       });
       return detail.question.session_id;
@@ -294,6 +403,10 @@ Page<ReviewData, {
         candidates,
         outputs,
         summaryText: sessionSummary?.session_id === this.data.sessionId ? sessionSummary.summary : "",
+        sessionSummaryId: sessionSummary?.session_id === this.data.sessionId ? sessionSummary.id : "",
+        sessionSummaryTtsSourceKey: sessionSummary?.session_id === this.data.sessionId
+          ? summaryTtsSourceKey(sessionSummary)
+          : "",
       });
     } catch (error) {
       this.setData({ error: error instanceof Error ? error.message : "记忆面板加载失败" });
@@ -305,12 +418,36 @@ Page<ReviewData, {
   applyReviewData(input) {
     this.setData({
       summaryText: input.summaryText,
+      sessionSummaryId: input.sessionSummaryId,
+      sessionSummaryTtsSourceKey: input.sessionSummaryTtsSourceKey,
       memoryCards: buildMemoryCards(input.people, input.events, input.places, input.themes),
-      openQuestions: input.openQuestions.filter((item) => item.status === "open"),
+      openQuestions: input.openQuestions.filter((item) => item.status === "open").map(openQuestionView),
       coverage: input.coverage,
       candidates: input.candidates,
-      outputs: input.outputs,
+      outputs: input.outputs.map(outputView),
     });
+  },
+
+  async toggleTtsSource(event) {
+    const sourceType = event.currentTarget.dataset.sourceType;
+    const sourceId = event.currentTarget.dataset.sourceId || "";
+    if (!sourceType || !sourceId || this.data.ttsBusy) {
+      return;
+    }
+    const sourceKey = memoirTtsSourceKey({ source_type: sourceType, source_id: sourceId });
+    if (this.data.ttsSourceKey === sourceKey && this.data.ttsPlaying) {
+      pauseMemoirTtsPlayback();
+      return;
+    }
+    await playMemoirTtsPlayback({
+      source_type: sourceType,
+      source_id: sourceId,
+      label: event.currentTarget.dataset.label || "",
+    });
+  },
+
+  cycleTtsSpeed() {
+    cycleMemoirTtsPlaybackSpeed();
   },
 
   async confirmMemory(event) {
