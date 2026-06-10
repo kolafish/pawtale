@@ -33,7 +33,7 @@
       >
         <image class="tts-icon" src="/assets/tts-speaker.png" mode="aspectFit" />
       </button>
-      <button class="tts-speed-chip" bindtap="cycleTtsSpeed">{{ttsSpeedLabel}}</button>
+      <button class="tts-settings-chip" bindtap="openTtsSettings">{{ttsSettingsLabel}}</button>
     </view>
     <text
       wx:if="{{(ttsSourceKey === questionTtsSourceKey || ttsSourceKey === answerTtsSourceKey) && ttsError}}"
@@ -61,7 +61,7 @@
       >
         <image class="tts-icon" src="/assets/tts-speaker.png" mode="aspectFit" />
       </button>
-      <button class="tts-speed-chip" bindtap="cycleTtsSpeed">{{ttsSpeedLabel}}</button>
+      <button class="tts-settings-chip" bindtap="openTtsSettings">{{ttsSettingsLabel}}</button>
     </view>
     <text
       wx:if="{{ttsSourceKey === sessionSummaryTtsSourceKey && ttsError}}"
@@ -91,7 +91,13 @@
         >
           <image class="tts-icon" src="/assets/tts-speaker.png" mode="aspectFit" />
         </button>
-        <button class="tts-speed-chip" bindtap="cycleTtsSpeed">{{ttsSpeedLabel}}</button>
+        <button
+          wx:if="{{ttsSourceKey === item.ttsSourceKey}}"
+          class="tts-settings-chip"
+          bindtap="openTtsSettings"
+        >
+          {{ttsSettingsLabel}}
+        </button>
       </view>
       <text
         wx:if="{{ttsSourceKey === item.ttsSourceKey && ttsError}}"
@@ -167,7 +173,13 @@
         >
           <image class="tts-icon" src="/assets/tts-speaker.png" mode="aspectFit" />
         </button>
-        <button class="tts-speed-chip" catchtap="cycleTtsSpeed">{{ttsSpeedLabel}}</button>
+        <button
+          wx:if="{{ttsSourceKey === item.ttsSourceKey}}"
+          class="tts-settings-chip"
+          catchtap="openTtsSettings"
+        >
+          {{ttsSettingsLabel}}
+        </button>
       </view>
       <text
         wx:if="{{ttsSourceKey === item.ttsSourceKey && ttsError}}"

@@ -4,8 +4,15 @@ import {
   processMemoirTtsJob,
   type MemoirTtsAssetInput,
 } from "./memoir";
+import {
+  MEMOIR_TTS_PLAYBACK_SPEEDS,
+  normalizeMemoirTtsPlaybackSpeed,
+  normalizeMemoirTtsVoice,
+  readMemoirTtsSettings,
+  writeMemoirTtsSettings,
+} from "./memoir-tts-settings";
 
-export const MEMOIR_TTS_PLAYBACK_SPEEDS = [0.75, 1, 1.25, 1.5, 2] as const;
+export { MEMOIR_TTS_PLAYBACK_SPEEDS };
 
 export type MemoirTtsPlaybackStatus =
   | "idle"
@@ -26,6 +33,7 @@ export interface MemoirTtsPlaybackState {
   status: MemoirTtsPlaybackStatus;
   source_key: string;
   source_label: string;
+  voice: string;
   speed: number;
   asset?: MemoirTtsAsset;
   temp_url: string;
@@ -40,12 +48,14 @@ type MemoirTtsPlaybackListener = (state: MemoirTtsPlaybackState) => void;
 let audioContext: WechatMiniprogram.InnerAudioContext | null = null;
 const listeners = new Set<MemoirTtsPlaybackListener>();
 let prepareSequence = 0;
+const initialSettings = readMemoirTtsSettings();
 
 let state: MemoirTtsPlaybackState = {
   status: "idle",
   source_key: "",
   source_label: "",
-  speed: 1,
+  voice: initialSettings.voice,
+  speed: initialSettings.speed,
   temp_url: "",
   position_seconds: 0,
   duration_seconds: 0,
@@ -56,21 +66,7 @@ let state: MemoirTtsPlaybackState = {
 export function memoirTtsSourceKey(source: MemoirTtsPlaybackSource): string {
   return `${source.source_type}:${source.source_id}`;
 }
-
-export function normalizeMemoirTtsPlaybackSpeed(speed: number): number {
-  if (!Number.isFinite(speed)) {
-    return 1;
-  }
-  return MEMOIR_TTS_PLAYBACK_SPEEDS.reduce((closest, candidate) => {
-    return Math.abs(candidate - speed) < Math.abs(closest - speed) ? candidate : closest;
-  }, 1);
-}
-
-export function nextMemoirTtsPlaybackSpeed(currentSpeed: number): number {
-  const normalized = normalizeMemoirTtsPlaybackSpeed(currentSpeed);
-  const index = MEMOIR_TTS_PLAYBACK_SPEEDS.indexOf(normalized as (typeof MEMOIR_TTS_PLAYBACK_SPEEDS)[number]);
-  return MEMOIR_TTS_PLAYBACK_SPEEDS[(index + 1) % MEMOIR_TTS_PLAYBACK_SPEEDS.length];
-}
+export { normalizeMemoirTtsPlaybackSpeed, normalizeMemoirTtsVoice };
 
 function emit(nextState: MemoirTtsPlaybackState): MemoirTtsPlaybackState {
   state = nextState;
@@ -162,11 +158,21 @@ function getTempFileUrl(fileId: string): Promise<string> {
   });
 }
 
+function playbackOptions(options: Omit<MemoirTtsAssetInput, "source_type" | "source_id">): Omit<MemoirTtsAssetInput, "source_type" | "source_id"> {
+  return {
+    voice: options.voice || readMemoirTtsSettings().voice,
+    model: options.model,
+    format: options.format,
+    synthesis_speed: options.synthesis_speed,
+  };
+}
+
 export async function prepareMemoirTtsPlayback(
   source: MemoirTtsPlaybackSource,
   options: Omit<MemoirTtsAssetInput, "source_type" | "source_id"> = {},
 ): Promise<MemoirTtsPlaybackState> {
   const sourceKey = memoirTtsSourceKey(source);
+  const resolvedOptions = playbackOptions(options);
   const sequence = prepareSequence + 1;
   prepareSequence = sequence;
   patchState({
@@ -177,6 +183,7 @@ export async function prepareMemoirTtsPlayback(
     temp_url: "",
     position_seconds: 0,
     duration_seconds: 0,
+    voice: normalizeMemoirTtsVoice(resolvedOptions.voice),
     message: "",
     error: "",
   });
@@ -185,7 +192,7 @@ export async function prepareMemoirTtsPlayback(
     const created = await createMemoirTtsAsset({
       source_type: source.source_type,
       source_id: source.source_id,
-      ...options,
+      ...resolvedOptions,
     });
     let asset = created.asset || null;
     if (!asset && created.job) {
@@ -228,9 +235,11 @@ export async function playMemoirTtsPlayback(
   options: Omit<MemoirTtsAssetInput, "source_type" | "source_id"> = {},
 ): Promise<MemoirTtsPlaybackState> {
   const sourceKey = memoirTtsSourceKey(source);
-  const prepared = state.source_key === sourceKey && state.temp_url
+  const resolvedOptions = playbackOptions(options);
+  const voice = normalizeMemoirTtsVoice(resolvedOptions.voice);
+  const prepared = state.source_key === sourceKey && state.temp_url && state.voice === voice
     ? state
-    : await prepareMemoirTtsPlayback(source, options);
+    : await prepareMemoirTtsPlayback(source, resolvedOptions);
   if (prepared.source_key !== sourceKey) {
     return readMemoirTtsPlaybackState();
   }
@@ -265,12 +274,33 @@ export function stopMemoirTtsPlayback(): MemoirTtsPlaybackState {
 
 export function setMemoirTtsPlaybackSpeed(speed: number): MemoirTtsPlaybackState {
   const normalized = normalizeMemoirTtsPlaybackSpeed(speed);
+  writeMemoirTtsSettings({ speed: normalized });
   setAudioPlaybackSpeed(normalized);
   return patchState({ speed: normalized });
 }
 
-export function cycleMemoirTtsPlaybackSpeed(): MemoirTtsPlaybackState {
-  return setMemoirTtsPlaybackSpeed(nextMemoirTtsPlaybackSpeed(state.speed));
+export function setMemoirTtsPlaybackVoice(voice: string): MemoirTtsPlaybackState {
+  const normalized = normalizeMemoirTtsVoice(voice);
+  writeMemoirTtsSettings({ voice: normalized });
+  if (state.voice === normalized) {
+    return readMemoirTtsPlaybackState();
+  }
+  prepareSequence += 1;
+  if (audioContext) {
+    audioContext.stop();
+  }
+  return patchState({
+    status: "idle",
+    source_key: "",
+    source_label: "",
+    voice: normalized,
+    asset: undefined,
+    temp_url: "",
+    position_seconds: 0,
+    duration_seconds: 0,
+    message: "",
+    error: "",
+  });
 }
 
 export function destroyMemoirTtsPlayback(): void {
@@ -283,6 +313,7 @@ export function destroyMemoirTtsPlayback(): void {
     status: "idle",
     source_key: "",
     source_label: "",
+    voice: state.voice,
     speed: state.speed,
     temp_url: "",
     position_seconds: 0,

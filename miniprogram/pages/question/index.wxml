@@ -20,7 +20,7 @@
       >
         <image class="tts-icon" src="/assets/tts-speaker.png" mode="aspectFit" />
       </button>
-      <button class="tts-speed-chip" bindtap="cycleTtsSpeed">{{ttsSpeedLabel}}</button>
+      <button class="tts-settings-chip" bindtap="openTtsSettings">{{ttsSettingsLabel}}</button>
     </view>
     <text
       wx:if="{{ttsSourceKey === questionTtsSourceKey && ttsError}}"

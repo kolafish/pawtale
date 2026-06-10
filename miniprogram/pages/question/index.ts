@@ -41,13 +41,13 @@ import {
 } from "../../stores/memoir-input-drafts";
 import { clearMemoirDraft, writeMemoirStore } from "../../stores/session";
 import {
-  cycleMemoirTtsPlaybackSpeed,
   memoirTtsSourceKey,
   pauseMemoirTtsPlayback,
   playMemoirTtsPlayback,
   readMemoirTtsPlaybackState,
   subscribeMemoirTtsPlayback,
 } from "../../services/memoir-tts-player";
+import { openMemoirTtsSettingsSheet } from "../../services/memoir-tts-settings-sheet";
 import { memoirTtsViewPatch } from "../../services/memoir-tts-view";
 
 interface InputEvent {
@@ -126,6 +126,9 @@ interface QuestionData {
   ttsError: string;
   ttsSpeed: number;
   ttsSpeedLabel: string;
+  ttsVoice: string;
+  ttsVoiceLabel: string;
+  ttsSettingsLabel: string;
   ttsPlaying: boolean;
   ttsBusy: boolean;
 }
@@ -382,7 +385,7 @@ Page<QuestionData, {
   startRecording(): void;
   stopRecording(): void;
   toggleTtsSource(event: TtsSourceEvent): Promise<void>;
-  cycleTtsSpeed(): void;
+  openTtsSettings(): Promise<void>;
   submitAnswer(): Promise<void>;
   skipCurrentQuestion(): Promise<void>;
 }>({
@@ -752,8 +755,8 @@ Page<QuestionData, {
     });
   },
 
-  cycleTtsSpeed() {
-    cycleMemoirTtsPlaybackSpeed();
+  async openTtsSettings() {
+    await openMemoirTtsSettingsSheet();
   },
 
   async submitAnswer() {

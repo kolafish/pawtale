@@ -6,13 +6,13 @@ import {
   shouldRefreshMemoirDashboardSnapshot,
 } from "../../stores/memoir-cache";
 import {
-  cycleMemoirTtsPlaybackSpeed,
   memoirTtsSourceKey,
   pauseMemoirTtsPlayback,
   playMemoirTtsPlayback,
   readMemoirTtsPlaybackState,
   subscribeMemoirTtsPlayback,
 } from "../../services/memoir-tts-player";
+import { openMemoirTtsSettingsSheet } from "../../services/memoir-tts-settings-sheet";
 import { memoirTtsViewPatch } from "../../services/memoir-tts-view";
 
 type OutputFilter = "all" | "story_fragment";
@@ -49,6 +49,9 @@ interface StoriesData {
   ttsError: string;
   ttsSpeed: number;
   ttsSpeedLabel: string;
+  ttsVoice: string;
+  ttsVoiceLabel: string;
+  ttsSettingsLabel: string;
   ttsPlaying: boolean;
   ttsBusy: boolean;
 }
@@ -88,7 +91,7 @@ Page<StoriesData, {
   selectFragments(): void;
   setActiveFilter(filter: OutputFilter): void;
   toggleTtsSource(event: TtsSourceEvent): Promise<void>;
-  cycleTtsSpeed(): void;
+  openTtsSettings(): Promise<void>;
   continueInterview(): void;
   backWorkbench(): void;
   openHome(): void;
@@ -216,8 +219,8 @@ Page<StoriesData, {
     });
   },
 
-  cycleTtsSpeed() {
-    cycleMemoirTtsPlaybackSpeed();
+  async openTtsSettings() {
+    await openMemoirTtsSettingsSheet();
   },
 
   continueInterview() {

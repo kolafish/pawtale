@@ -238,6 +238,14 @@ declare namespace WechatMiniprogram {
     complete?(result: GeneralCallbackResult): void;
   }
 
+  interface ActionSheetOption {
+    itemList: string[];
+    itemColor?: string;
+    success?(result: { tapIndex: number; errMsg?: string }): void;
+    fail?(result: GeneralCallbackResult): void;
+    complete?(result: GeneralCallbackResult): void;
+  }
+
   interface Wx {
     cloud: Cloud;
     request<T = unknown>(option: RequestOption<T>): void;
@@ -252,6 +260,7 @@ declare namespace WechatMiniprogram {
     redirectTo(option: NavigateOption): void;
     reLaunch(option: NavigateOption): void;
     navigateBack(option?: NavigateBackOption): void;
+    showActionSheet(option: ActionSheetOption): void;
     showModal(option: ModalOption): void;
     showToast(option: ToastOption): void;
     showLoading(option: LoadingOption): void;
