@@ -13,6 +13,15 @@ export type MemoirSensitivity = "low" | "medium" | "high";
 export type MemoirOpenQuestionStatus = "open" | "asked" | "answered" | "dismissed";
 export type MemoirCoverageStatus = "red" | "yellow" | "green";
 export type MemoirQuestionCandidateStatus = "candidate" | "selected" | "asked" | "dismissed";
+export type MemoirTtsSourceType =
+  | "question"
+  | "open_question"
+  | "answer"
+  | "draft"
+  | "output"
+  | "output_version"
+  | "session_summary";
+export type MemoirTtsJobStatus = "queued" | "running" | "completed" | "failed";
 
 export interface User {
   id: string;
@@ -179,6 +188,59 @@ export interface MemoirAudioTranscription {
   audio_file_id: string;
   text: string;
   usage?: Record<string, unknown>;
+}
+
+export interface MemoirTtsAsset {
+  id: string;
+  project_id: string;
+  source_type: MemoirTtsSourceType;
+  source_id: string;
+  source_version: string;
+  text_hash: string;
+  text_preview: string;
+  text_length: number;
+  file_id: string;
+  cloud_path: string;
+  mime_type: string;
+  size_bytes: number;
+  model: string;
+  voice: string;
+  format: "mp3";
+  synthesis_speed: number;
+  chunk_count: number;
+  created_at: string;
+  updated_at: string;
+  generated_at: string;
+}
+
+export interface MemoirTtsJob {
+  id: string;
+  project_id: string;
+  source_type: MemoirTtsSourceType;
+  source_id: string;
+  source_version: string;
+  text_hash: string;
+  text_preview: string;
+  text_length: number;
+  tts_asset_id?: string | null;
+  status: MemoirTtsJobStatus;
+  model: string;
+  voice: string;
+  format: "mp3";
+  synthesis_speed: number;
+  chunk_count: number;
+  error_message: string;
+  created_at: string;
+  updated_at: string;
+  started_at?: string | null;
+  completed_at?: string | null;
+  asset?: MemoirTtsAsset;
+}
+
+export interface MemoirTtsAssetResponse {
+  asset?: MemoirTtsAsset | null;
+  job?: MemoirTtsJob | null;
+  reused: boolean;
 }
 
 export interface MemoirDraft {

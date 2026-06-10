@@ -26,6 +26,10 @@ import type {
   MemoirStoryList,
   MemoirStoryDetail,
   MemoirThemeMemory,
+  MemoirTtsAsset,
+  MemoirTtsAssetResponse,
+  MemoirTtsJob,
+  MemoirTtsSourceType,
   Project,
 } from "../domain/memoir";
 import { getMemoirIdentity } from "./auth";
@@ -275,6 +279,37 @@ export function uploadMemoirAudioFile(filePath: string, durationSeconds?: number
 export function transcribeMemoirAudioFile(audioFileId: string): Promise<MemoirAudioTranscription> {
   return request<MemoirAudioTranscription>(`/api/mobile/memoir/audio-files/${audioFileId}/transcribe`, {
     method: "POST",
+  });
+}
+
+export interface MemoirTtsAssetInput {
+  source_type: MemoirTtsSourceType;
+  source_id: string;
+  voice?: string;
+  model?: string;
+  format?: "mp3";
+  synthesis_speed?: number;
+}
+
+export function createMemoirTtsAsset(data: MemoirTtsAssetInput): Promise<MemoirTtsAssetResponse> {
+  return request<MemoirTtsAssetResponse>("/api/mobile/memoir/tts-assets", {
+    method: "POST",
+    data,
+  });
+}
+
+export function getMemoirTtsAsset(ttsAssetId: string): Promise<MemoirTtsAsset> {
+  return request<MemoirTtsAsset>(`/api/mobile/memoir/tts-assets/${ttsAssetId}`);
+}
+
+export function getMemoirTtsJob(ttsJobId: string): Promise<MemoirTtsJob> {
+  return request<MemoirTtsJob>(`/api/mobile/memoir/tts-jobs/${ttsJobId}`);
+}
+
+export function processMemoirTtsJob(ttsJobId: string): Promise<MemoirTtsJob> {
+  return request<MemoirTtsJob>(`/api/mobile/memoir/tts-jobs/${ttsJobId}/process`, {
+    method: "POST",
+    data: {},
   });
 }
 
