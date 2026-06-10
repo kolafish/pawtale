@@ -11,6 +11,25 @@
   <view class="surface">
     <text class="eyebrow">{{sessionTitle || "访谈问答"}}</text>
     <text class="question-text">{{questionPrompt || "正在加载问题"}}</text>
+    <view wx:if="{{questionTtsSourceKey}}" class="tts-actions">
+      <button
+        class="tts-button {{ttsSourceKey === questionTtsSourceKey && ttsPlaying ? 'active' : ''}}"
+        disabled="{{ttsBusy}}"
+        data-source-type="question"
+        data-source-id="{{questionId}}"
+        data-label="问题"
+        bindtap="toggleTtsSource"
+      >
+        {{ttsSourceKey === questionTtsSourceKey && ttsPlaying ? "暂停朗读" : "朗读问题"}}
+      </button>
+      <button class="tts-speed-button" bindtap="cycleTtsSpeed">{{ttsSpeedLabel}}</button>
+    </view>
+    <text
+      wx:if="{{ttsSourceKey === questionTtsSourceKey && (ttsMessage || ttsError)}}"
+      class="tts-status {{ttsError ? 'tts-error' : ''}}"
+    >
+      {{ttsError || ttsMessage}}
+    </text>
   </view>
 
   <view class="surface">
@@ -41,15 +60,60 @@
       disabled="{{loading || saving || submitting || recording || uploadingAudio || transcribingAudio}}"
       bindinput="onAnswerInput"
     />
+    <view wx:if="{{answerTtsSourceKey}}" class="tts-actions">
+      <button
+        class="tts-button {{ttsSourceKey === answerTtsSourceKey && ttsPlaying ? 'active' : ''}}"
+        disabled="{{ttsBusy}}"
+        data-source-type="answer"
+        data-source-id="{{answerId}}"
+        data-label="回答"
+        bindtap="toggleTtsSource"
+      >
+        {{ttsSourceKey === answerTtsSourceKey && ttsPlaying ? "暂停朗读" : "朗读回答"}}
+      </button>
+      <button class="tts-speed-button" bindtap="cycleTtsSpeed">{{ttsSpeedLabel}}</button>
+    </view>
+    <text
+      wx:if="{{ttsSourceKey === answerTtsSourceKey && (ttsMessage || ttsError)}}"
+      class="tts-status {{ttsError ? 'tts-error' : ''}}"
+    >
+      {{ttsError || ttsMessage}}
+    </text>
     <view wx:if="{{transcriptRaw && transcriptRaw !== answerText}}" class="raw-block">
       <text class="detail-label">ASR 原文</text>
       <text class="raw-text">{{transcriptRaw}}</text>
     </view>
   </view>
 
+  <view wx:if="{{draftContent}}" class="surface">
+    <view class="section-row">
+      <text class="section-title">整理稿</text>
+    </view>
+    <text class="draft-text">{{draftContent}}</text>
+    <view wx:if="{{draftTtsSourceKey}}" class="tts-actions">
+      <button
+        class="tts-button {{ttsSourceKey === draftTtsSourceKey && ttsPlaying ? 'active' : ''}}"
+        disabled="{{ttsBusy}}"
+        data-source-type="draft"
+        data-source-id="{{draftId}}"
+        data-label="整理稿"
+        bindtap="toggleTtsSource"
+      >
+        {{ttsSourceKey === draftTtsSourceKey && ttsPlaying ? "暂停朗读" : "朗读整理稿"}}
+      </button>
+      <button class="tts-speed-button" bindtap="cycleTtsSpeed">{{ttsSpeedLabel}}</button>
+    </view>
+    <text
+      wx:if="{{ttsSourceKey === draftTtsSourceKey && (ttsMessage || ttsError)}}"
+      class="tts-status {{ttsError ? 'tts-error' : ''}}"
+    >
+      {{ttsError || ttsMessage}}
+    </text>
+  </view>
+
   <view class="surface">
     <view class="section-row">
-      <text class="section-title">重新回答</text>
+      <text class="section-title">继续回答</text>
       <text wx:if="{{newAudioSummary}}" class="muted">{{newAudioSummary}}</text>
     </view>
     <button
@@ -61,14 +125,14 @@
     >
       <block wx:if="{{uploadingAudio}}">保存中</block>
       <block wx:elif="{{transcribingAudio}}">转写中</block>
-      <block wx:else>重新录音</block>
+      <block wx:else>继续录音</block>
     </button>
     <button
       wx:else
       class="record-button record-button-active"
       bindtap="stopRecording"
     >
-      停止录音
+      暂停并保存本段
     </button>
     <button
       wx:if="{{newAudioSummary && !recording && !uploadingAudio && !transcribingAudio}}"
@@ -95,7 +159,7 @@
       disabled="{{loading || saving || submitting || recording || uploadingAudio || transcribingAudio}}"
       bindtap="submitReanswer"
     >
-      提交重答
+      提交继续回答
     </button>
   </view>
 </view>

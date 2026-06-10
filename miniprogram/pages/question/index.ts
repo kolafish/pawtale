@@ -2,6 +2,7 @@ import type {
   MemoirAnswerSegment,
   MemoirAnswerSegmentStatus,
   MemoirQuestion,
+  MemoirTtsSourceType,
 } from "../../domain/memoir";
 import {
   appendMemoirAnswerSegment,
@@ -39,6 +40,15 @@ import {
   writeMemoirQuestionInputDraft,
 } from "../../stores/memoir-input-drafts";
 import { clearMemoirDraft, writeMemoirStore } from "../../stores/session";
+import {
+  cycleMemoirTtsPlaybackSpeed,
+  memoirTtsSourceKey,
+  pauseMemoirTtsPlayback,
+  playMemoirTtsPlayback,
+  readMemoirTtsPlaybackState,
+  subscribeMemoirTtsPlayback,
+} from "../../services/memoir-tts-player";
+import { memoirTtsViewPatch } from "../../services/memoir-tts-view";
 
 interface InputEvent {
   detail: {
@@ -50,6 +60,16 @@ interface SegmentInputEvent extends InputEvent {
   currentTarget: {
     dataset: {
       localId?: string;
+    };
+  };
+}
+
+interface TtsSourceEvent {
+  currentTarget: {
+    dataset: {
+      sourceType?: MemoirTtsSourceType;
+      sourceId?: string;
+      label?: string;
     };
   };
 }
@@ -99,6 +119,15 @@ interface QuestionData {
   legacyAudioDurationSeconds: number | null;
   audioSummary: string;
   isCompleted: boolean;
+  questionTtsSourceKey: string;
+  ttsStatus: string;
+  ttsSourceKey: string;
+  ttsMessage: string;
+  ttsError: string;
+  ttsSpeed: number;
+  ttsSpeedLabel: string;
+  ttsPlaying: boolean;
+  ttsBusy: boolean;
 }
 
 type QuestionPageInstance = {
@@ -111,6 +140,7 @@ type QuestionPageInstance = {
   beginSegmentProcessing(message: string): void;
   endSegmentProcessing(): void;
   audioRecordingSession?: MemoirAudioRecorderSession;
+  unsubscribeTtsPlayback?: () => void;
 };
 
 let recordingTimer: ReturnType<typeof setInterval> | null = null;
@@ -333,9 +363,11 @@ function createQuestionRecorderSession(page: QuestionPageInstance): MemoirAudioR
 
 Page<QuestionData, {
   audioRecordingSession?: MemoirAudioRecorderSession;
+  unsubscribeTtsPlayback?: () => void;
   onLoad(options?: QuestionPageOptions): Promise<void>;
   onHide(): void;
   onUnload(): void;
+  registerTtsPlayback(): void;
   hydrateQuestionFromCache(preferredQuestionId: string): boolean;
   loadQuestion(preferredQuestionId?: string): Promise<void>;
   persistInputDraft(): void;
@@ -349,6 +381,8 @@ Page<QuestionData, {
   onSegmentInput(event: SegmentInputEvent): void;
   startRecording(): void;
   stopRecording(): void;
+  toggleTtsSource(event: TtsSourceEvent): Promise<void>;
+  cycleTtsSpeed(): void;
   submitAnswer(): Promise<void>;
   skipCurrentQuestion(): Promise<void>;
 }>({
@@ -377,9 +411,12 @@ Page<QuestionData, {
     legacyAudioDurationSeconds: null,
     audioSummary: "",
     isCompleted: false,
+    questionTtsSourceKey: "",
+    ...memoirTtsViewPatch(readMemoirTtsPlaybackState()),
   },
 
   async onLoad(options = {}) {
+    this.registerTtsPlayback();
     if (options.questionId && this.hydrateQuestionFromCache(options.questionId)) {
       return;
     }
@@ -402,6 +439,19 @@ Page<QuestionData, {
     if (this.data.recording) {
       stopMemoirAudioRecording();
     }
+    if (this.unsubscribeTtsPlayback) {
+      this.unsubscribeTtsPlayback();
+      this.unsubscribeTtsPlayback = undefined;
+    }
+  },
+
+  registerTtsPlayback() {
+    if (this.unsubscribeTtsPlayback) {
+      return;
+    }
+    this.unsubscribeTtsPlayback = subscribeMemoirTtsPlayback((playbackState) => {
+      this.setData(memoirTtsViewPatch(playbackState));
+    });
   },
 
   hydrateQuestionFromCache(preferredQuestionId) {
@@ -429,6 +479,7 @@ Page<QuestionData, {
       sessionTitle: interview.session.title,
       question: current,
       prompt: current.prompt,
+      questionTtsSourceKey: memoirTtsSourceKey({ source_type: "question", source_id: current.id }),
       isCompleted: false,
       answerSessionId: answerDraft?.answer_session_id || "",
       answerSessionCreatedAt: answerDraft?.created_at || "",
@@ -485,6 +536,7 @@ Page<QuestionData, {
         sessionTitle: interview.session.title,
         question: current,
         prompt: current?.prompt || "",
+        questionTtsSourceKey: current ? memoirTtsSourceKey({ source_type: "question", source_id: current.id }) : "",
         isCompleted: !current,
         answerSessionId: answerDraft?.answer_session_id || "",
         answerSessionCreatedAt: answerDraft?.created_at || "",
@@ -680,6 +732,28 @@ Page<QuestionData, {
     }
     stopRecordingTimer();
     stopMemoirAudioRecording();
+  },
+
+  async toggleTtsSource(event) {
+    const sourceType = event.currentTarget.dataset.sourceType;
+    const sourceId = event.currentTarget.dataset.sourceId || "";
+    if (!sourceType || !sourceId || this.data.ttsBusy) {
+      return;
+    }
+    const sourceKey = memoirTtsSourceKey({ source_type: sourceType, source_id: sourceId });
+    if (this.data.ttsSourceKey === sourceKey && this.data.ttsPlaying) {
+      pauseMemoirTtsPlayback();
+      return;
+    }
+    await playMemoirTtsPlayback({
+      source_type: sourceType,
+      source_id: sourceId,
+      label: event.currentTarget.dataset.label || "",
+    });
+  },
+
+  cycleTtsSpeed() {
+    cycleMemoirTtsPlaybackSpeed();
   },
 
   async submitAnswer() {

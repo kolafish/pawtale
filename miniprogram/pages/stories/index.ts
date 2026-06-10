@@ -1,12 +1,34 @@
-import type { MemoirMemoryStats, MemoirOutput } from "../../domain/memoir";
+import type { MemoirMemoryStats, MemoirOutput, MemoirTtsSourceType } from "../../domain/memoir";
 import { loadMemoirDashboard } from "../../services/memoir-dashboard";
 import {
   type MemoirDashboardSnapshot,
   readMemoirDashboardSnapshot,
   shouldRefreshMemoirDashboardSnapshot,
 } from "../../stores/memoir-cache";
+import {
+  cycleMemoirTtsPlaybackSpeed,
+  memoirTtsSourceKey,
+  pauseMemoirTtsPlayback,
+  playMemoirTtsPlayback,
+  readMemoirTtsPlaybackState,
+  subscribeMemoirTtsPlayback,
+} from "../../services/memoir-tts-player";
+import { memoirTtsViewPatch } from "../../services/memoir-tts-view";
 
 type OutputFilter = "all" | "story_fragment";
+type StoryOutput = MemoirOutput & {
+  ttsSourceKey: string;
+};
+
+interface TtsSourceEvent {
+  currentTarget: {
+    dataset: {
+      sourceType?: MemoirTtsSourceType;
+      sourceId?: string;
+      label?: string;
+    };
+  };
+}
 
 interface StoriesData {
   loading: boolean;
@@ -19,15 +41,30 @@ interface StoriesData {
   pendingReviewCount: number;
   progressPercent: number;
   activeFilter: OutputFilter;
-  outputs: MemoirOutput[];
-  visibleOutputs: MemoirOutput[];
+  outputs: StoryOutput[];
+  visibleOutputs: StoryOutput[];
+  ttsStatus: string;
+  ttsSourceKey: string;
+  ttsMessage: string;
+  ttsError: string;
+  ttsSpeed: number;
+  ttsSpeedLabel: string;
+  ttsPlaying: boolean;
+  ttsBusy: boolean;
 }
 
 function filterFromQuery(status?: string): OutputFilter {
   return status === "story_fragment" || status === "fragments" ? "story_fragment" : "all";
 }
 
-function filterOutputs(outputs: MemoirOutput[], filter: OutputFilter): MemoirOutput[] {
+function outputView(output: MemoirOutput): StoryOutput {
+  return {
+    ...output,
+    ttsSourceKey: memoirTtsSourceKey({ source_type: "output", source_id: output.id }),
+  };
+}
+
+function filterOutputs(outputs: StoryOutput[], filter: OutputFilter): StoryOutput[] {
   if (filter === "story_fragment") {
     return outputs.filter((output) => output.output_type === "story_fragment");
   }
@@ -39,14 +76,19 @@ function pendingReviewCount(stats?: MemoirMemoryStats): number {
 }
 
 Page<StoriesData, {
+  unsubscribeTtsPlayback?: () => void;
   onLoad(query?: Record<string, string | undefined>): Promise<void>;
   onShow(): void;
+  onUnload(): void;
+  registerTtsPlayback(): void;
   hydrateFromCache(): MemoirDashboardSnapshot;
   applySnapshot(outputs: MemoirOutput[], memoryStats?: MemoirMemoryStats): void;
   loadStoriesPage(): Promise<void>;
   selectAll(): void;
   selectFragments(): void;
   setActiveFilter(filter: OutputFilter): void;
+  toggleTtsSource(event: TtsSourceEvent): Promise<void>;
+  cycleTtsSpeed(): void;
   continueInterview(): void;
   backWorkbench(): void;
   openHome(): void;
@@ -67,9 +109,11 @@ Page<StoriesData, {
     activeFilter: "all",
     outputs: [],
     visibleOutputs: [],
+    ...memoirTtsViewPatch(readMemoirTtsPlaybackState()),
   },
 
   async onLoad(query) {
+    this.registerTtsPlayback();
     this.setData({ activeFilter: filterFromQuery(query?.status) });
     const snapshot = this.hydrateFromCache();
     if (shouldRefreshMemoirDashboardSnapshot(snapshot)) {
@@ -84,6 +128,22 @@ Page<StoriesData, {
     }
   },
 
+  onUnload() {
+    if (this.unsubscribeTtsPlayback) {
+      this.unsubscribeTtsPlayback();
+      this.unsubscribeTtsPlayback = undefined;
+    }
+  },
+
+  registerTtsPlayback() {
+    if (this.unsubscribeTtsPlayback) {
+      return;
+    }
+    this.unsubscribeTtsPlayback = subscribeMemoirTtsPlayback((playbackState) => {
+      this.setData(memoirTtsViewPatch(playbackState));
+    });
+  },
+
   hydrateFromCache() {
     const snapshot = readMemoirDashboardSnapshot();
     if (!snapshot.interview) {
@@ -94,13 +154,14 @@ Page<StoriesData, {
   },
 
   applySnapshot(outputs, memoryStats) {
+    const outputViews = outputs.map(outputView);
     this.setData({
       outputCount: memoryStats?.output_count ?? outputs.length,
       storyFragmentCount: outputs.filter((output) => output.output_type === "story_fragment").length,
       pendingReviewCount: pendingReviewCount(memoryStats),
       progressPercent: memoryStats?.coverage_average ?? 0,
-      outputs,
-      visibleOutputs: filterOutputs(outputs, this.data.activeFilter),
+      outputs: outputViews,
+      visibleOutputs: filterOutputs(outputViews, this.data.activeFilter),
       hasDashboardData: true,
       hasOutputData: true,
     });
@@ -135,6 +196,28 @@ Page<StoriesData, {
       activeFilter: filter,
       visibleOutputs: filterOutputs(this.data.outputs, filter),
     });
+  },
+
+  async toggleTtsSource(event) {
+    const sourceType = event.currentTarget.dataset.sourceType;
+    const sourceId = event.currentTarget.dataset.sourceId || "";
+    if (!sourceType || !sourceId || this.data.ttsBusy) {
+      return;
+    }
+    const sourceKey = memoirTtsSourceKey({ source_type: sourceType, source_id: sourceId });
+    if (this.data.ttsSourceKey === sourceKey && this.data.ttsPlaying) {
+      pauseMemoirTtsPlayback();
+      return;
+    }
+    await playMemoirTtsPlayback({
+      source_type: sourceType,
+      source_id: sourceId,
+      label: event.currentTarget.dataset.label || "",
+    });
+  },
+
+  cycleTtsSpeed() {
+    cycleMemoirTtsPlaybackSpeed();
   },
 
   continueInterview() {

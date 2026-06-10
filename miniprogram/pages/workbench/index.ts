@@ -11,6 +11,7 @@ import type {
   MemoirQuestionCandidate,
   MemoirSummary,
   MemoirThemeMemory,
+  MemoirTtsSourceType,
 } from "../../domain/memoir";
 import { loadMemoirDashboard } from "../../services/memoir-dashboard";
 import { selectQuestionCandidate } from "../../services/memoir";
@@ -20,6 +21,15 @@ import {
   readMemoirDashboardSnapshot,
   shouldRefreshMemoirDashboardSnapshot,
 } from "../../stores/memoir-cache";
+import {
+  cycleMemoirTtsPlaybackSpeed,
+  memoirTtsSourceKey,
+  pauseMemoirTtsPlayback,
+  playMemoirTtsPlayback,
+  readMemoirTtsPlaybackState,
+  subscribeMemoirTtsPlayback,
+} from "../../services/memoir-tts-player";
+import { memoirTtsViewPatch } from "../../services/memoir-tts-view";
 
 type WorkbenchMemoryCard = {
   title: string;
@@ -30,10 +40,28 @@ type WorkbenchMemoryCard = {
   evidence: string;
 };
 
+type WorkbenchOpenQuestion = MemoirOpenQuestion & {
+  ttsSourceKey: string;
+};
+
+type WorkbenchOutput = MemoirOutput & {
+  ttsSourceKey: string;
+};
+
 interface DatasetEvent {
   currentTarget: {
     dataset: {
       id?: string;
+    };
+  };
+}
+
+interface TtsSourceEvent {
+  currentTarget: {
+    dataset: {
+      sourceType?: MemoirTtsSourceType;
+      sourceId?: string;
+      label?: string;
     };
   };
 }
@@ -51,13 +79,23 @@ interface WorkbenchData {
   confirmedStoryCount: number;
   progressPercent: number;
   pendingCount: number;
+  sessionSummaryId: string;
+  sessionSummaryTtsSourceKey: string;
   summaryText: string;
   reviewSessionId: string;
   coverage: MemoirCoverageItem[];
   memoryCards: WorkbenchMemoryCard[];
-  openQuestions: MemoirOpenQuestion[];
+  openQuestions: WorkbenchOpenQuestion[];
   candidates: MemoirQuestionCandidate[];
-  outputs: MemoirOutput[];
+  outputs: WorkbenchOutput[];
+  ttsStatus: string;
+  ttsSourceKey: string;
+  ttsMessage: string;
+  ttsError: string;
+  ttsSpeed: number;
+  ttsSpeedLabel: string;
+  ttsPlaying: boolean;
+  ttsBusy: boolean;
 }
 
 function confidenceText(value?: number | null): string {
@@ -106,9 +144,26 @@ function buildMemoryCards(
   ];
 }
 
+function openQuestionView(item: MemoirOpenQuestion): WorkbenchOpenQuestion {
+  return {
+    ...item,
+    ttsSourceKey: memoirTtsSourceKey({ source_type: "open_question", source_id: item.id }),
+  };
+}
+
+function outputView(item: MemoirOutput): WorkbenchOutput {
+  return {
+    ...item,
+    ttsSourceKey: memoirTtsSourceKey({ source_type: "output", source_id: item.id }),
+  };
+}
+
 Page<WorkbenchData, {
+  unsubscribeTtsPlayback?: () => void;
   onLoad(): Promise<void>;
   onShow(): void;
+  onUnload(): void;
+  registerTtsPlayback(): void;
   hydrateFromCache(): MemoirDashboardSnapshot;
   applySnapshot(
     interview: MemoirInterviewState,
@@ -124,10 +179,13 @@ Page<WorkbenchData, {
       candidates: MemoirQuestionCandidate[];
       outputs: MemoirOutput[];
       memoryStats?: MemoirMemoryStats;
+      sessionSummaryId?: string;
     },
   ): void;
   loadWorkbench(): Promise<void>;
   askCandidate(event: DatasetEvent): Promise<void>;
+  toggleTtsSource(event: TtsSourceEvent): Promise<void>;
+  cycleTtsSpeed(): void;
   continueInterview(): void;
   openPendingReview(): Promise<void>;
   openProjects(): void;
@@ -151,6 +209,8 @@ Page<WorkbenchData, {
     confirmedStoryCount: 0,
     progressPercent: 0,
     pendingCount: 0,
+    sessionSummaryId: "",
+    sessionSummaryTtsSourceKey: "",
     summaryText: "",
     reviewSessionId: "",
     coverage: [],
@@ -158,9 +218,11 @@ Page<WorkbenchData, {
     openQuestions: [],
     candidates: [],
     outputs: [],
+    ...memoirTtsViewPatch(readMemoirTtsPlaybackState()),
   },
 
   async onLoad() {
+    this.registerTtsPlayback();
     const snapshot = this.hydrateFromCache();
     if (shouldRefreshMemoirDashboardSnapshot(snapshot)) {
       await this.loadWorkbench();
@@ -174,6 +236,22 @@ Page<WorkbenchData, {
     }
   },
 
+  onUnload() {
+    if (this.unsubscribeTtsPlayback) {
+      this.unsubscribeTtsPlayback();
+      this.unsubscribeTtsPlayback = undefined;
+    }
+  },
+
+  registerTtsPlayback() {
+    if (this.unsubscribeTtsPlayback) {
+      return;
+    }
+    this.unsubscribeTtsPlayback = subscribeMemoirTtsPlayback((playbackState) => {
+      this.setData(memoirTtsViewPatch(playbackState));
+    });
+  },
+
   hydrateFromCache() {
     const snapshot = readMemoirDashboardSnapshot();
     if (!snapshot.interview || !snapshot.summary) {
@@ -184,6 +262,7 @@ Page<WorkbenchData, {
     });
     this.applySnapshot(snapshot.interview, snapshot.summary, {
       summaryText: snapshot.sessionSummary?.summary || "",
+      sessionSummaryId: snapshot.sessionSummary?.id || "",
       coverage: snapshot.coverage,
       people: snapshot.people,
       events: snapshot.events,
@@ -208,13 +287,19 @@ Page<WorkbenchData, {
       confirmedStoryCount: memoryStats?.output_count ?? summary.confirmed_story_count,
       progressPercent: memoryStats?.coverage_average ?? summary.progress_percent,
       pendingCount: interview.pending_question_count,
+      sessionSummaryId: memory?.sessionSummaryId || this.data.sessionSummaryId,
+      sessionSummaryTtsSourceKey: memory?.sessionSummaryId
+        ? memoirTtsSourceKey({ source_type: "session_summary", source_id: memory.sessionSummaryId })
+        : this.data.sessionSummaryTtsSourceKey,
       reviewSessionId: interview.session.id,
       summaryText: memory?.summaryText || this.data.summaryText,
       coverage: memory?.coverage || this.data.coverage,
       memoryCards: memory ? buildMemoryCards(memory.people, memory.events, memory.places, memory.themes) : this.data.memoryCards,
-      openQuestions: (memory?.openQuestions || this.data.openQuestions).filter((item) => item.status === "open"),
+      openQuestions: (memory?.openQuestions || this.data.openQuestions)
+        .filter((item) => item.status === "open")
+        .map(openQuestionView),
       candidates: memory?.candidates || this.data.candidates,
-      outputs: memory?.outputs || this.data.outputs,
+      outputs: (memory?.outputs || this.data.outputs).map(outputView),
       hasDashboardData: true,
       hasOutputData: true,
     });
@@ -256,6 +341,7 @@ Page<WorkbenchData, {
         candidates,
         outputs,
         memoryStats,
+        sessionSummaryId: sessionSummary?.id || "",
       });
     } catch (error) {
       this.setData({ error: error instanceof Error ? error.message : "工作台加载失败" });
@@ -279,6 +365,28 @@ Page<WorkbenchData, {
     } finally {
       this.setData({ selecting: false });
     }
+  },
+
+  async toggleTtsSource(event) {
+    const sourceType = event.currentTarget.dataset.sourceType;
+    const sourceId = event.currentTarget.dataset.sourceId || "";
+    if (!sourceType || !sourceId || this.data.ttsBusy) {
+      return;
+    }
+    const sourceKey = memoirTtsSourceKey({ source_type: sourceType, source_id: sourceId });
+    if (this.data.ttsSourceKey === sourceKey && this.data.ttsPlaying) {
+      pauseMemoirTtsPlayback();
+      return;
+    }
+    await playMemoirTtsPlayback({
+      source_type: sourceType,
+      source_id: sourceId,
+      label: event.currentTarget.dataset.label || "",
+    });
+  },
+
+  cycleTtsSpeed() {
+    cycleMemoirTtsPlaybackSpeed();
   },
 
   continueInterview() {
