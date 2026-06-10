@@ -173,9 +173,10 @@ image {
 }
 
 .tts-icon {
-  width: 104rpx;
-  height: 92rpx;
+  width: 108rpx;
+  height: 86rpx;
   display: block;
+  transform: translate(4rpx, 3rpx);
 }
 
 .tts-icon-button::after {

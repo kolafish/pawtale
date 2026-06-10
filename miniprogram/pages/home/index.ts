@@ -24,6 +24,7 @@ import {
   memoirTtsSourceKey,
   pauseMemoirTtsPlayback,
   playMemoirTtsPlayback,
+  preloadMemoirTtsPlayback,
   readMemoirTtsPlaybackState,
   subscribeMemoirTtsPlayback,
 } from "../../services/memoir-tts-player";
@@ -138,6 +139,17 @@ function cardRotate(translateX: number): number {
 
 function promptForQuestion(question?: MemoirQuestion | null): string {
   return question?.prompt || HOME_EMPTY_PROMPT;
+}
+
+function preloadTtsSource(sourceType: MemoirTtsSourceType | "", sourceId: string, label: string): void {
+  if (!sourceType || !sourceId) {
+    return;
+  }
+  void preloadMemoirTtsPlayback({
+    source_type: sourceType,
+    source_id: sourceId,
+    label,
+  });
 }
 
 function answerDraftForQuestion(projectId: string, question?: MemoirQuestion | null): MemoirAnswerSessionDraft | undefined {
@@ -357,6 +369,8 @@ Page<HomeData, {
       latestOutputTtsSourceType,
       hasDashboardData: true,
     });
+    preloadTtsSource("question", currentQuestion?.id || "", "问题");
+    preloadTtsSource(latestOutputTtsSourceType, latestOutputId, "最近整理");
   },
 
   async loadHome() {
@@ -510,6 +524,7 @@ Page<HomeData, {
       switchingQuestion: false,
       canSwitchQuestion,
     });
+    preloadTtsSource("question", question?.id || "", "问题");
   },
 
   resetQuestionSwipe() {

@@ -12,6 +12,7 @@ import {
   readMemoirEditorInputDraft,
   writeMemoirEditorInputDraft,
 } from "../../stores/memoir-input-drafts";
+import { invalidateMemoirTtsPlayback } from "../../services/memoir-tts-player";
 import { readMemoirStore, writeMemoirStore } from "../../stores/session";
 
 interface InputEvent {
@@ -244,6 +245,8 @@ Page<EditorData, {
     try {
       const answer = await updateTextAnswer(this.data.answerId, answerText);
       const draft = await updateDraft(this.data.draftId, draftText);
+      invalidateMemoirTtsPlayback({ source_type: "answer", source_id: answer.id });
+      invalidateMemoirTtsPlayback({ source_type: "draft", source_id: draft.id });
       writeMemoirStore({ answer, draft });
       updateMemoirCachedStoryAnswer(answer);
       updateMemoirCachedStoryDraft(draft);

@@ -44,6 +44,7 @@ import {
   memoirTtsSourceKey,
   pauseMemoirTtsPlayback,
   playMemoirTtsPlayback,
+  preloadMemoirTtsPlayback,
   readMemoirTtsPlaybackState,
   subscribeMemoirTtsPlayback,
 } from "../../services/memoir-tts-player";
@@ -207,6 +208,17 @@ function segmentStatusText(status: QuestionAnswerSegmentView["status"], dirty = 
 
 function segmentText(segment: QuestionAnswerSegmentView): string {
   return segment.text.trim();
+}
+
+function preloadTtsSource(sourceType: MemoirTtsSourceType, sourceId: string, label: string): void {
+  if (!sourceId) {
+    return;
+  }
+  void preloadMemoirTtsPlayback({
+    source_type: sourceType,
+    source_id: sourceId,
+    label,
+  });
 }
 
 function segmentViewFromRemote(segment: MemoirAnswerSegment): QuestionAnswerSegmentView {
@@ -485,6 +497,7 @@ Page<QuestionData, {
       legacyAudioDurationSeconds: inputDraft?.audio_duration_seconds ?? null,
       audioSummary: inputDraft?.audio_summary || "",
     });
+    preloadTtsSource("question", current.id, "问题");
     return true;
   },
 
@@ -542,6 +555,7 @@ Page<QuestionData, {
         legacyAudioDurationSeconds: inputDraft?.audio_duration_seconds ?? null,
         audioSummary: inputDraft?.audio_summary || "",
       });
+      preloadTtsSource("question", current?.id || "", "问题");
     } catch (error) {
       this.setData({ error: error instanceof Error ? error.message : "问题加载失败" });
     } finally {
