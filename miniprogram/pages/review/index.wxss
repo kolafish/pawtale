@@ -35,20 +35,20 @@
 .section-title {
   color: #24100b;
   font-size: 34rpx;
-  font-weight: 900;
+  font-weight: 800;
 }
 
 .count-text {
   color: #9f4a3c;
   font-size: 28rpx;
-  font-weight: 900;
+  font-weight: 700;
 }
 
 .empty-state {
   padding: 24rpx;
   border-radius: 18rpx;
   background: #fff6f1;
-  color: #60716d;
+  color: #5f6d69;
   font-size: 28rpx;
 }
 
@@ -78,7 +78,7 @@
   display: block;
   color: #24100b;
   font-size: 30rpx;
-  font-weight: 900;
+  font-weight: 800;
   line-height: 1.45;
 }
 
@@ -113,7 +113,7 @@
   margin-top: 8rpx;
   color: #9f4a3c;
   font-size: 24rpx;
-  font-weight: 900;
+  font-weight: 700;
   text-align: right;
 }
 
@@ -124,7 +124,7 @@
   color: #8a5b12;
   background: #fff0c2;
   font-size: 22rpx;
-  font-weight: 900;
+  font-weight: 700;
 }
 
 .type-pill {
@@ -134,7 +134,7 @@
   color: #9f4a3c;
   background: #fff1ec;
   font-size: 22rpx;
-  font-weight: 900;
+  font-weight: 700;
 }
 
 .status-pill.confirmed {
@@ -194,7 +194,7 @@
   margin-top: 12rpx;
   color: #9f4a3c;
   font-size: 26rpx;
-  font-weight: 900;
+  font-weight: 700;
 }
 
 .compact {
