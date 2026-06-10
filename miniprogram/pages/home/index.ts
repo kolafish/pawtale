@@ -70,6 +70,7 @@ interface HomeData {
   questionCardLeaving: boolean;
   questionSwipeReady: boolean;
   switchingQuestion: boolean;
+  canSwitchQuestion: boolean;
   completedCount: number;
   weeklyStoryCount: number;
   pendingReviewCount: number;
@@ -88,7 +89,7 @@ interface HomeData {
   ttsBusy: boolean;
 }
 
-const HOME_EMPTY_PROMPT = "今天想从哪一段继续讲？小时候、年轻时候，还是工作以后？";
+const HOME_EMPTY_PROMPT = "我们可以随便聊一聊，小时候、年轻时候，工作，孩子，现在的生活，随便聊点感兴趣的？";
 const QUESTION_SWIPE_THRESHOLD_PX = 90;
 const QUESTION_SWIPE_MAX_TRANSLATE_PX = 160;
 const QUESTION_SWIPE_EXIT_TRANSLATE_PX = 420;
@@ -213,6 +214,7 @@ Page<HomeData, {
   onQuestionTouchCancel(): void;
   showQuestionCard(question?: MemoirQuestion | null): void;
   resetQuestionSwipe(): void;
+  switchQuestionManually(): void;
   switchQuestionBySwipe(direction: number): void;
   openPendingReview(): Promise<void>;
   toggleTtsSource(event: TtsSourceEvent): Promise<void>;
@@ -244,6 +246,7 @@ Page<HomeData, {
     questionCardLeaving: false,
     questionSwipeReady: false,
     switchingQuestion: false,
+    canSwitchQuestion: false,
     completedCount: 0,
     weeklyStoryCount: 0,
     pendingReviewCount: 0,
@@ -340,6 +343,7 @@ Page<HomeData, {
       questionCardDragging: false,
       questionCardLeaving: false,
       questionSwipeReady: false,
+      canSwitchQuestion: Boolean(currentQuestion && nextPendingQuestionAfter(interview, currentQuestion.id)),
       completedCount: answeredQuestionCount(interview),
       weeklyStoryCount: memoryStats?.output_count ?? summary.weekly_story_count,
       pendingReviewCount,
@@ -489,6 +493,7 @@ Page<HomeData, {
     }
     const projectId = snapshot.project?.id || this.data.projectId;
     const draftState = answerDraftState(projectId, question);
+    const canSwitchQuestion = Boolean(question && snapshot.interview && nextPendingQuestionAfter(snapshot.interview, question.id));
     this.setData({
       projectId,
       currentQuestionId: question?.id || "",
@@ -503,6 +508,7 @@ Page<HomeData, {
       questionCardLeaving: false,
       questionSwipeReady: false,
       switchingQuestion: false,
+      canSwitchQuestion,
     });
   },
 
@@ -515,6 +521,13 @@ Page<HomeData, {
       questionCardLeaving: false,
       questionSwipeReady: false,
     });
+  },
+
+  switchQuestionManually() {
+    if (!this.data.canSwitchQuestion || this.data.loading || this.data.refreshing || this.data.switchingQuestion) {
+      return;
+    }
+    this.switchQuestionBySwipe(1);
   },
 
   switchQuestionBySwipe(direction) {

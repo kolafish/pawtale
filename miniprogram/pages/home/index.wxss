@@ -104,6 +104,46 @@
   letter-spacing: 0;
 }
 
+.question-tools {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 18rpx;
+  margin-top: 34rpx;
+}
+
+.question-tools .tts-inline {
+  margin-top: 0;
+  flex: 0 0 auto;
+}
+
+.question-switch-button {
+  flex: 1;
+  min-width: 280rpx;
+  height: 88rpx;
+  margin: 0;
+  padding: 0 30rpx;
+  border: 0;
+  border-radius: 26rpx;
+  background: #fff1ec;
+  color: #9f4a3c;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 30rpx;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.question-switch-button::after {
+  border: 0;
+}
+
+.question-switch-button[disabled] {
+  background: #f3ece5;
+  color: #9c8d84;
+}
+
 .draft-state {
   display: flex;
   flex-wrap: wrap;

@@ -280,9 +280,9 @@ test("seeds a current session with template questions", async () => {
 
   assert.equal(response.statusCode, 200);
   assert.equal(response.data.session.status, "active");
-  assert.equal(response.data.questions.length, 12);
-  assert.equal(response.data.pending_question_count, 12);
-  assert.equal(response.data.current_question.prompt, "今天我们从哪一段开始讲比较轻松？小时候、年轻时候，还是工作以后？");
+  assert.equal(response.data.questions.length, DEFAULT_MEMOIR_QUESTIONS.length);
+  assert.equal(response.data.pending_question_count, DEFAULT_MEMOIR_QUESTIONS.length);
+  assert.equal(response.data.current_question.prompt, DEFAULT_MEMOIR_QUESTIONS[0]);
 });
 
 test("replaces stale unanswered template questions in an existing session", async () => {
@@ -1416,9 +1416,9 @@ test("returns memoir story cards and summary", async () => {
     weekly_story_count: 1,
     pending_review_count: 1,
     confirmed_story_count: 0,
-    total_question_count: 12,
+    total_question_count: DEFAULT_MEMOIR_QUESTIONS.length,
     completed_question_count: 1,
-    progress_percent: 8,
+    progress_percent: Math.round((1 / DEFAULT_MEMOIR_QUESTIONS.length) * 100),
   });
 });
 
