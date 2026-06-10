@@ -67,8 +67,8 @@
 }
 
 .question-card-ready {
-  border-color: #20a090;
-  box-shadow: 0 22rpx 54rpx rgba(18, 133, 119, 0.18);
+  border-color: #c06a55;
+  box-shadow: 0 22rpx 54rpx rgba(159, 74, 60, 0.18);
 }
 
 .question-card-leaving {
@@ -80,7 +80,7 @@
   display: flex;
   align-items: center;
   gap: 14rpx;
-  color: #0f8177;
+  color: #9f4a3c;
   font-size: 28rpx;
   font-weight: 800;
 }
@@ -89,7 +89,7 @@
   width: 16rpx;
   height: 16rpx;
   border-radius: 50%;
-  background: #0f8177;
+  background: #9f4a3c;
 }
 
 .question-text {
@@ -113,8 +113,8 @@
 .draft-pending {
   padding: 8rpx 16rpx;
   border-radius: 999rpx;
-  background: #edf8f5;
-  color: #0f8177;
+  background: #fff1ec;
+  color: #9f4a3c;
   font-size: 24rpx;
   font-weight: 800;
   line-height: 1.2;
@@ -130,7 +130,7 @@
   height: 108rpx;
   margin-top: 56rpx;
   border-radius: 26rpx;
-  background: #128577;
+  background: #9f4a3c;
   color: #ffffff;
   display: flex;
   align-items: center;
@@ -156,14 +156,14 @@
   display: flex;
   align-items: center;
   gap: 24rpx;
-  background: #f3fbf8;
-  border-color: #d7ebe4;
+  background: #fff6f1;
+  border-color: #f2cbbb;
 }
 
 .clipboard-icon {
   width: 72rpx;
   height: 72rpx;
-  border: 4rpx solid #128577;
+  border: 4rpx solid #9f4a3c;
   border-radius: 18rpx;
   position: relative;
   flex: 0 0 72rpx;
@@ -177,7 +177,7 @@
   right: 18rpx;
   height: 6rpx;
   border-radius: 6rpx;
-  background: #128577;
+  background: #9f4a3c;
 }
 
 .clip-top {
@@ -202,7 +202,7 @@
 }
 
 .weekly-title {
-  color: #145f57;
+  color: #7f3b32;
   font-size: 34rpx;
   font-weight: 900;
   line-height: 1.35;
@@ -215,7 +215,7 @@
 }
 
 .chevron {
-  color: #128577;
+  color: #9f4a3c;
   font-size: 56rpx;
   line-height: 1;
   flex: 0 0 auto;
@@ -239,13 +239,13 @@
   margin-top: 24rpx;
   overflow: hidden;
   border-radius: 999rpx;
-  background: #d7eee7;
+  background: #f6d7ca;
 }
 
 .progress-fill {
   height: 100%;
   border-radius: 999rpx;
-  background: #128577;
+  background: #9f4a3c;
 }
 
 .mini-stats {
@@ -272,7 +272,7 @@
 }
 
 .mini-value {
-  color: #128577;
+  color: #9f4a3c;
   font-size: 40rpx;
   font-weight: 900;
   line-height: 1;
@@ -291,7 +291,7 @@
 }
 
 .latest-label {
-  color: #128577;
+  color: #9f4a3c;
   font-size: 26rpx;
   font-weight: 800;
 }

@@ -24,7 +24,7 @@
 }
 
 .back-mark {
-  color: #128577;
+  color: #9f4a3c;
   font-size: 70rpx;
   line-height: 1;
 }
@@ -63,7 +63,7 @@
   width: 72rpx;
   height: 72rpx;
   border-radius: 50%;
-  background: #e9f6f2;
+  background: #fff1ec;
   margin-bottom: 22rpx;
 }
 
@@ -84,7 +84,7 @@
   top: 20rpx;
   width: 32rpx;
   height: 32rpx;
-  border: 4rpx solid #128577;
+  border: 4rpx solid #9f4a3c;
   border-radius: 6rpx;
 }
 
@@ -104,7 +104,7 @@
 
 .stat-value {
   margin-top: 20rpx;
-  color: #128577;
+  color: #9f4a3c;
   font-size: 58rpx;
   font-weight: 900;
   line-height: 1;
@@ -140,7 +140,7 @@
   width: 70rpx;
   height: 6rpx;
   border-radius: 6rpx;
-  background: #128577;
+  background: #9f4a3c;
 }
 
 .panel-subtitle {
@@ -155,7 +155,7 @@
   height: 104rpx;
   margin-top: 34rpx;
   border-radius: 24rpx;
-  background: #128577;
+  background: #9f4a3c;
   color: #ffffff;
   display: flex;
   align-items: center;
@@ -197,7 +197,7 @@
 }
 
 .chevron {
-  color: #128577;
+  color: #9f4a3c;
   font-size: 56rpx;
   line-height: 1;
 }
@@ -207,13 +207,13 @@
   margin-top: 30rpx;
   overflow: hidden;
   border-radius: 999rpx;
-  background: #d7eee7;
+  background: #f6d7ca;
 }
 
 .progress-fill {
   height: 100%;
   border-radius: 999rpx;
-  background: #128577;
+  background: #9f4a3c;
 }
 
 .progress-fill.red {
@@ -225,12 +225,12 @@
 }
 
 .progress-fill.green {
-  background: #128577;
+  background: #9f4a3c;
 }
 
 .progress-value {
   margin-top: 14rpx;
-  color: #128577;
+  color: #9f4a3c;
   font-size: 28rpx;
   font-weight: 900;
   text-align: right;
@@ -247,7 +247,7 @@
 }
 
 .header-action-text {
-  color: #128577;
+  color: #9f4a3c;
   font-size: 24rpx;
   font-weight: 900;
 }
@@ -256,7 +256,7 @@
   margin-top: 26rpx;
   padding: 28rpx;
   border-radius: 18rpx;
-  background: #f3fbf8;
+  background: #fff6f1;
   color: #60716d;
   font-size: 28rpx;
   line-height: 1.55;
@@ -289,7 +289,7 @@
 
 .coverage-score,
 .memory-status {
-  color: #128577;
+  color: #9f4a3c;
   font-size: 26rpx;
   font-weight: 900;
 }
@@ -308,7 +308,7 @@
 }
 
 .story-question {
-  color: #128577;
+  color: #9f4a3c;
   font-size: 28rpx;
   font-weight: 900;
   line-height: 1.45;
@@ -342,7 +342,7 @@
 .candidate-action {
   display: block;
   margin-top: 14rpx;
-  color: #128577;
+  color: #9f4a3c;
   font-size: 26rpx;
   font-weight: 900;
 }

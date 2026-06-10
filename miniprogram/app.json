@@ -15,7 +15,7 @@
   "cloud": true,
   "window": {
     "navigationBarTitleText": "Pawtale 回忆录",
-    "navigationBarBackgroundColor": "#0f766e",
+    "navigationBarBackgroundColor": "#9f4a3c",
     "navigationBarTextStyle": "white",
     "backgroundColor": "#f6f7f9"
   },
