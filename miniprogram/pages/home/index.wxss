@@ -14,9 +14,11 @@
 .avatar-mark {
   width: 140rpx;
   height: 140rpx;
-  border: 4rpx solid #f0cfa8;
+  flex: 0 0 140rpx;
+  border: 4rpx solid #e6b37d;
   border-radius: 50%;
-  background: #fff7ea;
+  background: linear-gradient(145deg, #efbd8b 0%, #f6d2a9 48%, #ffe9cf 100%);
+  box-shadow: inset 0 0 0 6rpx rgba(255, 250, 242, 0.52), 0 16rpx 34rpx rgba(110, 63, 24, 0.14);
   display: flex;
   align-items: center;
   justify-content: center;
