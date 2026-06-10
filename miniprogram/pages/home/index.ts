@@ -21,6 +21,7 @@ import {
 } from "../../stores/memoir-answer-session-drafts";
 import { writeMemoirStore } from "../../stores/session";
 import {
+  invalidateMemoirTtsPlayback,
   memoirTtsSourceKey,
   pauseMemoirTtsPlayback,
   playMemoirTtsPlayback,
@@ -559,6 +560,7 @@ Page<HomeData, {
       return;
     }
 
+    invalidateMemoirTtsPlayback({ source_type: "question", source_id: questionId });
     clearQuestionSwipeSwitchTimer();
     this.setData({
       switchingQuestion: true,
