@@ -14,9 +14,9 @@
 
 .page-title {
   color: #24100b;
-  font-size: 48rpx;
-  font-weight: 900;
-  line-height: 1.2;
+  font-size: 44rpx;
+  font-weight: 800;
+  line-height: 1.25;
 }
 
 .top-action {
@@ -25,7 +25,7 @@
   top: 24rpx;
   color: #9f4a3c;
   font-size: 28rpx;
-  font-weight: 900;
+  font-weight: 800;
 }
 
 .summary-panel,
@@ -36,7 +36,7 @@
   border: 2rpx solid #f0dac0;
   border-radius: 28rpx;
   background: rgba(255, 255, 255, 0.88);
-  box-shadow: 0 18rpx 44rpx rgba(64, 43, 24, 0.08);
+  box-shadow: 0 10rpx 28rpx rgba(64, 43, 24, 0.06);
 }
 
 .summary-panel {
@@ -62,7 +62,7 @@
 .summary-value {
   color: #9f4a3c;
   font-size: 50rpx;
-  font-weight: 900;
+  font-weight: 800;
   line-height: 1;
 }
 
@@ -72,7 +72,7 @@
 
 .summary-label {
   margin-top: 16rpx;
-  color: #70625d;
+  color: #685b55;
   font-size: 24rpx;
   font-weight: 700;
 }
@@ -95,7 +95,7 @@
 .selection-count {
   color: #24100b;
   font-size: 30rpx;
-  font-weight: 900;
+  font-weight: 800;
 }
 
 .toolbar-actions {
@@ -110,7 +110,7 @@
   background: #fff1ec;
   color: #9f4a3c;
   font-size: 26rpx;
-  font-weight: 900;
+  font-weight: 700;
   line-height: 68rpx;
 }
 
@@ -126,7 +126,7 @@
 .list-header {
   color: #24100b;
   font-size: 36rpx;
-  font-weight: 900;
+  font-weight: 800;
 }
 
 .record-count {
@@ -138,7 +138,7 @@
   padding: 28rpx;
   border-radius: 18rpx;
   background: #fff6f1;
-  color: #60716d;
+  color: #5f6d69;
   font-size: 28rpx;
   line-height: 1.55;
 }
@@ -156,7 +156,7 @@
 }
 
 .record-meta {
-  color: #70625d;
+  color: #685b55;
   font-size: 24rpx;
   line-height: 1.35;
 }
@@ -206,7 +206,7 @@
   margin-top: 18rpx;
   color: #9f4a3c;
   font-size: 30rpx;
-  font-weight: 900;
+  font-weight: 700;
   line-height: 1.5;
 }
 
@@ -233,18 +233,18 @@
   background: #fff1ec;
   color: #9f4a3c;
   font-size: 24rpx;
-  font-weight: 900;
+  font-weight: 700;
 }
 
 .audio-pill.muted {
   background: #f0ede8;
-  color: #70625d;
+  color: #685b55;
 }
 
 .detail-link {
   color: #9f4a3c;
   font-size: 26rpx;
-  font-weight: 900;
+  font-weight: 700;
 }
 
 .error {

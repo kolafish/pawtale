@@ -34,7 +34,7 @@
   max-width: 560rpx;
   color: #24100b;
   font-size: 40rpx;
-  font-weight: 900;
+  font-weight: 800;
   line-height: 1.25;
   text-align: center;
 }
@@ -44,7 +44,7 @@
   border: 2rpx solid #f0dac0;
   border-radius: 28rpx;
   background: rgba(255, 255, 255, 0.86);
-  box-shadow: 0 16rpx 42rpx rgba(64, 43, 24, 0.07);
+  box-shadow: 0 10rpx 28rpx rgba(64, 43, 24, 0.06);
 }
 
 .question-panel {
@@ -62,7 +62,7 @@
   align-items: center;
   gap: 16rpx;
   font-size: 30rpx;
-  font-weight: 900;
+  font-weight: 700;
   line-height: 1.2;
 }
 
@@ -84,7 +84,7 @@
   align-items: center;
   justify-content: center;
   font-size: 30rpx;
-  font-weight: 900;
+  font-weight: 800;
 }
 
 .bubble-icon {
@@ -132,9 +132,9 @@
   display: block;
   margin-top: 28rpx;
   color: #24100b;
-  font-size: 42rpx;
-  font-weight: 900;
-  line-height: 1.45;
+  font-size: 40rpx;
+  font-weight: 700;
+  line-height: 1.5;
 }
 
 .editor-textarea {
@@ -144,9 +144,9 @@
   border: 0;
   background: transparent;
   color: #24100b;
-  font-size: 38rpx;
-  font-weight: 800;
-  line-height: 1.6;
+  font-size: 34rpx;
+  font-weight: 500;
+  line-height: 1.72;
 }
 
 .answer-textarea {
@@ -168,7 +168,7 @@
   height: 92rpx;
   border-radius: 22rpx;
   font-size: 32rpx;
-  font-weight: 900;
+  font-weight: 700;
   line-height: 92rpx;
 }
 
@@ -206,7 +206,7 @@
   height: 100rpx;
   border-radius: 24rpx;
   font-size: 36rpx;
-  font-weight: 900;
+  font-weight: 700;
   line-height: 100rpx;
 }
 
