@@ -16,6 +16,7 @@ function request(event, options = {}) {
       memoryExtraction: options.memoryExtraction,
       storage: options.storage,
       store: options.store || new MemoryStore(),
+      tts: options.tts,
     },
   );
 }
@@ -812,6 +813,217 @@ test("marks ASR jobs and segments failed when transcription fails", async () => 
   assert.equal(processed.data.error_message, "ASR 服务超时");
   assert.equal(processed.data.segment.status, "failed");
   assert.equal(processed.data.segment.error_message, "ASR 服务超时");
+});
+
+test("creates processes and reuses TTS assets for readable sources", async () => {
+  const store = new MemoryStore();
+  const state = await request({
+    method: "GET",
+    path: "/api/mobile/memoir/sessions/current",
+  }, { store });
+  const questionId = state.data.current_question.id;
+
+  const created = await request({
+    method: "POST",
+    path: "/api/mobile/memoir/tts-assets",
+    data: {
+      source_type: "question",
+      source_id: questionId,
+    },
+  }, { store });
+
+  assert.equal(created.statusCode, 201);
+  assert.equal(created.data.asset, null);
+  assert.equal(created.data.job.status, "queued");
+  assert.equal(created.data.job.source_type, "question");
+  assert.equal(created.data.job.source_id, questionId);
+
+  const hiddenJob = await request({
+    method: "GET",
+    path: `/api/mobile/memoir/tts-jobs/${created.data.job.id}`,
+  }, { store, openid: "openid_b" });
+  assert.equal(hiddenJob.statusCode, 404);
+
+  const processed = await request({
+    method: "POST",
+    path: `/api/mobile/memoir/tts-jobs/${created.data.job.id}/process`,
+  }, {
+    store,
+    storage: {
+      async uploadFile(cloudPath, fileContent, mimeType) {
+        assert.ok(cloudPath.startsWith(`memoir/tts/openid_a/${created.data.job.id}-`));
+        assert.equal(fileContent.toString(), `tts:${state.data.current_question.prompt}`);
+        assert.equal(mimeType, "audio/mpeg");
+        return `cloud://env/${cloudPath}`;
+      },
+    },
+    tts: {
+      async synthesize(input) {
+        assert.equal(input.text, state.data.current_question.prompt);
+        assert.equal(input.model, "stepaudio-2.5-tts");
+        assert.equal(input.voice, "cixingnansheng");
+        return {
+          audioBytes: Buffer.from(`tts:${input.text}`),
+          mime_type: "audio/mpeg",
+          chunk_count: 1,
+        };
+      },
+    },
+  });
+
+  assert.equal(processed.statusCode, 200);
+  assert.equal(processed.data.status, "completed");
+  assert.equal(processed.data.asset.mime_type, "audio/mpeg");
+  assert.equal(processed.data.asset.size_bytes, Buffer.byteLength(`tts:${state.data.current_question.prompt}`));
+
+  const asset = await request({
+    method: "GET",
+    path: `/api/mobile/memoir/tts-assets/${processed.data.asset.id}`,
+  }, { store });
+  assert.equal(asset.statusCode, 200);
+  assert.equal(asset.data.file_id, processed.data.asset.file_id);
+
+  const reused = await request({
+    method: "POST",
+    path: "/api/mobile/memoir/tts-assets",
+    data: {
+      source_type: "question",
+      source_id: questionId,
+    },
+  }, { store });
+
+  assert.equal(reused.data.reused, true);
+  assert.equal(reused.data.job, null);
+  assert.equal(reused.data.asset.id, processed.data.asset.id);
+});
+
+test("marks TTS jobs failed when source text changes before processing", async () => {
+  const store = new MemoryStore();
+  const state = await request({
+    method: "GET",
+    path: "/api/mobile/memoir/sessions/current",
+  }, { store });
+  const answer = await request({
+    method: "POST",
+    path: "/api/mobile/memoir/answers",
+    data: {
+      question_id: state.data.current_question.id,
+      text: "原来的回答。",
+    },
+  }, { store });
+  const created = await request({
+    method: "POST",
+    path: "/api/mobile/memoir/tts-assets",
+    data: {
+      source_type: "answer",
+      source_id: answer.data.id,
+    },
+  }, { store });
+
+  await request({
+    method: "PATCH",
+    path: `/api/mobile/memoir/answers/${answer.data.id}`,
+    data: {
+      text: "更新后的回答。",
+    },
+  }, { store });
+
+  const processed = await request({
+    method: "POST",
+    path: `/api/mobile/memoir/tts-jobs/${created.data.job.id}/process`,
+  }, {
+    store,
+    storage: {
+      async uploadFile() {
+        throw new Error("stale jobs should not upload audio");
+      },
+    },
+    tts: {
+      async synthesize() {
+        throw new Error("stale jobs should not synthesize audio");
+      },
+    },
+  });
+
+  assert.equal(processed.statusCode, 200);
+  assert.equal(processed.data.status, "failed");
+  assert.equal(processed.data.error_message, "朗读内容已更新，请重新生成");
+});
+
+test("creates TTS jobs for the latest writing output version", async () => {
+  const store = new MemoryStore();
+  const project = await request({
+    method: "GET",
+    path: "/api/mobile/memoir/project",
+  }, { store });
+  const output = await store.insert(COLLECTIONS.outputs, {
+    openid: "openid_a",
+    project_id: project.data.id,
+    output_type: "story_fragment",
+    title: "第一章",
+    source_session_id: null,
+    status: "draft",
+    created_at: "2026-01-01T00:00:00.000Z",
+    updated_at: "2026-01-01T00:00:00.000Z",
+  });
+  await store.insert(COLLECTIONS.outputVersions, {
+    openid: "openid_a",
+    project_id: project.data.id,
+    output_id: output.id,
+    version: 1,
+    content: "第一版内容。",
+    model: "test",
+    prompt_snapshot: "",
+    feedback: null,
+    created_at: "2026-01-01T00:00:00.000Z",
+  });
+  await store.insert(COLLECTIONS.outputVersions, {
+    openid: "openid_a",
+    project_id: project.data.id,
+    output_id: output.id,
+    version: 2,
+    content: "第二版章节内容。",
+    model: "test",
+    prompt_snapshot: "",
+    feedback: null,
+    created_at: "2026-01-02T00:00:00.000Z",
+  });
+
+  const created = await request({
+    method: "POST",
+    path: "/api/mobile/memoir/tts-assets",
+    data: {
+      source_type: "output",
+      source_id: output.id,
+    },
+  }, { store });
+  assert.equal(created.data.job.source_version, "2");
+
+  const processed = await request({
+    method: "POST",
+    path: `/api/mobile/memoir/tts-jobs/${created.data.job.id}/process`,
+  }, {
+    store,
+    storage: {
+      async uploadFile(cloudPath) {
+        return `cloud://env/${cloudPath}`;
+      },
+    },
+    tts: {
+      async synthesize(input) {
+        assert.equal(input.text, "第二版章节内容。");
+        return {
+          audioBytes: Buffer.from("chapter-audio"),
+          mime_type: "audio/mpeg",
+          chunk_count: 1,
+        };
+      },
+    },
+  });
+
+  assert.equal(processed.data.status, "completed");
+  assert.equal(processed.data.asset.source_type, "output");
+  assert.equal(processed.data.asset.source_version, "2");
 });
 
 test("rejects malformed answer request bodies", async () => {

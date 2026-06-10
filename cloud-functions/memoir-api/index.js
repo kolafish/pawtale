@@ -4,6 +4,7 @@ const {
 } = require("./src/ai/deepseek");
 const cloud = require("wx-server-sdk");
 const { createStepFunASRService } = require("./src/asr/stepfun");
+const { createStepFunTTSService } = require("./src/tts/stepfun");
 const { handleMemoirApiRequest } = require("./src/router");
 const { CloudStore } = require("./src/store");
 
@@ -28,8 +29,13 @@ exports.main = async (event, context) => {
           const result = await cloud.downloadFile({ fileID });
           return result.fileContent;
         },
+        async uploadFile(cloudPath, fileContent) {
+          const result = await cloud.uploadFile({ cloudPath, fileContent });
+          return result.fileID;
+        },
       },
       asr: createStepFunASRService(),
+      tts: createStepFunTTSService(),
       drafting: createDeepSeekDraftService(),
       memoryExtraction: createDeepSeekMemoryExtractionService(),
     },

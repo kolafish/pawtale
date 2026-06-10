@@ -1,5 +1,6 @@
 const { ApiError } = require("./http");
 const { COLLECTIONS } = require("./collections");
+const { textHash } = require("./tts/stepfun");
 const {
   DEFAULT_COVERAGE_TOPICS,
   DEFAULT_MEMOIR_QUESTIONS,
@@ -38,6 +39,13 @@ const MemoirAnswerSegmentStatus = Object.freeze({
 });
 
 const MemoirAsrJobStatus = Object.freeze({
+  QUEUED: "queued",
+  RUNNING: "running",
+  COMPLETED: "completed",
+  FAILED: "failed",
+});
+
+const MemoirTtsJobStatus = Object.freeze({
   QUEUED: "queued",
   RUNNING: "running",
   COMPLETED: "completed",
@@ -101,6 +109,14 @@ const STORY_PREVIEW_LIMIT = 80;
 const DEFAULT_MEMOIR_QUESTION_PROMPTS = new Set(DEFAULT_MEMOIR_QUESTIONS);
 const MAX_AUDIO_BYTES = 20 * 1024 * 1024;
 const CLOUD_AUDIO_ROOT = "memoir/audio";
+const CLOUD_TTS_ROOT = "memoir/tts";
+const DEFAULT_TTS_MODEL = "stepaudio-2.5-tts";
+const DEFAULT_TTS_VOICE = "cixingnansheng";
+const DEFAULT_TTS_FORMAT = "mp3";
+const DEFAULT_TTS_SPEED = 1;
+const TTS_MIME_BY_FORMAT = Object.freeze({
+  mp3: "audio/mpeg",
+});
 const DEFAULT_WECHAT_DISPLAY_NAME = "微信用户";
 const AUDIO_MIME_BY_EXTENSION = Object.freeze({
   mp3: "audio/mpeg",
@@ -2727,6 +2743,455 @@ async function transcribeAudioFile(store, openid, audioFileId, dependencies) {
   };
 }
 
+function cleanTtsSourceType(value) {
+  const sourceType = cleanText(value).toLowerCase();
+  if ([
+    "question",
+    "open_question",
+    "answer",
+    "draft",
+    "output",
+    "output_version",
+    "session_summary",
+  ].includes(sourceType)) {
+    return sourceType;
+  }
+  throw new ApiError(400, "朗读来源类型不支持");
+}
+
+function cleanTtsFormat(value) {
+  const format = cleanText(value || DEFAULT_TTS_FORMAT).toLowerCase();
+  if (!TTS_MIME_BY_FORMAT[format]) {
+    throw new ApiError(400, "朗读音频格式暂不支持");
+  }
+  return format;
+}
+
+function cleanTtsSpeed(value) {
+  if (value === undefined || value === null || value === "") {
+    return DEFAULT_TTS_SPEED;
+  }
+  const speed = Number(value);
+  if (!Number.isFinite(speed)) {
+    return DEFAULT_TTS_SPEED;
+  }
+  return Number(Math.max(0.5, Math.min(2, speed)).toFixed(2));
+}
+
+function cleanTtsOptions(data = {}) {
+  return {
+    model: cleanText(data.model) || DEFAULT_TTS_MODEL,
+    voice: cleanText(data.voice) || DEFAULT_TTS_VOICE,
+    format: cleanTtsFormat(data.format),
+    synthesis_speed: cleanTtsSpeed(data.synthesis_speed),
+  };
+}
+
+function requireReadableText(text) {
+  const value = cleanText(text).replace(/\s+/g, " ");
+  if (!value) {
+    throw new ApiError(400, "朗读内容不能为空");
+  }
+  return value;
+}
+
+function ttsSourceVersion(row, fallback = "") {
+  return String(row.version || row.updated_at || row.created_at || fallback || "");
+}
+
+async function resolveTtsSource(store, openid, projectId, sourceTypeInput, sourceId) {
+  const sourceType = cleanTtsSourceType(sourceTypeInput);
+  if (sourceType === "question") {
+    const question = await loadQuestion(store, openid, sourceId, projectId);
+    return {
+      source_type: sourceType,
+      source_id: question.id,
+      source_version: ttsSourceVersion(question),
+      title: "问题",
+      text: requireReadableText(question.prompt),
+    };
+  }
+
+  if (sourceType === "open_question") {
+    const question = await loadMemory(store, openid, projectId, MemoirMemoryType.OPEN_QUESTION, sourceId);
+    return {
+      source_type: sourceType,
+      source_id: question.id,
+      source_version: ttsSourceVersion(question),
+      title: "待确认问题",
+      text: requireReadableText(question.question),
+    };
+  }
+
+  if (sourceType === "answer") {
+    const answer = await loadAnswer(store, openid, sourceId, projectId);
+    return {
+      source_type: sourceType,
+      source_id: answer.id,
+      source_version: ttsSourceVersion(answer),
+      title: "回答",
+      text: requireReadableText(answer.transcript_edited || answer.transcript_raw),
+    };
+  }
+
+  if (sourceType === "draft") {
+    const draft = await loadDraft(store, openid, sourceId, projectId);
+    return {
+      source_type: sourceType,
+      source_id: draft.id,
+      source_version: ttsSourceVersion(draft),
+      title: "整理稿",
+      text: requireReadableText(draft.content_edited || draft.content_raw),
+    };
+  }
+
+  if (sourceType === "session_summary") {
+    const summary = await store.findOne(COLLECTIONS.sessionSummaries, {
+      openid,
+      _id: sourceId,
+    });
+    if (!summary || (summary.project_id && summary.project_id !== projectId)) {
+      throw new ApiError(404, "访谈摘要不存在");
+    }
+    const scopedSummary = await updateProjectScopedRow(store, COLLECTIONS.sessionSummaries, summary, projectId);
+    return {
+      source_type: sourceType,
+      source_id: scopedSummary.id,
+      source_version: ttsSourceVersion(scopedSummary),
+      title: "访谈摘要",
+      text: requireReadableText(scopedSummary.summary),
+    };
+  }
+
+  if (sourceType === "output") {
+    const output = await store.findOne(COLLECTIONS.outputs, {
+      openid,
+      project_id: projectId,
+      _id: sourceId,
+    });
+    if (!output) {
+      throw new ApiError(404, "写作产物不存在");
+    }
+    const versions = await store.findMany(COLLECTIONS.outputVersions, {
+      openid,
+      output_id: output.id,
+    }, {
+      orderBy: [{ field: "version", direction: "desc" }],
+    });
+    const latestVersion = versions.find((version) => !version.project_id || version.project_id === projectId);
+    if (!latestVersion) {
+      throw new ApiError(400, "写作产物没有可朗读内容");
+    }
+    const scopedVersion = await updateProjectScopedRow(store, COLLECTIONS.outputVersions, latestVersion, projectId);
+    return {
+      source_type: sourceType,
+      source_id: output.id,
+      source_version: String(scopedVersion.version),
+      title: output.title || "写作产物",
+      text: requireReadableText(scopedVersion.content),
+    };
+  }
+
+  const version = await store.findOne(COLLECTIONS.outputVersions, {
+    openid,
+    _id: sourceId,
+  });
+  if (!version || (version.project_id && version.project_id !== projectId)) {
+    throw new ApiError(404, "写作产物版本不存在");
+  }
+  const output = await store.findOne(COLLECTIONS.outputs, {
+    openid,
+    _id: version.output_id,
+  });
+  if (!output || (output.project_id && output.project_id !== projectId)) {
+    throw new ApiError(404, "写作产物不存在");
+  }
+  const scopedVersion = await updateProjectScopedRow(store, COLLECTIONS.outputVersions, version, projectId);
+  return {
+    source_type: sourceType,
+    source_id: scopedVersion.id,
+    source_version: String(scopedVersion.version),
+    title: output.title || "写作产物",
+    text: requireReadableText(scopedVersion.content),
+  };
+}
+
+function ttsAssetResponse(asset) {
+  return {
+    id: asset.id,
+    project_id: asset.project_id,
+    source_type: asset.source_type,
+    source_id: asset.source_id,
+    source_version: asset.source_version,
+    text_hash: asset.text_hash,
+    text_preview: asset.text_preview,
+    text_length: asset.text_length,
+    file_id: asset.file_id,
+    cloud_path: asset.cloud_path,
+    mime_type: asset.mime_type,
+    size_bytes: asset.size_bytes,
+    model: asset.model,
+    voice: asset.voice,
+    format: asset.format,
+    synthesis_speed: asset.synthesis_speed,
+    chunk_count: asset.chunk_count,
+    created_at: asset.created_at,
+    updated_at: asset.updated_at,
+    generated_at: asset.generated_at,
+  };
+}
+
+function ttsJobResponse(job, asset = null) {
+  return {
+    id: job.id,
+    project_id: job.project_id,
+    source_type: job.source_type,
+    source_id: job.source_id,
+    source_version: job.source_version,
+    text_hash: job.text_hash,
+    text_preview: job.text_preview,
+    text_length: job.text_length,
+    tts_asset_id: job.tts_asset_id || null,
+    status: job.status,
+    model: job.model,
+    voice: job.voice,
+    format: job.format,
+    synthesis_speed: job.synthesis_speed,
+    chunk_count: job.chunk_count || 0,
+    error_message: job.error_message || "",
+    created_at: job.created_at,
+    updated_at: job.updated_at,
+    started_at: job.started_at || null,
+    completed_at: job.completed_at || null,
+    asset: asset ? ttsAssetResponse(asset) : undefined,
+  };
+}
+
+async function findTtsAsset(store, openid, projectId, source, options) {
+  return store.findOne(COLLECTIONS.ttsAssets, {
+    openid,
+    project_id: projectId,
+    source_type: source.source_type,
+    source_id: source.source_id,
+    source_version: source.source_version,
+    text_hash: textHash(source.text),
+    model: options.model,
+    voice: options.voice,
+    format: options.format,
+    synthesis_speed: options.synthesis_speed,
+  }, {
+    orderBy: [{ field: "updated_at", direction: "desc" }],
+  });
+}
+
+async function findReusableTtsJob(store, openid, projectId, source, options) {
+  const jobs = await store.findMany(COLLECTIONS.ttsJobs, {
+    openid,
+    project_id: projectId,
+    source_type: source.source_type,
+    source_id: source.source_id,
+    source_version: source.source_version,
+    text_hash: textHash(source.text),
+    model: options.model,
+    voice: options.voice,
+    format: options.format,
+    synthesis_speed: options.synthesis_speed,
+  }, {
+    orderBy: [{ field: "updated_at", direction: "desc" }],
+  });
+  return jobs.find((job) => [
+    MemoirTtsJobStatus.QUEUED,
+    MemoirTtsJobStatus.RUNNING,
+  ].includes(job.status)) || null;
+}
+
+async function loadTtsAsset(store, openid, ttsAssetId, projectId = null) {
+  const asset = await store.findOne(COLLECTIONS.ttsAssets, {
+    openid,
+    _id: ttsAssetId,
+  });
+  if (!asset) {
+    throw new ApiError(404, "朗读音频不存在");
+  }
+  if (projectId && asset.project_id !== projectId) {
+    throw new ApiError(404, "朗读音频不存在");
+  }
+  return asset;
+}
+
+async function loadTtsJob(store, openid, ttsJobId, projectId = null) {
+  const job = await store.findOne(COLLECTIONS.ttsJobs, {
+    openid,
+    _id: ttsJobId,
+  });
+  if (!job) {
+    throw new ApiError(404, "朗读任务不存在");
+  }
+  if (projectId && job.project_id !== projectId) {
+    throw new ApiError(404, "朗读任务不存在");
+  }
+  return job;
+}
+
+async function createTtsAsset(store, openid, data) {
+  const project = await getOrCreateProject(store, openid);
+  const source = await resolveTtsSource(store, openid, project.id, data.source_type, data.source_id);
+  const options = cleanTtsOptions(data);
+  const existingAsset = await findTtsAsset(store, openid, project.id, source, options);
+  if (existingAsset) {
+    return {
+      asset: ttsAssetResponse(existingAsset),
+      job: null,
+      reused: true,
+    };
+  }
+
+  const reusableJob = await findReusableTtsJob(store, openid, project.id, source, options);
+  if (reusableJob) {
+    return {
+      asset: null,
+      job: ttsJobResponse(reusableJob),
+      reused: true,
+    };
+  }
+
+  const now = nowIso();
+  const job = await store.insert(COLLECTIONS.ttsJobs, {
+    openid,
+    project_id: project.id,
+    source_type: source.source_type,
+    source_id: source.source_id,
+    source_version: source.source_version,
+    text_hash: textHash(source.text),
+    text_preview: previewText(source.text),
+    text_length: source.text.length,
+    tts_asset_id: null,
+    status: MemoirTtsJobStatus.QUEUED,
+    model: options.model,
+    voice: options.voice,
+    format: options.format,
+    synthesis_speed: options.synthesis_speed,
+    chunk_count: 0,
+    error_message: "",
+    created_at: now,
+    updated_at: now,
+    started_at: null,
+    completed_at: null,
+  });
+
+  return {
+    asset: null,
+    job: ttsJobResponse(job),
+    reused: false,
+  };
+}
+
+async function getTtsAsset(store, openid, ttsAssetId) {
+  const project = await getOrCreateProject(store, openid);
+  return ttsAssetResponse(await loadTtsAsset(store, openid, ttsAssetId, project.id));
+}
+
+async function getTtsJob(store, openid, ttsJobId) {
+  const project = await getOrCreateProject(store, openid);
+  const job = await loadTtsJob(store, openid, ttsJobId, project.id);
+  const asset = job.tts_asset_id
+    ? await loadTtsAsset(store, openid, job.tts_asset_id, project.id)
+    : null;
+  return ttsJobResponse(job, asset);
+}
+
+function ttsErrorMessage(error) {
+  return error instanceof Error ? error.message : "朗读生成失败";
+}
+
+async function processTtsJob(store, openid, ttsJobId, dependencies) {
+  const project = await getOrCreateProject(store, openid);
+  const job = await loadTtsJob(store, openid, ttsJobId, project.id);
+  if (job.status === MemoirTtsJobStatus.COMPLETED || job.status === MemoirTtsJobStatus.FAILED) {
+    const asset = job.tts_asset_id
+      ? await loadTtsAsset(store, openid, job.tts_asset_id, project.id)
+      : null;
+    return ttsJobResponse(job, asset);
+  }
+  if (!dependencies.tts?.synthesize) {
+    throw new ApiError(500, "语音朗读服务未配置");
+  }
+  if (!dependencies.storage?.uploadFile) {
+    throw new ApiError(500, "云存储未配置");
+  }
+
+  const startedAt = nowIso();
+  await store.updateById(COLLECTIONS.ttsJobs, job.id, {
+    status: MemoirTtsJobStatus.RUNNING,
+    error_message: "",
+    started_at: job.started_at || startedAt,
+    updated_at: startedAt,
+  });
+
+  try {
+    const source = await resolveTtsSource(store, openid, project.id, job.source_type, job.source_id);
+    if (source.source_version !== job.source_version || textHash(source.text) !== job.text_hash) {
+      throw new ApiError(409, "朗读内容已更新，请重新生成");
+    }
+
+    const result = await dependencies.tts.synthesize({
+      text: source.text,
+      model: job.model,
+      voice: job.voice,
+      format: job.format,
+      speed: job.synthesis_speed,
+    });
+    const audioBytes = result.audioBytes;
+    if (!Buffer.isBuffer(audioBytes) || audioBytes.length === 0) {
+      throw new ApiError(503, "语音朗读服务返回了空音频");
+    }
+
+    const cloudPath = `${CLOUD_TTS_ROOT}/${safePathSegment(openid)}/${job.id}-${job.text_hash.slice(0, 12)}.${job.format}`;
+    const fileId = await dependencies.storage.uploadFile(cloudPath, audioBytes, result.mime_type || TTS_MIME_BY_FORMAT[job.format]);
+    const completedAt = nowIso();
+    const asset = await store.insert(COLLECTIONS.ttsAssets, {
+      openid,
+      project_id: project.id,
+      source_type: source.source_type,
+      source_id: source.source_id,
+      source_version: source.source_version,
+      text_hash: job.text_hash,
+      text_preview: job.text_preview,
+      text_length: job.text_length,
+      file_id: fileId,
+      cloud_path: cloudPath,
+      mime_type: result.mime_type || TTS_MIME_BY_FORMAT[job.format],
+      size_bytes: audioBytes.length,
+      model: job.model,
+      voice: job.voice,
+      format: job.format,
+      synthesis_speed: job.synthesis_speed,
+      chunk_count: result.chunk_count || 1,
+      created_at: completedAt,
+      updated_at: completedAt,
+      generated_at: completedAt,
+    });
+    const completedJob = await store.updateById(COLLECTIONS.ttsJobs, job.id, {
+      tts_asset_id: asset.id,
+      status: MemoirTtsJobStatus.COMPLETED,
+      chunk_count: asset.chunk_count,
+      error_message: "",
+      completed_at: completedAt,
+      updated_at: completedAt,
+    });
+    return ttsJobResponse(completedJob, asset);
+  } catch (error) {
+    const failedAt = nowIso();
+    const failedJob = await store.updateById(COLLECTIONS.ttsJobs, job.id, {
+      status: MemoirTtsJobStatus.FAILED,
+      error_message: ttsErrorMessage(error),
+      completed_at: failedAt,
+      updated_at: failedAt,
+    });
+    return ttsJobResponse(failedJob);
+  }
+}
+
 async function generateDraft(store, openid, answerId, dependencies) {
   if (!dependencies.drafting?.generate) {
     throw new ApiError(500, "AI 整理服务未配置");
@@ -3003,6 +3468,8 @@ function createMemoirService(store, context, dependencies = {}) {
     getStoryDetail: async (answerId) => getStoryDetail(store, openid, answerId),
     getAnswerSession: async (answerSessionId) => getAnswerSessionDetail(store, openid, answerSessionId),
     getAsrJob: async (asrJobId) => getAsrJob(store, openid, asrJobId),
+    getTtsJob: async (ttsJobId) => getTtsJob(store, openid, ttsJobId),
+    getTtsAsset: async (ttsAssetId) => getTtsAsset(store, openid, ttsAssetId),
     getSessionSummary: async (sessionId) => getSessionSummary(store, openid, sessionId),
     processSessionMemory: async (sessionId) => processSessionMemory(store, openid, sessionId, dependencies),
     listPersonMemories: async () => listMemoryRows(store, openid, (await getOrCreateProject(store, openid)).id, MemoirMemoryType.PERSON),
@@ -3033,6 +3500,8 @@ function createMemoirService(store, context, dependencies = {}) {
     updateAnswerSegment: async (answerSegmentId, data) => updateAnswerSegment(store, openid, answerSegmentId, data),
     createSegmentTranscriptionJob: async (answerSegmentId) => createSegmentTranscriptionJob(store, openid, answerSegmentId),
     processAsrJob: async (asrJobId) => processAsrJob(store, openid, asrJobId, dependencies),
+    createTtsAsset: async (data) => createTtsAsset(store, openid, data),
+    processTtsJob: async (ttsJobId) => processTtsJob(store, openid, ttsJobId, dependencies),
     submitAnswerSession: async (answerSessionId) => submitAnswerSession(store, openid, answerSessionId),
     createTextAnswer: async (data) => createTextAnswer(store, openid, data),
     updateAnswerText: async (answerId, data) => updateAnswerText(store, openid, answerId, data),
@@ -3051,6 +3520,7 @@ module.exports = {
   MemoirAnswerSegmentStatus,
   MemoirAnswerSessionStatus,
   MemoirAsrJobStatus,
+  MemoirTtsJobStatus,
   MemoirDraftStatus,
   MemoirQuestionStatus,
   MemoirSessionStatus,
