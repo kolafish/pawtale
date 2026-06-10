@@ -152,15 +152,15 @@
 }
 
 .primary-action {
-  height: 104rpx;
+  height: 114rpx;
   margin-top: 34rpx;
-  border-radius: 24rpx;
+  border-radius: 30rpx;
   background: #9f4a3c;
   color: #ffffff;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 24rpx;
+  gap: 26rpx;
   font-size: 38rpx;
   font-weight: 900;
   line-height: 1;
