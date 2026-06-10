@@ -177,9 +177,17 @@ declare namespace WechatMiniprogram {
 
   interface InnerAudioContext {
     src: string;
+    playbackRate: number;
+    currentTime: number;
+    duration: number;
     play(): void;
+    pause(): void;
     stop(): void;
     destroy(): void;
+    onPlay(callback: () => void): void;
+    onPause(callback: () => void): void;
+    onStop(callback: () => void): void;
+    onTimeUpdate(callback: () => void): void;
     onEnded(callback: () => void): void;
     onError(callback: (error: GeneralCallbackResult) => void): void;
   }
