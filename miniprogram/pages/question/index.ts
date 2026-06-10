@@ -24,6 +24,7 @@ import {
 } from "../../services/memoir-audio-recorder";
 import {
   markMemoirDataSnapshotsStale,
+  readMemoirDashboardSnapshot,
 } from "../../stores/memoir-cache";
 import {
   clearMemoirAnswerSessionDraft,
@@ -272,6 +273,7 @@ Page<QuestionData, {
   onLoad(options?: QuestionPageOptions): Promise<void>;
   onHide(): void;
   onUnload(): void;
+  hydrateQuestionFromCache(preferredQuestionId: string): boolean;
   loadQuestion(preferredQuestionId?: string): Promise<void>;
   persistInputDraft(): void;
   persistAnswerSessionDraft(): void;
@@ -309,6 +311,9 @@ Page<QuestionData, {
   },
 
   async onLoad(options = {}) {
+    if (options.questionId && this.hydrateQuestionFromCache(options.questionId)) {
+      return;
+    }
     await this.loadQuestion(options.questionId);
   },
 
@@ -327,6 +332,43 @@ Page<QuestionData, {
     if (this.data.recording) {
       stopMemoirAudioRecording();
     }
+  },
+
+  hydrateQuestionFromCache(preferredQuestionId) {
+    const snapshot = readMemoirDashboardSnapshot();
+    const interview = snapshot.interview;
+    if (!interview || !preferredQuestionId) {
+      return false;
+    }
+    const questions = interview.current_question
+      ? [interview.current_question, ...interview.questions]
+      : interview.questions;
+    const current = questions.find((item) => item.id === preferredQuestionId && item.status === "pending");
+    if (!current) {
+      return false;
+    }
+
+    const projectId = interview.session.project_id;
+    const answerDraft = readMemoirAnswerSessionDraft(projectId, current.id);
+    const inputDraft = readMemoirQuestionInputDraft(current.id);
+    this.setData({
+      loading: false,
+      error: "",
+      projectId,
+      sessionId: interview.session.id,
+      sessionTitle: interview.session.title,
+      question: current,
+      prompt: current.prompt,
+      isCompleted: false,
+      answerSessionId: answerDraft?.answer_session_id || "",
+      answerSessionCreatedAt: answerDraft?.created_at || "",
+      answerSegments: answerDraft ? answerDraft.segments.map(segmentViewFromDraft) : [],
+      answerText: inputDraft?.answer_text || "",
+      legacyAudioFileId: inputDraft?.audio_file_id || "",
+      legacyAudioDurationSeconds: inputDraft?.audio_duration_seconds ?? null,
+      audioSummary: inputDraft?.audio_summary || "",
+    });
+    return true;
   },
 
   async loadQuestion(preferredQuestionId = "") {
