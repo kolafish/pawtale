@@ -349,7 +349,7 @@ image {
 
 .user-mark::before {
   left: 14rpx;
-  top: 5rpx;
+  top: 6rpx;
   width: 18rpx;
   height: 18rpx;
   border: 4rpx solid currentColor;
