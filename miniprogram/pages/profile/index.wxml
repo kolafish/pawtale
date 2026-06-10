@@ -59,6 +59,24 @@
     </view>
   </view>
 
+  <view class="settings-panel">
+    <text class="section-title">朗读设置</text>
+    <view class="service-row" bindtap="openTtsVoiceSettings">
+      <view class="service-main">
+        <text>朗读声音</text>
+        <text class="service-note">{{ttsVoiceLabel || "磁性男声"}}</text>
+      </view>
+      <text class="chevron">›</text>
+    </view>
+    <view class="service-row" bindtap="openTtsSpeedSettings">
+      <view class="service-main">
+        <text>朗读倍速</text>
+        <text class="service-note">{{ttsSpeedLabel || "1x"}}</text>
+      </view>
+      <text class="chevron">›</text>
+    </view>
+  </view>
+
   <view class="bottom-nav">
     <view class="bottom-nav-item" bindtap="openHome">
       <view class="nav-mark home-mark"></view>

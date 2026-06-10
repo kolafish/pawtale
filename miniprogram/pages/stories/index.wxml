@@ -59,13 +59,6 @@
         >
           <image class="tts-icon" src="/assets/tts-speaker.png" mode="aspectFit" />
         </button>
-        <button
-          wx:if="{{ttsSourceKey === item.ttsSourceKey}}"
-          class="tts-settings-chip"
-          bindtap="openTtsSettings"
-        >
-          {{ttsSettingsLabel}}
-        </button>
       </view>
       <text
         wx:if="{{ttsSourceKey === item.ttsSourceKey && ttsError}}"

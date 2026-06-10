@@ -223,10 +223,6 @@
   margin-top: 0;
 }
 
-.record-copy > .tts-settings-chip {
-  margin-top: 14rpx;
-}
-
 .record-footer {
   margin-top: 22rpx;
 }

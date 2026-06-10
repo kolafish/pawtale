@@ -7,6 +7,15 @@ import {
   shouldRefreshMemoirDashboardSnapshot,
 } from "../../stores/memoir-cache";
 import type { MemoirIdentity } from "../../domain/memoir";
+import {
+  memoirTtsSpeedLabel,
+  memoirTtsVoiceLabel,
+  readMemoirTtsSettings,
+} from "../../services/memoir-tts-settings";
+import {
+  openMemoirTtsSpeedSheet,
+  openMemoirTtsVoiceSheet,
+} from "../../services/memoir-tts-settings-sheet";
 
 interface ProfileData {
   loading: boolean;
@@ -20,6 +29,8 @@ interface ProfileData {
   canSaveProfile: boolean;
   activeProjectTitle: string;
   projectCount: number;
+  ttsVoiceLabel: string;
+  ttsSpeedLabel: string;
   syncingProfile: boolean;
   error: string;
 }
@@ -40,14 +51,18 @@ const DEFAULT_WECHAT_DISPLAY_NAME = "微信用户";
 
 Page<ProfileData, {
   onLoad(): Promise<void>;
+  onShow(): void;
   hydrateIdentityFromCache(): boolean;
   hydrateFromCache(): boolean;
   applyIdentity(identity: MemoirIdentity): void;
+  applyTtsSettings(): void;
   loadIdentity(): Promise<boolean>;
   loadProfile(): Promise<void>;
   chooseAvatar(event: AvatarEvent): void;
   onNicknameInput(event: InputEvent): void;
   saveWechatProfile(): Promise<void>;
+  openTtsVoiceSettings(): Promise<void>;
+  openTtsSpeedSettings(): Promise<void>;
   openProjects(): void;
   openHome(): void;
   openWorkbench(): void;
@@ -66,11 +81,14 @@ Page<ProfileData, {
     canSaveProfile: false,
     activeProjectTitle: "",
     projectCount: 0,
+    ttsVoiceLabel: "",
+    ttsSpeedLabel: "",
     syncingProfile: false,
     error: "",
   },
 
   async onLoad() {
+    this.applyTtsSettings();
     const identityCached = this.hydrateIdentityFromCache();
     const identityLoaded = await this.loadIdentity();
     if (!identityLoaded && !identityCached) {
@@ -79,6 +97,10 @@ Page<ProfileData, {
     if (!this.hydrateFromCache()) {
       await this.loadProfile();
     }
+  },
+
+  onShow() {
+    this.applyTtsSettings();
   },
 
   hydrateIdentityFromCache() {
@@ -116,6 +138,14 @@ Page<ProfileData, {
       activeProjectTitle: identity.active_project?.title || "",
       projectCount: identity.projects.length,
       error: "",
+    });
+  },
+
+  applyTtsSettings() {
+    const settings = readMemoirTtsSettings();
+    this.setData({
+      ttsVoiceLabel: memoirTtsVoiceLabel(settings.voice),
+      ttsSpeedLabel: memoirTtsSpeedLabel(settings.speed),
     });
   },
 
@@ -207,6 +237,22 @@ Page<ProfileData, {
     } finally {
       this.setData({ syncingProfile: false });
     }
+  },
+
+  async openTtsVoiceSettings() {
+    const settings = await openMemoirTtsVoiceSheet();
+    this.setData({
+      ttsVoiceLabel: memoirTtsVoiceLabel(settings.voice),
+      ttsSpeedLabel: memoirTtsSpeedLabel(settings.speed),
+    });
+  },
+
+  async openTtsSpeedSettings() {
+    const settings = await openMemoirTtsSpeedSheet();
+    this.setData({
+      ttsVoiceLabel: memoirTtsVoiceLabel(settings.voice),
+      ttsSpeedLabel: memoirTtsSpeedLabel(settings.speed),
+    });
   },
 
   openProjects() {

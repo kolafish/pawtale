@@ -32,7 +32,6 @@ import {
   readMemoirTtsPlaybackState,
   subscribeMemoirTtsPlayback,
 } from "../../services/memoir-tts-player";
-import { openMemoirTtsSettingsSheet } from "../../services/memoir-tts-settings-sheet";
 import { memoirTtsViewPatch } from "../../services/memoir-tts-view";
 
 interface InputEvent {
@@ -83,11 +82,6 @@ interface QaDetailData {
   ttsSourceKey: string;
   ttsMessage: string;
   ttsError: string;
-  ttsSpeed: number;
-  ttsSpeedLabel: string;
-  ttsVoice: string;
-  ttsVoiceLabel: string;
-  ttsSettingsLabel: string;
   ttsPlaying: boolean;
   ttsBusy: boolean;
 }
@@ -113,7 +107,6 @@ interface QaDetailMethods {
   playAudio(): void;
   stopAudio(): void;
   toggleTtsSource(event: TtsSourceEvent): Promise<void>;
-  openTtsSettings(): Promise<void>;
   backQa(): void;
 }
 
@@ -552,10 +545,6 @@ Page<QaDetailData, QaDetailMethods>({
       source_id: sourceId,
       label: event.currentTarget.dataset.label || "",
     });
-  },
-
-  async openTtsSettings() {
-    await openMemoirTtsSettingsSheet();
   },
 
   backQa() {
