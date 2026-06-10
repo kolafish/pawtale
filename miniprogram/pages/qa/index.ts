@@ -8,13 +8,13 @@ import {
   writeMemoirStoriesSnapshot,
 } from "../../stores/memoir-cache";
 import {
-  cycleMemoirTtsPlaybackSpeed,
   memoirTtsSourceKey,
   pauseMemoirTtsPlayback,
   playMemoirTtsPlayback,
   readMemoirTtsPlaybackState,
   subscribeMemoirTtsPlayback,
 } from "../../services/memoir-tts-player";
+import { openMemoirTtsSettingsSheet } from "../../services/memoir-tts-settings-sheet";
 import { memoirTtsViewPatch } from "../../services/memoir-tts-view";
 
 interface DatasetEvent {
@@ -66,6 +66,9 @@ interface QaData {
   ttsError: string;
   ttsSpeed: number;
   ttsSpeedLabel: string;
+  ttsVoice: string;
+  ttsVoiceLabel: string;
+  ttsSettingsLabel: string;
   ttsPlaying: boolean;
   ttsBusy: boolean;
 }
@@ -85,7 +88,7 @@ interface QaMethods {
   deleteSelectedRecords(): Promise<void>;
   applyRecords(records: QaRecord[]): void;
   toggleTtsSource(event: TtsSourceEvent): Promise<void>;
-  cycleTtsSpeed(): void;
+  openTtsSettings(): Promise<void>;
   openHome(): void;
   openWorkbench(): void;
   openQa(): void;
@@ -331,8 +334,8 @@ Page<QaData, QaMethods>({
     });
   },
 
-  cycleTtsSpeed() {
-    cycleMemoirTtsPlaybackSpeed();
+  async openTtsSettings() {
+    await openMemoirTtsSettingsSheet();
   },
 
   openHome() {

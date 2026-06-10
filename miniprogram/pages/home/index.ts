@@ -21,13 +21,13 @@ import {
 } from "../../stores/memoir-answer-session-drafts";
 import { writeMemoirStore } from "../../stores/session";
 import {
-  cycleMemoirTtsPlaybackSpeed,
   memoirTtsSourceKey,
   pauseMemoirTtsPlayback,
   playMemoirTtsPlayback,
   readMemoirTtsPlaybackState,
   subscribeMemoirTtsPlayback,
 } from "../../services/memoir-tts-player";
+import { openMemoirTtsSettingsSheet } from "../../services/memoir-tts-settings-sheet";
 import { memoirTtsViewPatch } from "../../services/memoir-tts-view";
 
 interface TouchPoint {
@@ -87,6 +87,9 @@ interface HomeData {
   ttsError: string;
   ttsSpeed: number;
   ttsSpeedLabel: string;
+  ttsVoice: string;
+  ttsVoiceLabel: string;
+  ttsSettingsLabel: string;
   ttsPlaying: boolean;
   ttsBusy: boolean;
 }
@@ -219,7 +222,7 @@ Page<HomeData, {
   switchQuestionBySwipe(direction: number): void;
   openPendingReview(): Promise<void>;
   toggleTtsSource(event: TtsSourceEvent): Promise<void>;
-  cycleTtsSpeed(): void;
+  openTtsSettings(): Promise<void>;
   openProjects(): void;
   openStories(): void;
   openWorkbench(): void;
@@ -589,8 +592,8 @@ Page<HomeData, {
     });
   },
 
-  cycleTtsSpeed() {
-    cycleMemoirTtsPlaybackSpeed();
+  async openTtsSettings() {
+    await openMemoirTtsSettingsSheet();
   },
 
   openProjects() {

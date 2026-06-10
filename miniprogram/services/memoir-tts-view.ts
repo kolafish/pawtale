@@ -1,4 +1,10 @@
 import type { MemoirTtsPlaybackState } from "./memoir-tts-player";
+import {
+  memoirTtsSettingsLabel,
+  memoirTtsSpeedLabel,
+  normalizeMemoirTtsVoice,
+  memoirTtsVoiceLabel,
+} from "./memoir-tts-settings";
 
 export interface MemoirTtsViewPatch {
   ttsStatus: MemoirTtsPlaybackState["status"];
@@ -7,15 +13,15 @@ export interface MemoirTtsViewPatch {
   ttsError: string;
   ttsSpeed: number;
   ttsSpeedLabel: string;
+  ttsVoice: string;
+  ttsVoiceLabel: string;
+  ttsSettingsLabel: string;
   ttsPlaying: boolean;
   ttsBusy: boolean;
 }
 
-export function memoirTtsSpeedLabel(speed: number): string {
-  return `${speed}x`;
-}
-
 export function memoirTtsViewPatch(state: MemoirTtsPlaybackState): MemoirTtsViewPatch {
+  const voice = normalizeMemoirTtsVoice(state.voice);
   return {
     ttsStatus: state.status,
     ttsSourceKey: state.source_key,
@@ -23,6 +29,9 @@ export function memoirTtsViewPatch(state: MemoirTtsPlaybackState): MemoirTtsView
     ttsError: state.error,
     ttsSpeed: state.speed,
     ttsSpeedLabel: memoirTtsSpeedLabel(state.speed),
+    ttsVoice: voice,
+    ttsVoiceLabel: memoirTtsVoiceLabel(voice),
+    ttsSettingsLabel: memoirTtsSettingsLabel({ voice, speed: state.speed }),
     ttsPlaying: state.status === "playing",
     ttsBusy: state.status === "loading" || state.status === "generating",
   };

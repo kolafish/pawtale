@@ -26,12 +26,29 @@ test("normalizes TTS playback speed to supported steps", () => {
   assert.equal(normalizeMemoirTtsPlaybackSpeed(Number.NaN), 1);
 });
 
-test("cycles TTS playback speed through all supported steps", () => {
-  const { nextMemoirTtsPlaybackSpeed } = playerModule();
+test("exports the supported TTS playback speed steps", () => {
+  const { MEMOIR_TTS_PLAYBACK_SPEEDS } = playerModule();
 
-  assert.equal(nextMemoirTtsPlaybackSpeed(0.75), 1);
-  assert.equal(nextMemoirTtsPlaybackSpeed(1), 1.25);
-  assert.equal(nextMemoirTtsPlaybackSpeed(1.25), 1.5);
-  assert.equal(nextMemoirTtsPlaybackSpeed(1.5), 2);
-  assert.equal(nextMemoirTtsPlaybackSpeed(2), 0.75);
+  assert.deepEqual(MEMOIR_TTS_PLAYBACK_SPEEDS, [0.75, 1, 1.25, 1.5, 2]);
+});
+
+test("normalizes TTS voice ids to supported voices", () => {
+  const { normalizeMemoirTtsVoice } = playerModule();
+
+  assert.equal(normalizeMemoirTtsVoice("wenrounvsheng"), "wenrounvsheng");
+  assert.equal(normalizeMemoirTtsVoice("unknown-voice"), "cixingnansheng");
+});
+
+test("changing TTS voice clears prepared playback source", () => {
+  const {
+    readMemoirTtsPlaybackState,
+    setMemoirTtsPlaybackVoice,
+  } = playerModule();
+
+  setMemoirTtsPlaybackVoice("wenrounvsheng");
+
+  const state = readMemoirTtsPlaybackState();
+  assert.equal(state.voice, "wenrounvsheng");
+  assert.equal(state.source_key, "");
+  assert.equal(state.temp_url, "");
 });

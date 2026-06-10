@@ -80,10 +80,10 @@
           </view>
           <button
             wx:if="{{!selectionMode && (ttsSourceKey === item.questionTtsSourceKey || ttsSourceKey === item.answerTtsSourceKey)}}"
-            class="tts-speed-chip"
-            catchtap="cycleTtsSpeed"
+            class="tts-settings-chip"
+            catchtap="openTtsSettings"
           >
-            {{ttsSpeedLabel}}
+            {{ttsSettingsLabel}}
           </button>
           <text
             wx:if="{{!selectionMode && (ttsSourceKey === item.questionTtsSourceKey || ttsSourceKey === item.answerTtsSourceKey) && ttsError}}"

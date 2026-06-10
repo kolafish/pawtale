@@ -193,7 +193,7 @@
 }
 
 .readable-row .tts-icon-button {
-  margin-top: 12rpx;
+  margin-top: 6rpx;
 }
 
 .answer-row {
@@ -223,7 +223,7 @@
   margin-top: 0;
 }
 
-.record-copy > .tts-speed-chip {
+.record-copy > .tts-settings-chip {
   margin-top: 14rpx;
 }
 
