@@ -22,6 +22,56 @@
   border: 0;
 }
 
+.recording-row,
+.processing-row {
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+  padding: 22rpx 24rpx;
+  border-radius: 16rpx;
+  background: #fff7ed;
+}
+
+.recording-dot {
+  width: 18rpx;
+  height: 18rpx;
+  border-radius: 50%;
+  background: #dc2626;
+}
+
+.recording-label {
+  flex: 1;
+  color: #991b1b;
+  font-size: 26rpx;
+  font-weight: 800;
+}
+
+.recording-time {
+  color: #111827;
+  font-size: 34rpx;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+}
+
+.processing-row {
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 8rpx;
+  background: #ecfdf5;
+}
+
+.processing-title {
+  color: #0f766e;
+  font-size: 26rpx;
+  font-weight: 900;
+}
+
+.processing-note {
+  color: #4b5563;
+  font-size: 24rpx;
+  line-height: 1.45;
+}
+
 .audio-row {
   display: flex;
   align-items: center;

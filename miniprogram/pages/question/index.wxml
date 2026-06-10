@@ -15,13 +15,10 @@
     <button
       wx:if="{{!recording}}"
       class="record-button"
-      disabled="{{isCompleted || submitting || uploadingAudio || transcribingAudio || syncingSegment}}"
-      loading="{{uploadingAudio || transcribingAudio || syncingSegment}}"
+      disabled="{{isCompleted || submitting}}"
       bindtap="startRecording"
     >
-      <block wx:if="{{uploadingAudio}}">保存中</block>
-      <block wx:elif="{{transcribingAudio}}">转写中</block>
-      <block wx:elif="{{syncingSegment}}">添加中</block>
+      <block wx:if="{{answerSegments.length || processingSegmentCount}}">继续录音</block>
       <block wx:else>开始录音</block>
     </button>
     <button
@@ -29,8 +26,19 @@
       class="record-button record-button-active"
       bindtap="stopRecording"
     >
-      停止录音
+      暂停并保存本段
     </button>
+
+    <view wx:if="{{recording}}" class="recording-row">
+      <view class="recording-dot"></view>
+      <text class="recording-label">正在录音</text>
+      <text class="recording-time">{{recordingElapsedLabel}}</text>
+    </view>
+
+    <view wx:if="{{processingSegmentCount}}" class="processing-row">
+      <text class="processing-title">{{processingSegmentLabel}}</text>
+      <text class="processing-note">可以继续讲，提交前会等这些分段完成</text>
+    </view>
 
     <view wx:if="{{audioSummary}}" class="audio-row">
       <text class="audio-state">{{audioSummary}}</text>
@@ -66,15 +74,15 @@
     value="{{answerText}}"
     placeholder="{{answerSegments.length ? '补充一段文字' : '写下你的回答，或先录一段'}}"
     maxlength="-1"
-    disabled="{{isCompleted || submitting || recording || uploadingAudio || transcribingAudio || syncingSegment}}"
+    disabled="{{isCompleted || submitting || recording || processingSegmentCount || uploadingAudio || transcribingAudio || syncingSegment}}"
     bindinput="onAnswerInput"
   />
 
   <view class="button-row">
-    <button class="button button-secondary" disabled="{{isCompleted || submitting || recording || uploadingAudio || transcribingAudio || syncingSegment}}" bindtap="skipCurrentQuestion">
+    <button class="button button-secondary" disabled="{{isCompleted || submitting || recording || processingSegmentCount || uploadingAudio || transcribingAudio || syncingSegment}}" bindtap="skipCurrentQuestion">
       跳过
     </button>
-    <button class="button button-primary" loading="{{submitting}}" disabled="{{isCompleted || recording || uploadingAudio || transcribingAudio || syncingSegment}}" bindtap="submitAnswer">
+    <button class="button button-primary" loading="{{submitting}}" disabled="{{isCompleted || recording || processingSegmentCount || uploadingAudio || transcribingAudio || syncingSegment}}" bindtap="submitAnswer">
       提交回答
     </button>
   </view>
