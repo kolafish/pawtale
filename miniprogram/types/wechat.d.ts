@@ -178,6 +178,8 @@ declare namespace WechatMiniprogram {
   interface InnerAudioContext {
     src: string;
     playbackRate: number;
+    obeyMuteSwitch: boolean;
+    volume: number;
     currentTime: number;
     duration: number;
     play(): void;
@@ -190,6 +192,15 @@ declare namespace WechatMiniprogram {
     onTimeUpdate(callback: () => void): void;
     onEnded(callback: () => void): void;
     onError(callback: (error: GeneralCallbackResult) => void): void;
+  }
+
+  interface InnerAudioOption {
+    obeyMuteSwitch?: boolean;
+    mixWithOther?: boolean;
+    speakerOn?: boolean;
+    success?(result: GeneralCallbackResult): void;
+    fail?(result: GeneralCallbackResult): void;
+    complete?(result: GeneralCallbackResult): void;
   }
 
   interface NavigateOption {
@@ -236,6 +247,7 @@ declare namespace WechatMiniprogram {
     getFileInfo(option: GetFileInfoOption): void;
     getRecorderManager(): RecorderManager;
     createInnerAudioContext(): InnerAudioContext;
+    setInnerAudioOption?(option: InnerAudioOption): void;
     navigateTo(option: NavigateOption): void;
     redirectTo(option: NavigateOption): void;
     reLaunch(option: NavigateOption): void;

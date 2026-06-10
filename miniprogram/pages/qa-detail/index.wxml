@@ -11,24 +11,24 @@
   <view class="surface">
     <text class="eyebrow">{{sessionTitle || "访谈问答"}}</text>
     <text class="question-text">{{questionPrompt || "正在加载问题"}}</text>
-    <view wx:if="{{questionTtsSourceKey}}" class="tts-actions">
+    <view wx:if="{{questionTtsSourceKey}}" class="tts-inline">
       <button
-        class="tts-button {{ttsSourceKey === questionTtsSourceKey && ttsPlaying ? 'active' : ''}}"
+        class="tts-icon-button {{ttsSourceKey === questionTtsSourceKey && ttsPlaying ? 'active' : ''}}"
         disabled="{{ttsBusy}}"
         data-source-type="question"
         data-source-id="{{questionId}}"
         data-label="问题"
         bindtap="toggleTtsSource"
       >
-        {{ttsSourceKey === questionTtsSourceKey && ttsPlaying ? "暂停朗读" : "朗读问题"}}
+        <image class="tts-icon" src="/assets/tts-speaker.png" mode="aspectFit" />
       </button>
-      <button class="tts-speed-button" bindtap="cycleTtsSpeed">{{ttsSpeedLabel}}</button>
+      <button class="tts-speed-chip" bindtap="cycleTtsSpeed">{{ttsSpeedLabel}}</button>
     </view>
     <text
-      wx:if="{{ttsSourceKey === questionTtsSourceKey && (ttsMessage || ttsError)}}"
+      wx:if="{{ttsSourceKey === questionTtsSourceKey && ttsError}}"
       class="tts-status {{ttsError ? 'tts-error' : ''}}"
     >
-      {{ttsError || ttsMessage}}
+      {{ttsError}}
     </text>
   </view>
 
@@ -60,24 +60,24 @@
       disabled="{{loading || saving || submitting || recording || uploadingAudio || transcribingAudio}}"
       bindinput="onAnswerInput"
     />
-    <view wx:if="{{answerTtsSourceKey}}" class="tts-actions">
+    <view wx:if="{{answerTtsSourceKey}}" class="tts-inline">
       <button
-        class="tts-button {{ttsSourceKey === answerTtsSourceKey && ttsPlaying ? 'active' : ''}}"
+        class="tts-icon-button {{ttsSourceKey === answerTtsSourceKey && ttsPlaying ? 'active' : ''}}"
         disabled="{{ttsBusy}}"
         data-source-type="answer"
         data-source-id="{{answerId}}"
         data-label="回答"
         bindtap="toggleTtsSource"
       >
-        {{ttsSourceKey === answerTtsSourceKey && ttsPlaying ? "暂停朗读" : "朗读回答"}}
+        <image class="tts-icon" src="/assets/tts-speaker.png" mode="aspectFit" />
       </button>
-      <button class="tts-speed-button" bindtap="cycleTtsSpeed">{{ttsSpeedLabel}}</button>
+      <button class="tts-speed-chip" bindtap="cycleTtsSpeed">{{ttsSpeedLabel}}</button>
     </view>
     <text
-      wx:if="{{ttsSourceKey === answerTtsSourceKey && (ttsMessage || ttsError)}}"
+      wx:if="{{ttsSourceKey === answerTtsSourceKey && ttsError}}"
       class="tts-status {{ttsError ? 'tts-error' : ''}}"
     >
-      {{ttsError || ttsMessage}}
+      {{ttsError}}
     </text>
     <view wx:if="{{transcriptRaw && transcriptRaw !== answerText}}" class="raw-block">
       <text class="detail-label">ASR 原文</text>
@@ -90,24 +90,24 @@
       <text class="section-title">整理稿</text>
     </view>
     <text class="draft-text">{{draftContent}}</text>
-    <view wx:if="{{draftTtsSourceKey}}" class="tts-actions">
+    <view wx:if="{{draftTtsSourceKey}}" class="tts-inline">
       <button
-        class="tts-button {{ttsSourceKey === draftTtsSourceKey && ttsPlaying ? 'active' : ''}}"
+        class="tts-icon-button {{ttsSourceKey === draftTtsSourceKey && ttsPlaying ? 'active' : ''}}"
         disabled="{{ttsBusy}}"
         data-source-type="draft"
         data-source-id="{{draftId}}"
         data-label="整理稿"
         bindtap="toggleTtsSource"
       >
-        {{ttsSourceKey === draftTtsSourceKey && ttsPlaying ? "暂停朗读" : "朗读整理稿"}}
+        <image class="tts-icon" src="/assets/tts-speaker.png" mode="aspectFit" />
       </button>
-      <button class="tts-speed-button" bindtap="cycleTtsSpeed">{{ttsSpeedLabel}}</button>
+      <button class="tts-speed-chip" bindtap="cycleTtsSpeed">{{ttsSpeedLabel}}</button>
     </view>
     <text
-      wx:if="{{ttsSourceKey === draftTtsSourceKey && (ttsMessage || ttsError)}}"
+      wx:if="{{ttsSourceKey === draftTtsSourceKey && ttsError}}"
       class="tts-status {{ttsError ? 'tts-error' : ''}}"
     >
-      {{ttsError || ttsMessage}}
+      {{ttsError}}
     </text>
   </view>
 

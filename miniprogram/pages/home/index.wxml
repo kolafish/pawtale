@@ -24,24 +24,24 @@
       <text>{{sessionTitle || "回忆录访谈"}}</text>
     </view>
     <text class="question-text">{{currentPrompt || "正在获取问题"}}</text>
-    <view wx:if="{{currentQuestionTtsSourceKey}}" class="tts-actions">
+    <view wx:if="{{currentQuestionTtsSourceKey}}" class="tts-inline">
       <button
-        class="tts-button {{ttsSourceKey === currentQuestionTtsSourceKey && ttsPlaying ? 'active' : ''}}"
+        class="tts-icon-button {{ttsSourceKey === currentQuestionTtsSourceKey && ttsPlaying ? 'active' : ''}}"
         disabled="{{ttsBusy}}"
         data-source-type="question"
         data-source-id="{{currentQuestionId}}"
         data-label="问题"
         catchtap="toggleTtsSource"
       >
-        {{ttsSourceKey === currentQuestionTtsSourceKey && ttsPlaying ? "暂停朗读" : "朗读问题"}}
+        <image class="tts-icon" src="/assets/tts-speaker.png" mode="aspectFit" />
       </button>
-      <button class="tts-speed-button" catchtap="cycleTtsSpeed">{{ttsSpeedLabel}}</button>
+      <button class="tts-speed-chip" catchtap="cycleTtsSpeed">{{ttsSpeedLabel}}</button>
     </view>
     <text
-      wx:if="{{ttsSourceKey === currentQuestionTtsSourceKey && (ttsMessage || ttsError)}}"
+      wx:if="{{ttsSourceKey === currentQuestionTtsSourceKey && ttsError}}"
       class="tts-status {{ttsError ? 'tts-error' : ''}}"
     >
-      {{ttsError || ttsMessage}}
+      {{ttsError}}
     </text>
     <view wx:if="{{hasAnswerDraft}}" class="draft-state">
       <text class="draft-label">{{answerDraftLabel}}</text>
@@ -97,24 +97,24 @@
   <view class="latest-card" wx:if="{{latestOutputPreview}}">
     <text class="latest-label">最近整理</text>
     <text class="latest-text">{{latestOutputPreview}}</text>
-    <view wx:if="{{latestOutputTtsSourceKey}}" class="tts-actions">
+    <view wx:if="{{latestOutputTtsSourceKey}}" class="tts-inline">
       <button
-        class="tts-button {{ttsSourceKey === latestOutputTtsSourceKey && ttsPlaying ? 'active' : ''}}"
+        class="tts-icon-button {{ttsSourceKey === latestOutputTtsSourceKey && ttsPlaying ? 'active' : ''}}"
         disabled="{{ttsBusy}}"
         data-source-type="{{latestOutputTtsSourceType}}"
         data-source-id="{{latestOutputId}}"
         data-label="最近整理"
         catchtap="toggleTtsSource"
       >
-        {{ttsSourceKey === latestOutputTtsSourceKey && ttsPlaying ? "暂停朗读" : "朗读整理"}}
+        <image class="tts-icon" src="/assets/tts-speaker.png" mode="aspectFit" />
       </button>
-      <button class="tts-speed-button" catchtap="cycleTtsSpeed">{{ttsSpeedLabel}}</button>
+      <button class="tts-speed-chip" catchtap="cycleTtsSpeed">{{ttsSpeedLabel}}</button>
     </view>
     <text
-      wx:if="{{ttsSourceKey === latestOutputTtsSourceKey && (ttsMessage || ttsError)}}"
+      wx:if="{{ttsSourceKey === latestOutputTtsSourceKey && ttsError}}"
       class="tts-status {{ttsError ? 'tts-error' : ''}}"
     >
-      {{ttsError || ttsMessage}}
+      {{ttsError}}
     </text>
   </view>
 

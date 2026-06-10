@@ -107,7 +107,10 @@ function ensureAudioContext(): WechatMiniprogram.InnerAudioContext {
   if (audioContext) {
     return audioContext;
   }
+  wx.setInnerAudioOption?.({ obeyMuteSwitch: false, mixWithOther: true });
   audioContext = wx.createInnerAudioContext();
+  audioContext.obeyMuteSwitch = false;
+  audioContext.volume = 1;
   audioContext.onPlay(() => {
     patchState({ status: "playing", message: "", error: "" });
   });
@@ -174,7 +177,7 @@ export async function prepareMemoirTtsPlayback(
     temp_url: "",
     position_seconds: 0,
     duration_seconds: 0,
-    message: "正在准备朗读",
+    message: "",
     error: "",
   });
 
@@ -186,7 +189,7 @@ export async function prepareMemoirTtsPlayback(
     });
     let asset = created.asset || null;
     if (!asset && created.job) {
-      patchState({ status: "generating", message: "正在生成朗读音频" });
+      patchState({ status: "generating", message: "" });
       const job = await processMemoirTtsJob(created.job.id);
       if (job.status !== "completed" || !job.asset) {
         throw new Error(job.error_message || "朗读生成失败");
