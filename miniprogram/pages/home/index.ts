@@ -6,6 +6,7 @@ import type {
   MemoirQuestion,
   MemoirSessionSummary,
   MemoirSummary,
+  MemoirTtsSourceType,
 } from "../../domain/memoir";
 import { loadMemoirDashboard } from "../../services/memoir-dashboard";
 import {
@@ -19,6 +20,15 @@ import {
   type MemoirAnswerSessionDraft,
 } from "../../stores/memoir-answer-session-drafts";
 import { writeMemoirStore } from "../../stores/session";
+import {
+  cycleMemoirTtsPlaybackSpeed,
+  memoirTtsSourceKey,
+  pauseMemoirTtsPlayback,
+  playMemoirTtsPlayback,
+  readMemoirTtsPlaybackState,
+  subscribeMemoirTtsPlayback,
+} from "../../services/memoir-tts-player";
+import { memoirTtsViewPatch } from "../../services/memoir-tts-view";
 
 interface TouchPoint {
   clientX: number;
@@ -30,6 +40,16 @@ interface TouchEvent {
   changedTouches?: TouchPoint[];
 }
 
+interface TtsSourceEvent {
+  currentTarget: {
+    dataset: {
+      sourceType?: MemoirTtsSourceType;
+      sourceId?: string;
+      label?: string;
+    };
+  };
+}
+
 interface HomeData {
   loading: boolean;
   refreshing: boolean;
@@ -39,6 +59,7 @@ interface HomeData {
   projectTitle: string;
   sessionTitle: string;
   currentQuestionId: string;
+  currentQuestionTtsSourceKey: string;
   currentPrompt: string;
   hasAnswerDraft: boolean;
   answerDraftLabel: string;
@@ -56,7 +77,18 @@ interface HomeData {
   confirmedStoryCount: number;
   progressPercent: number;
   latestOutputPreview: string;
+  latestOutputId: string;
+  latestOutputTtsSourceKey: string;
+  latestOutputTtsSourceType: MemoirTtsSourceType | "";
   reviewSessionId: string;
+  ttsStatus: string;
+  ttsSourceKey: string;
+  ttsMessage: string;
+  ttsError: string;
+  ttsSpeed: number;
+  ttsSpeedLabel: string;
+  ttsPlaying: boolean;
+  ttsBusy: boolean;
 }
 
 const HOME_EMPTY_PROMPT = "今天想从哪一段继续讲？小时候、年轻时候，还是工作以后？";
@@ -162,8 +194,11 @@ function nextPendingQuestionAfter(interview: MemoirInterviewState | undefined, q
 }
 
 Page<HomeData, {
+  unsubscribeTtsPlayback?: () => void;
   onLoad(): Promise<void>;
   onShow(): void;
+  onUnload(): void;
+  registerTtsPlayback(): void;
   hydrateFromCache(): MemoirDashboardSnapshot;
   applySnapshot(
     interview: MemoirInterviewState,
@@ -183,6 +218,8 @@ Page<HomeData, {
   resetQuestionSwipe(): void;
   switchQuestionBySwipe(direction: number): void;
   openPendingReview(): Promise<void>;
+  toggleTtsSource(event: TtsSourceEvent): Promise<void>;
+  cycleTtsSpeed(): void;
   openProjects(): void;
   openStories(): void;
   openWorkbench(): void;
@@ -199,6 +236,7 @@ Page<HomeData, {
     projectTitle: "",
     sessionTitle: "",
     currentQuestionId: "",
+    currentQuestionTtsSourceKey: "",
     currentPrompt: "",
     hasAnswerDraft: false,
     answerDraftLabel: "",
@@ -216,10 +254,15 @@ Page<HomeData, {
     confirmedStoryCount: 0,
     progressPercent: 0,
     latestOutputPreview: "",
+    latestOutputId: "",
+    latestOutputTtsSourceKey: "",
+    latestOutputTtsSourceType: "",
     reviewSessionId: "",
+    ...memoirTtsViewPatch(readMemoirTtsPlaybackState()),
   },
 
   async onLoad() {
+    this.registerTtsPlayback();
     const snapshot = this.hydrateFromCache();
     if (shouldRefreshMemoirDashboardSnapshot(snapshot)) {
       await this.loadHome();
@@ -231,6 +274,22 @@ Page<HomeData, {
     if (!this.data.refreshing && shouldRefreshMemoirDashboardSnapshot(snapshot)) {
       void this.loadHome();
     }
+  },
+
+  onUnload() {
+    if (this.unsubscribeTtsPlayback) {
+      this.unsubscribeTtsPlayback();
+      this.unsubscribeTtsPlayback = undefined;
+    }
+  },
+
+  registerTtsPlayback() {
+    if (this.unsubscribeTtsPlayback) {
+      return;
+    }
+    this.unsubscribeTtsPlayback = subscribeMemoirTtsPlayback((playbackState) => {
+      this.setData(memoirTtsViewPatch(playbackState));
+    });
   },
 
   hydrateFromCache() {
@@ -255,7 +314,16 @@ Page<HomeData, {
 
   applySnapshot(interview, summary, coverage = [], outputs = [], memoryStats, sessionSummary = null) {
     clearQuestionSwipeSwitchTimer();
-    const draftState = answerDraftState(this.data.projectId, interview.current_question);
+    const currentQuestion = interview.current_question;
+    const draftState = answerDraftState(this.data.projectId, currentQuestion);
+    const latestOutput = outputs[0];
+    const latestOutputPreview = latestOutput?.content_preview || sessionSummary?.summary || "";
+    const latestOutputTtsSourceType: MemoirTtsSourceType | "" = latestOutput?.content_preview
+      ? "output"
+      : sessionSummary?.id && sessionSummary.summary
+        ? "session_summary"
+        : "";
+    const latestOutputId = latestOutputTtsSourceType === "output" ? latestOutput?.id || "" : sessionSummary?.id || "";
     const coveragePercent = memoryStats?.coverage_average ?? (coverage.length
       ? Math.round(coverage.reduce((total, item) => total + item.coverage_score, 0) / coverage.length)
       : summary.progress_percent);
@@ -265,8 +333,11 @@ Page<HomeData, {
     this.setData({
       sessionTitle: interview.session.title,
       reviewSessionId: interview.session.id,
-      currentQuestionId: interview.current_question?.id || "",
-      currentPrompt: promptForQuestion(interview.current_question),
+      currentQuestionId: currentQuestion?.id || "",
+      currentQuestionTtsSourceKey: currentQuestion
+        ? memoirTtsSourceKey({ source_type: "question", source_id: currentQuestion.id })
+        : "",
+      currentPrompt: promptForQuestion(currentQuestion),
       ...draftState,
       questionCardTranslateX: 0,
       questionCardRotate: 0,
@@ -278,7 +349,12 @@ Page<HomeData, {
       pendingReviewCount,
       confirmedStoryCount: memoryStats?.confirmed_memory_count ?? summary.confirmed_story_count,
       progressPercent: coveragePercent,
-      latestOutputPreview: outputs[0]?.content_preview || sessionSummary?.summary || "",
+      latestOutputPreview,
+      latestOutputId,
+      latestOutputTtsSourceKey: latestOutputId && latestOutputTtsSourceType
+        ? memoirTtsSourceKey({ source_type: latestOutputTtsSourceType, source_id: latestOutputId })
+        : "",
+      latestOutputTtsSourceType,
       hasDashboardData: true,
     });
   },
@@ -420,6 +496,9 @@ Page<HomeData, {
     this.setData({
       projectId,
       currentQuestionId: question?.id || "",
+      currentQuestionTtsSourceKey: question
+        ? memoirTtsSourceKey({ source_type: "question", source_id: question.id })
+        : "",
       currentPrompt: promptForQuestion(question),
       ...draftState,
       questionCardTranslateX: 0,
@@ -490,6 +569,28 @@ Page<HomeData, {
       return;
     }
     wx.navigateTo({ url: `/pages/review/index?sessionId=${encodeURIComponent(fallbackSessionId)}` });
+  },
+
+  async toggleTtsSource(event) {
+    const sourceType = event.currentTarget.dataset.sourceType;
+    const sourceId = event.currentTarget.dataset.sourceId || "";
+    if (!sourceType || !sourceId || this.data.ttsBusy) {
+      return;
+    }
+    const sourceKey = memoirTtsSourceKey({ source_type: sourceType, source_id: sourceId });
+    if (this.data.ttsSourceKey === sourceKey && this.data.ttsPlaying) {
+      pauseMemoirTtsPlayback();
+      return;
+    }
+    await playMemoirTtsPlayback({
+      source_type: sourceType,
+      source_id: sourceId,
+      label: event.currentTarget.dataset.label || "",
+    });
+  },
+
+  cycleTtsSpeed() {
+    cycleMemoirTtsPlaybackSpeed();
   },
 
   openProjects() {
