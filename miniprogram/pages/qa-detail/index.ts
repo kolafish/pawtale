@@ -1,4 +1,4 @@
-import type { MemoirStoryDetail } from "../../domain/memoir";
+import type { MemoirStoryDetail, MemoirTtsSourceType } from "../../domain/memoir";
 import {
   createTextAnswer,
   getMemoirStoryDetail,
@@ -25,10 +25,29 @@ import {
   readMemoirQaDetailInputDraft,
   writeMemoirQaDetailInputDraft,
 } from "../../stores/memoir-input-drafts";
+import {
+  cycleMemoirTtsPlaybackSpeed,
+  memoirTtsSourceKey,
+  pauseMemoirTtsPlayback,
+  playMemoirTtsPlayback,
+  readMemoirTtsPlaybackState,
+  subscribeMemoirTtsPlayback,
+} from "../../services/memoir-tts-player";
+import { memoirTtsViewPatch } from "../../services/memoir-tts-view";
 
 interface InputEvent {
   detail: {
     value: string;
+  };
+}
+
+interface TtsSourceEvent {
+  currentTarget: {
+    dataset: {
+      sourceType?: MemoirTtsSourceType;
+      sourceId?: string;
+      label?: string;
+    };
   };
 }
 
@@ -45,6 +64,8 @@ interface QaDetailData {
   error: string;
   sessionTitle: string;
   questionPrompt: string;
+  draftId: string;
+  draftContent: string;
   transcriptRaw: string;
   answerText: string;
   hasAudio: boolean;
@@ -55,13 +76,26 @@ interface QaDetailData {
   newAudioDurationSeconds: number | null;
   newAudioSummary: string;
   inputDraftDirty: boolean;
+  questionTtsSourceKey: string;
+  answerTtsSourceKey: string;
+  draftTtsSourceKey: string;
+  ttsStatus: string;
+  ttsSourceKey: string;
+  ttsMessage: string;
+  ttsError: string;
+  ttsSpeed: number;
+  ttsSpeedLabel: string;
+  ttsPlaying: boolean;
+  ttsBusy: boolean;
 }
 
 interface QaDetailMethods {
   audioRecordingSession?: MemoirAudioRecorderSession;
+  unsubscribeTtsPlayback?: () => void;
   onLoad(query?: Record<string, string | undefined>): Promise<void>;
   onHide(): void;
   onUnload(): void;
+  registerTtsPlayback(): void;
   hydrateFromCache(): Promise<MemoirStoryDetailSnapshot>;
   applyInputDraft(answerId: string): boolean;
   persistInputDraft(): void;
@@ -75,6 +109,8 @@ interface QaDetailMethods {
   clearRecordedAudio(): void;
   playAudio(): void;
   stopAudio(): void;
+  toggleTtsSource(event: TtsSourceEvent): Promise<void>;
+  cycleTtsSpeed(): void;
   backQa(): void;
 }
 
@@ -83,6 +119,7 @@ type QaDetailPageInstance = {
   setData(data: Partial<QaDetailData>): void;
   persistInputDraft(): void;
   audioRecordingSession?: MemoirAudioRecorderSession;
+  unsubscribeTtsPlayback?: () => void;
 };
 let audioContext: WechatMiniprogram.InnerAudioContext | null = null;
 
@@ -214,6 +251,8 @@ Page<QaDetailData, QaDetailMethods>({
     error: "",
     sessionTitle: "",
     questionPrompt: "",
+    draftId: "",
+    draftContent: "",
     transcriptRaw: "",
     answerText: "",
     hasAudio: false,
@@ -224,9 +263,14 @@ Page<QaDetailData, QaDetailMethods>({
     newAudioDurationSeconds: null,
     newAudioSummary: "",
     inputDraftDirty: false,
+    questionTtsSourceKey: "",
+    answerTtsSourceKey: "",
+    draftTtsSourceKey: "",
+    ...memoirTtsViewPatch(readMemoirTtsPlaybackState()),
   },
 
   async onLoad(query) {
+    this.registerTtsPlayback();
     const answerId = query?.answerId || "";
     this.setData({ answerId });
     const snapshot = await this.hydrateFromCache();
@@ -253,6 +297,19 @@ Page<QaDetailData, QaDetailMethods>({
       audioContext.destroy();
       audioContext = null;
     }
+    if (this.unsubscribeTtsPlayback) {
+      this.unsubscribeTtsPlayback();
+      this.unsubscribeTtsPlayback = undefined;
+    }
+  },
+
+  registerTtsPlayback() {
+    if (this.unsubscribeTtsPlayback) {
+      return;
+    }
+    this.unsubscribeTtsPlayback = subscribeMemoirTtsPlayback((playbackState) => {
+      this.setData(memoirTtsViewPatch(playbackState));
+    });
   },
 
   async hydrateFromCache() {
@@ -333,12 +390,17 @@ Page<QaDetailData, QaDetailMethods>({
       questionId: detail.question.id,
       sessionTitle: detail.story.session_title,
       questionPrompt: detail.question.prompt,
+      draftId: detail.draft?.id || "",
+      draftContent: detail.draft?.content_edited || detail.draft?.content_raw || "",
       transcriptRaw: detail.answer.transcript_raw || "",
       answerText: detail.answer.transcript_edited || detail.answer.transcript_raw || "",
       hasAudio: Boolean(audioFile?.file_id || detail.answer.audio_file_id),
       audioLabel: audioLabel(Boolean(audioFile?.file_id || detail.answer.audio_file_id), audioFile?.duration_seconds ?? detail.answer.duration_seconds),
       audioTempUrl,
       audioError,
+      questionTtsSourceKey: memoirTtsSourceKey({ source_type: "question", source_id: detail.question.id }),
+      answerTtsSourceKey: memoirTtsSourceKey({ source_type: "answer", source_id: detail.answer.id }),
+      draftTtsSourceKey: detail.draft?.id ? memoirTtsSourceKey({ source_type: "draft", source_id: detail.draft.id }) : "",
       inputDraftDirty: false,
     });
   },
@@ -469,6 +531,28 @@ Page<QaDetailData, QaDetailMethods>({
       audioContext.stop();
     }
     this.setData({ playing: false });
+  },
+
+  async toggleTtsSource(event) {
+    const sourceType = event.currentTarget.dataset.sourceType;
+    const sourceId = event.currentTarget.dataset.sourceId || "";
+    if (!sourceType || !sourceId || this.data.ttsBusy) {
+      return;
+    }
+    const sourceKey = memoirTtsSourceKey({ source_type: sourceType, source_id: sourceId });
+    if (this.data.ttsSourceKey === sourceKey && this.data.ttsPlaying) {
+      pauseMemoirTtsPlayback();
+      return;
+    }
+    await playMemoirTtsPlayback({
+      source_type: sourceType,
+      source_id: sourceId,
+      label: event.currentTarget.dataset.label || "",
+    });
+  },
+
+  cycleTtsSpeed() {
+    cycleMemoirTtsPlaybackSpeed();
   },
 
   backQa() {

@@ -1,4 +1,4 @@
-import type { MemoirStoryCard } from "../../domain/memoir";
+import type { MemoirStoryCard, MemoirTtsSourceType } from "../../domain/memoir";
 import { deleteMemoirAnswer, getMemoirStories } from "../../services/memoir";
 import {
   readMemoirStoriesSnapshot,
@@ -7,6 +7,15 @@ import {
   type MemoirStoriesSnapshot,
   writeMemoirStoriesSnapshot,
 } from "../../stores/memoir-cache";
+import {
+  cycleMemoirTtsPlaybackSpeed,
+  memoirTtsSourceKey,
+  pauseMemoirTtsPlayback,
+  playMemoirTtsPlayback,
+  readMemoirTtsPlaybackState,
+  subscribeMemoirTtsPlayback,
+} from "../../services/memoir-tts-player";
+import { memoirTtsViewPatch } from "../../services/memoir-tts-view";
 
 interface DatasetEvent {
   currentTarget: {
@@ -16,8 +25,19 @@ interface DatasetEvent {
   };
 }
 
+interface TtsSourceEvent {
+  currentTarget: {
+    dataset: {
+      sourceType?: MemoirTtsSourceType;
+      sourceId?: string;
+      label?: string;
+    };
+  };
+}
+
 interface QaRecord {
   id: string;
+  questionId: string;
   question: string;
   sessionTitle: string;
   answerPreview: string;
@@ -25,6 +45,8 @@ interface QaRecord {
   hasAudio: boolean;
   createdAtText: string;
   selected: boolean;
+  questionTtsSourceKey: string;
+  answerTtsSourceKey: string;
 }
 
 interface QaData {
@@ -38,11 +60,22 @@ interface QaData {
   selectedCount: number;
   allSelected: boolean;
   records: QaRecord[];
+  ttsStatus: string;
+  ttsSourceKey: string;
+  ttsMessage: string;
+  ttsError: string;
+  ttsSpeed: number;
+  ttsSpeedLabel: string;
+  ttsPlaying: boolean;
+  ttsBusy: boolean;
 }
 
 interface QaMethods {
+  unsubscribeTtsPlayback?: () => void;
   onLoad(): Promise<void>;
   onShow(): void;
+  onUnload(): void;
+  registerTtsPlayback(): void;
   hydrateFromCache(): MemoirStoriesSnapshot;
   loadQaRecords(): Promise<void>;
   openRecord(event: DatasetEvent): void;
@@ -51,6 +84,8 @@ interface QaMethods {
   selectAllRecords(): void;
   deleteSelectedRecords(): Promise<void>;
   applyRecords(records: QaRecord[]): void;
+  toggleTtsSource(event: TtsSourceEvent): Promise<void>;
+  cycleTtsSpeed(): void;
   openHome(): void;
   openWorkbench(): void;
   openQa(): void;
@@ -93,6 +128,7 @@ function recordFromStory(story: MemoirStoryCard): QaRecord {
   const hasAudio = Boolean(story.audio_file_id || story.duration_seconds);
   return {
     id: story.answer_id,
+    questionId: story.question_id,
     question: story.question_prompt,
     sessionTitle: story.session_title,
     answerPreview: story.answer_preview,
@@ -100,6 +136,8 @@ function recordFromStory(story: MemoirStoryCard): QaRecord {
     hasAudio,
     createdAtText: formatDate(story.created_at),
     selected: false,
+    questionTtsSourceKey: memoirTtsSourceKey({ source_type: "question", source_id: story.question_id }),
+    answerTtsSourceKey: memoirTtsSourceKey({ source_type: "answer", source_id: story.answer_id }),
   };
 }
 
@@ -115,9 +153,11 @@ Page<QaData, QaMethods>({
     selectedCount: 0,
     allSelected: false,
     records: [],
+    ...memoirTtsViewPatch(readMemoirTtsPlaybackState()),
   },
 
   async onLoad() {
+    this.registerTtsPlayback();
     const snapshot = this.hydrateFromCache();
     if (shouldRefreshMemoirStoriesSnapshot(snapshot)) {
       await this.loadQaRecords();
@@ -129,6 +169,22 @@ Page<QaData, QaMethods>({
     if (!this.data.refreshing && shouldRefreshMemoirStoriesSnapshot(snapshot)) {
       void this.loadQaRecords();
     }
+  },
+
+  onUnload() {
+    if (this.unsubscribeTtsPlayback) {
+      this.unsubscribeTtsPlayback();
+      this.unsubscribeTtsPlayback = undefined;
+    }
+  },
+
+  registerTtsPlayback() {
+    if (this.unsubscribeTtsPlayback) {
+      return;
+    }
+    this.unsubscribeTtsPlayback = subscribeMemoirTtsPlayback((playbackState) => {
+      this.setData(memoirTtsViewPatch(playbackState));
+    });
   },
 
   hydrateFromCache() {
@@ -255,6 +311,28 @@ Page<QaData, QaMethods>({
       selectedCount,
       allSelected: Boolean(records.length && selectedCount === records.length),
     });
+  },
+
+  async toggleTtsSource(event) {
+    const sourceType = event.currentTarget.dataset.sourceType;
+    const sourceId = event.currentTarget.dataset.sourceId || "";
+    if (!sourceType || !sourceId || this.data.ttsBusy) {
+      return;
+    }
+    const sourceKey = memoirTtsSourceKey({ source_type: sourceType, source_id: sourceId });
+    if (this.data.ttsSourceKey === sourceKey && this.data.ttsPlaying) {
+      pauseMemoirTtsPlayback();
+      return;
+    }
+    await playMemoirTtsPlayback({
+      source_type: sourceType,
+      source_id: sourceId,
+      label: event.currentTarget.dataset.label || "",
+    });
+  },
+
+  cycleTtsSpeed() {
+    cycleMemoirTtsPlaybackSpeed();
   },
 
   openHome() {

@@ -9,6 +9,25 @@
   <view class="surface stack">
     <text class="body-text">{{prompt || "正在获取问题"}}</text>
     <text wx:if="{{isCompleted}}" class="muted">暂时没有新的问题，可以先回首页看看整理结果。</text>
+    <view wx:if="{{questionTtsSourceKey}}" class="tts-actions">
+      <button
+        class="tts-button {{ttsSourceKey === questionTtsSourceKey && ttsPlaying ? 'active' : ''}}"
+        disabled="{{ttsBusy}}"
+        data-source-type="question"
+        data-source-id="{{question.id}}"
+        data-label="问题"
+        bindtap="toggleTtsSource"
+      >
+        {{ttsSourceKey === questionTtsSourceKey && ttsPlaying ? "暂停朗读" : "朗读问题"}}
+      </button>
+      <button class="tts-speed-button" bindtap="cycleTtsSpeed">{{ttsSpeedLabel}}</button>
+    </view>
+    <text
+      wx:if="{{ttsSourceKey === questionTtsSourceKey && (ttsMessage || ttsError)}}"
+      class="tts-status {{ttsError ? 'tts-error' : ''}}"
+    >
+      {{ttsError || ttsMessage}}
+    </text>
   </view>
 
   <view class="recorder surface">

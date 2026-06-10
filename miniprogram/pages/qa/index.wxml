@@ -52,6 +52,35 @@
         <view class="record-copy">
           <text class="question-text">{{item.question}}</text>
           <text class="answer-preview">{{item.answerPreview || "暂无转写文字"}}</text>
+          <view wx:if="{{!selectionMode}}" class="tts-actions">
+            <button
+              class="tts-button {{ttsSourceKey === item.questionTtsSourceKey && ttsPlaying ? 'active' : ''}}"
+              disabled="{{ttsBusy}}"
+              data-source-type="question"
+              data-source-id="{{item.questionId}}"
+              data-label="问题"
+              catchtap="toggleTtsSource"
+            >
+              {{ttsSourceKey === item.questionTtsSourceKey && ttsPlaying ? "暂停问题" : "朗读问题"}}
+            </button>
+            <button
+              class="tts-button {{ttsSourceKey === item.answerTtsSourceKey && ttsPlaying ? 'active' : ''}}"
+              disabled="{{ttsBusy}}"
+              data-source-type="answer"
+              data-source-id="{{item.id}}"
+              data-label="回答"
+              catchtap="toggleTtsSource"
+            >
+              {{ttsSourceKey === item.answerTtsSourceKey && ttsPlaying ? "暂停回答" : "朗读回答"}}
+            </button>
+            <button class="tts-speed-button" catchtap="cycleTtsSpeed">{{ttsSpeedLabel}}</button>
+          </view>
+          <text
+            wx:if="{{!selectionMode && (ttsSourceKey === item.questionTtsSourceKey || ttsSourceKey === item.answerTtsSourceKey) && (ttsMessage || ttsError)}}"
+            class="tts-status {{ttsError ? 'tts-error' : ''}}"
+          >
+            {{ttsError || ttsMessage}}
+          </text>
         </view>
       </view>
       <view class="record-footer">

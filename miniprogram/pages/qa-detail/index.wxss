@@ -131,6 +131,14 @@
   line-height: 1.55;
 }
 
+.draft-text {
+  display: block;
+  margin-top: 22rpx;
+  color: #2d1710;
+  font-size: 30rpx;
+  line-height: 1.65;
+}
+
 .text-button {
   margin: 24rpx 0 0;
   padding: 0;
