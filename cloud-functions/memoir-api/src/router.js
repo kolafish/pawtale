@@ -11,6 +11,7 @@ const {
   createAnswerSegmentRequest,
   createProjectRequest,
   createTextAnswerRequest,
+  createTtsAssetRequest,
   registerAudioFileRequest,
   updateAnswerSegmentRequest,
   updateAnswerTextRequest,
@@ -32,6 +33,7 @@ function memoirService(request) {
     drafting: request.drafting,
     memoryExtraction: request.memoryExtraction,
     storage: request.storage,
+    tts: request.tts,
   });
 }
 
@@ -84,6 +86,14 @@ const routes = {
     route("/api/mobile/memoir/asr-jobs/:asrJobId", async (request) => jsonResponse(
       200,
       await memoirService(request).getAsrJob(request.params.asrJobId),
+    )),
+    route("/api/mobile/memoir/tts-jobs/:ttsJobId", async (request) => jsonResponse(
+      200,
+      await memoirService(request).getTtsJob(request.params.ttsJobId),
+    )),
+    route("/api/mobile/memoir/tts-assets/:ttsAssetId", async (request) => jsonResponse(
+      200,
+      await memoirService(request).getTtsAsset(request.params.ttsAssetId),
     )),
     route("/api/mobile/memoir/sessions/:sessionId/summary", async (request) => jsonResponse(
       200,
@@ -178,6 +188,14 @@ const routes = {
       200,
       await memoirService(request).processAsrJob(request.params.asrJobId),
     )),
+    route("/api/mobile/memoir/tts-assets", async (request) => jsonResponse(
+      201,
+      await memoirService(request).createTtsAsset(createTtsAssetRequest(request.data)),
+    )),
+    route("/api/mobile/memoir/tts-jobs/:ttsJobId/process", async (request) => jsonResponse(
+      200,
+      await memoirService(request).processTtsJob(request.params.ttsJobId),
+    )),
     route("/api/mobile/memoir/answers", async (request) => jsonResponse(
       201,
       await memoirService(request).createTextAnswer(createTextAnswerRequest(request.data)),
@@ -255,6 +273,7 @@ async function handleMemoirApiRequest(event = {}, context = {}, dependencies = {
       memoryExtraction: dependencies.memoryExtraction,
       store: dependencies.store,
       storage: dependencies.storage,
+      tts: dependencies.tts,
     };
 
     for (const routeConfig of routes[method] || []) {

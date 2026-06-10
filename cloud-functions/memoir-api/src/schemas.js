@@ -85,6 +85,18 @@ function registerAudioFileRequest(data) {
   };
 }
 
+function createTtsAssetRequest(data) {
+  const body = objectData(data);
+  return {
+    source_type: requiredString(body, "source_type", "缺少朗读来源类型"),
+    source_id: requiredString(body, "source_id", "缺少朗读来源 ID"),
+    voice: optionalString(body, "voice"),
+    model: optionalString(body, "model"),
+    format: optionalString(body, "format"),
+    synthesis_speed: optionalNumber(body, "synthesis_speed"),
+  };
+}
+
 function updateAnswerTextRequest(data) {
   const body = objectData(data);
   return {
@@ -131,6 +143,7 @@ module.exports = {
   createAnswerSegmentRequest,
   createProjectRequest,
   createTextAnswerRequest,
+  createTtsAssetRequest,
   registerAudioFileRequest,
   updateAnswerSegmentRequest,
   updateAnswerTextRequest,
