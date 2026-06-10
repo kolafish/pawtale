@@ -2,6 +2,7 @@ import type { MemoirAudioFile, MemoirAudioTranscription } from "../domain/memoir
 import { transcribeMemoirAudioFile, uploadMemoirAudioFile } from "./memoir";
 
 export const MAX_MEMOIR_RECORDING_MS = 60000;
+const AUTO_CONTINUE_THRESHOLD_SECONDS = Math.floor(MAX_MEMOIR_RECORDING_MS / 1000) - 1;
 
 export interface MemoirAudioRecorderUploaded {
   audioFile: MemoirAudioFile;
@@ -13,10 +14,17 @@ export interface MemoirAudioRecorderTranscribed extends MemoirAudioRecorderUploa
   transcription: MemoirAudioTranscription;
 }
 
+export interface MemoirAudioRecorderAutoSegment {
+  durationSeconds: number;
+  durationText: string;
+}
+
 export interface MemoirAudioRecorderSession {
+  continuous?: boolean;
   transcribeAfterUpload?: boolean;
   onStart(): void;
-  onStop(): void;
+  onStop(autoRestarting?: boolean): void;
+  onAutoSegmentStop?(result: MemoirAudioRecorderAutoSegment): void;
   onMissingFile(): void;
   onUploadStart(): void;
   onUploaded(result: MemoirAudioRecorderUploaded): void | Promise<void>;
@@ -31,6 +39,8 @@ const recorderManager = wx.getRecorderManager();
 let recorderBound = false;
 let activeSession: MemoirAudioRecorderSession | null = null;
 let recordingStartedAt = 0;
+let manualStopRequested = false;
+const cancelledSessions = new WeakSet<MemoirAudioRecorderSession>();
 
 export function durationSeconds(durationMs: number): number {
   return Math.max(0, Math.round(durationMs / 1000));
@@ -55,6 +65,12 @@ function callActive(session: MemoirAudioRecorderSession, callback: () => void): 
   }
 }
 
+function callLive(session: MemoirAudioRecorderSession, callback: () => void): void {
+  if (!cancelledSessions.has(session)) {
+    callback();
+  }
+}
+
 function bindRecorderEvents(): void {
   if (recorderBound) {
     return;
@@ -71,16 +87,40 @@ function bindRecorderEvents(): void {
       return;
     }
 
-    callActive(session, () => session.onStop());
+    const manuallyStopped = manualStopRequested;
+    manualStopRequested = false;
+    const seconds = durationSeconds(result.duration || Date.now() - recordingStartedAt);
+    const text = durationText(seconds);
+    const shouldContinue = Boolean(
+      session.continuous
+      && !manuallyStopped
+      && seconds >= AUTO_CONTINUE_THRESHOLD_SECONDS
+    );
+    callActive(session, () => session.onStop(shouldContinue));
+    if (shouldContinue) {
+      callActive(session, () => session.onAutoSegmentStop?.({
+        durationSeconds: seconds,
+        durationText: text,
+      }));
+      recorderManager.start({
+        duration: MAX_MEMOIR_RECORDING_MS,
+        sampleRate: 16000,
+        numberOfChannels: 1,
+        encodeBitRate: 48000,
+        format: "mp3",
+      });
+    }
+
     if (!result.tempFilePath) {
       if (activeSession === session) {
         session.onMissingFile();
-        activeSession = null;
+        if (!shouldContinue) {
+          activeSession = null;
+        }
       }
       return;
     }
 
-    const seconds = durationSeconds(result.duration || Date.now() - recordingStartedAt);
     callActive(session, () => session.onUploadStart());
 
     let uploaded: MemoirAudioRecorderUploaded | undefined;
@@ -93,24 +133,31 @@ function bindRecorderEvents(): void {
         durationText: durationText(savedSeconds),
       };
       uploaded = uploadedResult;
-      if (activeSession === session) {
-        await session.onUploaded(uploadedResult);
-      }
+      await new Promise<void>((resolve, reject) => {
+        callLive(session, () => {
+          Promise.resolve(session.onUploaded(uploadedResult)).then(resolve, reject);
+        });
+        if (cancelledSessions.has(session)) {
+          resolve();
+        }
+      });
 
       if (session.transcribeAfterUpload === false) {
         return;
       }
 
       const transcription = await transcribeMemoirAudioFile(audioFile.id);
-      callActive(session, () => session.onTranscribed({
+      callLive(session, () => session.onTranscribed({
         ...uploadedResult,
         transcription,
       }));
     } catch (error) {
-      callActive(session, () => session.onProcessingError(errorMessage(error, "录音处理失败"), uploaded));
+      callLive(session, () => session.onProcessingError(errorMessage(error, "录音处理失败"), uploaded));
     } finally {
-      if (activeSession === session) {
+      callLive(session, () => {
         session.onProcessingDone();
+      });
+      if (activeSession === session && !shouldContinue) {
         activeSession = null;
       }
     }
@@ -131,6 +178,7 @@ function bindRecorderEvents(): void {
 export function startMemoirAudioRecording(session: MemoirAudioRecorderSession): void {
   bindRecorderEvents();
   activeSession = session;
+  manualStopRequested = false;
   recorderManager.start({
     duration: MAX_MEMOIR_RECORDING_MS,
     sampleRate: 16000,
@@ -141,10 +189,12 @@ export function startMemoirAudioRecording(session: MemoirAudioRecorderSession): 
 }
 
 export function stopMemoirAudioRecording(): void {
+  manualStopRequested = true;
   recorderManager.stop();
 }
 
 export function clearMemoirAudioRecordingSession(session: MemoirAudioRecorderSession): void {
+  cancelledSessions.add(session);
   if (activeSession === session) {
     activeSession = null;
   }

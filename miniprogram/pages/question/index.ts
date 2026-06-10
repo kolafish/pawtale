@@ -78,9 +78,13 @@ interface QuestionData {
   loading: boolean;
   submitting: boolean;
   recording: boolean;
+  recordingElapsedSeconds: number;
+  recordingElapsedLabel: string;
   uploadingAudio: boolean;
   transcribingAudio: boolean;
   syncingSegment: boolean;
+  processingSegmentCount: number;
+  processingSegmentLabel: string;
   error: string;
   projectId: string;
   sessionId: string;
@@ -104,15 +108,57 @@ type QuestionPageInstance = {
   persistAnswerSessionDraft(): void;
   ensureAnswerSession(): Promise<string>;
   appendRecordedSegment(uploaded: MemoirAudioRecorderUploaded, transcriptText: string, errorMessage?: string): Promise<void>;
+  beginSegmentProcessing(message: string): void;
+  endSegmentProcessing(): void;
   audioRecordingSession?: MemoirAudioRecorderSession;
 };
+
+let recordingTimer: ReturnType<typeof setInterval> | null = null;
+let recordingTimerStartedAt = 0;
 
 function nowIso(): string {
   return new Date().toISOString();
 }
 
-function isAudioBusy(data: Pick<QuestionData, "recording" | "uploadingAudio" | "transcribingAudio" | "syncingSegment">): boolean {
-  return data.recording || data.uploadingAudio || data.transcribingAudio || data.syncingSegment;
+function isAudioBusy(data: Pick<QuestionData, "recording" | "uploadingAudio" | "transcribingAudio" | "syncingSegment" | "processingSegmentCount">): boolean {
+  return data.recording || data.uploadingAudio || data.transcribingAudio || data.syncingSegment || data.processingSegmentCount > 0;
+}
+
+function recordingElapsedText(seconds: number): string {
+  const minutes = Math.floor(seconds / 60);
+  const rest = Math.max(0, seconds % 60);
+  return `${minutes}:${rest < 10 ? "0" : ""}${rest}`;
+}
+
+function processingSegmentText(count: number): string {
+  if (count <= 0) {
+    return "";
+  }
+  return count > 1 ? `${count} 段正在保存或转写` : "上一段正在保存或转写";
+}
+
+function stopRecordingTimer(): void {
+  if (!recordingTimer) {
+    return;
+  }
+  clearInterval(recordingTimer);
+  recordingTimer = null;
+}
+
+function startRecordingTimer(page: { setData(data: Partial<QuestionData>): void }): void {
+  stopRecordingTimer();
+  recordingTimerStartedAt = Date.now();
+  page.setData({
+    recordingElapsedSeconds: 0,
+    recordingElapsedLabel: recordingElapsedText(0),
+  });
+  recordingTimer = setInterval(() => {
+    const seconds = Math.max(0, Math.floor((Date.now() - recordingTimerStartedAt) / 1000));
+    page.setData({
+      recordingElapsedSeconds: seconds,
+      recordingElapsedLabel: recordingElapsedText(seconds),
+    });
+  }, 1000);
 }
 
 function segmentStatusText(status: QuestionAnswerSegmentView["status"], dirty = false): string {
@@ -224,18 +270,30 @@ function inputDraftFromData(data: QuestionData): Parameters<typeof writeMemoirQu
 
 function createQuestionRecorderSession(page: QuestionPageInstance): MemoirAudioRecorderSession {
   return {
+    continuous: true,
     transcribeAfterUpload: false,
     onStart() {
-      page.setData({ recording: true, error: "", audioSummary: "正在录音" });
+      page.setData({ recording: true, error: "", audioSummary: "" });
+      startRecordingTimer(page);
     },
-    onStop() {
-      page.setData({ recording: false });
+    onStop(autoRestarting = false) {
+      stopRecordingTimer();
+      page.setData({
+        recording: autoRestarting,
+        recordingElapsedSeconds: 0,
+        recordingElapsedLabel: recordingElapsedText(0),
+      });
+    },
+    onAutoSegmentStop(result) {
+      page.setData({
+        audioSummary: `已录满 ${result.durationText}，这一段正在保存，已自动继续录音`,
+      });
     },
     onMissingFile() {
       page.setData({ error: "录音保存失败", audioSummary: "" });
     },
     onUploadStart() {
-      page.setData({ uploadingAudio: true, error: "", audioSummary: "正在保存录音" });
+      page.beginSegmentProcessing(page.data.recording ? "上一段正在保存，当前可以继续讲" : "正在保存录音");
     },
     async onUploaded(result) {
       await page.appendRecordedSegment(result, "");
@@ -253,15 +311,20 @@ function createQuestionRecorderSession(page: QuestionPageInstance): MemoirAudioR
       }
     },
     onProcessingDone() {
-      page.setData({ uploadingAudio: false, transcribingAudio: false });
+      page.endSegmentProcessing();
     },
     onRecorderError(message) {
+      stopRecordingTimer();
       page.setData({
         recording: false,
+        recordingElapsedSeconds: 0,
+        recordingElapsedLabel: recordingElapsedText(0),
         uploadingAudio: false,
         transcribingAudio: false,
-        syncingSegment: false,
-        audioSummary: "",
+    syncingSegment: false,
+    processingSegmentCount: 0,
+    processingSegmentLabel: "",
+    audioSummary: "",
         error: message,
       });
     },
@@ -279,6 +342,8 @@ Page<QuestionData, {
   persistAnswerSessionDraft(): void;
   ensureAnswerSession(): Promise<string>;
   appendRecordedSegment(uploaded: MemoirAudioRecorderUploaded, transcriptText: string, errorMessage?: string): Promise<void>;
+  beginSegmentProcessing(message: string): void;
+  endSegmentProcessing(): void;
   syncDirtyAnswerSegments(): Promise<QuestionAnswerSegmentView[]>;
   onAnswerInput(event: InputEvent): void;
   onSegmentInput(event: SegmentInputEvent): void;
@@ -291,9 +356,13 @@ Page<QuestionData, {
     loading: false,
     submitting: false,
     recording: false,
+    recordingElapsedSeconds: 0,
+    recordingElapsedLabel: "0:00",
     uploadingAudio: false,
     transcribingAudio: false,
     syncingSegment: false,
+    processingSegmentCount: 0,
+    processingSegmentLabel: "",
     error: "",
     projectId: "",
     sessionId: "",
@@ -329,6 +398,7 @@ Page<QuestionData, {
       clearMemoirAudioRecordingSession(this.audioRecordingSession);
       this.audioRecordingSession = undefined;
     }
+    stopRecordingTimer();
     if (this.data.recording) {
       stopMemoirAudioRecording();
     }
@@ -528,6 +598,28 @@ Page<QuestionData, {
     }
   },
 
+  beginSegmentProcessing(message) {
+    const count = this.data.processingSegmentCount + 1;
+    this.setData({
+      processingSegmentCount: count,
+      processingSegmentLabel: processingSegmentText(count),
+      uploadingAudio: true,
+      error: "",
+      audioSummary: message,
+    });
+  },
+
+  endSegmentProcessing() {
+    const count = Math.max(0, this.data.processingSegmentCount - 1);
+    this.setData({
+      processingSegmentCount: count,
+      processingSegmentLabel: processingSegmentText(count),
+      uploadingAudio: count > 0,
+      transcribingAudio: count > 0 ? this.data.transcribingAudio : false,
+      syncingSegment: count > 0 ? this.data.syncingSegment : false,
+    });
+  },
+
   async syncDirtyAnswerSegments() {
     const nextSegments: QuestionAnswerSegmentView[] = [];
     for (const segment of this.data.answerSegments) {
@@ -572,7 +664,7 @@ Page<QuestionData, {
   },
 
   startRecording() {
-    if (this.data.loading || this.data.isCompleted || this.data.submitting || isAudioBusy(this.data)) {
+    if (this.data.loading || this.data.isCompleted || this.data.submitting || this.data.recording) {
       return;
     }
     this.setData({ error: "", audioSummary: "" });
@@ -586,6 +678,7 @@ Page<QuestionData, {
     if (!this.data.recording) {
       return;
     }
+    stopRecordingTimer();
     stopMemoirAudioRecording();
   },
 
