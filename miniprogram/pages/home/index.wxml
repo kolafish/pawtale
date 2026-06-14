@@ -66,24 +66,6 @@
   <view class="latest-card" wx:if="{{latestOutputPreview}}">
     <text class="latest-label">最近整理</text>
     <text class="latest-text">{{latestOutputPreview}}</text>
-    <view wx:if="{{latestOutputTtsSourceKey}}" class="tts-inline">
-      <button
-        class="tts-icon-button {{ttsSourceKey === latestOutputTtsSourceKey && ttsPlaying ? 'active' : ''}}"
-        disabled="{{ttsBusy}}"
-        data-source-type="{{latestOutputTtsSourceType}}"
-        data-source-id="{{latestOutputId}}"
-        data-label="最近整理"
-        catchtap="toggleTtsSource"
-      >
-        <image class="tts-icon" src="/assets/tts-speaker.png" mode="aspectFit" />
-      </button>
-    </view>
-    <text
-      wx:if="{{ttsSourceKey === latestOutputTtsSourceKey && ttsError}}"
-      class="tts-status {{ttsError ? 'tts-error' : ''}}"
-    >
-      {{ttsError}}
-    </text>
   </view>
 
   <view class="bottom-nav">
