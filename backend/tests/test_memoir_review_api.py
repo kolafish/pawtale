@@ -6,6 +6,7 @@ from app.domain.projects.types import ProjectType
 from app.models.memoir import MemoirCoverageSnapshot, MemoirPersonMemory, MemoirQuestionCandidate, MemoirSession
 from app.models.projects import Project
 from app.models.users import User
+from app.services.memoir.answers import answer_question_with_text
 
 
 class FakeReviewAIClient:
@@ -75,7 +76,7 @@ class FakeReviewAIClient:
         return {}
 
 
-async def test_mobile_memoir_review_surfaces(client, monkeypatch):
+async def test_mobile_memoir_review_surfaces(client, test_db, monkeypatch):
     monkeypatch.setattr(
         "app.services.memoir.memory_extraction.get_ai_service",
         lambda ai_model=None: FakeReviewAIClient(),
@@ -83,11 +84,13 @@ async def test_mobile_memoir_review_surfaces(client, monkeypatch):
     session_response = await client.get("/api/mobile/memoir/sessions/current")
     session = session_response.json()["session"]
     question = session_response.json()["current_question"]
-    answer_response = await client.post(
-        "/api/mobile/memoir/answers",
-        json={"question_id": question["id"], "text": "我第一次去重庆厂里上班，是老张带我去的。"},
+    user = await test_db.scalar(select(User).where(User.email == "tester@example.com"))
+    await answer_question_with_text(
+        test_db,
+        question["id"],
+        user.id,
+        "我第一次去重庆厂里上班，是老张带我去的。",
     )
-    assert answer_response.status_code == 201
 
     process_response = await client.post(
         f"/api/mobile/memoir/sessions/{session['id']}/process",
@@ -133,8 +136,7 @@ async def test_mobile_memoir_review_surfaces(client, monkeypatch):
     selected_response = await client.post(
         f"/api/mobile/memoir/question-candidates/{candidate_id}/select"
     )
-    assert selected_response.status_code == 200
-    assert selected_response.json()["source"] == "ai_generated"
+    assert selected_response.status_code == 404
 
     open_question_id = open_questions_response.json()[0]["id"]
     update_open_question_response = await client.patch(

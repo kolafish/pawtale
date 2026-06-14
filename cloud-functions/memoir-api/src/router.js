@@ -8,14 +8,7 @@ const {
 } = require("./http");
 const { createMemoirService } = require("./memoirService");
 const {
-  createAnswerSegmentRequest,
   createProjectRequest,
-  createTextAnswerRequest,
-  createTtsAssetRequest,
-  registerAudioFileRequest,
-  updateAnswerSegmentRequest,
-  updateAnswerTextRequest,
-  updateDraftContentRequest,
   updateProjectRequest,
   updateWechatUserRequest,
 } = require("./schemas");
@@ -29,10 +22,8 @@ function requireStore(request) {
 
 function memoirService(request) {
   return createMemoirService(requireStore(request), request.context || {}, {
-    drafting: request.drafting,
     memoryExtraction: request.memoryExtraction,
     storage: request.storage,
-    tts: request.tts,
   });
 }
 
@@ -77,18 +68,6 @@ const routes = {
     route("/api/mobile/memoir/stories/:answerId", async (request) => jsonResponse(
       200,
       await memoirService(request).getStoryDetail(request.params.answerId),
-    )),
-    route("/api/mobile/memoir/answer-sessions/:answerSessionId", async (request) => jsonResponse(
-      200,
-      await memoirService(request).getAnswerSession(request.params.answerSessionId),
-    )),
-    route("/api/mobile/memoir/tts-jobs/:ttsJobId", async (request) => jsonResponse(
-      200,
-      await memoirService(request).getTtsJob(request.params.ttsJobId),
-    )),
-    route("/api/mobile/memoir/tts-assets/:ttsAssetId", async (request) => jsonResponse(
-      200,
-      await memoirService(request).getTtsAsset(request.params.ttsAssetId),
     )),
     route("/api/mobile/memoir/sessions/:sessionId/summary", async (request) => jsonResponse(
       200,
@@ -152,53 +131,6 @@ const routes = {
       200,
       await memoirService(request).generateQuestionCandidates(),
     )),
-    route("/api/mobile/memoir/question-candidates/:candidateId/select", async (request) => jsonResponse(
-      200,
-      await memoirService(request).selectCandidateAsQuestion(request.params.candidateId),
-    )),
-    route("/api/mobile/memoir/questions/:questionId/skip", async (request) => jsonResponse(
-      200,
-      await memoirService(request).skipQuestion(request.params.questionId),
-    )),
-    route("/api/mobile/memoir/questions/:questionId/answer-session", async (request) => jsonResponse(
-      201,
-      await memoirService(request).createAnswerSession(request.params.questionId),
-    )),
-    route("/api/mobile/memoir/answer-sessions/:answerSessionId/segments", async (request) => jsonResponse(
-      201,
-      await memoirService(request).appendAnswerSegment(
-        request.params.answerSessionId,
-        createAnswerSegmentRequest(request.data),
-      ),
-    )),
-    route("/api/mobile/memoir/answer-sessions/:answerSessionId/submit", async (request) => jsonResponse(
-      200,
-      await memoirService(request).submitAnswerSession(request.params.answerSessionId),
-    )),
-    route("/api/mobile/memoir/tts-assets", async (request) => jsonResponse(
-      201,
-      await memoirService(request).createTtsAsset(createTtsAssetRequest(request.data)),
-    )),
-    route("/api/mobile/memoir/tts-jobs/:ttsJobId/process", async (request) => jsonResponse(
-      200,
-      await memoirService(request).processTtsJob(request.params.ttsJobId),
-    )),
-    route("/api/mobile/memoir/answers", async (request) => jsonResponse(
-      201,
-      await memoirService(request).createTextAnswer(createTextAnswerRequest(request.data)),
-    )),
-    route("/api/mobile/memoir/audio-files", async (request) => jsonResponse(
-      201,
-      await memoirService(request).registerAudioFile(registerAudioFileRequest(request.data)),
-    )),
-    route("/api/mobile/memoir/answers/:answerId/draft", async (request) => jsonResponse(
-      200,
-      await memoirService(request).generateDraft(request.params.answerId),
-    )),
-    route("/api/mobile/memoir/drafts/:draftId/accept", async (request) => jsonResponse(
-      200,
-      await memoirService(request).acceptDraft(request.params.draftId),
-    )),
   ],
   PATCH: [
     route("/api/mobile/memoir/me", async (request) => jsonResponse(
@@ -217,28 +149,8 @@ const routes = {
       200,
       await memoirService(request).updateOpenQuestion(request.params.questionId, request.data),
     )),
-    route("/api/mobile/memoir/answers/:answerId", async (request) => jsonResponse(
-      200,
-      await memoirService(request).updateAnswerText(request.params.answerId, updateAnswerTextRequest(request.data)),
-    )),
-    route("/api/mobile/memoir/answer-segments/:answerSegmentId", async (request) => jsonResponse(
-      200,
-      await memoirService(request).updateAnswerSegment(
-        request.params.answerSegmentId,
-        updateAnswerSegmentRequest(request.data),
-      ),
-    )),
-    route("/api/mobile/memoir/drafts/:draftId", async (request) => jsonResponse(
-      200,
-      await memoirService(request).updateDraftContent(request.params.draftId, updateDraftContentRequest(request.data)),
-    )),
   ],
-  DELETE: [
-    route("/api/mobile/memoir/answers/:answerId", async (request) => jsonResponse(
-      200,
-      await memoirService(request).deleteAnswer(request.params.answerId),
-    )),
-  ],
+  DELETE: [],
 };
 
 async function handleMemoirApiRequest(event = {}, context = {}, dependencies = {}) {
@@ -251,11 +163,9 @@ async function handleMemoirApiRequest(event = {}, context = {}, dependencies = {
       data: event.data || {},
       context,
       event,
-      drafting: dependencies.drafting,
       memoryExtraction: dependencies.memoryExtraction,
       store: dependencies.store,
       storage: dependencies.storage,
-      tts: dependencies.tts,
     };
 
     for (const routeConfig of routes[method] || []) {

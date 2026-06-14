@@ -151,27 +151,6 @@ class MemoirQuestionResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-class AudioFileResponse(BaseModel):
-    id: str
-    mime_type: str
-    size_bytes: int
-    duration_seconds: int | None = None
-    created_at: datetime
-
-    model_config = ConfigDict(from_attributes=True)
-
-
-class MemoirTextAnswerCreate(BaseModel):
-    question_id: str
-    text: str
-    audio_file_id: str | None = None
-    duration_seconds: int | None = Field(default=None, ge=0)
-
-
-class MemoirTextAnswerUpdate(BaseModel):
-    text: str
-
-
 class MemoirAnswerResponse(BaseModel):
     id: str
     question_id: str
