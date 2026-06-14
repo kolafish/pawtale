@@ -1,8 +1,27 @@
-import { RefreshCw, Save, Wand2 } from 'lucide-react';
+import { useRef, useState, type SyntheticEvent } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import {
+  Bold,
+  Columns2,
+  Heading1,
+  Heading2,
+  Italic,
+  List,
+  ListOrdered,
+  Minus,
+  Pencil,
+  Quote,
+  RefreshCw,
+  Save,
+  Wand2,
+  Eye,
+} from 'lucide-react';
 import { DiffReviewView } from './DiffReviewView';
 import { MultiModelTabBar } from './MultiModelTabBar';
 import type { DiffChunk, SelectionRange, MultiReviseResultItem } from '../types';
 import type { SaveStatus } from '../hooks/useProjectState';
+import { applyMarkdownFormat, type MarkdownFormat } from '../utils/markdownEditor';
 
 interface EditorMainProps {
   title: string;
@@ -35,6 +54,49 @@ interface EditorMainProps {
   onToggleAIPanel: () => void;
 }
 
+type EditorViewMode = 'edit' | 'preview' | 'split';
+
+interface MarkdownTool {
+  format: MarkdownFormat;
+  title: string;
+  icon: typeof Bold;
+}
+
+const MARKDOWN_TOOLS: MarkdownTool[] = [
+  { format: 'heading-1', title: '一级标题', icon: Heading1 },
+  { format: 'heading-2', title: '二级标题', icon: Heading2 },
+  { format: 'bold', title: '加粗', icon: Bold },
+  { format: 'italic', title: '斜体', icon: Italic },
+  { format: 'quote', title: '引用', icon: Quote },
+  { format: 'unordered-list', title: '无序列表', icon: List },
+  { format: 'ordered-list', title: '有序列表', icon: ListOrdered },
+  { format: 'divider', title: '分隔线', icon: Minus },
+];
+
+const VIEW_MODES: { value: EditorViewMode; label: string; icon: typeof Pencil }[] = [
+  { value: 'edit', label: '编辑', icon: Pencil },
+  { value: 'preview', label: '预览', icon: Eye },
+  { value: 'split', label: '分屏', icon: Columns2 },
+];
+
+function MarkdownPreview({ content }: { content: string }) {
+  if (!content.trim()) {
+    return (
+      <div className="flex h-full items-center justify-center rounded-xl border border-dashed border-gray-200 bg-white text-sm text-gray-400">
+        暂无可预览内容
+      </div>
+    );
+  }
+
+  return (
+    <div className="markdown-preview h-full overflow-y-auto rounded-xl border border-pink-100 bg-white px-5 py-5 leading-7">
+      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+        {content}
+      </ReactMarkdown>
+    </div>
+  );
+}
+
 export function EditorMain({
   title,
   setTitle,
@@ -61,11 +123,13 @@ export function EditorMain({
   isAIPanelOpen,
   onToggleAIPanel,
 }: EditorMainProps) {
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const [viewMode, setViewMode] = useState<EditorViewMode>('edit');
   const saveStatusLabel = saveStatus === 'saved' ? '已保存' : saveStatus === 'saving' ? '保存中...' : '未保存';
   const saveStatusColor = saveStatus === 'saved' ? 'text-green-500' : saveStatus === 'saving' ? 'text-yellow-500' : 'text-gray-400';
 
-  const handleSelect = (e: React.SyntheticEvent<HTMLTextAreaElement>) => {
-    const target = e.target as HTMLTextAreaElement;
+  const handleSelect = (e: SyntheticEvent<HTMLTextAreaElement>) => {
+    const target = e.currentTarget;
     const start = target.selectionStart;
     const end = target.selectionEnd;
     if (start !== end) {
@@ -75,6 +139,47 @@ export function EditorMain({
         text: editorContent.substring(start, end),
       });
     } else {
+      onSelectionChange(null);
+    }
+  };
+
+  const applyFormat = (format: MarkdownFormat) => {
+    if (viewMode === 'preview') return;
+    const target = textareaRef.current;
+    const selection = target
+      ? { start: target.selectionStart, end: target.selectionEnd }
+      : { start: editorContent.length, end: editorContent.length };
+    const result = applyMarkdownFormat(editorContent, selection, format);
+    setEditorContent(result.text);
+    window.requestAnimationFrame(() => {
+      if (!textareaRef.current) return;
+      textareaRef.current.focus();
+      textareaRef.current.setSelectionRange(result.start, result.end);
+      if (result.start !== result.end) {
+        onSelectionChange({
+          start: result.start,
+          end: result.end,
+          text: result.text.substring(result.start, result.end),
+        });
+      }
+    });
+  };
+
+  const renderTextarea = () => (
+    <textarea
+      ref={textareaRef}
+      value={editorContent}
+      onChange={(e) => setEditorContent(e.target.value)}
+      onSelect={handleSelect}
+      onMouseUp={handleSelect}
+      placeholder="开始写作..."
+      className="min-h-0 flex-1 w-full px-4 py-4 rounded-xl border border-pink-100 focus:outline-none focus:ring-2 focus:ring-pink-500 leading-7 resize-none bg-white"
+    />
+  );
+
+  const switchViewMode = (mode: EditorViewMode) => {
+    setViewMode(mode);
+    if (mode === 'preview') {
       onSelectionChange(null);
     }
   };
@@ -148,14 +253,59 @@ export function EditorMain({
             )}
           </div>
         ) : (
-          <textarea
-            value={editorContent}
-            onChange={(e) => setEditorContent(e.target.value)}
-            onSelect={handleSelect}
-            onMouseUp={handleSelect}
-            placeholder="开始写作..."
-            className="flex-1 w-full px-4 py-4 rounded-xl border border-pink-100 focus:outline-none focus:ring-2 focus:ring-pink-500 leading-7 resize-none"
-          />
+          <div className="flex min-h-0 flex-1 flex-col gap-3">
+            <div className="flex flex-wrap items-center gap-2 rounded-xl border border-pink-100 bg-white px-2 py-2">
+              <div className="flex items-center gap-1">
+                {MARKDOWN_TOOLS.map((tool) => {
+                  const Icon = tool.icon;
+                  return (
+                    <button
+                      key={tool.format}
+                      type="button"
+                      onClick={() => applyFormat(tool.format)}
+                      disabled={viewMode === 'preview'}
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-md text-gray-600 hover:bg-pink-50 hover:text-pink-600 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-gray-600"
+                      title={tool.title}
+                    >
+                      <Icon size={16} />
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="ml-auto flex rounded-lg bg-gray-100 p-1">
+                {VIEW_MODES.map((mode) => {
+                  const Icon = mode.icon;
+                  return (
+                    <button
+                      key={mode.value}
+                      type="button"
+                      onClick={() => switchViewMode(mode.value)}
+                      className={`inline-flex h-8 items-center gap-1 rounded-md px-2 text-xs font-medium transition-colors ${
+                        viewMode === mode.value
+                          ? 'bg-white text-pink-600 shadow-sm'
+                          : 'text-gray-500 hover:text-gray-700'
+                      }`}
+                      title={mode.label}
+                    >
+                      <Icon size={14} />
+                      <span>{mode.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {viewMode === 'edit' && renderTextarea()}
+            {viewMode === 'preview' && (
+              <MarkdownPreview content={editorContent} />
+            )}
+            {viewMode === 'split' && (
+              <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 lg:grid-cols-2">
+                {renderTextarea()}
+                <MarkdownPreview content={editorContent} />
+              </div>
+            )}
+          </div>
         )}
       </div>
 
