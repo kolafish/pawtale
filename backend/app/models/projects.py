@@ -32,6 +32,9 @@ class Project(Base):
     memoir_sessions: Mapped[list["MemoirSession"]] = relationship(
         "MemoirSession", back_populates="project", cascade="all, delete-orphan",
     )
+    memoir_voice_sessions: Mapped[list["MemoirVoiceSession"]] = relationship(
+        "MemoirVoiceSession", back_populates="project", cascade="all, delete-orphan",
+    )
     memoir_source_artifacts: Mapped[list["MemoirSourceArtifact"]] = relationship(
         "MemoirSourceArtifact", back_populates="project", cascade="all, delete-orphan",
     )

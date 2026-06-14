@@ -6,6 +6,31 @@ class MemoirSessionStatus(str, Enum):
     COMPLETED = "completed"
 
 
+class MemoirVoiceSessionStatus(str, Enum):
+    CREATED = "created"
+    LISTENING = "listening"
+    SPEAKING = "speaking"
+    STOPPED = "stopped"
+    FAILED = "failed"
+
+
+class MemoirGuidanceMode(str, Enum):
+    FREE_NARRATION = "free_narration"
+    GUIDED_INTERVIEW = "guided_interview"
+
+
+class MemoirChatMessageRole(str, Enum):
+    USER = "user"
+    ASSISTANT = "assistant"
+    SYSTEM = "system"
+
+
+class MemoirChatContentStatus(str, Enum):
+    PARTIAL = "partial"
+    FINAL = "final"
+    CORRECTED = "corrected"
+
+
 class MemoirQuestionSource(str, Enum):
     TEMPLATE = "template"
     AI_GENERATED = "ai_generated"
