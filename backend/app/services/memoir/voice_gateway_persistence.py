@@ -31,6 +31,13 @@ class VoiceGatewayPersistence:
 
     async def persist_final(self, event: StreamingASREvent) -> dict[str, Any]:
         audio_file_id = await self._save_pending_audio()
+        transcript_version = await memoir_voice_sessions.create_voice_transcript_version(
+            self.db,
+            self.voice_session_id,
+            self.user_id,
+            content=event.text,
+            provider=self.provider,
+        )
         message = await memoir_voice_sessions.append_chat_message(
             self.db,
             self.voice_session_id,
@@ -40,6 +47,7 @@ class VoiceGatewayPersistence:
                 content_text=event.text,
                 content_status=MemoirChatContentStatus.FINAL,
                 audio_file_id=audio_file_id,
+                transcript_version_id=transcript_version.id,
                 metadata_json={"source": "asr.final", "provider": self.provider},
             ),
         )
@@ -61,6 +69,7 @@ class VoiceGatewayPersistence:
             "message_id": message.id,
             "utterance_id": utterance.id,
             "audio_file_id": audio_file_id,
+            "transcript_version_id": transcript_version.id,
         }
 
     async def flush_unfinalized_audio(self) -> dict[str, Any] | None:

@@ -182,6 +182,11 @@ class MemoirVoiceSession(Base):
         cascade="all, delete-orphan",
         order_by="MemoirVoiceUtterance.created_at",
     )
+    transcript_versions: Mapped[list["MemoirTranscriptVersion"]] = orm_relationship(
+        "MemoirTranscriptVersion",
+        back_populates="voice_session",
+        cascade="all, delete-orphan",
+    )
 
 
 class MemoirChatMessage(Base):
@@ -390,6 +395,10 @@ class MemoirTranscriptVersion(Base):
     __tablename__ = "memoir_transcript_versions"
     __table_args__ = (
         CheckConstraint(
+            "answer_id IS NOT NULL OR voice_session_id IS NOT NULL",
+            name="ck_memoir_transcript_versions_owner",
+        ),
+        CheckConstraint(
             f"version_type IN ({_enum_values(MemoirTranscriptVersionType)})",
             name="ck_memoir_transcript_versions_type",
         ),
@@ -400,8 +409,11 @@ class MemoirTranscriptVersion(Base):
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    answer_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("memoir_answers.id"), nullable=False, index=True,
+    answer_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("memoir_answers.id"), nullable=True, index=True,
+    )
+    voice_session_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("memoir_voice_sessions.id"), nullable=True, index=True,
     )
     source_artifact_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("memoir_source_artifacts.id"), nullable=True, index=True,
@@ -413,7 +425,11 @@ class MemoirTranscriptVersion(Base):
     created_by: Mapped[str] = mapped_column(String(20), nullable=False, default=MemoirCreatedBy.SYSTEM.value)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
-    answer: Mapped[MemoirAnswer] = orm_relationship("MemoirAnswer")
+    answer: Mapped[MemoirAnswer | None] = orm_relationship("MemoirAnswer")
+    voice_session: Mapped[MemoirVoiceSession | None] = orm_relationship(
+        "MemoirVoiceSession",
+        back_populates="transcript_versions",
+    )
     source_artifact: Mapped[MemoirSourceArtifact | None] = orm_relationship(
         "MemoirSourceArtifact",
         back_populates="transcript_versions",

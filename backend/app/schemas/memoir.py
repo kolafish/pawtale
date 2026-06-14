@@ -329,7 +329,8 @@ class MemoirTranscriptVersionCreate(BaseModel):
 
 class MemoirTranscriptVersionResponse(BaseModel):
     id: str
-    answer_id: str
+    answer_id: str | None = None
+    voice_session_id: str | None = None
     source_artifact_id: str | None = None
     version_type: MemoirTranscriptVersionType
     content: str
