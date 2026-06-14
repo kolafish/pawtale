@@ -20,6 +20,10 @@ import type {
   Project,
   User,
 } from "../domain/memoir";
+import type {
+  MemoirVoiceSessionDetail,
+  VoiceChatTranscriptLine,
+} from "../domain/voice-chat";
 
 const STORE_KEY = "pawtale_memoir_session";
 
@@ -29,6 +33,7 @@ export interface MemoirSessionStore {
   dashboard_cache?: MemoirCacheMetadata;
   stories_cache?: MemoirCacheMetadata;
   story_detail_cache?: MemoirStoryDetailCache;
+  voice_session_cache?: MemoirVoiceSessionCache;
   identity?: MemoirIdentity;
   project?: Project;
   interview?: MemoirInterviewState;
@@ -73,6 +78,18 @@ export interface MemoirStoryDetailCache {
   details: Record<string, MemoirCachedStoryDetail>;
 }
 
+export interface MemoirCachedVoiceSession {
+  detail?: MemoirVoiceSessionDetail;
+  transcript_lines: VoiceChatTranscriptLine[];
+  cached_at: string;
+  stale?: boolean;
+}
+
+export interface MemoirVoiceSessionCache {
+  version: number;
+  sessions: Record<string, MemoirCachedVoiceSession>;
+}
+
 export function readMemoirStore(): MemoirSessionStore {
   return wx.getStorageSync<MemoirSessionStore>(STORE_KEY) || {};
 }
@@ -82,7 +99,7 @@ function persistMemoirStore(store: MemoirSessionStore): MemoirSessionStore {
     wx.setStorageSync(STORE_KEY, store);
     return store;
   } catch {
-    if (!store.story_detail_cache) {
+    if (!store.story_detail_cache && !store.voice_session_cache) {
       return {
         ...store,
         cache_write_failed_at: new Date().toISOString(),
@@ -90,6 +107,7 @@ function persistMemoirStore(store: MemoirSessionStore): MemoirSessionStore {
     }
     const fallback = { ...store };
     delete fallback.story_detail_cache;
+    delete fallback.voice_session_cache;
     fallback.cache_write_failed_at = new Date().toISOString();
     try {
       wx.setStorageSync(STORE_KEY, fallback);
@@ -150,6 +168,7 @@ export function ensureMemoirStoreIdentity(identity: MemoirCacheIdentity): Memoir
     || current.dashboard_cache
     || current.stories_cache
     || current.story_detail_cache
+    || current.voice_session_cache
     || current.stories,
   );
   if (!current.cache_identity && hasCachedMemoirData) {
@@ -196,5 +215,6 @@ export function clearMemoirDraft(): void {
     dashboard_cache: current.dashboard_cache,
     stories_cache: current.stories_cache,
     story_detail_cache: current.story_detail_cache,
+    voice_session_cache: current.voice_session_cache,
   });
 }

@@ -101,6 +101,63 @@ test("builds voice gateway URLs from runtime backend config", () => {
   delete global.wx;
 });
 
+test("fetches voice session detail through backend API", async () => {
+  const requests = [];
+  const detail = {
+    session: {
+      id: "voice/1",
+      project_id: "project-1",
+      status: "stopped",
+      guidance_mode: "free_narration",
+      error_message: "",
+      metadata_json: {},
+      created_at: "2026-06-08T00:00:00.000Z",
+      updated_at: "2026-06-08T00:00:00.000Z",
+    },
+    messages: [],
+    utterances: [],
+  };
+  global.wx = {
+    getStorageSync(key) {
+      if (key === "pawtale_voice_backend_config") {
+        return {
+          httpBaseUrl: "http://backend.local:8000/",
+          devEmail: "local@example.com",
+          devPassword: "secret",
+        };
+      }
+      if (key === "pawtale_voice_backend_cookie") {
+        return "pawtale_session=abc";
+      }
+      return "";
+    },
+    getExtConfigSync() {
+      return {};
+    },
+    setStorageSync() {},
+    removeStorageSync() {},
+    request(options) {
+      requests.push(options);
+      if (options.url.endsWith("/api/auth/me")) {
+        options.success({ statusCode: 200, data: { id: "user-1" }, cookies: [], header: {} });
+        return;
+      }
+      options.success({ statusCode: 200, data: detail, cookies: [], header: {} });
+    },
+  };
+  delete require.cache[require.resolve("../services/memoir-voice-api.ts")];
+  const { getMemoirVoiceSession } = require("../services/memoir-voice-api.ts");
+
+  const result = await getMemoirVoiceSession("voice/1");
+
+  assert.deepEqual(result, detail);
+  assert.equal(requests.length, 2);
+  assert.equal(requests[1].url, "http://backend.local:8000/api/mobile/memoir/voice-sessions/voice%2F1");
+  assert.equal(requests[1].method, "GET");
+  assert.deepEqual(requests[1].header, { Cookie: "pawtale_session=abc" });
+  delete global.wx;
+});
+
 test("streaming ASR connect rejects on socket error before open", async () => {
   let onError;
   global.wx = {

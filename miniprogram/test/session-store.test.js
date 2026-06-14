@@ -39,6 +39,12 @@ function sessionStoreModule() {
   return require("../stores/session.ts");
 }
 
+function memoirCacheModule() {
+  delete require.cache[require.resolve("../stores/session.ts")];
+  delete require.cache[require.resolve("../stores/memoir-cache.ts")];
+  return require("../stores/memoir-cache.ts");
+}
+
 test("writeMemoirStore persists fallback when story detail cache is too large", () => {
   const mock = installWxStorageMock({}, 1);
   const { replaceMemoirStore } = sessionStoreModule();
@@ -54,10 +60,20 @@ test("writeMemoirStore persists fallback when story detail cache is too large", 
         },
       },
     },
+    voice_session_cache: {
+      version: 3,
+      sessions: {
+        voice_1: {
+          transcript_lines: [{ id: "line-1", text: "第一句话" }],
+          cached_at: "2026-06-08T00:00:00.000Z",
+        },
+      },
+    },
   });
 
   assert.equal(mock.writes.length, 2);
   assert.equal(result.story_detail_cache, undefined);
+  assert.equal(result.voice_session_cache, undefined);
   assert.equal(typeof result.cache_write_failed_at, "string");
   assert.deepEqual(mock.storage[STORE_KEY], result);
 });
@@ -89,4 +105,140 @@ test("writeMemoirStore clears previous write failure marker after successful wri
   assert.equal(result.cache_write_failed_at, undefined);
   assert.equal(mock.storage[STORE_KEY].cache_write_failed_at, undefined);
   assert.equal(mock.storage[STORE_KEY].project.title, "回忆录");
+});
+
+test("voice session snapshots persist backend detail as transcript lines", () => {
+  const mock = installWxStorageMock();
+  const {
+    readMemoirVoiceSessionSnapshot,
+    transcriptLinesFromVoiceSessionDetail,
+    writeMemoirVoiceSessionSnapshot,
+  } = memoirCacheModule();
+  const detail = {
+    session: {
+      id: "voice-1",
+      project_id: "project-1",
+      status: "stopped",
+      guidance_mode: "guided_interview",
+      current_guidance_module: "people",
+      error_message: "",
+      metadata_json: {},
+      created_at: "2026-06-08T00:00:00.000Z",
+      updated_at: "2026-06-08T00:03:00.000Z",
+    },
+    messages: [
+      {
+        id: "assistant-1",
+        project_id: "project-1",
+        voice_session_id: "voice-1",
+        role: "assistant",
+        content_text: "你想先聊谁？",
+        content_status: "final",
+        turn_index: 1,
+        metadata_json: {},
+        created_at: "2026-06-08T00:01:00.000Z",
+        updated_at: "2026-06-08T00:01:00.000Z",
+      },
+      {
+        id: "message-1",
+        project_id: "project-1",
+        voice_session_id: "voice-1",
+        role: "user",
+        content_text: "我想聊我的外婆。",
+        content_status: "final",
+        audio_file_id: "audio-1",
+        transcript_version_id: "transcript-1",
+        turn_index: 2,
+        metadata_json: {},
+        created_at: "2026-06-08T00:02:00.000Z",
+        updated_at: "2026-06-08T00:02:00.000Z",
+      },
+    ],
+    utterances: [
+      {
+        id: "utterance-1",
+        voice_session_id: "voice-1",
+        chat_message_id: "message-1",
+        audio_file_id: "audio-1",
+        transcript_raw: "我想聊我的外婆",
+        transcript_edited: "我想聊我的外婆。",
+        start_ms: 120,
+        end_ms: 2600,
+        provider_payload_json: {},
+        created_at: "2026-06-08T00:02:00.000Z",
+      },
+    ],
+  };
+
+  assert.deepEqual(transcriptLinesFromVoiceSessionDetail(detail), [
+    {
+      id: "message-1",
+      text: "我想聊我的外婆。",
+      message_id: "message-1",
+      utterance_id: "utterance-1",
+      audio_file_id: "audio-1",
+      transcript_version_id: "transcript-1",
+      start_ms: 120,
+      end_ms: 2600,
+    },
+  ]);
+
+  writeMemoirVoiceSessionSnapshot("voice-1", { detail });
+  const snapshot = readMemoirVoiceSessionSnapshot("voice-1");
+
+  assert.equal(snapshot.hasSession, true);
+  assert.equal(snapshot.isFresh, true);
+  assert.equal(snapshot.detail.session.guidance_mode, "guided_interview");
+  assert.equal(snapshot.transcriptLines.length, 1);
+  assert.equal(snapshot.transcriptLines[0].text, "我想聊我的外婆。");
+  assert.equal(mock.storage[STORE_KEY].voice_session_cache.version, 3);
+});
+
+test("voice session snapshots keep longer local transcript when backend detail lags", () => {
+  installWxStorageMock();
+  const {
+    readMemoirVoiceSessionSnapshot,
+    writeMemoirVoiceSessionSnapshot,
+  } = memoirCacheModule();
+  writeMemoirVoiceSessionSnapshot("voice-1", {
+    transcriptLines: [
+      { id: "line-1", text: "第一句" },
+      { id: "line-2", text: "第二句" },
+    ],
+  });
+  writeMemoirVoiceSessionSnapshot("voice-1", {
+    detail: {
+      session: {
+        id: "voice-1",
+        project_id: "project-1",
+        status: "listening",
+        guidance_mode: "free_narration",
+        error_message: "",
+        metadata_json: {},
+        created_at: "2026-06-08T00:00:00.000Z",
+        updated_at: "2026-06-08T00:01:00.000Z",
+      },
+      messages: [
+        {
+          id: "message-1",
+          project_id: "project-1",
+          voice_session_id: "voice-1",
+          role: "user",
+          content_text: "第一句",
+          content_status: "final",
+          turn_index: 1,
+          metadata_json: {},
+          created_at: "2026-06-08T00:01:00.000Z",
+          updated_at: "2026-06-08T00:01:00.000Z",
+        },
+      ],
+      utterances: [],
+    },
+  });
+
+  const snapshot = readMemoirVoiceSessionSnapshot("voice-1");
+
+  assert.equal(snapshot.hasSession, true);
+  assert.equal(snapshot.detail.session.id, "voice-1");
+  assert.deepEqual(snapshot.transcriptLines.map((line) => line.text), ["第一句", "第二句"]);
 });
