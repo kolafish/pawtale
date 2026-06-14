@@ -1,5 +1,4 @@
 import type {
-  MemoirAnswerSession,
   MemoirCoverageItem,
   MemoirEventMemory,
   MemoirInterviewState,
@@ -17,13 +16,11 @@ import type {
 import { getMemoirIdentity } from "./auth";
 import { getMemoirDashboard } from "./memoir";
 import { writeMemoirDashboardSnapshot } from "../stores/memoir-cache";
-import { writeMemoirAnswerSessionDraftFromRemote } from "../stores/memoir-answer-session-drafts";
 import { cacheIdentityFromUser, ensureMemoirStoreIdentity } from "../stores/session";
 
 export interface MemoirDashboardData {
   project?: Project;
   interview: MemoirInterviewState;
-  activeAnswerSession?: MemoirAnswerSession | null;
   summary: MemoirSummary;
   sessionSummary?: MemoirSessionSummary | null;
   people: MemoirPersonMemory[];
@@ -51,10 +48,6 @@ export async function loadMemoirDashboard(): Promise<MemoirDashboardData> {
   const candidates = dashboard.candidates;
   const outputs = dashboard.outputs;
   const memoryStats = dashboard.memory_stats;
-  const activeAnswerSession = dashboard.active_answer_session || null;
-  if (activeAnswerSession) {
-    writeMemoirAnswerSessionDraftFromRemote(activeAnswerSession);
-  }
 
   writeMemoirDashboardSnapshot({
     project: dashboard.project,
@@ -75,7 +68,6 @@ export async function loadMemoirDashboard(): Promise<MemoirDashboardData> {
   return {
     project: dashboard.project,
     interview: dashboard.interview,
-    activeAnswerSession,
     summary: dashboard.summary,
     sessionSummary,
     people,

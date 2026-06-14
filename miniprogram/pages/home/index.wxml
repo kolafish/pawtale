@@ -11,54 +11,14 @@
 
   <view wx:if="{{error}}" class="error">{{error}}</view>
 
-  <view
-    class="question-card {{questionCardDragging ? 'question-card-dragging' : ''}} {{questionCardLeaving ? 'question-card-leaving' : ''}} {{questionSwipeReady ? 'question-card-ready' : ''}}"
-    style="transform: translateX({{questionCardTranslateX}}px) rotate({{questionCardRotate}}deg);"
-    bindtouchstart="onQuestionTouchStart"
-    bindtouchmove="onQuestionTouchMove"
-    bindtouchend="onQuestionTouchEnd"
-    bindtouchcancel="onQuestionTouchCancel"
-  >
+  <view class="question-card">
     <view class="card-label">
       <view class="label-dot"></view>
-      <text>{{sessionTitle || "回忆录访谈"}}</text>
+      <text>语音访谈</text>
     </view>
-    <text class="question-text">{{currentPrompt || "正在获取问题"}}</text>
-    <view wx:if="{{currentQuestionTtsSourceKey || canSwitchQuestion}}" class="question-tools">
-      <view wx:if="{{currentQuestionTtsSourceKey}}" class="tts-inline">
-        <button
-          class="tts-icon-button {{ttsSourceKey === currentQuestionTtsSourceKey && ttsPlaying ? 'active' : ''}}"
-          disabled="{{ttsBusy}}"
-          data-source-type="question"
-          data-source-id="{{currentQuestionId}}"
-          data-label="问题"
-          catchtap="toggleTtsSource"
-        >
-          <image class="tts-icon" src="/assets/tts-speaker.png" mode="aspectFit" />
-        </button>
-      </view>
-      <button
-        wx:if="{{canSwitchQuestion}}"
-        class="question-switch-button"
-        disabled="{{loading || refreshing || switchingQuestion}}"
-        catchtap="switchQuestionManually"
-      >
-        换一个问题
-      </button>
-    </view>
-    <text
-      wx:if="{{ttsSourceKey === currentQuestionTtsSourceKey && ttsError}}"
-      class="tts-status {{ttsError ? 'tts-error' : ''}}"
-    >
-      {{ttsError}}
-    </text>
-    <view wx:if="{{hasAnswerDraft}}" class="draft-state">
-      <text class="draft-label">{{answerDraftLabel}}</text>
-      <text wx:if="{{answerDraftPendingLabel}}" class="draft-pending">{{answerDraftPendingLabel}}</text>
-    </view>
-
+    <text class="question-text">{{currentPrompt}}</text>
     <view
-      class="primary-action {{loading || switchingQuestion ? 'primary-action-disabled' : ''}}"
+      class="primary-action {{loading ? 'primary-action-disabled' : ''}}"
       bindtap="continueInterview"
     >
       <image class="action-art-icon" src="/assets/memoir-microphone.png" mode="aspectFit" />
@@ -90,9 +50,9 @@
     <view class="mini-stats">
       <view class="mini-stat">
         <text class="mini-value">{{hasDashboardData ? completedCount : "..."}}</text>
-        <text class="mini-label">已回答</text>
+        <text class="mini-label">已讲述</text>
       </view>
-      <view class="mini-stat action-stat" bindtap="openPendingReview" hover-class="tap-hover">
+      <view class="mini-stat">
         <text class="mini-value">{{hasDashboardData ? pendingReviewCount : "..."}}</text>
         <text class="mini-label">待确认</text>
       </view>
@@ -134,10 +94,6 @@
     <view class="bottom-nav-item" bindtap="openWorkbench">
       <view class="nav-mark grid-mark"></view>
       <text>工作台</text>
-    </view>
-    <view class="bottom-nav-item" bindtap="openQa">
-      <view class="nav-mark chat-mark"></view>
-      <text>问答</text>
     </view>
     <view class="bottom-nav-item" bindtap="openProfile">
       <view class="nav-mark user-mark"></view>

@@ -53,10 +53,6 @@
       </view>
       <text class="chevron">›</text>
     </view>
-    <view class="service-row" bindtap="openQa">
-      <text>问答记录</text>
-      <text class="chevron">›</text>
-    </view>
   </view>
 
   <view class="settings-panel">
@@ -85,10 +81,6 @@
     <view class="bottom-nav-item" bindtap="openWorkbench">
       <view class="nav-mark grid-mark"></view>
       <text>工作台</text>
-    </view>
-    <view class="bottom-nav-item" bindtap="openQa">
-      <view class="nav-mark chat-mark"></view>
-      <text>问答</text>
     </view>
     <view class="bottom-nav-item active">
       <view class="nav-mark user-mark"></view>

@@ -28,14 +28,14 @@ VAD + Streaming ASR + LLM Dynamic Follow-up + Streaming TTS
 Question -> Answer -> Audio File -> ASR Job -> Draft -> Review
 ```
 
-旧版代码只通过 Git commit 追溯，不在新版文档里维护代码路径清单。后续重构会删除或移动旧页面和旧 API，路径列表很快会失效。
+旧版代码只通过 Git commit 追溯，不在新版文档里维护代码路径清单。小程序固定问答、问答记录、旧 review/editor 页面已下线；需要查看旧版时以 baseline commit 为准。
 
 ```text
 legacy fixed-question baseline commit:
 bd3599ad3dddf382b242c47071c856d382543cac
 ```
 
-需要查看旧版时，直接基于该 commit 做 Git 追溯，例如 `git show bd3599ad3dddf382b242c47071c856d382543cac`。这套代码可以保留到新链路替换完成，但不再继续扩大功能面。后续 PR 如果触碰 legacy 逻辑，应优先服务迁移，而不是继续强化固定问答模型。
+需要查看旧版时，直接基于该 commit 做 Git 追溯，例如 `git show bd3599ad3dddf382b242c47071c856d382543cac`。后续 PR 如果触碰 legacy 逻辑，应优先服务迁移或删除，而不是继续强化固定问答模型。
 
 ### 新版本
 
@@ -61,15 +61,15 @@ backend/app/routers/memoir/voice.py           # 本地/服务端 voice session A
 backend/app/services/memoir/voice_gateway.py  # 对接实时 ASR/TTS provider
 backend/app/services/memoir/chat_orchestrator.py
 
-cloud-functions/memoir-api/                   # 短期可继续承载身份和云存储登记
+cloud-functions/memoir-api/                   # 短期可继续承载身份、项目、dashboard 和历史素材读取
 ```
 
 Git 上建议用以下边界区分：
 
 - `bd3599ad3dddf382b242c47071c856d382543cac`：legacy 固定问题链路的可追溯基线。
 - `codex/voice-chat-redesign`：新版语音聊天主线分支。
-- 第一批 PR 只做基础设施和新入口，不删除旧页面。
-- 新版跑通后再单独 PR 清理 legacy 页面、旧 API 和旧文档。
+- 第一批 PR 已完成 Streaming ASR、voice session 数据和小程序新入口。
+- 小程序 legacy 固定问答页面和旧非实时录音上传代码已清理；cloud 侧历史数据读取能力短期保留。
 
 ## 产品体验
 
@@ -417,7 +417,7 @@ LLM 和 TTS 相关事件仍是后续阶段目标，PR3 不生成 `assistant.*` �
 
 1. PR 1: 删除 legacy 非实时 ASR 代码
    - 删除 StepFun 整段转写 service、ASR job 路由、`audio-files/{id}/transcribe`。
-   - 小程序 legacy 页面停止调用离线转写，只保留录音保存和手工补文字。
+   - 小程序不再保留旧固定问答录音上传入口。
    - 更新文档和测试，确认没有 provider key 暴露。
 
 2. PR 2: 后端 voice session 数据骨架
@@ -446,7 +446,7 @@ PR5 后第一版已经具备的闭环：
 - 小程序录音为 16k mono PCM frame，通过 Pawtale voice gateway 发送。
 - 后端 provider adapter 返回 `asr.partial` / `asr.final`。
 - `asr.partial` 只用于页面大字实时显示。
-- `asr.final` 会创建 `memoir_chat_messages` 用户消息和 `memoir_voice_utterances`。
+- `asr.final` 会创建 `memoir_chat_messages` 用户消息、`memoir_voice_utterances` 和 voice-session 归属的 `memoir_transcript_versions`。
 - 当前 utterance 的 PCM 音频帧会保存为 `AudioFile`，并通过 `audio_file_id` 关联到 message / utterance。
 
 PR5 后仍未完成、不能按上线态理解的缺口：
@@ -511,9 +511,10 @@ PR5 后仍未完成、不能按上线态理解的缺口：
 目标：新版稳定后清理旧链路。
 
 - 移除固定问题主入口。
-- 旧 `question/answer/draft` 页面下线或转为只读迁移入口。
-- 删除不再使用的 TTS source type。
-- 更新旧文档或归档。
+- 小程序旧 `qa`、`qa-detail`、`question`、`review`、`editor` 页面已下线。
+- 旧 answer-session 草稿 store、旧非实时录音上传 service 已删除。
+- cloud function 中仍保留部分 legacy 固定问答服务，用于历史 dashboard、memory、output 读取和后续迁移参考；不再作为小程序主入口扩展。
+- 后续删除不再使用的 TTS source type，并把进度、校正、成稿编辑迁移到 voice session 数据。
 
 ## 验收标准
 
