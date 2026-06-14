@@ -1,5 +1,7 @@
 # 回忆录 Memory-first 架构规划
 
+> Legacy/参考文档：本文仍保留“记忆优先、证据链、覆盖度、写作产物分层”等长期原则，但具体产品主线已从固定问答演进为实时语音聊天。新版实施方案以 [MEMOIR_VOICE_CHAT_REDESIGN.md](MEMOIR_VOICE_CHAT_REDESIGN.md) 为准。
+
 ## 定位
 
 回忆录产品的核心不应该是聊天机器人，也不应该是固定问卷，而是：

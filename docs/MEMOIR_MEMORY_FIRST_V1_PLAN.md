@@ -1,5 +1,7 @@
 # 回忆录 Memory-first Interview v1 迭代计划
 
+> Legacy 文档：本文描述的是上一版从固定问答推进到 memory-first interview v1 的计划。当前产品已决定做大改版，转向 `VAD + Streaming ASR + LLM 动态追问 + Streaming TTS` 的语音聊天形态。新版实施方案以 [MEMOIR_VOICE_CHAT_REDESIGN.md](MEMOIR_VOICE_CHAT_REDESIGN.md) 为准。
+
 ## 版本目标
 
 本期目标是把回忆录模块从“固定问题 + 回答整理”推进到第一版“原始材料可追溯 + 结构化记忆 + 覆盖度驱动追问”。

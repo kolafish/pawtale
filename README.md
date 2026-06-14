@@ -18,7 +18,7 @@ Pawtale 目前保留在一个代码库中，通过项目类型和 workspace 边�
 
 - 小说创作：章节结构、大纲、人物设定、Inspector、项目分析
 - 公众号创作：较短篇幅，当前复用共享草稿工作台
-- 回忆录创作：问题驱动，当前已有回忆问题面板；后续会偏移动端和语音输入
+- 回忆录创作：小程序正在从固定问题面板改版为实时语音聊天，目标是弱引导/强引导两种访谈模式、Streaming ASR 大字转写、LLM 动态追问和 Streaming TTS 语音回复
 
 ## 项目结构
 
@@ -86,6 +86,12 @@ npm run dev
 | `ANTHROPIC_AUTH_TOKEN` | Claude 代理认证 token |
 | `ANTHROPIC_BASE_URL` | Claude 代理地址，OpenAI 兼容格式 |
 | `DEFAULT_AI_MODEL` | 默认模型：`claude-opus-4` / `claude-sonnet-4` / `deepseek` |
+| `STEPFUN_API_KEY` | StepFun ASR/TTS API key |
+| `STEPFUN_BASE_URL` | StepFun API 地址 |
+| `STEPFUN_ASR_MODEL` | StepFun 离线 ASR 模型 |
+| `VOLC_ASR_API_KEY` | 豆包流式 ASR API key |
+| `VOLC_ASR_RESOURCE_ID` | 豆包流式 ASR 资源 ID |
+| `VOLC_ASR_WS_URL` | 豆包流式 ASR WebSocket 地址 |
 
 ## 常用命令
 
@@ -105,9 +111,10 @@ cd backend && venv/bin/python -m pytest -q
 
 - [PRODUCT.md](./PRODUCT.md)
 - [TECH.md](./TECH.md)
-- [docs/MEMOIR_MINIPROGRAM_PRODUCT.md](./docs/MEMOIR_MINIPROGRAM_PRODUCT.md)
-- [docs/MEMOIR_MEMORY_ARCHITECTURE.md](./docs/MEMOIR_MEMORY_ARCHITECTURE.md)
-- [docs/MEMOIR_MEMORY_FIRST_V1_PLAN.md](./docs/MEMOIR_MEMORY_FIRST_V1_PLAN.md)
+- [docs/MEMOIR_VOICE_CHAT_REDESIGN.md](./docs/MEMOIR_VOICE_CHAT_REDESIGN.md) 回忆录小程序新版主线
+- [docs/MEMOIR_MINIPROGRAM_PRODUCT.md](./docs/MEMOIR_MINIPROGRAM_PRODUCT.md) legacy
+- [docs/MEMOIR_MEMORY_ARCHITECTURE.md](./docs/MEMOIR_MEMORY_ARCHITECTURE.md) legacy/long-term reference
+- [docs/MEMOIR_MEMORY_FIRST_V1_PLAN.md](./docs/MEMOIR_MEMORY_FIRST_V1_PLAN.md) legacy
 - [miniprogram/README.md](./miniprogram/README.md)
 - [backend/README.md](./backend/README.md)
 - [frontend/README.md](./frontend/README.md)
