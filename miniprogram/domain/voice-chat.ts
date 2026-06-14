@@ -75,6 +75,9 @@ export type VoiceGatewayClientEvent =
 export interface VoiceGatewayServerEvent {
   type: string;
   text?: string;
+  message_id?: string;
+  utterance_id?: string;
+  audio_file_id?: string | null;
   start_ms?: number | null;
   end_ms?: number | null;
   error?: string;
@@ -85,6 +88,9 @@ export interface VoiceGatewayServerEvent {
 export interface VoiceChatTranscriptLine {
   id: string;
   text: string;
+  message_id?: string;
+  utterance_id?: string;
+  audio_file_id?: string | null;
   start_ms?: number | null;
   end_ms?: number | null;
 }

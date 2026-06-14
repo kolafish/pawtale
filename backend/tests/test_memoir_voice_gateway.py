@@ -2,8 +2,12 @@ import asyncio
 import base64
 from typing import Any
 
+from sqlalchemy import select
+
+from app.models.memoir import AudioFile, MemoirChatMessage, MemoirVoiceUtterance
 from app.services.memoir.streaming_asr import StreamingASREvent
 from app.services.memoir.voice_gateway import VoiceGatewaySession
+from app.services.memoir.voice_gateway_persistence import VoiceGatewayPersistence
 
 
 async def test_voice_gateway_streams_audio_and_forwards_asr_events():
@@ -65,8 +69,106 @@ async def test_voice_gateway_rejects_invalid_base64_audio_frame():
     assert asr_client.sent_audio == []
 
 
+async def test_voice_gateway_final_event_includes_persistence_ids():
+    client = FakeGatewayClient()
+    asr_client = FakeStreamingASRClient()
+    recorded_audio: list[bytes] = []
+    persisted_events: list[StreamingASREvent] = []
+    session = VoiceGatewaySession(
+        client=client,
+        asr_client_factory=lambda: asr_client,
+        on_audio_frame=lambda audio: _record_audio(recorded_audio, audio),
+        on_asr_final=lambda event: _persist_fake_final(persisted_events, event),
+    )
+
+    run_task = asyncio.create_task(session.run())
+    await _wait_for_event(client, "session.ready")
+    await client.push({"type": "session.start"})
+    await _wait_for_event(client, "session.started")
+    await client.push(
+        {
+            "type": "audio.frame",
+            "audio": base64.b64encode(b"pcm").decode("ascii"),
+        }
+    )
+    await client.push({"type": "audio.end"})
+    final = await _wait_for_event(client, "asr.final")
+    await client.push({"type": "session.stop"})
+    await asyncio.wait_for(run_task, timeout=1)
+
+    assert recorded_audio == [b"pcm"]
+    assert [event.text for event in persisted_events] == ["我小时候住在外婆家。"]
+    assert final["message_id"] == "message-1"
+    assert final["utterance_id"] == "utterance-1"
+    assert final["audio_file_id"] == "audio-1"
+
+
+async def test_voice_gateway_persistence_saves_final_message_utterance_and_audio(
+    client,
+    test_db,
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr("app.services.memoir.audio_files.MEMOIR_AUDIO_DIR", tmp_path / "audio")
+    user_response = await client.get("/api/auth/me")
+    create_response = await client.post(
+        "/api/mobile/memoir/voice-sessions",
+        json={"guidance_mode": "free_narration"},
+    )
+    voice_session_id = create_response.json()["session"]["id"]
+    persistence = VoiceGatewayPersistence(
+        db=test_db,
+        voice_session_id=voice_session_id,
+        user_id=user_response.json()["id"],
+    )
+
+    await persistence.record_audio_frame(b"pcm-1")
+    await persistence.record_audio_frame(b"pcm-2")
+    persisted = await persistence.persist_final(
+        StreamingASREvent(
+            type="final",
+            text="我小时候住在外婆家。",
+            start_ms=0,
+            end_ms=2400,
+            raw={"payload": {"result": {"text": "我小时候住在外婆家。"}}},
+        )
+    )
+
+    audio_file = await test_db.scalar(select(AudioFile).where(AudioFile.id == persisted["audio_file_id"]))
+    message = await test_db.scalar(select(MemoirChatMessage).where(MemoirChatMessage.id == persisted["message_id"]))
+    utterance = await test_db.scalar(select(MemoirVoiceUtterance).where(MemoirVoiceUtterance.id == persisted["utterance_id"]))
+
+    assert audio_file is not None
+    assert audio_file.mime_type == "audio/pcm"
+    assert audio_file.size_bytes == len(b"pcm-1pcm-2")
+    assert (tmp_path / "audio" / audio_file.user_id / f"{audio_file.id}.pcm").read_bytes() == b"pcm-1pcm-2"
+    assert message is not None
+    assert message.content_text == "我小时候住在外婆家。"
+    assert message.audio_file_id == audio_file.id
+    assert utterance is not None
+    assert utterance.chat_message_id == message.id
+    assert utterance.audio_file_id == audio_file.id
+    assert utterance.transcript_raw == "我小时候住在外婆家。"
+
+
 async def _record_stop(values: list[str | None], error: str | None) -> None:
     values.append(error)
+
+
+async def _record_audio(values: list[bytes], audio: bytes) -> None:
+    values.append(audio)
+
+
+async def _persist_fake_final(
+    values: list[StreamingASREvent],
+    event: StreamingASREvent,
+) -> dict[str, str]:
+    values.append(event)
+    return {
+        "message_id": "message-1",
+        "utterance_id": "utterance-1",
+        "audio_file_id": "audio-1",
+    }
 
 
 async def _wait_for_event(client: "FakeGatewayClient", event_type: str) -> dict[str, Any]:

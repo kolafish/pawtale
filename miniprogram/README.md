@@ -109,12 +109,12 @@ GET  /api/mobile/memoir/outputs
 `POST /api/mobile/memoir/answers` 支持纯文本回答，也支持带上刚上传录音的
 `audio_file_id` 和 `duration_seconds`，用于后续播放原话或重录。
 
-## 当前不包含
+## 新版仍未包含
 
-- voice gateway
-- Streaming ASR 实时字幕
 - LLM 动态追问
 - Streaming TTS
+- 语音聊天结果的校正页和进度页
+- 云函数身份与 backend cookie 身份统一
 - accepted draft 同步到 Web 正文
 
 这些能力会在后续 PR 分别接入。

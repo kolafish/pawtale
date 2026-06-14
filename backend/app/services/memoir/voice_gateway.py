@@ -18,6 +18,8 @@ class VoiceGatewayClient(Protocol):
 
 StreamingASRClientFactory = Callable[[], StreamingASRClient]
 SessionStopHandler = Callable[[str | None], Awaitable[None]]
+AudioFrameHandler = Callable[[bytes], Awaitable[None]]
+ASRFinalHandler = Callable[[StreamingASREvent], Awaitable[dict[str, Any] | None]]
 
 
 class VoiceGatewaySession:
@@ -27,10 +29,14 @@ class VoiceGatewaySession:
         client: VoiceGatewayClient,
         asr_client_factory: StreamingASRClientFactory,
         on_stop: SessionStopHandler | None = None,
+        on_audio_frame: AudioFrameHandler | None = None,
+        on_asr_final: ASRFinalHandler | None = None,
     ) -> None:
         self.client = client
         self.asr_client_factory = asr_client_factory
         self.on_stop = on_stop
+        self.on_audio_frame = on_audio_frame
+        self.on_asr_final = on_asr_final
         self._asr_client: StreamingASRClient | None = None
         self._asr_task: asyncio.Task[None] | None = None
 
@@ -94,6 +100,8 @@ class VoiceGatewaySession:
             return
         if not audio:
             return
+        if self.on_audio_frame:
+            await self.on_audio_frame(audio)
         await self._asr_client.send_audio(audio)
 
     async def _finish_audio(self) -> None:
@@ -105,23 +113,29 @@ class VoiceGatewaySession:
     async def _forward_asr_events(self) -> None:
         if self._asr_client is None:
             return
-        async for event in self._asr_client.events():
-            await self._send_asr_event(event)
+        try:
+            async for event in self._asr_client.events():
+                await self._send_asr_event(event)
+        except Exception as exc:
+            await self._send_error(str(exc))
 
     async def _send_asr_event(self, event: StreamingASREvent) -> None:
         if event.type == "error":
             await self._send_error(event.error or "asr_provider_error", event.raw)
             return
 
-        await self.client.send_json(
-            {
-                "type": f"asr.{event.type}",
-                "text": event.text,
-                "start_ms": event.start_ms,
-                "end_ms": event.end_ms,
-                "provider_payload": event.raw,
-            }
-        )
+        payload: dict[str, Any] = {
+            "type": f"asr.{event.type}",
+            "text": event.text,
+            "start_ms": event.start_ms,
+            "end_ms": event.end_ms,
+            "provider_payload": event.raw,
+        }
+        if event.type == "final" and self.on_asr_final:
+            persisted = await self.on_asr_final(event)
+            if persisted:
+                payload.update(persisted)
+        await self.client.send_json(payload)
 
     async def _send_error(self, error: str, detail: dict[str, Any] | None = None) -> None:
         payload: dict[str, Any] = {"type": "session.error", "error": error}

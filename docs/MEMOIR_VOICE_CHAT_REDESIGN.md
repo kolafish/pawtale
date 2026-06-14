@@ -336,7 +336,7 @@ session.ready
 session.started
 audio.ended
 asr.partial        # { "text": "...", "start_ms": 0, "end_ms": 1200, "provider_payload": {...} }
-asr.final          # { "text": "...", "start_ms": 0, "end_ms": 2400, "provider_payload": {...} }
+asr.final          # { "text": "...", "message_id": "...", "utterance_id": "...", "audio_file_id": "...", "provider_payload": {...} }
 session.error
 ```
 
@@ -439,6 +439,23 @@ LLM 和 TTS 相关事件仍是后续阶段目标，PR3 不生成 `assistant.*` �
    - 将 `asr.final` 落 chat message / utterance。
    - 保存原始音频或音频片段引用。
    - 补齐 API/小程序测试和 README 操作说明。
+
+PR5 后第一版已经具备的闭环：
+
+- 小程序从 `voice-start` 创建 voice session，并进入 `voice-chat`。
+- 小程序录音为 16k mono PCM frame，通过 Pawtale voice gateway 发送。
+- 后端 provider adapter 返回 `asr.partial` / `asr.final`。
+- `asr.partial` 只用于页面大字实时显示。
+- `asr.final` 会创建 `memoir_chat_messages` 用户消息和 `memoir_voice_utterances`。
+- 当前 utterance 的 PCM 音频帧会保存为 `AudioFile`，并通过 `audio_file_id` 关联到 message / utterance。
+
+PR5 后仍未完成、不能按上线态理解的缺口：
+
+- 小程序云函数身份和 backend cookie 身份还未统一，当前 voice-chat 是开发态直连 backend。
+- 原始音频按 final utterance 粗粒度保存，尚未做更精确的 VAD 时间切片和断线续传。
+- LLM dynamic follow-up、Streaming TTS、插话打断和 AI 回复落库尚未接入。
+- 转写校正页、进度页、成稿编辑页还未迁移到新版 voice session 数据。
+- 还没有方言/噪声评测集、provider fallback、限流和成本监控。
 
 ### Phase 1: Streaming ASR MVP
 
