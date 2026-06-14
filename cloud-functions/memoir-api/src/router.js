@@ -29,7 +29,6 @@ function requireStore(request) {
 
 function memoirService(request) {
   return createMemoirService(requireStore(request), request.context || {}, {
-    asr: request.asr,
     drafting: request.drafting,
     memoryExtraction: request.memoryExtraction,
     storage: request.storage,
@@ -82,10 +81,6 @@ const routes = {
     route("/api/mobile/memoir/answer-sessions/:answerSessionId", async (request) => jsonResponse(
       200,
       await memoirService(request).getAnswerSession(request.params.answerSessionId),
-    )),
-    route("/api/mobile/memoir/asr-jobs/:asrJobId", async (request) => jsonResponse(
-      200,
-      await memoirService(request).getAsrJob(request.params.asrJobId),
     )),
     route("/api/mobile/memoir/tts-jobs/:ttsJobId", async (request) => jsonResponse(
       200,
@@ -180,14 +175,6 @@ const routes = {
       200,
       await memoirService(request).submitAnswerSession(request.params.answerSessionId),
     )),
-    route("/api/mobile/memoir/answer-segments/:answerSegmentId/transcription-job", async (request) => jsonResponse(
-      201,
-      await memoirService(request).createSegmentTranscriptionJob(request.params.answerSegmentId),
-    )),
-    route("/api/mobile/memoir/asr-jobs/:asrJobId/process", async (request) => jsonResponse(
-      200,
-      await memoirService(request).processAsrJob(request.params.asrJobId),
-    )),
     route("/api/mobile/memoir/tts-assets", async (request) => jsonResponse(
       201,
       await memoirService(request).createTtsAsset(createTtsAssetRequest(request.data)),
@@ -203,10 +190,6 @@ const routes = {
     route("/api/mobile/memoir/audio-files", async (request) => jsonResponse(
       201,
       await memoirService(request).registerAudioFile(registerAudioFileRequest(request.data)),
-    )),
-    route("/api/mobile/memoir/audio-files/:audioFileId/transcribe", async (request) => jsonResponse(
-      200,
-      await memoirService(request).transcribeAudioFile(request.params.audioFileId),
     )),
     route("/api/mobile/memoir/answers/:answerId/draft", async (request) => jsonResponse(
       200,
@@ -268,7 +251,6 @@ async function handleMemoirApiRequest(event = {}, context = {}, dependencies = {
       data: event.data || {},
       context,
       event,
-      asr: dependencies.asr,
       drafting: dependencies.drafting,
       memoryExtraction: dependencies.memoryExtraction,
       store: dependencies.store,

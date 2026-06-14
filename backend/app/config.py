@@ -23,11 +23,6 @@ class Settings(BaseSettings):
     anthropic_auth_token: str = ""
     anthropic_base_url: str = "https://cursor.scihub.edu.kg/api"
 
-    # StepFun ASR
-    stepfun_api_key: str = ""
-    stepfun_base_url: str = "https://api.stepfun.com"
-    stepfun_asr_model: str = "stepaudio-2.5-asr"
-
     # Default AI Model
     default_ai_model: str = "claude-opus-4"  # deepseek / claude-opus-4 / claude-sonnet-4
 

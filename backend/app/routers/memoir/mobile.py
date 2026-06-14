@@ -8,7 +8,6 @@ from app.models.users import User
 from app.schemas.memoir import (
     AudioFileResponse,
     MemoirCoverageItemResponse,
-    MemoirAudioTranscriptionResponse,
     MemoirAnswerResponse,
     MemoirDraftEditRequest,
     MemoirDraftGenerateRequest,
@@ -48,7 +47,6 @@ from app.services.memoir import projects as memoir_projects
 from app.services.memoir import question_planner as memoir_question_planner
 from app.services.memoir import session_summary as memoir_session_summary
 from app.services.memoir import story_cards as memoir_story_cards
-from app.services.memoir import transcription as memoir_transcription
 from app.services.memoir.access import load_memoir_project
 
 
@@ -370,15 +368,6 @@ async def upload_mobile_memoir_audio_file(
         file,
         duration_seconds,
     )
-
-
-@router.post("/audio-files/{audio_file_id}/transcribe", response_model=MemoirAudioTranscriptionResponse)
-async def transcribe_mobile_memoir_audio_file(
-    audio_file_id: str,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    return await memoir_transcription.transcribe_audio_file(db, audio_file_id, current_user.id)
 
 
 @router.post("/answers", response_model=MemoirAnswerResponse, status_code=201)

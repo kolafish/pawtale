@@ -83,7 +83,6 @@ POST /api/mobile/memoir/answers/{answer_id}/draft
 PATCH /api/mobile/memoir/drafts/{draft_id}
 POST /api/mobile/memoir/drafts/{draft_id}/accept
 POST /api/mobile/memoir/audio-files
-POST /api/mobile/memoir/audio-files/{audio_file_id}/transcribe
 GET  /api/mobile/memoir/memories/{people|events|places|themes}
 PATCH /api/mobile/memoir/memories/{memory_type}/{memory_id}
 GET  /api/mobile/memoir/open-questions

@@ -7,10 +7,8 @@ import type {
 import {
   appendMemoirAnswerSegment,
   createMemoirAnswerSession,
-  createMemoirSegmentTranscriptionJob,
   getCurrentSession,
   getNextQuestion,
-  processMemoirAsrJob,
   skipQuestion,
   submitMemoirAnswerSession,
   updateMemoirAnswerSegment,
@@ -101,7 +99,6 @@ interface QuestionData {
   recordingElapsedSeconds: number;
   recordingElapsedLabel: string;
   uploadingAudio: boolean;
-  transcribingAudio: boolean;
   syncingSegment: boolean;
   processingSegmentCount: number;
   processingSegmentLabel: string;
@@ -148,8 +145,8 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
-function isAudioBusy(data: Pick<QuestionData, "recording" | "uploadingAudio" | "transcribingAudio" | "syncingSegment" | "processingSegmentCount">): boolean {
-  return data.recording || data.uploadingAudio || data.transcribingAudio || data.syncingSegment || data.processingSegmentCount > 0;
+function isAudioBusy(data: Pick<QuestionData, "recording" | "uploadingAudio" | "syncingSegment" | "processingSegmentCount">): boolean {
+  return data.recording || data.uploadingAudio || data.syncingSegment || data.processingSegmentCount > 0;
 }
 
 function recordingElapsedText(seconds: number): string {
@@ -310,7 +307,6 @@ function inputDraftFromData(data: QuestionData): Parameters<typeof writeMemoirQu
 function createQuestionRecorderSession(page: QuestionPageInstance): MemoirAudioRecorderSession {
   return {
     continuous: true,
-    transcribeAfterUpload: false,
     onStart() {
       page.setData({ recording: true, error: "", audioSummary: "" });
       startRecordingTimer(page);
@@ -337,9 +333,6 @@ function createQuestionRecorderSession(page: QuestionPageInstance): MemoirAudioR
     async onUploaded(result) {
       await page.appendRecordedSegment(result, "");
     },
-    onTranscribed(result) {
-      void page.appendRecordedSegment(result, result.transcription.text);
-    },
     onProcessingError(message, uploaded) {
       page.setData({
         error: message,
@@ -359,11 +352,10 @@ function createQuestionRecorderSession(page: QuestionPageInstance): MemoirAudioR
         recordingElapsedSeconds: 0,
         recordingElapsedLabel: recordingElapsedText(0),
         uploadingAudio: false,
-        transcribingAudio: false,
-    syncingSegment: false,
-    processingSegmentCount: 0,
-    processingSegmentLabel: "",
-    audioSummary: "",
+        syncingSegment: false,
+        processingSegmentCount: 0,
+        processingSegmentLabel: "",
+        audioSummary: "",
         error: message,
       });
     },
@@ -401,7 +393,6 @@ Page<QuestionData, {
     recordingElapsedSeconds: 0,
     recordingElapsedLabel: "0:00",
     uploadingAudio: false,
-    transcribingAudio: false,
     syncingSegment: false,
     processingSegmentCount: 0,
     processingSegmentLabel: "",
@@ -627,32 +618,9 @@ Page<QuestionData, {
       this.setData({
         answerSegments: nextSegments,
         uploadingAudio: false,
-        transcribingAudio: !hasTranscript && !errorMessage,
-        audioSummary: hasTranscript ? `已添加一段 ${uploaded.durationText}` : `已保存 ${uploaded.durationText}，正在转写`,
+        audioSummary: hasTranscript ? `已添加一段 ${uploaded.durationText}` : `已保存 ${uploaded.durationText}，请补充文字`,
       });
       this.persistAnswerSessionDraft();
-      if (hasTranscript || errorMessage) {
-        return;
-      }
-
-      const job = await createMemoirSegmentTranscriptionJob(segment.id);
-      if (job.segment) {
-        this.setData({
-          answerSegments: upsertSegmentView(this.data.answerSegments, {
-            ...job.segment,
-            status: job.segment.status === "uploaded" ? "transcribing" : job.segment.status,
-          }),
-        });
-      }
-      const processedJob = await processMemoirAsrJob(job.id);
-      if (processedJob.segment) {
-        this.setData({
-          answerSegments: upsertSegmentView(this.data.answerSegments, processedJob.segment),
-          audioSummary: processedJob.status === "completed" ? `已添加一段 ${uploaded.durationText}` : "录音已保存，转写失败",
-          error: processedJob.status === "failed" ? processedJob.error_message || "转写失败" : this.data.error,
-        });
-        this.persistAnswerSessionDraft();
-      }
     } catch (error) {
       this.setData({ error: error instanceof Error ? error.message : "录音分段保存失败" });
     } finally {
@@ -677,7 +645,6 @@ Page<QuestionData, {
       processingSegmentCount: count,
       processingSegmentLabel: processingSegmentText(count),
       uploadingAudio: count > 0,
-      transcribingAudio: count > 0 ? this.data.transcribingAudio : false,
       syncingSegment: count > 0 ? this.data.syncingSegment : false,
     });
   },

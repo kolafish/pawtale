@@ -1,5 +1,5 @@
-import type { MemoirAudioFile, MemoirAudioTranscription } from "../domain/memoir";
-import { transcribeMemoirAudioFile, uploadMemoirAudioFile } from "./memoir";
+import type { MemoirAudioFile } from "../domain/memoir";
+import { uploadMemoirAudioFile } from "./memoir";
 
 export const MAX_MEMOIR_RECORDING_MS = 60000;
 const AUTO_CONTINUE_THRESHOLD_SECONDS = Math.floor(MAX_MEMOIR_RECORDING_MS / 1000) - 1;
@@ -10,10 +10,6 @@ export interface MemoirAudioRecorderUploaded {
   durationText: string;
 }
 
-export interface MemoirAudioRecorderTranscribed extends MemoirAudioRecorderUploaded {
-  transcription: MemoirAudioTranscription;
-}
-
 export interface MemoirAudioRecorderAutoSegment {
   durationSeconds: number;
   durationText: string;
@@ -21,14 +17,12 @@ export interface MemoirAudioRecorderAutoSegment {
 
 export interface MemoirAudioRecorderSession {
   continuous?: boolean;
-  transcribeAfterUpload?: boolean;
   onStart(): void;
   onStop(autoRestarting?: boolean): void;
   onAutoSegmentStop?(result: MemoirAudioRecorderAutoSegment): void;
   onMissingFile(): void;
   onUploadStart(): void;
   onUploaded(result: MemoirAudioRecorderUploaded): void | Promise<void>;
-  onTranscribed(result: MemoirAudioRecorderTranscribed): void;
   onProcessingError(message: string, uploaded?: MemoirAudioRecorderUploaded): void;
   onProcessingDone(): void;
   onRecorderError(message: string): void;
@@ -142,15 +136,6 @@ function bindRecorderEvents(): void {
         }
       });
 
-      if (session.transcribeAfterUpload === false) {
-        return;
-      }
-
-      const transcription = await transcribeMemoirAudioFile(audioFile.id);
-      callLive(session, () => session.onTranscribed({
-        ...uploadedResult,
-        transcription,
-      }));
     } catch (error) {
       callLive(session, () => session.onProcessingError(errorMessage(error, "录音处理失败"), uploaded));
     } finally {

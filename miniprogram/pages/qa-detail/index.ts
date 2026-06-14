@@ -60,7 +60,6 @@ interface QaDetailData {
   submitting: boolean;
   recording: boolean;
   uploadingAudio: boolean;
-  transcribingAudio: boolean;
   playing: boolean;
   error: string;
   sessionTitle: string;
@@ -129,8 +128,8 @@ function audioLabel(hasAudio: boolean, seconds?: number | null): string {
   return text ? `已保存录音 ${text}` : "已保存录音";
 }
 
-function isAudioBusy(data: Pick<QaDetailData, "recording" | "uploadingAudio" | "transcribingAudio">): boolean {
-  return data.recording || data.uploadingAudio || data.transcribingAudio;
+function isAudioBusy(data: Pick<QaDetailData, "recording" | "uploadingAudio">): boolean {
+  return data.recording || data.uploadingAudio;
 }
 
 function preloadTtsSource(sourceType: MemoirTtsSourceType, sourceId: string, label: string): void {
@@ -210,16 +209,7 @@ function createQaDetailRecorderSession(page: QaDetailPageInstance): MemoirAudioR
         newAudioFileId: result.audioFile.id,
         newAudioDurationSeconds: result.durationSeconds,
         uploadingAudio: false,
-        transcribingAudio: true,
-        newAudioSummary: "正在转写",
-        inputDraftDirty: true,
-      });
-      page.persistInputDraft();
-    },
-    onTranscribed(result) {
-      page.setData({
-        answerText: result.transcription.text,
-        newAudioSummary: `已转写 ${result.durationText}`,
+        newAudioSummary: `已保存 ${result.durationText}，请补充文字`,
         inputDraftDirty: true,
       });
       page.persistInputDraft();
@@ -233,13 +223,12 @@ function createQaDetailRecorderSession(page: QaDetailPageInstance): MemoirAudioR
       page.persistInputDraft();
     },
     onProcessingDone() {
-      page.setData({ uploadingAudio: false, transcribingAudio: false });
+      page.setData({ uploadingAudio: false });
     },
     onRecorderError(message) {
       page.setData({
         recording: false,
         uploadingAudio: false,
-        transcribingAudio: false,
         error: message,
       });
     },
@@ -255,7 +244,6 @@ Page<QaDetailData, QaDetailMethods>({
     submitting: false,
     recording: false,
     uploadingAudio: false,
-    transcribingAudio: false,
     playing: false,
     error: "",
     sessionTitle: "",

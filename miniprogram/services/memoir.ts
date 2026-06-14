@@ -3,9 +3,7 @@ import type {
   MemoirAnswerSegment,
   MemoirAnswerSegmentStatus,
   MemoirAnswerSession,
-  MemoirAsrJob,
   MemoirAudioFile,
-  MemoirAudioTranscription,
   MemoirCoverageItem,
   MemoirDashboardResponse,
   MemoirDraft,
@@ -237,24 +235,6 @@ export function updateMemoirAnswerSegment(
   });
 }
 
-export function createMemoirSegmentTranscriptionJob(answerSegmentId: string): Promise<MemoirAsrJob> {
-  return request<MemoirAsrJob>(`/api/mobile/memoir/answer-segments/${answerSegmentId}/transcription-job`, {
-    method: "POST",
-    data: {},
-  });
-}
-
-export function getMemoirAsrJob(asrJobId: string): Promise<MemoirAsrJob> {
-  return request<MemoirAsrJob>(`/api/mobile/memoir/asr-jobs/${asrJobId}`);
-}
-
-export function processMemoirAsrJob(asrJobId: string): Promise<MemoirAsrJob> {
-  return request<MemoirAsrJob>(`/api/mobile/memoir/asr-jobs/${asrJobId}/process`, {
-    method: "POST",
-    data: {},
-  });
-}
-
 export function submitMemoirAnswerSession(answerSessionId: string): Promise<MemoirAnswerSession> {
   return request<MemoirAnswerSession>(`/api/mobile/memoir/answer-sessions/${answerSessionId}/submit`, {
     method: "POST",
@@ -273,12 +253,6 @@ export function uploadMemoirAudioFile(filePath: string, durationSeconds?: number
   return uploadFile<MemoirAudioFile>("/api/mobile/memoir/audio-files", {
     filePath,
     formData,
-  });
-}
-
-export function transcribeMemoirAudioFile(audioFileId: string): Promise<MemoirAudioTranscription> {
-  return request<MemoirAudioTranscription>(`/api/mobile/memoir/audio-files/${audioFileId}/transcribe`, {
-    method: "POST",
   });
 }
 
