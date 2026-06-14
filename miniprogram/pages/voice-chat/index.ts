@@ -1,5 +1,6 @@
 import type {
   MemoirGuidanceMode,
+  MemoirVoiceSessionDetail,
   VoiceChatTranscriptLine,
   VoiceGatewayServerEvent,
 } from "../../domain/voice-chat";
@@ -7,6 +8,12 @@ import {
   MemoirStreamingAsrClient,
   type VoiceChatConnectionStatus,
 } from "../../services/memoir-streaming-asr";
+import { getMemoirVoiceSession } from "../../services/memoir-voice-api";
+import {
+  readMemoirVoiceSessionSnapshot,
+  transcriptLinesFromVoiceSessionDetail,
+  writeMemoirVoiceSessionSnapshot,
+} from "../../stores/memoir-cache";
 
 interface VoiceChatData {
   voiceSessionId: string;
@@ -18,6 +25,7 @@ interface VoiceChatData {
   connecting: boolean;
   error: string;
   liveText: string;
+  latestTranscriptText: string;
   transcriptLines: VoiceChatTranscriptLine[];
   modeLabel: string;
   primaryActionText: string;
@@ -42,9 +50,31 @@ function statusText(status: VoiceChatConnectionStatus): string {
   return labels[status];
 }
 
+function latestTranscriptText(lines: VoiceChatTranscriptLine[]): string {
+  return lines.length ? lines[lines.length - 1].text : "";
+}
+
+function upsertTranscriptLine(
+  lines: VoiceChatTranscriptLine[],
+  nextLine: VoiceChatTranscriptLine,
+): VoiceChatTranscriptLine[] {
+  const matchIndex = lines.findIndex((line) => Boolean(
+    (nextLine.message_id && line.message_id === nextLine.message_id)
+    || (nextLine.utterance_id && line.utterance_id === nextLine.utterance_id),
+  ));
+  if (matchIndex < 0) {
+    return [...lines, nextLine];
+  }
+  return lines.map((line, index) => (index === matchIndex ? nextLine : line));
+}
+
 Page<VoiceChatData, {
   onLoad(query?: Record<string, string | undefined>): Promise<void>;
   onUnload(): void;
+  hydrateVoiceSessionSnapshot(): void;
+  refreshVoiceSessionSnapshot(): Promise<void>;
+  applyVoiceSessionDetail(detail: MemoirVoiceSessionDetail): void;
+  persistCurrentTranscriptSnapshot(): void;
   connectGateway(): Promise<void>;
   toggleRecording(): void;
   finishSession(): Promise<void>;
@@ -64,6 +94,7 @@ Page<VoiceChatData, {
     connecting: false,
     error: "",
     liveText: "",
+    latestTranscriptText: "",
     transcriptLines: [],
     modeLabel: "自由讲述",
     primaryActionText: "开始说话",
@@ -83,12 +114,69 @@ Page<VoiceChatData, {
       this.setData({ error: "缺少语音会话" });
       return;
     }
+    this.hydrateVoiceSessionSnapshot();
+    void this.refreshVoiceSessionSnapshot();
     await this.connectGateway();
   },
 
   onUnload() {
+    this.persistCurrentTranscriptSnapshot();
     streamingClient?.close();
     streamingClient = null;
+  },
+
+  hydrateVoiceSessionSnapshot() {
+    const snapshot = readMemoirVoiceSessionSnapshot(this.data.voiceSessionId);
+    if (!snapshot.hasSession) {
+      return;
+    }
+    const guidanceMode = snapshot.detail?.session.guidance_mode || this.data.guidanceMode;
+    const currentGuidanceModule = snapshot.detail?.session.current_guidance_module || this.data.currentGuidanceModule;
+    this.setData({
+      guidanceMode,
+      currentGuidanceModule,
+      modeLabel: modeLabel(guidanceMode),
+      transcriptLines: snapshot.transcriptLines,
+      latestTranscriptText: latestTranscriptText(snapshot.transcriptLines),
+    });
+  },
+
+  async refreshVoiceSessionSnapshot() {
+    if (!this.data.voiceSessionId) {
+      return;
+    }
+    try {
+      const detail = await getMemoirVoiceSession(this.data.voiceSessionId);
+      writeMemoirVoiceSessionSnapshot(this.data.voiceSessionId, { detail });
+      this.applyVoiceSessionDetail(detail);
+    } catch (error) {
+      console.warn("refresh voice session snapshot failed", error);
+    }
+  },
+
+  applyVoiceSessionDetail(detail) {
+    const detailLines = transcriptLinesFromVoiceSessionDetail(detail);
+    const guidanceMode = detail.session.guidance_mode || this.data.guidanceMode;
+    const currentGuidanceModule = detail.session.current_guidance_module || this.data.currentGuidanceModule;
+    const nextLines = detailLines.length >= this.data.transcriptLines.length
+      ? detailLines
+      : this.data.transcriptLines;
+    this.setData({
+      guidanceMode,
+      currentGuidanceModule,
+      modeLabel: modeLabel(guidanceMode),
+      transcriptLines: nextLines,
+      latestTranscriptText: latestTranscriptText(nextLines),
+    });
+  },
+
+  persistCurrentTranscriptSnapshot() {
+    if (!this.data.voiceSessionId) {
+      return;
+    }
+    writeMemoirVoiceSessionSnapshot(this.data.voiceSessionId, {
+      transcriptLines: this.data.transcriptLines,
+    });
   },
 
   async connectGateway() {
@@ -138,6 +226,7 @@ Page<VoiceChatData, {
 
   async finishSession() {
     if (!streamingClient) {
+      await this.refreshVoiceSessionSnapshot();
       return;
     }
     const client = streamingClient;
@@ -150,6 +239,7 @@ Page<VoiceChatData, {
         status: "closed",
         statusText: statusText("closed"),
       });
+      await this.refreshVoiceSessionSnapshot();
     } catch (error) {
       this.handleError(error instanceof Error ? error.message : "语音会话结束失败");
     }
@@ -185,7 +275,7 @@ Page<VoiceChatData, {
       return;
     }
     const line: VoiceChatTranscriptLine = {
-      id: `${Date.now()}-${this.data.transcriptLines.length}`,
+      id: event.message_id || event.utterance_id || `${Date.now()}-${this.data.transcriptLines.length}`,
       text,
       message_id: event.message_id,
       utterance_id: event.utterance_id,
@@ -194,11 +284,14 @@ Page<VoiceChatData, {
       start_ms: event.start_ms,
       end_ms: event.end_ms,
     };
+    const transcriptLines = upsertTranscriptLine(this.data.transcriptLines, line);
     this.setData({
       liveText: "",
-      transcriptLines: [...this.data.transcriptLines, line],
+      latestTranscriptText: latestTranscriptText(transcriptLines),
+      transcriptLines,
       error: "",
     });
+    writeMemoirVoiceSessionSnapshot(this.data.voiceSessionId, { transcriptLines });
   },
 
   handleError(message) {

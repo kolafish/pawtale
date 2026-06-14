@@ -163,6 +163,15 @@ export async function createMemoirVoiceSession(
   });
 }
 
+export async function getMemoirVoiceSession(
+  voiceSessionId: string,
+): Promise<MemoirVoiceSessionDetail> {
+  await ensureVoiceBackendSession();
+  return voiceBackendRequest<MemoirVoiceSessionDetail>(
+    `/api/mobile/memoir/voice-sessions/${encodeURIComponent(voiceSessionId)}`,
+  );
+}
+
 async function ensureVoiceBackendSession(): Promise<void> {
   const config = readVoiceBackendConfig();
   const currentCookie = readVoiceBackendCookie();

@@ -11,7 +11,7 @@
 
   <view class="transcript-stage">
     <text class="stage-eyebrow">{{recording ? "正在实时转写" : "准备好了"}}</text>
-    <text class="live-text">{{liveText || (recording ? "请直接说，我会把文字显示在这里" : "点下方按钮开始说话")}}</text>
+    <text class="live-text">{{liveText || latestTranscriptText || (recording ? "请直接说，我会把文字显示在这里" : "点下方按钮开始说话")}}</text>
   </view>
 
   <view class="history-panel">

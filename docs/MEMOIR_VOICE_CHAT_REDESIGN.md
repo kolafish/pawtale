@@ -390,6 +390,7 @@ LLM 和 TTS 相关事件仍是后续阶段目标，PR3 不生成 `assistant.*` �
 - 小程序新增 `voice-start` 和 `voice-chat` 第一版入口。
 - 小程序发送 16k mono PCM 音频帧，服务端转发给豆包 Streaming ASR。
 - 页面展示 `asr.partial` 大字实时转写，`asr.final` 固化成用户消息。
+- 小程序保存 voice session 本地快照，并能从后端详情回放已固化 transcript。
 - 保存 voice session、chat message、utterance、原始音频或可回溯的音频片段引用。
 - 支持 `free_narration` / `guided_interview` 两种模式字段，但第一版不做复杂 AI 引导。
 - 明确错误状态：录音权限、WebSocket 失败、provider 失败、网络中断。
@@ -448,11 +449,13 @@ PR5 后第一版已经具备的闭环：
 - `asr.partial` 只用于页面大字实时显示。
 - `asr.final` 会创建 `memoir_chat_messages` 用户消息、`memoir_voice_utterances` 和 voice-session 归属的 `memoir_transcript_versions`。
 - 当前 utterance 的 PCM 音频帧会保存为 `AudioFile`，并通过 `audio_file_id` 关联到 message / utterance。
+- `voice-chat` 会优先恢复本地 voice session 快照，再异步读取后端详情，避免返回页面后丢失已固化文字。
 
 PR5 后仍未完成、不能按上线态理解的缺口：
 
 - 小程序云函数身份和 backend cookie 身份还未统一，当前 voice-chat 是开发态直连 backend。
 - 原始音频按 final utterance 粗粒度保存，尚未做更精确的 VAD 时间切片和断线续传。
+- voice session 快照只保证已固化 transcript 的页面回放，不等同于断线续传；录音帧上传中的状态仍不可恢复。
 - LLM dynamic follow-up、Streaming TTS、插话打断和 AI 回复落库尚未接入。
 - 转写校正页、进度页、成稿编辑页还未迁移到新版 voice session 数据。
 - 还没有方言/噪声评测集、provider fallback、限流和成本监控。
@@ -468,6 +471,7 @@ PR5 后仍未完成、不能按上线态理解的缺口：
 - 豆包 ASR 返回 partial/final。
 - final transcript 落 `memoir_chat_messages` 或临时兼容表。
 - 停止后保存完整音频并关联 transcript。
+- 页面离开再进入同一个 voice session 时，能通过本地快照和后端详情恢复已固化文字。
 - legacy 非实时 ASR endpoint 和 ASR job 不再保留。
 
 不做：
@@ -522,6 +526,7 @@ Streaming ASR MVP 必须满足：
 
 - 真机上麦克风开始后 1 秒内出现 partial transcript。
 - final transcript 能稳定落库。
+- 离开并重新进入同一个 voice session 后，已 final 的 transcript 不丢失。
 - 断网或 provider 错误能给出明确 UI 状态。
 - 小程序端不包含 provider key。
 - 旧链路在迁移完成前不被破坏。
