@@ -26,6 +26,14 @@ class Settings(BaseSettings):
     # Default AI Model
     default_ai_model: str = "claude-opus-4"  # deepseek / claude-opus-4 / claude-sonnet-4
 
+    # VolcEngine / Doubao Streaming ASR
+    volc_asr_api_key: str = ""
+    volc_asr_app_key: str = ""
+    volc_asr_access_key: str = ""
+    volc_asr_resource_id: str = "volc.seedasr.sauc.duration"
+    volc_asr_ws_url: str = "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async"
+    volc_asr_connect_timeout_seconds: float = 10.0
+
     class Config:
         env_file = str(BACKEND_DIR / ".env")
         extra = "ignore"
