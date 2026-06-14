@@ -66,7 +66,6 @@ Page<ProfileData, {
   openProjects(): void;
   openHome(): void;
   openWorkbench(): void;
-  openQa(): void;
   openProfile(): void;
 }>({
   data: {
@@ -265,10 +264,6 @@ Page<ProfileData, {
 
   openWorkbench() {
     wx.redirectTo({ url: "/pages/workbench/index" });
-  },
-
-  openQa() {
-    wx.redirectTo({ url: "/pages/qa/index" });
   },
 
   openProfile() {

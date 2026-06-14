@@ -1,14 +1,7 @@
 import type {
-  MemoirAnswer,
-  MemoirAnswerSegment,
-  MemoirAnswerSegmentStatus,
-  MemoirAnswerSession,
-  MemoirAudioFile,
   MemoirCoverageItem,
   MemoirDashboardResponse,
-  MemoirDraft,
   MemoirEventMemory,
-  MemoirInterviewState,
   MemoirMemoryStatus,
   MemoirMemoryType,
   MemoirOpenQuestion,
@@ -22,7 +15,6 @@ import type {
   MemoirSessionProcessResponse,
   MemoirSessionSummary,
   MemoirStoryList,
-  MemoirStoryDetail,
   MemoirThemeMemory,
   MemoirTtsAsset,
   MemoirTtsAssetResponse,
@@ -31,7 +23,7 @@ import type {
   Project,
 } from "../domain/memoir";
 import { getMemoirIdentity } from "./auth";
-import { request, uploadFile } from "./request";
+import { request } from "./request";
 
 export function getMemoirProject(): Promise<Project> {
   return request<Project>("/api/mobile/memoir/project");
@@ -66,15 +58,6 @@ export function getMemoirDashboard(): Promise<MemoirDashboardResponse> {
   return request<MemoirDashboardResponse>("/api/mobile/memoir/dashboard");
 }
 
-export async function getCurrentSession(): Promise<MemoirInterviewState> {
-  await getMemoirIdentity();
-  return request<MemoirInterviewState>("/api/mobile/memoir/sessions/current");
-}
-
-export function getNextQuestion(): Promise<MemoirQuestion | null> {
-  return request<MemoirQuestion | null>("/api/mobile/memoir/questions/next");
-}
-
 export function processSessionMemory(sessionId: string): Promise<MemoirSessionProcessResponse> {
   return request<MemoirSessionProcessResponse>(`/api/mobile/memoir/sessions/${sessionId}/process`, {
     method: "POST",
@@ -89,11 +72,6 @@ export function getSessionSummary(sessionId: string): Promise<MemoirSessionSumma
 export async function getMemoirStories(): Promise<MemoirStoryList> {
   await getMemoirIdentity();
   return request<MemoirStoryList>("/api/mobile/memoir/stories");
-}
-
-export async function getMemoirStoryDetail(answerId: string): Promise<MemoirStoryDetail> {
-  await getMemoirIdentity();
-  return request<MemoirStoryDetail>(`/api/mobile/memoir/stories/${answerId}`);
 }
 
 export function listPeopleMemories(): Promise<MemoirPersonMemory[]> {
@@ -167,95 +145,6 @@ export function listMemoirOutputs(): Promise<MemoirOutput[]> {
   return request<MemoirOutput[]>("/api/mobile/memoir/outputs");
 }
 
-export function skipQuestion(questionId: string): Promise<MemoirInterviewState> {
-  return request<MemoirInterviewState>(`/api/mobile/memoir/questions/${questionId}/skip`, {
-    method: "POST",
-  });
-}
-
-export function createTextAnswer(
-  questionId: string,
-  text: string,
-  audioFileId?: string,
-  durationSeconds?: number,
-): Promise<MemoirAnswer> {
-  const data: Record<string, string | number> = { question_id: questionId, text };
-  if (audioFileId) {
-    data.audio_file_id = audioFileId;
-  }
-  if (durationSeconds !== undefined) {
-    data.duration_seconds = durationSeconds;
-  }
-
-  return request<MemoirAnswer>("/api/mobile/memoir/answers", {
-    method: "POST",
-    data,
-  });
-}
-
-export function createMemoirAnswerSession(questionId: string): Promise<MemoirAnswerSession> {
-  return request<MemoirAnswerSession>(`/api/mobile/memoir/questions/${questionId}/answer-session`, {
-    method: "POST",
-    data: {},
-  });
-}
-
-export function getMemoirAnswerSession(answerSessionId: string): Promise<MemoirAnswerSession> {
-  return request<MemoirAnswerSession>(`/api/mobile/memoir/answer-sessions/${answerSessionId}`);
-}
-
-export interface MemoirAnswerSegmentInput {
-  audio_file_id?: string;
-  duration_seconds?: number;
-  sort_order?: number;
-  status?: MemoirAnswerSegmentStatus;
-  transcript_raw?: string;
-  transcript_text?: string;
-  transcript_edited?: string;
-  error_message?: string;
-}
-
-export function appendMemoirAnswerSegment(
-  answerSessionId: string,
-  data: MemoirAnswerSegmentInput,
-): Promise<MemoirAnswerSegment> {
-  return request<MemoirAnswerSegment>(`/api/mobile/memoir/answer-sessions/${answerSessionId}/segments`, {
-    method: "POST",
-    data,
-  });
-}
-
-export function updateMemoirAnswerSegment(
-  answerSegmentId: string,
-  data: MemoirAnswerSegmentInput,
-): Promise<MemoirAnswerSegment> {
-  return request<MemoirAnswerSegment>(`/api/mobile/memoir/answer-segments/${answerSegmentId}`, {
-    method: "PATCH",
-    data,
-  });
-}
-
-export function submitMemoirAnswerSession(answerSessionId: string): Promise<MemoirAnswerSession> {
-  return request<MemoirAnswerSession>(`/api/mobile/memoir/answer-sessions/${answerSessionId}/submit`, {
-    method: "POST",
-    data: {},
-  });
-}
-
-export function uploadMemoirAudioFile(filePath: string, durationSeconds?: number, sizeBytes?: number): Promise<MemoirAudioFile> {
-  const formData: Record<string, string> = {};
-  if (durationSeconds !== undefined) {
-    formData.duration_seconds = String(durationSeconds);
-  }
-  if (sizeBytes !== undefined) {
-    formData.size_bytes = String(sizeBytes);
-  }
-  return uploadFile<MemoirAudioFile>("/api/mobile/memoir/audio-files", {
-    filePath,
-    formData,
-  });
-}
-
 export interface MemoirTtsAssetInput {
   source_type: MemoirTtsSourceType;
   source_id: string;
@@ -284,38 +173,5 @@ export function processMemoirTtsJob(ttsJobId: string): Promise<MemoirTtsJob> {
   return request<MemoirTtsJob>(`/api/mobile/memoir/tts-jobs/${ttsJobId}/process`, {
     method: "POST",
     data: {},
-  });
-}
-
-export function updateTextAnswer(answerId: string, text: string): Promise<MemoirAnswer> {
-  return request<MemoirAnswer>(`/api/mobile/memoir/answers/${answerId}`, {
-    method: "PATCH",
-    data: { text },
-  });
-}
-
-export function deleteMemoirAnswer(answerId: string): Promise<{ id: string; question_id: string; deleted: boolean }> {
-  return request<{ id: string; question_id: string; deleted: boolean }>(`/api/mobile/memoir/answers/${answerId}`, {
-    method: "DELETE",
-  });
-}
-
-export function generateDraft(answerId: string): Promise<MemoirDraft> {
-  return request<MemoirDraft>(`/api/mobile/memoir/answers/${answerId}/draft`, {
-    method: "POST",
-    data: {},
-  });
-}
-
-export function updateDraft(draftId: string, contentEdited: string): Promise<MemoirDraft> {
-  return request<MemoirDraft>(`/api/mobile/memoir/drafts/${draftId}`, {
-    method: "PATCH",
-    data: { content_edited: contentEdited },
-  });
-}
-
-export function acceptDraft(draftId: string): Promise<MemoirDraft> {
-  return request<MemoirDraft>(`/api/mobile/memoir/drafts/${draftId}/accept`, {
-    method: "POST",
   });
 }

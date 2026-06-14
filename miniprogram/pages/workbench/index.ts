@@ -183,13 +183,11 @@ Page<WorkbenchData, {
   askCandidate(event: DatasetEvent): Promise<void>;
   toggleTtsSource(event: TtsSourceEvent): Promise<void>;
   continueInterview(): void;
-  openPendingReview(): Promise<void>;
   openProjects(): void;
   openStories(): void;
   backHome(): void;
   openHome(): void;
   openWorkbench(): void;
-  openQa(): void;
   openProfile(): void;
 }>({
   data: {
@@ -355,7 +353,7 @@ Page<WorkbenchData, {
     try {
       await selectQuestionCandidate(id);
       markMemoirDashboardSnapshotStale();
-      wx.navigateTo({ url: "/pages/question/index" });
+      wx.navigateTo({ url: "/pages/voice-start/index" });
     } catch (error) {
       this.setData({ error: error instanceof Error ? error.message : "下一问选择失败" });
     } finally {
@@ -385,24 +383,6 @@ Page<WorkbenchData, {
     wx.navigateTo({ url: "/pages/voice-start/index" });
   },
 
-  async openPendingReview() {
-    const snapshot = readMemoirDashboardSnapshot();
-    const sessionId = this.data.reviewSessionId || snapshot.interview?.session.id || "";
-    if (sessionId) {
-      wx.navigateTo({ url: `/pages/review/index?sessionId=${encodeURIComponent(sessionId)}` });
-      return;
-    }
-    if (!this.data.refreshing) {
-      await this.loadWorkbench();
-    }
-    const fallbackSessionId = this.data.reviewSessionId || readMemoirDashboardSnapshot().interview?.session.id || "";
-    if (!fallbackSessionId) {
-      this.setData({ error: "缺少访谈信息" });
-      return;
-    }
-    wx.navigateTo({ url: `/pages/review/index?sessionId=${encodeURIComponent(fallbackSessionId)}` });
-  },
-
   openProjects() {
     wx.navigateTo({ url: "/pages/projects/index" });
   },
@@ -420,10 +400,6 @@ Page<WorkbenchData, {
   },
 
   openWorkbench() {
-  },
-
-  openQa() {
-    wx.redirectTo({ url: "/pages/qa/index" });
   },
 
   openProfile() {

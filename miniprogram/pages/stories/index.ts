@@ -89,7 +89,6 @@ Page<StoriesData, {
   backWorkbench(): void;
   openHome(): void;
   openWorkbench(): void;
-  openQa(): void;
   openProfile(): void;
 }>({
   data: {
@@ -213,7 +212,7 @@ Page<StoriesData, {
   },
 
   continueInterview() {
-    wx.navigateTo({ url: "/pages/question/index" });
+    wx.navigateTo({ url: "/pages/voice-start/index" });
   },
 
   backWorkbench() {
@@ -226,10 +225,6 @@ Page<StoriesData, {
 
   openWorkbench() {
     wx.redirectTo({ url: "/pages/workbench/index" });
-  },
-
-  openQa() {
-    wx.redirectTo({ url: "/pages/qa/index" });
   },
 
   openProfile() {

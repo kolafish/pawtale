@@ -2,8 +2,6 @@ export type ProjectType = "novel" | "article" | "memoir";
 export type MemoirSessionStatus = "active" | "completed";
 export type MemoirQuestionStatus = "pending" | "answered" | "skipped";
 export type MemoirAnswerStatus = "uploaded" | "transcribing" | "answered" | "drafted" | "confirmed";
-export type MemoirAnswerSessionStatus = "draft" | "submitted";
-export type MemoirAnswerSegmentStatus = "draft" | "uploaded" | "transcribing" | "transcribed" | "failed";
 export type MemoirDraftStatus = "draft" | "accepted";
 export type MemoirMemoryStatus = "draft" | "confirmed" | "rejected";
 export type MemoirMemoryType = "person" | "event" | "place" | "theme" | "open_question";
@@ -118,40 +116,6 @@ export interface MemoirAnswer {
   duration_seconds?: number;
   created_at: string;
   updated_at: string;
-}
-
-export interface MemoirAnswerSegment {
-  id: string;
-  project_id: string;
-  session_id: string;
-  question_id: string;
-  answer_session_id: string;
-  audio_file_id?: string | null;
-  sort_order: number;
-  status: MemoirAnswerSegmentStatus;
-  duration_seconds?: number | null;
-  transcript_raw: string;
-  transcript_edited: string;
-  error_message?: string;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface MemoirAnswerSession {
-  id: string;
-  project_id: string;
-  session_id: string;
-  question_id: string;
-  answer_id?: string | null;
-  status: MemoirAnswerSessionStatus;
-  segment_count: number;
-  duration_seconds?: number | null;
-  transcript_raw: string;
-  transcript_edited: string;
-  submitted_at?: string | null;
-  created_at: string;
-  updated_at: string;
-  segments: MemoirAnswerSegment[];
 }
 
 export interface MemoirAudioFile {
@@ -421,7 +385,6 @@ export interface MemoirMemoryStats {
 export interface MemoirDashboardResponse {
   project: Project;
   interview: MemoirInterviewState;
-  active_answer_session?: MemoirAnswerSession | null;
   summary: MemoirSummary;
   session_summary?: MemoirSessionSummary | null;
   people: MemoirPersonMemory[];
