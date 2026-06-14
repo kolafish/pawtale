@@ -11,6 +11,7 @@ from app.schemas.memoir import MemoirVoiceSessionStopRequest
 from app.services.memoir import voice_sessions as memoir_voice_sessions
 from app.services.memoir.streaming_asr import create_volc_streaming_asr_client
 from app.services.memoir.voice_gateway import VoiceGatewaySession
+from app.services.memoir.voice_gateway_persistence import VoiceGatewayPersistence
 
 
 router = APIRouter()
@@ -34,13 +35,23 @@ async def mobile_memoir_voice_gateway(
         return
 
     await websocket.accept()
+    persistence = VoiceGatewayPersistence(
+        db=db,
+        voice_session_id=voice_session_id,
+        user_id=current_user.id,
+    )
 
     async def on_stop(error_message: str | None) -> None:
+        stop_error = error_message
+        try:
+            await persistence.flush_unfinalized_audio()
+        except Exception as exc:
+            stop_error = stop_error or str(exc)
         await memoir_voice_sessions.stop_voice_session(
             db,
             voice_session_id,
             current_user.id,
-            MemoirVoiceSessionStopRequest(error_message=error_message),
+            MemoirVoiceSessionStopRequest(error_message=stop_error),
         )
 
     gateway_session = VoiceGatewaySession(
@@ -50,6 +61,8 @@ async def mobile_memoir_voice_gateway(
             voice_session_id,
         ),
         on_stop=on_stop,
+        on_audio_frame=persistence.record_audio_frame,
+        on_asr_final=persistence.persist_final,
     )
     await gateway_session.run()
 

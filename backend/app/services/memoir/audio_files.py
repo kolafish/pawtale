@@ -122,3 +122,52 @@ async def save_audio_file(
         raise
     await db.refresh(audio_file)
     return audio_file
+
+
+async def save_audio_bytes(
+    db: AsyncSession,
+    user_id: str,
+    data: bytes,
+    *,
+    mime_type: str = "audio/pcm",
+    extension: str = ".pcm",
+    duration_seconds: int | None = None,
+) -> AudioFile:
+    if extension not in _FORMAT_MIME_TYPES:
+        raise HTTPException(status_code=400, detail="仅支持 mp3、wav、ogg、pcm 音频文件")
+    if len(data) == 0:
+        raise HTTPException(status_code=400, detail="音频文件不能为空")
+    if len(data) > MAX_AUDIO_BYTES:
+        raise HTTPException(status_code=413, detail="音频文件不能超过 20MB")
+    _validate_duration(duration_seconds)
+
+    audio_id = str(uuid.uuid4())
+    filename = f"{audio_id}{extension}"
+    user_audio_dir = MEMOIR_AUDIO_DIR / user_id
+    user_audio_dir.mkdir(parents=True, exist_ok=True)
+    target_path = user_audio_dir / filename
+
+    try:
+        async with aiofiles.open(target_path, "wb") as output:
+            await output.write(data)
+    except Exception:
+        await _remove_if_exists(target_path)
+        raise
+
+    audio_file = AudioFile(
+        id=audio_id,
+        user_id=user_id,
+        storage_path=_storage_path(user_id, filename),
+        mime_type=mime_type,
+        size_bytes=len(data),
+        duration_seconds=duration_seconds,
+    )
+    db.add(audio_file)
+    try:
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        await _remove_if_exists(target_path)
+        raise
+    await db.refresh(audio_file)
+    return audio_file

@@ -179,6 +179,9 @@ Page<VoiceChatData, {
     const line: VoiceChatTranscriptLine = {
       id: `${Date.now()}-${this.data.transcriptLines.length}`,
       text,
+      message_id: event.message_id,
+      utterance_id: event.utterance_id,
+      audio_file_id: event.audio_file_id,
       start_ms: event.start_ms,
       end_ms: event.end_ms,
     };
