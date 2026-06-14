@@ -17,6 +17,21 @@ export interface MarkdownEditResult extends MarkdownSelection {
   text: string;
 }
 
+export type MarkdownKeyboardCommand =
+  | { type: 'format'; format: MarkdownFormat }
+  | { type: 'indent'; direction: 'in' | 'out' }
+  | { type: 'continue-line' };
+
+export interface MarkdownKeyboardInput {
+  key: string;
+  code?: string;
+  metaKey?: boolean;
+  ctrlKey?: boolean;
+  altKey?: boolean;
+  shiftKey?: boolean;
+  isComposing?: boolean;
+}
+
 const INLINE_FORMATS: Partial<Record<MarkdownFormat, { marker: string; placeholder: string }>> = {
   bold: { marker: '**', placeholder: '加粗文字' },
   italic: { marker: '*', placeholder: '斜体文字' },
@@ -104,4 +119,126 @@ export function applyMarkdownFormat(
     if (format === 'ordered-list') return `${index + 1}. ${body || '列表项'}`;
     return line;
   });
+}
+
+export function applyMarkdownIndent(
+  text: string,
+  selection: MarkdownSelection,
+  direction: 'in' | 'out',
+): MarkdownEditResult {
+  return transformSelectedLines(text, selection, (line) => {
+    if (!line.trim()) return line;
+    if (direction === 'in') return `  ${line}`;
+    if (line.startsWith('  ')) return line.slice(2);
+    if (line.startsWith('\t')) return line.slice(1);
+    return line;
+  });
+}
+
+export function continueMarkdownLine(
+  text: string,
+  selection: MarkdownSelection,
+): MarkdownEditResult | null {
+  if (selection.start !== selection.end) return null;
+
+  const cursor = selection.start;
+  const start = text.lastIndexOf('\n', Math.max(0, cursor - 1)) + 1;
+  const lineBeforeCursor = text.slice(start, cursor);
+  const unordered = lineBeforeCursor.match(/^(\s*)([-*])\s+(.*)$/);
+  const ordered = lineBeforeCursor.match(/^(\s*)(\d+)\.\s+(.*)$/);
+  const quote = lineBeforeCursor.match(/^(\s*)>\s?(.*)$/);
+
+  if (unordered) {
+    const [, indent, marker, body] = unordered;
+    if (!body.trim()) {
+      return {
+        text: text.slice(0, start) + indent + text.slice(cursor),
+        start: start + indent.length,
+        end: start + indent.length,
+      };
+    }
+    const insert = `\n${indent}${marker} `;
+    return {
+      text: text.slice(0, cursor) + insert + text.slice(cursor),
+      start: cursor + insert.length,
+      end: cursor + insert.length,
+    };
+  }
+
+  if (ordered) {
+    const [, indent, number, body] = ordered;
+    if (!body.trim()) {
+      return {
+        text: text.slice(0, start) + indent + text.slice(cursor),
+        start: start + indent.length,
+        end: start + indent.length,
+      };
+    }
+    const nextNumber = Number(number) + 1;
+    const insert = `\n${indent}${nextNumber}. `;
+    return {
+      text: text.slice(0, cursor) + insert + text.slice(cursor),
+      start: cursor + insert.length,
+      end: cursor + insert.length,
+    };
+  }
+
+  if (quote) {
+    const [, indent, body] = quote;
+    if (!body.trim()) {
+      return {
+        text: text.slice(0, start) + indent + text.slice(cursor),
+        start: start + indent.length,
+        end: start + indent.length,
+      };
+    }
+    const insert = `\n${indent}> `;
+    return {
+      text: text.slice(0, cursor) + insert + text.slice(cursor),
+      start: cursor + insert.length,
+      end: cursor + insert.length,
+    };
+  }
+
+  return null;
+}
+
+export function getMarkdownKeyboardCommand(input: MarkdownKeyboardInput): MarkdownKeyboardCommand | null {
+  if (input.isComposing) return null;
+
+  if (input.key === 'Tab') {
+    return { type: 'indent', direction: input.shiftKey ? 'out' : 'in' };
+  }
+
+  if (input.key === 'Enter') {
+    return { type: 'continue-line' };
+  }
+
+  const hasMod = Boolean(input.metaKey || input.ctrlKey);
+  if (!hasMod) return null;
+
+  const key = input.key.toLowerCase();
+  if (!input.altKey && !input.shiftKey && key === 'b') {
+    return { type: 'format', format: 'bold' };
+  }
+  if (!input.altKey && !input.shiftKey && key === 'i') {
+    return { type: 'format', format: 'italic' };
+  }
+  if (input.altKey && !input.shiftKey && (input.key === '1' || input.code === 'Digit1')) {
+    return { type: 'format', format: 'heading-1' };
+  }
+  if (input.altKey && !input.shiftKey && (input.key === '2' || input.code === 'Digit2')) {
+    return { type: 'format', format: 'heading-2' };
+  }
+  if (!input.altKey && input.shiftKey && (input.key === '7' || input.code === 'Digit7')) {
+    return { type: 'format', format: 'ordered-list' };
+  }
+  if (!input.altKey && input.shiftKey && (input.key === '8' || input.code === 'Digit8')) {
+    return { type: 'format', format: 'unordered-list' };
+  }
+  if (!input.altKey && input.shiftKey && (input.key === '.' || input.key === '>')) {
+    return { type: 'format', format: 'quote' };
+  }
+
+  return null;
 }
