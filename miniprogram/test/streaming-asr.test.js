@@ -19,6 +19,16 @@ function streamingAsrModule() {
   return require("../services/memoir-streaming-asr.ts");
 }
 
+function recorderManagerStub() {
+  return {
+    start() {},
+    stop() {},
+    onFrameRecorded() {},
+    onError() {},
+    onStop() {},
+  };
+}
+
 test("encodes ArrayBuffer audio frames as base64", () => {
   const { arrayBufferToBase64 } = streamingAsrModule();
 
@@ -54,4 +64,99 @@ test("normalizes set-cookie values before reusing them as Cookie headers", () =>
     ),
     "pawtale_session=abc; another=value",
   );
+});
+
+test("builds voice gateway URLs from runtime backend config", () => {
+  global.wx = {
+    getStorageSync(key) {
+      if (key === "pawtale_voice_backend_config") {
+        return {
+          httpBaseUrl: "https://api.example.com/",
+          devEmail: "local@example.com",
+          devPassword: "secret",
+        };
+      }
+      return "";
+    },
+    getExtConfigSync() {
+      return {};
+    },
+    setStorageSync() {},
+  };
+  delete require.cache[require.resolve("../services/memoir-voice-api.ts")];
+  const { readVoiceBackendConfig, voiceGatewayUrl } = require("../services/memoir-voice-api.ts");
+
+  assert.deepEqual(readVoiceBackendConfig(), {
+    httpBaseUrl: "https://api.example.com/",
+    wsBaseUrl: "wss://api.example.com/",
+    devEmail: "local@example.com",
+    devPassword: "secret",
+    devDisplayName: "本地作者",
+  });
+  assert.equal(
+    voiceGatewayUrl("voice/1"),
+    "wss://api.example.com/api/mobile/memoir/voice-sessions/voice%2F1/gateway",
+  );
+
+  delete global.wx;
+});
+
+test("streaming ASR connect rejects on socket error before open", async () => {
+  let onError;
+  global.wx = {
+    getRecorderManager: recorderManagerStub,
+    getStorageSync(key) {
+      if (key === "pawtale_voice_backend_config") {
+        return {
+          httpBaseUrl: "http://backend.local:8000",
+          wsBaseUrl: "ws://backend.local:8000",
+          devEmail: "local@example.com",
+          devPassword: "secret",
+        };
+      }
+      if (key === "pawtale_voice_backend_cookie") {
+        return "pawtale_session=abc";
+      }
+      return "";
+    },
+    setStorageSync() {},
+    removeStorageSync() {},
+    request(options) {
+      options.success({ statusCode: 200, data: { id: "user-1" }, cookies: [], header: {} });
+    },
+    connectSocket() {
+      return {
+        onOpen() {},
+        onMessage() {},
+        onError(callback) {
+          onError = callback;
+        },
+        onClose() {},
+        send() {},
+        close() {},
+      };
+    },
+  };
+  delete require.cache[require.resolve("../services/memoir-voice-api.ts")];
+  delete require.cache[require.resolve("../services/memoir-streaming-asr.ts")];
+  const { MemoirStreamingAsrClient } = require("../services/memoir-streaming-asr.ts");
+  const client = new MemoirStreamingAsrClient({
+    voiceSessionId: "voice-1",
+    guidanceMode: "free_narration",
+    callbacks: {
+      onStatus() {},
+      onEvent() {},
+      onPartial() {},
+      onFinal() {},
+      onError() {},
+    },
+  });
+
+  const connectPromise = client.connect();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(typeof onError, "function");
+  onError({ errMsg: "socket failed" });
+
+  await assert.rejects(connectPromise, /socket failed/);
+  delete global.wx;
 });

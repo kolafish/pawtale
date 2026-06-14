@@ -12,18 +12,117 @@ import type {
 import { ApiError } from "./request";
 
 const VOICE_BACKEND_COOKIE_KEY = "pawtale_voice_backend_cookie";
+const VOICE_BACKEND_CONFIG_STORAGE_KEY = "pawtale_voice_backend_config";
 
 interface VoiceBackendRequestOptions {
   method?: WechatMiniprogram.RequestMethod;
   data?: unknown;
 }
 
+export interface VoiceBackendRuntimeConfig {
+  httpBaseUrl: string;
+  wsBaseUrl: string;
+  devEmail: string;
+  devPassword: string;
+  devDisplayName: string;
+}
+
+interface VoiceBackendRuntimeConfigInput {
+  httpBaseUrl?: string;
+  wsBaseUrl?: string;
+  devEmail?: string;
+  devPassword?: string;
+  devDisplayName?: string;
+}
+
+type WxWithExtConfig = typeof wx & {
+  getExtConfigSync?: () => Record<string, unknown>;
+};
+
 function cleanBaseUrl(baseUrl: string): string {
   return baseUrl.replace(/\/$/, "");
 }
 
+function stringFromConfig(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function storageConfig(): VoiceBackendRuntimeConfigInput {
+  const stored = wx.getStorageSync<VoiceBackendRuntimeConfigInput | string>(VOICE_BACKEND_CONFIG_STORAGE_KEY);
+  if (!stored || typeof stored === "string") {
+    return {};
+  }
+  return stored;
+}
+
+function extConfig(): VoiceBackendRuntimeConfigInput {
+  const wxWithExtConfig = wx as WxWithExtConfig;
+  if (typeof wxWithExtConfig.getExtConfigSync !== "function") {
+    return {};
+  }
+  const ext = wxWithExtConfig.getExtConfigSync();
+  return {
+    httpBaseUrl: stringFromConfig(ext.voiceBackendHttpBaseUrl),
+    wsBaseUrl: stringFromConfig(ext.voiceBackendWsBaseUrl),
+    devEmail: stringFromConfig(ext.voiceBackendDevEmail),
+    devPassword: stringFromConfig(ext.voiceBackendDevPassword),
+    devDisplayName: stringFromConfig(ext.voiceBackendDevDisplayName),
+  };
+}
+
+function deriveWsBaseUrl(httpBaseUrl: string): string {
+  if (!httpBaseUrl) {
+    return "";
+  }
+  if (httpBaseUrl.startsWith("https://")) {
+    return `wss://${httpBaseUrl.slice("https://".length)}`;
+  }
+  if (httpBaseUrl.startsWith("http://")) {
+    return `ws://${httpBaseUrl.slice("http://".length)}`;
+  }
+  return "";
+}
+
+export function readVoiceBackendConfig(): VoiceBackendRuntimeConfig {
+  const stored = storageConfig();
+  const ext = extConfig();
+  const httpBaseUrl =
+    stringFromConfig(stored.httpBaseUrl) ||
+    stringFromConfig(ext.httpBaseUrl) ||
+    stringFromConfig(VOICE_BACKEND_HTTP_BASE_URL);
+  const wsBaseUrl =
+    stringFromConfig(stored.wsBaseUrl) ||
+    stringFromConfig(ext.wsBaseUrl) ||
+    stringFromConfig(VOICE_BACKEND_WS_BASE_URL) ||
+    deriveWsBaseUrl(httpBaseUrl);
+  return {
+    httpBaseUrl,
+    wsBaseUrl,
+    devEmail:
+      stringFromConfig(stored.devEmail) ||
+      stringFromConfig(ext.devEmail) ||
+      stringFromConfig(VOICE_BACKEND_DEV_EMAIL),
+    devPassword:
+      stringFromConfig(stored.devPassword) ||
+      stringFromConfig(ext.devPassword) ||
+      stringFromConfig(VOICE_BACKEND_DEV_PASSWORD),
+    devDisplayName:
+      stringFromConfig(stored.devDisplayName) ||
+      stringFromConfig(ext.devDisplayName) ||
+      stringFromConfig(VOICE_BACKEND_DEV_DISPLAY_NAME),
+  };
+}
+
+export function writeVoiceBackendConfig(config: VoiceBackendRuntimeConfigInput): void {
+  wx.setStorageSync(VOICE_BACKEND_CONFIG_STORAGE_KEY, config);
+}
+
 export function voiceGatewayUrl(voiceSessionId: string): string {
-  return `${cleanBaseUrl(VOICE_BACKEND_WS_BASE_URL)}/api/mobile/memoir/voice-sessions/${encodeURIComponent(voiceSessionId)}/gateway`;
+  const config = readVoiceBackendConfig();
+  if (!config.wsBaseUrl) {
+    throw new ApiError(0, "未配置语音后端 WebSocket 地址", {});
+  }
+  return `${cleanBaseUrl(config.wsBaseUrl)}/api/mobile/memoir/voice-sessions/${encodeURIComponent(voiceSessionId)}/gateway`;
 }
 
 export function readVoiceBackendCookie(): string {
@@ -65,6 +164,7 @@ export async function createMemoirVoiceSession(
 }
 
 async function ensureVoiceBackendSession(): Promise<void> {
+  const config = readVoiceBackendConfig();
   const currentCookie = readVoiceBackendCookie();
   if (currentCookie) {
     try {
@@ -75,12 +175,16 @@ async function ensureVoiceBackendSession(): Promise<void> {
     }
   }
 
+  if (!config.devEmail || !config.devPassword) {
+    throw new ApiError(0, "未配置语音后端开发账号", {});
+  }
+
   try {
     await voiceBackendRequest<unknown>("/api/auth/login", {
       method: "POST",
       data: {
-        email: VOICE_BACKEND_DEV_EMAIL,
-        password: VOICE_BACKEND_DEV_PASSWORD,
+        email: config.devEmail,
+        password: config.devPassword,
       },
     });
   } catch (error) {
@@ -90,9 +194,9 @@ async function ensureVoiceBackendSession(): Promise<void> {
     await voiceBackendRequest<unknown>("/api/auth/register", {
       method: "POST",
       data: {
-        email: VOICE_BACKEND_DEV_EMAIL,
-        password: VOICE_BACKEND_DEV_PASSWORD,
-        display_name: VOICE_BACKEND_DEV_DISPLAY_NAME,
+        email: config.devEmail,
+        password: config.devPassword,
+        display_name: config.devDisplayName || "本地作者",
       },
     });
   }
@@ -100,9 +204,14 @@ async function ensureVoiceBackendSession(): Promise<void> {
 
 function voiceBackendRequest<T>(path: string, options: VoiceBackendRequestOptions = {}): Promise<T> {
   return new Promise((resolve, reject) => {
+    const config = readVoiceBackendConfig();
+    if (!config.httpBaseUrl) {
+      reject(new ApiError(0, "未配置语音后端 HTTP 地址", {}));
+      return;
+    }
     const cookie = readVoiceBackendCookie();
     wx.request<T>({
-      url: `${cleanBaseUrl(VOICE_BACKEND_HTTP_BASE_URL)}${path}`,
+      url: `${cleanBaseUrl(config.httpBaseUrl)}${path}`,
       method: options.method || "GET",
       data: options.data ?? {},
       header: cookie ? { Cookie: cookie } : {},
