@@ -41,6 +41,9 @@ async def mobile_memoir_voice_gateway(
         user_id=current_user.id,
     )
 
+    async def on_start() -> None:
+        await memoir_voice_sessions.mark_voice_session_listening(db, voice_session_id, current_user.id)
+
     async def on_stop(error_message: str | None) -> None:
         stop_error = error_message
         try:
@@ -60,6 +63,7 @@ async def mobile_memoir_voice_gateway(
             current_user.id,
             voice_session_id,
         ),
+        on_start=on_start,
         on_stop=on_stop,
         on_audio_frame=persistence.record_audio_frame,
         on_asr_final=persistence.persist_final,

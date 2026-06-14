@@ -18,6 +18,7 @@ class VoiceGatewayClient(Protocol):
 
 
 StreamingASRClientFactory = Callable[[], StreamingASRClient]
+SessionStartHandler = Callable[[], Awaitable[None]]
 SessionStopHandler = Callable[[str | None], Awaitable[None]]
 AudioFrameHandler = Callable[[bytes], Awaitable[None]]
 ASRFinalHandler = Callable[[StreamingASREvent], Awaitable[dict[str, Any] | None]]
@@ -30,12 +31,14 @@ class VoiceGatewaySession:
         *,
         client: VoiceGatewayClient,
         asr_client_factory: StreamingASRClientFactory,
+        on_start: SessionStartHandler | None = None,
         on_stop: SessionStopHandler | None = None,
         on_audio_frame: AudioFrameHandler | None = None,
         on_asr_final: ASRFinalHandler | None = None,
     ) -> None:
         self.client = client
         self.asr_client_factory = asr_client_factory
+        self.on_start = on_start
         self.on_stop = on_stop
         self.on_audio_frame = on_audio_frame
         self.on_asr_final = on_asr_final
@@ -117,6 +120,8 @@ class VoiceGatewaySession:
 
         self._asr_client = self.asr_client_factory()
         await self._asr_client.start()
+        if self.on_start:
+            await self.on_start()
         self._asr_task = asyncio.create_task(self._forward_asr_events())
         await self.client.send_json({"type": "session.started"})
 

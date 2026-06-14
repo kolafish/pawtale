@@ -4,7 +4,7 @@ from typing import Any
 
 from sqlalchemy import select
 
-from app.models.memoir import AudioFile, MemoirChatMessage, MemoirVoiceUtterance
+from app.models.memoir import AudioFile, MemoirChatMessage, MemoirTranscriptVersion, MemoirVoiceUtterance
 from app.services.memoir.streaming_asr import StreamingASREvent
 from app.services.memoir.voice_gateway import VoiceGatewaySession
 from app.services.memoir.voice_gateway_persistence import VoiceGatewayPersistence
@@ -13,10 +13,12 @@ from app.services.memoir.voice_gateway_persistence import VoiceGatewayPersistenc
 async def test_voice_gateway_streams_audio_and_forwards_asr_events():
     client = FakeGatewayClient()
     asr_client = FakeStreamingASRClient()
+    started_count = {"value": 0}
     stopped_with: list[str | None] = []
     session = VoiceGatewaySession(
         client=client,
         asr_client_factory=lambda: asr_client,
+        on_start=lambda: _record_start(started_count),
         on_stop=lambda error: _record_stop(stopped_with, error),
     )
 
@@ -41,6 +43,7 @@ async def test_voice_gateway_streams_audio_and_forwards_asr_events():
     await asyncio.wait_for(run_task, timeout=1)
 
     assert asr_client.started
+    assert started_count["value"] == 1
     assert asr_client.sent_audio == [b"pcm"]
     assert asr_client.finished
     assert asr_client.closed
@@ -101,6 +104,7 @@ async def test_voice_gateway_final_event_includes_persistence_ids():
     assert final["message_id"] == "message-1"
     assert final["utterance_id"] == "utterance-1"
     assert final["audio_file_id"] == "audio-1"
+    assert final["transcript_version_id"] == "transcript-1"
 
 
 async def test_voice_gateway_stop_finishes_asr_before_shutdown():
@@ -190,18 +194,32 @@ async def test_voice_gateway_persistence_saves_final_message_utterance_and_audio
     audio_file = await test_db.scalar(select(AudioFile).where(AudioFile.id == persisted["audio_file_id"]))
     message = await test_db.scalar(select(MemoirChatMessage).where(MemoirChatMessage.id == persisted["message_id"]))
     utterance = await test_db.scalar(select(MemoirVoiceUtterance).where(MemoirVoiceUtterance.id == persisted["utterance_id"]))
+    transcript_version = await test_db.scalar(
+        select(MemoirTranscriptVersion).where(MemoirTranscriptVersion.id == persisted["transcript_version_id"])
+    )
 
     assert audio_file is not None
     assert audio_file.mime_type == "audio/pcm"
     assert audio_file.size_bytes == len(b"pcm-1pcm-2")
     assert (tmp_path / "audio" / audio_file.user_id / f"{audio_file.id}.pcm").read_bytes() == b"pcm-1pcm-2"
     assert message is not None
+    assert transcript_version is not None
     assert message.content_text == "我小时候住在外婆家。"
     assert message.audio_file_id == audio_file.id
+    assert message.transcript_version_id == transcript_version.id
     assert utterance is not None
     assert utterance.chat_message_id == message.id
     assert utterance.audio_file_id == audio_file.id
     assert utterance.transcript_raw == "我小时候住在外婆家。"
+    assert transcript_version.answer_id is None
+    assert transcript_version.voice_session_id == voice_session_id
+    assert transcript_version.content == "我小时候住在外婆家。"
+    assert transcript_version.version_type == "asr_raw"
+    assert transcript_version.created_by == "asr"
+
+
+async def _record_start(values: dict[str, int]) -> None:
+    values["value"] += 1
 
 
 async def _record_stop(values: list[str | None], error: str | None) -> None:
@@ -221,6 +239,7 @@ async def _persist_fake_final(
         "message_id": "message-1",
         "utterance_id": "utterance-1",
         "audio_file_id": "audio-1",
+        "transcript_version_id": "transcript-1",
     }
 
 

@@ -1,6 +1,7 @@
 from sqlalchemy import select
 
 from app.models.memoir import MemoirChatMessage, MemoirVoiceSession, MemoirVoiceUtterance
+from app.services.memoir import voice_sessions as memoir_voice_sessions
 
 
 async def test_mobile_memoir_voice_session_routes_require_login(anonymous_client):
@@ -40,6 +41,13 @@ async def test_mobile_memoir_creates_voice_session_for_default_project(client, t
     stored = await test_db.scalar(select(MemoirVoiceSession).where(MemoirVoiceSession.id == session["id"]))
     assert stored is not None
     assert stored.guidance_mode == "guided_interview"
+
+    current_user = (await client.get("/api/auth/me")).json()
+    listening = await memoir_voice_sessions.mark_voice_session_listening(test_db, session["id"], current_user["id"])
+
+    assert listening.session.status == "listening"
+    await test_db.refresh(stored)
+    assert stored.status == "listening"
 
 
 async def test_mobile_memoir_voice_session_rejects_invalid_guidance_mode(client):
@@ -111,6 +119,37 @@ async def test_mobile_memoir_appends_voice_messages_and_utterances(client, test_
 
     assert await test_db.scalar(select(MemoirChatMessage).where(MemoirChatMessage.id == first_message_response.json()["id"]))
     assert await test_db.scalar(select(MemoirVoiceUtterance).where(MemoirVoiceUtterance.id == utterance["id"]))
+
+
+async def test_mobile_memoir_rejects_voice_transcript_from_another_session(client, test_db):
+    current_user = (await client.get("/api/auth/me")).json()
+    first_response = await client.post(
+        "/api/mobile/memoir/voice-sessions",
+        json={"guidance_mode": "free_narration"},
+    )
+    second_response = await client.post(
+        "/api/mobile/memoir/voice-sessions",
+        json={"guidance_mode": "free_narration"},
+    )
+    transcript_version = await memoir_voice_sessions.create_voice_transcript_version(
+        test_db,
+        first_response.json()["session"]["id"],
+        current_user["id"],
+        content="第一段语音。",
+        provider="volc_streaming_asr",
+    )
+
+    response = await client.post(
+        f"/api/mobile/memoir/voice-sessions/{second_response.json()['session']['id']}/messages",
+        json={
+            "role": "user",
+            "content_text": "第二段语音。",
+            "content_status": "final",
+            "transcript_version_id": transcript_version.id,
+        },
+    )
+
+    assert response.status_code == 404
 
 
 async def test_mobile_memoir_voice_session_stop_and_failure_states(client):

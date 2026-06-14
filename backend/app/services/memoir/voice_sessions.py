@@ -3,11 +3,11 @@ from __future__ import annotations
 from datetime import datetime
 
 from fastapi import HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.domain.memoir.types import MemoirVoiceSessionStatus
+from app.domain.memoir.types import MemoirCreatedBy, MemoirTranscriptVersionType, MemoirVoiceSessionStatus
 from app.models.memoir import (
     MemoirAnswer,
     MemoirChatMessage,
@@ -94,6 +94,19 @@ async def get_voice_session_detail(
     )
 
 
+async def mark_voice_session_listening(
+    db: AsyncSession,
+    voice_session_id: str,
+    user_id: str,
+) -> MemoirVoiceSessionDetailResponse:
+    voice_session = await _load_voice_session(db, voice_session_id, user_id)
+    if voice_session.status == MemoirVoiceSessionStatus.CREATED.value:
+        voice_session.status = MemoirVoiceSessionStatus.LISTENING.value
+        voice_session.error_message = ""
+    await db.commit()
+    return await get_voice_session_detail(db, voice_session.id, user_id)
+
+
 async def stop_voice_session(
     db: AsyncSession,
     voice_session_id: str,
@@ -116,6 +129,32 @@ async def stop_voice_session(
     return await get_voice_session_detail(db, voice_session.id, user_id)
 
 
+async def create_voice_transcript_version(
+    db: AsyncSession,
+    voice_session_id: str,
+    user_id: str,
+    *,
+    content: str,
+    provider: str | None,
+) -> MemoirTranscriptVersion:
+    voice_session = await _load_voice_session(db, voice_session_id, user_id)
+    normalized_content = content.strip()
+    if not normalized_content:
+        raise HTTPException(status_code=400, detail="转写文本不能为空")
+
+    version = MemoirTranscriptVersion(
+        voice_session_id=voice_session.id,
+        version_type=MemoirTranscriptVersionType.ASR_RAW.value,
+        content=normalized_content,
+        provider=provider,
+        created_by=MemoirCreatedBy.ASR.value,
+    )
+    db.add(version)
+    await db.commit()
+    await db.refresh(version)
+    return version
+
+
 async def append_chat_message(
     db: AsyncSession,
     voice_session_id: str,
@@ -124,7 +163,12 @@ async def append_chat_message(
 ) -> MemoirChatMessage:
     voice_session = await _load_voice_session(db, voice_session_id, user_id)
     await _assert_optional_audio_file(db, req.audio_file_id, user_id)
-    await _assert_optional_transcript_version(db, req.transcript_version_id, voice_session.project_id)
+    await _assert_optional_transcript_version(
+        db,
+        req.transcript_version_id,
+        voice_session.project_id,
+        voice_session.id,
+    )
     await _assert_optional_parent_message(db, req.parent_message_id, voice_session.id)
 
     next_turn_index = await _next_turn_index(db, voice_session.id)
@@ -195,16 +239,23 @@ async def _assert_optional_transcript_version(
     db: AsyncSession,
     transcript_version_id: str | None,
     project_id: str,
+    voice_session_id: str,
 ) -> None:
     if not transcript_version_id:
         return
     result = await db.execute(
         select(MemoirTranscriptVersion)
-        .join(MemoirAnswer, MemoirTranscriptVersion.answer_id == MemoirAnswer.id)
-        .join(MemoirQuestion, MemoirAnswer.question_id == MemoirQuestion.id)
-        .join(MemoirSession, MemoirQuestion.session_id == MemoirSession.id)
+        .outerjoin(MemoirAnswer, MemoirTranscriptVersion.answer_id == MemoirAnswer.id)
+        .outerjoin(MemoirQuestion, MemoirAnswer.question_id == MemoirQuestion.id)
+        .outerjoin(MemoirSession, MemoirQuestion.session_id == MemoirSession.id)
+        .outerjoin(MemoirVoiceSession, MemoirTranscriptVersion.voice_session_id == MemoirVoiceSession.id)
         .where(MemoirTranscriptVersion.id == transcript_version_id)
-        .where(MemoirSession.project_id == project_id)
+        .where(
+            or_(
+                MemoirSession.project_id == project_id,
+                MemoirVoiceSession.id == voice_session_id,
+            )
+        )
     )
     transcript_version = result.scalar_one_or_none()
     if not transcript_version:
