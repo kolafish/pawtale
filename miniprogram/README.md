@@ -43,11 +43,16 @@
 PR4 开始新增 `voice-start` / `voice-chat` 页面。当前实时语音链路直连仓库里的 `backend` 服务，不经过 legacy 云函数：
 
 ```ts
-export const VOICE_BACKEND_HTTP_BASE_URL = "http://127.0.0.1:8000";
-export const VOICE_BACKEND_WS_BASE_URL = "ws://127.0.0.1:8000";
+wx.setStorageSync("pawtale_voice_backend_config", {
+  httpBaseUrl: "http://192.168.1.10:8000",
+  wsBaseUrl: "ws://192.168.1.10:8000",
+  devEmail: "local@pawtale.local",
+  devPassword: "pawtale-local",
+  devDisplayName: "本地作者",
+});
 ```
 
-微信开发者工具本机调试可以使用默认值；真机预览需要改成手机可访问的局域网地址，正式环境需要配置为 HTTPS/WSS 域名。开发态会使用后端本地默认用户登录以取得 `pawtale_session` cookie，provider key 仍只放在 `backend/.env`。
+微信开发者工具本机调试可以填 `http://127.0.0.1:8000`；真机预览需要改成手机可访问的局域网地址，正式环境需要配置为 HTTPS/WSS 域名。开发态会使用这里配置的后端用户登录以取得 `pawtale_session` cookie，provider key 仍只放在 `backend/.env`。
 
 ## 检查
 

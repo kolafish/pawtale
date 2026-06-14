@@ -103,6 +103,59 @@ async def test_voice_gateway_final_event_includes_persistence_ids():
     assert final["audio_file_id"] == "audio-1"
 
 
+async def test_voice_gateway_stop_finishes_asr_before_shutdown():
+    client = FakeGatewayClient()
+    asr_client = FakeStreamingASRClient()
+    session = VoiceGatewaySession(client=client, asr_client_factory=lambda: asr_client)
+
+    run_task = asyncio.create_task(session.run())
+    await _wait_for_event(client, "session.ready")
+    await client.push({"type": "session.start"})
+    await _wait_for_event(client, "session.started")
+    await client.push(
+        {
+            "type": "audio.frame",
+            "audio": base64.b64encode(b"pcm").decode("ascii"),
+        }
+    )
+    await client.push({"type": "session.stop"})
+
+    final = await _wait_for_event(client, "asr.final")
+    stopped = await _wait_for_event(client, "session.stopped")
+    await asyncio.wait_for(run_task, timeout=1)
+
+    assert asr_client.finished
+    assert asr_client.closed
+    assert final["text"] == "我小时候住在外婆家。"
+    assert stopped["status"] == "stopped"
+
+
+async def test_voice_gateway_provider_error_stops_session_with_error():
+    client = FakeGatewayClient()
+    asr_client = FakeStreamingASRClient()
+    stopped_with: list[str | None] = []
+    session = VoiceGatewaySession(
+        client=client,
+        asr_client_factory=lambda: asr_client,
+        on_stop=lambda error: _record_stop(stopped_with, error),
+    )
+
+    run_task = asyncio.create_task(session.run())
+    await _wait_for_event(client, "session.ready")
+    await client.push({"type": "session.start"})
+    await _wait_for_event(client, "session.started")
+    await asr_client.events_queue.put(StreamingASREvent(type="error", error="provider_down"))
+
+    error = await _wait_for_event(client, "session.error")
+    stopped = await _wait_for_event(client, "session.stopped")
+    await asyncio.wait_for(run_task, timeout=1)
+
+    assert error["error"] == "provider_down"
+    assert stopped["status"] == "failed"
+    assert stopped["error"] == "provider_down"
+    assert stopped_with == ["provider_down"]
+
+
 async def test_voice_gateway_persistence_saves_final_message_utterance_and_audio(
     client,
     test_db,

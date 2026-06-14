@@ -47,7 +47,7 @@ Page<VoiceChatData, {
   onUnload(): void;
   connectGateway(): Promise<void>;
   toggleRecording(): void;
-  finishSession(): void;
+  finishSession(): Promise<void>;
   handleStatus(status: VoiceChatConnectionStatus): void;
   handleGatewayEvent(event: VoiceGatewayServerEvent): void;
   handlePartial(text: string): void;
@@ -136,15 +136,23 @@ Page<VoiceChatData, {
     });
   },
 
-  finishSession() {
-    streamingClient?.close();
-    streamingClient = null;
-    this.setData({
-      recording: false,
-      primaryActionText: "继续说话",
-      status: "closed",
-      statusText: statusText("closed"),
-    });
+  async finishSession() {
+    if (!streamingClient) {
+      return;
+    }
+    const client = streamingClient;
+    try {
+      await client.finishSession();
+      streamingClient = null;
+      this.setData({
+        recording: false,
+        primaryActionText: "继续说话",
+        status: "closed",
+        statusText: statusText("closed"),
+      });
+    } catch (error) {
+      this.handleError(error instanceof Error ? error.message : "语音会话结束失败");
+    }
   },
 
   handleStatus(status) {
