@@ -157,7 +157,7 @@ declare namespace WechatMiniprogram {
     sampleRate?: number;
     numberOfChannels?: number;
     encodeBitRate?: number;
-    format?: "mp3" | "aac" | "wav";
+    format?: "mp3" | "aac" | "wav" | "PCM";
     frameSize?: number;
   }
 
@@ -167,12 +167,56 @@ declare namespace WechatMiniprogram {
     fileSize: number;
   }
 
+  interface RecorderManagerFrameRecordedCallbackResult {
+    frameBuffer: ArrayBuffer;
+    isLastFrame: boolean;
+  }
+
   interface RecorderManager {
     start(option?: RecorderManagerStartOption): void;
     stop(): void;
     onStart(callback: () => void): void;
     onStop(callback: (result: RecorderManagerStopCallbackResult) => void): void;
+    onFrameRecorded(callback: (result: RecorderManagerFrameRecordedCallbackResult) => void): void;
     onError(callback: (result: GeneralCallbackResult) => void): void;
+  }
+
+  interface ConnectSocketOption {
+    url: string;
+    header?: Record<string, string>;
+    protocols?: string[];
+    tcpNoDelay?: boolean;
+    success?(result: GeneralCallbackResult): void;
+    fail?(result: GeneralCallbackResult): void;
+    complete?(result: GeneralCallbackResult): void;
+  }
+
+  interface SocketMessageCallbackResult {
+    data: string | ArrayBuffer;
+  }
+
+  interface SocketTaskSendOption {
+    data: string | ArrayBuffer;
+    success?(result: GeneralCallbackResult): void;
+    fail?(result: GeneralCallbackResult): void;
+    complete?(result: GeneralCallbackResult): void;
+  }
+
+  interface SocketTaskCloseOption {
+    code?: number;
+    reason?: string;
+    success?(result: GeneralCallbackResult): void;
+    fail?(result: GeneralCallbackResult): void;
+    complete?(result: GeneralCallbackResult): void;
+  }
+
+  interface SocketTask {
+    send(option: SocketTaskSendOption): void;
+    close(option?: SocketTaskCloseOption): void;
+    onOpen(callback: (result: GeneralCallbackResult) => void): void;
+    onMessage(callback: (result: SocketMessageCallbackResult) => void): void;
+    onError(callback: (result: GeneralCallbackResult) => void): void;
+    onClose(callback: (result: GeneralCallbackResult) => void): void;
   }
 
   interface InnerAudioContext {
@@ -249,6 +293,7 @@ declare namespace WechatMiniprogram {
   interface Wx {
     cloud: Cloud;
     request<T = unknown>(option: RequestOption<T>): void;
+    connectSocket(option: ConnectSocketOption): SocketTask;
     uploadFile(option: UploadFileOption): void;
     login(option?: LoginOption): void;
     getUserProfile(option: GetUserProfileOption): void;
