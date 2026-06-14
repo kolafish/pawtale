@@ -88,11 +88,6 @@ Recommended index: `openid,answer_id,updated_at`.
 
 Recommended index: `openid,created_at`.
 
-Cloud audio registrations must use `memoir/audio/{storage_owner_id}/...` paths, where
-`storage_owner_id` is returned by `GET /api/mobile/memoir/me`. The cloud API rejects
-paths outside the current user's directory, unsupported extensions, MIME/extension
-mismatches, empty files, and files over 20MB.
-
 Keep indexes on ownership and workflow fields instead:
 
 - `memoir_projects`: `openid,type,updated_at`
@@ -101,57 +96,3 @@ Keep indexes on ownership and workflow fields instead:
 - `memoir_answers`: `openid,question_id,updated_at`
 - `memoir_drafts`: `openid,answer_id,updated_at`
 - `memoir_audio_files`: `openid,created_at`
-
-## `memoir_tts_assets`
-
-| Field | Type | Notes |
-| --- | --- | --- |
-| `openid` | string | Owner |
-| `project_id` | string | `memoir_projects` id |
-| `source_type` | string | `question` / `open_question` / `answer` / `draft` / `output` / `output_version` / `session_summary` |
-| `source_id` | string | Source row id |
-| `source_version` | string | Source version or timestamp used for cache invalidation |
-| `text_hash` | string | SHA-256 of normalized readable text |
-| `text_preview` | string | Short readable preview |
-| `text_length` | number | Normalized text length |
-| `file_id` | string | Generated cloud storage file id |
-| `cloud_path` | string | Generated cloud storage path under `memoir/tts/{storage_owner_id}/...` |
-| `mime_type` | string | Generated audio MIME type |
-| `size_bytes` | number | Generated audio size |
-| `model` | string | TTS model used |
-| `voice` | string | TTS voice used |
-| `format` | string | Audio format, currently `mp3` |
-| `synthesis_speed` | number | Provider synthesis speed; frontend playback speed is separate |
-| `chunk_count` | number | Number of TTS chunks used |
-| `created_at` | string | ISO timestamp |
-| `updated_at` | string | ISO timestamp |
-| `generated_at` | string | ISO timestamp |
-
-Recommended index: `openid,project_id,source_type,source_id,text_hash,updated_at`.
-
-## `memoir_tts_jobs`
-
-| Field | Type | Notes |
-| --- | --- | --- |
-| `openid` | string | Owner |
-| `project_id` | string | `memoir_projects` id |
-| `source_type` | string | Same source types as `memoir_tts_assets` |
-| `source_id` | string | Source row id |
-| `source_version` | string | Source version or timestamp captured when queued |
-| `text_hash` | string | SHA-256 of normalized readable text captured when queued |
-| `text_preview` | string | Short readable preview |
-| `text_length` | number | Normalized text length |
-| `tts_asset_id` | string/null | Completed `memoir_tts_assets` id |
-| `status` | string | `queued` / `running` / `completed` / `failed` |
-| `model` | string | TTS model |
-| `voice` | string | TTS voice |
-| `format` | string | Audio format, currently `mp3` |
-| `synthesis_speed` | number | Provider synthesis speed |
-| `chunk_count` | number | Number of chunks generated |
-| `error_message` | string | Failure reason |
-| `created_at` | string | ISO timestamp |
-| `updated_at` | string | ISO timestamp |
-| `started_at` | string/null | ISO timestamp |
-| `completed_at` | string/null | ISO timestamp |
-
-Recommended index: `openid,project_id,status,updated_at`; for cache lookup also use `openid,project_id,source_type,source_id,text_hash`.

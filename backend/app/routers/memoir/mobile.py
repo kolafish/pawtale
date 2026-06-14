@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, File, Form, UploadFile
+from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_user
@@ -6,12 +6,7 @@ from app.database import get_db
 from app.domain.memoir import MemoirMemoryType
 from app.models.users import User
 from app.schemas.memoir import (
-    AudioFileResponse,
     MemoirCoverageItemResponse,
-    MemoirAnswerResponse,
-    MemoirDraftEditRequest,
-    MemoirDraftGenerateRequest,
-    MemoirDraftResponse,
     MemoirEventMemoryResponse,
     MemoirInterviewState,
     MemoirMemoryUpdateRequest,
@@ -31,14 +26,9 @@ from app.schemas.memoir import (
     MemoirStoryListResponse,
     MemoirSummaryResponse,
     MemoirThemeMemoryResponse,
-    MemoirTextAnswerCreate,
-    MemoirTextAnswerUpdate,
 )
 from app.schemas.projects import ProjectResponse
-from app.services.memoir import answers as memoir_answers
-from app.services.memoir import audio_files as memoir_audio_files
 from app.services.memoir import coverage as memoir_coverage
-from app.services.memoir import drafting as memoir_drafting
 from app.services.memoir import interview as memoir_interview
 from app.services.memoir import memory_repository as memoir_memory_repository
 from app.services.memoir import memory_extraction as memoir_memory_extraction
@@ -285,15 +275,6 @@ async def generate_mobile_memoir_question_candidates(
     )
 
 
-@router.post("/question-candidates/{candidate_id}/select", response_model=MemoirQuestionResponse)
-async def select_mobile_memoir_question_candidate(
-    candidate_id: str,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    return await memoir_question_planner.select_candidate_as_question(db, current_user.id, candidate_id)
-
-
 @router.get("/outputs", response_model=list[MemoirOutputResponse])
 async def list_mobile_memoir_outputs(
     project_id: str | None = None,
@@ -344,87 +325,3 @@ async def get_mobile_memoir_story(
 ):
     project_id = await _memoir_project_id(db, current_user.id, project_id)
     return await memoir_story_cards.get_story_detail(db, project_id, current_user.id, answer_id)
-
-
-@router.post("/questions/{question_id}/skip", response_model=MemoirInterviewState)
-async def skip_mobile_memoir_question(
-    question_id: str,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    return await memoir_interview.skip_question(db, question_id, current_user.id)
-
-
-@router.post("/audio-files", response_model=AudioFileResponse, status_code=201)
-async def upload_mobile_memoir_audio_file(
-    file: UploadFile = File(...),
-    duration_seconds: int | None = Form(None),
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    return await memoir_audio_files.save_audio_file(
-        db,
-        current_user.id,
-        file,
-        duration_seconds,
-    )
-
-
-@router.post("/answers", response_model=MemoirAnswerResponse, status_code=201)
-async def create_mobile_memoir_answer(
-    req: MemoirTextAnswerCreate,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    return await memoir_answers.answer_question_with_text(
-        db,
-        req.question_id,
-        current_user.id,
-        req.text,
-        audio_file_id=req.audio_file_id,
-        duration_seconds=req.duration_seconds,
-    )
-
-
-@router.patch("/answers/{answer_id}", response_model=MemoirAnswerResponse)
-async def update_mobile_memoir_answer(
-    answer_id: str,
-    req: MemoirTextAnswerUpdate,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    return await memoir_answers.update_answer_text(db, answer_id, current_user.id, req.text)
-
-
-@router.post("/answers/{answer_id}/draft", response_model=MemoirDraftResponse)
-async def generate_mobile_memoir_draft(
-    answer_id: str,
-    req: MemoirDraftGenerateRequest,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    return await memoir_drafting.generate_draft_for_answer(
-        db,
-        answer_id,
-        current_user.id,
-        req,
-    )
-
-
-@router.patch("/drafts/{draft_id}", response_model=MemoirDraftResponse)
-async def update_mobile_memoir_draft(
-    draft_id: str,
-    req: MemoirDraftEditRequest,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    return await memoir_drafting.update_draft_content(db, draft_id, current_user.id, req)
-
-
-@router.post("/drafts/{draft_id}/accept", response_model=MemoirDraftResponse)
-async def accept_mobile_memoir_draft(
-    draft_id: str,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    return await memoir_drafting.accept_draft(db, draft_id, current_user.id)
