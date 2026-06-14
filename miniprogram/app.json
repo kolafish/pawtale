@@ -2,6 +2,8 @@
   "pages": [
     "pages/index/index",
     "pages/home/index",
+    "pages/voice-start/index",
+    "pages/voice-chat/index",
     "pages/workbench/index",
     "pages/stories/index",
     "pages/qa/index",

@@ -382,7 +382,7 @@ Page<WorkbenchData, {
   },
 
   continueInterview() {
-    wx.navigateTo({ url: "/pages/question/index" });
+    wx.navigateTo({ url: "/pages/voice-start/index" });
   },
 
   async openPendingReview() {

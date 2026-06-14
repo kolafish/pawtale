@@ -1,0 +1,53 @@
+<view class="voice-start-page">
+  <view class="top-bar">
+    <view class="back-hit" bindtap="backHome">
+      <text class="back-mark">‹</text>
+    </view>
+    <text class="page-title">开始语音访谈</text>
+  </view>
+
+  <view wx:if="{{error}}" class="error">{{error}}</view>
+
+  <view class="intro-panel">
+    <image class="intro-icon" src="/assets/memoir-microphone.png" mode="aspectFit" />
+    <view class="intro-copy">
+      <text class="intro-title">今天想怎么聊？</text>
+      <text class="intro-subtitle">选择后会进入实时语音聊天，边说边显示大字转写。</text>
+    </view>
+  </view>
+
+  <view class="mode-list">
+    <view
+      wx:for="{{modeOptions}}"
+      wx:key="value"
+      class="mode-option {{selectedMode === item.value ? 'selected' : ''}}"
+      data-mode="{{item.value}}"
+      bindtap="selectMode"
+    >
+      <view class="mode-row">
+        <text class="mode-title">{{item.title}}</text>
+        <text class="mode-tag">{{item.tag}}</text>
+      </view>
+      <text class="mode-description">{{item.description}}</text>
+    </view>
+  </view>
+
+  <view wx:if="{{selectedMode === 'guided_interview'}}" class="module-panel">
+    <text class="section-title">先聊一个方向</text>
+    <view class="module-grid">
+      <view
+        wx:for="{{moduleOptions}}"
+        wx:key="value"
+        class="module-chip {{selectedModule === item.value ? 'selected' : ''}}"
+        data-module="{{item.value}}"
+        bindtap="selectModule"
+      >
+        <text>{{item.label}}</text>
+      </view>
+    </view>
+  </view>
+
+  <button class="start-button" loading="{{loading}}" disabled="{{loading}}" bindtap="startVoiceChat">
+    {{loading ? "正在准备" : "进入语音聊天"}}
+  </button>
+</view>

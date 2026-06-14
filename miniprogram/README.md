@@ -38,6 +38,17 @@
 
 新版实时语音聊天会新增 voice gateway。小程序不能直接连接 ASR/TTS provider，也不能携带 provider API key。用户原始语音是基础数据资产，后续转写校正、进度查看和成稿编辑都应回溯到原始音频和 transcript version。
 
+## 新版语音聊天开发配置
+
+PR4 开始新增 `voice-start` / `voice-chat` 页面。当前实时语音链路直连仓库里的 `backend` 服务，不经过 legacy 云函数：
+
+```ts
+export const VOICE_BACKEND_HTTP_BASE_URL = "http://127.0.0.1:8000";
+export const VOICE_BACKEND_WS_BASE_URL = "ws://127.0.0.1:8000";
+```
+
+微信开发者工具本机调试可以使用默认值；真机预览需要改成手机可访问的局域网地址，正式环境需要配置为 HTTPS/WSS 域名。开发态会使用后端本地默认用户登录以取得 `pawtale_session` cookie，provider key 仍只放在 `backend/.env`。
+
 ## 检查
 
 ```bash

@@ -1,0 +1,41 @@
+<view class="voice-chat-page">
+  <view class="top-bar">
+    <view>
+      <text class="mode-label">{{modeLabel}}</text>
+      <text class="status-label {{status}}">{{statusText}}</text>
+    </view>
+    <button class="finish-button" bindtap="finishSession">结束</button>
+  </view>
+
+  <view wx:if="{{error}}" class="error">{{error}}</view>
+
+  <view class="transcript-stage">
+    <text class="stage-eyebrow">{{recording ? "正在实时转写" : "准备好了"}}</text>
+    <text class="live-text">{{liveText || (recording ? "请直接说，我会把文字显示在这里" : "点下方按钮开始说话")}}</text>
+  </view>
+
+  <view class="history-panel">
+    <view class="history-header">
+      <text>已识别内容</text>
+      <text class="history-count">{{transcriptLines.length}}</text>
+    </view>
+    <view wx:if="{{!transcriptLines.length}}" class="empty-state">
+      <text>一句话结束后，会在这里固定下来。</text>
+    </view>
+    <view wx:for="{{transcriptLines}}" wx:key="id" class="transcript-line">
+      <text>{{item.text}}</text>
+    </view>
+  </view>
+
+  <view class="control-bar">
+    <button
+      class="mic-button {{recording ? 'recording' : ''}}"
+      loading="{{connecting}}"
+      disabled="{{connecting}}"
+      bindtap="toggleRecording"
+    >
+      <image class="mic-icon" src="/assets/memoir-microphone.png" mode="aspectFit" />
+      <text>{{connecting ? "连接中" : primaryActionText}}</text>
+    </button>
+  </view>
+</view>

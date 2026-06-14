@@ -409,12 +409,7 @@ Page<HomeData, {
     if (!this.data.projectTitle) {
       await this.loadHome();
     }
-    const questionId = this.data.currentQuestionId;
-    wx.navigateTo({
-      url: questionId
-        ? `/pages/question/index?questionId=${encodeURIComponent(questionId)}`
-        : "/pages/question/index",
-    });
+    wx.navigateTo({ url: "/pages/voice-start/index" });
   },
 
   onQuestionTouchStart(event) {
