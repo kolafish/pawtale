@@ -1,6 +1,21 @@
 # Pawtale 回忆录小程序
 
-这是 Pawtale 回忆录微信小程序。当前覆盖文字回答流程，并支持在问题页录音转写：
+这是 Pawtale 回忆录微信小程序。当前代码仍保留 legacy 固定问答流程；下一阶段会整体改版为实时语音聊天形态，详见 [../docs/MEMOIR_VOICE_CHAT_REDESIGN.md](../docs/MEMOIR_VOICE_CHAT_REDESIGN.md)。
+
+新版目标流程：
+
+```text
+进入小程序
+ -> 选择弱引导自由叙述，或强引导 AI 采访
+ -> 创建 voice session
+ -> 用户直接说话
+ -> Streaming ASR 实时显示大字转写
+ -> LLM 根据上下文动态追问
+ -> Streaming TTS 播放 AI 回复
+ -> 对话消息、原始音频和转写证据落库
+```
+
+当前 legacy 流程：
 
 ```text
 进入小程序
@@ -19,7 +34,9 @@
 
 用微信开发者工具打开仓库根目录 `Pawtale/`。根目录的 `project.config.json` 会把 `miniprogram/` 识别为小程序根目录，并把 `cloud-functions/` 识别为云函数根目录。
 
-小程序端只走微信云开发路径：JSON API 通过 `wx.cloud.callFunction` 请求 `memoir-api`，录音先上传到云存储，再由云函数登记音频元数据。
+当前 legacy 页面只走微信云开发路径：JSON API 通过 `wx.cloud.callFunction` 请求 `memoir-api`，录音先上传到云存储，再由云函数登记音频元数据。
+
+新版实时语音聊天会新增 voice gateway。小程序不能直接连接 ASR/TTS provider，也不能携带 provider API key。用户原始语音是基础数据资产，后续转写校正、进度查看和成稿编辑都应回溯到原始音频和 transcript version。
 
 ## 检查
 
@@ -41,9 +58,9 @@ export const CLOUD_ENV_ID = "cloud1-d6gmxffp0ea48aa1a";
 export const CLOUD_FUNCTION_NAME = "memoir-api";
 ```
 
-## 当前 API
+## 当前 Legacy API
 
-当前小程序只调用这些后端 API：
+当前 legacy 小程序页面调用这些后端 API。新版 voice-chat 页面会使用新的 voice session 和 realtime event contract，不继续扩展固定问答 API：
 
 ```text
 GET  /api/mobile/memoir/me
@@ -84,6 +101,10 @@ GET  /api/mobile/memoir/outputs
 
 ## 当前不包含
 
+- voice gateway
+- Streaming ASR 实时字幕
+- LLM 动态追问
+- Streaming TTS
 - accepted draft 同步到 Web 正文
 
 这些能力会在后续 PR 分别接入。

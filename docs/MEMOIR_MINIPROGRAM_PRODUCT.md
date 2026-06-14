@@ -1,5 +1,7 @@
 # 回忆录微信小程序产品规划
 
+> Legacy 文档：本文描述的是上一版“固定问题 + 整段录音上传 + 离线 ASR + 整理稿确认”的小程序规划。回忆录小程序已转向实时语音聊天重构，新实现以 [MEMOIR_VOICE_CHAT_REDESIGN.md](MEMOIR_VOICE_CHAT_REDESIGN.md) 为准。本文仅保留为旧版代码和迁移背景参考。
+
 ## 产品定位
 
 回忆录微信小程序是 Pawtale 的回忆录采集端，不是现有 Web 工作台的移动版。

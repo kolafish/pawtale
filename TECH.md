@@ -16,15 +16,15 @@ SQLite + file-backed document content
 
 WeChat Mini Program
         |
-        +-- Local dev: FastAPI
-        +-- Cloud: WeChat cloud functions + cloud database + cloud storage
+        +-- Legacy: WeChat cloud functions + cloud database + cloud storage
+        +-- Redesign: voice gateway + streaming ASR/TTS + chat orchestration
 ```
 
 Pawtale 当前是单仓库、前后端分离架构。后端提供项目、文档、项目资料和 AI API；前端按项目类型分发到不同 workspace，并复用一套草稿编辑和资料编辑基础能力。
 
-回忆录小程序不是 Web 工作台的移动版。上线链路优先使用微信云函数、云数据库和云存储，避免为了小程序 MVP 引入常驻云托管容器成本。本地开发仍可连接 FastAPI，云函数只承载小程序回忆录采集闭环。
+回忆录小程序不是 Web 工作台的移动版。当前代码仍保留 legacy 微信云函数采集链路；下一阶段小程序会改版为实时语音聊天形态，引入弱引导/强引导两种访谈模式，由 voice gateway 承接麦克风帧、Streaming ASR、LLM 动态追问和 Streaming TTS。
 
-回忆录后端长期会演进为 Memory-first Conversational Interview System：原始材料、转写版本、结构化长期记忆、证据链、覆盖度地图、问题规划和写作产物分层处理。完整架构见 [docs/MEMOIR_MEMORY_ARCHITECTURE.md](docs/MEMOIR_MEMORY_ARCHITECTURE.md)，第一期落地计划见 [docs/MEMOIR_MEMORY_FIRST_V1_PLAN.md](docs/MEMOIR_MEMORY_FIRST_V1_PLAN.md)。
+回忆录新版主线见 [docs/MEMOIR_VOICE_CHAT_REDESIGN.md](docs/MEMOIR_VOICE_CHAT_REDESIGN.md)。旧的固定问题和 memory-first v1 文档仅作为 legacy 背景和长期原则参考。
 
 ## 技术栈
 
@@ -196,30 +196,41 @@ frontend/src/
 - `useAIRevision` 只负责 AI 修改的 diff/review 状态
 - 项目资料只通过 Binder + 主编辑区创建和编辑；Inspector 只负责文档属性、文档关联资料和项目信息
 
-## 小程序云端结构
+## 小程序语音聊天结构
 
 ```text
 miniprogram/
 ├── config.ts
 ├── services/
 │   ├── request.ts
-│   └── memoir.ts
+│   ├── memoir.ts                    # legacy HTTP/cloud-function API
+│   ├── memoir-voice-session.ts      # redesign target
+│   ├── memoir-streaming-asr.ts      # redesign target
+│   └── memoir-streaming-tts.ts      # redesign target
 └── pages/
-    ├── home/
-    ├── question/
-    ├── feedback/
-    └── editor/
+    ├── home/                        # legacy
+    ├── question/                    # legacy
+    ├── qa/                          # legacy
+    ├── review/                      # legacy
+    ├── voice-start/                 # redesign target: project + guidance mode selection
+    ├── voice-chat/                  # redesign target: realtime transcript + voice chat
+    ├── transcript-review/           # redesign target: ASR correction + audio evidence
+    └── memoir-progress/             # redesign target: coverage + open questions
 
 cloud-functions/
-└── memoir-api/
+└── memoir-api/                      # legacy API and short-term identity/storage helpers
+
+backend or voice-gateway service/
+└── realtime voice WebSocket         # redesign target
 ```
 
 边界约定：
 
-- `miniprogram/` 只负责页面状态、录音、上传和调用云函数
-- `cloud-functions/memoir-api/` 负责小程序的微信身份、云数据库读写、云存储音频读取、ASR 和整理成文
-- Web/FastAPI 继续服务桌面创作工作台，不作为小程序上线的必需后端
-- 只有能被小程序和云函数共同验证的 API contract 才放入共享文档，避免跨端胶水过早膨胀
+- Legacy：`miniprogram/pages/question/` 仍是固定问题、整段录音上传、离线 ASR、answer segment 的旧流程。
+- Redesign：`voice-start` 负责选择弱引导/强引导，`voice-chat` 只管理语音会话、实时字幕、聊天消息和播放状态。
+- Editing：`transcript-review` 负责回听原始语音、校正 ASR 文本和保存 transcript version；`memoir-progress` 负责展示人、事、地点、时间段、主题覆盖度。
+- Provider key 只能在后端或 voice gateway，不能进入小程序。
+- `cloud-functions/memoir-api/` 可短期保留微信身份、云存储登记和 legacy API，但实时音频长连接应由 voice gateway 承接。
 
 ## 数据模型
 
@@ -270,9 +281,9 @@ writing_sessions
 - `reference_items.type` 由 `domain/references.py` 约束，当前支持 `character`、`location`、`note`、`outline`
 - `writing_sessions` 是写作记录能力，目前保留 API 和表结构
 
-### 回忆录 Memory-first 数据层规划
+### 回忆录 Voice-chat 数据层规划
 
-采集流程保留现有回忆录表：
+Legacy 采集流程当前仍有这些表：
 
 ```text
 memoir_sessions
@@ -282,7 +293,19 @@ memoir_drafts
 audio_files
 ```
 
-长期记忆层计划新增：
+新版语音聊天主线以这些对象为中心：
+
+```text
+memoir_voice_sessions
+memoir_chat_messages
+memoir_voice_utterances
+memoir_audio_files
+memoir_transcript_versions
+```
+
+`memoir_voice_sessions` 必须记录 `guidance_mode`，取值为 `free_narration` 或 `guided_interview`。弱引导允许叙述者按时间线自主讲述；强引导由 LLM 按人物、事件、地点、时间段、主题等模块推进。
+
+长期记忆层继续保留以下方向，但 evidence 应指向 chat message、transcript version 和 audio span：
 
 ```text
 memoir_source_artifacts
@@ -305,8 +328,10 @@ memoir_output_versions
 设计原则：
 
 - 原始材料、转写版本、结构化记忆和写作产物是不同生命周期对象。
-- 每条 AI 提取的 memory 默认是 `draft`，必须有 `memoir_memory_evidence` 指回原始回答。
-- `memoir_questions` 继续表示实际要问的问题；`memoir_question_candidates` 表示规划器生成的候选问题和排序理由。
+- 用户语音是回忆录基础数据资产；原始音频和音频时间段不能被 AI 摘要、校正文或最终文章覆盖。
+- 每条 AI 提取的 memory 默认是 `draft`，必须有 `memoir_memory_evidence` 指回 chat message、transcript version 和 audio span。
+- `memoir_questions` 保留为 legacy 固定问题或服务不可用时的兜底，不作为新版实时访谈主模型。
+- 新版待追问线索优先沉淀到 `memoir_open_questions`、chat message 元数据和 coverage state；`memoir_question_candidates` 只在后续确有规划器收益时再复用或改造。
 - 覆盖度地图由 `memoir_coverage_topics` 和 `memoir_coverage_snapshots` 表达，第一期以固定人生维度为主。
 
 ## API
@@ -482,6 +507,14 @@ ANTHROPIC_AUTH_TOKEN=xxx
 ANTHROPIC_BASE_URL=xxx
 
 DEFAULT_AI_MODEL=claude-opus-4
+
+STEPFUN_API_KEY=xxx
+STEPFUN_BASE_URL=https://api.stepfun.com
+STEPFUN_ASR_MODEL=stepaudio-2.5-asr
+
+VOLC_ASR_API_KEY=xxx
+VOLC_ASR_RESOURCE_ID=volc.seedasr.sauc.duration
+VOLC_ASR_WS_URL=wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async
 ```
 
 `DEFAULT_AI_MODEL` 可选值：
