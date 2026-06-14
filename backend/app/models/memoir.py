@@ -10,9 +10,12 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship as orm_relationsh
 from app.database import Base
 from app.domain.memoir.types import (
     MemoirAnswerStatus,
+    MemoirChatContentStatus,
+    MemoirChatMessageRole,
     MemoirCoverageStatus,
     MemoirCreatedBy,
     MemoirDraftStatus,
+    MemoirGuidanceMode,
     MemoirInterviewStage,
     MemoirMemoryStatus,
     MemoirMemoryType,
@@ -27,6 +30,7 @@ from app.domain.memoir.types import (
     MemoirSessionStatus,
     MemoirSourceArtifactType,
     MemoirTranscriptVersionType,
+    MemoirVoiceSessionStatus,
 )
 
 
@@ -123,6 +127,140 @@ class MemoirQuestion(Base):
         cascade="all, delete-orphan",
         uselist=False,
     )
+
+
+class MemoirVoiceSession(Base):
+    __tablename__ = "memoir_voice_sessions"
+    __table_args__ = (
+        CheckConstraint(
+            f"status IN ({_enum_values(MemoirVoiceSessionStatus)})",
+            name="ck_memoir_voice_sessions_status",
+        ),
+        CheckConstraint(
+            f"guidance_mode IN ({_enum_values(MemoirGuidanceMode)})",
+            name="ck_memoir_voice_sessions_guidance_mode",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    project_id: Mapped[str] = mapped_column(String(36), ForeignKey("projects.id"), nullable=False, index=True)
+    memoir_session_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("memoir_sessions.id"), nullable=True, index=True,
+    )
+    status: Mapped[str] = mapped_column(
+        String(20),
+        default=MemoirVoiceSessionStatus.CREATED.value,
+        nullable=False,
+        index=True,
+    )
+    guidance_mode: Mapped[str] = mapped_column(
+        String(30),
+        default=MemoirGuidanceMode.FREE_NARRATION.value,
+        nullable=False,
+    )
+    current_guidance_module: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    provider: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    input_format: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    stopped_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    error_message: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    metadata_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    project: Mapped["Project"] = orm_relationship("Project", back_populates="memoir_voice_sessions")
+    memoir_session: Mapped[MemoirSession | None] = orm_relationship("MemoirSession")
+    messages: Mapped[list["MemoirChatMessage"]] = orm_relationship(
+        "MemoirChatMessage",
+        back_populates="voice_session",
+        cascade="all, delete-orphan",
+        order_by="MemoirChatMessage.turn_index",
+    )
+    utterances: Mapped[list["MemoirVoiceUtterance"]] = orm_relationship(
+        "MemoirVoiceUtterance",
+        back_populates="voice_session",
+        cascade="all, delete-orphan",
+        order_by="MemoirVoiceUtterance.created_at",
+    )
+
+
+class MemoirChatMessage(Base):
+    __tablename__ = "memoir_chat_messages"
+    __table_args__ = (
+        CheckConstraint(
+            f"role IN ({_enum_values(MemoirChatMessageRole)})",
+            name="ck_memoir_chat_messages_role",
+        ),
+        CheckConstraint(
+            f"content_status IN ({_enum_values(MemoirChatContentStatus)})",
+            name="ck_memoir_chat_messages_content_status",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    project_id: Mapped[str] = mapped_column(String(36), ForeignKey("projects.id"), nullable=False, index=True)
+    voice_session_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("memoir_voice_sessions.id"), nullable=False, index=True,
+    )
+    role: Mapped[str] = mapped_column(String(20), nullable=False)
+    content_text: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    content_status: Mapped[str] = mapped_column(
+        String(20),
+        default=MemoirChatContentStatus.FINAL.value,
+        nullable=False,
+    )
+    audio_file_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("audio_files.id"), nullable=True)
+    transcript_version_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("memoir_transcript_versions.id"), nullable=True,
+    )
+    parent_message_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("memoir_chat_messages.id"), nullable=True,
+    )
+    guidance_intent: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    turn_index: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    metadata_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    project: Mapped["Project"] = orm_relationship("Project")
+    voice_session: Mapped[MemoirVoiceSession] = orm_relationship("MemoirVoiceSession", back_populates="messages")
+    audio_file: Mapped[AudioFile | None] = orm_relationship("AudioFile")
+    transcript_version: Mapped["MemoirTranscriptVersion | None"] = orm_relationship("MemoirTranscriptVersion")
+    parent_message: Mapped["MemoirChatMessage | None"] = orm_relationship(
+        "MemoirChatMessage",
+        remote_side=[id],
+    )
+    utterances: Mapped[list["MemoirVoiceUtterance"]] = orm_relationship(
+        "MemoirVoiceUtterance",
+        back_populates="chat_message",
+    )
+
+
+class MemoirVoiceUtterance(Base):
+    __tablename__ = "memoir_voice_utterances"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    voice_session_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("memoir_voice_sessions.id"), nullable=False, index=True,
+    )
+    chat_message_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("memoir_chat_messages.id"), nullable=True, index=True,
+    )
+    audio_file_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("audio_files.id"), nullable=True)
+    transcript_raw: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    transcript_edited: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    start_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    end_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    provider: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    provider_payload_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    voice_session: Mapped[MemoirVoiceSession] = orm_relationship("MemoirVoiceSession", back_populates="utterances")
+    chat_message: Mapped[MemoirChatMessage | None] = orm_relationship(
+        "MemoirChatMessage",
+        back_populates="utterances",
+    )
+    audio_file: Mapped[AudioFile | None] = orm_relationship("AudioFile")
 
 
 class AudioFile(Base):

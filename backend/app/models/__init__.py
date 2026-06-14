@@ -11,6 +11,7 @@ from app.models.projects import (
 from app.models.memoir import (
     AudioFile,
     MemoirAnswer,
+    MemoirChatMessage,
     MemoirCoverageSnapshot,
     MemoirCoverageTopic,
     MemoirDraft,
@@ -29,6 +30,8 @@ from app.models.memoir import (
     MemoirSourceArtifact,
     MemoirThemeMemory,
     MemoirTranscriptVersion,
+    MemoirVoiceSession,
+    MemoirVoiceUtterance,
 )
 
 __all__ = [
@@ -42,6 +45,7 @@ __all__ = [
     "WritingSession",
     "AudioFile",
     "MemoirAnswer",
+    "MemoirChatMessage",
     "MemoirCoverageSnapshot",
     "MemoirCoverageTopic",
     "MemoirDraft",
@@ -60,4 +64,6 @@ __all__ = [
     "MemoirSourceArtifact",
     "MemoirThemeMemory",
     "MemoirTranscriptVersion",
+    "MemoirVoiceSession",
+    "MemoirVoiceUtterance",
 ]

@@ -395,6 +395,7 @@ session.closed
 2. PR 2: 后端 voice session 数据骨架
    - 新增 voice session、chat message、utterance schema/model/migration。
    - 新增创建/停止 voice session 的 HTTP API。
+   - 暴露最小消息和 utterance 写入 API，供后续 gateway 复用。
    - 不接 provider，只做持久化和权限边界测试。
 
 3. PR 3: Voice gateway + 豆包 Streaming ASR adapter
