@@ -56,7 +56,7 @@
       value="{{answerText}}"
       placeholder="编辑这条回答的文字"
       maxlength="-1"
-      disabled="{{loading || saving || submitting || recording || uploadingAudio || transcribingAudio}}"
+      disabled="{{loading || saving || submitting || recording || uploadingAudio}}"
       bindinput="onAnswerInput"
     />
     <view wx:if="{{answerTtsSourceKey}}" class="tts-inline">
@@ -116,12 +116,11 @@
     <button
       wx:if="{{!recording}}"
       class="record-button"
-      disabled="{{loading || saving || submitting || uploadingAudio || transcribingAudio}}"
-      loading="{{uploadingAudio || transcribingAudio}}"
+      disabled="{{loading || saving || submitting || uploadingAudio}}"
+      loading="{{uploadingAudio}}"
       bindtap="startRecording"
     >
       <block wx:if="{{uploadingAudio}}">保存中</block>
-      <block wx:elif="{{transcribingAudio}}">转写中</block>
       <block wx:else>继续录音</block>
     </button>
     <button
@@ -132,7 +131,7 @@
       暂停并保存本段
     </button>
     <button
-      wx:if="{{newAudioSummary && !recording && !uploadingAudio && !transcribingAudio}}"
+      wx:if="{{newAudioSummary && !recording && !uploadingAudio}}"
       class="text-button"
       disabled="{{saving || submitting}}"
       bindtap="clearRecordedAudio"
@@ -145,7 +144,7 @@
     <button
       class="action-button secondary"
       loading="{{saving}}"
-      disabled="{{loading || saving || submitting || recording || uploadingAudio || transcribingAudio}}"
+      disabled="{{loading || saving || submitting || recording || uploadingAudio}}"
       bindtap="saveText"
     >
       保存文字
@@ -153,7 +152,7 @@
     <button
       class="action-button primary"
       loading="{{submitting}}"
-      disabled="{{loading || saving || submitting || recording || uploadingAudio || transcribingAudio}}"
+      disabled="{{loading || saving || submitting || recording || uploadingAudio}}"
       bindtap="submitReanswer"
     >
       提交继续回答

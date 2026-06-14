@@ -84,9 +84,6 @@ Recommended index: `openid,answer_id,updated_at`.
 | `mime_type` | string | Uploaded audio mime type |
 | `size_bytes` | number | Uploaded audio size |
 | `duration_seconds` | number/null | Optional duration |
-| `transcript_text` | string | Last ASR result |
-| `transcript_usage_json` | string | JSON-encoded ASR usage payload |
-| `transcribed_at` | string/null | Last ASR timestamp |
 | `created_at` | string | ISO timestamp |
 
 Recommended index: `openid,created_at`.
@@ -96,7 +93,7 @@ Cloud audio registrations must use `memoir/audio/{storage_owner_id}/...` paths, 
 paths outside the current user's directory, unsupported extensions, MIME/extension
 mismatches, empty files, and files over 20MB.
 
-`transcript_usage_json` is only for diagnostics and should not be queried or indexed. Keep indexes on ownership and workflow fields instead:
+Keep indexes on ownership and workflow fields instead:
 
 - `memoir_projects`: `openid,type,updated_at`
 - `memoir_sessions`: `openid,project_id,status,updated_at`

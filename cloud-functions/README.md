@@ -58,8 +58,7 @@ node --test cloud-functions/memoir-api/test/*.test.js
 
 | Name | Required | Notes |
 | --- | --- | --- |
-| `STEPFUN_API_KEY` | Yes | StepFun ASR API key |
-| `STEPFUN_ASR_MODEL` | No | Defaults to `stepaudio-2.5-asr` |
+| `STEPFUN_API_KEY` | Yes | StepFun TTS API key |
 | `STEPFUN_BASE_URL` | No | Defaults to `https://api.stepfun.com` |
 | `DEEPSEEK_API_KEY` | Yes | DeepSeek chat completion API key |
 | `DEEPSEEK_MODEL` | No | Defaults to `deepseek-chat` |

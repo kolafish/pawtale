@@ -62,12 +62,6 @@ class AudioFileResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-class MemoirAudioTranscriptionResponse(BaseModel):
-    audio_file_id: str
-    text: str
-    usage: dict[str, object] | None = None
-
-
 class MemoirTextAnswerCreate(BaseModel):
     question_id: str
     text: str

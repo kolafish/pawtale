@@ -3,7 +3,6 @@ const {
   createDeepSeekMemoryExtractionService,
 } = require("./src/ai/deepseek");
 const cloud = require("wx-server-sdk");
-const { createStepFunASRService } = require("./src/asr/stepfun");
 const { createStepFunTTSService } = require("./src/tts/stepfun");
 const { handleMemoirApiRequest } = require("./src/router");
 const { CloudStore } = require("./src/store");
@@ -34,7 +33,6 @@ exports.main = async (event, context) => {
           return result.fileID;
         },
       },
-      asr: createStepFunASRService(),
       tts: createStepFunTTSService(),
       drafting: createDeepSeekDraftService(),
       memoryExtraction: createDeepSeekMemoryExtractionService(),

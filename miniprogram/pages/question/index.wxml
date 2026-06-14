@@ -92,15 +92,15 @@
     value="{{answerText}}"
     placeholder="{{answerSegments.length ? '补充一段文字' : '写下你的回答，或先录一段'}}"
     maxlength="-1"
-    disabled="{{isCompleted || submitting || recording || processingSegmentCount || uploadingAudio || transcribingAudio || syncingSegment}}"
+    disabled="{{isCompleted || submitting || recording || processingSegmentCount || uploadingAudio || syncingSegment}}"
     bindinput="onAnswerInput"
   />
 
   <view class="button-row">
-    <button class="button button-secondary" disabled="{{isCompleted || submitting || recording || processingSegmentCount || uploadingAudio || transcribingAudio || syncingSegment}}" bindtap="skipCurrentQuestion">
+    <button class="button button-secondary" disabled="{{isCompleted || submitting || recording || processingSegmentCount || uploadingAudio || syncingSegment}}" bindtap="skipCurrentQuestion">
       跳过
     </button>
-    <button class="button button-primary" loading="{{submitting}}" disabled="{{isCompleted || recording || processingSegmentCount || uploadingAudio || transcribingAudio || syncingSegment}}" bindtap="submitAnswer">
+    <button class="button button-primary" loading="{{submitting}}" disabled="{{isCompleted || recording || processingSegmentCount || uploadingAudio || syncingSegment}}" bindtap="submitAnswer">
       提交回答
     </button>
   </view>

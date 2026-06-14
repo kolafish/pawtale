@@ -193,7 +193,7 @@ VOLC_ASR_RESOURCE_ID=volc.seedasr.sauc.duration
 - 16k mono PCM 帧可识别。
 - 真实 m4a 样例转 PCM 后可返回 final transcript。
 
-StepFun `stepaudio-2.5-asr` 继续作为离线 ASR 或对照评测来源。它适合完整音频转写，不作为实时大字显示的主链路。
+旧的 StepFun 整段音频转写不再保留为产品代码路径。后续如果需要做 ASR 质量对照，应通过独立评测脚本或 provider adapter 测试完成，不能重新接回小程序的固定问答/整段转写流程。
 
 ### LLM Orchestrator
 
@@ -351,6 +351,66 @@ session.closed
 
 ## 实施顺序
 
+### First Version Scope: Production-shaped Streaming ASR
+
+第一版不是一次性 demo，而是按最终上线模块形状实现最小闭环。
+
+第一版必须做：
+
+- 新增独立 voice session API 和 realtime event contract。
+- 新增 voice gateway WebSocket，所有 provider key 只在后端。
+- 小程序新增 `voice-start` 和 `voice-chat` 第一版入口。
+- 小程序发送 16k mono PCM 音频帧，服务端转发给豆包 Streaming ASR。
+- 页面展示 `asr.partial` 大字实时转写，`asr.final` 固化成用户消息。
+- 保存 voice session、chat message、utterance、原始音频或可回溯的音频片段引用。
+- 支持 `free_narration` / `guided_interview` 两种模式字段，但第一版不做复杂 AI 引导。
+- 明确错误状态：录音权限、WebSocket 失败、provider 失败、网络中断。
+- 删除 legacy 非实时 ASR 产品代码，避免新旧 ASR 路径并行。
+
+第一版明确不做：
+
+- LLM 自动追问。
+- Streaming TTS。
+- 自动 VAD 断句和用户插话打断。
+- 多 ASR provider fallback。
+- 断线续传和 session resume。
+- 转写校正页、进度页和成稿编辑页的完整实现。
+- 方言/噪声系统评测和监控大盘。
+
+第一版和上线版的差距：
+
+- 上线版需要 VAD、断线恢复、限流、成本监控、provider fallback、质量评测集和更完整的编辑校正链路。
+- 上线版需要把 `asr.final` 进一步接入 LLM 动态追问、Streaming TTS、memory extraction 和 transcript version 管理。
+- 第一版只保证实时转写主链路和数据骨架正确，后续能力都在这个骨架上迭代。
+
+### PR 拆分建议
+
+第一版建议拆成 5 个 PR，避免一个 PR 同时改前端、长连接、provider 和数据迁移：
+
+1. PR 1: 删除 legacy 非实时 ASR 代码
+   - 删除 StepFun 整段转写 service、ASR job 路由、`audio-files/{id}/transcribe`。
+   - 小程序 legacy 页面停止调用离线转写，只保留录音保存和手工补文字。
+   - 更新文档和测试，确认没有 provider key 暴露。
+
+2. PR 2: 后端 voice session 数据骨架
+   - 新增 voice session、chat message、utterance schema/model/migration。
+   - 新增创建/停止 voice session 的 HTTP API。
+   - 不接 provider，只做持久化和权限边界测试。
+
+3. PR 3: Voice gateway + 豆包 Streaming ASR adapter
+   - 新增 WebSocket gateway 和 provider adapter。
+   - 实现 `session.start`、`audio.frame`、`audio.end`、`asr.partial`、`asr.final`、`session.error`。
+   - 用本地音频样例跑集成验证。
+
+4. PR 4: 小程序 `voice-start` / `voice-chat` MVP
+   - 新增模式选择、录音帧发送、大字转写和错误状态。
+   - 真机验证 partial 延迟和 final 固化。
+
+5. PR 5: 持久化闭环和第一版验收
+   - 将 `asr.final` 落 chat message / utterance。
+   - 保存原始音频或音频片段引用。
+   - 补齐 API/小程序测试和 README 操作说明。
+
 ### Phase 1: Streaming ASR MVP
 
 目标：先完成“边说边出大字”，同时把 voice session 和原始语音资产模型打牢。
@@ -362,13 +422,14 @@ session.closed
 - 豆包 ASR 返回 partial/final。
 - final transcript 落 `memoir_chat_messages` 或临时兼容表。
 - 停止后保存完整音频并关联 transcript。
+- legacy 非实时 ASR endpoint 和 ASR job 不再保留。
 
 不做：
 
 - AI 自动追问。
 - 流式 TTS。
 - 复杂 VAD。
-- 删除旧页面。
+- 删除全部旧页面。
 
 ### Phase 2: Guidance Modes and LLM Dynamic Follow-up
 

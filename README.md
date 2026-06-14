@@ -86,9 +86,6 @@ npm run dev
 | `ANTHROPIC_AUTH_TOKEN` | Claude 代理认证 token |
 | `ANTHROPIC_BASE_URL` | Claude 代理地址，OpenAI 兼容格式 |
 | `DEFAULT_AI_MODEL` | 默认模型：`claude-opus-4` / `claude-sonnet-4` / `deepseek` |
-| `STEPFUN_API_KEY` | StepFun ASR/TTS API key |
-| `STEPFUN_BASE_URL` | StepFun API 地址 |
-| `STEPFUN_ASR_MODEL` | StepFun 离线 ASR 模型 |
 | `VOLC_ASR_API_KEY` | 豆包流式 ASR API key |
 | `VOLC_ASR_RESOURCE_ID` | 豆包流式 ASR 资源 ID |
 | `VOLC_ASR_WS_URL` | 豆包流式 ASR WebSocket 地址 |

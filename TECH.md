@@ -508,10 +508,6 @@ ANTHROPIC_BASE_URL=xxx
 
 DEFAULT_AI_MODEL=claude-opus-4
 
-STEPFUN_API_KEY=xxx
-STEPFUN_BASE_URL=https://api.stepfun.com
-STEPFUN_ASR_MODEL=stepaudio-2.5-asr
-
 VOLC_ASR_API_KEY=xxx
 VOLC_ASR_RESOURCE_ID=volc.seedasr.sauc.duration
 VOLC_ASR_WS_URL=wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async
