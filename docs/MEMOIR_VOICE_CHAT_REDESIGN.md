@@ -294,6 +294,14 @@ memoir_voice_utterances
 
 小程序和 voice gateway 之间使用事件协议，不直接暴露 provider 协议。
 
+第一版后端网关路径：
+
+```text
+GET /api/mobile/memoir/voice-sessions/{voice_session_id}/gateway
+```
+
+鉴权沿用 `pawtale_session` cookie。小程序端后续通过 WebSocket header 携带同一个 session cookie，provider key 只保存在后端 `.env`。
+
 ```text
 client -> server
 session.start
@@ -313,6 +321,26 @@ tts.done
 session.error
 session.closed
 ```
+
+PR3 已实现的最小子集：
+
+```text
+client -> server
+session.start
+audio.frame        # { "audio": "<base64 pcm_s16le_16000_mono bytes>" }
+audio.end
+session.stop
+
+server -> client
+session.ready
+session.started
+audio.ended
+asr.partial        # { "text": "...", "start_ms": 0, "end_ms": 1200, "provider_payload": {...} }
+asr.final          # { "text": "...", "start_ms": 0, "end_ms": 2400, "provider_payload": {...} }
+session.error
+```
+
+LLM 和 TTS 相关事件仍是后续阶段目标，PR3 不生成 `assistant.*` 或 `tts.*`。
 
 `session.start` 必须包含引导模式，后端据此选择 prompt policy：
 
