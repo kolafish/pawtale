@@ -96,6 +96,15 @@ test("normalizes invalid gateway payloads into session errors", () => {
     classifyVoiceGatewayError({ type: "session.error", error: "asr_session_not_started" }).kind,
     "gateway",
   );
+  assert.deepEqual(
+    classifyVoiceGatewayError({ type: "session.error", error: "audio_stream_too_large" }),
+    {
+      kind: "gateway",
+      code: "audio_stream_too_large",
+      state: undefined,
+      message: "本次录音超过可保存大小",
+    },
+  );
 
   delete global.wx;
 });
@@ -506,6 +515,107 @@ test("streaming ASR reports captured audio frame stats", async () => {
   assert.equal(captureStats.at(-1).frameCount, 2);
   assert.equal(captureStats.at(-1).audioBytesSent, 6);
   assert.equal(typeof captureStats.at(-1).recordingElapsedMs, "number");
+  delete global.wx;
+});
+
+test("streaming ASR close drains active audio before closing socket", async () => {
+  const recorder = recorderManagerHarness();
+  const sent = [];
+  const closes = [];
+  let onOpen;
+  let onMessage;
+  global.wx = {
+    getRecorderManager() {
+      return recorder;
+    },
+    getStorageSync(key) {
+      if (key === "pawtale_backend_config") {
+        return {
+          httpBaseUrl: "http://backend.local:8000",
+          wsBaseUrl: "ws://backend.local:8000",
+        };
+      }
+      if (key === "pawtale_backend_cookie") {
+        return "pawtale_session=abc";
+      }
+      return "";
+    },
+    getExtConfigSync() {
+      return {};
+    },
+    setStorageSync() {},
+    removeStorageSync() {},
+    request(options) {
+      options.success({ statusCode: 200, data: { id: "user-1" }, cookies: [], header: {} });
+    },
+    connectSocket() {
+      return {
+        onOpen(callback) {
+          onOpen = callback;
+        },
+        onMessage(callback) {
+          onMessage = callback;
+        },
+        onError() {},
+        onClose() {},
+        send(options) {
+          sent.push(JSON.parse(options.data));
+        },
+        close(options) {
+          closes.push(options);
+        },
+      };
+    },
+  };
+  delete require.cache[require.resolve("../services/request.ts")];
+  delete require.cache[require.resolve("../services/memoir-voice-api.ts")];
+  delete require.cache[require.resolve("../services/memoir-streaming-asr.ts")];
+  const { MemoirStreamingAsrClient } = require("../services/memoir-streaming-asr.ts");
+  const client = new MemoirStreamingAsrClient({
+    voiceSessionId: "voice-1",
+    guidanceMode: "free_narration",
+    callbacks: {
+      onStatus() {},
+      onEvent() {},
+      onPartial() {},
+      onFinal() {},
+      onError() {},
+    },
+  });
+
+  const connectPromise = client.connect();
+  await new Promise((resolve) => setImmediate(resolve));
+  onOpen({ errMsg: "connect:ok" });
+  await connectPromise;
+  client.startRecording();
+  recorder.callbacks.start();
+  recorder.callbacks.frame({
+    frameBuffer: Uint8Array.from([1, 2, 3, 4]).buffer,
+    isLastFrame: false,
+  });
+
+  client.close();
+
+  assert.equal(recorder.stops, 1);
+  assert.deepEqual(sent.map((event) => event.type), ["session.start", "audio.frame"]);
+  assert.equal(closes.length, 0);
+
+  recorder.callbacks.stop();
+  assert.deepEqual(sent.map((event) => event.type), ["session.start", "audio.frame", "audio.end"]);
+
+  onMessage({ data: JSON.stringify({ type: "audio.ended", state: "ready" }) });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(sent.map((event) => event.type), [
+    "session.start",
+    "audio.frame",
+    "audio.end",
+    "session.stop",
+  ]);
+  assert.equal(closes.length, 0);
+
+  onMessage({ data: JSON.stringify({ type: "session.stopped", state: "stopped" }) });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(closes.length, 1);
   delete global.wx;
 });
 

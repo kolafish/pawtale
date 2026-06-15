@@ -148,6 +148,40 @@ def test_parse_volc_ack_extracts_final_utterance_event():
     assert event.end_ms == 2400
 
 
+def test_parse_volc_ack_uses_full_text_and_span_for_multiple_utterances():
+    payload = {
+        "result": [
+            {
+                "text": "我小时候住在外婆家。院子里有一棵树。",
+                "utterances": [
+                    {
+                        "text": "我小时候住在外婆家。",
+                        "definite": True,
+                        "start_time": 0,
+                        "end_time": 2400,
+                    },
+                    {
+                        "text": "院子里有一棵树。",
+                        "definite": True,
+                        "start_time": 2400,
+                        "end_time": 4200,
+                    },
+                ],
+            }
+        ]
+    }
+    frame = _server_frame(SERVER_ACK, payload, sequence=8)
+
+    message = CODEC.parse_server_message(frame)
+    event = CODEC.message_to_event(message)
+
+    assert event is not None
+    assert event.type == "final"
+    assert event.text == "我小时候住在外婆家。院子里有一棵树。"
+    assert event.start_ms == 0
+    assert event.end_ms == 4200
+
+
 def test_parse_volc_error_response_extracts_error_event():
     payload = {"message": "invalid api key"}
     frame = _server_frame(SERVER_ERROR_RESPONSE, payload, code=401)

@@ -27,6 +27,13 @@ SessionStopHandler = Callable[[str | None], Awaitable[None]]
 AudioFrameHandler = Callable[[bytes], Awaitable[None]]
 ASRFinalHandler = Callable[[StreamingASREvent], Awaitable[dict[str, Any] | None]]
 ASR_FINISH_DRAIN_TIMEOUT_SECONDS = 10.0
+MAX_AUDIO_FRAME_BYTES = 256 * 1024
+
+
+class VoiceGatewayClientError(RuntimeError):
+    def __init__(self, code: str) -> None:
+        super().__init__(code)
+        self.code = code
 
 
 class VoiceGatewayState(str, Enum):
@@ -160,8 +167,15 @@ class VoiceGatewaySession:
             return
         if not audio:
             return
+        if len(audio) > MAX_AUDIO_FRAME_BYTES:
+            await self._mark_terminal_error("audio_frame_too_large", {"max_bytes": MAX_AUDIO_FRAME_BYTES})
+            return
         if self.on_audio_frame:
-            await self.on_audio_frame(audio)
+            try:
+                await self.on_audio_frame(audio)
+            except VoiceGatewayClientError as exc:
+                await self._mark_terminal_error(exc.code)
+                return
         await self._asr_client.send_audio(audio)
 
     async def _finish_audio(self) -> None:

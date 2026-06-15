@@ -221,9 +221,12 @@ def _extract_text_candidate(payload: dict[str, Any]) -> dict[str, Any]:
         utterances = payload.get("utterances")
 
     if isinstance(utterances, list) and utterances:
-        last_utterance = utterances[-1] if isinstance(utterances[-1], dict) else {}
+        valid_utterances = [utterance for utterance in utterances if isinstance(utterance, dict)]
+        first_utterance = valid_utterances[0] if valid_utterances else {}
+        last_utterance = valid_utterances[-1] if valid_utterances else {}
+        utterance_text = "".join(str(utterance.get("text") or "") for utterance in valid_utterances)
         return {
-            "text": last_utterance.get("text") or base.get("text") or payload.get("text") or "",
+            "text": base.get("text") or payload.get("text") or utterance_text,
             "is_final": bool(
                 last_utterance.get("definite")
                 or last_utterance.get("is_final")
@@ -233,8 +236,8 @@ def _extract_text_candidate(payload: dict[str, Any]) -> dict[str, Any]:
             ),
             "start_ms": _as_optional_int(
                 _first_present(
-                    last_utterance.get("start_ms"),
-                    last_utterance.get("start_time"),
+                    first_utterance.get("start_ms"),
+                    first_utterance.get("start_time"),
                     base.get("start_ms"),
                 )
             ),

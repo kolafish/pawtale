@@ -8,7 +8,11 @@ from sqlalchemy import select
 from app.models.memoir import AudioFile, MemoirChatMessage, MemoirTranscriptVersion, MemoirVoiceUtterance
 from app.services.memoir.asr import StreamingASREvent
 from app.services.memoir.voice_final_persistence import VoiceFinalPersistenceService
-from app.services.memoir.voice_gateway import VoiceGatewaySession
+from app.services.memoir.voice_gateway import (
+    MAX_AUDIO_FRAME_BYTES,
+    VoiceGatewayClientError,
+    VoiceGatewaySession,
+)
 from app.services.memoir.voice_gateway_persistence import VoiceGatewayPersistence
 
 
@@ -105,6 +109,32 @@ async def test_voice_gateway_rejects_invalid_base64_audio_frame():
 
     assert error["error"] == "audio_frame_invalid_base64"
     assert error["state"] == "listening"
+    assert asr_client.sent_audio == []
+
+
+async def test_voice_gateway_rejects_oversized_audio_frame():
+    client = FakeGatewayClient()
+    asr_client = FakeStreamingASRClient()
+    session = VoiceGatewaySession(client=client, asr_client_factory=lambda: asr_client)
+
+    run_task = asyncio.create_task(session.run())
+    await _wait_for_event(client, "session.ready")
+
+    await client.push({"type": "session.start"})
+    await _wait_for_event(client, "session.started")
+    await client.push(
+        {
+            "type": "audio.frame",
+            "audio": base64.b64encode(b"x" * (MAX_AUDIO_FRAME_BYTES + 1)).decode("ascii"),
+        }
+    )
+    error = await _wait_for_event(client, "session.error")
+    stopped = await _wait_for_event(client, "session.stopped")
+    await asyncio.wait_for(run_task, timeout=1)
+
+    assert error["error"] == "audio_frame_too_large"
+    assert error["state"] == "failed"
+    assert stopped["status"] == "failed"
     assert asr_client.sent_audio == []
 
 
@@ -385,6 +415,26 @@ async def test_voice_gateway_persistence_saves_final_message_utterance_and_audio
     assert transcript_version.content == "我小时候住在外婆家。"
     assert transcript_version.version_type == "asr_raw"
     assert transcript_version.created_by == "asr"
+
+
+async def test_voice_gateway_persistence_rejects_audio_stream_over_limit(client, test_db, monkeypatch):
+    monkeypatch.setattr("app.services.memoir.audio_files.MAX_AUDIO_BYTES", 5)
+    user_response = await client.get("/api/auth/me")
+    create_response = await client.post(
+        "/api/mobile/memoir/voice-sessions",
+        json={"guidance_mode": "free_narration"},
+    )
+    persistence = VoiceGatewayPersistence(
+        db=test_db,
+        voice_session_id=create_response.json()["session"]["id"],
+        user_id=user_response.json()["id"],
+    )
+
+    await persistence.record_audio_frame(b"123")
+    with pytest.raises(VoiceGatewayClientError) as exc_info:
+        await persistence.record_audio_frame(b"456")
+
+    assert exc_info.value.code == "audio_stream_too_large"
 
 
 async def test_voice_final_persistence_rolls_back_rows_and_staged_audio_on_failure(
