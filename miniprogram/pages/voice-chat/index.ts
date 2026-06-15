@@ -1,7 +1,9 @@
 import type {
   MemoirGuidanceMode,
   MemoirVoiceSessionDetail,
+  VoiceChatErrorInfo,
   VoiceChatTranscriptLine,
+  VoiceGatewayState,
   VoiceGatewayServerEvent,
 } from "../../domain/voice-chat";
 import {
@@ -36,6 +38,9 @@ interface VoiceChatData {
   captureDurationText: string;
   liveCharCount: number;
   totalTranscriptCharCount: number;
+  gatewayStateText: string;
+  persistenceStateText: string;
+  errorKindText: string;
 }
 
 let streamingClient: MemoirStreamingAsrClient | null = null;
@@ -55,6 +60,33 @@ function statusText(status: VoiceChatConnectionStatus): string {
     error: "异常",
   };
   return labels[status];
+}
+
+function gatewayStateText(state?: VoiceGatewayState): string {
+  const labels: Record<VoiceGatewayState, string> = {
+    ready: "识别就绪",
+    listening: "正在收音",
+    finishing: "识别收尾中",
+    stopped: "识别已结束",
+    failed: "连接异常",
+  };
+  return state ? labels[state] : "识别未同步";
+}
+
+function errorKindText(error?: VoiceChatErrorInfo): string {
+  if (!error) {
+    return "";
+  }
+  const labels: Record<VoiceChatErrorInfo["kind"], string> = {
+    connection: "连接错误",
+    recorder: "录音错误",
+    gateway: "网关错误",
+    asr: "识别错误",
+    persistence: "保存错误",
+    timeout: "超时",
+    unknown: "未知错误",
+  };
+  return labels[error.kind];
 }
 
 function latestTranscriptText(lines: VoiceChatTranscriptLine[]): string {
@@ -105,7 +137,7 @@ Page<VoiceChatData, {
   handleGatewayEvent(event: VoiceGatewayServerEvent): void;
   handlePartial(text: string): void;
   handleFinal(event: VoiceGatewayServerEvent): void;
-  handleError(message: string): void;
+  handleError(message: string, error?: VoiceChatErrorInfo): void;
 }>({
   data: {
     voiceSessionId: "",
@@ -127,6 +159,9 @@ Page<VoiceChatData, {
     captureDurationText: "00:00",
     liveCharCount: 0,
     totalTranscriptCharCount: 0,
+    gatewayStateText: "识别未同步",
+    persistenceStateText: "等待识别",
+    errorKindText: "",
   },
 
   async onLoad(query) {
@@ -226,7 +261,7 @@ Page<VoiceChatData, {
         onEvent: (event) => this.handleGatewayEvent(event),
         onPartial: (text) => this.handlePartial(text),
         onFinal: (event) => this.handleFinal(event),
-        onError: (message) => this.handleError(message),
+        onError: (message, error) => this.handleError(message, error),
       },
     });
     try {
@@ -304,15 +339,25 @@ Page<VoiceChatData, {
       captureFrameCount: stats.frameCount,
       captureKilobytes: Math.round(stats.audioBytesSent / 1024),
       captureDurationText: formatDuration(stats.recordingElapsedMs),
+      gatewayStateText: gatewayStateText(stats.gatewayState),
     });
   },
 
   handleGatewayEvent(event) {
+    const nextData: Partial<VoiceChatData> = {};
+    if (event.state) {
+      nextData.gatewayStateText = gatewayStateText(event.state);
+    }
     if (event.type === "audio.ended") {
-      this.setData({
-        recording: false,
-        primaryActionText: "继续说话",
-      });
+      nextData.recording = false;
+      nextData.primaryActionText = "继续说话";
+      nextData.persistenceStateText = "正在保存";
+    }
+    if (event.type === "session.started") {
+      nextData.persistenceStateText = "等待识别";
+    }
+    if (Object.keys(nextData).length) {
+      this.setData(nextData);
     }
   },
 
@@ -320,7 +365,9 @@ Page<VoiceChatData, {
     this.setData({
       liveText: text,
       liveCharCount: countTextChars(text),
+      persistenceStateText: "识别中",
       error: "",
+      errorKindText: "",
     });
   },
 
@@ -346,19 +393,29 @@ Page<VoiceChatData, {
       latestTranscriptText: latestTranscriptText(transcriptLines),
       transcriptLines,
       totalTranscriptCharCount: totalTranscriptChars(transcriptLines),
+      persistenceStateText: event.message_id && event.utterance_id && event.transcript_version_id
+        ? "已保存"
+        : "待同步",
       error: "",
+      errorKindText: "",
     });
     writeMemoirVoiceSessionSnapshot(this.data.voiceSessionId, { transcriptLines });
   },
 
-  handleError(message) {
-    this.setData({
+  handleError(message, error) {
+    const nextData: Partial<VoiceChatData> = {
       error: message,
+      errorKindText: errorKindText(error),
+      persistenceStateText: error?.kind === "persistence" ? "保存失败" : this.data.persistenceStateText,
       status: "error",
       statusText: statusText("error"),
       recording: false,
       primaryActionText: "重新连接",
       captureStateText: "录音异常",
-    });
+    };
+    if (error?.state) {
+      nextData.gatewayStateText = gatewayStateText(error.state);
+    }
+    this.setData(nextData);
   },
 });

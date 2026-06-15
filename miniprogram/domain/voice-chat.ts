@@ -2,6 +2,8 @@ export type MemoirGuidanceMode = "free_narration" | "guided_interview";
 export type MemoirVoiceSessionStatus = "created" | "listening" | "speaking" | "stopped" | "failed";
 export type MemoirChatMessageRole = "user" | "assistant" | "system";
 export type MemoirChatContentStatus = "partial" | "final" | "corrected";
+export type VoiceGatewayState = "ready" | "listening" | "finishing" | "stopped" | "failed";
+export type VoiceChatErrorKind = "connection" | "recorder" | "gateway" | "asr" | "persistence" | "timeout" | "unknown";
 
 export interface MemoirVoiceSession {
   id: string;
@@ -74,6 +76,8 @@ export type VoiceGatewayClientEvent =
 
 export interface VoiceGatewayServerEvent {
   type: string;
+  state?: VoiceGatewayState;
+  status?: string;
   text?: string;
   message_id?: string;
   utterance_id?: string;
@@ -84,6 +88,13 @@ export interface VoiceGatewayServerEvent {
   error?: string;
   detail?: Record<string, unknown>;
   provider_payload?: Record<string, unknown>;
+}
+
+export interface VoiceChatErrorInfo {
+  kind: VoiceChatErrorKind;
+  message: string;
+  code?: string;
+  state?: VoiceGatewayState;
 }
 
 export interface VoiceChatTranscriptLine {

@@ -8,6 +8,11 @@
   </view>
 
   <view wx:if="{{error}}" class="error">{{error}}</view>
+  <view class="diagnostic-strip">
+    <text>{{gatewayStateText}}</text>
+    <text>{{persistenceStateText}}</text>
+    <text wx:if="{{errorKindText}}" class="diagnostic-error">{{errorKindText}}</text>
+  </view>
 
   <view class="transcript-stage">
     <text class="stage-eyebrow">{{recording ? captureStateText : "准备好了"}}</text>

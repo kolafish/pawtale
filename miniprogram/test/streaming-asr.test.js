@@ -69,7 +69,7 @@ test("encodes ArrayBuffer audio frames as base64", () => {
 });
 
 test("normalizes invalid gateway payloads into session errors", () => {
-  const { normalizeVoiceGatewayEvent } = streamingAsrModule();
+  const { classifyVoiceGatewayError, normalizeVoiceGatewayEvent } = streamingAsrModule();
 
   assert.deepEqual(normalizeVoiceGatewayEvent("bad"), {
     type: "session.error",
@@ -79,6 +79,23 @@ test("normalizes invalid gateway payloads into session errors", () => {
     type: "session.error",
     text: "missing type",
   });
+  assert.deepEqual(
+    classifyVoiceGatewayError({
+      type: "session.error",
+      state: "failed",
+      error: "asr_final_persistence_failed",
+    }),
+    {
+      kind: "persistence",
+      code: "asr_final_persistence_failed",
+      state: "failed",
+      message: "转写已返回，但保存识别结果失败",
+    },
+  );
+  assert.equal(
+    classifyVoiceGatewayError({ type: "session.error", error: "asr_session_not_started" }).kind,
+    "gateway",
+  );
 
   delete global.wx;
 });
@@ -496,6 +513,7 @@ test("streaming ASR stops recorder when gateway reports an error", async () => {
   const recorder = recorderManagerHarness();
   const sent = [];
   const errors = [];
+  const errorInfos = [];
   const captureStats = [];
   let onOpen;
   let onMessage;
@@ -555,8 +573,9 @@ test("streaming ASR stops recorder when gateway reports an error", async () => {
       onEvent() {},
       onPartial() {},
       onFinal() {},
-      onError(message) {
+      onError(message, errorInfo) {
         errors.push(message);
+        errorInfos.push(errorInfo);
       },
     },
   });
@@ -572,15 +591,28 @@ test("streaming ASR stops recorder when gateway reports an error", async () => {
     isLastFrame: false,
   });
 
-  onMessage({ data: JSON.stringify({ type: "session.error", error: "provider_empty_payload" }) });
+  onMessage({
+    data: JSON.stringify({
+      type: "session.error",
+      state: "failed",
+      error: "asr_final_persistence_failed",
+    }),
+  });
   recorder.callbacks.frame({
     frameBuffer: Uint8Array.from([5, 6]).buffer,
     isLastFrame: false,
   });
 
   assert.equal(recorder.stops, 1);
-  assert.deepEqual(errors, ["provider_empty_payload"]);
+  assert.deepEqual(errors, ["转写已返回，但保存识别结果失败"]);
+  assert.deepEqual(errorInfos, [{
+    kind: "persistence",
+    code: "asr_final_persistence_failed",
+    state: "failed",
+    message: "转写已返回，但保存识别结果失败",
+  }]);
   assert.deepEqual(sent.map((event) => event.type), ["session.start", "audio.frame"]);
   assert.equal(captureStats.at(-1).state, "error");
+  assert.equal(captureStats.at(-1).gatewayState, "failed");
   delete global.wx;
 });

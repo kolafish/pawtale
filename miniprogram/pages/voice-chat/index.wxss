@@ -218,3 +218,25 @@
   font-size: 26rpx;
   line-height: 1.5;
 }
+
+.diagnostic-strip {
+  margin-top: 18rpx;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12rpx;
+  color: #9f4a3c;
+  font-size: 24rpx;
+  font-weight: 800;
+}
+
+.diagnostic-strip text {
+  padding: 8rpx 14rpx;
+  border-radius: 999rpx;
+  background: #fff1ec;
+}
+
+.diagnostic-strip .diagnostic-error {
+  background: #fff1f2;
+  color: #be123c;
+}
