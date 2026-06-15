@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import uuid
 from dataclasses import dataclass
 from typing import Any, AsyncIterator
@@ -46,13 +47,16 @@ class VolcStreamingASRClient:
 
     async def start(self) -> None:
         self.config.validate_credentials()
-        self._connection = await websockets.connect(
-            self.config.ws_url,
-            additional_headers=self._headers(),
-            open_timeout=self.config.connect_timeout_seconds,
-            ping_interval=20,
-            ping_timeout=20,
-        )
+        try:
+            self._connection = await websockets.connect(
+                self.config.ws_url,
+                additional_headers=self._headers(),
+                open_timeout=self.config.connect_timeout_seconds,
+                ping_interval=20,
+                ping_timeout=20,
+            )
+        except Exception as exc:
+            raise RuntimeError(_provider_connect_error_code(exc)) from exc
         await self._connection.send(
             self.codec.build_full_request(self._initial_request(), sequence=self._next_sequence())
         )
@@ -128,3 +132,47 @@ class VolcStreamingASRClient:
         sequence = self._sequence
         self._sequence += 1
         return sequence
+
+
+def _provider_connect_error_code(exc: Exception) -> str:
+    status_code = _provider_response_status_code(exc)
+    response_error = _provider_response_error_text(exc).lower()
+    exception_text = str(exc).lower()
+    combined = f"{response_error} {exception_text}"
+
+    if "requested resource not granted" in combined:
+        return "asr_provider_resource_not_granted"
+    if "api key" in combined and ("invalid" in combined or "unauthorized" in combined):
+        return "asr_provider_invalid_credentials"
+    if status_code in {401, 403}:
+        return "asr_provider_forbidden"
+    if "timeout" in combined or "timed out" in combined:
+        return "asr_provider_connection_timeout"
+    return "asr_provider_connection_failed"
+
+
+def _provider_response_status_code(exc: Exception) -> int | None:
+    response = getattr(exc, "response", None)
+    status_code = getattr(response, "status_code", None)
+    return status_code if isinstance(status_code, int) else None
+
+
+def _provider_response_error_text(exc: Exception) -> str:
+    response = getattr(exc, "response", None)
+    body = getattr(response, "body", b"")
+    if isinstance(body, bytearray):
+        body = bytes(body)
+    if isinstance(body, bytes):
+        raw = body.decode("utf-8", errors="replace")
+    else:
+        raw = str(body or "")
+    if not raw:
+        return ""
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return raw
+    if isinstance(data, dict):
+        value = data.get("error") or data.get("message") or data.get("detail")
+        return str(value or raw)
+    return raw
