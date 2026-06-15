@@ -10,8 +10,13 @@
   <view wx:if="{{error}}" class="error">{{error}}</view>
 
   <view class="transcript-stage">
-    <text class="stage-eyebrow">{{recording ? "正在实时转写" : "准备好了"}}</text>
+    <text class="stage-eyebrow">{{recording ? captureStateText : "准备好了"}}</text>
     <text class="live-text">{{liveText || latestTranscriptText || (recording ? "请直接说，我会把文字显示在这里" : "点下方按钮开始说话")}}</text>
+    <view class="capture-strip {{recording ? 'active' : ''}}">
+      <view class="capture-dot"></view>
+      <text>{{captureStateText}}</text>
+      <text wx:if="{{captureFrameCount}}" class="capture-count">{{captureFrameCount}} 帧 · {{captureKilobytes}} KB</text>
+    </view>
   </view>
 
   <view class="history-panel">

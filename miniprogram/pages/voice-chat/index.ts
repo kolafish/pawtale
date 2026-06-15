@@ -6,6 +6,7 @@ import type {
 } from "../../domain/voice-chat";
 import {
   MemoirStreamingAsrClient,
+  type MemoirCaptureStats,
   type VoiceChatConnectionStatus,
 } from "../../services/memoir-streaming-asr";
 import { getMemoirVoiceSession } from "../../services/memoir-voice-api";
@@ -29,6 +30,9 @@ interface VoiceChatData {
   transcriptLines: VoiceChatTranscriptLine[];
   modeLabel: string;
   primaryActionText: string;
+  captureStateText: string;
+  captureFrameCount: number;
+  captureKilobytes: number;
 }
 
 let streamingClient: MemoirStreamingAsrClient | null = null;
@@ -79,6 +83,7 @@ Page<VoiceChatData, {
   toggleRecording(): void;
   finishSession(): Promise<void>;
   handleStatus(status: VoiceChatConnectionStatus): void;
+  handleCaptureStats(stats: MemoirCaptureStats): void;
   handleGatewayEvent(event: VoiceGatewayServerEvent): void;
   handlePartial(text: string): void;
   handleFinal(event: VoiceGatewayServerEvent): void;
@@ -98,6 +103,9 @@ Page<VoiceChatData, {
     transcriptLines: [],
     modeLabel: "自由讲述",
     primaryActionText: "开始说话",
+    captureStateText: "麦克风未开始",
+    captureFrameCount: 0,
+    captureKilobytes: 0,
   },
 
   async onLoad(query) {
@@ -191,6 +199,7 @@ Page<VoiceChatData, {
       currentGuidanceModule: this.data.currentGuidanceModule,
       callbacks: {
         onStatus: (status) => this.handleStatus(status),
+        onCaptureStats: (stats) => this.handleCaptureStats(stats),
         onEvent: (event) => this.handleGatewayEvent(event),
         onPartial: (text) => this.handlePartial(text),
         onFinal: (event) => this.handleFinal(event),
@@ -257,6 +266,21 @@ Page<VoiceChatData, {
     });
   },
 
+  handleCaptureStats(stats) {
+    const labels: Record<MemoirCaptureStats["state"], string> = {
+      idle: "麦克风未开始",
+      opening: "正在打开麦克风",
+      recording: "录音中",
+      stopping: "正在收尾",
+      error: "录音异常",
+    };
+    this.setData({
+      captureStateText: labels[stats.state],
+      captureFrameCount: stats.frameCount,
+      captureKilobytes: Math.round(stats.audioBytesSent / 1024),
+    });
+  },
+
   handleGatewayEvent(event) {
     if (event.type === "audio.ended") {
       this.setData({
@@ -305,6 +329,7 @@ Page<VoiceChatData, {
       statusText: statusText("error"),
       recording: false,
       primaryActionText: "重新连接",
+      captureStateText: "录音异常",
     });
   },
 });
