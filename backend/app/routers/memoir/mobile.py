@@ -26,6 +26,7 @@ async def get_mobile_memoir_identity(
     return MemoirIdentityResponse(
         id=current_user.id,
         email=current_user.email,
+        password_login_enabled=current_user.password_login_enabled,
         display_name=current_user.display_name,
         avatar_url=current_user.avatar_url,
         created_at=current_user.created_at,

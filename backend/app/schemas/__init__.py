@@ -1,5 +1,19 @@
-from app.schemas.auth import AuthLoginRequest, AuthRegisterRequest, AuthResponse, UserResponse
+from app.schemas.auth import (
+    AuthLoginRequest,
+    AuthRegisterRequest,
+    AuthResponse,
+    AuthSetCredentialsRequest,
+    UserResponse,
+    WeChatBindRequest,
+    WeChatLoginRequest,
+)
 
 __all__ = [
-    "AuthLoginRequest", "AuthRegisterRequest", "AuthResponse", "UserResponse",
+    "AuthLoginRequest",
+    "AuthRegisterRequest",
+    "AuthResponse",
+    "AuthSetCredentialsRequest",
+    "UserResponse",
+    "WeChatBindRequest",
+    "WeChatLoginRequest",
 ]
