@@ -15,20 +15,6 @@ import type {
   AnalyzeApplyRequest,
   AnalyzeApplyResponse,
   ReferenceType,
-  MemoirCoverageItem,
-  MemoirEventMemory,
-  MemoirInterviewState,
-  MemoirMemoryStatus,
-  MemoirMemoryType,
-  MemoirOpenQuestion,
-  MemoirOpenQuestionStatus,
-  MemoirOutput,
-  MemoirPersonMemory,
-  MemoirPlaceMemory,
-  MemoirQuestionCandidate,
-  MemoirQuestionResponse,
-  MemoirSessionSummary,
-  MemoirThemeMemory,
 } from '../types';
 
 const api = axios.create({
@@ -144,50 +130,4 @@ export const projectsApi = {
     api.post<MultiReviseResponse>(
       `/projects/${projectId}/documents/${docId}/ai-revise-multi`, data
     ).then(r => r.data),
-};
-
-const memoirProjectConfig = (projectId?: string) => (
-  projectId ? { params: { project_id: projectId } } : undefined
-);
-
-export const memoirApi = {
-  currentSession: (projectId?: string) =>
-    api.get<MemoirInterviewState>('/mobile/memoir/sessions/current', memoirProjectConfig(projectId)).then(r => r.data),
-  processSession: (sessionId: string, data: { ai_model?: string | null } = {}) =>
-    api.post(`/mobile/memoir/sessions/${sessionId}/process`, data).then(r => r.data),
-  getSessionSummary: (sessionId: string) =>
-    api.get<MemoirSessionSummary | null>(`/mobile/memoir/sessions/${sessionId}/summary`).then(r => r.data),
-  listPeople: (projectId?: string) =>
-    api.get<MemoirPersonMemory[]>('/mobile/memoir/memories/people', memoirProjectConfig(projectId)).then(r => r.data),
-  listEvents: (projectId?: string) =>
-    api.get<MemoirEventMemory[]>('/mobile/memoir/memories/events', memoirProjectConfig(projectId)).then(r => r.data),
-  listPlaces: (projectId?: string) =>
-    api.get<MemoirPlaceMemory[]>('/mobile/memoir/memories/places', memoirProjectConfig(projectId)).then(r => r.data),
-  listThemes: (projectId?: string) =>
-    api.get<MemoirThemeMemory[]>('/mobile/memoir/memories/themes', memoirProjectConfig(projectId)).then(r => r.data),
-  updateMemory: (
-    memoryType: Exclude<MemoirMemoryType, 'open_question'>,
-    memoryId: string,
-    data: { status?: MemoirMemoryStatus; [key: string]: unknown },
-    projectId?: string,
-  ) => api.patch(`/mobile/memoir/memories/${memoryType}/${memoryId}`, data, memoirProjectConfig(projectId)).then(r => r.data),
-  listOpenQuestions: (projectId?: string) =>
-    api.get<MemoirOpenQuestion[]>('/mobile/memoir/open-questions', memoirProjectConfig(projectId)).then(r => r.data),
-  updateOpenQuestion: (
-    questionId: string,
-    data: { status?: MemoirOpenQuestionStatus; reason?: string },
-    projectId?: string,
-  ) => api.patch<MemoirOpenQuestion>(`/mobile/memoir/open-questions/${questionId}`, data, memoirProjectConfig(projectId)).then(r => r.data),
-  getCoverage: (projectId?: string) =>
-    api.get<MemoirCoverageItem[]>('/mobile/memoir/coverage', memoirProjectConfig(projectId)).then(r => r.data),
-  recalculateCoverage: (projectId?: string) =>
-    api.post<MemoirCoverageItem[]>('/mobile/memoir/coverage/recalculate', undefined, memoirProjectConfig(projectId)).then(r => r.data),
-  listQuestionCandidates: (projectId?: string) =>
-    api.get<MemoirQuestionCandidate[]>('/mobile/memoir/question-candidates', memoirProjectConfig(projectId)).then(r => r.data),
-  generateQuestionCandidates: (projectId?: string) =>
-    api.post<MemoirQuestionCandidate[]>('/mobile/memoir/question-candidates/generate', undefined, memoirProjectConfig(projectId)).then(r => r.data),
-  selectQuestionCandidate: (candidateId: string) =>
-    api.post<MemoirQuestionResponse>(`/mobile/memoir/question-candidates/${candidateId}/select`).then(r => r.data),
-  listOutputs: (projectId?: string) =>
-    api.get<MemoirOutput[]>('/mobile/memoir/outputs', memoirProjectConfig(projectId)).then(r => r.data),
 };
