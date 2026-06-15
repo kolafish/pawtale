@@ -1,0 +1,130 @@
+from __future__ import annotations
+
+import uuid
+from dataclasses import dataclass
+from typing import Any, AsyncIterator
+
+import websockets
+
+from app.services.memoir.asr import StreamingASREvent
+from app.services.memoir.volc_asr_protocol import VolcASRProtocolCodec
+
+
+@dataclass(frozen=True)
+class VolcStreamingASRConfig:
+    ws_url: str
+    resource_id: str
+    api_key: str = ""
+    app_key: str = ""
+    access_key: str = ""
+    connect_timeout_seconds: float = 10.0
+
+    def validate_credentials(self) -> None:
+        if self.app_key and self.access_key:
+            return
+        if self.api_key:
+            return
+        raise RuntimeError("Volc streaming ASR credentials are not configured")
+
+
+class VolcStreamingASRClient:
+    def __init__(
+        self,
+        *,
+        config: VolcStreamingASRConfig,
+        user_id: str,
+        voice_session_id: str,
+        codec: VolcASRProtocolCodec | None = None,
+    ) -> None:
+        self.config = config
+        self.user_id = user_id
+        self.voice_session_id = voice_session_id
+        self.codec = codec or VolcASRProtocolCodec()
+        self.request_id = str(uuid.uuid4())
+        self._connection: Any | None = None
+        self._sequence = 1
+
+    async def start(self) -> None:
+        self.config.validate_credentials()
+        self._connection = await websockets.connect(
+            self.config.ws_url,
+            additional_headers=self._headers(),
+            open_timeout=self.config.connect_timeout_seconds,
+            ping_interval=20,
+            ping_timeout=20,
+        )
+        await self._connection.send(
+            self.codec.build_full_request(self._initial_request(), sequence=self._next_sequence())
+        )
+
+    async def send_audio(self, audio: bytes) -> None:
+        await self._send(self.codec.build_audio_request(audio, sequence=self._next_sequence()))
+
+    async def finish(self) -> None:
+        await self._send(self.codec.build_audio_request(b"", is_last=True, sequence=self._next_sequence()))
+
+    async def events(self) -> AsyncIterator[StreamingASREvent]:
+        if self._connection is None:
+            raise RuntimeError("Volc streaming ASR client has not been started")
+        async for message in self._connection:
+            try:
+                if isinstance(message, bytes):
+                    server_message = self.codec.parse_server_message(message)
+                else:
+                    server_message = self.codec.text_message_to_server_message(message)
+                    if server_message is None:
+                        continue
+                event = self.codec.message_to_event(server_message)
+            except Exception as exc:
+                event = StreamingASREvent(type="error", error=str(exc))
+            if event:
+                yield event
+
+    async def close(self) -> None:
+        if self._connection is not None:
+            await self._connection.close()
+            self._connection = None
+
+    async def _send(self, frame: bytes) -> None:
+        if self._connection is None:
+            raise RuntimeError("Volc streaming ASR client has not been started")
+        await self._connection.send(frame)
+
+    def _headers(self) -> dict[str, str]:
+        headers = {
+            "X-Api-Request-Id": self.request_id,
+            "X-Api-Resource-Id": self.config.resource_id,
+        }
+        if self.config.app_key and self.config.access_key:
+            headers["X-Api-App-Key"] = self.config.app_key
+            headers["X-Api-Access-Key"] = self.config.access_key
+        elif self.config.api_key:
+            headers["X-Api-Key"] = self.config.api_key
+        return headers
+
+    def _initial_request(self) -> dict[str, Any]:
+        return {
+            "user": {"uid": self.user_id},
+            "audio": {
+                "format": "pcm",
+                "codec": "raw",
+                "rate": 16000,
+                "bits": 16,
+                "channel": 1,
+            },
+            "request": {
+                "model_name": "bigmodel",
+                "enable_itn": True,
+                "enable_punc": True,
+                "enable_ddc": True,
+                "show_utterances": True,
+                "enable_nonstream": True,
+                "result_type": "full",
+                "voice_session_id": self.voice_session_id,
+            },
+        }
+
+    def _next_sequence(self) -> int:
+        sequence = self._sequence
+        self._sequence += 1
+        return sequence

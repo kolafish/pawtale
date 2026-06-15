@@ -5,7 +5,7 @@ from typing import Any
 from sqlalchemy import select
 
 from app.models.memoir import AudioFile, MemoirChatMessage, MemoirTranscriptVersion, MemoirVoiceUtterance
-from app.services.memoir.streaming_asr import StreamingASREvent
+from app.services.memoir.asr import StreamingASREvent
 from app.services.memoir.voice_gateway import VoiceGatewaySession
 from app.services.memoir.voice_gateway_persistence import VoiceGatewayPersistence
 

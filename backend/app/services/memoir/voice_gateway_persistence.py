@@ -8,7 +8,7 @@ from app.domain.memoir.types import MemoirChatContentStatus, MemoirChatMessageRo
 from app.schemas.memoir import MemoirChatMessageCreate, MemoirVoiceUtteranceCreate
 from app.services.memoir import audio_files as memoir_audio_files
 from app.services.memoir import voice_sessions as memoir_voice_sessions
-from app.services.memoir.streaming_asr import StreamingASREvent
+from app.services.memoir.asr import StreamingASREvent
 
 
 class VoiceGatewayPersistence:
