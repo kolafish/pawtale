@@ -23,10 +23,12 @@ async def test_voice_gateway_streams_audio_and_forwards_asr_events():
     )
 
     run_task = asyncio.create_task(session.run())
-    await _wait_for_event(client, "session.ready")
+    ready = await _wait_for_event(client, "session.ready")
+    assert ready["state"] == "ready"
 
     await client.push({"type": "session.start"})
-    await _wait_for_event(client, "session.started")
+    started = await _wait_for_event(client, "session.started")
+    assert started["state"] == "listening"
 
     await client.push(
         {
@@ -38,8 +40,10 @@ async def test_voice_gateway_streams_audio_and_forwards_asr_events():
 
     await client.push({"type": "audio.end"})
     final = await _wait_for_event(client, "asr.final")
+    ended = await _wait_for_event(client, "audio.ended")
 
     await client.push({"type": "session.stop"})
+    stopped = await _wait_for_event(client, "session.stopped")
     await asyncio.wait_for(run_task, timeout=1)
 
     assert asr_client.started
@@ -48,8 +52,37 @@ async def test_voice_gateway_streams_audio_and_forwards_asr_events():
     assert asr_client.finished
     assert asr_client.closed
     assert partial["text"] == "我小时候"
+    assert partial["state"] == "listening"
     assert final["text"] == "我小时候住在外婆家。"
+    assert final["state"] == "finishing"
+    assert ended["state"] == "ready"
+    assert stopped["state"] == "stopped"
     assert stopped_with == [None]
+
+
+async def test_voice_gateway_rejects_audio_before_session_start_with_ready_state():
+    client = FakeGatewayClient()
+    asr_client = FakeStreamingASRClient()
+    session = VoiceGatewaySession(client=client, asr_client_factory=lambda: asr_client)
+
+    run_task = asyncio.create_task(session.run())
+    await _wait_for_event(client, "session.ready")
+
+    await client.push(
+        {
+            "type": "audio.frame",
+            "audio": base64.b64encode(b"pcm").decode("ascii"),
+        }
+    )
+    error = await _wait_for_event(client, "session.error")
+    await client.push({"type": "session.stop"})
+    stopped = await _wait_for_event(client, "session.stopped")
+    await asyncio.wait_for(run_task, timeout=1)
+
+    assert error["error"] == "asr_session_not_started"
+    assert error["state"] == "ready"
+    assert asr_client.sent_audio == []
+    assert stopped["state"] == "stopped"
 
 
 async def test_voice_gateway_rejects_invalid_base64_audio_frame():
@@ -69,7 +102,57 @@ async def test_voice_gateway_rejects_invalid_base64_audio_frame():
     await asyncio.wait_for(run_task, timeout=1)
 
     assert error["error"] == "audio_frame_invalid_base64"
+    assert error["state"] == "listening"
     assert asr_client.sent_audio == []
+
+
+async def test_voice_gateway_duplicate_start_reuses_current_listening_session():
+    client = FakeGatewayClient()
+    asr_clients = [FakeStreamingASRClient(), FakeStreamingASRClient()]
+    created_count = {"value": 0}
+
+    def create_asr_client() -> FakeStreamingASRClient:
+        client = asr_clients[created_count["value"]]
+        created_count["value"] += 1
+        return client
+
+    session = VoiceGatewaySession(client=client, asr_client_factory=create_asr_client)
+
+    run_task = asyncio.create_task(session.run())
+    await _wait_for_event(client, "session.ready")
+    await client.push({"type": "session.start"})
+    first_started = await _wait_for_event_count(client, "session.started", 1)
+    await client.push({"type": "session.start"})
+    second_started = await _wait_for_event_count(client, "session.started", 2)
+    await client.push({"type": "session.stop"})
+    await asyncio.wait_for(run_task, timeout=1)
+
+    assert created_count["value"] == 1
+    assert asr_clients[0].started
+    assert asr_clients[0].finished
+    assert asr_clients[0].closed
+    assert not asr_clients[1].started
+    assert [event["state"] for event in first_started] == ["listening"]
+    assert [event["state"] for event in second_started] == ["listening", "listening"]
+
+
+async def test_voice_gateway_start_failure_reports_failed_state():
+    client = FakeGatewayClient()
+    asr_client = FailingStartStreamingASRClient()
+    session = VoiceGatewaySession(client=client, asr_client_factory=lambda: asr_client)
+
+    run_task = asyncio.create_task(session.run())
+    await _wait_for_event(client, "session.ready")
+    await client.push({"type": "session.start"})
+    error = await _wait_for_event(client, "session.error")
+    stopped = await _wait_for_event(client, "session.stopped")
+    await asyncio.wait_for(run_task, timeout=1)
+
+    assert error["error"] == "provider connect failed"
+    assert error["state"] == "failed"
+    assert stopped["status"] == "failed"
+    assert stopped["state"] == "failed"
+    assert asr_client.closed
 
 
 async def test_voice_gateway_final_event_includes_persistence_ids():
@@ -393,3 +476,8 @@ class FakeStreamingASRClient:
 
     async def close(self) -> None:
         self.closed = True
+
+
+class FailingStartStreamingASRClient(FakeStreamingASRClient):
+    async def start(self) -> None:
+        raise RuntimeError("provider connect failed")

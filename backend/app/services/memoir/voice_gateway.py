@@ -5,6 +5,7 @@ import base64
 import binascii
 import contextlib
 import logging
+from enum import Enum
 from typing import Any, Awaitable, Callable, Protocol
 
 from app.services.memoir.asr import StreamingASRClient, StreamingASREvent
@@ -28,6 +29,14 @@ ASRFinalHandler = Callable[[StreamingASREvent], Awaitable[dict[str, Any] | None]
 ASR_FINISH_DRAIN_TIMEOUT_SECONDS = 10.0
 
 
+class VoiceGatewayState(str, Enum):
+    READY = "ready"
+    LISTENING = "listening"
+    FINISHING = "finishing"
+    STOPPED = "stopped"
+    FAILED = "failed"
+
+
 class VoiceGatewaySession:
     def __init__(
         self,
@@ -47,12 +56,12 @@ class VoiceGatewaySession:
         self.on_asr_final = on_asr_final
         self._asr_client: StreamingASRClient | None = None
         self._asr_task: asyncio.Task[None] | None = None
-        self._audio_finished = False
+        self._state = VoiceGatewayState.READY
         self._terminal_error: str | None = None
         self._terminal_stop = asyncio.Event()
 
     async def run(self) -> None:
-        await self.client.send_json({"type": "session.ready"})
+        await self.client.send_json(self._event("session.ready"))
         stop_error: str | None = None
         try:
             while not self._terminal_stop.is_set():
@@ -65,20 +74,22 @@ class VoiceGatewaySession:
                     break
         except Exception as exc:
             stop_error = str(exc)
+            self._state = VoiceGatewayState.FAILED
             with contextlib.suppress(Exception):
                 await self._send_error(stop_error)
         finally:
             stop_error = stop_error or self._terminal_error
             await self._shutdown()
+            self._state = VoiceGatewayState.FAILED if stop_error else VoiceGatewayState.STOPPED
             if self.on_stop:
                 await self.on_stop(stop_error)
             with contextlib.suppress(Exception):
                 await self.client.send_json(
-                    {
-                        "type": "session.stopped",
-                        "status": "failed" if stop_error else "stopped",
-                        "error": stop_error or "",
-                    }
+                    self._event(
+                        "session.stopped",
+                        status="failed" if stop_error else "stopped",
+                        error=stop_error or "",
+                    )
                 )
 
     async def _receive_next_message(self) -> dict[str, Any] | None:
@@ -109,7 +120,7 @@ class VoiceGatewaySession:
             await self._finish_audio()
             return self._terminal_error is not None
         if message_type == "session.stop":
-            if self._asr_client is not None and not self._audio_finished and self._terminal_error is None:
+            if self._state == VoiceGatewayState.LISTENING and self._terminal_error is None:
                 await self._finish_audio()
             return True
 
@@ -117,22 +128,25 @@ class VoiceGatewaySession:
         return False
 
     async def _start_asr(self) -> None:
-        if self._asr_client is not None and not self._audio_finished:
-            await self.client.send_json({"type": "session.started"})
+        if self._state == VoiceGatewayState.LISTENING:
+            await self.client.send_json(self._event("session.started"))
+            return
+        if self._state == VoiceGatewayState.FINISHING:
+            await self._send_error("asr_session_finishing")
             return
 
         await self._close_asr_client()
-        self._audio_finished = False
+        self._state = VoiceGatewayState.LISTENING
         self._asr_client = self.asr_client_factory()
         await self._asr_client.start()
         if self.on_start:
             await self.on_start()
         self._asr_task = asyncio.create_task(self._forward_asr_events())
-        await self.client.send_json({"type": "session.started"})
+        await self.client.send_json(self._event("session.started"))
 
     async def _send_audio_frame(self, message: dict[str, Any]) -> None:
-        if self._asr_client is None:
-            await self._send_error("asr_session_not_started")
+        if self._state != VoiceGatewayState.LISTENING or self._asr_client is None:
+            await self._send_error(self._audio_frame_state_error())
             return
 
         encoded = message.get("audio")
@@ -151,13 +165,16 @@ class VoiceGatewaySession:
         await self._asr_client.send_audio(audio)
 
     async def _finish_audio(self) -> None:
-        if self._asr_client is None or self._audio_finished:
+        if self._state == VoiceGatewayState.READY and self._asr_client is None:
             return
+        if self._state != VoiceGatewayState.LISTENING or self._asr_client is None:
+            return
+        self._state = VoiceGatewayState.FINISHING
         await self._asr_client.finish()
         await self._drain_asr_events()
-        self._audio_finished = True
         if self._terminal_error is None:
-            await self.client.send_json({"type": "audio.ended"})
+            self._state = VoiceGatewayState.READY
+            await self.client.send_json(self._event("audio.ended"))
         await self._close_asr_client()
 
     async def _drain_asr_events(self) -> None:
@@ -186,6 +203,7 @@ class VoiceGatewaySession:
 
         payload: dict[str, Any] = {
             "type": f"asr.{event.type}",
+            "state": self._state.value,
             "text": event.text,
             "start_ms": event.start_ms,
             "end_ms": event.end_ms,
@@ -203,7 +221,7 @@ class VoiceGatewaySession:
         await self.client.send_json(payload)
 
     async def _send_error(self, error: str, detail: dict[str, Any] | None = None) -> None:
-        payload: dict[str, Any] = {"type": "session.error", "error": error}
+        payload: dict[str, Any] = self._event("session.error", error=error)
         if detail:
             payload["detail"] = detail
         await self.client.send_json(payload)
@@ -211,6 +229,7 @@ class VoiceGatewaySession:
     async def _mark_terminal_error(self, error: str, detail: dict[str, Any] | None = None) -> None:
         if self._terminal_error is None:
             self._terminal_error = error
+        self._state = VoiceGatewayState.FAILED
         self._terminal_stop.set()
         await self._send_error(error, detail)
 
@@ -228,3 +247,19 @@ class VoiceGatewaySession:
         if self._asr_client is not None:
             await self._asr_client.close()
             self._asr_client = None
+
+    def _audio_frame_state_error(self) -> str:
+        if self._state == VoiceGatewayState.FINISHING:
+            return "asr_session_finishing"
+        if self._state == VoiceGatewayState.FAILED:
+            return "asr_session_failed"
+        if self._state == VoiceGatewayState.STOPPED:
+            return "asr_session_stopped"
+        return "asr_session_not_started"
+
+    def _event(self, event_type: str, **payload: Any) -> dict[str, Any]:
+        return {
+            "type": event_type,
+            "state": self._state.value,
+            **payload,
+        }
