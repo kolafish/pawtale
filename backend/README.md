@@ -86,6 +86,10 @@ APP_ENV=development
 APP_SECRET_KEY=xxx
 # DATABASE_URL=sqlite+aiosqlite:///../data/pawtale.db
 
+WECHAT_MINIPROGRAM_APPID=wx71acdf73e2ba7067
+WECHAT_MINIPROGRAM_SECRET=xxx
+WECHAT_JSCODE2SESSION_URL=https://api.weixin.qq.com/sns/jscode2session
+
 DEEPSEEK_API_KEY=xxx
 DEEPSEEK_BASE_URL=xxx
 

@@ -48,12 +48,13 @@ Voice Session -> Chat Messages -> Realtime Transcript -> Memory Extraction -> Wr
 当前小程序代码已从独立入口进入新版链路，避免和 legacy 页面互相缠绕：
 
 ```text
-miniprogram/pages/login/                      # ECS 邮箱登录/注册
+miniprogram/pages/login/                      # 微信登录、Pawtale 账号登录、首次设 Web 登录凭据
 miniprogram/pages/home/                       # 新版语音入口
 miniprogram/pages/projects/                   # 回忆录项目创建、切换、重命名
 miniprogram/pages/voice-start/                # 强/弱引导选择
 miniprogram/pages/voice-chat/                 # 新版老人端实时语音聊天
 miniprogram/services/request.ts               # ECS HTTP + cookie session
+miniprogram/services/auth.ts                  # wx.login、backend cookie session、账号凭据设置
 miniprogram/services/memoir-voice-api.ts      # voice session API
 miniprogram/services/memoir-streaming-asr.ts  # 录音帧、WebSocket、partial/final transcript
 miniprogram/domain/voice-chat.ts              # 新版聊天消息和实时事件类型
@@ -69,6 +70,7 @@ Git 上建议用以下边界区分：
 - `codex/voice-chat-redesign`：新版语音聊天主线分支。
 - 第一批 PR 已完成 Streaming ASR、voice session 数据和小程序新入口。
 - 小程序 legacy 固定问答页面、旧非实时录音上传代码和微信云函数链路已清理。
+- 登录链路已迁移为统一 Pawtale 账号：已有 Web 用户用邮箱密码登录小程序，新用户用微信登录后设置 Web 端邮箱密码。
 
 ## 产品体验
 
@@ -299,7 +301,7 @@ memoir_voice_utterances
 GET /api/mobile/memoir/voice-sessions/{voice_session_id}/gateway
 ```
 
-鉴权沿用 `pawtale_session` cookie。小程序端后续通过 WebSocket header 携带同一个 session cookie，provider key 只保存在后端 `.env`。
+鉴权沿用 `pawtale_session` cookie。小程序端通过 `wx.login()` 获取一次性 code，后端用 `WECHAT_MINIPROGRAM_APPID` 和 `WECHAT_MINIPROGRAM_SECRET` 调用微信 code2session 换取 openid，并把 openid 绑定到 Pawtale 用户。小程序端后续通过 WebSocket header 携带同一个 session cookie；微信 AppSecret 和 provider key 都只保存在后端 `.env`。
 
 ```text
 client -> server
@@ -453,6 +455,7 @@ PR5 后第一版已经具备的闭环：
 PR5 后仍未完成、不能按上线态理解的缺口：
 
 - 小程序已经统一为 backend cookie 身份；仍需要在微信公众平台配置正式 request/socket 合法域名。
+- 微信登录后端 API 已完成；ECS `/opt/pawtale/backend/.env` 仍需要配置真实 `WECHAT_MINIPROGRAM_SECRET` 后，真机微信登录才能通过 code2session。
 - 原始音频按 final utterance 粗粒度保存，尚未做更精确的 VAD 时间切片和断线续传。
 - voice session 快照只保证已固化 transcript 的页面回放，不等同于断线续传；录音帧上传中的状态仍不可恢复。
 - LLM dynamic follow-up、Streaming TTS、插话打断和 AI 回复落库尚未接入。
@@ -529,7 +532,7 @@ Streaming ASR MVP 必须满足：
 - final transcript 能稳定落库。
 - 离开并重新进入同一个 voice session 后，已 final 的 transcript 不丢失。
 - 断网或 provider 错误能给出明确 UI 状态。
-- 小程序端不包含 provider key。
+- 小程序端不包含 provider key 或微信 AppSecret。
 - 旧链路不再作为产品代码路径保留。
 
 完整语音聊天版本必须满足：
