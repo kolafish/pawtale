@@ -315,6 +315,30 @@ PYTHONPATH=. python scripts/rebuild_memoir_voice_schema.py --yes
 
 `--describe-only` 只打印模型期望列和当前数据库实际列；`--yes` 会删除并重建上述实时语音表，会清空 voice session、chat message、utterance、transcript version 以及 `audio_files` 元数据。ECS 上执行前必须先做数据库和音频文件备份，并确认不需要保留这部分数据。
 
+### Realtime ASR Smoke Check
+
+部署后先跑不调用真实 provider 的本地 smoke，确认 `.env`、schema 和 Volc 协议帧构造正常：
+
+```bash
+cd backend
+PYTHONPATH=. python scripts/smoke_realtime_asr.py
+```
+
+脚本只输出配置是否存在，不打印 provider key。需要做真实豆包 ASR 冒烟时，传入一段 16kHz mono `pcm_s16le` 文件：
+
+```bash
+cd backend
+PYTHONPATH=. python scripts/smoke_realtime_asr.py --pcm-file /path/to/sample.pcm
+```
+
+ECS 部署后建议顺序：
+
+1. 先备份 `/opt/pawtale/backend` 和 `/opt/pawtale/data/pawtale.db`。
+2. 同步 backend 代码，保留 ECS 上的 `/opt/pawtale/backend/.env`。
+3. 重启 `pawtale-backend`。
+4. 请求 `https://pawtale-api.spaceflows.cn/health`。
+5. 在 ECS 上执行 `cd /opt/pawtale/backend && PYTHONPATH=/opt/pawtale/backend/.pythondeps:/opt/pawtale/backend python3 scripts/smoke_realtime_asr.py`，确认 schema 和 provider 配置。
+
 ## Realtime Event Contract
 
 小程序和 voice gateway 之间使用事件协议，不直接暴露 provider 协议。
