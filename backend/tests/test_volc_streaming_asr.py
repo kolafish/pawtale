@@ -289,6 +289,64 @@ def test_volc_client_start_sends_initial_request_with_sequence(monkeypatch):
     assert int.from_bytes(sent_frames[1][4:8], "big", signed=True) == 2
 
 
+def test_volc_client_maps_resource_permission_rejection(monkeypatch):
+    class FakeResponse:
+        status_code = 403
+        body = bytearray(
+            b'{"error":"[resource_id=volc.seedasr.sauc.duration] requested resource not granted"}'
+        )
+
+    class FakeProviderReject(Exception):
+        response = FakeResponse()
+
+    async def fake_connect(*_args, **_kwargs):
+        raise FakeProviderReject("server rejected WebSocket connection: HTTP 403")
+
+    monkeypatch.setattr("app.services.memoir.volc_streaming_asr.websockets.connect", fake_connect)
+    client = VolcStreamingASRClient(
+        config=VolcStreamingASRConfig(
+            ws_url="wss://example.test",
+            resource_id="volc.seedasr.sauc.duration",
+            api_key="api",
+        ),
+        user_id="user-1",
+        voice_session_id="voice-session-1",
+    )
+
+    import asyncio
+
+    with pytest.raises(RuntimeError, match="asr_provider_resource_not_granted"):
+        asyncio.run(client.start())
+
+
+def test_volc_client_maps_forbidden_provider_rejection_without_body(monkeypatch):
+    class FakeResponse:
+        status_code = 403
+        body = bytearray(b"")
+
+    class FakeProviderReject(Exception):
+        response = FakeResponse()
+
+    async def fake_connect(*_args, **_kwargs):
+        raise FakeProviderReject("server rejected WebSocket connection: HTTP 403")
+
+    monkeypatch.setattr("app.services.memoir.volc_streaming_asr.websockets.connect", fake_connect)
+    client = VolcStreamingASRClient(
+        config=VolcStreamingASRConfig(
+            ws_url="wss://example.test",
+            resource_id="volc.seedasr.sauc.duration",
+            api_key="api",
+        ),
+        user_id="user-1",
+        voice_session_id="voice-session-1",
+    )
+
+    import asyncio
+
+    with pytest.raises(RuntimeError, match="asr_provider_forbidden"):
+        asyncio.run(client.start())
+
+
 def test_volc_client_uses_sequence_frames_for_requests():
     sent_frames = []
 

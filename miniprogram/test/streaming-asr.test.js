@@ -119,6 +119,19 @@ test("normalizes invalid gateway payloads into session errors", () => {
     },
   );
   assert.deepEqual(
+    classifyVoiceGatewayError({
+      type: "session.error",
+      state: "failed",
+      error: "asr_provider_resource_not_granted",
+    }),
+    {
+      kind: "asr",
+      code: "asr_provider_resource_not_granted",
+      state: "failed",
+      message: "ASR 资源未开通或 API Key 无权限",
+    },
+  );
+  assert.deepEqual(
     classifyVoiceClientConnectionError("server rejected WebSocket connection: HTTP 403"),
     {
       kind: "connection",
