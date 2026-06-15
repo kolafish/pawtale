@@ -7,6 +7,7 @@ import type {
   VoiceGatewayServerEvent,
 } from "../../domain/voice-chat";
 import {
+  classifyVoiceClientConnectionError,
   MemoirStreamingAsrClient,
   type MemoirCaptureStats,
   type VoiceChatConnectionStatus,
@@ -267,7 +268,8 @@ Page<VoiceChatData, {
     try {
       await streamingClient.connect();
     } catch (error) {
-      this.handleError(error instanceof Error ? error.message : "语音连接失败");
+      const message = error instanceof Error ? error.message : "语音连接失败";
+      this.handleError(message, classifyVoiceClientConnectionError(message));
     } finally {
       this.setData({ connecting: false });
     }

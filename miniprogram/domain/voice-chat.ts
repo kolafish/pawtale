@@ -88,6 +88,7 @@ export interface VoiceGatewayServerEvent {
   error?: string;
   detail?: Record<string, unknown>;
   provider_payload?: Record<string, unknown>;
+  provider_event_type?: string;
 }
 
 export interface VoiceChatErrorInfo {

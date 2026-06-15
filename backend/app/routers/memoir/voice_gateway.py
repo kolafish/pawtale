@@ -25,14 +25,14 @@ async def mobile_memoir_voice_gateway(
 ):
     current_user = await _authenticate_websocket(websocket, db)
     if current_user is None:
-        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        await _reject_websocket(websocket, "voice_gateway_auth_failed")
         return
     current_user_id = current_user.id
 
     try:
         await memoir_voice_sessions.get_voice_session_detail(db, voice_session_id, current_user_id)
     except HTTPException:
-        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        await _reject_websocket(websocket, "voice_session_unavailable")
         return
 
     await websocket.accept()
@@ -83,3 +83,15 @@ async def _authenticate_websocket(websocket: WebSocket, db: AsyncSession) -> Use
 
     result = await db.execute(select(User).where(User.id == user_id))
     return result.scalar_one_or_none()
+
+
+async def _reject_websocket(websocket: WebSocket, error: str) -> None:
+    await websocket.accept()
+    await websocket.send_json(
+        {
+            "type": "session.error",
+            "state": "failed",
+            "error": error,
+        }
+    )
+    await websocket.close(code=status.WS_1008_POLICY_VIOLATION)

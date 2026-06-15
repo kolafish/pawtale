@@ -222,6 +222,51 @@ async def test_voice_gateway_final_event_includes_persistence_ids():
     assert final["transcript_version_id"] == "transcript-1"
 
 
+async def test_voice_gateway_persists_only_latest_cumulative_final_per_audio_segment():
+    client = FakeGatewayClient()
+    final_texts = [
+        "我小时候住在外婆家。",
+        "我小时候住在外婆家，门口有一棵树。",
+        "我小时候住在外婆家，门口有一棵树，夏天大家都在树下乘凉。",
+    ]
+    asr_client = CumulativeFinalStreamingASRClient(final_texts)
+    persisted_events: list[StreamingASREvent] = []
+    session = VoiceGatewaySession(
+        client=client,
+        asr_client_factory=lambda: asr_client,
+        on_asr_final=lambda event: _persist_fake_final(persisted_events, event),
+    )
+
+    run_task = asyncio.create_task(session.run())
+    await _wait_for_event(client, "session.ready")
+    await client.push({"type": "session.start"})
+    await _wait_for_event(client, "session.started")
+    await client.push(
+        {
+            "type": "audio.frame",
+            "audio": base64.b64encode(b"pcm").decode("ascii"),
+        }
+    )
+    await client.push({"type": "audio.end"})
+    ended = await _wait_for_event(client, "audio.ended")
+    await client.push({"type": "session.stop"})
+    await asyncio.wait_for(run_task, timeout=1)
+
+    partial_final_candidates = [
+        event["text"]
+        for event in client.sent
+        if event["type"] == "asr.partial" and event.get("provider_event_type") == "final"
+    ]
+    final_events = [event for event in client.sent if event["type"] == "asr.final"]
+
+    assert partial_final_candidates == final_texts
+    assert [event.text for event in persisted_events] == [final_texts[-1]]
+    assert len(final_events) == 1
+    assert final_events[0]["text"] == final_texts[-1]
+    assert final_events[0]["message_id"] == "message-1"
+    assert ended["state"] == "ready"
+
+
 async def test_voice_gateway_stop_finishes_asr_before_shutdown():
     client = FakeGatewayClient()
     asr_client = FakeStreamingASRClient()
@@ -570,6 +615,18 @@ class FakeStreamingASRClient:
 
     async def close(self) -> None:
         self.closed = True
+
+
+class CumulativeFinalStreamingASRClient(FakeStreamingASRClient):
+    def __init__(self, final_texts: list[str]) -> None:
+        super().__init__()
+        self.final_texts = final_texts
+
+    async def finish(self) -> None:
+        self.finished = True
+        for text in self.final_texts:
+            await self.events_queue.put(StreamingASREvent(type="final", text=text))
+        await self.events_queue.put(None)
 
 
 class FailingStartStreamingASRClient(FakeStreamingASRClient):

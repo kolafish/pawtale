@@ -94,7 +94,31 @@ export function classifyVoiceGatewayError(event: VoiceGatewayServerEvent): Voice
   };
 }
 
+export function classifyVoiceClientConnectionError(message: string): VoiceChatErrorInfo {
+  const rawMessage = message || "语音连接失败";
+  let code = "voice_gateway_connection_failed";
+  if (rawMessage.includes("HTTP 403") || rawMessage.includes("rejected WebSocket")) {
+    code = "voice_gateway_connection_forbidden";
+  } else if (rawMessage.includes("超时") || rawMessage.toLowerCase().includes("timeout")) {
+    code = "voice_gateway_connection_timeout";
+  } else if (rawMessage.includes("关闭") || rawMessage.toLowerCase().includes("closed")) {
+    code = "voice_gateway_connection_closed";
+  }
+  const kind = errorKindFromCode(code);
+  return {
+    kind,
+    code,
+    message: messageFromErrorCode(code, kind),
+  };
+}
+
 function errorKindFromCode(code: string): VoiceChatErrorKind {
+  if (code.startsWith("voice_gateway_connection") || code === "voice_gateway_auth_failed") {
+    return "connection";
+  }
+  if (code.startsWith("voice_session_")) {
+    return "gateway";
+  }
   if (code.includes("persistence") || code.includes("sqlite") || code.includes("database")) {
     return "persistence";
   }
@@ -125,6 +149,12 @@ function messageFromErrorCode(code: string, kind: VoiceChatErrorKind): string {
     audio_stream_too_large: "本次录音超过可保存大小",
     asr_session_not_started: "语音识别还没有开始",
     asr_session_finishing: "上一句语音还在收尾",
+    voice_gateway_auth_failed: "登录状态已失效，请重新登录后再进入",
+    voice_gateway_connection_closed: "语音连接已关闭，请重新连接",
+    voice_gateway_connection_failed: "语音连接失败，请重新连接",
+    voice_gateway_connection_forbidden: "语音连接被拒绝，请返回后重新进入",
+    voice_gateway_connection_timeout: "语音连接超时，请检查网络后重试",
+    voice_session_unavailable: "语音会话不存在或已失效，请重新开始",
     provider_empty_payload: "语音识别服务返回了空结果",
     unsupported_gateway_event: "语音连接事件不支持",
   };
@@ -212,10 +242,10 @@ export class MemoirStreamingAsrClient {
         this.handleSocketMessage(message.data);
       });
       socketTask.onError((error) => {
-        const message = error.errMsg || "语音连接错误";
-        settle(() => reject(new Error(message)));
-        this.rejectWaiters(message);
-        this.options.callbacks.onError(message, clientError(message, "connection"));
+        const errorInfo = classifyVoiceClientConnectionError(error.errMsg || "语音连接错误");
+        settle(() => reject(new Error(errorInfo.message)));
+        this.rejectWaiters(errorInfo.message);
+        this.options.callbacks.onError(errorInfo.message, errorInfo);
         this.options.callbacks.onStatus("error");
       });
       socketTask.onClose(() => {
