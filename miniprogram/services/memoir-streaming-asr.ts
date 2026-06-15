@@ -7,6 +7,7 @@ import { backendSessionCookieHeader, voiceGatewayUrl } from "./memoir-voice-api"
 
 const STREAMING_RECORDING_DURATION_MS = 10 * 60 * 1000;
 const STREAMING_FRAME_SIZE_KB = 4;
+const STREAMING_ENCODE_BIT_RATE = 96000;
 const SOCKET_CONNECT_TIMEOUT_MS = 10000;
 const AUDIO_END_TIMEOUT_MS = 15000;
 const SESSION_STOP_TIMEOUT_MS = 8000;
@@ -27,10 +28,19 @@ export type VoiceChatConnectionStatus =
 
 export interface MemoirStreamingAsrCallbacks {
   onStatus(status: VoiceChatConnectionStatus): void;
+  onCaptureStats?(stats: MemoirCaptureStats): void;
   onEvent(event: VoiceGatewayServerEvent): void;
   onPartial(text: string): void;
   onFinal(event: VoiceGatewayServerEvent): void;
   onError(message: string): void;
+}
+
+export type MemoirCaptureState = "idle" | "opening" | "recording" | "stopping" | "error";
+
+export interface MemoirCaptureStats {
+  state: MemoirCaptureState;
+  frameCount: number;
+  audioBytesSent: number;
 }
 
 export interface MemoirStreamingAsrOptions {
@@ -78,6 +88,8 @@ export class MemoirStreamingAsrClient {
   private audioEnded = false;
   private sessionStopped = false;
   private closed = false;
+  private frameCount = 0;
+  private audioBytesSent = 0;
   private recorderStopTimer: ReturnType<typeof setTimeout> | null = null;
   private waiters: Array<{
     eventType: string;
@@ -146,22 +158,19 @@ export class MemoirStreamingAsrClient {
     activeClient = this;
     this.recording = true;
     this.recorderStarted = false;
-    this.acceptingFrames = true;
+    this.acceptingFrames = false;
     this.audioEndSent = false;
     this.audioEnded = false;
     this.sessionStopped = false;
-    this.sendJson({
-      type: "session.start",
-      guidance_mode: this.options.guidanceMode,
-      current_guidance_module: this.options.currentGuidanceModule,
-    });
-    this.options.callbacks.onStatus("listening");
+    this.frameCount = 0;
+    this.audioBytesSent = 0;
+    this.emitCaptureStats("opening");
     try {
       recorderManager.start({
         duration: STREAMING_RECORDING_DURATION_MS,
         sampleRate: 16000,
         numberOfChannels: 1,
-        encodeBitRate: 256000,
+        encodeBitRate: STREAMING_ENCODE_BIT_RATE,
         format: "PCM",
         frameSize: STREAMING_FRAME_SIZE_KB,
       });
@@ -179,12 +188,14 @@ export class MemoirStreamingAsrClient {
     this.recording = false;
     this.options.callbacks.onStatus("stopping");
     if (this.recorderStarted) {
+      this.emitCaptureStats("stopping");
       recorderManager.stop();
       this.recorderStopTimer = setTimeout(() => {
         this.finishAudioInput();
       }, RECORDER_STOP_FALLBACK_MS);
     } else {
-      this.finishAudioInput();
+      this.acceptingFrames = false;
+      this.emitCaptureStats("idle");
     }
   }
 
@@ -214,10 +225,13 @@ export class MemoirStreamingAsrClient {
   }
 
   handleFrame(frameBuffer: ArrayBuffer, isLastFrame: boolean): void {
-    if (!this.socketOpen || !this.acceptingFrames) {
+    if (!this.socketOpen || !this.recording || !this.acceptingFrames) {
       return;
     }
     if (frameBuffer.byteLength > 0) {
+      this.frameCount += 1;
+      this.audioBytesSent += frameBuffer.byteLength;
+      this.emitCaptureStats("recording");
       this.sendJson({
         type: "audio.frame",
         audio: arrayBufferToBase64(frameBuffer),
@@ -231,6 +245,9 @@ export class MemoirStreamingAsrClient {
   handleRecorderStopped(): void {
     this.recorderStarted = false;
     if (activeClient !== this || !this.acceptingFrames || this.audioEndSent) {
+      if (!this.recording) {
+        this.emitCaptureStats("idle");
+      }
       return;
     }
     this.finishAudioInput();
@@ -243,15 +260,35 @@ export class MemoirStreamingAsrClient {
       this.finishAudioInput();
     }
     this.acceptingFrames = false;
+    this.emitCaptureStats("error");
     this.rejectWaiters(message);
     this.options.callbacks.onError(message);
     this.options.callbacks.onStatus("error");
   }
 
   handleRecorderStarted(): void {
-    if (activeClient === this && this.recording) {
-      this.recorderStarted = true;
+    if (activeClient !== this) {
+      return;
     }
+    this.recorderStarted = true;
+    if (!this.recording) {
+      this.emitCaptureStats("stopping");
+      try {
+        recorderManager.stop();
+      } catch {
+        this.recorderStarted = false;
+        this.emitCaptureStats("idle");
+      }
+      return;
+    }
+    this.acceptingFrames = true;
+    this.sendJson({
+      type: "session.start",
+      guidance_mode: this.options.guidanceMode,
+      current_guidance_module: this.options.currentGuidanceModule,
+    });
+    this.options.callbacks.onStatus("listening");
+    this.emitCaptureStats("recording");
   }
 
   private handleSocketMessage(data: string | ArrayBuffer): void {
@@ -275,6 +312,7 @@ export class MemoirStreamingAsrClient {
       this.acceptingFrames = false;
       this.resolveWaiters("audio.ended");
       this.options.callbacks.onStatus("ready");
+      this.emitCaptureStats("idle");
       return;
     }
     if (event.type === "session.stopped") {
@@ -301,6 +339,7 @@ export class MemoirStreamingAsrClient {
     this.audioEndSent = true;
     this.acceptingFrames = false;
     this.options.callbacks.onStatus("stopping");
+    this.emitCaptureStats("stopping");
     this.sendJson({ type: "audio.end" });
   }
 
@@ -358,10 +397,19 @@ export class MemoirStreamingAsrClient {
     this.recording = false;
     this.recorderStarted = false;
     this.acceptingFrames = false;
+    this.emitCaptureStats("idle");
     if (activeClient === this) {
       activeClient = null;
     }
     this.options.callbacks.onStatus("closed");
+  }
+
+  private emitCaptureStats(state: MemoirCaptureState): void {
+    this.options.callbacks.onCaptureStats?.({
+      state,
+      frameCount: this.frameCount,
+      audioBytesSent: this.audioBytesSent,
+    });
   }
 
   private sendJson(event: VoiceGatewayClientEvent): void {

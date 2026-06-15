@@ -89,6 +89,40 @@
   word-break: break-all;
 }
 
+.capture-strip {
+  margin-top: 34rpx;
+  padding: 18rpx 22rpx;
+  border-radius: 18rpx;
+  background: #fff6f1;
+  color: #685b55;
+  display: flex;
+  align-items: center;
+  gap: 14rpx;
+  font-size: 24rpx;
+  font-weight: 700;
+}
+
+.capture-strip.active {
+  color: #9f4a3c;
+}
+
+.capture-dot {
+  width: 16rpx;
+  height: 16rpx;
+  border-radius: 999rpx;
+  background: #c7b2a0;
+}
+
+.capture-strip.active .capture-dot {
+  background: #b85c45;
+  box-shadow: 0 0 0 10rpx rgba(184, 92, 69, 0.12);
+}
+
+.capture-count {
+  margin-left: auto;
+  color: #9f4a3c;
+}
+
 .history-panel {
   margin-top: 30rpx;
   padding: 30rpx;

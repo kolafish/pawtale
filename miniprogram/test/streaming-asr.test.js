@@ -254,6 +254,7 @@ test("streaming ASR connect rejects on socket error before open", async () => {
 test("streaming ASR starts provider only after recording starts", async () => {
   const recorder = recorderManagerHarness();
   const sent = [];
+  const captureStats = [];
   let onOpen;
   global.wx = {
     getRecorderManager() {
@@ -303,6 +304,9 @@ test("streaming ASR starts provider only after recording starts", async () => {
     guidanceMode: "free_narration",
     callbacks: {
       onStatus() {},
+      onCaptureStats(stats) {
+        captureStats.push(stats);
+      },
       onEvent() {},
       onPartial() {},
       onFinal() {},
@@ -317,10 +321,17 @@ test("streaming ASR starts provider only after recording starts", async () => {
 
   assert.deepEqual(sent, []);
   assert.equal(client.startRecording(), true);
-  assert.equal(sent.length, 1);
-  assert.equal(sent[0].type, "session.start");
+  assert.deepEqual(sent, []);
   assert.equal(recorder.starts.length, 1);
   assert.equal(recorder.starts[0].sampleRate, 16000);
+  assert.equal(recorder.starts[0].encodeBitRate, 96000);
+  assert.equal(captureStats.at(-1).state, "opening");
+
+  recorder.callbacks.start();
+
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].type, "session.start");
+  assert.equal(captureStats.at(-1).state, "recording");
   delete global.wx;
 });
 
@@ -391,6 +402,91 @@ test("streaming ASR stop before recorder start does not call recorder stop", asy
   client.stopRecording();
 
   assert.equal(recorder.stops, 0);
-  assert.deepEqual(sent.map((event) => event.type), ["session.start", "audio.end"]);
+  assert.deepEqual(sent.map((event) => event.type), []);
+  delete global.wx;
+});
+
+test("streaming ASR reports captured audio frame stats", async () => {
+  const recorder = recorderManagerHarness();
+  const sent = [];
+  const captureStats = [];
+  let onOpen;
+  global.wx = {
+    getRecorderManager() {
+      return recorder;
+    },
+    getStorageSync(key) {
+      if (key === "pawtale_backend_config") {
+        return {
+          httpBaseUrl: "http://backend.local:8000",
+          wsBaseUrl: "ws://backend.local:8000",
+        };
+      }
+      if (key === "pawtale_backend_cookie") {
+        return "pawtale_session=abc";
+      }
+      return "";
+    },
+    getExtConfigSync() {
+      return {};
+    },
+    setStorageSync() {},
+    removeStorageSync() {},
+    request(options) {
+      options.success({ statusCode: 200, data: { id: "user-1" }, cookies: [], header: {} });
+    },
+    connectSocket() {
+      return {
+        onOpen(callback) {
+          onOpen = callback;
+        },
+        onMessage() {},
+        onError() {},
+        onClose() {},
+        send(options) {
+          sent.push(JSON.parse(options.data));
+        },
+        close() {},
+      };
+    },
+  };
+  delete require.cache[require.resolve("../services/request.ts")];
+  delete require.cache[require.resolve("../services/memoir-voice-api.ts")];
+  delete require.cache[require.resolve("../services/memoir-streaming-asr.ts")];
+  const { MemoirStreamingAsrClient } = require("../services/memoir-streaming-asr.ts");
+  const client = new MemoirStreamingAsrClient({
+    voiceSessionId: "voice-1",
+    guidanceMode: "free_narration",
+    callbacks: {
+      onStatus() {},
+      onCaptureStats(stats) {
+        captureStats.push(stats);
+      },
+      onEvent() {},
+      onPartial() {},
+      onFinal() {},
+      onError() {},
+    },
+  });
+
+  const connectPromise = client.connect();
+  await new Promise((resolve) => setImmediate(resolve));
+  onOpen({ errMsg: "connect:ok" });
+  await connectPromise;
+  client.startRecording();
+  recorder.callbacks.start();
+  recorder.callbacks.frame({
+    frameBuffer: Uint8Array.from([1, 2, 3, 4]).buffer,
+    isLastFrame: false,
+  });
+  recorder.callbacks.frame({
+    frameBuffer: Uint8Array.from([5, 6]).buffer,
+    isLastFrame: false,
+  });
+
+  assert.deepEqual(sent.map((event) => event.type), ["session.start", "audio.frame", "audio.frame"]);
+  assert.equal(captureStats.at(-1).state, "recording");
+  assert.equal(captureStats.at(-1).frameCount, 2);
+  assert.equal(captureStats.at(-1).audioBytesSent, 6);
   delete global.wx;
 });
