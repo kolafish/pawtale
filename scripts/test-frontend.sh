@@ -23,6 +23,14 @@ fi
 echo "✅ TypeScript 类型检查通过"
 echo ""
 
+echo "🧪 前端单元测试..."
+if ! npm test; then
+    echo "❌ 前端单元测试失败"
+    exit 1
+fi
+echo "✅ 前端单元测试通过"
+echo ""
+
 echo "🏗️  Vite 构建测试（不输出文件）..."
 if ! npx vite build --mode development --logLevel error; then
     echo "❌ Vite 构建失败"

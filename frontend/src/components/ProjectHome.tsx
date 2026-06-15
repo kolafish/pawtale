@@ -2,19 +2,18 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, FolderOpen, Trash2, RefreshCw, Pencil, Check, X } from 'lucide-react';
 import { projectsApi } from '../api';
-import { formatProjectStructure, getProjectProfile, PROJECT_TYPE_OPTIONS } from '../domain/projectProfiles';
+import { formatProjectStructure, getProjectProfile } from '../domain/projectProfiles';
 import { useAppStore } from '../stores/appStore';
-import type { ProjectListItem, ProjectType } from '../types';
+import type { ProjectListItem } from '../types';
 
 export function ProjectHome() {
   const queryClient = useQueryClient();
   const { setCurrentProject, setCurrentDocumentId } = useAppStore();
   const [newTitle, setNewTitle] = useState('');
-  const [newType, setNewType] = useState<ProjectType>('novel');
   const [showCreate, setShowCreate] = useState(false);
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState('');
-  const selectedType = getProjectProfile(newType);
+  const novelProfile = getProjectProfile('novel');
 
   const { data: projects = [], isLoading } = useQuery({
     queryKey: ['projects'],
@@ -22,14 +21,13 @@ export function ProjectHome() {
   });
 
   const createMutation = useMutation({
-    mutationFn: ({ title, type }: { title: string; type: ProjectType }) => projectsApi.create({ type, title }),
+    mutationFn: ({ title }: { title: string }) => projectsApi.create({ type: 'novel', title }),
     onSuccess: (project) => {
       queryClient.invalidateQueries({ queryKey: ['projects'] });
       setCurrentProject(project);
       const firstDoc = project.groups?.[0]?.documents?.[0];
       if (firstDoc) setCurrentDocumentId(firstDoc.id);
       setNewTitle('');
-      setNewType('novel');
       setShowCreate(false);
     },
   });
@@ -99,46 +97,30 @@ export function ProjectHome() {
 
         {showCreate && (
           <div className="mb-6 rounded-2xl border border-pink-100 bg-white p-5">
-            <h3 className="text-lg font-semibold text-gray-800 mb-3">新建项目</h3>
-            <div className="mb-2 flex rounded-lg bg-gray-100 p-1">
-              {PROJECT_TYPE_OPTIONS.map((option) => (
-                <button
-                  key={option.type}
-                  type="button"
-                  onClick={() => setNewType(option.type)}
-                  className={`flex-1 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
-                    newType === option.type
-                      ? 'bg-white text-pink-600 shadow-sm'
-                      : 'text-gray-500 hover:text-gray-700'
-                  }`}
-                >
-                  {option.label}
-                </button>
-              ))}
-            </div>
-            <p className="mb-4 text-xs text-gray-500">{selectedType.description}</p>
+            <h3 className="text-lg font-semibold text-gray-800 mb-3">新建小说项目</h3>
+            <p className="mb-4 text-xs text-gray-500">{novelProfile.description}</p>
             <div className="flex flex-col gap-3 sm:flex-row">
               <input
                 value={newTitle}
                 onChange={(e) => setNewTitle(e.target.value)}
-                placeholder={selectedType.placeholder}
+                placeholder={novelProfile.placeholder}
                 autoFocus
                 className="flex-1 px-3 py-2 rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-pink-500"
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && newTitle.trim()) {
-                    createMutation.mutate({ title: newTitle.trim(), type: newType });
+                    createMutation.mutate({ title: newTitle.trim() });
                   }
                 }}
               />
               <button
-                onClick={() => newTitle.trim() && createMutation.mutate({ title: newTitle.trim(), type: newType })}
+                onClick={() => newTitle.trim() && createMutation.mutate({ title: newTitle.trim() })}
                 disabled={!newTitle.trim() || createMutation.isPending}
                 className="px-4 py-2 rounded-lg bg-pink-500 text-white hover:bg-pink-600 disabled:opacity-60 transition-colors"
               >
                 {createMutation.isPending ? <RefreshCw size={16} className="animate-spin" /> : '创建'}
               </button>
               <button
-                onClick={() => { setShowCreate(false); setNewTitle(''); setNewType('novel'); }}
+                onClick={() => { setShowCreate(false); setNewTitle(''); }}
                 className="px-4 py-2 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors"
               >
                 取消
