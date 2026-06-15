@@ -16,13 +16,13 @@ SQLite + file-backed document content
 
 WeChat Mini Program
         |
-        +-- Legacy: WeChat cloud functions + cloud database + cloud storage
-        +-- Redesign: voice gateway + streaming ASR/TTS + chat orchestration
+        +-- backend HTTP APIs + voice gateway WebSocket
+        +-- streaming ASR/TTS + chat orchestration
 ```
 
 Pawtale 当前是单仓库、前后端分离架构。后端提供项目、文档、项目资料和 AI API；前端按项目类型分发到不同 workspace，并复用一套草稿编辑和资料编辑基础能力。
 
-回忆录小程序不是 Web 工作台的移动版。当前代码仍保留 legacy 微信云函数采集链路；下一阶段小程序会改版为实时语音聊天形态，引入弱引导/强引导两种访谈模式，由 voice gateway 承接麦克风帧、Streaming ASR、LLM 动态追问和 Streaming TTS。
+回忆录小程序不是 Web 工作台的移动版。当前代码已切到实时语音聊天形态，引入弱引导/强引导两种访谈模式，由 backend voice gateway 承接麦克风帧、Streaming ASR、LLM 动态追问和 Streaming TTS。
 
 回忆录新版主线见 [docs/MEMOIR_VOICE_CHAT_REDESIGN.md](docs/MEMOIR_VOICE_CHAT_REDESIGN.md)。旧的固定问题和 memory-first v1 文档仅作为 legacy 背景和长期原则参考。
 
@@ -52,9 +52,8 @@ Pawtale 当前是单仓库、前后端分离架构。后端提供项目、文档
 
 - 微信开发者工具
 - TypeScript
-- 微信云开发环境：`cloud1-d6gmxffp0ea48aa1a`
-- 云函数：`memoir-api`
-- 云数据库 + 云存储
+- ECS/Backend HTTP API
+- WSS voice gateway
 
 ### AI
 
@@ -203,34 +202,26 @@ miniprogram/
 ├── config.ts
 ├── services/
 │   ├── request.ts
-│   ├── memoir.ts                    # legacy HTTP/cloud-function API
-│   ├── memoir-voice-session.ts      # redesign target
-│   ├── memoir-streaming-asr.ts      # redesign target
-│   └── memoir-streaming-tts.ts      # redesign target
+│   ├── auth.ts                      # ECS cookie session
+│   ├── memoir.ts                    # project and memoir HTTP APIs
+│   ├── memoir-voice-api.ts          # voice session API helpers
+│   └── memoir-streaming-asr.ts      # recorder frames + WebSocket transcript
 └── pages/
-    ├── home/                        # legacy
-    ├── question/                    # legacy
-    ├── qa/                          # legacy
-    ├── review/                      # legacy
-    ├── voice-start/                 # redesign target: project + guidance mode selection
-    ├── voice-chat/                  # redesign target: realtime transcript + voice chat
-    ├── transcript-review/           # redesign target: ASR correction + audio evidence
-    └── memoir-progress/             # redesign target: coverage + open questions
+    ├── login/                       # ECS email login/register
+    ├── home/                        # voice entry
+    ├── projects/                    # memoir project management
+    ├── voice-start/                 # guidance mode selection
+    └── voice-chat/                  # realtime transcript + voice chat
 
-cloud-functions/
-└── memoir-api/                      # legacy API and short-term identity/storage helpers
-
-backend or voice-gateway service/
-└── realtime voice WebSocket         # redesign target
+backend/app/routers/memoir/
+└── voice.py                         # voice session HTTP + WebSocket gateway
 ```
 
 边界约定：
 
-- Legacy：`miniprogram/pages/question/` 仍是固定问题、整段录音上传、离线 ASR、answer segment 的旧流程。
-- Redesign：`voice-start` 负责选择弱引导/强引导，`voice-chat` 只管理语音会话、实时字幕、聊天消息和播放状态。
+- `voice-start` 负责选择弱引导/强引导，`voice-chat` 只管理语音会话、实时字幕、聊天消息和播放状态。
 - Editing：`transcript-review` 负责回听原始语音、校正 ASR 文本和保存 transcript version；`memoir-progress` 负责展示人、事、地点、时间段、主题覆盖度。
 - Provider key 只能在后端或 voice gateway，不能进入小程序。
-- `cloud-functions/memoir-api/` 可短期保留微信身份、云存储登记和 legacy API，但实时音频长连接应由 voice gateway 承接。
 
 ## 数据模型
 

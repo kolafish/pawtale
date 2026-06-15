@@ -1,41 +1,52 @@
 # Pawtale 回忆录小程序
 
-这是 Pawtale 回忆录微信小程序。当前主线已切到实时语音聊天形态，详见 [../docs/MEMOIR_VOICE_CHAT_REDESIGN.md](../docs/MEMOIR_VOICE_CHAT_REDESIGN.md)。
-
-新版目标流程：
+当前主线是实时语音聊天形态，详见 [../docs/MEMOIR_VOICE_CHAT_REDESIGN.md](../docs/MEMOIR_VOICE_CHAT_REDESIGN.md)。
 
 ```text
-进入小程序
- -> 选择弱引导自由叙述，或强引导 AI 采访
+登录
+ -> 选择或创建回忆录
+ -> 选择自由讲述或 AI 引导
  -> 创建 voice session
- -> 用户直接说话
+ -> 通过 WSS 发送录音帧
  -> Streaming ASR 实时显示大字转写
- -> LLM 根据上下文动态追问
- -> Streaming TTS 播放 AI 回复
- -> 对话消息、原始音频和转写证据落库
+ -> 保存 voice session、chat message、utterance、音频证据
 ```
 
 ## 本地运行
 
-用微信开发者工具打开仓库根目录 `Pawtale/`。根目录的 `project.config.json` 会把 `miniprogram/` 识别为小程序根目录，并把 `cloud-functions/` 识别为云函数根目录。
+用微信开发者工具打开仓库根目录 `Pawtale/`。根目录的 `project.config.json` 会把 `miniprogram/` 识别为小程序根目录。
 
-实时语音聊天页面直连 `backend` 的 voice gateway。小程序不能直接连接 ASR/TTS provider，也不能携带 provider API key。用户原始语音是基础数据资产，后续转写校正、进度查看和成稿编辑都应回溯到原始音频和 transcript version。
+小程序直连 Pawtale backend 的 HTTP/WSS 服务，不连接 ASR/TTS provider，也不携带 provider API key。开发验证阶段 provider key 只放在 `backend/.env`。
 
-## 新版语音聊天开发配置
+## 后端配置
 
-`voice-start` / `voice-chat` 页面使用仓库里的 `backend` 服务，不经过 legacy 固定问答云函数：
+默认地址在 `miniprogram/config.ts`：
 
 ```ts
-wx.setStorageSync("pawtale_voice_backend_config", {
-  httpBaseUrl: "http://192.168.1.10:8000",
-  wsBaseUrl: "ws://192.168.1.10:8000",
-  devEmail: "local@pawtale.local",
-  devPassword: "pawtale-local",
-  devDisplayName: "本地作者",
+export const BACKEND_HTTP_BASE_URL = "https://pawtale-api.spaceflows.cn";
+export const BACKEND_WS_BASE_URL = "wss://pawtale-api.spaceflows.cn";
+```
+
+开发者工具可临时覆盖运行时配置：
+
+```ts
+wx.setStorageSync("pawtale_backend_config", {
+  httpBaseUrl: "http://127.0.0.1:8000",
+  wsBaseUrl: "ws://127.0.0.1:8000",
 });
 ```
 
-微信开发者工具本机调试可以填 `http://127.0.0.1:8000`；真机预览需要改成手机可访问的局域网地址，正式环境需要配置为 HTTPS/WSS 域名。开发态会使用这里配置的后端用户登录以取得 `pawtale_session` cookie，provider key 仍只放在 `backend/.env`。
+真机预览必须使用手机可访问的 HTTPS/WSS 域名，并在微信公众平台配置 request/socket 合法域名。
+
+## 当前页面
+
+- `pages/login`：ECS 邮箱登录和注册。
+- `pages/home`：新版语音入口和当前回忆录入口。
+- `pages/projects`：创建、切换、重命名回忆录。
+- `pages/voice-start`：选择弱引导自由讲述或强引导 AI 采访。
+- `pages/voice-chat`：实时录音、WebSocket、partial/final transcript 和本地快照恢复。
+
+旧 workbench、stories、profile、固定问答和整段录音上传页面已移除。
 
 ## 检查
 
@@ -46,36 +57,9 @@ npm run typecheck
 npm test
 ```
 
-## 微信云开发配置
+## 未完成
 
-小程序 AppID 已配置为 `wx71acdf73e2ba7067`。
-
-`config.ts` 集中管理云开发目标：
-
-```ts
-export const CLOUD_ENV_ID = "cloud1-d6gmxffp0ea48aa1a";
-export const CLOUD_FUNCTION_NAME = "memoir-api";
-```
-
-## 当前小程序 API 边界
-
-当前语音聊天入口使用：
-
-```text
-POST /api/mobile/memoir/voice-sessions
-GET  /api/mobile/memoir/voice-sessions/{voice_session_id}
-POST /api/mobile/memoir/voice-sessions/{voice_session_id}/stop
-GET  /api/mobile/memoir/voice-sessions/{voice_session_id}/gateway
-```
-
-`home`、`workbench`、`stories`、`profile` 仍会读取部分云函数 dashboard/project/memory/output 数据，用于开发期查看进度和历史素材。固定问题、整段录音上传、问答记录、旧 review/editor 页面已经从小程序入口下线。
-
-## 新版仍未包含
-
-- LLM 动态追问
-- Streaming TTS
-- 语音聊天结果的校正页和进度页
-- 云函数身份与 backend cookie 身份统一
-- accepted draft 同步到 Web 正文
-
-这些能力会在后续 PR 分别接入。
+- LLM 动态追问。
+- Streaming TTS。
+- 转写校正页、进度页、成稿编辑页。
+- 方言/噪声评测集、provider fallback、限流和成本监控。

@@ -3,7 +3,7 @@ import type {
   VoiceGatewayClientEvent,
   VoiceGatewayServerEvent,
 } from "../domain/voice-chat";
-import { voiceBackendCookieHeader, voiceGatewayUrl } from "./memoir-voice-api";
+import { backendSessionCookieHeader, voiceGatewayUrl } from "./memoir-voice-api";
 
 const STREAMING_RECORDING_DURATION_MS = 10 * 60 * 1000;
 const STREAMING_FRAME_SIZE_KB = 4;
@@ -89,7 +89,7 @@ export class MemoirStreamingAsrClient {
   async connect(): Promise<void> {
     this.closed = false;
     this.options.callbacks.onStatus("connecting");
-    const cookie = await voiceBackendCookieHeader();
+    const cookie = await backendSessionCookieHeader();
     const gatewayUrl = voiceGatewayUrl(this.options.voiceSessionId);
     await new Promise<void>((resolve, reject) => {
       let settled = false;

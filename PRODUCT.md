@@ -134,16 +134,17 @@ Layout
 
 ### 回忆录
 
-当前已有问题面板作为产品入口。长期重点是移动端和低门槛输入。
+当前小程序主线已经改为实时语音聊天。长期重点是移动端低门槛输入、原始语音资产沉淀和可回溯的记忆整理。
 
 后续可以继续加强：
 
-- 问题驱动的访谈流程
-- 语音输入和转写
-- AI 将回答整理成段落和章节
-- 小程序端优先的简化交互
+- 弱引导自由叙述和强引导 AI 采访
+- Streaming ASR 大字转写
+- LLM 动态追问和 Streaming TTS
+- 转写校正、进度查看和成稿编辑
+- 原始语音、transcript version、结构化记忆和最终文章之间的证据链
 
-回忆录微信小程序的产品边界、数据组织、页面设计和实施顺序见 [docs/MEMOIR_MINIPROGRAM_PRODUCT.md](docs/MEMOIR_MINIPROGRAM_PRODUCT.md)。小程序上线链路优先采用微信云函数、云数据库和云存储，不使用云托管作为 MVP 默认方案。
+回忆录微信小程序新版主线见 [docs/MEMOIR_VOICE_CHAT_REDESIGN.md](docs/MEMOIR_VOICE_CHAT_REDESIGN.md)。小程序通过 Pawtale backend 的 HTTP/WSS 服务访问项目、语音会话和 voice gateway，provider key 不进入小程序。
 
 回忆录长期会从“固定问题 + 回答整理”演进为记忆优先的聊天式人生采访系统。长期后台架构、结构化多层级记忆、多 agent 分工和证据链设计见 [docs/MEMOIR_MEMORY_ARCHITECTURE.md](docs/MEMOIR_MEMORY_ARCHITECTURE.md)。第一期 Memory-first Interview 的产品形态、数据结构、服务拆分和 PR 计划见 [docs/MEMOIR_MEMORY_FIRST_V1_PLAN.md](docs/MEMOIR_MEMORY_FIRST_V1_PLAN.md)。
 

@@ -9,9 +9,7 @@ import {
 export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
 const BACKEND_COOKIE_KEY = "pawtale_backend_cookie";
-const LEGACY_VOICE_BACKEND_COOKIE_KEY = "pawtale_voice_backend_cookie";
 const BACKEND_CONFIG_STORAGE_KEY = "pawtale_backend_config";
-const LEGACY_VOICE_BACKEND_CONFIG_STORAGE_KEY = "pawtale_voice_backend_config";
 
 export interface BackendRuntimeConfig {
   httpBaseUrl: string;
@@ -66,10 +64,7 @@ function storageConfigValue(key: string): BackendRuntimeConfigInput {
 }
 
 function storageConfig(): BackendRuntimeConfigInput {
-  return {
-    ...storageConfigValue(LEGACY_VOICE_BACKEND_CONFIG_STORAGE_KEY),
-    ...storageConfigValue(BACKEND_CONFIG_STORAGE_KEY),
-  };
+  return storageConfigValue(BACKEND_CONFIG_STORAGE_KEY);
 }
 
 function extConfig(): BackendRuntimeConfigInput {
@@ -79,11 +74,11 @@ function extConfig(): BackendRuntimeConfigInput {
   }
   const ext = wxWithExtConfig.getExtConfigSync();
   return {
-    httpBaseUrl: stringFromConfig(ext.backendHttpBaseUrl || ext.voiceBackendHttpBaseUrl),
-    wsBaseUrl: stringFromConfig(ext.backendWsBaseUrl || ext.voiceBackendWsBaseUrl),
-    devEmail: stringFromConfig(ext.backendDevEmail || ext.voiceBackendDevEmail),
-    devPassword: stringFromConfig(ext.backendDevPassword || ext.voiceBackendDevPassword),
-    devDisplayName: stringFromConfig(ext.backendDevDisplayName || ext.voiceBackendDevDisplayName),
+    httpBaseUrl: stringFromConfig(ext.backendHttpBaseUrl),
+    wsBaseUrl: stringFromConfig(ext.backendWsBaseUrl),
+    devEmail: stringFromConfig(ext.backendDevEmail),
+    devPassword: stringFromConfig(ext.backendDevPassword),
+    devDisplayName: stringFromConfig(ext.backendDevDisplayName),
   };
 }
 
@@ -140,16 +135,11 @@ export function writeBackendConfig(config: BackendRuntimeConfigInput): void {
 }
 
 export function readSessionCookie(): string {
-  return (
-    wx.getStorageSync<string>(BACKEND_COOKIE_KEY) ||
-    wx.getStorageSync<string>(LEGACY_VOICE_BACKEND_COOKIE_KEY) ||
-    ""
-  );
+  return wx.getStorageSync<string>(BACKEND_COOKIE_KEY) || "";
 }
 
 export function clearSessionCookie(): void {
   wx.removeStorageSync(BACKEND_COOKIE_KEY);
-  wx.removeStorageSync(LEGACY_VOICE_BACKEND_COOKIE_KEY);
 }
 
 export function cookieHeaderFromSetCookie(
@@ -171,7 +161,6 @@ function writeSessionCookie(
   const nextCookie = cookieHeaderFromSetCookie(cookies, header);
   if (nextCookie) {
     wx.setStorageSync(BACKEND_COOKIE_KEY, nextCookie);
-    wx.removeStorageSync(LEGACY_VOICE_BACKEND_COOKIE_KEY);
   }
 }
 
@@ -216,8 +205,4 @@ export function request<T>(path: string, options: RequestOptions = {}): Promise<
       },
     });
   });
-}
-
-export async function uploadFile<T>(): Promise<T> {
-  throw new ApiError(0, "ECS 文件上传接口暂未接入", {});
 }
