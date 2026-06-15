@@ -72,6 +72,7 @@ export class MemoirStreamingAsrClient {
   private socketTask: WechatMiniprogram.SocketTask | null = null;
   private socketOpen = false;
   private recording = false;
+  private recorderStarted = false;
   private acceptingFrames = false;
   private audioEndSent = false;
   private audioEnded = false;
@@ -114,11 +115,6 @@ export class MemoirStreamingAsrClient {
       this.socketTask = socketTask;
       socketTask.onOpen(() => {
         this.socketOpen = true;
-        this.sendJson({
-          type: "session.start",
-          guidance_mode: this.options.guidanceMode,
-          current_guidance_module: this.options.currentGuidanceModule,
-        });
         settle(resolve);
       });
       socketTask.onMessage((message) => {
@@ -142,25 +138,38 @@ export class MemoirStreamingAsrClient {
     });
   }
 
-  startRecording(): void {
+  startRecording(): boolean {
     if (!this.socketOpen || this.recording) {
-      return;
+      return false;
     }
     bindRecorderEvents();
     activeClient = this;
     this.recording = true;
+    this.recorderStarted = false;
     this.acceptingFrames = true;
     this.audioEndSent = false;
     this.audioEnded = false;
-    this.options.callbacks.onStatus("listening");
-    recorderManager.start({
-      duration: STREAMING_RECORDING_DURATION_MS,
-      sampleRate: 16000,
-      numberOfChannels: 1,
-      encodeBitRate: 256000,
-      format: "PCM",
-      frameSize: STREAMING_FRAME_SIZE_KB,
+    this.sessionStopped = false;
+    this.sendJson({
+      type: "session.start",
+      guidance_mode: this.options.guidanceMode,
+      current_guidance_module: this.options.currentGuidanceModule,
     });
+    this.options.callbacks.onStatus("listening");
+    try {
+      recorderManager.start({
+        duration: STREAMING_RECORDING_DURATION_MS,
+        sampleRate: 16000,
+        numberOfChannels: 1,
+        encodeBitRate: 256000,
+        format: "PCM",
+        frameSize: STREAMING_FRAME_SIZE_KB,
+      });
+    } catch (error) {
+      this.handleRecorderError(error instanceof Error ? error.message : "录音启动失败");
+      return false;
+    }
+    return true;
   }
 
   stopRecording(): void {
@@ -169,10 +178,14 @@ export class MemoirStreamingAsrClient {
     }
     this.recording = false;
     this.options.callbacks.onStatus("stopping");
-    recorderManager.stop();
-    this.recorderStopTimer = setTimeout(() => {
+    if (this.recorderStarted) {
+      recorderManager.stop();
+      this.recorderStopTimer = setTimeout(() => {
+        this.finishAudioInput();
+      }, RECORDER_STOP_FALLBACK_MS);
+    } else {
       this.finishAudioInput();
-    }, RECORDER_STOP_FALLBACK_MS);
+    }
   }
 
   async finishSession(): Promise<void> {
@@ -216,6 +229,7 @@ export class MemoirStreamingAsrClient {
   }
 
   handleRecorderStopped(): void {
+    this.recorderStarted = false;
     if (activeClient !== this || !this.acceptingFrames || this.audioEndSent) {
       return;
     }
@@ -224,10 +238,20 @@ export class MemoirStreamingAsrClient {
 
   handleRecorderError(message: string): void {
     this.recording = false;
+    this.recorderStarted = false;
+    if (this.acceptingFrames && !this.audioEndSent) {
+      this.finishAudioInput();
+    }
     this.acceptingFrames = false;
     this.rejectWaiters(message);
     this.options.callbacks.onError(message);
     this.options.callbacks.onStatus("error");
+  }
+
+  handleRecorderStarted(): void {
+    if (activeClient === this && this.recording) {
+      this.recorderStarted = true;
+    }
   }
 
   private handleSocketMessage(data: string | ArrayBuffer): void {
@@ -235,7 +259,7 @@ export class MemoirStreamingAsrClient {
     const event = normalizeVoiceGatewayEvent(raw);
     this.options.callbacks.onEvent(event);
     if (event.type === "session.ready" || event.type === "session.started") {
-      this.options.callbacks.onStatus("ready");
+      this.options.callbacks.onStatus(this.acceptingFrames ? "listening" : "ready");
       return;
     }
     if (event.type === "asr.partial") {
@@ -332,6 +356,7 @@ export class MemoirStreamingAsrClient {
     this.socketTask = null;
     this.socketOpen = false;
     this.recording = false;
+    this.recorderStarted = false;
     this.acceptingFrames = false;
     if (activeClient === this) {
       activeClient = null;
@@ -356,6 +381,9 @@ function bindRecorderEvents(): void {
   if (recorderEventsBound) {
     return;
   }
+  recorderManager.onStart(() => {
+    activeClient?.handleRecorderStarted();
+  });
   recorderManager.onFrameRecorded((result) => {
     activeClient?.handleFrame(result.frameBuffer, result.isLastFrame);
   });

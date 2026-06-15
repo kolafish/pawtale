@@ -114,10 +114,12 @@ class VoiceGatewaySession:
         return False
 
     async def _start_asr(self) -> None:
-        if self._asr_client is not None:
+        if self._asr_client is not None and not self._audio_finished:
             await self.client.send_json({"type": "session.started"})
             return
 
+        await self._close_asr_client()
+        self._audio_finished = False
         self._asr_client = self.asr_client_factory()
         await self._asr_client.start()
         if self.on_start:
@@ -153,6 +155,7 @@ class VoiceGatewaySession:
         self._audio_finished = True
         if self._terminal_error is None:
             await self.client.send_json({"type": "audio.ended"})
+        await self._close_asr_client()
 
     async def _drain_asr_events(self) -> None:
         if self._asr_task is None:
@@ -204,6 +207,9 @@ class VoiceGatewaySession:
         await self._send_error(error, detail)
 
     async def _shutdown(self) -> None:
+        await self._close_asr_client()
+
+    async def _close_asr_client(self) -> None:
         if self._asr_task is not None and not self._asr_task.done():
             self._asr_task.cancel()
             try:

@@ -1,7 +1,7 @@
 .home-page {
   min-height: 100vh;
   padding: 52rpx 36rpx 88rpx;
-  background: #f7fbf9;
+  background: #fffaf2;
 }
 
 .top-row {
@@ -14,7 +14,7 @@
 
 .hello {
   display: block;
-  color: #17221f;
+  color: #24100b;
   font-size: 42rpx;
   font-weight: 800;
   line-height: 1.2;
@@ -23,7 +23,7 @@
 .project-line {
   display: block;
   margin-top: 12rpx;
-  color: #5f6d69;
+  color: #685b55;
   font-size: 28rpx;
   line-height: 1.35;
 }
@@ -41,7 +41,7 @@
   justify-content: center;
   font-size: 26rpx;
   font-weight: 800;
-  box-shadow: 0 8rpx 22rpx rgba(37, 73, 62, 0.08);
+  box-shadow: 0 8rpx 22rpx rgba(64, 43, 24, 0.08);
 }
 
 .logout-button::after {
@@ -55,10 +55,10 @@
 .voice-panel,
 .project-card,
 .mode-strip {
-  border: 2rpx solid #d6e7df;
+  border: 2rpx solid #f0dac0;
   border-radius: 24rpx;
   background: #ffffff;
-  box-shadow: 0 16rpx 40rpx rgba(37, 73, 62, 0.08);
+  box-shadow: 0 16rpx 40rpx rgba(64, 43, 24, 0.08);
 }
 
 .voice-panel {
@@ -74,7 +74,7 @@
 .voice-title {
   display: block;
   margin-top: 26rpx;
-  color: #17221f;
+  color: #24100b;
   font-size: 52rpx;
   font-weight: 800;
   line-height: 1.18;
@@ -83,7 +83,7 @@
 .voice-copy {
   display: block;
   margin-top: 18rpx;
-  color: #5f6d69;
+  color: #685b55;
   font-size: 30rpx;
   line-height: 1.5;
 }
@@ -94,7 +94,7 @@
   margin: 42rpx 0 0;
   border: 0;
   border-radius: 28rpx;
-  background: #2e7d6b;
+  background: #9f4a3c;
   color: #ffffff;
   display: flex;
   align-items: center;
@@ -123,7 +123,7 @@
 .card-label,
 .card-meta {
   display: block;
-  color: #5f6d69;
+  color: #685b55;
   font-size: 26rpx;
   line-height: 1.3;
 }
@@ -131,7 +131,7 @@
 .card-title {
   display: block;
   margin-top: 10rpx;
-  color: #17221f;
+  color: #24100b;
   font-size: 34rpx;
   font-weight: 800;
   line-height: 1.35;
@@ -142,7 +142,7 @@
 }
 
 .chevron {
-  color: #2e7d6b;
+  color: #9f4a3c;
   font-size: 58rpx;
   line-height: 1;
 }
@@ -159,12 +159,12 @@
   min-height: 132rpx;
   padding: 24rpx;
   border-radius: 20rpx;
-  background: #e9f6f1;
+  background: #fff1ec;
 }
 
 .mode-title {
   display: block;
-  color: #1f6b59;
+  color: #7a3b31;
   font-size: 30rpx;
   font-weight: 800;
   line-height: 1.25;
@@ -173,7 +173,7 @@
 .mode-desc {
   display: block;
   margin-top: 12rpx;
-  color: #5f6d69;
+  color: #685b55;
   font-size: 25rpx;
   line-height: 1.35;
 }

@@ -11,7 +11,7 @@
     "navigationBarTitleText": "余主任留声机",
     "navigationBarBackgroundColor": "#9f4a3c",
     "navigationBarTextStyle": "white",
-    "backgroundColor": "#f6f7f9"
+    "backgroundColor": "#fffaf2"
   },
   "networkTimeout": {
     "request": 60000,
