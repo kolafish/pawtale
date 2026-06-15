@@ -1,169 +1,66 @@
-import type {
-  MemoirCoverageItem,
-  MemoirInterviewState,
-  MemoirMemoryStats,
-  MemoirOutput,
-  MemoirSessionSummary,
-  MemoirSummary,
-} from "../../domain/memoir";
-import { loadMemoirDashboard } from "../../services/memoir-dashboard";
-import {
-  answeredQuestionCount,
-  type MemoirDashboardSnapshot,
-  readMemoirDashboardSnapshot,
-  shouldRefreshMemoirDashboardSnapshot,
-} from "../../stores/memoir-cache";
+import { getMemoirIdentity, logoutBackendSession } from "../../services/auth";
+import { ApiError } from "../../services/request";
+import { replaceMemoirStore } from "../../stores/session";
 
 interface HomeData {
   loading: boolean;
-  refreshing: boolean;
-  hasDashboardData: boolean;
   error: string;
+  displayName: string;
   projectId: string;
   projectTitle: string;
-  currentPrompt: string;
-  primaryActionText: string;
-  completedCount: number;
-  weeklyStoryCount: number;
-  pendingReviewCount: number;
-  confirmedStoryCount: number;
-  progressPercent: number;
-  latestOutputPreview: string;
-  latestOutputId: string;
+  projectCount: number;
 }
 
-const HOME_EMPTY_PROMPT = "我们可以随便聊一聊，小时候、年轻时候，工作，孩子，现在的生活，随便聊点感兴趣的？";
+function userDisplayName(displayName: string, email: string): string {
+  return displayName || email.split("@", 1)[0] || "作者";
+}
 
 Page<HomeData, {
-  onLoad(): Promise<void>;
-  onShow(): void;
-  hydrateFromCache(): MemoirDashboardSnapshot;
-  applySnapshot(
-    interview: MemoirInterviewState,
-    summary: MemoirSummary,
-    coverage?: MemoirCoverageItem[],
-    outputs?: MemoirOutput[],
-    memoryStats?: MemoirMemoryStats,
-    sessionSummary?: MemoirSessionSummary | null,
-  ): void;
+  onShow(): Promise<void>;
   loadHome(): Promise<void>;
-  continueInterview(): Promise<void>;
+  startVoiceChat(): void;
   openProjects(): void;
-  openStories(): void;
-  openWorkbench(): void;
-  openHome(): void;
-  openProfile(): void;
+  logout(): Promise<void>;
 }>({
   data: {
     loading: false,
-    refreshing: false,
-    hasDashboardData: false,
     error: "",
+    displayName: "",
     projectId: "",
     projectTitle: "",
-    currentPrompt: "",
-    primaryActionText: "开始讲述",
-    completedCount: 0,
-    weeklyStoryCount: 0,
-    pendingReviewCount: 0,
-    confirmedStoryCount: 0,
-    progressPercent: 0,
-    latestOutputPreview: "",
-    latestOutputId: "",
+    projectCount: 0,
   },
 
-  async onLoad() {
-    const snapshot = this.hydrateFromCache();
-    if (shouldRefreshMemoirDashboardSnapshot(snapshot)) {
+  async onShow() {
+    if (!this.data.loading) {
       await this.loadHome();
     }
-  },
-
-  onShow() {
-    const snapshot = this.hydrateFromCache();
-    if (!this.data.refreshing && shouldRefreshMemoirDashboardSnapshot(snapshot)) {
-      void this.loadHome();
-    }
-  },
-
-  hydrateFromCache() {
-    const snapshot = readMemoirDashboardSnapshot();
-    if (!snapshot.interview || !snapshot.summary) {
-      return snapshot;
-    }
-    this.setData({
-      projectId: snapshot.project?.id || this.data.projectId,
-      projectTitle: snapshot.project?.title || this.data.projectTitle,
-    });
-    this.applySnapshot(
-      snapshot.interview,
-      snapshot.summary,
-      snapshot.coverage,
-      snapshot.outputs,
-      snapshot.memoryStats,
-      snapshot.sessionSummary,
-    );
-    return snapshot;
-  },
-
-  applySnapshot(interview, summary, coverage = [], outputs = [], memoryStats, sessionSummary = null) {
-    const completedCount = answeredQuestionCount(interview);
-    const latestOutput = outputs[0];
-    const latestOutputPreview = latestOutput?.content_preview || sessionSummary?.summary || "";
-    const coveragePercent = memoryStats?.coverage_average ?? (coverage.length
-      ? Math.round(coverage.reduce((total, item) => total + item.coverage_score, 0) / coverage.length)
-      : summary.progress_percent);
-    const pendingReviewCount = memoryStats
-      ? memoryStats.draft_memory_count + memoryStats.open_question_count
-      : summary.pending_review_count;
-    this.setData({
-      currentPrompt: HOME_EMPTY_PROMPT,
-      primaryActionText: completedCount ? "继续讲述" : "开始讲述",
-      completedCount,
-      weeklyStoryCount: memoryStats?.output_count ?? summary.weekly_story_count,
-      pendingReviewCount,
-      confirmedStoryCount: memoryStats?.confirmed_memory_count ?? summary.confirmed_story_count,
-      progressPercent: coveragePercent,
-      latestOutputPreview,
-      latestOutputId: latestOutput?.id || sessionSummary?.id || "",
-      hasDashboardData: true,
-    });
   },
 
   async loadHome() {
-    if (this.data.refreshing) {
-      return;
-    }
-    const loading = !this.data.hasDashboardData;
-    this.setData({ loading, refreshing: true, error: "" });
+    this.setData({ loading: true, error: "" });
     try {
-      const {
-        project,
-        interview,
-        summary,
-        coverage,
-        outputs,
-        memoryStats,
-        sessionSummary,
-      } = await loadMemoirDashboard();
+      const identity = await getMemoirIdentity();
       this.setData({
-        projectId: project?.id || "",
-        projectTitle: project?.title || "",
+        displayName: userDisplayName(identity.display_name, identity.email),
+        projectId: identity.active_project_id,
+        projectTitle: identity.active_project?.title || "我的回忆录",
+        projectCount: identity.projects.length,
       });
-      this.applySnapshot(interview, summary, coverage, outputs, memoryStats, sessionSummary);
     } catch (error) {
-      this.setData({ error: error instanceof Error ? error.message : "加载失败" });
+      if (error instanceof ApiError && [401, 403].includes(error.statusCode)) {
+        wx.reLaunch({ url: "/pages/login/index" });
+        return;
+      }
+      this.setData({ error: error instanceof Error ? error.message : "首页加载失败" });
     } finally {
-      this.setData({ loading: false, refreshing: false });
+      this.setData({ loading: false });
     }
   },
 
-  async continueInterview() {
+  startVoiceChat() {
     if (this.data.loading) {
       return;
-    }
-    if (!this.data.projectTitle) {
-      await this.loadHome();
     }
     wx.navigateTo({ url: "/pages/voice-start/index" });
   },
@@ -172,18 +69,19 @@ Page<HomeData, {
     wx.navigateTo({ url: "/pages/projects/index" });
   },
 
-  openStories() {
-    wx.navigateTo({ url: "/pages/stories/index" });
-  },
-
-  openWorkbench() {
-    wx.redirectTo({ url: "/pages/workbench/index" });
-  },
-
-  openHome() {
-  },
-
-  openProfile() {
-    wx.redirectTo({ url: "/pages/profile/index" });
+  async logout() {
+    if (this.data.loading) {
+      return;
+    }
+    this.setData({ loading: true, error: "" });
+    try {
+      await logoutBackendSession();
+    } catch (error) {
+      console.warn("backend logout failed", error);
+    } finally {
+      replaceMemoirStore({});
+      this.setData({ loading: false });
+      wx.reLaunch({ url: "/pages/login/index" });
+    }
   },
 });

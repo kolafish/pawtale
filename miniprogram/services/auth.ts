@@ -9,12 +9,6 @@ import {
 import { writeMemoirIdentitySnapshot } from "../stores/memoir-cache";
 import { cacheIdentityFromUser, ensureMemoirStoreIdentity } from "../stores/session";
 
-export interface WechatProfilePatch {
-  display_name?: string;
-  wechat_nickname?: string;
-  wechat_avatar_url?: string;
-}
-
 export interface BackendAuthUser {
   id: string;
   email: string;
@@ -116,15 +110,4 @@ export async function ensureBackendSession(): Promise<void> {
 export async function getMemoirIdentity(): Promise<MemoirIdentity> {
   await ensureBackendSession();
   return rememberMemoirIdentity(await request<MemoirIdentity>("/api/mobile/memoir/me"));
-}
-
-export async function uploadWechatAvatar(filePath: string, _ownerId?: string): Promise<string> {
-  if (/^https?:\/\//.test(filePath)) {
-    return filePath;
-  }
-  throw new ApiError(0, "ECS 头像上传接口暂未接入", {});
-}
-
-export async function updateWechatUserProfile(_data: WechatProfilePatch): Promise<MemoirIdentity> {
-  throw new ApiError(0, "ECS 资料编辑接口暂未接入", {});
 }

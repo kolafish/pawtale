@@ -68,7 +68,6 @@ Page<ProjectsData, {
   changeRenameTitle(event: InputEvent): void;
   saveRename(event: DatasetEvent): Promise<void>;
   cancelRename(): Promise<void>;
-  openProfile(): void;
   openHome(): void;
 }>({
   data: {
@@ -187,10 +186,6 @@ Page<ProjectsData, {
 
   async cancelRename() {
     await this.loadProjects();
-  },
-
-  openProfile() {
-    wx.redirectTo({ url: "/pages/profile/index" });
   },
 
   openHome() {

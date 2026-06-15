@@ -1,6 +1,6 @@
 <view class="projects-page">
   <view class="top-row">
-    <view class="back-hit" bindtap="openProfile">
+    <view class="back-hit" bindtap="openHome">
       <text class="back-mark">‹</text>
     </view>
     <text class="page-title">我的回忆录</text>

@@ -1,85 +1,40 @@
 <view class="home-page">
-  <view class="home-header">
-    <view class="avatar-mark">
-      <image class="avatar-logo" src="/assets/memoir-gramophone.png" mode="aspectFit" />
+  <view class="top-row">
+    <view>
+      <text class="hello">你好，{{displayName || "作者"}}</text>
+      <text class="project-line">{{projectTitle || "正在加载回忆录"}}</text>
     </view>
-    <view class="header-copy">
-      <text class="host-name">余主任留声机</text>
-      <text class="host-note">让我听听你的故事</text>
-    </view>
+    <button class="logout-button" loading="{{loading}}" disabled="{{loading}}" bindtap="logout">退出</button>
   </view>
 
   <view wx:if="{{error}}" class="error">{{error}}</view>
 
-  <view class="question-card">
-    <view class="card-label">
-      <view class="label-dot"></view>
-      <text>语音访谈</text>
-    </view>
-    <text class="question-text">{{currentPrompt}}</text>
-    <view
-      class="primary-action {{loading ? 'primary-action-disabled' : ''}}"
-      bindtap="continueInterview"
-    >
-      <image class="action-art-icon" src="/assets/memoir-microphone.png" mode="aspectFit" />
-      <text class="primary-action-text">{{loading ? "加载中" : primaryActionText}}</text>
-    </view>
+  <view class="voice-panel">
+    <image class="voice-icon" src="/assets/memoir-microphone.png" mode="aspectFit" />
+    <text class="voice-title">语音聊天</text>
+    <text class="voice-copy">边说边转写，结束后保存原始语音和文字记录。</text>
+    <button class="primary-button" loading="{{loading}}" disabled="{{loading}}" bindtap="startVoiceChat">
+      {{loading ? "加载中" : "开始"}}
+    </button>
   </view>
 
-  <view class="weekly-card" bindtap="openStories" hover-class="tap-hover">
-    <view class="clipboard-icon">
-      <view class="clip-top"></view>
-      <view class="clip-line"></view>
-      <view class="clip-line short"></view>
-    </view>
-    <view class="weekly-copy">
-      <text class="weekly-title">已整理 <text class="accent">{{hasDashboardData ? weeklyStoryCount : "..."}}</text> 个片段</text>
+  <view class="project-card" bindtap="openProjects" hover-class="tap-hover">
+    <view>
+      <text class="card-label">当前回忆录</text>
+      <text class="card-title">{{projectTitle || "我的回忆录"}}</text>
+      <text class="card-meta">共 {{projectCount}} 本</text>
     </view>
     <text class="chevron">›</text>
   </view>
 
-  <view class="progress-panel">
-    <view class="progress-row" bindtap="openProjects" hover-class="tap-hover">
-      <text>{{projectTitle || "我的回忆录"}}</text>
-      <text wx:if="{{hasDashboardData}}">{{progressPercent}}%</text>
-      <text wx:else>加载中</text>
+  <view class="mode-strip">
+    <view class="mode-item">
+      <text class="mode-title">自由讲述</text>
+      <text class="mode-desc">按自己的时间线说</text>
     </view>
-    <view class="progress-track">
-      <view class="progress-fill" style="width: {{hasDashboardData ? progressPercent : 0}}%;"></view>
-    </view>
-    <view class="mini-stats">
-      <view class="mini-stat">
-        <text class="mini-value">{{hasDashboardData ? completedCount : "..."}}</text>
-        <text class="mini-label">已讲述</text>
-      </view>
-      <view class="mini-stat">
-        <text class="mini-value">{{hasDashboardData ? pendingReviewCount : "..."}}</text>
-        <text class="mini-label">待确认</text>
-      </view>
-      <view class="mini-stat">
-        <text class="mini-value">{{hasDashboardData ? confirmedStoryCount : "..."}}</text>
-        <text class="mini-label">已确认</text>
-      </view>
-    </view>
-  </view>
-
-  <view class="latest-card" wx:if="{{latestOutputPreview}}">
-    <text class="latest-label">最近整理</text>
-    <text class="latest-text">{{latestOutputPreview}}</text>
-  </view>
-
-  <view class="bottom-nav">
-    <view class="bottom-nav-item active">
-      <view class="nav-mark home-mark"></view>
-      <text>首页</text>
-    </view>
-    <view class="bottom-nav-item" bindtap="openWorkbench">
-      <view class="nav-mark grid-mark"></view>
-      <text>工作台</text>
-    </view>
-    <view class="bottom-nav-item" bindtap="openProfile">
-      <view class="nav-mark user-mark"></view>
-      <text>我的</text>
+    <view class="mode-item">
+      <text class="mode-title">AI 引导</text>
+      <text class="mode-desc">按人物、事件、地点聊</text>
     </view>
   </view>
 </view>

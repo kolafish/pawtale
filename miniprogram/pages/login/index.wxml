@@ -1,0 +1,56 @@
+<view class="login-page">
+  <view class="brand-row">
+    <image class="brand-icon" src="/assets/memoir-gramophone.png" mode="aspectFit" />
+    <view class="brand-copy">
+      <text class="brand-title">Pawtale 回忆录</text>
+      <text class="brand-subtitle">语音访谈工作台</text>
+    </view>
+  </view>
+
+  <view class="login-panel">
+    <text class="panel-title">{{registerMode ? "创建账号" : "登录账号"}}</text>
+
+    <view wx:if="{{error}}" class="error">{{error}}</view>
+
+    <view class="field">
+      <text class="field-label">邮箱</text>
+      <input
+        class="field-input"
+        type="text"
+        value="{{email}}"
+        placeholder="name@example.com"
+        bindinput="changeEmail"
+      />
+    </view>
+
+    <view class="field">
+      <text class="field-label">密码</text>
+      <input
+        class="field-input"
+        password
+        value="{{password}}"
+        placeholder="至少 8 位"
+        bindinput="changePassword"
+      />
+    </view>
+
+    <view wx:if="{{registerMode}}" class="field">
+      <text class="field-label">昵称</text>
+      <input
+        class="field-input"
+        type="text"
+        value="{{displayName}}"
+        placeholder="本地作者"
+        bindinput="changeDisplayName"
+      />
+    </view>
+
+    <button class="primary-button" loading="{{loading}}" disabled="{{loading}}" bindtap="submit">
+      {{loading ? "处理中" : (registerMode ? "创建并进入" : "登录")}}
+    </button>
+
+    <button class="mode-button" disabled="{{loading}}" bindtap="toggleMode">
+      {{registerMode ? "已有账号，去登录" : "没有账号，创建一个"}}
+    </button>
+  </view>
+</view>
