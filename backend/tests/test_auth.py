@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.migrations.auth import migrate_auth_schema
 from app.models.users import AuthIdentity, User
+from app.services.wechat_auth import WeChatAuthError, WeChatSession
 
 
 class TestAuthAPI:
@@ -74,6 +75,177 @@ class TestAuthAPI:
 
         direct_access = await anonymous_client.get(f"/api/projects/{project_id}")
         assert direct_access.status_code == 404
+
+    async def test_wechat_login_creates_provisional_user_and_reuses_identity(
+        self,
+        anonymous_client,
+        test_db,
+        monkeypatch,
+    ):
+        calls: list[str] = []
+
+        async def fake_exchange(code: str) -> WeChatSession:
+            calls.append(code)
+            return WeChatSession(openid="wechat-openid-1", unionid="wechat-unionid-1")
+
+        monkeypatch.setattr("app.routers.auth.exchange_wechat_login_code", fake_exchange)
+
+        first = await anonymous_client.post(
+            "/api/auth/wechat-login",
+            json={"code": "code-1", "display_name": "余主任", "avatar_url": "https://avatar"},
+        )
+        assert first.status_code == 200
+        first_body = first.json()
+        first_user = first_body["user"]
+        assert first_body["needs_credentials"] is True
+        assert first_user["display_name"] == "余主任"
+        assert first_user["email"].startswith("wechat_")
+        assert first_user["email"].endswith("@wechat.local")
+        assert first_user["password_login_enabled"] is False
+
+        identity = await test_db.scalar(
+            select(AuthIdentity).where(AuthIdentity.provider_user_id == "wechat-openid-1")
+        )
+        assert identity is not None
+        assert identity.provider == "wechat_miniprogram"
+        assert identity.provider_union_id == "wechat-unionid-1"
+        assert identity.user_id == first_user["id"]
+
+        me = await anonymous_client.get("/api/auth/me")
+        assert me.status_code == 200
+        assert me.json()["id"] == first_user["id"]
+
+        await anonymous_client.post("/api/auth/logout")
+        second = await anonymous_client.post(
+            "/api/auth/wechat-login",
+            json={"code": "code-2"},
+        )
+        assert second.status_code == 200
+        assert second.json()["user"]["id"] == first_user["id"]
+        assert second.json()["needs_credentials"] is True
+        assert calls == ["code-1", "code-2"]
+
+    async def test_set_credentials_enables_web_login_for_wechat_user(
+        self,
+        anonymous_client,
+        monkeypatch,
+    ):
+        async def fake_exchange(code: str) -> WeChatSession:
+            return WeChatSession(openid=f"openid-{code}")
+
+        monkeypatch.setattr("app.routers.auth.exchange_wechat_login_code", fake_exchange)
+
+        login = await anonymous_client.post("/api/auth/wechat-login", json={"code": "new-user"})
+        assert login.status_code == 200
+        assert login.json()["needs_credentials"] is True
+
+        credentials = await anonymous_client.post(
+            "/api/auth/set-credentials",
+            json={
+                "email": "wechat-web@example.com",
+                "password": "password123",
+                "display_name": "微信 Web 用户",
+            },
+        )
+        assert credentials.status_code == 200
+        assert credentials.json()["needs_credentials"] is False
+        assert credentials.json()["user"]["email"] == "wechat-web@example.com"
+        assert credentials.json()["user"]["password_login_enabled"] is True
+
+        await anonymous_client.post("/api/auth/logout")
+        web_login = await anonymous_client.post(
+            "/api/auth/login",
+            json={"email": "wechat-web@example.com", "password": "password123"},
+        )
+        assert web_login.status_code == 200
+        assert web_login.json()["user"]["display_name"] == "微信 Web 用户"
+
+    async def test_wechat_bind_links_existing_password_user(self, anonymous_client, monkeypatch):
+        async def fake_exchange(code: str) -> WeChatSession:
+            return WeChatSession(openid="bind-openid", unionid="bind-unionid")
+
+        monkeypatch.setattr("app.routers.auth.exchange_wechat_login_code", fake_exchange)
+
+        register = await anonymous_client.post(
+            "/api/auth/register",
+            json={
+                "email": "bound@example.com",
+                "password": "password123",
+                "display_name": "已有用户",
+            },
+        )
+        assert register.status_code == 201
+        user_id = register.json()["user"]["id"]
+
+        bind = await anonymous_client.post("/api/auth/wechat-bind", json={"code": "bind-code"})
+        assert bind.status_code == 200
+        assert bind.json()["needs_credentials"] is False
+
+        await anonymous_client.post("/api/auth/logout")
+        wechat_login = await anonymous_client.post(
+            "/api/auth/wechat-login",
+            json={"code": "bind-code"},
+        )
+        assert wechat_login.status_code == 200
+        assert wechat_login.json()["user"]["id"] == user_id
+        assert wechat_login.json()["needs_credentials"] is False
+
+    async def test_set_credentials_rejects_existing_password_user(self, anonymous_client):
+        register = await anonymous_client.post(
+            "/api/auth/register",
+            json={"email": "ready@example.com", "password": "password123"},
+        )
+        assert register.status_code == 201
+
+        response = await anonymous_client.post(
+            "/api/auth/set-credentials",
+            json={"email": "new-ready@example.com", "password": "password456"},
+        )
+        assert response.status_code == 409
+        assert response.json()["detail"] == "账号已设置登录凭据"
+
+    async def test_wechat_bind_rejects_identity_bound_to_another_user(
+        self,
+        anonymous_client,
+        monkeypatch,
+    ):
+        async def fake_exchange(code: str) -> WeChatSession:
+            return WeChatSession(openid="shared-openid")
+
+        monkeypatch.setattr("app.routers.auth.exchange_wechat_login_code", fake_exchange)
+
+        first = await anonymous_client.post(
+            "/api/auth/register",
+            json={"email": "first-bind@example.com", "password": "password123"},
+        )
+        assert first.status_code == 201
+        first_bind = await anonymous_client.post("/api/auth/wechat-bind", json={"code": "same"})
+        assert first_bind.status_code == 200
+
+        await anonymous_client.post("/api/auth/logout")
+        second = await anonymous_client.post(
+            "/api/auth/register",
+            json={"email": "second-bind@example.com", "password": "password123"},
+        )
+        assert second.status_code == 201
+        conflict = await anonymous_client.post("/api/auth/wechat-bind", json={"code": "same"})
+        assert conflict.status_code == 409
+        assert conflict.json()["detail"] == "该微信已绑定其他账号"
+
+    async def test_wechat_login_rejects_empty_code(self, anonymous_client):
+        response = await anonymous_client.post("/api/auth/wechat-login", json={"code": " "})
+        assert response.status_code == 400
+        assert response.json()["detail"] == "缺少微信登录 code"
+
+    async def test_wechat_login_reports_provider_error(self, anonymous_client, monkeypatch):
+        async def fake_exchange(code: str) -> WeChatSession:
+            raise WeChatAuthError("微信小程序登录未配置")
+
+        monkeypatch.setattr("app.routers.auth.exchange_wechat_login_code", fake_exchange)
+
+        response = await anonymous_client.post("/api/auth/wechat-login", json={"code": "bad"})
+        assert response.status_code == 502
+        assert response.json()["detail"] == "微信小程序登录未配置"
 
 
 async def test_auth_identity_provider_user_is_unique(test_db):

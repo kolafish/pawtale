@@ -15,6 +15,11 @@ class Settings(BaseSettings):
     local_default_user_password: str = "pawtale-local"
     local_default_user_display_name: str = "本地作者"
 
+    # WeChat Mini Program auth
+    wechat_miniprogram_appid: str = ""
+    wechat_miniprogram_secret: str = ""
+    wechat_jscode2session_url: str = "https://api.weixin.qq.com/sns/jscode2session"
+
     # AI API Keys
     deepseek_api_key: str = ""
     deepseek_base_url: str = "https://api.deepseek.com"
