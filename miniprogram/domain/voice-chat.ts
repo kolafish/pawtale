@@ -68,6 +68,16 @@ export interface MemoirVoiceSessionCreate {
   metadata_json?: Record<string, unknown>;
 }
 
+export interface MemoirVoiceFollowUpRequest {
+  ai_model?: string;
+  regenerate?: boolean;
+}
+
+export interface MemoirVoiceFollowUpResponse {
+  message: MemoirChatMessage;
+  follow_up_text: string;
+}
+
 export type VoiceGatewayClientEvent =
   | { type: "session.start"; guidance_mode: MemoirGuidanceMode; current_guidance_module?: string }
   | { type: "audio.frame"; audio: string }
@@ -101,6 +111,7 @@ export interface VoiceChatErrorInfo {
 export interface VoiceChatTranscriptLine {
   id: string;
   text: string;
+  role?: MemoirChatMessageRole;
   message_id?: string;
   utterance_id?: string;
   audio_file_id?: string | null;

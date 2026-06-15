@@ -61,8 +61,8 @@
 }
 
 .transcript-stage {
-  min-height: 520rpx;
-  margin-top: 38rpx;
+  min-height: 460rpx;
+  margin-top: 28rpx;
   padding: 44rpx 34rpx;
   border: 2rpx solid #f0dac0;
   border-radius: 28rpx;
@@ -71,6 +71,87 @@
   display: flex;
   flex-direction: column;
   justify-content: center;
+}
+
+.assistant-panel {
+  margin-top: 24rpx;
+  padding: 30rpx;
+  border: 2rpx solid #e4c6b3;
+  border-radius: 24rpx;
+  background: #fff6f1;
+  box-shadow: 0 12rpx 32rpx rgba(64, 43, 24, 0.07);
+}
+
+.assistant-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18rpx;
+}
+
+.assistant-label {
+  color: #7a3b31;
+  font-size: 28rpx;
+  font-weight: 800;
+}
+
+.assistant-state {
+  padding: 8rpx 16rpx;
+  border-radius: 999rpx;
+  background: #ffffff;
+  color: #9f4a3c;
+  font-size: 23rpx;
+  font-weight: 800;
+}
+
+.assistant-text {
+  display: block;
+  margin-top: 18rpx;
+  color: #24100b;
+  font-size: 38rpx;
+  font-weight: 800;
+  line-height: 1.42;
+  word-break: break-word;
+}
+
+.assistant-actions {
+  margin-top: 22rpx;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.assistant-button {
+  min-width: 168rpx;
+  height: 70rpx;
+  margin: 0;
+  border: 0;
+  border-radius: 18rpx;
+  background: #ffffff;
+  color: #9f4a3c;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 26rpx;
+  font-weight: 800;
+}
+
+.assistant-button::after {
+  border: 0;
+}
+
+.assistant-button[disabled] {
+  opacity: 0.66;
+}
+
+.assistant-panel.error-state {
+  border-color: #ffd1dc;
+  background: #fff1f2;
+}
+
+.assistant-panel.error-state .assistant-label,
+.assistant-panel.error-state .assistant-state,
+.assistant-panel.error-state .assistant-text {
+  color: #be123c;
 }
 
 .stage-eyebrow {
@@ -165,6 +246,31 @@
   color: #24100b;
   font-size: 32rpx;
   line-height: 1.55;
+}
+
+.transcript-line.assistant {
+  background: #ffffff;
+  border: 2rpx solid #f0dac0;
+}
+
+.line-role {
+  display: inline-flex;
+  min-width: 52rpx;
+  height: 42rpx;
+  margin-right: 14rpx;
+  border-radius: 999rpx;
+  background: #9f4a3c;
+  color: #ffffff;
+  align-items: center;
+  justify-content: center;
+  font-size: 22rpx;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.transcript-line.assistant .line-role {
+  background: #fff1ec;
+  color: #9f4a3c;
 }
 
 .control-bar {

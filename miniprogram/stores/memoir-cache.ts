@@ -133,15 +133,16 @@ export function transcriptLinesFromVoiceSessionDetail(
       .filter((utterance) => utterance.chat_message_id)
       .map((utterance) => [utterance.chat_message_id as string, utterance]),
   );
-  const userMessages = detail.messages
-    .filter((message) => message.role === "user" && message.content_text.trim())
+  const textMessages = detail.messages
+    .filter((message) => (message.role === "user" || message.role === "assistant") && message.content_text.trim())
     .sort(compareVoiceMessages);
-  if (userMessages.length) {
-    return userMessages.map((message) => {
+  if (textMessages.length) {
+    return textMessages.map((message) => {
       const utterance = utteranceByMessageId.get(message.id);
       return {
         id: message.id,
         text: message.content_text,
+        role: message.role,
         message_id: message.id,
         utterance_id: utterance?.id,
         audio_file_id: message.audio_file_id ?? utterance?.audio_file_id,
@@ -157,6 +158,7 @@ export function transcriptLinesFromVoiceSessionDetail(
     .map((utterance) => ({
       id: utterance.chat_message_id || utterance.id,
       text: utterance.transcript_edited || utterance.transcript_raw,
+      role: "user",
       message_id: utterance.chat_message_id || undefined,
       utterance_id: utterance.id,
       audio_file_id: utterance.audio_file_id,

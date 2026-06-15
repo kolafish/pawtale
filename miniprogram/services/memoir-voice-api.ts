@@ -1,4 +1,6 @@
 import type {
+  MemoirVoiceFollowUpRequest,
+  MemoirVoiceFollowUpResponse,
   MemoirVoiceTranscriptItem,
   MemoirVoiceTranscriptListResponse,
   MemoirVoiceSessionCreate,
@@ -42,6 +44,20 @@ export async function getMemoirVoiceSession(
   await ensureBackendSession();
   return request<MemoirVoiceSessionDetail>(
     `/api/mobile/memoir/voice-sessions/${encodeURIComponent(voiceSessionId)}`,
+  );
+}
+
+export async function createMemoirVoiceFollowUp(
+  voiceSessionId: string,
+  data: MemoirVoiceFollowUpRequest = {},
+): Promise<MemoirVoiceFollowUpResponse> {
+  await ensureBackendSession();
+  return request<MemoirVoiceFollowUpResponse>(
+    `/api/mobile/memoir/voice-sessions/${encodeURIComponent(voiceSessionId)}/follow-up`,
+    {
+      method: "POST",
+      data,
+    },
   );
 }
 

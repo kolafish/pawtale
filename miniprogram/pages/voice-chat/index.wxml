@@ -18,9 +18,27 @@
     </block>
   </view>
 
+  <view wx:if="{{assistantPromptText || followUpLoading || followUpError}}" class="assistant-panel {{followUpError ? 'error-state' : ''}}">
+    <view class="assistant-head">
+      <text class="assistant-label">AI 追问</text>
+      <text class="assistant-state">{{followUpLoading ? "思考中" : (followUpError ? "追问失败" : "等待回答")}}</text>
+    </view>
+    <text class="assistant-text">{{followUpLoading ? "正在根据刚才的内容生成下一句追问" : (followUpError || assistantPromptText)}}</text>
+    <view class="assistant-actions">
+      <button
+        class="assistant-button"
+        loading="{{followUpLoading}}"
+        disabled="{{followUpLoading}}"
+        bindtap="regenerateFollowUp"
+      >
+        {{followUpError ? "重试追问" : "换个追问"}}
+      </button>
+    </view>
+  </view>
+
   <view class="transcript-stage">
-    <text class="stage-eyebrow">{{recording ? captureStateText : "准备好了"}}</text>
-    <text class="live-text">{{liveText || latestTranscriptText || (recording ? "请直接说，我会把文字显示在这里" : "点下方按钮开始说话")}}</text>
+    <text class="stage-eyebrow">{{recording ? captureStateText : (followUpLoading ? "AI 正在追问" : "准备好了")}}</text>
+    <text class="live-text">{{liveText || latestTranscriptText || (recording ? "请直接说，我会把文字显示在这里" : "点下方按钮开始回答")}}</text>
     <view class="capture-strip {{recording ? 'active' : ''}}">
       <view class="capture-dot"></view>
       <text>{{captureStateText}}</text>
@@ -35,13 +53,14 @@
 
   <view class="history-panel">
     <view class="history-header">
-      <text>已识别内容</text>
+      <text>访谈记录</text>
       <text class="history-count">{{transcriptLines.length}} 段 · {{totalTranscriptCharCount}} 字</text>
     </view>
     <view wx:if="{{!transcriptLines.length}}" class="empty-state">
       <text>一句话结束后，会在这里固定下来。</text>
     </view>
-    <view wx:for="{{transcriptLines}}" wx:key="id" class="transcript-line">
+    <view wx:for="{{transcriptLines}}" wx:key="id" class="transcript-line {{item.role === 'assistant' ? 'assistant' : 'user'}}">
+      <text class="line-role">{{item.role === 'assistant' ? 'AI' : '我'}}</text>
       <text>{{item.text}}</text>
     </view>
   </view>
@@ -50,11 +69,11 @@
     <button
       class="mic-button {{recording ? 'recording' : ''}}"
       loading="{{connecting}}"
-      disabled="{{connecting}}"
+      disabled="{{connecting || followUpLoading}}"
       bindtap="toggleRecording"
     >
       <image class="mic-icon" src="/assets/memoir-microphone.png" mode="aspectFit" />
-      <text>{{connecting ? "连接中" : primaryActionText}}</text>
+      <text>{{connecting ? "连接中" : (followUpLoading ? "AI 思考中" : primaryActionText)}}</text>
     </button>
   </view>
 </view>

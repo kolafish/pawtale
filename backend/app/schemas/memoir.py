@@ -83,6 +83,11 @@ class MemoirVoiceSessionStopRequest(BaseModel):
     error_message: str | None = None
 
 
+class MemoirVoiceFollowUpRequest(BaseModel):
+    ai_model: str | None = None
+    regenerate: bool = False
+
+
 class MemoirVoiceSessionResponse(BaseModel):
     id: str
     project_id: str
@@ -141,6 +146,11 @@ class MemoirVoiceSessionDetailResponse(BaseModel):
     session: MemoirVoiceSessionResponse
     messages: list[MemoirChatMessageResponse] = Field(default_factory=list)
     utterances: list[MemoirVoiceUtteranceResponse] = Field(default_factory=list)
+
+
+class MemoirVoiceFollowUpResponse(BaseModel):
+    message: MemoirChatMessageResponse
+    follow_up_text: str
 
 
 class MemoirVoiceTranscriptItemResponse(BaseModel):

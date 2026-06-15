@@ -10,6 +10,8 @@ from app.auth import get_current_user
 from app.database import get_db
 from app.models.users import User
 from app.schemas.memoir import (
+    MemoirVoiceFollowUpRequest,
+    MemoirVoiceFollowUpResponse,
     MemoirVoiceTranscriptCleanupRequest,
     MemoirVoiceTranscriptItemResponse,
     MemoirVoiceTranscriptListResponse,
@@ -19,6 +21,7 @@ from app.schemas.memoir import (
     MemoirVoiceSessionStopRequest,
 )
 from app.services.memoir import projects as memoir_projects
+from app.services.memoir import voice_followups as memoir_voice_followups
 from app.services.memoir import voice_sessions as memoir_voice_sessions
 from app.services.memoir import voice_transcripts as memoir_voice_transcripts
 from app.services.memoir.access import load_audio_file, load_memoir_project
@@ -94,6 +97,16 @@ async def stop_mobile_memoir_voice_session(
     current_user: User = Depends(get_current_user),
 ):
     return await memoir_voice_sessions.stop_voice_session(db, voice_session_id, current_user.id, req)
+
+
+@router.post("/voice-sessions/{voice_session_id}/follow-up", response_model=MemoirVoiceFollowUpResponse)
+async def create_mobile_memoir_voice_follow_up(
+    voice_session_id: str,
+    req: MemoirVoiceFollowUpRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await memoir_voice_followups.generate_voice_follow_up(db, voice_session_id, current_user.id, req)
 
 
 @router.get("/audio-files/{audio_file_id}/playback")
