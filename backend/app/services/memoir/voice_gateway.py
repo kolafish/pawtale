@@ -66,6 +66,7 @@ class VoiceGatewaySession:
         self._state = VoiceGatewayState.READY
         self._terminal_error: str | None = None
         self._terminal_stop = asyncio.Event()
+        self._pending_final_event: StreamingASREvent | None = None
 
     async def run(self) -> None:
         await self.client.send_json(self._event("session.ready"))
@@ -143,6 +144,7 @@ class VoiceGatewaySession:
             return
 
         await self._close_asr_client()
+        self._pending_final_event = None
         self._state = VoiceGatewayState.LISTENING
         self._asr_client = self.asr_client_factory()
         await self._asr_client.start()
@@ -187,6 +189,8 @@ class VoiceGatewaySession:
         await self._asr_client.finish()
         await self._drain_asr_events()
         if self._terminal_error is None:
+            await self._persist_pending_final_event()
+        if self._terminal_error is None:
             self._state = VoiceGatewayState.READY
             await self.client.send_json(self._event("audio.ended"))
         await self._close_asr_client()
@@ -215,15 +219,26 @@ class VoiceGatewaySession:
             await self._mark_terminal_error(event.error or "asr_provider_error", event.raw)
             return
 
-        payload: dict[str, Any] = {
-            "type": f"asr.{event.type}",
-            "state": self._state.value,
-            "text": event.text,
-            "start_ms": event.start_ms,
-            "end_ms": event.end_ms,
-            "provider_payload": event.raw,
-        }
-        if event.type == "final" and self.on_asr_final:
+        if event.type == "final":
+            self._pending_final_event = event
+            await self.client.send_json(
+                self._asr_event_payload(
+                    event,
+                    event_type="asr.partial",
+                    provider_event_type="final",
+                )
+            )
+            return
+
+        await self.client.send_json(self._asr_event_payload(event, event_type=f"asr.{event.type}"))
+
+    async def _persist_pending_final_event(self) -> None:
+        if self._pending_final_event is None:
+            return
+
+        event = self._pending_final_event
+        payload = self._asr_event_payload(event, event_type="asr.final")
+        if self.on_asr_final:
             try:
                 persisted = await self.on_asr_final(event)
             except Exception:
@@ -232,7 +247,26 @@ class VoiceGatewaySession:
                 return
             if persisted:
                 payload.update(persisted)
+        self._pending_final_event = None
         await self.client.send_json(payload)
+
+    def _asr_event_payload(
+        self,
+        event: StreamingASREvent,
+        *,
+        event_type: str,
+        **extra: Any,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "type": event_type,
+            "state": self._state.value,
+            "text": event.text,
+            "start_ms": event.start_ms,
+            "end_ms": event.end_ms,
+            "provider_payload": event.raw,
+            **extra,
+        }
+        return payload
 
     async def _send_error(self, error: str, detail: dict[str, Any] | None = None) -> None:
         payload: dict[str, Any] = self._event("session.error", error=error)

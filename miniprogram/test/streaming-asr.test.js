@@ -69,7 +69,11 @@ test("encodes ArrayBuffer audio frames as base64", () => {
 });
 
 test("normalizes invalid gateway payloads into session errors", () => {
-  const { classifyVoiceGatewayError, normalizeVoiceGatewayEvent } = streamingAsrModule();
+  const {
+    classifyVoiceClientConnectionError,
+    classifyVoiceGatewayError,
+    normalizeVoiceGatewayEvent,
+  } = streamingAsrModule();
 
   assert.deepEqual(normalizeVoiceGatewayEvent("bad"), {
     type: "session.error",
@@ -103,6 +107,23 @@ test("normalizes invalid gateway payloads into session errors", () => {
       code: "audio_stream_too_large",
       state: undefined,
       message: "本次录音超过可保存大小",
+    },
+  );
+  assert.deepEqual(
+    classifyVoiceGatewayError({ type: "session.error", state: "failed", error: "voice_gateway_auth_failed" }),
+    {
+      kind: "connection",
+      code: "voice_gateway_auth_failed",
+      state: "failed",
+      message: "登录状态已失效，请重新登录后再进入",
+    },
+  );
+  assert.deepEqual(
+    classifyVoiceClientConnectionError("server rejected WebSocket connection: HTTP 403"),
+    {
+      kind: "connection",
+      code: "voice_gateway_connection_forbidden",
+      message: "语音连接被拒绝，请返回后重新进入",
     },
   );
 
@@ -273,7 +294,7 @@ test("streaming ASR connect rejects on socket error before open", async () => {
   assert.equal(typeof onError, "function");
   onError({ errMsg: "socket failed" });
 
-  await assert.rejects(connectPromise, /socket failed/);
+  await assert.rejects(connectPromise, /语音连接失败，请重新连接/);
   delete global.wx;
 });
 
