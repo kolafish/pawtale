@@ -24,7 +24,9 @@ SERVER_ACK = 0b1011
 SERVER_ERROR_RESPONSE = 0b1111
 
 NO_SEQUENCE = 0b0000
+POS_SEQUENCE = 0b0001
 NEG_SEQUENCE = 0b0010
+NEG_SEQUENCE_1 = 0b0011
 
 JSON_SERIALIZATION = 0b0001
 GZIP_COMPRESSION = 0b0001
@@ -98,18 +100,23 @@ def create_volc_streaming_asr_client(user_id: str, voice_session_id: str) -> "Vo
     )
 
 
-def build_volc_full_request(payload: dict[str, Any]) -> bytes:
+def build_volc_full_request(payload: dict[str, Any], *, sequence: int | None = None) -> bytes:
     return _build_volc_frame(
         message_type=CLIENT_FULL_REQUEST,
-        flags=NO_SEQUENCE,
+        flags=POS_SEQUENCE if sequence is not None else NO_SEQUENCE,
+        sequence=sequence,
         payload=_serialize_payload(payload),
     )
 
 
-def build_volc_audio_request(audio: bytes, *, is_last: bool = False) -> bytes:
+def build_volc_audio_request(audio: bytes, *, is_last: bool = False, sequence: int | None = None) -> bytes:
+    flags = NEG_SEQUENCE if is_last else NO_SEQUENCE
+    if sequence is not None:
+        flags = NEG_SEQUENCE_1 if is_last else POS_SEQUENCE
     return _build_volc_frame(
         message_type=CLIENT_AUDIO_ONLY_REQUEST,
-        flags=NEG_SEQUENCE if is_last else NO_SEQUENCE,
+        flags=flags,
+        sequence=(-abs(sequence) if sequence is not None and is_last else sequence),
         payload=gzip.compress(audio),
     )
 
@@ -127,22 +134,26 @@ def parse_volc_server_message(message: bytes) -> VolcServerMessage:
     serialization = message[2] >> 4
     compression = message[2] & 0x0F
     payload = message[header_size:]
+    sequence, body_payload = _split_sequence(flags, payload)
 
     if message_type == SERVER_FULL_RESPONSE:
-        if not payload:
-            return VolcServerMessage(message_type=message_type, flags=flags)
-        body = _read_payload_body(payload)
+        if not body_payload:
+            return VolcServerMessage(message_type=message_type, flags=flags, sequence=sequence)
+        body = _read_payload_body(body_payload)
         return VolcServerMessage(
             message_type=message_type,
             flags=flags,
+            sequence=sequence,
             payload=_deserialize_payload(body, serialization, compression) if body else None,
         )
 
     if message_type == SERVER_ACK:
-        if len(payload) < 4:
+        if sequence is None and len(payload) < 4:
             raise ValueError("Volc ASR ACK frame is missing sequence")
-        sequence = int.from_bytes(payload[:4], "big", signed=True)
-        body = _read_payload_body(payload[4:]) if len(payload) >= 8 else b""
+        if sequence is None:
+            sequence = int.from_bytes(payload[:4], "big", signed=True)
+            body_payload = payload[4:]
+        body = _read_payload_body(body_payload) if len(body_payload) >= 4 else b""
         decoded_payload: dict[str, Any] | str | bytes | None = None
         if body:
             decoded_payload = _deserialize_payload(body, serialization, compression)
@@ -154,18 +165,19 @@ def parse_volc_server_message(message: bytes) -> VolcServerMessage:
         )
 
     if message_type == SERVER_ERROR_RESPONSE:
-        if len(payload) < 8:
+        if len(body_payload) < 8:
             raise ValueError("Volc ASR error frame is missing code or payload size")
-        code = int.from_bytes(payload[:4], "big", signed=False)
-        body = _read_payload_body(payload[4:])
+        code = int.from_bytes(body_payload[:4], "big", signed=False)
+        body = _read_payload_body(body_payload[4:])
         return VolcServerMessage(
             message_type=message_type,
             flags=flags,
+            sequence=sequence,
             code=code,
             payload=_deserialize_payload(body, serialization, compression),
         )
 
-    return VolcServerMessage(message_type=message_type, flags=flags, payload=payload)
+    return VolcServerMessage(message_type=message_type, flags=flags, sequence=sequence, payload=body_payload)
 
 
 def volc_message_to_event(message: VolcServerMessage) -> StreamingASREvent | None:
@@ -214,6 +226,7 @@ class VolcStreamingASRClient:
         self.voice_session_id = voice_session_id
         self.request_id = str(uuid.uuid4())
         self._connection: Any | None = None
+        self._sequence = 1
 
     async def start(self) -> None:
         self.config.validate_credentials()
@@ -224,13 +237,13 @@ class VolcStreamingASRClient:
             ping_interval=20,
             ping_timeout=20,
         )
-        await self._connection.send(build_volc_full_request(self._initial_request()))
+        await self._connection.send(build_volc_full_request(self._initial_request(), sequence=self._next_sequence()))
 
     async def send_audio(self, audio: bytes) -> None:
-        await self._send(build_volc_audio_request(audio))
+        await self._send(build_volc_audio_request(audio, sequence=self._next_sequence()))
 
     async def finish(self) -> None:
-        await self._send(build_volc_audio_request(b"", is_last=True))
+        await self._send(build_volc_audio_request(b"", is_last=True, sequence=self._next_sequence()))
 
     async def events(self) -> AsyncIterator[StreamingASREvent]:
         if self._connection is None:
@@ -297,8 +310,13 @@ class VolcStreamingASRClient:
             },
         }
 
+    def _next_sequence(self) -> int:
+        sequence = self._sequence
+        self._sequence += 1
+        return sequence
 
-def _build_volc_frame(*, message_type: int, flags: int, payload: bytes) -> bytes:
+
+def _build_volc_frame(*, message_type: int, flags: int, payload: bytes, sequence: int | None = None) -> bytes:
     header = bytes(
         [
             (PROTOCOL_VERSION << 4) | DEFAULT_HEADER_SIZE,
@@ -307,7 +325,8 @@ def _build_volc_frame(*, message_type: int, flags: int, payload: bytes) -> bytes
             0,
         ]
     )
-    return header + len(payload).to_bytes(4, "big", signed=False) + payload
+    sequence_bytes = b"" if sequence is None else sequence.to_bytes(4, "big", signed=True)
+    return header + sequence_bytes + len(payload).to_bytes(4, "big", signed=False) + payload
 
 
 def _serialize_payload(payload: dict[str, Any]) -> bytes:
@@ -323,6 +342,14 @@ def _read_payload_body(payload: bytes) -> bytes:
     if len(body) != size:
         raise ValueError("Volc ASR frame payload is truncated")
     return body
+
+
+def _split_sequence(flags: int, payload: bytes) -> tuple[int | None, bytes]:
+    if flags not in {POS_SEQUENCE, NEG_SEQUENCE, NEG_SEQUENCE_1}:
+        return None, payload
+    if len(payload) < 4:
+        raise ValueError("Volc ASR frame is missing sequence")
+    return int.from_bytes(payload[:4], "big", signed=True), payload[4:]
 
 
 def _deserialize_payload(body: bytes, serialization: int, compression: int) -> dict[str, Any] | str | bytes:
