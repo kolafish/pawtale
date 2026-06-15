@@ -1,25 +1,4 @@
-import type {
-  MemoirAnswer,
-  MemoirCoverageItem,
-  MemoirDraft,
-  MemoirEventMemory,
-  MemoirIdentity,
-  MemoirInterviewState,
-  MemoirMemoryStats,
-  MemoirOpenQuestion,
-  MemoirOutput,
-  MemoirPersonMemory,
-  MemoirPlaceMemory,
-  MemoirQuestion,
-  MemoirQuestionCandidate,
-  MemoirSessionSummary,
-  MemoirStoryCard,
-  MemoirStoryDetail,
-  MemoirSummary,
-  MemoirThemeMemory,
-  Project,
-  User,
-} from "../domain/memoir";
+import type { MemoirIdentity, Project, User } from "../domain/memoir";
 import type {
   MemoirVoiceSessionDetail,
   VoiceChatTranscriptLine,
@@ -30,28 +9,9 @@ const STORE_KEY = "pawtale_memoir_session";
 export interface MemoirSessionStore {
   cache_identity?: MemoirCacheIdentity;
   identity_cache?: MemoirCacheMetadata;
-  dashboard_cache?: MemoirCacheMetadata;
-  stories_cache?: MemoirCacheMetadata;
-  story_detail_cache?: MemoirStoryDetailCache;
   voice_session_cache?: MemoirVoiceSessionCache;
   identity?: MemoirIdentity;
   project?: Project;
-  interview?: MemoirInterviewState;
-  question?: MemoirQuestion;
-  answer?: MemoirAnswer;
-  draft?: MemoirDraft;
-  summary?: MemoirSummary;
-  sessionSummary?: MemoirSessionSummary | null;
-  people?: MemoirPersonMemory[];
-  events?: MemoirEventMemory[];
-  places?: MemoirPlaceMemory[];
-  themes?: MemoirThemeMemory[];
-  openQuestions?: MemoirOpenQuestion[];
-  coverage?: MemoirCoverageItem[];
-  candidates?: MemoirQuestionCandidate[];
-  outputs?: MemoirOutput[];
-  memoryStats?: MemoirMemoryStats;
-  stories?: MemoirStoryCard[];
   cache_write_failed_at?: string;
 }
 
@@ -65,17 +25,6 @@ export interface MemoirCacheMetadata {
   version: number;
   cached_at: string;
   stale?: boolean;
-}
-
-export interface MemoirCachedStoryDetail {
-  detail: MemoirStoryDetail;
-  cached_at: string;
-  stale?: boolean;
-}
-
-export interface MemoirStoryDetailCache {
-  version: number;
-  details: Record<string, MemoirCachedStoryDetail>;
 }
 
 export interface MemoirCachedVoiceSession {
@@ -99,14 +48,13 @@ function persistMemoirStore(store: MemoirSessionStore): MemoirSessionStore {
     wx.setStorageSync(STORE_KEY, store);
     return store;
   } catch {
-    if (!store.story_detail_cache && !store.voice_session_cache) {
+    if (!store.voice_session_cache) {
       return {
         ...store,
         cache_write_failed_at: new Date().toISOString(),
       };
     }
     const fallback = { ...store };
-    delete fallback.story_detail_cache;
     delete fallback.voice_session_cache;
     fallback.cache_write_failed_at = new Date().toISOString();
     try {
@@ -132,7 +80,10 @@ export function replaceMemoirStore(next: MemoirSessionStore): MemoirSessionStore
   return persistMemoirStore(next);
 }
 
-export function cacheIdentityFromUser(user: Pick<User, "id" | "storage_owner_id">, project?: Pick<Project, "id">): MemoirCacheIdentity {
+export function cacheIdentityFromUser(
+  user: Pick<User, "id" | "storage_owner_id">,
+  project?: Pick<Project, "id">,
+): MemoirCacheIdentity {
   return {
     user_id: user.id,
     storage_owner_id: user.storage_owner_id,
@@ -163,13 +114,8 @@ export function ensureMemoirStoreIdentity(identity: MemoirCacheIdentity): Memoir
   const hasCachedMemoirData = Boolean(
     current.project
     || current.identity
-    || current.interview
     || current.identity_cache
-    || current.dashboard_cache
-    || current.stories_cache
-    || current.story_detail_cache
-    || current.voice_session_cache
-    || current.stories,
+    || current.voice_session_cache,
   );
   if (!current.cache_identity && hasCachedMemoirData) {
     return replaceMemoirStore({ cache_identity: identity });
@@ -190,31 +136,4 @@ export function ensureMemoirStoreIdentity(identity: MemoirCacheIdentity): Memoir
     return current;
   }
   return writeMemoirStore({ cache_identity: nextIdentity });
-}
-
-export function clearMemoirDraft(): void {
-  const current = readMemoirStore();
-  replaceMemoirStore({
-    cache_identity: current.cache_identity,
-    identity: current.identity,
-    identity_cache: current.identity_cache,
-    project: current.project,
-    interview: current.interview,
-    summary: current.summary,
-    sessionSummary: current.sessionSummary,
-    people: current.people,
-    events: current.events,
-    places: current.places,
-    themes: current.themes,
-    openQuestions: current.openQuestions,
-    coverage: current.coverage,
-    candidates: current.candidates,
-    outputs: current.outputs,
-    memoryStats: current.memoryStats,
-    stories: current.stories,
-    dashboard_cache: current.dashboard_cache,
-    stories_cache: current.stories_cache,
-    story_detail_cache: current.story_detail_cache,
-    voice_session_cache: current.voice_session_cache,
-  });
 }

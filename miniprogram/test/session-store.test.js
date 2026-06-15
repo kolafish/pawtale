@@ -45,21 +45,12 @@ function memoirCacheModule() {
   return require("../stores/memoir-cache.ts");
 }
 
-test("writeMemoirStore persists fallback when story detail cache is too large", () => {
+test("writeMemoirStore persists fallback when voice session cache is too large", () => {
   const mock = installWxStorageMock({}, 1);
   const { replaceMemoirStore } = sessionStoreModule();
 
   const result = replaceMemoirStore({
     cache_identity: { user_id: "user-1", project_id: "project-1" },
-    story_detail_cache: {
-      version: 3,
-      details: {
-        answer_1: {
-          detail: { answer: { id: "answer_1" } },
-          cached_at: "2026-06-08T00:00:00.000Z",
-        },
-      },
-    },
     voice_session_cache: {
       version: 3,
       sessions: {
@@ -72,7 +63,6 @@ test("writeMemoirStore persists fallback when story detail cache is too large", 
   });
 
   assert.equal(mock.writes.length, 2);
-  assert.equal(result.story_detail_cache, undefined);
   assert.equal(result.voice_session_cache, undefined);
   assert.equal(typeof result.cache_write_failed_at, "string");
   assert.deepEqual(mock.storage[STORE_KEY], result);

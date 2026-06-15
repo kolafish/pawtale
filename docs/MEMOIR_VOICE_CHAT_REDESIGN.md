@@ -516,6 +516,8 @@ PR5 后仍未完成、不能按上线态理解的缺口：
 - 固定问题主入口已移除。
 - 小程序旧 `workbench`、`stories`、`profile`、固定问答、旧 review/editor 页面已下线。
 - 旧 answer-session 草稿 store、旧非实时录音上传 service 已删除。
+- 小程序端旧 dashboard/stories/review 缓存、类型和 API wrapper 已删除。
+- Backend mobile API 仅保留身份、项目管理和 voice session 链路；旧固定访谈、离线整理、stories、coverage、outputs mobile endpoints 已下线。
 - 微信云函数链路已删除；旧版只能通过 baseline commit 追溯。
 - 后续删除不再使用的 TTS source type，并把进度、校正、成稿编辑迁移到 voice session 数据。
 

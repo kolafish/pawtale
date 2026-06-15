@@ -1,20 +1,23 @@
 async def test_mobile_memoir_routes_require_login(anonymous_client):
-    response = await anonymous_client.get("/api/mobile/memoir/project")
+    response = await anonymous_client.get("/api/mobile/memoir/me")
 
     assert response.status_code == 401
 
 
-async def test_mobile_memoir_project_is_created_once(client):
-    first = await client.get("/api/mobile/memoir/project")
-    second = await client.get("/api/mobile/memoir/project")
+async def test_mobile_memoir_default_project_is_created_once(client):
+    first = await client.get("/api/mobile/memoir/projects")
+    second = await client.get("/api/mobile/memoir/projects")
 
     assert first.status_code == 200
     assert second.status_code == 200
-    assert first.json()["id"] == second.json()["id"]
-    assert first.json()["type"] == "memoir"
-    assert first.json()["title"] == "我的回忆录"
-    assert first.json()["groups"][0]["name"] == "回忆片段"
-    assert first.json()["groups"][0]["documents"][0]["name"] == "第一次记录"
+    first_data = first.json()
+    second_data = second.json()
+    assert first_data["active_project_id"] == second_data["active_project_id"]
+    assert len(first_data["projects"]) == 1
+    assert first_data["projects"][0]["type"] == "memoir"
+    assert first_data["projects"][0]["title"] == "我的回忆录"
+    assert first_data["projects"][0]["groups"][0]["name"] == "回忆片段"
+    assert first_data["projects"][0]["groups"][0]["documents"][0]["name"] == "第一次记录"
 
 
 async def test_mobile_memoir_identity_includes_active_project(client):
@@ -66,70 +69,42 @@ async def test_mobile_memoir_projects_can_be_created_updated_and_activated(clien
     assert activated["active_project"]["title"] == "我的回忆录"
 
 
-async def test_mobile_memoir_current_session_initializes_questions(client):
-    response = await client.get("/api/mobile/memoir/sessions/current")
-
-    assert response.status_code == 200
-    data = response.json()
-    assert data["session"]["status"] == "active"
-    assert data["current_question"]["id"] == data["session"]["current_question_id"]
-    assert data["completed_question_count"] == 0
-    assert data["pending_question_count"] == 5
-    assert len(data["questions"]) == 5
-
-
-async def test_mobile_memoir_can_create_custom_session(client):
-    response = await client.post(
-        "/api/mobile/memoir/sessions",
-        json={"title": "童年"},
-    )
-
-    assert response.status_code == 201
-    data = response.json()
-    assert data["session"]["title"] == "童年"
-    assert data["current_question"] is not None
-
-
-async def test_mobile_memoir_dashboard_returns_ecs_backend_snapshot(client):
-    response = await client.get("/api/mobile/memoir/dashboard")
-
-    assert response.status_code == 200
-    data = response.json()
-    assert data["project"]["type"] == "memoir"
-    assert data["interview"]["session"]["status"] == "active"
-    assert data["summary"]["total_question_count"] == 5
-    assert len(data["coverage"]) > 0
-    assert data["memory_stats"] == {
-        "total_memory_count": 0,
-        "draft_memory_count": 0,
-        "confirmed_memory_count": 0,
-        "rejected_memory_count": 0,
-        "open_question_count": 0,
-        "asked_open_question_count": 0,
-        "answered_open_question_count": 0,
-        "dismissed_open_question_count": 0,
-        "question_candidate_count": 0,
-        "output_count": 0,
-        "coverage_average": 0,
-        "low_coverage_count": len(data["coverage"]),
-    }
-
-
-async def test_mobile_memoir_legacy_write_routes_are_removed(client):
-    session_response = await client.get("/api/mobile/memoir/sessions/current")
-    question_id = session_response.json()["current_question"]["id"]
-
-    requests = [
-        client.post("/api/mobile/memoir/answers", json={"question_id": question_id, "text": "旧回答"}),
-        client.patch("/api/mobile/memoir/answers/legacy-answer", json={"text": "旧编辑"}),
-        client.post("/api/mobile/memoir/answers/legacy-answer/draft", json={}),
-        client.patch("/api/mobile/memoir/drafts/legacy-draft", json={"content_edited": "旧草稿"}),
-        client.post("/api/mobile/memoir/drafts/legacy-draft/accept"),
-        client.post("/api/mobile/memoir/audio-files", json={}),
-        client.post(f"/api/mobile/memoir/questions/{question_id}/skip"),
-        client.post("/api/mobile/memoir/question-candidates/legacy-candidate/select"),
+async def test_mobile_memoir_legacy_routes_are_removed(client):
+    legacy_requests = [
+        ("GET", "/api/mobile/memoir/project", None),
+        ("GET", "/api/mobile/memoir/dashboard", None),
+        ("POST", "/api/mobile/memoir/sessions", {"title": "童年"}),
+        ("GET", "/api/mobile/memoir/sessions/current", None),
+        ("POST", "/api/mobile/memoir/sessions/legacy-session/process", {}),
+        ("GET", "/api/mobile/memoir/sessions/legacy-session/summary", None),
+        ("GET", "/api/mobile/memoir/questions/next", None),
+        ("POST", "/api/mobile/memoir/answers", {"question_id": "legacy-question", "text": "旧回答"}),
+        ("PATCH", "/api/mobile/memoir/answers/legacy-answer", {"text": "旧编辑"}),
+        ("POST", "/api/mobile/memoir/answers/legacy-answer/draft", {}),
+        ("PATCH", "/api/mobile/memoir/drafts/legacy-draft", {"content_edited": "旧草稿"}),
+        ("POST", "/api/mobile/memoir/drafts/legacy-draft/accept", None),
+        ("POST", "/api/mobile/memoir/audio-files", {}),
+        ("POST", "/api/mobile/memoir/questions/legacy-question/skip", None),
+        ("GET", "/api/mobile/memoir/memories/people", None),
+        ("GET", "/api/mobile/memoir/memories/events", None),
+        ("GET", "/api/mobile/memoir/memories/places", None),
+        ("GET", "/api/mobile/memoir/memories/themes", None),
+        ("PATCH", "/api/mobile/memoir/memories/person/legacy-memory", {"status": "confirmed"}),
+        ("GET", "/api/mobile/memoir/open-questions", None),
+        ("PATCH", "/api/mobile/memoir/open-questions/legacy-question", {"status": "dismissed"}),
+        ("GET", "/api/mobile/memoir/coverage", None),
+        ("POST", "/api/mobile/memoir/coverage/recalculate", None),
+        ("GET", "/api/mobile/memoir/question-candidates", None),
+        ("POST", "/api/mobile/memoir/question-candidates/generate", None),
+        ("POST", "/api/mobile/memoir/question-candidates/legacy-candidate/select", None),
+        ("GET", "/api/mobile/memoir/outputs", None),
+        ("GET", "/api/mobile/memoir/outputs/legacy-output", None),
+        ("GET", "/api/mobile/memoir/summary", None),
+        ("GET", "/api/mobile/memoir/stories", None),
+        ("GET", "/api/mobile/memoir/stories/legacy-answer", None),
     ]
 
-    responses = [await request for request in requests]
-
-    assert [response.status_code for response in responses] == [404] * len(responses)
+    for method, path, body in legacy_requests:
+        request = getattr(client, method.lower())
+        response = await request(path, json=body) if body is not None else await request(path)
+        assert response.status_code == 404, f"{method} {path}"

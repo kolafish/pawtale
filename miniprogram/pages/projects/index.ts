@@ -6,7 +6,6 @@ import {
   listMemoirProjects,
   updateMemoirProject,
 } from "../../services/memoir";
-import { markMemoirDataSnapshotsStale } from "../../stores/memoir-cache";
 
 interface DatasetEvent {
   currentTarget: {
@@ -110,7 +109,6 @@ Page<ProjectsData, {
     try {
       const project = await createMemoirProject();
       await getMemoirIdentity();
-      markMemoirDataSnapshotsStale();
       wx.showToast({ title: "已创建", icon: "success" });
       await this.loadProjects(project.id, project.title);
     } catch (error) {
@@ -129,7 +127,6 @@ Page<ProjectsData, {
     try {
       await activateMemoirProject(id);
       await getMemoirIdentity();
-      markMemoirDataSnapshotsStale();
       wx.showToast({ title: "已切换", icon: "success" });
       await this.loadProjects();
     } catch (error) {
@@ -174,7 +171,6 @@ Page<ProjectsData, {
     try {
       await updateMemoirProject(id, { title });
       await getMemoirIdentity();
-      markMemoirDataSnapshotsStale();
       wx.showToast({ title: "已保存", icon: "success" });
       await this.loadProjects();
     } catch (error) {
