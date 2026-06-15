@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
+from sqlalchemy.schema import Table
 
 from app.database import Base, register_models
 
@@ -15,6 +16,18 @@ REALTIME_VOICE_TABLES = (
 )
 
 
+def _memoir_voice_tables_from_metadata() -> tuple[Table, ...]:
+    register_models()
+    return tuple(Base.metadata.tables[table_name] for table_name in REALTIME_VOICE_TABLES)
+
+
+def expected_memoir_voice_schema() -> dict[str, list[str]]:
+    return {
+        table.name: list(table.columns.keys())
+        for table in _memoir_voice_tables_from_metadata()
+    }
+
+
 async def _table_columns(conn, table: str) -> set[str]:
     result = await conn.execute(text(f"PRAGMA table_info({table})"))
     return {row[1] for row in result.fetchall()}
@@ -26,6 +39,30 @@ async def _table_exists(conn, table: str) -> bool:
         {"table": table},
     )
     return result.scalar_one_or_none() is not None
+
+
+async def describe_memoir_voice_schema(engine: AsyncEngine) -> dict[str, list[str]]:
+    actual: dict[str, list[str]] = {}
+    async with engine.begin() as conn:
+        for table_name in REALTIME_VOICE_TABLES:
+            if not await _table_exists(conn, table_name):
+                actual[table_name] = []
+                continue
+            result = await conn.execute(text(f"PRAGMA table_info({table_name})"))
+            actual[table_name] = [row[1] for row in result.fetchall()]
+    return actual
+
+
+async def rebuild_memoir_voice_schema(engine: AsyncEngine) -> None:
+    """Drop and recreate only realtime voice tables for development resets."""
+    tables = _memoir_voice_tables_from_metadata()
+    async with engine.begin() as conn:
+        await conn.execute(text("PRAGMA foreign_keys=OFF"))
+        for table in reversed(tables):
+            await conn.run_sync(lambda sync_conn, table=table: table.drop(sync_conn, checkfirst=True))
+        for table in tables:
+            await conn.run_sync(lambda sync_conn, table=table: table.create(sync_conn, checkfirst=True))
+        await conn.execute(text("PRAGMA foreign_keys=ON"))
 
 
 async def migrate_memoir_voice_schema(engine: AsyncEngine) -> dict[str, list[str]]:
@@ -55,13 +92,10 @@ async def migrate_memoir_voice_schema(engine: AsyncEngine) -> dict[str, list[str
 
 
 async def assert_memoir_voice_schema(engine: AsyncEngine) -> None:
-    register_models()
-    expected_columns = {
-        table_name: set(Base.metadata.tables[table_name].columns.keys())
-        for table_name in REALTIME_VOICE_TABLES
-    }
+    expected_columns = {table: set(columns) for table, columns in expected_memoir_voice_schema().items()}
     missing_tables: list[str] = []
     missing_columns: list[str] = []
+    unexpected_columns: list[str] = []
 
     async with engine.begin() as conn:
         for table_name, expected in expected_columns.items():
@@ -73,11 +107,17 @@ async def assert_memoir_voice_schema(engine: AsyncEngine) -> None:
                 f"{table_name}.{column}"
                 for column in sorted(expected - actual)
             )
+            unexpected_columns.extend(
+                f"{table_name}.{column}"
+                for column in sorted(actual - expected)
+            )
 
-    if missing_tables or missing_columns:
+    if missing_tables or missing_columns or unexpected_columns:
         details: list[str] = []
         if missing_tables:
             details.append(f"missing tables: {', '.join(sorted(missing_tables))}")
         if missing_columns:
             details.append(f"missing columns: {', '.join(sorted(missing_columns))}")
+        if unexpected_columns:
+            details.append(f"unexpected columns: {', '.join(sorted(unexpected_columns))}")
         raise RuntimeError("Memoir realtime voice schema mismatch; " + "; ".join(details))
