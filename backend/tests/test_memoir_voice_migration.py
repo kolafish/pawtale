@@ -120,6 +120,42 @@ async def test_memoir_voice_schema_assertion_reports_unexpected_columns():
         await engine.dispose()
 
 
+async def test_memoir_voice_schema_assertion_reports_nullable_mismatch():
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
+    try:
+        await rebuild_memoir_voice_schema(engine)
+        async with engine.begin() as conn:
+            await conn.execute(text("DROP TABLE memoir_transcript_versions"))
+            await conn.execute(
+                text(
+                    """
+                    CREATE TABLE memoir_transcript_versions (
+                        id VARCHAR(36) NOT NULL,
+                        answer_id VARCHAR(36) NOT NULL,
+                        voice_session_id VARCHAR(36),
+                        source_artifact_id VARCHAR(36),
+                        version_type VARCHAR(30) NOT NULL,
+                        content TEXT NOT NULL,
+                        provider VARCHAR(100),
+                        confidence FLOAT,
+                        created_by VARCHAR(20) NOT NULL,
+                        created_at DATETIME NOT NULL,
+                        PRIMARY KEY (id)
+                    )
+                    """
+                )
+            )
+
+        with pytest.raises(RuntimeError) as exc_info:
+            await assert_memoir_voice_schema(engine)
+
+        message = str(exc_info.value)
+        assert "column mismatches:" in message
+        assert "memoir_transcript_versions.answer_id.nullable expected=True actual=False" in message
+    finally:
+        await engine.dispose()
+
+
 async def test_rebuild_memoir_voice_schema_restores_exact_model_columns():
     engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
     try:

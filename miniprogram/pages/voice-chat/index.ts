@@ -351,7 +351,7 @@ Page<VoiceChatData, {
     if (event.type === "audio.ended") {
       nextData.recording = false;
       nextData.primaryActionText = "继续说话";
-      nextData.persistenceStateText = "正在保存";
+      nextData.persistenceStateText = this.data.persistenceStateText === "已保存" ? "已保存" : "正在保存";
     }
     if (event.type === "session.started") {
       nextData.persistenceStateText = "等待识别";
