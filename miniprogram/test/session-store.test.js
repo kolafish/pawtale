@@ -162,8 +162,20 @@ test("voice session snapshots persist backend detail as transcript lines", () =>
 
   assert.deepEqual(transcriptLinesFromVoiceSessionDetail(detail), [
     {
+      id: "assistant-1",
+      text: "你想先聊谁？",
+      role: "assistant",
+      message_id: "assistant-1",
+      utterance_id: undefined,
+      audio_file_id: undefined,
+      transcript_version_id: undefined,
+      start_ms: undefined,
+      end_ms: undefined,
+    },
+    {
       id: "message-1",
       text: "我想聊我的外婆。",
+      role: "user",
       message_id: "message-1",
       utterance_id: "utterance-1",
       audio_file_id: "audio-1",
@@ -179,8 +191,9 @@ test("voice session snapshots persist backend detail as transcript lines", () =>
   assert.equal(snapshot.hasSession, true);
   assert.equal(snapshot.isFresh, true);
   assert.equal(snapshot.detail.session.guidance_mode, "guided_interview");
-  assert.equal(snapshot.transcriptLines.length, 1);
-  assert.equal(snapshot.transcriptLines[0].text, "我想聊我的外婆。");
+  assert.equal(snapshot.transcriptLines.length, 2);
+  assert.equal(snapshot.transcriptLines[0].text, "你想先聊谁？");
+  assert.equal(snapshot.transcriptLines[1].text, "我想聊我的外婆。");
   assert.equal(mock.storage[STORE_KEY].voice_session_cache.version, 3);
 });
 

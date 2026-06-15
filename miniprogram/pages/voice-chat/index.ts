@@ -12,7 +12,7 @@ import {
   type MemoirCaptureStats,
   type VoiceChatConnectionStatus,
 } from "../../services/memoir-streaming-asr";
-import { getMemoirVoiceSession } from "../../services/memoir-voice-api";
+import { createMemoirVoiceFollowUp, getMemoirVoiceSession } from "../../services/memoir-voice-api";
 import {
   readMemoirVoiceSessionSnapshot,
   transcriptLinesFromVoiceSessionDetail,
@@ -31,6 +31,10 @@ interface VoiceChatData {
   liveText: string;
   latestTranscriptText: string;
   transcriptLines: VoiceChatTranscriptLine[];
+  assistantPromptText: string;
+  followUpLoading: boolean;
+  followUpError: string;
+  lastFollowUpSourceMessageId: string;
   modeLabel: string;
   primaryActionText: string;
   captureStateText: string;
@@ -45,6 +49,7 @@ interface VoiceChatData {
 }
 
 let streamingClient: MemoirStreamingAsrClient | null = null;
+let followUpRequestSerial = 0;
 
 function modeLabel(mode: MemoirGuidanceMode): string {
   return mode === "guided_interview" ? "AI 引导" : "自由讲述";
@@ -91,7 +96,19 @@ function errorKindText(error?: VoiceChatErrorInfo): string {
 }
 
 function latestTranscriptText(lines: VoiceChatTranscriptLine[]): string {
-  return lines.length ? lines[lines.length - 1].text : "";
+  const userLines = lines.filter((line) => (line.role || "user") === "user");
+  return userLines.length ? userLines[userLines.length - 1].text : "";
+}
+
+function latestAssistantText(lines: VoiceChatTranscriptLine[]): string {
+  const assistantLines = lines.filter((line) => line.role === "assistant");
+  return assistantLines.length ? assistantLines[assistantLines.length - 1].text : "";
+}
+
+function latestUserMessageId(lines: VoiceChatTranscriptLine[]): string {
+  const userLines = lines.filter((line) => (line.role || "user") === "user");
+  const latest = userLines[userLines.length - 1];
+  return latest?.message_id || latest?.id || "";
 }
 
 function countTextChars(text: string): number {
@@ -99,7 +116,9 @@ function countTextChars(text: string): number {
 }
 
 function totalTranscriptChars(lines: VoiceChatTranscriptLine[]): number {
-  return lines.reduce((total, line) => total + countTextChars(line.text), 0);
+  return lines
+    .filter((line) => (line.role || "user") === "user")
+    .reduce((total, line) => total + countTextChars(line.text), 0);
 }
 
 function formatDuration(milliseconds: number): string {
@@ -130,6 +149,9 @@ Page<VoiceChatData, {
   refreshVoiceSessionSnapshot(): Promise<void>;
   applyVoiceSessionDetail(detail: MemoirVoiceSessionDetail): void;
   persistCurrentTranscriptSnapshot(): void;
+  maybeGenerateOpeningFollowUp(): void;
+  generateFollowUp(regenerate?: boolean): Promise<void>;
+  regenerateFollowUp(): Promise<void>;
   connectGateway(): Promise<void>;
   toggleRecording(): void;
   finishSession(): Promise<void>;
@@ -152,6 +174,10 @@ Page<VoiceChatData, {
     liveText: "",
     latestTranscriptText: "",
     transcriptLines: [],
+    assistantPromptText: "",
+    followUpLoading: false,
+    followUpError: "",
+    lastFollowUpSourceMessageId: "",
     modeLabel: "自由讲述",
     primaryActionText: "开始说话",
     captureStateText: "麦克风未开始",
@@ -185,6 +211,7 @@ Page<VoiceChatData, {
   },
 
   onUnload() {
+    followUpRequestSerial += 1;
     this.persistCurrentTranscriptSnapshot();
     streamingClient?.close();
     streamingClient = null;
@@ -203,6 +230,7 @@ Page<VoiceChatData, {
       modeLabel: modeLabel(guidanceMode),
       transcriptLines: snapshot.transcriptLines,
       latestTranscriptText: latestTranscriptText(snapshot.transcriptLines),
+      assistantPromptText: latestAssistantText(snapshot.transcriptLines),
       totalTranscriptCharCount: totalTranscriptChars(snapshot.transcriptLines),
     });
   },
@@ -215,6 +243,7 @@ Page<VoiceChatData, {
       const detail = await getMemoirVoiceSession(this.data.voiceSessionId);
       writeMemoirVoiceSessionSnapshot(this.data.voiceSessionId, { detail });
       this.applyVoiceSessionDetail(detail);
+      this.maybeGenerateOpeningFollowUp();
     } catch (error) {
       console.warn("refresh voice session snapshot failed", error);
     }
@@ -233,6 +262,7 @@ Page<VoiceChatData, {
       modeLabel: modeLabel(guidanceMode),
       transcriptLines: nextLines,
       latestTranscriptText: latestTranscriptText(nextLines),
+      assistantPromptText: latestAssistantText(nextLines),
       totalTranscriptCharCount: totalTranscriptChars(nextLines),
     });
   },
@@ -244,6 +274,71 @@ Page<VoiceChatData, {
     writeMemoirVoiceSessionSnapshot(this.data.voiceSessionId, {
       transcriptLines: this.data.transcriptLines,
     });
+  },
+
+  maybeGenerateOpeningFollowUp() {
+    if (this.data.guidanceMode !== "guided_interview" || this.data.followUpLoading) {
+      return;
+    }
+    const hasAnyLine = this.data.transcriptLines.some((line) => line.text.trim());
+    if (!hasAnyLine) {
+      void this.generateFollowUp(false);
+    }
+  },
+
+  async generateFollowUp(regenerate = false) {
+    if (!this.data.voiceSessionId || this.data.followUpLoading) {
+      return;
+    }
+    const sourceMessageId = latestUserMessageId(this.data.transcriptLines) || "opening";
+    if (!regenerate && this.data.lastFollowUpSourceMessageId === sourceMessageId) {
+      return;
+    }
+    const requestSerial = followUpRequestSerial + 1;
+    followUpRequestSerial = requestSerial;
+    this.setData({
+      followUpLoading: true,
+      followUpError: "",
+      persistenceStateText: "AI 思考中",
+    });
+    try {
+      const response = await createMemoirVoiceFollowUp(this.data.voiceSessionId, { regenerate });
+      if (requestSerial !== followUpRequestSerial) {
+        return;
+      }
+      const line: VoiceChatTranscriptLine = {
+        id: response.message.id,
+        role: response.message.role,
+        text: response.message.content_text,
+        message_id: response.message.id,
+        transcript_version_id: response.message.transcript_version_id,
+      };
+      const transcriptLines = upsertTranscriptLine(this.data.transcriptLines, line);
+      this.setData({
+        transcriptLines,
+        assistantPromptText: response.follow_up_text,
+        totalTranscriptCharCount: totalTranscriptChars(transcriptLines),
+        persistenceStateText: "等待回答",
+        lastFollowUpSourceMessageId: sourceMessageId,
+      });
+      writeMemoirVoiceSessionSnapshot(this.data.voiceSessionId, { transcriptLines });
+    } catch (error) {
+      if (requestSerial !== followUpRequestSerial) {
+        return;
+      }
+      this.setData({
+        followUpError: error instanceof Error ? error.message : "AI 追问生成失败",
+        persistenceStateText: "追问失败",
+      });
+    } finally {
+      if (requestSerial === followUpRequestSerial) {
+        this.setData({ followUpLoading: false });
+      }
+    }
+  },
+
+  async regenerateFollowUp() {
+    await this.generateFollowUp(true);
   },
 
   async connectGateway() {
@@ -381,6 +476,7 @@ Page<VoiceChatData, {
     const line: VoiceChatTranscriptLine = {
       id: event.message_id || event.utterance_id || `${Date.now()}-${this.data.transcriptLines.length}`,
       text,
+      role: "user",
       message_id: event.message_id,
       utterance_id: event.utterance_id,
       audio_file_id: event.audio_file_id,
@@ -402,6 +498,9 @@ Page<VoiceChatData, {
       errorKindText: "",
     });
     writeMemoirVoiceSessionSnapshot(this.data.voiceSessionId, { transcriptLines });
+    if (event.message_id) {
+      void this.generateFollowUp(false);
+    }
   },
 
   handleError(message, error) {
