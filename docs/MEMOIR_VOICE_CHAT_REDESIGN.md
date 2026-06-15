@@ -287,9 +287,33 @@ memoir_voice_utterances
 
 - `memoir_questions`：legacy 固定问题；新版只作冷启动兜底或迁移参考。
 - `memoir_answer_sessions` / `memoir_answer_segments`：legacy 采集草稿；新版不继续扩展。
-- `memoir_audio_files`：可复用，仍保存原始音频资产。
+- `audio_files`：可复用，仍保存原始音频资产。
 - `memoir_transcript_versions`：继续复用，用于 ASR 原文、方言修正、用户编辑和最终确认。
 - memory/output 相关表继续保留，消费新版 chat message 和 transcript evidence。
+
+### Realtime Voice Schema Boundary
+
+实时语音链路的第一层持久化边界只认以下表：
+
+```text
+audio_files
+memoir_voice_sessions
+memoir_chat_messages
+memoir_voice_utterances
+memoir_transcript_versions
+```
+
+这组表必须和 SQLAlchemy model 的列保持一致。应用启动时可以修复已经明确识别的安全漂移，例如早期开发库缺少 `memoir_transcript_versions.voice_session_id`；修复后必须执行严格 schema 断言，缺表、缺列或多余列都应让后端启动失败，避免把错误延迟到用户录音结束才暴露。
+
+开发阶段如果不需要保留旧小程序数据，可以手动重建这组表：
+
+```bash
+cd backend
+PYTHONPATH=. python scripts/rebuild_memoir_voice_schema.py --describe-only
+PYTHONPATH=. python scripts/rebuild_memoir_voice_schema.py --yes
+```
+
+`--describe-only` 只打印模型期望列和当前数据库实际列；`--yes` 会删除并重建上述实时语音表，会清空 voice session、chat message、utterance、transcript version 以及 `audio_files` 元数据。ECS 上执行前必须先做数据库和音频文件备份，并确认不需要保留这部分数据。
 
 ## Realtime Event Contract
 

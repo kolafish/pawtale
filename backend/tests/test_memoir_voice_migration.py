@@ -2,7 +2,13 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from app.migrations.memoir_voice import assert_memoir_voice_schema, migrate_memoir_voice_schema
+from app.migrations.memoir_voice import (
+    assert_memoir_voice_schema,
+    describe_memoir_voice_schema,
+    expected_memoir_voice_schema,
+    migrate_memoir_voice_schema,
+    rebuild_memoir_voice_schema,
+)
 
 
 async def test_memoir_voice_migration_adds_transcript_voice_session_column():
@@ -94,5 +100,45 @@ async def test_memoir_voice_schema_assertion_reports_missing_tables_and_columns(
         assert "memoir_voice_sessions" in message
         assert "missing columns:" in message
         assert "memoir_transcript_versions.voice_session_id" in message
+    finally:
+        await engine.dispose()
+
+
+async def test_memoir_voice_schema_assertion_reports_unexpected_columns():
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
+    try:
+        await rebuild_memoir_voice_schema(engine)
+        async with engine.begin() as conn:
+            await conn.execute(text("ALTER TABLE memoir_voice_sessions ADD COLUMN legacy_question_id VARCHAR(36)"))
+
+        with pytest.raises(RuntimeError) as exc_info:
+            await assert_memoir_voice_schema(engine)
+
+        assert "unexpected columns:" in str(exc_info.value)
+        assert "memoir_voice_sessions.legacy_question_id" in str(exc_info.value)
+    finally:
+        await engine.dispose()
+
+
+async def test_rebuild_memoir_voice_schema_restores_exact_model_columns():
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
+    try:
+        async with engine.begin() as conn:
+            await conn.execute(
+                text(
+                    """
+                    CREATE TABLE memoir_voice_sessions (
+                        id VARCHAR(36) NOT NULL,
+                        legacy_question_id VARCHAR(36),
+                        PRIMARY KEY (id)
+                    )
+                    """
+                )
+            )
+
+        await rebuild_memoir_voice_schema(engine)
+        await assert_memoir_voice_schema(engine)
+
+        assert await describe_memoir_voice_schema(engine) == expected_memoir_voice_schema()
     finally:
         await engine.dispose()
