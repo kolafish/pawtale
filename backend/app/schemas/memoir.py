@@ -26,10 +26,36 @@ from app.domain.memoir.types import (
     MemoirTranscriptVersionType,
     MemoirVoiceSessionStatus,
 )
+from app.schemas.auth import UserResponse
+from app.schemas.projects import ProjectResponse
 
 
 class MemoirSessionCreate(BaseModel):
     title: str = "回忆录访谈"
+
+
+class MemoirProjectCreate(BaseModel):
+    title: str | None = None
+    description: str | None = None
+    elder_name: str | None = None
+
+
+class MemoirProjectUpdate(BaseModel):
+    title: str | None = None
+    description: str | None = None
+    elder_name: str | None = None
+
+
+class MemoirProjectListResponse(BaseModel):
+    active_project_id: str
+    active_project: ProjectResponse
+    projects: list[ProjectResponse] = Field(default_factory=list)
+
+
+class MemoirIdentityResponse(UserResponse):
+    active_project_id: str
+    active_project: ProjectResponse
+    projects: list[ProjectResponse] = Field(default_factory=list)
 
 
 class MemoirSessionResponse(BaseModel):
@@ -641,3 +667,34 @@ class MemoirSessionProcessResponse(BaseModel):
     places: list[MemoirPlaceMemoryResponse] = Field(default_factory=list)
     themes: list[MemoirThemeMemoryResponse] = Field(default_factory=list)
     open_questions: list[MemoirOpenQuestionResponse] = Field(default_factory=list)
+
+
+class MemoirMemoryStatsResponse(BaseModel):
+    total_memory_count: int = 0
+    draft_memory_count: int = 0
+    confirmed_memory_count: int = 0
+    rejected_memory_count: int = 0
+    open_question_count: int = 0
+    asked_open_question_count: int = 0
+    answered_open_question_count: int = 0
+    dismissed_open_question_count: int = 0
+    question_candidate_count: int = 0
+    output_count: int = 0
+    coverage_average: int = 0
+    low_coverage_count: int = 0
+
+
+class MemoirDashboardResponse(BaseModel):
+    project: ProjectResponse
+    interview: MemoirInterviewState
+    summary: MemoirSummaryResponse
+    session_summary: MemoirSessionSummaryResponse | None = None
+    people: list[MemoirPersonMemoryResponse] = Field(default_factory=list)
+    events: list[MemoirEventMemoryResponse] = Field(default_factory=list)
+    places: list[MemoirPlaceMemoryResponse] = Field(default_factory=list)
+    themes: list[MemoirThemeMemoryResponse] = Field(default_factory=list)
+    open_questions: list[MemoirOpenQuestionResponse] = Field(default_factory=list)
+    coverage: list[MemoirCoverageItemResponse] = Field(default_factory=list)
+    candidates: list[MemoirQuestionCandidateResponse] = Field(default_factory=list)
+    outputs: list[MemoirOutputResponse] = Field(default_factory=list)
+    memory_stats: MemoirMemoryStatsResponse = Field(default_factory=MemoirMemoryStatsResponse)

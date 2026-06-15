@@ -7,15 +7,21 @@ from app.domain.memoir import MemoirMemoryType
 from app.models.users import User
 from app.schemas.memoir import (
     MemoirCoverageItemResponse,
+    MemoirDashboardResponse,
     MemoirEventMemoryResponse,
+    MemoirIdentityResponse,
     MemoirInterviewState,
     MemoirMemoryUpdateRequest,
+    MemoirMemoryStatsResponse,
     MemoirOpenQuestionResponse,
     MemoirOpenQuestionUpdateRequest,
     MemoirOutputDetailResponse,
     MemoirOutputResponse,
     MemoirPersonMemoryResponse,
     MemoirPlaceMemoryResponse,
+    MemoirProjectCreate,
+    MemoirProjectListResponse,
+    MemoirProjectUpdate,
     MemoirQuestionCandidateResponse,
     MemoirQuestionResponse,
     MemoirSessionCreate,
@@ -43,6 +49,43 @@ from app.services.memoir.access import load_memoir_project
 router = APIRouter()
 
 
+def _enum_value(value: object) -> str:
+    return getattr(value, "value", value) or ""
+
+
+def _memory_stats(
+    *,
+    people: list[MemoirPersonMemoryResponse],
+    events: list[MemoirEventMemoryResponse],
+    places: list[MemoirPlaceMemoryResponse],
+    themes: list[MemoirThemeMemoryResponse],
+    open_questions: list[MemoirOpenQuestionResponse],
+    coverage: list[MemoirCoverageItemResponse],
+    candidates: list[MemoirQuestionCandidateResponse],
+    outputs: list[MemoirOutputResponse],
+) -> MemoirMemoryStatsResponse:
+    memory_statuses = [
+        _enum_value(item.status)
+        for item in [*people, *events, *places, *themes]
+    ]
+    open_question_statuses = [_enum_value(item.status) for item in open_questions]
+    coverage_scores = [item.coverage_score for item in coverage]
+    return MemoirMemoryStatsResponse(
+        total_memory_count=len(memory_statuses),
+        draft_memory_count=memory_statuses.count("draft"),
+        confirmed_memory_count=memory_statuses.count("confirmed"),
+        rejected_memory_count=memory_statuses.count("rejected"),
+        open_question_count=open_question_statuses.count("open"),
+        asked_open_question_count=open_question_statuses.count("asked"),
+        answered_open_question_count=open_question_statuses.count("answered"),
+        dismissed_open_question_count=open_question_statuses.count("dismissed"),
+        question_candidate_count=len(candidates),
+        output_count=len(outputs),
+        coverage_average=round(sum(coverage_scores) / len(coverage_scores)) if coverage_scores else 0,
+        low_coverage_count=sum(score < 30 for score in coverage_scores),
+    )
+
+
 async def _default_memoir_project_id(db: AsyncSession, user_id: str) -> str:
     project = await memoir_projects.get_or_create_mobile_memoir_project(db, user_id)
     return project.id
@@ -65,6 +108,136 @@ async def get_mobile_memoir_project(
     current_user: User = Depends(get_current_user),
 ):
     return await memoir_projects.get_or_create_mobile_memoir_project(db, current_user.id)
+
+
+@router.get("/me", response_model=MemoirIdentityResponse)
+async def get_mobile_memoir_identity(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    projects = await memoir_projects.mobile_project_list(db, current_user.id)
+    return MemoirIdentityResponse(
+        id=current_user.id,
+        email=current_user.email,
+        display_name=current_user.display_name,
+        avatar_url=current_user.avatar_url,
+        created_at=current_user.created_at,
+        active_project_id=projects.active_project_id,
+        active_project=projects.active_project,
+        projects=projects.projects,
+    )
+
+
+@router.get("/projects", response_model=MemoirProjectListResponse)
+async def list_mobile_memoir_projects(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await memoir_projects.mobile_project_list(db, current_user.id)
+
+
+@router.post("/projects", response_model=ProjectResponse, status_code=201)
+async def create_mobile_memoir_project(
+    req: MemoirProjectCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await memoir_projects.create_mobile_memoir_project(db, current_user.id, req)
+
+
+@router.patch("/projects/{project_id}", response_model=ProjectResponse)
+async def update_mobile_memoir_project(
+    project_id: str,
+    req: MemoirProjectUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await memoir_projects.update_mobile_memoir_project(
+        db,
+        current_user.id,
+        project_id,
+        req,
+    )
+
+
+@router.post("/projects/{project_id}/activate", response_model=MemoirProjectListResponse)
+async def activate_mobile_memoir_project(
+    project_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await memoir_projects.activate_mobile_memoir_project(
+        db,
+        current_user.id,
+        project_id,
+    )
+
+
+@router.get("/dashboard", response_model=MemoirDashboardResponse)
+async def get_mobile_memoir_dashboard(
+    project_id: str | None = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if project_id:
+        project_response = await memoir_projects.get_mobile_memoir_project(
+            db,
+            current_user.id,
+            project_id,
+        )
+    else:
+        project_response = await memoir_projects.active_mobile_memoir_project(db, current_user.id)
+    project_id = project_response.id
+
+    interview = await memoir_interview.get_or_create_current_session(db, project_id, current_user.id)
+    summary = await memoir_story_cards.get_summary(db, project_id, current_user.id)
+    session_summary = await memoir_session_summary.get_session_summary(
+        db,
+        current_user.id,
+        interview.session.id,
+    )
+    people = await memoir_memory_repository.list_person_memories(db, current_user.id, project_id)
+    events = await memoir_memory_repository.list_event_memories(db, current_user.id, project_id)
+    places = await memoir_memory_repository.list_place_memories(db, current_user.id, project_id)
+    themes = await memoir_memory_repository.list_theme_memories(db, current_user.id, project_id)
+    open_questions = await memoir_memory_repository.list_open_questions(db, current_user.id, project_id)
+    coverage = await memoir_coverage.get_coverage_map(db, current_user.id, project_id)
+    if not coverage:
+        await memoir_coverage.calculate_coverage_snapshots(db, current_user.id, project_id)
+        await db.commit()
+        coverage = await memoir_coverage.get_coverage_map(db, current_user.id, project_id)
+    candidates = await memoir_question_planner.list_question_candidates(
+        db,
+        current_user.id,
+        project_id,
+        interview.session.id,
+    )
+    outputs = await memoir_outputs.list_outputs(db, current_user.id, project_id)
+
+    return MemoirDashboardResponse(
+        project=project_response,
+        interview=interview,
+        summary=summary,
+        session_summary=session_summary,
+        people=people,
+        events=events,
+        places=places,
+        themes=themes,
+        open_questions=open_questions,
+        coverage=coverage,
+        candidates=candidates,
+        outputs=outputs,
+        memory_stats=_memory_stats(
+            people=people,
+            events=events,
+            places=places,
+            themes=themes,
+            open_questions=open_questions,
+            coverage=coverage,
+            candidates=candidates,
+            outputs=outputs,
+        ),
+    )
 
 
 @router.post("/sessions", response_model=MemoirInterviewState, status_code=201)
