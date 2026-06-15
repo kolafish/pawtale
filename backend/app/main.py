@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from app.database import init_db, engine
 from app.migrations.auth import migrate_auth_schema
+from app.migrations.memoir_voice import assert_memoir_voice_schema, migrate_memoir_voice_schema
 from app.routers import auth_router, memoir_router, projects_router
 
 
@@ -20,6 +21,8 @@ async def _auto_migrate():
         if "type" not in project_columns:
             await conn.execute(text("ALTER TABLE projects ADD COLUMN type VARCHAR(20) NOT NULL DEFAULT 'novel'"))
     await migrate_auth_schema(engine)
+    await migrate_memoir_voice_schema(engine)
+    await assert_memoir_voice_schema(engine)
 
 
 @asynccontextmanager

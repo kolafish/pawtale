@@ -488,6 +488,7 @@ test("streaming ASR reports captured audio frame stats", async () => {
   assert.equal(captureStats.at(-1).state, "recording");
   assert.equal(captureStats.at(-1).frameCount, 2);
   assert.equal(captureStats.at(-1).audioBytesSent, 6);
+  assert.equal(typeof captureStats.at(-1).recordingElapsedMs, "number");
   delete global.wx;
 });
 

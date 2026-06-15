@@ -41,6 +41,7 @@ export interface MemoirCaptureStats {
   state: MemoirCaptureState;
   frameCount: number;
   audioBytesSent: number;
+  recordingElapsedMs: number;
 }
 
 export interface MemoirStreamingAsrOptions {
@@ -90,6 +91,7 @@ export class MemoirStreamingAsrClient {
   private closed = false;
   private frameCount = 0;
   private audioBytesSent = 0;
+  private captureStartedAtMs = 0;
   private recorderStopTimer: ReturnType<typeof setTimeout> | null = null;
   private waiters: Array<{
     eventType: string;
@@ -165,6 +167,7 @@ export class MemoirStreamingAsrClient {
     this.sessionStopped = false;
     this.frameCount = 0;
     this.audioBytesSent = 0;
+    this.captureStartedAtMs = Date.now();
     this.emitCaptureStats("opening");
     try {
       recorderManager.start({
@@ -426,6 +429,7 @@ export class MemoirStreamingAsrClient {
       state,
       frameCount: this.frameCount,
       audioBytesSent: this.audioBytesSent,
+      recordingElapsedMs: this.captureStartedAtMs ? Date.now() - this.captureStartedAtMs : 0,
     });
   }
 

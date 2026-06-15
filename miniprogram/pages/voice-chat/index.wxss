@@ -97,6 +97,7 @@
   color: #685b55;
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 14rpx;
   font-size: 24rpx;
   font-weight: 700;
@@ -118,9 +119,14 @@
   box-shadow: 0 0 0 10rpx rgba(184, 92, 69, 0.12);
 }
 
-.capture-count {
+.capture-metrics {
   margin-left: auto;
   color: #9f4a3c;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 10rpx 16rpx;
 }
 
 .history-panel {
