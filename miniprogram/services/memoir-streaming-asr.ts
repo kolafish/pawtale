@@ -101,7 +101,12 @@ function errorKindFromCode(code: string): VoiceChatErrorKind {
   if (code.includes("timeout") || code.includes("超时")) {
     return "timeout";
   }
-  if (code.startsWith("audio_frame") || code.startsWith("unsupported_gateway") || code.startsWith("asr_session")) {
+  if (
+    code.startsWith("audio_frame")
+    || code.startsWith("audio_stream")
+    || code.startsWith("unsupported_gateway")
+    || code.startsWith("asr_session")
+  ) {
     return "gateway";
   }
   if (code.startsWith("asr_provider") || code.startsWith("provider_") || code.startsWith("volc") || code.includes("asr_")) {
@@ -116,6 +121,8 @@ function messageFromErrorCode(code: string, kind: VoiceChatErrorKind): string {
     asr_finish_timeout: "语音识别收尾超时",
     audio_frame_invalid_base64: "音频帧格式异常",
     audio_frame_missing_base64: "音频帧缺少数据",
+    audio_frame_too_large: "单次音频数据过大",
+    audio_stream_too_large: "本次录音超过可保存大小",
     asr_session_not_started: "语音识别还没有开始",
     asr_session_finishing: "上一句语音还在收尾",
     provider_empty_payload: "语音识别服务返回了空结果",
@@ -162,6 +169,7 @@ export class MemoirStreamingAsrClient {
   private captureStartedAtMs = 0;
   private gatewayState: VoiceGatewayState | undefined;
   private recorderStopTimer: ReturnType<typeof setTimeout> | null = null;
+  private closePromise: Promise<void> | null = null;
   private waiters: Array<{
     eventType: string;
     resolve: () => void;
@@ -288,13 +296,25 @@ export class MemoirStreamingAsrClient {
     this.closeSocket();
   }
 
-  close(): void {
-    this.closed = true;
-    if (this.recording) {
-      this.stopRecording();
+  close(options: { force?: boolean } = {}): void {
+    if (options.force) {
+      if (this.recording) {
+        this.stopRecording();
+      }
+      this.sendJson({ type: "session.stop" });
+      this.closeSocket();
+      return;
     }
-    this.sendJson({ type: "session.stop" });
-    this.closeSocket();
+    if (!this.socketOpen) {
+      this.closeSocket();
+      return;
+    }
+    if (this.closePromise) {
+      return;
+    }
+    this.closePromise = this.finishSession().catch(() => {
+      this.closeSocket();
+    });
   }
 
   handleFrame(frameBuffer: ArrayBuffer, isLastFrame: boolean): void {
@@ -477,6 +497,7 @@ export class MemoirStreamingAsrClient {
 
   private closeSocket(): void {
     this.closed = true;
+    this.closePromise = null;
     this.rejectWaiters("语音连接已关闭");
     if (this.recorderStopTimer) {
       clearTimeout(this.recorderStopTimer);

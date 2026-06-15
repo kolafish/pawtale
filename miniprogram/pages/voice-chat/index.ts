@@ -250,7 +250,7 @@ Page<VoiceChatData, {
       return;
     }
     this.setData({ connecting: true, error: "" });
-    streamingClient?.close();
+    streamingClient?.close({ force: true });
     streamingClient = new MemoirStreamingAsrClient({
       voiceSessionId: this.data.voiceSessionId,
       guidanceMode: this.data.guidanceMode,

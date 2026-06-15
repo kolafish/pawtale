@@ -4,7 +4,9 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services.memoir import audio_files as memoir_audio_files
 from app.services.memoir.asr import StreamingASREvent
+from app.services.memoir.voice_gateway import VoiceGatewayClientError
 from app.services.memoir.voice_final_persistence import VoiceFinalPersistenceService
 
 
@@ -30,6 +32,8 @@ class VoiceGatewayPersistence:
         self._pending_audio = bytearray()
 
     async def record_audio_frame(self, audio: bytes) -> None:
+        if len(self._pending_audio) + len(audio) > memoir_audio_files.MAX_AUDIO_BYTES:
+            raise VoiceGatewayClientError("audio_stream_too_large")
         self._pending_audio.extend(audio)
 
     async def persist_final(self, event: StreamingASREvent) -> dict[str, Any]:
