@@ -1,5 +1,8 @@
 import type {
   MemoirGuidanceMode,
+  VoiceChatErrorInfo,
+  VoiceChatErrorKind,
+  VoiceGatewayState,
   VoiceGatewayClientEvent,
   VoiceGatewayServerEvent,
 } from "../domain/voice-chat";
@@ -32,7 +35,7 @@ export interface MemoirStreamingAsrCallbacks {
   onEvent(event: VoiceGatewayServerEvent): void;
   onPartial(text: string): void;
   onFinal(event: VoiceGatewayServerEvent): void;
-  onError(message: string): void;
+  onError(message: string, error?: VoiceChatErrorInfo): void;
 }
 
 export type MemoirCaptureState = "idle" | "opening" | "recording" | "stopping" | "error";
@@ -42,6 +45,7 @@ export interface MemoirCaptureStats {
   frameCount: number;
   audioBytesSent: number;
   recordingElapsedMs: number;
+  gatewayState?: VoiceGatewayState;
 }
 
 export interface MemoirStreamingAsrOptions {
@@ -79,6 +83,70 @@ export function normalizeVoiceGatewayEvent(raw: unknown): VoiceGatewayServerEven
   };
 }
 
+export function classifyVoiceGatewayError(event: VoiceGatewayServerEvent): VoiceChatErrorInfo {
+  const code = event.error || "voice_gateway_error";
+  const kind = errorKindFromCode(code);
+  return {
+    kind,
+    code,
+    state: event.state,
+    message: messageFromErrorCode(code, kind),
+  };
+}
+
+function errorKindFromCode(code: string): VoiceChatErrorKind {
+  if (code.includes("persistence") || code.includes("sqlite") || code.includes("database")) {
+    return "persistence";
+  }
+  if (code.includes("timeout") || code.includes("超时")) {
+    return "timeout";
+  }
+  if (code.startsWith("audio_frame") || code.startsWith("unsupported_gateway") || code.startsWith("asr_session")) {
+    return "gateway";
+  }
+  if (code.startsWith("asr_provider") || code.startsWith("provider_") || code.startsWith("volc") || code.includes("asr_")) {
+    return "asr";
+  }
+  return "unknown";
+}
+
+function messageFromErrorCode(code: string, kind: VoiceChatErrorKind): string {
+  const messages: Partial<Record<string, string>> = {
+    asr_final_persistence_failed: "转写已返回，但保存识别结果失败",
+    asr_finish_timeout: "语音识别收尾超时",
+    audio_frame_invalid_base64: "音频帧格式异常",
+    audio_frame_missing_base64: "音频帧缺少数据",
+    asr_session_not_started: "语音识别还没有开始",
+    asr_session_finishing: "上一句语音还在收尾",
+    provider_empty_payload: "语音识别服务返回了空结果",
+    unsupported_gateway_event: "语音连接事件不支持",
+  };
+  if (messages[code]) {
+    return messages[code];
+  }
+  if (kind === "persistence") {
+    return "识别结果保存失败";
+  }
+  if (kind === "asr") {
+    return "语音识别服务异常";
+  }
+  if (kind === "gateway") {
+    return "语音连接状态异常";
+  }
+  if (kind === "timeout") {
+    return "语音处理超时";
+  }
+  return code || "语音处理失败";
+}
+
+function clientError(message: string, kind: VoiceChatErrorKind, code?: string): VoiceChatErrorInfo {
+  return {
+    kind,
+    code,
+    message,
+  };
+}
+
 export class MemoirStreamingAsrClient {
   private socketTask: WechatMiniprogram.SocketTask | null = null;
   private socketOpen = false;
@@ -92,6 +160,7 @@ export class MemoirStreamingAsrClient {
   private frameCount = 0;
   private audioBytesSent = 0;
   private captureStartedAtMs = 0;
+  private gatewayState: VoiceGatewayState | undefined;
   private recorderStopTimer: ReturnType<typeof setTimeout> | null = null;
   private waiters: Array<{
     eventType: string;
@@ -138,7 +207,7 @@ export class MemoirStreamingAsrClient {
         const message = error.errMsg || "语音连接错误";
         settle(() => reject(new Error(message)));
         this.rejectWaiters(message);
-        this.options.callbacks.onError(message);
+        this.options.callbacks.onError(message, clientError(message, "connection"));
         this.options.callbacks.onStatus("error");
       });
       socketTask.onClose(() => {
@@ -266,7 +335,7 @@ export class MemoirStreamingAsrClient {
     this.acceptingFrames = false;
     this.emitCaptureStats("error");
     this.rejectWaiters(message);
-    this.options.callbacks.onError(message);
+    this.options.callbacks.onError(message, clientError(message, "recorder"));
     this.options.callbacks.onStatus("error");
   }
 
@@ -298,6 +367,7 @@ export class MemoirStreamingAsrClient {
   private handleSocketMessage(data: string | ArrayBuffer): void {
     const raw = typeof data === "string" ? safeJsonParse(data) : null;
     const event = normalizeVoiceGatewayEvent(raw);
+    this.gatewayState = event.state || this.gatewayState;
     this.options.callbacks.onEvent(event);
     if (event.type === "session.ready" || event.type === "session.started") {
       this.options.callbacks.onStatus(this.acceptingFrames ? "listening" : "ready");
@@ -327,9 +397,10 @@ export class MemoirStreamingAsrClient {
       return;
     }
     if (event.type === "session.error") {
+      const error = classifyVoiceGatewayError(event);
       this.stopRecorderAfterGatewayEnd("error");
-      this.rejectWaiters(event.error || "语音识别失败");
-      this.options.callbacks.onError(event.error || "语音识别失败");
+      this.rejectWaiters(error.message);
+      this.options.callbacks.onError(error.message, error);
       this.options.callbacks.onStatus("error");
     }
   }
@@ -430,6 +501,7 @@ export class MemoirStreamingAsrClient {
       frameCount: this.frameCount,
       audioBytesSent: this.audioBytesSent,
       recordingElapsedMs: this.captureStartedAtMs ? Date.now() - this.captureStartedAtMs : 0,
+      gatewayState: this.gatewayState,
     });
   }
 
@@ -440,7 +512,8 @@ export class MemoirStreamingAsrClient {
     this.socketTask.send({
       data: JSON.stringify(event),
       fail: (error) => {
-        this.options.callbacks.onError(error.errMsg || "语音数据发送失败");
+        const message = error.errMsg || "语音数据发送失败";
+        this.options.callbacks.onError(message, clientError(message, "connection"));
       },
     });
   }
