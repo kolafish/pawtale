@@ -45,23 +45,22 @@ bd3599ad3dddf382b242c47071c856d382543cac
 Voice Session -> Chat Messages -> Realtime Transcript -> Memory Extraction -> Writing Output
 ```
 
-新代码建议从独立入口开始，避免和 legacy 页面互相缠绕：
+当前小程序代码已从独立入口进入新版链路，避免和 legacy 页面互相缠绕：
 
 ```text
-miniprogram/pages/voice-start/                # 项目、叙述者、强/弱引导选择
+miniprogram/pages/login/                      # ECS 邮箱登录/注册
+miniprogram/pages/home/                       # 新版语音入口
+miniprogram/pages/projects/                   # 回忆录项目创建、切换、重命名
+miniprogram/pages/voice-start/                # 强/弱引导选择
 miniprogram/pages/voice-chat/                 # 新版老人端实时语音聊天
-miniprogram/pages/transcript-review/          # 转写校正、回听原始语音
-miniprogram/pages/memoir-progress/            # 覆盖度、待追问线索、进度查看
-miniprogram/services/memoir-voice-session.ts  # 小程序语音会话状态机
+miniprogram/services/request.ts               # ECS HTTP + cookie session
+miniprogram/services/memoir-voice-api.ts      # voice session API
 miniprogram/services/memoir-streaming-asr.ts  # 录音帧、WebSocket、partial/final transcript
-miniprogram/services/memoir-streaming-tts.ts  # AI 回复的流式播放
 miniprogram/domain/voice-chat.ts              # 新版聊天消息和实时事件类型
 
 backend/app/routers/memoir/voice.py           # 本地/服务端 voice session API
 backend/app/services/memoir/voice_gateway.py  # 对接实时 ASR/TTS provider
 backend/app/services/memoir/chat_orchestrator.py
-
-cloud-functions/memoir-api/                   # 短期可继续承载身份、项目、dashboard 和历史素材读取
 ```
 
 Git 上建议用以下边界区分：
@@ -69,7 +68,7 @@ Git 上建议用以下边界区分：
 - `bd3599ad3dddf382b242c47071c856d382543cac`：legacy 固定问题链路的可追溯基线。
 - `codex/voice-chat-redesign`：新版语音聊天主线分支。
 - 第一批 PR 已完成 Streaming ASR、voice session 数据和小程序新入口。
-- 小程序 legacy 固定问答页面和旧非实时录音上传代码已清理；cloud 侧历史数据读取能力短期保留。
+- 小程序 legacy 固定问答页面、旧非实时录音上传代码和微信云函数链路已清理。
 
 ## 产品体验
 
@@ -453,7 +452,7 @@ PR5 后第一版已经具备的闭环：
 
 PR5 后仍未完成、不能按上线态理解的缺口：
 
-- 小程序云函数身份和 backend cookie 身份还未统一，当前 voice-chat 是开发态直连 backend。
+- 小程序已经统一为 backend cookie 身份；仍需要在微信公众平台配置正式 request/socket 合法域名。
 - 原始音频按 final utterance 粗粒度保存，尚未做更精确的 VAD 时间切片和断线续传。
 - voice session 快照只保证已固化 transcript 的页面回放，不等同于断线续传；录音帧上传中的状态仍不可恢复。
 - LLM dynamic follow-up、Streaming TTS、插话打断和 AI 回复落库尚未接入。
@@ -479,7 +478,7 @@ PR5 后仍未完成、不能按上线态理解的缺口：
 - AI 自动追问。
 - 流式 TTS。
 - 复杂 VAD。
-- 删除全部旧页面。
+- 转写校正、进度和成稿编辑页面。
 
 ### Phase 2: Guidance Modes and LLM Dynamic Follow-up
 
@@ -514,10 +513,10 @@ PR5 后仍未完成、不能按上线态理解的缺口：
 
 目标：新版稳定后清理旧链路。
 
-- 移除固定问题主入口。
-- 小程序旧 `qa`、`qa-detail`、`question`、`review`、`editor` 页面已下线。
+- 固定问题主入口已移除。
+- 小程序旧 `workbench`、`stories`、`profile`、固定问答、旧 review/editor 页面已下线。
 - 旧 answer-session 草稿 store、旧非实时录音上传 service 已删除。
-- cloud function 中仍保留部分 legacy 固定问答服务，用于历史 dashboard、memory、output 读取和后续迁移参考；不再作为小程序主入口扩展。
+- 微信云函数链路已删除；旧版只能通过 baseline commit 追溯。
 - 后续删除不再使用的 TTS source type，并把进度、校正、成稿编辑迁移到 voice session 数据。
 
 ## 验收标准
@@ -529,7 +528,7 @@ Streaming ASR MVP 必须满足：
 - 离开并重新进入同一个 voice session 后，已 final 的 transcript 不丢失。
 - 断网或 provider 错误能给出明确 UI 状态。
 - 小程序端不包含 provider key。
-- 旧链路在迁移完成前不被破坏。
+- 旧链路不再作为产品代码路径保留。
 
 完整语音聊天版本必须满足：
 

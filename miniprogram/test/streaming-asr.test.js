@@ -55,7 +55,7 @@ test("normalizes invalid gateway payloads into session errors", () => {
 });
 
 test("normalizes set-cookie values before reusing them as Cookie headers", () => {
-  const { cookieHeaderFromSetCookie } = require("../services/memoir-voice-api.ts");
+  const { cookieHeaderFromSetCookie } = require("../services/request.ts");
 
   assert.equal(
     cookieHeaderFromSetCookie(
@@ -69,7 +69,7 @@ test("normalizes set-cookie values before reusing them as Cookie headers", () =>
 test("builds voice gateway URLs from runtime backend config", () => {
   global.wx = {
     getStorageSync(key) {
-      if (key === "pawtale_voice_backend_config") {
+      if (key === "pawtale_backend_config") {
         return {
           httpBaseUrl: "https://api.example.com/",
           devEmail: "local@example.com",
@@ -83,10 +83,12 @@ test("builds voice gateway URLs from runtime backend config", () => {
     },
     setStorageSync() {},
   };
+  delete require.cache[require.resolve("../services/request.ts")];
   delete require.cache[require.resolve("../services/memoir-voice-api.ts")];
-  const { readVoiceBackendConfig, voiceGatewayUrl } = require("../services/memoir-voice-api.ts");
+  const { readBackendConfig } = require("../services/request.ts");
+  const { voiceGatewayUrl } = require("../services/memoir-voice-api.ts");
 
-  assert.deepEqual(readVoiceBackendConfig(), {
+  assert.deepEqual(readBackendConfig(), {
     httpBaseUrl: "https://api.example.com/",
     wsBaseUrl: "wss://api.example.com/",
     devEmail: "local@example.com",
@@ -119,14 +121,14 @@ test("fetches voice session detail through backend API", async () => {
   };
   global.wx = {
     getStorageSync(key) {
-      if (key === "pawtale_voice_backend_config") {
+      if (key === "pawtale_backend_config") {
         return {
           httpBaseUrl: "http://backend.local:8000/",
           devEmail: "local@example.com",
           devPassword: "secret",
         };
       }
-      if (key === "pawtale_voice_backend_cookie") {
+      if (key === "pawtale_backend_cookie") {
         return "pawtale_session=abc";
       }
       return "";
@@ -145,6 +147,7 @@ test("fetches voice session detail through backend API", async () => {
       options.success({ statusCode: 200, data: detail, cookies: [], header: {} });
     },
   };
+  delete require.cache[require.resolve("../services/request.ts")];
   delete require.cache[require.resolve("../services/memoir-voice-api.ts")];
   const { getMemoirVoiceSession } = require("../services/memoir-voice-api.ts");
 
@@ -163,7 +166,7 @@ test("streaming ASR connect rejects on socket error before open", async () => {
   global.wx = {
     getRecorderManager: recorderManagerStub,
     getStorageSync(key) {
-      if (key === "pawtale_voice_backend_config") {
+      if (key === "pawtale_backend_config") {
         return {
           httpBaseUrl: "http://backend.local:8000",
           wsBaseUrl: "ws://backend.local:8000",
@@ -171,7 +174,7 @@ test("streaming ASR connect rejects on socket error before open", async () => {
           devPassword: "secret",
         };
       }
-      if (key === "pawtale_voice_backend_cookie") {
+      if (key === "pawtale_backend_cookie") {
         return "pawtale_session=abc";
       }
       return "";
@@ -194,6 +197,7 @@ test("streaming ASR connect rejects on socket error before open", async () => {
       };
     },
   };
+  delete require.cache[require.resolve("../services/request.ts")];
   delete require.cache[require.resolve("../services/memoir-voice-api.ts")];
   delete require.cache[require.resolve("../services/memoir-streaming-asr.ts")];
   const { MemoirStreamingAsrClient } = require("../services/memoir-streaming-asr.ts");

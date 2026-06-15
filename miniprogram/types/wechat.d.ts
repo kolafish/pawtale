@@ -35,123 +35,6 @@ declare namespace WechatMiniprogram {
     complete?(result: GeneralCallbackResult): void;
   }
 
-  interface UploadFileSuccessCallbackResult {
-    data: string;
-    statusCode: number;
-    header: Record<string, string | string[] | undefined>;
-    cookies?: string[];
-  }
-
-  interface UploadFileOption {
-    url: string;
-    filePath: string;
-    name: string;
-    header?: Record<string, string>;
-    formData?: Record<string, string>;
-    timeout?: number;
-    success?(result: UploadFileSuccessCallbackResult): void;
-    fail?(result: GeneralCallbackResult): void;
-    complete?(result: GeneralCallbackResult): void;
-  }
-
-  interface GetFileInfoSuccessCallbackResult {
-    size: number;
-    digest?: string;
-    errMsg?: string;
-  }
-
-  interface GetFileInfoOption {
-    filePath: string;
-    digestAlgorithm?: "md5" | "sha1";
-    success?(result: GetFileInfoSuccessCallbackResult): void;
-    fail?(result: GeneralCallbackResult): void;
-    complete?(result: GeneralCallbackResult): void;
-  }
-
-  interface UserInfo {
-    nickName?: string;
-    avatarUrl?: string;
-  }
-
-  interface GetUserProfileSuccessCallbackResult extends GeneralCallbackResult {
-    userInfo: UserInfo;
-  }
-
-  interface GetUserProfileOption {
-    desc: string;
-    success?(result: GetUserProfileSuccessCallbackResult): void;
-    fail?(result: GeneralCallbackResult): void;
-    complete?(result: GeneralCallbackResult): void;
-  }
-
-  interface LoginSuccessCallbackResult extends GeneralCallbackResult {
-    code: string;
-  }
-
-  interface LoginOption {
-    timeout?: number;
-    success?(result: LoginSuccessCallbackResult): void;
-    fail?(result: GeneralCallbackResult): void;
-    complete?(result: GeneralCallbackResult): void;
-  }
-
-  interface CloudInitOption {
-    env?: string;
-    traceUser?: boolean;
-  }
-
-  interface CloudCallFunctionResult<T = unknown> {
-    result: T;
-    errMsg?: string;
-  }
-
-  interface CloudCallFunctionOption<T = unknown> {
-    name: string;
-    data?: unknown;
-    config?: CloudInitOption;
-    success?(result: CloudCallFunctionResult<T>): void;
-    fail?(result: GeneralCallbackResult): void;
-    complete?(result: GeneralCallbackResult): void;
-  }
-
-  interface CloudUploadFileResult {
-    fileID: string;
-    statusCode?: number;
-    errMsg?: string;
-  }
-
-  interface CloudUploadFileOption {
-    cloudPath: string;
-    filePath: string;
-    config?: CloudInitOption;
-    success?(result: CloudUploadFileResult): void;
-    fail?(result: GeneralCallbackResult): void;
-    complete?(result: GeneralCallbackResult): void;
-  }
-
-  interface CloudGetTempFileURLResult extends GeneralCallbackResult {
-    fileList: Array<{
-      fileID?: string;
-      tempFileURL?: string;
-      status?: number;
-      errMsg?: string;
-    }>;
-  }
-
-  interface CloudGetTempFileURLOption {
-    fileList: string[];
-    success?(result: CloudGetTempFileURLResult): void;
-    fail?(result: GeneralCallbackResult): void;
-    complete?(result: GeneralCallbackResult): void;
-  }
-
-  interface Cloud {
-    init(option?: CloudInitOption): void;
-    callFunction<T = unknown>(option: CloudCallFunctionOption<T>): Promise<CloudCallFunctionResult<T>>;
-    uploadFile(option: CloudUploadFileOption): Promise<CloudUploadFileResult>;
-    getTempFileURL(option: CloudGetTempFileURLOption): void;
-  }
-
   interface RecorderManagerStartOption {
     duration?: number;
     sampleRate?: number;
@@ -291,13 +174,8 @@ declare namespace WechatMiniprogram {
   }
 
   interface Wx {
-    cloud: Cloud;
     request<T = unknown>(option: RequestOption<T>): void;
     connectSocket(option: ConnectSocketOption): SocketTask;
-    uploadFile(option: UploadFileOption): void;
-    login(option?: LoginOption): void;
-    getUserProfile(option: GetUserProfileOption): void;
-    getFileInfo(option: GetFileInfoOption): void;
     getRecorderManager(): RecorderManager;
     createInnerAudioContext(): InnerAudioContext;
     setInnerAudioOption?(option: InnerAudioOption): void;

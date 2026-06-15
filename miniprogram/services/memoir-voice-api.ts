@@ -6,26 +6,10 @@ import { ensureBackendSession } from "./auth";
 import {
   ApiError,
   cleanBaseUrl,
-  cookieHeaderFromSetCookie,
   readBackendConfig,
   readSessionCookie,
   request,
-  writeBackendConfig,
-  type BackendRuntimeConfig,
-  type BackendRuntimeConfigInput,
 } from "./request";
-
-export type VoiceBackendRuntimeConfig = BackendRuntimeConfig;
-export type VoiceBackendRuntimeConfigInput = BackendRuntimeConfigInput;
-export { cookieHeaderFromSetCookie };
-
-export function readVoiceBackendConfig(): VoiceBackendRuntimeConfig {
-  return readBackendConfig();
-}
-
-export function writeVoiceBackendConfig(config: VoiceBackendRuntimeConfigInput): void {
-  writeBackendConfig(config);
-}
 
 export function voiceGatewayUrl(voiceSessionId: string): string {
   const config = readBackendConfig();
@@ -35,11 +19,7 @@ export function voiceGatewayUrl(voiceSessionId: string): string {
   return `${cleanBaseUrl(config.wsBaseUrl)}/api/mobile/memoir/voice-sessions/${encodeURIComponent(voiceSessionId)}/gateway`;
 }
 
-export function readVoiceBackendCookie(): string {
-  return readSessionCookie();
-}
-
-export async function voiceBackendCookieHeader(): Promise<string> {
+export async function backendSessionCookieHeader(): Promise<string> {
   await ensureBackendSession();
   return readSessionCookie();
 }
