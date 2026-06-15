@@ -102,17 +102,6 @@ class MemoirVoiceSessionResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-class MemoirChatMessageCreate(BaseModel):
-    role: MemoirChatMessageRole
-    content_text: str = ""
-    content_status: MemoirChatContentStatus = MemoirChatContentStatus.FINAL
-    audio_file_id: str | None = None
-    transcript_version_id: str | None = None
-    parent_message_id: str | None = None
-    guidance_intent: str | None = None
-    metadata_json: dict[str, object] = Field(default_factory=dict)
-
-
 class MemoirChatMessageResponse(BaseModel):
     id: str
     project_id: str
@@ -130,17 +119,6 @@ class MemoirChatMessageResponse(BaseModel):
     updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
-
-
-class MemoirVoiceUtteranceCreate(BaseModel):
-    chat_message_id: str | None = None
-    audio_file_id: str | None = None
-    transcript_raw: str = ""
-    transcript_edited: str | None = None
-    start_ms: int | None = Field(default=None, ge=0)
-    end_ms: int | None = Field(default=None, ge=0)
-    provider: str | None = None
-    provider_payload_json: dict[str, object] = Field(default_factory=dict)
 
 
 class MemoirVoiceUtteranceResponse(BaseModel):
