@@ -27,9 +27,10 @@ async def mobile_memoir_voice_gateway(
     if current_user is None:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
+    current_user_id = current_user.id
 
     try:
-        await memoir_voice_sessions.get_voice_session_detail(db, voice_session_id, current_user.id)
+        await memoir_voice_sessions.get_voice_session_detail(db, voice_session_id, current_user_id)
     except HTTPException:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
@@ -38,11 +39,11 @@ async def mobile_memoir_voice_gateway(
     persistence = VoiceGatewayPersistence(
         db=db,
         voice_session_id=voice_session_id,
-        user_id=current_user.id,
+        user_id=current_user_id,
     )
 
     async def on_start() -> None:
-        await memoir_voice_sessions.mark_voice_session_listening(db, voice_session_id, current_user.id)
+        await memoir_voice_sessions.mark_voice_session_listening(db, voice_session_id, current_user_id)
 
     async def on_stop(error_message: str | None) -> None:
         stop_error = error_message
@@ -53,14 +54,14 @@ async def mobile_memoir_voice_gateway(
         await memoir_voice_sessions.stop_voice_session(
             db,
             voice_session_id,
-            current_user.id,
+            current_user_id,
             MemoirVoiceSessionStopRequest(error_message=stop_error),
         )
 
     gateway_session = VoiceGatewaySession(
         client=websocket,
         asr_client_factory=lambda: create_volc_streaming_asr_client(
-            current_user.id,
+            current_user_id,
             voice_session_id,
         ),
         on_start=on_start,
