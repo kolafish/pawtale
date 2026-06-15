@@ -12,7 +12,7 @@ from fastapi import Cookie, Depends, HTTPException, Response, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import get_settings
+from app.config import get_settings, is_production_environment
 from app.database import get_db
 from app.models.users import User
 
@@ -105,7 +105,7 @@ def set_session_cookie(response: Response, user_id: str) -> None:
         max_age=60 * 60 * 24 * 30,
         httponly=True,
         samesite="lax",
-        secure=settings.app_env == "production",
+        secure=is_production_environment(settings),
     )
 
 

@@ -5,11 +5,14 @@ from pathlib import Path
 # 获取 backend 目录的绝对路径
 BACKEND_DIR = Path(__file__).parent.parent.resolve()
 DATA_DIR = BACKEND_DIR.parent / "data"
+DEFAULT_APP_SECRET_KEY = "dev-secret-key-change-in-production"
+MIN_PRODUCTION_SECRET_LENGTH = 32
+VALID_APP_ENVS = {"development", "test", "production"}
 
 
 class Settings(BaseSettings):
     app_env: str = "development"
-    app_secret_key: str = "dev-secret-key-change-in-production"
+    app_secret_key: str = DEFAULT_APP_SECRET_KEY
     database_url: str = f"sqlite+aiosqlite:///{DATA_DIR}/pawtale.db"
     local_default_user_email: str = "local@pawtale.local"
     local_default_user_password: str = "pawtale-local"
@@ -47,3 +50,31 @@ class Settings(BaseSettings):
 @lru_cache()
 def get_settings() -> Settings:
     return Settings()
+
+
+def normalized_app_env(settings: Settings) -> str:
+    return settings.app_env.strip().lower()
+
+
+def is_production_environment(settings: Settings | None = None) -> bool:
+    current_settings = settings or get_settings()
+    return normalized_app_env(current_settings) == "production"
+
+
+def validate_runtime_settings(settings: Settings | None = None) -> None:
+    current_settings = settings or get_settings()
+    app_env = normalized_app_env(current_settings)
+    if app_env not in VALID_APP_ENVS:
+        valid_envs = ", ".join(sorted(VALID_APP_ENVS))
+        raise RuntimeError(f"APP_ENV must be one of: {valid_envs}")
+
+    if app_env != "production":
+        return
+
+    secret = current_settings.app_secret_key.strip()
+    if not secret or secret == DEFAULT_APP_SECRET_KEY:
+        raise RuntimeError("APP_SECRET_KEY must be set to a non-default value when APP_ENV=production")
+    if len(secret) < MIN_PRODUCTION_SECRET_LENGTH:
+        raise RuntimeError(
+            f"APP_SECRET_KEY must be at least {MIN_PRODUCTION_SECRET_LENGTH} characters when APP_ENV=production"
+        )

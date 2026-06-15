@@ -2,6 +2,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
+from app.config import validate_runtime_settings
 from app.database import init_db, engine
 from app.migrations.auth import migrate_auth_schema
 from app.migrations.memoir_voice import assert_memoir_voice_schema, migrate_memoir_voice_schema
@@ -28,6 +29,7 @@ async def _auto_migrate():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # 启动时初始化数据库
+    validate_runtime_settings()
     await init_db()
     await _auto_migrate()
     yield
