@@ -17,6 +17,17 @@ declare namespace WechatMiniprogram {
     errMsg: string;
   }
 
+  interface LoginSuccessCallbackResult extends GeneralCallbackResult {
+    code: string;
+  }
+
+  interface LoginOption {
+    timeout?: number;
+    success?(result: LoginSuccessCallbackResult): void;
+    fail?(result: GeneralCallbackResult): void;
+    complete?(result: GeneralCallbackResult): void;
+  }
+
   interface RequestSuccessCallbackResult<T = unknown> {
     data: T;
     statusCode: number;
@@ -174,6 +185,7 @@ declare namespace WechatMiniprogram {
   }
 
   interface Wx {
+    login(option?: LoginOption): void;
     request<T = unknown>(option: RequestOption<T>): void;
     connectSocket(option: ConnectSocketOption): SocketTask;
     getRecorderManager(): RecorderManager;

@@ -2,55 +2,113 @@
   <view class="brand-row">
     <image class="brand-icon" src="/assets/memoir-gramophone.png" mode="aspectFit" />
     <view class="brand-copy">
-      <text class="brand-title">Pawtale 回忆录</text>
+      <text class="brand-title">余主任留声机</text>
       <text class="brand-subtitle">语音访谈工作台</text>
     </view>
   </view>
 
   <view class="login-panel">
-    <text class="panel-title">{{registerMode ? "创建账号" : "登录账号"}}</text>
+    <text class="panel-title">{{credentialsMode ? "设置登录账号" : "欢迎登录"}}</text>
+    <text class="panel-copy">
+      {{credentialsMode ? "设置后可在 Pawtale Web 端继续使用同一个账号。" : "微信登录或使用已有 Pawtale 账号进入。"}}
+    </text>
 
     <view wx:if="{{error}}" class="error">{{error}}</view>
 
-    <view class="field">
-      <text class="field-label">邮箱</text>
-      <input
-        class="field-input"
-        type="text"
-        value="{{email}}"
-        placeholder="name@example.com"
-        bindinput="changeEmail"
-      />
-    </view>
+    <block wx:if="{{credentialsMode}}">
+      <view class="field">
+        <text class="field-label">邮箱</text>
+        <input
+          class="field-input"
+          type="text"
+          value="{{credentialEmail}}"
+          placeholder="name@example.com"
+          bindinput="changeCredentialEmail"
+        />
+      </view>
 
-    <view class="field">
-      <text class="field-label">密码</text>
-      <input
-        class="field-input"
-        password
-        value="{{password}}"
-        placeholder="至少 8 位"
-        bindinput="changePassword"
-      />
-    </view>
+      <view class="field">
+        <text class="field-label">密码</text>
+        <input
+          class="field-input"
+          password
+          value="{{credentialPassword}}"
+          placeholder="至少 8 位"
+          bindinput="changeCredentialPassword"
+        />
+      </view>
 
-    <view wx:if="{{registerMode}}" class="field">
-      <text class="field-label">昵称</text>
-      <input
-        class="field-input"
-        type="text"
-        value="{{displayName}}"
-        placeholder="本地作者"
-        bindinput="changeDisplayName"
-      />
-    </view>
+      <view class="field">
+        <text class="field-label">昵称</text>
+        <input
+          class="field-input"
+          type="text"
+          value="{{credentialDisplayName}}"
+          placeholder="余主任"
+          bindinput="changeCredentialDisplayName"
+        />
+      </view>
 
-    <button class="primary-button" loading="{{loading}}" disabled="{{loading}}" bindtap="submit">
-      {{loading ? "处理中" : (registerMode ? "创建并进入" : "登录")}}
-    </button>
+      <button
+        class="primary-button"
+        loading="{{credentialsLoading}}"
+        disabled="{{loading || wechatLoading || credentialsLoading}}"
+        bindtap="submitCredentials"
+      >
+        {{credentialsLoading ? "保存中" : "保存并进入"}}
+      </button>
+    </block>
 
-    <button class="mode-button" disabled="{{loading}}" bindtap="toggleMode">
-      {{registerMode ? "已有账号，去登录" : "没有账号，创建一个"}}
-    </button>
+    <block wx:else>
+      <button
+        class="primary-button"
+        loading="{{wechatLoading}}"
+        disabled="{{loading || wechatLoading || credentialsLoading}}"
+        bindtap="submitWeChat"
+      >
+        {{wechatLoading ? "微信登录中" : "微信登录"}}
+      </button>
+
+      <button
+        class="mode-button"
+        disabled="{{loading || wechatLoading || credentialsLoading}}"
+        bindtap="toggleAccountMode"
+      >
+        {{accountMode ? "收起账号登录" : "使用 Pawtale 账号登录"}}
+      </button>
+
+      <view wx:if="{{accountMode}}" class="account-panel">
+        <view class="field">
+          <text class="field-label">邮箱</text>
+          <input
+            class="field-input"
+            type="text"
+            value="{{email}}"
+            placeholder="name@example.com"
+            bindinput="changeEmail"
+          />
+        </view>
+
+        <view class="field">
+          <text class="field-label">密码</text>
+          <input
+            class="field-input"
+            password
+            value="{{password}}"
+            placeholder="至少 8 位"
+            bindinput="changePassword"
+          />
+        </view>
+
+        <button
+          class="secondary-button"
+          loading="{{loading}}"
+          disabled="{{loading || wechatLoading || credentialsLoading}}"
+          bindtap="submitAccount"
+        >
+          {{loading ? "登录中" : "账号登录"}}
+        </button>
+      </view>
+    </block>
   </view>
 </view>

@@ -41,7 +41,7 @@
 .login-panel {
   padding: 36rpx 32rpx;
   border: 2rpx solid #d6e7df;
-  border-radius: 24rpx;
+  border-radius: 16rpx;
   background: #ffffff;
   box-shadow: 0 16rpx 40rpx rgba(37, 73, 62, 0.08);
 }
@@ -52,6 +52,14 @@
   font-size: 40rpx;
   font-weight: 800;
   line-height: 1.25;
+}
+
+.panel-copy {
+  display: block;
+  margin-top: 14rpx;
+  color: #5f6d69;
+  font-size: 26rpx;
+  line-height: 1.45;
 }
 
 .field {
@@ -71,19 +79,24 @@
   margin-top: 14rpx;
   padding: 0 22rpx;
   border: 2rpx solid #d6e7df;
-  border-radius: 18rpx;
+  border-radius: 14rpx;
   background: #f7fbf9;
   color: #17221f;
   font-size: 30rpx;
 }
 
+.account-panel {
+  margin-top: 12rpx;
+}
+
 .primary-button,
-.mode-button {
+.mode-button,
+.secondary-button {
   width: 100%;
   height: 98rpx;
   margin: 30rpx 0 0;
   border: 0;
-  border-radius: 24rpx;
+  border-radius: 16rpx;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -92,7 +105,8 @@
 }
 
 .primary-button::after,
-.mode-button::after {
+.mode-button::after,
+.secondary-button::after {
   border: 0;
 }
 
@@ -106,15 +120,21 @@
   color: #2e7d6b;
 }
 
+.secondary-button {
+  background: #17221f;
+  color: #ffffff;
+}
+
 .primary-button[disabled],
-.mode-button[disabled] {
+.mode-button[disabled],
+.secondary-button[disabled] {
   opacity: 0.72;
 }
 
 .error {
   margin-top: 22rpx;
   padding: 20rpx 22rpx;
-  border-radius: 18rpx;
+  border-radius: 14rpx;
   background: #fff1f2;
   color: #be123c;
   font-size: 26rpx;
