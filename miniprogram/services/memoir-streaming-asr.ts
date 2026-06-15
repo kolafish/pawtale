@@ -144,6 +144,7 @@ export class MemoirStreamingAsrClient {
         settle(() => reject(new Error("语音连接已关闭")));
         this.rejectWaiters("语音连接已关闭");
         if (!this.closed) {
+          this.stopRecorderAfterGatewayEnd("idle");
           this.options.callbacks.onStatus("closed");
         }
       });
@@ -318,14 +319,30 @@ export class MemoirStreamingAsrClient {
     if (event.type === "session.stopped") {
       this.sessionStopped = true;
       this.resolveWaiters("session.stopped");
+      this.stopRecorderAfterGatewayEnd("idle");
       this.options.callbacks.onStatus("closed");
       return;
     }
     if (event.type === "session.error") {
+      this.stopRecorderAfterGatewayEnd("error");
       this.rejectWaiters(event.error || "语音识别失败");
       this.options.callbacks.onError(event.error || "语音识别失败");
       this.options.callbacks.onStatus("error");
     }
+  }
+
+  private stopRecorderAfterGatewayEnd(captureState: MemoirCaptureState): void {
+    this.recording = false;
+    this.acceptingFrames = false;
+    if (this.recorderStarted) {
+      try {
+        recorderManager.stop();
+      } catch {
+        // Recorder may already be stopped by WeChat after permission or system interruptions.
+      }
+    }
+    this.recorderStarted = false;
+    this.emitCaptureStats(captureState);
   }
 
   private finishAudioInput(): void {
