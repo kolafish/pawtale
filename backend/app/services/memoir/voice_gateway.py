@@ -7,7 +7,7 @@ import contextlib
 import logging
 from typing import Any, Awaitable, Callable, Protocol
 
-from app.services.memoir.streaming_asr import StreamingASRClient, StreamingASREvent
+from app.services.memoir.asr import StreamingASRClient, StreamingASREvent
 
 logger = logging.getLogger(__name__)
 

@@ -3,24 +3,26 @@ import json
 
 import pytest
 
-from app.services.memoir.streaming_asr import (
+from app.services.memoir.asr import StreamingASREvent
+from app.services.memoir.volc_asr_protocol import (
     GZIP_COMPRESSION,
     JSON_SERIALIZATION,
     SERVER_ACK,
     SERVER_ERROR_RESPONSE,
     SERVER_FULL_RESPONSE,
-    StreamingASREvent,
+    VolcASRProtocolCodec,
+)
+from app.services.memoir.volc_streaming_asr import (
     VolcStreamingASRClient,
     VolcStreamingASRConfig,
-    build_volc_audio_request,
-    build_volc_full_request,
-    parse_volc_server_message,
-    volc_message_to_event,
 )
 
 
+CODEC = VolcASRProtocolCodec()
+
+
 def test_build_volc_full_request_uses_binary_gzip_json_frame():
-    frame = build_volc_full_request({"request": {"model_name": "bigmodel"}})
+    frame = CODEC.build_full_request({"request": {"model_name": "bigmodel"}})
 
     assert frame[:4] == bytes([0x11, 0x10, 0x11, 0x00])
 
@@ -30,7 +32,7 @@ def test_build_volc_full_request_uses_binary_gzip_json_frame():
 
 
 def test_build_volc_full_request_can_include_sequence():
-    frame = build_volc_full_request({"request": {"model_name": "bigmodel"}}, sequence=1)
+    frame = CODEC.build_full_request({"request": {"model_name": "bigmodel"}}, sequence=1)
 
     assert frame[:4] == bytes([0x11, 0x11, 0x11, 0x00])
     assert int.from_bytes(frame[4:8], "big", signed=True) == 1
@@ -41,8 +43,8 @@ def test_build_volc_full_request_can_include_sequence():
 
 
 def test_build_volc_audio_request_marks_regular_and_final_frames():
-    regular = build_volc_audio_request(b"abc")
-    final = build_volc_audio_request(b"", is_last=True)
+    regular = CODEC.build_audio_request(b"abc")
+    final = CODEC.build_audio_request(b"", is_last=True)
 
     assert regular[:4] == bytes([0x11, 0x20, 0x11, 0x00])
     assert final[:4] == bytes([0x11, 0x22, 0x11, 0x00])
@@ -50,8 +52,8 @@ def test_build_volc_audio_request_marks_regular_and_final_frames():
 
 
 def test_build_volc_audio_request_can_include_sequence():
-    regular = build_volc_audio_request(b"abc", sequence=2)
-    final = build_volc_audio_request(b"", is_last=True, sequence=3)
+    regular = CODEC.build_audio_request(b"abc", sequence=2)
+    final = CODEC.build_audio_request(b"", is_last=True, sequence=3)
 
     assert regular[:4] == bytes([0x11, 0x21, 0x11, 0x00])
     assert int.from_bytes(regular[4:8], "big", signed=True) == 2
@@ -64,8 +66,8 @@ def test_parse_volc_full_response_and_extract_partial_event():
     payload = {"result": [{"text": "我小时候", "is_final": False}]}
     frame = _server_frame(SERVER_FULL_RESPONSE, payload)
 
-    message = parse_volc_server_message(frame)
-    event = volc_message_to_event(message)
+    message = CODEC.parse_server_message(frame)
+    event = CODEC.message_to_event(message)
 
     assert message.message_type == SERVER_FULL_RESPONSE
     assert event == StreamingASREvent(
@@ -83,8 +85,8 @@ def test_parse_volc_full_response_with_sequence():
     payload = {"result": [{"text": "我小时候", "is_final": False}]}
     frame = _server_frame(SERVER_FULL_RESPONSE, payload, sequence=2)
 
-    message = parse_volc_server_message(frame)
-    event = volc_message_to_event(message)
+    message = CODEC.parse_server_message(frame)
+    event = CODEC.message_to_event(message)
 
     assert message.sequence == 2
     assert event is not None
@@ -95,8 +97,8 @@ def test_parse_volc_full_response_with_sequence():
 def test_parse_volc_empty_full_response_is_ignored():
     frame = bytes([0x11, SERVER_FULL_RESPONSE << 4, (JSON_SERIALIZATION << 4) | GZIP_COMPRESSION, 0x00])
 
-    message = parse_volc_server_message(frame)
-    event = volc_message_to_event(message)
+    message = CODEC.parse_server_message(frame)
+    event = CODEC.message_to_event(message)
 
     assert message.payload is None
     assert event is None
@@ -110,8 +112,8 @@ def test_parse_volc_empty_json_payload_is_ignored():
         + body
     )
 
-    message = parse_volc_server_message(frame)
-    event = volc_message_to_event(message)
+    message = CODEC.parse_server_message(frame)
+    event = CODEC.message_to_event(message)
 
     assert message.payload == ""
     assert event is None
@@ -135,8 +137,8 @@ def test_parse_volc_ack_extracts_final_utterance_event():
     }
     frame = _server_frame(SERVER_ACK, payload, sequence=7)
 
-    message = parse_volc_server_message(frame)
-    event = volc_message_to_event(message)
+    message = CODEC.parse_server_message(frame)
+    event = CODEC.message_to_event(message)
 
     assert message.sequence == 7
     assert event is not None
@@ -150,8 +152,8 @@ def test_parse_volc_error_response_extracts_error_event():
     payload = {"message": "invalid api key"}
     frame = _server_frame(SERVER_ERROR_RESPONSE, payload, code=401)
 
-    message = parse_volc_server_message(frame)
-    event = volc_message_to_event(message)
+    message = CODEC.parse_server_message(frame)
+    event = CODEC.message_to_event(message)
 
     assert message.code == 401
     assert event is not None
@@ -214,6 +216,43 @@ def test_volc_initial_request_asks_for_full_two_pass_results():
     }
     assert request["request"]["result_type"] == "full"
     assert request["request"]["enable_nonstream"] is True
+
+
+def test_volc_client_start_sends_initial_request_with_sequence(monkeypatch):
+    sent_frames = []
+    connect_calls = []
+
+    class FakeConnection:
+        async def send(self, frame):
+            sent_frames.append(frame)
+
+    async def fake_connect(*args, **kwargs):
+        connect_calls.append({"args": args, "kwargs": kwargs})
+        return FakeConnection()
+
+    monkeypatch.setattr("app.services.memoir.volc_streaming_asr.websockets.connect", fake_connect)
+
+    client = VolcStreamingASRClient(
+        config=VolcStreamingASRConfig(
+            ws_url="wss://example.test",
+            resource_id="volc.seedasr.sauc.duration",
+            api_key="api",
+        ),
+        user_id="user-1",
+        voice_session_id="voice-session-1",
+    )
+
+    import asyncio
+
+    asyncio.run(client.start())
+    asyncio.run(client.send_audio(b"abc"))
+
+    assert connect_calls[0]["args"] == ("wss://example.test",)
+    assert connect_calls[0]["kwargs"]["additional_headers"]["X-Api-Key"] == "api"
+    assert sent_frames[0][:4] == bytes([0x11, 0x11, 0x11, 0x00])
+    assert int.from_bytes(sent_frames[0][4:8], "big", signed=True) == 1
+    assert sent_frames[1][:4] == bytes([0x11, 0x21, 0x11, 0x00])
+    assert int.from_bytes(sent_frames[1][4:8], "big", signed=True) == 2
 
 
 def test_volc_client_uses_sequence_frames_for_requests():
