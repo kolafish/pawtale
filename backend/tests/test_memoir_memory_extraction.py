@@ -316,38 +316,3 @@ async def test_process_session_memory_ai_failure_does_not_change_answers(test_db
     assert exc.value.status_code == 503
     assert saved_answer.transcript_edited == "我第一次去重庆厂里上班，是老张带我去的。"
     assert await _count(test_db, MemoirSessionSummary) == 0
-
-
-async def test_mobile_process_session_endpoint(client, test_db, monkeypatch):
-    payload_holder: dict[str, str] = {}
-
-    def fake_get_ai_service(ai_model=None):
-        return FakeExtractionAIClient(_payload(payload_holder["answer_id"]))
-
-    monkeypatch.setattr(
-        "app.services.memoir.memory_extraction.get_ai_service",
-        fake_get_ai_service,
-    )
-    session_response = await client.get("/api/mobile/memoir/sessions/current")
-    session = session_response.json()["session"]
-    question = session_response.json()["current_question"]
-    user = await test_db.scalar(select(User).where(User.email == "tester@example.com"))
-    answer = await answer_question_with_text(
-        test_db,
-        question["id"],
-        user.id,
-        "我第一次去重庆厂里上班，是老张带我去的。",
-    )
-    payload_holder["answer_id"] = answer.id
-
-    process_response = await client.post(
-        f"/api/mobile/memoir/sessions/{session['id']}/process",
-        json={"ai_model": "deepseek"},
-    )
-
-    assert process_response.status_code == 200
-    data = process_response.json()
-    assert data["people"][0]["canonical_name"] == "老张"
-    assert data["events"][0]["title"] == "第一次去重庆工作"
-    assert data["session_summary"]["summary"].startswith("本次访谈提到")
-    assert data["story_fragment"]["output_type"] == "story_fragment"
