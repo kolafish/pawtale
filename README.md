@@ -77,8 +77,8 @@ npm run dev
 
 | 变量 | 说明 |
 | --- | --- |
-| `APP_ENV` | 应用环境，默认 `development` |
-| `APP_SECRET_KEY` | session cookie 签名密钥 |
+| `APP_ENV` | 应用环境：`development` / `test` / `production`；生产环境必须显式设为 `production` |
+| `APP_SECRET_KEY` | session cookie 签名密钥；生产环境必须是至少 32 字符的非默认随机值 |
 | `DATABASE_URL` | 可选数据库连接；不设置时使用 `data/pawtale.db` |
 | `WECHAT_MINIPROGRAM_APPID` | 微信小程序 AppID，用于后端 code2session |
 | `WECHAT_MINIPROGRAM_SECRET` | 微信小程序 AppSecret，只能放后端 `.env` |

@@ -83,7 +83,7 @@ app/
 
 ```bash
 APP_ENV=development
-APP_SECRET_KEY=xxx
+APP_SECRET_KEY=replace-with-at-least-32-random-characters
 # DATABASE_URL=sqlite+aiosqlite:///../data/pawtale.db
 
 WECHAT_MINIPROGRAM_APPID=wx71acdf73e2ba7067
@@ -98,6 +98,8 @@ ANTHROPIC_BASE_URL=xxx
 
 DEFAULT_AI_MODEL=claude-opus-4
 ```
+
+生产环境必须设置 `APP_ENV=production`，并使用至少 32 字符的非默认随机 `APP_SECRET_KEY`；否则后端启动会失败。
 
 `DEFAULT_AI_MODEL` 可选：
 
