@@ -3,29 +3,19 @@ from __future__ import annotations
 from datetime import datetime
 
 from fastapi import HTTPException
-from sqlalchemy import func, or_, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.domain.memoir.types import MemoirCreatedBy, MemoirTranscriptVersionType, MemoirVoiceSessionStatus
-from app.models.memoir import (
-    MemoirAnswer,
-    MemoirChatMessage,
-    MemoirQuestion,
-    MemoirSession,
-    MemoirTranscriptVersion,
-    MemoirVoiceSession,
-    MemoirVoiceUtterance,
-)
+from app.domain.memoir.types import MemoirVoiceSessionStatus
+from app.models.memoir import MemoirVoiceSession
 from app.models.projects import Project
 from app.schemas.memoir import (
-    MemoirChatMessageCreate,
     MemoirVoiceSessionCreate,
     MemoirVoiceSessionDetailResponse,
     MemoirVoiceSessionStopRequest,
-    MemoirVoiceUtteranceCreate,
 )
-from app.services.memoir.access import load_audio_file, load_memoir_project, load_session
+from app.services.memoir.access import load_memoir_project, load_session
 
 
 def _detail_options():
@@ -127,163 +117,3 @@ async def stop_voice_session(
         voice_session.stopped_at = datetime.utcnow()
     await db.commit()
     return await get_voice_session_detail(db, voice_session.id, user_id)
-
-
-async def create_voice_transcript_version(
-    db: AsyncSession,
-    voice_session_id: str,
-    user_id: str,
-    *,
-    content: str,
-    provider: str | None,
-) -> MemoirTranscriptVersion:
-    voice_session = await _load_voice_session(db, voice_session_id, user_id)
-    normalized_content = content.strip()
-    if not normalized_content:
-        raise HTTPException(status_code=400, detail="转写文本不能为空")
-
-    version = MemoirTranscriptVersion(
-        voice_session_id=voice_session.id,
-        version_type=MemoirTranscriptVersionType.ASR_RAW.value,
-        content=normalized_content,
-        provider=provider,
-        created_by=MemoirCreatedBy.ASR.value,
-    )
-    db.add(version)
-    await db.commit()
-    await db.refresh(version)
-    return version
-
-
-async def append_chat_message(
-    db: AsyncSession,
-    voice_session_id: str,
-    user_id: str,
-    req: MemoirChatMessageCreate,
-) -> MemoirChatMessage:
-    voice_session = await _load_voice_session(db, voice_session_id, user_id)
-    await _assert_optional_audio_file(db, req.audio_file_id, user_id)
-    await _assert_optional_transcript_version(
-        db,
-        req.transcript_version_id,
-        voice_session.project_id,
-        voice_session.id,
-    )
-    await _assert_optional_parent_message(db, req.parent_message_id, voice_session.id)
-
-    next_turn_index = await _next_turn_index(db, voice_session.id)
-    message = MemoirChatMessage(
-        project_id=voice_session.project_id,
-        voice_session_id=voice_session.id,
-        role=req.role.value,
-        content_text=req.content_text,
-        content_status=req.content_status.value,
-        audio_file_id=req.audio_file_id,
-        transcript_version_id=req.transcript_version_id,
-        parent_message_id=req.parent_message_id,
-        guidance_intent=req.guidance_intent,
-        turn_index=next_turn_index,
-        metadata_json=req.metadata_json,
-    )
-    db.add(message)
-    await db.commit()
-    await db.refresh(message)
-    return message
-
-
-async def append_utterance(
-    db: AsyncSession,
-    voice_session_id: str,
-    user_id: str,
-    req: MemoirVoiceUtteranceCreate,
-) -> MemoirVoiceUtterance:
-    voice_session = await _load_voice_session(db, voice_session_id, user_id)
-    await _assert_optional_audio_file(db, req.audio_file_id, user_id)
-    await _assert_optional_chat_message(db, req.chat_message_id, voice_session.id)
-    if req.start_ms is not None and req.end_ms is not None and req.end_ms < req.start_ms:
-        raise HTTPException(status_code=400, detail="音频结束时间不能早于开始时间")
-
-    utterance = MemoirVoiceUtterance(
-        voice_session_id=voice_session.id,
-        chat_message_id=req.chat_message_id,
-        audio_file_id=req.audio_file_id,
-        transcript_raw=req.transcript_raw,
-        transcript_edited=req.transcript_edited if req.transcript_edited is not None else req.transcript_raw,
-        start_ms=req.start_ms,
-        end_ms=req.end_ms,
-        provider=req.provider,
-        provider_payload_json=req.provider_payload_json,
-    )
-    db.add(utterance)
-    await db.commit()
-    await db.refresh(utterance)
-    return utterance
-
-
-async def _next_turn_index(db: AsyncSession, voice_session_id: str) -> int:
-    result = await db.execute(
-        select(func.max(MemoirChatMessage.turn_index)).where(
-            MemoirChatMessage.voice_session_id == voice_session_id
-        )
-    )
-    current = result.scalar_one_or_none()
-    return 0 if current is None else int(current) + 1
-
-
-async def _assert_optional_audio_file(db: AsyncSession, audio_file_id: str | None, user_id: str) -> None:
-    if audio_file_id:
-        await load_audio_file(db, audio_file_id, user_id)
-
-
-async def _assert_optional_transcript_version(
-    db: AsyncSession,
-    transcript_version_id: str | None,
-    project_id: str,
-    voice_session_id: str,
-) -> None:
-    if not transcript_version_id:
-        return
-    result = await db.execute(
-        select(MemoirTranscriptVersion)
-        .outerjoin(MemoirAnswer, MemoirTranscriptVersion.answer_id == MemoirAnswer.id)
-        .outerjoin(MemoirQuestion, MemoirAnswer.question_id == MemoirQuestion.id)
-        .outerjoin(MemoirSession, MemoirQuestion.session_id == MemoirSession.id)
-        .outerjoin(MemoirVoiceSession, MemoirTranscriptVersion.voice_session_id == MemoirVoiceSession.id)
-        .where(MemoirTranscriptVersion.id == transcript_version_id)
-        .where(
-            or_(
-                MemoirSession.project_id == project_id,
-                MemoirVoiceSession.id == voice_session_id,
-            )
-        )
-    )
-    transcript_version = result.scalar_one_or_none()
-    if not transcript_version:
-        raise HTTPException(status_code=404, detail="转写版本不存在")
-
-
-async def _assert_optional_parent_message(
-    db: AsyncSession,
-    parent_message_id: str | None,
-    voice_session_id: str,
-) -> None:
-    if not parent_message_id:
-        return
-    await _assert_optional_chat_message(db, parent_message_id, voice_session_id)
-
-
-async def _assert_optional_chat_message(
-    db: AsyncSession,
-    chat_message_id: str | None,
-    voice_session_id: str,
-) -> None:
-    if not chat_message_id:
-        return
-    result = await db.execute(
-        select(MemoirChatMessage).where(
-            MemoirChatMessage.id == chat_message_id,
-            MemoirChatMessage.voice_session_id == voice_session_id,
-        )
-    )
-    if not result.scalar_one_or_none():
-        raise HTTPException(status_code=404, detail="聊天消息不存在")

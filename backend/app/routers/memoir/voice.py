@@ -5,13 +5,9 @@ from app.auth import get_current_user
 from app.database import get_db
 from app.models.users import User
 from app.schemas.memoir import (
-    MemoirChatMessageCreate,
-    MemoirChatMessageResponse,
     MemoirVoiceSessionCreate,
     MemoirVoiceSessionDetailResponse,
     MemoirVoiceSessionStopRequest,
-    MemoirVoiceUtteranceCreate,
-    MemoirVoiceUtteranceResponse,
 )
 from app.services.memoir import projects as memoir_projects
 from app.services.memoir import voice_sessions as memoir_voice_sessions
@@ -61,31 +57,3 @@ async def stop_mobile_memoir_voice_session(
     current_user: User = Depends(get_current_user),
 ):
     return await memoir_voice_sessions.stop_voice_session(db, voice_session_id, current_user.id, req)
-
-
-@router.post(
-    "/voice-sessions/{voice_session_id}/messages",
-    response_model=MemoirChatMessageResponse,
-    status_code=201,
-)
-async def append_mobile_memoir_voice_message(
-    voice_session_id: str,
-    req: MemoirChatMessageCreate,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    return await memoir_voice_sessions.append_chat_message(db, voice_session_id, current_user.id, req)
-
-
-@router.post(
-    "/voice-sessions/{voice_session_id}/utterances",
-    response_model=MemoirVoiceUtteranceResponse,
-    status_code=201,
-)
-async def append_mobile_memoir_voice_utterance(
-    voice_session_id: str,
-    req: MemoirVoiceUtteranceCreate,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    return await memoir_voice_sessions.append_utterance(db, voice_session_id, current_user.id, req)
