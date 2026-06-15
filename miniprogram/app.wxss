@@ -1,6 +1,6 @@
 page {
   min-height: 100vh;
-  background: #f6f7f9;
+  background: #fffaf2;
   color: #2d1710;
   font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", "Helvetica Neue", Helvetica, Arial, sans-serif;
 }
@@ -47,7 +47,7 @@ image {
 
 .surface {
   background: #ffffff;
-  border: 1rpx solid #e5e7eb;
+  border: 1rpx solid #f0dac0;
   border-radius: 16rpx;
   padding: 32rpx;
 }
@@ -80,7 +80,7 @@ image {
 }
 
 .muted {
-  color: #766a63;
+  color: #685b55;
   font-size: 26rpx;
 }
 
@@ -88,10 +88,10 @@ image {
   width: 100%;
   min-height: 260rpx;
   padding: 26rpx;
-  border: 1rpx solid #d1d5db;
+  border: 1rpx solid #f2cbbb;
   border-radius: 14rpx;
   background: #ffffff;
-  color: #111827;
+  color: #24100b;
   font-size: 30rpx;
   line-height: 1.6;
 }
@@ -115,13 +115,13 @@ image {
 }
 
 .button-secondary {
-  background: #fff1ec;
+  background: #fff6f1;
   color: #9f4a3c;
 }
 
 .button-quiet {
-  background: #f3f4f6;
-  color: #374151;
+  background: #fff6f1;
+  color: #5b4038;
 }
 
 .button-danger {
@@ -173,7 +173,7 @@ image {
   bottom: 0;
   min-height: 132rpx;
   padding: 14rpx 18rpx 26rpx;
-  border-top: 1rpx solid #e5ded2;
+  border-top: 1rpx solid #f0dac0;
   background: rgba(255, 255, 255, 0.96);
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -184,7 +184,7 @@ image {
 .bottom-nav-item {
   min-width: 0;
   height: 92rpx;
-  color: #74706c;
+  color: #685b55;
   display: flex;
   flex-direction: column;
   align-items: center;

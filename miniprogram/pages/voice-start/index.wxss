@@ -74,7 +74,7 @@
 .intro-subtitle {
   display: block;
   margin-top: 14rpx;
-  color: #5f6d69;
+  color: #685b55;
   font-size: 28rpx;
   line-height: 1.45;
 }
@@ -92,8 +92,8 @@
 }
 
 .mode-option.selected {
-  border-color: #2e7d6b;
-  background: #f2fbf7;
+  border-color: #9f4a3c;
+  background: #fff6f1;
 }
 
 .mode-row {
@@ -112,8 +112,8 @@
 .mode-tag {
   padding: 8rpx 16rpx;
   border-radius: 999rpx;
-  background: #e9f6f1;
-  color: #2e7d6b;
+  background: #fff1ec;
+  color: #9f4a3c;
   font-size: 24rpx;
   font-weight: 800;
 }
@@ -121,7 +121,7 @@
 .mode-description {
   display: block;
   margin-top: 18rpx;
-  color: #5f6d69;
+  color: #685b55;
   font-size: 28rpx;
   line-height: 1.55;
 }
@@ -159,9 +159,9 @@
 }
 
 .module-chip.selected {
-  border-color: #2e7d6b;
-  background: #e9f6f1;
-  color: #1f6b59;
+  border-color: #9f4a3c;
+  background: #fff1ec;
+  color: #7a3b31;
 }
 
 .start-button {

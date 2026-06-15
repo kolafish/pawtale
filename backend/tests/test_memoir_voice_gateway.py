@@ -134,6 +134,53 @@ async def test_voice_gateway_stop_finishes_asr_before_shutdown():
     assert stopped["status"] == "stopped"
 
 
+async def test_voice_gateway_can_start_new_asr_after_audio_end():
+    client = FakeGatewayClient()
+    asr_clients = [FakeStreamingASRClient(), FakeStreamingASRClient()]
+    started_count = {"value": 0}
+    session = VoiceGatewaySession(
+        client=client,
+        asr_client_factory=lambda: asr_clients[started_count["value"]],
+        on_start=lambda: _record_start(started_count),
+    )
+
+    run_task = asyncio.create_task(session.run())
+    await _wait_for_event(client, "session.ready")
+
+    await client.push({"type": "session.start"})
+    await _wait_for_event_count(client, "session.started", 1)
+    await client.push(
+        {
+            "type": "audio.frame",
+            "audio": base64.b64encode(b"first").decode("ascii"),
+        }
+    )
+    await client.push({"type": "audio.end"})
+    await _wait_for_event_count(client, "audio.ended", 1)
+
+    await client.push({"type": "session.start"})
+    await _wait_for_event_count(client, "session.started", 2)
+    await client.push(
+        {
+            "type": "audio.frame",
+            "audio": base64.b64encode(b"second").decode("ascii"),
+        }
+    )
+    await client.push({"type": "audio.end"})
+    await _wait_for_event_count(client, "audio.ended", 2)
+
+    await client.push({"type": "session.stop"})
+    await asyncio.wait_for(run_task, timeout=1)
+
+    assert started_count["value"] == 2
+    assert asr_clients[0].sent_audio == [b"first"]
+    assert asr_clients[0].finished
+    assert asr_clients[0].closed
+    assert asr_clients[1].sent_audio == [b"second"]
+    assert asr_clients[1].finished
+    assert asr_clients[1].closed
+
+
 async def test_voice_gateway_provider_error_stops_session_with_error():
     client = FakeGatewayClient()
     asr_client = FakeStreamingASRClient()
@@ -250,6 +297,15 @@ async def _wait_for_event(client: "FakeGatewayClient", event_type: str) -> dict[
                 return event
         await asyncio.sleep(0.01)
     raise AssertionError(f"Timed out waiting for {event_type}; sent={client.sent}")
+
+
+async def _wait_for_event_count(client: "FakeGatewayClient", event_type: str, count: int) -> list[dict[str, Any]]:
+    for _ in range(50):
+        events = [event for event in client.sent if event["type"] == event_type]
+        if len(events) >= count:
+            return events
+        await asyncio.sleep(0.01)
+    raise AssertionError(f"Timed out waiting for {count} {event_type}; sent={client.sent}")
 
 
 class FakeGatewayClient:

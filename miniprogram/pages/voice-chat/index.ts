@@ -216,7 +216,11 @@ Page<VoiceChatData, {
       this.setData({ recording: false, primaryActionText: "继续说话" });
       return;
     }
-    streamingClient.startRecording();
+    const started = streamingClient.startRecording();
+    if (!started) {
+      void this.connectGateway();
+      return;
+    }
     this.setData({
       recording: true,
       error: "",
