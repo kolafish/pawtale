@@ -80,6 +80,9 @@ npm run dev
 | `APP_ENV` | 应用环境，默认 `development` |
 | `APP_SECRET_KEY` | session cookie 签名密钥 |
 | `DATABASE_URL` | 可选数据库连接；不设置时使用 `data/pawtale.db` |
+| `WECHAT_MINIPROGRAM_APPID` | 微信小程序 AppID，用于后端 code2session |
+| `WECHAT_MINIPROGRAM_SECRET` | 微信小程序 AppSecret，只能放后端 `.env` |
+| `WECHAT_JSCODE2SESSION_URL` | 微信 code2session 接口地址 |
 | `DEEPSEEK_API_KEY` | DeepSeek API key |
 | `DEEPSEEK_BASE_URL` | DeepSeek API 地址 |
 | `ANTHROPIC_AUTH_TOKEN` | Claude 代理认证 token |

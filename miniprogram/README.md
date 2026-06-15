@@ -1,9 +1,11 @@
-# Pawtale 回忆录小程序
+# 余主任留声机小程序
 
 当前主线是实时语音聊天形态，详见 [../docs/MEMOIR_VOICE_CHAT_REDESIGN.md](../docs/MEMOIR_VOICE_CHAT_REDESIGN.md)。
 
 ```text
 登录
+ -> 微信登录或 Pawtale 账号登录
+ -> 首次微信登录设置 Web 端邮箱密码
  -> 选择或创建回忆录
  -> 选择自由讲述或 AI 引导
  -> 创建 voice session
@@ -16,7 +18,7 @@
 
 用微信开发者工具打开仓库根目录 `Pawtale/`。根目录的 `project.config.json` 会把 `miniprogram/` 识别为小程序根目录。
 
-小程序直连 Pawtale backend 的 HTTP/WSS 服务，不连接 ASR/TTS provider，也不携带 provider API key。开发验证阶段 provider key 只放在 `backend/.env`。
+小程序直连 Pawtale backend 的 HTTP/WSS 服务，不连接 ASR/TTS provider，也不携带 provider API key。开发验证阶段 provider key 和微信小程序 AppSecret 只放在 `backend/.env`。
 
 ## 后端配置
 
@@ -38,9 +40,22 @@ wx.setStorageSync("pawtale_backend_config", {
 
 真机预览必须使用手机可访问的 HTTPS/WSS 域名，并在微信公众平台配置 request/socket 合法域名。
 
+## 登录链路
+
+- 新用户：点击微信登录，后端用 `wx.login()` 返回的 code 换取 openid，创建 Pawtale 账号，再要求设置 Web 端可用的邮箱和密码。
+- 已有 Pawtale Web 用户：展开“使用 Pawtale 账号登录”，用 Web 端邮箱和密码进入小程序。
+- 小程序端不保存微信 AppSecret，也不保存 ASR/TTS/LLM provider key。
+- ECS 后端必须在 `/opt/pawtale/backend/.env` 配置：
+
+```bash
+WECHAT_MINIPROGRAM_APPID=wx71acdf73e2ba7067
+WECHAT_MINIPROGRAM_SECRET=从微信公众平台获取
+WECHAT_JSCODE2SESSION_URL=https://api.weixin.qq.com/sns/jscode2session
+```
+
 ## 当前页面
 
-- `pages/login`：ECS 邮箱登录和注册。
+- `pages/login`：微信登录、已有 Pawtale 账号登录、首次微信登录后设置 Web 登录凭据。
 - `pages/home`：新版语音入口和当前回忆录入口。
 - `pages/projects`：创建、切换、重命名回忆录。
 - `pages/voice-start`：选择弱引导自由讲述或强引导 AI 采访。
