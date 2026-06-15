@@ -2,10 +2,12 @@ import asyncio
 import base64
 from typing import Any
 
+import pytest
 from sqlalchemy import select
 
 from app.models.memoir import AudioFile, MemoirChatMessage, MemoirTranscriptVersion, MemoirVoiceUtterance
 from app.services.memoir.asr import StreamingASREvent
+from app.services.memoir.voice_final_persistence import VoiceFinalPersistenceService
 from app.services.memoir.voice_gateway import VoiceGatewaySession
 from app.services.memoir.voice_gateway_persistence import VoiceGatewayPersistence
 
@@ -383,6 +385,48 @@ async def test_voice_gateway_persistence_saves_final_message_utterance_and_audio
     assert transcript_version.content == "我小时候住在外婆家。"
     assert transcript_version.version_type == "asr_raw"
     assert transcript_version.created_by == "asr"
+
+
+async def test_voice_final_persistence_rolls_back_rows_and_staged_audio_on_failure(
+    client,
+    test_db,
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr("app.services.memoir.audio_files.MEMOIR_AUDIO_DIR", tmp_path / "audio")
+    user_response = await client.get("/api/auth/me")
+    create_response = await client.post(
+        "/api/mobile/memoir/voice-sessions",
+        json={"guidance_mode": "free_narration"},
+    )
+    voice_session_id = create_response.json()["session"]["id"]
+    service = VoiceFinalPersistenceService(
+        db=test_db,
+        voice_session_id=voice_session_id,
+        user_id=user_response.json()["id"],
+    )
+
+    async def fail_turn_index(_voice_session_id: str) -> int:
+        raise RuntimeError("turn index failed")
+
+    monkeypatch.setattr(service, "_next_turn_index", fail_turn_index)
+
+    with pytest.raises(RuntimeError, match="turn index failed"):
+        await service.persist_final(
+            StreamingASREvent(type="final", text="我小时候住在外婆家。"),
+            audio=b"pcm",
+        )
+
+    audio_files = (await test_db.execute(select(AudioFile))).scalars().all()
+    messages = (await test_db.execute(select(MemoirChatMessage))).scalars().all()
+    utterances = (await test_db.execute(select(MemoirVoiceUtterance))).scalars().all()
+    transcript_versions = (await test_db.execute(select(MemoirTranscriptVersion))).scalars().all()
+
+    assert audio_files == []
+    assert messages == []
+    assert utterances == []
+    assert transcript_versions == []
+    assert list((tmp_path / "audio").rglob("*.pcm")) == []
 
 
 async def _record_start(values: dict[str, int]) -> None:

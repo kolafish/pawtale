@@ -4,11 +4,8 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domain.memoir.types import MemoirChatContentStatus, MemoirChatMessageRole
-from app.schemas.memoir import MemoirChatMessageCreate, MemoirVoiceUtteranceCreate
-from app.services.memoir import audio_files as memoir_audio_files
-from app.services.memoir import voice_sessions as memoir_voice_sessions
 from app.services.memoir.asr import StreamingASREvent
+from app.services.memoir.voice_final_persistence import VoiceFinalPersistenceService
 
 
 class VoiceGatewayPersistence:
@@ -24,84 +21,32 @@ class VoiceGatewayPersistence:
         self.voice_session_id = voice_session_id
         self.user_id = user_id
         self.provider = provider
+        self._service = VoiceFinalPersistenceService(
+            db=db,
+            voice_session_id=voice_session_id,
+            user_id=user_id,
+            provider=provider,
+        )
         self._pending_audio = bytearray()
 
     async def record_audio_frame(self, audio: bytes) -> None:
         self._pending_audio.extend(audio)
 
     async def persist_final(self, event: StreamingASREvent) -> dict[str, Any]:
-        audio_file_id = await self._save_pending_audio()
-        transcript_version = await memoir_voice_sessions.create_voice_transcript_version(
-            self.db,
-            self.voice_session_id,
-            self.user_id,
-            content=event.text,
-            provider=self.provider,
-        )
-        message = await memoir_voice_sessions.append_chat_message(
-            self.db,
-            self.voice_session_id,
-            self.user_id,
-            MemoirChatMessageCreate(
-                role=MemoirChatMessageRole.USER,
-                content_text=event.text,
-                content_status=MemoirChatContentStatus.FINAL,
-                audio_file_id=audio_file_id,
-                transcript_version_id=transcript_version.id,
-                metadata_json={"source": "asr.final", "provider": self.provider},
-            ),
-        )
-        utterance = await memoir_voice_sessions.append_utterance(
-            self.db,
-            self.voice_session_id,
-            self.user_id,
-            MemoirVoiceUtteranceCreate(
-                chat_message_id=message.id,
-                audio_file_id=audio_file_id,
-                transcript_raw=event.text,
-                start_ms=event.start_ms,
-                end_ms=event.end_ms,
-                provider=self.provider,
-                provider_payload_json=event.raw,
-            ),
-        )
-        return {
-            "message_id": message.id,
-            "utterance_id": utterance.id,
-            "audio_file_id": audio_file_id,
-            "transcript_version_id": transcript_version.id,
-        }
+        audio = self._pending_audio_bytes()
+        result = await self._service.persist_final(event, audio=audio)
+        self._pending_audio.clear()
+        return result.as_gateway_payload()
 
     async def flush_unfinalized_audio(self) -> dict[str, Any] | None:
-        audio_file_id = await self._save_pending_audio()
-        if not audio_file_id:
+        audio = self._pending_audio_bytes()
+        result = await self._service.persist_unfinalized_audio(audio)
+        if result is None:
             return None
-        utterance = await memoir_voice_sessions.append_utterance(
-            self.db,
-            self.voice_session_id,
-            self.user_id,
-            MemoirVoiceUtteranceCreate(
-                audio_file_id=audio_file_id,
-                transcript_raw="",
-                provider=self.provider,
-                provider_payload_json={"source": "unfinalized_audio"},
-            ),
-        )
-        return {
-            "utterance_id": utterance.id,
-            "audio_file_id": audio_file_id,
-        }
+        self._pending_audio.clear()
+        return result.as_gateway_payload()
 
-    async def _save_pending_audio(self) -> str | None:
+    def _pending_audio_bytes(self) -> bytes | None:
         if not self._pending_audio:
             return None
-        audio = bytes(self._pending_audio)
-        audio_file = await memoir_audio_files.save_audio_bytes(
-            self.db,
-            self.user_id,
-            audio,
-            mime_type="audio/pcm",
-            extension=".pcm",
-        )
-        self._pending_audio.clear()
-        return audio_file.id
+        return bytes(self._pending_audio)

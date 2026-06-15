@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from pathlib import Path
 import uuid
 
@@ -30,6 +31,12 @@ _MIME_EXTENSIONS = {
     "audio/x-pcm": ".pcm",
 }
 _GENERIC_MIME_TYPES = {"", "application/octet-stream"}
+
+
+@dataclass(frozen=True)
+class StagedAudioFile:
+    audio_file: AudioFile
+    path: Path
 
 
 def _storage_path(user_id: str, filename: str) -> str:
@@ -133,6 +140,33 @@ async def save_audio_bytes(
     extension: str = ".pcm",
     duration_seconds: int | None = None,
 ) -> AudioFile:
+    staged = await stage_audio_bytes(
+        db,
+        user_id,
+        data,
+        mime_type=mime_type,
+        extension=extension,
+        duration_seconds=duration_seconds,
+    )
+    try:
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        await discard_staged_audio(staged)
+        raise
+    await db.refresh(staged.audio_file)
+    return staged.audio_file
+
+
+async def stage_audio_bytes(
+    db: AsyncSession,
+    user_id: str,
+    data: bytes,
+    *,
+    mime_type: str = "audio/pcm",
+    extension: str = ".pcm",
+    duration_seconds: int | None = None,
+) -> StagedAudioFile:
     if extension not in _FORMAT_MIME_TYPES:
         raise HTTPException(status_code=400, detail="仅支持 mp3、wav、ogg、pcm 音频文件")
     if len(data) == 0:
@@ -163,11 +197,9 @@ async def save_audio_bytes(
         duration_seconds=duration_seconds,
     )
     db.add(audio_file)
-    try:
-        await db.commit()
-    except Exception:
-        await db.rollback()
-        await _remove_if_exists(target_path)
-        raise
-    await db.refresh(audio_file)
-    return audio_file
+    return StagedAudioFile(audio_file=audio_file, path=target_path)
+
+
+async def discard_staged_audio(staged: StagedAudioFile | None) -> None:
+    if staged is not None:
+        await _remove_if_exists(staged.path)
