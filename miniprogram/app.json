@@ -1,15 +1,12 @@
 {
   "pages": [
     "pages/index/index",
+    "pages/login/index",
     "pages/home/index",
     "pages/voice-start/index",
     "pages/voice-chat/index",
-    "pages/workbench/index",
-    "pages/stories/index",
-    "pages/profile/index",
     "pages/projects/index"
   ],
-  "cloud": true,
   "window": {
     "navigationBarTitleText": "Pawtale 回忆录",
     "navigationBarBackgroundColor": "#9f4a3c",
@@ -18,9 +15,13 @@
   },
   "networkTimeout": {
     "request": 60000,
-    "uploadFile": 60000,
     "downloadFile": 60000,
     "connectSocket": 60000
+  },
+  "permission": {
+    "scope.record": {
+      "desc": "用于语音访谈和实时转写"
+    }
   },
   "style": "v2",
   "sitemapLocation": "sitemap.json"
