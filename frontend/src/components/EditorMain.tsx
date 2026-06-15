@@ -1,4 +1,4 @@
-import { useRef, useState, type SyntheticEvent } from 'react';
+import { useRef, useState, type KeyboardEvent, type SyntheticEvent } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
@@ -21,7 +21,14 @@ import { DiffReviewView } from './DiffReviewView';
 import { MultiModelTabBar } from './MultiModelTabBar';
 import type { DiffChunk, SelectionRange, MultiReviseResultItem } from '../types';
 import type { SaveStatus } from '../hooks/useProjectState';
-import { applyMarkdownFormat, type MarkdownFormat } from '../utils/markdownEditor';
+import {
+  applyMarkdownFormat,
+  applyMarkdownIndent,
+  continueMarkdownLine,
+  getMarkdownKeyboardCommand,
+  type MarkdownEditResult,
+  type MarkdownFormat,
+} from '../utils/markdownEditor';
 
 interface EditorMainProps {
   title: string;
@@ -63,13 +70,13 @@ interface MarkdownTool {
 }
 
 const MARKDOWN_TOOLS: MarkdownTool[] = [
-  { format: 'heading-1', title: '一级标题', icon: Heading1 },
-  { format: 'heading-2', title: '二级标题', icon: Heading2 },
-  { format: 'bold', title: '加粗', icon: Bold },
-  { format: 'italic', title: '斜体', icon: Italic },
-  { format: 'quote', title: '引用', icon: Quote },
-  { format: 'unordered-list', title: '无序列表', icon: List },
-  { format: 'ordered-list', title: '有序列表', icon: ListOrdered },
+  { format: 'heading-1', title: '一级标题 Cmd/Ctrl+Alt+1', icon: Heading1 },
+  { format: 'heading-2', title: '二级标题 Cmd/Ctrl+Alt+2', icon: Heading2 },
+  { format: 'bold', title: '加粗 Cmd/Ctrl+B', icon: Bold },
+  { format: 'italic', title: '斜体 Cmd/Ctrl+I', icon: Italic },
+  { format: 'quote', title: '引用 Cmd/Ctrl+Shift+>', icon: Quote },
+  { format: 'unordered-list', title: '无序列表 Cmd/Ctrl+Shift+8', icon: List },
+  { format: 'ordered-list', title: '有序列表 Cmd/Ctrl+Shift+7', icon: ListOrdered },
   { format: 'divider', title: '分隔线', icon: Minus },
 ];
 
@@ -143,13 +150,7 @@ export function EditorMain({
     }
   };
 
-  const applyFormat = (format: MarkdownFormat) => {
-    if (viewMode === 'preview') return;
-    const target = textareaRef.current;
-    const selection = target
-      ? { start: target.selectionStart, end: target.selectionEnd }
-      : { start: editorContent.length, end: editorContent.length };
-    const result = applyMarkdownFormat(editorContent, selection, format);
+  const applyEditResult = (result: MarkdownEditResult) => {
     setEditorContent(result.text);
     window.requestAnimationFrame(() => {
       if (!textareaRef.current) return;
@@ -165,11 +166,57 @@ export function EditorMain({
     });
   };
 
+  const currentTextareaSelection = () => {
+    const target = textareaRef.current;
+    return target
+      ? { start: target.selectionStart, end: target.selectionEnd }
+      : { start: editorContent.length, end: editorContent.length };
+  };
+
+  const applyFormat = (format: MarkdownFormat) => {
+    if (viewMode === 'preview') return;
+    applyEditResult(applyMarkdownFormat(editorContent, currentTextareaSelection(), format));
+  };
+
+  const handleEditorKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    const command = getMarkdownKeyboardCommand({
+      key: event.key,
+      code: event.code,
+      metaKey: event.metaKey,
+      ctrlKey: event.ctrlKey,
+      altKey: event.altKey,
+      shiftKey: event.shiftKey,
+      isComposing: event.nativeEvent.isComposing,
+    });
+    if (!command) return;
+
+    const selection = {
+      start: event.currentTarget.selectionStart,
+      end: event.currentTarget.selectionEnd,
+    };
+    if (command.type === 'format') {
+      event.preventDefault();
+      applyEditResult(applyMarkdownFormat(editorContent, selection, command.format));
+      return;
+    }
+    if (command.type === 'indent') {
+      event.preventDefault();
+      applyEditResult(applyMarkdownIndent(editorContent, selection, command.direction));
+      return;
+    }
+
+    const result = continueMarkdownLine(editorContent, selection);
+    if (!result) return;
+    event.preventDefault();
+    applyEditResult(result);
+  };
+
   const renderTextarea = () => (
     <textarea
       ref={textareaRef}
       value={editorContent}
       onChange={(e) => setEditorContent(e.target.value)}
+      onKeyDown={handleEditorKeyDown}
       onSelect={handleSelect}
       onMouseUp={handleSelect}
       placeholder="开始写作..."
