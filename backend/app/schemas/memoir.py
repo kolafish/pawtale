@@ -143,6 +143,47 @@ class MemoirVoiceSessionDetailResponse(BaseModel):
     utterances: list[MemoirVoiceUtteranceResponse] = Field(default_factory=list)
 
 
+class MemoirVoiceTranscriptItemResponse(BaseModel):
+    id: str
+    voice_session_id: str
+    project_id: str
+    chat_message_id: str | None = None
+    audio_file_id: str | None = None
+    audio_mime_type: str | None = None
+    audio_size_bytes: int | None = None
+    audio_duration_seconds: int | None = None
+    transcript_version_id: str | None = None
+    transcript_raw: str
+    transcript_edited: str
+    display_text: str
+    raw_char_count: int
+    edited_char_count: int
+    display_char_count: int
+    start_ms: int | None = None
+    end_ms: int | None = None
+    provider: str | None = None
+    session_status: MemoirVoiceSessionStatus
+    guidance_mode: MemoirGuidanceMode
+    current_guidance_module: str | None = None
+    created_at: datetime
+    session_created_at: datetime
+
+
+class MemoirVoiceTranscriptListResponse(BaseModel):
+    items: list[MemoirVoiceTranscriptItemResponse] = Field(default_factory=list)
+    total: int
+    limit: int
+    offset: int
+
+
+class MemoirVoiceTranscriptUpdateRequest(BaseModel):
+    transcript_edited: str
+
+
+class MemoirVoiceTranscriptCleanupRequest(BaseModel):
+    ai_model: str | None = None
+
+
 class MemoirQuestionResponse(BaseModel):
     id: str
     session_id: str
