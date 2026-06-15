@@ -15,14 +15,19 @@
     <view class="capture-strip {{recording ? 'active' : ''}}">
       <view class="capture-dot"></view>
       <text>{{captureStateText}}</text>
-      <text wx:if="{{captureFrameCount}}" class="capture-count">{{captureFrameCount}} 帧 · {{captureKilobytes}} KB</text>
+      <view class="capture-metrics">
+        <text>{{captureDurationText}}</text>
+        <text>本句 {{liveCharCount}} 字</text>
+        <text wx:if="{{captureFrameCount}}">{{captureFrameCount}} 帧</text>
+        <text wx:if="{{captureFrameCount}}">{{captureKilobytes}} KB</text>
+      </view>
     </view>
   </view>
 
   <view class="history-panel">
     <view class="history-header">
       <text>已识别内容</text>
-      <text class="history-count">{{transcriptLines.length}}</text>
+      <text class="history-count">{{transcriptLines.length}} 段 · {{totalTranscriptCharCount}} 字</text>
     </view>
     <view wx:if="{{!transcriptLines.length}}" class="empty-state">
       <text>一句话结束后，会在这里固定下来。</text>

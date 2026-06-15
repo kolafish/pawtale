@@ -207,6 +207,43 @@ async def test_voice_gateway_provider_error_stops_session_with_error():
     assert stopped_with == ["provider_down"]
 
 
+async def test_voice_gateway_masks_final_persistence_errors():
+    client = FakeGatewayClient()
+    asr_client = FakeStreamingASRClient()
+    stopped_with: list[str | None] = []
+
+    async def fail_persist(_event: StreamingASREvent) -> dict[str, Any]:
+        raise RuntimeError("sqlite raw insert failure should not reach the mini program")
+
+    session = VoiceGatewaySession(
+        client=client,
+        asr_client_factory=lambda: asr_client,
+        on_stop=lambda error: _record_stop(stopped_with, error),
+        on_asr_final=fail_persist,
+    )
+
+    run_task = asyncio.create_task(session.run())
+    await _wait_for_event(client, "session.ready")
+    await client.push({"type": "session.start"})
+    await _wait_for_event(client, "session.started")
+    await client.push(
+        {
+            "type": "audio.frame",
+            "audio": base64.b64encode(b"pcm").decode("ascii"),
+        }
+    )
+    await client.push({"type": "audio.end"})
+
+    error = await _wait_for_event(client, "session.error")
+    stopped = await _wait_for_event(client, "session.stopped")
+    await asyncio.wait_for(run_task, timeout=1)
+
+    assert error["error"] == "asr_final_persistence_failed"
+    assert "sqlite raw insert" not in str(error)
+    assert stopped["status"] == "failed"
+    assert stopped_with == ["asr_final_persistence_failed"]
+
+
 async def test_voice_gateway_persistence_saves_final_message_utterance_and_audio(
     client,
     test_db,

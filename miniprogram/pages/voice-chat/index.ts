@@ -33,6 +33,9 @@ interface VoiceChatData {
   captureStateText: string;
   captureFrameCount: number;
   captureKilobytes: number;
+  captureDurationText: string;
+  liveCharCount: number;
+  totalTranscriptCharCount: number;
 }
 
 let streamingClient: MemoirStreamingAsrClient | null = null;
@@ -56,6 +59,21 @@ function statusText(status: VoiceChatConnectionStatus): string {
 
 function latestTranscriptText(lines: VoiceChatTranscriptLine[]): string {
   return lines.length ? lines[lines.length - 1].text : "";
+}
+
+function countTextChars(text: string): number {
+  return Array.from(text.replace(/\s/g, "")).length;
+}
+
+function totalTranscriptChars(lines: VoiceChatTranscriptLine[]): number {
+  return lines.reduce((total, line) => total + countTextChars(line.text), 0);
+}
+
+function formatDuration(milliseconds: number): string {
+  const totalSeconds = Math.max(0, Math.floor(milliseconds / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
 }
 
 function upsertTranscriptLine(
@@ -106,6 +124,9 @@ Page<VoiceChatData, {
     captureStateText: "麦克风未开始",
     captureFrameCount: 0,
     captureKilobytes: 0,
+    captureDurationText: "00:00",
+    liveCharCount: 0,
+    totalTranscriptCharCount: 0,
   },
 
   async onLoad(query) {
@@ -146,6 +167,7 @@ Page<VoiceChatData, {
       modeLabel: modeLabel(guidanceMode),
       transcriptLines: snapshot.transcriptLines,
       latestTranscriptText: latestTranscriptText(snapshot.transcriptLines),
+      totalTranscriptCharCount: totalTranscriptChars(snapshot.transcriptLines),
     });
   },
 
@@ -175,6 +197,7 @@ Page<VoiceChatData, {
       modeLabel: modeLabel(guidanceMode),
       transcriptLines: nextLines,
       latestTranscriptText: latestTranscriptText(nextLines),
+      totalTranscriptCharCount: totalTranscriptChars(nextLines),
     });
   },
 
@@ -233,6 +256,8 @@ Page<VoiceChatData, {
     this.setData({
       recording: true,
       error: "",
+      liveText: "",
+      liveCharCount: 0,
       primaryActionText: "暂停收音",
     });
   },
@@ -278,6 +303,7 @@ Page<VoiceChatData, {
       captureStateText: labels[stats.state],
       captureFrameCount: stats.frameCount,
       captureKilobytes: Math.round(stats.audioBytesSent / 1024),
+      captureDurationText: formatDuration(stats.recordingElapsedMs),
     });
   },
 
@@ -293,6 +319,7 @@ Page<VoiceChatData, {
   handlePartial(text) {
     this.setData({
       liveText: text,
+      liveCharCount: countTextChars(text),
       error: "",
     });
   },
@@ -315,8 +342,10 @@ Page<VoiceChatData, {
     const transcriptLines = upsertTranscriptLine(this.data.transcriptLines, line);
     this.setData({
       liveText: "",
+      liveCharCount: 0,
       latestTranscriptText: latestTranscriptText(transcriptLines),
       transcriptLines,
+      totalTranscriptCharCount: totalTranscriptChars(transcriptLines),
       error: "",
     });
     writeMemoirVoiceSessionSnapshot(this.data.voiceSessionId, { transcriptLines });

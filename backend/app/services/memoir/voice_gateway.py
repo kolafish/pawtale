@@ -4,9 +4,12 @@ import asyncio
 import base64
 import binascii
 import contextlib
+import logging
 from typing import Any, Awaitable, Callable, Protocol
 
 from app.services.memoir.streaming_asr import StreamingASRClient, StreamingASREvent
+
+logger = logging.getLogger(__name__)
 
 
 class VoiceGatewayClient(Protocol):
@@ -189,7 +192,12 @@ class VoiceGatewaySession:
             "provider_payload": event.raw,
         }
         if event.type == "final" and self.on_asr_final:
-            persisted = await self.on_asr_final(event)
+            try:
+                persisted = await self.on_asr_final(event)
+            except Exception:
+                logger.exception("Failed to persist final ASR event")
+                await self._mark_terminal_error("asr_final_persistence_failed")
+                return
             if persisted:
                 payload.update(persisted)
         await self.client.send_json(payload)
