@@ -3,6 +3,7 @@ export type ProjectType = "novel" | "article" | "memoir";
 export interface User {
   id: string;
   email: string;
+  password_login_enabled: boolean;
   display_name: string;
   avatar_url?: string | null;
   storage_owner_id?: string;

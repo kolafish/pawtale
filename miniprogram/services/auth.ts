@@ -12,13 +12,15 @@ import { cacheIdentityFromUser, ensureMemoirStoreIdentity } from "../stores/sess
 export interface BackendAuthUser {
   id: string;
   email: string;
+  password_login_enabled: boolean;
   display_name: string;
   avatar_url?: string | null;
   created_at: string;
 }
 
-interface AuthResponse {
+export interface AuthResponse {
   user: BackendAuthUser;
+  needs_credentials: boolean;
 }
 
 export interface LoginCredentials {
@@ -29,6 +31,8 @@ export interface LoginCredentials {
 export interface RegisterCredentials extends LoginCredentials {
   display_name?: string;
 }
+
+export interface SetCredentialsInput extends RegisterCredentials {}
 
 function rememberMemoirIdentity(identity: MemoirIdentity): MemoirIdentity {
   ensureMemoirStoreIdentity(cacheIdentityFromUser(identity, identity.active_project));
@@ -54,6 +58,38 @@ export async function registerWithEmail(credentials: RegisterCredentials): Promi
     data: credentials,
   });
   return response.user;
+}
+
+function wxLoginCode(): Promise<string> {
+  return new Promise((resolve, reject) => {
+    wx.login({
+      success(result) {
+        if (result.code) {
+          resolve(result.code);
+          return;
+        }
+        reject(new ApiError(0, "微信登录未返回 code", result));
+      },
+      fail(error) {
+        reject(new ApiError(0, error.errMsg || "微信登录失败", error));
+      },
+    });
+  });
+}
+
+export async function loginWithWeChat(): Promise<AuthResponse> {
+  const code = await wxLoginCode();
+  return request<AuthResponse>("/api/auth/wechat-login", {
+    method: "POST",
+    data: { code },
+  });
+}
+
+export async function setAccountCredentials(credentials: SetCredentialsInput): Promise<AuthResponse> {
+  return request<AuthResponse>("/api/auth/set-credentials", {
+    method: "POST",
+    data: credentials,
+  });
 }
 
 export async function logoutBackendSession(): Promise<void> {
