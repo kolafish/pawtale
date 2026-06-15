@@ -4,6 +4,7 @@ import gzip
 import json
 import uuid
 from dataclasses import dataclass, field
+from json import JSONDecodeError
 from typing import Any, AsyncIterator, Literal, Protocol
 
 import websockets
@@ -49,9 +50,9 @@ class VolcStreamingASRConfig:
     connect_timeout_seconds: float = 10.0
 
     def validate_credentials(self) -> None:
-        if self.api_key:
-            return
         if self.app_key and self.access_key:
+            return
+        if self.api_key:
             return
         raise RuntimeError("Volc streaming ASR credentials are not configured")
 
@@ -128,11 +129,13 @@ def parse_volc_server_message(message: bytes) -> VolcServerMessage:
     payload = message[header_size:]
 
     if message_type == SERVER_FULL_RESPONSE:
+        if not payload:
+            return VolcServerMessage(message_type=message_type, flags=flags)
         body = _read_payload_body(payload)
         return VolcServerMessage(
             message_type=message_type,
             flags=flags,
-            payload=_deserialize_payload(body, serialization, compression),
+            payload=_deserialize_payload(body, serialization, compression) if body else None,
         )
 
     if message_type == SERVER_ACK:
@@ -234,15 +237,16 @@ class VolcStreamingASRClient:
             raise RuntimeError("Volc streaming ASR client has not been started")
         async for message in self._connection:
             try:
-                server_message = (
-                    parse_volc_server_message(message)
-                    if isinstance(message, bytes)
-                    else VolcServerMessage(
+                if isinstance(message, bytes):
+                    server_message = parse_volc_server_message(message)
+                else:
+                    if not message.strip():
+                        continue
+                    server_message = VolcServerMessage(
                         message_type=SERVER_FULL_RESPONSE,
                         flags=NO_SEQUENCE,
                         payload=json.loads(message),
                     )
-                )
                 event = volc_message_to_event(server_message)
             except Exception as exc:
                 event = StreamingASREvent(type="error", error=str(exc))
@@ -264,12 +268,11 @@ class VolcStreamingASRClient:
             "X-Api-Request-Id": self.request_id,
             "X-Api-Resource-Id": self.config.resource_id,
         }
-        if self.config.api_key:
-            headers["X-Api-Key"] = self.config.api_key
-        if self.config.app_key:
+        if self.config.app_key and self.config.access_key:
             headers["X-Api-App-Key"] = self.config.app_key
-        if self.config.access_key:
             headers["X-Api-Access-Key"] = self.config.access_key
+        elif self.config.api_key:
+            headers["X-Api-Key"] = self.config.api_key
         return headers
 
     def _initial_request(self) -> dict[str, Any]:
@@ -326,7 +329,13 @@ def _deserialize_payload(body: bytes, serialization: int, compression: int) -> d
     if compression == GZIP_COMPRESSION:
         body = gzip.decompress(body)
     if serialization == JSON_SERIALIZATION:
-        decoded = json.loads(body.decode("utf-8"))
+        text = body.decode("utf-8", errors="replace")
+        if not text.strip():
+            return ""
+        try:
+            decoded = json.loads(text)
+        except JSONDecodeError:
+            return text
         return decoded if isinstance(decoded, dict) else {"value": decoded}
     return body
 

@@ -57,6 +57,31 @@ def test_parse_volc_full_response_and_extract_partial_event():
     )
 
 
+def test_parse_volc_empty_full_response_is_ignored():
+    frame = bytes([0x11, SERVER_FULL_RESPONSE << 4, (JSON_SERIALIZATION << 4) | GZIP_COMPRESSION, 0x00])
+
+    message = parse_volc_server_message(frame)
+    event = volc_message_to_event(message)
+
+    assert message.payload is None
+    assert event is None
+
+
+def test_parse_volc_empty_json_payload_is_ignored():
+    body = gzip.compress(b"")
+    frame = (
+        bytes([0x11, SERVER_FULL_RESPONSE << 4, (JSON_SERIALIZATION << 4) | GZIP_COMPRESSION, 0x00])
+        + len(body).to_bytes(4, "big")
+        + body
+    )
+
+    message = parse_volc_server_message(frame)
+    event = volc_message_to_event(message)
+
+    assert message.payload == ""
+    assert event is None
+
+
 def test_parse_volc_ack_extracts_final_utterance_event():
     payload = {
         "result": [
@@ -110,6 +135,26 @@ def test_volc_config_accepts_new_or_legacy_credentials():
 
     with pytest.raises(RuntimeError):
         VolcStreamingASRConfig(ws_url="wss://example.test", resource_id="resource").validate_credentials()
+
+
+def test_volc_headers_prefer_app_access_credentials_over_api_key():
+    client = VolcStreamingASRClient(
+        config=VolcStreamingASRConfig(
+            ws_url="wss://example.test",
+            resource_id="volc.seedasr.sauc.duration",
+            api_key="legacy-api-key",
+            app_key="app-id",
+            access_key="access-token",
+        ),
+        user_id="user-1",
+        voice_session_id="voice-session-1",
+    )
+
+    headers = client._headers()
+
+    assert headers["X-Api-App-Key"] == "app-id"
+    assert headers["X-Api-Access-Key"] == "access-token"
+    assert "X-Api-Key" not in headers
 
 
 def test_volc_initial_request_asks_for_full_two_pass_results():
