@@ -1,20 +1,7 @@
 import { useState, useCallback } from 'react';
-import DiffMatchPatch from 'diff-match-patch';
 import { projectsApi } from '../api';
+import { computeMarkdownDiff } from '../utils/markdownDiff';
 import type { DiffChunk, SelectionRange, AIDebugInfo, MultiReviseResultItem } from '../types';
-
-const dmp = new DiffMatchPatch();
-
-function computeDiff(orig: string, revised: string): DiffChunk[] {
-  const diffs = dmp.diff_main(orig, revised);
-  dmp.diff_cleanupSemantic(diffs);
-  return diffs.map(([op, text], i) => ({
-    id: `chunk-${i}`,
-    type: op === 0 ? 'equal' : op === 1 ? 'insert' : 'delete',
-    text,
-    accepted: null,
-  }));
-}
 
 export function useAIRevision() {
   const [isOpen, setIsOpen] = useState(false);
@@ -57,7 +44,7 @@ export function useAIRevision() {
       setOriginalText(orig);
       setRevisedText(revised);
       setDebugInfo(result.debug_info || null);
-      setDiffChunks(computeDiff(orig, revised));
+      setDiffChunks(computeMarkdownDiff(orig, revised));
     } catch (e) {
       console.error('AI revision failed:', e);
       throw e;
@@ -95,7 +82,7 @@ export function useAIRevision() {
       const item = result.results[idx];
       if (item?.revised_text) {
         setRevisedText(item.revised_text);
-        setDiffChunks(computeDiff(result.original_text, item.revised_text));
+        setDiffChunks(computeMarkdownDiff(result.original_text, item.revised_text));
         setDebugInfo(item.debug_info || null);
       } else {
         setRevisedText(null);
@@ -116,7 +103,7 @@ export function useAIRevision() {
     const item = multiResults[index];
     if (item?.revised_text) {
       setRevisedText(item.revised_text);
-      setDiffChunks(computeDiff(originalText, item.revised_text));
+      setDiffChunks(computeMarkdownDiff(originalText, item.revised_text));
       setDebugInfo(item.debug_info || null);
     } else {
       setRevisedText(null);
