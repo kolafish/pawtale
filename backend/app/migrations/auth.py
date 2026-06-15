@@ -60,6 +60,50 @@ async def migrate_auth_schema(engine: AsyncEngine) -> dict:
     async with engine.begin() as conn:
         default_user_id = await ensure_default_user(conn)
         changed_columns: list[str] = []
+        changed_tables: list[str] = []
+
+        user_columns = await _table_columns(conn, "users")
+        if "password_login_enabled" not in user_columns:
+            await conn.execute(
+                text("ALTER TABLE users ADD COLUMN password_login_enabled BOOLEAN NOT NULL DEFAULT 1")
+            )
+            changed_columns.append("users.password_login_enabled")
+
+        if not await _table_exists(conn, "auth_identities"):
+            await conn.execute(
+                text(
+                    """
+                    CREATE TABLE auth_identities (
+                        id VARCHAR(36) NOT NULL,
+                        user_id VARCHAR(36) NOT NULL,
+                        provider VARCHAR(32) NOT NULL,
+                        provider_user_id VARCHAR(255) NOT NULL,
+                        provider_union_id VARCHAR(255),
+                        profile_json JSON NOT NULL DEFAULT '{}',
+                        created_at DATETIME,
+                        updated_at DATETIME,
+                        PRIMARY KEY (id),
+                        FOREIGN KEY(user_id) REFERENCES users (id),
+                        CONSTRAINT uq_auth_identities_provider_user
+                            UNIQUE (provider, provider_user_id)
+                    )
+                    """
+                )
+            )
+            changed_tables.append("auth_identities")
+
+        await conn.execute(
+            text("CREATE INDEX IF NOT EXISTS ix_auth_identities_user_id ON auth_identities (user_id)")
+        )
+        await conn.execute(
+            text("CREATE INDEX IF NOT EXISTS ix_auth_identities_provider ON auth_identities (provider)")
+        )
+        await conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_auth_identities_provider_union_id "
+                "ON auth_identities (provider_union_id)"
+            )
+        )
 
         for table in OWNED_TABLES:
             if not await _table_exists(conn, table):
@@ -82,4 +126,5 @@ async def migrate_auth_schema(engine: AsyncEngine) -> dict:
     return {
         "default_user_id": default_user_id,
         "changed_columns": changed_columns,
+        "changed_tables": changed_tables,
     }

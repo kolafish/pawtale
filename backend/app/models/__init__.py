@@ -1,5 +1,5 @@
 from app.database import Base
-from app.models.users import User
+from app.models.users import AuthIdentity, User
 from app.models.projects import (
     Project,
     DocumentGroup,
@@ -36,6 +36,7 @@ from app.models.memoir import (
 
 __all__ = [
     "Base",
+    "AuthIdentity",
     "User",
     "Project",
     "DocumentGroup",
