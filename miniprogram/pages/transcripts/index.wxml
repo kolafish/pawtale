@@ -1,0 +1,105 @@
+<view class="transcripts-page">
+  <view class="top-row">
+    <view class="back-hit" bindtap="openHome">
+      <text class="back-mark">‹</text>
+    </view>
+    <view class="title-block">
+      <text class="page-title">转写记录</text>
+      <text class="page-meta">{{total}} 条语音转写</text>
+    </view>
+  </view>
+
+  <view wx:if="{{error}}" class="error">{{error}}</view>
+
+  <view wx:if="{{loading && !items.length}}" class="empty-panel">
+    <text>正在加载</text>
+  </view>
+
+  <view wx:elif="{{!items.length}}" class="empty-panel">
+    <text class="empty-title">暂无转写记录</text>
+    <text class="empty-copy">完成一次语音聊天后，保存的语音和文字会显示在这里。</text>
+  </view>
+
+  <view wx:for="{{items}}" wx:key="id" class="transcript-card">
+    <view class="record-head">
+      <view>
+        <text class="record-title">{{item.createdText || "语音记录"}}</text>
+        <text class="record-meta">{{item.audioText}}</text>
+      </view>
+      <text class="record-count">{{item.display_char_count}} 字</text>
+    </view>
+
+    <view class="raw-box">
+      <view class="section-head">
+        <text class="section-title">ASR 原文</text>
+        <text class="section-count">{{item.raw_char_count}} 字</text>
+      </view>
+      <text class="raw-text">{{item.transcript_raw}}</text>
+    </view>
+
+    <view class="edit-box">
+      <view class="section-head">
+        <text class="section-title">校正文</text>
+        <text class="section-count">{{item.editingCharCount}} 字</text>
+      </view>
+      <textarea
+        class="transcript-textarea"
+        value="{{item.editingText}}"
+        data-id="{{item.id}}"
+        bindinput="changeText"
+        maxlength="-1"
+        auto-height
+        cursor-spacing="24"
+      />
+    </view>
+
+    <view class="actions-row">
+      <button
+        class="ghost-button"
+        data-id="{{item.id}}"
+        bindtap="playAudio"
+        disabled="{{savingId || cleaningId || !item.canPlayAudio}}"
+      >
+        {{playingId === item.id ? "停止" : "播放"}}
+      </button>
+      <button
+        class="ghost-button"
+        data-id="{{item.id}}"
+        bindtap="resetToRaw"
+        disabled="{{savingId || cleaningId}}"
+      >
+        恢复原文
+      </button>
+      <button
+        class="ghost-button"
+        data-id="{{item.id}}"
+        bindtap="cleanupTranscript"
+        loading="{{cleaningId === item.id}}"
+        disabled="{{savingId || cleaningId || item.changed}}"
+      >
+        AI 清理
+      </button>
+      <button
+        class="small-primary"
+        data-id="{{item.id}}"
+        bindtap="saveTranscript"
+        loading="{{savingId === item.id}}"
+        disabled="{{savingId || cleaningId || !item.changed}}"
+      >
+        保存
+      </button>
+    </view>
+  </view>
+
+  <button
+    wx:if="{{items.length < total}}"
+    class="load-more"
+    loading="{{loading}}"
+    disabled="{{loading}}"
+    bindtap="loadMore"
+  >
+    加载更多
+  </button>
+
+  <view class="bottom-spacer"></view>
+</view>

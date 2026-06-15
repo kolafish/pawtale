@@ -1,20 +1,57 @@
-from fastapi import APIRouter, Depends
+from pathlib import Path
+import struct
+
+import aiofiles
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_user
 from app.database import get_db
 from app.models.users import User
 from app.schemas.memoir import (
+    MemoirVoiceTranscriptCleanupRequest,
+    MemoirVoiceTranscriptItemResponse,
+    MemoirVoiceTranscriptListResponse,
+    MemoirVoiceTranscriptUpdateRequest,
     MemoirVoiceSessionCreate,
     MemoirVoiceSessionDetailResponse,
     MemoirVoiceSessionStopRequest,
 )
 from app.services.memoir import projects as memoir_projects
 from app.services.memoir import voice_sessions as memoir_voice_sessions
-from app.services.memoir.access import load_memoir_project
+from app.services.memoir import voice_transcripts as memoir_voice_transcripts
+from app.services.memoir.access import load_audio_file, load_memoir_project
+from app.services.memoir.audio_files import audio_file_path
 
 
 router = APIRouter()
+
+_PCM_SAMPLE_RATE = 16000
+_PCM_CHANNELS = 1
+_PCM_BITS_PER_SAMPLE = 16
+
+
+def _wav_bytes(pcm: bytes) -> bytes:
+    byte_rate = _PCM_SAMPLE_RATE * _PCM_CHANNELS * _PCM_BITS_PER_SAMPLE // 8
+    block_align = _PCM_CHANNELS * _PCM_BITS_PER_SAMPLE // 8
+    header = struct.pack(
+        "<4sI4s4sIHHIIHH4sI",
+        b"RIFF",
+        36 + len(pcm),
+        b"WAVE",
+        b"fmt ",
+        16,
+        1,
+        _PCM_CHANNELS,
+        _PCM_SAMPLE_RATE,
+        byte_rate,
+        block_align,
+        _PCM_BITS_PER_SAMPLE,
+        b"data",
+        len(pcm),
+    )
+    return header + pcm
 
 
 async def _memoir_project_id(
@@ -57,3 +94,67 @@ async def stop_mobile_memoir_voice_session(
     current_user: User = Depends(get_current_user),
 ):
     return await memoir_voice_sessions.stop_voice_session(db, voice_session_id, current_user.id, req)
+
+
+@router.get("/audio-files/{audio_file_id}/playback")
+async def play_mobile_memoir_audio_file(
+    audio_file_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    audio_file = await load_audio_file(db, audio_file_id, current_user.id)
+    path = audio_file_path(audio_file)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="音频文件不存在")
+    if audio_file.mime_type == "audio/pcm":
+        async with aiofiles.open(path, "rb") as file:
+            pcm = await file.read()
+        return Response(
+            content=_wav_bytes(pcm),
+            media_type="audio/wav",
+            headers={"Content-Disposition": f'inline; filename="{audio_file.id}.wav"'},
+        )
+    return FileResponse(
+        path,
+        media_type=audio_file.mime_type,
+        filename=f"{audio_file.id}{Path(audio_file.storage_path).suffix}",
+    )
+
+
+@router.get("/voice-transcripts", response_model=MemoirVoiceTranscriptListResponse)
+async def list_mobile_memoir_voice_transcripts(
+    project_id: str | None = None,
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if project_id:
+        await load_memoir_project(db, project_id, current_user.id)
+    return await memoir_voice_transcripts.list_voice_transcripts(
+        db,
+        current_user.id,
+        project_id=project_id,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.patch("/voice-transcripts/{utterance_id}", response_model=MemoirVoiceTranscriptItemResponse)
+async def update_mobile_memoir_voice_transcript(
+    utterance_id: str,
+    req: MemoirVoiceTranscriptUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await memoir_voice_transcripts.update_voice_transcript(db, utterance_id, current_user.id, req)
+
+
+@router.post("/voice-transcripts/{utterance_id}/cleanup", response_model=MemoirVoiceTranscriptItemResponse)
+async def cleanup_mobile_memoir_voice_transcript(
+    utterance_id: str,
+    req: MemoirVoiceTranscriptCleanupRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await memoir_voice_transcripts.cleanup_voice_transcript(db, utterance_id, current_user.id, req)

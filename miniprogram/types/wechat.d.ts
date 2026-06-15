@@ -46,6 +46,22 @@ declare namespace WechatMiniprogram {
     complete?(result: GeneralCallbackResult): void;
   }
 
+  interface DownloadFileSuccessCallbackResult extends GeneralCallbackResult {
+    tempFilePath: string;
+    filePath?: string;
+    statusCode: number;
+    header: Record<string, string | string[] | undefined>;
+  }
+
+  interface DownloadFileOption {
+    url: string;
+    header?: Record<string, string>;
+    timeout?: number;
+    success?(result: DownloadFileSuccessCallbackResult): void;
+    fail?(result: GeneralCallbackResult): void;
+    complete?(result: GeneralCallbackResult): void;
+  }
+
   interface RecorderManagerStartOption {
     duration?: number;
     sampleRate?: number;
@@ -187,6 +203,7 @@ declare namespace WechatMiniprogram {
   interface Wx {
     login(option?: LoginOption): void;
     request<T = unknown>(option: RequestOption<T>): void;
+    downloadFile(option: DownloadFileOption): void;
     connectSocket(option: ConnectSocketOption): SocketTask;
     getRecorderManager(): RecorderManager;
     createInnerAudioContext(): InnerAudioContext;

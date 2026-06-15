@@ -108,3 +108,36 @@ export interface VoiceChatTranscriptLine {
   start_ms?: number | null;
   end_ms?: number | null;
 }
+
+export interface MemoirVoiceTranscriptItem {
+  id: string;
+  voice_session_id: string;
+  project_id: string;
+  chat_message_id?: string | null;
+  audio_file_id?: string | null;
+  audio_mime_type?: string | null;
+  audio_size_bytes?: number | null;
+  audio_duration_seconds?: number | null;
+  transcript_version_id?: string | null;
+  transcript_raw: string;
+  transcript_edited: string;
+  display_text: string;
+  raw_char_count: number;
+  edited_char_count: number;
+  display_char_count: number;
+  start_ms?: number | null;
+  end_ms?: number | null;
+  provider?: string | null;
+  session_status: MemoirVoiceSessionStatus;
+  guidance_mode: MemoirGuidanceMode;
+  current_guidance_module?: string | null;
+  created_at: string;
+  session_created_at: string;
+}
+
+export interface MemoirVoiceTranscriptListResponse {
+  items: MemoirVoiceTranscriptItem[];
+  total: number;
+  limit: number;
+  offset: number;
+}

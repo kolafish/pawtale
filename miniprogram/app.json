@@ -5,6 +5,7 @@
     "pages/home/index",
     "pages/voice-start/index",
     "pages/voice-chat/index",
+    "pages/transcripts/index",
     "pages/projects/index"
   ],
   "window": {

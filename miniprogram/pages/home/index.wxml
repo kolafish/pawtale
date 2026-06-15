@@ -27,6 +27,15 @@
     <text class="chevron">›</text>
   </view>
 
+  <view class="project-card" bindtap="openTranscripts" hover-class="tap-hover">
+    <view>
+      <text class="card-label">转写记录</text>
+      <text class="card-title">语音与文字校对</text>
+      <text class="card-meta">浏览已保存语音，编辑 ASR 转写文字</text>
+    </view>
+    <text class="chevron">›</text>
+  </view>
+
   <view class="mode-strip">
     <view class="mode-item">
       <text class="mode-title">自由讲述</text>

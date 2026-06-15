@@ -1,4 +1,6 @@
 import type {
+  MemoirVoiceTranscriptItem,
+  MemoirVoiceTranscriptListResponse,
   MemoirVoiceSessionCreate,
   MemoirVoiceSessionDetail,
 } from "../domain/voice-chat";
@@ -41,4 +43,91 @@ export async function getMemoirVoiceSession(
   return request<MemoirVoiceSessionDetail>(
     `/api/mobile/memoir/voice-sessions/${encodeURIComponent(voiceSessionId)}`,
   );
+}
+
+interface VoiceTranscriptListOptions {
+  projectId?: string;
+  limit?: number;
+  offset?: number;
+}
+
+function queryString(options: VoiceTranscriptListOptions): string {
+  const query: string[] = [];
+  if (options.projectId) {
+    query.push(`project_id=${encodeURIComponent(options.projectId)}`);
+  }
+  if (options.limit !== undefined) {
+    query.push(`limit=${encodeURIComponent(String(options.limit))}`);
+  }
+  if (options.offset !== undefined) {
+    query.push(`offset=${encodeURIComponent(String(options.offset))}`);
+  }
+  return query.length ? `?${query.join("&")}` : "";
+}
+
+export async function listMemoirVoiceTranscripts(
+  options: VoiceTranscriptListOptions = {},
+): Promise<MemoirVoiceTranscriptListResponse> {
+  await ensureBackendSession();
+  return request<MemoirVoiceTranscriptListResponse>(
+    `/api/mobile/memoir/voice-transcripts${queryString(options)}`,
+  );
+}
+
+export async function updateMemoirVoiceTranscript(
+  utteranceId: string,
+  transcriptEdited: string,
+): Promise<MemoirVoiceTranscriptItem> {
+  await ensureBackendSession();
+  return request<MemoirVoiceTranscriptItem>(
+    `/api/mobile/memoir/voice-transcripts/${encodeURIComponent(utteranceId)}`,
+    {
+      method: "PATCH",
+      data: { transcript_edited: transcriptEdited },
+    },
+  );
+}
+
+export async function cleanupMemoirVoiceTranscript(
+  utteranceId: string,
+): Promise<MemoirVoiceTranscriptItem> {
+  await ensureBackendSession();
+  return request<MemoirVoiceTranscriptItem>(
+    `/api/mobile/memoir/voice-transcripts/${encodeURIComponent(utteranceId)}/cleanup`,
+    {
+      method: "POST",
+      data: {},
+    },
+  );
+}
+
+export function memoirAudioPlaybackUrl(audioFileId: string): string {
+  const config = readBackendConfig();
+  if (!config.httpBaseUrl) {
+    throw new ApiError(0, "未配置后端 HTTP 地址", {});
+  }
+  return `${cleanBaseUrl(config.httpBaseUrl)}/api/mobile/memoir/audio-files/${encodeURIComponent(audioFileId)}/playback`;
+}
+
+export async function downloadMemoirVoiceAudio(audioFileId: string): Promise<string> {
+  await ensureBackendSession();
+  const cookie = readSessionCookie();
+  return new Promise((resolve, reject) => {
+    wx.downloadFile({
+      url: memoirAudioPlaybackUrl(audioFileId),
+      header: {
+        ...(cookie ? { Cookie: cookie } : {}),
+      },
+      success: (result) => {
+        if (result.statusCode >= 200 && result.statusCode < 300) {
+          resolve(result.tempFilePath);
+          return;
+        }
+        reject(new ApiError(result.statusCode, "音频下载失败", result));
+      },
+      fail: (error) => {
+        reject(new ApiError(0, error.errMsg || "音频下载失败", error));
+      },
+    });
+  });
 }
