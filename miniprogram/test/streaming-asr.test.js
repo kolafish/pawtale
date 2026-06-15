@@ -154,7 +154,7 @@ test("fetches voice session detail through backend API", async () => {
   assert.equal(requests.length, 2);
   assert.equal(requests[1].url, "http://backend.local:8000/api/mobile/memoir/voice-sessions/voice%2F1");
   assert.equal(requests[1].method, "GET");
-  assert.deepEqual(requests[1].header, { Cookie: "pawtale_session=abc" });
+  assert.equal(requests[1].header.Cookie, "pawtale_session=abc");
   delete global.wx;
 });
 

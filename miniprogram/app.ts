@@ -1,14 +1,9 @@
-import { CLOUD_ENV_ID, CLOUD_FUNCTION_NAME } from "./config";
+import { BACKEND_HTTP_BASE_URL, BACKEND_WS_BASE_URL } from "./config";
 
 App({
-  onLaunch() {
-    wx.cloud.init({
-      env: CLOUD_ENV_ID,
-      traceUser: true,
-    });
-  },
+  onLaunch() {},
   globalData: {
-    cloudEnvId: CLOUD_ENV_ID,
-    cloudFunctionName: CLOUD_FUNCTION_NAME,
+    backendHttpBaseUrl: BACKEND_HTTP_BASE_URL,
+    backendWsBaseUrl: BACKEND_WS_BASE_URL,
   }
 });

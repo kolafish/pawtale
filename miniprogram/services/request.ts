@@ -1,13 +1,43 @@
-import { CLOUD_ENV_ID, CLOUD_FUNCTION_NAME } from "../config";
+import {
+  BACKEND_DEV_DISPLAY_NAME,
+  BACKEND_DEV_EMAIL,
+  BACKEND_DEV_PASSWORD,
+  BACKEND_HTTP_BASE_URL,
+  BACKEND_WS_BASE_URL,
+} from "../config";
 
 export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
-const CLOUD_AUDIO_ROOT = "memoir/audio";
+const BACKEND_COOKIE_KEY = "pawtale_backend_cookie";
+const LEGACY_VOICE_BACKEND_COOKIE_KEY = "pawtale_voice_backend_cookie";
+const BACKEND_CONFIG_STORAGE_KEY = "pawtale_backend_config";
+const LEGACY_VOICE_BACKEND_CONFIG_STORAGE_KEY = "pawtale_voice_backend_config";
 
-interface CloudApiResponse<T> {
-  statusCode: number;
-  data: T;
+export interface BackendRuntimeConfig {
+  httpBaseUrl: string;
+  wsBaseUrl: string;
+  devEmail: string;
+  devPassword: string;
+  devDisplayName: string;
 }
+
+export interface BackendRuntimeConfigInput {
+  httpBaseUrl?: string;
+  wsBaseUrl?: string;
+  devEmail?: string;
+  devPassword?: string;
+  devDisplayName?: string;
+}
+
+interface RequestOptions {
+  method?: HttpMethod;
+  data?: unknown;
+  header?: Record<string, string>;
+}
+
+type WxWithExtConfig = typeof wx & {
+  getExtConfigSync?: () => Record<string, unknown>;
+};
 
 export class ApiError extends Error {
   constructor(
@@ -19,6 +49,132 @@ export class ApiError extends Error {
   }
 }
 
+export function cleanBaseUrl(baseUrl: string): string {
+  return baseUrl.replace(/\/$/, "");
+}
+
+function stringFromConfig(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function storageConfigValue(key: string): BackendRuntimeConfigInput {
+  const stored = wx.getStorageSync<BackendRuntimeConfigInput | string>(key);
+  if (!stored || typeof stored === "string") {
+    return {};
+  }
+  return stored;
+}
+
+function storageConfig(): BackendRuntimeConfigInput {
+  return {
+    ...storageConfigValue(LEGACY_VOICE_BACKEND_CONFIG_STORAGE_KEY),
+    ...storageConfigValue(BACKEND_CONFIG_STORAGE_KEY),
+  };
+}
+
+function extConfig(): BackendRuntimeConfigInput {
+  const wxWithExtConfig = wx as WxWithExtConfig;
+  if (typeof wxWithExtConfig.getExtConfigSync !== "function") {
+    return {};
+  }
+  const ext = wxWithExtConfig.getExtConfigSync();
+  return {
+    httpBaseUrl: stringFromConfig(ext.backendHttpBaseUrl || ext.voiceBackendHttpBaseUrl),
+    wsBaseUrl: stringFromConfig(ext.backendWsBaseUrl || ext.voiceBackendWsBaseUrl),
+    devEmail: stringFromConfig(ext.backendDevEmail || ext.voiceBackendDevEmail),
+    devPassword: stringFromConfig(ext.backendDevPassword || ext.voiceBackendDevPassword),
+    devDisplayName: stringFromConfig(ext.backendDevDisplayName || ext.voiceBackendDevDisplayName),
+  };
+}
+
+function deriveWsBaseUrl(httpBaseUrl: string): string {
+  if (!httpBaseUrl) {
+    return "";
+  }
+  if (httpBaseUrl.startsWith("https://")) {
+    return `wss://${httpBaseUrl.slice("https://".length)}`;
+  }
+  if (httpBaseUrl.startsWith("http://")) {
+    return `ws://${httpBaseUrl.slice("http://".length)}`;
+  }
+  return "";
+}
+
+export function readBackendConfig(): BackendRuntimeConfig {
+  const stored = storageConfig();
+  const ext = extConfig();
+  const configuredHttpBaseUrl =
+    stringFromConfig(stored.httpBaseUrl) ||
+    stringFromConfig(ext.httpBaseUrl);
+  const defaultHttpBaseUrl = stringFromConfig(BACKEND_HTTP_BASE_URL);
+  const httpBaseUrl = configuredHttpBaseUrl || defaultHttpBaseUrl;
+  const explicitWsBaseUrl =
+    stringFromConfig(stored.wsBaseUrl) ||
+    stringFromConfig(ext.wsBaseUrl);
+  const defaultWsBaseUrl = stringFromConfig(BACKEND_WS_BASE_URL);
+  const wsBaseUrl =
+    explicitWsBaseUrl ||
+    (configuredHttpBaseUrl ? deriveWsBaseUrl(configuredHttpBaseUrl) : "") ||
+    defaultWsBaseUrl ||
+    deriveWsBaseUrl(httpBaseUrl);
+  return {
+    httpBaseUrl,
+    wsBaseUrl,
+    devEmail:
+      stringFromConfig(stored.devEmail) ||
+      stringFromConfig(ext.devEmail) ||
+      stringFromConfig(BACKEND_DEV_EMAIL),
+    devPassword:
+      stringFromConfig(stored.devPassword) ||
+      stringFromConfig(ext.devPassword) ||
+      stringFromConfig(BACKEND_DEV_PASSWORD),
+    devDisplayName:
+      stringFromConfig(stored.devDisplayName) ||
+      stringFromConfig(ext.devDisplayName) ||
+      stringFromConfig(BACKEND_DEV_DISPLAY_NAME),
+  };
+}
+
+export function writeBackendConfig(config: BackendRuntimeConfigInput): void {
+  wx.setStorageSync(BACKEND_CONFIG_STORAGE_KEY, config);
+}
+
+export function readSessionCookie(): string {
+  return (
+    wx.getStorageSync<string>(BACKEND_COOKIE_KEY) ||
+    wx.getStorageSync<string>(LEGACY_VOICE_BACKEND_COOKIE_KEY) ||
+    ""
+  );
+}
+
+export function clearSessionCookie(): void {
+  wx.removeStorageSync(BACKEND_COOKIE_KEY);
+  wx.removeStorageSync(LEGACY_VOICE_BACKEND_COOKIE_KEY);
+}
+
+export function cookieHeaderFromSetCookie(
+  cookies: string[] | undefined,
+  header: Record<string, string | string[] | undefined>,
+): string {
+  const setCookie = header["Set-Cookie"] || header["set-cookie"];
+  const headerCookies = Array.isArray(setCookie) ? setCookie : setCookie ? [setCookie] : [];
+  return [...(cookies || []), ...headerCookies]
+    .map((item) => item.split(";")[0]?.trim() || "")
+    .filter(Boolean)
+    .join("; ");
+}
+
+function writeSessionCookie(
+  cookies: string[] | undefined,
+  header: Record<string, string | string[] | undefined>,
+): void {
+  const nextCookie = cookieHeaderFromSetCookie(cookies, header);
+  if (nextCookie) {
+    wx.setStorageSync(BACKEND_COOKIE_KEY, nextCookie);
+    wx.removeStorageSync(LEGACY_VOICE_BACKEND_COOKIE_KEY);
+  }
+}
+
 function apiMessage(data: unknown): string {
   if (data && typeof data === "object" && "detail" in data) {
     const detail = (data as { detail?: unknown }).detail;
@@ -27,149 +183,41 @@ function apiMessage(data: unknown): string {
   return "请求失败";
 }
 
-function fileExtension(filePath: string): string {
-  const cleanPath = filePath.split("?")[0] || "";
-  const match = /\.([a-zA-Z0-9]+)$/.exec(cleanPath);
-  return match ? match[1].toLowerCase() : "mp3";
-}
-
-function audioMimeType(extension: string): string {
-  if (extension === "wav") {
-    return "audio/wav";
-  }
-  if (extension === "ogg") {
-    return "audio/ogg";
-  }
-  if (extension === "pcm") {
-    return "audio/pcm";
-  }
-  return "audio/mpeg";
-}
-
-interface CloudUser {
-  id: string;
-  storage_owner_id?: string;
-}
-
-function safePathSegment(value: string): string {
-  return value.replace(/[^a-zA-Z0-9_-]/g, "_");
-}
-
-function uniqueCloudAudioPath(filePath: string, ownerId: string): string {
-  const extension = fileExtension(filePath);
-  const random = Math.random().toString(36).slice(2, 10);
-  return `${CLOUD_AUDIO_ROOT}/${safePathSegment(ownerId)}/${Date.now()}-${random}.${extension}`;
-}
-
-function localFileSize(filePath: string): Promise<number> {
+export function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
   return new Promise((resolve, reject) => {
-    wx.getFileInfo({
-      filePath,
+    const config = readBackendConfig();
+    if (!config.httpBaseUrl) {
+      reject(new ApiError(0, "未配置后端 HTTP 地址", {}));
+      return;
+    }
+    const cookie = readSessionCookie();
+    wx.request<T>({
+      url: `${cleanBaseUrl(config.httpBaseUrl)}${path}`,
+      method: options.method || "GET",
+      data: options.data ?? {},
+      header: {
+        "content-type": "application/json",
+        ...(cookie ? { Cookie: cookie } : {}),
+        ...(options.header || {}),
+      },
       success: (result) => {
-        resolve(result.size);
+        writeSessionCookie(
+          result.cookies,
+          result.header as Record<string, string | string[] | undefined>,
+        );
+        if (result.statusCode >= 200 && result.statusCode < 300) {
+          resolve(result.data);
+          return;
+        }
+        reject(new ApiError(result.statusCode, apiMessage(result.data), result.data));
       },
       fail: (error) => {
-        reject(new ApiError(0, error.errMsg || "音频文件信息读取失败", error));
+        reject(new ApiError(0, error.errMsg || "后端请求失败", error));
       },
     });
   });
 }
 
-export function request<T>(
-  path: string,
-  options: {
-    method?: HttpMethod;
-    data?: unknown;
-  } = {},
-): Promise<T> {
-  return cloudFunctionRequest<T>(path, options);
-}
-
-async function cloudFunctionRequest<T>(
-  path: string,
-  options: {
-    method?: HttpMethod;
-    data?: unknown;
-  } = {},
-): Promise<T> {
-  try {
-    const result = await wx.cloud.callFunction<CloudApiResponse<T>>({
-      name: CLOUD_FUNCTION_NAME,
-      config: {
-        env: CLOUD_ENV_ID,
-      },
-      data: {
-        path,
-        method: options.method || "GET",
-        data: options.data ?? {},
-      },
-    });
-    const response = result.result;
-    if (response.statusCode >= 200 && response.statusCode < 300) {
-      return response.data;
-    }
-    throw new ApiError(response.statusCode, apiMessage(response.data), response.data);
-  } catch (error) {
-    if (error instanceof ApiError) {
-      throw error;
-    }
-    const message = error instanceof Error ? error.message : "云函数请求失败";
-    throw new ApiError(0, message, error);
-  }
-}
-
-export function uploadFile<T>(
-  path: string,
-  options: {
-    filePath: string;
-    formData?: Record<string, string>;
-  },
-): Promise<T> {
-  return uploadCloudAudioFile<T>(path, options);
-}
-
-async function uploadCloudAudioFile<T>(
-  path: string,
-  options: {
-    filePath: string;
-    formData?: Record<string, string>;
-  },
-): Promise<T> {
-  const cloudUser = await cloudFunctionRequest<CloudUser>("/api/mobile/memoir/me");
-  const ownerId = cloudUser.storage_owner_id || cloudUser.id;
-  const cloudPath = uniqueCloudAudioPath(options.filePath, ownerId);
-  const extension = fileExtension(options.filePath);
-  const durationSeconds = options.formData?.duration_seconds
-    ? Number(options.formData.duration_seconds)
-    : undefined;
-  const sizeBytes = options.formData?.size_bytes
-    ? Number(options.formData.size_bytes)
-    : await localFileSize(options.filePath);
-
-  try {
-    const uploadResult = await wx.cloud.uploadFile({
-      config: {
-        env: CLOUD_ENV_ID,
-      },
-      cloudPath,
-      filePath: options.filePath,
-    });
-
-    return cloudFunctionRequest<T>(path, {
-      method: "POST",
-      data: {
-        file_id: uploadResult.fileID,
-        cloud_path: cloudPath,
-        mime_type: audioMimeType(extension),
-        size_bytes: Number.isFinite(sizeBytes) ? sizeBytes : undefined,
-        duration_seconds: Number.isFinite(durationSeconds) ? durationSeconds : undefined,
-      },
-    });
-  } catch (error) {
-    if (error instanceof ApiError) {
-      throw error;
-    }
-    const message = error instanceof Error ? error.message : "云存储上传失败";
-    throw new ApiError(0, message, error);
-  }
+export async function uploadFile<T>(): Promise<T> {
+  throw new ApiError(0, "ECS 文件上传接口暂未接入", {});
 }
