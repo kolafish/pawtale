@@ -20,10 +20,10 @@
 
   <view wx:if="{{assistantPromptText || followUpLoading || followUpError || canRequestFollowUp}}" class="assistant-panel {{followUpError ? 'error-state' : ''}}">
     <view class="assistant-head">
-      <text class="assistant-label">AI 追问</text>
+      <text class="assistant-label">{{assistantPromptLabel}}</text>
       <text class="assistant-state">{{followUpLoading ? "思考中" : (followUpError ? "追问失败" : (assistantPromptText ? "等待回答" : "可生成"))}}</text>
     </view>
-    <text class="assistant-text">{{followUpLoading ? "正在根据刚才的内容生成下一句追问" : (followUpError || assistantPromptText || "可以让 AI 根据刚才的内容继续追问。")}}</text>
+    <text class="assistant-text">{{followUpLoading ? assistantLoadingText : (followUpError || assistantPromptText || assistantEmptyText)}}</text>
     <view wx:if="{{assistantPromptText && (followUpTTSStateText || followUpTTSError || followUpTTSLoading)}}" class="tts-strip {{followUpTTSError ? 'error' : ''}}">
       <text>{{followUpTTSLoading ? "正在准备 AI 语音" : (followUpTTSError || followUpTTSStateText)}}</text>
     </view>
@@ -43,7 +43,7 @@
         disabled="{{followUpLoading}}"
         bindtap="regenerateFollowUp"
       >
-        {{followUpError ? "重试追问" : (assistantPromptText ? "换个追问" : "生成追问")}}
+        {{followUpError ? (assistantPromptLabel === "AI 开场" ? "重试开场" : "重试追问") : (assistantPromptText ? (assistantPromptLabel === "AI 开场" ? "换个开场" : "换个追问") : (assistantPromptLabel === "AI 开场" ? "生成开场" : "生成追问"))}}
       </button>
       <button
         wx:if="{{assistantPromptText && !followUpLoading && !followUpError}}"
@@ -56,7 +56,7 @@
   </view>
 
   <view class="transcript-stage">
-    <text class="stage-eyebrow">{{recording ? captureStateText : (followUpLoading ? "AI 正在追问" : "准备好了")}}</text>
+    <text class="stage-eyebrow">{{recording ? captureStateText : (followUpLoading ? (assistantPromptLabel === "AI 开场" ? "AI 正在开场" : "AI 正在追问") : "准备好了")}}</text>
     <text class="live-text">{{liveText || latestTranscriptText || (recording ? "请直接说，我会把文字显示在这里" : "点下方按钮开始回答")}}</text>
     <view class="capture-strip {{recording ? 'active' : ''}}">
       <view class="capture-dot"></view>

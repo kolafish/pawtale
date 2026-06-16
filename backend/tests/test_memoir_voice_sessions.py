@@ -229,9 +229,43 @@ async def test_mobile_memoir_voice_follow_up_starts_guided_session_without_user_
     assert response.status_code == 200
     data = response.json()
     assert data["message"]["turn_index"] == 0
+    assert data["message"]["guidance_intent"] == "opening"
+    assert data["message"]["metadata_json"]["source"] == "ai.opening"
     assert data["message"]["metadata_json"]["regenerate"] is True
     assert data["message"]["metadata_json"]["has_user_message"] is False
     assert "人物" in fake_ai.calls[0]["user_prompt"]
+    assert "暂无对话" in fake_ai.calls[0]["user_prompt"]
+
+
+async def test_mobile_memoir_voice_follow_up_starts_free_session_without_user_message(
+    client,
+    monkeypatch,
+):
+    create_response = await client.post(
+        "/api/mobile/memoir/voice-sessions",
+        json={"guidance_mode": "free_narration"},
+    )
+    session = create_response.json()["session"]
+    fake_ai = FakeFollowUpAI("您想从哪段回忆开始讲起？")
+    monkeypatch.setattr(
+        "app.services.memoir.voice_followups.get_ai_service",
+        lambda model=None: fake_ai,
+    )
+
+    response = await client.post(
+        f"/api/mobile/memoir/voice-sessions/{session['id']}/follow-up",
+        json={},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["follow_up_text"] == "您想从哪段回忆开始讲起？"
+    assert data["message"]["turn_index"] == 0
+    assert data["message"]["guidance_intent"] == "opening"
+    assert data["message"]["metadata_json"]["source"] == "ai.opening"
+    assert data["message"]["metadata_json"]["has_user_message"] is False
+    assert "自由讲述开场" in fake_ai.calls[0]["user_prompt"]
+    assert "不要指定主题" in fake_ai.calls[0]["user_prompt"]
     assert "暂无对话" in fake_ai.calls[0]["user_prompt"]
 
 
