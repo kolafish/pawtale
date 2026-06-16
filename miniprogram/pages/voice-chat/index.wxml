@@ -68,6 +68,15 @@
         <text wx:if="{{captureFrameCount}}">{{captureKilobytes}} KB</text>
       </view>
     </view>
+    <view class="voice-activity">
+      <view class="level-track">
+        <view class="level-fill" style="width: {{audioLevelPercent}}%;"></view>
+      </view>
+      <text class="auto-stop-text">{{autoStopStateText}}</text>
+      <button class="auto-stop-toggle" bindtap="toggleAutoStop">
+        {{autoStopEnabled ? "关闭" : "开启"}}
+      </button>
+    </view>
   </view>
 
   <view class="history-panel">

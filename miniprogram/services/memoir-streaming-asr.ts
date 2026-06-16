@@ -15,6 +15,10 @@ const SOCKET_CONNECT_TIMEOUT_MS = 10000;
 const AUDIO_END_TIMEOUT_MS = 15000;
 const SESSION_STOP_TIMEOUT_MS = 8000;
 const RECORDER_STOP_FALLBACK_MS = 1200;
+const PCM_SAMPLE_RATE = 16000;
+const PCM_BYTES_PER_SAMPLE = 2;
+const DEFAULT_SILENCE_LEVEL_THRESHOLD = 0.015;
+const DEFAULT_MIN_AUTO_STOP_RECORDING_MS = 1200;
 const recorderManager = wx.getRecorderManager();
 
 let activeClient: MemoirStreamingAsrClient | null = null;
@@ -46,12 +50,18 @@ export interface MemoirCaptureStats {
   audioBytesSent: number;
   recordingElapsedMs: number;
   gatewayState?: VoiceGatewayState;
+  audioLevel: number;
+  silentElapsedMs: number;
+  autoStopped: boolean;
 }
 
 export interface MemoirStreamingAsrOptions {
   voiceSessionId: string;
   guidanceMode: MemoirGuidanceMode;
   currentGuidanceModule?: string;
+  autoStopSilenceMs?: number;
+  silenceLevelThreshold?: number;
+  minAutoStopRecordingMs?: number;
   callbacks: MemoirStreamingAsrCallbacks;
 }
 
@@ -81,6 +91,27 @@ export function normalizeVoiceGatewayEvent(raw: unknown): VoiceGatewayServerEven
     ...event,
     type: typeof event.type === "string" ? event.type : "session.error",
   };
+}
+
+export function estimatePcm16Level(buffer: ArrayBuffer): number {
+  if (buffer.byteLength < PCM_BYTES_PER_SAMPLE) {
+    return 0;
+  }
+  const view = new DataView(buffer);
+  const sampleCount = Math.floor(buffer.byteLength / PCM_BYTES_PER_SAMPLE);
+  let squareSum = 0;
+  for (let index = 0; index < sampleCount; index += 1) {
+    const sample = view.getInt16(index * PCM_BYTES_PER_SAMPLE, true);
+    squareSum += sample * sample;
+  }
+  return Math.min(1, Math.sqrt(squareSum / sampleCount) / 32768);
+}
+
+function pcmFrameDurationMs(buffer: ArrayBuffer): number {
+  if (buffer.byteLength <= 0) {
+    return 0;
+  }
+  return Math.max(1, Math.round((buffer.byteLength / PCM_BYTES_PER_SAMPLE / PCM_SAMPLE_RATE) * 1000));
 }
 
 export function classifyVoiceGatewayError(event: VoiceGatewayServerEvent): VoiceChatErrorInfo {
@@ -202,6 +233,9 @@ export class MemoirStreamingAsrClient {
   private frameCount = 0;
   private audioBytesSent = 0;
   private captureStartedAtMs = 0;
+  private audioLevel = 0;
+  private silentElapsedMs = 0;
+  private autoStopped = false;
   private gatewayState: VoiceGatewayState | undefined;
   private recorderStopTimer: ReturnType<typeof setTimeout> | null = null;
   private closePromise: Promise<void> | null = null;
@@ -212,6 +246,14 @@ export class MemoirStreamingAsrClient {
   }> = [];
 
   constructor(private readonly options: MemoirStreamingAsrOptions) {}
+
+  configureAutoStop(autoStopSilenceMs: number): void {
+    this.options.autoStopSilenceMs = Math.max(0, autoStopSilenceMs);
+    if (!this.options.autoStopSilenceMs) {
+      this.silentElapsedMs = 0;
+      this.autoStopped = false;
+    }
+  }
 
   async connect(): Promise<void> {
     this.closed = false;
@@ -279,6 +321,9 @@ export class MemoirStreamingAsrClient {
     this.sessionStopped = false;
     this.frameCount = 0;
     this.audioBytesSent = 0;
+    this.audioLevel = 0;
+    this.silentElapsedMs = 0;
+    this.autoStopped = false;
     this.captureStartedAtMs = Date.now();
     this.emitCaptureStats("opening");
     try {
@@ -359,11 +404,17 @@ export class MemoirStreamingAsrClient {
     if (frameBuffer.byteLength > 0) {
       this.frameCount += 1;
       this.audioBytesSent += frameBuffer.byteLength;
+      this.updateVoiceActivity(frameBuffer);
       this.emitCaptureStats("recording");
       this.sendJson({
         type: "audio.frame",
         audio: arrayBufferToBase64(frameBuffer),
       });
+      if (this.shouldAutoStopForSilence()) {
+        this.autoStopped = true;
+        this.stopRecording();
+        return;
+      }
     }
     if (isLastFrame) {
       this.finishAudioInput();
@@ -484,6 +535,7 @@ export class MemoirStreamingAsrClient {
     }
     this.audioEndSent = true;
     this.acceptingFrames = false;
+    this.silentElapsedMs = 0;
     this.options.callbacks.onStatus("stopping");
     this.emitCaptureStats("stopping");
     this.sendJson({ type: "audio.end" });
@@ -558,7 +610,30 @@ export class MemoirStreamingAsrClient {
       audioBytesSent: this.audioBytesSent,
       recordingElapsedMs: this.captureStartedAtMs ? Date.now() - this.captureStartedAtMs : 0,
       gatewayState: this.gatewayState,
+      audioLevel: this.audioLevel,
+      silentElapsedMs: this.silentElapsedMs,
+      autoStopped: this.autoStopped,
     });
+  }
+
+  private updateVoiceActivity(frameBuffer: ArrayBuffer): void {
+    this.audioLevel = estimatePcm16Level(frameBuffer);
+    const threshold = this.options.silenceLevelThreshold ?? DEFAULT_SILENCE_LEVEL_THRESHOLD;
+    if (this.audioLevel < threshold) {
+      this.silentElapsedMs += pcmFrameDurationMs(frameBuffer);
+      return;
+    }
+    this.silentElapsedMs = 0;
+  }
+
+  private shouldAutoStopForSilence(): boolean {
+    const silenceMs = this.options.autoStopSilenceMs || 0;
+    if (silenceMs <= 0 || this.audioEndSent || this.autoStopped) {
+      return false;
+    }
+    const elapsedMs = this.captureStartedAtMs ? Date.now() - this.captureStartedAtMs : 0;
+    const minElapsedMs = this.options.minAutoStopRecordingMs ?? DEFAULT_MIN_AUTO_STOP_RECORDING_MS;
+    return elapsedMs >= minElapsedMs && this.silentElapsedMs >= silenceMs;
   }
 
   private sendJson(event: VoiceGatewayClientEvent): void {
