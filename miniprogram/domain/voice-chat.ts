@@ -192,6 +192,9 @@ export interface MemoirVoiceTranscriptItem {
   audio_size_bytes?: number | null;
   audio_duration_seconds?: number | null;
   transcript_version_id?: string | null;
+  question_message_id?: string | null;
+  question_text: string;
+  question_audio_file_id?: string | null;
   transcript_raw: string;
   transcript_edited: string;
   display_text: string;

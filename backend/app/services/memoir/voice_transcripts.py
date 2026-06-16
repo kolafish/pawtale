@@ -192,6 +192,7 @@ def _item_response(utterance: MemoirVoiceUtterance) -> MemoirVoiceTranscriptItem
     voice_session = utterance.voice_session
     chat_message = utterance.chat_message
     audio_file = utterance.audio_file
+    question_message = _question_message_for_utterance(utterance)
     raw = utterance.transcript_raw or ""
     edited = utterance.transcript_edited or ""
     display_text = edited.strip() or raw.strip()
@@ -205,6 +206,9 @@ def _item_response(utterance: MemoirVoiceUtterance) -> MemoirVoiceTranscriptItem
         audio_size_bytes=audio_file.size_bytes if audio_file else None,
         audio_duration_seconds=audio_file.duration_seconds if audio_file else None,
         transcript_version_id=chat_message.transcript_version_id if chat_message else None,
+        question_message_id=question_message.id if question_message else None,
+        question_text=question_message.content_text if question_message else "",
+        question_audio_file_id=question_message.audio_file_id if question_message else None,
         transcript_raw=raw,
         transcript_edited=edited,
         display_text=display_text,
@@ -222,9 +226,27 @@ def _item_response(utterance: MemoirVoiceUtterance) -> MemoirVoiceTranscriptItem
     )
 
 
+def _question_message_for_utterance(utterance: MemoirVoiceUtterance) -> MemoirChatMessage | None:
+    user_message = utterance.chat_message
+    if not user_message:
+        return None
+    candidates = [
+        message
+        for message in utterance.voice_session.messages
+        if (
+            message.role == MemoirChatMessageRole.ASSISTANT.value
+            and message.content_text.strip()
+            and message.turn_index < user_message.turn_index
+        )
+    ]
+    if not candidates:
+        return None
+    return sorted(candidates, key=lambda message: (message.turn_index, message.created_at, message.id))[-1]
+
+
 def _detail_options():
     return (
-        selectinload(MemoirVoiceUtterance.voice_session),
+        selectinload(MemoirVoiceUtterance.voice_session).selectinload(MemoirVoiceSession.messages),
         selectinload(MemoirVoiceUtterance.chat_message),
         selectinload(MemoirVoiceUtterance.audio_file),
     )

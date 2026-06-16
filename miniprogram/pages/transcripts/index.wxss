@@ -126,6 +126,7 @@
   font-weight: 800;
 }
 
+.question-box,
 .raw-box,
 .display-box,
 .edit-box {
@@ -152,6 +153,7 @@
   line-height: 1.3;
 }
 
+.question-text,
 .raw-text,
 .display-text {
   display: block;
@@ -161,6 +163,11 @@
   font-size: 28rpx;
   line-height: 1.55;
   word-break: break-word;
+}
+
+.question-text {
+  background: #fffaf2;
+  border: 2rpx solid #f0dac0;
 }
 
 .raw-text {
