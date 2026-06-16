@@ -3,6 +3,7 @@ from sqlalchemy import select
 from app.domain.memoir.types import MemoirChatContentStatus, MemoirChatMessageRole
 from app.models.memoir import MemoirChatMessage, MemoirVoiceSession
 from app.services.memoir import voice_sessions as memoir_voice_sessions
+from app.services.memoir.voice_tts import TTSResult
 
 
 class FakeFollowUpAI:
@@ -22,6 +23,24 @@ class FakeFollowUpAI:
             }
         )
         return self.text
+
+
+class FakeTTS:
+    provider_name = "fake-tts"
+    model_name = "fake-tts-model"
+
+    def __init__(self):
+        self.calls = []
+
+    async def synthesize(self, text, *, voice=None):
+        self.calls.append({"text": text, "voice": voice})
+        return TTSResult(
+            audio=b"fake-mp3-audio",
+            mime_type="audio/mpeg",
+            extension=".mp3",
+            provider=self.provider_name,
+            model=self.model_name,
+        )
 
 
 async def test_mobile_memoir_voice_session_routes_require_login(anonymous_client):
@@ -214,6 +233,82 @@ async def test_mobile_memoir_voice_follow_up_starts_guided_session_without_user_
     assert data["message"]["metadata_json"]["has_user_message"] is False
     assert "人物" in fake_ai.calls[0]["user_prompt"]
     assert "暂无对话" in fake_ai.calls[0]["user_prompt"]
+
+
+async def test_mobile_memoir_assistant_tts_generates_audio_for_follow_up_message(
+    client,
+    test_db,
+    monkeypatch,
+):
+    create_response = await client.post(
+        "/api/mobile/memoir/voice-sessions",
+        json={"guidance_mode": "guided_interview"},
+    )
+    session = create_response.json()["session"]
+    assistant_message = MemoirChatMessage(
+        project_id=session["project_id"],
+        voice_session_id=session["id"],
+        role=MemoirChatMessageRole.ASSISTANT.value,
+        content_text="你想先聊哪一位亲人？",
+        content_status=MemoirChatContentStatus.FINAL.value,
+        turn_index=0,
+        guidance_intent="follow_up",
+        metadata_json={"source": "test"},
+    )
+    test_db.add(assistant_message)
+    await test_db.commit()
+    await test_db.refresh(assistant_message)
+    fake_tts = FakeTTS()
+    monkeypatch.setattr("app.services.memoir.voice_tts.get_tts_client", lambda: fake_tts)
+
+    response = await client.post(
+        f"/api/mobile/memoir/voice-sessions/{session['id']}/messages/{assistant_message.id}/tts",
+        json={"voice": "warm"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["audio_file_id"]
+    assert data["provider"] == "fake-tts"
+    assert data["model"] == "fake-tts-model"
+    assert data["mime_type"] == "audio/mpeg"
+    assert data["message"]["audio_file_id"] == data["audio_file_id"]
+    assert fake_tts.calls == [{"text": "你想先聊哪一位亲人？", "voice": "warm"}]
+
+    await test_db.refresh(assistant_message)
+    assert assistant_message.audio_file_id == data["audio_file_id"]
+    assert assistant_message.metadata_json["tts_provider"] == "fake-tts"
+    playback = await client.get(f"/api/mobile/memoir/audio-files/{data['audio_file_id']}/playback")
+    assert playback.status_code == 200
+    assert playback.content == b"fake-mp3-audio"
+
+
+async def test_mobile_memoir_assistant_tts_rejects_user_message(client, test_db):
+    create_response = await client.post(
+        "/api/mobile/memoir/voice-sessions",
+        json={"guidance_mode": "free_narration"},
+    )
+    session = create_response.json()["session"]
+    user_message = MemoirChatMessage(
+        project_id=session["project_id"],
+        voice_session_id=session["id"],
+        role=MemoirChatMessageRole.USER.value,
+        content_text="我小时候住在外婆家。",
+        content_status=MemoirChatContentStatus.FINAL.value,
+        turn_index=0,
+        metadata_json={"source": "test"},
+    )
+    test_db.add(user_message)
+    await test_db.commit()
+    await test_db.refresh(user_message)
+
+    response = await client.post(
+        f"/api/mobile/memoir/voice-sessions/{session['id']}/messages/{user_message.id}/tts",
+        json={},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "只有 AI 追问可以生成语音"
 
 
 async def test_mobile_memoir_voice_sessions_are_user_scoped(anonymous_client):

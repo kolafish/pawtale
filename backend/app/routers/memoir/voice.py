@@ -10,6 +10,8 @@ from app.auth import get_current_user
 from app.database import get_db
 from app.models.users import User
 from app.schemas.memoir import (
+    MemoirAssistantTTSRequest,
+    MemoirAssistantTTSResponse,
     MemoirVoiceFollowUpRequest,
     MemoirVoiceFollowUpResponse,
     MemoirVoiceTranscriptCleanupRequest,
@@ -23,6 +25,7 @@ from app.schemas.memoir import (
 from app.services.memoir import projects as memoir_projects
 from app.services.memoir import voice_followups as memoir_voice_followups
 from app.services.memoir import voice_sessions as memoir_voice_sessions
+from app.services.memoir import voice_tts as memoir_voice_tts
 from app.services.memoir import voice_transcripts as memoir_voice_transcripts
 from app.services.memoir.access import load_audio_file, load_memoir_project
 from app.services.memoir.audio_files import audio_file_path
@@ -107,6 +110,26 @@ async def create_mobile_memoir_voice_follow_up(
     current_user: User = Depends(get_current_user),
 ):
     return await memoir_voice_followups.generate_voice_follow_up(db, voice_session_id, current_user.id, req)
+
+
+@router.post(
+    "/voice-sessions/{voice_session_id}/messages/{message_id}/tts",
+    response_model=MemoirAssistantTTSResponse,
+)
+async def create_mobile_memoir_assistant_tts(
+    voice_session_id: str,
+    message_id: str,
+    req: MemoirAssistantTTSRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await memoir_voice_tts.synthesize_assistant_message(
+        db,
+        voice_session_id,
+        message_id,
+        current_user.id,
+        req,
+    )
 
 
 @router.get("/audio-files/{audio_file_id}/playback")

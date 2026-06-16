@@ -24,7 +24,19 @@
       <text class="assistant-state">{{followUpLoading ? "思考中" : (followUpError ? "追问失败" : (assistantPromptText ? "等待回答" : "可生成"))}}</text>
     </view>
     <text class="assistant-text">{{followUpLoading ? "正在根据刚才的内容生成下一句追问" : (followUpError || assistantPromptText || "可以让 AI 根据刚才的内容继续追问。")}}</text>
+    <view wx:if="{{assistantPromptText && (followUpTTSStateText || followUpTTSError || followUpTTSLoading)}}" class="tts-strip {{followUpTTSError ? 'error' : ''}}">
+      <text>{{followUpTTSLoading ? "正在准备 AI 语音" : (followUpTTSError || followUpTTSStateText)}}</text>
+    </view>
     <view class="assistant-actions">
+      <button
+        wx:if="{{assistantPromptText}}"
+        class="assistant-button ghost"
+        loading="{{followUpTTSLoading}}"
+        disabled="{{followUpTTSLoading}}"
+        bindtap="playFollowUpAudio"
+      >
+        {{followUpAudioFileId ? (followUpTTSPlaying ? "播放中" : "重播语音") : (followUpTTSError ? "重试语音" : "播放语音")}}
+      </button>
       <button
         class="assistant-button"
         loading="{{followUpLoading}}"

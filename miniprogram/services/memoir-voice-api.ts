@@ -1,4 +1,6 @@
 import type {
+  MemoirAssistantTTSRequest,
+  MemoirAssistantTTSResponse,
   MemoirVoiceFollowUpRequest,
   MemoirVoiceFollowUpResponse,
   MemoirVoiceTranscriptItem,
@@ -54,6 +56,21 @@ export async function createMemoirVoiceFollowUp(
   await ensureBackendSession();
   return request<MemoirVoiceFollowUpResponse>(
     `/api/mobile/memoir/voice-sessions/${encodeURIComponent(voiceSessionId)}/follow-up`,
+    {
+      method: "POST",
+      data,
+    },
+  );
+}
+
+export async function createMemoirAssistantTTS(
+  voiceSessionId: string,
+  messageId: string,
+  data: MemoirAssistantTTSRequest = {},
+): Promise<MemoirAssistantTTSResponse> {
+  await ensureBackendSession();
+  return request<MemoirAssistantTTSResponse>(
+    `/api/mobile/memoir/voice-sessions/${encodeURIComponent(voiceSessionId)}/messages/${encodeURIComponent(messageId)}/tts`,
     {
       method: "POST",
       data,

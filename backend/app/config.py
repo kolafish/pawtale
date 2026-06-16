@@ -42,6 +42,15 @@ class Settings(BaseSettings):
     volc_asr_ws_url: str = "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async"
     volc_asr_connect_timeout_seconds: float = 10.0
 
+    # Assistant TTS
+    tts_provider: str = "disabled"
+    tts_api_key: str = ""
+    tts_base_url: str = "https://api.openai.com/v1"
+    tts_model: str = "tts-1"
+    tts_voice: str = "alloy"
+    tts_response_format: str = "mp3"
+    tts_timeout_seconds: float = 30.0
+
     class Config:
         env_file = str(BACKEND_DIR / ".env")
         extra = "ignore"
