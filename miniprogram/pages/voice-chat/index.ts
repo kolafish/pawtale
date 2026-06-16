@@ -35,6 +35,8 @@ interface VoiceChatData {
   followUpLoading: boolean;
   followUpError: string;
   lastFollowUpSourceMessageId: string;
+  dismissedFollowUpMessageId: string;
+  canRequestFollowUp: boolean;
   modeLabel: string;
   primaryActionText: string;
   captureStateText: string;
@@ -101,14 +103,48 @@ function latestTranscriptText(lines: VoiceChatTranscriptLine[]): string {
 }
 
 function latestAssistantText(lines: VoiceChatTranscriptLine[]): string {
-  const assistantLines = lines.filter((line) => line.role === "assistant");
-  return assistantLines.length ? assistantLines[assistantLines.length - 1].text : "";
+  const latest = lines[lines.length - 1];
+  return latest?.role === "assistant" ? latest.text : "";
 }
 
 function latestUserMessageId(lines: VoiceChatTranscriptLine[]): string {
   const userLines = lines.filter((line) => (line.role || "user") === "user");
   const latest = userLines[userLines.length - 1];
   return latest?.message_id || latest?.id || "";
+}
+
+function followUpSourceMessageId(lines: VoiceChatTranscriptLine[]): string {
+  return latestUserMessageId(lines) || "opening";
+}
+
+function coveredFollowUpSourceMessageId(lines: VoiceChatTranscriptLine[]): string {
+  const latest = lines[lines.length - 1];
+  return latest?.role === "assistant" ? followUpSourceMessageId(lines) : "";
+}
+
+function latestAssistantMessageId(lines: VoiceChatTranscriptLine[]): string {
+  const latest = lines[lines.length - 1];
+  return latest?.role === "assistant" ? latest.message_id || latest.id : "";
+}
+
+function visibleAssistantText(lines: VoiceChatTranscriptLine[], dismissedMessageId: string): string {
+  const latestMessageId = latestAssistantMessageId(lines);
+  if (!latestMessageId || latestMessageId === dismissedMessageId) {
+    return "";
+  }
+  return latestAssistantText(lines);
+}
+
+function canRequestFollowUp(
+  lines: VoiceChatTranscriptLine[],
+  mode: MemoirGuidanceMode,
+  lastFollowUpSourceMessageId: string,
+  followUpLoading: boolean,
+): boolean {
+  if (mode !== "guided_interview" || followUpLoading) {
+    return false;
+  }
+  return followUpSourceMessageId(lines) !== lastFollowUpSourceMessageId;
 }
 
 function countTextChars(text: string): number {
@@ -152,6 +188,7 @@ Page<VoiceChatData, {
   maybeGenerateOpeningFollowUp(): void;
   generateFollowUp(regenerate?: boolean): Promise<void>;
   regenerateFollowUp(): Promise<void>;
+  skipFollowUp(): void;
   connectGateway(): Promise<void>;
   toggleRecording(): void;
   finishSession(): Promise<void>;
@@ -178,6 +215,8 @@ Page<VoiceChatData, {
     followUpLoading: false,
     followUpError: "",
     lastFollowUpSourceMessageId: "",
+    dismissedFollowUpMessageId: "",
+    canRequestFollowUp: false,
     modeLabel: "自由讲述",
     primaryActionText: "开始说话",
     captureStateText: "麦克风未开始",
@@ -230,8 +269,16 @@ Page<VoiceChatData, {
       modeLabel: modeLabel(guidanceMode),
       transcriptLines: snapshot.transcriptLines,
       latestTranscriptText: latestTranscriptText(snapshot.transcriptLines),
-      assistantPromptText: latestAssistantText(snapshot.transcriptLines),
+      assistantPromptText: visibleAssistantText(snapshot.transcriptLines, this.data.dismissedFollowUpMessageId),
       totalTranscriptCharCount: totalTranscriptChars(snapshot.transcriptLines),
+      lastFollowUpSourceMessageId: coveredFollowUpSourceMessageId(snapshot.transcriptLines)
+        || this.data.lastFollowUpSourceMessageId,
+      canRequestFollowUp: canRequestFollowUp(
+        snapshot.transcriptLines,
+        guidanceMode,
+        coveredFollowUpSourceMessageId(snapshot.transcriptLines) || this.data.lastFollowUpSourceMessageId,
+        this.data.followUpLoading,
+      ),
     });
   },
 
@@ -256,14 +303,23 @@ Page<VoiceChatData, {
     const nextLines = detailLines.length >= this.data.transcriptLines.length
       ? detailLines
       : this.data.transcriptLines;
+    const coveredSourceMessageId = coveredFollowUpSourceMessageId(nextLines);
+    const lastFollowUpSourceMessageId = coveredSourceMessageId || this.data.lastFollowUpSourceMessageId;
     this.setData({
       guidanceMode,
       currentGuidanceModule,
       modeLabel: modeLabel(guidanceMode),
       transcriptLines: nextLines,
       latestTranscriptText: latestTranscriptText(nextLines),
-      assistantPromptText: latestAssistantText(nextLines),
+      assistantPromptText: visibleAssistantText(nextLines, this.data.dismissedFollowUpMessageId),
       totalTranscriptCharCount: totalTranscriptChars(nextLines),
+      lastFollowUpSourceMessageId,
+      canRequestFollowUp: canRequestFollowUp(
+        nextLines,
+        guidanceMode,
+        lastFollowUpSourceMessageId,
+        this.data.followUpLoading,
+      ),
     });
   },
 
@@ -290,7 +346,7 @@ Page<VoiceChatData, {
     if (!this.data.voiceSessionId || this.data.followUpLoading) {
       return;
     }
-    const sourceMessageId = latestUserMessageId(this.data.transcriptLines) || "opening";
+    const sourceMessageId = followUpSourceMessageId(this.data.transcriptLines);
     if (!regenerate && this.data.lastFollowUpSourceMessageId === sourceMessageId) {
       return;
     }
@@ -299,6 +355,7 @@ Page<VoiceChatData, {
     this.setData({
       followUpLoading: true,
       followUpError: "",
+      canRequestFollowUp: false,
       persistenceStateText: "AI 思考中",
     });
     try {
@@ -317,9 +374,11 @@ Page<VoiceChatData, {
       this.setData({
         transcriptLines,
         assistantPromptText: response.follow_up_text,
+        dismissedFollowUpMessageId: "",
         totalTranscriptCharCount: totalTranscriptChars(transcriptLines),
         persistenceStateText: "等待回答",
         lastFollowUpSourceMessageId: sourceMessageId,
+        canRequestFollowUp: false,
       });
       writeMemoirVoiceSessionSnapshot(this.data.voiceSessionId, { transcriptLines });
     } catch (error) {
@@ -328,17 +387,42 @@ Page<VoiceChatData, {
       }
       this.setData({
         followUpError: error instanceof Error ? error.message : "AI 追问生成失败",
+        canRequestFollowUp: true,
         persistenceStateText: "追问失败",
       });
     } finally {
       if (requestSerial === followUpRequestSerial) {
-        this.setData({ followUpLoading: false });
+        this.setData({
+          followUpLoading: false,
+          canRequestFollowUp: canRequestFollowUp(
+            this.data.transcriptLines,
+            this.data.guidanceMode,
+            this.data.lastFollowUpSourceMessageId,
+            false,
+          ),
+        });
       }
     }
   },
 
   async regenerateFollowUp() {
     await this.generateFollowUp(true);
+  },
+
+  skipFollowUp() {
+    const dismissedFollowUpMessageId = latestAssistantMessageId(this.data.transcriptLines);
+    this.setData({
+      assistantPromptText: "",
+      followUpError: "",
+      dismissedFollowUpMessageId,
+      canRequestFollowUp: canRequestFollowUp(
+        this.data.transcriptLines,
+        this.data.guidanceMode,
+        this.data.lastFollowUpSourceMessageId,
+        this.data.followUpLoading,
+      ),
+      persistenceStateText: "已跳过追问",
+    });
   },
 
   async connectGateway() {
@@ -410,6 +494,17 @@ Page<VoiceChatData, {
         statusText: statusText("closed"),
       });
       await this.refreshVoiceSessionSnapshot();
+      wx.showModal({
+        title: "访谈已结束",
+        content: "可以到转写记录里查看和校正文稿。",
+        confirmText: "查看记录",
+        cancelText: "留在本页",
+        success: (result) => {
+          if (result.confirm) {
+            wx.navigateTo({ url: "/pages/transcripts/index" });
+          }
+        },
+      });
     } catch (error) {
       this.handleError(error instanceof Error ? error.message : "语音会话结束失败");
     }
@@ -496,6 +591,14 @@ Page<VoiceChatData, {
         : "待同步",
       error: "",
       errorKindText: "",
+      assistantPromptText: "",
+      dismissedFollowUpMessageId: "",
+      canRequestFollowUp: canRequestFollowUp(
+        transcriptLines,
+        this.data.guidanceMode,
+        this.data.lastFollowUpSourceMessageId,
+        this.data.followUpLoading,
+      ),
     });
     writeMemoirVoiceSessionSnapshot(this.data.voiceSessionId, { transcriptLines });
     if (event.message_id) {

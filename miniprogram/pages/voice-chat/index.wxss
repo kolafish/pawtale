@@ -117,7 +117,10 @@
 .assistant-actions {
   margin-top: 22rpx;
   display: flex;
+  align-items: center;
   justify-content: flex-end;
+  gap: 16rpx;
+  flex-wrap: wrap;
 }
 
 .assistant-button {
@@ -141,6 +144,11 @@
 
 .assistant-button[disabled] {
   opacity: 0.66;
+}
+
+.assistant-button.ghost {
+  background: transparent;
+  color: #7a3b31;
 }
 
 .assistant-panel.error-state {
