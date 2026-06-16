@@ -5,8 +5,10 @@ import type {
   MemoirVoiceFollowUpResponse,
   MemoirVoiceTranscriptItem,
   MemoirVoiceTranscriptListResponse,
+  MemoirVoiceProgressResponse,
   MemoirVoiceSessionCreate,
   MemoirVoiceSessionDetail,
+  MemoirVoiceSessionListResponse,
 } from "../domain/voice-chat";
 import { ensureBackendSession } from "./auth";
 import {
@@ -47,6 +49,41 @@ export async function getMemoirVoiceSession(
   return request<MemoirVoiceSessionDetail>(
     `/api/mobile/memoir/voice-sessions/${encodeURIComponent(voiceSessionId)}`,
   );
+}
+
+interface VoiceSessionListOptions {
+  projectId?: string;
+  limit?: number;
+  offset?: number;
+}
+
+function voiceQueryString(options: VoiceSessionListOptions): string {
+  const query: string[] = [];
+  if (options.projectId) {
+    query.push(`project_id=${encodeURIComponent(options.projectId)}`);
+  }
+  if (options.limit !== undefined) {
+    query.push(`limit=${encodeURIComponent(String(options.limit))}`);
+  }
+  if (options.offset !== undefined) {
+    query.push(`offset=${encodeURIComponent(String(options.offset))}`);
+  }
+  return query.length ? `?${query.join("&")}` : "";
+}
+
+export async function listMemoirVoiceSessions(
+  options: VoiceSessionListOptions = {},
+): Promise<MemoirVoiceSessionListResponse> {
+  await ensureBackendSession();
+  return request<MemoirVoiceSessionListResponse>(
+    `/api/mobile/memoir/voice-sessions${voiceQueryString(options)}`,
+  );
+}
+
+export async function getMemoirVoiceProgress(projectId?: string): Promise<MemoirVoiceProgressResponse> {
+  await ensureBackendSession();
+  const query = projectId ? `?project_id=${encodeURIComponent(projectId)}` : "";
+  return request<MemoirVoiceProgressResponse>(`/api/mobile/memoir/voice-progress${query}`);
 }
 
 export async function createMemoirVoiceFollowUp(

@@ -3,14 +3,18 @@ from __future__ import annotations
 from datetime import datetime
 
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.domain.memoir.types import MemoirVoiceSessionStatus
-from app.models.memoir import MemoirVoiceSession
+from app.domain.memoir.types import MemoirChatMessageRole, MemoirVoiceSessionStatus
+from app.models.memoir import MemoirVoiceSession, MemoirVoiceUtterance
 from app.models.projects import Project
 from app.schemas.memoir import (
+    MemoirVoiceModuleProgressResponse,
+    MemoirVoiceProgressResponse,
+    MemoirVoiceSessionListResponse,
+    MemoirVoiceSessionSummaryResponse,
     MemoirVoiceSessionCreate,
     MemoirVoiceSessionDetailResponse,
     MemoirVoiceSessionStopRequest,
@@ -81,6 +85,152 @@ async def get_voice_session_detail(
         session=voice_session,
         messages=list(voice_session.messages),
         utterances=list(voice_session.utterances),
+    )
+
+
+def _char_count(text: str) -> int:
+    return len("".join(str(text or "").split()))
+
+
+def _utterance_duration_seconds(utterance: MemoirVoiceUtterance) -> int:
+    if utterance.start_ms is None or utterance.end_ms is None:
+        return 0
+    return max(0, round((utterance.end_ms - utterance.start_ms) / 1000))
+
+
+def _session_summary(voice_session: MemoirVoiceSession) -> MemoirVoiceSessionSummaryResponse:
+    messages = list(voice_session.messages)
+    utterances = list(voice_session.utterances)
+    user_messages = [
+        message for message in messages
+        if message.role == MemoirChatMessageRole.USER.value and message.content_text.strip()
+    ]
+    assistant_messages = [
+        message for message in messages
+        if message.role == MemoirChatMessageRole.ASSISTANT.value and message.content_text.strip()
+    ]
+    ordered_messages = sorted(messages, key=lambda message: (message.turn_index, message.created_at, message.id))
+    last_message = ordered_messages[-1] if ordered_messages else None
+    return MemoirVoiceSessionSummaryResponse(
+        id=voice_session.id,
+        project_id=voice_session.project_id,
+        status=voice_session.status,
+        guidance_mode=voice_session.guidance_mode,
+        current_guidance_module=voice_session.current_guidance_module,
+        started_at=voice_session.started_at,
+        stopped_at=voice_session.stopped_at,
+        created_at=voice_session.created_at,
+        updated_at=voice_session.updated_at,
+        user_message_count=len(user_messages),
+        assistant_message_count=len(assistant_messages),
+        utterance_count=len(utterances),
+        total_user_char_count=sum(_char_count(message.content_text) for message in user_messages),
+        total_audio_seconds=sum(_utterance_duration_seconds(utterance) for utterance in utterances),
+        last_message_text=(last_message.content_text if last_message else "")[:120],
+        last_message_role=last_message.role if last_message else None,
+        last_message_at=last_message.created_at if last_message else None,
+    )
+
+
+async def list_voice_sessions(
+    db: AsyncSession,
+    user_id: str,
+    *,
+    project_id: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> MemoirVoiceSessionListResponse:
+    filters = [Project.user_id == user_id]
+    if project_id:
+        await load_memoir_project(db, project_id, user_id)
+        filters.append(Project.id == project_id)
+    total = await db.scalar(
+        select(func.count(MemoirVoiceSession.id))
+        .join(Project, MemoirVoiceSession.project_id == Project.id)
+        .where(*filters)
+    )
+    result = await db.execute(
+        select(MemoirVoiceSession)
+        .join(Project, MemoirVoiceSession.project_id == Project.id)
+        .where(*filters)
+        .options(*_detail_options())
+        .order_by(MemoirVoiceSession.updated_at.desc(), MemoirVoiceSession.created_at.desc())
+        .offset(offset)
+        .limit(limit)
+    )
+    return MemoirVoiceSessionListResponse(
+        items=[_session_summary(voice_session) for voice_session in result.scalars().all()],
+        total=total or 0,
+        limit=limit,
+        offset=offset,
+    )
+
+
+async def get_voice_progress(
+    db: AsyncSession,
+    user_id: str,
+    *,
+    project_id: str | None = None,
+) -> MemoirVoiceProgressResponse:
+    filters = [Project.user_id == user_id]
+    if project_id:
+        await load_memoir_project(db, project_id, user_id)
+        filters.append(Project.id == project_id)
+    result = await db.execute(
+        select(MemoirVoiceSession)
+        .join(Project, MemoirVoiceSession.project_id == Project.id)
+        .where(*filters)
+        .options(*_detail_options())
+        .order_by(MemoirVoiceSession.updated_at.desc(), MemoirVoiceSession.created_at.desc())
+    )
+    sessions = result.scalars().all()
+    module_stats: dict[str, dict[str, int]] = {}
+    active_statuses = {
+        MemoirVoiceSessionStatus.CREATED.value,
+        MemoirVoiceSessionStatus.LISTENING.value,
+        MemoirVoiceSessionStatus.SPEAKING.value,
+    }
+    user_message_count = 0
+    assistant_message_count = 0
+    utterance_count = 0
+    total_user_char_count = 0
+    total_audio_seconds = 0
+    for voice_session in sessions:
+        summary = _session_summary(voice_session)
+        user_message_count += summary.user_message_count
+        assistant_message_count += summary.assistant_message_count
+        utterance_count += summary.utterance_count
+        total_user_char_count += summary.total_user_char_count
+        total_audio_seconds += summary.total_audio_seconds
+        module = voice_session.current_guidance_module or (
+            "free_narration" if voice_session.guidance_mode == "free_narration" else "unassigned"
+        )
+        stats = module_stats.setdefault(module, {"sessions": 0, "utterances": 0, "chars": 0})
+        stats["sessions"] += 1
+        stats["utterances"] += summary.utterance_count
+        stats["chars"] += summary.total_user_char_count
+
+    return MemoirVoiceProgressResponse(
+        project_id=project_id,
+        session_count=len(sessions),
+        active_session_count=sum(1 for session in sessions if session.status in active_statuses),
+        stopped_session_count=sum(1 for session in sessions if session.status == MemoirVoiceSessionStatus.STOPPED.value),
+        failed_session_count=sum(1 for session in sessions if session.status == MemoirVoiceSessionStatus.FAILED.value),
+        utterance_count=utterance_count,
+        user_message_count=user_message_count,
+        assistant_message_count=assistant_message_count,
+        total_user_char_count=total_user_char_count,
+        total_audio_seconds=total_audio_seconds,
+        last_session_at=sessions[0].updated_at if sessions else None,
+        modules=[
+            MemoirVoiceModuleProgressResponse(
+                module=module,
+                session_count=stats["sessions"],
+                utterance_count=stats["utterances"],
+                user_char_count=stats["chars"],
+            )
+            for module, stats in sorted(module_stats.items())
+        ],
     )
 
 

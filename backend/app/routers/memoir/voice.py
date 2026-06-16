@@ -14,12 +14,14 @@ from app.schemas.memoir import (
     MemoirAssistantTTSResponse,
     MemoirVoiceFollowUpRequest,
     MemoirVoiceFollowUpResponse,
+    MemoirVoiceProgressResponse,
     MemoirVoiceTranscriptCleanupRequest,
     MemoirVoiceTranscriptItemResponse,
     MemoirVoiceTranscriptListResponse,
     MemoirVoiceTranscriptUpdateRequest,
     MemoirVoiceSessionCreate,
     MemoirVoiceSessionDetailResponse,
+    MemoirVoiceSessionListResponse,
     MemoirVoiceSessionStopRequest,
 )
 from app.services.memoir import projects as memoir_projects
@@ -81,6 +83,32 @@ async def create_mobile_memoir_voice_session(
 ):
     project_id = await _memoir_project_id(db, current_user.id, project_id)
     return await memoir_voice_sessions.create_voice_session(db, project_id, current_user.id, req)
+
+
+@router.get("/voice-sessions", response_model=MemoirVoiceSessionListResponse)
+async def list_mobile_memoir_voice_sessions(
+    project_id: str | None = None,
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await memoir_voice_sessions.list_voice_sessions(
+        db,
+        current_user.id,
+        project_id=project_id,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.get("/voice-progress", response_model=MemoirVoiceProgressResponse)
+async def get_mobile_memoir_voice_progress(
+    project_id: str | None = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await memoir_voice_sessions.get_voice_progress(db, current_user.id, project_id=project_id)
 
 
 @router.get("/voice-sessions/{voice_session_id}", response_model=MemoirVoiceSessionDetailResponse)

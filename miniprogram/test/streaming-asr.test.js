@@ -265,6 +265,74 @@ test("fetches voice session detail through backend API", async () => {
   delete global.wx;
 });
 
+test("fetches voice session list and progress through backend API", async () => {
+  const requests = [];
+  global.wx = {
+    getStorageSync(key) {
+      if (key === "pawtale_backend_config") {
+        return {
+          httpBaseUrl: "http://backend.local:8000/",
+          devEmail: "local@example.com",
+          devPassword: "secret",
+        };
+      }
+      if (key === "pawtale_backend_cookie") {
+        return "pawtale_session=abc";
+      }
+      return "";
+    },
+    getExtConfigSync() {
+      return {};
+    },
+    setStorageSync() {},
+    removeStorageSync() {},
+    request(options) {
+      requests.push(options);
+      if (options.url.endsWith("/api/auth/me")) {
+        options.success({ statusCode: 200, data: { id: "user-1" }, cookies: [], header: {} });
+        return;
+      }
+      if (options.url.includes("/api/mobile/memoir/voice-progress")) {
+        options.success({
+          statusCode: 200,
+          data: {
+            session_count: 0,
+            active_session_count: 0,
+            stopped_session_count: 0,
+            failed_session_count: 0,
+            utterance_count: 0,
+            user_message_count: 0,
+            assistant_message_count: 0,
+            total_user_char_count: 0,
+            total_audio_seconds: 0,
+            modules: [],
+          },
+          cookies: [],
+          header: {},
+        });
+        return;
+      }
+      options.success({ statusCode: 200, data: { items: [], total: 0, limit: 10, offset: 0 }, cookies: [], header: {} });
+    },
+  };
+  delete require.cache[require.resolve("../services/request.ts")];
+  delete require.cache[require.resolve("../services/memoir-voice-api.ts")];
+  const { getMemoirVoiceProgress, listMemoirVoiceSessions } = require("../services/memoir-voice-api.ts");
+
+  await listMemoirVoiceSessions({ projectId: "project/1", limit: 10, offset: 5 });
+  await getMemoirVoiceProgress("project/1");
+
+  const apiRequests = requests.filter((request) => request.url.includes("/api/mobile/memoir/"));
+  assert.equal(
+    apiRequests[0].url,
+    "http://backend.local:8000/api/mobile/memoir/voice-sessions?project_id=project%2F1&limit=10&offset=5",
+  );
+  assert.equal(apiRequests[1].url, "http://backend.local:8000/api/mobile/memoir/voice-progress?project_id=project%2F1");
+  assert.equal(apiRequests[0].header.Cookie, "pawtale_session=abc");
+  assert.equal(apiRequests[1].header.Cookie, "pawtale_session=abc");
+  delete global.wx;
+});
+
 test("streaming ASR connect rejects on socket error before open", async () => {
   let onError;
   global.wx = {
