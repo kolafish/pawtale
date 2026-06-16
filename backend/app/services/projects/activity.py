@@ -7,9 +7,8 @@ from app.schemas.projects import (
     WritingSessionCreate,
     WritingSessionResponse,
 )
-from app.services import project_documents as project_docs
-from app.services.content_storage import read_content
 from app.services.projects.access import load_project
+from app.services.projects.export import export_project_data
 
 
 async def list_sessions(
@@ -46,15 +45,4 @@ async def create_session(
 
 
 async def export_project(db: AsyncSession, project_id: str, user_id: str) -> ProjectExportResponse:
-    project = await load_project(db, project_id, user_id)
-    sections = []
-    total = 0
-    for group in project.groups:
-        docs = []
-        for doc in group.documents:
-            content = await read_content(project_id, doc.id)
-            word_count = project_docs.count_words(content)
-            total += word_count
-            docs.append({"name": doc.name, "content": content, "word_count": word_count})
-        sections.append({"group": group.name, "documents": docs})
-    return ProjectExportResponse(title=project.title, sections=sections, total_words=total)
+    return await export_project_data(db, project_id, user_id)
