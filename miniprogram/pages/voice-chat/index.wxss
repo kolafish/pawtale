@@ -262,6 +262,12 @@
   font-weight: 800;
 }
 
+.auto-listen-text {
+  color: #9f4a3c;
+  font-size: 24rpx;
+  font-weight: 800;
+}
+
 .auto-stop-toggle {
   min-width: 92rpx;
   height: 56rpx;

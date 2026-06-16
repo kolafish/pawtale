@@ -19,6 +19,7 @@ import {
   downloadMemoirVoiceAudio,
   getMemoirVoiceSession,
 } from "../../services/memoir-voice-api";
+import { canAutoStartListeningAfterTTS } from "../../services/voice-chat-auto-listen";
 import {
   readMemoirVoiceSessionSnapshot,
   transcriptLinesFromVoiceSessionDetail,
@@ -61,6 +62,8 @@ interface VoiceChatData {
   audioLevelPercent: number;
   autoStopEnabled: boolean;
   autoStopStateText: string;
+  autoListenEnabled: boolean;
+  autoListenStateText: string;
   liveCharCount: number;
   totalTranscriptCharCount: number;
   gatewayStateText: string;
@@ -232,14 +235,20 @@ Page<VoiceChatData, {
   generateFollowUp(regenerate?: boolean): Promise<void>;
   regenerateFollowUp(): Promise<void>;
   skipFollowUp(): void;
-  prepareFollowUpTTS(messageId: string, forceRegenerate?: boolean): Promise<void>;
+  prepareFollowUpTTS(
+    messageId: string,
+    forceRegenerate?: boolean,
+    autoListenAfterPlayback?: boolean,
+  ): Promise<void>;
   playFollowUpAudio(): Promise<void>;
-  playAudioFile(audioFileId: string): Promise<void>;
+  playAudioFile(audioFileId: string, options?: { autoListenAfterPlayback?: boolean }): Promise<void>;
   stopFollowUpAudio(): void;
   cancelFollowUpTTS(): void;
   toggleAutoStop(): void;
   connectGateway(): Promise<void>;
+  startRecording(autoTriggered?: boolean): boolean;
   toggleRecording(): void;
+  shouldAutoStartListening(): boolean;
   finishSession(): Promise<void>;
   handleStatus(status: VoiceChatConnectionStatus): void;
   handleCaptureStats(stats: MemoirCaptureStats): void;
@@ -291,6 +300,8 @@ Page<VoiceChatData, {
     audioLevelPercent: 0,
     autoStopEnabled: true,
     autoStopStateText: "自动收尾开",
+    autoListenEnabled: true,
+    autoListenStateText: "AI 说完自动听",
     liveCharCount: 0,
     totalTranscriptCharCount: 0,
     gatewayStateText: "识别未同步",
@@ -473,7 +484,7 @@ Page<VoiceChatData, {
         canRequestFollowUp: false,
       });
       writeMemoirVoiceSessionSnapshot(this.data.voiceSessionId, { transcriptLines });
-      void this.prepareFollowUpTTS(response.message.id);
+      void this.prepareFollowUpTTS(response.message.id, false);
     } catch (error) {
       if (requestSerial !== followUpRequestSerial) {
         return;
@@ -524,7 +535,7 @@ Page<VoiceChatData, {
     });
   },
 
-  async prepareFollowUpTTS(messageId, forceRegenerate = false) {
+  async prepareFollowUpTTS(messageId, forceRegenerate = false, autoListenAfterPlayback = true) {
     if (!this.data.voiceSessionId || !messageId || this.data.followUpTTSLoading) {
       return;
     }
@@ -560,7 +571,7 @@ Page<VoiceChatData, {
         followUpTTSStateText: "语音已生成",
       });
       writeMemoirVoiceSessionSnapshot(this.data.voiceSessionId, { transcriptLines });
-      await this.playAudioFile(response.audio_file_id);
+      await this.playAudioFile(response.audio_file_id, { autoListenAfterPlayback });
     } catch (error) {
       if (requestSerial === this.ttsRequestSerial) {
         this.setData({
@@ -580,15 +591,15 @@ Page<VoiceChatData, {
       return;
     }
     if (this.data.followUpAudioFileId) {
-      await this.playAudioFile(this.data.followUpAudioFileId);
+      await this.playAudioFile(this.data.followUpAudioFileId, { autoListenAfterPlayback: false });
       return;
     }
     if (this.data.followUpMessageId) {
-      await this.prepareFollowUpTTS(this.data.followUpMessageId, false);
+      await this.prepareFollowUpTTS(this.data.followUpMessageId, false, false);
     }
   },
 
-  async playAudioFile(audioFileId) {
+  async playAudioFile(audioFileId, options = {}) {
     if (!audioFileId) {
       return;
     }
@@ -611,11 +622,17 @@ Page<VoiceChatData, {
       audio.src = tempFilePath;
       audio.onEnded(() => {
         if (playToken === this.ttsPlayToken) {
-          this.setData({ followUpTTSPlaying: false, followUpTTSStateText: "播放完成" });
+          this.setData({
+            followUpTTSPlaying: false,
+            followUpTTSStateText: options.autoListenAfterPlayback ? "播放完成，正在听你说" : "播放完成",
+          });
         }
         audio.destroy();
         if (this.audio === audio) {
           this.audio = null;
+        }
+        if (playToken === this.ttsPlayToken && options.autoListenAfterPlayback && this.shouldAutoStartListening()) {
+          this.startRecording(true);
         }
       });
       audio.onError(() => {
@@ -707,6 +724,30 @@ Page<VoiceChatData, {
     }
   },
 
+  startRecording(autoTriggered = false) {
+    if (!streamingClient || this.data.status === "closed") {
+      void this.connectGateway();
+      this.setData({ autoListenStateText: autoTriggered ? "正在重新连接语音" : this.data.autoListenStateText });
+      return false;
+    }
+    const started = streamingClient.startRecording();
+    if (!started) {
+      void this.connectGateway();
+      this.setData({ autoListenStateText: autoTriggered ? "自动收音未就绪" : this.data.autoListenStateText });
+      return false;
+    }
+    this.cancelFollowUpTTS();
+    this.setData({
+      recording: true,
+      error: "",
+      liveText: "",
+      liveCharCount: 0,
+      primaryActionText: "暂停收音",
+      autoListenStateText: autoTriggered ? "AI 说完，正在听你说" : "AI 说完自动听",
+    });
+    return true;
+  },
+
   toggleRecording() {
     if (!streamingClient || this.data.status === "closed") {
       void this.connectGateway();
@@ -717,18 +758,16 @@ Page<VoiceChatData, {
       this.setData({ recording: false, primaryActionText: "继续说话" });
       return;
     }
-    const started = streamingClient.startRecording();
-    if (!started) {
-      void this.connectGateway();
-      return;
-    }
-    this.cancelFollowUpTTS();
-    this.setData({
-      recording: true,
-      error: "",
-      liveText: "",
-      liveCharCount: 0,
-      primaryActionText: "暂停收音",
+    this.startRecording(false);
+  },
+
+  shouldAutoStartListening() {
+    return Boolean(streamingClient) && canAutoStartListeningAfterTTS({
+      autoListenEnabled: this.data.autoListenEnabled,
+      status: this.data.status,
+      recording: this.data.recording,
+      connecting: this.data.connecting,
+      followUpLoading: this.data.followUpLoading,
     });
   },
 
