@@ -17,6 +17,7 @@ from app.models.memoir import MemoirChatMessage, MemoirTranscriptVersion, Memoir
 from app.models.projects import Project
 from app.services.memoir import audio_files as memoir_audio_files
 from app.services.memoir.asr import StreamingASREvent
+from app.services.memoir.voice_transcripts import generate_cleaned_transcript_text
 
 
 @dataclass(frozen=True)
@@ -62,6 +63,7 @@ class VoiceFinalPersistenceService:
         if not content:
             raise HTTPException(status_code=400, detail="转写文本不能为空")
         _validate_audio_span(event.start_ms, event.end_ms)
+        cleaned = await generate_cleaned_transcript_text(content, strict=False)
 
         staged_audio: memoir_audio_files.StagedAudioFile | None = None
         try:
@@ -79,16 +81,33 @@ class VoiceFinalPersistenceService:
             self.db.add(transcript_version)
             await self.db.flush()
 
+            corrected_version = MemoirTranscriptVersion(
+                voice_session_id=voice_session.id,
+                version_type=MemoirTranscriptVersionType.DIALECT_CORRECTED.value,
+                content=cleaned.content,
+                provider=cleaned.provider,
+                created_by=cleaned.created_by.value,
+            )
+            self.db.add(corrected_version)
+            await self.db.flush()
+
             message = MemoirChatMessage(
                 project_id=voice_session.project_id,
                 voice_session_id=voice_session.id,
                 role=MemoirChatMessageRole.USER.value,
-                content_text=content,
-                content_status=MemoirChatContentStatus.FINAL.value,
+                content_text=cleaned.content,
+                content_status=MemoirChatContentStatus.CORRECTED.value,
                 audio_file_id=audio_file_id,
-                transcript_version_id=transcript_version.id,
+                transcript_version_id=corrected_version.id,
                 turn_index=await self._next_turn_index(voice_session.id),
-                metadata_json={"source": "asr.final", "provider": self.provider},
+                metadata_json={
+                    "source": "asr.final",
+                    "provider": self.provider,
+                    "auto_corrected": True,
+                    "correction_provider": cleaned.provider,
+                    "correction_created_by": cleaned.created_by.value,
+                    "asr_transcript_version_id": transcript_version.id,
+                },
             )
             self.db.add(message)
             await self.db.flush()
@@ -98,7 +117,7 @@ class VoiceFinalPersistenceService:
                 chat_message_id=message.id,
                 audio_file_id=audio_file_id,
                 transcript_raw=content,
-                transcript_edited=content,
+                transcript_edited=cleaned.content,
                 start_ms=event.start_ms,
                 end_ms=event.end_ms,
                 provider=self.provider,
@@ -111,7 +130,7 @@ class VoiceFinalPersistenceService:
                 message_id=message.id,
                 utterance_id=utterance.id,
                 audio_file_id=audio_file_id,
-                transcript_version_id=transcript_version.id,
+                transcript_version_id=corrected_version.id,
             )
         except Exception:
             await self.db.rollback()

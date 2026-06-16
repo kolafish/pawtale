@@ -158,19 +158,6 @@ export async function updateMemoirVoiceTranscript(
   );
 }
 
-export async function cleanupMemoirVoiceTranscript(
-  utteranceId: string,
-): Promise<MemoirVoiceTranscriptItem> {
-  await ensureBackendSession();
-  return request<MemoirVoiceTranscriptItem>(
-    `/api/mobile/memoir/voice-transcripts/${encodeURIComponent(utteranceId)}/cleanup`,
-    {
-      method: "POST",
-      data: {},
-    },
-  );
-}
-
 export async function deleteMemoirVoiceTranscript(
   utteranceId: string,
 ): Promise<void> {

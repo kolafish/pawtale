@@ -20,10 +20,10 @@
     <text class="empty-copy">完成一次语音聊天后，保存的语音和文字会显示在这里。</text>
   </view>
 
-  <view wx:for="{{items}}" wx:key="id" class="transcript-card">
+  <view wx:for="{{items}}" wx:for-index="index" wx:key="id" class="transcript-card">
     <view class="record-head">
       <view>
-        <text class="record-title">{{item.createdText || "语音记录"}}</text>
+        <text class="record-title">语音记录 {{index + 1}}</text>
         <text class="record-meta">{{item.audioText}}</text>
       </view>
       <text class="record-count">{{item.display_char_count}} 字</text>
@@ -66,7 +66,7 @@
         class="ghost-button"
         data-id="{{item.id}}"
         bindtap="playAudio"
-        disabled="{{savingId || cleaningId || deletingId || !item.canPlayAudio}}"
+        disabled="{{savingId || deletingId || !item.canPlayAudio}}"
       >
         {{playingId === item.id ? "停止" : "播放"}}
       </button>
@@ -74,25 +74,16 @@
         class="ghost-button"
         data-id="{{item.id}}"
         bindtap="beginEdit"
-        disabled="{{savingId || cleaningId || deletingId}}"
+        disabled="{{savingId || deletingId}}"
       >
         编辑
-      </button>
-      <button
-        class="ghost-button"
-        data-id="{{item.id}}"
-        bindtap="cleanupTranscript"
-        loading="{{cleaningId === item.id}}"
-        disabled="{{savingId || cleaningId || deletingId || item.changed}}"
-      >
-        AI 清理
       </button>
       <button
         class="danger-button"
         data-id="{{item.id}}"
         bindtap="deleteTranscript"
         loading="{{deletingId === item.id}}"
-        disabled="{{savingId || cleaningId || deletingId}}"
+        disabled="{{savingId || deletingId}}"
       >
         删除
       </button>
@@ -103,7 +94,7 @@
         class="ghost-button"
         data-id="{{item.id}}"
         bindtap="playAudio"
-        disabled="{{savingId || cleaningId || deletingId || !item.canPlayAudio}}"
+        disabled="{{savingId || deletingId || !item.canPlayAudio}}"
       >
         {{playingId === item.id ? "停止" : "播放"}}
       </button>
@@ -111,7 +102,7 @@
         class="ghost-button"
         data-id="{{item.id}}"
         bindtap="resetToRaw"
-        disabled="{{savingId || cleaningId || deletingId}}"
+        disabled="{{savingId || deletingId}}"
       >
         恢复原文
       </button>
@@ -119,7 +110,7 @@
         class="ghost-button"
         data-id="{{item.id}}"
         bindtap="cancelEdit"
-        disabled="{{savingId || cleaningId || deletingId}}"
+        disabled="{{savingId || deletingId}}"
       >
         取消
       </button>
@@ -128,7 +119,7 @@
         data-id="{{item.id}}"
         bindtap="saveTranscript"
         loading="{{savingId === item.id}}"
-        disabled="{{savingId || cleaningId || deletingId || !item.changed}}"
+        disabled="{{savingId || deletingId || !item.changed}}"
       >
         保存
       </button>

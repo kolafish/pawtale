@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
+from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from fastapi import HTTPException
@@ -43,6 +44,13 @@ _BOUNDARY_DEICTIC_RE = re.compile(
 )
 _DUPLICATE_PUNCTUATION_RE = re.compile(r"([，,。！？!?；;])\1+")
 _SPACE_RE = re.compile(r"\s+")
+
+
+@dataclass(frozen=True)
+class CleanedTranscriptText:
+    content: str
+    provider: str | None
+    created_by: MemoirCreatedBy
 
 
 def _text_or_empty(value: str | None) -> str:
@@ -94,6 +102,77 @@ def _remove_obvious_oral_fillers(text: str) -> str:
     cleaned = cleaned.strip(" ，,、")
     cleaned = cleaned.replace("，。", "。").replace(",。", "。")
     return cleaned.strip()
+
+
+def _fallback_cleaned_transcript_text(source_text: str) -> str:
+    return _remove_obvious_oral_fillers(source_text) or source_text.strip()
+
+
+async def generate_cleaned_transcript_text(
+    source_text: str,
+    *,
+    ai_model: str | None = None,
+    ai_client: AITextClient | None = None,
+    strict: bool = True,
+) -> CleanedTranscriptText:
+    source_text = source_text.strip()
+    if not source_text:
+        raise HTTPException(status_code=400, detail="转写内容为空，无法清理")
+
+    client: AITextClient | None = ai_client
+    try:
+        if client is None:
+            client = get_ai_service(ai_model)
+        content = await client._call_llm(
+            SYSTEM_PROMPT,
+            _build_cleanup_prompt(source_text),
+            temperature=0.2,
+            max_tokens=1200,
+            timeout=90.0,
+        )
+    except HTTPException as exc:
+        if strict and exc.status_code < 500:
+            raise
+        if strict:
+            logger.exception(
+                "AI voice transcript cleanup failed provider=%s model=%s",
+                getattr(client, "provider_name", "unknown"),
+                getattr(client, "model_name", ai_model or "default"),
+            )
+            raise HTTPException(status_code=503, detail=AI_CLEANUP_UNAVAILABLE_MESSAGE) from exc
+        logger.warning("AI voice transcript cleanup unavailable; using local fallback", exc_info=True)
+        return CleanedTranscriptText(
+            content=_fallback_cleaned_transcript_text(source_text),
+            provider=None,
+            created_by=MemoirCreatedBy.SYSTEM,
+        )
+    except Exception as exc:
+        if strict:
+            logger.exception(
+                "AI voice transcript cleanup failed provider=%s model=%s",
+                getattr(client, "provider_name", "unknown"),
+                getattr(client, "model_name", ai_model or "default"),
+            )
+            raise HTTPException(status_code=503, detail=AI_CLEANUP_UNAVAILABLE_MESSAGE) from exc
+        logger.warning("AI voice transcript cleanup failed; using local fallback", exc_info=True)
+        return CleanedTranscriptText(
+            content=_fallback_cleaned_transcript_text(source_text),
+            provider=None,
+            created_by=MemoirCreatedBy.SYSTEM,
+        )
+
+    cleaned = _remove_obvious_oral_fillers(str(content))
+    if cleaned == source_text:
+        cleaned = _fallback_cleaned_transcript_text(source_text)
+    if not cleaned:
+        if strict:
+            raise HTTPException(status_code=502, detail="AI 未返回可用清理结果")
+        cleaned = source_text
+    return CleanedTranscriptText(
+        content=cleaned,
+        provider=client.provider_name,
+        created_by=MemoirCreatedBy.AI,
+    )
 
 
 def _transcript_filter(user_id: str, project_id: str | None = None):
@@ -259,47 +338,19 @@ async def cleanup_voice_transcript(
 ) -> MemoirVoiceTranscriptItemResponse:
     utterance = await _load_owned_utterance(db, utterance_id, user_id)
     source_text = _current_text(utterance)
-    if not source_text:
-        raise HTTPException(status_code=400, detail="转写内容为空，无法清理")
-
-    client = ai_client or get_ai_service(req.ai_model)
-    try:
-        content = await client._call_llm(
-            SYSTEM_PROMPT,
-            _build_cleanup_prompt(source_text),
-            temperature=0.2,
-            max_tokens=1200,
-            timeout=90.0,
-        )
-    except HTTPException as exc:
-        if exc.status_code < 500:
-            raise
-        logger.exception(
-            "AI voice transcript cleanup failed provider=%s model=%s",
-            client.provider_name,
-            client.model_name,
-        )
-        raise HTTPException(status_code=503, detail=AI_CLEANUP_UNAVAILABLE_MESSAGE) from exc
-    except Exception as exc:
-        logger.exception(
-            "AI voice transcript cleanup failed provider=%s model=%s",
-            client.provider_name,
-            client.model_name,
-        )
-        raise HTTPException(status_code=503, detail=AI_CLEANUP_UNAVAILABLE_MESSAGE) from exc
-
-    cleaned = _remove_obvious_oral_fillers(str(content))
-    if cleaned == source_text:
-        cleaned = _remove_obvious_oral_fillers(source_text)
-    if not cleaned:
-        raise HTTPException(status_code=502, detail="AI 未返回可用清理结果")
+    cleaned = await generate_cleaned_transcript_text(
+        source_text,
+        ai_model=req.ai_model,
+        ai_client=ai_client,
+        strict=True,
+    )
     return await _apply_edited_text(
         db,
         utterance,
-        cleaned,
+        cleaned.content,
         version_type=MemoirTranscriptVersionType.DIALECT_CORRECTED,
-        created_by=MemoirCreatedBy.AI,
-        provider=client.provider_name,
+        created_by=cleaned.created_by,
+        provider=cleaned.provider,
     )
 
 
