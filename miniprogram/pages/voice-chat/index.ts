@@ -38,6 +38,9 @@ interface VoiceChatData {
   latestTranscriptText: string;
   transcriptLines: VoiceChatTranscriptLine[];
   assistantPromptText: string;
+  assistantPromptLabel: string;
+  assistantLoadingText: string;
+  assistantEmptyText: string;
   followUpLoading: boolean;
   followUpError: string;
   lastFollowUpSourceMessageId: string;
@@ -168,6 +171,25 @@ function canRequestFollowUp(
   return followUpSourceMessageId(lines) !== lastFollowUpSourceMessageId;
 }
 
+function assistantPanelCopy(lines: VoiceChatTranscriptLine[]): {
+  assistantPromptLabel: string;
+  assistantLoadingText: string;
+  assistantEmptyText: string;
+} {
+  const hasUserMessage = Boolean(latestUserMessageId(lines));
+  return hasUserMessage
+    ? {
+        assistantPromptLabel: "AI 追问",
+        assistantLoadingText: "正在根据刚才的内容生成下一句追问",
+        assistantEmptyText: "可以让 AI 根据刚才的内容继续追问。",
+      }
+    : {
+        assistantPromptLabel: "AI 开场",
+        assistantLoadingText: "正在准备第一句话",
+        assistantEmptyText: "AI 会先说一句，帮你开始讲。",
+      };
+}
+
 function countTextChars(text: string): number {
   return Array.from(text.replace(/\s/g, "")).length;
 }
@@ -246,6 +268,9 @@ Page<VoiceChatData, {
     latestTranscriptText: "",
     transcriptLines: [],
     assistantPromptText: "",
+    assistantPromptLabel: "AI 开场",
+    assistantLoadingText: "正在准备第一句话",
+    assistantEmptyText: "AI 会先说一句，帮你开始讲。",
     followUpLoading: false,
     followUpError: "",
     lastFollowUpSourceMessageId: "",
@@ -288,7 +313,9 @@ Page<VoiceChatData, {
       return;
     }
     this.hydrateVoiceSessionSnapshot();
-    void this.refreshVoiceSessionSnapshot();
+    this.setData({ connecting: true });
+    await this.refreshVoiceSessionSnapshot();
+    this.setData({ connecting: false });
     await this.connectGateway();
   },
 
@@ -310,6 +337,7 @@ Page<VoiceChatData, {
     const assistantLine = visibleAssistantLine(snapshot.transcriptLines, this.data.dismissedFollowUpMessageId);
     const coveredSourceMessageId = coveredFollowUpSourceMessageId(snapshot.transcriptLines);
     const lastFollowUpSourceMessageId = coveredSourceMessageId || this.data.lastFollowUpSourceMessageId;
+    const assistantCopy = assistantPanelCopy(snapshot.transcriptLines);
     this.setData({
       guidanceMode,
       currentGuidanceModule,
@@ -317,6 +345,7 @@ Page<VoiceChatData, {
       transcriptLines: snapshot.transcriptLines,
       latestTranscriptText: latestTranscriptText(snapshot.transcriptLines),
       assistantPromptText: assistantLine?.text || "",
+      ...assistantCopy,
       followUpMessageId: assistantLine?.message_id || assistantLine?.id || "",
       followUpAudioFileId: assistantLine?.audio_file_id || "",
       followUpTTSStateText: assistantLine?.audio_file_id ? "语音已生成" : this.data.followUpTTSStateText,
@@ -339,7 +368,9 @@ Page<VoiceChatData, {
       const detail = await getMemoirVoiceSession(this.data.voiceSessionId);
       writeMemoirVoiceSessionSnapshot(this.data.voiceSessionId, { detail });
       this.applyVoiceSessionDetail(detail);
-      this.maybeGenerateOpeningFollowUp();
+      if (detail.session.status !== "stopped" && detail.session.status !== "failed") {
+        this.maybeGenerateOpeningFollowUp();
+      }
     } catch (error) {
       console.warn("refresh voice session snapshot failed", error);
     }
@@ -355,6 +386,7 @@ Page<VoiceChatData, {
     const coveredSourceMessageId = coveredFollowUpSourceMessageId(nextLines);
     const lastFollowUpSourceMessageId = coveredSourceMessageId || this.data.lastFollowUpSourceMessageId;
     const assistantLine = visibleAssistantLine(nextLines, this.data.dismissedFollowUpMessageId);
+    const assistantCopy = assistantPanelCopy(nextLines);
     this.setData({
       guidanceMode,
       currentGuidanceModule,
@@ -362,6 +394,7 @@ Page<VoiceChatData, {
       transcriptLines: nextLines,
       latestTranscriptText: latestTranscriptText(nextLines),
       assistantPromptText: assistantLine?.text || "",
+      ...assistantCopy,
       followUpMessageId: assistantLine?.message_id || assistantLine?.id || "",
       followUpAudioFileId: assistantLine?.audio_file_id || "",
       followUpTTSStateText: assistantLine?.audio_file_id ? "语音已生成" : this.data.followUpTTSStateText,
@@ -386,7 +419,7 @@ Page<VoiceChatData, {
   },
 
   maybeGenerateOpeningFollowUp() {
-    if (this.data.guidanceMode !== "guided_interview" || this.data.followUpLoading) {
+    if (this.data.followUpLoading) {
       return;
     }
     const hasAnyLine = this.data.transcriptLines.some((line) => line.text.trim());
@@ -424,9 +457,11 @@ Page<VoiceChatData, {
         transcript_version_id: response.message.transcript_version_id,
       };
       const transcriptLines = upsertTranscriptLine(this.data.transcriptLines, line);
+      const assistantCopy = assistantPanelCopy(transcriptLines);
       this.setData({
         transcriptLines,
         assistantPromptText: response.follow_up_text,
+        ...assistantCopy,
         dismissedFollowUpMessageId: "",
         followUpMessageId: response.message.id,
         followUpAudioFileId: response.message.audio_file_id || "",
@@ -806,11 +841,13 @@ Page<VoiceChatData, {
       end_ms: event.end_ms,
     };
     const transcriptLines = upsertTranscriptLine(this.data.transcriptLines, line);
+    const assistantCopy = assistantPanelCopy(transcriptLines);
     this.setData({
       liveText: "",
       liveCharCount: 0,
       latestTranscriptText: latestTranscriptText(transcriptLines),
       transcriptLines,
+      ...assistantCopy,
       totalTranscriptCharCount: totalTranscriptChars(transcriptLines),
       persistenceStateText: event.message_id && event.utterance_id && event.transcript_version_id
         ? "已保存"

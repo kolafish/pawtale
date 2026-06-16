@@ -111,6 +111,8 @@ guided_interview    # 强引导 / AI 模块化引导
 
 选定模块后，AI 一次只问一个具体问题，问题要围绕可讲述的场景，而不是让用户填写抽象信息。例如“那我们先聊一件你印象里最开心的事，它大概发生在哪一年？”强引导也要允许用户随时跑题；跑题内容仍然保存，只是后端更新当前模块和覆盖度。
 
+进入语音聊天页后默认由 AI 先说第一句。弱引导的开场只做开放邀请，让叙述者按自己的顺序开始；强引导的开场围绕用户选定模块给一个具体、容易回答的问题。
+
 ### 首屏
 
 小程序进入后直接进入语音访谈，不再先展示固定问题卡片。
@@ -151,9 +153,14 @@ partial transcript 只用于屏幕显示和本地状态，不作为事实依据�
 - AI 提取的人、事、地点、主题必须通过 evidence 指回 transcript version 和音频时间段。
 - 用户删除或隐藏产出稿时，不默认删除原始音频资产，除非明确执行素材删除。
 
-### AI 追问
+### AI 开场和追问
 
 ```text
+新 voice session 且暂无用户消息
+ -> LLM 根据引导模式生成 AI 开场
+ -> 保存 assistant chat message
+ -> TTS 播放 AI 开场
+
 用户 final transcript
  -> LLM 根据近期对话、长期记忆、覆盖度和敏感度生成追问
  -> 保存 assistant chat message
@@ -240,7 +247,7 @@ LLM 输出建议带结构化元数据，便于后续进度页和追问策略复�
 
 ```text
 assistant_text
-guidance_intent       # encourage_continue / clarify / switch_module / ask_detail / summarize
+guidance_intent       # opening / follow_up / encourage_continue / clarify / switch_module / ask_detail / summarize
 next_module
 memory_hints
 open_question_hints
