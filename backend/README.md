@@ -106,13 +106,19 @@ GITHUB_APP_PRIVATE_KEY_PATH=
 GITHUB_APP_SETUP_REDIRECT_URL=http://localhost:5173/
 GITHUB_SYNC_DEFAULT_BRANCH=main
 
-# AI 追问语音合成，默认 disabled；启用 OpenAI 兼容服务时改成 openai_compatible
+# AI 追问语音合成，默认 disabled；启用阶跃时改成 stepfun，启用其他 OpenAI 兼容服务时改成 openai_compatible
 TTS_PROVIDER=disabled
 TTS_API_KEY=
 TTS_BASE_URL=https://api.openai.com/v1
 TTS_MODEL=tts-1
 TTS_VOICE=alloy
 TTS_RESPONSE_FORMAT=mp3
+
+# StepFun TTS。TTS_PROVIDER=stepfun 时优先读取这些变量；STEPFUN_API_KEY 也可复用既有阶跃 key。
+STEPFUN_API_KEY=
+STEPFUN_BASE_URL=https://api.stepfun.ai/v1
+STEPFUN_TTS_MODEL=step-tts-2
+STEPFUN_TTS_VOICE=cixingnansheng
 ```
 
 生产环境必须设置 `APP_ENV=production`，并使用至少 32 字符的非默认随机 `APP_SECRET_KEY`；否则后端启动会失败。
