@@ -12,7 +12,7 @@ from app.models.memoir import (
     MemoirTranscriptVersion,
     MemoirVoiceUtterance,
 )
-from app.services.memoir.voice_transcripts import _remove_obvious_oral_fillers
+from app.services.memoir.voice_transcripts import _remove_obvious_oral_fillers, generate_cleaned_transcript_text
 
 UTC_SUFFIXES = ("Z", "+00:00")
 
@@ -31,6 +31,14 @@ class EchoFillerAIClient:
 
     async def _call_llm(self, *args, **kwargs):
         return "那个就是今天下雨了，那个那个那个雨下的很大。"
+
+
+class FailingAIClient:
+    provider_name = "fake-ai"
+    model_name = "fake-cleaner"
+
+    async def _call_llm(self, *args, **kwargs):
+        raise RuntimeError("provider down")
 
 
 async def _create_voice_transcript(client, test_db, text="嗯，我小时候就是住在外婆家。"):
@@ -255,6 +263,18 @@ async def test_mobile_memoir_ai_cleanup_removes_repeated_fillers_when_model_is_t
 def test_remove_obvious_oral_fillers_preserves_meaningful_deictic_phrase():
     assert _remove_obvious_oral_fillers("那个年代生活很不一样。") == "那个年代生活很不一样。"
     assert _remove_obvious_oral_fillers("那个那个那个雨下得很大。") == "雨下得很大。"
+
+
+async def test_generate_cleaned_transcript_text_uses_fallback_when_not_strict():
+    result = await generate_cleaned_transcript_text(
+        "那个就是今天下雨了，那个那个那个雨下的很大。",
+        ai_client=FailingAIClient(),
+        strict=False,
+    )
+
+    assert result.content == "今天下雨了，雨下的很大。"
+    assert result.provider is None
+    assert result.created_by == MemoirCreatedBy.SYSTEM
 
 
 async def test_mobile_memoir_voice_transcripts_are_user_scoped(anonymous_client, test_db):

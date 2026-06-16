@@ -5,6 +5,7 @@ from typing import Any
 import pytest
 from sqlalchemy import select
 
+from app.domain.memoir.types import MemoirCreatedBy
 from app.models.memoir import AudioFile, MemoirChatMessage, MemoirTranscriptVersion, MemoirVoiceUtterance
 from app.services.memoir.asr import StreamingASREvent
 from app.services.memoir.voice_final_persistence import VoiceFinalPersistenceService
@@ -14,6 +15,7 @@ from app.services.memoir.voice_gateway import (
     VoiceGatewaySession,
 )
 from app.services.memoir.voice_gateway_persistence import VoiceGatewayPersistence
+from app.services.memoir.voice_transcripts import CleanedTranscriptText
 
 
 async def test_voice_gateway_streams_audio_and_forwards_asr_events():
@@ -411,6 +413,20 @@ async def test_voice_gateway_persistence_saves_final_message_utterance_and_audio
     monkeypatch,
 ):
     monkeypatch.setattr("app.services.memoir.audio_files.MEMOIR_AUDIO_DIR", tmp_path / "audio")
+
+    async def fake_generate_cleaned_transcript_text(text: str, *, strict: bool = True, **_kwargs):
+        assert text == "嗯，我小时候就是住在外婆家。"
+        assert strict is False
+        return CleanedTranscriptText(
+            content="我小时候住在外婆家。",
+            provider="fake-ai",
+            created_by=MemoirCreatedBy.AI,
+        )
+
+    monkeypatch.setattr(
+        "app.services.memoir.voice_final_persistence.generate_cleaned_transcript_text",
+        fake_generate_cleaned_transcript_text,
+    )
     user_response = await client.get("/api/auth/me")
     create_response = await client.post(
         "/api/mobile/memoir/voice-sessions",
@@ -428,38 +444,54 @@ async def test_voice_gateway_persistence_saves_final_message_utterance_and_audio
     persisted = await persistence.persist_final(
         StreamingASREvent(
             type="final",
-            text="我小时候住在外婆家。",
+            text="嗯，我小时候就是住在外婆家。",
             start_ms=0,
             end_ms=2400,
-            raw={"payload": {"result": {"text": "我小时候住在外婆家。"}}},
+            raw={"payload": {"result": {"text": "嗯，我小时候就是住在外婆家。"}}},
         )
     )
 
     audio_file = await test_db.scalar(select(AudioFile).where(AudioFile.id == persisted["audio_file_id"]))
     message = await test_db.scalar(select(MemoirChatMessage).where(MemoirChatMessage.id == persisted["message_id"]))
     utterance = await test_db.scalar(select(MemoirVoiceUtterance).where(MemoirVoiceUtterance.id == persisted["utterance_id"]))
-    transcript_version = await test_db.scalar(
+    corrected_version = await test_db.scalar(
         select(MemoirTranscriptVersion).where(MemoirTranscriptVersion.id == persisted["transcript_version_id"])
     )
+    versions = (
+        await test_db.execute(
+            select(MemoirTranscriptVersion)
+            .where(MemoirTranscriptVersion.voice_session_id == voice_session_id)
+            .order_by(MemoirTranscriptVersion.created_at)
+        )
+    ).scalars().all()
 
     assert audio_file is not None
     assert audio_file.mime_type == "audio/pcm"
     assert audio_file.size_bytes == len(b"pcm-1pcm-2")
     assert (tmp_path / "audio" / audio_file.user_id / f"{audio_file.id}.pcm").read_bytes() == b"pcm-1pcm-2"
     assert message is not None
-    assert transcript_version is not None
+    assert corrected_version is not None
     assert message.content_text == "我小时候住在外婆家。"
+    assert message.content_status == "corrected"
     assert message.audio_file_id == audio_file.id
-    assert message.transcript_version_id == transcript_version.id
+    assert message.transcript_version_id == corrected_version.id
+    assert message.metadata_json["asr_transcript_version_id"] == versions[0].id
+    assert message.metadata_json["correction_provider"] == "fake-ai"
     assert utterance is not None
     assert utterance.chat_message_id == message.id
     assert utterance.audio_file_id == audio_file.id
-    assert utterance.transcript_raw == "我小时候住在外婆家。"
-    assert transcript_version.answer_id is None
-    assert transcript_version.voice_session_id == voice_session_id
-    assert transcript_version.content == "我小时候住在外婆家。"
-    assert transcript_version.version_type == "asr_raw"
-    assert transcript_version.created_by == "asr"
+    assert utterance.transcript_raw == "嗯，我小时候就是住在外婆家。"
+    assert utterance.transcript_edited == "我小时候住在外婆家。"
+    assert len(versions) == 2
+    assert versions[0].answer_id is None
+    assert versions[0].voice_session_id == voice_session_id
+    assert versions[0].content == "嗯，我小时候就是住在外婆家。"
+    assert versions[0].version_type == "asr_raw"
+    assert versions[0].created_by == "asr"
+    assert corrected_version.content == "我小时候住在外婆家。"
+    assert corrected_version.version_type == "dialect_corrected"
+    assert corrected_version.created_by == "ai"
+    assert corrected_version.provider == "fake-ai"
 
 
 async def test_voice_gateway_persistence_rejects_audio_stream_over_limit(client, test_db, monkeypatch):

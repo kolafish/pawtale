@@ -1,6 +1,5 @@
 import type { MemoirVoiceTranscriptItem } from "../../domain/voice-chat";
 import {
-  cleanupMemoirVoiceTranscript,
   deleteMemoirVoiceTranscript,
   downloadMemoirVoiceAudio,
   listMemoirVoiceTranscripts,
@@ -8,7 +7,6 @@ import {
 } from "../../services/memoir-voice-api";
 import { configureAudiblePlayback } from "../../services/audio-playback";
 import { ApiError } from "../../services/request";
-import { formatBeijingDateTime } from "../../services/time";
 
 interface DatasetEvent {
   currentTarget: {
@@ -27,7 +25,6 @@ interface TextAreaEvent extends DatasetEvent {
 interface TranscriptItemView extends MemoirVoiceTranscriptItem {
   editingText: string;
   editingCharCount: number;
-  createdText: string;
   audioText: string;
   canPlayAudio: boolean;
   changed: boolean;
@@ -37,7 +34,6 @@ interface TranscriptItemView extends MemoirVoiceTranscriptItem {
 interface TranscriptsData {
   loading: boolean;
   savingId: string;
-  cleaningId: string;
   deletingId: string;
   playingId: string;
   error: string;
@@ -98,7 +94,6 @@ function toViewItem(item: MemoirVoiceTranscriptItem): TranscriptItemView {
     ...item,
     editingText,
     editingCharCount: editingText.trim().length,
-    createdText: formatBeijingDateTime(item.created_at),
     audioText: audioText(item),
     canPlayAudio: Boolean(item.audio_file_id),
     changed: editingText !== (item.transcript_edited || item.transcript_raw),
@@ -124,19 +119,6 @@ function removeItem(items: TranscriptItemView[], id: string): TranscriptItemView
   return items.filter((item) => item.id !== id);
 }
 
-function confirmCleanup(): Promise<boolean> {
-  return new Promise((resolve) => {
-    wx.showModal({
-      title: "AI 清理转写",
-      content: "会忠实保留原意，只去掉语气词和无信息重复表达。",
-      confirmText: "开始清理",
-      confirmColor: "#9f4a3c",
-      success: (result) => resolve(Boolean(result.confirm)),
-      fail: () => resolve(false),
-    });
-  });
-}
-
 function confirmDelete(item: TranscriptItemView): Promise<boolean> {
   return new Promise((resolve) => {
     const preview = item.display_text || item.transcript_raw || "这条转写记录";
@@ -159,7 +141,6 @@ Page<TranscriptsData, {
   changeText(event: TextAreaEvent): void;
   cancelEdit(event: DatasetEvent): void;
   saveTranscript(event: DatasetEvent): Promise<void>;
-  cleanupTranscript(event: DatasetEvent): Promise<void>;
   resetToRaw(event: DatasetEvent): void;
   deleteTranscript(event: DatasetEvent): Promise<void>;
   playAudio(event: DatasetEvent): Promise<void>;
@@ -175,7 +156,6 @@ Page<TranscriptsData, {
   data: {
     loading: false,
     savingId: "",
-    cleaningId: "",
     deletingId: "",
     playingId: "",
     error: "",
@@ -227,7 +207,7 @@ Page<TranscriptsData, {
   beginEdit(event) {
     const id = event.currentTarget.dataset.id || "";
     const index = this.data.items.findIndex((item) => item.id === id);
-    if (index < 0 || this.data.savingId || this.data.cleaningId || this.data.deletingId) {
+    if (index < 0 || this.data.savingId || this.data.deletingId) {
       return;
     }
     const items = [...this.data.items];
@@ -256,7 +236,7 @@ Page<TranscriptsData, {
   cancelEdit(event) {
     const id = event.currentTarget.dataset.id || "";
     const index = this.data.items.findIndex((item) => item.id === id);
-    if (index < 0 || this.data.savingId || this.data.cleaningId || this.data.deletingId) {
+    if (index < 0 || this.data.savingId || this.data.deletingId) {
       return;
     }
     const items = [...this.data.items];
@@ -267,7 +247,7 @@ Page<TranscriptsData, {
   async saveTranscript(event) {
     const id = event.currentTarget.dataset.id || "";
     const item = this.data.items.find((candidate) => candidate.id === id);
-    if (!item || this.data.savingId || this.data.cleaningId || this.data.deletingId) {
+    if (!item || this.data.savingId || this.data.deletingId) {
       return;
     }
     const content = item.editingText.trim();
@@ -287,32 +267,6 @@ Page<TranscriptsData, {
     }
   },
 
-  async cleanupTranscript(event) {
-    const id = event.currentTarget.dataset.id || "";
-    const item = this.data.items.find((candidate) => candidate.id === id);
-    if (!id || !item || this.data.savingId || this.data.cleaningId || this.data.deletingId) {
-      return;
-    }
-    if (item.changed) {
-      this.setData({ error: "请先保存当前修改，再使用 AI 清理" });
-      return;
-    }
-    const confirmed = await confirmCleanup();
-    if (!confirmed) {
-      return;
-    }
-    this.setData({ cleaningId: id, error: "" });
-    try {
-      const updated = await cleanupMemoirVoiceTranscript(id);
-      this.setData({ items: replaceItem(this.data.items, updated) });
-      wx.showToast({ title: "已清理", icon: "success" });
-    } catch (error) {
-      this.setData({ error: error instanceof Error ? error.message : "AI 清理失败" });
-    } finally {
-      this.setData({ cleaningId: "" });
-    }
-  },
-
   resetToRaw(event) {
     const id = event.currentTarget.dataset.id || "";
     const index = this.data.items.findIndex((item) => item.id === id);
@@ -327,7 +281,7 @@ Page<TranscriptsData, {
   async deleteTranscript(event) {
     const id = event.currentTarget.dataset.id || "";
     const item = this.data.items.find((candidate) => candidate.id === id);
-    if (!id || !item || this.data.savingId || this.data.cleaningId || this.data.deletingId) {
+    if (!id || !item || this.data.savingId || this.data.deletingId) {
       return;
     }
     const confirmed = await confirmDelete(item);
@@ -364,7 +318,7 @@ Page<TranscriptsData, {
       this.stopPlayback();
       return;
     }
-    if (this.data.savingId || this.data.cleaningId || this.data.deletingId) {
+    if (this.data.savingId || this.data.deletingId) {
       return;
     }
     this.stopPlayback();
