@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass
 from enum import StrEnum
+from io import BytesIO
 from urllib.parse import quote
+from zipfile import ZIP_DEFLATED, ZipFile
 
 from markdown_it import MarkdownIt
 from markdown_it.token import Token
@@ -18,22 +21,28 @@ from app.services.projects.access import load_project
 class ProjectExportFormat(StrEnum):
     TXT = "txt"
     MARKDOWN = "markdown"
+    ZIP = "zip"
 
 
 @dataclass(frozen=True)
 class ProjectExportFile:
     filename: str
     media_type: str
-    content: str
+    content: str | bytes
 
 
 markdown_parser = MarkdownIt("commonmark")
 SAFE_FILENAME_RE = re.compile(r'[\\/:*?"<>|\r\n]+')
+SAFE_PATH_PART_RE = re.compile(r"[^a-zA-Z0-9._\-\u4e00-\u9fff]+")
 
 
 def safe_filename(name: str, extension: str) -> str:
     stem = SAFE_FILENAME_RE.sub("-", name).strip(" .-") or "pawtale-export"
     return f"{stem}.{extension}"
+
+
+def safe_path_part(name: str) -> str:
+    return SAFE_PATH_PART_RE.sub("-", name).strip(" .-") or "untitled"
 
 
 def content_disposition(filename: str) -> str:
@@ -52,9 +61,33 @@ async def export_project_data(db: AsyncSession, project_id: str, user_id: str) -
             content = await read_content(project_id, doc.id)
             word_count = project_docs.count_words(content)
             total += word_count
-            docs.append({"name": doc.name, "content": content, "word_count": word_count})
+            docs.append(
+                {
+                    "id": doc.id,
+                    "name": doc.name,
+                    "content": content,
+                    "word_count": word_count,
+                    "status": doc.status,
+                    "label": doc.label,
+                    "sort_order": doc.sort_order,
+                }
+            )
         sections.append({"group": group.name, "documents": docs})
-    return ProjectExportResponse(title=project.title, sections=sections, total_words=total)
+
+    references = [
+        {
+            "id": ref.id,
+            "type": ref.type,
+            "name": ref.name,
+            "content": ref.content,
+            "metadata_json": ref.metadata_json,
+            "sort_order": ref.sort_order,
+            "updated_at": ref.updated_at.isoformat() if ref.updated_at else None,
+        }
+        for ref in sorted(project.references, key=lambda item: (item.sort_order, item.name, item.id))
+    ]
+
+    return ProjectExportResponse(title=project.title, sections=sections, total_words=total, references=references)
 
 
 def _inline_text(token: Token) -> str:
@@ -140,6 +173,76 @@ def render_markdown_export(data: ProjectExportResponse) -> str:
     return "\n\n".join(parts).strip() + "\n"
 
 
+def project_manifest(data: ProjectExportResponse) -> dict:
+    return {
+        "format": "pawtale-project-export-v1",
+        "title": data.title,
+        "total_words": data.total_words,
+        "sections": [
+            {
+                "group": section.get("group"),
+                "documents": [
+                    {
+                        "id": doc.get("id"),
+                        "name": doc.get("name"),
+                        "word_count": doc.get("word_count", 0),
+                        "status": doc.get("status"),
+                        "label": doc.get("label"),
+                        "sort_order": doc.get("sort_order", 0),
+                    }
+                    for doc in section.get("documents", [])
+                ],
+            }
+            for section in data.sections
+        ],
+        "references": [
+            {
+                "id": ref.get("id"),
+                "type": ref.get("type"),
+                "name": ref.get("name"),
+                "sort_order": ref.get("sort_order", 0),
+                "metadata_json": ref.get("metadata_json", {}),
+            }
+            for ref in data.references
+        ],
+    }
+
+
+def render_zip_export(data: ProjectExportResponse) -> bytes:
+    buffer = BytesIO()
+    root = safe_path_part(data.title)
+    with ZipFile(buffer, "w", compression=ZIP_DEFLATED) as archive:
+        archive.writestr(
+            f"{root}/pawtale-project.json",
+            json.dumps(project_manifest(data), ensure_ascii=False, indent=2) + "\n",
+        )
+        archive.writestr(f"{root}/manuscript/full.md", render_markdown_export(data))
+        archive.writestr(f"{root}/manuscript/full.txt", render_txt_export(data))
+
+        for group_index, section in enumerate(data.sections, start=1):
+            group_name = str(section.get("group") or "未命名分组")
+            group_dir = f"{group_index:03d}-{safe_path_part(group_name)}"
+            for doc_index, doc in enumerate(section.get("documents", []), start=1):
+                doc_name = str(doc.get("name") or "未命名文档")
+                content = str(doc.get("content") or "")
+                doc_id = str(doc.get("id") or "").strip()
+                doc_suffix = f"-{doc_id}" if doc_id else ""
+                archive.writestr(
+                    f"{root}/manuscript/{group_dir}/{doc_index:03d}-{safe_path_part(doc_name)}{doc_suffix}.md",
+                    content,
+                )
+
+        for ref_index, ref in enumerate(data.references, start=1):
+            ref_name = str(ref.get("name") or "未命名资料")
+            ref_id = str(ref.get("id") or "").strip()
+            ref_suffix = f"-{ref_id}" if ref_id else ""
+            archive.writestr(
+                f"{root}/references/{ref_index:03d}-{safe_path_part(ref_name)}{ref_suffix}.json",
+                json.dumps(ref, ensure_ascii=False, indent=2) + "\n",
+            )
+    return buffer.getvalue()
+
+
 def render_txt_export(data: ProjectExportResponse) -> str:
     parts = [data.title]
     for section in data.sections:
@@ -154,6 +257,12 @@ def render_txt_export(data: ProjectExportResponse) -> str:
 
 
 def render_export_file(data: ProjectExportResponse, export_format: ProjectExportFormat) -> ProjectExportFile:
+    if export_format == ProjectExportFormat.ZIP:
+        return ProjectExportFile(
+            filename=safe_filename(data.title, "zip"),
+            media_type="application/zip",
+            content=render_zip_export(data),
+        )
     if export_format == ProjectExportFormat.MARKDOWN:
         return ProjectExportFile(
             filename=safe_filename(data.title, "md"),
