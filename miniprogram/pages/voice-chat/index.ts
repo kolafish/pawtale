@@ -54,6 +54,9 @@ interface VoiceChatData {
   captureFrameCount: number;
   captureKilobytes: number;
   captureDurationText: string;
+  audioLevelPercent: number;
+  autoStopEnabled: boolean;
+  autoStopStateText: string;
   liveCharCount: number;
   totalTranscriptCharCount: number;
   gatewayStateText: string;
@@ -63,6 +66,8 @@ interface VoiceChatData {
 
 let streamingClient: MemoirStreamingAsrClient | null = null;
 let followUpRequestSerial = 0;
+const AUTO_STOP_SILENCE_MS = 1800;
+const AUTO_STOP_MIN_RECORDING_MS = 1200;
 
 function modeLabel(mode: MemoirGuidanceMode): string {
   return mode === "guided_interview" ? "AI 引导" : "自由讲述";
@@ -209,6 +214,7 @@ Page<VoiceChatData, {
   playAudioFile(audioFileId: string): Promise<void>;
   stopFollowUpAudio(): void;
   cancelFollowUpTTS(): void;
+  toggleAutoStop(): void;
   connectGateway(): Promise<void>;
   toggleRecording(): void;
   finishSession(): Promise<void>;
@@ -256,6 +262,9 @@ Page<VoiceChatData, {
     captureFrameCount: 0,
     captureKilobytes: 0,
     captureDurationText: "00:00",
+    audioLevelPercent: 0,
+    autoStopEnabled: true,
+    autoStopStateText: "自动收尾开",
     liveCharCount: 0,
     totalTranscriptCharCount: 0,
     gatewayStateText: "识别未同步",
@@ -621,6 +630,15 @@ Page<VoiceChatData, {
     }
   },
 
+  toggleAutoStop() {
+    const autoStopEnabled = !this.data.autoStopEnabled;
+    streamingClient?.configureAutoStop(autoStopEnabled ? AUTO_STOP_SILENCE_MS : 0);
+    this.setData({
+      autoStopEnabled,
+      autoStopStateText: autoStopEnabled ? "自动收尾开" : "自动收尾关",
+    });
+  },
+
   async connectGateway() {
     if (this.data.connecting || !this.data.voiceSessionId) {
       return;
@@ -631,6 +649,8 @@ Page<VoiceChatData, {
       voiceSessionId: this.data.voiceSessionId,
       guidanceMode: this.data.guidanceMode,
       currentGuidanceModule: this.data.currentGuidanceModule,
+      autoStopSilenceMs: this.data.autoStopEnabled ? AUTO_STOP_SILENCE_MS : 0,
+      minAutoStopRecordingMs: AUTO_STOP_MIN_RECORDING_MS,
       callbacks: {
         onStatus: (status) => this.handleStatus(status),
         onCaptureStats: (stats) => this.handleCaptureStats(stats),
@@ -712,7 +732,9 @@ Page<VoiceChatData, {
     this.setData({
       status,
       statusText: statusText(status),
-      recording: status === "listening" ? true : this.data.recording && status !== "closed" && status !== "error",
+      recording: status === "listening"
+        ? true
+        : this.data.recording && status !== "stopping" && status !== "closed" && status !== "error",
     });
   },
 
@@ -730,6 +752,10 @@ Page<VoiceChatData, {
       captureKilobytes: Math.round(stats.audioBytesSent / 1024),
       captureDurationText: formatDuration(stats.recordingElapsedMs),
       gatewayStateText: gatewayStateText(stats.gatewayState),
+      audioLevelPercent: Math.min(100, Math.round(Math.sqrt(stats.audioLevel || 0) * 100)),
+      autoStopStateText: !this.data.autoStopEnabled
+        ? "自动收尾关"
+        : (stats.autoStopped ? "检测到停顿，已自动收尾" : `自动收尾开 · 静音 ${formatDuration(stats.silentElapsedMs || 0)}`),
     });
   },
 
