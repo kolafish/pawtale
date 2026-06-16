@@ -1,0 +1,155 @@
+.me-page {
+  min-height: 100vh;
+  padding: 52rpx 36rpx 120rpx;
+  background: #fffaf2;
+}
+
+.header {
+  margin-bottom: 30rpx;
+}
+
+.page-title {
+  display: block;
+  color: #24100b;
+  font-size: 48rpx;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.page-subtitle {
+  display: block;
+  margin-top: 10rpx;
+  color: #685b55;
+  font-size: 28rpx;
+  line-height: 1.4;
+}
+
+.profile-panel,
+.action-card {
+  border: 2rpx solid #f0dac0;
+  border-radius: 24rpx;
+  background: #ffffff;
+  box-shadow: 0 12rpx 32rpx rgba(64, 43, 24, 0.07);
+}
+
+.profile-panel {
+  padding: 30rpx;
+  display: flex;
+  align-items: center;
+  gap: 24rpx;
+}
+
+.avatar {
+  width: 96rpx;
+  height: 96rpx;
+  border-radius: 999rpx;
+  background: #9f4a3c;
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 38rpx;
+  font-weight: 800;
+}
+
+.profile-main {
+  min-width: 0;
+}
+
+.profile-name {
+  display: block;
+  color: #24100b;
+  font-size: 36rpx;
+  font-weight: 800;
+  line-height: 1.3;
+}
+
+.profile-email {
+  display: block;
+  margin-top: 8rpx;
+  color: #685b55;
+  font-size: 25rpx;
+  line-height: 1.35;
+  word-break: break-all;
+}
+
+.section {
+  margin-top: 30rpx;
+}
+
+.section-title {
+  display: block;
+  margin-bottom: 16rpx;
+  color: #7a3b31;
+  font-size: 28rpx;
+  font-weight: 800;
+  line-height: 1.3;
+}
+
+.action-card {
+  min-height: 112rpx;
+  padding: 28rpx 30rpx;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24rpx;
+}
+
+.action-title {
+  display: block;
+  color: #24100b;
+  font-size: 32rpx;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.action-meta {
+  display: block;
+  margin-top: 10rpx;
+  color: #685b55;
+  font-size: 25rpx;
+  line-height: 1.35;
+}
+
+.chevron {
+  color: #9f4a3c;
+  font-size: 58rpx;
+  line-height: 1;
+}
+
+.logout-button {
+  width: 100%;
+  height: 94rpx;
+  margin: 38rpx 0 0;
+  border: 0;
+  border-radius: 24rpx;
+  background: #fff1f2;
+  color: #b4234a;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 30rpx;
+  font-weight: 800;
+}
+
+.logout-button::after {
+  border: 0;
+}
+
+.logout-button[disabled] {
+  opacity: 0.66;
+}
+
+.error {
+  margin-bottom: 24rpx;
+  padding: 22rpx 26rpx;
+  border-radius: 18rpx;
+  background: #fff1f2;
+  color: #b4234a;
+  font-size: 28rpx;
+  line-height: 1.45;
+}
+
+.tap-hover {
+  opacity: 0.82;
+}

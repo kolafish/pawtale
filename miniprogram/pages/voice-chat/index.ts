@@ -843,7 +843,7 @@ Page<VoiceChatData, {
         cancelText: "留在本页",
         success: (result) => {
           if (result.confirm) {
-            wx.navigateTo({ url: "/pages/transcripts/index" });
+            wx.switchTab({ url: "/pages/transcripts/index" });
           }
         },
       });

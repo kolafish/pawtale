@@ -1,0 +1,42 @@
+<view class="me-page">
+  <view class="header">
+    <text class="page-title">我的</text>
+    <text class="page-subtitle">账号、回忆录和语音访谈设置</text>
+  </view>
+
+  <view wx:if="{{error}}" class="error">{{error}}</view>
+
+  <view class="profile-panel">
+    <view class="avatar">
+      <text>{{avatarText}}</text>
+    </view>
+    <view class="profile-main">
+      <text class="profile-name">{{displayName || "作者"}}</text>
+      <text class="profile-email">{{email || "正在加载账号"}}</text>
+    </view>
+  </view>
+
+  <view class="section">
+    <text class="section-title">当前回忆录</text>
+    <view class="action-card" bindtap="openProjects" hover-class="tap-hover">
+      <view>
+        <text class="action-title">{{projectTitle || "我的回忆录"}}</text>
+        <text class="action-meta">共 {{projectCount}} 本 · 管理项目</text>
+      </view>
+      <text class="chevron">›</text>
+    </view>
+  </view>
+
+  <view class="section">
+    <text class="section-title">访谈管理</text>
+    <view class="action-card" bindtap="openVoiceProgress" hover-class="tap-hover">
+      <view>
+        <text class="action-title">访谈进度</text>
+        <text class="action-meta">查看会话、模块和累计文字</text>
+      </view>
+      <text class="chevron">›</text>
+    </view>
+  </view>
+
+  <button class="logout-button" loading="{{loading}}" disabled="{{loading}}" bindtap="logout">退出登录</button>
+</view>

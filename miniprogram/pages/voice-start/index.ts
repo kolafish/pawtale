@@ -116,6 +116,6 @@ Page<VoiceStartData, {
   },
 
   backHome() {
-    wx.redirectTo({ url: "/pages/home/index" });
+    wx.switchTab({ url: "/pages/home/index" });
   },
 });

@@ -7,8 +7,41 @@
     "pages/voice-chat/index",
     "pages/transcripts/index",
     "pages/voice-progress/index",
-    "pages/projects/index"
+    "pages/projects/index",
+    "pages/me/index"
   ],
+  "tabBar": {
+    "color": "#685b55",
+    "selectedColor": "#9f4a3c",
+    "backgroundColor": "#fffaf2",
+    "borderStyle": "black",
+    "list": [
+      {
+        "pagePath": "pages/home/index",
+        "text": "首页",
+        "iconPath": "assets/memoir-gramophone.png",
+        "selectedIconPath": "assets/memoir-gramophone.png"
+      },
+      {
+        "pagePath": "pages/voice-start/index",
+        "text": "语音",
+        "iconPath": "assets/memoir-microphone.png",
+        "selectedIconPath": "assets/memoir-microphone.png"
+      },
+      {
+        "pagePath": "pages/transcripts/index",
+        "text": "转写",
+        "iconPath": "assets/memoir-gramophone.png",
+        "selectedIconPath": "assets/memoir-gramophone.png"
+      },
+      {
+        "pagePath": "pages/me/index",
+        "text": "我的",
+        "iconPath": "assets/memoir-gramophone.png",
+        "selectedIconPath": "assets/memoir-gramophone.png"
+      }
+    ]
+  },
   "window": {
     "navigationBarTitleText": "余主任留声机",
     "navigationBarBackgroundColor": "#9f4a3c",

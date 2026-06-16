@@ -81,11 +81,11 @@ Page<HomeData, {
     if (this.data.loading) {
       return;
     }
-    wx.navigateTo({ url: "/pages/voice-start/index" });
+    wx.switchTab({ url: "/pages/voice-start/index" });
   },
 
   openTranscripts() {
-    wx.navigateTo({ url: "/pages/transcripts/index" });
+    wx.switchTab({ url: "/pages/transcripts/index" });
   },
 
   openVoiceProgress() {
@@ -93,7 +93,7 @@ Page<HomeData, {
   },
 
   openProjects() {
-    wx.navigateTo({ url: "/pages/projects/index" });
+    wx.switchTab({ url: "/pages/me/index" });
   },
 
   async logout() {
