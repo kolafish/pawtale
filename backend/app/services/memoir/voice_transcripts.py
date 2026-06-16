@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
+from datetime import datetime, timezone
 
 from fastapi import HTTPException
 from sqlalchemy import func, or_, select
@@ -10,10 +11,12 @@ from sqlalchemy.orm import selectinload
 
 from app.domain.memoir.types import (
     MemoirChatContentStatus,
+    MemoirChatMessageRole,
     MemoirCreatedBy,
     MemoirTranscriptVersionType,
 )
 from app.models.memoir import (
+    MemoirChatMessage,
     MemoirTranscriptVersion,
     MemoirVoiceSession,
     MemoirVoiceUtterance,
@@ -48,6 +51,12 @@ def _text_or_empty(value: str | None) -> str:
 
 def _current_text(utterance: MemoirVoiceUtterance) -> str:
     return _text_or_empty(utterance.transcript_edited) or _text_or_empty(utterance.transcript_raw)
+
+
+def _utc_datetime(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
 
 
 def _build_cleanup_prompt(source_text: str) -> str:
@@ -129,8 +138,8 @@ def _item_response(utterance: MemoirVoiceUtterance) -> MemoirVoiceTranscriptItem
         session_status=voice_session.status,
         guidance_mode=voice_session.guidance_mode,
         current_guidance_module=voice_session.current_guidance_module,
-        created_at=utterance.created_at,
-        session_created_at=voice_session.created_at,
+        created_at=_utc_datetime(utterance.created_at),
+        session_created_at=_utc_datetime(voice_session.created_at),
     )
 
 
@@ -292,3 +301,51 @@ async def cleanup_voice_transcript(
         created_by=MemoirCreatedBy.AI,
         provider=client.provider_name,
     )
+
+
+async def _message_reference_counts(
+    db: AsyncSession,
+    message: MemoirChatMessage,
+    utterance_id: str,
+) -> tuple[int, int]:
+    other_utterances = await db.scalar(
+        select(func.count(MemoirVoiceUtterance.id)).where(
+            MemoirVoiceUtterance.chat_message_id == message.id,
+            MemoirVoiceUtterance.id != utterance_id,
+        )
+    )
+    child_messages = await db.scalar(
+        select(func.count(MemoirChatMessage.id)).where(
+            MemoirChatMessage.parent_message_id == message.id,
+        )
+    )
+    return other_utterances or 0, child_messages or 0
+
+
+async def delete_voice_transcript(
+    db: AsyncSession,
+    utterance_id: str,
+    user_id: str,
+) -> None:
+    utterance = await _load_owned_utterance(db, utterance_id, user_id)
+    message = utterance.chat_message
+    delete_message = False
+    clear_message = False
+
+    if message and message.role == MemoirChatMessageRole.USER.value:
+        other_utterances, child_messages = await _message_reference_counts(db, message, utterance.id)
+        delete_message = other_utterances == 0 and child_messages == 0
+        clear_message = other_utterances == 0 and child_messages > 0
+
+    await db.delete(utterance)
+    await db.flush()
+
+    if message and delete_message:
+        await db.delete(message)
+    elif message and clear_message:
+        message.content_text = ""
+        message.audio_file_id = None
+        message.transcript_version_id = None
+        message.content_status = MemoirChatContentStatus.CORRECTED.value
+
+    await db.commit()

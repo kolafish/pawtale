@@ -1,12 +1,14 @@
 import type { MemoirVoiceTranscriptItem } from "../../domain/voice-chat";
 import {
   cleanupMemoirVoiceTranscript,
+  deleteMemoirVoiceTranscript,
   downloadMemoirVoiceAudio,
   listMemoirVoiceTranscripts,
   updateMemoirVoiceTranscript,
 } from "../../services/memoir-voice-api";
 import { configureAudiblePlayback } from "../../services/audio-playback";
 import { ApiError } from "../../services/request";
+import { formatBeijingDateTime } from "../../services/time";
 
 interface DatasetEvent {
   currentTarget: {
@@ -29,12 +31,14 @@ interface TranscriptItemView extends MemoirVoiceTranscriptItem {
   audioText: string;
   canPlayAudio: boolean;
   changed: boolean;
+  isEditing: boolean;
 }
 
 interface TranscriptsData {
   loading: boolean;
   savingId: string;
   cleaningId: string;
+  deletingId: string;
   playingId: string;
   error: string;
   items: TranscriptItemView[];
@@ -44,18 +48,6 @@ interface TranscriptsData {
 }
 
 const DEFAULT_LIMIT = 30;
-
-function formatDate(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return "";
-  }
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  const hour = String(date.getHours()).padStart(2, "0");
-  const minute = String(date.getMinutes()).padStart(2, "0");
-  return `${month}-${day} ${hour}:${minute}`;
-}
 
 function formatBytes(value?: number | null): string {
   if (!value || value <= 0) {
@@ -106,10 +98,11 @@ function toViewItem(item: MemoirVoiceTranscriptItem): TranscriptItemView {
     ...item,
     editingText,
     editingCharCount: editingText.trim().length,
-    createdText: formatDate(item.created_at),
+    createdText: formatBeijingDateTime(item.created_at),
     audioText: audioText(item),
     canPlayAudio: Boolean(item.audio_file_id),
     changed: editingText !== (item.transcript_edited || item.transcript_raw),
+    isEditing: false,
   };
 }
 
@@ -119,11 +112,16 @@ function changedItem(item: TranscriptItemView, editingText: string): TranscriptI
     editingText,
     editingCharCount: editingText.trim().length,
     changed: editingText.trim() !== (item.transcript_edited || item.transcript_raw).trim(),
+    isEditing: true,
   };
 }
 
 function replaceItem(items: TranscriptItemView[], next: MemoirVoiceTranscriptItem): TranscriptItemView[] {
   return items.map((item) => (item.id === next.id ? toViewItem(next) : item));
+}
+
+function removeItem(items: TranscriptItemView[], id: string): TranscriptItemView[] {
+  return items.filter((item) => item.id !== id);
 }
 
 function confirmCleanup(): Promise<boolean> {
@@ -139,14 +137,31 @@ function confirmCleanup(): Promise<boolean> {
   });
 }
 
+function confirmDelete(item: TranscriptItemView): Promise<boolean> {
+  return new Promise((resolve) => {
+    const preview = item.display_text || item.transcript_raw || "这条转写记录";
+    wx.showModal({
+      title: "删除转写",
+      content: `确定删除“${preview.slice(0, 24)}${preview.length > 24 ? "..." : ""}”？删除后不会再出现在转写记录和访谈上下文中。`,
+      confirmText: "删除",
+      confirmColor: "#b4234a",
+      success: (result) => resolve(Boolean(result.confirm)),
+      fail: () => resolve(false),
+    });
+  });
+}
+
 Page<TranscriptsData, {
   onLoad(): Promise<void>;
   loadTranscripts(reset?: boolean): Promise<void>;
   loadMore(): Promise<void>;
+  beginEdit(event: DatasetEvent): void;
   changeText(event: TextAreaEvent): void;
+  cancelEdit(event: DatasetEvent): void;
   saveTranscript(event: DatasetEvent): Promise<void>;
   cleanupTranscript(event: DatasetEvent): Promise<void>;
   resetToRaw(event: DatasetEvent): void;
+  deleteTranscript(event: DatasetEvent): Promise<void>;
   playAudio(event: DatasetEvent): Promise<void>;
   stopPlayback(): void;
   onUnload(): void;
@@ -161,6 +176,7 @@ Page<TranscriptsData, {
     loading: false,
     savingId: "",
     cleaningId: "",
+    deletingId: "",
     playingId: "",
     error: "",
     items: [],
@@ -208,6 +224,24 @@ Page<TranscriptsData, {
     await this.loadTranscripts(false);
   },
 
+  beginEdit(event) {
+    const id = event.currentTarget.dataset.id || "";
+    const index = this.data.items.findIndex((item) => item.id === id);
+    if (index < 0 || this.data.savingId || this.data.cleaningId || this.data.deletingId) {
+      return;
+    }
+    const items = [...this.data.items];
+    const current = items[index].transcript_edited || items[index].transcript_raw;
+    items[index] = {
+      ...items[index],
+      editingText: current,
+      editingCharCount: current.trim().length,
+      changed: false,
+      isEditing: true,
+    };
+    this.setData({ items, error: "" });
+  },
+
   changeText(event) {
     const id = event.currentTarget.dataset.id || "";
     const index = this.data.items.findIndex((item) => item.id === id);
@@ -219,10 +253,21 @@ Page<TranscriptsData, {
     this.setData({ items });
   },
 
+  cancelEdit(event) {
+    const id = event.currentTarget.dataset.id || "";
+    const index = this.data.items.findIndex((item) => item.id === id);
+    if (index < 0 || this.data.savingId || this.data.cleaningId || this.data.deletingId) {
+      return;
+    }
+    const items = [...this.data.items];
+    items[index] = toViewItem(items[index]);
+    this.setData({ items, error: "" });
+  },
+
   async saveTranscript(event) {
     const id = event.currentTarget.dataset.id || "";
     const item = this.data.items.find((candidate) => candidate.id === id);
-    if (!item || this.data.savingId || this.data.cleaningId) {
+    if (!item || this.data.savingId || this.data.cleaningId || this.data.deletingId) {
       return;
     }
     const content = item.editingText.trim();
@@ -245,7 +290,7 @@ Page<TranscriptsData, {
   async cleanupTranscript(event) {
     const id = event.currentTarget.dataset.id || "";
     const item = this.data.items.find((candidate) => candidate.id === id);
-    if (!id || !item || this.data.savingId || this.data.cleaningId) {
+    if (!id || !item || this.data.savingId || this.data.cleaningId || this.data.deletingId) {
       return;
     }
     if (item.changed) {
@@ -279,6 +324,35 @@ Page<TranscriptsData, {
     this.setData({ items });
   },
 
+  async deleteTranscript(event) {
+    const id = event.currentTarget.dataset.id || "";
+    const item = this.data.items.find((candidate) => candidate.id === id);
+    if (!id || !item || this.data.savingId || this.data.cleaningId || this.data.deletingId) {
+      return;
+    }
+    const confirmed = await confirmDelete(item);
+    if (!confirmed) {
+      return;
+    }
+    if (this.data.playingId === id) {
+      this.stopPlayback();
+    }
+    this.setData({ deletingId: id, error: "" });
+    try {
+      await deleteMemoirVoiceTranscript(id);
+      this.setData({
+        items: removeItem(this.data.items, id),
+        total: Math.max(0, this.data.total - 1),
+        offset: Math.max(0, this.data.offset - 1),
+      });
+      wx.showToast({ title: "已删除", icon: "success" });
+    } catch (error) {
+      this.setData({ error: error instanceof Error ? error.message : "删除失败" });
+    } finally {
+      this.setData({ deletingId: "" });
+    }
+  },
+
   async playAudio(event) {
     const id = event.currentTarget.dataset.id || "";
     const item = this.data.items.find((candidate) => candidate.id === id);
@@ -288,6 +362,9 @@ Page<TranscriptsData, {
     }
     if (this.data.playingId === id) {
       this.stopPlayback();
+      return;
+    }
+    if (this.data.savingId || this.data.cleaningId || this.data.deletingId) {
       return;
     }
     this.stopPlayback();
