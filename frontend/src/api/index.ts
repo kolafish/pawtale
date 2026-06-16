@@ -8,6 +8,8 @@ import type {
   WritingDocument,
   ReferenceItem,
   WritingSession,
+  ProjectExportDownload,
+  ProjectExportDownloadFormat,
   ProjectExportResponse,
   GitSyncStatus,
   DocumentGroup,
@@ -19,6 +21,7 @@ import type {
   AnalyzeApplyResponse,
   ReferenceType,
 } from '../types';
+import { parseContentDispositionFilename } from '../utils/download';
 
 const api = axios.create({
   baseURL: '/api',
@@ -92,6 +95,18 @@ export const projectsApi = {
   // Export
   export: (projectId: string) =>
     api.get<ProjectExportResponse>(`/projects/${projectId}/export`).then(r => r.data),
+  downloadExport: async (projectId: string, format: ProjectExportDownloadFormat): Promise<ProjectExportDownload> => {
+    const response = await api.get<Blob>(`/projects/${projectId}/export/download`, {
+      params: { format },
+      responseType: 'blob',
+    });
+    const header = response.headers['content-disposition'];
+    const contentDisposition = Array.isArray(header) ? header.join(';') : header;
+    return {
+      blob: response.data,
+      filename: parseContentDispositionFilename(contentDisposition) ?? undefined,
+    };
+  },
 
   // GitHub one-way sync
   getGitSync: (projectId: string) =>

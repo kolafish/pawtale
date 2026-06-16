@@ -2,7 +2,8 @@ import { useCallback, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { projectsApi } from '../api';
 import { useAppStore } from '../stores/appStore';
-import type { AIDebugInfo } from '../types';
+import type { AIDebugInfo, ProjectExportDownloadFormat } from '../types';
+import { saveBlob } from '../utils/download';
 import { useDocumentDraft } from './project/useDocumentDraft';
 import { useProjectReferences } from './project/useProjectReferences';
 import { useProjectStructure } from './project/useProjectStructure';
@@ -23,6 +24,7 @@ export function useProjectState() {
   const [continueInstruction, setContinueInstruction] = useState('');
   const [debugMode, setDebugMode] = useState(false);
   const [debugInfo, setDebugInfo] = useState<AIDebugInfo | null>(null);
+  const [exportingFormat, setExportingFormat] = useState<ProjectExportDownloadFormat | null>(null);
 
   const refreshProject = useCallback(async () => {
     if (!currentProject) return;
@@ -81,22 +83,16 @@ export function useProjectState() {
     setContinueInstruction('');
   };
 
-  const handleExportTxt = async () => {
-    if (!currentProject) return;
-    const exportData = await projectsApi.export(currentProject.id);
-    const text = exportData.sections
-      .map((s) => {
-        const docs = s.documents.map((d) => `${d.name}\n\n${d.content}`).join('\n\n---\n\n');
-        return `【${s.group}】\n\n${docs}`;
-      })
-      .join('\n\n========\n\n');
-    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${currentProject.title}.txt`;
-    a.click();
-    URL.revokeObjectURL(url);
+  const handleExport = async (format: ProjectExportDownloadFormat) => {
+    if (!currentProject || exportingFormat) return;
+    setExportingFormat(format);
+    try {
+      const download = await projectsApi.downloadExport(currentProject.id, format);
+      const extension = format === 'markdown' ? 'md' : format;
+      saveBlob(download.blob, download.filename || `${currentProject.title}.${extension}`);
+    } finally {
+      setExportingFormat(null);
+    }
   };
 
   const closeProject = () => {
@@ -146,7 +142,8 @@ export function useProjectState() {
     totalWordCount,
 
     // Export
-    handleExportTxt,
+    exportingFormat,
+    handleExport,
 
     // Review mode (for AI revision)
     setIsReviewing: draft.setIsReviewing,
