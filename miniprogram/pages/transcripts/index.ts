@@ -5,6 +5,7 @@ import {
   listMemoirVoiceTranscripts,
   updateMemoirVoiceTranscript,
 } from "../../services/memoir-voice-api";
+import { configureAudiblePlayback } from "../../services/audio-playback";
 import { ApiError } from "../../services/request";
 
 interface DatasetEvent {
@@ -300,7 +301,7 @@ Page<TranscriptsData, {
       }
       const audio = wx.createInnerAudioContext();
       this.audio = audio;
-      audio.obeyMuteSwitch = false;
+      configureAudiblePlayback(audio);
       audio.src = tempFilePath;
       audio.onEnded(() => {
         if (this.audio === audio && token === this.playToken) {
