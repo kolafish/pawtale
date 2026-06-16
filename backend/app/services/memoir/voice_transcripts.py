@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 
 from fastapi import HTTPException
 from sqlalchemy import func, or_, select
@@ -31,6 +32,14 @@ from app.services.ai_types import AITextClient
 SYSTEM_PROMPT = "你是一位谨慎的中文口述稿校对助手，只做忠于原话的转写校正和口头语清理。"
 AI_CLEANUP_UNAVAILABLE_MESSAGE = "AI 服务暂时不可用，请稍后重试。"
 logger = logging.getLogger(__name__)
+_FILLER = r"(?:嗯+|啊+|呃+|额+|那个|这个|就是)"
+_REPEATED_FILLERS_RE = re.compile(rf"(?:{_FILLER}[\s，,、]*){{2,}}")
+_BOUNDARY_FILLER_RE = re.compile(rf"(^|[。！？!?；;，,、]\s*)(?:嗯+|啊+|呃+|额+|就是)[\s，,、]*")
+_BOUNDARY_DEICTIC_RE = re.compile(
+    rf"(^|[。！？!?；;，,、]\s*)(?:那个|这个)(?=(?:就是|就|是|那个|这个|嗯|啊|呃|额|[\s，,、]))[\s，,、]*"
+)
+_DUPLICATE_PUNCTUATION_RE = re.compile(r"([，,。！？!?；;])\1+")
+_SPACE_RE = re.compile(r"\s+")
 
 
 def _text_or_empty(value: str | None) -> str:
@@ -46,8 +55,8 @@ def _build_cleanup_prompt(source_text: str) -> str:
 
 要求：
 - 只修正 ASR 可能因方言、口音、同音词造成的明显错字或错词；无法确定时保留原文
-- 去掉明显的口头填充词，比如“嗯”“啊”“呃”“那个”“就是”等不承载信息的重复语气词
-- 去掉同一句话里明显无信息增量的重复表达
+- 必须去掉明显的口头填充词，比如句首或重复出现的“嗯”“啊”“呃”“那个”“这个”“就是”
+- 必须去掉同一句话里明显无信息增量的重复表达，例如“那个那个那个”“就是就是”
 - 可以整理基础标点和极少量语序，使句子可读
 - 不新增事实、人物、时间、地点、事件或情绪
 - 不扩写、不总结、不文学化、不替用户补充细节
@@ -57,6 +66,25 @@ def _build_cleanup_prompt(source_text: str) -> str:
 原始口述内容：
 {source_text}
 """
+
+
+def _strip_llm_wrapping(text: str) -> str:
+    cleaned = text.strip()
+    if len(cleaned) >= 2 and cleaned[0] in {"“", "「", '"', "'"} and cleaned[-1] in {"”", "」", '"', "'"}:
+        return cleaned[1:-1].strip()
+    return cleaned
+
+
+def _remove_obvious_oral_fillers(text: str) -> str:
+    cleaned = _strip_llm_wrapping(text)
+    cleaned = _REPEATED_FILLERS_RE.sub("", cleaned)
+    cleaned = _BOUNDARY_FILLER_RE.sub(r"\1", cleaned)
+    cleaned = _BOUNDARY_DEICTIC_RE.sub(r"\1", cleaned)
+    cleaned = _DUPLICATE_PUNCTUATION_RE.sub(r"\1", cleaned)
+    cleaned = _SPACE_RE.sub(" ", cleaned)
+    cleaned = cleaned.strip(" ，,、")
+    cleaned = cleaned.replace("，。", "。").replace(",。", "。")
+    return cleaned.strip()
 
 
 def _transcript_filter(user_id: str, project_id: str | None = None):
@@ -251,7 +279,9 @@ async def cleanup_voice_transcript(
         )
         raise HTTPException(status_code=503, detail=AI_CLEANUP_UNAVAILABLE_MESSAGE) from exc
 
-    cleaned = str(content).strip()
+    cleaned = _remove_obvious_oral_fillers(str(content))
+    if cleaned == source_text:
+        cleaned = _remove_obvious_oral_fillers(source_text)
     if not cleaned:
         raise HTTPException(status_code=502, detail="AI 未返回可用清理结果")
     return await _apply_edited_text(

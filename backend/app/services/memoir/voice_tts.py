@@ -36,6 +36,17 @@ class TTSResult:
     model: str
 
 
+@dataclass(frozen=True)
+class AudioSpeechProviderConfig:
+    provider_name: str
+    api_key: str
+    base_url: str
+    model: str
+    voice: str
+    response_format: str
+    timeout_seconds: float
+
+
 class TTSClient(Protocol):
     @property
     def provider_name(self) -> str:
@@ -49,15 +60,16 @@ class TTSClient(Protocol):
         ...
 
 
-class OpenAICompatibleTTSClient:
-    provider_name = "openai_compatible"
+class AudioSpeechTTSClient:
+    """Client for providers exposing an OpenAI-compatible /audio/speech API."""
 
-    def __init__(self, settings: Settings):
-        self.settings = settings
-        self.model_name = settings.tts_model
+    def __init__(self, config: AudioSpeechProviderConfig):
+        self.config = config
+        self.provider_name = config.provider_name
+        self.model_name = config.model
 
     def _endpoint(self) -> str:
-        base_url = self.settings.tts_base_url.strip().rstrip("/")
+        base_url = self.config.base_url.strip().rstrip("/")
         if not base_url:
             base_url = "https://api.openai.com/v1"
         if base_url.endswith("/audio/speech"):
@@ -65,20 +77,20 @@ class OpenAICompatibleTTSClient:
         return f"{base_url}/audio/speech"
 
     async def synthesize(self, text: str, *, voice: str | None = None) -> TTSResult:
-        api_key = self.settings.tts_api_key.strip()
+        api_key = self.config.api_key.strip()
         if not api_key:
-            raise HTTPException(status_code=503, detail="TTS_API_KEY 未配置")
-        response_format = self.settings.tts_response_format.strip().lower() or "mp3"
+            raise HTTPException(status_code=503, detail=f"{self.provider_name} TTS API key 未配置")
+        response_format = self.config.response_format.strip().lower() or "mp3"
         if response_format not in SUPPORTED_RESPONSE_FORMATS:
             raise HTTPException(status_code=500, detail=f"不支持的 TTS 音频格式: {response_format}")
 
         payload = {
-            "model": self.settings.tts_model,
+            "model": self.config.model,
             "input": text,
-            "voice": voice or self.settings.tts_voice,
+            "voice": voice or self.config.voice,
             "response_format": response_format,
         }
-        timeout = max(1.0, float(self.settings.tts_timeout_seconds))
+        timeout = max(1.0, float(self.config.timeout_seconds))
         try:
             async with httpx.AsyncClient(timeout=timeout) as client:
                 response = await client.post(
@@ -107,11 +119,50 @@ class OpenAICompatibleTTSClient:
         )
 
 
+class OpenAICompatibleTTSClient(AudioSpeechTTSClient):
+    def __init__(self, settings: Settings):
+        super().__init__(
+            AudioSpeechProviderConfig(
+                provider_name="openai_compatible",
+                api_key=settings.tts_api_key,
+                base_url=settings.tts_base_url,
+                model=settings.tts_model,
+                voice=settings.tts_voice,
+                response_format=settings.tts_response_format,
+                timeout_seconds=settings.tts_timeout_seconds,
+            )
+        )
+
+
+def _stepfun_base_url(base_url: str) -> str:
+    normalized = (base_url or "https://api.stepfun.ai/v1").strip().rstrip("/")
+    if normalized.endswith("/audio/speech") or normalized.endswith("/v1"):
+        return normalized
+    return f"{normalized}/v1"
+
+
+class StepFunTTSClient(AudioSpeechTTSClient):
+    def __init__(self, settings: Settings):
+        super().__init__(
+            AudioSpeechProviderConfig(
+                provider_name="stepfun",
+                api_key=settings.stepfun_api_key or settings.tts_api_key,
+                base_url=_stepfun_base_url(settings.stepfun_base_url),
+                model=settings.stepfun_tts_model or settings.tts_model or "step-tts-2",
+                voice=settings.stepfun_tts_voice or settings.tts_voice or "cixingnansheng",
+                response_format=settings.tts_response_format,
+                timeout_seconds=settings.tts_timeout_seconds,
+            )
+        )
+
+
 def get_tts_client(settings: Settings | None = None) -> TTSClient:
     current_settings = settings or get_settings()
     provider = current_settings.tts_provider.strip().lower()
     if provider in {"openai", "openai_compatible"}:
         return OpenAICompatibleTTSClient(current_settings)
+    if provider == "stepfun":
+        return StepFunTTSClient(current_settings)
     raise HTTPException(status_code=503, detail="TTS_PROVIDER 未启用")
 
 

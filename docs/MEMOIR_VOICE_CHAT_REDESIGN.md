@@ -258,11 +258,11 @@ assistant message
  -> 小程序下载并播放
 ```
 
-后端新增 OpenAI-compatible TTS provider 抽象，环境变量为 `TTS_PROVIDER`、`TTS_API_KEY`、`TTS_BASE_URL`、`TTS_MODEL`、`TTS_VOICE`、`TTS_RESPONSE_FORMAT`。默认 `TTS_PROVIDER=disabled`，没有配置时小程序仍显示 AI 文字追问，不阻塞 ASR 和 LLM。
+后端新增 TTS provider 抽象，环境变量为 `TTS_PROVIDER`、`TTS_API_KEY`、`TTS_BASE_URL`、`TTS_MODEL`、`TTS_VOICE`、`TTS_RESPONSE_FORMAT`。默认 `TTS_PROVIDER=disabled`，没有配置时小程序仍显示 AI 文字追问，不阻塞 ASR 和 LLM。当前支持 `openai_compatible` 和 `stepfun`；`TTS_PROVIDER=stepfun` 时优先读取 `STEPFUN_API_KEY`、`STEPFUN_BASE_URL`、`STEPFUN_TTS_MODEL`、`STEPFUN_TTS_VOICE`，默认走阶跃 `/v1/audio/speech` 非流式短句合成。
 
 小程序语音聊天页在 AI 追问生成后会请求 TTS，自动播放；用户开始说话、跳过追问、结束页面时会取消未完成合成或停止播放，避免旧追问音频和新回答冲突。
 
-后续真正的 Streaming TTS 仍要把 provider 音频流直接接到播放队列，当前第一版是“短句生成后播放”的生产形状。
+后续真正的 Streaming TTS 仍要把 provider WebSocket/SSE 音频流直接接到播放队列，并与 LLM streaming 输出联动。当前第一版刻意保持为“短句生成后播放”：AI 追问文本较短，非流式音质和稳定性更可控，先保证 ASR、持久化、追问和播放闭环。
 
 ## 数据模型方向
 

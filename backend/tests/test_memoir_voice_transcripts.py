@@ -12,6 +12,7 @@ from app.models.memoir import (
     MemoirTranscriptVersion,
     MemoirVoiceUtterance,
 )
+from app.services.memoir.voice_transcripts import _remove_obvious_oral_fillers
 
 
 class FakeAIClient:
@@ -20,6 +21,14 @@ class FakeAIClient:
 
     async def _call_llm(self, *args, **kwargs):
         return "我小时候住在外婆家。"
+
+
+class EchoFillerAIClient:
+    provider_name = "fake-ai"
+    model_name = "fake-cleaner"
+
+    async def _call_llm(self, *args, **kwargs):
+        return "那个就是今天下雨了，那个那个那个雨下的很大。"
 
 
 async def _create_voice_transcript(client, test_db, text="嗯，我小时候就是住在外婆家。"):
@@ -180,6 +189,37 @@ async def test_mobile_memoir_ai_cleanup_creates_corrected_version(client, test_d
     assert version.created_by == "ai"
     assert version.provider == "fake-ai"
     assert version.content == "我小时候住在外婆家。"
+
+
+async def test_mobile_memoir_ai_cleanup_removes_repeated_fillers_when_model_is_too_conservative(
+    client,
+    test_db,
+    monkeypatch,
+):
+    created = await _create_voice_transcript(
+        client,
+        test_db,
+        text="那个就是今天下雨了，那个那个那个雨下的很大。",
+    )
+    monkeypatch.setattr(
+        "app.services.memoir.voice_transcripts.get_ai_service",
+        lambda model=None: EchoFillerAIClient(),
+    )
+
+    response = await client.post(
+        f"/api/mobile/memoir/voice-transcripts/{created['utterance_id']}/cleanup",
+        json={},
+    )
+
+    assert response.status_code == 200
+    item = response.json()
+    assert item["transcript_raw"] == "那个就是今天下雨了，那个那个那个雨下的很大。"
+    assert item["transcript_edited"] == "今天下雨了，雨下的很大。"
+
+
+def test_remove_obvious_oral_fillers_preserves_meaningful_deictic_phrase():
+    assert _remove_obvious_oral_fillers("那个年代生活很不一样。") == "那个年代生活很不一样。"
+    assert _remove_obvious_oral_fillers("那个那个那个雨下得很大。") == "雨下得很大。"
 
 
 async def test_mobile_memoir_voice_transcripts_are_user_scoped(anonymous_client, test_db):
