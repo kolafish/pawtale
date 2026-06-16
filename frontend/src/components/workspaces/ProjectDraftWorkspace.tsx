@@ -206,7 +206,8 @@ export function ProjectDraftWorkspace({
           setLabel={ps.setLabel}
           wordCount={ps.wordCount}
           totalWordCount={ps.totalWordCount}
-          onExport={ps.handleExportTxt}
+          exportingFormat={ps.exportingFormat}
+          onExport={ps.handleExport}
         />
       )}
     </WorkspaceShell>

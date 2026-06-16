@@ -120,10 +120,26 @@ export interface WritingSession {
   created_at: string;
 }
 
+export type ProjectExportDownloadFormat = 'txt' | 'markdown' | 'zip';
+
 export interface ProjectExportResponse {
   title: string;
   sections: { group: string; documents: { name: string; content: string; word_count: number }[] }[];
   total_words: number;
+  references?: {
+    id: string;
+    type: ReferenceType;
+    name: string;
+    content: string;
+    metadata_json: Record<string, unknown>;
+    sort_order: number;
+    updated_at?: string | null;
+  }[];
+}
+
+export interface ProjectExportDownload {
+  blob: Blob;
+  filename?: string;
 }
 
 export interface GitSyncInstallation {

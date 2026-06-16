@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ChevronRight, FileText, FolderOpen, Download, X, Github, RefreshCw, UploadCloud, Unlink } from 'lucide-react';
+import { Archive, ChevronRight, FileText, FolderOpen, Download, X, Github, RefreshCw, UploadCloud, Unlink } from 'lucide-react';
 import { projectsApi } from '../api';
-import type { GitSyncRepositoryOption, Project } from '../types';
+import type { GitSyncRepositoryOption, Project, ProjectExportDownloadFormat } from '../types';
 
 type InspectorTab = 'document' | 'project';
 
@@ -17,8 +17,20 @@ interface InspectorProps {
   setLabel: (v: string) => void;
   wordCount: number;
   totalWordCount: number;
-  onExport: () => void;
+  exportingFormat: ProjectExportDownloadFormat | null;
+  onExport: (format: ProjectExportDownloadFormat) => void;
 }
+
+const exportOptions: {
+  format: ProjectExportDownloadFormat;
+  label: string;
+  title: string;
+  icon: typeof FileText;
+}[] = [
+  { format: 'txt', label: 'TXT', title: '导出 TXT', icon: FileText },
+  { format: 'markdown', label: 'MD', title: '导出 Markdown', icon: Download },
+  { format: 'zip', label: 'ZIP', title: '导出 ZIP', icon: Archive },
+];
 
 function parseRepositoryOption(
   fullName: string,
@@ -49,6 +61,7 @@ export function Inspector({
   setLabel,
   wordCount,
   totalWordCount,
+  exportingFormat,
   onExport,
 }: InspectorProps) {
   const queryClient = useQueryClient();
@@ -283,13 +296,28 @@ export function Inspector({
                 </>
               )}
             </div>
-            <button
-              onClick={onExport}
-              className="w-full inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg border border-gray-200 hover:bg-gray-50 text-sm"
-            >
-              <Download size={14} />
-              导出 TXT
-            </button>
+            <div className="space-y-2">
+              <label className="text-xs font-medium text-gray-500 block">本地导出</label>
+              <div className="grid grid-cols-3 gap-2">
+                {exportOptions.map((option) => {
+                  const Icon = option.icon;
+                  const isExporting = exportingFormat === option.format;
+                  return (
+                    <button
+                      key={option.format}
+                      type="button"
+                      onClick={() => onExport(option.format)}
+                      disabled={exportingFormat !== null}
+                      title={option.title}
+                      className="inline-flex min-w-0 items-center justify-center gap-1.5 px-2 py-2 rounded-lg border border-gray-200 hover:bg-gray-50 text-xs disabled:opacity-60"
+                    >
+                      {isExporting ? <RefreshCw size={13} className="animate-spin" /> : <Icon size={13} />}
+                      <span>{option.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
 
             <div className="space-y-3 border-t border-gray-100 pt-4">
               <div className="flex items-center justify-between">
