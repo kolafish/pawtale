@@ -29,6 +29,14 @@
       <text class="record-count">{{item.display_char_count}} 字</text>
     </view>
 
+    <view wx:if="{{item.question_text}}" class="question-box">
+      <view class="section-head">
+        <text class="section-title">AI 引导问题</text>
+        <text class="section-count">{{item.question_audio_file_id ? "可播放" : "无语音"}}</text>
+      </view>
+      <text class="question-text">{{item.question_text}}</text>
+    </view>
+
     <view class="raw-box">
       <view class="section-head">
         <text class="section-title">ASR 原文</text>
@@ -68,7 +76,7 @@
         bindtap="playAudio"
         disabled="{{savingId || deletingId || !item.canPlayAudio}}"
       >
-        {{playingId === item.id ? "停止" : "播放"}}
+        {{playingId === item.id ? "停止" : (item.question_text ? "播放问答" : "播放")}}
       </button>
       <button
         class="ghost-button"
@@ -96,7 +104,7 @@
         bindtap="playAudio"
         disabled="{{savingId || deletingId || !item.canPlayAudio}}"
       >
-        {{playingId === item.id ? "停止" : "播放"}}
+        {{playingId === item.id ? "停止" : (item.question_text ? "播放问答" : "播放")}}
       </button>
       <button
         class="ghost-button"

@@ -225,6 +225,9 @@ class MemoirVoiceTranscriptItemResponse(BaseModel):
     audio_size_bytes: int | None = None
     audio_duration_seconds: int | None = None
     transcript_version_id: str | None = None
+    question_message_id: str | None = None
+    question_text: str = ""
+    question_audio_file_id: str | None = None
     transcript_raw: str
     transcript_edited: str
     display_text: str

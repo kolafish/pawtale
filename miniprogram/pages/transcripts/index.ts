@@ -95,7 +95,7 @@ function toViewItem(item: MemoirVoiceTranscriptItem): TranscriptItemView {
     editingText,
     editingCharCount: editingText.trim().length,
     audioText: audioText(item),
-    canPlayAudio: Boolean(item.audio_file_id),
+    canPlayAudio: Boolean(item.audio_file_id || item.question_audio_file_id),
     changed: editingText !== (item.transcript_edited || item.transcript_raw),
     isEditing: false,
   };
@@ -144,6 +144,7 @@ Page<TranscriptsData, {
   resetToRaw(event: DatasetEvent): void;
   deleteTranscript(event: DatasetEvent): Promise<void>;
   playAudio(event: DatasetEvent): Promise<void>;
+  playAudioFile(audioFileId: string, token: number): Promise<void>;
   stopPlayback(): void;
   onUnload(): void;
   openHome(): void;
@@ -310,7 +311,8 @@ Page<TranscriptsData, {
   async playAudio(event) {
     const id = event.currentTarget.dataset.id || "";
     const item = this.data.items.find((candidate) => candidate.id === id);
-    if (!item?.audio_file_id) {
+    const audioFileIds = [item?.question_audio_file_id, item?.audio_file_id].filter(Boolean) as string[];
+    if (!audioFileIds.length) {
       this.setData({ error: "这条记录没有可播放的音频" });
       return;
     }
@@ -326,34 +328,15 @@ Page<TranscriptsData, {
     const token = this.playToken;
     this.setData({ playingId: id, error: "" });
     try {
-      const tempFilePath = await downloadMemoirVoiceAudio(item.audio_file_id);
-      if (token !== this.playToken) {
-        return;
+      for (const audioFileId of audioFileIds) {
+        if (token !== this.playToken) {
+          return;
+        }
+        await this.playAudioFile(audioFileId, token);
       }
-      const audio = wx.createInnerAudioContext();
-      this.audio = audio;
-      configureAudiblePlayback(audio);
-      audio.src = tempFilePath;
-      audio.onEnded(() => {
-        if (this.audio === audio && token === this.playToken) {
-          this.audio = null;
-          this.setData({ playingId: "" });
-        }
-        audio.destroy();
-      });
-      audio.onStop(() => {
-        if (this.audio === audio && token === this.playToken) {
-          this.setData({ playingId: "" });
-        }
-      });
-      audio.onError((error) => {
-        if (this.audio === audio && token === this.playToken) {
-          this.audio = null;
-          this.setData({ playingId: "", error: error.errMsg || "音频播放失败" });
-        }
-        audio.destroy();
-      });
-      audio.play();
+      if (token === this.playToken) {
+        this.setData({ playingId: "" });
+      }
     } catch (error) {
       if (token === this.playToken) {
         this.setData({
@@ -362,6 +345,40 @@ Page<TranscriptsData, {
         });
       }
     }
+  },
+
+  async playAudioFile(audioFileId, token) {
+    const tempFilePath = await downloadMemoirVoiceAudio(audioFileId);
+    if (token !== this.playToken) {
+      return;
+    }
+    await new Promise<void>((resolve, reject) => {
+      const audio = wx.createInnerAudioContext();
+      this.audio = audio;
+      const cleanup = () => {
+        audio.destroy();
+        if (this.audio === audio) {
+          this.audio = null;
+        }
+      };
+      configureAudiblePlayback(audio);
+      audio.src = tempFilePath;
+      audio.onEnded(() => {
+        cleanup();
+        resolve();
+      });
+      audio.onStop(() => {
+        if (this.audio === audio) {
+          this.audio = null;
+        }
+        resolve();
+      });
+      audio.onError((error) => {
+        cleanup();
+        reject(new Error(error.errMsg || "音频播放失败"));
+      });
+      audio.play();
+    });
   },
 
   stopPlayback() {

@@ -41,7 +41,12 @@ class FailingAIClient:
         raise RuntimeError("provider down")
 
 
-async def _create_voice_transcript(client, test_db, text="嗯，我小时候就是住在外婆家。"):
+async def _create_voice_transcript(
+    client,
+    test_db,
+    text="嗯，我小时候就是住在外婆家。",
+    question_text: str | None = None,
+):
     user = (await client.get("/api/auth/me")).json()
     create_response = await client.post(
         "/api/mobile/memoir/voice-sessions",
@@ -56,6 +61,30 @@ async def _create_voice_transcript(client, test_db, text="嗯，我小时候就�
         duration_seconds=8,
     )
     test_db.add(audio_file)
+    question_audio_file = None
+    question_message = None
+    if question_text:
+        question_audio_file = AudioFile(
+            user_id=user["id"],
+            storage_path=f"memoir/audio/{user['id']}/question.pcm",
+            mime_type="audio/pcm",
+            size_bytes=1600,
+            duration_seconds=4,
+        )
+        test_db.add(question_audio_file)
+        await test_db.flush()
+        question_message = MemoirChatMessage(
+            project_id=session["project_id"],
+            voice_session_id=session["id"],
+            role=MemoirChatMessageRole.ASSISTANT.value,
+            content_text=question_text,
+            content_status=MemoirChatContentStatus.FINAL.value,
+            audio_file_id=question_audio_file.id,
+            turn_index=0,
+            guidance_intent="opening",
+            metadata_json={"source": "test.question"},
+        )
+        test_db.add(question_message)
     version = MemoirTranscriptVersion(
         voice_session_id=session["id"],
         version_type=MemoirTranscriptVersionType.ASR_RAW.value,
@@ -73,7 +102,7 @@ async def _create_voice_transcript(client, test_db, text="嗯，我小时候就�
         content_status=MemoirChatContentStatus.FINAL.value,
         audio_file_id=audio_file.id,
         transcript_version_id=version.id,
-        turn_index=1,
+        turn_index=1 if question_message else 0,
         metadata_json={"source": "test"},
     )
     test_db.add(message)
@@ -97,11 +126,13 @@ async def _create_voice_transcript(client, test_db, text="嗯，我小时候就�
         "utterance_id": utterance.id,
         "message_id": message.id,
         "audio_file_id": audio_file.id,
+        "question_message_id": question_message.id if question_message else None,
+        "question_audio_file_id": question_audio_file.id if question_audio_file else None,
     }
 
 
 async def test_mobile_memoir_lists_saved_voice_transcripts(client, test_db):
-    created = await _create_voice_transcript(client, test_db)
+    created = await _create_voice_transcript(client, test_db, question_text="你小时候住在哪里？")
 
     response = await client.get("/api/mobile/memoir/voice-transcripts")
 
@@ -114,6 +145,9 @@ async def test_mobile_memoir_lists_saved_voice_transcripts(client, test_db):
     assert item["voice_session_id"] == created["session"]["id"]
     assert item["chat_message_id"] == created["message_id"]
     assert item["audio_file_id"] == created["audio_file_id"]
+    assert item["question_message_id"] == created["question_message_id"]
+    assert item["question_text"] == "你小时候住在哪里？"
+    assert item["question_audio_file_id"] == created["question_audio_file_id"]
     assert item["audio_mime_type"] == "audio/pcm"
     assert item["audio_size_bytes"] == 3200
     assert item["audio_duration_seconds"] == 8
