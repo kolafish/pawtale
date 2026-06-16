@@ -18,12 +18,12 @@
     </block>
   </view>
 
-  <view wx:if="{{assistantPromptText || followUpLoading || followUpError}}" class="assistant-panel {{followUpError ? 'error-state' : ''}}">
+  <view wx:if="{{assistantPromptText || followUpLoading || followUpError || canRequestFollowUp}}" class="assistant-panel {{followUpError ? 'error-state' : ''}}">
     <view class="assistant-head">
       <text class="assistant-label">AI 追问</text>
-      <text class="assistant-state">{{followUpLoading ? "思考中" : (followUpError ? "追问失败" : "等待回答")}}</text>
+      <text class="assistant-state">{{followUpLoading ? "思考中" : (followUpError ? "追问失败" : (assistantPromptText ? "等待回答" : "可生成"))}}</text>
     </view>
-    <text class="assistant-text">{{followUpLoading ? "正在根据刚才的内容生成下一句追问" : (followUpError || assistantPromptText)}}</text>
+    <text class="assistant-text">{{followUpLoading ? "正在根据刚才的内容生成下一句追问" : (followUpError || assistantPromptText || "可以让 AI 根据刚才的内容继续追问。")}}</text>
     <view class="assistant-actions">
       <button
         class="assistant-button"
@@ -31,7 +31,14 @@
         disabled="{{followUpLoading}}"
         bindtap="regenerateFollowUp"
       >
-        {{followUpError ? "重试追问" : "换个追问"}}
+        {{followUpError ? "重试追问" : (assistantPromptText ? "换个追问" : "生成追问")}}
+      </button>
+      <button
+        wx:if="{{assistantPromptText && !followUpLoading && !followUpError}}"
+        class="assistant-button ghost"
+        bindtap="skipFollowUp"
+      >
+        跳过
       </button>
     </view>
   </view>
