@@ -59,6 +59,55 @@ export interface MemoirVoiceSessionDetail {
   utterances: MemoirVoiceUtterance[];
 }
 
+export interface MemoirVoiceSessionSummary {
+  id: string;
+  project_id: string;
+  status: MemoirVoiceSessionStatus;
+  guidance_mode: MemoirGuidanceMode;
+  current_guidance_module?: string | null;
+  started_at?: string | null;
+  stopped_at?: string | null;
+  created_at: string;
+  updated_at: string;
+  user_message_count: number;
+  assistant_message_count: number;
+  utterance_count: number;
+  total_user_char_count: number;
+  total_audio_seconds: number;
+  last_message_text: string;
+  last_message_role?: MemoirChatMessageRole | null;
+  last_message_at?: string | null;
+}
+
+export interface MemoirVoiceSessionListResponse {
+  items: MemoirVoiceSessionSummary[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface MemoirVoiceModuleProgress {
+  module: string;
+  session_count: number;
+  utterance_count: number;
+  user_char_count: number;
+}
+
+export interface MemoirVoiceProgressResponse {
+  project_id?: string | null;
+  session_count: number;
+  active_session_count: number;
+  stopped_session_count: number;
+  failed_session_count: number;
+  utterance_count: number;
+  user_message_count: number;
+  assistant_message_count: number;
+  total_user_char_count: number;
+  total_audio_seconds: number;
+  last_session_at?: string | null;
+  modules: MemoirVoiceModuleProgress[];
+}
+
 export interface MemoirVoiceSessionCreate {
   memoir_session_id?: string;
   guidance_mode: MemoirGuidanceMode;

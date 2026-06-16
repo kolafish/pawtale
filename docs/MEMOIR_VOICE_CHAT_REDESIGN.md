@@ -4,6 +4,16 @@
 
 这是回忆录小程序的新主线文档。此前的固定问题、整段录音上传、离线转写、整理稿确认路线只作为 legacy 参考，不再作为下一阶段产品目标。
 
+当前实现已经从 Streaming ASR MVP 进入语音聊天第一版闭环：
+
+- 小程序已通过 `voice-start` / `voice-chat` 进入 voice session，实时发送 PCM 帧并显示 ASR partial/final。
+- `asr.final` 已落 `memoir_chat_messages`、`memoir_voice_utterances`、`memoir_transcript_versions` 和原始音频 `audio_files`。
+- 强引导模式已接入 LLM 动态追问，assistant message 会落库并显示在语音聊天页。
+- PR2 交互细节已补齐：支持开场追问、手动生成追问、重试/换个追问、跳过当前追问、用户开始新回答时清掉旧追问活跃态、结束后跳转转写记录。
+- AI 追问已接入 assistant-message 驱动的 TTS 音频生成和播放；第一版是短句音频快速生成后播放，接口按后续 streaming TTS 形态保留 provider 抽象。
+- 小程序已接入客户端轻量 VAD：基于 PCM 能量显示音量条、计算连续静音，并可自动收尾当前句。
+- 已有转写校正页和访谈进度页，可查看会话、模块覆盖、语音段、AI 追问数，并从记录继续访谈。
+
 新的产品目标是：
 
 ```text
@@ -53,6 +63,8 @@ miniprogram/pages/home/                       # 新版语音入口
 miniprogram/pages/projects/                   # 回忆录项目创建、切换、重命名
 miniprogram/pages/voice-start/                # 强/弱引导选择
 miniprogram/pages/voice-chat/                 # 新版老人端实时语音聊天
+miniprogram/pages/transcripts/                # 语音与转写校正
+miniprogram/pages/voice-progress/             # 访谈记录和进度
 miniprogram/services/request.ts               # ECS HTTP + cookie session
 miniprogram/services/auth.ts                  # wx.login、backend cookie session、账号凭据设置
 miniprogram/services/memoir-voice-api.ts      # voice session API
@@ -60,8 +72,11 @@ miniprogram/services/memoir-streaming-asr.ts  # 录音帧、WebSocket、partial/
 miniprogram/domain/voice-chat.ts              # 新版聊天消息和实时事件类型
 
 backend/app/routers/memoir/voice.py           # 本地/服务端 voice session API
-backend/app/services/memoir/voice_gateway.py  # 对接实时 ASR/TTS provider
-backend/app/services/memoir/chat_orchestrator.py
+backend/app/services/memoir/voice_gateway.py  # WebSocket voice gateway + Streaming ASR
+backend/app/services/memoir/voice_sessions.py # voice session detail/list/progress
+backend/app/services/memoir/voice_followups.py # LLM dynamic follow-up
+backend/app/services/memoir/voice_tts.py      # assistant message TTS
+backend/app/services/memoir/voice_transcripts.py # 转写校正和 AI 忠实清理
 ```
 
 Git 上建议用以下边界区分：
@@ -69,6 +84,7 @@ Git 上建议用以下边界区分：
 - `bd3599ad3dddf382b242c47071c856d382543cac`：legacy 固定问题链路的可追溯基线。
 - `codex/voice-chat-redesign`：新版语音聊天主线分支。
 - 第一批 PR 已完成 Streaming ASR、voice session 数据和小程序新入口。
+- 第二批 PR 已完成 LLM 动态追问、小程序追问交互、assistant TTS 播放、客户端自动收尾和进度页。
 - 小程序 legacy 固定问答页面、旧非实时录音上传代码和微信云函数链路已清理。
 - 登录链路已迁移为统一 Pawtale 账号：已有 Web 用户用邮箱密码登录小程序，新用户用微信登录后设置 Web 端邮箱密码。
 
@@ -173,11 +189,18 @@ Provider API key 不进入小程序。小程序只连接 Pawtale 自己的 voice
 
 ### VAD
 
-第一版不强依赖复杂 VAD，可以先采用按钮控制开始/停止。实时转写链路稳定后再补：
+当前第一版采用客户端轻量 VAD，不引入服务端断句模型：
 
-- 客户端轻量 VAD：基于音量或能量判断 UI 状态。
-- 服务端 VAD：决定 utterance 边界、打断 AI 播放、提交 LLM。
+- 小程序在 `RecorderManager.onFrameRecorded` 中按 16-bit PCM 计算 RMS 能量。
+- 页面显示音量条和连续静音时长。
+- 默认开启自动收尾：录音超过最小时长后，连续静音超过阈值会自动停止当前句并发送 `audio.end`。
+- 用户可在页面关闭自动收尾，继续使用手动开始/结束。
+
+这不是上线态完整 VAD。后续仍需要评估：
+
+- 服务端 VAD：用于更稳定的 utterance 边界、插话打断和异常恢复。
 - Provider VAD：如果实时语音服务提供 server VAD，可以优先复用。
+- 方言、远场、背景噪声下的阈值评测和动态阈值。
 
 ### Streaming ASR
 
@@ -226,15 +249,20 @@ safety_flags
 
 ### Streaming TTS
 
-当前旧版 TTS 是完整生成音频后播放，后续需要改成：
+当前已实现 assistant message 驱动的第一版 TTS：
 
 ```text
-assistant message text stream
- -> TTS audio stream
- -> 小程序边接收边播放
+assistant message
+ -> backend TTS provider
+ -> audio_files
+ -> 小程序下载并播放
 ```
 
-如果小程序端流式播放复杂，第一版可以先用“快速生成短句音频后播放”，但接口和数据模型按 assistant message 设计，不再按固定 `question/draft/output` source 设计。
+后端新增 OpenAI-compatible TTS provider 抽象，环境变量为 `TTS_PROVIDER`、`TTS_API_KEY`、`TTS_BASE_URL`、`TTS_MODEL`、`TTS_VOICE`、`TTS_RESPONSE_FORMAT`。默认 `TTS_PROVIDER=disabled`，没有配置时小程序仍显示 AI 文字追问，不阻塞 ASR 和 LLM。
+
+小程序语音聊天页在 AI 追问生成后会请求 TTS，自动播放；用户开始说话、跳过追问、结束页面时会取消未完成合成或停止播放，避免旧追问音频和新回答冲突。
+
+后续真正的 Streaming TTS 仍要把 provider 音频流直接接到播放队列，当前第一版是“短句生成后播放”的生产形状。
 
 ## 数据模型方向
 
@@ -357,21 +385,16 @@ session.start
 audio.frame
 audio.end
 session.stop
-tts.cancel
 
 server -> client
 session.ready
 asr.partial
 asr.final
-assistant.delta
-assistant.final
-tts.audio
-tts.done
 session.error
 session.closed
 ```
 
-PR3 已实现的最小子集：
+当前 WebSocket 已实现的 ASR 子集：
 
 ```text
 client -> server
@@ -389,7 +412,13 @@ asr.final          # { "text": "...", "message_id": "...", "utterance_id": "..."
 session.error
 ```
 
-LLM 和 TTS 相关事件仍是后续阶段目标，PR3 不生成 `assistant.*` 或 `tts.*`。
+LLM 和 TTS 当前不走 WebSocket 事件：
+
+- LLM 追问通过 `POST /api/mobile/memoir/voice-sessions/{voice_session_id}/follow-up` 生成 assistant message。
+- TTS 通过 `POST /api/mobile/memoir/voice-sessions/{voice_session_id}/messages/{message_id}/tts` 生成并关联 `audio_file_id`。
+- 音频播放通过 `GET /api/mobile/memoir/audio-files/{audio_file_id}/playback` 下载。
+
+后续如果要真正做低延迟 Streaming TTS，可以在现有 message/audio 数据模型不变的前提下扩展 `assistant.*` 和 `tts.*` WebSocket 事件。
 
 `session.start` 必须包含引导模式，后端据此选择 prompt policy：
 
@@ -500,15 +529,27 @@ PR5 后第一版已经具备的闭环：
 - 当前 utterance 的 PCM 音频帧会保存为 `AudioFile`，并通过 `audio_file_id` 关联到 message / utterance。
 - `voice-chat` 会优先恢复本地 voice session 快照，再异步读取后端详情，避免返回页面后丢失已固化文字。
 
-PR5 后仍未完成、不能按上线态理解的缺口：
+Streaming ASR PR5 后当时仍未完成、不能按上线态理解的缺口：
 
 - 小程序已经统一为 backend cookie 身份；仍需要在微信公众平台配置正式 request/socket 合法域名。
 - 微信登录后端 API 已完成；ECS `/opt/pawtale/backend/.env` 仍需要配置真实 `WECHAT_MINIPROGRAM_SECRET` 后，真机微信登录才能通过 code2session。
 - 原始音频按 final utterance 粗粒度保存，尚未做更精确的 VAD 时间切片和断线续传。
 - voice session 快照只保证已固化 transcript 的页面回放，不等同于断线续传；录音帧上传中的状态仍不可恢复。
-- LLM dynamic follow-up、Streaming TTS、插话打断和 AI 回复落库尚未接入。
-- 转写校正页、进度页、成稿编辑页还未迁移到新版 voice session 数据。
+- 低延迟 Streaming TTS、用户插话打断和断线续传尚未接入；LLM follow-up、AI 回复落库和短句 TTS 播放已在第二批完成第一版。
+- 转写校正页和进度页已有第一版；成稿编辑页、结构化记忆页和证据链浏览仍未迁移到新版 voice session 数据。
 - 还没有方言/噪声评测集、provider fallback、限流和成本监控。
+
+### 当前第二批 PR 状态
+
+在 Streaming ASR 第一版闭环之后，第二批按长期迭代方向继续补齐语音聊天能力：
+
+1. AI 追问后端和小程序基础接入：已完成。`asr.final` 后可调用 LLM 生成 assistant message，并在语音聊天页展示 AI 追问。
+2. PR2 交互细节：已完成。页面支持开场追问、手动生成追问、重试追问、换个追问、跳过追问；用户开始新回答时旧追问不再保持活跃；结束访谈后可直接进入转写记录页。
+3. Assistant TTS：已完成第一版。assistant message 可生成音频并关联 `audio_file_id`，小程序自动播放并支持重播；没有配置 TTS provider 时降级为文字追问。
+4. 客户端轻量 VAD / 自动收尾：已完成第一版。小程序显示音量条、连续静音状态，并可自动结束当前句；用户可以关闭自动收尾。
+5. 访谈记录与进度页：已完成第一版。后端提供 voice session list/progress API，小程序可查看会话、模块覆盖、语音段、AI 追问和字数，并能从记录继续访谈。
+
+第二批完成后仍不是最终上线态。后续重点是 memory extraction、结构化证据链、章节/片段产出编辑、断线恢复、provider fallback、质量评测和成本监控。
 
 ### Phase 1: Streaming ASR MVP
 
@@ -533,32 +574,35 @@ PR5 后仍未完成、不能按上线态理解的缺口：
 
 ### Phase 2: Guidance Modes and LLM Dynamic Follow-up
 
-目标：final transcript 后按强/弱引导策略生成下一句 AI 追问。
+目标：final transcript 后按强/弱引导策略生成下一句 AI 追问。第一版已完成。
 
-- 新增 `chat_orchestrator`。
-- 增加两套 system prompt policy：自由叙述陪伴、模块化强引导采访。
-- 引入 recent messages 和 memory context。
+- 已新增 `voice_followups.py`，按 `free_narration` / `guided_interview` 生成追问。
+- 已支持 recent messages，上下文来自当前 voice session 的 chat messages。
 - 强引导先支持人、事、地点、时间段、主题五类模块。
-- assistant message 落库。
-- 前端显示 AI 气泡。
+- assistant message 已落库，并在前端显示 AI 追问。
+- PR2 交互细节已补齐：开场追问、生成/重试/换一个、跳过、结束后查看转写记录。
+
+下一步需要把 confirmed memories、open questions、coverage state 纳入 prompt context。
 
 ### Phase 3: Streaming TTS
 
-目标：AI 回复可边生成边播放。
+目标：AI 回复可边生成边播放。第一版已完成“短句生成后播放”的生产形状，尚未做到真正流式音频播放。
 
-- assistant message 驱动 TTS。
-- 小程序支持播放队列和打断。
-- 用户插话时暂停或取消 TTS。
+- assistant message 驱动 TTS 已完成。
+- 小程序支持自动播放、重播、生成失败降级文字。
+- 用户开始说话、跳过追问、退出页面时会取消未完成合成或停止播放。
+
+下一步是接入真实 streaming TTS provider，把 provider 音频流接到播放队列，并补齐插话打断。
 
 ### Phase 4: Editing, Progress and Memory-first Integration
 
 目标：语音聊天结果沉淀为回忆录资产，并提供可校正、可查看进度的页面。
 
-- 从 chat messages 提取 person/event/place/theme。
-- evidence 指向 transcript version 和 audio span。
-- 生成 session summary、open questions、story fragments。
-- 新增转写校正页，支持回听原始语音并保存校正文。
-- 新增进度页，展示人物、事件、地点、时间段、主题覆盖度。
+- 转写校正页已完成第一版，支持回听原始语音、编辑 ASR 转写、AI 忠实清理口语稿。
+- 进度页已完成第一版，展示会话、模块覆盖、语音段、AI 追问、字数，并支持继续访谈。
+- 从 chat messages 提取 person/event/place/theme 仍未完成。
+- evidence 指向 transcript version 和 audio span 的结构化浏览仍未完成。
+- session summary、open questions、story fragments 和成稿编辑仍未完成。
 
 ### Phase 5: Legacy Cleanup
 

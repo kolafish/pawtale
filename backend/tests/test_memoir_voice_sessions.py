@@ -1,7 +1,7 @@
 from sqlalchemy import select
 
 from app.domain.memoir.types import MemoirChatContentStatus, MemoirChatMessageRole
-from app.models.memoir import MemoirChatMessage, MemoirVoiceSession
+from app.models.memoir import MemoirChatMessage, MemoirVoiceSession, MemoirVoiceUtterance
 from app.services.memoir import voice_sessions as memoir_voice_sessions
 from app.services.memoir.voice_tts import TTSResult
 
@@ -233,6 +233,80 @@ async def test_mobile_memoir_voice_follow_up_starts_guided_session_without_user_
     assert data["message"]["metadata_json"]["has_user_message"] is False
     assert "人物" in fake_ai.calls[0]["user_prompt"]
     assert "暂无对话" in fake_ai.calls[0]["user_prompt"]
+
+
+async def test_mobile_memoir_voice_session_list_and_progress(client, test_db):
+    guided_response = await client.post(
+        "/api/mobile/memoir/voice-sessions",
+        json={"guidance_mode": "guided_interview", "current_guidance_module": "person"},
+    )
+    free_response = await client.post(
+        "/api/mobile/memoir/voice-sessions",
+        json={"guidance_mode": "free_narration"},
+    )
+    guided_session = guided_response.json()["session"]
+    free_session = free_response.json()["session"]
+    user_message = MemoirChatMessage(
+        project_id=guided_session["project_id"],
+        voice_session_id=guided_session["id"],
+        role=MemoirChatMessageRole.USER.value,
+        content_text="我小时候住在外婆家。",
+        content_status=MemoirChatContentStatus.FINAL.value,
+        turn_index=0,
+        metadata_json={"source": "test"},
+    )
+    assistant_message = MemoirChatMessage(
+        project_id=guided_session["project_id"],
+        voice_session_id=guided_session["id"],
+        role=MemoirChatMessageRole.ASSISTANT.value,
+        content_text="那时候你最记得谁？",
+        content_status=MemoirChatContentStatus.FINAL.value,
+        turn_index=1,
+        metadata_json={"source": "test"},
+    )
+    test_db.add_all([user_message, assistant_message])
+    await test_db.flush()
+    utterance = MemoirVoiceUtterance(
+        voice_session_id=guided_session["id"],
+        chat_message_id=user_message.id,
+        transcript_raw=user_message.content_text,
+        transcript_edited="",
+        start_ms=0,
+        end_ms=2500,
+        provider="test",
+        provider_payload_json={},
+    )
+    test_db.add(utterance)
+    await test_db.commit()
+
+    list_response = await client.get("/api/mobile/memoir/voice-sessions")
+
+    assert list_response.status_code == 200
+    list_data = list_response.json()
+    assert list_data["total"] == 2
+    guided_item = next(item for item in list_data["items"] if item["id"] == guided_session["id"])
+    assert guided_item["guidance_mode"] == "guided_interview"
+    assert guided_item["current_guidance_module"] == "person"
+    assert guided_item["user_message_count"] == 1
+    assert guided_item["assistant_message_count"] == 1
+    assert guided_item["utterance_count"] == 1
+    assert guided_item["total_user_char_count"] == len("我小时候住在外婆家。")
+    assert guided_item["total_audio_seconds"] == 2
+    assert guided_item["last_message_text"] == "那时候你最记得谁？"
+    assert guided_item["last_message_role"] == "assistant"
+
+    progress_response = await client.get("/api/mobile/memoir/voice-progress")
+
+    assert progress_response.status_code == 200
+    progress = progress_response.json()
+    assert progress["session_count"] == 2
+    assert progress["active_session_count"] == 2
+    assert progress["utterance_count"] == 1
+    assert progress["user_message_count"] == 1
+    assert progress["assistant_message_count"] == 1
+    assert progress["total_user_char_count"] == len("我小时候住在外婆家。")
+    assert {item["module"] for item in progress["modules"]} == {"person", "free_narration"}
+    assert free_session["id"]
 
 
 async def test_mobile_memoir_assistant_tts_generates_audio_for_follow_up_message(

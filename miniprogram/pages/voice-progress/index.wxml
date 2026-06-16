@@ -1,0 +1,80 @@
+<view class="progress-page">
+  <view class="top-row">
+    <view>
+      <text class="page-title">访谈进度</text>
+      <text class="page-subtitle">按语音会话沉淀素材和追问线索</text>
+    </view>
+    <button class="refresh-button" loading="{{loading}}" disabled="{{loading}}" bindtap="loadProgress">刷新</button>
+  </view>
+
+  <view wx:if="{{error}}" class="error">{{error}}</view>
+
+  <view class="summary-grid">
+    <view class="summary-item">
+      <text class="summary-value">{{progress.session_count || 0}}</text>
+      <text class="summary-label">访谈</text>
+    </view>
+    <view class="summary-item">
+      <text class="summary-value">{{progress.utterance_count || 0}}</text>
+      <text class="summary-label">语音段</text>
+    </view>
+    <view class="summary-item">
+      <text class="summary-value">{{progress.total_user_char_count || 0}}</text>
+      <text class="summary-label">字</text>
+    </view>
+    <view class="summary-item">
+      <text class="summary-value">{{progress.assistant_message_count || 0}}</text>
+      <text class="summary-label">AI 追问</text>
+    </view>
+  </view>
+
+  <view class="action-row">
+    <button class="primary-button" bindtap="startNewSession">新访谈</button>
+    <button class="secondary-button" bindtap="openTranscripts">校正文稿</button>
+  </view>
+
+  <view class="section">
+    <view class="section-header">
+      <text>模块覆盖</text>
+      <text class="section-meta">{{modules.length}} 类</text>
+    </view>
+    <view wx:if="{{!modules.length}}" class="empty-state">还没有形成模块覆盖数据。</view>
+    <view wx:for="{{modules}}" wx:key="module" class="module-row">
+      <view>
+        <text class="module-title">{{item.label}}</text>
+        <text class="module-meta">{{item.session_count}} 次访谈 · {{item.utterance_count}} 段 · {{item.user_char_count}} 字</text>
+      </view>
+    </view>
+  </view>
+
+  <view class="section">
+    <view class="section-header">
+      <text>最近访谈</text>
+      <text class="section-meta">{{sessions.length}} / {{progress.session_count || 0}}</text>
+    </view>
+    <view wx:if="{{!sessions.length}}" class="empty-state">还没有语音访谈记录。</view>
+    <view wx:for="{{sessions}}" wx:key="id" class="session-card">
+      <view class="session-head">
+        <view>
+          <text class="session-title">{{item.modeText}} · {{item.moduleText}}</text>
+          <text class="session-meta">{{item.updatedText}} · {{item.statusText}}</text>
+        </view>
+        <button
+          class="continue-button"
+          data-id="{{item.id}}"
+          disabled="{{!item.canContinue}}"
+          bindtap="continueSession"
+        >
+          继续
+        </button>
+      </view>
+      <view class="session-stats">
+        <text>{{item.utterance_count}} 段</text>
+        <text>{{item.total_user_char_count}} 字</text>
+        <text>{{item.assistant_message_count}} 追问</text>
+        <text>{{item.durationText}}</text>
+      </view>
+      <text wx:if="{{item.last_message_text}}" class="last-message">{{item.last_message_text}}</text>
+    </view>
+  </view>
+</view>

@@ -36,6 +36,15 @@
     <text class="chevron">›</text>
   </view>
 
+  <view class="project-card" bindtap="openVoiceProgress" hover-class="tap-hover">
+    <view>
+      <text class="card-label">访谈进度</text>
+      <text class="card-title">会话、模块和追问概览</text>
+      <text class="card-meta">继续访谈，查看已聊过的人、事、地点和主题</text>
+    </view>
+    <text class="chevron">›</text>
+  </view>
+
   <view class="mode-strip">
     <view class="mode-item">
       <text class="mode-title">自由讲述</text>

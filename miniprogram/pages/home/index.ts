@@ -20,6 +20,7 @@ Page<HomeData, {
   loadHome(): Promise<void>;
   startVoiceChat(): void;
   openTranscripts(): void;
+  openVoiceProgress(): void;
   openProjects(): void;
   logout(): Promise<void>;
 }>({
@@ -68,6 +69,10 @@ Page<HomeData, {
 
   openTranscripts() {
     wx.navigateTo({ url: "/pages/transcripts/index" });
+  },
+
+  openVoiceProgress() {
+    wx.navigateTo({ url: "/pages/voice-progress/index" });
   },
 
   openProjects() {

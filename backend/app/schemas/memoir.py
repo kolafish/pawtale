@@ -153,6 +153,55 @@ class MemoirVoiceSessionDetailResponse(BaseModel):
     utterances: list[MemoirVoiceUtteranceResponse] = Field(default_factory=list)
 
 
+class MemoirVoiceSessionSummaryResponse(BaseModel):
+    id: str
+    project_id: str
+    status: MemoirVoiceSessionStatus
+    guidance_mode: MemoirGuidanceMode
+    current_guidance_module: str | None = None
+    started_at: datetime | None = None
+    stopped_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+    user_message_count: int
+    assistant_message_count: int
+    utterance_count: int
+    total_user_char_count: int
+    total_audio_seconds: int
+    last_message_text: str
+    last_message_role: MemoirChatMessageRole | None = None
+    last_message_at: datetime | None = None
+
+
+class MemoirVoiceSessionListResponse(BaseModel):
+    items: list[MemoirVoiceSessionSummaryResponse] = Field(default_factory=list)
+    total: int
+    limit: int
+    offset: int
+
+
+class MemoirVoiceModuleProgressResponse(BaseModel):
+    module: str
+    session_count: int
+    utterance_count: int
+    user_char_count: int
+
+
+class MemoirVoiceProgressResponse(BaseModel):
+    project_id: str | None = None
+    session_count: int
+    active_session_count: int
+    stopped_session_count: int
+    failed_session_count: int
+    utterance_count: int
+    user_message_count: int
+    assistant_message_count: int
+    total_user_char_count: int
+    total_audio_seconds: int
+    last_session_at: datetime | None = None
+    modules: list[MemoirVoiceModuleProgressResponse] = Field(default_factory=list)
+
+
 class MemoirVoiceFollowUpResponse(BaseModel):
     message: MemoirChatMessageResponse
     follow_up_text: str
