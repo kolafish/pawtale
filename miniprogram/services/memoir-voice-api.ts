@@ -171,6 +171,18 @@ export async function cleanupMemoirVoiceTranscript(
   );
 }
 
+export async function deleteMemoirVoiceTranscript(
+  utteranceId: string,
+): Promise<void> {
+  await ensureBackendSession();
+  await request<unknown>(
+    `/api/mobile/memoir/voice-transcripts/${encodeURIComponent(utteranceId)}`,
+    {
+      method: "DELETE",
+    },
+  );
+}
+
 export function memoirAudioPlaybackUrl(audioFileId: string): string {
   const config = readBackendConfig();
   if (!config.httpBaseUrl) {

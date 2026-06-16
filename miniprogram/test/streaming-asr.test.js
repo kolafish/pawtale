@@ -333,6 +333,76 @@ test("fetches voice session list and progress through backend API", async () => 
   delete global.wx;
 });
 
+test("updates and deletes voice transcripts through backend API", async () => {
+  const requests = [];
+  const updated = {
+    id: "utterance/1",
+    voice_session_id: "voice-1",
+    project_id: "project-1",
+    transcript_raw: "原文",
+    transcript_edited: "校正文",
+    display_text: "校正文",
+    raw_char_count: 2,
+    edited_char_count: 3,
+    display_char_count: 3,
+    session_status: "stopped",
+    guidance_mode: "free_narration",
+    created_at: "2026-06-08T00:00:00.000Z",
+    session_created_at: "2026-06-08T00:00:00.000Z",
+  };
+  global.wx = {
+    getStorageSync(key) {
+      if (key === "pawtale_backend_config") {
+        return {
+          httpBaseUrl: "http://backend.local:8000/",
+          devEmail: "local@example.com",
+          devPassword: "secret",
+        };
+      }
+      if (key === "pawtale_backend_cookie") {
+        return "pawtale_session=abc";
+      }
+      return "";
+    },
+    getExtConfigSync() {
+      return {};
+    },
+    setStorageSync() {},
+    removeStorageSync() {},
+    request(options) {
+      requests.push(options);
+      if (options.url.endsWith("/api/auth/me")) {
+        options.success({ statusCode: 200, data: { id: "user-1" }, cookies: [], header: {} });
+        return;
+      }
+      if (options.method === "DELETE") {
+        options.success({ statusCode: 204, data: "", cookies: [], header: {} });
+        return;
+      }
+      options.success({ statusCode: 200, data: updated, cookies: [], header: {} });
+    },
+  };
+  delete require.cache[require.resolve("../services/request.ts")];
+  delete require.cache[require.resolve("../services/memoir-voice-api.ts")];
+  const {
+    deleteMemoirVoiceTranscript,
+    updateMemoirVoiceTranscript,
+  } = require("../services/memoir-voice-api.ts");
+
+  const result = await updateMemoirVoiceTranscript("utterance/1", "校正文");
+  await deleteMemoirVoiceTranscript("utterance/1");
+
+  const apiRequests = requests.filter((request) => request.url.includes("/api/mobile/memoir/voice-transcripts"));
+  assert.deepEqual(result, updated);
+  assert.equal(apiRequests[0].url, "http://backend.local:8000/api/mobile/memoir/voice-transcripts/utterance%2F1");
+  assert.equal(apiRequests[0].method, "PATCH");
+  assert.deepEqual(apiRequests[0].data, { transcript_edited: "校正文" });
+  assert.equal(apiRequests[1].url, "http://backend.local:8000/api/mobile/memoir/voice-transcripts/utterance%2F1");
+  assert.equal(apiRequests[1].method, "DELETE");
+  assert.equal(apiRequests[1].header.Cookie, "pawtale_session=abc");
+  delete global.wx;
+});
+
 test("streaming ASR connect rejects on socket error before open", async () => {
   let onError;
   global.wx = {

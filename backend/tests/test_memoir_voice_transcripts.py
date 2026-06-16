@@ -14,6 +14,8 @@ from app.models.memoir import (
 )
 from app.services.memoir.voice_transcripts import _remove_obvious_oral_fillers
 
+UTC_SUFFIXES = ("Z", "+00:00")
+
 
 class FakeAIClient:
     provider_name = "fake-ai"
@@ -109,6 +111,8 @@ async def test_mobile_memoir_lists_saved_voice_transcripts(client, test_db):
     assert item["audio_duration_seconds"] == 8
     assert item["display_text"] == "嗯，我小时候就是住在外婆家。"
     assert item["display_char_count"] == len("嗯，我小时候就是住在外婆家。")
+    assert item["created_at"].endswith(UTC_SUFFIXES)
+    assert item["session_created_at"].endswith(UTC_SUFFIXES)
 
 
 async def test_mobile_memoir_audio_playback_wraps_pcm_as_wav(client, test_db, tmp_path, monkeypatch):
@@ -162,6 +166,37 @@ async def test_mobile_memoir_updates_voice_transcript_without_overwriting_raw(cl
     assert versions[-1].version_type == "user_edited"
     assert versions[-1].created_by == "user"
     assert message.transcript_version_id == versions[-1].id
+
+
+async def test_mobile_memoir_deletes_voice_transcript_and_user_message(client, test_db):
+    created = await _create_voice_transcript(client, test_db)
+
+    response = await client.delete(f"/api/mobile/memoir/voice-transcripts/{created['utterance_id']}")
+
+    assert response.status_code == 204
+
+    list_response = await client.get("/api/mobile/memoir/voice-transcripts")
+    assert list_response.status_code == 200
+    assert list_response.json()["total"] == 0
+
+    utterance = await test_db.scalar(
+        select(MemoirVoiceUtterance).where(MemoirVoiceUtterance.id == created["utterance_id"])
+    )
+    message = await test_db.scalar(select(MemoirChatMessage).where(MemoirChatMessage.id == created["message_id"]))
+    audio_file = await test_db.scalar(select(AudioFile).where(AudioFile.id == created["audio_file_id"]))
+    versions = (
+        await test_db.execute(
+            select(MemoirTranscriptVersion).where(
+                MemoirTranscriptVersion.voice_session_id == created["session"]["id"]
+            )
+        )
+    ).scalars().all()
+
+    assert utterance is None
+    assert message is None
+    assert audio_file is not None
+    assert len(versions) == 1
+    assert versions[0].content == "嗯，我小时候就是住在外婆家。"
 
 
 async def test_mobile_memoir_ai_cleanup_creates_corrected_version(client, test_db, monkeypatch):
@@ -250,7 +285,11 @@ async def test_mobile_memoir_voice_transcripts_are_user_scoped(anonymous_client,
         f"/api/mobile/memoir/voice-transcripts/{created['utterance_id']}",
         json={"transcript_edited": "跨用户编辑"},
     )
+    delete_response = await anonymous_client.delete(
+        f"/api/mobile/memoir/voice-transcripts/{created['utterance_id']}"
+    )
 
     assert list_response.status_code == 200
     assert list_response.json()["total"] == 0
     assert update_response.status_code == 404
+    assert delete_response.status_code == 404

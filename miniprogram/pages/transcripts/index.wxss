@@ -127,6 +127,7 @@
 }
 
 .raw-box,
+.display-box,
 .edit-box {
   margin-top: 26rpx;
 }
@@ -151,15 +152,24 @@
   line-height: 1.3;
 }
 
-.raw-text {
+.raw-text,
+.display-text {
   display: block;
   padding: 22rpx 24rpx;
   border-radius: 18rpx;
-  background: #fff6f1;
   color: #3a2119;
   font-size: 28rpx;
   line-height: 1.55;
   word-break: break-word;
+}
+
+.raw-text {
+  background: #fff6f1;
+}
+
+.display-text {
+  background: #ffffff;
+  border: 2rpx solid #f0dac0;
 }
 
 .transcript-textarea {
@@ -183,6 +193,7 @@
 }
 
 .ghost-button,
+.danger-button,
 .small-primary,
 .load-more {
   min-width: 148rpx;
@@ -199,11 +210,13 @@
 }
 
 .ghost-button,
+.danger-button,
 .small-primary {
   flex: 1 1 148rpx;
 }
 
 .ghost-button::after,
+.danger-button::after,
 .small-primary::after,
 .load-more::after {
   border: 0;
@@ -219,7 +232,13 @@
   color: #ffffff;
 }
 
+.danger-button {
+  background: #fff1f2;
+  color: #b4234a;
+}
+
 .ghost-button[disabled],
+.danger-button[disabled],
 .small-primary[disabled],
 .load-more[disabled] {
   opacity: 0.62;
