@@ -29,6 +29,7 @@ from app.services.wechat_auth import WeChatAuthError, WeChatSession, exchange_we
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 WECHAT_PROVIDER = "wechat_miniprogram"
+WECHAT_PLACEHOLDER_DISPLAY_NAME = "微信用户"
 
 
 def _validate_email(email: str) -> str:
@@ -50,7 +51,11 @@ def _provisional_wechat_email(openid: str) -> str:
 
 def _display_name_from_wechat(req: WeChatLoginRequest) -> str:
     display_name = (req.display_name or "").strip()
-    return display_name or "微信用户"
+    return display_name or WECHAT_PLACEHOLDER_DISPLAY_NAME
+
+
+def _display_name_from_email(email: str) -> str:
+    return email.split("@", 1)[0].strip() or "作者"
 
 
 async def _exchange_wechat_code(code: str) -> WeChatSession:
@@ -139,7 +144,7 @@ async def wechat_login(
             identity.provider_union_id = session.unionid
         if req.avatar_url and not user.avatar_url:
             user.avatar_url = req.avatar_url
-        if req.display_name and user.display_name == "微信用户":
+        if req.display_name and user.display_name == WECHAT_PLACEHOLDER_DISPLAY_NAME:
             user.display_name = req.display_name.strip() or user.display_name
     else:
         user = User(
@@ -216,6 +221,8 @@ async def set_credentials(
     display_name = (req.display_name or "").strip()
     if display_name:
         current_user.display_name = display_name
+    elif current_user.display_name == WECHAT_PLACEHOLDER_DISPLAY_NAME:
+        current_user.display_name = _display_name_from_email(email)
 
     await db.commit()
     await db.refresh(current_user)
