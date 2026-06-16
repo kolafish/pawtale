@@ -160,6 +160,31 @@ class TestAuthAPI:
         assert web_login.status_code == 200
         assert web_login.json()["user"]["display_name"] == "微信 Web 用户"
 
+    async def test_set_credentials_replaces_wechat_placeholder_with_email_name(
+        self,
+        anonymous_client,
+        monkeypatch,
+    ):
+        async def fake_exchange(code: str) -> WeChatSession:
+            return WeChatSession(openid=f"openid-{code}")
+
+        monkeypatch.setattr("app.routers.auth.exchange_wechat_login_code", fake_exchange)
+
+        login = await anonymous_client.post("/api/auth/wechat-login", json={"code": "placeholder-user"})
+        assert login.status_code == 200
+        assert login.json()["user"]["display_name"] == "微信用户"
+
+        credentials = await anonymous_client.post(
+            "/api/auth/set-credentials",
+            json={
+                "email": "memoir-author@example.com",
+                "password": "password123",
+            },
+        )
+        assert credentials.status_code == 200
+        assert credentials.json()["needs_credentials"] is False
+        assert credentials.json()["user"]["display_name"] == "memoir-author"
+
     async def test_wechat_bind_links_existing_password_user(self, anonymous_client, monkeypatch):
         async def fake_exchange(code: str) -> WeChatSession:
             return WeChatSession(openid="bind-openid", unionid="bind-unionid")

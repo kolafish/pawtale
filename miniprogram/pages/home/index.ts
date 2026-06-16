@@ -2,6 +2,8 @@ import { getMemoirIdentity, logoutBackendSession } from "../../services/auth";
 import { ApiError } from "../../services/request";
 import { replaceMemoirStore } from "../../stores/session";
 
+const WECHAT_PLACEHOLDER_DISPLAY_NAME = "微信用户";
+
 interface HomeData {
   loading: boolean;
   error: string;
@@ -11,8 +13,19 @@ interface HomeData {
   projectCount: number;
 }
 
-function userDisplayName(displayName: string, email: string): string {
-  return displayName || email.split("@", 1)[0] || "作者";
+function isProvisionalWeChatEmail(email: string): boolean {
+  return email.trim().toLowerCase().endsWith("@wechat.local");
+}
+
+export function userDisplayName(displayName: string, email: string): string {
+  const normalizedName = displayName.trim();
+  if (normalizedName && normalizedName !== WECHAT_PLACEHOLDER_DISPLAY_NAME) {
+    return normalizedName;
+  }
+  if (isProvisionalWeChatEmail(email)) {
+    return "作者";
+  }
+  return email.split("@", 1)[0].trim() || "作者";
 }
 
 Page<HomeData, {
@@ -43,6 +56,10 @@ Page<HomeData, {
     this.setData({ loading: true, error: "" });
     try {
       const identity = await getMemoirIdentity();
+      if (!identity.password_login_enabled) {
+        wx.reLaunch({ url: "/pages/login/index" });
+        return;
+      }
       this.setData({
         displayName: userDisplayName(identity.display_name, identity.email),
         projectId: identity.active_project_id,
