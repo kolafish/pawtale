@@ -205,13 +205,17 @@ miniprogram/
 │   ├── auth.ts                      # ECS cookie session
 │   ├── memoir.ts                    # project and memoir HTTP APIs
 │   ├── memoir-voice-api.ts          # voice session API helpers
-│   └── memoir-streaming-asr.ts      # recorder frames + WebSocket transcript
+│   ├── memoir-streaming-asr.ts      # recorder frames + WebSocket transcript
+│   └── tts-settings.ts              # local TTS voice preference
 └── pages/
     ├── login/                       # ECS email login/register
     ├── home/                        # voice entry
     ├── projects/                    # memoir project management
     ├── voice-start/                 # guidance mode selection
-    └── voice-chat/                  # realtime transcript + voice chat
+    ├── voice-chat/                  # realtime transcript + voice chat
+    ├── transcripts/                 # transcript editing and audio playback
+    ├── voice-progress/              # session progress
+    └── me/                          # account, project stats, TTS settings
 
 backend/app/routers/memoir/
 └── voice.py                         # voice session HTTP + WebSocket gateway
@@ -220,7 +224,8 @@ backend/app/routers/memoir/
 边界约定：
 
 - `voice-start` 负责选择弱引导/强引导，`voice-chat` 只管理语音会话、实时字幕、聊天消息和播放状态。
-- Editing：`transcript-review` 负责回听原始语音、校正 ASR 文本和保存 transcript version；`memoir-progress` 负责展示人、事、地点、时间段、主题覆盖度。
+- Editing：`transcripts` 负责回听原始语音、校正 ASR 文本和保存 transcript version；`voice-progress` 负责展示会话、模块覆盖和累计文字。
+- 我的页只保存本地 UI 偏好，例如 TTS 音色；provider key 和微信 AppSecret 仍只在后端。
 - Provider key 只能在后端或 voice gateway，不能进入小程序。
 
 ## 数据模型

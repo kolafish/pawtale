@@ -57,9 +57,12 @@ WECHAT_JSCODE2SESSION_URL=https://api.weixin.qq.com/sns/jscode2session
 
 - `pages/login`：微信登录、已有 Pawtale 账号登录、首次微信登录后设置 Web 登录凭据。
 - `pages/home`：新版语音入口和当前回忆录入口。
-- `pages/projects`：创建、切换、重命名回忆录。
+- `pages/projects`：创建、切换、重命名、删除回忆录。
 - `pages/voice-start`：选择弱引导自由讲述或强引导 AI 采访。
-- `pages/voice-chat`：实时录音、WebSocket、partial/final transcript 和本地快照恢复。
+- `pages/voice-chat`：实时录音、WebSocket、partial/final transcript、AI 追问 TTS 和本地快照恢复。
+- `pages/transcripts`：查看原始语音、ASR 原文、校正文、AI 引导问题，并支持问题和回答连播。
+- `pages/voice-progress`：查看会话、模块覆盖、语音段、AI 追问和累计文字。
+- `pages/me`：账号信息、当前项目统计、项目入口和 TTS 音色设置。
 
 旧 workbench、stories、profile、固定问答和整段录音上传页面已移除。
 
@@ -74,7 +77,6 @@ npm test
 
 ## 未完成
 
-- LLM 动态追问。
-- Streaming TTS。
-- 转写校正页、进度页、成稿编辑页。
+- 真正低延迟 Streaming TTS、插话打断和断线续传。
+- 结构化记忆提取、证据链浏览和成稿编辑页。
 - 方言/噪声评测集、provider fallback、限流和成本监控。

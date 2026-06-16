@@ -47,7 +47,8 @@
 
 .primary-button,
 .small-primary,
-.ghost-button {
+.ghost-button,
+.danger-button {
   border: 0;
   border-radius: 22rpx;
   display: flex;
@@ -59,7 +60,8 @@
 
 .primary-button::after,
 .small-primary::after,
-.ghost-button::after {
+.ghost-button::after,
+.danger-button::after {
   border: 0;
 }
 
@@ -126,13 +128,18 @@
 .project-actions,
 .rename-actions {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 18rpx;
   margin-top: 26rpx;
 }
 
+.rename-actions {
+  grid-template-columns: 1fr 1fr;
+}
+
 .ghost-button,
-.small-primary {
+.small-primary,
+.danger-button {
   height: 78rpx;
   font-size: 28rpx;
 }
@@ -147,9 +154,19 @@
   color: #ffffff;
 }
 
+.danger-button {
+  background: #fff1f2;
+  color: #b4234a;
+}
+
 .small-primary.disabled {
   background: #f0dac0;
   color: #6d817d;
+}
+
+.danger-button.disabled {
+  background: #f8efe7;
+  color: #b8a7a0;
 }
 
 .rename-box {

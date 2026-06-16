@@ -28,3 +28,9 @@ export function activateMemoirProject(projectId: string): Promise<MemoirProjectL
     data: {},
   });
 }
+
+export async function deleteMemoirProject(projectId: string): Promise<void> {
+  await request<unknown>(`/api/mobile/memoir/projects/${projectId}`, {
+    method: "DELETE",
+  });
+}

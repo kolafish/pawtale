@@ -13,6 +13,7 @@
 - AI 追问已接入 assistant-message 驱动的 TTS 音频生成和播放；第一版是短句音频快速生成后播放，接口按后续 streaming TTS 形态保留 provider 抽象。
 - 小程序已接入客户端轻量 VAD：基于 PCM 能量显示音量条、计算连续静音，并可自动收尾当前句。
 - 已有转写校正页和访谈进度页，可查看会话、模块覆盖、语音段、AI 追问数，并从记录继续访谈。
+- 小程序已拆为首页、语音、转写、我的 tab；我的页可看当前项目统计、管理项目和设置 AI TTS 音色，项目页支持创建、切换、重命名和删除回忆录。
 
 新的产品目标是：
 
@@ -60,15 +61,17 @@ Voice Session -> Chat Messages -> Realtime Transcript -> Memory Extraction -> Wr
 ```text
 miniprogram/pages/login/                      # 微信登录、Pawtale 账号登录、首次设 Web 登录凭据
 miniprogram/pages/home/                       # 新版语音入口
-miniprogram/pages/projects/                   # 回忆录项目创建、切换、重命名
+miniprogram/pages/projects/                   # 回忆录项目创建、切换、重命名、删除
 miniprogram/pages/voice-start/                # 强/弱引导选择
 miniprogram/pages/voice-chat/                 # 新版老人端实时语音聊天
 miniprogram/pages/transcripts/                # 语音与转写校正
 miniprogram/pages/voice-progress/             # 访谈记录和进度
+miniprogram/pages/me/                         # 账号、项目统计和 TTS 音色设置
 miniprogram/services/request.ts               # ECS HTTP + cookie session
 miniprogram/services/auth.ts                  # wx.login、backend cookie session、账号凭据设置
 miniprogram/services/memoir-voice-api.ts      # voice session API
 miniprogram/services/memoir-streaming-asr.ts  # 录音帧、WebSocket、partial/final transcript
+miniprogram/services/tts-settings.ts          # 小程序本地 TTS 音色偏好
 miniprogram/domain/voice-chat.ts              # 新版聊天消息和实时事件类型
 
 backend/app/routers/memoir/voice.py           # 本地/服务端 voice session API
@@ -85,6 +88,7 @@ Git 上建议用以下边界区分：
 - `codex/voice-chat-redesign`：新版语音聊天主线分支。
 - 第一批 PR 已完成 Streaming ASR、voice session 数据和小程序新入口。
 - 第二批 PR 已完成 LLM 动态追问、小程序追问交互、assistant TTS 播放、客户端自动收尾和进度页。
+- 第三批 PR 已完成自动续听、TTS 文本播放进度、转写自动校正、AI 问题与回答连播、主 tab 拆分和我的页项目/TTS 设置。
 - 小程序 legacy 固定问答页面、旧非实时录音上传代码和微信云函数链路已清理。
 - 登录链路已迁移为统一 Pawtale 账号：已有 Web 用户用邮箱密码登录小程序，新用户用微信登录后设置 Web 端邮箱密码。
 
@@ -131,6 +135,7 @@ guided_interview    # 强引导 / AI 模块化引导
 - 语音聊天页：实时录音、Streaming ASR 大字显示、AI 语音回复、暂停/继续/结束。
 - 转写校正页：查看每段原始语音、ASR 原文、编辑后文本和版本记录，支持家人或编辑校正。
 - 进度页：查看已聊过的人、事、地点、时间段、主题覆盖度，以及 AI 发现的待追问问题。
+- 我的页：查看账号、当前项目统计、管理回忆录项目，并选择 AI TTS 音色。
 - 产出编辑页：把确认后的素材组织为章节、片段或故事稿，仍然能回溯到语音证据。
 
 ### 用户说话
@@ -267,7 +272,7 @@ assistant message
 
 后端新增 TTS provider 抽象，环境变量为 `TTS_PROVIDER`、`TTS_API_KEY`、`TTS_BASE_URL`、`TTS_MODEL`、`TTS_VOICE`、`TTS_RESPONSE_FORMAT`。默认 `TTS_PROVIDER=disabled`，没有配置时小程序仍显示 AI 文字追问，不阻塞 ASR 和 LLM。当前支持 `openai_compatible` 和 `stepfun`；`TTS_PROVIDER=stepfun` 时优先读取 `STEPFUN_API_KEY`、`STEPFUN_BASE_URL`、`STEPFUN_TTS_MODEL`、`STEPFUN_TTS_VOICE`，默认走阶跃 `/v1/audio/speech` 非流式短句合成。
 
-小程序语音聊天页在 AI 追问生成后会请求 TTS，自动播放；用户开始说话、跳过追问、结束页面时会取消未完成合成或停止播放，避免旧追问音频和新回答冲突。
+小程序语音聊天页在 AI 追问生成后会请求 TTS，自动播放；播放时按当前音频进度高亮已讲到的文字，播放完成且 voice gateway 可录音时自动进入下一轮收听。用户开始说话、跳过追问、结束页面时会取消未完成合成或停止播放，避免旧追问音频和新回答冲突。
 
 后续真正的 Streaming TTS 仍要把 provider WebSocket/SSE 音频流直接接到播放队列，并与 LLM streaming 输出联动。当前第一版刻意保持为“短句生成后播放”：AI 追问文本较短，非流式音质和稳定性更可控，先保证 ASR、持久化、追问和播放闭环。
 
@@ -556,7 +561,18 @@ Streaming ASR PR5 后当时仍未完成、不能按上线态理解的缺口：
 4. 客户端轻量 VAD / 自动收尾：已完成第一版。小程序显示音量条、连续静音状态，并可自动结束当前句；用户可以关闭自动收尾。
 5. 访谈记录与进度页：已完成第一版。后端提供 voice session list/progress API，小程序可查看会话、模块覆盖、语音段、AI 追问和字数，并能从记录继续访谈。
 
-第二批完成后仍不是最终上线态。后续重点是 memory extraction、结构化证据链、章节/片段产出编辑、断线恢复、provider fallback、质量评测和成本监控。
+当前语音聊天第一版仍不是最终上线态。后续重点是 memory extraction、结构化证据链、章节/片段产出编辑、断线恢复、provider fallback、质量评测和成本监控。
+
+### 当前第三批 PR 状态
+
+这批主要补齐语音聊天的连续体验和小程序页面结构：
+
+1. 自动续听：已完成。AI TTS 自动播放完后，如果 WebSocket 和录音状态允许，会自动开始下一轮收听。
+2. TTS 文本进度：已完成。播放 AI 问题时，页面会按播放比例显示已读和未读文字。
+3. 转写自动校正：已完成。`asr.final` 保存时会同步生成忠实去口语化校正文；转写记录页默认展示校正文，仍保留 ASR 原文。
+4. AI 问题与回答连播：已完成。转写记录项显示对应 AI 引导问题；播放时优先播放问题音频，再播放用户回答音频。
+5. 主 tab 拆分：已完成。小程序拆为首页、语音、转写、我的四个主入口。
+6. 我的页项目和 TTS 设置：已完成。我的页展示当前项目统计、TTS 音色设置；项目页支持删除回忆录，并保留至少一本项目。
 
 ### Phase 1: Streaming ASR MVP
 
@@ -597,6 +613,7 @@ Streaming ASR PR5 后当时仍未完成、不能按上线态理解的缺口：
 
 - assistant message 驱动 TTS 已完成。
 - 小程序支持自动播放、重播、生成失败降级文字。
+- 小程序支持播放文字进度和 TTS 播放后自动续听。
 - 用户开始说话、跳过追问、退出页面时会取消未完成合成或停止播放。
 
 下一步是接入真实 streaming TTS provider，把 provider 音频流接到播放队列，并补齐插话打断。
@@ -606,6 +623,8 @@ Streaming ASR PR5 后当时仍未完成、不能按上线态理解的缺口：
 目标：语音聊天结果沉淀为回忆录资产，并提供可校正、可查看进度的页面。
 
 - 转写校正页已完成第一版，支持回听原始语音、编辑 ASR 转写、AI 忠实清理口语稿。
+- final transcript 保存时已自动生成忠实校正文，减少转写记录页的手动清理成本。
+- 转写记录项已显示 AI 引导问题，并支持问题音频与回答音频顺序播放。
 - 进度页已完成第一版，展示会话、模块覆盖、语音段、AI 追问、字数，并支持继续访谈。
 - 从 chat messages 提取 person/event/place/theme 仍未完成。
 - evidence 指向 transcript version 和 audio span 的结构化浏览仍未完成。
