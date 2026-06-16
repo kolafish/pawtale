@@ -160,3 +160,19 @@ async def activate_mobile_memoir_project(
     project.updated_at = _utcnow()
     await db.commit()
     return await mobile_project_list(db, user_id)
+
+
+async def delete_mobile_memoir_project(
+    db: AsyncSession,
+    user_id: str,
+    project_id: str,
+) -> None:
+    project = await load_project(db, project_id, user_id)
+    if project.type != ProjectType.MEMOIR.value:
+        raise HTTPException(status_code=400, detail="项目不是回忆录")
+
+    projects = await list_mobile_memoir_project_responses(db, user_id)
+    if len(projects) <= 1:
+        raise HTTPException(status_code=400, detail="至少保留一本回忆录")
+
+    await project_docs.delete_project(db, project)

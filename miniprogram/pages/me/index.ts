@@ -1,17 +1,42 @@
+import type { MemoirVoiceProgressResponse } from "../../domain/voice-chat";
+import type { TTSVoiceOption } from "../../services/tts-settings";
 import { getMemoirIdentity, logoutBackendSession } from "../../services/auth";
+import { getMemoirVoiceProgress } from "../../services/memoir-voice-api";
 import { ApiError } from "../../services/request";
+import {
+  readTTSSettings,
+  saveTTSSettings,
+  TTS_VOICE_OPTIONS,
+  ttsVoiceLabel,
+} from "../../services/tts-settings";
 import { replaceMemoirStore } from "../../stores/session";
 
 const WECHAT_PLACEHOLDER_DISPLAY_NAME = "微信用户";
 
 interface MeData {
   loading: boolean;
+  voiceStatsLoading: boolean;
   error: string;
   displayName: string;
   avatarText: string;
   email: string;
   projectTitle: string;
   projectCount: number;
+  sessionCount: number;
+  utteranceCount: number;
+  totalUserCharCount: number;
+  totalAudioText: string;
+  ttsVoice: string;
+  ttsVoiceLabel: string;
+  ttsVoiceOptions: TTSVoiceOption[];
+}
+
+interface VoiceDatasetEvent {
+  currentTarget: {
+    dataset: {
+      voice?: string;
+    };
+  };
 }
 
 function isProvisionalWeChatEmail(email: string): boolean {
@@ -29,21 +54,50 @@ function displayNameForUser(displayName: string, email: string): string {
   return email.split("@", 1)[0].trim() || "作者";
 }
 
+function formatAudioDuration(totalSeconds: number): string {
+  const seconds = Math.max(0, Math.round(totalSeconds || 0));
+  const minutes = Math.floor(seconds / 60);
+  const restSeconds = seconds % 60;
+  if (!minutes) {
+    return `${restSeconds} 秒`;
+  }
+  return `${minutes} 分 ${restSeconds} 秒`;
+}
+
+function voiceStatsData(progress: MemoirVoiceProgressResponse) {
+  return {
+    sessionCount: progress.session_count,
+    utteranceCount: progress.utterance_count,
+    totalUserCharCount: progress.total_user_char_count,
+    totalAudioText: formatAudioDuration(progress.total_audio_seconds),
+  };
+}
+
 Page<MeData, {
   onShow(): Promise<void>;
   loadMe(): Promise<void>;
+  loadVoiceStats(projectId: string): Promise<void>;
+  selectTTSVoice(event: VoiceDatasetEvent): void;
   openProjects(): void;
   openVoiceProgress(): void;
   logout(): Promise<void>;
 }>({
   data: {
     loading: false,
+    voiceStatsLoading: false,
     error: "",
     displayName: "",
     avatarText: "作",
     email: "",
     projectTitle: "",
     projectCount: 0,
+    sessionCount: 0,
+    utteranceCount: 0,
+    totalUserCharCount: 0,
+    totalAudioText: "0 秒",
+    ttsVoice: "",
+    ttsVoiceLabel: "默认音色",
+    ttsVoiceOptions: TTS_VOICE_OPTIONS,
   },
 
   async onShow() {
@@ -61,13 +115,17 @@ Page<MeData, {
         return;
       }
       const displayName = displayNameForUser(identity.display_name, identity.email);
+      const ttsSettings = readTTSSettings();
       this.setData({
         displayName,
         avatarText: Array.from(displayName)[0] || "作",
         email: identity.email,
         projectTitle: identity.active_project?.title || "我的回忆录",
         projectCount: identity.projects.length,
+        ttsVoice: ttsSettings.voice,
+        ttsVoiceLabel: ttsVoiceLabel(ttsSettings.voice),
       });
+      await this.loadVoiceStats(identity.active_project_id);
     } catch (error) {
       if (error instanceof ApiError && [401, 403].includes(error.statusCode)) {
         wx.reLaunch({ url: "/pages/login/index" });
@@ -77,6 +135,31 @@ Page<MeData, {
     } finally {
       this.setData({ loading: false });
     }
+  },
+
+  async loadVoiceStats(projectId) {
+    if (!projectId) {
+      return;
+    }
+    this.setData({ voiceStatsLoading: true });
+    try {
+      const progress = await getMemoirVoiceProgress(projectId);
+      this.setData(voiceStatsData(progress));
+    } catch (error) {
+      console.warn("load memoir voice stats failed", error);
+    } finally {
+      this.setData({ voiceStatsLoading: false });
+    }
+  },
+
+  selectTTSVoice(event) {
+    const voice = event.currentTarget.dataset.voice || "";
+    const settings = saveTTSSettings({ voice });
+    this.setData({
+      ttsVoice: settings.voice,
+      ttsVoiceLabel: ttsVoiceLabel(settings.voice),
+    });
+    wx.showToast({ title: "已保存", icon: "success" });
   },
 
   openProjects() {

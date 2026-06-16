@@ -28,7 +28,7 @@
         <text class="project-title">{{item.title}}</text>
         <text wx:if="{{item.active}}" class="active-badge">当前</text>
       </view>
-      <text class="project-meta">{{item.elder_name || "未填写主人公"}} · {{item.updatedText || "刚刚"}}</text>
+      <text class="project-meta">{{item.elder_name || "未填写主人公"}} · {{item.wordCountText}} · {{item.updatedText || "刚刚"}}</text>
     </view>
 
     <view wx:if="{{item.editing}}" class="rename-box">
@@ -47,6 +47,14 @@
         bindtap="activateProject"
       >
         {{item.active ? "使用中" : "切换"}}
+      </button>
+      <button
+        class="danger-button {{item.canDelete ? '' : 'disabled'}}"
+        data-id="{{item.id}}"
+        disabled="{{!item.canDelete || busy}}"
+        bindtap="deleteProject"
+      >
+        {{deletingId === item.id ? "删除中" : "删除"}}
       </button>
     </view>
   </view>

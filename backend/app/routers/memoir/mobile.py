@@ -79,3 +79,16 @@ async def activate_mobile_memoir_project(
         current_user.id,
         project_id,
     )
+
+
+@router.delete("/projects/{project_id}", status_code=204)
+async def delete_mobile_memoir_project(
+    project_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    await memoir_projects.delete_mobile_memoir_project(
+        db,
+        current_user.id,
+        project_id,
+    )

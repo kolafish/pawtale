@@ -3,6 +3,7 @@ import { getMemoirIdentity } from "../../services/auth";
 import {
   activateMemoirProject,
   createMemoirProject,
+  deleteMemoirProject,
   listMemoirProjects,
   updateMemoirProject,
 } from "../../services/memoir";
@@ -23,14 +24,17 @@ interface InputEvent {
 
 interface ProjectItem extends Project {
   active: boolean;
+  canDelete: boolean;
   editing: boolean;
   editTitle: string;
   updatedText: string;
+  wordCountText: string;
 }
 
 interface ProjectsData {
   loading: boolean;
   busy: boolean;
+  deletingId: string;
   error: string;
   activeProjectId: string;
   projects: ProjectItem[];
@@ -48,13 +52,30 @@ function displayDate(value?: string): string {
 }
 
 function projectItems(response: MemoirProjectListResponse, editingId = "", editTitle = ""): ProjectItem[] {
+  const canDelete = response.projects.length > 1;
   return response.projects.map((project) => ({
     ...project,
     active: project.id === response.active_project_id,
+    canDelete,
     editing: project.id === editingId,
     editTitle: project.id === editingId ? editTitle : project.title,
     updatedText: displayDate(project.last_opened_at || project.updated_at || project.created_at),
+    wordCountText: `${project.total_word_count || 0} 字`,
   }));
+}
+
+function confirmDeleteProject(project: ProjectItem): Promise<boolean> {
+  const activeHint = project.active ? "这是当前使用中的回忆录，删除后会自动切换到最近一本。" : "";
+  return new Promise((resolve) => {
+    wx.showModal({
+      title: "删除回忆录",
+      content: `确定删除「${project.title}」吗？${activeHint}删除后不可恢复。`,
+      confirmText: "删除",
+      confirmColor: "#b4234a",
+      success: (result) => resolve(Boolean(result.confirm)),
+      fail: () => resolve(false),
+    });
+  });
 }
 
 Page<ProjectsData, {
@@ -67,11 +88,13 @@ Page<ProjectsData, {
   changeRenameTitle(event: InputEvent): void;
   saveRename(event: DatasetEvent): Promise<void>;
   cancelRename(): Promise<void>;
+  deleteProject(event: DatasetEvent): Promise<void>;
   openHome(): void;
 }>({
   data: {
     loading: false,
     busy: false,
+    deletingId: "",
     error: "",
     activeProjectId: "",
     projects: [],
@@ -177,6 +200,33 @@ Page<ProjectsData, {
       this.setData({ error: error instanceof Error ? error.message : "保存失败" });
     } finally {
       this.setData({ busy: false });
+    }
+  },
+
+  async deleteProject(event) {
+    const id = event.currentTarget.dataset.id || "";
+    const project = this.data.projects.find((item) => item.id === id);
+    if (!project || this.data.busy) {
+      return;
+    }
+    if (!project.canDelete) {
+      this.setData({ error: "至少保留一本回忆录" });
+      return;
+    }
+    const confirmed = await confirmDeleteProject(project);
+    if (!confirmed) {
+      return;
+    }
+    this.setData({ busy: true, deletingId: id, error: "" });
+    try {
+      await deleteMemoirProject(id);
+      await getMemoirIdentity();
+      wx.showToast({ title: "已删除", icon: "success" });
+      await this.loadProjects();
+    } catch (error) {
+      this.setData({ error: error instanceof Error ? error.message : "删除失败" });
+    } finally {
+      this.setData({ busy: false, deletingId: "" });
     }
   },
 
