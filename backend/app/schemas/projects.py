@@ -210,6 +210,78 @@ class ProjectExportResponse(BaseModel):
     total_words: int
 
 
+# ── GitHub one-way sync ─────────────────────────────
+
+class GitSyncInstallationResponse(BaseModel):
+    installation_id: int
+    account_login: str | None = None
+    account_type: str | None = None
+    repository_selection: str | None = None
+
+
+class GitSyncRepositoryOption(BaseModel):
+    installation_id: int
+    owner: str
+    name: str
+    full_name: str
+    private: bool = True
+    default_branch: str = "main"
+
+
+class ProjectGitSyncConfigRequest(BaseModel):
+    installation_id: int
+    repository_owner: str
+    repository_name: str
+    branch: str = "main"
+    base_path: str = ""
+
+    @field_validator("repository_owner", "repository_name", "branch", mode="before")
+    @classmethod
+    def _required_trimmed(cls, value: str) -> str:
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError("不能为空")
+        return value.strip()
+
+    @field_validator("base_path", mode="before")
+    @classmethod
+    def _clean_base_path(cls, value: str | None) -> str:
+        raw = (value or "").strip().strip("/")
+        if ".." in raw.split("/"):
+            raise ValueError("路径不能包含 ..")
+        return raw
+
+
+class ProjectGitSyncConfigResponse(BaseModel):
+    project_id: str
+    installation_id: int
+    repository_owner: str
+    repository_name: str
+    branch: str
+    base_path: str
+    last_synced_at: datetime | None = None
+    last_commit_sha: str | None = None
+    last_error: str | None = None
+
+    class Config:
+        from_attributes = True
+
+
+class GitSyncStatusResponse(BaseModel):
+    configured: bool
+    install_url: str | None = None
+    installations: list[GitSyncInstallationResponse] = Field(default_factory=list)
+    repositories: list[GitSyncRepositoryOption] = Field(default_factory=list)
+    project_config: ProjectGitSyncConfigResponse | None = None
+
+
+class ProjectGitSyncRunResponse(BaseModel):
+    ok: bool
+    synced_files: int
+    commit_sha: str | None = None
+    synced_at: datetime
+    error: str | None = None
+
+
 # ── AI Continue ─────────────────────────────────────
 
 class DocumentAIContinueRequest(BaseModel):

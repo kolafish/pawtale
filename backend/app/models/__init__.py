@@ -8,6 +8,7 @@ from app.models.projects import (
     DocumentReference,
     WritingSession,
 )
+from app.models.git_sync import GitHubInstallation, ProjectGitSync
 from app.models.memoir import (
     AudioFile,
     MemoirAnswer,
@@ -44,6 +45,8 @@ __all__ = [
     "ReferenceItem",
     "DocumentReference",
     "WritingSession",
+    "GitHubInstallation",
+    "ProjectGitSync",
     "AudioFile",
     "MemoirAnswer",
     "MemoirChatMessage",

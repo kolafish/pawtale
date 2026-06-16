@@ -1,8 +1,8 @@
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { ChevronRight, FileText, FolderOpen, Download, X } from 'lucide-react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { ChevronRight, FileText, FolderOpen, Download, X, Github, RefreshCw, UploadCloud, Unlink } from 'lucide-react';
 import { projectsApi } from '../api';
-import type { Project } from '../types';
+import type { GitSyncRepositoryOption, Project } from '../types';
 
 type InspectorTab = 'document' | 'project';
 
@@ -20,6 +20,24 @@ interface InspectorProps {
   onExport: () => void;
 }
 
+function parseRepositoryOption(
+  fullName: string,
+  repositories: GitSyncRepositoryOption[],
+): GitSyncRepositoryOption | null {
+  const existing = repositories.find((repo) => repo.full_name === fullName);
+  if (existing) return existing;
+  const [owner, name] = fullName.split('/');
+  if (!owner || !name || repositories.length === 0) return null;
+  return {
+    installation_id: repositories[0].installation_id,
+    owner,
+    name,
+    full_name: `${owner}/${name}`,
+    private: true,
+    default_branch: 'main',
+  };
+}
+
 export function Inspector({
   project,
   currentDocumentId,
@@ -33,8 +51,12 @@ export function Inspector({
   totalWordCount,
   onExport,
 }: InspectorProps) {
+  const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<InspectorTab>('document');
+  const [selectedRepo, setSelectedRepo] = useState('');
+  const [syncBranch, setSyncBranch] = useState<string | null>(null);
+  const [syncBasePath, setSyncBasePath] = useState<string | null>(null);
 
   const { data: references = [] } = useQuery({
     queryKey: ['references', project.id],
@@ -46,6 +68,53 @@ export function Inspector({
     queryKey: ['docRefs', project.id, currentDocumentId],
     queryFn: () => currentDocumentId ? projectsApi.getDocumentReferences(project.id, currentDocumentId) : Promise.resolve([]),
     enabled: open && !!currentDocumentId,
+  });
+
+  const syncQuery = useQuery({
+    queryKey: ['gitSync', project.id],
+    queryFn: () => projectsApi.getGitSync(project.id),
+    enabled: open && tab === 'project',
+  });
+
+  const syncStatus = syncQuery.data;
+  const configuredRepo = syncStatus?.project_config
+    ? `${syncStatus.project_config.repository_owner}/${syncStatus.project_config.repository_name}`
+    : '';
+  const activeRepo = selectedRepo || configuredRepo || syncStatus?.repositories[0]?.full_name || '';
+  const activeRepoOption = syncStatus?.repositories.find((repo) => repo.full_name === activeRepo);
+  const activeBranch = syncBranch ?? syncStatus?.project_config?.branch ?? activeRepoOption?.default_branch ?? 'main';
+  const activeBasePath = syncBasePath ?? syncStatus?.project_config?.base_path ?? `pawtale/${project.id}`;
+
+  const invalidateGitSync = () => queryClient.invalidateQueries({ queryKey: ['gitSync', project.id] });
+
+  const saveSyncMutation = useMutation({
+    mutationFn: () => {
+      const repo = activeRepoOption || parseRepositoryOption(activeRepo, syncStatus?.repositories ?? []);
+      if (!repo) throw new Error('请选择仓库');
+      return projectsApi.saveGitSync(project.id, {
+        installation_id: repo.installation_id,
+        repository_owner: repo.owner,
+        repository_name: repo.name,
+        branch: activeBranch,
+        base_path: activeBasePath,
+      });
+    },
+    onSuccess: () => {
+      setSelectedRepo('');
+      setSyncBranch(null);
+      setSyncBasePath(null);
+      invalidateGitSync();
+    },
+  });
+
+  const runSyncMutation = useMutation({
+    mutationFn: () => projectsApi.runGitSync(project.id),
+    onSuccess: invalidateGitSync,
+  });
+
+  const deleteSyncMutation = useMutation({
+    mutationFn: () => projectsApi.deleteGitSync(project.id),
+    onSuccess: invalidateGitSync,
   });
 
   const tabs: { id: InspectorTab; label: string; icon: typeof FileText }[] = [
@@ -62,6 +131,12 @@ export function Inspector({
     await projectsApi.setDocumentReferences(project.id, currentDocumentId, newIds);
     refetchDocRefs();
   };
+
+  const lastSyncedAt = syncStatus?.project_config?.last_synced_at
+    ? new Date(syncStatus.project_config.last_synced_at).toLocaleString('zh-CN')
+    : null;
+
+  const syncError = syncStatus?.project_config?.last_error || runSyncMutation.data?.error || null;
 
   if (!open) {
     return (
@@ -215,6 +290,114 @@ export function Inspector({
               <Download size={14} />
               导出 TXT
             </button>
+
+            <div className="space-y-3 border-t border-gray-100 pt-4">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-medium text-gray-500">GitHub 同步</label>
+                <button
+                  onClick={() => syncQuery.refetch()}
+                  className="p-1 rounded text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+                  title="刷新"
+                >
+                  <RefreshCw size={13} className={syncQuery.isFetching ? 'animate-spin' : ''} />
+                </button>
+              </div>
+
+              {syncQuery.isLoading ? (
+                <p className="text-xs text-gray-400">加载中...</p>
+              ) : !syncStatus?.configured ? (
+                <p className="text-xs text-gray-400">后端未配置 GitHub App</p>
+              ) : (
+                <div className="space-y-2">
+                  <div className="flex gap-2">
+                    {syncStatus.install_url && (
+                      <button
+                        onClick={() => window.open(syncStatus.install_url || '', '_blank', 'noopener,noreferrer')}
+                        className="flex-1 inline-flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-md border border-gray-200 hover:bg-gray-50 text-xs"
+                      >
+                        <Github size={13} />
+                        连接
+                      </button>
+                    )}
+                    {syncStatus.project_config && (
+                      <button
+                        onClick={() => deleteSyncMutation.mutate()}
+                        disabled={deleteSyncMutation.isPending}
+                        className="inline-flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-md border border-gray-200 hover:bg-red-50 hover:text-red-600 text-xs disabled:opacity-60"
+                      >
+                        <Unlink size={13} />
+                        断开
+                      </button>
+                    )}
+                  </div>
+
+                  {syncStatus.repositories.length === 0 ? (
+                    <p className="text-xs text-gray-400">暂无可用仓库</p>
+                  ) : (
+                    <>
+                      <select
+                        value={activeRepo}
+                        onChange={(e) => {
+                          const repo = syncStatus.repositories.find((item) => item.full_name === e.target.value);
+                          setSelectedRepo(e.target.value);
+                          setSyncBranch(repo?.default_branch || 'main');
+                        }}
+                        className="w-full px-2 py-1.5 text-sm rounded border border-gray-200 focus:outline-none focus:ring-1 focus:ring-pink-400"
+                      >
+                        {syncStatus.repositories.map((repo) => (
+                          <option key={`${repo.installation_id}:${repo.full_name}`} value={repo.full_name}>
+                            {repo.full_name}
+                          </option>
+                        ))}
+                      </select>
+                      <div className="grid grid-cols-2 gap-2">
+                        <input
+                          value={activeBranch}
+                          onChange={(e) => setSyncBranch(e.target.value)}
+                          placeholder="branch"
+                          className="w-full px-2 py-1.5 text-sm rounded border border-gray-200 focus:outline-none focus:ring-1 focus:ring-pink-400"
+                        />
+                        <input
+                          value={activeBasePath}
+                          onChange={(e) => setSyncBasePath(e.target.value)}
+                          placeholder="path"
+                          className="w-full px-2 py-1.5 text-sm rounded border border-gray-200 focus:outline-none focus:ring-1 focus:ring-pink-400"
+                        />
+                      </div>
+                      <button
+                        onClick={() => saveSyncMutation.mutate()}
+                        disabled={saveSyncMutation.isPending || !activeRepo}
+                        className="w-full inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg border border-gray-200 hover:bg-gray-50 text-sm disabled:opacity-60"
+                      >
+                        {saveSyncMutation.isPending ? <RefreshCw size={14} className="animate-spin" /> : <Github size={14} />}
+                        保存配置
+                      </button>
+                    </>
+                  )}
+
+                  {syncStatus.project_config && (
+                    <button
+                      onClick={() => runSyncMutation.mutate()}
+                      disabled={runSyncMutation.isPending}
+                      className="w-full inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-pink-500 text-white hover:bg-pink-600 text-sm disabled:opacity-60"
+                    >
+                      {runSyncMutation.isPending ? <RefreshCw size={14} className="animate-spin" /> : <UploadCloud size={14} />}
+                      同步到 GitHub
+                    </button>
+                  )}
+
+                  {lastSyncedAt && (
+                    <p className="text-xs text-gray-400">上次同步 {lastSyncedAt}</p>
+                  )}
+                  {syncError && (
+                    <p className="text-xs text-red-500">{syncError}</p>
+                  )}
+                  {saveSyncMutation.error instanceof Error && (
+                    <p className="text-xs text-red-500">{saveSyncMutation.error.message}</p>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>

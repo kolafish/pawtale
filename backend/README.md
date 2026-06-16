@@ -98,6 +98,14 @@ ANTHROPIC_BASE_URL=xxx
 
 DEFAULT_AI_MODEL=claude-opus-4
 
+# GitHub App 单向备份。Private key 只放后端，可用 inline 内容或文件路径二选一。
+GITHUB_APP_ID=
+GITHUB_APP_SLUG=
+GITHUB_APP_PRIVATE_KEY=
+GITHUB_APP_PRIVATE_KEY_PATH=
+GITHUB_APP_SETUP_REDIRECT_URL=http://localhost:5173/
+GITHUB_SYNC_DEFAULT_BRANCH=main
+
 # AI 追问语音合成，默认 disabled；启用 OpenAI 兼容服务时改成 openai_compatible
 TTS_PROVIDER=disabled
 TTS_API_KEY=

@@ -126,6 +126,50 @@ export interface ProjectExportResponse {
   total_words: number;
 }
 
+export interface GitSyncInstallation {
+  installation_id: number;
+  account_login?: string | null;
+  account_type?: string | null;
+  repository_selection?: string | null;
+}
+
+export interface GitSyncRepositoryOption {
+  installation_id: number;
+  owner: string;
+  name: string;
+  full_name: string;
+  private: boolean;
+  default_branch: string;
+}
+
+export interface ProjectGitSyncConfig {
+  project_id: string;
+  installation_id: number;
+  repository_owner: string;
+  repository_name: string;
+  branch: string;
+  base_path: string;
+  last_synced_at?: string | null;
+  last_commit_sha?: string | null;
+  last_error?: string | null;
+}
+
+export interface GitSyncStatus {
+  configured: boolean;
+  install_url?: string | null;
+  installations: GitSyncInstallation[];
+  repositories: GitSyncRepositoryOption[];
+  project_config?: ProjectGitSyncConfig | null;
+}
+
+export interface ProjectGitSyncRunResponse {
+  ok: boolean;
+  synced_files: number;
+  commit_sha?: string | null;
+  synced_at: string;
+  error?: string | null;
+}
+
 // ── Memoir review surfaces ─────────────────────────
 
 export type MemoirMemoryStatus = 'draft' | 'confirmed' | 'rejected';
