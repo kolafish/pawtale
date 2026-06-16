@@ -78,6 +78,19 @@ export interface MemoirVoiceFollowUpResponse {
   follow_up_text: string;
 }
 
+export interface MemoirAssistantTTSRequest {
+  voice?: string;
+  force_regenerate?: boolean;
+}
+
+export interface MemoirAssistantTTSResponse {
+  message: MemoirChatMessage;
+  audio_file_id: string;
+  provider: string;
+  model: string;
+  mime_type: string;
+}
+
 export type VoiceGatewayClientEvent =
   | { type: "session.start"; guidance_mode: MemoirGuidanceMode; current_guidance_module?: string }
   | { type: "audio.frame"; audio: string }

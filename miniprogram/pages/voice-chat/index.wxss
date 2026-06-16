@@ -114,6 +114,21 @@
   word-break: break-word;
 }
 
+.tts-strip {
+  margin-top: 18rpx;
+  padding: 14rpx 18rpx;
+  border-radius: 16rpx;
+  background: #ffffff;
+  color: #7a3b31;
+  font-size: 24rpx;
+  font-weight: 800;
+}
+
+.tts-strip.error {
+  background: #fff1f2;
+  color: #be123c;
+}
+
 .assistant-actions {
   margin-top: 22rpx;
   display: flex;

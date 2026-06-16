@@ -12,7 +12,12 @@ import {
   type MemoirCaptureStats,
   type VoiceChatConnectionStatus,
 } from "../../services/memoir-streaming-asr";
-import { createMemoirVoiceFollowUp, getMemoirVoiceSession } from "../../services/memoir-voice-api";
+import {
+  createMemoirAssistantTTS,
+  createMemoirVoiceFollowUp,
+  downloadMemoirVoiceAudio,
+  getMemoirVoiceSession,
+} from "../../services/memoir-voice-api";
 import {
   readMemoirVoiceSessionSnapshot,
   transcriptLinesFromVoiceSessionDetail,
@@ -37,6 +42,12 @@ interface VoiceChatData {
   lastFollowUpSourceMessageId: string;
   dismissedFollowUpMessageId: string;
   canRequestFollowUp: boolean;
+  followUpMessageId: string;
+  followUpAudioFileId: string;
+  followUpTTSLoading: boolean;
+  followUpTTSPlaying: boolean;
+  followUpTTSError: string;
+  followUpTTSStateText: string;
   modeLabel: string;
   primaryActionText: string;
   captureStateText: string;
@@ -102,9 +113,9 @@ function latestTranscriptText(lines: VoiceChatTranscriptLine[]): string {
   return userLines.length ? userLines[userLines.length - 1].text : "";
 }
 
-function latestAssistantText(lines: VoiceChatTranscriptLine[]): string {
+function latestAssistantLine(lines: VoiceChatTranscriptLine[]): VoiceChatTranscriptLine | undefined {
   const latest = lines[lines.length - 1];
-  return latest?.role === "assistant" ? latest.text : "";
+  return latest?.role === "assistant" ? latest : undefined;
 }
 
 function latestUserMessageId(lines: VoiceChatTranscriptLine[]): string {
@@ -123,16 +134,20 @@ function coveredFollowUpSourceMessageId(lines: VoiceChatTranscriptLine[]): strin
 }
 
 function latestAssistantMessageId(lines: VoiceChatTranscriptLine[]): string {
-  const latest = lines[lines.length - 1];
-  return latest?.role === "assistant" ? latest.message_id || latest.id : "";
+  const latest = latestAssistantLine(lines);
+  return latest ? latest.message_id || latest.id : "";
 }
 
-function visibleAssistantText(lines: VoiceChatTranscriptLine[], dismissedMessageId: string): string {
-  const latestMessageId = latestAssistantMessageId(lines);
-  if (!latestMessageId || latestMessageId === dismissedMessageId) {
-    return "";
+function visibleAssistantLine(
+  lines: VoiceChatTranscriptLine[],
+  dismissedMessageId: string,
+): VoiceChatTranscriptLine | undefined {
+  const latest = latestAssistantLine(lines);
+  if (!latest) {
+    return undefined;
   }
-  return latestAssistantText(lines);
+  const latestMessageId = latest.message_id || latest.id;
+  return latestMessageId === dismissedMessageId ? undefined : latest;
 }
 
 function canRequestFollowUp(
@@ -189,6 +204,11 @@ Page<VoiceChatData, {
   generateFollowUp(regenerate?: boolean): Promise<void>;
   regenerateFollowUp(): Promise<void>;
   skipFollowUp(): void;
+  prepareFollowUpTTS(messageId: string, forceRegenerate?: boolean): Promise<void>;
+  playFollowUpAudio(): Promise<void>;
+  playAudioFile(audioFileId: string): Promise<void>;
+  stopFollowUpAudio(): void;
+  cancelFollowUpTTS(): void;
   connectGateway(): Promise<void>;
   toggleRecording(): void;
   finishSession(): Promise<void>;
@@ -198,7 +218,14 @@ Page<VoiceChatData, {
   handlePartial(text: string): void;
   handleFinal(event: VoiceGatewayServerEvent): void;
   handleError(message: string, error?: VoiceChatErrorInfo): void;
+  audio: WechatMiniprogram.InnerAudioContext | null;
+  ttsPlayToken: number;
+  ttsRequestSerial: number;
 }>({
+  audio: null,
+  ttsPlayToken: 0,
+  ttsRequestSerial: 0,
+
   data: {
     voiceSessionId: "",
     guidanceMode: "free_narration",
@@ -217,6 +244,12 @@ Page<VoiceChatData, {
     lastFollowUpSourceMessageId: "",
     dismissedFollowUpMessageId: "",
     canRequestFollowUp: false,
+    followUpMessageId: "",
+    followUpAudioFileId: "",
+    followUpTTSLoading: false,
+    followUpTTSPlaying: false,
+    followUpTTSError: "",
+    followUpTTSStateText: "",
     modeLabel: "自由讲述",
     primaryActionText: "开始说话",
     captureStateText: "麦克风未开始",
@@ -252,6 +285,7 @@ Page<VoiceChatData, {
   onUnload() {
     followUpRequestSerial += 1;
     this.persistCurrentTranscriptSnapshot();
+    this.cancelFollowUpTTS();
     streamingClient?.close();
     streamingClient = null;
   },
@@ -263,20 +297,25 @@ Page<VoiceChatData, {
     }
     const guidanceMode = snapshot.detail?.session.guidance_mode || this.data.guidanceMode;
     const currentGuidanceModule = snapshot.detail?.session.current_guidance_module || this.data.currentGuidanceModule;
+    const assistantLine = visibleAssistantLine(snapshot.transcriptLines, this.data.dismissedFollowUpMessageId);
+    const coveredSourceMessageId = coveredFollowUpSourceMessageId(snapshot.transcriptLines);
+    const lastFollowUpSourceMessageId = coveredSourceMessageId || this.data.lastFollowUpSourceMessageId;
     this.setData({
       guidanceMode,
       currentGuidanceModule,
       modeLabel: modeLabel(guidanceMode),
       transcriptLines: snapshot.transcriptLines,
       latestTranscriptText: latestTranscriptText(snapshot.transcriptLines),
-      assistantPromptText: visibleAssistantText(snapshot.transcriptLines, this.data.dismissedFollowUpMessageId),
+      assistantPromptText: assistantLine?.text || "",
+      followUpMessageId: assistantLine?.message_id || assistantLine?.id || "",
+      followUpAudioFileId: assistantLine?.audio_file_id || "",
+      followUpTTSStateText: assistantLine?.audio_file_id ? "语音已生成" : this.data.followUpTTSStateText,
       totalTranscriptCharCount: totalTranscriptChars(snapshot.transcriptLines),
-      lastFollowUpSourceMessageId: coveredFollowUpSourceMessageId(snapshot.transcriptLines)
-        || this.data.lastFollowUpSourceMessageId,
+      lastFollowUpSourceMessageId,
       canRequestFollowUp: canRequestFollowUp(
         snapshot.transcriptLines,
         guidanceMode,
-        coveredFollowUpSourceMessageId(snapshot.transcriptLines) || this.data.lastFollowUpSourceMessageId,
+        lastFollowUpSourceMessageId,
         this.data.followUpLoading,
       ),
     });
@@ -305,13 +344,17 @@ Page<VoiceChatData, {
       : this.data.transcriptLines;
     const coveredSourceMessageId = coveredFollowUpSourceMessageId(nextLines);
     const lastFollowUpSourceMessageId = coveredSourceMessageId || this.data.lastFollowUpSourceMessageId;
+    const assistantLine = visibleAssistantLine(nextLines, this.data.dismissedFollowUpMessageId);
     this.setData({
       guidanceMode,
       currentGuidanceModule,
       modeLabel: modeLabel(guidanceMode),
       transcriptLines: nextLines,
       latestTranscriptText: latestTranscriptText(nextLines),
-      assistantPromptText: visibleAssistantText(nextLines, this.data.dismissedFollowUpMessageId),
+      assistantPromptText: assistantLine?.text || "",
+      followUpMessageId: assistantLine?.message_id || assistantLine?.id || "",
+      followUpAudioFileId: assistantLine?.audio_file_id || "",
+      followUpTTSStateText: assistantLine?.audio_file_id ? "语音已生成" : this.data.followUpTTSStateText,
       totalTranscriptCharCount: totalTranscriptChars(nextLines),
       lastFollowUpSourceMessageId,
       canRequestFollowUp: canRequestFollowUp(
@@ -375,12 +418,17 @@ Page<VoiceChatData, {
         transcriptLines,
         assistantPromptText: response.follow_up_text,
         dismissedFollowUpMessageId: "",
+        followUpMessageId: response.message.id,
+        followUpAudioFileId: response.message.audio_file_id || "",
+        followUpTTSError: "",
+        followUpTTSStateText: "",
         totalTranscriptCharCount: totalTranscriptChars(transcriptLines),
         persistenceStateText: "等待回答",
         lastFollowUpSourceMessageId: sourceMessageId,
         canRequestFollowUp: false,
       });
       writeMemoirVoiceSessionSnapshot(this.data.voiceSessionId, { transcriptLines });
+      void this.prepareFollowUpTTS(response.message.id);
     } catch (error) {
       if (requestSerial !== followUpRequestSerial) {
         return;
@@ -411,10 +459,16 @@ Page<VoiceChatData, {
 
   skipFollowUp() {
     const dismissedFollowUpMessageId = latestAssistantMessageId(this.data.transcriptLines);
+    this.cancelFollowUpTTS();
     this.setData({
       assistantPromptText: "",
       followUpError: "",
       dismissedFollowUpMessageId,
+      followUpMessageId: "",
+      followUpAudioFileId: "",
+      followUpTTSLoading: false,
+      followUpTTSError: "",
+      followUpTTSStateText: "",
       canRequestFollowUp: canRequestFollowUp(
         this.data.transcriptLines,
         this.data.guidanceMode,
@@ -423,6 +477,148 @@ Page<VoiceChatData, {
       ),
       persistenceStateText: "已跳过追问",
     });
+  },
+
+  async prepareFollowUpTTS(messageId, forceRegenerate = false) {
+    if (!this.data.voiceSessionId || !messageId || this.data.followUpTTSLoading) {
+      return;
+    }
+    this.stopFollowUpAudio();
+    const requestSerial = this.ttsRequestSerial + 1;
+    this.ttsRequestSerial = requestSerial;
+    this.setData({
+      followUpTTSLoading: true,
+      followUpTTSError: "",
+      followUpTTSStateText: "正在合成语音",
+    });
+    try {
+      const response = await createMemoirAssistantTTS(this.data.voiceSessionId, messageId, {
+        force_regenerate: forceRegenerate,
+      });
+      if (requestSerial !== this.ttsRequestSerial || this.data.followUpMessageId !== response.message.id) {
+        return;
+      }
+      const transcriptLines = this.data.transcriptLines.map((line) => {
+        if ((line.message_id || line.id) !== response.message.id) {
+          return line;
+        }
+        return {
+          ...line,
+          audio_file_id: response.audio_file_id,
+        };
+      });
+      this.setData({
+        transcriptLines,
+        followUpMessageId: response.message.id,
+        followUpAudioFileId: response.audio_file_id,
+        followUpTTSError: "",
+        followUpTTSStateText: "语音已生成",
+      });
+      writeMemoirVoiceSessionSnapshot(this.data.voiceSessionId, { transcriptLines });
+      await this.playAudioFile(response.audio_file_id);
+    } catch (error) {
+      if (requestSerial === this.ttsRequestSerial) {
+        this.setData({
+          followUpTTSError: error instanceof Error ? error.message : "AI 语音生成失败",
+          followUpTTSStateText: "语音暂不可用",
+        });
+      }
+    } finally {
+      if (requestSerial === this.ttsRequestSerial) {
+        this.setData({ followUpTTSLoading: false });
+      }
+    }
+  },
+
+  async playFollowUpAudio() {
+    if (this.data.followUpTTSLoading) {
+      return;
+    }
+    if (this.data.followUpAudioFileId) {
+      await this.playAudioFile(this.data.followUpAudioFileId);
+      return;
+    }
+    if (this.data.followUpMessageId) {
+      await this.prepareFollowUpTTS(this.data.followUpMessageId, false);
+    }
+  },
+
+  async playAudioFile(audioFileId) {
+    if (!audioFileId) {
+      return;
+    }
+    this.stopFollowUpAudio();
+    const playToken = this.ttsPlayToken + 1;
+    this.ttsPlayToken = playToken;
+    this.setData({
+      followUpTTSPlaying: true,
+      followUpTTSError: "",
+      followUpTTSStateText: "正在播放",
+    });
+    try {
+      const tempFilePath = await downloadMemoirVoiceAudio(audioFileId);
+      if (playToken !== this.ttsPlayToken) {
+        return;
+      }
+      const audio = wx.createInnerAudioContext();
+      this.audio = audio;
+      audio.src = tempFilePath;
+      audio.onEnded(() => {
+        if (playToken === this.ttsPlayToken) {
+          this.setData({ followUpTTSPlaying: false, followUpTTSStateText: "播放完成" });
+        }
+        audio.destroy();
+        if (this.audio === audio) {
+          this.audio = null;
+        }
+      });
+      audio.onError(() => {
+        if (playToken === this.ttsPlayToken) {
+          this.setData({
+            followUpTTSPlaying: false,
+            followUpTTSError: "AI 语音播放失败",
+            followUpTTSStateText: "播放失败",
+          });
+        }
+        audio.destroy();
+        if (this.audio === audio) {
+          this.audio = null;
+        }
+      });
+      audio.play();
+    } catch (error) {
+      if (playToken === this.ttsPlayToken) {
+        this.setData({
+          followUpTTSPlaying: false,
+          followUpTTSError: error instanceof Error ? error.message : "AI 语音播放失败",
+          followUpTTSStateText: "播放失败",
+        });
+      }
+    }
+  },
+
+  stopFollowUpAudio() {
+    this.ttsPlayToken += 1;
+    if (this.audio) {
+      this.audio.stop();
+      this.audio.destroy();
+      this.audio = null;
+    }
+    if (this.data.followUpTTSPlaying) {
+      this.setData({ followUpTTSPlaying: false });
+    }
+  },
+
+  cancelFollowUpTTS() {
+    this.ttsRequestSerial += 1;
+    this.stopFollowUpAudio();
+    if (this.data.followUpTTSLoading || this.data.followUpTTSPlaying) {
+      this.setData({
+        followUpTTSLoading: false,
+        followUpTTSPlaying: false,
+        followUpTTSStateText: this.data.followUpTTSStateText ? "语音已停止" : "",
+      });
+    }
   },
 
   async connectGateway() {
@@ -469,6 +665,7 @@ Page<VoiceChatData, {
       void this.connectGateway();
       return;
     }
+    this.cancelFollowUpTTS();
     this.setData({
       recording: true,
       error: "",
@@ -479,6 +676,7 @@ Page<VoiceChatData, {
   },
 
   async finishSession() {
+    this.cancelFollowUpTTS();
     if (!streamingClient) {
       await this.refreshVoiceSessionSnapshot();
       return;
@@ -593,6 +791,11 @@ Page<VoiceChatData, {
       errorKindText: "",
       assistantPromptText: "",
       dismissedFollowUpMessageId: "",
+      followUpMessageId: "",
+      followUpAudioFileId: "",
+      followUpTTSLoading: false,
+      followUpTTSError: "",
+      followUpTTSStateText: "",
       canRequestFollowUp: canRequestFollowUp(
         transcriptLines,
         this.data.guidanceMode,

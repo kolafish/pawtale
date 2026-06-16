@@ -97,6 +97,14 @@ ANTHROPIC_AUTH_TOKEN=xxx
 ANTHROPIC_BASE_URL=xxx
 
 DEFAULT_AI_MODEL=claude-opus-4
+
+# AI 追问语音合成，默认 disabled；启用 OpenAI 兼容服务时改成 openai_compatible
+TTS_PROVIDER=disabled
+TTS_API_KEY=
+TTS_BASE_URL=https://api.openai.com/v1
+TTS_MODEL=tts-1
+TTS_VOICE=alloy
+TTS_RESPONSE_FORMAT=mp3
 ```
 
 生产环境必须设置 `APP_ENV=production`，并使用至少 32 字符的非默认随机 `APP_SECRET_KEY`；否则后端启动会失败。

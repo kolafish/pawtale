@@ -88,6 +88,11 @@ class MemoirVoiceFollowUpRequest(BaseModel):
     regenerate: bool = False
 
 
+class MemoirAssistantTTSRequest(BaseModel):
+    voice: str | None = None
+    force_regenerate: bool = False
+
+
 class MemoirVoiceSessionResponse(BaseModel):
     id: str
     project_id: str
@@ -151,6 +156,14 @@ class MemoirVoiceSessionDetailResponse(BaseModel):
 class MemoirVoiceFollowUpResponse(BaseModel):
     message: MemoirChatMessageResponse
     follow_up_text: str
+
+
+class MemoirAssistantTTSResponse(BaseModel):
+    message: MemoirChatMessageResponse
+    audio_file_id: str
+    provider: str
+    model: str
+    mime_type: str
 
 
 class MemoirVoiceTranscriptItemResponse(BaseModel):
