@@ -114,6 +114,20 @@
   word-break: break-word;
 }
 
+.assistant-tts-text {
+  display: block;
+  margin-top: 18rpx;
+  color: #24100b;
+  font-size: 38rpx;
+  font-weight: 800;
+  line-height: 1.42;
+  word-break: break-word;
+}
+
+.assistant-tts-spoken {
+  color: #b85c45;
+}
+
 .tts-strip {
   margin-top: 18rpx;
   padding: 14rpx 18rpx;
@@ -122,11 +136,19 @@
   color: #7a3b31;
   font-size: 24rpx;
   font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18rpx;
 }
 
 .tts-strip.error {
   background: #fff1f2;
   color: #be123c;
+}
+
+.tts-progress-text {
+  color: #9f4a3c;
 }
 
 .assistant-actions {

@@ -19,6 +19,7 @@ import {
   downloadMemoirVoiceAudio,
   getMemoirVoiceSession,
 } from "../../services/memoir-voice-api";
+import { splitTextByPlaybackProgress } from "../../services/tts-text-progress";
 import { canAutoStartListeningAfterTTS } from "../../services/voice-chat-auto-listen";
 import {
   readMemoirVoiceSessionSnapshot,
@@ -53,6 +54,9 @@ interface VoiceChatData {
   followUpTTSPlaying: boolean;
   followUpTTSError: string;
   followUpTTSStateText: string;
+  ttsSpokenText: string;
+  ttsRemainingText: string;
+  ttsProgressPercent: number;
   modeLabel: string;
   primaryActionText: string;
   captureStateText: string;
@@ -244,6 +248,8 @@ Page<VoiceChatData, {
   playAudioFile(audioFileId: string, options?: { autoListenAfterPlayback?: boolean }): Promise<void>;
   stopFollowUpAudio(): void;
   cancelFollowUpTTS(): void;
+  updateFollowUpTTSProgress(currentTime: number, duration: number): void;
+  resetFollowUpTTSProgress(): void;
   toggleAutoStop(): void;
   connectGateway(): Promise<void>;
   startRecording(autoTriggered?: boolean): boolean;
@@ -291,6 +297,9 @@ Page<VoiceChatData, {
     followUpTTSPlaying: false,
     followUpTTSError: "",
     followUpTTSStateText: "",
+    ttsSpokenText: "",
+    ttsRemainingText: "",
+    ttsProgressPercent: 0,
     modeLabel: "自由讲述",
     primaryActionText: "开始说话",
     captureStateText: "麦克风未开始",
@@ -525,6 +534,9 @@ Page<VoiceChatData, {
       followUpTTSLoading: false,
       followUpTTSError: "",
       followUpTTSStateText: "",
+      ttsSpokenText: "",
+      ttsRemainingText: "",
+      ttsProgressPercent: 0,
       canRequestFollowUp: canRequestFollowUp(
         this.data.transcriptLines,
         this.data.guidanceMode,
@@ -546,6 +558,9 @@ Page<VoiceChatData, {
       followUpTTSLoading: true,
       followUpTTSError: "",
       followUpTTSStateText: "正在合成语音",
+      ttsSpokenText: "",
+      ttsRemainingText: this.data.assistantPromptText,
+      ttsProgressPercent: 0,
     });
     try {
       const response = await createMemoirAssistantTTS(this.data.voiceSessionId, messageId, {
@@ -611,6 +626,7 @@ Page<VoiceChatData, {
       followUpTTSError: "",
       followUpTTSStateText: "正在播放",
     });
+    this.updateFollowUpTTSProgress(0, 0);
     try {
       const tempFilePath = await downloadMemoirVoiceAudio(audioFileId);
       if (playToken !== this.ttsPlayToken) {
@@ -620,11 +636,19 @@ Page<VoiceChatData, {
       this.audio = audio;
       configureAudiblePlayback(audio);
       audio.src = tempFilePath;
+      audio.onTimeUpdate(() => {
+        if (playToken === this.ttsPlayToken) {
+          this.updateFollowUpTTSProgress(audio.currentTime, audio.duration);
+        }
+      });
       audio.onEnded(() => {
         if (playToken === this.ttsPlayToken) {
           this.setData({
             followUpTTSPlaying: false,
             followUpTTSStateText: options.autoListenAfterPlayback ? "播放完成，正在听你说" : "播放完成",
+            ttsSpokenText: this.data.assistantPromptText,
+            ttsRemainingText: "",
+            ttsProgressPercent: 100,
           });
         }
         audio.destroy();
@@ -670,6 +694,7 @@ Page<VoiceChatData, {
     if (this.data.followUpTTSPlaying) {
       this.setData({ followUpTTSPlaying: false });
     }
+    this.resetFollowUpTTSProgress();
   },
 
   cancelFollowUpTTS() {
@@ -682,6 +707,29 @@ Page<VoiceChatData, {
         followUpTTSStateText: this.data.followUpTTSStateText ? "语音已停止" : "",
       });
     }
+  },
+
+  updateFollowUpTTSProgress(currentTime, duration) {
+    const text = this.data.assistantPromptText;
+    if (!text) {
+      this.resetFollowUpTTSProgress();
+      return;
+    }
+    const progressRatio = duration > 0 ? currentTime / duration : 0;
+    const progress = splitTextByPlaybackProgress(text, progressRatio);
+    this.setData({
+      ttsSpokenText: progress.spokenText,
+      ttsRemainingText: progress.remainingText,
+      ttsProgressPercent: progress.progressPercent,
+    });
+  },
+
+  resetFollowUpTTSProgress() {
+    this.setData({
+      ttsSpokenText: "",
+      ttsRemainingText: "",
+      ttsProgressPercent: 0,
+    });
   },
 
   toggleAutoStop() {
