@@ -9,7 +9,10 @@ import type {
   ReferenceItem,
   WritingSession,
   ProjectExportResponse,
+  GitSyncStatus,
   DocumentGroup,
+  ProjectGitSyncConfig,
+  ProjectGitSyncRunResponse,
   MultiReviseResponse,
   ProjectAnalyzeResponse,
   AnalyzeApplyRequest,
@@ -89,6 +92,24 @@ export const projectsApi = {
   // Export
   export: (projectId: string) =>
     api.get<ProjectExportResponse>(`/projects/${projectId}/export`).then(r => r.data),
+
+  // GitHub one-way sync
+  getGitSync: (projectId: string) =>
+    api.get<GitSyncStatus>(`/projects/${projectId}/git-sync`).then(r => r.data),
+  saveGitSync: (
+    projectId: string,
+    data: {
+      installation_id: number;
+      repository_owner: string;
+      repository_name: string;
+      branch: string;
+      base_path: string;
+    },
+  ) => api.put<ProjectGitSyncConfig>(`/projects/${projectId}/git-sync`, data).then(r => r.data),
+  deleteGitSync: (projectId: string) =>
+    api.delete(`/projects/${projectId}/git-sync`),
+  runGitSync: (projectId: string) =>
+    api.post<ProjectGitSyncRunResponse>(`/projects/${projectId}/git-sync/run`).then(r => r.data),
 
   // AI Continue
   aiContinue: (projectId: string, docId: string, data: { instruction?: string; ai_model?: string; debug?: boolean }) =>
