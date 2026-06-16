@@ -211,6 +211,7 @@ declare namespace WechatMiniprogram {
     navigateTo(option: NavigateOption): void;
     redirectTo(option: NavigateOption): void;
     reLaunch(option: NavigateOption): void;
+    switchTab(option: NavigateOption): void;
     navigateBack(option?: NavigateBackOption): void;
     showActionSheet(option: ActionSheetOption): void;
     showModal(option: ModalOption): void;

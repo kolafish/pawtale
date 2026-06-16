@@ -185,6 +185,6 @@ Page<ProjectsData, {
   },
 
   openHome() {
-    wx.redirectTo({ url: "/pages/home/index" });
+    wx.switchTab({ url: "/pages/me/index" });
   },
 });

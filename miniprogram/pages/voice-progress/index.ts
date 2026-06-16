@@ -192,10 +192,10 @@ Page<ProgressData, {
   },
 
   openTranscripts() {
-    wx.navigateTo({ url: "/pages/transcripts/index" });
+    wx.switchTab({ url: "/pages/transcripts/index" });
   },
 
   startNewSession() {
-    wx.navigateTo({ url: "/pages/voice-start/index" });
+    wx.switchTab({ url: "/pages/voice-start/index" });
   },
 });
