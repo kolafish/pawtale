@@ -1,3 +1,7 @@
+import json
+from io import BytesIO
+from zipfile import ZipFile
+
 from project_helpers import create_project_id, create_project_with_document
 from app.services.projects.export import markdown_to_plain_text
 
@@ -91,3 +95,56 @@ class TestExport:
         assert "正文标题" in response.text
         assert "这是 Markdown。" in response.text
         assert "列表项" in response.text
+
+    async def test_download_zip_export_includes_manuscript_and_references(self, client):
+        project_id, document_id = await create_project_with_document(client, "ZIP 导出")
+        await client.put(
+            f"/api/projects/{project_id}/documents/{document_id}",
+            json={"content": "# 第一章\n\n这是 **Markdown** 正文。"},
+        )
+        reference = await client.post(
+            f"/api/projects/{project_id}/references",
+            json={
+                "type": "outline",
+                "name": "主线资料",
+                "content": "大纲内容",
+                "metadata_json": {"source": "manual"},
+            },
+        )
+        assert reference.status_code == 201
+
+        response = await client.get(f"/api/projects/{project_id}/export/download?format=zip")
+
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("application/zip")
+        assert "ZIP%20%E5%AF%BC%E5%87%BA.zip" in response.headers["content-disposition"]
+
+        with ZipFile(BytesIO(response.content)) as archive:
+            names = set(archive.namelist())
+            root = "ZIP-导出"
+            assert f"{root}/pawtale-project.json" in names
+            assert f"{root}/manuscript/full.md" in names
+            assert f"{root}/manuscript/full.txt" in names
+            document_path = next(
+                name
+                for name in names
+                if name.startswith(f"{root}/manuscript/")
+                and name.endswith(f"{document_id}.md")
+                and name != f"{root}/manuscript/full.md"
+            )
+            assert any(
+                name.startswith(f"{root}/references/001-主线资料-") and name.endswith(".json")
+                for name in names
+            )
+
+            manifest = json.loads(archive.read(f"{root}/pawtale-project.json"))
+            assert manifest["title"] == "ZIP 导出"
+            assert manifest["references"][0]["name"] == "主线资料"
+            assert archive.read(document_path).decode() == "# 第一章\n\n这是 **Markdown** 正文。"
+            assert "# 第一章" in archive.read(f"{root}/manuscript/full.md").decode()
+            assert "**Markdown**" not in archive.read(f"{root}/manuscript/full.txt").decode()
+
+            reference_path = next(name for name in names if name.startswith(f"{root}/references/001-主线资料-"))
+            reference_payload = json.loads(archive.read(reference_path))
+            assert reference_payload["content"] == "大纲内容"
+            assert reference_payload["metadata_json"] == {"source": "manual"}

@@ -208,6 +208,7 @@ class ProjectExportResponse(BaseModel):
     title: str
     sections: list[dict]  # [{group: str, documents: [{name, content}]}]
     total_words: int
+    references: list[dict] = Field(default_factory=list)
 
 
 # ── GitHub one-way sync ─────────────────────────────
