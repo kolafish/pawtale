@@ -6,6 +6,7 @@ import type {
   VoiceGatewayState,
   VoiceGatewayServerEvent,
 } from "../../domain/voice-chat";
+import { configureAudiblePlayback } from "../../services/audio-playback";
 import {
   classifyVoiceClientConnectionError,
   MemoirStreamingAsrClient,
@@ -571,6 +572,7 @@ Page<VoiceChatData, {
       }
       const audio = wx.createInnerAudioContext();
       this.audio = audio;
+      configureAudiblePlayback(audio);
       audio.src = tempFilePath;
       audio.onEnded(() => {
         if (playToken === this.ttsPlayToken) {
