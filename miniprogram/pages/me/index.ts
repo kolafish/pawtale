@@ -1,6 +1,13 @@
 import type { MemoirVoiceProgressResponse } from "../../domain/voice-chat";
 import type { TTSVoiceOption } from "../../services/tts-settings";
-import { getMemoirIdentity, logoutBackendSession, updateBackendProfile } from "../../services/auth";
+import {
+  getMemoirIdentity,
+  loginWithEmail,
+  loginWithWeChat,
+  logoutBackendSession,
+  setAccountCredentials,
+  updateBackendProfile,
+} from "../../services/auth";
 import { getMemoirVoiceProgress } from "../../services/memoir-voice-api";
 import { ApiError } from "../../services/request";
 import {
@@ -15,14 +22,24 @@ const WECHAT_PLACEHOLDER_DISPLAY_NAME = "微信用户";
 
 interface MeData {
   loading: boolean;
+  loggedIn: boolean;
   savingName: boolean;
   editingName: boolean;
   voiceStatsLoading: boolean;
+  wechatLoading: boolean;
+  credentialsLoading: boolean;
   error: string;
   displayName: string;
   nameDraft: string;
   avatarText: string;
   email: string;
+  emailInput: string;
+  password: string;
+  credentialEmail: string;
+  credentialPassword: string;
+  credentialDisplayName: string;
+  accountMode: boolean;
+  credentialsMode: boolean;
   projectTitle: string;
   projectCount: number;
   sessionCount: number;
@@ -82,10 +99,43 @@ function voiceStatsData(progress: MemoirVoiceProgressResponse) {
   };
 }
 
+function credentialDisplayName(displayName: string): string {
+  const normalizedName = displayName.trim();
+  return normalizedName && normalizedName !== WECHAT_PLACEHOLDER_DISPLAY_NAME ? normalizedName : "";
+}
+
+function loggedOutData(credentialsMode = false): Partial<MeData> {
+  return {
+    loggedIn: false,
+    editingName: false,
+    voiceStatsLoading: false,
+    displayName: "",
+    nameDraft: "",
+    avatarText: "作",
+    email: "",
+    projectTitle: "",
+    projectCount: 0,
+    sessionCount: 0,
+    utteranceCount: 0,
+    totalUserCharCount: 0,
+    totalAudioText: "0 秒",
+    credentialsMode,
+  };
+}
+
 Page<MeData, {
   onShow(): Promise<void>;
   loadMe(): Promise<void>;
   loadVoiceStats(projectId: string): Promise<void>;
+  changeEmailInput(event: InputEvent): void;
+  changePassword(event: InputEvent): void;
+  changeCredentialEmail(event: InputEvent): void;
+  changeCredentialPassword(event: InputEvent): void;
+  changeCredentialDisplayName(event: InputEvent): void;
+  toggleAccountMode(): void;
+  submitWeChat(): Promise<void>;
+  submitAccount(): Promise<void>;
+  submitCredentials(): Promise<void>;
   startEditName(): void;
   changeNameDraft(event: InputEvent): void;
   cancelEditName(): void;
@@ -97,14 +147,24 @@ Page<MeData, {
 }>({
   data: {
     loading: false,
+    loggedIn: false,
     savingName: false,
     editingName: false,
     voiceStatsLoading: false,
+    wechatLoading: false,
+    credentialsLoading: false,
     error: "",
     displayName: "",
     nameDraft: "",
     avatarText: "作",
     email: "",
+    emailInput: "",
+    password: "",
+    credentialEmail: "",
+    credentialPassword: "",
+    credentialDisplayName: "",
+    accountMode: false,
+    credentialsMode: false,
     projectTitle: "",
     projectCount: 0,
     sessionCount: 0,
@@ -127,12 +187,24 @@ Page<MeData, {
     try {
       const identity = await getMemoirIdentity();
       if (!identity.password_login_enabled) {
-        wx.reLaunch({ url: "/pages/login/index" });
+        this.setData({
+          ...loggedOutData(true),
+          accountMode: false,
+          credentialDisplayName: credentialDisplayName(identity.display_name),
+        });
         return;
       }
       const displayName = displayNameForUser(identity.display_name, identity.email);
       const ttsSettings = readTTSSettings();
       this.setData({
+        loggedIn: true,
+        accountMode: false,
+        credentialsMode: false,
+        emailInput: "",
+        password: "",
+        credentialEmail: "",
+        credentialPassword: "",
+        credentialDisplayName: "",
         displayName,
         nameDraft: displayName,
         editingName: false,
@@ -146,12 +218,136 @@ Page<MeData, {
       await this.loadVoiceStats(identity.active_project_id);
     } catch (error) {
       if (error instanceof ApiError && [401, 403].includes(error.statusCode)) {
-        wx.reLaunch({ url: "/pages/login/index" });
+        this.setData(loggedOutData(false));
         return;
       }
-      this.setData({ error: error instanceof Error ? error.message : "我的页面加载失败" });
+      this.setData({
+        ...loggedOutData(false),
+        error: error instanceof Error ? error.message : "我的页面加载失败",
+      });
     } finally {
       this.setData({ loading: false });
+    }
+  },
+
+  changeEmailInput(event) {
+    this.setData({ emailInput: event.detail.value, error: "" });
+  },
+
+  changePassword(event) {
+    this.setData({ password: event.detail.value, error: "" });
+  },
+
+  changeCredentialEmail(event) {
+    this.setData({ credentialEmail: event.detail.value, error: "" });
+  },
+
+  changeCredentialPassword(event) {
+    this.setData({ credentialPassword: event.detail.value, error: "" });
+  },
+
+  changeCredentialDisplayName(event) {
+    this.setData({ credentialDisplayName: event.detail.value, error: "" });
+  },
+
+  toggleAccountMode() {
+    this.setData({
+      accountMode: !this.data.accountMode,
+      error: "",
+    });
+  },
+
+  async submitWeChat() {
+    if (this.data.loading || this.data.wechatLoading || this.data.credentialsLoading) {
+      return;
+    }
+    this.setData({ wechatLoading: true, error: "" });
+    try {
+      const response = await loginWithWeChat();
+      if (response.needs_credentials || !response.user.password_login_enabled) {
+        this.setData({
+          ...loggedOutData(true),
+          accountMode: false,
+          credentialDisplayName: credentialDisplayName(response.user.display_name),
+          error: "",
+        });
+        return;
+      }
+      await this.loadMe();
+      if (this.data.loggedIn) {
+        wx.showToast({ title: "已登录", icon: "success" });
+      }
+    } catch (error) {
+      this.setData({
+        error: error instanceof Error ? error.message : "微信登录失败",
+      });
+    } finally {
+      this.setData({ wechatLoading: false });
+    }
+  },
+
+  async submitAccount() {
+    if (this.data.loading || this.data.wechatLoading || this.data.credentialsLoading) {
+      return;
+    }
+    const email = this.data.emailInput.trim();
+    const password = this.data.password;
+    if (!email || !password) {
+      this.setData({ error: "请输入邮箱和密码" });
+      return;
+    }
+    this.setData({ loading: true, error: "" });
+    try {
+      await loginWithEmail({ email, password });
+      await this.loadMe();
+      if (this.data.loggedIn) {
+        wx.showToast({ title: "已登录", icon: "success" });
+      }
+    } catch (error) {
+      this.setData({
+        error: error instanceof Error ? error.message : "登录失败",
+      });
+    } finally {
+      this.setData({ loading: false });
+    }
+  },
+
+  async submitCredentials() {
+    if (this.data.loading || this.data.wechatLoading || this.data.credentialsLoading) {
+      return;
+    }
+    const email = this.data.credentialEmail.trim();
+    const password = this.data.credentialPassword;
+    const displayName = this.data.credentialDisplayName.trim();
+    if (!email || !password) {
+      this.setData({ error: "请输入邮箱和密码" });
+      return;
+    }
+    if (password.length < 8) {
+      this.setData({ error: "密码至少需要 8 位" });
+      return;
+    }
+    this.setData({ credentialsLoading: true, error: "" });
+    try {
+      const response = await setAccountCredentials({
+        email,
+        password,
+        display_name: displayName || undefined,
+      });
+      if (response.needs_credentials) {
+        this.setData({ error: "账号还没有设置完成，请重新提交" });
+        return;
+      }
+      await this.loadMe();
+      if (this.data.loggedIn) {
+        wx.showToast({ title: "已登录", icon: "success" });
+      }
+    } catch (error) {
+      this.setData({
+        error: error instanceof Error ? error.message : "保存账号失败",
+      });
+    } finally {
+      this.setData({ credentialsLoading: false });
     }
   },
 
@@ -246,8 +442,18 @@ Page<MeData, {
       console.warn("backend logout failed", error);
     } finally {
       replaceMemoirStore({});
-      this.setData({ loading: false });
-      wx.reLaunch({ url: "/pages/login/index" });
+      this.setData({
+        ...loggedOutData(false),
+        loading: false,
+        error: "",
+        emailInput: "",
+        password: "",
+        credentialEmail: "",
+        credentialPassword: "",
+        credentialDisplayName: "",
+        accountMode: false,
+      });
+      wx.showToast({ title: "已退出", icon: "success" });
     }
   },
 });

@@ -25,7 +25,9 @@
       disabled="{{loading || creatingVoice}}"
       bindtap="startVoiceChat"
     >
-      {{creatingVoice ? "正在准备" : "进入语音聊天"}}
+      <block wx:if="{{needsLogin}}">去我的页面登录</block>
+      <block wx:elif="{{creatingVoice}}">正在准备</block>
+      <block wx:else>进入语音聊天</block>
     </button>
   </view>
 </view>

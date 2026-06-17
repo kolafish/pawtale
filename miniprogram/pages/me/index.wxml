@@ -6,6 +6,112 @@
 
   <view wx:if="{{error}}" class="error">{{error}}</view>
 
+  <block wx:if="{{!loggedIn}}">
+    <view class="login-panel">
+      <text class="panel-title">{{credentialsMode ? "设置登录账号" : "登录 Pawtale"}}</text>
+      <text class="panel-copy">
+        {{credentialsMode ? "设置后可在 Web 端继续使用同一个账号。" : "登录后管理回忆录、转写和成书。"}}
+      </text>
+
+      <block wx:if="{{credentialsMode}}">
+        <view class="field">
+          <text class="field-label">邮箱</text>
+          <input
+            class="field-input"
+            type="text"
+            value="{{credentialEmail}}"
+            placeholder="name@example.com"
+            bindinput="changeCredentialEmail"
+          />
+        </view>
+
+        <view class="field">
+          <text class="field-label">密码</text>
+          <input
+            class="field-input"
+            password
+            value="{{credentialPassword}}"
+            placeholder="至少 8 位"
+            bindinput="changeCredentialPassword"
+          />
+        </view>
+
+        <view class="field">
+          <text class="field-label">昵称</text>
+          <input
+            class="field-input"
+            type="text"
+            value="{{credentialDisplayName}}"
+            placeholder="余主任"
+            bindinput="changeCredentialDisplayName"
+          />
+        </view>
+
+        <button
+          class="primary-button"
+          loading="{{credentialsLoading}}"
+          disabled="{{loading || wechatLoading || credentialsLoading}}"
+          bindtap="submitCredentials"
+        >
+          {{credentialsLoading ? "保存中" : "保存并登录"}}
+        </button>
+      </block>
+
+      <block wx:else>
+        <button
+          class="primary-button"
+          loading="{{wechatLoading}}"
+          disabled="{{loading || wechatLoading || credentialsLoading}}"
+          bindtap="submitWeChat"
+        >
+          {{wechatLoading ? "微信登录中" : "微信登录"}}
+        </button>
+
+        <button
+          class="mode-button"
+          disabled="{{loading || wechatLoading || credentialsLoading}}"
+          bindtap="toggleAccountMode"
+        >
+          {{accountMode ? "收起账号登录" : "使用 Pawtale 账号登录"}}
+        </button>
+
+        <view wx:if="{{accountMode}}" class="account-panel">
+          <view class="field">
+            <text class="field-label">邮箱</text>
+            <input
+              class="field-input"
+              type="text"
+              value="{{emailInput}}"
+              placeholder="name@example.com"
+              bindinput="changeEmailInput"
+            />
+          </view>
+
+          <view class="field">
+            <text class="field-label">密码</text>
+            <input
+              class="field-input"
+              password
+              value="{{password}}"
+              placeholder="至少 8 位"
+              bindinput="changePassword"
+            />
+          </view>
+
+          <button
+            class="secondary-button"
+            loading="{{loading}}"
+            disabled="{{loading || wechatLoading || credentialsLoading}}"
+            bindtap="submitAccount"
+          >
+            {{loading ? "登录中" : "账号登录"}}
+          </button>
+        </view>
+      </block>
+    </view>
+  </block>
+
+  <block wx:else>
   <view class="profile-panel">
     <view class="avatar">
       <text>{{avatarText}}</text>
@@ -101,4 +207,5 @@
   </view>
 
   <button class="logout-button" loading="{{loading}}" disabled="{{loading}}" bindtap="logout">退出登录</button>
+  </block>
 </view>

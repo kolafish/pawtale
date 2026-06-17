@@ -197,7 +197,7 @@ Page<TranscriptsData, {
       });
     } catch (error) {
       if (error instanceof ApiError && [401, 403].includes(error.statusCode)) {
-        wx.reLaunch({ url: "/pages/login/index" });
+        wx.switchTab({ url: "/pages/me/index" });
         return;
       }
       this.setData({ error: error instanceof Error ? error.message : "转写记录加载失败" });

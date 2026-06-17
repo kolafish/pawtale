@@ -66,13 +66,7 @@ test("home userDisplayName keeps real display names", () => {
   assert.equal(userDisplayName("  余主任  ", "memoir-author@example.com"), "余主任");
 });
 
-test("home redirects incomplete wechat accounts back to login", async () => {
-  const launches = [];
-  global.wx = {
-    reLaunch(options) {
-      launches.push(options.url);
-    },
-  };
+test("home keeps incomplete wechat accounts on the home tab and asks for login", async () => {
   const { page } = loadHomePage({
     authExports: {
       getMemoirIdentity: async () => ({
@@ -88,7 +82,7 @@ test("home redirects incomplete wechat accounts back to login", async () => {
     },
   });
   const context = {
-    data: { loading: false },
+    data: { ...page.data },
     setData(patch) {
       this.data = { ...this.data, ...patch };
     },
@@ -96,9 +90,9 @@ test("home redirects incomplete wechat accounts back to login", async () => {
 
   await page.loadHome.call(context);
 
-  assert.deepEqual(launches, ["/pages/login/index"]);
+  assert.equal(context.data.needsLogin, true);
+  assert.equal(context.data.projectTitle, "我的回忆录");
   assert.equal(context.data.loading, false);
-  delete global.wx;
 });
 
 test("home refreshes guidance mode from current project on load", async () => {
@@ -177,5 +171,29 @@ test("home creates voice sessions with the project-bound guidance mode", async (
   assert.equal(createdSessions[0].metadata_json.entry, "miniprogram_home");
   assert.equal(navigations[0], "/pages/voice-chat/index?voiceSessionId=voice%2F1&mode=guided_interview&module=event");
   assert.equal(context.data.creatingVoice, false);
+  delete global.wx;
+});
+
+test("home sends login-required voice starts to the me tab", async () => {
+  const switches = [];
+  global.wx = {
+    switchTab(options) {
+      switches.push(options.url);
+    },
+  };
+  const { page } = loadHomePage();
+  const context = {
+    data: {
+      ...page.data,
+      needsLogin: true,
+    },
+    setData(patch) {
+      this.data = { ...this.data, ...patch };
+    },
+  };
+
+  await page.startVoiceChat.call(context);
+
+  assert.deepEqual(switches, ["/pages/me/index"]);
   delete global.wx;
 });
