@@ -339,6 +339,7 @@ test("updates and deletes voice transcripts through backend API", async () => {
     id: "utterance/1",
     voice_session_id: "voice-1",
     project_id: "project-1",
+    project_title: "我的回忆录",
     transcript_raw: "原文",
     transcript_edited: "校正文",
     display_text: "校正文",

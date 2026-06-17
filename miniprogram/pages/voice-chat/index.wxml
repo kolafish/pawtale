@@ -25,6 +25,7 @@
     </view>
     <view wx:if="{{followUpTTSPlaying && assistantPromptText}}" class="assistant-tts-text">
       <text class="assistant-tts-spoken">{{ttsSpokenText}}</text>
+      <text class="assistant-tts-current">{{ttsCurrentText}}</text>
       <text>{{ttsRemainingText}}</text>
     </view>
     <text wx:else class="assistant-text">{{followUpLoading ? assistantLoadingText : (followUpError || assistantPromptText || assistantEmptyText)}}</text>

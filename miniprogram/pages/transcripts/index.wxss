@@ -108,6 +108,15 @@
   line-height: 1.35;
 }
 
+.record-project {
+  display: block;
+  margin-top: 8rpx;
+  color: #7a3b31;
+  font-size: 25rpx;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
 .record-meta {
   display: block;
   margin-top: 10rpx;
