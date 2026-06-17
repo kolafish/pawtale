@@ -82,6 +82,42 @@ function sampleDraft(version = 1, status = "draft", content = "我小时候常�
   };
 }
 
+function sampleBookOutput(version = 1, content = "外婆回忆录\n\n目录\n1. 外婆家的童年\n\n第1章 外婆家的童年\n\n正文") {
+  return {
+    id: "book-output-1",
+    project_id: "project/1",
+    plan_id: "plan-1",
+    title: "外婆回忆录",
+    status: "draft",
+    metadata_json: {},
+    latest_version: {
+      id: `book-output-version-${version}`,
+      output_id: "book-output-1",
+      project_id: "project/1",
+      plan_id: "plan-1",
+      version,
+      content,
+      chapter_snapshot_json: [],
+      created_by: "system",
+      created_at: "2026-06-17T00:00:00.000Z",
+    },
+    versions: [],
+    created_at: "2026-06-17T00:00:00.000Z",
+    updated_at: "2026-06-17T00:00:00.000Z",
+  };
+}
+
+function sampleAudioResponse() {
+  return {
+    audio_file_ids: ["audio-book-1", "audio-book-2"],
+    provider: "fake",
+    model: "fake-tts",
+    mime_type: "audio/mpeg",
+    chunk_count: 2,
+    source_text_hash: "hash",
+  };
+}
+
 function loadBookPage({ authExports = {}, voiceApiExports = {} } = {}) {
   const authPath = require.resolve("../services/auth.ts");
   const voiceApiPath = require.resolve("../services/memoir-voice-api.ts");
@@ -111,13 +147,26 @@ function loadBookPage({ authExports = {}, voiceApiExports = {} } = {}) {
       confirmMemoirBookPlan: async () => {
         throw new Error("confirmMemoirBookPlan was not mocked");
       },
+      createMemoirBookChapterDraftTTS: async () => {
+        throw new Error("createMemoirBookChapterDraftTTS was not mocked");
+      },
+      createMemoirBookOutputTTS: async () => {
+        throw new Error("createMemoirBookOutputTTS was not mocked");
+      },
+      downloadMemoirVoiceAudio: async () => {
+        throw new Error("downloadMemoirVoiceAudio was not mocked");
+      },
       generateMemoirBookChapterDraft: async () => {
         throw new Error("generateMemoirBookChapterDraft was not mocked");
+      },
+      generateMemoirBookOutput: async () => {
+        throw new Error("generateMemoirBookOutput was not mocked");
       },
       generateMemoirBookPlan: async () => {
         throw new Error("generateMemoirBookPlan was not mocked");
       },
       getMemoirBookChapterDraft: async () => null,
+      getMemoirBookOutput: async () => null,
       getMemoirBookPlan: async () => {
         throw new Error("getMemoirBookPlan was not mocked");
       },
@@ -180,6 +229,15 @@ test("book page progress counts generated and confirmed chapters", () => {
   assert.equal(chapters[1].draftStatusText, "待确认");
 });
 
+test("book page summarizes latest book output version", () => {
+  const { mod } = loadBookPage();
+  const output = sampleBookOutput(3, "全书正文");
+
+  assert.equal(mod.latestBookContent(output), "全书正文");
+  assert.equal(mod.bookOutputVersionText(output), "全书第 3 版");
+  assert.equal(mod.bookOutputVersionText(null), "尚未生成全书");
+});
+
 test("book page confirms chapters with trimmed user edits and original source refs", async () => {
   const submissions = [];
   const confirmedPlan = samplePlan("confirmed");
@@ -214,6 +272,37 @@ test("book page confirms chapters with trimmed user edits and original source re
   assert.equal(submissions[0].data.chapters[0].summary, "只写院子里的事");
   assert.equal(submissions[0].data.chapters[0].source_refs[0].utterance_id, "utterance-1");
   assert.equal(context.data.stage, "drafting");
+  delete global.wx;
+});
+
+test("book page generates full book output after all chapters are confirmed", async () => {
+  const calls = [];
+  global.wx = { showToast() {} };
+  const { mod, page } = loadBookPage({
+    voiceApiExports: {
+      generateMemoirBookOutput: async (projectId, data) => {
+        calls.push({ projectId, data });
+        return sampleBookOutput(2, "全书第二版正文");
+      },
+    },
+  });
+  const plan = samplePlan("confirmed");
+  const context = pageContext(page, { projectId: "project/1", projectTitle: "外婆回忆录" });
+  page.applyPlan.call(context, plan, {
+    "chapter-1": sampleDraft(1, "confirmed"),
+    "chapter-2": sampleDraft(1, "confirmed"),
+  });
+  page.applyBookOutput.call(context, sampleBookOutput(1, "全书第一版正文"));
+
+  await page.generateBook.call(context);
+
+  assert.deepEqual(calls[0], {
+    projectId: "project/1",
+    data: { force_regenerate: true },
+  });
+  assert.equal(context.data.bookVersionText, "全书第 2 版");
+  assert.equal(context.data.bookContent, "全书第二版正文");
+  assert.equal(context.data.bookCharCount, "全书第二版正文".length);
   delete global.wx;
 });
 
@@ -302,8 +391,16 @@ test("book APIs call encoded backend routes", async () => {
         options.success({ statusCode: 200, data: { id: "user-1" }, cookies: [], header: {} });
         return;
       }
+      if (options.url.endsWith("/draft/tts") || options.url.endsWith("/book-output/tts")) {
+        options.success({ statusCode: 200, data: sampleAudioResponse(), cookies: [], header: {} });
+        return;
+      }
       if (options.url.endsWith("/draft") || options.url.endsWith("/draft/confirm")) {
         options.success({ statusCode: 200, data: sampleDraft(), cookies: [], header: {} });
+        return;
+      }
+      if (options.url.endsWith("/book-output") || options.url.endsWith("/book-output/generate")) {
+        options.success({ statusCode: 200, data: sampleBookOutput(), cookies: [], header: {} });
         return;
       }
       options.success({ statusCode: 200, data: samplePlan("confirmed"), cookies: [], header: {} });
@@ -315,9 +412,13 @@ test("book APIs call encoded backend routes", async () => {
   const {
     confirmMemoirBookChapterDraft,
     confirmMemoirBookPlan,
+    createMemoirBookChapterDraftTTS,
+    createMemoirBookOutputTTS,
     generateMemoirBookChapterDraft,
+    generateMemoirBookOutput,
     generateMemoirBookPlan,
     getMemoirBookChapterDraft,
+    getMemoirBookOutput,
     getMemoirBookPlan,
     updateMemoirBookChapterDraft,
   } = require("../services/memoir-voice-api.ts");
@@ -329,6 +430,10 @@ test("book APIs call encoded backend routes", async () => {
   await generateMemoirBookChapterDraft("project/1", "chapter/1", { force_regenerate: true });
   await updateMemoirBookChapterDraft("project/1", "chapter/1", { content: "正文" });
   await confirmMemoirBookChapterDraft("project/1", "chapter/1");
+  await createMemoirBookChapterDraftTTS("project/1", "chapter/1", {});
+  await getMemoirBookOutput("project/1");
+  await generateMemoirBookOutput("project/1", { force_regenerate: true });
+  await createMemoirBookOutputTTS("project/1", {});
 
   const apiRequests = requests.filter((request) => request.url.includes("/api/mobile/memoir/"));
   assert.equal(apiRequests[0].url, "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-plan");
@@ -351,6 +456,27 @@ test("book APIs call encoded backend routes", async () => {
     "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-plan/chapters/chapter%2F1/draft/confirm",
   );
   assert.equal(apiRequests[6].method, "POST");
-  assert.equal(apiRequests[6].header.Cookie, "pawtale_session=abc");
+  assert.equal(
+    apiRequests[7].url,
+    "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-plan/chapters/chapter%2F1/draft/tts",
+  );
+  assert.equal(apiRequests[7].method, "POST");
+  assert.equal(
+    apiRequests[8].url,
+    "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-output",
+  );
+  assert.equal(apiRequests[8].method, "GET");
+  assert.equal(
+    apiRequests[9].url,
+    "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-output/generate",
+  );
+  assert.equal(apiRequests[9].method, "POST");
+  assert.deepEqual(apiRequests[9].data, { force_regenerate: true });
+  assert.equal(
+    apiRequests[10].url,
+    "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-output/tts",
+  );
+  assert.equal(apiRequests[10].method, "POST");
+  assert.equal(apiRequests[10].header.Cookie, "pawtale_session=abc");
   delete global.wx;
 });

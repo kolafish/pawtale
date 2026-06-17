@@ -78,6 +78,9 @@ class Project(Base):
     memoir_book_plans: Mapped[list["MemoirBookPlan"]] = relationship(
         "MemoirBookPlan", back_populates="project", cascade="all, delete-orphan",
     )
+    memoir_book_outputs: Mapped[list["MemoirBookOutput"]] = relationship(
+        "MemoirBookOutput", back_populates="project", cascade="all, delete-orphan",
+    )
 
 
 class DocumentGroup(Base):

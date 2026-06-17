@@ -11,8 +11,10 @@ from app.services.memoir.book_drafts import (
     confirm_chapter_draft,
     generate_chapter_draft,
     get_chapter_draft,
+    synthesize_chapter_draft_audio,
     update_chapter_draft,
 )
+from app.services.memoir.book_outputs import generate_book_output, get_book_output, synthesize_book_output_audio
 from app.services.memoir.book_plans import confirm_book_plan, generate_book_plan, get_book_plan
 from app.services.memoir.drafting import (
     accept_draft,
@@ -73,10 +75,12 @@ __all__ = [
     "create_transcript_version",
     "generate_draft_for_answer",
     "generate_book_plan",
+    "generate_book_output",
     "generate_chapter_draft",
     "generate_question_candidates",
     "get_coverage_map",
     "get_book_plan",
+    "get_book_output",
     "get_chapter_draft",
     "get_next_question",
     "get_output",
@@ -98,6 +102,8 @@ __all__ = [
     "process_session_memory",
     "select_candidate_as_question",
     "skip_question",
+    "synthesize_book_output_audio",
+    "synthesize_chapter_draft_audio",
     "update_answer_text",
     "update_chapter_draft",
     "update_draft_content",

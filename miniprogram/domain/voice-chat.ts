@@ -5,6 +5,7 @@ export type MemoirChatContentStatus = "partial" | "final" | "corrected";
 export type MemoirCreatedBy = "user" | "ai" | "asr" | "system";
 export type MemoirBookPlanStatus = "draft" | "confirmed";
 export type MemoirBookChapterDraftStatus = "draft" | "confirmed";
+export type MemoirOutputStatus = "draft" | "accepted" | "archived";
 export type VoiceGatewayState = "ready" | "listening" | "finishing" | "stopped" | "failed";
 export type VoiceChatErrorKind = "connection" | "recorder" | "gateway" | "asr" | "persistence" | "timeout" | "unknown";
 
@@ -320,6 +321,49 @@ export interface MemoirBookChapterDraft {
   metadata_json: Record<string, unknown>;
   latest_version?: MemoirBookChapterDraftVersion | null;
   versions: MemoirBookChapterDraftVersion[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MemoirBookAudioRequest {
+  voice?: string;
+  force_regenerate?: boolean;
+}
+
+export interface MemoirBookAudioResponse {
+  audio_file_ids: string[];
+  provider: string;
+  model: string;
+  mime_type: string;
+  chunk_count: number;
+  source_text_hash: string;
+}
+
+export interface MemoirBookOutputGenerateRequest {
+  force_regenerate?: boolean;
+}
+
+export interface MemoirBookOutputVersion {
+  id: string;
+  output_id: string;
+  project_id: string;
+  plan_id: string;
+  version: number;
+  content: string;
+  chapter_snapshot_json: Record<string, unknown>[];
+  created_by: MemoirCreatedBy;
+  created_at: string;
+}
+
+export interface MemoirBookOutput {
+  id: string;
+  project_id: string;
+  plan_id: string;
+  title: string;
+  status: MemoirOutputStatus;
+  metadata_json: Record<string, unknown>;
+  latest_version?: MemoirBookOutputVersion | null;
+  versions: MemoirBookOutputVersion[];
   created_at: string;
   updated_at: string;
 }

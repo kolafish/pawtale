@@ -6,6 +6,7 @@ from app.domain.memoir.types import (
     MemoirBookChapterDraftStatus,
     MemoirBookPlanStatus,
     MemoirCreatedBy,
+    MemoirOutputStatus,
 )
 
 
@@ -144,5 +145,56 @@ class MemoirBookChapterDraftResponse(BaseModel):
     metadata_json: dict[str, object] = Field(default_factory=dict)
     latest_version: MemoirBookChapterDraftVersionResponse | None = None
     versions: list[MemoirBookChapterDraftVersionResponse] = Field(default_factory=list)
+    created_at: datetime
+    updated_at: datetime
+
+
+class MemoirBookAudioRequest(BaseModel):
+    voice: str | None = None
+    force_regenerate: bool = False
+
+    @field_validator("voice")
+    @classmethod
+    def _valid_voice(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        voice = value.strip()
+        return voice or None
+
+
+class MemoirBookAudioResponse(BaseModel):
+    audio_file_ids: list[str]
+    provider: str
+    model: str
+    mime_type: str
+    chunk_count: int
+    source_text_hash: str
+
+
+class MemoirBookOutputGenerateRequest(BaseModel):
+    force_regenerate: bool = False
+
+
+class MemoirBookOutputVersionResponse(BaseModel):
+    id: str
+    output_id: str
+    project_id: str
+    plan_id: str
+    version: int
+    content: str
+    chapter_snapshot_json: list[dict[str, object]] = Field(default_factory=list)
+    created_by: MemoirCreatedBy
+    created_at: datetime
+
+
+class MemoirBookOutputResponse(BaseModel):
+    id: str
+    project_id: str
+    plan_id: str
+    title: str
+    status: MemoirOutputStatus
+    metadata_json: dict[str, object] = Field(default_factory=dict)
+    latest_version: MemoirBookOutputVersionResponse | None = None
+    versions: list[MemoirBookOutputVersionResponse] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime

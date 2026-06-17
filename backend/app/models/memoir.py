@@ -966,3 +966,51 @@ class MemoirBookChapterDraftVersion(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     draft: Mapped[MemoirBookChapterDraft] = orm_relationship("MemoirBookChapterDraft", back_populates="versions")
+
+
+class MemoirBookOutput(Base):
+    __tablename__ = "memoir_book_outputs"
+    __table_args__ = (
+        UniqueConstraint("project_id", name="uq_memoir_book_outputs_project_id"),
+        CheckConstraint(
+            f"status IN ({_enum_values(MemoirOutputStatus)})",
+            name="ck_memoir_book_outputs_status",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    project_id: Mapped[str] = mapped_column(String(36), ForeignKey("projects.id"), nullable=False, index=True)
+    plan_id: Mapped[str] = mapped_column(String(36), ForeignKey("memoir_book_plans.id"), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default=MemoirOutputStatus.DRAFT.value, nullable=False)
+    metadata_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    project: Mapped["Project"] = orm_relationship("Project", back_populates="memoir_book_outputs")
+    plan: Mapped[MemoirBookPlan] = orm_relationship("MemoirBookPlan")
+    versions: Mapped[list["MemoirBookOutputVersion"]] = orm_relationship(
+        "MemoirBookOutputVersion",
+        back_populates="output",
+        cascade="all, delete-orphan",
+        order_by="MemoirBookOutputVersion.version",
+    )
+
+
+class MemoirBookOutputVersion(Base):
+    __tablename__ = "memoir_book_output_versions"
+    __table_args__ = (
+        UniqueConstraint("output_id", "version", name="uq_memoir_book_output_versions_version"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    output_id: Mapped[str] = mapped_column(String(36), ForeignKey("memoir_book_outputs.id"), nullable=False, index=True)
+    project_id: Mapped[str] = mapped_column(String(36), ForeignKey("projects.id"), nullable=False, index=True)
+    plan_id: Mapped[str] = mapped_column(String(36), ForeignKey("memoir_book_plans.id"), nullable=False, index=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    chapter_snapshot_json: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    created_by: Mapped[str] = mapped_column(String(20), default=MemoirCreatedBy.SYSTEM.value, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    output: Mapped[MemoirBookOutput] = orm_relationship("MemoirBookOutput", back_populates="versions")

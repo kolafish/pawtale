@@ -23,6 +23,8 @@ from app.models.memoir import (
     MemoirVoiceUtterance,
 )
 from app.schemas.memoir_book import (
+    MemoirBookAudioRequest,
+    MemoirBookAudioResponse,
     MemoirBookChapterDraftGenerateRequest,
     MemoirBookChapterDraftResponse,
     MemoirBookChapterDraftUpdateRequest,
@@ -32,10 +34,20 @@ from app.schemas.memoir_book import (
 from app.services import get_ai_service
 from app.services.ai_types import AITextClient
 from app.services.memoir.access import load_memoir_project
+from app.services.memoir.book_audio import (
+    audio_cache_payload,
+    audio_response,
+    cached_audio_response,
+    discard_staged_audio_files,
+    source_text_hash,
+    synthesize_text_audio,
+)
+from app.services.memoir.voice_tts import TTSClient
 
 
 SYSTEM_PROMPT = "你是一位谨慎的中文回忆录整理写作者，只能把给定口述材料整理成章节正文。"
 AI_BOOK_DRAFT_UNAVAILABLE_MESSAGE = "AI 服务暂时不可用，请稍后重试。"
+CHAPTER_TTS_CACHE_KEY = "chapter_tts"
 logger = logging.getLogger(__name__)
 
 
@@ -384,3 +396,55 @@ async def confirm_chapter_draft(
     if not refreshed:
         raise HTTPException(status_code=500, detail="章节稿确认失败")
     return _draft_response(refreshed)
+
+
+async def synthesize_chapter_draft_audio(
+    db: AsyncSession,
+    *,
+    user_id: str,
+    project_id: str,
+    chapter_id: str,
+    req: MemoirBookAudioRequest,
+    tts_client: TTSClient | None = None,
+) -> MemoirBookAudioResponse:
+    chapter = await _load_chapter(db, user_id=user_id, project_id=project_id, chapter_id=chapter_id)
+    _require_confirmed_plan(chapter)
+    draft = await _load_draft(db, project_id=project_id, chapter_id=chapter_id)
+    if not draft or not draft.versions:
+        raise HTTPException(status_code=400, detail="章节稿为空，无法朗读")
+    latest = draft.versions[-1]
+    text = latest.content.strip()
+    text_hash = source_text_hash(text)
+    cached = cached_audio_response(
+        draft.metadata_json or {},
+        cache_key=CHAPTER_TTS_CACHE_KEY,
+        text_hash=text_hash,
+        voice=req.voice,
+        force_regenerate=req.force_regenerate,
+    )
+    if cached:
+        return cached
+
+    synthesis = await synthesize_text_audio(
+        db,
+        user_id=user_id,
+        text=text,
+        voice=req.voice,
+        tts_client=tts_client,
+    )
+    try:
+        draft.metadata_json = {
+            **(draft.metadata_json or {}),
+            CHAPTER_TTS_CACHE_KEY: {
+                **audio_cache_payload(synthesis, voice=req.voice),
+                "draft_version_id": latest.id,
+                "chapter_id": chapter.id,
+            },
+        }
+        db.add(draft)
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        await discard_staged_audio_files(synthesis.staged_audio)
+        raise
+    return audio_response(synthesis)
