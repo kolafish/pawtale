@@ -16,6 +16,7 @@ class FakeGitHubClient:
 
     def __init__(self):
         self.files: list[dict] = []
+        self.commits: list[dict] = []
 
     async def get_installation(self, installation_id: int):
         assert installation_id == 123
@@ -36,22 +37,34 @@ class FakeGitHubClient:
             }
         ]
 
-    async def put_file(self, **kwargs):
-        self.files.append(kwargs)
-        return f"commit-{len(self.files)}"
+    async def commit_files(self, **kwargs):
+        self.commits.append(kwargs)
+        self.files.extend(
+            {"path": file.path, "content": file.content}
+            for file in kwargs["files"]
+        )
+        return f"commit-{len(self.commits)}"
 
 
 class TokenGitHubClient(git_sync_service.GitHubAppClient):
     def __init__(self, responses: list[dict]):
         super().__init__()
         self.responses = responses
-        self.requests: list[tuple[str, str, str]] = []
+        self.requests: list[dict] = []
 
     def _app_jwt(self) -> str:
         return "app-jwt"
 
     async def _request(self, method, path, *, token, json_body=None, expected_status=None):
-        self.requests.append((method, path, token))
+        self.requests.append(
+            {
+                "method": method,
+                "path": path,
+                "token": token,
+                "json_body": json_body,
+                "expected_status": expected_status,
+            }
+        )
         return self.responses.pop(0)
 
 
@@ -127,7 +140,9 @@ async def test_configure_and_run_git_sync(client, monkeypatch):
     run_data = run.json()
     assert run_data["ok"] is True
     assert run_data["synced_files"] == 3
-    assert run_data["commit_sha"] == "commit-3"
+    assert run_data["commit_sha"] == "commit-1"
+    assert len(fake.commits) == 1
+    assert fake.commits[0]["message"] == "Sync Pawtale project backup"
 
     paths = {item["path"] for item in fake.files}
     assert "novels/demo/pawtale-project.json" in paths
@@ -137,7 +152,7 @@ async def test_configure_and_run_git_sync(client, monkeypatch):
     saved = await client.get(f"/api/projects/{project_id}/git-sync")
     assert saved.status_code == 200
     saved_config = saved.json()["project_config"]
-    assert saved_config["last_commit_sha"] == "commit-3"
+    assert saved_config["last_commit_sha"] == "commit-1"
     assert saved_config["last_error"] is None
 
 
@@ -266,3 +281,63 @@ async def test_github_installation_token_cache_ignores_invalid_expiry():
     assert first == "token-1"
     assert second == "token-2"
     assert len(client.requests) == 2
+
+
+async def test_github_commit_files_updates_ref_with_single_commit():
+    client = TokenGitHubClient(
+        [
+            {
+                "token": "token-1",
+                "expires_at": _github_timestamp(datetime.now(timezone.utc) + timedelta(hours=1)),
+            },
+            {"object": {"sha": "base-commit"}},
+            {"tree": {"sha": "base-tree"}},
+            {"sha": "blob-1"},
+            {"sha": "blob-2"},
+            {"sha": "new-tree"},
+            {"sha": "new-commit"},
+            {"ref": "refs/heads/feature/demo"},
+        ]
+    )
+
+    commit_sha = await client.commit_files(
+        installation_id=123,
+        owner="author",
+        repo="pawtale-backup",
+        branch="feature/demo",
+        files=[
+            git_sync_service.BackupFile(path="pawtale/project.json", content='{"ok": true}\n'),
+            git_sync_service.BackupFile(path="pawtale/documents/001.md", content="# 第一章\n"),
+        ],
+        message="Sync Pawtale project backup",
+    )
+
+    assert commit_sha == "new-commit"
+    request_keys = [(request["method"], request["path"]) for request in client.requests]
+    assert request_keys == [
+        ("POST", "/app/installations/123/access_tokens"),
+        ("GET", "/repos/author/pawtale-backup/git/ref/heads/feature/demo"),
+        ("GET", "/repos/author/pawtale-backup/git/commits/base-commit"),
+        ("POST", "/repos/author/pawtale-backup/git/blobs"),
+        ("POST", "/repos/author/pawtale-backup/git/blobs"),
+        ("POST", "/repos/author/pawtale-backup/git/trees"),
+        ("POST", "/repos/author/pawtale-backup/git/commits"),
+        ("PATCH", "/repos/author/pawtale-backup/git/refs/heads/feature/demo"),
+    ]
+    assert not any(request["method"] == "PUT" for request in client.requests)
+    tree_request = client.requests[5]
+    assert tree_request["json_body"] == {
+        "base_tree": "base-tree",
+        "tree": [
+            {"path": "pawtale/project.json", "mode": "100644", "type": "blob", "sha": "blob-1"},
+            {"path": "pawtale/documents/001.md", "mode": "100644", "type": "blob", "sha": "blob-2"},
+        ],
+    }
+    commit_request = client.requests[6]
+    assert commit_request["json_body"] == {
+        "message": "Sync Pawtale project backup",
+        "tree": "new-tree",
+        "parents": ["base-commit"],
+    }
+    ref_request = client.requests[7]
+    assert ref_request["json_body"] == {"sha": "new-commit", "force": False}
