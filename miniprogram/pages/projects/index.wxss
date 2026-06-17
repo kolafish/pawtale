@@ -125,16 +125,11 @@
   line-height: 1.35;
 }
 
-.project-actions,
-.rename-actions {
+.project-actions {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 18rpx;
   margin-top: 26rpx;
-}
-
-.rename-actions {
-  grid-template-columns: 1fr 1fr;
 }
 
 .ghost-button,
@@ -167,20 +162,6 @@
 .danger-button.disabled {
   background: #f8efe7;
   color: #b8a7a0;
-}
-
-.rename-box {
-  margin-top: 24rpx;
-}
-
-.rename-input {
-  height: 88rpx;
-  padding: 0 22rpx;
-  border: 2rpx solid #f2cbbb;
-  border-radius: 18rpx;
-  background: #ffffff;
-  color: #24100b;
-  font-size: 30rpx;
 }
 
 .empty-panel {

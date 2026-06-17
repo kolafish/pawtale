@@ -22,6 +22,8 @@ async def _auto_migrate():
         project_columns = {row[1] for row in result.fetchall()}
         if "type" not in project_columns:
             await conn.execute(text("ALTER TABLE projects ADD COLUMN type VARCHAR(20) NOT NULL DEFAULT 'novel'"))
+        if "metadata_json" not in project_columns:
+            await conn.execute(text("ALTER TABLE projects ADD COLUMN metadata_json JSON NOT NULL DEFAULT '{}'"))
     await migrate_auth_schema(engine)
     await migrate_git_sync_schema(engine)
     await migrate_memoir_voice_schema(engine)

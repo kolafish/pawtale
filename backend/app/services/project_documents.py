@@ -62,6 +62,7 @@ def project_response(project: Project) -> ProjectResponse:
         description=project.description,
         word_count_target=project.word_count_target,
         daily_word_goal=project.daily_word_goal,
+        metadata_json=project.metadata_json or {},
         total_word_count=project_total_words(project),
         groups=[group_response(group) for group in (project.groups or [])],
         references=[

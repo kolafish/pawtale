@@ -15,10 +15,66 @@ from app.services.projects.access import load_project
 
 
 DEFAULT_MEMOIR_PROJECT_TITLE = "我的回忆录"
+MEMOIR_PROFILE_METADATA_KEY = "memoir_profile"
+DEFAULT_GUIDANCE_MODE = "free_narration"
+ALLOWED_NARRATOR_GENDERS = {"male", "female", "unspecified"}
 
 
 def _utcnow() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
+
+
+def _clean_text(value: str | None) -> str:
+    return (value or "").strip()
+
+
+def _default_profile() -> dict[str, object]:
+    return {
+        "narrator_name": "",
+        "narrator_gender": "unspecified",
+        "narrator_origin": "",
+        "narrator_age": None,
+        "default_guidance_mode": DEFAULT_GUIDANCE_MODE,
+    }
+
+
+def _field_was_set(req: MemoirProjectCreate | MemoirProjectUpdate, field: str) -> bool:
+    return field in getattr(req, "model_fields_set", set())
+
+
+def _profile_metadata(
+    req: MemoirProjectCreate | MemoirProjectUpdate,
+    *,
+    existing_metadata: dict | None = None,
+    include_defaults: bool = False,
+) -> dict:
+    metadata = dict(existing_metadata or {})
+    current_profile = metadata.get(MEMOIR_PROFILE_METADATA_KEY)
+    profile = {
+        **_default_profile(),
+        **(current_profile if isinstance(current_profile, dict) else {}),
+    }
+
+    if include_defaults or _field_was_set(req, "elder_name"):
+        profile["narrator_name"] = _clean_text(req.elder_name)
+    if include_defaults or _field_was_set(req, "narrator_gender"):
+        gender = _clean_text(req.narrator_gender) or "unspecified"
+        if gender not in ALLOWED_NARRATOR_GENDERS:
+            raise HTTPException(status_code=400, detail="性别只能选择男、女或未填写")
+        profile["narrator_gender"] = gender
+    if include_defaults or _field_was_set(req, "narrator_origin"):
+        profile["narrator_origin"] = _clean_text(req.narrator_origin)
+    if include_defaults or _field_was_set(req, "narrator_age"):
+        profile["narrator_age"] = req.narrator_age
+    if include_defaults or _field_was_set(req, "default_guidance_mode"):
+        profile["default_guidance_mode"] = (
+            req.default_guidance_mode.value
+            if req.default_guidance_mode is not None
+            else DEFAULT_GUIDANCE_MODE
+        )
+
+    metadata[MEMOIR_PROFILE_METADATA_KEY] = profile
+    return metadata
 
 
 def _memoir_project_options():
@@ -102,6 +158,7 @@ async def get_or_create_mobile_memoir_project(
         user_id=user_id,
         type=ProjectType.MEMOIR.value,
         title=DEFAULT_MEMOIR_PROJECT_TITLE,
+        metadata_json={MEMOIR_PROFILE_METADATA_KEY: _default_profile()},
     )
     db.add(project)
     await db.flush()
@@ -121,6 +178,7 @@ async def create_mobile_memoir_project(
         type=ProjectType.MEMOIR.value,
         title=title,
         description=req.description,
+        metadata_json=_profile_metadata(req, include_defaults=True),
     )
     db.add(project)
     await db.flush()
@@ -144,6 +202,7 @@ async def update_mobile_memoir_project(
         project.title = title
     if req.description is not None:
         project.description = req.description
+    project.metadata_json = _profile_metadata(req, existing_metadata=project.metadata_json)
     project.updated_at = _utcnow()
     await db.commit()
     return await _load_memoir_project_response(db, project.id, user_id)

@@ -2,20 +2,33 @@ import type {
   MemoirProjectListResponse,
   Project,
 } from "../domain/memoir";
+import type { MemoirGuidanceMode } from "../domain/voice-chat";
 import { request } from "./request";
+
+export type MemoirNarratorGender = "male" | "female" | "unspecified";
+
+export interface MemoirProjectInput {
+  title?: string;
+  description?: string;
+  elder_name?: string;
+  narrator_gender?: MemoirNarratorGender;
+  narrator_origin?: string;
+  narrator_age?: number | null;
+  default_guidance_mode?: MemoirGuidanceMode;
+}
 
 export function listMemoirProjects(): Promise<MemoirProjectListResponse> {
   return request<MemoirProjectListResponse>("/api/mobile/memoir/projects");
 }
 
-export function createMemoirProject(data: { title?: string; description?: string; elder_name?: string } = {}): Promise<Project> {
+export function createMemoirProject(data: MemoirProjectInput = {}): Promise<Project> {
   return request<Project>("/api/mobile/memoir/projects", {
     method: "POST",
     data,
   });
 }
 
-export function updateMemoirProject(projectId: string, data: { title?: string; description?: string; elder_name?: string }): Promise<Project> {
+export function updateMemoirProject(projectId: string, data: MemoirProjectInput): Promise<Project> {
   return request<Project>(`/api/mobile/memoir/projects/${projectId}`, {
     method: "PATCH",
     data,

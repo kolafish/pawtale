@@ -1,5 +1,7 @@
 import type { MemoirGuidanceMode } from "../../domain/voice-chat";
+import { getMemoirIdentity } from "../../services/auth";
 import { createMemoirVoiceSession } from "../../services/memoir-voice-api";
+import { memoirProjectProfile } from "../../services/memoir-project-profile";
 
 interface ModeOption {
   value: MemoirGuidanceMode;
@@ -27,6 +29,7 @@ interface DatasetEvent {
 }
 
 Page<VoiceStartData, {
+  onLoad(): Promise<void>;
   selectMode(event: DatasetEvent): void;
   selectModule(event: DatasetEvent): void;
   startVoiceChat(): Promise<void>;
@@ -46,7 +49,7 @@ Page<VoiceStartData, {
       },
       {
         value: "guided_interview",
-        title: "AI 引导",
+        title: "主题讲述",
         description: "适合不知道从哪讲起的人，AI 会按主题一步步追问。",
         tag: "强引导",
       },
@@ -58,6 +61,16 @@ Page<VoiceStartData, {
       { value: "period", label: "时间段" },
       { value: "theme", label: "主题" },
     ],
+  },
+
+  async onLoad() {
+    try {
+      const identity = await getMemoirIdentity();
+      const profile = memoirProjectProfile(identity.active_project);
+      this.setData({ selectedMode: profile.defaultGuidanceMode });
+    } catch (error) {
+      console.warn("load memoir project default guidance mode failed", error);
+    }
   },
 
   selectMode(event) {

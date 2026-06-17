@@ -16,6 +16,7 @@ async def test_mobile_memoir_default_project_is_created_once(client):
     assert len(first_data["projects"]) == 1
     assert first_data["projects"][0]["type"] == "memoir"
     assert first_data["projects"][0]["title"] == "我的回忆录"
+    assert first_data["projects"][0]["metadata_json"]["memoir_profile"]["default_guidance_mode"] == "free_narration"
     assert first_data["projects"][0]["groups"][0]["name"] == "回忆片段"
     assert first_data["projects"][0]["groups"][0]["documents"][0]["name"] == "第一次记录"
 
@@ -38,19 +39,43 @@ async def test_mobile_memoir_projects_can_be_created_updated_and_activated(clien
 
     created_response = await client.post(
         "/api/mobile/memoir/projects",
-        json={"title": "母亲的回忆", "description": "先从童年聊起"},
+        json={
+            "title": "母亲的回忆",
+            "description": "先从童年聊起",
+            "narrator_gender": "female",
+            "narrator_origin": "四川成都",
+            "narrator_age": 72,
+            "default_guidance_mode": "guided_interview",
+        },
     )
     assert created_response.status_code == 201
     created = created_response.json()
     assert created["title"] == "母亲的回忆"
     assert created["type"] == "memoir"
+    assert created["metadata_json"]["memoir_profile"] == {
+        "narrator_name": "",
+        "narrator_gender": "female",
+        "narrator_origin": "四川成都",
+        "narrator_age": 72,
+        "default_guidance_mode": "guided_interview",
+    }
 
     renamed_response = await client.patch(
         f"/api/mobile/memoir/projects/{created['id']}",
-        json={"title": "外婆的回忆"},
+        json={
+            "title": "外婆的回忆",
+            "narrator_gender": "female",
+            "narrator_origin": "四川绵阳",
+            "narrator_age": 73,
+            "default_guidance_mode": "free_narration",
+        },
     )
     assert renamed_response.status_code == 200
-    assert renamed_response.json()["title"] == "外婆的回忆"
+    renamed = renamed_response.json()
+    assert renamed["title"] == "外婆的回忆"
+    assert renamed["metadata_json"]["memoir_profile"]["narrator_origin"] == "四川绵阳"
+    assert renamed["metadata_json"]["memoir_profile"]["narrator_age"] == 73
+    assert renamed["metadata_json"]["memoir_profile"]["default_guidance_mode"] == "free_narration"
 
     project_list_response = await client.get("/api/mobile/memoir/projects")
     project_list = project_list_response.json()

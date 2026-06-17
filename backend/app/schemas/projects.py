@@ -71,6 +71,7 @@ class ProjectListItem(BaseModel):
     total_word_count: int = 0
     group_count: int = 0
     document_count: int = 0
+    metadata_json: dict = Field(default_factory=dict)
     updated_at: datetime
 
     class Config:
@@ -84,6 +85,7 @@ class ProjectResponse(BaseModel):
     description: str | None = None
     word_count_target: int | None = None
     daily_word_goal: int | None = None
+    metadata_json: dict = Field(default_factory=dict)
     total_word_count: int = 0
     groups: list[GroupResponse] = Field(default_factory=list)
     references: list[ReferenceItemBrief] = Field(default_factory=list)

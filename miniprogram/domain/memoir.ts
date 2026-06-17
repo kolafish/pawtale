@@ -20,6 +20,7 @@ export interface Project {
   total_word_count: number;
   status?: "active" | "archived";
   elder_name?: string | null;
+  metadata_json: Record<string, unknown>;
   is_default?: boolean;
   last_opened_at?: string | null;
   groups: Array<{

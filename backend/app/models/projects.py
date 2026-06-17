@@ -16,6 +16,7 @@ class Project(Base):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     word_count_target: Mapped[int | None] = mapped_column(Integer, nullable=True)
     daily_word_goal: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    metadata_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
