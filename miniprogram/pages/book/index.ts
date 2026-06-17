@@ -106,6 +106,8 @@ interface BookData {
   bookContent: string;
   bookCharCount: number;
   bookVersionText: string;
+  bookStaleNotice: string;
+  bookActionText: string;
   generatingBook: boolean;
   ttsBusyTarget: string;
   playingTarget: string;
@@ -173,9 +175,28 @@ export function bookOutputVersionText(output: MemoirBookOutput | null): string {
   return version ? `全书第 ${version} 版` : "尚未生成全书";
 }
 
+export function bookOutputStaleNotice(output: MemoirBookOutput | null): string {
+  if (!output?.is_stale) {
+    return "";
+  }
+  const titles = (output.stale_chapter_titles || []).filter(Boolean).slice(0, 2);
+  if (!titles.length) {
+    return "章节内容已更新，请重新生成全书。";
+  }
+  const suffix = (output.stale_chapter_titles || []).length > 2 ? "等章节" : "";
+  return `章节「${titles.join("、")}」${suffix}已更新，请重新生成全书。`;
+}
+
+function bookActionText(output: MemoirBookOutput | null): string {
+  if (output?.is_stale) {
+    return "更新全书";
+  }
+  return output?.latest_version ? "重新生成全书" : "生成全书";
+}
+
 function bookOutputData(output: MemoirBookOutput | null): Pick<
   BookData,
-  "bookOutput" | "bookContent" | "bookCharCount" | "bookVersionText"
+  "bookOutput" | "bookContent" | "bookCharCount" | "bookVersionText" | "bookStaleNotice" | "bookActionText"
 > {
   const content = latestBookContent(output);
   return {
@@ -183,6 +204,8 @@ function bookOutputData(output: MemoirBookOutput | null): Pick<
     bookContent: content,
     bookCharCount: trimText(content).length,
     bookVersionText: bookOutputVersionText(output),
+    bookStaleNotice: bookOutputStaleNotice(output),
+    bookActionText: bookActionText(output),
   };
 }
 
@@ -400,6 +423,8 @@ Page<BookData, {
     bookContent: "",
     bookCharCount: 0,
     bookVersionText: "尚未生成全书",
+    bookStaleNotice: "",
+    bookActionText: "生成全书",
     ttsBusyTarget: "",
     playingTarget: "",
   },
@@ -833,6 +858,10 @@ Page<BookData, {
     }
     if (this.data.hasDraftChanges) {
       this.setData({ error: "请先保存当前章节修改，再朗读全书" });
+      return;
+    }
+    if (this.data.bookOutput?.is_stale) {
+      this.setData({ error: "章节内容已更新，请先更新全书再朗读" });
       return;
     }
     this.stopPlayback();

@@ -39,6 +39,15 @@ from app.services.memoir.voice_tts import TTSClient
 
 
 BOOK_TTS_CACHE_KEY = "book_tts"
+SNAPSHOT_COMPARE_KEYS = (
+    "chapter_id",
+    "chapter_title",
+    "chapter_sort_order",
+    "draft_id",
+    "draft_version_id",
+    "draft_version",
+    "content_char_count",
+)
 
 
 def _latest_chapter_version(draft: MemoirBookChapterDraft | None) -> MemoirBookChapterDraftVersion | None:
@@ -64,8 +73,13 @@ def _output_version_response(version: MemoirBookOutputVersion) -> MemoirBookOutp
     )
 
 
-def _output_response(output: MemoirBookOutput) -> MemoirBookOutputResponse:
+def _output_response(
+    output: MemoirBookOutput,
+    *,
+    stale_chapter_titles: list[str] | None = None,
+) -> MemoirBookOutputResponse:
     versions = [_output_version_response(version) for version in output.versions]
+    stale_titles = stale_chapter_titles or []
     return MemoirBookOutputResponse(
         id=output.id,
         project_id=output.project_id,
@@ -73,6 +87,8 @@ def _output_response(output: MemoirBookOutput) -> MemoirBookOutputResponse:
         title=output.title,
         status=MemoirOutputStatus(output.status),
         metadata_json=output.metadata_json or {},
+        is_stale=bool(stale_titles),
+        stale_chapter_titles=stale_titles,
         latest_version=versions[-1] if versions else None,
         versions=versions,
         created_at=output.created_at,
@@ -135,19 +151,72 @@ def _compose_book_content(
     for index, (chapter, version) in enumerate(chapters, start=1):
         content = version.content.strip()
         body_parts.append(f"第{index}章 {chapter.title}\n\n{content}")
-        snapshot.append(
-            {
-                "chapter_id": chapter.id,
-                "chapter_title": chapter.title,
-                "chapter_sort_order": chapter.sort_order,
-                "draft_id": chapter.draft.id if chapter.draft else "",
-                "draft_version_id": version.id,
-                "draft_version": version.version,
-                "content_char_count": len(content),
-            }
-        )
+        snapshot.append(_chapter_snapshot(chapter, version))
     content = f"{title}\n\n目录\n{toc}\n\n" + "\n\n".join(body_parts)
     return content.strip(), snapshot
+
+
+def _chapter_snapshot(chapter: MemoirBookPlanChapter, version: MemoirBookChapterDraftVersion) -> dict[str, object]:
+    content = version.content.strip()
+    return {
+        "chapter_id": chapter.id,
+        "chapter_title": chapter.title,
+        "chapter_sort_order": chapter.sort_order,
+        "draft_id": chapter.draft.id if chapter.draft else "",
+        "draft_version_id": version.id,
+        "draft_version": version.version,
+        "content_char_count": len(content),
+    }
+
+
+def _current_book_snapshot(plan: MemoirBookPlan) -> tuple[list[dict[str, object]], list[str]]:
+    if plan.status != MemoirBookPlanStatus.CONFIRMED.value:
+        return [], ["章节规划"]
+    chapters = sorted(plan.chapters, key=lambda item: item.sort_order)
+    snapshot: list[dict[str, object]] = []
+    unavailable_titles: list[str] = []
+    for chapter in chapters:
+        version = _latest_chapter_version(chapter.draft)
+        if not chapter.draft or chapter.draft.status != MemoirBookChapterDraftStatus.CONFIRMED.value or not version:
+            unavailable_titles.append(chapter.title)
+            continue
+        snapshot.append(_chapter_snapshot(chapter, version))
+    return snapshot, unavailable_titles
+
+
+def _snapshot_stale_chapter_titles(
+    latest_version: MemoirBookOutputVersion | None,
+    current_snapshot: list[dict[str, object]],
+    unavailable_titles: list[str],
+) -> list[str]:
+    if unavailable_titles:
+        return unavailable_titles
+    if not latest_version:
+        return []
+    stored_snapshot = [
+        item for item in (latest_version.chapter_snapshot_json or [])
+        if isinstance(item, dict)
+    ]
+    stored_by_chapter_id = {
+        item.get("chapter_id"): item
+        for item in stored_snapshot
+        if isinstance(item.get("chapter_id"), str)
+    }
+    stale_titles: list[str] = []
+    for current in current_snapshot:
+        chapter_id = current.get("chapter_id")
+        stored = stored_by_chapter_id.get(chapter_id)
+        if not stored or any(stored.get(key) != current.get(key) for key in SNAPSHOT_COMPARE_KEYS):
+            stale_titles.append(str(current.get("chapter_title") or "未命名章节"))
+    if len(stored_snapshot) != len(current_snapshot) and not stale_titles:
+        stale_titles.append("章节结构")
+    return stale_titles
+
+
+def _output_stale_chapter_titles(output: MemoirBookOutput, plan: MemoirBookPlan) -> list[str]:
+    current_snapshot, unavailable_titles = _current_book_snapshot(plan)
+    latest_version = output.versions[-1] if output.versions else None
+    return _snapshot_stale_chapter_titles(latest_version, current_snapshot, unavailable_titles)
 
 
 async def _latest_output_version_number(db: AsyncSession, output_id: str) -> int:
@@ -182,7 +251,8 @@ async def get_book_output(
     output = await _load_output(db, project_id=project_id)
     if not output:
         raise HTTPException(status_code=404, detail="全书稿不存在")
-    return _output_response(output)
+    plan = await _load_plan(db, user_id=user_id, project_id=project_id)
+    return _output_response(output, stale_chapter_titles=_output_stale_chapter_titles(output, plan))
 
 
 async def generate_book_output(
@@ -198,7 +268,12 @@ async def generate_book_output(
     content, snapshot = _compose_book_content(title=title, chapters=chapters)
 
     output = await _load_output(db, project_id=project_id)
-    if output and output.versions and not req.force_regenerate:
+    stale_titles = (
+        _snapshot_stale_chapter_titles(output.versions[-1], snapshot, [])
+        if output and output.versions
+        else []
+    )
+    if output and output.versions and not req.force_regenerate and not stale_titles:
         return _output_response(output)
 
     if not output:

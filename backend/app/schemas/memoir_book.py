@@ -248,6 +248,8 @@ class MemoirBookOutputResponse(BaseModel):
     title: str
     status: MemoirOutputStatus
     metadata_json: dict[str, object] = Field(default_factory=dict)
+    is_stale: bool = False
+    stale_chapter_titles: list[str] = Field(default_factory=list)
     latest_version: MemoirBookOutputVersionResponse | None = None
     versions: list[MemoirBookOutputVersionResponse] = Field(default_factory=list)
     created_at: datetime
