@@ -54,6 +54,8 @@ class Settings(BaseSettings):
     volc_asr_resource_id: str = "volc.seedasr.sauc.duration"
     volc_asr_ws_url: str = "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async"
     volc_asr_connect_timeout_seconds: float = 10.0
+    voice_gateway_max_active_sessions: int = 10
+    voice_gateway_max_active_sessions_per_user: int = 1
 
     # Assistant TTS
     tts_provider: str = "disabled"
