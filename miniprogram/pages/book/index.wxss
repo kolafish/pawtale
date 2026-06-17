@@ -109,7 +109,7 @@
   border-radius: 22rpx;
   background: #fff7dc;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 20rpx;
   box-sizing: border-box;
@@ -136,6 +136,47 @@
   font-size: 24rpx;
   line-height: 1.4;
   word-break: break-word;
+}
+
+.coverage-source-list {
+  margin-top: 16rpx;
+}
+
+.coverage-source {
+  margin-top: 12rpx;
+  padding: 16rpx;
+  border-radius: 16rpx;
+  background: rgba(255, 255, 255, 0.72);
+  display: flex;
+  align-items: center;
+  gap: 14rpx;
+}
+
+.coverage-source-text {
+  min-width: 0;
+  flex: 1;
+  color: #3a2119;
+  font-size: 24rpx;
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+.coverage-assign {
+  width: 132rpx;
+  height: 56rpx;
+  border-radius: 16rpx;
+  background: #fff1ec;
+  color: #8a4034;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 23rpx;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.coverage-assign.loading {
+  opacity: 0.62;
 }
 
 .coverage-link {

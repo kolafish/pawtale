@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import HTTPException
@@ -10,7 +10,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.domain.memoir.types import MemoirBookPlanStatus, MemoirCreatedBy
+from app.domain.memoir.types import MemoirBookChapterDraftStatus, MemoirBookPlanStatus, MemoirCreatedBy
 from app.models.memoir import (
     MemoirBookPlan,
     MemoirBookPlanChapter,
@@ -26,6 +26,7 @@ from app.schemas.memoir_book import (
     MemoirBookPlanConfirmRequest,
     MemoirBookPlanGenerateRequest,
     MemoirBookPlanResponse,
+    MemoirBookSourceAssignmentRequest,
     MemoirBookSourceCoverageItem,
     MemoirBookSourceCoverageResponse,
 )
@@ -83,6 +84,10 @@ def _safe_quote(source_text: str, quote: str = "") -> str:
 
 def _as_dict(ref: MemoirBookChapterSourceRef) -> dict[str, object]:
     return ref.model_dump()
+
+
+def _merge_metadata(metadata_json: dict | None, patch: dict[str, object]) -> dict[str, object]:
+    return {**(metadata_json or {}), **patch}
 
 
 def _chapter_response(chapter: MemoirBookPlanChapter) -> MemoirBookPlanChapterResponse:
@@ -407,6 +412,82 @@ async def get_book_source_coverage(
         uncovered_source_count=len(uncovered_sources),
         uncovered_sources=[_source_coverage_item(source) for source in uncovered_sources],
     )
+
+
+async def assign_book_sources_to_chapters(
+    db: AsyncSession,
+    *,
+    user_id: str,
+    project_id: str,
+    req: MemoirBookSourceAssignmentRequest,
+) -> MemoirBookPlanResponse:
+    await load_memoir_project(db, project_id, user_id)
+    plan = await _load_plan(db, project_id)
+    if not plan:
+        raise HTTPException(status_code=404, detail="章节规划不存在")
+    if plan.status != MemoirBookPlanStatus.CONFIRMED.value:
+        raise HTTPException(status_code=400, detail="请先确认章节规划")
+
+    sources = await _source_segments(db, user_id=user_id, project_id=project_id)
+    source_by_utterance = {source.utterance_id: source for source in sources}
+    covered_ids = _covered_utterance_ids(plan)
+    chapter_by_id = {chapter.id: chapter for chapter in plan.chapters}
+
+    affected_chapter_ids: set[str] = set()
+    for assignment in req.assignments:
+        chapter = chapter_by_id.get(assignment.chapter_id)
+        if not chapter:
+            raise HTTPException(status_code=404, detail="章节不存在")
+
+        refs = list(chapter.source_refs_json or [])
+        pending_ids = set(
+            item for item in (chapter.metadata_json or {}).get("pending_source_utterance_ids", [])
+            if isinstance(item, str)
+        )
+        for utterance_id in assignment.utterance_ids:
+            source = source_by_utterance.get(utterance_id)
+            if not source:
+                raise HTTPException(status_code=400, detail="转写不属于当前回忆录")
+            if utterance_id in covered_ids:
+                raise HTTPException(status_code=400, detail="转写已收录到章节")
+            refs.append(_as_dict(source.ref()))
+            covered_ids.add(utterance_id)
+            pending_ids.add(utterance_id)
+            affected_chapter_ids.add(chapter.id)
+
+        chapter.source_refs_json = refs
+        chapter.metadata_json = _merge_metadata(
+            chapter.metadata_json,
+            {
+                "pending_source_utterance_ids": sorted(pending_ids),
+                "source_assignment_updated_at": datetime.now(UTC).isoformat(),
+            },
+        )
+        db.add(chapter)
+
+    if affected_chapter_ids:
+        drafts = (
+            await db.execute(
+                select(MemoirBookChapterDraft).where(
+                    MemoirBookChapterDraft.project_id == project_id,
+                    MemoirBookChapterDraft.chapter_id.in_(affected_chapter_ids),
+                )
+            )
+        ).scalars().all()
+        for draft in drafts:
+            if draft.status == MemoirBookChapterDraftStatus.CONFIRMED.value:
+                draft.status = MemoirBookChapterDraftStatus.DRAFT.value
+                draft.metadata_json = _merge_metadata(
+                    draft.metadata_json,
+                    {"status_reason": "new_sources_assigned"},
+                )
+                db.add(draft)
+
+    await db.commit()
+    refreshed = await _load_plan(db, project_id)
+    if not refreshed:
+        raise HTTPException(status_code=500, detail="章节规划保存失败")
+    return _plan_response(refreshed)
 
 
 async def generate_book_plan(

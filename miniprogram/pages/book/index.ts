@@ -9,6 +9,7 @@ import type {
 } from "../../domain/voice-chat";
 import { getMemoirIdentity } from "../../services/auth";
 import {
+  assignMemoirBookSources,
   confirmMemoirBookChapterDraft,
   confirmMemoirBookPlan,
   createMemoirBookChapterDraftTTS,
@@ -40,7 +41,24 @@ interface TextInputEvent extends DatasetEvent {
   };
 }
 
+interface PickerEvent extends DatasetEvent {
+  detail: {
+    value: string | number;
+  };
+}
+
 type BookStage = "empty" | "plan_draft" | "drafting";
+
+interface ChapterPickerOption {
+  label: string;
+  value: string;
+}
+
+export interface BookUncoveredSourceView {
+  utterance_id: string;
+  previewText: string;
+  created_at: string;
+}
 
 export interface BookChapterView extends MemoirBookPlanChapter {
   editingTitle: string;
@@ -79,6 +97,9 @@ interface BookData {
   sourceCoverage: MemoirBookSourceCoverage | null;
   sourceCoverageNotice: string;
   uncoveredSourceCount: number;
+  uncoveredSources: BookUncoveredSourceView[];
+  chapterPickerOptions: ChapterPickerOption[];
+  assigningSourceId: string;
   bookOutput: MemoirBookOutput | null;
   bookContent: string;
   bookCharCount: number;
@@ -147,12 +168,34 @@ export function bookSourceCoverageNotice(
 function sourceCoverageData(
   plan: MemoirBookPlan | null,
   coverage: MemoirBookSourceCoverage | null,
-): Pick<BookData, "sourceCoverage" | "sourceCoverageNotice" | "uncoveredSourceCount"> {
+): Pick<BookData, "sourceCoverage" | "sourceCoverageNotice" | "uncoveredSourceCount" | "uncoveredSources"> {
   return {
     sourceCoverage: coverage,
     sourceCoverageNotice: bookSourceCoverageNotice(plan, coverage),
     uncoveredSourceCount: coverage?.uncovered_source_count || 0,
+    uncoveredSources: buildUncoveredSourceViews(coverage),
   };
+}
+
+export function buildUncoveredSourceViews(
+  coverage: MemoirBookSourceCoverage | null,
+  limit = 5,
+): BookUncoveredSourceView[] {
+  return (coverage?.uncovered_sources || []).slice(0, limit).map((source) => {
+    const text = trimText(source.text);
+    return {
+      utterance_id: source.utterance_id,
+      previewText: text.length > 72 ? `${text.slice(0, 72)}...` : text,
+      created_at: source.created_at,
+    };
+  });
+}
+
+export function buildChapterPickerOptions(chapters: BookChapterView[]): ChapterPickerOption[] {
+  return chapters.map((chapter, index) => ({
+    label: `第 ${index + 1} 章 ${chapter.title}`,
+    value: chapter.id,
+  }));
 }
 
 function chapterStateData(chapters: BookChapterView[]): Pick<
@@ -270,6 +313,7 @@ Page<BookData, {
   changeDraftContent(event: TextInputEvent): void;
   saveChapterDraft(event: DatasetEvent): Promise<void>;
   confirmChapterDraft(event: DatasetEvent): Promise<void>;
+  assignUncoveredSource(event: PickerEvent): Promise<void>;
   generateBook(): Promise<void>;
   playChapterAudio(event: DatasetEvent): Promise<void>;
   playBookAudio(): Promise<void>;
@@ -311,6 +355,9 @@ Page<BookData, {
     sourceCoverage: null,
     sourceCoverageNotice: "",
     uncoveredSourceCount: 0,
+    uncoveredSources: [],
+    chapterPickerOptions: [],
+    assigningSourceId: "",
     bookOutput: null,
     bookContent: "",
     bookCharCount: 0,
@@ -432,6 +479,7 @@ Page<BookData, {
       stageText: stageText(stage),
       chapters,
       ...chapterStateData(chapters),
+      chapterPickerOptions: buildChapterPickerOptions(chapters),
       ...sourceCoverageData(plan, this.data.sourceCoverage),
       ...(stage === "drafting" ? {} : bookOutputData(null)),
     });
@@ -610,6 +658,43 @@ Page<BookData, {
       });
     } finally {
       this.patchChapter(chapterId, { draftBusy: false });
+    }
+  },
+
+  async assignUncoveredSource(event) {
+    const utteranceId = event.currentTarget.dataset.id || "";
+    const optionIndex = Number(event.detail.value);
+    const option = this.data.chapterPickerOptions[optionIndex];
+    if (!utteranceId || !option || !this.data.projectId || this.data.assigningSourceId) {
+      return;
+    }
+    this.stopPlayback();
+    this.setData({ assigningSourceId: utteranceId, error: "" });
+    try {
+      const plan = await assignMemoirBookSources(this.data.projectId, {
+        assignments: [
+          {
+            chapter_id: option.value,
+            utterance_ids: [utteranceId],
+          },
+        ],
+      });
+      const [draftsByChapterId, coverage] = await Promise.all([
+        this.loadDraftsForPlan(plan),
+        this.loadSourceCoverage(this.data.projectId),
+      ]);
+      this.applyPlan(plan, draftsByChapterId);
+      this.applySourceCoverage(coverage);
+      this.applyBookOutput(null);
+      wx.showToast({ title: "已归入章节", icon: "success" });
+    } catch (error) {
+      if (isLoginError(error)) {
+        wx.switchTab({ url: "/pages/me/index" });
+        return;
+      }
+      this.setData({ error: error instanceof Error ? error.message : "归入章节失败" });
+    } finally {
+      this.setData({ assigningSourceId: "" });
     }
   },
 

@@ -163,6 +163,9 @@ function loadBookPage({ authExports = {}, voiceApiExports = {} } = {}) {
     filename: voiceApiPath,
     loaded: true,
     exports: {
+      assignMemoirBookSources: async () => {
+        throw new Error("assignMemoirBookSources was not mocked");
+      },
       confirmMemoirBookChapterDraft: async () => {
         throw new Error("confirmMemoirBookChapterDraft was not mocked");
       },
@@ -270,6 +273,25 @@ test("book page shows source coverage notice only when there are uncovered trans
   assert.equal(mod.bookSourceCoverageNotice(samplePlan("confirmed"), null), "");
 });
 
+test("book page builds source assignment views and chapter picker options", () => {
+  const { mod } = loadBookPage();
+  const plan = samplePlan("confirmed");
+  const chapters = mod.buildChapterViews(plan);
+  const coverage = sampleSourceCoverage(2);
+  coverage.uncovered_sources[0].text = "这是一段很长的新增转写，".repeat(8);
+
+  const sources = mod.buildUncoveredSourceViews(coverage, 1);
+  const options = mod.buildChapterPickerOptions(chapters);
+
+  assert.equal(sources.length, 1);
+  assert.equal(sources[0].utterance_id, "utterance-new-1");
+  assert.equal(sources[0].previewText.endsWith("..."), true);
+  assert.deepEqual(options, [
+    { label: "第 1 章 外婆家的童年", value: "chapter-1" },
+    { label: "第 2 章 第一次离家", value: "chapter-2" },
+  ]);
+});
+
 test("book page confirms chapters with trimmed user edits and original source refs", async () => {
   const submissions = [];
   const confirmedPlan = samplePlan("confirmed");
@@ -304,6 +326,54 @@ test("book page confirms chapters with trimmed user edits and original source re
   assert.equal(submissions[0].data.chapters[0].summary, "只写院子里的事");
   assert.equal(submissions[0].data.chapters[0].source_refs[0].utterance_id, "utterance-1");
   assert.equal(context.data.stage, "drafting");
+  delete global.wx;
+});
+
+test("book page assigns uncovered transcript to selected chapter", async () => {
+  const calls = [];
+  global.wx = { showToast() {}, switchTab() {} };
+  const assignedPlan = samplePlan("confirmed");
+  const { mod, page } = loadBookPage({
+    voiceApiExports: {
+      assignMemoirBookSources: async (projectId, data) => {
+        calls.push({ projectId, data });
+        return assignedPlan;
+      },
+      getMemoirBookChapterDraft: async () => sampleDraft(1, "draft"),
+      getMemoirBookSourceCoverage: async () => sampleSourceCoverage(0),
+    },
+  });
+  const context = pageContext(page, {
+    projectId: "project/1",
+    projectTitle: "外婆回忆录",
+  });
+  page.applyPlan.call(context, assignedPlan, {
+    "chapter-1": sampleDraft(1, "confirmed"),
+    "chapter-2": sampleDraft(1, "confirmed"),
+  });
+  page.applySourceCoverage.call(context, sampleSourceCoverage(1));
+  page.applyBookOutput.call(context, sampleBookOutput(1, "旧全书"));
+
+  await page.assignUncoveredSource.call(context, {
+    currentTarget: { dataset: { id: "utterance-new-1" } },
+    detail: { value: 1 },
+  });
+
+  assert.deepEqual(calls[0], {
+    projectId: "project/1",
+    data: {
+      assignments: [
+        {
+          chapter_id: "chapter-2",
+          utterance_ids: ["utterance-new-1"],
+        },
+      ],
+    },
+  });
+  assert.equal(context.data.assigningSourceId, "");
+  assert.equal(context.data.bookOutput, null);
+  assert.equal(context.data.sourceCoverageNotice, "");
+  assert.equal(context.data.chapters[0].draftStatusText, "待确认");
   delete global.wx;
 });
 
@@ -521,5 +591,67 @@ test("book APIs call encoded backend routes", async () => {
   );
   assert.equal(apiRequests[11].method, "POST");
   assert.equal(apiRequests[11].header.Cookie, "pawtale_session=abc");
+  delete global.wx;
+});
+
+test("book source assignment API calls encoded backend route", async () => {
+  const requests = [];
+  global.wx = {
+    getStorageSync(key) {
+      if (key === "pawtale_backend_config") {
+        return {
+          httpBaseUrl: "http://backend.local:8000/",
+          devEmail: "local@example.com",
+          devPassword: "secret",
+        };
+      }
+      if (key === "pawtale_backend_cookie") {
+        return "pawtale_session=abc";
+      }
+      return "";
+    },
+    getExtConfigSync() {
+      return {};
+    },
+    setStorageSync() {},
+    removeStorageSync() {},
+    request(options) {
+      requests.push(options);
+      if (options.url.endsWith("/api/auth/me")) {
+        options.success({ statusCode: 200, data: { id: "user-1" }, cookies: [], header: {} });
+        return;
+      }
+      options.success({ statusCode: 200, data: samplePlan("confirmed"), cookies: [], header: {} });
+    },
+  };
+  delete require.cache[require.resolve("../services/auth.ts")];
+  delete require.cache[require.resolve("../services/request.ts")];
+  delete require.cache[require.resolve("../services/memoir-voice-api.ts")];
+  const { assignMemoirBookSources } = require("../services/memoir-voice-api.ts");
+
+  await assignMemoirBookSources("project/1", {
+    assignments: [
+      {
+        chapter_id: "chapter/1",
+        utterance_ids: ["utterance/1"],
+      },
+    ],
+  });
+
+  const apiRequests = requests.filter((request) => request.url.includes("/api/mobile/memoir/"));
+  assert.equal(
+    apiRequests[0].url,
+    "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-source-assignments",
+  );
+  assert.equal(apiRequests[0].method, "POST");
+  assert.deepEqual(apiRequests[0].data, {
+    assignments: [
+      {
+        chapter_id: "chapter/1",
+        utterance_ids: ["utterance/1"],
+      },
+    ],
+  });
+  assert.equal(apiRequests[0].header.Cookie, "pawtale_session=abc");
   delete global.wx;
 });
