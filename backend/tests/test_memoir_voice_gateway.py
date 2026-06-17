@@ -269,6 +269,46 @@ async def test_voice_gateway_persists_only_latest_cumulative_final_per_audio_seg
     assert ended["state"] == "ready"
 
 
+async def test_voice_gateway_persists_latest_partial_when_provider_does_not_mark_final():
+    client = FakeGatewayClient()
+    partial_texts = [
+        "我小时候住在",
+        "我小时候住在外婆家。",
+    ]
+    asr_client = PartialOnlyStreamingASRClient(partial_texts)
+    persisted_events: list[StreamingASREvent] = []
+    session = VoiceGatewaySession(
+        client=client,
+        asr_client_factory=lambda: asr_client,
+        on_asr_final=lambda event: _persist_fake_final(persisted_events, event),
+    )
+
+    run_task = asyncio.create_task(session.run())
+    await _wait_for_event(client, "session.ready")
+    await client.push({"type": "session.start"})
+    await _wait_for_event(client, "session.started")
+    await client.push(
+        {
+            "type": "audio.frame",
+            "audio": base64.b64encode(b"pcm").decode("ascii"),
+        }
+    )
+    await client.push({"type": "audio.end"})
+    final = await _wait_for_event(client, "asr.final")
+    ended = await _wait_for_event(client, "audio.ended")
+    await client.push({"type": "session.stop"})
+    await asyncio.wait_for(run_task, timeout=1)
+
+    assert [event["text"] for event in client.sent if event["type"] == "asr.partial"] == partial_texts
+    assert [event.text for event in persisted_events] == [partial_texts[-1]]
+    assert persisted_events[0].raw["fallback_from_partial"] is True
+    assert final["text"] == partial_texts[-1]
+    assert final["provider_event_type"] == "partial_fallback"
+    assert final["message_id"] == "message-1"
+    assert final["utterance_id"] == "utterance-1"
+    assert ended["state"] == "ready"
+
+
 async def test_voice_gateway_stop_finishes_asr_before_shutdown():
     client = FakeGatewayClient()
     asr_client = FakeStreamingASRClient()
@@ -658,6 +698,21 @@ class CumulativeFinalStreamingASRClient(FakeStreamingASRClient):
         self.finished = True
         for text in self.final_texts:
             await self.events_queue.put(StreamingASREvent(type="final", text=text))
+        await self.events_queue.put(None)
+
+
+class PartialOnlyStreamingASRClient(FakeStreamingASRClient):
+    def __init__(self, partial_texts: list[str]) -> None:
+        super().__init__()
+        self.partial_texts = partial_texts
+
+    async def send_audio(self, audio: bytes) -> None:
+        self.sent_audio.append(audio)
+        for text in self.partial_texts:
+            await self.events_queue.put(StreamingASREvent(type="partial", text=text))
+
+    async def finish(self) -> None:
+        self.finished = True
         await self.events_queue.put(None)
 
 

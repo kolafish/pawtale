@@ -234,6 +234,7 @@ Page<VoiceChatData, {
   onUnload(): void;
   hydrateVoiceSessionSnapshot(): void;
   refreshVoiceSessionSnapshot(): Promise<void>;
+  confirmSavedTranscriptSnapshot(event: VoiceGatewayServerEvent): Promise<void>;
   applyVoiceSessionDetail(detail: MemoirVoiceSessionDetail): void;
   persistCurrentTranscriptSnapshot(): void;
   maybeGenerateOpeningFollowUp(): void;
@@ -394,6 +395,25 @@ Page<VoiceChatData, {
       }
     } catch (error) {
       console.warn("refresh voice session snapshot failed", error);
+    }
+  },
+
+  async confirmSavedTranscriptSnapshot(event) {
+    if (!this.data.voiceSessionId || !event.message_id || !event.utterance_id) {
+      return;
+    }
+    try {
+      const detail = await getMemoirVoiceSession(this.data.voiceSessionId);
+      writeMemoirVoiceSessionSnapshot(this.data.voiceSessionId, { detail });
+      this.applyVoiceSessionDetail(detail);
+      const persisted = detail.messages.some((message) => message.id === event.message_id)
+        && detail.utterances.some((utterance) => utterance.id === event.utterance_id);
+      this.setData({
+        persistenceStateText: persisted ? "已保存" : "已识别，记录同步中",
+      });
+    } catch (error) {
+      console.warn("confirm saved voice transcript failed", error);
+      this.setData({ persistenceStateText: "已保存，本地已缓存" });
     }
   },
 
@@ -959,6 +979,9 @@ Page<VoiceChatData, {
       ),
     });
     writeMemoirVoiceSessionSnapshot(this.data.voiceSessionId, { transcriptLines });
+    if (event.message_id && event.utterance_id) {
+      void this.confirmSavedTranscriptSnapshot(event);
+    }
     if (event.message_id) {
       void this.generateFollowUp(false);
     }
