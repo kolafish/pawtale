@@ -197,9 +197,11 @@ async def test_mobile_memoir_voice_follow_up_generates_and_saves_assistant_messa
     assert data["message"]["content_text"] == "那时候你最记得谁？"
     assert data["message"]["turn_index"] == 1
     assert data["message"]["guidance_intent"] == "follow_up"
-    assert data["message"]["metadata_json"]["prompt_version"] == "memoir_voice_followup_v1"
+    assert data["message"]["metadata_json"]["prompt_version"] == "memoir_voice_followup_v2"
     assert data["message"]["metadata_json"]["has_user_message"] is True
+    assert "老余" in fake_ai.calls[0]["system_prompt"]
     assert "我小时候住在外婆家。" in fake_ai.calls[0]["user_prompt"]
+    assert "不要一直纠缠同一件事的不同细节" in fake_ai.calls[0]["user_prompt"]
 
     stored = await test_db.scalar(select(MemoirChatMessage).where(MemoirChatMessage.id == data["message"]["id"]))
     assert stored is not None
@@ -233,7 +235,10 @@ async def test_mobile_memoir_voice_follow_up_starts_guided_session_without_user_
     assert data["message"]["metadata_json"]["source"] == "ai.opening"
     assert data["message"]["metadata_json"]["regenerate"] is True
     assert data["message"]["metadata_json"]["has_user_message"] is False
-    assert "人物" in fake_ai.calls[0]["user_prompt"]
+    assert "老余" in fake_ai.calls[0]["system_prompt"]
+    assert "人物、事情、家庭、工作、地点、某一天、人生阶段、闲聊" in fake_ai.calls[0]["user_prompt"]
+    assert "聊一个最挂念的家人" in fake_ai.calls[0]["user_prompt"]
+    assert "聊第一份工作" in fake_ai.calls[0]["user_prompt"]
     assert "暂无对话" in fake_ai.calls[0]["user_prompt"]
 
 
@@ -264,7 +269,9 @@ async def test_mobile_memoir_voice_follow_up_starts_free_session_without_user_me
     assert data["message"]["guidance_intent"] == "opening"
     assert data["message"]["metadata_json"]["source"] == "ai.opening"
     assert data["message"]["metadata_json"]["has_user_message"] is False
+    assert "老余" in fake_ai.calls[0]["system_prompt"]
     assert "自由讲述开场" in fake_ai.calls[0]["user_prompt"]
+    assert "用“老余”做简短自我介绍" in fake_ai.calls[0]["user_prompt"]
     assert "不要指定主题" in fake_ai.calls[0]["user_prompt"]
     assert "暂无对话" in fake_ai.calls[0]["user_prompt"]
 

@@ -31,6 +31,13 @@
 4. 在测试/验证结论明确后 merge 到 `main`。
 5. 最终汇报包含 PR 链接、测试或验证结果、merge commit SHA。
 
+## Post-Merge Deployment Preference
+
+- 如果本次 PR 改动包含 `backend/` 下的后端代码、依赖、配置模板、数据库迁移或部署脚本，且 PR 已成功 merge 到 `main`，默认继续把最新 `main` 自动部署到 ECS 上的 Pawtale 后端。
+- 后端自动部署仅限 Pawtale 自己的部署目录、进程和端口；不得修改共享机器上已有项目、已有进程、Caddy 全局配置、防火墙、systemd、PM2 全局状态或其他服务，除非用户明确要求。
+- 部署后必须做基础验证，至少包括后端健康检查、关键 API/OpenAPI 可访问性，以及本次后端改动相关的最小 smoke test；最终汇报要包含部署目标、验证结果和已部署的 commit SHA。
+- 如果 PR 只改小程序、文档、前端静态资源或非后端模块，默认不自动部署 ECS，除非用户明确要求。
+
 ## Long-Term Code Quality Principles
 
 - 长期迭代定位：这是一个需要持续演进的项目，默认以长期维护质量为先，代码要清晰、稳定、可继续扩展。
