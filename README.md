@@ -96,6 +96,8 @@ npm run dev
 | `GITHUB_APP_PRIVATE_KEY` / `GITHUB_APP_PRIVATE_KEY_PATH` | 可选，GitHub App private key；只放后端，二选一 |
 | `GITHUB_APP_SETUP_REDIRECT_URL` | 可选，GitHub App 安装完成后的前端跳转地址 |
 | `VOLC_ASR_API_KEY` | 豆包流式 ASR API key |
+| `VOICE_GATEWAY_MAX_ACTIVE_SESSIONS` | 回忆录语音网关全局 active WebSocket 上限；默认 `10` |
+| `VOICE_GATEWAY_MAX_ACTIVE_SESSIONS_PER_USER` | 单用户 active 语音网关上限；默认 `1` |
 | `VOLC_ASR_RESOURCE_ID` | 豆包流式 ASR 资源 ID |
 | `VOLC_ASR_WS_URL` | 豆包流式 ASR WebSocket 地址 |
 
