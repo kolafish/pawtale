@@ -24,6 +24,7 @@ async def list_projects(db: AsyncSession, user_id: str) -> list[ProjectListItem]
             title=p.title,
             description=p.description,
             word_count_target=p.word_count_target,
+            metadata_json=p.metadata_json or {},
             total_word_count=project_docs.project_total_words(p),
             group_count=len(p.groups or []),
             document_count=sum(len(g.documents or []) for g in (p.groups or [])),

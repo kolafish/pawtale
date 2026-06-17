@@ -2,11 +2,10 @@ import type { MemoirProjectListResponse, Project } from "../../domain/memoir";
 import { getMemoirIdentity } from "../../services/auth";
 import {
   activateMemoirProject,
-  createMemoirProject,
   deleteMemoirProject,
   listMemoirProjects,
-  updateMemoirProject,
 } from "../../services/memoir";
+import { projectProfileSummary } from "../../services/memoir-project-profile";
 
 interface DatasetEvent {
   currentTarget: {
@@ -16,17 +15,10 @@ interface DatasetEvent {
   };
 }
 
-interface InputEvent {
-  detail: {
-    value: string;
-  };
-}
-
 interface ProjectItem extends Project {
   active: boolean;
   canDelete: boolean;
-  editing: boolean;
-  editTitle: string;
+  profileSummary: string;
   updatedText: string;
   wordCountText: string;
 }
@@ -51,14 +43,13 @@ function displayDate(value?: string): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
-function projectItems(response: MemoirProjectListResponse, editingId = "", editTitle = ""): ProjectItem[] {
+function projectItems(response: MemoirProjectListResponse): ProjectItem[] {
   const canDelete = response.projects.length > 1;
   return response.projects.map((project) => ({
     ...project,
     active: project.id === response.active_project_id,
     canDelete,
-    editing: project.id === editingId,
-    editTitle: project.id === editingId ? editTitle : project.title,
+    profileSummary: projectProfileSummary(project),
     updatedText: displayDate(project.last_opened_at || project.updated_at || project.created_at),
     wordCountText: `${project.total_word_count || 0} 字`,
   }));
@@ -80,14 +71,12 @@ function confirmDeleteProject(project: ProjectItem): Promise<boolean> {
 
 Page<ProjectsData, {
   onLoad(): Promise<void>;
-  loadProjects(editingId?: string, editTitle?: string): Promise<void>;
-  applyProjects(response: MemoirProjectListResponse, editingId?: string, editTitle?: string): void;
-  createProject(): Promise<void>;
+  onShow(): Promise<void>;
+  loadProjects(): Promise<void>;
+  applyProjects(response: MemoirProjectListResponse): void;
+  createProject(): void;
   activateProject(event: DatasetEvent): Promise<void>;
-  startRename(event: DatasetEvent): void;
-  changeRenameTitle(event: InputEvent): void;
-  saveRename(event: DatasetEvent): Promise<void>;
-  cancelRename(): Promise<void>;
+  openProjectEdit(event: DatasetEvent): void;
   deleteProject(event: DatasetEvent): Promise<void>;
   openHome(): void;
 }>({
@@ -104,12 +93,18 @@ Page<ProjectsData, {
     await this.loadProjects();
   },
 
-  async loadProjects(editingId = "", editTitle = "") {
+  async onShow() {
+    if (!this.data.loading && !this.data.busy) {
+      await this.loadProjects();
+    }
+  },
+
+  async loadProjects() {
     this.setData({ loading: true, error: "" });
     try {
       await getMemoirIdentity();
       const response = await listMemoirProjects();
-      this.applyProjects(response, editingId, editTitle);
+      this.applyProjects(response);
     } catch (error) {
       this.setData({ error: error instanceof Error ? error.message : "回忆录加载失败" });
     } finally {
@@ -117,28 +112,15 @@ Page<ProjectsData, {
     }
   },
 
-  applyProjects(response, editingId = "", editTitle = "") {
+  applyProjects(response) {
     this.setData({
       activeProjectId: response.active_project_id,
-      projects: projectItems(response, editingId, editTitle),
+      projects: projectItems(response),
     });
   },
 
-  async createProject() {
-    if (this.data.busy) {
-      return;
-    }
-    this.setData({ busy: true, error: "" });
-    try {
-      const project = await createMemoirProject();
-      await getMemoirIdentity();
-      wx.showToast({ title: "已创建", icon: "success" });
-      await this.loadProjects(project.id, project.title);
-    } catch (error) {
-      this.setData({ error: error instanceof Error ? error.message : "创建失败" });
-    } finally {
-      this.setData({ busy: false });
-    }
+  createProject() {
+    wx.navigateTo({ url: "/pages/project-edit/index" });
   },
 
   async activateProject(event) {
@@ -159,48 +141,12 @@ Page<ProjectsData, {
     }
   },
 
-  startRename(event) {
+  openProjectEdit(event) {
     const id = event.currentTarget.dataset.id || "";
-    const project = this.data.projects.find((item) => item.id === id);
-    if (!project) {
+    if (!id) {
       return;
     }
-    this.setData({
-      projects: this.data.projects.map((item) => ({
-        ...item,
-        editing: item.id === id,
-        editTitle: item.id === id ? item.title : item.editTitle,
-      })),
-    });
-  },
-
-  changeRenameTitle(event) {
-    this.setData({
-      projects: this.data.projects.map((item) => item.editing
-        ? { ...item, editTitle: event.detail.value }
-        : item),
-    });
-  },
-
-  async saveRename(event) {
-    const id = event.currentTarget.dataset.id || "";
-    const project = this.data.projects.find((item) => item.id === id);
-    const title = project?.editTitle.trim() || "";
-    if (!project || !title || this.data.busy) {
-      this.setData({ error: "回忆录名称不能为空" });
-      return;
-    }
-    this.setData({ busy: true, error: "" });
-    try {
-      await updateMemoirProject(id, { title });
-      await getMemoirIdentity();
-      wx.showToast({ title: "已保存", icon: "success" });
-      await this.loadProjects();
-    } catch (error) {
-      this.setData({ error: error instanceof Error ? error.message : "保存失败" });
-    } finally {
-      this.setData({ busy: false });
-    }
+    wx.navigateTo({ url: `/pages/project-edit/index?projectId=${encodeURIComponent(id)}` });
   },
 
   async deleteProject(event) {
@@ -228,10 +174,6 @@ Page<ProjectsData, {
     } finally {
       this.setData({ busy: false, deletingId: "" });
     }
-  },
-
-  async cancelRename() {
-    await this.loadProjects();
   },
 
   openHome() {

@@ -82,7 +82,7 @@ const AUTO_STOP_SILENCE_MS = 1800;
 const AUTO_STOP_MIN_RECORDING_MS = 1200;
 
 function modeLabel(mode: MemoirGuidanceMode): string {
-  return mode === "guided_interview" ? "AI 引导" : "自由讲述";
+  return mode === "guided_interview" ? "主题讲述" : "自由讲述";
 }
 
 function statusText(status: VoiceChatConnectionStatus): string {

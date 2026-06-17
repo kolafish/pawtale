@@ -51,7 +51,7 @@
       <text class="mode-desc">按自己的时间线说</text>
     </view>
     <view class="mode-item">
-      <text class="mode-title">AI 引导</text>
+      <text class="mode-title">主题讲述</text>
       <text class="mode-desc">按人物、事件、地点聊</text>
     </view>
   </view>

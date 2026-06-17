@@ -1,0 +1,87 @@
+<view class="project-edit-page">
+  <view class="top-row">
+    <view class="back-hit" bindtap="cancel">
+      <text class="back-mark">‹</text>
+    </view>
+    <view class="title-block">
+      <text class="page-title">{{pageTitle}}</text>
+      <text class="page-meta">资料会用于语音访谈和 AI 追问</text>
+    </view>
+  </view>
+
+  <view wx:if="{{error}}" class="error">{{error}}</view>
+
+  <view class="form-panel">
+    <view class="field">
+      <text class="field-label">回忆录名称</text>
+      <input
+        class="text-input"
+        value="{{title}}"
+        maxlength="40"
+        placeholder="例如：母亲的回忆"
+        bindinput="changeTitle"
+      />
+    </view>
+
+    <view class="field">
+      <text class="field-label">性别</text>
+      <view class="segmented">
+        <view
+          wx:for="{{genderOptions}}"
+          wx:key="value"
+          class="segment {{narratorGender === item.value ? 'selected' : ''}}"
+          data-gender="{{item.value}}"
+          bindtap="selectGender"
+        >
+          <text>{{item.label}}</text>
+        </view>
+      </view>
+    </view>
+
+    <view class="field">
+      <text class="field-label">籍贯</text>
+      <input
+        class="text-input"
+        value="{{narratorOrigin}}"
+        maxlength="40"
+        placeholder="例如：四川成都"
+        bindinput="changeOrigin"
+      />
+    </view>
+
+    <view class="field">
+      <text class="field-label">年龄</text>
+      <input
+        class="text-input"
+        value="{{narratorAgeText}}"
+        type="number"
+        maxlength="3"
+        placeholder="例如：72"
+        bindinput="changeAge"
+      />
+    </view>
+
+    <view class="field">
+      <text class="field-label">讲述方式</text>
+      <view class="mode-list">
+        <view
+          wx:for="{{guidanceOptions}}"
+          wx:key="value"
+          class="mode-option {{defaultGuidanceMode === item.value ? 'selected' : ''}}"
+          data-mode="{{item.value}}"
+          bindtap="selectGuidanceMode"
+        >
+          <text class="mode-title">{{item.label}}</text>
+          <text class="mode-desc">{{item.value === 'guided_interview' ? 'AI 按人物、事件、地点和主题追问' : '讲述者按自己的节奏说'}}</text>
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <view class="actions">
+    <button class="ghost-button" disabled="{{saving || loading}}" bindtap="cancel">取消</button>
+    <button class="primary-button" loading="{{saving}}" disabled="{{saving || loading}}" bindtap="saveProject">
+      {{saving ? "保存中" : "保存"}}
+    </button>
+  </view>
+</view>
