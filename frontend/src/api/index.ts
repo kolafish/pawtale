@@ -12,6 +12,7 @@ import type {
   ProjectExportDownloadFormat,
   ProjectExportResponse,
   GitSyncStatus,
+  GitHubSetupUrl,
   DocumentGroup,
   ProjectGitSyncConfig,
   ProjectGitSyncRunResponse,
@@ -109,6 +110,8 @@ export const projectsApi = {
   },
 
   // GitHub one-way sync
+  createGitHubSetupUrl: () =>
+    api.post<GitHubSetupUrl>('/github/setup-url').then(r => r.data),
   getGitSync: (projectId: string) =>
     api.get<GitSyncStatus>(`/projects/${projectId}/git-sync`).then(r => r.data),
   saveGitSync: (

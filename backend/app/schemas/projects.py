@@ -222,6 +222,11 @@ class GitSyncInstallationResponse(BaseModel):
     repository_selection: str | None = None
 
 
+class GitHubSetupUrlResponse(BaseModel):
+    install_url: str
+    expires_at: datetime
+
+
 class GitSyncRepositoryOption(BaseModel):
     installation_id: int
     owner: str

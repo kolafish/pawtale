@@ -65,6 +65,24 @@ async def migrate_git_sync_schema(engine: AsyncEngine) -> dict:
             )
             changed_tables.append("project_git_sync")
 
+        if not await _table_exists(conn, "github_setup_states"):
+            await conn.execute(
+                text(
+                    """
+                    CREATE TABLE github_setup_states (
+                        state VARCHAR(120) NOT NULL,
+                        user_id VARCHAR(36) NOT NULL,
+                        created_at DATETIME NOT NULL,
+                        expires_at DATETIME NOT NULL,
+                        used_at DATETIME,
+                        PRIMARY KEY (state),
+                        FOREIGN KEY(user_id) REFERENCES users (id)
+                    )
+                    """
+                )
+            )
+            changed_tables.append("github_setup_states")
+
         await conn.execute(
             text("CREATE INDEX IF NOT EXISTS ix_github_installations_user_id ON github_installations (user_id)")
         )
@@ -77,6 +95,12 @@ async def migrate_git_sync_schema(engine: AsyncEngine) -> dict:
         await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_project_git_sync_user_id ON project_git_sync (user_id)"))
         await conn.execute(
             text("CREATE INDEX IF NOT EXISTS ix_project_git_sync_installation_id ON project_git_sync (installation_id)")
+        )
+        await conn.execute(
+            text("CREATE INDEX IF NOT EXISTS ix_github_setup_states_user_id ON github_setup_states (user_id)")
+        )
+        await conn.execute(
+            text("CREATE INDEX IF NOT EXISTS ix_github_setup_states_expires_at ON github_setup_states (expires_at)")
         )
 
     return {"changed_tables": changed_tables}
