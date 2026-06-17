@@ -7,6 +7,7 @@ from sqlalchemy import select
 
 from app.domain.memoir.types import MemoirCreatedBy
 from app.models.memoir import AudioFile, MemoirChatMessage, MemoirTranscriptVersion, MemoirVoiceUtterance
+from app.services.memoir import audio_files as memoir_audio_files
 from app.services.memoir.asr import StreamingASREvent
 from app.services.memoir.voice_final_persistence import VoiceFinalPersistenceService
 from app.services.memoir.voice_gateway import (
@@ -481,6 +482,12 @@ async def test_voice_gateway_persistence_saves_final_message_utterance_and_audio
 
     await persistence.record_audio_frame(b"pcm-1")
     await persistence.record_audio_frame(b"pcm-2")
+    pending_path = persistence.pending_audio_path
+    assert pending_path is not None
+    assert pending_path.exists()
+    assert pending_path.read_bytes() == b"pcm-1pcm-2"
+    assert persistence.pending_audio_size_bytes == len(b"pcm-1pcm-2")
+
     persisted = await persistence.persist_final(
         StreamingASREvent(
             type="final",
@@ -509,6 +516,9 @@ async def test_voice_gateway_persistence_saves_final_message_utterance_and_audio
     assert audio_file.mime_type == "audio/pcm"
     assert audio_file.size_bytes == len(b"pcm-1pcm-2")
     assert (tmp_path / "audio" / audio_file.user_id / f"{audio_file.id}.pcm").read_bytes() == b"pcm-1pcm-2"
+    assert not pending_path.exists()
+    assert persistence.pending_audio_path is None
+    assert persistence.pending_audio_size_bytes == 0
     assert message is not None
     assert corrected_version is not None
     assert message.content_text == "我小时候住在外婆家。"
@@ -554,6 +564,76 @@ async def test_voice_gateway_persistence_rejects_audio_stream_over_limit(client,
     assert exc_info.value.code == "audio_stream_too_large"
 
 
+async def test_voice_gateway_persistence_flushes_unfinalized_audio_from_pending_file(
+    client,
+    test_db,
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr("app.services.memoir.audio_files.MEMOIR_AUDIO_DIR", tmp_path / "audio")
+    user_response = await client.get("/api/auth/me")
+    create_response = await client.post(
+        "/api/mobile/memoir/voice-sessions",
+        json={"guidance_mode": "free_narration"},
+    )
+    voice_session_id = create_response.json()["session"]["id"]
+    persistence = VoiceGatewayPersistence(
+        db=test_db,
+        voice_session_id=voice_session_id,
+        user_id=user_response.json()["id"],
+    )
+
+    await persistence.record_audio_frame(b"partial-pcm")
+    pending_path = persistence.pending_audio_path
+    assert pending_path is not None
+    assert pending_path.exists()
+
+    persisted = await persistence.flush_unfinalized_audio()
+
+    assert persisted is not None
+    audio_file = await test_db.scalar(select(AudioFile).where(AudioFile.id == persisted["audio_file_id"]))
+    utterance = await test_db.scalar(select(MemoirVoiceUtterance).where(MemoirVoiceUtterance.id == persisted["utterance_id"]))
+
+    assert audio_file is not None
+    assert audio_file.size_bytes == len(b"partial-pcm")
+    assert (tmp_path / "audio" / audio_file.user_id / f"{audio_file.id}.pcm").read_bytes() == b"partial-pcm"
+    assert utterance is not None
+    assert utterance.transcript_raw == ""
+    assert utterance.provider_payload_json == {"source": "unfinalized_audio"}
+    assert not pending_path.exists()
+    assert persistence.pending_audio_path is None
+
+
+async def test_voice_gateway_persistence_discards_pending_audio_file(
+    client,
+    test_db,
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr("app.services.memoir.audio_files.MEMOIR_AUDIO_DIR", tmp_path / "audio")
+    user_response = await client.get("/api/auth/me")
+    create_response = await client.post(
+        "/api/mobile/memoir/voice-sessions",
+        json={"guidance_mode": "free_narration"},
+    )
+    persistence = VoiceGatewayPersistence(
+        db=test_db,
+        voice_session_id=create_response.json()["session"]["id"],
+        user_id=user_response.json()["id"],
+    )
+
+    await persistence.record_audio_frame(b"abandoned-pcm")
+    pending_path = persistence.pending_audio_path
+    assert pending_path is not None
+    assert pending_path.exists()
+
+    await persistence.discard_pending_audio()
+
+    assert not pending_path.exists()
+    assert persistence.pending_audio_path is None
+    assert persistence.pending_audio_size_bytes == 0
+
+
 async def test_voice_final_persistence_rolls_back_rows_and_staged_audio_on_failure(
     client,
     test_db,
@@ -594,6 +674,60 @@ async def test_voice_final_persistence_rolls_back_rows_and_staged_audio_on_failu
     assert utterances == []
     assert transcript_versions == []
     assert list((tmp_path / "audio").rglob("*.pcm")) == []
+
+
+async def test_voice_final_persistence_rolls_back_staged_audio_path_on_failure(
+    client,
+    test_db,
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr("app.services.memoir.audio_files.MEMOIR_AUDIO_DIR", tmp_path / "audio")
+    user_response = await client.get("/api/auth/me")
+    user_id = user_response.json()["id"]
+    create_response = await client.post(
+        "/api/mobile/memoir/voice-sessions",
+        json={"guidance_mode": "free_narration"},
+    )
+    voice_session_id = create_response.json()["session"]["id"]
+    service = VoiceFinalPersistenceService(
+        db=test_db,
+        voice_session_id=voice_session_id,
+        user_id=user_id,
+    )
+    source_path = tmp_path / "pending.pcm"
+    source_path.write_bytes(b"pcm-from-path")
+    staged_audio = await memoir_audio_files.stage_audio_path(
+        test_db,
+        user_id,
+        source_path,
+        mime_type="audio/pcm",
+        extension=".pcm",
+        move_source=True,
+    )
+
+    async def fail_turn_index(_voice_session_id: str) -> int:
+        raise RuntimeError("turn index failed")
+
+    monkeypatch.setattr(service, "_next_turn_index", fail_turn_index)
+
+    with pytest.raises(RuntimeError, match="turn index failed"):
+        await service.persist_final(
+            StreamingASREvent(type="final", text="我小时候住在外婆家。"),
+            staged_audio=staged_audio,
+        )
+
+    audio_files = (await test_db.execute(select(AudioFile))).scalars().all()
+    messages = (await test_db.execute(select(MemoirChatMessage))).scalars().all()
+    utterances = (await test_db.execute(select(MemoirVoiceUtterance))).scalars().all()
+    transcript_versions = (await test_db.execute(select(MemoirTranscriptVersion))).scalars().all()
+
+    assert audio_files == []
+    assert messages == []
+    assert utterances == []
+    assert transcript_versions == []
+    assert not source_path.exists()
+    assert not staged_audio.path.exists()
 
 
 async def _record_start(values: dict[str, int]) -> None:

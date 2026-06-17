@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,6 +23,7 @@ from app.services.memoir.voice_gateway_persistence import VoiceGatewayPersistenc
 
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 voice_gateway_capacity_manager = VoiceGatewayCapacityManager(
     VoiceGatewayCapacityLimits.from_settings(get_settings())
 )
@@ -50,6 +53,7 @@ async def mobile_memoir_voice_gateway(
         await _reject_websocket(websocket, exc.code)
         return
 
+    persistence: VoiceGatewayPersistence | None = None
     try:
         await websocket.accept()
         persistence = VoiceGatewayPersistence(
@@ -87,7 +91,13 @@ async def mobile_memoir_voice_gateway(
         )
         await gateway_session.run()
     finally:
-        await capacity_lease.release()
+        try:
+            if persistence is not None:
+                await persistence.discard_pending_audio()
+        except Exception:
+            logger.exception("Failed to discard pending memoir voice gateway audio")
+        finally:
+            await capacity_lease.release()
 
 
 async def _authenticate_websocket(websocket: WebSocket, db: AsyncSession) -> User | None:
