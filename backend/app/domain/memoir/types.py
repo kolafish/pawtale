@@ -147,3 +147,8 @@ class MemoirOutputStatus(str, Enum):
 class MemoirBookPlanStatus(str, Enum):
     DRAFT = "draft"
     CONFIRMED = "confirmed"
+
+
+class MemoirBookChapterDraftStatus(str, Enum):
+    DRAFT = "draft"
+    CONFIRMED = "confirmed"

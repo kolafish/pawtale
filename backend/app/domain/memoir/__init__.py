@@ -2,6 +2,7 @@ from app.domain.memoir.coverage import DEFAULT_COVERAGE_TOPICS, DefaultCoverageT
 from app.domain.memoir.template import initialize_memoir_project
 from app.domain.memoir.types import (
     MemoirAnswerStatus,
+    MemoirBookChapterDraftStatus,
     MemoirBookPlanStatus,
     MemoirCoverageStatus,
     MemoirCreatedBy,
@@ -27,6 +28,7 @@ __all__ = [
     "DEFAULT_COVERAGE_TOPICS",
     "DefaultCoverageTopic",
     "MemoirAnswerStatus",
+    "MemoirBookChapterDraftStatus",
     "MemoirBookPlanStatus",
     "MemoirCoverageStatus",
     "MemoirCreatedBy",

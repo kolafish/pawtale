@@ -14,7 +14,7 @@
 - 小程序已接入客户端轻量 VAD：基于 PCM 能量显示音量条、计算连续静音，并可自动收尾当前句。
 - 已有转写校正页和访谈进度页，可查看会话、模块覆盖、语音段、AI 追问数，并从记录继续访谈。
 - 小程序已拆为首页、转写、成书、我的 tab；我的页可看当前项目统计、管理项目和设置 AI TTS 音色，项目页支持创建、切换、重命名和删除回忆录。
-- 后端已新增成书章节规划 API，可基于当前转写生成章节建议、保存用户确认后的章节结构，并保留 utterance/message source refs；逐章正文成稿仍在后续 PR。
+- 后端已新增成书章节规划和逐章成稿 API，可基于当前转写生成章节建议、保存用户确认后的章节结构，并按章节 source refs 生成、编辑、确认正文版本。
 
 新的产品目标是：
 
@@ -76,6 +76,7 @@ miniprogram/services/tts-settings.ts          # 小程序本地 TTS 音色偏好
 miniprogram/domain/voice-chat.ts              # 新版聊天消息和实时事件类型
 backend/app/routers/memoir/book.py            # 成书章节规划 mobile API
 backend/app/services/memoir/book_plans.py     # 章节规划生成、确认和 source ref 校验
+backend/app/services/memoir/book_drafts.py    # 逐章成稿、版本追加和正文确认
 
 backend/app/routers/memoir/voice.py           # 本地/服务端 voice session API
 backend/app/services/memoir/voice_gateway.py  # WebSocket voice gateway + Streaming ASR

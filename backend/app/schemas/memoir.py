@@ -4,6 +4,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.domain.memoir.types import (
     MemoirAnswerStatus,
+    MemoirBookChapterDraftStatus,
     MemoirBookPlanStatus,
     MemoirChatContentStatus,
     MemoirChatMessageRole,
@@ -872,6 +873,58 @@ class MemoirBookPlanResponse(BaseModel):
     model: str | None = None
     metadata_json: dict[str, object] = Field(default_factory=dict)
     chapters: list[MemoirBookPlanChapterResponse] = Field(default_factory=list)
+    created_at: datetime
+    updated_at: datetime
+
+
+class MemoirBookChapterDraftGenerateRequest(BaseModel):
+    ai_model: str | None = None
+    force_regenerate: bool = False
+    feedback: str | None = None
+
+    @field_validator("feedback")
+    @classmethod
+    def _valid_feedback(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        feedback = value.strip()
+        return feedback or None
+
+
+class MemoirBookChapterDraftUpdateRequest(BaseModel):
+    content: str
+
+    @field_validator("content")
+    @classmethod
+    def _valid_content(cls, value: str) -> str:
+        content = value.strip()
+        if not content:
+            raise ValueError("章节稿内容不能为空")
+        return content
+
+
+class MemoirBookChapterDraftVersionResponse(BaseModel):
+    id: str
+    draft_id: str
+    project_id: str
+    chapter_id: str
+    version: int
+    content: str
+    created_by: MemoirCreatedBy
+    model: str | None = None
+    prompt_snapshot: str
+    feedback: str | None = None
+    created_at: datetime
+
+
+class MemoirBookChapterDraftResponse(BaseModel):
+    id: str
+    project_id: str
+    chapter_id: str
+    status: MemoirBookChapterDraftStatus
+    metadata_json: dict[str, object] = Field(default_factory=dict)
+    latest_version: MemoirBookChapterDraftVersionResponse | None = None
+    versions: list[MemoirBookChapterDraftVersionResponse] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
 
