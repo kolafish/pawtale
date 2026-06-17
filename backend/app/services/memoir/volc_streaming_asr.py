@@ -10,6 +10,9 @@ import websockets
 from app.services.memoir.asr import StreamingASREvent
 from app.services.memoir.volc_asr_protocol import VolcASRProtocolCodec
 
+ASR_PROVIDER_ERROR = "asr_provider_error"
+ASR_PROVIDER_INVALID_FRAME = "asr_provider_invalid_frame"
+
 
 @dataclass(frozen=True)
 class VolcStreamingASRConfig:
@@ -80,7 +83,11 @@ class VolcStreamingASRClient:
                         continue
                 event = self.codec.message_to_event(server_message)
             except Exception as exc:
-                event = StreamingASREvent(type="error", error=str(exc))
+                event = StreamingASREvent(
+                    type="error",
+                    error=_provider_event_error_code(exc),
+                    raw=_provider_event_error_raw(exc, message),
+                )
             if event:
                 yield event
 
@@ -149,6 +156,45 @@ def _provider_connect_error_code(exc: Exception) -> str:
     if "timeout" in combined or "timed out" in combined:
         return "asr_provider_connection_timeout"
     return "asr_provider_connection_failed"
+
+
+def _provider_event_error_code(exc: Exception) -> str:
+    if isinstance(exc, ValueError) and str(exc).startswith("Volc ASR frame"):
+        return ASR_PROVIDER_INVALID_FRAME
+    return ASR_PROVIDER_ERROR
+
+
+def _provider_event_error_raw(exc: Exception, message: Any) -> dict[str, Any]:
+    raw: dict[str, Any] = {
+        "provider": "volc_streaming_asr",
+        "error_type": exc.__class__.__name__,
+        "error": str(exc),
+    }
+    if isinstance(message, bytes):
+        raw.update(_provider_binary_frame_metadata(message))
+    elif isinstance(message, str):
+        raw["text_frame_length"] = len(message)
+    return raw
+
+
+def _provider_binary_frame_metadata(message: bytes) -> dict[str, Any]:
+    metadata: dict[str, Any] = {"frame_length": len(message)}
+    if len(message) < 4:
+        return metadata
+
+    first, second, third, fourth = message[:4]
+    metadata.update(
+        {
+            "frame_header_hex": bytes([first, second, third, fourth]).hex(),
+            "header_size_bytes": (first & 0x0F) * 4,
+            "message_type": second >> 4,
+            "message_flags": second & 0x0F,
+            "serialization": third >> 4,
+            "compression": third & 0x0F,
+            "reserved": fourth,
+        }
+    )
+    return metadata
 
 
 def _provider_response_status_code(exc: Exception) -> int | None:

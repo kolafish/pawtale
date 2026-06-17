@@ -115,7 +115,7 @@ function pcmFrameDurationMs(buffer: ArrayBuffer): number {
 }
 
 export function classifyVoiceGatewayError(event: VoiceGatewayServerEvent): VoiceChatErrorInfo {
-  const code = event.error || "voice_gateway_error";
+  const code = normalizeVoiceGatewayErrorCode(event.error || "voice_gateway_error");
   const kind = errorKindFromCode(code);
   return {
     kind,
@@ -123,6 +123,14 @@ export function classifyVoiceGatewayError(event: VoiceGatewayServerEvent): Voice
     state: event.state,
     message: messageFromErrorCode(code, kind),
   };
+}
+
+function normalizeVoiceGatewayErrorCode(code: string): string {
+  const normalized = code.toLowerCase();
+  if (normalized.startsWith("volc asr frame")) {
+    return "asr_provider_invalid_frame";
+  }
+  return code;
 }
 
 export function classifyVoiceClientConnectionError(message: string): VoiceChatErrorInfo {
@@ -144,27 +152,33 @@ export function classifyVoiceClientConnectionError(message: string): VoiceChatEr
 }
 
 function errorKindFromCode(code: string): VoiceChatErrorKind {
-  if (code.startsWith("voice_gateway_connection") || code === "voice_gateway_auth_failed") {
+  const normalized = code.toLowerCase();
+  if (normalized.startsWith("voice_gateway_connection") || normalized === "voice_gateway_auth_failed") {
     return "connection";
   }
-  if (code.startsWith("voice_session_")) {
+  if (normalized.startsWith("voice_session_")) {
     return "gateway";
   }
-  if (code.includes("persistence") || code.includes("sqlite") || code.includes("database")) {
+  if (normalized.includes("persistence") || normalized.includes("sqlite") || normalized.includes("database")) {
     return "persistence";
   }
-  if (code.includes("timeout") || code.includes("超时")) {
+  if (normalized.includes("timeout") || normalized.includes("超时")) {
     return "timeout";
   }
   if (
-    code.startsWith("audio_frame")
-    || code.startsWith("audio_stream")
-    || code.startsWith("unsupported_gateway")
-    || code.startsWith("asr_session")
+    normalized.startsWith("audio_frame")
+    || normalized.startsWith("audio_stream")
+    || normalized.startsWith("unsupported_gateway")
+    || normalized.startsWith("asr_session")
   ) {
     return "gateway";
   }
-  if (code.startsWith("asr_provider") || code.startsWith("provider_") || code.startsWith("volc") || code.includes("asr_")) {
+  if (
+    normalized.startsWith("asr_provider")
+    || normalized.startsWith("provider_")
+    || normalized.startsWith("volc")
+    || normalized.includes("asr_")
+  ) {
     return "asr";
   }
   return "unknown";
@@ -183,6 +197,7 @@ function messageFromErrorCode(code: string, kind: VoiceChatErrorKind): string {
     asr_provider_connection_failed: "语音识别服务连接失败",
     asr_provider_connection_timeout: "语音识别服务连接超时",
     asr_provider_forbidden: "语音识别服务鉴权失败",
+    asr_provider_invalid_frame: "语音识别服务返回异常，请重试",
     asr_provider_invalid_credentials: "语音识别 API Key 无效",
     asr_provider_resource_not_granted: "ASR 资源未开通或 API Key 无权限",
     voice_gateway_auth_failed: "登录状态已失效，请重新登录后再进入",

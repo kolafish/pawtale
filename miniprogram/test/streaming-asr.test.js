@@ -147,6 +147,32 @@ test("normalizes invalid gateway payloads into session errors", () => {
     },
   );
   assert.deepEqual(
+    classifyVoiceGatewayError({
+      type: "session.error",
+      state: "failed",
+      error: "asr_provider_invalid_frame",
+    }),
+    {
+      kind: "asr",
+      code: "asr_provider_invalid_frame",
+      state: "failed",
+      message: "语音识别服务返回异常，请重试",
+    },
+  );
+  assert.deepEqual(
+    classifyVoiceGatewayError({
+      type: "session.error",
+      state: "failed",
+      error: "Volc ASR frame payload is truncated",
+    }),
+    {
+      kind: "asr",
+      code: "asr_provider_invalid_frame",
+      state: "failed",
+      message: "语音识别服务返回异常，请重试",
+    },
+  );
+  assert.deepEqual(
     classifyVoiceClientConnectionError("server rejected WebSocket connection: HTTP 403"),
     {
       kind: "connection",

@@ -228,6 +228,63 @@ def test_volc_headers_prefer_app_access_credentials_over_api_key():
     assert "X-Api-Key" not in headers
 
 
+def test_volc_client_maps_protocol_parse_error_to_stable_provider_event():
+    declared_payload_size = 999
+    bad_frame = (
+        bytes([0x11, SERVER_FULL_RESPONSE << 4, (JSON_SERIALIZATION << 4) | GZIP_COMPRESSION, 0x00])
+        + declared_payload_size.to_bytes(4, "big")
+        + b"short"
+    )
+
+    class FakeConnection:
+        def __init__(self):
+            self.messages = [bad_frame]
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            if not self.messages:
+                raise StopAsyncIteration
+            return self.messages.pop(0)
+
+    client = VolcStreamingASRClient(
+        config=VolcStreamingASRConfig(
+            ws_url="wss://example.test",
+            resource_id="volc.seedasr.sauc.duration",
+            api_key="api",
+        ),
+        user_id="user-1",
+        voice_session_id="voice-session-1",
+    )
+    client._connection = FakeConnection()
+
+    import asyncio
+
+    async def collect_events():
+        return [event async for event in client.events()]
+
+    events = asyncio.run(collect_events())
+
+    assert len(events) == 1
+    event = events[0]
+    assert event.type == "error"
+    assert event.error == "asr_provider_invalid_frame"
+    assert event.raw == {
+        "provider": "volc_streaming_asr",
+        "error_type": "ValueError",
+        "error": "Volc ASR frame payload is truncated",
+        "frame_length": len(bad_frame),
+        "frame_header_hex": "11901100",
+        "header_size_bytes": 4,
+        "message_type": SERVER_FULL_RESPONSE,
+        "message_flags": 0,
+        "serialization": JSON_SERIALIZATION,
+        "compression": GZIP_COMPRESSION,
+        "reserved": 0,
+    }
+
+
 def test_volc_initial_request_asks_for_full_two_pass_results():
     client = VolcStreamingASRClient(
         config=VolcStreamingASRConfig(
