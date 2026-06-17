@@ -236,10 +236,13 @@ async def test_mobile_memoir_voice_follow_up_starts_guided_session_without_user_
     assert data["message"]["metadata_json"]["regenerate"] is True
     assert data["message"]["metadata_json"]["has_user_message"] is False
     assert "老余" in fake_ai.calls[0]["system_prompt"]
+    assert "今天可以随便聊一些主题" in fake_ai.calls[0]["user_prompt"]
+    assert "比如" in fake_ai.calls[0]["user_prompt"]
     assert "人物、事情、家庭、工作、地点、某一天、人生阶段、闲聊" in fake_ai.calls[0]["user_prompt"]
     assert "聊一个最挂念的家人" in fake_ai.calls[0]["user_prompt"]
     assert "聊第一份工作" in fake_ai.calls[0]["user_prompt"]
     assert "暂无对话" in fake_ai.calls[0]["user_prompt"]
+    assert "暂无历史会话" in fake_ai.calls[0]["user_prompt"]
 
 
 async def test_mobile_memoir_voice_follow_up_starts_free_session_without_user_message(
@@ -272,8 +275,154 @@ async def test_mobile_memoir_voice_follow_up_starts_free_session_without_user_me
     assert "老余" in fake_ai.calls[0]["system_prompt"]
     assert "自由讲述开场" in fake_ai.calls[0]["user_prompt"]
     assert "用“老余”做简短自我介绍" in fake_ai.calls[0]["user_prompt"]
-    assert "不要指定主题" in fake_ai.calls[0]["user_prompt"]
+    assert "从小时候或最早的记忆开始讲起" in fake_ai.calls[0]["user_prompt"]
     assert "暂无对话" in fake_ai.calls[0]["user_prompt"]
+    assert "暂无历史会话" in fake_ai.calls[0]["user_prompt"]
+
+
+async def test_mobile_memoir_guided_opening_references_previous_session(
+    client,
+    test_db,
+    monkeypatch,
+):
+    previous_response = await client.post(
+        "/api/mobile/memoir/voice-sessions",
+        json={"guidance_mode": "guided_interview", "current_guidance_module": "event"},
+    )
+    previous_session = previous_response.json()["session"]
+    previous_message = MemoirChatMessage(
+        project_id=previous_session["project_id"],
+        voice_session_id=previous_session["id"],
+        role=MemoirChatMessageRole.USER.value,
+        content_text="上次讲到我第一次去上海找工作。",
+        content_status=MemoirChatContentStatus.FINAL.value,
+        turn_index=0,
+        metadata_json={"source": "test"},
+    )
+    test_db.add(previous_message)
+    await test_db.commit()
+    create_response = await client.post(
+        "/api/mobile/memoir/voice-sessions",
+        json={"guidance_mode": "guided_interview", "current_guidance_module": "event"},
+    )
+    session = create_response.json()["session"]
+    fake_ai = FakeFollowUpAI("你好，我是老余。我们可以随便聊些主题，比如人物、事情或家庭；上次讲到你第一次去上海找工作，今天想接着聊，还是重新选个主题？")
+    monkeypatch.setattr(
+        "app.services.memoir.voice_followups.get_ai_service",
+        lambda model=None: fake_ai,
+    )
+
+    response = await client.post(
+        f"/api/mobile/memoir/voice-sessions/{session['id']}/follow-up",
+        json={},
+    )
+
+    assert response.status_code == 200
+    prompt = fake_ai.calls[0]["user_prompt"]
+    assert "叙述者之前已有同模式讲述记录" in prompt
+    assert "今天可以随便聊一些主题" in prompt
+    assert "问叙述者是想接着上次聊，还是重新选一个主题聊" in prompt
+    assert "叙述者：上次讲到我第一次去上海找工作。" in prompt
+
+
+async def test_mobile_memoir_guided_follow_up_can_continue_previous_session(
+    client,
+    test_db,
+    monkeypatch,
+):
+    previous_response = await client.post(
+        "/api/mobile/memoir/voice-sessions",
+        json={"guidance_mode": "guided_interview", "current_guidance_module": "work"},
+    )
+    previous_session = previous_response.json()["session"]
+    previous_message = MemoirChatMessage(
+        project_id=previous_session["project_id"],
+        voice_session_id=previous_session["id"],
+        role=MemoirChatMessageRole.USER.value,
+        content_text="我讲到进厂第一天跟着师傅学开机器。",
+        content_status=MemoirChatContentStatus.FINAL.value,
+        turn_index=0,
+        metadata_json={"source": "test"},
+    )
+    test_db.add(previous_message)
+    await test_db.commit()
+    create_response = await client.post(
+        "/api/mobile/memoir/voice-sessions",
+        json={"guidance_mode": "guided_interview", "current_guidance_module": "work"},
+    )
+    session = create_response.json()["session"]
+    current_message = MemoirChatMessage(
+        project_id=session["project_id"],
+        voice_session_id=session["id"],
+        role=MemoirChatMessageRole.USER.value,
+        content_text="我们接着上次讲吧。",
+        content_status=MemoirChatContentStatus.FINAL.value,
+        turn_index=0,
+        metadata_json={"source": "test"},
+    )
+    test_db.add(current_message)
+    await test_db.commit()
+    fake_ai = FakeFollowUpAI("那进厂第一天，师傅先教了你什么？")
+    monkeypatch.setattr(
+        "app.services.memoir.voice_followups.get_ai_service",
+        lambda model=None: fake_ai,
+    )
+
+    response = await client.post(
+        f"/api/mobile/memoir/voice-sessions/{session['id']}/follow-up",
+        json={},
+    )
+
+    assert response.status_code == 200
+    prompt = fake_ai.calls[0]["user_prompt"]
+    assert "如果叙述者表达想接着上次聊" in prompt
+    assert "叙述者：我们接着上次讲吧。" in prompt
+    assert "叙述者：我讲到进厂第一天跟着师傅学开机器。" in prompt
+
+
+async def test_mobile_memoir_free_opening_prompts_previous_timeline_continuation(
+    client,
+    test_db,
+    monkeypatch,
+):
+    previous_response = await client.post(
+        "/api/mobile/memoir/voice-sessions",
+        json={"guidance_mode": "free_narration"},
+    )
+    previous_session = previous_response.json()["session"]
+    previous_message = MemoirChatMessage(
+        project_id=previous_session["project_id"],
+        voice_session_id=previous_session["id"],
+        role=MemoirChatMessageRole.USER.value,
+        content_text="我小时候讲到在外婆家门口等父亲回来。",
+        content_status=MemoirChatContentStatus.FINAL.value,
+        turn_index=0,
+        metadata_json={"source": "test"},
+    )
+    test_db.add(previous_message)
+    await test_db.commit()
+    create_response = await client.post(
+        "/api/mobile/memoir/voice-sessions",
+        json={"guidance_mode": "free_narration"},
+    )
+    session = create_response.json()["session"]
+    fake_ai = FakeFollowUpAI("你好，我是老余。上次你讲到小时候在外婆家门口等父亲回来，我们可以从那里接着讲。")
+    monkeypatch.setattr(
+        "app.services.memoir.voice_followups.get_ai_service",
+        lambda model=None: fake_ai,
+    )
+
+    response = await client.post(
+        f"/api/mobile/memoir/voice-sessions/{session['id']}/follow-up",
+        json={},
+    )
+
+    assert response.status_code == 200
+    prompt = fake_ai.calls[0]["user_prompt"]
+    assert "叙述者之前已有讲述记录" in prompt
+    assert "提醒上次讲到哪里" in prompt
+    assert "可以从上次停下来的地方接着讲" in prompt
+    assert "叙述者：我小时候讲到在外婆家门口等父亲回来。" in prompt
 
 
 async def test_mobile_memoir_voice_session_list_and_progress(client, test_db):
