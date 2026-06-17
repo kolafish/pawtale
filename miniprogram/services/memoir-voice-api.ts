@@ -1,9 +1,13 @@
 import type {
   MemoirAssistantTTSRequest,
   MemoirAssistantTTSResponse,
+  MemoirBookAudioRequest,
+  MemoirBookAudioResponse,
   MemoirBookChapterDraft,
   MemoirBookChapterDraftGenerateRequest,
   MemoirBookChapterDraftUpdateRequest,
+  MemoirBookOutput,
+  MemoirBookOutputGenerateRequest,
   MemoirBookPlan,
   MemoirBookPlanConfirmRequest,
   MemoirBookPlanGenerateRequest,
@@ -234,6 +238,56 @@ export async function confirmMemoirBookChapterDraft(
     `/api/mobile/memoir/projects/${encodeURIComponent(projectId)}/book-plan/chapters/${encodeURIComponent(chapterId)}/draft/confirm`,
     {
       method: "POST",
+    },
+  );
+}
+
+export async function createMemoirBookChapterDraftTTS(
+  projectId: string,
+  chapterId: string,
+  data: MemoirBookAudioRequest = {},
+): Promise<MemoirBookAudioResponse> {
+  await ensureBackendSession();
+  return request<MemoirBookAudioResponse>(
+    `/api/mobile/memoir/projects/${encodeURIComponent(projectId)}/book-plan/chapters/${encodeURIComponent(chapterId)}/draft/tts`,
+    {
+      method: "POST",
+      data,
+    },
+  );
+}
+
+export async function getMemoirBookOutput(projectId: string): Promise<MemoirBookOutput> {
+  await ensureBackendSession();
+  return request<MemoirBookOutput>(
+    `/api/mobile/memoir/projects/${encodeURIComponent(projectId)}/book-output`,
+  );
+}
+
+export async function generateMemoirBookOutput(
+  projectId: string,
+  data: MemoirBookOutputGenerateRequest = {},
+): Promise<MemoirBookOutput> {
+  await ensureBackendSession();
+  return request<MemoirBookOutput>(
+    `/api/mobile/memoir/projects/${encodeURIComponent(projectId)}/book-output/generate`,
+    {
+      method: "POST",
+      data,
+    },
+  );
+}
+
+export async function createMemoirBookOutputTTS(
+  projectId: string,
+  data: MemoirBookAudioRequest = {},
+): Promise<MemoirBookAudioResponse> {
+  await ensureBackendSession();
+  return request<MemoirBookAudioResponse>(
+    `/api/mobile/memoir/projects/${encodeURIComponent(projectId)}/book-output/tts`,
+    {
+      method: "POST",
+      data,
     },
   );
 }

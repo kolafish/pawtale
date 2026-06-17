@@ -5,14 +5,19 @@ from app.auth import get_current_user
 from app.database import get_db
 from app.models.users import User
 from app.schemas.memoir_book import (
+    MemoirBookAudioRequest,
+    MemoirBookAudioResponse,
     MemoirBookChapterDraftGenerateRequest,
     MemoirBookChapterDraftResponse,
     MemoirBookChapterDraftUpdateRequest,
+    MemoirBookOutputGenerateRequest,
+    MemoirBookOutputResponse,
     MemoirBookPlanConfirmRequest,
     MemoirBookPlanGenerateRequest,
     MemoirBookPlanResponse,
 )
 from app.services.memoir import book_drafts as memoir_book_drafts
+from app.services.memoir import book_outputs as memoir_book_outputs
 from app.services.memoir import book_plans as memoir_book_plans
 
 
@@ -135,4 +140,67 @@ async def confirm_mobile_memoir_book_chapter_draft(
         user_id=current_user.id,
         project_id=project_id,
         chapter_id=chapter_id,
+    )
+
+
+@router.post(
+    "/projects/{project_id}/book-plan/chapters/{chapter_id}/draft/tts",
+    response_model=MemoirBookAudioResponse,
+)
+async def create_mobile_memoir_book_chapter_tts(
+    project_id: str,
+    chapter_id: str,
+    req: MemoirBookAudioRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await memoir_book_drafts.synthesize_chapter_draft_audio(
+        db,
+        user_id=current_user.id,
+        project_id=project_id,
+        chapter_id=chapter_id,
+        req=req,
+    )
+
+
+@router.get("/projects/{project_id}/book-output", response_model=MemoirBookOutputResponse)
+async def get_mobile_memoir_book_output(
+    project_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await memoir_book_outputs.get_book_output(
+        db,
+        user_id=current_user.id,
+        project_id=project_id,
+    )
+
+
+@router.post("/projects/{project_id}/book-output/generate", response_model=MemoirBookOutputResponse)
+async def generate_mobile_memoir_book_output(
+    project_id: str,
+    req: MemoirBookOutputGenerateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await memoir_book_outputs.generate_book_output(
+        db,
+        user_id=current_user.id,
+        project_id=project_id,
+        req=req,
+    )
+
+
+@router.post("/projects/{project_id}/book-output/tts", response_model=MemoirBookAudioResponse)
+async def create_mobile_memoir_book_output_tts(
+    project_id: str,
+    req: MemoirBookAudioRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await memoir_book_outputs.synthesize_book_output_audio(
+        db,
+        user_id=current_user.id,
+        project_id=project_id,
+        req=req,
     )

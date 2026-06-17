@@ -1,5 +1,7 @@
 import type {
+  MemoirBookAudioResponse,
   MemoirBookChapterDraft,
+  MemoirBookOutput,
   MemoirBookPlan,
   MemoirBookPlanChapter,
   MemoirBookPlanChapterInput,
@@ -8,12 +10,18 @@ import { getMemoirIdentity } from "../../services/auth";
 import {
   confirmMemoirBookChapterDraft,
   confirmMemoirBookPlan,
+  createMemoirBookChapterDraftTTS,
+  createMemoirBookOutputTTS,
+  downloadMemoirVoiceAudio,
   generateMemoirBookChapterDraft,
+  generateMemoirBookOutput,
   generateMemoirBookPlan,
   getMemoirBookChapterDraft,
+  getMemoirBookOutput,
   getMemoirBookPlan,
   updateMemoirBookChapterDraft,
 } from "../../services/memoir-voice-api";
+import { configureAudiblePlayback } from "../../services/audio-playback";
 import { ApiError } from "../../services/request";
 
 interface DatasetEvent {
@@ -35,6 +43,7 @@ type BookStage = "empty" | "plan_draft" | "drafting";
 export interface BookChapterView extends MemoirBookPlanChapter {
   editingTitle: string;
   editingSummary: string;
+  ttsTarget: string;
   sourceCount: number;
   sourceSummary: string;
   draft: MemoirBookChapterDraft | null;
@@ -61,7 +70,17 @@ interface BookData {
   chapters: BookChapterView[];
   confirmedDraftCount: number;
   totalChapterCount: number;
+  allChaptersConfirmed: boolean;
+  hasDraftChanges: boolean;
+  canGenerateBook: boolean;
   progressText: string;
+  bookOutput: MemoirBookOutput | null;
+  bookContent: string;
+  bookCharCount: number;
+  bookVersionText: string;
+  generatingBook: boolean;
+  ttsBusyTarget: string;
+  playingTarget: string;
 }
 
 function trimText(value: string): string {
@@ -82,6 +101,46 @@ function draftStatusText(draft: MemoirBookChapterDraft | null): string {
 function draftVersionText(draft: MemoirBookChapterDraft | null): string {
   const version = draft?.latest_version?.version;
   return version ? `第 ${version} 版` : "暂无正文";
+}
+
+export function latestBookContent(output: MemoirBookOutput | null): string {
+  return output?.latest_version?.content || "";
+}
+
+export function bookOutputVersionText(output: MemoirBookOutput | null): string {
+  const version = output?.latest_version?.version;
+  return version ? `全书第 ${version} 版` : "尚未生成全书";
+}
+
+function bookOutputData(output: MemoirBookOutput | null): Pick<
+  BookData,
+  "bookOutput" | "bookContent" | "bookCharCount" | "bookVersionText"
+> {
+  const content = latestBookContent(output);
+  return {
+    bookOutput: output,
+    bookContent: content,
+    bookCharCount: trimText(content).length,
+    bookVersionText: bookOutputVersionText(output),
+  };
+}
+
+function chapterStateData(chapters: BookChapterView[]): Pick<
+  BookData,
+  "confirmedDraftCount" | "totalChapterCount" | "allChaptersConfirmed" | "hasDraftChanges" | "canGenerateBook" | "progressText"
+> {
+  const confirmedDraftCount = chapters.filter((chapter) => chapter.draft?.status === "confirmed").length;
+  const totalChapterCount = chapters.length;
+  const hasDraftChanges = chapters.some((chapter) => chapter.draftChanged);
+  const allChaptersConfirmed = totalChapterCount > 0 && confirmedDraftCount === totalChapterCount;
+  return {
+    confirmedDraftCount,
+    totalChapterCount,
+    allChaptersConfirmed,
+    hasDraftChanges,
+    canGenerateBook: allChaptersConfirmed && !hasDraftChanges,
+    progressText: bookProgressText(chapters),
+  };
 }
 
 export function bookChapterSourceSummary(chapter: Pick<MemoirBookPlanChapter, "source_refs">): string {
@@ -108,6 +167,7 @@ export function buildChapterViews(
         ...chapter,
         editingTitle: chapter.title,
         editingSummary: chapter.summary || "",
+        ttsTarget: `chapter:${chapter.id}`,
         sourceCount: chapter.source_refs.length,
         sourceSummary: bookChapterSourceSummary(chapter),
         draft,
@@ -165,7 +225,9 @@ Page<BookData, {
   loadBookHome(): Promise<void>;
   loadPlanForProject(projectId: string): Promise<void>;
   loadDraftsForPlan(plan: MemoirBookPlan): Promise<Record<string, MemoirBookChapterDraft | null>>;
+  loadBookOutput(projectId: string): Promise<MemoirBookOutput | null>;
   applyPlan(plan: MemoirBookPlan | null, draftsByChapterId?: Record<string, MemoirBookChapterDraft | null>): void;
+  applyBookOutput(output: MemoirBookOutput | null): void;
   generatePlan(): Promise<void>;
   confirmPlan(): Promise<void>;
   changePlanTitle(event: TextInputEvent): void;
@@ -176,15 +238,30 @@ Page<BookData, {
   changeDraftContent(event: TextInputEvent): void;
   saveChapterDraft(event: DatasetEvent): Promise<void>;
   confirmChapterDraft(event: DatasetEvent): Promise<void>;
+  generateBook(): Promise<void>;
+  playChapterAudio(event: DatasetEvent): Promise<void>;
+  playBookAudio(): Promise<void>;
+  requestBookAudio(target: string): Promise<MemoirBookAudioResponse>;
+  playAudioFiles(audioFileIds: string[], target: string, token: number): Promise<void>;
+  playAudioFile(audioFileId: string, token: number): Promise<void>;
+  stopPlayback(): void;
+  onUnload(): void;
   openTranscripts(): void;
   openHome(): void;
   patchChapter(chapterId: string, patch: Partial<BookChapterView>): void;
   patchDraft(chapterId: string, draft: MemoirBookChapterDraft): void;
+  clearBookOutput(): void;
+  audio: WechatMiniprogram.InnerAudioContext | null;
+  playToken: number;
 }>({
+  audio: null,
+  playToken: 0,
+
   data: {
     loading: false,
     generatingPlan: false,
     confirmingPlan: false,
+    generatingBook: false,
     error: "",
     projectId: "",
     projectTitle: "我的回忆录",
@@ -195,7 +272,16 @@ Page<BookData, {
     chapters: [],
     confirmedDraftCount: 0,
     totalChapterCount: 0,
+    allChaptersConfirmed: false,
+    hasDraftChanges: false,
+    canGenerateBook: false,
     progressText: "还没有章节",
+    bookOutput: null,
+    bookContent: "",
+    bookCharCount: 0,
+    bookVersionText: "尚未生成全书",
+    ttsBusyTarget: "",
+    playingTarget: "",
   },
 
   async onShow() {
@@ -235,11 +321,20 @@ Page<BookData, {
   async loadPlanForProject(projectId: string) {
     try {
       const plan = await getMemoirBookPlan(projectId);
-      const draftsByChapterId = plan.status === "confirmed" ? await this.loadDraftsForPlan(plan) : {};
+      let draftsByChapterId: Record<string, MemoirBookChapterDraft | null> = {};
+      let output: MemoirBookOutput | null = null;
+      if (plan.status === "confirmed") {
+        [draftsByChapterId, output] = await Promise.all([
+          this.loadDraftsForPlan(plan),
+          this.loadBookOutput(projectId),
+        ]);
+      }
       this.applyPlan(plan, draftsByChapterId);
+      this.applyBookOutput(output);
     } catch (error) {
       if (error instanceof ApiError && error.statusCode === 404) {
         this.applyPlan(null);
+        this.applyBookOutput(null);
         return;
       }
       throw error;
@@ -266,20 +361,33 @@ Page<BookData, {
     }, {});
   },
 
+  async loadBookOutput(projectId) {
+    try {
+      return await getMemoirBookOutput(projectId);
+    } catch (error) {
+      if (error instanceof ApiError && error.statusCode === 404) {
+        return null;
+      }
+      throw error;
+    }
+  },
+
   applyPlan(plan, draftsByChapterId = {}) {
     const chapters = plan ? buildChapterViews(plan, draftsByChapterId) : [];
     const stage = planStage(plan);
-    const confirmedDraftCount = chapters.filter((chapter) => chapter.draft?.status === "confirmed").length;
     this.setData({
       plan,
       planTitle: plan?.title || `${this.data.projectTitle || "我的回忆录"}章节规划`,
       stage,
       stageText: stageText(stage),
       chapters,
-      confirmedDraftCount,
-      totalChapterCount: chapters.length,
-      progressText: bookProgressText(chapters),
+      ...chapterStateData(chapters),
+      ...(stage === "drafting" ? {} : bookOutputData(null)),
     });
+  },
+
+  applyBookOutput(output) {
+    this.setData(bookOutputData(output));
   },
 
   async generatePlan() {
@@ -358,8 +466,7 @@ Page<BookData, {
     const chapters = this.data.chapters.filter((chapter) => chapter.id !== id);
     this.setData({
       chapters,
-      totalChapterCount: chapters.length,
-      progressText: bookProgressText(chapters),
+      ...chapterStateData(chapters),
       error: "",
     });
   },
@@ -451,11 +558,216 @@ Page<BookData, {
     }
   },
 
+  async generateBook() {
+    if (!this.data.projectId || this.data.generatingBook) {
+      return;
+    }
+    if (!this.data.allChaptersConfirmed) {
+      this.setData({ error: "请先确认所有章节正文" });
+      return;
+    }
+    if (this.data.hasDraftChanges) {
+      this.setData({ error: "请先保存当前章节修改" });
+      return;
+    }
+    this.stopPlayback();
+    this.setData({ generatingBook: true, error: "" });
+    try {
+      const output = await generateMemoirBookOutput(this.data.projectId, {
+        force_regenerate: Boolean(this.data.bookOutput?.latest_version),
+      });
+      this.applyBookOutput(output);
+      wx.showToast({ title: "全书已生成", icon: "success" });
+    } catch (error) {
+      if (isLoginError(error)) {
+        wx.reLaunch({ url: "/pages/login/index" });
+        return;
+      }
+      this.setData({ error: error instanceof Error ? error.message : "全书生成失败" });
+    } finally {
+      this.setData({ generatingBook: false });
+    }
+  },
+
+  async playChapterAudio(event) {
+    const chapterId = event.currentTarget.dataset.id || "";
+    const chapter = this.data.chapters.find((candidate) => candidate.id === chapterId);
+    if (!chapter || !this.data.projectId) {
+      return;
+    }
+    const target = chapter.ttsTarget;
+    if (this.data.playingTarget === target) {
+      this.stopPlayback();
+      return;
+    }
+    if (this.data.ttsBusyTarget) {
+      return;
+    }
+    if (!chapter.draft?.latest_version) {
+      this.patchChapter(chapterId, { draftError: "请先生成章节稿" });
+      return;
+    }
+    if (chapter.draftChanged) {
+      this.patchChapter(chapterId, { draftError: "请先保存当前修改" });
+      return;
+    }
+    this.stopPlayback();
+    this.playToken += 1;
+    const token = this.playToken;
+    this.setData({ ttsBusyTarget: target, error: "" });
+    this.patchChapter(chapterId, { draftError: "" });
+    try {
+      const response = await this.requestBookAudio(target);
+      if (token !== this.playToken) {
+        return;
+      }
+      this.setData({ ttsBusyTarget: "" });
+      await this.playAudioFiles(response.audio_file_ids, target, token);
+    } catch (error) {
+      if (isLoginError(error)) {
+        wx.reLaunch({ url: "/pages/login/index" });
+        return;
+      }
+      if (token === this.playToken) {
+        this.patchChapter(chapterId, {
+          draftError: error instanceof Error ? error.message : "章节朗读失败",
+        });
+      }
+    } finally {
+      if (token === this.playToken && this.data.ttsBusyTarget === target) {
+        this.setData({ ttsBusyTarget: "" });
+      }
+    }
+  },
+
+  async playBookAudio() {
+    const target = "book";
+    if (this.data.playingTarget === target) {
+      this.stopPlayback();
+      return;
+    }
+    if (!this.data.projectId || this.data.ttsBusyTarget) {
+      return;
+    }
+    if (!this.data.bookContent) {
+      this.setData({ error: "请先生成全书" });
+      return;
+    }
+    if (this.data.hasDraftChanges) {
+      this.setData({ error: "请先保存当前章节修改，再朗读全书" });
+      return;
+    }
+    this.stopPlayback();
+    this.playToken += 1;
+    const token = this.playToken;
+    this.setData({ ttsBusyTarget: target, error: "" });
+    try {
+      const response = await this.requestBookAudio(target);
+      if (token !== this.playToken) {
+        return;
+      }
+      this.setData({ ttsBusyTarget: "" });
+      await this.playAudioFiles(response.audio_file_ids, target, token);
+    } catch (error) {
+      if (isLoginError(error)) {
+        wx.reLaunch({ url: "/pages/login/index" });
+        return;
+      }
+      if (token === this.playToken) {
+        this.setData({ error: error instanceof Error ? error.message : "全书朗读失败" });
+      }
+    } finally {
+      if (token === this.playToken && this.data.ttsBusyTarget === target) {
+        this.setData({ ttsBusyTarget: "" });
+      }
+    }
+  },
+
+  async requestBookAudio(target) {
+    if (target === "book") {
+      return createMemoirBookOutputTTS(this.data.projectId, {});
+    }
+    if (target.startsWith("chapter:")) {
+      return createMemoirBookChapterDraftTTS(this.data.projectId, target.slice("chapter:".length), {});
+    }
+    throw new Error("朗读目标无效");
+  },
+
+  async playAudioFiles(audioFileIds, target, token) {
+    if (!audioFileIds.length) {
+      throw new Error("没有可播放的音频");
+    }
+    this.setData({ playingTarget: target, error: "" });
+    try {
+      for (const audioFileId of audioFileIds) {
+        if (token !== this.playToken) {
+          return;
+        }
+        await this.playAudioFile(audioFileId, token);
+      }
+    } finally {
+      if (token === this.playToken) {
+        this.setData({ playingTarget: "" });
+      }
+    }
+  },
+
+  async playAudioFile(audioFileId, token) {
+    const tempFilePath = await downloadMemoirVoiceAudio(audioFileId);
+    if (token !== this.playToken) {
+      return;
+    }
+    await new Promise<void>((resolve, reject) => {
+      const audio = wx.createInnerAudioContext();
+      this.audio = audio;
+      const cleanup = () => {
+        audio.destroy();
+        if (this.audio === audio) {
+          this.audio = null;
+        }
+      };
+      configureAudiblePlayback(audio);
+      audio.src = tempFilePath;
+      audio.onEnded(() => {
+        cleanup();
+        resolve();
+      });
+      audio.onStop(() => {
+        if (this.audio === audio) {
+          this.audio = null;
+        }
+        resolve();
+      });
+      audio.onError((error) => {
+        cleanup();
+        reject(new Error(error.errMsg || "音频播放失败"));
+      });
+      audio.play();
+    });
+  },
+
+  stopPlayback() {
+    this.playToken += 1;
+    if (this.audio) {
+      this.audio.stop();
+      this.audio.destroy();
+      this.audio = null;
+    }
+    if (this.data.playingTarget || this.data.ttsBusyTarget) {
+      this.setData({ playingTarget: "", ttsBusyTarget: "" });
+    }
+  },
+
+  onUnload() {
+    this.stopPlayback();
+  },
+
   openTranscripts() {
     wx.switchTab({ url: "/pages/transcripts/index" });
   },
 
   openHome() {
+    this.stopPlayback();
     wx.switchTab({ url: "/pages/home/index" });
   },
 
@@ -468,9 +780,7 @@ Page<BookData, {
     ));
     this.setData({
       chapters,
-      confirmedDraftCount: chapters.filter((chapter) => chapter.draft?.status === "confirmed").length,
-      totalChapterCount: chapters.length,
-      progressText: bookProgressText(chapters),
+      ...chapterStateData(chapters),
     });
   },
 
@@ -485,5 +795,13 @@ Page<BookData, {
       draftVersionText: draftVersionText(draft),
       draftError: "",
     });
+    this.clearBookOutput();
+  },
+
+  clearBookOutput() {
+    if (this.data.playingTarget === "book") {
+      this.stopPlayback();
+    }
+    this.applyBookOutput(null);
   },
 });

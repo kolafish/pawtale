@@ -67,7 +67,8 @@
 
 .status-panel,
 .empty-panel,
-.chapter-card {
+.chapter-card,
+.book-output-card {
   border: 2rpx solid #f0dac0;
   border-radius: 24rpx;
   background: rgba(255, 255, 255, 0.95);
@@ -168,6 +169,10 @@
   margin: 28rpx 0 16rpx;
 }
 
+.section-head.inline {
+  margin: 0 0 18rpx;
+}
+
 .section-title {
   color: #7a3b31;
   font-size: 30rpx;
@@ -217,6 +222,11 @@
 
 .chapter-card {
   margin-top: 22rpx;
+  padding: 30rpx;
+}
+
+.book-output-card {
+  margin-top: 30rpx;
   padding: 30rpx;
 }
 
@@ -301,6 +311,37 @@
 
 .draft-editor {
   margin-top: 22rpx;
+}
+
+.book-output-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16rpx;
+  color: #685b55;
+  font-size: 24rpx;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.book-preview {
+  max-height: 680rpx;
+  margin-top: 20rpx;
+  padding: 24rpx;
+  border: 2rpx solid #efd6c4;
+  border-radius: 18rpx;
+  background: #fffdf9;
+  overflow-y: auto;
+  box-sizing: border-box;
+}
+
+.book-output-text {
+  display: block;
+  color: #24100b;
+  font-size: 28rpx;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .draft-meta-row {

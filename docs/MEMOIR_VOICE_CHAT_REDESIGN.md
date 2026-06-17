@@ -14,8 +14,8 @@
 - 小程序已接入客户端轻量 VAD：基于 PCM 能量显示音量条、计算连续静音，并可自动收尾当前句。
 - 已有转写校正页和访谈进度页，可查看会话、模块覆盖、语音段、AI 追问数，并从记录继续访谈。
 - 小程序已拆为首页、转写、成书、我的 tab；我的页可看当前项目统计、管理项目和设置 AI TTS 音色，项目页支持创建、切换、重命名和删除回忆录。
-- 后端已新增成书章节规划和逐章成稿 API，可基于当前转写生成章节建议、保存用户确认后的章节结构，并按章节 source refs 生成、编辑、确认正文版本。
-- 小程序成书页已接入章节规划确认和逐章成稿流程，用户可先确认目录，再逐章生成、编辑和确认正文。
+- 后端已新增成书章节规划、逐章成稿和全书合成 API，可基于当前转写生成章节建议、保存用户确认后的章节结构，按章节 source refs 生成/编辑/确认正文版本，并把已确认章节合成为全书稿。
+- 小程序成书页已接入章节规划确认、逐章成稿、全书生成和朗读流程。用户可先确认目录，再逐章生成、编辑和确认正文；章节正文和全书稿都可生成音频朗读。
 
 新的产品目标是：
 
@@ -75,9 +75,11 @@ miniprogram/services/memoir-voice-api.ts      # voice session API
 miniprogram/services/memoir-streaming-asr.ts  # 录音帧、WebSocket、partial/final transcript
 miniprogram/services/tts-settings.ts          # 小程序本地 TTS 音色偏好
 miniprogram/domain/voice-chat.ts              # 新版聊天消息和实时事件类型
-backend/app/routers/memoir/book.py            # 成书章节规划 mobile API
+backend/app/routers/memoir/book.py            # 成书章节规划、章节稿、全书稿和朗读 mobile API
 backend/app/services/memoir/book_plans.py     # 章节规划生成、确认和 source ref 校验
 backend/app/services/memoir/book_drafts.py    # 逐章成稿、版本追加和正文确认
+backend/app/services/memoir/book_outputs.py   # 全书稿合成、版本追加和全书朗读
+backend/app/services/memoir/book_audio.py     # 章节/全书 TTS 文本分片、缓存和音频落库
 
 backend/app/routers/memoir/voice.py           # 本地/服务端 voice session API
 backend/app/services/memoir/voice_gateway.py  # WebSocket voice gateway + Streaming ASR
@@ -141,7 +143,7 @@ guided_interview    # 强引导 / AI 模块化引导
 - 转写校正页：查看每段原始语音、ASR 原文、编辑后文本和版本记录，支持家人或编辑校正。
 - 进度页：查看已聊过的人、事、地点、时间段、主题覆盖度，以及 AI 发现的待追问问题。
 - 我的页：查看账号、当前项目统计、管理回忆录项目，并选择 AI TTS 音色。
-- 产出编辑页：把确认后的素材组织为章节、片段或故事稿，仍然能回溯到语音证据。
+- 成书页：把确认后的素材组织为章节，逐章生成以用户叙述为主的正文，确认后合成为全书稿；章节和全书都支持语音朗读。
 
 ### 用户说话
 

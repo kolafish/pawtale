@@ -183,6 +183,61 @@
         >
           确认本章
         </button>
+        <button
+          class="ghost-button"
+          data-id="{{item.id}}"
+          loading="{{ttsBusyTarget === item.ttsTarget}}"
+          disabled="{{item.draftBusy || item.draftChanged || !item.draft || !item.draft.latest_version || ttsBusyTarget}}"
+          bindtap="playChapterAudio"
+        >
+          {{ttsBusyTarget === item.ttsTarget ? "准备朗读" : (playingTarget === item.ttsTarget ? "停止朗读" : "朗读本章")}}
+        </button>
+      </view>
+    </view>
+
+    <view class="book-output-card">
+      <view class="section-head inline">
+        <text class="section-title">全书成稿</text>
+        <text class="section-count">{{bookVersionText}}</text>
+      </view>
+
+      <view wx:if="{{!allChaptersConfirmed}}" class="draft-empty">
+        <text>确认所有章节后，可以把当前章节内容合成为全书。</text>
+      </view>
+      <view wx:elif="{{hasDraftChanges}}" class="draft-empty">
+        <text>当前有未保存的章节修改，保存后再生成全书。</text>
+      </view>
+      <view wx:else>
+        <view class="book-output-meta">
+          <text>{{bookContent ? bookCharCount + " 字" : "尚未生成正文"}}</text>
+          <text>按已确认章节顺序合成</text>
+        </view>
+
+        <view wx:if="{{bookContent}}" class="book-preview">
+          <text class="book-output-text" selectable>{{bookContent}}</text>
+        </view>
+        <view wx:else class="draft-empty">
+          <text>全书会直接使用已确认章节正文，不额外扩写叙述内容。</text>
+        </view>
+
+        <view class="actions-row">
+          <button
+            class="primary-button"
+            loading="{{generatingBook}}"
+            disabled="{{generatingBook || ttsBusyTarget || !canGenerateBook}}"
+            bindtap="generateBook"
+          >
+            {{bookOutput && bookOutput.latest_version ? "重新生成全书" : "生成全书"}}
+          </button>
+          <button
+            class="ghost-button"
+            loading="{{ttsBusyTarget === 'book'}}"
+            disabled="{{generatingBook || !bookContent || hasDraftChanges || ttsBusyTarget}}"
+            bindtap="playBookAudio"
+          >
+            {{ttsBusyTarget === "book" ? "准备朗读" : (playingTarget === "book" ? "停止朗读" : "朗读全书")}}
+          </button>
+        </view>
       </view>
     </view>
   </view>
