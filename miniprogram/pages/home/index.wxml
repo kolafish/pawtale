@@ -1,58 +1,23 @@
 <view class="home-page">
-  <view class="top-row">
-    <view>
-      <text class="hello">你好，{{displayName || "作者"}}</text>
-      <text class="project-line">{{projectTitle || "正在加载回忆录"}}</text>
-    </view>
-    <button class="logout-button" loading="{{loading}}" disabled="{{loading}}" bindtap="logout">退出</button>
+  <view class="header">
+    <text class="hello">你好，{{displayName || "作者"}}</text>
+    <text class="subtitle">余主任留声机</text>
   </view>
 
   <view wx:if="{{error}}" class="error">{{error}}</view>
 
+  <view class="project-panel">
+    <text class="panel-label">当前回忆录</text>
+    <text class="project-title">{{projectTitle || "正在加载回忆录"}}</text>
+    <text class="project-meta">从这里开始语音访谈，转写记录和项目设置可在底部入口查看。</text>
+  </view>
+
   <view class="voice-panel">
     <image class="voice-icon" src="/assets/memoir-microphone.png" mode="aspectFit" />
-    <text class="voice-title">语音聊天</text>
-    <text class="voice-copy">边说边转写，结束后保存原始语音和文字记录。</text>
+    <text class="voice-title">开始语音聊天</text>
+    <text class="voice-copy">一边说话，一边实时显示文字；结束后保存原始语音和校正文。</text>
     <button class="primary-button" loading="{{loading}}" disabled="{{loading}}" bindtap="startVoiceChat">
-      {{loading ? "加载中" : "开始"}}
+      {{loading ? "加载中" : "进入语音"}}
     </button>
-  </view>
-
-  <view class="project-card" bindtap="openProjects" hover-class="tap-hover">
-    <view>
-      <text class="card-label">当前回忆录</text>
-      <text class="card-title">{{projectTitle || "我的回忆录"}}</text>
-      <text class="card-meta">共 {{projectCount}} 本</text>
-    </view>
-    <text class="chevron">›</text>
-  </view>
-
-  <view class="project-card" bindtap="openTranscripts" hover-class="tap-hover">
-    <view>
-      <text class="card-label">转写记录</text>
-      <text class="card-title">语音与文字校对</text>
-      <text class="card-meta">浏览已保存语音，编辑 ASR 转写文字</text>
-    </view>
-    <text class="chevron">›</text>
-  </view>
-
-  <view class="project-card" bindtap="openVoiceProgress" hover-class="tap-hover">
-    <view>
-      <text class="card-label">访谈进度</text>
-      <text class="card-title">会话、模块和追问概览</text>
-      <text class="card-meta">继续访谈，查看已聊过的人、事、地点和主题</text>
-    </view>
-    <text class="chevron">›</text>
-  </view>
-
-  <view class="mode-strip">
-    <view class="mode-item">
-      <text class="mode-title">自由讲述</text>
-      <text class="mode-desc">按自己的时间线说</text>
-    </view>
-    <view class="mode-item">
-      <text class="mode-title">主题讲述</text>
-      <text class="mode-desc">按人物、事件、地点聊</text>
-    </view>
   </view>
 </view>

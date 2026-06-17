@@ -1,6 +1,5 @@
-import { getMemoirIdentity, logoutBackendSession } from "../../services/auth";
+import { getMemoirIdentity } from "../../services/auth";
 import { ApiError } from "../../services/request";
-import { replaceMemoirStore } from "../../stores/session";
 
 const WECHAT_PLACEHOLDER_DISPLAY_NAME = "微信用户";
 
@@ -10,7 +9,6 @@ interface HomeData {
   displayName: string;
   projectId: string;
   projectTitle: string;
-  projectCount: number;
 }
 
 function isProvisionalWeChatEmail(email: string): boolean {
@@ -32,10 +30,6 @@ Page<HomeData, {
   onShow(): Promise<void>;
   loadHome(): Promise<void>;
   startVoiceChat(): void;
-  openTranscripts(): void;
-  openVoiceProgress(): void;
-  openProjects(): void;
-  logout(): Promise<void>;
 }>({
   data: {
     loading: false,
@@ -43,7 +37,6 @@ Page<HomeData, {
     displayName: "",
     projectId: "",
     projectTitle: "",
-    projectCount: 0,
   },
 
   async onShow() {
@@ -64,7 +57,6 @@ Page<HomeData, {
         displayName: userDisplayName(identity.display_name, identity.email),
         projectId: identity.active_project_id,
         projectTitle: identity.active_project?.title || "我的回忆录",
-        projectCount: identity.projects.length,
       });
     } catch (error) {
       if (error instanceof ApiError && [401, 403].includes(error.statusCode)) {
@@ -82,33 +74,5 @@ Page<HomeData, {
       return;
     }
     wx.switchTab({ url: "/pages/voice-start/index" });
-  },
-
-  openTranscripts() {
-    wx.switchTab({ url: "/pages/transcripts/index" });
-  },
-
-  openVoiceProgress() {
-    wx.navigateTo({ url: "/pages/voice-progress/index" });
-  },
-
-  openProjects() {
-    wx.switchTab({ url: "/pages/me/index" });
-  },
-
-  async logout() {
-    if (this.data.loading) {
-      return;
-    }
-    this.setData({ loading: true, error: "" });
-    try {
-      await logoutBackendSession();
-    } catch (error) {
-      console.warn("backend logout failed", error);
-    } finally {
-      replaceMemoirStore({});
-      this.setData({ loading: false });
-      wx.reLaunch({ url: "/pages/login/index" });
-    }
   },
 });

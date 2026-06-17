@@ -20,26 +20,26 @@
       {
         "pagePath": "pages/home/index",
         "text": "首页",
-        "iconPath": "assets/tab-gramophone.png",
-        "selectedIconPath": "assets/tab-gramophone.png"
+        "iconPath": "assets/tab-home.png",
+        "selectedIconPath": "assets/tab-home-active.png"
       },
       {
         "pagePath": "pages/voice-start/index",
         "text": "语音",
-        "iconPath": "assets/tab-microphone.png",
-        "selectedIconPath": "assets/tab-microphone.png"
+        "iconPath": "assets/tab-voice.png",
+        "selectedIconPath": "assets/tab-voice-active.png"
       },
       {
         "pagePath": "pages/transcripts/index",
         "text": "转写",
-        "iconPath": "assets/tab-gramophone.png",
-        "selectedIconPath": "assets/tab-gramophone.png"
+        "iconPath": "assets/tab-transcripts.png",
+        "selectedIconPath": "assets/tab-transcripts-active.png"
       },
       {
         "pagePath": "pages/me/index",
         "text": "我的",
-        "iconPath": "assets/tab-gramophone.png",
-        "selectedIconPath": "assets/tab-gramophone.png"
+        "iconPath": "assets/tab-me.png",
+        "selectedIconPath": "assets/tab-me-active.png"
       }
     ]
   },
