@@ -1,6 +1,7 @@
 import httpx
 from app.config import get_settings
 from app.services.ai_base import AITextServiceBase
+from app.services.provider_limits import provider_concurrency_limiter
 
 settings = get_settings()
 
@@ -16,6 +17,7 @@ class ClaudeTextService(AITextServiceBase):
             "claude-sonnet-4": "claude-sonnet-4-6",
         }
         self.model = model_map.get(model, "claude-opus-4-6")
+        self.max_concurrent_requests = settings.ai_text_max_concurrent_requests
 
     @property
     def provider_name(self) -> str:
@@ -40,25 +42,32 @@ class ClaudeTextService(AITextServiceBase):
         """
         merged = f"{system_prompt}\n\n{user_prompt}" if system_prompt.strip() else user_prompt
 
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"{self.base_url}/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {self.auth_token}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": self.model,
-                    "max_tokens": max_tokens,
-                    "temperature": temperature,
-                    "messages": [
-                        {"role": "user", "content": merged},
-                    ],
-                },
-                timeout=timeout,
-            )
-            response.raise_for_status()
-            result = response.json()
+        async def request() -> dict:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    f"{self.base_url}/v1/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {self.auth_token}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": self.model,
+                        "max_tokens": max_tokens,
+                        "temperature": temperature,
+                        "messages": [
+                            {"role": "user", "content": merged},
+                        ],
+                    },
+                    timeout=timeout,
+                )
+                response.raise_for_status()
+                return response.json()
+
+        result = await provider_concurrency_limiter.run(
+            "ai_text",
+            self.max_concurrent_requests,
+            request,
+        )
 
         content = self._extract_response_text(result)
         if not content:

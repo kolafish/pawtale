@@ -346,6 +346,48 @@ class TestCallLlmContract:
         assert result[0] == "world"
 
     @pytest.mark.asyncio
+    async def test_deepseek_uses_text_provider_concurrency_limit(self, monkeypatch):
+        service = DeepSeekTextService()
+        service.max_concurrent_requests = 7
+        limiter = RecordingLimiter()
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"choices": [{"message": {"content": "world"}}]}
+        mock_resp.raise_for_status = MagicMock()
+        monkeypatch.setattr("app.services.ai_text.provider_concurrency_limiter", limiter)
+
+        with patch("httpx.AsyncClient") as mock_client:
+            inst = AsyncMock()
+            inst.post = AsyncMock(return_value=mock_resp)
+            inst.__aenter__ = AsyncMock(return_value=inst)
+            inst.__aexit__ = AsyncMock(return_value=None)
+            mock_client.return_value = inst
+
+            await service._call_llm("sys", "user")
+
+        assert limiter.calls == [("ai_text", 7)]
+
+    @pytest.mark.asyncio
+    async def test_claude_uses_text_provider_concurrency_limit(self, monkeypatch):
+        service = ClaudeTextService()
+        service.max_concurrent_requests = 5
+        limiter = RecordingLimiter()
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"choices": [{"message": {"content": "hello"}}]}
+        mock_resp.raise_for_status = MagicMock()
+        monkeypatch.setattr("app.services.ai_claude.provider_concurrency_limiter", limiter)
+
+        with patch("httpx.AsyncClient") as mock_client:
+            inst = AsyncMock()
+            inst.post = AsyncMock(return_value=mock_resp)
+            inst.__aenter__ = AsyncMock(return_value=inst)
+            inst.__aexit__ = AsyncMock(return_value=None)
+            mock_client.return_value = inst
+
+            await service._call_llm("sys", "user")
+
+        assert limiter.calls == [("ai_text", 5)]
+
+    @pytest.mark.asyncio
     async def test_provider_and_model_properties(self):
         claude = ClaudeTextService()
         assert claude.provider_name == "claude"
@@ -354,3 +396,12 @@ class TestCallLlmContract:
         deepseek = DeepSeekTextService()
         assert deepseek.provider_name == "deepseek"
         assert deepseek.model_name == "deepseek-chat"
+
+
+class RecordingLimiter:
+    def __init__(self):
+        self.calls = []
+
+    async def run(self, key, limit, operation):
+        self.calls.append((key, limit))
+        return await operation()

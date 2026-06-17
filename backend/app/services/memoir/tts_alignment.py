@@ -8,6 +8,7 @@ import httpx
 from fastapi import HTTPException
 
 from app.config import Settings, get_settings
+from app.services.provider_limits import provider_concurrency_limiter
 
 
 logger = logging.getLogger(__name__)
@@ -153,6 +154,7 @@ class ElevenLabsForcedAlignmentClient:
         self.api_key = settings.elevenlabs_api_key or settings.tts_alignment_api_key
         self.base_url = (settings.elevenlabs_base_url or settings.tts_alignment_base_url).strip().rstrip("/")
         self.timeout_seconds = settings.tts_alignment_timeout_seconds
+        self.max_concurrent_requests = settings.tts_alignment_max_concurrent_requests
 
     def _endpoint(self) -> str:
         base_url = self.base_url or "https://api.elevenlabs.io/v1"
@@ -173,7 +175,7 @@ class ElevenLabsForcedAlignmentClient:
             raise HTTPException(status_code=503, detail="ElevenLabs alignment API key 未配置")
         filename = f"tts-audio{extension if extension.startswith('.') else f'.{extension}'}"
         timeout = max(1.0, float(self.timeout_seconds))
-        try:
+        async def request() -> httpx.Response:
             async with httpx.AsyncClient(timeout=timeout) as client:
                 response = await client.post(
                     self._endpoint(),
@@ -182,6 +184,14 @@ class ElevenLabsForcedAlignmentClient:
                     headers={"xi-api-key": api_key},
                 )
                 response.raise_for_status()
+                return response
+
+        try:
+            response = await provider_concurrency_limiter.run(
+                "tts_alignment",
+                self.max_concurrent_requests,
+                request,
+            )
         except httpx.HTTPStatusError as exc:
             logger.exception("TTS alignment provider rejected request status=%s", exc.response.status_code)
             raise HTTPException(status_code=503, detail="TTS 对齐服务暂时不可用") from exc

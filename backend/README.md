@@ -97,6 +97,7 @@ ANTHROPIC_AUTH_TOKEN=xxx
 ANTHROPIC_BASE_URL=xxx
 
 DEFAULT_AI_MODEL=claude-opus-4
+AI_TEXT_MAX_CONCURRENT_REQUESTS=3
 
 # GitHub App 单向备份。Private key 只放后端，可用 inline 内容或文件路径二选一。
 GITHUB_APP_ID=
@@ -113,12 +114,14 @@ TTS_BASE_URL=https://api.openai.com/v1
 TTS_MODEL=tts-1
 TTS_VOICE=alloy
 TTS_RESPONSE_FORMAT=mp3
+TTS_MAX_CONCURRENT_REQUESTS=3
 
 # 可选：TTS 后置强制对齐。启用后会把已合成音频和追问文本发到对齐服务，返回逐字时间戳供小程序播放高亮使用。
 TTS_ALIGNMENT_PROVIDER=disabled
 TTS_ALIGNMENT_API_KEY=
 TTS_ALIGNMENT_BASE_URL=https://api.elevenlabs.io/v1
 TTS_ALIGNMENT_TIMEOUT_SECONDS=30
+TTS_ALIGNMENT_MAX_CONCURRENT_REQUESTS=2
 ELEVENLABS_API_KEY=
 ELEVENLABS_BASE_URL=https://api.elevenlabs.io/v1
 

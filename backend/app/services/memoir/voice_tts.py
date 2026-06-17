@@ -23,6 +23,7 @@ from app.services.memoir.tts_alignment import (
     alignment_segments_to_json,
     align_tts_audio,
 )
+from app.services.provider_limits import provider_concurrency_limiter
 
 
 logger = logging.getLogger(__name__)
@@ -53,6 +54,7 @@ class AudioSpeechProviderConfig:
     voice: str
     response_format: str
     timeout_seconds: float
+    max_concurrent_requests: int
 
 
 class TTSClient(Protocol):
@@ -99,7 +101,7 @@ class AudioSpeechTTSClient:
             "response_format": response_format,
         }
         timeout = max(1.0, float(self.config.timeout_seconds))
-        try:
+        async def request() -> httpx.Response:
             async with httpx.AsyncClient(timeout=timeout) as client:
                 response = await client.post(
                     self._endpoint(),
@@ -107,6 +109,14 @@ class AudioSpeechTTSClient:
                     headers={"Authorization": f"Bearer {api_key}"},
                 )
                 response.raise_for_status()
+                return response
+
+        try:
+            response = await provider_concurrency_limiter.run(
+                "tts",
+                self.config.max_concurrent_requests,
+                request,
+            )
         except httpx.HTTPStatusError as exc:
             logger.exception("TTS provider rejected request status=%s", exc.response.status_code)
             raise HTTPException(status_code=503, detail=TTS_UNAVAILABLE_MESSAGE) from exc
@@ -138,6 +148,7 @@ class OpenAICompatibleTTSClient(AudioSpeechTTSClient):
                 voice=settings.tts_voice,
                 response_format=settings.tts_response_format,
                 timeout_seconds=settings.tts_timeout_seconds,
+                max_concurrent_requests=settings.tts_max_concurrent_requests,
             )
         )
 
@@ -160,6 +171,7 @@ class StepFunTTSClient(AudioSpeechTTSClient):
                 voice=settings.stepfun_tts_voice or settings.tts_voice or "cixingnansheng",
                 response_format=settings.tts_response_format,
                 timeout_seconds=settings.tts_timeout_seconds,
+                max_concurrent_requests=settings.tts_max_concurrent_requests,
             )
         )
 
