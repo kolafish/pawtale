@@ -36,6 +36,7 @@ class Settings(BaseSettings):
 
     # Default AI Model
     default_ai_model: str = "claude-opus-4"  # deepseek / claude-opus-4 / claude-sonnet-4
+    ai_text_max_concurrent_requests: int = 3
 
     # GitHub App one-way project backup
     github_app_id: str = ""
@@ -65,10 +66,12 @@ class Settings(BaseSettings):
     tts_voice: str = "alloy"
     tts_response_format: str = "mp3"
     tts_timeout_seconds: float = 30.0
+    tts_max_concurrent_requests: int = 3
     tts_alignment_provider: str = "disabled"
     tts_alignment_api_key: str = ""
     tts_alignment_base_url: str = "https://api.elevenlabs.io/v1"
     tts_alignment_timeout_seconds: float = 30.0
+    tts_alignment_max_concurrent_requests: int = 2
     elevenlabs_api_key: str = ""
     elevenlabs_base_url: str = "https://api.elevenlabs.io/v1"
 

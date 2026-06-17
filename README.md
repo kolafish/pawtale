@@ -91,6 +91,7 @@ npm run dev
 | `ANTHROPIC_AUTH_TOKEN` | Claude 代理认证 token |
 | `ANTHROPIC_BASE_URL` | Claude 代理地址，OpenAI 兼容格式 |
 | `DEFAULT_AI_MODEL` | 默认模型：`claude-opus-4` / `claude-sonnet-4` / `deepseek` |
+| `AI_TEXT_MAX_CONCURRENT_REQUESTS` | 文本 AI provider 并发请求上限；默认 `3`，`0` 表示不限制 |
 | `GITHUB_APP_ID` | 可选，GitHub App ID，用于项目单向备份到用户授权仓库 |
 | `GITHUB_APP_SLUG` | 可选，GitHub App slug，用于生成安装链接 |
 | `GITHUB_APP_PRIVATE_KEY` / `GITHUB_APP_PRIVATE_KEY_PATH` | 可选，GitHub App private key；只放后端，二选一 |
@@ -100,6 +101,8 @@ npm run dev
 | `VOICE_GATEWAY_MAX_ACTIVE_SESSIONS_PER_USER` | 单用户 active 语音网关上限；默认 `1` |
 | `VOLC_ASR_RESOURCE_ID` | 豆包流式 ASR 资源 ID |
 | `VOLC_ASR_WS_URL` | 豆包流式 ASR WebSocket 地址 |
+| `TTS_MAX_CONCURRENT_REQUESTS` | TTS provider 并发请求上限；默认 `3`，`0` 表示不限制 |
+| `TTS_ALIGNMENT_MAX_CONCURRENT_REQUESTS` | TTS forced-alignment provider 并发请求上限；默认 `2`，`0` 表示不限制 |
 
 ## 常用命令
 

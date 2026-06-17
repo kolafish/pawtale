@@ -60,6 +60,7 @@ def test_stepfun_tts_client_accepts_host_level_base_url():
 @pytest.mark.asyncio
 async def test_audio_speech_tts_client_posts_openai_compatible_payload(monkeypatch):
     calls = []
+    limiter = RecordingLimiter()
 
     class FakeAsyncClient:
         def __init__(self, *, timeout):
@@ -84,6 +85,7 @@ async def test_audio_speech_tts_client_posts_openai_compatible_payload(monkeypat
             return httpx.Response(200, content=b"audio-bytes", request=request)
 
     monkeypatch.setattr("app.services.memoir.voice_tts.httpx.AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr("app.services.memoir.voice_tts.provider_concurrency_limiter", limiter)
     client = OpenAICompatibleTTSClient(
         Settings(
             tts_api_key="test-key",
@@ -92,6 +94,7 @@ async def test_audio_speech_tts_client_posts_openai_compatible_payload(monkeypat
             tts_voice="default-voice",
             tts_response_format="mp3",
             tts_timeout_seconds=12,
+            tts_max_concurrent_requests=6,
         )
     )
 
@@ -113,11 +116,13 @@ async def test_audio_speech_tts_client_posts_openai_compatible_payload(monkeypat
             "timeout": 12,
         }
     ]
+    assert limiter.calls == [("tts", 6)]
 
 
 @pytest.mark.asyncio
 async def test_elevenlabs_forced_alignment_client_posts_audio_and_maps_characters(monkeypatch):
     calls = []
+    limiter = RecordingLimiter()
 
     class FakeAsyncClient:
         def __init__(self, *, timeout):
@@ -154,11 +159,13 @@ async def test_elevenlabs_forced_alignment_client_posts_audio_and_maps_character
             )
 
     monkeypatch.setattr("app.services.memoir.tts_alignment.httpx.AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr("app.services.memoir.tts_alignment.provider_concurrency_limiter", limiter)
     client = ElevenLabsForcedAlignmentClient(
         Settings(
             tts_alignment_api_key="align-key",
             tts_alignment_base_url="https://api.elevenlabs.io/v1",
             tts_alignment_timeout_seconds=9,
+            tts_alignment_max_concurrent_requests=4,
         )
     )
 
@@ -180,3 +187,13 @@ async def test_elevenlabs_forced_alignment_client_posts_audio_and_maps_character
             "timeout": 9,
         }
     ]
+    assert limiter.calls == [("tts_alignment", 4)]
+
+
+class RecordingLimiter:
+    def __init__(self):
+        self.calls = []
+
+    async def run(self, key, limit, operation):
+        self.calls.append((key, limit))
+        return await operation()

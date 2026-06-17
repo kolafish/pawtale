@@ -77,6 +77,16 @@ def test_non_sqlite_engine_connect_args_stay_empty():
     assert database.sqlite_engine_connect_args(settings) == {}
 
 
+def test_small_concurrency_provider_limit_defaults():
+    settings = Settings()
+
+    assert settings.voice_gateway_max_active_sessions == 10
+    assert settings.voice_gateway_max_active_sessions_per_user == 1
+    assert settings.ai_text_max_concurrent_requests == 3
+    assert settings.tts_max_concurrent_requests == 3
+    assert settings.tts_alignment_max_concurrent_requests == 2
+
+
 def test_configure_sqlite_connection_applies_small_concurrency_pragmas():
     settings = Settings(
         sqlite_busy_timeout_ms=3000,

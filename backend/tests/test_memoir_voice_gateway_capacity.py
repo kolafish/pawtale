@@ -88,6 +88,29 @@ async def test_voice_gateway_capacity_zero_limits_mean_unlimited():
         await lease.release()
 
 
+async def test_voice_gateway_capacity_allows_ten_distinct_users_and_rejects_eleventh():
+    manager = VoiceGatewayCapacityManager(
+        VoiceGatewayCapacityLimits(max_active_sessions=10, max_active_sessions_per_user=1)
+    )
+    leases = [
+        await manager.acquire(f"user-{index}", f"session-{index}")
+        for index in range(10)
+    ]
+    snapshot = await manager.snapshot()
+
+    assert snapshot.active_sessions == 10
+    assert snapshot.active_users == 10
+
+    with pytest.raises(VoiceGatewayCapacityError) as exc_info:
+        await manager.acquire("user-11", "session-11")
+
+    assert exc_info.value.code == VOICE_GATEWAY_CAPACITY_REACHED
+
+    for lease in leases:
+        await lease.release()
+    assert (await manager.snapshot()).active_sessions == 0
+
+
 def test_voice_gateway_capacity_limits_read_settings():
     settings = Settings(
         voice_gateway_max_active_sessions=12,
