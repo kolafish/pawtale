@@ -9,6 +9,7 @@ const WECHAT_PLACEHOLDER_DISPLAY_NAME = "微信用户";
 interface HomeData {
   loading: boolean;
   creatingVoice: boolean;
+  needsLogin: boolean;
   error: string;
   displayName: string;
   projectId: string;
@@ -33,6 +34,10 @@ export function userDisplayName(displayName: string, email: string): string {
   return email.split("@", 1)[0].trim() || "作者";
 }
 
+function goToMeLogin(): void {
+  wx.switchTab({ url: "/pages/me/index" });
+}
+
 Page<HomeData, {
   onShow(): Promise<void>;
   loadHome(): Promise<void>;
@@ -41,6 +46,7 @@ Page<HomeData, {
   data: {
     loading: false,
     creatingVoice: false,
+    needsLogin: false,
     error: "",
     displayName: "",
     projectId: "",
@@ -61,11 +67,19 @@ Page<HomeData, {
     try {
       const identity = await getMemoirIdentity();
       if (!identity.password_login_enabled) {
-        wx.reLaunch({ url: "/pages/login/index" });
+        this.setData({
+          needsLogin: true,
+          displayName: "作者",
+          projectId: "",
+          projectTitle: "我的回忆录",
+          selectedMode: "free_narration",
+          guidanceLabel: guidanceModeLabel("free_narration"),
+        });
         return;
       }
       const profile = memoirProjectProfile(identity.active_project);
       this.setData({
+        needsLogin: false,
         displayName: userDisplayName(identity.display_name, identity.email),
         projectId: identity.active_project_id,
         projectTitle: identity.active_project?.title || "我的回忆录",
@@ -74,7 +88,14 @@ Page<HomeData, {
       });
     } catch (error) {
       if (error instanceof ApiError && [401, 403].includes(error.statusCode)) {
-        wx.reLaunch({ url: "/pages/login/index" });
+        this.setData({
+          needsLogin: true,
+          displayName: "作者",
+          projectId: "",
+          projectTitle: "我的回忆录",
+          selectedMode: "free_narration",
+          guidanceLabel: guidanceModeLabel("free_narration"),
+        });
         return;
       }
       this.setData({ error: error instanceof Error ? error.message : "首页加载失败" });
@@ -85,6 +106,10 @@ Page<HomeData, {
 
   async startVoiceChat() {
     if (this.data.loading || this.data.creatingVoice) {
+      return;
+    }
+    if (this.data.needsLogin) {
+      goToMeLogin();
       return;
     }
     this.setData({ creatingVoice: true, error: "" });
@@ -112,7 +137,7 @@ Page<HomeData, {
       wx.navigateTo({ url: `/pages/voice-chat/index?${params.join("&")}` });
     } catch (error) {
       if (error instanceof ApiError && [401, 403].includes(error.statusCode)) {
-        wx.reLaunch({ url: "/pages/login/index" });
+        goToMeLogin();
         return;
       }
       this.setData({

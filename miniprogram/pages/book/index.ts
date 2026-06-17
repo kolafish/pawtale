@@ -210,7 +210,7 @@ Page<BookData, {
     try {
       const identity = await getMemoirIdentity();
       if (!identity.password_login_enabled) {
-        wx.reLaunch({ url: "/pages/login/index" });
+        wx.switchTab({ url: "/pages/me/index" });
         return;
       }
       const projectId = identity.active_project_id;
@@ -223,7 +223,7 @@ Page<BookData, {
       await this.loadPlanForProject(projectId);
     } catch (error) {
       if (isLoginError(error)) {
-        wx.reLaunch({ url: "/pages/login/index" });
+        wx.switchTab({ url: "/pages/me/index" });
         return;
       }
       this.setData({ error: error instanceof Error ? error.message : "成书页面加载失败" });
@@ -293,7 +293,7 @@ Page<BookData, {
       wx.showToast({ title: "已生成章节", icon: "success" });
     } catch (error) {
       if (isLoginError(error)) {
-        wx.reLaunch({ url: "/pages/login/index" });
+        wx.switchTab({ url: "/pages/me/index" });
         return;
       }
       this.setData({ error: error instanceof Error ? error.message : "章节生成失败" });
@@ -327,7 +327,7 @@ Page<BookData, {
       wx.showToast({ title: "章节已确认", icon: "success" });
     } catch (error) {
       if (isLoginError(error)) {
-        wx.reLaunch({ url: "/pages/login/index" });
+        wx.switchTab({ url: "/pages/me/index" });
         return;
       }
       this.setData({ error: error instanceof Error ? error.message : "章节确认失败" });

@@ -166,7 +166,7 @@ Page<ProgressData, {
       });
     } catch (error) {
       if (error instanceof ApiError && [401, 403].includes(error.statusCode)) {
-        wx.reLaunch({ url: "/pages/login/index" });
+        wx.switchTab({ url: "/pages/me/index" });
         return;
       }
       this.setData({ error: error instanceof Error ? error.message : "访谈进度加载失败" });
