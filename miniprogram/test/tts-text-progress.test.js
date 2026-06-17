@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 
 const {
+  splitTextByAudioPlaybackProgress,
   splitTextByPlaybackProgress,
   splitTextByTimedAlignment,
 } = require("../services/tts-text-progress.ts");
@@ -74,5 +75,42 @@ test("splits TTS text by forced alignment timestamps", () => {
     currentText: "",
     remainingText: "",
     progressPercent: 100,
+  });
+});
+
+test("splits TTS text by fallback duration when audio duration is unavailable", () => {
+  assert.deepEqual(splitTextByAudioPlaybackProgress("你好世界", 1, 0, {
+    fallbackDurationSeconds: 4,
+  }), {
+    spokenText: "你",
+    currentText: "好",
+    remainingText: "世界",
+    progressPercent: 25,
+  });
+});
+
+test("estimates missing TTS duration so playback progress can still move", () => {
+  const progress = splitTextByAudioPlaybackProgress("你好吗朋友", 0.8, 0, {
+    estimateMissingDuration: true,
+  });
+
+  assert.notEqual(progress.currentText, "你");
+  assert.ok(progress.progressPercent > 0);
+});
+
+test("uses alignment in audio playback progress when available", () => {
+  const alignment = [
+    { text: "你", start_ms: 0, end_ms: 120, text_start: 0, text_end: 1 },
+    { text: "好", start_ms: 120, end_ms: 260, text_start: 1, text_end: 2 },
+  ];
+
+  assert.deepEqual(splitTextByAudioPlaybackProgress("你好", 0.15, 0, {
+    alignment,
+    estimateMissingDuration: true,
+  }), {
+    spokenText: "你",
+    currentText: "好",
+    remainingText: "",
+    progressPercent: 58,
   });
 });
