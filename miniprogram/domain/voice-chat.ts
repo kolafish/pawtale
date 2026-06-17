@@ -301,6 +301,15 @@ export interface MemoirBookSourceCoverage {
   uncovered_sources: MemoirBookSourceCoverageItem[];
 }
 
+export interface MemoirBookSourceAssignmentInput {
+  chapter_id: string;
+  utterance_ids: string[];
+}
+
+export interface MemoirBookSourceAssignmentRequest {
+  assignments: MemoirBookSourceAssignmentInput[];
+}
+
 export interface MemoirBookPlanGenerateRequest {
   ai_model?: string;
   max_chapters?: number;

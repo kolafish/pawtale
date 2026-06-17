@@ -23,6 +23,23 @@
     <view class="coverage-copy">
       <text class="coverage-title">{{sourceCoverageNotice}}</text>
       <text class="coverage-meta">新录音会先进入转写记录，不会自动改动已确认章节和全书。</text>
+      <view wx:if="{{plan && chapterPickerOptions.length && uncoveredSources.length}}" class="coverage-source-list">
+        <view wx:for="{{uncoveredSources}}" wx:key="utterance_id" class="coverage-source">
+          <text class="coverage-source-text">{{item.previewText}}</text>
+          <picker
+            mode="selector"
+            range="{{chapterPickerOptions}}"
+            range-key="label"
+            data-id="{{item.utterance_id}}"
+            disabled="{{assigningSourceId}}"
+            bindchange="assignUncoveredSource"
+          >
+            <view class="coverage-assign {{assigningSourceId === item.utterance_id ? 'loading' : ''}}">
+              {{assigningSourceId === item.utterance_id ? "归入中" : "归入章节"}}
+            </view>
+          </picker>
+        </view>
+      </view>
     </view>
     <button class="coverage-link" bindtap="openTranscripts">查看转写</button>
   </view>

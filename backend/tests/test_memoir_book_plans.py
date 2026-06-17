@@ -141,6 +141,15 @@ async def test_mobile_memoir_book_source_coverage_requires_login(anonymous_clien
     assert response.status_code == 401
 
 
+async def test_mobile_memoir_book_source_assignments_require_login(anonymous_client):
+    response = await anonymous_client.post(
+        "/api/mobile/memoir/projects/project-1/book-source-assignments",
+        json={"assignments": [{"chapter_id": "chapter-1", "utterance_ids": ["utterance-1"]}]},
+    )
+
+    assert response.status_code == 401
+
+
 async def test_mobile_memoir_book_plan_requires_transcripts(client):
     project_id = await _active_project_id(client)
 
@@ -318,6 +327,134 @@ async def test_mobile_memoir_book_source_coverage_detects_new_transcripts_after_
     assert data["uncovered_source_count"] == 1
     assert [item["utterance_id"] for item in data["uncovered_sources"]] == [later["utterance_id"]]
     assert data["uncovered_sources"][0]["text"] == "后来我又讲了第一次离家去县城读书。"
+
+
+async def test_mobile_memoir_book_source_assignment_appends_source_and_marks_draft_pending(
+    client,
+    test_db,
+    monkeypatch,
+):
+    created = await _create_voice_transcript(client, test_db, "我小时候常在外婆家的院子里晒太阳。")
+    project_id = created["session"]["project_id"]
+    monkeypatch.setattr(
+        "app.services.memoir.book_plans.get_ai_service",
+        lambda model=None: FakeBookPlanAI(),
+    )
+    generated_response = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-plan/generate",
+        json={},
+    )
+    source_ref = generated_response.json()["chapters"][0]["source_refs"][0]
+    confirm_response = await client.put(
+        f"/api/mobile/memoir/projects/{project_id}/book-plan",
+        json={
+            "title": "用户确认后的章节",
+            "chapters": [
+                {
+                    "title": "童年和外婆家",
+                    "summary": "只保留童年院子的内容。",
+                    "source_refs": [source_ref],
+                }
+            ],
+        },
+    )
+    assert confirm_response.status_code == 200
+    chapter_id = confirm_response.json()["chapters"][0]["id"]
+    draft = MemoirBookChapterDraft(
+        project_id=project_id,
+        chapter_id=chapter_id,
+        status=MemoirBookChapterDraftStatus.CONFIRMED.value,
+    )
+    test_db.add(draft)
+    await test_db.flush()
+    test_db.add(
+        MemoirBookChapterDraftVersion(
+            draft_id=draft.id,
+            project_id=project_id,
+            chapter_id=chapter_id,
+            version=1,
+            content="我小时候常在外婆家的院子里晒太阳。",
+            created_by=MemoirCreatedBy.USER.value,
+            prompt_snapshot="",
+        )
+    )
+    await test_db.commit()
+    later = await _create_voice_transcript(client, test_db, "后来我又讲了第一次离家去县城读书。")
+
+    response = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-source-assignments",
+        json={
+            "assignments": [
+                {
+                    "chapter_id": chapter_id,
+                    "utterance_ids": [later["utterance_id"]],
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    refs = data["chapters"][0]["source_refs"]
+    assert [ref["utterance_id"] for ref in refs] == [created["utterance_id"], later["utterance_id"]]
+    assert later["utterance_id"] in data["chapters"][0]["metadata_json"]["pending_source_utterance_ids"]
+
+    refreshed_draft = await test_db.scalar(
+        select(MemoirBookChapterDraft).where(MemoirBookChapterDraft.id == draft.id)
+    )
+    assert refreshed_draft.status == MemoirBookChapterDraftStatus.DRAFT.value
+    assert refreshed_draft.metadata_json["status_reason"] == "new_sources_assigned"
+
+    coverage = await client.get(f"/api/mobile/memoir/projects/{project_id}/book-source-coverage")
+    assert coverage.status_code == 200
+    assert coverage.json()["uncovered_source_count"] == 0
+
+
+async def test_mobile_memoir_book_source_assignment_rejects_covered_source(
+    client,
+    test_db,
+    monkeypatch,
+):
+    created = await _create_voice_transcript(client, test_db, "我小时候常在外婆家的院子里晒太阳。")
+    project_id = created["session"]["project_id"]
+    monkeypatch.setattr(
+        "app.services.memoir.book_plans.get_ai_service",
+        lambda model=None: FakeBookPlanAI(),
+    )
+    generated_response = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-plan/generate",
+        json={},
+    )
+    source_ref = generated_response.json()["chapters"][0]["source_refs"][0]
+    confirm_response = await client.put(
+        f"/api/mobile/memoir/projects/{project_id}/book-plan",
+        json={
+            "title": "用户确认后的章节",
+            "chapters": [
+                {
+                    "title": "童年和外婆家",
+                    "summary": "只保留童年院子的内容。",
+                    "source_refs": [source_ref],
+                }
+            ],
+        },
+    )
+    chapter_id = confirm_response.json()["chapters"][0]["id"]
+
+    response = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-source-assignments",
+        json={
+            "assignments": [
+                {
+                    "chapter_id": chapter_id,
+                    "utterance_ids": [created["utterance_id"]],
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "转写已收录到章节"
 
 
 async def test_mobile_memoir_book_plan_reconfirm_removes_replaced_chapter_drafts(

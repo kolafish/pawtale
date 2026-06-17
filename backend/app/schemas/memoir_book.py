@@ -119,6 +119,38 @@ class MemoirBookSourceCoverageResponse(BaseModel):
     uncovered_sources: list[MemoirBookSourceCoverageItem] = Field(default_factory=list)
 
 
+class MemoirBookSourceAssignmentInput(BaseModel):
+    chapter_id: str
+    utterance_ids: list[str]
+
+    @field_validator("chapter_id")
+    @classmethod
+    def _valid_chapter_id(cls, value: str) -> str:
+        chapter_id = value.strip()
+        if not chapter_id:
+            raise ValueError("章节不能为空")
+        return chapter_id
+
+    @field_validator("utterance_ids")
+    @classmethod
+    def _valid_utterance_ids(cls, value: list[str]) -> list[str]:
+        utterance_ids = [item.strip() for item in value if item.strip()]
+        if not utterance_ids:
+            raise ValueError("至少选择一条转写")
+        return list(dict.fromkeys(utterance_ids))
+
+
+class MemoirBookSourceAssignmentRequest(BaseModel):
+    assignments: list[MemoirBookSourceAssignmentInput]
+
+    @field_validator("assignments")
+    @classmethod
+    def _valid_assignments(cls, value: list[MemoirBookSourceAssignmentInput]) -> list[MemoirBookSourceAssignmentInput]:
+        if not value:
+            raise ValueError("至少需要一条归入操作")
+        return value
+
+
 class MemoirBookChapterDraftGenerateRequest(BaseModel):
     ai_model: str | None = None
     force_regenerate: bool = False
