@@ -11,40 +11,17 @@
   <view class="intro-panel">
     <image class="intro-icon" src="/assets/memoir-microphone.png" mode="aspectFit" />
     <view class="intro-copy">
-      <text class="intro-title">今天想怎么聊？</text>
-      <text class="intro-subtitle">选择后会进入实时语音聊天，边说边显示大字转写。</text>
+      <text class="intro-title">开始语音聊天</text>
+      <text class="intro-subtitle">边说边显示大字转写，AI 会按当前回忆录的讲述方式接话。</text>
     </view>
   </view>
 
-  <view class="mode-list">
-    <view
-      wx:for="{{modeOptions}}"
-      wx:key="value"
-      class="mode-option {{selectedMode === item.value ? 'selected' : ''}}"
-      data-mode="{{item.value}}"
-      bindtap="selectMode"
-    >
-      <view class="mode-row">
-        <text class="mode-title">{{item.title}}</text>
-        <text class="mode-tag">{{item.tag}}</text>
-      </view>
-      <text class="mode-description">{{item.description}}</text>
+  <view class="project-panel">
+    <view class="project-row">
+      <text class="project-label">当前回忆录</text>
+      <text class="mode-tag">{{guidanceLabel}}</text>
     </view>
-  </view>
-
-  <view wx:if="{{selectedMode === 'guided_interview'}}" class="module-panel">
-    <text class="section-title">先聊一个方向</text>
-    <view class="module-grid">
-      <view
-        wx:for="{{moduleOptions}}"
-        wx:key="value"
-        class="module-chip {{selectedModule === item.value ? 'selected' : ''}}"
-        data-module="{{item.value}}"
-        bindtap="selectModule"
-      >
-        <text>{{item.label}}</text>
-      </view>
-    </view>
+    <text class="project-title">{{projectTitle}}</text>
   </view>
 
   <button class="start-button" loading="{{loading}}" disabled="{{loading}}" bindtap="startVoiceChat">

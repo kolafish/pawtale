@@ -1,37 +1,19 @@
 import type { MemoirGuidanceMode } from "../../domain/voice-chat";
 import { getMemoirIdentity } from "../../services/auth";
 import { createMemoirVoiceSession } from "../../services/memoir-voice-api";
-import { memoirProjectProfile } from "../../services/memoir-project-profile";
-
-interface ModeOption {
-  value: MemoirGuidanceMode;
-  title: string;
-  description: string;
-  tag: string;
-}
+import { guidanceModeLabel, memoirProjectProfile } from "../../services/memoir-project-profile";
 
 interface VoiceStartData {
   loading: boolean;
   error: string;
   selectedMode: MemoirGuidanceMode;
   selectedModule: string;
-  modeOptions: ModeOption[];
-  moduleOptions: Array<{ value: string; label: string }>;
-}
-
-interface DatasetEvent {
-  currentTarget: {
-    dataset: {
-      mode?: MemoirGuidanceMode;
-      module?: string;
-    };
-  };
+  projectTitle: string;
+  guidanceLabel: string;
 }
 
 Page<VoiceStartData, {
-  onLoad(): Promise<void>;
-  selectMode(event: DatasetEvent): void;
-  selectModule(event: DatasetEvent): void;
+  onShow(): Promise<void>;
   startVoiceChat(): Promise<void>;
   backHome(): void;
 }>({
@@ -40,56 +22,22 @@ Page<VoiceStartData, {
     error: "",
     selectedMode: "free_narration",
     selectedModule: "event",
-    modeOptions: [
-      {
-        value: "free_narration",
-        title: "自由讲述",
-        description: "适合已经想好要讲什么的人，AI 只做轻量接话。",
-        tag: "弱引导",
-      },
-      {
-        value: "guided_interview",
-        title: "主题讲述",
-        description: "适合不知道从哪讲起的人，AI 会按主题一步步追问。",
-        tag: "强引导",
-      },
-    ],
-    moduleOptions: [
-      { value: "person", label: "人" },
-      { value: "event", label: "事" },
-      { value: "place", label: "地点" },
-      { value: "period", label: "时间段" },
-      { value: "theme", label: "主题" },
-    ],
+    projectTitle: "我的回忆录",
+    guidanceLabel: "自由讲述",
   },
 
-  async onLoad() {
+  async onShow() {
     try {
       const identity = await getMemoirIdentity();
       const profile = memoirProjectProfile(identity.active_project);
-      this.setData({ selectedMode: profile.defaultGuidanceMode });
+      this.setData({
+        selectedMode: profile.defaultGuidanceMode,
+        projectTitle: identity.active_project?.title || "我的回忆录",
+        guidanceLabel: guidanceModeLabel(profile.defaultGuidanceMode),
+      });
     } catch (error) {
       console.warn("load memoir project default guidance mode failed", error);
     }
-  },
-
-  selectMode(event) {
-    const mode = event.currentTarget.dataset.mode;
-    if (!mode) {
-      return;
-    }
-    this.setData({
-      selectedMode: mode,
-      error: "",
-    });
-  },
-
-  selectModule(event) {
-    const selectedModule = event.currentTarget.dataset.module;
-    if (!selectedModule) {
-      return;
-    }
-    this.setData({ selectedModule });
   },
 
   async startVoiceChat() {
