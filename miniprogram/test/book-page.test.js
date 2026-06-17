@@ -1,0 +1,356 @@
+require("./register-ts");
+
+const assert = require("node:assert/strict");
+const test = require("node:test");
+
+function sampleRef(id = "utterance-1", quote = "外婆家的院子") {
+  return {
+    voice_session_id: "voice-1",
+    message_id: `message-${id}`,
+    utterance_id: id,
+    transcript_version_id: `version-${id}`,
+    audio_file_id: `audio-${id}`,
+    start_ms: 0,
+    end_ms: 8000,
+    quote,
+  };
+}
+
+function samplePlan(status = "draft") {
+  return {
+    id: "plan-1",
+    project_id: "project/1",
+    title: "外婆回忆录章节规划",
+    status,
+    created_by: "ai",
+    model: "fake",
+    metadata_json: {},
+    created_at: "2026-06-17T00:00:00.000Z",
+    updated_at: "2026-06-17T00:00:00.000Z",
+    chapters: [
+      {
+        id: "chapter-1",
+        plan_id: "plan-1",
+        project_id: "project/1",
+        title: "外婆家的童年",
+        summary: "整理外婆家院子的童年生活。",
+        sort_order: 0,
+        source_refs: [sampleRef("utterance-1", "外婆家的院子")],
+        metadata_json: {},
+        created_at: "2026-06-17T00:00:00.000Z",
+        updated_at: "2026-06-17T00:00:00.000Z",
+      },
+      {
+        id: "chapter-2",
+        plan_id: "plan-1",
+        project_id: "project/1",
+        title: "第一次离家",
+        summary: "整理第一次离家求学。",
+        sort_order: 1,
+        source_refs: [sampleRef("utterance-2", "第一次离家")],
+        metadata_json: {},
+        created_at: "2026-06-17T00:00:00.000Z",
+        updated_at: "2026-06-17T00:00:00.000Z",
+      },
+    ],
+  };
+}
+
+function sampleDraft(version = 1, status = "draft", content = "我小时候常在外婆家的院子里晒太阳。") {
+  return {
+    id: "draft-1",
+    project_id: "project/1",
+    chapter_id: "chapter-1",
+    status,
+    metadata_json: {},
+    latest_version: {
+      id: `draft-version-${version}`,
+      draft_id: "draft-1",
+      project_id: "project/1",
+      chapter_id: "chapter-1",
+      version,
+      content,
+      created_by: "ai",
+      model: "fake",
+      prompt_snapshot: "prompt",
+      feedback: null,
+      created_at: "2026-06-17T00:00:00.000Z",
+    },
+    versions: [],
+    created_at: "2026-06-17T00:00:00.000Z",
+    updated_at: "2026-06-17T00:00:00.000Z",
+  };
+}
+
+function loadBookPage({ authExports = {}, voiceApiExports = {} } = {}) {
+  const authPath = require.resolve("../services/auth.ts");
+  const voiceApiPath = require.resolve("../services/memoir-voice-api.ts");
+  const bookPath = require.resolve("../pages/book/index.ts");
+  delete require.cache[authPath];
+  delete require.cache[voiceApiPath];
+  delete require.cache[bookPath];
+  require.cache[authPath] = {
+    id: authPath,
+    filename: authPath,
+    loaded: true,
+    exports: {
+      getMemoirIdentity: async () => {
+        throw new Error("getMemoirIdentity was not mocked");
+      },
+      ...authExports,
+    },
+  };
+  require.cache[voiceApiPath] = {
+    id: voiceApiPath,
+    filename: voiceApiPath,
+    loaded: true,
+    exports: {
+      confirmMemoirBookChapterDraft: async () => {
+        throw new Error("confirmMemoirBookChapterDraft was not mocked");
+      },
+      confirmMemoirBookPlan: async () => {
+        throw new Error("confirmMemoirBookPlan was not mocked");
+      },
+      generateMemoirBookChapterDraft: async () => {
+        throw new Error("generateMemoirBookChapterDraft was not mocked");
+      },
+      generateMemoirBookPlan: async () => {
+        throw new Error("generateMemoirBookPlan was not mocked");
+      },
+      getMemoirBookChapterDraft: async () => null,
+      getMemoirBookPlan: async () => {
+        throw new Error("getMemoirBookPlan was not mocked");
+      },
+      updateMemoirBookChapterDraft: async () => {
+        throw new Error("updateMemoirBookChapterDraft was not mocked");
+      },
+      ...voiceApiExports,
+    },
+  };
+
+  let page = null;
+  const previousPage = global.Page;
+  global.Page = (definition) => {
+    page = definition;
+  };
+  const mod = require(bookPath);
+  if (previousPage === undefined) {
+    delete global.Page;
+  } else {
+    global.Page = previousPage;
+  }
+  return { mod, page };
+}
+
+function pageContext(page, dataPatch = {}) {
+  return {
+    ...page,
+    data: { ...page.data, ...dataPatch },
+    setData(patch) {
+      this.data = { ...this.data, ...patch };
+    },
+  };
+}
+
+test("book page summarizes chapter source quotes without exposing raw ids", () => {
+  const { mod } = loadBookPage();
+
+  assert.equal(
+    mod.bookChapterSourceSummary({
+      source_refs: [
+        sampleRef("utterance-1", "外婆家的院子"),
+        sampleRef("utterance-2", "第一次离家"),
+        sampleRef("utterance-3", "第三段"),
+      ],
+    }),
+    "外婆家的院子 / 第一次离家",
+  );
+});
+
+test("book page progress counts generated and confirmed chapters", () => {
+  const { mod } = loadBookPage();
+  const plan = samplePlan("confirmed");
+  const chapters = mod.buildChapterViews(plan, {
+    "chapter-1": sampleDraft(1, "confirmed"),
+    "chapter-2": sampleDraft(1, "draft"),
+  });
+
+  assert.equal(mod.bookProgressText(chapters), "1/2 章已确认，2 章已有正文");
+  assert.equal(chapters[0].draftStatusText, "已确认");
+  assert.equal(chapters[1].draftStatusText, "待确认");
+});
+
+test("book page confirms chapters with trimmed user edits and original source refs", async () => {
+  const submissions = [];
+  const confirmedPlan = samplePlan("confirmed");
+  global.wx = { showToast() {} };
+  const { mod, page } = loadBookPage({
+    voiceApiExports: {
+      confirmMemoirBookPlan: async (projectId, data) => {
+        submissions.push({ projectId, data });
+        return confirmedPlan;
+      },
+      getMemoirBookChapterDraft: async () => null,
+    },
+  });
+  const plan = samplePlan("draft");
+  const chapters = mod.buildChapterViews(plan);
+  chapters[0].editingTitle = "  童年院子  ";
+  chapters[0].editingSummary = "  只写院子里的事  ";
+  const context = pageContext(page, {
+    projectId: "project/1",
+    projectTitle: "外婆回忆录",
+    plan,
+    planTitle: "  用户确认目录  ",
+    chapters,
+  });
+
+  await page.confirmPlan.call(context);
+
+  assert.equal(submissions.length, 1);
+  assert.equal(submissions[0].projectId, "project/1");
+  assert.equal(submissions[0].data.title, "用户确认目录");
+  assert.equal(submissions[0].data.chapters[0].title, "童年院子");
+  assert.equal(submissions[0].data.chapters[0].summary, "只写院子里的事");
+  assert.equal(submissions[0].data.chapters[0].source_refs[0].utterance_id, "utterance-1");
+  assert.equal(context.data.stage, "drafting");
+  delete global.wx;
+});
+
+test("book page regenerates an existing chapter draft with force flag", async () => {
+  const calls = [];
+  global.wx = { showToast() {} };
+  const { mod, page } = loadBookPage({
+    voiceApiExports: {
+      generateMemoirBookChapterDraft: async (projectId, chapterId, data) => {
+        calls.push({ projectId, chapterId, data });
+        return sampleDraft(2, "draft", "第二版正文");
+      },
+    },
+  });
+  const plan = samplePlan("confirmed");
+  const context = pageContext(page, {
+    projectId: "project/1",
+    chapters: mod.buildChapterViews(plan, { "chapter-1": sampleDraft(1, "draft", "第一版正文") }),
+  });
+
+  await page.generateChapterDraft.call(context, {
+    currentTarget: { dataset: { id: "chapter-1" } },
+  });
+
+  assert.deepEqual(calls[0], {
+    projectId: "project/1",
+    chapterId: "chapter-1",
+    data: { force_regenerate: true },
+  });
+  assert.equal(context.data.chapters[0].draftVersionText, "第 2 版");
+  assert.equal(context.data.chapters[0].draftContent, "第二版正文");
+  assert.equal(context.data.chapters[0].draftChanged, false);
+  delete global.wx;
+});
+
+test("book page blocks regeneration while draft edits are unsaved", async () => {
+  const calls = [];
+  const { mod, page } = loadBookPage({
+    voiceApiExports: {
+      generateMemoirBookChapterDraft: async () => {
+        calls.push("called");
+        return sampleDraft(2);
+      },
+    },
+  });
+  const plan = samplePlan("confirmed");
+  const chapters = mod.buildChapterViews(plan, { "chapter-1": sampleDraft(1) });
+  chapters[0].draftChanged = true;
+  const context = pageContext(page, {
+    projectId: "project/1",
+    chapters,
+  });
+
+  await page.generateChapterDraft.call(context, {
+    currentTarget: { dataset: { id: "chapter-1" } },
+  });
+
+  assert.equal(calls.length, 0);
+  assert.equal(context.data.chapters[0].draftError, "请先保存当前修改，再重新生成");
+});
+
+test("book APIs call encoded backend routes", async () => {
+  const requests = [];
+  global.wx = {
+    getStorageSync(key) {
+      if (key === "pawtale_backend_config") {
+        return {
+          httpBaseUrl: "http://backend.local:8000/",
+          devEmail: "local@example.com",
+          devPassword: "secret",
+        };
+      }
+      if (key === "pawtale_backend_cookie") {
+        return "pawtale_session=abc";
+      }
+      return "";
+    },
+    getExtConfigSync() {
+      return {};
+    },
+    setStorageSync() {},
+    removeStorageSync() {},
+    request(options) {
+      requests.push(options);
+      if (options.url.endsWith("/api/auth/me")) {
+        options.success({ statusCode: 200, data: { id: "user-1" }, cookies: [], header: {} });
+        return;
+      }
+      if (options.url.endsWith("/draft") || options.url.endsWith("/draft/confirm")) {
+        options.success({ statusCode: 200, data: sampleDraft(), cookies: [], header: {} });
+        return;
+      }
+      options.success({ statusCode: 200, data: samplePlan("confirmed"), cookies: [], header: {} });
+    },
+  };
+  delete require.cache[require.resolve("../services/auth.ts")];
+  delete require.cache[require.resolve("../services/request.ts")];
+  delete require.cache[require.resolve("../services/memoir-voice-api.ts")];
+  const {
+    confirmMemoirBookChapterDraft,
+    confirmMemoirBookPlan,
+    generateMemoirBookChapterDraft,
+    generateMemoirBookPlan,
+    getMemoirBookChapterDraft,
+    getMemoirBookPlan,
+    updateMemoirBookChapterDraft,
+  } = require("../services/memoir-voice-api.ts");
+
+  await getMemoirBookPlan("project/1");
+  await generateMemoirBookPlan("project/1", { max_chapters: 6 });
+  await confirmMemoirBookPlan("project/1", { title: "目录", chapters: [] });
+  await getMemoirBookChapterDraft("project/1", "chapter/1");
+  await generateMemoirBookChapterDraft("project/1", "chapter/1", { force_regenerate: true });
+  await updateMemoirBookChapterDraft("project/1", "chapter/1", { content: "正文" });
+  await confirmMemoirBookChapterDraft("project/1", "chapter/1");
+
+  const apiRequests = requests.filter((request) => request.url.includes("/api/mobile/memoir/"));
+  assert.equal(apiRequests[0].url, "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-plan");
+  assert.equal(apiRequests[0].method, "GET");
+  assert.equal(apiRequests[1].url, "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-plan/generate");
+  assert.equal(apiRequests[1].method, "POST");
+  assert.deepEqual(apiRequests[1].data, { max_chapters: 6 });
+  assert.equal(apiRequests[2].method, "PUT");
+  assert.equal(
+    apiRequests[3].url,
+    "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-plan/chapters/chapter%2F1/draft",
+  );
+  assert.equal(apiRequests[3].method, "GET");
+  assert.equal(apiRequests[4].method, "POST");
+  assert.deepEqual(apiRequests[4].data, { force_regenerate: true });
+  assert.equal(apiRequests[5].method, "PATCH");
+  assert.deepEqual(apiRequests[5].data, { content: "正文" });
+  assert.equal(
+    apiRequests[6].url,
+    "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-plan/chapters/chapter%2F1/draft/confirm",
+  );
+  assert.equal(apiRequests[6].method, "POST");
+  assert.equal(apiRequests[6].header.Cookie, "pawtale_session=abc");
+  delete global.wx;
+});
