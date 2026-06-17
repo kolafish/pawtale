@@ -80,6 +80,9 @@ npm run dev
 | `APP_ENV` | 应用环境：`development` / `test` / `production`；生产环境必须显式设为 `production` |
 | `APP_SECRET_KEY` | session cookie 签名密钥；生产环境必须是至少 32 字符的非默认随机值 |
 | `DATABASE_URL` | 可选数据库连接；不设置时使用 `data/pawtale.db` |
+| `SQLITE_JOURNAL_MODE` | SQLite journal 模式；默认 `WAL`，用于小规模并发读写 |
+| `SQLITE_SYNCHRONOUS` | SQLite 同步级别；默认 `NORMAL` |
+| `SQLITE_BUSY_TIMEOUT_MS` | SQLite 写锁等待时间；默认 `5000` |
 | `WECHAT_MINIPROGRAM_APPID` | 微信小程序 AppID，用于后端 code2session |
 | `WECHAT_MINIPROGRAM_SECRET` | 微信小程序 AppSecret，只能放后端 `.env` |
 | `WECHAT_JSCODE2SESSION_URL` | 微信 code2session 接口地址 |

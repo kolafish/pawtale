@@ -14,6 +14,9 @@ class Settings(BaseSettings):
     app_env: str = "development"
     app_secret_key: str = DEFAULT_APP_SECRET_KEY
     database_url: str = f"sqlite+aiosqlite:///{DATA_DIR}/pawtale.db"
+    sqlite_journal_mode: str = "WAL"
+    sqlite_synchronous: str = "NORMAL"
+    sqlite_busy_timeout_ms: int = 5000
     local_default_user_email: str = "local@pawtale.local"
     local_default_user_password: str = "pawtale-local"
     local_default_user_display_name: str = "本地作者"
