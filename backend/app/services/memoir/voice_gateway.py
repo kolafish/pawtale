@@ -67,6 +67,7 @@ class VoiceGatewaySession:
         self._terminal_error: str | None = None
         self._terminal_stop = asyncio.Event()
         self._pending_final_event: StreamingASREvent | None = None
+        self._latest_text_event: StreamingASREvent | None = None
 
     async def run(self) -> None:
         await self.client.send_json(self._event("session.ready"))
@@ -145,6 +146,7 @@ class VoiceGatewaySession:
 
         await self._close_asr_client()
         self._pending_final_event = None
+        self._latest_text_event = None
         self._state = VoiceGatewayState.LISTENING
         self._asr_client = self.asr_client_factory()
         await self._asr_client.start()
@@ -219,6 +221,9 @@ class VoiceGatewaySession:
             await self._mark_terminal_error(event.error or "asr_provider_error", event.raw)
             return
 
+        if event.text.strip():
+            self._latest_text_event = event
+
         if event.type == "final":
             self._pending_final_event = event
             await self.client.send_json(
@@ -233,11 +238,13 @@ class VoiceGatewaySession:
         await self.client.send_json(self._asr_event_payload(event, event_type=f"asr.{event.type}"))
 
     async def _persist_pending_final_event(self) -> None:
-        if self._pending_final_event is None:
+        event = self._final_event_for_persistence()
+        if event is None:
             return
 
-        event = self._pending_final_event
         payload = self._asr_event_payload(event, event_type="asr.final")
+        if self._pending_final_event is None:
+            payload["provider_event_type"] = "partial_fallback"
         if self.on_asr_final:
             try:
                 persisted = await self.on_asr_final(event)
@@ -248,7 +255,24 @@ class VoiceGatewaySession:
             if persisted:
                 payload.update(persisted)
         self._pending_final_event = None
+        self._latest_text_event = None
         await self.client.send_json(payload)
+
+    def _final_event_for_persistence(self) -> StreamingASREvent | None:
+        if self._pending_final_event is not None:
+            return self._pending_final_event
+        if self._latest_text_event is None:
+            return None
+        raw = dict(self._latest_text_event.raw or {})
+        raw["fallback_from_partial"] = True
+        return StreamingASREvent(
+            type="final",
+            text=self._latest_text_event.text,
+            start_ms=self._latest_text_event.start_ms,
+            end_ms=self._latest_text_event.end_ms,
+            raw=raw,
+            error=self._latest_text_event.error,
+        )
 
     def _asr_event_payload(
         self,
