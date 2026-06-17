@@ -63,7 +63,7 @@
 ## Shared ECS Deployment Guardrails
 
 - ECS `115.190.174.247` 是共享机器，不是 Pawtale 专用部署环境。第一原则：不要动已经存在的进程、Web 服务、项目目录或全局配置，除非用户明确要求。
-- SSH 连接方式：`ssh root@115.190.174.247`。当前线程曾通过临时 key `~/.ssh/pawtale_codex_115_190_174_247` 接入；不要把服务器密码写入仓库或文档。
+- 推荐 SSH 连接方式：`ssh pawtale-ecs`。本机 `~/.ssh/config` 应将该 alias 指向 `root@115.190.174.247`，并使用 `~/.ssh/pawtale_codex_115_190_174_247`；原始连接方式是 `ssh root@115.190.174.247`。不要把服务器密码或私钥内容写入仓库或文档。
 - 相关域名是 `spaceflows.cn`。当前已知 Caddy 映射：`www.spaceflows.cn -> 127.0.0.1:5173`，`dev-api.spaceflows.cn -> 127.0.0.1:8081`，`api.spaceflows.cn -> 127.0.0.1:8082`，`dev-admin.spaceflows.cn -> 127.0.0.1:9527`，`admin.spaceflows.cn -> 127.0.0.1:9728`。
 - 已有服务包括 Caddy、Redis、PM2 管理的 `spaceflows-web`，以及 `/root/project/juju_find_*`、`/root/project/space-flows-web` 等项目。部署 Pawtale 时应使用独立目录、独立进程名、独立端口和可回滚配置。
 - 修改 Caddy、PM2、systemd、防火墙、证书、DNS、全局 Node/Python 环境或已有项目之前，必须先说明影响范围并获得用户确认。
