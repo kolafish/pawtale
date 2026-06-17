@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import base64
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import json
@@ -187,43 +186,93 @@ class GitHubAppClient:
             page += 1
         return repositories
 
-    async def put_file(
+    async def commit_files(
         self,
         *,
         installation_id: int,
         owner: str,
         repo: str,
         branch: str,
-        path: str,
-        content: str,
+        files: list[BackupFile],
         message: str,
-    ) -> str | None:
+    ) -> str:
+        if not files:
+            raise GitHubSyncError("GitHub 同步文件为空")
+
         token = await self.create_installation_token(installation_id)
         repo_path = f"/repos/{quote(owner, safe='')}/{quote(repo, safe='')}"
-        content_path = quote(path, safe="/")
-        existing = await self._request(
+        ref_path = quote(f"heads/{branch}", safe="/")
+        ref_data = await self._request(
             "GET",
-            f"{repo_path}/contents/{content_path}?{urlencode({'ref': branch})}",
+            f"{repo_path}/git/ref/{ref_path}",
             token=token,
-            expected_status={200, 404},
         )
-        body: dict[str, Any] = {
-            "message": message,
-            "content": base64.b64encode(content.encode("utf-8")).decode("ascii"),
-            "branch": branch,
-        }
-        if existing and isinstance(existing.get("sha"), str):
-            body["sha"] = existing["sha"]
-        result = await self._request(
-            "PUT",
-            f"{repo_path}/contents/{content_path}",
+        ref_object = (ref_data or {}).get("object")
+        base_commit_sha = ref_object.get("sha") if isinstance(ref_object, dict) else None
+        if not isinstance(base_commit_sha, str) or not base_commit_sha:
+            raise GitHubSyncError("GitHub branch ref 缺少 commit sha")
+
+        commit_data = await self._request(
+            "GET",
+            f"{repo_path}/git/commits/{quote(base_commit_sha, safe='')}",
             token=token,
-            json_body=body,
-            expected_status={200, 201},
         )
-        commit = (result or {}).get("commit", {})
-        sha = commit.get("sha") if isinstance(commit, dict) else None
-        return sha if isinstance(sha, str) else None
+        commit_tree = (commit_data or {}).get("tree")
+        base_tree_sha = commit_tree.get("sha") if isinstance(commit_tree, dict) else None
+        if not isinstance(base_tree_sha, str) or not base_tree_sha:
+            raise GitHubSyncError("GitHub base commit 缺少 tree sha")
+
+        tree_entries: list[dict[str, str]] = []
+        for file in files:
+            blob_data = await self._request(
+                "POST",
+                f"{repo_path}/git/blobs",
+                token=token,
+                json_body={"content": file.content, "encoding": "utf-8"},
+                expected_status={201},
+            )
+            blob_sha = (blob_data or {}).get("sha")
+            if not isinstance(blob_sha, str) or not blob_sha:
+                raise GitHubSyncError(f"GitHub blob 创建失败：{file.path}")
+            tree_entries.append(
+                {
+                    "path": file.path,
+                    "mode": "100644",
+                    "type": "blob",
+                    "sha": blob_sha,
+                }
+            )
+
+        tree_data = await self._request(
+            "POST",
+            f"{repo_path}/git/trees",
+            token=token,
+            json_body={"base_tree": base_tree_sha, "tree": tree_entries},
+            expected_status={201},
+        )
+        tree_sha = (tree_data or {}).get("sha")
+        if not isinstance(tree_sha, str) or not tree_sha:
+            raise GitHubSyncError("GitHub tree 创建失败")
+
+        new_commit_data = await self._request(
+            "POST",
+            f"{repo_path}/git/commits",
+            token=token,
+            json_body={"message": message, "tree": tree_sha, "parents": [base_commit_sha]},
+            expected_status={201},
+        )
+        new_commit_sha = (new_commit_data or {}).get("sha")
+        if not isinstance(new_commit_sha, str) or not new_commit_sha:
+            raise GitHubSyncError("GitHub commit 创建失败")
+
+        await self._request(
+            "PATCH",
+            f"{repo_path}/git/refs/{ref_path}",
+            token=token,
+            json_body={"sha": new_commit_sha, "force": False},
+            expected_status={200},
+        )
+        return new_commit_sha
 
 
 def _repo_option(installation_id: int, repo: dict[str, Any]) -> GitSyncRepositoryOption:
@@ -570,25 +619,22 @@ async def run_sync(
     synced_at = datetime.utcnow()
     try:
         files = await _backup_files(db, project_id, user_id, config.base_path)
-        last_sha: str | None = None
-        for file in files:
-            last_sha = await github.put_file(
-                installation_id=config.installation_id,
-                owner=config.repository_owner,
-                repo=config.repository_name,
-                branch=config.branch,
-                path=file.path,
-                content=file.content,
-                message=f"Sync Pawtale project backup: {file.path}",
-            )
+        commit_sha = await github.commit_files(
+            installation_id=config.installation_id,
+            owner=config.repository_owner,
+            repo=config.repository_name,
+            branch=config.branch,
+            files=files,
+            message="Sync Pawtale project backup",
+        )
         config.last_synced_at = synced_at
-        config.last_commit_sha = last_sha
+        config.last_commit_sha = commit_sha
         config.last_error = None
         await db.commit()
         return ProjectGitSyncRunResponse(
             ok=True,
             synced_files=len(files),
-            commit_sha=last_sha,
+            commit_sha=commit_sha,
             synced_at=synced_at,
         )
     except GitHubSyncError as exc:
