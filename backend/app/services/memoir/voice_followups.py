@@ -29,6 +29,7 @@ SYSTEM_PROMPT = (
 AI_FOLLOW_UP_UNAVAILABLE_MESSAGE = "AI 服务暂时不可用，请稍后重试。"
 PROMPT_VERSION = "memoir_voice_followup_v2"
 MAX_CONTEXT_MESSAGES = 12
+MAX_PREVIOUS_CONTEXT_MESSAGES = 8
 logger = logging.getLogger(__name__)
 
 
@@ -64,15 +65,23 @@ def _ordered_messages(messages: list[MemoirChatMessage]) -> list[MemoirChatMessa
     return sorted(messages, key=lambda message: (message.turn_index, message.created_at, message.id))
 
 
-def _recent_context(messages: list[MemoirChatMessage]) -> str:
+def _message_context(messages: list[MemoirChatMessage]) -> str:
     lines: list[str] = []
-    for message in _ordered_messages(messages)[-MAX_CONTEXT_MESSAGES:]:
+    for message in messages:
         content = message.content_text.strip()
         if not content:
             continue
         speaker = "叙述者" if message.role == MemoirChatMessageRole.USER.value else "AI"
         lines.append(f"{speaker}：{content}")
-    return "\n".join(lines) or "暂无对话。"
+    return "\n".join(lines)
+
+
+def _recent_context(messages: list[MemoirChatMessage]) -> str:
+    return _message_context(_ordered_messages(messages)[-MAX_CONTEXT_MESSAGES:]) or "暂无对话。"
+
+
+def _previous_context(messages: list[MemoirChatMessage]) -> str:
+    return _message_context(messages) or "暂无历史会话。"
 
 
 def _has_user_message(messages: list[MemoirChatMessage]) -> bool:
@@ -82,42 +91,68 @@ def _has_user_message(messages: list[MemoirChatMessage]) -> bool:
     )
 
 
-def _build_user_prompt(voice_session: MemoirVoiceSession, *, regenerate: bool) -> str:
+def _build_user_prompt(
+    voice_session: MemoirVoiceSession,
+    *,
+    previous_messages: list[MemoirChatMessage],
+    regenerate: bool,
+) -> str:
     guidance_mode = MemoirGuidanceMode(voice_session.guidance_mode)
     messages = list(voice_session.messages)
     context = _recent_context(messages)
     has_user_message = _has_user_message(messages)
+    has_previous_user_message = _has_user_message(previous_messages)
+    history_context = _previous_context(previous_messages)
     module_label = _module_label(voice_session.current_guidance_module)
     regenerate_instruction = "这次是在替换上一句追问，请换一个角度，不要重复上一句。" if regenerate else ""
 
     if guidance_mode == MemoirGuidanceMode.GUIDED_INTERVIEW:
         if has_user_message:
             mode_instruction = f"""当前是主题讲述，当前主题线索是“{module_label}”；如果最近对话中叙述者已经选择了其他主题，以最近对话为准。
+- 如果叙述者表达想接着上次聊，结合历史会话进度，围绕上次最后讲到的内容自然接下去
+- 如果叙述者表达想重新聊，回到主题菜单，让他重新选一个想聊的方向
 - 先从宏观问题开始，不要立刻追细节
 - 帮叙述者把当前主题讲完整：时间、地点、人物、发生了什么、当时感受、后来影响
 - 不要连续追同一个细节超过两轮
 - 如果叙述者明显还有兴趣，就顺着讲；如果回答变短或重复，就引导换一个同主题问题，或回到主题菜单
 {GUIDED_TOPIC_LIBRARY}"""
+        elif has_previous_user_message:
+            mode_instruction = f"""当前是主题讲述开场，叙述者之前已有同模式讲述记录。
+- 先问好，并用“老余”做简短自我介绍
+- 先自然说明“今天可以随便聊一些主题”
+- 再用“比如”简短举例介绍几个主题：{GUIDED_TOPIC_MENU}
+- 然后提醒上次讲到的内容，问叙述者是想接着上次聊，还是重新选一个主题聊
+- 不要直接进入细节，不要替叙述者决定继续或重开
+- 下面题库仅供后续追问参考，开场不要一次展开
+{GUIDED_TOPIC_LIBRARY}"""
         else:
             mode_instruction = f"""当前是主题讲述开场。
 - 先问好，并用“老余”做简短自我介绍
-- 介绍可聊的主题：{GUIDED_TOPIC_MENU}
+- 先自然说明“今天可以随便聊一些主题”
+- 再用“比如”简短举例介绍几个主题：{GUIDED_TOPIC_MENU}
 - 先让叙述者选择想聊哪个主题，不要立刻进入细节
-- 可以用一句自然的话完成问候、自我介绍和主题选择邀请
+- 可以用一句自然的话完成问候、自我介绍、主题举例和选择邀请
 - 下面题库仅供后续追问参考，开场不要一次展开
 {GUIDED_TOPIC_LIBRARY}"""
     else:
         if has_user_message:
             mode_instruction = """当前是自由讲述，AI 只做弱引导。
+- 如果叙述者表达想接着上次讲，结合历史会话进度，围绕上次最后讲到的时间点或事件轻轻接住
 - 顺着叙述者自己的时间线走，尽量不要突然换主题
 - 不要一直纠缠同一件事的不同细节
 - 如果这件事重要、有情绪或有转折，鼓励他多讲一点
 - 如果这件事已经讲得差不多，就自然引导到前后时间、相关人物，或下一段回忆"""
+        elif has_previous_user_message:
+            mode_instruction = """当前是自由讲述开场，AI 只做弱引导，叙述者之前已有讲述记录。
+- 先问好，并用“老余”做简短自我介绍
+- 根据历史会话进度提醒上次讲到哪里，只能复述明确出现过的内容
+- 温和提示叙述者可以从上次停下来的地方接着讲
+- 不要展开主题菜单，不要强行切换主题，不要连续提问"""
         else:
             mode_instruction = """当前是自由讲述开场，AI 只做弱引导。
 - 先问好，并用“老余”做简短自我介绍
-- 用一句温和的话邀请叙述者按自己的顺序开始讲
-- 不要指定主题，不要替他安排时间线，不要连续提问"""
+- 引导叙述者可以从小时候或最早的记忆开始讲起
+- 仍然允许叙述者按自己的顺序开始，不要连续提问"""
 
     return f"""请根据下面的访谈上下文，生成下一句 AI 开场或追问。
 
@@ -125,7 +160,8 @@ def _build_user_prompt(voice_session: MemoirVoiceSession, *, regenerate: bool) -
 - 只输出一句中文问题或邀请句，不要标题、解释、编号或引号
 - 内容要短，普通追问最好 30 个汉字以内；开场或主题菜单可以稍长，但仍要适合语音播放
 - 语气自然、尊重，像真人访谈主持人
-- 不要替用户总结事实，不要编造上下文没有的信息
+- 不要编造上下文没有的信息；如果提醒“上次讲到哪里”，只能概括历史会话里明确出现过的内容
+- 历史会话进度只用于判断是否续聊；如果历史会话为空，不要提“上次”
 - 不要连续问多个问题
 - 不问敏感隐私，除非用户已经主动提到
 {regenerate_instruction}
@@ -134,6 +170,9 @@ def _build_user_prompt(voice_session: MemoirVoiceSession, *, regenerate: bool) -
 
 访谈上下文：
 {context}
+
+历史会话进度：
+{history_context}
 """
 
 
@@ -152,6 +191,30 @@ async def _load_voice_session(
     if not voice_session:
         raise HTTPException(status_code=404, detail="语音会话不存在")
     return voice_session
+
+
+async def _load_previous_project_messages(
+    db: AsyncSession,
+    voice_session: MemoirVoiceSession,
+) -> list[MemoirChatMessage]:
+    result = await db.execute(
+        select(MemoirChatMessage)
+        .join(MemoirVoiceSession, MemoirChatMessage.voice_session_id == MemoirVoiceSession.id)
+        .where(
+            MemoirChatMessage.project_id == voice_session.project_id,
+            MemoirChatMessage.voice_session_id != voice_session.id,
+            MemoirVoiceSession.guidance_mode == voice_session.guidance_mode,
+            MemoirChatMessage.role == MemoirChatMessageRole.USER.value,
+            MemoirChatMessage.content_text != "",
+        )
+        .order_by(
+            MemoirChatMessage.created_at.desc(),
+            MemoirChatMessage.turn_index.desc(),
+            MemoirChatMessage.id.desc(),
+        )
+        .limit(MAX_PREVIOUS_CONTEXT_MESSAGES)
+    )
+    return list(reversed(result.scalars().all()))
 
 
 async def _next_turn_index(db: AsyncSession, voice_session_id: str) -> int:
@@ -173,7 +236,12 @@ async def generate_voice_follow_up(
 ) -> MemoirVoiceFollowUpResponse:
     voice_session = await _load_voice_session(db, voice_session_id, user_id)
     client = ai_client or get_ai_service(req.ai_model)
-    prompt = _build_user_prompt(voice_session, regenerate=req.regenerate)
+    previous_messages = await _load_previous_project_messages(db, voice_session)
+    prompt = _build_user_prompt(
+        voice_session,
+        previous_messages=previous_messages,
+        regenerate=req.regenerate,
+    )
     has_user_message = _has_user_message(list(voice_session.messages))
     guidance_intent = "follow_up" if has_user_message else "opening"
     try:
