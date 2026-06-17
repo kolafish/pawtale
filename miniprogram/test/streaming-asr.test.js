@@ -20,6 +20,11 @@ function streamingAsrModule() {
   return require("../services/memoir-streaming-asr.ts");
 }
 
+function streamingAsrProtocolModule() {
+  delete require.cache[require.resolve("../services/memoir-streaming-asr-protocol.ts")];
+  return require("../services/memoir-streaming-asr-protocol.ts");
+}
+
 function recorderManagerStub() {
   return {
     start() {},
@@ -59,17 +64,15 @@ function recorderManagerHarness() {
 }
 
 test("encodes ArrayBuffer audio frames as base64", () => {
-  const { arrayBufferToBase64 } = streamingAsrModule();
+  const { arrayBufferToBase64 } = streamingAsrProtocolModule();
 
   assert.equal(arrayBufferToBase64(Uint8Array.from([0, 1, 2, 253, 254, 255]).buffer), "AAEC/f7/");
   assert.equal(arrayBufferToBase64(Uint8Array.from([255]).buffer), "/w==");
   assert.equal(arrayBufferToBase64(Uint8Array.from([255, 238]).buffer), "/+4=");
-
-  delete global.wx;
 });
 
 test("estimates 16-bit PCM audio level", () => {
-  const { estimatePcm16Level } = streamingAsrModule();
+  const { estimatePcm16Level } = streamingAsrProtocolModule();
   const silent = new ArrayBuffer(4);
   const loud = new ArrayBuffer(4);
   const view = new DataView(loud);
@@ -79,8 +82,6 @@ test("estimates 16-bit PCM audio level", () => {
   assert.equal(estimatePcm16Level(silent), 0);
   assert.ok(estimatePcm16Level(loud) > 0.49);
   assert.ok(estimatePcm16Level(loud) < 0.51);
-
-  delete global.wx;
 });
 
 test("normalizes invalid gateway payloads into session errors", () => {
@@ -88,7 +89,7 @@ test("normalizes invalid gateway payloads into session errors", () => {
     classifyVoiceClientConnectionError,
     classifyVoiceGatewayError,
     normalizeVoiceGatewayEvent,
-  } = streamingAsrModule();
+  } = streamingAsrProtocolModule();
 
   assert.deepEqual(normalizeVoiceGatewayEvent("bad"), {
     type: "session.error",
@@ -180,8 +181,6 @@ test("normalizes invalid gateway payloads into session errors", () => {
       message: "语音连接被拒绝，请返回后重新进入",
     },
   );
-
-  delete global.wx;
 });
 
 test("normalizes set-cookie values before reusing them as Cookie headers", () => {
