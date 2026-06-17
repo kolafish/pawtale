@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from urllib.parse import parse_qs, urlparse
 
 from sqlalchemy import select
@@ -39,6 +39,24 @@ class FakeGitHubClient:
     async def put_file(self, **kwargs):
         self.files.append(kwargs)
         return f"commit-{len(self.files)}"
+
+
+class TokenGitHubClient(git_sync_service.GitHubAppClient):
+    def __init__(self, responses: list[dict]):
+        super().__init__()
+        self.responses = responses
+        self.requests: list[tuple[str, str, str]] = []
+
+    def _app_jwt(self) -> str:
+        return "app-jwt"
+
+    async def _request(self, method, path, *, token, json_body=None, expected_status=None):
+        self.requests.append((method, path, token))
+        return self.responses.pop(0)
+
+
+def _github_timestamp(value: datetime) -> str:
+    return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def _state_from_install_url(install_url: str) -> str:
@@ -189,3 +207,62 @@ async def test_github_setup_state_expires(client, test_db, monkeypatch):
 
     assert response.status_code == 400
     assert response.json()["detail"] == "GitHub setup state 已过期"
+
+
+async def test_github_installation_token_cache_reuses_valid_token():
+    client = TokenGitHubClient(
+        [
+            {
+                "token": "token-1",
+                "expires_at": _github_timestamp(datetime.now(timezone.utc) + timedelta(hours=1)),
+            }
+        ]
+    )
+
+    first = await client.create_installation_token(123)
+    second = await client.create_installation_token(123)
+
+    assert first == "token-1"
+    assert second == "token-1"
+    assert len(client.requests) == 1
+
+
+async def test_github_installation_token_cache_refreshes_near_expiry():
+    client = TokenGitHubClient(
+        [
+            {
+                "token": "token-1",
+                "expires_at": _github_timestamp(datetime.now(timezone.utc) + timedelta(minutes=4)),
+            },
+            {
+                "token": "token-2",
+                "expires_at": _github_timestamp(datetime.now(timezone.utc) + timedelta(hours=1)),
+            },
+        ]
+    )
+
+    first = await client.create_installation_token(123)
+    second = await client.create_installation_token(123)
+
+    assert first == "token-1"
+    assert second == "token-2"
+    assert len(client.requests) == 2
+
+
+async def test_github_installation_token_cache_ignores_invalid_expiry():
+    client = TokenGitHubClient(
+        [
+            {"token": "token-1", "expires_at": "not-a-date"},
+            {
+                "token": "token-2",
+                "expires_at": _github_timestamp(datetime.now(timezone.utc) + timedelta(hours=1)),
+            },
+        ]
+    )
+
+    first = await client.create_installation_token(123)
+    second = await client.create_installation_token(123)
+
+    assert first == "token-1"
+    assert second == "token-2"
+    assert len(client.requests) == 2

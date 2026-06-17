@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import base64
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import json
 import re
 import secrets
@@ -34,6 +34,7 @@ from app.services.projects.access import load_project
 
 SAFE_PATH_PART_RE = re.compile(r"[^a-zA-Z0-9._-]+")
 GITHUB_SETUP_STATE_TTL_MINUTES = 10
+GITHUB_INSTALLATION_TOKEN_REFRESH_BUFFER = timedelta(minutes=5)
 
 
 class GitHubSyncError(RuntimeError):
@@ -46,10 +47,16 @@ class BackupFile:
     content: str
 
 
+@dataclass(frozen=True)
+class InstallationToken:
+    token: str
+    expires_at: datetime
+
+
 class GitHubAppClient:
     def __init__(self) -> None:
         self.settings = get_settings()
-        self._installation_tokens: dict[int, str] = {}
+        self._installation_tokens: dict[int, InstallationToken] = {}
 
     @property
     def configured(self) -> bool:
@@ -124,10 +131,30 @@ class GitHubAppClient:
         )
         return data or {}
 
+    def _now(self) -> datetime:
+        return datetime.now(timezone.utc)
+
+    @staticmethod
+    def _parse_expires_at(value: Any) -> datetime | None:
+        if not isinstance(value, str) or not value.strip():
+            return None
+        normalized = value.strip()
+        if normalized.endswith("Z"):
+            normalized = f"{normalized[:-1]}+00:00"
+        try:
+            parsed = datetime.fromisoformat(normalized)
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+
     async def create_installation_token(self, installation_id: int) -> str:
         cached = self._installation_tokens.get(installation_id)
-        if cached:
-            return cached
+        if cached and cached.expires_at - self._now() > GITHUB_INSTALLATION_TOKEN_REFRESH_BUFFER:
+            return cached.token
+        self._installation_tokens.pop(installation_id, None)
+
         data = await self._request(
             "POST",
             f"/app/installations/{installation_id}/access_tokens",
@@ -136,7 +163,9 @@ class GitHubAppClient:
         token = (data or {}).get("token")
         if not isinstance(token, str) or not token:
             raise GitHubSyncError("GitHub installation token 为空")
-        self._installation_tokens[installation_id] = token
+        expires_at = self._parse_expires_at((data or {}).get("expires_at"))
+        if expires_at and expires_at - self._now() > GITHUB_INSTALLATION_TOKEN_REFRESH_BUFFER:
+            self._installation_tokens[installation_id] = InstallationToken(token=token, expires_at=expires_at)
         return token
 
     async def list_repositories(self, installation_id: int) -> list[dict[str, Any]]:
