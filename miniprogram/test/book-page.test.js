@@ -56,13 +56,18 @@ function samplePlan(status = "draft") {
   };
 }
 
-function sampleDraft(version = 1, status = "draft", content = "我小时候常在外婆家的院子里晒太阳。") {
+function sampleDraft(
+  version = 1,
+  status = "draft",
+  content = "我小时候常在外婆家的院子里晒太阳。",
+  metadata = {},
+) {
   return {
     id: "draft-1",
     project_id: "project/1",
     chapter_id: "chapter-1",
     status,
-    metadata_json: {},
+    metadata_json: metadata,
     latest_version: {
       id: `draft-version-${version}`,
       draft_id: "draft-1",
@@ -292,6 +297,23 @@ test("book page builds source assignment views and chapter picker options", () =
   ]);
 });
 
+test("book page marks assigned sources as supplemental chapter work", () => {
+  const { mod } = loadBookPage();
+  const plan = samplePlan("confirmed");
+  plan.chapters[0].metadata_json = {
+    pending_source_utterance_ids: ["utterance-new-1"],
+    source_assignment_updated_at: "2026-06-17T00:00:00+00:00",
+  };
+
+  const chapters = mod.buildChapterViews(plan, {
+    "chapter-1": sampleDraft(1, "draft", "第一版正文", { status_reason: "new_sources_assigned" }),
+  });
+
+  assert.equal(chapters[0].pendingSourceCount, 1);
+  assert.equal(chapters[0].draftActionText, "补写新增");
+  assert.equal(chapters[1].draftActionText, "生成本章");
+});
+
 test("book page confirms chapters with trimmed user edits and original source refs", async () => {
   const submissions = [];
   const confirmedPlan = samplePlan("confirmed");
@@ -437,6 +459,44 @@ test("book page regenerates an existing chapter draft with force flag", async ()
   assert.equal(context.data.chapters[0].draftVersionText, "第 2 版");
   assert.equal(context.data.chapters[0].draftContent, "第二版正文");
   assert.equal(context.data.chapters[0].draftChanged, false);
+  delete global.wx;
+});
+
+test("book page clears supplemental source state after chapter regeneration", async () => {
+  const calls = [];
+  global.wx = { showToast() {} };
+  const { mod, page } = loadBookPage({
+    voiceApiExports: {
+      generateMemoirBookChapterDraft: async (projectId, chapterId, data) => {
+        calls.push({ projectId, chapterId, data });
+        return sampleDraft(2, "draft", "补写后的正文");
+      },
+    },
+  });
+  const plan = samplePlan("confirmed");
+  plan.chapters[0].metadata_json = {
+    pending_source_utterance_ids: ["utterance-new-1"],
+    source_assignment_updated_at: "2026-06-17T00:00:00+00:00",
+  };
+  const context = pageContext(page, {
+    projectId: "project/1",
+    chapters: mod.buildChapterViews(plan, {
+      "chapter-1": sampleDraft(1, "draft", "第一版正文", { status_reason: "new_sources_assigned" }),
+    }),
+  });
+
+  await page.generateChapterDraft.call(context, {
+    currentTarget: { dataset: { id: "chapter-1" } },
+  });
+
+  assert.deepEqual(calls[0], {
+    projectId: "project/1",
+    chapterId: "chapter-1",
+    data: { force_regenerate: true },
+  });
+  assert.equal(context.data.chapters[0].pendingSourceCount, 0);
+  assert.equal(context.data.chapters[0].draftActionText, "重新生成");
+  assert.deepEqual(context.data.chapters[0].metadata_json, {});
   delete global.wx;
 });
 

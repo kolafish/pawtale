@@ -395,6 +395,15 @@
   background: #fff8ef;
 }
 
+.draft-pending {
+  display: block;
+  margin-top: 12rpx;
+  color: #8a4034;
+  font-size: 24rpx;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
 .chapter-summary {
   color: #3a2119;
 }
