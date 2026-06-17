@@ -149,6 +149,11 @@ export interface GitSyncInstallation {
   repository_selection?: string | null;
 }
 
+export interface GitHubSetupUrl {
+  install_url: string;
+  expires_at: string;
+}
+
 export interface GitSyncRepositoryOption {
   installation_id: number;
   owner: string;

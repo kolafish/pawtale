@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 import json
 import re
+import secrets
 import time
 from pathlib import Path
 from typing import Any
@@ -13,12 +14,13 @@ from urllib.parse import quote, urlencode
 from fastapi import HTTPException
 import httpx
 import jwt
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
-from app.models.git_sync import GitHubInstallation, ProjectGitSync
+from app.models.git_sync import GitHubInstallation, GitHubSetupState, ProjectGitSync
 from app.schemas.projects import (
+    GitHubSetupUrlResponse,
     GitSyncInstallationResponse,
     GitSyncRepositoryOption,
     GitSyncStatusResponse,
@@ -31,6 +33,7 @@ from app.services.projects.access import load_project
 
 
 SAFE_PATH_PART_RE = re.compile(r"[^a-zA-Z0-9._-]+")
+GITHUB_SETUP_STATE_TTL_MINUTES = 10
 
 
 class GitHubSyncError(RuntimeError):
@@ -222,6 +225,11 @@ def _config_response(row: ProjectGitSync) -> ProjectGitSyncConfigResponse:
     return ProjectGitSyncConfigResponse.model_validate(row)
 
 
+def _with_query_param(url: str, params: dict[str, str]) -> str:
+    separator = "&" if "?" in url else "?"
+    return f"{url}{separator}{urlencode(params)}"
+
+
 def _safe_part(value: str) -> str:
     cleaned = SAFE_PATH_PART_RE.sub("-", value.strip()).strip(".-")
     return cleaned or "untitled"
@@ -315,16 +323,74 @@ async def _backup_files(db: AsyncSession, project_id: str, user_id: str, base_pa
     return files
 
 
+async def _cleanup_setup_states(db: AsyncSession, now: datetime) -> None:
+    await db.execute(
+        delete(GitHubSetupState).where(
+            GitHubSetupState.expires_at < now - timedelta(hours=1)
+        )
+    )
+
+
+async def create_setup_url(
+    db: AsyncSession,
+    user_id: str,
+    *,
+    client: GitHubAppClient | None = None,
+) -> GitHubSetupUrlResponse:
+    github = client or GitHubAppClient()
+    if not github.configured or not github.install_url:
+        raise HTTPException(status_code=503, detail="GitHub App 未配置")
+
+    now = datetime.utcnow()
+    expires_at = now + timedelta(minutes=GITHUB_SETUP_STATE_TTL_MINUTES)
+    await _cleanup_setup_states(db, now)
+    setup_state = GitHubSetupState(
+        state=secrets.token_urlsafe(32),
+        user_id=user_id,
+        created_at=now,
+        expires_at=expires_at,
+    )
+    db.add(setup_state)
+    await db.commit()
+    return GitHubSetupUrlResponse(
+        install_url=_with_query_param(github.install_url, {"state": setup_state.state}),
+        expires_at=expires_at,
+    )
+
+
+async def _consume_setup_state(
+    db: AsyncSession,
+    *,
+    user_id: str,
+    state: str,
+) -> GitHubSetupState:
+    value = state.strip()
+    if not value:
+        raise HTTPException(status_code=400, detail="GitHub setup state 缺失")
+    row = await db.get(GitHubSetupState, value)
+    if not row:
+        raise HTTPException(status_code=400, detail="GitHub setup state 无效")
+    if row.user_id != user_id:
+        raise HTTPException(status_code=403, detail="GitHub setup state 不属于当前用户")
+    if row.used_at is not None:
+        raise HTTPException(status_code=400, detail="GitHub setup state 已使用")
+    if row.expires_at <= datetime.utcnow():
+        raise HTTPException(status_code=400, detail="GitHub setup state 已过期")
+    return row
+
+
 async def record_installation(
     db: AsyncSession,
     user_id: str,
     installation_id: int,
     *,
+    state: str,
     client: GitHubAppClient | None = None,
 ) -> GitSyncInstallationResponse:
     github = client or GitHubAppClient()
     if not github.configured:
         raise HTTPException(status_code=503, detail="GitHub App 未配置")
+    setup_state = await _consume_setup_state(db, user_id=user_id, state=state)
 
     try:
         installation = await github.get_installation(installation_id)
@@ -347,6 +413,7 @@ async def record_installation(
     row.repository_selection = (
         installation.get("repository_selection") if isinstance(installation.get("repository_selection"), str) else None
     )
+    setup_state.used_at = datetime.utcnow()
     await db.commit()
     await db.refresh(row)
     return _installation_response(row)

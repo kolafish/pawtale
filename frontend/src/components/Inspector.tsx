@@ -120,6 +120,13 @@ export function Inspector({
     },
   });
 
+  const connectGitHubMutation = useMutation({
+    mutationFn: () => projectsApi.createGitHubSetupUrl(),
+    onSuccess: (data) => {
+      window.location.assign(data.install_url);
+    },
+  });
+
   const runSyncMutation = useMutation({
     mutationFn: () => projectsApi.runGitSync(project.id),
     onSuccess: invalidateGitSync,
@@ -338,15 +345,14 @@ export function Inspector({
               ) : (
                 <div className="space-y-2">
                   <div className="flex gap-2">
-                    {syncStatus.install_url && (
-                      <button
-                        onClick={() => window.open(syncStatus.install_url || '', '_blank', 'noopener,noreferrer')}
-                        className="flex-1 inline-flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-md border border-gray-200 hover:bg-gray-50 text-xs"
-                      >
-                        <Github size={13} />
-                        连接
-                      </button>
-                    )}
+                    <button
+                      onClick={() => connectGitHubMutation.mutate()}
+                      disabled={connectGitHubMutation.isPending}
+                      className="flex-1 inline-flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-md border border-gray-200 hover:bg-gray-50 text-xs disabled:opacity-60"
+                    >
+                      {connectGitHubMutation.isPending ? <RefreshCw size={13} className="animate-spin" /> : <Github size={13} />}
+                      连接
+                    </button>
                     {syncStatus.project_config && (
                       <button
                         onClick={() => deleteSyncMutation.mutate()}
@@ -422,6 +428,9 @@ export function Inspector({
                   )}
                   {saveSyncMutation.error instanceof Error && (
                     <p className="text-xs text-red-500">{saveSyncMutation.error.message}</p>
+                  )}
+                  {connectGitHubMutation.error instanceof Error && (
+                    <p className="text-xs text-red-500">{connectGitHubMutation.error.message}</p>
                   )}
                 </div>
               )}
