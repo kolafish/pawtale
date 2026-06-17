@@ -1,7 +1,7 @@
 from sqlalchemy import select
 
 from app.domain.memoir.types import MemoirChatContentStatus, MemoirChatMessageRole
-from app.models.memoir import MemoirChatMessage, MemoirVoiceSession, MemoirVoiceUtterance
+from app.models.memoir import AudioFile, MemoirChatMessage, MemoirVoiceSession, MemoirVoiceUtterance
 from app.services.memoir import voice_sessions as memoir_voice_sessions
 from app.services.memoir.tts_alignment import TTSAlignmentResult, TTSAlignmentSegment
 from app.services.memoir.voice_tts import TTSResult
@@ -30,13 +30,15 @@ class FakeTTS:
     provider_name = "fake-tts"
     model_name = "fake-tts-model"
 
-    def __init__(self):
+    def __init__(self, audio_results=None):
         self.calls = []
+        self.audio_results = list(audio_results or [b"fake-mp3-audio"])
 
     async def synthesize(self, text, *, voice=None):
         self.calls.append({"text": text, "voice": voice})
+        audio = self.audio_results.pop(0) if self.audio_results else b"fake-mp3-audio"
         return TTSResult(
-            audio=b"fake-mp3-audio",
+            audio=audio,
             mime_type="audio/mpeg",
             extension=".mp3",
             provider=self.provider_name,
@@ -596,6 +598,70 @@ async def test_mobile_memoir_assistant_tts_generates_audio_for_follow_up_message
     playback = await client.get(f"/api/mobile/memoir/audio-files/{data['audio_file_id']}/playback")
     assert playback.status_code == 200
     assert playback.content == b"fake-mp3-audio"
+
+
+async def test_mobile_memoir_assistant_tts_force_regenerate_deletes_replaced_audio(
+    client,
+    test_db,
+    monkeypatch,
+    tmp_path,
+):
+    monkeypatch.setattr("app.services.memoir.audio_files.MEMOIR_AUDIO_DIR", tmp_path / "audio")
+    create_response = await client.post(
+        "/api/mobile/memoir/voice-sessions",
+        json={"guidance_mode": "guided_interview"},
+    )
+    session = create_response.json()["session"]
+    assistant_message = MemoirChatMessage(
+        project_id=session["project_id"],
+        voice_session_id=session["id"],
+        role=MemoirChatMessageRole.ASSISTANT.value,
+        content_text="继续讲讲那一次分别。",
+        content_status=MemoirChatContentStatus.FINAL.value,
+        turn_index=0,
+        guidance_intent="follow_up",
+        metadata_json={"source": "test"},
+    )
+    test_db.add(assistant_message)
+    await test_db.commit()
+    await test_db.refresh(assistant_message)
+    fake_tts = FakeTTS([b"first-mp3-audio", b"second-mp3-audio"])
+
+    async def fake_align_tts_audio(text, audio, *, mime_type, extension, settings=None):
+        return None
+
+    monkeypatch.setattr("app.services.memoir.voice_tts.get_tts_client", lambda: fake_tts)
+    monkeypatch.setattr("app.services.memoir.voice_tts.align_tts_audio", fake_align_tts_audio)
+
+    first_response = await client.post(
+        f"/api/mobile/memoir/voice-sessions/{session['id']}/messages/{assistant_message.id}/tts",
+        json={},
+    )
+    assert first_response.status_code == 200
+    first_audio_id = first_response.json()["audio_file_id"]
+    first_audio = await test_db.scalar(select(AudioFile).where(AudioFile.id == first_audio_id))
+    assert first_audio is not None
+    first_audio_path = tmp_path / "audio" / first_audio.user_id / f"{first_audio.id}.mp3"
+    assert first_audio_path.read_bytes() == b"first-mp3-audio"
+
+    second_response = await client.post(
+        f"/api/mobile/memoir/voice-sessions/{session['id']}/messages/{assistant_message.id}/tts",
+        json={"force_regenerate": True},
+    )
+
+    assert second_response.status_code == 200
+    second_audio_id = second_response.json()["audio_file_id"]
+    assert second_audio_id != first_audio_id
+    assert await test_db.scalar(select(AudioFile).where(AudioFile.id == first_audio_id)) is None
+    assert not first_audio_path.exists()
+    assert fake_tts.calls == [
+        {"text": "继续讲讲那一次分别。", "voice": None},
+        {"text": "继续讲讲那一次分别。", "voice": None},
+    ]
+
+    second_playback = await client.get(f"/api/mobile/memoir/audio-files/{second_audio_id}/playback")
+    assert second_playback.status_code == 200
+    assert second_playback.content == b"second-mp3-audio"
 
 
 async def test_mobile_memoir_assistant_tts_rejects_user_message(client, test_db):

@@ -13,10 +13,10 @@ from sqlalchemy.orm import selectinload
 
 from app.config import Settings, get_settings
 from app.domain.memoir.types import MemoirChatMessageRole
-from app.models.memoir import AudioFile, MemoirChatMessage
+from app.models.memoir import AudioFile, MemoirAnswer, MemoirChatMessage, MemoirVoiceUtterance
 from app.models.projects import Project
 from app.schemas.memoir import MemoirAssistantTTSRequest, MemoirAssistantTTSResponse
-from app.services.memoir.audio_files import discard_staged_audio, stage_audio_bytes
+from app.services.memoir.audio_files import delete_audio_file_paths, discard_staged_audio, stage_audio_bytes
 from app.services.memoir.tts_alignment import (
     TTSAlignmentResult,
     alignment_segments_from_json,
@@ -207,6 +207,35 @@ async def _load_existing_audio(db: AsyncSession, message: MemoirChatMessage) -> 
     return result.scalar_one_or_none()
 
 
+async def _audio_file_is_referenced(db: AsyncSession, audio_file_id: str) -> bool:
+    queries = [
+        select(MemoirChatMessage.id).where(MemoirChatMessage.audio_file_id == audio_file_id).limit(1),
+        select(MemoirVoiceUtterance.id).where(MemoirVoiceUtterance.audio_file_id == audio_file_id).limit(1),
+        select(MemoirAnswer.id).where(MemoirAnswer.audio_file_id == audio_file_id).limit(1),
+    ]
+    for query in queries:
+        if await db.scalar(query):
+            return True
+    return False
+
+
+async def _delete_unreferenced_audio_file(db: AsyncSession, audio_file: AudioFile | None) -> None:
+    if audio_file is None:
+        return
+    if await _audio_file_is_referenced(db, audio_file.id):
+        return
+    await db.delete(audio_file)
+    await db.commit()
+    try:
+        await delete_audio_file_paths([audio_file])
+    except Exception:
+        logger.warning(
+            "Failed to delete replaced TTS audio file audio_file_id=%s",
+            audio_file.id,
+            exc_info=True,
+        )
+
+
 def _message_alignment(message: MemoirChatMessage) -> list[dict[str, object]]:
     metadata = message.metadata_json or {}
     return alignment_segments_to_json(alignment_segments_from_json(metadata.get(TTS_ALIGNMENT_METADATA_KEY)))
@@ -336,6 +365,16 @@ async def synthesize_assistant_message(
 
     await db.refresh(message)
     await db.refresh(staged_audio.audio_file)
+    if existing_audio and existing_audio.id != staged_audio.audio_file.id:
+        try:
+            await _delete_unreferenced_audio_file(db, existing_audio)
+        except Exception:
+            await db.rollback()
+            logger.warning(
+                "Failed to delete replaced TTS audio row audio_file_id=%s",
+                existing_audio.id,
+                exc_info=True,
+            )
     return _tts_response(
         message,
         staged_audio.audio_file,
