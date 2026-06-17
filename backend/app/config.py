@@ -60,6 +60,12 @@ class Settings(BaseSettings):
     tts_voice: str = "alloy"
     tts_response_format: str = "mp3"
     tts_timeout_seconds: float = 30.0
+    tts_alignment_provider: str = "disabled"
+    tts_alignment_api_key: str = ""
+    tts_alignment_base_url: str = "https://api.elevenlabs.io/v1"
+    tts_alignment_timeout_seconds: float = 30.0
+    elevenlabs_api_key: str = ""
+    elevenlabs_base_url: str = "https://api.elevenlabs.io/v1"
 
     # StepFun TTS. STEPFUN_API_KEY is kept separate from the generic TTS key
     # so existing StepFun credentials can be reused by setting TTS_PROVIDER=stepfun.

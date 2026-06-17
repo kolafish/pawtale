@@ -114,6 +114,14 @@ TTS_MODEL=tts-1
 TTS_VOICE=alloy
 TTS_RESPONSE_FORMAT=mp3
 
+# 可选：TTS 后置强制对齐。启用后会把已合成音频和追问文本发到对齐服务，返回逐字时间戳供小程序播放高亮使用。
+TTS_ALIGNMENT_PROVIDER=disabled
+TTS_ALIGNMENT_API_KEY=
+TTS_ALIGNMENT_BASE_URL=https://api.elevenlabs.io/v1
+TTS_ALIGNMENT_TIMEOUT_SECONDS=30
+ELEVENLABS_API_KEY=
+ELEVENLABS_BASE_URL=https://api.elevenlabs.io/v1
+
 # StepFun TTS。TTS_PROVIDER=stepfun 时优先读取这些变量；STEPFUN_API_KEY 也可复用既有阶跃 key。
 STEPFUN_API_KEY=
 STEPFUN_BASE_URL=https://api.stepfun.ai/v1

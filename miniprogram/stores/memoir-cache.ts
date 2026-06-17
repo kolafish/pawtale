@@ -147,6 +147,7 @@ export function transcriptLinesFromVoiceSessionDetail(
         utterance_id: utterance?.id,
         audio_file_id: message.audio_file_id ?? utterance?.audio_file_id,
         transcript_version_id: message.transcript_version_id,
+        metadata_json: message.metadata_json || {},
         start_ms: utterance?.start_ms,
         end_ms: utterance?.end_ms,
       };

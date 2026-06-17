@@ -2,6 +2,7 @@ import type {
   MemoirGuidanceMode,
   MemoirVoiceSessionDetail,
   VoiceChatErrorInfo,
+  TTSAlignmentSegment,
   VoiceChatTranscriptLine,
   VoiceGatewayState,
   VoiceGatewayServerEvent,
@@ -19,7 +20,7 @@ import {
   downloadMemoirVoiceAudio,
   getMemoirVoiceSession,
 } from "../../services/memoir-voice-api";
-import { splitTextByPlaybackProgress } from "../../services/tts-text-progress";
+import { splitTextByPlaybackProgress, splitTextByTimedAlignment } from "../../services/tts-text-progress";
 import { readTTSSettings } from "../../services/tts-settings";
 import { canAutoStartListeningAfterTTS } from "../../services/voice-chat-auto-listen";
 import {
@@ -59,6 +60,8 @@ interface VoiceChatData {
   ttsCurrentText: string;
   ttsRemainingText: string;
   ttsProgressPercent: number;
+  ttsAlignment: TTSAlignmentSegment[];
+  ttsAlignmentProvider: string;
   modeLabel: string;
   primaryActionText: string;
   captureStateText: string;
@@ -149,6 +152,46 @@ function followUpSourceMessageId(lines: VoiceChatTranscriptLine[]): string {
 function coveredFollowUpSourceMessageId(lines: VoiceChatTranscriptLine[]): string {
   const latest = lines[lines.length - 1];
   return latest?.role === "assistant" ? followUpSourceMessageId(lines) : "";
+}
+
+function ttsAlignmentFromMetadata(metadata?: Record<string, unknown>): TTSAlignmentSegment[] {
+  const rawAlignment = metadata?.tts_alignment;
+  if (!Array.isArray(rawAlignment)) {
+    return [];
+  }
+  return rawAlignment.flatMap((item) => {
+    if (!item || typeof item !== "object") {
+      return [];
+    }
+    const segment = item as Record<string, unknown>;
+    const text = String(segment.text || "");
+    const startMs = Number(segment.start_ms);
+    const endMs = Number(segment.end_ms);
+    const textStart = Number(segment.text_start);
+    const textEnd = Number(segment.text_end);
+    if (!text || !Number.isFinite(startMs) || !Number.isFinite(endMs)
+      || !Number.isFinite(textStart) || !Number.isFinite(textEnd)
+      || startMs < 0 || endMs <= startMs || textStart < 0 || textEnd <= textStart) {
+      return [];
+    }
+    return [{
+      text,
+      start_ms: startMs,
+      end_ms: endMs,
+      text_start: textStart,
+      text_end: textEnd,
+      confidence: typeof segment.confidence === "number" ? segment.confidence : null,
+    }];
+  });
+}
+
+function ttsAlignmentProviderFromMetadata(metadata?: Record<string, unknown>): string {
+  const provider = metadata?.tts_alignment_provider;
+  return typeof provider === "string" ? provider : "";
+}
+
+function ttsAlignmentFromAssistantLine(line?: VoiceChatTranscriptLine): TTSAlignmentSegment[] {
+  return ttsAlignmentFromMetadata(line?.metadata_json);
 }
 
 function latestAssistantMessageId(lines: VoiceChatTranscriptLine[]): string {
@@ -304,6 +347,8 @@ Page<VoiceChatData, {
     ttsCurrentText: "",
     ttsRemainingText: "",
     ttsProgressPercent: 0,
+    ttsAlignment: [],
+    ttsAlignmentProvider: "",
     modeLabel: "自由讲述",
     primaryActionText: "开始说话",
     captureStateText: "麦克风未开始",
@@ -373,6 +418,8 @@ Page<VoiceChatData, {
       followUpMessageId: assistantLine?.message_id || assistantLine?.id || "",
       followUpAudioFileId: assistantLine?.audio_file_id || "",
       followUpTTSStateText: assistantLine?.audio_file_id ? "语音已生成" : this.data.followUpTTSStateText,
+      ttsAlignment: ttsAlignmentFromAssistantLine(assistantLine),
+      ttsAlignmentProvider: ttsAlignmentProviderFromMetadata(assistantLine?.metadata_json),
       totalTranscriptCharCount: totalTranscriptChars(snapshot.transcriptLines),
       lastFollowUpSourceMessageId,
       canRequestFollowUp: canRequestFollowUp(
@@ -441,6 +488,8 @@ Page<VoiceChatData, {
       followUpMessageId: assistantLine?.message_id || assistantLine?.id || "",
       followUpAudioFileId: assistantLine?.audio_file_id || "",
       followUpTTSStateText: assistantLine?.audio_file_id ? "语音已生成" : this.data.followUpTTSStateText,
+      ttsAlignment: ttsAlignmentFromAssistantLine(assistantLine),
+      ttsAlignmentProvider: ttsAlignmentProviderFromMetadata(assistantLine?.metadata_json),
       totalTranscriptCharCount: totalTranscriptChars(nextLines),
       lastFollowUpSourceMessageId,
       canRequestFollowUp: canRequestFollowUp(
@@ -498,6 +547,7 @@ Page<VoiceChatData, {
         text: response.message.content_text,
         message_id: response.message.id,
         transcript_version_id: response.message.transcript_version_id,
+        metadata_json: response.message.metadata_json || {},
       };
       const transcriptLines = upsertTranscriptLine(this.data.transcriptLines, line);
       const assistantCopy = assistantPanelCopy(transcriptLines);
@@ -510,6 +560,8 @@ Page<VoiceChatData, {
         followUpAudioFileId: response.message.audio_file_id || "",
         followUpTTSError: "",
         followUpTTSStateText: "",
+        ttsAlignment: ttsAlignmentFromMetadata(response.message.metadata_json),
+        ttsAlignmentProvider: ttsAlignmentProviderFromMetadata(response.message.metadata_json),
         totalTranscriptCharCount: totalTranscriptChars(transcriptLines),
         persistenceStateText: "等待回答",
         lastFollowUpSourceMessageId: sourceMessageId,
@@ -560,6 +612,8 @@ Page<VoiceChatData, {
       ttsSpokenText: "",
       ttsRemainingText: "",
       ttsProgressPercent: 0,
+      ttsAlignment: [],
+      ttsAlignmentProvider: "",
       canRequestFollowUp: canRequestFollowUp(
         this.data.transcriptLines,
         this.data.guidanceMode,
@@ -584,6 +638,10 @@ Page<VoiceChatData, {
       ttsSpokenText: "",
       ttsRemainingText: this.data.assistantPromptText,
       ttsProgressPercent: 0,
+      ttsAlignment: ttsAlignmentFromMetadata(this.data.transcriptLines.find(
+        (line) => (line.message_id || line.id) === messageId,
+      )?.metadata_json),
+      ttsAlignmentProvider: "",
     });
     try {
       const ttsSettings = readTTSSettings();
@@ -601,14 +659,20 @@ Page<VoiceChatData, {
         return {
           ...line,
           audio_file_id: response.audio_file_id,
+          metadata_json: response.message.metadata_json || line.metadata_json || {},
         };
       });
+      const responseAlignment = response.alignment && response.alignment.length
+        ? response.alignment
+        : ttsAlignmentFromMetadata(response.message.metadata_json);
       this.setData({
         transcriptLines,
         followUpMessageId: response.message.id,
         followUpAudioFileId: response.audio_file_id,
         followUpTTSError: "",
         followUpTTSStateText: "语音已生成",
+        ttsAlignment: responseAlignment,
+        ttsAlignmentProvider: response.alignment_provider || ttsAlignmentProviderFromMetadata(response.message.metadata_json),
       });
       writeMemoirVoiceSessionSnapshot(this.data.voiceSessionId, { transcriptLines });
       await this.playAudioFile(response.audio_file_id, { autoListenAfterPlayback });
@@ -742,7 +806,9 @@ Page<VoiceChatData, {
       return;
     }
     const progressRatio = duration > 0 ? currentTime / duration : 0;
-    const progress = splitTextByPlaybackProgress(text, progressRatio);
+    const progress = this.data.ttsAlignment.length
+      ? splitTextByTimedAlignment(text, currentTime * 1000, this.data.ttsAlignment)
+      : splitTextByPlaybackProgress(text, progressRatio);
     this.setData({
       ttsSpokenText: progress.spokenText,
       ttsCurrentText: progress.currentText,

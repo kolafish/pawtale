@@ -274,6 +274,8 @@ assistant message
 
 小程序语音聊天页在 AI 追问生成后会请求 TTS，自动播放；播放时按当前音频进度高亮已讲到的文字，播放完成且 voice gateway 可录音时自动进入下一轮收听。用户开始说话、跳过追问、结束页面时会取消未完成合成或停止播放，避免旧追问音频和新回答冲突。
 
+为了让高亮块跟随真实语音位置移动，后端支持 TTS 后置强制对齐。默认 `TTS_ALIGNMENT_PROVIDER=disabled` 时仍按播放器进度估算；配置 `TTS_ALIGNMENT_PROVIDER=elevenlabs` 并提供 `ELEVENLABS_API_KEY` 或 `TTS_ALIGNMENT_API_KEY` 后，后端会把已合成的追问音频和原始追问文本送到 forced alignment，返回逐字 `start_ms` / `end_ms` 时间轴，保存到 `memoir_chat_messages.metadata_json.tts_alignment`，并随 TTS response 返回给小程序。小程序播放时优先按该时间轴定位当前字，只有没有 alignment 时才回退到原来的百分比估算。
+
 后续真正的 Streaming TTS 仍要把 provider WebSocket/SSE 音频流直接接到播放队列，并与 LLM streaming 输出联动。当前第一版刻意保持为“短句生成后播放”：AI 追问文本较短，非流式音质和稳定性更可控，先保证 ASR、持久化、追问和播放闭环。
 
 ## 数据模型方向
