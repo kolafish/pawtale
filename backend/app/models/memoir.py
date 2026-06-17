@@ -10,6 +10,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship as orm_relationsh
 from app.database import Base
 from app.domain.memoir.types import (
     MemoirAnswerStatus,
+    MemoirBookPlanStatus,
     MemoirChatContentStatus,
     MemoirChatMessageRole,
     MemoirCoverageStatus,
@@ -833,3 +834,61 @@ class MemoirOutputVersion(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     output: Mapped[MemoirOutput] = orm_relationship("MemoirOutput", back_populates="versions")
+
+
+class MemoirBookPlan(Base):
+    __tablename__ = "memoir_book_plans"
+    __table_args__ = (
+        UniqueConstraint("project_id", name="uq_memoir_book_plans_project_id"),
+        CheckConstraint(
+            f"status IN ({_enum_values(MemoirBookPlanStatus)})",
+            name="ck_memoir_book_plans_status",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    project_id: Mapped[str] = mapped_column(String(36), ForeignKey("projects.id"), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String(200), default="章节规划", nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(20),
+        default=MemoirBookPlanStatus.DRAFT.value,
+        nullable=False,
+    )
+    created_by: Mapped[str] = mapped_column(
+        String(20),
+        default=MemoirCreatedBy.AI.value,
+        nullable=False,
+    )
+    model: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    prompt_snapshot: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    metadata_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    project: Mapped["Project"] = orm_relationship("Project", back_populates="memoir_book_plans")
+    chapters: Mapped[list["MemoirBookPlanChapter"]] = orm_relationship(
+        "MemoirBookPlanChapter",
+        back_populates="plan",
+        cascade="all, delete-orphan",
+        order_by="MemoirBookPlanChapter.sort_order",
+    )
+
+
+class MemoirBookPlanChapter(Base):
+    __tablename__ = "memoir_book_plan_chapters"
+    __table_args__ = (
+        UniqueConstraint("plan_id", "sort_order", name="uq_memoir_book_plan_chapters_plan_order"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    plan_id: Mapped[str] = mapped_column(String(36), ForeignKey("memoir_book_plans.id"), nullable=False, index=True)
+    project_id: Mapped[str] = mapped_column(String(36), ForeignKey("projects.id"), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    summary: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    source_refs_json: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    metadata_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    plan: Mapped[MemoirBookPlan] = orm_relationship("MemoirBookPlan", back_populates="chapters")

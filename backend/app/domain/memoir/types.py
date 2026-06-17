@@ -142,3 +142,8 @@ class MemoirOutputStatus(str, Enum):
     DRAFT = "draft"
     ACCEPTED = "accepted"
     ARCHIVED = "archived"
+
+
+class MemoirBookPlanStatus(str, Enum):
+    DRAFT = "draft"
+    CONFIRMED = "confirmed"

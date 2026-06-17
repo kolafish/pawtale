@@ -4,6 +4,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.domain.memoir.types import (
     MemoirAnswerStatus,
+    MemoirBookPlanStatus,
     MemoirChatContentStatus,
     MemoirChatMessageRole,
     MemoirCoverageStatus,
@@ -786,6 +787,93 @@ class MemoirOutputVersionResponse(BaseModel):
 
 class MemoirOutputDetailResponse(MemoirOutputResponse):
     versions: list[MemoirOutputVersionResponse] = Field(default_factory=list)
+
+
+class MemoirBookChapterSourceRef(BaseModel):
+    voice_session_id: str
+    message_id: str
+    utterance_id: str
+    transcript_version_id: str | None = None
+    audio_file_id: str | None = None
+    start_ms: int | None = None
+    end_ms: int | None = None
+    quote: str = ""
+
+
+class MemoirBookPlanChapterInput(BaseModel):
+    title: str
+    summary: str = ""
+    source_refs: list[MemoirBookChapterSourceRef] = Field(default_factory=list)
+
+    @field_validator("title")
+    @classmethod
+    def _valid_title(cls, value: str) -> str:
+        title = value.strip()
+        if not title:
+            raise ValueError("章节标题不能为空")
+        if len(title) > 80:
+            raise ValueError("章节标题不能超过 80 个字")
+        return title
+
+    @field_validator("summary")
+    @classmethod
+    def _valid_summary(cls, value: str) -> str:
+        return value.strip()
+
+
+class MemoirBookPlanGenerateRequest(BaseModel):
+    ai_model: str | None = None
+    max_chapters: int = 8
+
+    @field_validator("max_chapters")
+    @classmethod
+    def _valid_max_chapters(cls, value: int) -> int:
+        if value < 1 or value > 12:
+            raise ValueError("章节数量需要在 1 到 12 之间")
+        return value
+
+
+class MemoirBookPlanConfirmRequest(BaseModel):
+    title: str | None = None
+    chapters: list[MemoirBookPlanChapterInput]
+
+    @field_validator("title")
+    @classmethod
+    def _valid_optional_title(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        title = value.strip()
+        if not title:
+            return None
+        if len(title) > 120:
+            raise ValueError("规划标题不能超过 120 个字")
+        return title
+
+
+class MemoirBookPlanChapterResponse(BaseModel):
+    id: str
+    plan_id: str
+    project_id: str
+    title: str
+    summary: str
+    sort_order: int
+    source_refs: list[MemoirBookChapterSourceRef] = Field(default_factory=list)
+    metadata_json: dict[str, object] = Field(default_factory=dict)
+    created_at: datetime
+    updated_at: datetime
+
+
+class MemoirBookPlanResponse(BaseModel):
+    id: str
+    project_id: str
+    title: str
+    status: MemoirBookPlanStatus
+    created_by: MemoirCreatedBy
+    model: str | None = None
+    metadata_json: dict[str, object] = Field(default_factory=dict)
+    chapters: list[MemoirBookPlanChapterResponse] = Field(default_factory=list)
+    created_at: datetime
+    updated_at: datetime
 
 
 class MemoirSessionProcessResponse(BaseModel):
