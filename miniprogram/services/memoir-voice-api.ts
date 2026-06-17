@@ -11,6 +11,7 @@ import type {
   MemoirBookPlan,
   MemoirBookPlanConfirmRequest,
   MemoirBookPlanGenerateRequest,
+  MemoirBookSourceCoverage,
   MemoirVoiceFollowUpRequest,
   MemoirVoiceFollowUpResponse,
   MemoirVoiceTranscriptItem,
@@ -186,6 +187,13 @@ export async function confirmMemoirBookPlan(
       method: "PUT",
       data,
     },
+  );
+}
+
+export async function getMemoirBookSourceCoverage(projectId: string): Promise<MemoirBookSourceCoverage> {
+  await ensureBackendSession();
+  return request<MemoirBookSourceCoverage>(
+    `/api/mobile/memoir/projects/${encodeURIComponent(projectId)}/book-source-coverage`,
   );
 }
 

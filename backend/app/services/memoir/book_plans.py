@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 from fastapi import HTTPException
@@ -25,6 +26,8 @@ from app.schemas.memoir_book import (
     MemoirBookPlanConfirmRequest,
     MemoirBookPlanGenerateRequest,
     MemoirBookPlanResponse,
+    MemoirBookSourceCoverageItem,
+    MemoirBookSourceCoverageResponse,
 )
 from app.services import get_ai_service
 from app.services.ai_types import AITextClient
@@ -48,6 +51,7 @@ class SourceSegment:
     start_ms: int | None
     end_ms: int | None
     text: str
+    created_at: datetime
 
     def ref(self, quote: str = "") -> MemoirBookChapterSourceRef:
         return MemoirBookChapterSourceRef(
@@ -155,6 +159,7 @@ async def _source_segments(
                 start_ms=utterance.start_ms,
                 end_ms=utterance.end_ms,
                 text=text,
+                created_at=utterance.created_at,
             )
         )
     return segments
@@ -352,6 +357,56 @@ async def get_book_plan(
     if not plan:
         raise HTTPException(status_code=404, detail="章节规划不存在")
     return _plan_response(plan)
+
+
+def _covered_utterance_ids(plan: MemoirBookPlan | None) -> set[str]:
+    if not plan:
+        return set()
+    covered: set[str] = set()
+    for chapter in plan.chapters:
+        for ref in chapter.source_refs_json or []:
+            if isinstance(ref, dict) and isinstance(ref.get("utterance_id"), str):
+                covered.add(ref["utterance_id"])
+    return covered
+
+
+def _source_coverage_item(source: SourceSegment) -> MemoirBookSourceCoverageItem:
+    return MemoirBookSourceCoverageItem(
+        source_index=source.source_index,
+        voice_session_id=source.voice_session_id,
+        message_id=source.message_id,
+        utterance_id=source.utterance_id,
+        transcript_version_id=source.transcript_version_id,
+        audio_file_id=source.audio_file_id,
+        start_ms=source.start_ms,
+        end_ms=source.end_ms,
+        text=source.text,
+        created_at=source.created_at,
+    )
+
+
+async def get_book_source_coverage(
+    db: AsyncSession,
+    *,
+    user_id: str,
+    project_id: str,
+) -> MemoirBookSourceCoverageResponse:
+    sources = await _source_segments(db, user_id=user_id, project_id=project_id)
+    plan = await _load_plan(db, project_id)
+    covered_ids = _covered_utterance_ids(plan)
+    uncovered_sources = [
+        source for source in sources
+        if source.utterance_id not in covered_ids
+    ]
+    covered_source_count = len(sources) - len(uncovered_sources)
+    return MemoirBookSourceCoverageResponse(
+        project_id=project_id,
+        plan_id=plan.id if plan else None,
+        total_source_count=len(sources),
+        covered_source_count=covered_source_count,
+        uncovered_source_count=len(uncovered_sources),
+        uncovered_sources=[_source_coverage_item(source) for source in uncovered_sources],
+    )
 
 
 async def generate_book_plan(

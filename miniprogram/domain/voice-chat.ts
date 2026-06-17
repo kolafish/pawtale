@@ -279,6 +279,28 @@ export interface MemoirBookPlan {
   updated_at: string;
 }
 
+export interface MemoirBookSourceCoverageItem {
+  source_index: number;
+  voice_session_id: string;
+  message_id: string;
+  utterance_id: string;
+  transcript_version_id?: string | null;
+  audio_file_id?: string | null;
+  start_ms?: number | null;
+  end_ms?: number | null;
+  text: string;
+  created_at: string;
+}
+
+export interface MemoirBookSourceCoverage {
+  project_id: string;
+  plan_id?: string | null;
+  total_source_count: number;
+  covered_source_count: number;
+  uncovered_source_count: number;
+  uncovered_sources: MemoirBookSourceCoverageItem[];
+}
+
 export interface MemoirBookPlanGenerateRequest {
   ai_model?: string;
   max_chapters?: number;
