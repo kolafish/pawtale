@@ -393,6 +393,8 @@ export interface MemoirBookOutput {
   title: string;
   status: MemoirOutputStatus;
   metadata_json: Record<string, unknown>;
+  is_stale: boolean;
+  stale_chapter_titles: string[];
   latest_version?: MemoirBookOutputVersion | null;
   versions: MemoirBookOutputVersion[];
   created_at: string;

@@ -87,7 +87,12 @@ function sampleDraft(
   };
 }
 
-function sampleBookOutput(version = 1, content = "外婆回忆录\n\n目录\n1. 外婆家的童年\n\n第1章 外婆家的童年\n\n正文") {
+function sampleBookOutput(
+  version = 1,
+  content = "外婆回忆录\n\n目录\n1. 外婆家的童年\n\n第1章 外婆家的童年\n\n正文",
+  isStale = false,
+  staleChapterTitles = [],
+) {
   return {
     id: "book-output-1",
     project_id: "project/1",
@@ -95,6 +100,8 @@ function sampleBookOutput(version = 1, content = "外婆回忆录\n\n目录\n1. 
     title: "外婆回忆录",
     status: "draft",
     metadata_json: {},
+    is_stale: isStale,
+    stale_chapter_titles: staleChapterTitles,
     latest_version: {
       id: `book-output-version-${version}`,
       output_id: "book-output-1",
@@ -266,7 +273,12 @@ test("book page summarizes latest book output version", () => {
 
   assert.equal(mod.latestBookContent(output), "全书正文");
   assert.equal(mod.bookOutputVersionText(output), "全书第 3 版");
+  assert.equal(mod.bookOutputStaleNotice(output), "");
   assert.equal(mod.bookOutputVersionText(null), "尚未生成全书");
+  assert.equal(
+    mod.bookOutputStaleNotice(sampleBookOutput(3, "全书正文", true, ["外婆家的童年", "第一次离家", "县城生活"])),
+    "章节「外婆家的童年、第一次离家」等章节已更新，请重新生成全书。",
+  );
 });
 
 test("book page shows source coverage notice only when there are uncovered transcripts", () => {
@@ -427,7 +439,37 @@ test("book page generates full book output after all chapters are confirmed", as
   assert.equal(context.data.bookVersionText, "全书第 2 版");
   assert.equal(context.data.bookContent, "全书第二版正文");
   assert.equal(context.data.bookCharCount, "全书第二版正文".length);
+  assert.equal(context.data.bookActionText, "重新生成全书");
   delete global.wx;
+});
+
+test("book page shows stale book output state and blocks old audio", async () => {
+  const calls = [];
+  const { page } = loadBookPage({
+    voiceApiExports: {
+      createMemoirBookOutputTTS: async () => {
+        calls.push("tts");
+        return sampleAudioResponse();
+      },
+    },
+  });
+  const context = pageContext(page, {
+    projectId: "project/1",
+    allChaptersConfirmed: true,
+    canGenerateBook: true,
+    bookOutput: sampleBookOutput(1, "旧全书", true, ["外婆家的童年"]),
+    bookContent: "旧全书",
+    hasDraftChanges: false,
+  });
+  page.applyBookOutput.call(context, context.data.bookOutput);
+
+  assert.equal(context.data.bookActionText, "更新全书");
+  assert.equal(context.data.bookStaleNotice, "章节「外婆家的童年」已更新，请重新生成全书。");
+
+  await page.playBookAudio.call(context);
+
+  assert.equal(context.data.error, "章节内容已更新，请先更新全书再朗读");
+  assert.equal(calls.length, 0);
 });
 
 test("book page regenerates an existing chapter draft with force flag", async () => {

@@ -156,6 +156,62 @@ async def test_mobile_memoir_book_output_generate_returns_existing_without_force
     assert first.status_code == 200
     assert second.status_code == 200
     assert second.json()["latest_version"]["version"] == 1
+    assert second.json()["is_stale"] is False
+
+
+async def test_mobile_memoir_book_output_detects_and_regenerates_stale_chapter_versions(client, test_db):
+    project_id = await _active_project_id(client)
+    _, chapters = await _create_confirmed_book_plan(test_db, project_id=project_id)
+    first = await client.post(f"/api/mobile/memoir/projects/{project_id}/book-output/generate", json={})
+    assert first.status_code == 200
+
+    draft = await test_db.scalar(
+        select(MemoirBookChapterDraft).where(MemoirBookChapterDraft.chapter_id == chapters[0].id)
+    )
+    test_db.add(
+        MemoirBookChapterDraftVersion(
+            draft_id=draft.id,
+            project_id=project_id,
+            chapter_id=chapters[0].id,
+            version=2,
+            content="我小时候常在外婆家的院子里晒太阳，也常听外婆讲老屋的事。",
+            created_by=MemoirCreatedBy.USER.value,
+            prompt_snapshot="",
+        )
+    )
+    await test_db.commit()
+
+    stale = await client.get(f"/api/mobile/memoir/projects/{project_id}/book-output")
+
+    assert stale.status_code == 200
+    stale_data = stale.json()
+    assert stale_data["latest_version"]["version"] == 1
+    assert stale_data["is_stale"] is True
+    assert stale_data["stale_chapter_titles"] == ["外婆家的童年"]
+
+    regenerated = await client.post(f"/api/mobile/memoir/projects/{project_id}/book-output/generate", json={})
+
+    assert regenerated.status_code == 200
+    regenerated_data = regenerated.json()
+    assert regenerated_data["latest_version"]["version"] == 2
+    assert regenerated_data["is_stale"] is False
+    assert "老屋的事" in regenerated_data["latest_version"]["content"]
+
+
+async def test_mobile_memoir_book_output_marks_unconfirmed_plan_as_stale(client, test_db):
+    project_id = await _active_project_id(client)
+    plan, _ = await _create_confirmed_book_plan(test_db, project_id=project_id)
+    generated = await client.post(f"/api/mobile/memoir/projects/{project_id}/book-output/generate", json={})
+    assert generated.status_code == 200
+    plan.status = MemoirBookPlanStatus.DRAFT.value
+    await test_db.commit()
+
+    response = await client.get(f"/api/mobile/memoir/projects/{project_id}/book-output")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["is_stale"] is True
+    assert data["stale_chapter_titles"] == ["章节规划"]
 
 
 async def test_mobile_memoir_book_chapter_tts_generates_and_reuses_audio(
