@@ -7,6 +7,12 @@ from app.services.memoir.interview import (
 )
 from app.services.memoir.projects import get_or_create_mobile_memoir_project
 from app.services.memoir.answers import answer_question_with_text, update_answer_text
+from app.services.memoir.book_drafts import (
+    confirm_chapter_draft,
+    generate_chapter_draft,
+    get_chapter_draft,
+    update_chapter_draft,
+)
 from app.services.memoir.book_plans import confirm_book_plan, generate_book_plan, get_book_plan
 from app.services.memoir.drafting import (
     accept_draft,
@@ -55,6 +61,7 @@ __all__ = [
     "add_memory_evidence",
     "calculate_coverage_snapshots",
     "confirm_book_plan",
+    "confirm_chapter_draft",
     "create_coverage_topic",
     "create_event_memory",
     "create_open_question",
@@ -66,9 +73,11 @@ __all__ = [
     "create_transcript_version",
     "generate_draft_for_answer",
     "generate_book_plan",
+    "generate_chapter_draft",
     "generate_question_candidates",
     "get_coverage_map",
     "get_book_plan",
+    "get_chapter_draft",
     "get_next_question",
     "get_output",
     "get_or_create_planned_question",
@@ -90,6 +99,7 @@ __all__ = [
     "select_candidate_as_question",
     "skip_question",
     "update_answer_text",
+    "update_chapter_draft",
     "update_draft_content",
     "update_memory",
     "update_memory_status",

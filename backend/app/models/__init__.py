@@ -12,6 +12,8 @@ from app.models.git_sync import GitHubInstallation, ProjectGitSync
 from app.models.memoir import (
     AudioFile,
     MemoirAnswer,
+    MemoirBookChapterDraft,
+    MemoirBookChapterDraftVersion,
     MemoirBookPlan,
     MemoirBookPlanChapter,
     MemoirChatMessage,
@@ -51,6 +53,8 @@ __all__ = [
     "ProjectGitSync",
     "AudioFile",
     "MemoirAnswer",
+    "MemoirBookChapterDraft",
+    "MemoirBookChapterDraftVersion",
     "MemoirBookPlan",
     "MemoirBookPlanChapter",
     "MemoirChatMessage",
