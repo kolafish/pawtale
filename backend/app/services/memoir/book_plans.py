@@ -13,6 +13,7 @@ from app.domain.memoir.types import MemoirBookPlanStatus, MemoirCreatedBy
 from app.models.memoir import (
     MemoirBookPlan,
     MemoirBookPlanChapter,
+    MemoirBookChapterDraft,
     MemoirChatMessage,
     MemoirVoiceSession,
     MemoirVoiceUtterance,
@@ -273,6 +274,28 @@ async def _load_plan(db: AsyncSession, project_id: str) -> MemoirBookPlan | None
     )
 
 
+async def _delete_plan_chapters(db: AsyncSession, plan: MemoirBookPlan) -> None:
+    chapters = list(plan.chapters)
+    if not chapters:
+        return
+    chapter_ids = [chapter.id for chapter in chapters]
+    drafts = (
+        await db.execute(
+            select(MemoirBookChapterDraft)
+            .where(MemoirBookChapterDraft.chapter_id.in_(chapter_ids))
+            .options(selectinload(MemoirBookChapterDraft.versions))
+        )
+    ).scalars().all()
+    for draft in drafts:
+        for version in list(draft.versions):
+            await db.delete(version)
+        await db.delete(draft)
+    for chapter in chapters:
+        await db.delete(chapter)
+    await db.flush()
+    plan.chapters = []
+
+
 async def _replace_plan(
     db: AsyncSession,
     *,
@@ -291,10 +314,7 @@ async def _replace_plan(
         db.add(plan)
         await db.flush()
     else:
-        for chapter in list(plan.chapters):
-            await db.delete(chapter)
-        await db.flush()
-        plan.chapters = []
+        await _delete_plan_chapters(db, plan)
 
     plan.title = title[:200]
     plan.status = status.value
