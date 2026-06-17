@@ -70,6 +70,21 @@ def _validate_duration(duration_seconds: int | None) -> None:
         raise HTTPException(status_code=400, detail="音频时长不能为负数")
 
 
+def _validate_audio_payload(
+    *,
+    extension: str,
+    size_bytes: int,
+    duration_seconds: int | None,
+) -> None:
+    if extension not in _FORMAT_MIME_TYPES:
+        raise HTTPException(status_code=400, detail="仅支持 mp3、wav、ogg、pcm 音频文件")
+    if size_bytes == 0:
+        raise HTTPException(status_code=400, detail="音频文件不能为空")
+    if size_bytes > MAX_AUDIO_BYTES:
+        raise HTTPException(status_code=413, detail="音频文件不能超过 20MB")
+    _validate_duration(duration_seconds)
+
+
 async def _remove_if_exists(path: Path) -> None:
     if path.exists():
         await aiofiles.os.remove(path)
@@ -168,13 +183,11 @@ async def stage_audio_bytes(
     extension: str = ".pcm",
     duration_seconds: int | None = None,
 ) -> StagedAudioFile:
-    if extension not in _FORMAT_MIME_TYPES:
-        raise HTTPException(status_code=400, detail="仅支持 mp3、wav、ogg、pcm 音频文件")
-    if len(data) == 0:
-        raise HTTPException(status_code=400, detail="音频文件不能为空")
-    if len(data) > MAX_AUDIO_BYTES:
-        raise HTTPException(status_code=413, detail="音频文件不能超过 20MB")
-    _validate_duration(duration_seconds)
+    _validate_audio_payload(
+        extension=extension,
+        size_bytes=len(data),
+        duration_seconds=duration_seconds,
+    )
 
     audio_id = str(uuid.uuid4())
     filename = f"{audio_id}{extension}"
@@ -195,6 +208,53 @@ async def stage_audio_bytes(
         storage_path=_storage_path(user_id, filename),
         mime_type=mime_type,
         size_bytes=len(data),
+        duration_seconds=duration_seconds,
+    )
+    db.add(audio_file)
+    return StagedAudioFile(audio_file=audio_file, path=target_path)
+
+
+async def stage_audio_path(
+    db: AsyncSession,
+    user_id: str,
+    source_path: Path,
+    *,
+    mime_type: str = "audio/pcm",
+    extension: str = ".pcm",
+    duration_seconds: int | None = None,
+    move_source: bool = False,
+) -> StagedAudioFile:
+    stat = await aiofiles.os.stat(source_path)
+    _validate_audio_payload(
+        extension=extension,
+        size_bytes=stat.st_size,
+        duration_seconds=duration_seconds,
+    )
+
+    audio_id = str(uuid.uuid4())
+    filename = f"{audio_id}{extension}"
+    user_audio_dir = MEMOIR_AUDIO_DIR / user_id
+    user_audio_dir.mkdir(parents=True, exist_ok=True)
+    target_path = user_audio_dir / filename
+
+    try:
+        if move_source:
+            await aiofiles.os.replace(source_path, target_path)
+        else:
+            async with aiofiles.open(source_path, "rb") as source:
+                async with aiofiles.open(target_path, "wb") as output:
+                    while chunk := await source.read(_CHUNK_SIZE):
+                        await output.write(chunk)
+    except Exception:
+        await _remove_if_exists(target_path)
+        raise
+
+    audio_file = AudioFile(
+        id=audio_id,
+        user_id=user_id,
+        storage_path=_storage_path(user_id, filename),
+        mime_type=mime_type,
+        size_bytes=stat.st_size,
         duration_seconds=duration_seconds,
     )
     db.add(audio_file)

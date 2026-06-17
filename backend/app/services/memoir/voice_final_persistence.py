@@ -57,19 +57,20 @@ class VoiceFinalPersistenceService:
         self,
         event: StreamingASREvent,
         *,
-        audio: bytes | None,
+        audio: bytes | None = None,
+        staged_audio: memoir_audio_files.StagedAudioFile | None = None,
     ) -> VoiceFinalPersistenceResult:
-        content = event.text.strip()
-        if not content:
-            raise HTTPException(status_code=400, detail="转写文本不能为空")
-        _validate_audio_span(event.start_ms, event.end_ms)
-        cleaned = await generate_cleaned_transcript_text(content, strict=False)
-
-        staged_audio: memoir_audio_files.StagedAudioFile | None = None
+        owned_staged_audio = staged_audio
         try:
+            content = event.text.strip()
+            if not content:
+                raise HTTPException(status_code=400, detail="转写文本不能为空")
+            _validate_audio_span(event.start_ms, event.end_ms)
+            cleaned = await generate_cleaned_transcript_text(content, strict=False)
+
             voice_session = await self._load_voice_session()
-            staged_audio = await self._stage_audio(audio)
-            audio_file_id = staged_audio.audio_file.id if staged_audio else None
+            owned_staged_audio = await self._stage_audio_input(audio, owned_staged_audio)
+            audio_file_id = owned_staged_audio.audio_file.id if owned_staged_audio else None
 
             transcript_version = MemoirTranscriptVersion(
                 voice_session_id=voice_session.id,
@@ -134,20 +135,27 @@ class VoiceFinalPersistenceService:
             )
         except Exception:
             await self.db.rollback()
-            await memoir_audio_files.discard_staged_audio(staged_audio)
+            await memoir_audio_files.discard_staged_audio(owned_staged_audio)
             raise
 
-    async def persist_unfinalized_audio(self, audio: bytes | None) -> VoiceFinalPersistenceResult | None:
-        if not audio:
+    async def persist_unfinalized_audio(
+        self,
+        audio: bytes | None = None,
+        *,
+        staged_audio: memoir_audio_files.StagedAudioFile | None = None,
+    ) -> VoiceFinalPersistenceResult | None:
+        if not audio and staged_audio is None:
             return None
 
-        staged_audio: memoir_audio_files.StagedAudioFile | None = None
+        owned_staged_audio = staged_audio
         try:
             voice_session = await self._load_voice_session()
-            staged_audio = await self._stage_audio(audio)
+            owned_staged_audio = await self._stage_audio_input(audio, owned_staged_audio)
+            if owned_staged_audio is None:
+                return None
             utterance = MemoirVoiceUtterance(
                 voice_session_id=voice_session.id,
-                audio_file_id=staged_audio.audio_file.id,
+                audio_file_id=owned_staged_audio.audio_file.id,
                 transcript_raw="",
                 transcript_edited="",
                 provider=self.provider,
@@ -159,12 +167,12 @@ class VoiceFinalPersistenceService:
             return VoiceFinalPersistenceResult(
                 message_id=None,
                 utterance_id=utterance.id,
-                audio_file_id=staged_audio.audio_file.id,
+                audio_file_id=owned_staged_audio.audio_file.id,
                 transcript_version_id=None,
             )
         except Exception:
             await self.db.rollback()
-            await memoir_audio_files.discard_staged_audio(staged_audio)
+            await memoir_audio_files.discard_staged_audio(owned_staged_audio)
             raise
 
     async def _load_voice_session(self) -> MemoirVoiceSession:
@@ -188,6 +196,17 @@ class VoiceFinalPersistenceService:
             mime_type="audio/pcm",
             extension=".pcm",
         )
+
+    async def _stage_audio_input(
+        self,
+        audio: bytes | None,
+        staged_audio: memoir_audio_files.StagedAudioFile | None,
+    ) -> memoir_audio_files.StagedAudioFile | None:
+        if audio is not None and staged_audio is not None:
+            raise RuntimeError("audio bytes and staged audio cannot both be provided")
+        if staged_audio is not None:
+            return staged_audio
+        return await self._stage_audio(audio)
 
     async def _next_turn_index(self, voice_session_id: str) -> int:
         result = await self.db.execute(
