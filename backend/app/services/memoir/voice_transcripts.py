@@ -11,12 +11,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.domain.memoir.types import (
+    MemoirBookChapterDraftStatus,
     MemoirChatContentStatus,
     MemoirChatMessageRole,
     MemoirCreatedBy,
     MemoirTranscriptVersionType,
 )
 from app.models.memoir import (
+    MemoirBookPlanChapter,
     MemoirChatMessage,
     MemoirTranscriptVersion,
     MemoirVoiceSession,
@@ -44,6 +46,10 @@ _BOUNDARY_DEICTIC_RE = re.compile(
 )
 _DUPLICATE_PUNCTUATION_RE = re.compile(r"([，,。！？!?；;])\1+")
 _SPACE_RE = re.compile(r"\s+")
+PENDING_SOURCE_UTTERANCE_IDS_KEY = "pending_source_utterance_ids"
+REMOVED_SOURCE_UTTERANCE_IDS_KEY = "removed_source_utterance_ids"
+SOURCE_REFS_REMOVED_AT_KEY = "source_refs_removed_at"
+SOURCES_DELETED_STATUS_REASON = "sources_deleted"
 
 
 @dataclass(frozen=True)
@@ -397,12 +403,74 @@ async def _message_reference_counts(
     return other_utterances or 0, child_messages or 0
 
 
+def _source_ids_from_metadata(metadata_json: dict | None, key: str) -> set[str]:
+    value = (metadata_json or {}).get(key, [])
+    if not isinstance(value, list):
+        return set()
+    return {item.strip() for item in value if isinstance(item, str) and item.strip()}
+
+
+async def _mark_book_sources_deleted(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    utterance_id: str,
+) -> None:
+    chapters = (
+        await db.execute(
+            select(MemoirBookPlanChapter)
+            .where(MemoirBookPlanChapter.project_id == project_id)
+            .options(selectinload(MemoirBookPlanChapter.draft))
+        )
+    ).scalars().all()
+    removed_at = datetime.now(timezone.utc).isoformat()
+    for chapter in chapters:
+        refs = [ref for ref in (chapter.source_refs_json or []) if isinstance(ref, dict)]
+        kept_refs = [ref for ref in refs if ref.get("utterance_id") != utterance_id]
+        removed_ref_count = len(refs) - len(kept_refs)
+
+        pending_ids = _source_ids_from_metadata(chapter.metadata_json, PENDING_SOURCE_UTTERANCE_IDS_KEY)
+        removed_ids = _source_ids_from_metadata(chapter.metadata_json, REMOVED_SOURCE_UTTERANCE_IDS_KEY)
+        pending_changed = utterance_id in pending_ids
+        if pending_changed:
+            pending_ids.discard(utterance_id)
+
+        if not removed_ref_count and not pending_changed:
+            continue
+
+        if removed_ref_count:
+            removed_ids.add(utterance_id)
+            chapter.source_refs_json = kept_refs
+
+        metadata = dict(chapter.metadata_json or {})
+        if pending_ids:
+            metadata[PENDING_SOURCE_UTTERANCE_IDS_KEY] = sorted(pending_ids)
+        else:
+            metadata.pop(PENDING_SOURCE_UTTERANCE_IDS_KEY, None)
+        if removed_ids:
+            metadata[REMOVED_SOURCE_UTTERANCE_IDS_KEY] = sorted(removed_ids)
+            metadata[SOURCE_REFS_REMOVED_AT_KEY] = removed_at
+        chapter.metadata_json = metadata
+        db.add(chapter)
+
+        if chapter.draft:
+            chapter.draft.status = MemoirBookChapterDraftStatus.DRAFT.value
+            draft_metadata = dict(chapter.draft.metadata_json or {})
+            draft_removed_ids = _source_ids_from_metadata(draft_metadata, REMOVED_SOURCE_UTTERANCE_IDS_KEY)
+            draft_removed_ids.add(utterance_id)
+            draft_metadata[REMOVED_SOURCE_UTTERANCE_IDS_KEY] = sorted(draft_removed_ids)
+            draft_metadata["status_reason"] = SOURCES_DELETED_STATUS_REASON
+            chapter.draft.metadata_json = draft_metadata
+            db.add(chapter.draft)
+
+
 async def delete_voice_transcript(
     db: AsyncSession,
     utterance_id: str,
     user_id: str,
 ) -> None:
     utterance = await _load_owned_utterance(db, utterance_id, user_id)
+    project_id = utterance.voice_session.project_id
     message = utterance.chat_message
     delete_message = False
     clear_message = False
@@ -412,6 +480,7 @@ async def delete_voice_transcript(
         delete_message = other_utterances == 0 and child_messages == 0
         clear_message = other_utterances == 0 and child_messages > 0
 
+    await _mark_book_sources_deleted(db, project_id=project_id, utterance_id=utterance.id)
     await db.delete(utterance)
     await db.flush()
 

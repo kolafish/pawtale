@@ -67,6 +67,8 @@ export interface BookChapterView extends MemoirBookPlanChapter {
   sourceCount: number;
   sourceSummary: string;
   pendingSourceCount: number;
+  removedSourceCount: number;
+  sourceChangeNotice: string;
   draft: MemoirBookChapterDraft | null;
   draftContent: string;
   draftCharCount: number;
@@ -128,12 +130,16 @@ function draftStatusText(draft: MemoirBookChapterDraft | null): string {
   return draft.status === "confirmed" ? "已确认" : "待确认";
 }
 
-function pendingSourceCount(metadata: Record<string, unknown> | null | undefined): number {
-  const value = metadata?.pending_source_utterance_ids;
+function sourceIdCount(metadata: Record<string, unknown> | null | undefined, key: string): number {
+  const value = metadata?.[key];
   if (!Array.isArray(value)) {
     return 0;
   }
   return value.filter((item) => typeof item === "string" && item.trim()).length;
+}
+
+function pendingSourceCount(metadata: Record<string, unknown> | null | undefined): number {
+  return sourceIdCount(metadata, "pending_source_utterance_ids");
 }
 
 function sourceSupplementCount(
@@ -147,9 +153,33 @@ function sourceSupplementCount(
   return draft?.metadata_json?.status_reason === "new_sources_assigned" ? 1 : 0;
 }
 
-function draftActionText(draft: MemoirBookChapterDraft | null, pendingCount: number): string {
+function removedSourceCount(
+  metadata: Record<string, unknown> | null | undefined,
+  draft: MemoirBookChapterDraft | null,
+): number {
+  const count = sourceIdCount(metadata, "removed_source_utterance_ids");
+  if (count) {
+    return count;
+  }
+  return draft?.metadata_json?.status_reason === "sources_deleted" ? 1 : 0;
+}
+
+function sourceChangeNotice(pendingCount: number, removedCount: number): string {
+  if (removedCount) {
+    return `${removedCount} 条来源已删除，请检查本章正文`;
+  }
+  if (pendingCount) {
+    return `${pendingCount} 条新增来源待补写`;
+  }
+  return "";
+}
+
+function draftActionText(draft: MemoirBookChapterDraft | null, pendingCount: number, removedCount = 0): string {
   if (pendingCount) {
     return "补写新增";
+  }
+  if (removedCount) {
+    return "整理本章";
   }
   return draft?.latest_version ? "重新生成" : "生成本章";
 }
@@ -159,10 +189,12 @@ function draftVersionText(draft: MemoirBookChapterDraft | null): string {
   return version ? `第 ${version} 版` : "暂无正文";
 }
 
-function clearPendingSourceMetadata(metadata: Record<string, unknown> | null | undefined): Record<string, unknown> {
+function clearSourceChangeMetadata(metadata: Record<string, unknown> | null | undefined): Record<string, unknown> {
   const next = { ...(metadata || {}) };
   delete next.pending_source_utterance_ids;
   delete next.source_assignment_updated_at;
+  delete next.removed_source_utterance_ids;
+  delete next.source_refs_removed_at;
   return next;
 }
 
@@ -295,6 +327,7 @@ export function buildChapterViews(
       const draft = draftsByChapterId[chapter.id] || null;
       const content = latestDraftContent(draft);
       const assignedPendingCount = sourceSupplementCount(chapter.metadata_json, draft);
+      const assignedRemovedCount = removedSourceCount(chapter.metadata_json, draft);
       return {
         ...chapter,
         editingTitle: chapter.title,
@@ -303,13 +336,15 @@ export function buildChapterViews(
         sourceCount: chapter.source_refs.length,
         sourceSummary: bookChapterSourceSummary(chapter),
         pendingSourceCount: assignedPendingCount,
+        removedSourceCount: assignedRemovedCount,
+        sourceChangeNotice: sourceChangeNotice(assignedPendingCount, assignedRemovedCount),
         draft,
         draftContent: content,
         draftCharCount: trimText(content).length,
         draftChanged: false,
         draftStatusText: draftStatusText(draft),
         draftVersionText: draftVersionText(draft),
-        draftActionText: draftActionText(draft, assignedPendingCount),
+        draftActionText: draftActionText(draft, assignedPendingCount, assignedRemovedCount),
         draftBusy: false,
         draftError: "",
       };
@@ -994,20 +1029,23 @@ Page<BookData, {
   patchDraft(chapterId, draft, options) {
     const chapter = this.data.chapters.find((candidate) => candidate.id === chapterId);
     const metadata = options?.clearPendingSources
-      ? clearPendingSourceMetadata(chapter?.metadata_json)
+      ? clearSourceChangeMetadata(chapter?.metadata_json)
       : (chapter?.metadata_json || {});
     const assignedPendingCount = sourceSupplementCount(metadata, draft);
+    const assignedRemovedCount = removedSourceCount(metadata, draft);
     const content = latestDraftContent(draft);
     this.patchChapter(chapterId, {
       metadata_json: metadata,
       pendingSourceCount: assignedPendingCount,
+      removedSourceCount: assignedRemovedCount,
+      sourceChangeNotice: sourceChangeNotice(assignedPendingCount, assignedRemovedCount),
       draft,
       draftContent: content,
       draftCharCount: trimText(content).length,
       draftChanged: false,
       draftStatusText: draftStatusText(draft),
       draftVersionText: draftVersionText(draft),
-      draftActionText: draftActionText(draft, assignedPendingCount),
+      draftActionText: draftActionText(draft, assignedPendingCount, assignedRemovedCount),
       draftError: "",
     });
     this.clearBookOutput();

@@ -1,6 +1,8 @@
 from sqlalchemy import select
 
 from app.domain.memoir.types import (
+    MemoirBookChapterDraftStatus,
+    MemoirBookPlanStatus,
     MemoirChatContentStatus,
     MemoirChatMessageRole,
     MemoirCreatedBy,
@@ -8,6 +10,10 @@ from app.domain.memoir.types import (
 )
 from app.models.memoir import (
     AudioFile,
+    MemoirBookChapterDraft,
+    MemoirBookChapterDraftVersion,
+    MemoirBookPlan,
+    MemoirBookPlanChapter,
     MemoirChatMessage,
     MemoirTranscriptVersion,
     MemoirVoiceUtterance,
@@ -240,6 +246,89 @@ async def test_mobile_memoir_deletes_voice_transcript_and_user_message(client, t
     assert audio_file is not None
     assert len(versions) == 1
     assert versions[0].content == "嗯，我小时候就是住在外婆家。"
+
+
+def _book_source_ref(created: dict, quote: str) -> dict:
+    return {
+        "voice_session_id": created["session"]["id"],
+        "message_id": created["message_id"],
+        "utterance_id": created["utterance_id"],
+        "transcript_version_id": None,
+        "audio_file_id": created["audio_file_id"],
+        "start_ms": 0,
+        "end_ms": 8000,
+        "quote": quote,
+    }
+
+
+async def test_mobile_memoir_delete_transcript_removes_book_source_refs_and_marks_draft_stale(client, test_db):
+    first = await _create_voice_transcript(client, test_db, text="我小时候常在外婆家的院子里晒太阳。")
+    second = await _create_voice_transcript(client, test_db, text="后来我第一次离家去县城读书。")
+    project_id = first["session"]["project_id"]
+    plan = MemoirBookPlan(
+        project_id=project_id,
+        title="外婆回忆录章节规划",
+        status=MemoirBookPlanStatus.CONFIRMED.value,
+        created_by=MemoirCreatedBy.USER.value,
+    )
+    test_db.add(plan)
+    await test_db.flush()
+    chapter = MemoirBookPlanChapter(
+        plan_id=plan.id,
+        project_id=project_id,
+        title="童年和离家",
+        summary="整理外婆家和第一次离家的内容。",
+        sort_order=0,
+        source_refs_json=[
+            _book_source_ref(first, "外婆家的院子"),
+            _book_source_ref(second, "第一次离家"),
+        ],
+    )
+    test_db.add(chapter)
+    await test_db.flush()
+    draft = MemoirBookChapterDraft(
+        project_id=project_id,
+        chapter_id=chapter.id,
+        status=MemoirBookChapterDraftStatus.CONFIRMED.value,
+    )
+    test_db.add(draft)
+    await test_db.flush()
+    test_db.add(
+        MemoirBookChapterDraftVersion(
+            draft_id=draft.id,
+            project_id=project_id,
+            chapter_id=chapter.id,
+            version=1,
+            content="我小时候常在外婆家的院子里晒太阳。后来我第一次离家去县城读书。",
+            created_by=MemoirCreatedBy.USER.value,
+            prompt_snapshot="",
+        )
+    )
+    await test_db.commit()
+    generated = await client.post(f"/api/mobile/memoir/projects/{project_id}/book-output/generate", json={})
+    assert generated.status_code == 200
+
+    response = await client.delete(f"/api/mobile/memoir/voice-transcripts/{second['utterance_id']}")
+
+    assert response.status_code == 204
+    refreshed_chapter = await test_db.scalar(
+        select(MemoirBookPlanChapter).where(MemoirBookPlanChapter.id == chapter.id)
+    )
+    assert [ref["utterance_id"] for ref in refreshed_chapter.source_refs_json] == [first["utterance_id"]]
+    assert refreshed_chapter.metadata_json["removed_source_utterance_ids"] == [second["utterance_id"]]
+    assert "source_refs_removed_at" in refreshed_chapter.metadata_json
+
+    refreshed_draft = await test_db.scalar(
+        select(MemoirBookChapterDraft).where(MemoirBookChapterDraft.id == draft.id)
+    )
+    assert refreshed_draft.status == MemoirBookChapterDraftStatus.DRAFT.value
+    assert refreshed_draft.metadata_json["status_reason"] == "sources_deleted"
+    assert refreshed_draft.metadata_json["removed_source_utterance_ids"] == [second["utterance_id"]]
+
+    output = await client.get(f"/api/mobile/memoir/projects/{project_id}/book-output")
+    assert output.status_code == 200
+    assert output.json()["is_stale"] is True
+    assert output.json()["stale_chapter_titles"] == ["童年和离家"]
 
 
 async def test_mobile_memoir_ai_cleanup_creates_corrected_version(client, test_db, monkeypatch):
