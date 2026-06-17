@@ -241,6 +241,7 @@ class MemoirVoiceTranscriptItemResponse(BaseModel):
     id: str
     voice_session_id: str
     project_id: str
+    project_title: str
     chat_message_id: str | None = None
     audio_file_id: str | None = None
     audio_mime_type: str | None = None

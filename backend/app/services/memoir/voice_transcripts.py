@@ -200,6 +200,7 @@ def _item_response(utterance: MemoirVoiceUtterance) -> MemoirVoiceTranscriptItem
         id=utterance.id,
         voice_session_id=utterance.voice_session_id,
         project_id=voice_session.project_id,
+        project_title=voice_session.project.title if voice_session.project else "",
         chat_message_id=utterance.chat_message_id,
         audio_file_id=utterance.audio_file_id,
         audio_mime_type=audio_file.mime_type if audio_file else None,
@@ -247,6 +248,7 @@ def _question_message_for_utterance(utterance: MemoirVoiceUtterance) -> MemoirCh
 def _detail_options():
     return (
         selectinload(MemoirVoiceUtterance.voice_session).selectinload(MemoirVoiceSession.messages),
+        selectinload(MemoirVoiceUtterance.voice_session).selectinload(MemoirVoiceSession.project),
         selectinload(MemoirVoiceUtterance.chat_message),
         selectinload(MemoirVoiceUtterance.audio_file),
     )

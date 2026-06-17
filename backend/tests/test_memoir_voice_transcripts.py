@@ -143,6 +143,7 @@ async def test_mobile_memoir_lists_saved_voice_transcripts(client, test_db):
     item = data["items"][0]
     assert item["id"] == created["utterance_id"]
     assert item["voice_session_id"] == created["session"]["id"]
+    assert item["project_title"] == "我的回忆录"
     assert item["chat_message_id"] == created["message_id"]
     assert item["audio_file_id"] == created["audio_file_id"]
     assert item["question_message_id"] == created["question_message_id"]

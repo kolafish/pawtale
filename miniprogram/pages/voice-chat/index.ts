@@ -56,6 +56,7 @@ interface VoiceChatData {
   followUpTTSError: string;
   followUpTTSStateText: string;
   ttsSpokenText: string;
+  ttsCurrentText: string;
   ttsRemainingText: string;
   ttsProgressPercent: number;
   modeLabel: string;
@@ -300,6 +301,7 @@ Page<VoiceChatData, {
     followUpTTSError: "",
     followUpTTSStateText: "",
     ttsSpokenText: "",
+    ttsCurrentText: "",
     ttsRemainingText: "",
     ttsProgressPercent: 0,
     modeLabel: "自由讲述",
@@ -670,6 +672,7 @@ Page<VoiceChatData, {
             followUpTTSPlaying: false,
             followUpTTSStateText: options.autoListenAfterPlayback ? "播放完成，正在听你说" : "播放完成",
             ttsSpokenText: this.data.assistantPromptText,
+            ttsCurrentText: "",
             ttsRemainingText: "",
             ttsProgressPercent: 100,
           });
@@ -742,6 +745,7 @@ Page<VoiceChatData, {
     const progress = splitTextByPlaybackProgress(text, progressRatio);
     this.setData({
       ttsSpokenText: progress.spokenText,
+      ttsCurrentText: progress.currentText,
       ttsRemainingText: progress.remainingText,
       ttsProgressPercent: progress.progressPercent,
     });
@@ -750,6 +754,7 @@ Page<VoiceChatData, {
   resetFollowUpTTSProgress() {
     this.setData({
       ttsSpokenText: "",
+      ttsCurrentText: "",
       ttsRemainingText: "",
       ttsProgressPercent: 0,
     });
