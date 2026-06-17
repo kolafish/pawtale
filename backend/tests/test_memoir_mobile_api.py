@@ -1,3 +1,10 @@
+from sqlalchemy import func, select
+
+from app.domain.memoir.types import MemoirChatContentStatus, MemoirChatMessageRole
+from app.models.memoir import AudioFile, MemoirChatMessage, MemoirVoiceUtterance
+from app.services.memoir import audio_files as memoir_audio_files
+
+
 async def test_mobile_memoir_routes_require_login(anonymous_client):
     response = await anonymous_client.get("/api/mobile/memoir/me")
 
@@ -94,7 +101,86 @@ async def test_mobile_memoir_projects_can_be_created_updated_and_activated(clien
     assert activated["active_project"]["title"] == "我的回忆录"
 
 
-async def test_mobile_memoir_projects_can_be_deleted_but_keeps_one_project(client):
+async def test_mobile_memoir_project_word_count_includes_user_voice_messages(client, test_db):
+    first_project_response = await client.get("/api/mobile/memoir/projects")
+    first_project_id = first_project_response.json()["active_project_id"]
+    second_project_response = await client.post(
+        "/api/mobile/memoir/projects",
+        json={"title": "母亲的回忆"},
+    )
+    second_project_id = second_project_response.json()["id"]
+
+    first_session_response = await client.post(
+        "/api/mobile/memoir/voice-sessions",
+        params={"project_id": first_project_id},
+        json={"guidance_mode": "free_narration"},
+    )
+    second_session_response = await client.post(
+        "/api/mobile/memoir/voice-sessions",
+        params={"project_id": second_project_id},
+        json={"guidance_mode": "guided_interview"},
+    )
+    first_session = first_session_response.json()["session"]
+    second_session = second_session_response.json()["session"]
+    first_text = " 我小时候 住在外婆家。 "
+    second_text = "今天下雨了。"
+    test_db.add_all(
+        [
+            MemoirChatMessage(
+                project_id=first_project_id,
+                voice_session_id=first_session["id"],
+                role=MemoirChatMessageRole.USER.value,
+                content_text=first_text,
+                content_status=MemoirChatContentStatus.CORRECTED.value,
+                turn_index=0,
+            ),
+            MemoirChatMessage(
+                project_id=second_project_id,
+                voice_session_id=second_session["id"],
+                role=MemoirChatMessageRole.USER.value,
+                content_text=second_text,
+                content_status=MemoirChatContentStatus.CORRECTED.value,
+                turn_index=0,
+            ),
+            MemoirChatMessage(
+                project_id=second_project_id,
+                voice_session_id=second_session["id"],
+                role=MemoirChatMessageRole.ASSISTANT.value,
+                content_text="你想继续聊哪一段？",
+                content_status=MemoirChatContentStatus.FINAL.value,
+                turn_index=1,
+            ),
+        ]
+    )
+    await test_db.commit()
+
+    project_list_response = await client.get("/api/mobile/memoir/projects")
+    project_list = project_list_response.json()
+    projects = {project["id"]: project for project in project_list["projects"]}
+
+    assert projects[first_project_id]["total_word_count"] == len("".join(first_text.split()))
+    assert projects[second_project_id]["total_word_count"] == len(second_text)
+    assert project_list["active_project"]["id"] == second_project_id
+    assert project_list["active_project"]["total_word_count"] == len(second_text)
+
+    identity_response = await client.get("/api/mobile/memoir/me")
+    identity = identity_response.json()
+    identity_projects = {project["id"]: project for project in identity["projects"]}
+
+    assert identity["active_project"]["total_word_count"] == len(second_text)
+    assert identity_projects[first_project_id]["total_word_count"] == len(
+        "".join(first_text.split())
+    )
+
+
+async def test_mobile_memoir_projects_can_be_deleted_but_keeps_one_project(
+    client,
+    test_db,
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr("app.services.memoir.audio_files.MEMOIR_AUDIO_DIR", tmp_path / "audio")
+    user = (await client.get("/api/auth/me")).json()
     initial_response = await client.get("/api/mobile/memoir/projects")
     default_project_id = initial_response.json()["active_project_id"]
 
@@ -103,6 +189,62 @@ async def test_mobile_memoir_projects_can_be_deleted_but_keeps_one_project(clien
         json={"title": "父亲的回忆"},
     )
     created_project_id = created_response.json()["id"]
+    voice_session_response = await client.post(
+        "/api/mobile/memoir/voice-sessions",
+        params={"project_id": created_project_id},
+        json={"guidance_mode": "free_narration"},
+    )
+    voice_session_id = voice_session_response.json()["session"]["id"]
+    user_audio = await memoir_audio_files.save_audio_bytes(
+        test_db,
+        user["id"],
+        b"user-audio",
+        extension=".pcm",
+    )
+    assistant_audio = await memoir_audio_files.save_audio_bytes(
+        test_db,
+        user["id"],
+        b"assistant-audio",
+        extension=".mp3",
+        mime_type="audio/mpeg",
+    )
+    unrelated_audio = await memoir_audio_files.save_audio_bytes(
+        test_db,
+        user["id"],
+        b"unrelated-audio",
+        extension=".pcm",
+    )
+    user_audio_path = memoir_audio_files.audio_file_path(user_audio)
+    assistant_audio_path = memoir_audio_files.audio_file_path(assistant_audio)
+    unrelated_audio_path = memoir_audio_files.audio_file_path(unrelated_audio)
+    test_db.add_all(
+        [
+            MemoirChatMessage(
+                project_id=created_project_id,
+                voice_session_id=voice_session_id,
+                role=MemoirChatMessageRole.ASSISTANT.value,
+                content_text="想继续讲哪一段？",
+                content_status=MemoirChatContentStatus.FINAL.value,
+                audio_file_id=assistant_audio.id,
+                turn_index=0,
+            ),
+            MemoirVoiceUtterance(
+                voice_session_id=voice_session_id,
+                audio_file_id=user_audio.id,
+                transcript_raw="小时候住在外婆家。",
+                transcript_edited="小时候住在外婆家。",
+                start_ms=0,
+                end_ms=2000,
+                provider="test",
+                provider_payload_json={},
+            ),
+        ]
+    )
+    await test_db.commit()
+
+    assert user_audio_path.exists()
+    assert assistant_audio_path.exists()
+    assert unrelated_audio_path.exists()
 
     delete_response = await client.delete(f"/api/mobile/memoir/projects/{created_project_id}")
     assert delete_response.status_code == 204
@@ -111,6 +253,31 @@ async def test_mobile_memoir_projects_can_be_deleted_but_keeps_one_project(clien
     project_list = project_list_response.json()
     assert project_list["active_project_id"] == default_project_id
     assert [project["id"] for project in project_list["projects"]] == [default_project_id]
+    deleted_audio_count = await test_db.scalar(
+        select(func.count(AudioFile.id)).where(
+            AudioFile.id.in_([user_audio.id, assistant_audio.id])
+        )
+    )
+    unrelated_audio_count = await test_db.scalar(
+        select(func.count(AudioFile.id)).where(AudioFile.id == unrelated_audio.id)
+    )
+    deleted_message_count = await test_db.scalar(
+        select(func.count(MemoirChatMessage.id)).where(
+            MemoirChatMessage.project_id == created_project_id
+        )
+    )
+    deleted_utterance_count = await test_db.scalar(
+        select(func.count(MemoirVoiceUtterance.id)).where(
+            MemoirVoiceUtterance.voice_session_id == voice_session_id
+        )
+    )
+    assert deleted_audio_count == 0
+    assert unrelated_audio_count == 1
+    assert deleted_message_count == 0
+    assert deleted_utterance_count == 0
+    assert not user_audio_path.exists()
+    assert not assistant_audio_path.exists()
+    assert unrelated_audio_path.exists()
 
     last_delete_response = await client.delete(f"/api/mobile/memoir/projects/{default_project_id}")
     assert last_delete_response.status_code == 400

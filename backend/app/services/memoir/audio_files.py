@@ -1,3 +1,4 @@
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 import uuid
@@ -203,3 +204,8 @@ async def stage_audio_bytes(
 async def discard_staged_audio(staged: StagedAudioFile | None) -> None:
     if staged is not None:
         await _remove_if_exists(staged.path)
+
+
+async def delete_audio_file_paths(audio_files: Iterable[AudioFile]) -> None:
+    for audio_file in audio_files:
+        await _remove_if_exists(audio_file_path(audio_file))
