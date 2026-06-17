@@ -196,6 +196,6 @@ Page<ProgressData, {
   },
 
   startNewSession() {
-    wx.switchTab({ url: "/pages/voice-start/index" });
+    wx.switchTab({ url: "/pages/home/index" });
   },
 });

@@ -7,17 +7,25 @@
   <view wx:if="{{error}}" class="error">{{error}}</view>
 
   <view class="project-panel">
-    <text class="panel-label">当前回忆录</text>
+    <view class="project-row">
+      <text class="panel-label">当前回忆录</text>
+      <text class="mode-tag">{{guidanceLabel}}</text>
+    </view>
     <text class="project-title">{{projectTitle || "正在加载回忆录"}}</text>
-    <text class="project-meta">从这里开始语音访谈，转写记录和项目设置可在底部入口查看。</text>
+    <text class="project-meta">从这里继续讲述，转写和成书分别在底部入口管理。</text>
   </view>
 
   <view class="voice-panel">
     <image class="voice-icon" src="/assets/memoir-microphone.png" mode="aspectFit" />
     <text class="voice-title">开始语音聊天</text>
     <text class="voice-copy">一边说话，一边实时显示文字；结束后保存原始语音和校正文。</text>
-    <button class="primary-button" loading="{{loading}}" disabled="{{loading}}" bindtap="startVoiceChat">
-      {{loading ? "加载中" : "进入语音"}}
+    <button
+      class="primary-button"
+      loading="{{creatingVoice}}"
+      disabled="{{loading || creatingVoice}}"
+      bindtap="startVoiceChat"
+    >
+      {{creatingVoice ? "正在准备" : "进入语音聊天"}}
     </button>
   </view>
 </view>

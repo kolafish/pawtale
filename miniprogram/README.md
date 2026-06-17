@@ -56,11 +56,11 @@ WECHAT_JSCODE2SESSION_URL=https://api.weixin.qq.com/sns/jscode2session
 ## 当前页面
 
 - `pages/login`：微信登录、已有 Pawtale 账号登录、首次微信登录后设置 Web 登录凭据。
-- `pages/home`：新版语音入口和当前回忆录入口。
+- `pages/home`：新版语音入口和当前回忆录入口，按当前回忆录绑定的讲述方式直接进入语音聊天。
 - `pages/projects`：创建、切换、重命名、删除回忆录。
-- `pages/voice-start`：按当前回忆录绑定的讲述方式直接进入语音聊天。
 - `pages/voice-chat`：实时录音、WebSocket、partial/final transcript、AI 追问 TTS 和本地快照恢复。
 - `pages/transcripts`：默认查看当前回忆录的转写素材、ASR 原文、校正文、AI 引导问题，并支持问题和回答连播。
+- `pages/book`：成书入口，先保留章节规划、章节确认和分章成稿的页面结构。
 - `pages/voice-progress`：查看会话、模块覆盖、语音段、AI 追问和累计文字。
 - `pages/me`：账号信息、当前项目统计、项目入口和 TTS 音色设置。
 

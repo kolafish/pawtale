@@ -3,9 +3,9 @@
     "pages/index/index",
     "pages/login/index",
     "pages/home/index",
-    "pages/voice-start/index",
     "pages/voice-chat/index",
     "pages/transcripts/index",
+    "pages/book/index",
     "pages/voice-progress/index",
     "pages/projects/index",
     "pages/project-edit/index",
@@ -24,16 +24,16 @@
         "selectedIconPath": "assets/tab-home-active.png"
       },
       {
-        "pagePath": "pages/voice-start/index",
-        "text": "语音",
-        "iconPath": "assets/tab-voice.png",
-        "selectedIconPath": "assets/tab-voice-active.png"
-      },
-      {
         "pagePath": "pages/transcripts/index",
         "text": "转写",
         "iconPath": "assets/tab-transcripts.png",
         "selectedIconPath": "assets/tab-transcripts-active.png"
+      },
+      {
+        "pagePath": "pages/book/index",
+        "text": "成书",
+        "iconPath": "assets/tab-book.png",
+        "selectedIconPath": "assets/tab-book-active.png"
       },
       {
         "pagePath": "pages/me/index",

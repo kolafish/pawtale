@@ -6,14 +6,14 @@
 
 当前实现已经从 Streaming ASR MVP 进入语音聊天第一版闭环：
 
-- 小程序已通过 `voice-start` / `voice-chat` 进入 voice session，实时发送 PCM 帧并显示 ASR partial/final。
+- 小程序已通过 `home` / `voice-chat` 进入 voice session，实时发送 PCM 帧并显示 ASR partial/final。
 - `asr.final` 已落 `memoir_chat_messages`、`memoir_voice_utterances`、`memoir_transcript_versions` 和原始音频 `audio_files`。
 - 强引导模式已接入 LLM 动态追问，assistant message 会落库并显示在语音聊天页。
 - PR2 交互细节已补齐：支持开场追问、手动生成追问、重试/换个追问、跳过当前追问、用户开始新回答时清掉旧追问活跃态、结束后跳转转写记录。
 - AI 追问已接入 assistant-message 驱动的 TTS 音频生成和播放；第一版是短句音频快速生成后播放，接口按后续 streaming TTS 形态保留 provider 抽象。
 - 小程序已接入客户端轻量 VAD：基于 PCM 能量显示音量条、计算连续静音，并可自动收尾当前句。
 - 已有转写校正页和访谈进度页，可查看会话、模块覆盖、语音段、AI 追问数，并从记录继续访谈。
-- 小程序已拆为首页、语音、转写、我的 tab；我的页可看当前项目统计、管理项目和设置 AI TTS 音色，项目页支持创建、切换、重命名和删除回忆录。
+- 小程序已拆为首页、转写、成书、我的 tab；我的页可看当前项目统计、管理项目和设置 AI TTS 音色，项目页支持创建、切换、重命名和删除回忆录。
 
 新的产品目标是：
 
@@ -60,11 +60,11 @@ Voice Session -> Chat Messages -> Realtime Transcript -> Memory Extraction -> Wr
 
 ```text
 miniprogram/pages/login/                      # 微信登录、Pawtale 账号登录、首次设 Web 登录凭据
-miniprogram/pages/home/                       # 新版语音入口
+miniprogram/pages/home/                       # 新版语音入口和当前回忆录入口
 miniprogram/pages/projects/                   # 回忆录项目创建、切换、重命名、删除
-miniprogram/pages/voice-start/                # 强/弱引导选择
 miniprogram/pages/voice-chat/                 # 新版老人端实时语音聊天
 miniprogram/pages/transcripts/                # 语音与转写校正
+miniprogram/pages/book/                       # 成书入口、章节规划和分章成稿入口
 miniprogram/pages/voice-progress/             # 访谈记录和进度
 miniprogram/pages/me/                         # 账号、项目统计和 TTS 音色设置
 miniprogram/services/request.ts               # ECS HTTP + cookie session
@@ -477,7 +477,7 @@ LLM 和 TTS 当前不走 WebSocket 事件：
 
 - 新增独立 voice session API 和 realtime event contract。
 - 新增 voice gateway WebSocket，所有 provider key 只在后端。
-- 小程序新增 `voice-start` 和 `voice-chat` 第一版入口。
+- 小程序新增 `home` 和 `voice-chat` 第一版入口。
 - 小程序发送 16k mono PCM 音频帧，服务端转发给豆包 Streaming ASR。
 - 页面展示 `asr.partial` 大字实时转写，`asr.final` 固化成用户消息。
 - 小程序保存 voice session 本地快照，并能从后端详情回放已固化 transcript。
@@ -522,7 +522,7 @@ LLM 和 TTS 当前不走 WebSocket 事件：
    - 实现 `session.start`、`audio.frame`、`audio.end`、`asr.partial`、`asr.final`、`session.error`。
    - 用本地音频样例跑集成验证。
 
-4. PR 4: 小程序 `voice-start` / `voice-chat` MVP
+4. PR 4: 小程序 `home` / `voice-chat` MVP
    - 新增模式选择、录音帧发送、大字转写和错误状态。
    - 真机验证 partial 延迟和 final 固化。
 
@@ -533,7 +533,7 @@ LLM 和 TTS 当前不走 WebSocket 事件：
 
 PR5 后第一版已经具备的闭环：
 
-- 小程序从 `voice-start` 创建 voice session，并进入 `voice-chat`。
+- 小程序从 `home` 创建 voice session，并进入 `voice-chat`。
 - 小程序录音为 16k mono PCM frame，通过 Pawtale voice gateway 发送。
 - 后端 provider adapter 返回 `asr.partial` / `asr.final`。
 - `asr.partial` 只用于页面大字实时显示。
