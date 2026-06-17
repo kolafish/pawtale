@@ -5,7 +5,7 @@
     </view>
     <view class="title-block">
       <text class="page-title">转写记录</text>
-      <text class="page-meta">{{total}} 条语音转写</text>
+      <text class="page-meta">{{projectTitle || "当前回忆录"}} · {{total}} 条语音转写</text>
     </view>
   </view>
 

@@ -6,6 +6,7 @@ import {
   updateMemoirVoiceTranscript,
 } from "../../services/memoir-voice-api";
 import { configureAudiblePlayback } from "../../services/audio-playback";
+import { getMemoirIdentity } from "../../services/auth";
 import { ApiError } from "../../services/request";
 
 interface DatasetEvent {
@@ -41,51 +42,36 @@ interface TranscriptsData {
   total: number;
   limit: number;
   offset: number;
+  activeProjectId: string;
+  projectTitle: string;
 }
 
 const DEFAULT_LIMIT = 30;
 
-function formatBytes(value?: number | null): string {
-  if (!value || value <= 0) {
-    return "";
+function formatDurationSeconds(value: number): string {
+  const seconds = Math.max(0, Math.round(value));
+  if (seconds < 60) {
+    return `${seconds} 秒`;
   }
-  if (value < 1024) {
-    return `${value} B`;
-  }
-  if (value < 1024 * 1024) {
-    return `${Math.round(value / 1024)} KB`;
-  }
-  return `${(value / 1024 / 1024).toFixed(1)} MB`;
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+  return remainingSeconds ? `${minutes} 分 ${remainingSeconds} 秒` : `${minutes} 分`;
 }
 
 function formatDuration(item: MemoirVoiceTranscriptItem): string {
   if (item.audio_duration_seconds !== null && item.audio_duration_seconds !== undefined) {
-    return `${item.audio_duration_seconds}s`;
+    return formatDurationSeconds(item.audio_duration_seconds);
   }
   if (item.start_ms !== null && item.start_ms !== undefined && item.end_ms !== null && item.end_ms !== undefined) {
     const seconds = Math.max(0, Math.round((item.end_ms - item.start_ms) / 1000));
-    return `${seconds}s`;
+    return formatDurationSeconds(seconds);
   }
   return "";
 }
 
-function audioText(item: MemoirVoiceTranscriptItem): string {
-  if (!item.audio_file_id) {
-    return "无音频文件";
-  }
-  const parts = ["音频已保存"];
+export function transcriptAudioText(item: MemoirVoiceTranscriptItem): string {
   const duration = formatDuration(item);
-  const size = formatBytes(item.audio_size_bytes);
-  if (duration) {
-    parts.push(duration);
-  }
-  if (size) {
-    parts.push(size);
-  }
-  if (item.audio_mime_type === "audio/pcm") {
-    parts.push("PCM");
-  }
-  return parts.join(" · ");
+  return duration ? `时长 ${duration}` : "时长未知";
 }
 
 function toViewItem(item: MemoirVoiceTranscriptItem): TranscriptItemView {
@@ -94,7 +80,7 @@ function toViewItem(item: MemoirVoiceTranscriptItem): TranscriptItemView {
     ...item,
     editingText,
     editingCharCount: editingText.trim().length,
-    audioText: audioText(item),
+    audioText: transcriptAudioText(item),
     canPlayAudio: Boolean(item.audio_file_id || item.question_audio_file_id),
     changed: editingText !== (item.transcript_edited || item.transcript_raw),
     isEditing: false,
@@ -134,7 +120,7 @@ function confirmDelete(item: TranscriptItemView): Promise<boolean> {
 }
 
 Page<TranscriptsData, {
-  onLoad(): Promise<void>;
+  onShow(): Promise<void>;
   loadTranscripts(reset?: boolean): Promise<void>;
   loadMore(): Promise<void>;
   beginEdit(event: DatasetEvent): void;
@@ -164,9 +150,11 @@ Page<TranscriptsData, {
     total: 0,
     limit: DEFAULT_LIMIT,
     offset: 0,
+    activeProjectId: "",
+    projectTitle: "",
   },
 
-  async onLoad() {
+  async onShow() {
     await this.loadTranscripts(true);
   },
 
@@ -177,12 +165,32 @@ Page<TranscriptsData, {
     const offset = reset ? 0 : this.data.offset;
     this.setData({ loading: true, error: "" });
     try {
+      let activeProjectId = this.data.activeProjectId;
+      let projectTitle = this.data.projectTitle;
+      if (reset || !activeProjectId) {
+        const identity = await getMemoirIdentity();
+        activeProjectId = identity.active_project_id;
+        projectTitle = identity.active_project?.title || "我的回忆录";
+      }
+      if (!activeProjectId) {
+        this.setData({
+          activeProjectId: "",
+          projectTitle: projectTitle || "我的回忆录",
+          items: [],
+          total: 0,
+          offset: 0,
+        });
+        return;
+      }
       const response = await listMemoirVoiceTranscripts({
+        projectId: activeProjectId,
         limit: this.data.limit,
         offset,
       });
       const nextItems = response.items.map(toViewItem);
       this.setData({
+        activeProjectId,
+        projectTitle,
         items: reset ? nextItems : [...this.data.items, ...nextItems],
         total: response.total,
         offset: offset + nextItems.length,
