@@ -1,45 +1,191 @@
 <view class="book-page">
-  <view class="header">
-    <text class="page-title">成书</text>
-    <text class="page-subtitle">{{projectTitle || "我的回忆录"}}</text>
+  <view class="top-row">
+    <view class="back-hit" bindtap="openHome">
+      <text class="back-mark">‹</text>
+    </view>
+    <view class="title-block">
+      <text class="page-title">成书</text>
+      <text class="page-meta">{{projectTitle || "我的回忆录"}} · {{stageText}}</text>
+    </view>
   </view>
 
   <view wx:if="{{error}}" class="error">{{error}}</view>
 
-  <view class="book-panel">
-    <image class="book-icon" src="/assets/memoir-gramophone.png" mode="aspectFit" />
-    <text class="book-title">整理成书</text>
-    <text class="book-copy">先确认章节，再逐章生成书稿。内容以你的叙述为主，只做分章、整理和轻度润色。</text>
+  <view class="status-panel">
+    <view>
+      <text class="status-title">{{planTitle || "整理成书"}}</text>
+      <text class="status-meta">{{progressText}}</text>
+    </view>
+    <text class="status-pill">{{stageText}}</text>
   </view>
 
-  <view class="section">
-    <text class="section-title">当前进度</text>
-    <view class="step-list">
-      <view class="step-item active">
-        <text class="step-index">1</text>
-        <view class="step-main">
-          <text class="step-title">章节规划</text>
-          <text class="step-meta">根据已保存的转写内容划分章节</text>
-        </view>
+  <view wx:if="{{loading && !plan}}" class="empty-panel">
+    <text>正在加载</text>
+  </view>
+
+  <view wx:elif="{{!plan}}" class="empty-panel">
+    <image class="empty-icon" src="/assets/memoir-gramophone.png" mode="aspectFit" />
+    <text class="empty-title">从转写生成章节</text>
+    <text class="empty-copy">系统会先把当前回忆录转写划分为若干章节。你确认章节后，再逐章生成正文。</text>
+    <view class="actions-row">
+      <button
+        class="primary-button"
+        loading="{{generatingPlan}}"
+        disabled="{{loading || generatingPlan || !projectId}}"
+        bindtap="generatePlan"
+      >
+        生成章节规划
+      </button>
+      <button class="ghost-button" disabled="{{generatingPlan}}" bindtap="openTranscripts">
+        查看转写
+      </button>
+    </view>
+  </view>
+
+  <view wx:elif="{{stage === 'plan_draft'}}" class="section">
+    <view class="field-block">
+      <text class="field-label">目录名称</text>
+      <input
+        class="title-input"
+        value="{{planTitle}}"
+        bindinput="changePlanTitle"
+        maxlength="120"
+      />
+    </view>
+
+    <view class="section-head">
+      <text class="section-title">确认章节</text>
+      <text class="section-count">{{chapters.length}} 章</text>
+    </view>
+
+    <view wx:for="{{chapters}}" wx:key="id" class="chapter-card">
+      <view class="chapter-head">
+        <text class="chapter-index">第 {{index + 1}} 章</text>
+        <text class="source-count">{{item.sourceCount}} 条来源</text>
       </view>
-      <view class="step-item">
-        <text class="step-index">2</text>
-        <view class="step-main">
-          <text class="step-title">章节确认</text>
-          <text class="step-meta">调整标题、顺序和内容范围</text>
-        </view>
+
+      <input
+        class="chapter-title-input"
+        value="{{item.editingTitle}}"
+        data-id="{{item.id}}"
+        bindinput="changeChapterTitle"
+        maxlength="80"
+      />
+
+      <textarea
+        class="summary-textarea"
+        value="{{item.editingSummary}}"
+        data-id="{{item.id}}"
+        bindinput="changeChapterSummary"
+        maxlength="-1"
+        auto-height
+        cursor-spacing="24"
+      />
+
+      <text class="source-preview">{{item.sourceSummary}}</text>
+
+      <view class="actions-row compact">
+        <button
+          class="danger-button"
+          data-id="{{item.id}}"
+          bindtap="removeChapter"
+          disabled="{{confirmingPlan || chapters.length <= 1}}"
+        >
+          删除本章
+        </button>
       </view>
-      <view class="step-item">
-        <text class="step-index">3</text>
-        <view class="step-main">
-          <text class="step-title">分章成稿</text>
-          <text class="step-meta">每章单独生成和确认</text>
+    </view>
+
+    <view class="sticky-actions">
+      <button
+        class="ghost-button"
+        loading="{{generatingPlan}}"
+        disabled="{{generatingPlan || confirmingPlan}}"
+        bindtap="generatePlan"
+      >
+        重新规划
+      </button>
+      <button
+        class="primary-button"
+        loading="{{confirmingPlan}}"
+        disabled="{{generatingPlan || confirmingPlan || !chapters.length}}"
+        bindtap="confirmPlan"
+      >
+        确认章节
+      </button>
+    </view>
+  </view>
+
+  <view wx:else class="section">
+    <view class="section-head">
+      <text class="section-title">逐章成稿</text>
+      <text class="section-count">{{confirmedDraftCount}}/{{totalChapterCount}} 已确认</text>
+    </view>
+
+    <view wx:for="{{chapters}}" wx:key="id" class="chapter-card">
+      <view class="chapter-head">
+        <view class="chapter-title-block">
+          <text class="chapter-index">第 {{index + 1}} 章</text>
+          <text class="chapter-title">{{item.title}}</text>
         </view>
+        <text class="draft-status {{item.draft && item.draft.status === 'confirmed' ? 'confirmed' : ''}}">
+          {{item.draftStatusText}}
+        </text>
+      </view>
+
+      <text wx:if="{{item.summary}}" class="chapter-summary">{{item.summary}}</text>
+      <text class="source-preview">{{item.sourceSummary}}</text>
+
+      <view wx:if="{{!item.draft || !item.draft.latest_version}}" class="draft-empty">
+        <text>还没有章节正文</text>
+      </view>
+
+      <view wx:else class="draft-editor">
+        <view class="draft-meta-row">
+          <text class="draft-version">{{item.draftVersionText}}</text>
+          <text class="draft-count">{{item.draftCharCount}} 字</text>
+        </view>
+        <textarea
+          class="draft-textarea"
+          value="{{item.draftContent}}"
+          data-id="{{item.id}}"
+          bindinput="changeDraftContent"
+          maxlength="-1"
+          auto-height
+          cursor-spacing="24"
+        />
+      </view>
+
+      <view wx:if="{{item.draftError}}" class="chapter-error">{{item.draftError}}</view>
+
+      <view class="actions-row">
+        <button
+          class="ghost-button"
+          data-id="{{item.id}}"
+          disabled="{{item.draftBusy || item.draftChanged}}"
+          bindtap="generateChapterDraft"
+        >
+          {{item.draft && item.draft.latest_version ? "重新生成" : "生成本章"}}
+        </button>
+        <button
+          class="ghost-button"
+          data-id="{{item.id}}"
+          disabled="{{item.draftBusy || !item.draftChanged}}"
+          bindtap="saveChapterDraft"
+        >
+          保存修改
+        </button>
+        <button
+          class="primary-button"
+          data-id="{{item.id}}"
+          disabled="{{item.draftBusy || !item.draft || !item.draft.latest_version || item.draft.status === 'confirmed' || item.draftChanged}}"
+          bindtap="confirmChapterDraft"
+        >
+          确认本章
+        </button>
       </view>
     </view>
   </view>
 
-  <button class="primary-button" disabled="{{loading}}" bindtap="openTranscripts">
-    查看转写内容
-  </button>
+  <view class="bottom-spacer"></view>
 </view>

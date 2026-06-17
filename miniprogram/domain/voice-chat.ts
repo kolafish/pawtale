@@ -2,6 +2,9 @@ export type MemoirGuidanceMode = "free_narration" | "guided_interview";
 export type MemoirVoiceSessionStatus = "created" | "listening" | "speaking" | "stopped" | "failed";
 export type MemoirChatMessageRole = "user" | "assistant" | "system";
 export type MemoirChatContentStatus = "partial" | "final" | "corrected";
+export type MemoirCreatedBy = "user" | "ai" | "asr" | "system";
+export type MemoirBookPlanStatus = "draft" | "confirmed";
+export type MemoirBookChapterDraftStatus = "draft" | "confirmed";
 export type VoiceGatewayState = "ready" | "listening" | "finishing" | "stopped" | "failed";
 export type VoiceChatErrorKind = "connection" | "recorder" | "gateway" | "asr" | "persistence" | "timeout" | "unknown";
 
@@ -230,4 +233,93 @@ export interface MemoirVoiceTranscriptListResponse {
   total: number;
   limit: number;
   offset: number;
+}
+
+export interface MemoirBookChapterSourceRef {
+  voice_session_id: string;
+  message_id: string;
+  utterance_id: string;
+  transcript_version_id?: string | null;
+  audio_file_id?: string | null;
+  start_ms?: number | null;
+  end_ms?: number | null;
+  quote: string;
+}
+
+export interface MemoirBookPlanChapterInput {
+  title: string;
+  summary: string;
+  source_refs: MemoirBookChapterSourceRef[];
+}
+
+export interface MemoirBookPlanChapter {
+  id: string;
+  plan_id: string;
+  project_id: string;
+  title: string;
+  summary: string;
+  sort_order: number;
+  source_refs: MemoirBookChapterSourceRef[];
+  metadata_json: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MemoirBookPlan {
+  id: string;
+  project_id: string;
+  title: string;
+  status: MemoirBookPlanStatus;
+  created_by: MemoirCreatedBy;
+  model?: string | null;
+  metadata_json: Record<string, unknown>;
+  chapters: MemoirBookPlanChapter[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MemoirBookPlanGenerateRequest {
+  ai_model?: string;
+  max_chapters?: number;
+}
+
+export interface MemoirBookPlanConfirmRequest {
+  title?: string;
+  chapters: MemoirBookPlanChapterInput[];
+}
+
+export interface MemoirBookChapterDraftGenerateRequest {
+  ai_model?: string;
+  force_regenerate?: boolean;
+  feedback?: string;
+}
+
+export interface MemoirBookChapterDraftUpdateRequest {
+  content: string;
+}
+
+export interface MemoirBookChapterDraftVersion {
+  id: string;
+  draft_id: string;
+  project_id: string;
+  chapter_id: string;
+  version: number;
+  content: string;
+  created_by: MemoirCreatedBy;
+  model?: string | null;
+  prompt_snapshot: string;
+  feedback?: string | null;
+  created_at: string;
+}
+
+export interface MemoirBookChapterDraft {
+  id: string;
+  project_id: string;
+  chapter_id: string;
+  status: MemoirBookChapterDraftStatus;
+  metadata_json: Record<string, unknown>;
+  latest_version?: MemoirBookChapterDraftVersion | null;
+  versions: MemoirBookChapterDraftVersion[];
+  created_at: string;
+  updated_at: string;
 }

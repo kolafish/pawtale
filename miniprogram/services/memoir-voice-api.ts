@@ -1,6 +1,12 @@
 import type {
   MemoirAssistantTTSRequest,
   MemoirAssistantTTSResponse,
+  MemoirBookChapterDraft,
+  MemoirBookChapterDraftGenerateRequest,
+  MemoirBookChapterDraftUpdateRequest,
+  MemoirBookPlan,
+  MemoirBookPlanConfirmRequest,
+  MemoirBookPlanGenerateRequest,
   MemoirVoiceFollowUpRequest,
   MemoirVoiceFollowUpResponse,
   MemoirVoiceTranscriptItem,
@@ -141,6 +147,94 @@ export async function listMemoirVoiceTranscripts(
   await ensureBackendSession();
   return request<MemoirVoiceTranscriptListResponse>(
     `/api/mobile/memoir/voice-transcripts${queryString(options)}`,
+  );
+}
+
+export async function getMemoirBookPlan(projectId: string): Promise<MemoirBookPlan> {
+  await ensureBackendSession();
+  return request<MemoirBookPlan>(
+    `/api/mobile/memoir/projects/${encodeURIComponent(projectId)}/book-plan`,
+  );
+}
+
+export async function generateMemoirBookPlan(
+  projectId: string,
+  data: MemoirBookPlanGenerateRequest = {},
+): Promise<MemoirBookPlan> {
+  await ensureBackendSession();
+  return request<MemoirBookPlan>(
+    `/api/mobile/memoir/projects/${encodeURIComponent(projectId)}/book-plan/generate`,
+    {
+      method: "POST",
+      data,
+    },
+  );
+}
+
+export async function confirmMemoirBookPlan(
+  projectId: string,
+  data: MemoirBookPlanConfirmRequest,
+): Promise<MemoirBookPlan> {
+  await ensureBackendSession();
+  return request<MemoirBookPlan>(
+    `/api/mobile/memoir/projects/${encodeURIComponent(projectId)}/book-plan`,
+    {
+      method: "PUT",
+      data,
+    },
+  );
+}
+
+export async function getMemoirBookChapterDraft(
+  projectId: string,
+  chapterId: string,
+): Promise<MemoirBookChapterDraft> {
+  await ensureBackendSession();
+  return request<MemoirBookChapterDraft>(
+    `/api/mobile/memoir/projects/${encodeURIComponent(projectId)}/book-plan/chapters/${encodeURIComponent(chapterId)}/draft`,
+  );
+}
+
+export async function generateMemoirBookChapterDraft(
+  projectId: string,
+  chapterId: string,
+  data: MemoirBookChapterDraftGenerateRequest = {},
+): Promise<MemoirBookChapterDraft> {
+  await ensureBackendSession();
+  return request<MemoirBookChapterDraft>(
+    `/api/mobile/memoir/projects/${encodeURIComponent(projectId)}/book-plan/chapters/${encodeURIComponent(chapterId)}/draft`,
+    {
+      method: "POST",
+      data,
+    },
+  );
+}
+
+export async function updateMemoirBookChapterDraft(
+  projectId: string,
+  chapterId: string,
+  data: MemoirBookChapterDraftUpdateRequest,
+): Promise<MemoirBookChapterDraft> {
+  await ensureBackendSession();
+  return request<MemoirBookChapterDraft>(
+    `/api/mobile/memoir/projects/${encodeURIComponent(projectId)}/book-plan/chapters/${encodeURIComponent(chapterId)}/draft`,
+    {
+      method: "PATCH",
+      data,
+    },
+  );
+}
+
+export async function confirmMemoirBookChapterDraft(
+  projectId: string,
+  chapterId: string,
+): Promise<MemoirBookChapterDraft> {
+  await ensureBackendSession();
+  return request<MemoirBookChapterDraft>(
+    `/api/mobile/memoir/projects/${encodeURIComponent(projectId)}/book-plan/chapters/${encodeURIComponent(chapterId)}/draft/confirm`,
+    {
+      method: "POST",
+    },
   );
 }
 
