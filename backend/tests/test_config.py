@@ -2,6 +2,7 @@ import pytest
 from fastapi import Response
 
 from app import auth
+from app import database
 from app.auth import SESSION_COOKIE_NAME, set_session_cookie
 from app.config import (
     DEFAULT_APP_SECRET_KEY,
@@ -59,3 +60,63 @@ def test_session_cookie_remains_http_compatible_in_development(monkeypatch):
     set_session_cookie(response, "user-id")
 
     assert "Secure" not in response.headers["set-cookie"]
+
+
+def test_sqlite_engine_connect_args_use_busy_timeout_seconds():
+    settings = Settings(
+        database_url="sqlite+aiosqlite:///tmp/pawtale.db",
+        sqlite_busy_timeout_ms=7500,
+    )
+
+    assert database.sqlite_engine_connect_args(settings) == {"timeout": 7.5}
+
+
+def test_non_sqlite_engine_connect_args_stay_empty():
+    settings = Settings(database_url="postgresql+asyncpg://pawtale@example.test/db")
+
+    assert database.sqlite_engine_connect_args(settings) == {}
+
+
+def test_configure_sqlite_connection_applies_small_concurrency_pragmas():
+    settings = Settings(
+        sqlite_busy_timeout_ms=3000,
+        sqlite_journal_mode="wal",
+        sqlite_synchronous="normal",
+    )
+    connection = FakeDBAPIConnection()
+
+    database.configure_sqlite_connection(connection, settings)
+
+    assert connection.cursor_obj.statements == [
+        "PRAGMA busy_timeout = 3000",
+        "PRAGMA journal_mode = WAL",
+        "PRAGMA synchronous = NORMAL",
+    ]
+    assert connection.cursor_obj.closed
+
+
+def test_configure_sqlite_connection_rejects_invalid_pragma_values():
+    settings = Settings(sqlite_journal_mode="wal; drop table users")
+
+    with pytest.raises(RuntimeError, match="SQLITE_JOURNAL_MODE"):
+        database.configure_sqlite_connection(FakeDBAPIConnection(), settings)
+
+
+class FakeDBAPICursor:
+    def __init__(self):
+        self.statements: list[str] = []
+        self.closed = False
+
+    def execute(self, statement: str):
+        self.statements.append(statement)
+
+    def close(self):
+        self.closed = True
+
+
+class FakeDBAPIConnection:
+    def __init__(self):
+        self.cursor_obj = FakeDBAPICursor()
+
+    def cursor(self):
+        return self.cursor_obj
