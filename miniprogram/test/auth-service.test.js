@@ -103,3 +103,32 @@ test("setAccountCredentials saves email password for current backend session", a
   assert.equal(response.needs_credentials, false);
   delete global.wx;
 });
+
+test("updateBackendProfile patches current user display name", async () => {
+  const requests = installWxMock((options) => {
+    assert.equal(options.url, "https://api.example.com/api/auth/me");
+    assert.equal(options.method, "PATCH");
+    assert.deepEqual(options.data, {
+      display_name: "新昵称",
+    });
+    options.success({
+      statusCode: 200,
+      data: {
+        id: "user-1",
+        email: "author@example.com",
+        password_login_enabled: true,
+        display_name: "新昵称",
+        created_at: "2026-06-15T00:00:00",
+      },
+      cookies: [],
+      header: {},
+    });
+  });
+  const { updateBackendProfile } = authModule();
+
+  const user = await updateBackendProfile({ display_name: "新昵称" });
+
+  assert.equal(requests.length, 1);
+  assert.equal(user.display_name, "新昵称");
+  delete global.wx;
+});

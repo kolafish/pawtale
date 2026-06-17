@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 
 class UserResponse(BaseModel):
@@ -40,6 +40,20 @@ class AuthSetCredentialsRequest(BaseModel):
     email: str
     password: str
     display_name: str | None = None
+
+
+class AuthUpdateProfileRequest(BaseModel):
+    display_name: str
+
+    @field_validator("display_name")
+    @classmethod
+    def _valid_display_name(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("昵称不能为空")
+        if len(normalized) > 40:
+            raise ValueError("昵称不能超过 40 个字")
+        return normalized
 
 
 class AuthResponse(BaseModel):

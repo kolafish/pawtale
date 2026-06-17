@@ -1,6 +1,6 @@
 import type { MemoirVoiceProgressResponse } from "../../domain/voice-chat";
 import type { TTSVoiceOption } from "../../services/tts-settings";
-import { getMemoirIdentity, logoutBackendSession } from "../../services/auth";
+import { getMemoirIdentity, logoutBackendSession, updateBackendProfile } from "../../services/auth";
 import { getMemoirVoiceProgress } from "../../services/memoir-voice-api";
 import { ApiError } from "../../services/request";
 import {
@@ -15,9 +15,12 @@ const WECHAT_PLACEHOLDER_DISPLAY_NAME = "微信用户";
 
 interface MeData {
   loading: boolean;
+  savingName: boolean;
+  editingName: boolean;
   voiceStatsLoading: boolean;
   error: string;
   displayName: string;
+  nameDraft: string;
   avatarText: string;
   email: string;
   projectTitle: string;
@@ -36,6 +39,12 @@ interface VoiceDatasetEvent {
     dataset: {
       voice?: string;
     };
+  };
+}
+
+interface InputEvent {
+  detail: {
+    value: string;
   };
 }
 
@@ -77,6 +86,10 @@ Page<MeData, {
   onShow(): Promise<void>;
   loadMe(): Promise<void>;
   loadVoiceStats(projectId: string): Promise<void>;
+  startEditName(): void;
+  changeNameDraft(event: InputEvent): void;
+  cancelEditName(): void;
+  saveDisplayName(): Promise<void>;
   selectTTSVoice(event: VoiceDatasetEvent): void;
   openProjects(): void;
   openVoiceProgress(): void;
@@ -84,9 +97,12 @@ Page<MeData, {
 }>({
   data: {
     loading: false,
+    savingName: false,
+    editingName: false,
     voiceStatsLoading: false,
     error: "",
     displayName: "",
+    nameDraft: "",
     avatarText: "作",
     email: "",
     projectTitle: "",
@@ -118,6 +134,8 @@ Page<MeData, {
       const ttsSettings = readTTSSettings();
       this.setData({
         displayName,
+        nameDraft: displayName,
+        editingName: false,
         avatarText: Array.from(displayName)[0] || "作",
         email: identity.email,
         projectTitle: identity.active_project?.title || "我的回忆录",
@@ -134,6 +152,53 @@ Page<MeData, {
       this.setData({ error: error instanceof Error ? error.message : "我的页面加载失败" });
     } finally {
       this.setData({ loading: false });
+    }
+  },
+
+  startEditName() {
+    if (this.data.loading || this.data.savingName) {
+      return;
+    }
+    this.setData({ editingName: true, nameDraft: this.data.displayName, error: "" });
+  },
+
+  changeNameDraft(event) {
+    this.setData({ nameDraft: event.detail.value, error: "" });
+  },
+
+  cancelEditName() {
+    if (this.data.savingName) {
+      return;
+    }
+    this.setData({ editingName: false, nameDraft: this.data.displayName, error: "" });
+  },
+
+  async saveDisplayName() {
+    if (this.data.savingName) {
+      return;
+    }
+    const displayName = this.data.nameDraft.trim();
+    if (!displayName) {
+      this.setData({ error: "昵称不能为空" });
+      return;
+    }
+    this.setData({ savingName: true, error: "" });
+    try {
+      const user = await updateBackendProfile({ display_name: displayName });
+      await getMemoirIdentity();
+      const normalizedName = displayNameForUser(user.display_name, user.email);
+      this.setData({
+        displayName: normalizedName,
+        nameDraft: normalizedName,
+        avatarText: Array.from(normalizedName)[0] || "作",
+        email: user.email,
+        editingName: false,
+      });
+      wx.showToast({ title: "已保存", icon: "success" });
+    } catch (error) {
+      this.setData({ error: error instanceof Error ? error.message : "昵称保存失败" });
+    } finally {
+      this.setData({ savingName: false });
     }
   },
 

@@ -34,6 +34,10 @@ export interface RegisterCredentials extends LoginCredentials {
 
 export interface SetCredentialsInput extends RegisterCredentials {}
 
+export interface UpdateProfileInput {
+  display_name: string;
+}
+
 function rememberMemoirIdentity(identity: MemoirIdentity): MemoirIdentity {
   ensureMemoirStoreIdentity(cacheIdentityFromUser(identity, identity.active_project));
   writeMemoirIdentitySnapshot(identity);
@@ -105,6 +109,13 @@ export async function logoutBackendSession(): Promise<void> {
 
 export async function getBackendUser(): Promise<BackendAuthUser> {
   return request<BackendAuthUser>("/api/auth/me");
+}
+
+export async function updateBackendProfile(input: UpdateProfileInput): Promise<BackendAuthUser> {
+  return request<BackendAuthUser>("/api/auth/me", {
+    method: "PATCH",
+    data: input,
+  });
 }
 
 export async function ensureBackendSession(): Promise<void> {
