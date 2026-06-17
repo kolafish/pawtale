@@ -160,9 +160,7 @@
 
       <text wx:if="{{item.summary}}" class="chapter-summary">{{item.summary}}</text>
       <text class="source-preview">{{item.sourceSummary}}</text>
-      <text wx:if="{{item.pendingSourceCount}}" class="draft-pending">
-        {{item.pendingSourceCount}} 条新增来源待补写
-      </text>
+      <text wx:if="{{item.sourceChangeNotice}}" class="draft-pending">{{item.sourceChangeNotice}}</text>
 
       <view wx:if="{{!item.draft || !item.draft.latest_version}}" class="draft-empty">
         <text>还没有章节正文</text>
@@ -190,7 +188,7 @@
         <button
           class="ghost-button"
           data-id="{{item.id}}"
-          disabled="{{item.draftBusy || item.draftChanged}}"
+          disabled="{{item.draftBusy || item.draftChanged || (item.removedSourceCount && !item.sourceCount)}}"
           bindtap="generateChapterDraft"
         >
           {{item.draftActionText}}

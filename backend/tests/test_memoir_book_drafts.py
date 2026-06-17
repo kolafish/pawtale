@@ -400,6 +400,92 @@ async def test_mobile_memoir_book_chapter_draft_update_clears_pending_source_sta
     assert refreshed_chapter.metadata_json == {}
 
 
+async def test_mobile_memoir_book_chapter_draft_confirm_rejects_pending_sources(client, test_db):
+    created = await _create_voice_transcript(client, test_db, "我小时候常在外婆家的院子里晒太阳。")
+    project_id = created["session"]["project_id"]
+    _, chapter = await _create_book_plan(
+        test_db,
+        project_id=project_id,
+        source_ref=_source_ref(created),
+        status=MemoirBookPlanStatus.CONFIRMED,
+    )
+    chapter.metadata_json = {"pending_source_utterance_ids": [created["utterance_id"]]}
+    draft = MemoirBookChapterDraft(
+        project_id=project_id,
+        chapter_id=chapter.id,
+        status=MemoirBookChapterDraftStatus.DRAFT.value,
+    )
+    test_db.add(draft)
+    await test_db.flush()
+    test_db.add(
+        MemoirBookChapterDraftVersion(
+            draft_id=draft.id,
+            project_id=project_id,
+            chapter_id=chapter.id,
+            version=1,
+            content="我小时候常在外婆家的院子里晒太阳。",
+            created_by=MemoirCreatedBy.AI.value,
+            prompt_snapshot="",
+        )
+    )
+    await test_db.commit()
+
+    response = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-plan/chapters/{chapter.id}/draft/confirm"
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "请先补写新增来源"
+
+
+async def test_mobile_memoir_book_chapter_draft_confirm_clears_removed_source_state(client, test_db):
+    created = await _create_voice_transcript(client, test_db, "我小时候常在外婆家的院子里晒太阳。")
+    project_id = created["session"]["project_id"]
+    _, chapter = await _create_book_plan(
+        test_db,
+        project_id=project_id,
+        source_ref=_source_ref(created),
+        status=MemoirBookPlanStatus.CONFIRMED,
+    )
+    chapter.metadata_json = {
+        "removed_source_utterance_ids": ["deleted-utterance"],
+        "source_refs_removed_at": "2026-06-17T00:00:00+00:00",
+    }
+    draft = MemoirBookChapterDraft(
+        project_id=project_id,
+        chapter_id=chapter.id,
+        status=MemoirBookChapterDraftStatus.DRAFT.value,
+        metadata_json={"status_reason": "sources_deleted", "removed_source_utterance_ids": ["deleted-utterance"]},
+    )
+    test_db.add(draft)
+    await test_db.flush()
+    test_db.add(
+        MemoirBookChapterDraftVersion(
+            draft_id=draft.id,
+            project_id=project_id,
+            chapter_id=chapter.id,
+            version=1,
+            content="我小时候常在外婆家的院子里晒太阳。",
+            created_by=MemoirCreatedBy.USER.value,
+            prompt_snapshot="",
+        )
+    )
+    await test_db.commit()
+
+    response = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-plan/chapters/{chapter.id}/draft/confirm"
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "confirmed"
+    assert data["metadata_json"] == {}
+    refreshed_chapter = await test_db.scalar(
+        select(MemoirBookPlanChapter).where(MemoirBookPlanChapter.id == chapter.id)
+    )
+    assert refreshed_chapter.metadata_json == {}
+
+
 async def test_mobile_memoir_book_chapter_draft_update_and_confirm(client, test_db, monkeypatch):
     created = await _create_voice_transcript(client, test_db, "我小时候常在外婆家的院子里晒太阳。")
     project_id = created["session"]["project_id"]

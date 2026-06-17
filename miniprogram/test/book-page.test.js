@@ -323,7 +323,27 @@ test("book page marks assigned sources as supplemental chapter work", () => {
 
   assert.equal(chapters[0].pendingSourceCount, 1);
   assert.equal(chapters[0].draftActionText, "补写新增");
+  assert.equal(chapters[0].sourceChangeNotice, "1 条新增来源待补写");
   assert.equal(chapters[1].draftActionText, "生成本章");
+});
+
+test("book page marks deleted chapter sources for review", () => {
+  const { mod } = loadBookPage();
+  const plan = samplePlan("confirmed");
+  plan.chapters[0].source_refs = [];
+  plan.chapters[0].metadata_json = {
+    removed_source_utterance_ids: ["utterance-1"],
+    source_refs_removed_at: "2026-06-17T00:00:00+00:00",
+  };
+
+  const chapters = mod.buildChapterViews(plan, {
+    "chapter-1": sampleDraft(1, "draft", "第一版正文", { status_reason: "sources_deleted" }),
+  });
+
+  assert.equal(chapters[0].sourceCount, 0);
+  assert.equal(chapters[0].removedSourceCount, 1);
+  assert.equal(chapters[0].draftActionText, "整理本章");
+  assert.equal(chapters[0].sourceChangeNotice, "1 条来源已删除，请检查本章正文");
 });
 
 test("book page confirms chapters with trimmed user edits and original source refs", async () => {

@@ -50,6 +50,8 @@ AI_BOOK_DRAFT_UNAVAILABLE_MESSAGE = "AI 服务暂时不可用，请稍后重试�
 CHAPTER_TTS_CACHE_KEY = "chapter_tts"
 PENDING_SOURCE_UTTERANCE_IDS_KEY = "pending_source_utterance_ids"
 SOURCE_ASSIGNMENT_UPDATED_AT_KEY = "source_assignment_updated_at"
+REMOVED_SOURCE_UTTERANCE_IDS_KEY = "removed_source_utterance_ids"
+SOURCE_REFS_REMOVED_AT_KEY = "source_refs_removed_at"
 logger = logging.getLogger(__name__)
 
 
@@ -86,6 +88,15 @@ def _pending_source_utterance_ids(chapter: MemoirBookPlanChapter) -> set[str]:
     if not isinstance(value, list):
         return set()
     return {item.strip() for item in value if isinstance(item, str) and item.strip()}
+
+
+def _source_change_metadata_keys() -> set[str]:
+    return {
+        PENDING_SOURCE_UTTERANCE_IDS_KEY,
+        SOURCE_ASSIGNMENT_UPDATED_AT_KEY,
+        REMOVED_SOURCE_UTTERANCE_IDS_KEY,
+        SOURCE_REFS_REMOVED_AT_KEY,
+    }
 
 
 def _version_response(version: MemoirBookChapterDraftVersion) -> MemoirBookChapterDraftVersionResponse:
@@ -309,7 +320,7 @@ async def _append_version(
         if chapter:
             chapter.metadata_json = _metadata_without_keys(
                 chapter.metadata_json,
-                {PENDING_SOURCE_UTTERANCE_IDS_KEY, SOURCE_ASSIGNMENT_UPDATED_AT_KEY},
+                _source_change_metadata_keys(),
             )
             db.add(chapter)
 
@@ -442,10 +453,15 @@ async def confirm_chapter_draft(
 ) -> MemoirBookChapterDraftResponse:
     chapter = await _load_chapter(db, user_id=user_id, project_id=project_id, chapter_id=chapter_id)
     _require_confirmed_plan(chapter)
+    if _pending_source_utterance_ids(chapter):
+        raise HTTPException(status_code=400, detail="请先补写新增来源")
     draft = await _load_draft(db, project_id=project_id, chapter_id=chapter_id)
     if not draft or not draft.versions:
         raise HTTPException(status_code=400, detail="章节稿为空，无法确认")
     draft.status = MemoirBookChapterDraftStatus.CONFIRMED.value
+    draft.metadata_json = _metadata_without_keys(draft.metadata_json, {"status_reason", REMOVED_SOURCE_UTTERANCE_IDS_KEY})
+    chapter.metadata_json = _metadata_without_keys(chapter.metadata_json, _source_change_metadata_keys())
+    db.add(chapter)
     await db.commit()
     refreshed = await _load_draft(db, project_id=project_id, chapter_id=chapter_id)
     if not refreshed:
