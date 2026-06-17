@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import logging
+import math
 from typing import Protocol
 
 import httpx
@@ -16,6 +17,12 @@ from app.models.memoir import AudioFile, MemoirChatMessage
 from app.models.projects import Project
 from app.schemas.memoir import MemoirAssistantTTSRequest, MemoirAssistantTTSResponse
 from app.services.memoir.audio_files import discard_staged_audio, stage_audio_bytes
+from app.services.memoir.tts_alignment import (
+    TTSAlignmentResult,
+    alignment_segments_from_json,
+    alignment_segments_to_json,
+    align_tts_audio,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -25,6 +32,7 @@ SUPPORTED_RESPONSE_FORMATS = {
     "wav": ("audio/wav", ".wav"),
     "ogg": ("audio/ogg", ".ogg"),
 }
+TTS_ALIGNMENT_METADATA_KEY = "tts_alignment"
 
 
 @dataclass(frozen=True)
@@ -199,6 +207,63 @@ async def _load_existing_audio(db: AsyncSession, message: MemoirChatMessage) -> 
     return result.scalar_one_or_none()
 
 
+def _message_alignment(message: MemoirChatMessage) -> list[dict[str, object]]:
+    metadata = message.metadata_json or {}
+    return alignment_segments_to_json(alignment_segments_from_json(metadata.get(TTS_ALIGNMENT_METADATA_KEY)))
+
+
+def _message_duration_seconds(message: MemoirChatMessage, audio_file: AudioFile | None = None) -> float | None:
+    value = (message.metadata_json or {}).get("tts_duration_seconds")
+    try:
+        duration = float(value)
+    except (TypeError, ValueError):
+        duration = None
+    if duration is not None and duration >= 0:
+        return duration
+    if audio_file and audio_file.duration_seconds is not None:
+        return float(audio_file.duration_seconds)
+    return None
+
+
+def _tts_response(
+    message: MemoirChatMessage,
+    audio_file: AudioFile,
+    *,
+    provider: str,
+    model: str,
+) -> MemoirAssistantTTSResponse:
+    metadata = message.metadata_json or {}
+    return MemoirAssistantTTSResponse(
+        message=message,
+        audio_file_id=audio_file.id,
+        provider=provider,
+        model=model,
+        mime_type=audio_file.mime_type,
+        duration_seconds=_message_duration_seconds(message, audio_file),
+        alignment_provider=str(metadata.get("tts_alignment_provider") or "") or None,
+        alignment=_message_alignment(message),
+    )
+
+
+async def _align_synthesized_audio(
+    text: str,
+    result: TTSResult,
+) -> TTSAlignmentResult | None:
+    try:
+        return await align_tts_audio(
+            text,
+            result.audio,
+            mime_type=result.mime_type,
+            extension=result.extension,
+        )
+    except HTTPException:
+        logger.exception("TTS alignment failed")
+        return None
+    except Exception:
+        logger.exception("Unexpected TTS alignment failure")
+        return None
+
+
 async def synthesize_assistant_message(
     db: AsyncSession,
     voice_session_id: str,
@@ -210,38 +275,57 @@ async def synthesize_assistant_message(
     message = await _load_assistant_message(db, voice_session_id, message_id, user_id)
     existing_audio = await _load_existing_audio(db, message)
     if existing_audio and not req.force_regenerate:
-        return MemoirAssistantTTSResponse(
-            message=message,
-            audio_file_id=existing_audio.id,
+        return _tts_response(
+            message,
+            existing_audio,
             provider=str(message.metadata_json.get("tts_provider") or "stored"),
             model=str(message.metadata_json.get("tts_model") or ""),
-            mime_type=existing_audio.mime_type,
         )
 
     client = tts_client or get_tts_client()
+    text = message.content_text.strip()
     try:
-        result = await client.synthesize(message.content_text.strip(), voice=req.voice)
+        result = await client.synthesize(text, voice=req.voice)
     except HTTPException:
         raise
     except Exception as exc:
         logger.exception("TTS synthesis failed provider=%s model=%s", client.provider_name, client.model_name)
         raise HTTPException(status_code=503, detail=TTS_UNAVAILABLE_MESSAGE) from exc
 
+    alignment_result = await _align_synthesized_audio(text, result)
+    duration_seconds = alignment_result.duration_seconds if alignment_result else None
     staged_audio = await stage_audio_bytes(
         db,
         user_id,
         result.audio,
         mime_type=result.mime_type,
         extension=result.extension,
+        duration_seconds=math.ceil(duration_seconds) if duration_seconds is not None else None,
     )
     try:
         message.audio_file_id = staged_audio.audio_file.id
+        alignment_metadata = (
+            {
+                TTS_ALIGNMENT_METADATA_KEY: alignment_segments_to_json(alignment_result.segments),
+                "tts_alignment_provider": alignment_result.provider,
+                "tts_alignment_loss": alignment_result.loss,
+                "tts_duration_seconds": alignment_result.duration_seconds,
+            }
+            if alignment_result
+            else {
+                TTS_ALIGNMENT_METADATA_KEY: [],
+                "tts_alignment_provider": None,
+                "tts_alignment_loss": None,
+                "tts_duration_seconds": None,
+            }
+        )
         message.metadata_json = {
             **(message.metadata_json or {}),
             "tts_provider": result.provider,
             "tts_model": result.model,
             "tts_voice": req.voice,
             "tts_mime_type": result.mime_type,
+            **alignment_metadata,
         }
         db.add(message)
         await db.commit()
@@ -252,10 +336,9 @@ async def synthesize_assistant_message(
 
     await db.refresh(message)
     await db.refresh(staged_audio.audio_file)
-    return MemoirAssistantTTSResponse(
-        message=message,
-        audio_file_id=staged_audio.audio_file.id,
+    return _tts_response(
+        message,
+        staged_audio.audio_file,
         provider=result.provider,
         model=result.model,
-        mime_type=staged_audio.audio_file.mime_type,
     )

@@ -3,6 +3,7 @@ from sqlalchemy import select
 from app.domain.memoir.types import MemoirChatContentStatus, MemoirChatMessageRole
 from app.models.memoir import MemoirChatMessage, MemoirVoiceSession, MemoirVoiceUtterance
 from app.services.memoir import voice_sessions as memoir_voice_sessions
+from app.services.memoir.tts_alignment import TTSAlignmentResult, TTSAlignmentSegment
 from app.services.memoir.voice_tts import TTSResult
 
 
@@ -523,7 +524,35 @@ async def test_mobile_memoir_assistant_tts_generates_audio_for_follow_up_message
     await test_db.commit()
     await test_db.refresh(assistant_message)
     fake_tts = FakeTTS()
+    async def fake_align_tts_audio(text, audio, *, mime_type, extension, settings=None):
+        assert text == "你想先聊哪一位亲人？"
+        assert audio == b"fake-mp3-audio"
+        assert mime_type == "audio/mpeg"
+        assert extension == ".mp3"
+        return TTSAlignmentResult(
+            provider="fake-align",
+            duration_seconds=0.42,
+            loss=0.03,
+            segments=[
+                TTSAlignmentSegment(
+                    text="你",
+                    start_ms=0,
+                    end_ms=120,
+                    text_start=0,
+                    text_end=1,
+                ),
+                TTSAlignmentSegment(
+                    text="想",
+                    start_ms=120,
+                    end_ms=240,
+                    text_start=1,
+                    text_end=2,
+                ),
+            ],
+        )
+
     monkeypatch.setattr("app.services.memoir.voice_tts.get_tts_client", lambda: fake_tts)
+    monkeypatch.setattr("app.services.memoir.voice_tts.align_tts_audio", fake_align_tts_audio)
 
     response = await client.post(
         f"/api/mobile/memoir/voice-sessions/{session['id']}/messages/{assistant_message.id}/tts",
@@ -536,12 +565,34 @@ async def test_mobile_memoir_assistant_tts_generates_audio_for_follow_up_message
     assert data["provider"] == "fake-tts"
     assert data["model"] == "fake-tts-model"
     assert data["mime_type"] == "audio/mpeg"
+    assert data["duration_seconds"] == 0.42
+    assert data["alignment_provider"] == "fake-align"
+    assert data["alignment"][:2] == [
+        {
+            "text": "你",
+            "start_ms": 0,
+            "end_ms": 120,
+            "text_start": 0,
+            "text_end": 1,
+            "confidence": None,
+        },
+        {
+            "text": "想",
+            "start_ms": 120,
+            "end_ms": 240,
+            "text_start": 1,
+            "text_end": 2,
+            "confidence": None,
+        },
+    ]
     assert data["message"]["audio_file_id"] == data["audio_file_id"]
     assert fake_tts.calls == [{"text": "你想先聊哪一位亲人？", "voice": "warm"}]
 
     await test_db.refresh(assistant_message)
     assert assistant_message.audio_file_id == data["audio_file_id"]
     assert assistant_message.metadata_json["tts_provider"] == "fake-tts"
+    assert assistant_message.metadata_json["tts_alignment_provider"] == "fake-align"
+    assert assistant_message.metadata_json["tts_alignment"][0]["text"] == "你"
     playback = await client.get(f"/api/mobile/memoir/audio-files/{data['audio_file_id']}/playback")
     assert playback.status_code == 200
     assert playback.content == b"fake-mp3-audio"

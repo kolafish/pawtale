@@ -132,12 +132,24 @@ export interface MemoirAssistantTTSRequest {
   force_regenerate?: boolean;
 }
 
+export interface TTSAlignmentSegment {
+  text: string;
+  start_ms: number;
+  end_ms: number;
+  text_start: number;
+  text_end: number;
+  confidence?: number | null;
+}
+
 export interface MemoirAssistantTTSResponse {
   message: MemoirChatMessage;
   audio_file_id: string;
   provider: string;
   model: string;
   mime_type: string;
+  duration_seconds?: number | null;
+  alignment_provider?: string | null;
+  alignment?: TTSAlignmentSegment[];
 }
 
 export type VoiceGatewayClientEvent =
@@ -178,6 +190,7 @@ export interface VoiceChatTranscriptLine {
   utterance_id?: string;
   audio_file_id?: string | null;
   transcript_version_id?: string | null;
+  metadata_json?: Record<string, unknown>;
   start_ms?: number | null;
   end_ms?: number | null;
 }

@@ -229,12 +229,24 @@ class MemoirVoiceFollowUpResponse(BaseModel):
     follow_up_text: str
 
 
+class MemoirTTSAlignmentSegmentResponse(BaseModel):
+    text: str
+    start_ms: int
+    end_ms: int
+    text_start: int
+    text_end: int
+    confidence: float | None = None
+
+
 class MemoirAssistantTTSResponse(BaseModel):
     message: MemoirChatMessageResponse
     audio_file_id: str
     provider: str
     model: str
     mime_type: str
+    duration_seconds: float | None = None
+    alignment_provider: str | None = None
+    alignment: list[MemoirTTSAlignmentSegmentResponse] = Field(default_factory=list)
 
 
 class MemoirVoiceTranscriptItemResponse(BaseModel):
