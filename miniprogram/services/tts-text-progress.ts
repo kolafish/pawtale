@@ -13,6 +13,12 @@ export interface TTSAlignmentSegment {
   text_end: number;
 }
 
+export interface TTSAudioPlaybackProgressOptions {
+  alignment?: TTSAlignmentSegment[];
+  fallbackDurationSeconds?: number | null;
+  estimateMissingDuration?: boolean;
+}
+
 export function splitTextByPlaybackProgress(text: string, progressRatio: number): TTSProgressText {
   const characters = Array.from(text || "");
   const clampedRatio = Math.max(0, Math.min(1, Number.isFinite(progressRatio) ? progressRatio : 0));
@@ -93,4 +99,35 @@ export function splitTextByTimedAlignment(
     remainingText: characters.slice(currentEnd).join(""),
     progressPercent,
   };
+}
+
+function positiveFiniteSeconds(value: number | null | undefined): number {
+  return Number.isFinite(value) && Number(value) > 0 ? Number(value) : 0;
+}
+
+export function estimateTTSPlaybackDurationSeconds(text: string): number {
+  const spokenCharacters = Array.from((text || "").replace(/\s/g, ""));
+  if (!spokenCharacters.length) {
+    return 0;
+  }
+  return Math.max(1.2, spokenCharacters.length * 0.28);
+}
+
+export function splitTextByAudioPlaybackProgress(
+  text: string,
+  currentTimeSeconds: number,
+  durationSeconds: number,
+  options: TTSAudioPlaybackProgressOptions = {},
+): TTSProgressText {
+  const currentSeconds = Math.max(0, Number.isFinite(currentTimeSeconds) ? currentTimeSeconds : 0);
+  const alignment = options.alignment || [];
+  if (alignment.length) {
+    return splitTextByTimedAlignment(text, currentSeconds * 1000, alignment);
+  }
+
+  const resolvedDurationSeconds = positiveFiniteSeconds(durationSeconds)
+    || positiveFiniteSeconds(options.fallbackDurationSeconds)
+    || (options.estimateMissingDuration ? estimateTTSPlaybackDurationSeconds(text) : 0);
+  const progressRatio = resolvedDurationSeconds > 0 ? currentSeconds / resolvedDurationSeconds : 0;
+  return splitTextByPlaybackProgress(text, progressRatio);
 }

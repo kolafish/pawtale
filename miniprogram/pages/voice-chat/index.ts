@@ -19,7 +19,7 @@ import {
   downloadMemoirVoiceAudio,
   getMemoirVoiceSession,
 } from "../../services/memoir-voice-api";
-import { splitTextByPlaybackProgress, splitTextByTimedAlignment } from "../../services/tts-text-progress";
+import { splitTextByAudioPlaybackProgress } from "../../services/tts-text-progress";
 import { readTTSSettings } from "../../services/tts-settings";
 import { canAutoStartListeningAfterTTS } from "../../services/voice-chat-auto-listen";
 import {
@@ -39,6 +39,7 @@ import {
   ttsAlignmentFromAssistantLine,
   ttsAlignmentFromMetadata,
   ttsAlignmentProviderFromMetadata,
+  ttsDurationSecondsFromMetadata,
   upsertTranscriptLine,
   visibleAssistantLine,
 } from "../../services/voice-chat-state";
@@ -81,6 +82,7 @@ interface VoiceChatData {
   ttsProgressPercent: number;
   ttsAlignment: TTSAlignmentSegment[];
   ttsAlignmentProvider: string;
+  ttsDurationSeconds: number;
   modeLabel: string;
   primaryActionText: string;
   captureStateText: string;
@@ -126,6 +128,9 @@ Page<VoiceChatData, {
   stopFollowUpAudio(): void;
   cancelFollowUpTTS(): void;
   updateFollowUpTTSProgress(currentTime: number, duration: number): void;
+  playbackTimeForProgress(audio: WechatMiniprogram.InnerAudioContext): number;
+  startFollowUpProgressTimer(playToken: number, audio: WechatMiniprogram.InnerAudioContext): void;
+  stopFollowUpProgressTimer(): void;
   resetFollowUpTTSProgress(): void;
   toggleAutoStop(): void;
   connectGateway(): Promise<void>;
@@ -141,10 +146,14 @@ Page<VoiceChatData, {
   handleError(message: string, error?: VoiceChatErrorInfo): void;
   audio: WechatMiniprogram.InnerAudioContext | null;
   ttsPlayToken: number;
+  ttsProgressTimer: number | null;
+  ttsProgressStartedAtMs: number;
   ttsRequestSerial: number;
 }>({
   audio: null,
   ttsPlayToken: 0,
+  ttsProgressTimer: null,
+  ttsProgressStartedAtMs: 0,
   ttsRequestSerial: 0,
 
   data: {
@@ -180,6 +189,7 @@ Page<VoiceChatData, {
     ttsProgressPercent: 0,
     ttsAlignment: [],
     ttsAlignmentProvider: "",
+    ttsDurationSeconds: 0,
     modeLabel: "自由讲述",
     primaryActionText: "开始说话",
     captureStateText: "麦克风未开始",
@@ -251,6 +261,7 @@ Page<VoiceChatData, {
       followUpTTSStateText: assistantLine?.audio_file_id ? "语音已生成" : this.data.followUpTTSStateText,
       ttsAlignment: ttsAlignmentFromAssistantLine(assistantLine),
       ttsAlignmentProvider: ttsAlignmentProviderFromMetadata(assistantLine?.metadata_json),
+      ttsDurationSeconds: ttsDurationSecondsFromMetadata(assistantLine?.metadata_json),
       totalTranscriptCharCount: totalTranscriptChars(snapshot.transcriptLines),
       lastFollowUpSourceMessageId,
       canRequestFollowUp: canRequestFollowUp(
@@ -321,6 +332,7 @@ Page<VoiceChatData, {
       followUpTTSStateText: assistantLine?.audio_file_id ? "语音已生成" : this.data.followUpTTSStateText,
       ttsAlignment: ttsAlignmentFromAssistantLine(assistantLine),
       ttsAlignmentProvider: ttsAlignmentProviderFromMetadata(assistantLine?.metadata_json),
+      ttsDurationSeconds: ttsDurationSecondsFromMetadata(assistantLine?.metadata_json),
       totalTranscriptCharCount: totalTranscriptChars(nextLines),
       lastFollowUpSourceMessageId,
       canRequestFollowUp: canRequestFollowUp(
@@ -393,6 +405,7 @@ Page<VoiceChatData, {
         followUpTTSStateText: "",
         ttsAlignment: ttsAlignmentFromMetadata(response.message.metadata_json),
         ttsAlignmentProvider: ttsAlignmentProviderFromMetadata(response.message.metadata_json),
+        ttsDurationSeconds: ttsDurationSecondsFromMetadata(response.message.metadata_json),
         totalTranscriptCharCount: totalTranscriptChars(transcriptLines),
         persistenceStateText: "等待回答",
         lastFollowUpSourceMessageId: sourceMessageId,
@@ -441,10 +454,12 @@ Page<VoiceChatData, {
       followUpTTSError: "",
       followUpTTSStateText: "",
       ttsSpokenText: "",
+      ttsCurrentText: "",
       ttsRemainingText: "",
       ttsProgressPercent: 0,
       ttsAlignment: [],
       ttsAlignmentProvider: "",
+      ttsDurationSeconds: 0,
       canRequestFollowUp: canRequestFollowUp(
         this.data.transcriptLines,
         this.data.guidanceMode,
@@ -462,17 +477,20 @@ Page<VoiceChatData, {
     this.stopFollowUpAudio();
     const requestSerial = this.ttsRequestSerial + 1;
     this.ttsRequestSerial = requestSerial;
+    const existingMetadata = this.data.transcriptLines.find(
+      (line) => (line.message_id || line.id) === messageId,
+    )?.metadata_json;
     this.setData({
       followUpTTSLoading: true,
       followUpTTSError: "",
       followUpTTSStateText: "正在合成语音",
       ttsSpokenText: "",
+      ttsCurrentText: "",
       ttsRemainingText: this.data.assistantPromptText,
       ttsProgressPercent: 0,
-      ttsAlignment: ttsAlignmentFromMetadata(this.data.transcriptLines.find(
-        (line) => (line.message_id || line.id) === messageId,
-      )?.metadata_json),
+      ttsAlignment: ttsAlignmentFromMetadata(existingMetadata),
       ttsAlignmentProvider: "",
+      ttsDurationSeconds: ttsDurationSecondsFromMetadata(existingMetadata),
     });
     try {
       const ttsSettings = readTTSSettings();
@@ -496,6 +514,8 @@ Page<VoiceChatData, {
       const responseAlignment = response.alignment && response.alignment.length
         ? response.alignment
         : ttsAlignmentFromMetadata(response.message.metadata_json);
+      const responseDurationSeconds = response.duration_seconds
+        || ttsDurationSecondsFromMetadata(response.message.metadata_json);
       this.setData({
         transcriptLines,
         followUpMessageId: response.message.id,
@@ -504,6 +524,7 @@ Page<VoiceChatData, {
         followUpTTSStateText: "语音已生成",
         ttsAlignment: responseAlignment,
         ttsAlignmentProvider: response.alignment_provider || ttsAlignmentProviderFromMetadata(response.message.metadata_json),
+        ttsDurationSeconds: responseDurationSeconds,
       });
       writeMemoirVoiceSessionSnapshot(this.data.voiceSessionId, { transcriptLines });
       await this.playAudioFile(response.audio_file_id, { autoListenAfterPlayback });
@@ -556,13 +577,23 @@ Page<VoiceChatData, {
       this.audio = audio;
       configureAudiblePlayback(audio);
       audio.src = tempFilePath;
-      audio.onTimeUpdate(() => {
+      const refreshPlaybackProgress = () => {
         if (playToken === this.ttsPlayToken) {
-          this.updateFollowUpTTSProgress(audio.currentTime, audio.duration);
+          this.updateFollowUpTTSProgress(this.playbackTimeForProgress(audio), audio.duration);
         }
+      };
+      audio.onPlay(() => {
+        if (playToken === this.ttsPlayToken) {
+          this.ttsProgressStartedAtMs = Date.now();
+          this.startFollowUpProgressTimer(playToken, audio);
+        }
+      });
+      audio.onTimeUpdate(() => {
+        refreshPlaybackProgress();
       });
       audio.onEnded(() => {
         if (playToken === this.ttsPlayToken) {
+          this.stopFollowUpProgressTimer();
           this.setData({
             followUpTTSPlaying: false,
             followUpTTSStateText: options.autoListenAfterPlayback ? "播放完成，正在听你说" : "播放完成",
@@ -582,6 +613,7 @@ Page<VoiceChatData, {
       });
       audio.onError(() => {
         if (playToken === this.ttsPlayToken) {
+          this.stopFollowUpProgressTimer();
           this.setData({
             followUpTTSPlaying: false,
             followUpTTSError: "AI 语音播放失败",
@@ -594,6 +626,7 @@ Page<VoiceChatData, {
         }
       });
       audio.play();
+      this.startFollowUpProgressTimer(playToken, audio);
     } catch (error) {
       if (playToken === this.ttsPlayToken) {
         this.setData({
@@ -607,6 +640,7 @@ Page<VoiceChatData, {
 
   stopFollowUpAudio() {
     this.ttsPlayToken += 1;
+    this.stopFollowUpProgressTimer();
     if (this.audio) {
       this.audio.stop();
       this.audio.destroy();
@@ -636,16 +670,53 @@ Page<VoiceChatData, {
       this.resetFollowUpTTSProgress();
       return;
     }
-    const progressRatio = duration > 0 ? currentTime / duration : 0;
-    const progress = this.data.ttsAlignment.length
-      ? splitTextByTimedAlignment(text, currentTime * 1000, this.data.ttsAlignment)
-      : splitTextByPlaybackProgress(text, progressRatio);
+    const progress = splitTextByAudioPlaybackProgress(text, currentTime, duration, {
+      alignment: this.data.ttsAlignment,
+      fallbackDurationSeconds: this.data.ttsDurationSeconds,
+      estimateMissingDuration: true,
+    });
     this.setData({
       ttsSpokenText: progress.spokenText,
       ttsCurrentText: progress.currentText,
       ttsRemainingText: progress.remainingText,
       ttsProgressPercent: progress.progressPercent,
     });
+  },
+
+  playbackTimeForProgress(audio) {
+    const currentTime = Number(audio.currentTime);
+    if (Number.isFinite(currentTime) && currentTime > 0) {
+      return currentTime;
+    }
+    if (this.ttsProgressStartedAtMs > 0) {
+      return Math.max(0, (Date.now() - this.ttsProgressStartedAtMs) / 1000);
+    }
+    return 0;
+  },
+
+  startFollowUpProgressTimer(playToken, audio) {
+    this.stopFollowUpProgressTimer();
+    if (this.ttsProgressStartedAtMs <= 0) {
+      this.ttsProgressStartedAtMs = Date.now();
+    }
+    const timer = setInterval(() => {
+      if (playToken !== this.ttsPlayToken || this.audio !== audio || !this.data.followUpTTSPlaying) {
+        if (this.ttsProgressTimer === timer) {
+          this.stopFollowUpProgressTimer();
+        }
+        return;
+      }
+      this.updateFollowUpTTSProgress(this.playbackTimeForProgress(audio), audio.duration);
+    }, 250);
+    this.ttsProgressTimer = timer;
+  },
+
+  stopFollowUpProgressTimer() {
+    if (this.ttsProgressTimer !== null) {
+      clearInterval(this.ttsProgressTimer);
+      this.ttsProgressTimer = null;
+    }
+    this.ttsProgressStartedAtMs = 0;
   },
 
   resetFollowUpTTSProgress() {

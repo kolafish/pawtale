@@ -112,6 +112,11 @@ export function ttsAlignmentProviderFromMetadata(metadata?: Record<string, unkno
   return typeof provider === "string" ? provider : "";
 }
 
+export function ttsDurationSecondsFromMetadata(metadata?: Record<string, unknown>): number {
+  const duration = Number(metadata?.tts_duration_seconds);
+  return Number.isFinite(duration) && duration > 0 ? duration : 0;
+}
+
 export function ttsAlignmentFromAssistantLine(line?: VoiceChatTranscriptLine): TTSAlignmentSegment[] {
   return ttsAlignmentFromMetadata(line?.metadata_json);
 }
