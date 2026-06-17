@@ -15,6 +15,7 @@ from app.schemas.memoir_book import (
     MemoirBookPlanConfirmRequest,
     MemoirBookPlanGenerateRequest,
     MemoirBookPlanResponse,
+    MemoirBookSourceCoverageResponse,
 )
 from app.services.memoir import book_drafts as memoir_book_drafts
 from app.services.memoir import book_outputs as memoir_book_outputs
@@ -64,6 +65,19 @@ async def confirm_mobile_memoir_book_plan(
         user_id=current_user.id,
         project_id=project_id,
         req=req,
+    )
+
+
+@router.get("/projects/{project_id}/book-source-coverage", response_model=MemoirBookSourceCoverageResponse)
+async def get_mobile_memoir_book_source_coverage(
+    project_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await memoir_book_plans.get_book_source_coverage(
+        db,
+        user_id=current_user.id,
+        project_id=project_id,
     )
 
 

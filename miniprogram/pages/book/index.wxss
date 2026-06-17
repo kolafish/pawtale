@@ -102,6 +102,61 @@
   line-height: 1.35;
 }
 
+.coverage-panel {
+  margin-top: 20rpx;
+  padding: 24rpx 26rpx;
+  border: 2rpx solid #efc87a;
+  border-radius: 22rpx;
+  background: #fff7dc;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20rpx;
+  box-sizing: border-box;
+}
+
+.coverage-copy {
+  min-width: 0;
+  flex: 1;
+}
+
+.coverage-title {
+  display: block;
+  color: #6f3d08;
+  font-size: 28rpx;
+  font-weight: 800;
+  line-height: 1.35;
+  word-break: break-word;
+}
+
+.coverage-meta {
+  display: block;
+  margin-top: 8rpx;
+  color: #7b5a2a;
+  font-size: 24rpx;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.coverage-link {
+  flex: 0 0 auto;
+  min-width: 144rpx;
+  height: 68rpx;
+  margin: 0;
+  padding: 0 18rpx;
+  border: 0;
+  border-radius: 18rpx;
+  background: #9f4a3c;
+  color: #ffffff;
+  font-size: 24rpx;
+  font-weight: 800;
+  line-height: 68rpx;
+}
+
+.coverage-link::after {
+  border: 0;
+}
+
 .status-pill,
 .source-count,
 .draft-status,

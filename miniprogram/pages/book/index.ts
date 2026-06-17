@@ -5,6 +5,7 @@ import type {
   MemoirBookPlan,
   MemoirBookPlanChapter,
   MemoirBookPlanChapterInput,
+  MemoirBookSourceCoverage,
 } from "../../domain/voice-chat";
 import { getMemoirIdentity } from "../../services/auth";
 import {
@@ -19,6 +20,7 @@ import {
   getMemoirBookChapterDraft,
   getMemoirBookOutput,
   getMemoirBookPlan,
+  getMemoirBookSourceCoverage,
   updateMemoirBookChapterDraft,
 } from "../../services/memoir-voice-api";
 import { configureAudiblePlayback } from "../../services/audio-playback";
@@ -74,6 +76,9 @@ interface BookData {
   hasDraftChanges: boolean;
   canGenerateBook: boolean;
   progressText: string;
+  sourceCoverage: MemoirBookSourceCoverage | null;
+  sourceCoverageNotice: string;
+  uncoveredSourceCount: number;
   bookOutput: MemoirBookOutput | null;
   bookContent: string;
   bookCharCount: number;
@@ -122,6 +127,31 @@ function bookOutputData(output: MemoirBookOutput | null): Pick<
     bookContent: content,
     bookCharCount: trimText(content).length,
     bookVersionText: bookOutputVersionText(output),
+  };
+}
+
+export function bookSourceCoverageNotice(
+  plan: MemoirBookPlan | null,
+  coverage: MemoirBookSourceCoverage | null,
+): string {
+  const count = coverage?.uncovered_source_count || 0;
+  if (!count) {
+    return "";
+  }
+  if (!plan) {
+    return `有 ${count} 条转写可用于生成章节`;
+  }
+  return `有 ${count} 条新转写尚未收录到书中`;
+}
+
+function sourceCoverageData(
+  plan: MemoirBookPlan | null,
+  coverage: MemoirBookSourceCoverage | null,
+): Pick<BookData, "sourceCoverage" | "sourceCoverageNotice" | "uncoveredSourceCount"> {
+  return {
+    sourceCoverage: coverage,
+    sourceCoverageNotice: bookSourceCoverageNotice(plan, coverage),
+    uncoveredSourceCount: coverage?.uncovered_source_count || 0,
   };
 }
 
@@ -226,8 +256,10 @@ Page<BookData, {
   loadPlanForProject(projectId: string): Promise<void>;
   loadDraftsForPlan(plan: MemoirBookPlan): Promise<Record<string, MemoirBookChapterDraft | null>>;
   loadBookOutput(projectId: string): Promise<MemoirBookOutput | null>;
+  loadSourceCoverage(projectId: string): Promise<MemoirBookSourceCoverage | null>;
   applyPlan(plan: MemoirBookPlan | null, draftsByChapterId?: Record<string, MemoirBookChapterDraft | null>): void;
   applyBookOutput(output: MemoirBookOutput | null): void;
+  applySourceCoverage(coverage: MemoirBookSourceCoverage | null): void;
   generatePlan(): Promise<void>;
   confirmPlan(): Promise<void>;
   changePlanTitle(event: TextInputEvent): void;
@@ -276,6 +308,9 @@ Page<BookData, {
     hasDraftChanges: false,
     canGenerateBook: false,
     progressText: "还没有章节",
+    sourceCoverage: null,
+    sourceCoverageNotice: "",
+    uncoveredSourceCount: 0,
     bookOutput: null,
     bookContent: "",
     bookCharCount: 0,
@@ -304,6 +339,7 @@ Page<BookData, {
       this.setData({ projectId, projectTitle });
       if (!projectId) {
         this.applyPlan(null);
+        this.applySourceCoverage(null);
         return;
       }
       await this.loadPlanForProject(projectId);
@@ -320,6 +356,8 @@ Page<BookData, {
 
   async loadPlanForProject(projectId: string) {
     try {
+      const coverage = await this.loadSourceCoverage(projectId);
+      this.applySourceCoverage(coverage);
       const plan = await getMemoirBookPlan(projectId);
       let draftsByChapterId: Record<string, MemoirBookChapterDraft | null> = {};
       let output: MemoirBookOutput | null = null;
@@ -331,6 +369,7 @@ Page<BookData, {
       }
       this.applyPlan(plan, draftsByChapterId);
       this.applyBookOutput(output);
+      this.applySourceCoverage(coverage);
     } catch (error) {
       if (error instanceof ApiError && error.statusCode === 404) {
         this.applyPlan(null);
@@ -372,6 +411,17 @@ Page<BookData, {
     }
   },
 
+  async loadSourceCoverage(projectId) {
+    try {
+      return await getMemoirBookSourceCoverage(projectId);
+    } catch (error) {
+      if (error instanceof ApiError && error.statusCode === 404) {
+        return null;
+      }
+      throw error;
+    }
+  },
+
   applyPlan(plan, draftsByChapterId = {}) {
     const chapters = plan ? buildChapterViews(plan, draftsByChapterId) : [];
     const stage = planStage(plan);
@@ -382,12 +432,17 @@ Page<BookData, {
       stageText: stageText(stage),
       chapters,
       ...chapterStateData(chapters),
+      ...sourceCoverageData(plan, this.data.sourceCoverage),
       ...(stage === "drafting" ? {} : bookOutputData(null)),
     });
   },
 
   applyBookOutput(output) {
     this.setData(bookOutputData(output));
+  },
+
+  applySourceCoverage(coverage) {
+    this.setData(sourceCoverageData(this.data.plan, coverage));
   },
 
   async generatePlan() {

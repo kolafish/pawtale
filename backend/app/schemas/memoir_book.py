@@ -97,6 +97,28 @@ class MemoirBookPlanResponse(BaseModel):
     updated_at: datetime
 
 
+class MemoirBookSourceCoverageItem(BaseModel):
+    source_index: int
+    voice_session_id: str
+    message_id: str
+    utterance_id: str
+    transcript_version_id: str | None = None
+    audio_file_id: str | None = None
+    start_ms: int | None = None
+    end_ms: int | None = None
+    text: str
+    created_at: datetime
+
+
+class MemoirBookSourceCoverageResponse(BaseModel):
+    project_id: str
+    plan_id: str | None = None
+    total_source_count: int
+    covered_source_count: int
+    uncovered_source_count: int
+    uncovered_sources: list[MemoirBookSourceCoverageItem] = Field(default_factory=list)
+
+
 class MemoirBookChapterDraftGenerateRequest(BaseModel):
     ai_model: str | None = None
     force_regenerate: bool = False

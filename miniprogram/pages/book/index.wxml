@@ -19,6 +19,14 @@
     <text class="status-pill">{{stageText}}</text>
   </view>
 
+  <view wx:if="{{sourceCoverageNotice}}" class="coverage-panel">
+    <view class="coverage-copy">
+      <text class="coverage-title">{{sourceCoverageNotice}}</text>
+      <text class="coverage-meta">新录音会先进入转写记录，不会自动改动已确认章节和全书。</text>
+    </view>
+    <button class="coverage-link" bindtap="openTranscripts">查看转写</button>
+  </view>
+
   <view wx:if="{{loading && !plan}}" class="empty-panel">
     <text>正在加载</text>
   </view>
