@@ -22,7 +22,7 @@ from app.models.memoir import (
     MemoirVoiceSession,
     MemoirVoiceUtterance,
 )
-from app.schemas.memoir import (
+from app.schemas.memoir_book import (
     MemoirBookChapterDraftGenerateRequest,
     MemoirBookChapterDraftResponse,
     MemoirBookChapterDraftUpdateRequest,
