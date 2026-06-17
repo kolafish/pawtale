@@ -39,6 +39,32 @@ class TestAuthAPI:
         response = await anonymous_client.get("/api/projects")
         assert response.status_code == 401
 
+    async def test_update_me_display_name(self, anonymous_client, test_db):
+        register = await anonymous_client.post(
+            "/api/auth/register",
+            json={
+                "email": "profile@example.com",
+                "password": "password123",
+                "display_name": "旧昵称",
+            },
+        )
+        assert register.status_code == 201
+
+        update = await anonymous_client.patch("/api/auth/me", json={"display_name": "  新昵称  "})
+        assert update.status_code == 200
+        assert update.json()["display_name"] == "新昵称"
+
+        user = await test_db.scalar(select(User).where(User.email == "profile@example.com"))
+        assert user is not None
+        assert user.display_name == "新昵称"
+
+        invalid = await anonymous_client.patch("/api/auth/me", json={"display_name": "   "})
+        assert invalid.status_code == 422
+
+        await anonymous_client.post("/api/auth/logout")
+        unauthorized = await anonymous_client.patch("/api/auth/me", json={"display_name": "游客"})
+        assert unauthorized.status_code == 401
+
     async def test_projects_are_isolated_between_users(self, anonymous_client):
         first_register = await anonymous_client.post(
             "/api/auth/register",

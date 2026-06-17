@@ -11,9 +11,26 @@
       <text>{{avatarText}}</text>
     </view>
     <view class="profile-main">
-      <text class="profile-name">{{displayName || "作者"}}</text>
+      <view wx:if="{{editingName}}" class="name-edit-row">
+        <input
+          class="name-input"
+          value="{{nameDraft}}"
+          maxlength="40"
+          placeholder="填写昵称"
+          focus="{{editingName}}"
+          bindinput="changeNameDraft"
+        />
+      </view>
+      <text wx:else class="profile-name">{{displayName || "作者"}}</text>
       <text class="profile-email">{{email || "正在加载账号"}}</text>
     </view>
+    <view wx:if="{{editingName}}" class="profile-actions">
+      <button class="mini-button ghost" disabled="{{savingName}}" bindtap="cancelEditName">取消</button>
+      <button class="mini-button primary" loading="{{savingName}}" disabled="{{savingName}}" bindtap="saveDisplayName">
+        保存
+      </button>
+    </view>
+    <button wx:else class="edit-name-button" disabled="{{loading}}" bindtap="startEditName">编辑</button>
   </view>
 
   <view class="section">

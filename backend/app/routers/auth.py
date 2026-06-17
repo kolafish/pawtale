@@ -20,6 +20,7 @@ from app.schemas.auth import (
     AuthRegisterRequest,
     AuthResponse,
     AuthSetCredentialsRequest,
+    AuthUpdateProfileRequest,
     UserResponse,
     WeChatBindRequest,
     WeChatLoginRequest,
@@ -236,4 +237,16 @@ async def logout(response: Response):
 
 @router.get("/me", response_model=UserResponse)
 async def me(current_user: User = Depends(get_current_user)):
+    return UserResponse.model_validate(current_user)
+
+
+@router.patch("/me", response_model=UserResponse)
+async def update_me(
+    req: AuthUpdateProfileRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    current_user.display_name = req.display_name
+    await db.commit()
+    await db.refresh(current_user)
     return UserResponse.model_validate(current_user)

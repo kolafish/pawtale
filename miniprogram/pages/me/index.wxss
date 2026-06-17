@@ -55,6 +55,7 @@
 }
 
 .profile-main {
+  flex: 1;
   min-width: 0;
 }
 
@@ -73,6 +74,73 @@
   font-size: 25rpx;
   line-height: 1.35;
   word-break: break-all;
+}
+
+.name-edit-row {
+  min-width: 0;
+}
+
+.name-input {
+  width: 100%;
+  height: 72rpx;
+  padding: 0 18rpx;
+  border: 2rpx solid #efd6c4;
+  border-radius: 16rpx;
+  background: #fffaf2;
+  color: #24100b;
+  font-size: 30rpx;
+  font-weight: 800;
+  box-sizing: border-box;
+}
+
+.profile-actions {
+  width: 148rpx;
+  display: grid;
+  gap: 10rpx;
+}
+
+.mini-button,
+.edit-name-button {
+  margin: 0;
+  border: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+}
+
+.mini-button::after,
+.edit-name-button::after {
+  border: 0;
+}
+
+.mini-button {
+  height: 56rpx;
+  border-radius: 14rpx;
+  font-size: 24rpx;
+}
+
+.mini-button.ghost {
+  background: #fff1ec;
+  color: #8a4034;
+}
+
+.mini-button.primary,
+.edit-name-button {
+  background: #9f4a3c;
+  color: #ffffff;
+}
+
+.edit-name-button {
+  width: 96rpx;
+  height: 60rpx;
+  border-radius: 16rpx;
+  font-size: 24rpx;
+}
+
+.mini-button[disabled],
+.edit-name-button[disabled] {
+  opacity: 0.66;
 }
 
 .section {
