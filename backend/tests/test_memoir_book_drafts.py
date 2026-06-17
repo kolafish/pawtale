@@ -1,6 +1,7 @@
 from sqlalchemy import select
 
 from app.domain.memoir.types import (
+    MemoirBookChapterDraftStatus,
     MemoirBookPlanStatus,
     MemoirChatContentStatus,
     MemoirChatMessageRole,
@@ -275,6 +276,128 @@ async def test_mobile_memoir_book_chapter_draft_regenerate_appends_version_with_
     assert data["latest_version"]["content"] == "第二版正文"
     assert data["latest_version"]["feedback"] == "更贴近原话"
     assert len(data["versions"]) == 2
+
+
+async def test_mobile_memoir_book_chapter_draft_supplements_pending_sources_without_force(
+    client,
+    test_db,
+    monkeypatch,
+):
+    first = await _create_voice_transcript(client, test_db, "我小时候常在外婆家的院子里晒太阳。")
+    second = await _create_voice_transcript(client, test_db, "后来我又讲了第一次离家去县城读书。")
+    project_id = first["session"]["project_id"]
+    _, chapter = await _create_book_plan(
+        test_db,
+        project_id=project_id,
+        source_ref=_source_ref(first),
+        status=MemoirBookPlanStatus.CONFIRMED,
+    )
+    chapter.source_refs_json = [_source_ref(first), _source_ref(second, "第一次离家")]
+    chapter.metadata_json = {
+        "pending_source_utterance_ids": [second["utterance_id"]],
+        "source_assignment_updated_at": "2026-06-17T00:00:00+00:00",
+    }
+    draft = MemoirBookChapterDraft(
+        project_id=project_id,
+        chapter_id=chapter.id,
+        status=MemoirBookChapterDraftStatus.DRAFT.value,
+        metadata_json={"status_reason": "new_sources_assigned"},
+    )
+    test_db.add(draft)
+    await test_db.flush()
+    test_db.add(
+        MemoirBookChapterDraftVersion(
+            draft_id=draft.id,
+            project_id=project_id,
+            chapter_id=chapter.id,
+            version=1,
+            content="我小时候常在外婆家的院子里晒太阳。",
+            created_by=MemoirCreatedBy.AI.value,
+            prompt_snapshot="old prompt",
+        )
+    )
+    await test_db.commit()
+    fake_ai = FakeBookDraftAI("我小时候常在外婆家的院子里晒太阳。后来我第一次离家去县城读书。")
+    monkeypatch.setattr(
+        "app.services.memoir.book_drafts.get_ai_service",
+        lambda model=None: fake_ai,
+    )
+
+    response = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-plan/chapters/{chapter.id}/draft",
+        json={},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["latest_version"]["version"] == 2
+    assert "第一次离家去县城读书" in data["latest_version"]["content"]
+    assert data["metadata_json"] == {}
+    assert len(fake_ai.calls) == 1
+    prompt = fake_ai.calls[0]["user_prompt"]
+    assert "原章节正文" in prompt
+    assert "本次任务：只把 source_type 为“新增来源”" in prompt
+    assert f"utterance_id: {first['utterance_id']}" in prompt
+    assert f"utterance_id: {second['utterance_id']}" in prompt
+    assert "source_type: 既有来源" in prompt
+    assert "source_type: 新增来源" in prompt
+
+    refreshed_chapter = await test_db.scalar(
+        select(MemoirBookPlanChapter).where(MemoirBookPlanChapter.id == chapter.id)
+    )
+    assert refreshed_chapter.metadata_json == {}
+
+
+async def test_mobile_memoir_book_chapter_draft_update_clears_pending_source_state(client, test_db):
+    first = await _create_voice_transcript(client, test_db, "我小时候常在外婆家的院子里晒太阳。")
+    second = await _create_voice_transcript(client, test_db, "后来我又讲了第一次离家去县城读书。")
+    project_id = first["session"]["project_id"]
+    _, chapter = await _create_book_plan(
+        test_db,
+        project_id=project_id,
+        source_ref=_source_ref(first),
+        status=MemoirBookPlanStatus.CONFIRMED,
+    )
+    chapter.source_refs_json = [_source_ref(first), _source_ref(second, "第一次离家")]
+    chapter.metadata_json = {
+        "pending_source_utterance_ids": [second["utterance_id"]],
+        "source_assignment_updated_at": "2026-06-17T00:00:00+00:00",
+    }
+    draft = MemoirBookChapterDraft(
+        project_id=project_id,
+        chapter_id=chapter.id,
+        status=MemoirBookChapterDraftStatus.DRAFT.value,
+        metadata_json={"status_reason": "new_sources_assigned"},
+    )
+    test_db.add(draft)
+    await test_db.flush()
+    test_db.add(
+        MemoirBookChapterDraftVersion(
+            draft_id=draft.id,
+            project_id=project_id,
+            chapter_id=chapter.id,
+            version=1,
+            content="我小时候常在外婆家的院子里晒太阳。",
+            created_by=MemoirCreatedBy.AI.value,
+            prompt_snapshot="old prompt",
+        )
+    )
+    await test_db.commit()
+
+    response = await client.patch(
+        f"/api/mobile/memoir/projects/{project_id}/book-plan/chapters/{chapter.id}/draft",
+        json={"content": "我小时候常在外婆家的院子里晒太阳。后来我第一次离家去县城读书。"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["latest_version"]["version"] == 2
+    assert data["latest_version"]["created_by"] == "user"
+    assert data["metadata_json"] == {}
+    refreshed_chapter = await test_db.scalar(
+        select(MemoirBookPlanChapter).where(MemoirBookPlanChapter.id == chapter.id)
+    )
+    assert refreshed_chapter.metadata_json == {}
 
 
 async def test_mobile_memoir_book_chapter_draft_update_and_confirm(client, test_db, monkeypatch):

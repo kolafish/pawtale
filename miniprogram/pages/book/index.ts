@@ -66,12 +66,14 @@ export interface BookChapterView extends MemoirBookPlanChapter {
   ttsTarget: string;
   sourceCount: number;
   sourceSummary: string;
+  pendingSourceCount: number;
   draft: MemoirBookChapterDraft | null;
   draftContent: string;
   draftCharCount: number;
   draftChanged: boolean;
   draftStatusText: string;
   draftVersionText: string;
+  draftActionText: string;
   draftBusy: boolean;
   draftError: string;
 }
@@ -124,9 +126,42 @@ function draftStatusText(draft: MemoirBookChapterDraft | null): string {
   return draft.status === "confirmed" ? "已确认" : "待确认";
 }
 
+function pendingSourceCount(metadata: Record<string, unknown> | null | undefined): number {
+  const value = metadata?.pending_source_utterance_ids;
+  if (!Array.isArray(value)) {
+    return 0;
+  }
+  return value.filter((item) => typeof item === "string" && item.trim()).length;
+}
+
+function sourceSupplementCount(
+  metadata: Record<string, unknown> | null | undefined,
+  draft: MemoirBookChapterDraft | null,
+): number {
+  const count = pendingSourceCount(metadata);
+  if (count) {
+    return count;
+  }
+  return draft?.metadata_json?.status_reason === "new_sources_assigned" ? 1 : 0;
+}
+
+function draftActionText(draft: MemoirBookChapterDraft | null, pendingCount: number): string {
+  if (pendingCount) {
+    return "补写新增";
+  }
+  return draft?.latest_version ? "重新生成" : "生成本章";
+}
+
 function draftVersionText(draft: MemoirBookChapterDraft | null): string {
   const version = draft?.latest_version?.version;
   return version ? `第 ${version} 版` : "暂无正文";
+}
+
+function clearPendingSourceMetadata(metadata: Record<string, unknown> | null | undefined): Record<string, unknown> {
+  const next = { ...(metadata || {}) };
+  delete next.pending_source_utterance_ids;
+  delete next.source_assignment_updated_at;
+  return next;
 }
 
 export function latestBookContent(output: MemoirBookOutput | null): string {
@@ -236,6 +271,7 @@ export function buildChapterViews(
     .map((chapter) => {
       const draft = draftsByChapterId[chapter.id] || null;
       const content = latestDraftContent(draft);
+      const assignedPendingCount = sourceSupplementCount(chapter.metadata_json, draft);
       return {
         ...chapter,
         editingTitle: chapter.title,
@@ -243,12 +279,14 @@ export function buildChapterViews(
         ttsTarget: `chapter:${chapter.id}`,
         sourceCount: chapter.source_refs.length,
         sourceSummary: bookChapterSourceSummary(chapter),
+        pendingSourceCount: assignedPendingCount,
         draft,
         draftContent: content,
         draftCharCount: trimText(content).length,
         draftChanged: false,
         draftStatusText: draftStatusText(draft),
         draftVersionText: draftVersionText(draft),
+        draftActionText: draftActionText(draft, assignedPendingCount),
         draftBusy: false,
         draftError: "",
       };
@@ -325,7 +363,7 @@ Page<BookData, {
   openTranscripts(): void;
   openHome(): void;
   patchChapter(chapterId: string, patch: Partial<BookChapterView>): void;
-  patchDraft(chapterId: string, draft: MemoirBookChapterDraft): void;
+  patchDraft(chapterId: string, draft: MemoirBookChapterDraft, options?: { clearPendingSources?: boolean }): void;
   clearBookOutput(): void;
   audio: WechatMiniprogram.InnerAudioContext | null;
   playToken: number;
@@ -589,7 +627,7 @@ Page<BookData, {
       const draft = await generateMemoirBookChapterDraft(this.data.projectId, chapterId, {
         force_regenerate: Boolean(chapter.draft?.latest_version),
       });
-      this.patchDraft(chapterId, draft);
+      this.patchDraft(chapterId, draft, { clearPendingSources: true });
       wx.showToast({ title: "章节稿已生成", icon: "success" });
     } catch (error) {
       this.patchChapter(chapterId, {
@@ -630,7 +668,7 @@ Page<BookData, {
     this.patchChapter(chapterId, { draftBusy: true, draftError: "" });
     try {
       const draft = await updateMemoirBookChapterDraft(this.data.projectId, chapterId, { content });
-      this.patchDraft(chapterId, draft);
+      this.patchDraft(chapterId, draft, { clearPendingSources: true });
       wx.showToast({ title: "章节稿已保存", icon: "success" });
     } catch (error) {
       this.patchChapter(chapterId, {
@@ -924,15 +962,23 @@ Page<BookData, {
     });
   },
 
-  patchDraft(chapterId, draft) {
+  patchDraft(chapterId, draft, options) {
+    const chapter = this.data.chapters.find((candidate) => candidate.id === chapterId);
+    const metadata = options?.clearPendingSources
+      ? clearPendingSourceMetadata(chapter?.metadata_json)
+      : (chapter?.metadata_json || {});
+    const assignedPendingCount = sourceSupplementCount(metadata, draft);
     const content = latestDraftContent(draft);
     this.patchChapter(chapterId, {
+      metadata_json: metadata,
+      pendingSourceCount: assignedPendingCount,
       draft,
       draftContent: content,
       draftCharCount: trimText(content).length,
       draftChanged: false,
       draftStatusText: draftStatusText(draft),
       draftVersionText: draftVersionText(draft),
+      draftActionText: draftActionText(draft, assignedPendingCount),
       draftError: "",
     });
     this.clearBookOutput();

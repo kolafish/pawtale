@@ -48,6 +48,8 @@ from app.services.memoir.voice_tts import TTSClient
 SYSTEM_PROMPT = "你是一位谨慎的中文回忆录整理写作者，只能把给定口述材料整理成章节正文。"
 AI_BOOK_DRAFT_UNAVAILABLE_MESSAGE = "AI 服务暂时不可用，请稍后重试。"
 CHAPTER_TTS_CACHE_KEY = "chapter_tts"
+PENDING_SOURCE_UTTERANCE_IDS_KEY = "pending_source_utterance_ids"
+SOURCE_ASSIGNMENT_UPDATED_AT_KEY = "source_assignment_updated_at"
 logger = logging.getLogger(__name__)
 
 
@@ -70,6 +72,20 @@ def _strip_generated_text(text: str) -> str:
     if len(content) >= 2 and content[0] in {"“", "「", '"', "'"} and content[-1] in {"”", "」", '"', "'"}:
         content = content[1:-1].strip()
     return content
+
+
+def _metadata_without_keys(metadata_json: dict | None, keys: set[str]) -> dict[str, object]:
+    metadata = dict(metadata_json or {})
+    for key in keys:
+        metadata.pop(key, None)
+    return metadata
+
+
+def _pending_source_utterance_ids(chapter: MemoirBookPlanChapter) -> set[str]:
+    value = (chapter.metadata_json or {}).get(PENDING_SOURCE_UTTERANCE_IDS_KEY, [])
+    if not isinstance(value, list):
+        return set()
+    return {item.strip() for item in value if isinstance(item, str) and item.strip()}
 
 
 def _version_response(version: MemoirBookChapterDraftVersion) -> MemoirBookChapterDraftVersionResponse:
@@ -193,10 +209,14 @@ def _build_draft_prompt(
     chapter: MemoirBookPlanChapter,
     sources: list[ChapterSourceText],
     feedback: str | None,
+    previous_content: str | None = None,
+    pending_source_utterance_ids: set[str] | None = None,
 ) -> str:
+    pending_ids = pending_source_utterance_ids or set()
     source_text = "\n\n".join(
         (
             f"source {index}\n"
+            f"source_type: {'新增来源' if source.ref.utterance_id in pending_ids else '既有来源'}\n"
             f"utterance_id: {source.ref.utterance_id}\n"
             f"quote: {source.ref.quote}\n"
             f"transcript: {source.text}"
@@ -204,11 +224,24 @@ def _build_draft_prompt(
         for index, source in enumerate(sources, start=1)
     )
     feedback_text = f"\n用户反馈：{feedback.strip()}\n" if feedback else ""
+    previous_text = (
+        f"\n原章节正文（作为补写基础，尽量保留原有表达和段落）：\n{previous_content.strip()}\n"
+        if previous_content
+        else ""
+    )
+    supplement_text = (
+        "\n本次任务：只把 source_type 为“新增来源”的转写里用户确实讲过的内容自然补入原章节正文；"
+        "没有新增来源支撑的内容不要扩写，既有段落不要无故重写。\n"
+        if pending_ids and previous_content
+        else ""
+    )
     return f"""请把下面口述材料整理成一个回忆录章节正文。
 
 章节标题：{chapter.title}
 章节范围：{chapter.summary or "只整理本章来源转写里已经讲过的内容。"}
 {feedback_text}
+{previous_text}
+{supplement_text}
 写作要求：
 - 必须以叙述者已讲述的内容为主，使用第一人称或贴近原话的叙述。
 - 不新增事实、人物、时间、地点、事件、对话或情绪，不替用户补故事。
@@ -257,6 +290,8 @@ async def _append_version(
     model: str | None,
     prompt_snapshot: str,
     feedback: str | None = None,
+    chapter: MemoirBookPlanChapter | None = None,
+    clear_source_assignment_state: bool = False,
 ) -> MemoirBookChapterDraftResponse:
     draft = await _load_draft(db, project_id=project_id, chapter_id=chapter_id)
     if not draft:
@@ -269,6 +304,14 @@ async def _append_version(
         await db.flush()
     else:
         draft.status = MemoirBookChapterDraftStatus.DRAFT.value
+    if clear_source_assignment_state:
+        draft.metadata_json = _metadata_without_keys(draft.metadata_json, {"status_reason"})
+        if chapter:
+            chapter.metadata_json = _metadata_without_keys(
+                chapter.metadata_json,
+                {PENDING_SOURCE_UTTERANCE_IDS_KEY, SOURCE_ASSIGNMENT_UPDATED_AT_KEY},
+            )
+            db.add(chapter)
 
     version_number = await _latest_version_number(db, draft.id) + 1
     db.add(
@@ -317,11 +360,19 @@ async def generate_chapter_draft(
     chapter = await _load_chapter(db, user_id=user_id, project_id=project_id, chapter_id=chapter_id)
     _require_confirmed_plan(chapter)
     existing = await _load_draft(db, project_id=project_id, chapter_id=chapter_id)
-    if existing and existing.versions and not req.force_regenerate:
+    pending_source_ids = _pending_source_utterance_ids(chapter)
+    if existing and existing.versions and not req.force_regenerate and not pending_source_ids:
         return _draft_response(existing)
 
     sources = await _chapter_sources(db, project_id=project_id, chapter=chapter)
-    prompt = _build_draft_prompt(chapter=chapter, sources=sources, feedback=req.feedback)
+    previous_content = existing.versions[-1].content if existing and existing.versions and pending_source_ids else None
+    prompt = _build_draft_prompt(
+        chapter=chapter,
+        sources=sources,
+        feedback=req.feedback,
+        previous_content=previous_content,
+        pending_source_utterance_ids=pending_source_ids,
+    )
     client = ai_client
     try:
         if client is None:
@@ -354,6 +405,8 @@ async def generate_chapter_draft(
         model=getattr(client, "model_name", req.ai_model),
         prompt_snapshot=prompt,
         feedback=req.feedback,
+        chapter=chapter,
+        clear_source_assignment_state=True,
     )
 
 
@@ -375,6 +428,8 @@ async def update_chapter_draft(
         created_by=MemoirCreatedBy.USER,
         model=None,
         prompt_snapshot="",
+        chapter=chapter,
+        clear_source_assignment_state=True,
     )
 
 
