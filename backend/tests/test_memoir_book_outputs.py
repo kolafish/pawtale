@@ -24,7 +24,7 @@ class FakeBookTTS:
     def __init__(self):
         self.calls = []
 
-    async def synthesize(self, text, *, voice=None):
+    async def synthesize(self, text, *, voice=None, speed_ratio=None):
         self.calls.append({"text": text, "voice": voice})
         return TTSResult(
             audio=f"audio:{len(self.calls)}".encode(),
@@ -33,6 +33,7 @@ class FakeBookTTS:
             provider=self.provider_name,
             model=self.model_name,
             voice=voice or self.default_voice,
+            speed_ratio=speed_ratio or 1.0,
         )
 
 

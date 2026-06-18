@@ -107,6 +107,7 @@ async def test_volc_tts_client_posts_sse_payload_and_maps_subtitle(monkeypatch):
     assert result.provider == "volc_tts"
     assert result.model == "seed-tts-2.0"
     assert result.voice == "zh_male_m191_uranus_bigtts"
+    assert result.speed_ratio == 1.0
     assert result.duration_seconds == 0.82
     assert [segment.text for segment in result.alignment] == ["你", "好，", "继"]
     assert result.alignment[1].start_ms == 220
@@ -167,10 +168,12 @@ async def test_volc_tts_client_ignores_legacy_voice_values(monkeypatch):
         )
     )
 
-    result = await client.synthesize("你好", voice="cixingnansheng")
+    result = await client.synthesize("你好", voice="cixingnansheng", speed_ratio=0.7)
 
     assert result.voice == "zh_female_vv_uranus_bigtts"
+    assert result.speed_ratio == 0.7
     assert calls[0]["req_params"]["speaker"] == "zh_female_vv_uranus_bigtts"
+    assert calls[0]["req_params"]["audio_params"]["speech_rate"] == -30
 
 
 @pytest.mark.asyncio

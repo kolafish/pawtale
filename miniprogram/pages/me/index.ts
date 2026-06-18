@@ -1,5 +1,5 @@
 import type { MemoirVoiceProgressResponse } from "../../domain/voice-chat";
-import type { TTSVoiceOption } from "../../services/tts-settings";
+import type { TTSSpeedOption, TTSVoiceOption } from "../../services/tts-settings";
 import {
   getMemoirIdentity,
   loginWithEmail,
@@ -13,7 +13,9 @@ import { ApiError } from "../../services/request";
 import {
   readTTSSettings,
   saveTTSSettings,
+  TTS_SPEED_OPTIONS,
   TTS_VOICE_OPTIONS,
+  ttsSpeedLabel,
   ttsVoiceLabel,
 } from "../../services/tts-settings";
 import { replaceMemoirStore } from "../../stores/session";
@@ -49,12 +51,23 @@ interface MeData {
   ttsVoice: string;
   ttsVoiceLabel: string;
   ttsVoiceOptions: TTSVoiceOption[];
+  ttsSpeedRatio: number;
+  ttsSpeedLabel: string;
+  ttsSpeedOptions: TTSSpeedOption[];
 }
 
 interface VoiceDatasetEvent {
   currentTarget: {
     dataset: {
       voice?: string;
+    };
+  };
+}
+
+interface SpeedDatasetEvent {
+  currentTarget: {
+    dataset: {
+      speed?: string | number;
     };
   };
 }
@@ -141,6 +154,7 @@ Page<MeData, {
   cancelEditName(): void;
   saveDisplayName(): Promise<void>;
   selectTTSVoice(event: VoiceDatasetEvent): void;
+  selectTTSSpeed(event: SpeedDatasetEvent): void;
   openProjects(): void;
   openVoiceProgress(): void;
   logout(): Promise<void>;
@@ -174,6 +188,9 @@ Page<MeData, {
     ttsVoice: "",
     ttsVoiceLabel: "默认音色",
     ttsVoiceOptions: TTS_VOICE_OPTIONS,
+    ttsSpeedRatio: 1,
+    ttsSpeedLabel: "正常 1.0x",
+    ttsSpeedOptions: TTS_SPEED_OPTIONS,
   },
 
   async onShow() {
@@ -214,6 +231,8 @@ Page<MeData, {
         projectCount: identity.projects.length,
         ttsVoice: ttsSettings.voice,
         ttsVoiceLabel: ttsVoiceLabel(ttsSettings.voice),
+        ttsSpeedRatio: ttsSettings.speedRatio,
+        ttsSpeedLabel: ttsSpeedLabel(ttsSettings.speedRatio),
       });
       await this.loadVoiceStats(identity.active_project_id);
     } catch (error) {
@@ -415,10 +434,24 @@ Page<MeData, {
 
   selectTTSVoice(event) {
     const voice = event.currentTarget.dataset.voice || "";
-    const settings = saveTTSSettings({ voice });
+    const settings = saveTTSSettings({ ...readTTSSettings(), voice });
     this.setData({
       ttsVoice: settings.voice,
       ttsVoiceLabel: ttsVoiceLabel(settings.voice),
+      ttsSpeedRatio: settings.speedRatio,
+      ttsSpeedLabel: ttsSpeedLabel(settings.speedRatio),
+    });
+    wx.showToast({ title: "已保存", icon: "success" });
+  },
+
+  selectTTSSpeed(event) {
+    const speedRatio = Number(event.currentTarget.dataset.speed);
+    const settings = saveTTSSettings({ ...readTTSSettings(), speedRatio });
+    this.setData({
+      ttsVoice: settings.voice,
+      ttsVoiceLabel: ttsVoiceLabel(settings.voice),
+      ttsSpeedRatio: settings.speedRatio,
+      ttsSpeedLabel: ttsSpeedLabel(settings.speedRatio),
     });
     wx.showToast({ title: "已保存", icon: "success" });
   },

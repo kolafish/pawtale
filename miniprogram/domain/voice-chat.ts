@@ -133,6 +133,7 @@ export interface MemoirVoiceFollowUpResponse {
 
 export interface MemoirAssistantTTSRequest {
   voice?: string;
+  speed_ratio?: number;
   force_regenerate?: boolean;
 }
 

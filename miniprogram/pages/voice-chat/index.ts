@@ -480,6 +480,7 @@ Page<VoiceChatData, {
       const ttsSettings = readTTSSettings();
       const response = await createMemoirAssistantTTS(this.data.voiceSessionId, messageId, {
         voice: ttsSettings.voice || undefined,
+        speed_ratio: ttsSettings.speedRatio === 1 ? undefined : ttsSettings.speedRatio,
         force_regenerate: forceRegenerate,
       });
       if (requestSerial !== this.ttsRequestSerial || this.data.followUpMessageId !== response.message.id) {

@@ -62,8 +62,16 @@ function loadMePage({ authExports = {}, voiceApiExports = {}, ttsExports = {} } 
           description: "使用后端当前默认配置",
         },
       ],
-      readTTSSettings: () => ({ voice: "" }),
+      TTS_SPEED_OPTIONS: [
+        {
+          value: 1,
+          label: "正常 1.0x",
+          description: "使用默认语速",
+        },
+      ],
+      readTTSSettings: () => ({ voice: "", speedRatio: 1 }),
       saveTTSSettings: (settings) => settings,
+      ttsSpeedLabel: () => "正常 1.0x",
       ttsVoiceLabel: () => "默认音色",
       ...ttsExports,
     },
@@ -182,5 +190,63 @@ test("me refreshes profile after Pawtale account login", async () => {
   assert.equal(refreshed, true);
   assert.equal(context.data.loggedIn, true);
   assert.equal(context.data.loading, false);
+  delete global.wx;
+});
+
+test("me saves TTS voice and speed without dropping the other setting", () => {
+  let settings = {
+    voice: "zh_female_vv_uranus_bigtts",
+    speedRatio: 0.7,
+  };
+  const saved = [];
+  const { page } = loadMePage({
+    ttsExports: {
+      readTTSSettings: () => settings,
+      saveTTSSettings: (nextSettings) => {
+        settings = nextSettings;
+        saved.push(nextSettings);
+        return nextSettings;
+      },
+      ttsVoiceLabel: (voice) => (voice ? "通用男声" : "默认音色"),
+      ttsSpeedLabel: (speedRatio) => `${speedRatio}x`,
+    },
+  });
+  const toastCalls = [];
+  global.wx = {
+    showToast(input) {
+      toastCalls.push(input);
+    },
+  };
+  const context = pageContext(page, settings);
+
+  page.selectTTSVoice.call(context, {
+    currentTarget: {
+      dataset: {
+        voice: "zh_male_m191_uranus_bigtts",
+      },
+    },
+  });
+  page.selectTTSSpeed.call(context, {
+    currentTarget: {
+      dataset: {
+        speed: "1.5",
+      },
+    },
+  });
+
+  assert.deepEqual(saved, [
+    {
+      voice: "zh_male_m191_uranus_bigtts",
+      speedRatio: 0.7,
+    },
+    {
+      voice: "zh_male_m191_uranus_bigtts",
+      speedRatio: 1.5,
+    },
+  ]);
+  assert.equal(context.data.ttsVoice, "zh_male_m191_uranus_bigtts");
+  assert.equal(context.data.ttsSpeedRatio, 1.5);
+  assert.equal(context.data.ttsSpeedLabel, "1.5x");
+  assert.equal(toastCalls.length, 2);
   delete global.wx;
 });
