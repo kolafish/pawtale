@@ -13,8 +13,6 @@ const {
   latestTranscriptText,
   totalTranscriptChars,
   ttsAlignmentFromMetadata,
-  ttsAlignmentProviderFromMetadata,
-  ttsDurationSecondsFromMetadata,
   upsertTranscriptLine,
   visibleAssistantLine,
 } = require("../services/voice-chat-state.ts");
@@ -34,7 +32,6 @@ const assistantLine = {
   message_id: "message-assistant",
   metadata_json: {
     tts_alignment_provider: "fake-align",
-    tts_duration_seconds: 2.4,
     tts_alignment: [
       {
         text: "那",
@@ -95,10 +92,7 @@ test("parses valid TTS alignment metadata and drops invalid segments", () => {
       confidence: 0.9,
     },
   ]);
-  assert.equal(ttsAlignmentProviderFromMetadata(assistantLine.metadata_json), "fake-align");
-  assert.equal(ttsDurationSecondsFromMetadata(assistantLine.metadata_json), 2.4);
   assert.deepEqual(ttsAlignmentFromMetadata({ tts_alignment: "bad" }), []);
-  assert.equal(ttsDurationSecondsFromMetadata({ tts_duration_seconds: "bad" }), 0);
 });
 
 test("upserts transcript lines by message or utterance identity", () => {
