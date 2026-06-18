@@ -590,6 +590,7 @@ Page<BookData, {
   openTranscripts(): void;
   openHome(): void;
   openLogin(): void;
+  createProject(): void;
   patchChapter(chapterId: string, patch: Partial<BookChapterView>): void;
   patchDraft(chapterId: string, draft: MemoirBookChapterDraft, options?: { clearPendingSources?: boolean }): void;
   clearBookOutput(): void;
@@ -666,11 +667,12 @@ Page<BookData, {
         return;
       }
       const projectId = identity.active_project_id;
-      const projectTitle = identity.active_project?.title || "我的回忆录";
+      const projectTitle = identity.active_project?.title || "尚未创建回忆录";
       this.setData({ needsLogin: false, projectId, projectTitle });
       if (!projectId) {
         this.applyPlan(null);
         this.applySourceCoverage(null);
+        this.applyBookOutput(null);
         return;
       }
       await this.loadPlanForProject(projectId);
@@ -1514,6 +1516,11 @@ Page<BookData, {
   openLogin() {
     this.stopPlayback();
     wx.switchTab({ url: "/pages/me/index" });
+  },
+
+  createProject() {
+    this.stopPlayback();
+    wx.navigateTo({ url: "/pages/project-edit/index" });
   },
 
   patchChapter(chapterId, patch) {

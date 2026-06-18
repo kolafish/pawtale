@@ -11,7 +11,7 @@ export interface MemoirSessionStore {
   identity_cache?: MemoirCacheMetadata;
   voice_session_cache?: MemoirVoiceSessionCache;
   identity?: MemoirIdentity;
-  project?: Project;
+  project?: Project | null;
   cache_write_failed_at?: string;
 }
 

@@ -44,7 +44,7 @@ interface WeChatProfileData {
 }
 
 function rememberMemoirIdentity(identity: MemoirIdentity): MemoirIdentity {
-  ensureMemoirStoreIdentity(cacheIdentityFromUser(identity, identity.active_project));
+  ensureMemoirStoreIdentity(cacheIdentityFromUser(identity, identity.active_project || undefined));
   writeMemoirIdentitySnapshot(identity);
   return identity;
 }

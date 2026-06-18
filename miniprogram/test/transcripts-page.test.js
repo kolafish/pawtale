@@ -134,3 +134,36 @@ test("transcripts page stays browseable when login is required", async () => {
   assert.deepEqual(switches, []);
   delete global.wx;
 });
+
+test("transcripts page asks logged-in users to create a memoir before listing records", async () => {
+  let listCalls = 0;
+  const { page } = loadTranscriptsPage({
+    authExports: {
+      getMemoirIdentity: async () => ({
+        id: "user-1",
+        email: "memoir-author@example.com",
+        password_login_enabled: true,
+        display_name: "作者",
+        created_at: "2026-06-15T00:00:00",
+        active_project_id: "",
+        active_project: null,
+        projects: [],
+      }),
+    },
+    voiceApiExports: {
+      listMemoirVoiceTranscripts: async () => {
+        listCalls += 1;
+        return { items: [], total: 0, limit: 50, offset: 0 };
+      },
+    },
+  });
+  const context = pageContext(page);
+
+  await page.loadTranscripts.call(context, true);
+
+  assert.equal(context.data.needsLogin, false);
+  assert.equal(context.data.activeProjectId, "");
+  assert.equal(context.data.projectTitle, "尚未创建回忆录");
+  assert.deepEqual(context.data.items, []);
+  assert.equal(listCalls, 0);
+});

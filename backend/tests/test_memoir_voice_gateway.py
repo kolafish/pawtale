@@ -17,6 +17,7 @@ from app.services.memoir.voice_gateway import (
 )
 from app.services.memoir.voice_gateway_persistence import VoiceGatewayPersistence
 from app.services.memoir.voice_transcripts import CleanedTranscriptText
+from tests.memoir_helpers import post_mobile_memoir_voice_session
 
 
 async def test_voice_gateway_streams_audio_and_forwards_asr_events():
@@ -469,8 +470,8 @@ async def test_voice_gateway_persistence_saves_final_message_utterance_and_audio
         fake_generate_cleaned_transcript_text,
     )
     user_response = await client.get("/api/auth/me")
-    create_response = await client.post(
-        "/api/mobile/memoir/voice-sessions",
+    create_response = await post_mobile_memoir_voice_session(
+        client,
         json={"guidance_mode": "free_narration"},
     )
     voice_session_id = create_response.json()["session"]["id"]
@@ -547,8 +548,8 @@ async def test_voice_gateway_persistence_saves_final_message_utterance_and_audio
 async def test_voice_gateway_persistence_rejects_audio_stream_over_limit(client, test_db, monkeypatch):
     monkeypatch.setattr("app.services.memoir.audio_files.MAX_AUDIO_BYTES", 5)
     user_response = await client.get("/api/auth/me")
-    create_response = await client.post(
-        "/api/mobile/memoir/voice-sessions",
+    create_response = await post_mobile_memoir_voice_session(
+        client,
         json={"guidance_mode": "free_narration"},
     )
     persistence = VoiceGatewayPersistence(
@@ -572,8 +573,8 @@ async def test_voice_gateway_persistence_flushes_unfinalized_audio_from_pending_
 ):
     monkeypatch.setattr("app.services.memoir.audio_files.MEMOIR_AUDIO_DIR", tmp_path / "audio")
     user_response = await client.get("/api/auth/me")
-    create_response = await client.post(
-        "/api/mobile/memoir/voice-sessions",
+    create_response = await post_mobile_memoir_voice_session(
+        client,
         json={"guidance_mode": "free_narration"},
     )
     voice_session_id = create_response.json()["session"]["id"]
@@ -612,8 +613,8 @@ async def test_voice_gateway_persistence_discards_pending_audio_file(
 ):
     monkeypatch.setattr("app.services.memoir.audio_files.MEMOIR_AUDIO_DIR", tmp_path / "audio")
     user_response = await client.get("/api/auth/me")
-    create_response = await client.post(
-        "/api/mobile/memoir/voice-sessions",
+    create_response = await post_mobile_memoir_voice_session(
+        client,
         json={"guidance_mode": "free_narration"},
     )
     persistence = VoiceGatewayPersistence(
@@ -642,8 +643,8 @@ async def test_voice_final_persistence_rolls_back_rows_and_staged_audio_on_failu
 ):
     monkeypatch.setattr("app.services.memoir.audio_files.MEMOIR_AUDIO_DIR", tmp_path / "audio")
     user_response = await client.get("/api/auth/me")
-    create_response = await client.post(
-        "/api/mobile/memoir/voice-sessions",
+    create_response = await post_mobile_memoir_voice_session(
+        client,
         json={"guidance_mode": "free_narration"},
     )
     voice_session_id = create_response.json()["session"]["id"]
@@ -685,8 +686,8 @@ async def test_voice_final_persistence_rolls_back_staged_audio_path_on_failure(
     monkeypatch.setattr("app.services.memoir.audio_files.MEMOIR_AUDIO_DIR", tmp_path / "audio")
     user_response = await client.get("/api/auth/me")
     user_id = user_response.json()["id"]
-    create_response = await client.post(
-        "/api/mobile/memoir/voice-sessions",
+    create_response = await post_mobile_memoir_voice_session(
+        client,
         json={"guidance_mode": "free_narration"},
     )
     voice_session_id = create_response.json()["session"]["id"]

@@ -19,6 +19,7 @@ from app.models.memoir import (
     MemoirVoiceUtterance,
 )
 from app.services.memoir.voice_transcripts import _remove_obvious_oral_fillers, generate_cleaned_transcript_text
+from tests.memoir_helpers import post_mobile_memoir_voice_session
 
 UTC_SUFFIXES = ("Z", "+00:00")
 
@@ -54,8 +55,8 @@ async def _create_voice_transcript(
     question_text: str | None = None,
 ):
     user = (await client.get("/api/auth/me")).json()
-    create_response = await client.post(
-        "/api/mobile/memoir/voice-sessions",
+    create_response = await post_mobile_memoir_voice_session(
+        client,
         json={"guidance_mode": "free_narration", "provider": "volc_streaming_asr"},
     )
     session = create_response.json()["session"]
@@ -149,7 +150,7 @@ async def test_mobile_memoir_lists_saved_voice_transcripts(client, test_db):
     item = data["items"][0]
     assert item["id"] == created["utterance_id"]
     assert item["voice_session_id"] == created["session"]["id"]
-    assert item["project_title"] == "我的回忆录"
+    assert item["project_title"] == "测试回忆录"
     assert item["chat_message_id"] == created["message_id"]
     assert item["audio_file_id"] == created["audio_file_id"]
     assert item["question_message_id"] == created["question_message_id"]

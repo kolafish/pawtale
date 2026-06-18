@@ -5,7 +5,6 @@ from app.services.memoir.interview import (
     get_session_state,
     skip_question,
 )
-from app.services.memoir.projects import get_or_create_mobile_memoir_project
 from app.services.memoir.answers import answer_question_with_text, update_answer_text
 from app.services.memoir.book_drafts import (
     confirm_chapter_draft,
@@ -92,7 +91,6 @@ __all__ = [
     "get_next_question",
     "get_output",
     "get_or_create_planned_question",
-    "get_or_create_mobile_memoir_project",
     "get_or_create_current_session",
     "get_session_state",
     "get_session_summary",

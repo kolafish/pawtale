@@ -262,11 +262,17 @@ Page<MeData, {
         editingName: false,
         avatarText: Array.from(displayName)[0] || "作",
         email: identity.email,
-        projectTitle: identity.active_project?.title || "我的回忆录",
+        projectTitle: identity.active_project?.title || "尚未创建回忆录",
         projectCount: identity.projects.length,
+        sessionCount: 0,
+        utteranceCount: 0,
+        totalUserCharCount: 0,
+        totalAudioText: "0 秒",
         ...ttsProfilesData(),
       });
-      await this.loadVoiceStats(identity.active_project_id);
+      if (identity.active_project_id) {
+        await this.loadVoiceStats(identity.active_project_id);
+      }
     } catch (error) {
       if (error instanceof ApiError && [401, 403].includes(error.statusCode)) {
         this.setData(loggedOutData(false));

@@ -70,13 +70,13 @@ class MemoirProjectUpdate(BaseModel):
 
 class MemoirProjectListResponse(BaseModel):
     active_project_id: str
-    active_project: ProjectResponse
+    active_project: ProjectResponse | None = None
     projects: list[ProjectResponse] = Field(default_factory=list)
 
 
 class MemoirIdentityResponse(UserResponse):
     active_project_id: str
-    active_project: ProjectResponse
+    active_project: ProjectResponse | None = None
     projects: list[ProjectResponse] = Field(default_factory=list)
 
 

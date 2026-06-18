@@ -70,7 +70,9 @@ async def _memoir_project_id(
     if project_id:
         project = await load_memoir_project(db, project_id, user_id)
         return project.id
-    project = await memoir_projects.get_or_create_mobile_memoir_project(db, user_id)
+    project = await memoir_projects.active_mobile_memoir_project(db, user_id)
+    if project is None:
+        raise HTTPException(status_code=400, detail="请先创建回忆录")
     return project.id
 
 

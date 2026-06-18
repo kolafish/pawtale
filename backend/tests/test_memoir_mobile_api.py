@@ -11,7 +11,7 @@ async def test_mobile_memoir_routes_require_login(anonymous_client):
     assert response.status_code == 401
 
 
-async def test_mobile_memoir_default_project_is_created_once(client):
+async def test_mobile_memoir_project_list_starts_empty(client):
     first = await client.get("/api/mobile/memoir/projects")
     second = await client.get("/api/mobile/memoir/projects")
 
@@ -19,16 +19,26 @@ async def test_mobile_memoir_default_project_is_created_once(client):
     assert second.status_code == 200
     first_data = first.json()
     second_data = second.json()
-    assert first_data["active_project_id"] == second_data["active_project_id"]
-    assert len(first_data["projects"]) == 1
-    assert first_data["projects"][0]["type"] == "memoir"
-    assert first_data["projects"][0]["title"] == "我的回忆录"
-    assert first_data["projects"][0]["metadata_json"]["memoir_profile"]["default_guidance_mode"] == "free_narration"
-    assert first_data["projects"][0]["groups"][0]["name"] == "回忆片段"
-    assert first_data["projects"][0]["groups"][0]["documents"][0]["name"] == "第一次记录"
+    assert first_data == second_data
+    assert first_data["active_project_id"] == ""
+    assert first_data["active_project"] is None
+    assert first_data["projects"] == []
+
+
+async def test_mobile_memoir_voice_session_requires_explicit_project(client):
+    response = await client.post(
+        "/api/mobile/memoir/voice-sessions",
+        json={"guidance_mode": "free_narration"},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "请先创建回忆录"
 
 
 async def test_mobile_memoir_identity_includes_active_project(client):
+    created_response = await client.post("/api/mobile/memoir/projects", json={"title": "母亲的回忆"})
+    assert created_response.status_code == 201
+
     response = await client.get("/api/mobile/memoir/me")
 
     assert response.status_code == 200
@@ -41,9 +51,6 @@ async def test_mobile_memoir_identity_includes_active_project(client):
 
 
 async def test_mobile_memoir_projects_can_be_created_updated_and_activated(client):
-    initial_response = await client.get("/api/mobile/memoir/projects")
-    default_project_id = initial_response.json()["active_project_id"]
-
     created_response = await client.post(
         "/api/mobile/memoir/projects",
         json={
@@ -89,21 +96,32 @@ async def test_mobile_memoir_projects_can_be_created_updated_and_activated(clien
     assert project_list["active_project_id"] == created["id"]
     assert [project["title"] for project in project_list["projects"]] == [
         "外婆的回忆",
-        "我的回忆录",
     ]
 
+    second_response = await client.post(
+        "/api/mobile/memoir/projects",
+        json={"title": "父亲的回忆"},
+    )
+    assert second_response.status_code == 201
     activated_response = await client.post(
-        f"/api/mobile/memoir/projects/{default_project_id}/activate",
+        f"/api/mobile/memoir/projects/{created['id']}/activate",
     )
     assert activated_response.status_code == 200
     activated = activated_response.json()
-    assert activated["active_project_id"] == default_project_id
-    assert activated["active_project"]["title"] == "我的回忆录"
+    assert activated["active_project_id"] == created["id"]
+    assert activated["active_project"]["title"] == "外婆的回忆"
+    assert [project["title"] for project in activated["projects"]] == [
+        "外婆的回忆",
+        "父亲的回忆",
+    ]
 
 
 async def test_mobile_memoir_project_word_count_includes_user_voice_messages(client, test_db):
-    first_project_response = await client.get("/api/mobile/memoir/projects")
-    first_project_id = first_project_response.json()["active_project_id"]
+    first_project_response = await client.post(
+        "/api/mobile/memoir/projects",
+        json={"title": "父亲的回忆"},
+    )
+    first_project_id = first_project_response.json()["id"]
     second_project_response = await client.post(
         "/api/mobile/memoir/projects",
         json={"title": "母亲的回忆"},
@@ -181,8 +199,11 @@ async def test_mobile_memoir_projects_can_be_deleted_but_keeps_one_project(
 ):
     monkeypatch.setattr("app.services.memoir.audio_files.MEMOIR_AUDIO_DIR", tmp_path / "audio")
     user = (await client.get("/api/auth/me")).json()
-    initial_response = await client.get("/api/mobile/memoir/projects")
-    default_project_id = initial_response.json()["active_project_id"]
+    default_response = await client.post(
+        "/api/mobile/memoir/projects",
+        json={"title": "我的回忆录"},
+    )
+    default_project_id = default_response.json()["id"]
 
     created_response = await client.post(
         "/api/mobile/memoir/projects",

@@ -49,9 +49,11 @@ export async function backendSessionCookieHeader(): Promise<string> {
 
 export async function createMemoirVoiceSession(
   data: MemoirVoiceSessionCreate,
+  options: { projectId?: string } = {},
 ): Promise<MemoirVoiceSessionDetail> {
   await ensureBackendSession();
-  return request<MemoirVoiceSessionDetail>("/api/mobile/memoir/voice-sessions", {
+  const query = options.projectId ? `?project_id=${encodeURIComponent(options.projectId)}` : "";
+  return request<MemoirVoiceSessionDetail>(`/api/mobile/memoir/voice-sessions${query}`, {
     method: "POST",
     data,
   });

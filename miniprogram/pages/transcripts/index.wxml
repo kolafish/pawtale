@@ -17,6 +17,12 @@
     <button class="login-button" bindtap="openLogin">登录后查看</button>
   </view>
 
+  <view wx:elif="{{!activeProjectId}}" class="empty-panel">
+    <text class="empty-title">还没有回忆录</text>
+    <text class="empty-copy">先创建一本回忆录，完成语音聊天后，转写记录会显示在这里。</text>
+    <button class="login-button" bindtap="createProject">创建回忆录</button>
+  </view>
+
   <view wx:elif="{{loading && !items.length}}" class="empty-panel">
     <text>正在加载</text>
   </view>
