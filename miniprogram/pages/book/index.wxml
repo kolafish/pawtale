@@ -43,13 +43,21 @@
             range="{{chapterPickerOptions}}"
             range-key="label"
             data-id="{{item.utterance_id}}"
-            disabled="{{assigningSourceId}}"
+            disabled="{{assigningSourceId || updatingPlanStructure}}"
             bindchange="assignUncoveredSource"
           >
             <view class="coverage-assign {{assigningSourceId === item.utterance_id ? 'loading' : ''}}">
               {{assigningSourceId === item.utterance_id ? "归入中" : "归入章节"}}
             </view>
           </picker>
+          <button
+            class="coverage-new-chapter"
+            data-id="{{item.utterance_id}}"
+            disabled="{{assigningSourceId || updatingPlanStructure || stage !== 'drafting'}}"
+            bindtap="addUncoveredSourceAsChapter"
+          >
+            作为新章
+          </button>
         </view>
       </view>
     </view>
@@ -203,7 +211,7 @@
         <button
           class="ghost-button"
           data-id="{{item.id}}"
-          disabled="{{item.draftBusy || item.draftChanged || (item.removedSourceCount && !item.sourceCount)}}"
+          disabled="{{updatingPlanStructure || item.draftBusy || item.draftChanged || (item.removedSourceCount && !item.sourceCount)}}"
           bindtap="generateChapterDraft"
         >
           {{item.draftActionText}}
@@ -211,7 +219,7 @@
         <button
           class="ghost-button"
           data-id="{{item.id}}"
-          disabled="{{item.draftBusy || !item.draftChanged}}"
+          disabled="{{updatingPlanStructure || item.draftBusy || !item.draftChanged}}"
           bindtap="saveChapterDraft"
         >
           保存修改
@@ -219,7 +227,7 @@
         <button
           class="primary-button"
           data-id="{{item.id}}"
-          disabled="{{item.draftBusy || !item.draft || !item.draft.latest_version || item.draft.status === 'confirmed' || item.draftChanged}}"
+          disabled="{{updatingPlanStructure || item.draftBusy || !item.draft || !item.draft.latest_version || item.draft.status === 'confirmed' || item.draftChanged}}"
           bindtap="confirmChapterDraft"
         >
           确认本章
@@ -228,10 +236,18 @@
           class="ghost-button"
           data-id="{{item.id}}"
           loading="{{ttsBusyTarget === item.ttsTarget}}"
-          disabled="{{item.draftBusy || item.draftChanged || !item.draft || !item.draft.latest_version || ttsBusyTarget}}"
+          disabled="{{updatingPlanStructure || item.draftBusy || item.draftChanged || !item.draft || !item.draft.latest_version || ttsBusyTarget}}"
           bindtap="playChapterAudio"
         >
           {{ttsBusyTarget === item.ttsTarget ? "准备朗读" : (playingTarget === item.ttsTarget ? "停止朗读" : "朗读本章")}}
+        </button>
+        <button
+          class="danger-button"
+          data-id="{{item.id}}"
+          disabled="{{updatingPlanStructure || item.draftBusy || chapters.length <= 1}}"
+          bindtap="deleteConfirmedChapter"
+        >
+          删除本章
         </button>
       </view>
     </view>
@@ -266,7 +282,7 @@
           <button
             class="primary-button"
             loading="{{generatingBook}}"
-            disabled="{{generatingBook || ttsBusyTarget || !canGenerateBook}}"
+            disabled="{{updatingPlanStructure || generatingBook || ttsBusyTarget || !canGenerateBook}}"
             bindtap="generateBook"
           >
             {{bookActionText}}
@@ -274,7 +290,7 @@
           <button
             class="ghost-button"
             loading="{{ttsBusyTarget === 'book'}}"
-            disabled="{{generatingBook || !bookContent || hasDraftChanges || bookStaleNotice || ttsBusyTarget}}"
+            disabled="{{updatingPlanStructure || generatingBook || !bookContent || hasDraftChanges || bookStaleNotice || ttsBusyTarget}}"
             bindtap="playBookAudio"
           >
             {{ttsBusyTarget === "book" ? "准备朗读" : (playingTarget === "book" ? "停止朗读" : "朗读全书")}}

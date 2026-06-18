@@ -253,6 +253,10 @@ export interface MemoirBookPlanChapterInput {
   source_refs: MemoirBookChapterSourceRef[];
 }
 
+export interface MemoirBookPlanChapterUpdateInput extends MemoirBookPlanChapterInput {
+  id?: string;
+}
+
 export interface MemoirBookPlanChapter {
   id: string;
   plan_id: string;
@@ -318,6 +322,11 @@ export interface MemoirBookPlanGenerateRequest {
 export interface MemoirBookPlanConfirmRequest {
   title?: string;
   chapters: MemoirBookPlanChapterInput[];
+}
+
+export interface MemoirBookPlanUpdateRequest {
+  title?: string;
+  chapters: MemoirBookPlanChapterUpdateInput[];
 }
 
 export interface MemoirBookChapterDraftGenerateRequest {

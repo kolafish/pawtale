@@ -25,6 +25,7 @@ from app.schemas.memoir_book import (
     MemoirBookPlanChapterResponse,
     MemoirBookPlanConfirmRequest,
     MemoirBookPlanGenerateRequest,
+    MemoirBookPlanUpdateRequest,
     MemoirBookPlanResponse,
     MemoirBookSourceAssignmentRequest,
     MemoirBookSourceCoverageItem,
@@ -67,6 +68,14 @@ class SourceSegment:
         )
 
 
+@dataclass(frozen=True)
+class ValidatedChapterUpdate:
+    id: str | None
+    title: str
+    summary: str
+    source_refs: list[MemoirBookChapterSourceRef]
+
+
 def _text_or_empty(value: str | None) -> str:
     return (value or "").strip()
 
@@ -88,6 +97,35 @@ def _as_dict(ref: MemoirBookChapterSourceRef) -> dict[str, object]:
 
 def _merge_metadata(metadata_json: dict | None, patch: dict[str, object]) -> dict[str, object]:
     return {**(metadata_json or {}), **patch}
+
+
+def _source_ref_utterance_ids(refs: list[dict] | list[MemoirBookChapterSourceRef]) -> list[str]:
+    ids: list[str] = []
+    for ref in refs:
+        if isinstance(ref, MemoirBookChapterSourceRef):
+            ids.append(ref.utterance_id)
+        elif isinstance(ref, dict) and isinstance(ref.get("utterance_id"), str):
+            ids.append(ref["utterance_id"])
+    return ids
+
+
+def _set_source_change_metadata(
+    metadata_json: dict | None,
+    *,
+    added_ids: set[str],
+    removed_ids: set[str],
+) -> dict[str, object]:
+    metadata = dict(metadata_json or {})
+    if added_ids:
+        metadata["pending_source_utterance_ids"] = sorted(added_ids)
+    else:
+        metadata.pop("pending_source_utterance_ids", None)
+    if removed_ids:
+        metadata["removed_source_utterance_ids"] = sorted(removed_ids)
+    else:
+        metadata.pop("removed_source_utterance_ids", None)
+    metadata["source_refs_updated_at"] = datetime.now(UTC).isoformat()
+    return metadata
 
 
 def _chapter_response(chapter: MemoirBookPlanChapter) -> MemoirBookPlanChapterResponse:
@@ -572,6 +610,42 @@ def _validated_chapters(
     return chapters
 
 
+def _validated_chapter_updates(
+    req: MemoirBookPlanUpdateRequest,
+    sources: list[SourceSegment],
+) -> list[ValidatedChapterUpdate]:
+    source_by_utterance = {source.utterance_id: source for source in sources}
+    chapters: list[ValidatedChapterUpdate] = []
+    seen_plan_utterances: set[str] = set()
+    for chapter in req.chapters:
+        refs: list[MemoirBookChapterSourceRef] = []
+        seen_chapter_utterances: set[str] = set()
+        for ref in chapter.source_refs:
+            source = source_by_utterance.get(ref.utterance_id)
+            if not source:
+                raise HTTPException(status_code=400, detail="章节来源不属于当前回忆录")
+            if source.utterance_id in seen_chapter_utterances:
+                continue
+            if source.utterance_id in seen_plan_utterances:
+                raise HTTPException(status_code=400, detail="同一条转写不能重复归入多个章节")
+            refs.append(source.ref(ref.quote))
+            seen_chapter_utterances.add(source.utterance_id)
+            seen_plan_utterances.add(source.utterance_id)
+        if not refs:
+            raise HTTPException(status_code=400, detail="每个章节都需要至少一个来源")
+        chapters.append(
+            ValidatedChapterUpdate(
+                id=chapter.id,
+                title=chapter.title,
+                summary=chapter.summary,
+                source_refs=refs,
+            )
+        )
+    if not chapters:
+        raise HTTPException(status_code=400, detail="章节规划不能为空")
+    return chapters
+
+
 async def confirm_book_plan(
     db: AsyncSession,
     *,
@@ -596,3 +670,105 @@ async def confirm_book_plan(
             "confirmed_by": "user",
         },
     )
+
+
+async def update_book_plan(
+    db: AsyncSession,
+    *,
+    user_id: str,
+    project_id: str,
+    req: MemoirBookPlanUpdateRequest,
+) -> MemoirBookPlanResponse:
+    await load_memoir_project(db, project_id, user_id)
+    plan = await _load_plan(db, project_id)
+    if not plan:
+        raise HTTPException(status_code=404, detail="章节规划不存在")
+    if plan.status != MemoirBookPlanStatus.CONFIRMED.value:
+        raise HTTPException(status_code=400, detail="请先确认章节规划")
+
+    sources = await _source_segments(db, user_id=user_id, project_id=project_id)
+    chapter_updates = _validated_chapter_updates(req, sources)
+    existing_by_id = {chapter.id: chapter for chapter in plan.chapters}
+    retained_ids = {chapter.id for chapter in chapter_updates if chapter.id}
+    unknown_ids = retained_ids - set(existing_by_id)
+    if unknown_ids:
+        raise HTTPException(status_code=404, detail="章节不存在")
+
+    for index, chapter in enumerate(plan.chapters):
+        chapter.sort_order = 10000 + index
+        db.add(chapter)
+    await db.flush()
+
+    changed_chapter_ids: set[str] = set()
+    now = datetime.now(UTC).isoformat()
+    for index, chapter_update in enumerate(chapter_updates):
+        if chapter_update.id:
+            chapter = existing_by_id[chapter_update.id]
+            old_ids = set(_source_ref_utterance_ids(chapter.source_refs_json or []))
+            new_ids = set(_source_ref_utterance_ids(chapter_update.source_refs))
+            added_ids = new_ids - old_ids
+            removed_ids = old_ids - new_ids
+            chapter.title = chapter_update.title.strip()[:200]
+            chapter.summary = chapter_update.summary.strip()
+            chapter.sort_order = index
+            chapter.source_refs_json = [_as_dict(ref) for ref in chapter_update.source_refs]
+            if added_ids or removed_ids:
+                chapter.metadata_json = _set_source_change_metadata(
+                    chapter.metadata_json,
+                    added_ids=added_ids,
+                    removed_ids=removed_ids,
+                )
+                changed_chapter_ids.add(chapter.id)
+            db.add(chapter)
+        else:
+            db.add(
+                MemoirBookPlanChapter(
+                    plan_id=plan.id,
+                    project_id=project_id,
+                    title=chapter_update.title.strip()[:200],
+                    summary=chapter_update.summary.strip(),
+                    sort_order=index,
+                    source_refs_json=[_as_dict(ref) for ref in chapter_update.source_refs],
+                    metadata_json={"created_from_plan_update_at": now},
+                )
+            )
+
+    removed_chapters = [
+        chapter for chapter_id, chapter in existing_by_id.items()
+        if chapter_id not in retained_ids
+    ]
+    for chapter in removed_chapters:
+        await db.delete(chapter)
+
+    if changed_chapter_ids:
+        drafts = (
+            await db.execute(
+                select(MemoirBookChapterDraft).where(
+                    MemoirBookChapterDraft.project_id == project_id,
+                    MemoirBookChapterDraft.chapter_id.in_(changed_chapter_ids),
+                )
+            )
+        ).scalars().all()
+        for draft in drafts:
+            draft.status = MemoirBookChapterDraftStatus.DRAFT.value
+            draft.metadata_json = _merge_metadata(
+                draft.metadata_json,
+                {"status_reason": "sources_changed"},
+            )
+            db.add(draft)
+
+    plan.title = (req.title or plan.title).strip()[:200]
+    plan.created_by = MemoirCreatedBy.USER.value
+    plan.metadata_json = _merge_metadata(
+        plan.metadata_json,
+        {
+            "structure_updated_at": now,
+            "structure_updated_by": "user",
+        },
+    )
+    db.add(plan)
+    await db.commit()
+    refreshed = await _load_plan(db, project_id)
+    if not refreshed:
+        raise HTTPException(status_code=500, detail="章节规划保存失败")
+    return _plan_response(refreshed)

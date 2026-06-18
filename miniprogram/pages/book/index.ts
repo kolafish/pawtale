@@ -1,10 +1,12 @@
 import type {
   MemoirBookAudioResponse,
   MemoirBookChapterDraft,
+  MemoirBookChapterSourceRef,
   MemoirBookOutput,
   MemoirBookPlan,
   MemoirBookPlanChapter,
   MemoirBookPlanChapterInput,
+  MemoirBookPlanChapterUpdateInput,
   MemoirBookSourceCoverage,
 } from "../../domain/voice-chat";
 import { getMemoirIdentity } from "../../services/auth";
@@ -22,6 +24,7 @@ import {
   getMemoirBookOutput,
   getMemoirBookPlan,
   getMemoirBookSourceCoverage,
+  updateMemoirBookPlan,
   updateMemoirBookChapterDraft,
 } from "../../services/memoir-voice-api";
 import { configureAudiblePlayback } from "../../services/audio-playback";
@@ -62,6 +65,7 @@ export interface BookUncoveredSourceView {
   previewText: string;
   created_at: string;
   createdAtText: string;
+  sourceRef: MemoirBookChapterSourceRef;
 }
 
 export interface BookChapterView extends MemoirBookPlanChapter {
@@ -88,6 +92,7 @@ interface BookData {
   loading: boolean;
   generatingPlan: boolean;
   confirmingPlan: boolean;
+  updatingPlanStructure: boolean;
   error: string;
   projectId: string;
   projectTitle: string;
@@ -304,6 +309,16 @@ export function buildUncoveredSourceViews(
         previewText: text.length > 96 ? `${text.slice(0, 96)}...` : text,
         created_at: source.created_at,
         createdAtText: formatBeijingDateTime(source.created_at) || "转写记录",
+        sourceRef: {
+          voice_session_id: source.voice_session_id,
+          message_id: source.message_id,
+          utterance_id: source.utterance_id,
+          transcript_version_id: source.transcript_version_id,
+          audio_file_id: source.audio_file_id,
+          start_ms: source.start_ms,
+          end_ms: source.end_ms,
+          quote: text.slice(0, 180),
+        },
       };
     });
 }
@@ -412,6 +427,24 @@ function toPlanInput(chapters: BookChapterView[]): MemoirBookPlanChapterInput[] 
   }));
 }
 
+function toPlanUpdateInput(chapters: BookChapterView[]): MemoirBookPlanChapterUpdateInput[] {
+  return chapters.map((chapter) => ({
+    id: chapter.id,
+    title: trimText(chapter.title || chapter.editingTitle),
+    summary: trimText(chapter.summary || chapter.editingSummary),
+    source_refs: chapter.source_refs,
+  }));
+}
+
+function titleFromUncoveredSource(source: BookUncoveredSourceView): string {
+  const text = trimText(source.previewText).replace(/\s+/g, "");
+  const firstClause = text.split(/[，。！？、,.!?;；:：]/).find(Boolean) || text;
+  if (!firstClause || firstClause.length < 3) {
+    return "新收录转写";
+  }
+  return firstClause.length > 16 ? firstClause.slice(0, 16) : firstClause;
+}
+
 function isLoginError(error: unknown): boolean {
   return error instanceof ApiError && [401, 403].includes(error.statusCode);
 }
@@ -437,6 +470,9 @@ Page<BookData, {
   saveChapterDraft(event: DatasetEvent): Promise<void>;
   confirmChapterDraft(event: DatasetEvent): Promise<void>;
   assignUncoveredSource(event: PickerEvent): Promise<void>;
+  addUncoveredSourceAsChapter(event: DatasetEvent): Promise<void>;
+  deleteConfirmedChapter(event: DatasetEvent): Promise<void>;
+  updatePlanStructure(chapters: MemoirBookPlanChapterUpdateInput[], toastTitle: string): Promise<void>;
   generateBook(): Promise<void>;
   playChapterAudio(event: DatasetEvent): Promise<void>;
   playBookAudio(): Promise<void>;
@@ -460,6 +496,7 @@ Page<BookData, {
     loading: false,
     generatingPlan: false,
     confirmingPlan: false,
+    updatingPlanStructure: false,
     generatingBook: false,
     error: "",
     projectId: "",
@@ -703,7 +740,7 @@ Page<BookData, {
   async generateChapterDraft(event) {
     const chapterId = event.currentTarget.dataset.id || "";
     const chapter = this.data.chapters.find((candidate) => candidate.id === chapterId);
-    if (!chapter || !this.data.projectId || chapter.draftBusy) {
+    if (!chapter || !this.data.projectId || chapter.draftBusy || this.data.updatingPlanStructure) {
       return;
     }
     if (chapter.draftChanged) {
@@ -745,7 +782,7 @@ Page<BookData, {
   async saveChapterDraft(event) {
     const chapterId = event.currentTarget.dataset.id || "";
     const chapter = this.data.chapters.find((candidate) => candidate.id === chapterId);
-    if (!chapter || !this.data.projectId || chapter.draftBusy) {
+    if (!chapter || !this.data.projectId || chapter.draftBusy || this.data.updatingPlanStructure) {
       return;
     }
     const content = trimText(chapter.draftContent);
@@ -770,7 +807,13 @@ Page<BookData, {
   async confirmChapterDraft(event) {
     const chapterId = event.currentTarget.dataset.id || "";
     const chapter = this.data.chapters.find((candidate) => candidate.id === chapterId);
-    if (!chapter || !this.data.projectId || chapter.draftBusy || !chapter.draft?.latest_version) {
+    if (
+      !chapter
+      || !this.data.projectId
+      || chapter.draftBusy
+      || this.data.updatingPlanStructure
+      || !chapter.draft?.latest_version
+    ) {
       return;
     }
     this.patchChapter(chapterId, { draftBusy: true, draftError: "" });
@@ -824,8 +867,94 @@ Page<BookData, {
     }
   },
 
+  async addUncoveredSourceAsChapter(event) {
+    const utteranceId = event.currentTarget.dataset.id || "";
+    const source = this.data.uncoveredSources.find((candidate) => candidate.utterance_id === utteranceId);
+    if (!source || !this.data.plan || this.data.stage !== "drafting" || this.data.updatingPlanStructure) {
+      return;
+    }
+    this.setData({ assigningSourceId: utteranceId });
+    try {
+      await this.updatePlanStructure(
+        [
+          ...toPlanUpdateInput(this.data.chapters),
+          {
+            title: titleFromUncoveredSource(source),
+            summary: "整理这条新收录转写。",
+            source_refs: [source.sourceRef],
+          },
+        ],
+        "已新增章节",
+      );
+    } finally {
+      this.setData({ assigningSourceId: "" });
+    }
+  },
+
+  async deleteConfirmedChapter(event) {
+    const chapterId = event.currentTarget.dataset.id || "";
+    const chapter = this.data.chapters.find((candidate) => candidate.id === chapterId);
+    if (
+      !chapter
+      || this.data.stage !== "drafting"
+      || this.data.chapters.length <= 1
+      || this.data.updatingPlanStructure
+      || chapter.draftBusy
+    ) {
+      return;
+    }
+    const confirmed = await new Promise<boolean>((resolve) => {
+      wx.showModal({
+        title: "删除章节",
+        content: `删除「${chapter.title}」会移除本章正文，来源转写会回到待收录列表。`,
+        confirmText: "删除",
+        confirmColor: "#b4234a",
+        success: (result) => resolve(Boolean(result.confirm)),
+        fail: () => resolve(false),
+      });
+    });
+    if (!confirmed) {
+      return;
+    }
+    await this.updatePlanStructure(
+      toPlanUpdateInput(this.data.chapters.filter((candidate) => candidate.id !== chapterId)),
+      "章节已删除",
+    );
+  },
+
+  async updatePlanStructure(chapters, toastTitle) {
+    if (!this.data.projectId || !this.data.plan || this.data.updatingPlanStructure) {
+      return;
+    }
+    this.stopPlayback();
+    this.setData({ updatingPlanStructure: true, error: "" });
+    try {
+      const plan = await updateMemoirBookPlan(this.data.projectId, {
+        title: trimText(this.data.planTitle) || this.data.plan.title,
+        chapters,
+      });
+      const [draftsByChapterId, coverage, output] = await Promise.all([
+        this.loadDraftsForPlan(plan),
+        this.loadSourceCoverage(this.data.projectId),
+        this.loadBookOutput(this.data.projectId),
+      ]);
+      this.applyPlan(plan, draftsByChapterId);
+      this.applySourceCoverage(coverage);
+      this.applyBookOutput(output);
+      wx.showToast({ title: toastTitle, icon: "success" });
+    } catch (error) {
+      if (isLoginError(error)) {
+        wx.switchTab({ url: "/pages/me/index" });
+        return;
+      }
+      this.setData({ error: error instanceof Error ? error.message : "目录调整失败" });
+    } finally {
+      this.setData({ updatingPlanStructure: false });
+    }
+  },
+
   async generateBook() {
-    if (!this.data.projectId || this.data.generatingBook) {
+    if (!this.data.projectId || this.data.generatingBook || this.data.updatingPlanStructure) {
       return;
     }
     if (!this.data.allChaptersConfirmed) {
@@ -858,7 +987,7 @@ Page<BookData, {
   async playChapterAudio(event) {
     const chapterId = event.currentTarget.dataset.id || "";
     const chapter = this.data.chapters.find((candidate) => candidate.id === chapterId);
-    if (!chapter || !this.data.projectId) {
+    if (!chapter || !this.data.projectId || this.data.updatingPlanStructure) {
       return;
     }
     const target = chapter.ttsTarget;
@@ -912,7 +1041,7 @@ Page<BookData, {
       this.stopPlayback();
       return;
     }
-    if (!this.data.projectId || this.data.ttsBusyTarget) {
+    if (!this.data.projectId || this.data.ttsBusyTarget || this.data.updatingPlanStructure) {
       return;
     }
     if (!this.data.bookContent) {

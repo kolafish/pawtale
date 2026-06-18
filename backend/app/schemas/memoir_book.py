@@ -71,6 +71,35 @@ class MemoirBookPlanConfirmRequest(BaseModel):
         return title
 
 
+class MemoirBookPlanChapterUpdateInput(MemoirBookPlanChapterInput):
+    id: str | None = None
+
+    @field_validator("id")
+    @classmethod
+    def _valid_optional_id(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        chapter_id = value.strip()
+        return chapter_id or None
+
+
+class MemoirBookPlanUpdateRequest(BaseModel):
+    title: str | None = None
+    chapters: list[MemoirBookPlanChapterUpdateInput]
+
+    @field_validator("title")
+    @classmethod
+    def _valid_optional_title(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        title = value.strip()
+        if not title:
+            return None
+        if len(title) > 120:
+            raise ValueError("规划标题不能超过 120 个字")
+        return title
+
+
 class MemoirBookPlanChapterResponse(BaseModel):
     id: str
     plan_id: str
