@@ -123,29 +123,19 @@ GITHUB_APP_PRIVATE_KEY_PATH=
 GITHUB_APP_SETUP_REDIRECT_URL=http://localhost:5173/
 GITHUB_SYNC_DEFAULT_BRANCH=main
 
-# AI 追问语音合成，默认 disabled；启用阶跃时改成 stepfun，启用其他 OpenAI 兼容服务时改成 openai_compatible
+# AI 追问语音合成，默认 disabled；启用火山 V3 时改成 volc
 TTS_PROVIDER=disabled
-TTS_API_KEY=
-TTS_BASE_URL=https://api.openai.com/v1
-TTS_MODEL=tts-1
-TTS_VOICE=alloy
-TTS_RESPONSE_FORMAT=mp3
+TTS_TIMEOUT_SECONDS=30
 TTS_MAX_CONCURRENT_REQUESTS=3
 
-# 可选：TTS 后置强制对齐。disabled 时不做文字高亮对齐；启用 elevenlabs 并配置 key 后返回逐字时间戳供小程序播放高亮使用。
-TTS_ALIGNMENT_PROVIDER=disabled
-TTS_ALIGNMENT_API_KEY=
-TTS_ALIGNMENT_BASE_URL=https://api.elevenlabs.io/v1
-TTS_ALIGNMENT_TIMEOUT_SECONDS=30
-TTS_ALIGNMENT_MAX_CONCURRENT_REQUESTS=2
-ELEVENLABS_API_KEY=
-ELEVENLABS_BASE_URL=https://api.elevenlabs.io/v1
-
-# StepFun TTS。TTS_PROVIDER=stepfun 时优先读取这些变量；STEPFUN_API_KEY 也可复用既有阶跃 key。
-STEPFUN_API_KEY=
-STEPFUN_BASE_URL=https://api.stepfun.ai/v1
-STEPFUN_TTS_MODEL=step-tts-2
-STEPFUN_TTS_VOICE=cixingnansheng
+# 火山/豆包语音 V3 TTS。使用 seed-tts-2.0 + *_uranus_bigtts 音色时，后端会读取原生字幕时间戳供小程序高亮。
+VOLC_TTS_APP_ID=
+VOLC_TTS_ACCESS_TOKEN=
+VOLC_TTS_ENDPOINT=https://openspeech.bytedance.com/api/v3/tts/unidirectional/sse
+VOLC_TTS_RESOURCE_ID=seed-tts-2.0
+VOLC_TTS_SPEAKER=zh_female_vv_uranus_bigtts
+VOLC_TTS_RESPONSE_FORMAT=mp3
+VOLC_TTS_SAMPLE_RATE=24000
 ```
 
 生产环境必须设置 `APP_ENV=production`，并使用至少 32 字符的非默认随机 `APP_SECRET_KEY`；否则后端启动会失败。

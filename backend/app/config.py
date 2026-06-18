@@ -60,27 +60,15 @@ class Settings(BaseSettings):
 
     # Assistant TTS
     tts_provider: str = "disabled"
-    tts_api_key: str = ""
-    tts_base_url: str = "https://api.openai.com/v1"
-    tts_model: str = "tts-1"
-    tts_voice: str = "alloy"
-    tts_response_format: str = "mp3"
     tts_timeout_seconds: float = 30.0
     tts_max_concurrent_requests: int = 3
-    tts_alignment_provider: str = "disabled"
-    tts_alignment_api_key: str = ""
-    tts_alignment_base_url: str = "https://api.elevenlabs.io/v1"
-    tts_alignment_timeout_seconds: float = 30.0
-    tts_alignment_max_concurrent_requests: int = 2
-    elevenlabs_api_key: str = ""
-    elevenlabs_base_url: str = "https://api.elevenlabs.io/v1"
-
-    # StepFun TTS. STEPFUN_API_KEY is kept separate from the generic TTS key
-    # so existing StepFun credentials can be reused by setting TTS_PROVIDER=stepfun.
-    stepfun_api_key: str = ""
-    stepfun_base_url: str = "https://api.stepfun.ai/v1"
-    stepfun_tts_model: str = "step-tts-2"
-    stepfun_tts_voice: str = "cixingnansheng"
+    volc_tts_app_id: str = ""
+    volc_tts_access_token: str = ""
+    volc_tts_endpoint: str = "https://openspeech.bytedance.com/api/v3/tts/unidirectional/sse"
+    volc_tts_resource_id: str = "seed-tts-2.0"
+    volc_tts_speaker: str = "zh_female_vv_uranus_bigtts"
+    volc_tts_response_format: str = "mp3"
+    volc_tts_sample_rate: int = 24000
 
     class Config:
         env_file = str(BACKEND_DIR / ".env")

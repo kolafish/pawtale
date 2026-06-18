@@ -19,6 +19,7 @@ from app.services.memoir.voice_tts import TTSResult
 class FakeBookTTS:
     provider_name = "fake-tts"
     model_name = "fake-tts-model"
+    default_voice = ""
 
     def __init__(self):
         self.calls = []
@@ -31,6 +32,7 @@ class FakeBookTTS:
             extension=".mp3",
             provider=self.provider_name,
             model=self.model_name,
+            voice=voice or self.default_voice,
         )
 
 

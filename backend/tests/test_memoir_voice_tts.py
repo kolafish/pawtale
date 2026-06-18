@@ -1,78 +1,64 @@
+import base64
+import json
+
 import httpx
 import pytest
+from fastapi import HTTPException
 
 from app.config import Settings
-from app.services.memoir.tts_alignment import ElevenLabsForcedAlignmentClient, is_tts_alignment_enabled
-from app.services.memoir.voice_tts import (
-    OpenAICompatibleTTSClient,
-    StepFunTTSClient,
-    get_tts_client,
-)
+from app.services.memoir.voice_tts import VolcTTSClient, get_tts_client
 
 
-def test_get_tts_client_supports_stepfun_provider():
+def test_get_tts_client_supports_volc_provider():
     settings = Settings(
-        tts_provider="stepfun",
-        tts_api_key="generic-key",
-        tts_response_format="mp3",
-        stepfun_api_key="stepfun-key",
-        stepfun_base_url="https://api.stepfun.ai/v1",
-        stepfun_tts_model="stepaudio-2.5-tts",
-        stepfun_tts_voice="cixingnansheng",
+        tts_provider="volc",
+        volc_tts_app_id="app-id",
+        volc_tts_access_token="access-token",
+        volc_tts_resource_id="seed-tts-2.0",
+        volc_tts_speaker="zh_female_vv_uranus_bigtts",
     )
 
     client = get_tts_client(settings)
 
-    assert isinstance(client, StepFunTTSClient)
-    assert client.provider_name == "stepfun"
-    assert client.model_name == "stepaudio-2.5-tts"
-    assert client.config.api_key == "stepfun-key"
-    assert client.config.voice == "cixingnansheng"
-    assert client._endpoint() == "https://api.stepfun.ai/v1/audio/speech"
+    assert isinstance(client, VolcTTSClient)
+    assert client.provider_name == "volc_tts"
+    assert client.model_name == "seed-tts-2.0"
+    assert client.default_voice == "zh_female_vv_uranus_bigtts"
 
 
-def test_stepfun_tts_client_can_fallback_to_generic_tts_key():
-    settings = Settings(
-        tts_provider="stepfun",
-        tts_api_key="generic-key",
-        stepfun_api_key="",
-    )
-
-    client = get_tts_client(settings)
-
-    assert isinstance(client, StepFunTTSClient)
-    assert client.config.api_key == "generic-key"
-
-
-def test_stepfun_tts_client_accepts_host_level_base_url():
-    client = get_tts_client(
-        Settings(
-            tts_provider="stepfun",
-            tts_api_key="generic-key",
-            stepfun_base_url="https://api.stepfun.com",
-        )
-    )
-
-    assert isinstance(client, StepFunTTSClient)
-    assert client._endpoint() == "https://api.stepfun.com/v1/audio/speech"
-
-
-def test_tts_alignment_requires_provider_and_key():
-    assert not is_tts_alignment_enabled(Settings(tts_alignment_provider="disabled"))
-    assert not is_tts_alignment_enabled(Settings(tts_alignment_provider="unknown"))
-    assert not is_tts_alignment_enabled(Settings(tts_alignment_provider="elevenlabs"))
-    assert is_tts_alignment_enabled(
-        Settings(
-            tts_alignment_provider="elevenlabs",
-            tts_alignment_api_key="align-key",
-        )
-    )
+def test_get_tts_client_rejects_disabled_provider():
+    with pytest.raises(HTTPException):
+        get_tts_client(Settings(tts_provider="disabled"))
 
 
 @pytest.mark.asyncio
-async def test_audio_speech_tts_client_posts_openai_compatible_payload(monkeypatch):
+async def test_volc_tts_client_posts_sse_payload_and_maps_subtitle(monkeypatch):
     calls = []
     limiter = RecordingLimiter()
+    audio = b"audio-bytes"
+    response_body = "\n".join(
+        [
+            f'data: {json.dumps({"code": 0, "message": "", "data": base64.b64encode(audio).decode()})}',
+            'event: 351',
+            'data: '
+            + json.dumps(
+                {
+                    "code": 0,
+                    "message": "",
+                    "data": None,
+                    "sentence": {
+                        "text": "你好，继续讲。",
+                        "words": [
+                            {"word": "你", "startTime": 0.1, "endTime": 0.22, "confidence": 0.91},
+                            {"word": "好，", "startTime": 0.22, "endTime": 0.46, "confidence": 0.92},
+                            {"word": "继", "startTime": 0.7, "endTime": 0.82, "confidence": 0.93},
+                        ],
+                    },
+                },
+                ensure_ascii=False,
+            ),
+        ]
+    )
 
     class FakeAsyncClient:
         def __init__(self, *, timeout):
@@ -94,51 +80,71 @@ async def test_audio_speech_tts_client_posts_openai_compatible_payload(monkeypat
                 }
             )
             request = httpx.Request("POST", url)
-            return httpx.Response(200, content=b"audio-bytes", request=request)
+            return httpx.Response(200, text=response_body, request=request)
 
     monkeypatch.setattr("app.services.memoir.voice_tts.httpx.AsyncClient", FakeAsyncClient)
     monkeypatch.setattr("app.services.memoir.voice_tts.provider_concurrency_limiter", limiter)
-    client = OpenAICompatibleTTSClient(
+    client = VolcTTSClient(
         Settings(
-            tts_api_key="test-key",
-            tts_base_url="https://tts.example.test/v1",
-            tts_model="tts-model",
-            tts_voice="default-voice",
-            tts_response_format="mp3",
+            tts_provider="volc",
             tts_timeout_seconds=12,
             tts_max_concurrent_requests=6,
+            volc_tts_app_id="app-id",
+            volc_tts_access_token="access-token",
+            volc_tts_endpoint="https://openspeech.bytedance.com/api/v3/tts/unidirectional/sse",
+            volc_tts_resource_id="seed-tts-2.0",
+            volc_tts_speaker="zh_female_vv_uranus_bigtts",
+            volc_tts_response_format="mp3",
+            volc_tts_sample_rate=24000,
         )
     )
 
-    result = await client.synthesize("你想先聊哪一位亲人？", voice="warm")
+    result = await client.synthesize("你好，继续讲。", voice="zh_male_m191_uranus_bigtts")
 
-    assert result.audio == b"audio-bytes"
+    assert result.audio == audio
     assert result.mime_type == "audio/mpeg"
     assert result.extension == ".mp3"
-    assert calls == [
-        {
-            "url": "https://tts.example.test/v1/audio/speech",
-            "json": {
-                "model": "tts-model",
-                "input": "你想先聊哪一位亲人？",
-                "voice": "warm",
-                "response_format": "mp3",
+    assert result.provider == "volc_tts"
+    assert result.model == "seed-tts-2.0"
+    assert result.voice == "zh_male_m191_uranus_bigtts"
+    assert result.duration_seconds == 0.82
+    assert [segment.text for segment in result.alignment] == ["你", "好，", "继"]
+    assert result.alignment[1].start_ms == 220
+    assert result.alignment[1].end_ms == 460
+    assert result.alignment[1].text_start == 1
+    assert result.alignment[1].text_end == 3
+    assert result.alignment[1].confidence == 0.92
+    assert calls[0]["url"] == "https://openspeech.bytedance.com/api/v3/tts/unidirectional/sse"
+    assert calls[0]["json"] == {
+        "user": {"uid": "pawtale-backend"},
+        "req_params": {
+            "text": "你好，继续讲。",
+            "speaker": "zh_male_m191_uranus_bigtts",
+            "audio_params": {
+                "format": "mp3",
+                "sample_rate": 24000,
+                "enable_subtitle": True,
             },
-            "headers": {"Authorization": "Bearer test-key"},
-            "timeout": 12,
-        }
-    ]
+            "additions": '{"disable_markdown_filter":true}',
+        },
+    }
+    assert calls[0]["headers"]["X-Api-App-Key"] == "app-id"
+    assert calls[0]["headers"]["X-Api-Access-Key"] == "access-token"
+    assert calls[0]["headers"]["X-Api-Resource-Id"] == "seed-tts-2.0"
+    assert calls[0]["headers"]["X-Api-Request-Id"]
+    assert calls[0]["timeout"] == 12
     assert limiter.calls == [("tts", 6)]
 
 
 @pytest.mark.asyncio
-async def test_elevenlabs_forced_alignment_client_posts_audio_and_maps_characters(monkeypatch):
+async def test_volc_tts_client_ignores_legacy_voice_values(monkeypatch):
     calls = []
-    limiter = RecordingLimiter()
+    audio = b"audio-bytes"
+    response_body = f'data: {json.dumps({"code": 0, "message": "", "data": base64.b64encode(audio).decode()})}'
 
     class FakeAsyncClient:
         def __init__(self, *, timeout):
-            self.timeout = timeout
+            pass
 
         async def __aenter__(self):
             return self
@@ -146,60 +152,58 @@ async def test_elevenlabs_forced_alignment_client_posts_audio_and_maps_character
         async def __aexit__(self, exc_type, exc, tb):
             return None
 
-        async def post(self, url, *, data, files, headers):
-            calls.append(
-                {
-                    "url": url,
-                    "data": data,
-                    "files": files,
-                    "headers": headers,
-                    "timeout": self.timeout,
-                }
-            )
+        async def post(self, url, *, json, headers):
+            calls.append(json)
             request = httpx.Request("POST", url)
-            return httpx.Response(
-                200,
-                json={
-                    "characters": [
-                        {"text": "你", "start": 0.0, "end": 0.12},
-                        {"text": "好", "start": 0.12, "end": 0.28},
-                    ],
-                    "words": [],
-                    "loss": 0.04,
-                },
-                request=request,
-            )
+            return httpx.Response(200, text=response_body, request=request)
 
-    monkeypatch.setattr("app.services.memoir.tts_alignment.httpx.AsyncClient", FakeAsyncClient)
-    monkeypatch.setattr("app.services.memoir.tts_alignment.provider_concurrency_limiter", limiter)
-    client = ElevenLabsForcedAlignmentClient(
+    monkeypatch.setattr("app.services.memoir.voice_tts.httpx.AsyncClient", FakeAsyncClient)
+    client = VolcTTSClient(
         Settings(
-            tts_alignment_api_key="align-key",
-            tts_alignment_base_url="https://api.elevenlabs.io/v1",
-            tts_alignment_timeout_seconds=9,
-            tts_alignment_max_concurrent_requests=4,
+            tts_provider="volc",
+            volc_tts_app_id="app-id",
+            volc_tts_access_token="access-token",
+            volc_tts_speaker="zh_female_vv_uranus_bigtts",
         )
     )
 
-    result = await client.align("你好", b"audio-bytes", mime_type="audio/mpeg", extension=".mp3")
+    result = await client.synthesize("你好", voice="cixingnansheng")
 
-    assert result.provider == "elevenlabs_forced_alignment"
-    assert result.duration_seconds == 0.28
-    assert result.loss == 0.04
-    assert [segment.text for segment in result.segments] == ["你", "好"]
-    assert result.segments[1].start_ms == 120
-    assert result.segments[1].end_ms == 280
-    assert result.segments[1].text_start == 1
-    assert calls == [
-        {
-            "url": "https://api.elevenlabs.io/v1/forced-alignment",
-            "data": {"text": "你好"},
-            "files": {"file": ("tts-audio.mp3", b"audio-bytes", "audio/mpeg")},
-            "headers": {"xi-api-key": "align-key"},
-            "timeout": 9,
-        }
-    ]
-    assert limiter.calls == [("tts_alignment", 4)]
+    assert result.voice == "zh_female_vv_uranus_bigtts"
+    assert calls[0]["req_params"]["speaker"] == "zh_female_vv_uranus_bigtts"
+
+
+@pytest.mark.asyncio
+async def test_volc_tts_client_fails_when_provider_returns_no_audio(monkeypatch):
+    limiter = RecordingLimiter()
+    response_body = 'event: 153\ndata: {"code":45000030,"message":"resource not granted"}\n'
+
+    class FakeAsyncClient:
+        def __init__(self, *, timeout):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def post(self, url, *, json, headers):
+            request = httpx.Request("POST", url)
+            return httpx.Response(200, text=response_body, request=request)
+
+    monkeypatch.setattr("app.services.memoir.voice_tts.httpx.AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr("app.services.memoir.voice_tts.provider_concurrency_limiter", limiter)
+    client = VolcTTSClient(
+        Settings(
+            tts_provider="volc",
+            volc_tts_app_id="app-id",
+            volc_tts_access_token="access-token",
+        )
+    )
+
+    with pytest.raises(HTTPException):
+        await client.synthesize("你好")
 
 
 class RecordingLimiter:

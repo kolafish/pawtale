@@ -3,7 +3,7 @@ from sqlalchemy import select
 from app.domain.memoir.types import MemoirChatContentStatus, MemoirChatMessageRole
 from app.models.memoir import AudioFile, MemoirChatMessage, MemoirVoiceSession, MemoirVoiceUtterance
 from app.services.memoir import voice_sessions as memoir_voice_sessions
-from app.services.memoir.tts_alignment import TTSAlignmentResult, TTSAlignmentSegment
+from app.services.memoir.tts_alignment import TTSAlignmentSegment
 from app.services.memoir.voice_tts import TTSResult
 
 
@@ -29,20 +29,27 @@ class FakeFollowUpAI:
 class FakeTTS:
     provider_name = "fake-tts"
     model_name = "fake-tts-model"
+    default_voice = ""
 
-    def __init__(self, audio_results=None):
+    def __init__(self, audio_results=None, alignment_results=None):
         self.calls = []
         self.audio_results = list(audio_results or [b"fake-mp3-audio"])
+        self.alignment_results = list(alignment_results or [])
 
     async def synthesize(self, text, *, voice=None):
         self.calls.append({"text": text, "voice": voice})
         audio = self.audio_results.pop(0) if self.audio_results else b"fake-mp3-audio"
+        alignment = self.alignment_results.pop(0) if self.alignment_results else []
+        duration_seconds = max((segment.end_ms for segment in alignment), default=0) / 1000 if alignment else None
         return TTSResult(
             audio=audio,
             mime_type="audio/mpeg",
             extension=".mp3",
             provider=self.provider_name,
             model=self.model_name,
+            voice=voice or self.default_voice,
+            alignment=alignment,
+            duration_seconds=duration_seconds,
         )
 
 
@@ -531,17 +538,9 @@ async def test_mobile_memoir_assistant_tts_generates_audio_for_follow_up_message
     test_db.add(assistant_message)
     await test_db.commit()
     await test_db.refresh(assistant_message)
-    fake_tts = FakeTTS()
-    async def fake_align_tts_audio(text, audio, *, mime_type, extension, settings=None):
-        assert text == "你想先聊哪一位亲人？"
-        assert audio == b"fake-mp3-audio"
-        assert mime_type == "audio/mpeg"
-        assert extension == ".mp3"
-        return TTSAlignmentResult(
-            provider="fake-align",
-            duration_seconds=0.42,
-            loss=0.03,
-            segments=[
+    fake_tts = FakeTTS(
+        alignment_results=[
+            [
                 TTSAlignmentSegment(
                     text="你",
                     start_ms=0,
@@ -556,11 +555,11 @@ async def test_mobile_memoir_assistant_tts_generates_audio_for_follow_up_message
                     text_start=1,
                     text_end=2,
                 ),
-            ],
-        )
+            ]
+        ]
+    )
 
     monkeypatch.setattr("app.services.memoir.voice_tts.get_tts_client", lambda: fake_tts)
-    monkeypatch.setattr("app.services.memoir.voice_tts.align_tts_audio", fake_align_tts_audio)
 
     response = await client.post(
         f"/api/mobile/memoir/voice-sessions/{session['id']}/messages/{assistant_message.id}/tts",
@@ -573,8 +572,8 @@ async def test_mobile_memoir_assistant_tts_generates_audio_for_follow_up_message
     assert data["provider"] == "fake-tts"
     assert data["model"] == "fake-tts-model"
     assert data["mime_type"] == "audio/mpeg"
-    assert data["duration_seconds"] == 0.42
-    assert data["alignment_provider"] == "fake-align"
+    assert data["duration_seconds"] == 0.24
+    assert data["alignment_provider"] == "fake-tts"
     assert data["alignment"][:2] == [
         {
             "text": "你",
@@ -599,7 +598,7 @@ async def test_mobile_memoir_assistant_tts_generates_audio_for_follow_up_message
     await test_db.refresh(assistant_message)
     assert assistant_message.audio_file_id == data["audio_file_id"]
     assert assistant_message.metadata_json["tts_provider"] == "fake-tts"
-    assert assistant_message.metadata_json["tts_alignment_provider"] == "fake-align"
+    assert assistant_message.metadata_json["tts_timing_source"] == "fake-tts"
     assert assistant_message.metadata_json["tts_alignment"][0]["text"] == "你"
     playback = await client.get(f"/api/mobile/memoir/audio-files/{data['audio_file_id']}/playback")
     assert playback.status_code == 200
@@ -633,11 +632,7 @@ async def test_mobile_memoir_assistant_tts_force_regenerate_deletes_replaced_aud
     await test_db.refresh(assistant_message)
     fake_tts = FakeTTS([b"first-mp3-audio", b"second-mp3-audio"])
 
-    async def fake_align_tts_audio(text, audio, *, mime_type, extension, settings=None):
-        return None
-
     monkeypatch.setattr("app.services.memoir.voice_tts.get_tts_client", lambda: fake_tts)
-    monkeypatch.setattr("app.services.memoir.voice_tts.align_tts_audio", fake_align_tts_audio)
 
     first_response = await client.post(
         f"/api/mobile/memoir/voice-sessions/{session['id']}/messages/{assistant_message.id}/tts",
@@ -670,7 +665,7 @@ async def test_mobile_memoir_assistant_tts_force_regenerate_deletes_replaced_aud
     assert second_playback.content == b"second-mp3-audio"
 
 
-async def test_mobile_memoir_assistant_tts_regenerates_unaligned_cache_when_alignment_enabled(
+async def test_mobile_memoir_assistant_tts_regenerates_stale_provider_cache(
     client,
     test_db,
     monkeypatch,
@@ -696,32 +691,9 @@ async def test_mobile_memoir_assistant_tts_regenerates_unaligned_cache_when_alig
     await test_db.commit()
     await test_db.refresh(assistant_message)
 
-    alignment_enabled = False
     fake_tts = FakeTTS([b"old-mp3-audio", b"new-mp3-audio"])
 
-    async def fake_align_tts_audio(text, audio, *, mime_type, extension, settings=None):
-        if not alignment_enabled:
-            return None
-        assert text == "说说你最记得的那一天。"
-        assert audio == b"new-mp3-audio"
-        return TTSAlignmentResult(
-            provider="fake-align",
-            duration_seconds=0.36,
-            loss=None,
-            segments=[
-                TTSAlignmentSegment(
-                    text="说",
-                    start_ms=0,
-                    end_ms=120,
-                    text_start=0,
-                    text_end=1,
-                )
-            ],
-        )
-
     monkeypatch.setattr("app.services.memoir.voice_tts.get_tts_client", lambda: fake_tts)
-    monkeypatch.setattr("app.services.memoir.voice_tts.align_tts_audio", fake_align_tts_audio)
-    monkeypatch.setattr("app.services.memoir.voice_tts.is_tts_alignment_enabled", lambda: alignment_enabled)
 
     first_response = await client.post(
         f"/api/mobile/memoir/voice-sessions/{session['id']}/messages/{assistant_message.id}/tts",
@@ -734,9 +706,17 @@ async def test_mobile_memoir_assistant_tts_regenerates_unaligned_cache_when_alig
     first_audio_path = tmp_path / "audio" / first_audio.user_id / f"{first_audio.id}.mp3"
     assert first_audio_path.read_bytes() == b"old-mp3-audio"
     assert first_response.json()["alignment"] == []
-    assert first_response.json()["message"]["metadata_json"]["tts_alignment_attempted"] is False
+    assert first_response.json()["message"]["metadata_json"]["tts_provider"] == "fake-tts"
 
-    alignment_enabled = True
+    await test_db.refresh(assistant_message)
+    assistant_message.metadata_json = {
+        **assistant_message.metadata_json,
+        "tts_provider": "stepfun",
+        "tts_model": "step-tts-2",
+    }
+    test_db.add(assistant_message)
+    await test_db.commit()
+
     second_response = await client.post(
         f"/api/mobile/memoir/voice-sessions/{session['id']}/messages/{assistant_message.id}/tts",
         json={},
@@ -745,9 +725,8 @@ async def test_mobile_memoir_assistant_tts_regenerates_unaligned_cache_when_alig
     assert second_response.status_code == 200
     second_data = second_response.json()
     assert second_data["audio_file_id"] != first_audio_id
-    assert second_data["alignment_provider"] == "fake-align"
-    assert second_data["alignment"][0]["text"] == "说"
-    assert second_data["message"]["metadata_json"]["tts_alignment_attempted"] is True
+    assert second_data["provider"] == "fake-tts"
+    assert second_data["message"]["metadata_json"]["tts_provider"] == "fake-tts"
     assert await test_db.scalar(select(AudioFile).where(AudioFile.id == first_audio_id)) is None
     assert not first_audio_path.exists()
     assert fake_tts.calls == [
@@ -760,7 +739,7 @@ async def test_mobile_memoir_assistant_tts_regenerates_unaligned_cache_when_alig
     assert second_playback.content == b"new-mp3-audio"
 
 
-async def test_mobile_memoir_assistant_tts_reuses_cache_after_alignment_attempt_without_segments(
+async def test_mobile_memoir_assistant_tts_reuses_cache_after_timing_attempt_without_segments(
     client,
     test_db,
     monkeypatch,
@@ -788,12 +767,7 @@ async def test_mobile_memoir_assistant_tts_reuses_cache_after_alignment_attempt_
 
     fake_tts = FakeTTS([b"first-mp3-audio", b"second-mp3-audio"])
 
-    async def fake_align_tts_audio(text, audio, *, mime_type, extension, settings=None):
-        return None
-
     monkeypatch.setattr("app.services.memoir.voice_tts.get_tts_client", lambda: fake_tts)
-    monkeypatch.setattr("app.services.memoir.voice_tts.align_tts_audio", fake_align_tts_audio)
-    monkeypatch.setattr("app.services.memoir.voice_tts.is_tts_alignment_enabled", lambda: True)
 
     first_response = await client.post(
         f"/api/mobile/memoir/voice-sessions/{session['id']}/messages/{assistant_message.id}/tts",
@@ -802,7 +776,7 @@ async def test_mobile_memoir_assistant_tts_reuses_cache_after_alignment_attempt_
     assert first_response.status_code == 200
     first_data = first_response.json()
     assert first_data["alignment"] == []
-    assert first_data["message"]["metadata_json"]["tts_alignment_attempted"] is True
+    assert first_data["message"]["metadata_json"]["tts_timing_source"] is None
 
     second_response = await client.post(
         f"/api/mobile/memoir/voice-sessions/{session['id']}/messages/{assistant_message.id}/tts",
