@@ -200,7 +200,7 @@ async def test_mobile_memoir_voice_follow_up_generates_and_saves_assistant_messa
     assert data["message"]["content_text"] == "那时候你最记得谁？"
     assert data["message"]["turn_index"] == 1
     assert data["message"]["guidance_intent"] == "follow_up"
-    assert data["message"]["metadata_json"]["prompt_version"] == "memoir_voice_followup_v2"
+    assert data["message"]["metadata_json"]["prompt_version"] == "memoir_voice_followup_v3"
     assert data["message"]["metadata_json"]["has_user_message"] is True
     assert "老余" in fake_ai.calls[0]["system_prompt"]
     assert "我小时候住在外婆家。" in fake_ai.calls[0]["user_prompt"]
@@ -239,8 +239,10 @@ async def test_mobile_memoir_voice_follow_up_starts_guided_session_without_user_
     assert data["message"]["metadata_json"]["regenerate"] is True
     assert data["message"]["metadata_json"]["has_user_message"] is False
     assert "老余" in fake_ai.calls[0]["system_prompt"]
-    assert "今天可以随便聊一些主题" in fake_ai.calls[0]["user_prompt"]
-    assert "比如" in fake_ai.calls[0]["user_prompt"]
+    assert "主题讲述首次开场" in fake_ai.calls[0]["user_prompt"]
+    assert "第一次主题讲述开场" in fake_ai.calls[0]["user_prompt"]
+    assert "今天可以围绕不同主题讲回忆" in fake_ai.calls[0]["user_prompt"]
+    assert "要明确介绍可聊主题" in fake_ai.calls[0]["user_prompt"]
     assert "人物、事情、家庭、工作、地点、某一天、人生阶段、闲聊" in fake_ai.calls[0]["user_prompt"]
     assert "聊一个最挂念的家人" in fake_ai.calls[0]["user_prompt"]
     assert "聊第一份工作" in fake_ai.calls[0]["user_prompt"]
@@ -322,9 +324,13 @@ async def test_mobile_memoir_guided_opening_references_previous_session(
 
     assert response.status_code == 200
     prompt = fake_ai.calls[0]["user_prompt"]
+    assert "主题讲述继续开场" in prompt
     assert "叙述者之前已有同模式讲述记录" in prompt
-    assert "今天可以随便聊一些主题" in prompt
-    assert "问叙述者是想接着上次聊，还是重新选一个主题聊" in prompt
+    assert "欢迎回来，咱们接着聊" in prompt
+    assert "不要重复完整自我介绍" in prompt
+    assert "优先邀请叙述者接着上次的话题继续讲" in prompt
+    assert "主题介绍只做一句简短兜底" in prompt
+    assert "不要完整展开主题菜单" in prompt
     assert "叙述者：上次讲到我第一次去上海找工作。" in prompt
 
 

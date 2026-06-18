@@ -27,7 +27,7 @@ SYSTEM_PROMPT = (
     "你的任务不是审问用户，而是帮助叙述者自然地讲出人生经历、人物、事情、地点、时间和感受。"
 )
 AI_FOLLOW_UP_UNAVAILABLE_MESSAGE = "AI 服务暂时不可用，请稍后重试。"
-PROMPT_VERSION = "memoir_voice_followup_v2"
+PROMPT_VERSION = "memoir_voice_followup_v3"
 MAX_CONTEXT_MESSAGES = 12
 MAX_PREVIOUS_CONTEXT_MESSAGES = 8
 logger = logging.getLogger(__name__)
@@ -117,19 +117,22 @@ def _build_user_prompt(
 - 如果叙述者明显还有兴趣，就顺着讲；如果回答变短或重复，就引导换一个同主题问题，或回到主题菜单
 {GUIDED_TOPIC_LIBRARY}"""
         elif has_previous_user_message:
-            mode_instruction = f"""当前是主题讲述开场，叙述者之前已有同模式讲述记录。
-- 先问好，并用“老余”做简短自我介绍
-- 先自然说明“今天可以随便聊一些主题”
-- 再用“比如”简短举例介绍几个主题：{GUIDED_TOPIC_MENU}
-- 然后提醒上次讲到的内容，问叙述者是想接着上次聊，还是重新选一个主题聊
+            mode_instruction = f"""当前是主题讲述继续开场，叙述者之前已有同模式讲述记录。
+- 开头要明确体现回访，例如“欢迎回来，咱们接着聊”
+- 可以用“老余”轻轻带一下，但不要重复完整自我介绍
+- 根据历史会话进度提醒上次讲到哪里，只能复述明确出现过的内容
+- 优先邀请叙述者接着上次的话题继续讲，同时允许他重新选主题
+- 主题介绍只做一句简短兜底：如果今天想换方向，也可以从这些主题里挑一个：{GUIDED_TOPIC_MENU}
 - 不要直接进入细节，不要替叙述者决定继续或重开
+- 不要完整展开主题菜单，不要使用首次开场的话术
 - 下面题库仅供后续追问参考，开场不要一次展开
 {GUIDED_TOPIC_LIBRARY}"""
         else:
-            mode_instruction = f"""当前是主题讲述开场。
+            mode_instruction = f"""当前是主题讲述首次开场。
+- 这是这个项目第一次主题讲述开场，不要提“上次”或“欢迎回来”
 - 先问好，并用“老余”做简短自我介绍
-- 先自然说明“今天可以随便聊一些主题”
-- 再用“比如”简短举例介绍几个主题：{GUIDED_TOPIC_MENU}
+- 先自然说明“今天可以围绕不同主题讲回忆”
+- 要明确介绍可聊主题：{GUIDED_TOPIC_MENU}
 - 先让叙述者选择想聊哪个主题，不要立刻进入细节
 - 可以用一句自然的话完成问候、自我介绍、主题举例和选择邀请
 - 下面题库仅供后续追问参考，开场不要一次展开
