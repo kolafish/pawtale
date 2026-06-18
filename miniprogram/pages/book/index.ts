@@ -786,6 +786,7 @@ Page<BookData, {
     }
     if (title === trimText(chapter.title)) {
       this.patchChapter(chapterId, { titleChanged: false, draftError: "" });
+      wx.showToast({ title: "章名已保存", icon: "success" });
       return;
     }
     this.stopPlayback();

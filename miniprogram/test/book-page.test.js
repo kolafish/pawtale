@@ -616,6 +616,33 @@ test("book page saves edited confirmed chapter title", async () => {
   delete global.wx;
 });
 
+test("book page acknowledges unchanged confirmed chapter title save", async () => {
+  const toasts = [];
+  const { page } = loadBookPage({
+    voiceApiExports: {
+      updateMemoirBookChapterTitle: async () => {
+        throw new Error("updateMemoirBookChapterTitle should not be called for unchanged title");
+      },
+    },
+  });
+  global.wx = {
+    showToast(options) {
+      toasts.push(options);
+    },
+    switchTab() {},
+  };
+  const context = pageContext(page, { projectId: "project/1", projectTitle: "外婆回忆录" });
+  page.applyPlan.call(context, samplePlan("confirmed"));
+
+  await page.saveChapterTitle.call(context, {
+    currentTarget: { dataset: { id: "chapter-1" } },
+  });
+
+  assert.deepEqual(toasts[0], { title: "章名已保存", icon: "success" });
+  assert.equal(context.data.chapters[0].titleChanged, false);
+  delete global.wx;
+});
+
 test("book page regenerates confirmed chapter title through AI", async () => {
   const calls = [];
   global.wx = { showToast() {}, switchTab() {} };
