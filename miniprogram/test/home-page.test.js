@@ -5,12 +5,14 @@ const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
 
-function loadHomePage({ authExports = {}, voiceApiExports = {} } = {}) {
+function loadHomePage({ authExports = {}, voiceApiExports = {}, voiceAuthorizationExports = {} } = {}) {
   const authPath = require.resolve("../services/auth.ts");
   const voiceApiPath = require.resolve("../services/memoir-voice-api.ts");
+  const voiceAuthorizationPath = require.resolve("../services/voice-authorization.ts");
   const homePath = require.resolve("../pages/home/index.ts");
   delete require.cache[authPath];
   delete require.cache[voiceApiPath];
+  delete require.cache[voiceAuthorizationPath];
   delete require.cache[homePath];
   require.cache[authPath] = {
     id: authPath,
@@ -33,6 +35,21 @@ function loadHomePage({ authExports = {}, voiceApiExports = {} } = {}) {
         throw new Error("createMemoirVoiceSession was not mocked");
       },
       ...voiceApiExports,
+    },
+  };
+  require.cache[voiceAuthorizationPath] = {
+    id: voiceAuthorizationPath,
+    filename: voiceAuthorizationPath,
+    loaded: true,
+    exports: {
+      readVoiceAuthorizationConsent: () => true,
+      saveVoiceAuthorizationConsent: (agreed = true) => ({
+        agreed,
+        version: "test",
+        agreedAt: "2026-06-18T00:00:00.000Z",
+      }),
+      VOICE_AUTHORIZATION_PAGE_URL: "/pages/voice-authorization/index",
+      ...voiceAuthorizationExports,
     },
   };
 
@@ -165,6 +182,7 @@ test("home creates voice sessions with the project-bound guidance mode", async (
       ...page.data,
       selectedMode: "guided_interview",
       selectedModule: "event",
+      voiceAuthorizationAgreed: true,
     },
     setData(patch) {
       this.data = { ...this.data, ...patch };
@@ -194,6 +212,7 @@ test("home sends login-required voice starts to the me tab", async () => {
     data: {
       ...page.data,
       needsLogin: true,
+      voiceAuthorizationAgreed: true,
     },
     setData(patch) {
       this.data = { ...this.data, ...patch };
@@ -204,4 +223,69 @@ test("home sends login-required voice starts to the me tab", async () => {
 
   assert.deepEqual(switches, ["/pages/me/index"]);
   delete global.wx;
+});
+
+test("home blocks voice session creation before voice authorization consent", async () => {
+  let createCalls = 0;
+  const toasts = [];
+  global.wx = {
+    showToast(options) {
+      toasts.push(options);
+    },
+  };
+  const { page } = loadHomePage({
+    voiceApiExports: {
+      createMemoirVoiceSession: async () => {
+        createCalls += 1;
+        return { session: { id: "voice/blocked" } };
+      },
+    },
+  });
+  const context = {
+    data: {
+      ...page.data,
+      needsLogin: false,
+      voiceAuthorizationAgreed: false,
+    },
+    setData(patch) {
+      this.data = { ...this.data, ...patch };
+    },
+  };
+
+  await page.startVoiceChat.call(context);
+
+  assert.equal(createCalls, 0);
+  assert.match(context.data.error, /声纹授权协议/);
+  assert.equal(toasts[0].title, "请先同意声纹授权协议");
+  delete global.wx;
+});
+
+test("home persists voice authorization checkbox changes", () => {
+  let savedValue = null;
+  const { page } = loadHomePage({
+    voiceAuthorizationExports: {
+      saveVoiceAuthorizationConsent: (agreed = true) => {
+        savedValue = agreed;
+        return {
+          agreed,
+          version: "test",
+          agreedAt: "2026-06-18T00:00:00.000Z",
+        };
+      },
+    },
+  });
+  const context = {
+    data: { ...page.data, error: "旧错误" },
+    setData(patch) {
+      this.data = { ...this.data, ...patch };
+    },
+  };
+
+  page.changeVoiceAuthorization.call(context, {
+    detail: { value: ["voice_authorization"] },
+  });
+
+  assert.equal(savedValue, true);
+  assert.equal(context.data.voiceAuthorizationAgreed, true);
+  assert.equal(context.data.error, "");
 });

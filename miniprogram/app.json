@@ -3,6 +3,7 @@
     "pages/home/index",
     "pages/index/index",
     "pages/login/index",
+    "pages/voice-authorization/index",
     "pages/voice-chat/index",
     "pages/transcripts/index",
     "pages/book/index",
@@ -56,7 +57,7 @@
   },
   "permission": {
     "scope.record": {
-      "desc": "用于语音访谈和实时转写"
+      "desc": "用于语音访谈录音、实时转写和留存音频"
     }
   },
   "style": "v2",

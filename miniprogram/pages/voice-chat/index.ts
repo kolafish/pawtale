@@ -23,6 +23,11 @@ import { splitTextByAudioPlaybackProgress } from "../../services/tts-text-progre
 import { readChatTTSSettings } from "../../services/tts-settings";
 import { canAutoStartListeningAfterTTS } from "../../services/voice-chat-auto-listen";
 import {
+  readVoiceAuthorizationConsent,
+  saveVoiceAuthorizationConsent,
+  VOICE_AUTHORIZATION_PAGE_URL,
+} from "../../services/voice-authorization";
+import {
   assistantPanelCopy,
   canRequestFollowUp,
   countTextChars,
@@ -46,6 +51,14 @@ import {
   transcriptLinesFromVoiceSessionDetail,
   writeMemoirVoiceSessionSnapshot,
 } from "../../stores/memoir-cache";
+
+const VOICE_AUTHORIZATION_VALUE = "voice_authorization";
+
+interface CheckboxChangeEvent {
+  detail: {
+    value: string[];
+  };
+}
 
 interface VoiceChatData {
   voiceSessionId: string;
@@ -95,6 +108,7 @@ interface VoiceChatData {
   gatewayStateText: string;
   persistenceStateText: string;
   errorKindText: string;
+  voiceAuthorizationAgreed: boolean;
 }
 
 let streamingClient: MemoirStreamingAsrClient | null = null;
@@ -104,7 +118,12 @@ const AUTO_STOP_MIN_RECORDING_MS = 1200;
 
 Page<VoiceChatData, {
   onLoad(query?: Record<string, string | undefined>): Promise<void>;
+  onShow(): void;
   onUnload(): void;
+  refreshVoiceAuthorizationConsent(): void;
+  changeVoiceAuthorization(event: CheckboxChangeEvent): void;
+  openVoiceAuthorization(): void;
+  ensureVoiceAuthorization(autoTriggered?: boolean): boolean;
   hydrateVoiceSessionSnapshot(): void;
   refreshVoiceSessionSnapshot(): Promise<void>;
   confirmSavedTranscriptSnapshot(event: VoiceGatewayServerEvent): Promise<void>;
@@ -200,17 +219,21 @@ Page<VoiceChatData, {
     gatewayStateText: "识别未同步",
     persistenceStateText: "等待识别",
     errorKindText: "",
+    voiceAuthorizationAgreed: false,
   },
 
   async onLoad(query) {
     const voiceSessionId = query?.voiceSessionId || "";
     const guidanceMode = query?.mode === "guided_interview" ? "guided_interview" : "free_narration";
     const currentGuidanceModule = query?.module || "";
+    const voiceAuthorizationAgreed = readVoiceAuthorizationConsent();
     this.setData({
       voiceSessionId,
       guidanceMode,
       currentGuidanceModule,
       modeLabel: modeLabel(guidanceMode),
+      voiceAuthorizationAgreed,
+      primaryActionText: voiceAuthorizationAgreed ? "开始说话" : "同意后开始说话",
     });
     if (!voiceSessionId) {
       this.setData({ error: "缺少语音会话" });
@@ -220,7 +243,18 @@ Page<VoiceChatData, {
     this.setData({ connecting: true });
     await this.refreshVoiceSessionSnapshot();
     this.setData({ connecting: false });
-    await this.connectGateway();
+    if (this.data.voiceAuthorizationAgreed) {
+      await this.connectGateway();
+    } else {
+      this.setData({
+        statusText: "等待声纹授权",
+        autoListenStateText: "同意后才会自动收音",
+      });
+    }
+  },
+
+  onShow() {
+    this.refreshVoiceAuthorizationConsent();
   },
 
   onUnload() {
@@ -229,6 +263,69 @@ Page<VoiceChatData, {
     this.cancelFollowUpTTS();
     streamingClient?.close();
     streamingClient = null;
+  },
+
+  refreshVoiceAuthorizationConsent() {
+    const voiceAuthorizationAgreed = readVoiceAuthorizationConsent();
+    const patch: Partial<VoiceChatData> = { voiceAuthorizationAgreed };
+    if (voiceAuthorizationAgreed && this.data.primaryActionText === "同意后开始说话") {
+      patch.primaryActionText = "开始说话";
+      patch.error = "";
+      patch.autoListenStateText = "AI 说完自动听";
+    }
+    if (!voiceAuthorizationAgreed && !this.data.recording) {
+      patch.primaryActionText = "同意后开始说话";
+      patch.autoListenStateText = "同意后才会自动收音";
+    }
+    this.setData(patch);
+    if (
+      voiceAuthorizationAgreed
+      && this.data.voiceSessionId
+      && !this.data.connecting
+      && (!streamingClient || this.data.status === "closed")
+    ) {
+      void this.connectGateway();
+    }
+  },
+
+  changeVoiceAuthorization(event) {
+    const agreed = event.detail.value.includes(VOICE_AUTHORIZATION_VALUE);
+    const consent = saveVoiceAuthorizationConsent(agreed);
+    if (!agreed && streamingClient && this.data.recording) {
+      streamingClient.stopRecording();
+    }
+    this.setData({
+      voiceAuthorizationAgreed: consent.agreed,
+      recording: agreed ? this.data.recording : false,
+      error: agreed ? "" : this.data.error,
+      primaryActionText: agreed ? "开始说话" : "同意后开始说话",
+      autoListenStateText: agreed ? "AI 说完自动听" : "同意后才会自动收音",
+    });
+    if (agreed && this.data.voiceSessionId && !streamingClient && !this.data.connecting) {
+      void this.connectGateway();
+    }
+  },
+
+  openVoiceAuthorization() {
+    wx.navigateTo({ url: VOICE_AUTHORIZATION_PAGE_URL });
+  },
+
+  ensureVoiceAuthorization(autoTriggered = false) {
+    const latestConsent = readVoiceAuthorizationConsent();
+    if (latestConsent) {
+      if (!this.data.voiceAuthorizationAgreed) {
+        this.setData({ voiceAuthorizationAgreed: true, error: "" });
+      }
+      return true;
+    }
+    this.setData({
+      voiceAuthorizationAgreed: false,
+      error: "请先阅读并同意《声纹授权协议》后再开始录音",
+      primaryActionText: "同意后开始说话",
+      autoListenStateText: autoTriggered ? "自动收音已暂停，等待声纹授权" : "同意后才会自动收音",
+    });
+    wx.showToast({ title: "请先同意声纹授权协议", icon: "none" });
+    return false;
   },
 
   hydrateVoiceSessionSnapshot() {
@@ -748,6 +845,9 @@ Page<VoiceChatData, {
   },
 
   startRecording(autoTriggered = false) {
+    if (!this.ensureVoiceAuthorization(autoTriggered)) {
+      return false;
+    }
     if (!streamingClient || this.data.status === "closed") {
       void this.connectGateway();
       this.setData({ autoListenStateText: autoTriggered ? "正在重新连接语音" : this.data.autoListenStateText });
@@ -772,6 +872,9 @@ Page<VoiceChatData, {
   },
 
   toggleRecording() {
+    if (!this.ensureVoiceAuthorization(false)) {
+      return;
+    }
     if (!streamingClient || this.data.status === "closed") {
       void this.connectGateway();
       return;

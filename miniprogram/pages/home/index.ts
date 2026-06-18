@@ -3,8 +3,14 @@ import { getMemoirIdentity } from "../../services/auth";
 import { createMemoirVoiceSession } from "../../services/memoir-voice-api";
 import { guidanceModeLabel, memoirProjectProfile } from "../../services/memoir-project-profile";
 import { ApiError } from "../../services/request";
+import {
+  readVoiceAuthorizationConsent,
+  saveVoiceAuthorizationConsent,
+  VOICE_AUTHORIZATION_PAGE_URL,
+} from "../../services/voice-authorization";
 
 const WECHAT_PLACEHOLDER_DISPLAY_NAME = "微信用户";
+const VOICE_AUTHORIZATION_VALUE = "voice_authorization";
 
 interface HomeData {
   loading: boolean;
@@ -17,6 +23,13 @@ interface HomeData {
   selectedMode: MemoirGuidanceMode;
   selectedModule: string;
   guidanceLabel: string;
+  voiceAuthorizationAgreed: boolean;
+}
+
+interface CheckboxChangeEvent {
+  detail: {
+    value: string[];
+  };
 }
 
 function isProvisionalWeChatEmail(email: string): boolean {
@@ -41,6 +54,9 @@ function goToMeLogin(): void {
 Page<HomeData, {
   onShow(): Promise<void>;
   loadHome(): Promise<void>;
+  refreshVoiceAuthorizationConsent(): void;
+  changeVoiceAuthorization(event: CheckboxChangeEvent): void;
+  openVoiceAuthorization(): void;
   startVoiceChat(): Promise<void>;
 }>({
   data: {
@@ -54,12 +70,18 @@ Page<HomeData, {
     selectedMode: "free_narration",
     selectedModule: "event",
     guidanceLabel: "自由讲述",
+    voiceAuthorizationAgreed: false,
   },
 
   async onShow() {
+    this.refreshVoiceAuthorizationConsent();
     if (!this.data.loading) {
       await this.loadHome();
     }
+  },
+
+  refreshVoiceAuthorizationConsent() {
+    this.setData({ voiceAuthorizationAgreed: readVoiceAuthorizationConsent() });
   },
 
   async loadHome() {
@@ -104,8 +126,26 @@ Page<HomeData, {
     }
   },
 
+  changeVoiceAuthorization(event) {
+    const agreed = event.detail.value.includes(VOICE_AUTHORIZATION_VALUE);
+    const consent = saveVoiceAuthorizationConsent(agreed);
+    this.setData({
+      voiceAuthorizationAgreed: consent.agreed,
+      error: agreed ? "" : this.data.error,
+    });
+  },
+
+  openVoiceAuthorization() {
+    wx.navigateTo({ url: VOICE_AUTHORIZATION_PAGE_URL });
+  },
+
   async startVoiceChat() {
     if (this.data.loading || this.data.creatingVoice) {
+      return;
+    }
+    if (!this.data.voiceAuthorizationAgreed) {
+      this.setData({ error: "请先阅读并同意《声纹授权协议》后再开始语音聊天" });
+      wx.showToast({ title: "请先同意声纹授权协议", icon: "none" });
       return;
     }
     if (this.data.needsLogin) {
