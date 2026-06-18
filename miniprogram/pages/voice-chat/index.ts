@@ -27,6 +27,7 @@ import {
   saveVoiceAuthorizationConsent,
   VOICE_AUTHORIZATION_PAGE_URL,
 } from "../../services/voice-authorization";
+import { ensureRecorderPrivacyAuthorization } from "../../services/wechat-privacy";
 import {
   assistantPanelCopy,
   canRequestFollowUp,
@@ -150,6 +151,7 @@ Page<VoiceChatData, {
   toggleAutoStop(): void;
   connectGateway(): Promise<void>;
   startRecording(autoTriggered?: boolean): boolean;
+  startRecordingAfterPrivacy(autoTriggered?: boolean): Promise<boolean>;
   toggleRecording(): void;
   shouldAutoStartListening(): boolean;
   finishSession(): Promise<void>;
@@ -846,6 +848,28 @@ Page<VoiceChatData, {
 
   startRecording(autoTriggered = false) {
     if (!this.ensureVoiceAuthorization(autoTriggered)) {
+      return false;
+    }
+    if (!streamingClient || this.data.status === "closed") {
+      void this.connectGateway();
+      this.setData({ autoListenStateText: autoTriggered ? "正在重新连接语音" : this.data.autoListenStateText });
+      return false;
+    }
+    void this.startRecordingAfterPrivacy(autoTriggered);
+    return true;
+  },
+
+  async startRecordingAfterPrivacy(autoTriggered = false) {
+    try {
+      await ensureRecorderPrivacyAuthorization();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "微信隐私授权失败";
+      this.handleError(message, { kind: "recorder", code: "wechat_privacy_authorization_failed", message });
+      this.setData({
+        recording: false,
+        primaryActionText: "继续说话",
+        autoListenStateText: autoTriggered ? "自动收音已暂停，等待隐私授权" : this.data.autoListenStateText,
+      });
       return false;
     }
     if (!streamingClient || this.data.status === "closed") {
