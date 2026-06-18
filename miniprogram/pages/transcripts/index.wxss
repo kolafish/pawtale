@@ -125,6 +125,25 @@
   line-height: 1.35;
 }
 
+.book-status {
+  display: inline-flex;
+  max-width: 100%;
+  margin-top: 12rpx;
+  padding: 8rpx 14rpx;
+  border-radius: 999rpx;
+  background: #fff8ef;
+  color: #7a6255;
+  font-size: 22rpx;
+  font-weight: 800;
+  line-height: 1.25;
+  word-break: break-word;
+}
+
+.book-status.included {
+  background: #fff1ec;
+  color: #8a4034;
+}
+
 .record-count {
   flex: 0 0 auto;
   padding: 10rpx 16rpx;

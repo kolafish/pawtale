@@ -26,6 +26,7 @@ from app.models.memoir import (
 )
 from app.models.projects import Project
 from app.schemas.memoir import (
+    MemoirVoiceTranscriptIncludedChapterResponse,
     MemoirVoiceTranscriptCleanupRequest,
     MemoirVoiceTranscriptItemResponse,
     MemoirVoiceTranscriptListResponse,
@@ -194,7 +195,10 @@ def _transcript_filter(user_id: str, project_id: str | None = None):
     return clauses
 
 
-def _item_response(utterance: MemoirVoiceUtterance) -> MemoirVoiceTranscriptItemResponse:
+def _item_response(
+    utterance: MemoirVoiceUtterance,
+    included_chapters: list[MemoirVoiceTranscriptIncludedChapterResponse] | None = None,
+) -> MemoirVoiceTranscriptItemResponse:
     voice_session = utterance.voice_session
     chat_message = utterance.chat_message
     audio_file = utterance.audio_file
@@ -202,6 +206,7 @@ def _item_response(utterance: MemoirVoiceUtterance) -> MemoirVoiceTranscriptItem
     raw = utterance.transcript_raw or ""
     edited = utterance.transcript_edited or ""
     display_text = edited.strip() or raw.strip()
+    inclusions = included_chapters or []
     return MemoirVoiceTranscriptItemResponse(
         id=utterance.id,
         voice_session_id=utterance.voice_session_id,
@@ -228,6 +233,8 @@ def _item_response(utterance: MemoirVoiceUtterance) -> MemoirVoiceTranscriptItem
         session_status=voice_session.status,
         guidance_mode=voice_session.guidance_mode,
         current_guidance_module=voice_session.current_guidance_module,
+        is_included_in_book=bool(inclusions),
+        included_chapters=inclusions,
         created_at=_utc_datetime(utterance.created_at),
         session_created_at=_utc_datetime(voice_session.created_at),
     )
@@ -258,6 +265,36 @@ def _detail_options():
         selectinload(MemoirVoiceUtterance.chat_message),
         selectinload(MemoirVoiceUtterance.audio_file),
     )
+
+
+async def _book_inclusions_by_utterance_ids(
+    db: AsyncSession,
+    utterance_ids: list[str],
+    *,
+    project_ids: list[str] | None = None,
+) -> dict[str, list[MemoirVoiceTranscriptIncludedChapterResponse]]:
+    clean_utterance_ids = list(dict.fromkeys(item for item in utterance_ids if item))
+    if not clean_utterance_ids:
+        return {}
+    query = select(MemoirBookPlanChapter)
+    if project_ids:
+        query = query.where(MemoirBookPlanChapter.project_id.in_(list(dict.fromkeys(project_ids))))
+    chapters = (await db.execute(query)).scalars().all()
+    utterance_id_set = set(clean_utterance_ids)
+    inclusions: dict[str, list[MemoirVoiceTranscriptIncludedChapterResponse]] = {}
+    for chapter in sorted(chapters, key=lambda item: (item.sort_order, item.created_at, item.id)):
+        included_chapter = MemoirVoiceTranscriptIncludedChapterResponse(
+            chapter_id=chapter.id,
+            title=chapter.title,
+            sort_order=chapter.sort_order,
+        )
+        for ref in chapter.source_refs_json or []:
+            if not isinstance(ref, dict):
+                continue
+            utterance_id = ref.get("utterance_id")
+            if isinstance(utterance_id, str) and utterance_id in utterance_id_set:
+                inclusions.setdefault(utterance_id, []).append(included_chapter)
+    return inclusions
 
 
 async def _load_owned_utterance(
@@ -303,7 +340,16 @@ async def list_voice_transcripts(
         .offset(offset)
         .limit(limit)
     )
-    items = [_item_response(utterance) for utterance in result.scalars().all()]
+    utterances = result.scalars().all()
+    inclusions = await _book_inclusions_by_utterance_ids(
+        db,
+        [utterance.id for utterance in utterances],
+        project_ids=[utterance.voice_session.project_id for utterance in utterances],
+    )
+    items = [
+        _item_response(utterance, inclusions.get(utterance.id, []))
+        for utterance in utterances
+    ]
     return MemoirVoiceTranscriptListResponse(
         items=items,
         total=total or 0,
@@ -336,7 +382,12 @@ async def _apply_edited_text(
         utterance.chat_message.content_status = MemoirChatContentStatus.CORRECTED.value
         utterance.chat_message.transcript_version_id = version.id
     await db.commit()
-    return _item_response(utterance)
+    inclusions = await _book_inclusions_by_utterance_ids(
+        db,
+        [utterance.id],
+        project_ids=[utterance.voice_session.project_id],
+    )
+    return _item_response(utterance, inclusions.get(utterance.id, []))
 
 
 async def update_voice_transcript(

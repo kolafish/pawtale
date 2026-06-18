@@ -21,6 +21,12 @@ class MemoirBookChapterSourceRef(BaseModel):
     quote: str = ""
 
 
+class MemoirBookSourceIncludedChapter(BaseModel):
+    chapter_id: str
+    title: str
+    sort_order: int
+
+
 class MemoirBookPlanChapterInput(BaseModel):
     title: str
     summary: str = ""
@@ -100,6 +106,24 @@ class MemoirBookPlanUpdateRequest(BaseModel):
         return title
 
 
+class MemoirBookChapterTitleUpdateRequest(BaseModel):
+    title: str
+
+    @field_validator("title")
+    @classmethod
+    def _valid_title(cls, value: str) -> str:
+        title = value.strip()
+        if not title:
+            raise ValueError("章节标题不能为空")
+        if len(title) > 80:
+            raise ValueError("章节标题不能超过 80 个字")
+        return title
+
+
+class MemoirBookChapterTitleGenerateRequest(BaseModel):
+    ai_model: str | None = None
+
+
 class MemoirBookPlanChapterResponse(BaseModel):
     id: str
     plan_id: str
@@ -137,6 +161,8 @@ class MemoirBookSourceCoverageItem(BaseModel):
     end_ms: int | None = None
     text: str
     created_at: datetime
+    is_included: bool = False
+    included_in_chapters: list[MemoirBookSourceIncludedChapter] = Field(default_factory=list)
 
 
 class MemoirBookSourceCoverageResponse(BaseModel):
@@ -145,6 +171,7 @@ class MemoirBookSourceCoverageResponse(BaseModel):
     total_source_count: int
     covered_source_count: int
     uncovered_source_count: int
+    sources: list[MemoirBookSourceCoverageItem] = Field(default_factory=list)
     uncovered_sources: list[MemoirBookSourceCoverageItem] = Field(default_factory=list)
 
 

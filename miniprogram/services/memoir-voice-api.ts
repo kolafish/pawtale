@@ -6,6 +6,8 @@ import type {
   MemoirBookChapterDraft,
   MemoirBookChapterDraftGenerateRequest,
   MemoirBookChapterDraftUpdateRequest,
+  MemoirBookChapterTitleGenerateRequest,
+  MemoirBookChapterTitleUpdateRequest,
   MemoirBookOutput,
   MemoirBookOutputGenerateRequest,
   MemoirBookPlan,
@@ -220,6 +222,36 @@ export async function assignMemoirBookSources(
   await ensureBackendSession();
   return request<MemoirBookPlan>(
     `/api/mobile/memoir/projects/${encodeURIComponent(projectId)}/book-source-assignments`,
+    {
+      method: "POST",
+      data,
+    },
+  );
+}
+
+export async function updateMemoirBookChapterTitle(
+  projectId: string,
+  chapterId: string,
+  data: MemoirBookChapterTitleUpdateRequest,
+): Promise<MemoirBookPlan> {
+  await ensureBackendSession();
+  return request<MemoirBookPlan>(
+    `/api/mobile/memoir/projects/${encodeURIComponent(projectId)}/book-plan/chapters/${encodeURIComponent(chapterId)}/title`,
+    {
+      method: "PATCH",
+      data,
+    },
+  );
+}
+
+export async function generateMemoirBookChapterTitle(
+  projectId: string,
+  chapterId: string,
+  data: MemoirBookChapterTitleGenerateRequest = {},
+): Promise<MemoirBookPlan> {
+  await ensureBackendSession();
+  return request<MemoirBookPlan>(
+    `/api/mobile/memoir/projects/${encodeURIComponent(projectId)}/book-plan/chapters/${encodeURIComponent(chapterId)}/title/generate`,
     {
       method: "POST",
       data,

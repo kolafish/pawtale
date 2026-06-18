@@ -160,6 +160,8 @@ async def test_mobile_memoir_lists_saved_voice_transcripts(client, test_db):
     assert item["audio_duration_seconds"] == 8
     assert item["display_text"] == "嗯，我小时候就是住在外婆家。"
     assert item["display_char_count"] == len("嗯，我小时候就是住在外婆家。")
+    assert item["is_included_in_book"] is False
+    assert item["included_chapters"] == []
     assert item["created_at"].endswith(UTC_SUFFIXES)
     assert item["session_created_at"].endswith(UTC_SUFFIXES)
 
@@ -259,6 +261,40 @@ def _book_source_ref(created: dict, quote: str) -> dict:
         "end_ms": 8000,
         "quote": quote,
     }
+
+
+async def test_mobile_memoir_lists_book_inclusion_for_voice_transcripts(client, test_db):
+    created = await _create_voice_transcript(client, test_db, text="我小时候常在外婆家的院子里晒太阳。")
+    project_id = created["session"]["project_id"]
+    plan = MemoirBookPlan(
+        project_id=project_id,
+        title="外婆回忆录章节规划",
+        status=MemoirBookPlanStatus.CONFIRMED.value,
+        created_by=MemoirCreatedBy.USER.value,
+    )
+    test_db.add(plan)
+    await test_db.flush()
+    test_db.add(
+        MemoirBookPlanChapter(
+            plan_id=plan.id,
+            project_id=project_id,
+            title="院子里的童年",
+            summary="整理外婆家院子的童年生活。",
+            sort_order=0,
+            source_refs_json=[_book_source_ref(created, "外婆家的院子")],
+        )
+    )
+    await test_db.commit()
+
+    response = await client.get(f"/api/mobile/memoir/voice-transcripts?project_id={project_id}")
+
+    assert response.status_code == 200
+    item = response.json()["items"][0]
+    assert item["id"] == created["utterance_id"]
+    assert item["is_included_in_book"] is True
+    assert len(item["included_chapters"]) == 1
+    assert item["included_chapters"][0]["title"] == "院子里的童年"
+    assert item["included_chapters"][0]["sort_order"] == 0
 
 
 async def test_mobile_memoir_delete_transcript_removes_book_source_refs_and_marks_draft_stale(client, test_db):

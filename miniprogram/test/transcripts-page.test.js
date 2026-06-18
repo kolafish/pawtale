@@ -44,3 +44,18 @@ test("transcript audio summary falls back to utterance timestamps", () => {
     "时长 10 秒",
   );
 });
+
+test("transcript book inclusion text shows included chapter titles", () => {
+  const { transcriptBookInclusionText } = loadTranscriptsPage();
+
+  assert.equal(
+    transcriptBookInclusionText({
+      included_chapters: [
+        { chapter_id: "chapter-2", title: "离家求学", sort_order: 1 },
+        { chapter_id: "chapter-1", title: "童年院子", sort_order: 0 },
+      ],
+    }),
+    "已收录：童年院子、离家求学",
+  );
+  assert.equal(transcriptBookInclusionText({ included_chapters: [] }), "未收录到章节");
+});

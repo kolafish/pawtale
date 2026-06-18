@@ -15,7 +15,13 @@ from app.services.memoir.book_drafts import (
     update_chapter_draft,
 )
 from app.services.memoir.book_outputs import generate_book_output, get_book_output, synthesize_book_output_audio
-from app.services.memoir.book_plans import confirm_book_plan, generate_book_plan, get_book_plan
+from app.services.memoir.book_plans import (
+    confirm_book_plan,
+    generate_book_chapter_title,
+    generate_book_plan,
+    get_book_plan,
+    update_book_chapter_title,
+)
 from app.services.memoir.drafting import (
     accept_draft,
     generate_draft_for_answer,
@@ -74,6 +80,7 @@ __all__ = [
     "create_theme_memory",
     "create_transcript_version",
     "generate_draft_for_answer",
+    "generate_book_chapter_title",
     "generate_book_plan",
     "generate_book_output",
     "generate_chapter_draft",
@@ -105,6 +112,7 @@ __all__ = [
     "synthesize_book_output_audio",
     "synthesize_chapter_draft_audio",
     "update_answer_text",
+    "update_book_chapter_title",
     "update_chapter_draft",
     "update_draft_content",
     "update_memory",

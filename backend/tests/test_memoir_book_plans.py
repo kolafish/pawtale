@@ -58,6 +58,24 @@ class FakeBookPlanAI:
         )
 
 
+class FakeChapterTitleAI:
+    provider_name = "fake-ai"
+    model_name = "fake-title"
+
+    def __init__(self):
+        self.calls = []
+
+    async def _call_llm(self, system_prompt, user_prompt, **kwargs):
+        self.calls.append(
+            {
+                "system_prompt": system_prompt,
+                "user_prompt": user_prompt,
+                "kwargs": kwargs,
+            }
+        )
+        return "外婆院中的日子"
+
+
 async def _active_project_id(client):
     response = await client.get("/api/mobile/memoir/projects")
     assert response.status_code == 200
@@ -195,6 +213,9 @@ async def test_mobile_memoir_book_source_coverage_lists_all_sources_before_plan(
     assert data["total_source_count"] == 1
     assert data["covered_source_count"] == 0
     assert data["uncovered_source_count"] == 1
+    assert data["sources"][0]["utterance_id"] == created["utterance_id"]
+    assert data["sources"][0]["is_included"] is False
+    assert data["sources"][0]["included_in_chapters"] == []
     assert data["uncovered_sources"][0]["utterance_id"] == created["utterance_id"]
     assert data["uncovered_sources"][0]["text"] == "我小时候常在外婆家的院子里晒太阳。"
 
@@ -336,6 +357,10 @@ async def test_mobile_memoir_book_source_coverage_detects_new_transcripts_after_
     assert data["total_source_count"] == 2
     assert data["covered_source_count"] == 1
     assert data["uncovered_source_count"] == 1
+    source_status_by_utterance = {item["utterance_id"]: item for item in data["sources"]}
+    assert source_status_by_utterance[created["utterance_id"]]["is_included"] is True
+    assert source_status_by_utterance[created["utterance_id"]]["included_in_chapters"][0]["title"] == "童年和外婆家"
+    assert source_status_by_utterance[later["utterance_id"]]["is_included"] is False
     assert [item["utterance_id"] for item in data["uncovered_sources"]] == [later["utterance_id"]]
     assert data["uncovered_sources"][0]["text"] == "后来我又讲了第一次离家去县城读书。"
 
@@ -709,6 +734,97 @@ async def test_mobile_memoir_book_plan_patch_adds_chapter_from_uncovered_source(
     coverage = await client.get(f"/api/mobile/memoir/projects/{project_id}/book-source-coverage")
     assert coverage.status_code == 200
     assert coverage.json()["uncovered_source_count"] == 0
+
+
+async def test_mobile_memoir_book_chapter_title_update_renames_confirmed_chapter(
+    client,
+    test_db,
+    monkeypatch,
+):
+    created = await _create_voice_transcript(client, test_db, "我小时候常在外婆家的院子里晒太阳。")
+    project_id = created["session"]["project_id"]
+    monkeypatch.setattr(
+        "app.services.memoir.book_plans.get_ai_service",
+        lambda model=None: FakeBookPlanAI(),
+    )
+    generated_response = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-plan/generate",
+        json={},
+    )
+    source_ref = generated_response.json()["chapters"][0]["source_refs"][0]
+    confirm_response = await client.put(
+        f"/api/mobile/memoir/projects/{project_id}/book-plan",
+        json={
+            "chapters": [
+                {
+                    "title": "童年和外婆家",
+                    "summary": "只保留童年院子的内容。",
+                    "source_refs": [source_ref],
+                }
+            ],
+        },
+    )
+    chapter_id = confirm_response.json()["chapters"][0]["id"]
+
+    response = await client.patch(
+        f"/api/mobile/memoir/projects/{project_id}/book-plan/chapters/{chapter_id}/title",
+        json={"title": "院子里的童年"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["chapters"][0]["title"] == "院子里的童年"
+    assert data["chapters"][0]["source_refs"][0]["utterance_id"] == created["utterance_id"]
+    assert data["chapters"][0]["metadata_json"]["title_updated_by"] == "user"
+
+
+async def test_mobile_memoir_book_chapter_title_generate_uses_chapter_sources(
+    client,
+    test_db,
+    monkeypatch,
+):
+    created = await _create_voice_transcript(client, test_db, "我小时候常在外婆家的院子里晒太阳。")
+    project_id = created["session"]["project_id"]
+    monkeypatch.setattr(
+        "app.services.memoir.book_plans.get_ai_service",
+        lambda model=None: FakeBookPlanAI(),
+    )
+    generated_response = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-plan/generate",
+        json={},
+    )
+    source_ref = generated_response.json()["chapters"][0]["source_refs"][0]
+    confirm_response = await client.put(
+        f"/api/mobile/memoir/projects/{project_id}/book-plan",
+        json={
+            "chapters": [
+                {
+                    "title": "新收录转写",
+                    "summary": "整理这条新收录转写。",
+                    "source_refs": [source_ref],
+                }
+            ],
+        },
+    )
+    chapter_id = confirm_response.json()["chapters"][0]["id"]
+    fake_ai = FakeChapterTitleAI()
+    monkeypatch.setattr(
+        "app.services.memoir.book_plans.get_ai_service",
+        lambda model=None: fake_ai,
+    )
+
+    response = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-plan/chapters/{chapter_id}/title/generate",
+        json={"ai_model": "deepseek"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["chapters"][0]["title"] == "外婆院中的日子"
+    assert data["chapters"][0]["metadata_json"]["title_updated_by"] == "ai"
+    assert data["chapters"][0]["metadata_json"]["title_model"] == "fake-title"
+    assert "不要使用“转写”" in fake_ai.calls[0]["user_prompt"]
+    assert "外婆家的院子" in fake_ai.calls[0]["user_prompt"]
 
 
 async def test_mobile_memoir_book_plan_confirm_rejects_foreign_source(client, test_db):

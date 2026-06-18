@@ -225,6 +225,8 @@ export interface MemoirVoiceTranscriptItem {
   session_status: MemoirVoiceSessionStatus;
   guidance_mode: MemoirGuidanceMode;
   current_guidance_module?: string | null;
+  is_included_in_book?: boolean;
+  included_chapters?: MemoirBookSourceIncludedChapter[];
   created_at: string;
   session_created_at: string;
 }
@@ -245,6 +247,12 @@ export interface MemoirBookChapterSourceRef {
   start_ms?: number | null;
   end_ms?: number | null;
   quote: string;
+}
+
+export interface MemoirBookSourceIncludedChapter {
+  chapter_id: string;
+  title: string;
+  sort_order: number;
 }
 
 export interface MemoirBookPlanChapterInput {
@@ -294,6 +302,8 @@ export interface MemoirBookSourceCoverageItem {
   end_ms?: number | null;
   text: string;
   created_at: string;
+  is_included?: boolean;
+  included_in_chapters?: MemoirBookSourceIncludedChapter[];
 }
 
 export interface MemoirBookSourceCoverage {
@@ -302,6 +312,7 @@ export interface MemoirBookSourceCoverage {
   total_source_count: number;
   covered_source_count: number;
   uncovered_source_count: number;
+  sources?: MemoirBookSourceCoverageItem[];
   uncovered_sources: MemoirBookSourceCoverageItem[];
 }
 
@@ -317,6 +328,14 @@ export interface MemoirBookSourceAssignmentRequest {
 export interface MemoirBookPlanGenerateRequest {
   ai_model?: string;
   max_chapters?: number;
+}
+
+export interface MemoirBookChapterTitleUpdateRequest {
+  title: string;
+}
+
+export interface MemoirBookChapterTitleGenerateRequest {
+  ai_model?: string;
 }
 
 export interface MemoirBookPlanConfirmRequest {

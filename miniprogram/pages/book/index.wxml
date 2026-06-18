@@ -134,6 +134,15 @@
 
       <view class="actions-row compact">
         <button
+          class="ghost-button"
+          data-id="{{item.id}}"
+          loading="{{titleBusyTarget === item.id}}"
+          bindtap="generateChapterTitle"
+          disabled="{{confirmingPlan || generatingPlan || titleBusyTarget || updatingPlanStructure}}"
+        >
+          {{titleBusyTarget === item.id ? "起名中" : "AI 起名"}}
+        </button>
+        <button
           class="danger-button"
           data-id="{{item.id}}"
           bindtap="removeChapter"
@@ -174,11 +183,38 @@
       <view class="chapter-head">
         <view class="chapter-title-block">
           <text class="chapter-index">第 {{index + 1}} 章</text>
-          <text class="chapter-title">{{item.title}}</text>
         </view>
         <text class="draft-status {{item.draft && item.draft.status === 'confirmed' ? 'confirmed' : ''}}">
           {{item.draftStatusText}}
         </text>
+      </view>
+
+      <view class="chapter-title-edit-row">
+        <input
+          class="chapter-title-inline-input"
+          value="{{item.editingTitle}}"
+          data-id="{{item.id}}"
+          bindinput="changeChapterTitle"
+          maxlength="80"
+          disabled="{{updatingPlanStructure || titleBusyTarget === item.id}}"
+        />
+        <button
+          class="title-action-button"
+          data-id="{{item.id}}"
+          loading="{{titleBusyTarget === item.id}}"
+          bindtap="generateChapterTitle"
+          disabled="{{updatingPlanStructure || item.draftBusy || titleBusyTarget}}"
+        >
+          {{titleBusyTarget === item.id ? "起名中" : "AI 起名"}}
+        </button>
+        <button
+          class="title-action-button primary"
+          data-id="{{item.id}}"
+          bindtap="saveChapterTitle"
+          disabled="{{updatingPlanStructure || item.draftBusy || titleBusyTarget || !item.titleChanged}}"
+        >
+          保存章名
+        </button>
       </view>
 
       <text wx:if="{{item.summary}}" class="chapter-summary">{{item.summary}}</text>
