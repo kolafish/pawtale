@@ -310,6 +310,7 @@ test("book page builds source assignment views and chapter picker options", () =
 
   const sources = mod.buildUncoveredSourceViews(coverage, 1);
   const options = mod.buildChapterPickerOptions(chapters);
+  const sourceActionOptions = mod.buildSourceActionPickerOptions(chapters, true);
 
   assert.equal(sources.length, 1);
   assert.equal(sources[0].utterance_id, "utterance-new-2");
@@ -318,6 +319,11 @@ test("book page builds source assignment views and chapter picker options", () =
   assert.deepEqual(options, [
     { label: "第 1 章 外婆家的童年", value: "chapter-1" },
     { label: "第 2 章 第一次离家", value: "chapter-2" },
+  ]);
+  assert.deepEqual(sourceActionOptions, [
+    { label: "第 1 章 外婆家的童年", value: "chapter-1" },
+    { label: "第 2 章 第一次离家", value: "chapter-2" },
+    { label: "作为新章", value: "__new_chapter__" },
   ]);
 });
 
@@ -515,6 +521,60 @@ test("book page adds uncovered transcript as a new chapter", async () => {
   delete global.wx;
 });
 
+test("book page adds uncovered transcript as a new chapter from picker option", async () => {
+  const calls = [];
+  global.wx = { showToast() {}, switchTab() {} };
+  const updatedPlan = samplePlan("confirmed");
+  updatedPlan.chapters = [
+    ...updatedPlan.chapters,
+    {
+      id: "chapter-3",
+      plan_id: "plan-1",
+      project_id: "project/1",
+      title: "补记往事",
+      summary: "整理这条新收录转写。",
+      sort_order: 2,
+      source_refs: [sampleRef("utterance-new-1", "新增转写")],
+      metadata_json: {},
+      created_at: "2026-06-17T00:00:00.000Z",
+      updated_at: "2026-06-17T00:00:00.000Z",
+    },
+  ];
+  const { page } = loadBookPage({
+    voiceApiExports: {
+      assignMemoirBookSources: async () => {
+        throw new Error("assignMemoirBookSources should not be called for new chapter option");
+      },
+      updateMemoirBookPlan: async (projectId, data) => {
+        calls.push({ projectId, data });
+        return updatedPlan;
+      },
+      getMemoirBookChapterDraft: async () => null,
+      getMemoirBookSourceCoverage: async () => sampleSourceCoverage(0),
+      getMemoirBookOutput: async () => null,
+    },
+  });
+  const context = pageContext(page, {
+    projectId: "project/1",
+    projectTitle: "外婆回忆录",
+  });
+  page.applyPlan.call(context, samplePlan("confirmed"));
+  page.applySourceCoverage.call(context, sampleSourceCoverage(1));
+
+  const newChapterOptionIndex = context.data.chapterPickerOptions.findIndex((option) => option.label === "作为新章");
+  await page.assignUncoveredSource.call(context, {
+    currentTarget: { dataset: { id: "utterance-new-1" } },
+    detail: { value: newChapterOptionIndex },
+  });
+
+  assert.equal(newChapterOptionIndex, 2);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].data.chapters.length, 3);
+  assert.equal(calls[0].data.chapters[2].title, "补记往事");
+  assert.equal(context.data.assigningSourceId, "");
+  delete global.wx;
+});
+
 test("book page saves edited confirmed chapter title", async () => {
   const calls = [];
   global.wx = { showToast() {}, switchTab() {} };
@@ -553,6 +613,33 @@ test("book page saves edited confirmed chapter title", async () => {
   assert.equal(context.data.chapters[0].title, "院子里的童年");
   assert.equal(context.data.chapters[0].titleChanged, false);
   assert.equal(context.data.titleBusyTarget, "");
+  delete global.wx;
+});
+
+test("book page acknowledges unchanged confirmed chapter title save", async () => {
+  const toasts = [];
+  const { page } = loadBookPage({
+    voiceApiExports: {
+      updateMemoirBookChapterTitle: async () => {
+        throw new Error("updateMemoirBookChapterTitle should not be called for unchanged title");
+      },
+    },
+  });
+  global.wx = {
+    showToast(options) {
+      toasts.push(options);
+    },
+    switchTab() {},
+  };
+  const context = pageContext(page, { projectId: "project/1", projectTitle: "外婆回忆录" });
+  page.applyPlan.call(context, samplePlan("confirmed"));
+
+  await page.saveChapterTitle.call(context, {
+    currentTarget: { dataset: { id: "chapter-1" } },
+  });
+
+  assert.deepEqual(toasts[0], { title: "章名已保存", icon: "success" });
+  assert.equal(context.data.chapters[0].titleChanged, false);
   delete global.wx;
 });
 

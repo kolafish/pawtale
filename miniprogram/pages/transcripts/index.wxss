@@ -129,13 +129,13 @@
   display: inline-flex;
   max-width: 100%;
   margin-top: 12rpx;
-  padding: 8rpx 14rpx;
+  padding: 12rpx 18rpx;
   border-radius: 999rpx;
   background: #fff8ef;
   color: #7a6255;
-  font-size: 22rpx;
+  font-size: 28rpx;
   font-weight: 800;
-  line-height: 1.25;
+  line-height: 1.35;
   word-break: break-word;
 }
 

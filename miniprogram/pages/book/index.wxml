@@ -50,14 +50,6 @@
               {{assigningSourceId === item.utterance_id ? "归入中" : "归入章节"}}
             </view>
           </picker>
-          <button
-            class="coverage-new-chapter"
-            data-id="{{item.utterance_id}}"
-            disabled="{{assigningSourceId || updatingPlanStructure || stage !== 'drafting'}}"
-            bindtap="addUncoveredSourceAsChapter"
-          >
-            作为新章
-          </button>
         </view>
       </view>
     </view>
@@ -193,28 +185,31 @@
         <input
           class="chapter-title-inline-input"
           value="{{item.editingTitle}}"
+          placeholder="输入章节名"
           data-id="{{item.id}}"
           bindinput="changeChapterTitle"
           maxlength="80"
           disabled="{{updatingPlanStructure || titleBusyTarget === item.id}}"
         />
-        <button
-          class="title-action-button"
-          data-id="{{item.id}}"
-          loading="{{titleBusyTarget === item.id}}"
-          bindtap="generateChapterTitle"
-          disabled="{{updatingPlanStructure || item.draftBusy || titleBusyTarget}}"
-        >
-          {{titleBusyTarget === item.id ? "起名中" : "AI 起名"}}
-        </button>
-        <button
-          class="title-action-button primary"
-          data-id="{{item.id}}"
-          bindtap="saveChapterTitle"
-          disabled="{{updatingPlanStructure || item.draftBusy || titleBusyTarget || !item.titleChanged}}"
-        >
-          保存章名
-        </button>
+        <view class="chapter-title-actions">
+          <button
+            class="title-action-button"
+            data-id="{{item.id}}"
+            loading="{{titleBusyTarget === item.id}}"
+            bindtap="generateChapterTitle"
+            disabled="{{updatingPlanStructure || item.draftBusy || titleBusyTarget}}"
+          >
+            {{titleBusyTarget === item.id ? "起名中" : "AI 起名"}}
+          </button>
+          <button
+            class="title-action-button primary"
+            data-id="{{item.id}}"
+            bindtap="saveChapterTitle"
+            disabled="{{updatingPlanStructure || item.draftBusy || titleBusyTarget}}"
+          >
+            保存章名
+          </button>
+        </view>
       </view>
 
       <text wx:if="{{item.summary}}" class="chapter-summary">{{item.summary}}</text>
