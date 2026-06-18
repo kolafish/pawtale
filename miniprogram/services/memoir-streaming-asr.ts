@@ -15,6 +15,7 @@ import {
   normalizeVoiceGatewayEvent,
   pcmFrameDurationMs,
 } from "./memoir-streaming-asr-protocol";
+import { wechatPrivacyErrorMessage } from "./wechat-privacy";
 
 export {
   arrayBufferToBase64,
@@ -295,6 +296,7 @@ export class MemoirStreamingAsrClient {
   }
 
   handleRecorderError(message: string): void {
+    const readableMessage = wechatPrivacyErrorMessage(message);
     this.recording = false;
     this.recorderStarted = false;
     if (this.acceptingFrames && !this.audioEndSent) {
@@ -302,8 +304,8 @@ export class MemoirStreamingAsrClient {
     }
     this.acceptingFrames = false;
     this.emitCaptureStats("error");
-    this.rejectWaiters(message);
-    this.options.callbacks.onError(message, clientError(message, "recorder"));
+    this.rejectWaiters(readableMessage);
+    this.options.callbacks.onError(readableMessage, clientError(readableMessage, "recorder"));
     this.options.callbacks.onStatus("error");
   }
 

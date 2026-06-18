@@ -200,6 +200,18 @@ declare namespace WechatMiniprogram {
     complete?(result: GeneralCallbackResult): void;
   }
 
+  interface PrivacySettingOption {
+    success?(result: { needAuthorization: boolean; privacyContractName?: string; errMsg?: string }): void;
+    fail?(result: GeneralCallbackResult): void;
+    complete?(result: GeneralCallbackResult): void;
+  }
+
+  interface PrivacyAuthorizeOption {
+    success?(result: GeneralCallbackResult): void;
+    fail?(result: GeneralCallbackResult): void;
+    complete?(result: GeneralCallbackResult): void;
+  }
+
   interface Wx {
     login(option?: LoginOption): void;
     request<T = unknown>(option: RequestOption<T>): void;
@@ -207,6 +219,8 @@ declare namespace WechatMiniprogram {
     connectSocket(option: ConnectSocketOption): SocketTask;
     getRecorderManager(): RecorderManager;
     createInnerAudioContext(): InnerAudioContext;
+    getPrivacySetting?(option: PrivacySettingOption): void;
+    requirePrivacyAuthorize?(option: PrivacyAuthorizeOption): void;
     setInnerAudioOption?(option: InnerAudioOption): void;
     navigateTo(option: NavigateOption): void;
     redirectTo(option: NavigateOption): void;

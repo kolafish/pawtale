@@ -466,6 +466,48 @@ test("updates and deletes voice transcripts through backend API", async () => {
   delete global.wx;
 });
 
+test("download voice audio explains missing downloadFile domain", async () => {
+  global.wx = {
+    getStorageSync(key) {
+      if (key === "pawtale_backend_config") {
+        return {
+          httpBaseUrl: "https://pawtale-api.spaceflows.cn",
+          devEmail: "local@example.com",
+          devPassword: "secret",
+        };
+      }
+      if (key === "pawtale_backend_cookie") {
+        return "pawtale_session=abc";
+      }
+      return "";
+    },
+    getExtConfigSync() {
+      return {};
+    },
+    setStorageSync() {},
+    removeStorageSync() {},
+    request(options) {
+      options.success({ statusCode: 200, data: { id: "user-1" }, cookies: [], header: {} });
+    },
+    downloadFile(options) {
+      assert.equal(
+        options.url,
+        "https://pawtale-api.spaceflows.cn/api/mobile/memoir/audio-files/audio%2F1/playback",
+      );
+      options.fail({ errMsg: "downloadFile:fail url not in domain list" });
+    },
+  };
+  delete require.cache[require.resolve("../services/request.ts")];
+  delete require.cache[require.resolve("../services/memoir-voice-api.ts")];
+  const { downloadMemoirVoiceAudio } = require("../services/memoir-voice-api.ts");
+
+  await assert.rejects(
+    downloadMemoirVoiceAudio("audio/1"),
+    /https:\/\/pawtale-api\.spaceflows\.cn.*downloadFile 合法域名/,
+  );
+  delete global.wx;
+});
+
 test("streaming ASR connect rejects on socket error before open", async () => {
   let onError;
   global.wx = {
@@ -608,6 +650,41 @@ test("streaming ASR starts provider only after recording starts", async () => {
   assert.equal(sent.length, 1);
   assert.equal(sent[0].type, "session.start");
   assert.equal(captureStats.at(-1).state, "recording");
+  delete global.wx;
+});
+
+test("streaming ASR maps recorder privacy ban to setup guidance", () => {
+  const recorder = recorderManagerHarness();
+  const statuses = [];
+  let reportedMessage = "";
+  global.wx = {
+    getRecorderManager() {
+      return recorder;
+    },
+  };
+  delete require.cache[require.resolve("../services/memoir-streaming-asr.ts")];
+  const { MemoirStreamingAsrClient } = require("../services/memoir-streaming-asr.ts");
+
+  const client = new MemoirStreamingAsrClient({
+    voiceSessionId: "voice-1",
+    guidanceMode: "free_narration",
+    callbacks: {
+      onStatus(status) {
+        statuses.push(status);
+      },
+      onEvent() {},
+      onPartial() {},
+      onFinal() {},
+      onError(message) {
+        reportedMessage = message;
+      },
+    },
+  });
+
+  client.handleRecorderError("operateRecorder:fail appid privacy api banned");
+
+  assert.match(reportedMessage, /用户隐私保护指引.*麦克风\/录音用途声明/);
+  assert.equal(statuses.at(-1), "error");
   delete global.wx;
 });
 
