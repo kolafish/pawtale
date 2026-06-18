@@ -8,7 +8,7 @@ const {
   splitTextByTimedAlignment,
 } = require("../services/tts-text-progress.ts");
 
-test("splits TTS text by forced alignment timestamps", () => {
+test("splits TTS text by native timing timestamps", () => {
   const alignment = [
     { text: "你", start_ms: 0, end_ms: 120, text_start: 0, text_end: 1 },
     { text: "好", start_ms: 120, end_ms: 260, text_start: 1, text_end: 2 },
@@ -51,7 +51,7 @@ test("uses alignment in audio playback progress when available", () => {
   });
 });
 
-test("does not highlight text without forced alignment", () => {
+test("does not highlight text without native timing", () => {
   assert.deepEqual(splitTextByAudioPlaybackProgress("你好，世界", 0.5, 2), {
     spokenText: "",
     currentText: "",

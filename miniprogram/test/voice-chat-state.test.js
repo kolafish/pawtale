@@ -31,7 +31,7 @@ const assistantLine = {
   text: "那时候你最记得谁？",
   message_id: "message-assistant",
   metadata_json: {
-    tts_alignment_provider: "fake-align",
+    tts_timing_source: "volc_tts",
     tts_alignment: [
       {
         text: "那",
