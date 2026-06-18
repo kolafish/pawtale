@@ -15,6 +15,24 @@
     <text class="project-meta">从这里继续讲述，转写和成书分别在底部入口管理。</text>
   </view>
 
+  <view wx:if="{{needsLogin}}" class="guest-preview">
+    <text class="preview-title">先看看能做什么</text>
+    <view class="preview-grid">
+      <view class="preview-card">
+        <text class="preview-card-title">语音访谈</text>
+        <text class="preview-card-copy">按自由讲述或主题引导进行对话，过程里实时转写。</text>
+      </view>
+      <view class="preview-card">
+        <text class="preview-card-title">转写记录</text>
+        <text class="preview-card-copy">访谈结束后保留原始语音、ASR 原文和可编辑校正文。</text>
+      </view>
+      <view class="preview-card">
+        <text class="preview-card-title">整理成书</text>
+        <text class="preview-card-copy">把已确认的转写归入章节，生成章节正文和全书朗读。</text>
+      </view>
+    </view>
+  </view>
+
   <view class="voice-panel">
     <image class="voice-icon" src="/assets/memoir-microphone.png" mode="aspectFit" />
     <text class="voice-title">开始语音聊天</text>
@@ -25,7 +43,7 @@
       disabled="{{loading || creatingVoice}}"
       bindtap="startVoiceChat"
     >
-      <block wx:if="{{needsLogin}}">去我的页面登录</block>
+      <block wx:if="{{needsLogin}}">登录后开始语音聊天</block>
       <block wx:elif="{{creatingVoice}}">正在准备</block>
       <block wx:else>进入语音聊天</block>
     </button>

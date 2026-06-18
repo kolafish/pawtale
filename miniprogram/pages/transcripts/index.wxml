@@ -11,7 +11,13 @@
 
   <view wx:if="{{error}}" class="error">{{error}}</view>
 
-  <view wx:if="{{loading && !items.length}}" class="empty-panel">
+  <view wx:if="{{needsLogin}}" class="empty-panel guest-panel">
+    <text class="empty-title">浏览转写记录</text>
+    <text class="empty-copy">登录后可以查看语音聊天保存的 ASR 原文、校正文、音频时长和是否已收录到章节。</text>
+    <button class="login-button" bindtap="openLogin">登录后查看</button>
+  </view>
+
+  <view wx:elif="{{loading && !items.length}}" class="empty-panel">
     <text>正在加载</text>
   </view>
 

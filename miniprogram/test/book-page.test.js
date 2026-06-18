@@ -320,6 +320,32 @@ test("book page summarizes latest book output version", () => {
   );
 });
 
+test("book page stays on the book tab when login is required", async () => {
+  const switches = [];
+  global.wx = {
+    switchTab(options) {
+      switches.push(options.url);
+    },
+  };
+  const { ApiError } = require("../services/request.ts");
+  const { page } = loadBookPage({
+    authExports: {
+      getMemoirIdentity: async () => {
+        throw new ApiError(401, "请先登录", {});
+      },
+    },
+  });
+  const context = pageContext(page);
+
+  await page.loadBookHome.call(context);
+
+  assert.equal(context.data.needsLogin, true);
+  assert.equal(context.data.projectTitle, "我的回忆录");
+  assert.equal(context.data.progressText, "登录后可以开始整理");
+  assert.deepEqual(switches, []);
+  delete global.wx;
+});
+
 test("book page shows source coverage notice only when there are uncovered transcripts", () => {
   const { mod } = loadBookPage();
 

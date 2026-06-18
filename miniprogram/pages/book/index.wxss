@@ -518,6 +518,26 @@
   background: #fff8ef;
 }
 
+.guest-panel {
+  margin-top: 24rpx;
+  padding: 46rpx 34rpx;
+}
+
+.guest-steps {
+  margin-top: 22rpx;
+  padding: 22rpx 24rpx;
+  border-radius: 18rpx;
+  background: #fff8ef;
+}
+
+.guest-steps text {
+  display: block;
+  color: #3a2119;
+  font-size: 26rpx;
+  font-weight: 700;
+  line-height: 1.55;
+}
+
 .draft-editor {
   margin-top: 22rpx;
 }

@@ -1,6 +1,8 @@
 require("./register-ts");
 
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
 const test = require("node:test");
 
 function loadHomePage({ authExports = {}, voiceApiExports = {} } = {}) {
@@ -47,6 +49,12 @@ function loadHomePage({ authExports = {}, voiceApiExports = {} } = {}) {
   }
   return { mod, page };
 }
+
+test("mini program opens on the browseable home tab", () => {
+  const appJson = JSON.parse(fs.readFileSync(path.join(__dirname, "../app.json"), "utf8"));
+
+  assert.equal(appJson.pages[0], "pages/home/index");
+});
 
 test("home userDisplayName hides wechat placeholder display name", () => {
   const { userDisplayName } = loadHomePage().mod;
