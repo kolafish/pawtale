@@ -56,6 +56,7 @@ interface PickerEvent extends DatasetEvent {
 type BookStage = "empty" | "plan_draft" | "drafting";
 
 const TIMEZONE_OFFSET_RE = /(?:[zZ]|[+-]\d{2}:?\d{2})$/;
+const NEW_CHAPTER_PICKER_VALUE = "__new_chapter__";
 
 interface ChapterPickerOption {
   label: string;
@@ -334,6 +335,20 @@ export function buildChapterPickerOptions(chapters: BookChapterView[]): ChapterP
   }));
 }
 
+export function buildSourceActionPickerOptions(
+  chapters: BookChapterView[],
+  includeNewChapter = false,
+): ChapterPickerOption[] {
+  const options = buildChapterPickerOptions(chapters);
+  if (includeNewChapter) {
+    options.push({
+      label: "作为新章",
+      value: NEW_CHAPTER_PICKER_VALUE,
+    });
+  }
+  return options;
+}
+
 function chapterStateData(chapters: BookChapterView[]): Pick<
   BookData,
   "confirmedDraftCount" | "totalChapterCount" | "allChaptersConfirmed" | "hasDraftChanges" | "canGenerateBook" | "progressText"
@@ -481,6 +496,7 @@ Page<BookData, {
   confirmChapterDraft(event: DatasetEvent): Promise<void>;
   assignUncoveredSource(event: PickerEvent): Promise<void>;
   addUncoveredSourceAsChapter(event: DatasetEvent): Promise<void>;
+  addUncoveredSourceAsChapterById(utteranceId: string): Promise<void>;
   deleteConfirmedChapter(event: DatasetEvent): Promise<void>;
   updatePlanStructure(chapters: MemoirBookPlanChapterUpdateInput[], toastTitle: string): Promise<void>;
   generateBook(): Promise<void>;
@@ -653,7 +669,7 @@ Page<BookData, {
       stageText: stageText(stage),
       chapters,
       ...chapterStateData(chapters),
-      chapterPickerOptions: buildChapterPickerOptions(chapters),
+      chapterPickerOptions: buildSourceActionPickerOptions(chapters, stage === "drafting"),
       ...sourceCoverageData(plan, this.data.sourceCoverage),
       ...(stage === "drafting" ? {} : bookOutputData(null)),
     });
@@ -937,6 +953,10 @@ Page<BookData, {
     if (!utteranceId || !option || !this.data.projectId || this.data.assigningSourceId) {
       return;
     }
+    if (option.value === NEW_CHAPTER_PICKER_VALUE) {
+      await this.addUncoveredSourceAsChapterById(utteranceId);
+      return;
+    }
     this.stopPlayback();
     this.setData({ assigningSourceId: utteranceId, error: "" });
     try {
@@ -969,6 +989,10 @@ Page<BookData, {
 
   async addUncoveredSourceAsChapter(event) {
     const utteranceId = event.currentTarget.dataset.id || "";
+    await this.addUncoveredSourceAsChapterById(utteranceId);
+  },
+
+  async addUncoveredSourceAsChapterById(utteranceId) {
     const source = this.data.uncoveredSources.find((candidate) => candidate.utterance_id === utteranceId);
     if (!source || !this.data.plan || this.data.stage !== "drafting" || this.data.updatingPlanStructure) {
       return;
