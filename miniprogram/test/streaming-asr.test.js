@@ -63,6 +63,15 @@ function recorderManagerHarness() {
   };
 }
 
+function pcm16Frame(sample, byteLength = 3200) {
+  const frame = new ArrayBuffer(byteLength);
+  const view = new DataView(frame);
+  for (let offset = 0; offset < byteLength; offset += 2) {
+    view.setInt16(offset, sample, true);
+  }
+  return frame;
+}
+
 test("encodes ArrayBuffer audio frames as base64", () => {
   const { arrayBufferToBase64 } = streamingAsrProtocolModule();
 
@@ -741,7 +750,7 @@ test("streaming ASR reports captured audio frame stats", async () => {
   delete global.wx;
 });
 
-test("streaming ASR auto-stops after configured silence", async () => {
+test("streaming ASR waits for voice before auto-stopping after silence", async () => {
   const recorder = recorderManagerHarness();
   const sent = [];
   const captureStats = [];
@@ -813,6 +822,12 @@ test("streaming ASR auto-stops after configured silence", async () => {
   client.startRecording();
   recorder.callbacks.start();
   const silentFrame = new ArrayBuffer(3200);
+  const voiceFrame = pcm16Frame(16384);
+  recorder.callbacks.frame({ frameBuffer: silentFrame, isLastFrame: false });
+  recorder.callbacks.frame({ frameBuffer: silentFrame, isLastFrame: false });
+  assert.equal(recorder.stops, 0);
+
+  recorder.callbacks.frame({ frameBuffer: voiceFrame, isLastFrame: false });
   recorder.callbacks.frame({ frameBuffer: silentFrame, isLastFrame: false });
   recorder.callbacks.frame({ frameBuffer: silentFrame, isLastFrame: false });
 
@@ -822,6 +837,9 @@ test("streaming ASR auto-stops after configured silence", async () => {
   recorder.callbacks.stop();
   assert.deepEqual(sent.map((event) => event.type), [
     "session.start",
+    "audio.frame",
+    "audio.frame",
+    "audio.frame",
     "audio.frame",
     "audio.frame",
     "audio.end",
