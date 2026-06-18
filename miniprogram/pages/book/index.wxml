@@ -11,6 +11,22 @@
 
   <view wx:if="{{error}}" class="error">{{error}}</view>
 
+  <view wx:if="{{needsLogin}}" class="empty-panel guest-panel">
+    <image class="empty-icon" src="/assets/memoir-gramophone.png" mode="aspectFit" />
+    <text class="empty-title">浏览整理成书</text>
+    <text class="empty-copy">登录后可以把语音转写归入章节，确认章节正文，再生成全书和章节朗读。</text>
+    <view class="guest-steps">
+      <text>1. 先生成章节规划</text>
+      <text>2. 再逐章整理正文</text>
+      <text>3. 最后合成全书朗读</text>
+    </view>
+    <view class="actions-row">
+      <button class="primary-button" bindtap="openLogin">登录后整理</button>
+      <button class="ghost-button" bindtap="openHome">返回首页</button>
+    </view>
+  </view>
+
+  <block wx:else>
   <view class="status-panel">
     <view>
       <text class="status-title">{{planTitle || "整理成书"}}</text>
@@ -353,6 +369,7 @@
       </view>
     </view>
   </view>
+  </block>
 
   <view class="bottom-spacer"></view>
 </view>

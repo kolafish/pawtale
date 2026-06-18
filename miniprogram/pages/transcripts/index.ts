@@ -36,6 +36,7 @@ interface TranscriptItemView extends MemoirVoiceTranscriptItem {
 
 interface TranscriptsData {
   loading: boolean;
+  needsLogin: boolean;
   savingId: string;
   deletingId: string;
   playingId: string;
@@ -152,6 +153,7 @@ Page<TranscriptsData, {
   stopPlayback(): void;
   onUnload(): void;
   openHome(): void;
+  openLogin(): void;
   audio: WechatMiniprogram.InnerAudioContext | null;
   playToken: number;
 }>({
@@ -160,6 +162,7 @@ Page<TranscriptsData, {
 
   data: {
     loading: false,
+    needsLogin: false,
     savingId: "",
     deletingId: "",
     playingId: "",
@@ -187,6 +190,17 @@ Page<TranscriptsData, {
       let projectTitle = this.data.projectTitle;
       if (reset || !activeProjectId) {
         const identity = await getMemoirIdentity();
+        if (!identity.password_login_enabled) {
+          this.setData({
+            needsLogin: true,
+            activeProjectId: "",
+            projectTitle: "我的回忆录",
+            items: [],
+            total: 0,
+            offset: 0,
+          });
+          return;
+        }
         activeProjectId = identity.active_project_id;
         projectTitle = identity.active_project?.title || "我的回忆录";
       }
@@ -207,6 +221,7 @@ Page<TranscriptsData, {
       });
       const nextItems = response.items.map(toViewItem);
       this.setData({
+        needsLogin: false,
         activeProjectId,
         projectTitle,
         items: reset ? nextItems : [...this.data.items, ...nextItems],
@@ -215,7 +230,14 @@ Page<TranscriptsData, {
       });
     } catch (error) {
       if (error instanceof ApiError && [401, 403].includes(error.statusCode)) {
-        wx.switchTab({ url: "/pages/me/index" });
+        this.setData({
+          needsLogin: true,
+          activeProjectId: "",
+          projectTitle: "我的回忆录",
+          items: [],
+          total: 0,
+          offset: 0,
+        });
         return;
       }
       this.setData({ error: error instanceof Error ? error.message : "转写记录加载失败" });
@@ -426,5 +448,10 @@ Page<TranscriptsData, {
   openHome() {
     this.stopPlayback();
     wx.switchTab({ url: "/pages/home/index" });
+  },
+
+  openLogin() {
+    this.stopPlayback();
+    wx.switchTab({ url: "/pages/me/index" });
   },
 });

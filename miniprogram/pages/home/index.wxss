@@ -84,6 +84,50 @@
   padding: 42rpx 34rpx;
 }
 
+.guest-preview {
+  margin-top: 28rpx;
+}
+
+.preview-title {
+  display: block;
+  color: #24100b;
+  font-size: 32rpx;
+  font-weight: 800;
+  line-height: 1.3;
+}
+
+.preview-grid {
+  margin-top: 18rpx;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16rpx;
+}
+
+.preview-card {
+  padding: 24rpx;
+  border: 2rpx solid #f0dac0;
+  border-radius: 20rpx;
+  background: rgba(255, 255, 255, 0.94);
+  box-sizing: border-box;
+}
+
+.preview-card-title {
+  display: block;
+  color: #7a3b31;
+  font-size: 28rpx;
+  font-weight: 800;
+  line-height: 1.3;
+}
+
+.preview-card-copy {
+  display: block;
+  margin-top: 10rpx;
+  color: #685b55;
+  font-size: 26rpx;
+  line-height: 1.45;
+  word-break: break-word;
+}
+
 .voice-icon {
   width: 112rpx;
   height: 112rpx;

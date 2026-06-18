@@ -97,6 +97,7 @@ export interface BookChapterView extends MemoirBookPlanChapter {
 
 interface BookData {
   loading: boolean;
+  needsLogin: boolean;
   generatingPlan: boolean;
   confirmingPlan: boolean;
   updatingPlanStructure: boolean;
@@ -455,6 +456,49 @@ function stageText(stage: BookStage): string {
   return "逐章成稿";
 }
 
+function guestBookData(): Partial<BookData> {
+  return {
+    needsLogin: true,
+    projectId: "",
+    projectTitle: "我的回忆录",
+    plan: null,
+    planTitle: "",
+    stage: "empty",
+    stageText: stageText("empty"),
+    chapters: [],
+    confirmedDraftCount: 0,
+    totalChapterCount: 0,
+    allChaptersConfirmed: false,
+    hasDraftChanges: false,
+    canGenerateBook: false,
+    progressText: "登录后可以开始整理",
+    sourceCoverage: null,
+    sourceCoverageNotice: "",
+    uncoveredSourceCount: 0,
+    uncoveredSourceDisplayText: "",
+    uncoveredSources: [],
+    chapterPickerOptions: [],
+    assigningSourceId: "",
+    titleBusyTarget: "",
+    bookOutput: null,
+    bookContent: "",
+    bookCharCount: 0,
+    bookVersionText: "尚未生成全书",
+    bookStaleNotice: "",
+    bookActionText: "生成全书",
+    ttsBusyTarget: "",
+    playingTarget: "",
+    bookTTSActiveTarget: "",
+    bookTTSActiveText: "",
+    bookTTSSpokenText: "",
+    bookTTSCurrentText: "",
+    bookTTSRemainingText: "",
+    bookTTSProgressPercent: 0,
+    bookTTSDurationSeconds: 0,
+    bookTTSAlignment: [],
+  };
+}
+
 function toPlanInput(chapters: BookChapterView[]): MemoirBookPlanChapterInput[] {
   return chapters.map((chapter) => ({
     title: trimText(chapter.editingTitle),
@@ -545,6 +589,7 @@ Page<BookData, {
   onUnload(): void;
   openTranscripts(): void;
   openHome(): void;
+  openLogin(): void;
   patchChapter(chapterId: string, patch: Partial<BookChapterView>): void;
   patchDraft(chapterId: string, draft: MemoirBookChapterDraft, options?: { clearPendingSources?: boolean }): void;
   clearBookOutput(): void;
@@ -560,6 +605,7 @@ Page<BookData, {
 
   data: {
     loading: false,
+    needsLogin: false,
     generatingPlan: false,
     confirmingPlan: false,
     updatingPlanStructure: false,
@@ -616,12 +662,12 @@ Page<BookData, {
     try {
       const identity = await getMemoirIdentity();
       if (!identity.password_login_enabled) {
-        wx.switchTab({ url: "/pages/me/index" });
+        this.setData(guestBookData());
         return;
       }
       const projectId = identity.active_project_id;
       const projectTitle = identity.active_project?.title || "我的回忆录";
-      this.setData({ projectId, projectTitle });
+      this.setData({ needsLogin: false, projectId, projectTitle });
       if (!projectId) {
         this.applyPlan(null);
         this.applySourceCoverage(null);
@@ -630,7 +676,7 @@ Page<BookData, {
       await this.loadPlanForProject(projectId);
     } catch (error) {
       if (isLoginError(error)) {
-        wx.switchTab({ url: "/pages/me/index" });
+        this.setData(guestBookData());
         return;
       }
       this.setData({ error: error instanceof Error ? error.message : "成书页面加载失败" });
@@ -1463,6 +1509,11 @@ Page<BookData, {
   openHome() {
     this.stopPlayback();
     wx.switchTab({ url: "/pages/home/index" });
+  },
+
+  openLogin() {
+    this.stopPlayback();
+    wx.switchTab({ url: "/pages/me/index" });
   },
 
   patchChapter(chapterId, patch) {

@@ -84,6 +84,29 @@
   margin-top: 14rpx;
 }
 
+.guest-panel .empty-copy {
+  line-height: 1.5;
+}
+
+.login-button {
+  width: 100%;
+  height: 84rpx;
+  margin: 28rpx 0 0;
+  border: 0;
+  border-radius: 20rpx;
+  background: #9f4a3c;
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 28rpx;
+  font-weight: 800;
+}
+
+.login-button::after {
+  border: 0;
+}
+
 .transcript-card {
   padding: 30rpx;
 }

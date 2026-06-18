@@ -1,8 +1,8 @@
 {
   "pages": [
+    "pages/home/index",
     "pages/index/index",
     "pages/login/index",
-    "pages/home/index",
     "pages/voice-chat/index",
     "pages/transcripts/index",
     "pages/book/index",
