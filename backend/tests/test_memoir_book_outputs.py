@@ -54,7 +54,12 @@ class FakeBookTTS:
 async def _active_project_id(client):
     response = await client.get("/api/mobile/memoir/projects")
     assert response.status_code == 200
-    return response.json()["active_project_id"]
+    active_project_id = response.json()["active_project_id"]
+    if active_project_id:
+        return active_project_id
+    created = await client.post("/api/mobile/memoir/projects", json={"title": "测试回忆录"})
+    assert created.status_code == 201
+    return created.json()["id"]
 
 
 def test_book_tts_chunks_keep_offsets_across_blank_lines():

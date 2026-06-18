@@ -346,17 +346,28 @@ test("fetches voice session list and progress through backend API", async () => 
         });
         return;
       }
+      if (options.method === "POST" && options.url.includes("/api/mobile/memoir/voice-sessions?")) {
+        options.success({
+          statusCode: 201,
+          data: { session: { id: "voice/created" }, messages: [], utterances: [] },
+          cookies: [],
+          header: {},
+        });
+        return;
+      }
       options.success({ statusCode: 200, data: { items: [], total: 0, limit: 10, offset: 0 }, cookies: [], header: {} });
     },
   };
   delete require.cache[require.resolve("../services/request.ts")];
   delete require.cache[require.resolve("../services/memoir-voice-api.ts")];
   const {
+    createMemoirVoiceSession,
     getMemoirVoiceProgress,
     listMemoirVoiceSessions,
     listMemoirVoiceTranscripts,
   } = require("../services/memoir-voice-api.ts");
 
+  await createMemoirVoiceSession({ guidance_mode: "free_narration" }, { projectId: "project/1" });
   await listMemoirVoiceSessions({ projectId: "project/1", limit: 10, offset: 5 });
   await getMemoirVoiceProgress("project/1");
   await listMemoirVoiceTranscripts({ projectId: "project/1", limit: 10, offset: 5 });
@@ -364,16 +375,23 @@ test("fetches voice session list and progress through backend API", async () => 
   const apiRequests = requests.filter((request) => request.url.includes("/api/mobile/memoir/"));
   assert.equal(
     apiRequests[0].url,
+    "http://backend.local:8000/api/mobile/memoir/voice-sessions?project_id=project%2F1",
+  );
+  assert.equal(apiRequests[0].method, "POST");
+  assert.deepEqual(apiRequests[0].data, { guidance_mode: "free_narration" });
+  assert.equal(
+    apiRequests[1].url,
     "http://backend.local:8000/api/mobile/memoir/voice-sessions?project_id=project%2F1&limit=10&offset=5",
   );
-  assert.equal(apiRequests[1].url, "http://backend.local:8000/api/mobile/memoir/voice-progress?project_id=project%2F1");
+  assert.equal(apiRequests[2].url, "http://backend.local:8000/api/mobile/memoir/voice-progress?project_id=project%2F1");
   assert.equal(
-    apiRequests[2].url,
+    apiRequests[3].url,
     "http://backend.local:8000/api/mobile/memoir/voice-transcripts?project_id=project%2F1&limit=10&offset=5",
   );
   assert.equal(apiRequests[0].header.Cookie, "pawtale_session=abc");
   assert.equal(apiRequests[1].header.Cookie, "pawtale_session=abc");
   assert.equal(apiRequests[2].header.Cookie, "pawtale_session=abc");
+  assert.equal(apiRequests[3].header.Cookie, "pawtale_session=abc");
   delete global.wx;
 });
 

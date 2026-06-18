@@ -20,6 +20,7 @@ interface HomeData {
   displayName: string;
   projectId: string;
   projectTitle: string;
+  hasProject: boolean;
   selectedMode: MemoirGuidanceMode;
   selectedModule: string;
   guidanceLabel: string;
@@ -57,6 +58,7 @@ Page<HomeData, {
   refreshVoiceAuthorizationConsent(): void;
   changeVoiceAuthorization(event: CheckboxChangeEvent): void;
   openVoiceAuthorization(): void;
+  createProject(): void;
   startVoiceChat(): Promise<void>;
 }>({
   data: {
@@ -67,6 +69,7 @@ Page<HomeData, {
     displayName: "",
     projectId: "",
     projectTitle: "",
+    hasProject: false,
     selectedMode: "free_narration",
     selectedModule: "event",
     guidanceLabel: "自由讲述",
@@ -93,18 +96,21 @@ Page<HomeData, {
           needsLogin: true,
           displayName: "作者",
           projectId: "",
-          projectTitle: "我的回忆录",
+          projectTitle: "登录后创建回忆录",
+          hasProject: false,
           selectedMode: "free_narration",
           guidanceLabel: guidanceModeLabel("free_narration"),
         });
         return;
       }
+      const hasProject = Boolean(identity.active_project_id && identity.active_project);
       const profile = memoirProjectProfile(identity.active_project);
       this.setData({
         needsLogin: false,
         displayName: userDisplayName(identity.display_name, identity.email),
         projectId: identity.active_project_id,
-        projectTitle: identity.active_project?.title || "我的回忆录",
+        projectTitle: identity.active_project?.title || "还没有回忆录",
+        hasProject,
         selectedMode: profile.defaultGuidanceMode,
         guidanceLabel: guidanceModeLabel(profile.defaultGuidanceMode),
       });
@@ -114,7 +120,8 @@ Page<HomeData, {
           needsLogin: true,
           displayName: "作者",
           projectId: "",
-          projectTitle: "我的回忆录",
+          projectTitle: "登录后创建回忆录",
+          hasProject: false,
           selectedMode: "free_narration",
           guidanceLabel: guidanceModeLabel("free_narration"),
         });
@@ -139,17 +146,25 @@ Page<HomeData, {
     wx.navigateTo({ url: VOICE_AUTHORIZATION_PAGE_URL });
   },
 
+  createProject() {
+    wx.navigateTo({ url: "/pages/project-edit/index" });
+  },
+
   async startVoiceChat() {
     if (this.data.loading || this.data.creatingVoice) {
+      return;
+    }
+    if (this.data.needsLogin) {
+      goToMeLogin();
+      return;
+    }
+    if (!this.data.projectId) {
+      this.createProject();
       return;
     }
     if (!this.data.voiceAuthorizationAgreed) {
       this.setData({ error: "请先阅读并同意《声纹授权协议》后再开始语音聊天" });
       wx.showToast({ title: "请先同意声纹授权协议", icon: "none" });
-      return;
-    }
-    if (this.data.needsLogin) {
-      goToMeLogin();
       return;
     }
     this.setData({ creatingVoice: true, error: "" });
@@ -166,6 +181,8 @@ Page<HomeData, {
           entry: "miniprogram_home",
           first_version: true,
         },
+      }, {
+        projectId: this.data.projectId,
       });
       const params = [
         `voiceSessionId=${encodeURIComponent(detail.session.id)}`,

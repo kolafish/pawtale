@@ -154,6 +154,7 @@ Page<TranscriptsData, {
   onUnload(): void;
   openHome(): void;
   openLogin(): void;
+  createProject(): void;
   audio: WechatMiniprogram.InnerAudioContext | null;
   playToken: number;
 }>({
@@ -202,12 +203,12 @@ Page<TranscriptsData, {
           return;
         }
         activeProjectId = identity.active_project_id;
-        projectTitle = identity.active_project?.title || "我的回忆录";
+        projectTitle = identity.active_project?.title || "尚未创建回忆录";
       }
       if (!activeProjectId) {
         this.setData({
           activeProjectId: "",
-          projectTitle: projectTitle || "我的回忆录",
+          projectTitle: projectTitle || "尚未创建回忆录",
           items: [],
           total: 0,
           offset: 0,
@@ -453,5 +454,10 @@ Page<TranscriptsData, {
   openLogin() {
     this.stopPlayback();
     wx.switchTab({ url: "/pages/me/index" });
+  },
+
+  createProject() {
+    this.stopPlayback();
+    wx.navigateTo({ url: "/pages/project-edit/index" });
   },
 });

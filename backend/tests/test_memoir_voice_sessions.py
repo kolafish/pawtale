@@ -5,6 +5,7 @@ from app.models.memoir import AudioFile, MemoirChatMessage, MemoirVoiceSession, 
 from app.services.memoir import voice_sessions as memoir_voice_sessions
 from app.services.memoir.tts_alignment import TTSAlignmentSegment
 from app.services.memoir.voice_tts import TTSResult
+from tests.memoir_helpers import post_mobile_memoir_voice_session
 
 
 class FakeFollowUpAI:
@@ -66,9 +67,9 @@ async def test_mobile_memoir_voice_session_routes_require_login(anonymous_client
     assert response.status_code == 401
 
 
-async def test_mobile_memoir_creates_voice_session_for_default_project(client, test_db):
-    response = await client.post(
-        "/api/mobile/memoir/voice-sessions",
+async def test_mobile_memoir_creates_voice_session_for_existing_project(client, test_db):
+    response = await post_mobile_memoir_voice_session(
+        client,
         json={
             "guidance_mode": "guided_interview",
             "current_guidance_module": "person",
@@ -104,8 +105,8 @@ async def test_mobile_memoir_creates_voice_session_for_default_project(client, t
 
 
 async def test_mobile_memoir_voice_session_rejects_invalid_guidance_mode(client):
-    response = await client.post(
-        "/api/mobile/memoir/voice-sessions",
+    response = await post_mobile_memoir_voice_session(
+        client,
         json={"guidance_mode": "scripted_questions"},
     )
 
@@ -113,8 +114,8 @@ async def test_mobile_memoir_voice_session_rejects_invalid_guidance_mode(client)
 
 
 async def test_mobile_memoir_rejects_direct_message_and_utterance_writes(client):
-    create_response = await client.post(
-        "/api/mobile/memoir/voice-sessions",
+    create_response = await post_mobile_memoir_voice_session(
+        client,
         json={"guidance_mode": "free_narration"},
     )
     voice_session_id = create_response.json()["session"]["id"]
@@ -141,8 +142,8 @@ async def test_mobile_memoir_rejects_direct_message_and_utterance_writes(client)
 
 
 async def test_mobile_memoir_voice_session_stop_and_failure_states(client):
-    create_response = await client.post(
-        "/api/mobile/memoir/voice-sessions",
+    create_response = await post_mobile_memoir_voice_session(
+        client,
         json={"guidance_mode": "free_narration"},
     )
     voice_session_id = create_response.json()["session"]["id"]
@@ -157,8 +158,8 @@ async def test_mobile_memoir_voice_session_stop_and_failure_states(client):
     assert stopped["status"] == "stopped"
     assert stopped["stopped_at"] is not None
 
-    create_failed_response = await client.post(
-        "/api/mobile/memoir/voice-sessions",
+    create_failed_response = await post_mobile_memoir_voice_session(
+        client,
         json={"guidance_mode": "free_narration"},
     )
     failed_session_id = create_failed_response.json()["session"]["id"]
@@ -177,8 +178,8 @@ async def test_mobile_memoir_voice_follow_up_generates_and_saves_assistant_messa
     test_db,
     monkeypatch,
 ):
-    create_response = await client.post(
-        "/api/mobile/memoir/voice-sessions",
+    create_response = await post_mobile_memoir_voice_session(
+        client,
         json={"guidance_mode": "free_narration"},
     )
     session = create_response.json()["session"]
@@ -226,8 +227,8 @@ async def test_mobile_memoir_voice_follow_up_starts_guided_session_without_user_
     client,
     monkeypatch,
 ):
-    create_response = await client.post(
-        "/api/mobile/memoir/voice-sessions",
+    create_response = await post_mobile_memoir_voice_session(
+        client,
         json={"guidance_mode": "guided_interview", "current_guidance_module": "person"},
     )
     session = create_response.json()["session"]
@@ -265,8 +266,8 @@ async def test_mobile_memoir_voice_follow_up_starts_free_session_without_user_me
     client,
     monkeypatch,
 ):
-    create_response = await client.post(
-        "/api/mobile/memoir/voice-sessions",
+    create_response = await post_mobile_memoir_voice_session(
+        client,
         json={"guidance_mode": "free_narration"},
     )
     session = create_response.json()["session"]
@@ -301,8 +302,8 @@ async def test_mobile_memoir_guided_opening_references_previous_session(
     test_db,
     monkeypatch,
 ):
-    previous_response = await client.post(
-        "/api/mobile/memoir/voice-sessions",
+    previous_response = await post_mobile_memoir_voice_session(
+        client,
         json={"guidance_mode": "guided_interview", "current_guidance_module": "event"},
     )
     previous_session = previous_response.json()["session"]
@@ -317,8 +318,8 @@ async def test_mobile_memoir_guided_opening_references_previous_session(
     )
     test_db.add(previous_message)
     await test_db.commit()
-    create_response = await client.post(
-        "/api/mobile/memoir/voice-sessions",
+    create_response = await post_mobile_memoir_voice_session(
+        client,
         json={"guidance_mode": "guided_interview", "current_guidance_module": "event"},
     )
     session = create_response.json()["session"]
@@ -350,8 +351,8 @@ async def test_mobile_memoir_guided_follow_up_can_continue_previous_session(
     test_db,
     monkeypatch,
 ):
-    previous_response = await client.post(
-        "/api/mobile/memoir/voice-sessions",
+    previous_response = await post_mobile_memoir_voice_session(
+        client,
         json={"guidance_mode": "guided_interview", "current_guidance_module": "work"},
     )
     previous_session = previous_response.json()["session"]
@@ -366,8 +367,8 @@ async def test_mobile_memoir_guided_follow_up_can_continue_previous_session(
     )
     test_db.add(previous_message)
     await test_db.commit()
-    create_response = await client.post(
-        "/api/mobile/memoir/voice-sessions",
+    create_response = await post_mobile_memoir_voice_session(
+        client,
         json={"guidance_mode": "guided_interview", "current_guidance_module": "work"},
     )
     session = create_response.json()["session"]
@@ -405,8 +406,8 @@ async def test_mobile_memoir_free_opening_prompts_previous_timeline_continuation
     test_db,
     monkeypatch,
 ):
-    previous_response = await client.post(
-        "/api/mobile/memoir/voice-sessions",
+    previous_response = await post_mobile_memoir_voice_session(
+        client,
         json={"guidance_mode": "free_narration"},
     )
     previous_session = previous_response.json()["session"]
@@ -421,8 +422,8 @@ async def test_mobile_memoir_free_opening_prompts_previous_timeline_continuation
     )
     test_db.add(previous_message)
     await test_db.commit()
-    create_response = await client.post(
-        "/api/mobile/memoir/voice-sessions",
+    create_response = await post_mobile_memoir_voice_session(
+        client,
         json={"guidance_mode": "free_narration"},
     )
     session = create_response.json()["session"]
@@ -446,12 +447,12 @@ async def test_mobile_memoir_free_opening_prompts_previous_timeline_continuation
 
 
 async def test_mobile_memoir_voice_session_list_and_progress(client, test_db):
-    guided_response = await client.post(
-        "/api/mobile/memoir/voice-sessions",
+    guided_response = await post_mobile_memoir_voice_session(
+        client,
         json={"guidance_mode": "guided_interview", "current_guidance_module": "person"},
     )
-    free_response = await client.post(
-        "/api/mobile/memoir/voice-sessions",
+    free_response = await post_mobile_memoir_voice_session(
+        client,
         json={"guidance_mode": "free_narration"},
     )
     guided_session = guided_response.json()["session"]
@@ -524,8 +525,8 @@ async def test_mobile_memoir_assistant_tts_generates_audio_for_follow_up_message
     test_db,
     monkeypatch,
 ):
-    create_response = await client.post(
-        "/api/mobile/memoir/voice-sessions",
+    create_response = await post_mobile_memoir_voice_session(
+        client,
         json={"guidance_mode": "guided_interview"},
     )
     session = create_response.json()["session"]
@@ -616,8 +617,8 @@ async def test_mobile_memoir_assistant_tts_force_regenerate_deletes_replaced_aud
     tmp_path,
 ):
     monkeypatch.setattr("app.services.memoir.audio_files.MEMOIR_AUDIO_DIR", tmp_path / "audio")
-    create_response = await client.post(
-        "/api/mobile/memoir/voice-sessions",
+    create_response = await post_mobile_memoir_voice_session(
+        client,
         json={"guidance_mode": "guided_interview"},
     )
     session = create_response.json()["session"]
@@ -676,8 +677,8 @@ async def test_mobile_memoir_assistant_tts_regenerates_stale_provider_cache(
     tmp_path,
 ):
     monkeypatch.setattr("app.services.memoir.audio_files.MEMOIR_AUDIO_DIR", tmp_path / "audio")
-    create_response = await client.post(
-        "/api/mobile/memoir/voice-sessions",
+    create_response = await post_mobile_memoir_voice_session(
+        client,
         json={"guidance_mode": "guided_interview"},
     )
     session = create_response.json()["session"]
@@ -750,8 +751,8 @@ async def test_mobile_memoir_assistant_tts_reuses_cache_after_timing_attempt_wit
     tmp_path,
 ):
     monkeypatch.setattr("app.services.memoir.audio_files.MEMOIR_AUDIO_DIR", tmp_path / "audio")
-    create_response = await client.post(
-        "/api/mobile/memoir/voice-sessions",
+    create_response = await post_mobile_memoir_voice_session(
+        client,
         json={"guidance_mode": "guided_interview"},
     )
     session = create_response.json()["session"]
@@ -804,8 +805,8 @@ async def test_mobile_memoir_assistant_tts_regenerates_cache_when_speed_changes(
     tmp_path,
 ):
     monkeypatch.setattr("app.services.memoir.audio_files.MEMOIR_AUDIO_DIR", tmp_path / "audio")
-    create_response = await client.post(
-        "/api/mobile/memoir/voice-sessions",
+    create_response = await post_mobile_memoir_voice_session(
+        client,
         json={"guidance_mode": "guided_interview"},
     )
     session = create_response.json()["session"]
@@ -861,8 +862,8 @@ async def test_mobile_memoir_assistant_tts_regenerates_cache_when_speed_changes(
 
 
 async def test_mobile_memoir_assistant_tts_rejects_user_message(client, test_db):
-    create_response = await client.post(
-        "/api/mobile/memoir/voice-sessions",
+    create_response = await post_mobile_memoir_voice_session(
+        client,
         json={"guidance_mode": "free_narration"},
     )
     session = create_response.json()["session"]
@@ -898,8 +899,8 @@ async def test_mobile_memoir_voice_sessions_are_user_scoped(anonymous_client):
         },
     )
     assert first_register.status_code == 201
-    create_response = await anonymous_client.post(
-        "/api/mobile/memoir/voice-sessions",
+    create_response = await post_mobile_memoir_voice_session(
+        anonymous_client,
         json={"guidance_mode": "free_narration"},
     )
     voice_session_id = create_response.json()["session"]["id"]
@@ -930,8 +931,8 @@ async def test_mobile_memoir_voice_follow_up_is_user_scoped(anonymous_client):
         },
     )
     assert first_register.status_code == 201
-    create_response = await anonymous_client.post(
-        "/api/mobile/memoir/voice-sessions",
+    create_response = await post_mobile_memoir_voice_session(
+        anonymous_client,
         json={"guidance_mode": "free_narration"},
     )
     voice_session_id = create_response.json()["session"]["id"]

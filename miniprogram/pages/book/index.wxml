@@ -27,6 +27,17 @@
   </view>
 
   <block wx:else>
+  <view wx:if="{{!projectId}}" class="empty-panel">
+    <image class="empty-icon" src="/assets/memoir-gramophone.png" mode="aspectFit" />
+    <text class="empty-title">还没有回忆录</text>
+    <text class="empty-copy">先创建一本回忆录并设置讲述资料，完成语音转写后再整理成书。</text>
+    <view class="actions-row">
+      <button class="primary-button" bindtap="createProject">创建回忆录</button>
+      <button class="ghost-button" bindtap="openHome">返回首页</button>
+    </view>
+  </view>
+
+  <block wx:else>
   <view class="status-panel">
     <view>
       <text class="status-title">{{planTitle || "整理成书"}}</text>
@@ -369,6 +380,7 @@
       </view>
     </view>
   </view>
+  </block>
   </block>
 
   <view class="bottom-spacer"></view>

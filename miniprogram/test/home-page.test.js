@@ -116,7 +116,8 @@ test("home keeps incomplete wechat accounts on the home tab and asks for login",
   await page.loadHome.call(context);
 
   assert.equal(context.data.needsLogin, true);
-  assert.equal(context.data.projectTitle, "我的回忆录");
+  assert.equal(context.data.projectTitle, "登录后创建回忆录");
+  assert.equal(context.data.hasProject, false);
   assert.equal(context.data.loading, false);
 });
 
@@ -155,6 +156,37 @@ test("home refreshes guidance mode from current project on load", async () => {
   assert.equal(context.data.selectedMode, "guided_interview");
   assert.equal(context.data.guidanceLabel, "主题讲述");
   assert.equal(context.data.projectTitle, "外婆回忆录");
+  assert.equal(context.data.hasProject, true);
+});
+
+test("home shows explicit project creation state for logged-in users without projects", async () => {
+  const { page } = loadHomePage({
+    authExports: {
+      getMemoirIdentity: async () => ({
+        id: "user-1",
+        email: "memoir-author@example.com",
+        password_login_enabled: true,
+        display_name: "作者",
+        created_at: "2026-06-15T00:00:00",
+        active_project_id: "",
+        active_project: null,
+        projects: [],
+      }),
+    },
+  });
+  const context = {
+    data: { ...page.data },
+    setData(patch) {
+      this.data = { ...this.data, ...patch };
+    },
+  };
+
+  await page.loadHome.call(context);
+
+  assert.equal(context.data.needsLogin, false);
+  assert.equal(context.data.projectId, "");
+  assert.equal(context.data.projectTitle, "还没有回忆录");
+  assert.equal(context.data.hasProject, false);
 });
 
 test("home creates voice sessions with the project-bound guidance mode", async () => {
@@ -167,8 +199,8 @@ test("home creates voice sessions with the project-bound guidance mode", async (
   };
   const { page } = loadHomePage({
     voiceApiExports: {
-      createMemoirVoiceSession: async (input) => {
-        createdSessions.push(input);
+      createMemoirVoiceSession: async (input, options) => {
+        createdSessions.push({ input, options });
         return {
           session: {
             id: "voice/1",
@@ -182,6 +214,8 @@ test("home creates voice sessions with the project-bound guidance mode", async (
       ...page.data,
       selectedMode: "guided_interview",
       selectedModule: "event",
+      projectId: "project/1",
+      hasProject: true,
       voiceAuthorizationAgreed: true,
     },
     setData(patch) {
@@ -192,11 +226,49 @@ test("home creates voice sessions with the project-bound guidance mode", async (
   await page.startVoiceChat.call(context);
 
   assert.equal(createdSessions.length, 1);
-  assert.equal(createdSessions[0].guidance_mode, "guided_interview");
-  assert.equal(createdSessions[0].current_guidance_module, "event");
-  assert.equal(createdSessions[0].metadata_json.entry, "miniprogram_home");
+  assert.equal(createdSessions[0].input.guidance_mode, "guided_interview");
+  assert.equal(createdSessions[0].input.current_guidance_module, "event");
+  assert.equal(createdSessions[0].input.metadata_json.entry, "miniprogram_home");
+  assert.deepEqual(createdSessions[0].options, { projectId: "project/1" });
   assert.equal(navigations[0], "/pages/voice-chat/index?voiceSessionId=voice%2F1&mode=guided_interview&module=event");
   assert.equal(context.data.creatingVoice, false);
+  delete global.wx;
+});
+
+test("home sends voice starts without a project to project creation", async () => {
+  let createCalls = 0;
+  const navigations = [];
+  global.wx = {
+    navigateTo(options) {
+      navigations.push(options.url);
+    },
+  };
+  const { page } = loadHomePage({
+    voiceApiExports: {
+      createMemoirVoiceSession: async () => {
+        createCalls += 1;
+        return { session: { id: "voice/skipped" } };
+      },
+    },
+  });
+  const context = {
+    ...page,
+    data: {
+      ...page.data,
+      needsLogin: false,
+      projectId: "",
+      hasProject: false,
+      voiceAuthorizationAgreed: true,
+    },
+    setData(patch) {
+      this.data = { ...this.data, ...patch };
+    },
+  };
+
+  await page.startVoiceChat.call(context);
+
+  assert.equal(createCalls, 0);
+  assert.deepEqual(navigations, ["/pages/project-edit/index"]);
   delete global.wx;
 });
 
@@ -245,6 +317,8 @@ test("home blocks voice session creation before voice authorization consent", as
     data: {
       ...page.data,
       needsLogin: false,
+      projectId: "project/1",
+      hasProject: true,
       voiceAuthorizationAgreed: false,
     },
     setData(patch) {

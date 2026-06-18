@@ -244,11 +244,11 @@ async def list_mobile_memoir_project_responses(
 async def active_mobile_memoir_project(
     db: AsyncSession,
     user_id: str,
-) -> ProjectResponse:
+) -> ProjectResponse | None:
     projects = await list_mobile_memoir_project_responses(db, user_id)
     if projects:
         return projects[0]
-    return await get_or_create_mobile_memoir_project(db, user_id)
+    return None
 
 
 async def get_mobile_memoir_project(
@@ -263,42 +263,13 @@ async def mobile_project_list(
     db: AsyncSession,
     user_id: str,
 ) -> MemoirProjectListResponse:
-    active_project = await active_mobile_memoir_project(db, user_id)
     projects = await list_mobile_memoir_project_responses(db, user_id)
+    active_project = projects[0] if projects else None
     return MemoirProjectListResponse(
-        active_project_id=active_project.id,
+        active_project_id=active_project.id if active_project else "",
         active_project=active_project,
         projects=projects,
     )
-
-
-async def get_or_create_mobile_memoir_project(
-    db: AsyncSession,
-    user_id: str,
-) -> ProjectResponse:
-    result = await db.execute(
-        select(Project)
-        .where(Project.user_id == user_id, Project.type == ProjectType.MEMOIR.value)
-        .options(*_memoir_project_options())
-        .order_by(Project.updated_at.desc(), Project.created_at.desc())
-        .limit(1)
-    )
-    project = result.scalar_one_or_none()
-    if project:
-        voice_counts = await _memoir_voice_char_counts(db, user_id, [project.id])
-        return _project_response_with_voice_words(project, voice_counts)
-
-    project = Project(
-        user_id=user_id,
-        type=ProjectType.MEMOIR.value,
-        title=DEFAULT_MEMOIR_PROJECT_TITLE,
-        metadata_json={MEMOIR_PROFILE_METADATA_KEY: _default_profile()},
-    )
-    db.add(project)
-    await db.flush()
-    await initialize_project_template(db, project)
-    project = await load_project(db, project.id, user_id)
-    return _project_response_with_voice_words(project, {})
 
 
 async def create_mobile_memoir_project(

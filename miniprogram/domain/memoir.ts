@@ -49,12 +49,12 @@ export interface Project {
 
 export interface MemoirIdentity extends User {
   active_project_id: string;
-  active_project: Project;
+  active_project: Project | null;
   projects: Project[];
 }
 
 export interface MemoirProjectListResponse {
   active_project_id: string;
-  active_project: Project;
+  active_project: Project | null;
   projects: Project[];
 }

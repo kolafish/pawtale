@@ -183,7 +183,7 @@ export function writeMemoirIdentitySnapshot(identity: MemoirIdentity): void {
   writeMemoirStore({
     identity,
     identity_cache: freshCacheMeta(),
-    project: identity.active_project,
+    project: identity.active_project || null,
   });
 }
 

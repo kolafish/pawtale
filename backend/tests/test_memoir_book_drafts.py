@@ -18,6 +18,7 @@ from app.models.memoir import (
     MemoirTranscriptVersion,
     MemoirVoiceUtterance,
 )
+from tests.memoir_helpers import post_mobile_memoir_voice_session
 
 
 class FakeBookDraftAI:
@@ -42,13 +43,18 @@ class FakeBookDraftAI:
 async def _active_project_id(client):
     response = await client.get("/api/mobile/memoir/projects")
     assert response.status_code == 200
-    return response.json()["active_project_id"]
+    active_project_id = response.json()["active_project_id"]
+    if active_project_id:
+        return active_project_id
+    created = await client.post("/api/mobile/memoir/projects", json={"title": "测试回忆录"})
+    assert created.status_code == 201
+    return created.json()["id"]
 
 
 async def _create_voice_transcript(client, test_db, text: str):
     user = (await client.get("/api/auth/me")).json()
-    create_response = await client.post(
-        "/api/mobile/memoir/voice-sessions",
+    create_response = await post_mobile_memoir_voice_session(
+        client,
         json={"guidance_mode": "free_narration", "provider": "volc_streaming_asr"},
     )
     assert create_response.status_code == 201

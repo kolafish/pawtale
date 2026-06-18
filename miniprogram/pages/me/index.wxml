@@ -144,8 +144,8 @@
     <text class="section-title">当前回忆录</text>
     <view class="action-card" bindtap="openProjects" hover-class="tap-hover">
       <view>
-        <text class="action-title">{{projectTitle || "我的回忆录"}}</text>
-        <text class="action-meta">共 {{projectCount}} 本 · 管理项目</text>
+        <text class="action-title">{{projectTitle || "尚未创建回忆录"}}</text>
+        <text class="action-meta">{{projectCount ? ("共 " + projectCount + " 本 · 管理项目") : "创建第一本回忆录并设置讲述资料"}}</text>
       </view>
       <text class="chevron">›</text>
     </view>

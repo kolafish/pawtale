@@ -9,10 +9,20 @@
   <view class="project-panel">
     <view class="project-row">
       <text class="panel-label">当前回忆录</text>
-      <text class="mode-tag">{{guidanceLabel}}</text>
+      <text class="mode-tag">{{hasProject ? guidanceLabel : "待创建"}}</text>
     </view>
     <text class="project-title">{{projectTitle || "正在加载回忆录"}}</text>
-    <text class="project-meta">从这里继续讲述，转写和成书分别在底部入口管理。</text>
+    <text class="project-meta">
+      {{hasProject ? "从这里继续讲述，转写和成书分别在底部入口管理。" : "先创建一本回忆录，设置讲述者资料和讲述方式，再开始语音访谈。"}}
+    </text>
+    <button
+      wx:if="{{!needsLogin && !hasProject}}"
+      class="project-create-button"
+      bindtap="createProject"
+      disabled="{{loading}}"
+    >
+      创建第一本回忆录
+    </button>
   </view>
 
   <view wx:if="{{needsLogin}}" class="guest-preview">
@@ -60,6 +70,7 @@
       bindtap="startVoiceChat"
     >
       <block wx:if="{{needsLogin}}">登录后开始语音聊天</block>
+      <block wx:elif="{{!hasProject}}">先创建回忆录</block>
       <block wx:elif="{{creatingVoice}}">正在准备</block>
       <block wx:else>进入语音聊天</block>
     </button>

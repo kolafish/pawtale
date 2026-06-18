@@ -346,6 +346,39 @@ test("book page stays on the book tab when login is required", async () => {
   delete global.wx;
 });
 
+test("book page asks logged-in users to create a memoir before loading book content", async () => {
+  let planCalls = 0;
+  const { page } = loadBookPage({
+    authExports: {
+      getMemoirIdentity: async () => ({
+        id: "user-1",
+        email: "memoir-author@example.com",
+        password_login_enabled: true,
+        display_name: "作者",
+        created_at: "2026-06-15T00:00:00",
+        active_project_id: "",
+        active_project: null,
+        projects: [],
+      }),
+    },
+    voiceApiExports: {
+      getMemoirBookPlan: async () => {
+        planCalls += 1;
+        return samplePlan("confirmed");
+      },
+    },
+  });
+  const context = pageContext(page);
+
+  await page.loadBookHome.call(context);
+
+  assert.equal(context.data.needsLogin, false);
+  assert.equal(context.data.projectId, "");
+  assert.equal(context.data.projectTitle, "尚未创建回忆录");
+  assert.equal(context.data.progressText, "还没有章节");
+  assert.equal(planCalls, 0);
+});
+
 test("book page shows source coverage notice only when there are uncovered transcripts", () => {
   const { mod } = loadBookPage();
 
