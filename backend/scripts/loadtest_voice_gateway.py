@@ -217,6 +217,7 @@ async def prepare_voice_sessions(client: httpx.AsyncClient, specs: list[TestUser
         response = await client.post(
             "/api/mobile/memoir/voice-sessions",
             json={"guidance_mode": "free_narration"},
+            headers={"Cookie": user.cookie_header},
         )
         response.raise_for_status()
         payload = response.json()

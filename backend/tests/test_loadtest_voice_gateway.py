@@ -5,10 +5,12 @@ import httpx
 from app.auth import SESSION_COOKIE_NAME
 from scripts.loadtest_voice_gateway import (
     GatewayResult,
+    TestUserSpec as LoadtestUserSpec,
     build_user_specs,
     gateway_ws_url,
     loadtest_passed,
     normalize_base_url,
+    prepare_voice_sessions,
     session_cookie_header,
 )
 
@@ -80,3 +82,55 @@ def test_loadtest_failed_when_eleventh_is_not_rejected():
     eleventh = GatewayResult(index=1, email="u1@example.test", session_id="s1", status="unexpected")
 
     assert not loadtest_passed(final_results, ready_results, eleventh, args)
+
+
+async def test_prepare_voice_sessions_sends_explicit_cookie_header_for_secure_cookie():
+    client = FakeLoadtestClient()
+    specs = [
+        LoadtestUserSpec(
+            index=0,
+            email="loadtest-0@example.test",
+            password="secret-password",
+            display_name="压测用户 0",
+        )
+    ]
+
+    sessions = await prepare_voice_sessions(client, specs)
+
+    assert sessions[0].id == "voice-session-1"
+    assert client.voice_session_headers == [{"Cookie": f"{SESSION_COOKIE_NAME}=secure-token"}]
+
+
+class FakeLoadtestResponse:
+    def __init__(self, status_code, payload):
+        self.status_code = status_code
+        self._payload = payload
+
+    def json(self):
+        return self._payload
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise AssertionError(f"unexpected status {self.status_code}")
+
+
+class FakeLoadtestClient:
+    def __init__(self):
+        self.cookies = httpx.Cookies()
+        self.voice_session_headers = []
+
+    async def post(self, url, *, json, headers=None):
+        if url == "/api/auth/register":
+            self.cookies.set(SESSION_COOKIE_NAME, "secure-token")
+            return FakeLoadtestResponse(
+                201,
+                {
+                    "user": {
+                        "id": "user-1",
+                    }
+                },
+            )
+        if url == "/api/mobile/memoir/voice-sessions":
+            self.voice_session_headers.append(headers)
+            return FakeLoadtestResponse(201, {"session": {"id": "voice-session-1"}})
+        raise AssertionError(f"unexpected URL {url}")
