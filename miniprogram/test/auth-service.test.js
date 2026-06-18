@@ -34,6 +34,19 @@ function installWxMock(handler) {
   return requests;
 }
 
+function installWxProfileMock(handler) {
+  const requests = installWxMock(handler);
+  global.wx.getUserProfile = (options) => {
+    options.success({
+      userInfo: {
+        nickName: "微信昵称",
+        avatarUrl: "https://avatar.example.com/wechat.png",
+      },
+    });
+  };
+  return requests;
+}
+
 test("loginWithWeChat exchanges wx login code through backend", async () => {
   const requests = installWxMock((options) => {
     assert.equal(options.url, "https://api.example.com/api/auth/wechat-login");
@@ -65,6 +78,42 @@ test("loginWithWeChat exchanges wx login code through backend", async () => {
   delete global.wx;
 });
 
+test("loginWithWeChat sends wechat nickname and avatar when authorized", async () => {
+  const requests = installWxProfileMock((options) => {
+    assert.equal(options.url, "https://api.example.com/api/auth/wechat-login");
+    assert.equal(options.method, "POST");
+    assert.deepEqual(options.data, {
+      code: "wx-code-1",
+      display_name: "微信昵称",
+      avatar_url: "https://avatar.example.com/wechat.png",
+    });
+    options.success({
+      statusCode: 200,
+      data: {
+        user: {
+          id: "user-1",
+          email: "wechat_x@wechat.local",
+          password_login_enabled: false,
+          display_name: "微信昵称",
+          avatar_url: "https://avatar.example.com/wechat.png",
+          created_at: "2026-06-15T00:00:00",
+        },
+        needs_credentials: true,
+      },
+      cookies: ["pawtale_session=abc; Path=/"],
+      header: {},
+    });
+  });
+  const { loginWithWeChat } = authModule();
+
+  const response = await loginWithWeChat();
+
+  assert.equal(requests.length, 1);
+  assert.equal(response.user.display_name, "微信昵称");
+  assert.equal(response.user.avatar_url, "https://avatar.example.com/wechat.png");
+  delete global.wx;
+});
+
 test("setAccountCredentials saves email password for current backend session", async () => {
   const requests = installWxMock((options) => {
     assert.equal(options.url, "https://api.example.com/api/auth/set-credentials");
@@ -72,7 +121,7 @@ test("setAccountCredentials saves email password for current backend session", a
     assert.deepEqual(options.data, {
       email: "author@example.com",
       password: "password123",
-      display_name: "余主任",
+      display_name: "微信昵称",
     });
     options.success({
       statusCode: 200,
@@ -81,7 +130,7 @@ test("setAccountCredentials saves email password for current backend session", a
           id: "user-1",
           email: "author@example.com",
           password_login_enabled: true,
-          display_name: "余主任",
+          display_name: "微信昵称",
           created_at: "2026-06-15T00:00:00",
         },
         needs_credentials: false,
@@ -95,7 +144,7 @@ test("setAccountCredentials saves email password for current backend session", a
   const response = await setAccountCredentials({
     email: "author@example.com",
     password: "password123",
-    display_name: "余主任",
+    display_name: "微信昵称",
   });
 
   assert.equal(requests.length, 1);
