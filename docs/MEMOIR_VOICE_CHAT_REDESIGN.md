@@ -278,11 +278,11 @@ assistant message
  -> 小程序下载并播放
 ```
 
-后端新增 TTS provider 抽象，环境变量为 `TTS_PROVIDER`、`TTS_API_KEY`、`TTS_BASE_URL`、`TTS_MODEL`、`TTS_VOICE`、`TTS_RESPONSE_FORMAT`。默认 `TTS_PROVIDER=disabled`，没有配置时小程序仍显示 AI 文字追问，不阻塞 ASR 和 LLM。当前支持 `openai_compatible` 和 `stepfun`；`TTS_PROVIDER=stepfun` 时优先读取 `STEPFUN_API_KEY`、`STEPFUN_BASE_URL`、`STEPFUN_TTS_MODEL`、`STEPFUN_TTS_VOICE`，默认走阶跃 `/v1/audio/speech` 非流式短句合成。
+后端 TTS 接入收敛为火山/豆包语音 V3，环境变量为 `TTS_PROVIDER=volc`、`VOLC_TTS_APP_ID`、`VOLC_TTS_ACCESS_TOKEN`、`VOLC_TTS_RESOURCE_ID`、`VOLC_TTS_SPEAKER`、`VOLC_TTS_RESPONSE_FORMAT`。默认 `TTS_PROVIDER=disabled`，没有配置时小程序仍显示 AI 文字追问，不阻塞 ASR 和 LLM。火山 V3 默认走 `seed-tts-2.0` 和 `*_uranus_bigtts` 音色，通过 SSE 返回音频分片。
 
 小程序语音聊天页在 AI 追问生成后会请求 TTS，自动播放；播放时优先按后端返回的逐字时间轴高亮已讲到的文字，播放完成且 voice gateway 可录音时自动进入下一轮收听。用户开始说话、跳过追问、结束页面时会取消未完成合成或停止播放，避免旧追问音频和新回答冲突。
 
-为了让高亮块跟随真实语音位置移动，后端支持 TTS 后置强制对齐。默认 `TTS_ALIGNMENT_PROVIDER=disabled` 时不做文字高亮对齐；配置 `TTS_ALIGNMENT_PROVIDER=elevenlabs` 并提供 `ELEVENLABS_API_KEY` 或 `TTS_ALIGNMENT_API_KEY` 后，后端会把已合成的追问音频和原始追问文本送到 forced alignment，返回逐字 `start_ms` / `end_ms` 时间轴，保存到 `memoir_chat_messages.metadata_json.tts_alignment`，并随 TTS response 返回给小程序。小程序播放时只按该时间轴定位当前字，不再按播放百分比估算；开启 alignment provider 且 key 可用后，已有但没有逐字时间轴的 TTS 音频会在下次请求时重新生成并替换旧音频。
+为了让高亮块跟随真实语音位置移动，后端请求火山 V3 时开启 `audio_params.enable_subtitle=true`，读取 `sentence.words[].startTime/endTime` 原生字幕时间戳，转换为逐字/词 `start_ms` / `end_ms` 时间轴，保存到 `memoir_chat_messages.metadata_json.tts_alignment`，并随 TTS response 返回给小程序。小程序播放时只按该时间轴定位当前字，不再按播放百分比估算；已有旧 provider 音频不会继续复用，会在下次请求时按火山 V3 重新生成。
 
 后续真正的 Streaming TTS 仍要把 provider WebSocket/SSE 音频流直接接到播放队列，并与 LLM streaming 输出联动。当前第一版刻意保持为“短句生成后播放”：AI 追问文本较短，非流式音质和稳定性更可控，先保证 ASR、持久化、追问和播放闭环。
 
@@ -578,7 +578,7 @@ Streaming ASR PR5 后当时仍未完成、不能按上线态理解的缺口：
 这批主要补齐语音聊天的连续体验和小程序页面结构：
 
 1. 自动续听：已完成。AI TTS 自动播放完后，如果 WebSocket 和录音状态允许，会自动开始下一轮收听。
-2. TTS 文本进度：已完成。播放 AI 问题时，页面会按 forced alignment 时间轴显示已读和当前文字；没有时间轴时不做文字高亮。
+2. TTS 文本进度：已完成。播放 AI 问题时，页面会按火山 V3 原生字幕时间轴显示已读和当前文字；没有时间轴时不做文字高亮。
 3. 转写自动校正：已完成。`asr.final` 保存时会同步生成忠实去口语化校正文；转写记录页默认展示校正文，仍保留 ASR 原文。
 4. AI 问题与回答连播：已完成。转写记录项显示对应 AI 引导问题；播放时优先播放问题音频，再播放用户回答音频。
 5. 主 tab 拆分：已完成。小程序拆为首页、语音、转写、我的四个主入口。
@@ -623,7 +623,7 @@ Streaming ASR PR5 后当时仍未完成、不能按上线态理解的缺口：
 
 - assistant message 驱动 TTS 已完成。
 - 小程序支持自动播放、重播、生成失败降级文字。
-- 小程序支持基于 forced alignment 的播放文字进度和 TTS 播放后自动续听。
+- 小程序支持基于 TTS 原生字幕时间轴的播放文字进度和 TTS 播放后自动续听。
 - 用户开始说话、跳过追问、退出页面时会取消未完成合成或停止播放。
 
 下一步是接入真实 streaming TTS provider，把 provider 音频流接到播放队列，并补齐插话打断。

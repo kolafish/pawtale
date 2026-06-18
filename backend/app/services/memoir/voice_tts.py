@@ -1,9 +1,13 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+import base64
+import binascii
+from dataclasses import dataclass, field
+import json
 import logging
 import math
 from typing import Protocol
+import uuid
 
 import httpx
 from fastapi import HTTPException
@@ -18,11 +22,10 @@ from app.models.projects import Project
 from app.schemas.memoir import MemoirAssistantTTSRequest, MemoirAssistantTTSResponse
 from app.services.memoir.audio_files import delete_audio_file_paths, discard_staged_audio, stage_audio_bytes
 from app.services.memoir.tts_alignment import (
-    TTSAlignmentResult,
+    TTSAlignmentSegment,
     alignment_segments_from_json,
+    alignment_segments_from_volc_words,
     alignment_segments_to_json,
-    align_tts_audio,
-    is_tts_alignment_enabled,
 )
 from app.services.provider_limits import provider_concurrency_limiter
 
@@ -30,12 +33,14 @@ from app.services.provider_limits import provider_concurrency_limiter
 logger = logging.getLogger(__name__)
 TTS_UNAVAILABLE_MESSAGE = "语音合成服务暂时不可用，请稍后重试。"
 SUPPORTED_RESPONSE_FORMATS = {
-    "mp3": ("audio/mpeg", ".mp3"),
-    "wav": ("audio/wav", ".wav"),
-    "ogg": ("audio/ogg", ".ogg"),
+    "mp3": ("audio/mpeg", ".mp3", "mp3"),
+    "wav": ("audio/wav", ".wav", "wav"),
+    "ogg": ("audio/ogg", ".ogg", "ogg_opus"),
+    "ogg_opus": ("audio/ogg", ".ogg", "ogg_opus"),
+    "pcm": ("audio/L16", ".pcm", "pcm"),
 }
 TTS_ALIGNMENT_METADATA_KEY = "tts_alignment"
-TTS_ALIGNMENT_ATTEMPTED_METADATA_KEY = "tts_alignment_attempted"
+TTS_TIMING_SOURCE_METADATA_KEY = "tts_timing_source"
 
 
 @dataclass(frozen=True)
@@ -45,18 +50,16 @@ class TTSResult:
     extension: str
     provider: str
     model: str
+    voice: str
+    alignment: list[TTSAlignmentSegment] = field(default_factory=list)
+    duration_seconds: float | None = None
 
 
 @dataclass(frozen=True)
-class AudioSpeechProviderConfig:
-    provider_name: str
-    api_key: str
-    base_url: str
-    model: str
-    voice: str
-    response_format: str
-    timeout_seconds: float
-    max_concurrent_requests: int
+class VolcTTSResponseFormat:
+    mime_type: str
+    extension: str
+    provider_value: str
 
 
 class TTSClient(Protocol):
@@ -68,47 +71,65 @@ class TTSClient(Protocol):
     def model_name(self) -> str:
         ...
 
+    @property
+    def default_voice(self) -> str:
+        ...
+
     async def synthesize(self, text: str, *, voice: str | None = None) -> TTSResult:
         ...
 
 
-class AudioSpeechTTSClient:
-    """Client for providers exposing an OpenAI-compatible /audio/speech API."""
+class VolcTTSClient:
+    provider_name = "volc_tts"
 
-    def __init__(self, config: AudioSpeechProviderConfig):
-        self.config = config
-        self.provider_name = config.provider_name
-        self.model_name = config.model
+    def __init__(self, settings: Settings):
+        self.app_id = settings.volc_tts_app_id.strip()
+        self.access_token = settings.volc_tts_access_token.strip()
+        self.endpoint = settings.volc_tts_endpoint.strip()
+        self.resource_id = settings.volc_tts_resource_id.strip()
+        self.default_voice = settings.volc_tts_speaker.strip()
+        self.response_format = _volc_response_format(settings.volc_tts_response_format)
+        self.sample_rate = settings.volc_tts_sample_rate
+        self.timeout_seconds = settings.tts_timeout_seconds
+        self.max_concurrent_requests = settings.tts_max_concurrent_requests
+        self.model_name = self.resource_id
 
-    def _endpoint(self) -> str:
-        base_url = self.config.base_url.strip().rstrip("/")
-        if not base_url:
-            base_url = "https://api.openai.com/v1"
-        if base_url.endswith("/audio/speech"):
-            return base_url
-        return f"{base_url}/audio/speech"
+    def effective_voice(self, voice: str | None = None) -> str:
+        return _volc_effective_voice(voice, self.default_voice)
 
     async def synthesize(self, text: str, *, voice: str | None = None) -> TTSResult:
-        api_key = self.config.api_key.strip()
-        if not api_key:
-            raise HTTPException(status_code=503, detail=f"{self.provider_name} TTS API key 未配置")
-        response_format = self.config.response_format.strip().lower() or "mp3"
-        if response_format not in SUPPORTED_RESPONSE_FORMATS:
-            raise HTTPException(status_code=500, detail=f"不支持的 TTS 音频格式: {response_format}")
+        if not self.app_id or not self.access_token:
+            raise HTTPException(status_code=503, detail="火山 TTS app id 或 access token 未配置")
+        if not self.endpoint:
+            raise HTTPException(status_code=503, detail="火山 TTS endpoint 未配置")
+        if not self.resource_id:
+            raise HTTPException(status_code=503, detail="火山 TTS resource id 未配置")
+        effective_voice = self.effective_voice(voice)
+        if not effective_voice:
+            raise HTTPException(status_code=503, detail="火山 TTS 音色未配置")
 
-        payload = {
-            "model": self.config.model,
-            "input": text,
-            "voice": voice or self.config.voice,
-            "response_format": response_format,
+        request_id = str(uuid.uuid4())
+        payload = _volc_sse_payload(
+            text=text,
+            voice=effective_voice,
+            response_format=self.response_format,
+            sample_rate=self.sample_rate,
+        )
+        headers = {
+            "Content-Type": "application/json",
+            "X-Api-App-Key": self.app_id,
+            "X-Api-Access-Key": self.access_token,
+            "X-Api-Resource-Id": self.resource_id,
+            "X-Api-Request-Id": request_id,
         }
-        timeout = max(1.0, float(self.config.timeout_seconds))
+        timeout = max(1.0, float(self.timeout_seconds))
+
         async def request() -> httpx.Response:
             async with httpx.AsyncClient(timeout=timeout) as client:
                 response = await client.post(
-                    self._endpoint(),
+                    self.endpoint,
                     json=payload,
-                    headers={"Authorization": f"Bearer {api_key}"},
+                    headers=headers,
                 )
                 response.raise_for_status()
                 return response
@@ -116,76 +137,137 @@ class AudioSpeechTTSClient:
         try:
             response = await provider_concurrency_limiter.run(
                 "tts",
-                self.config.max_concurrent_requests,
+                self.max_concurrent_requests,
                 request,
             )
         except httpx.HTTPStatusError as exc:
-            logger.exception("TTS provider rejected request status=%s", exc.response.status_code)
+            logger.exception(
+                "Volc TTS rejected request status=%s logid=%s",
+                exc.response.status_code,
+                exc.response.headers.get("x-tt-logid"),
+            )
             raise HTTPException(status_code=503, detail=TTS_UNAVAILABLE_MESSAGE) from exc
         except httpx.HTTPError as exc:
-            logger.exception("TTS provider request failed")
+            logger.exception("Volc TTS request failed")
             raise HTTPException(status_code=503, detail=TTS_UNAVAILABLE_MESSAGE) from exc
 
-        audio = response.content
+        audio, alignment = _parse_volc_sse_response(text, response.text)
         if not audio:
             raise HTTPException(status_code=502, detail="TTS 未返回可用音频")
-        mime_type, extension = SUPPORTED_RESPONSE_FORMATS[response_format]
+        duration_seconds = max((segment.end_ms for segment in alignment), default=0) / 1000 if alignment else None
         return TTSResult(
             audio=audio,
-            mime_type=mime_type,
-            extension=extension,
+            mime_type=self.response_format.mime_type,
+            extension=self.response_format.extension,
             provider=self.provider_name,
             model=self.model_name,
+            voice=effective_voice,
+            alignment=alignment,
+            duration_seconds=duration_seconds,
         )
 
 
-class OpenAICompatibleTTSClient(AudioSpeechTTSClient):
-    def __init__(self, settings: Settings):
-        super().__init__(
-            AudioSpeechProviderConfig(
-                provider_name="openai_compatible",
-                api_key=settings.tts_api_key,
-                base_url=settings.tts_base_url,
-                model=settings.tts_model,
-                voice=settings.tts_voice,
-                response_format=settings.tts_response_format,
-                timeout_seconds=settings.tts_timeout_seconds,
-                max_concurrent_requests=settings.tts_max_concurrent_requests,
-            )
-        )
+def _volc_response_format(value: str) -> VolcTTSResponseFormat:
+    normalized = (value or "mp3").strip().lower()
+    if normalized not in SUPPORTED_RESPONSE_FORMATS:
+        raise HTTPException(status_code=500, detail=f"不支持的火山 TTS 音频格式: {normalized}")
+    mime_type, extension, provider_value = SUPPORTED_RESPONSE_FORMATS[normalized]
+    return VolcTTSResponseFormat(mime_type=mime_type, extension=extension, provider_value=provider_value)
 
 
-def _stepfun_base_url(base_url: str) -> str:
-    normalized = (base_url or "https://api.stepfun.ai/v1").strip().rstrip("/")
-    if normalized.endswith("/audio/speech") or normalized.endswith("/v1"):
-        return normalized
-    return f"{normalized}/v1"
+def _volc_sse_payload(
+    *,
+    text: str,
+    voice: str,
+    response_format: VolcTTSResponseFormat,
+    sample_rate: int,
+) -> dict[str, object]:
+    return {
+        "user": {"uid": "pawtale-backend"},
+        "req_params": {
+            "text": text,
+            "speaker": voice,
+            "audio_params": {
+                "format": response_format.provider_value,
+                "sample_rate": sample_rate,
+                "enable_subtitle": True,
+            },
+            "additions": json.dumps({"disable_markdown_filter": True}, separators=(",", ":")),
+        },
+    }
 
 
-class StepFunTTSClient(AudioSpeechTTSClient):
-    def __init__(self, settings: Settings):
-        super().__init__(
-            AudioSpeechProviderConfig(
-                provider_name="stepfun",
-                api_key=settings.stepfun_api_key or settings.tts_api_key,
-                base_url=_stepfun_base_url(settings.stepfun_base_url),
-                model=settings.stepfun_tts_model or settings.tts_model or "step-tts-2",
-                voice=settings.stepfun_tts_voice or settings.tts_voice or "cixingnansheng",
-                response_format=settings.tts_response_format,
-                timeout_seconds=settings.tts_timeout_seconds,
-                max_concurrent_requests=settings.tts_max_concurrent_requests,
-            )
-        )
+def _parse_volc_sse_response(text: str, response_text: str) -> tuple[bytes, list[TTSAlignmentSegment]]:
+    audio_chunks: list[bytes] = []
+    words: list[object] = []
+    error_messages: list[str] = []
+    for payload in _volc_sse_payloads(response_text):
+        code = payload.get("code")
+        if isinstance(code, int) and code not in {0, 20000000}:
+            error_messages.append(str(payload.get("message") or f"火山 TTS 错误 {code}"))
+
+        audio = payload.get("data")
+        if isinstance(audio, str) and audio:
+            try:
+                audio_chunks.append(base64.b64decode(audio))
+            except (binascii.Error, ValueError):
+                logger.warning("Volc TTS returned an invalid audio chunk")
+
+        sentence = payload.get("sentence")
+        if isinstance(sentence, dict):
+            sentence_words = sentence.get("words")
+            if isinstance(sentence_words, list):
+                words.extend(sentence_words)
+
+    if error_messages and not audio_chunks:
+        raise HTTPException(status_code=503, detail=TTS_UNAVAILABLE_MESSAGE)
+    return b"".join(audio_chunks), alignment_segments_from_volc_words(text, words)
+
+
+def _volc_sse_payloads(response_text: str) -> list[dict[str, object]]:
+    payloads: list[dict[str, object]] = []
+    for line in response_text.splitlines():
+        stripped = line.strip()
+        if not stripped.startswith("data:"):
+            continue
+        raw_payload = stripped.removeprefix("data:").strip()
+        if not raw_payload or raw_payload == "[DONE]":
+            continue
+        try:
+            payload = json.loads(raw_payload)
+        except json.JSONDecodeError:
+            logger.warning("Volc TTS returned an invalid SSE payload")
+            continue
+        if isinstance(payload, dict):
+            payloads.append(payload)
+    return payloads
 
 
 def get_tts_client(settings: Settings | None = None) -> TTSClient:
     current_settings = settings or get_settings()
     provider = current_settings.tts_provider.strip().lower()
-    if provider in {"openai", "openai_compatible"}:
-        return OpenAICompatibleTTSClient(current_settings)
-    if provider == "stepfun":
-        return StepFunTTSClient(current_settings)
+    if provider in {"volc", "volc_tts", "doubao"}:
+        return VolcTTSClient(current_settings)
     raise HTTPException(status_code=503, detail="TTS_PROVIDER 未启用")
+
+
+def _volc_effective_voice(requested_voice: str | None, default_voice: str) -> str:
+    candidate = (requested_voice or "").strip()
+    if _looks_like_volc_v3_voice(candidate):
+        return candidate
+    return default_voice.strip()
+
+
+def _looks_like_volc_v3_voice(voice: str) -> bool:
+    if not voice:
+        return False
+    return (
+        voice.startswith("S_")
+        or voice.endswith("_bigtts")
+        or voice.endswith("_tob")
+        or voice.startswith("ICL_")
+        or voice.startswith("multi_")
+    )
 
 
 async def _load_assistant_message(
@@ -260,34 +342,29 @@ def _message_has_alignment(message: MemoirChatMessage) -> bool:
     return bool(alignment_segments_from_json(metadata.get(TTS_ALIGNMENT_METADATA_KEY)))
 
 
-def _message_alignment_attempted(message: MemoirChatMessage) -> bool:
+def _effective_tts_voice(client: TTSClient, requested_voice: str | None) -> str:
+    resolver = getattr(client, "effective_voice", None)
+    if callable(resolver):
+        return str(resolver(requested_voice) or "").strip()
+    return (requested_voice or getattr(client, "default_voice", "") or "").strip()
+
+
+def _can_reuse_existing_audio(message: MemoirChatMessage, client: TTSClient, *, voice: str) -> bool:
     metadata = message.metadata_json or {}
-    return metadata.get(TTS_ALIGNMENT_ATTEMPTED_METADATA_KEY) is True
+    if metadata.get("tts_provider") != client.provider_name:
+        return False
+    if metadata.get("tts_model") != client.model_name:
+        return False
+    if str(metadata.get("tts_voice") or "") != voice:
+        return False
+    return TTS_TIMING_SOURCE_METADATA_KEY in metadata or _message_has_alignment(message)
 
 
-def _can_reuse_existing_audio(message: MemoirChatMessage, *, alignment_enabled: bool) -> bool:
-    return not alignment_enabled or _message_has_alignment(message) or _message_alignment_attempted(message)
-
-
-def _alignment_metadata(
-    alignment_result: TTSAlignmentResult | None,
-    *,
-    alignment_enabled: bool,
-) -> dict[str, object]:
-    if alignment_result:
-        return {
-            TTS_ALIGNMENT_METADATA_KEY: alignment_segments_to_json(alignment_result.segments),
-            "tts_alignment_provider": alignment_result.provider,
-            "tts_alignment_loss": alignment_result.loss,
-            "tts_duration_seconds": alignment_result.duration_seconds,
-            TTS_ALIGNMENT_ATTEMPTED_METADATA_KEY: True,
-        }
+def _tts_timing_metadata(result: TTSResult) -> dict[str, object]:
     return {
-        TTS_ALIGNMENT_METADATA_KEY: [],
-        "tts_alignment_provider": None,
-        "tts_alignment_loss": None,
-        "tts_duration_seconds": None,
-        TTS_ALIGNMENT_ATTEMPTED_METADATA_KEY: alignment_enabled,
+        TTS_ALIGNMENT_METADATA_KEY: alignment_segments_to_json(result.alignment),
+        TTS_TIMING_SOURCE_METADATA_KEY: result.provider if result.alignment else None,
+        "tts_duration_seconds": result.duration_seconds,
     }
 
 
@@ -319,28 +396,9 @@ def _tts_response(
         model=model,
         mime_type=audio_file.mime_type,
         duration_seconds=_message_duration_seconds(message, audio_file),
-        alignment_provider=str(metadata.get("tts_alignment_provider") or "") or None,
+        alignment_provider=str(metadata.get(TTS_TIMING_SOURCE_METADATA_KEY) or "") or None,
         alignment=_message_alignment(message),
     )
-
-
-async def _align_synthesized_audio(
-    text: str,
-    result: TTSResult,
-) -> TTSAlignmentResult | None:
-    try:
-        return await align_tts_audio(
-            text,
-            result.audio,
-            mime_type=result.mime_type,
-            extension=result.extension,
-        )
-    except HTTPException:
-        logger.exception("TTS alignment failed")
-        return None
-    except Exception:
-        logger.exception("Unexpected TTS alignment failure")
-        return None
 
 
 async def synthesize_assistant_message(
@@ -353,11 +411,9 @@ async def synthesize_assistant_message(
 ) -> MemoirAssistantTTSResponse:
     message = await _load_assistant_message(db, voice_session_id, message_id, user_id)
     existing_audio = await _load_existing_audio(db, message)
-    alignment_enabled = is_tts_alignment_enabled()
-    if existing_audio and not req.force_regenerate and _can_reuse_existing_audio(
-        message,
-        alignment_enabled=alignment_enabled,
-    ):
+    client = tts_client or get_tts_client()
+    effective_voice = _effective_tts_voice(client, req.voice)
+    if existing_audio and not req.force_regenerate and _can_reuse_existing_audio(message, client, voice=effective_voice):
         return _tts_response(
             message,
             existing_audio,
@@ -365,7 +421,6 @@ async def synthesize_assistant_message(
             model=str(message.metadata_json.get("tts_model") or ""),
         )
 
-    client = tts_client or get_tts_client()
     text = message.content_text.strip()
     try:
         result = await client.synthesize(text, voice=req.voice)
@@ -375,15 +430,13 @@ async def synthesize_assistant_message(
         logger.exception("TTS synthesis failed provider=%s model=%s", client.provider_name, client.model_name)
         raise HTTPException(status_code=503, detail=TTS_UNAVAILABLE_MESSAGE) from exc
 
-    alignment_result = await _align_synthesized_audio(text, result)
-    duration_seconds = alignment_result.duration_seconds if alignment_result else None
     staged_audio = await stage_audio_bytes(
         db,
         user_id,
         result.audio,
         mime_type=result.mime_type,
         extension=result.extension,
-        duration_seconds=math.ceil(duration_seconds) if duration_seconds is not None else None,
+        duration_seconds=math.ceil(result.duration_seconds) if result.duration_seconds is not None else None,
     )
     try:
         message.audio_file_id = staged_audio.audio_file.id
@@ -391,9 +444,9 @@ async def synthesize_assistant_message(
             **(message.metadata_json or {}),
             "tts_provider": result.provider,
             "tts_model": result.model,
-            "tts_voice": req.voice,
+            "tts_voice": result.voice,
             "tts_mime_type": result.mime_type,
-            **_alignment_metadata(alignment_result, alignment_enabled=alignment_enabled),
+            **_tts_timing_metadata(result),
         }
         db.add(message)
         await db.commit()

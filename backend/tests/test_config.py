@@ -84,7 +84,8 @@ def test_small_concurrency_provider_limit_defaults():
     assert settings.voice_gateway_max_active_sessions_per_user == 1
     assert settings.ai_text_max_concurrent_requests == 3
     assert settings.tts_max_concurrent_requests == 3
-    assert settings.tts_alignment_max_concurrent_requests == 2
+    assert settings.volc_tts_resource_id == "seed-tts-2.0"
+    assert settings.volc_tts_speaker == "zh_female_vv_uranus_bigtts"
 
 
 def test_configure_sqlite_connection_applies_small_concurrency_pragmas():
