@@ -12,6 +12,7 @@ from app.services.provider_limits import provider_concurrency_limiter
 
 
 logger = logging.getLogger(__name__)
+DISABLED_ALIGNMENT_PROVIDERS = {"", "disabled", "none"}
 
 
 @dataclass(frozen=True)
@@ -213,10 +214,20 @@ class ElevenLabsForcedAlignmentClient:
         )
 
 
+def is_tts_alignment_enabled(settings: Settings | None = None) -> bool:
+    current_settings = settings or get_settings()
+    provider = current_settings.tts_alignment_provider.strip().lower()
+    if provider in DISABLED_ALIGNMENT_PROVIDERS:
+        return False
+    if provider in {"elevenlabs", "elevenlabs_forced_alignment"}:
+        return bool((current_settings.elevenlabs_api_key or current_settings.tts_alignment_api_key).strip())
+    return False
+
+
 def get_tts_alignment_client(settings: Settings | None = None) -> TTSAlignmentClient | None:
     current_settings = settings or get_settings()
     provider = current_settings.tts_alignment_provider.strip().lower()
-    if provider in {"", "disabled", "none"}:
+    if provider in DISABLED_ALIGNMENT_PROVIDERS:
         return None
     if provider in {"elevenlabs", "elevenlabs_forced_alignment"}:
         return ElevenLabsForcedAlignmentClient(current_settings)

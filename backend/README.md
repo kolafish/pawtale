@@ -132,7 +132,7 @@ TTS_VOICE=alloy
 TTS_RESPONSE_FORMAT=mp3
 TTS_MAX_CONCURRENT_REQUESTS=3
 
-# 可选：TTS 后置强制对齐。启用后会把已合成音频和追问文本发到对齐服务，返回逐字时间戳供小程序播放高亮使用。
+# 可选：TTS 后置强制对齐。disabled 时不做文字高亮对齐；启用 elevenlabs 并配置 key 后返回逐字时间戳供小程序播放高亮使用。
 TTS_ALIGNMENT_PROVIDER=disabled
 TTS_ALIGNMENT_API_KEY=
 TTS_ALIGNMENT_BASE_URL=https://api.elevenlabs.io/v1

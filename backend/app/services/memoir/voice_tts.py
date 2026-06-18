@@ -22,6 +22,7 @@ from app.services.memoir.tts_alignment import (
     alignment_segments_from_json,
     alignment_segments_to_json,
     align_tts_audio,
+    is_tts_alignment_enabled,
 )
 from app.services.provider_limits import provider_concurrency_limiter
 
@@ -34,6 +35,7 @@ SUPPORTED_RESPONSE_FORMATS = {
     "ogg": ("audio/ogg", ".ogg"),
 }
 TTS_ALIGNMENT_METADATA_KEY = "tts_alignment"
+TTS_ALIGNMENT_ATTEMPTED_METADATA_KEY = "tts_alignment_attempted"
 
 
 @dataclass(frozen=True)
@@ -253,6 +255,42 @@ def _message_alignment(message: MemoirChatMessage) -> list[dict[str, object]]:
     return alignment_segments_to_json(alignment_segments_from_json(metadata.get(TTS_ALIGNMENT_METADATA_KEY)))
 
 
+def _message_has_alignment(message: MemoirChatMessage) -> bool:
+    metadata = message.metadata_json or {}
+    return bool(alignment_segments_from_json(metadata.get(TTS_ALIGNMENT_METADATA_KEY)))
+
+
+def _message_alignment_attempted(message: MemoirChatMessage) -> bool:
+    metadata = message.metadata_json or {}
+    return metadata.get(TTS_ALIGNMENT_ATTEMPTED_METADATA_KEY) is True
+
+
+def _can_reuse_existing_audio(message: MemoirChatMessage, *, alignment_enabled: bool) -> bool:
+    return not alignment_enabled or _message_has_alignment(message) or _message_alignment_attempted(message)
+
+
+def _alignment_metadata(
+    alignment_result: TTSAlignmentResult | None,
+    *,
+    alignment_enabled: bool,
+) -> dict[str, object]:
+    if alignment_result:
+        return {
+            TTS_ALIGNMENT_METADATA_KEY: alignment_segments_to_json(alignment_result.segments),
+            "tts_alignment_provider": alignment_result.provider,
+            "tts_alignment_loss": alignment_result.loss,
+            "tts_duration_seconds": alignment_result.duration_seconds,
+            TTS_ALIGNMENT_ATTEMPTED_METADATA_KEY: True,
+        }
+    return {
+        TTS_ALIGNMENT_METADATA_KEY: [],
+        "tts_alignment_provider": None,
+        "tts_alignment_loss": None,
+        "tts_duration_seconds": None,
+        TTS_ALIGNMENT_ATTEMPTED_METADATA_KEY: alignment_enabled,
+    }
+
+
 def _message_duration_seconds(message: MemoirChatMessage, audio_file: AudioFile | None = None) -> float | None:
     value = (message.metadata_json or {}).get("tts_duration_seconds")
     try:
@@ -315,7 +353,11 @@ async def synthesize_assistant_message(
 ) -> MemoirAssistantTTSResponse:
     message = await _load_assistant_message(db, voice_session_id, message_id, user_id)
     existing_audio = await _load_existing_audio(db, message)
-    if existing_audio and not req.force_regenerate:
+    alignment_enabled = is_tts_alignment_enabled()
+    if existing_audio and not req.force_regenerate and _can_reuse_existing_audio(
+        message,
+        alignment_enabled=alignment_enabled,
+    ):
         return _tts_response(
             message,
             existing_audio,
@@ -345,28 +387,13 @@ async def synthesize_assistant_message(
     )
     try:
         message.audio_file_id = staged_audio.audio_file.id
-        alignment_metadata = (
-            {
-                TTS_ALIGNMENT_METADATA_KEY: alignment_segments_to_json(alignment_result.segments),
-                "tts_alignment_provider": alignment_result.provider,
-                "tts_alignment_loss": alignment_result.loss,
-                "tts_duration_seconds": alignment_result.duration_seconds,
-            }
-            if alignment_result
-            else {
-                TTS_ALIGNMENT_METADATA_KEY: [],
-                "tts_alignment_provider": None,
-                "tts_alignment_loss": None,
-                "tts_duration_seconds": None,
-            }
-        )
         message.metadata_json = {
             **(message.metadata_json or {}),
             "tts_provider": result.provider,
             "tts_model": result.model,
             "tts_voice": req.voice,
             "tts_mime_type": result.mime_type,
-            **alignment_metadata,
+            **_alignment_metadata(alignment_result, alignment_enabled=alignment_enabled),
         }
         db.add(message)
         await db.commit()

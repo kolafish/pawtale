@@ -4,53 +4,9 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 
 const {
-  estimateTTSPlaybackDurationSeconds,
   splitTextByAudioPlaybackProgress,
-  splitTextByPlaybackProgress,
   splitTextByTimedAlignment,
 } = require("../services/tts-text-progress.ts");
-
-test("splits TTS text by playback progress", () => {
-  assert.deepEqual(splitTextByPlaybackProgress("你好，世界", 0), {
-    spokenText: "",
-    currentText: "你",
-    remainingText: "好，世界",
-    progressPercent: 0,
-  });
-  assert.deepEqual(splitTextByPlaybackProgress("你好，世界", 0.5), {
-    spokenText: "你好",
-    currentText: "，",
-    remainingText: "世界",
-    progressPercent: 50,
-  });
-  assert.deepEqual(splitTextByPlaybackProgress("你好，世界", 1), {
-    spokenText: "你好，世界",
-    currentText: "",
-    remainingText: "",
-    progressPercent: 100,
-  });
-});
-
-test("clamps invalid TTS progress ratios", () => {
-  assert.deepEqual(splitTextByPlaybackProgress("测试", -1), {
-    spokenText: "",
-    currentText: "测",
-    remainingText: "试",
-    progressPercent: 0,
-  });
-  assert.deepEqual(splitTextByPlaybackProgress("测试", Number.NaN), {
-    spokenText: "",
-    currentText: "测",
-    remainingText: "试",
-    progressPercent: 0,
-  });
-  assert.deepEqual(splitTextByPlaybackProgress("测试", 2), {
-    spokenText: "测试",
-    currentText: "",
-    remainingText: "",
-    progressPercent: 100,
-  });
-});
 
 test("splits TTS text by forced alignment timestamps", () => {
   const alignment = [
@@ -79,60 +35,6 @@ test("splits TTS text by forced alignment timestamps", () => {
   });
 });
 
-test("splits TTS text by fallback duration when audio duration is unavailable", () => {
-  assert.deepEqual(splitTextByAudioPlaybackProgress("你好世界", 1, 0, {
-    fallbackDurationSeconds: 4,
-  }), {
-    spokenText: "你",
-    currentText: "好",
-    remainingText: "世界",
-    progressPercent: 25,
-  });
-});
-
-test("estimates assistant TTS duration with a conversational question pace", () => {
-  assert.equal(estimateTTSPlaybackDurationSeconds("你好吗？"), 0.9);
-  assert.equal(estimateTTSPlaybackDurationSeconds("你还记得那天发生什么吗？"), 2.34);
-  assert.equal(estimateTTSPlaybackDurationSeconds("你还记得那天，我们一起去了哪里？"), 3.12);
-});
-
-test("estimates missing TTS duration so playback progress can still move", () => {
-  const progress = splitTextByAudioPlaybackProgress("你好吗朋友", 0.8, 0, {
-    estimateMissingDuration: true,
-  });
-
-  assert.notEqual(progress.currentText, "你");
-  assert.ok(progress.progressPercent > 0);
-});
-
-test("uses estimated duration instead of a coarse slower fallback duration", () => {
-  const progress = splitTextByAudioPlaybackProgress("你还记得那天发生什么吗？", 1, 0, {
-    fallbackDurationSeconds: 5,
-    estimateMissingDuration: true,
-  });
-
-  assert.equal(progress.progressPercent, 43);
-  assert.equal(progress.currentText, "天");
-});
-
-test("keeps close fallback duration instead of forcing the estimate", () => {
-  const progress = splitTextByAudioPlaybackProgress("你还记得那天发生什么吗？", 1, 0, {
-    fallbackDurationSeconds: 2.2,
-    estimateMissingDuration: true,
-  });
-
-  assert.equal(progress.progressPercent, 45);
-  assert.equal(progress.currentText, "天");
-});
-
-test("keeps TTS highlight on punctuation while the voice pauses", () => {
-  const progress = splitTextByAudioPlaybackProgress("你好，世界", 0.58, 0.96);
-
-  assert.equal(progress.currentText, "，");
-  assert.equal(progress.spokenText, "你好");
-  assert.equal(progress.remainingText, "世界");
-});
-
 test("uses alignment in audio playback progress when available", () => {
   const alignment = [
     { text: "你", start_ms: 0, end_ms: 120, text_start: 0, text_end: 1 },
@@ -141,11 +43,33 @@ test("uses alignment in audio playback progress when available", () => {
 
   assert.deepEqual(splitTextByAudioPlaybackProgress("你好", 0.15, 0, {
     alignment,
-    estimateMissingDuration: true,
   }), {
     spokenText: "你",
     currentText: "好",
     remainingText: "",
     progressPercent: 58,
+  });
+});
+
+test("does not highlight text without forced alignment", () => {
+  assert.deepEqual(splitTextByAudioPlaybackProgress("你好，世界", 0.5, 2), {
+    spokenText: "",
+    currentText: "",
+    remainingText: "你好，世界",
+    progressPercent: 25,
+  });
+});
+
+test("does not highlight text before the first aligned character starts", () => {
+  const alignment = [
+    { text: "你", start_ms: 300, end_ms: 420, text_start: 0, text_end: 1 },
+    { text: "好", start_ms: 420, end_ms: 600, text_start: 1, text_end: 2 },
+  ];
+
+  assert.deepEqual(splitTextByTimedAlignment("你好", 100, alignment), {
+    spokenText: "",
+    currentText: "",
+    remainingText: "你好",
+    progressPercent: 17,
   });
 });

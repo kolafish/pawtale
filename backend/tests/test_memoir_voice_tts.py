@@ -2,7 +2,7 @@ import httpx
 import pytest
 
 from app.config import Settings
-from app.services.memoir.tts_alignment import ElevenLabsForcedAlignmentClient
+from app.services.memoir.tts_alignment import ElevenLabsForcedAlignmentClient, is_tts_alignment_enabled
 from app.services.memoir.voice_tts import (
     OpenAICompatibleTTSClient,
     StepFunTTSClient,
@@ -55,6 +55,18 @@ def test_stepfun_tts_client_accepts_host_level_base_url():
 
     assert isinstance(client, StepFunTTSClient)
     assert client._endpoint() == "https://api.stepfun.com/v1/audio/speech"
+
+
+def test_tts_alignment_requires_provider_and_key():
+    assert not is_tts_alignment_enabled(Settings(tts_alignment_provider="disabled"))
+    assert not is_tts_alignment_enabled(Settings(tts_alignment_provider="unknown"))
+    assert not is_tts_alignment_enabled(Settings(tts_alignment_provider="elevenlabs"))
+    assert is_tts_alignment_enabled(
+        Settings(
+            tts_alignment_provider="elevenlabs",
+            tts_alignment_api_key="align-key",
+        )
+    )
 
 
 @pytest.mark.asyncio
