@@ -295,18 +295,35 @@ test("book page builds source assignment views and chapter picker options", () =
   const plan = samplePlan("confirmed");
   const chapters = mod.buildChapterViews(plan);
   const coverage = sampleSourceCoverage(2);
-  coverage.uncovered_sources[0].text = "这是一段很长的新增转写，".repeat(8);
+  coverage.uncovered_sources[0].created_at = "2026-06-17T00:00:00.000Z";
+  coverage.uncovered_sources[1].created_at = "2026-06-17T01:00:00.000Z";
+  coverage.uncovered_sources[1].text = "这是一段很长的新增转写，".repeat(10);
 
   const sources = mod.buildUncoveredSourceViews(coverage, 1);
   const options = mod.buildChapterPickerOptions(chapters);
 
   assert.equal(sources.length, 1);
-  assert.equal(sources[0].utterance_id, "utterance-new-1");
+  assert.equal(sources[0].utterance_id, "utterance-new-2");
   assert.equal(sources[0].previewText.endsWith("..."), true);
+  assert.equal(sources[0].createdAtText, "06-17 09:00 北京时间");
   assert.deepEqual(options, [
     { label: "第 1 章 外婆家的童年", value: "chapter-1" },
     { label: "第 2 章 第一次离家", value: "chapter-2" },
   ]);
+});
+
+test("book page shows recent uncovered transcripts before older ones", () => {
+  const { mod } = loadBookPage();
+  const coverage = sampleSourceCoverage(14);
+  coverage.uncovered_sources.forEach((source, index) => {
+    source.created_at = `2026-06-17T00:${String(index).padStart(2, "0")}:00.000Z`;
+  });
+
+  const sources = mod.buildUncoveredSourceViews(coverage);
+
+  assert.equal(sources.length, 12);
+  assert.equal(sources[0].utterance_id, "utterance-new-14");
+  assert.equal(sources[11].utterance_id, "utterance-new-3");
 });
 
 test("book page marks assigned sources as supplemental chapter work", () => {
