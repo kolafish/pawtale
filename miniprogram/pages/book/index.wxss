@@ -363,6 +363,7 @@
 
 .title-input,
 .chapter-title-input,
+.chapter-title-inline-input,
 .summary-textarea,
 .draft-textarea {
   width: 100%;
@@ -380,6 +381,54 @@
   font-size: 30rpx;
   font-weight: 800;
   line-height: 84rpx;
+}
+
+.chapter-title-edit-row {
+  display: flex;
+  align-items: center;
+  gap: 14rpx;
+  margin-top: 18rpx;
+}
+
+.chapter-title-inline-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 76rpx;
+  padding: 0 20rpx;
+  font-size: 30rpx;
+  font-weight: 800;
+  line-height: 76rpx;
+}
+
+.title-action-button {
+  flex: 0 0 auto;
+  min-width: 136rpx;
+  height: 76rpx;
+  margin: 0;
+  padding: 0 18rpx;
+  border: 0;
+  border-radius: 18rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #fff1ec;
+  color: #8a4034;
+  font-size: 24rpx;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.title-action-button.primary {
+  background: #9f4a3c;
+  color: #ffffff;
+}
+
+.title-action-button::after {
+  border: 0;
+}
+
+.title-action-button[disabled] {
+  opacity: 0.62;
 }
 
 .chapter-card {

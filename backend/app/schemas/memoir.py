@@ -250,6 +250,12 @@ class MemoirAssistantTTSResponse(BaseModel):
     alignment: list[MemoirTTSAlignmentSegmentResponse] = Field(default_factory=list)
 
 
+class MemoirVoiceTranscriptIncludedChapterResponse(BaseModel):
+    chapter_id: str
+    title: str
+    sort_order: int
+
+
 class MemoirVoiceTranscriptItemResponse(BaseModel):
     id: str
     voice_session_id: str
@@ -276,6 +282,8 @@ class MemoirVoiceTranscriptItemResponse(BaseModel):
     session_status: MemoirVoiceSessionStatus
     guidance_mode: MemoirGuidanceMode
     current_guidance_module: str | None = None
+    is_included_in_book: bool = False
+    included_chapters: list[MemoirVoiceTranscriptIncludedChapterResponse] = Field(default_factory=list)
     created_at: datetime
     session_created_at: datetime
 

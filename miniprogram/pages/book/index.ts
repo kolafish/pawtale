@@ -17,6 +17,7 @@ import {
   createMemoirBookChapterDraftTTS,
   createMemoirBookOutputTTS,
   downloadMemoirVoiceAudio,
+  generateMemoirBookChapterTitle,
   generateMemoirBookChapterDraft,
   generateMemoirBookOutput,
   generateMemoirBookPlan,
@@ -24,6 +25,7 @@ import {
   getMemoirBookOutput,
   getMemoirBookPlan,
   getMemoirBookSourceCoverage,
+  updateMemoirBookChapterTitle,
   updateMemoirBookPlan,
   updateMemoirBookChapterDraft,
 } from "../../services/memoir-voice-api";
@@ -71,6 +73,7 @@ export interface BookUncoveredSourceView {
 export interface BookChapterView extends MemoirBookPlanChapter {
   editingTitle: string;
   editingSummary: string;
+  titleChanged: boolean;
   ttsTarget: string;
   sourceCount: number;
   sourceSummary: string;
@@ -114,6 +117,7 @@ interface BookData {
   uncoveredSources: BookUncoveredSourceView[];
   chapterPickerOptions: ChapterPickerOption[];
   assigningSourceId: string;
+  titleBusyTarget: string;
   bookOutput: MemoirBookOutput | null;
   bookContent: string;
   bookCharCount: number;
@@ -374,6 +378,7 @@ export function buildChapterViews(
         ...chapter,
         editingTitle: chapter.title,
         editingSummary: chapter.summary || "",
+        titleChanged: false,
         ttsTarget: `chapter:${chapter.id}`,
         sourceCount: chapter.source_refs.length,
         sourceSummary: bookChapterSourceSummary(chapter),
@@ -430,17 +435,19 @@ function toPlanInput(chapters: BookChapterView[]): MemoirBookPlanChapterInput[] 
 function toPlanUpdateInput(chapters: BookChapterView[]): MemoirBookPlanChapterUpdateInput[] {
   return chapters.map((chapter) => ({
     id: chapter.id,
-    title: trimText(chapter.title || chapter.editingTitle),
-    summary: trimText(chapter.summary || chapter.editingSummary),
+    title: trimText(chapter.editingTitle || chapter.title),
+    summary: trimText(chapter.editingSummary || chapter.summary),
     source_refs: chapter.source_refs,
   }));
 }
 
-function titleFromUncoveredSource(source: BookUncoveredSourceView): string {
-  const text = trimText(source.previewText).replace(/\s+/g, "");
+export function titleFromUncoveredSource(source: BookUncoveredSourceView): string {
+  const text = trimText(source.previewText)
+    .replace(/\s+/g, "")
+    .replace(/^(新增|新收录|补充)?转写(记录|内容)?[:：，,。]*/, "");
   const firstClause = text.split(/[，。！？、,.!?;；:：]/).find(Boolean) || text;
-  if (!firstClause || firstClause.length < 3) {
-    return "新收录转写";
+  if (!firstClause || firstClause.length < 3 || ["新增转写", "新收录转写", "转写记录"].includes(firstClause)) {
+    return "补记往事";
   }
   return firstClause.length > 16 ? firstClause.slice(0, 16) : firstClause;
 }
@@ -459,11 +466,14 @@ Page<BookData, {
   applyPlan(plan: MemoirBookPlan | null, draftsByChapterId?: Record<string, MemoirBookChapterDraft | null>): void;
   applyBookOutput(output: MemoirBookOutput | null): void;
   applySourceCoverage(coverage: MemoirBookSourceCoverage | null): void;
+  applyUpdatedPlan(plan: MemoirBookPlan, toastTitle: string): Promise<void>;
   generatePlan(): Promise<void>;
   confirmPlan(): Promise<void>;
   changePlanTitle(event: TextInputEvent): void;
   changeChapterTitle(event: TextInputEvent): void;
   changeChapterSummary(event: TextInputEvent): void;
+  saveChapterTitle(event: DatasetEvent): Promise<void>;
+  generateChapterTitle(event: DatasetEvent): Promise<void>;
   removeChapter(event: DatasetEvent): void;
   generateChapterDraft(event: DatasetEvent): Promise<void>;
   changeDraftContent(event: TextInputEvent): void;
@@ -519,6 +529,7 @@ Page<BookData, {
     uncoveredSources: [],
     chapterPickerOptions: [],
     assigningSourceId: "",
+    titleBusyTarget: "",
     bookOutput: null,
     bookContent: "",
     bookCharCount: 0,
@@ -656,6 +667,24 @@ Page<BookData, {
     this.setData(sourceCoverageData(this.data.plan, coverage));
   },
 
+  async applyUpdatedPlan(plan, toastTitle) {
+    const [draftsByChapterId, coverage, output] = plan.status === "confirmed"
+      ? await Promise.all([
+        this.loadDraftsForPlan(plan),
+        this.loadSourceCoverage(plan.project_id),
+        this.loadBookOutput(plan.project_id),
+      ])
+      : [
+        {},
+        await this.loadSourceCoverage(plan.project_id),
+        null,
+      ] as const;
+    this.applyPlan(plan, draftsByChapterId);
+    this.applySourceCoverage(coverage);
+    this.applyBookOutput(output);
+    wx.showToast({ title: toastTitle, icon: "success" });
+  },
+
   async generatePlan() {
     if (!this.data.projectId || this.data.generatingPlan || this.data.loading) {
       return;
@@ -716,12 +745,83 @@ Page<BookData, {
 
   changeChapterTitle(event) {
     const id = event.currentTarget.dataset.id || "";
-    this.patchChapter(id, { editingTitle: event.detail.value });
+    const chapter = this.data.chapters.find((candidate) => candidate.id === id);
+    this.patchChapter(id, {
+      editingTitle: event.detail.value,
+      titleChanged: chapter ? trimText(event.detail.value) !== trimText(chapter.title) : false,
+    });
   },
 
   changeChapterSummary(event) {
     const id = event.currentTarget.dataset.id || "";
     this.patchChapter(id, { editingSummary: event.detail.value });
+  },
+
+  async saveChapterTitle(event) {
+    const chapterId = event.currentTarget.dataset.id || "";
+    const chapter = this.data.chapters.find((candidate) => candidate.id === chapterId);
+    if (!chapter || !this.data.projectId || this.data.titleBusyTarget || this.data.updatingPlanStructure) {
+      return;
+    }
+    const title = trimText(chapter.editingTitle);
+    if (!title) {
+      this.patchChapter(chapterId, { draftError: "章节名不能为空" });
+      return;
+    }
+    if (title === trimText(chapter.title)) {
+      this.patchChapter(chapterId, { titleChanged: false, draftError: "" });
+      return;
+    }
+    this.stopPlayback();
+    this.setData({ titleBusyTarget: chapterId, error: "" });
+    this.patchChapter(chapterId, { draftError: "" });
+    try {
+      const plan = await updateMemoirBookChapterTitle(this.data.projectId, chapterId, { title });
+      await this.applyUpdatedPlan(plan, "章名已保存");
+    } catch (error) {
+      if (isLoginError(error)) {
+        wx.switchTab({ url: "/pages/me/index" });
+        return;
+      }
+      const message = error instanceof Error ? error.message : "章节名保存失败";
+      this.patchChapter(chapterId, {
+        draftError: message,
+      });
+      if (this.data.stage === "plan_draft") {
+        this.setData({ error: message });
+      }
+    } finally {
+      this.setData({ titleBusyTarget: "" });
+    }
+  },
+
+  async generateChapterTitle(event) {
+    const chapterId = event.currentTarget.dataset.id || "";
+    const chapter = this.data.chapters.find((candidate) => candidate.id === chapterId);
+    if (!chapter || !this.data.projectId || this.data.titleBusyTarget || this.data.updatingPlanStructure) {
+      return;
+    }
+    this.stopPlayback();
+    this.setData({ titleBusyTarget: chapterId, error: "" });
+    this.patchChapter(chapterId, { draftError: "" });
+    try {
+      const plan = await generateMemoirBookChapterTitle(this.data.projectId, chapterId, {});
+      await this.applyUpdatedPlan(plan, "已重新起名");
+    } catch (error) {
+      if (isLoginError(error)) {
+        wx.switchTab({ url: "/pages/me/index" });
+        return;
+      }
+      const message = error instanceof Error ? error.message : "AI 起名失败";
+      this.patchChapter(chapterId, {
+        draftError: message,
+      });
+      if (this.data.stage === "plan_draft") {
+        this.setData({ error: message });
+      }
+    } finally {
+      this.setData({ titleBusyTarget: "" });
+    }
   },
 
   removeChapter(event) {
@@ -933,15 +1033,7 @@ Page<BookData, {
         title: trimText(this.data.planTitle) || this.data.plan.title,
         chapters,
       });
-      const [draftsByChapterId, coverage, output] = await Promise.all([
-        this.loadDraftsForPlan(plan),
-        this.loadSourceCoverage(this.data.projectId),
-        this.loadBookOutput(this.data.projectId),
-      ]);
-      this.applyPlan(plan, draftsByChapterId);
-      this.applySourceCoverage(coverage);
-      this.applyBookOutput(output);
-      wx.showToast({ title: toastTitle, icon: "success" });
+      await this.applyUpdatedPlan(plan, toastTitle);
     } catch (error) {
       if (isLoginError(error)) {
         wx.switchTab({ url: "/pages/me/index" });

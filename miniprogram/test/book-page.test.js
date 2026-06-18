@@ -193,6 +193,9 @@ function loadBookPage({ authExports = {}, voiceApiExports = {} } = {}) {
       downloadMemoirVoiceAudio: async () => {
         throw new Error("downloadMemoirVoiceAudio was not mocked");
       },
+      generateMemoirBookChapterTitle: async () => {
+        throw new Error("generateMemoirBookChapterTitle was not mocked");
+      },
       generateMemoirBookChapterDraft: async () => {
         throw new Error("generateMemoirBookChapterDraft was not mocked");
       },
@@ -208,6 +211,9 @@ function loadBookPage({ authExports = {}, voiceApiExports = {} } = {}) {
         throw new Error("getMemoirBookPlan was not mocked");
       },
       getMemoirBookSourceCoverage: async () => null,
+      updateMemoirBookChapterTitle: async () => {
+        throw new Error("updateMemoirBookChapterTitle was not mocked");
+      },
       updateMemoirBookPlan: async () => {
         throw new Error("updateMemoirBookPlan was not mocked");
       },
@@ -327,6 +333,13 @@ test("book page shows recent uncovered transcripts before older ones", () => {
   assert.equal(sources.length, 12);
   assert.equal(sources[0].utterance_id, "utterance-new-14");
   assert.equal(sources[11].utterance_id, "utterance-new-3");
+});
+
+test("book page avoids placeholder title for generic uncovered transcript", () => {
+  const { mod } = loadBookPage();
+  const source = mod.buildUncoveredSourceViews(sampleSourceCoverage(1))[0];
+
+  assert.equal(mod.titleFromUncoveredSource(source), "补记往事");
 });
 
 test("book page marks assigned sources as supplemental chapter work", () => {
@@ -461,7 +474,7 @@ test("book page adds uncovered transcript as a new chapter", async () => {
       id: "chapter-3",
       plan_id: "plan-1",
       project_id: "project/1",
-      title: "新增转写",
+      title: "补记往事",
       summary: "整理这条新收录转写。",
       sort_order: 2,
       source_refs: [sampleRef("utterance-new-1", "新增转写")],
@@ -495,10 +508,84 @@ test("book page adds uncovered transcript as a new chapter", async () => {
   assert.equal(calls.length, 1);
   assert.equal(calls[0].projectId, "project/1");
   assert.equal(calls[0].data.chapters.length, 3);
-  assert.equal(calls[0].data.chapters[2].title, "新增转写");
+  assert.equal(calls[0].data.chapters[2].title, "补记往事");
   assert.equal(calls[0].data.chapters[2].source_refs[0].utterance_id, "utterance-new-1");
   assert.equal(context.data.chapters.length, 3);
   assert.equal(context.data.assigningSourceId, "");
+  delete global.wx;
+});
+
+test("book page saves edited confirmed chapter title", async () => {
+  const calls = [];
+  global.wx = { showToast() {}, switchTab() {} };
+  const updatedPlan = samplePlan("confirmed");
+  updatedPlan.chapters[0].title = "院子里的童年";
+  const { mod, page } = loadBookPage({
+    voiceApiExports: {
+      updateMemoirBookChapterTitle: async (projectId, chapterId, data) => {
+        calls.push({ projectId, chapterId, data });
+        return updatedPlan;
+      },
+      getMemoirBookChapterDraft: async () => sampleDraft(1, "confirmed"),
+      getMemoirBookSourceCoverage: async () => sampleSourceCoverage(0),
+      getMemoirBookOutput: async () => sampleBookOutput(),
+    },
+  });
+  const context = pageContext(page, { projectId: "project/1", projectTitle: "外婆回忆录" });
+  page.applyPlan.call(context, samplePlan("confirmed"), {
+    "chapter-1": sampleDraft(1, "confirmed"),
+    "chapter-2": sampleDraft(1, "confirmed"),
+  });
+
+  page.changeChapterTitle.call(context, {
+    currentTarget: { dataset: { id: "chapter-1" } },
+    detail: { value: "院子里的童年" },
+  });
+  await page.saveChapterTitle.call(context, {
+    currentTarget: { dataset: { id: "chapter-1" } },
+  });
+
+  assert.deepEqual(calls[0], {
+    projectId: "project/1",
+    chapterId: "chapter-1",
+    data: { title: "院子里的童年" },
+  });
+  assert.equal(context.data.chapters[0].title, "院子里的童年");
+  assert.equal(context.data.chapters[0].titleChanged, false);
+  assert.equal(context.data.titleBusyTarget, "");
+  delete global.wx;
+});
+
+test("book page regenerates confirmed chapter title through AI", async () => {
+  const calls = [];
+  global.wx = { showToast() {}, switchTab() {} };
+  const updatedPlan = samplePlan("confirmed");
+  updatedPlan.chapters[0].title = "外婆院中的日子";
+  const { page } = loadBookPage({
+    voiceApiExports: {
+      generateMemoirBookChapterTitle: async (projectId, chapterId, data) => {
+        calls.push({ projectId, chapterId, data });
+        return updatedPlan;
+      },
+      getMemoirBookChapterDraft: async () => sampleDraft(1, "confirmed"),
+      getMemoirBookSourceCoverage: async () => sampleSourceCoverage(0),
+      getMemoirBookOutput: async () => sampleBookOutput(),
+    },
+  });
+  const context = pageContext(page, { projectId: "project/1", projectTitle: "外婆回忆录" });
+  page.applyPlan.call(context, samplePlan("confirmed"));
+
+  await page.generateChapterTitle.call(context, {
+    currentTarget: { dataset: { id: "chapter-1" } },
+  });
+
+  assert.deepEqual(calls[0], {
+    projectId: "project/1",
+    chapterId: "chapter-1",
+    data: {},
+  });
+  assert.equal(context.data.chapters[0].title, "外婆院中的日子");
+  assert.equal(context.data.titleBusyTarget, "");
   delete global.wx;
 });
 
@@ -755,12 +842,14 @@ test("book APIs call encoded backend routes", async () => {
     createMemoirBookChapterDraftTTS,
     createMemoirBookOutputTTS,
     generateMemoirBookChapterDraft,
+    generateMemoirBookChapterTitle,
     generateMemoirBookOutput,
     generateMemoirBookPlan,
     getMemoirBookChapterDraft,
     getMemoirBookOutput,
     getMemoirBookPlan,
     getMemoirBookSourceCoverage,
+    updateMemoirBookChapterTitle,
     updateMemoirBookPlan,
     updateMemoirBookChapterDraft,
   } = require("../services/memoir-voice-api.ts");
@@ -770,6 +859,8 @@ test("book APIs call encoded backend routes", async () => {
   await confirmMemoirBookPlan("project/1", { title: "目录", chapters: [] });
   await updateMemoirBookPlan("project/1", { title: "目录", chapters: [] });
   await getMemoirBookSourceCoverage("project/1");
+  await updateMemoirBookChapterTitle("project/1", "chapter/1", { title: "新章名" });
+  await generateMemoirBookChapterTitle("project/1", "chapter/1", {});
   await getMemoirBookChapterDraft("project/1", "chapter/1");
   await generateMemoirBookChapterDraft("project/1", "chapter/1", { force_regenerate: true });
   await updateMemoirBookChapterDraft("project/1", "chapter/1", { content: "正文" });
@@ -795,40 +886,52 @@ test("book APIs call encoded backend routes", async () => {
   assert.equal(apiRequests[4].method, "GET");
   assert.equal(
     apiRequests[5].url,
+    "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-plan/chapters/chapter%2F1/title",
+  );
+  assert.equal(apiRequests[5].method, "PATCH");
+  assert.deepEqual(apiRequests[5].data, { title: "新章名" });
+  assert.equal(
+    apiRequests[6].url,
+    "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-plan/chapters/chapter%2F1/title/generate",
+  );
+  assert.equal(apiRequests[6].method, "POST");
+  assert.deepEqual(apiRequests[6].data, {});
+  assert.equal(
+    apiRequests[7].url,
     "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-plan/chapters/chapter%2F1/draft",
   );
-  assert.equal(apiRequests[5].method, "GET");
-  assert.equal(apiRequests[6].method, "POST");
-  assert.deepEqual(apiRequests[6].data, { force_regenerate: true });
-  assert.equal(apiRequests[7].method, "PATCH");
-  assert.deepEqual(apiRequests[7].data, { content: "正文" });
-  assert.equal(
-    apiRequests[8].url,
-    "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-plan/chapters/chapter%2F1/draft/confirm",
-  );
+  assert.equal(apiRequests[7].method, "GET");
   assert.equal(apiRequests[8].method, "POST");
-  assert.equal(
-    apiRequests[9].url,
-    "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-plan/chapters/chapter%2F1/draft/tts",
-  );
-  assert.equal(apiRequests[9].method, "POST");
+  assert.deepEqual(apiRequests[8].data, { force_regenerate: true });
+  assert.equal(apiRequests[9].method, "PATCH");
+  assert.deepEqual(apiRequests[9].data, { content: "正文" });
   assert.equal(
     apiRequests[10].url,
-    "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-output",
+    "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-plan/chapters/chapter%2F1/draft/confirm",
   );
-  assert.equal(apiRequests[10].method, "GET");
+  assert.equal(apiRequests[10].method, "POST");
   assert.equal(
     apiRequests[11].url,
-    "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-output/generate",
+    "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-plan/chapters/chapter%2F1/draft/tts",
   );
   assert.equal(apiRequests[11].method, "POST");
-  assert.deepEqual(apiRequests[11].data, { force_regenerate: true });
   assert.equal(
     apiRequests[12].url,
+    "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-output",
+  );
+  assert.equal(apiRequests[12].method, "GET");
+  assert.equal(
+    apiRequests[13].url,
+    "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-output/generate",
+  );
+  assert.equal(apiRequests[13].method, "POST");
+  assert.deepEqual(apiRequests[13].data, { force_regenerate: true });
+  assert.equal(
+    apiRequests[14].url,
     "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-output/tts",
   );
-  assert.equal(apiRequests[12].method, "POST");
-  assert.equal(apiRequests[12].header.Cookie, "pawtale_session=abc");
+  assert.equal(apiRequests[14].method, "POST");
+  assert.equal(apiRequests[14].header.Cookie, "pawtale_session=abc");
   delete global.wx;
 });
 

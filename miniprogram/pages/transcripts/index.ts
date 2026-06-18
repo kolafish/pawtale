@@ -27,6 +27,8 @@ interface TranscriptItemView extends MemoirVoiceTranscriptItem {
   editingText: string;
   editingCharCount: number;
   audioText: string;
+  bookInclusionText: string;
+  isIncludedInBook: boolean;
   canPlayAudio: boolean;
   changed: boolean;
   isEditing: boolean;
@@ -74,13 +76,29 @@ export function transcriptAudioText(item: MemoirVoiceTranscriptItem): string {
   return duration ? `时长 ${duration}` : "时长未知";
 }
 
+export function transcriptBookInclusionText(item: MemoirVoiceTranscriptItem): string {
+  const chapters = [...(item.included_chapters || [])]
+    .sort((left, right) => left.sort_order - right.sort_order)
+    .map((chapter) => chapter.title.trim())
+    .filter(Boolean);
+  if (!chapters.length) {
+    return "未收录到章节";
+  }
+  const visible = chapters.slice(0, 2).join("、");
+  const suffix = chapters.length > 2 ? "等章节" : "";
+  return `已收录：${visible}${suffix}`;
+}
+
 function toViewItem(item: MemoirVoiceTranscriptItem): TranscriptItemView {
   const editingText = item.transcript_edited || item.transcript_raw;
+  const isIncludedInBook = Boolean(item.is_included_in_book || item.included_chapters?.length);
   return {
     ...item,
     editingText,
     editingCharCount: editingText.trim().length,
     audioText: transcriptAudioText(item),
+    bookInclusionText: transcriptBookInclusionText(item),
+    isIncludedInBook,
     canPlayAudio: Boolean(item.audio_file_id || item.question_audio_file_id),
     changed: editingText !== (item.transcript_edited || item.transcript_raw),
     isEditing: false,

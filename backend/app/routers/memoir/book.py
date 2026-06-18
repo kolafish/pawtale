@@ -10,6 +10,8 @@ from app.schemas.memoir_book import (
     MemoirBookChapterDraftGenerateRequest,
     MemoirBookChapterDraftResponse,
     MemoirBookChapterDraftUpdateRequest,
+    MemoirBookChapterTitleGenerateRequest,
+    MemoirBookChapterTitleUpdateRequest,
     MemoirBookOutputGenerateRequest,
     MemoirBookOutputResponse,
     MemoirBookPlanConfirmRequest,
@@ -109,6 +111,46 @@ async def assign_mobile_memoir_book_sources(
         db,
         user_id=current_user.id,
         project_id=project_id,
+        req=req,
+    )
+
+
+@router.patch(
+    "/projects/{project_id}/book-plan/chapters/{chapter_id}/title",
+    response_model=MemoirBookPlanResponse,
+)
+async def update_mobile_memoir_book_chapter_title(
+    project_id: str,
+    chapter_id: str,
+    req: MemoirBookChapterTitleUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await memoir_book_plans.update_book_chapter_title(
+        db,
+        user_id=current_user.id,
+        project_id=project_id,
+        chapter_id=chapter_id,
+        req=req,
+    )
+
+
+@router.post(
+    "/projects/{project_id}/book-plan/chapters/{chapter_id}/title/generate",
+    response_model=MemoirBookPlanResponse,
+)
+async def generate_mobile_memoir_book_chapter_title(
+    project_id: str,
+    chapter_id: str,
+    req: MemoirBookChapterTitleGenerateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await memoir_book_plans.generate_book_chapter_title(
+        db,
+        user_id=current_user.id,
+        project_id=project_id,
+        chapter_id=chapter_id,
         req=req,
     )
 

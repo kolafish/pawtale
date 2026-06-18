@@ -20,6 +20,8 @@ from app.models.memoir import (
     MemoirVoiceUtterance,
 )
 from app.schemas.memoir_book import (
+    MemoirBookChapterTitleGenerateRequest,
+    MemoirBookChapterTitleUpdateRequest,
     MemoirBookChapterSourceRef,
     MemoirBookPlanChapterInput,
     MemoirBookPlanChapterResponse,
@@ -30,6 +32,7 @@ from app.schemas.memoir_book import (
     MemoirBookSourceAssignmentRequest,
     MemoirBookSourceCoverageItem,
     MemoirBookSourceCoverageResponse,
+    MemoirBookSourceIncludedChapter,
 )
 from app.services import get_ai_service
 from app.services.ai_types import AITextClient
@@ -38,8 +41,10 @@ from app.services.memoir.access import load_memoir_project
 
 
 SYSTEM_PROMPT = "你是一位谨慎的中文回忆录章节规划编辑，只能根据给定口述转写整理章节。"
+CHAPTER_TITLE_SYSTEM_PROMPT = "你是一位谨慎的中文回忆录目录编辑，只为已有章节重新拟标题。"
 AI_BOOK_PLAN_UNAVAILABLE_MESSAGE = "AI 服务暂时不可用，请稍后重试。"
 logger = logging.getLogger(__name__)
+GENERIC_CHAPTER_TITLES = {"新收录转写", "新增转写", "转写记录", "新章节", "未命名章节"}
 
 
 @dataclass(frozen=True)
@@ -413,7 +418,30 @@ def _covered_utterance_ids(plan: MemoirBookPlan | None) -> set[str]:
     return covered
 
 
-def _source_coverage_item(source: SourceSegment) -> MemoirBookSourceCoverageItem:
+def _included_chapters_by_utterance(
+    plan: MemoirBookPlan | None,
+) -> dict[str, list[MemoirBookSourceIncludedChapter]]:
+    if not plan:
+        return {}
+    included: dict[str, list[MemoirBookSourceIncludedChapter]] = {}
+    for chapter in sorted(plan.chapters, key=lambda item: item.sort_order):
+        chapter_item = MemoirBookSourceIncludedChapter(
+            chapter_id=chapter.id,
+            title=chapter.title,
+            sort_order=chapter.sort_order,
+        )
+        for ref in chapter.source_refs_json or []:
+            if not isinstance(ref, dict) or not isinstance(ref.get("utterance_id"), str):
+                continue
+            included.setdefault(ref["utterance_id"], []).append(chapter_item)
+    return included
+
+
+def _source_coverage_item(
+    source: SourceSegment,
+    included_chapters: list[MemoirBookSourceIncludedChapter] | None = None,
+) -> MemoirBookSourceCoverageItem:
+    included = included_chapters or []
     return MemoirBookSourceCoverageItem(
         source_index=source.source_index,
         voice_session_id=source.voice_session_id,
@@ -425,6 +453,8 @@ def _source_coverage_item(source: SourceSegment) -> MemoirBookSourceCoverageItem
         end_ms=source.end_ms,
         text=source.text,
         created_at=source.created_at,
+        is_included=bool(included),
+        included_in_chapters=included,
     )
 
 
@@ -436,7 +466,8 @@ async def get_book_source_coverage(
 ) -> MemoirBookSourceCoverageResponse:
     sources = await _source_segments(db, user_id=user_id, project_id=project_id)
     plan = await _load_plan(db, project_id)
-    covered_ids = _covered_utterance_ids(plan)
+    included_by_utterance = _included_chapters_by_utterance(plan)
+    covered_ids = set(included_by_utterance)
     uncovered_sources = [
         source for source in sources
         if source.utterance_id not in covered_ids
@@ -448,6 +479,10 @@ async def get_book_source_coverage(
         total_source_count=len(sources),
         covered_source_count=covered_source_count,
         uncovered_source_count=len(uncovered_sources),
+        sources=[
+            _source_coverage_item(source, included_by_utterance.get(source.utterance_id, []))
+            for source in sources
+        ],
         uncovered_sources=[_source_coverage_item(source) for source in uncovered_sources],
     )
 
@@ -646,6 +681,107 @@ def _validated_chapter_updates(
     return chapters
 
 
+def _chapter_by_id(plan: MemoirBookPlan, chapter_id: str) -> MemoirBookPlanChapter:
+    for chapter in plan.chapters:
+        if chapter.id == chapter_id:
+            return chapter
+    raise HTTPException(status_code=404, detail="章节不存在")
+
+
+def _chapter_source_texts(chapter: MemoirBookPlanChapter, sources: list[SourceSegment]) -> list[str]:
+    source_by_utterance = {source.utterance_id: source for source in sources}
+    texts: list[str] = []
+    for ref in chapter.source_refs_json or []:
+        if not isinstance(ref, dict):
+            continue
+        utterance_id = ref.get("utterance_id")
+        source = source_by_utterance.get(utterance_id) if isinstance(utterance_id, str) else None
+        text = source.text if source else str(ref.get("quote") or "")
+        text = _text_or_empty(text)
+        if text:
+            texts.append(text)
+    return texts
+
+
+def _build_chapter_title_prompt(chapter: MemoirBookPlanChapter, source_texts: list[str]) -> str:
+    source_text = "\n\n".join(f"- {text}" for text in source_texts[:8])
+    return f"""请为下面这一个回忆录章节重新拟一个正式章节名。
+
+当前章节名：{chapter.title}
+章节摘要：{chapter.summary or "无"}
+
+章节来源口述：
+{source_text or "无"}
+
+要求：
+- 只根据章节来源口述和摘要，不新增事实、人物、地点或情绪。
+- 标题要像书稿目录，短而正式，建议 6 到 14 个汉字。
+- 不要使用“转写”“新收录”“记录”“素材”“章节”等占位词。
+- 直接输出标题，不要解释，不要引号，不要编号。
+"""
+
+
+def _clean_generated_chapter_title(content: str) -> str:
+    payload = extract_json_payload(content)
+    title = ""
+    if isinstance(payload, dict):
+        value = payload.get("title")
+        title = value.strip() if isinstance(value, str) else ""
+    if not title:
+        lines = [line.strip() for line in str(content).splitlines() if line.strip()]
+        title = lines[0] if lines else ""
+    title = title.strip().strip("“”\"'「」《》")
+    for prefix in ("章节标题：", "标题：", "章名：", "章节名："):
+        if title.startswith(prefix):
+            title = title[len(prefix):].strip()
+    title = title.strip("。；;，, ")
+    if title in GENERIC_CHAPTER_TITLES or "转写" in title or "新收录" in title:
+        raise HTTPException(status_code=502, detail="AI 未返回可用章节标题")
+    if not title:
+        raise HTTPException(status_code=502, detail="AI 未返回可用章节标题")
+    return title[:80]
+
+
+async def _save_chapter_title(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    plan: MemoirBookPlan,
+    chapter: MemoirBookPlanChapter,
+    title: str,
+    updated_by: MemoirCreatedBy,
+    model: str | None = None,
+    prompt_snapshot: str = "",
+) -> MemoirBookPlanResponse:
+    now = datetime.now(UTC).isoformat()
+    previous_title = chapter.title
+    chapter.title = title.strip()[:200]
+    chapter.metadata_json = _merge_metadata(
+        chapter.metadata_json,
+        {
+            "title_updated_at": now,
+            "title_updated_by": updated_by.value,
+            "previous_title": previous_title,
+            **({"title_model": model} if model else {}),
+            **({"title_prompt_snapshot": prompt_snapshot} if prompt_snapshot else {}),
+        },
+    )
+    plan.metadata_json = _merge_metadata(
+        plan.metadata_json,
+        {
+            "chapter_title_updated_at": now,
+            "chapter_title_updated_by": updated_by.value,
+        },
+    )
+    db.add(chapter)
+    db.add(plan)
+    await db.commit()
+    refreshed = await _load_plan(db, project_id)
+    if not refreshed:
+        raise HTTPException(status_code=500, detail="章节标题保存失败")
+    return _plan_response(refreshed)
+
+
 async def confirm_book_plan(
     db: AsyncSession,
     *,
@@ -772,3 +908,76 @@ async def update_book_plan(
     if not refreshed:
         raise HTTPException(status_code=500, detail="章节规划保存失败")
     return _plan_response(refreshed)
+
+
+async def update_book_chapter_title(
+    db: AsyncSession,
+    *,
+    user_id: str,
+    project_id: str,
+    chapter_id: str,
+    req: MemoirBookChapterTitleUpdateRequest,
+) -> MemoirBookPlanResponse:
+    await load_memoir_project(db, project_id, user_id)
+    plan = await _load_plan(db, project_id)
+    if not plan:
+        raise HTTPException(status_code=404, detail="章节规划不存在")
+    chapter = _chapter_by_id(plan, chapter_id)
+    return await _save_chapter_title(
+        db,
+        project_id=project_id,
+        plan=plan,
+        chapter=chapter,
+        title=req.title,
+        updated_by=MemoirCreatedBy.USER,
+    )
+
+
+async def generate_book_chapter_title(
+    db: AsyncSession,
+    *,
+    user_id: str,
+    project_id: str,
+    chapter_id: str,
+    req: MemoirBookChapterTitleGenerateRequest,
+    ai_client: AITextClient | None = None,
+) -> MemoirBookPlanResponse:
+    await load_memoir_project(db, project_id, user_id)
+    plan = await _load_plan(db, project_id)
+    if not plan:
+        raise HTTPException(status_code=404, detail="章节规划不存在")
+    chapter = _chapter_by_id(plan, chapter_id)
+    sources = await _source_segments(db, user_id=user_id, project_id=project_id)
+    prompt = _build_chapter_title_prompt(chapter, _chapter_source_texts(chapter, sources))
+
+    client = ai_client
+    try:
+        if client is None:
+            client = get_ai_service(req.ai_model)
+        content = await client._call_llm(
+            CHAPTER_TITLE_SYSTEM_PROMPT,
+            prompt,
+            temperature=0.25,
+            max_tokens=160,
+            timeout=60.0,
+        )
+    except HTTPException as exc:
+        if exc.status_code < 500:
+            raise
+        logger.exception("AI memoir chapter title failed provider=%s", getattr(client, "provider_name", "unknown"))
+        raise HTTPException(status_code=503, detail=AI_BOOK_PLAN_UNAVAILABLE_MESSAGE) from exc
+    except Exception as exc:
+        logger.exception("AI memoir chapter title failed provider=%s", getattr(client, "provider_name", "unknown"))
+        raise HTTPException(status_code=503, detail=AI_BOOK_PLAN_UNAVAILABLE_MESSAGE) from exc
+
+    title = _clean_generated_chapter_title(str(content))
+    return await _save_chapter_title(
+        db,
+        project_id=project_id,
+        plan=plan,
+        chapter=chapter,
+        title=title,
+        updated_by=MemoirCreatedBy.AI,
+        model=getattr(client, "model_name", req.ai_model),
+        prompt_snapshot=prompt,
+    )

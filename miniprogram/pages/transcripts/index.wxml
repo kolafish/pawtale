@@ -26,6 +26,7 @@
         <text class="record-title">语音记录 {{index + 1}}</text>
         <text class="record-project">{{item.project_title || "我的回忆录"}}</text>
         <text class="record-meta">{{item.audioText}}</text>
+        <text class="book-status {{item.isIncludedInBook ? 'included' : ''}}">{{item.bookInclusionText}}</text>
       </view>
       <text class="record-count">{{item.display_char_count}} 字</text>
     </view>
