@@ -91,8 +91,9 @@ test("splits TTS text by fallback duration when audio duration is unavailable", 
 });
 
 test("estimates assistant TTS duration with a conversational question pace", () => {
-  assert.equal(estimateTTSPlaybackDurationSeconds("你好吗？"), 0.8);
-  assert.equal(estimateTTSPlaybackDurationSeconds("你还记得那天发生什么吗？"), 2.06);
+  assert.equal(estimateTTSPlaybackDurationSeconds("你好吗？"), 0.9);
+  assert.equal(estimateTTSPlaybackDurationSeconds("你还记得那天发生什么吗？"), 2.34);
+  assert.equal(estimateTTSPlaybackDurationSeconds("你还记得那天，我们一起去了哪里？"), 3.12);
 });
 
 test("estimates missing TTS duration so playback progress can still move", () => {
@@ -110,7 +111,7 @@ test("uses estimated duration instead of a coarse slower fallback duration", () 
     estimateMissingDuration: true,
   });
 
-  assert.equal(progress.progressPercent, 49);
+  assert.equal(progress.progressPercent, 43);
   assert.equal(progress.currentText, "天");
 });
 
@@ -122,6 +123,14 @@ test("keeps close fallback duration instead of forcing the estimate", () => {
 
   assert.equal(progress.progressPercent, 45);
   assert.equal(progress.currentText, "天");
+});
+
+test("keeps TTS highlight on punctuation while the voice pauses", () => {
+  const progress = splitTextByAudioPlaybackProgress("你好，世界", 0.58, 0.96);
+
+  assert.equal(progress.currentText, "，");
+  assert.equal(progress.spokenText, "你好");
+  assert.equal(progress.remainingText, "世界");
 });
 
 test("uses alignment in audio playback progress when available", () => {
