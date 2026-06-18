@@ -1,5 +1,5 @@
 import type { MemoirVoiceProgressResponse } from "../../domain/voice-chat";
-import type { TTSSpeedOption, TTSVoiceOption } from "../../services/tts-settings";
+import type { TTSSpeedOption, TTSSettingsScope, TTSVoiceOption } from "../../services/tts-settings";
 import {
   getMemoirIdentity,
   loginWithEmail,
@@ -11,8 +11,9 @@ import {
 import { getMemoirVoiceProgress } from "../../services/memoir-voice-api";
 import { ApiError } from "../../services/request";
 import {
-  readTTSSettings,
-  saveTTSSettings,
+  readScopedTTSSettings,
+  readTTSSettingsProfiles,
+  saveScopedTTSSettings,
   TTS_SPEED_OPTIONS,
   TTS_VOICE_OPTIONS,
   ttsSpeedLabel,
@@ -48,17 +49,22 @@ interface MeData {
   utteranceCount: number;
   totalUserCharCount: number;
   totalAudioText: string;
-  ttsVoice: string;
-  ttsVoiceLabel: string;
+  chatTTSVoice: string;
+  chatTTSVoiceLabel: string;
+  bookTTSVoice: string;
+  bookTTSVoiceLabel: string;
   ttsVoiceOptions: TTSVoiceOption[];
-  ttsSpeedRatio: number;
-  ttsSpeedLabel: string;
+  chatTTSSpeedRatio: number;
+  chatTTSSpeedLabel: string;
+  bookTTSSpeedRatio: number;
+  bookTTSSpeedLabel: string;
   ttsSpeedOptions: TTSSpeedOption[];
 }
 
 interface VoiceDatasetEvent {
   currentTarget: {
     dataset: {
+      scope?: TTSSettingsScope;
       voice?: string;
     };
   };
@@ -67,6 +73,7 @@ interface VoiceDatasetEvent {
 interface SpeedDatasetEvent {
   currentTarget: {
     dataset: {
+      scope?: TTSSettingsScope;
       speed?: string | number;
     };
   };
@@ -115,6 +122,31 @@ function voiceStatsData(progress: MemoirVoiceProgressResponse) {
 function credentialDisplayName(displayName: string): string {
   const normalizedName = displayName.trim();
   return normalizedName && normalizedName !== WECHAT_PLACEHOLDER_DISPLAY_NAME ? normalizedName : "";
+}
+
+function ttsScopeData(scope: TTSSettingsScope, settings: { voice: string; speedRatio: number }): Partial<MeData> {
+  if (scope === "book") {
+    return {
+      bookTTSVoice: settings.voice,
+      bookTTSVoiceLabel: ttsVoiceLabel(settings.voice),
+      bookTTSSpeedRatio: settings.speedRatio,
+      bookTTSSpeedLabel: ttsSpeedLabel(settings.speedRatio),
+    };
+  }
+  return {
+    chatTTSVoice: settings.voice,
+    chatTTSVoiceLabel: ttsVoiceLabel(settings.voice),
+    chatTTSSpeedRatio: settings.speedRatio,
+    chatTTSSpeedLabel: ttsSpeedLabel(settings.speedRatio),
+  };
+}
+
+function ttsProfilesData(): Partial<MeData> {
+  const profiles = readTTSSettingsProfiles();
+  return {
+    ...ttsScopeData("chat", profiles.chat),
+    ...ttsScopeData("book", profiles.book),
+  };
 }
 
 function loggedOutData(credentialsMode = false): Partial<MeData> {
@@ -185,11 +217,15 @@ Page<MeData, {
     utteranceCount: 0,
     totalUserCharCount: 0,
     totalAudioText: "0 秒",
-    ttsVoice: "",
-    ttsVoiceLabel: "默认音色",
+    chatTTSVoice: "",
+    chatTTSVoiceLabel: "默认音色",
+    bookTTSVoice: "",
+    bookTTSVoiceLabel: "默认音色",
     ttsVoiceOptions: TTS_VOICE_OPTIONS,
-    ttsSpeedRatio: 1,
-    ttsSpeedLabel: "正常 1.0x",
+    chatTTSSpeedRatio: 1,
+    chatTTSSpeedLabel: "正常 1.0x",
+    bookTTSSpeedRatio: 1,
+    bookTTSSpeedLabel: "正常 1.0x",
     ttsSpeedOptions: TTS_SPEED_OPTIONS,
   },
 
@@ -212,7 +248,6 @@ Page<MeData, {
         return;
       }
       const displayName = displayNameForUser(identity.display_name, identity.email);
-      const ttsSettings = readTTSSettings();
       this.setData({
         loggedIn: true,
         accountMode: false,
@@ -229,10 +264,7 @@ Page<MeData, {
         email: identity.email,
         projectTitle: identity.active_project?.title || "我的回忆录",
         projectCount: identity.projects.length,
-        ttsVoice: ttsSettings.voice,
-        ttsVoiceLabel: ttsVoiceLabel(ttsSettings.voice),
-        ttsSpeedRatio: ttsSettings.speedRatio,
-        ttsSpeedLabel: ttsSpeedLabel(ttsSettings.speedRatio),
+        ...ttsProfilesData(),
       });
       await this.loadVoiceStats(identity.active_project_id);
     } catch (error) {
@@ -433,26 +465,18 @@ Page<MeData, {
   },
 
   selectTTSVoice(event) {
+    const scope = event.currentTarget.dataset.scope === "book" ? "book" : "chat";
     const voice = event.currentTarget.dataset.voice || "";
-    const settings = saveTTSSettings({ ...readTTSSettings(), voice });
-    this.setData({
-      ttsVoice: settings.voice,
-      ttsVoiceLabel: ttsVoiceLabel(settings.voice),
-      ttsSpeedRatio: settings.speedRatio,
-      ttsSpeedLabel: ttsSpeedLabel(settings.speedRatio),
-    });
+    const settings = saveScopedTTSSettings(scope, { ...readScopedTTSSettings(scope), voice });
+    this.setData(ttsScopeData(scope, settings));
     wx.showToast({ title: "已保存", icon: "success" });
   },
 
   selectTTSSpeed(event) {
+    const scope = event.currentTarget.dataset.scope === "book" ? "book" : "chat";
     const speedRatio = Number(event.currentTarget.dataset.speed);
-    const settings = saveTTSSettings({ ...readTTSSettings(), speedRatio });
-    this.setData({
-      ttsVoice: settings.voice,
-      ttsVoiceLabel: ttsVoiceLabel(settings.voice),
-      ttsSpeedRatio: settings.speedRatio,
-      ttsSpeedLabel: ttsSpeedLabel(settings.speedRatio),
-    });
+    const settings = saveScopedTTSSettings(scope, { ...readScopedTTSSettings(scope), speedRatio });
+    this.setData(ttsScopeData(scope, settings));
     wx.showToast({ title: "已保存", icon: "success" });
   },
 

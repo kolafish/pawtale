@@ -387,16 +387,21 @@ export interface MemoirBookChapterDraft {
 
 export interface MemoirBookAudioRequest {
   voice?: string;
+  speed_ratio?: number;
   force_regenerate?: boolean;
 }
 
 export interface MemoirBookAudioResponse {
   audio_file_ids: string[];
+  audio_file_durations_seconds?: Array<number | null>;
   provider: string;
   model: string;
   mime_type: string;
   chunk_count: number;
   source_text_hash: string;
+  duration_seconds?: number | null;
+  alignment_provider?: string | null;
+  alignment?: TTSAlignmentSegment[];
 }
 
 export interface MemoirBookOutputGenerateRequest {

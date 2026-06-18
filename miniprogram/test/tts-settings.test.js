@@ -5,6 +5,7 @@ const test = require("node:test");
 
 const {
   normalizeTTSSettings,
+  normalizeScopedTTSSettings,
   normalizeTTSSpeedRatio,
   normalizeTTSVoice,
   ttsSpeedLabel,
@@ -26,6 +27,30 @@ test("normalizes persisted TTS settings", () => {
   });
   assert.deepEqual(normalizeTTSSettings({ voice: "bad", speedRatio: 2 }), { voice: "", speedRatio: 1 });
   assert.deepEqual(normalizeTTSSettings("bad"), { voice: "", speedRatio: 1 });
+});
+
+test("normalizes scoped TTS settings and migrates the legacy flat shape", () => {
+  assert.deepEqual(
+    normalizeScopedTTSSettings({
+      chat: { voice: "zh_female_xiaohe_uranus_bigtts", speedRatio: 0.7 },
+      book: { voice: "zh_male_m191_uranus_bigtts", speedRatio: 1.5 },
+    }),
+    {
+      chat: { voice: "zh_female_xiaohe_uranus_bigtts", speedRatio: 0.7 },
+      book: { voice: "zh_male_m191_uranus_bigtts", speedRatio: 1.5 },
+    },
+  );
+  assert.deepEqual(
+    normalizeScopedTTSSettings({ voice: "zh_female_vv_uranus_bigtts", speedRatio: 1.5 }),
+    {
+      chat: { voice: "zh_female_vv_uranus_bigtts", speedRatio: 1.5 },
+      book: { voice: "zh_female_vv_uranus_bigtts", speedRatio: 1.5 },
+    },
+  );
+  assert.deepEqual(normalizeScopedTTSSettings("bad"), {
+    chat: { voice: "", speedRatio: 1 },
+    book: { voice: "", speedRatio: 1 },
+  });
 });
 
 test("normalizes supported TTS speed ratios", () => {

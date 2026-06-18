@@ -188,14 +188,15 @@
 
   <view class="section">
     <view class="setting-header">
-      <text class="section-title">AI 音色</text>
-      <text class="setting-current">{{ttsVoiceLabel}}</text>
+      <text class="section-title">语音聊天音色</text>
+      <text class="setting-current">{{chatTTSVoiceLabel}}</text>
     </view>
     <view class="voice-options">
       <view
         wx:for="{{ttsVoiceOptions}}"
         wx:key="value"
-        class="voice-option {{item.value === ttsVoice ? 'selected' : ''}}"
+        class="voice-option {{item.value === chatTTSVoice ? 'selected' : ''}}"
+        data-scope="chat"
         data-voice="{{item.value}}"
         bindtap="selectTTSVoice"
         hover-class="tap-hover"
@@ -208,14 +209,57 @@
 
   <view class="section">
     <view class="setting-header">
-      <text class="section-title">AI 语速</text>
-      <text class="setting-current">{{ttsSpeedLabel}}</text>
+      <text class="section-title">语音聊天语速</text>
+      <text class="setting-current">{{chatTTSSpeedLabel}}</text>
     </view>
     <view class="voice-options">
       <view
         wx:for="{{ttsSpeedOptions}}"
         wx:key="value"
-        class="voice-option {{item.value === ttsSpeedRatio ? 'selected' : ''}}"
+        class="voice-option {{item.value === chatTTSSpeedRatio ? 'selected' : ''}}"
+        data-scope="chat"
+        data-speed="{{item.value}}"
+        bindtap="selectTTSSpeed"
+        hover-class="tap-hover"
+      >
+        <text class="voice-label">{{item.label}}</text>
+        <text class="voice-desc">{{item.description}}</text>
+      </view>
+    </view>
+  </view>
+
+  <view class="section">
+    <view class="setting-header">
+      <text class="section-title">成书朗读音色</text>
+      <text class="setting-current">{{bookTTSVoiceLabel}}</text>
+    </view>
+    <view class="voice-options">
+      <view
+        wx:for="{{ttsVoiceOptions}}"
+        wx:key="value"
+        class="voice-option {{item.value === bookTTSVoice ? 'selected' : ''}}"
+        data-scope="book"
+        data-voice="{{item.value}}"
+        bindtap="selectTTSVoice"
+        hover-class="tap-hover"
+      >
+        <text class="voice-label">{{item.label}}</text>
+        <text class="voice-desc">{{item.description}}</text>
+      </view>
+    </view>
+  </view>
+
+  <view class="section">
+    <view class="setting-header">
+      <text class="section-title">成书朗读语速</text>
+      <text class="setting-current">{{bookTTSSpeedLabel}}</text>
+    </view>
+    <view class="voice-options">
+      <view
+        wx:for="{{ttsSpeedOptions}}"
+        wx:key="value"
+        class="voice-option {{item.value === bookTTSSpeedRatio ? 'selected' : ''}}"
+        data-scope="book"
         data-speed="{{item.value}}"
         bindtap="selectTTSSpeed"
         hover-class="tap-hover"

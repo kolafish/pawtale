@@ -39,6 +39,7 @@ from app.services.memoir.book_audio import (
     audio_response,
     cached_audio_response,
     discard_staged_audio_files,
+    effective_tts_speed_ratio,
     source_text_hash,
     synthesize_text_audio,
 )
@@ -486,11 +487,13 @@ async def synthesize_chapter_draft_audio(
     latest = draft.versions[-1]
     text = latest.content.strip()
     text_hash = source_text_hash(text)
+    speed_ratio = effective_tts_speed_ratio(req.speed_ratio)
     cached = cached_audio_response(
         draft.metadata_json or {},
         cache_key=CHAPTER_TTS_CACHE_KEY,
         text_hash=text_hash,
         voice=req.voice,
+        speed_ratio=speed_ratio,
         force_regenerate=req.force_regenerate,
     )
     if cached:
@@ -501,13 +504,14 @@ async def synthesize_chapter_draft_audio(
         user_id=user_id,
         text=text,
         voice=req.voice,
+        speed_ratio=req.speed_ratio,
         tts_client=tts_client,
     )
     try:
         draft.metadata_json = {
             **(draft.metadata_json or {}),
             CHAPTER_TTS_CACHE_KEY: {
-                **audio_cache_payload(synthesis, voice=req.voice),
+                **audio_cache_payload(synthesis, voice=req.voice, speed_ratio=speed_ratio),
                 "draft_version_id": latest.id,
                 "chapter_id": chapter.id,
             },

@@ -234,6 +234,19 @@
           auto-height
           cursor-spacing="24"
         />
+        <view
+          wx:if="{{playingTarget === item.ttsTarget && bookTTSActiveTarget === item.ttsTarget}}"
+          class="tts-highlight-card"
+        >
+          <view class="tts-progress-bar">
+            <view class="tts-progress-fill" style="width: {{bookTTSProgressPercent}}%;"></view>
+          </view>
+          <text class="tts-highlight-text" selectable>
+            <text class="tts-spoken">{{bookTTSSpokenText}}</text>
+            <text wx:if="{{bookTTSCurrentText}}" class="tts-current">{{bookTTSCurrentText}}</text>
+            <text class="tts-remaining">{{bookTTSRemainingText}}</text>
+          </text>
+        </view>
       </view>
 
       <view wx:if="{{item.draftError}}" class="chapter-error">{{item.draftError}}</view>
@@ -303,7 +316,17 @@
         <text wx:if="{{bookStaleNotice}}" class="book-stale-notice">{{bookStaleNotice}}</text>
 
         <view wx:if="{{bookContent}}" class="book-preview">
-          <text class="book-output-text" selectable>{{bookContent}}</text>
+          <block wx:if="{{playingTarget === 'book' && bookTTSActiveTarget === 'book'}}">
+            <view class="tts-progress-bar">
+              <view class="tts-progress-fill" style="width: {{bookTTSProgressPercent}}%;"></view>
+            </view>
+            <text class="tts-highlight-text book" selectable>
+              <text class="tts-spoken">{{bookTTSSpokenText}}</text>
+              <text wx:if="{{bookTTSCurrentText}}" class="tts-current">{{bookTTSCurrentText}}</text>
+              <text class="tts-remaining">{{bookTTSRemainingText}}</text>
+            </text>
+          </block>
+          <text wx:else class="book-output-text" selectable>{{bookContent}}</text>
         </view>
         <view wx:else class="draft-empty">
           <text>全书会直接使用已确认章节正文，不额外扩写叙述内容。</text>

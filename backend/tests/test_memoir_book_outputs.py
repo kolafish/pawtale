@@ -13,6 +13,8 @@ from app.models.memoir import (
     MemoirBookPlan,
     MemoirBookPlanChapter,
 )
+from app.services.memoir.book_audio import split_tts_text
+from app.services.memoir.tts_alignment import TTSAlignmentSegment
 from app.services.memoir.voice_tts import TTSResult
 
 
@@ -25,7 +27,9 @@ class FakeBookTTS:
         self.calls = []
 
     async def synthesize(self, text, *, voice=None, speed_ratio=None):
-        self.calls.append({"text": text, "voice": voice})
+        self.calls.append({"text": text, "voice": voice, "speed_ratio": speed_ratio})
+        alignment_end = min(6, len(text))
+        duration_seconds = max(0.2, alignment_end * 0.08)
         return TTSResult(
             audio=f"audio:{len(self.calls)}".encode(),
             mime_type="audio/mpeg",
@@ -34,6 +38,16 @@ class FakeBookTTS:
             model=self.model_name,
             voice=voice or self.default_voice,
             speed_ratio=speed_ratio or 1.0,
+            alignment=[
+                TTSAlignmentSegment(
+                    text=text[:alignment_end],
+                    start_ms=0,
+                    end_ms=int(duration_seconds * 1000),
+                    text_start=0,
+                    text_end=alignment_end,
+                )
+            ],
+            duration_seconds=duration_seconds,
         )
 
 
@@ -41,6 +55,13 @@ async def _active_project_id(client):
     response = await client.get("/api/mobile/memoir/projects")
     assert response.status_code == 200
     return response.json()["active_project_id"]
+
+
+def test_book_tts_chunks_keep_offsets_across_blank_lines():
+    chunks = split_tts_text("标题\n\n第一段正文。\n\n第二段正文。", max_chars=8)
+
+    assert [chunk.text for chunk in chunks] == ["标题", "第一段正文。", "第二段正文。"]
+    assert [chunk.text_start for chunk in chunks] == [0, 4, 12]
 
 
 async def _create_confirmed_book_plan(test_db, *, project_id: str, confirmed_chapters: bool = True):
@@ -231,19 +252,31 @@ async def test_mobile_memoir_book_chapter_tts_generates_and_reuses_audio(
 
     first = await client.post(
         f"/api/mobile/memoir/projects/{project_id}/book-plan/chapters/{chapters[0].id}/draft/tts",
-        json={"voice": "voice-a"},
+        json={"voice": "voice-a", "speed_ratio": 1.5},
     )
     second = await client.post(
         f"/api/mobile/memoir/projects/{project_id}/book-plan/chapters/{chapters[0].id}/draft/tts",
-        json={"voice": "voice-a"},
+        json={"voice": "voice-a", "speed_ratio": 1.5},
+    )
+    third = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-plan/chapters/{chapters[0].id}/draft/tts",
+        json={"voice": "voice-a", "speed_ratio": 0.7},
     )
 
     assert first.status_code == 200
     assert second.status_code == 200
+    assert third.status_code == 200
     assert first.json()["audio_file_ids"] == second.json()["audio_file_ids"]
+    assert first.json()["audio_file_ids"] != third.json()["audio_file_ids"]
     assert first.json()["chunk_count"] == 1
-    assert len(fake_tts.calls) == 1
+    assert first.json()["audio_file_durations_seconds"] == [0.48]
+    assert first.json()["duration_seconds"] == 0.48
+    assert first.json()["alignment_provider"] == "fake-tts"
+    assert first.json()["alignment"][0]["text_start"] == 0
+    assert len(fake_tts.calls) == 2
     assert fake_tts.calls[0]["text"] == "我小时候常在外婆家的院子里晒太阳。"
+    assert fake_tts.calls[0]["speed_ratio"] == 1.5
+    assert fake_tts.calls[1]["speed_ratio"] == 0.7
     playback = await client.get(f"/api/mobile/memoir/audio-files/{first.json()['audio_file_ids'][0]}/playback")
     assert playback.status_code == 200
 
@@ -263,7 +296,7 @@ async def test_mobile_memoir_book_output_tts_generates_full_book_audio(
 
     response = await client.post(
         f"/api/mobile/memoir/projects/{project_id}/book-output/tts",
-        json={"voice": "voice-book"},
+        json={"voice": "voice-book", "speed_ratio": 1.5},
     )
 
     assert response.status_code == 200
@@ -273,3 +306,7 @@ async def test_mobile_memoir_book_output_tts_generates_full_book_audio(
     assert len(fake_tts.calls) == data["chunk_count"]
     assert "外婆回忆录" in fake_tts.calls[0]["text"]
     assert fake_tts.calls[0]["voice"] == "voice-book"
+    assert fake_tts.calls[0]["speed_ratio"] == 1.5
+    assert len(data["audio_file_durations_seconds"]) == data["chunk_count"]
+    assert data["alignment_provider"] == "fake-tts"
+    assert data["alignment"][0]["text_start"] == 0

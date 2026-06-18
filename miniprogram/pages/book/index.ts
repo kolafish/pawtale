@@ -8,6 +8,7 @@ import type {
   MemoirBookPlanChapterInput,
   MemoirBookPlanChapterUpdateInput,
   MemoirBookSourceCoverage,
+  TTSAlignmentSegment,
 } from "../../domain/voice-chat";
 import { getMemoirIdentity } from "../../services/auth";
 import {
@@ -31,6 +32,8 @@ import {
 } from "../../services/memoir-voice-api";
 import { configureAudiblePlayback } from "../../services/audio-playback";
 import { ApiError } from "../../services/request";
+import { readBookTTSSettings } from "../../services/tts-settings";
+import { splitTextByAudioPlaybackProgress } from "../../services/tts-text-progress";
 import { formatBeijingDateTime } from "../../services/time";
 
 interface DatasetEvent {
@@ -128,10 +131,23 @@ interface BookData {
   generatingBook: boolean;
   ttsBusyTarget: string;
   playingTarget: string;
+  bookTTSActiveTarget: string;
+  bookTTSActiveText: string;
+  bookTTSSpokenText: string;
+  bookTTSCurrentText: string;
+  bookTTSRemainingText: string;
+  bookTTSProgressPercent: number;
+  bookTTSDurationSeconds: number;
+  bookTTSAlignment: TTSAlignmentSegment[];
 }
 
 function trimText(value: string): string {
   return value.trim();
+}
+
+function positiveFiniteSeconds(value: number | null | undefined): number {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : 0;
 }
 
 function latestDraftContent(draft: MemoirBookChapterDraft | null): string {
@@ -503,8 +519,28 @@ Page<BookData, {
   playChapterAudio(event: DatasetEvent): Promise<void>;
   playBookAudio(): Promise<void>;
   requestBookAudio(target: string): Promise<MemoirBookAudioResponse>;
-  playAudioFiles(audioFileIds: string[], target: string, token: number): Promise<void>;
-  playAudioFile(audioFileId: string, token: number): Promise<void>;
+  playAudioFiles(
+    response: MemoirBookAudioResponse,
+    target: string,
+    token: number,
+    activeText: string,
+  ): Promise<void>;
+  playAudioFile(
+    audioFileId: string,
+    token: number,
+    elapsedBeforeSeconds: number,
+    fallbackDurationSeconds: number,
+  ): Promise<number>;
+  updateBookTTSProgress(currentTimeSeconds: number, durationSeconds?: number): void;
+  startBookTTSProgressTimer(
+    token: number,
+    audio: WechatMiniprogram.InnerAudioContext,
+    elapsedBeforeSeconds: number,
+    durationSeconds: number,
+  ): void;
+  stopBookTTSProgressTimer(): void;
+  resetBookTTSProgress(): void;
+  playbackTimeForProgress(audio: WechatMiniprogram.InnerAudioContext): number;
   stopPlayback(): void;
   onUnload(): void;
   openTranscripts(): void;
@@ -514,9 +550,13 @@ Page<BookData, {
   clearBookOutput(): void;
   audio: WechatMiniprogram.InnerAudioContext | null;
   playToken: number;
+  ttsProgressTimer: number | null;
+  ttsProgressStartedAtMs: number;
 }>({
   audio: null,
   playToken: 0,
+  ttsProgressTimer: null,
+  ttsProgressStartedAtMs: 0,
 
   data: {
     loading: false,
@@ -554,6 +594,14 @@ Page<BookData, {
     bookActionText: "生成全书",
     ttsBusyTarget: "",
     playingTarget: "",
+    bookTTSActiveTarget: "",
+    bookTTSActiveText: "",
+    bookTTSSpokenText: "",
+    bookTTSCurrentText: "",
+    bookTTSRemainingText: "",
+    bookTTSProgressPercent: 0,
+    bookTTSDurationSeconds: 0,
+    bookTTSAlignment: [],
   },
 
   async onShow() {
@@ -1134,7 +1182,7 @@ Page<BookData, {
         return;
       }
       this.setData({ ttsBusyTarget: "" });
-      await this.playAudioFiles(response.audio_file_ids, target, token);
+      await this.playAudioFiles(response, target, token, trimText(chapter.draftContent));
     } catch (error) {
       if (isLoginError(error)) {
         wx.reLaunch({ url: "/pages/login/index" });
@@ -1183,7 +1231,7 @@ Page<BookData, {
         return;
       }
       this.setData({ ttsBusyTarget: "" });
-      await this.playAudioFiles(response.audio_file_ids, target, token);
+      await this.playAudioFiles(response, target, token, trimText(this.data.bookContent));
     } catch (error) {
       if (isLoginError(error)) {
         wx.reLaunch({ url: "/pages/login/index" });
@@ -1200,70 +1248,199 @@ Page<BookData, {
   },
 
   async requestBookAudio(target) {
+    const settings = readBookTTSSettings();
+    const request = {
+      ...(settings.voice ? { voice: settings.voice } : {}),
+      ...(settings.speedRatio === 1 ? {} : { speed_ratio: settings.speedRatio }),
+    };
     if (target === "book") {
-      return createMemoirBookOutputTTS(this.data.projectId, {});
+      return createMemoirBookOutputTTS(this.data.projectId, request);
     }
     if (target.startsWith("chapter:")) {
-      return createMemoirBookChapterDraftTTS(this.data.projectId, target.slice("chapter:".length), {});
+      return createMemoirBookChapterDraftTTS(this.data.projectId, target.slice("chapter:".length), request);
     }
     throw new Error("朗读目标无效");
   },
 
-  async playAudioFiles(audioFileIds, target, token) {
+  async playAudioFiles(response, target, token, activeText) {
+    const audioFileIds = response.audio_file_ids || [];
     if (!audioFileIds.length) {
       throw new Error("没有可播放的音频");
     }
-    this.setData({ playingTarget: target, error: "" });
+    const durationSeconds = positiveFiniteSeconds(response.duration_seconds);
+    const alignment = Array.isArray(response.alignment) ? response.alignment : [];
+    this.setData({
+      playingTarget: target,
+      error: "",
+      bookTTSActiveTarget: target,
+      bookTTSActiveText: activeText,
+      bookTTSDurationSeconds: durationSeconds,
+      bookTTSAlignment: alignment,
+    });
+    this.updateBookTTSProgress(0, durationSeconds);
+    let elapsedBeforeSeconds = 0;
     try {
-      for (const audioFileId of audioFileIds) {
+      for (let index = 0; index < audioFileIds.length; index += 1) {
         if (token !== this.playToken) {
           return;
         }
-        await this.playAudioFile(audioFileId, token);
+        const fallbackDurationSeconds = positiveFiniteSeconds(response.audio_file_durations_seconds?.[index]);
+        const playedSeconds = await this.playAudioFile(
+          audioFileIds[index],
+          token,
+          elapsedBeforeSeconds,
+          fallbackDurationSeconds,
+        );
+        elapsedBeforeSeconds += fallbackDurationSeconds || playedSeconds;
+      }
+      if (token === this.playToken) {
+        this.updateBookTTSProgress(durationSeconds || elapsedBeforeSeconds, durationSeconds || elapsedBeforeSeconds);
       }
     } finally {
       if (token === this.playToken) {
         this.setData({ playingTarget: "" });
       }
+      this.stopBookTTSProgressTimer();
     }
   },
 
-  async playAudioFile(audioFileId, token) {
+  async playAudioFile(audioFileId, token, elapsedBeforeSeconds, fallbackDurationSeconds) {
     const tempFilePath = await downloadMemoirVoiceAudio(audioFileId);
     if (token !== this.playToken) {
-      return;
+      return 0;
     }
-    await new Promise<void>((resolve, reject) => {
+    return new Promise<number>((resolve, reject) => {
       const audio = wx.createInnerAudioContext();
       this.audio = audio;
+      let settled = false;
       const cleanup = () => {
+        this.stopBookTTSProgressTimer();
         audio.destroy();
         if (this.audio === audio) {
           this.audio = null;
         }
       };
+      const elapsedSeconds = () => {
+        const duration = fallbackDurationSeconds
+          || positiveFiniteSeconds(audio.duration)
+          || this.playbackTimeForProgress(audio);
+        return positiveFiniteSeconds(duration);
+      };
+      const resolveOnce = (seconds: number) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        cleanup();
+        resolve(seconds);
+      };
+      const rejectOnce = (error: Error) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        cleanup();
+        reject(error);
+      };
       configureAudiblePlayback(audio);
       audio.src = tempFilePath;
+      audio.onPlay(() => {
+        this.ttsProgressStartedAtMs = Date.now();
+        this.startBookTTSProgressTimer(token, audio, elapsedBeforeSeconds, fallbackDurationSeconds);
+      });
+      audio.onTimeUpdate(() => {
+        if (token === this.playToken && this.audio === audio) {
+          this.updateBookTTSProgress(
+            elapsedBeforeSeconds + this.playbackTimeForProgress(audio),
+            this.data.bookTTSDurationSeconds,
+          );
+        }
+      });
       audio.onEnded(() => {
-        cleanup();
-        resolve();
+        const seconds = elapsedSeconds();
+        this.updateBookTTSProgress(elapsedBeforeSeconds + seconds, this.data.bookTTSDurationSeconds);
+        resolveOnce(seconds);
       });
       audio.onStop(() => {
-        if (this.audio === audio) {
-          this.audio = null;
-        }
-        resolve();
+        resolveOnce(this.playbackTimeForProgress(audio));
       });
       audio.onError((error) => {
-        cleanup();
-        reject(new Error(error.errMsg || "音频播放失败"));
+        rejectOnce(new Error(error.errMsg || "音频播放失败"));
       });
       audio.play();
     });
   },
 
+  updateBookTTSProgress(currentTimeSeconds, durationSeconds) {
+    const activeText = this.data.bookTTSActiveText;
+    if (!activeText) {
+      return;
+    }
+    const progress = splitTextByAudioPlaybackProgress(
+      activeText,
+      currentTimeSeconds,
+      positiveFiniteSeconds(durationSeconds) || this.data.bookTTSDurationSeconds,
+      { alignment: this.data.bookTTSAlignment },
+    );
+    this.setData({
+      bookTTSSpokenText: progress.spokenText,
+      bookTTSCurrentText: progress.currentText,
+      bookTTSRemainingText: progress.remainingText,
+      bookTTSProgressPercent: progress.progressPercent,
+    });
+  },
+
+  startBookTTSProgressTimer(token, audio, elapsedBeforeSeconds, durationSeconds) {
+    this.stopBookTTSProgressTimer();
+    const tick = () => {
+      if (token !== this.playToken || this.audio !== audio) {
+        this.stopBookTTSProgressTimer();
+        return;
+      }
+      this.updateBookTTSProgress(
+        elapsedBeforeSeconds + this.playbackTimeForProgress(audio),
+        this.data.bookTTSDurationSeconds || elapsedBeforeSeconds + durationSeconds,
+      );
+    };
+    tick();
+    this.ttsProgressTimer = setInterval(tick, 250);
+  },
+
+  stopBookTTSProgressTimer() {
+    if (this.ttsProgressTimer !== null) {
+      clearInterval(this.ttsProgressTimer);
+      this.ttsProgressTimer = null;
+    }
+  },
+
+  resetBookTTSProgress() {
+    this.stopBookTTSProgressTimer();
+    this.setData({
+      bookTTSActiveTarget: "",
+      bookTTSActiveText: "",
+      bookTTSSpokenText: "",
+      bookTTSCurrentText: "",
+      bookTTSRemainingText: "",
+      bookTTSProgressPercent: 0,
+      bookTTSDurationSeconds: 0,
+      bookTTSAlignment: [],
+    });
+  },
+
+  playbackTimeForProgress(audio) {
+    const currentTime = positiveFiniteSeconds(audio.currentTime);
+    if (currentTime) {
+      return currentTime;
+    }
+    if (!this.ttsProgressStartedAtMs) {
+      return 0;
+    }
+    return Math.max(0, (Date.now() - this.ttsProgressStartedAtMs) / 1000);
+  },
+
   stopPlayback() {
     this.playToken += 1;
+    this.stopBookTTSProgressTimer();
     if (this.audio) {
       this.audio.stop();
       this.audio.destroy();
@@ -1272,6 +1449,7 @@ Page<BookData, {
     if (this.data.playingTarget || this.data.ttsBusyTarget) {
       this.setData({ playingTarget: "", ttsBusyTarget: "" });
     }
+    this.resetBookTTSProgress();
   },
 
   onUnload() {

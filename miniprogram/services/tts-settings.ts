@@ -15,8 +15,16 @@ export interface TTSSettings {
   speedRatio: number;
 }
 
+export type TTSSettingsScope = "chat" | "book";
+
+export interface ScopedTTSSettings {
+  chat: TTSSettings;
+  book: TTSSettings;
+}
+
 const STORAGE_KEY = "pawtale_memoir_tts_settings";
 const DEFAULT_TTS_SPEED_RATIO = 1;
+const DEFAULT_TTS_SETTINGS: TTSSettings = { voice: "", speedRatio: DEFAULT_TTS_SPEED_RATIO };
 
 export const TTS_VOICE_OPTIONS: TTSVoiceOption[] = [
   {
@@ -77,12 +85,37 @@ export function normalizeTTSSpeedRatio(value: unknown): number {
 
 export function normalizeTTSSettings(value: unknown): TTSSettings {
   if (!value || typeof value !== "object") {
-    return { voice: "", speedRatio: DEFAULT_TTS_SPEED_RATIO };
+    return { ...DEFAULT_TTS_SETTINGS };
   }
   const candidate = value as Partial<TTSSettings>;
   return {
     voice: normalizeTTSVoice(candidate.voice),
     speedRatio: normalizeTTSSpeedRatio(candidate.speedRatio),
+  };
+}
+
+function hasLegacySettingsShape(value: unknown): boolean {
+  return Boolean(
+    value
+    && typeof value === "object"
+    && ("voice" in value || "speedRatio" in value)
+    && !("chat" in value)
+    && !("book" in value),
+  );
+}
+
+export function normalizeScopedTTSSettings(value: unknown): ScopedTTSSettings {
+  if (hasLegacySettingsShape(value)) {
+    const migrated = normalizeTTSSettings(value);
+    return {
+      chat: migrated,
+      book: migrated,
+    };
+  }
+  const candidate = (value && typeof value === "object" ? value : {}) as Partial<ScopedTTSSettings>;
+  return {
+    chat: normalizeTTSSettings(candidate.chat),
+    book: normalizeTTSSettings(candidate.book),
   };
 }
 
@@ -95,16 +128,48 @@ export function ttsSpeedLabel(value: number): string {
 }
 
 export function readTTSSettings(): TTSSettings {
+  return readScopedTTSSettings("chat");
+}
+
+export function readScopedTTSSettings(scope: TTSSettingsScope): TTSSettings {
   try {
-    return normalizeTTSSettings(wx.getStorageSync<TTSSettings>(STORAGE_KEY));
+    return normalizeScopedTTSSettings(wx.getStorageSync<ScopedTTSSettings | TTSSettings>(STORAGE_KEY))[scope];
   } catch (error) {
     console.warn("read TTS settings failed", error);
-    return { voice: "", speedRatio: DEFAULT_TTS_SPEED_RATIO };
+    return { ...DEFAULT_TTS_SETTINGS };
   }
 }
 
 export function saveTTSSettings(settings: TTSSettings): TTSSettings {
+  return saveScopedTTSSettings("chat", settings);
+}
+
+export function readTTSSettingsProfiles(): ScopedTTSSettings {
+  try {
+    return normalizeScopedTTSSettings(wx.getStorageSync<ScopedTTSSettings | TTSSettings>(STORAGE_KEY));
+  } catch (error) {
+    console.warn("read TTS settings failed", error);
+    return {
+      chat: { ...DEFAULT_TTS_SETTINGS },
+      book: { ...DEFAULT_TTS_SETTINGS },
+    };
+  }
+}
+
+export function saveScopedTTSSettings(scope: TTSSettingsScope, settings: TTSSettings): TTSSettings {
+  const profiles = readTTSSettingsProfiles();
   const normalized = normalizeTTSSettings(settings);
-  wx.setStorageSync(STORAGE_KEY, normalized);
+  wx.setStorageSync(STORAGE_KEY, {
+    ...profiles,
+    [scope]: normalized,
+  });
   return normalized;
+}
+
+export function readChatTTSSettings(): TTSSettings {
+  return readScopedTTSSettings("chat");
+}
+
+export function readBookTTSSettings(): TTSSettings {
+  return readScopedTTSSettings("book");
 }
