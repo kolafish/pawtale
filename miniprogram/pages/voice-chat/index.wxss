@@ -453,3 +453,47 @@
   background: #fff1f2;
   color: #be123c;
 }
+
+.voice-auth-panel {
+  margin-top: 24rpx;
+  padding: 28rpx;
+  border: 2rpx solid #e4c6b3;
+  border-radius: 22rpx;
+  background: #fff6f1;
+}
+
+.voice-auth-title {
+  display: block;
+  color: #7a3b31;
+  font-size: 30rpx;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.voice-auth-desc {
+  display: block;
+  margin-top: 12rpx;
+  color: #685b55;
+  font-size: 26rpx;
+  line-height: 1.5;
+}
+
+.voice-auth-row {
+  margin-top: 20rpx;
+  display: flex;
+  align-items: flex-start;
+  gap: 16rpx;
+}
+
+.voice-auth-copy {
+  flex: 1;
+  min-width: 0;
+  color: #24100b;
+  font-size: 28rpx;
+  font-weight: 800;
+  line-height: 1.45;
+}
+
+.voice-auth-link {
+  color: #9f4a3c;
+}

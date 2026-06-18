@@ -18,6 +18,24 @@
     </block>
   </view>
 
+  <view wx:if="{{!voiceAuthorizationAgreed}}" class="voice-auth-panel">
+    <text class="voice-auth-title">开始录音前需要声纹授权</text>
+    <text class="voice-auth-desc">同意后才会打开麦克风，语音会用于实时转写、AI 追问、原始音频留存和回忆录成书。</text>
+    <checkbox-group bindchange="changeVoiceAuthorization">
+      <label class="voice-auth-row">
+        <checkbox
+          value="voice_authorization"
+          checked="{{voiceAuthorizationAgreed}}"
+          color="#9f4a3c"
+        />
+        <view class="voice-auth-copy">
+          <text>我已阅读并同意</text>
+          <text class="voice-auth-link" catchtap="openVoiceAuthorization">《声纹授权协议》</text>
+        </view>
+      </label>
+    </checkbox-group>
+  </view>
+
   <view wx:if="{{assistantPromptText || followUpLoading || followUpError || canRequestFollowUp}}" class="assistant-panel {{followUpError ? 'error-state' : ''}}">
     <view class="assistant-head">
       <text class="assistant-label">{{assistantPromptLabel}}</text>
@@ -104,11 +122,11 @@
     <button
       class="mic-button {{recording ? 'recording' : ''}}"
       loading="{{connecting}}"
-      disabled="{{connecting || followUpLoading}}"
+      disabled="{{connecting || followUpLoading || !voiceAuthorizationAgreed}}"
       bindtap="toggleRecording"
     >
       <image class="mic-icon" src="/assets/memoir-microphone.png" mode="aspectFit" />
-      <text>{{connecting ? "连接中" : (followUpLoading ? "AI 思考中" : primaryActionText)}}</text>
+      <text>{{!voiceAuthorizationAgreed ? "同意后开始说话" : (connecting ? "连接中" : (followUpLoading ? "AI 思考中" : primaryActionText))}}</text>
     </button>
   </view>
 </view>

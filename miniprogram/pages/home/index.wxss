@@ -150,6 +150,41 @@
   line-height: 1.5;
 }
 
+.voice-auth-panel {
+  margin-top: 30rpx;
+  padding: 22rpx;
+  border: 2rpx solid #efd6c4;
+  border-radius: 18rpx;
+  background: #fffaf2;
+}
+
+.voice-auth-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 16rpx;
+}
+
+.voice-auth-copy {
+  flex: 1;
+  min-width: 0;
+  color: #24100b;
+  font-size: 28rpx;
+  font-weight: 800;
+  line-height: 1.45;
+}
+
+.voice-auth-link {
+  color: #9f4a3c;
+}
+
+.voice-auth-hint {
+  display: block;
+  margin-top: 14rpx;
+  color: #685b55;
+  font-size: 25rpx;
+  line-height: 1.45;
+}
+
 .primary-button {
   width: 100%;
   height: 112rpx;
