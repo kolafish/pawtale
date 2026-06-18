@@ -19,6 +19,12 @@ export interface TTSAudioPlaybackProgressOptions {
   estimateMissingDuration?: boolean;
 }
 
+const TTS_CHARACTER_SECONDS = 0.18;
+const TTS_PUNCTUATION_SECONDS = 0.08;
+const TTS_MIN_ESTIMATED_DURATION_SECONDS = 0.8;
+const TTS_PUNCTUATION_PATTERN = /^[，。！？、,.!?;；:：]$/;
+const TTS_COARSE_FALLBACK_SLOW_RATIO = 1.2;
+
 export function splitTextByPlaybackProgress(text: string, progressRatio: number): TTSProgressText {
   const characters = Array.from(text || "");
   const clampedRatio = Math.max(0, Math.min(1, Number.isFinite(progressRatio) ? progressRatio : 0));
@@ -106,11 +112,17 @@ function positiveFiniteSeconds(value: number | null | undefined): number {
 }
 
 export function estimateTTSPlaybackDurationSeconds(text: string): number {
-  const spokenCharacters = Array.from((text || "").replace(/\s/g, ""));
+  const spokenCharacters = Array.from(text || "").filter((character) => !/\s/.test(character));
   if (!spokenCharacters.length) {
     return 0;
   }
-  return Math.max(1.2, spokenCharacters.length * 0.28);
+  const estimatedSeconds = spokenCharacters.reduce(
+    (total, character) => total + (
+      TTS_PUNCTUATION_PATTERN.test(character) ? TTS_PUNCTUATION_SECONDS : TTS_CHARACTER_SECONDS
+    ),
+    0,
+  );
+  return Math.max(TTS_MIN_ESTIMATED_DURATION_SECONDS, Math.round(estimatedSeconds * 100) / 100);
 }
 
 export function splitTextByAudioPlaybackProgress(
@@ -125,9 +137,14 @@ export function splitTextByAudioPlaybackProgress(
     return splitTextByTimedAlignment(text, currentSeconds * 1000, alignment);
   }
 
-  const resolvedDurationSeconds = positiveFiniteSeconds(durationSeconds)
-    || positiveFiniteSeconds(options.fallbackDurationSeconds)
-    || (options.estimateMissingDuration ? estimateTTSPlaybackDurationSeconds(text) : 0);
+  const estimatedDurationSeconds = options.estimateMissingDuration ? estimateTTSPlaybackDurationSeconds(text) : 0;
+  const fallbackDurationSeconds = positiveFiniteSeconds(options.fallbackDurationSeconds);
+  const resolvedFallbackSeconds = fallbackDurationSeconds && estimatedDurationSeconds
+    ? (fallbackDurationSeconds > estimatedDurationSeconds * TTS_COARSE_FALLBACK_SLOW_RATIO
+        ? estimatedDurationSeconds
+        : fallbackDurationSeconds)
+    : fallbackDurationSeconds || estimatedDurationSeconds;
+  const resolvedDurationSeconds = positiveFiniteSeconds(durationSeconds) || resolvedFallbackSeconds;
   const progressRatio = resolvedDurationSeconds > 0 ? currentSeconds / resolvedDurationSeconds : 0;
   return splitTextByPlaybackProgress(text, progressRatio);
 }

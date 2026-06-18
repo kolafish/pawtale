@@ -94,6 +94,7 @@ export class MemoirStreamingAsrClient {
   private captureStartedAtMs = 0;
   private audioLevel = 0;
   private silentElapsedMs = 0;
+  private hasVoiceActivity = false;
   private autoStopped = false;
   private gatewayState: VoiceGatewayState | undefined;
   private recorderStopTimer: ReturnType<typeof setTimeout> | null = null;
@@ -110,6 +111,7 @@ export class MemoirStreamingAsrClient {
     this.options.autoStopSilenceMs = Math.max(0, autoStopSilenceMs);
     if (!this.options.autoStopSilenceMs) {
       this.silentElapsedMs = 0;
+      this.hasVoiceActivity = false;
       this.autoStopped = false;
     }
   }
@@ -182,6 +184,7 @@ export class MemoirStreamingAsrClient {
     this.audioBytesSent = 0;
     this.audioLevel = 0;
     this.silentElapsedMs = 0;
+    this.hasVoiceActivity = false;
     this.autoStopped = false;
     this.captureStartedAtMs = Date.now();
     this.emitCaptureStats("opening");
@@ -482,12 +485,13 @@ export class MemoirStreamingAsrClient {
       this.silentElapsedMs += pcmFrameDurationMs(frameBuffer);
       return;
     }
+    this.hasVoiceActivity = true;
     this.silentElapsedMs = 0;
   }
 
   private shouldAutoStopForSilence(): boolean {
     const silenceMs = this.options.autoStopSilenceMs || 0;
-    if (silenceMs <= 0 || this.audioEndSent || this.autoStopped) {
+    if (silenceMs <= 0 || this.audioEndSent || this.autoStopped || !this.hasVoiceActivity) {
       return false;
     }
     const elapsedMs = this.captureStartedAtMs ? Date.now() - this.captureStartedAtMs : 0;

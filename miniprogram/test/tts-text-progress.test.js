@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 
 const {
+  estimateTTSPlaybackDurationSeconds,
   splitTextByAudioPlaybackProgress,
   splitTextByPlaybackProgress,
   splitTextByTimedAlignment,
@@ -89,6 +90,11 @@ test("splits TTS text by fallback duration when audio duration is unavailable", 
   });
 });
 
+test("estimates assistant TTS duration with a conversational question pace", () => {
+  assert.equal(estimateTTSPlaybackDurationSeconds("你好吗？"), 0.8);
+  assert.equal(estimateTTSPlaybackDurationSeconds("你还记得那天发生什么吗？"), 2.06);
+});
+
 test("estimates missing TTS duration so playback progress can still move", () => {
   const progress = splitTextByAudioPlaybackProgress("你好吗朋友", 0.8, 0, {
     estimateMissingDuration: true,
@@ -96,6 +102,26 @@ test("estimates missing TTS duration so playback progress can still move", () =>
 
   assert.notEqual(progress.currentText, "你");
   assert.ok(progress.progressPercent > 0);
+});
+
+test("uses estimated duration instead of a coarse slower fallback duration", () => {
+  const progress = splitTextByAudioPlaybackProgress("你还记得那天发生什么吗？", 1, 0, {
+    fallbackDurationSeconds: 5,
+    estimateMissingDuration: true,
+  });
+
+  assert.equal(progress.progressPercent, 49);
+  assert.equal(progress.currentText, "天");
+});
+
+test("keeps close fallback duration instead of forcing the estimate", () => {
+  const progress = splitTextByAudioPlaybackProgress("你还记得那天发生什么吗？", 1, 0, {
+    fallbackDurationSeconds: 2.2,
+    estimateMissingDuration: true,
+  });
+
+  assert.equal(progress.progressPercent, 45);
+  assert.equal(progress.currentText, "天");
 });
 
 test("uses alignment in audio playback progress when available", () => {
