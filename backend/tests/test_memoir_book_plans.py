@@ -124,6 +124,17 @@ async def _create_voice_transcript(client, test_db, text: str):
     }
 
 
+def _source_ref(created: dict[str, str], quote: str = "") -> dict[str, str]:
+    return {
+        "voice_session_id": created["session"]["id"],
+        "message_id": created["message_id"],
+        "utterance_id": created["utterance_id"],
+        "transcript_version_id": created["transcript_version_id"],
+        "audio_file_id": created["audio_file_id"],
+        "quote": quote,
+    }
+
+
 async def test_mobile_memoir_book_plan_routes_require_login(anonymous_client):
     response = await anonymous_client.post(
         "/api/mobile/memoir/projects/project-1/book-plan/generate",
@@ -532,6 +543,172 @@ async def test_mobile_memoir_book_plan_reconfirm_removes_replaced_chapter_drafts
             MemoirBookChapterDraftVersion.chapter_id == replaced_chapter_id
         )
     ) is None
+
+
+async def test_mobile_memoir_book_plan_patch_deletes_chapter_without_replacing_remaining_draft(
+    client,
+    test_db,
+    monkeypatch,
+):
+    first = await _create_voice_transcript(client, test_db, "我小时候常在外婆家的院子里晒太阳。")
+    second = await _create_voice_transcript(client, test_db, "后来我第一次离家去县城读书，心里很紧张。")
+    project_id = first["session"]["project_id"]
+    monkeypatch.setattr(
+        "app.services.memoir.book_plans.get_ai_service",
+        lambda model=None: FakeBookPlanAI(),
+    )
+    generated_response = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-plan/generate",
+        json={},
+    )
+    generated = generated_response.json()
+    confirm_response = await client.put(
+        f"/api/mobile/memoir/projects/{project_id}/book-plan",
+        json={
+            "title": "用户确认后的章节",
+            "chapters": [
+                {
+                    "title": "童年和外婆家",
+                    "summary": "只保留童年院子的内容。",
+                    "source_refs": [generated["chapters"][0]["source_refs"][0]],
+                },
+                {
+                    "title": "离家求学",
+                    "summary": "只保留离家读书的内容。",
+                    "source_refs": [generated["chapters"][1]["source_refs"][0]],
+                },
+            ],
+        },
+    )
+    assert confirm_response.status_code == 200
+    first_chapter, second_chapter = confirm_response.json()["chapters"]
+    first_draft = MemoirBookChapterDraft(
+        project_id=project_id,
+        chapter_id=first_chapter["id"],
+        status=MemoirBookChapterDraftStatus.CONFIRMED.value,
+    )
+    second_draft = MemoirBookChapterDraft(
+        project_id=project_id,
+        chapter_id=second_chapter["id"],
+        status=MemoirBookChapterDraftStatus.CONFIRMED.value,
+    )
+    test_db.add_all([first_draft, second_draft])
+    await test_db.flush()
+    test_db.add_all([
+        MemoirBookChapterDraftVersion(
+            draft_id=first_draft.id,
+            project_id=project_id,
+            chapter_id=first_chapter["id"],
+            version=1,
+            content="童年正文",
+            created_by=MemoirCreatedBy.USER.value,
+            prompt_snapshot="",
+        ),
+        MemoirBookChapterDraftVersion(
+            draft_id=second_draft.id,
+            project_id=project_id,
+            chapter_id=second_chapter["id"],
+            version=1,
+            content="离家正文",
+            created_by=MemoirCreatedBy.USER.value,
+            prompt_snapshot="",
+        ),
+    ])
+    await test_db.commit()
+
+    response = await client.patch(
+        f"/api/mobile/memoir/projects/{project_id}/book-plan",
+        json={
+            "title": "调整后的章节",
+            "chapters": [
+                {
+                    "id": first_chapter["id"],
+                    "title": first_chapter["title"],
+                    "summary": first_chapter["summary"],
+                    "source_refs": first_chapter["source_refs"],
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["title"] == "调整后的章节"
+    assert [chapter["id"] for chapter in data["chapters"]] == [first_chapter["id"]]
+    assert await test_db.scalar(
+        select(MemoirBookChapterDraft).where(MemoirBookChapterDraft.id == first_draft.id)
+    ) is not None
+    assert await test_db.scalar(
+        select(MemoirBookChapterDraft).where(MemoirBookChapterDraft.id == second_draft.id)
+    ) is None
+
+    coverage = await client.get(f"/api/mobile/memoir/projects/{project_id}/book-source-coverage")
+    assert coverage.status_code == 200
+    assert [item["utterance_id"] for item in coverage.json()["uncovered_sources"]] == [second["utterance_id"]]
+
+
+async def test_mobile_memoir_book_plan_patch_adds_chapter_from_uncovered_source(
+    client,
+    test_db,
+    monkeypatch,
+):
+    first = await _create_voice_transcript(client, test_db, "我小时候常在外婆家的院子里晒太阳。")
+    project_id = first["session"]["project_id"]
+    monkeypatch.setattr(
+        "app.services.memoir.book_plans.get_ai_service",
+        lambda model=None: FakeBookPlanAI(),
+    )
+    generated_response = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-plan/generate",
+        json={},
+    )
+    source_ref = generated_response.json()["chapters"][0]["source_refs"][0]
+    confirm_response = await client.put(
+        f"/api/mobile/memoir/projects/{project_id}/book-plan",
+        json={
+            "title": "用户确认后的章节",
+            "chapters": [
+                {
+                    "title": "童年和外婆家",
+                    "summary": "只保留童年院子的内容。",
+                    "source_refs": [source_ref],
+                }
+            ],
+        },
+    )
+    assert confirm_response.status_code == 200
+    existing_chapter = confirm_response.json()["chapters"][0]
+    later = await _create_voice_transcript(client, test_db, "后来我又讲了一个认识很多年的朋友。")
+
+    response = await client.patch(
+        f"/api/mobile/memoir/projects/{project_id}/book-plan",
+        json={
+            "chapters": [
+                {
+                    "id": existing_chapter["id"],
+                    "title": existing_chapter["title"],
+                    "summary": existing_chapter["summary"],
+                    "source_refs": existing_chapter["source_refs"],
+                },
+                {
+                    "title": "朋友往事",
+                    "summary": "整理新收录的朋友相关转写。",
+                    "source_refs": [_source_ref(later, "认识很多年的朋友")],
+                },
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert [chapter["title"] for chapter in data["chapters"]] == ["童年和外婆家", "朋友往事"]
+    assert data["chapters"][0]["id"] == existing_chapter["id"]
+    assert data["chapters"][1]["id"] != existing_chapter["id"]
+    assert data["chapters"][1]["source_refs"][0]["utterance_id"] == later["utterance_id"]
+
+    coverage = await client.get(f"/api/mobile/memoir/projects/{project_id}/book-source-coverage")
+    assert coverage.status_code == 200
+    assert coverage.json()["uncovered_source_count"] == 0
 
 
 async def test_mobile_memoir_book_plan_confirm_rejects_foreign_source(client, test_db):
