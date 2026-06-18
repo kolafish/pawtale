@@ -17,24 +17,19 @@ export const TTS_VOICE_OPTIONS: TTSVoiceOption[] = [
     description: "使用后端当前默认配置",
   },
   {
-    value: "cixingnansheng",
-    label: "磁性男声",
-    description: "稳重清晰，适合访谈引导",
+    value: "zh_female_vv_uranus_bigtts",
+    label: "通用女声",
+    description: "火山 V3 大模型音色，支持文字高亮时间轴",
   },
   {
-    value: "wenrounansheng",
-    label: "温柔男声",
-    description: "语气柔和，适合慢节奏追问",
+    value: "zh_female_xiaohe_uranus_bigtts",
+    label: "小荷女声",
+    description: "清晰自然，适合陪伴式交流",
   },
   {
-    value: "qinqienvsheng",
-    label: "亲切女声",
-    description: "自然亲和，适合陪伴式交流",
-  },
-  {
-    value: "linjiajiejie",
-    label: "邻家姐姐",
-    description: "轻松温暖，适合日常回忆",
+    value: "zh_male_m191_uranus_bigtts",
+    label: "通用男声",
+    description: "火山 V3 大模型音色，适合访谈引导",
   },
 ];
 
