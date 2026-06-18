@@ -522,6 +522,59 @@
   margin-top: 22rpx;
 }
 
+.tts-highlight-card {
+  margin-top: 20rpx;
+  padding: 22rpx;
+  border: 2rpx solid #f0c987;
+  border-radius: 18rpx;
+  background: #fffaf0;
+  box-sizing: border-box;
+}
+
+.tts-progress-bar {
+  height: 8rpx;
+  border-radius: 999rpx;
+  background: #eadcc9;
+  overflow: hidden;
+}
+
+.tts-progress-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: #2f7d63;
+  transition: width 180ms ease;
+}
+
+.tts-highlight-text {
+  display: block;
+  margin-top: 18rpx;
+  color: #24100b;
+  font-size: 28rpx;
+  line-height: 1.68;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.tts-highlight-text.book {
+  margin-top: 20rpx;
+}
+
+.tts-spoken {
+  color: #8f8078;
+}
+
+.tts-current {
+  padding: 2rpx 4rpx;
+  border-radius: 6rpx;
+  background: #ffe08a;
+  color: #24100b;
+  font-weight: 800;
+}
+
+.tts-remaining {
+  color: #24100b;
+}
+
 .book-output-meta {
   display: flex;
   align-items: center;

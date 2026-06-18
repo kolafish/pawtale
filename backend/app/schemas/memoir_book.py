@@ -8,6 +8,7 @@ from app.domain.memoir.types import (
     MemoirCreatedBy,
     MemoirOutputStatus,
 )
+from app.schemas.memoir import MemoirTTSAlignmentSegmentResponse
 
 
 class MemoirBookChapterSourceRef(BaseModel):
@@ -261,6 +262,7 @@ class MemoirBookChapterDraftResponse(BaseModel):
 
 class MemoirBookAudioRequest(BaseModel):
     voice: str | None = None
+    speed_ratio: float | None = None
     force_regenerate: bool = False
 
     @field_validator("voice")
@@ -271,14 +273,25 @@ class MemoirBookAudioRequest(BaseModel):
         voice = value.strip()
         return voice or None
 
+    @field_validator("speed_ratio")
+    @classmethod
+    def _valid_speed_ratio(cls, value: float | None) -> float | None:
+        if value is None:
+            return None
+        return max(0.5, min(2.0, round(float(value), 2)))
+
 
 class MemoirBookAudioResponse(BaseModel):
     audio_file_ids: list[str]
+    audio_file_durations_seconds: list[float | None] = Field(default_factory=list)
     provider: str
     model: str
     mime_type: str
     chunk_count: int
     source_text_hash: str
+    duration_seconds: float | None = None
+    alignment_provider: str | None = None
+    alignment: list[MemoirTTSAlignmentSegmentResponse] = Field(default_factory=list)
 
 
 class MemoirBookOutputGenerateRequest(BaseModel):

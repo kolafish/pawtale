@@ -69,8 +69,12 @@ function loadMePage({ authExports = {}, voiceApiExports = {}, ttsExports = {} } 
           description: "使用默认语速",
         },
       ],
-      readTTSSettings: () => ({ voice: "", speedRatio: 1 }),
-      saveTTSSettings: (settings) => settings,
+      readTTSSettingsProfiles: () => ({
+        chat: { voice: "", speedRatio: 1 },
+        book: { voice: "", speedRatio: 1 },
+      }),
+      readScopedTTSSettings: () => ({ voice: "", speedRatio: 1 }),
+      saveScopedTTSSettings: (_scope, settings) => settings,
       ttsSpeedLabel: () => "正常 1.0x",
       ttsVoiceLabel: () => "默认音色",
       ...ttsExports,
@@ -193,18 +197,28 @@ test("me refreshes profile after Pawtale account login", async () => {
   delete global.wx;
 });
 
-test("me saves TTS voice and speed without dropping the other setting", () => {
-  let settings = {
-    voice: "zh_female_vv_uranus_bigtts",
-    speedRatio: 0.7,
+test("me saves chat and book TTS settings independently", () => {
+  let profiles = {
+    chat: {
+      voice: "zh_female_vv_uranus_bigtts",
+      speedRatio: 0.7,
+    },
+    book: {
+      voice: "",
+      speedRatio: 1,
+    },
   };
   const saved = [];
   const { page } = loadMePage({
     ttsExports: {
-      readTTSSettings: () => settings,
-      saveTTSSettings: (nextSettings) => {
-        settings = nextSettings;
-        saved.push(nextSettings);
+      readTTSSettingsProfiles: () => profiles,
+      readScopedTTSSettings: (scope) => profiles[scope],
+      saveScopedTTSSettings: (scope, nextSettings) => {
+        profiles = {
+          ...profiles,
+          [scope]: nextSettings,
+        };
+        saved.push({ scope, settings: nextSettings });
         return nextSettings;
       },
       ttsVoiceLabel: (voice) => (voice ? "通用男声" : "默认音色"),
@@ -217,11 +231,17 @@ test("me saves TTS voice and speed without dropping the other setting", () => {
       toastCalls.push(input);
     },
   };
-  const context = pageContext(page, settings);
+  const context = pageContext(page, {
+    chatTTSVoice: profiles.chat.voice,
+    chatTTSSpeedRatio: profiles.chat.speedRatio,
+    bookTTSVoice: profiles.book.voice,
+    bookTTSSpeedRatio: profiles.book.speedRatio,
+  });
 
   page.selectTTSVoice.call(context, {
     currentTarget: {
       dataset: {
+        scope: "book",
         voice: "zh_male_m191_uranus_bigtts",
       },
     },
@@ -229,6 +249,7 @@ test("me saves TTS voice and speed without dropping the other setting", () => {
   page.selectTTSSpeed.call(context, {
     currentTarget: {
       dataset: {
+        scope: "chat",
         speed: "1.5",
       },
     },
@@ -236,17 +257,25 @@ test("me saves TTS voice and speed without dropping the other setting", () => {
 
   assert.deepEqual(saved, [
     {
-      voice: "zh_male_m191_uranus_bigtts",
-      speedRatio: 0.7,
+      scope: "book",
+      settings: {
+        voice: "zh_male_m191_uranus_bigtts",
+        speedRatio: 1,
+      },
     },
     {
-      voice: "zh_male_m191_uranus_bigtts",
-      speedRatio: 1.5,
+      scope: "chat",
+      settings: {
+        voice: "zh_female_vv_uranus_bigtts",
+        speedRatio: 1.5,
+      },
     },
   ]);
-  assert.equal(context.data.ttsVoice, "zh_male_m191_uranus_bigtts");
-  assert.equal(context.data.ttsSpeedRatio, 1.5);
-  assert.equal(context.data.ttsSpeedLabel, "1.5x");
+  assert.equal(context.data.bookTTSVoice, "zh_male_m191_uranus_bigtts");
+  assert.equal(context.data.bookTTSSpeedRatio, 1);
+  assert.equal(context.data.chatTTSVoice, "zh_female_vv_uranus_bigtts");
+  assert.equal(context.data.chatTTSSpeedRatio, 1.5);
+  assert.equal(context.data.chatTTSSpeedLabel, "1.5x");
   assert.equal(toastCalls.length, 2);
   delete global.wx;
 });

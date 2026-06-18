@@ -144,20 +144,41 @@ function sampleSourceCoverage(count = 1) {
 function sampleAudioResponse() {
   return {
     audio_file_ids: ["audio-book-1", "audio-book-2"],
+    audio_file_durations_seconds: [1.2, 1.4],
     provider: "fake",
     model: "fake-tts",
     mime_type: "audio/mpeg",
     chunk_count: 2,
     source_text_hash: "hash",
+    duration_seconds: 2.6,
+    alignment_provider: "fake",
+    alignment: [
+      {
+        text: "外婆",
+        start_ms: 0,
+        end_ms: 600,
+        text_start: 0,
+        text_end: 2,
+      },
+      {
+        text: "回忆录",
+        start_ms: 600,
+        end_ms: 1200,
+        text_start: 2,
+        text_end: 5,
+      },
+    ],
   };
 }
 
-function loadBookPage({ authExports = {}, voiceApiExports = {} } = {}) {
+function loadBookPage({ authExports = {}, voiceApiExports = {}, ttsExports = {} } = {}) {
   const authPath = require.resolve("../services/auth.ts");
   const voiceApiPath = require.resolve("../services/memoir-voice-api.ts");
+  const ttsPath = require.resolve("../services/tts-settings.ts");
   const bookPath = require.resolve("../pages/book/index.ts");
   delete require.cache[authPath];
   delete require.cache[voiceApiPath];
+  delete require.cache[ttsPath];
   delete require.cache[bookPath];
   require.cache[authPath] = {
     id: authPath,
@@ -221,6 +242,15 @@ function loadBookPage({ authExports = {}, voiceApiExports = {} } = {}) {
         throw new Error("updateMemoirBookChapterDraft was not mocked");
       },
       ...voiceApiExports,
+    },
+  };
+  require.cache[ttsPath] = {
+    id: ttsPath,
+    filename: ttsPath,
+    loaded: true,
+    exports: {
+      readBookTTSSettings: () => ({ voice: "", speedRatio: 1 }),
+      ...ttsExports,
     },
   };
 
@@ -776,6 +806,83 @@ test("book page shows stale book output state and blocks old audio", async () =>
 
   assert.equal(context.data.error, "章节内容已更新，请先更新全书再朗读");
   assert.equal(calls.length, 0);
+});
+
+test("book page sends book-specific TTS voice and speed", async () => {
+  const calls = [];
+  const { page } = loadBookPage({
+    voiceApiExports: {
+      createMemoirBookChapterDraftTTS: async (projectId, chapterId, data) => {
+        calls.push({ kind: "chapter", projectId, chapterId, data });
+        return sampleAudioResponse();
+      },
+      createMemoirBookOutputTTS: async (projectId, data) => {
+        calls.push({ kind: "book", projectId, data });
+        return sampleAudioResponse();
+      },
+    },
+    ttsExports: {
+      readBookTTSSettings: () => ({
+        voice: "zh_male_m191_uranus_bigtts",
+        speedRatio: 1.5,
+      }),
+    },
+  });
+  const context = pageContext(page, { projectId: "project/1" });
+
+  await page.requestBookAudio.call(context, "book");
+  await page.requestBookAudio.call(context, "chapter:chapter-1");
+
+  assert.deepEqual(calls, [
+    {
+      kind: "book",
+      projectId: "project/1",
+      data: {
+        voice: "zh_male_m191_uranus_bigtts",
+        speed_ratio: 1.5,
+      },
+    },
+    {
+      kind: "chapter",
+      projectId: "project/1",
+      chapterId: "chapter-1",
+      data: {
+        voice: "zh_male_m191_uranus_bigtts",
+        speed_ratio: 1.5,
+      },
+    },
+  ]);
+});
+
+test("book page splits active TTS text for highlighting", () => {
+  const { page } = loadBookPage();
+  const context = pageContext(page, {
+    bookTTSActiveText: "外婆回忆录",
+    bookTTSDurationSeconds: 1.2,
+    bookTTSAlignment: [
+      {
+        text: "外婆",
+        start_ms: 0,
+        end_ms: 600,
+        text_start: 0,
+        text_end: 2,
+      },
+      {
+        text: "回忆录",
+        start_ms: 600,
+        end_ms: 1200,
+        text_start: 2,
+        text_end: 5,
+      },
+    ],
+  });
+
+  page.updateBookTTSProgress.call(context, 0.8, 1.2);
+
+  assert.equal(context.data.bookTTSSpokenText, "外婆");
+  assert.equal(context.data.bookTTSCurrentText, "回忆录");
+  assert.equal(context.data.bookTTSRemainingText, "");
+  assert.equal(context.data.bookTTSProgressPercent, 67);
 });
 
 test("book page regenerates an existing chapter draft with force flag", async () => {

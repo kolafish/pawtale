@@ -20,7 +20,7 @@ import {
   getMemoirVoiceSession,
 } from "../../services/memoir-voice-api";
 import { splitTextByAudioPlaybackProgress } from "../../services/tts-text-progress";
-import { readTTSSettings } from "../../services/tts-settings";
+import { readChatTTSSettings } from "../../services/tts-settings";
 import { canAutoStartListeningAfterTTS } from "../../services/voice-chat-auto-listen";
 import {
   assistantPanelCopy,
@@ -477,7 +477,7 @@ Page<VoiceChatData, {
       ttsAlignment: ttsAlignmentFromMetadata(existingMetadata),
     });
     try {
-      const ttsSettings = readTTSSettings();
+      const ttsSettings = readChatTTSSettings();
       const response = await createMemoirAssistantTTS(this.data.voiceSessionId, messageId, {
         voice: ttsSettings.voice || undefined,
         speed_ratio: ttsSettings.speedRatio === 1 ? undefined : ttsSettings.speedRatio,
