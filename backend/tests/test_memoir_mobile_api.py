@@ -103,7 +103,6 @@ async def test_mobile_memoir_projects_can_be_created_updated_and_activated(clien
         json={"title": "父亲的回忆"},
     )
     assert second_response.status_code == 201
-    second = second_response.json()
     activated_response = await client.post(
         f"/api/mobile/memoir/projects/{created['id']}/activate",
     )
