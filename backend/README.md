@@ -46,6 +46,22 @@ venv/bin/python -m pytest tests/test_project_references.py -q
 venv/bin/python -m pytest tests/test_project_ai.py -q
 ```
 
+## 回忆录语音网关压测
+
+只验证 10 个不同登录用户的 WebSocket 容量，不触发真实 ASR/LLM/TTS：
+
+```bash
+cd backend
+venv/bin/python scripts/loadtest_voice_gateway.py \
+  --base-url https://pawtale-api.spaceflows.cn \
+  --users 10 \
+  --hold-seconds 120 \
+  --mode capacity \
+  --expect-eleventh-rejected
+```
+
+脚本会自动注册测试用户、创建 voice session、携带各自的 `pawtale_session` cookie 连接 gateway，并验证第 11 条连接返回 `voice_gateway_capacity_reached`。如果指定 `--mode asr`，脚本会发送生成的静音 PCM 帧并触发真实 ASR provider，请先确认 provider 额度和费用。
+
 ## 核心结构
 
 ```text
