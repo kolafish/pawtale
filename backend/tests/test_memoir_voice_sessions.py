@@ -36,8 +36,11 @@ class FakeTTS:
         self.audio_results = list(audio_results or [b"fake-mp3-audio"])
         self.alignment_results = list(alignment_results or [])
 
-    async def synthesize(self, text, *, voice=None):
-        self.calls.append({"text": text, "voice": voice})
+    async def synthesize(self, text, *, voice=None, speed_ratio=None):
+        call = {"text": text, "voice": voice}
+        if speed_ratio is not None:
+            call["speed_ratio"] = speed_ratio
+        self.calls.append(call)
         audio = self.audio_results.pop(0) if self.audio_results else b"fake-mp3-audio"
         alignment = self.alignment_results.pop(0) if self.alignment_results else []
         duration_seconds = max((segment.end_ms for segment in alignment), default=0) / 1000 if alignment else None
@@ -48,6 +51,7 @@ class FakeTTS:
             provider=self.provider_name,
             model=self.model_name,
             voice=voice or self.default_voice,
+            speed_ratio=speed_ratio or 1.0,
             alignment=alignment,
             duration_seconds=duration_seconds,
         )
@@ -791,6 +795,69 @@ async def test_mobile_memoir_assistant_tts_reuses_cache_after_timing_attempt_wit
     playback = await client.get(f"/api/mobile/memoir/audio-files/{first_data['audio_file_id']}/playback")
     assert playback.status_code == 200
     assert playback.content == b"first-mp3-audio"
+
+
+async def test_mobile_memoir_assistant_tts_regenerates_cache_when_speed_changes(
+    client,
+    test_db,
+    monkeypatch,
+    tmp_path,
+):
+    monkeypatch.setattr("app.services.memoir.audio_files.MEMOIR_AUDIO_DIR", tmp_path / "audio")
+    create_response = await client.post(
+        "/api/mobile/memoir/voice-sessions",
+        json={"guidance_mode": "guided_interview"},
+    )
+    session = create_response.json()["session"]
+    assistant_message = MemoirChatMessage(
+        project_id=session["project_id"],
+        voice_session_id=session["id"],
+        role=MemoirChatMessageRole.ASSISTANT.value,
+        content_text="慢一点，再讲讲细节。",
+        content_status=MemoirChatContentStatus.FINAL.value,
+        turn_index=0,
+        guidance_intent="follow_up",
+        metadata_json={"source": "test"},
+    )
+    test_db.add(assistant_message)
+    await test_db.commit()
+    await test_db.refresh(assistant_message)
+
+    fake_tts = FakeTTS([b"slow-mp3-audio", b"fast-mp3-audio"])
+    monkeypatch.setattr("app.services.memoir.voice_tts.get_tts_client", lambda: fake_tts)
+
+    first_response = await client.post(
+        f"/api/mobile/memoir/voice-sessions/{session['id']}/messages/{assistant_message.id}/tts",
+        json={"speed_ratio": 0.7},
+    )
+    assert first_response.status_code == 200
+    first_data = first_response.json()
+    first_audio_id = first_data["audio_file_id"]
+    first_audio = await test_db.scalar(select(AudioFile).where(AudioFile.id == first_audio_id))
+    assert first_audio is not None
+    first_audio_path = tmp_path / "audio" / first_audio.user_id / f"{first_audio.id}.mp3"
+    assert first_audio_path.read_bytes() == b"slow-mp3-audio"
+    assert first_data["message"]["metadata_json"]["tts_speed_ratio"] == 0.7
+
+    second_response = await client.post(
+        f"/api/mobile/memoir/voice-sessions/{session['id']}/messages/{assistant_message.id}/tts",
+        json={"speed_ratio": 1.5},
+    )
+
+    assert second_response.status_code == 200
+    second_data = second_response.json()
+    assert second_data["audio_file_id"] != first_audio_id
+    assert second_data["message"]["metadata_json"]["tts_speed_ratio"] == 1.5
+    assert await test_db.scalar(select(AudioFile).where(AudioFile.id == first_audio_id)) is None
+    assert not first_audio_path.exists()
+    assert fake_tts.calls == [
+        {"text": "慢一点，再讲讲细节。", "voice": None, "speed_ratio": 0.7},
+        {"text": "慢一点，再讲讲细节。", "voice": None, "speed_ratio": 1.5},
+    ]
+
+    playback = await client.get(f"/api/mobile/memoir/audio-files/{second_data['audio_file_id']}/playback")
+    assert playback.status_code == 200
+    assert playback.content == b"fast-mp3-audio"
 
 
 async def test_mobile_memoir_assistant_tts_rejects_user_message(client, test_db):

@@ -206,6 +206,26 @@
     </view>
   </view>
 
+  <view class="section">
+    <view class="setting-header">
+      <text class="section-title">AI 语速</text>
+      <text class="setting-current">{{ttsSpeedLabel}}</text>
+    </view>
+    <view class="voice-options">
+      <view
+        wx:for="{{ttsSpeedOptions}}"
+        wx:key="value"
+        class="voice-option {{item.value === ttsSpeedRatio ? 'selected' : ''}}"
+        data-speed="{{item.value}}"
+        bindtap="selectTTSSpeed"
+        hover-class="tap-hover"
+      >
+        <text class="voice-label">{{item.label}}</text>
+        <text class="voice-desc">{{item.description}}</text>
+      </view>
+    </view>
+  </view>
+
   <button class="logout-button" loading="{{loading}}" disabled="{{loading}}" bindtap="logout">退出登录</button>
   </block>
 </view>

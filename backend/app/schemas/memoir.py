@@ -112,6 +112,7 @@ class MemoirVoiceFollowUpRequest(BaseModel):
 
 class MemoirAssistantTTSRequest(BaseModel):
     voice: str | None = None
+    speed_ratio: float | None = Field(default=None, ge=0.5, le=2.0)
     force_regenerate: bool = False
 
 

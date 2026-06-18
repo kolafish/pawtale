@@ -41,6 +41,8 @@ SUPPORTED_RESPONSE_FORMATS = {
 }
 TTS_ALIGNMENT_METADATA_KEY = "tts_alignment"
 TTS_TIMING_SOURCE_METADATA_KEY = "tts_timing_source"
+TTS_SPEED_RATIO_METADATA_KEY = "tts_speed_ratio"
+DEFAULT_TTS_SPEED_RATIO = 1.0
 
 
 @dataclass(frozen=True)
@@ -51,6 +53,7 @@ class TTSResult:
     provider: str
     model: str
     voice: str
+    speed_ratio: float = DEFAULT_TTS_SPEED_RATIO
     alignment: list[TTSAlignmentSegment] = field(default_factory=list)
     duration_seconds: float | None = None
 
@@ -75,7 +78,13 @@ class TTSClient(Protocol):
     def default_voice(self) -> str:
         ...
 
-    async def synthesize(self, text: str, *, voice: str | None = None) -> TTSResult:
+    async def synthesize(
+        self,
+        text: str,
+        *,
+        voice: str | None = None,
+        speed_ratio: float | None = None,
+    ) -> TTSResult:
         ...
 
 
@@ -97,7 +106,13 @@ class VolcTTSClient:
     def effective_voice(self, voice: str | None = None) -> str:
         return _volc_effective_voice(voice, self.default_voice)
 
-    async def synthesize(self, text: str, *, voice: str | None = None) -> TTSResult:
+    async def synthesize(
+        self,
+        text: str,
+        *,
+        voice: str | None = None,
+        speed_ratio: float | None = None,
+    ) -> TTSResult:
         if not self.app_id or not self.access_token:
             raise HTTPException(status_code=503, detail="火山 TTS app id 或 access token 未配置")
         if not self.endpoint:
@@ -107,6 +122,7 @@ class VolcTTSClient:
         effective_voice = self.effective_voice(voice)
         if not effective_voice:
             raise HTTPException(status_code=503, detail="火山 TTS 音色未配置")
+        effective_speed_ratio = _effective_tts_speed_ratio(speed_ratio)
 
         request_id = str(uuid.uuid4())
         payload = _volc_sse_payload(
@@ -114,6 +130,7 @@ class VolcTTSClient:
             voice=effective_voice,
             response_format=self.response_format,
             sample_rate=self.sample_rate,
+            speed_ratio=effective_speed_ratio,
         )
         headers = {
             "Content-Type": "application/json",
@@ -162,6 +179,7 @@ class VolcTTSClient:
             provider=self.provider_name,
             model=self.model_name,
             voice=effective_voice,
+            speed_ratio=effective_speed_ratio,
             alignment=alignment,
             duration_seconds=duration_seconds,
         )
@@ -181,17 +199,22 @@ def _volc_sse_payload(
     voice: str,
     response_format: VolcTTSResponseFormat,
     sample_rate: int,
+    speed_ratio: float,
 ) -> dict[str, object]:
+    audio_params: dict[str, object] = {
+        "format": response_format.provider_value,
+        "sample_rate": sample_rate,
+        "enable_subtitle": True,
+    }
+    speech_rate = _volc_speech_rate_from_speed_ratio(speed_ratio)
+    if speech_rate is not None:
+        audio_params["speech_rate"] = speech_rate
     return {
         "user": {"uid": "pawtale-backend"},
         "req_params": {
             "text": text,
             "speaker": voice,
-            "audio_params": {
-                "format": response_format.provider_value,
-                "sample_rate": sample_rate,
-                "enable_subtitle": True,
-            },
+            "audio_params": audio_params,
             "additions": json.dumps({"disable_markdown_filter": True}, separators=(",", ":")),
         },
     }
@@ -268,6 +291,25 @@ def _looks_like_volc_v3_voice(voice: str) -> bool:
         or voice.startswith("ICL_")
         or voice.startswith("multi_")
     )
+
+
+def _effective_tts_speed_ratio(speed_ratio: object) -> float:
+    if speed_ratio is None:
+        return DEFAULT_TTS_SPEED_RATIO
+    try:
+        value = float(speed_ratio)
+    except (TypeError, ValueError):
+        return DEFAULT_TTS_SPEED_RATIO
+    if not math.isfinite(value):
+        return DEFAULT_TTS_SPEED_RATIO
+    return max(0.5, min(2.0, round(value, 2)))
+
+
+def _volc_speech_rate_from_speed_ratio(speed_ratio: float) -> int | None:
+    effective_speed_ratio = _effective_tts_speed_ratio(speed_ratio)
+    if effective_speed_ratio == DEFAULT_TTS_SPEED_RATIO:
+        return None
+    return max(-50, min(100, int(round((effective_speed_ratio - 1.0) * 100))))
 
 
 async def _load_assistant_message(
@@ -349,13 +391,21 @@ def _effective_tts_voice(client: TTSClient, requested_voice: str | None) -> str:
     return (requested_voice or getattr(client, "default_voice", "") or "").strip()
 
 
-def _can_reuse_existing_audio(message: MemoirChatMessage, client: TTSClient, *, voice: str) -> bool:
+def _can_reuse_existing_audio(
+    message: MemoirChatMessage,
+    client: TTSClient,
+    *,
+    voice: str,
+    speed_ratio: float,
+) -> bool:
     metadata = message.metadata_json or {}
     if metadata.get("tts_provider") != client.provider_name:
         return False
     if metadata.get("tts_model") != client.model_name:
         return False
     if str(metadata.get("tts_voice") or "") != voice:
+        return False
+    if _effective_tts_speed_ratio(metadata.get(TTS_SPEED_RATIO_METADATA_KEY)) != speed_ratio:
         return False
     return TTS_TIMING_SOURCE_METADATA_KEY in metadata or _message_has_alignment(message)
 
@@ -365,6 +415,7 @@ def _tts_timing_metadata(result: TTSResult) -> dict[str, object]:
         TTS_ALIGNMENT_METADATA_KEY: alignment_segments_to_json(result.alignment),
         TTS_TIMING_SOURCE_METADATA_KEY: result.provider if result.alignment else None,
         "tts_duration_seconds": result.duration_seconds,
+        TTS_SPEED_RATIO_METADATA_KEY: result.speed_ratio,
     }
 
 
@@ -413,7 +464,12 @@ async def synthesize_assistant_message(
     existing_audio = await _load_existing_audio(db, message)
     client = tts_client or get_tts_client()
     effective_voice = _effective_tts_voice(client, req.voice)
-    if existing_audio and not req.force_regenerate and _can_reuse_existing_audio(message, client, voice=effective_voice):
+    effective_speed_ratio = _effective_tts_speed_ratio(req.speed_ratio)
+    if (
+        existing_audio
+        and not req.force_regenerate
+        and _can_reuse_existing_audio(message, client, voice=effective_voice, speed_ratio=effective_speed_ratio)
+    ):
         return _tts_response(
             message,
             existing_audio,
@@ -423,7 +479,7 @@ async def synthesize_assistant_message(
 
     text = message.content_text.strip()
     try:
-        result = await client.synthesize(text, voice=req.voice)
+        result = await client.synthesize(text, voice=req.voice, speed_ratio=req.speed_ratio)
     except HTTPException:
         raise
     except Exception as exc:
