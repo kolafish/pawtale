@@ -40,9 +40,10 @@
           <text class="field-label">昵称</text>
           <input
             class="field-input"
-            type="text"
+            type="nickname"
             value="{{credentialDisplayName}}"
-            placeholder="余主任"
+            placeholder="使用微信昵称或填写昵称"
+            maxlength="40"
             bindinput="changeCredentialDisplayName"
           />
         </view>

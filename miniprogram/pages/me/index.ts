@@ -370,6 +370,10 @@ Page<MeData, {
     const email = this.data.credentialEmail.trim();
     const password = this.data.credentialPassword;
     const displayName = this.data.credentialDisplayName.trim();
+    if (!displayName) {
+      this.setData({ error: "请输入昵称，可直接使用微信昵称" });
+      return;
+    }
     if (!email || !password) {
       this.setData({ error: "请输入邮箱和密码" });
       return;
@@ -383,7 +387,7 @@ Page<MeData, {
       const response = await setAccountCredentials({
         email,
         password,
-        display_name: displayName || undefined,
+        display_name: displayName,
       });
       if (response.needs_credentials) {
         this.setData({ error: "账号还没有设置完成，请重新提交" });

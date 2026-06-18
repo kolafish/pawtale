@@ -38,6 +38,11 @@ export interface UpdateProfileInput {
   display_name: string;
 }
 
+interface WeChatProfileData {
+  display_name?: string;
+  avatar_url?: string;
+}
+
 function rememberMemoirIdentity(identity: MemoirIdentity): MemoirIdentity {
   ensureMemoirStoreIdentity(cacheIdentityFromUser(identity, identity.active_project));
   writeMemoirIdentitySnapshot(identity);
@@ -81,11 +86,46 @@ function wxLoginCode(): Promise<string> {
   });
 }
 
+function wxUserProfile(): Promise<WeChatProfileData> {
+  type GetUserProfileOptions = {
+    desc: string;
+    success?: (result: { userInfo?: { nickName?: string; avatarUrl?: string } }) => void;
+    fail?: () => void;
+  };
+  const profileApi = (wx as WechatMiniprogram.Wx & {
+    getUserProfile?: (options: GetUserProfileOptions) => void;
+  }).getUserProfile;
+  if (typeof profileApi !== "function") {
+    return Promise.resolve({});
+  }
+  return new Promise((resolve) => {
+    profileApi({
+      desc: "用于展示登录后的昵称和头像",
+      success(result) {
+        const nickName = result.userInfo?.nickName?.trim() || "";
+        const avatarUrl = result.userInfo?.avatarUrl?.trim() || "";
+        resolve({
+          display_name: nickName || undefined,
+          avatar_url: avatarUrl || undefined,
+        });
+      },
+      fail() {
+        resolve({});
+      },
+    });
+  });
+}
+
 export async function loginWithWeChat(): Promise<AuthResponse> {
+  const profile = await wxUserProfile();
   const code = await wxLoginCode();
   return request<AuthResponse>("/api/auth/wechat-login", {
     method: "POST",
-    data: { code },
+    data: {
+      code,
+      ...(profile.display_name ? { display_name: profile.display_name } : {}),
+      ...(profile.avatar_url ? { avatar_url: profile.avatar_url } : {}),
+    },
   });
 }
 

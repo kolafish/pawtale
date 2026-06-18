@@ -152,6 +152,60 @@ test("me keeps new wechat users in credential setup mode", async () => {
   assert.equal(context.data.wechatLoading, false);
 });
 
+test("me pre-fills credential nickname from wechat login response", async () => {
+  const { page } = loadMePage({
+    authExports: {
+      loginWithWeChat: async () => ({
+        user: {
+          id: "user-1",
+          email: "wechat_x@wechat.local",
+          password_login_enabled: false,
+          display_name: "微信昵称",
+          created_at: "2026-06-15T00:00:00",
+        },
+        needs_credentials: true,
+      }),
+    },
+  });
+  const context = pageContext(page);
+
+  await page.submitWeChat.call(context);
+
+  assert.equal(context.data.credentialsMode, true);
+  assert.equal(context.data.credentialDisplayName, "微信昵称");
+});
+
+test("me requires a nickname when setting first login credentials", async () => {
+  let credentialsCalls = 0;
+  const { page } = loadMePage({
+    authExports: {
+      setAccountCredentials: async () => {
+        credentialsCalls += 1;
+        return {
+          user: {
+            id: "user-1",
+            email: "author@example.com",
+            password_login_enabled: true,
+            display_name: "作者",
+            created_at: "2026-06-15T00:00:00",
+          },
+          needs_credentials: false,
+        };
+      },
+    },
+  });
+  const context = pageContext(page, {
+    credentialEmail: "author@example.com",
+    credentialPassword: "password123",
+    credentialDisplayName: "   ",
+  });
+
+  await page.submitCredentials.call(context);
+
+  assert.equal(credentialsCalls, 0);
+  assert.match(context.data.error, /昵称/);
+});
+
 test("me refreshes profile after Pawtale account login", async () => {
   const loginCalls = [];
   let refreshed = false;
