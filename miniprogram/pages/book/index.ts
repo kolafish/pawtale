@@ -26,6 +26,7 @@ import {
 } from "../../services/memoir-voice-api";
 import { configureAudiblePlayback } from "../../services/audio-playback";
 import { ApiError } from "../../services/request";
+import { formatBeijingDateTime } from "../../services/time";
 
 interface DatasetEvent {
   currentTarget: {
@@ -49,6 +50,8 @@ interface PickerEvent extends DatasetEvent {
 
 type BookStage = "empty" | "plan_draft" | "drafting";
 
+const TIMEZONE_OFFSET_RE = /(?:[zZ]|[+-]\d{2}:?\d{2})$/;
+
 interface ChapterPickerOption {
   label: string;
   value: string;
@@ -58,6 +61,7 @@ export interface BookUncoveredSourceView {
   utterance_id: string;
   previewText: string;
   created_at: string;
+  createdAtText: string;
 }
 
 export interface BookChapterView extends MemoirBookPlanChapter {
@@ -101,6 +105,7 @@ interface BookData {
   sourceCoverage: MemoirBookSourceCoverage | null;
   sourceCoverageNotice: string;
   uncoveredSourceCount: number;
+  uncoveredSourceDisplayText: string;
   uncoveredSources: BookUncoveredSourceView[];
   chapterPickerOptions: ChapterPickerOption[];
   assigningSourceId: string;
@@ -258,27 +263,49 @@ export function bookSourceCoverageNotice(
 function sourceCoverageData(
   plan: MemoirBookPlan | null,
   coverage: MemoirBookSourceCoverage | null,
-): Pick<BookData, "sourceCoverage" | "sourceCoverageNotice" | "uncoveredSourceCount" | "uncoveredSources"> {
+): Pick<
+  BookData,
+  "sourceCoverage" | "sourceCoverageNotice" | "uncoveredSourceCount" | "uncoveredSourceDisplayText" | "uncoveredSources"
+> {
+  const uncoveredSources = buildUncoveredSourceViews(coverage);
+  const uncoveredSourceCount = coverage?.uncovered_source_count || 0;
   return {
     sourceCoverage: coverage,
     sourceCoverageNotice: bookSourceCoverageNotice(plan, coverage),
-    uncoveredSourceCount: coverage?.uncovered_source_count || 0,
-    uncoveredSources: buildUncoveredSourceViews(coverage),
+    uncoveredSourceCount,
+    uncoveredSourceDisplayText: uncoveredSourceCount > uncoveredSources.length
+      ? `最近 ${uncoveredSources.length}/${uncoveredSourceCount} 条`
+      : `${uncoveredSourceCount} 条待收录`,
+    uncoveredSources,
   };
+}
+
+function createdAtTime(value: string): number {
+  const text = value.trim();
+  if (!text) {
+    return 0;
+  }
+  const normalized = TIMEZONE_OFFSET_RE.test(text) ? text : `${text}Z`;
+  const time = new Date(normalized).getTime();
+  return Number.isFinite(time) ? time : 0;
 }
 
 export function buildUncoveredSourceViews(
   coverage: MemoirBookSourceCoverage | null,
-  limit = 5,
+  limit = 12,
 ): BookUncoveredSourceView[] {
-  return (coverage?.uncovered_sources || []).slice(0, limit).map((source) => {
-    const text = trimText(source.text);
-    return {
-      utterance_id: source.utterance_id,
-      previewText: text.length > 72 ? `${text.slice(0, 72)}...` : text,
-      created_at: source.created_at,
-    };
-  });
+  return [...(coverage?.uncovered_sources || [])]
+    .sort((left, right) => createdAtTime(right.created_at) - createdAtTime(left.created_at))
+    .slice(0, limit)
+    .map((source) => {
+      const text = trimText(source.text);
+      return {
+        utterance_id: source.utterance_id,
+        previewText: text.length > 96 ? `${text.slice(0, 96)}...` : text,
+        created_at: source.created_at,
+        createdAtText: formatBeijingDateTime(source.created_at) || "转写记录",
+      };
+    });
 }
 
 export function buildChapterPickerOptions(chapters: BookChapterView[]): ChapterPickerOption[] {
@@ -451,6 +478,7 @@ Page<BookData, {
     sourceCoverage: null,
     sourceCoverageNotice: "",
     uncoveredSourceCount: 0,
+    uncoveredSourceDisplayText: "",
     uncoveredSources: [],
     chapterPickerOptions: [],
     assigningSourceId: "",
