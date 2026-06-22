@@ -4,7 +4,7 @@ from datetime import date, datetime
 from enum import Enum
 import uuid
 
-from sqlalchemy import CheckConstraint, Date, DateTime, Float, ForeignKey, Integer, JSON, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, CheckConstraint, Date, DateTime, Float, ForeignKey, Integer, JSON, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship as orm_relationship
 
 from app.database import Base
@@ -189,6 +189,29 @@ class MemoirVoiceSession(Base):
         back_populates="voice_session",
         cascade="all, delete-orphan",
     )
+
+
+class MemoirVoiceAuthorizationConsent(Base):
+    __tablename__ = "memoir_voice_authorization_consents"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False, index=True)
+    consent_type: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    version: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    agreed: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    source: Mapped[str] = mapped_column(String(80), default="miniprogram", nullable=False)
+    source_session_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("memoir_voice_sessions.id"),
+        nullable=True,
+        index=True,
+    )
+    metadata_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    user: Mapped["User"] = orm_relationship("User")
+    source_session: Mapped[MemoirVoiceSession | None] = orm_relationship("MemoirVoiceSession")
 
 
 class MemoirChatMessage(Base):

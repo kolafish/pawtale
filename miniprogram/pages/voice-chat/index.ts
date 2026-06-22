@@ -26,6 +26,7 @@ import { voiceGuidanceLabel } from "../../services/memoir-project-profile";
 import {
   readVoiceAuthorizationConsent,
   saveVoiceAuthorizationConsent,
+  syncVoiceAuthorizationConsent,
   VOICE_AUTHORIZATION_PAGE_URL,
 } from "../../services/voice-authorization";
 import { ensureRecorderPrivacyAuthorization } from "../../services/wechat-privacy";
@@ -129,9 +130,11 @@ Page<VoiceChatData, {
   onHide(): void;
   onUnload(): void;
   refreshVoiceAuthorizationConsent(): void;
-  changeVoiceAuthorization(event: CheckboxChangeEvent): void;
+  changeVoiceAuthorization(event: CheckboxChangeEvent): Promise<void>;
   openVoiceAuthorization(): void;
   ensureVoiceAuthorization(autoTriggered?: boolean): boolean;
+  syncVoiceAuthorizationForSession(): Promise<boolean>;
+  syncVoiceAuthorizationAndConnect(autoTriggered?: boolean): Promise<void>;
   hydrateVoiceSessionSnapshot(): void;
   refreshVoiceSessionSnapshot(): Promise<MemoirVoiceSessionDetail | null>;
   reconcilePendingClose(detail: MemoirVoiceSessionDetail): void;
@@ -265,7 +268,7 @@ Page<VoiceChatData, {
       && this.data.status !== "closed"
       && this.data.status !== "error"
     ) {
-      await this.connectGateway();
+      await this.syncVoiceAuthorizationAndConnect();
     }
     if (!this.data.voiceAuthorizationAgreed) {
       this.setData({
@@ -322,11 +325,11 @@ Page<VoiceChatData, {
       && this.data.status !== "error"
       && !streamingClient
     ) {
-      void this.connectGateway();
+      void this.syncVoiceAuthorizationAndConnect();
     }
   },
 
-  changeVoiceAuthorization(event) {
+  async changeVoiceAuthorization(event) {
     const agreed = event.detail.value.includes(VOICE_AUTHORIZATION_VALUE);
     const consent = saveVoiceAuthorizationConsent(agreed);
     if (!agreed && streamingClient && this.data.recording) {
@@ -340,7 +343,14 @@ Page<VoiceChatData, {
       autoListenStateText: agreed ? "AI 说完自动听" : "同意后才会自动收音",
     });
     if (agreed && this.data.voiceSessionId && !streamingClient && !this.data.connecting) {
-      void this.connectGateway();
+      await this.syncVoiceAuthorizationAndConnect();
+    } else {
+      void syncVoiceAuthorizationConsent({
+        consent,
+        sourceSessionId: this.data.voiceSessionId || undefined,
+      }).catch((error) => {
+        console.warn("sync voice authorization consent change failed", error);
+      });
     }
   },
 
@@ -364,6 +374,41 @@ Page<VoiceChatData, {
     });
     wx.showToast({ title: "请先同意声纹授权协议", icon: "none" });
     return false;
+  },
+
+  async syncVoiceAuthorizationForSession() {
+    if (!readVoiceAuthorizationConsent()) {
+      this.ensureVoiceAuthorization(false);
+      return false;
+    }
+    try {
+      await syncVoiceAuthorizationConsent({
+        sourceSessionId: this.data.voiceSessionId || undefined,
+      });
+      return true;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "声纹授权同步失败";
+      this.setData({
+        error: message,
+        primaryActionText: "继续说话",
+        autoListenStateText: "声纹授权同步失败",
+      });
+      if (typeof wx !== "undefined" && typeof wx.showToast === "function") {
+        wx.showToast({ title: "声纹授权同步失败", icon: "none" });
+      }
+      return false;
+    }
+  },
+
+  async syncVoiceAuthorizationAndConnect(autoTriggered = false) {
+    const synced = await this.syncVoiceAuthorizationForSession();
+    if (!synced) {
+      if (autoTriggered) {
+        this.setData({ autoListenStateText: "自动收音已暂停，等待声纹授权同步" });
+      }
+      return;
+    }
+    await this.connectGateway();
   },
 
   hydrateVoiceSessionSnapshot() {
@@ -988,7 +1033,7 @@ Page<VoiceChatData, {
       return false;
     }
     if (!streamingClient || this.data.status === "closed") {
-      void this.connectGateway();
+      void this.syncVoiceAuthorizationAndConnect(autoTriggered);
       this.setData({ autoListenStateText: autoTriggered ? "正在重新连接语音" : this.data.autoListenStateText });
       return false;
     }
@@ -997,6 +1042,9 @@ Page<VoiceChatData, {
   },
 
   async startRecordingAfterPrivacy(autoTriggered = false) {
+    if (!(await this.syncVoiceAuthorizationForSession())) {
+      return false;
+    }
     try {
       await ensureRecorderPrivacyAuthorization();
     } catch (error) {
@@ -1010,7 +1058,7 @@ Page<VoiceChatData, {
       return false;
     }
     if (!streamingClient || this.data.status === "closed") {
-      void this.connectGateway();
+      void this.syncVoiceAuthorizationAndConnect(autoTriggered);
       this.setData({ autoListenStateText: autoTriggered ? "正在重新连接语音" : this.data.autoListenStateText });
       return false;
     }
@@ -1037,7 +1085,7 @@ Page<VoiceChatData, {
       return;
     }
     if (!streamingClient || this.data.status === "closed") {
-      void this.connectGateway();
+      void this.syncVoiceAuthorizationAndConnect(false);
       return;
     }
     if (this.data.recording) {

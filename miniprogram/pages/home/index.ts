@@ -15,6 +15,7 @@ import { ApiError } from "../../services/request";
 import {
   readVoiceAuthorizationConsent,
   saveVoiceAuthorizationConsent,
+  syncVoiceAuthorizationConsent,
   VOICE_AUTHORIZATION_PAGE_URL,
 } from "../../services/voice-authorization";
 
@@ -171,6 +172,9 @@ Page<HomeData, {
       voiceAuthorizationAgreed: consent.agreed,
       error: agreed ? "" : this.data.error,
     });
+    void syncVoiceAuthorizationConsent({ consent }).catch((error) => {
+      console.warn("sync voice authorization consent change failed", error);
+    });
   },
 
   selectGuidanceMode(event) {
@@ -216,6 +220,7 @@ Page<HomeData, {
     }
     this.setData({ creatingVoice: true, error: "" });
     try {
+      await syncVoiceAuthorizationConsent();
       const currentGuidanceModule = this.data.selectedMode === "guided_interview"
         ? this.data.selectedModule
         : "";

@@ -105,6 +105,50 @@ class MemoirVoiceSessionStopRequest(BaseModel):
     error_message: str | None = None
 
 
+class MemoirVoiceAuthorizationConsentRequest(BaseModel):
+    version: str
+    agreed: bool
+    source: str = "miniprogram"
+    source_session_id: str | None = None
+    metadata_json: dict[str, object] = Field(default_factory=dict)
+
+    @field_validator("version", "source")
+    @classmethod
+    def _non_empty_text(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("不能为空")
+        return normalized
+
+    @field_validator("source_session_id")
+    @classmethod
+    def _optional_non_empty_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None
+
+
+class MemoirVoiceAuthorizationConsentResponse(BaseModel):
+    id: str
+    user_id: str
+    consent_type: str
+    version: str
+    agreed: bool
+    source: str
+    source_session_id: str | None = None
+    metadata_json: dict[str, object] = Field(default_factory=dict)
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class MemoirVoiceAuthorizationConsentStatusResponse(BaseModel):
+    has_current_consent: bool
+    consent: MemoirVoiceAuthorizationConsentResponse | None = None
+
+
 class MemoirVoiceFollowUpRequest(BaseModel):
     ai_model: str | None = None
     regenerate: bool = False

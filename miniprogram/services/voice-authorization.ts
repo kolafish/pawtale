@@ -1,3 +1,6 @@
+import { ensureBackendSession } from "./auth";
+import { request } from "./request";
+
 export const VOICE_AUTHORIZATION_VERSION = "2026-06-18";
 export const VOICE_AUTHORIZATION_STORAGE_KEY = "pawtale_voice_authorization_consent";
 export const VOICE_AUTHORIZATION_PAGE_URL = "/pages/voice-authorization/index";
@@ -6,6 +9,24 @@ export interface VoiceAuthorizationConsent {
   agreed: boolean;
   version: string;
   agreedAt: string;
+}
+
+export interface VoiceAuthorizationConsentAudit {
+  id: string;
+  user_id: string;
+  consent_type: string;
+  version: string;
+  agreed: boolean;
+  source: string;
+  source_session_id?: string | null;
+  metadata_json: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+interface SyncVoiceAuthorizationConsentOptions {
+  consent?: VoiceAuthorizationConsent;
+  sourceSessionId?: string;
 }
 
 function isConsent(value: unknown): value is VoiceAuthorizationConsent {
@@ -18,18 +39,23 @@ function isConsent(value: unknown): value is VoiceAuthorizationConsent {
     && typeof candidate.agreedAt === "string";
 }
 
-export function readVoiceAuthorizationConsent(): boolean {
+export function readVoiceAuthorizationConsentRecord(): VoiceAuthorizationConsent | null {
   if (typeof wx === "undefined" || typeof wx.getStorageSync !== "function") {
-    return false;
+    return null;
   }
   try {
     const stored = wx.getStorageSync(VOICE_AUTHORIZATION_STORAGE_KEY);
-    return isConsent(stored)
-      && stored.agreed
-      && stored.version === VOICE_AUTHORIZATION_VERSION;
+    if (!isConsent(stored) || stored.version !== VOICE_AUTHORIZATION_VERSION) {
+      return null;
+    }
+    return stored;
   } catch {
-    return false;
+    return null;
   }
+}
+
+export function readVoiceAuthorizationConsent(): boolean {
+  return readVoiceAuthorizationConsentRecord()?.agreed === true;
 }
 
 export function saveVoiceAuthorizationConsent(agreed = true): VoiceAuthorizationConsent {
@@ -42,4 +68,26 @@ export function saveVoiceAuthorizationConsent(agreed = true): VoiceAuthorization
     wx.setStorageSync(VOICE_AUTHORIZATION_STORAGE_KEY, consent);
   }
   return consent;
+}
+
+export async function syncVoiceAuthorizationConsent(
+  options: SyncVoiceAuthorizationConsentOptions = {},
+): Promise<VoiceAuthorizationConsentAudit> {
+  const consent = options.consent || readVoiceAuthorizationConsentRecord();
+  if (!consent || consent.version !== VOICE_AUTHORIZATION_VERSION) {
+    throw new Error("请先同意声纹授权协议");
+  }
+  await ensureBackendSession();
+  return request<VoiceAuthorizationConsentAudit>("/api/mobile/memoir/voice-authorization-consent", {
+    method: "POST",
+    data: {
+      version: consent.version,
+      agreed: consent.agreed,
+      source: "miniprogram",
+      ...(options.sourceSessionId ? { source_session_id: options.sourceSessionId } : {}),
+      metadata_json: {
+        agreed_at: consent.agreedAt,
+      },
+    },
+  });
 }

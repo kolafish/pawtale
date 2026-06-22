@@ -37,6 +37,7 @@ from app.models.memoir import (
     MemoirSourceArtifact,
     MemoirThemeMemory,
     MemoirTranscriptVersion,
+    MemoirVoiceAuthorizationConsent,
     MemoirVoiceSession,
     MemoirVoiceUtterance,
 )
@@ -81,6 +82,7 @@ __all__ = [
     "MemoirSourceArtifact",
     "MemoirThemeMemory",
     "MemoirTranscriptVersion",
+    "MemoirVoiceAuthorizationConsent",
     "MemoirVoiceSession",
     "MemoirVoiceUtterance",
 ]
