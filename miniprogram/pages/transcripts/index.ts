@@ -191,17 +191,6 @@ Page<TranscriptsData, {
       let projectTitle = this.data.projectTitle;
       if (reset || !activeProjectId) {
         const identity = await getMemoirIdentity();
-        if (!identity.password_login_enabled) {
-          this.setData({
-            needsLogin: true,
-            activeProjectId: "",
-            projectTitle: "我的回忆录",
-            items: [],
-            total: 0,
-            offset: 0,
-          });
-          return;
-        }
         activeProjectId = identity.active_project_id;
         projectTitle = identity.active_project?.title || "尚未创建回忆录";
       }

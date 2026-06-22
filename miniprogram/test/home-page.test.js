@@ -91,14 +91,14 @@ test("home userDisplayName keeps real display names", () => {
   assert.equal(userDisplayName("  余主任  ", "memoir-author@example.com"), "余主任");
 });
 
-test("home keeps incomplete wechat accounts on the home tab and asks for login", async () => {
+test("home treats wechat-only accounts as logged in users without projects", async () => {
   const { page } = loadHomePage({
     authExports: {
       getMemoirIdentity: async () => ({
         id: "user-1",
         email: "wechat_1234567890abcdef12345678@wechat.local",
         password_login_enabled: false,
-        display_name: "微信用户",
+        display_name: "微信昵称",
         created_at: "2026-06-15T00:00:00",
         active_project_id: "",
         active_project: null,
@@ -115,8 +115,9 @@ test("home keeps incomplete wechat accounts on the home tab and asks for login",
 
   await page.loadHome.call(context);
 
-  assert.equal(context.data.needsLogin, true);
-  assert.equal(context.data.projectTitle, "登录后创建回忆录");
+  assert.equal(context.data.needsLogin, false);
+  assert.equal(context.data.displayName, "微信昵称");
+  assert.equal(context.data.projectTitle, "还没有回忆录");
   assert.equal(context.data.hasProject, false);
   assert.equal(context.data.loading, false);
 });

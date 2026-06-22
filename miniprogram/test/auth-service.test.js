@@ -78,6 +78,15 @@ test("loginWithWeChat exchanges wx login code through backend", async () => {
   delete global.wx;
 });
 
+test("isValidEmail validates basic email shape", () => {
+  const { isValidEmail } = authModule();
+
+  assert.equal(isValidEmail(" author@example.com "), true);
+  assert.equal(isValidEmail("author"), false);
+  assert.equal(isValidEmail("author@example"), false);
+  assert.equal(isValidEmail("author @example.com"), false);
+});
+
 test("loginWithWeChat sends wechat nickname and avatar when authorized", async () => {
   const requests = installWxProfileMock((options) => {
     assert.equal(options.url, "https://api.example.com/api/auth/wechat-login");

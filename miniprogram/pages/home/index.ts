@@ -91,18 +91,6 @@ Page<HomeData, {
     this.setData({ loading: true, error: "" });
     try {
       const identity = await getMemoirIdentity();
-      if (!identity.password_login_enabled) {
-        this.setData({
-          needsLogin: true,
-          displayName: "作者",
-          projectId: "",
-          projectTitle: "登录后创建回忆录",
-          hasProject: false,
-          selectedMode: "free_narration",
-          guidanceLabel: guidanceModeLabel("free_narration"),
-        });
-        return;
-      }
       const hasProject = Boolean(identity.active_project_id && identity.active_project);
       const profile = memoirProjectProfile(identity.active_project);
       this.setData({

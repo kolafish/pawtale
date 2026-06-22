@@ -1,4 +1,5 @@
 import hashlib
+import re
 import secrets
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
@@ -31,11 +32,12 @@ from app.services.wechat_auth import WeChatAuthError, WeChatSession, exchange_we
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 WECHAT_PROVIDER = "wechat_miniprogram"
 WECHAT_PLACEHOLDER_DISPLAY_NAME = "微信用户"
+EMAIL_PATTERN = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 
 
 def _validate_email(email: str) -> str:
     normalized = normalize_email(email)
-    if "@" not in normalized or "." not in normalized.rsplit("@", 1)[-1]:
+    if not EMAIL_PATTERN.fullmatch(normalized):
         raise HTTPException(status_code=400, detail="邮箱格式不正确")
     return normalized
 

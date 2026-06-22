@@ -35,6 +35,17 @@ class TestAuthAPI:
         after_logout = await anonymous_client.get("/api/auth/me")
         assert after_logout.status_code == 401
 
+    async def test_register_rejects_invalid_email(self, anonymous_client):
+        register = await anonymous_client.post(
+            "/api/auth/register",
+            json={
+                "email": "not-an-email",
+                "password": "password123",
+            },
+        )
+        assert register.status_code == 400
+        assert register.json()["detail"] == "邮箱格式不正确"
+
     async def test_project_routes_require_login(self, anonymous_client):
         response = await anonymous_client.get("/api/projects")
         assert response.status_code == 401
@@ -185,6 +196,58 @@ class TestAuthAPI:
         )
         assert web_login.status_code == 200
         assert web_login.json()["user"]["display_name"] == "微信 Web 用户"
+
+    async def test_set_credentials_keeps_wechat_profile_when_display_name_is_omitted(
+        self,
+        anonymous_client,
+        monkeypatch,
+    ):
+        async def fake_exchange(code: str) -> WeChatSession:
+            return WeChatSession(openid=f"openid-{code}")
+
+        monkeypatch.setattr("app.routers.auth.exchange_wechat_login_code", fake_exchange)
+
+        login = await anonymous_client.post(
+            "/api/auth/wechat-login",
+            json={
+                "code": "profile-user",
+                "display_name": "微信昵称",
+                "avatar_url": "https://avatar.example.com/me.png",
+            },
+        )
+        assert login.status_code == 200
+        assert login.json()["user"]["display_name"] == "微信昵称"
+        assert login.json()["user"]["avatar_url"] == "https://avatar.example.com/me.png"
+
+        credentials = await anonymous_client.post(
+            "/api/auth/set-credentials",
+            json={
+                "email": "wechat-profile@example.com",
+                "password": "password123",
+            },
+        )
+        assert credentials.status_code == 200
+        assert credentials.json()["user"]["display_name"] == "微信昵称"
+        assert credentials.json()["user"]["avatar_url"] == "https://avatar.example.com/me.png"
+
+    async def test_set_credentials_rejects_invalid_email(self, anonymous_client, monkeypatch):
+        async def fake_exchange(code: str) -> WeChatSession:
+            return WeChatSession(openid=f"openid-{code}")
+
+        monkeypatch.setattr("app.routers.auth.exchange_wechat_login_code", fake_exchange)
+
+        login = await anonymous_client.post("/api/auth/wechat-login", json={"code": "bad-email"})
+        assert login.status_code == 200
+
+        credentials = await anonymous_client.post(
+            "/api/auth/set-credentials",
+            json={
+                "email": "wechat-profile",
+                "password": "password123",
+            },
+        )
+        assert credentials.status_code == 400
+        assert credentials.json()["detail"] == "邮箱格式不正确"
 
     async def test_set_credentials_replaces_wechat_placeholder_with_email_name(
         self,

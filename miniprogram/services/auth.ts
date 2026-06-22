@@ -49,6 +49,11 @@ function rememberMemoirIdentity(identity: MemoirIdentity): MemoirIdentity {
   return identity;
 }
 
+export function isValidEmail(email: string): boolean {
+  const normalized = email.trim();
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized);
+}
+
 export function currentSessionCookie(): string {
   return readSessionCookie();
 }
