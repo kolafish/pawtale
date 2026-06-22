@@ -11,7 +11,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **后端**: FastAPI + async SQLAlchemy + aiosqlite，SQLite 数据库 (`data/pawtale.db`)
 - **前端**: React 19 + TypeScript + Vite，TailwindCSS，Zustand 状态管理，TanStack Query
 - **AI 服务**:
-  - 文本生成：Claude Opus 4.6（默认）、Claude Sonnet 4.6、DeepSeek（多模型工厂模式）
+  - 文本生成：Claude Opus 4.6（默认）、Claude Sonnet 4.6、DeepSeek V4 Flash、Doubao Seed 2.0 Pro（多模型工厂模式）
 
 ## Python 虚拟环境
 
@@ -58,9 +58,17 @@ ANTHROPIC_BASE_URL=xxx         # 代理地址
 # DeepSeek API
 DEEPSEEK_API_KEY=xxx
 DEEPSEEK_BASE_URL=xxx
+DEEPSEEK_MODEL=deepseek-v4-flash
+DEEPSEEK_THINKING_TYPE=disabled
+
+# 火山方舟 API
+VOLC_ARK_API_KEY=replace-with-ark-api-key
+VOLC_ARK_BASE_URL=https://ark.cn-beijing.volces.com/api/v3
+VOLC_ARK_MODEL=doubao-seed-2-0-pro-260215
+VOLC_ARK_THINKING_TYPE=disabled
 
 # 默认 AI 模型
-DEFAULT_AI_MODEL=claude-opus-4  # 可选: deepseek, claude-opus-4, claude-sonnet-4
+DEFAULT_AI_MODEL=claude-opus-4  # 可选: deepseek-v4-flash, deepseek-v4-pro, doubao-seed-2-0-pro-260215, claude-opus-4, claude-sonnet-4
 ```
 
 ## 架构要点
@@ -101,7 +109,7 @@ Layout (h-screen flex flex-col)
 - 用户在编辑器中写作，点击"AI 续写"按钮
 - 可输入续写指令引导 AI 方向
 - AI 生成内容追加到文档末尾
-- 多模型支持：Claude Opus 4.6 / Sonnet 4.6 / DeepSeek，通过工厂模式切换
+- 多模型支持：Claude Opus 4.6 / Sonnet 4.6 / DeepSeek V4 Flash / Doubao Seed 2.0 Pro，通过工厂模式切换
 
 **AI 修改**：
 - 选中文本或全文，点击"AI 修改"按钮
@@ -114,7 +122,8 @@ Layout (h-screen flex flex-col)
 - 统一接口：`AITextServiceBase` 定义 provider 合约和公共 AI 方法代理
 - Use-case 模块：`ai_story.py`、`ai_revision.py`、`ai_project_analysis.py` 承载 prompt 构建、解析和重试逻辑
 - Claude 代理限制：system role 被忽略 → 合并到 user message
-- DeepSeek：原生 API，支持 system role（但保持简短）
+- DeepSeek：原生 API，支持 system role（但保持简短），默认使用 `deepseek-v4-flash`，可切 `deepseek-v4-pro`
+- 火山方舟：Responses API，默认使用 `doubao-seed-2-0-pro-260215`，默认关闭 thinking 以避免短追问被隐藏推理 token 截断
 - 详见 `backend/docs/AI_ARCHITECTURE.md`
 
 ### API 路由注册顺序
@@ -138,6 +147,7 @@ Layout (h-screen flex flex-col)
 - `backend/app/services/ai_story.py` / `ai_revision.py` / `ai_project_analysis.py` - AI 产品能力模块
 - `backend/app/services/ai_claude.py` - Claude 文本生成服务
 - `backend/app/services/ai_text.py` - DeepSeek 文本生成服务
+- `backend/app/services/ai_volc.py` - 火山方舟文本生成服务
 - `backend/docs/AI_ARCHITECTURE.md` - AI 服务架构完整文档
 
 ### 前端

@@ -29,13 +29,21 @@ class Settings(BaseSettings):
     # AI API Keys
     deepseek_api_key: str = ""
     deepseek_base_url: str = "https://api.deepseek.com"
+    deepseek_model: str = "deepseek-v4-flash"
+    deepseek_thinking_type: str = "disabled"
+
+    # VolcEngine Ark API Keys
+    volc_ark_api_key: str = ""
+    volc_ark_base_url: str = "https://ark.cn-beijing.volces.com/api/v3"
+    volc_ark_model: str = "doubao-seed-2-0-pro-260215"
+    volc_ark_thinking_type: str = "disabled"
 
     # Claude API Keys
     anthropic_auth_token: str = ""
     anthropic_base_url: str = "https://cursor.scihub.edu.kg/api"
 
     # Default AI Model
-    default_ai_model: str = "claude-opus-4"  # deepseek / claude-opus-4 / claude-sonnet-4
+    default_ai_model: str = "claude-opus-4"  # deepseek / deepseek-v4-* / doubao-seed-2-0-pro-260215 / claude-*
     ai_text_max_concurrent_requests: int = 3
 
     # GitHub App one-way project backup

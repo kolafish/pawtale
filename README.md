@@ -9,7 +9,7 @@ AI 辅助内容创作工作台。当前核心是以项目为单位管理写作�
 - 项目内参考资料：角色、地点、笔记、大纲
 - 写作编辑器：自动保存、Cmd+S、字数统计、TXT 导出
 - AI 辅助：续写、单模型修改、多模型修改对比、diff review、项目内容分析
-- 多模型：Claude Opus 4.6、Claude Sonnet 4.6、DeepSeek
+- 多模型：Claude Opus 4.6、Claude Sonnet 4.6、DeepSeek V4 Flash、DeepSeek V4 Pro、Doubao Seed 2.0 Pro
 - 登录与用户隔离：项目、资料和 API 均基于当前用户访问
 
 ## 产品方向
@@ -88,9 +88,15 @@ npm run dev
 | `WECHAT_JSCODE2SESSION_URL` | 微信 code2session 接口地址 |
 | `DEEPSEEK_API_KEY` | DeepSeek API key |
 | `DEEPSEEK_BASE_URL` | DeepSeek API 地址 |
+| `DEEPSEEK_MODEL` | DeepSeek 模型；默认 `deepseek-v4-flash`，可切 `deepseek-v4-pro` |
+| `DEEPSEEK_THINKING_TYPE` | DeepSeek thinking 模式；默认 `disabled`，保持与旧 `deepseek-chat` 非思考行为接近 |
+| `VOLC_ARK_API_KEY` | 火山方舟 API key |
+| `VOLC_ARK_BASE_URL` | 火山方舟 Responses API 地址；默认 `https://ark.cn-beijing.volces.com/api/v3` |
+| `VOLC_ARK_MODEL` | 火山方舟模型；默认 `doubao-seed-2-0-pro-260215` |
+| `VOLC_ARK_THINKING_TYPE` | 火山方舟 thinking 模式；默认 `disabled`，避免短追问被隐藏推理 token 截断 |
 | `ANTHROPIC_AUTH_TOKEN` | Claude 代理认证 token |
 | `ANTHROPIC_BASE_URL` | Claude 代理地址，OpenAI 兼容格式 |
-| `DEFAULT_AI_MODEL` | 默认模型：`claude-opus-4` / `claude-sonnet-4` / `deepseek` |
+| `DEFAULT_AI_MODEL` | 默认模型：`claude-opus-4` / `claude-sonnet-4` / `deepseek` / `deepseek-v4-flash` / `deepseek-v4-pro` / `doubao-seed-2-0-pro-260215` |
 | `AI_TEXT_MAX_CONCURRENT_REQUESTS` | 文本 AI provider 并发请求上限；默认 `3`，`0` 表示不限制 |
 | `GITHUB_APP_ID` | 可选，GitHub App ID，用于项目单向备份到用户授权仓库 |
 | `GITHUB_APP_SLUG` | 可选，GitHub App slug，用于生成安装链接 |

@@ -1,13 +1,14 @@
 import { create } from 'zustand';
 import type { Project } from '../types';
+import type { AiModelValue } from '../constants/aiModels';
 
 interface AppState {
-  defaultAiModel: 'deepseek' | 'claude-opus-4' | 'claude-sonnet-4';
+  defaultAiModel: AiModelValue;
   currentProject: Project | null;
   currentDocumentId: string | null;
   currentReferenceId: string | null;
 
-  setDefaultAiModel: (model: 'deepseek' | 'claude-opus-4' | 'claude-sonnet-4') => void;
+  setDefaultAiModel: (model: AiModelValue) => void;
   setCurrentProject: (project: Project | null) => void;
   setCurrentDocumentId: (docId: string | null) => void;
   setCurrentReferenceId: (refId: string | null) => void;

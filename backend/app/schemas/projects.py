@@ -332,7 +332,13 @@ class DocumentAIReviseMultiRequest(BaseModel):
     selected_text: str | None = None
     full_content: str | None = None
     models: list[str] = Field(
-        default_factory=lambda: ["claude-opus-4", "claude-sonnet-4", "deepseek"]
+        default_factory=lambda: [
+            "claude-opus-4",
+            "claude-sonnet-4",
+            "deepseek-v4-flash",
+            "deepseek-v4-pro",
+            "doubao-seed-2-0-pro-260215",
+        ]
     )
     debug: bool = False
 
