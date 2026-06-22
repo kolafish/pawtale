@@ -18,6 +18,7 @@ app/services/
 ├── ai_factory.py       # 工厂函数，根据模型名返回服务实例
 ├── ai_claude.py        # Claude 服务实现（通过代理）
 ├── ai_text.py          # DeepSeek 服务实现
+├── ai_volc.py          # 火山方舟服务实现
 └── ai_debug.py         # 调试信息构建工具
 ```
 
@@ -36,7 +37,7 @@ app/services/
 from app.services import get_ai_service
 
 # 根据模型名获取服务实例
-ai_service = get_ai_service("claude-opus-4")  # 或 "deepseek", "claude-sonnet-4"
+ai_service = get_ai_service("claude-opus-4")  # 或 "deepseek-v4-flash", "deepseek-v4-pro", "doubao-seed-2-0-pro-260215"
 result = await ai_service.generate_story(...)
 ```
 
@@ -83,7 +84,7 @@ async def _call_claude(
 response = await client.post(
     f"{self.base_url}/v1/chat/completions",
     json={
-        "model": "deepseek-chat",
+        "model": "deepseek-v4-flash",
         "messages": [
             {"role": "system", "content": "你是一位专业的文字编辑。"},
             {"role": "user", "content": user_prompt},
@@ -158,9 +159,17 @@ ANTHROPIC_BASE_URL=https://cursor.scihub.edu.kg
 # DeepSeek API
 DEEPSEEK_API_KEY=sk-xxx
 DEEPSEEK_BASE_URL=https://api.deepseek.com
+DEEPSEEK_MODEL=deepseek-v4-flash
+DEEPSEEK_THINKING_TYPE=disabled
+
+# 火山方舟 API
+VOLC_ARK_API_KEY=replace-with-ark-api-key
+VOLC_ARK_BASE_URL=https://ark.cn-beijing.volces.com/api/v3
+VOLC_ARK_MODEL=doubao-seed-2-0-pro-260215
+VOLC_ARK_THINKING_TYPE=disabled
 
 # 默认模型
-DEFAULT_AI_MODEL=claude-opus-4  # 可选: deepseek, claude-opus-4, claude-sonnet-4
+DEFAULT_AI_MODEL=claude-opus-4  # 可选: deepseek-v4-flash, deepseek-v4-pro, doubao-seed-2-0-pro-260215, claude-opus-4, claude-sonnet-4
 ```
 
 ## 添加新 AI 服务
@@ -198,7 +207,10 @@ def get_ai_service(model: str) -> AITextServiceBase:
 A: 项目使用的代理会忽略 system role 消息。将 system prompt 合并到 user message 是兼容性解决方案。
 
 ### Q: DeepSeek 为什么还用 system role？
-A: DeepSeek 使用原生 API，支持 system role。但我们保持 system prompt 简短，主要指令放在 user message。
+A: DeepSeek 使用原生 API，支持 system role。但我们保持 system prompt 简短，主要指令放在 user message。默认模型为 `deepseek-v4-flash`，可切换 `deepseek-v4-pro`；并通过 `DEEPSEEK_THINKING_TYPE=disabled` 保持与旧 `deepseek-chat` 接近的非思考行为。
+
+### Q: 火山方舟为什么单独一个 provider？
+A: 火山方舟使用 Responses API，base URL、API key、模型 ID 和 thinking 参数独立于 DeepSeek。`VOLC_ARK_THINKING_TYPE` 默认 `disabled`，避免回忆录短追问被隐藏推理 token 截断；需要深度推理时可以按任务单独开启。
 
 ### Q: 如何切换默认模型？
 A: 修改 `.env` 中的 `DEFAULT_AI_MODEL`，或在前端 UI 中选择模型。

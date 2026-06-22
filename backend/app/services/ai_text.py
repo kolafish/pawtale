@@ -9,9 +9,11 @@ settings = get_settings()
 class DeepSeekTextService(AITextServiceBase):
     """DeepSeek 文本生成服务"""
 
-    def __init__(self):
+    def __init__(self, model: str | None = None):
         self.api_key = settings.deepseek_api_key
         self.base_url = settings.deepseek_base_url
+        self.model = model or settings.deepseek_model
+        self.thinking_type = settings.deepseek_thinking_type.strip()
         self.max_concurrent_requests = settings.ai_text_max_concurrent_requests
 
     @property
@@ -20,7 +22,7 @@ class DeepSeekTextService(AITextServiceBase):
 
     @property
     def model_name(self) -> str:
-        return "deepseek-chat"
+        return self.model
 
     async def _call_llm(
         self,
@@ -37,6 +39,15 @@ class DeepSeekTextService(AITextServiceBase):
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": user_prompt})
 
+        payload = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+        }
+        if self.thinking_type:
+            payload["thinking"] = {"type": self.thinking_type}
+
         async def request() -> dict:
             async with httpx.AsyncClient() as client:
                 response = await client.post(
@@ -45,12 +56,7 @@ class DeepSeekTextService(AITextServiceBase):
                         "Authorization": f"Bearer {self.api_key}",
                         "Content-Type": "application/json",
                     },
-                    json={
-                        "model": "deepseek-chat",
-                        "messages": messages,
-                        "temperature": temperature,
-                        "max_tokens": max_tokens,
-                    },
+                    json=payload,
                     timeout=timeout,
                 )
                 response.raise_for_status()

@@ -12,8 +12,9 @@ class FakeFollowUpAI:
     provider_name = "fake-ai"
     model_name = "fake-follow-up"
 
-    def __init__(self, text="那时候你最记得谁？"):
+    def __init__(self, text="那时候你最记得谁？", raw=None):
         self.text = text
+        self.raw = raw
         self.calls = []
 
     async def _call_llm(self, system_prompt, user_prompt, **kwargs):
@@ -24,6 +25,8 @@ class FakeFollowUpAI:
                 "kwargs": kwargs,
             }
         )
+        if kwargs.get("return_raw") and self.raw is not None:
+            return self.text, self.raw
         return self.text
 
 
@@ -194,7 +197,12 @@ async def test_mobile_memoir_voice_follow_up_generates_and_saves_assistant_messa
     )
     test_db.add(user_message)
     await test_db.commit()
-    fake_ai = FakeFollowUpAI()
+    fake_ai = FakeFollowUpAI(
+        raw={
+            "choices": [{"finish_reason": "stop"}],
+            "usage": {"input_tokens": 120, "output_tokens": 12, "total_tokens": 132},
+        }
+    )
     monkeypatch.setattr(
         "app.services.memoir.voice_followups.get_ai_service",
         lambda model=None: fake_ai,
@@ -214,6 +222,14 @@ async def test_mobile_memoir_voice_follow_up_generates_and_saves_assistant_messa
     assert data["message"]["guidance_intent"] == "follow_up"
     assert data["message"]["metadata_json"]["prompt_version"] == "memoir_voice_followup_v3"
     assert data["message"]["metadata_json"]["has_user_message"] is True
+    assert data["message"]["metadata_json"]["max_tokens"] == 180
+    assert data["message"]["metadata_json"]["response_chars"] == 9
+    assert data["message"]["metadata_json"]["question_mark_count"] == 1
+    assert data["message"]["metadata_json"]["finish_reason"] == "stop"
+    assert data["message"]["metadata_json"]["truncated"] is False
+    assert data["message"]["metadata_json"]["usage"]["total_tokens"] == 132
+    assert fake_ai.calls[0]["kwargs"]["max_tokens"] == 180
+    assert fake_ai.calls[0]["kwargs"]["return_raw"] is True
     assert "老余" in fake_ai.calls[0]["system_prompt"]
     assert "我小时候住在外婆家。" in fake_ai.calls[0]["user_prompt"]
     assert "不要一直纠缠同一件事的不同细节" in fake_ai.calls[0]["user_prompt"]
@@ -250,6 +266,8 @@ async def test_mobile_memoir_voice_follow_up_starts_guided_session_without_user_
     assert data["message"]["metadata_json"]["source"] == "ai.opening"
     assert data["message"]["metadata_json"]["regenerate"] is True
     assert data["message"]["metadata_json"]["has_user_message"] is False
+    assert data["message"]["metadata_json"]["max_tokens"] == 320
+    assert fake_ai.calls[0]["kwargs"]["max_tokens"] == 320
     assert "老余" in fake_ai.calls[0]["system_prompt"]
     assert "主题讲述首次开场" in fake_ai.calls[0]["user_prompt"]
     assert "第一次主题讲述开场" in fake_ai.calls[0]["user_prompt"]
@@ -289,6 +307,8 @@ async def test_mobile_memoir_voice_follow_up_starts_free_session_without_user_me
     assert data["message"]["guidance_intent"] == "opening"
     assert data["message"]["metadata_json"]["source"] == "ai.opening"
     assert data["message"]["metadata_json"]["has_user_message"] is False
+    assert data["message"]["metadata_json"]["max_tokens"] == 260
+    assert fake_ai.calls[0]["kwargs"]["max_tokens"] == 260
     assert "老余" in fake_ai.calls[0]["system_prompt"]
     assert "自由讲述开场" in fake_ai.calls[0]["user_prompt"]
     assert "用“老余”做简短自我介绍" in fake_ai.calls[0]["user_prompt"]

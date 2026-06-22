@@ -11,7 +11,8 @@ TailwindCSS + Zustand + TanStack Query
 FastAPI + async SQLAlchemy
 SQLite + file-backed document content
         |
-        +-- DeepSeek
+        +-- DeepSeek V4 Flash
+        +-- Volc Ark / Doubao Seed 2.0 Pro
         +-- Claude Opus 4.6 / Sonnet 4.6
 
 WeChat Mini Program
@@ -57,7 +58,7 @@ Pawtale 当前是单仓库、前后端分离架构。后端提供项目、文档
 
 ### AI
 
-- 文本：DeepSeek、Claude Opus 4.6、Claude Sonnet 4.6
+- 文本：DeepSeek V4 Flash、Doubao Seed 2.0 Pro、Claude Opus 4.6、Claude Sonnet 4.6
 - 服务边界：`AITextServiceBase` 定义 provider 合约和薄代理；prompt/use-case 逻辑在 `ai_story.py`、`ai_revision.py`、`ai_project_analysis.py`
 
 ## 后端结构
@@ -516,3 +517,6 @@ VOLC_ASR_WS_URL=wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async
 - `claude-opus-4`
 - `claude-sonnet-4`
 - `deepseek`
+- `deepseek-v4-flash`
+- `deepseek-v4-pro`
+- `doubao-seed-2-0-pro-260215`

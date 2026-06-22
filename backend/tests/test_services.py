@@ -48,7 +48,7 @@ class TestAIDebugHelpers:
         debug_info = build_debug_info(
             request_info={
                 "provider": "deepseek",
-                "model": "deepseek-chat",
+                "model": "deepseek-v4-flash",
                 "authorization": "Bearer very-secret-token",
                 "max_tokens": 3000,
                 "nested": {"api_key": "abc123456789"},

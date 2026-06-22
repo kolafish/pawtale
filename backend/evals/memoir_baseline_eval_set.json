@@ -1,0 +1,613 @@
+{
+  "version": "2026-06-22",
+  "name": "memoir_baseline_eval_set",
+  "description": "Synthetic baseline data for comparing memoir LLM providers. Do not add provider keys or real user private data to this file.",
+  "candidate_models": [
+    "deepseek-v4-flash",
+    "deepseek-v4-pro",
+    "doubao-seed-2-0-pro-260215"
+  ],
+  "default_run_config": {
+    "temperature": 0.35,
+    "follow_up_max_tokens": {
+      "free_follow_up": 180,
+      "guided_follow_up": 240,
+      "free_opening": 260,
+      "guided_opening": 320
+    },
+    "cleanup_max_tokens": 800,
+    "memory_extraction_max_tokens": 1600,
+    "drafting_max_tokens": 2200,
+    "repetitions_per_model": 3
+  },
+  "scoring": {
+    "hard_checks": [
+      "valid_json_when_required",
+      "schema_valid_when_required",
+      "one_question_for_follow_up",
+      "no_truncation",
+      "no_core_fact_hallucination",
+      "evidence_span_required_for_extraction"
+    ],
+    "human_blind_checks": [
+      "relevance",
+      "memoir_interviewer_tone",
+      "empathy_without_overacting",
+      "faithfulness",
+      "natural_spoken_chinese"
+    ],
+    "runtime_metrics": [
+      "latency_ms",
+      "input_tokens",
+      "output_tokens",
+      "cached_input_tokens",
+      "finish_reason",
+      "estimated_cost"
+    ]
+  },
+  "items": [
+    {
+      "id": "followup_001",
+      "category": "voice_follow_up",
+      "guidance_mode": "free_narration",
+      "intent": "opening",
+      "current_messages": [],
+      "previous_messages": [],
+      "expected_checks": {
+        "one_question": true,
+        "max_chinese_chars": 90,
+        "must_include_any": ["小时候", "最早", "从哪"],
+        "must_not_include": ["上次", "主题菜单", "编号"]
+      }
+    },
+    {
+      "id": "followup_002",
+      "category": "voice_follow_up",
+      "guidance_mode": "guided_interview",
+      "current_guidance_module": "person",
+      "intent": "opening",
+      "current_messages": [],
+      "previous_messages": [],
+      "expected_checks": {
+        "one_question": true,
+        "max_chinese_chars": 130,
+        "must_include_any": ["人物", "家人", "朋友", "想先聊谁"],
+        "must_not_include": ["上次", "第一题", "请回答"]
+      }
+    },
+    {
+      "id": "followup_003",
+      "category": "voice_follow_up",
+      "guidance_mode": "free_narration",
+      "intent": "follow_up",
+      "current_messages": [
+        {"role": "user", "text": "我小时候一直住在外婆家，院子里有一棵很大的枣树。"}
+      ],
+      "previous_messages": [],
+      "expected_checks": {
+        "one_question": true,
+        "max_chinese_chars": 60,
+        "must_include_any": ["外婆家", "枣树", "院子"],
+        "must_not_include": ["你能详细说说时间地点人物经过吗", "为什么"]
+      }
+    },
+    {
+      "id": "followup_004",
+      "category": "voice_follow_up",
+      "guidance_mode": "guided_interview",
+      "current_guidance_module": "event",
+      "intent": "follow_up",
+      "current_messages": [
+        {"role": "user", "text": "那年我第一次一个人坐火车去上海找工作。"}
+      ],
+      "previous_messages": [],
+      "expected_checks": {
+        "one_question": true,
+        "max_chinese_chars": 80,
+        "must_include_any": ["火车", "上海", "找工作"],
+        "must_not_include": ["换个主题", "家庭", "人物题库"]
+      }
+    },
+    {
+      "id": "followup_005",
+      "category": "voice_follow_up",
+      "guidance_mode": "free_narration",
+      "intent": "follow_up",
+      "current_messages": [
+        {"role": "user", "text": "嗯。"},
+        {"role": "assistant", "text": "那时候你最记得谁？"},
+        {"role": "user", "text": "外婆吧，她总是天不亮就起来。"}
+      ],
+      "previous_messages": [],
+      "expected_checks": {
+        "one_question": true,
+        "max_chinese_chars": 70,
+        "must_include_any": ["外婆", "天不亮"],
+        "must_not_include": ["嗯是什么意思", "请展开说明"]
+      }
+    },
+    {
+      "id": "followup_006",
+      "category": "voice_follow_up",
+      "guidance_mode": "guided_interview",
+      "current_guidance_module": "work",
+      "intent": "follow_up",
+      "current_messages": [
+        {"role": "user", "text": "我第一份工作是在县里的供销社。"}
+      ],
+      "previous_messages": [],
+      "expected_checks": {
+        "one_question": true,
+        "max_chinese_chars": 80,
+        "must_include_any": ["供销社", "第一天", "刚去"],
+        "must_not_include": ["工资多少", "隐私"]
+      }
+    },
+    {
+      "id": "followup_007",
+      "category": "voice_follow_up",
+      "guidance_mode": "free_narration",
+      "intent": "follow_up",
+      "current_messages": [
+        {"role": "user", "text": "父亲走的那天，我一直没哭出来。"}
+      ],
+      "previous_messages": [],
+      "expected_checks": {
+        "one_question": true,
+        "max_chinese_chars": 70,
+        "must_include_any": ["那天", "当时", "父亲"],
+        "must_not_include": ["为什么不哭", "你是不是", "诊断"]
+      }
+    },
+    {
+      "id": "followup_008",
+      "category": "voice_follow_up",
+      "guidance_mode": "guided_interview",
+      "current_guidance_module": "place",
+      "intent": "follow_up",
+      "current_messages": [
+        {"role": "user", "text": "老家的河边以前都是柳树，夏天大家都在那里乘凉。"}
+      ],
+      "previous_messages": [],
+      "expected_checks": {
+        "one_question": true,
+        "max_chinese_chars": 75,
+        "must_include_any": ["河边", "柳树", "乘凉"],
+        "must_not_include": ["现在房价", "行政区划"]
+      }
+    },
+    {
+      "id": "followup_009",
+      "category": "voice_follow_up",
+      "guidance_mode": "free_narration",
+      "intent": "follow_up",
+      "current_messages": [
+        {"role": "user", "text": "过年的时候，母亲会提前好几天蒸馒头。"}
+      ],
+      "previous_messages": [],
+      "expected_checks": {
+        "one_question": true,
+        "max_chinese_chars": 70,
+        "must_include_any": ["过年", "母亲", "馒头"],
+        "must_not_include": ["菜单", "菜谱步骤"]
+      }
+    },
+    {
+      "id": "followup_010",
+      "category": "voice_follow_up",
+      "guidance_mode": "guided_interview",
+      "current_guidance_module": "period",
+      "intent": "follow_up",
+      "current_messages": [
+        {"role": "user", "text": "八十年代初我刚结婚，日子很紧，但心里有奔头。"}
+      ],
+      "previous_messages": [],
+      "expected_checks": {
+        "one_question": true,
+        "max_chinese_chars": 80,
+        "must_include_any": ["八十年代", "刚结婚", "奔头"],
+        "must_not_include": ["收入证明", "贷款"]
+      }
+    },
+    {
+      "id": "followup_011",
+      "category": "voice_follow_up",
+      "guidance_mode": "free_narration",
+      "intent": "opening",
+      "current_messages": [],
+      "previous_messages": [
+        {"role": "user", "text": "上次讲到我十六岁离开老家去县城读书。"}
+      ],
+      "expected_checks": {
+        "one_question": true,
+        "max_chinese_chars": 100,
+        "must_include_any": ["上次", "十六岁", "县城读书", "接着"],
+        "must_not_include": ["编造学校名字", "主题菜单"]
+      }
+    },
+    {
+      "id": "followup_012",
+      "category": "voice_follow_up",
+      "guidance_mode": "guided_interview",
+      "current_guidance_module": "family",
+      "intent": "opening",
+      "current_messages": [],
+      "previous_messages": [
+        {"role": "user", "text": "上回说到母亲一个人撑着家里的农活。"}
+      ],
+      "expected_checks": {
+        "one_question": true,
+        "max_chinese_chars": 110,
+        "must_include_any": ["欢迎回来", "母亲", "农活", "接着"],
+        "must_not_include": ["第一次", "完整主题菜单"]
+      }
+    },
+    {
+      "id": "followup_013",
+      "category": "voice_follow_up",
+      "guidance_mode": "guided_interview",
+      "current_guidance_module": "event",
+      "intent": "follow_up",
+      "current_messages": [
+        {"role": "user", "text": "这个事情我不太想讲了，换一个吧。"}
+      ],
+      "previous_messages": [],
+      "expected_checks": {
+        "one_question": true,
+        "max_chinese_chars": 80,
+        "must_include_any": ["没关系", "换个", "想聊"],
+        "must_not_include": ["为什么不想讲", "必须", "继续这个"]
+      }
+    },
+    {
+      "id": "followup_014",
+      "category": "voice_follow_up",
+      "guidance_mode": "free_narration",
+      "intent": "follow_up",
+      "current_messages": [
+        {"role": "assistant", "text": "那天是谁陪你去的？"},
+        {"role": "user", "text": "是二哥陪我去的。"},
+        {"role": "assistant", "text": "二哥当时说了什么？"},
+        {"role": "user", "text": "他就说别怕。"}
+      ],
+      "previous_messages": [],
+      "expected_checks": {
+        "one_question": true,
+        "max_chinese_chars": 70,
+        "must_include_any": ["后来", "那件事", "之后"],
+        "must_not_include": ["二哥还说了什么", "连续追二哥"]
+      }
+    },
+    {
+      "id": "followup_015",
+      "category": "voice_follow_up",
+      "guidance_mode": "guided_interview",
+      "current_guidance_module": "person",
+      "intent": "follow_up",
+      "regenerate": true,
+      "current_messages": [
+        {"role": "assistant", "text": "你想先聊哪一位亲人？"},
+        {"role": "user", "text": "我想聊爷爷，他会修所有东西。"}
+      ],
+      "previous_messages": [],
+      "expected_checks": {
+        "one_question": true,
+        "max_chinese_chars": 80,
+        "must_include_any": ["爷爷", "修东西"],
+        "must_not_include": ["你想先聊哪一位亲人", "重复上一句"]
+      }
+    },
+    {
+      "id": "followup_016",
+      "category": "voice_follow_up",
+      "guidance_mode": "free_narration",
+      "intent": "follow_up",
+      "current_messages": [
+        {"role": "user", "text": "你是谁啊？"}
+      ],
+      "previous_messages": [],
+      "expected_checks": {
+        "one_question": true,
+        "max_chinese_chars": 90,
+        "must_include_any": ["老余", "陪你", "回忆"],
+        "must_not_include": ["我是人工智能大模型", "公司", "隐私政策"]
+      }
+    },
+    {
+      "id": "followup_017",
+      "category": "voice_follow_up",
+      "guidance_mode": "free_narration",
+      "intent": "follow_up",
+      "current_messages": [
+        {"role": "user", "text": "那会儿吧，嗯，俺们几个娃娃天天跑到晒坝头耍。"}
+      ],
+      "previous_messages": [],
+      "expected_checks": {
+        "one_question": true,
+        "max_chinese_chars": 70,
+        "must_include_any": ["晒坝", "娃娃", "那会儿"],
+        "must_not_include": ["纠正方言", "普通话是"]
+      }
+    },
+    {
+      "id": "followup_018",
+      "category": "voice_follow_up",
+      "guidance_mode": "guided_interview",
+      "current_guidance_module": "event",
+      "intent": "follow_up",
+      "current_messages": [
+        {"role": "user", "text": "那次住院以后，我才觉得身体真的不一样了。"}
+      ],
+      "previous_messages": [],
+      "expected_checks": {
+        "one_question": true,
+        "max_chinese_chars": 75,
+        "must_include_any": ["住院", "身体", "之后"],
+        "must_not_include": ["诊断", "药名", "病历"]
+      }
+    },
+    {
+      "id": "followup_019",
+      "category": "voice_follow_up",
+      "guidance_mode": "free_narration",
+      "intent": "follow_up",
+      "current_messages": [
+        {"role": "user", "text": "后来全家搬到山那边，开始几年什么都没有。"}
+      ],
+      "previous_messages": [],
+      "expected_checks": {
+        "one_question": true,
+        "max_chinese_chars": 70,
+        "must_include_any": ["搬家", "山那边", "开始几年"],
+        "must_not_include": ["具体地址", "户籍"]
+      }
+    },
+    {
+      "id": "followup_020",
+      "category": "voice_follow_up",
+      "guidance_mode": "guided_interview",
+      "current_guidance_module": "theme",
+      "intent": "follow_up",
+      "current_messages": [
+        {"role": "user", "text": "讲到这里我觉得挺满足的，今天差不多了。"}
+      ],
+      "previous_messages": [],
+      "expected_checks": {
+        "one_question": true,
+        "max_chinese_chars": 70,
+        "must_include_any": ["今天", "下次", "想接着"],
+        "must_not_include": ["继续讲", "还没讲完"]
+      }
+    },
+    {
+      "id": "asr_cleanup_001",
+      "category": "asr_cleanup",
+      "raw_transcript": "我小时候啊，嗯，住在外婆家，那个院子里有棵枣树，特别大。",
+      "expected_facts": ["小时候住在外婆家", "院子里有一棵很大的枣树"],
+      "expected_checks": {"remove_fillers": true, "preserve_facts": true, "do_not_expand": true}
+    },
+    {
+      "id": "asr_cleanup_002",
+      "category": "asr_cleanup",
+      "raw_transcript": "一九七八年吧，我考到县中，第一次离开我们村。",
+      "expected_facts": ["1978年考到县中", "第一次离开村子"],
+      "expected_checks": {"normalize_year": true, "preserve_uncertainty": true}
+    },
+    {
+      "id": "asr_cleanup_003",
+      "category": "asr_cleanup",
+      "raw_transcript": "我妈她就是，怎么说呢，天不亮就起来蒸馍，冬天手都是裂的。",
+      "expected_facts": ["母亲天不亮起床蒸馍", "冬天手会裂"],
+      "expected_checks": {"remove_hesitation": true, "preserve_emotion": true}
+    },
+    {
+      "id": "asr_cleanup_004",
+      "category": "asr_cleanup",
+      "raw_transcript": "那趟火车坐了，哎呀，差不多二十多个小时，到上海腿都麻了。",
+      "expected_facts": ["坐火车二十多个小时", "到上海时腿麻"],
+      "expected_checks": {"preserve_approximation": true, "no_new_details": true}
+    },
+    {
+      "id": "asr_cleanup_005",
+      "category": "asr_cleanup",
+      "raw_transcript": "供销社第一天上班，我连算盘都拨不好，师傅就笑我。",
+      "expected_facts": ["供销社第一天上班", "算盘拨不好", "师傅笑他"],
+      "expected_checks": {"preserve_sequence": true}
+    },
+    {
+      "id": "asr_cleanup_006",
+      "category": "asr_cleanup",
+      "raw_transcript": "父亲走那天我没哭，后来晚上一个人在厨房才哭出来。",
+      "expected_facts": ["父亲去世当天没哭", "晚上一个人在厨房哭出来"],
+      "expected_checks": {"sensitive_tone": true, "no_psychological_diagnosis": true}
+    },
+    {
+      "id": "asr_cleanup_007",
+      "category": "asr_cleanup",
+      "raw_transcript": "晒坝头那个地方，夏天热得很，大家吃完饭都搬凳子出来。",
+      "expected_facts": ["晒坝头夏天很热", "大家饭后搬凳子出来乘凉"],
+      "expected_checks": {"preserve_dialect_term": "晒坝头"}
+    },
+    {
+      "id": "asr_cleanup_008",
+      "category": "asr_cleanup",
+      "raw_transcript": "我和你大姨吵过一次，后来因为外婆生病，我们又一起照顾她。",
+      "expected_facts": ["和大姨吵过一次", "外婆生病后一起照顾她"],
+      "expected_checks": {"preserve_relationships": true}
+    },
+    {
+      "id": "asr_cleanup_009",
+      "category": "asr_cleanup",
+      "raw_transcript": "那年洪水把桥冲断了，村里人轮流背小孩过河上学。",
+      "expected_facts": ["洪水冲断桥", "村里人轮流背小孩过河上学"],
+      "expected_checks": {"preserve_event": true, "no_date_hallucination": true}
+    },
+    {
+      "id": "asr_cleanup_010",
+      "category": "asr_cleanup",
+      "raw_transcript": "我不记得具体哪一年，反正是你舅舅出生前后，我们搬的家。",
+      "expected_facts": ["不记得具体年份", "搬家在舅舅出生前后"],
+      "expected_checks": {"preserve_uncertainty": true, "do_not_invent_year": true}
+    },
+    {
+      "id": "memory_001",
+      "category": "memory_extraction",
+      "transcript_segments": [
+        {"segment_id": "s1", "text": "我小时候住在外婆家。"},
+        {"segment_id": "s2", "text": "院子里有一棵很大的枣树。"}
+      ],
+      "expected_memory_outline": [
+        {"type": "place", "summary_contains": ["外婆家", "院子"], "evidence_segment_ids": ["s1", "s2"]}
+      ],
+      "expected_checks": {"valid_json": true, "evidence_required": true}
+    },
+    {
+      "id": "memory_002",
+      "category": "memory_extraction",
+      "transcript_segments": [
+        {"segment_id": "s1", "text": "一九七八年我考到县中。"},
+        {"segment_id": "s2", "text": "那是我第一次离开村子。"}
+      ],
+      "expected_memory_outline": [
+        {"type": "period", "summary_contains": ["1978年", "县中", "离开村子"], "evidence_segment_ids": ["s1", "s2"]}
+      ],
+      "expected_checks": {"valid_json": true, "normalize_year": true}
+    },
+    {
+      "id": "memory_003",
+      "category": "memory_extraction",
+      "transcript_segments": [
+        {"segment_id": "s1", "text": "母亲冬天也天不亮就起来蒸馍。"},
+        {"segment_id": "s2", "text": "她的手常常裂口子。"}
+      ],
+      "expected_memory_outline": [
+        {"type": "person", "person": "母亲", "summary_contains": ["勤劳", "蒸馍", "手裂"], "evidence_segment_ids": ["s1", "s2"]}
+      ],
+      "expected_checks": {"valid_json": true, "no_sentimental_expansion": true}
+    },
+    {
+      "id": "memory_004",
+      "category": "memory_extraction",
+      "transcript_segments": [
+        {"segment_id": "s1", "text": "第一次去上海找工作，我坐了二十多个小时火车。"},
+        {"segment_id": "s2", "text": "到站的时候腿都麻了。"}
+      ],
+      "expected_memory_outline": [
+        {"type": "event", "summary_contains": ["第一次去上海", "找工作", "二十多个小时"], "evidence_segment_ids": ["s1", "s2"]}
+      ],
+      "expected_checks": {"valid_json": true, "preserve_approximation": true}
+    },
+    {
+      "id": "memory_005",
+      "category": "memory_extraction",
+      "transcript_segments": [
+        {"segment_id": "s1", "text": "我第一天在供销社上班，算盘拨不好。"},
+        {"segment_id": "s2", "text": "师傅笑我，但后来也是他教会我的。"}
+      ],
+      "expected_memory_outline": [
+        {"type": "work", "summary_contains": ["供销社", "算盘", "师傅"], "evidence_segment_ids": ["s1", "s2"]}
+      ],
+      "expected_checks": {"valid_json": true, "relationship_preserved": true}
+    },
+    {
+      "id": "memory_006",
+      "category": "memory_extraction",
+      "transcript_segments": [
+        {"segment_id": "s1", "text": "父亲走的那天我没哭。"},
+        {"segment_id": "s2", "text": "晚上一个人在厨房才哭出来。"}
+      ],
+      "expected_memory_outline": [
+        {"type": "event", "summary_contains": ["父亲去世", "厨房", "哭"], "evidence_segment_ids": ["s1", "s2"]}
+      ],
+      "expected_checks": {"valid_json": true, "sensitive_tone": true, "no_diagnosis": true}
+    },
+    {
+      "id": "memory_007",
+      "category": "memory_extraction",
+      "transcript_segments": [
+        {"segment_id": "s1", "text": "老家的河边以前都是柳树。"},
+        {"segment_id": "s2", "text": "夏天吃完饭，大家搬凳子去那里乘凉。"}
+      ],
+      "expected_memory_outline": [
+        {"type": "place", "summary_contains": ["老家河边", "柳树", "乘凉"], "evidence_segment_ids": ["s1", "s2"]}
+      ],
+      "expected_checks": {"valid_json": true, "place_memory": true}
+    },
+    {
+      "id": "memory_008",
+      "category": "memory_extraction",
+      "transcript_segments": [
+        {"segment_id": "s1", "text": "我和大姨吵过一次。"},
+        {"segment_id": "s2", "text": "后来外婆生病，我们又一起照顾她。"}
+      ],
+      "expected_memory_outline": [
+        {"type": "family", "summary_contains": ["大姨", "外婆生病", "一起照顾"], "evidence_segment_ids": ["s1", "s2"]}
+      ],
+      "expected_checks": {"valid_json": true, "relationship_preserved": true}
+    },
+    {
+      "id": "memory_009",
+      "category": "memory_extraction",
+      "transcript_segments": [
+        {"segment_id": "s1", "text": "那年洪水把桥冲断了。"},
+        {"segment_id": "s2", "text": "村里人轮流背小孩过河上学。"}
+      ],
+      "expected_memory_outline": [
+        {"type": "event", "summary_contains": ["洪水", "桥冲断", "背小孩过河"], "evidence_segment_ids": ["s1", "s2"]}
+      ],
+      "expected_checks": {"valid_json": true, "no_date_hallucination": true}
+    },
+    {
+      "id": "memory_010",
+      "category": "memory_extraction",
+      "transcript_segments": [
+        {"segment_id": "s1", "text": "我不记得具体哪一年。"},
+        {"segment_id": "s2", "text": "反正是你舅舅出生前后，我们搬的家。"}
+      ],
+      "expected_memory_outline": [
+        {"type": "event", "summary_contains": ["搬家", "舅舅出生前后", "年份不确定"], "evidence_segment_ids": ["s1", "s2"]}
+      ],
+      "expected_checks": {"valid_json": true, "preserve_uncertainty": true}
+    },
+    {
+      "id": "drafting_001",
+      "category": "drafting",
+      "task_type": "chapter_outline",
+      "source_memories": ["外婆家院子里的枣树", "母亲冬天蒸馍", "晒坝头乘凉"],
+      "instruction": "生成一章回忆录大纲，主题是童年生活，按时间和场景组织。",
+      "expected_checks": {"uses_only_source_memories": true, "clear_sections": true, "memoir_tone": true}
+    },
+    {
+      "id": "drafting_002",
+      "category": "drafting",
+      "task_type": "draft_paragraph",
+      "source_memories": ["第一次坐二十多个小时火车去上海找工作", "到站时腿麻", "心里又害怕又有奔头"],
+      "instruction": "写一段 300 字以内的回忆录正文，第一人称，朴素自然。",
+      "expected_checks": {"first_person": true, "max_chinese_chars": 300, "no_new_core_facts": true}
+    },
+    {
+      "id": "drafting_003",
+      "category": "drafting",
+      "task_type": "title_candidates",
+      "source_memories": ["供销社第一天上班", "算盘拨不好", "师傅笑我又教我"],
+      "instruction": "生成 5 个章节标题，不能夸张，不要网文风。",
+      "expected_checks": {"exact_count": 5, "no_clickbait": true, "source_relevant": true}
+    },
+    {
+      "id": "drafting_004",
+      "category": "drafting",
+      "task_type": "book_plan",
+      "source_memories": ["童年在外婆家", "县中读书", "上海找工作", "组建家庭", "父亲去世"],
+      "instruction": "生成一本回忆录的一级目录，章节顺序要自然。",
+      "expected_checks": {"chronological_flow": true, "balanced_chapters": true, "no_invented_life_events": true}
+    },
+    {
+      "id": "drafting_005",
+      "category": "drafting",
+      "task_type": "style_rewrite",
+      "source_text": "父亲走的那天我没哭。晚上一个人在厨房才哭出来。",
+      "instruction": "在不增加事实的前提下，改写得更适合回忆录正文，保持克制。",
+      "expected_checks": {"no_new_core_facts": true, "restrained_emotion": true, "preserve_first_person": true}
+    }
+  ]
+}

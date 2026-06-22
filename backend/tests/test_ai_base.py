@@ -6,6 +6,7 @@ from app.services import ai_story
 from app.services.ai_project_analysis import normalize_project_analysis
 from app.services.ai_text import DeepSeekTextService
 from app.services.ai_claude import ClaudeTextService
+from app.services.ai_volc import VolcArkTextService
 
 
 # ── Helper Unit Tests ──────────────────────────
@@ -213,12 +214,14 @@ def _make_mock_response_raw(content: str, raw: dict):
 
 
 class TestTemplateMethodBothServices:
-    """Verify public methods work on both ClaudeTextService and DeepSeekTextService."""
+    """Verify public methods work on all text provider implementations."""
 
-    @pytest.fixture(params=["claude", "deepseek"])
+    @pytest.fixture(params=["claude", "deepseek", "volc"])
     def service(self, request):
         if request.param == "claude":
             return ClaudeTextService()
+        if request.param == "volc":
+            return VolcArkTextService()
         return DeepSeekTextService()
 
     @pytest.mark.asyncio
@@ -325,6 +328,9 @@ class TestCallLlmContract:
             result = await service._call_llm("sys", "user")
         assert isinstance(result, str)
         assert result == "world"
+        _, kwargs = inst.post.call_args
+        assert kwargs["json"]["model"] == "deepseek-v4-flash"
+        assert kwargs["json"]["thinking"] == {"type": "disabled"}
 
     @pytest.mark.asyncio
     async def test_deepseek_returns_tuple_with_raw(self):
@@ -344,6 +350,70 @@ class TestCallLlmContract:
             result = await service._call_llm("sys", "user", return_raw=True)
         assert isinstance(result, tuple)
         assert result[0] == "world"
+
+    @pytest.mark.asyncio
+    async def test_volc_returns_string(self):
+        service = VolcArkTextService()
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {
+            "output": [
+                {
+                    "type": "message",
+                    "content": [{"type": "output_text", "text": "doubao"}],
+                }
+            ]
+        }
+        mock_resp.raise_for_status = MagicMock()
+
+        with patch("httpx.AsyncClient") as mock_client:
+            inst = AsyncMock()
+            inst.post = AsyncMock(return_value=mock_resp)
+            inst.__aenter__ = AsyncMock(return_value=inst)
+            inst.__aexit__ = AsyncMock(return_value=None)
+            mock_client.return_value = inst
+
+            result = await service._call_llm("sys", "user")
+        assert isinstance(result, str)
+        assert result == "doubao"
+        args, kwargs = inst.post.call_args
+        assert args[0] == "https://ark.cn-beijing.volces.com/api/v3/responses"
+        assert kwargs["json"]["model"] == "doubao-seed-2-0-pro-260215"
+        assert kwargs["json"]["instructions"] == "sys"
+        assert kwargs["json"]["input"] == [
+            {"role": "user", "content": [{"type": "input_text", "text": "user"}]}
+        ]
+        assert kwargs["json"]["max_output_tokens"] == 4000
+        assert kwargs["json"]["thinking"] == {"type": "disabled"}
+
+    @pytest.mark.asyncio
+    async def test_volc_returns_tuple_with_raw(self):
+        service = VolcArkTextService()
+        raw = {
+            "output": [
+                {
+                    "type": "reasoning",
+                    "summary": [{"type": "summary_text", "text": "hidden"}],
+                },
+                {
+                    "type": "message",
+                    "content": [{"type": "output_text", "text": "doubao"}],
+                },
+            ]
+        }
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = raw
+        mock_resp.raise_for_status = MagicMock()
+
+        with patch("httpx.AsyncClient") as mock_client:
+            inst = AsyncMock()
+            inst.post = AsyncMock(return_value=mock_resp)
+            inst.__aenter__ = AsyncMock(return_value=inst)
+            inst.__aexit__ = AsyncMock(return_value=None)
+            mock_client.return_value = inst
+
+            result = await service._call_llm("sys", "user", return_raw=True)
+        assert isinstance(result, tuple)
+        assert result[0] == "doubao"
 
     @pytest.mark.asyncio
     async def test_deepseek_uses_text_provider_concurrency_limit(self, monkeypatch):
@@ -388,6 +458,27 @@ class TestCallLlmContract:
         assert limiter.calls == [("ai_text", 5)]
 
     @pytest.mark.asyncio
+    async def test_volc_uses_text_provider_concurrency_limit(self, monkeypatch):
+        service = VolcArkTextService()
+        service.max_concurrent_requests = 4
+        limiter = RecordingLimiter()
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"choices": [{"message": {"content": "doubao"}}]}
+        mock_resp.raise_for_status = MagicMock()
+        monkeypatch.setattr("app.services.ai_volc.provider_concurrency_limiter", limiter)
+
+        with patch("httpx.AsyncClient") as mock_client:
+            inst = AsyncMock()
+            inst.post = AsyncMock(return_value=mock_resp)
+            inst.__aenter__ = AsyncMock(return_value=inst)
+            inst.__aexit__ = AsyncMock(return_value=None)
+            mock_client.return_value = inst
+
+            await service._call_llm("sys", "user")
+
+        assert limiter.calls == [("ai_text", 4)]
+
+    @pytest.mark.asyncio
     async def test_provider_and_model_properties(self):
         claude = ClaudeTextService()
         assert claude.provider_name == "claude"
@@ -395,7 +486,11 @@ class TestCallLlmContract:
 
         deepseek = DeepSeekTextService()
         assert deepseek.provider_name == "deepseek"
-        assert deepseek.model_name == "deepseek-chat"
+        assert deepseek.model_name == "deepseek-v4-flash"
+
+        volc = VolcArkTextService()
+        assert volc.provider_name == "volc_ark"
+        assert volc.model_name == "doubao-seed-2-0-pro-260215"
 
 
 class RecordingLimiter:

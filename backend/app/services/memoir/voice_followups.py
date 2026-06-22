@@ -30,6 +30,10 @@ AI_FOLLOW_UP_UNAVAILABLE_MESSAGE = "AI 服务暂时不可用，请稍后重试�
 PROMPT_VERSION = "memoir_voice_followup_v3"
 MAX_CONTEXT_MESSAGES = 12
 MAX_PREVIOUS_CONTEXT_MESSAGES = 8
+FOLLOW_UP_MAX_TOKENS = 180
+GUIDED_FOLLOW_UP_MAX_TOKENS = 240
+FREE_OPENING_MAX_TOKENS = 260
+GUIDED_OPENING_MAX_TOKENS = 320
 logger = logging.getLogger(__name__)
 
 
@@ -89,6 +93,59 @@ def _has_user_message(messages: list[MemoirChatMessage]) -> bool:
         message.role == MemoirChatMessageRole.USER.value and message.content_text.strip()
         for message in messages
     )
+
+
+def _llm_max_tokens(
+    voice_session: MemoirVoiceSession,
+    *,
+    has_user_message: bool,
+    regenerate: bool,
+) -> int:
+    guidance_mode = MemoirGuidanceMode(voice_session.guidance_mode)
+    if not has_user_message:
+        if guidance_mode == MemoirGuidanceMode.GUIDED_INTERVIEW:
+            return GUIDED_OPENING_MAX_TOKENS
+        return FREE_OPENING_MAX_TOKENS
+    if guidance_mode == MemoirGuidanceMode.GUIDED_INTERVIEW or regenerate:
+        return GUIDED_FOLLOW_UP_MAX_TOKENS
+    return FOLLOW_UP_MAX_TOKENS
+
+
+def _extract_finish_reason(raw_response: dict | None) -> str | None:
+    if not raw_response:
+        return None
+    choices = raw_response.get("choices")
+    if isinstance(choices, list) and choices:
+        first_choice = choices[0] if isinstance(choices[0], dict) else {}
+        finish_reason = first_choice.get("finish_reason")
+        if isinstance(finish_reason, str):
+            return finish_reason
+    status = raw_response.get("status")
+    if isinstance(status, str):
+        if status == "incomplete":
+            incomplete = raw_response.get("incomplete_details")
+            if isinstance(incomplete, dict):
+                reason = incomplete.get("reason")
+                if isinstance(reason, str) and reason:
+                    return reason
+            return status
+        return status
+    return None
+
+
+def _is_truncated_response(finish_reason: str | None) -> bool:
+    return finish_reason in {"length", "max_output_tokens", "incomplete"}
+
+
+def _question_mark_count(text: str) -> int:
+    return text.count("？") + text.count("?")
+
+
+def _usage_metadata(raw_response: dict | None) -> dict:
+    if not raw_response:
+        return {}
+    usage = raw_response.get("usage")
+    return usage if isinstance(usage, dict) else {}
 
 
 def _build_user_prompt(
@@ -247,14 +304,26 @@ async def generate_voice_follow_up(
     )
     has_user_message = _has_user_message(list(voice_session.messages))
     guidance_intent = "follow_up" if has_user_message else "opening"
+    llm_max_tokens = _llm_max_tokens(
+        voice_session,
+        has_user_message=has_user_message,
+        regenerate=req.regenerate,
+    )
+    raw_response: dict | None = None
     try:
-        content = await client._call_llm(
+        llm_response = await client._call_llm(
             SYSTEM_PROMPT,
             prompt,
             temperature=0.35,
-            max_tokens=180,
+            max_tokens=llm_max_tokens,
             timeout=60.0,
+            return_raw=True,
         )
+        if isinstance(llm_response, tuple):
+            content = llm_response[0]
+            raw_response = llm_response[1] if isinstance(llm_response[1], dict) else None
+        else:
+            content = llm_response
     except HTTPException as exc:
         if exc.status_code < 500:
             raise
@@ -275,6 +344,7 @@ async def generate_voice_follow_up(
     follow_up_text = str(content).strip().strip("\"“”")
     if not follow_up_text:
         raise HTTPException(status_code=502, detail="AI 未返回可用开场或追问")
+    finish_reason = _extract_finish_reason(raw_response)
 
     message = MemoirChatMessage(
         project_id=voice_session.project_id,
@@ -291,6 +361,12 @@ async def generate_voice_follow_up(
             "model": client.model_name,
             "regenerate": req.regenerate,
             "has_user_message": has_user_message,
+            "max_tokens": llm_max_tokens,
+            "response_chars": len(follow_up_text),
+            "question_mark_count": _question_mark_count(follow_up_text),
+            "finish_reason": finish_reason,
+            "truncated": _is_truncated_response(finish_reason),
+            "usage": _usage_metadata(raw_response),
         },
     )
     db.add(message)
