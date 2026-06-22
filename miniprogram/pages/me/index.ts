@@ -2,6 +2,7 @@ import type { MemoirVoiceProgressResponse } from "../../domain/voice-chat";
 import type { TTSSpeedOption, TTSSettingsScope, TTSVoiceOption } from "../../services/tts-settings";
 import {
   getMemoirIdentity,
+  isValidEmail,
   loginWithEmail,
   loginWithWeChat,
   logoutBackendSession,
@@ -35,14 +36,15 @@ interface MeData {
   displayName: string;
   nameDraft: string;
   avatarText: string;
+  avatarUrl: string;
   email: string;
+  accountEmailText: string;
+  passwordLoginEnabled: boolean;
   emailInput: string;
   password: string;
   credentialEmail: string;
   credentialPassword: string;
-  credentialDisplayName: string;
   accountMode: boolean;
-  credentialsMode: boolean;
   projectTitle: string;
   projectCount: number;
   sessionCount: number;
@@ -100,6 +102,13 @@ function displayNameForUser(displayName: string, email: string): string {
   return email.split("@", 1)[0].trim() || "作者";
 }
 
+function accountEmailText(email: string, passwordLoginEnabled: boolean): string {
+  if (!passwordLoginEnabled && isProvisionalWeChatEmail(email)) {
+    return "微信账号登录";
+  }
+  return email;
+}
+
 function formatAudioDuration(totalSeconds: number): string {
   const seconds = Math.max(0, Math.round(totalSeconds || 0));
   const minutes = Math.floor(seconds / 60);
@@ -117,11 +126,6 @@ function voiceStatsData(progress: MemoirVoiceProgressResponse) {
     totalUserCharCount: progress.total_user_char_count,
     totalAudioText: formatAudioDuration(progress.total_audio_seconds),
   };
-}
-
-function credentialDisplayName(displayName: string): string {
-  const normalizedName = displayName.trim();
-  return normalizedName && normalizedName !== WECHAT_PLACEHOLDER_DISPLAY_NAME ? normalizedName : "";
 }
 
 function ttsScopeData(scope: TTSSettingsScope, settings: { voice: string; speedRatio: number }): Partial<MeData> {
@@ -149,7 +153,7 @@ function ttsProfilesData(): Partial<MeData> {
   };
 }
 
-function loggedOutData(credentialsMode = false): Partial<MeData> {
+function loggedOutData(): Partial<MeData> {
   return {
     loggedIn: false,
     editingName: false,
@@ -157,14 +161,22 @@ function loggedOutData(credentialsMode = false): Partial<MeData> {
     displayName: "",
     nameDraft: "",
     avatarText: "作",
+    avatarUrl: "",
     email: "",
+    accountEmailText: "",
+    passwordLoginEnabled: false,
+    emailInput: "",
+    password: "",
+    credentialEmail: "",
+    credentialPassword: "",
+    accountMode: false,
+    credentialsLoading: false,
     projectTitle: "",
     projectCount: 0,
     sessionCount: 0,
     utteranceCount: 0,
     totalUserCharCount: 0,
     totalAudioText: "0 秒",
-    credentialsMode,
   };
 }
 
@@ -176,7 +188,6 @@ Page<MeData, {
   changePassword(event: InputEvent): void;
   changeCredentialEmail(event: InputEvent): void;
   changeCredentialPassword(event: InputEvent): void;
-  changeCredentialDisplayName(event: InputEvent): void;
   toggleAccountMode(): void;
   submitWeChat(): Promise<void>;
   submitAccount(): Promise<void>;
@@ -203,14 +214,15 @@ Page<MeData, {
     displayName: "",
     nameDraft: "",
     avatarText: "作",
+    avatarUrl: "",
     email: "",
+    accountEmailText: "",
+    passwordLoginEnabled: false,
     emailInput: "",
     password: "",
     credentialEmail: "",
     credentialPassword: "",
-    credentialDisplayName: "",
     accountMode: false,
-    credentialsMode: false,
     projectTitle: "",
     projectCount: 0,
     sessionCount: 0,
@@ -239,29 +251,22 @@ Page<MeData, {
     this.setData({ loading: true, error: "" });
     try {
       const identity = await getMemoirIdentity();
-      if (!identity.password_login_enabled) {
-        this.setData({
-          ...loggedOutData(true),
-          accountMode: false,
-          credentialDisplayName: credentialDisplayName(identity.display_name),
-        });
-        return;
-      }
       const displayName = displayNameForUser(identity.display_name, identity.email);
       this.setData({
         loggedIn: true,
         accountMode: false,
-        credentialsMode: false,
         emailInput: "",
         password: "",
         credentialEmail: "",
         credentialPassword: "",
-        credentialDisplayName: "",
         displayName,
         nameDraft: displayName,
         editingName: false,
         avatarText: Array.from(displayName)[0] || "作",
+        avatarUrl: identity.avatar_url || "",
         email: identity.email,
+        accountEmailText: accountEmailText(identity.email, identity.password_login_enabled),
+        passwordLoginEnabled: identity.password_login_enabled,
         projectTitle: identity.active_project?.title || "尚未创建回忆录",
         projectCount: identity.projects.length,
         sessionCount: 0,
@@ -275,11 +280,11 @@ Page<MeData, {
       }
     } catch (error) {
       if (error instanceof ApiError && [401, 403].includes(error.statusCode)) {
-        this.setData(loggedOutData(false));
+        this.setData(loggedOutData());
         return;
       }
       this.setData({
-        ...loggedOutData(false),
+        ...loggedOutData(),
         error: error instanceof Error ? error.message : "我的页面加载失败",
       });
     } finally {
@@ -303,10 +308,6 @@ Page<MeData, {
     this.setData({ credentialPassword: event.detail.value, error: "" });
   },
 
-  changeCredentialDisplayName(event) {
-    this.setData({ credentialDisplayName: event.detail.value, error: "" });
-  },
-
   toggleAccountMode() {
     this.setData({
       accountMode: !this.data.accountMode,
@@ -320,16 +321,7 @@ Page<MeData, {
     }
     this.setData({ wechatLoading: true, error: "" });
     try {
-      const response = await loginWithWeChat();
-      if (response.needs_credentials || !response.user.password_login_enabled) {
-        this.setData({
-          ...loggedOutData(true),
-          accountMode: false,
-          credentialDisplayName: credentialDisplayName(response.user.display_name),
-          error: "",
-        });
-        return;
-      }
+      await loginWithWeChat();
       await this.loadMe();
       if (this.data.loggedIn) {
         wx.showToast({ title: "已登录", icon: "success" });
@@ -351,6 +343,10 @@ Page<MeData, {
     const password = this.data.password;
     if (!email || !password) {
       this.setData({ error: "请输入邮箱和密码" });
+      return;
+    }
+    if (!isValidEmail(email)) {
+      this.setData({ error: "请输入正确的邮箱地址" });
       return;
     }
     this.setData({ loading: true, error: "" });
@@ -375,13 +371,12 @@ Page<MeData, {
     }
     const email = this.data.credentialEmail.trim();
     const password = this.data.credentialPassword;
-    const displayName = this.data.credentialDisplayName.trim();
-    if (!displayName) {
-      this.setData({ error: "请输入昵称，可直接使用微信昵称" });
-      return;
-    }
     if (!email || !password) {
       this.setData({ error: "请输入邮箱和密码" });
+      return;
+    }
+    if (!isValidEmail(email)) {
+      this.setData({ error: "请输入正确的邮箱地址" });
       return;
     }
     if (password.length < 8) {
@@ -393,7 +388,6 @@ Page<MeData, {
       const response = await setAccountCredentials({
         email,
         password,
-        display_name: displayName,
       });
       if (response.needs_credentials) {
         this.setData({ error: "账号还没有设置完成，请重新提交" });
@@ -449,6 +443,8 @@ Page<MeData, {
         nameDraft: normalizedName,
         avatarText: Array.from(normalizedName)[0] || "作",
         email: user.email,
+        accountEmailText: accountEmailText(user.email, user.password_login_enabled),
+        passwordLoginEnabled: user.password_login_enabled,
         editingName: false,
       });
       wx.showToast({ title: "已保存", icon: "success" });
@@ -510,15 +506,9 @@ Page<MeData, {
     } finally {
       replaceMemoirStore({});
       this.setData({
-        ...loggedOutData(false),
+        ...loggedOutData(),
         loading: false,
         error: "",
-        emailInput: "",
-        password: "",
-        credentialEmail: "",
-        credentialPassword: "",
-        credentialDisplayName: "",
-        accountMode: false,
       });
       wx.showToast({ title: "已退出", icon: "success" });
     }

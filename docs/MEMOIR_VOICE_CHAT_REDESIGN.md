@@ -62,7 +62,7 @@ Voice Session -> Chat Messages -> Realtime Transcript -> Memory Extraction -> Wr
 当前小程序代码已从独立入口进入新版链路，避免和 legacy 页面互相缠绕：
 
 ```text
-miniprogram/pages/login/                      # 微信登录、Pawtale 账号登录、首次设 Web 登录凭据
+miniprogram/pages/login/                      # 微信登录、Pawtale 账号登录
 miniprogram/pages/home/                       # 新版语音入口和当前回忆录入口
 miniprogram/pages/projects/                   # 回忆录项目创建、切换、重命名、删除
 miniprogram/pages/voice-chat/                 # 新版老人端实时语音聊天
@@ -98,7 +98,7 @@ Git 上建议用以下边界区分：
 - 第二批 PR 已完成 LLM 动态追问、小程序追问交互、assistant TTS 播放、客户端自动收尾和进度页。
 - 第三批 PR 已完成自动续听、TTS 文本播放进度、转写自动校正、AI 问题与回答连播、主 tab 拆分和我的页项目/TTS 设置。
 - 小程序 legacy 固定问答页面、旧非实时录音上传代码和微信云函数链路已清理。
-- 登录链路已迁移为统一 Pawtale 账号：已有 Web 用户用邮箱密码登录小程序，新用户用微信登录后设置 Web 端邮箱密码。
+- 登录链路已迁移为统一 Pawtale 账号：已有 Web 用户用邮箱密码登录小程序，新用户用微信登录后直接进入小程序，Web 端邮箱密码可稍后在“我的”里设置。
 
 ## 产品体验
 

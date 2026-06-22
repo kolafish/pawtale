@@ -662,10 +662,6 @@ Page<BookData, {
     this.setData({ loading: true, error: "" });
     try {
       const identity = await getMemoirIdentity();
-      if (!identity.password_login_enabled) {
-        this.setData(guestBookData());
-        return;
-      }
       const projectId = identity.active_project_id;
       const projectTitle = identity.active_project?.title || "尚未创建回忆录";
       this.setData({ needsLogin: false, projectId, projectTitle });

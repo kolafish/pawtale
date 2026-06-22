@@ -17,6 +17,7 @@ function loadMePage({ authExports = {}, voiceApiExports = {}, ttsExports = {} } 
     filename: authPath,
     loaded: true,
     exports: {
+      isValidEmail: (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()),
       getMemoirIdentity: async () => {
         throw new Error("getMemoirIdentity was not mocked");
       },
@@ -121,38 +122,40 @@ test("me shows the login panel instead of redirecting when the session is missin
   await page.loadMe.call(context);
 
   assert.equal(context.data.loggedIn, false);
-  assert.equal(context.data.credentialsMode, false);
   assert.equal(context.data.error, "");
   assert.equal(context.data.loading, false);
 });
 
-test("me keeps new wechat users in credential setup mode", async () => {
+test("me treats wechat-only users as logged in and shows wechat profile", async () => {
   const { page } = loadMePage({
     authExports: {
-      loginWithWeChat: async () => ({
-        user: {
-          id: "user-1",
-          email: "wechat_x@wechat.local",
-          password_login_enabled: false,
-          display_name: "微信用户",
-          created_at: "2026-06-15T00:00:00",
-        },
-        needs_credentials: true,
+      getMemoirIdentity: async () => ({
+        id: "user-1",
+        email: "wechat_x@wechat.local",
+        password_login_enabled: false,
+        display_name: "微信昵称",
+        avatar_url: "https://avatar.example.com/wechat.png",
+        created_at: "2026-06-15T00:00:00",
+        active_project_id: "",
+        active_project: null,
+        projects: [],
       }),
     },
   });
   const context = pageContext(page);
 
-  await page.submitWeChat.call(context);
+  await page.loadMe.call(context);
 
-  assert.equal(context.data.loggedIn, false);
-  assert.equal(context.data.credentialsMode, true);
+  assert.equal(context.data.loggedIn, true);
+  assert.equal(context.data.passwordLoginEnabled, false);
+  assert.equal(context.data.displayName, "微信昵称");
+  assert.equal(context.data.avatarUrl, "https://avatar.example.com/wechat.png");
+  assert.equal(context.data.accountEmailText, "微信账号登录");
   assert.equal(context.data.accountMode, false);
-  assert.equal(context.data.credentialDisplayName, "");
-  assert.equal(context.data.wechatLoading, false);
 });
 
-test("me pre-fills credential nickname from wechat login response", async () => {
+test("me refreshes profile after wechat login", async () => {
+  let refreshed = false;
   const { page } = loadMePage({
     authExports: {
       loginWithWeChat: async () => ({
@@ -167,15 +170,26 @@ test("me pre-fills credential nickname from wechat login response", async () => 
       }),
     },
   });
-  const context = pageContext(page);
+  global.wx = {
+    showToast() {},
+  };
+  const context = {
+    ...pageContext(page),
+    async loadMe() {
+      refreshed = true;
+      this.setData({ loggedIn: true });
+    },
+  };
 
   await page.submitWeChat.call(context);
 
-  assert.equal(context.data.credentialsMode, true);
-  assert.equal(context.data.credentialDisplayName, "微信昵称");
+  assert.equal(refreshed, true);
+  assert.equal(context.data.loggedIn, true);
+  assert.equal(context.data.wechatLoading, false);
+  delete global.wx;
 });
 
-test("me requires a nickname when setting first login credentials", async () => {
+test("me validates email before setting Web login credentials", async () => {
   let credentialsCalls = 0;
   const { page } = loadMePage({
     authExports: {
@@ -195,15 +209,61 @@ test("me requires a nickname when setting first login credentials", async () => 
     },
   });
   const context = pageContext(page, {
-    credentialEmail: "author@example.com",
+    credentialEmail: "author",
     credentialPassword: "password123",
-    credentialDisplayName: "   ",
   });
 
   await page.submitCredentials.call(context);
 
   assert.equal(credentialsCalls, 0);
-  assert.match(context.data.error, /昵称/);
+  assert.match(context.data.error, /邮箱/);
+});
+
+test("me saves Web login credentials without overriding wechat nickname", async () => {
+  const credentialsCalls = [];
+  let refreshed = false;
+  const { page } = loadMePage({
+    authExports: {
+      setAccountCredentials: async (input) => {
+        credentialsCalls.push(input);
+        return {
+          user: {
+            id: "user-1",
+            email: input.email,
+            password_login_enabled: true,
+            display_name: "微信昵称",
+            created_at: "2026-06-15T00:00:00",
+          },
+          needs_credentials: false,
+        };
+      },
+    },
+  });
+  global.wx = {
+    showToast() {},
+  };
+  const context = {
+    ...pageContext(page, {
+      credentialEmail: " author@example.com ",
+      credentialPassword: "password123",
+    }),
+    async loadMe() {
+      refreshed = true;
+      this.setData({ loggedIn: true, passwordLoginEnabled: true });
+    },
+  };
+
+  await page.submitCredentials.call(context);
+
+  assert.deepEqual(credentialsCalls, [
+    {
+      email: "author@example.com",
+      password: "password123",
+    },
+  ]);
+  assert.equal(refreshed, true);
+  assert.equal(context.data.passwordLoginEnabled, true);
+  delete global.wx;
 });
 
 test("me refreshes profile after Pawtale account login", async () => {
