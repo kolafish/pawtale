@@ -154,6 +154,26 @@
 
   <view class="section">
     <view class="setting-header">
+      <text class="section-title">AI 模型</text>
+      <text class="setting-current">{{aiModelLabel}}</text>
+    </view>
+    <view class="voice-options">
+      <view
+        wx:for="{{aiModelOptions}}"
+        wx:key="value"
+        class="voice-option {{item.value === aiModel ? 'selected' : ''}}"
+        data-model="{{item.value}}"
+        bindtap="selectAIModel"
+        hover-class="tap-hover"
+      >
+        <text class="voice-label">{{item.label}}</text>
+        <text class="voice-desc">{{item.description}}</text>
+      </view>
+    </view>
+  </view>
+
+  <view class="section">
+    <view class="setting-header">
       <text class="section-title">当前项目统计</text>
       <text wx:if="{{voiceStatsLoading}}" class="setting-current">更新中</text>
     </view>

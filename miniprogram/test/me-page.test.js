@@ -3,14 +3,16 @@ require("./register-ts");
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-function loadMePage({ authExports = {}, voiceApiExports = {}, ttsExports = {} } = {}) {
+function loadMePage({ authExports = {}, voiceApiExports = {}, ttsExports = {}, aiModelExports = {} } = {}) {
   const authPath = require.resolve("../services/auth.ts");
   const voiceApiPath = require.resolve("../services/memoir-voice-api.ts");
   const ttsPath = require.resolve("../services/tts-settings.ts");
+  const aiModelPath = require.resolve("../services/ai-model-settings.ts");
   const mePath = require.resolve("../pages/me/index.ts");
   delete require.cache[authPath];
   delete require.cache[voiceApiPath];
   delete require.cache[ttsPath];
+  delete require.cache[aiModelPath];
   delete require.cache[mePath];
   require.cache[authPath] = {
     id: authPath,
@@ -79,6 +81,31 @@ function loadMePage({ authExports = {}, voiceApiExports = {}, ttsExports = {} } 
       ttsSpeedLabel: () => "正常 1.0x",
       ttsVoiceLabel: () => "默认音色",
       ...ttsExports,
+    },
+  };
+  require.cache[aiModelPath] = {
+    id: aiModelPath,
+    filename: aiModelPath,
+    loaded: true,
+    exports: {
+      AI_MODEL_OPTIONS: [
+        {
+          value: "deepseek-v4-pro",
+          label: "DeepSeek V4 Pro",
+          description: "质量优先",
+        },
+        {
+          value: "doubao-seed-2-0-pro-260215",
+          label: "Doubao Seed 2.0 Pro",
+          description: "豆包旗舰模型",
+        },
+      ],
+      aiModelLabel: (model) => (
+        model === "doubao-seed-2-0-pro-260215" ? "Doubao Seed 2.0 Pro" : "DeepSeek V4 Pro"
+      ),
+      readSelectedAIModel: () => "deepseek-v4-pro",
+      saveSelectedAIModel: (model) => model,
+      ...aiModelExports,
     },
   };
 
@@ -391,5 +418,38 @@ test("me saves chat and book TTS settings independently", () => {
   assert.equal(context.data.chatTTSSpeedRatio, 1.5);
   assert.equal(context.data.chatTTSSpeedLabel, "1.5x");
   assert.equal(toastCalls.length, 2);
+  delete global.wx;
+});
+
+test("me saves selected AI model", () => {
+  const saved = [];
+  const { page } = loadMePage({
+    aiModelExports: {
+      saveSelectedAIModel: (model) => {
+        saved.push(model);
+        return model === "doubao-seed-2-0-pro-260215" ? model : "deepseek-v4-pro";
+      },
+    },
+  });
+  const toastCalls = [];
+  global.wx = {
+    showToast(input) {
+      toastCalls.push(input);
+    },
+  };
+  const context = pageContext(page);
+
+  page.selectAIModel.call(context, {
+    currentTarget: {
+      dataset: {
+        model: "doubao-seed-2-0-pro-260215",
+      },
+    },
+  });
+
+  assert.deepEqual(saved, ["doubao-seed-2-0-pro-260215"]);
+  assert.equal(context.data.aiModel, "doubao-seed-2-0-pro-260215");
+  assert.equal(context.data.aiModelLabel, "Doubao Seed 2.0 Pro");
+  assert.equal(toastCalls.length, 1);
   delete global.wx;
 });
