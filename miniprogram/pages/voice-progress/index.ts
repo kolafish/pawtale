@@ -17,6 +17,8 @@ interface VoiceSessionSummaryView extends MemoirVoiceSessionSummary {
   updatedText: string;
   durationText: string;
   canContinue: boolean;
+  canViewTranscripts: boolean;
+  actionText: string;
 }
 
 interface ModuleProgressView extends MemoirVoiceModuleProgress {
@@ -111,6 +113,20 @@ function formatDuration(seconds: number): string {
   return rest ? `${minutes}m ${rest}s` : `${minutes}m`;
 }
 
+export function canContinueVoiceSession(status: string): boolean {
+  return status === "created" || status === "listening" || status === "speaking";
+}
+
+function sessionActionText(item: MemoirVoiceSessionSummary): string {
+  if (canContinueVoiceSession(item.status)) {
+    return "继续";
+  }
+  if (item.status === "stopped") {
+    return "查看记录";
+  }
+  return "不可继续";
+}
+
 function toSessionView(item: MemoirVoiceSessionSummary): VoiceSessionSummaryView {
   return {
     ...item,
@@ -119,7 +135,9 @@ function toSessionView(item: MemoirVoiceSessionSummary): VoiceSessionSummaryView
     moduleText: item.guidance_mode === "free_narration" ? "自由讲述" : moduleText(item.current_guidance_module),
     updatedText: formatDate(item.updated_at || item.created_at),
     durationText: formatDuration(item.total_audio_seconds),
-    canContinue: item.status !== "failed",
+    canContinue: canContinueVoiceSession(item.status),
+    canViewTranscripts: item.status === "stopped",
+    actionText: sessionActionText(item),
   };
 }
 
@@ -178,7 +196,15 @@ Page<ProgressData, {
   continueSession(event) {
     const id = String(event.currentTarget.dataset.id || "");
     const item = this.data.sessions.find((candidate) => candidate.id === id);
-    if (!item || !item.canContinue) {
+    if (!item) {
+      return;
+    }
+    if (item.canViewTranscripts) {
+      this.openTranscripts();
+      return;
+    }
+    if (!item.canContinue) {
+      this.setData({ error: "这次访谈异常结束，请返回首页重新开始" });
       return;
     }
     const query = [

@@ -110,6 +110,7 @@ interface VoiceChatData {
   persistenceStateText: string;
   errorKindText: string;
   voiceAuthorizationAgreed: boolean;
+  finishingSession: boolean;
 }
 
 let streamingClient: MemoirStreamingAsrClient | null = null;
@@ -126,7 +127,7 @@ Page<VoiceChatData, {
   openVoiceAuthorization(): void;
   ensureVoiceAuthorization(autoTriggered?: boolean): boolean;
   hydrateVoiceSessionSnapshot(): void;
-  refreshVoiceSessionSnapshot(): Promise<void>;
+  refreshVoiceSessionSnapshot(): Promise<MemoirVoiceSessionDetail | null>;
   confirmSavedTranscriptSnapshot(event: VoiceGatewayServerEvent): Promise<void>;
   applyVoiceSessionDetail(detail: MemoirVoiceSessionDetail): void;
   persistCurrentTranscriptSnapshot(): void;
@@ -222,6 +223,7 @@ Page<VoiceChatData, {
     persistenceStateText: "等待识别",
     errorKindText: "",
     voiceAuthorizationAgreed: false,
+    finishingSession: false,
   },
 
   async onLoad(query) {
@@ -245,9 +247,14 @@ Page<VoiceChatData, {
     this.setData({ connecting: true });
     await this.refreshVoiceSessionSnapshot();
     this.setData({ connecting: false });
-    if (this.data.voiceAuthorizationAgreed) {
+    if (
+      this.data.voiceAuthorizationAgreed
+      && this.data.status !== "closed"
+      && this.data.status !== "error"
+    ) {
       await this.connectGateway();
-    } else {
+    }
+    if (!this.data.voiceAuthorizationAgreed) {
       this.setData({
         statusText: "等待声纹授权",
         autoListenStateText: "同意后才会自动收音",
@@ -366,7 +373,7 @@ Page<VoiceChatData, {
 
   async refreshVoiceSessionSnapshot() {
     if (!this.data.voiceSessionId) {
-      return;
+      return null;
     }
     try {
       const detail = await getMemoirVoiceSession(this.data.voiceSessionId);
@@ -375,8 +382,10 @@ Page<VoiceChatData, {
       if (detail.session.status !== "stopped" && detail.session.status !== "failed") {
         this.maybeGenerateOpeningFollowUp();
       }
+      return detail;
     } catch (error) {
       console.warn("refresh voice session snapshot failed", error);
+      return null;
     }
   },
 
@@ -410,7 +419,24 @@ Page<VoiceChatData, {
     const lastFollowUpSourceMessageId = coveredSourceMessageId || this.data.lastFollowUpSourceMessageId;
     const assistantLine = visibleAssistantLine(nextLines, this.data.dismissedFollowUpMessageId);
     const assistantCopy = assistantPanelCopy(nextLines);
+    const sessionPatch: Partial<VoiceChatData> = {};
+    if (detail.session.status === "stopped") {
+      sessionPatch.status = "closed";
+      sessionPatch.statusText = statusText("closed");
+      sessionPatch.primaryActionText = "已结束";
+      sessionPatch.recording = false;
+      sessionPatch.persistenceStateText = "已保存";
+    }
+    if (detail.session.status === "failed") {
+      sessionPatch.status = "error";
+      sessionPatch.statusText = statusText("error");
+      sessionPatch.primaryActionText = "重新开始";
+      sessionPatch.recording = false;
+      sessionPatch.persistenceStateText = "会话异常";
+      sessionPatch.error = detail.session.error_message || "语音会话异常结束，请返回首页重新开始";
+    }
     this.setData({
+      ...sessionPatch,
       guidanceMode,
       currentGuidanceModule,
       modeLabel: voiceGuidanceLabel(guidanceMode, currentGuidanceModule),
@@ -922,9 +948,22 @@ Page<VoiceChatData, {
   },
 
   async finishSession() {
+    if (this.data.finishingSession) {
+      return;
+    }
     this.cancelFollowUpTTS();
+    this.setData({
+      finishingSession: true,
+      error: "",
+      recording: false,
+      status: "stopping",
+      statusText: statusText("stopping"),
+      primaryActionText: "正在结束",
+      persistenceStateText: this.data.recording ? "正在保存最后一句" : "正在结束",
+    });
     if (!streamingClient) {
       await this.refreshVoiceSessionSnapshot();
+      this.setData({ finishingSession: false });
       return;
     }
     const client = streamingClient;
@@ -933,11 +972,13 @@ Page<VoiceChatData, {
       streamingClient = null;
       this.setData({
         recording: false,
-        primaryActionText: "继续说话",
+        primaryActionText: "已结束",
         status: "closed",
         statusText: statusText("closed"),
+        persistenceStateText: "正在同步",
       });
       await this.refreshVoiceSessionSnapshot();
+      this.setData({ persistenceStateText: "已保存" });
       wx.showModal({
         title: "访谈已结束",
         content: "可以到转写记录里查看和校正文稿。",
@@ -950,7 +991,10 @@ Page<VoiceChatData, {
         },
       });
     } catch (error) {
+      await this.refreshVoiceSessionSnapshot();
       this.handleError(error instanceof Error ? error.message : "语音会话结束失败");
+    } finally {
+      this.setData({ finishingSession: false });
     }
   },
 

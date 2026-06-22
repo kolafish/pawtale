@@ -62,10 +62,10 @@
         <button
           class="continue-button"
           data-id="{{item.id}}"
-          disabled="{{!item.canContinue}}"
+          disabled="{{!item.canContinue && !item.canViewTranscripts}}"
           bindtap="continueSession"
         >
-          继续
+          {{item.actionText}}
         </button>
       </view>
       <view class="session-stats">

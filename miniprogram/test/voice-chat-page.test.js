@@ -14,7 +14,11 @@ function mockModule(relativePath, exports) {
   };
 }
 
-function loadVoiceChatPage({ voiceAuthorizationExports = {} } = {}) {
+function loadVoiceChatPage({
+  streamingExports = {},
+  voiceApiExports = {},
+  voiceAuthorizationExports = {},
+} = {}) {
   const pagePath = require.resolve("../pages/voice-chat/index.ts");
   delete require.cache[pagePath];
   mockModule("../services/audio-playback.ts", {
@@ -22,7 +26,7 @@ function loadVoiceChatPage({ voiceAuthorizationExports = {} } = {}) {
   });
   mockModule("../services/memoir-streaming-asr.ts", {
     classifyVoiceClientConnectionError: () => ({ kind: "unknown" }),
-    MemoirStreamingAsrClient: class {
+    MemoirStreamingAsrClient: streamingExports.MemoirStreamingAsrClient || class {
       async connect() {}
       close() {}
       startRecording() {
@@ -32,6 +36,7 @@ function loadVoiceChatPage({ voiceAuthorizationExports = {} } = {}) {
       configureAutoStop() {}
       async finishSession() {}
     },
+    ...streamingExports,
   });
   mockModule("../services/memoir-voice-api.ts", {
     createMemoirAssistantTTS: async () => {
@@ -43,13 +48,15 @@ function loadVoiceChatPage({ voiceAuthorizationExports = {} } = {}) {
     downloadMemoirVoiceAudio: async () => "",
     getMemoirVoiceSession: async () => ({
       session: {
-        status: "active",
+        status: "created",
         guidance_mode: "free_narration",
         current_guidance_module: "",
+        error_message: "",
       },
       messages: [],
       utterances: [],
     }),
+    ...voiceApiExports,
   });
   mockModule("../services/tts-text-progress.ts", {
     splitTextByAudioPlaybackProgress: () => ({
@@ -146,5 +153,117 @@ test("voice chat blocks recording before voice authorization consent", () => {
   assert.match(context.data.error, /声纹授权协议/);
   assert.equal(context.data.autoListenStateText, "自动收音已暂停，等待声纹授权");
   assert.equal(toasts[0].title, "请先同意声纹授权协议");
+  delete global.wx;
+});
+
+test("voice chat does not connect a stopped voice session", async () => {
+  let connectCalls = 0;
+  const page = loadVoiceChatPage({
+    streamingExports: {
+      MemoirStreamingAsrClient: class {
+        async connect() {
+          connectCalls += 1;
+        }
+        close() {}
+      },
+    },
+    voiceApiExports: {
+      getMemoirVoiceSession: async () => ({
+        session: {
+          status: "stopped",
+          guidance_mode: "guided_interview",
+          current_guidance_module: "person",
+          error_message: "",
+        },
+        messages: [],
+        utterances: [],
+      }),
+    },
+    voiceAuthorizationExports: {
+      readVoiceAuthorizationConsent: () => true,
+    },
+  });
+  const context = {
+    ...page,
+    data: { ...page.data },
+    setData(patch) {
+      this.data = { ...this.data, ...patch };
+    },
+  };
+
+  await page.onLoad.call(context, {
+    voiceSessionId: "voice-stopped",
+    mode: "guided_interview",
+    module: "person",
+  });
+
+  assert.equal(connectCalls, 0);
+  assert.equal(context.data.status, "closed");
+  assert.equal(context.data.statusText, "closed");
+  assert.equal(context.data.primaryActionText, "已结束");
+  assert.equal(context.data.persistenceStateText, "已保存");
+});
+
+test("voice chat finishSession ignores duplicate finish taps", async () => {
+  let finishCalls = 0;
+  let resolveFinish = () => {};
+  const modals = [];
+  global.wx = {
+    showModal(options) {
+      modals.push(options);
+    },
+  };
+  const page = loadVoiceChatPage({
+    streamingExports: {
+      MemoirStreamingAsrClient: class {
+        async connect() {}
+        async finishSession() {
+          finishCalls += 1;
+          await new Promise((resolve) => {
+            resolveFinish = resolve;
+          });
+        }
+        close() {}
+      },
+    },
+    voiceApiExports: {
+      getMemoirVoiceSession: async () => ({
+        session: {
+          status: "stopped",
+          guidance_mode: "free_narration",
+          current_guidance_module: "",
+          error_message: "",
+        },
+        messages: [],
+        utterances: [],
+      }),
+    },
+  });
+  const context = {
+    ...page,
+    data: {
+      ...page.data,
+      voiceSessionId: "voice-1",
+      status: "ready",
+      voiceAuthorizationAgreed: true,
+    },
+    setData(patch) {
+      this.data = { ...this.data, ...patch };
+    },
+  };
+
+  await page.connectGateway.call(context);
+  const firstFinish = page.finishSession.call(context);
+  const secondFinish = page.finishSession.call(context);
+  assert.equal(finishCalls, 1);
+  assert.equal(context.data.finishingSession, true);
+  resolveFinish();
+  await Promise.all([firstFinish, secondFinish]);
+
+  assert.equal(finishCalls, 1);
+  assert.equal(context.data.status, "closed");
+  assert.equal(context.data.finishingSession, false);
+  assert.equal(context.data.persistenceStateText, "已保存");
+  assert.equal(modals.length, 1);
   delete global.wx;
 });
