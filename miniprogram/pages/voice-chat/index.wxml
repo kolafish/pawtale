@@ -4,7 +4,14 @@
       <text class="mode-label">{{modeLabel}}</text>
       <text class="status-label {{status}}">{{statusText}}</text>
     </view>
-    <button class="finish-button" bindtap="finishSession">结束</button>
+    <button
+      class="finish-button"
+      loading="{{finishingSession}}"
+      disabled="{{finishingSession}}"
+      bindtap="finishSession"
+    >
+      {{finishingSession ? "结束中" : "结束"}}
+    </button>
   </view>
 
   <view wx:if="{{error}}" class="error">{{error}}</view>
