@@ -247,3 +247,40 @@ test("voice session snapshots keep longer local transcript when backend detail l
   assert.equal(snapshot.detail.session.id, "voice-1");
   assert.deepEqual(snapshot.transcriptLines.map((line) => line.text), ["第一句", "第二句"]);
 });
+
+test("voice session pending close snapshots can be written, preserved, and cleared", () => {
+  installWxStorageMock();
+  const {
+    clearMemoirVoiceSessionPendingClose,
+    readMemoirVoiceSessionSnapshot,
+    writeMemoirVoiceSessionPendingClose,
+    writeMemoirVoiceSessionSnapshot,
+  } = memoirCacheModule();
+  const pendingClose = {
+    reason: "connection_error",
+    captured_at: "2026-06-18T00:00:00.000Z",
+    transcript_lines: [{ id: "line-1", text: "已经保存的一句" }],
+    live_text: "还没保存的半句",
+    recording: true,
+  };
+
+  writeMemoirVoiceSessionPendingClose("voice-1", pendingClose);
+  let snapshot = readMemoirVoiceSessionSnapshot("voice-1");
+
+  assert.equal(snapshot.hasSession, true);
+  assert.equal(snapshot.pendingClose.live_text, "还没保存的半句");
+  assert.equal(snapshot.pendingClose.recording, true);
+
+  writeMemoirVoiceSessionSnapshot("voice-1", {
+    transcriptLines: [{ id: "line-1", text: "已经保存的一句" }],
+  });
+  snapshot = readMemoirVoiceSessionSnapshot("voice-1");
+
+  assert.equal(snapshot.pendingClose.reason, "connection_error");
+
+  clearMemoirVoiceSessionPendingClose("voice-1");
+  snapshot = readMemoirVoiceSessionSnapshot("voice-1");
+
+  assert.equal(snapshot.pendingClose, undefined);
+  assert.deepEqual(snapshot.transcriptLines.map((line) => line.text), ["已经保存的一句"]);
+});

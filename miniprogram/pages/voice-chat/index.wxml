@@ -24,6 +24,13 @@
       <text>{{persistenceStateText}}</text>
     </block>
   </view>
+  <view wx:if="{{recoveryNotice || canReconnect || canFinishAfterDisconnect}}" class="recovery-panel">
+    <text wx:if="{{recoveryNotice}}" class="recovery-text">{{recoveryNotice}}</text>
+    <view wx:if="{{canReconnect || canFinishAfterDisconnect}}" class="recovery-actions">
+      <button wx:if="{{canReconnect}}" class="recovery-button" bindtap="reconnectGateway">重新连接</button>
+      <button wx:if="{{canFinishAfterDisconnect}}" class="recovery-button ghost" bindtap="finishAfterDisconnect">查看记录</button>
+    </view>
+  </view>
 
   <view wx:if="{{!voiceAuthorizationAgreed}}" class="voice-auth-panel">
     <text class="voice-auth-title">开始录音前需要声纹授权</text>
