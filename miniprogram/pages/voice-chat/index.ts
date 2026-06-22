@@ -22,6 +22,7 @@ import {
 import { splitTextByAudioPlaybackProgress } from "../../services/tts-text-progress";
 import { readChatTTSSettings } from "../../services/tts-settings";
 import { canAutoStartListeningAfterTTS } from "../../services/voice-chat-auto-listen";
+import { voiceGuidanceLabel } from "../../services/memoir-project-profile";
 import {
   readVoiceAuthorizationConsent,
   saveVoiceAuthorizationConsent,
@@ -39,7 +40,6 @@ import {
   gatewayStateText,
   latestAssistantMessageId,
   latestTranscriptText,
-  modeLabel,
   statusText,
   totalTranscriptChars,
   ttsAlignmentFromAssistantLine,
@@ -233,7 +233,7 @@ Page<VoiceChatData, {
       voiceSessionId,
       guidanceMode,
       currentGuidanceModule,
-      modeLabel: modeLabel(guidanceMode),
+      modeLabel: voiceGuidanceLabel(guidanceMode, currentGuidanceModule),
       voiceAuthorizationAgreed,
       primaryActionText: voiceAuthorizationAgreed ? "开始说话" : "同意后开始说话",
     });
@@ -344,7 +344,7 @@ Page<VoiceChatData, {
     this.setData({
       guidanceMode,
       currentGuidanceModule,
-      modeLabel: modeLabel(guidanceMode),
+      modeLabel: voiceGuidanceLabel(guidanceMode, currentGuidanceModule),
       transcriptLines: snapshot.transcriptLines,
       latestTranscriptText: latestTranscriptText(snapshot.transcriptLines),
       assistantPromptText: assistantLine?.text || "",
@@ -413,7 +413,7 @@ Page<VoiceChatData, {
     this.setData({
       guidanceMode,
       currentGuidanceModule,
-      modeLabel: modeLabel(guidanceMode),
+      modeLabel: voiceGuidanceLabel(guidanceMode, currentGuidanceModule),
       transcriptLines: nextLines,
       latestTranscriptText: latestTranscriptText(nextLines),
       assistantPromptText: assistantLine?.text || "",

@@ -173,6 +173,70 @@
   line-height: 1.5;
 }
 
+.guidance-panel {
+  margin-top: 30rpx;
+  padding: 24rpx;
+  border: 2rpx solid #efd6c4;
+  border-radius: 20rpx;
+  background: #fffaf2;
+}
+
+.guidance-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18rpx;
+}
+
+.guidance-title,
+.module-title {
+  color: #7a3b31;
+  font-size: 26rpx;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.guidance-current {
+  color: #9f4a3c;
+  font-size: 24rpx;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.guidance-options,
+.module-options {
+  margin-top: 18rpx;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14rpx;
+}
+
+.guidance-option,
+.module-option {
+  min-height: 64rpx;
+  padding: 0 22rpx;
+  border: 2rpx solid #efd6c4;
+  border-radius: 18rpx;
+  background: #ffffff;
+  color: #7a3b31;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 26rpx;
+  font-weight: 800;
+}
+
+.guidance-option.selected,
+.module-option.selected {
+  border-color: #9f4a3c;
+  background: #fff1ec;
+  color: #9f4a3c;
+}
+
+.module-section {
+  margin-top: 24rpx;
+}
+
 .voice-auth-panel {
   margin-top: 30rpx;
   padding: 22rpx;
