@@ -1054,6 +1054,9 @@ test("book APIs call encoded backend routes", async () => {
       if (key === "pawtale_backend_cookie") {
         return "pawtale_session=abc";
       }
+      if (key === "pawtale_ai_model_settings") {
+        return { model: "doubao-seed-2-0-pro-260215" };
+      }
       return "";
     },
     getExtConfigSync() {
@@ -1128,7 +1131,7 @@ test("book APIs call encoded backend routes", async () => {
   assert.equal(apiRequests[0].method, "GET");
   assert.equal(apiRequests[1].url, "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-plan/generate");
   assert.equal(apiRequests[1].method, "POST");
-  assert.deepEqual(apiRequests[1].data, { max_chapters: 6 });
+  assert.deepEqual(apiRequests[1].data, { max_chapters: 6, ai_model: "doubao-seed-2-0-pro-260215" });
   assert.equal(apiRequests[2].method, "PUT");
   assert.equal(apiRequests[3].method, "PATCH");
   assert.deepEqual(apiRequests[3].data, { title: "目录", chapters: [] });
@@ -1148,14 +1151,14 @@ test("book APIs call encoded backend routes", async () => {
     "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-plan/chapters/chapter%2F1/title/generate",
   );
   assert.equal(apiRequests[6].method, "POST");
-  assert.deepEqual(apiRequests[6].data, {});
+  assert.deepEqual(apiRequests[6].data, { ai_model: "doubao-seed-2-0-pro-260215" });
   assert.equal(
     apiRequests[7].url,
     "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-plan/chapters/chapter%2F1/draft",
   );
   assert.equal(apiRequests[7].method, "GET");
   assert.equal(apiRequests[8].method, "POST");
-  assert.deepEqual(apiRequests[8].data, { force_regenerate: true });
+  assert.deepEqual(apiRequests[8].data, { force_regenerate: true, ai_model: "doubao-seed-2-0-pro-260215" });
   assert.equal(apiRequests[9].method, "PATCH");
   assert.deepEqual(apiRequests[9].data, { content: "正文" });
   assert.equal(

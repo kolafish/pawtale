@@ -12,6 +12,13 @@ import {
 import { getMemoirVoiceProgress } from "../../services/memoir-voice-api";
 import { ApiError } from "../../services/request";
 import {
+  AI_MODEL_OPTIONS,
+  aiModelLabel,
+  readSelectedAIModel,
+  saveSelectedAIModel,
+  type AIModelOption,
+} from "../../services/ai-model-settings";
+import {
   readScopedTTSSettings,
   readTTSSettingsProfiles,
   saveScopedTTSSettings,
@@ -51,6 +58,9 @@ interface MeData {
   utteranceCount: number;
   totalUserCharCount: number;
   totalAudioText: string;
+  aiModel: string;
+  aiModelLabel: string;
+  aiModelOptions: AIModelOption[];
   chatTTSVoice: string;
   chatTTSVoiceLabel: string;
   bookTTSVoice: string;
@@ -77,6 +87,14 @@ interface SpeedDatasetEvent {
     dataset: {
       scope?: TTSSettingsScope;
       speed?: string | number;
+    };
+  };
+}
+
+interface ModelDatasetEvent {
+  currentTarget: {
+    dataset: {
+      model?: string;
     };
   };
 }
@@ -153,6 +171,15 @@ function ttsProfilesData(): Partial<MeData> {
   };
 }
 
+function aiModelSettingsData(): Pick<MeData, "aiModel" | "aiModelLabel" | "aiModelOptions"> {
+  const model = readSelectedAIModel();
+  return {
+    aiModel: model,
+    aiModelLabel: aiModelLabel(model),
+    aiModelOptions: AI_MODEL_OPTIONS,
+  };
+}
+
 function loggedOutData(): Partial<MeData> {
   return {
     loggedIn: false,
@@ -198,6 +225,7 @@ Page<MeData, {
   saveDisplayName(): Promise<void>;
   selectTTSVoice(event: VoiceDatasetEvent): void;
   selectTTSSpeed(event: SpeedDatasetEvent): void;
+  selectAIModel(event: ModelDatasetEvent): void;
   openProjects(): void;
   openVoiceProgress(): void;
   logout(): Promise<void>;
@@ -229,6 +257,7 @@ Page<MeData, {
     utteranceCount: 0,
     totalUserCharCount: 0,
     totalAudioText: "0 秒",
+    ...aiModelSettingsData(),
     chatTTSVoice: "",
     chatTTSVoiceLabel: "默认音色",
     bookTTSVoice: "",
@@ -273,6 +302,7 @@ Page<MeData, {
         utteranceCount: 0,
         totalUserCharCount: 0,
         totalAudioText: "0 秒",
+        ...aiModelSettingsData(),
         ...ttsProfilesData(),
       });
       if (identity.active_project_id) {
@@ -483,6 +513,16 @@ Page<MeData, {
     const speedRatio = Number(event.currentTarget.dataset.speed);
     const settings = saveScopedTTSSettings(scope, { ...readScopedTTSSettings(scope), speedRatio });
     this.setData(ttsScopeData(scope, settings));
+    wx.showToast({ title: "已保存", icon: "success" });
+  },
+
+  selectAIModel(event) {
+    const model = saveSelectedAIModel(event.currentTarget.dataset.model || "");
+    this.setData({
+      aiModel: model,
+      aiModelLabel: aiModelLabel(model),
+      aiModelOptions: AI_MODEL_OPTIONS,
+    });
     wx.showToast({ title: "已保存", icon: "success" });
   },
 

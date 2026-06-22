@@ -26,6 +26,7 @@ import type {
   MemoirVoiceSessionListResponse,
 } from "../domain/voice-chat";
 import { ensureBackendSession } from "./auth";
+import { readSelectedAIModel } from "./ai-model-settings";
 import {
   ApiError,
   cleanBaseUrl,
@@ -33,6 +34,14 @@ import {
   readSessionCookie,
   request,
 } from "./request";
+
+function withSelectedAIModel<T extends { ai_model?: string }>(data: T): T {
+  const explicitModel = typeof data.ai_model === "string" ? data.ai_model.trim() : "";
+  return {
+    ...data,
+    ai_model: explicitModel || readSelectedAIModel(),
+  };
+}
 
 export function voiceGatewayUrl(voiceSessionId: string): string {
   const config = readBackendConfig();
@@ -112,7 +121,7 @@ export async function createMemoirVoiceFollowUp(
     `/api/mobile/memoir/voice-sessions/${encodeURIComponent(voiceSessionId)}/follow-up`,
     {
       method: "POST",
-      data,
+      data: withSelectedAIModel(data),
     },
   );
 }
@@ -177,7 +186,7 @@ export async function generateMemoirBookPlan(
     `/api/mobile/memoir/projects/${encodeURIComponent(projectId)}/book-plan/generate`,
     {
       method: "POST",
-      data,
+      data: withSelectedAIModel(data),
     },
   );
 }
@@ -256,7 +265,7 @@ export async function generateMemoirBookChapterTitle(
     `/api/mobile/memoir/projects/${encodeURIComponent(projectId)}/book-plan/chapters/${encodeURIComponent(chapterId)}/title/generate`,
     {
       method: "POST",
-      data,
+      data: withSelectedAIModel(data),
     },
   );
 }
@@ -281,7 +290,7 @@ export async function generateMemoirBookChapterDraft(
     `/api/mobile/memoir/projects/${encodeURIComponent(projectId)}/book-plan/chapters/${encodeURIComponent(chapterId)}/draft`,
     {
       method: "POST",
-      data,
+      data: withSelectedAIModel(data),
     },
   );
 }
