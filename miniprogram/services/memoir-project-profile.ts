@@ -1,6 +1,24 @@
 import type { Project } from "../domain/memoir";
-import type { MemoirGuidanceMode } from "../domain/voice-chat";
+import type { MemoirGuidanceMode, MemoirGuidanceModule } from "../domain/voice-chat";
 import type { MemoirNarratorGender } from "./memoir";
+
+export interface GuidanceOption<T extends string> {
+  value: T;
+  label: string;
+}
+
+export const MEMOIR_GUIDANCE_MODE_OPTIONS: Array<GuidanceOption<MemoirGuidanceMode>> = [
+  { value: "free_narration", label: "自由讲述" },
+  { value: "guided_interview", label: "AI 引导" },
+];
+
+export const MEMOIR_GUIDANCE_MODULE_OPTIONS: Array<GuidanceOption<MemoirGuidanceModule>> = [
+  { value: "person", label: "人物" },
+  { value: "event", label: "事件" },
+  { value: "place", label: "地点" },
+  { value: "period", label: "时间段" },
+  { value: "theme", label: "主题" },
+];
 
 export interface MemoirProjectProfile {
   narratorName: string;
@@ -59,6 +77,21 @@ export function memoirProjectProfile(project?: Pick<Project, "metadata_json"> | 
 
 export function guidanceModeLabel(mode: MemoirGuidanceMode): string {
   return mode === "guided_interview" ? "主题讲述" : "自由讲述";
+}
+
+export function normalizeGuidanceModule(value?: string | null): MemoirGuidanceModule {
+  return MEMOIR_GUIDANCE_MODULE_OPTIONS.some((option) => option.value === value)
+    ? value as MemoirGuidanceModule
+    : "person";
+}
+
+export function guidanceModuleLabel(module?: string | null): string {
+  const normalized = normalizeGuidanceModule(module);
+  return MEMOIR_GUIDANCE_MODULE_OPTIONS.find((option) => option.value === normalized)?.label || "人物";
+}
+
+export function voiceGuidanceLabel(mode: MemoirGuidanceMode, module?: string | null): string {
+  return mode === "guided_interview" ? `AI 引导 · ${guidanceModuleLabel(module)}` : "自由讲述";
 }
 
 export function narratorGenderLabel(gender: MemoirNarratorGender): string {

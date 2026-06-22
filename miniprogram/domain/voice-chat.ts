@@ -1,4 +1,5 @@
 export type MemoirGuidanceMode = "free_narration" | "guided_interview";
+export type MemoirGuidanceModule = "person" | "event" | "place" | "period" | "theme";
 export type MemoirVoiceSessionStatus = "created" | "listening" | "speaking" | "stopped" | "failed";
 export type MemoirChatMessageRole = "user" | "assistant" | "system";
 export type MemoirChatContentStatus = "partial" | "final" | "corrected";
