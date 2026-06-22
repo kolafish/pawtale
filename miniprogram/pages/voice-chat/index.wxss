@@ -454,6 +454,54 @@
   color: #be123c;
 }
 
+.recovery-panel {
+  margin-top: 18rpx;
+  padding: 22rpx;
+  border: 2rpx solid #efd6c4;
+  border-radius: 18rpx;
+  background: #fff6f1;
+}
+
+.recovery-text {
+  display: block;
+  color: #7a3b31;
+  font-size: 26rpx;
+  font-weight: 800;
+  line-height: 1.45;
+}
+
+.recovery-actions {
+  margin-top: 18rpx;
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+  flex-wrap: wrap;
+}
+
+.recovery-button {
+  min-width: 160rpx;
+  height: 64rpx;
+  margin: 0;
+  border: 0;
+  border-radius: 16rpx;
+  background: #9f4a3c;
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 25rpx;
+  font-weight: 800;
+}
+
+.recovery-button.ghost {
+  background: #ffffff;
+  color: #9f4a3c;
+}
+
+.recovery-button::after {
+  border: 0;
+}
+
 .voice-auth-panel {
   margin-top: 24rpx;
   padding: 28rpx;

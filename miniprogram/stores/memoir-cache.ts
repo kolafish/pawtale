@@ -10,6 +10,7 @@ import {
   writeMemoirStore,
   type MemoirCachedVoiceSession,
   type MemoirCacheMetadata,
+  type MemoirPendingVoiceClose,
   type MemoirVoiceSessionCache,
 } from "./session";
 
@@ -28,6 +29,7 @@ export interface MemoirIdentitySnapshot {
 export interface MemoirVoiceSessionSnapshot {
   detail?: MemoirVoiceSessionDetail;
   transcriptLines: VoiceChatTranscriptLine[];
+  pendingClose?: MemoirPendingVoiceClose;
   hasSession: boolean;
   cachedAt?: string;
   isFresh: boolean;
@@ -207,6 +209,7 @@ export function readMemoirVoiceSessionSnapshot(voiceSessionId: string): MemoirVo
   return {
     detail: entry.detail,
     transcriptLines: entry.transcript_lines,
+    pendingClose: entry.pending_close,
     hasSession: true,
     cachedAt: entry.cached_at,
     isFresh: !entry.stale && cacheAgeMs(entry.cached_at) <= VOICE_SESSION_CACHE_MAX_AGE_MS,
@@ -241,8 +244,62 @@ export function writeMemoirVoiceSessionSnapshot(
     voice_session_cache: voiceSessionCacheWith({
       ...cache.sessions,
       [voiceSessionId]: {
+        ...(validCachedVoiceSession(existing) ? existing : {}),
         detail,
         transcript_lines: transcriptLines,
+        cached_at: new Date().toISOString(),
+        stale: false,
+      },
+    }),
+  });
+}
+
+export function writeMemoirVoiceSessionPendingClose(
+  voiceSessionId: string,
+  pendingClose: MemoirPendingVoiceClose,
+): void {
+  if (!voiceSessionId) {
+    return;
+  }
+  const store = readMemoirStore();
+  const cache = validVoiceSessionCache(store.voice_session_cache)
+    ? store.voice_session_cache
+    : { version: MEMOIR_CACHE_VERSION, sessions: {} };
+  const existing = cache.sessions[voiceSessionId];
+  const existingEntry = validCachedVoiceSession(existing) ? existing : undefined;
+  writeMemoirStore({
+    voice_session_cache: voiceSessionCacheWith({
+      ...cache.sessions,
+      [voiceSessionId]: {
+        ...(existingEntry || {}),
+        transcript_lines: pendingClose.transcript_lines,
+        pending_close: pendingClose,
+        cached_at: new Date().toISOString(),
+        stale: true,
+      },
+    }),
+  });
+}
+
+export function clearMemoirVoiceSessionPendingClose(voiceSessionId: string): void {
+  if (!voiceSessionId) {
+    return;
+  }
+  const store = readMemoirStore();
+  const cache = validVoiceSessionCache(store.voice_session_cache)
+    ? store.voice_session_cache
+    : undefined;
+  const existing = cache?.sessions[voiceSessionId];
+  if (!cache || !validCachedVoiceSession(existing) || !existing.pending_close) {
+    return;
+  }
+  const nextEntry = { ...existing };
+  delete nextEntry.pending_close;
+  writeMemoirStore({
+    voice_session_cache: voiceSessionCacheWith({
+      ...cache.sessions,
+      [voiceSessionId]: {
+        ...nextEntry,
         cached_at: new Date().toISOString(),
         stale: false,
       },

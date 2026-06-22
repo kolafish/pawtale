@@ -17,6 +17,7 @@ function mockModule(relativePath, exports) {
 function loadVoiceChatPage({
   streamingExports = {},
   voiceApiExports = {},
+  memoirCacheExports = {},
   voiceAuthorizationExports = {},
 } = {}) {
   const pagePath = require.resolve("../pages/voice-chat/index.ts");
@@ -96,9 +97,12 @@ function loadVoiceChatPage({
     visibleAssistantLine: () => null,
   });
   mockModule("../stores/memoir-cache.ts", {
+    clearMemoirVoiceSessionPendingClose: () => {},
     readMemoirVoiceSessionSnapshot: () => ({ hasSession: false }),
     transcriptLinesFromVoiceSessionDetail: () => [],
+    writeMemoirVoiceSessionPendingClose: () => {},
     writeMemoirVoiceSessionSnapshot: () => {},
+    ...memoirCacheExports,
   });
   mockModule("../services/voice-authorization.ts", {
     readVoiceAuthorizationConsent: () => false,
@@ -266,4 +270,92 @@ test("voice chat finishSession ignores duplicate finish taps", async () => {
   assert.equal(context.data.persistenceStateText, "已保存");
   assert.equal(modals.length, 1);
   delete global.wx;
+});
+
+test("voice chat stores pending close state for connection errors", () => {
+  const pendingWrites = [];
+  const page = loadVoiceChatPage({
+    memoirCacheExports: {
+      writeMemoirVoiceSessionPendingClose: (voiceSessionId, pendingClose) => {
+        pendingWrites.push({ voiceSessionId, pendingClose });
+      },
+    },
+  });
+  const context = {
+    ...page,
+    data: {
+      ...page.data,
+      voiceSessionId: "voice-1",
+      recording: true,
+      liveText: "最后一句还在识别",
+      transcriptLines: [{ id: "line-1", text: "已经保存的一句" }],
+      persistenceStateText: "识别中",
+    },
+    setData(patch) {
+      this.data = { ...this.data, ...patch };
+    },
+  };
+
+  page.handleError.call(context, "语音连接已关闭", {
+    kind: "connection",
+    code: "voice_gateway_connection_closed",
+    message: "语音连接已关闭",
+  });
+
+  assert.equal(pendingWrites.length, 1);
+  assert.equal(pendingWrites[0].voiceSessionId, "voice-1");
+  assert.equal(pendingWrites[0].pendingClose.reason, "connection_error");
+  assert.equal(pendingWrites[0].pendingClose.live_text, "最后一句还在识别");
+  assert.equal(pendingWrites[0].pendingClose.recording, true);
+  assert.equal(context.data.status, "error");
+  assert.equal(context.data.canReconnect, true);
+  assert.equal(context.data.canFinishAfterDisconnect, true);
+  assert.match(context.data.recoveryNotice, /语音连接中断/);
+});
+
+test("voice chat warns when a pending live transcript is not in backend detail", () => {
+  let clearCalls = 0;
+  const page = loadVoiceChatPage({
+    memoirCacheExports: {
+      clearMemoirVoiceSessionPendingClose: () => {
+        clearCalls += 1;
+      },
+      readMemoirVoiceSessionSnapshot: () => ({
+        hasSession: true,
+        transcriptLines: [{ id: "line-1", text: "已经保存的一句" }],
+        pendingClose: {
+          reason: "unload",
+          captured_at: "2026-06-18T00:00:00.000Z",
+          transcript_lines: [{ id: "line-1", text: "已经保存的一句" }],
+          live_text: "最后一句还没回来",
+          recording: true,
+        },
+      }),
+      transcriptLinesFromVoiceSessionDetail: () => [
+        { id: "line-1", text: "已经保存的一句" },
+      ],
+    },
+  });
+  const context = {
+    ...page,
+    data: {
+      ...page.data,
+      voiceSessionId: "voice-1",
+    },
+    setData(patch) {
+      this.data = { ...this.data, ...patch };
+    },
+  };
+
+  page.reconcilePendingClose.call(context, {
+    session: { id: "voice-1" },
+    messages: [],
+    utterances: [],
+  });
+
+  assert.equal(clearCalls, 0);
+  assert.match(context.data.recoveryNotice, /最后一句可能未保存/);
+  assert.equal(context.data.canReconnect, true);
+  assert.equal(context.data.canFinishAfterDisconnect, true);
+  assert.equal(context.data.persistenceStateText, "已恢复已保存记录");
 });

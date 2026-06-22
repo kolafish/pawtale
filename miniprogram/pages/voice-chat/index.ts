@@ -48,8 +48,10 @@ import {
   visibleAssistantLine,
 } from "../../services/voice-chat-state";
 import {
+  clearMemoirVoiceSessionPendingClose,
   readMemoirVoiceSessionSnapshot,
   transcriptLinesFromVoiceSessionDetail,
+  writeMemoirVoiceSessionPendingClose,
   writeMemoirVoiceSessionSnapshot,
 } from "../../stores/memoir-cache";
 
@@ -111,6 +113,9 @@ interface VoiceChatData {
   errorKindText: string;
   voiceAuthorizationAgreed: boolean;
   finishingSession: boolean;
+  recoveryNotice: string;
+  canReconnect: boolean;
+  canFinishAfterDisconnect: boolean;
 }
 
 let streamingClient: MemoirStreamingAsrClient | null = null;
@@ -121,6 +126,7 @@ const AUTO_STOP_MIN_RECORDING_MS = 1200;
 Page<VoiceChatData, {
   onLoad(query?: Record<string, string | undefined>): Promise<void>;
   onShow(): void;
+  onHide(): void;
   onUnload(): void;
   refreshVoiceAuthorizationConsent(): void;
   changeVoiceAuthorization(event: CheckboxChangeEvent): void;
@@ -128,9 +134,13 @@ Page<VoiceChatData, {
   ensureVoiceAuthorization(autoTriggered?: boolean): boolean;
   hydrateVoiceSessionSnapshot(): void;
   refreshVoiceSessionSnapshot(): Promise<MemoirVoiceSessionDetail | null>;
+  reconcilePendingClose(detail: MemoirVoiceSessionDetail): void;
   confirmSavedTranscriptSnapshot(event: VoiceGatewayServerEvent): Promise<void>;
   applyVoiceSessionDetail(detail: MemoirVoiceSessionDetail): void;
   persistCurrentTranscriptSnapshot(): void;
+  persistPendingVoiceClose(reason: "hide" | "unload" | "connection_error"): void;
+  reconnectGateway(): Promise<void>;
+  finishAfterDisconnect(): Promise<void>;
   maybeGenerateOpeningFollowUp(): void;
   generateFollowUp(regenerate?: boolean): Promise<void>;
   regenerateFollowUp(): Promise<void>;
@@ -224,6 +234,9 @@ Page<VoiceChatData, {
     errorKindText: "",
     voiceAuthorizationAgreed: false,
     finishingSession: false,
+    recoveryNotice: "",
+    canReconnect: false,
+    canFinishAfterDisconnect: false,
   },
 
   async onLoad(query) {
@@ -266,9 +279,23 @@ Page<VoiceChatData, {
     this.refreshVoiceAuthorizationConsent();
   },
 
+  onHide() {
+    if (this.data.recording && streamingClient) {
+      streamingClient.stopRecording();
+      this.persistPendingVoiceClose("hide");
+      this.setData({
+        recording: false,
+        primaryActionText: "继续说话",
+        persistenceStateText: "正在保存当前句",
+        recoveryNotice: "已暂停收音，返回后会恢复已保存的访谈记录",
+      });
+    }
+  },
+
   onUnload() {
     followUpRequestSerial += 1;
     this.persistCurrentTranscriptSnapshot();
+    this.persistPendingVoiceClose("unload");
     this.cancelFollowUpTTS();
     streamingClient?.close();
     streamingClient = null;
@@ -291,7 +318,9 @@ Page<VoiceChatData, {
       voiceAuthorizationAgreed
       && this.data.voiceSessionId
       && !this.data.connecting
-      && (!streamingClient || this.data.status === "closed")
+      && this.data.status !== "closed"
+      && this.data.status !== "error"
+      && !streamingClient
     ) {
       void this.connectGateway();
     }
@@ -362,6 +391,7 @@ Page<VoiceChatData, {
       ttsAlignment: ttsAlignmentFromAssistantLine(assistantLine),
       totalTranscriptCharCount: totalTranscriptChars(snapshot.transcriptLines),
       lastFollowUpSourceMessageId,
+      recoveryNotice: snapshot.pendingClose ? "正在恢复上次离开前的访谈记录" : this.data.recoveryNotice,
       canRequestFollowUp: canRequestFollowUp(
         snapshot.transcriptLines,
         guidanceMode,
@@ -379,6 +409,7 @@ Page<VoiceChatData, {
       const detail = await getMemoirVoiceSession(this.data.voiceSessionId);
       writeMemoirVoiceSessionSnapshot(this.data.voiceSessionId, { detail });
       this.applyVoiceSessionDetail(detail);
+      this.reconcilePendingClose(detail);
       if (detail.session.status !== "stopped" && detail.session.status !== "failed") {
         this.maybeGenerateOpeningFollowUp();
       }
@@ -387,6 +418,44 @@ Page<VoiceChatData, {
       console.warn("refresh voice session snapshot failed", error);
       return null;
     }
+  },
+
+  reconcilePendingClose(detail) {
+    const snapshot = readMemoirVoiceSessionSnapshot(this.data.voiceSessionId);
+    const pending = snapshot.pendingClose;
+    if (!pending) {
+      return;
+    }
+    const detailLines = transcriptLinesFromVoiceSessionDetail(detail);
+    const savedTexts = detailLines.map((line) => line.text.trim()).filter(Boolean);
+    const pendingLinesSaved = pending.transcript_lines.every((line) => {
+      const lineText = line.text.trim();
+      if (!lineText) {
+        return true;
+      }
+      return detailLines.some((savedLine) => (
+        (line.message_id && savedLine.message_id === line.message_id)
+        || (line.utterance_id && savedLine.utterance_id === line.utterance_id)
+        || savedLine.text.trim() === lineText
+      ));
+    });
+    const pendingLiveText = pending.live_text.trim();
+    const pendingLiveTextSaved = !pendingLiveText || savedTexts.some((text) => text.includes(pendingLiveText));
+    if (pendingLinesSaved && pendingLiveTextSaved) {
+      clearMemoirVoiceSessionPendingClose(this.data.voiceSessionId);
+      this.setData({
+        recoveryNotice: "",
+        canReconnect: false,
+        canFinishAfterDisconnect: false,
+      });
+      return;
+    }
+    this.setData({
+      recoveryNotice: "上次离开时最后一句可能未保存，请检查转写记录",
+      persistenceStateText: "已恢复已保存记录",
+      canReconnect: true,
+      canFinishAfterDisconnect: true,
+    });
   },
 
   async confirmSavedTranscriptSnapshot(event) {
@@ -466,6 +535,48 @@ Page<VoiceChatData, {
     writeMemoirVoiceSessionSnapshot(this.data.voiceSessionId, {
       transcriptLines: this.data.transcriptLines,
     });
+  },
+
+  persistPendingVoiceClose(reason) {
+    if (!this.data.voiceSessionId) {
+      return;
+    }
+    if (!this.data.recording && !this.data.liveText.trim() && !this.data.transcriptLines.length) {
+      return;
+    }
+    writeMemoirVoiceSessionPendingClose(this.data.voiceSessionId, {
+      reason,
+      captured_at: new Date().toISOString(),
+      transcript_lines: this.data.transcriptLines,
+      live_text: this.data.liveText,
+      recording: this.data.recording,
+    });
+  },
+
+  async reconnectGateway() {
+    this.setData({
+      recoveryNotice: "",
+      canReconnect: false,
+      canFinishAfterDisconnect: false,
+      error: "",
+      errorKindText: "",
+    });
+    await this.connectGateway();
+  },
+
+  async finishAfterDisconnect() {
+    streamingClient?.close({ force: true });
+    streamingClient = null;
+    await this.refreshVoiceSessionSnapshot();
+    this.setData({
+      recording: false,
+      status: "closed",
+      statusText: statusText("closed"),
+      primaryActionText: "已结束",
+      canReconnect: false,
+      canFinishAfterDisconnect: false,
+    });
+    wx.switchTab({ url: "/pages/transcripts/index" });
   },
 
   maybeGenerateOpeningFollowUp() {
@@ -1111,6 +1222,9 @@ Page<VoiceChatData, {
   },
 
   handleError(message, error) {
+    if (error?.kind === "connection") {
+      this.persistPendingVoiceClose("connection_error");
+    }
     const nextData: Partial<VoiceChatData> = {
       error: message,
       errorKindText: errorKindText(error),
@@ -1120,6 +1234,9 @@ Page<VoiceChatData, {
       recording: false,
       primaryActionText: "重新连接",
       captureStateText: "录音异常",
+      recoveryNotice: error?.kind === "connection" ? "语音连接中断，已保留本地访谈记录" : this.data.recoveryNotice,
+      canReconnect: error?.kind === "connection",
+      canFinishAfterDisconnect: error?.kind === "connection",
     };
     if (error?.state) {
       nextData.gatewayStateText = gatewayStateText(error.state);

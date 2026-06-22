@@ -30,8 +30,17 @@ export interface MemoirCacheMetadata {
 export interface MemoirCachedVoiceSession {
   detail?: MemoirVoiceSessionDetail;
   transcript_lines: VoiceChatTranscriptLine[];
+  pending_close?: MemoirPendingVoiceClose;
   cached_at: string;
   stale?: boolean;
+}
+
+export interface MemoirPendingVoiceClose {
+  reason: "hide" | "unload" | "connection_error";
+  captured_at: string;
+  transcript_lines: VoiceChatTranscriptLine[];
+  live_text: string;
+  recording: boolean;
 }
 
 export interface MemoirVoiceSessionCache {
