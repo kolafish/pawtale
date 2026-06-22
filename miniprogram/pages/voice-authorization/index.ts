@@ -1,5 +1,6 @@
 import {
   saveVoiceAuthorizationConsent,
+  syncVoiceAuthorizationConsent,
   VOICE_AUTHORIZATION_VERSION,
 } from "../../services/voice-authorization";
 
@@ -8,23 +9,33 @@ interface VoiceAuthorizationData {
 }
 
 Page<VoiceAuthorizationData, {
-  agreeAndBack(): void;
-  disagreeAndBack(): void;
+  agreeAndBack(): Promise<void>;
+  disagreeAndBack(): Promise<void>;
 }>({
   data: {
     version: VOICE_AUTHORIZATION_VERSION,
   },
 
-  agreeAndBack() {
-    saveVoiceAuthorizationConsent(true);
+  async agreeAndBack() {
+    const consent = saveVoiceAuthorizationConsent(true);
+    try {
+      await syncVoiceAuthorizationConsent({ consent });
+    } catch (error) {
+      console.warn("sync voice authorization consent failed", error);
+    }
     wx.showToast({ title: "已同意", icon: "success" });
     setTimeout(() => {
       wx.navigateBack({ delta: 1 });
     }, 250);
   },
 
-  disagreeAndBack() {
-    saveVoiceAuthorizationConsent(false);
+  async disagreeAndBack() {
+    const consent = saveVoiceAuthorizationConsent(false);
+    try {
+      await syncVoiceAuthorizationConsent({ consent });
+    } catch (error) {
+      console.warn("sync voice authorization disagreement failed", error);
+    }
     wx.navigateBack({ delta: 1 });
   },
 });

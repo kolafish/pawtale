@@ -48,6 +48,7 @@ function loadHomePage({ authExports = {}, voiceApiExports = {}, voiceAuthorizati
         version: "test",
         agreedAt: "2026-06-18T00:00:00.000Z",
       }),
+      syncVoiceAuthorizationConsent: async () => ({ id: "consent-1" }),
       VOICE_AUTHORIZATION_PAGE_URL: "/pages/voice-authorization/index",
       ...voiceAuthorizationExports,
     },
@@ -195,6 +196,7 @@ test("home shows explicit project creation state for logged-in users without pro
 test("home creates voice sessions with the project-bound guidance mode", async () => {
   const createdSessions = [];
   const navigations = [];
+  const syncedConsents = [];
   global.wx = {
     navigateTo(options) {
       navigations.push(options.url);
@@ -209,6 +211,12 @@ test("home creates voice sessions with the project-bound guidance mode", async (
             id: "voice/1",
           },
         };
+      },
+    },
+    voiceAuthorizationExports: {
+      syncVoiceAuthorizationConsent: async (options) => {
+        syncedConsents.push(options || {});
+        return { id: "consent-1" };
       },
     },
   });
@@ -229,6 +237,7 @@ test("home creates voice sessions with the project-bound guidance mode", async (
   await page.startVoiceChat.call(context);
 
   assert.equal(createdSessions.length, 1);
+  assert.equal(syncedConsents.length, 1);
   assert.equal(createdSessions[0].input.guidance_mode, "guided_interview");
   assert.equal(createdSessions[0].input.current_guidance_module, "place");
   assert.equal(createdSessions[0].input.metadata_json.entry, "miniprogram_home");
@@ -303,6 +312,40 @@ test("home creates free narration voice sessions without a guidance module", asy
   assert.equal(createdSessions[0].input.current_guidance_module, undefined);
   assert.equal(navigations[0], "/pages/voice-chat/index?voiceSessionId=voice%2Ffree&mode=free_narration");
   delete global.wx;
+});
+
+test("home does not create voice sessions when consent audit sync fails", async () => {
+  let createCalls = 0;
+  const { page } = loadHomePage({
+    voiceApiExports: {
+      createMemoirVoiceSession: async () => {
+        createCalls += 1;
+        return { session: { id: "voice/blocked" } };
+      },
+    },
+    voiceAuthorizationExports: {
+      syncVoiceAuthorizationConsent: async () => {
+        throw new Error("授权同步失败");
+      },
+    },
+  });
+  const context = {
+    data: {
+      ...page.data,
+      projectId: "project/1",
+      hasProject: true,
+      voiceAuthorizationAgreed: true,
+    },
+    setData(patch) {
+      this.data = { ...this.data, ...patch };
+    },
+  };
+
+  await page.startVoiceChat.call(context);
+
+  assert.equal(createCalls, 0);
+  assert.equal(context.data.error, "授权同步失败");
+  assert.equal(context.data.creatingVoice, false);
 });
 
 test("home sends voice starts without a project to project creation", async () => {

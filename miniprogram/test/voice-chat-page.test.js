@@ -107,6 +107,7 @@ function loadVoiceChatPage({
   mockModule("../services/voice-authorization.ts", {
     readVoiceAuthorizationConsent: () => false,
     saveVoiceAuthorizationConsent: (agreed = true) => ({ agreed, version: "test", agreedAt: "now" }),
+    syncVoiceAuthorizationConsent: async () => ({ id: "consent-1" }),
     VOICE_AUTHORIZATION_PAGE_URL: "/pages/voice-authorization/index",
     ...voiceAuthorizationExports,
   });
@@ -358,4 +359,42 @@ test("voice chat warns when a pending live transcript is not in backend detail",
   assert.equal(context.data.canReconnect, true);
   assert.equal(context.data.canFinishAfterDisconnect, true);
   assert.equal(context.data.persistenceStateText, "已恢复已保存记录");
+});
+
+test("voice chat syncs authorization consent before reconnecting", async () => {
+  const syncedOptions = [];
+  const page = loadVoiceChatPage({
+    voiceAuthorizationExports: {
+      readVoiceAuthorizationConsent: () => true,
+      syncVoiceAuthorizationConsent: async (options) => {
+        syncedOptions.push(options);
+        return { id: "consent-1" };
+      },
+    },
+  });
+  let connectCalls = 0;
+  const context = {
+    ...page,
+    data: {
+      ...page.data,
+      voiceSessionId: "voice-1",
+      voiceAuthorizationAgreed: false,
+      status: "idle",
+      connecting: false,
+      primaryActionText: "同意后开始说话",
+    },
+    setData(patch) {
+      this.data = { ...this.data, ...patch };
+    },
+    async connectGateway() {
+      connectCalls += 1;
+    },
+  };
+
+  page.refreshVoiceAuthorizationConsent.call(context);
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(syncedOptions, [{ sourceSessionId: "voice-1" }]);
+  assert.equal(connectCalls, 1);
+  assert.equal(context.data.voiceAuthorizationAgreed, true);
 });

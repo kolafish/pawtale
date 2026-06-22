@@ -12,6 +12,9 @@ from app.models.users import User
 from app.schemas.memoir import (
     MemoirAssistantTTSRequest,
     MemoirAssistantTTSResponse,
+    MemoirVoiceAuthorizationConsentRequest,
+    MemoirVoiceAuthorizationConsentResponse,
+    MemoirVoiceAuthorizationConsentStatusResponse,
     MemoirVoiceFollowUpRequest,
     MemoirVoiceFollowUpResponse,
     MemoirVoiceProgressResponse,
@@ -25,6 +28,7 @@ from app.schemas.memoir import (
     MemoirVoiceSessionStopRequest,
 )
 from app.services.memoir import projects as memoir_projects
+from app.services.memoir import voice_authorization as memoir_voice_authorization
 from app.services.memoir import voice_followups as memoir_voice_followups
 from app.services.memoir import voice_sessions as memoir_voice_sessions
 from app.services.memoir import voice_tts as memoir_voice_tts
@@ -130,6 +134,39 @@ async def stop_mobile_memoir_voice_session(
     current_user: User = Depends(get_current_user),
 ):
     return await memoir_voice_sessions.stop_voice_session(db, voice_session_id, current_user.id, req)
+
+
+@router.post(
+    "/voice-authorization-consent",
+    response_model=MemoirVoiceAuthorizationConsentResponse,
+    status_code=201,
+)
+async def record_mobile_memoir_voice_authorization_consent(
+    req: MemoirVoiceAuthorizationConsentRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await memoir_voice_authorization.record_voice_authorization_consent(db, current_user.id, req)
+
+
+@router.get(
+    "/voice-authorization-consent",
+    response_model=MemoirVoiceAuthorizationConsentStatusResponse,
+)
+async def get_mobile_memoir_voice_authorization_consent(
+    version: str = Query(..., min_length=1),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    consent = await memoir_voice_authorization.latest_voice_authorization_consent(
+        db,
+        current_user.id,
+        version.strip(),
+    )
+    return MemoirVoiceAuthorizationConsentStatusResponse(
+        has_current_consent=bool(consent and consent.agreed),
+        consent=consent,
+    )
 
 
 @router.post("/voice-sessions/{voice_session_id}/follow-up", response_model=MemoirVoiceFollowUpResponse)

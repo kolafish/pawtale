@@ -3,9 +3,29 @@ require("./register-ts");
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-function loadVoiceAuthorizationService() {
+function loadVoiceAuthorizationService({ authExports, requestExports } = {}) {
   const servicePath = require.resolve("../services/voice-authorization.ts");
+  const authPath = require.resolve("../services/auth.ts");
+  const requestPath = require.resolve("../services/request.ts");
   delete require.cache[servicePath];
+  delete require.cache[authPath];
+  delete require.cache[requestPath];
+  if (authExports) {
+    require.cache[authPath] = {
+      id: authPath,
+      filename: authPath,
+      loaded: true,
+      exports: authExports,
+    };
+  }
+  if (requestExports) {
+    require.cache[requestPath] = {
+      id: requestPath,
+      filename: requestPath,
+      loaded: true,
+      exports: requestExports,
+    };
+  }
   return require(servicePath);
 }
 
@@ -61,5 +81,74 @@ test("voice authorization consent ignores stale versions", () => {
   const service = loadVoiceAuthorizationService();
 
   assert.equal(service.readVoiceAuthorizationConsent(), false);
+  delete global.wx;
+});
+
+test("voice authorization consent exposes the active consent record", () => {
+  global.wx = {
+    getStorageSync() {
+      return {
+        agreed: true,
+        version: "2026-06-18",
+        agreedAt: "2026-06-18T00:00:00.000Z",
+      };
+    },
+    setStorageSync() {},
+  };
+  const service = loadVoiceAuthorizationService();
+
+  assert.deepEqual(service.readVoiceAuthorizationConsentRecord(), {
+    agreed: true,
+    version: service.VOICE_AUTHORIZATION_VERSION,
+    agreedAt: "2026-06-18T00:00:00.000Z",
+  });
+  delete global.wx;
+});
+
+test("syncVoiceAuthorizationConsent posts the local consent audit", async () => {
+  const requests = [];
+  let ensuredSession = false;
+  const storage = {};
+  global.wx = {
+    getStorageSync(key) {
+      return storage[key];
+    },
+    setStorageSync(key, value) {
+      storage[key] = value;
+    },
+  };
+  const service = loadVoiceAuthorizationService({
+    authExports: {
+      ensureBackendSession: async () => {
+        ensuredSession = true;
+      },
+    },
+    requestExports: {
+      request: async (path, options) => {
+        requests.push({ path, options });
+        return {
+          id: "consent-1",
+          agreed: options.data.agreed,
+        };
+      },
+    },
+  });
+  service.saveVoiceAuthorizationConsent(true);
+
+  const response = await service.syncVoiceAuthorizationConsent({ sourceSessionId: "voice-1" });
+
+  assert.equal(ensuredSession, true);
+  assert.equal(response.id, "consent-1");
+  assert.equal(requests[0].path, "/api/mobile/memoir/voice-authorization-consent");
+  assert.equal(requests[0].options.method, "POST");
+  assert.deepEqual(requests[0].options.data, {
+    version: service.VOICE_AUTHORIZATION_VERSION,
+    agreed: true,
+    source: "miniprogram",
+    source_session_id: "voice-1",
+    metadata_json: {
+      agreed_at: storage[service.VOICE_AUTHORIZATION_STORAGE_KEY].agreedAt,
+    },
+  });
   delete global.wx;
 });

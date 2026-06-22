@@ -13,6 +13,7 @@ REALTIME_VOICE_TABLES = (
     "memoir_chat_messages",
     "memoir_voice_utterances",
     "memoir_transcript_versions",
+    "memoir_voice_authorization_consents",
 )
 
 
@@ -84,11 +85,22 @@ async def rebuild_memoir_voice_schema(engine: AsyncEngine) -> None:
         await conn.execute(text("PRAGMA foreign_keys=ON"))
 
 
+async def _create_metadata_table(conn, table_name: str) -> None:
+    register_models()
+    table = Base.metadata.tables[table_name]
+    await conn.run_sync(lambda sync_conn: table.create(sync_conn, checkfirst=True))
+
+
 async def migrate_memoir_voice_schema(engine: AsyncEngine) -> dict[str, list[str]]:
     """Repair known realtime voice schema drift in existing SQLite databases."""
+    changed_tables: list[str] = []
     changed_columns: list[str] = []
     changed_indexes: list[str] = []
     async with engine.begin() as conn:
+        if not await _table_exists(conn, "memoir_voice_authorization_consents"):
+            await _create_metadata_table(conn, "memoir_voice_authorization_consents")
+            changed_tables.append("memoir_voice_authorization_consents")
+
         if not await _table_exists(conn, "memoir_transcript_versions"):
             raise RuntimeError("Missing required table: memoir_transcript_versions")
 
@@ -107,7 +119,11 @@ async def migrate_memoir_voice_schema(engine: AsyncEngine) -> dict[str, list[str
         )
         changed_indexes.append("ix_memoir_transcript_versions_voice_session_id")
 
-    return {"changed_columns": changed_columns, "changed_indexes": changed_indexes}
+    return {
+        "changed_tables": changed_tables,
+        "changed_columns": changed_columns,
+        "changed_indexes": changed_indexes,
+    }
 
 
 async def assert_memoir_voice_schema(engine: AsyncEngine) -> None:
