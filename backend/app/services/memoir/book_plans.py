@@ -3,10 +3,9 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
 
 from fastapi import HTTPException
-from sqlalchemy import or_, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -15,64 +14,51 @@ from app.models.memoir import (
     MemoirBookPlan,
     MemoirBookPlanChapter,
     MemoirBookChapterDraft,
-    MemoirChatMessage,
-    MemoirVoiceSession,
-    MemoirVoiceUtterance,
 )
 from app.schemas.memoir_book import (
     MemoirBookChapterTitleGenerateRequest,
     MemoirBookChapterTitleUpdateRequest,
     MemoirBookChapterSourceRef,
     MemoirBookPlanChapterInput,
-    MemoirBookPlanChapterResponse,
     MemoirBookPlanConfirmRequest,
     MemoirBookPlanGenerateRequest,
     MemoirBookPlanUpdateRequest,
     MemoirBookPlanResponse,
     MemoirBookSourceAssignmentRequest,
-    MemoirBookSourceCoverageItem,
     MemoirBookSourceCoverageResponse,
-    MemoirBookSourceIncludedChapter,
     MemoirBookSourceMoveRequest,
 )
 from app.services import get_ai_service
 from app.services.ai_types import AITextClient
 from app.services.json_utils import extract_json_payload
 from app.services.memoir.access import load_memoir_project
+from app.services.memoir.book_plan_ai import (
+    AI_BOOK_PLAN_UNAVAILABLE_MESSAGE,
+    CHAPTER_TITLE_SYSTEM_PROMPT,
+    SYSTEM_PROMPT,
+    build_chapter_title_prompt as _build_chapter_title_prompt,
+    build_plan_prompt as _build_plan_prompt,
+    chapters_from_payload as _chapters_from_payload,
+    clean_generated_chapter_title as _clean_generated_chapter_title,
+)
+from app.services.memoir.book_plan_sources import (
+    SourceSegment,
+    as_dict as _as_dict,
+    covered_utterance_ids as _covered_utterance_ids,
+    included_chapters_by_utterance as _included_chapters_by_utterance,
+    merge_metadata as _merge_metadata,
+    plan_response as _plan_response,
+    set_source_change_metadata as _set_source_change_metadata,
+    source_coverage_item as _source_coverage_item,
+    source_ids_from_metadata as _source_ids_from_metadata,
+    source_ref_utterance_id as _source_ref_utterance_id,
+    source_ref_utterance_ids as _source_ref_utterance_ids,
+    source_segments as _source_segments,
+    text_or_empty as _text_or_empty,
+)
 
 
-SYSTEM_PROMPT = "你是一位谨慎的中文回忆录章节规划编辑，只能根据给定口述转写整理章节。"
-CHAPTER_TITLE_SYSTEM_PROMPT = "你是一位谨慎的中文回忆录目录编辑，只为已有章节重新拟标题。"
-AI_BOOK_PLAN_UNAVAILABLE_MESSAGE = "AI 服务暂时不可用，请稍后重试。"
 logger = logging.getLogger(__name__)
-GENERIC_CHAPTER_TITLES = {"新收录转写", "新增转写", "转写记录", "新章节", "未命名章节"}
-
-
-@dataclass(frozen=True)
-class SourceSegment:
-    source_index: int
-    voice_session_id: str
-    message_id: str
-    utterance_id: str
-    transcript_version_id: str | None
-    audio_file_id: str | None
-    start_ms: int | None
-    end_ms: int | None
-    text: str
-    created_at: datetime
-
-    def ref(self, quote: str = "") -> MemoirBookChapterSourceRef:
-        return MemoirBookChapterSourceRef(
-            voice_session_id=self.voice_session_id,
-            message_id=self.message_id,
-            utterance_id=self.utterance_id,
-            transcript_version_id=self.transcript_version_id,
-            audio_file_id=self.audio_file_id,
-            start_ms=self.start_ms,
-            end_ms=self.end_ms,
-            created_at=self.created_at,
-            quote=_safe_quote(self.text, quote),
-        )
 
 
 @dataclass(frozen=True)
@@ -80,73 +66,6 @@ class ValidatedChapterUpdate:
     id: str | None
     title: str
     source_refs: list[MemoirBookChapterSourceRef]
-
-
-def _text_or_empty(value: str | None) -> str:
-    return (value or "").strip()
-
-
-def _display_text(utterance: MemoirVoiceUtterance) -> str:
-    return _text_or_empty(utterance.transcript_edited) or _text_or_empty(utterance.transcript_raw)
-
-
-def _safe_quote(source_text: str, quote: str = "") -> str:
-    cleaned = _text_or_empty(quote)
-    if cleaned and cleaned in source_text:
-        return cleaned[:180]
-    return source_text[:180]
-
-
-def _as_dict(ref: MemoirBookChapterSourceRef) -> dict[str, object]:
-    return ref.model_dump(mode="json")
-
-
-def _merge_metadata(metadata_json: dict | None, patch: dict[str, object]) -> dict[str, object]:
-    return {**(metadata_json or {}), **patch}
-
-
-def _source_ref_utterance_ids(refs: list[dict] | list[MemoirBookChapterSourceRef]) -> list[str]:
-    ids: list[str] = []
-    for ref in refs:
-        if isinstance(ref, MemoirBookChapterSourceRef):
-            ids.append(ref.utterance_id)
-        elif isinstance(ref, dict) and isinstance(ref.get("utterance_id"), str):
-            ids.append(ref["utterance_id"])
-    return ids
-
-
-def _source_ref_utterance_id(ref: object) -> str:
-    if isinstance(ref, MemoirBookChapterSourceRef):
-        return ref.utterance_id
-    if isinstance(ref, dict) and isinstance(ref.get("utterance_id"), str):
-        return ref["utterance_id"]
-    return ""
-
-
-def _source_ids_from_metadata(metadata_json: dict | None, key: str) -> set[str]:
-    value = (metadata_json or {}).get(key, [])
-    if not isinstance(value, list):
-        return set()
-    return {item for item in value if isinstance(item, str) and item}
-
-
-def _set_source_change_metadata(
-    metadata_json: dict | None,
-    *,
-    added_ids: set[str],
-    removed_ids: set[str],
-) -> dict[str, object]:
-    metadata = dict(metadata_json or {})
-    if added_ids:
-        metadata["pending_source_utterance_ids"] = sorted(added_ids)
-    else:
-        metadata.pop("pending_source_utterance_ids", None)
-    if removed_ids:
-        metadata["removed_source_utterance_ids"] = sorted(removed_ids)
-    else:
-        metadata.pop("removed_source_utterance_ids", None)
-    metadata["source_refs_updated_at"] = datetime.now(UTC).isoformat()
-    return metadata
 
 
 async def _mark_chapter_drafts_sources_changed(
@@ -172,228 +91,6 @@ async def _mark_chapter_drafts_sources_changed(
             {"status_reason": "sources_changed"},
         )
         db.add(draft)
-
-
-def _source_ref_response(
-    ref: dict[str, object],
-    created_at_by_utterance: dict[str, datetime],
-) -> MemoirBookChapterSourceRef:
-    data = dict(ref)
-    utterance_id = data.get("utterance_id")
-    if not data.get("created_at") and isinstance(utterance_id, str):
-        created_at = created_at_by_utterance.get(utterance_id)
-        if created_at:
-            data["created_at"] = created_at
-    return MemoirBookChapterSourceRef.model_validate(data)
-
-
-async def _source_ref_created_at_by_utterance(
-    db: AsyncSession,
-    plan: MemoirBookPlan,
-) -> dict[str, datetime]:
-    utterance_ids = {
-        ref["utterance_id"]
-        for chapter in plan.chapters
-        for ref in (chapter.source_refs_json or [])
-        if isinstance(ref, dict) and isinstance(ref.get("utterance_id"), str)
-    }
-    if not utterance_ids:
-        return {}
-    result = await db.execute(
-        select(MemoirVoiceUtterance.id, MemoirVoiceUtterance.created_at).where(
-            MemoirVoiceUtterance.id.in_(utterance_ids)
-        )
-    )
-    return {utterance_id: created_at for utterance_id, created_at in result.all()}
-
-
-def _chapter_response(
-    chapter: MemoirBookPlanChapter,
-    *,
-    created_at_by_utterance: dict[str, datetime] | None = None,
-) -> MemoirBookPlanChapterResponse:
-    source_created_at = created_at_by_utterance or {}
-    return MemoirBookPlanChapterResponse(
-        id=chapter.id,
-        plan_id=chapter.plan_id,
-        project_id=chapter.project_id,
-        title=chapter.title,
-        sort_order=chapter.sort_order,
-        source_refs=[
-            _source_ref_response(ref, source_created_at)
-            for ref in (chapter.source_refs_json or [])
-            if isinstance(ref, dict)
-        ],
-        metadata_json=chapter.metadata_json or {},
-        created_at=chapter.created_at,
-        updated_at=chapter.updated_at,
-    )
-
-
-async def _plan_response(db: AsyncSession, plan: MemoirBookPlan) -> MemoirBookPlanResponse:
-    created_at_by_utterance = await _source_ref_created_at_by_utterance(db, plan)
-    return MemoirBookPlanResponse(
-        id=plan.id,
-        project_id=plan.project_id,
-        title=plan.title,
-        status=MemoirBookPlanStatus(plan.status),
-        created_by=MemoirCreatedBy(plan.created_by),
-        model=plan.model,
-        metadata_json=plan.metadata_json or {},
-        chapters=[
-            _chapter_response(chapter, created_at_by_utterance=created_at_by_utterance)
-            for chapter in plan.chapters
-        ],
-        created_at=plan.created_at,
-        updated_at=plan.updated_at,
-    )
-
-
-async def _source_segments(
-    db: AsyncSession,
-    *,
-    user_id: str,
-    project_id: str,
-) -> list[SourceSegment]:
-    await load_memoir_project(db, project_id, user_id)
-    result = await db.execute(
-        select(MemoirVoiceUtterance, MemoirChatMessage)
-        .join(MemoirVoiceSession, MemoirVoiceUtterance.voice_session_id == MemoirVoiceSession.id)
-        .join(MemoirChatMessage, MemoirVoiceUtterance.chat_message_id == MemoirChatMessage.id)
-        .where(
-            MemoirVoiceSession.project_id == project_id,
-            or_(
-                MemoirVoiceUtterance.transcript_raw != "",
-                MemoirVoiceUtterance.transcript_edited != "",
-            ),
-        )
-        .order_by(
-            MemoirVoiceSession.created_at,
-            MemoirVoiceUtterance.created_at,
-            MemoirVoiceUtterance.id,
-        )
-    )
-    segments: list[SourceSegment] = []
-    for utterance, message in result.all():
-        text = _display_text(utterance)
-        if not text:
-            continue
-        segments.append(
-            SourceSegment(
-                source_index=len(segments) + 1,
-                voice_session_id=utterance.voice_session_id,
-                message_id=message.id,
-                utterance_id=utterance.id,
-                transcript_version_id=message.transcript_version_id,
-                audio_file_id=utterance.audio_file_id or message.audio_file_id,
-                start_ms=utterance.start_ms,
-                end_ms=utterance.end_ms,
-                text=text,
-                created_at=utterance.created_at,
-            )
-        )
-    return segments
-
-
-def _build_plan_prompt(project_title: str, sources: list[SourceSegment], max_chapters: int) -> str:
-    source_text = "\n\n".join(
-        (
-            f"source_index: {source.source_index}\n"
-            f"utterance_id: {source.utterance_id}\n"
-            f"message_id: {source.message_id}\n"
-            f"text: {source.text}"
-        )
-        for source in sources
-    )
-    return f"""请把下面的口述转写整理成回忆录章节规划。
-
-当前回忆录：{project_title}
-最多章节数：{max_chapters}
-
-请输出严格 JSON，不要 Markdown，不要解释。格式：
-{{
-  "title": "章节规划标题",
-  "chapters": [
-    {{
-      "title": "章节标题",
-      "source_indices": [1, 2],
-      "evidence_quote": "必须来自 source text 的短句"
-    }}
-  ]
-}}
-
-要求：
-- 只根据 source text 已经讲过的事实划分章节，不新增人物、时间、地点、事件或情绪。
-- 章节标题要短，像书稿目录，不要像 AI 总结标题。
-- source_indices 必须来自给定 source_index，且每章至少包含一个来源。
-- evidence_quote 必须逐字来自对应 source text。
-- 如果素材很少，可以只返回 1 到 2 章。
-
-口述转写：
-{source_text}
-"""
-
-
-def _string_value(item: dict[str, Any], key: str) -> str:
-    value = item.get(key)
-    return value.strip() if isinstance(value, str) else ""
-
-
-def _source_indices(item: dict[str, Any]) -> list[int]:
-    raw = item.get("source_indices", [])
-    if not isinstance(raw, list):
-        return []
-    indices: list[int] = []
-    for value in raw:
-        if isinstance(value, int):
-            indices.append(value)
-        elif isinstance(value, str) and value.isdigit():
-            indices.append(int(value))
-    return indices
-
-
-def _chapters_from_payload(
-    payload: Any,
-    *,
-    sources: list[SourceSegment],
-    max_chapters: int,
-) -> tuple[str, list[MemoirBookPlanChapterInput]]:
-    if not isinstance(payload, dict):
-        raise HTTPException(status_code=502, detail="AI 未返回有效章节规划 JSON")
-    source_by_index = {source.source_index: source for source in sources}
-    raw_chapters = payload.get("chapters", [])
-    if not isinstance(raw_chapters, list):
-        raise HTTPException(status_code=502, detail="AI 未返回有效章节列表")
-
-    chapters: list[MemoirBookPlanChapterInput] = []
-    for item in raw_chapters[:max_chapters]:
-        if not isinstance(item, dict):
-            continue
-        title = _string_value(item, "title")
-        if not title:
-            continue
-        quote = _string_value(item, "evidence_quote")
-        refs: list[MemoirBookChapterSourceRef] = []
-        seen_utterances: set[str] = set()
-        for source_index in _source_indices(item):
-            source = source_by_index.get(source_index)
-            if not source or source.utterance_id in seen_utterances:
-                continue
-            refs.append(source.ref(quote))
-            seen_utterances.add(source.utterance_id)
-        if not refs:
-            continue
-        chapters.append(
-            MemoirBookPlanChapterInput(
-                title=title,
-                source_refs=refs,
-            )
-        )
-
-    if not chapters:
-        raise HTTPException(status_code=502, detail="AI 未返回可用章节规划")
-    title = _string_value(payload, "title") or "章节规划"
-    return title, chapters
 
 
 async def _load_plan(db: AsyncSession, project_id: str) -> MemoirBookPlan | None:
@@ -482,57 +179,6 @@ async def get_book_plan(
     if not plan:
         raise HTTPException(status_code=404, detail="章节规划不存在")
     return await _plan_response(db, plan)
-
-
-def _covered_utterance_ids(plan: MemoirBookPlan | None) -> set[str]:
-    if not plan:
-        return set()
-    covered: set[str] = set()
-    for chapter in plan.chapters:
-        for ref in chapter.source_refs_json or []:
-            if isinstance(ref, dict) and isinstance(ref.get("utterance_id"), str):
-                covered.add(ref["utterance_id"])
-    return covered
-
-
-def _included_chapters_by_utterance(
-    plan: MemoirBookPlan | None,
-) -> dict[str, list[MemoirBookSourceIncludedChapter]]:
-    if not plan:
-        return {}
-    included: dict[str, list[MemoirBookSourceIncludedChapter]] = {}
-    for chapter in sorted(plan.chapters, key=lambda item: item.sort_order):
-        chapter_item = MemoirBookSourceIncludedChapter(
-            chapter_id=chapter.id,
-            title=chapter.title,
-            sort_order=chapter.sort_order,
-        )
-        for ref in chapter.source_refs_json or []:
-            if not isinstance(ref, dict) or not isinstance(ref.get("utterance_id"), str):
-                continue
-            included.setdefault(ref["utterance_id"], []).append(chapter_item)
-    return included
-
-
-def _source_coverage_item(
-    source: SourceSegment,
-    included_chapters: list[MemoirBookSourceIncludedChapter] | None = None,
-) -> MemoirBookSourceCoverageItem:
-    included = included_chapters or []
-    return MemoirBookSourceCoverageItem(
-        source_index=source.source_index,
-        voice_session_id=source.voice_session_id,
-        message_id=source.message_id,
-        utterance_id=source.utterance_id,
-        transcript_version_id=source.transcript_version_id,
-        audio_file_id=source.audio_file_id,
-        start_ms=source.start_ms,
-        end_ms=source.end_ms,
-        text=source.text,
-        created_at=source.created_at,
-        is_included=bool(included),
-        included_in_chapters=included,
-    )
 
 
 async def get_book_source_coverage(
@@ -860,44 +506,6 @@ def _chapter_source_texts(chapter: MemoirBookPlanChapter, sources: list[SourceSe
     return texts
 
 
-def _build_chapter_title_prompt(chapter: MemoirBookPlanChapter, source_texts: list[str]) -> str:
-    source_text = "\n\n".join(f"- {text}" for text in source_texts[:8])
-    return f"""请为下面这一个回忆录章节重新拟一个正式章节名。
-
-当前章节名：{chapter.title}
-
-章节来源口述：
-{source_text or "无"}
-
-要求：
-- 只根据章节来源口述，不新增事实、人物、地点或情绪。
-- 标题要像书稿目录，短而正式，建议 6 到 14 个汉字。
-- 不要使用“转写”“新收录”“记录”“素材”“章节”等占位词。
-- 直接输出标题，不要解释，不要引号，不要编号。
-"""
-
-
-def _clean_generated_chapter_title(content: str) -> str:
-    payload = extract_json_payload(content)
-    title = ""
-    if isinstance(payload, dict):
-        value = payload.get("title")
-        title = value.strip() if isinstance(value, str) else ""
-    if not title:
-        lines = [line.strip() for line in str(content).splitlines() if line.strip()]
-        title = lines[0] if lines else ""
-    title = title.strip().strip("“”\"'「」《》")
-    for prefix in ("章节标题：", "标题：", "章名：", "章节名："):
-        if title.startswith(prefix):
-            title = title[len(prefix):].strip()
-    title = title.strip("。；;，, ")
-    if title in GENERIC_CHAPTER_TITLES or "转写" in title or "新收录" in title:
-        raise HTTPException(status_code=502, detail="AI 未返回可用章节标题")
-    if not title:
-        raise HTTPException(status_code=502, detail="AI 未返回可用章节标题")
-    return title[:80]
-
-
 async def _save_chapter_title(
     db: AsyncSession,
     *,
@@ -1092,7 +700,7 @@ async def generate_book_chapter_title(
         raise HTTPException(status_code=404, detail="章节规划不存在")
     chapter = _chapter_by_id(plan, chapter_id)
     sources = await _source_segments(db, user_id=user_id, project_id=project_id)
-    prompt = _build_chapter_title_prompt(chapter, _chapter_source_texts(chapter, sources))
+    prompt = _build_chapter_title_prompt(chapter.title, _chapter_source_texts(chapter, sources))
 
     client = ai_client
     try:
