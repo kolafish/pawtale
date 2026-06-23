@@ -5,7 +5,10 @@ from sqlalchemy.orm import selectinload
 
 from app.domain.memoir import MemoirOutputStatus, MemoirOutputType
 from app.models.memoir import MemoirOutput, MemoirOutputVersion
-from app.schemas.memoir import MemoirOutputDetailResponse, MemoirOutputResponse
+from app.schemas.memoir_legacy import (
+    MemoirOutputDetailResponse,
+    MemoirOutputResponse,
+)
 from app.services.memoir.access import load_memoir_project
 
 

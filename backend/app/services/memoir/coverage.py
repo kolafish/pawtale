@@ -14,7 +14,7 @@ from app.models.memoir import (
     MemoirSession,
     MemoirThemeMemory,
 )
-from app.schemas.memoir import (
+from app.schemas.memoir_memory import (
     MemoirCoverageItemResponse,
     MemoirCoverageSnapshotResponse,
     MemoirCoverageTopicCreate,

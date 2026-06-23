@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.memoir import MemoirAnswerStatus, MemoirDraftStatus
 from app.models.memoir import MemoirDraft
-from app.schemas.memoir import (
+from app.schemas.memoir_legacy import (
     MemoirDraftEditRequest,
     MemoirDraftGenerateRequest,
     MemoirDraftResponse,

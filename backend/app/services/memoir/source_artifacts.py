@@ -2,7 +2,10 @@ from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.memoir import MemoirSourceArtifact
-from app.schemas.memoir import MemoirSourceArtifactCreate, MemoirSourceArtifactResponse
+from app.schemas.memoir_legacy import (
+    MemoirSourceArtifactCreate,
+    MemoirSourceArtifactResponse,
+)
 from app.services.memoir.access import load_answer, load_memoir_project, load_session
 
 

@@ -19,7 +19,11 @@ from app.models.memoir import (
     MemoirVoiceUtterance,
 )
 from app.models.projects import DocumentGroup, Project
-from app.schemas.memoir import MemoirProjectCreate, MemoirProjectListResponse, MemoirProjectUpdate
+from app.schemas.memoir_projects import (
+    MemoirProjectCreate,
+    MemoirProjectListResponse,
+    MemoirProjectUpdate,
+)
 from app.schemas.projects import ProjectResponse
 from app.services import project_documents as project_docs
 from app.services.memoir import audio_files as memoir_audio_files

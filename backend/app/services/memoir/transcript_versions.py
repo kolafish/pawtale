@@ -3,7 +3,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.memoir import MemoirSourceArtifact, MemoirTranscriptVersion
-from app.schemas.memoir import MemoirTranscriptVersionCreate, MemoirTranscriptVersionResponse
+from app.schemas.memoir_legacy import (
+    MemoirTranscriptVersionCreate,
+    MemoirTranscriptVersionResponse,
+)
 from app.services.memoir.access import load_answer
 
 

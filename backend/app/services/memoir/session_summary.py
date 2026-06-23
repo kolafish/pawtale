@@ -2,7 +2,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.memoir import MemoirSession, MemoirSessionSummary
-from app.schemas.memoir import MemoirSessionSummaryResponse
+from app.schemas.memoir_legacy import (
+    MemoirSessionSummaryResponse,
+)
 from app.services.memoir.access import load_session
 
 

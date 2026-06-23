@@ -14,7 +14,7 @@ from app.domain.memoir.types import (
 )
 from app.models.memoir import MemoirChatMessage, MemoirVoiceSession
 from app.models.projects import Project
-from app.schemas.memoir import (
+from app.schemas.memoir_voice import (
     MemoirVoiceNoAnswerPromptRequest,
     MemoirVoiceFollowUpRequest,
     MemoirVoiceFollowUpResponse,

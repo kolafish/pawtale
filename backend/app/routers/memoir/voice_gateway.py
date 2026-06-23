@@ -10,7 +10,9 @@ from app.auth import SESSION_COOKIE_NAME, decode_session_token
 from app.config import get_settings
 from app.database import get_db
 from app.models.users import User
-from app.schemas.memoir import MemoirVoiceSessionStopRequest
+from app.schemas.memoir_voice import (
+    MemoirVoiceSessionStopRequest,
+)
 from app.services.memoir import voice_sessions as memoir_voice_sessions
 from app.services.memoir.streaming_asr import create_volc_streaming_asr_client
 from app.services.memoir.voice_gateway import VoiceGatewaySession
