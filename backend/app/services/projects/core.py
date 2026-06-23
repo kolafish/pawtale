@@ -5,7 +5,7 @@ from sqlalchemy.orm import selectinload
 from app.domain.projects.templates import initialize_project_template
 from app.models.projects import DocumentGroup, Project
 from app.schemas.projects import ProjectCreate, ProjectListItem, ProjectResponse, ProjectUpdate
-from app.services import project_documents as project_docs
+import app.services.project_documents as project_docs
 from app.services.projects.access import load_project
 
 

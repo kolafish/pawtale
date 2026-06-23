@@ -22,7 +22,7 @@ from app.schemas.memoir_projects import (
     MemoirProjectUpdate,
 )
 from app.schemas.projects import ProjectResponse
-from app.services import project_documents as project_docs
+import app.services.project_documents as project_docs
 from app.services.memoir import audio_files as memoir_audio_files
 from app.services.projects.access import load_project
 

@@ -12,7 +12,7 @@ from app.schemas.projects import (
     GroupResponse,
     GroupUpdate,
 )
-from app.services import project_documents as project_docs
+import app.services.project_documents as project_docs
 from app.services.content_storage import read_content
 from app.services.projects.access import get_document, get_group, load_project
 

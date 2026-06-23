@@ -34,7 +34,7 @@ app/services/
 ### 3. 工厂模式
 
 ```python
-from app.services import get_ai_service
+from app.services.ai_factory import get_ai_service
 
 # 根据模型名获取服务实例
 ai_service = get_ai_service("claude-opus-4")  # 或 "deepseek-v4-flash", "deepseek-v4-pro", "doubao-seed-2-0-pro-260215"

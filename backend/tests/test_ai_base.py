@@ -2,7 +2,7 @@
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 from app.services.ai_base import AITextServiceBase
-from app.services import ai_story
+import app.services.ai_story as ai_story
 from app.services.ai_project_analysis import normalize_project_analysis
 from app.services.ai_text import DeepSeekTextService
 from app.services.ai_claude import ClaudeTextService

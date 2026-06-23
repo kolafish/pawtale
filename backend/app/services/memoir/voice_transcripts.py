@@ -32,7 +32,7 @@ from app.schemas.memoir_voice import (
     MemoirVoiceTranscriptListResponse,
     MemoirVoiceTranscriptUpdateRequest,
 )
-from app.services import get_ai_service
+from app.services.ai_factory import get_ai_service
 from app.services.ai_types import AITextClient
 
 

@@ -31,7 +31,7 @@ from app.schemas.memoir_book import (
     MemoirBookChapterDraftVersionResponse,
     MemoirBookChapterSourceRef,
 )
-from app.services import get_ai_service
+from app.services.ai_factory import get_ai_service
 from app.services.ai_types import AITextClient
 from app.services.memoir.access import load_memoir_project
 from app.services.memoir.book_audio import (

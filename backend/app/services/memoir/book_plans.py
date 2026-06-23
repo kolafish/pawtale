@@ -28,7 +28,7 @@ from app.schemas.memoir_book import (
     MemoirBookSourceCoverageResponse,
     MemoirBookSourceMoveRequest,
 )
-from app.services import get_ai_service
+from app.services.ai_factory import get_ai_service
 from app.services.ai_types import AITextClient
 from app.services.json_utils import extract_json_payload
 from app.services.memoir.access import load_memoir_project
