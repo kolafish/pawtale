@@ -6,39 +6,29 @@
 
   <view wx:if="{{error}}" class="error">{{error}}</view>
 
-  <view class="project-panel">
+  <view class="home-card">
     <view class="project-row">
       <text class="panel-label">当前回忆录</text>
       <text class="mode-tag">{{hasProject ? guidanceLabel : "待创建"}}</text>
     </view>
     <text class="project-title">{{projectTitle || "正在加载回忆录"}}</text>
     <text class="project-meta">
-      {{hasProject ? "讲述方式由这本回忆录决定。" : "先创建一本回忆录。"}}
+      {{needsLogin ? "登录后，我在这里等你。" : (!hasProject ? "先创建一本回忆录，我再听你讲。" : "我在听，请讲吧……")}}
     </text>
-    <button
-      wx:if="{{!needsLogin && !hasProject}}"
-      class="project-create-button"
-      bindtap="createProject"
-      disabled="{{loading}}"
-    >
-      创建第一本回忆录
-    </button>
-  </view>
 
-  <view class="voice-panel">
-    <view class="voice-head">
-      <image class="voice-icon" src="/assets/memoir-microphone.png" mode="aspectFit" />
-      <view class="voice-main">
-        <text class="voice-title">开始讲述</text>
-        <text class="voice-copy">
-          {{needsLogin ? "登录后开始。" : (!hasProject ? "创建回忆录后开始。" : "AI 会先开场。")}}
-        </text>
-      </view>
-    </view>
-    <view wx:if="{{!needsLogin && hasProject}}" class="voice-mode-row">
-      <text class="voice-mode-label">当前方式</text>
-      <text class="voice-mode-value">{{guidanceLabel}}</text>
-    </view>
+    <button
+      class="mic-button"
+      loading="{{creatingVoice}}"
+      disabled="{{loading || creatingVoice}}"
+      bindtap="startVoiceChat"
+      hover-class="mic-button-hover"
+    >
+      <image class="mic-icon" src="/assets/memoir-microphone.png" mode="aspectFit" />
+    </button>
+    <text class="mic-button-label">
+      {{needsLogin ? "登录后开始" : (!hasProject ? "创建回忆录" : (!voiceAuthorizationAgreed ? "同意协议后开始" : (creatingVoice ? "正在准备" : "点麦克风开始")))}}
+    </text>
+
     <view wx:if="{{!voiceAuthorizationAgreed}}" class="voice-auth-panel">
       <checkbox-group bindchange="changeVoiceAuthorization">
         <label class="voice-auth-row">
@@ -55,16 +45,5 @@
       </checkbox-group>
       <text class="voice-auth-hint">同意后才会打开麦克风，并上传语音用于访谈转写、原始音频留存和成书。</text>
     </view>
-    <button
-      class="primary-button"
-      loading="{{creatingVoice}}"
-      disabled="{{loading || creatingVoice}}"
-      bindtap="startVoiceChat"
-    >
-      <block wx:if="{{needsLogin}}">登录后开始语音聊天</block>
-      <block wx:elif="{{!hasProject}}">先创建回忆录</block>
-      <block wx:elif="{{creatingVoice}}">正在准备</block>
-      <block wx:else>开始讲述</block>
-    </button>
   </view>
 </view>

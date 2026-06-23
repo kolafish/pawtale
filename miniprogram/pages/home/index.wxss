@@ -25,15 +25,11 @@
   line-height: 1.35;
 }
 
-.project-panel,
-.voice-panel {
+.home-card {
   border: 2rpx solid #f0dac0;
   border-radius: 24rpx;
   background: #ffffff;
   box-shadow: 0 16rpx 40rpx rgba(64, 43, 24, 0.08);
-}
-
-.project-panel {
   padding: 30rpx;
 }
 
@@ -73,101 +69,56 @@
 
 .project-meta {
   display: block;
-  margin-top: 16rpx;
+  margin-top: 18rpx;
   color: #685b55;
-  font-size: 27rpx;
+  font-size: 31rpx;
   line-height: 1.5;
 }
 
-.project-create-button {
-  width: 100%;
-  height: 88rpx;
-  margin: 24rpx 0 0;
+.mic-button {
+  width: 190rpx;
+  height: 190rpx;
+  margin: 46rpx auto 0;
   border: 0;
-  border-radius: 22rpx;
+  border-radius: 999rpx;
   background: #fff1ec;
-  color: #9f4a3c;
+  box-shadow: inset 0 0 0 4rpx #efd6c4, 0 18rpx 36rpx rgba(159, 74, 60, 0.16);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 30rpx;
-  font-weight: 800;
+  padding: 0;
 }
 
-.project-create-button::after {
+.mic-button::after {
   border: 0;
 }
 
-.project-create-button[disabled] {
-  opacity: 0.68;
+.mic-button[disabled] {
+  opacity: 0.72;
 }
 
-.voice-panel {
-  margin-top: 28rpx;
-  padding: 36rpx 34rpx;
+.mic-button-hover {
+  background: #fff6f1;
 }
 
-.voice-head {
-  display: flex;
-  align-items: center;
-  gap: 24rpx;
-}
-
-.voice-icon {
-  width: 104rpx;
-  height: 104rpx;
-  flex: 0 0 104rpx;
-}
-
-.voice-main {
-  flex: 1;
-  min-width: 0;
-}
-
-.voice-title {
+.mic-icon {
+  width: 124rpx;
+  height: 124rpx;
   display: block;
-  color: #24100b;
-  font-size: 48rpx;
-  font-weight: 800;
-  line-height: 1.18;
 }
 
-.voice-copy {
+.mic-button-label {
   display: block;
-  margin-top: 10rpx;
-  color: #685b55;
-  font-size: 29rpx;
-  line-height: 1.5;
-}
-
-.voice-mode-row {
-  min-height: 74rpx;
-  margin-top: 30rpx;
-  padding: 0 24rpx;
-  border-radius: 18rpx;
-  background: #fffaf2;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 18rpx;
-}
-
-.voice-mode-label {
-  color: #7a3b31;
-  font-size: 26rpx;
-  font-weight: 800;
-  line-height: 1.35;
-}
-
-.voice-mode-value {
+  margin-top: 18rpx;
   color: #9f4a3c;
-  font-size: 28rpx;
-  font-weight: 900;
+  font-size: 30rpx;
+  font-weight: 800;
   line-height: 1.35;
+  text-align: center;
 }
 
 .voice-auth-panel {
-  margin-top: 30rpx;
+  margin-top: 32rpx;
   padding: 22rpx;
   border: 2rpx solid #efd6c4;
   border-radius: 18rpx;
@@ -199,29 +150,6 @@
   color: #685b55;
   font-size: 25rpx;
   line-height: 1.45;
-}
-
-.primary-button {
-  width: 100%;
-  height: 120rpx;
-  margin: 36rpx 0 0;
-  border: 0;
-  border-radius: 30rpx;
-  background: #2f7d63;
-  color: #ffffff;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 40rpx;
-  font-weight: 800;
-}
-
-.primary-button::after {
-  border: 0;
-}
-
-.primary-button[disabled] {
-  opacity: 0.72;
 }
 
 .error {
