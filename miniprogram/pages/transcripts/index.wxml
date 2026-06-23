@@ -21,7 +21,7 @@
         bindinput="onSearchInput"
         bindconfirm="onSearchConfirm"
       />
-      <button wx:if="{{searchInput}}" class="search-clear" bindtap="clearSearch">×</button>
+      <button wx:if="{{searchInput || hasSearchCriteria}}" class="search-clear" bindtap="clearSearch">×</button>
       <button
         class="voice-search-button {{voiceSearchRecording ? 'recording' : ''}}"
         bindtap="startVoiceSearch"

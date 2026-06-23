@@ -16,8 +16,6 @@ from app.services.memoir.asr import StreamingASRClient, StreamingASREvent
 
 MAX_VOICE_SEARCH_AUDIO_BYTES = 2 * 1024 * 1024
 ASR_SEARCH_DRAIN_TIMEOUT_SECONDS = 10.0
-VOICE_SEARCH_PARSE_PROMPT_VERSION = "memoir_voice_search_query_v1"
-
 StreamingASRClientFactory = Callable[[], StreamingASRClient]
 logger = logging.getLogger(__name__)
 
@@ -53,7 +51,7 @@ JSON 格式：
 
 COMMAND_WORD_RE = re.compile(
     r"(帮我|给我|麻烦|请|想|要)?(搜索|搜|查找|查一下|找一下|找找|看看|看一下|筛一下|筛选|过滤)"
-    r"|帮我找|给我找|找|相关(的)?(记录|内容|转写)?|转写记录|语音记录|里面|一下|那些|关于|有关"
+    r"|帮我找|给我找|找|相关(的)?(记录|内容|转写)?|转写记录|语音记录|记录|内容|里面|一下|那些|关于|有关"
 )
 SPLIT_WORD_RE = re.compile(r"[\s,，。；;、？！?]+")
 
@@ -269,7 +267,7 @@ def _fallback_parse_voice_search_query(text: str) -> ParsedVoiceSearchQuery:
         module=_scan_alias(text, MODULE_ALIASES),
     )
     cleaned = _remove_filter_terms(COMMAND_WORD_RE.sub(" ", text), filters)
-    query = cleaned or text.strip()
+    query = cleaned or ("" if _voice_search_filters_active(filters) else text.strip())
     keywords = _fallback_keywords(query)
     return ParsedVoiceSearchQuery(
         original_text=text,
@@ -335,6 +333,10 @@ def _remove_alias_group(text: str, aliases: dict[str, str]) -> str:
             continue
         cleaned = cleaned.replace(alias, " ")
     return cleaned
+
+
+def _voice_search_filters_active(filters: VoiceSearchQueryFilters) -> bool:
+    return filters.included != "all" or bool(filters.guidance_mode) or bool(filters.module)
 
 
 def _normalized_included_filter(value: Any) -> str | None:

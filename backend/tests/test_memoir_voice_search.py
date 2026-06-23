@@ -143,6 +143,20 @@ async def test_parse_voice_search_query_invalid_ai_payload_uses_fallback_without
     assert parsed.filters.module is None
 
 
+async def test_parse_voice_search_query_fallback_allows_filter_only_search():
+    parsed = await parse_voice_search_query(
+        "帮我找工作相关的未收录记录",
+        ai_client=FakeAIClient("不是 JSON"),
+    )
+
+    assert parsed.used_ai is False
+    assert parsed.query == ""
+    assert parsed.keywords == []
+    assert parsed.filters.included == "not_included"
+    assert parsed.filters.module == "work"
+    assert parsed.display_text == "未收录 · 工作"
+
+
 async def test_parse_mobile_memoir_search_query_route(client, monkeypatch):
     calls: list[dict[str, str | None]] = []
 
