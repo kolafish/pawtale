@@ -727,6 +727,7 @@ test("streaming ASR starts provider only after recording starts", async () => {
   const sent = [];
   const captureStats = [];
   const statuses = [];
+  const diagnostics = [];
   let onOpen;
   global.wx = {
     getRecorderManager() {
@@ -781,6 +782,9 @@ test("streaming ASR starts provider only after recording starts", async () => {
       onCaptureStats(stats) {
         captureStats.push(stats);
       },
+      onDiagnostic(event) {
+        diagnostics.push(event);
+      },
       onEvent() {},
       onPartial() {},
       onFinal() {},
@@ -796,18 +800,21 @@ test("streaming ASR starts provider only after recording starts", async () => {
   assert.deepEqual(statuses, ["connecting", "ready"]);
   assert.deepEqual(sent, []);
   assert.equal(captureStats.at(-1).state, "idle");
+  assert.ok(diagnostics.some((event) => event.name === "asr.socket.open"));
   assert.equal(client.startRecording(), true);
   assert.deepEqual(sent, []);
   assert.equal(recorder.starts.length, 1);
   assert.equal(recorder.starts[0].sampleRate, 16000);
   assert.equal(recorder.starts[0].encodeBitRate, 96000);
   assert.equal(captureStats.at(-1).state, "opening");
+  assert.ok(diagnostics.some((event) => event.name === "asr.recorder.start.call"));
 
   recorder.callbacks.start();
 
   assert.equal(sent.length, 1);
   assert.equal(sent[0].type, "session.start");
   assert.equal(captureStats.at(-1).state, "recording");
+  assert.ok(diagnostics.some((event) => event.name === "asr.recorder.onStart"));
   delete global.wx;
 });
 

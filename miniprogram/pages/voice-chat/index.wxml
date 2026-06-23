@@ -23,6 +23,8 @@
       <text>{{gatewayStateText}}</text>
       <text>{{persistenceStateText}}</text>
     </block>
+    <text class="diagnostic-count">诊断 {{diagnosticEventCount}}</text>
+    <button class="diagnostic-copy" bindtap="copyVoiceDiagnostics">复制诊断</button>
   </view>
   <view wx:if="{{recoveryNotice || canReconnect || canFinishAfterDisconnect}}" class="recovery-panel">
     <text wx:if="{{recoveryNotice}}" class="recovery-text">{{recoveryNotice}}</text>

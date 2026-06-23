@@ -454,6 +454,31 @@
   color: #be123c;
 }
 
+.diagnostic-strip .diagnostic-count {
+  background: #ffffff;
+  color: #7a3b31;
+}
+
+.diagnostic-copy {
+  width: 144rpx;
+  height: 54rpx;
+  margin: 0;
+  border: 0;
+  border-radius: 16rpx;
+  background: #ffffff;
+  color: #9f4a3c;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 23rpx;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.diagnostic-copy::after {
+  border: 0;
+}
+
 .recovery-panel {
   margin-top: 18rpx;
   padding: 22rpx;
