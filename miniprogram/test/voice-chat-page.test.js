@@ -739,6 +739,48 @@ test("voice chat starts pending auto listening when gateway becomes ready after 
   delete global.wx;
 });
 
+test("voice chat copies diagnostics with auto-listen gate state", () => {
+  let clipboardText = "";
+  const toasts = [];
+  global.wx = {
+    setClipboardData(options) {
+      clipboardText = options.data;
+      options.success?.();
+    },
+    showToast(options) {
+      toasts.push(options);
+    },
+  };
+  const page = loadVoiceChatPage();
+  const context = {
+    ...page,
+    data: {
+      ...page.data,
+      voiceSessionId: "voice-1",
+      voiceAuthorizationAgreed: true,
+      autoListenEnabled: true,
+      status: "idle",
+      connecting: false,
+      recording: false,
+    },
+    setData(patch) {
+      this.data = { ...this.data, ...patch };
+    },
+  };
+
+  context.autoListenPendingAfterPlayback = true;
+  const started = page.tryStartAutoListenAfterTTS.call(context);
+  page.copyVoiceDiagnostics.call(context);
+
+  assert.equal(started, false);
+  assert.match(clipboardText, /build=voice-chat-diagnostics-2026-06-23/);
+  assert.match(clipboardText, /autoListen\.tryAfterTTS/);
+  assert.match(clipboardText, /hasClient=false/);
+  assert.match(clipboardText, /pendingAfterPlayback=true/);
+  assert.equal(toasts[0].title, "诊断已复制");
+  delete global.wx;
+});
+
 test("voice chat asks with AI voice when auto-listen hears no answer", async () => {
   const noAnswerRequests = [];
   const preparedTTS = [];
