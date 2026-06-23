@@ -171,6 +171,33 @@ function sampleAudioResponse() {
   };
 }
 
+function clone(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+function planFromChapterUpdates(status, updates) {
+  const base = samplePlan(status);
+  return {
+    ...base,
+    chapters: updates.map((update, index) => {
+      const existing = base.chapters.find((chapter) => chapter.id === update.id) || {};
+      return {
+        id: update.id || `chapter-${index + 1}`,
+        plan_id: "plan-1",
+        project_id: "project/1",
+        metadata_json: {},
+        created_at: "2026-06-17T00:00:00.000Z",
+        updated_at: "2026-06-17T00:00:00.000Z",
+        ...existing,
+        title: update.title,
+        summary: update.summary,
+        sort_order: index,
+        source_refs: clone(update.source_refs),
+      };
+    }),
+  };
+}
+
 function loadBookPage({ authExports = {}, voiceApiExports = {}, ttsExports = {} } = {}) {
   const authPath = require.resolve("../services/auth.ts");
   const voiceApiPath = require.resolve("../services/memoir-voice-api.ts");
@@ -416,6 +443,32 @@ test("book page builds source assignment views and chapter picker options", () =
   ]);
 });
 
+test("book page builds chapter structure controls from source refs", () => {
+  const { mod } = loadBookPage();
+  const plan = samplePlan("confirmed");
+  plan.chapters[0].source_refs = [
+    sampleRef("utterance-1", "外婆家的院子"),
+    sampleRef("utterance-3", "春节做年糕"),
+  ];
+
+  const chapters = mod.buildChapterViews(plan);
+
+  assert.equal(chapters[0].canMoveUp, false);
+  assert.equal(chapters[0].canMoveDown, true);
+  assert.equal(chapters[1].canMoveUp, true);
+  assert.equal(chapters[0].sourceViews.length, 2);
+  assert.equal(chapters[0].sourceViews[0].previewText, "外婆家的院子");
+  assert.deepEqual(chapters[0].sourceViews[0].moveTargetOptions, [
+    { label: "第 2 章 第一次离家", value: "chapter-2" },
+  ]);
+  assert.deepEqual(chapters[0].mergeTargetOptions, [
+    { label: "第 2 章 第一次离家", value: "chapter-2" },
+  ]);
+  assert.deepEqual(chapters[0].splitOptions, [
+    { label: "前 1 条 / 后 1 条", value: 1 },
+  ]);
+});
+
 test("book page shows recent uncovered transcripts before older ones", () => {
   const { mod } = loadBookPage();
   const coverage = sampleSourceCoverage(14);
@@ -499,7 +552,7 @@ test("book page marks deleted chapter sources for review", () => {
   assert.equal(chapters[0].sourceCount, 0);
   assert.equal(chapters[0].removedSourceCount, 1);
   assert.equal(chapters[0].draftActionText, "整理本章");
-  assert.equal(chapters[0].sourceChangeNotice, "1 条来源已删除，请检查本章正文");
+  assert.equal(chapters[0].sourceChangeNotice, "1 条来源已删除，章节稿需要更新");
 });
 
 test("book page confirms chapters with trimmed user edits and original source refs", async () => {
@@ -831,6 +884,172 @@ test("book page deletes confirmed chapter through plan structure update", async 
   assert.equal(calls[0].data.chapters[0].id, "chapter-2");
   assert.equal(context.data.chapters.length, 1);
   assert.equal(context.data.chapters[0].id, "chapter-2");
+  delete global.wx;
+});
+
+test("book page reorders chapters through plan structure update", async () => {
+  const calls = [];
+  global.wx = { showToast() {}, switchTab() {} };
+  const { page } = loadBookPage({
+    voiceApiExports: {
+      updateMemoirBookPlan: async (projectId, data) => {
+        calls.push({ projectId, data });
+        return planFromChapterUpdates("confirmed", data.chapters);
+      },
+      getMemoirBookChapterDraft: async () => null,
+      getMemoirBookSourceCoverage: async () => sampleSourceCoverage(0),
+      getMemoirBookOutput: async () => null,
+    },
+  });
+  const context = pageContext(page, { projectId: "project/1", projectTitle: "外婆回忆录" });
+  page.applyPlan.call(context, samplePlan("confirmed"));
+
+  await page.moveChapter.call(context, {
+    currentTarget: { dataset: { id: "chapter-1", direction: "down" } },
+  });
+
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0].data.chapters.map((chapter) => chapter.id), ["chapter-2", "chapter-1"]);
+  assert.deepEqual(context.data.chapters.map((chapter) => chapter.id), ["chapter-2", "chapter-1"]);
+  delete global.wx;
+});
+
+test("book page moves a source ref between chapters", async () => {
+  const calls = [];
+  global.wx = { showToast() {}, switchTab() {} };
+  const plan = samplePlan("confirmed");
+  plan.chapters[0].source_refs = [
+    sampleRef("utterance-1", "外婆家的院子"),
+    sampleRef("utterance-3", "春节做年糕"),
+  ];
+  const { page } = loadBookPage({
+    voiceApiExports: {
+      updateMemoirBookPlan: async (projectId, data) => {
+        calls.push({ projectId, data });
+        return planFromChapterUpdates("confirmed", data.chapters);
+      },
+      getMemoirBookChapterDraft: async () => null,
+      getMemoirBookSourceCoverage: async () => sampleSourceCoverage(0),
+      getMemoirBookOutput: async () => null,
+    },
+  });
+  const context = pageContext(page, { projectId: "project/1", projectTitle: "外婆回忆录" });
+  page.applyPlan.call(context, plan);
+
+  await page.moveChapterSource.call(context, {
+    currentTarget: {
+      dataset: {
+        id: "chapter-1",
+        utteranceId: "utterance-3",
+      },
+    },
+    detail: { value: 0 },
+  });
+
+  assert.equal(calls.length, 1);
+  assert.deepEqual(
+    calls[0].data.chapters[0].source_refs.map((ref) => ref.utterance_id),
+    ["utterance-1"],
+  );
+  assert.deepEqual(
+    calls[0].data.chapters[1].source_refs.map((ref) => ref.utterance_id),
+    ["utterance-2", "utterance-3"],
+  );
+  assert.equal(context.data.chapters[0].sourceCount, 1);
+  assert.equal(context.data.chapters[1].sourceCount, 2);
+  delete global.wx;
+});
+
+test("book page splits a chapter at a selected source boundary", async () => {
+  const calls = [];
+  global.wx = { showToast() {}, switchTab() {} };
+  const plan = samplePlan("confirmed");
+  plan.chapters[0].source_refs = [
+    sampleRef("utterance-1", "外婆家的院子"),
+    sampleRef("utterance-3", "春节做年糕"),
+  ];
+  const { page } = loadBookPage({
+    voiceApiExports: {
+      updateMemoirBookPlan: async (projectId, data) => {
+        calls.push({ projectId, data });
+        return planFromChapterUpdates("confirmed", data.chapters);
+      },
+      getMemoirBookChapterDraft: async () => null,
+      getMemoirBookSourceCoverage: async () => sampleSourceCoverage(0),
+      getMemoirBookOutput: async () => null,
+    },
+  });
+  const context = pageContext(page, { projectId: "project/1", projectTitle: "外婆回忆录" });
+  page.applyPlan.call(context, plan);
+
+  await page.splitChapter.call(context, {
+    currentTarget: { dataset: { id: "chapter-1" } },
+    detail: { value: 0 },
+  });
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].data.chapters.length, 3);
+  assert.equal(calls[0].data.chapters[0].id, "chapter-1");
+  assert.equal(calls[0].data.chapters[0].source_refs[0].utterance_id, "utterance-1");
+  assert.equal(calls[0].data.chapters[1].id, undefined);
+  assert.equal(calls[0].data.chapters[1].title, "外婆家的童年（续）");
+  assert.equal(calls[0].data.chapters[1].source_refs[0].utterance_id, "utterance-3");
+  assert.equal(calls[0].data.chapters[2].id, "chapter-2");
+  delete global.wx;
+});
+
+test("book page merges chapters and regenerates title plus draft for confirmed plans", async () => {
+  const calls = [];
+  global.wx = {
+    showModal(options) {
+      options.success({ confirm: true });
+    },
+    showToast() {},
+    switchTab() {},
+  };
+  const { page } = loadBookPage({
+    voiceApiExports: {
+      updateMemoirBookPlan: async (projectId, data) => {
+        calls.push({ kind: "update", projectId, data });
+        return planFromChapterUpdates("confirmed", data.chapters);
+      },
+      generateMemoirBookChapterTitle: async (projectId, chapterId, data) => {
+        calls.push({ kind: "title", projectId, chapterId, data });
+        const updated = planFromChapterUpdates("confirmed", calls[0].data.chapters);
+        updated.chapters[0].title = "童年里的离别";
+        return updated;
+      },
+      generateMemoirBookChapterDraft: async (projectId, chapterId, data) => {
+        calls.push({ kind: "draft", projectId, chapterId, data });
+        return sampleDraft(2, "draft", "合并后的章节正文");
+      },
+      getMemoirBookChapterDraft: async () => null,
+      getMemoirBookSourceCoverage: async () => sampleSourceCoverage(0),
+      getMemoirBookOutput: async () => null,
+    },
+  });
+  const context = pageContext(page, { projectId: "project/1", projectTitle: "外婆回忆录" });
+  page.applyPlan.call(context, samplePlan("confirmed"), {
+    "chapter-1": sampleDraft(1, "confirmed", "童年正文"),
+    "chapter-2": sampleDraft(1, "confirmed", "离家正文"),
+  });
+
+  await page.mergeChapterInto.call(context, {
+    currentTarget: { dataset: { id: "chapter-2" } },
+    detail: { value: 0 },
+  });
+
+  assert.deepEqual(calls.map((call) => call.kind), ["update", "title", "draft"]);
+  assert.equal(calls[0].data.chapters.length, 1);
+  assert.equal(calls[0].data.chapters[0].id, "chapter-1");
+  assert.deepEqual(
+    calls[0].data.chapters[0].source_refs.map((ref) => ref.utterance_id),
+    ["utterance-1", "utterance-2"],
+  );
+  assert.match(calls[0].data.chapters[0].summary, /补充整理/);
+  assert.deepEqual(calls[2].data, { force_regenerate: false });
+  assert.equal(context.data.chapters[0].title, "童年里的离别");
+  assert.equal(context.data.chapters[0].draftContent, "合并后的章节正文");
   delete global.wx;
 });
 
