@@ -512,3 +512,23 @@ test("me saves selected AI model", () => {
   assert.equal(toastCalls.length, 1);
   delete global.wx;
 });
+
+test("me keeps memoir management and voice progress entries in the combined project overview", () => {
+  const navigations = [];
+  global.wx = {
+    navigateTo(options) {
+      navigations.push(options.url);
+    },
+  };
+  const { page } = loadMePage();
+  const context = pageContext(page);
+
+  page.openVoiceProgress.call(context);
+  page.openProjects.call(context);
+
+  assert.deepEqual(navigations, [
+    "/pages/voice-progress/index",
+    "/pages/projects/index",
+  ]);
+  delete global.wx;
+});
