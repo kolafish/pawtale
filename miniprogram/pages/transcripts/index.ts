@@ -8,6 +8,11 @@ import {
 import { configureAudiblePlayback } from "../../services/audio-playback";
 import { getMemoirIdentity } from "../../services/auth";
 import { ApiError } from "../../services/request";
+import { formatBeijingDateTime } from "../../services/time";
+import {
+  clearTranscriptNavigationTarget,
+  readTranscriptNavigationTarget,
+} from "../../services/transcript-navigation";
 
 interface DatasetEvent {
   currentTarget: {
@@ -26,6 +31,8 @@ interface TextAreaEvent extends DatasetEvent {
 interface TranscriptItemView extends MemoirVoiceTranscriptItem {
   editingText: string;
   editingCharCount: number;
+  createdAtText: string;
+  anchorId: string;
   audioText: string;
   bookInclusionText: string;
   isIncludedInBook: boolean;
@@ -47,9 +54,20 @@ interface TranscriptsData {
   offset: number;
   activeProjectId: string;
   projectTitle: string;
+  highlightedId: string;
 }
 
 const DEFAULT_LIMIT = 30;
+
+type PageScrollTo = (options: {
+  selector: string;
+  offsetTop?: number;
+  duration?: number;
+}) => void;
+
+type WxWithPageScrollTo = typeof wx & {
+  pageScrollTo?: PageScrollTo;
+};
 
 function formatDurationSeconds(value: number): string {
   const seconds = Math.max(0, Math.round(value));
@@ -77,6 +95,14 @@ export function transcriptAudioText(item: MemoirVoiceTranscriptItem): string {
   return duration ? `时长 ${duration}` : "时长未知";
 }
 
+export function transcriptCreatedAtText(item: Pick<MemoirVoiceTranscriptItem, "created_at">): string {
+  return formatBeijingDateTime(item.created_at) || "转写记录";
+}
+
+function transcriptAnchorId(id: string): string {
+  return `transcript-${id.replace(/[^A-Za-z0-9_-]/g, "-")}`;
+}
+
 export function transcriptBookInclusionText(item: MemoirVoiceTranscriptItem): string {
   const chapters = [...(item.included_chapters || [])]
     .sort((left, right) => left.sort_order - right.sort_order)
@@ -97,6 +123,8 @@ function toViewItem(item: MemoirVoiceTranscriptItem): TranscriptItemView {
     ...item,
     editingText,
     editingCharCount: editingText.trim().length,
+    createdAtText: transcriptCreatedAtText(item),
+    anchorId: transcriptAnchorId(item.id),
     audioText: transcriptAudioText(item),
     bookInclusionText: transcriptBookInclusionText(item),
     isIncludedInBook,
@@ -155,6 +183,9 @@ Page<TranscriptsData, {
   openHome(): void;
   openLogin(): void;
   createProject(): void;
+  revealStoredTranscriptTarget(): Promise<void>;
+  ensureTranscriptTargetLoaded(targetId: string): Promise<TranscriptItemView | null>;
+  scrollToTranscript(item: TranscriptItemView): void;
   audio: WechatMiniprogram.InnerAudioContext | null;
   playToken: number;
 }>({
@@ -174,10 +205,12 @@ Page<TranscriptsData, {
     offset: 0,
     activeProjectId: "",
     projectTitle: "",
+    highlightedId: "",
   },
 
   async onShow() {
     await this.loadTranscripts(true);
+    await this.revealStoredTranscriptTarget();
   },
 
   async loadTranscripts(reset = false) {
@@ -201,6 +234,7 @@ Page<TranscriptsData, {
           items: [],
           total: 0,
           offset: 0,
+          highlightedId: "",
         });
         return;
       }
@@ -217,6 +251,7 @@ Page<TranscriptsData, {
         items: reset ? nextItems : [...this.data.items, ...nextItems],
         total: response.total,
         offset: offset + nextItems.length,
+        highlightedId: reset ? "" : this.data.highlightedId,
       });
     } catch (error) {
       if (error instanceof ApiError && [401, 403].includes(error.statusCode)) {
@@ -227,6 +262,7 @@ Page<TranscriptsData, {
           items: [],
           total: 0,
           offset: 0,
+          highlightedId: "",
         });
         return;
       }
@@ -448,5 +484,44 @@ Page<TranscriptsData, {
   createProject() {
     this.stopPlayback();
     wx.navigateTo({ url: "/pages/project-edit/index" });
+  },
+
+  async revealStoredTranscriptTarget() {
+    const targetId = readTranscriptNavigationTarget();
+    if (!targetId) {
+      return;
+    }
+    clearTranscriptNavigationTarget();
+    const item = await this.ensureTranscriptTargetLoaded(targetId);
+    if (!item) {
+      return;
+    }
+    this.setData({ highlightedId: item.id });
+    this.scrollToTranscript(item);
+  },
+
+  async ensureTranscriptTargetLoaded(targetId) {
+    let item = this.data.items.find((candidate) => candidate.id === targetId) || null;
+    while (!item && this.data.items.length < this.data.total) {
+      const previousCount = this.data.items.length;
+      await this.loadTranscripts(false);
+      item = this.data.items.find((candidate) => candidate.id === targetId) || null;
+      if (this.data.items.length === previousCount) {
+        break;
+      }
+    }
+    return item;
+  },
+
+  scrollToTranscript(item) {
+    const pageScrollTo = (wx as WxWithPageScrollTo).pageScrollTo;
+    if (typeof pageScrollTo !== "function") {
+      return;
+    }
+    pageScrollTo({
+      selector: `#${item.anchorId}`,
+      offsetTop: 16,
+      duration: 240,
+    });
   },
 });

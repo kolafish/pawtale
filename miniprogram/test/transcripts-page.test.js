@@ -66,6 +66,40 @@ function pageContext(page, dataPatch = {}) {
   };
 }
 
+function sampleTranscript(id, createdAt = "2026-06-17T00:00:00.000Z") {
+  return {
+    id,
+    voice_session_id: "voice-1",
+    project_id: "project-1",
+    project_title: "我的回忆录",
+    chat_message_id: `message-${id}`,
+    audio_file_id: `audio-${id}`,
+    audio_mime_type: "audio/pcm",
+    audio_size_bytes: 1024,
+    audio_duration_seconds: 8,
+    transcript_version_id: `version-${id}`,
+    question_message_id: null,
+    question_text: "",
+    question_audio_file_id: null,
+    transcript_raw: `原文 ${id}`,
+    transcript_edited: "",
+    display_text: `原文 ${id}`,
+    raw_char_count: 5,
+    edited_char_count: 0,
+    display_char_count: 5,
+    start_ms: 0,
+    end_ms: 8000,
+    provider: "fake",
+    session_status: "stopped",
+    guidance_mode: "free_narration",
+    current_guidance_module: null,
+    is_included_in_book: false,
+    included_chapters: [],
+    created_at: createdAt,
+    session_created_at: "2026-06-17T00:00:00.000Z",
+  };
+}
+
 test("transcript audio summary only exposes duration", () => {
   const { transcriptAudioText } = loadTranscriptsPage().mod;
   const summary = transcriptAudioText({
@@ -107,6 +141,90 @@ test("transcript book inclusion text shows included chapter titles", () => {
     "已收录：童年院子、离家求学",
   );
   assert.equal(transcriptBookInclusionText({ included_chapters: [] }), "未收录到章节");
+});
+
+test("transcripts page formats record time like book uncovered sources", async () => {
+  const { page } = loadTranscriptsPage({
+    authExports: {
+      getMemoirIdentity: async () => ({
+        id: "user-1",
+        active_project_id: "project-1",
+        active_project: { id: "project-1", title: "我的回忆录" },
+        projects: [],
+      }),
+    },
+    voiceApiExports: {
+      listMemoirVoiceTranscripts: async () => ({
+        items: [sampleTranscript("utterance-1", "2026-06-17T00:00:00.000Z")],
+        total: 1,
+        limit: 30,
+        offset: 0,
+      }),
+    },
+  });
+  const context = pageContext(page);
+
+  await page.loadTranscripts.call(context, true);
+
+  assert.equal(context.data.items[0].createdAtText, "06-17 08:00 北京时间");
+});
+
+test("transcripts page scrolls to stored uncovered source target", async () => {
+  const scrolls = [];
+  const removedKeys = [];
+  global.wx = {
+    getStorageSync(key) {
+      if (key === "pawtale_transcript_navigation_target") {
+        return { utterance_id: "utterance-target" };
+      }
+      return "";
+    },
+    removeStorageSync(key) {
+      removedKeys.push(key);
+    },
+    pageScrollTo(options) {
+      scrolls.push(options);
+    },
+  };
+  const calls = [];
+  const { page } = loadTranscriptsPage({
+    authExports: {
+      getMemoirIdentity: async () => ({
+        id: "user-1",
+        active_project_id: "project-1",
+        active_project: { id: "project-1", title: "我的回忆录" },
+        projects: [],
+      }),
+    },
+    voiceApiExports: {
+      listMemoirVoiceTranscripts: async ({ offset }) => {
+        calls.push(offset);
+        return {
+          items: offset === 0
+            ? [sampleTranscript("utterance-old")]
+            : [sampleTranscript("utterance-target")],
+          total: 2,
+          limit: 1,
+          offset,
+        };
+      },
+    },
+  });
+  const context = pageContext(page, { limit: 1 });
+
+  await page.onShow.call(context);
+
+  assert.deepEqual(calls, [0, 1]);
+  assert.equal(context.data.highlightedId, "utterance-target");
+  assert.deepEqual(removedKeys, ["pawtale_transcript_navigation_target"]);
+  assert.deepEqual(scrolls, [
+    {
+      selector: "#transcript-utterance-target",
+      offsetTop: 16,
+      duration: 240,
+    },
+  ]);
+  delete global.wx;
 });
 
 test("transcripts page stays browseable when login is required", async () => {

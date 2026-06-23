@@ -60,7 +60,12 @@
 
     <view wx:if="{{plan && chapterPickerOptions.length && uncoveredSources.length}}" class="coverage-source-list">
       <view wx:for="{{uncoveredSources}}" wx:key="utterance_id" class="coverage-source-card">
-        <view class="coverage-source-main">
+        <view
+          class="coverage-source-main"
+          data-id="{{item.utterance_id}}"
+          bindtap="openTranscripts"
+          hover-class="coverage-source-main-active"
+        >
           <text class="coverage-source-time">{{item.createdAtText}}</text>
           <text class="coverage-source-text">{{item.previewText}}</text>
         </view>

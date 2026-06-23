@@ -430,6 +430,34 @@ test("book page shows recent uncovered transcripts before older ones", () => {
   assert.equal(sources[11].utterance_id, "utterance-new-3");
 });
 
+test("book page stores uncovered source target before opening transcripts tab", () => {
+  const switches = [];
+  const storageWrites = [];
+  global.wx = {
+    setStorageSync(key, value) {
+      storageWrites.push({ key, value });
+    },
+    switchTab(options) {
+      switches.push(options.url);
+    },
+  };
+  const { page } = loadBookPage();
+  const context = pageContext(page);
+
+  page.openTranscripts.call(context, {
+    currentTarget: {
+      dataset: {
+        id: "utterance-new-1",
+      },
+    },
+  });
+
+  assert.equal(storageWrites[0].key, "pawtale_transcript_navigation_target");
+  assert.equal(storageWrites[0].value.utterance_id, "utterance-new-1");
+  assert.deepEqual(switches, ["/pages/transcripts/index"]);
+  delete global.wx;
+});
+
 test("book page avoids placeholder title for generic uncovered transcript", () => {
   const { mod } = loadBookPage();
   const source = mod.buildUncoveredSourceViews(sampleSourceCoverage(1))[0];

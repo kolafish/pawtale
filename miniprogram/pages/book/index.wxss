@@ -172,6 +172,12 @@
 .coverage-source-main {
   min-width: 0;
   flex: 1;
+  padding: 4rpx;
+  border-radius: 14rpx;
+}
+
+.coverage-source-main-active {
+  background: #fff6f1;
 }
 
 .coverage-source-time {
