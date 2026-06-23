@@ -819,8 +819,6 @@ async def update_book_plan(
     plan = await _load_plan(db, project_id)
     if not plan:
         raise HTTPException(status_code=404, detail="章节规划不存在")
-    if plan.status != MemoirBookPlanStatus.CONFIRMED.value:
-        raise HTTPException(status_code=400, detail="请先确认章节规划")
 
     sources = await _source_segments(db, user_id=user_id, project_id=project_id)
     chapter_updates = _validated_chapter_updates(req, sources)
@@ -874,7 +872,10 @@ async def update_book_plan(
         if chapter_id not in retained_ids
     ]
     for chapter in removed_chapters:
-        await db.delete(chapter)
+        if chapter in plan.chapters:
+            plan.chapters.remove(chapter)
+        else:
+            await db.delete(chapter)
 
     if changed_chapter_ids:
         drafts = (

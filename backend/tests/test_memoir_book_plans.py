@@ -742,6 +742,60 @@ async def test_mobile_memoir_book_plan_patch_adds_chapter_from_uncovered_source(
     assert coverage.json()["uncovered_source_count"] == 0
 
 
+async def test_mobile_memoir_book_plan_patch_updates_draft_plan_structure(
+    client,
+    test_db,
+    monkeypatch,
+):
+    first = await _create_voice_transcript(client, test_db, "我小时候常在外婆家的院子里晒太阳。")
+    second = await _create_voice_transcript(client, test_db, "后来我第一次离家去县城读书，心里很紧张。")
+    project_id = first["session"]["project_id"]
+    monkeypatch.setattr(
+        "app.services.memoir.book_plans.get_ai_service",
+        lambda model=None: FakeBookPlanAI(),
+    )
+    generated_response = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-plan/generate",
+        json={},
+    )
+    assert generated_response.status_code == 200
+    generated = generated_response.json()
+    assert generated["status"] == "draft"
+    first_chapter, second_chapter = generated["chapters"]
+
+    response = await client.patch(
+        f"/api/mobile/memoir/projects/{project_id}/book-plan",
+        json={
+            "title": "草稿目录调整",
+            "chapters": [
+                {
+                    "id": first_chapter["id"],
+                    "title": "童年和离家",
+                    "summary": "合并整理童年院子和第一次离家。",
+                    "source_refs": [
+                        first_chapter["source_refs"][0],
+                        second_chapter["source_refs"][0],
+                    ],
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200, response.json()
+    data = response.json()
+    assert data["status"] == "draft"
+    assert data["title"] == "草稿目录调整"
+    assert [chapter["title"] for chapter in data["chapters"]] == ["童年和离家"]
+    assert [ref["utterance_id"] for ref in data["chapters"][0]["source_refs"]] == [
+        first["utterance_id"],
+        second["utterance_id"],
+    ]
+
+    coverage = await client.get(f"/api/mobile/memoir/projects/{project_id}/book-source-coverage")
+    assert coverage.status_code == 200
+    assert coverage.json()["uncovered_source_count"] == 0
+
+
 async def test_mobile_memoir_book_chapter_title_update_renames_confirmed_chapter(
     client,
     test_db,
