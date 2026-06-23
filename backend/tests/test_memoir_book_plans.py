@@ -157,6 +157,29 @@ def _source_ref(created: dict[str, str], quote: str = "") -> dict[str, str]:
     }
 
 
+async def _create_confirmed_chapter_draft(test_db, *, project_id: str, chapter_id: str) -> MemoirBookChapterDraft:
+    draft = MemoirBookChapterDraft(
+        project_id=project_id,
+        chapter_id=chapter_id,
+        status=MemoirBookChapterDraftStatus.CONFIRMED.value,
+    )
+    test_db.add(draft)
+    await test_db.flush()
+    test_db.add(
+        MemoirBookChapterDraftVersion(
+            draft_id=draft.id,
+            project_id=project_id,
+            chapter_id=chapter_id,
+            version=1,
+            content="已确认章节稿",
+            created_by=MemoirCreatedBy.USER.value,
+            prompt_snapshot="",
+        )
+    )
+    await test_db.commit()
+    return draft
+
+
 async def test_mobile_memoir_book_plan_routes_require_login(anonymous_client):
     response = await anonymous_client.post(
         "/api/mobile/memoir/projects/project-1/book-plan/generate",
@@ -519,6 +542,123 @@ async def test_mobile_memoir_book_source_assignment_rejects_covered_source(
 
     assert response.status_code == 400
     assert response.json()["detail"] == "转写已收录到章节"
+
+
+async def test_mobile_memoir_book_source_move_updates_only_source_and_target_chapters(
+    client,
+    test_db,
+):
+    first = await _create_voice_transcript(client, test_db, "第一条年节记忆。")
+    second = await _create_voice_transcript(client, test_db, "第二条年节记忆。")
+    third = await _create_voice_transcript(client, test_db, "童年友情里的伙伴。")
+    project_id = first["session"]["project_id"]
+    confirm_response = await client.put(
+        f"/api/mobile/memoir/projects/{project_id}/book-plan",
+        json={
+            "title": "用户确认后的章节",
+            "chapters": [
+                {
+                    "title": "岁首欢聚记",
+                    "source_refs": [_source_ref(first), _source_ref(second)],
+                },
+                {
+                    "title": "童年友情",
+                    "source_refs": [_source_ref(third)],
+                },
+            ],
+        },
+    )
+    assert confirm_response.status_code == 200
+    chapters = confirm_response.json()["chapters"]
+    source_chapter_id = chapters[0]["id"]
+    target_chapter_id = chapters[1]["id"]
+    source_draft = await _create_confirmed_chapter_draft(
+        test_db,
+        project_id=project_id,
+        chapter_id=source_chapter_id,
+    )
+    target_draft = await _create_confirmed_chapter_draft(
+        test_db,
+        project_id=project_id,
+        chapter_id=target_chapter_id,
+    )
+
+    response = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-source-moves",
+        json={
+            "source_chapter_id": source_chapter_id,
+            "target_chapter_id": target_chapter_id,
+            "utterance_id": second["utterance_id"],
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    chapters_by_id = {chapter["id"]: chapter for chapter in data["chapters"]}
+    assert [
+        ref["utterance_id"]
+        for ref in chapters_by_id[source_chapter_id]["source_refs"]
+    ] == [first["utterance_id"]]
+    assert [
+        ref["utterance_id"]
+        for ref in chapters_by_id[target_chapter_id]["source_refs"]
+    ] == [third["utterance_id"], second["utterance_id"]]
+    assert chapters_by_id[source_chapter_id]["metadata_json"]["removed_source_utterance_ids"] == [
+        second["utterance_id"]
+    ]
+    assert chapters_by_id[target_chapter_id]["metadata_json"]["pending_source_utterance_ids"] == [
+        second["utterance_id"]
+    ]
+
+    refreshed_source_draft = await test_db.scalar(
+        select(MemoirBookChapterDraft).where(MemoirBookChapterDraft.id == source_draft.id)
+    )
+    refreshed_target_draft = await test_db.scalar(
+        select(MemoirBookChapterDraft).where(MemoirBookChapterDraft.id == target_draft.id)
+    )
+    assert refreshed_source_draft.status == MemoirBookChapterDraftStatus.DRAFT.value
+    assert refreshed_source_draft.metadata_json["status_reason"] == "sources_changed"
+    assert refreshed_target_draft.status == MemoirBookChapterDraftStatus.DRAFT.value
+    assert refreshed_target_draft.metadata_json["status_reason"] == "sources_changed"
+
+
+async def test_mobile_memoir_book_source_move_rejects_last_source_in_chapter(
+    client,
+    test_db,
+):
+    first = await _create_voice_transcript(client, test_db, "第一条年节记忆。")
+    second = await _create_voice_transcript(client, test_db, "童年友情里的伙伴。")
+    project_id = first["session"]["project_id"]
+    confirm_response = await client.put(
+        f"/api/mobile/memoir/projects/{project_id}/book-plan",
+        json={
+            "title": "用户确认后的章节",
+            "chapters": [
+                {
+                    "title": "岁首欢聚记",
+                    "source_refs": [_source_ref(first)],
+                },
+                {
+                    "title": "童年友情",
+                    "source_refs": [_source_ref(second)],
+                },
+            ],
+        },
+    )
+    assert confirm_response.status_code == 200
+    chapters = confirm_response.json()["chapters"]
+
+    response = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-source-moves",
+        json={
+            "source_chapter_id": chapters[0]["id"],
+            "target_chapter_id": chapters[1]["id"],
+            "utterance_id": first["utterance_id"],
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "原章节至少需要保留一条来源"
 
 
 async def test_mobile_memoir_book_plan_reconfirm_removes_replaced_chapter_drafts(

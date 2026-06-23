@@ -352,6 +352,12 @@ export interface MemoirBookSourceAssignmentRequest {
   assignments: MemoirBookSourceAssignmentInput[];
 }
 
+export interface MemoirBookSourceMoveRequest {
+  source_chapter_id: string;
+  target_chapter_id: string;
+  utterance_id: string;
+}
+
 export interface MemoirBookPlanGenerateRequest {
   ai_model?: string;
   max_chapters?: number;
