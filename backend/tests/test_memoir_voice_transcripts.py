@@ -53,11 +53,16 @@ async def _create_voice_transcript(
     test_db,
     text="嗯，我小时候就是住在外婆家。",
     question_text: str | None = None,
+    guidance_mode: str = "free_narration",
+    current_guidance_module: str | None = None,
 ):
     user = (await client.get("/api/auth/me")).json()
+    session_payload = {"guidance_mode": guidance_mode, "provider": "volc_streaming_asr"}
+    if current_guidance_module:
+        session_payload["current_guidance_module"] = current_guidance_module
     create_response = await post_mobile_memoir_voice_session(
         client,
-        json={"guidance_mode": "free_narration", "provider": "volc_streaming_asr"},
+        json=session_payload,
     )
     session = create_response.json()["session"]
     audio_file = AudioFile(
@@ -138,6 +143,77 @@ async def _create_voice_transcript(
     }
 
 
+async def _append_voice_turn(
+    test_db,
+    *,
+    user_id: str,
+    session: dict,
+    text: str,
+    question_text: str,
+    question_turn_index: int,
+    user_turn_index: int,
+) -> dict:
+    audio_file = AudioFile(
+        user_id=user_id,
+        storage_path=f"memoir/audio/{user_id}/sample-{user_turn_index}.pcm",
+        mime_type="audio/pcm",
+        size_bytes=3200,
+        duration_seconds=8,
+    )
+    test_db.add(audio_file)
+    question_message = MemoirChatMessage(
+        project_id=session["project_id"],
+        voice_session_id=session["id"],
+        role=MemoirChatMessageRole.ASSISTANT.value,
+        content_text=question_text,
+        content_status=MemoirChatContentStatus.FINAL.value,
+        turn_index=question_turn_index,
+        guidance_intent="follow_up",
+        metadata_json={"source": "test.question"},
+    )
+    test_db.add(question_message)
+    version = MemoirTranscriptVersion(
+        voice_session_id=session["id"],
+        version_type=MemoirTranscriptVersionType.ASR_RAW.value,
+        content=text,
+        provider="volc_streaming_asr",
+        created_by=MemoirCreatedBy.ASR.value,
+    )
+    test_db.add(version)
+    await test_db.flush()
+    message = MemoirChatMessage(
+        project_id=session["project_id"],
+        voice_session_id=session["id"],
+        role=MemoirChatMessageRole.USER.value,
+        content_text=text,
+        content_status=MemoirChatContentStatus.FINAL.value,
+        audio_file_id=audio_file.id,
+        transcript_version_id=version.id,
+        turn_index=user_turn_index,
+        metadata_json={"source": "test"},
+    )
+    test_db.add(message)
+    await test_db.flush()
+    utterance = MemoirVoiceUtterance(
+        voice_session_id=session["id"],
+        chat_message_id=message.id,
+        audio_file_id=audio_file.id,
+        transcript_raw=text,
+        transcript_edited=text,
+        start_ms=0,
+        end_ms=8000,
+        provider="volc_streaming_asr",
+        provider_payload_json={"source": "test"},
+    )
+    test_db.add(utterance)
+    await test_db.commit()
+    return {
+        "utterance_id": utterance.id,
+        "message_id": message.id,
+        "question_message_id": question_message.id,
+    }
+
+
 async def test_mobile_memoir_lists_saved_voice_transcripts(client, test_db):
     created = await _create_voice_transcript(client, test_db, question_text="你小时候住在哪里？")
 
@@ -165,6 +241,108 @@ async def test_mobile_memoir_lists_saved_voice_transcripts(client, test_db):
     assert item["included_chapters"] == []
     assert item["created_at"].endswith(UTC_SUFFIXES)
     assert item["session_created_at"].endswith(UTC_SUFFIXES)
+
+
+async def test_mobile_memoir_searches_voice_transcripts_by_text_and_question(client, test_db):
+    first = await _create_voice_transcript(
+        client,
+        test_db,
+        text="我小时候常在外婆家的院子里晒太阳。",
+        question_text="你小时候住在哪里？",
+    )
+    second = await _create_voice_transcript(
+        client,
+        test_db,
+        text="后来我第一次离家去县城读书。",
+        question_text="你在学校最想念谁？",
+    )
+
+    text_response = await client.get("/api/mobile/memoir/voice-transcripts", params={"q": "外婆"})
+    question_response = await client.get("/api/mobile/memoir/voice-transcripts", params={"q": "学校"})
+    multi_term_response = await client.get("/api/mobile/memoir/voice-transcripts", params={"q": "县城 读书"})
+    empty_response = await client.get("/api/mobile/memoir/voice-transcripts", params={"q": "纺织厂"})
+
+    assert text_response.status_code == 200
+    assert text_response.json()["total"] == 1
+    assert text_response.json()["items"][0]["id"] == first["utterance_id"]
+
+    assert question_response.status_code == 200
+    assert question_response.json()["total"] == 1
+    assert question_response.json()["items"][0]["id"] == second["utterance_id"]
+
+    assert multi_term_response.status_code == 200
+    assert multi_term_response.json()["total"] == 1
+    assert multi_term_response.json()["items"][0]["id"] == second["utterance_id"]
+
+    assert empty_response.status_code == 200
+    assert empty_response.json()["total"] == 0
+    assert empty_response.json()["items"] == []
+
+
+async def test_mobile_memoir_searches_only_the_displayed_question_for_each_transcript(client, test_db):
+    user = (await client.get("/api/auth/me")).json()
+    create_response = await post_mobile_memoir_voice_session(
+        client,
+        json={"guidance_mode": "guided_interview", "provider": "volc_streaming_asr"},
+    )
+    session = create_response.json()["session"]
+    first = await _append_voice_turn(
+        test_db,
+        user_id=user["id"],
+        session=session,
+        question_text="你小时候最喜欢的老师是谁？",
+        text="那时候我经常在老家院子里玩。",
+        question_turn_index=0,
+        user_turn_index=1,
+    )
+    second = await _append_voice_turn(
+        test_db,
+        user_id=user["id"],
+        session=session,
+        question_text="后来去县城读书时住在哪里？",
+        text="我住在学校旁边的一间小屋里。",
+        question_turn_index=2,
+        user_turn_index=3,
+    )
+
+    teacher_response = await client.get("/api/mobile/memoir/voice-transcripts", params={"q": "老师"})
+    county_response = await client.get("/api/mobile/memoir/voice-transcripts", params={"q": "县城"})
+
+    assert teacher_response.status_code == 200
+    assert teacher_response.json()["total"] == 1
+    assert teacher_response.json()["items"][0]["id"] == first["utterance_id"]
+
+    assert county_response.status_code == 200
+    assert county_response.json()["total"] == 1
+    assert county_response.json()["items"][0]["id"] == second["utterance_id"]
+
+
+async def test_mobile_memoir_filters_voice_transcripts_by_mode_and_module(client, test_db):
+    await _create_voice_transcript(
+        client,
+        test_db,
+        text="我想自由讲讲小时候的村子。",
+        guidance_mode="free_narration",
+    )
+    guided = await _create_voice_transcript(
+        client,
+        test_db,
+        text="母亲每天很早就去田里干活。",
+        guidance_mode="guided_interview",
+        current_guidance_module="person",
+    )
+
+    response = await client.get(
+        "/api/mobile/memoir/voice-transcripts",
+        params={"guidance_mode": "guided_interview", "module": "person"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["total"] == 1
+    assert data["items"][0]["id"] == guided["utterance_id"]
+    assert data["items"][0]["guidance_mode"] == "guided_interview"
+    assert data["items"][0]["current_guidance_module"] == "person"
 
 
 async def test_mobile_memoir_audio_playback_wraps_pcm_as_wav(client, test_db, tmp_path, monkeypatch):
@@ -296,6 +474,48 @@ async def test_mobile_memoir_lists_book_inclusion_for_voice_transcripts(client, 
     assert len(item["included_chapters"]) == 1
     assert item["included_chapters"][0]["title"] == "院子里的童年"
     assert item["included_chapters"][0]["sort_order"] == 0
+
+
+async def test_mobile_memoir_filters_voice_transcripts_by_book_inclusion(client, test_db):
+    included = await _create_voice_transcript(client, test_db, text="我小时候常在外婆家的院子里晒太阳。")
+    not_included = await _create_voice_transcript(client, test_db, text="后来我第一次离家去县城读书。")
+    project_id = included["session"]["project_id"]
+    plan = MemoirBookPlan(
+        project_id=project_id,
+        title="外婆回忆录章节规划",
+        status=MemoirBookPlanStatus.CONFIRMED.value,
+        created_by=MemoirCreatedBy.USER.value,
+    )
+    test_db.add(plan)
+    await test_db.flush()
+    test_db.add(
+        MemoirBookPlanChapter(
+            plan_id=plan.id,
+            project_id=project_id,
+            title="院子里的童年",
+            summary="整理外婆家院子的童年生活。",
+            sort_order=0,
+            source_refs_json=[_book_source_ref(included, "外婆家的院子")],
+        )
+    )
+    await test_db.commit()
+
+    included_response = await client.get(
+        "/api/mobile/memoir/voice-transcripts",
+        params={"project_id": project_id, "included": "included"},
+    )
+    not_included_response = await client.get(
+        "/api/mobile/memoir/voice-transcripts",
+        params={"project_id": project_id, "included": "not_included"},
+    )
+
+    assert included_response.status_code == 200
+    assert included_response.json()["total"] == 1
+    assert included_response.json()["items"][0]["id"] == included["utterance_id"]
+
+    assert not_included_response.status_code == 200
+    assert not_included_response.json()["total"] == 1
+    assert not_included_response.json()["items"][0]["id"] == not_included["utterance_id"]
 
 
 async def test_mobile_memoir_delete_transcript_removes_book_source_refs_and_marks_draft_stale(client, test_db):
