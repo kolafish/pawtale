@@ -86,7 +86,21 @@ test("home keeps voice entry free of per-session guidance controls", () => {
   assert.equal(wxml.includes("本次讲述方式"), false);
   assert.equal(wxml.includes("guidance-options"), false);
   assert.equal(wxml.includes("module-options"), false);
-  assert.match(wxml, /class="voice-mode-row"/);
+  assert.equal(wxml.includes("voice-mode-row"), false);
+});
+
+test("home uses one warm memoir card with a microphone start button", () => {
+  const wxml = fs.readFileSync(path.join(__dirname, "../pages/home/index.wxml"), "utf8");
+  const wxss = fs.readFileSync(path.join(__dirname, "../pages/home/index.wxss"), "utf8");
+
+  assert.match(wxml, /class="home-card"/);
+  assert.equal(wxml.includes('class="project-panel"'), false);
+  assert.equal(wxml.includes('class="voice-panel"'), false);
+  assert.match(wxml, /class="mic-button"/);
+  assert.match(wxml, /我在听，请讲吧/);
+  assert.equal(wxss.includes("#2f7d63"), false);
+  assert.match(wxss, /\.mic-button[\s\S]*#fff1ec/);
+  assert.match(wxss, /\.mic-button-label[\s\S]*#9f4a3c/);
 });
 
 test("home userDisplayName hides wechat placeholder display name", () => {
