@@ -15,6 +15,7 @@ from app.domain.memoir.types import (
 from app.models.memoir import MemoirChatMessage, MemoirVoiceSession
 from app.models.projects import Project
 from app.schemas.memoir import (
+    MemoirVoiceNoAnswerPromptRequest,
     MemoirVoiceFollowUpRequest,
     MemoirVoiceFollowUpResponse,
 )
@@ -35,6 +36,10 @@ GUIDED_FOLLOW_UP_MAX_TOKENS = 240
 FREE_OPENING_MAX_TOKENS = 260
 GUIDED_OPENING_MAX_TOKENS = 320
 logger = logging.getLogger(__name__)
+
+NO_ANSWER_PROMPT_VERSION = "memoir_voice_no_answer_prompt_v1"
+NO_ANSWER_RETRY_TEXT = "我这边没有听到声音，您可以接着刚才的问题慢慢说。"
+NO_ANSWER_PAUSE_TEXT = "没关系，我先暂停一下。您准备好了，再点继续说话。"
 
 
 MODULE_LABELS = {
@@ -372,3 +377,30 @@ async def generate_voice_follow_up(
     db.add(message)
     await db.commit()
     return MemoirVoiceFollowUpResponse(message=message, follow_up_text=follow_up_text)
+
+
+async def create_no_answer_prompt(
+    db: AsyncSession,
+    voice_session_id: str,
+    user_id: str,
+    req: MemoirVoiceNoAnswerPromptRequest,
+) -> MemoirVoiceFollowUpResponse:
+    voice_session = await _load_voice_session(db, voice_session_id, user_id)
+    prompt_text = NO_ANSWER_RETRY_TEXT if req.attempt <= 1 else NO_ANSWER_PAUSE_TEXT
+    message = MemoirChatMessage(
+        project_id=voice_session.project_id,
+        voice_session_id=voice_session.id,
+        role=MemoirChatMessageRole.ASSISTANT.value,
+        content_text=prompt_text,
+        content_status=MemoirChatContentStatus.FINAL.value,
+        guidance_intent="no_answer_prompt",
+        turn_index=await _next_turn_index(db, voice_session.id),
+        metadata_json={
+            "source": "ai.no_answer_prompt",
+            "prompt_version": NO_ANSWER_PROMPT_VERSION,
+            "attempt": req.attempt,
+        },
+    )
+    db.add(message)
+    await db.commit()
+    return MemoirVoiceFollowUpResponse(message=message, follow_up_text=prompt_text)

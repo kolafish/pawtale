@@ -15,6 +15,7 @@ import {
 } from "../../services/memoir-streaming-asr";
 import {
   createMemoirAssistantTTS,
+  createMemoirVoiceNoAnswerPrompt,
   createMemoirVoiceFollowUp,
   downloadMemoirVoiceAudio,
   getMemoirVoiceSession,
@@ -123,6 +124,8 @@ let streamingClient: MemoirStreamingAsrClient | null = null;
 let followUpRequestSerial = 0;
 const AUTO_STOP_SILENCE_MS = 1800;
 const AUTO_STOP_MIN_RECORDING_MS = 1200;
+const AUTO_LISTEN_NO_ANSWER_MS = 15000;
+const MAX_CONSECUTIVE_NO_ANSWER_PROMPTS = 2;
 
 Page<VoiceChatData, {
   onLoad(query?: Record<string, string | undefined>): Promise<void>;
@@ -168,6 +171,7 @@ Page<VoiceChatData, {
   startRecordingAfterPrivacy(autoTriggered?: boolean): Promise<boolean>;
   toggleRecording(): void;
   shouldAutoStartListening(): boolean;
+  handleNoAnswerAutoStop(): Promise<void>;
   finishSession(): Promise<void>;
   handleStatus(status: VoiceChatConnectionStatus): void;
   handleCaptureStats(stats: MemoirCaptureStats): void;
@@ -180,12 +184,18 @@ Page<VoiceChatData, {
   ttsProgressTimer: number | null;
   ttsProgressStartedAtMs: number;
   ttsRequestSerial: number;
+  noAnswerPromptInFlight: boolean;
+  consecutiveNoAnswerPrompts: number;
+  handledNoAnswerFrameCount: number;
 }>({
   audio: null,
   ttsPlayToken: 0,
   ttsProgressTimer: null,
   ttsProgressStartedAtMs: 0,
   ttsRequestSerial: 0,
+  noAnswerPromptInFlight: false,
+  consecutiveNoAnswerPrompts: 0,
+  handledNoAnswerFrameCount: -1,
 
   data: {
     voiceSessionId: "",
@@ -1042,6 +1052,9 @@ Page<VoiceChatData, {
   },
 
   async startRecordingAfterPrivacy(autoTriggered = false) {
+    if (!autoTriggered) {
+      this.consecutiveNoAnswerPrompts = 0;
+    }
     if (!(await this.syncVoiceAuthorizationForSession())) {
       return false;
     }
@@ -1062,13 +1075,16 @@ Page<VoiceChatData, {
       this.setData({ autoListenStateText: autoTriggered ? "正在重新连接语音" : this.data.autoListenStateText });
       return false;
     }
-    const started = streamingClient.startRecording();
+    const started = streamingClient.startRecording({
+      noVoiceActivityTimeoutMs: autoTriggered ? AUTO_LISTEN_NO_ANSWER_MS : 0,
+    });
     if (!started) {
       void this.connectGateway();
       this.setData({ autoListenStateText: autoTriggered ? "自动收音未就绪" : this.data.autoListenStateText });
       return false;
     }
     this.cancelFollowUpTTS();
+    this.handledNoAnswerFrameCount = -1;
     this.setData({
       recording: true,
       error: "",
@@ -1104,6 +1120,68 @@ Page<VoiceChatData, {
       connecting: this.data.connecting,
       followUpLoading: this.data.followUpLoading,
     });
+  },
+
+  async handleNoAnswerAutoStop() {
+    if (this.noAnswerPromptInFlight || !this.data.voiceSessionId) {
+      return;
+    }
+    this.noAnswerPromptInFlight = true;
+    const attempt = Math.min(this.consecutiveNoAnswerPrompts + 1, MAX_CONSECUTIVE_NO_ANSWER_PROMPTS);
+    const autoListenAfterPlayback = attempt < MAX_CONSECUTIVE_NO_ANSWER_PROMPTS;
+    this.consecutiveNoAnswerPrompts = attempt;
+    this.setData({
+      followUpLoading: true,
+      followUpError: "",
+      canRequestFollowUp: false,
+      persistenceStateText: "AI 正在确认",
+      autoListenStateText: "没听到回答，AI 正在确认",
+    });
+    try {
+      const response = await createMemoirVoiceNoAnswerPrompt(this.data.voiceSessionId, { attempt });
+      const line: VoiceChatTranscriptLine = {
+        id: response.message.id,
+        role: response.message.role,
+        text: response.message.content_text,
+        message_id: response.message.id,
+        transcript_version_id: response.message.transcript_version_id,
+        metadata_json: response.message.metadata_json || {},
+      };
+      const transcriptLines = upsertTranscriptLine(this.data.transcriptLines, line);
+      const assistantCopy = assistantPanelCopy(transcriptLines);
+      this.setData({
+        transcriptLines,
+        assistantPromptText: response.follow_up_text,
+        ...assistantCopy,
+        dismissedFollowUpMessageId: "",
+        followUpMessageId: response.message.id,
+        followUpAudioFileId: response.message.audio_file_id || "",
+        followUpTTSError: "",
+        followUpTTSStateText: "",
+        ttsAlignment: ttsAlignmentFromMetadata(response.message.metadata_json),
+        totalTranscriptCharCount: totalTranscriptChars(transcriptLines),
+        persistenceStateText: autoListenAfterPlayback ? "AI 正在确认" : "已暂停收音",
+        autoListenStateText: autoListenAfterPlayback ? "AI 确认后会继续听" : "已暂停，可点继续说话",
+        canRequestFollowUp: false,
+      });
+      writeMemoirVoiceSessionSnapshot(this.data.voiceSessionId, { transcriptLines });
+      await this.prepareFollowUpTTS(response.message.id, false, autoListenAfterPlayback);
+    } catch (error) {
+      this.setData({
+        followUpError: error instanceof Error ? error.message : "AI 确认生成失败",
+        persistenceStateText: "确认失败",
+        autoListenStateText: "没听到回答，可点继续说话",
+        canRequestFollowUp: canRequestFollowUp(
+          this.data.transcriptLines,
+          this.data.guidanceMode,
+          this.data.lastFollowUpSourceMessageId,
+          false,
+        ),
+      });
+    } finally {
+      this.noAnswerPromptInFlight = false;
+      this.setData({ followUpLoading: false });
+    }
   },
 
   async finishSession() {
@@ -1175,17 +1253,36 @@ Page<VoiceChatData, {
       stopping: "正在收尾",
       error: "录音异常",
     };
-    this.setData({
+    let autoStopStateText = `自动收尾开 · 静音 ${formatDuration(stats.silentElapsedMs || 0)}`;
+    if (stats.autoStopped && stats.autoStopReason === "no_voice") {
+      autoStopStateText = "未听到回答，已暂停收音";
+    } else if (!this.data.autoStopEnabled) {
+      autoStopStateText = "自动收尾关";
+    } else if (stats.autoStopped) {
+      autoStopStateText = "检测到停顿，已自动收尾";
+    }
+    const patch: Partial<VoiceChatData> = {
       captureStateText: labels[stats.state],
       captureFrameCount: stats.frameCount,
       captureKilobytes: Math.round(stats.audioBytesSent / 1024),
       captureDurationText: formatDuration(stats.recordingElapsedMs),
       gatewayStateText: gatewayStateText(stats.gatewayState),
       audioLevelPercent: Math.min(100, Math.round(Math.sqrt(stats.audioLevel || 0) * 100)),
-      autoStopStateText: !this.data.autoStopEnabled
-        ? "自动收尾关"
-        : (stats.autoStopped ? "检测到停顿，已自动收尾" : `自动收尾开 · 静音 ${formatDuration(stats.silentElapsedMs || 0)}`),
-    });
+      autoStopStateText,
+    };
+    const noAnswerAutoStopped = stats.autoStopped && stats.autoStopReason === "no_voice";
+    const noAnswerPromptAlreadyHandled = noAnswerAutoStopped
+      && this.handledNoAnswerFrameCount === stats.frameCount;
+    if (noAnswerAutoStopped && !noAnswerPromptAlreadyHandled) {
+      patch.autoListenStateText = "没听到回答，已暂停，可点继续说话";
+      patch.persistenceStateText = "未听到回答";
+      patch.primaryActionText = "继续说话";
+    }
+    this.setData(patch);
+    if (noAnswerAutoStopped && !noAnswerPromptAlreadyHandled) {
+      this.handledNoAnswerFrameCount = stats.frameCount;
+      void this.handleNoAnswerAutoStop();
+    }
   },
 
   handleGatewayEvent(event) {
@@ -1196,7 +1293,11 @@ Page<VoiceChatData, {
     if (event.type === "audio.ended") {
       nextData.recording = false;
       nextData.primaryActionText = "继续说话";
-      nextData.persistenceStateText = this.data.persistenceStateText === "已保存" ? "已保存" : "正在保存";
+      nextData.persistenceStateText = this.data.persistenceStateText === "已保存"
+        || this.data.persistenceStateText === "未听到回答"
+        || this.data.persistenceStateText === "AI 正在确认"
+        ? this.data.persistenceStateText
+        : "正在保存";
     }
     if (event.type === "session.started") {
       nextData.persistenceStateText = "等待识别";
@@ -1234,6 +1335,7 @@ Page<VoiceChatData, {
     };
     const transcriptLines = upsertTranscriptLine(this.data.transcriptLines, line);
     const assistantCopy = assistantPanelCopy(transcriptLines);
+    this.consecutiveNoAnswerPrompts = 0;
     this.setData({
       liveText: "",
       liveCharCount: 0,
