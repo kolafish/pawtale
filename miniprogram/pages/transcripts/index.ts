@@ -29,6 +29,7 @@ interface DatasetEvent {
   currentTarget: {
     dataset: {
       id?: string;
+      field?: TranscriptTextField;
     };
   };
 }
@@ -48,6 +49,15 @@ interface SearchInputEvent {
 interface TranscriptTextSegment {
   text: string;
   highlight: boolean;
+}
+
+type TranscriptTextField = "raw" | "display";
+
+interface TranscriptTextView {
+  segments: TranscriptTextSegment[];
+  collapsible: boolean;
+  expanded: boolean;
+  toggleText: string;
 }
 
 interface TranscriptSearchFilters {
@@ -71,7 +81,13 @@ interface TranscriptItemView extends MemoirVoiceTranscriptItem {
   canPlayAudio: boolean;
   questionSegments: TranscriptTextSegment[];
   rawSegments: TranscriptTextSegment[];
+  rawCollapsible: boolean;
+  rawExpanded: boolean;
+  rawToggleText: string;
   displaySegments: TranscriptTextSegment[];
+  displayCollapsible: boolean;
+  displayExpanded: boolean;
+  displayToggleText: string;
   changed: boolean;
   isEditing: boolean;
 }
@@ -104,6 +120,7 @@ interface TranscriptsData {
 
 const DEFAULT_LIMIT = 30;
 const SEARCH_DEBOUNCE_MS = 300;
+const COLLAPSED_TRANSCRIPT_CHAR_LIMIT = 180;
 const DEFAULT_SEARCH_FILTERS: TranscriptSearchFilters = {
   included: "all",
   guidanceMode: "",
@@ -205,6 +222,25 @@ export function highlightTranscriptText(text: string, searchQuery: string): Tran
   return segments;
 }
 
+export function transcriptTextView(
+  text: string,
+  searchQuery = "",
+  expanded = false,
+): TranscriptTextView {
+  const content = text || "";
+  const collapsible = content.length > COLLAPSED_TRANSCRIPT_CHAR_LIMIT;
+  const showExpanded = collapsible && expanded;
+  const visibleText = collapsible && !showExpanded
+    ? `${content.slice(0, COLLAPSED_TRANSCRIPT_CHAR_LIMIT)}...`
+    : content;
+  return {
+    segments: highlightTranscriptText(visibleText, searchQuery),
+    collapsible,
+    expanded: showExpanded,
+    toggleText: showExpanded ? "收起" : "展开全部",
+  };
+}
+
 function normalizedSearchFilters(filters?: Partial<TranscriptSearchFilters>): TranscriptSearchFilters {
   return {
     included: filters?.included || "all",
@@ -296,6 +332,8 @@ export function transcriptBookInclusionText(item: MemoirVoiceTranscriptItem): st
 function toViewItem(item: MemoirVoiceTranscriptItem, searchQuery = ""): TranscriptItemView {
   const editingText = item.transcript_edited || item.transcript_raw;
   const isIncludedInBook = Boolean(item.is_included_in_book || item.included_chapters?.length);
+  const rawView = transcriptTextView(item.transcript_raw, searchQuery);
+  const displayView = transcriptTextView(item.display_text, searchQuery);
   return {
     ...item,
     editingText,
@@ -307,10 +345,42 @@ function toViewItem(item: MemoirVoiceTranscriptItem, searchQuery = ""): Transcri
     isIncludedInBook,
     canPlayAudio: Boolean(item.audio_file_id || item.question_audio_file_id),
     questionSegments: highlightTranscriptText(item.question_text, searchQuery),
-    rawSegments: highlightTranscriptText(item.transcript_raw, searchQuery),
-    displaySegments: highlightTranscriptText(item.display_text, searchQuery),
+    rawSegments: rawView.segments,
+    rawCollapsible: rawView.collapsible,
+    rawExpanded: rawView.expanded,
+    rawToggleText: rawView.toggleText,
+    displaySegments: displayView.segments,
+    displayCollapsible: displayView.collapsible,
+    displayExpanded: displayView.expanded,
+    displayToggleText: displayView.toggleText,
     changed: editingText !== (item.transcript_edited || item.transcript_raw),
     isEditing: false,
+  };
+}
+
+function withTextExpansion(
+  item: TranscriptItemView,
+  field: TranscriptTextField,
+  searchQuery: string,
+  expanded: boolean,
+): TranscriptItemView {
+  if (field === "raw") {
+    const rawView = transcriptTextView(item.transcript_raw, searchQuery, expanded);
+    return {
+      ...item,
+      rawSegments: rawView.segments,
+      rawCollapsible: rawView.collapsible,
+      rawExpanded: rawView.expanded,
+      rawToggleText: rawView.toggleText,
+    };
+  }
+  const displayView = transcriptTextView(item.display_text, searchQuery, expanded);
+  return {
+    ...item,
+    displaySegments: displayView.segments,
+    displayCollapsible: displayView.collapsible,
+    displayExpanded: displayView.expanded,
+    displayToggleText: displayView.toggleText,
   };
 }
 
@@ -359,6 +429,7 @@ Page<TranscriptsData, {
     parsed?: MemoirVoiceSearchQueryParseResponse,
   ): Promise<void>;
   startVoiceSearch(): Promise<void>;
+  toggleTranscriptText(event: DatasetEvent): void;
   beginEdit(event: DatasetEvent): void;
   changeText(event: TextAreaEvent): void;
   cancelEdit(event: DatasetEvent): void;
@@ -600,6 +671,22 @@ Page<TranscriptsData, {
         voiceSearchStatusText: "",
       });
     }
+  },
+
+  toggleTranscriptText(event) {
+    const id = event.currentTarget.dataset.id || "";
+    const field = event.currentTarget.dataset.field;
+    if (!id || (field !== "raw" && field !== "display")) {
+      return;
+    }
+    const items = this.data.items.map((item) => {
+      if (item.id !== id) {
+        return item;
+      }
+      const expanded = field === "raw" ? !item.rawExpanded : !item.displayExpanded;
+      return withTextExpansion(item, field, this.data.searchQuery, expanded);
+    });
+    this.setData({ items });
   },
 
   beginEdit(event) {

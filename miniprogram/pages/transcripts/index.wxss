@@ -362,6 +362,27 @@
   border: 2rpx solid #f0dac0;
 }
 
+.text-toggle-button {
+  width: auto;
+  min-width: 0;
+  height: 44rpx;
+  margin: 12rpx 0 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #9f4a3c;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  font-size: 25rpx;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.text-toggle-button::after {
+  border: 0;
+}
+
 .search-hit {
   background: #ffe7a3;
   color: #24100b;

@@ -377,13 +377,18 @@ async def generate_chapter_draft(
         return _draft_response(existing)
 
     sources = await _chapter_sources(db, project_id=project_id, chapter=chapter)
-    previous_content = existing.versions[-1].content if existing and existing.versions and pending_source_ids else None
+    should_supplement_pending_sources = bool(pending_source_ids) and not req.force_regenerate
+    previous_content = (
+        existing.versions[-1].content
+        if existing and existing.versions and should_supplement_pending_sources
+        else None
+    )
     prompt = _build_draft_prompt(
         chapter=chapter,
         sources=sources,
         feedback=req.feedback,
         previous_content=previous_content,
-        pending_source_utterance_ids=pending_source_ids,
+        pending_source_utterance_ids=pending_source_ids if should_supplement_pending_sources else set(),
     )
     client = ai_client
     try:

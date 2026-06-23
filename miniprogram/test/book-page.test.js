@@ -1,6 +1,8 @@
 require("./register-ts");
 
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
 const test = require("node:test");
 
 function sampleRef(id = "utterance-1", quote = "外婆家的院子") {
@@ -318,6 +320,13 @@ test("book page summarizes chapter source quotes without exposing raw ids", () =
     }),
     "外婆家的院子 / 第一次离家",
   );
+});
+
+test("book page renders chapter source counts in plan and drafting cards", () => {
+  const wxml = fs.readFileSync(path.join(__dirname, "../pages/book/index.wxml"), "utf8");
+  const matches = wxml.match(/{{item\.sourceCount}} 条来源/g) || [];
+
+  assert.equal(matches.length, 2);
 });
 
 test("book page progress counts generated and confirmed chapters", () => {
