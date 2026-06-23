@@ -131,24 +131,51 @@
   </view>
 
   <view class="section">
-    <text class="section-title">当前回忆录</text>
-    <view class="action-card" bindtap="openProjects" hover-class="tap-hover">
-      <view>
-        <text class="action-title">{{projectTitle || "尚未创建回忆录"}}</text>
-        <text class="action-meta">{{projectCount ? ("共 " + projectCount + " 本 · 管理项目") : "创建第一本回忆录并设置讲述资料"}}</text>
-      </view>
-      <text class="chevron">›</text>
+    <view class="setting-header">
+      <text class="section-title">当前回忆录</text>
+      <text wx:if="{{voiceStatsLoading}}" class="setting-current">更新中</text>
     </view>
-  </view>
-
-  <view class="section">
-    <text class="section-title">访谈管理</text>
-    <view class="action-card" bindtap="openVoiceProgress" hover-class="tap-hover">
-      <view>
-        <text class="action-title">访谈进度</text>
-        <text class="action-meta">查看会话、模块和累计文字</text>
+    <view class="project-overview">
+      <view class="project-overview-head">
+        <view class="project-overview-main">
+          <text class="action-title">{{projectTitle || "尚未创建回忆录"}}</text>
+          <text class="action-meta">
+            {{projectCount ? ("共 " + projectCount + " 本 · " + (sessionCount ? ("已访谈 " + sessionCount + " 次") : "还没有访谈")) : "创建第一本回忆录并设置讲述资料"}}
+          </text>
+        </view>
       </view>
-      <text class="chevron">›</text>
+
+      <view class="overview-stats">
+        <view class="overview-stat">
+          <text class="overview-stat-value">{{sessionCount}}</text>
+          <text class="overview-stat-label">会话</text>
+        </view>
+        <view class="overview-stat">
+          <text class="overview-stat-value">{{utteranceCount}}</text>
+          <text class="overview-stat-label">语音段</text>
+        </view>
+        <view class="overview-stat">
+          <text class="overview-stat-value">{{totalUserCharCount}}</text>
+          <text class="overview-stat-label">文字</text>
+        </view>
+        <view class="overview-stat">
+          <text class="overview-stat-value small">{{totalAudioText}}</text>
+          <text class="overview-stat-label">录音</text>
+        </view>
+      </view>
+
+      <view class="overview-actions">
+        <button
+          class="overview-button primary"
+          disabled="{{!projectCount}}"
+          bindtap="openVoiceProgress"
+        >
+          访谈进度
+        </button>
+        <button class="overview-button ghost" bindtap="openProjects">
+          {{projectCount ? "管理回忆录" : "创建回忆录"}}
+        </button>
+      </view>
     </view>
   </view>
 
@@ -182,31 +209,6 @@
       >
         <text class="voice-label">{{item.label}}</text>
         <text class="voice-desc">{{item.description}}</text>
-      </view>
-    </view>
-  </view>
-
-  <view class="section">
-    <view class="setting-header">
-      <text class="section-title">当前项目统计</text>
-      <text wx:if="{{voiceStatsLoading}}" class="setting-current">更新中</text>
-    </view>
-    <view class="stats-grid">
-      <view class="stat-card">
-        <text class="stat-value">{{sessionCount}}</text>
-        <text class="stat-label">会话</text>
-      </view>
-      <view class="stat-card">
-        <text class="stat-value">{{utteranceCount}}</text>
-        <text class="stat-label">语音段</text>
-      </view>
-      <view class="stat-card">
-        <text class="stat-value">{{totalUserCharCount}}</text>
-        <text class="stat-label">文字</text>
-      </view>
-      <view class="stat-card">
-        <text class="stat-value small">{{totalAudioText}}</text>
-        <text class="stat-label">录音</text>
       </view>
     </view>
   </view>
