@@ -251,19 +251,17 @@ def _build_draft_prompt(
     if pending_ids and previous_content:
         coverage_text = (
             f"\n来源覆盖要求：本章共有 {len(sources)} 条来源；本次必须覆盖所有 source_type 为“新增来源”的内容，"
-            "既有来源只用于衔接和核对。即使章节标题或章节范围更像旧内容，也不能忽略新增来源。\n"
+            "既有来源只用于衔接和核对。即使章节标题更像旧内容，也不能忽略新增来源。\n"
         )
     else:
         coverage_text = (
             f"\n来源覆盖要求：本章共有 {len(sources)} 条来源；正文必须覆盖每一条 source 中叙述者实际讲过的具体信息，"
-            "不能只写第一条，也不能只写最贴合标题的一条。若章节标题或章节范围与来源转写不完全一致，以来源转写为准，"
+            "不能只写第一条，也不能只写最贴合标题的一条。若章节标题与来源转写不完全一致，以来源转写为准，"
             "可以分段或用自然过渡串联不同主题。\n"
         )
-    chapter_scope = chapter.summary or "只整理本章来源转写里已经讲过的内容。"
     return f"""请把下面口述材料整理成一个回忆录章节正文。
 
 章节标题参考：{chapter.title}
-章节范围参考（可能滞后，以来源转写为准）：{chapter_scope}
 {feedback_text}
 {previous_text}
 {supplement_text}

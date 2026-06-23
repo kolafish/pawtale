@@ -43,13 +43,11 @@ class FakeBookPlanAI:
                 "chapters": [
                     {
                         "title": "外婆家的童年",
-                        "summary": "整理外婆家院子和童年生活。",
                         "source_indices": [1],
                         "evidence_quote": "外婆家的院子",
                     },
                     {
                         "title": "离家求学",
-                        "summary": "整理第一次离家去县城读书的经历。",
                         "source_indices": [2],
                         "evidence_quote": "第一次离家去县城读书",
                     },
@@ -258,8 +256,10 @@ async def test_mobile_memoir_book_plan_generate_saves_source_bound_chapters(
     assert data["chapters"][0]["source_refs"][0]["utterance_id"] == first["utterance_id"]
     assert data["chapters"][0]["source_refs"][0]["message_id"] == first["message_id"]
     assert data["chapters"][0]["source_refs"][0]["created_at"]
+    assert "summary" not in data["chapters"][0]
     assert data["chapters"][1]["source_refs"][0]["utterance_id"] == second["utterance_id"]
     assert "不新增人物、时间、地点、事件或情绪" in fake_ai.calls[0]["user_prompt"]
+    assert '"summary"' not in fake_ai.calls[0]["user_prompt"]
     assert f"utterance_id: {first['utterance_id']}" in fake_ai.calls[0]["user_prompt"]
 
     stored_plan = await test_db.scalar(select(MemoirBookPlan).where(MemoirBookPlan.project_id == project_id))
@@ -309,7 +309,6 @@ async def test_mobile_memoir_book_plan_confirm_replaces_plan_with_user_chapters(
             "chapters": [
                 {
                     "title": "童年和外婆家",
-                    "summary": "只保留童年院子的内容。",
                     "source_refs": [source_ref],
                 }
             ],
@@ -332,6 +331,21 @@ async def test_mobile_memoir_book_plan_confirm_replaces_plan_with_user_chapters(
         )
     ).scalars().all()
     assert len(stored_chapters) == 1
+
+    legacy_response = await client.put(
+        f"/api/mobile/memoir/projects/{project_id}/book-plan",
+        json={
+            "title": "旧版摘要请求",
+            "chapters": [
+                {
+                    "title": "童年和外婆家",
+                    "summary": "旧字段不再接受",
+                    "source_refs": [source_ref],
+                }
+            ],
+        },
+    )
+    assert legacy_response.status_code == 422
 
 
 async def test_mobile_memoir_book_source_coverage_detects_new_transcripts_after_plan(
@@ -357,7 +371,6 @@ async def test_mobile_memoir_book_source_coverage_detects_new_transcripts_after_
             "chapters": [
                 {
                     "title": "童年和外婆家",
-                    "summary": "只保留童年院子的内容。",
                     "source_refs": [source_ref],
                 }
             ],
@@ -405,7 +418,6 @@ async def test_mobile_memoir_book_source_assignment_appends_source_and_marks_dra
             "chapters": [
                 {
                     "title": "童年和外婆家",
-                    "summary": "只保留童年院子的内容。",
                     "source_refs": [source_ref],
                 }
             ],
@@ -486,7 +498,6 @@ async def test_mobile_memoir_book_source_assignment_rejects_covered_source(
             "chapters": [
                 {
                     "title": "童年和外婆家",
-                    "summary": "只保留童年院子的内容。",
                     "source_refs": [source_ref],
                 }
             ],
@@ -533,7 +544,6 @@ async def test_mobile_memoir_book_plan_reconfirm_removes_replaced_chapter_drafts
             "chapters": [
                 {
                     "title": "童年和外婆家",
-                    "summary": "只保留童年院子的内容。",
                     "source_refs": [source_ref],
                 }
             ],
@@ -568,7 +578,6 @@ async def test_mobile_memoir_book_plan_reconfirm_removes_replaced_chapter_drafts
             "chapters": [
                 {
                     "title": "重新整理童年",
-                    "summary": "重新确认后的章节。",
                     "source_refs": [source_ref],
                 }
             ],
@@ -611,12 +620,10 @@ async def test_mobile_memoir_book_plan_patch_deletes_chapter_without_replacing_r
             "chapters": [
                 {
                     "title": "童年和外婆家",
-                    "summary": "只保留童年院子的内容。",
                     "source_refs": [generated["chapters"][0]["source_refs"][0]],
                 },
                 {
                     "title": "离家求学",
-                    "summary": "只保留离家读书的内容。",
                     "source_refs": [generated["chapters"][1]["source_refs"][0]],
                 },
             ],
@@ -666,7 +673,6 @@ async def test_mobile_memoir_book_plan_patch_deletes_chapter_without_replacing_r
                 {
                     "id": first_chapter["id"],
                     "title": first_chapter["title"],
-                    "summary": first_chapter["summary"],
                     "source_refs": first_chapter["source_refs"],
                 }
             ],
@@ -712,7 +718,6 @@ async def test_mobile_memoir_book_plan_patch_adds_chapter_from_uncovered_source(
             "chapters": [
                 {
                     "title": "童年和外婆家",
-                    "summary": "只保留童年院子的内容。",
                     "source_refs": [source_ref],
                 }
             ],
@@ -729,12 +734,10 @@ async def test_mobile_memoir_book_plan_patch_adds_chapter_from_uncovered_source(
                 {
                     "id": existing_chapter["id"],
                     "title": existing_chapter["title"],
-                    "summary": existing_chapter["summary"],
                     "source_refs": existing_chapter["source_refs"],
                 },
                 {
                     "title": "朋友往事",
-                    "summary": "整理新收录的朋友相关转写。",
                     "source_refs": [_source_ref(later, "认识很多年的朋友")],
                 },
             ],
@@ -782,7 +785,6 @@ async def test_mobile_memoir_book_plan_patch_updates_draft_plan_structure(
                 {
                     "id": first_chapter["id"],
                     "title": "童年和离家",
-                    "summary": "合并整理童年院子和第一次离家。",
                     "source_refs": [
                         first_chapter["source_refs"][0],
                         second_chapter["source_refs"][0],
@@ -829,7 +831,6 @@ async def test_mobile_memoir_book_chapter_title_update_renames_confirmed_chapter
             "chapters": [
                 {
                     "title": "童年和外婆家",
-                    "summary": "只保留童年院子的内容。",
                     "source_refs": [source_ref],
                 }
             ],
@@ -871,7 +872,6 @@ async def test_mobile_memoir_book_chapter_title_generate_uses_chapter_sources(
             "chapters": [
                 {
                     "title": "新收录转写",
-                    "summary": "整理这条新收录转写。",
                     "source_refs": [source_ref],
                 }
             ],
@@ -908,7 +908,6 @@ async def test_mobile_memoir_book_plan_confirm_rejects_foreign_source(client, te
             "chapters": [
                 {
                     "title": "伪造来源",
-                    "summary": "",
                     "source_refs": [
                         {
                             "voice_session_id": "voice-x",

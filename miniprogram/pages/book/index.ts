@@ -92,7 +92,6 @@ export interface BookChapterSourceView extends MemoirBookChapterSourceRef {
 
 export interface BookChapterView extends MemoirBookPlanChapter {
   editingTitle: string;
-  editingSummary: string;
   titleChanged: boolean;
   ttsTarget: string;
   sourceCount: number;
@@ -221,10 +220,10 @@ function removedSourceCount(
 
 function sourceChangeNotice(pendingCount: number, removedCount: number): string {
   if (removedCount) {
-    return `${removedCount} 条来源已删除，章节稿需要更新`;
+    return `${removedCount} 条素材已删除，章节稿需要更新`;
   }
   if (pendingCount) {
-    return `${pendingCount} 条新增来源待补写`;
+    return `${pendingCount} 条新增转写待补写`;
   }
   return "";
 }
@@ -414,7 +413,7 @@ function chapterSourceView(ref: MemoirBookChapterSourceRef, index: number): Book
   return {
     ...ref,
     sourceIndex: index + 1,
-    labelText: `来源 ${index + 1} · ${createdAtText} · ${charCount} 字`,
+    labelText: `素材 ${index + 1} · ${createdAtText} · ${charCount} 字`,
     createdAtText,
     charCount,
     previewText,
@@ -435,31 +434,6 @@ function uniqueSourceRefs(refs: MemoirBookChapterSourceRef[]): MemoirBookChapter
   return result;
 }
 
-export function mergedChapterSummary(
-  target: Pick<BookChapterView, "summary" | "editingSummary">,
-  source: Pick<BookChapterView, "summary" | "editingSummary">,
-): string {
-  const fragments = [target.editingSummary || target.summary, source.editingSummary || source.summary]
-    .map(trimText)
-    .filter(Boolean);
-  if (!fragments.length) {
-    return "合并整理两个章节的来源转写。";
-  }
-  if (fragments.length === 1) {
-    return fragments[0];
-  }
-  return `${fragments[0]}\n\n补充整理：${fragments.slice(1).join("\n\n")}`;
-}
-
-export function splitChapterSummary(
-  chapter: Pick<BookChapterView, "summary" | "editingSummary">,
-  part: "first" | "second",
-): string {
-  const summary = trimText(chapter.editingSummary || chapter.summary);
-  const suffix = part === "first" ? "本节保留前半部分来源。" : "本节整理拆分后的后半部分来源。";
-  return summary ? `${summary}\n\n${suffix}` : suffix;
-}
-
 function decorateChapterStructureOptions(chapters: BookChapterView[]): BookChapterView[] {
   const options = chapters.map(chapterOption);
   return chapters.map((chapter, index) => {
@@ -467,7 +441,7 @@ function decorateChapterStructureOptions(chapters: BookChapterView[]): BookChapt
     return {
       ...chapter,
       sourceViews: chapter.source_refs.map(chapterSourceView),
-      sourceToggleText: chapter.sourceListExpanded ? "收起来源" : `展开 ${chapter.source_refs.length} 条来源`,
+      sourceToggleText: chapter.sourceListExpanded ? "收起素材" : `查看 ${chapter.source_refs.length} 条`,
       mergeTargetOptions: targetOptions,
       splitOptions: chapter.source_refs.slice(1).map((_, splitIndex) => {
         const beforeCount = splitIndex + 1;
@@ -524,7 +498,7 @@ function chapterCollectionData(
 }
 
 export function bookChapterSourceSummary(chapter: Pick<MemoirBookPlanChapter, "source_refs">): string {
-  return `${chapter.source_refs.length} 条来源转写`;
+  return `本章素材：${chapter.source_refs.length} 条收录转写`;
 }
 
 export function buildChapterViews(
@@ -541,7 +515,6 @@ export function buildChapterViews(
       return {
         ...chapter,
         editingTitle: chapter.title,
-        editingSummary: chapter.summary || "",
         titleChanged: false,
         ttsTarget: `chapter:${chapter.id}`,
         sourceCount: chapter.source_refs.length,
@@ -642,7 +615,6 @@ function guestBookData(): Partial<BookData> {
 function toPlanInput(chapters: BookChapterView[]): MemoirBookPlanChapterInput[] {
   return chapters.map((chapter) => ({
     title: trimText(chapter.editingTitle),
-    summary: trimText(chapter.editingSummary),
     source_refs: chapter.source_refs,
   }));
 }
@@ -651,7 +623,6 @@ function toPlanUpdateInput(chapters: BookChapterView[]): MemoirBookPlanChapterUp
   return chapters.map((chapter) => ({
     id: chapter.id,
     title: trimText(chapter.editingTitle || chapter.title),
-    summary: trimText(chapter.editingSummary || chapter.summary),
     source_refs: chapter.source_refs,
   }));
 }
@@ -686,7 +657,6 @@ Page<BookData, {
   confirmPlan(): Promise<void>;
   changePlanTitle(event: TextInputEvent): void;
   changeChapterTitle(event: TextInputEvent): void;
-  changeChapterSummary(event: TextInputEvent): void;
   saveChapterTitle(event: DatasetEvent): Promise<void>;
   generateChapterTitle(event: DatasetEvent): Promise<void>;
   generateChapterTitleById(chapterId: string, toastTitle?: string): Promise<boolean>;
@@ -969,7 +939,7 @@ Page<BookData, {
     }
     const invalid = chapters.find((chapter) => !chapter.title || !chapter.source_refs.length);
     if (invalid) {
-      this.setData({ error: "每个章节都需要标题和来源转写" });
+      this.setData({ error: "每个章节都需要标题和收录转写" });
       return;
     }
     this.setData({ confirmingPlan: true, error: "" });
@@ -1003,11 +973,6 @@ Page<BookData, {
       editingTitle: event.detail.value,
       titleChanged: chapter ? trimText(event.detail.value) !== trimText(chapter.title) : false,
     });
-  },
-
-  changeChapterSummary(event) {
-    const id = event.currentTarget.dataset.id || "";
-    this.patchChapter(id, { editingSummary: event.detail.value });
   },
 
   async saveChapterTitle(event) {
@@ -1131,7 +1096,7 @@ Page<BookData, {
     const confirmed = await new Promise<boolean>((resolve) => {
       wx.showModal({
         title: "合并章节",
-        content: `把「${sourceChapter.title}」合并到「${targetChapter.title}」，来源转写会保留在合并后的章节中。`,
+        content: `把「${sourceChapter.title}」合并到「${targetChapter.title}」，本章素材会保留在合并后的章节中。`,
         confirmText: "合并",
         confirmColor: "#9f4a3c",
         success: (result) => resolve(Boolean(result.confirm)),
@@ -1148,14 +1113,11 @@ Page<BookData, {
           return chapter;
         }
         const sourceRefs = uniqueSourceRefs([...targetChapter.source_refs, ...sourceChapter.source_refs]);
-        const summary = mergedChapterSummary(targetChapter, sourceChapter);
         return {
           ...chapter,
           source_refs: sourceRefs,
           sourceCount: sourceRefs.length,
           sourceSummary: bookChapterSourceSummary({ source_refs: sourceRefs }),
-          summary,
-          editingSummary: summary,
           draftChanged: false,
         };
       })
@@ -1183,20 +1145,15 @@ Page<BookData, {
       if (candidate.id !== chapterId) {
         return [candidate];
       }
-      const firstSummary = splitChapterSummary(candidate, "first");
-      const secondSummary = splitChapterSummary(candidate, "second");
       return [
         {
           ...candidate,
           source_refs: firstRefs,
           sourceCount: firstRefs.length,
           sourceSummary: bookChapterSourceSummary({ source_refs: firstRefs }),
-          summary: firstSummary,
-          editingSummary: firstSummary,
         },
         {
           title: `${title}（续）`,
-          summary: secondSummary,
           source_refs: secondRefs,
         },
       ];
@@ -1371,7 +1328,6 @@ Page<BookData, {
           ...toPlanUpdateInput(this.data.chapters),
           {
             title: titleFromUncoveredSource(source),
-            summary: "整理这条新收录转写。",
             source_refs: [source.sourceRef],
           },
         ],
@@ -1397,7 +1353,7 @@ Page<BookData, {
     const confirmed = await new Promise<boolean>((resolve) => {
       wx.showModal({
         title: "删除章节",
-        content: `删除「${chapter.title}」会移除本章正文，来源转写会回到待收录列表。`,
+        content: `删除「${chapter.title}」会移除本章正文，收录转写会回到待收录列表。`,
         confirmText: "删除",
         confirmColor: "#b4234a",
         success: (result) => resolve(Boolean(result.confirm)),

@@ -36,7 +36,6 @@ function samplePlan(status = "draft") {
         plan_id: "plan-1",
         project_id: "project/1",
         title: "外婆家的童年",
-        summary: "整理外婆家院子的童年生活。",
         sort_order: 0,
         source_refs: [sampleRef("utterance-1", "外婆家的院子")],
         metadata_json: {},
@@ -48,7 +47,6 @@ function samplePlan(status = "draft") {
         plan_id: "plan-1",
         project_id: "project/1",
         title: "第一次离家",
-        summary: "整理第一次离家求学。",
         sort_order: 1,
         source_refs: [sampleRef("utterance-2", "第一次离家")],
         metadata_json: {},
@@ -193,7 +191,6 @@ function planFromChapterUpdates(status, updates) {
         updated_at: "2026-06-17T00:00:00.000Z",
         ...existing,
         title: update.title,
-        summary: update.summary,
         sort_order: index,
         source_refs: clone(update.source_refs),
       };
@@ -319,13 +316,13 @@ test("book page summarizes chapter source count without exposing raw ids", () =>
         sampleRef("utterance-3", "第三段"),
       ],
     }),
-    "3 条来源转写",
+    "本章素材：3 条收录转写",
   );
 });
 
 test("book page renders chapter source counts in plan and drafting cards", () => {
   const wxml = fs.readFileSync(path.join(__dirname, "../pages/book/index.wxml"), "utf8");
-  const matches = wxml.match(/{{item\.sourceCount}} 条来源/g) || [];
+  const matches = wxml.match(/{{item\.sourceCount}} 条素材/g) || [];
 
   assert.equal(matches.length, 2);
 });
@@ -476,8 +473,8 @@ test("book page builds chapter structure controls from source refs", () => {
   assert.equal(chapters[1].canMoveUp, true);
   assert.equal(chapters[0].sourceViews.length, 2);
   assert.equal(chapters[0].sourceViews[0].previewText, "外婆家的院子");
-  assert.equal(chapters[0].sourceViews[0].labelText, "来源 1 · 06-17 08:00 北京时间 · 6 字");
-  assert.equal(chapters[0].sourceToggleText, "展开 2 条来源");
+  assert.equal(chapters[0].sourceViews[0].labelText, "素材 1 · 06-17 08:00 北京时间 · 6 字");
+  assert.equal(chapters[0].sourceToggleText, "查看 2 条");
   assert.deepEqual(chapters[0].mergeTargetOptions, [
     { label: "第 2 章 第一次离家", value: "chapter-2" },
   ]);
@@ -502,7 +499,7 @@ test("book page toggles chapter source details", () => {
   });
 
   assert.equal(context.data.chapters[0].sourceListExpanded, true);
-  assert.equal(context.data.chapters[0].sourceToggleText, "收起来源");
+  assert.equal(context.data.chapters[0].sourceToggleText, "收起素材");
 });
 
 test("book page shows recent uncovered transcripts before older ones", () => {
@@ -568,7 +565,7 @@ test("book page marks assigned sources as supplemental chapter work", () => {
 
   assert.equal(chapters[0].pendingSourceCount, 1);
   assert.equal(chapters[0].draftActionText, "补写新增");
-  assert.equal(chapters[0].sourceChangeNotice, "1 条新增来源待补写");
+  assert.equal(chapters[0].sourceChangeNotice, "1 条新增转写待补写");
   assert.equal(chapters[1].draftActionText, "生成本章");
 });
 
@@ -588,7 +585,7 @@ test("book page marks deleted chapter sources for review", () => {
   assert.equal(chapters[0].sourceCount, 0);
   assert.equal(chapters[0].removedSourceCount, 1);
   assert.equal(chapters[0].draftActionText, "整理本章");
-  assert.equal(chapters[0].sourceChangeNotice, "1 条来源已删除，章节稿需要更新");
+  assert.equal(chapters[0].sourceChangeNotice, "1 条素材已删除，章节稿需要更新");
 });
 
 test("book page confirms chapters with trimmed user edits and original source refs", async () => {
@@ -607,7 +604,6 @@ test("book page confirms chapters with trimmed user edits and original source re
   const plan = samplePlan("draft");
   const chapters = mod.buildChapterViews(plan);
   chapters[0].editingTitle = "  童年院子  ";
-  chapters[0].editingSummary = "  只写院子里的事  ";
   const context = pageContext(page, {
     projectId: "project/1",
     projectTitle: "外婆回忆录",
@@ -622,7 +618,7 @@ test("book page confirms chapters with trimmed user edits and original source re
   assert.equal(submissions[0].projectId, "project/1");
   assert.equal(submissions[0].data.title, "用户确认目录");
   assert.equal(submissions[0].data.chapters[0].title, "童年院子");
-  assert.equal(submissions[0].data.chapters[0].summary, "只写院子里的事");
+  assert.equal("summary" in submissions[0].data.chapters[0], false);
   assert.equal(submissions[0].data.chapters[0].source_refs[0].utterance_id, "utterance-1");
   assert.equal(context.data.stage, "drafting");
   delete global.wx;
@@ -687,7 +683,6 @@ test("book page adds uncovered transcript as a new chapter", async () => {
       plan_id: "plan-1",
       project_id: "project/1",
       title: "补记往事",
-      summary: "整理这条新收录转写。",
       sort_order: 2,
       source_refs: [sampleRef("utterance-new-1", "新增转写")],
       metadata_json: {},
@@ -738,7 +733,6 @@ test("book page adds uncovered transcript as a new chapter from picker option", 
       plan_id: "plan-1",
       project_id: "project/1",
       title: "补记往事",
-      summary: "整理这条新收录转写。",
       sort_order: 2,
       source_refs: [sampleRef("utterance-new-1", "新增转写")],
       metadata_json: {},
@@ -1036,7 +1030,7 @@ test("book page merges chapters and regenerates title plus draft for confirmed p
     calls[0].data.chapters[0].source_refs.map((ref) => ref.utterance_id),
     ["utterance-1", "utterance-2"],
   );
-  assert.match(calls[0].data.chapters[0].summary, /补充整理/);
+  assert.equal("summary" in calls[0].data.chapters[0], false);
   assert.deepEqual(calls[2].data, { force_regenerate: false });
   assert.equal(context.data.chapters[0].title, "童年里的离别");
   assert.equal(context.data.chapters[0].draftContent, "合并后的章节正文");

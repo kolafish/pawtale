@@ -124,7 +124,6 @@ async def _create_book_plan(test_db, *, project_id: str, source_ref: dict, statu
         plan_id=plan.id,
         project_id=project_id,
         title="外婆家的童年",
-        summary="整理外婆家院子和童年生活。",
         sort_order=0,
         source_refs_json=[source_ref],
     )
@@ -420,7 +419,7 @@ async def test_mobile_memoir_book_chapter_draft_force_regenerate_ignores_previou
     assert "不能只写第一条" in prompt
     assert "以来源转写为准" in prompt
     assert "章节标题参考" in prompt
-    assert "章节范围参考（可能滞后，以来源转写为准）" in prompt
+    assert "章节范围参考" not in prompt
     assert "每条要求覆盖的来源至少要有一处可对应的具体内容进入正文" in prompt
 
     refreshed_chapter = await test_db.scalar(

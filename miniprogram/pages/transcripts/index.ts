@@ -405,7 +405,6 @@ function planUpdateInput(plan: MemoirBookPlan): MemoirBookPlanChapterUpdateInput
   return sortedBookChapters(plan).map((chapter) => ({
     id: chapter.id,
     title: chapter.title,
-    summary: chapter.summary || "",
     source_refs: chapterSourceRefs(chapter),
   }));
 }
@@ -884,11 +883,11 @@ Page<TranscriptsData, {
       const sourceChapter = sourceChapters.length === 1 ? sourceChapters[0] : null;
       const targetChapter = chapters.find((chapter) => chapter.id === option.value) || null;
       if (!plan || !sourceChapter || !targetChapter) {
-        this.setData({ error: "没有找到可移动的章节来源" });
+        this.setData({ error: "没有找到可移动的本章素材" });
         return;
       }
       if (sourceChapter.source_refs.length <= 1) {
-        this.setData({ error: "本章只剩 1 条来源；请在成书页合并或删除章节来保留素材" });
+        this.setData({ error: "本章只剩 1 条素材；请在成书页合并或删除章节来保留素材" });
         return;
       }
       const movingRef = sourceChapter.source_refs.find((ref) => ref.utterance_id === utteranceId);
@@ -903,13 +902,13 @@ Page<TranscriptsData, {
       });
       this.setData({ bookPlan: updatedPlan, bookPlanProjectId: this.data.activeProjectId });
       await this.loadTranscripts(true);
-      wx.showToast({ title: "来源已移动", icon: "success" });
+      wx.showToast({ title: "素材已移动", icon: "success" });
     } catch (error) {
       if (error instanceof ApiError && [401, 403].includes(error.statusCode)) {
         wx.switchTab({ url: "/pages/me/index" });
         return;
       }
-      this.setData({ error: error instanceof Error ? error.message : "来源移动失败" });
+      this.setData({ error: error instanceof Error ? error.message : "素材移动失败" });
     } finally {
       this.setData({ movingSourceId: "" });
     }

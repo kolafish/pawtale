@@ -468,7 +468,6 @@ async def test_mobile_memoir_lists_book_inclusion_for_voice_transcripts(client, 
             plan_id=plan.id,
             project_id=project_id,
             title="院子里的童年",
-            summary="整理外婆家院子的童年生活。",
             sort_order=0,
             source_refs_json=[_book_source_ref(created, "外婆家的院子")],
         )
@@ -503,7 +502,6 @@ async def test_mobile_memoir_filters_voice_transcripts_by_book_inclusion(client,
             plan_id=plan.id,
             project_id=project_id,
             title="院子里的童年",
-            summary="整理外婆家院子的童年生活。",
             sort_order=0,
             source_refs_json=[_book_source_ref(included, "外婆家的院子")],
         )
@@ -544,7 +542,6 @@ async def test_mobile_memoir_delete_transcript_removes_book_source_refs_and_mark
         plan_id=plan.id,
         project_id=project_id,
         title="童年和离家",
-        summary="整理外婆家和第一次离家的内容。",
         sort_order=0,
         source_refs_json=[
             _book_source_ref(first, "外婆家的院子"),

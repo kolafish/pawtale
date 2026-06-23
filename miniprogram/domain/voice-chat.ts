@@ -286,7 +286,6 @@ export interface MemoirBookSourceIncludedChapter {
 
 export interface MemoirBookPlanChapterInput {
   title: string;
-  summary: string;
   source_refs: MemoirBookChapterSourceRef[];
 }
 
@@ -299,7 +298,6 @@ export interface MemoirBookPlanChapter {
   plan_id: string;
   project_id: string;
   title: string;
-  summary: string;
   sort_order: number;
   source_refs: MemoirBookChapterSourceRef[];
   metadata_json: Record<string, unknown>;

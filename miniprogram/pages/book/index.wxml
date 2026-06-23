@@ -133,7 +133,7 @@
     <view wx:for="{{chapters}}" wx:key="id" class="chapter-card">
       <view class="chapter-head">
         <text class="chapter-index">第 {{index + 1}} 章</text>
-        <text class="source-count">{{item.sourceCount}} 条来源</text>
+        <text class="source-count">{{item.sourceCount}} 条素材</text>
       </view>
 
       <input
@@ -142,16 +142,6 @@
         data-id="{{item.id}}"
         bindinput="changeChapterTitle"
         maxlength="80"
-      />
-
-      <textarea
-        class="summary-textarea"
-        value="{{item.editingSummary}}"
-        data-id="{{item.id}}"
-        bindinput="changeChapterSummary"
-        maxlength="-1"
-        auto-height
-        cursor-spacing="24"
       />
 
       <view class="source-summary-row">
@@ -280,7 +270,7 @@
       <view class="chapter-head">
         <view class="chapter-title-block">
           <text class="chapter-index">第 {{index + 1}} 章</text>
-          <text class="source-count">{{item.sourceCount}} 条来源</text>
+          <text class="source-count">{{item.sourceCount}} 条素材</text>
         </view>
         <text class="draft-status {{item.draft && item.draft.status === 'confirmed' ? 'confirmed' : ''}}">
           {{item.draftStatusText}}
