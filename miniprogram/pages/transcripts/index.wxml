@@ -32,10 +32,17 @@
     <text class="empty-copy">完成一次语音聊天后，保存的语音和文字会显示在这里。</text>
   </view>
 
-  <view wx:for="{{items}}" wx:for-index="index" wx:key="id" class="transcript-card">
+  <view
+    wx:for="{{items}}"
+    wx:for-index="index"
+    wx:key="id"
+    id="{{item.anchorId}}"
+    class="transcript-card {{highlightedId === item.id ? 'highlighted' : ''}}"
+  >
     <view class="record-head">
       <view>
         <text class="record-title">语音记录 {{index + 1}}</text>
+        <text class="record-time">{{item.createdAtText}}</text>
         <text class="record-project">{{item.project_title || "我的回忆录"}}</text>
         <text class="record-meta">{{item.audioText}}</text>
         <text class="book-status {{item.isIncludedInBook ? 'included' : ''}}">{{item.bookInclusionText}}</text>

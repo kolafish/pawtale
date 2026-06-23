@@ -35,6 +35,7 @@ import { ApiError } from "../../services/request";
 import { readBookTTSSettings } from "../../services/tts-settings";
 import { splitTextByAudioPlaybackProgress } from "../../services/tts-text-progress";
 import { formatBeijingDateTime } from "../../services/time";
+import { writeTranscriptNavigationTarget } from "../../services/transcript-navigation";
 
 interface DatasetEvent {
   currentTarget: {
@@ -587,7 +588,7 @@ Page<BookData, {
   playbackTimeForProgress(audio: WechatMiniprogram.InnerAudioContext): number;
   stopPlayback(): void;
   onUnload(): void;
-  openTranscripts(): void;
+  openTranscripts(event?: DatasetEvent): void;
   openHome(): void;
   openLogin(): void;
   createProject(): void;
@@ -1500,7 +1501,11 @@ Page<BookData, {
     this.stopPlayback();
   },
 
-  openTranscripts() {
+  openTranscripts(event) {
+    const utteranceId = event?.currentTarget?.dataset?.id || "";
+    if (utteranceId) {
+      writeTranscriptNavigationTarget(utteranceId);
+    }
     wx.switchTab({ url: "/pages/transcripts/index" });
   },
 

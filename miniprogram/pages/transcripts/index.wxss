@@ -111,6 +111,11 @@
   padding: 30rpx;
 }
 
+.transcript-card.highlighted {
+  border-color: #c25a46;
+  box-shadow: 0 12rpx 30rpx rgba(154, 66, 48, 0.16);
+}
+
 .record-head,
 .section-head,
 .actions-row {
@@ -135,6 +140,15 @@
   display: block;
   margin-top: 8rpx;
   color: #7a3b31;
+  font-size: 25rpx;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.record-time {
+  display: block;
+  margin-top: 8rpx;
+  color: #9f4a3c;
   font-size: 25rpx;
   font-weight: 800;
   line-height: 1.35;
