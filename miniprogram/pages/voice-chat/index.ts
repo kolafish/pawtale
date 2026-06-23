@@ -130,7 +130,8 @@ const AUTO_STOP_SILENCE_MS = 1800;
 const AUTO_STOP_MIN_RECORDING_MS = 1200;
 const AUTO_LISTEN_NO_ANSWER_MS = 15000;
 const MAX_CONSECUTIVE_NO_ANSWER_PROMPTS = 2;
-const VOICE_CHAT_DIAGNOSTIC_BUILD = "voice-chat-diagnostics-2026-06-23";
+const GATEWAY_CONNECT_WATCHDOG_MS = 12000;
+const VOICE_CHAT_DIAGNOSTIC_BUILD = "voice-chat-connect-watchdog-2026-06-23";
 const MAX_VOICE_DIAGNOSTIC_EVENTS = 140;
 
 interface VoiceDiagnosticEntry {
@@ -168,6 +169,27 @@ function formatDiagnosticData(data?: Record<string, MemoirDiagnosticValue>): str
     .sort()
     .map((key) => `${key}=${String(data[key] ?? "")}`)
     .join(" ");
+}
+
+async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  onTimeout: () => void,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      onTimeout();
+      reject(new Error("语音连接超时"));
+    }, timeoutMs);
+  });
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    if (timer) {
+      clearTimeout(timer);
+    }
+  }
 }
 
 Page<VoiceChatData, {
@@ -213,6 +235,7 @@ Page<VoiceChatData, {
   voiceDiagnosticText(): string;
   copyVoiceDiagnostics(): void;
   autoListenGateSnapshot(): AutoListenGateSnapshot;
+  gatewayConnectWatchdogMs(): number;
   connectGateway(): Promise<void>;
   startRecording(autoTriggered?: boolean): boolean;
   startRecordingAfterPrivacy(autoTriggered?: boolean): Promise<boolean>;
@@ -1204,6 +1227,10 @@ Page<VoiceChatData, {
     });
   },
 
+  gatewayConnectWatchdogMs() {
+    return GATEWAY_CONNECT_WATCHDOG_MS;
+  },
+
   async connectGateway() {
     if (this.data.connecting || !this.data.voiceSessionId) {
       this.recordVoiceDiagnostic("gateway.connect.skip", {
@@ -1218,34 +1245,88 @@ Page<VoiceChatData, {
       hadClient: Boolean(streamingClient),
     });
     this.setData({ connecting: true, error: "" });
-    streamingClient?.close({ force: true });
     let connected = false;
-    const client = new MemoirStreamingAsrClient({
-      voiceSessionId: this.data.voiceSessionId,
-      guidanceMode: this.data.guidanceMode,
-      currentGuidanceModule: this.data.currentGuidanceModule,
-      autoStopSilenceMs: this.data.autoStopEnabled ? AUTO_STOP_SILENCE_MS : 0,
-      minAutoStopRecordingMs: AUTO_STOP_MIN_RECORDING_MS,
-      callbacks: {
-        onStatus: (status) => this.handleStatus(status),
-        onCaptureStats: (stats) => this.handleCaptureStats(stats),
-        onDiagnostic: (event: MemoirStreamingAsrDiagnosticEvent) => (
-          this.recordVoiceDiagnostic(event.name, event.data)
-        ),
-        onEvent: (event) => this.handleGatewayEvent(event),
-        onPartial: (text) => this.handlePartial(text),
-        onFinal: (event) => this.handleFinal(event),
-        onError: (message, error) => this.handleError(message, error),
-      },
-    });
-    streamingClient = client;
+    let client: MemoirStreamingAsrClient | null = null;
+    const isCurrentClient = () => Boolean(client && streamingClient === client);
     try {
-      await client.connect();
+      if (streamingClient) {
+        this.recordVoiceDiagnostic("gateway.previousClient.close");
+        streamingClient.close({ force: true });
+      }
+      this.recordVoiceDiagnostic("gateway.client.create.begin");
+      client = new MemoirStreamingAsrClient({
+        voiceSessionId: this.data.voiceSessionId,
+        guidanceMode: this.data.guidanceMode,
+        currentGuidanceModule: this.data.currentGuidanceModule,
+        autoStopSilenceMs: this.data.autoStopEnabled ? AUTO_STOP_SILENCE_MS : 0,
+        minAutoStopRecordingMs: AUTO_STOP_MIN_RECORDING_MS,
+        callbacks: {
+          onStatus: (status) => {
+            if (isCurrentClient()) {
+              this.handleStatus(status);
+              return;
+            }
+            this.recordVoiceDiagnostic("gateway.stale.status", { status });
+          },
+          onCaptureStats: (stats) => {
+            if (isCurrentClient()) {
+              this.handleCaptureStats(stats);
+            }
+          },
+          onDiagnostic: (event: MemoirStreamingAsrDiagnosticEvent) => (
+            this.recordVoiceDiagnostic(
+              event.name,
+              isCurrentClient() ? event.data : { ...(event.data || {}), staleClient: true },
+            )
+          ),
+          onEvent: (event) => {
+            if (isCurrentClient()) {
+              this.handleGatewayEvent(event);
+            }
+          },
+          onPartial: (text) => {
+            if (isCurrentClient()) {
+              this.handlePartial(text);
+            }
+          },
+          onFinal: (event) => {
+            if (isCurrentClient()) {
+              this.handleFinal(event);
+            }
+          },
+          onError: (message, error) => {
+            if (isCurrentClient()) {
+              this.handleError(message, error);
+              return;
+            }
+            this.recordVoiceDiagnostic("gateway.stale.error", { message });
+          },
+        },
+      });
+      streamingClient = client;
+      this.recordVoiceDiagnostic("gateway.client.create.success");
+      const connectTimeoutMs = this.gatewayConnectWatchdogMs();
+      this.recordVoiceDiagnostic("gateway.client.connect.call", { connectTimeoutMs });
+      await withTimeout(
+        client.connect(),
+        connectTimeoutMs,
+        () => {
+          this.recordVoiceDiagnostic("gateway.connect.watchdog.timeout", { connectTimeoutMs });
+        },
+      );
       connected = true;
       this.recordVoiceDiagnostic("gateway.connect.success", { status: this.data.status });
     } catch (error) {
-      if (streamingClient === client) {
+      if (client && streamingClient === client) {
         streamingClient = null;
+      }
+      if (client) {
+        try {
+          client.close({ force: true });
+        } catch (closeError) {
+          const closeMessage = closeError instanceof Error ? closeError.message : "语音连接关闭失败";
+          this.recordVoiceDiagnostic("gateway.connect.closeAfterError", { message: closeMessage });
+        }
       }
       const message = error instanceof Error ? error.message : "语音连接失败";
       this.recordVoiceDiagnostic("gateway.connect.error", { message });
