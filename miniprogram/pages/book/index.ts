@@ -84,7 +84,6 @@ export interface BookUncoveredSourceView {
 
 export interface BookChapterSourceView extends MemoirBookChapterSourceRef {
   previewText: string;
-  moveTargetOptions: ChapterPickerOption[];
 }
 
 export interface BookChapterView extends MemoirBookPlanChapter {
@@ -445,7 +444,6 @@ function decorateChapterStructureOptions(chapters: BookChapterView[]): BookChapt
       sourceViews: chapter.source_refs.map((ref) => ({
         ...ref,
         previewText: sourcePreviewText(ref),
-        moveTargetOptions: targetOptions,
       })),
       mergeTargetOptions: targetOptions,
       splitOptions: chapter.source_refs.slice(1).map((_, splitIndex) => {
@@ -678,7 +676,6 @@ Page<BookData, {
   moveChapter(event: DatasetEvent): Promise<void>;
   mergeChapterInto(event: PickerEvent): Promise<void>;
   splitChapter(event: PickerEvent): Promise<void>;
-  moveChapterSource(event: PickerEvent): Promise<void>;
   generateChapterDraft(event: DatasetEvent): Promise<void>;
   generateChapterDraftById(chapterId: string, toastTitle?: string): Promise<boolean>;
   changeDraftContent(event: TextInputEvent): void;
@@ -1186,53 +1183,6 @@ Page<BookData, {
       ];
     });
     await this.updatePlanStructure(toPlanUpdateInput(updates as BookChapterView[]), "章节已拆分");
-  },
-
-  async moveChapterSource(event) {
-    const sourceChapterId = event.currentTarget.dataset.id || "";
-    const utteranceId = event.currentTarget.dataset.utteranceId || "";
-    const optionIndex = Number(event.detail.value);
-    const sourceChapter = this.data.chapters.find((chapter) => chapter.id === sourceChapterId);
-    const sourceView = sourceChapter?.sourceViews.find((source) => source.utterance_id === utteranceId);
-    const option = sourceView?.moveTargetOptions[optionIndex];
-    const targetChapter = option
-      ? this.data.chapters.find((chapter) => chapter.id === option.value)
-      : undefined;
-    if (!sourceChapter || !sourceView || !targetChapter || this.data.updatingPlanStructure) {
-      return;
-    }
-    if (sourceChapter.source_refs.length <= 1) {
-      this.patchChapter(sourceChapter.id, {
-        draftError: "本章只剩 1 条来源；可合并或删除本章来保留素材",
-      });
-      return;
-    }
-    const movingRef = sourceChapter.source_refs.find((ref) => ref.utterance_id === utteranceId);
-    if (!movingRef) {
-      return;
-    }
-    const chapters = this.data.chapters.map((chapter) => {
-      if (chapter.id === sourceChapter.id) {
-        const refs = chapter.source_refs.filter((ref) => ref.utterance_id !== utteranceId);
-        return {
-          ...chapter,
-          source_refs: refs,
-          sourceCount: refs.length,
-          sourceSummary: bookChapterSourceSummary({ source_refs: refs }),
-        };
-      }
-      if (chapter.id === targetChapter.id) {
-        const refs = uniqueSourceRefs([...chapter.source_refs, movingRef]);
-        return {
-          ...chapter,
-          source_refs: refs,
-          sourceCount: refs.length,
-          sourceSummary: bookChapterSourceSummary({ source_refs: refs }),
-        };
-      }
-      return chapter;
-    });
-    await this.updatePlanStructure(toPlanUpdateInput(chapters), "来源已移动");
   },
 
   async generateChapterDraft(event) {

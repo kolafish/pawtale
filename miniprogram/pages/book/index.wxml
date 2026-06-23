@@ -167,62 +167,56 @@
             <text class="source-ref-label">来源转写</text>
             <text class="source-ref-text">{{source.previewText}}</text>
           </view>
-          <picker
-            range="{{source.moveTargetOptions}}"
-            range-key="label"
-            data-id="{{item.id}}"
-            data-utterance-id="{{source.utterance_id}}"
-            disabled="{{confirmingPlan || updatingPlanStructure || item.sourceViews.length <= 1 || !source.moveTargetOptions.length}}"
-            bindchange="moveChapterSource"
-          >
-            <view class="source-ref-action {{confirmingPlan || updatingPlanStructure || item.sourceViews.length <= 1 || !source.moveTargetOptions.length ? 'disabled' : ''}}">
-              移动到
-            </view>
-          </picker>
         </view>
       </view>
 
       <view class="structure-actions">
-        <button
-          class="structure-button"
-          data-id="{{item.id}}"
-          data-direction="up"
-          bindtap="moveChapter"
-          disabled="{{confirmingPlan || updatingPlanStructure || !item.canMoveUp}}"
-        >
-          上移
-        </button>
-        <button
-          class="structure-button"
-          data-id="{{item.id}}"
-          data-direction="down"
-          bindtap="moveChapter"
-          disabled="{{confirmingPlan || updatingPlanStructure || !item.canMoveDown}}"
-        >
-          下移
-        </button>
-        <picker
-          range="{{item.mergeTargetOptions}}"
-          range-key="label"
-          data-id="{{item.id}}"
-          disabled="{{confirmingPlan || updatingPlanStructure || !item.mergeTargetOptions.length}}"
-          bindchange="mergeChapterInto"
-        >
-          <view class="structure-button picker-button {{confirmingPlan || updatingPlanStructure || !item.mergeTargetOptions.length ? 'disabled' : ''}}">
-            合并到
-          </view>
-        </picker>
-        <picker
-          range="{{item.splitOptions}}"
-          range-key="label"
-          data-id="{{item.id}}"
-          disabled="{{confirmingPlan || updatingPlanStructure || !item.splitOptions.length}}"
-          bindchange="splitChapter"
-        >
-          <view class="structure-button picker-button {{confirmingPlan || updatingPlanStructure || !item.splitOptions.length ? 'disabled' : ''}}">
-            拆分
-          </view>
-        </picker>
+        <view class="structure-action-row">
+          <button
+            class="structure-button"
+            data-id="{{item.id}}"
+            data-direction="up"
+            bindtap="moveChapter"
+            disabled="{{confirmingPlan || updatingPlanStructure || !item.canMoveUp}}"
+          >
+            上移
+          </button>
+          <button
+            class="structure-button"
+            data-id="{{item.id}}"
+            data-direction="down"
+            bindtap="moveChapter"
+            disabled="{{confirmingPlan || updatingPlanStructure || !item.canMoveDown}}"
+          >
+            下移
+          </button>
+        </view>
+        <view class="structure-action-row">
+          <picker
+            class="structure-picker"
+            range="{{item.mergeTargetOptions}}"
+            range-key="label"
+            data-id="{{item.id}}"
+            disabled="{{confirmingPlan || updatingPlanStructure || !item.mergeTargetOptions.length}}"
+            bindchange="mergeChapterInto"
+          >
+            <view class="structure-button picker-button {{confirmingPlan || updatingPlanStructure || !item.mergeTargetOptions.length ? 'disabled' : ''}}">
+              合并到
+            </view>
+          </picker>
+          <picker
+            class="structure-picker"
+            range="{{item.splitOptions}}"
+            range-key="label"
+            data-id="{{item.id}}"
+            disabled="{{confirmingPlan || updatingPlanStructure || !item.splitOptions.length}}"
+            bindchange="splitChapter"
+          >
+            <view class="structure-button picker-button {{confirmingPlan || updatingPlanStructure || !item.splitOptions.length ? 'disabled' : ''}}">
+              拆分
+            </view>
+          </picker>
+        </view>
       </view>
 
       <view class="actions-row compact">
@@ -327,63 +321,57 @@
             <text class="source-ref-label">来源转写</text>
             <text class="source-ref-text">{{source.previewText}}</text>
           </view>
-          <picker
-            range="{{source.moveTargetOptions}}"
-            range-key="label"
-            data-id="{{item.id}}"
-            data-utterance-id="{{source.utterance_id}}"
-            disabled="{{updatingPlanStructure || item.draftBusy || item.sourceViews.length <= 1 || !source.moveTargetOptions.length}}"
-            bindchange="moveChapterSource"
-          >
-            <view class="source-ref-action {{updatingPlanStructure || item.draftBusy || item.sourceViews.length <= 1 || !source.moveTargetOptions.length ? 'disabled' : ''}}">
-              移动到
-            </view>
-          </picker>
         </view>
       </view>
       <text wx:if="{{item.sourceChangeNotice}}" class="draft-pending">{{item.sourceChangeNotice}}</text>
 
       <view class="structure-actions">
-        <button
-          class="structure-button"
-          data-id="{{item.id}}"
-          data-direction="up"
-          bindtap="moveChapter"
-          disabled="{{updatingPlanStructure || item.draftBusy || !item.canMoveUp}}"
-        >
-          上移
-        </button>
-        <button
-          class="structure-button"
-          data-id="{{item.id}}"
-          data-direction="down"
-          bindtap="moveChapter"
-          disabled="{{updatingPlanStructure || item.draftBusy || !item.canMoveDown}}"
-        >
-          下移
-        </button>
-        <picker
-          range="{{item.mergeTargetOptions}}"
-          range-key="label"
-          data-id="{{item.id}}"
-          disabled="{{updatingPlanStructure || item.draftBusy || !item.mergeTargetOptions.length}}"
-          bindchange="mergeChapterInto"
-        >
-          <view class="structure-button picker-button {{updatingPlanStructure || item.draftBusy || !item.mergeTargetOptions.length ? 'disabled' : ''}}">
-            合并到
-          </view>
-        </picker>
-        <picker
-          range="{{item.splitOptions}}"
-          range-key="label"
-          data-id="{{item.id}}"
-          disabled="{{updatingPlanStructure || item.draftBusy || !item.splitOptions.length}}"
-          bindchange="splitChapter"
-        >
-          <view class="structure-button picker-button {{updatingPlanStructure || item.draftBusy || !item.splitOptions.length ? 'disabled' : ''}}">
-            拆分
-          </view>
-        </picker>
+        <view class="structure-action-row">
+          <button
+            class="structure-button"
+            data-id="{{item.id}}"
+            data-direction="up"
+            bindtap="moveChapter"
+            disabled="{{updatingPlanStructure || item.draftBusy || !item.canMoveUp}}"
+          >
+            上移
+          </button>
+          <button
+            class="structure-button"
+            data-id="{{item.id}}"
+            data-direction="down"
+            bindtap="moveChapter"
+            disabled="{{updatingPlanStructure || item.draftBusy || !item.canMoveDown}}"
+          >
+            下移
+          </button>
+        </view>
+        <view class="structure-action-row">
+          <picker
+            class="structure-picker"
+            range="{{item.mergeTargetOptions}}"
+            range-key="label"
+            data-id="{{item.id}}"
+            disabled="{{updatingPlanStructure || item.draftBusy || !item.mergeTargetOptions.length}}"
+            bindchange="mergeChapterInto"
+          >
+            <view class="structure-button picker-button {{updatingPlanStructure || item.draftBusy || !item.mergeTargetOptions.length ? 'disabled' : ''}}">
+              合并到
+            </view>
+          </picker>
+          <picker
+            class="structure-picker"
+            range="{{item.splitOptions}}"
+            range-key="label"
+            data-id="{{item.id}}"
+            disabled="{{updatingPlanStructure || item.draftBusy || !item.splitOptions.length}}"
+            bindchange="splitChapter"
+          >
+            <view class="structure-button picker-button {{updatingPlanStructure || item.draftBusy || !item.splitOptions.length ? 'disabled' : ''}}">
+              拆分
+            </view>
+          </picker>
+        </view>
       </view>
 
       <view wx:if="{{!item.draft || !item.draft.latest_version}}" class="draft-empty">

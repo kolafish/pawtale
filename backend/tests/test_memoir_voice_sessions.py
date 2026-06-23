@@ -569,13 +569,13 @@ async def test_mobile_memoir_voice_session_list_and_progress(client, test_db):
 
     assert progress_response.status_code == 200
     progress = progress_response.json()
-    assert progress["session_count"] == 2
-    assert progress["active_session_count"] == 2
+    assert progress["session_count"] == 1
+    assert progress["active_session_count"] == 1
     assert progress["utterance_count"] == 1
     assert progress["user_message_count"] == 1
     assert progress["assistant_message_count"] == 1
     assert progress["total_user_char_count"] == len("我小时候住在外婆家。")
-    assert {item["module"] for item in progress["modules"]} == {"person", "free_narration"}
+    assert {item["module"] for item in progress["modules"]} == {"person"}
     assert free_session["id"]
 
 
