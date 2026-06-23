@@ -19,7 +19,7 @@ from app.schemas.memoir_voice import (
     MemoirVoiceFollowUpRequest,
     MemoirVoiceFollowUpResponse,
 )
-from app.services import get_ai_service
+from app.services.ai_factory import get_ai_service
 from app.services.ai_types import AITextClient
 
 

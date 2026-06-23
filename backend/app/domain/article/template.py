@@ -1,7 +1,7 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.projects import Document, DocumentGroup, Project
-from app.services import project_documents as project_docs
+import app.services.project_documents as project_docs
 
 
 async def initialize_article_project(db: AsyncSession, project: Project) -> None:

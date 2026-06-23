@@ -23,8 +23,8 @@ from app.schemas.projects import (
     ProjectAnalyzeResponse,
     ReferenceItemBrief,
 )
-from app.services import get_ai_service
-from app.services import project_documents as project_docs
+from app.services.ai_factory import get_ai_service
+import app.services.project_documents as project_docs
 from app.services.content_storage import read_content
 from app.services.projects.access import get_document, load_project
 

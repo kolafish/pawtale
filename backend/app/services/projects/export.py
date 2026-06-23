@@ -13,7 +13,7 @@ from markdown_it.token import Token
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.schemas.projects import ProjectExportResponse
-from app.services import project_documents as project_docs
+import app.services.project_documents as project_docs
 from app.services.content_storage import read_content
 from app.services.projects.access import load_project
 
