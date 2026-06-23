@@ -842,7 +842,7 @@ test("voice chat copies diagnostics with auto-listen gate state", () => {
   page.copyVoiceDiagnostics.call(context);
 
   assert.equal(started, false);
-  assert.match(clipboardText, /build=voice-chat-connect-watchdog-2026-06-23/);
+  assert.match(clipboardText, /build=voice-chat-constructor-order-2026-06-23/);
   assert.match(clipboardText, /autoListen\.tryAfterTTS/);
   assert.match(clipboardText, /hasClient=false/);
   assert.match(clipboardText, /pendingAfterPlayback=true/);

@@ -96,6 +96,7 @@ export interface MemoirStartRecordingOptions {
 }
 
 export class MemoirStreamingAsrClient {
+  private readonly options: MemoirStreamingAsrOptions;
   private socketTask: WechatMiniprogram.SocketTask | null = null;
   private socketOpen = false;
   private recording = false;
@@ -112,7 +113,7 @@ export class MemoirStreamingAsrClient {
   private silentElapsedMs = 0;
   private voiceActivityElapsedMs = 0;
   private hasVoiceActivity = false;
-  private voiceActivityDetector = this.createVoiceActivityDetector();
+  private voiceActivityDetector: VoiceActivityDetector;
   private autoStopped = false;
   private autoStopReason: MemoirAutoStopReason | "" = "";
   private noVoiceActivityTimeoutMs = 0;
@@ -126,7 +127,10 @@ export class MemoirStreamingAsrClient {
     reject: (error: Error) => void;
   }> = [];
 
-  constructor(private readonly options: MemoirStreamingAsrOptions) {}
+  constructor(options: MemoirStreamingAsrOptions) {
+    this.options = options;
+    this.voiceActivityDetector = this.createVoiceActivityDetector();
+  }
 
   configureAutoStop(autoStopSilenceMs: number): void {
     this.options.autoStopSilenceMs = Math.max(0, autoStopSilenceMs);
