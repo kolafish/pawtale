@@ -10,6 +10,7 @@ export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
 const BACKEND_COOKIE_KEY = "pawtale_backend_cookie";
 const BACKEND_CONFIG_STORAGE_KEY = "pawtale_backend_config";
+const REQUEST_TIMEOUT_MS = 10000;
 
 export interface BackendRuntimeConfig {
   httpBaseUrl: string;
@@ -31,6 +32,7 @@ interface RequestOptions {
   method?: HttpMethod;
   data?: unknown;
   header?: Record<string, string>;
+  timeoutMs?: number;
 }
 
 type WxWithExtConfig = typeof wx & {
@@ -184,6 +186,7 @@ export function request<T>(path: string, options: RequestOptions = {}): Promise<
       url: `${cleanBaseUrl(config.httpBaseUrl)}${path}`,
       method: options.method || "GET",
       data: options.data ?? {},
+      timeout: options.timeoutMs ?? REQUEST_TIMEOUT_MS,
       header: {
         "content-type": "application/json",
         ...(cookie ? { Cookie: cookie } : {}),
