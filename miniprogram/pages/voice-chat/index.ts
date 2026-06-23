@@ -131,7 +131,7 @@ const AUTO_STOP_MIN_RECORDING_MS = 1200;
 const AUTO_LISTEN_NO_ANSWER_MS = 15000;
 const MAX_CONSECUTIVE_NO_ANSWER_PROMPTS = 2;
 const GATEWAY_CONNECT_WATCHDOG_MS = 12000;
-const VOICE_CHAT_DIAGNOSTIC_BUILD = "voice-chat-connect-watchdog-2026-06-23";
+const VOICE_CHAT_DIAGNOSTIC_BUILD = "voice-chat-constructor-order-2026-06-23";
 const MAX_VOICE_DIAGNOSTIC_EVENTS = 140;
 
 interface VoiceDiagnosticEntry {

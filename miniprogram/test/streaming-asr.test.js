@@ -1,6 +1,8 @@
 require("./register-ts");
 
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
 const test = require("node:test");
 
 function streamingAsrModule() {
@@ -71,6 +73,25 @@ function pcm16Frame(sample, byteLength = 3200) {
   }
   return frame;
 }
+
+test("streaming ASR does not read constructor options from class field initializers", () => {
+  const source = fs.readFileSync(
+    path.join(__dirname, "../services/memoir-streaming-asr.ts"),
+    "utf8",
+  );
+  assert.doesNotMatch(source, /private\s+voiceActivityDetector\s*=\s*this\.createVoiceActivityDetector\(\)/);
+  assert.match(source, /private\s+voiceActivityDetector:\s*VoiceActivityDetector;/);
+
+  const constructorIndex = source.indexOf("constructor(options: MemoirStreamingAsrOptions)");
+  const assignOptionsIndex = source.indexOf("this.options = options;", constructorIndex);
+  const createDetectorIndex = source.indexOf(
+    "this.voiceActivityDetector = this.createVoiceActivityDetector();",
+    constructorIndex,
+  );
+  assert.ok(constructorIndex > 0);
+  assert.ok(assignOptionsIndex > constructorIndex);
+  assert.ok(createDetectorIndex > assignOptionsIndex);
+});
 
 test("encodes ArrayBuffer audio frames as base64", () => {
   const { arrayBufferToBase64 } = streamingAsrProtocolModule();
