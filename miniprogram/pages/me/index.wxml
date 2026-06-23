@@ -133,7 +133,7 @@
   <view class="section">
     <view class="setting-header">
       <text class="section-title">当前回忆录</text>
-      <text wx:if="{{voiceStatsLoading}}" class="setting-current">更新中</text>
+      <text class="setting-current stats-refresh">{{voiceStatsLoading ? "更新中" : " "}}</text>
     </view>
     <view class="project-overview">
       <view class="project-overview-head">

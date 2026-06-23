@@ -154,6 +154,16 @@ function pageContext(page, data = {}) {
   };
 }
 
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+  return { promise, resolve, reject };
+}
+
 test("me shows the login panel instead of redirecting when the session is missing", async () => {
   const { ApiError } = require("../services/request.ts");
   const { page } = loadMePage({
@@ -198,6 +208,72 @@ test("me treats wechat-only users as logged in and shows wechat profile", async 
   assert.equal(context.data.avatarUrl, "https://avatar.example.com/wechat.png");
   assert.equal(context.data.accountEmailText, "微信账号登录");
   assert.equal(context.data.accountMode, false);
+});
+
+test("me keeps existing voice stats while refreshing the same project", async () => {
+  const progress = deferred();
+  let progressRequested = false;
+  const { page } = loadMePage({
+    authExports: {
+      getMemoirIdentity: async () => ({
+        id: "user-1",
+        email: "memoir-author@example.com",
+        password_login_enabled: true,
+        display_name: "作者",
+        avatar_url: "",
+        created_at: "2026-06-15T00:00:00",
+        active_project_id: "project-1",
+        active_project: {
+          id: "project-1",
+          title: "外婆回忆录",
+          metadata_json: {},
+        },
+        projects: [],
+      }),
+    },
+    voiceApiExports: {
+      getMemoirVoiceProgress: async () => {
+        progressRequested = true;
+        return progress.promise;
+      },
+    },
+  });
+  const context = {
+    ...page,
+    ...pageContext(page, {
+      loggedIn: true,
+      voiceStatsProjectId: "project-1",
+      sessionCount: 6,
+      utteranceCount: 38,
+      totalUserCharCount: 1200,
+      totalAudioText: "18 分 2 秒",
+    }),
+  };
+
+  const loading = page.loadMe.call(context);
+  while (!progressRequested) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+
+  assert.equal(context.data.sessionCount, 6);
+  assert.equal(context.data.utteranceCount, 38);
+  assert.equal(context.data.totalUserCharCount, 1200);
+  assert.equal(context.data.totalAudioText, "18 分 2 秒");
+  assert.equal(context.data.voiceStatsLoading, true);
+
+  progress.resolve({
+    session_count: 7,
+    utterance_count: 42,
+    total_user_char_count: 1500,
+    total_audio_seconds: 1200,
+  });
+  await loading;
+
+  assert.equal(context.data.sessionCount, 7);
+  assert.equal(context.data.utteranceCount, 42);
+  assert.equal(context.data.totalUserCharCount, 1500);
+  assert.equal(context.data.totalAudioText, "20 分 0 秒");
+  assert.equal(context.data.voiceStatsLoading, false);
 });
 
 test("me shows voice authorization status and opens agreement", () => {
