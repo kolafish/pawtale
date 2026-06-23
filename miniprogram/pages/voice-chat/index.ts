@@ -273,9 +273,7 @@ Page<VoiceChatData, {
       return;
     }
     this.hydrateVoiceSessionSnapshot();
-    this.setData({ connecting: true });
     await this.refreshVoiceSessionSnapshot();
-    this.setData({ connecting: false });
     if (
       this.data.voiceAuthorizationAgreed
       && this.data.status !== "closed"
@@ -1018,7 +1016,7 @@ Page<VoiceChatData, {
     }
     this.setData({ connecting: true, error: "" });
     streamingClient?.close({ force: true });
-    streamingClient = new MemoirStreamingAsrClient({
+    const client = new MemoirStreamingAsrClient({
       voiceSessionId: this.data.voiceSessionId,
       guidanceMode: this.data.guidanceMode,
       currentGuidanceModule: this.data.currentGuidanceModule,
@@ -1033,9 +1031,13 @@ Page<VoiceChatData, {
         onError: (message, error) => this.handleError(message, error),
       },
     });
+    streamingClient = client;
     try {
-      await streamingClient.connect();
+      await client.connect();
     } catch (error) {
+      if (streamingClient === client) {
+        streamingClient = null;
+      }
       const message = error instanceof Error ? error.message : "语音连接失败";
       this.handleError(message, classifyVoiceClientConnectionError(message));
     } finally {
@@ -1047,7 +1049,7 @@ Page<VoiceChatData, {
     if (!this.ensureVoiceAuthorization(autoTriggered)) {
       return false;
     }
-    if (!streamingClient || this.data.status === "closed") {
+    if (!streamingClient || this.data.status === "closed" || this.data.status === "error") {
       void this.syncVoiceAuthorizationAndConnect(autoTriggered);
       this.setData({ autoListenStateText: autoTriggered ? "正在重新连接语音" : this.data.autoListenStateText });
       return false;
@@ -1076,7 +1078,7 @@ Page<VoiceChatData, {
       });
       return false;
     }
-    if (!streamingClient || this.data.status === "closed") {
+    if (!streamingClient || this.data.status === "closed" || this.data.status === "error") {
       void this.syncVoiceAuthorizationAndConnect(autoTriggered);
       this.setData({ autoListenStateText: autoTriggered ? "正在重新连接语音" : this.data.autoListenStateText });
       return false;
@@ -1106,7 +1108,7 @@ Page<VoiceChatData, {
     if (!this.ensureVoiceAuthorization(false)) {
       return;
     }
-    if (!streamingClient || this.data.status === "closed") {
+    if (!streamingClient || this.data.status === "closed" || this.data.status === "error") {
       void this.syncVoiceAuthorizationAndConnect(false);
       return;
     }
