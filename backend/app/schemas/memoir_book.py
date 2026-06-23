@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.domain.memoir.types import (
     MemoirBookChapterDraftStatus,
@@ -202,6 +202,26 @@ class MemoirBookSourceAssignmentRequest(BaseModel):
         if not value:
             raise ValueError("至少需要一条归入操作")
         return value
+
+
+class MemoirBookSourceMoveRequest(BaseModel):
+    source_chapter_id: str
+    target_chapter_id: str
+    utterance_id: str
+
+    @field_validator("source_chapter_id", "target_chapter_id", "utterance_id")
+    @classmethod
+    def _valid_id(cls, value: str) -> str:
+        item_id = value.strip()
+        if not item_id:
+            raise ValueError("移动素材参数不能为空")
+        return item_id
+
+    @model_validator(mode="after")
+    def _valid_distinct_chapters(self) -> "MemoirBookSourceMoveRequest":
+        if self.source_chapter_id == self.target_chapter_id:
+            raise ValueError("目标章节不能与原章节相同")
+        return self
 
 
 class MemoirBookChapterDraftGenerateRequest(BaseModel):

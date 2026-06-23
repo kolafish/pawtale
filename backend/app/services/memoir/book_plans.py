@@ -33,6 +33,7 @@ from app.schemas.memoir_book import (
     MemoirBookSourceCoverageItem,
     MemoirBookSourceCoverageResponse,
     MemoirBookSourceIncludedChapter,
+    MemoirBookSourceMoveRequest,
 )
 from app.services import get_ai_service
 from app.services.ai_types import AITextClient
@@ -114,6 +115,21 @@ def _source_ref_utterance_ids(refs: list[dict] | list[MemoirBookChapterSourceRef
     return ids
 
 
+def _source_ref_utterance_id(ref: object) -> str:
+    if isinstance(ref, MemoirBookChapterSourceRef):
+        return ref.utterance_id
+    if isinstance(ref, dict) and isinstance(ref.get("utterance_id"), str):
+        return ref["utterance_id"]
+    return ""
+
+
+def _source_ids_from_metadata(metadata_json: dict | None, key: str) -> set[str]:
+    value = (metadata_json or {}).get(key, [])
+    if not isinstance(value, list):
+        return set()
+    return {item for item in value if isinstance(item, str) and item}
+
+
 def _set_source_change_metadata(
     metadata_json: dict | None,
     *,
@@ -131,6 +147,31 @@ def _set_source_change_metadata(
         metadata.pop("removed_source_utterance_ids", None)
     metadata["source_refs_updated_at"] = datetime.now(UTC).isoformat()
     return metadata
+
+
+async def _mark_chapter_drafts_sources_changed(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    chapter_ids: set[str],
+) -> None:
+    if not chapter_ids:
+        return
+    drafts = (
+        await db.execute(
+            select(MemoirBookChapterDraft).where(
+                MemoirBookChapterDraft.project_id == project_id,
+                MemoirBookChapterDraft.chapter_id.in_(chapter_ids),
+            )
+        )
+    ).scalars().all()
+    for draft in drafts:
+        draft.status = MemoirBookChapterDraftStatus.DRAFT.value
+        draft.metadata_json = _merge_metadata(
+            draft.metadata_json,
+            {"status_reason": "sources_changed"},
+        )
+        db.add(draft)
 
 
 def _source_ref_response(
@@ -599,6 +640,88 @@ async def assign_book_sources_to_chapters(
     return await _plan_response(db, refreshed)
 
 
+async def move_book_source_between_chapters(
+    db: AsyncSession,
+    *,
+    user_id: str,
+    project_id: str,
+    req: MemoirBookSourceMoveRequest,
+) -> MemoirBookPlanResponse:
+    await load_memoir_project(db, project_id, user_id)
+    plan = await _load_plan(db, project_id)
+    if not plan:
+        raise HTTPException(status_code=404, detail="章节规划不存在")
+    if plan.status != MemoirBookPlanStatus.CONFIRMED.value:
+        raise HTTPException(status_code=400, detail="请先确认章节规划")
+
+    source_chapter = _chapter_by_id(plan, req.source_chapter_id)
+    target_chapter = _chapter_by_id(plan, req.target_chapter_id)
+    source_refs = list(source_chapter.source_refs_json or [])
+    target_refs = list(target_chapter.source_refs_json or [])
+
+    if len(source_refs) <= 1:
+        raise HTTPException(status_code=400, detail="原章节至少需要保留一条来源")
+    if any(_source_ref_utterance_id(ref) == req.utterance_id for ref in target_refs):
+        raise HTTPException(status_code=400, detail="转写已收录到目标章节")
+
+    moving_ref: dict[str, object] | None = None
+    kept_source_refs: list[dict[str, object]] = []
+    for ref in source_refs:
+        if _source_ref_utterance_id(ref) == req.utterance_id:
+            moving_ref = dict(ref)
+            continue
+        kept_source_refs.append(ref)
+    if moving_ref is None:
+        raise HTTPException(status_code=404, detail="原章节中没有找到这条来源")
+    if not kept_source_refs:
+        raise HTTPException(status_code=400, detail="原章节至少需要保留一条来源")
+
+    source_pending_ids = _source_ids_from_metadata(source_chapter.metadata_json, "pending_source_utterance_ids")
+    source_pending_ids.discard(req.utterance_id)
+    source_removed_ids = _source_ids_from_metadata(source_chapter.metadata_json, "removed_source_utterance_ids")
+    source_removed_ids.add(req.utterance_id)
+    target_pending_ids = _source_ids_from_metadata(target_chapter.metadata_json, "pending_source_utterance_ids")
+    target_pending_ids.add(req.utterance_id)
+    target_removed_ids = _source_ids_from_metadata(target_chapter.metadata_json, "removed_source_utterance_ids")
+    target_removed_ids.discard(req.utterance_id)
+
+    source_chapter.source_refs_json = kept_source_refs
+    source_chapter.metadata_json = _set_source_change_metadata(
+        source_chapter.metadata_json,
+        added_ids=source_pending_ids,
+        removed_ids=source_removed_ids,
+    )
+    target_chapter.source_refs_json = [*target_refs, moving_ref]
+    target_chapter.metadata_json = _set_source_change_metadata(
+        target_chapter.metadata_json,
+        added_ids=target_pending_ids,
+        removed_ids=target_removed_ids,
+    )
+
+    now = datetime.now(UTC).isoformat()
+    plan.metadata_json = _merge_metadata(
+        plan.metadata_json,
+        {
+            "source_moved_at": now,
+            "structure_updated_at": now,
+            "structure_updated_by": "user",
+        },
+    )
+    db.add(source_chapter)
+    db.add(target_chapter)
+    db.add(plan)
+    await _mark_chapter_drafts_sources_changed(
+        db,
+        project_id=project_id,
+        chapter_ids={source_chapter.id, target_chapter.id},
+    )
+    await db.commit()
+    refreshed = await _load_plan(db, project_id)
+    if not refreshed:
+        raise HTTPException(status_code=500, detail="章节规划保存失败")
+    return await _plan_response(db, refreshed)
+
+
 async def generate_book_plan(
     db: AsyncSession,
     *,
@@ -908,22 +1031,11 @@ async def update_book_plan(
         else:
             await db.delete(chapter)
 
-    if changed_chapter_ids:
-        drafts = (
-            await db.execute(
-                select(MemoirBookChapterDraft).where(
-                    MemoirBookChapterDraft.project_id == project_id,
-                    MemoirBookChapterDraft.chapter_id.in_(changed_chapter_ids),
-                )
-            )
-        ).scalars().all()
-        for draft in drafts:
-            draft.status = MemoirBookChapterDraftStatus.DRAFT.value
-            draft.metadata_json = _merge_metadata(
-                draft.metadata_json,
-                {"status_reason": "sources_changed"},
-            )
-            db.add(draft)
+    await _mark_chapter_drafts_sources_changed(
+        db,
+        project_id=project_id,
+        chapter_ids=changed_chapter_ids,
+    )
 
     plan.title = (req.title or plan.title).strip()[:200]
     plan.created_by = MemoirCreatedBy.USER.value

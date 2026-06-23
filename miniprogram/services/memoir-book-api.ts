@@ -14,6 +14,7 @@ import type {
   MemoirBookPlanUpdateRequest,
   MemoirBookSourceAssignmentRequest,
   MemoirBookSourceCoverage,
+  MemoirBookSourceMoveRequest,
 } from "../domain/voice-chat";
 import {
   memoirProjectPath,
@@ -82,6 +83,19 @@ export function assignMemoirBookSources(
 ): Promise<MemoirBookPlan> {
   return memoirRequest<MemoirBookPlan>(
     memoirProjectPath(projectId, "/book-source-assignments"),
+    {
+      method: "POST",
+      data,
+    },
+  );
+}
+
+export function moveMemoirBookSource(
+  projectId: string,
+  data: MemoirBookSourceMoveRequest,
+): Promise<MemoirBookPlan> {
+  return memoirRequest<MemoirBookPlan>(
+    memoirProjectPath(projectId, "/book-source-moves"),
     {
       method: "POST",
       data,

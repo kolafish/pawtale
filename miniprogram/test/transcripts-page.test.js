@@ -44,6 +44,9 @@ function loadTranscriptsPage({ authExports = {}, voiceApiExports = {}, voiceSear
       parseMemoirVoiceSearchQuery: async () => {
         throw new Error("parseMemoirVoiceSearchQuery was not mocked");
       },
+      moveMemoirBookSource: async () => {
+        throw new Error("moveMemoirBookSource was not mocked");
+      },
       updateMemoirVoiceTranscript: async () => {
         throw new Error("updateMemoirVoiceTranscript was not mocked");
       },
@@ -361,7 +364,7 @@ test("transcripts page numbers newest-first records from the oldest record", asy
 });
 
 test("transcripts page moves an included source to another chapter", async () => {
-  const updates = [];
+  const moves = [];
   const toasts = [];
   global.wx = {
     showToast(options) {
@@ -392,16 +395,20 @@ test("transcripts page moves an included source to another chapter", async () =>
         limit: 30,
         offset: 0,
       }),
-      updateMemoirBookPlan: async (projectId, data) => {
-        updates.push({ projectId, data });
+      moveMemoirBookSource: async (projectId, data) => {
+        moves.push({ projectId, data });
         return {
           ...sampleBookPlan(),
-          chapters: data.chapters.map((chapter, index) => ({
-            ...sampleBookPlan().chapters[index],
-            ...chapter,
-            sort_order: index,
-            source_refs: chapter.source_refs,
-          })),
+          chapters: [
+            {
+              ...sampleBookPlan().chapters[0],
+              source_refs: [sampleSourceRef("utterance-1")],
+            },
+            {
+              ...sampleBookPlan().chapters[1],
+              source_refs: [sampleSourceRef("utterance-3"), sampleSourceRef("utterance-2")],
+            },
+          ],
         };
       },
     },
@@ -419,15 +426,16 @@ test("transcripts page moves an included source to another chapter", async () =>
     detail: { value: 0 },
   });
 
-  assert.equal(updates.length, 1);
-  assert.deepEqual(
-    updates[0].data.chapters[0].source_refs.map((ref) => ref.utterance_id),
-    ["utterance-1"],
-  );
-  assert.deepEqual(
-    updates[0].data.chapters[1].source_refs.map((ref) => ref.utterance_id),
-    ["utterance-3", "utterance-2"],
-  );
+  assert.deepEqual(moves, [
+    {
+      projectId: "project-1",
+      data: {
+        source_chapter_id: "chapter-1",
+        target_chapter_id: "chapter-2",
+        utterance_id: "utterance-2",
+      },
+    },
+  ]);
   assert.deepEqual(toasts, [{ title: "素材已移动", icon: "success" }]);
   delete global.wx;
 });

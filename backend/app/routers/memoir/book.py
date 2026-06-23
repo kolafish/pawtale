@@ -20,6 +20,7 @@ from app.schemas.memoir_book import (
     MemoirBookPlanResponse,
     MemoirBookSourceAssignmentRequest,
     MemoirBookSourceCoverageResponse,
+    MemoirBookSourceMoveRequest,
 )
 from app.services.memoir import book_drafts as memoir_book_drafts
 from app.services.memoir import book_outputs as memoir_book_outputs
@@ -108,6 +109,21 @@ async def assign_mobile_memoir_book_sources(
     current_user: User = Depends(get_current_user),
 ):
     return await memoir_book_plans.assign_book_sources_to_chapters(
+        db,
+        user_id=current_user.id,
+        project_id=project_id,
+        req=req,
+    )
+
+
+@router.post("/projects/{project_id}/book-source-moves", response_model=MemoirBookPlanResponse)
+async def move_mobile_memoir_book_source(
+    project_id: str,
+    req: MemoirBookSourceMoveRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await memoir_book_plans.move_book_source_between_chapters(
         db,
         user_id=current_user.id,
         project_id=project_id,

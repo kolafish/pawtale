@@ -1,7 +1,6 @@
 import type {
   MemoirBookPlan,
   MemoirBookPlanChapter,
-  MemoirBookPlanChapterUpdateInput,
   MemoirGuidanceMode,
   MemoirVoiceTranscriptIncludedFilter,
   MemoirVoiceTranscriptItem,
@@ -14,8 +13,8 @@ import {
   downloadMemoirVoiceAudio,
   getMemoirBookPlan,
   listMemoirVoiceTranscripts,
+  moveMemoirBookSource,
   parseMemoirVoiceSearchQuery,
-  updateMemoirBookPlan,
   updateMemoirVoiceTranscript,
 } from "../../services/memoir-voice-api";
 import { configureAudiblePlayback } from "../../services/audio-playback";
@@ -23,7 +22,6 @@ import { getMemoirIdentity } from "../../services/auth";
 import {
   chapterSourceRefs,
   sourceRefMatchesUtterance,
-  uniqueSourceRefs,
 } from "../../services/memoir-book-sources";
 import { ApiError } from "../../services/request";
 import { formatBeijingDateTimeShort } from "../../services/time";
@@ -390,14 +388,6 @@ function transcriptChapterAssignOptions(
     return [];
   }
   return sortedBookChapters(plan).map(chapterOption);
-}
-
-function planUpdateInput(plan: MemoirBookPlan): MemoirBookPlanChapterUpdateInput[] {
-  return sortedBookChapters(plan).map((chapter) => ({
-    id: chapter.id,
-    title: chapter.title,
-    source_refs: chapterSourceRefs(chapter),
-  }));
 }
 
 async function loadTranscriptBookPlan(projectId: string): Promise<MemoirBookPlan | null> {
@@ -872,34 +862,20 @@ Page<TranscriptsData, {
     this.setData({ movingSourceId: utteranceId, error: "" });
     try {
       const plan = this.data.bookPlan || await loadTranscriptBookPlan(this.data.activeProjectId);
-      const chapters = sortedBookChapters(plan).map((chapter) => ({
-        ...chapter,
-        source_refs: chapterSourceRefs(chapter),
-      }));
-      const sourceChapters = chapters.filter((chapter) => (
-        chapter.source_refs.some((ref) => sourceRefMatchesUtterance(ref, utteranceId))
-      ));
+      const sourceChapters = sourceChaptersForTranscript(item, plan);
       const sourceChapter = sourceChapters.length === 1 ? sourceChapters[0] : null;
-      const targetChapter = chapters.find((chapter) => chapter.id === option.value) || null;
-      if (!plan || !sourceChapter || !targetChapter) {
+      if (!plan || !sourceChapter) {
         this.setData({ error: "没有找到可移动的本章素材" });
         return;
       }
-      if (sourceChapter.source_refs.length <= 1) {
+      if (chapterSourceRefs(sourceChapter).length <= 1) {
         this.setData({ error: "本章只剩 1 条素材；请在成书页合并或删除章节来保留素材" });
         return;
       }
-      const movingRef = sourceChapter.source_refs.find((ref) => sourceRefMatchesUtterance(ref, utteranceId));
-      if (!movingRef) {
-        return;
-      }
-      sourceChapter.source_refs = sourceChapter.source_refs.filter((ref) => (
-        !sourceRefMatchesUtterance(ref, utteranceId)
-      ));
-      targetChapter.source_refs = uniqueSourceRefs([...targetChapter.source_refs, movingRef]);
-      const updatedPlan = await updateMemoirBookPlan(this.data.activeProjectId, {
-        title: plan.title,
-        chapters: planUpdateInput({ ...plan, chapters }),
+      const updatedPlan = await moveMemoirBookSource(this.data.activeProjectId, {
+        source_chapter_id: sourceChapter.id,
+        target_chapter_id: option.value,
+        utterance_id: utteranceId,
       });
       this.setData({ bookPlan: updatedPlan, bookPlanProjectId: this.data.activeProjectId });
       await this.loadTranscripts(true);

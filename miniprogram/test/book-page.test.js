@@ -1534,3 +1534,59 @@ test("book source assignment API calls encoded backend route", async () => {
   assert.equal(apiRequests[0].header.Cookie, "pawtale_session=abc");
   delete global.wx;
 });
+
+test("book source move API calls narrow backend route", async () => {
+  const requests = [];
+  global.wx = {
+    getStorageSync(key) {
+      if (key === "pawtale_backend_config") {
+        return {
+          httpBaseUrl: "http://backend.local:8000/",
+          devEmail: "local@example.com",
+          devPassword: "secret",
+        };
+      }
+      if (key === "pawtale_backend_cookie") {
+        return "pawtale_session=abc";
+      }
+      return "";
+    },
+    getExtConfigSync() {
+      return {};
+    },
+    setStorageSync() {},
+    removeStorageSync() {},
+    request(options) {
+      requests.push(options);
+      if (options.url.endsWith("/api/auth/me")) {
+        options.success({ statusCode: 200, data: { id: "user-1" }, cookies: [], header: {} });
+        return;
+      }
+      options.success({ statusCode: 200, data: samplePlan("confirmed"), cookies: [], header: {} });
+    },
+  };
+  delete require.cache[require.resolve("../services/auth.ts")];
+  delete require.cache[require.resolve("../services/request.ts")];
+  delete require.cache[require.resolve("../services/memoir-voice-api.ts")];
+  const { moveMemoirBookSource } = require("../services/memoir-voice-api.ts");
+
+  await moveMemoirBookSource("project/1", {
+    source_chapter_id: "chapter/1",
+    target_chapter_id: "chapter/2",
+    utterance_id: "utterance/1",
+  });
+
+  const apiRequests = requests.filter((request) => request.url.includes("/api/mobile/memoir/"));
+  assert.equal(
+    apiRequests[0].url,
+    "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-source-moves",
+  );
+  assert.equal(apiRequests[0].method, "POST");
+  assert.deepEqual(apiRequests[0].data, {
+    source_chapter_id: "chapter/1",
+    target_chapter_id: "chapter/2",
+    utterance_id: "utterance/1",
+  });
+  assert.equal(apiRequests[0].header.Cookie, "pawtale_session=abc");
+  delete global.wx;
+});
