@@ -1,4 +1,5 @@
 import { transcribeMemoirVoiceSearchAudio } from "./memoir-voice-api";
+import { estimatePcm16Level, pcmFrameDurationMs } from "./memoir-streaming-asr-protocol";
 import { ensureRecorderPrivacyAuthorization, wechatPrivacyErrorMessage } from "./wechat-privacy";
 import {
   readVoiceAuthorizationConsent,
@@ -7,10 +8,20 @@ import {
 } from "./voice-authorization";
 
 const VOICE_SEARCH_MAX_DURATION_MS = 10000;
+const VOICE_SEARCH_FRAME_SIZE_KB = 4;
+const VOICE_SEARCH_SILENCE_LEVEL_THRESHOLD = 0.015;
+const VOICE_SEARCH_MIN_VOICE_ACTIVITY_MS = 180;
+const VOICE_SEARCH_AUTO_STOP_SILENCE_MS = 900;
+const VOICE_SEARCH_MIN_RECORDING_MS = 700;
 
 interface VoiceSearchRecorderPending {
   resolve(result: WechatMiniprogram.RecorderManagerStopCallbackResult): void;
   reject(error: Error): void;
+  recordingElapsedMs: number;
+  voiceActivityElapsedMs: number;
+  silentElapsedMs: number;
+  hasVoiceActivity: boolean;
+  stopping: boolean;
 }
 
 interface RecordMemoirVoiceSearchQueryOptions {
@@ -54,6 +65,9 @@ function bindRecorderEvents(manager: WechatMiniprogram.RecorderManager): void {
     }
     pending.reject(new Error(wechatPrivacyErrorMessage(error.errMsg || "录音失败")));
   });
+  manager.onFrameRecorded((result) => {
+    handleRecordedFrame(result.frameBuffer);
+  });
 }
 
 function recordVoiceSearchAudio(): Promise<WechatMiniprogram.RecorderManagerStopCallbackResult> {
@@ -62,13 +76,22 @@ function recordVoiceSearchAudio(): Promise<WechatMiniprogram.RecorderManagerStop
   }
   const manager = getRecorderManager();
   return new Promise((resolve, reject) => {
-    pendingRecording = { resolve, reject };
+    pendingRecording = {
+      resolve,
+      reject,
+      recordingElapsedMs: 0,
+      voiceActivityElapsedMs: 0,
+      silentElapsedMs: 0,
+      hasVoiceActivity: false,
+      stopping: false,
+    };
     try {
       manager.start({
         duration: VOICE_SEARCH_MAX_DURATION_MS,
         sampleRate: 16000,
         numberOfChannels: 1,
         encodeBitRate: 48000,
+        frameSize: VOICE_SEARCH_FRAME_SIZE_KB,
         format: "PCM",
       });
     } catch (error) {
@@ -95,11 +118,41 @@ function readFileAsBase64(filePath: string): Promise<string> {
   });
 }
 
-export function stopMemoirVoiceSearchRecording(): void {
+function handleRecordedFrame(frameBuffer: ArrayBuffer): void {
   const pending = pendingRecording;
-  if (!pending) {
+  if (!pending || pending.stopping || !frameBuffer?.byteLength) {
     return;
   }
+  const frameDurationMs = pcmFrameDurationMs(frameBuffer);
+  pending.recordingElapsedMs += frameDurationMs;
+  const level = estimatePcm16Level(frameBuffer);
+  if (level >= VOICE_SEARCH_SILENCE_LEVEL_THRESHOLD) {
+    pending.voiceActivityElapsedMs += frameDurationMs;
+    pending.silentElapsedMs = 0;
+    if (pending.voiceActivityElapsedMs >= VOICE_SEARCH_MIN_VOICE_ACTIVITY_MS) {
+      pending.hasVoiceActivity = true;
+    }
+    return;
+  }
+  pending.voiceActivityElapsedMs = 0;
+  if (!pending.hasVoiceActivity) {
+    return;
+  }
+  pending.silentElapsedMs += frameDurationMs;
+  if (
+    pending.recordingElapsedMs >= VOICE_SEARCH_MIN_RECORDING_MS
+    && pending.silentElapsedMs >= VOICE_SEARCH_AUTO_STOP_SILENCE_MS
+  ) {
+    stopMemoirVoiceSearchRecording();
+  }
+}
+
+export function stopMemoirVoiceSearchRecording(): void {
+  const pending = pendingRecording;
+  if (!pending || pending.stopping) {
+    return;
+  }
+  pending.stopping = true;
   try {
     getRecorderManager().stop();
   } catch (error) {

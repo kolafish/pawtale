@@ -518,12 +518,8 @@
 }
 
 .source-ref-row {
-  min-height: 96rpx;
   padding: 16rpx 18rpx;
   border-top: 2rpx solid #f7eadc;
-  display: flex;
-  align-items: center;
-  gap: 16rpx;
   background: #fffdf9;
   box-sizing: border-box;
 }
@@ -533,8 +529,6 @@
 }
 
 .source-ref-main {
-  min-width: 0;
-  flex: 1;
   padding: 6rpx 8rpx;
   border-radius: 12rpx;
 }
@@ -554,27 +548,6 @@
   font-size: 25rpx;
   line-height: 1.38;
   word-break: break-word;
-}
-
-.source-ref-action {
-  flex: 0 0 auto;
-  min-width: 116rpx;
-  height: 60rpx;
-  padding: 0 16rpx;
-  border-radius: 16rpx;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: #fff1ec;
-  color: #8a4034;
-  font-size: 23rpx;
-  font-weight: 800;
-  line-height: 1.2;
-  box-sizing: border-box;
-}
-
-.source-ref-action.disabled {
-  opacity: 0.5;
 }
 
 .draft-pending {
@@ -731,14 +704,24 @@
 
 .structure-actions {
   display: flex;
-  align-items: center;
-  flex-wrap: wrap;
+  flex-direction: column;
   gap: 12rpx;
   margin-top: 18rpx;
 }
 
+.structure-action-row {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+}
+
+.structure-action-row .structure-button,
+.structure-picker {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
 .structure-button {
-  min-width: 116rpx;
   height: 64rpx;
   margin: 0;
   padding: 0 18rpx;

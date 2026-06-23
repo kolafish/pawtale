@@ -428,6 +428,16 @@ async def test_mobile_memoir_deletes_voice_transcript_and_user_message(client, t
     assert len(versions) == 1
     assert versions[0].content == "嗯，我小时候就是住在外婆家。"
 
+    progress_response = await client.get("/api/mobile/memoir/voice-progress")
+    assert progress_response.status_code == 200
+    progress = progress_response.json()
+    assert progress["session_count"] == 0
+    assert progress["utterance_count"] == 0
+    assert progress["user_message_count"] == 0
+    assert progress["total_user_char_count"] == 0
+    assert progress["total_audio_seconds"] == 0
+    assert progress["modules"] == []
+
 
 def _book_source_ref(created: dict, quote: str) -> dict:
     return {

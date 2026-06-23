@@ -432,6 +432,19 @@
   flex: 1 1 148rpx;
 }
 
+.chapter-move-picker {
+  flex: 1 1 148rpx;
+  min-width: 148rpx;
+}
+
+.picker-action {
+  width: 100%;
+}
+
+.picker-action.disabled {
+  opacity: 0.5;
+}
+
 .ghost-button::after,
 .danger-button::after,
 .small-primary::after,

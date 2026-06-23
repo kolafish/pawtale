@@ -1,4 +1,8 @@
 import type {
+  MemoirBookChapterSourceRef,
+  MemoirBookPlan,
+  MemoirBookPlanChapter,
+  MemoirBookPlanChapterUpdateInput,
   MemoirGuidanceMode,
   MemoirVoiceTranscriptIncludedFilter,
   MemoirVoiceTranscriptItem,
@@ -6,10 +10,13 @@ import type {
   MemoirVoiceSearchQueryParseResponse,
 } from "../../domain/voice-chat";
 import {
+  assignMemoirBookSources,
   deleteMemoirVoiceTranscript,
   downloadMemoirVoiceAudio,
+  getMemoirBookPlan,
   listMemoirVoiceTranscripts,
   parseMemoirVoiceSearchQuery,
+  updateMemoirBookPlan,
   updateMemoirVoiceTranscript,
 } from "../../services/memoir-voice-api";
 import { configureAudiblePlayback } from "../../services/audio-playback";
@@ -46,6 +53,12 @@ interface SearchInputEvent {
   };
 }
 
+interface PickerEvent extends DatasetEvent {
+  detail: {
+    value: string | number;
+  };
+}
+
 interface TranscriptTextSegment {
   text: string;
   highlight: boolean;
@@ -70,6 +83,11 @@ interface SearchChipView {
   text: string;
 }
 
+interface ChapterPickerOption {
+  label: string;
+  value: string;
+}
+
 interface TranscriptItemView extends MemoirVoiceTranscriptItem {
   editingText: string;
   editingCharCount: number;
@@ -78,6 +96,10 @@ interface TranscriptItemView extends MemoirVoiceTranscriptItem {
   audioText: string;
   bookInclusionText: string;
   isIncludedInBook: boolean;
+  canAssignChapterSource: boolean;
+  chapterAssignOptions: ChapterPickerOption[];
+  canMoveChapterSource: boolean;
+  chapterMoveOptions: ChapterPickerOption[];
   canPlayAudio: boolean;
   questionSegments: TranscriptTextSegment[];
   rawSegments: TranscriptTextSegment[];
@@ -97,6 +119,8 @@ interface TranscriptsData {
   needsLogin: boolean;
   savingId: string;
   deletingId: string;
+  assigningSourceId: string;
+  movingSourceId: string;
   playingId: string;
   error: string;
   items: TranscriptItemView[];
@@ -115,6 +139,8 @@ interface TranscriptsData {
   voiceSearchStatusText: string;
   activeProjectId: string;
   projectTitle: string;
+  bookPlan: MemoirBookPlan | null;
+  bookPlanProjectId: string;
   highlightedId: string;
 }
 
@@ -316,6 +342,91 @@ function transcriptAnchorId(id: string): string {
   return `transcript-${id.replace(/[^A-Za-z0-9_-]/g, "-")}`;
 }
 
+function sortedBookChapters(plan: MemoirBookPlan | null): MemoirBookPlanChapter[] {
+  return [...(plan?.chapters || [])].sort((left, right) => left.sort_order - right.sort_order);
+}
+
+function chapterOption(chapter: MemoirBookPlanChapter, index: number): ChapterPickerOption {
+  return {
+    label: `第 ${index + 1} 章 ${chapter.title || "未命名章节"}`,
+    value: chapter.id,
+  };
+}
+
+function chapterSourceRefs(chapter: MemoirBookPlanChapter): MemoirBookChapterSourceRef[] {
+  return [...(chapter.source_refs || [])];
+}
+
+function uniqueSourceRefs(refs: MemoirBookChapterSourceRef[]): MemoirBookChapterSourceRef[] {
+  const seen = new Set<string>();
+  const result: MemoirBookChapterSourceRef[] = [];
+  refs.forEach((ref) => {
+    const key = ref.utterance_id || `${ref.voice_session_id}:${ref.message_id}`;
+    if (seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    result.push(ref);
+  });
+  return result;
+}
+
+function sourceChaptersForTranscript(
+  item: MemoirVoiceTranscriptItem,
+  plan: MemoirBookPlan | null,
+): MemoirBookPlanChapter[] {
+  return sortedBookChapters(plan).filter((chapter) => (
+    chapterSourceRefs(chapter).some((ref) => ref.utterance_id === item.id)
+  ));
+}
+
+function transcriptChapterMoveOptions(
+  item: MemoirVoiceTranscriptItem,
+  plan: MemoirBookPlan | null,
+): ChapterPickerOption[] {
+  const sourceChapters = sourceChaptersForTranscript(item, plan);
+  if (sourceChapters.length !== 1) {
+    return [];
+  }
+  const sourceChapter = sourceChapters[0];
+  if (chapterSourceRefs(sourceChapter).length <= 1) {
+    return [];
+  }
+  return sortedBookChapters(plan).flatMap((chapter, index) => (
+    chapter.id === sourceChapter.id ? [] : [chapterOption(chapter, index)]
+  ));
+}
+
+function transcriptChapterAssignOptions(
+  item: MemoirVoiceTranscriptItem,
+  plan: MemoirBookPlan | null,
+): ChapterPickerOption[] {
+  if (item.is_included_in_book || item.included_chapters?.length) {
+    return [];
+  }
+  return sortedBookChapters(plan).map(chapterOption);
+}
+
+function planUpdateInput(plan: MemoirBookPlan): MemoirBookPlanChapterUpdateInput[] {
+  return sortedBookChapters(plan).map((chapter) => ({
+    id: chapter.id,
+    title: chapter.title,
+    summary: chapter.summary || "",
+    source_refs: chapterSourceRefs(chapter),
+  }));
+}
+
+async function loadTranscriptBookPlan(projectId: string): Promise<MemoirBookPlan | null> {
+  try {
+    return await getMemoirBookPlan(projectId);
+  } catch (error) {
+    if (error instanceof ApiError && error.statusCode === 404) {
+      return null;
+    }
+    throw error;
+  }
+}
+
 export function transcriptBookInclusionText(item: MemoirVoiceTranscriptItem): string {
   const chapters = [...(item.included_chapters || [])]
     .sort((left, right) => left.sort_order - right.sort_order)
@@ -329,11 +440,17 @@ export function transcriptBookInclusionText(item: MemoirVoiceTranscriptItem): st
   return `已收录：${visible}${suffix}`;
 }
 
-function toViewItem(item: MemoirVoiceTranscriptItem, searchQuery = ""): TranscriptItemView {
+function toViewItem(
+  item: MemoirVoiceTranscriptItem,
+  searchQuery = "",
+  bookPlan: MemoirBookPlan | null = null,
+): TranscriptItemView {
   const editingText = item.transcript_edited || item.transcript_raw;
   const isIncludedInBook = Boolean(item.is_included_in_book || item.included_chapters?.length);
   const rawView = transcriptTextView(item.transcript_raw, searchQuery);
   const displayView = transcriptTextView(item.display_text, searchQuery);
+  const chapterAssignOptions = transcriptChapterAssignOptions(item, bookPlan);
+  const chapterMoveOptions = transcriptChapterMoveOptions(item, bookPlan);
   return {
     ...item,
     editingText,
@@ -343,6 +460,10 @@ function toViewItem(item: MemoirVoiceTranscriptItem, searchQuery = ""): Transcri
     audioText: transcriptAudioText(item),
     bookInclusionText: transcriptBookInclusionText(item),
     isIncludedInBook,
+    canAssignChapterSource: chapterAssignOptions.length > 0,
+    chapterAssignOptions,
+    canMoveChapterSource: chapterMoveOptions.length > 0,
+    chapterMoveOptions,
     canPlayAudio: Boolean(item.audio_file_id || item.question_audio_file_id),
     questionSegments: highlightTranscriptText(item.question_text, searchQuery),
     rawSegments: rawView.segments,
@@ -394,8 +515,13 @@ function changedItem(item: TranscriptItemView, editingText: string): TranscriptI
   };
 }
 
-function replaceItem(items: TranscriptItemView[], next: MemoirVoiceTranscriptItem, searchQuery = ""): TranscriptItemView[] {
-  return items.map((item) => (item.id === next.id ? toViewItem(next, searchQuery) : item));
+function replaceItem(
+  items: TranscriptItemView[],
+  next: MemoirVoiceTranscriptItem,
+  searchQuery = "",
+  bookPlan: MemoirBookPlan | null = null,
+): TranscriptItemView[] {
+  return items.map((item) => (item.id === next.id ? toViewItem(next, searchQuery, bookPlan) : item));
 }
 
 function removeItem(items: TranscriptItemView[], id: string): TranscriptItemView[] {
@@ -430,6 +556,8 @@ Page<TranscriptsData, {
   ): Promise<void>;
   startVoiceSearch(): Promise<void>;
   toggleTranscriptText(event: DatasetEvent): void;
+  assignTranscriptChapter(event: PickerEvent): Promise<void>;
+  moveTranscriptChapter(event: PickerEvent): Promise<void>;
   beginEdit(event: DatasetEvent): void;
   changeText(event: TextAreaEvent): void;
   cancelEdit(event: DatasetEvent): void;
@@ -461,6 +589,8 @@ Page<TranscriptsData, {
     needsLogin: false,
     savingId: "",
     deletingId: "",
+    assigningSourceId: "",
+    movingSourceId: "",
     playingId: "",
     error: "",
     items: [],
@@ -479,6 +609,8 @@ Page<TranscriptsData, {
     voiceSearchStatusText: "",
     activeProjectId: "",
     projectTitle: "",
+    bookPlan: null,
+    bookPlanProjectId: "",
     highlightedId: "",
   },
 
@@ -513,6 +645,8 @@ Page<TranscriptsData, {
         this.setData({
           activeProjectId: "",
           projectTitle: projectTitle || "尚未创建回忆录",
+          bookPlan: null,
+          bookPlanProjectId: "",
           items: [],
           total: 0,
           offset: 0,
@@ -522,16 +656,22 @@ Page<TranscriptsData, {
         });
         return;
       }
-      const response = await listMemoirVoiceTranscripts({
-        projectId: activeProjectId,
-        query: searchQuery || undefined,
-        included: searchFilters.included,
-        guidanceMode: searchFilters.guidanceMode || undefined,
-        module: searchFilters.module || undefined,
-        limit: this.data.limit,
-        offset,
-      });
-      const nextItems = response.items.map((item) => toViewItem(item, searchQuery));
+      let bookPlan = this.data.bookPlan;
+      const shouldRefreshPlan = reset || this.data.bookPlanProjectId !== activeProjectId;
+      const [nextBookPlan, response] = await Promise.all([
+        shouldRefreshPlan ? loadTranscriptBookPlan(activeProjectId) : Promise.resolve(bookPlan),
+        listMemoirVoiceTranscripts({
+          projectId: activeProjectId,
+          query: searchQuery || undefined,
+          included: searchFilters.included,
+          guidanceMode: searchFilters.guidanceMode || undefined,
+          module: searchFilters.module || undefined,
+          limit: this.data.limit,
+          offset,
+        }),
+      ]);
+      bookPlan = nextBookPlan;
+      const nextItems = response.items.map((item) => toViewItem(item, searchQuery, bookPlan));
       if (requestToken !== this.loadToken) {
         return;
       }
@@ -539,6 +679,8 @@ Page<TranscriptsData, {
         needsLogin: false,
         activeProjectId,
         projectTitle,
+        bookPlan,
+        bookPlanProjectId: activeProjectId,
         items: reset ? nextItems : [...this.data.items, ...nextItems],
         total: response.total,
         offset: offset + nextItems.length,
@@ -555,6 +697,8 @@ Page<TranscriptsData, {
           needsLogin: true,
           activeProjectId: "",
           projectTitle: "我的回忆录",
+          bookPlan: null,
+          bookPlanProjectId: "",
           items: [],
           total: 0,
           offset: 0,
@@ -689,6 +833,106 @@ Page<TranscriptsData, {
     this.setData({ items });
   },
 
+  async assignTranscriptChapter(event) {
+    const utteranceId = event.currentTarget.dataset.id || "";
+    const item = this.data.items.find((candidate) => candidate.id === utteranceId);
+    const optionIndex = Number(event.detail.value);
+    const option = item?.chapterAssignOptions[optionIndex];
+    if (
+      !utteranceId
+      || !item
+      || !option
+      || !this.data.activeProjectId
+      || this.data.assigningSourceId
+      || this.data.movingSourceId
+    ) {
+      return;
+    }
+    this.stopPlayback();
+    this.setData({ assigningSourceId: utteranceId, error: "" });
+    try {
+      const updatedPlan = await assignMemoirBookSources(this.data.activeProjectId, {
+        assignments: [
+          {
+            chapter_id: option.value,
+            utterance_ids: [utteranceId],
+          },
+        ],
+      });
+      this.setData({ bookPlan: updatedPlan, bookPlanProjectId: this.data.activeProjectId });
+      await this.loadTranscripts(true);
+      wx.showToast({ title: "已归入章节", icon: "success" });
+    } catch (error) {
+      if (error instanceof ApiError && [401, 403].includes(error.statusCode)) {
+        wx.switchTab({ url: "/pages/me/index" });
+        return;
+      }
+      this.setData({ error: error instanceof Error ? error.message : "归入章节失败" });
+    } finally {
+      this.setData({ assigningSourceId: "" });
+    }
+  },
+
+  async moveTranscriptChapter(event) {
+    const utteranceId = event.currentTarget.dataset.id || "";
+    const item = this.data.items.find((candidate) => candidate.id === utteranceId);
+    const optionIndex = Number(event.detail.value);
+    const option = item?.chapterMoveOptions[optionIndex];
+    if (
+      !utteranceId
+      || !item
+      || !option
+      || !this.data.activeProjectId
+      || this.data.assigningSourceId
+      || this.data.movingSourceId
+    ) {
+      return;
+    }
+    this.stopPlayback();
+    this.setData({ movingSourceId: utteranceId, error: "" });
+    try {
+      const plan = this.data.bookPlan || await loadTranscriptBookPlan(this.data.activeProjectId);
+      const chapters = sortedBookChapters(plan).map((chapter) => ({
+        ...chapter,
+        source_refs: chapterSourceRefs(chapter),
+      }));
+      const sourceChapters = chapters.filter((chapter) => (
+        chapter.source_refs.some((ref) => ref.utterance_id === utteranceId)
+      ));
+      const sourceChapter = sourceChapters.length === 1 ? sourceChapters[0] : null;
+      const targetChapter = chapters.find((chapter) => chapter.id === option.value) || null;
+      if (!plan || !sourceChapter || !targetChapter) {
+        this.setData({ error: "没有找到可移动的章节来源" });
+        return;
+      }
+      if (sourceChapter.source_refs.length <= 1) {
+        this.setData({ error: "本章只剩 1 条来源；请在成书页合并或删除章节来保留素材" });
+        return;
+      }
+      const movingRef = sourceChapter.source_refs.find((ref) => ref.utterance_id === utteranceId);
+      if (!movingRef) {
+        return;
+      }
+      sourceChapter.source_refs = sourceChapter.source_refs.filter((ref) => ref.utterance_id !== utteranceId);
+      targetChapter.source_refs = uniqueSourceRefs([...targetChapter.source_refs, movingRef]);
+      const updatedPlan = await updateMemoirBookPlan(this.data.activeProjectId, {
+        title: plan.title,
+        chapters: planUpdateInput({ ...plan, chapters }),
+      });
+      this.setData({ bookPlan: updatedPlan, bookPlanProjectId: this.data.activeProjectId });
+      await this.loadTranscripts(true);
+      wx.showToast({ title: "来源已移动", icon: "success" });
+    } catch (error) {
+      if (error instanceof ApiError && [401, 403].includes(error.statusCode)) {
+        wx.switchTab({ url: "/pages/me/index" });
+        return;
+      }
+      this.setData({ error: error instanceof Error ? error.message : "来源移动失败" });
+    } finally {
+      this.setData({ movingSourceId: "" });
+    }
+  },
+
   beginEdit(event) {
     const id = event.currentTarget.dataset.id || "";
     const index = this.data.items.findIndex((item) => item.id === id);
@@ -743,7 +987,7 @@ Page<TranscriptsData, {
     this.setData({ savingId: id, error: "" });
     try {
       const updated = await updateMemoirVoiceTranscript(id, content);
-      this.setData({ items: replaceItem(this.data.items, updated, this.data.searchQuery) });
+      this.setData({ items: replaceItem(this.data.items, updated, this.data.searchQuery, this.data.bookPlan) });
       wx.showToast({ title: "已保存", icon: "success" });
     } catch (error) {
       this.setData({ error: error instanceof Error ? error.message : "保存失败" });

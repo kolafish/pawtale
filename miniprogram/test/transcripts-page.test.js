@@ -28,12 +28,16 @@ function loadTranscriptsPage({ authExports = {}, voiceApiExports = {}, voiceSear
     filename: voiceApiPath,
     loaded: true,
     exports: {
+      assignMemoirBookSources: async () => {
+        throw new Error("assignMemoirBookSources was not mocked");
+      },
       deleteMemoirVoiceTranscript: async () => {
         throw new Error("deleteMemoirVoiceTranscript was not mocked");
       },
       downloadMemoirVoiceAudio: async () => {
         throw new Error("downloadMemoirVoiceAudio was not mocked");
       },
+      getMemoirBookPlan: async () => null,
       listMemoirVoiceTranscripts: async () => {
         throw new Error("listMemoirVoiceTranscripts was not mocked");
       },
@@ -42,6 +46,9 @@ function loadTranscriptsPage({ authExports = {}, voiceApiExports = {}, voiceSear
       },
       updateMemoirVoiceTranscript: async () => {
         throw new Error("updateMemoirVoiceTranscript was not mocked");
+      },
+      updateMemoirBookPlan: async () => {
+        throw new Error("updateMemoirBookPlan was not mocked");
       },
       ...voiceApiExports,
     },
@@ -114,6 +121,59 @@ function sampleTranscript(id, createdAt = "2026-06-17T00:00:00.000Z") {
     included_chapters: [],
     created_at: createdAt,
     session_created_at: "2026-06-17T00:00:00.000Z",
+  };
+}
+
+function sampleSourceRef(id, quote = `原文 ${id}`) {
+  return {
+    voice_session_id: "voice-1",
+    message_id: `message-${id}`,
+    utterance_id: id,
+    transcript_version_id: `version-${id}`,
+    audio_file_id: `audio-${id}`,
+    start_ms: 0,
+    end_ms: 8000,
+    quote,
+  };
+}
+
+function sampleBookPlan() {
+  return {
+    id: "plan-1",
+    project_id: "project-1",
+    title: "我的回忆录章节规划",
+    status: "confirmed",
+    created_by: "ai",
+    model: "fake",
+    metadata_json: {},
+    created_at: "2026-06-17T00:00:00.000Z",
+    updated_at: "2026-06-17T00:00:00.000Z",
+    chapters: [
+      {
+        id: "chapter-1",
+        plan_id: "plan-1",
+        project_id: "project-1",
+        title: "岁首欢聚记",
+        summary: "整理春节团聚。",
+        sort_order: 0,
+        source_refs: [sampleSourceRef("utterance-1"), sampleSourceRef("utterance-2")],
+        metadata_json: {},
+        created_at: "2026-06-17T00:00:00.000Z",
+        updated_at: "2026-06-17T00:00:00.000Z",
+      },
+      {
+        id: "chapter-2",
+        plan_id: "plan-1",
+        project_id: "project-1",
+        title: "童年友情",
+        summary: "整理童年朋友。",
+        sort_order: 1,
+        source_refs: [sampleSourceRef("utterance-3")],
+        metadata_json: {},
+        created_at: "2026-06-17T00:00:00.000Z",
+        updated_at: "2026-06-17T00:00:00.000Z",
+      },
+    ],
   };
 }
 
@@ -260,6 +320,134 @@ test("transcripts page formats record time like book uncovered sources", async (
   await page.loadTranscripts.call(context, true);
 
   assert.equal(context.data.items[0].createdAtText, "06-17 08:00 北京时间");
+});
+
+test("transcripts page moves an included source to another chapter", async () => {
+  const updates = [];
+  const toasts = [];
+  global.wx = {
+    showToast(options) {
+      toasts.push(options);
+    },
+    switchTab() {},
+  };
+  const { page } = loadTranscriptsPage({
+    authExports: {
+      getMemoirIdentity: async () => ({
+        id: "user-1",
+        active_project_id: "project-1",
+        active_project: { id: "project-1", title: "我的回忆录" },
+        projects: [],
+      }),
+    },
+    voiceApiExports: {
+      getMemoirBookPlan: async () => sampleBookPlan(),
+      listMemoirVoiceTranscripts: async () => ({
+        items: [
+          {
+            ...sampleTranscript("utterance-2"),
+            is_included_in_book: true,
+            included_chapters: [{ chapter_id: "chapter-1", title: "岁首欢聚记", sort_order: 0 }],
+          },
+        ],
+        total: 1,
+        limit: 30,
+        offset: 0,
+      }),
+      updateMemoirBookPlan: async (projectId, data) => {
+        updates.push({ projectId, data });
+        return {
+          ...sampleBookPlan(),
+          chapters: data.chapters.map((chapter, index) => ({
+            ...sampleBookPlan().chapters[index],
+            ...chapter,
+            sort_order: index,
+            source_refs: chapter.source_refs,
+          })),
+        };
+      },
+    },
+  });
+  const context = pageContext(page);
+
+  await page.loadTranscripts.call(context, true);
+  assert.equal(context.data.items[0].canMoveChapterSource, true);
+  assert.deepEqual(context.data.items[0].chapterMoveOptions, [
+    { label: "第 2 章 童年友情", value: "chapter-2" },
+  ]);
+
+  await page.moveTranscriptChapter.call(context, {
+    currentTarget: { dataset: { id: "utterance-2" } },
+    detail: { value: 0 },
+  });
+
+  assert.equal(updates.length, 1);
+  assert.deepEqual(
+    updates[0].data.chapters[0].source_refs.map((ref) => ref.utterance_id),
+    ["utterance-1"],
+  );
+  assert.deepEqual(
+    updates[0].data.chapters[1].source_refs.map((ref) => ref.utterance_id),
+    ["utterance-3", "utterance-2"],
+  );
+  assert.deepEqual(toasts, [{ title: "来源已移动", icon: "success" }]);
+  delete global.wx;
+});
+
+test("transcripts page assigns an uncovered source to a chapter", async () => {
+  const assignments = [];
+  const toasts = [];
+  global.wx = {
+    showToast(options) {
+      toasts.push(options);
+    },
+    switchTab() {},
+  };
+  const { page } = loadTranscriptsPage({
+    authExports: {
+      getMemoirIdentity: async () => ({
+        id: "user-1",
+        active_project_id: "project-1",
+        active_project: { id: "project-1", title: "我的回忆录" },
+        projects: [],
+      }),
+    },
+    voiceApiExports: {
+      getMemoirBookPlan: async () => sampleBookPlan(),
+      listMemoirVoiceTranscripts: async () => ({
+        items: [sampleTranscript("utterance-new")],
+        total: 1,
+        limit: 30,
+        offset: 0,
+      }),
+      assignMemoirBookSources: async (projectId, data) => {
+        assignments.push({ projectId, data });
+        return sampleBookPlan();
+      },
+    },
+  });
+  const context = pageContext(page);
+
+  await page.loadTranscripts.call(context, true);
+  assert.equal(context.data.items[0].canAssignChapterSource, true);
+  assert.deepEqual(context.data.items[0].chapterAssignOptions, [
+    { label: "第 1 章 岁首欢聚记", value: "chapter-1" },
+    { label: "第 2 章 童年友情", value: "chapter-2" },
+  ]);
+
+  await page.assignTranscriptChapter.call(context, {
+    currentTarget: { dataset: { id: "utterance-new" } },
+    detail: { value: 0 },
+  });
+
+  assert.deepEqual(assignments, [
+    {
+      projectId: "project-1",
+      data: { assignments: [{ chapter_id: "chapter-1", utterance_ids: ["utterance-new"] }] },
+    },
+  ]);
+  assert.deepEqual(toasts, [{ title: "已归入章节", icon: "success" }]);
+  delete global.wx;
 });
 
 test("transcripts page searches records and clears back to the full list", async () => {

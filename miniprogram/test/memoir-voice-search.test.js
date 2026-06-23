@@ -53,6 +53,15 @@ async function flushAsyncSetup() {
   await Promise.resolve();
 }
 
+function pcmFrame(sample, samples = 2000) {
+  const buffer = new ArrayBuffer(samples * 2);
+  const view = new DataView(buffer);
+  for (let index = 0; index < samples; index += 1) {
+    view.setInt16(index * 2, sample, true);
+  }
+  return buffer;
+}
+
 test("voice search service records PCM audio and returns transcribed text", async () => {
   let onStop = null;
   const starts = [];
@@ -112,6 +121,60 @@ test("voice search service records PCM audio and returns transcribed text", asyn
   assert.equal(readFiles[0].encoding, "base64");
   assert.deepEqual(transcriptions, [{ audioBase64: "cGNt", mimeType: "audio/pcm" }]);
   assert.deepEqual(syncedAuthorizations, [undefined]);
+  delete global.wx;
+});
+
+test("voice search service auto-stops after speech followed by silence", async () => {
+  let onStop = null;
+  let onFrameRecorded = null;
+  const stops = [];
+  global.wx = {
+    getRecorderManager() {
+      return {
+        start() {},
+        stop() {
+          stops.push("stop");
+        },
+        onStart() {},
+        onStop(callback) {
+          onStop = callback;
+        },
+        onFrameRecorded(callback) {
+          onFrameRecorded = callback;
+        },
+        onError() {},
+      };
+    },
+    getFileSystemManager() {
+      return {
+        readFile(options) {
+          options.success({ errMsg: "ok", data: "cGNt" });
+        },
+      };
+    },
+  };
+  const {
+    recordMemoirVoiceSearchQuery,
+    stopMemoirVoiceSearchRecording,
+  } = loadVoiceSearchService({
+    voiceApiExports: {
+      transcribeMemoirVoiceSearchAudio: async () => ({ transcript: "春节" }),
+    },
+  });
+
+  const promise = recordMemoirVoiceSearchQuery();
+  await flushAsyncSetup();
+  onFrameRecorded({ frameBuffer: pcmFrame(2600), isLastFrame: false });
+  onFrameRecorded({ frameBuffer: pcmFrame(2600), isLastFrame: false });
+  for (let index = 0; index < 8; index += 1) {
+    onFrameRecorded({ frameBuffer: pcmFrame(0), isLastFrame: false });
+  }
+
+  assert.deepEqual(stops, ["stop"]);
+  stopMemoirVoiceSearchRecording();
+  assert.deepEqual(stops, ["stop"]);
+  onStop({ tempFilePath: "/tmp/search.pcm", duration: 1200, fileSize: 4800 });
+  assert.equal(await promise, "春节");
   delete global.wx;
 });
 

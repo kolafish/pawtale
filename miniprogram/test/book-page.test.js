@@ -329,6 +329,14 @@ test("book page renders chapter source counts in plan and drafting cards", () =>
   assert.equal(matches.length, 2);
 });
 
+test("book page keeps source rows read-only and splits chapter structure actions", () => {
+  const wxml = fs.readFileSync(path.join(__dirname, "../pages/book/index.wxml"), "utf8");
+
+  assert.equal(wxml.includes("source-ref-action"), false);
+  assert.equal(wxml.includes("移动到"), false);
+  assert.equal((wxml.match(/structure-action-row/g) || []).length, 4);
+});
+
 test("book page progress counts generated and confirmed chapters", () => {
   const { mod } = loadBookPage();
   const plan = samplePlan("confirmed");
@@ -467,9 +475,6 @@ test("book page builds chapter structure controls from source refs", () => {
   assert.equal(chapters[1].canMoveUp, true);
   assert.equal(chapters[0].sourceViews.length, 2);
   assert.equal(chapters[0].sourceViews[0].previewText, "外婆家的院子");
-  assert.deepEqual(chapters[0].sourceViews[0].moveTargetOptions, [
-    { label: "第 2 章 第一次离家", value: "chapter-2" },
-  ]);
   assert.deepEqual(chapters[0].mergeTargetOptions, [
     { label: "第 2 章 第一次离家", value: "chapter-2" },
   ]);
@@ -920,52 +925,6 @@ test("book page reorders chapters through plan structure update", async () => {
   assert.equal(calls.length, 1);
   assert.deepEqual(calls[0].data.chapters.map((chapter) => chapter.id), ["chapter-2", "chapter-1"]);
   assert.deepEqual(context.data.chapters.map((chapter) => chapter.id), ["chapter-2", "chapter-1"]);
-  delete global.wx;
-});
-
-test("book page moves a source ref between chapters", async () => {
-  const calls = [];
-  global.wx = { showToast() {}, switchTab() {} };
-  const plan = samplePlan("confirmed");
-  plan.chapters[0].source_refs = [
-    sampleRef("utterance-1", "外婆家的院子"),
-    sampleRef("utterance-3", "春节做年糕"),
-  ];
-  const { page } = loadBookPage({
-    voiceApiExports: {
-      updateMemoirBookPlan: async (projectId, data) => {
-        calls.push({ projectId, data });
-        return planFromChapterUpdates("confirmed", data.chapters);
-      },
-      getMemoirBookChapterDraft: async () => null,
-      getMemoirBookSourceCoverage: async () => sampleSourceCoverage(0),
-      getMemoirBookOutput: async () => null,
-    },
-  });
-  const context = pageContext(page, { projectId: "project/1", projectTitle: "外婆回忆录" });
-  page.applyPlan.call(context, plan);
-
-  await page.moveChapterSource.call(context, {
-    currentTarget: {
-      dataset: {
-        id: "chapter-1",
-        utteranceId: "utterance-3",
-      },
-    },
-    detail: { value: 0 },
-  });
-
-  assert.equal(calls.length, 1);
-  assert.deepEqual(
-    calls[0].data.chapters[0].source_refs.map((ref) => ref.utterance_id),
-    ["utterance-1"],
-  );
-  assert.deepEqual(
-    calls[0].data.chapters[1].source_refs.map((ref) => ref.utterance_id),
-    ["utterance-2", "utterance-3"],
-  );
-  assert.equal(context.data.chapters[0].sourceCount, 1);
-  assert.equal(context.data.chapters[1].sourceCount, 2);
   delete global.wx;
 });
 

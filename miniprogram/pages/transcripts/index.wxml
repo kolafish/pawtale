@@ -181,6 +181,32 @@
       >
         {{playingId === item.id ? "停止" : (item.question_text ? "播放问答" : "播放")}}
       </button>
+      <picker
+        wx:if="{{item.canAssignChapterSource}}"
+        class="chapter-move-picker"
+        range="{{item.chapterAssignOptions}}"
+        range-key="label"
+        data-id="{{item.id}}"
+        disabled="{{savingId || deletingId || assigningSourceId || movingSourceId}}"
+        bindchange="assignTranscriptChapter"
+      >
+        <view class="ghost-button picker-action {{savingId || deletingId || assigningSourceId || movingSourceId ? 'disabled' : ''}}">
+          {{assigningSourceId === item.id ? "归入中" : "归入章节"}}
+        </view>
+      </picker>
+      <picker
+        wx:if="{{item.canMoveChapterSource}}"
+        class="chapter-move-picker"
+        range="{{item.chapterMoveOptions}}"
+        range-key="label"
+        data-id="{{item.id}}"
+        disabled="{{savingId || deletingId || assigningSourceId || movingSourceId}}"
+        bindchange="moveTranscriptChapter"
+      >
+        <view class="ghost-button picker-action {{savingId || deletingId || assigningSourceId || movingSourceId ? 'disabled' : ''}}">
+          {{movingSourceId === item.id ? "移动中" : "移动章节"}}
+        </view>
+      </picker>
       <button
         class="ghost-button"
         data-id="{{item.id}}"
