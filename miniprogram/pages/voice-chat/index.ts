@@ -130,8 +130,7 @@ const AUTO_STOP_SILENCE_MS = 1800;
 const AUTO_STOP_MIN_RECORDING_MS = 1200;
 const AUTO_LISTEN_NO_ANSWER_MS = 15000;
 const MAX_CONSECUTIVE_NO_ANSWER_PROMPTS = 2;
-const GATEWAY_CONNECT_WATCHDOG_MS = 12000;
-const VOICE_CHAT_DIAGNOSTIC_BUILD = "voice-chat-constructor-order-2026-06-23";
+const VOICE_CHAT_DIAGNOSTIC_BUILD = "voice-chat-cleanup-2026-06-24";
 const MAX_VOICE_DIAGNOSTIC_EVENTS = 140;
 
 interface VoiceDiagnosticEntry {
@@ -169,27 +168,6 @@ function formatDiagnosticData(data?: Record<string, MemoirDiagnosticValue>): str
     .sort()
     .map((key) => `${key}=${String(data[key] ?? "")}`)
     .join(" ");
-}
-
-async function withTimeout<T>(
-  promise: Promise<T>,
-  timeoutMs: number,
-  onTimeout: () => void,
-): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | null = null;
-  const timeoutPromise = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => {
-      onTimeout();
-      reject(new Error("语音连接超时"));
-    }, timeoutMs);
-  });
-  try {
-    return await Promise.race([promise, timeoutPromise]);
-  } finally {
-    if (timer) {
-      clearTimeout(timer);
-    }
-  }
 }
 
 Page<VoiceChatData, {
@@ -235,7 +213,6 @@ Page<VoiceChatData, {
   voiceDiagnosticText(): string;
   copyVoiceDiagnostics(): void;
   autoListenGateSnapshot(): AutoListenGateSnapshot;
-  gatewayConnectWatchdogMs(): number;
   connectGateway(): Promise<void>;
   startRecording(autoTriggered?: boolean): boolean;
   startRecordingAfterPrivacy(autoTriggered?: boolean): Promise<boolean>;
@@ -1227,10 +1204,6 @@ Page<VoiceChatData, {
     });
   },
 
-  gatewayConnectWatchdogMs() {
-    return GATEWAY_CONNECT_WATCHDOG_MS;
-  },
-
   async connectGateway() {
     if (this.data.connecting || !this.data.voiceSessionId) {
       this.recordVoiceDiagnostic("gateway.connect.skip", {
@@ -1305,15 +1278,8 @@ Page<VoiceChatData, {
       });
       streamingClient = client;
       this.recordVoiceDiagnostic("gateway.client.create.success");
-      const connectTimeoutMs = this.gatewayConnectWatchdogMs();
-      this.recordVoiceDiagnostic("gateway.client.connect.call", { connectTimeoutMs });
-      await withTimeout(
-        client.connect(),
-        connectTimeoutMs,
-        () => {
-          this.recordVoiceDiagnostic("gateway.connect.watchdog.timeout", { connectTimeoutMs });
-        },
-      );
+      this.recordVoiceDiagnostic("gateway.client.connect.call");
+      await client.connect();
       connected = true;
       this.recordVoiceDiagnostic("gateway.connect.success", { status: this.data.status });
     } catch (error) {
@@ -1409,8 +1375,14 @@ Page<VoiceChatData, {
     });
     this.recordVoiceDiagnostic("recording.client.start.result", { autoTriggered, started });
     if (!started) {
-      void this.connectGateway();
-      this.setData({ autoListenStateText: autoTriggered ? "自动收音未就绪" : this.data.autoListenStateText });
+      this.setData({
+        error: "语音未就绪，请重新连接",
+        status: "error",
+        statusText: statusText("error"),
+        primaryActionText: "重新连接",
+        canReconnect: true,
+        autoListenStateText: autoTriggered ? "自动收音未就绪" : this.data.autoListenStateText,
+      });
       return false;
     }
     this.cancelFollowUpTTS();
