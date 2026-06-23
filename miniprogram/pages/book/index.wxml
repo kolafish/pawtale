@@ -157,7 +157,7 @@
       </view>
 
       <view wx:if="{{item.sourceViews.length && item.sourceListExpanded}}" class="source-ref-list">
-        <view wx:for="{{item.sourceViews}}" wx:for-item="source" wx:key="utterance_id" class="source-ref-row">
+        <view wx:for="{{item.sourceViews}}" wx:for-item="source" wx:key="utterance_id" class="source-ref-row {{source.splitSelected ? 'selected' : ''}}">
           <view
             class="source-ref-main"
             data-id="{{source.utterance_id}}"
@@ -167,6 +167,16 @@
             <text class="source-ref-label">{{source.labelText}}</text>
             <text class="source-ref-text">{{source.previewText}}</text>
           </view>
+          <button
+            wx:if="{{item.sourceViews.length > 1}}"
+            class="source-split-toggle {{source.splitSelected ? 'selected' : ''}}"
+            data-id="{{item.id}}"
+            data-utterance-id="{{source.utterance_id}}"
+            bindtap="toggleSplitSource"
+            disabled="{{confirmingPlan || updatingPlanStructure}}"
+          >
+            {{source.splitSelected ? "已选" : "选择"}}
+          </button>
         </view>
       </view>
 
@@ -204,18 +214,14 @@
               合并到
             </view>
           </picker>
-          <picker
-            class="structure-picker"
-            range="{{item.splitOptions}}"
-            range-key="label"
+          <button
+            class="structure-button picker-button"
             data-id="{{item.id}}"
-            disabled="{{confirmingPlan || updatingPlanStructure || !item.splitOptions.length}}"
-            bindchange="splitChapter"
+            disabled="{{confirmingPlan || updatingPlanStructure || !item.canSplitSelectedSources}}"
+            bindtap="splitSelectedChapterSources"
           >
-            <view class="structure-button picker-button {{confirmingPlan || updatingPlanStructure || !item.splitOptions.length ? 'disabled' : ''}}">
-              拆分
-            </view>
-          </picker>
+            {{item.splitActionText}}
+          </button>
         </view>
       </view>
 
@@ -320,7 +326,7 @@
         </button>
       </view>
       <view wx:if="{{item.sourceViews.length && item.sourceListExpanded}}" class="source-ref-list">
-        <view wx:for="{{item.sourceViews}}" wx:for-item="source" wx:key="utterance_id" class="source-ref-row">
+        <view wx:for="{{item.sourceViews}}" wx:for-item="source" wx:key="utterance_id" class="source-ref-row {{source.splitSelected ? 'selected' : ''}}">
           <view
             class="source-ref-main"
             data-id="{{source.utterance_id}}"
@@ -330,6 +336,16 @@
             <text class="source-ref-label">{{source.labelText}}</text>
             <text class="source-ref-text">{{source.previewText}}</text>
           </view>
+          <button
+            wx:if="{{item.sourceViews.length > 1}}"
+            class="source-split-toggle {{source.splitSelected ? 'selected' : ''}}"
+            data-id="{{item.id}}"
+            data-utterance-id="{{source.utterance_id}}"
+            bindtap="toggleSplitSource"
+            disabled="{{updatingPlanStructure || item.draftBusy}}"
+          >
+            {{source.splitSelected ? "已选" : "选择"}}
+          </button>
         </view>
       </view>
       <text wx:if="{{item.sourceChangeNotice}}" class="draft-pending">{{item.sourceChangeNotice}}</text>
@@ -368,18 +384,14 @@
               合并到
             </view>
           </picker>
-          <picker
-            class="structure-picker"
-            range="{{item.splitOptions}}"
-            range-key="label"
+          <button
+            class="structure-button picker-button"
             data-id="{{item.id}}"
-            disabled="{{updatingPlanStructure || item.draftBusy || !item.splitOptions.length}}"
-            bindchange="splitChapter"
+            disabled="{{updatingPlanStructure || item.draftBusy || !item.canSplitSelectedSources}}"
+            bindtap="splitSelectedChapterSources"
           >
-            <view class="structure-button picker-button {{updatingPlanStructure || item.draftBusy || !item.splitOptions.length ? 'disabled' : ''}}">
-              拆分
-            </view>
-          </picker>
+            {{item.splitActionText}}
+          </button>
         </view>
       </view>
 

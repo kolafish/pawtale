@@ -550,6 +550,9 @@
   padding: 16rpx 18rpx;
   border-top: 2rpx solid #f7eadc;
   background: #fffdf9;
+  display: flex;
+  align-items: flex-start;
+  gap: 14rpx;
   box-sizing: border-box;
 }
 
@@ -557,7 +560,13 @@
   border-top: 0;
 }
 
+.source-ref-row.selected {
+  background: #fff6f1;
+}
+
 .source-ref-main {
+  flex: 1 1 auto;
+  min-width: 0;
   padding: 6rpx 8rpx;
   border-radius: 12rpx;
 }
@@ -577,6 +586,37 @@
   font-size: 25rpx;
   line-height: 1.38;
   word-break: break-word;
+}
+
+.source-split-toggle {
+  flex: 0 0 112rpx;
+  width: 112rpx;
+  height: 58rpx;
+  margin: 2rpx 0 0;
+  padding: 0;
+  border: 0;
+  border-radius: 16rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f4efe8;
+  color: #6d4d40;
+  font-size: 23rpx;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.source-split-toggle.selected {
+  background: #9f4a3c;
+  color: #ffffff;
+}
+
+.source-split-toggle::after {
+  border: 0;
+}
+
+.source-split-toggle[disabled] {
+  opacity: 0.56;
 }
 
 .draft-pending {

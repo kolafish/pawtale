@@ -34,7 +34,7 @@ import { configureAudiblePlayback } from "../../services/audio-playback";
 import { ApiError } from "../../services/request";
 import { readBookTTSSettings } from "../../services/tts-settings";
 import { splitTextByAudioPlaybackProgress } from "../../services/tts-text-progress";
-import { formatBeijingDateTime } from "../../services/time";
+import { formatBeijingDateTimeShort } from "../../services/time";
 import { writeTranscriptNavigationTarget } from "../../services/transcript-navigation";
 
 interface DatasetEvent {
@@ -69,13 +69,9 @@ interface ChapterPickerOption {
   value: string;
 }
 
-interface ChapterSplitOption {
-  label: string;
-  value: number;
-}
-
 export interface BookUncoveredSourceView {
   utterance_id: string;
+  recordNumber: number;
   previewText: string;
   created_at: string;
   createdAtText: string;
@@ -84,10 +80,12 @@ export interface BookUncoveredSourceView {
 
 export interface BookChapterSourceView extends MemoirBookChapterSourceRef {
   sourceIndex: number;
+  recordNumber: number;
   labelText: string;
   createdAtText: string;
   charCount: number;
   previewText: string;
+  splitSelected: boolean;
 }
 
 export interface BookChapterView extends MemoirBookPlanChapter {
@@ -100,7 +98,9 @@ export interface BookChapterView extends MemoirBookPlanChapter {
   sourceListExpanded: boolean;
   sourceToggleText: string;
   mergeTargetOptions: ChapterPickerOption[];
-  splitOptions: ChapterSplitOption[];
+  splitSelectedCount: number;
+  splitActionText: string;
+  canSplitSelectedSources: boolean;
   canMoveUp: boolean;
   canMoveDown: boolean;
   pendingSourceCount: number;
@@ -131,6 +131,7 @@ interface BookData {
   stage: BookStage;
   stageText: string;
   chapters: BookChapterView[];
+  splitSourceSelections: Record<string, string[]>;
   confirmedDraftCount: number;
   totalChapterCount: number;
   allChaptersConfirmed: boolean;
@@ -350,9 +351,10 @@ export function buildUncoveredSourceViews(
       const text = trimText(source.text);
       return {
         utterance_id: source.utterance_id,
+        recordNumber: source.source_index,
         previewText: text.length > 96 ? `${text.slice(0, 96)}...` : text,
         created_at: source.created_at,
-        createdAtText: formatBeijingDateTime(source.created_at) || "转写记录",
+        createdAtText: formatBeijingDateTimeShort(source.created_at) || "转写记录",
         sourceRef: {
           voice_session_id: source.voice_session_id,
           message_id: source.message_id,
@@ -361,6 +363,7 @@ export function buildUncoveredSourceViews(
           audio_file_id: source.audio_file_id,
           start_ms: source.start_ms,
           end_ms: source.end_ms,
+          created_at: source.created_at,
           quote: text.slice(0, 180),
         },
       };
@@ -402,21 +405,70 @@ function sourcePreviewText(ref: MemoirBookChapterSourceRef): string {
 }
 
 function sourceCreatedAtText(ref: MemoirBookChapterSourceRef): string {
-  return ref.created_at ? formatBeijingDateTime(ref.created_at) : "时间未知";
+  return ref.created_at ? formatBeijingDateTimeShort(ref.created_at) : "时间未知";
 }
 
-function chapterSourceView(ref: MemoirBookChapterSourceRef, index: number): BookChapterSourceView {
+function sourceRefKey(ref: Pick<MemoirBookChapterSourceRef, "utterance_id" | "voice_session_id" | "message_id">): string {
+  return ref.utterance_id || `${ref.voice_session_id}:${ref.message_id}`;
+}
+
+function sourceRefSortKey(ref: MemoirBookChapterSourceRef): string {
+  return sourceRefKey(ref);
+}
+
+function planSourceRecordNumbers(chapters: Pick<MemoirBookPlanChapter, "source_refs">[]): Record<string, number> {
+  const seen = new Set<string>();
+  const refs: MemoirBookChapterSourceRef[] = [];
+  chapters.forEach((chapter) => {
+    chapter.source_refs.forEach((ref) => {
+      const key = sourceRefKey(ref);
+      if (seen.has(key)) {
+        return;
+      }
+      seen.add(key);
+      refs.push(ref);
+    });
+  });
+  return refs
+    .sort((left, right) => (
+      createdAtTime(left.created_at || "") - createdAtTime(right.created_at || "")
+      || sourceRefSortKey(left).localeCompare(sourceRefSortKey(right))
+    ))
+    .reduce<Record<string, number>>((memo, ref, index) => {
+      memo[sourceRefKey(ref)] = index + 1;
+      return memo;
+    }, {});
+}
+
+function coverageSourceRecordNumbers(coverage: MemoirBookSourceCoverage | null): Record<string, number> {
+  return [...(coverage?.sources || [])].reduce<Record<string, number>>((memo, source) => {
+    memo[source.utterance_id] = source.source_index;
+    return memo;
+  }, {});
+}
+
+function chapterSourceView(
+  ref: MemoirBookChapterSourceRef,
+  index: number,
+  recordNumbers: Record<string, number>,
+  fallbackRecordNumbers: Record<string, number>,
+  selectedSourceIds: Set<string>,
+): BookChapterSourceView {
   const previewText = sourcePreviewText(ref);
   const createdAtText = sourceCreatedAtText(ref);
   const rawCharCount = trimText(ref.quote || "").length;
   const charCount = rawCharCount || previewText.length;
+  const key = sourceRefKey(ref);
+  const recordNumber = recordNumbers[key] || fallbackRecordNumbers[key] || index + 1;
   return {
     ...ref,
     sourceIndex: index + 1,
-    labelText: `素材 ${index + 1} · ${createdAtText} · ${charCount} 字`,
+    recordNumber,
+    labelText: `语音记录 ${recordNumber} · 素材 ${index + 1} · ${createdAtText} · ${charCount} 字`,
     createdAtText,
     charCount,
     previewText,
+    splitSelected: selectedSourceIds.has(ref.utterance_id),
   };
 }
 
@@ -424,7 +476,7 @@ function uniqueSourceRefs(refs: MemoirBookChapterSourceRef[]): MemoirBookChapter
   const seen = new Set<string>();
   const result: MemoirBookChapterSourceRef[] = [];
   refs.forEach((ref) => {
-    const key = ref.utterance_id || `${ref.voice_session_id}:${ref.message_id}`;
+    const key = sourceRefKey(ref);
     if (seen.has(key)) {
       return;
     }
@@ -434,23 +486,28 @@ function uniqueSourceRefs(refs: MemoirBookChapterSourceRef[]): MemoirBookChapter
   return result;
 }
 
-function decorateChapterStructureOptions(chapters: BookChapterView[]): BookChapterView[] {
+function decorateChapterStructureOptions(
+  chapters: BookChapterView[],
+  coverage: MemoirBookSourceCoverage | null = null,
+  splitSelections: Record<string, string[]> = {},
+): BookChapterView[] {
   const options = chapters.map(chapterOption);
+  const recordNumbers = coverageSourceRecordNumbers(coverage);
+  const fallbackRecordNumbers = planSourceRecordNumbers(chapters);
   return chapters.map((chapter, index) => {
     const targetOptions = options.filter((option) => option.value !== chapter.id);
+    const selectedSourceIds = new Set(splitSelections[chapter.id] || []);
+    const selectedCount = chapter.source_refs.filter((ref) => selectedSourceIds.has(ref.utterance_id)).length;
     return {
       ...chapter,
-      sourceViews: chapter.source_refs.map(chapterSourceView),
+      sourceViews: chapter.source_refs.map((ref, sourceIndex) => (
+        chapterSourceView(ref, sourceIndex, recordNumbers, fallbackRecordNumbers, selectedSourceIds)
+      )),
       sourceToggleText: chapter.sourceListExpanded ? "收起素材" : `查看 ${chapter.source_refs.length} 条`,
       mergeTargetOptions: targetOptions,
-      splitOptions: chapter.source_refs.slice(1).map((_, splitIndex) => {
-        const beforeCount = splitIndex + 1;
-        const afterCount = chapter.source_refs.length - beforeCount;
-        return {
-          label: `前 ${beforeCount} 条 / 后 ${afterCount} 条`,
-          value: beforeCount,
-        };
-      }),
+      splitSelectedCount: selectedCount,
+      splitActionText: selectedCount ? `拆出所选 ${selectedCount} 条` : "拆出所选",
+      canSplitSelectedSources: selectedCount > 0 && selectedCount < chapter.source_refs.length,
       canMoveUp: index > 0,
       canMoveDown: index < chapters.length - 1,
     };
@@ -478,6 +535,8 @@ function chapterStateData(chapters: BookChapterView[]): Pick<
 function chapterCollectionData(
   chapters: BookChapterView[],
   stage: BookStage,
+  coverage: MemoirBookSourceCoverage | null = null,
+  splitSelections: Record<string, string[]> = {},
 ): Pick<
   BookData,
   | "chapters"
@@ -489,7 +548,7 @@ function chapterCollectionData(
   | "progressText"
   | "chapterPickerOptions"
 > {
-  const decorated = decorateChapterStructureOptions(chapters);
+  const decorated = decorateChapterStructureOptions(chapters, coverage, splitSelections);
   return {
     chapters: decorated,
     ...chapterStateData(decorated),
@@ -504,6 +563,8 @@ export function bookChapterSourceSummary(chapter: Pick<MemoirBookPlanChapter, "s
 export function buildChapterViews(
   plan: MemoirBookPlan,
   draftsByChapterId: Record<string, MemoirBookChapterDraft | null> = {},
+  coverage: MemoirBookSourceCoverage | null = null,
+  splitSelections: Record<string, string[]> = {},
 ): BookChapterView[] {
   const chapters = [...plan.chapters]
     .sort((left, right) => left.sort_order - right.sort_order)
@@ -523,7 +584,9 @@ export function buildChapterViews(
         sourceListExpanded: false,
         sourceToggleText: "",
         mergeTargetOptions: [],
-        splitOptions: [],
+        splitSelectedCount: 0,
+        splitActionText: "拆出所选",
+        canSplitSelectedSources: false,
         canMoveUp: false,
         canMoveDown: false,
         pendingSourceCount: assignedPendingCount,
@@ -540,7 +603,7 @@ export function buildChapterViews(
         draftError: "",
       };
     });
-  return decorateChapterStructureOptions(chapters);
+  return decorateChapterStructureOptions(chapters, coverage, splitSelections);
 }
 
 export function bookProgressText(chapters: BookChapterView[]): string {
@@ -585,6 +648,7 @@ function guestBookData(): Partial<BookData> {
     hasDraftChanges: false,
     canGenerateBook: false,
     progressText: "登录后可以开始整理",
+    splitSourceSelections: {},
     sourceCoverage: null,
     sourceCoverageNotice: "",
     uncoveredSourceCount: 0,
@@ -663,7 +727,8 @@ Page<BookData, {
   removeChapter(event: DatasetEvent): Promise<void>;
   moveChapter(event: DatasetEvent): Promise<void>;
   mergeChapterInto(event: PickerEvent): Promise<void>;
-  splitChapter(event: PickerEvent): Promise<void>;
+  toggleSplitSource(event: DatasetEvent): void;
+  splitSelectedChapterSources(event: DatasetEvent): Promise<void>;
   toggleChapterSources(event: DatasetEvent): void;
   generateChapterDraft(event: DatasetEvent): Promise<void>;
   generateChapterDraftById(chapterId: string, toastTitle?: string): Promise<boolean>;
@@ -736,6 +801,7 @@ Page<BookData, {
     stage: "empty",
     stageText: "等待生成章节",
     chapters: [],
+    splitSourceSelections: {},
     confirmedDraftCount: 0,
     totalChapterCount: 0,
     allChaptersConfirmed: false,
@@ -813,9 +879,9 @@ Page<BookData, {
           this.loadBookOutput(projectId),
         ]);
       }
+      this.applySourceCoverage(coverage);
       this.applyPlan(plan, draftsByChapterId);
       this.applyBookOutput(output);
-      this.applySourceCoverage(coverage);
     } catch (error) {
       if (error instanceof ApiError && error.statusCode === 404) {
         this.applyPlan(null);
@@ -869,14 +935,16 @@ Page<BookData, {
   },
 
   applyPlan(plan, draftsByChapterId = {}) {
-    const chapters = plan ? buildChapterViews(plan, draftsByChapterId) : [];
+    const chapters = plan
+      ? buildChapterViews(plan, draftsByChapterId, this.data.sourceCoverage, this.data.splitSourceSelections)
+      : [];
     const stage = planStage(plan);
     this.setData({
       plan,
       planTitle: plan?.title || `${this.data.projectTitle || "我的回忆录"}章节规划`,
       stage,
       stageText: stageText(stage),
-      ...chapterCollectionData(chapters, stage),
+      ...chapterCollectionData(chapters, stage, this.data.sourceCoverage, this.data.splitSourceSelections),
       ...sourceCoverageData(plan, this.data.sourceCoverage),
       ...(stage === "drafting" ? {} : bookOutputData(null)),
     });
@@ -902,8 +970,8 @@ Page<BookData, {
         await this.loadSourceCoverage(plan.project_id),
         null,
       ] as const;
-    this.applyPlan(plan, draftsByChapterId);
     this.applySourceCoverage(coverage);
+    this.applyPlan(plan, draftsByChapterId);
     this.applyBookOutput(output);
     wx.showToast({ title: toastTitle, icon: "success" });
   },
@@ -1060,7 +1128,7 @@ Page<BookData, {
       return;
     }
     this.setData({
-      ...chapterCollectionData(chapters, this.data.stage),
+      ...chapterCollectionData(chapters, this.data.stage, this.data.sourceCoverage, this.data.splitSourceSelections),
       error: "",
     });
   },
@@ -1130,17 +1198,53 @@ Page<BookData, {
     }
   },
 
-  async splitChapter(event) {
+  toggleSplitSource(event) {
     const chapterId = event.currentTarget.dataset.id || "";
-    const optionIndex = Number(event.detail.value);
+    const utteranceId = event.currentTarget.dataset.utteranceId || "";
     const chapter = this.data.chapters.find((candidate) => candidate.id === chapterId);
-    const splitAt = chapter?.splitOptions[optionIndex]?.value || 0;
-    if (!chapter || splitAt <= 0 || splitAt >= chapter.source_refs.length || this.data.updatingPlanStructure) {
+    if (!chapter || !utteranceId || chapter.source_refs.length <= 1 || this.data.updatingPlanStructure || chapter.draftBusy) {
+      return;
+    }
+    const selected = new Set(this.data.splitSourceSelections[chapterId] || []);
+    if (selected.has(utteranceId)) {
+      selected.delete(utteranceId);
+    } else {
+      selected.add(utteranceId);
+    }
+    const splitSourceSelections = { ...this.data.splitSourceSelections };
+    if (selected.size) {
+      splitSourceSelections[chapterId] = Array.from(selected);
+    } else {
+      delete splitSourceSelections[chapterId];
+    }
+    this.setData({
+      splitSourceSelections,
+      ...chapterCollectionData(this.data.chapters, this.data.stage, this.data.sourceCoverage, splitSourceSelections),
+      error: "",
+    });
+  },
+
+  async splitSelectedChapterSources(event) {
+    const chapterId = event.currentTarget.dataset.id || "";
+    const chapter = this.data.chapters.find((candidate) => candidate.id === chapterId);
+    const selectedIds = new Set(this.data.splitSourceSelections[chapterId] || []);
+    if (!chapter || !selectedIds.size || this.data.updatingPlanStructure || chapter.draftBusy) {
+      return;
+    }
+    const keptRefs: MemoirBookChapterSourceRef[] = [];
+    const splitRefs: MemoirBookChapterSourceRef[] = [];
+    chapter.source_refs.forEach((ref) => {
+      if (selectedIds.has(ref.utterance_id)) {
+        splitRefs.push(ref);
+        return;
+      }
+      keptRefs.push(ref);
+    });
+    if (!splitRefs.length || !keptRefs.length) {
+      this.setData({ error: "拆分时至少保留 1 条素材在原章节" });
       return;
     }
     const title = trimText(chapter.editingTitle || chapter.title) || "未命名章节";
-    const firstRefs = chapter.source_refs.slice(0, splitAt);
-    const secondRefs = chapter.source_refs.slice(splitAt);
     const updates = this.data.chapters.flatMap((candidate) => {
       if (candidate.id !== chapterId) {
         return [candidate];
@@ -1148,16 +1252,19 @@ Page<BookData, {
       return [
         {
           ...candidate,
-          source_refs: firstRefs,
-          sourceCount: firstRefs.length,
-          sourceSummary: bookChapterSourceSummary({ source_refs: firstRefs }),
+          source_refs: keptRefs,
+          sourceCount: keptRefs.length,
+          sourceSummary: bookChapterSourceSummary({ source_refs: keptRefs }),
         },
         {
-          title: `${title}（续）`,
-          source_refs: secondRefs,
+          title: `${title}（拆出）`,
+          source_refs: splitRefs,
         },
       ];
     });
+    const splitSourceSelections = { ...this.data.splitSourceSelections };
+    delete splitSourceSelections[chapterId];
+    this.setData({ splitSourceSelections });
     await this.updatePlanStructure(toPlanUpdateInput(updates as BookChapterView[]), "章节已拆分");
   },
 
@@ -1168,7 +1275,12 @@ Page<BookData, {
         ? { ...chapter, sourceListExpanded: !chapter.sourceListExpanded }
         : chapter
     ));
-    this.setData(chapterCollectionData(chapters, this.data.stage));
+    this.setData(chapterCollectionData(
+      chapters,
+      this.data.stage,
+      this.data.sourceCoverage,
+      this.data.splitSourceSelections,
+    ));
   },
 
   async generateChapterDraft(event) {
@@ -1777,7 +1889,12 @@ Page<BookData, {
       chapter.id === chapterId ? { ...chapter, ...patch } : chapter
     ));
     this.setData({
-      ...chapterCollectionData(chapters, this.data.stage),
+      ...chapterCollectionData(
+        chapters,
+        this.data.stage,
+        this.data.sourceCoverage,
+        this.data.splitSourceSelections,
+      ),
     });
   },
 

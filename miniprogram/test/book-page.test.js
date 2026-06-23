@@ -121,24 +121,56 @@ function sampleBookOutput(
 }
 
 function sampleSourceCoverage(count = 1) {
+  const uncoveredSources = Array.from({ length: count }, (_, index) => ({
+    source_index: index + 3,
+    voice_session_id: "voice-1",
+    message_id: `message-new-${index + 1}`,
+    utterance_id: `utterance-new-${index + 1}`,
+    transcript_version_id: `version-new-${index + 1}`,
+    audio_file_id: `audio-new-${index + 1}`,
+    start_ms: 0,
+    end_ms: 8000,
+    text: "新增转写",
+    created_at: "2026-06-17T00:00:00.000Z",
+  }));
   return {
     project_id: "project/1",
     plan_id: "plan-1",
     total_source_count: count + 2,
     covered_source_count: 2,
     uncovered_source_count: count,
-    uncovered_sources: Array.from({ length: count }, (_, index) => ({
-      source_index: index + 3,
-      voice_session_id: "voice-1",
-      message_id: `message-new-${index + 1}`,
-      utterance_id: `utterance-new-${index + 1}`,
-      transcript_version_id: `version-new-${index + 1}`,
-      audio_file_id: `audio-new-${index + 1}`,
-      start_ms: 0,
-      end_ms: 8000,
-      text: "新增转写",
-      created_at: "2026-06-17T00:00:00.000Z",
-    })),
+    sources: [
+      {
+        source_index: 1,
+        voice_session_id: "voice-1",
+        message_id: "message-utterance-1",
+        utterance_id: "utterance-1",
+        transcript_version_id: "version-utterance-1",
+        audio_file_id: "audio-utterance-1",
+        start_ms: 0,
+        end_ms: 8000,
+        text: "外婆家的院子",
+        created_at: "2026-06-17T00:00:00.000Z",
+        is_included: true,
+        included_in_chapters: [{ chapter_id: "chapter-1", title: "外婆家的童年", sort_order: 0 }],
+      },
+      {
+        source_index: 2,
+        voice_session_id: "voice-1",
+        message_id: "message-utterance-2",
+        utterance_id: "utterance-2",
+        transcript_version_id: "version-utterance-2",
+        audio_file_id: "audio-utterance-2",
+        start_ms: 0,
+        end_ms: 8000,
+        text: "第一次离家",
+        created_at: "2026-06-17T00:00:00.000Z",
+        is_included: true,
+        included_in_chapters: [{ chapter_id: "chapter-2", title: "第一次离家", sort_order: 1 }],
+      },
+      ...uncoveredSources,
+    ],
+    uncovered_sources: uncoveredSources,
   };
 }
 
@@ -332,6 +364,9 @@ test("book page keeps source rows read-only and splits chapter structure actions
 
   assert.equal(wxml.includes("source-ref-action"), false);
   assert.equal(wxml.includes("移动到"), false);
+  assert.equal(wxml.includes('bindchange="splitChapter"'), false);
+  assert.equal(wxml.includes('bindtap="toggleSplitSource"'), true);
+  assert.equal(wxml.includes('bindtap="splitSelectedChapterSources"'), true);
   assert.equal((wxml.match(/structure-action-row/g) || []).length, 4);
 });
 
@@ -446,7 +481,9 @@ test("book page builds source assignment views and chapter picker options", () =
   assert.equal(sources.length, 1);
   assert.equal(sources[0].utterance_id, "utterance-new-2");
   assert.equal(sources[0].previewText.endsWith("..."), true);
-  assert.equal(sources[0].createdAtText, "06-17 09:00 北京时间");
+  assert.equal(sources[0].recordNumber, 4);
+  assert.equal(sources[0].createdAtText, "06-17 09:00");
+  assert.equal(sources[0].sourceRef.created_at, "2026-06-17T01:00:00.000Z");
   assert.deepEqual(options, [
     { label: "第 1 章 外婆家的童年", value: "chapter-1" },
     { label: "第 2 章 第一次离家", value: "chapter-2" },
@@ -473,14 +510,15 @@ test("book page builds chapter structure controls from source refs", () => {
   assert.equal(chapters[1].canMoveUp, true);
   assert.equal(chapters[0].sourceViews.length, 2);
   assert.equal(chapters[0].sourceViews[0].previewText, "外婆家的院子");
-  assert.equal(chapters[0].sourceViews[0].labelText, "素材 1 · 06-17 08:00 北京时间 · 6 字");
+  assert.equal(chapters[0].sourceViews[0].recordNumber, 1);
+  assert.equal(chapters[0].sourceViews[0].labelText, "语音记录 1 · 素材 1 · 06-17 08:00 · 6 字");
   assert.equal(chapters[0].sourceToggleText, "查看 2 条");
   assert.deepEqual(chapters[0].mergeTargetOptions, [
     { label: "第 2 章 第一次离家", value: "chapter-2" },
   ]);
-  assert.deepEqual(chapters[0].splitOptions, [
-    { label: "前 1 条 / 后 1 条", value: 1 },
-  ]);
+  assert.equal(chapters[0].splitSelectedCount, 0);
+  assert.equal(chapters[0].splitActionText, "拆出所选");
+  assert.equal(chapters[0].canSplitSelectedSources, false);
 });
 
 test("book page toggles chapter source details", () => {
@@ -944,7 +982,7 @@ test("book page reorders chapters through plan structure update", async () => {
   delete global.wx;
 });
 
-test("book page splits a chapter at a selected source boundary", async () => {
+test("book page splits selected chapter sources into a new chapter", async () => {
   const calls = [];
   global.wx = { showToast() {}, switchTab() {} };
   const plan = samplePlan("confirmed");
@@ -966,9 +1004,21 @@ test("book page splits a chapter at a selected source boundary", async () => {
   const context = pageContext(page, { projectId: "project/1", projectTitle: "外婆回忆录" });
   page.applyPlan.call(context, plan);
 
-  await page.splitChapter.call(context, {
+  page.toggleSplitSource.call(context, {
     currentTarget: { dataset: { id: "chapter-1" } },
-    detail: { value: 0 },
+  });
+  assert.equal(context.data.chapters[0].splitSelectedCount, 0);
+
+  page.toggleSplitSource.call(context, {
+    currentTarget: { dataset: { id: "chapter-1", utteranceId: "utterance-3" } },
+  });
+
+  assert.equal(context.data.chapters[0].sourceViews[1].splitSelected, true);
+  assert.equal(context.data.chapters[0].splitSelectedCount, 1);
+  assert.equal(context.data.chapters[0].canSplitSelectedSources, true);
+
+  await page.splitSelectedChapterSources.call(context, {
+    currentTarget: { dataset: { id: "chapter-1" } },
   });
 
   assert.equal(calls.length, 1);
@@ -976,9 +1026,10 @@ test("book page splits a chapter at a selected source boundary", async () => {
   assert.equal(calls[0].data.chapters[0].id, "chapter-1");
   assert.equal(calls[0].data.chapters[0].source_refs[0].utterance_id, "utterance-1");
   assert.equal(calls[0].data.chapters[1].id, undefined);
-  assert.equal(calls[0].data.chapters[1].title, "外婆家的童年（续）");
+  assert.equal(calls[0].data.chapters[1].title, "外婆家的童年（拆出）");
   assert.equal(calls[0].data.chapters[1].source_refs[0].utterance_id, "utterance-3");
   assert.equal(calls[0].data.chapters[2].id, "chapter-2");
+  assert.equal(context.data.splitSourceSelections["chapter-1"], undefined);
   delete global.wx;
 });
 

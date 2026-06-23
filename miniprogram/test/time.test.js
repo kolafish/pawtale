@@ -21,3 +21,10 @@ test("treats legacy timezone-less backend timestamps as UTC", () => {
   assert.equal(formatBeijingDateTime("2026-06-16T01:05:00"), "06-16 09:05 北京时间");
   assert.equal(formatBeijingDateTime(""), "");
 });
+
+test("formats Beijing time without timezone label for compact records", () => {
+  const { formatBeijingDateTimeShort } = timeModule();
+
+  assert.equal(formatBeijingDateTimeShort("2026-06-16T01:05:00+00:00"), "06-16 09:05");
+  assert.equal(formatBeijingDateTimeShort(""), "");
+});

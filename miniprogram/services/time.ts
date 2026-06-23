@@ -27,3 +27,8 @@ export function formatBeijingDateTime(value: string): string {
   const minute = pad2(beijing.getUTCMinutes());
   return `${month}-${day} ${hour}:${minute} 北京时间`;
 }
+
+export function formatBeijingDateTimeShort(value: string): string {
+  const text = formatBeijingDateTime(value);
+  return text.replace(/\s*北京时间$/, "");
+}
