@@ -45,6 +45,69 @@
   line-height: 1.35;
 }
 
+.search-panel {
+  margin-bottom: 24rpx;
+}
+
+.search-box {
+  min-height: 84rpx;
+  box-sizing: border-box;
+  padding: 0 16rpx 0 24rpx;
+  border: 2rpx solid #efd6c4;
+  border-radius: 20rpx;
+  background: rgba(255, 255, 255, 0.96);
+  display: flex;
+  align-items: center;
+  gap: 14rpx;
+}
+
+.search-mark {
+  flex: 0 0 auto;
+  color: #9f4a3c;
+  font-size: 34rpx;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.search-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 80rpx;
+  color: #24100b;
+  font-size: 28rpx;
+  line-height: 80rpx;
+}
+
+.search-clear {
+  flex: 0 0 60rpx;
+  width: 60rpx;
+  height: 60rpx;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: #fff1ec;
+  color: #8a4034;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 32rpx;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.search-clear::after {
+  border: 0;
+}
+
+.search-summary {
+  display: block;
+  margin-top: 12rpx;
+  color: #685b55;
+  font-size: 24rpx;
+  line-height: 1.35;
+}
+
 .error {
   margin-bottom: 24rpx;
   padding: 22rpx 26rpx;
@@ -242,6 +305,12 @@
 .display-text {
   background: #ffffff;
   border: 2rpx solid #f0dac0;
+}
+
+.search-hit {
+  background: #ffe7a3;
+  color: #24100b;
+  font-weight: 800;
 }
 
 .transcript-textarea {
