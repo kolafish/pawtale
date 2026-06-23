@@ -371,6 +371,75 @@ test("voice chat retries gateway connection after a failed connect", async () =>
   assert.equal(context.data.status, "ready");
 });
 
+test("voice chat clears connecting when gateway connect never settles", async () => {
+  let connectCalls = 0;
+  let closeCalls = 0;
+  let releaseConnect = () => {};
+  const page = loadVoiceChatPage({
+    streamingExports: {
+      MemoirStreamingAsrClient: class {
+        constructor(options) {
+          this.options = options;
+        }
+        async connect() {
+          connectCalls += 1;
+          await new Promise((resolve) => {
+            releaseConnect = resolve;
+          });
+          this.options.callbacks.onStatus("ready");
+        }
+        close() {
+          closeCalls += 1;
+          this.options.callbacks.onStatus("closed");
+        }
+        configureAutoStop() {}
+        startRecording() {
+          throw new Error("startRecording should wait for reconnect");
+        }
+      },
+    },
+    voiceAuthorizationExports: {
+      readVoiceAuthorizationConsent: () => true,
+      syncVoiceAuthorizationConsent: async () => ({ id: "consent-1" }),
+    },
+  });
+  const context = {
+    ...page,
+    data: {
+      ...page.data,
+      voiceSessionId: "voice-1",
+      voiceAuthorizationAgreed: true,
+      status: "idle",
+      connecting: false,
+    },
+    gatewayConnectWatchdogMs() {
+      return 5;
+    },
+    setData(patch) {
+      this.data = { ...this.data, ...patch };
+    },
+  };
+
+  await page.connectGateway.call(context);
+
+  const diagnosticNames = context.voiceDiagnosticEvents.map((event) => event.name);
+  assert.equal(connectCalls, 1);
+  assert.equal(closeCalls, 1);
+  assert.equal(context.data.connecting, false);
+  assert.equal(context.data.status, "error");
+  assert.match(context.data.error, /语音连接超时/);
+  assert.ok(diagnosticNames.includes("gateway.client.create.success"));
+  assert.ok(diagnosticNames.includes("gateway.client.connect.call"));
+  assert.ok(diagnosticNames.includes("gateway.connect.watchdog.timeout"));
+  assert.ok(diagnosticNames.includes("gateway.connect.finally"));
+
+  releaseConnect();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(context.data.status, "error");
+  assert.ok(context.voiceDiagnosticEvents.some((event) => event.name === "gateway.stale.status"));
+});
+
 test("voice chat finishSession ignores duplicate finish taps", async () => {
   let finishCalls = 0;
   let resolveFinish = () => {};
@@ -773,7 +842,7 @@ test("voice chat copies diagnostics with auto-listen gate state", () => {
   page.copyVoiceDiagnostics.call(context);
 
   assert.equal(started, false);
-  assert.match(clipboardText, /build=voice-chat-diagnostics-2026-06-23/);
+  assert.match(clipboardText, /build=voice-chat-connect-watchdog-2026-06-23/);
   assert.match(clipboardText, /autoListen\.tryAfterTTS/);
   assert.match(clipboardText, /hasClient=false/);
   assert.match(clipboardText, /pendingAfterPlayback=true/);
