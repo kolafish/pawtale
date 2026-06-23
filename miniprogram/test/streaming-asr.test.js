@@ -923,12 +923,15 @@ test("streaming ASR waits for voice before auto-stopping after silence", async (
   assert.equal(recorder.stops, 0);
 
   recorder.callbacks.frame({ frameBuffer: voiceFrame, isLastFrame: false });
+  recorder.callbacks.frame({ frameBuffer: voiceFrame, isLastFrame: false });
+  recorder.callbacks.frame({ frameBuffer: voiceFrame, isLastFrame: false });
   recorder.callbacks.frame({ frameBuffer: silentFrame, isLastFrame: false });
   recorder.callbacks.frame({ frameBuffer: silentFrame, isLastFrame: false });
 
   assert.equal(recorder.stops, 1);
   assert.equal(captureStats.at(-1).state, "stopping");
   assert.equal(captureStats.at(-1).autoStopped, true);
+  assert.equal(captureStats.at(-1).autoStopReason, "silence_after_voice");
   recorder.callbacks.stop();
   assert.deepEqual(sent.map((event) => event.type), [
     "session.start",
@@ -937,8 +940,182 @@ test("streaming ASR waits for voice before auto-stopping after silence", async (
     "audio.frame",
     "audio.frame",
     "audio.frame",
+    "audio.frame",
+    "audio.frame",
     "audio.end",
   ]);
+  delete global.wx;
+});
+
+test("streaming ASR auto-stops auto-listen when no voice answers", async () => {
+  const recorder = recorderManagerHarness();
+  const sent = [];
+  const captureStats = [];
+  let onOpen;
+  global.wx = {
+    getRecorderManager() {
+      return recorder;
+    },
+    getStorageSync(key) {
+      if (key === "pawtale_backend_config") {
+        return {
+          httpBaseUrl: "http://backend.local:8000",
+          wsBaseUrl: "ws://backend.local:8000",
+        };
+      }
+      if (key === "pawtale_backend_cookie") {
+        return "pawtale_session=abc";
+      }
+      return "";
+    },
+    getExtConfigSync() {
+      return {};
+    },
+    setStorageSync() {},
+    removeStorageSync() {},
+    request(options) {
+      options.success({ statusCode: 200, data: { id: "user-1" }, cookies: [], header: {} });
+    },
+    connectSocket() {
+      return {
+        onOpen(callback) {
+          onOpen = callback;
+        },
+        onMessage() {},
+        onError() {},
+        onClose() {},
+        send(options) {
+          sent.push(JSON.parse(options.data));
+        },
+        close() {},
+      };
+    },
+  };
+  delete require.cache[require.resolve("../services/request.ts")];
+  delete require.cache[require.resolve("../services/memoir-voice-api.ts")];
+  delete require.cache[require.resolve("../services/memoir-streaming-asr.ts")];
+  const { MemoirStreamingAsrClient } = require("../services/memoir-streaming-asr.ts");
+  const client = new MemoirStreamingAsrClient({
+    voiceSessionId: "voice-1",
+    guidanceMode: "free_narration",
+    callbacks: {
+      onStatus() {},
+      onCaptureStats(stats) {
+        captureStats.push(stats);
+      },
+      onEvent() {},
+      onPartial() {},
+      onFinal() {},
+      onError() {},
+    },
+  });
+
+  const connectPromise = client.connect();
+  await new Promise((resolve) => setImmediate(resolve));
+  onOpen({ errMsg: "connect:ok" });
+  await connectPromise;
+  client.startRecording({ noVoiceActivityTimeoutMs: 200 });
+  recorder.callbacks.start();
+  const silentFrame = new ArrayBuffer(3200);
+  recorder.callbacks.frame({ frameBuffer: silentFrame, isLastFrame: false });
+  assert.equal(recorder.stops, 0);
+
+  recorder.callbacks.frame({ frameBuffer: silentFrame, isLastFrame: false });
+
+  assert.equal(recorder.stops, 1);
+  assert.equal(captureStats.at(-1).state, "stopping");
+  assert.equal(captureStats.at(-1).autoStopped, true);
+  assert.equal(captureStats.at(-1).autoStopReason, "no_voice");
+  recorder.callbacks.stop();
+  assert.deepEqual(sent.map((event) => event.type), [
+    "session.start",
+    "audio.frame",
+    "audio.frame",
+    "audio.end",
+  ]);
+  delete global.wx;
+});
+
+test("streaming ASR no-answer timeout does not depend on silent frame callbacks", async () => {
+  const recorder = recorderManagerHarness();
+  const sent = [];
+  const captureStats = [];
+  let onOpen;
+  global.wx = {
+    getRecorderManager() {
+      return recorder;
+    },
+    getStorageSync(key) {
+      if (key === "pawtale_backend_config") {
+        return {
+          httpBaseUrl: "http://backend.local:8000",
+          wsBaseUrl: "ws://backend.local:8000",
+        };
+      }
+      if (key === "pawtale_backend_cookie") {
+        return "pawtale_session=abc";
+      }
+      return "";
+    },
+    getExtConfigSync() {
+      return {};
+    },
+    setStorageSync() {},
+    removeStorageSync() {},
+    request(options) {
+      options.success({ statusCode: 200, data: { id: "user-1" }, cookies: [], header: {} });
+    },
+    connectSocket() {
+      return {
+        onOpen(callback) {
+          onOpen = callback;
+        },
+        onMessage() {},
+        onError() {},
+        onClose() {},
+        send(options) {
+          sent.push(JSON.parse(options.data));
+        },
+        close() {},
+      };
+    },
+  };
+  delete require.cache[require.resolve("../services/request.ts")];
+  delete require.cache[require.resolve("../services/memoir-voice-api.ts")];
+  delete require.cache[require.resolve("../services/memoir-streaming-asr.ts")];
+  const { MemoirStreamingAsrClient } = require("../services/memoir-streaming-asr.ts");
+  const client = new MemoirStreamingAsrClient({
+    voiceSessionId: "voice-1",
+    guidanceMode: "free_narration",
+    callbacks: {
+      onStatus() {},
+      onCaptureStats(stats) {
+        captureStats.push(stats);
+      },
+      onEvent() {},
+      onPartial() {},
+      onFinal() {},
+      onError() {},
+    },
+  });
+
+  const connectPromise = client.connect();
+  await new Promise((resolve) => setImmediate(resolve));
+  onOpen({ errMsg: "connect:ok" });
+  await connectPromise;
+  client.startRecording({ noVoiceActivityTimeoutMs: 20 });
+  recorder.callbacks.start();
+
+  await new Promise((resolve) => setTimeout(resolve, 30));
+
+  assert.equal(recorder.stops, 1);
+  assert.equal(captureStats.at(-1).state, "stopping");
+  assert.equal(captureStats.at(-1).autoStopped, true);
+  assert.equal(captureStats.at(-1).autoStopReason, "no_voice");
+  assert.deepEqual(sent.map((event) => event.type), ["session.start"]);
+
+  recorder.callbacks.stop();
+  assert.deepEqual(sent.map((event) => event.type), ["session.start", "audio.end"]);
   delete global.wx;
 });
 

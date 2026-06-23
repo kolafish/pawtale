@@ -17,6 +17,7 @@ from app.schemas.memoir import (
     MemoirVoiceAuthorizationConsentStatusResponse,
     MemoirVoiceFollowUpRequest,
     MemoirVoiceFollowUpResponse,
+    MemoirVoiceNoAnswerPromptRequest,
     MemoirVoiceProgressResponse,
     MemoirVoiceTranscriptCleanupRequest,
     MemoirVoiceTranscriptItemResponse,
@@ -177,6 +178,16 @@ async def create_mobile_memoir_voice_follow_up(
     current_user: User = Depends(get_current_user),
 ):
     return await memoir_voice_followups.generate_voice_follow_up(db, voice_session_id, current_user.id, req)
+
+
+@router.post("/voice-sessions/{voice_session_id}/no-answer-prompt", response_model=MemoirVoiceFollowUpResponse)
+async def create_mobile_memoir_voice_no_answer_prompt(
+    voice_session_id: str,
+    req: MemoirVoiceNoAnswerPromptRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await memoir_voice_followups.create_no_answer_prompt(db, voice_session_id, current_user.id, req)
 
 
 @router.post(

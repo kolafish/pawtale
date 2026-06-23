@@ -127,6 +127,10 @@ export interface MemoirVoiceFollowUpRequest {
   regenerate?: boolean;
 }
 
+export interface MemoirVoiceNoAnswerPromptRequest {
+  attempt?: number;
+}
+
 export interface MemoirVoiceFollowUpResponse {
   message: MemoirChatMessage;
   follow_up_text: string;

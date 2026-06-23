@@ -18,6 +18,7 @@ import type {
   MemoirBookSourceCoverage,
   MemoirVoiceFollowUpRequest,
   MemoirVoiceFollowUpResponse,
+  MemoirVoiceNoAnswerPromptRequest,
   MemoirVoiceTranscriptItem,
   MemoirVoiceTranscriptListResponse,
   MemoirVoiceProgressResponse,
@@ -122,6 +123,20 @@ export async function createMemoirVoiceFollowUp(
     {
       method: "POST",
       data: withSelectedAIModel(data),
+    },
+  );
+}
+
+export async function createMemoirVoiceNoAnswerPrompt(
+  voiceSessionId: string,
+  data: MemoirVoiceNoAnswerPromptRequest = {},
+): Promise<MemoirVoiceFollowUpResponse> {
+  await ensureBackendSession();
+  return request<MemoirVoiceFollowUpResponse>(
+    `/api/mobile/memoir/voice-sessions/${encodeURIComponent(voiceSessionId)}/no-answer-prompt`,
+    {
+      method: "POST",
+      data,
     },
   );
 }

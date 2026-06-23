@@ -154,6 +154,10 @@ class MemoirVoiceFollowUpRequest(BaseModel):
     regenerate: bool = False
 
 
+class MemoirVoiceNoAnswerPromptRequest(BaseModel):
+    attempt: int = Field(default=1, ge=1, le=3)
+
+
 class MemoirAssistantTTSRequest(BaseModel):
     voice: str | None = None
     speed_ratio: float | None = Field(default=None, ge=0.5, le=2.0)

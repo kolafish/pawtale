@@ -239,6 +239,45 @@ async def test_mobile_memoir_voice_follow_up_generates_and_saves_assistant_messa
     assert stored.content_text == "那时候你最记得谁？"
 
 
+async def test_mobile_memoir_voice_no_answer_prompt_saves_assistant_message(client, test_db):
+    create_response = await post_mobile_memoir_voice_session(
+        client,
+        json={"guidance_mode": "free_narration"},
+    )
+    session = create_response.json()["session"]
+    user_message = MemoirChatMessage(
+        project_id=session["project_id"],
+        voice_session_id=session["id"],
+        role=MemoirChatMessageRole.USER.value,
+        content_text="我小时候住在外婆家。",
+        content_status=MemoirChatContentStatus.FINAL.value,
+        turn_index=0,
+        metadata_json={"source": "test"},
+    )
+    test_db.add(user_message)
+    await test_db.commit()
+
+    response = await client.post(
+        f"/api/mobile/memoir/voice-sessions/{session['id']}/no-answer-prompt",
+        json={"attempt": 2},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["follow_up_text"] == "没关系，我先暂停一下。您准备好了，再点继续说话。"
+    assert data["message"]["role"] == "assistant"
+    assert data["message"]["content_text"] == data["follow_up_text"]
+    assert data["message"]["turn_index"] == 1
+    assert data["message"]["guidance_intent"] == "no_answer_prompt"
+    assert data["message"]["metadata_json"]["source"] == "ai.no_answer_prompt"
+    assert data["message"]["metadata_json"]["prompt_version"] == "memoir_voice_no_answer_prompt_v1"
+    assert data["message"]["metadata_json"]["attempt"] == 2
+
+    stored = await test_db.scalar(select(MemoirChatMessage).where(MemoirChatMessage.id == data["message"]["id"]))
+    assert stored is not None
+    assert stored.content_text == "没关系，我先暂停一下。您准备好了，再点继续说话。"
+
+
 async def test_mobile_memoir_voice_follow_up_starts_guided_session_without_user_message(
     client,
     monkeypatch,
