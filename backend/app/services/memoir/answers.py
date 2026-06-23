@@ -4,7 +4,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.memoir import MemoirAnswerStatus, MemoirQuestionStatus
 from app.models.memoir import MemoirAnswer
-from app.schemas.memoir import MemoirAnswerResponse
+from app.schemas.memoir_legacy import (
+    MemoirAnswerResponse,
+)
 from app.services.memoir.access import load_answer, load_audio_file, load_question
 from app.services.memoir.interview import advance_session
 

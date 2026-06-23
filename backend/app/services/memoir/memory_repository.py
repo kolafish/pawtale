@@ -17,7 +17,7 @@ from app.models.memoir import (
     MemoirThemeMemory,
     MemoirTranscriptVersion,
 )
-from app.schemas.memoir import (
+from app.schemas.memoir_memory import (
     MemoirEventMemoryCreate,
     MemoirEventMemoryResponse,
     MemoirMemoryUpdateRequest,

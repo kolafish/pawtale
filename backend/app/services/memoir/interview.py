@@ -5,7 +5,7 @@ from sqlalchemy.orm import selectinload
 
 from app.domain.memoir import MemoirQuestionStatus, MemoirSessionStatus
 from app.models.memoir import MemoirAnswer, MemoirQuestion, MemoirSession
-from app.schemas.memoir import (
+from app.schemas.memoir_legacy import (
     MemoirDraftResponse,
     MemoirInterviewState,
     MemoirQuestionResponse,

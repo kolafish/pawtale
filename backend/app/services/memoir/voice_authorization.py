@@ -6,7 +6,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.memoir import MemoirVoiceAuthorizationConsent, MemoirVoiceSession
 from app.models.projects import Project
-from app.schemas.memoir import MemoirVoiceAuthorizationConsentRequest
+from app.schemas.memoir_voice import (
+    MemoirVoiceAuthorizationConsentRequest,
+)
 
 
 VOICE_AUTHORIZATION_CONSENT_TYPE = "voice_authorization"

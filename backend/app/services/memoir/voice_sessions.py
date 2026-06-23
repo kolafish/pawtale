@@ -10,7 +10,7 @@ from sqlalchemy.orm import selectinload
 from app.domain.memoir.types import MemoirChatMessageRole, MemoirVoiceSessionStatus
 from app.models.memoir import MemoirVoiceSession, MemoirVoiceUtterance
 from app.models.projects import Project
-from app.schemas.memoir import (
+from app.schemas.memoir_voice import (
     MemoirVoiceModuleProgressResponse,
     MemoirVoiceProgressResponse,
     MemoirVoiceSessionListResponse,

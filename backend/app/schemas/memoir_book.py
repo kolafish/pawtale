@@ -8,7 +8,9 @@ from app.domain.memoir.types import (
     MemoirCreatedBy,
     MemoirOutputStatus,
 )
-from app.schemas.memoir import MemoirTTSAlignmentSegmentResponse
+from app.schemas.memoir_voice import (
+    MemoirTTSAlignmentSegmentResponse,
+)
 
 
 class MemoirBookChapterSourceRef(BaseModel):

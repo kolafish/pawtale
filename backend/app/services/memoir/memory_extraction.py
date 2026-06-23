@@ -26,7 +26,7 @@ from app.models.memoir import (
     MemoirSession,
     MemoirThemeMemory,
 )
-from app.schemas.memoir import (
+from app.schemas.memoir_memory import (
     MemoirEventMemoryCreate,
     MemoirEventMemoryResponse,
     MemoirMemoryEvidenceCreate,
@@ -36,10 +36,12 @@ from app.schemas.memoir import (
     MemoirPersonMemoryResponse,
     MemoirPlaceMemoryCreate,
     MemoirPlaceMemoryResponse,
-    MemoirSessionProcessRequest,
     MemoirSessionProcessResponse,
     MemoirThemeMemoryCreate,
     MemoirThemeMemoryResponse,
+)
+from app.schemas.memoir_legacy import (
+    MemoirSessionProcessRequest,
 )
 from app.services import get_ai_service
 from app.services.ai_types import AITextClient

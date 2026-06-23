@@ -23,7 +23,12 @@ from app.models.memoir import (
     MemoirQuestionCandidate,
     MemoirSession,
 )
-from app.schemas.memoir import MemoirQuestionCandidateResponse, MemoirQuestionResponse
+from app.schemas.memoir_memory import (
+    MemoirQuestionCandidateResponse,
+)
+from app.schemas.memoir_legacy import (
+    MemoirQuestionResponse,
+)
 from app.services.memoir.access import load_memoir_project, load_session
 from app.services.memoir.coverage import calculate_coverage_snapshots
 

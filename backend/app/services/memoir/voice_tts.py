@@ -19,7 +19,10 @@ from app.config import Settings, get_settings
 from app.domain.memoir.types import MemoirChatMessageRole
 from app.models.memoir import AudioFile, MemoirAnswer, MemoirChatMessage, MemoirVoiceUtterance
 from app.models.projects import Project
-from app.schemas.memoir import MemoirAssistantTTSRequest, MemoirAssistantTTSResponse
+from app.schemas.memoir_voice import (
+    MemoirAssistantTTSRequest,
+    MemoirAssistantTTSResponse,
+)
 from app.services.memoir.audio_files import delete_audio_file_paths, discard_staged_audio, stage_audio_bytes
 from app.services.memoir.tts_alignment import (
     TTSAlignmentSegment,
