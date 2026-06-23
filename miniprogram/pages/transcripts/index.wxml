@@ -120,6 +120,15 @@
           class="{{segment.highlight ? 'search-hit' : ''}}"
         >{{segment.text}}</text>
       </text>
+      <button
+        wx:if="{{item.rawCollapsible}}"
+        class="text-toggle-button"
+        data-id="{{item.id}}"
+        data-field="raw"
+        bindtap="toggleTranscriptText"
+      >
+        {{item.rawToggleText}}
+      </button>
     </view>
 
     <view wx:if="{{!item.isEditing}}" class="display-box">
@@ -136,6 +145,15 @@
           class="{{segment.highlight ? 'search-hit' : ''}}"
         >{{segment.text}}</text>
       </text>
+      <button
+        wx:if="{{item.displayCollapsible}}"
+        class="text-toggle-button"
+        data-id="{{item.id}}"
+        data-field="display"
+        bindtap="toggleTranscriptText"
+      >
+        {{item.displayToggleText}}
+      </button>
     </view>
 
     <view wx:else class="edit-box">

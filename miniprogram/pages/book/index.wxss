@@ -453,6 +453,11 @@
   flex: 1;
 }
 
+.chapter-title-block .source-count {
+  display: inline-flex;
+  margin-top: 8rpx;
+}
+
 .chapter-index {
   display: block;
   color: #7a3b31;

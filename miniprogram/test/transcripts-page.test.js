@@ -184,6 +184,58 @@ test("transcript text highlighter marks every search term", () => {
   ]);
 });
 
+test("transcripts page collapses long raw and corrected text", async () => {
+  const longRaw = "院子里的年节记忆".repeat(24);
+  const longDisplay = "春节时一家人围坐说笑".repeat(24);
+  const { page } = loadTranscriptsPage({
+    authExports: {
+      getMemoirIdentity: async () => ({
+        id: "user-1",
+        active_project_id: "project-1",
+        active_project: { id: "project-1", title: "我的回忆录" },
+        projects: [],
+      }),
+    },
+    voiceApiExports: {
+      listMemoirVoiceTranscripts: async () => ({
+        items: [
+          {
+            ...sampleTranscript("utterance-long"),
+            transcript_raw: longRaw,
+            transcript_edited: "",
+            display_text: longDisplay,
+            raw_char_count: longRaw.length,
+            display_char_count: longDisplay.length,
+          },
+        ],
+        total: 1,
+        limit: 30,
+        offset: 0,
+      }),
+    },
+  });
+  const context = pageContext(page);
+
+  await page.loadTranscripts.call(context, true);
+
+  let item = context.data.items[0];
+  assert.equal(item.rawCollapsible, true);
+  assert.equal(item.displayCollapsible, true);
+  assert.equal(item.rawExpanded, false);
+  assert.equal(item.displayExpanded, false);
+  assert.equal(item.rawSegments.map((segment) => segment.text).join("").endsWith("..."), true);
+  assert.equal(item.displaySegments.map((segment) => segment.text).join("").length, 183);
+
+  page.toggleTranscriptText.call(context, {
+    currentTarget: { dataset: { id: "utterance-long", field: "display" } },
+  });
+
+  item = context.data.items[0];
+  assert.equal(item.displayExpanded, true);
+  assert.equal(item.displayToggleText, "收起");
+  assert.equal(item.displaySegments.map((segment) => segment.text).join(""), longDisplay);
+});
+
 test("transcripts page formats record time like book uncovered sources", async () => {
   const { page } = loadTranscriptsPage({
     authExports: {

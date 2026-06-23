@@ -276,6 +276,7 @@
       <view class="chapter-head">
         <view class="chapter-title-block">
           <text class="chapter-index">第 {{index + 1}} 章</text>
+          <text class="source-count">{{item.sourceCount}} 条来源</text>
         </view>
         <text class="draft-status {{item.draft && item.draft.status === 'confirmed' ? 'confirmed' : ''}}">
           {{item.draftStatusText}}

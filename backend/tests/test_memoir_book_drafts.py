@@ -354,6 +354,75 @@ async def test_mobile_memoir_book_chapter_draft_supplements_pending_sources_with
     assert refreshed_chapter.metadata_json == {}
 
 
+async def test_mobile_memoir_book_chapter_draft_force_regenerate_ignores_previous_pending_content(
+    client,
+    test_db,
+    monkeypatch,
+):
+    first = await _create_voice_transcript(client, test_db, "岁首一家人围坐吃团圆饭。")
+    second = await _create_voice_transcript(client, test_db, "初一早上挨家给长辈拜年。")
+    project_id = first["session"]["project_id"]
+    _, chapter = await _create_book_plan(
+        test_db,
+        project_id=project_id,
+        source_ref=_source_ref(first, "团圆饭"),
+        status=MemoirBookPlanStatus.CONFIRMED,
+    )
+    chapter.source_refs_json = [_source_ref(first, "团圆饭"), _source_ref(second, "拜年")]
+    chapter.metadata_json = {
+        "pending_source_utterance_ids": [second["utterance_id"]],
+        "source_assignment_updated_at": "2026-06-17T00:00:00+00:00",
+    }
+    draft = MemoirBookChapterDraft(
+        project_id=project_id,
+        chapter_id=chapter.id,
+        status=MemoirBookChapterDraftStatus.DRAFT.value,
+        metadata_json={"status_reason": "new_sources_assigned"},
+    )
+    test_db.add(draft)
+    await test_db.flush()
+    test_db.add(
+        MemoirBookChapterDraftVersion(
+            draft_id=draft.id,
+            project_id=project_id,
+            chapter_id=chapter.id,
+            version=1,
+            content="很早以前的一条旧记录，不应该进入重生成提示。",
+            created_by=MemoirCreatedBy.AI.value,
+            prompt_snapshot="old prompt",
+        )
+    )
+    await test_db.commit()
+    fake_ai = FakeBookDraftAI("岁首时一家人吃团圆饭，初一早上去给长辈拜年。")
+    monkeypatch.setattr(
+        "app.services.memoir.book_drafts.get_ai_service",
+        lambda model=None: fake_ai,
+    )
+
+    response = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-plan/chapters/{chapter.id}/draft",
+        json={"force_regenerate": True},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["latest_version"]["version"] == 2
+    assert data["metadata_json"] == {}
+    prompt = fake_ai.calls[0]["user_prompt"]
+    assert "很早以前的一条旧记录" not in prompt
+    assert "原章节正文" not in prompt
+    assert "本次任务：只把 source_type 为“新增来源”" not in prompt
+    assert "岁首一家人围坐吃团圆饭" in prompt
+    assert "初一早上挨家给长辈拜年" in prompt
+    assert prompt.count("source_type: 既有来源") == 2
+    assert "source_type: 新增来源" not in prompt
+
+    refreshed_chapter = await test_db.scalar(
+        select(MemoirBookPlanChapter).where(MemoirBookPlanChapter.id == chapter.id)
+    )
+    assert refreshed_chapter.metadata_json == {}
+
+
 async def test_mobile_memoir_book_chapter_draft_update_clears_pending_source_state(client, test_db):
     first = await _create_voice_transcript(client, test_db, "我小时候常在外婆家的院子里晒太阳。")
     second = await _create_voice_transcript(client, test_db, "后来我又讲了第一次离家去县城读书。")
