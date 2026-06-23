@@ -294,7 +294,7 @@ test("transcripts page collapses long raw and corrected text", async () => {
   assert.equal(item.displaySegments.map((segment) => segment.text).join(""), longDisplay);
 });
 
-test("transcripts page formats record time like book uncovered sources", async () => {
+test("transcripts page formats record time without timezone label", async () => {
   const { page } = loadTranscriptsPage({
     authExports: {
       getMemoirIdentity: async () => ({
@@ -317,7 +317,47 @@ test("transcripts page formats record time like book uncovered sources", async (
 
   await page.loadTranscripts.call(context, true);
 
-  assert.equal(context.data.items[0].createdAtText, "06-17 08:00 北京时间");
+  assert.equal(context.data.items[0].createdAtText, "06-17 08:00");
+  assert.equal(context.data.items[0].recordNumber, 1);
+});
+
+test("transcripts page numbers newest-first records from the oldest record", async () => {
+  const { page } = loadTranscriptsPage({
+    authExports: {
+      getMemoirIdentity: async () => ({
+        id: "user-1",
+        active_project_id: "project-1",
+        active_project: { id: "project-1", title: "我的回忆录" },
+        projects: [],
+      }),
+    },
+    voiceApiExports: {
+      listMemoirVoiceTranscripts: async ({ offset }) => ({
+        items: offset === 0
+          ? [
+            sampleTranscript("utterance-newest", "2026-06-17T02:00:00.000Z"),
+            sampleTranscript("utterance-middle", "2026-06-17T01:00:00.000Z"),
+          ]
+          : [
+            sampleTranscript("utterance-oldest", "2026-06-17T00:00:00.000Z"),
+          ],
+        total: 3,
+        limit: 2,
+        offset,
+      }),
+    },
+  });
+  const context = pageContext(page, { limit: 2 });
+
+  await page.loadTranscripts.call(context, true);
+  await page.loadMore.call(context);
+
+  assert.deepEqual(context.data.items.map((item) => item.id), [
+    "utterance-newest",
+    "utterance-middle",
+    "utterance-oldest",
+  ]);
+  assert.deepEqual(context.data.items.map((item) => item.recordNumber), [3, 2, 1]);
 });
 
 test("transcripts page moves an included source to another chapter", async () => {

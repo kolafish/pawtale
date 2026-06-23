@@ -81,7 +81,7 @@
   >
     <view class="record-head">
       <view>
-        <text class="record-title">语音记录 {{index + 1}}</text>
+        <text class="record-title">语音记录 {{item.recordNumber}}</text>
         <text class="record-time">{{item.createdAtText}}</text>
         <text class="record-project">{{item.project_title || "我的回忆录"}}</text>
         <text class="record-meta">{{item.audioText}}</text>

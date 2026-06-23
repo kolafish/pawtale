@@ -22,7 +22,7 @@ import {
 import { configureAudiblePlayback } from "../../services/audio-playback";
 import { getMemoirIdentity } from "../../services/auth";
 import { ApiError } from "../../services/request";
-import { formatBeijingDateTime } from "../../services/time";
+import { formatBeijingDateTimeShort } from "../../services/time";
 import {
   clearTranscriptNavigationTarget,
   readTranscriptNavigationTarget,
@@ -86,6 +86,7 @@ interface ChapterPickerOption {
 }
 
 interface TranscriptItemView extends MemoirVoiceTranscriptItem {
+  recordNumber: number;
   editingText: string;
   editingCharCount: number;
   createdAtText: string;
@@ -195,7 +196,11 @@ export function transcriptAudioText(item: MemoirVoiceTranscriptItem): string {
 }
 
 export function transcriptCreatedAtText(item: Pick<MemoirVoiceTranscriptItem, "created_at">): string {
-  return formatBeijingDateTime(item.created_at) || "转写记录";
+  return formatBeijingDateTimeShort(item.created_at) || "转写记录";
+}
+
+export function transcriptRecordNumber(total: number, offset: number, index: number): number {
+  return Math.max(1, total - offset - index);
 }
 
 function transcriptSearchTerms(searchQuery: string): string[] {
@@ -437,6 +442,7 @@ function toViewItem(
   item: MemoirVoiceTranscriptItem,
   searchQuery = "",
   bookPlan: MemoirBookPlan | null = null,
+  recordNumber = 1,
 ): TranscriptItemView {
   const editingText = item.transcript_edited || item.transcript_raw;
   const isIncludedInBook = Boolean(item.is_included_in_book || item.included_chapters?.length);
@@ -446,6 +452,7 @@ function toViewItem(
   const chapterMoveOptions = transcriptChapterMoveOptions(item, bookPlan);
   return {
     ...item,
+    recordNumber,
     editingText,
     editingCharCount: editingText.trim().length,
     createdAtText: transcriptCreatedAtText(item),
@@ -504,7 +511,11 @@ function replaceItem(
   searchQuery = "",
   bookPlan: MemoirBookPlan | null = null,
 ): TranscriptItemView[] {
-  return items.map((item) => (item.id === next.id ? toViewItem(next, searchQuery, bookPlan) : item));
+  return items.map((item) => (
+    item.id === next.id
+      ? toViewItem(next, searchQuery, bookPlan, item.recordNumber)
+      : item
+  ));
 }
 
 function removeItem(items: TranscriptItemView[], id: string): TranscriptItemView[] {
@@ -654,7 +665,9 @@ Page<TranscriptsData, {
         }),
       ]);
       bookPlan = nextBookPlan;
-      const nextItems = response.items.map((item) => toViewItem(item, searchQuery, bookPlan));
+      const nextItems = response.items.map((item, index) => (
+        toViewItem(item, searchQuery, bookPlan, transcriptRecordNumber(response.total, offset, index))
+      ));
       if (requestToken !== this.loadToken) {
         return;
       }
@@ -950,7 +963,7 @@ Page<TranscriptsData, {
       return;
     }
     const items = [...this.data.items];
-    items[index] = toViewItem(items[index], this.data.searchQuery);
+    items[index] = toViewItem(items[index], this.data.searchQuery, this.data.bookPlan, items[index].recordNumber);
     this.setData({ items, error: "" });
   },
 
