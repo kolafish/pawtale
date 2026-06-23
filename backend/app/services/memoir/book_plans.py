@@ -78,7 +78,6 @@ class SourceSegment:
 class ValidatedChapterUpdate:
     id: str | None
     title: str
-    summary: str
     source_refs: list[MemoirBookChapterSourceRef]
 
 
@@ -178,7 +177,6 @@ def _chapter_response(
         plan_id=chapter.plan_id,
         project_id=chapter.project_id,
         title=chapter.title,
-        summary=chapter.summary,
         sort_order=chapter.sort_order,
         source_refs=[
             _source_ref_response(ref, source_created_at)
@@ -277,7 +275,6 @@ def _build_plan_prompt(project_title: str, sources: list[SourceSegment], max_cha
   "chapters": [
     {{
       "title": "章节标题",
-      "summary": "只概括该章节会整理哪些已讲述内容",
       "source_indices": [1, 2],
       "evidence_quote": "必须来自 source text 的短句"
     }}
@@ -287,7 +284,6 @@ def _build_plan_prompt(project_title: str, sources: list[SourceSegment], max_cha
 要求：
 - 只根据 source text 已经讲过的事实划分章节，不新增人物、时间、地点、事件或情绪。
 - 章节标题要短，像书稿目录，不要像 AI 总结标题。
-- summary 只能说明用户已经讲述的内容范围，不能扩写正文。
 - source_indices 必须来自给定 source_index，且每章至少包含一个来源。
 - evidence_quote 必须逐字来自对应 source text。
 - 如果素材很少，可以只返回 1 到 2 章。
@@ -335,7 +331,6 @@ def _chapters_from_payload(
         title = _string_value(item, "title")
         if not title:
             continue
-        summary = _string_value(item, "summary")
         quote = _string_value(item, "evidence_quote")
         refs: list[MemoirBookChapterSourceRef] = []
         seen_utterances: set[str] = set()
@@ -350,7 +345,6 @@ def _chapters_from_payload(
         chapters.append(
             MemoirBookPlanChapterInput(
                 title=title,
-                summary=summary,
                 source_refs=refs,
             )
         )
@@ -425,7 +419,6 @@ async def _replace_plan(
                 plan_id=plan.id,
                 project_id=project_id,
                 title=chapter.title.strip()[:200],
-                summary=chapter.summary.strip(),
                 sort_order=index,
                 source_refs_json=[_as_dict(ref) for ref in chapter.source_refs],
             )
@@ -679,7 +672,6 @@ def _validated_chapters(
         chapters.append(
             MemoirBookPlanChapterInput(
                 title=chapter.title,
-                summary=chapter.summary,
                 source_refs=refs,
             )
         )
@@ -715,7 +707,6 @@ def _validated_chapter_updates(
             ValidatedChapterUpdate(
                 id=chapter.id,
                 title=chapter.title,
-                summary=chapter.summary,
                 source_refs=refs,
             )
         )
@@ -751,13 +742,12 @@ def _build_chapter_title_prompt(chapter: MemoirBookPlanChapter, source_texts: li
     return f"""请为下面这一个回忆录章节重新拟一个正式章节名。
 
 当前章节名：{chapter.title}
-章节摘要：{chapter.summary or "无"}
 
 章节来源口述：
 {source_text or "无"}
 
 要求：
-- 只根据章节来源口述和摘要，不新增事实、人物、地点或情绪。
+- 只根据章节来源口述，不新增事实、人物、地点或情绪。
 - 标题要像书稿目录，短而正式，建议 6 到 14 个汉字。
 - 不要使用“转写”“新收录”“记录”“素材”“章节”等占位词。
 - 直接输出标题，不要解释，不要引号，不要编号。
@@ -886,7 +876,6 @@ async def update_book_plan(
             added_ids = new_ids - old_ids
             removed_ids = old_ids - new_ids
             chapter.title = chapter_update.title.strip()[:200]
-            chapter.summary = chapter_update.summary.strip()
             chapter.sort_order = index
             chapter.source_refs_json = [_as_dict(ref) for ref in chapter_update.source_refs]
             if added_ids or removed_ids:
@@ -903,7 +892,6 @@ async def update_book_plan(
                     plan_id=plan.id,
                     project_id=project_id,
                     title=chapter_update.title.strip()[:200],
-                    summary=chapter_update.summary.strip(),
                     sort_order=index,
                     source_refs_json=[_as_dict(ref) for ref in chapter_update.source_refs],
                     metadata_json={"created_from_plan_update_at": now},

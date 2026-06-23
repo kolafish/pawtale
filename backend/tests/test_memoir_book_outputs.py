@@ -89,7 +89,6 @@ async def _create_confirmed_book_plan(test_db, *, project_id: str, confirmed_cha
             plan_id=plan.id,
             project_id=project_id,
             title=title,
-            summary="",
             sort_order=index,
             source_refs_json=[],
         )

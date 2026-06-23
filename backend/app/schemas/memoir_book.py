@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.domain.memoir.types import (
     MemoirBookChapterDraftStatus,
@@ -30,8 +30,9 @@ class MemoirBookSourceIncludedChapter(BaseModel):
 
 
 class MemoirBookPlanChapterInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     title: str
-    summary: str = ""
     source_refs: list[MemoirBookChapterSourceRef] = Field(default_factory=list)
 
     @field_validator("title")
@@ -43,11 +44,6 @@ class MemoirBookPlanChapterInput(BaseModel):
         if len(title) > 80:
             raise ValueError("章节标题不能超过 80 个字")
         return title
-
-    @field_validator("summary")
-    @classmethod
-    def _valid_summary(cls, value: str) -> str:
-        return value.strip()
 
 
 class MemoirBookPlanGenerateRequest(BaseModel):
@@ -131,7 +127,6 @@ class MemoirBookPlanChapterResponse(BaseModel):
     plan_id: str
     project_id: str
     title: str
-    summary: str
     sort_order: int
     source_refs: list[MemoirBookChapterSourceRef] = Field(default_factory=list)
     metadata_json: dict[str, object] = Field(default_factory=dict)

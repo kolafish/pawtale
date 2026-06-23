@@ -354,7 +354,6 @@
 .title-input,
 .chapter-title-input,
 .chapter-title-inline-input,
-.summary-textarea,
 .draft-textarea {
   width: 100%;
   box-sizing: border-box;
@@ -480,7 +479,6 @@
   margin-top: 22rpx;
 }
 
-.summary-textarea,
 .draft-textarea {
   margin-top: 18rpx;
   min-height: 150rpx;
@@ -494,7 +492,6 @@
 }
 
 .source-preview,
-.chapter-summary,
 .draft-empty {
   display: block;
   margin-top: 18rpx;
@@ -589,10 +586,6 @@
   font-size: 24rpx;
   font-weight: 700;
   line-height: 1.35;
-}
-
-.chapter-summary {
-  color: #3a2119;
 }
 
 .draft-empty {

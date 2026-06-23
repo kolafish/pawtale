@@ -154,7 +154,6 @@ function sampleBookPlan() {
         plan_id: "plan-1",
         project_id: "project-1",
         title: "岁首欢聚记",
-        summary: "整理春节团聚。",
         sort_order: 0,
         source_refs: [sampleSourceRef("utterance-1"), sampleSourceRef("utterance-2")],
         metadata_json: {},
@@ -166,7 +165,6 @@ function sampleBookPlan() {
         plan_id: "plan-1",
         project_id: "project-1",
         title: "童年友情",
-        summary: "整理童年朋友。",
         sort_order: 1,
         source_refs: [sampleSourceRef("utterance-3")],
         metadata_json: {},
@@ -390,7 +388,7 @@ test("transcripts page moves an included source to another chapter", async () =>
     updates[0].data.chapters[1].source_refs.map((ref) => ref.utterance_id),
     ["utterance-3", "utterance-2"],
   );
-  assert.deepEqual(toasts, [{ title: "来源已移动", icon: "success" }]);
+  assert.deepEqual(toasts, [{ title: "素材已移动", icon: "success" }]);
   delete global.wx;
 });
 
