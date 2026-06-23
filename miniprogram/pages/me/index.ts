@@ -18,6 +18,7 @@ import {
   saveSelectedAIModel,
   type AIModelOption,
 } from "../../services/ai-model-settings";
+import { formatBeijingDateTime } from "../../services/time";
 import {
   readScopedTTSSettings,
   readTTSSettingsProfiles,
@@ -27,6 +28,11 @@ import {
   ttsSpeedLabel,
   ttsVoiceLabel,
 } from "../../services/tts-settings";
+import {
+  readVoiceAuthorizationConsentRecord,
+  VOICE_AUTHORIZATION_PAGE_URL,
+  VOICE_AUTHORIZATION_VERSION,
+} from "../../services/voice-authorization";
 import { replaceMemoirStore } from "../../stores/session";
 
 const WECHAT_PLACEHOLDER_DISPLAY_NAME = "微信用户";
@@ -61,6 +67,9 @@ interface MeData {
   aiModel: string;
   aiModelLabel: string;
   aiModelOptions: AIModelOption[];
+  voiceAuthorizationAgreed: boolean;
+  voiceAuthorizationStatusText: string;
+  voiceAuthorizationDetailText: string;
   chatTTSVoice: string;
   chatTTSVoiceLabel: string;
   bookTTSVoice: string;
@@ -180,6 +189,26 @@ function aiModelSettingsData(): Pick<MeData, "aiModel" | "aiModelLabel" | "aiMod
   };
 }
 
+function voiceAuthorizationSettingsData(): Pick<
+  MeData,
+  "voiceAuthorizationAgreed" | "voiceAuthorizationStatusText" | "voiceAuthorizationDetailText"
+> {
+  const consent = readVoiceAuthorizationConsentRecord();
+  if (consent?.agreed) {
+    const agreedAtText = formatBeijingDateTime(consent.agreedAt);
+    return {
+      voiceAuthorizationAgreed: true,
+      voiceAuthorizationStatusText: "已同意",
+      voiceAuthorizationDetailText: `${agreedAtText ? `${agreedAtText} 已同意 · ` : ""}协议版本 ${consent.version}`,
+    };
+  }
+  return {
+    voiceAuthorizationAgreed: false,
+    voiceAuthorizationStatusText: "未同意",
+    voiceAuthorizationDetailText: `开始语音前需要阅读并同意当前版本协议 ${VOICE_AUTHORIZATION_VERSION}`,
+  };
+}
+
 function loggedOutData(): Partial<MeData> {
   return {
     loggedIn: false,
@@ -204,6 +233,7 @@ function loggedOutData(): Partial<MeData> {
     utteranceCount: 0,
     totalUserCharCount: 0,
     totalAudioText: "0 秒",
+    ...voiceAuthorizationSettingsData(),
   };
 }
 
@@ -211,6 +241,7 @@ Page<MeData, {
   onShow(): Promise<void>;
   loadMe(): Promise<void>;
   loadVoiceStats(projectId: string): Promise<void>;
+  refreshVoiceAuthorizationConsent(): void;
   changeEmailInput(event: InputEvent): void;
   changePassword(event: InputEvent): void;
   changeCredentialEmail(event: InputEvent): void;
@@ -226,6 +257,7 @@ Page<MeData, {
   selectTTSVoice(event: VoiceDatasetEvent): void;
   selectTTSSpeed(event: SpeedDatasetEvent): void;
   selectAIModel(event: ModelDatasetEvent): void;
+  openVoiceAuthorization(): void;
   openProjects(): void;
   openVoiceProgress(): void;
   logout(): Promise<void>;
@@ -258,6 +290,7 @@ Page<MeData, {
     totalUserCharCount: 0,
     totalAudioText: "0 秒",
     ...aiModelSettingsData(),
+    ...voiceAuthorizationSettingsData(),
     chatTTSVoice: "",
     chatTTSVoiceLabel: "默认音色",
     bookTTSVoice: "",
@@ -271,9 +304,14 @@ Page<MeData, {
   },
 
   async onShow() {
+    this.refreshVoiceAuthorizationConsent();
     if (!this.data.loading) {
       await this.loadMe();
     }
+  },
+
+  refreshVoiceAuthorizationConsent() {
+    this.setData(voiceAuthorizationSettingsData());
   },
 
   async loadMe() {
@@ -524,6 +562,10 @@ Page<MeData, {
       aiModelOptions: AI_MODEL_OPTIONS,
     });
     wx.showToast({ title: "已保存", icon: "success" });
+  },
+
+  openVoiceAuthorization() {
+    wx.navigateTo({ url: VOICE_AUTHORIZATION_PAGE_URL });
   },
 
   openProjects() {

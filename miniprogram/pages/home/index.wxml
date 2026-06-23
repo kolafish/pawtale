@@ -80,7 +80,7 @@
         </view>
       </view>
     </view>
-    <view class="voice-auth-panel">
+    <view wx:if="{{!voiceAuthorizationAgreed}}" class="voice-auth-panel">
       <checkbox-group bindchange="changeVoiceAuthorization">
         <label class="voice-auth-row">
           <checkbox
