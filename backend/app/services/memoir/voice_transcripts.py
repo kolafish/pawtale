@@ -6,9 +6,9 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from fastapi import HTTPException
-from sqlalchemy import func, or_, select
+from sqlalchemy import false, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import aliased, selectinload
 
 from app.domain.memoir.types import (
     MemoirBookChapterDraftStatus,
@@ -51,6 +51,7 @@ PENDING_SOURCE_UTTERANCE_IDS_KEY = "pending_source_utterance_ids"
 REMOVED_SOURCE_UTTERANCE_IDS_KEY = "removed_source_utterance_ids"
 SOURCE_REFS_REMOVED_AT_KEY = "source_refs_removed_at"
 SOURCES_DELETED_STATUS_REASON = "sources_deleted"
+INCLUDED_FILTER_VALUES = {"all", "included", "not_included"}
 
 
 @dataclass(frozen=True)
@@ -195,6 +196,82 @@ def _transcript_filter(user_id: str, project_id: str | None = None):
     return clauses
 
 
+def _like_pattern(value: str) -> str:
+    escaped = value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"%{escaped}%"
+
+
+def _search_terms(search_query: str | None) -> list[str]:
+    if not search_query:
+        return []
+    return [term for term in re.split(r"\s+", search_query.strip()) if term][:8]
+
+
+def _question_search_filter(pattern: str):
+    user_message = aliased(MemoirChatMessage)
+    question_message = aliased(MemoirChatMessage)
+    later_question = aliased(MemoirChatMessage)
+    later_question_exists = (
+        select(later_question.id)
+        .where(
+            later_question.voice_session_id == MemoirVoiceUtterance.voice_session_id,
+            later_question.role == MemoirChatMessageRole.ASSISTANT.value,
+            func.trim(later_question.content_text) != "",
+            later_question.turn_index > question_message.turn_index,
+            later_question.turn_index < user_message.turn_index,
+        )
+        .exists()
+    )
+    return (
+        select(question_message.id)
+        .select_from(question_message)
+        .join(user_message, user_message.id == MemoirVoiceUtterance.chat_message_id)
+        .where(
+            question_message.voice_session_id == MemoirVoiceUtterance.voice_session_id,
+            question_message.role == MemoirChatMessageRole.ASSISTANT.value,
+            func.trim(question_message.content_text) != "",
+            question_message.content_text.ilike(pattern, escape="\\"),
+            question_message.turn_index < user_message.turn_index,
+            ~later_question_exists,
+        )
+        .exists()
+    )
+
+
+def _search_filter(term: str):
+    pattern = _like_pattern(term)
+    return or_(
+        MemoirVoiceUtterance.transcript_raw.ilike(pattern, escape="\\"),
+        MemoirVoiceUtterance.transcript_edited.ilike(pattern, escape="\\"),
+        _question_search_filter(pattern),
+    )
+
+
+async def _included_utterance_ids_for_filter(
+    db: AsyncSession,
+    user_id: str,
+    *,
+    project_id: str | None = None,
+) -> set[str]:
+    query = (
+        select(MemoirBookPlanChapter.source_refs_json)
+        .join(Project, MemoirBookPlanChapter.project_id == Project.id)
+        .where(Project.user_id == user_id)
+    )
+    if project_id:
+        query = query.where(Project.id == project_id)
+    rows = (await db.execute(query)).scalars().all()
+    utterance_ids: set[str] = set()
+    for refs in rows:
+        for ref in refs or []:
+            if not isinstance(ref, dict):
+                continue
+            utterance_id = ref.get("utterance_id")
+            if isinstance(utterance_id, str) and utterance_id:
+                utterance_ids.add(utterance_id)
+    return utterance_ids
+
+
 def _item_response(
     utterance: MemoirVoiceUtterance,
     included_chapters: list[MemoirVoiceTranscriptIncludedChapterResponse] | None = None,
@@ -320,10 +397,36 @@ async def list_voice_transcripts(
     user_id: str,
     *,
     project_id: str | None = None,
+    search_query: str | None = None,
+    included: str = "all",
+    guidance_mode: str | None = None,
+    current_guidance_module: str | None = None,
     limit: int = 50,
     offset: int = 0,
 ) -> MemoirVoiceTranscriptListResponse:
+    if included not in INCLUDED_FILTER_VALUES:
+        raise HTTPException(status_code=400, detail="不支持的转写收录筛选条件")
     filters = _transcript_filter(user_id, project_id)
+    filters.extend(_search_filter(term) for term in _search_terms(search_query))
+    if guidance_mode:
+        filters.append(MemoirVoiceSession.guidance_mode == guidance_mode)
+    if current_guidance_module:
+        filters.append(MemoirVoiceSession.current_guidance_module == current_guidance_module)
+    if included != "all":
+        included_utterance_ids = await _included_utterance_ids_for_filter(
+            db,
+            user_id,
+            project_id=project_id,
+        )
+        if included == "included":
+            filters.append(
+                MemoirVoiceUtterance.id.in_(included_utterance_ids)
+                if included_utterance_ids
+                else false()
+            )
+        else:
+            if included_utterance_ids:
+                filters.append(~MemoirVoiceUtterance.id.in_(included_utterance_ids))
     total = await db.scalar(
         select(func.count(MemoirVoiceUtterance.id))
         .join(MemoirVoiceSession, MemoirVoiceUtterance.voice_session_id == MemoirVoiceSession.id)

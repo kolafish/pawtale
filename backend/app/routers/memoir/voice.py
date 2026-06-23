@@ -1,5 +1,6 @@
 from pathlib import Path
 import struct
+from typing import Literal
 
 import aiofiles
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
@@ -39,6 +40,8 @@ from app.services.memoir.audio_files import audio_file_path
 
 
 router = APIRouter()
+VoiceTranscriptIncludedFilter = Literal["all", "included", "not_included"]
+VoiceTranscriptGuidanceModeFilter = Literal["free_narration", "guided_interview"]
 
 _PCM_SAMPLE_RATE = 16000
 _PCM_CHANNELS = 1
@@ -238,6 +241,10 @@ async def play_mobile_memoir_audio_file(
 @router.get("/voice-transcripts", response_model=MemoirVoiceTranscriptListResponse)
 async def list_mobile_memoir_voice_transcripts(
     project_id: str | None = None,
+    q: str | None = Query(None, max_length=120),
+    included: VoiceTranscriptIncludedFilter = "all",
+    guidance_mode: VoiceTranscriptGuidanceModeFilter | None = None,
+    module: str | None = Query(None, min_length=1, max_length=80),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
@@ -249,6 +256,10 @@ async def list_mobile_memoir_voice_transcripts(
         db,
         current_user.id,
         project_id=project_id,
+        search_query=q,
+        included=included,
+        guidance_mode=guidance_mode,
+        current_guidance_module=module,
         limit=limit,
         offset=offset,
     )
