@@ -21,6 +21,8 @@ import type {
   MemoirVoiceNoAnswerPromptRequest,
   MemoirVoiceTranscriptItem,
   MemoirVoiceTranscriptListResponse,
+  MemoirVoiceSearchQueryParseResponse,
+  MemoirVoiceTranscriptIncludedFilter,
   MemoirVoiceSearchTranscriptionResponse,
   MemoirVoiceProgressResponse,
   MemoirVoiceSessionCreate,
@@ -160,6 +162,9 @@ export async function createMemoirAssistantTTS(
 interface VoiceTranscriptListOptions {
   projectId?: string;
   query?: string;
+  included?: MemoirVoiceTranscriptIncludedFilter;
+  guidanceMode?: string;
+  module?: string;
   limit?: number;
   offset?: number;
 }
@@ -172,6 +177,15 @@ function queryString(options: VoiceTranscriptListOptions): string {
   const searchQuery = options.query?.trim();
   if (searchQuery) {
     query.push(`q=${encodeURIComponent(searchQuery)}`);
+  }
+  if (options.included && options.included !== "all") {
+    query.push(`included=${encodeURIComponent(options.included)}`);
+  }
+  if (options.guidanceMode) {
+    query.push(`guidance_mode=${encodeURIComponent(options.guidanceMode)}`);
+  }
+  if (options.module) {
+    query.push(`module=${encodeURIComponent(options.module)}`);
   }
   if (options.limit !== undefined) {
     query.push(`limit=${encodeURIComponent(String(options.limit))}`);
@@ -201,6 +215,21 @@ export async function transcribeMemoirVoiceSearchAudio(
     data: {
       audio_base64: audioBase64,
       mime_type: mimeType,
+    },
+  });
+}
+
+export async function parseMemoirVoiceSearchQuery(
+  text: string,
+  aiModel?: string,
+): Promise<MemoirVoiceSearchQueryParseResponse> {
+  await ensureBackendSession();
+  const selectedModel = aiModel?.trim() || readSelectedAIModel();
+  return request<MemoirVoiceSearchQueryParseResponse>("/api/mobile/memoir/search-query/parse", {
+    method: "POST",
+    data: {
+      text,
+      ...(selectedModel ? { ai_model: selectedModel } : {}),
     },
   });
 }

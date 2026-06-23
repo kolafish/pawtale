@@ -37,6 +37,9 @@ function loadTranscriptsPage({ authExports = {}, voiceApiExports = {}, voiceSear
       listMemoirVoiceTranscripts: async () => {
         throw new Error("listMemoirVoiceTranscripts was not mocked");
       },
+      parseMemoirVoiceSearchQuery: async () => {
+        throw new Error("parseMemoirVoiceSearchQuery was not mocked");
+      },
       updateMemoirVoiceTranscript: async () => {
         throw new Error("updateMemoirVoiceTranscript was not mocked");
       },
@@ -355,6 +358,7 @@ test("transcripts page ignores stale search responses", async () => {
 
 test("transcripts page applies recognized voice search text", async () => {
   const calls = [];
+  const parseCalls = [];
   const toasts = [];
   global.wx = {
     showToast(options) {
@@ -370,6 +374,12 @@ test("transcripts page applies recognized voice search text", async () => {
         projects: [],
       }),
     },
+    voiceSearchExports: {
+      recordMemoirVoiceSearchQuery: async (options) => {
+        options.onRecordingEnd();
+        return "帮我找未收录的外婆家院子，地点相关";
+      },
+    },
     voiceApiExports: {
       listMemoirVoiceTranscripts: async (options) => {
         calls.push(options);
@@ -380,11 +390,18 @@ test("transcripts page applies recognized voice search text", async () => {
           offset: 0,
         };
       },
-    },
-    voiceSearchExports: {
-      recordMemoirVoiceSearchQuery: async (options) => {
-        options.onRecordingEnd();
-        return "外婆家的院子";
+      parseMemoirVoiceSearchQuery: async (text) => {
+        parseCalls.push(text);
+        return {
+          original_text: text,
+          query: "外婆家院子",
+          keywords: ["外婆", "院子"],
+          filters: { included: "not_included", guidance_mode: null, module: "place" },
+          display_text: "外婆家院子 · 未收录 · 地点",
+          used_ai: true,
+          provider: "fake-ai",
+          model: "fake-model",
+        };
       },
     },
   });
@@ -392,13 +409,65 @@ test("transcripts page applies recognized voice search text", async () => {
 
   await page.startVoiceSearch.call(context);
 
-  assert.equal(context.data.searchInput, "外婆家的院子");
-  assert.equal(context.data.searchQuery, "外婆家的院子");
-  assert.deepEqual(calls.map((item) => item.query), ["外婆家的院子"]);
+  assert.deepEqual(parseCalls, ["帮我找未收录的外婆家院子，地点相关"]);
+  assert.equal(context.data.searchInput, "外婆家院子");
+  assert.equal(context.data.searchQuery, "外婆家院子");
+  assert.deepEqual(calls.map((item) => item.query), ["外婆家院子"]);
+  assert.deepEqual(calls.map((item) => item.included), ["not_included"]);
+  assert.deepEqual(calls.map((item) => item.module), ["place"]);
+  assert.deepEqual(context.data.searchChips, [{ text: "外婆" }, { text: "院子" }, { text: "未收录" }, { text: "地点" }]);
+  assert.equal(context.data.searchDisplayText, "外婆家院子 · 未收录 · 地点");
   assert.equal(context.data.voiceSearchRecording, false);
   assert.equal(context.data.voiceSearchTranscribing, false);
   assert.deepEqual(toasts, [{ title: "已识别", icon: "success" }]);
   delete global.wx;
+});
+
+test("transcripts page supports filter-only parsed voice search", async () => {
+  const calls = [];
+  const { page } = loadTranscriptsPage({
+    authExports: {
+      getMemoirIdentity: async () => ({
+        id: "user-1",
+        active_project_id: "project-1",
+        active_project: { id: "project-1", title: "我的回忆录" },
+        projects: [],
+      }),
+    },
+    voiceApiExports: {
+      listMemoirVoiceTranscripts: async (options) => {
+        calls.push(options);
+        return {
+          items: [sampleTranscript("utterance-filtered")],
+          total: options.included === "not_included" ? 1 : 8,
+          limit: 30,
+          offset: 0,
+        };
+      },
+    },
+  });
+  const context = pageContext(page);
+
+  await page.applySearch.call(
+    context,
+    "",
+    { included: "not_included", module: "work" },
+    {
+      original_text: "帮我找工作相关的未收录记录",
+      query: "",
+      keywords: [],
+      filters: { included: "not_included", guidance_mode: null, module: "work" },
+      display_text: "未收录 · 工作",
+      used_ai: false,
+    },
+  );
+  await page.clearSearch.call(context);
+
+  assert.deepEqual(calls.map((item) => item.query), [undefined, undefined]);
+  assert.deepEqual(calls.map((item) => item.included), ["not_included", "all"]);
+  assert.deepEqual(calls.map((item) => item.module), ["work", undefined]);
+  assert.equal(context.data.hasSearchCriteria, false);
+  assert.deepEqual(context.data.searchChips, []);
 });
 
 test("transcripts page stops active voice search recording on second tap", async () => {

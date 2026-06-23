@@ -360,6 +360,36 @@ class MemoirVoiceSearchTranscriptionResponse(BaseModel):
     transcript: str
 
 
+class MemoirVoiceSearchQueryParseRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=240)
+    ai_model: str | None = None
+
+    @field_validator("text")
+    @classmethod
+    def _non_empty_search_text(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("不能为空")
+        return normalized
+
+
+class MemoirVoiceSearchQueryFiltersResponse(BaseModel):
+    included: str = "all"
+    guidance_mode: str | None = None
+    module: str | None = None
+
+
+class MemoirVoiceSearchQueryParseResponse(BaseModel):
+    original_text: str
+    query: str
+    keywords: list[str] = Field(default_factory=list)
+    filters: MemoirVoiceSearchQueryFiltersResponse
+    display_text: str
+    used_ai: bool = False
+    provider: str | None = None
+    model: str | None = None
+
+
 class MemoirVoiceTranscriptUpdateRequest(BaseModel):
     transcript_edited: str
 

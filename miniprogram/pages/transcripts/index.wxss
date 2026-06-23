@@ -131,6 +131,25 @@
   border: 0;
 }
 
+.search-chips {
+  margin-top: 14rpx;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10rpx;
+}
+
+.search-chip {
+  max-width: 100%;
+  padding: 8rpx 14rpx;
+  border-radius: 999rpx;
+  background: #fff1ec;
+  color: #7a3b31;
+  font-size: 23rpx;
+  font-weight: 800;
+  line-height: 1.35;
+  word-break: break-word;
+}
+
 .search-summary {
   display: block;
   margin-top: 12rpx;

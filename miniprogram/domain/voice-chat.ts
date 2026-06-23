@@ -1,5 +1,6 @@
 export type MemoirGuidanceMode = "free_narration" | "guided_interview";
 export type MemoirGuidanceModule = "person" | "event" | "place" | "period" | "theme";
+export type MemoirVoiceTranscriptIncludedFilter = "all" | "included" | "not_included";
 export type MemoirVoiceSessionStatus = "created" | "listening" | "speaking" | "stopped" | "failed";
 export type MemoirChatMessageRole = "user" | "assistant" | "system";
 export type MemoirChatContentStatus = "partial" | "final" | "corrected";
@@ -246,6 +247,23 @@ export interface MemoirVoiceTranscriptListResponse {
 
 export interface MemoirVoiceSearchTranscriptionResponse {
   transcript: string;
+}
+
+export interface MemoirVoiceSearchQueryFilters {
+  included: MemoirVoiceTranscriptIncludedFilter;
+  guidance_mode?: MemoirGuidanceMode | null;
+  module?: string | null;
+}
+
+export interface MemoirVoiceSearchQueryParseResponse {
+  original_text: string;
+  query: string;
+  keywords: string[];
+  filters: MemoirVoiceSearchQueryFilters;
+  display_text: string;
+  used_ai: boolean;
+  provider?: string | null;
+  model?: string | null;
 }
 
 export interface MemoirBookChapterSourceRef {
