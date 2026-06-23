@@ -125,3 +125,31 @@ test("voice search service navigates to authorization before recording", async (
   assert.deepEqual(navigations, ["/pages/voice-authorization/index"]);
   delete global.wx;
 });
+
+test("voice search service rejects pending recording when stop fails", async () => {
+  global.wx = {
+    getRecorderManager() {
+      return {
+        start() {},
+        stop() {
+          throw new Error("operateRecorder:fail already stopped");
+        },
+        onStart() {},
+        onStop() {},
+        onFrameRecorded() {},
+        onError() {},
+      };
+    },
+  };
+  const {
+    recordMemoirVoiceSearchQuery,
+    stopMemoirVoiceSearchRecording,
+  } = loadVoiceSearchService();
+
+  const promise = recordMemoirVoiceSearchQuery();
+  await flushAsyncSetup();
+  stopMemoirVoiceSearchRecording();
+
+  await assert.rejects(promise, /already stopped/);
+  delete global.wx;
+});

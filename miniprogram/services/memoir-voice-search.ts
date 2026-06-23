@@ -96,10 +96,16 @@ function readFileAsBase64(filePath: string): Promise<string> {
 }
 
 export function stopMemoirVoiceSearchRecording(): void {
-  if (!pendingRecording) {
+  const pending = pendingRecording;
+  if (!pending) {
     return;
   }
-  getRecorderManager().stop();
+  try {
+    getRecorderManager().stop();
+  } catch (error) {
+    pendingRecording = null;
+    pending.reject(error instanceof Error ? error : new Error("录音停止失败"));
+  }
 }
 
 export async function recordMemoirVoiceSearchQuery(
