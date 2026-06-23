@@ -91,6 +91,22 @@ declare namespace WechatMiniprogram {
     onError(callback: (result: GeneralCallbackResult) => void): void;
   }
 
+  interface FileSystemReadFileSuccessCallbackResult extends GeneralCallbackResult {
+    data: string | ArrayBuffer;
+  }
+
+  interface FileSystemReadFileOption {
+    filePath: string;
+    encoding?: "ascii" | "base64" | "binary" | "hex" | "ucs2" | "ucs-2" | "utf16le" | "utf-16le" | "utf-8" | "utf8" | "latin1";
+    success?(result: FileSystemReadFileSuccessCallbackResult): void;
+    fail?(result: GeneralCallbackResult): void;
+    complete?(result: GeneralCallbackResult): void;
+  }
+
+  interface FileSystemManager {
+    readFile(option: FileSystemReadFileOption): void;
+  }
+
   interface ConnectSocketOption {
     url: string;
     header?: Record<string, string>;
@@ -218,6 +234,7 @@ declare namespace WechatMiniprogram {
     downloadFile(option: DownloadFileOption): void;
     connectSocket(option: ConnectSocketOption): SocketTask;
     getRecorderManager(): RecorderManager;
+    getFileSystemManager(): FileSystemManager;
     createInnerAudioContext(): InnerAudioContext;
     getPrivacySetting?(option: PrivacySettingOption): void;
     requirePrivacyAuthorize?(option: PrivacyAuthorizeOption): void;

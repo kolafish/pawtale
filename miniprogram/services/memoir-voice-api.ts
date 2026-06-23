@@ -21,6 +21,7 @@ import type {
   MemoirVoiceNoAnswerPromptRequest,
   MemoirVoiceTranscriptItem,
   MemoirVoiceTranscriptListResponse,
+  MemoirVoiceSearchTranscriptionResponse,
   MemoirVoiceProgressResponse,
   MemoirVoiceSessionCreate,
   MemoirVoiceSessionDetail,
@@ -188,6 +189,20 @@ export async function listMemoirVoiceTranscripts(
   return request<MemoirVoiceTranscriptListResponse>(
     `/api/mobile/memoir/voice-transcripts${queryString(options)}`,
   );
+}
+
+export async function transcribeMemoirVoiceSearchAudio(
+  audioBase64: string,
+  mimeType = "audio/pcm",
+): Promise<MemoirVoiceSearchTranscriptionResponse> {
+  await ensureBackendSession();
+  return request<MemoirVoiceSearchTranscriptionResponse>("/api/mobile/memoir/search-query/transcribe", {
+    method: "POST",
+    data: {
+      audio_base64: audioBase64,
+      mime_type: mimeType,
+    },
+  });
 }
 
 export async function getMemoirBookPlan(projectId: string): Promise<MemoirBookPlan> {
