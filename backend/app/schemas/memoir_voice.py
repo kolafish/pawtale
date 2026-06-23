@@ -11,7 +11,6 @@ from app.domain.memoir.types import (
 
 
 class MemoirVoiceSessionCreate(BaseModel):
-    memoir_session_id: str | None = None
     guidance_mode: MemoirGuidanceMode = MemoirGuidanceMode.FREE_NARRATION
     current_guidance_module: str | None = None
     provider: str | None = None
@@ -77,7 +76,6 @@ class MemoirAssistantTTSRequest(BaseModel):
 class MemoirVoiceSessionResponse(BaseModel):
     id: str
     project_id: str
-    memoir_session_id: str | None = None
     status: MemoirVoiceSessionStatus
     guidance_mode: MemoirGuidanceMode
     current_guidance_module: str | None = None

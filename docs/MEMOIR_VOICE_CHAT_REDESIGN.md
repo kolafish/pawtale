@@ -294,7 +294,6 @@ assistant message
 memoir_voice_sessions
 ├─ id
 ├─ project_id
-├─ memoir_session_id
 ├─ status                 # created / listening / speaking / stopped / failed
 ├─ guidance_mode          # free_narration / guided_interview
 ├─ current_guidance_module
@@ -335,11 +334,11 @@ memoir_voice_utterances
 
 旧表的定位：
 
-- `memoir_questions`：legacy 固定问题；新版只作冷启动兜底或迁移参考。
-- `memoir_answer_sessions` / `memoir_answer_segments`：legacy 采集草稿；新版不继续扩展。
+- `memoir_questions` / `memoir_sessions` / `memoir_answers` / `memoir_drafts`：legacy 固定问答链路；当前代码不再保留，只通过 baseline commit 追溯。
+- 旧 memory-first 结构化记忆、覆盖度、问题候选和旧输出链路：当前代码不再保留；后续如恢复此能力，需要重新挂到 chat message、voice utterance 和 transcript evidence 上。
 - `audio_files`：可复用，仍保存原始音频资产。
 - `memoir_transcript_versions`：继续复用，用于 ASR 原文、方言修正、用户编辑和最终确认。
-- memory/output 相关表继续保留，消费新版 chat message 和 transcript evidence。
+- `memoir_book_*`：保留为当前成书规划、章节草稿和整书输出链路。
 
 ### Realtime Voice Schema Boundary
 
@@ -673,12 +672,8 @@ Streaming ASR MVP 必须满足：
 - 原始音频、ASR 原文、修正文、用户确认文本分层保存。
 - 家人/编辑端能追溯事实来源。
 
-## 旧文档归档说明
+## Legacy 追溯
 
-以下文档描述的是上一版或中间态，不再作为新版实现目标：
+旧版文档和产品代码不再保留在当前工作树中。需要查看固定问题、离线 ASR、memory-first 中间态或旧写作产物设计时，直接通过 legacy baseline commit 做 Git 追溯。
 
-- `docs/MEMOIR_MINIPROGRAM_PRODUCT.md`
-- `docs/MEMOIR_MEMORY_FIRST_V1_PLAN.md`
-- `docs/MEMOIR_MEMORY_ARCHITECTURE.md`
-
-后续实现以本文档为主。旧文档中仍有价值的部分包括：证据链、结构化记忆、覆盖度地图、写作产物分层。这些能力会迁移到新版 chat message 和 transcript evidence 模型上。
+后续实现以本文档为主。旧方案中仍有价值的部分包括：证据链、结构化记忆、覆盖度地图、写作产物分层。这些能力会迁移到新版 chat message 和 transcript evidence 模型上。

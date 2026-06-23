@@ -17,7 +17,7 @@ from sqlalchemy.orm import selectinload
 
 from app.config import Settings, get_settings
 from app.domain.memoir.types import MemoirChatMessageRole
-from app.models.memoir import AudioFile, MemoirAnswer, MemoirChatMessage, MemoirVoiceUtterance
+from app.models.memoir import AudioFile, MemoirChatMessage, MemoirVoiceUtterance
 from app.models.projects import Project
 from app.schemas.memoir_voice import (
     MemoirAssistantTTSRequest,
@@ -352,7 +352,6 @@ async def _audio_file_is_referenced(db: AsyncSession, audio_file_id: str) -> boo
     queries = [
         select(MemoirChatMessage.id).where(MemoirChatMessage.audio_file_id == audio_file_id).limit(1),
         select(MemoirVoiceUtterance.id).where(MemoirVoiceUtterance.audio_file_id == audio_file_id).limit(1),
-        select(MemoirAnswer.id).where(MemoirAnswer.audio_file_id == audio_file_id).limit(1),
     ]
     for query in queries:
         if await db.scalar(query):

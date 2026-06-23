@@ -19,7 +19,7 @@ from app.schemas.memoir_voice import (
     MemoirVoiceSessionDetailResponse,
     MemoirVoiceSessionStopRequest,
 )
-from app.services.memoir.access import load_memoir_project, load_session
+from app.services.memoir.access import load_memoir_project
 
 
 def _detail_options():
@@ -53,15 +53,10 @@ async def create_voice_session(
     req: MemoirVoiceSessionCreate,
 ) -> MemoirVoiceSessionDetailResponse:
     project = await load_memoir_project(db, project_id, user_id)
-    if req.memoir_session_id:
-        memoir_session = await load_session(db, req.memoir_session_id, user_id)
-        if memoir_session.project_id != project.id:
-            raise HTTPException(status_code=404, detail="访谈不存在")
 
     now = datetime.utcnow()
     voice_session = MemoirVoiceSession(
         project_id=project.id,
-        memoir_session_id=req.memoir_session_id,
         status=MemoirVoiceSessionStatus.CREATED.value,
         guidance_mode=req.guidance_mode.value,
         current_guidance_module=req.current_guidance_module,

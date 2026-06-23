@@ -11,10 +11,7 @@ from app.domain.projects.templates import initialize_project_template
 from app.domain.projects.types import ProjectType
 from app.models.memoir import (
     AudioFile,
-    MemoirAnswer,
     MemoirChatMessage,
-    MemoirQuestion,
-    MemoirSession,
     MemoirVoiceSession,
     MemoirVoiceUtterance,
 )
@@ -165,22 +162,12 @@ async def _memoir_project_audio_files(
             MemoirVoiceUtterance.audio_file_id.is_not(None),
         )
     )
-    answer_audio_ids = (
-        select(MemoirAnswer.audio_file_id)
-        .join(MemoirQuestion, MemoirAnswer.question_id == MemoirQuestion.id)
-        .join(MemoirSession, MemoirQuestion.session_id == MemoirSession.id)
-        .where(
-            MemoirSession.project_id == project_id,
-            MemoirAnswer.audio_file_id.is_not(None),
-        )
-    )
     result = await db.execute(
         select(AudioFile).where(
             AudioFile.user_id == user_id,
             or_(
                 AudioFile.id.in_(chat_audio_ids),
                 AudioFile.id.in_(utterance_audio_ids),
-                AudioFile.id.in_(answer_audio_ids),
             ),
         )
     )
@@ -206,7 +193,6 @@ async def _referenced_audio_file_ids(db: AsyncSession, audio_file_ids: list[str]
         select(MemoirVoiceUtterance.audio_file_id).where(
             MemoirVoiceUtterance.audio_file_id.in_(audio_file_ids)
         ),
-        select(MemoirAnswer.audio_file_id).where(MemoirAnswer.audio_file_id.in_(audio_file_ids)),
     ]
     for query in queries:
         result = await db.execute(query)

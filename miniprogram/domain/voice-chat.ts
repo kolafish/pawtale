@@ -14,7 +14,6 @@ export type VoiceChatErrorKind = "connection" | "recorder" | "gateway" | "asr" |
 export interface MemoirVoiceSession {
   id: string;
   project_id: string;
-  memoir_session_id?: string | null;
   status: MemoirVoiceSessionStatus;
   guidance_mode: MemoirGuidanceMode;
   current_guidance_module?: string | null;
@@ -115,7 +114,6 @@ export interface MemoirVoiceProgressResponse {
 }
 
 export interface MemoirVoiceSessionCreate {
-  memoir_session_id?: string;
   guidance_mode: MemoirGuidanceMode;
   current_guidance_module?: string;
   provider?: string;

@@ -60,7 +60,7 @@
 
 - 回忆录小程序新版主线文档是 `docs/MEMOIR_VOICE_CHAT_REDESIGN.md`，后续回忆录小程序改造默认以它为准。
 - 旧版固定问题、整段录音上传、离线 ASR、整理稿确认链路只通过 commit `bd3599ad3dddf382b242c47071c856d382543cac` 追溯，不在文档里维护旧代码路径清单。
-- 旧文档 `docs/MEMOIR_MINIPROGRAM_PRODUCT.md`、`docs/MEMOIR_MEMORY_FIRST_V1_PLAN.md`、`docs/MEMOIR_MEMORY_ARCHITECTURE.md` 仅作为 legacy 背景或长期原则参考。
+- 旧版回忆录文档已删除；需要查看 legacy 背景时通过上述 baseline commit 做 Git 追溯。
 - 新版产品形态是 `VAD + Streaming ASR + LLM Dynamic Follow-up + Streaming TTS`，以 voice session、chat message、realtime transcript、audio evidence 为核心，不再继续强化固定问答模型。
 - 新版创建/开始访谈时要区分 `free_narration` 弱引导和 `guided_interview` 强引导：弱引导支持叙述者按时间线自主讲述，强引导由 AI 按人物、事件、地点、时间段、主题等模块推进。
 - 用户原始语音是回忆录基础数据资产。ASR 原文、校正文、结构化记忆和最终文章都必须能回溯到原始音频、transcript version 和音频时间段。
