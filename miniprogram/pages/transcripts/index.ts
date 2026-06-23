@@ -257,10 +257,12 @@ Page<TranscriptsData, {
   scrollToTranscript(item: TranscriptItemView): void;
   audio: WechatMiniprogram.InnerAudioContext | null;
   playToken: number;
+  loadToken: number;
   searchDebounceTimer: number | null;
 }>({
   audio: null,
   playToken: 0,
+  loadToken: 0,
   searchDebounceTimer: null,
 
   data: {
@@ -288,10 +290,13 @@ Page<TranscriptsData, {
   },
 
   async loadTranscripts(reset = false) {
-    if (this.data.loading) {
+    if (this.data.loading && !reset) {
       return;
     }
+    this.loadToken += 1;
+    const requestToken = this.loadToken;
     const offset = reset ? 0 : this.data.offset;
+    const searchQuery = this.data.searchQuery;
     this.setData({ loading: true, error: "" });
     try {
       let activeProjectId = this.data.activeProjectId;
@@ -302,6 +307,9 @@ Page<TranscriptsData, {
         projectTitle = identity.active_project?.title || "尚未创建回忆录";
       }
       if (!activeProjectId) {
+        if (requestToken !== this.loadToken) {
+          return;
+        }
         this.setData({
           activeProjectId: "",
           projectTitle: projectTitle || "尚未创建回忆录",
@@ -313,7 +321,6 @@ Page<TranscriptsData, {
         });
         return;
       }
-      const searchQuery = this.data.searchQuery;
       const response = await listMemoirVoiceTranscripts({
         projectId: activeProjectId,
         query: searchQuery || undefined,
@@ -321,6 +328,9 @@ Page<TranscriptsData, {
         offset,
       });
       const nextItems = response.items.map((item) => toViewItem(item, searchQuery));
+      if (requestToken !== this.loadToken) {
+        return;
+      }
       this.setData({
         needsLogin: false,
         activeProjectId,
@@ -332,6 +342,9 @@ Page<TranscriptsData, {
         highlightedId: reset ? "" : this.data.highlightedId,
       });
     } catch (error) {
+      if (requestToken !== this.loadToken) {
+        return;
+      }
       if (error instanceof ApiError && [401, 403].includes(error.statusCode)) {
         this.setData({
           needsLogin: true,
@@ -347,7 +360,9 @@ Page<TranscriptsData, {
       }
       this.setData({ error: error instanceof Error ? error.message : "转写记录加载失败" });
     } finally {
-      this.setData({ loading: false });
+      if (requestToken === this.loadToken) {
+        this.setData({ loading: false });
+      }
     }
   },
 
