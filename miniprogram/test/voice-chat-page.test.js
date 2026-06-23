@@ -535,6 +535,99 @@ test("voice chat asks with AI voice when auto-listen hears no answer", async () 
   assert.equal(context.data.persistenceStateText, "AI 正在确认");
 });
 
+test("voice chat ignores stale no-answer prompt after manual recording resumes", async () => {
+  let resolvePrompt = () => {};
+  const noAnswerRequests = [];
+  const preparedTTS = [];
+  const startOptions = [];
+  const noAnswerPrompt = new Promise((resolve) => {
+    resolvePrompt = () => resolve({
+      follow_up_text: "我这边没有听到声音，您可以接着刚才的问题慢慢说。",
+      message: {
+        id: "assistant-no-answer-stale",
+        role: "assistant",
+        content_text: "我这边没有听到声音，您可以接着刚才的问题慢慢说。",
+        audio_file_id: "",
+        transcript_version_id: "",
+        metadata_json: { source: "ai.no_answer_prompt", attempt: 1 },
+      },
+    });
+  });
+  const page = loadVoiceChatPage({
+    streamingExports: {
+      MemoirStreamingAsrClient: class {
+        async connect() {}
+        close() {}
+        startRecording(options) {
+          startOptions.push(options);
+          return true;
+        }
+        stopRecording() {}
+        configureAutoStop() {}
+        async finishSession() {}
+      },
+    },
+    voiceApiExports: {
+      createMemoirVoiceNoAnswerPrompt: async (voiceSessionId, data) => {
+        noAnswerRequests.push({ voiceSessionId, data });
+        return noAnswerPrompt;
+      },
+    },
+    voiceAuthorizationExports: {
+      readVoiceAuthorizationConsent: () => true,
+      syncVoiceAuthorizationConsent: async () => ({ id: "consent-1" }),
+    },
+  });
+  const context = {
+    ...page,
+    data: {
+      ...page.data,
+      voiceSessionId: "voice-1",
+      voiceAuthorizationAgreed: true,
+      status: "ready",
+      autoStopEnabled: true,
+      autoListenStateText: "AI 说完，正在听你说",
+      persistenceStateText: "等待识别",
+      primaryActionText: "暂停收音",
+    },
+    setData(patch) {
+      this.data = { ...this.data, ...patch };
+    },
+    async prepareFollowUpTTS(messageId, forceRegenerate, autoListenAfterPlayback) {
+      preparedTTS.push({ messageId, forceRegenerate, autoListenAfterPlayback });
+    },
+  };
+
+  await page.connectGateway.call(context);
+  page.handleCaptureStats.call(context, {
+    state: "stopping",
+    frameCount: 2,
+    audioBytesSent: 6400,
+    recordingElapsedMs: 15000,
+    gatewayState: "recording",
+    audioLevel: 0,
+    silentElapsedMs: 15000,
+    autoStopped: true,
+    autoStopReason: "no_voice",
+  });
+  assert.equal(noAnswerRequests.length, 1);
+  assert.equal(context.data.followUpLoading, true);
+
+  await page.startRecordingAfterPrivacy.call(context, false);
+  assert.equal(context.data.followUpLoading, false);
+  assert.equal(context.consecutiveNoAnswerPrompts, 0);
+  assert.equal(context.noAnswerPromptInFlight, false);
+  resolvePrompt();
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(preparedTTS.length, 0);
+  assert.equal(context.data.transcriptLines.length, 0);
+  assert.equal(context.data.assistantPromptText, "");
+  assert.equal(context.data.primaryActionText, "暂停收音");
+  assert.equal(startOptions.at(-1).noVoiceActivityTimeoutMs, 0);
+});
+
 test("voice chat pauses after the second consecutive no-answer prompt", async () => {
   const noAnswerRequests = [];
   const preparedTTS = [];

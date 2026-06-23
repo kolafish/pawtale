@@ -171,6 +171,7 @@ Page<VoiceChatData, {
   startRecordingAfterPrivacy(autoTriggered?: boolean): Promise<boolean>;
   toggleRecording(): void;
   shouldAutoStartListening(): boolean;
+  cancelPendingNoAnswerPrompt(clearLoading?: boolean): void;
   handleNoAnswerAutoStop(): Promise<void>;
   finishSession(): Promise<void>;
   handleStatus(status: VoiceChatConnectionStatus): void;
@@ -185,6 +186,7 @@ Page<VoiceChatData, {
   ttsProgressStartedAtMs: number;
   ttsRequestSerial: number;
   noAnswerPromptInFlight: boolean;
+  noAnswerPromptRequestSerial: number;
   consecutiveNoAnswerPrompts: number;
   handledNoAnswerFrameCount: number;
 }>({
@@ -194,6 +196,7 @@ Page<VoiceChatData, {
   ttsProgressStartedAtMs: 0,
   ttsRequestSerial: 0,
   noAnswerPromptInFlight: false,
+  noAnswerPromptRequestSerial: 0,
   consecutiveNoAnswerPrompts: 0,
   handledNoAnswerFrameCount: -1,
 
@@ -307,6 +310,8 @@ Page<VoiceChatData, {
 
   onUnload() {
     followUpRequestSerial += 1;
+    this.noAnswerPromptRequestSerial += 1;
+    this.noAnswerPromptInFlight = false;
     this.persistCurrentTranscriptSnapshot();
     this.persistPendingVoiceClose("unload");
     this.cancelFollowUpTTS();
@@ -1054,6 +1059,7 @@ Page<VoiceChatData, {
   async startRecordingAfterPrivacy(autoTriggered = false) {
     if (!autoTriggered) {
       this.consecutiveNoAnswerPrompts = 0;
+      this.cancelPendingNoAnswerPrompt();
     }
     if (!(await this.syncVoiceAuthorizationForSession())) {
       return false;
@@ -1122,11 +1128,24 @@ Page<VoiceChatData, {
     });
   },
 
+  cancelPendingNoAnswerPrompt(clearLoading = true) {
+    this.noAnswerPromptRequestSerial += 1;
+    if (!this.noAnswerPromptInFlight) {
+      return;
+    }
+    this.noAnswerPromptInFlight = false;
+    if (clearLoading) {
+      this.setData({ followUpLoading: false });
+    }
+  },
+
   async handleNoAnswerAutoStop() {
     if (this.noAnswerPromptInFlight || !this.data.voiceSessionId) {
       return;
     }
     this.noAnswerPromptInFlight = true;
+    const requestSerial = this.noAnswerPromptRequestSerial + 1;
+    this.noAnswerPromptRequestSerial = requestSerial;
     const attempt = Math.min(this.consecutiveNoAnswerPrompts + 1, MAX_CONSECUTIVE_NO_ANSWER_PROMPTS);
     const autoListenAfterPlayback = attempt < MAX_CONSECUTIVE_NO_ANSWER_PROMPTS;
     this.consecutiveNoAnswerPrompts = attempt;
@@ -1139,6 +1158,9 @@ Page<VoiceChatData, {
     });
     try {
       const response = await createMemoirVoiceNoAnswerPrompt(this.data.voiceSessionId, { attempt });
+      if (requestSerial !== this.noAnswerPromptRequestSerial) {
+        return;
+      }
       const line: VoiceChatTranscriptLine = {
         id: response.message.id,
         role: response.message.role,
@@ -1167,6 +1189,9 @@ Page<VoiceChatData, {
       writeMemoirVoiceSessionSnapshot(this.data.voiceSessionId, { transcriptLines });
       await this.prepareFollowUpTTS(response.message.id, false, autoListenAfterPlayback);
     } catch (error) {
+      if (requestSerial !== this.noAnswerPromptRequestSerial) {
+        return;
+      }
       this.setData({
         followUpError: error instanceof Error ? error.message : "AI 确认生成失败",
         persistenceStateText: "确认失败",
@@ -1179,8 +1204,10 @@ Page<VoiceChatData, {
         ),
       });
     } finally {
-      this.noAnswerPromptInFlight = false;
-      this.setData({ followUpLoading: false });
+      if (requestSerial === this.noAnswerPromptRequestSerial) {
+        this.noAnswerPromptInFlight = false;
+        this.setData({ followUpLoading: false });
+      }
     }
   },
 
@@ -1336,6 +1363,7 @@ Page<VoiceChatData, {
     const transcriptLines = upsertTranscriptLine(this.data.transcriptLines, line);
     const assistantCopy = assistantPanelCopy(transcriptLines);
     this.consecutiveNoAnswerPrompts = 0;
+    this.cancelPendingNoAnswerPrompt();
     this.setData({
       liveText: "",
       liveCharCount: 0,
@@ -1352,6 +1380,7 @@ Page<VoiceChatData, {
       dismissedFollowUpMessageId: "",
       followUpMessageId: "",
       followUpAudioFileId: "",
+      followUpLoading: false,
       followUpTTSLoading: false,
       followUpTTSError: "",
       followUpTTSStateText: "",
@@ -1359,7 +1388,7 @@ Page<VoiceChatData, {
         transcriptLines,
         this.data.guidanceMode,
         this.data.lastFollowUpSourceMessageId,
-        this.data.followUpLoading,
+        false,
       ),
     });
     writeMemoirVoiceSessionSnapshot(this.data.voiceSessionId, { transcriptLines });
