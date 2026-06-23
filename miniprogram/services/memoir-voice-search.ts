@@ -115,7 +115,7 @@ export async function recordMemoirVoiceSearchQuery(
     wx.navigateTo({ url: VOICE_AUTHORIZATION_PAGE_URL });
     throw new Error("请先同意声纹授权协议");
   }
-  await syncVoiceAuthorizationConsent({ sourceSessionId: "voice-search" });
+  await syncVoiceAuthorizationConsent();
   await ensureRecorderPrivacyAuthorization();
   const audio = await recordVoiceSearchAudio();
   options.onRecordingEnd?.();
