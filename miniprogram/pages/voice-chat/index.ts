@@ -171,6 +171,7 @@ Page<VoiceChatData, {
   startRecordingAfterPrivacy(autoTriggered?: boolean): Promise<boolean>;
   toggleRecording(): void;
   shouldAutoStartListening(): boolean;
+  tryStartAutoListenAfterTTS(): boolean;
   cancelPendingNoAnswerPrompt(clearLoading?: boolean): void;
   handleNoAnswerAutoStop(): Promise<void>;
   finishSession(): Promise<void>;
@@ -189,6 +190,7 @@ Page<VoiceChatData, {
   noAnswerPromptRequestSerial: number;
   consecutiveNoAnswerPrompts: number;
   handledNoAnswerFrameCount: number;
+  autoListenPendingAfterPlayback: boolean;
 }>({
   audio: null,
   ttsPlayToken: 0,
@@ -199,6 +201,7 @@ Page<VoiceChatData, {
   noAnswerPromptRequestSerial: 0,
   consecutiveNoAnswerPrompts: 0,
   handledNoAnswerFrameCount: -1,
+  autoListenPendingAfterPlayback: false,
 
   data: {
     voiceSessionId: "",
@@ -868,6 +871,9 @@ Page<VoiceChatData, {
       });
       audio.onEnded(() => {
         if (playToken === this.ttsPlayToken) {
+          if (options.autoListenAfterPlayback) {
+            this.autoListenPendingAfterPlayback = true;
+          }
           this.stopFollowUpProgressTimer();
           this.setData({
             followUpTTSPlaying: false,
@@ -882,8 +888,8 @@ Page<VoiceChatData, {
         if (this.audio === audio) {
           this.audio = null;
         }
-        if (playToken === this.ttsPlayToken && options.autoListenAfterPlayback && this.shouldAutoStartListening()) {
-          this.startRecording(true);
+        if (playToken === this.ttsPlayToken && options.autoListenAfterPlayback) {
+          this.tryStartAutoListenAfterTTS();
         }
       });
       audio.onError(() => {
@@ -915,6 +921,7 @@ Page<VoiceChatData, {
 
   stopFollowUpAudio() {
     this.ttsPlayToken += 1;
+    this.autoListenPendingAfterPlayback = false;
     this.stopFollowUpProgressTimer();
     if (this.audio) {
       this.audio.stop();
@@ -1016,6 +1023,7 @@ Page<VoiceChatData, {
     }
     this.setData({ connecting: true, error: "" });
     streamingClient?.close({ force: true });
+    let connected = false;
     const client = new MemoirStreamingAsrClient({
       voiceSessionId: this.data.voiceSessionId,
       guidanceMode: this.data.guidanceMode,
@@ -1034,6 +1042,7 @@ Page<VoiceChatData, {
     streamingClient = client;
     try {
       await client.connect();
+      connected = true;
     } catch (error) {
       if (streamingClient === client) {
         streamingClient = null;
@@ -1042,6 +1051,9 @@ Page<VoiceChatData, {
       this.handleError(message, classifyVoiceClientConnectionError(message));
     } finally {
       this.setData({ connecting: false });
+      if (connected) {
+        this.tryStartAutoListenAfterTTS();
+      }
     }
   },
 
@@ -1128,6 +1140,14 @@ Page<VoiceChatData, {
       connecting: this.data.connecting,
       followUpLoading: this.data.followUpLoading,
     });
+  },
+
+  tryStartAutoListenAfterTTS() {
+    if (!this.autoListenPendingAfterPlayback || !this.shouldAutoStartListening()) {
+      return false;
+    }
+    this.autoListenPendingAfterPlayback = false;
+    return this.startRecording(true);
   },
 
   cancelPendingNoAnswerPrompt(clearLoading = true) {

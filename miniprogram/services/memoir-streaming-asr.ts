@@ -177,6 +177,8 @@ export class MemoirStreamingAsrClient {
             return;
           }
           this.socketOpen = true;
+          this.options.callbacks.onStatus("ready");
+          this.emitCaptureStats("idle");
           settle(resolve);
         });
         socketTask.onMessage((message) => {

@@ -726,6 +726,7 @@ test("streaming ASR starts provider only after recording starts", async () => {
   const recorder = recorderManagerHarness();
   const sent = [];
   const captureStats = [];
+  const statuses = [];
   let onOpen;
   global.wx = {
     getRecorderManager() {
@@ -774,7 +775,9 @@ test("streaming ASR starts provider only after recording starts", async () => {
     voiceSessionId: "voice-1",
     guidanceMode: "free_narration",
     callbacks: {
-      onStatus() {},
+      onStatus(status) {
+        statuses.push(status);
+      },
       onCaptureStats(stats) {
         captureStats.push(stats);
       },
@@ -790,7 +793,9 @@ test("streaming ASR starts provider only after recording starts", async () => {
   onOpen({ errMsg: "connect:ok" });
   await connectPromise;
 
+  assert.deepEqual(statuses, ["connecting", "ready"]);
   assert.deepEqual(sent, []);
+  assert.equal(captureStats.at(-1).state, "idle");
   assert.equal(client.startRecording(), true);
   assert.deepEqual(sent, []);
   assert.equal(recorder.starts.length, 1);

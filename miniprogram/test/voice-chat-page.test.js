@@ -20,6 +20,7 @@ function loadVoiceChatPage({
   memoirCacheExports = {},
   voiceAuthorizationExports = {},
   wechatPrivacyExports = {},
+  voiceChatAutoListenExports = {},
 } = {}) {
   const pagePath = require.resolve("../pages/voice-chat/index.ts");
   delete require.cache[pagePath];
@@ -76,6 +77,7 @@ function loadVoiceChatPage({
   });
   mockModule("../services/voice-chat-auto-listen.ts", {
     canAutoStartListeningAfterTTS: () => false,
+    ...voiceChatAutoListenExports,
   });
   mockModule("../services/voice-chat-state.ts", {
     assistantPanelCopy: () => ({
@@ -133,6 +135,30 @@ function loadVoiceChatPage({
     global.Page = previousPage;
   }
   return page;
+}
+
+function installAutoEndingAudioContext() {
+  let endedCallback = () => {};
+  global.wx = {
+    createInnerAudioContext() {
+      return {
+        src: "",
+        duration: 1,
+        currentTime: 1,
+        onPlay() {},
+        onTimeUpdate() {},
+        onEnded(callback) {
+          endedCallback = callback;
+        },
+        onError() {},
+        play() {
+          setImmediate(() => endedCallback());
+        },
+        stop() {},
+        destroy() {},
+      };
+    },
+  };
 }
 
 test("voice chat blocks recording before voice authorization consent", () => {
@@ -578,6 +604,139 @@ test("voice chat uses no-answer timeout only for auto-listen recordings", async 
   assert.equal(startOptions[0].noVoiceActivityTimeoutMs, 15000);
   assert.equal(startOptions[1].noVoiceActivityTimeoutMs, 0);
   assert.equal(context.data.primaryActionText, "暂停收音");
+});
+
+test("voice chat starts auto listening after AI audio playback ends when gateway is ready", async () => {
+  const startCalls = [];
+  installAutoEndingAudioContext();
+  const page = loadVoiceChatPage({
+    streamingExports: {
+      MemoirStreamingAsrClient: class {
+        async connect() {}
+        close() {}
+        startRecording() {
+          return true;
+        }
+        stopRecording() {}
+        configureAutoStop() {}
+        async finishSession() {}
+      },
+    },
+    voiceApiExports: {
+      downloadMemoirVoiceAudio: async () => "/tmp/assistant.mp3",
+    },
+    voiceChatAutoListenExports: {
+      canAutoStartListeningAfterTTS: (state) => (
+        state.autoListenEnabled
+        && state.status === "ready"
+        && !state.recording
+        && !state.connecting
+        && !state.followUpLoading
+      ),
+    },
+  });
+  const context = {
+    ...page,
+    data: {
+      ...page.data,
+      voiceSessionId: "voice-1",
+      voiceAuthorizationAgreed: true,
+      autoListenEnabled: true,
+      status: "ready",
+      assistantPromptText: "您接着讲吧。",
+    },
+    setData(patch) {
+      this.data = { ...this.data, ...patch };
+    },
+    startRecording(autoTriggered) {
+      startCalls.push(autoTriggered);
+      return true;
+    },
+  };
+
+  await page.connectGateway.call(context);
+  await page.playAudioFile.call(context, "audio-1", { autoListenAfterPlayback: true });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(startCalls, [true]);
+  assert.equal(context.data.followUpTTSPlaying, false);
+  assert.equal(context.data.followUpTTSStateText, "播放完成，正在听你说");
+  delete global.wx;
+});
+
+test("voice chat starts pending auto listening when gateway becomes ready after playback", async () => {
+  const startCalls = [];
+  let releaseConnection = () => {};
+  installAutoEndingAudioContext();
+  const page = loadVoiceChatPage({
+    streamingExports: {
+      MemoirStreamingAsrClient: class {
+        constructor(options) {
+          this.options = options;
+        }
+        async connect() {
+          this.options.callbacks.onStatus("connecting");
+          await new Promise((resolve) => {
+            releaseConnection = () => {
+              this.options.callbacks.onStatus("ready");
+              resolve();
+            };
+          });
+        }
+        close() {}
+        startRecording() {
+          return true;
+        }
+        stopRecording() {}
+        configureAutoStop() {}
+        async finishSession() {}
+      },
+    },
+    voiceApiExports: {
+      downloadMemoirVoiceAudio: async () => "/tmp/assistant.mp3",
+    },
+    voiceChatAutoListenExports: {
+      canAutoStartListeningAfterTTS: (state) => (
+        state.autoListenEnabled
+        && state.status === "ready"
+        && !state.recording
+        && !state.connecting
+        && !state.followUpLoading
+      ),
+    },
+  });
+  const context = {
+    ...page,
+    data: {
+      ...page.data,
+      voiceSessionId: "voice-1",
+      voiceAuthorizationAgreed: true,
+      autoListenEnabled: true,
+      status: "idle",
+      assistantPromptText: "您接着讲吧。",
+    },
+    setData(patch) {
+      this.data = { ...this.data, ...patch };
+    },
+    startRecording(autoTriggered) {
+      startCalls.push(autoTriggered);
+      return true;
+    },
+  };
+
+  const connectPromise = page.connectGateway.call(context);
+  await page.playAudioFile.call(context, "audio-1", { autoListenAfterPlayback: true });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(startCalls, []);
+  assert.equal(context.autoListenPendingAfterPlayback, true);
+
+  releaseConnection();
+  await connectPromise;
+
+  assert.deepEqual(startCalls, [true]);
+  assert.equal(context.autoListenPendingAfterPlayback, false);
+  delete global.wx;
 });
 
 test("voice chat asks with AI voice when auto-listen hears no answer", async () => {
