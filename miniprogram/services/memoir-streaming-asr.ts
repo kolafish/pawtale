@@ -78,6 +78,7 @@ export interface MemoirStreamingAsrOptions {
   currentGuidanceModule?: string;
   autoStopSilenceMs?: number;
   noVoiceActivityTimeoutMs?: number;
+  connectTimeoutMs?: number;
   silenceLevelThreshold?: number;
   minAutoStopRecordingMs?: number;
   callbacks: MemoirStreamingAsrCallbacks;
@@ -136,53 +137,81 @@ export class MemoirStreamingAsrClient {
   async connect(): Promise<void> {
     this.closed = false;
     this.options.callbacks.onStatus("connecting");
-    const cookie = await backendSessionCookieHeader();
-    const gatewayUrl = voiceGatewayUrl(this.options.voiceSessionId);
-    await new Promise<void>((resolve, reject) => {
-      let settled = false;
-      let connectTimer: ReturnType<typeof setTimeout>;
-      const settle = (callback: () => void) => {
-        if (settled) {
-          return;
-        }
-        settled = true;
-        clearTimeout(connectTimer);
-        callback();
-      };
-      connectTimer = setTimeout(() => {
-        settle(() => reject(new Error("语音连接超时")));
-      }, SOCKET_CONNECT_TIMEOUT_MS);
-      const socketTask = wx.connectSocket({
-        url: gatewayUrl,
-        header: cookie ? { Cookie: cookie } : {},
-        success: () => undefined,
-        fail: (error) => settle(() => reject(new Error(error.errMsg || "语音连接失败"))),
-      });
-      this.socketTask = socketTask;
-      socketTask.onOpen(() => {
-        this.socketOpen = true;
-        settle(resolve);
-      });
-      socketTask.onMessage((message) => {
-        this.handleSocketMessage(message.data);
-      });
-      socketTask.onError((error) => {
-        const errorInfo = classifyVoiceClientConnectionError(error.errMsg || "语音连接错误");
-        settle(() => reject(new Error(errorInfo.message)));
-        this.rejectWaiters(errorInfo.message);
-        this.options.callbacks.onError(errorInfo.message, errorInfo);
-        this.options.callbacks.onStatus("error");
-      });
-      socketTask.onClose(() => {
+    const connectTimeoutMs = this.options.connectTimeoutMs ?? SOCKET_CONNECT_TIMEOUT_MS;
+    let timedOut = false;
+    let timeoutTimer: ReturnType<typeof setTimeout> | null = null;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeoutTimer = setTimeout(() => {
+        timedOut = true;
+        this.closed = true;
         this.socketOpen = false;
-        settle(() => reject(new Error("语音连接已关闭")));
-        this.rejectWaiters("语音连接已关闭");
-        if (!this.closed) {
-          this.stopRecorderAfterGatewayEnd("idle");
-          this.options.callbacks.onStatus("closed");
-        }
-      });
+        this.socketTask?.close({ code: 1000, reason: "voice connection timeout" });
+        reject(new Error("语音连接超时"));
+      }, connectTimeoutMs);
     });
+    const connectPromise = (async () => {
+      const cookie = await backendSessionCookieHeader();
+      if (timedOut || this.closed) {
+        throw new Error("语音连接超时");
+      }
+      const gatewayUrl = voiceGatewayUrl(this.options.voiceSessionId);
+      await new Promise<void>((resolve, reject) => {
+        let settled = false;
+        const settle = (callback: () => void) => {
+          if (settled || timedOut) {
+            return;
+          }
+          settled = true;
+          callback();
+        };
+        const socketTask = wx.connectSocket({
+          url: gatewayUrl,
+          header: cookie ? { Cookie: cookie } : {},
+          success: () => undefined,
+          fail: (error) => settle(() => reject(new Error(error.errMsg || "语音连接失败"))),
+        });
+        this.socketTask = socketTask;
+        socketTask.onOpen(() => {
+          if (timedOut || this.closed) {
+            socketTask.close({ code: 1000, reason: "voice connection timeout" });
+            return;
+          }
+          this.socketOpen = true;
+          settle(resolve);
+        });
+        socketTask.onMessage((message) => {
+          if (!timedOut && !this.closed) {
+            this.handleSocketMessage(message.data);
+          }
+        });
+        socketTask.onError((error) => {
+          if (timedOut || this.closed) {
+            return;
+          }
+          const errorInfo = classifyVoiceClientConnectionError(error.errMsg || "语音连接错误");
+          settle(() => reject(new Error(errorInfo.message)));
+          this.rejectWaiters(errorInfo.message);
+          this.options.callbacks.onError(errorInfo.message, errorInfo);
+          this.options.callbacks.onStatus("error");
+        });
+        socketTask.onClose(() => {
+          this.socketOpen = false;
+          settle(() => reject(new Error("语音连接已关闭")));
+          this.rejectWaiters("语音连接已关闭");
+          if (!this.closed) {
+            this.stopRecorderAfterGatewayEnd("idle");
+            this.options.callbacks.onStatus("closed");
+          }
+        });
+      });
+    })();
+    try {
+      await Promise.race([connectPromise, timeoutPromise]);
+    } finally {
+      if (timeoutTimer) {
+        clearTimeout(timeoutTimer);
+      }
+    }
   }
 
   startRecording(recordingOptions: MemoirStartRecordingOptions = {}): boolean {
