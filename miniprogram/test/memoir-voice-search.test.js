@@ -58,6 +58,7 @@ test("voice search service records PCM audio and returns transcribed text", asyn
   const starts = [];
   const readFiles = [];
   const transcriptions = [];
+  const syncedAuthorizations = [];
   global.wx = {
     getRecorderManager() {
       return {
@@ -89,6 +90,12 @@ test("voice search service records PCM audio and returns transcribed text", asyn
         return { transcript: " 外婆家的院子 " };
       },
     },
+    authorizationExports: {
+      syncVoiceAuthorizationConsent: async (options) => {
+        syncedAuthorizations.push(options);
+        return {};
+      },
+    },
   });
 
   const promise = recordMemoirVoiceSearchQuery();
@@ -104,6 +111,7 @@ test("voice search service records PCM audio and returns transcribed text", asyn
   assert.equal(readFiles[0].filePath, "/tmp/search.pcm");
   assert.equal(readFiles[0].encoding, "base64");
   assert.deepEqual(transcriptions, [{ audioBase64: "cGNt", mimeType: "audio/pcm" }]);
+  assert.deepEqual(syncedAuthorizations, [undefined]);
   delete global.wx;
 });
 
