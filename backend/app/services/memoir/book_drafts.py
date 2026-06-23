@@ -208,6 +208,7 @@ async def _chapter_sources(
                     audio_file_id=utterance.audio_file_id or message.audio_file_id,
                     start_ms=utterance.start_ms,
                     end_ms=utterance.end_ms,
+                    created_at=utterance.created_at,
                     quote=ref.quote,
                 ),
                 text=text,
@@ -247,18 +248,32 @@ def _build_draft_prompt(
         if pending_ids and previous_content
         else ""
     )
+    if pending_ids and previous_content:
+        coverage_text = (
+            f"\n来源覆盖要求：本章共有 {len(sources)} 条来源；本次必须覆盖所有 source_type 为“新增来源”的内容，"
+            "既有来源只用于衔接和核对。即使章节标题或章节范围更像旧内容，也不能忽略新增来源。\n"
+        )
+    else:
+        coverage_text = (
+            f"\n来源覆盖要求：本章共有 {len(sources)} 条来源；正文必须覆盖每一条 source 中叙述者实际讲过的具体信息，"
+            "不能只写第一条，也不能只写最贴合标题的一条。若章节标题或章节范围与来源转写不完全一致，以来源转写为准，"
+            "可以分段或用自然过渡串联不同主题。\n"
+        )
+    chapter_scope = chapter.summary or "只整理本章来源转写里已经讲过的内容。"
     return f"""请把下面口述材料整理成一个回忆录章节正文。
 
-章节标题：{chapter.title}
-章节范围：{chapter.summary or "只整理本章来源转写里已经讲过的内容。"}
+章节标题参考：{chapter.title}
+章节范围参考（可能滞后，以来源转写为准）：{chapter_scope}
 {feedback_text}
 {previous_text}
 {supplement_text}
+{coverage_text}
 写作要求：
 - 必须以叙述者已讲述的内容为主，使用第一人称或贴近原话的叙述。
 - 不新增事实、人物、时间、地点、事件、对话或情绪，不替用户补故事。
 - 可以去掉明显口头填充词，调整顺序和标点，让文字更像书稿。
 - 素材少就写短，不要为了篇幅扩写。
+- 每条要求覆盖的来源至少要有一处可对应的具体内容进入正文。
 - 不要输出标题、列表、解释或 Markdown，只输出正文。
 
 来源转写：

@@ -257,6 +257,7 @@ async def test_mobile_memoir_book_plan_generate_saves_source_bound_chapters(
     ]
     assert data["chapters"][0]["source_refs"][0]["utterance_id"] == first["utterance_id"]
     assert data["chapters"][0]["source_refs"][0]["message_id"] == first["message_id"]
+    assert data["chapters"][0]["source_refs"][0]["created_at"]
     assert data["chapters"][1]["source_refs"][0]["utterance_id"] == second["utterance_id"]
     assert "不新增人物、时间、地点、事件或情绪" in fake_ai.calls[0]["user_prompt"]
     assert f"utterance_id: {first['utterance_id']}" in fake_ai.calls[0]["user_prompt"]
@@ -272,6 +273,16 @@ async def test_mobile_memoir_book_plan_generate_saves_source_bound_chapters(
     assert stored_plan.status == "draft"
     assert len(stored_chapters) == 2
     assert stored_chapters[0].source_refs_json[0]["quote"] == "外婆家的院子"
+
+    legacy_ref = dict(stored_chapters[0].source_refs_json[0])
+    legacy_ref.pop("created_at", None)
+    stored_chapters[0].source_refs_json = [legacy_ref]
+    test_db.add(stored_chapters[0])
+    await test_db.commit()
+
+    get_response = await client.get(f"/api/mobile/memoir/projects/{project_id}/book-plan")
+    assert get_response.status_code == 200
+    assert get_response.json()["chapters"][0]["source_refs"][0]["created_at"]
 
 
 async def test_mobile_memoir_book_plan_confirm_replaces_plan_with_user_chapters(

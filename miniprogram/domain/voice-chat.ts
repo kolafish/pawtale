@@ -274,6 +274,7 @@ export interface MemoirBookChapterSourceRef {
   audio_file_id?: string | null;
   start_ms?: number | null;
   end_ms?: number | null;
+  created_at?: string | null;
   quote: string;
 }
 

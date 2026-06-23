@@ -69,6 +69,7 @@ class SourceSegment:
             audio_file_id=self.audio_file_id,
             start_ms=self.start_ms,
             end_ms=self.end_ms,
+            created_at=self.created_at,
             quote=_safe_quote(self.text, quote),
         )
 
@@ -97,7 +98,7 @@ def _safe_quote(source_text: str, quote: str = "") -> str:
 
 
 def _as_dict(ref: MemoirBookChapterSourceRef) -> dict[str, object]:
-    return ref.model_dump()
+    return ref.model_dump(mode="json")
 
 
 def _merge_metadata(metadata_json: dict | None, patch: dict[str, object]) -> dict[str, object]:
@@ -133,7 +134,45 @@ def _set_source_change_metadata(
     return metadata
 
 
-def _chapter_response(chapter: MemoirBookPlanChapter) -> MemoirBookPlanChapterResponse:
+def _source_ref_response(
+    ref: dict[str, object],
+    created_at_by_utterance: dict[str, datetime],
+) -> MemoirBookChapterSourceRef:
+    data = dict(ref)
+    utterance_id = data.get("utterance_id")
+    if not data.get("created_at") and isinstance(utterance_id, str):
+        created_at = created_at_by_utterance.get(utterance_id)
+        if created_at:
+            data["created_at"] = created_at
+    return MemoirBookChapterSourceRef.model_validate(data)
+
+
+async def _source_ref_created_at_by_utterance(
+    db: AsyncSession,
+    plan: MemoirBookPlan,
+) -> dict[str, datetime]:
+    utterance_ids = {
+        ref["utterance_id"]
+        for chapter in plan.chapters
+        for ref in (chapter.source_refs_json or [])
+        if isinstance(ref, dict) and isinstance(ref.get("utterance_id"), str)
+    }
+    if not utterance_ids:
+        return {}
+    result = await db.execute(
+        select(MemoirVoiceUtterance.id, MemoirVoiceUtterance.created_at).where(
+            MemoirVoiceUtterance.id.in_(utterance_ids)
+        )
+    )
+    return {utterance_id: created_at for utterance_id, created_at in result.all()}
+
+
+def _chapter_response(
+    chapter: MemoirBookPlanChapter,
+    *,
+    created_at_by_utterance: dict[str, datetime] | None = None,
+) -> MemoirBookPlanChapterResponse:
+    source_created_at = created_at_by_utterance or {}
     return MemoirBookPlanChapterResponse(
         id=chapter.id,
         plan_id=chapter.plan_id,
@@ -142,7 +181,7 @@ def _chapter_response(chapter: MemoirBookPlanChapter) -> MemoirBookPlanChapterRe
         summary=chapter.summary,
         sort_order=chapter.sort_order,
         source_refs=[
-            MemoirBookChapterSourceRef.model_validate(ref)
+            _source_ref_response(ref, source_created_at)
             for ref in (chapter.source_refs_json or [])
             if isinstance(ref, dict)
         ],
@@ -152,7 +191,8 @@ def _chapter_response(chapter: MemoirBookPlanChapter) -> MemoirBookPlanChapterRe
     )
 
 
-def _plan_response(plan: MemoirBookPlan) -> MemoirBookPlanResponse:
+async def _plan_response(db: AsyncSession, plan: MemoirBookPlan) -> MemoirBookPlanResponse:
+    created_at_by_utterance = await _source_ref_created_at_by_utterance(db, plan)
     return MemoirBookPlanResponse(
         id=plan.id,
         project_id=plan.project_id,
@@ -161,7 +201,10 @@ def _plan_response(plan: MemoirBookPlan) -> MemoirBookPlanResponse:
         created_by=MemoirCreatedBy(plan.created_by),
         model=plan.model,
         metadata_json=plan.metadata_json or {},
-        chapters=[_chapter_response(chapter) for chapter in plan.chapters],
+        chapters=[
+            _chapter_response(chapter, created_at_by_utterance=created_at_by_utterance)
+            for chapter in plan.chapters
+        ],
         created_at=plan.created_at,
         updated_at=plan.updated_at,
     )
@@ -391,7 +434,7 @@ async def _replace_plan(
     refreshed = await _load_plan(db, project_id)
     if not refreshed:
         raise HTTPException(status_code=500, detail="章节规划保存失败")
-    return _plan_response(refreshed)
+    return await _plan_response(db, refreshed)
 
 
 async def get_book_plan(
@@ -404,7 +447,7 @@ async def get_book_plan(
     plan = await _load_plan(db, project_id)
     if not plan:
         raise HTTPException(status_code=404, detail="章节规划不存在")
-    return _plan_response(plan)
+    return await _plan_response(db, plan)
 
 
 def _covered_utterance_ids(plan: MemoirBookPlan | None) -> set[str]:
@@ -560,7 +603,7 @@ async def assign_book_sources_to_chapters(
     refreshed = await _load_plan(db, project_id)
     if not refreshed:
         raise HTTPException(status_code=500, detail="章节规划保存失败")
-    return _plan_response(refreshed)
+    return await _plan_response(db, refreshed)
 
 
 async def generate_book_plan(
@@ -779,7 +822,7 @@ async def _save_chapter_title(
     refreshed = await _load_plan(db, project_id)
     if not refreshed:
         raise HTTPException(status_code=500, detail="章节标题保存失败")
-    return _plan_response(refreshed)
+    return await _plan_response(db, refreshed)
 
 
 async def confirm_book_plan(
@@ -908,7 +951,7 @@ async def update_book_plan(
     refreshed = await _load_plan(db, project_id)
     if not refreshed:
         raise HTTPException(status_code=500, detail="章节规划保存失败")
-    return _plan_response(refreshed)
+    return await _plan_response(db, refreshed)
 
 
 async def update_book_chapter_title(

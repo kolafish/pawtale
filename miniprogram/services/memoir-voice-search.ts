@@ -1,5 +1,5 @@
 import { transcribeMemoirVoiceSearchAudio } from "./memoir-voice-api";
-import { estimatePcm16Level, pcmFrameDurationMs } from "./memoir-streaming-asr-protocol";
+import { VoiceActivityDetector } from "./voice-activity-detector";
 import { ensureRecorderPrivacyAuthorization, wechatPrivacyErrorMessage } from "./wechat-privacy";
 import {
   readVoiceAuthorizationConsent,
@@ -17,10 +17,7 @@ const VOICE_SEARCH_MIN_RECORDING_MS = 700;
 interface VoiceSearchRecorderPending {
   resolve(result: WechatMiniprogram.RecorderManagerStopCallbackResult): void;
   reject(error: Error): void;
-  recordingElapsedMs: number;
-  voiceActivityElapsedMs: number;
-  silentElapsedMs: number;
-  hasVoiceActivity: boolean;
+  vad: VoiceActivityDetector;
   stopping: boolean;
 }
 
@@ -79,10 +76,10 @@ function recordVoiceSearchAudio(): Promise<WechatMiniprogram.RecorderManagerStop
     pendingRecording = {
       resolve,
       reject,
-      recordingElapsedMs: 0,
-      voiceActivityElapsedMs: 0,
-      silentElapsedMs: 0,
-      hasVoiceActivity: false,
+      vad: new VoiceActivityDetector({
+        silenceLevelThreshold: VOICE_SEARCH_SILENCE_LEVEL_THRESHOLD,
+        minVoiceActivityMs: VOICE_SEARCH_MIN_VOICE_ACTIVITY_MS,
+      }),
       stopping: false,
     };
     try {
@@ -123,25 +120,13 @@ function handleRecordedFrame(frameBuffer: ArrayBuffer): void {
   if (!pending || pending.stopping || !frameBuffer?.byteLength) {
     return;
   }
-  const frameDurationMs = pcmFrameDurationMs(frameBuffer);
-  pending.recordingElapsedMs += frameDurationMs;
-  const level = estimatePcm16Level(frameBuffer);
-  if (level >= VOICE_SEARCH_SILENCE_LEVEL_THRESHOLD) {
-    pending.voiceActivityElapsedMs += frameDurationMs;
-    pending.silentElapsedMs = 0;
-    if (pending.voiceActivityElapsedMs >= VOICE_SEARCH_MIN_VOICE_ACTIVITY_MS) {
-      pending.hasVoiceActivity = true;
-    }
+  const vad = pending.vad.update(frameBuffer);
+  if (!vad.hasVoiceActivity) {
     return;
   }
-  pending.voiceActivityElapsedMs = 0;
-  if (!pending.hasVoiceActivity) {
-    return;
-  }
-  pending.silentElapsedMs += frameDurationMs;
   if (
-    pending.recordingElapsedMs >= VOICE_SEARCH_MIN_RECORDING_MS
-    && pending.silentElapsedMs >= VOICE_SEARCH_AUTO_STOP_SILENCE_MS
+    vad.recordingElapsedMs >= VOICE_SEARCH_MIN_RECORDING_MS
+    && vad.silentElapsedMs >= VOICE_SEARCH_AUTO_STOP_SILENCE_MS
   ) {
     stopMemoirVoiceSearchRecording();
   }

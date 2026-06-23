@@ -120,15 +120,6 @@
           class="{{segment.highlight ? 'search-hit' : ''}}"
         >{{segment.text}}</text>
       </text>
-      <button
-        wx:if="{{item.rawCollapsible}}"
-        class="text-toggle-button"
-        data-id="{{item.id}}"
-        data-field="raw"
-        bindtap="toggleTranscriptText"
-      >
-        {{item.rawToggleText}}
-      </button>
     </view>
 
     <view wx:if="{{!item.isEditing}}" class="display-box">
@@ -146,13 +137,12 @@
         >{{segment.text}}</text>
       </text>
       <button
-        wx:if="{{item.displayCollapsible}}"
-        class="text-toggle-button"
+        wx:if="{{item.detailsCollapsible}}"
+        class="text-toggle-button record-toggle-button"
         data-id="{{item.id}}"
-        data-field="display"
         bindtap="toggleTranscriptText"
       >
-        {{item.displayToggleText}}
+        {{item.detailsToggleText}}
       </button>
     </view>
 
