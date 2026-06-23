@@ -379,6 +379,10 @@
   line-height: 1.35;
 }
 
+.record-toggle-button {
+  margin-top: 18rpx;
+}
+
 .text-toggle-button::after {
   border: 0;
 }

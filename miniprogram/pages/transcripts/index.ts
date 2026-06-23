@@ -36,7 +36,6 @@ interface DatasetEvent {
   currentTarget: {
     dataset: {
       id?: string;
-      field?: TranscriptTextField;
     };
   };
 }
@@ -63,8 +62,6 @@ interface TranscriptTextSegment {
   text: string;
   highlight: boolean;
 }
-
-type TranscriptTextField = "raw" | "display";
 
 interface TranscriptTextView {
   segments: TranscriptTextSegment[];
@@ -103,13 +100,10 @@ interface TranscriptItemView extends MemoirVoiceTranscriptItem {
   canPlayAudio: boolean;
   questionSegments: TranscriptTextSegment[];
   rawSegments: TranscriptTextSegment[];
-  rawCollapsible: boolean;
-  rawExpanded: boolean;
-  rawToggleText: string;
   displaySegments: TranscriptTextSegment[];
-  displayCollapsible: boolean;
-  displayExpanded: boolean;
-  displayToggleText: string;
+  detailsCollapsible: boolean;
+  detailsExpanded: boolean;
+  detailsToggleText: string;
   changed: boolean;
   isEditing: boolean;
 }
@@ -467,41 +461,31 @@ function toViewItem(
     canPlayAudio: Boolean(item.audio_file_id || item.question_audio_file_id),
     questionSegments: highlightTranscriptText(item.question_text, searchQuery),
     rawSegments: rawView.segments,
-    rawCollapsible: rawView.collapsible,
-    rawExpanded: rawView.expanded,
-    rawToggleText: rawView.toggleText,
     displaySegments: displayView.segments,
-    displayCollapsible: displayView.collapsible,
-    displayExpanded: displayView.expanded,
-    displayToggleText: displayView.toggleText,
+    detailsCollapsible: rawView.collapsible || displayView.collapsible,
+    detailsExpanded: false,
+    detailsToggleText: "展开全部",
     changed: editingText !== (item.transcript_edited || item.transcript_raw),
     isEditing: false,
   };
 }
 
-function withTextExpansion(
+function withTranscriptExpansion(
   item: TranscriptItemView,
-  field: TranscriptTextField,
   searchQuery: string,
   expanded: boolean,
 ): TranscriptItemView {
-  if (field === "raw") {
-    const rawView = transcriptTextView(item.transcript_raw, searchQuery, expanded);
-    return {
-      ...item,
-      rawSegments: rawView.segments,
-      rawCollapsible: rawView.collapsible,
-      rawExpanded: rawView.expanded,
-      rawToggleText: rawView.toggleText,
-    };
-  }
+  const rawView = transcriptTextView(item.transcript_raw, searchQuery, expanded);
   const displayView = transcriptTextView(item.display_text, searchQuery, expanded);
+  const detailsCollapsible = rawView.collapsible || displayView.collapsible;
+  const detailsExpanded = detailsCollapsible && expanded;
   return {
     ...item,
+    rawSegments: rawView.segments,
     displaySegments: displayView.segments,
-    displayCollapsible: displayView.collapsible,
-    displayExpanded: displayView.expanded,
-    displayToggleText: displayView.toggleText,
+    detailsCollapsible,
+    detailsExpanded,
+    detailsToggleText: detailsExpanded ? "收起" : "展开全部",
   };
 }
 
@@ -819,16 +803,14 @@ Page<TranscriptsData, {
 
   toggleTranscriptText(event) {
     const id = event.currentTarget.dataset.id || "";
-    const field = event.currentTarget.dataset.field;
-    if (!id || (field !== "raw" && field !== "display")) {
+    if (!id) {
       return;
     }
     const items = this.data.items.map((item) => {
       if (item.id !== id) {
         return item;
       }
-      const expanded = field === "raw" ? !item.rawExpanded : !item.displayExpanded;
-      return withTextExpansion(item, field, this.data.searchQuery, expanded);
+      return withTranscriptExpansion(item, this.data.searchQuery, !item.detailsExpanded);
     });
     this.setData({ items });
   },

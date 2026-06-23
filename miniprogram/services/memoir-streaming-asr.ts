@@ -11,10 +11,9 @@ import {
   classifyVoiceClientConnectionError,
   classifyVoiceGatewayError,
   clientError,
-  estimatePcm16Level,
   normalizeVoiceGatewayEvent,
-  pcmFrameDurationMs,
 } from "./memoir-streaming-asr-protocol";
+import { VoiceActivityDetector } from "./voice-activity-detector";
 import { wechatPrivacyErrorMessage } from "./wechat-privacy";
 
 export {
@@ -105,6 +104,7 @@ export class MemoirStreamingAsrClient {
   private silentElapsedMs = 0;
   private voiceActivityElapsedMs = 0;
   private hasVoiceActivity = false;
+  private voiceActivityDetector = this.createVoiceActivityDetector();
   private autoStopped = false;
   private autoStopReason: MemoirAutoStopReason | "" = "";
   private noVoiceActivityTimeoutMs = 0;
@@ -126,6 +126,7 @@ export class MemoirStreamingAsrClient {
       this.silentElapsedMs = 0;
       this.voiceActivityElapsedMs = 0;
       this.hasVoiceActivity = false;
+      this.voiceActivityDetector.reset();
       this.autoStopped = false;
       this.autoStopReason = "";
       this.clearNoVoiceActivityTimer();
@@ -202,6 +203,7 @@ export class MemoirStreamingAsrClient {
     this.silentElapsedMs = 0;
     this.voiceActivityElapsedMs = 0;
     this.hasVoiceActivity = false;
+    this.voiceActivityDetector = this.createVoiceActivityDetector();
     this.autoStopped = false;
     this.autoStopReason = "";
     this.noVoiceActivityTimeoutMs = Math.max(
@@ -514,20 +516,23 @@ export class MemoirStreamingAsrClient {
   }
 
   private updateVoiceActivity(frameBuffer: ArrayBuffer): void {
-    this.audioLevel = estimatePcm16Level(frameBuffer);
-    const threshold = this.options.silenceLevelThreshold ?? DEFAULT_SILENCE_LEVEL_THRESHOLD;
-    const frameDurationMs = pcmFrameDurationMs(frameBuffer);
-    if (this.audioLevel < threshold) {
-      this.silentElapsedMs += frameDurationMs;
-      this.voiceActivityElapsedMs = 0;
-      return;
-    }
-    this.voiceActivityElapsedMs += frameDurationMs;
-    if (this.voiceActivityElapsedMs >= MIN_VOICE_ACTIVITY_MS) {
-      this.hasVoiceActivity = true;
+    const state = this.voiceActivityDetector.update(frameBuffer);
+    this.audioLevel = state.audioLevel;
+    this.silentElapsedMs = state.silentElapsedMs;
+    this.voiceActivityElapsedMs = state.voiceActivityElapsedMs;
+    const hadVoiceActivity = this.hasVoiceActivity;
+    this.hasVoiceActivity = state.hasVoiceActivity;
+    if (!hadVoiceActivity && this.hasVoiceActivity) {
       this.clearNoVoiceActivityTimer();
     }
-    this.silentElapsedMs = 0;
+  }
+
+  private createVoiceActivityDetector(): VoiceActivityDetector {
+    return new VoiceActivityDetector({
+      silenceLevelThreshold: this.options.silenceLevelThreshold ?? DEFAULT_SILENCE_LEVEL_THRESHOLD,
+      minVoiceActivityMs: MIN_VOICE_ACTIVITY_MS,
+      trackPreVoiceSilence: true,
+    });
   }
 
   private startNoVoiceActivityTimer(): void {

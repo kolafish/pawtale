@@ -19,6 +19,7 @@ class MemoirBookChapterSourceRef(BaseModel):
     audio_file_id: str | None = None
     start_ms: int | None = None
     end_ms: int | None = None
+    created_at: datetime | None = None
     quote: str = ""
 
 

@@ -14,6 +14,7 @@ function sampleRef(id = "utterance-1", quote = "外婆家的院子") {
     audio_file_id: `audio-${id}`,
     start_ms: 0,
     end_ms: 8000,
+    created_at: "2026-06-17T00:00:00.000Z",
     quote,
   };
 }
@@ -307,7 +308,7 @@ function pageContext(page, dataPatch = {}) {
   };
 }
 
-test("book page summarizes chapter source quotes without exposing raw ids", () => {
+test("book page summarizes chapter source count without exposing raw ids", () => {
   const { mod } = loadBookPage();
 
   assert.equal(
@@ -318,7 +319,7 @@ test("book page summarizes chapter source quotes without exposing raw ids", () =
         sampleRef("utterance-3", "第三段"),
       ],
     }),
-    "外婆家的院子 / 第一次离家",
+    "3 条来源转写",
   );
 });
 
@@ -475,12 +476,33 @@ test("book page builds chapter structure controls from source refs", () => {
   assert.equal(chapters[1].canMoveUp, true);
   assert.equal(chapters[0].sourceViews.length, 2);
   assert.equal(chapters[0].sourceViews[0].previewText, "外婆家的院子");
+  assert.equal(chapters[0].sourceViews[0].labelText, "来源 1 · 06-17 08:00 北京时间 · 6 字");
+  assert.equal(chapters[0].sourceToggleText, "展开 2 条来源");
   assert.deepEqual(chapters[0].mergeTargetOptions, [
     { label: "第 2 章 第一次离家", value: "chapter-2" },
   ]);
   assert.deepEqual(chapters[0].splitOptions, [
     { label: "前 1 条 / 后 1 条", value: 1 },
   ]);
+});
+
+test("book page toggles chapter source details", () => {
+  const { page } = loadBookPage();
+  const context = pageContext(page);
+  const plan = samplePlan("confirmed");
+  plan.chapters[0].source_refs = [
+    sampleRef("utterance-1", "外婆家的院子"),
+    sampleRef("utterance-3", "春节做年糕"),
+  ];
+  page.applyPlan.call(context, plan);
+
+  assert.equal(context.data.chapters[0].sourceListExpanded, false);
+  page.toggleChapterSources.call(context, {
+    currentTarget: { dataset: { id: "chapter-1" } },
+  });
+
+  assert.equal(context.data.chapters[0].sourceListExpanded, true);
+  assert.equal(context.data.chapters[0].sourceToggleText, "收起来源");
 });
 
 test("book page shows recent uncovered transcripts before older ones", () => {

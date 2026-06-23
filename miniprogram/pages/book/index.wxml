@@ -154,9 +154,19 @@
         cursor-spacing="24"
       />
 
-      <text class="source-preview">{{item.sourceSummary}}</text>
+      <view class="source-summary-row">
+        <text class="source-preview">{{item.sourceSummary}}</text>
+        <button
+          wx:if="{{item.sourceViews.length}}"
+          class="source-toggle-button"
+          data-id="{{item.id}}"
+          bindtap="toggleChapterSources"
+        >
+          {{item.sourceToggleText}}
+        </button>
+      </view>
 
-      <view wx:if="{{item.sourceViews.length}}" class="source-ref-list">
+      <view wx:if="{{item.sourceViews.length && item.sourceListExpanded}}" class="source-ref-list">
         <view wx:for="{{item.sourceViews}}" wx:for-item="source" wx:key="utterance_id" class="source-ref-row">
           <view
             class="source-ref-main"
@@ -164,7 +174,7 @@
             bindtap="openTranscripts"
             hover-class="coverage-source-main-active"
           >
-            <text class="source-ref-label">来源转写</text>
+            <text class="source-ref-label">{{source.labelText}}</text>
             <text class="source-ref-text">{{source.previewText}}</text>
           </view>
         </view>
@@ -308,9 +318,18 @@
         </view>
       </view>
 
-      <text wx:if="{{item.summary}}" class="chapter-summary">{{item.summary}}</text>
-      <text class="source-preview">{{item.sourceSummary}}</text>
-      <view wx:if="{{item.sourceViews.length}}" class="source-ref-list">
+      <view class="source-summary-row">
+        <text class="source-preview">{{item.sourceSummary}}</text>
+        <button
+          wx:if="{{item.sourceViews.length}}"
+          class="source-toggle-button"
+          data-id="{{item.id}}"
+          bindtap="toggleChapterSources"
+        >
+          {{item.sourceToggleText}}
+        </button>
+      </view>
+      <view wx:if="{{item.sourceViews.length && item.sourceListExpanded}}" class="source-ref-list">
         <view wx:for="{{item.sourceViews}}" wx:for-item="source" wx:key="utterance_id" class="source-ref-row">
           <view
             class="source-ref-main"
@@ -318,7 +337,7 @@
             bindtap="openTranscripts"
             hover-class="coverage-source-main-active"
           >
-            <text class="source-ref-label">来源转写</text>
+            <text class="source-ref-label">{{source.labelText}}</text>
             <text class="source-ref-text">{{source.previewText}}</text>
           </view>
         </view>

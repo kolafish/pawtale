@@ -93,6 +93,23 @@ test("estimates 16-bit PCM audio level", () => {
   assert.ok(estimatePcm16Level(loud) < 0.51);
 });
 
+test("voice activity detector can share logic with different pre-voice silence policy", () => {
+  const { VoiceActivityDetector } = require("../services/voice-activity-detector.ts");
+  const silent = new ArrayBuffer(3200);
+  const searchVad = new VoiceActivityDetector({
+    silenceLevelThreshold: 0.015,
+    minVoiceActivityMs: 180,
+  });
+  const streamingVad = new VoiceActivityDetector({
+    silenceLevelThreshold: 0.015,
+    minVoiceActivityMs: 180,
+    trackPreVoiceSilence: true,
+  });
+
+  assert.equal(searchVad.update(silent).silentElapsedMs, 0);
+  assert.equal(streamingVad.update(silent).silentElapsedMs, 100);
+});
+
 test("normalizes invalid gateway payloads into session errors", () => {
   const {
     classifyVoiceClientConnectionError,

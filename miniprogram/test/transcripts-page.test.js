@@ -279,20 +279,20 @@ test("transcripts page collapses long raw and corrected text", async () => {
   await page.loadTranscripts.call(context, true);
 
   let item = context.data.items[0];
-  assert.equal(item.rawCollapsible, true);
-  assert.equal(item.displayCollapsible, true);
-  assert.equal(item.rawExpanded, false);
-  assert.equal(item.displayExpanded, false);
+  assert.equal(item.detailsCollapsible, true);
+  assert.equal(item.detailsExpanded, false);
+  assert.equal(item.detailsToggleText, "展开全部");
   assert.equal(item.rawSegments.map((segment) => segment.text).join("").endsWith("..."), true);
   assert.equal(item.displaySegments.map((segment) => segment.text).join("").length, 183);
 
   page.toggleTranscriptText.call(context, {
-    currentTarget: { dataset: { id: "utterance-long", field: "display" } },
+    currentTarget: { dataset: { id: "utterance-long" } },
   });
 
   item = context.data.items[0];
-  assert.equal(item.displayExpanded, true);
-  assert.equal(item.displayToggleText, "收起");
+  assert.equal(item.detailsExpanded, true);
+  assert.equal(item.detailsToggleText, "收起");
+  assert.equal(item.rawSegments.map((segment) => segment.text).join(""), longRaw);
   assert.equal(item.displaySegments.map((segment) => segment.text).join(""), longDisplay);
 });
 

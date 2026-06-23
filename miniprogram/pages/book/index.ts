@@ -83,6 +83,10 @@ export interface BookUncoveredSourceView {
 }
 
 export interface BookChapterSourceView extends MemoirBookChapterSourceRef {
+  sourceIndex: number;
+  labelText: string;
+  createdAtText: string;
+  charCount: number;
   previewText: string;
 }
 
@@ -94,6 +98,8 @@ export interface BookChapterView extends MemoirBookPlanChapter {
   sourceCount: number;
   sourceSummary: string;
   sourceViews: BookChapterSourceView[];
+  sourceListExpanded: boolean;
+  sourceToggleText: string;
   mergeTargetOptions: ChapterPickerOption[];
   splitOptions: ChapterSplitOption[];
   canMoveUp: boolean;
@@ -396,6 +402,25 @@ function sourcePreviewText(ref: MemoirBookChapterSourceRef): string {
   return text.length > 72 ? `${text.slice(0, 72)}...` : text;
 }
 
+function sourceCreatedAtText(ref: MemoirBookChapterSourceRef): string {
+  return ref.created_at ? formatBeijingDateTime(ref.created_at) : "时间未知";
+}
+
+function chapterSourceView(ref: MemoirBookChapterSourceRef, index: number): BookChapterSourceView {
+  const previewText = sourcePreviewText(ref);
+  const createdAtText = sourceCreatedAtText(ref);
+  const rawCharCount = trimText(ref.quote || "").length;
+  const charCount = rawCharCount || previewText.length;
+  return {
+    ...ref,
+    sourceIndex: index + 1,
+    labelText: `来源 ${index + 1} · ${createdAtText} · ${charCount} 字`,
+    createdAtText,
+    charCount,
+    previewText,
+  };
+}
+
 function uniqueSourceRefs(refs: MemoirBookChapterSourceRef[]): MemoirBookChapterSourceRef[] {
   const seen = new Set<string>();
   const result: MemoirBookChapterSourceRef[] = [];
@@ -441,10 +466,8 @@ function decorateChapterStructureOptions(chapters: BookChapterView[]): BookChapt
     const targetOptions = options.filter((option) => option.value !== chapter.id);
     return {
       ...chapter,
-      sourceViews: chapter.source_refs.map((ref) => ({
-        ...ref,
-        previewText: sourcePreviewText(ref),
-      })),
+      sourceViews: chapter.source_refs.map(chapterSourceView),
+      sourceToggleText: chapter.sourceListExpanded ? "收起来源" : `展开 ${chapter.source_refs.length} 条来源`,
       mergeTargetOptions: targetOptions,
       splitOptions: chapter.source_refs.slice(1).map((_, splitIndex) => {
         const beforeCount = splitIndex + 1;
@@ -501,14 +524,7 @@ function chapterCollectionData(
 }
 
 export function bookChapterSourceSummary(chapter: Pick<MemoirBookPlanChapter, "source_refs">): string {
-  const quotes = chapter.source_refs
-    .map((ref) => trimText(ref.quote || ""))
-    .filter(Boolean)
-    .slice(0, 2);
-  if (!quotes.length) {
-    return `${chapter.source_refs.length} 条来源转写`;
-  }
-  return quotes.join(" / ");
+  return `${chapter.source_refs.length} 条来源转写`;
 }
 
 export function buildChapterViews(
@@ -531,6 +547,8 @@ export function buildChapterViews(
         sourceCount: chapter.source_refs.length,
         sourceSummary: bookChapterSourceSummary(chapter),
         sourceViews: [],
+        sourceListExpanded: false,
+        sourceToggleText: "",
         mergeTargetOptions: [],
         splitOptions: [],
         canMoveUp: false,
@@ -676,6 +694,7 @@ Page<BookData, {
   moveChapter(event: DatasetEvent): Promise<void>;
   mergeChapterInto(event: PickerEvent): Promise<void>;
   splitChapter(event: PickerEvent): Promise<void>;
+  toggleChapterSources(event: DatasetEvent): void;
   generateChapterDraft(event: DatasetEvent): Promise<void>;
   generateChapterDraftById(chapterId: string, toastTitle?: string): Promise<boolean>;
   changeDraftContent(event: TextInputEvent): void;
@@ -1183,6 +1202,16 @@ Page<BookData, {
       ];
     });
     await this.updatePlanStructure(toPlanUpdateInput(updates as BookChapterView[]), "章节已拆分");
+  },
+
+  toggleChapterSources(event) {
+    const chapterId = event.currentTarget.dataset.id || "";
+    const chapters = this.data.chapters.map((chapter) => (
+      chapter.id === chapterId
+        ? { ...chapter, sourceListExpanded: !chapter.sourceListExpanded }
+        : chapter
+    ));
+    this.setData(chapterCollectionData(chapters, this.data.stage));
   },
 
   async generateChapterDraft(event) {

@@ -416,6 +416,12 @@ async def test_mobile_memoir_book_chapter_draft_force_regenerate_ignores_previou
     assert "初一早上挨家给长辈拜年" in prompt
     assert prompt.count("source_type: 既有来源") == 2
     assert "source_type: 新增来源" not in prompt
+    assert "本章共有 2 条来源" in prompt
+    assert "不能只写第一条" in prompt
+    assert "以来源转写为准" in prompt
+    assert "章节标题参考" in prompt
+    assert "章节范围参考（可能滞后，以来源转写为准）" in prompt
+    assert "每条要求覆盖的来源至少要有一处可对应的具体内容进入正文" in prompt
 
     refreshed_chapter = await test_db.scalar(
         select(MemoirBookPlanChapter).where(MemoirBookPlanChapter.id == chapter.id)
