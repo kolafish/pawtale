@@ -123,3 +123,57 @@ test("voice no-answer prompt API posts attempt without selected AI model", async
   assert.deepEqual(apiRequests[0].data, { attempt: 1 });
   delete global.wx;
 });
+
+test("voice search transcription API posts recorded audio", async () => {
+  const requests = [];
+  global.wx = {
+    getStorageSync(key) {
+      if (key === "pawtale_backend_config") {
+        return {
+          httpBaseUrl: "http://backend.local:8000/",
+          devEmail: "local@example.com",
+          devPassword: "secret",
+        };
+      }
+      if (key === "pawtale_backend_cookie") {
+        return "pawtale_session=abc";
+      }
+      return "";
+    },
+    getExtConfigSync() {
+      return {};
+    },
+    setStorageSync() {},
+    removeStorageSync() {},
+    request(options) {
+      requests.push(options);
+      if (options.url.endsWith("/api/auth/me")) {
+        options.success({ statusCode: 200, data: { id: "user-1" }, cookies: [], header: {} });
+        return;
+      }
+      options.success({
+        statusCode: 200,
+        data: { transcript: "外婆家的院子" },
+        cookies: [],
+        header: {},
+      });
+    },
+  };
+  delete require.cache[require.resolve("../services/auth.ts")];
+  delete require.cache[require.resolve("../services/request.ts")];
+  delete require.cache[require.resolve("../services/memoir-voice-api.ts")];
+  const { transcribeMemoirVoiceSearchAudio } = require("../services/memoir-voice-api.ts");
+
+  const response = await transcribeMemoirVoiceSearchAudio("cGNt", "audio/pcm");
+
+  const apiRequests = requests.filter((request) => request.url.includes("/api/mobile/memoir/"));
+  assert.equal(apiRequests[0].url, "http://backend.local:8000/api/mobile/memoir/search-query/transcribe");
+  assert.equal(apiRequests[0].method, "POST");
+  assert.deepEqual(apiRequests[0].data, {
+    audio_base64: "cGNt",
+    mime_type: "audio/pcm",
+  });
+  assert.equal(apiRequests[0].header.Cookie, "pawtale_session=abc");
+  assert.deepEqual(response, { transcript: "外婆家的院子" });
+  delete global.wx;
+});

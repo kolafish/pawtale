@@ -13,6 +13,10 @@ import {
   clearTranscriptNavigationTarget,
   readTranscriptNavigationTarget,
 } from "../../services/transcript-navigation";
+import {
+  recordMemoirVoiceSearchQuery,
+  stopMemoirVoiceSearchRecording,
+} from "../../services/memoir-voice-search";
 
 interface DatasetEvent {
   currentTarget: {
@@ -69,6 +73,9 @@ interface TranscriptsData {
   searchInput: string;
   searchQuery: string;
   searchResultText: string;
+  voiceSearchRecording: boolean;
+  voiceSearchTranscribing: boolean;
+  voiceSearchStatusText: string;
   activeProjectId: string;
   projectTitle: string;
   highlightedId: string;
@@ -239,6 +246,7 @@ Page<TranscriptsData, {
   onSearchConfirm(): Promise<void>;
   clearSearch(): Promise<void>;
   applySearch(rawQuery?: string): Promise<void>;
+  startVoiceSearch(): Promise<void>;
   beginEdit(event: DatasetEvent): void;
   changeText(event: TextAreaEvent): void;
   cancelEdit(event: DatasetEvent): void;
@@ -279,6 +287,9 @@ Page<TranscriptsData, {
     searchInput: "",
     searchQuery: "",
     searchResultText: "",
+    voiceSearchRecording: false,
+    voiceSearchTranscribing: false,
+    voiceSearchStatusText: "",
     activeProjectId: "",
     projectTitle: "",
     highlightedId: "",
@@ -413,6 +424,44 @@ Page<TranscriptsData, {
       highlightedId: "",
     });
     await this.loadTranscripts(true);
+  },
+
+  async startVoiceSearch() {
+    if (this.data.voiceSearchTranscribing) {
+      return;
+    }
+    if (this.data.voiceSearchRecording) {
+      stopMemoirVoiceSearchRecording();
+      return;
+    }
+    this.stopPlayback();
+    this.setData({
+      voiceSearchRecording: true,
+      voiceSearchTranscribing: false,
+      voiceSearchStatusText: "正在听你说搜索内容",
+      error: "",
+    });
+    try {
+      const query = await recordMemoirVoiceSearchQuery({
+        onRecordingEnd: () => {
+          this.setData({
+            voiceSearchRecording: false,
+            voiceSearchTranscribing: true,
+            voiceSearchStatusText: "正在识别语音搜索",
+          });
+        },
+      });
+      await this.applySearch(query);
+      wx.showToast({ title: "已识别", icon: "success" });
+    } catch (error) {
+      this.setData({ error: error instanceof Error ? error.message : "语音搜索失败" });
+    } finally {
+      this.setData({
+        voiceSearchRecording: false,
+        voiceSearchTranscribing: false,
+        voiceSearchStatusText: "",
+      });
+    }
   },
 
   beginEdit(event) {
@@ -607,6 +656,9 @@ Page<TranscriptsData, {
     if (this.searchDebounceTimer !== null) {
       clearTimeout(this.searchDebounceTimer);
       this.searchDebounceTimer = null;
+    }
+    if (this.data.voiceSearchRecording) {
+      stopMemoirVoiceSearchRecording();
     }
     this.stopPlayback();
   },

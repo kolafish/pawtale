@@ -100,12 +100,48 @@
   border: 0;
 }
 
+.voice-search-button {
+  flex: 0 0 112rpx;
+  width: 112rpx;
+  height: 60rpx;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 16rpx;
+  background: #9f4a3c;
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24rpx;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.voice-search-button.recording {
+  background: #b4234a;
+}
+
+.voice-search-button[disabled] {
+  background: #d8b7a8;
+  color: rgba(255, 255, 255, 0.86);
+}
+
+.voice-search-button::after {
+  border: 0;
+}
+
 .search-summary {
   display: block;
   margin-top: 12rpx;
   color: #685b55;
   font-size: 24rpx;
   line-height: 1.35;
+}
+
+.voice-search-status {
+  color: #9f4a3c;
+  font-weight: 800;
 }
 
 .error {

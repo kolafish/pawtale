@@ -1,6 +1,9 @@
+import base64
+import binascii
 from pathlib import Path
 import struct
 from typing import Literal
+import uuid
 
 import aiofiles
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
@@ -20,6 +23,8 @@ from app.schemas.memoir import (
     MemoirVoiceFollowUpResponse,
     MemoirVoiceNoAnswerPromptRequest,
     MemoirVoiceProgressResponse,
+    MemoirVoiceSearchTranscriptionRequest,
+    MemoirVoiceSearchTranscriptionResponse,
     MemoirVoiceTranscriptCleanupRequest,
     MemoirVoiceTranscriptItemResponse,
     MemoirVoiceTranscriptListResponse,
@@ -32,11 +37,13 @@ from app.schemas.memoir import (
 from app.services.memoir import projects as memoir_projects
 from app.services.memoir import voice_authorization as memoir_voice_authorization
 from app.services.memoir import voice_followups as memoir_voice_followups
+from app.services.memoir import voice_search as memoir_voice_search
 from app.services.memoir import voice_sessions as memoir_voice_sessions
 from app.services.memoir import voice_tts as memoir_voice_tts
 from app.services.memoir import voice_transcripts as memoir_voice_transcripts
 from app.services.memoir.access import load_audio_file, load_memoir_project
 from app.services.memoir.audio_files import audio_file_path
+from app.services.memoir.streaming_asr import create_volc_streaming_asr_client
 
 
 router = APIRouter()
@@ -236,6 +243,28 @@ async def play_mobile_memoir_audio_file(
         media_type=audio_file.mime_type,
         filename=f"{audio_file.id}{Path(audio_file.storage_path).suffix}",
     )
+
+
+@router.post("/search-query/transcribe", response_model=MemoirVoiceSearchTranscriptionResponse)
+async def transcribe_mobile_memoir_search_query(
+    req: MemoirVoiceSearchTranscriptionRequest,
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        audio = base64.b64decode(req.audio_base64, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise HTTPException(status_code=400, detail="搜索语音格式无效") from exc
+    try:
+        transcript = await memoir_voice_search.transcribe_voice_search_audio(
+            audio,
+            asr_client_factory=lambda: create_volc_streaming_asr_client(
+                current_user.id,
+                f"voice-search-{uuid.uuid4().hex}",
+            ),
+        )
+    except memoir_voice_search.VoiceSearchTranscriptionError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+    return MemoirVoiceSearchTranscriptionResponse(transcript=transcript)
 
 
 @router.get("/voice-transcripts", response_model=MemoirVoiceTranscriptListResponse)

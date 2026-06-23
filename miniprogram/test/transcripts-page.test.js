@@ -3,12 +3,14 @@ require("./register-ts");
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-function loadTranscriptsPage({ authExports = {}, voiceApiExports = {} } = {}) {
+function loadTranscriptsPage({ authExports = {}, voiceApiExports = {}, voiceSearchExports = {} } = {}) {
   const authPath = require.resolve("../services/auth.ts");
   const voiceApiPath = require.resolve("../services/memoir-voice-api.ts");
+  const voiceSearchPath = require.resolve("../services/memoir-voice-search.ts");
   const transcriptsPath = require.resolve("../pages/transcripts/index.ts");
   delete require.cache[authPath];
   delete require.cache[voiceApiPath];
+  delete require.cache[voiceSearchPath];
   delete require.cache[transcriptsPath];
   require.cache[authPath] = {
     id: authPath,
@@ -39,6 +41,18 @@ function loadTranscriptsPage({ authExports = {}, voiceApiExports = {} } = {}) {
         throw new Error("updateMemoirVoiceTranscript was not mocked");
       },
       ...voiceApiExports,
+    },
+  };
+  require.cache[voiceSearchPath] = {
+    id: voiceSearchPath,
+    filename: voiceSearchPath,
+    loaded: true,
+    exports: {
+      recordMemoirVoiceSearchQuery: async () => {
+        throw new Error("recordMemoirVoiceSearchQuery was not mocked");
+      },
+      stopMemoirVoiceSearchRecording: () => {},
+      ...voiceSearchExports,
     },
   };
 
@@ -337,6 +351,68 @@ test("transcripts page ignores stale search responses", async () => {
   assert.equal(context.data.searchQuery, "县城");
   assert.equal(context.data.items[0].id, "utterance-county");
   assert.equal(context.data.loading, false);
+});
+
+test("transcripts page applies recognized voice search text", async () => {
+  const calls = [];
+  const toasts = [];
+  global.wx = {
+    showToast(options) {
+      toasts.push(options);
+    },
+  };
+  const { page } = loadTranscriptsPage({
+    authExports: {
+      getMemoirIdentity: async () => ({
+        id: "user-1",
+        active_project_id: "project-1",
+        active_project: { id: "project-1", title: "我的回忆录" },
+        projects: [],
+      }),
+    },
+    voiceApiExports: {
+      listMemoirVoiceTranscripts: async (options) => {
+        calls.push(options);
+        return {
+          items: [sampleTranscript("utterance-hit")],
+          total: 1,
+          limit: 30,
+          offset: 0,
+        };
+      },
+    },
+    voiceSearchExports: {
+      recordMemoirVoiceSearchQuery: async (options) => {
+        options.onRecordingEnd();
+        return "外婆家的院子";
+      },
+    },
+  });
+  const context = pageContext(page);
+
+  await page.startVoiceSearch.call(context);
+
+  assert.equal(context.data.searchInput, "外婆家的院子");
+  assert.equal(context.data.searchQuery, "外婆家的院子");
+  assert.deepEqual(calls.map((item) => item.query), ["外婆家的院子"]);
+  assert.equal(context.data.voiceSearchRecording, false);
+  assert.equal(context.data.voiceSearchTranscribing, false);
+  assert.deepEqual(toasts, [{ title: "已识别", icon: "success" }]);
+  delete global.wx;
+});
+
+test("transcripts page stops active voice search recording on second tap", async () => {
+  const stops = [];
+  const { page } = loadTranscriptsPage({
+    voiceSearchExports: {
+      stopMemoirVoiceSearchRecording: () => stops.push("stop"),
+    },
+  });
+  const context = pageContext(page, { voiceSearchRecording: true });
+
+  await page.startVoiceSearch.call(context);
+
+  assert.deepEqual(stops, ["stop"]);
 });
 
 test("transcripts page scrolls to stored uncovered source target", async () => {

@@ -343,6 +343,23 @@ class MemoirVoiceTranscriptListResponse(BaseModel):
     offset: int
 
 
+class MemoirVoiceSearchTranscriptionRequest(BaseModel):
+    audio_base64: str = Field(min_length=1)
+    mime_type: str = "audio/pcm"
+
+    @field_validator("audio_base64", "mime_type")
+    @classmethod
+    def _non_empty_voice_search_text(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("不能为空")
+        return normalized
+
+
+class MemoirVoiceSearchTranscriptionResponse(BaseModel):
+    transcript: str
+
+
 class MemoirVoiceTranscriptUpdateRequest(BaseModel):
     transcript_edited: str
 

@@ -22,8 +22,17 @@
         bindconfirm="onSearchConfirm"
       />
       <button wx:if="{{searchInput}}" class="search-clear" bindtap="clearSearch">×</button>
+      <button
+        class="voice-search-button {{voiceSearchRecording ? 'recording' : ''}}"
+        bindtap="startVoiceSearch"
+        loading="{{voiceSearchTranscribing}}"
+        disabled="{{voiceSearchTranscribing}}"
+      >
+        {{voiceSearchRecording ? "停止" : (voiceSearchTranscribing ? "识别中" : "语音")}}
+      </button>
     </view>
     <text wx:if="{{searchQuery}}" class="search-summary">{{searchResultText}}</text>
+    <text wx:if="{{voiceSearchStatusText}}" class="search-summary voice-search-status">{{voiceSearchStatusText}}</text>
   </view>
 
   <view wx:if="{{error}}" class="error">{{error}}</view>

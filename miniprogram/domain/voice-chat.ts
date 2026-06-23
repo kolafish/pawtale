@@ -244,6 +244,10 @@ export interface MemoirVoiceTranscriptListResponse {
   offset: number;
 }
 
+export interface MemoirVoiceSearchTranscriptionResponse {
+  transcript: string;
+}
+
 export interface MemoirBookChapterSourceRef {
   voice_session_id: string;
   message_id: string;
