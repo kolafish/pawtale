@@ -158,6 +158,7 @@ export async function createMemoirAssistantTTS(
 
 interface VoiceTranscriptListOptions {
   projectId?: string;
+  query?: string;
   limit?: number;
   offset?: number;
 }
@@ -166,6 +167,10 @@ function queryString(options: VoiceTranscriptListOptions): string {
   const query: string[] = [];
   if (options.projectId) {
     query.push(`project_id=${encodeURIComponent(options.projectId)}`);
+  }
+  const searchQuery = options.query?.trim();
+  if (searchQuery) {
+    query.push(`q=${encodeURIComponent(searchQuery)}`);
   }
   if (options.limit !== undefined) {
     query.push(`limit=${encodeURIComponent(String(options.limit))}`);

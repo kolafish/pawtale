@@ -9,6 +9,23 @@
     </view>
   </view>
 
+  <view wx:if="{{activeProjectId}}" class="search-panel">
+    <view class="search-box">
+      <text class="search-mark">⌕</text>
+      <input
+        class="search-input"
+        type="text"
+        value="{{searchInput}}"
+        placeholder="搜索人名、地点、事件、年份"
+        confirm-type="search"
+        bindinput="onSearchInput"
+        bindconfirm="onSearchConfirm"
+      />
+      <button wx:if="{{searchInput}}" class="search-clear" bindtap="clearSearch">×</button>
+    </view>
+    <text wx:if="{{searchQuery}}" class="search-summary">{{searchResultText}}</text>
+  </view>
+
   <view wx:if="{{error}}" class="error">{{error}}</view>
 
   <view wx:if="{{needsLogin}}" class="empty-panel guest-panel">
@@ -24,7 +41,12 @@
   </view>
 
   <view wx:elif="{{loading && !items.length}}" class="empty-panel">
-    <text>正在加载</text>
+    <text>{{searchQuery ? "正在搜索" : "正在加载"}}</text>
+  </view>
+
+  <view wx:elif="{{searchQuery && !items.length}}" class="empty-panel">
+    <text class="empty-title">没有找到相关记录</text>
+    <text class="empty-copy">没有包含“{{searchQuery}}”的转写记录。</text>
   </view>
 
   <view wx:elif="{{!items.length}}" class="empty-panel">
@@ -55,7 +77,15 @@
         <text class="section-title">AI 引导问题</text>
         <text class="section-count">{{item.question_audio_file_id ? "可播放" : "无语音"}}</text>
       </view>
-      <text class="question-text">{{item.question_text}}</text>
+      <text class="question-text">
+        <text
+          wx:for="{{item.questionSegments}}"
+          wx:for-item="segment"
+          wx:for-index="segmentIndex"
+          wx:key="segmentIndex"
+          class="{{segment.highlight ? 'search-hit' : ''}}"
+        >{{segment.text}}</text>
+      </text>
     </view>
 
     <view class="raw-box">
@@ -63,7 +93,15 @@
         <text class="section-title">ASR 原文</text>
         <text class="section-count">{{item.raw_char_count}} 字</text>
       </view>
-      <text class="raw-text">{{item.transcript_raw}}</text>
+      <text class="raw-text">
+        <text
+          wx:for="{{item.rawSegments}}"
+          wx:for-item="segment"
+          wx:for-index="segmentIndex"
+          wx:key="segmentIndex"
+          class="{{segment.highlight ? 'search-hit' : ''}}"
+        >{{segment.text}}</text>
+      </text>
     </view>
 
     <view wx:if="{{!item.isEditing}}" class="display-box">
@@ -71,7 +109,15 @@
         <text class="section-title">校正文</text>
         <text class="section-count">{{item.display_char_count}} 字</text>
       </view>
-      <text class="display-text">{{item.display_text}}</text>
+      <text class="display-text">
+        <text
+          wx:for="{{item.displaySegments}}"
+          wx:for-item="segment"
+          wx:for-index="segmentIndex"
+          wx:key="segmentIndex"
+          class="{{segment.highlight ? 'search-hit' : ''}}"
+        >{{segment.text}}</text>
+      </text>
     </view>
 
     <view wx:else class="edit-box">

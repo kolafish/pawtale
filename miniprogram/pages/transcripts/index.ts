@@ -28,6 +28,17 @@ interface TextAreaEvent extends DatasetEvent {
   };
 }
 
+interface SearchInputEvent {
+  detail: {
+    value: string;
+  };
+}
+
+interface TranscriptTextSegment {
+  text: string;
+  highlight: boolean;
+}
+
 interface TranscriptItemView extends MemoirVoiceTranscriptItem {
   editingText: string;
   editingCharCount: number;
@@ -37,6 +48,9 @@ interface TranscriptItemView extends MemoirVoiceTranscriptItem {
   bookInclusionText: string;
   isIncludedInBook: boolean;
   canPlayAudio: boolean;
+  questionSegments: TranscriptTextSegment[];
+  rawSegments: TranscriptTextSegment[];
+  displaySegments: TranscriptTextSegment[];
   changed: boolean;
   isEditing: boolean;
 }
@@ -52,12 +66,16 @@ interface TranscriptsData {
   total: number;
   limit: number;
   offset: number;
+  searchInput: string;
+  searchQuery: string;
+  searchResultText: string;
   activeProjectId: string;
   projectTitle: string;
   highlightedId: string;
 }
 
 const DEFAULT_LIMIT = 30;
+const SEARCH_DEBOUNCE_MS = 300;
 
 type PageScrollTo = (options: {
   selector: string;
@@ -99,6 +117,50 @@ export function transcriptCreatedAtText(item: Pick<MemoirVoiceTranscriptItem, "c
   return formatBeijingDateTime(item.created_at) || "转写记录";
 }
 
+function transcriptSearchTerms(searchQuery: string): string[] {
+  return searchQuery
+    .trim()
+    .split(/\s+/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .slice(0, 8);
+}
+
+export function highlightTranscriptText(text: string, searchQuery: string): TranscriptTextSegment[] {
+  if (!text) {
+    return [];
+  }
+  const terms = transcriptSearchTerms(searchQuery);
+  if (!terms.length) {
+    return [{ text, highlight: false }];
+  }
+  const normalizedTerms = terms.map((term) => term.toLocaleLowerCase());
+  const normalizedText = text.toLocaleLowerCase();
+  const segments: TranscriptTextSegment[] = [];
+  let cursor = 0;
+  while (cursor < text.length) {
+    let nextIndex = -1;
+    let nextTerm = "";
+    for (const term of normalizedTerms) {
+      const index = normalizedText.indexOf(term, cursor);
+      if (index >= 0 && (nextIndex < 0 || index < nextIndex || (index === nextIndex && term.length > nextTerm.length))) {
+        nextIndex = index;
+        nextTerm = term;
+      }
+    }
+    if (nextIndex < 0) {
+      segments.push({ text: text.slice(cursor), highlight: false });
+      break;
+    }
+    if (nextIndex > cursor) {
+      segments.push({ text: text.slice(cursor, nextIndex), highlight: false });
+    }
+    segments.push({ text: text.slice(nextIndex, nextIndex + nextTerm.length), highlight: true });
+    cursor = nextIndex + nextTerm.length;
+  }
+  return segments;
+}
+
 function transcriptAnchorId(id: string): string {
   return `transcript-${id.replace(/[^A-Za-z0-9_-]/g, "-")}`;
 }
@@ -116,7 +178,7 @@ export function transcriptBookInclusionText(item: MemoirVoiceTranscriptItem): st
   return `已收录：${visible}${suffix}`;
 }
 
-function toViewItem(item: MemoirVoiceTranscriptItem): TranscriptItemView {
+function toViewItem(item: MemoirVoiceTranscriptItem, searchQuery = ""): TranscriptItemView {
   const editingText = item.transcript_edited || item.transcript_raw;
   const isIncludedInBook = Boolean(item.is_included_in_book || item.included_chapters?.length);
   return {
@@ -129,6 +191,9 @@ function toViewItem(item: MemoirVoiceTranscriptItem): TranscriptItemView {
     bookInclusionText: transcriptBookInclusionText(item),
     isIncludedInBook,
     canPlayAudio: Boolean(item.audio_file_id || item.question_audio_file_id),
+    questionSegments: highlightTranscriptText(item.question_text, searchQuery),
+    rawSegments: highlightTranscriptText(item.transcript_raw, searchQuery),
+    displaySegments: highlightTranscriptText(item.display_text, searchQuery),
     changed: editingText !== (item.transcript_edited || item.transcript_raw),
     isEditing: false,
   };
@@ -144,8 +209,8 @@ function changedItem(item: TranscriptItemView, editingText: string): TranscriptI
   };
 }
 
-function replaceItem(items: TranscriptItemView[], next: MemoirVoiceTranscriptItem): TranscriptItemView[] {
-  return items.map((item) => (item.id === next.id ? toViewItem(next) : item));
+function replaceItem(items: TranscriptItemView[], next: MemoirVoiceTranscriptItem, searchQuery = ""): TranscriptItemView[] {
+  return items.map((item) => (item.id === next.id ? toViewItem(next, searchQuery) : item));
 }
 
 function removeItem(items: TranscriptItemView[], id: string): TranscriptItemView[] {
@@ -170,6 +235,10 @@ Page<TranscriptsData, {
   onShow(): Promise<void>;
   loadTranscripts(reset?: boolean): Promise<void>;
   loadMore(): Promise<void>;
+  onSearchInput(event: SearchInputEvent): void;
+  onSearchConfirm(): Promise<void>;
+  clearSearch(): Promise<void>;
+  applySearch(rawQuery?: string): Promise<void>;
   beginEdit(event: DatasetEvent): void;
   changeText(event: TextAreaEvent): void;
   cancelEdit(event: DatasetEvent): void;
@@ -188,9 +257,11 @@ Page<TranscriptsData, {
   scrollToTranscript(item: TranscriptItemView): void;
   audio: WechatMiniprogram.InnerAudioContext | null;
   playToken: number;
+  searchDebounceTimer: number | null;
 }>({
   audio: null,
   playToken: 0,
+  searchDebounceTimer: null,
 
   data: {
     loading: false,
@@ -203,6 +274,9 @@ Page<TranscriptsData, {
     total: 0,
     limit: DEFAULT_LIMIT,
     offset: 0,
+    searchInput: "",
+    searchQuery: "",
+    searchResultText: "",
     activeProjectId: "",
     projectTitle: "",
     highlightedId: "",
@@ -234,16 +308,19 @@ Page<TranscriptsData, {
           items: [],
           total: 0,
           offset: 0,
+          searchResultText: "",
           highlightedId: "",
         });
         return;
       }
+      const searchQuery = this.data.searchQuery;
       const response = await listMemoirVoiceTranscripts({
         projectId: activeProjectId,
+        query: searchQuery || undefined,
         limit: this.data.limit,
         offset,
       });
-      const nextItems = response.items.map(toViewItem);
+      const nextItems = response.items.map((item) => toViewItem(item, searchQuery));
       this.setData({
         needsLogin: false,
         activeProjectId,
@@ -251,6 +328,7 @@ Page<TranscriptsData, {
         items: reset ? nextItems : [...this.data.items, ...nextItems],
         total: response.total,
         offset: offset + nextItems.length,
+        searchResultText: searchQuery ? `找到 ${response.total} 条相关记录` : "",
         highlightedId: reset ? "" : this.data.highlightedId,
       });
     } catch (error) {
@@ -262,6 +340,7 @@ Page<TranscriptsData, {
           items: [],
           total: 0,
           offset: 0,
+          searchResultText: "",
           highlightedId: "",
         });
         return;
@@ -277,6 +356,48 @@ Page<TranscriptsData, {
       return;
     }
     await this.loadTranscripts(false);
+  },
+
+  onSearchInput(event) {
+    const value = event.detail.value;
+    this.setData({ searchInput: value });
+    if (this.searchDebounceTimer !== null) {
+      clearTimeout(this.searchDebounceTimer);
+    }
+    this.searchDebounceTimer = setTimeout(() => {
+      void this.applySearch(value);
+    }, SEARCH_DEBOUNCE_MS);
+  },
+
+  async onSearchConfirm() {
+    await this.applySearch(this.data.searchInput);
+  },
+
+  async clearSearch() {
+    await this.applySearch("");
+  },
+
+  async applySearch(rawQuery) {
+    if (this.searchDebounceTimer !== null) {
+      clearTimeout(this.searchDebounceTimer);
+      this.searchDebounceTimer = null;
+    }
+    const nextInput = rawQuery ?? this.data.searchInput;
+    const searchQuery = nextInput.trim();
+    if (searchQuery === this.data.searchQuery && nextInput === this.data.searchInput) {
+      return;
+    }
+    this.stopPlayback();
+    this.setData({
+      searchInput: nextInput,
+      searchQuery,
+      searchResultText: "",
+      items: [],
+      total: 0,
+      offset: 0,
+      highlightedId: "",
+    });
+    await this.loadTranscripts(true);
   },
 
   beginEdit(event) {
@@ -315,7 +436,7 @@ Page<TranscriptsData, {
       return;
     }
     const items = [...this.data.items];
-    items[index] = toViewItem(items[index]);
+    items[index] = toViewItem(items[index], this.data.searchQuery);
     this.setData({ items, error: "" });
   },
 
@@ -333,7 +454,7 @@ Page<TranscriptsData, {
     this.setData({ savingId: id, error: "" });
     try {
       const updated = await updateMemoirVoiceTranscript(id, content);
-      this.setData({ items: replaceItem(this.data.items, updated) });
+      this.setData({ items: replaceItem(this.data.items, updated, this.data.searchQuery) });
       wx.showToast({ title: "已保存", icon: "success" });
     } catch (error) {
       this.setData({ error: error instanceof Error ? error.message : "保存失败" });
@@ -468,6 +589,10 @@ Page<TranscriptsData, {
   },
 
   onUnload() {
+    if (this.searchDebounceTimer !== null) {
+      clearTimeout(this.searchDebounceTimer);
+      this.searchDebounceTimer = null;
+    }
     this.stopPlayback();
   },
 
@@ -492,6 +617,10 @@ Page<TranscriptsData, {
       return;
     }
     clearTranscriptNavigationTarget();
+    if (this.data.searchQuery) {
+      this.setData({ searchInput: "", searchQuery: "", searchResultText: "" });
+      await this.loadTranscripts(true);
+    }
     const item = await this.ensureTranscriptTargetLoaded(targetId);
     if (!item) {
       return;
