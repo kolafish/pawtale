@@ -31,7 +31,16 @@
         {{voiceSearchRecording ? "停止" : (voiceSearchTranscribing ? "识别中" : "语音")}}
       </button>
     </view>
-    <text wx:if="{{searchQuery}}" class="search-summary">{{searchResultText}}</text>
+    <view wx:if="{{searchChips.length}}" class="search-chips">
+      <text
+        wx:for="{{searchChips}}"
+        wx:for-item="chip"
+        wx:for-index="chipIndex"
+        wx:key="chipIndex"
+        class="search-chip"
+      >{{chip.text}}</text>
+    </view>
+    <text wx:if="{{hasSearchCriteria}}" class="search-summary">{{searchResultText}}</text>
     <text wx:if="{{voiceSearchStatusText}}" class="search-summary voice-search-status">{{voiceSearchStatusText}}</text>
   </view>
 
@@ -50,12 +59,12 @@
   </view>
 
   <view wx:elif="{{loading && !items.length}}" class="empty-panel">
-    <text>{{searchQuery ? "正在搜索" : "正在加载"}}</text>
+    <text>{{hasSearchCriteria ? "正在搜索" : "正在加载"}}</text>
   </view>
 
-  <view wx:elif="{{searchQuery && !items.length}}" class="empty-panel">
+  <view wx:elif="{{hasSearchCriteria && !items.length}}" class="empty-panel">
     <text class="empty-title">没有找到相关记录</text>
-    <text class="empty-copy">没有包含“{{searchQuery}}”的转写记录。</text>
+    <text class="empty-copy">没有匹配“{{searchDisplayText}}”的转写记录。</text>
   </view>
 
   <view wx:elif="{{!items.length}}" class="empty-panel">

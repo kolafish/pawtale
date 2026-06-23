@@ -1,8 +1,15 @@
-import type { MemoirVoiceTranscriptItem } from "../../domain/voice-chat";
+import type {
+  MemoirGuidanceMode,
+  MemoirVoiceTranscriptIncludedFilter,
+  MemoirVoiceTranscriptItem,
+  MemoirVoiceSearchQueryFilters,
+  MemoirVoiceSearchQueryParseResponse,
+} from "../../domain/voice-chat";
 import {
   deleteMemoirVoiceTranscript,
   downloadMemoirVoiceAudio,
   listMemoirVoiceTranscripts,
+  parseMemoirVoiceSearchQuery,
   updateMemoirVoiceTranscript,
 } from "../../services/memoir-voice-api";
 import { configureAudiblePlayback } from "../../services/audio-playback";
@@ -43,6 +50,16 @@ interface TranscriptTextSegment {
   highlight: boolean;
 }
 
+interface TranscriptSearchFilters {
+  included: MemoirVoiceTranscriptIncludedFilter;
+  guidanceMode: MemoirGuidanceMode | "";
+  module: string;
+}
+
+interface SearchChipView {
+  text: string;
+}
+
 interface TranscriptItemView extends MemoirVoiceTranscriptItem {
   editingText: string;
   editingCharCount: number;
@@ -73,6 +90,10 @@ interface TranscriptsData {
   searchInput: string;
   searchQuery: string;
   searchResultText: string;
+  searchFilters: TranscriptSearchFilters;
+  searchChips: SearchChipView[];
+  hasSearchCriteria: boolean;
+  searchDisplayText: string;
   voiceSearchRecording: boolean;
   voiceSearchTranscribing: boolean;
   voiceSearchStatusText: string;
@@ -83,6 +104,22 @@ interface TranscriptsData {
 
 const DEFAULT_LIMIT = 30;
 const SEARCH_DEBOUNCE_MS = 300;
+const DEFAULT_SEARCH_FILTERS: TranscriptSearchFilters = {
+  included: "all",
+  guidanceMode: "",
+  module: "",
+};
+
+const MODULE_LABELS: Record<string, string> = {
+  person: "人物",
+  event: "事情",
+  place: "地点",
+  period: "时间段",
+  theme: "主题",
+  family: "家庭",
+  work: "工作",
+  chat: "闲聊",
+};
 
 type PageScrollTo = (options: {
   selector: string;
@@ -168,6 +205,77 @@ export function highlightTranscriptText(text: string, searchQuery: string): Tran
   return segments;
 }
 
+function normalizedSearchFilters(filters?: Partial<TranscriptSearchFilters>): TranscriptSearchFilters {
+  return {
+    included: filters?.included || "all",
+    guidanceMode: filters?.guidanceMode || "",
+    module: filters?.module || "",
+  };
+}
+
+function filtersFromParsedSearch(parsed: MemoirVoiceSearchQueryParseResponse): TranscriptSearchFilters {
+  const filters: MemoirVoiceSearchQueryFilters = parsed.filters || { included: "all" };
+  return normalizedSearchFilters({
+    included: filters.included || "all",
+    guidanceMode: filters.guidance_mode || "",
+    module: filters.module || "",
+  });
+}
+
+function filtersActive(filters: TranscriptSearchFilters): boolean {
+  return filters.included !== "all" || Boolean(filters.guidanceMode) || Boolean(filters.module);
+}
+
+function filtersEqual(left: TranscriptSearchFilters, right: TranscriptSearchFilters): boolean {
+  return left.included === right.included
+    && left.guidanceMode === right.guidanceMode
+    && left.module === right.module;
+}
+
+function searchCriteriaActive(query: string, filters: TranscriptSearchFilters): boolean {
+  return Boolean(query.trim()) || filtersActive(filters);
+}
+
+function moduleLabel(module: string): string {
+  return MODULE_LABELS[module] || module;
+}
+
+function searchChips(filters: TranscriptSearchFilters, parsed?: MemoirVoiceSearchQueryParseResponse): SearchChipView[] {
+  const chips: SearchChipView[] = [];
+  for (const keyword of (parsed?.keywords || []).slice(0, 4)) {
+    const text = keyword.trim();
+    if (text) {
+      chips.push({ text });
+    }
+  }
+  if (filters.included === "included") {
+    chips.push({ text: "已收录" });
+  } else if (filters.included === "not_included") {
+    chips.push({ text: "未收录" });
+  }
+  if (filters.guidanceMode === "free_narration") {
+    chips.push({ text: "自由讲述" });
+  } else if (filters.guidanceMode === "guided_interview") {
+    chips.push({ text: "引导访谈" });
+  }
+  if (filters.module) {
+    chips.push({ text: moduleLabel(filters.module) });
+  }
+  return chips;
+}
+
+function searchDisplayText(query: string, filters: TranscriptSearchFilters, parsed?: MemoirVoiceSearchQueryParseResponse): string {
+  const displayText = parsed?.display_text?.trim();
+  if (displayText) {
+    return displayText;
+  }
+  if (query.trim()) {
+    return query.trim();
+  }
+  const chips = searchChips(filters).map((chip) => chip.text);
+  return chips.join("、") || "筛选条件";
+}
+
 function transcriptAnchorId(id: string): string {
   return `transcript-${id.replace(/[^A-Za-z0-9_-]/g, "-")}`;
 }
@@ -245,7 +353,11 @@ Page<TranscriptsData, {
   onSearchInput(event: SearchInputEvent): void;
   onSearchConfirm(): Promise<void>;
   clearSearch(): Promise<void>;
-  applySearch(rawQuery?: string): Promise<void>;
+  applySearch(
+    rawQuery?: string,
+    filters?: Partial<TranscriptSearchFilters>,
+    parsed?: MemoirVoiceSearchQueryParseResponse,
+  ): Promise<void>;
   startVoiceSearch(): Promise<void>;
   beginEdit(event: DatasetEvent): void;
   changeText(event: TextAreaEvent): void;
@@ -287,6 +399,10 @@ Page<TranscriptsData, {
     searchInput: "",
     searchQuery: "",
     searchResultText: "",
+    searchFilters: DEFAULT_SEARCH_FILTERS,
+    searchChips: [],
+    hasSearchCriteria: false,
+    searchDisplayText: "",
     voiceSearchRecording: false,
     voiceSearchTranscribing: false,
     voiceSearchStatusText: "",
@@ -308,6 +424,8 @@ Page<TranscriptsData, {
     const requestToken = this.loadToken;
     const offset = reset ? 0 : this.data.offset;
     const searchQuery = this.data.searchQuery;
+    const searchFilters = normalizedSearchFilters(this.data.searchFilters);
+    const hasSearchCriteria = searchCriteriaActive(searchQuery, searchFilters);
     this.setData({ loading: true, error: "" });
     try {
       let activeProjectId = this.data.activeProjectId;
@@ -328,6 +446,7 @@ Page<TranscriptsData, {
           total: 0,
           offset: 0,
           searchResultText: "",
+          hasSearchCriteria,
           highlightedId: "",
         });
         return;
@@ -335,6 +454,9 @@ Page<TranscriptsData, {
       const response = await listMemoirVoiceTranscripts({
         projectId: activeProjectId,
         query: searchQuery || undefined,
+        included: searchFilters.included,
+        guidanceMode: searchFilters.guidanceMode || undefined,
+        module: searchFilters.module || undefined,
         limit: this.data.limit,
         offset,
       });
@@ -349,7 +471,8 @@ Page<TranscriptsData, {
         items: reset ? nextItems : [...this.data.items, ...nextItems],
         total: response.total,
         offset: offset + nextItems.length,
-        searchResultText: searchQuery ? `找到 ${response.total} 条相关记录` : "",
+        searchResultText: hasSearchCriteria ? `找到 ${response.total} 条相关记录` : "",
+        hasSearchCriteria,
         highlightedId: reset ? "" : this.data.highlightedId,
       });
     } catch (error) {
@@ -365,6 +488,7 @@ Page<TranscriptsData, {
           total: 0,
           offset: 0,
           searchResultText: "",
+          hasSearchCriteria: false,
           highlightedId: "",
         });
         return;
@@ -403,20 +527,31 @@ Page<TranscriptsData, {
     await this.applySearch("");
   },
 
-  async applySearch(rawQuery) {
+  async applySearch(rawQuery, filters, parsed) {
     if (this.searchDebounceTimer !== null) {
       clearTimeout(this.searchDebounceTimer);
       this.searchDebounceTimer = null;
     }
     const nextInput = rawQuery ?? this.data.searchInput;
     const searchQuery = nextInput.trim();
-    if (searchQuery === this.data.searchQuery && nextInput === this.data.searchInput) {
+    const nextFilters = normalizedSearchFilters(filters);
+    const hasSearchCriteria = searchCriteriaActive(searchQuery, nextFilters);
+    const displayText = hasSearchCriteria ? searchDisplayText(searchQuery, nextFilters, parsed) : "";
+    if (
+      searchQuery === this.data.searchQuery
+      && nextInput === this.data.searchInput
+      && filtersEqual(nextFilters, this.data.searchFilters)
+    ) {
       return;
     }
     this.stopPlayback();
     this.setData({
       searchInput: nextInput,
       searchQuery,
+      searchFilters: nextFilters,
+      searchChips: hasSearchCriteria ? searchChips(nextFilters, parsed) : [],
+      hasSearchCriteria,
+      searchDisplayText: displayText,
       searchResultText: "",
       items: [],
       total: 0,
@@ -451,7 +586,10 @@ Page<TranscriptsData, {
           });
         },
       });
-      await this.applySearch(query);
+      this.setData({ voiceSearchStatusText: "正在理解搜索需求" });
+      const parsed = await parseMemoirVoiceSearchQuery(query);
+      const parsedFilters = filtersFromParsedSearch(parsed);
+      await this.applySearch(parsed.query || query, parsedFilters, parsed);
       wx.showToast({ title: "已识别", icon: "success" });
     } catch (error) {
       this.setData({ error: error instanceof Error ? error.message : "语音搜索失败" });
@@ -684,8 +822,16 @@ Page<TranscriptsData, {
       return;
     }
     clearTranscriptNavigationTarget();
-    if (this.data.searchQuery) {
-      this.setData({ searchInput: "", searchQuery: "", searchResultText: "" });
+    if (this.data.hasSearchCriteria) {
+      this.setData({
+        searchInput: "",
+        searchQuery: "",
+        searchFilters: DEFAULT_SEARCH_FILTERS,
+        searchChips: [],
+        hasSearchCriteria: false,
+        searchDisplayText: "",
+        searchResultText: "",
+      });
       await this.loadTranscripts(true);
     }
     const item = await this.ensureTranscriptTargetLoaded(targetId);

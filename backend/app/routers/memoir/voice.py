@@ -23,6 +23,9 @@ from app.schemas.memoir import (
     MemoirVoiceFollowUpResponse,
     MemoirVoiceNoAnswerPromptRequest,
     MemoirVoiceProgressResponse,
+    MemoirVoiceSearchQueryFiltersResponse,
+    MemoirVoiceSearchQueryParseRequest,
+    MemoirVoiceSearchQueryParseResponse,
     MemoirVoiceSearchTranscriptionRequest,
     MemoirVoiceSearchTranscriptionResponse,
     MemoirVoiceTranscriptCleanupRequest,
@@ -265,6 +268,28 @@ async def transcribe_mobile_memoir_search_query(
     except memoir_voice_search.VoiceSearchTranscriptionError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
     return MemoirVoiceSearchTranscriptionResponse(transcript=transcript)
+
+
+@router.post("/search-query/parse", response_model=MemoirVoiceSearchQueryParseResponse)
+async def parse_mobile_memoir_search_query(
+    req: MemoirVoiceSearchQueryParseRequest,
+    current_user: User = Depends(get_current_user),
+):
+    parsed = await memoir_voice_search.parse_voice_search_query(req.text, ai_model=req.ai_model)
+    return MemoirVoiceSearchQueryParseResponse(
+        original_text=parsed.original_text,
+        query=parsed.query,
+        keywords=parsed.keywords,
+        filters=MemoirVoiceSearchQueryFiltersResponse(
+            included=parsed.filters.included,
+            guidance_mode=parsed.filters.guidance_mode,
+            module=parsed.filters.module,
+        ),
+        display_text=parsed.display_text,
+        used_ai=parsed.used_ai,
+        provider=parsed.provider,
+        model=parsed.model,
+    )
 
 
 @router.get("/voice-transcripts", response_model=MemoirVoiceTranscriptListResponse)

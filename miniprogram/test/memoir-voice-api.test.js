@@ -177,3 +177,67 @@ test("voice search transcription API posts recorded audio", async () => {
   assert.deepEqual(response, { transcript: "外婆家的院子" });
   delete global.wx;
 });
+
+test("voice search query parse API posts text and selected AI model", async () => {
+  const requests = [];
+  global.wx = {
+    getStorageSync(key) {
+      if (key === "pawtale_backend_config") {
+        return {
+          httpBaseUrl: "http://backend.local:8000/",
+          devEmail: "local@example.com",
+          devPassword: "secret",
+        };
+      }
+      if (key === "pawtale_backend_cookie") {
+        return "pawtale_session=abc";
+      }
+      return "";
+    },
+    getExtConfigSync() {
+      return {};
+    },
+    setStorageSync() {},
+    removeStorageSync() {},
+    request(options) {
+      requests.push(options);
+      if (options.url.endsWith("/api/auth/me")) {
+        options.success({ statusCode: 200, data: { id: "user-1" }, cookies: [], header: {} });
+        return;
+      }
+      options.success({
+        statusCode: 200,
+        data: {
+          original_text: "帮我找外婆家院子",
+          query: "外婆 院子",
+          keywords: ["外婆", "院子"],
+          filters: { included: "not_included", guidance_mode: null, module: "place" },
+          display_text: "外婆 院子 · 未收录 · 地点",
+          used_ai: true,
+          provider: "fake-ai",
+          model: "deepseek",
+        },
+        cookies: [],
+        header: {},
+      });
+    },
+  };
+  delete require.cache[require.resolve("../services/auth.ts")];
+  delete require.cache[require.resolve("../services/request.ts")];
+  delete require.cache[require.resolve("../services/memoir-voice-api.ts")];
+  const { parseMemoirVoiceSearchQuery } = require("../services/memoir-voice-api.ts");
+
+  const response = await parseMemoirVoiceSearchQuery("帮我找外婆家院子", "deepseek");
+
+  const apiRequests = requests.filter((request) => request.url.includes("/api/mobile/memoir/"));
+  assert.equal(apiRequests[0].url, "http://backend.local:8000/api/mobile/memoir/search-query/parse");
+  assert.equal(apiRequests[0].method, "POST");
+  assert.deepEqual(apiRequests[0].data, {
+    text: "帮我找外婆家院子",
+    ai_model: "deepseek",
+  });
+  assert.equal(apiRequests[0].header.Cookie, "pawtale_session=abc");
+  assert.equal(response.query, "外婆 院子");
+  assert.equal(response.filters.module, "place");
+  delete global.wx;
+});
