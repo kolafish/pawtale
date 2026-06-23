@@ -218,6 +218,133 @@ test("voice chat does not connect a stopped voice session", async () => {
   assert.equal(context.data.persistenceStateText, "已保存");
 });
 
+test("voice chat does not show microphone connecting while session refresh is pending", async () => {
+  let resolveDetail;
+  const detailPromise = new Promise((resolve) => {
+    resolveDetail = resolve;
+  });
+  let connectCalls = 0;
+  const page = loadVoiceChatPage({
+    streamingExports: {
+      MemoirStreamingAsrClient: class {
+        constructor(options) {
+          this.options = options;
+        }
+        async connect() {
+          connectCalls += 1;
+          this.options.callbacks.onStatus("ready");
+        }
+        close() {}
+        configureAutoStop() {}
+      },
+    },
+    voiceApiExports: {
+      getMemoirVoiceSession: async () => detailPromise,
+    },
+    voiceAuthorizationExports: {
+      readVoiceAuthorizationConsent: () => true,
+    },
+  });
+  const context = {
+    ...page,
+    data: { ...page.data },
+    setData(patch) {
+      this.data = { ...this.data, ...patch };
+    },
+  };
+
+  const loadPromise = page.onLoad.call(context, {
+    voiceSessionId: "voice-1",
+    mode: "guided_interview",
+    module: "person",
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(context.data.connecting, false);
+  assert.equal(context.data.status, "idle");
+
+  resolveDetail({
+    session: {
+      status: "created",
+      guidance_mode: "guided_interview",
+      current_guidance_module: "person",
+      error_message: "",
+    },
+    messages: [
+      {
+        id: "assistant-1",
+        role: "assistant",
+        content_text: "咱们接着聊。",
+        turn_index: 1,
+        created_at: "2026-06-23T00:00:00.000Z",
+        metadata_json: {},
+      },
+    ],
+    utterances: [],
+  });
+  await loadPromise;
+
+  assert.equal(connectCalls, 1);
+  assert.equal(context.data.connecting, false);
+  assert.equal(context.data.status, "ready");
+});
+
+test("voice chat retries gateway connection after a failed connect", async () => {
+  let connectCalls = 0;
+  const page = loadVoiceChatPage({
+    streamingExports: {
+      MemoirStreamingAsrClient: class {
+        constructor(options) {
+          this.options = options;
+        }
+        async connect() {
+          connectCalls += 1;
+          if (connectCalls === 1) {
+            throw new Error("语音连接超时");
+          }
+          this.options.callbacks.onStatus("ready");
+        }
+        close() {}
+        configureAutoStop() {}
+        startRecording() {
+          throw new Error("startRecording should wait for reconnect");
+        }
+      },
+    },
+    voiceAuthorizationExports: {
+      readVoiceAuthorizationConsent: () => true,
+      syncVoiceAuthorizationConsent: async () => ({ id: "consent-1" }),
+    },
+  });
+  const context = {
+    ...page,
+    data: {
+      ...page.data,
+      voiceSessionId: "voice-1",
+      voiceAuthorizationAgreed: true,
+      status: "idle",
+      connecting: false,
+    },
+    setData(patch) {
+      this.data = { ...this.data, ...patch };
+    },
+  };
+
+  await page.connectGateway.call(context);
+  assert.equal(connectCalls, 1);
+  assert.equal(context.data.connecting, false);
+  assert.equal(context.data.status, "error");
+
+  const started = page.startRecording.call(context, false);
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(started, false);
+  assert.equal(connectCalls, 2);
+  assert.equal(context.data.connecting, false);
+  assert.equal(context.data.status, "ready");
+});
+
 test("voice chat finishSession ignores duplicate finish taps", async () => {
   let finishCalls = 0;
   let resolveFinish = () => {};
