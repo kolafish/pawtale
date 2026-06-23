@@ -74,6 +74,12 @@ test("mini program opens on the browseable home tab", () => {
   assert.equal(appJson.pages[0], "pages/home/index");
 });
 
+test("home only shows voice authorization panel before current consent", () => {
+  const wxml = fs.readFileSync(path.join(__dirname, "../pages/home/index.wxml"), "utf8");
+
+  assert.match(wxml, /wx:if="{{!voiceAuthorizationAgreed}}" class="voice-auth-panel"/);
+});
+
 test("home userDisplayName hides wechat placeholder display name", () => {
   const { userDisplayName } = loadHomePage().mod;
 
@@ -445,6 +451,28 @@ test("home blocks voice session creation before voice authorization consent", as
   assert.match(context.data.error, /声纹授权协议/);
   assert.equal(toasts[0].title, "请先同意声纹授权协议");
   delete global.wx;
+});
+
+test("home refreshes voice authorization consent from storage", () => {
+  let agreed = false;
+  const { page } = loadHomePage({
+    voiceAuthorizationExports: {
+      readVoiceAuthorizationConsent: () => agreed,
+    },
+  });
+  const context = {
+    data: { ...page.data, voiceAuthorizationAgreed: true },
+    setData(patch) {
+      this.data = { ...this.data, ...patch };
+    },
+  };
+
+  page.refreshVoiceAuthorizationConsent.call(context);
+  assert.equal(context.data.voiceAuthorizationAgreed, false);
+
+  agreed = true;
+  page.refreshVoiceAuthorizationConsent.call(context);
+  assert.equal(context.data.voiceAuthorizationAgreed, true);
 });
 
 test("home persists voice authorization checkbox changes", () => {

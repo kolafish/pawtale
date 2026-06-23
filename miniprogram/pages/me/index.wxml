@@ -154,6 +154,20 @@
 
   <view class="section">
     <view class="setting-header">
+      <text class="section-title">声纹授权</text>
+      <text class="setting-current {{voiceAuthorizationAgreed ? 'ok' : 'warn'}}">{{voiceAuthorizationStatusText}}</text>
+    </view>
+    <view class="action-card" bindtap="openVoiceAuthorization" hover-class="tap-hover">
+      <view>
+        <text class="action-title">查看声纹授权协议</text>
+        <text class="action-meta">{{voiceAuthorizationDetailText}}</text>
+      </view>
+      <text class="chevron">›</text>
+    </view>
+  </view>
+
+  <view class="section">
+    <view class="setting-header">
       <text class="section-title">AI 模型</text>
       <text class="setting-current">{{aiModelLabel}}</text>
     </view>

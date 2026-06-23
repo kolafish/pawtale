@@ -3,16 +3,24 @@ require("./register-ts");
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-function loadMePage({ authExports = {}, voiceApiExports = {}, ttsExports = {}, aiModelExports = {} } = {}) {
+function loadMePage({
+  authExports = {},
+  voiceApiExports = {},
+  ttsExports = {},
+  aiModelExports = {},
+  voiceAuthorizationExports = {},
+} = {}) {
   const authPath = require.resolve("../services/auth.ts");
   const voiceApiPath = require.resolve("../services/memoir-voice-api.ts");
   const ttsPath = require.resolve("../services/tts-settings.ts");
   const aiModelPath = require.resolve("../services/ai-model-settings.ts");
+  const voiceAuthorizationPath = require.resolve("../services/voice-authorization.ts");
   const mePath = require.resolve("../pages/me/index.ts");
   delete require.cache[authPath];
   delete require.cache[voiceApiPath];
   delete require.cache[ttsPath];
   delete require.cache[aiModelPath];
+  delete require.cache[voiceAuthorizationPath];
   delete require.cache[mePath];
   require.cache[authPath] = {
     id: authPath,
@@ -108,6 +116,17 @@ function loadMePage({ authExports = {}, voiceApiExports = {}, ttsExports = {}, a
       ...aiModelExports,
     },
   };
+  require.cache[voiceAuthorizationPath] = {
+    id: voiceAuthorizationPath,
+    filename: voiceAuthorizationPath,
+    loaded: true,
+    exports: {
+      readVoiceAuthorizationConsentRecord: () => null,
+      VOICE_AUTHORIZATION_PAGE_URL: "/pages/voice-authorization/index",
+      VOICE_AUTHORIZATION_VERSION: "2026-06-18",
+      ...voiceAuthorizationExports,
+    },
+  };
 
   let page = null;
   const previousPage = global.Page;
@@ -179,6 +198,46 @@ test("me treats wechat-only users as logged in and shows wechat profile", async 
   assert.equal(context.data.avatarUrl, "https://avatar.example.com/wechat.png");
   assert.equal(context.data.accountEmailText, "微信账号登录");
   assert.equal(context.data.accountMode, false);
+});
+
+test("me shows voice authorization status and opens agreement", () => {
+  const navigations = [];
+  global.wx = {
+    navigateTo(options) {
+      navigations.push(options.url);
+    },
+  };
+  const { page } = loadMePage({
+    voiceAuthorizationExports: {
+      readVoiceAuthorizationConsentRecord: () => ({
+        agreed: true,
+        version: "2026-06-18",
+        agreedAt: "2026-06-18T00:00:00.000Z",
+      }),
+    },
+  });
+  const context = pageContext(page);
+
+  page.refreshVoiceAuthorizationConsent.call(context);
+  page.openVoiceAuthorization.call(context);
+
+  assert.equal(context.data.voiceAuthorizationAgreed, true);
+  assert.equal(context.data.voiceAuthorizationStatusText, "已同意");
+  assert.match(context.data.voiceAuthorizationDetailText, /06-18 08:00 北京时间 已同意/);
+  assert.match(context.data.voiceAuthorizationDetailText, /协议版本 2026-06-18/);
+  assert.deepEqual(navigations, ["/pages/voice-authorization/index"]);
+  delete global.wx;
+});
+
+test("me shows missing voice authorization consent as not agreed", () => {
+  const { page } = loadMePage();
+  const context = pageContext(page, { voiceAuthorizationAgreed: true });
+
+  page.refreshVoiceAuthorizationConsent.call(context);
+
+  assert.equal(context.data.voiceAuthorizationAgreed, false);
+  assert.equal(context.data.voiceAuthorizationStatusText, "未同意");
+  assert.match(context.data.voiceAuthorizationDetailText, /开始语音前/);
 });
 
 test("me refreshes profile after wechat login", async () => {

@@ -337,6 +337,14 @@
   line-height: 1.3;
 }
 
+.setting-current.ok {
+  color: #147d64;
+}
+
+.setting-current.warn {
+  color: #b4234a;
+}
+
 .voice-options {
   padding: 12rpx;
   display: grid;
