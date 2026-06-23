@@ -80,6 +80,15 @@ test("home only shows voice authorization panel before current consent", () => {
   assert.match(wxml, /wx:if="{{!voiceAuthorizationAgreed}}" class="voice-auth-panel"/);
 });
 
+test("home keeps voice entry free of per-session guidance controls", () => {
+  const wxml = fs.readFileSync(path.join(__dirname, "../pages/home/index.wxml"), "utf8");
+
+  assert.equal(wxml.includes("本次讲述方式"), false);
+  assert.equal(wxml.includes("guidance-options"), false);
+  assert.equal(wxml.includes("module-options"), false);
+  assert.match(wxml, /class="voice-mode-row"/);
+});
+
 test("home userDisplayName hides wechat placeholder display name", () => {
   const { userDisplayName } = loadHomePage().mod;
 
@@ -163,8 +172,6 @@ test("home refreshes guidance mode from current project on load", async () => {
 
   assert.equal(context.data.selectedMode, "guided_interview");
   assert.equal(context.data.guidanceLabel, "主题讲述");
-  assert.equal(context.data.sessionGuidanceLabel, "AI 引导 · 人物");
-  assert.equal(context.data.showGuidanceModules, true);
   assert.equal(context.data.projectTitle, "外婆回忆录");
   assert.equal(context.data.hasProject, true);
 });
@@ -230,7 +237,6 @@ test("home creates voice sessions with the project-bound guidance mode", async (
     data: {
       ...page.data,
       selectedMode: "guided_interview",
-      selectedModule: "place",
       projectId: "project/1",
       hasProject: true,
       voiceAuthorizationAgreed: true,
@@ -245,36 +251,12 @@ test("home creates voice sessions with the project-bound guidance mode", async (
   assert.equal(createdSessions.length, 1);
   assert.equal(syncedConsents.length, 1);
   assert.equal(createdSessions[0].input.guidance_mode, "guided_interview");
-  assert.equal(createdSessions[0].input.current_guidance_module, "place");
+  assert.equal(createdSessions[0].input.current_guidance_module, undefined);
   assert.equal(createdSessions[0].input.metadata_json.entry, "miniprogram_home");
   assert.deepEqual(createdSessions[0].options, { projectId: "project/1" });
-  assert.equal(navigations[0], "/pages/voice-chat/index?voiceSessionId=voice%2F1&mode=guided_interview&module=place");
+  assert.equal(navigations[0], "/pages/voice-chat/index?voiceSessionId=voice%2F1&mode=guided_interview");
   assert.equal(context.data.creatingVoice, false);
   delete global.wx;
-});
-
-test("home updates the guided module selection for this voice session", () => {
-  const { page } = loadHomePage();
-  const context = {
-    data: { ...page.data, selectedMode: "guided_interview", selectedModule: "person" },
-    setData(patch) {
-      this.data = { ...this.data, ...patch };
-    },
-  };
-
-  page.selectGuidanceModule.call(context, {
-    currentTarget: {
-      dataset: {
-        module: "theme",
-      },
-    },
-  });
-
-  assert.equal(context.data.selectedMode, "guided_interview");
-  assert.equal(context.data.selectedModule, "theme");
-  assert.equal(context.data.selectedModuleLabel, "主题");
-  assert.equal(context.data.sessionGuidanceLabel, "AI 引导 · 主题");
-  assert.equal(context.data.showGuidanceModules, true);
 });
 
 test("home creates free narration voice sessions without a guidance module", async () => {
@@ -301,7 +283,6 @@ test("home creates free narration voice sessions without a guidance module", asy
     data: {
       ...page.data,
       selectedMode: "free_narration",
-      selectedModule: "theme",
       projectId: "project/1",
       hasProject: true,
       voiceAuthorizationAgreed: true,

@@ -60,6 +60,7 @@ interface MeData {
   accountMode: boolean;
   projectTitle: string;
   projectCount: number;
+  voiceStatsProjectId: string;
   sessionCount: number;
   utteranceCount: number;
   totalUserCharCount: number;
@@ -229,6 +230,7 @@ function loggedOutData(): Partial<MeData> {
     credentialsLoading: false,
     projectTitle: "",
     projectCount: 0,
+    voiceStatsProjectId: "",
     sessionCount: 0,
     utteranceCount: 0,
     totalUserCharCount: 0,
@@ -285,6 +287,7 @@ Page<MeData, {
     accountMode: false,
     projectTitle: "",
     projectCount: 0,
+    voiceStatsProjectId: "",
     sessionCount: 0,
     utteranceCount: 0,
     totalUserCharCount: 0,
@@ -319,6 +322,8 @@ Page<MeData, {
     try {
       const identity = await getMemoirIdentity();
       const displayName = displayNameForUser(identity.display_name, identity.email);
+      const activeProjectId = identity.active_project_id || "";
+      const keepVoiceStats = Boolean(activeProjectId && this.data.voiceStatsProjectId === activeProjectId);
       this.setData({
         loggedIn: true,
         accountMode: false,
@@ -336,15 +341,18 @@ Page<MeData, {
         passwordLoginEnabled: identity.password_login_enabled,
         projectTitle: identity.active_project?.title || "尚未创建回忆录",
         projectCount: identity.projects.length,
-        sessionCount: 0,
-        utteranceCount: 0,
-        totalUserCharCount: 0,
-        totalAudioText: "0 秒",
+        ...(keepVoiceStats ? {} : {
+          voiceStatsProjectId: activeProjectId,
+          sessionCount: 0,
+          utteranceCount: 0,
+          totalUserCharCount: 0,
+          totalAudioText: "0 秒",
+        }),
         ...aiModelSettingsData(),
         ...ttsProfilesData(),
       });
-      if (identity.active_project_id) {
-        await this.loadVoiceStats(identity.active_project_id);
+      if (activeProjectId) {
+        await this.loadVoiceStats(activeProjectId);
       }
     } catch (error) {
       if (error instanceof ApiError && [401, 403].includes(error.statusCode)) {
@@ -530,7 +538,10 @@ Page<MeData, {
     this.setData({ voiceStatsLoading: true });
     try {
       const progress = await getMemoirVoiceProgress(projectId);
-      this.setData(voiceStatsData(progress));
+      this.setData({
+        voiceStatsProjectId: projectId,
+        ...voiceStatsData(progress),
+      });
     } catch (error) {
       console.warn("load memoir voice stats failed", error);
     } finally {

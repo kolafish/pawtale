@@ -402,6 +402,11 @@
   color: #b4234a;
 }
 
+.stats-refresh {
+  min-width: 72rpx;
+  text-align: right;
+}
+
 .voice-options {
   padding: 12rpx;
   display: grid;

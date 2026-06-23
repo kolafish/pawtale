@@ -1,15 +1,9 @@
-import type { MemoirGuidanceMode, MemoirGuidanceModule } from "../../domain/voice-chat";
+import type { MemoirGuidanceMode } from "../../domain/voice-chat";
 import { getMemoirIdentity } from "../../services/auth";
 import { createMemoirVoiceSession } from "../../services/memoir-voice-api";
 import {
-  type GuidanceOption,
   guidanceModeLabel,
-  guidanceModuleLabel,
-  MEMOIR_GUIDANCE_MODE_OPTIONS,
-  MEMOIR_GUIDANCE_MODULE_OPTIONS,
   memoirProjectProfile,
-  normalizeGuidanceModule,
-  voiceGuidanceLabel,
 } from "../../services/memoir-project-profile";
 import { ApiError } from "../../services/request";
 import {
@@ -32,28 +26,13 @@ interface HomeData {
   projectTitle: string;
   hasProject: boolean;
   selectedMode: MemoirGuidanceMode;
-  selectedModule: MemoirGuidanceModule;
-  selectedModuleLabel: string;
   guidanceLabel: string;
-  sessionGuidanceLabel: string;
-  showGuidanceModules: boolean;
-  guidanceOptions: Array<GuidanceOption<MemoirGuidanceMode>>;
-  moduleOptions: Array<GuidanceOption<MemoirGuidanceModule>>;
   voiceAuthorizationAgreed: boolean;
 }
 
 interface CheckboxChangeEvent {
   detail: {
     value: string[];
-  };
-}
-
-interface DatasetEvent {
-  currentTarget: {
-    dataset: {
-      mode?: MemoirGuidanceMode;
-      module?: MemoirGuidanceModule;
-    };
   };
 }
 
@@ -76,18 +55,10 @@ function goToMeLogin(): void {
   wx.switchTab({ url: "/pages/me/index" });
 }
 
-function guidancePatch(
-  mode: MemoirGuidanceMode,
-  module: string,
-): Pick<HomeData, "selectedMode" | "selectedModule" | "selectedModuleLabel" | "guidanceLabel" | "sessionGuidanceLabel" | "showGuidanceModules"> {
-  const selectedModule = normalizeGuidanceModule(module);
+function guidancePatch(mode: MemoirGuidanceMode): Pick<HomeData, "selectedMode" | "guidanceLabel"> {
   return {
     selectedMode: mode,
-    selectedModule,
-    selectedModuleLabel: guidanceModuleLabel(selectedModule),
     guidanceLabel: guidanceModeLabel(mode),
-    sessionGuidanceLabel: voiceGuidanceLabel(mode, selectedModule),
-    showGuidanceModules: mode === "guided_interview",
   };
 }
 
@@ -96,8 +67,6 @@ Page<HomeData, {
   loadHome(): Promise<void>;
   refreshVoiceAuthorizationConsent(): void;
   changeVoiceAuthorization(event: CheckboxChangeEvent): void;
-  selectGuidanceMode(event: DatasetEvent): void;
-  selectGuidanceModule(event: DatasetEvent): void;
   openVoiceAuthorization(): void;
   createProject(): void;
   startVoiceChat(): Promise<void>;
@@ -112,13 +81,7 @@ Page<HomeData, {
     projectTitle: "",
     hasProject: false,
     selectedMode: "free_narration",
-    selectedModule: "person",
-    selectedModuleLabel: "人物",
     guidanceLabel: "自由讲述",
-    sessionGuidanceLabel: "自由讲述",
-    showGuidanceModules: false,
-    guidanceOptions: MEMOIR_GUIDANCE_MODE_OPTIONS,
-    moduleOptions: MEMOIR_GUIDANCE_MODULE_OPTIONS,
     voiceAuthorizationAgreed: false,
   },
 
@@ -145,7 +108,7 @@ Page<HomeData, {
         projectId: identity.active_project_id,
         projectTitle: identity.active_project?.title || "还没有回忆录",
         hasProject,
-        ...guidancePatch(profile.defaultGuidanceMode, this.data.selectedModule),
+        ...guidancePatch(profile.defaultGuidanceMode),
       });
     } catch (error) {
       if (error instanceof ApiError && [401, 403].includes(error.statusCode)) {
@@ -155,7 +118,7 @@ Page<HomeData, {
           projectId: "",
           projectTitle: "登录后创建回忆录",
           hasProject: false,
-          ...guidancePatch("free_narration", this.data.selectedModule),
+          ...guidancePatch("free_narration"),
         });
         return;
       }
@@ -174,22 +137,6 @@ Page<HomeData, {
     });
     void syncVoiceAuthorizationConsent({ consent }).catch((error) => {
       console.warn("sync voice authorization consent change failed", error);
-    });
-  },
-
-  selectGuidanceMode(event) {
-    const mode = event.currentTarget.dataset.mode === "guided_interview" ? "guided_interview" : "free_narration";
-    this.setData({
-      ...guidancePatch(mode, this.data.selectedModule),
-      error: "",
-    });
-  },
-
-  selectGuidanceModule(event) {
-    const module = normalizeGuidanceModule(event.currentTarget.dataset.module);
-    this.setData({
-      ...guidancePatch("guided_interview", module),
-      error: "",
     });
   },
 
@@ -221,12 +168,8 @@ Page<HomeData, {
     this.setData({ creatingVoice: true, error: "" });
     try {
       await syncVoiceAuthorizationConsent();
-      const currentGuidanceModule = this.data.selectedMode === "guided_interview"
-        ? this.data.selectedModule
-        : "";
       const detail = await createMemoirVoiceSession({
         guidance_mode: this.data.selectedMode,
-        current_guidance_module: currentGuidanceModule || undefined,
         provider: "volc_streaming_asr",
         input_format: "pcm_s16le_16000_mono",
         metadata_json: {
@@ -240,9 +183,6 @@ Page<HomeData, {
         `voiceSessionId=${encodeURIComponent(detail.session.id)}`,
         `mode=${encodeURIComponent(this.data.selectedMode)}`,
       ];
-      if (currentGuidanceModule) {
-        params.push(`module=${encodeURIComponent(currentGuidanceModule)}`);
-      }
       wx.navigateTo({ url: `/pages/voice-chat/index?${params.join("&")}` });
     } catch (error) {
       if (error instanceof ApiError && [401, 403].includes(error.statusCode)) {

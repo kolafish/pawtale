@@ -13,7 +13,7 @@
     </view>
     <text class="project-title">{{projectTitle || "正在加载回忆录"}}</text>
     <text class="project-meta">
-      {{hasProject ? "从这里继续讲述，转写和成书分别在底部入口管理。" : "先创建一本回忆录，设置讲述者资料和讲述方式，再开始语音访谈。"}}
+      {{hasProject ? "讲述方式由这本回忆录决定。" : "先创建一本回忆录。"}}
     </text>
     <button
       wx:if="{{!needsLogin && !hasProject}}"
@@ -25,60 +25,19 @@
     </button>
   </view>
 
-  <view wx:if="{{needsLogin}}" class="guest-preview">
-    <text class="preview-title">先看看能做什么</text>
-    <view class="preview-grid">
-      <view class="preview-card">
-        <text class="preview-card-title">语音访谈</text>
-        <text class="preview-card-copy">按自由讲述或主题引导进行对话，过程里实时转写。</text>
-      </view>
-      <view class="preview-card">
-        <text class="preview-card-title">转写记录</text>
-        <text class="preview-card-copy">访谈结束后保留原始语音、ASR 原文和可编辑校正文。</text>
-      </view>
-      <view class="preview-card">
-        <text class="preview-card-title">整理成书</text>
-        <text class="preview-card-copy">把已确认的转写归入章节，生成章节正文和全书朗读。</text>
+  <view class="voice-panel">
+    <view class="voice-head">
+      <image class="voice-icon" src="/assets/memoir-microphone.png" mode="aspectFit" />
+      <view class="voice-main">
+        <text class="voice-title">开始讲述</text>
+        <text class="voice-copy">
+          {{needsLogin ? "登录后开始。" : (!hasProject ? "创建回忆录后开始。" : "AI 会先开场。")}}
+        </text>
       </view>
     </view>
-  </view>
-
-  <view class="voice-panel">
-    <image class="voice-icon" src="/assets/memoir-microphone.png" mode="aspectFit" />
-    <text class="voice-title">开始语音聊天</text>
-    <text class="voice-copy">一边说话，一边实时显示文字；结束后保存原始语音和校正文。</text>
-    <view wx:if="{{!needsLogin && hasProject}}" class="guidance-panel">
-      <view class="guidance-row">
-        <text class="guidance-title">本次讲述方式</text>
-        <text class="guidance-current">{{sessionGuidanceLabel}}</text>
-      </view>
-      <view class="guidance-options">
-        <view
-          wx:for="{{guidanceOptions}}"
-          wx:key="value"
-          class="guidance-option {{item.value === selectedMode ? 'selected' : ''}}"
-          data-mode="{{item.value}}"
-          bindtap="selectGuidanceMode"
-          hover-class="tap-hover"
-        >
-          <text>{{item.label}}</text>
-        </view>
-      </view>
-      <view wx:if="{{showGuidanceModules}}" class="module-section">
-        <text class="module-title">这次先聊</text>
-        <view class="module-options">
-          <view
-            wx:for="{{moduleOptions}}"
-            wx:key="value"
-            class="module-option {{item.value === selectedModule ? 'selected' : ''}}"
-            data-module="{{item.value}}"
-            bindtap="selectGuidanceModule"
-            hover-class="tap-hover"
-          >
-            <text>{{item.label}}</text>
-          </view>
-        </view>
-      </view>
+    <view wx:if="{{!needsLogin && hasProject}}" class="voice-mode-row">
+      <text class="voice-mode-label">当前方式</text>
+      <text class="voice-mode-value">{{guidanceLabel}}</text>
     </view>
     <view wx:if="{{!voiceAuthorizationAgreed}}" class="voice-auth-panel">
       <checkbox-group bindchange="changeVoiceAuthorization">
@@ -105,7 +64,7 @@
       <block wx:if="{{needsLogin}}">登录后开始语音聊天</block>
       <block wx:elif="{{!hasProject}}">先创建回忆录</block>
       <block wx:elif="{{creatingVoice}}">正在准备</block>
-      <block wx:else>进入语音聊天</block>
+      <block wx:else>开始讲述</block>
     </button>
   </view>
 </view>
