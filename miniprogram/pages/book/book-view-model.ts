@@ -9,7 +9,21 @@ import type {
   MemoirBookSourceCoverage,
   TTSAlignmentSegment,
 } from "../../domain/voice-chat";
+import {
+  clearSourceChangeMetadata,
+  removedSourceCount,
+  sourceRefKey,
+  sourceSupplementCount,
+  uniqueSourceRefs,
+} from "../../services/memoir-book-sources";
 import { formatBeijingDateTimeShort } from "../../services/time";
+
+export {
+  clearSourceChangeMetadata,
+  removedSourceCount,
+  sourceSupplementCount,
+  uniqueSourceRefs,
+} from "../../services/memoir-book-sources";
 
 export type BookStage = "empty" | "plan_draft" | "drafting";
 
@@ -137,40 +151,6 @@ export function draftStatusText(draft: MemoirBookChapterDraft | null): string {
   return draft.status === "confirmed" ? "已确认" : "待确认";
 }
 
-function sourceIdCount(metadata: Record<string, unknown> | null | undefined, key: string): number {
-  const value = metadata?.[key];
-  if (!Array.isArray(value)) {
-    return 0;
-  }
-  return value.filter((item) => typeof item === "string" && item.trim()).length;
-}
-
-function pendingSourceCount(metadata: Record<string, unknown> | null | undefined): number {
-  return sourceIdCount(metadata, "pending_source_utterance_ids");
-}
-
-export function sourceSupplementCount(
-  metadata: Record<string, unknown> | null | undefined,
-  draft: MemoirBookChapterDraft | null,
-): number {
-  const count = pendingSourceCount(metadata);
-  if (count) {
-    return count;
-  }
-  return draft?.metadata_json?.status_reason === "new_sources_assigned" ? 1 : 0;
-}
-
-export function removedSourceCount(
-  metadata: Record<string, unknown> | null | undefined,
-  draft: MemoirBookChapterDraft | null,
-): number {
-  const count = sourceIdCount(metadata, "removed_source_utterance_ids");
-  if (count) {
-    return count;
-  }
-  return draft?.metadata_json?.status_reason === "sources_deleted" ? 1 : 0;
-}
-
 export function sourceChangeNotice(pendingCount: number, removedCount: number): string {
   if (removedCount) {
     return `${removedCount} 条素材已删除，章节稿需要更新`;
@@ -194,15 +174,6 @@ export function draftActionText(draft: MemoirBookChapterDraft | null, pendingCou
 export function draftVersionText(draft: MemoirBookChapterDraft | null): string {
   const version = draft?.latest_version?.version;
   return version ? `第 ${version} 版` : "暂无正文";
-}
-
-export function clearSourceChangeMetadata(metadata: Record<string, unknown> | null | undefined): Record<string, unknown> {
-  const next = { ...(metadata || {}) };
-  delete next.pending_source_utterance_ids;
-  delete next.source_assignment_updated_at;
-  delete next.removed_source_utterance_ids;
-  delete next.source_refs_removed_at;
-  return next;
 }
 
 export function latestBookContent(output: MemoirBookOutput | null): string {
@@ -360,10 +331,6 @@ function sourceCreatedAtText(ref: MemoirBookChapterSourceRef): string {
   return ref.created_at ? formatBeijingDateTimeShort(ref.created_at) : "时间未知";
 }
 
-function sourceRefKey(ref: Pick<MemoirBookChapterSourceRef, "utterance_id" | "voice_session_id" | "message_id">): string {
-  return ref.utterance_id || `${ref.voice_session_id}:${ref.message_id}`;
-}
-
 function sourceRefSortKey(ref: MemoirBookChapterSourceRef): string {
   return sourceRefKey(ref);
 }
@@ -422,20 +389,6 @@ function chapterSourceView(
     previewText,
     splitSelected: selectedSourceIds.has(ref.utterance_id),
   };
-}
-
-export function uniqueSourceRefs(refs: MemoirBookChapterSourceRef[]): MemoirBookChapterSourceRef[] {
-  const seen = new Set<string>();
-  const result: MemoirBookChapterSourceRef[] = [];
-  refs.forEach((ref) => {
-    const key = sourceRefKey(ref);
-    if (seen.has(key)) {
-      return;
-    }
-    seen.add(key);
-    result.push(ref);
-  });
-  return result;
 }
 
 function decorateChapterStructureOptions(

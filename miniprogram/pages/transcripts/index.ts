@@ -1,5 +1,4 @@
 import type {
-  MemoirBookChapterSourceRef,
   MemoirBookPlan,
   MemoirBookPlanChapter,
   MemoirBookPlanChapterUpdateInput,
@@ -21,6 +20,11 @@ import {
 } from "../../services/memoir-voice-api";
 import { configureAudiblePlayback } from "../../services/audio-playback";
 import { getMemoirIdentity } from "../../services/auth";
+import {
+  chapterSourceRefs,
+  sourceRefMatchesUtterance,
+  uniqueSourceRefs,
+} from "../../services/memoir-book-sources";
 import { ApiError } from "../../services/request";
 import { formatBeijingDateTimeShort } from "../../services/time";
 import {
@@ -352,30 +356,12 @@ function chapterOption(chapter: MemoirBookPlanChapter, index: number): ChapterPi
   };
 }
 
-function chapterSourceRefs(chapter: MemoirBookPlanChapter): MemoirBookChapterSourceRef[] {
-  return [...(chapter.source_refs || [])];
-}
-
-function uniqueSourceRefs(refs: MemoirBookChapterSourceRef[]): MemoirBookChapterSourceRef[] {
-  const seen = new Set<string>();
-  const result: MemoirBookChapterSourceRef[] = [];
-  refs.forEach((ref) => {
-    const key = ref.utterance_id || `${ref.voice_session_id}:${ref.message_id}`;
-    if (seen.has(key)) {
-      return;
-    }
-    seen.add(key);
-    result.push(ref);
-  });
-  return result;
-}
-
 function sourceChaptersForTranscript(
   item: MemoirVoiceTranscriptItem,
   plan: MemoirBookPlan | null,
 ): MemoirBookPlanChapter[] {
   return sortedBookChapters(plan).filter((chapter) => (
-    chapterSourceRefs(chapter).some((ref) => ref.utterance_id === item.id)
+    chapterSourceRefs(chapter).some((ref) => sourceRefMatchesUtterance(ref, item.id))
   ));
 }
 
@@ -891,7 +877,7 @@ Page<TranscriptsData, {
         source_refs: chapterSourceRefs(chapter),
       }));
       const sourceChapters = chapters.filter((chapter) => (
-        chapter.source_refs.some((ref) => ref.utterance_id === utteranceId)
+        chapter.source_refs.some((ref) => sourceRefMatchesUtterance(ref, utteranceId))
       ));
       const sourceChapter = sourceChapters.length === 1 ? sourceChapters[0] : null;
       const targetChapter = chapters.find((chapter) => chapter.id === option.value) || null;
@@ -903,11 +889,13 @@ Page<TranscriptsData, {
         this.setData({ error: "本章只剩 1 条素材；请在成书页合并或删除章节来保留素材" });
         return;
       }
-      const movingRef = sourceChapter.source_refs.find((ref) => ref.utterance_id === utteranceId);
+      const movingRef = sourceChapter.source_refs.find((ref) => sourceRefMatchesUtterance(ref, utteranceId));
       if (!movingRef) {
         return;
       }
-      sourceChapter.source_refs = sourceChapter.source_refs.filter((ref) => ref.utterance_id !== utteranceId);
+      sourceChapter.source_refs = sourceChapter.source_refs.filter((ref) => (
+        !sourceRefMatchesUtterance(ref, utteranceId)
+      ));
       targetChapter.source_refs = uniqueSourceRefs([...targetChapter.source_refs, movingRef]);
       const updatedPlan = await updateMemoirBookPlan(this.data.activeProjectId, {
         title: plan.title,
