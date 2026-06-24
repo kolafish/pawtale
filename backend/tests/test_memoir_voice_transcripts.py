@@ -163,6 +163,7 @@ async def test_mobile_memoir_searches_voice_transcripts_by_text_and_question(cli
     )
 
     text_response = await client.get("/api/mobile/memoir/voice-transcripts", params={"q": "外婆"})
+    fts_response = await client.get("/api/mobile/memoir/voice-transcripts", params={"q": "外婆家"})
     question_response = await client.get("/api/mobile/memoir/voice-transcripts", params={"q": "学校"})
     multi_term_response = await client.get("/api/mobile/memoir/voice-transcripts", params={"q": "县城 读书"})
     empty_response = await client.get("/api/mobile/memoir/voice-transcripts", params={"q": "纺织厂"})
@@ -170,6 +171,10 @@ async def test_mobile_memoir_searches_voice_transcripts_by_text_and_question(cli
     assert text_response.status_code == 200
     assert text_response.json()["total"] == 1
     assert text_response.json()["items"][0]["id"] == first["utterance_id"]
+
+    assert fts_response.status_code == 200
+    assert fts_response.json()["total"] == 1
+    assert fts_response.json()["items"][0]["id"] == first["utterance_id"]
 
     assert question_response.status_code == 200
     assert question_response.json()["total"] == 1
@@ -512,6 +517,36 @@ async def test_mobile_memoir_ai_cleanup_creates_corrected_version(client, test_d
     assert version.created_by == "ai"
     assert version.provider == "fake-ai"
     assert version.content == "我小时候住在外婆家。"
+
+
+async def test_mobile_memoir_transcript_edits_keep_only_latest_three_versions(client, test_db):
+    created = await create_test_voice_transcript(client, test_db)
+
+    for index in range(5):
+        response = await client.patch(
+            f"/api/mobile/memoir/voice-transcripts/{created['utterance_id']}",
+            json={"transcript_edited": f"第 {index + 1} 次人工整理"},
+        )
+        assert response.status_code == 200
+
+    versions = (
+        await test_db.execute(
+            select(MemoirTranscriptVersion)
+            .where(
+                MemoirTranscriptVersion.source_artifact_id == created["utterance_id"],
+                MemoirTranscriptVersion.version_type == MemoirTranscriptVersionType.USER_EDITED.value,
+            )
+            .order_by(MemoirTranscriptVersion.created_at, MemoirTranscriptVersion.id)
+        )
+    ).scalars().all()
+    message = await test_db.scalar(select(MemoirChatMessage).where(MemoirChatMessage.id == created["message_id"]))
+
+    assert [version.content for version in versions] == [
+        "第 3 次人工整理",
+        "第 4 次人工整理",
+        "第 5 次人工整理",
+    ]
+    assert message.transcript_version_id == versions[-1].id
 
 
 async def test_mobile_memoir_ai_cleanup_removes_repeated_fillers_when_model_is_too_conservative(

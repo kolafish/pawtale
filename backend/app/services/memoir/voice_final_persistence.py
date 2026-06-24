@@ -17,7 +17,10 @@ from app.models.memoir import MemoirChatMessage, MemoirTranscriptVersion, Memoir
 from app.models.projects import Project
 from app.services.memoir import audio_files as memoir_audio_files
 from app.services.memoir.asr import StreamingASREvent
-from app.services.memoir.voice_transcripts import generate_cleaned_transcript_text
+from app.services.memoir.voice_transcripts import (
+    generate_cleaned_transcript_text,
+    prune_transcript_versions_for_utterance,
+)
 
 
 @dataclass(frozen=True)
@@ -126,6 +129,19 @@ class VoiceFinalPersistenceService:
             )
             self.db.add(utterance)
             await self.db.flush()
+            transcript_version.source_artifact_id = utterance.id
+            corrected_version.source_artifact_id = utterance.id
+            await self.db.flush()
+            await prune_transcript_versions_for_utterance(
+                self.db,
+                utterance_id=utterance.id,
+                version_type=MemoirTranscriptVersionType.ASR_RAW,
+            )
+            await prune_transcript_versions_for_utterance(
+                self.db,
+                utterance_id=utterance.id,
+                version_type=MemoirTranscriptVersionType.DIALECT_CORRECTED,
+            )
             await self.db.commit()
             return VoiceFinalPersistenceResult(
                 message_id=message.id,

@@ -364,6 +364,32 @@ PYTHONPATH=. python scripts/rebuild_memoir_voice_schema.py --yes
 
 `--describe-only` 只打印模型期望列和当前数据库实际列；`--yes` 会删除并重建上述实时语音表，会清空 voice session、chat message、utterance、transcript version 以及 `audio_files` 元数据。ECS 上执行前必须先做数据库和音频文件备份，并确认不需要保留这部分数据。
 
+### Transcript Search And Version Retention
+
+当前阶段继续使用 SQLite 作为主库，但转写搜索不能继续依赖普通 `LIKE` 扫描。后端启动迁移会为 `memoir_voice_utterances` 建立 SQLite FTS5 虚拟表：
+
+```text
+memoir_voice_utterances_fts
+├─ transcript_raw
+└─ transcript_edited
+```
+
+FTS 使用 `trigram` tokenizer，适合中文三字以上片段检索；两字或更短的中文关键词仍保留普通 `LIKE` fallback，避免“外婆”“老师”这类常见短词搜不到。FTS 表通过 SQLite trigger 跟随 `memoir_voice_utterances` 的 insert/update/delete 自动同步。
+
+`memoir_transcript_versions` 只保留必要追溯窗口：每条转写记录、每种 `version_type` 最多保留最近 3 个版本。写入新版本时必须设置 `source_artifact_id = utterance.id`，再裁剪同一 `source_artifact_id + version_type` 下更旧的版本。`memoir_voice_utterances.transcript_raw` 和 `transcript_edited` 仍保存当前可展示文本，成书证据链继续引用当前有效转写记录和音频时间段。
+
+### PostgreSQL Migration Roadmap
+
+SQLite 只作为当前阶段的轻量主库。随着多用户、连续录音、成书生成和搜索量增长，PostgreSQL 迁移是后续重要架构任务，不能等到 SQLite 写锁、备份恢复和搜索性能成为线上故障后再处理。
+
+迁移目标：
+
+- 主业务表从 `/opt/pawtale/data/pawtale.db` 迁移到 PostgreSQL，保留明确的 schema migration 流程。
+- 转写搜索从 SQLite FTS5 迁移到 PostgreSQL full-text search、`pg_trgm`，或独立搜索服务；中文搜索质量需要单独评估分词策略。
+- 音频本体继续不进入关系数据库，后续迁到 OSS/S3 类对象存储；数据库只保存 `audio_files` 元数据和对象 key。
+- 迁移前必须补齐数据导出、校验、回滚和只读演练脚本，至少校验用户、项目、voice session、utterance、transcript version、book plan/source ref 和 audio file 引用完整性。
+- PostgreSQL 上线后再考虑行级权限、备份加密、敏感文本字段加密和审计日志，不把这些能力继续绑在单机 SQLite 文件权限上。
+
 ### Realtime ASR Smoke Check
 
 部署后先跑不调用真实 provider 的本地 smoke，确认 `.env`、schema 和 Volc 协议帧构造正常：
