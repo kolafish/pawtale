@@ -284,6 +284,7 @@ Page<BookData, {
   resetBookTTSProgress(): void;
   playbackTimeForProgress(audio: WechatMiniprogram.InnerAudioContext): number;
   stopPlayback(): void;
+  onHide(): void;
   onUnload(): void;
   openTranscripts(event?: DatasetEvent): void;
   openHome(): void;
@@ -1971,6 +1972,29 @@ Page<BookData, {
 
   stopPlayback() {
     stopBookPlayback(this);
+  },
+
+  onHide() {
+    this.clearBookVoiceAssistantAutoListenTimer();
+    bookVoiceStreamingClient?.close({ force: true });
+    bookVoiceStreamingClient = null;
+    this.stopPlayback();
+    if (
+      this.data.bookVoiceAssistantConversationActive
+      || this.data.bookVoiceAssistantListening
+      || this.data.bookVoiceAssistantBusy
+      || this.data.bookVoiceLiveText
+    ) {
+      this.setData({
+        bookVoiceAssistantListening: false,
+        bookVoiceAssistantBusy: false,
+        bookVoiceAssistantConversationActive: false,
+        bookVoiceLiveText: "",
+        bookVoiceAudioLevelPercent: 0,
+        bookVoiceCaptureStateText: "麦克风未开始",
+        bookVoiceAssistantStatusText: bookVoiceAssistantStatusText(this.data.stage),
+      });
+    }
   },
 
   onUnload() {

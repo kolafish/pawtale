@@ -123,8 +123,9 @@ async def mobile_memoir_book_voice_command_gateway(
         return
 
     transient_session_id = f"book-voice-command-{project_id}-{uuid.uuid4().hex}"
+    capacity_user_id = f"{current_user_id}:book-voice-command"
     try:
-        capacity_lease = await voice_gateway_capacity_manager.acquire(current_user_id, transient_session_id)
+        capacity_lease = await voice_gateway_capacity_manager.acquire(capacity_user_id, transient_session_id)
     except VoiceGatewayCapacityError as exc:
         await _reject_websocket(websocket, exc.code)
         return
