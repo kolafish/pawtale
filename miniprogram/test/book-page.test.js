@@ -1457,7 +1457,7 @@ test("book page records and previews a voice edit command", async () => {
       },
     },
     streamingAsrExports: {
-      MemoirStreamingAsrClient: streamingAsrClientForFinal(calls, "把第一章改名为童年往事"),
+      MemoirStreamingAsrClient: streamingAsrClientForFinal(calls, "把第一张改名为童年往事"),
     },
   });
   const context = pageContext(page, { projectId: "project/1" });
@@ -1566,6 +1566,63 @@ test("book page sends recent voice editing context when parsing follow-up questi
   assert.deepEqual(calls[5], {
     kind: "reply",
     text: "现在目录有 2 章：第一章「外婆家的童年」，第二章「第一次离家」。",
+    options: { autoListenAfterPlayback: true },
+  });
+  delete global.wx;
+});
+
+test("book page sends source coverage context when parsing book voice questions", async () => {
+  const calls = [];
+  global.wx = { showToast(options) { calls.push({ kind: "toast", title: options.title }); } };
+  const answerPreview = sampleBookVoiceCommandPreview({
+    original_text: "现在是不是有记录还没归到章节呀",
+    intent: "answer_book_question",
+    intent_label: "成书问答",
+    response_kind: "answer",
+    summary: "回答当前素材收入章节状态。",
+    reply_text: "这本书现在还有 7 条未收入章节。",
+    operations: [],
+    requires_confirmation: false,
+  });
+  const { page } = loadBookPage({
+    voiceApiExports: {
+      parseMemoirBookVoiceCommand: async (projectId, data) => {
+        calls.push({ kind: "parse", projectId, data });
+        return answerPreview;
+      },
+    },
+    streamingAsrExports: {
+      MemoirStreamingAsrClient: streamingAsrClientForFinal(calls, "现在是不是有记录还没归到章节呀"),
+    },
+  });
+  const context = pageContext(page, { projectId: "project/1" });
+  page.applyPlan.call(context, samplePlan("confirmed"));
+  context.setData({ sourceCoverage: sampleSourceCoverage(7) });
+  context.playBookVoiceAssistantReply = async (text, options) => {
+    calls.push({ kind: "reply", text, options });
+  };
+
+  await page.startBookVoiceCommand.call(context);
+  await flushAsyncWork();
+
+  assert.deepEqual(calls[3], {
+    kind: "parse",
+    projectId: "project/1",
+    data: {
+      text: "现在是不是有记录还没归到章节呀",
+      book_context: {
+        source_coverage: {
+          total_source_count: 9,
+          covered_source_count: 2,
+          uncovered_source_count: 7,
+        },
+      },
+    },
+  });
+  assert.equal(context.data.bookVoiceCommandResponseKind, "answer");
+  assert.deepEqual(calls[5], {
+    kind: "reply",
+    text: "这本书现在还有 7 条未收入章节。",
     options: { autoListenAfterPlayback: true },
   });
   delete global.wx;
