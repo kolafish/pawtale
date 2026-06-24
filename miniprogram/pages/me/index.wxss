@@ -338,7 +338,7 @@
 
 .overview-actions {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: 1fr;
   gap: 16rpx;
   margin-top: 24rpx;
 }
@@ -363,11 +363,6 @@
 .overview-button.primary {
   background: #9f4a3c;
   color: #ffffff;
-}
-
-.overview-button.ghost {
-  background: #fff1ec;
-  color: #8a4034;
 }
 
 .overview-button[disabled] {

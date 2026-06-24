@@ -140,7 +140,7 @@
         <view class="project-overview-main">
           <text class="action-title">{{projectTitle || "尚未创建回忆录"}}</text>
           <text class="action-meta">
-            {{projectCount ? ("当前回忆录 · " + (sessionCount ? ("已访谈 " + sessionCount + " 次") : "还没有访谈")) : "创建第一本回忆录并设置讲述资料"}}
+            {{projectCount ? ("当前使用 · " + (utteranceCount ? (utteranceCount + " 条转写记录") : "还没有转写记录")) : "创建第一本回忆录并设置讲述资料"}}
           </text>
         </view>
       </view>
@@ -148,11 +148,11 @@
       <view class="overview-stats">
         <view class="overview-stat">
           <text class="overview-stat-value">{{sessionCount}}</text>
-          <text class="overview-stat-label">会话</text>
+          <text class="overview-stat-label">有效访谈</text>
         </view>
         <view class="overview-stat">
           <text class="overview-stat-value">{{utteranceCount}}</text>
-          <text class="overview-stat-label">语音段</text>
+          <text class="overview-stat-label">转写记录</text>
         </view>
         <view class="overview-stat">
           <text class="overview-stat-value">{{totalUserCharCount}}</text>
@@ -170,12 +170,22 @@
           disabled="{{!projectCount}}"
           bindtap="openVoiceProgress"
         >
-          访谈进度
-        </button>
-        <button class="overview-button ghost" bindtap="openProjects">
-          {{projectCount ? "管理回忆录" : "创建回忆录"}}
+          查看访谈进度
         </button>
       </view>
+    </view>
+  </view>
+
+  <view class="section">
+    <text class="section-title">回忆录管理</text>
+    <view class="action-card" bindtap="openProjects" hover-class="tap-hover">
+      <view>
+        <text class="action-title">{{projectCount ? "管理回忆录" : "创建回忆录"}}</text>
+        <text class="action-meta">
+          {{projectCount ? ("切换当前回忆录、编辑项目资料 · 共 " + projectCount + " 本") : "创建第一本回忆录后开始访谈"}}
+        </text>
+      </view>
+      <text class="chevron">›</text>
     </view>
   </view>
 

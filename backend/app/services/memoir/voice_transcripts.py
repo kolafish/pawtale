@@ -191,8 +191,8 @@ def _transcript_filter(user_id: str, project_id: str | None = None):
     clauses = [
         Project.user_id == user_id,
         or_(
-            MemoirVoiceUtterance.transcript_raw != "",
-            MemoirVoiceUtterance.transcript_edited != "",
+            func.trim(MemoirVoiceUtterance.transcript_raw) != "",
+            func.trim(MemoirVoiceUtterance.transcript_edited) != "",
         ),
     ]
     if project_id:

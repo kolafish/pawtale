@@ -28,9 +28,7 @@
 }
 
 .refresh-button,
-.continue-button,
-.primary-button,
-.secondary-button {
+.continue-button {
   margin: 0;
   border: 0;
   display: flex;
@@ -40,9 +38,7 @@
 }
 
 .refresh-button::after,
-.continue-button::after,
-.primary-button::after,
-.secondary-button::after {
+.continue-button::after {
   border: 0;
 }
 
@@ -90,30 +86,6 @@
   margin-top: 18rpx;
   color: #685b55;
   font-size: 26rpx;
-}
-
-.action-row {
-  margin-top: 24rpx;
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 18rpx;
-}
-
-.primary-button,
-.secondary-button {
-  height: 92rpx;
-  border-radius: 24rpx;
-  font-size: 30rpx;
-}
-
-.primary-button {
-  background: #9f4a3c;
-  color: #ffffff;
-}
-
-.secondary-button {
-  background: #fff1ec;
-  color: #9f4a3c;
 }
 
 .section {
