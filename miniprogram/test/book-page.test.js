@@ -379,6 +379,8 @@ test("book page exposes a compact voice assistant entry", () => {
   assert.match(wxml, /playingTarget === 'outline'/);
   assert.match(wxml, /bookVoiceCommandSummary/);
   assert.match(wxml, /book-voice-command-preview/);
+  assert.match(wxml, /bindtap="executeBookVoiceCommand"/);
+  assert.match(wxml, /bindtap="undoBookVoiceCommand"/);
   assert.match(wxss, /\.book-voice-assistant/);
   assert.match(wxss, /\.book-voice-command-preview/);
   assert.match(wxss, /#fff6f1/);
@@ -1348,6 +1350,134 @@ test("book page records and previews a voice edit command", async () => {
   assert.equal(context.data.bookVoiceAssistantBusy, false);
   assert.deepEqual(calls[2], { kind: "toast", title: "已识别" });
   delete global.wx;
+});
+
+test("book page executes a confirmed voice rename with undo snapshot", async () => {
+  global.wx = {
+    showModal(options) {
+      options.success({ confirm: true });
+    },
+  };
+  const { page } = loadBookPage();
+  const plan = samplePlan("confirmed");
+  const calls = [];
+  const context = pageContext(page, { projectId: "project/1" });
+  page.applyPlan.call(context, plan);
+  page.applyBookVoiceCommandPreview.call(context, sampleBookVoiceCommandPreview());
+  context.updatePlanStructure = async (chapters, toastTitle) => {
+    calls.push({ chapters, toastTitle });
+    return planFromChapterUpdates("confirmed", chapters);
+  };
+
+  await page.executeBookVoiceCommand.call(context);
+
+  assert.equal(calls[0].toastTitle, "已按语音改名");
+  assert.equal(calls[0].chapters[0].id, "chapter-1");
+  assert.equal(calls[0].chapters[0].title, "童年往事");
+  assert.equal(calls[0].chapters[1].title, "第一次离家");
+  assert.equal(context.data.bookVoiceCommandUndoText, "撤回语音改名");
+  assert.equal(context.data.bookVoiceCommandUndoSnapshot.chapters[0].title, "外婆家的童年");
+  assert.equal(context.data.bookVoiceAssistantStatusText, "已执行，可撤回");
+  delete global.wx;
+});
+
+test("book page executes and undoes a voice chapter move", async () => {
+  global.wx = {
+    showModal(options) {
+      options.success({ confirm: true });
+    },
+  };
+  const { page } = loadBookPage();
+  const calls = [];
+  const context = pageContext(page, { projectId: "project/1" });
+  page.applyPlan.call(context, samplePlan("confirmed"));
+  page.applyBookVoiceCommandPreview.call(context, sampleBookVoiceCommandPreview({
+    original_text: "把第二章上移",
+    intent: "move_chapter",
+    intent_label: "移动章节",
+    summary: "准备把「第一次离家」上移。",
+    operations: [
+      {
+        type: "move_chapter",
+        chapter_id: "chapter-2",
+        chapter_title: "第一次离家",
+        direction: "up",
+      },
+    ],
+  }));
+  context.updatePlanStructure = async (chapters, toastTitle) => {
+    calls.push({ chapters, toastTitle });
+    return planFromChapterUpdates("confirmed", chapters);
+  };
+
+  await page.executeBookVoiceCommand.call(context);
+  await page.undoBookVoiceCommand.call(context);
+
+  assert.equal(calls[0].toastTitle, "已按语音调整顺序");
+  assert.deepEqual(calls[0].chapters.map((chapter) => chapter.id), ["chapter-2", "chapter-1"]);
+  assert.equal(calls[1].toastTitle, "已撤回语音修改");
+  assert.deepEqual(calls[1].chapters.map((chapter) => chapter.id), ["chapter-1", "chapter-2"]);
+  assert.equal(context.data.bookVoiceCommandUndoText, "");
+  assert.equal(context.data.bookVoiceCommandUndoSnapshot, null);
+  assert.equal(context.data.bookVoiceAssistantStatusText, "已撤回");
+  delete global.wx;
+});
+
+test("book page keeps unsupported voice commands as preview only", () => {
+  const { page } = loadBookPage();
+  const context = pageContext(page);
+
+  page.applyBookVoiceCommandPreview.call(context, sampleBookVoiceCommandPreview({
+    intent: "merge_chapters",
+    intent_label: "合并章节",
+    summary: "准备把「外婆家的童年」合并到「第一次离家」。",
+    operations: [
+      {
+        type: "merge_chapters",
+        chapter_id: "chapter-1",
+        chapter_title: "外婆家的童年",
+        target_chapter_id: "chapter-2",
+        target_chapter_title: "第一次离家",
+      },
+    ],
+  }));
+
+  assert.equal(context.data.bookVoiceCommandCanExecute, false);
+  assert.equal(context.data.bookVoiceCommandActionText, "暂不执行");
+});
+
+test("book page only enables executable voice commands with required fields", () => {
+  const { mod } = loadBookPage();
+
+  assert.equal(mod.canExecuteBookVoiceCommand(sampleBookVoiceCommandPreview({
+    intent: "rename_chapter",
+    operations: [{ type: "rename_chapter", chapter_id: "chapter-1" }],
+  })), false);
+  assert.equal(mod.canExecuteBookVoiceCommand(sampleBookVoiceCommandPreview({
+    intent: "move_chapter",
+    operations: [{ type: "move_chapter", chapter_id: "chapter-1", direction: "later" }],
+  })), false);
+  assert.equal(mod.canExecuteBookVoiceCommand(sampleBookVoiceCommandPreview({
+    intent: "read_chapter",
+    operations: [{ type: "read_chapter", chapter_id: "chapter-1" }],
+  })), true);
+});
+
+test("book page replaces old voice undo state when applying a new preview", () => {
+  const { page } = loadBookPage();
+  const context = pageContext(page);
+  context.setData({
+    bookVoiceCommandUndoText: "撤回语音改名",
+    bookVoiceCommandUndoSnapshot: {
+      planTitle: "旧目录",
+      chapters: [],
+    },
+  });
+
+  page.applyBookVoiceCommandPreview.call(context, sampleBookVoiceCommandPreview());
+
+  assert.equal(context.data.bookVoiceCommandUndoText, "");
+  assert.equal(context.data.bookVoiceCommandUndoSnapshot, null);
 });
 
 test("book page stops active voice edit recording on second tap", async () => {

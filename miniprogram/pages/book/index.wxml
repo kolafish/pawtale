@@ -87,6 +87,34 @@
       </view>
       <text wx:if="{{bookVoiceCommandText}}" class="book-voice-command-text">“{{bookVoiceCommandText}}”</text>
       <text wx:if="{{bookVoiceCommandSummary}}" class="book-voice-command-summary">{{bookVoiceCommandSummary}}</text>
+      <view class="book-voice-command-actions">
+        <button
+          wx:if="{{!bookVoiceCommandUndoText}}"
+          class="book-voice-command-button"
+          disabled="{{bookVoiceCommandExecuting || updatingPlanStructure}}"
+          bindtap="clearBookVoiceCommandPreview"
+        >
+          取消
+        </button>
+        <button
+          wx:if="{{bookVoiceCommandCanExecute}}"
+          class="book-voice-command-button primary"
+          loading="{{bookVoiceCommandExecuting}}"
+          disabled="{{bookVoiceCommandExecuting || updatingPlanStructure}}"
+          bindtap="executeBookVoiceCommand"
+        >
+          {{bookVoiceCommandActionText}}
+        </button>
+        <button
+          wx:if="{{bookVoiceCommandUndoText}}"
+          class="book-voice-command-button"
+          loading="{{bookVoiceCommandExecuting}}"
+          disabled="{{bookVoiceCommandExecuting || updatingPlanStructure}}"
+          bindtap="undoBookVoiceCommand"
+        >
+          {{bookVoiceCommandUndoText}}
+        </button>
+      </view>
     </view>
   </view>
 

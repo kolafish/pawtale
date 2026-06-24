@@ -6,9 +6,10 @@ import type {
   MemoirBookPlan,
   MemoirBookPlanChapterUpdateInput,
   MemoirBookSourceCoverage,
+  MemoirBookVoiceCommandOperation,
   MemoirBookVoiceCommandParseResponse,
 } from "../../domain/voice-chat";
-import type { BookChapterView, BookData } from "./book-view-model";
+import type { BookChapterView, BookData, BookVoiceCommandUndoSnapshot } from "./book-view-model";
 import { getMemoirIdentity } from "../../services/auth";
 
 import {
@@ -73,18 +74,22 @@ import {
   uniqueSourceRefs,
   bookChapterSourceSummary,
   bookOutlineNarrationText,
+  bookVoiceCommandActionText,
+  canExecuteBookVoiceCommand,
 } from "./book-view-model";
 export {
   bookChapterSourceSummary,
   bookOutputStaleNotice,
   bookOutputVersionText,
   bookOutlineNarrationText,
+  bookVoiceCommandActionText,
   bookProgressText,
   bookSourceCoverageNotice,
   buildChapterPickerOptions,
   buildChapterViews,
   buildSourceActionPickerOptions,
   buildUncoveredSourceViews,
+  canExecuteBookVoiceCommand,
   latestBookContent,
   titleFromUncoveredSource,
 } from "./book-view-model";
@@ -171,10 +176,16 @@ Page<BookData, {
   regenerateMergedChapter(chapterId: string): Promise<void>;
   generateBook(): Promise<void>;
   playChapterAudio(event: DatasetEvent): Promise<void>;
+  playChapterAudioById(chapterId: string): Promise<void>;
   playBookAudio(): Promise<void>;
   playBookOutlineAudio(): Promise<void>;
   startBookVoiceCommand(): Promise<void>;
   applyBookVoiceCommandPreview(preview: MemoirBookVoiceCommandParseResponse): void;
+  executeBookVoiceCommand(): Promise<void>;
+  undoBookVoiceCommand(): Promise<void>;
+  clearBookVoiceCommandPreview(): void;
+  bookVoiceCommandUndoSnapshot(): BookVoiceCommandUndoSnapshot | null;
+  confirmBookVoiceCommandExecution(content: string, confirmText?: string): Promise<boolean>;
   requestBookAudio(target: string): Promise<MemoirBookAudioResponse>;
   playAudioFiles(
     response: MemoirBookAudioResponse,
@@ -272,6 +283,11 @@ Page<BookData, {
     bookVoiceCommandSummary: "",
     bookVoiceCommandRequiresConfirmation: false,
     bookVoiceCommandPreview: null,
+    bookVoiceCommandCanExecute: false,
+    bookVoiceCommandActionText: "确认执行",
+    bookVoiceCommandExecuting: false,
+    bookVoiceCommandUndoText: "",
+    bookVoiceCommandUndoSnapshot: null,
   },
 
   async onShow() {
@@ -993,6 +1009,10 @@ Page<BookData, {
 
   async playChapterAudio(event) {
     const chapterId = event.currentTarget.dataset.id || "";
+    await this.playChapterAudioById(chapterId);
+  },
+
+  async playChapterAudioById(chapterId) {
     const chapter = this.data.chapters.find((candidate) => candidate.id === chapterId);
     if (!chapter || !this.data.projectId || this.data.updatingPlanStructure) {
       return;
@@ -1175,6 +1195,10 @@ Page<BookData, {
       bookVoiceCommandSummary: "",
       bookVoiceCommandRequiresConfirmation: false,
       bookVoiceCommandPreview: null,
+      bookVoiceCommandCanExecute: false,
+      bookVoiceCommandActionText: "确认执行",
+      bookVoiceCommandUndoText: "",
+      bookVoiceCommandUndoSnapshot: null,
       error: "",
     });
     try {
@@ -1210,14 +1234,156 @@ Page<BookData, {
   },
 
   applyBookVoiceCommandPreview(preview) {
+    const canExecute = canExecuteBookVoiceCommand(preview);
     this.setData({
       bookVoiceCommandText: preview.original_text,
       bookVoiceCommandIntentLabel: preview.intent_label,
       bookVoiceCommandSummary: preview.summary,
       bookVoiceCommandRequiresConfirmation: preview.requires_confirmation,
       bookVoiceCommandPreview: preview,
+      bookVoiceCommandCanExecute: canExecute,
+      bookVoiceCommandActionText: canExecute ? bookVoiceCommandActionText(preview) : "暂不执行",
+      bookVoiceCommandUndoText: "",
+      bookVoiceCommandUndoSnapshot: null,
       bookVoiceAssistantStatusText: preview.intent === "unknown" ? "需要再说明" : "已理解，等待确认",
       error: "",
+    });
+  },
+
+  async executeBookVoiceCommand() {
+    const preview = this.data.bookVoiceCommandPreview;
+    const operation = preview?.operations?.[0] as MemoirBookVoiceCommandOperation | undefined;
+    if (
+      !preview
+      || !operation
+      || !this.data.bookVoiceCommandCanExecute
+      || this.data.bookVoiceCommandExecuting
+      || this.data.updatingPlanStructure
+    ) {
+      return;
+    }
+    if (preview.intent === "read_outline") {
+      await this.playBookOutlineAudio();
+      return;
+    }
+    if (preview.intent === "read_chapter" && operation.chapter_id) {
+      await this.playChapterAudioById(operation.chapter_id);
+      return;
+    }
+
+    const confirmed = await this.confirmBookVoiceCommandExecution(preview.summary);
+    if (!confirmed) {
+      return;
+    }
+    const undoSnapshot = this.bookVoiceCommandUndoSnapshot();
+    this.setData({ bookVoiceCommandExecuting: true, error: "" });
+    try {
+      if (preview.intent === "rename_chapter" && operation.chapter_id && operation.new_title) {
+        const chapters = this.data.chapters.map((chapter) => (
+          chapter.id === operation.chapter_id
+            ? { ...chapter, title: operation.new_title || chapter.title, editingTitle: operation.new_title || chapter.editingTitle }
+            : chapter
+        ));
+        const plan = await this.updatePlanStructure(toPlanUpdateInput(chapters), "已按语音改名");
+        if (plan && undoSnapshot) {
+          this.setData({
+            bookVoiceCommandUndoText: "撤回语音改名",
+            bookVoiceCommandUndoSnapshot: undoSnapshot,
+            bookVoiceAssistantStatusText: "已执行，可撤回",
+          });
+        }
+        return;
+      }
+      if (preview.intent === "move_chapter" && operation.chapter_id && operation.direction) {
+        const fromIndex = this.data.chapters.findIndex((chapter) => chapter.id === operation.chapter_id);
+        const toIndex = operation.direction === "up" ? fromIndex - 1 : fromIndex + 1;
+        if (fromIndex < 0 || toIndex < 0 || toIndex >= this.data.chapters.length) {
+          this.setData({ error: operation.direction === "up" ? "这一章已经在最前面" : "这一章已经在最后面" });
+          return;
+        }
+        const chapters = [...this.data.chapters];
+        [chapters[fromIndex], chapters[toIndex]] = [chapters[toIndex], chapters[fromIndex]];
+        const reordered = chapters.map((chapter, index) => ({ ...chapter, sort_order: index }));
+        const plan = await this.updatePlanStructure(toPlanUpdateInput(reordered), "已按语音调整顺序");
+        if (plan && undoSnapshot) {
+          this.setData({
+            bookVoiceCommandUndoText: "撤回语音排序",
+            bookVoiceCommandUndoSnapshot: undoSnapshot,
+            bookVoiceAssistantStatusText: "已执行，可撤回",
+          });
+        }
+        return;
+      }
+      this.setData({ error: "这个语音操作暂时只能预览" });
+    } finally {
+      this.setData({ bookVoiceCommandExecuting: false });
+    }
+  },
+
+  async undoBookVoiceCommand() {
+    const snapshot = this.data.bookVoiceCommandUndoSnapshot;
+    if (!snapshot || this.data.bookVoiceCommandExecuting || this.data.updatingPlanStructure) {
+      return;
+    }
+    const confirmed = await this.confirmBookVoiceCommandExecution("撤回上一次语音修改？", "撤回");
+    if (!confirmed) {
+      return;
+    }
+    this.setData({
+      bookVoiceCommandExecuting: true,
+      planTitle: snapshot.planTitle,
+      error: "",
+    });
+    try {
+      const plan = await this.updatePlanStructure(snapshot.chapters, "已撤回语音修改");
+      if (plan) {
+        this.setData({
+          bookVoiceCommandUndoText: "",
+          bookVoiceCommandUndoSnapshot: null,
+          bookVoiceAssistantStatusText: "已撤回",
+        });
+      }
+    } finally {
+      this.setData({ bookVoiceCommandExecuting: false });
+    }
+  },
+
+  clearBookVoiceCommandPreview() {
+    this.setData({
+      bookVoiceCommandText: "",
+      bookVoiceCommandIntentLabel: "",
+      bookVoiceCommandSummary: "",
+      bookVoiceCommandRequiresConfirmation: false,
+      bookVoiceCommandPreview: null,
+      bookVoiceCommandCanExecute: false,
+      bookVoiceCommandActionText: "确认执行",
+      bookVoiceCommandUndoText: "",
+      bookVoiceCommandUndoSnapshot: null,
+      bookVoiceAssistantStatusText: bookVoiceAssistantStatusText(this.data.stage),
+      error: "",
+    });
+  },
+
+  bookVoiceCommandUndoSnapshot() {
+    if (!this.data.plan || !this.data.chapters.length) {
+      return null;
+    }
+    return {
+      planTitle: trimText(this.data.planTitle) || this.data.plan.title,
+      chapters: toPlanUpdateInput(this.data.chapters),
+    };
+  },
+
+  async confirmBookVoiceCommandExecution(content, confirmText = "执行") {
+    return new Promise<boolean>((resolve) => {
+      wx.showModal({
+        title: "语音修改",
+        content,
+        confirmText,
+        confirmColor: "#9f4a3c",
+        success: (result) => resolve(Boolean(result.confirm)),
+        fail: () => resolve(false),
+      });
     });
   },
 
