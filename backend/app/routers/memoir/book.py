@@ -88,6 +88,21 @@ async def update_mobile_memoir_book_plan(
     )
 
 
+@router.post("/projects/{project_id}/book-plan/outline/tts", response_model=MemoirBookAudioResponse)
+async def create_mobile_memoir_book_plan_outline_tts(
+    project_id: str,
+    req: MemoirBookAudioRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await memoir_book_plans.synthesize_book_outline_audio(
+        db,
+        user_id=current_user.id,
+        project_id=project_id,
+        req=req,
+    )
+
+
 @router.get("/projects/{project_id}/book-source-coverage", response_model=MemoirBookSourceCoverageResponse)
 async def get_mobile_memoir_book_source_coverage(
     project_id: str,

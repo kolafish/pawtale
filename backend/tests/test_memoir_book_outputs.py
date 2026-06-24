@@ -285,6 +285,43 @@ async def test_mobile_memoir_book_chapter_tts_generates_and_reuses_audio(
     assert playback.status_code == 200
 
 
+async def test_mobile_memoir_book_outline_tts_generates_and_reuses_audio(
+    client,
+    test_db,
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr("app.services.memoir.audio_files.MEMOIR_AUDIO_DIR", tmp_path / "audio")
+    project_id = await _active_project_id(client)
+    _, chapters = await _create_confirmed_book_plan(test_db, project_id=project_id)
+    chapters[0].source_refs_json = [{"utterance_id": "utterance-1"}]
+    chapters[1].source_refs_json = [{"utterance_id": "utterance-2"}, {"utterance_id": "utterance-3"}]
+    await test_db.commit()
+    fake_tts = FakeBookTTS()
+    monkeypatch.setattr("app.services.memoir.book_audio.get_tts_client", lambda: fake_tts)
+
+    first = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-plan/outline/tts",
+        json={"voice": "voice-outline", "speed_ratio": 1.25},
+    )
+    second = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-plan/outline/tts",
+        json={"voice": "voice-outline", "speed_ratio": 1.25},
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.json()["audio_file_ids"] == second.json()["audio_file_ids"]
+    assert len(fake_tts.calls) == 1
+    outline_text = fake_tts.calls[0]["text"]
+    assert "《外婆回忆录章节规划》现在有 2 章。" in outline_text
+    assert "第 1 章，外婆家的童年。本章收录 1 条语音素材。" in outline_text
+    assert "第 2 章，第一次离家。本章收录 2 条语音素材。" in outline_text
+    assert "你可以继续调整章节顺序、合并章节，或者说出想修改的地方。" in outline_text
+    assert fake_tts.calls[0]["voice"] == "voice-outline"
+    assert fake_tts.calls[0]["speed_ratio"] == 1.25
+
+
 async def test_mobile_memoir_book_output_tts_generates_full_book_audio(
     client,
     test_db,

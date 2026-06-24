@@ -469,6 +469,20 @@ export function bookChapterSourceSummary(chapter: Pick<MemoirBookPlanChapter, "s
   return `本章素材：${chapter.source_refs.length} 条收录转写`;
 }
 
+export function bookOutlineNarrationText(
+  planTitle: string,
+  chapters: Pick<BookChapterView, "title" | "sourceCount">[],
+): string {
+  const title = trimText(planTitle) || "回忆录章节规划";
+  const lines = [`《${title}》现在有 ${chapters.length} 章。`];
+  chapters.forEach((chapter, index) => {
+    const chapterTitle = trimText(chapter.title) || "未命名章节";
+    lines.push(`第 ${index + 1} 章，${chapterTitle}。本章收录 ${chapter.sourceCount} 条语音素材。`);
+  });
+  lines.push("你可以继续调整章节顺序、合并章节，或者说出想修改的地方。");
+  return lines.join("\n");
+}
+
 export function buildChapterViews(
   plan: MemoirBookPlan,
   draftsByChapterId: Record<string, MemoirBookChapterDraft | null> = {},
