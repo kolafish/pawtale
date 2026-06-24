@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -106,9 +107,33 @@ class MemoirBookPlanUpdateRequest(BaseModel):
         return title
 
 
+class MemoirBookVoiceCommandContextMessage(BaseModel):
+    role: Literal["user", "assistant"]
+    text: str = Field(min_length=1, max_length=240)
+    intent: str | None = None
+    summary: str | None = None
+
+    @field_validator("text")
+    @classmethod
+    def _valid_text(cls, value: str) -> str:
+        text = value.strip()
+        if not text:
+            raise ValueError("对话上下文不能为空")
+        return text
+
+    @field_validator("intent", "summary")
+    @classmethod
+    def _valid_optional_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None
+
+
 class MemoirBookVoiceCommandParseRequest(BaseModel):
     text: str = Field(min_length=1, max_length=240)
     current_chapter_id: str | None = None
+    conversation_context: list[MemoirBookVoiceCommandContextMessage] = Field(default_factory=list, max_length=8)
     ai_model: str | None = None
 
     @field_validator("text")
@@ -142,6 +167,7 @@ class MemoirBookVoiceCommandParseResponse(BaseModel):
     original_text: str
     intent: str
     intent_label: str
+    response_kind: Literal["action_preview", "consultation", "answer", "clarification"] = "action_preview"
     summary: str
     reply_text: str | None = None
     operations: list[MemoirBookVoiceCommandOperationResponse] = Field(default_factory=list)

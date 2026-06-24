@@ -253,6 +253,139 @@ async def test_mobile_memoir_book_voice_command_parse_falls_back_to_length_advic
     assert "短于其他章节" in data["reply_text"]
 
 
+async def test_mobile_memoir_book_voice_command_answers_current_chapter_count(
+    client,
+    test_db,
+    monkeypatch,
+):
+    project_id = await ensure_mobile_memoir_project(client)
+    await _create_two_chapter_plan(test_db, project_id=project_id)
+    fake_ai = FakeBookVoiceCommandAI(error=RuntimeError("provider unavailable"))
+    monkeypatch.setattr("app.services.memoir.book_voice_commands.get_ai_service", lambda _model: fake_ai)
+
+    response = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-voice-command/parse",
+        json={"text": "现在有几个章节啊"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["intent"] == "answer_book_question"
+    assert data["intent_label"] == "成书问答"
+    assert data["response_kind"] == "answer"
+    assert data["requires_confirmation"] is False
+    assert data["operations"] == []
+    assert "2 章" in data["reply_text"]
+    assert "外婆家的童年" in data["reply_text"]
+    assert "第一次离家" in data["reply_text"]
+
+    response = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-voice-command/parse",
+        json={"text": "章节一共有几个啊"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["intent"] == "answer_book_question"
+
+
+async def test_mobile_memoir_book_voice_command_explains_editing_capabilities(
+    client,
+    test_db,
+    monkeypatch,
+):
+    project_id = await ensure_mobile_memoir_project(client)
+    await _create_two_chapter_plan(test_db, project_id=project_id)
+    fake_ai = FakeBookVoiceCommandAI(error=RuntimeError("provider unavailable"))
+    monkeypatch.setattr("app.services.memoir.book_voice_commands.get_ai_service", lambda _model: fake_ai)
+
+    response = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-voice-command/parse",
+        json={"text": "我可以修改些啥"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["intent"] == "capability_help"
+    assert data["response_kind"] == "answer"
+    assert data["requires_confirmation"] is False
+    assert data["operations"] == []
+    assert "改章名" in data["reply_text"]
+    assert "合并章节" in data["reply_text"]
+    assert "等你确认" in data["reply_text"]
+
+
+async def test_mobile_memoir_book_voice_command_passes_recent_conversation_to_ai(
+    client,
+    test_db,
+    monkeypatch,
+):
+    project_id = await ensure_mobile_memoir_project(client)
+    await _create_two_chapter_plan(test_db, project_id=project_id)
+    fake_ai = FakeBookVoiceCommandAI(
+        {
+            "intent": "answer_book_question",
+            "response_kind": "answer",
+            "summary": "回答当前目录章节数",
+            "reply_text": "现在有两章，分别是外婆家的童年和第一次离家。",
+        }
+    )
+    monkeypatch.setattr("app.services.memoir.book_voice_commands.get_ai_service", lambda _model: fake_ai)
+
+    response = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-voice-command/parse",
+        json={
+            "text": "现在呢",
+            "conversation_context": [
+                {"role": "user", "text": "现在都有几张呀"},
+                {"role": "assistant", "text": "现在目录有 2 章。"},
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["intent"] == "answer_book_question"
+    assert data["response_kind"] == "answer"
+    assert data["reply_text"] == "现在有两章，分别是外婆家的童年和第一次离家。"
+    assert "最近语音对话" in fake_ai.calls[0]["user_prompt"]
+    assert "用户：现在都有几张呀" in fake_ai.calls[0]["user_prompt"]
+    assert "AI：现在目录有 2 章。" in fake_ai.calls[0]["user_prompt"]
+
+
+async def test_mobile_memoir_book_voice_command_clarifies_ai_follow_up_without_reply_text(
+    client,
+    test_db,
+    monkeypatch,
+):
+    project_id = await ensure_mobile_memoir_project(client)
+    await _create_two_chapter_plan(test_db, project_id=project_id)
+    fake_ai = FakeBookVoiceCommandAI(
+        {
+            "intent": "clarify_previous",
+            "summary": "需要确认用户指代的修改对象",
+        }
+    )
+    monkeypatch.setattr("app.services.memoir.book_voice_commands.get_ai_service", lambda _model: fake_ai)
+
+    response = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-voice-command/parse",
+        json={
+            "text": "那个",
+            "conversation_context": [
+                {"role": "assistant", "text": "可以改章名、调顺序、合并章节。"},
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["intent"] == "clarify_previous"
+    assert data["response_kind"] == "clarification"
+    assert data["requires_confirmation"] is False
+    assert data["operations"] == []
+    assert "想改章名、调整顺序" in data["reply_text"]
+
+
 async def test_mobile_memoir_book_voice_assistant_tts_generates_short_reply(
     client,
     test_db,

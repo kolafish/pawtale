@@ -210,6 +210,7 @@ function sampleBookVoiceCommandPreview(overrides = {}) {
     original_text: "把第一章改名为童年往事",
     intent: "rename_chapter",
     intent_label: "修改章名",
+    response_kind: "action_preview",
     summary: "准备把「外婆家的童年」改名为「童年往事」。",
     operations: [
       {
@@ -1494,6 +1495,65 @@ test("book page records and previews a voice edit command", async () => {
   delete global.wx;
 });
 
+test("book page sends recent voice editing context when parsing follow-up questions", async () => {
+  const calls = [];
+  global.wx = { showToast(options) { calls.push({ kind: "toast", title: options.title }); } };
+  const answerPreview = sampleBookVoiceCommandPreview({
+    original_text: "现在有几个章节啊",
+    intent: "answer_book_question",
+    intent_label: "成书问答",
+    response_kind: "answer",
+    summary: "回答当前成书章节状态。",
+    reply_text: "现在目录有 2 章：第一章「外婆家的童年」，第二章「第一次离家」。",
+    operations: [],
+    requires_confirmation: false,
+  });
+  const { page } = loadBookPage({
+    voiceApiExports: {
+      parseMemoirBookVoiceCommand: async (projectId, data) => {
+        calls.push({ kind: "parse", projectId, data });
+        return answerPreview;
+      },
+    },
+    streamingAsrExports: {
+      MemoirStreamingAsrClient: streamingAsrClientForFinal(calls, "现在有几个章节啊"),
+    },
+  });
+  const context = pageContext(page, { projectId: "project/1" });
+  page.applyPlan.call(context, samplePlan("confirmed"));
+  context.setData({
+    bookVoiceTranscriptLines: [
+      { id: "book-user-1", role: "user", text: "我可以修改些啥" },
+      { id: "book-ai-1", role: "assistant", text: "可以改章名、调顺序、合并章节。" },
+    ],
+  });
+  context.playBookVoiceAssistantReply = async (text, options) => {
+    calls.push({ kind: "reply", text, options });
+  };
+
+  await page.startBookVoiceCommand.call(context);
+  await flushAsyncWork();
+
+  assert.deepEqual(calls[3], {
+    kind: "parse",
+    projectId: "project/1",
+    data: {
+      text: "现在有几个章节啊",
+      conversation_context: [
+        { role: "user", text: "我可以修改些啥" },
+        { role: "assistant", text: "可以改章名、调顺序、合并章节。" },
+      ],
+    },
+  });
+  assert.equal(context.data.bookVoiceAssistantStatusText, "已回答");
+  assert.deepEqual(calls[5], {
+    kind: "reply",
+    text: "现在目录有 2 章：第一章「外婆家的童年」，第二章「第一次离家」。",
+    options: { autoListenAfterPlayback: true },
+  });
+  delete global.wx;
+});
+
 test("book page treats voice editing advice as a spoken consultation", async () => {
   const calls = [];
   global.wx = { showToast(options) { calls.push({ kind: "toast", title: options.title }); } };
@@ -1501,6 +1561,7 @@ test("book page treats voice editing advice as a spoken consultation", async () 
     original_text: "第一章是不是太短了",
     intent: "review_chapter_length",
     intent_label: "篇幅建议",
+    response_kind: "consultation",
     summary: "正在判断「外婆家的童年」的篇幅是否合适。",
     reply_text: "这一章现在明显偏短，建议补一个具体场景或人物对话。",
     operations: [],

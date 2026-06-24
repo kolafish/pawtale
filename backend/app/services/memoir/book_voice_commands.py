@@ -30,7 +30,8 @@ logger = logging.getLogger(__name__)
 
 BOOK_VOICE_COMMAND_SYSTEM_PROMPT = (
     "你是回忆录成书页面的语音编辑助手。你的任务是理解用户口语化的中文语音请求，"
-    "把可执行修改解析成安全的操作预览，把编辑判断类问题解析成不会改动数据的建议回复。"
+    "把可执行修改解析成安全的操作预览，把编辑判断类问题解析成不会改动数据的建议回复，"
+    "也要能回答当前成书状态、可修改范围和上下文追问。"
     "只输出 JSON，不要解释。"
 )
 
@@ -39,15 +40,22 @@ BOOK_VOICE_COMMAND_USER_PROMPT_TEMPLATE = """请解析下面这句成书语音�
 当前章节上下文：
 {chapter_lines}
 
+当前成书状态：
+{book_status}
+
 当前正在编辑章节：
 {current_chapter_line}
+
+最近语音对话：
+{conversation_lines}
 
 用户原句：
 {text}
 
 JSON 格式：
 {{
-  "intent": "read_outline | read_chapter | rename_chapter | merge_chapters | move_chapter | split_chapter | rewrite_chapter | polish_chapter | confirm_chapter | review_chapter_title | review_chapter_length | review_chapter_structure | unknown",
+  "intent": "read_outline | read_chapter | rename_chapter | merge_chapters | move_chapter | split_chapter | rewrite_chapter | polish_chapter | confirm_chapter | review_chapter_title | review_chapter_length | review_chapter_structure | answer_book_question | capability_help | clarify_previous | unknown",
+  "response_kind": "action_preview | consultation | answer | clarification",
   "chapter_ref": "用户提到的章节编号或标题；没有则 null",
   "target_chapter_ref": "合并目标章节编号或标题；没有则 null",
   "new_title": "改名后的新标题；没有则 null",
@@ -66,7 +74,11 @@ JSON 格式：
 - “第一章是不是需要换个名字/标题好不好/题目是否合适”用 review_chapter_title，不要生成 rename_chapter。
 - “第一章是不是太短/太长/字数够不够/篇幅是否合适”用 review_chapter_length，不要生成 rewrite_chapter。
 - “这一章结构是否合理/要不要拆分或合并/顺序是否合适”用 review_chapter_structure，除非用户明确要求执行。
+- “现在有几章/都有几章/目录里有什么/现在都有哪些章节”等状态问题用 answer_book_question，reply_text 要直接回答章节数量和标题。
+- “我可以修改什么/能改哪些/可以怎么改”等能力问题用 capability_help，reply_text 要结合当前目录说明可做的修改。
+- “那个/这个/现在呢/继续”等短追问要结合最近语音对话；能判断指代就继续回答，不能判断用 clarify_previous 并问一个具体澄清问题。
 - 建议类 intent 不产生 operations，不需要确认；reply_text 要给判断理由和下一步建议，控制在 120 字以内。
+- answer_book_question、capability_help、clarify_previous 不产生 operations，不需要确认。
 - 如果缺少必要章节或无法判断，intent 用 unknown。
 """
 
@@ -83,6 +95,9 @@ SUPPORTED_INTENTS = {
     "review_chapter_title",
     "review_chapter_length",
     "review_chapter_structure",
+    "answer_book_question",
+    "capability_help",
+    "clarify_previous",
     "unknown",
 }
 
@@ -99,12 +114,17 @@ INTENT_LABELS = {
     "review_chapter_title": "章名建议",
     "review_chapter_length": "篇幅建议",
     "review_chapter_structure": "结构建议",
+    "answer_book_question": "成书问答",
+    "capability_help": "修改帮助",
+    "clarify_previous": "需要澄清",
     "unknown": "需要再说明",
 }
 
 READ_INTENTS = {"read_outline", "read_chapter"}
 CONSULTATION_INTENTS = {"review_chapter_title", "review_chapter_length", "review_chapter_structure"}
-NON_CONFIRMATION_INTENTS = READ_INTENTS | CONSULTATION_INTENTS
+ANSWER_INTENTS = {"answer_book_question", "capability_help"}
+CLARIFICATION_INTENTS = {"clarify_previous", "unknown"}
+NON_CONFIRMATION_INTENTS = READ_INTENTS | CONSULTATION_INTENTS | ANSWER_INTENTS | CLARIFICATION_INTENTS
 CHINESE_NUMBERS = {
     "一": 1,
     "二": 2,
@@ -127,6 +147,40 @@ TITLE_REVIEW_KEYWORDS = ("换个名字", "改个名字", "名字", "标题", "�
 LENGTH_REVIEW_KEYWORDS = ("太短", "太长", "字数", "长度", "篇幅", "内容少", "内容多", "够不够")
 STRUCTURE_REVIEW_KEYWORDS = ("结构", "顺序", "节奏", "拆分", "合并", "拆开", "放一起")
 QUESTION_KEYWORDS = ("是不是", "是否", "要不要", "需不需要", "需要", "合不合适", "好不好", "好吗", "怎么样", "够不够")
+CAPABILITY_KEYWORDS = (
+    "可以修改什么",
+    "可以修改些啥",
+    "可以改什么",
+    "可以改些啥",
+    "能修改什么",
+    "能修改些啥",
+    "能改什么",
+    "能改些啥",
+    "改哪些",
+    "修改哪些",
+    "怎么修改",
+    "怎么改",
+    "能做什么",
+    "可以做什么",
+    "会做什么",
+)
+CHAPTER_COUNT_KEYWORDS = (
+    "几章",
+    "几张",
+    "几个章",
+    "几个章节",
+    "多少章",
+    "多少章节",
+    "目录有几",
+    "现在有几",
+    "现在都有几",
+    "一共有几",
+    "总共有几",
+    "章节有几",
+    "章有几个",
+)
+OUTLINE_STATUS_KEYWORDS = ("有哪些章节", "都有哪些章", "现在有什么章", "目录里有什么", "目录是什么", "现在目录")
+AMBIGUOUS_FOLLOW_UPS = {"那个", "这个", "那", "嗯", "现在呢", "然后呢", "继续", "就是那个", "刚才那个", "前面那个"}
 
 
 @dataclass(frozen=True)
@@ -209,7 +263,7 @@ async def _parse_payload_with_ai(
     *,
     ai_client: AITextClient | None = None,
 ) -> ParsedCommandPayload:
-    fallback = _fallback_payload(req.text)
+    fallback = _fallback_payload(req.text, plan=plan, conversation_context=req.conversation_context)
     client = ai_client
     try:
         if client is None:
@@ -218,7 +272,9 @@ async def _parse_payload_with_ai(
             BOOK_VOICE_COMMAND_SYSTEM_PROMPT,
             BOOK_VOICE_COMMAND_USER_PROMPT_TEMPLATE.format(
                 chapter_lines=_chapter_prompt_lines(plan),
+                book_status=_book_status_prompt_line(plan),
                 current_chapter_line=_current_chapter_prompt_line(plan, req.current_chapter_id),
+                conversation_lines=_conversation_prompt_lines(req.conversation_context),
                 text=req.text,
             ),
             temperature=0.1,
@@ -229,6 +285,9 @@ async def _parse_payload_with_ai(
         parsed = _payload_from_json(payload)
         if parsed.intent == "unknown":
             return fallback
+        reply_text = parsed.reply_text
+        if parsed.intent == "clarify_previous" and not reply_text:
+            reply_text = _clarification_reply_text(req.conversation_context, None)
         return ParsedCommandPayload(
             intent=parsed.intent,
             chapter_ref=parsed.chapter_ref,
@@ -236,7 +295,7 @@ async def _parse_payload_with_ai(
             new_title=parsed.new_title,
             direction=parsed.direction,
             summary=parsed.summary,
-            reply_text=parsed.reply_text,
+            reply_text=reply_text,
             used_ai=True,
             provider=getattr(client, "provider_name", None),
             model=getattr(client, "model_name", req.ai_model),
@@ -269,12 +328,38 @@ def _payload_from_json(payload: Any) -> ParsedCommandPayload:
     )
 
 
-def _fallback_payload(text: str) -> ParsedCommandPayload:
+def _fallback_payload(
+    text: str,
+    *,
+    plan: MemoirBookPlan,
+    conversation_context: list[Any] | None = None,
+) -> ParsedCommandPayload:
     normalized = _compact(text)
     if not normalized:
         return ParsedCommandPayload(intent="unknown")
     if any(keyword in normalized for keyword in ("读目录", "念目录", "听目录", "朗读目录")):
         return ParsedCommandPayload(intent="read_outline", summary="朗读当前章节目录")
+
+    if _is_chapter_count_question(normalized) or any(keyword in normalized for keyword in OUTLINE_STATUS_KEYWORDS):
+        return ParsedCommandPayload(
+            intent="answer_book_question",
+            summary="回答当前成书章节状态。",
+            reply_text=_chapter_count_reply_text(plan),
+        )
+
+    if any(keyword in normalized for keyword in CAPABILITY_KEYWORDS):
+        return ParsedCommandPayload(
+            intent="capability_help",
+            summary="说明语音编辑可以做的修改。",
+            reply_text=_capability_reply_text(plan, None),
+        )
+
+    if _is_ambiguous_follow_up(normalized):
+        return ParsedCommandPayload(
+            intent="clarify_previous",
+            summary="需要确认上一句指的是哪一项修改。",
+            reply_text=_clarification_reply_text(conversation_context, None),
+        )
 
     consultation_intent = _fallback_consultation_intent(normalized)
     if consultation_intent:
@@ -342,6 +427,100 @@ def _fallback_chapter_ref(normalized: str) -> str | None:
     return normalized
 
 
+def _is_chapter_count_question(normalized: str) -> bool:
+    return any(keyword in normalized for keyword in CHAPTER_COUNT_KEYWORDS)
+
+
+def _is_ambiguous_follow_up(normalized: str) -> bool:
+    return normalized in AMBIGUOUS_FOLLOW_UPS or (
+        len(normalized) <= 6 and normalized.startswith(("那个", "这个", "刚才", "前面"))
+    )
+
+
+def _response_kind_for_intent(intent: str) -> str:
+    if intent in CONSULTATION_INTENTS:
+        return "consultation"
+    if intent in ANSWER_INTENTS:
+        return "answer"
+    if intent in CLARIFICATION_INTENTS:
+        return "clarification"
+    return "action_preview"
+
+
+def _book_status_prompt_line(plan: MemoirBookPlan) -> str:
+    chapters = _sorted_chapters(plan)
+    non_empty_drafts = sum(1 for chapter in chapters if _draft_char_count(chapter) > 0)
+    return f"当前目录 {len(chapters)} 章，已有正文 {non_empty_drafts} 章，规划状态 {plan.status}。"
+
+
+def _conversation_prompt_lines(conversation_context: list[Any] | None) -> str:
+    lines: list[str] = []
+    for item in (conversation_context or [])[-6:]:
+        role = getattr(item, "role", "")
+        text = _clean_reply_text(getattr(item, "text", ""))
+        if role not in {"user", "assistant"} or not text:
+            continue
+        label = "用户" if role == "user" else "AI"
+        summary = _clean_reply_text(getattr(item, "summary", None))
+        if summary:
+            lines.append(f"{label}：{text}（{summary}）")
+        else:
+            lines.append(f"{label}：{text}")
+    return "\n".join(lines) or "无"
+
+
+def _book_question_reply_text(original_text: str, plan: MemoirBookPlan, ai_reply_text: str | None) -> str:
+    cleaned_ai_reply = _clean_reply_text(ai_reply_text)
+    if cleaned_ai_reply:
+        return cleaned_ai_reply
+    normalized = _compact(original_text)
+    if _is_chapter_count_question(normalized) or any(keyword in normalized for keyword in OUTLINE_STATUS_KEYWORDS):
+        return _chapter_count_reply_text(plan)
+    return _chapter_count_reply_text(plan)
+
+
+def _chapter_count_reply_text(plan: MemoirBookPlan) -> str:
+    chapters = _sorted_chapters(plan)
+    if not chapters:
+        return "现在还没有章节。你可以先生成目录，再用语音让我读目录、改章名或调整顺序。"
+    chapter_names = "，".join(f"第 {index} 章「{chapter.title}」" for index, chapter in enumerate(chapters, start=1))
+    return f"现在目录有 {len(chapters)} 章：{chapter_names}。你可以继续问某一章是否太短，或直接说想怎么改。"
+
+
+def _capability_reply_text(plan: MemoirBookPlan, ai_reply_text: str | None) -> str:
+    cleaned_ai_reply = _clean_reply_text(ai_reply_text)
+    if cleaned_ai_reply:
+        return cleaned_ai_reply
+    chapters = _sorted_chapters(plan)
+    count_text = f"现在有 {len(chapters)} 章，" if chapters else ""
+    return (
+        f"{count_text}我可以帮你读目录或读某章、改章名、上移下移章节、合并章节，"
+        "也可以判断某章名字是否合适、篇幅是不是太短。真正改动前我会先复述并等你确认。"
+    )
+
+
+def _clarification_reply_text(conversation_context: list[Any] | None, ai_reply_text: str | None) -> str:
+    cleaned_ai_reply = _clean_reply_text(ai_reply_text)
+    if cleaned_ai_reply:
+        return cleaned_ai_reply
+    last_assistant_text = ""
+    for item in reversed(conversation_context or []):
+        if getattr(item, "role", "") != "assistant":
+            continue
+        last_assistant_text = _clean_reply_text(getattr(item, "text", "")) or ""
+        if last_assistant_text:
+            break
+    if last_assistant_text:
+        return "你是接着刚才那条建议，想改章名、调整顺序，还是让我继续读目录？请直接说要改哪一章。"
+    return "我还没确定你指的是哪一处。你可以说：现在有几章、第一章是不是太短，或者把第一章改名为什么。"
+
+
+def _unknown_reply_text(chapters: list[MemoirBookPlanChapter]) -> str:
+    if chapters:
+        return "我还没听清你想改哪一块。你可以问现在有几章、第一章是不是太短，或直接说把第一章改名为什么。"
+    return "我还没听清。现在还没有章节，可以先生成目录，再让我读目录或调整章节。"
+
+
 def _response_from_payload(
     original_text: str,
     plan: MemoirBookPlan,
@@ -385,18 +564,34 @@ def _response_from_payload(
             operations = []
         else:
             intent = "unknown"
+    elif intent in ANSWER_INTENTS or intent == "clarify_previous":
+        operations = []
 
     if intent in CONSULTATION_INTENTS:
         summary = payload.summary or _summary_for_consultation(intent, chapter)
         reply_text = _consultation_reply_text(intent, chapter, chapters, payload.reply_text)
+    elif intent == "answer_book_question":
+        summary = payload.summary or "回答当前成书章节状态。"
+        reply_text = _book_question_reply_text(original_text, plan, payload.reply_text)
+    elif intent == "capability_help":
+        summary = payload.summary or "说明语音编辑可以做的修改。"
+        reply_text = _capability_reply_text(plan, payload.reply_text)
+    elif intent == "clarify_previous":
+        summary = payload.summary or "需要确认上一句指的是哪一项修改。"
+        reply_text = _clarification_reply_text(None, payload.reply_text)
+    elif intent == "unknown":
+        summary = payload.summary or _summary_for_operation(intent, operations)
+        reply_text = _unknown_reply_text(chapters)
     else:
         summary = _summary_for_operation(intent, operations)
         reply_text = None
 
+    response_kind = _response_kind_for_intent(intent)
     return MemoirBookVoiceCommandParseResponse(
         original_text=original_text.strip(),
         intent=intent,
         intent_label=INTENT_LABELS[intent],
+        response_kind=response_kind,
         summary=summary,
         reply_text=reply_text,
         operations=operations,

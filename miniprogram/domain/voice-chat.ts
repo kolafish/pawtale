@@ -469,11 +469,24 @@ export type MemoirBookVoiceCommandIntent =
   | "review_chapter_title"
   | "review_chapter_length"
   | "review_chapter_structure"
+  | "answer_book_question"
+  | "capability_help"
+  | "clarify_previous"
   | "unknown";
+
+export type MemoirBookVoiceCommandResponseKind = "action_preview" | "consultation" | "answer" | "clarification";
+
+export interface MemoirBookVoiceCommandContextMessage {
+  role: "user" | "assistant";
+  text: string;
+  intent?: string | null;
+  summary?: string | null;
+}
 
 export interface MemoirBookVoiceCommandParseRequest {
   text: string;
   current_chapter_id?: string;
+  conversation_context?: MemoirBookVoiceCommandContextMessage[];
   ai_model?: string;
 }
 
@@ -491,6 +504,7 @@ export interface MemoirBookVoiceCommandParseResponse {
   original_text: string;
   intent: MemoirBookVoiceCommandIntent;
   intent_label: string;
+  response_kind: MemoirBookVoiceCommandResponseKind;
   summary: string;
   reply_text?: string | null;
   operations: MemoirBookVoiceCommandOperation[];
