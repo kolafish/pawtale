@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.domain.memoir.types import MemoirChatMessageRole, MemoirVoiceSessionStatus
-from app.models.memoir import MemoirVoiceSession, MemoirVoiceUtterance
+from app.models.memoir import MemoirChatMessage, MemoirVoiceSession, MemoirVoiceUtterance
 from app.models.projects import Project
 from app.schemas.memoir_voice import (
     MemoirVoiceModuleProgressResponse,
@@ -95,6 +95,11 @@ def _visible_utterances(voice_session: MemoirVoiceSession) -> list[MemoirVoiceUt
     return [utterance for utterance in voice_session.utterances if _utterance_text(utterance)]
 
 
+def _assistant_message_expects_answer(message: MemoirChatMessage) -> bool:
+    metadata = message.metadata_json if isinstance(message.metadata_json, dict) else {}
+    return metadata.get("expects_answer") is not False
+
+
 def _visible_utterance_exists_clause():
     return MemoirVoiceSession.utterances.any(
         or_(
@@ -120,6 +125,7 @@ def _session_summary(voice_session: MemoirVoiceSession) -> MemoirVoiceSessionSum
     assistant_messages = [
         message for message in messages
         if message.role == MemoirChatMessageRole.ASSISTANT.value and message.content_text.strip()
+        and _assistant_message_expects_answer(message)
     ]
     ordered_messages = sorted(messages, key=lambda message: (message.turn_index, message.created_at, message.id))
     last_message = ordered_messages[-1] if ordered_messages else None

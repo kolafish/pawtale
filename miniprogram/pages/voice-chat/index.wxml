@@ -136,11 +136,11 @@
     <button
       class="mic-button {{recording ? 'recording' : ''}}"
       loading="{{connecting}}"
-      disabled="{{connecting || followUpLoading || !voiceAuthorizationAgreed}}"
+      disabled="{{connecting || followUpLoading || followUpTTSLoading || followUpTTSPlaying || !voiceAuthorizationAgreed}}"
       bindtap="toggleRecording"
     >
       <image class="mic-icon" src="/assets/memoir-microphone.png" mode="aspectFit" />
-      <text>{{!voiceAuthorizationAgreed ? "同意后开始说话" : (connecting ? "连接中" : (followUpLoading ? "老余思考中" : primaryActionText))}}</text>
+      <text>{{!voiceAuthorizationAgreed ? "同意后开始说话" : (connecting ? "连接中" : (followUpLoading ? "老余思考中" : ((followUpTTSLoading || followUpTTSPlaying) ? "老余说话中" : primaryActionText)))}}</text>
     </button>
   </view>
 </view>

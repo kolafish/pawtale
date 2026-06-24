@@ -57,21 +57,31 @@ class MemoirVoiceAuthorizationConsentResponse(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
+
 class MemoirVoiceAuthorizationConsentStatusResponse(BaseModel):
     has_current_consent: bool
     consent: MemoirVoiceAuthorizationConsentResponse | None = None
 
+
 class MemoirVoiceFollowUpRequest(BaseModel):
     ai_model: str | None = None
     regenerate: bool = False
+    acknowledgement_message_id: str | None = None
+
+
+class MemoirVoiceAcknowledgementRequest(BaseModel):
+    ai_model: str | None = None
+
 
 class MemoirVoiceNoAnswerPromptRequest(BaseModel):
     attempt: int = Field(default=1, ge=1, le=3)
+
 
 class MemoirAssistantTTSRequest(BaseModel):
     voice: str | None = None
     speed_ratio: float | None = Field(default=None, ge=0.5, le=2.0)
     force_regenerate: bool = False
+
 
 class MemoirVoiceSessionResponse(BaseModel):
     id: str

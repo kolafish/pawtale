@@ -2,7 +2,7 @@ require("./register-ts");
 
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const { loadPageModule, mockModule } = require("./page-harness");
+const { clearModule, loadPageModule, mockModule } = require("./page-harness");
 
 function loadVoiceChatPage({
   streamingExports = {},
@@ -35,6 +35,9 @@ function loadVoiceChatPage({
     },
     createMemoirVoiceFollowUp: async () => {
       throw new Error("createMemoirVoiceFollowUp was not mocked");
+    },
+    createMemoirVoiceAcknowledgement: async () => {
+      throw new Error("createMemoirVoiceAcknowledgement was not mocked");
     },
     createMemoirVoiceNoAnswerPrompt: async () => {
       throw new Error("createMemoirVoiceNoAnswerPrompt was not mocked");
@@ -125,6 +128,8 @@ function loadVoiceChatPage({
     wechatPrivacyErrorMessage: (message) => message || "微信隐私授权失败",
     ...wechatPrivacyExports,
   });
+  clearModule("../services/voice-assistant-turn-queue.ts");
+  clearModule("../services/voice-assistant-turn-pipeline.ts");
 
   return loadPageModule("../pages/voice-chat/index.ts").page;
 }
@@ -780,15 +785,114 @@ test("voice chat starts pending auto listening when gateway becomes ready after 
   delete global.wx;
 });
 
+test("voice chat pipelines acknowledgement before the next follow-up question", async () => {
+  const requests = [];
+  const queuedTurns = [];
+  const page = loadVoiceChatPage({
+    voiceApiExports: {
+      createMemoirVoiceAcknowledgement: async (voiceSessionId, data) => {
+        requests.push({ type: "acknowledgement", voiceSessionId, data });
+        return {
+          follow_up_text: "您刚才说的院子和外婆，一下子就有画面了。",
+          primary_intent: "acknowledge",
+          intent_tags: ["acknowledge"],
+          expects_answer: false,
+          message: {
+            id: "assistant-ack-1",
+            role: "assistant",
+            content_text: "您刚才说的院子和外婆，一下子就有画面了。",
+            audio_file_id: "",
+            transcript_version_id: "",
+            metadata_json: { primary_intent: "acknowledge", expects_answer: false },
+          },
+        };
+      },
+      createMemoirVoiceFollowUp: async (voiceSessionId, data) => {
+        requests.push({ type: "follow_up", voiceSessionId, data });
+        return {
+          follow_up_text: "那时候在院子里，外婆最常带着您做什么？",
+          primary_intent: "follow_up",
+          intent_tags: ["acknowledge", "follow_up"],
+          expects_answer: true,
+          message: {
+            id: "assistant-question-1",
+            role: "assistant",
+            content_text: "那时候在院子里，外婆最常带着您做什么？",
+            audio_file_id: "",
+            transcript_version_id: "",
+            metadata_json: { primary_intent: "follow_up", expects_answer: true },
+          },
+        };
+      },
+    },
+  });
+  const context = {
+    ...page,
+    data: {
+      ...page.data,
+      voiceSessionId: "voice-1",
+      guidanceMode: "guided_interview",
+      transcriptLines: [{
+        id: "user-line-1",
+        role: "user",
+        text: "我小时候经常和外婆在院子里摘菜。",
+        message_id: "user-message-1",
+      }],
+      lastFollowUpSourceMessageId: "",
+    },
+    setData(patch) {
+      this.data = { ...this.data, ...patch };
+    },
+    enqueueAssistantTurn(item) {
+      queuedTurns.push(item);
+    },
+  };
+
+  await page.generateFollowUpPipeline.call(context, "user-message-1");
+
+  assert.deepEqual(requests, [
+    { type: "acknowledgement", voiceSessionId: "voice-1", data: {} },
+    {
+      type: "follow_up",
+      voiceSessionId: "voice-1",
+      data: { acknowledgement_message_id: "assistant-ack-1" },
+    },
+  ]);
+  assert.deepEqual(queuedTurns.map((item) => ({
+    messageId: item.messageId,
+    autoListenAfterPlayback: item.autoListenAfterPlayback,
+    expectsAnswer: item.expectsAnswer,
+    text: item.text,
+  })), [
+    {
+      messageId: "assistant-ack-1",
+      autoListenAfterPlayback: false,
+      expectsAnswer: false,
+      text: "您刚才说的院子和外婆，一下子就有画面了。",
+    },
+    {
+      messageId: "assistant-question-1",
+      autoListenAfterPlayback: true,
+      expectsAnswer: true,
+      text: "那时候在院子里，外婆最常带着您做什么？",
+    },
+  ]);
+  assert.equal(context.data.lastFollowUpSourceMessageId, "user-message-1");
+  assert.equal(context.data.persistenceStateText, "等待回答");
+});
+
 test("voice chat asks with AI voice when auto-listen hears no answer", async () => {
   const noAnswerRequests = [];
-  const preparedTTS = [];
+  const queuedTurns = [];
   const page = loadVoiceChatPage({
     voiceApiExports: {
       createMemoirVoiceNoAnswerPrompt: async (voiceSessionId, data) => {
         noAnswerRequests.push({ voiceSessionId, data });
         return {
           follow_up_text: "我这边没有听到声音，您可以接着刚才的问题慢慢说。",
+          primary_intent: "repair",
+          intent_tags: ["repair"],
+          expects_answer: true,
           message: {
             id: "assistant-no-answer-1",
             role: "assistant",
@@ -814,8 +918,12 @@ test("voice chat asks with AI voice when auto-listen hears no answer", async () 
     setData(patch) {
       this.data = { ...this.data, ...patch };
     },
-    async prepareFollowUpTTS(messageId, forceRegenerate, autoListenAfterPlayback) {
-      preparedTTS.push({ messageId, forceRegenerate, autoListenAfterPlayback });
+    enqueueAssistantTurn(item) {
+      queuedTurns.push(item);
+      this.setData({
+        assistantPromptText: item.text,
+        transcriptLines: [...this.data.transcriptLines, item.line],
+      });
     },
   };
 
@@ -835,10 +943,16 @@ test("voice chat asks with AI voice when auto-listen hears no answer", async () 
   assert.equal(context.data.captureStateText, "正在收尾");
   assert.equal(context.data.autoStopStateText, "未听到回答，已暂停收音");
   assert.deepEqual(noAnswerRequests, [{ voiceSessionId: "voice-1", data: { attempt: 1 } }]);
-  assert.deepEqual(preparedTTS, [{
+  assert.deepEqual(queuedTurns.map((item) => ({
+    messageId: item.messageId,
+    autoListenAfterPlayback: item.autoListenAfterPlayback,
+    expectsAnswer: item.expectsAnswer,
+    text: item.text,
+  })), [{
     messageId: "assistant-no-answer-1",
-    forceRegenerate: false,
     autoListenAfterPlayback: true,
+    expectsAnswer: true,
+    text: "我这边没有听到声音，您可以接着刚才的问题慢慢说。",
   }]);
   assert.equal(context.data.assistantPromptText, "我这边没有听到声音，您可以接着刚才的问题慢慢说。");
   assert.equal(context.data.autoListenStateText, "老余确认后会继续听");
@@ -865,11 +979,14 @@ test("voice chat asks with AI voice when auto-listen hears no answer", async () 
 test("voice chat ignores stale no-answer prompt after manual recording resumes", async () => {
   let resolvePrompt = () => {};
   const noAnswerRequests = [];
-  const preparedTTS = [];
+  const queuedTurns = [];
   const startOptions = [];
   const noAnswerPrompt = new Promise((resolve) => {
     resolvePrompt = () => resolve({
       follow_up_text: "我这边没有听到声音，您可以接着刚才的问题慢慢说。",
+      primary_intent: "repair",
+      intent_tags: ["repair"],
+      expects_answer: true,
       message: {
         id: "assistant-no-answer-stale",
         role: "assistant",
@@ -920,8 +1037,8 @@ test("voice chat ignores stale no-answer prompt after manual recording resumes",
     setData(patch) {
       this.data = { ...this.data, ...patch };
     },
-    async prepareFollowUpTTS(messageId, forceRegenerate, autoListenAfterPlayback) {
-      preparedTTS.push({ messageId, forceRegenerate, autoListenAfterPlayback });
+    enqueueAssistantTurn(item) {
+      queuedTurns.push(item);
     },
   };
 
@@ -948,7 +1065,7 @@ test("voice chat ignores stale no-answer prompt after manual recording resumes",
   await new Promise((resolve) => setImmediate(resolve));
   await new Promise((resolve) => setImmediate(resolve));
 
-  assert.equal(preparedTTS.length, 0);
+  assert.equal(queuedTurns.length, 0);
   assert.equal(context.data.transcriptLines.length, 0);
   assert.equal(context.data.assistantPromptText, "");
   assert.equal(context.data.primaryActionText, "暂停收音");
@@ -957,13 +1074,16 @@ test("voice chat ignores stale no-answer prompt after manual recording resumes",
 
 test("voice chat pauses after the second consecutive no-answer prompt", async () => {
   const noAnswerRequests = [];
-  const preparedTTS = [];
+  const queuedTurns = [];
   const page = loadVoiceChatPage({
     voiceApiExports: {
       createMemoirVoiceNoAnswerPrompt: async (voiceSessionId, data) => {
         noAnswerRequests.push({ voiceSessionId, data });
         return {
           follow_up_text: "没关系，我先暂停一下。您准备好了，再点继续说话。",
+          primary_intent: "repair",
+          intent_tags: ["repair"],
+          expects_answer: false,
           message: {
             id: "assistant-no-answer-2",
             role: "assistant",
@@ -990,8 +1110,12 @@ test("voice chat pauses after the second consecutive no-answer prompt", async ()
     setData(patch) {
       this.data = { ...this.data, ...patch };
     },
-    async prepareFollowUpTTS(messageId, forceRegenerate, autoListenAfterPlayback) {
-      preparedTTS.push({ messageId, forceRegenerate, autoListenAfterPlayback });
+    enqueueAssistantTurn(item) {
+      queuedTurns.push(item);
+      this.setData({
+        assistantPromptText: item.text,
+        transcriptLines: [...this.data.transcriptLines, item.line],
+      });
     },
   };
 
@@ -1009,10 +1133,16 @@ test("voice chat pauses after the second consecutive no-answer prompt", async ()
   await new Promise((resolve) => setImmediate(resolve));
 
   assert.deepEqual(noAnswerRequests, [{ voiceSessionId: "voice-1", data: { attempt: 2 } }]);
-  assert.deepEqual(preparedTTS, [{
+  assert.deepEqual(queuedTurns.map((item) => ({
+    messageId: item.messageId,
+    autoListenAfterPlayback: item.autoListenAfterPlayback,
+    expectsAnswer: item.expectsAnswer,
+    text: item.text,
+  })), [{
     messageId: "assistant-no-answer-2",
-    forceRegenerate: false,
     autoListenAfterPlayback: false,
+    expectsAnswer: false,
+    text: "没关系，我先暂停一下。您准备好了，再点继续说话。",
   }]);
   assert.equal(context.data.assistantPromptText, "没关系，我先暂停一下。您准备好了，再点继续说话。");
   assert.equal(context.data.autoListenStateText, "已暂停，可点继续说话");

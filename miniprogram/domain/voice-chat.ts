@@ -132,6 +132,11 @@ export interface MemoirVoiceSessionCreate {
 export interface MemoirVoiceFollowUpRequest {
   ai_model?: string;
   regenerate?: boolean;
+  acknowledgement_message_id?: string;
+}
+
+export interface MemoirVoiceAcknowledgementRequest {
+  ai_model?: string;
 }
 
 export interface MemoirVoiceNoAnswerPromptRequest {

@@ -76,6 +76,20 @@ test("derives assistant panel state from transcript lines", () => {
   });
 });
 
+test("does not mark a source covered by a non-answer acknowledgement", () => {
+  const acknowledgementLine = {
+    ...assistantLine,
+    text: "您刚才说的院子，我听到了。",
+    metadata_json: {
+      ...assistantLine.metadata_json,
+      primary_intent: "acknowledge",
+      expects_answer: false,
+    },
+  };
+
+  assert.equal(coveredFollowUpSourceMessageId([userLine, acknowledgementLine]), "");
+});
+
 test("derives assistant transcript patch from lines and overrides generated assistant fields", () => {
   assert.deepEqual(
     assistantTranscriptState([userLine, assistantLine], {
