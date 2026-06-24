@@ -16,6 +16,7 @@ import {
   confirmMemoirBookPlan,
   createMemoirBookChapterDraftTTS,
   createMemoirBookOutputTTS,
+  createMemoirBookPlanOutlineTTS,
   generateMemoirBookChapterTitle,
   generateMemoirBookChapterDraft,
   generateMemoirBookOutput,
@@ -65,11 +66,13 @@ import {
   trimText,
   uniqueSourceRefs,
   bookChapterSourceSummary,
+  bookOutlineNarrationText,
 } from "./book-view-model";
 export {
   bookChapterSourceSummary,
   bookOutputStaleNotice,
   bookOutputVersionText,
+  bookOutlineNarrationText,
   bookProgressText,
   bookSourceCoverageNotice,
   buildChapterPickerOptions,
@@ -163,7 +166,7 @@ Page<BookData, {
   generateBook(): Promise<void>;
   playChapterAudio(event: DatasetEvent): Promise<void>;
   playBookAudio(): Promise<void>;
-  playBookOutlineAudio(): void;
+  playBookOutlineAudio(): Promise<void>;
   startBookVoiceCommand(): void;
   requestBookAudio(target: string): Promise<MemoirBookAudioResponse>;
   playAudioFiles(
@@ -1074,7 +1077,13 @@ Page<BookData, {
     }
   },
 
-  playBookOutlineAudio() {
+  async playBookOutlineAudio() {
+    const target = "outline";
+    if (this.data.playingTarget === target) {
+      this.stopPlayback();
+      this.setData({ bookVoiceAssistantStatusText: bookVoiceAssistantStatusText(this.data.stage) });
+      return;
+    }
     if (!this.data.plan || !this.data.chapters.length) {
       this.setData({
         bookVoiceAssistantStatusText: "先生成章节",
@@ -1082,11 +1091,47 @@ Page<BookData, {
       wx.showToast({ title: "先生成章节规划", icon: "none" });
       return;
     }
+    if (!this.data.projectId || this.data.ttsBusyTarget || this.data.updatingPlanStructure) {
+      return;
+    }
+    this.stopPlayback();
+    this.playToken += 1;
+    const token = this.playToken;
+    const activeText = bookOutlineNarrationText(this.data.plan.title, this.data.chapters);
     this.setData({
-      bookVoiceAssistantStatusText: "目录朗读将在下一步接入",
+      ttsBusyTarget: target,
+      bookVoiceAssistantStatusText: "正在准备目录",
       error: "",
     });
-    wx.showToast({ title: "下一步接入听目录", icon: "none" });
+    try {
+      const response = await this.requestBookAudio(target);
+      if (token !== this.playToken) {
+        return;
+      }
+      this.setData({
+        ttsBusyTarget: "",
+        bookVoiceAssistantStatusText: "正在朗读目录",
+      });
+      await this.playAudioFiles(response, target, token, activeText);
+      if (token === this.playToken) {
+        this.setData({ bookVoiceAssistantStatusText: bookVoiceAssistantStatusText(this.data.stage) });
+      }
+    } catch (error) {
+      if (isLoginError(error)) {
+        wx.reLaunch({ url: "/pages/login/index" });
+        return;
+      }
+      if (token === this.playToken) {
+        this.setData({
+          error: error instanceof Error ? error.message : "目录朗读失败",
+          bookVoiceAssistantStatusText: "目录朗读失败",
+        });
+      }
+    } finally {
+      if (token === this.playToken && this.data.ttsBusyTarget === target) {
+        this.setData({ ttsBusyTarget: "" });
+      }
+    }
   },
 
   startBookVoiceCommand() {
@@ -1112,6 +1157,9 @@ Page<BookData, {
     };
     if (target === "book") {
       return createMemoirBookOutputTTS(this.data.projectId, request);
+    }
+    if (target === "outline") {
+      return createMemoirBookPlanOutlineTTS(this.data.projectId, request);
     }
     if (target.startsWith("chapter:")) {
       return createMemoirBookChapterDraftTTS(this.data.projectId, target.slice("chapter:".length), request);

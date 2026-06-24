@@ -55,10 +55,11 @@
     <view class="book-voice-actions">
       <button
         class="book-voice-button"
+        loading="{{ttsBusyTarget === 'outline'}}"
         disabled="{{loading || generatingPlan || confirmingPlan || updatingPlanStructure || ttsBusyTarget}}"
         bindtap="playBookOutlineAudio"
       >
-        听目录
+        {{ttsBusyTarget === "outline" ? "准备目录" : (playingTarget === "outline" ? "停止目录" : "听目录")}}
       </button>
       <button
         class="book-voice-button primary"
@@ -68,6 +69,16 @@
       >
         语音修改
       </button>
+    </view>
+    <view wx:if="{{playingTarget === 'outline' && bookTTSActiveTarget === 'outline'}}" class="book-voice-playback">
+      <view class="tts-progress-bar">
+        <view class="tts-progress-fill" style="width: {{bookTTSProgressPercent}}%;"></view>
+      </view>
+      <text class="tts-highlight-text" selectable>
+        <text class="tts-spoken">{{bookTTSSpokenText}}</text>
+        <text wx:if="{{bookTTSCurrentText}}" class="tts-current">{{bookTTSCurrentText}}</text>
+        <text class="tts-remaining">{{bookTTSRemainingText}}</text>
+      </text>
     </view>
   </view>
 

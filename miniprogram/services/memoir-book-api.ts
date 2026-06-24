@@ -192,6 +192,19 @@ export function createMemoirBookChapterDraftTTS(
   );
 }
 
+export function createMemoirBookPlanOutlineTTS(
+  projectId: string,
+  data: MemoirBookAudioRequest = {},
+): Promise<MemoirBookAudioResponse> {
+  return memoirRequest<MemoirBookAudioResponse>(
+    bookPlanPath(projectId, "/outline/tts"),
+    {
+      method: "POST",
+      data,
+    },
+  );
+}
+
 export function getMemoirBookOutput(projectId: string): Promise<MemoirBookOutput> {
   return memoirRequest<MemoirBookOutput>(memoirProjectPath(projectId, "/book-output"));
 }

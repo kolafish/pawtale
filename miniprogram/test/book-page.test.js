@@ -254,6 +254,9 @@ function loadBookPage({ authExports = {}, voiceApiExports = {}, ttsExports = {} 
     createMemoirBookOutputTTS: async () => {
       throw new Error("createMemoirBookOutputTTS was not mocked");
     },
+    createMemoirBookPlanOutlineTTS: async () => {
+      throw new Error("createMemoirBookPlanOutlineTTS was not mocked");
+    },
     downloadMemoirVoiceAudio: async () => {
       throw new Error("downloadMemoirVoiceAudio was not mocked");
     },
@@ -336,31 +339,45 @@ test("book page exposes a compact voice assistant entry", () => {
   assert.match(wxml, /语音修改/);
   assert.match(wxml, /bindtap="playBookOutlineAudio"/);
   assert.match(wxml, /bindtap="startBookVoiceCommand"/);
+  assert.match(wxml, /playingTarget === 'outline'/);
   assert.match(wxss, /\.book-voice-assistant/);
   assert.match(wxss, /#fff6f1/);
   assert.match(wxss, /#9f4a3c/);
 });
 
-test("book voice assistant placeholders give immediate feedback", () => {
+test("book page builds outline narration for saved chapter titles", () => {
+  const { mod } = loadBookPage();
+  const plan = samplePlan("confirmed");
+  const chapters = mod.buildChapterViews(plan);
+  chapters[0].editingTitle = "未保存的新标题";
+
+  assert.equal(
+    mod.bookOutlineNarrationText(plan.title, chapters),
+    [
+      "《外婆回忆录章节规划》现在有 2 章。",
+      "第 1 章，外婆家的童年。本章收录 1 条语音素材。",
+      "第 2 章，第一次离家。本章收录 1 条语音素材。",
+      "你可以继续调整章节顺序、合并章节，或者说出想修改的地方。",
+    ].join("\n"),
+  );
+});
+
+test("book voice assistant blocks actions before a plan exists", () => {
   const toastTitles = [];
   global.wx = {
     showToast(options) {
       toastTitles.push(options.title);
     },
   };
-  const { mod, page } = loadBookPage();
-  const plan = samplePlan("draft");
-  const context = pageContext(page, {
-    plan,
-    chapters: mod.buildChapterViews(plan),
-  });
+  const { page } = loadBookPage();
+  const context = pageContext(page, { plan: null, chapters: [] });
 
   page.playBookOutlineAudio.call(context);
-  assert.equal(context.data.bookVoiceAssistantStatusText, "目录朗读将在下一步接入");
+  assert.equal(context.data.bookVoiceAssistantStatusText, "先生成章节");
 
   page.startBookVoiceCommand.call(context);
-  assert.equal(context.data.bookVoiceAssistantStatusText, "语音修改将在下一步接入");
-  assert.deepEqual(toastTitles, ["下一步接入听目录", "下一步接入语音修改"]);
+  assert.equal(context.data.bookVoiceAssistantStatusText, "先生成章节");
+  assert.deepEqual(toastTitles, ["先生成章节规划", "先生成章节规划"]);
   delete global.wx;
 });
 
@@ -1155,6 +1172,10 @@ test("book page sends book-specific TTS voice and speed", async () => {
         calls.push({ kind: "book", projectId, data });
         return sampleAudioResponse();
       },
+      createMemoirBookPlanOutlineTTS: async (projectId, data) => {
+        calls.push({ kind: "outline", projectId, data });
+        return sampleAudioResponse();
+      },
     },
     ttsExports: {
       readBookTTSSettings: () => ({
@@ -1166,11 +1187,20 @@ test("book page sends book-specific TTS voice and speed", async () => {
   const context = pageContext(page, { projectId: "project/1" });
 
   await page.requestBookAudio.call(context, "book");
+  await page.requestBookAudio.call(context, "outline");
   await page.requestBookAudio.call(context, "chapter:chapter-1");
 
   assert.deepEqual(calls, [
     {
       kind: "book",
+      projectId: "project/1",
+      data: {
+        voice: "zh_male_m191_uranus_bigtts",
+        speed_ratio: 1.5,
+      },
+    },
+    {
+      kind: "outline",
       projectId: "project/1",
       data: {
         voice: "zh_male_m191_uranus_bigtts",
@@ -1187,6 +1217,54 @@ test("book page sends book-specific TTS voice and speed", async () => {
       },
     },
   ]);
+});
+
+test("book page plays outline audio through the voice assistant", async () => {
+  const calls = [];
+  const { mod, page } = loadBookPage({
+    voiceApiExports: {
+      createMemoirBookPlanOutlineTTS: async (projectId, data) => {
+        calls.push({ kind: "outline", projectId, data });
+        return sampleAudioResponse();
+      },
+    },
+  });
+  const plan = samplePlan("confirmed");
+  const context = pageContext(page, { projectId: "project/1" });
+  page.applyPlan.call(context, plan);
+  context.playAudioFiles = async (response, target, token, activeText) => {
+    calls.push({ kind: "play", response, target, token, activeText });
+    context.setData({ playingTarget: target, bookTTSActiveTarget: target });
+  };
+
+  await page.playBookOutlineAudio.call(context);
+
+  assert.deepEqual(calls[0], {
+    kind: "outline",
+    projectId: "project/1",
+    data: {},
+  });
+  assert.equal(calls[1].target, "outline");
+  assert.equal(
+    calls[1].activeText,
+    mod.bookOutlineNarrationText(plan.title, context.data.chapters),
+  );
+  assert.equal(context.data.ttsBusyTarget, "");
+  assert.equal(context.data.bookVoiceAssistantStatusText, "我可以帮你听和改");
+});
+
+test("book page restores assistant status when outline audio stops", () => {
+  const { page } = loadBookPage();
+  const context = pageContext(page, {
+    stage: "drafting",
+    playingTarget: "outline",
+    bookVoiceAssistantStatusText: "正在朗读目录",
+  });
+
+  page.playBookOutlineAudio.call(context);
+
+  assert.equal(context.data.playingTarget, "");
+  assert.equal(context.data.bookVoiceAssistantStatusText, "我可以帮你听和改");
 });
 
 test("book page splits active TTS text for highlighting", () => {
@@ -1387,7 +1465,11 @@ test("book APIs call encoded backend routes", async () => {
         options.success({ statusCode: 200, data: { id: "user-1" }, cookies: [], header: {} });
         return;
       }
-      if (options.url.endsWith("/draft/tts") || options.url.endsWith("/book-output/tts")) {
+      if (
+        options.url.endsWith("/draft/tts")
+        || options.url.endsWith("/outline/tts")
+        || options.url.endsWith("/book-output/tts")
+      ) {
         options.success({ statusCode: 200, data: sampleAudioResponse(), cookies: [], header: {} });
         return;
       }
@@ -1414,6 +1496,7 @@ test("book APIs call encoded backend routes", async () => {
     confirmMemoirBookPlan,
     createMemoirBookChapterDraftTTS,
     createMemoirBookOutputTTS,
+    createMemoirBookPlanOutlineTTS,
     generateMemoirBookChapterDraft,
     generateMemoirBookChapterTitle,
     generateMemoirBookOutput,
@@ -1439,6 +1522,7 @@ test("book APIs call encoded backend routes", async () => {
   await updateMemoirBookChapterDraft("project/1", "chapter/1", { content: "正文" });
   await confirmMemoirBookChapterDraft("project/1", "chapter/1");
   await createMemoirBookChapterDraftTTS("project/1", "chapter/1", {});
+  await createMemoirBookPlanOutlineTTS("project/1", {});
   await getMemoirBookOutput("project/1");
   await generateMemoirBookOutput("project/1", { force_regenerate: true });
   await createMemoirBookOutputTTS("project/1", {});
@@ -1490,21 +1574,26 @@ test("book APIs call encoded backend routes", async () => {
   assert.equal(apiRequests[11].method, "POST");
   assert.equal(
     apiRequests[12].url,
-    "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-output",
+    "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-plan/outline/tts",
   );
-  assert.equal(apiRequests[12].method, "GET");
+  assert.equal(apiRequests[12].method, "POST");
   assert.equal(
     apiRequests[13].url,
-    "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-output/generate",
+    "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-output",
   );
-  assert.equal(apiRequests[13].method, "POST");
-  assert.deepEqual(apiRequests[13].data, { force_regenerate: true });
+  assert.equal(apiRequests[13].method, "GET");
   assert.equal(
     apiRequests[14].url,
-    "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-output/tts",
+    "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-output/generate",
   );
   assert.equal(apiRequests[14].method, "POST");
-  assert.equal(apiRequests[14].header.Cookie, "pawtale_session=abc");
+  assert.deepEqual(apiRequests[14].data, { force_regenerate: true });
+  assert.equal(
+    apiRequests[15].url,
+    "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-output/tts",
+  );
+  assert.equal(apiRequests[15].method, "POST");
+  assert.equal(apiRequests[15].header.Cookie, "pawtale_session=abc");
   delete global.wx;
 });
 
