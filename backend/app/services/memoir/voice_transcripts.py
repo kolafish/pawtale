@@ -34,6 +34,14 @@ from app.schemas.memoir_voice import (
 )
 from app.services.ai_factory import get_ai_service
 from app.services.ai_types import AITextClient
+from app.services.memoir.book_plan_sources import (
+    REMOVED_SOURCE_UTTERANCE_IDS_KEY,
+    SOURCES_DELETED_STATUS_REASON,
+    draft_status_metadata as _draft_status_metadata,
+    pending_source_ids as _pending_source_ids,
+    removed_source_ids as _removed_source_ids,
+    set_deleted_source_metadata as _set_deleted_source_metadata,
+)
 
 
 SYSTEM_PROMPT = "你是一位谨慎的中文口述稿校对助手，只做忠于原话的转写校正和口头语清理。"
@@ -47,10 +55,6 @@ _BOUNDARY_DEICTIC_RE = re.compile(
 )
 _DUPLICATE_PUNCTUATION_RE = re.compile(r"([，,。！？!?；;])\1+")
 _SPACE_RE = re.compile(r"\s+")
-PENDING_SOURCE_UTTERANCE_IDS_KEY = "pending_source_utterance_ids"
-REMOVED_SOURCE_UTTERANCE_IDS_KEY = "removed_source_utterance_ids"
-SOURCE_REFS_REMOVED_AT_KEY = "source_refs_removed_at"
-SOURCES_DELETED_STATUS_REASON = "sources_deleted"
 INCLUDED_FILTER_VALUES = {"all", "included", "not_included"}
 
 
@@ -557,13 +561,6 @@ async def _message_reference_counts(
     return other_utterances or 0, child_messages or 0
 
 
-def _source_ids_from_metadata(metadata_json: dict | None, key: str) -> set[str]:
-    value = (metadata_json or {}).get(key, [])
-    if not isinstance(value, list):
-        return set()
-    return {item.strip() for item in value if isinstance(item, str) and item.strip()}
-
-
 async def _mark_book_sources_deleted(
     db: AsyncSession,
     *,
@@ -583,8 +580,8 @@ async def _mark_book_sources_deleted(
         kept_refs = [ref for ref in refs if ref.get("utterance_id") != utterance_id]
         removed_ref_count = len(refs) - len(kept_refs)
 
-        pending_ids = _source_ids_from_metadata(chapter.metadata_json, PENDING_SOURCE_UTTERANCE_IDS_KEY)
-        removed_ids = _source_ids_from_metadata(chapter.metadata_json, REMOVED_SOURCE_UTTERANCE_IDS_KEY)
+        pending_ids = _pending_source_ids(chapter.metadata_json)
+        removed_ids = _removed_source_ids(chapter.metadata_json)
         pending_changed = utterance_id in pending_ids
         if pending_changed:
             pending_ids.discard(utterance_id)
@@ -596,24 +593,23 @@ async def _mark_book_sources_deleted(
             removed_ids.add(utterance_id)
             chapter.source_refs_json = kept_refs
 
-        metadata = dict(chapter.metadata_json or {})
-        if pending_ids:
-            metadata[PENDING_SOURCE_UTTERANCE_IDS_KEY] = sorted(pending_ids)
-        else:
-            metadata.pop(PENDING_SOURCE_UTTERANCE_IDS_KEY, None)
-        if removed_ids:
-            metadata[REMOVED_SOURCE_UTTERANCE_IDS_KEY] = sorted(removed_ids)
-            metadata[SOURCE_REFS_REMOVED_AT_KEY] = removed_at
-        chapter.metadata_json = metadata
+        chapter.metadata_json = _set_deleted_source_metadata(
+            chapter.metadata_json,
+            pending_ids=pending_ids,
+            removed_ids=removed_ids,
+            removed_at=removed_at,
+        )
         db.add(chapter)
 
         if chapter.draft:
             chapter.draft.status = MemoirBookChapterDraftStatus.DRAFT.value
-            draft_metadata = dict(chapter.draft.metadata_json or {})
-            draft_removed_ids = _source_ids_from_metadata(draft_metadata, REMOVED_SOURCE_UTTERANCE_IDS_KEY)
+            draft_metadata = _draft_status_metadata(
+                chapter.draft.metadata_json,
+                SOURCES_DELETED_STATUS_REASON,
+            )
+            draft_removed_ids = _removed_source_ids(draft_metadata)
             draft_removed_ids.add(utterance_id)
             draft_metadata[REMOVED_SOURCE_UTTERANCE_IDS_KEY] = sorted(draft_removed_ids)
-            draft_metadata["status_reason"] = SOURCES_DELETED_STATUS_REASON
             chapter.draft.metadata_json = draft_metadata
             db.add(chapter.draft)
 

@@ -24,6 +24,26 @@ from app.schemas.memoir_book import (
 from app.services.memoir.access import load_memoir_project
 
 
+PENDING_SOURCE_UTTERANCE_IDS_KEY = "pending_source_utterance_ids"
+SOURCE_ASSIGNMENT_UPDATED_AT_KEY = "source_assignment_updated_at"
+SOURCE_REFS_UPDATED_AT_KEY = "source_refs_updated_at"
+REMOVED_SOURCE_UTTERANCE_IDS_KEY = "removed_source_utterance_ids"
+SOURCE_REFS_REMOVED_AT_KEY = "source_refs_removed_at"
+DRAFT_STATUS_REASON_KEY = "status_reason"
+
+NEW_SOURCES_ASSIGNED_STATUS_REASON = "new_sources_assigned"
+SOURCES_CHANGED_STATUS_REASON = "sources_changed"
+SOURCES_DELETED_STATUS_REASON = "sources_deleted"
+
+SOURCE_CHANGE_METADATA_KEYS = {
+    PENDING_SOURCE_UTTERANCE_IDS_KEY,
+    SOURCE_ASSIGNMENT_UPDATED_AT_KEY,
+    SOURCE_REFS_UPDATED_AT_KEY,
+    REMOVED_SOURCE_UTTERANCE_IDS_KEY,
+    SOURCE_REFS_REMOVED_AT_KEY,
+}
+
+
 @dataclass(frozen=True)
 class SourceSegment:
     source_index: int
@@ -74,6 +94,21 @@ def merge_metadata(metadata_json: dict | None, patch: dict[str, object]) -> dict
     return {**(metadata_json or {}), **patch}
 
 
+def metadata_without_keys(metadata_json: dict | None, keys: set[str]) -> dict[str, object]:
+    metadata = dict(metadata_json or {})
+    for key in keys:
+        metadata.pop(key, None)
+    return metadata
+
+
+def source_change_metadata_keys() -> set[str]:
+    return set(SOURCE_CHANGE_METADATA_KEYS)
+
+
+def draft_status_metadata(metadata_json: dict | None, reason: str) -> dict[str, object]:
+    return merge_metadata(metadata_json, {DRAFT_STATUS_REASON_KEY: reason})
+
+
 def source_ref_utterance_ids(refs: list[dict] | list[MemoirBookChapterSourceRef]) -> list[str]:
     ids: list[str] = []
     for ref in refs:
@@ -96,7 +131,26 @@ def source_ids_from_metadata(metadata_json: dict | None, key: str) -> set[str]:
     value = (metadata_json or {}).get(key, [])
     if not isinstance(value, list):
         return set()
-    return {item for item in value if isinstance(item, str) and item}
+    return {item.strip() for item in value if isinstance(item, str) and item.strip()}
+
+
+def pending_source_ids(metadata_json: dict | None) -> set[str]:
+    return source_ids_from_metadata(metadata_json, PENDING_SOURCE_UTTERANCE_IDS_KEY)
+
+
+def removed_source_ids(metadata_json: dict | None) -> set[str]:
+    return source_ids_from_metadata(metadata_json, REMOVED_SOURCE_UTTERANCE_IDS_KEY)
+
+
+def set_source_assignment_metadata(metadata_json: dict | None, pending_ids: set[str]) -> dict[str, object]:
+    metadata = dict(metadata_json or {})
+    if pending_ids:
+        metadata[PENDING_SOURCE_UTTERANCE_IDS_KEY] = sorted(pending_ids)
+        metadata[SOURCE_ASSIGNMENT_UPDATED_AT_KEY] = datetime.now(UTC).isoformat()
+    else:
+        metadata.pop(PENDING_SOURCE_UTTERANCE_IDS_KEY, None)
+        metadata.pop(SOURCE_ASSIGNMENT_UPDATED_AT_KEY, None)
+    return metadata
 
 
 def set_source_change_metadata(
@@ -107,14 +161,35 @@ def set_source_change_metadata(
 ) -> dict[str, object]:
     metadata = dict(metadata_json or {})
     if added_ids:
-        metadata["pending_source_utterance_ids"] = sorted(added_ids)
+        metadata[PENDING_SOURCE_UTTERANCE_IDS_KEY] = sorted(added_ids)
     else:
-        metadata.pop("pending_source_utterance_ids", None)
+        metadata.pop(PENDING_SOURCE_UTTERANCE_IDS_KEY, None)
     if removed_ids:
-        metadata["removed_source_utterance_ids"] = sorted(removed_ids)
+        metadata[REMOVED_SOURCE_UTTERANCE_IDS_KEY] = sorted(removed_ids)
     else:
-        metadata.pop("removed_source_utterance_ids", None)
-    metadata["source_refs_updated_at"] = datetime.now(UTC).isoformat()
+        metadata.pop(REMOVED_SOURCE_UTTERANCE_IDS_KEY, None)
+    metadata[SOURCE_REFS_UPDATED_AT_KEY] = datetime.now(UTC).isoformat()
+    return metadata
+
+
+def set_deleted_source_metadata(
+    metadata_json: dict | None,
+    *,
+    pending_ids: set[str],
+    removed_ids: set[str],
+    removed_at: str,
+) -> dict[str, object]:
+    metadata = dict(metadata_json or {})
+    if pending_ids:
+        metadata[PENDING_SOURCE_UTTERANCE_IDS_KEY] = sorted(pending_ids)
+    else:
+        metadata.pop(PENDING_SOURCE_UTTERANCE_IDS_KEY, None)
+    if removed_ids:
+        metadata[REMOVED_SOURCE_UTTERANCE_IDS_KEY] = sorted(removed_ids)
+        metadata[SOURCE_REFS_REMOVED_AT_KEY] = removed_at
+    else:
+        metadata.pop(REMOVED_SOURCE_UTTERANCE_IDS_KEY, None)
+        metadata.pop(SOURCE_REFS_REMOVED_AT_KEY, None)
     return metadata
 
 

@@ -6,20 +6,23 @@ import type {
 
 export const PENDING_SOURCE_UTTERANCE_IDS_KEY = "pending_source_utterance_ids";
 export const SOURCE_ASSIGNMENT_UPDATED_AT_KEY = "source_assignment_updated_at";
+export const SOURCE_REFS_UPDATED_AT_KEY = "source_refs_updated_at";
 export const REMOVED_SOURCE_UTTERANCE_IDS_KEY = "removed_source_utterance_ids";
 export const SOURCE_REFS_REMOVED_AT_KEY = "source_refs_removed_at";
 export const DRAFT_STATUS_REASON_KEY = "status_reason";
 
-export type MemoirBookDraftStatusReason = "new_sources_assigned" | "sources_deleted";
+export type MemoirBookDraftStatusReason = "new_sources_assigned" | "sources_changed" | "sources_deleted";
 export type MemoirBookSourceChangeMetadataKey =
   | typeof PENDING_SOURCE_UTTERANCE_IDS_KEY
   | typeof SOURCE_ASSIGNMENT_UPDATED_AT_KEY
+  | typeof SOURCE_REFS_UPDATED_AT_KEY
   | typeof REMOVED_SOURCE_UTTERANCE_IDS_KEY
   | typeof SOURCE_REFS_REMOVED_AT_KEY;
 
 export type MemoirBookChapterMetadata = Record<string, unknown> & Partial<{
   [PENDING_SOURCE_UTTERANCE_IDS_KEY]: string[];
   [SOURCE_ASSIGNMENT_UPDATED_AT_KEY]: string;
+  [SOURCE_REFS_UPDATED_AT_KEY]: string;
   [REMOVED_SOURCE_UTTERANCE_IDS_KEY]: string[];
   [SOURCE_REFS_REMOVED_AT_KEY]: string;
 }>;
@@ -32,6 +35,7 @@ export type MemoirBookDraftMetadata = Record<string, unknown> & Partial<{
 const SOURCE_CHANGE_METADATA_KEYS: MemoirBookSourceChangeMetadataKey[] = [
   PENDING_SOURCE_UTTERANCE_IDS_KEY,
   SOURCE_ASSIGNMENT_UPDATED_AT_KEY,
+  SOURCE_REFS_UPDATED_AT_KEY,
   REMOVED_SOURCE_UTTERANCE_IDS_KEY,
   SOURCE_REFS_REMOVED_AT_KEY,
 ];
@@ -85,7 +89,9 @@ export function removedSourceUtteranceIds(metadata: Record<string, unknown> | nu
 
 function draftStatusReason(draft: MemoirBookChapterDraft | null): MemoirBookDraftStatusReason | "" {
   const reason = draft?.metadata_json?.[DRAFT_STATUS_REASON_KEY];
-  return reason === "new_sources_assigned" || reason === "sources_deleted" ? reason : "";
+  return reason === "new_sources_assigned" || reason === "sources_changed" || reason === "sources_deleted"
+    ? reason
+    : "";
 }
 
 export function sourceSupplementCount(
