@@ -497,10 +497,19 @@ export interface MemoirBookVoiceCommandContextMessage {
   summary?: string | null;
 }
 
+export interface MemoirBookVoiceCommandBookContext {
+  source_coverage?: {
+    total_source_count: number;
+    covered_source_count: number;
+    uncovered_source_count: number;
+  };
+}
+
 export interface MemoirBookVoiceCommandParseRequest {
   text: string;
   current_chapter_id?: string;
   conversation_context?: MemoirBookVoiceCommandContextMessage[];
+  book_context?: MemoirBookVoiceCommandBookContext;
   ai_model?: string;
 }
 

@@ -184,6 +184,15 @@ function isBookVoiceCommandConfirmationText(text: string): boolean {
   return /^(确认|确认执行|执行|可以|可以执行|就这样|就这样改|好的|好|没问题|按这个改)$/.test(normalized);
 }
 
+function normalizeBookVoiceAsrText(text: string): string {
+  const trimmed = trimText(text);
+  return trimmed
+    .replace(/第\s*([0-9一二两三四五六七八九十]+)\s*张/g, "第$1章")
+    .replace(/([0-9一二两三四五六七八九十]+)\s*张(?=(?:和|跟|与|的|换|调|移|顺序|章节|章|[，。,.!！?？、\s]|$))/g, "$1章")
+    .replace(/几张/g, "几章")
+    .replace(/多少张/g, "多少章");
+}
+
 function bookVoiceAssistantReplyText(preview: MemoirBookVoiceCommandParseResponse): string {
   const replyText = trimText(preview.reply_text || "");
   if (replyText) {
@@ -223,6 +232,21 @@ function bookVoiceConversationContext(
       role: line.role as "user" | "assistant",
       text: trimText(line.text).slice(0, 240),
     }));
+}
+
+function bookVoiceCommandBookContext(
+  coverage: MemoirBookSourceCoverage | null,
+): MemoirBookVoiceCommandParseRequest["book_context"] {
+  if (!coverage) {
+    return undefined;
+  }
+  return {
+    source_coverage: {
+      total_source_count: coverage.total_source_count || 0,
+      covered_source_count: coverage.covered_source_count || 0,
+      uncovered_source_count: coverage.uncovered_source_count || 0,
+    },
+  };
 }
 
 function bookVoiceCommandResponseKind(
@@ -1623,16 +1647,17 @@ Page<BookData, {
   },
 
   handleBookVoicePartial(text) {
+    const displayText = normalizeBookVoiceAsrText(text || "");
     this.setData({
       bookVoiceAssistantExpanded: true,
-      bookVoiceLiveText: text,
-      bookVoiceAssistantStatusText: text ? "正在实时识别" : "我在听，请说想怎么改",
+      bookVoiceLiveText: displayText,
+      bookVoiceAssistantStatusText: displayText ? "正在实时识别" : "我在听，请说想怎么改",
       error: "",
     });
   },
 
   async handleBookVoiceFinal(event) {
-    const text = trimText(event.text || "");
+    const text = normalizeBookVoiceAsrText(event.text || "");
     if (!text) {
       return;
     }
@@ -1739,9 +1764,12 @@ Page<BookData, {
       ? transcriptLines.slice(0, -1)
       : transcriptLines;
     const conversationContext = bookVoiceConversationContext(contextLines);
-    const request: MemoirBookVoiceCommandParseRequest = conversationContext.length
-      ? { text, conversation_context: conversationContext }
-      : { text };
+    const bookContext = bookVoiceCommandBookContext(this.data.sourceCoverage);
+    const request: MemoirBookVoiceCommandParseRequest = {
+      text,
+      ...(conversationContext.length ? { conversation_context: conversationContext } : {}),
+      ...(bookContext ? { book_context: bookContext } : {}),
+    };
     const preview = await parseMemoirBookVoiceCommand(this.data.projectId, request);
     this.applyBookVoiceCommandPreview(preview);
     wx.showToast({ title: "已识别", icon: "success" });

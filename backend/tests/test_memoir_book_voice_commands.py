@@ -66,7 +66,13 @@ class FakeBookVoiceAssistantTTS:
         )
 
 
-async def _create_two_chapter_plan(test_db, *, project_id: str, draft_contents: list[str] | None = None):
+async def _create_two_chapter_plan(
+    test_db,
+    *,
+    project_id: str,
+    draft_contents: list[str] | None = None,
+    titles: list[str] | None = None,
+):
     plan = MemoirBookPlan(
         project_id=project_id,
         title="外婆回忆录章节规划",
@@ -76,7 +82,7 @@ async def _create_two_chapter_plan(test_db, *, project_id: str, draft_contents: 
     test_db.add(plan)
     await test_db.flush()
     chapters = []
-    for index, title in enumerate(["外婆家的童年", "第一次离家"]):
+    for index, title in enumerate(titles or ["外婆家的童年", "第一次离家"]):
         chapter = MemoirBookPlanChapter(
             plan_id=plan.id,
             project_id=project_id,
@@ -179,6 +185,36 @@ async def test_mobile_memoir_book_voice_command_parse_falls_back_when_ai_fails(
     assert data["used_ai"] is False
     assert data["operations"][0]["chapter_id"] == chapters[1].id
     assert data["operations"][0]["direction"] == "up"
+
+
+async def test_mobile_memoir_book_voice_command_swaps_adjacent_chapters_from_asr_zhang(
+    client,
+    test_db,
+    monkeypatch,
+):
+    project_id = await ensure_mobile_memoir_project(client)
+    _, chapters = await _create_two_chapter_plan(
+        test_db,
+        project_id=project_id,
+        titles=["小时候的年", "儿时庭院与家人聚散", "一生的朋友"],
+    )
+    fake_ai = FakeBookVoiceCommandAI(error=RuntimeError("provider unavailable"))
+    monkeypatch.setattr("app.services.memoir.book_voice_commands.get_ai_service", lambda _model: fake_ai)
+
+    response = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-voice-command/parse",
+        json={"text": "我想把第二张和第三张的顺序换一下。"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["original_text"] == "我想把第二章和第三章的顺序换一下。"
+    assert data["intent"] == "move_chapter"
+    assert data["intent_label"] == "移动章节"
+    assert data["summary"] == "准备把「儿时庭院与家人聚散」下移。"
+    assert data["requires_confirmation"] is True
+    assert data["operations"][0]["chapter_id"] == chapters[1].id
+    assert data["operations"][0]["direction"] == "down"
 
 
 async def test_mobile_memoir_book_voice_command_parse_returns_chapter_title_advice(
@@ -286,6 +322,71 @@ async def test_mobile_memoir_book_voice_command_answers_current_chapter_count(
 
     assert response.status_code == 200
     assert response.json()["intent"] == "answer_book_question"
+
+
+async def test_mobile_memoir_book_voice_command_answers_uncovered_source_count_from_context(
+    client,
+    test_db,
+    monkeypatch,
+):
+    project_id = await ensure_mobile_memoir_project(client)
+    await _create_two_chapter_plan(
+        test_db,
+        project_id=project_id,
+        titles=["小时候的年", "儿时庭院与家人聚散", "一生的朋友", "职场浮沉与升职加薪"],
+    )
+    fake_ai = FakeBookVoiceCommandAI(
+        {
+            "intent": "answer_book_question",
+            "summary": "回答素材收入状态",
+            "reply_text": "目前所有素材都已归入 4 个章节，没有未归类的记录。",
+        }
+    )
+    monkeypatch.setattr("app.services.memoir.book_voice_commands.get_ai_service", lambda _model: fake_ai)
+
+    response = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-voice-command/parse",
+        json={
+            "text": "我现在是不是有一些记录还没归到章节呀",
+            "book_context": {
+                "source_coverage": {
+                    "total_source_count": 18,
+                    "covered_source_count": 11,
+                    "uncovered_source_count": 7,
+                }
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["intent"] == "answer_book_question"
+    assert data["response_kind"] == "answer"
+    assert data["requires_confirmation"] is False
+    assert data["operations"] == []
+    assert "共有 18 条讲述记录" in data["reply_text"]
+    assert "已收入章节 11 条" in data["reply_text"]
+    assert "还有 7 条未收入章节" in data["reply_text"]
+    assert "所有素材都已归入" not in data["reply_text"]
+    assert "讲述记录共 18 条" in fake_ai.calls[0]["user_prompt"]
+
+    response = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-voice-command/parse",
+        json={
+            "text": "有一张记录还没归到章节吗",
+            "book_context": {
+                "source_coverage": {
+                    "total_source_count": 18,
+                    "covered_source_count": 17,
+                    "uncovered_source_count": 1,
+                }
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["original_text"] == "有一张记录还没归到章节吗"
+    assert "还有 1 条未收入章节" in response.json()["reply_text"]
 
 
 async def test_mobile_memoir_book_voice_command_explains_editing_capabilities(

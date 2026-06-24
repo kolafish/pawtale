@@ -130,10 +130,21 @@ class MemoirBookVoiceCommandContextMessage(BaseModel):
         return normalized or None
 
 
+class MemoirBookVoiceCommandSourceCoverageContext(BaseModel):
+    total_source_count: int = Field(default=0, ge=0)
+    covered_source_count: int = Field(default=0, ge=0)
+    uncovered_source_count: int = Field(default=0, ge=0)
+
+
+class MemoirBookVoiceCommandBookContext(BaseModel):
+    source_coverage: MemoirBookVoiceCommandSourceCoverageContext | None = None
+
+
 class MemoirBookVoiceCommandParseRequest(BaseModel):
     text: str = Field(min_length=1, max_length=240)
     current_chapter_id: str | None = None
     conversation_context: list[MemoirBookVoiceCommandContextMessage] = Field(default_factory=list, max_length=8)
+    book_context: MemoirBookVoiceCommandBookContext | None = None
     ai_model: str | None = None
 
     @field_validator("text")
