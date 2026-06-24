@@ -5,6 +5,7 @@ const test = require("node:test");
 
 const {
   assistantPanelCopy,
+  assistantTranscriptState,
   canRequestFollowUp,
   countTextChars,
   coveredFollowUpSourceMessageId,
@@ -66,6 +67,55 @@ test("derives assistant panel state from transcript lines", () => {
     assistantLoadingText: "正在根据刚才的内容生成下一句追问",
     assistantEmptyText: "可以让 AI 根据刚才的内容继续追问。",
   });
+});
+
+test("derives assistant transcript patch from lines and overrides generated assistant fields", () => {
+  assert.deepEqual(
+    assistantTranscriptState([userLine, assistantLine], {
+      guidanceMode: "guided_interview",
+      lastFollowUpSourceMessageId: "message-user",
+      followUpLoading: false,
+      currentFollowUpTTSStateText: "等待语音",
+    }),
+    {
+      transcriptLines: [userLine, assistantLine],
+      latestTranscriptText: userLine.text,
+      assistantPromptText: assistantLine.text,
+      assistantPromptLabel: "AI 追问",
+      assistantLoadingText: "正在根据刚才的内容生成下一句追问",
+      assistantEmptyText: "可以让 AI 根据刚才的内容继续追问。",
+      followUpMessageId: "message-assistant",
+      followUpAudioFileId: "",
+      followUpTTSStateText: "等待语音",
+      ttsAlignment: [
+        {
+          text: "那",
+          start_ms: 0,
+          end_ms: 120,
+          text_start: 0,
+          text_end: 1,
+          confidence: 0.9,
+        },
+      ],
+      totalTranscriptCharCount: 5,
+      canRequestFollowUp: false,
+    },
+  );
+
+  assert.equal(
+    assistantTranscriptState([userLine, assistantLine], {
+      guidanceMode: "guided_interview",
+      lastFollowUpSourceMessageId: "",
+      followUpLoading: true,
+      assistantPromptText: "覆盖后的追问",
+      followUpMessageId: "message-override",
+      followUpAudioFileId: "audio-override",
+      followUpTTSStateText: "",
+      ttsAlignment: [],
+      canRequestFollowUp: false,
+    }).assistantPromptText,
+    "覆盖后的追问",
+  );
 });
 
 test("derives opening follow-up source before the first user line", () => {
