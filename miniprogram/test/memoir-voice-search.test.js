@@ -178,6 +178,58 @@ test("voice search service auto-stops after speech followed by silence", async (
   delete global.wx;
 });
 
+test("voice search service auto-stops when no speech is detected", async () => {
+  let onStop = null;
+  let onFrameRecorded = null;
+  const stops = [];
+  const noVoiceStops = [];
+  global.wx = {
+    getRecorderManager() {
+      return {
+        start() {},
+        stop() {
+          stops.push("stop");
+        },
+        onStart() {},
+        onStop(callback) {
+          onStop = callback;
+        },
+        onFrameRecorded(callback) {
+          onFrameRecorded = callback;
+        },
+        onError() {},
+      };
+    },
+    getFileSystemManager() {
+      return {
+        readFile(options) {
+          options.success({ errMsg: "ok", data: "cGNt" });
+        },
+      };
+    },
+  };
+  const { recordMemoirVoiceSearchQuery } = loadVoiceSearchService({
+    voiceApiExports: {
+      transcribeMemoirVoiceSearchAudio: async () => ({ transcript: "" }),
+    },
+  });
+
+  const promise = recordMemoirVoiceSearchQuery({
+    onNoVoiceAutoStop: () => noVoiceStops.push("no-voice"),
+    noVoiceTranscriptMessage: "没有听到声音，语音对话已暂停",
+  });
+  await flushAsyncSetup();
+  for (let index = 0; index < 30; index += 1) {
+    onFrameRecorded({ frameBuffer: pcmFrame(0), isLastFrame: false });
+  }
+
+  assert.deepEqual(stops, ["stop"]);
+  assert.deepEqual(noVoiceStops, ["no-voice"]);
+  onStop({ tempFilePath: "/tmp/search.pcm", duration: 3600, fileSize: 14400 });
+  await assert.rejects(promise, /没有听到声音，语音对话已暂停/);
+  delete global.wx;
+});
+
 test("voice search service navigates to authorization before recording", async () => {
   const navigations = [];
   global.wx = {

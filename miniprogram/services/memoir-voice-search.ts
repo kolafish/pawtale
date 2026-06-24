@@ -12,18 +12,23 @@ const VOICE_SEARCH_FRAME_SIZE_KB = 4;
 const VOICE_SEARCH_SILENCE_LEVEL_THRESHOLD = 0.015;
 const VOICE_SEARCH_MIN_VOICE_ACTIVITY_MS = 180;
 const VOICE_SEARCH_AUTO_STOP_SILENCE_MS = 900;
+const VOICE_SEARCH_NO_VOICE_AUTO_STOP_MS = 3500;
 const VOICE_SEARCH_MIN_RECORDING_MS = 700;
 
 interface VoiceSearchRecorderPending {
-  resolve(result: WechatMiniprogram.RecorderManagerStopCallbackResult): void;
+  resolve(result: WechatMiniprogram.RecorderManagerStopCallbackResult & { noVoiceAutoStopped?: boolean }): void;
   reject(error: Error): void;
   vad: VoiceActivityDetector;
   stopping: boolean;
+  noVoiceAutoStopped: boolean;
+  onNoVoiceAutoStop?: () => void;
 }
 
 interface RecordMemoirVoiceSearchQueryOptions {
   onRecordingEnd?: () => void;
+  onNoVoiceAutoStop?: () => void;
   emptyTranscriptMessage?: string;
+  noVoiceTranscriptMessage?: string;
 }
 
 let recorderManager: WechatMiniprogram.RecorderManager | null = null;
@@ -53,7 +58,7 @@ function bindRecorderEvents(manager: WechatMiniprogram.RecorderManager): void {
       pending.reject(new Error("没有生成可识别的搜索语音"));
       return;
     }
-    pending.resolve(result);
+    pending.resolve({ ...result, noVoiceAutoStopped: pending.noVoiceAutoStopped });
   });
   manager.onError((error) => {
     const pending = pendingRecording;
@@ -68,7 +73,9 @@ function bindRecorderEvents(manager: WechatMiniprogram.RecorderManager): void {
   });
 }
 
-function recordVoiceSearchAudio(): Promise<WechatMiniprogram.RecorderManagerStopCallbackResult> {
+function recordVoiceSearchAudio(
+  options: Pick<RecordMemoirVoiceSearchQueryOptions, "onNoVoiceAutoStop"> = {},
+): Promise<WechatMiniprogram.RecorderManagerStopCallbackResult & { noVoiceAutoStopped?: boolean }> {
   if (pendingRecording) {
     return Promise.reject(new Error("已有语音搜索正在录音"));
   }
@@ -80,8 +87,11 @@ function recordVoiceSearchAudio(): Promise<WechatMiniprogram.RecorderManagerStop
       vad: new VoiceActivityDetector({
         silenceLevelThreshold: VOICE_SEARCH_SILENCE_LEVEL_THRESHOLD,
         minVoiceActivityMs: VOICE_SEARCH_MIN_VOICE_ACTIVITY_MS,
+        trackPreVoiceSilence: true,
       }),
       stopping: false,
+      noVoiceAutoStopped: false,
+      onNoVoiceAutoStop: options.onNoVoiceAutoStop,
     };
     try {
       manager.start({
@@ -122,6 +132,15 @@ function handleRecordedFrame(frameBuffer: ArrayBuffer): void {
     return;
   }
   const vad = pending.vad.update(frameBuffer);
+  if (
+    !vad.hasVoiceActivity
+    && vad.silentElapsedMs >= VOICE_SEARCH_NO_VOICE_AUTO_STOP_MS
+  ) {
+    pending.noVoiceAutoStopped = true;
+    pending.onNoVoiceAutoStop?.();
+    stopMemoirVoiceSearchRecording();
+    return;
+  }
   if (!vad.hasVoiceActivity) {
     return;
   }
@@ -156,13 +175,24 @@ export async function recordMemoirVoiceSearchQuery(
   }
   await syncVoiceAuthorizationConsent();
   await ensureRecorderPrivacyAuthorization();
-  const audio = await recordVoiceSearchAudio();
+  let noVoiceAutoStopped = false;
+  const audio = await recordVoiceSearchAudio({
+    onNoVoiceAutoStop: () => {
+      noVoiceAutoStopped = true;
+      options.onNoVoiceAutoStop?.();
+    },
+  });
   options.onRecordingEnd?.();
   const audioBase64 = await readFileAsBase64(audio.tempFilePath);
   const response = await transcribeMemoirVoiceSearchAudio(audioBase64, "audio/pcm");
   const transcript = response.transcript.trim();
   if (!transcript) {
-    throw new Error(options.emptyTranscriptMessage || "没有识别到搜索内容，请换个说法再试");
+    const wasNoVoice = noVoiceAutoStopped || Boolean(audio.noVoiceAutoStopped);
+    throw new Error(
+      wasNoVoice
+        ? options.noVoiceTranscriptMessage || options.emptyTranscriptMessage || "没有听到声音，请再说一次"
+        : options.emptyTranscriptMessage || "没有识别到搜索内容，请换个说法再试",
+    );
   }
   return transcript;
 }

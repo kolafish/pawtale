@@ -15,6 +15,7 @@ import type {
   MemoirBookSourceAssignmentRequest,
   MemoirBookSourceCoverage,
   MemoirBookSourceMoveRequest,
+  MemoirBookVoiceAssistantTTSRequest,
   MemoirBookVoiceCommandParseRequest,
   MemoirBookVoiceCommandParseResponse,
 } from "../domain/voice-chat";
@@ -216,6 +217,19 @@ export function parseMemoirBookVoiceCommand(
     {
       method: "POST",
       data: withSelectedAIModel(data),
+    },
+  );
+}
+
+export function createMemoirBookVoiceAssistantTTS(
+  projectId: string,
+  data: MemoirBookVoiceAssistantTTSRequest,
+): Promise<MemoirBookAudioResponse> {
+  return memoirRequest<MemoirBookAudioResponse>(
+    memoirProjectPath(projectId, "/book-voice-assistant/tts"),
+    {
+      method: "POST",
+      data,
     },
   );
 }
