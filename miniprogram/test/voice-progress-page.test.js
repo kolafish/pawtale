@@ -25,11 +25,40 @@ function sampleSession(id, status) {
   };
 }
 
-function loadProgressPage({ voiceApiExports = {} } = {}) {
+function defaultIdentity() {
+  return {
+    id: "user-1",
+    email: "memoir-author@example.com",
+    password_login_enabled: true,
+    display_name: "作者",
+    avatar_url: "",
+    created_at: "2026-06-18T00:00:00.000Z",
+    active_project_id: "project-1",
+    active_project: {
+      id: "project-1",
+      title: "爷爷回忆录",
+      metadata_json: {},
+    },
+    projects: [],
+  };
+}
+
+function loadProgressPage({ authExports = {}, voiceApiExports = {} } = {}) {
+  const authPath = require.resolve("../services/auth.ts");
   const voiceApiPath = require.resolve("../services/memoir-voice-api.ts");
   const progressPath = require.resolve("../pages/voice-progress/index.ts");
+  delete require.cache[authPath];
   delete require.cache[voiceApiPath];
   delete require.cache[progressPath];
+  require.cache[authPath] = {
+    id: authPath,
+    filename: authPath,
+    loaded: true,
+    exports: {
+      getMemoirIdentity: async () => defaultIdentity(),
+      ...authExports,
+    },
+  };
   require.cache[voiceApiPath] = {
     id: voiceApiPath,
     filename: voiceApiPath,
@@ -110,6 +139,102 @@ test("voice progress maps session actions by backend status", async () => {
   assert.equal(context.data.sessions[2].canContinue, false);
   assert.equal(context.data.sessions[2].canViewTranscripts, false);
   assert.equal(context.data.sessions[2].actionText, "不可继续");
+});
+
+test("voice progress scopes progress and sessions to the active project", async () => {
+  const progressProjectIds = [];
+  const sessionOptions = [];
+  const { page } = loadProgressPage({
+    authExports: {
+      getMemoirIdentity: async () => ({
+        ...defaultIdentity(),
+        active_project_id: "project-current",
+        active_project: {
+          id: "project-current",
+          title: "外婆回忆录",
+          metadata_json: {},
+        },
+        projects: [
+          { id: "project-current", title: "外婆回忆录" },
+          { id: "project-other", title: "爷爷回忆录" },
+        ],
+      }),
+    },
+    voiceApiExports: {
+      getMemoirVoiceProgress: async (projectId) => {
+        progressProjectIds.push(projectId);
+        return {
+          session_count: 1,
+          active_session_count: 1,
+          stopped_session_count: 0,
+          failed_session_count: 0,
+          utterance_count: 2,
+          user_message_count: 2,
+          assistant_message_count: 1,
+          total_user_char_count: 80,
+          total_audio_seconds: 30,
+          modules: [],
+        };
+      },
+      listMemoirVoiceSessions: async (options) => {
+        sessionOptions.push(options);
+        return { items: [sampleSession("voice-current", "listening")], total: 1, limit: 30, offset: 0 };
+      },
+    },
+  });
+  const context = {
+    data: { ...page.data },
+    setData(patch) {
+      this.data = { ...this.data, ...patch };
+    },
+  };
+
+  await page.loadProgress.call(context);
+
+  assert.deepEqual(progressProjectIds, ["project-current"]);
+  assert.deepEqual(sessionOptions, [{ projectId: "project-current", limit: 30 }]);
+  assert.equal(context.data.activeProjectId, "project-current");
+  assert.equal(context.data.projectTitle, "外婆回忆录");
+  assert.equal(context.data.progress.session_count, 1);
+  assert.equal(context.data.sessions.length, 1);
+});
+
+test("voice progress does not load all-project stats without an active project", async () => {
+  let progressRequested = false;
+  let sessionsRequested = false;
+  const { page } = loadProgressPage({
+    authExports: {
+      getMemoirIdentity: async () => ({
+        ...defaultIdentity(),
+        active_project_id: "",
+        active_project: null,
+        projects: [],
+      }),
+    },
+    voiceApiExports: {
+      getMemoirVoiceProgress: async () => {
+        progressRequested = true;
+        return {};
+      },
+      listMemoirVoiceSessions: async () => {
+        sessionsRequested = true;
+        return { items: [], total: 0, limit: 30, offset: 0 };
+      },
+    },
+  });
+  const context = {
+    data: { ...page.data },
+    setData(patch) {
+      this.data = { ...this.data, ...patch };
+    },
+  };
+
+  await page.loadProgress.call(context);
+
+  assert.equal(progressRequested, false);
+  assert.equal(sessionsRequested, false);
+  assert.equal(context.data.progress.session_count, 0);
+  assert.deepEqual(context.data.sessions, []);
 });
 
 test("voice progress opens transcripts for stopped sessions and only resumes active sessions", () => {
