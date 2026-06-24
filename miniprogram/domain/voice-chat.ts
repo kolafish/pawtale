@@ -347,10 +347,12 @@ export interface MemoirBookSourceAssignmentInput {
 }
 
 export interface MemoirBookSourceAssignmentRequest {
+  ai_model?: string;
   assignments: MemoirBookSourceAssignmentInput[];
 }
 
 export interface MemoirBookSourceMoveRequest {
+  ai_model?: string;
   source_chapter_id: string;
   target_chapter_id: string;
   utterance_id: string;

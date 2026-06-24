@@ -1571,6 +1571,7 @@ test("book source assignment API calls encoded backend route", async () => {
         utterance_ids: ["utterance/1"],
       },
     ],
+    ai_model: "deepseek-v4-pro",
   });
   assert.equal(apiRequests[0].header.Cookie, "pawtale_session=abc");
   delete global.wx;
@@ -1627,6 +1628,7 @@ test("book source move API calls narrow backend route", async () => {
     source_chapter_id: "chapter/1",
     target_chapter_id: "chapter/2",
     utterance_id: "utterance/1",
+    ai_model: "deepseek-v4-pro",
   });
   assert.equal(apiRequests[0].header.Cookie, "pawtale_session=abc");
   delete global.wx;

@@ -1,8 +1,10 @@
 import json
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 
 from app.domain.memoir.types import (
+    MemoirBookAutoRevisionJobStatus,
     MemoirBookChapterDraftStatus,
     MemoirBookPlanStatus,
     MemoirChatContentStatus,
@@ -12,6 +14,7 @@ from app.domain.memoir.types import (
 )
 from app.models.memoir import (
     AudioFile,
+    MemoirBookAutoRevisionJob,
     MemoirBookChapterDraft,
     MemoirBookChapterDraftVersion,
     MemoirBookPlan,
@@ -19,6 +22,10 @@ from app.models.memoir import (
     MemoirChatMessage,
     MemoirTranscriptVersion,
     MemoirVoiceUtterance,
+)
+from app.services.memoir.book_auto_revision import (
+    run_auto_revision_job,
+    schedule_chapter_auto_revision,
 )
 from tests.memoir_helpers import post_mobile_memoir_voice_session
 
@@ -376,6 +383,110 @@ async def test_mobile_memoir_book_chapter_draft_supplements_pending_sources_with
         select(MemoirBookPlanChapter).where(MemoirBookPlanChapter.id == chapter.id)
     )
     assert refreshed_chapter.metadata_json == {}
+
+
+async def test_memoir_book_auto_revision_job_supplements_pending_sources(
+    client,
+    test_db,
+    monkeypatch,
+):
+    first = await _create_voice_transcript(client, test_db, "我小时候常在外婆家的院子里晒太阳。")
+    second = await _create_voice_transcript(client, test_db, "后来我又讲了第一次离家去县城读书。")
+    project_id = first["session"]["project_id"]
+    _, chapter = await _create_book_plan(
+        test_db,
+        project_id=project_id,
+        source_ref=_source_ref(first),
+        status=MemoirBookPlanStatus.CONFIRMED,
+    )
+    chapter.source_refs_json = [_source_ref(first), _source_ref(second, "第一次离家")]
+    chapter.metadata_json = {
+        "pending_source_utterance_ids": [second["utterance_id"]],
+        "source_assignment_updated_at": "2026-06-17T00:00:00+00:00",
+    }
+    draft = MemoirBookChapterDraft(
+        project_id=project_id,
+        chapter_id=chapter.id,
+        status=MemoirBookChapterDraftStatus.DRAFT.value,
+        metadata_json={"status_reason": "new_sources_assigned"},
+    )
+    test_db.add(draft)
+    await test_db.flush()
+    version = MemoirBookChapterDraftVersion(
+        draft_id=draft.id,
+        project_id=project_id,
+        chapter_id=chapter.id,
+        version=1,
+        content="我小时候常在外婆家的院子里晒太阳。",
+        created_by=MemoirCreatedBy.AI.value,
+        prompt_snapshot="old prompt",
+    )
+    test_db.add(version)
+    await test_db.commit()
+
+    job = await schedule_chapter_auto_revision(
+        test_db,
+        project_id=project_id,
+        chapter_id=chapter.id,
+        ai_model="deepseek-v4-pro",
+        run_after=datetime.now(UTC).replace(tzinfo=None),
+    )
+    await test_db.commit()
+    assert job is not None
+    assert job.metadata_json["base_version_id"] == version.id
+
+    model_calls = []
+    fake_ai = FakeBookDraftAI(
+        [
+            json.dumps(
+                {
+                    "mode": "supplement",
+                    "reason": "新增来源是新的离家经历，适合补入新段落。",
+                    "pending_source_ids": [second["utterance_id"]],
+                    "related_existing_source_ids": [],
+                    "coverage_requirements": ["补入第一次离家去县城读书的经历"],
+                },
+                ensure_ascii=False,
+            ),
+            "我小时候常在外婆家的院子里晒太阳。后来我第一次离家去县城读书。",
+        ]
+    )
+
+    def fake_get_ai_service(model=None):
+        model_calls.append(model)
+        return fake_ai
+
+    monkeypatch.setattr(
+        "app.services.memoir.book_drafts.get_ai_service",
+        fake_get_ai_service,
+    )
+
+    assert await run_auto_revision_job(test_db, job.id) is True
+
+    refreshed_job = await test_db.scalar(
+        select(MemoirBookAutoRevisionJob).where(MemoirBookAutoRevisionJob.id == job.id)
+    )
+    assert refreshed_job.status == MemoirBookAutoRevisionJobStatus.SUCCEEDED.value
+    assert refreshed_job.attempts == 1
+    assert refreshed_job.metadata_json["result_version_id"]
+    refreshed_draft = await test_db.scalar(
+        select(MemoirBookChapterDraft).where(MemoirBookChapterDraft.id == draft.id)
+    )
+    assert refreshed_draft.metadata_json == {}
+    versions = (
+        await test_db.execute(
+            select(MemoirBookChapterDraftVersion)
+            .where(MemoirBookChapterDraftVersion.draft_id == draft.id)
+            .order_by(MemoirBookChapterDraftVersion.version)
+        )
+    ).scalars().all()
+    assert len(versions) == 2
+    assert "第一次离家去县城读书" in versions[-1].content
+    refreshed_chapter = await test_db.scalar(
+        select(MemoirBookPlanChapter).where(MemoirBookPlanChapter.id == chapter.id)
+    )
+    assert refreshed_chapter.metadata_json == {}
+    assert model_calls == ["deepseek-v4-pro"]
 
 
 async def test_mobile_memoir_book_chapter_draft_planner_can_choose_regenerate(

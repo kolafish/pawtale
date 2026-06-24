@@ -85,7 +85,7 @@ export function assignMemoirBookSources(
     memoirProjectPath(projectId, "/book-source-assignments"),
     {
       method: "POST",
-      data,
+      data: withSelectedAIModel(data),
     },
   );
 }
@@ -98,7 +98,7 @@ export function moveMemoirBookSource(
     memoirProjectPath(projectId, "/book-source-moves"),
     {
       method: "POST",
-      data,
+      data: withSelectedAIModel(data),
     },
   );
 }

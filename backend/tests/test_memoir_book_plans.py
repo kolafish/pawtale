@@ -3,6 +3,7 @@ import json
 from sqlalchemy import select
 
 from app.domain.memoir.types import (
+    MemoirBookAutoRevisionJobStatus,
     MemoirBookChapterDraftStatus,
     MemoirChatContentStatus,
     MemoirChatMessageRole,
@@ -11,6 +12,7 @@ from app.domain.memoir.types import (
 )
 from app.models.memoir import (
     AudioFile,
+    MemoirBookAutoRevisionJob,
     MemoirBookChapterDraft,
     MemoirBookChapterDraftVersion,
     MemoirBookPlan,
@@ -478,17 +480,16 @@ async def test_mobile_memoir_book_source_assignment_appends_source_and_marks_dra
     )
     test_db.add(draft)
     await test_db.flush()
-    test_db.add(
-        MemoirBookChapterDraftVersion(
-            draft_id=draft.id,
-            project_id=project_id,
-            chapter_id=chapter_id,
-            version=1,
-            content="我小时候常在外婆家的院子里晒太阳。",
-            created_by=MemoirCreatedBy.USER.value,
-            prompt_snapshot="",
-        )
+    version = MemoirBookChapterDraftVersion(
+        draft_id=draft.id,
+        project_id=project_id,
+        chapter_id=chapter_id,
+        version=1,
+        content="我小时候常在外婆家的院子里晒太阳。",
+        created_by=MemoirCreatedBy.USER.value,
+        prompt_snapshot="",
     )
+    test_db.add(version)
     await test_db.commit()
     later = await _create_voice_transcript(client, test_db, "后来我又讲了第一次离家去县城读书。")
 
@@ -501,6 +502,7 @@ async def test_mobile_memoir_book_source_assignment_appends_source_and_marks_dra
                     "utterance_ids": [later["utterance_id"]],
                 }
             ],
+            "ai_model": "deepseek-v4-pro",
         },
     )
 
@@ -515,6 +517,15 @@ async def test_mobile_memoir_book_source_assignment_appends_source_and_marks_dra
     )
     assert refreshed_draft.status == MemoirBookChapterDraftStatus.DRAFT.value
     assert refreshed_draft.metadata_json["status_reason"] == "new_sources_assigned"
+    job = await test_db.scalar(
+        select(MemoirBookAutoRevisionJob).where(MemoirBookAutoRevisionJob.chapter_id == chapter_id)
+    )
+    assert job is not None
+    assert job.status == MemoirBookAutoRevisionJobStatus.PENDING.value
+    assert job.attempts == 0
+    assert job.metadata_json["base_version_id"] == version.id
+    assert job.metadata_json["pending_source_utterance_ids"] == [later["utterance_id"]]
+    assert job.metadata_json["ai_model"] == "deepseek-v4-pro"
 
     coverage = await client.get(f"/api/mobile/memoir/projects/{project_id}/book-source-coverage")
     assert coverage.status_code == 200
