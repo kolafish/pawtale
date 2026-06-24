@@ -19,6 +19,7 @@ from app.models.memoir import (
     MemoirTranscriptVersion,
     MemoirVoiceUtterance,
 )
+from app.services.memoir.book_plan_ai import ChapterTitleSourceDigest, build_chapter_title_prompt
 from tests.memoir_helpers import post_mobile_memoir_voice_session
 
 
@@ -72,7 +73,29 @@ class FakeChapterTitleAI:
                 "kwargs": kwargs,
             }
         )
-        return "外婆院中的日子"
+        return json.dumps({"title": "外婆院中的日子"}, ensure_ascii=False)
+
+
+def test_chapter_title_prompt_uses_all_source_digests_without_current_title():
+    sources = [
+        ChapterTitleSourceDigest(
+            source_number=index,
+            utterance_id=f"utterance-{index}",
+            created_at=f"2026-06-{index:02d}T00:00:00+00:00",
+            summary=f"第{index}条来源讲到过年时家里准备饭菜和亲戚团聚。",
+            representative_quote=f"第{index}条原话",
+        )
+        for index in range(1, 10)
+    ]
+
+    prompt = build_chapter_title_prompt(sources)
+
+    assert "当前章节名" not in prompt
+    assert "旧章节标题" not in prompt
+    assert "record_summary:" in prompt
+    assert "representative_quote:" in prompt
+    assert "第9条来源" in prompt
+    assert '"title": "章节标题"' in prompt
 
 
 async def _active_project_id(client):
@@ -1034,6 +1057,10 @@ async def test_mobile_memoir_book_chapter_title_generate_uses_chapter_sources(
     assert data["chapters"][0]["title"] == "外婆院中的日子"
     assert data["chapters"][0]["metadata_json"]["title_updated_by"] == "ai"
     assert data["chapters"][0]["metadata_json"]["title_model"] == "fake-title"
+    assert "当前章节名" not in fake_ai.calls[0]["user_prompt"]
+    assert "新收录转写" not in fake_ai.calls[0]["user_prompt"]
+    assert "record_summary:" in fake_ai.calls[0]["user_prompt"]
+    assert '"title": "章节标题"' in fake_ai.calls[0]["user_prompt"]
     assert "不要使用“转写”" in fake_ai.calls[0]["user_prompt"]
     assert "外婆家的院子" in fake_ai.calls[0]["user_prompt"]
 

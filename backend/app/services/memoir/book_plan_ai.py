@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 from fastapi import HTTPException
@@ -13,6 +14,26 @@ SYSTEM_PROMPT = "你是一位谨慎的中文回忆录章节规划编辑，只能
 CHAPTER_TITLE_SYSTEM_PROMPT = "你是一位谨慎的中文回忆录目录编辑，只为已有章节重新拟标题。"
 AI_BOOK_PLAN_UNAVAILABLE_MESSAGE = "AI 服务暂时不可用，请稍后重试。"
 GENERIC_CHAPTER_TITLES = {"新收录转写", "新增转写", "转写记录", "新章节", "未命名章节"}
+
+
+@dataclass(frozen=True)
+class ChapterTitleSourceDigest:
+    source_number: int
+    utterance_id: str
+    created_at: str
+    summary: str
+    representative_quote: str
+
+
+def _compact_text(value: str, max_chars: int) -> str:
+    text = " ".join(value.split())
+    if len(text) <= max_chars:
+        return text
+    for marker in ("。", "！", "？", "；", ";", "!", "?"):
+        index = text.find(marker)
+        if 0 < index + 1 <= max_chars:
+            return text[: index + 1].strip()
+    return f"{text[: max_chars - 3].rstrip()}..."
 
 
 def build_plan_prompt(project_title: str, sources: list[SourceSegment], max_chapters: int) -> str:
@@ -116,20 +137,33 @@ def chapters_from_payload(
     return title, chapters
 
 
-def build_chapter_title_prompt(chapter_title: str, source_texts: list[str]) -> str:
-    source_text = "\n\n".join(f"- {text}" for text in source_texts[:8])
-    return f"""请为下面这一个回忆录章节重新拟一个正式章节名。
+def build_chapter_title_prompt(sources: list[ChapterTitleSourceDigest]) -> str:
+    source_text = "\n\n".join(
+        (
+            f"source {source.source_number}\n"
+            f"utterance_id: {source.utterance_id}\n"
+            f"created_at: {source.created_at}\n"
+            f"record_summary: {_compact_text(source.summary, 140)}\n"
+            f"representative_quote: {_compact_text(source.representative_quote or source.summary, 90)}"
+        )
+        for source in sources
+    )
+    return f"""请基于下面这个回忆录章节的全部来源记录摘要，重新拟一个正式章节名。
 
-当前章节名：{chapter_title}
+请输出严格 JSON，不要 Markdown，不要解释。格式：
+{{
+  "title": "章节标题"
+}}
 
-章节来源口述：
+章节来源记录摘要：
 {source_text or "无"}
 
 要求：
-- 只根据章节来源口述，不新增事实、人物、地点或情绪。
+- 只根据 record_summary 和 representative_quote，不新增事实、人物、地点或情绪。
+- 必须综合全部来源记录；来源很多时，不要只看前几条，优先概括反复出现或最能代表本章的主题。
 - 标题要像书稿目录，短而正式，建议 6 到 14 个汉字。
 - 不要使用“转写”“新收录”“记录”“素材”“章节”等占位词。
-- 直接输出标题，不要解释，不要引号，不要编号。
+- 只输出 JSON 对象，不要解释、引号包裹全文或编号。
 """
 
 

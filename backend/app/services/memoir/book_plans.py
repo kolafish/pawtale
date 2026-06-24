@@ -35,6 +35,7 @@ from app.services.memoir.access import load_memoir_project
 from app.services.memoir.book_plan_ai import (
     AI_BOOK_PLAN_UNAVAILABLE_MESSAGE,
     CHAPTER_TITLE_SYSTEM_PROMPT,
+    ChapterTitleSourceDigest,
     SYSTEM_PROMPT,
     build_chapter_title_prompt as _build_chapter_title_prompt,
     build_plan_prompt as _build_plan_prompt,
@@ -491,9 +492,12 @@ def _chapter_by_id(plan: MemoirBookPlan, chapter_id: str) -> MemoirBookPlanChapt
     raise HTTPException(status_code=404, detail="章节不存在")
 
 
-def _chapter_source_texts(chapter: MemoirBookPlanChapter, sources: list[SourceSegment]) -> list[str]:
+def _chapter_title_source_digests(
+    chapter: MemoirBookPlanChapter,
+    sources: list[SourceSegment],
+) -> list[ChapterTitleSourceDigest]:
     source_by_utterance = {source.utterance_id: source for source in sources}
-    texts: list[str] = []
+    digests: list[ChapterTitleSourceDigest] = []
     for ref in chapter.source_refs_json or []:
         if not isinstance(ref, dict):
             continue
@@ -502,8 +506,17 @@ def _chapter_source_texts(chapter: MemoirBookPlanChapter, sources: list[SourceSe
         text = source.text if source else str(ref.get("quote") or "")
         text = _text_or_empty(text)
         if text:
-            texts.append(text)
-    return texts
+            quote = _text_or_empty(str(ref.get("quote") or "")) or text
+            digests.append(
+                ChapterTitleSourceDigest(
+                    source_number=len(digests) + 1,
+                    utterance_id=utterance_id if isinstance(utterance_id, str) else "",
+                    created_at=source.created_at.isoformat() if source else "",
+                    summary=text,
+                    representative_quote=quote,
+                )
+            )
+    return digests
 
 
 async def _save_chapter_title(
@@ -700,7 +713,7 @@ async def generate_book_chapter_title(
         raise HTTPException(status_code=404, detail="章节规划不存在")
     chapter = _chapter_by_id(plan, chapter_id)
     sources = await _source_segments(db, user_id=user_id, project_id=project_id)
-    prompt = _build_chapter_title_prompt(chapter.title, _chapter_source_texts(chapter, sources))
+    prompt = _build_chapter_title_prompt(_chapter_title_source_digests(chapter, sources))
 
     client = ai_client
     try:
