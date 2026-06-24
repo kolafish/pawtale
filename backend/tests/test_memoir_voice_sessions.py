@@ -546,7 +546,16 @@ async def test_mobile_memoir_voice_session_list_and_progress(client, test_db):
         provider="test",
         provider_payload_json={},
     )
-    test_db.add(utterance)
+    empty_utterance = MemoirVoiceUtterance(
+        voice_session_id=free_session["id"],
+        transcript_raw="",
+        transcript_edited="",
+        start_ms=0,
+        end_ms=1000,
+        provider="test",
+        provider_payload_json={},
+    )
+    test_db.add_all([utterance, empty_utterance])
     await test_db.commit()
 
     list_response = await client.get("/api/mobile/memoir/voice-sessions")
@@ -555,6 +564,7 @@ async def test_mobile_memoir_voice_session_list_and_progress(client, test_db):
     list_data = list_response.json()
     assert list_data["total"] == 2
     guided_item = next(item for item in list_data["items"] if item["id"] == guided_session["id"])
+    free_item = next(item for item in list_data["items"] if item["id"] == free_session["id"])
     assert guided_item["guidance_mode"] == "guided_interview"
     assert guided_item["current_guidance_module"] == "person"
     assert guided_item["user_message_count"] == 1
@@ -564,6 +574,14 @@ async def test_mobile_memoir_voice_session_list_and_progress(client, test_db):
     assert guided_item["total_audio_seconds"] == 2
     assert guided_item["last_message_text"] == "那时候你最记得谁？"
     assert guided_item["last_message_role"] == "assistant"
+    assert free_item["utterance_count"] == 0
+
+    effective_list_response = await client.get("/api/mobile/memoir/voice-sessions?effective_only=true")
+
+    assert effective_list_response.status_code == 200
+    effective_list = effective_list_response.json()
+    assert effective_list["total"] == 1
+    assert [item["id"] for item in effective_list["items"]] == [guided_session["id"]]
 
     progress_response = await client.get("/api/mobile/memoir/voice-progress")
 

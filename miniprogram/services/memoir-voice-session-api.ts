@@ -25,6 +25,7 @@ import {
 
 interface VoiceSessionListOptions {
   projectId?: string;
+  effectiveOnly?: boolean;
   limit?: number;
   offset?: number;
 }
@@ -67,6 +68,7 @@ export function listMemoirVoiceSessions(
   return memoirRequest<MemoirVoiceSessionListResponse>(
     `/api/mobile/memoir/voice-sessions${queryString({
       project_id: options.projectId,
+      effective_only: options.effectiveOnly,
       limit: options.limit,
       offset: options.offset,
     })}`,

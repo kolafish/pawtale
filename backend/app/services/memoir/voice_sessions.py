@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from fastapi import HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -87,6 +87,23 @@ def _char_count(text: str) -> int:
     return len("".join(str(text or "").split()))
 
 
+def _utterance_text(utterance: MemoirVoiceUtterance) -> str:
+    return (utterance.transcript_edited or "").strip() or (utterance.transcript_raw or "").strip()
+
+
+def _visible_utterances(voice_session: MemoirVoiceSession) -> list[MemoirVoiceUtterance]:
+    return [utterance for utterance in voice_session.utterances if _utterance_text(utterance)]
+
+
+def _visible_utterance_exists_clause():
+    return MemoirVoiceSession.utterances.any(
+        or_(
+            func.trim(MemoirVoiceUtterance.transcript_raw) != "",
+            func.trim(MemoirVoiceUtterance.transcript_edited) != "",
+        )
+    )
+
+
 def _utterance_duration_seconds(utterance: MemoirVoiceUtterance) -> int:
     if utterance.start_ms is None or utterance.end_ms is None:
         return 0
@@ -95,7 +112,7 @@ def _utterance_duration_seconds(utterance: MemoirVoiceUtterance) -> int:
 
 def _session_summary(voice_session: MemoirVoiceSession) -> MemoirVoiceSessionSummaryResponse:
     messages = list(voice_session.messages)
-    utterances = list(voice_session.utterances)
+    utterances = _visible_utterances(voice_session)
     user_messages = [
         message for message in messages
         if message.role == MemoirChatMessageRole.USER.value and message.content_text.strip()
@@ -119,7 +136,7 @@ def _session_summary(voice_session: MemoirVoiceSession) -> MemoirVoiceSessionSum
         user_message_count=len(user_messages),
         assistant_message_count=len(assistant_messages),
         utterance_count=len(utterances),
-        total_user_char_count=sum(_char_count(message.content_text) for message in user_messages),
+        total_user_char_count=sum(_char_count(_utterance_text(utterance)) for utterance in utterances),
         total_audio_seconds=sum(_utterance_duration_seconds(utterance) for utterance in utterances),
         last_message_text=(last_message.content_text if last_message else "")[:120],
         last_message_role=last_message.role if last_message else None,
@@ -136,6 +153,7 @@ async def list_voice_sessions(
     user_id: str,
     *,
     project_id: str | None = None,
+    effective_only: bool = False,
     limit: int = 50,
     offset: int = 0,
 ) -> MemoirVoiceSessionListResponse:
@@ -143,6 +161,8 @@ async def list_voice_sessions(
     if project_id:
         await load_memoir_project(db, project_id, user_id)
         filters.append(Project.id == project_id)
+    if effective_only:
+        filters.append(_visible_utterance_exists_clause())
     total = await db.scalar(
         select(func.count(MemoirVoiceSession.id))
         .join(Project, MemoirVoiceSession.project_id == Project.id)

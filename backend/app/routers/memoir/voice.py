@@ -108,6 +108,7 @@ async def create_mobile_memoir_voice_session(
 @router.get("/voice-sessions", response_model=MemoirVoiceSessionListResponse)
 async def list_mobile_memoir_voice_sessions(
     project_id: str | None = None,
+    effective_only: bool = Query(False),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
@@ -117,6 +118,7 @@ async def list_mobile_memoir_voice_sessions(
         db,
         current_user.id,
         project_id=project_id,
+        effective_only=effective_only,
         limit=limit,
         offset=offset,
     )

@@ -18,8 +18,6 @@ interface VoiceSessionSummaryView extends MemoirVoiceSessionSummary {
   updatedText: string;
   durationText: string;
   canContinue: boolean;
-  canViewTranscripts: boolean;
-  actionText: string;
 }
 
 interface ModuleProgressView extends MemoirVoiceModuleProgress {
@@ -120,16 +118,6 @@ export function canContinueVoiceSession(status: string): boolean {
   return status === "created" || status === "listening" || status === "speaking";
 }
 
-function sessionActionText(item: MemoirVoiceSessionSummary): string {
-  if (canContinueVoiceSession(item.status)) {
-    return "继续";
-  }
-  if (item.status === "stopped") {
-    return "查看记录";
-  }
-  return "不可继续";
-}
-
 function toSessionView(item: MemoirVoiceSessionSummary): VoiceSessionSummaryView {
   return {
     ...item,
@@ -139,8 +127,6 @@ function toSessionView(item: MemoirVoiceSessionSummary): VoiceSessionSummaryView
     updatedText: formatDate(item.updated_at || item.created_at),
     durationText: formatDuration(item.total_audio_seconds),
     canContinue: canContinueVoiceSession(item.status),
-    canViewTranscripts: item.status === "stopped",
-    actionText: sessionActionText(item),
   };
 }
 
@@ -155,8 +141,6 @@ Page<ProgressData, {
   onShow(): Promise<void>;
   loadProgress(): Promise<void>;
   continueSession(event: DatasetEvent): void;
-  openTranscripts(): void;
-  startNewSession(): void;
 }>({
   data: {
     loading: false,
@@ -192,7 +176,7 @@ Page<ProgressData, {
       }
       const [progress, sessionList] = await Promise.all([
         getMemoirVoiceProgress(activeProjectId),
-        listMemoirVoiceSessions({ projectId: activeProjectId, limit: 30 }),
+        listMemoirVoiceSessions({ projectId: activeProjectId, effectiveOnly: true, limit: 30 }),
       ]);
       this.setData({
         activeProjectId,
@@ -218,12 +202,10 @@ Page<ProgressData, {
     if (!item) {
       return;
     }
-    if (item.canViewTranscripts) {
-      this.openTranscripts();
-      return;
-    }
     if (!item.canContinue) {
-      this.setData({ error: "这次访谈异常结束，请返回首页重新开始" });
+      this.setData({
+        error: item.status === "failed" ? "这次访谈异常结束，请返回首页重新开始" : "这次访谈已结束",
+      });
       return;
     }
     const query = [
@@ -234,13 +216,5 @@ Page<ProgressData, {
       query.push(`module=${encodeURIComponent(item.current_guidance_module)}`);
     }
     wx.navigateTo({ url: `/pages/voice-chat/index?${query.join("&")}` });
-  },
-
-  openTranscripts() {
-    wx.switchTab({ url: "/pages/transcripts/index" });
-  },
-
-  startNewSession() {
-    wx.switchTab({ url: "/pages/home/index" });
   },
 });

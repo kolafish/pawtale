@@ -406,7 +406,7 @@ test("fetches voice session list and progress through backend API", async () => 
   } = require("../services/memoir-voice-api.ts");
 
   await createMemoirVoiceSession({ guidance_mode: "free_narration" }, { projectId: "project/1" });
-  await listMemoirVoiceSessions({ projectId: "project/1", limit: 10, offset: 5 });
+  await listMemoirVoiceSessions({ projectId: "project/1", effectiveOnly: true, limit: 10, offset: 5 });
   await getMemoirVoiceProgress("project/1");
   await listMemoirVoiceTranscripts({
     projectId: "project/1",
@@ -427,7 +427,7 @@ test("fetches voice session list and progress through backend API", async () => 
   assert.deepEqual(apiRequests[0].data, { guidance_mode: "free_narration" });
   assert.equal(
     apiRequests[1].url,
-    "http://backend.local:8000/api/mobile/memoir/voice-sessions?project_id=project%2F1&limit=10&offset=5",
+    "http://backend.local:8000/api/mobile/memoir/voice-sessions?project_id=project%2F1&effective_only=true&limit=10&offset=5",
   );
   assert.equal(apiRequests[2].url, "http://backend.local:8000/api/mobile/memoir/voice-progress?project_id=project%2F1");
   assert.equal(

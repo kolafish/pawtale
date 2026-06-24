@@ -95,7 +95,7 @@ function loadProgressPage({ authExports = {}, voiceApiExports = {} } = {}) {
   return { mod, page };
 }
 
-test("voice progress maps session actions by backend status", async () => {
+test("voice progress maps session status by backend status", async () => {
   const { page } = loadProgressPage({
     voiceApiExports: {
       getMemoirVoiceProgress: async () => ({
@@ -132,13 +132,10 @@ test("voice progress maps session actions by backend status", async () => {
   await page.loadProgress.call(context);
 
   assert.equal(context.data.sessions[0].canContinue, true);
-  assert.equal(context.data.sessions[0].actionText, "继续");
   assert.equal(context.data.sessions[1].canContinue, false);
-  assert.equal(context.data.sessions[1].canViewTranscripts, true);
-  assert.equal(context.data.sessions[1].actionText, "查看记录");
   assert.equal(context.data.sessions[2].canContinue, false);
-  assert.equal(context.data.sessions[2].canViewTranscripts, false);
-  assert.equal(context.data.sessions[2].actionText, "不可继续");
+  assert.equal("canViewTranscripts" in context.data.sessions[1], false);
+  assert.equal("actionText" in context.data.sessions[1], false);
 });
 
 test("voice progress scopes progress and sessions to the active project", async () => {
@@ -192,7 +189,7 @@ test("voice progress scopes progress and sessions to the active project", async 
   await page.loadProgress.call(context);
 
   assert.deepEqual(progressProjectIds, ["project-current"]);
-  assert.deepEqual(sessionOptions, [{ projectId: "project-current", limit: 30 }]);
+  assert.deepEqual(sessionOptions, [{ projectId: "project-current", effectiveOnly: true, limit: 30 }]);
   assert.equal(context.data.activeProjectId, "project-current");
   assert.equal(context.data.projectTitle, "外婆回忆录");
   assert.equal(context.data.progress.session_count, 1);
@@ -237,16 +234,12 @@ test("voice progress does not load all-project stats without an active project",
   assert.deepEqual(context.data.sessions, []);
 });
 
-test("voice progress opens transcripts for stopped sessions and only resumes active sessions", () => {
+test("voice progress only resumes active sessions", () => {
   const { page } = loadProgressPage();
   const navigations = [];
-  const tabSwitches = [];
   global.wx = {
     navigateTo(options) {
       navigations.push(options.url);
-    },
-    switchTab(options) {
-      tabSwitches.push(options.url);
     },
   };
   const context = {
@@ -257,12 +250,10 @@ test("voice progress opens transcripts for stopped sessions and only resumes act
         {
           ...sampleSession("voice-listening", "listening"),
           canContinue: true,
-          canViewTranscripts: false,
         },
         {
           ...sampleSession("voice-stopped", "stopped"),
           canContinue: false,
-          canViewTranscripts: true,
         },
       ],
     },
@@ -274,7 +265,7 @@ test("voice progress opens transcripts for stopped sessions and only resumes act
   page.continueSession.call(context, { currentTarget: { dataset: { id: "voice-stopped" } } });
   page.continueSession.call(context, { currentTarget: { dataset: { id: "voice-listening" } } });
 
-  assert.deepEqual(tabSwitches, ["/pages/transcripts/index"]);
+  assert.equal(context.data.error, "这次访谈已结束");
   assert.equal(navigations[0], "/pages/voice-chat/index?voiceSessionId=voice-listening&mode=guided_interview&module=person");
   delete global.wx;
 });

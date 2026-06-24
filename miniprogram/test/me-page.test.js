@@ -642,7 +642,7 @@ test("me saves selected AI model", () => {
   delete global.wx;
 });
 
-test("me keeps memoir management and voice progress entries in the combined project overview", () => {
+test("me keeps memoir management and voice progress as separate entries", () => {
   const navigations = [];
   global.wx = {
     navigateTo(options) {

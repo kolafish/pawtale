@@ -16,7 +16,7 @@
     </view>
     <view class="summary-item">
       <text class="summary-value">{{progress.utterance_count || 0}}</text>
-      <text class="summary-label">语音段</text>
+      <text class="summary-label">转写记录</text>
     </view>
     <view class="summary-item">
       <text class="summary-value">{{progress.total_user_char_count || 0}}</text>
@@ -28,11 +28,6 @@
     </view>
   </view>
 
-  <view class="action-row">
-    <button class="primary-button" bindtap="startNewSession">新访谈</button>
-    <button class="secondary-button" bindtap="openTranscripts">校正文稿</button>
-  </view>
-
   <view class="section">
     <view class="section-header">
       <text>模块覆盖</text>
@@ -42,15 +37,15 @@
     <view wx:for="{{modules}}" wx:key="module" class="module-row">
       <view>
         <text class="module-title">{{item.label}}</text>
-        <text class="module-meta">{{item.session_count}} 次访谈 · {{item.utterance_count}} 段 · {{item.user_char_count}} 字</text>
+        <text class="module-meta">{{item.session_count}} 次访谈 · {{item.utterance_count}} 条转写 · {{item.user_char_count}} 字</text>
       </view>
     </view>
   </view>
 
   <view class="section">
     <view class="section-header">
-      <text>最近访谈</text>
-      <text class="section-meta">{{sessions.length}} / {{progress.session_count || 0}}</text>
+      <text>最近有效访谈</text>
+      <text class="section-meta">{{sessions.length}} 次</text>
     </view>
     <view wx:if="{{!sessions.length}}" class="empty-state">还没有语音访谈记录。</view>
     <view wx:for="{{sessions}}" wx:key="id" class="session-card">
@@ -60,16 +55,16 @@
           <text class="session-meta">{{item.updatedText}} · {{item.statusText}}</text>
         </view>
         <button
+          wx:if="{{item.canContinue}}"
           class="continue-button"
           data-id="{{item.id}}"
-          disabled="{{!item.canContinue && !item.canViewTranscripts}}"
           bindtap="continueSession"
         >
-          {{item.actionText}}
+          继续
         </button>
       </view>
       <view class="session-stats">
-        <text>{{item.utterance_count}} 段</text>
+        <text>{{item.utterance_count}} 条转写</text>
         <text>{{item.total_user_char_count}} 字</text>
         <text>{{item.assistant_message_count}} 追问</text>
         <text>{{item.durationText}}</text>
