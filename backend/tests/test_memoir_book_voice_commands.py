@@ -313,6 +313,14 @@ async def test_mobile_memoir_book_voice_command_explains_editing_capabilities(
     assert "合并章节" in data["reply_text"]
     assert "等你确认" in data["reply_text"]
 
+    response = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-voice-command/parse",
+        json={"text": "我还可以改点啥呀"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["intent"] == "capability_help"
+
 
 async def test_mobile_memoir_book_voice_command_passes_recent_conversation_to_ai(
     client,

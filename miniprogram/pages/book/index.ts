@@ -180,7 +180,7 @@ function isBookVoiceClarificationIntent(preview: MemoirBookVoiceCommandParseResp
 }
 
 function isBookVoiceCommandConfirmationText(text: string): boolean {
-  const normalized = trimText(text).replace(/\s+/g, "");
+  const normalized = trimText(text).replace(/[\s，。,.!！?？、；;：“”"‘’'（）()]/g, "");
   return /^(确认|确认执行|执行|可以|可以执行|就这样|就这样改|好的|好|没问题|按这个改)$/.test(normalized);
 }
 
@@ -450,6 +450,7 @@ Page<BookData, {
     bookVoiceAssistantBusy: false,
     bookVoiceAssistantConversationActive: false,
     bookVoiceAssistantReplyText: "",
+    bookVoiceAssistantSpeakingLineId: "",
     bookVoiceLiveText: "",
     bookVoiceTranscriptLines: [],
     bookVoiceAudioLevelPercent: 0,
@@ -587,6 +588,7 @@ Page<BookData, {
         bookVoiceAssistantStatusText: bookVoiceAssistantStatusText(stage),
         bookVoiceAssistantConversationActive: false,
         bookVoiceAssistantReplyText: "",
+        bookVoiceAssistantSpeakingLineId: "",
         bookVoiceLiveText: "",
         bookVoiceTranscriptLines: [],
         bookVoiceAudioLevelPercent: 0,
@@ -1401,6 +1403,7 @@ Page<BookData, {
       bookVoiceAssistantExpanded: true,
       bookVoiceAssistantConversationActive: true,
       bookVoiceAssistantReplyText: "",
+      bookVoiceAssistantSpeakingLineId: "",
       bookVoiceLiveText: "",
       bookVoiceAudioLevelPercent: 0,
       bookVoiceCaptureStateText: "正在打开麦克风",
@@ -1722,7 +1725,6 @@ Page<BookData, {
       && isBookVoiceCommandConfirmationText(text)
     ) {
       this.setData({
-        bookVoiceCommandText: text,
         bookVoiceAssistantStatusText: "收到确认，正在执行",
       });
       await this.playBookVoiceAssistantReply("好的，我按刚才理解的修改。", { autoListenAfterPlayback: false });
@@ -1792,6 +1794,10 @@ Page<BookData, {
         const plan = await this.updatePlanStructure(toPlanUpdateInput(chapters), "已按语音改名");
         if (plan && undoSnapshot) {
           this.setData({
+            bookVoiceCommandCanExecute: false,
+            bookVoiceCommandRequiresConfirmation: false,
+            bookVoiceCommandStateText: "已执行",
+            bookVoiceCommandActionText: "已执行",
             bookVoiceCommandUndoText: "撤回语音改名",
             bookVoiceCommandUndoSnapshot: undoSnapshot,
             bookVoiceAssistantStatusText: "已执行，可撤回",
@@ -1817,6 +1823,10 @@ Page<BookData, {
         const plan = await this.updatePlanStructure(toPlanUpdateInput(reordered), "已按语音调整顺序");
         if (plan && undoSnapshot) {
           this.setData({
+            bookVoiceCommandCanExecute: false,
+            bookVoiceCommandRequiresConfirmation: false,
+            bookVoiceCommandStateText: "已执行",
+            bookVoiceCommandActionText: "已执行",
             bookVoiceCommandUndoText: "撤回语音排序",
             bookVoiceCommandUndoSnapshot: undoSnapshot,
             bookVoiceAssistantStatusText: "已执行，可撤回",
@@ -1879,6 +1889,7 @@ Page<BookData, {
       bookVoiceCommandUndoText: "",
       bookVoiceCommandUndoSnapshot: null,
       bookVoiceAssistantStatusText: bookVoiceAssistantStatusText(this.data.stage),
+      bookVoiceAssistantSpeakingLineId: "",
       bookVoiceLiveText: "",
       error: "",
     });
@@ -1900,6 +1911,7 @@ Page<BookData, {
       bookVoiceAssistantConversationActive: false,
       bookVoiceAssistantBusy: false,
       bookVoiceAssistantReplyText: "",
+      bookVoiceAssistantSpeakingLineId: "",
       bookVoiceLiveText: "",
       bookVoiceAudioLevelPercent: 0,
       bookVoiceCaptureStateText: "麦克风未开始",
@@ -1959,8 +1971,9 @@ Page<BookData, {
     this.stopPlayback();
     this.playToken += 1;
     const token = this.playToken;
+    const lineId = `book-ai-${Date.now()}-${this.data.bookVoiceTranscriptLines.length}`;
     this.appendBookVoiceTranscriptLine({
-      id: `book-ai-${Date.now()}-${this.data.bookVoiceTranscriptLines.length}`,
+      id: lineId,
       role: "assistant",
       text: replyText,
     });
@@ -1969,6 +1982,7 @@ Page<BookData, {
       ttsBusyTarget: target,
       bookVoiceAssistantBusy: true,
       bookVoiceAssistantReplyText: replyText,
+      bookVoiceAssistantSpeakingLineId: lineId,
       bookVoiceAssistantStatusText: "AI 正在回复",
       error: "",
     });
@@ -1985,6 +1999,7 @@ Page<BookData, {
       if (token !== this.playToken) {
         return;
       }
+      this.setData({ bookVoiceAssistantSpeakingLineId: "" });
       this.setData({ bookVoiceAssistantBusy: false });
       if (options.autoListenAfterPlayback) {
         this.scheduleBookVoiceAssistantAutoListen("我继续听");
@@ -2008,6 +2023,9 @@ Page<BookData, {
       }
       if (token === this.playToken && this.data.bookVoiceAssistantBusy) {
         this.setData({ bookVoiceAssistantBusy: false });
+      }
+      if (token === this.playToken && this.data.bookVoiceAssistantSpeakingLineId === lineId) {
+        this.setData({ bookVoiceAssistantSpeakingLineId: "" });
       }
     }
   },
@@ -2092,6 +2110,9 @@ Page<BookData, {
 
   stopPlayback() {
     stopBookPlayback(this);
+    if (this.data.bookVoiceAssistantSpeakingLineId) {
+      this.setData({ bookVoiceAssistantSpeakingLineId: "" });
+    }
   },
 
   onHide() {
@@ -2109,6 +2130,7 @@ Page<BookData, {
         bookVoiceAssistantListening: false,
         bookVoiceAssistantBusy: false,
         bookVoiceAssistantConversationActive: false,
+        bookVoiceAssistantSpeakingLineId: "",
         bookVoiceLiveText: "",
         bookVoiceAudioLevelPercent: 0,
         bookVoiceCaptureStateText: "麦克风未开始",

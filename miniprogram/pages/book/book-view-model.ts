@@ -144,6 +144,7 @@ export interface BookData {
   bookVoiceAssistantBusy: boolean;
   bookVoiceAssistantConversationActive: boolean;
   bookVoiceAssistantReplyText: string;
+  bookVoiceAssistantSpeakingLineId: string;
   bookVoiceLiveText: string;
   bookVoiceTranscriptLines: VoiceChatTranscriptLine[];
   bookVoiceAudioLevelPercent: number;
@@ -662,6 +663,7 @@ export function guestBookData(): Partial<BookData> {
     bookVoiceAssistantBusy: false,
     bookVoiceAssistantConversationActive: false,
     bookVoiceAssistantReplyText: "",
+    bookVoiceAssistantSpeakingLineId: "",
     bookVoiceLiveText: "",
     bookVoiceTranscriptLines: [],
     bookVoiceAudioLevelPercent: 0,
