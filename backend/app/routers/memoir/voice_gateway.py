@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, status
 from sqlalchemy import select
@@ -14,6 +15,7 @@ from app.schemas.memoir_voice import (
     MemoirVoiceSessionStopRequest,
 )
 from app.services.memoir import voice_sessions as memoir_voice_sessions
+from app.services.memoir.access import load_memoir_project
 from app.services.memoir.streaming_asr import create_volc_streaming_asr_client
 from app.services.memoir.voice_gateway import VoiceGatewaySession
 from app.services.memoir.voice_gateway_capacity import (
@@ -100,6 +102,45 @@ async def mobile_memoir_voice_gateway(
             logger.exception("Failed to discard pending memoir voice gateway audio")
         finally:
             await capacity_lease.release()
+
+
+@router.websocket("/projects/{project_id}/book-voice-command/gateway")
+async def mobile_memoir_book_voice_command_gateway(
+    websocket: WebSocket,
+    project_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    current_user = await _authenticate_websocket(websocket, db)
+    if current_user is None:
+        await _reject_websocket(websocket, "voice_gateway_auth_failed")
+        return
+    current_user_id = current_user.id
+
+    try:
+        await load_memoir_project(db, project_id, current_user_id)
+    except HTTPException:
+        await _reject_websocket(websocket, "memoir_project_unavailable")
+        return
+
+    transient_session_id = f"book-voice-command-{project_id}-{uuid.uuid4().hex}"
+    try:
+        capacity_lease = await voice_gateway_capacity_manager.acquire(current_user_id, transient_session_id)
+    except VoiceGatewayCapacityError as exc:
+        await _reject_websocket(websocket, exc.code)
+        return
+
+    try:
+        await websocket.accept()
+        gateway_session = VoiceGatewaySession(
+            client=websocket,
+            asr_client_factory=lambda: create_volc_streaming_asr_client(
+                current_user_id,
+                transient_session_id,
+            ),
+        )
+        await gateway_session.run()
+    finally:
+        await capacity_lease.release()
 
 
 async def _authenticate_websocket(websocket: WebSocket, db: AsyncSession) -> User | None:

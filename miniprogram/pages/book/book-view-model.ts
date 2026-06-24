@@ -9,6 +9,7 @@ import type {
   MemoirBookSourceCoverage,
   MemoirBookVoiceCommandParseResponse,
   TTSAlignmentSegment,
+  VoiceChatTranscriptLine,
 } from "../../domain/voice-chat";
 import {
   clearSourceChangeMetadata,
@@ -135,12 +136,17 @@ export interface BookData {
   bookTTSProgressPercent: number;
   bookTTSDurationSeconds: number;
   bookTTSAlignment: TTSAlignmentSegment[];
+  bookVoiceAssistantExpanded: boolean;
   bookVoiceAssistantHint: string;
   bookVoiceAssistantStatusText: string;
   bookVoiceAssistantListening: boolean;
   bookVoiceAssistantBusy: boolean;
   bookVoiceAssistantConversationActive: boolean;
   bookVoiceAssistantReplyText: string;
+  bookVoiceLiveText: string;
+  bookVoiceTranscriptLines: VoiceChatTranscriptLine[];
+  bookVoiceAudioLevelPercent: number;
+  bookVoiceCaptureStateText: string;
   bookVoiceCommandText: string;
   bookVoiceCommandIntentLabel: string;
   bookVoiceCommandSummary: string;
@@ -644,10 +650,17 @@ export function guestBookData(): Partial<BookData> {
     bookTTSProgressPercent: 0,
     bookTTSDurationSeconds: 0,
     bookTTSAlignment: [],
+    bookVoiceAssistantExpanded: false,
     bookVoiceAssistantHint: "生成章节后，可以听目录或说修改",
     bookVoiceAssistantStatusText: "等待章节",
     bookVoiceAssistantListening: false,
     bookVoiceAssistantBusy: false,
+    bookVoiceAssistantConversationActive: false,
+    bookVoiceAssistantReplyText: "",
+    bookVoiceLiveText: "",
+    bookVoiceTranscriptLines: [],
+    bookVoiceAudioLevelPercent: 0,
+    bookVoiceCaptureStateText: "麦克风未开始",
     bookVoiceCommandText: "",
     bookVoiceCommandIntentLabel: "",
     bookVoiceCommandSummary: "",

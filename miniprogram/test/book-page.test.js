@@ -231,6 +231,93 @@ function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
+async function flushAsyncWork(rounds = 6) {
+  for (let index = 0; index < rounds; index += 1) {
+    await Promise.resolve();
+  }
+}
+
+function streamingAsrClientForFinal(calls, finalText, partialText = finalText) {
+  return class {
+    constructor(options) {
+      this.options = options;
+      calls.push({ kind: "client", gatewayUrl: options.gatewayUrl });
+    }
+
+    async connect() {
+      calls.push({ kind: "connect" });
+      this.options.callbacks.onStatus("ready");
+    }
+
+    startRecording(options) {
+      calls.push({ kind: "record", options });
+      this.options.callbacks.onStatus("listening");
+      if (partialText) {
+        this.options.callbacks.onPartial(partialText);
+      }
+      void Promise.resolve(this.options.callbacks.onFinal({
+        type: "asr.final",
+        text: finalText,
+        start_ms: 0,
+        end_ms: 1200,
+      })).then(() => {
+        this.options.callbacks.onEvent({ type: "audio.ended", state: "ready" });
+        this.options.callbacks.onStatus("ready");
+      });
+      return true;
+    }
+
+    stopRecording() {
+      calls.push({ kind: "stop" });
+      this.options.callbacks.onStatus("stopping");
+    }
+
+    close() {
+      calls.push({ kind: "close" });
+    }
+
+    configureAutoStop() {}
+  };
+}
+
+function streamingAsrClientForNoVoice(calls) {
+  return class {
+    constructor(options) {
+      this.options = options;
+    }
+
+    async connect() {
+      this.options.callbacks.onStatus("ready");
+    }
+
+    startRecording(options) {
+      calls.push({ kind: "record", options });
+      this.options.callbacks.onStatus("listening");
+      this.options.callbacks.onCaptureStats({
+        state: "recording",
+        frameCount: 0,
+        audioBytesSent: 0,
+        recordingElapsedMs: 3500,
+        audioLevel: 0,
+        silentElapsedMs: 3500,
+        autoStopped: true,
+        autoStopReason: "no_voice",
+      });
+      this.options.callbacks.onEvent({ type: "audio.ended", state: "ready" });
+      this.options.callbacks.onStatus("ready");
+      return true;
+    }
+
+    stopRecording() {
+      calls.push({ kind: "stop" });
+    }
+
+    close() {}
+
+    configureAutoStop() {}
+  };
+}
+
 function planFromChapterUpdates(status, updates) {
   const base = samplePlan(status);
   return {
@@ -257,7 +344,10 @@ function loadBookPage({
   authExports = {},
   voiceApiExports = {},
   voiceSearchExports = {},
+  streamingAsrExports = {},
   ttsExports = {},
+  voiceAuthorizationExports = {},
+  wechatPrivacyExports = {},
 } = {}) {
   mockModule("../services/auth.ts", {
     getMemoirIdentity: async () => {
@@ -311,6 +401,7 @@ function loadBookPage({
     parseMemoirBookVoiceCommand: async () => {
       throw new Error("parseMemoirBookVoiceCommand was not mocked");
     },
+    bookVoiceCommandGatewayUrl: (projectId) => `wss://api.example.test/book/${encodeURIComponent(projectId)}/gateway`,
     updateMemoirBookChapterTitle: async () => {
       throw new Error("updateMemoirBookChapterTitle was not mocked");
     },
@@ -328,6 +419,42 @@ function loadBookPage({
     },
     stopMemoirVoiceSearchRecording: () => {},
     ...voiceSearchExports,
+  });
+  mockModule("../services/memoir-streaming-asr.ts", {
+    MemoirStreamingAsrClient: class {
+      constructor(options) {
+        this.options = options;
+      }
+
+      async connect() {
+        this.options.callbacks.onStatus("ready");
+      }
+
+      startRecording() {
+        this.options.callbacks.onStatus("listening");
+        return true;
+      }
+
+      stopRecording() {
+        this.options.callbacks.onStatus("stopping");
+      }
+
+      close() {}
+
+      configureAutoStop() {}
+    },
+    classifyVoiceClientConnectionError: (message) => ({ kind: "connection", message }),
+    ...streamingAsrExports,
+  });
+  mockModule("../services/voice-authorization.ts", {
+    readVoiceAuthorizationConsent: () => true,
+    syncVoiceAuthorizationConsent: async () => {},
+    VOICE_AUTHORIZATION_PAGE_URL: "/pages/voice-authorization/index",
+    ...voiceAuthorizationExports,
+  });
+  mockModule("../services/wechat-privacy.ts", {
+    ensureRecorderPrivacyAuthorization: async () => {},
+    ...wechatPrivacyExports,
   });
   mockModule("../services/tts-settings.ts", {
     readBookTTSSettings: () => ({ voice: "", speedRatio: 1 }),
@@ -1322,12 +1449,8 @@ test("book page records and previews a voice edit command", async () => {
         return sampleBookVoiceCommandPreview();
       },
     },
-    voiceSearchExports: {
-      recordMemoirVoiceSearchQuery: async (options) => {
-        calls.push({ kind: "record", emptyTranscriptMessage: options.emptyTranscriptMessage });
-        options.onRecordingEnd?.();
-        return "把第一章改名为童年往事";
-      },
+    streamingAsrExports: {
+      MemoirStreamingAsrClient: streamingAsrClientForFinal(calls, "把第一章改名为童年往事"),
     },
   });
   const context = pageContext(page, { projectId: "project/1" });
@@ -1337,12 +1460,17 @@ test("book page records and previews a voice edit command", async () => {
   };
 
   await page.startBookVoiceCommand.call(context);
+  await flushAsyncWork();
 
   assert.deepEqual(calls[0], {
-    kind: "record",
-    emptyTranscriptMessage: "没有识别到修改内容，请换个说法再试",
+    kind: "client",
+    gatewayUrl: "wss://api.example.test/book/project%2F1/gateway",
   });
-  assert.deepEqual(calls[1], {
+  assert.deepEqual(calls[2], {
+    kind: "record",
+    options: { noVoiceActivityTimeoutMs: 3500 },
+  });
+  assert.deepEqual(calls[3], {
     kind: "parse",
     projectId: "project/1",
     data: { text: "把第一章改名为童年往事" },
@@ -1354,8 +1482,11 @@ test("book page records and previews a voice edit command", async () => {
   assert.equal(context.data.bookVoiceAssistantStatusText, "已理解，等待确认");
   assert.equal(context.data.bookVoiceAssistantListening, false);
   assert.equal(context.data.bookVoiceAssistantBusy, false);
-  assert.deepEqual(calls[2], { kind: "toast", title: "已识别" });
-  assert.deepEqual(calls[3], {
+  assert.equal(context.data.bookVoiceAssistantExpanded, true);
+  assert.equal(context.data.bookVoiceTranscriptLines[0].role, "user");
+  assert.equal(context.data.bookVoiceTranscriptLines[0].text, "把第一章改名为童年往事");
+  assert.deepEqual(calls[4], { kind: "toast", title: "已识别" });
+  assert.deepEqual(calls[5], {
     kind: "reply",
     text: "我理解了，准备把「外婆家的童年」改名为「童年往事」。 如果没问题，说确认执行，我再改。",
     options: { autoListenAfterPlayback: true },
@@ -1382,12 +1513,8 @@ test("book page treats voice editing advice as a spoken consultation", async () 
         return consultationPreview;
       },
     },
-    voiceSearchExports: {
-      recordMemoirVoiceSearchQuery: async (options) => {
-        calls.push({ kind: "record", emptyTranscriptMessage: options.emptyTranscriptMessage });
-        options.onRecordingEnd?.();
-        return "第一章是不是太短了";
-      },
+    streamingAsrExports: {
+      MemoirStreamingAsrClient: streamingAsrClientForFinal(calls, "第一章是不是太短了"),
     },
   });
   const context = pageContext(page, { projectId: "project/1" });
@@ -1397,13 +1524,16 @@ test("book page treats voice editing advice as a spoken consultation", async () 
   };
 
   await page.startBookVoiceCommand.call(context);
+  await flushAsyncWork();
 
   assert.equal(context.data.bookVoiceCommandText, "第一章是不是太短了");
   assert.equal(context.data.bookVoiceCommandIntentLabel, "篇幅建议");
   assert.equal(context.data.bookVoiceCommandRequiresConfirmation, false);
   assert.equal(context.data.bookVoiceCommandCanExecute, false);
   assert.equal(context.data.bookVoiceAssistantStatusText, "已给建议");
-  assert.deepEqual(calls[3], {
+  assert.equal(context.data.bookVoiceTranscriptLines[0].role, "user");
+  assert.equal(context.data.bookVoiceTranscriptLines[0].text, "第一章是不是太短了");
+  assert.deepEqual(calls[5], {
     kind: "reply",
     text: "这一章现在明显偏短，建议补一个具体场景或人物对话。",
     options: { autoListenAfterPlayback: true },
@@ -1458,12 +1588,8 @@ test("book page plays assistant reply and auto-listens after playback", async ()
 test("book page keeps pending preview during auto-listen for voice confirmation", async () => {
   const calls = [];
   const { page } = loadBookPage({
-    voiceSearchExports: {
-      recordMemoirVoiceSearchQuery: async (options) => {
-        calls.push({ kind: "record", emptyTranscriptMessage: options.emptyTranscriptMessage });
-        options.onRecordingEnd?.();
-        return "确认执行";
-      },
+    streamingAsrExports: {
+      MemoirStreamingAsrClient: streamingAsrClientForFinal(calls, "确认执行"),
     },
   });
   const context = pageContext(page, { projectId: "project/1" });
@@ -1477,28 +1603,26 @@ test("book page keeps pending preview during auto-listen for voice confirmation"
   };
 
   await page.startBookVoiceCommand.call(context, { autoTriggered: true });
+  await flushAsyncWork();
 
   assert.equal(context.data.bookVoiceCommandPreview.intent, "rename_chapter");
   assert.equal(context.data.bookVoiceCommandText, "确认执行");
-  assert.deepEqual(calls[1], {
+  assert.deepEqual(calls[3], {
     kind: "reply",
     text: "好的，我按刚才理解的修改。",
     options: { autoListenAfterPlayback: false },
   });
-  assert.deepEqual(calls[2], {
+  assert.deepEqual(calls[4], {
     kind: "execute",
     options: { confirmedByVoice: true, autoListenAfterExecution: true },
   });
 });
 
 test("book page pauses voice conversation when no speech is detected", async () => {
+  const calls = [];
   const { page } = loadBookPage({
-    voiceSearchExports: {
-      recordMemoirVoiceSearchQuery: async (options) => {
-        options.onNoVoiceAutoStop?.();
-        options.onRecordingEnd?.();
-        throw new Error(options.noVoiceTranscriptMessage);
-      },
+    streamingAsrExports: {
+      MemoirStreamingAsrClient: streamingAsrClientForNoVoice(calls),
     },
   });
   const context = pageContext(page, { projectId: "project/1" });
@@ -1643,14 +1767,35 @@ test("book page replaces old voice undo state when applying a new preview", () =
 test("book page stops active voice edit recording on second tap", async () => {
   const stops = [];
   const { page } = loadBookPage({
-    voiceSearchExports: {
-      stopMemoirVoiceSearchRecording: () => stops.push("stop"),
+    streamingAsrExports: {
+      MemoirStreamingAsrClient: class {
+        constructor(options) {
+          this.options = options;
+        }
+
+        async connect() {
+          this.options.callbacks.onStatus("ready");
+        }
+
+        startRecording() {
+          this.options.callbacks.onStatus("listening");
+          return true;
+        }
+
+        stopRecording() {
+          stops.push("stop");
+        }
+
+        close() {}
+
+        configureAutoStop() {}
+      },
     },
   });
-  const context = pageContext(page, {
-    bookVoiceAssistantListening: true,
-    bookVoiceAssistantStatusText: "我在听，请说想怎么改",
-  });
+  const context = pageContext(page, { projectId: "project/1" });
+  page.applyPlan.call(context, samplePlan("confirmed"));
+
+  await page.startBookVoiceCommand.call(context);
 
   await page.startBookVoiceCommand.call(context);
 
