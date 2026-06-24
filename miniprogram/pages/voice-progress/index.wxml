@@ -2,7 +2,7 @@
   <view class="top-row">
     <view>
       <text class="page-title">访谈进度</text>
-      <text class="page-subtitle">按语音会话沉淀素材和追问线索</text>
+      <text class="page-subtitle">{{projectTitle ? (projectTitle + " · 当前回忆录") : "当前回忆录的访谈进度"}}</text>
     </view>
     <button class="refresh-button" loading="{{loading}}" disabled="{{loading}}" bindtap="loadProgress">刷新</button>
   </view>

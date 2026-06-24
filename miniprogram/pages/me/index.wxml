@@ -140,7 +140,7 @@
         <view class="project-overview-main">
           <text class="action-title">{{projectTitle || "尚未创建回忆录"}}</text>
           <text class="action-meta">
-            {{projectCount ? ("共 " + projectCount + " 本 · " + (sessionCount ? ("已访谈 " + sessionCount + " 次") : "还没有访谈")) : "创建第一本回忆录并设置讲述资料"}}
+            {{projectCount ? ("当前回忆录 · " + (sessionCount ? ("已访谈 " + sessionCount + " 次") : "还没有访谈")) : "创建第一本回忆录并设置讲述资料"}}
           </text>
         </view>
       </view>

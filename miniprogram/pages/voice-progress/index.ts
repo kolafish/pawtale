@@ -8,6 +8,7 @@ import {
   getMemoirVoiceProgress,
   listMemoirVoiceSessions,
 } from "../../services/memoir-voice-api";
+import { getMemoirIdentity } from "../../services/auth";
 import { ApiError } from "../../services/request";
 
 interface VoiceSessionSummaryView extends MemoirVoiceSessionSummary {
@@ -28,6 +29,8 @@ interface ModuleProgressView extends MemoirVoiceModuleProgress {
 interface ProgressData {
   loading: boolean;
   error: string;
+  activeProjectId: string;
+  projectTitle: string;
   progress: MemoirVoiceProgressResponse;
   sessions: VoiceSessionSummaryView[];
   modules: ModuleProgressView[];
@@ -158,6 +161,8 @@ Page<ProgressData, {
   data: {
     loading: false,
     error: "",
+    activeProjectId: "",
+    projectTitle: "",
     progress: EMPTY_PROGRESS,
     sessions: [],
     modules: [],
@@ -173,11 +178,25 @@ Page<ProgressData, {
     }
     this.setData({ loading: true, error: "" });
     try {
+      const identity = await getMemoirIdentity();
+      const activeProjectId = identity.active_project_id || identity.active_project?.id || "";
+      if (!activeProjectId) {
+        this.setData({
+          activeProjectId: "",
+          projectTitle: "",
+          progress: EMPTY_PROGRESS,
+          sessions: [],
+          modules: [],
+        });
+        return;
+      }
       const [progress, sessionList] = await Promise.all([
-        getMemoirVoiceProgress(),
-        listMemoirVoiceSessions({ limit: 30 }),
+        getMemoirVoiceProgress(activeProjectId),
+        listMemoirVoiceSessions({ projectId: activeProjectId, limit: 30 }),
       ]);
       this.setData({
+        activeProjectId,
+        projectTitle: identity.active_project?.title || "当前回忆录",
         progress,
         sessions: sessionList.items.map(toSessionView),
         modules: progress.modules.map(toModuleView),

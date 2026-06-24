@@ -213,6 +213,7 @@ test("me treats wechat-only users as logged in and shows wechat profile", async 
 test("me keeps existing voice stats while refreshing the same project", async () => {
   const progress = deferred();
   let progressRequested = false;
+  const progressProjectIds = [];
   const { page } = loadMePage({
     authExports: {
       getMemoirIdentity: async () => ({
@@ -232,8 +233,9 @@ test("me keeps existing voice stats while refreshing the same project", async ()
       }),
     },
     voiceApiExports: {
-      getMemoirVoiceProgress: async () => {
+      getMemoirVoiceProgress: async (projectId) => {
         progressRequested = true;
+        progressProjectIds.push(projectId);
         return progress.promise;
       },
     },
@@ -260,6 +262,7 @@ test("me keeps existing voice stats while refreshing the same project", async ()
   assert.equal(context.data.totalUserCharCount, 1200);
   assert.equal(context.data.totalAudioText, "18 分 2 秒");
   assert.equal(context.data.voiceStatsLoading, true);
+  assert.deepEqual(progressProjectIds, ["project-1"]);
 
   progress.resolve({
     session_count: 7,
@@ -274,6 +277,56 @@ test("me keeps existing voice stats while refreshing the same project", async ()
   assert.equal(context.data.totalUserCharCount, 1500);
   assert.equal(context.data.totalAudioText, "20 分 0 秒");
   assert.equal(context.data.voiceStatsLoading, false);
+});
+
+test("me loads voice stats only for the active project", async () => {
+  const progressProjectIds = [];
+  const { page } = loadMePage({
+    authExports: {
+      getMemoirIdentity: async () => ({
+        id: "user-1",
+        email: "memoir-author@example.com",
+        password_login_enabled: true,
+        display_name: "作者",
+        avatar_url: "",
+        created_at: "2026-06-15T00:00:00",
+        active_project_id: "project-current",
+        active_project: {
+          id: "project-current",
+          title: "当前回忆录",
+          metadata_json: {},
+        },
+        projects: [
+          { id: "project-current", title: "当前回忆录" },
+          { id: "project-other", title: "其他回忆录" },
+        ],
+      }),
+    },
+    voiceApiExports: {
+      getMemoirVoiceProgress: async (projectId) => {
+        progressProjectIds.push(projectId);
+        return {
+          session_count: 4,
+          utterance_count: 16,
+          total_user_char_count: 640,
+          total_audio_seconds: 360,
+        };
+      },
+    },
+  });
+  const context = {
+    ...page,
+    ...pageContext(page),
+  };
+
+  await page.loadMe.call(context);
+
+  assert.deepEqual(progressProjectIds, ["project-current"]);
+  assert.equal(context.data.projectTitle, "当前回忆录");
+  assert.equal(context.data.projectCount, 2);
+  assert.equal(context.data.voiceStatsProjectId, "project-current");
+  assert.equal(context.data.sessionCount, 4);
+  assert.equal(context.data.totalAudioText, "6 分 0 秒");
 });
 
 test("me shows voice authorization status and opens agreement", () => {

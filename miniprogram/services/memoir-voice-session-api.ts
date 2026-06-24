@@ -73,7 +73,7 @@ export function listMemoirVoiceSessions(
   );
 }
 
-export function getMemoirVoiceProgress(projectId?: string): Promise<MemoirVoiceProgressResponse> {
+export function getMemoirVoiceProgress(projectId: string): Promise<MemoirVoiceProgressResponse> {
   return memoirRequest<MemoirVoiceProgressResponse>(
     `/api/mobile/memoir/voice-progress${queryString({ project_id: projectId })}`,
   );
