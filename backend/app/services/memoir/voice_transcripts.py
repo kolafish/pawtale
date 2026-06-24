@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from fastapi import HTTPException
-from sqlalchemy import false, func, or_, select
+from sqlalchemy import bindparam, delete, false, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased, selectinload
 
@@ -47,6 +47,8 @@ from app.services.memoir.book_plan_sources import (
 SYSTEM_PROMPT = "你是一位谨慎的中文口述稿校对助手，只做忠于原话的识别文字校正和口头语清理。"
 AI_CLEANUP_UNAVAILABLE_MESSAGE = "AI 服务暂时不可用，请稍后重试。"
 logger = logging.getLogger(__name__)
+MAX_TRANSCRIPT_VERSIONS_PER_UTTERANCE_TYPE = 3
+TRANSCRIPT_FTS_MIN_TERM_LENGTH = 3
 _FILLER = r"(?:嗯+|啊+|呃+|额+|那个|这个|就是)"
 _REPEATED_FILLERS_RE = re.compile(rf"(?:{_FILLER}[\s，,、]*){{2,}}")
 _BOUNDARY_FILLER_RE = re.compile(rf"(^|[。！？!?；;，,、]\s*)(?:嗯+|啊+|呃+|额+|就是)[\s，,、]*")
@@ -211,6 +213,30 @@ def _search_terms(search_query: str | None) -> list[str]:
     return [term for term in re.split(r"\s+", search_query.strip()) if term][:8]
 
 
+def _fts_match_query(term: str) -> str:
+    escaped = term.replace('"', '""')
+    return f'"{escaped}"'
+
+
+def _transcript_text_search_filter(term: str):
+    if len(term) < TRANSCRIPT_FTS_MIN_TERM_LENGTH:
+        pattern = _like_pattern(term)
+        return or_(
+            MemoirVoiceUtterance.transcript_raw.ilike(pattern, escape="\\"),
+            MemoirVoiceUtterance.transcript_edited.ilike(pattern, escape="\\"),
+        )
+    return text(
+        """
+        EXISTS (
+            SELECT 1
+            FROM memoir_voice_utterances_fts
+            WHERE memoir_voice_utterances_fts.rowid = memoir_voice_utterances.rowid
+                AND memoir_voice_utterances_fts MATCH :fts_query
+        )
+        """
+    ).bindparams(bindparam("fts_query", _fts_match_query(term), unique=True))
+
+
 def _question_search_filter(pattern: str):
     user_message = aliased(MemoirChatMessage)
     question_message = aliased(MemoirChatMessage)
@@ -245,10 +271,34 @@ def _question_search_filter(pattern: str):
 def _search_filter(term: str):
     pattern = _like_pattern(term)
     return or_(
-        MemoirVoiceUtterance.transcript_raw.ilike(pattern, escape="\\"),
-        MemoirVoiceUtterance.transcript_edited.ilike(pattern, escape="\\"),
+        _transcript_text_search_filter(term),
         _question_search_filter(pattern),
     )
+
+
+async def prune_transcript_versions_for_utterance(
+    db: AsyncSession,
+    *,
+    utterance_id: str,
+    version_type: MemoirTranscriptVersionType | str,
+    keep: int = MAX_TRANSCRIPT_VERSIONS_PER_UTTERANCE_TYPE,
+) -> int:
+    version_value = version_type.value if isinstance(version_type, MemoirTranscriptVersionType) else version_type
+    stale_ids = (
+        await db.execute(
+            select(MemoirTranscriptVersion.id)
+            .where(
+                MemoirTranscriptVersion.source_artifact_id == utterance_id,
+                MemoirTranscriptVersion.version_type == version_value,
+            )
+            .order_by(MemoirTranscriptVersion.created_at.desc(), MemoirTranscriptVersion.id.desc())
+            .offset(max(1, keep))
+        )
+    ).scalars().all()
+    if not stale_ids:
+        return 0
+    result = await db.execute(delete(MemoirTranscriptVersion).where(MemoirTranscriptVersion.id.in_(stale_ids)))
+    return int(result.rowcount or 0)
 
 
 async def _included_utterance_ids_for_filter(
@@ -476,6 +526,7 @@ async def _apply_edited_text(
 ) -> MemoirVoiceTranscriptItemResponse:
     version = MemoirTranscriptVersion(
         voice_session_id=utterance.voice_session_id,
+        source_artifact_id=utterance.id,
         version_type=version_type.value,
         content=content,
         provider=provider,
@@ -488,6 +539,11 @@ async def _apply_edited_text(
         utterance.chat_message.content_text = content
         utterance.chat_message.content_status = MemoirChatContentStatus.CORRECTED.value
         utterance.chat_message.transcript_version_id = version.id
+    await prune_transcript_versions_for_utterance(
+        db,
+        utterance_id=utterance.id,
+        version_type=version_type,
+    )
     await db.commit()
     inclusions = await _book_inclusions_by_utterance_ids(
         db,

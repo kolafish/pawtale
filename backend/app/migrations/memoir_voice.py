@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 from sqlalchemy.schema import Column, Table
@@ -15,6 +17,13 @@ REALTIME_VOICE_TABLES = (
     "memoir_transcript_versions",
     "memoir_voice_authorization_consents",
 )
+TRANSCRIPT_FTS_TABLE = "memoir_voice_utterances_fts"
+TRANSCRIPT_FTS_TRIGGERS = (
+    "memoir_voice_utterances_fts_ai",
+    "memoir_voice_utterances_fts_ad",
+    "memoir_voice_utterances_fts_au",
+)
+TRANSCRIPT_VERSION_RETENTION_LIMIT = 3
 
 
 def _memoir_voice_tables_from_metadata() -> tuple[Table, ...]:
@@ -50,6 +59,14 @@ async def _table_exists(conn, table: str) -> bool:
     return result.scalar_one_or_none() is not None
 
 
+async def _trigger_exists(conn, trigger: str) -> bool:
+    result = await conn.execute(
+        text("SELECT 1 FROM sqlite_master WHERE type = 'trigger' AND name = :trigger"),
+        {"trigger": trigger},
+    )
+    return result.scalar_one_or_none() is not None
+
+
 async def _table_column_schema(conn, table: str) -> list[dict[str, object]]:
     result = await conn.execute(text(f"PRAGMA table_info({table})"))
     return [
@@ -78,10 +95,12 @@ async def rebuild_memoir_voice_schema(engine: AsyncEngine) -> None:
     tables = _memoir_voice_tables_from_metadata()
     async with engine.begin() as conn:
         await conn.execute(text("PRAGMA foreign_keys=OFF"))
+        await _drop_transcript_fts(conn)
         for table in reversed(tables):
             await conn.run_sync(lambda sync_conn, table=table: table.drop(sync_conn, checkfirst=True))
         for table in tables:
             await conn.run_sync(lambda sync_conn, table=table: table.create(sync_conn, checkfirst=True))
+        await _ensure_transcript_fts(conn)
         await conn.execute(text("PRAGMA foreign_keys=ON"))
 
 
@@ -91,11 +110,169 @@ async def _create_metadata_table(conn, table_name: str) -> None:
     await conn.run_sync(lambda sync_conn: table.create(sync_conn, checkfirst=True))
 
 
+async def _drop_transcript_fts(conn) -> None:
+    for trigger in TRANSCRIPT_FTS_TRIGGERS:
+        await conn.execute(text(f"DROP TRIGGER IF EXISTS {trigger}"))
+    await conn.execute(text(f"DROP TABLE IF EXISTS {TRANSCRIPT_FTS_TABLE}"))
+
+
+async def _ensure_transcript_fts(conn) -> dict[str, list[str]]:
+    changed_tables: list[str] = []
+    changed_triggers: list[str] = []
+    if not await _table_exists(conn, "memoir_voice_utterances"):
+        return {"changed_tables": changed_tables, "changed_triggers": changed_triggers}
+
+    created_fts = not await _table_exists(conn, TRANSCRIPT_FTS_TABLE)
+    await conn.execute(
+        text(
+            f"""
+            CREATE VIRTUAL TABLE IF NOT EXISTS {TRANSCRIPT_FTS_TABLE}
+            USING fts5(
+                transcript_raw,
+                transcript_edited,
+                content='memoir_voice_utterances',
+                content_rowid='rowid',
+                tokenize='trigram'
+            )
+            """
+        )
+    )
+    if created_fts:
+        changed_tables.append(TRANSCRIPT_FTS_TABLE)
+        await conn.execute(text(f"INSERT INTO {TRANSCRIPT_FTS_TABLE}({TRANSCRIPT_FTS_TABLE}) VALUES('rebuild')"))
+
+    trigger_sql = {
+        "memoir_voice_utterances_fts_ai": f"""
+            CREATE TRIGGER IF NOT EXISTS memoir_voice_utterances_fts_ai
+            AFTER INSERT ON memoir_voice_utterances
+            BEGIN
+                INSERT INTO {TRANSCRIPT_FTS_TABLE}(rowid, transcript_raw, transcript_edited)
+                VALUES (new.rowid, new.transcript_raw, new.transcript_edited);
+            END
+        """,
+        "memoir_voice_utterances_fts_ad": f"""
+            CREATE TRIGGER IF NOT EXISTS memoir_voice_utterances_fts_ad
+            AFTER DELETE ON memoir_voice_utterances
+            BEGIN
+                INSERT INTO {TRANSCRIPT_FTS_TABLE}({TRANSCRIPT_FTS_TABLE}, rowid, transcript_raw, transcript_edited)
+                VALUES ('delete', old.rowid, old.transcript_raw, old.transcript_edited);
+            END
+        """,
+        "memoir_voice_utterances_fts_au": f"""
+            CREATE TRIGGER IF NOT EXISTS memoir_voice_utterances_fts_au
+            AFTER UPDATE ON memoir_voice_utterances
+            BEGIN
+                INSERT INTO {TRANSCRIPT_FTS_TABLE}({TRANSCRIPT_FTS_TABLE}, rowid, transcript_raw, transcript_edited)
+                VALUES ('delete', old.rowid, old.transcript_raw, old.transcript_edited);
+                INSERT INTO {TRANSCRIPT_FTS_TABLE}(rowid, transcript_raw, transcript_edited)
+                VALUES (new.rowid, new.transcript_raw, new.transcript_edited);
+            END
+        """,
+    }
+    for trigger, sql in trigger_sql.items():
+        created_trigger = not await _trigger_exists(conn, trigger)
+        await conn.execute(text(sql))
+        if created_trigger:
+            changed_triggers.append(trigger)
+
+    return {"changed_tables": changed_tables, "changed_triggers": changed_triggers}
+
+
+def _raw_asr_version_id(metadata_json: object) -> str | None:
+    if metadata_json is None:
+        return None
+    value = metadata_json
+    if isinstance(metadata_json, str):
+        try:
+            value = json.loads(metadata_json)
+        except json.JSONDecodeError:
+            return None
+    if not isinstance(value, dict):
+        return None
+    version_id = value.get("asr_transcript_version_id")
+    return version_id if isinstance(version_id, str) and version_id else None
+
+
+async def _backfill_transcript_version_source_artifacts(conn) -> int:
+    if not (
+        await _table_exists(conn, "memoir_voice_utterances")
+        and await _table_exists(conn, "memoir_chat_messages")
+        and await _table_exists(conn, "memoir_transcript_versions")
+    ):
+        return 0
+    rows = (
+        await conn.execute(
+            text(
+                """
+                SELECT
+                    memoir_voice_utterances.id,
+                    memoir_chat_messages.transcript_version_id,
+                    memoir_chat_messages.metadata_json
+                FROM memoir_voice_utterances
+                JOIN memoir_chat_messages
+                    ON memoir_voice_utterances.chat_message_id = memoir_chat_messages.id
+                """
+            )
+        )
+    ).fetchall()
+    changed_rows = 0
+    for utterance_id, corrected_version_id, metadata_json in rows:
+        version_ids = [
+            version_id
+            for version_id in (corrected_version_id, _raw_asr_version_id(metadata_json))
+            if version_id
+        ]
+        for version_id in dict.fromkeys(version_ids):
+            result = await conn.execute(
+                text(
+                    """
+                    UPDATE memoir_transcript_versions
+                    SET source_artifact_id = :utterance_id
+                    WHERE id = :version_id
+                        AND source_artifact_id IS NULL
+                    """
+                ),
+                {"utterance_id": utterance_id, "version_id": version_id},
+            )
+            changed_rows += int(result.rowcount or 0)
+    return changed_rows
+
+
+async def _prune_transcript_versions(conn) -> int:
+    if not await _table_exists(conn, "memoir_transcript_versions"):
+        return 0
+    delete_result = await conn.execute(
+        text(
+            """
+            DELETE FROM memoir_transcript_versions
+            WHERE id IN (
+                SELECT id
+                FROM (
+                    SELECT
+                        id,
+                        row_number() OVER (
+                            PARTITION BY source_artifact_id, version_type
+                            ORDER BY created_at DESC, id DESC
+                        ) AS version_rank
+                    FROM memoir_transcript_versions
+                    WHERE source_artifact_id IS NOT NULL
+                )
+                WHERE version_rank > :retention_limit
+            )
+            """
+        ),
+        {"retention_limit": TRANSCRIPT_VERSION_RETENTION_LIMIT},
+    )
+    return int(delete_result.rowcount or 0)
+
+
 async def migrate_memoir_voice_schema(engine: AsyncEngine) -> dict[str, list[str]]:
     """Repair known realtime voice schema drift in existing SQLite databases."""
     changed_tables: list[str] = []
     changed_columns: list[str] = []
     changed_indexes: list[str] = []
+    changed_triggers: list[str] = []
+    changed_rows: list[str] = []
     async with engine.begin() as conn:
         if not await _table_exists(conn, "memoir_voice_authorization_consents"):
             await _create_metadata_table(conn, "memoir_voice_authorization_consents")
@@ -110,6 +287,11 @@ async def migrate_memoir_voice_schema(engine: AsyncEngine) -> dict[str, list[str
                 text("ALTER TABLE memoir_transcript_versions ADD COLUMN voice_session_id VARCHAR(36)")
             )
             changed_columns.append("memoir_transcript_versions.voice_session_id")
+        if "source_artifact_id" not in columns:
+            await conn.execute(
+                text("ALTER TABLE memoir_transcript_versions ADD COLUMN source_artifact_id VARCHAR(36)")
+            )
+            changed_columns.append("memoir_transcript_versions.source_artifact_id")
 
         await conn.execute(
             text(
@@ -119,10 +301,31 @@ async def migrate_memoir_voice_schema(engine: AsyncEngine) -> dict[str, list[str
         )
         changed_indexes.append("ix_memoir_transcript_versions_voice_session_id")
 
+        await conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_memoir_transcript_versions_source_type_created "
+                "ON memoir_transcript_versions (source_artifact_id, version_type, created_at)"
+            )
+        )
+        changed_indexes.append("ix_memoir_transcript_versions_source_type_created")
+
+        fts_result = await _ensure_transcript_fts(conn)
+        changed_tables.extend(fts_result["changed_tables"])
+        changed_triggers.extend(fts_result["changed_triggers"])
+
+        backfilled = await _backfill_transcript_version_source_artifacts(conn)
+        if backfilled:
+            changed_rows.append(f"memoir_transcript_versions.source_artifact_id:{backfilled}")
+        pruned = await _prune_transcript_versions(conn)
+        if pruned:
+            changed_rows.append(f"memoir_transcript_versions.pruned:{pruned}")
+
     return {
         "changed_tables": changed_tables,
         "changed_columns": changed_columns,
         "changed_indexes": changed_indexes,
+        "changed_triggers": changed_triggers,
+        "changed_rows": changed_rows,
     }
 
 

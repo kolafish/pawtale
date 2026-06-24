@@ -134,6 +134,8 @@ async def create_test_voice_transcript(
         provider_payload_json={"source": "test"},
     )
     test_db.add(utterance)
+    await test_db.flush()
+    version.source_artifact_id = utterance.id
     await test_db.commit()
     audio_relative_path = Path(audio_file.storage_path).relative_to(Path("memoir") / "audio")
     return {
