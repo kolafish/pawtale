@@ -10,6 +10,8 @@ import {
 
 export type AssistantTurnPipelineStage = "acknowledgement" | "question";
 
+const ACKNOWLEDGEMENT_BRIDGE_WAIT_MS = 900;
+
 export interface AssistantTurnPipelineStep {
   stage: AssistantTurnPipelineStage;
   response: MemoirVoiceFollowUpResponse;
@@ -47,7 +49,10 @@ export async function runAcknowledgedQuestionPipeline(
   request.onStep({
     stage: "acknowledgement",
     response: acknowledgement,
-    item: assistantTurnQueueItem(acknowledgement, { autoListenAfterPlayback: false }),
+    item: assistantTurnQueueItem(acknowledgement, {
+      autoListenAfterPlayback: false,
+      waitForNextTurnBeforePlaybackMs: ACKNOWLEDGEMENT_BRIDGE_WAIT_MS,
+    }),
   });
   if (cancelled(request.isCancelled)) {
     return { cancelled: true, acknowledgement };

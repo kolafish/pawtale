@@ -333,7 +333,7 @@ async def test_mobile_memoir_voice_acknowledgement_saves_short_non_answer_turn(
         {
           "primary_intent": "acknowledge",
           "intent_tags": ["acknowledge", "encourage_continue"],
-          "speech_text": "您说的院子和摘菜，一下子就有生活气了。",
+          "speech_text": "嗯，这段日子听着很有生活气。",
           "expects_answer": false
         }
         """
@@ -350,7 +350,7 @@ async def test_mobile_memoir_voice_acknowledgement_saves_short_non_answer_turn(
 
     assert response.status_code == 200
     data = response.json()
-    assert data["follow_up_text"] == "您说的院子和摘菜，一下子就有生活气了。"
+    assert data["follow_up_text"] == "嗯，这段日子听着很有生活气。"
     assert data["primary_intent"] == "acknowledge"
     assert data["intent_tags"] == ["acknowledge", "encourage_continue"]
     assert data["expects_answer"] is False
@@ -361,6 +361,8 @@ async def test_mobile_memoir_voice_acknowledgement_saves_short_non_answer_turn(
     assert data["message"]["metadata_json"]["max_tokens"] == 120
     assert fake_ai.calls[0]["kwargs"]["max_tokens"] == 120
     assert "不要问问题" in fake_ai.calls[0]["user_prompt"]
+    assert "不要复述整句" in fake_ai.calls[0]["user_prompt"]
+    assert "不要把叙述者刚说过的人名、地点、事件串起来再说一遍" in fake_ai.calls[0]["user_prompt"]
 
 
 async def test_mobile_memoir_voice_follow_up_after_acknowledgement_skips_repeated_ack(
@@ -399,7 +401,16 @@ async def test_mobile_memoir_voice_follow_up_after_acknowledgement_skips_repeate
     test_db.add_all([user_message, acknowledgement])
     await test_db.commit()
     await test_db.refresh(acknowledgement)
-    fake_ai = FakeFollowUpAI("那时候摘菜，一般是您先动手，还是外婆先招呼您？")
+    fake_ai = FakeFollowUpAI(
+        """
+        {
+          "primary_intent": "acknowledge",
+          "intent_tags": ["acknowledge", "encourage_continue", "follow_up"],
+          "speech_text": "那时候一般是您先动手，还是外婆先招呼您？",
+          "expects_answer": false
+        }
+        """
+    )
     monkeypatch.setattr(
         "app.services.memoir.voice_followups.get_ai_service",
         lambda model=None: fake_ai,
@@ -415,7 +426,14 @@ async def test_mobile_memoir_voice_follow_up_after_acknowledgement_skips_repeate
     assert data["message"]["turn_index"] == 2
     assert data["message"]["metadata_json"]["turn_pipeline_stage"] == "question"
     assert data["message"]["metadata_json"]["acknowledgement_message_id"] == acknowledgement.id
-    assert "不要重复上一条承接" in fake_ai.calls[0]["user_prompt"]
+    assert data["primary_intent"] == "follow_up"
+    assert data["intent_tags"] == ["follow_up"]
+    assert data["expects_answer"] is True
+    assert data["message"]["metadata_json"]["primary_intent"] == "follow_up"
+    assert data["message"]["metadata_json"]["intent_tags"] == ["follow_up"]
+    assert data["message"]["metadata_json"]["expects_answer"] is True
+    assert "不要再承接、认可、概括或复述叙述者刚才说的内容" in fake_ai.calls[0]["user_prompt"]
+    assert "intent_tags 不要包含 acknowledge、encourage_continue、reflect_summary" in fake_ai.calls[0]["user_prompt"]
 
 
 async def test_mobile_memoir_voice_follow_up_rejects_invalid_acknowledgement_message(

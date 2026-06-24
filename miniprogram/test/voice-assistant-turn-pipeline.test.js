@@ -59,18 +59,21 @@ test("assistant turn pipeline emits acknowledgement before question", async () =
     messageId: step.item.messageId,
     autoListenAfterPlayback: step.item.autoListenAfterPlayback,
     expectsAnswer: step.item.expectsAnswer,
+    waitForNextTurnBeforePlaybackMs: step.item.waitForNextTurnBeforePlaybackMs,
   })), [
     {
       stage: "acknowledgement",
       messageId: "ack-1",
       autoListenAfterPlayback: false,
       expectsAnswer: false,
+      waitForNextTurnBeforePlaybackMs: 900,
     },
     {
       stage: "question",
       messageId: "question-1",
       autoListenAfterPlayback: true,
       expectsAnswer: true,
+      waitForNextTurnBeforePlaybackMs: 0,
     },
   ]);
 });
