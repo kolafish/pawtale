@@ -30,7 +30,6 @@ const STREAMING_ENCODE_BIT_RATE = 96000;
 const SOCKET_CONNECT_TIMEOUT_MS = 10000;
 const AUDIO_END_TIMEOUT_MS = 15000;
 const SESSION_STOP_TIMEOUT_MS = 8000;
-const RECORDER_STOP_FALLBACK_MS = 1200;
 const DEFAULT_SILENCE_LEVEL_THRESHOLD = 0.015;
 const DEFAULT_MIN_AUTO_STOP_RECORDING_MS = 1200;
 const MIN_VOICE_ACTIVITY_MS = 240;
@@ -51,7 +50,6 @@ export type VoiceChatConnectionStatus =
 export interface MemoirStreamingAsrCallbacks {
   onStatus(status: VoiceChatConnectionStatus): void;
   onCaptureStats?(stats: MemoirCaptureStats): void;
-  onDiagnostic?(event: MemoirStreamingAsrDiagnosticEvent): void;
   onEvent(event: VoiceGatewayServerEvent): void;
   onPartial(text: string): void;
   onFinal(event: VoiceGatewayServerEvent): void;
@@ -60,12 +58,6 @@ export interface MemoirStreamingAsrCallbacks {
 
 export type MemoirCaptureState = "idle" | "opening" | "recording" | "stopping" | "error";
 export type MemoirAutoStopReason = "silence_after_voice" | "no_voice";
-export type MemoirDiagnosticValue = string | number | boolean | null | undefined;
-
-export interface MemoirStreamingAsrDiagnosticEvent {
-  name: string;
-  data?: Record<string, MemoirDiagnosticValue>;
-}
 
 export interface MemoirCaptureStats {
   state: MemoirCaptureState;
@@ -118,7 +110,6 @@ export class MemoirStreamingAsrClient {
   private autoStopReason: MemoirAutoStopReason | "" = "";
   private noVoiceActivityTimeoutMs = 0;
   private gatewayState: VoiceGatewayState | undefined;
-  private recorderStopTimer: ReturnType<typeof setTimeout> | null = null;
   private noVoiceActivityTimer: ReturnType<typeof setTimeout> | null = null;
   private closePromise: Promise<void> | null = null;
   private waiters: Array<{
@@ -149,7 +140,6 @@ export class MemoirStreamingAsrClient {
     this.closed = false;
     this.options.callbacks.onStatus("connecting");
     const connectTimeoutMs = this.options.connectTimeoutMs ?? SOCKET_CONNECT_TIMEOUT_MS;
-    this.emitDiagnostic("asr.connect.begin", { connectTimeoutMs });
     let timedOut = false;
     let timeoutTimer: ReturnType<typeof setTimeout> | null = null;
     const timeoutPromise = new Promise<never>((_, reject) => {
@@ -157,14 +147,12 @@ export class MemoirStreamingAsrClient {
         timedOut = true;
         this.closed = true;
         this.socketOpen = false;
-        this.emitDiagnostic("asr.connect.timeout", { connectTimeoutMs });
         this.socketTask?.close({ code: 1000, reason: "voice connection timeout" });
         reject(new Error("语音连接超时"));
       }, connectTimeoutMs);
     });
     const connectPromise = (async () => {
       const cookie = await backendSessionCookieHeader();
-      this.emitDiagnostic("asr.connect.cookie", { hasCookie: Boolean(cookie) });
       if (timedOut || this.closed) {
         throw new Error("语音连接超时");
       }
@@ -178,25 +166,21 @@ export class MemoirStreamingAsrClient {
           settled = true;
           callback();
         };
-        this.emitDiagnostic("asr.socket.connect", { hasCookie: Boolean(cookie) });
         const socketTask = wx.connectSocket({
           url: gatewayUrl,
           header: cookie ? { Cookie: cookie } : {},
           success: () => undefined,
           fail: (error) => {
-            this.emitDiagnostic("asr.socket.fail", { errMsg: error.errMsg || "" });
             settle(() => reject(new Error(error.errMsg || "语音连接失败")));
           },
         });
         this.socketTask = socketTask;
         socketTask.onOpen(() => {
           if (timedOut || this.closed) {
-            this.emitDiagnostic("asr.socket.open.late", { timedOut, closed: this.closed });
             socketTask.close({ code: 1000, reason: "voice connection timeout" });
             return;
           }
           this.socketOpen = true;
-          this.emitDiagnostic("asr.socket.open");
           this.options.callbacks.onStatus("ready");
           this.emitCaptureStats("idle");
           settle(resolve);
@@ -211,11 +195,6 @@ export class MemoirStreamingAsrClient {
             return;
           }
           const errorInfo = classifyVoiceClientConnectionError(error.errMsg || "语音连接错误");
-          this.emitDiagnostic("asr.socket.error", {
-            errMsg: error.errMsg || "",
-            code: errorInfo.code,
-            kind: errorInfo.kind,
-          });
           settle(() => reject(new Error(errorInfo.message)));
           this.rejectWaiters(errorInfo.message);
           this.options.callbacks.onError(errorInfo.message, errorInfo);
@@ -223,7 +202,6 @@ export class MemoirStreamingAsrClient {
         });
         socketTask.onClose(() => {
           this.socketOpen = false;
-          this.emitDiagnostic("asr.socket.close", { closed: this.closed });
           settle(() => reject(new Error("语音连接已关闭")));
           this.rejectWaiters("语音连接已关闭");
           if (!this.closed) {
@@ -244,17 +222,8 @@ export class MemoirStreamingAsrClient {
 
   startRecording(recordingOptions: MemoirStartRecordingOptions = {}): boolean {
     if (!this.socketOpen || this.recording) {
-      this.emitDiagnostic("asr.recording.blocked", {
-        socketOpen: this.socketOpen,
-        recording: this.recording,
-        closed: this.closed,
-      });
       return false;
     }
-    this.emitDiagnostic("asr.recording.start.request", {
-      noVoiceActivityTimeoutMs: recordingOptions.noVoiceActivityTimeoutMs ?? 0,
-      autoStopSilenceMs: this.options.autoStopSilenceMs ?? 0,
-    });
     bindRecorderEvents();
     activeClient = this;
     this.recording = true;
@@ -279,11 +248,6 @@ export class MemoirStreamingAsrClient {
     this.captureStartedAtMs = Date.now();
     this.emitCaptureStats("opening");
     try {
-      this.emitDiagnostic("asr.recorder.start.call", {
-        sampleRate: 16000,
-        format: "PCM",
-        frameSize: STREAMING_FRAME_SIZE_KB,
-      });
       recorderManager.start({
         duration: STREAMING_RECORDING_DURATION_MS,
         sampleRate: 16000,
@@ -296,7 +260,6 @@ export class MemoirStreamingAsrClient {
     } catch (error) {
       this.clearNoVoiceActivityTimer();
       const message = error instanceof Error ? error.message : "录音启动失败";
-      this.emitDiagnostic("asr.recorder.start.throw", { message });
       this.handleRecorderError(message);
       return false;
     }
@@ -305,23 +268,14 @@ export class MemoirStreamingAsrClient {
 
   stopRecording(): void {
     if (!this.recording) {
-      this.emitDiagnostic("asr.recording.stop.ignored", { recording: this.recording });
       return;
     }
-    this.emitDiagnostic("asr.recording.stop.request", {
-      recorderStarted: this.recorderStarted,
-      acceptingFrames: this.acceptingFrames,
-      frameCount: this.frameCount,
-    });
     this.clearNoVoiceActivityTimer();
     this.recording = false;
     this.options.callbacks.onStatus("stopping");
     if (this.recorderStarted) {
       this.emitCaptureStats("stopping");
       recorderManager.stop();
-      this.recorderStopTimer = setTimeout(() => {
-        this.finishAudioInput();
-      }, RECORDER_STOP_FALLBACK_MS);
     } else {
       this.acceptingFrames = false;
       this.emitCaptureStats("idle");
@@ -367,15 +321,6 @@ export class MemoirStreamingAsrClient {
 
   handleFrame(frameBuffer: ArrayBuffer, isLastFrame: boolean): void {
     if (!this.socketOpen || !this.recording || !this.acceptingFrames) {
-      if (isLastFrame || frameBuffer.byteLength > 0) {
-        this.emitDiagnostic("asr.frame.ignored", {
-          socketOpen: this.socketOpen,
-          recording: this.recording,
-          acceptingFrames: this.acceptingFrames,
-          byteLength: frameBuffer.byteLength,
-          isLastFrame,
-        });
-      }
       return;
     }
     if (frameBuffer.byteLength > 0) {
@@ -386,14 +331,6 @@ export class MemoirStreamingAsrClient {
       if (autoStopReason) {
         this.autoStopped = true;
         this.autoStopReason = autoStopReason;
-      }
-      if (this.frameCount === 1 || this.frameCount % 20 === 0 || autoStopReason) {
-        this.emitDiagnostic("asr.frame.sent", {
-          frameCount: this.frameCount,
-          audioBytesSent: this.audioBytesSent,
-          autoStopReason,
-          audioLevel: Math.round(this.audioLevel * 1000) / 1000,
-        });
       }
       this.emitCaptureStats("recording");
       this.sendJson({
@@ -411,13 +348,6 @@ export class MemoirStreamingAsrClient {
   }
 
   handleRecorderStopped(): void {
-    this.emitDiagnostic("asr.recorder.onStop", {
-      active: activeClient === this,
-      acceptingFrames: this.acceptingFrames,
-      audioEndSent: this.audioEndSent,
-      recording: this.recording,
-      frameCount: this.frameCount,
-    });
     this.recorderStarted = false;
     if (activeClient !== this || !this.acceptingFrames || this.audioEndSent) {
       if (!this.recording) {
@@ -430,7 +360,6 @@ export class MemoirStreamingAsrClient {
 
   handleRecorderError(message: string): void {
     const readableMessage = wechatPrivacyErrorMessage(message);
-    this.emitDiagnostic("asr.recorder.error", { message, readableMessage });
     this.recording = false;
     this.recorderStarted = false;
     this.clearNoVoiceActivityTimer();
@@ -446,10 +375,8 @@ export class MemoirStreamingAsrClient {
 
   handleRecorderStarted(): void {
     if (activeClient !== this) {
-      this.emitDiagnostic("asr.recorder.onStart.ignored");
       return;
     }
-    this.emitDiagnostic("asr.recorder.onStart", { recording: this.recording });
     this.recorderStarted = true;
     if (!this.recording) {
       this.emitCaptureStats("stopping");
@@ -474,11 +401,6 @@ export class MemoirStreamingAsrClient {
   private handleSocketMessage(data: string | ArrayBuffer): void {
     const raw = typeof data === "string" ? safeJsonParse(data) : null;
     const event = normalizeVoiceGatewayEvent(raw);
-    this.emitDiagnostic("asr.socket.message", {
-      type: event.type,
-      state: event.state,
-      error: event.error,
-    });
     this.gatewayState = event.state || this.gatewayState;
     this.options.callbacks.onEvent(event);
     if (event.type === "session.ready" || event.type === "session.started") {
@@ -534,16 +456,7 @@ export class MemoirStreamingAsrClient {
 
   private finishAudioInput(): void {
     if (this.audioEndSent) {
-      this.emitDiagnostic("asr.audio.end.ignored", { audioEndSent: this.audioEndSent });
       return;
-    }
-    this.emitDiagnostic("asr.audio.end.send", {
-      frameCount: this.frameCount,
-      audioBytesSent: this.audioBytesSent,
-    });
-    if (this.recorderStopTimer) {
-      clearTimeout(this.recorderStopTimer);
-      this.recorderStopTimer = null;
     }
     this.clearNoVoiceActivityTimer();
     this.audioEndSent = true;
@@ -599,10 +512,6 @@ export class MemoirStreamingAsrClient {
     this.closed = true;
     this.closePromise = null;
     this.rejectWaiters("语音连接已关闭");
-    if (this.recorderStopTimer) {
-      clearTimeout(this.recorderStopTimer);
-      this.recorderStopTimer = null;
-    }
     this.clearNoVoiceActivityTimer();
     this.socketTask?.close({ code: 1000, reason: "voice chat closed" });
     this.socketTask = null;
@@ -671,18 +580,8 @@ export class MemoirStreamingAsrClient {
 
   private handleNoVoiceActivityTimeout(): void {
     if (!this.recording || this.audioEndSent || this.autoStopped || this.hasVoiceActivity) {
-      this.emitDiagnostic("asr.noVoice.timeout.ignored", {
-        recording: this.recording,
-        audioEndSent: this.audioEndSent,
-        autoStopped: this.autoStopped,
-        hasVoiceActivity: this.hasVoiceActivity,
-      });
       return;
     }
-    this.emitDiagnostic("asr.noVoice.timeout", {
-      acceptingFrames: this.acceptingFrames,
-      frameCount: this.frameCount,
-    });
     this.autoStopped = true;
     this.autoStopReason = "no_voice";
     this.emitCaptureStats(this.acceptingFrames ? "recording" : "opening");
@@ -711,28 +610,15 @@ export class MemoirStreamingAsrClient {
 
   private sendJson(event: VoiceGatewayClientEvent): void {
     if (!this.socketTask || !this.socketOpen) {
-      this.emitDiagnostic("asr.send.blocked", {
-        type: event.type,
-        hasSocketTask: Boolean(this.socketTask),
-        socketOpen: this.socketOpen,
-      });
       return;
-    }
-    if (event.type !== "audio.frame") {
-      this.emitDiagnostic("asr.send", { type: event.type });
     }
     this.socketTask.send({
       data: JSON.stringify(event),
       fail: (error) => {
         const message = error.errMsg || "语音数据发送失败";
-        this.emitDiagnostic("asr.send.fail", { type: event.type, message });
         this.options.callbacks.onError(message, clientError(message, "connection"));
       },
     });
-  }
-
-  private emitDiagnostic(name: string, data?: Record<string, MemoirDiagnosticValue>): void {
-    this.options.callbacks.onDiagnostic?.({ name, data });
   }
 }
 

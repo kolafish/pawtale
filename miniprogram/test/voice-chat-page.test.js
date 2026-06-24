@@ -315,7 +315,7 @@ test("voice chat does not show microphone connecting while session refresh is pe
   assert.equal(context.data.status, "ready");
 });
 
-test("voice chat retries gateway connection after a failed connect", async () => {
+test("voice chat reconnects on user start after a failed connect", async () => {
   let connectCalls = 0;
   const page = loadVoiceChatPage({
     streamingExports: {
@@ -785,48 +785,6 @@ test("voice chat starts pending auto listening when gateway becomes ready after 
 
   assert.deepEqual(startCalls, [true]);
   assert.equal(context.autoListenPendingAfterPlayback, false);
-  delete global.wx;
-});
-
-test("voice chat copies diagnostics with auto-listen gate state", () => {
-  let clipboardText = "";
-  const toasts = [];
-  global.wx = {
-    setClipboardData(options) {
-      clipboardText = options.data;
-      options.success?.();
-    },
-    showToast(options) {
-      toasts.push(options);
-    },
-  };
-  const page = loadVoiceChatPage();
-  const context = {
-    ...page,
-    data: {
-      ...page.data,
-      voiceSessionId: "voice-1",
-      voiceAuthorizationAgreed: true,
-      autoListenEnabled: true,
-      status: "idle",
-      connecting: false,
-      recording: false,
-    },
-    setData(patch) {
-      this.data = { ...this.data, ...patch };
-    },
-  };
-
-  context.autoListenPendingAfterPlayback = true;
-  const started = page.tryStartAutoListenAfterTTS.call(context);
-  page.copyVoiceDiagnostics.call(context);
-
-  assert.equal(started, false);
-  assert.match(clipboardText, /build=voice-chat-cleanup-2026-06-24/);
-  assert.match(clipboardText, /autoListen\.tryAfterTTS/);
-  assert.match(clipboardText, /hasClient=false/);
-  assert.match(clipboardText, /pendingAfterPlayback=true/);
-  assert.equal(toasts[0].title, "诊断已复制");
   delete global.wx;
 });
 
