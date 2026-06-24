@@ -9,6 +9,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship as orm_relationsh
 from app.database import Base
 from app.domain.memoir.types import (
     MemoirBookChapterDraftStatus,
+    MemoirBookAutoRevisionJobStatus,
     MemoirBookPlanStatus,
     MemoirChatContentStatus,
     MemoirChatMessageRole,
@@ -392,3 +393,39 @@ class MemoirBookOutputVersion(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     output: Mapped[MemoirBookOutput] = orm_relationship("MemoirBookOutput", back_populates="versions")
+
+
+class MemoirBookAutoRevisionJob(Base):
+    __tablename__ = "memoir_book_auto_revision_jobs"
+    __table_args__ = (
+        UniqueConstraint("chapter_id", name="uq_memoir_book_auto_revision_jobs_chapter_id"),
+        CheckConstraint(
+            f"status IN ({_enum_values(MemoirBookAutoRevisionJobStatus)})",
+            name="ck_memoir_book_auto_revision_jobs_status",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    project_id: Mapped[str] = mapped_column(String(36), ForeignKey("projects.id"), nullable=False, index=True)
+    chapter_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("memoir_book_plan_chapters.id"),
+        nullable=False,
+        index=True,
+    )
+    status: Mapped[str] = mapped_column(
+        String(20),
+        default=MemoirBookAutoRevisionJobStatus.PENDING.value,
+        nullable=False,
+        index=True,
+    )
+    run_after: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
+    locked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    error_message: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    metadata_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    project: Mapped["Project"] = orm_relationship("Project")
+    chapter: Mapped[MemoirBookPlanChapter] = orm_relationship("MemoirBookPlanChapter")

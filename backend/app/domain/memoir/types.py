@@ -54,3 +54,11 @@ class MemoirBookPlanStatus(str, Enum):
 class MemoirBookChapterDraftStatus(str, Enum):
     DRAFT = "draft"
     CONFIRMED = "confirmed"
+
+
+class MemoirBookAutoRevisionJobStatus(str, Enum):
+    PENDING = "pending"
+    RUNNING = "running"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    SKIPPED = "skipped"

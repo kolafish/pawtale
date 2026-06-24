@@ -196,6 +196,7 @@ class MemoirBookSourceAssignmentInput(BaseModel):
 
 
 class MemoirBookSourceAssignmentRequest(BaseModel):
+    ai_model: str | None = None
     assignments: list[MemoirBookSourceAssignmentInput]
 
     @field_validator("assignments")
@@ -207,6 +208,7 @@ class MemoirBookSourceAssignmentRequest(BaseModel):
 
 
 class MemoirBookSourceMoveRequest(BaseModel):
+    ai_model: str | None = None
     source_chapter_id: str
     target_chapter_id: str
     utterance_id: str

@@ -32,6 +32,11 @@ from app.services.ai_factory import get_ai_service
 from app.services.ai_types import AITextClient
 from app.services.json_utils import extract_json_payload
 from app.services.memoir.access import load_memoir_project
+from app.services.memoir.book_auto_revision import (
+    remember_project_ai_model as _remember_project_ai_model,
+    schedule_chapter_auto_revision as _schedule_chapter_auto_revision,
+    schedule_chapter_auto_revisions as _schedule_chapter_auto_revisions,
+)
 from app.services.memoir.book_plan_ai import (
     AI_BOOK_PLAN_UNAVAILABLE_MESSAGE,
     CHAPTER_TITLE_SYSTEM_PROMPT,
@@ -218,7 +223,8 @@ async def assign_book_sources_to_chapters(
     project_id: str,
     req: MemoirBookSourceAssignmentRequest,
 ) -> MemoirBookPlanResponse:
-    await load_memoir_project(db, project_id, user_id)
+    project = await load_memoir_project(db, project_id, user_id)
+    _remember_project_ai_model(project, req.ai_model)
     plan = await _load_plan(db, project_id)
     if not plan:
         raise HTTPException(status_code=404, detail="章节规划不存在")
@@ -279,6 +285,12 @@ async def assign_book_sources_to_chapters(
                     {"status_reason": "new_sources_assigned"},
                 )
                 db.add(draft)
+        await _schedule_chapter_auto_revisions(
+            db,
+            project_id=project_id,
+            chapter_ids=affected_chapter_ids,
+            ai_model=req.ai_model,
+        )
 
     await db.commit()
     refreshed = await _load_plan(db, project_id)
@@ -294,7 +306,8 @@ async def move_book_source_between_chapters(
     project_id: str,
     req: MemoirBookSourceMoveRequest,
 ) -> MemoirBookPlanResponse:
-    await load_memoir_project(db, project_id, user_id)
+    project = await load_memoir_project(db, project_id, user_id)
+    _remember_project_ai_model(project, req.ai_model)
     plan = await _load_plan(db, project_id)
     if not plan:
         raise HTTPException(status_code=404, detail="章节规划不存在")
@@ -361,6 +374,12 @@ async def move_book_source_between_chapters(
         db,
         project_id=project_id,
         chapter_ids={source_chapter.id, target_chapter.id},
+    )
+    await _schedule_chapter_auto_revision(
+        db,
+        project_id=project_id,
+        chapter_id=target_chapter.id,
+        ai_model=req.ai_model,
     )
     await db.commit()
     refreshed = await _load_plan(db, project_id)

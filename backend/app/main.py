@@ -1,13 +1,15 @@
+import asyncio
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
-from app.config import validate_runtime_settings
+from app.config import get_settings, validate_runtime_settings
 from app.database import init_db, engine
 from app.migrations.auth import migrate_auth_schema
 from app.migrations.git_sync import migrate_git_sync_schema
 from app.migrations.memoir_voice import assert_memoir_voice_schema, migrate_memoir_voice_schema
 from app.routers import auth_router, github_router, memoir_router, projects_router
+from app.services.memoir.book_auto_revision import auto_revision_worker_loop
 
 
 async def _auto_migrate():
@@ -40,7 +42,18 @@ async def lifespan(app: FastAPI):
     validate_runtime_settings()
     await init_db()
     await _auto_migrate()
-    yield
+    settings = get_settings()
+    stop_event: asyncio.Event | None = None
+    worker_task: asyncio.Task | None = None
+    if settings.memoir_auto_revision_worker_enabled:
+        stop_event = asyncio.Event()
+        worker_task = asyncio.create_task(auto_revision_worker_loop(stop_event))
+    try:
+        yield
+    finally:
+        if stop_event and worker_task:
+            stop_event.set()
+            await worker_task
 
 
 app = FastAPI(

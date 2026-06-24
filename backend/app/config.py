@@ -46,6 +46,12 @@ class Settings(BaseSettings):
     default_ai_model: str = "claude-opus-4"  # deepseek / deepseek-v4-* / doubao-seed-2-0-pro-260215 / claude-*
     ai_text_max_concurrent_requests: int = 3
 
+    # Memoir book auto revision worker
+    memoir_auto_revision_worker_enabled: bool = True
+    memoir_auto_revision_delay_seconds: int = 300
+    memoir_auto_revision_poll_seconds: int = 30
+    memoir_auto_revision_batch_size: int = 3
+
     # GitHub App one-way project backup
     github_app_id: str = ""
     github_app_slug: str = ""
