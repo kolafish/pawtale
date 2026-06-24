@@ -1,9 +1,10 @@
 import type {
   MemoirAssistantTTSRequest,
   MemoirAssistantTTSResponse,
-  MemoirVoiceAcknowledgementRequest,
   MemoirVoiceFollowUpRequest,
   MemoirVoiceFollowUpResponse,
+  MemoirVoiceTurnPlanRequest,
+  MemoirVoiceTurnPlanResponse,
   MemoirVoiceNoAnswerPromptRequest,
   MemoirVoiceProgressResponse,
   MemoirVoiceSessionCreate,
@@ -95,12 +96,12 @@ export function createMemoirVoiceFollowUp(
   );
 }
 
-export function createMemoirVoiceAcknowledgement(
+export function createMemoirVoiceTurnPlan(
   voiceSessionId: string,
-  data: MemoirVoiceAcknowledgementRequest = {},
-): Promise<MemoirVoiceFollowUpResponse> {
-  return memoirRequest<MemoirVoiceFollowUpResponse>(
-    memoirVoiceSessionPath(voiceSessionId, "/acknowledgement"),
+  data: MemoirVoiceTurnPlanRequest = {},
+): Promise<MemoirVoiceTurnPlanResponse> {
+  return memoirRequest<MemoirVoiceTurnPlanResponse>(
+    memoirVoiceSessionPath(voiceSessionId, "/turn-plan"),
     {
       method: "POST",
       data: withSelectedAIModel(data),

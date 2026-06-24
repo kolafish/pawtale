@@ -307,7 +307,7 @@ async def test_mobile_memoir_voice_follow_up_parses_interviewer_turn_json(
     assert fake_ai.calls[0]["kwargs"]["max_tokens"] == 320
 
 
-async def test_mobile_memoir_voice_acknowledgement_saves_short_non_answer_turn(
+async def test_mobile_memoir_voice_turn_plan_can_skip_acknowledgement(
     client,
     test_db,
     monkeypatch,
@@ -321,7 +321,7 @@ async def test_mobile_memoir_voice_acknowledgement_saves_short_non_answer_turn(
         project_id=session["project_id"],
         voice_session_id=session["id"],
         role=MemoirChatMessageRole.USER.value,
-        content_text="我和外婆在院子里一起摘菜。",
+        content_text="那时候我每天放学都要先去井边挑水。",
         content_status=MemoirChatContentStatus.FINAL.value,
         turn_index=0,
         metadata_json={"source": "test"},
@@ -331,10 +331,11 @@ async def test_mobile_memoir_voice_acknowledgement_saves_short_non_answer_turn(
     fake_ai = FakeFollowUpAI(
         """
         {
-          "primary_intent": "acknowledge",
-          "intent_tags": ["acknowledge", "encourage_continue"],
-          "speech_text": "嗯，这段日子听着很有生活气。",
-          "expects_answer": false
+          "user_signal": "memory_detail",
+          "response_strategy": "direct_follow",
+          "should_play_ack": false,
+          "acknowledgement_text": "",
+          "next_question_brief": "追问挑水这件事通常是谁安排的，以及当时的感受"
         }
         """
     )
@@ -344,25 +345,77 @@ async def test_mobile_memoir_voice_acknowledgement_saves_short_non_answer_turn(
     )
 
     response = await client.post(
-        f"/api/mobile/memoir/voice-sessions/{session['id']}/acknowledgement",
+        f"/api/mobile/memoir/voice-sessions/{session['id']}/turn-plan",
         json={},
     )
 
     assert response.status_code == 200
     data = response.json()
-    assert data["follow_up_text"] == "嗯，这段日子听着很有生活气。"
-    assert data["primary_intent"] == "acknowledge"
-    assert data["intent_tags"] == ["acknowledge", "encourage_continue"]
-    assert data["expects_answer"] is False
-    assert data["message"]["guidance_intent"] == "acknowledge"
-    assert data["message"]["metadata_json"]["prompt_version"] == "memoir_voice_interviewer_acknowledgement_v1"
-    assert data["message"]["metadata_json"]["turn_pipeline_stage"] == "acknowledgement"
-    assert data["message"]["metadata_json"]["expects_answer"] is False
-    assert data["message"]["metadata_json"]["max_tokens"] == 120
-    assert fake_ai.calls[0]["kwargs"]["max_tokens"] == 120
-    assert "不要问问题" in fake_ai.calls[0]["user_prompt"]
-    assert "不要复述整句" in fake_ai.calls[0]["user_prompt"]
-    assert "不要把叙述者刚说过的人名、地点、事件串起来再说一遍" in fake_ai.calls[0]["user_prompt"]
+    assert data["acknowledgement"] is None
+    assert data["plan"] == {
+        "user_signal": "memory_detail",
+        "response_strategy": "direct_follow",
+        "should_play_ack": False,
+        "acknowledgement_text": "",
+        "next_question_brief": "追问挑水这件事通常是谁安排的，以及当时的感受",
+    }
+    assert fake_ai.calls[0]["kwargs"]["max_tokens"] == 260
+    assert "结构化计划" in fake_ai.calls[0]["user_prompt"]
+    assert "短承接不是必须的" in fake_ai.calls[0]["user_prompt"]
+
+
+async def test_mobile_memoir_voice_turn_plan_saves_ack_when_useful(
+    client,
+    test_db,
+    monkeypatch,
+):
+    create_response = await post_mobile_memoir_voice_session(
+        client,
+        json={"guidance_mode": "free_narration"},
+    )
+    session = create_response.json()["session"]
+    user_message = MemoirChatMessage(
+        project_id=session["project_id"],
+        voice_session_id=session["id"],
+        role=MemoirChatMessageRole.USER.value,
+        content_text="外婆一边摘菜一边给我讲她年轻时候的事。",
+        content_status=MemoirChatContentStatus.FINAL.value,
+        turn_index=0,
+        metadata_json={"source": "test"},
+    )
+    test_db.add(user_message)
+    await test_db.commit()
+    fake_ai = FakeFollowUpAI(
+        """
+        {
+          "user_signal": "emotion",
+          "response_strategy": "direct_follow",
+          "should_play_ack": true,
+          "acknowledgement_text": "这份陪伴听着很亲。",
+          "next_question_brief": "继续问外婆当时常讲哪些年轻时候的事"
+        }
+        """
+    )
+    monkeypatch.setattr(
+        "app.services.memoir.voice_followups.get_ai_service",
+        lambda model=None: fake_ai,
+    )
+
+    response = await client.post(
+        f"/api/mobile/memoir/voice-sessions/{session['id']}/turn-plan",
+        json={},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["plan"]["should_play_ack"] is True
+    assert data["plan"]["response_strategy"] == "ack_then_follow"
+    assert data["acknowledgement"]["follow_up_text"] == "这份陪伴听着很亲。"
+    assert data["acknowledgement"]["expects_answer"] is False
+    metadata = data["acknowledgement"]["message"]["metadata_json"]
+    assert metadata["prompt_version"] == "memoir_voice_interviewer_turn_plan_v1"
+    assert metadata["turn_pipeline_stage"] == "acknowledgement"
+    assert metadata["turn_plan"]["next_question_brief"] == "继续问外婆当时常讲哪些年轻时候的事"
 
 
 async def test_mobile_memoir_voice_follow_up_after_acknowledgement_skips_repeated_ack(
@@ -418,7 +471,16 @@ async def test_mobile_memoir_voice_follow_up_after_acknowledgement_skips_repeate
 
     response = await client.post(
         f"/api/mobile/memoir/voice-sessions/{session['id']}/follow-up",
-        json={"acknowledgement_message_id": acknowledgement.id},
+        json={
+            "acknowledgement_message_id": acknowledgement.id,
+            "turn_plan": {
+                "user_signal": "memory_detail",
+                "response_strategy": "ack_then_follow",
+                "should_play_ack": True,
+                "acknowledgement_text": acknowledgement.content_text,
+                "next_question_brief": "追问摘菜时通常是谁先开口安排",
+            },
+        },
     )
 
     assert response.status_code == 200
@@ -432,7 +494,10 @@ async def test_mobile_memoir_voice_follow_up_after_acknowledgement_skips_repeate
     assert data["message"]["metadata_json"]["primary_intent"] == "follow_up"
     assert data["message"]["metadata_json"]["intent_tags"] == ["follow_up"]
     assert data["message"]["metadata_json"]["expects_answer"] is True
-    assert "不要再承接、认可、概括或复述叙述者刚才说的内容" in fake_ai.calls[0]["user_prompt"]
+    assert data["message"]["metadata_json"]["turn_plan"]["next_question_brief"] == "追问摘菜时通常是谁先开口安排"
+    assert "本轮已经先做过结构化访谈计划" in fake_ai.calls[0]["user_prompt"]
+    assert "追问摘菜时通常是谁先开口安排" in fake_ai.calls[0]["user_prompt"]
+    assert "不要重复短承接内容" in fake_ai.calls[0]["user_prompt"]
     assert "intent_tags 不要包含 acknowledge、encourage_continue、reflect_summary" in fake_ai.calls[0]["user_prompt"]
 
 

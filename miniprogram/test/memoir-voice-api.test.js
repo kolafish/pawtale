@@ -65,7 +65,7 @@ test("voice follow-up API includes the selected AI model", async () => {
   delete global.wx;
 });
 
-test("voice acknowledgement API includes the selected AI model", async () => {
+test("voice turn plan API includes the selected AI model", async () => {
   const requests = [];
   global.wx = {
     getStorageSync(key) {
@@ -98,8 +98,14 @@ test("voice acknowledgement API includes the selected AI model", async () => {
       options.success({
         statusCode: 200,
         data: {
-          message: { id: "message-1" },
-          follow_up_text: "您刚才说的院子，我听到了。",
+          plan: {
+            user_signal: "memory_detail",
+            response_strategy: "direct_follow",
+            should_play_ack: false,
+            acknowledgement_text: "",
+            next_question_brief: "追问时间地点",
+          },
+          acknowledgement: null,
         },
         cookies: [],
         header: {},
@@ -110,14 +116,14 @@ test("voice acknowledgement API includes the selected AI model", async () => {
   delete require.cache[require.resolve("../services/request.ts")];
   delete require.cache[require.resolve("../services/ai-model-settings.ts")];
   delete require.cache[require.resolve("../services/memoir-voice-api.ts")];
-  const { createMemoirVoiceAcknowledgement } = require("../services/memoir-voice-api.ts");
+  const { createMemoirVoiceTurnPlan } = require("../services/memoir-voice-api.ts");
 
-  await createMemoirVoiceAcknowledgement("voice/1", {});
+  await createMemoirVoiceTurnPlan("voice/1", {});
 
   const apiRequests = requests.filter((request) => request.url.includes("/api/mobile/memoir/"));
   assert.equal(
     apiRequests[0].url,
-    "http://backend.local:8000/api/mobile/memoir/voice-sessions/voice%2F1/acknowledgement",
+    "http://backend.local:8000/api/mobile/memoir/voice-sessions/voice%2F1/turn-plan",
   );
   assert.equal(apiRequests[0].method, "POST");
   assert.deepEqual(apiRequests[0].data, {
