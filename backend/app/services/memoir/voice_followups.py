@@ -16,6 +16,7 @@ from app.domain.memoir.types import (
 from app.models.memoir import MemoirChatMessage, MemoirVoiceSession
 from app.models.projects import Project
 from app.schemas.memoir_voice import (
+    MemoirVoiceAcknowledgementRequest,
     MemoirVoiceNoAnswerPromptRequest,
     MemoirVoiceFollowUpRequest,
     MemoirVoiceFollowUpResponse,
@@ -31,8 +32,10 @@ SYSTEM_PROMPT = (
 )
 AI_FOLLOW_UP_UNAVAILABLE_MESSAGE = "AI 服务暂时不可用，请稍后重试。"
 PROMPT_VERSION = "memoir_voice_interviewer_turn_v1"
+ACKNOWLEDGEMENT_PROMPT_VERSION = "memoir_voice_interviewer_acknowledgement_v1"
 MAX_CONTEXT_MESSAGES = 12
 MAX_PREVIOUS_CONTEXT_MESSAGES = 8
+ACKNOWLEDGEMENT_MAX_TOKENS = 120
 FOLLOW_UP_MAX_TOKENS = 260
 GUIDED_FOLLOW_UP_MAX_TOKENS = 320
 FREE_OPENING_MAX_TOKENS = 360
@@ -122,6 +125,26 @@ def _has_user_message(messages: list[MemoirChatMessage]) -> bool:
     )
 
 
+def _acknowledgement_message(
+    voice_session: MemoirVoiceSession,
+    message_id: str | None,
+) -> MemoirChatMessage | None:
+    if not message_id:
+        return None
+    for message in voice_session.messages:
+        if message.id != message_id:
+            continue
+        metadata = message.metadata_json if isinstance(message.metadata_json, dict) else {}
+        if (
+            message.role == MemoirChatMessageRole.ASSISTANT.value
+            and message.guidance_intent in {"acknowledge", "encourage_continue", "reflect_summary"}
+            and metadata.get("expects_answer") is False
+        ):
+            return message
+        raise HTTPException(status_code=400, detail="承接消息不能用于生成追问")
+    raise HTTPException(status_code=400, detail="承接消息不存在")
+
+
 def _llm_max_tokens(
     voice_session: MemoirVoiceSession,
     *,
@@ -196,7 +219,12 @@ def _normalize_intent_tags(value: object, primary_intent: str) -> list[str]:
     return tags[:5]
 
 
-def _parse_interviewer_turn(content: object, *, fallback_intent: str) -> InterviewerTurn:
+def _parse_interviewer_turn(
+    content: object,
+    *,
+    fallback_intent: str,
+    default_expects_answer: bool = True,
+) -> InterviewerTurn:
     raw_text = _clean_speech_text(content)
     payload = extract_json_payload(raw_text)
     if isinstance(payload, dict):
@@ -216,14 +244,14 @@ def _parse_interviewer_turn(content: object, *, fallback_intent: str) -> Intervi
                 primary_intent=primary_intent,
                 intent_tags=_normalize_intent_tags(payload.get("intent_tags"), primary_intent),
                 speech_text=speech_text,
-                expects_answer=expects_answer if isinstance(expects_answer, bool) else True,
+                expects_answer=expects_answer if isinstance(expects_answer, bool) else default_expects_answer,
                 parsed_json=True,
             )
     return InterviewerTurn(
         primary_intent=fallback_intent,
         intent_tags=[fallback_intent],
         speech_text=raw_text,
-        expects_answer=True,
+        expects_answer=default_expects_answer,
         parsed_json=False,
     )
 
@@ -233,6 +261,7 @@ def _build_user_prompt(
     *,
     previous_messages: list[MemoirChatMessage],
     regenerate: bool,
+    acknowledgement_message_id: str | None = None,
 ) -> str:
     guidance_mode = MemoirGuidanceMode(voice_session.guidance_mode)
     messages = list(voice_session.messages)
@@ -242,6 +271,11 @@ def _build_user_prompt(
     history_context = _previous_context(previous_messages)
     module_label = _module_label(voice_session.current_guidance_module)
     regenerate_instruction = "这次是在替换上一句回应，请换一个角度，不要重复上一句。" if regenerate else ""
+    pipeline_instruction = (
+        "上一条老余回应只是短承接；这次直接生成下一句要推进访谈的问题或自然转向，不要重复上一条承接。"
+        if acknowledgement_message_id
+        else ""
+    )
 
     if guidance_mode == MemoirGuidanceMode.GUIDED_INTERVIEW:
         if has_user_message:
@@ -308,6 +342,7 @@ def _build_user_prompt(
 - 不问敏感隐私，除非用户已经主动提到
 - 遇到痛苦、遗憾、疾病、离别等内容，可以温和承接，不要强行积极
 {regenerate_instruction}
+{pipeline_instruction}
 
 {mode_instruction}
 
@@ -330,6 +365,54 @@ def _build_user_prompt(
 - intent_tags 表示这句话包含的表达功能，可以多个，必须包含 primary_intent
 - speech_text 是要播放给用户听的完整中文回应
 - expects_answer 第一版通常填 true；只有纯小结且不希望立刻收音时才填 false
+"""
+
+
+def _build_acknowledgement_prompt(
+    voice_session: MemoirVoiceSession,
+    *,
+    previous_messages: list[MemoirChatMessage],
+) -> str:
+    context = _recent_context(list(voice_session.messages))
+    history_context = _previous_context(previous_messages)
+    guidance_mode = MemoirGuidanceMode(voice_session.guidance_mode)
+    mode_hint = (
+        "当前是主题讲述。承接要贴合叙述者刚刚讲到的主题，不要提前追细节。"
+        if guidance_mode == MemoirGuidanceMode.GUIDED_INTERVIEW
+        else "当前是自由讲述。承接要顺着叙述者自己的时间线和感受，不要突然换主题。"
+    )
+    return f"""请根据下面的访谈上下文，生成下一句“老余”的短承接。
+
+承接目标：
+- 让叙述者马上感觉“刚才这段话被听见了”
+- 可以轻轻认可、复述一个具体画面、点出一种感受，或鼓励继续
+- 不要问问题，不要引入新方向，不要总结成大段
+- 不要说空泛的“您真棒”“很有意义”；必须落在叙述者刚说过的具体内容上
+- 适合语音播放，通常 1 句，20 到 50 个汉字
+- 不要编造上下文没有的信息
+- expects_answer 必须为 false
+
+{mode_hint}
+
+访谈上下文：
+{context}
+
+历史会话进度：
+{history_context}
+
+请只输出严格 JSON，不要 Markdown，不要解释。格式：
+{{
+  "primary_intent": "acknowledge",
+  "intent_tags": ["acknowledge", "encourage_continue"],
+  "speech_text": "老余实际要说的话",
+  "expects_answer": false
+}}
+
+字段说明：
+- primary_intent 只能从 acknowledge、encourage_continue、reflect_summary 里选一个
+- intent_tags 表示这句话包含的表达功能，可以多个，必须包含 primary_intent
+- speech_text 是要播放给用户听的完整中文承接
+- expects_answer 必须为 false
 """
 
 
@@ -384,66 +467,77 @@ async def _next_turn_index(db: AsyncSession, voice_session_id: str) -> int:
     return 0 if current is None else int(current) + 1
 
 
-async def generate_voice_follow_up(
-    db: AsyncSession,
-    voice_session_id: str,
-    user_id: str,
-    req: MemoirVoiceFollowUpRequest,
-    ai_client: AITextClient | None = None,
-) -> MemoirVoiceFollowUpResponse:
-    voice_session = await _load_voice_session(db, voice_session_id, user_id)
-    client = ai_client or get_ai_service(req.ai_model)
-    previous_messages = await _load_previous_project_messages(db, voice_session)
-    prompt = _build_user_prompt(
-        voice_session,
-        previous_messages=previous_messages,
-        regenerate=req.regenerate,
-    )
-    has_user_message = _has_user_message(list(voice_session.messages))
-    fallback_intent = "follow_up" if has_user_message else "opening"
-    llm_max_tokens = _llm_max_tokens(
-        voice_session,
-        has_user_message=has_user_message,
-        regenerate=req.regenerate,
-    )
-    raw_response: dict | None = None
+async def _call_interviewer_llm(
+    client: AITextClient,
+    *,
+    prompt: str,
+    max_tokens: int,
+) -> tuple[object, dict | None]:
     try:
         llm_response = await client._call_llm(
             SYSTEM_PROMPT,
             prompt,
             temperature=0.35,
-            max_tokens=llm_max_tokens,
+            max_tokens=max_tokens,
             timeout=60.0,
             return_raw=True,
         )
-        if isinstance(llm_response, tuple):
-            content = llm_response[0]
-            raw_response = llm_response[1] if isinstance(llm_response[1], dict) else None
-        else:
-            content = llm_response
     except HTTPException as exc:
         if exc.status_code < 500:
             raise
         logger.exception(
-            "AI voice follow-up failed provider=%s model=%s",
+            "AI voice interviewer turn failed provider=%s model=%s",
             client.provider_name,
             client.model_name,
         )
         raise HTTPException(status_code=503, detail=AI_FOLLOW_UP_UNAVAILABLE_MESSAGE) from exc
     except Exception as exc:
         logger.exception(
-            "AI voice follow-up failed provider=%s model=%s",
+            "AI voice interviewer turn failed provider=%s model=%s",
             client.provider_name,
             client.model_name,
         )
         raise HTTPException(status_code=503, detail=AI_FOLLOW_UP_UNAVAILABLE_MESSAGE) from exc
 
-    turn = _parse_interviewer_turn(content, fallback_intent=fallback_intent)
+    if isinstance(llm_response, tuple):
+        return llm_response[0], llm_response[1] if isinstance(llm_response[1], dict) else None
+    return llm_response, None
+
+
+async def _save_interviewer_turn(
+    db: AsyncSession,
+    *,
+    voice_session: MemoirVoiceSession,
+    turn: InterviewerTurn,
+    client: AITextClient,
+    prompt_version: str,
+    max_tokens: int,
+    raw_response: dict | None,
+    fallback_intent: str,
+    metadata_extra: dict[str, object],
+) -> MemoirVoiceFollowUpResponse:
     follow_up_text = turn.speech_text
     if not follow_up_text:
         raise HTTPException(status_code=502, detail="AI 未返回可用访谈回应")
     finish_reason = _extract_finish_reason(raw_response)
-
+    metadata = {
+        "source": f"ai.{turn.primary_intent}",
+        "prompt_version": prompt_version,
+        "fallback_intent": fallback_intent,
+        "primary_intent": turn.primary_intent,
+        "intent_tags": turn.intent_tags,
+        "expects_answer": turn.expects_answer,
+        "parsed_json": turn.parsed_json,
+        "provider": client.provider_name,
+        "model": client.model_name,
+        "max_tokens": max_tokens,
+        "response_chars": len(follow_up_text),
+        "question_mark_count": _question_mark_count(follow_up_text),
+        "finish_reason": finish_reason,
+        "truncated": _is_truncated_response(finish_reason),
+        "usage": _usage_metadata(raw_response),
+    }
+    metadata.update(metadata_extra)
     message = MemoirChatMessage(
         project_id=voice_session.project_id,
         voice_session_id=voice_session.id,
@@ -452,25 +546,7 @@ async def generate_voice_follow_up(
         content_status=MemoirChatContentStatus.FINAL.value,
         guidance_intent=turn.primary_intent,
         turn_index=await _next_turn_index(db, voice_session.id),
-        metadata_json={
-            "source": f"ai.{turn.primary_intent}",
-            "prompt_version": PROMPT_VERSION,
-            "fallback_intent": fallback_intent,
-            "primary_intent": turn.primary_intent,
-            "intent_tags": turn.intent_tags,
-            "expects_answer": turn.expects_answer,
-            "parsed_json": turn.parsed_json,
-            "provider": client.provider_name,
-            "model": client.model_name,
-            "regenerate": req.regenerate,
-            "has_user_message": has_user_message,
-            "max_tokens": llm_max_tokens,
-            "response_chars": len(follow_up_text),
-            "question_mark_count": _question_mark_count(follow_up_text),
-            "finish_reason": finish_reason,
-            "truncated": _is_truncated_response(finish_reason),
-            "usage": _usage_metadata(raw_response),
-        },
+        metadata_json=metadata,
     )
     db.add(message)
     await db.commit()
@@ -480,6 +556,106 @@ async def generate_voice_follow_up(
         primary_intent=turn.primary_intent,
         intent_tags=turn.intent_tags,
         expects_answer=turn.expects_answer,
+    )
+
+
+async def generate_voice_follow_up(
+    db: AsyncSession,
+    voice_session_id: str,
+    user_id: str,
+    req: MemoirVoiceFollowUpRequest,
+    ai_client: AITextClient | None = None,
+) -> MemoirVoiceFollowUpResponse:
+    voice_session = await _load_voice_session(db, voice_session_id, user_id)
+    acknowledgement_message = _acknowledgement_message(voice_session, req.acknowledgement_message_id)
+    client = ai_client or get_ai_service(req.ai_model)
+    previous_messages = await _load_previous_project_messages(db, voice_session)
+    prompt = _build_user_prompt(
+        voice_session,
+        previous_messages=previous_messages,
+        regenerate=req.regenerate,
+        acknowledgement_message_id=acknowledgement_message.id if acknowledgement_message else None,
+    )
+    has_user_message = _has_user_message(list(voice_session.messages))
+    fallback_intent = "follow_up" if has_user_message else "opening"
+    llm_max_tokens = _llm_max_tokens(
+        voice_session,
+        has_user_message=has_user_message,
+        regenerate=req.regenerate,
+    )
+    content, raw_response = await _call_interviewer_llm(
+        client,
+        prompt=prompt,
+        max_tokens=llm_max_tokens,
+    )
+    turn = _parse_interviewer_turn(content, fallback_intent=fallback_intent)
+    return await _save_interviewer_turn(
+        db,
+        voice_session=voice_session,
+        turn=turn,
+        client=client,
+        prompt_version=PROMPT_VERSION,
+        max_tokens=llm_max_tokens,
+        raw_response=raw_response,
+        fallback_intent=fallback_intent,
+        metadata_extra={
+            "regenerate": req.regenerate,
+            "has_user_message": has_user_message,
+            "turn_pipeline_stage": "question",
+            "acknowledgement_message_id": acknowledgement_message.id if acknowledgement_message else None,
+        },
+    )
+
+
+async def generate_voice_acknowledgement(
+    db: AsyncSession,
+    voice_session_id: str,
+    user_id: str,
+    req: MemoirVoiceAcknowledgementRequest,
+    ai_client: AITextClient | None = None,
+) -> MemoirVoiceFollowUpResponse:
+    voice_session = await _load_voice_session(db, voice_session_id, user_id)
+    messages = list(voice_session.messages)
+    if not _has_user_message(messages):
+        raise HTTPException(status_code=400, detail="还没有可承接的讲述内容")
+    client = ai_client or get_ai_service(req.ai_model)
+    previous_messages = await _load_previous_project_messages(db, voice_session)
+    prompt = _build_acknowledgement_prompt(voice_session, previous_messages=previous_messages)
+    content, raw_response = await _call_interviewer_llm(
+        client,
+        prompt=prompt,
+        max_tokens=ACKNOWLEDGEMENT_MAX_TOKENS,
+    )
+    parsed_turn = _parse_interviewer_turn(
+        content,
+        fallback_intent="acknowledge",
+        default_expects_answer=False,
+    )
+    turn = InterviewerTurn(
+        primary_intent=parsed_turn.primary_intent
+        if parsed_turn.primary_intent in {"acknowledge", "encourage_continue", "reflect_summary"}
+        else "acknowledge",
+        intent_tags=[
+            tag for tag in parsed_turn.intent_tags
+            if tag in {"acknowledge", "encourage_continue", "reflect_summary"}
+        ] or ["acknowledge"],
+        speech_text=parsed_turn.speech_text,
+        expects_answer=False,
+        parsed_json=parsed_turn.parsed_json,
+    )
+    return await _save_interviewer_turn(
+        db,
+        voice_session=voice_session,
+        turn=turn,
+        client=client,
+        prompt_version=ACKNOWLEDGEMENT_PROMPT_VERSION,
+        max_tokens=ACKNOWLEDGEMENT_MAX_TOKENS,
+        raw_response=raw_response,
+        fallback_intent="acknowledge",
+        metadata_extra={
+            "has_user_message": True,
+            "turn_pipeline_stage": "acknowledgement",
+        },
     )
 
 

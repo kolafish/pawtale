@@ -74,7 +74,7 @@ export function followUpSourceMessageId(lines: VoiceChatTranscriptLine[]): strin
 
 export function coveredFollowUpSourceMessageId(lines: VoiceChatTranscriptLine[]): string {
   const latest = lines[lines.length - 1];
-  return latest?.role === "assistant" ? followUpSourceMessageId(lines) : "";
+  return latest?.role === "assistant" && assistantExpectsAnswer(latest) ? followUpSourceMessageId(lines) : "";
 }
 
 export function ttsAlignmentFromMetadata(metadata?: Record<string, unknown>): TTSAlignmentSegment[] {

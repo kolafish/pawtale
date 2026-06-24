@@ -1,6 +1,7 @@
 import type {
   MemoirAssistantTTSRequest,
   MemoirAssistantTTSResponse,
+  MemoirVoiceAcknowledgementRequest,
   MemoirVoiceFollowUpRequest,
   MemoirVoiceFollowUpResponse,
   MemoirVoiceNoAnswerPromptRequest,
@@ -87,6 +88,19 @@ export function createMemoirVoiceFollowUp(
 ): Promise<MemoirVoiceFollowUpResponse> {
   return memoirRequest<MemoirVoiceFollowUpResponse>(
     memoirVoiceSessionPath(voiceSessionId, "/follow-up"),
+    {
+      method: "POST",
+      data: withSelectedAIModel(data),
+    },
+  );
+}
+
+export function createMemoirVoiceAcknowledgement(
+  voiceSessionId: string,
+  data: MemoirVoiceAcknowledgementRequest = {},
+): Promise<MemoirVoiceFollowUpResponse> {
+  return memoirRequest<MemoirVoiceFollowUpResponse>(
+    memoirVoiceSessionPath(voiceSessionId, "/acknowledgement"),
     {
       method: "POST",
       data: withSelectedAIModel(data),

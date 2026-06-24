@@ -307,6 +307,147 @@ async def test_mobile_memoir_voice_follow_up_parses_interviewer_turn_json(
     assert fake_ai.calls[0]["kwargs"]["max_tokens"] == 320
 
 
+async def test_mobile_memoir_voice_acknowledgement_saves_short_non_answer_turn(
+    client,
+    test_db,
+    monkeypatch,
+):
+    create_response = await post_mobile_memoir_voice_session(
+        client,
+        json={"guidance_mode": "free_narration"},
+    )
+    session = create_response.json()["session"]
+    user_message = MemoirChatMessage(
+        project_id=session["project_id"],
+        voice_session_id=session["id"],
+        role=MemoirChatMessageRole.USER.value,
+        content_text="我和外婆在院子里一起摘菜。",
+        content_status=MemoirChatContentStatus.FINAL.value,
+        turn_index=0,
+        metadata_json={"source": "test"},
+    )
+    test_db.add(user_message)
+    await test_db.commit()
+    fake_ai = FakeFollowUpAI(
+        """
+        {
+          "primary_intent": "acknowledge",
+          "intent_tags": ["acknowledge", "encourage_continue"],
+          "speech_text": "您说的院子和摘菜，一下子就有生活气了。",
+          "expects_answer": false
+        }
+        """
+    )
+    monkeypatch.setattr(
+        "app.services.memoir.voice_followups.get_ai_service",
+        lambda model=None: fake_ai,
+    )
+
+    response = await client.post(
+        f"/api/mobile/memoir/voice-sessions/{session['id']}/acknowledgement",
+        json={},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["follow_up_text"] == "您说的院子和摘菜，一下子就有生活气了。"
+    assert data["primary_intent"] == "acknowledge"
+    assert data["intent_tags"] == ["acknowledge", "encourage_continue"]
+    assert data["expects_answer"] is False
+    assert data["message"]["guidance_intent"] == "acknowledge"
+    assert data["message"]["metadata_json"]["prompt_version"] == "memoir_voice_interviewer_acknowledgement_v1"
+    assert data["message"]["metadata_json"]["turn_pipeline_stage"] == "acknowledgement"
+    assert data["message"]["metadata_json"]["expects_answer"] is False
+    assert data["message"]["metadata_json"]["max_tokens"] == 120
+    assert fake_ai.calls[0]["kwargs"]["max_tokens"] == 120
+    assert "不要问问题" in fake_ai.calls[0]["user_prompt"]
+
+
+async def test_mobile_memoir_voice_follow_up_after_acknowledgement_skips_repeated_ack(
+    client,
+    test_db,
+    monkeypatch,
+):
+    create_response = await post_mobile_memoir_voice_session(
+        client,
+        json={"guidance_mode": "free_narration"},
+    )
+    session = create_response.json()["session"]
+    user_message = MemoirChatMessage(
+        project_id=session["project_id"],
+        voice_session_id=session["id"],
+        role=MemoirChatMessageRole.USER.value,
+        content_text="我和外婆在院子里一起摘菜。",
+        content_status=MemoirChatContentStatus.FINAL.value,
+        turn_index=0,
+        metadata_json={"source": "test"},
+    )
+    acknowledgement = MemoirChatMessage(
+        project_id=session["project_id"],
+        voice_session_id=session["id"],
+        role=MemoirChatMessageRole.ASSISTANT.value,
+        content_text="您说的院子和摘菜，一下子就有生活气了。",
+        content_status=MemoirChatContentStatus.FINAL.value,
+        guidance_intent="acknowledge",
+        turn_index=1,
+        metadata_json={
+            "source": "ai.acknowledge",
+            "expects_answer": False,
+            "turn_pipeline_stage": "acknowledgement",
+        },
+    )
+    test_db.add_all([user_message, acknowledgement])
+    await test_db.commit()
+    await test_db.refresh(acknowledgement)
+    fake_ai = FakeFollowUpAI("那时候摘菜，一般是您先动手，还是外婆先招呼您？")
+    monkeypatch.setattr(
+        "app.services.memoir.voice_followups.get_ai_service",
+        lambda model=None: fake_ai,
+    )
+
+    response = await client.post(
+        f"/api/mobile/memoir/voice-sessions/{session['id']}/follow-up",
+        json={"acknowledgement_message_id": acknowledgement.id},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["message"]["turn_index"] == 2
+    assert data["message"]["metadata_json"]["turn_pipeline_stage"] == "question"
+    assert data["message"]["metadata_json"]["acknowledgement_message_id"] == acknowledgement.id
+    assert "不要重复上一条承接" in fake_ai.calls[0]["user_prompt"]
+
+
+async def test_mobile_memoir_voice_follow_up_rejects_invalid_acknowledgement_message(
+    client,
+    test_db,
+):
+    create_response = await post_mobile_memoir_voice_session(
+        client,
+        json={"guidance_mode": "free_narration"},
+    )
+    session = create_response.json()["session"]
+    user_message = MemoirChatMessage(
+        project_id=session["project_id"],
+        voice_session_id=session["id"],
+        role=MemoirChatMessageRole.USER.value,
+        content_text="我和外婆在院子里一起摘菜。",
+        content_status=MemoirChatContentStatus.FINAL.value,
+        turn_index=0,
+        metadata_json={"source": "test"},
+    )
+    test_db.add(user_message)
+    await test_db.commit()
+
+    response = await client.post(
+        f"/api/mobile/memoir/voice-sessions/{session['id']}/follow-up",
+        json={"acknowledgement_message_id": user_message.id},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "承接消息不能用于生成追问"
+
+
 async def test_mobile_memoir_voice_no_answer_prompt_saves_assistant_message(client, test_db):
     create_response = await post_mobile_memoir_voice_session(
         client,
@@ -599,16 +740,27 @@ async def test_mobile_memoir_voice_session_list_and_progress(client, test_db):
         turn_index=0,
         metadata_json={"source": "test"},
     )
+    acknowledgement_message = MemoirChatMessage(
+        project_id=guided_session["project_id"],
+        voice_session_id=guided_session["id"],
+        role=MemoirChatMessageRole.ASSISTANT.value,
+        content_text="您说的外婆家，我听到了。",
+        content_status=MemoirChatContentStatus.FINAL.value,
+        guidance_intent="acknowledge",
+        turn_index=1,
+        metadata_json={"source": "ai.acknowledge", "expects_answer": False},
+    )
     assistant_message = MemoirChatMessage(
         project_id=guided_session["project_id"],
         voice_session_id=guided_session["id"],
         role=MemoirChatMessageRole.ASSISTANT.value,
         content_text="那时候你最记得谁？",
         content_status=MemoirChatContentStatus.FINAL.value,
-        turn_index=1,
-        metadata_json={"source": "test"},
+        guidance_intent="follow_up",
+        turn_index=2,
+        metadata_json={"source": "ai.follow_up", "expects_answer": True},
     )
-    test_db.add_all([user_message, assistant_message])
+    test_db.add_all([user_message, acknowledgement_message, assistant_message])
     await test_db.flush()
     utterance = MemoirVoiceUtterance(
         voice_session_id=guided_session["id"],
