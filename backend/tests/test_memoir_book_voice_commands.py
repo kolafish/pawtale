@@ -1,7 +1,12 @@
 import json
 
 from app.domain.memoir.types import MemoirBookPlanStatus, MemoirCreatedBy
-from app.models.memoir import MemoirBookPlan, MemoirBookPlanChapter
+from app.models.memoir import (
+    MemoirBookChapterDraft,
+    MemoirBookChapterDraftVersion,
+    MemoirBookPlan,
+    MemoirBookPlanChapter,
+)
 from app.services.memoir.tts_alignment import TTSAlignmentSegment
 from app.services.memoir.voice_tts import TTSResult
 from tests.memoir_helpers import ensure_mobile_memoir_project
@@ -61,7 +66,7 @@ class FakeBookVoiceAssistantTTS:
         )
 
 
-async def _create_two_chapter_plan(test_db, *, project_id: str):
+async def _create_two_chapter_plan(test_db, *, project_id: str, draft_contents: list[str] | None = None):
     plan = MemoirBookPlan(
         project_id=project_id,
         title="外婆回忆录章节规划",
@@ -81,6 +86,27 @@ async def _create_two_chapter_plan(test_db, *, project_id: str):
         )
         test_db.add(chapter)
         chapters.append(chapter)
+    await test_db.flush()
+    if draft_contents:
+        for chapter, content in zip(chapters, draft_contents, strict=False):
+            if not content:
+                continue
+            draft = MemoirBookChapterDraft(
+                project_id=project_id,
+                chapter_id=chapter.id,
+            )
+            test_db.add(draft)
+            await test_db.flush()
+            test_db.add(
+                MemoirBookChapterDraftVersion(
+                    draft_id=draft.id,
+                    project_id=project_id,
+                    chapter_id=chapter.id,
+                    version=1,
+                    content=content,
+                    created_by=MemoirCreatedBy.AI.value,
+                )
+            )
     await test_db.commit()
     return plan, chapters
 
@@ -153,6 +179,78 @@ async def test_mobile_memoir_book_voice_command_parse_falls_back_when_ai_fails(
     assert data["used_ai"] is False
     assert data["operations"][0]["chapter_id"] == chapters[1].id
     assert data["operations"][0]["direction"] == "up"
+
+
+async def test_mobile_memoir_book_voice_command_parse_returns_chapter_title_advice(
+    client,
+    test_db,
+    monkeypatch,
+):
+    project_id = await ensure_mobile_memoir_project(client)
+    await _create_two_chapter_plan(
+        test_db,
+        project_id=project_id,
+        draft_contents=["外婆家的厨房里总有柴火味，她会在傍晚给孩子们讲老家的故事。", "第一次离家那天，火车站很吵。"],
+    )
+    fake_ai = FakeBookVoiceCommandAI(
+        {
+            "intent": "review_chapter_title",
+            "chapter_ref": "第一章",
+            "summary": "正在判断第一章章名是否合适",
+            "reply_text": "这个章名方向是对的，但还可以更具体。若重点是厨房和傍晚的故事，可以考虑突出那个场景。",
+        }
+    )
+    monkeypatch.setattr("app.services.memoir.book_voice_commands.get_ai_service", lambda _model: fake_ai)
+
+    response = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-voice-command/parse",
+        json={"text": "第一章是不是需要换个名字", "ai_model": "deepseek-test"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["intent"] == "review_chapter_title"
+    assert data["intent_label"] == "章名建议"
+    assert data["requires_confirmation"] is False
+    assert data["operations"] == []
+    assert data["used_ai"] is True
+    assert data["reply_text"] == "这个章名方向是对的，但还可以更具体。若重点是厨房和傍晚的故事，可以考虑突出那个场景。"
+    assert "正文" in fake_ai.calls[0]["user_prompt"]
+    assert "摘录：外婆家的厨房" in fake_ai.calls[0]["user_prompt"]
+
+
+async def test_mobile_memoir_book_voice_command_parse_falls_back_to_length_advice(
+    client,
+    test_db,
+    monkeypatch,
+):
+    project_id = await ensure_mobile_memoir_project(client)
+    fake_ai = FakeBookVoiceCommandAI(error=RuntimeError("provider unavailable"))
+    await _create_two_chapter_plan(
+        test_db,
+        project_id=project_id,
+        draft_contents=[
+            "外婆笑了。",
+            "第一次离家那天，我记得天还没亮，母亲把包袱塞到我手里。" * 24,
+        ],
+    )
+    monkeypatch.setattr("app.services.memoir.book_voice_commands.get_ai_service", lambda _model: fake_ai)
+
+    response = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-voice-command/parse",
+        json={"text": "第一章是不是太短了"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["intent"] == "review_chapter_length"
+    assert data["intent_label"] == "篇幅建议"
+    assert data["summary"] == "正在判断「外婆家的童年」的篇幅是否合适。"
+    assert data["requires_confirmation"] is False
+    assert data["operations"] == []
+    assert data["used_ai"] is False
+    assert "外婆家的童年" in data["reply_text"]
+    assert "短于其他章节" in data["reply_text"]
 
 
 async def test_mobile_memoir_book_voice_assistant_tts_generates_short_reply(

@@ -461,6 +461,9 @@ export type MemoirBookVoiceCommandIntent =
   | "rewrite_chapter"
   | "polish_chapter"
   | "confirm_chapter"
+  | "review_chapter_title"
+  | "review_chapter_length"
+  | "review_chapter_structure"
   | "unknown";
 
 export interface MemoirBookVoiceCommandParseRequest {
@@ -484,6 +487,7 @@ export interface MemoirBookVoiceCommandParseResponse {
   intent: MemoirBookVoiceCommandIntent;
   intent_label: string;
   summary: string;
+  reply_text?: string | null;
   operations: MemoirBookVoiceCommandOperation[];
   requires_confirmation: boolean;
   used_ai: boolean;

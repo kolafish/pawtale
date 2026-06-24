@@ -144,12 +144,22 @@ function isBookVoiceReadIntent(preview: MemoirBookVoiceCommandParseResponse): bo
   return preview.intent === "read_outline" || preview.intent === "read_chapter";
 }
 
+function isBookVoiceConsultationIntent(preview: MemoirBookVoiceCommandParseResponse): boolean {
+  return preview.intent === "review_chapter_title"
+    || preview.intent === "review_chapter_length"
+    || preview.intent === "review_chapter_structure";
+}
+
 function isBookVoiceCommandConfirmationText(text: string): boolean {
   const normalized = trimText(text).replace(/\s+/g, "");
   return /^(确认|确认执行|执行|可以|可以执行|就这样|就这样改|好的|好|没问题|按这个改)$/.test(normalized);
 }
 
 function bookVoiceAssistantReplyText(preview: MemoirBookVoiceCommandParseResponse): string {
+  const replyText = trimText(preview.reply_text || "");
+  if (replyText) {
+    return replyText;
+  }
   if (preview.intent === "read_outline") {
     return "好，我现在读目录。读完后我会继续听你说。";
   }
@@ -158,6 +168,9 @@ function bookVoiceAssistantReplyText(preview: MemoirBookVoiceCommandParseRespons
   }
   if (preview.intent === "unknown") {
     return "我还没理解清楚。你可以说：把第一章改名为童年往事，或者读一下目录。";
+  }
+  if (isBookVoiceConsultationIntent(preview)) {
+    return `我的建议是：${preview.summary}`;
   }
   if (preview.requires_confirmation && canExecuteBookVoiceCommand(preview)) {
     return `我理解了，${preview.summary} 如果没问题，说确认执行，我再改。`;
@@ -1299,7 +1312,9 @@ Page<BookData, {
     const canExecute = canExecuteBookVoiceCommand(preview);
     const statusText = preview.intent === "unknown"
       ? "需要再说明"
-      : (isBookVoiceReadIntent(preview) ? "已理解，马上朗读" : "已理解，等待确认");
+      : (isBookVoiceReadIntent(preview)
+        ? "已理解，马上朗读"
+        : (isBookVoiceConsultationIntent(preview) ? "已给建议" : "已理解，等待确认"));
     this.setData({
       bookVoiceCommandText: preview.original_text,
       bookVoiceCommandIntentLabel: preview.intent_label,
