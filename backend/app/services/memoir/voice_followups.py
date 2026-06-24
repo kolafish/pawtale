@@ -16,10 +16,12 @@ from app.domain.memoir.types import (
 from app.models.memoir import MemoirChatMessage, MemoirVoiceSession
 from app.models.projects import Project
 from app.schemas.memoir_voice import (
-    MemoirVoiceAcknowledgementRequest,
     MemoirVoiceNoAnswerPromptRequest,
     MemoirVoiceFollowUpRequest,
     MemoirVoiceFollowUpResponse,
+    MemoirVoiceTurnPlanContext,
+    MemoirVoiceTurnPlanRequest,
+    MemoirVoiceTurnPlanResponse,
 )
 from app.services.ai_factory import get_ai_service
 from app.services.ai_types import AITextClient
@@ -32,10 +34,10 @@ SYSTEM_PROMPT = (
 )
 AI_FOLLOW_UP_UNAVAILABLE_MESSAGE = "AI 服务暂时不可用，请稍后重试。"
 PROMPT_VERSION = "memoir_voice_interviewer_turn_v1"
-ACKNOWLEDGEMENT_PROMPT_VERSION = "memoir_voice_interviewer_acknowledgement_v1"
+TURN_PLAN_PROMPT_VERSION = "memoir_voice_interviewer_turn_plan_v1"
 MAX_CONTEXT_MESSAGES = 12
 MAX_PREVIOUS_CONTEXT_MESSAGES = 8
-ACKNOWLEDGEMENT_MAX_TOKENS = 120
+TURN_PLAN_MAX_TOKENS = 260
 FOLLOW_UP_MAX_TOKENS = 260
 GUIDED_FOLLOW_UP_MAX_TOKENS = 320
 FREE_OPENING_MAX_TOKENS = 360
@@ -56,13 +58,27 @@ PRIMARY_INTENTS = {
     "transition",
     "repair",
 }
-POST_ACKNOWLEDGEMENT_NON_QUESTION_INTENTS = {
+PLANNED_TURN_NON_QUESTION_INTENTS = {
     "acknowledge",
     "encourage_continue",
     "reflect_summary",
 }
-POST_ACKNOWLEDGEMENT_QUESTION_INTENTS = {
+PLANNED_TURN_QUESTION_INTENTS = {
     "follow_up",
+    "transition",
+    "repair",
+}
+TURN_PLAN_USER_SIGNALS = {
+    "memory_detail",
+    "emotion",
+    "short_answer",
+    "unclear",
+    "off_topic",
+    "continuation",
+}
+TURN_PLAN_RESPONSE_STRATEGIES = {
+    "ack_then_follow",
+    "direct_follow",
     "transition",
     "repair",
 }
@@ -76,6 +92,24 @@ class InterviewerTurn:
     expects_answer: bool
     parsed_json: bool
 
+
+@dataclass(frozen=True)
+class VoiceTurnPlan:
+    user_signal: str
+    response_strategy: str
+    should_play_ack: bool
+    acknowledgement_text: str
+    next_question_brief: str
+    parsed_json: bool
+
+    def to_context(self) -> MemoirVoiceTurnPlanContext:
+        return MemoirVoiceTurnPlanContext(
+            user_signal=self.user_signal,
+            response_strategy=self.response_strategy,
+            should_play_ack=self.should_play_ack,
+            acknowledgement_text=self.acknowledgement_text,
+            next_question_brief=self.next_question_brief,
+        )
 
 MODULE_LABELS = {
     "person": "人物",
@@ -266,15 +300,106 @@ def _parse_interviewer_turn(
     )
 
 
-def _question_turn_after_acknowledgement(turn: InterviewerTurn) -> InterviewerTurn:
+def _bounded_speech_text(value: object, *, max_chars: int) -> str:
+    text = _clean_speech_text(value)
+    text = " ".join(text.split())
+    return text[:max_chars]
+
+
+def _normalize_turn_plan_value(value: object, allowed: set[str], fallback: str) -> str:
+    normalized = str(value or "").strip()
+    return normalized if normalized in allowed else fallback
+
+
+def _parse_voice_turn_plan(content: object) -> VoiceTurnPlan:
+    raw_text = _clean_speech_text(content)
+    payload = extract_json_payload(raw_text)
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=502, detail="AI 未返回可用访谈计划")
+
+    response_strategy = _normalize_turn_plan_value(
+        payload.get("response_strategy"),
+        TURN_PLAN_RESPONSE_STRATEGIES,
+        "direct_follow",
+    )
+    should_play_ack = payload.get("should_play_ack")
+    if not isinstance(should_play_ack, bool):
+        should_play_ack = response_strategy == "ack_then_follow"
+
+    acknowledgement_text = _bounded_speech_text(payload.get("acknowledgement_text"), max_chars=80)
+    if should_play_ack and not acknowledgement_text:
+        should_play_ack = False
+        response_strategy = "direct_follow"
+    if not should_play_ack:
+        acknowledgement_text = ""
+        if response_strategy == "ack_then_follow":
+            response_strategy = "direct_follow"
+    elif response_strategy == "direct_follow":
+        response_strategy = "ack_then_follow"
+
+    next_question_brief = _bounded_speech_text(payload.get("next_question_brief"), max_chars=160)
+    if not next_question_brief:
+        raise HTTPException(status_code=502, detail="AI 未返回下一问计划")
+
+    return VoiceTurnPlan(
+        user_signal=_normalize_turn_plan_value(
+            payload.get("user_signal"),
+            TURN_PLAN_USER_SIGNALS,
+            "memory_detail",
+        ),
+        response_strategy=response_strategy,
+        should_play_ack=should_play_ack,
+        acknowledgement_text=acknowledgement_text,
+        next_question_brief=next_question_brief,
+        parsed_json=True,
+    )
+
+
+def _voice_turn_plan_from_request(plan: MemoirVoiceTurnPlanContext | None) -> VoiceTurnPlan | None:
+    if not plan:
+        return None
+    response_strategy = _normalize_turn_plan_value(
+        plan.response_strategy,
+        TURN_PLAN_RESPONSE_STRATEGIES,
+        "direct_follow",
+    )
+    should_play_ack = bool(plan.should_play_ack)
+    acknowledgement_text = _bounded_speech_text(plan.acknowledgement_text, max_chars=80)
+    if should_play_ack and not acknowledgement_text:
+        should_play_ack = False
+        response_strategy = "direct_follow"
+    if not should_play_ack:
+        acknowledgement_text = ""
+        if response_strategy == "ack_then_follow":
+            response_strategy = "direct_follow"
+    elif response_strategy == "direct_follow":
+        response_strategy = "ack_then_follow"
+    next_question_brief = _bounded_speech_text(plan.next_question_brief, max_chars=160)
+    if not next_question_brief:
+        raise HTTPException(status_code=400, detail="下一问计划不能为空")
+    return VoiceTurnPlan(
+        user_signal=_normalize_turn_plan_value(
+            plan.user_signal,
+            TURN_PLAN_USER_SIGNALS,
+            "memory_detail",
+        ),
+        response_strategy=response_strategy,
+        should_play_ack=should_play_ack,
+        acknowledgement_text=acknowledgement_text,
+        next_question_brief=next_question_brief,
+        parsed_json=True,
+    )
+
+
+def _planned_question_turn(turn: InterviewerTurn) -> InterviewerTurn:
     primary_intent = (
         turn.primary_intent
-        if turn.primary_intent in POST_ACKNOWLEDGEMENT_QUESTION_INTENTS
+        if turn.primary_intent in PLANNED_TURN_QUESTION_INTENTS
         else "follow_up"
     )
     intent_tags = [
         tag for tag in turn.intent_tags
-        if tag not in POST_ACKNOWLEDGEMENT_NON_QUESTION_INTENTS
+        if tag not in PLANNED_TURN_NON_QUESTION_INTENTS
     ]
     if primary_intent not in intent_tags:
         intent_tags.append(primary_intent)
@@ -293,6 +418,7 @@ def _build_user_prompt(
     previous_messages: list[MemoirChatMessage],
     regenerate: bool,
     acknowledgement_message_id: str | None = None,
+    turn_plan: VoiceTurnPlan | None = None,
 ) -> str:
     guidance_mode = MemoirGuidanceMode(voice_session.guidance_mode)
     messages = list(voice_session.messages)
@@ -302,14 +428,27 @@ def _build_user_prompt(
     history_context = _previous_context(previous_messages)
     module_label = _module_label(voice_session.current_guidance_module)
     regenerate_instruction = "这次是在替换上一句回应，请换一个角度，不要重复上一句。" if regenerate else ""
-    pipeline_instruction = (
-        "上一条老余回应已经完成了短承接；这次只生成下一句推进访谈的问题或自然转向。"
-        "不要再承接、认可、概括或复述叙述者刚才说的内容，"
-        "不要用“您刚才说”“听起来”“这个画面”“这段经历”这类开头；"
-        "primary_intent 优先 follow_up 或 transition，intent_tags 不要包含 acknowledge、encourage_continue、reflect_summary。"
-        if acknowledgement_message_id
-        else ""
-    )
+    if turn_plan:
+        played_ack = "已播放短承接" if turn_plan.should_play_ack else "未播放短承接"
+        ack_text = turn_plan.acknowledgement_text or "无"
+        pipeline_instruction = f"""本轮已经先做过结构化访谈计划：
+- 用户信号：{turn_plan.user_signal}
+- 回应策略：{turn_plan.response_strategy}
+- 短承接状态：{played_ack}
+- 短承接内容：{ack_text}
+- 下一问方向：{turn_plan.next_question_brief}
+这次只生成正式的下一句主持人回应；优先落实“下一问方向”。
+不要重复短承接内容，不要补一段新的承接或小结；如果策略是 direct_follow，就直接进入问题。
+primary_intent 优先 follow_up、transition 或 repair，intent_tags 不要包含 acknowledge、encourage_continue、reflect_summary。"""
+    else:
+        pipeline_instruction = (
+            "上一条老余回应已经完成了短承接；这次只生成下一句推进访谈的问题或自然转向。"
+            "不要再承接、认可、概括或复述叙述者刚才说的内容，"
+            "不要用“您刚才说”“听起来”“这个画面”“这段经历”这类开头；"
+            "primary_intent 优先 follow_up 或 transition，intent_tags 不要包含 acknowledge、encourage_continue、reflect_summary。"
+            if acknowledgement_message_id
+            else ""
+        )
 
     if guidance_mode == MemoirGuidanceMode.GUIDED_INTERVIEW:
         if has_user_message:
@@ -402,7 +541,7 @@ def _build_user_prompt(
 """
 
 
-def _build_acknowledgement_prompt(
+def _build_turn_plan_prompt(
     voice_session: MemoirVoiceSession,
     *,
     previous_messages: list[MemoirChatMessage],
@@ -410,23 +549,24 @@ def _build_acknowledgement_prompt(
     context = _recent_context(list(voice_session.messages))
     history_context = _previous_context(previous_messages)
     guidance_mode = MemoirGuidanceMode(voice_session.guidance_mode)
+    module_label = _module_label(voice_session.current_guidance_module)
     mode_hint = (
-        "当前是主题讲述。承接要贴合叙述者刚刚讲到的主题，不要提前追细节。"
+        f"当前是主题讲述，当前主题线索是“{module_label}”。计划要服务于当前主题，但如果用户已经自然换题，以最近对话为准。"
         if guidance_mode == MemoirGuidanceMode.GUIDED_INTERVIEW
-        else "当前是自由讲述。承接要顺着叙述者自己的时间线和感受，不要突然换主题。"
+        else "当前是自由讲述。计划要顺着叙述者自己的时间线和感受，不要突然换主题。"
     )
-    return f"""请根据下面的访谈上下文，生成下一句“老余”的短承接。
+    return f"""请先为“老余”的下一轮语音访谈做结构化计划，不要生成正式追问正文。
 
-承接目标：
-- 让叙述者马上感觉“刚才这段话被听见了”
-- 只做当下的自然短回应，可以轻轻认可、点出一种感受，或鼓励继续
-- 不要复述整句，不要把叙述者刚说过的人名、地点、事件串起来再说一遍
-- 避免“您刚才说”“你提到”“这个画面”“这段经历”这类模板开头
-- 不要问问题，不要引入新方向，不要总结成大段
-- 不要说空泛的“您真棒”“很有意义”；可以贴住情绪、语气或叙述价值，但不要机械复读内容
-- 适合语音播放，通常 1 句，14 到 36 个汉字
+计划目标：
+- 判断叙述者刚才这段更像哪类信号：memory_detail、emotion、short_answer、unclear、off_topic、continuation
+- 决定回应策略：ack_then_follow、direct_follow、transition、repair
+- 只有当短承接能明显增加被理解感时，should_play_ack 才填 true；否则直接 direct_follow
+- 短承接不是必须的。用户回答短、信息少、或已经需要直接追问时，不要硬加第一段
+- acknowledgement_text 只在 should_play_ack=true 时填写，必须自然、简短、不是问题，8 到 28 个汉字
+- acknowledgement_text 不要复述整句，不要把刚才的人名、地点、事件串起来，不要用“您刚才说”“你提到”“这个画面”“这段经历”开头
+- next_question_brief 是给下一步生成正式追问的内部方向，不是要播放的原文，10 到 60 个汉字
+- next_question_brief 要说清下一问应该推进什么，但不要和 acknowledgement_text 重复同一句意思
 - 不要编造上下文没有的信息
-- expects_answer 必须为 false
 
 {mode_hint}
 
@@ -438,17 +578,19 @@ def _build_acknowledgement_prompt(
 
 请只输出严格 JSON，不要 Markdown，不要解释。格式：
 {{
-  "primary_intent": "acknowledge",
-  "intent_tags": ["acknowledge", "encourage_continue"],
-  "speech_text": "老余实际要说的话",
-  "expects_answer": false
+  "user_signal": "memory_detail",
+  "response_strategy": "ack_then_follow",
+  "should_play_ack": true,
+  "acknowledgement_text": "这段日子听着很有生活气。",
+  "next_question_brief": "继续问当时谁和叙述者一起做这件事"
 }}
 
 字段说明：
-- primary_intent 只能从 acknowledge、encourage_continue、reflect_summary 里选一个
-- intent_tags 表示这句话包含的表达功能，可以多个，必须包含 primary_intent
-- speech_text 是要播放给用户听的完整中文承接
-- expects_answer 必须为 false
+- user_signal 只能从 memory_detail、emotion、short_answer、unclear、off_topic、continuation 里选一个
+- response_strategy 只能从 ack_then_follow、direct_follow、transition、repair 里选一个
+- should_play_ack 表示是否需要播放一个短承接
+- acknowledgement_text 是可选短承接；如果 should_play_ack=false，必须为空字符串
+- next_question_brief 是下一句正式回应的生成方向
 """
 
 
@@ -606,11 +748,13 @@ async def generate_voice_follow_up(
     acknowledgement_message = _acknowledgement_message(voice_session, req.acknowledgement_message_id)
     client = ai_client or get_ai_service(req.ai_model)
     previous_messages = await _load_previous_project_messages(db, voice_session)
+    turn_plan = _voice_turn_plan_from_request(req.turn_plan)
     prompt = _build_user_prompt(
         voice_session,
         previous_messages=previous_messages,
         regenerate=req.regenerate,
         acknowledgement_message_id=acknowledgement_message.id if acknowledgement_message else None,
+        turn_plan=turn_plan,
     )
     has_user_message = _has_user_message(list(voice_session.messages))
     fallback_intent = "follow_up" if has_user_message else "opening"
@@ -625,8 +769,8 @@ async def generate_voice_follow_up(
         max_tokens=llm_max_tokens,
     )
     turn = _parse_interviewer_turn(content, fallback_intent=fallback_intent)
-    if acknowledgement_message:
-        turn = _question_turn_after_acknowledgement(turn)
+    if acknowledgement_message or turn_plan:
+        turn = _planned_question_turn(turn)
     return await _save_interviewer_turn(
         db,
         voice_session=voice_session,
@@ -641,59 +785,58 @@ async def generate_voice_follow_up(
             "has_user_message": has_user_message,
             "turn_pipeline_stage": "question",
             "acknowledgement_message_id": acknowledgement_message.id if acknowledgement_message else None,
+            "turn_plan": turn_plan.to_context().model_dump() if turn_plan else None,
         },
     )
 
 
-async def generate_voice_acknowledgement(
+async def plan_voice_turn(
     db: AsyncSession,
     voice_session_id: str,
     user_id: str,
-    req: MemoirVoiceAcknowledgementRequest,
+    req: MemoirVoiceTurnPlanRequest,
     ai_client: AITextClient | None = None,
-) -> MemoirVoiceFollowUpResponse:
+) -> MemoirVoiceTurnPlanResponse:
     voice_session = await _load_voice_session(db, voice_session_id, user_id)
     messages = list(voice_session.messages)
     if not _has_user_message(messages):
-        raise HTTPException(status_code=400, detail="还没有可承接的讲述内容")
+        raise HTTPException(status_code=400, detail="还没有可规划的讲述内容")
     client = ai_client or get_ai_service(req.ai_model)
     previous_messages = await _load_previous_project_messages(db, voice_session)
-    prompt = _build_acknowledgement_prompt(voice_session, previous_messages=previous_messages)
+    prompt = _build_turn_plan_prompt(voice_session, previous_messages=previous_messages)
     content, raw_response = await _call_interviewer_llm(
         client,
         prompt=prompt,
-        max_tokens=ACKNOWLEDGEMENT_MAX_TOKENS,
+        max_tokens=TURN_PLAN_MAX_TOKENS,
     )
-    parsed_turn = _parse_interviewer_turn(
-        content,
-        fallback_intent="acknowledge",
-        default_expects_answer=False,
-    )
-    turn = InterviewerTurn(
-        primary_intent=parsed_turn.primary_intent
-        if parsed_turn.primary_intent in {"acknowledge", "encourage_continue", "reflect_summary"}
-        else "acknowledge",
-        intent_tags=[
-            tag for tag in parsed_turn.intent_tags
-            if tag in {"acknowledge", "encourage_continue", "reflect_summary"}
-        ] or ["acknowledge"],
-        speech_text=parsed_turn.speech_text,
-        expects_answer=False,
-        parsed_json=parsed_turn.parsed_json,
-    )
-    return await _save_interviewer_turn(
-        db,
-        voice_session=voice_session,
-        turn=turn,
-        client=client,
-        prompt_version=ACKNOWLEDGEMENT_PROMPT_VERSION,
-        max_tokens=ACKNOWLEDGEMENT_MAX_TOKENS,
-        raw_response=raw_response,
-        fallback_intent="acknowledge",
-        metadata_extra={
-            "has_user_message": True,
-            "turn_pipeline_stage": "acknowledgement",
-        },
+    plan = _parse_voice_turn_plan(content)
+    acknowledgement: MemoirVoiceFollowUpResponse | None = None
+    if plan.should_play_ack:
+        turn = InterviewerTurn(
+            primary_intent="acknowledge",
+            intent_tags=["acknowledge"],
+            speech_text=plan.acknowledgement_text,
+            expects_answer=False,
+            parsed_json=plan.parsed_json,
+        )
+        acknowledgement = await _save_interviewer_turn(
+            db,
+            voice_session=voice_session,
+            turn=turn,
+            client=client,
+            prompt_version=TURN_PLAN_PROMPT_VERSION,
+            max_tokens=TURN_PLAN_MAX_TOKENS,
+            raw_response=raw_response,
+            fallback_intent="acknowledge",
+            metadata_extra={
+                "has_user_message": True,
+                "turn_pipeline_stage": "acknowledgement",
+                "turn_plan": plan.to_context().model_dump(),
+            },
+        )
+    return MemoirVoiceTurnPlanResponse(
+        plan=plan.to_context(),
+        acknowledgement=acknowledgement,
     )
 
 

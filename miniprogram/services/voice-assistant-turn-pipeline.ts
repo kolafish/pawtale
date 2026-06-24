@@ -1,7 +1,10 @@
-import type { MemoirVoiceFollowUpResponse } from "../domain/voice-chat";
+import type {
+  MemoirVoiceFollowUpResponse,
+  MemoirVoiceTurnPlanResponse,
+} from "../domain/voice-chat";
 import {
-  createMemoirVoiceAcknowledgement,
   createMemoirVoiceFollowUp,
+  createMemoirVoiceTurnPlan,
 } from "./memoir-voice-api";
 import {
   assistantTurnQueueItem,
@@ -20,6 +23,7 @@ export interface AssistantTurnPipelineStep {
 
 export interface AssistantTurnPipelineResult {
   cancelled: boolean;
+  turnPlan?: MemoirVoiceTurnPlanResponse;
   acknowledgement?: MemoirVoiceFollowUpResponse;
   followUp?: MemoirVoiceFollowUpResponse;
 }
@@ -28,7 +32,7 @@ export interface AssistantTurnPipelineRequest {
   voiceSessionId: string;
   isCancelled?: () => boolean;
   onStep: (step: AssistantTurnPipelineStep) => void;
-  createAcknowledgement?: typeof createMemoirVoiceAcknowledgement;
+  createTurnPlan?: typeof createMemoirVoiceTurnPlan;
   createFollowUp?: typeof createMemoirVoiceFollowUp;
 }
 
@@ -39,30 +43,37 @@ function cancelled(isCancelled?: () => boolean): boolean {
 export async function runAcknowledgedQuestionPipeline(
   request: AssistantTurnPipelineRequest,
 ): Promise<AssistantTurnPipelineResult> {
-  const createAcknowledgement = request.createAcknowledgement || createMemoirVoiceAcknowledgement;
+  const createTurnPlan = request.createTurnPlan || createMemoirVoiceTurnPlan;
   const createFollowUp = request.createFollowUp || createMemoirVoiceFollowUp;
 
-  const acknowledgement = await createAcknowledgement(request.voiceSessionId, {});
+  const turnPlan = await createTurnPlan(request.voiceSessionId, {});
   if (cancelled(request.isCancelled)) {
     return { cancelled: true };
   }
-  request.onStep({
-    stage: "acknowledgement",
-    response: acknowledgement,
-    item: assistantTurnQueueItem(acknowledgement, {
-      autoListenAfterPlayback: false,
-      waitForNextTurnBeforePlaybackMs: ACKNOWLEDGEMENT_BRIDGE_WAIT_MS,
-    }),
-  });
+  const acknowledgement = turnPlan.plan.should_play_ack !== false
+    ? turnPlan.acknowledgement || undefined
+    : undefined;
+  if (acknowledgement) {
+    request.onStep({
+      stage: "acknowledgement",
+      response: acknowledgement,
+      item: assistantTurnQueueItem(acknowledgement, {
+        autoListenAfterPlayback: false,
+        waitForNextTurnBeforePlaybackMs: ACKNOWLEDGEMENT_BRIDGE_WAIT_MS,
+      }),
+    });
+  }
   if (cancelled(request.isCancelled)) {
-    return { cancelled: true, acknowledgement };
+    return { cancelled: true, turnPlan, acknowledgement };
   }
 
-  const followUp = await createFollowUp(request.voiceSessionId, {
-    acknowledgement_message_id: acknowledgement.message.id,
-  });
+  const followUpRequest = {
+    turn_plan: turnPlan.plan,
+    ...(acknowledgement?.message.id ? { acknowledgement_message_id: acknowledgement.message.id } : {}),
+  };
+  const followUp = await createFollowUp(request.voiceSessionId, followUpRequest);
   if (cancelled(request.isCancelled)) {
-    return { cancelled: true, acknowledgement };
+    return { cancelled: true, turnPlan, acknowledgement };
   }
   request.onStep({
     stage: "question",
@@ -72,5 +83,5 @@ export async function runAcknowledgedQuestionPipeline(
     }),
   });
 
-  return { cancelled: false, acknowledgement, followUp };
+  return { cancelled: false, turnPlan, acknowledgement, followUp };
 }

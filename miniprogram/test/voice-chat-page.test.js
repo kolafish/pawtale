@@ -36,8 +36,8 @@ function loadVoiceChatPage({
     createMemoirVoiceFollowUp: async () => {
       throw new Error("createMemoirVoiceFollowUp was not mocked");
     },
-    createMemoirVoiceAcknowledgement: async () => {
-      throw new Error("createMemoirVoiceAcknowledgement was not mocked");
+    createMemoirVoiceTurnPlan: async () => {
+      throw new Error("createMemoirVoiceTurnPlan was not mocked");
     },
     createMemoirVoiceNoAnswerPrompt: async () => {
       throw new Error("createMemoirVoiceNoAnswerPrompt was not mocked");
@@ -790,20 +790,29 @@ test("voice chat pipelines acknowledgement before the next follow-up question", 
   const queuedTurns = [];
   const page = loadVoiceChatPage({
     voiceApiExports: {
-      createMemoirVoiceAcknowledgement: async (voiceSessionId, data) => {
-        requests.push({ type: "acknowledgement", voiceSessionId, data });
+      createMemoirVoiceTurnPlan: async (voiceSessionId, data) => {
+        requests.push({ type: "turn_plan", voiceSessionId, data });
         return {
-          follow_up_text: "您刚才说的院子和外婆，一下子就有画面了。",
-          primary_intent: "acknowledge",
-          intent_tags: ["acknowledge"],
-          expects_answer: false,
-          message: {
-            id: "assistant-ack-1",
-            role: "assistant",
-            content_text: "您刚才说的院子和外婆，一下子就有画面了。",
-            audio_file_id: "",
-            transcript_version_id: "",
-            metadata_json: { primary_intent: "acknowledge", expects_answer: false },
+          plan: {
+            user_signal: "memory_detail",
+            response_strategy: "ack_then_follow",
+            should_play_ack: true,
+            acknowledgement_text: "这段院子的记忆很具体。",
+            next_question_brief: "追问外婆在院子里最常带叙述者做什么",
+          },
+          acknowledgement: {
+            follow_up_text: "这段院子的记忆很具体。",
+            primary_intent: "acknowledge",
+            intent_tags: ["acknowledge"],
+            expects_answer: false,
+            message: {
+              id: "assistant-ack-1",
+              role: "assistant",
+              content_text: "这段院子的记忆很具体。",
+              audio_file_id: "",
+              transcript_version_id: "",
+              metadata_json: { primary_intent: "acknowledge", expects_answer: false },
+            },
           },
         };
       },
@@ -851,11 +860,20 @@ test("voice chat pipelines acknowledgement before the next follow-up question", 
   await page.generateFollowUpPipeline.call(context, "user-message-1");
 
   assert.deepEqual(requests, [
-    { type: "acknowledgement", voiceSessionId: "voice-1", data: {} },
+    { type: "turn_plan", voiceSessionId: "voice-1", data: {} },
     {
       type: "follow_up",
       voiceSessionId: "voice-1",
-      data: { acknowledgement_message_id: "assistant-ack-1" },
+      data: {
+        acknowledgement_message_id: "assistant-ack-1",
+        turn_plan: {
+          user_signal: "memory_detail",
+          response_strategy: "ack_then_follow",
+          should_play_ack: true,
+          acknowledgement_text: "这段院子的记忆很具体。",
+          next_question_brief: "追问外婆在院子里最常带叙述者做什么",
+        },
+      },
     },
   ]);
   assert.deepEqual(queuedTurns.map((item) => ({
@@ -870,7 +888,7 @@ test("voice chat pipelines acknowledgement before the next follow-up question", 
       autoListenAfterPlayback: false,
       expectsAnswer: false,
       waitForNextTurnBeforePlaybackMs: 900,
-      text: "您刚才说的院子和外婆，一下子就有画面了。",
+      text: "这段院子的记忆很具体。",
     },
     {
       messageId: "assistant-question-1",
@@ -880,6 +898,94 @@ test("voice chat pipelines acknowledgement before the next follow-up question", 
       text: "那时候在院子里，外婆最常带着您做什么？",
     },
   ]);
+  assert.equal(context.data.lastFollowUpSourceMessageId, "user-message-1");
+  assert.equal(context.data.persistenceStateText, "等待回答");
+});
+
+test("voice chat skips acknowledgement playback when turn plan uses direct follow", async () => {
+  const requests = [];
+  const queuedTurns = [];
+  const page = loadVoiceChatPage({
+    voiceApiExports: {
+      createMemoirVoiceTurnPlan: async (voiceSessionId, data) => {
+        requests.push({ type: "turn_plan", voiceSessionId, data });
+        return {
+          plan: {
+            user_signal: "short_answer",
+            response_strategy: "direct_follow",
+            should_play_ack: false,
+            acknowledgement_text: "",
+            next_question_brief: "直接追问这件事发生的大概时间",
+          },
+          acknowledgement: null,
+        };
+      },
+      createMemoirVoiceFollowUp: async (voiceSessionId, data) => {
+        requests.push({ type: "follow_up", voiceSessionId, data });
+        return {
+          follow_up_text: "那这件事大概发生在您多大的时候？",
+          primary_intent: "follow_up",
+          intent_tags: ["follow_up"],
+          expects_answer: true,
+          message: {
+            id: "assistant-question-1",
+            role: "assistant",
+            content_text: "那这件事大概发生在您多大的时候？",
+            audio_file_id: "",
+            transcript_version_id: "",
+            metadata_json: { primary_intent: "follow_up", expects_answer: true },
+          },
+        };
+      },
+    },
+  });
+  const context = {
+    ...page,
+    data: {
+      ...page.data,
+      voiceSessionId: "voice-1",
+      guidanceMode: "guided_interview",
+      transcriptLines: [{
+        id: "user-line-1",
+        role: "user",
+        text: "记得，不太多。",
+        message_id: "user-message-1",
+      }],
+      lastFollowUpSourceMessageId: "",
+    },
+    setData(patch) {
+      this.data = { ...this.data, ...patch };
+    },
+    enqueueAssistantTurn(item) {
+      queuedTurns.push(item);
+    },
+  };
+
+  await page.generateFollowUpPipeline.call(context, "user-message-1");
+
+  assert.deepEqual(requests, [
+    { type: "turn_plan", voiceSessionId: "voice-1", data: {} },
+    {
+      type: "follow_up",
+      voiceSessionId: "voice-1",
+      data: {
+        turn_plan: {
+          user_signal: "short_answer",
+          response_strategy: "direct_follow",
+          should_play_ack: false,
+          acknowledgement_text: "",
+          next_question_brief: "直接追问这件事发生的大概时间",
+        },
+      },
+    },
+  ]);
+  assert.deepEqual(queuedTurns.map((item) => ({
+    messageId: item.messageId,
+    text: item.text,
+  })), [{
+    messageId: "assistant-question-1",
+    text: "那这件事大概发生在您多大的时候？",
+  }]);
   assert.equal(context.data.lastFollowUpSourceMessageId, "user-message-1");
   assert.equal(context.data.persistenceStateText, "等待回答");
 });
