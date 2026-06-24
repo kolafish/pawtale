@@ -143,6 +143,7 @@ class MemoirBookVoiceCommandParseResponse(BaseModel):
     intent: str
     intent_label: str
     summary: str
+    reply_text: str | None = None
     operations: list[MemoirBookVoiceCommandOperationResponse] = Field(default_factory=list)
     requires_confirmation: bool = True
     used_ai: bool = False

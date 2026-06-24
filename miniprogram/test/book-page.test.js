@@ -1363,6 +1363,54 @@ test("book page records and previews a voice edit command", async () => {
   delete global.wx;
 });
 
+test("book page treats voice editing advice as a spoken consultation", async () => {
+  const calls = [];
+  global.wx = { showToast(options) { calls.push({ kind: "toast", title: options.title }); } };
+  const consultationPreview = sampleBookVoiceCommandPreview({
+    original_text: "第一章是不是太短了",
+    intent: "review_chapter_length",
+    intent_label: "篇幅建议",
+    summary: "正在判断「外婆家的童年」的篇幅是否合适。",
+    reply_text: "这一章现在明显偏短，建议补一个具体场景或人物对话。",
+    operations: [],
+    requires_confirmation: false,
+  });
+  const { page } = loadBookPage({
+    voiceApiExports: {
+      parseMemoirBookVoiceCommand: async (projectId, data) => {
+        calls.push({ kind: "parse", projectId, data });
+        return consultationPreview;
+      },
+    },
+    voiceSearchExports: {
+      recordMemoirVoiceSearchQuery: async (options) => {
+        calls.push({ kind: "record", emptyTranscriptMessage: options.emptyTranscriptMessage });
+        options.onRecordingEnd?.();
+        return "第一章是不是太短了";
+      },
+    },
+  });
+  const context = pageContext(page, { projectId: "project/1" });
+  page.applyPlan.call(context, samplePlan("confirmed"));
+  context.playBookVoiceAssistantReply = async (text, options) => {
+    calls.push({ kind: "reply", text, options });
+  };
+
+  await page.startBookVoiceCommand.call(context);
+
+  assert.equal(context.data.bookVoiceCommandText, "第一章是不是太短了");
+  assert.equal(context.data.bookVoiceCommandIntentLabel, "篇幅建议");
+  assert.equal(context.data.bookVoiceCommandRequiresConfirmation, false);
+  assert.equal(context.data.bookVoiceCommandCanExecute, false);
+  assert.equal(context.data.bookVoiceAssistantStatusText, "已给建议");
+  assert.deepEqual(calls[3], {
+    kind: "reply",
+    text: "这一章现在明显偏短，建议补一个具体场景或人物对话。",
+    options: { autoListenAfterPlayback: true },
+  });
+  delete global.wx;
+});
+
 test("book page plays assistant reply and auto-listens after playback", async () => {
   const calls = [];
   const originalSetTimeout = global.setTimeout;
