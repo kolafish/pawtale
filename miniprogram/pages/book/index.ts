@@ -9,6 +9,7 @@ import type {
   MemoirBookVoiceCommandOperation,
   MemoirBookVoiceCommandParseRequest,
   MemoirBookVoiceCommandParseResponse,
+  MemoirBookVoiceCommandResponseKind,
   VoiceChatErrorInfo,
   VoiceChatTranscriptLine,
   VoiceGatewayServerEvent,
@@ -224,6 +225,70 @@ function bookVoiceConversationContext(
     }));
 }
 
+function bookVoiceCommandResponseKind(
+  preview: MemoirBookVoiceCommandParseResponse,
+): MemoirBookVoiceCommandResponseKind {
+  if (preview.response_kind) {
+    return preview.response_kind;
+  }
+  if (isBookVoiceConsultationIntent(preview)) {
+    return "consultation";
+  }
+  if (isBookVoiceAnswerIntent(preview)) {
+    return "answer";
+  }
+  if (isBookVoiceClarificationIntent(preview)) {
+    return "clarification";
+  }
+  return "action_preview";
+}
+
+function bookVoiceCommandPanelTitle(kind: MemoirBookVoiceCommandResponseKind): string {
+  if (kind === "answer") {
+    return "回答";
+  }
+  if (kind === "consultation") {
+    return "建议";
+  }
+  if (kind === "clarification") {
+    return "需要补充";
+  }
+  return "操作预览";
+}
+
+function bookVoiceCommandStateText(
+  preview: MemoirBookVoiceCommandParseResponse,
+  kind: MemoirBookVoiceCommandResponseKind,
+  canExecute: boolean,
+): string {
+  if (kind === "answer") {
+    return "已回答";
+  }
+  if (kind === "consultation") {
+    return "建议";
+  }
+  if (kind === "clarification") {
+    return "需补充";
+  }
+  if (isBookVoiceReadIntent(preview)) {
+    return "即将朗读";
+  }
+  if (preview.requires_confirmation && !canExecute) {
+    return "仅预览";
+  }
+  return preview.requires_confirmation ? "待确认" : "已识别";
+}
+
+function bookVoiceCommandDetailText(
+  preview: MemoirBookVoiceCommandParseResponse,
+  kind: MemoirBookVoiceCommandResponseKind,
+): string {
+  if (kind === "answer" || kind === "consultation" || kind === "clarification") {
+    return trimText(preview.reply_text || preview.summary);
+  }
+  return trimText(preview.summary);
+}
+
 Page<BookData, {
   onShow(): Promise<void>;
   loadBookHome(): Promise<void>;
@@ -391,6 +456,10 @@ Page<BookData, {
     bookVoiceCaptureStateText: "麦克风未开始",
     bookVoiceCommandText: "",
     bookVoiceCommandIntentLabel: "",
+    bookVoiceCommandResponseKind: "",
+    bookVoiceCommandPanelTitle: "",
+    bookVoiceCommandStateText: "",
+    bookVoiceCommandDetailText: "",
     bookVoiceCommandSummary: "",
     bookVoiceCommandRequiresConfirmation: false,
     bookVoiceCommandPreview: null,
@@ -1339,6 +1408,10 @@ Page<BookData, {
       ...(keepCurrentPreview ? {} : {
         bookVoiceCommandText: "",
         bookVoiceCommandIntentLabel: "",
+        bookVoiceCommandResponseKind: "",
+        bookVoiceCommandPanelTitle: "",
+        bookVoiceCommandStateText: "",
+        bookVoiceCommandDetailText: "",
         bookVoiceCommandSummary: "",
         bookVoiceCommandRequiresConfirmation: false,
         bookVoiceCommandPreview: null,
@@ -1613,6 +1686,7 @@ Page<BookData, {
 
   applyBookVoiceCommandPreview(preview) {
     const canExecute = canExecuteBookVoiceCommand(preview);
+    const responseKind = bookVoiceCommandResponseKind(preview);
     const statusText = isBookVoiceClarificationIntent(preview)
       ? "需要再说明"
       : (isBookVoiceReadIntent(preview)
@@ -1623,6 +1697,10 @@ Page<BookData, {
     this.setData({
       bookVoiceCommandText: preview.original_text,
       bookVoiceCommandIntentLabel: preview.intent_label,
+      bookVoiceCommandResponseKind: responseKind,
+      bookVoiceCommandPanelTitle: bookVoiceCommandPanelTitle(responseKind),
+      bookVoiceCommandStateText: bookVoiceCommandStateText(preview, responseKind, canExecute),
+      bookVoiceCommandDetailText: bookVoiceCommandDetailText(preview, responseKind),
       bookVoiceCommandSummary: preview.summary,
       bookVoiceCommandRequiresConfirmation: preview.requires_confirmation,
       bookVoiceCommandPreview: preview,
@@ -1789,6 +1867,10 @@ Page<BookData, {
     this.setData({
       bookVoiceCommandText: "",
       bookVoiceCommandIntentLabel: "",
+      bookVoiceCommandResponseKind: "",
+      bookVoiceCommandPanelTitle: "",
+      bookVoiceCommandStateText: "",
+      bookVoiceCommandDetailText: "",
       bookVoiceCommandSummary: "",
       bookVoiceCommandRequiresConfirmation: false,
       bookVoiceCommandPreview: null,
