@@ -176,6 +176,9 @@ class MemoirVoiceProgressResponse(BaseModel):
 class MemoirVoiceFollowUpResponse(BaseModel):
     message: MemoirChatMessageResponse
     follow_up_text: str
+    primary_intent: str = "follow_up"
+    intent_tags: list[str] = Field(default_factory=list)
+    expects_answer: bool = True
 
 class MemoirTTSAlignmentSegmentResponse(BaseModel):
     text: str

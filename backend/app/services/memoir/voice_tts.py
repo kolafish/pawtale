@@ -335,9 +335,9 @@ async def _load_assistant_message(
     if not message:
         raise HTTPException(status_code=404, detail="聊天消息不存在")
     if message.role != MemoirChatMessageRole.ASSISTANT.value:
-        raise HTTPException(status_code=400, detail="只有 AI 追问可以生成语音")
+        raise HTTPException(status_code=400, detail="只有 AI 回应可以生成语音")
     if not message.content_text.strip():
-        raise HTTPException(status_code=400, detail="AI 追问内容为空")
+        raise HTTPException(status_code=400, detail="AI 回应内容为空")
     return message
 
 

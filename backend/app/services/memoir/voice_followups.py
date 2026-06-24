@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 import logging
 
 from fastapi import HTTPException
@@ -21,6 +22,7 @@ from app.schemas.memoir_voice import (
 )
 from app.services.ai_factory import get_ai_service
 from app.services.ai_types import AITextClient
+from app.services.json_utils import extract_json_payload
 
 
 SYSTEM_PROMPT = (
@@ -28,18 +30,38 @@ SYSTEM_PROMPT = (
     "你的任务不是审问用户，而是帮助叙述者自然地讲出人生经历、人物、事情、地点、时间和感受。"
 )
 AI_FOLLOW_UP_UNAVAILABLE_MESSAGE = "AI 服务暂时不可用，请稍后重试。"
-PROMPT_VERSION = "memoir_voice_followup_v3"
+PROMPT_VERSION = "memoir_voice_interviewer_turn_v1"
 MAX_CONTEXT_MESSAGES = 12
 MAX_PREVIOUS_CONTEXT_MESSAGES = 8
-FOLLOW_UP_MAX_TOKENS = 180
-GUIDED_FOLLOW_UP_MAX_TOKENS = 240
-FREE_OPENING_MAX_TOKENS = 260
-GUIDED_OPENING_MAX_TOKENS = 320
+FOLLOW_UP_MAX_TOKENS = 260
+GUIDED_FOLLOW_UP_MAX_TOKENS = 320
+FREE_OPENING_MAX_TOKENS = 360
+GUIDED_OPENING_MAX_TOKENS = 420
 logger = logging.getLogger(__name__)
 
 NO_ANSWER_PROMPT_VERSION = "memoir_voice_no_answer_prompt_v1"
 NO_ANSWER_RETRY_TEXT = "我这边没有听到声音，您可以接着刚才的问题慢慢说。"
 NO_ANSWER_PAUSE_TEXT = "没关系，我先暂停一下。您准备好了，再点继续说话。"
+
+
+PRIMARY_INTENTS = {
+    "opening",
+    "follow_up",
+    "acknowledge",
+    "encourage_continue",
+    "reflect_summary",
+    "transition",
+    "repair",
+}
+
+
+@dataclass(frozen=True)
+class InterviewerTurn:
+    primary_intent: str
+    intent_tags: list[str]
+    speech_text: str
+    expects_answer: bool
+    parsed_json: bool
 
 
 MODULE_LABELS = {
@@ -153,6 +175,59 @@ def _usage_metadata(raw_response: dict | None) -> dict:
     return usage if isinstance(usage, dict) else {}
 
 
+def _clean_speech_text(value: object) -> str:
+    return str(value or "").strip().strip("\"“”").strip()
+
+
+def _normalize_primary_intent(value: object, fallback: str) -> str:
+    normalized = str(value or "").strip()
+    return normalized if normalized in PRIMARY_INTENTS else fallback
+
+
+def _normalize_intent_tags(value: object, primary_intent: str) -> list[str]:
+    raw_tags = value if isinstance(value, list) else []
+    tags: list[str] = []
+    for item in raw_tags:
+        tag = str(item or "").strip()
+        if tag in PRIMARY_INTENTS and tag not in tags:
+            tags.append(tag)
+    if primary_intent not in tags:
+        tags.append(primary_intent)
+    return tags[:5]
+
+
+def _parse_interviewer_turn(content: object, *, fallback_intent: str) -> InterviewerTurn:
+    raw_text = _clean_speech_text(content)
+    payload = extract_json_payload(raw_text)
+    if isinstance(payload, dict):
+        speech_text = _clean_speech_text(
+            payload.get("speech_text")
+            or payload.get("text")
+            or payload.get("follow_up_text")
+            or payload.get("message")
+        )
+        if speech_text:
+            primary_intent = _normalize_primary_intent(
+                payload.get("primary_intent") or payload.get("intent"),
+                fallback_intent,
+            )
+            expects_answer = payload.get("expects_answer")
+            return InterviewerTurn(
+                primary_intent=primary_intent,
+                intent_tags=_normalize_intent_tags(payload.get("intent_tags"), primary_intent),
+                speech_text=speech_text,
+                expects_answer=expects_answer if isinstance(expects_answer, bool) else True,
+                parsed_json=True,
+            )
+    return InterviewerTurn(
+        primary_intent=fallback_intent,
+        intent_tags=[fallback_intent],
+        speech_text=raw_text,
+        expects_answer=True,
+        parsed_json=False,
+    )
+
+
 def _build_user_prompt(
     voice_session: MemoirVoiceSession,
     *,
@@ -166,7 +241,7 @@ def _build_user_prompt(
     has_previous_user_message = _has_user_message(previous_messages)
     history_context = _previous_context(previous_messages)
     module_label = _module_label(voice_session.current_guidance_module)
-    regenerate_instruction = "这次是在替换上一句追问，请换一个角度，不要重复上一句。" if regenerate else ""
+    regenerate_instruction = "这次是在替换上一句回应，请换一个角度，不要重复上一句。" if regenerate else ""
 
     if guidance_mode == MemoirGuidanceMode.GUIDED_INTERVIEW:
         if has_user_message:
@@ -219,16 +294,19 @@ def _build_user_prompt(
 - 引导叙述者可以从小时候或最早的记忆开始讲起
 - 仍然允许叙述者按自己的顺序开始，不要连续提问"""
 
-    return f"""请根据下面的访谈上下文，生成下一句 AI 开场或追问。
+    return f"""请根据下面的访谈上下文，生成下一句“老余”的主持人回应。
 
 访谈要求：
-- 只输出一句中文问题或邀请句，不要标题、解释、编号或引号
-- 内容要短，普通追问最好 30 个汉字以内；开场或主题菜单可以稍长，但仍要适合语音播放
-- 语气自然、尊重，像真人访谈主持人
+- 你可以自主选择下一步动作：开场、继续追问、承接认可、鼓励继续讲、小结、自然换方向，或没听清/回答太短时温和修复
+- 允许把多个动作组合在一句回应里，例如“承接和认可 + 鼓励继续讲 + 一个追问”
+- speech_text 要像真人主持人自然说话，通常 1 到 3 句，适合语音播放
+- 普通回应建议 40 到 90 个汉字；开场或主题菜单可以稍长，但不要啰嗦
+- 不要机械夸奖，不要说空泛的“您真棒”；认可必须落在叙述者刚说过的具体内容上
 - 不要编造上下文没有的信息；如果提醒“上次讲到哪里”，只能概括历史会话里明确出现过的内容
 - 历史会话进度只用于判断是否续聊；如果历史会话为空，不要提“上次”
-- 不要连续问多个问题
+- 一次最多推进一个方向；如果要问问题，只问一个自然问题
 - 不问敏感隐私，除非用户已经主动提到
+- 遇到痛苦、遗憾、疾病、离别等内容，可以温和承接，不要强行积极
 {regenerate_instruction}
 
 {mode_instruction}
@@ -238,6 +316,20 @@ def _build_user_prompt(
 
 历史会话进度：
 {history_context}
+
+请只输出严格 JSON，不要 Markdown，不要解释。格式：
+{{
+  "primary_intent": "follow_up",
+  "intent_tags": ["acknowledge", "encourage_continue", "follow_up"],
+  "speech_text": "老余实际要说的话",
+  "expects_answer": true
+}}
+
+字段说明：
+- primary_intent 表示这句话最终的主动作，只能从 opening、follow_up、acknowledge、encourage_continue、reflect_summary、transition、repair 里选一个
+- intent_tags 表示这句话包含的表达功能，可以多个，必须包含 primary_intent
+- speech_text 是要播放给用户听的完整中文回应
+- expects_answer 第一版通常填 true；只有纯小结且不希望立刻收音时才填 false
 """
 
 
@@ -308,7 +400,7 @@ async def generate_voice_follow_up(
         regenerate=req.regenerate,
     )
     has_user_message = _has_user_message(list(voice_session.messages))
-    guidance_intent = "follow_up" if has_user_message else "opening"
+    fallback_intent = "follow_up" if has_user_message else "opening"
     llm_max_tokens = _llm_max_tokens(
         voice_session,
         has_user_message=has_user_message,
@@ -346,9 +438,10 @@ async def generate_voice_follow_up(
         )
         raise HTTPException(status_code=503, detail=AI_FOLLOW_UP_UNAVAILABLE_MESSAGE) from exc
 
-    follow_up_text = str(content).strip().strip("\"“”")
+    turn = _parse_interviewer_turn(content, fallback_intent=fallback_intent)
+    follow_up_text = turn.speech_text
     if not follow_up_text:
-        raise HTTPException(status_code=502, detail="AI 未返回可用开场或追问")
+        raise HTTPException(status_code=502, detail="AI 未返回可用访谈回应")
     finish_reason = _extract_finish_reason(raw_response)
 
     message = MemoirChatMessage(
@@ -357,11 +450,16 @@ async def generate_voice_follow_up(
         role=MemoirChatMessageRole.ASSISTANT.value,
         content_text=follow_up_text,
         content_status=MemoirChatContentStatus.FINAL.value,
-        guidance_intent=guidance_intent,
+        guidance_intent=turn.primary_intent,
         turn_index=await _next_turn_index(db, voice_session.id),
         metadata_json={
-            "source": f"ai.{guidance_intent}",
+            "source": f"ai.{turn.primary_intent}",
             "prompt_version": PROMPT_VERSION,
+            "fallback_intent": fallback_intent,
+            "primary_intent": turn.primary_intent,
+            "intent_tags": turn.intent_tags,
+            "expects_answer": turn.expects_answer,
+            "parsed_json": turn.parsed_json,
             "provider": client.provider_name,
             "model": client.model_name,
             "regenerate": req.regenerate,
@@ -376,7 +474,13 @@ async def generate_voice_follow_up(
     )
     db.add(message)
     await db.commit()
-    return MemoirVoiceFollowUpResponse(message=message, follow_up_text=follow_up_text)
+    return MemoirVoiceFollowUpResponse(
+        message=message,
+        follow_up_text=follow_up_text,
+        primary_intent=turn.primary_intent,
+        intent_tags=turn.intent_tags,
+        expects_answer=turn.expects_answer,
+    )
 
 
 async def create_no_answer_prompt(
@@ -387,6 +491,7 @@ async def create_no_answer_prompt(
 ) -> MemoirVoiceFollowUpResponse:
     voice_session = await _load_voice_session(db, voice_session_id, user_id)
     prompt_text = NO_ANSWER_RETRY_TEXT if req.attempt <= 1 else NO_ANSWER_PAUSE_TEXT
+    expects_answer = req.attempt <= 1
     message = MemoirChatMessage(
         project_id=voice_session.project_id,
         voice_session_id=voice_session.id,
@@ -398,9 +503,18 @@ async def create_no_answer_prompt(
         metadata_json={
             "source": "ai.no_answer_prompt",
             "prompt_version": NO_ANSWER_PROMPT_VERSION,
+            "primary_intent": "repair",
+            "intent_tags": ["repair"],
+            "expects_answer": expects_answer,
             "attempt": req.attempt,
         },
     )
     db.add(message)
     await db.commit()
-    return MemoirVoiceFollowUpResponse(message=message, follow_up_text=prompt_text)
+    return MemoirVoiceFollowUpResponse(
+        message=message,
+        follow_up_text=prompt_text,
+        primary_intent="repair",
+        intent_tags=["repair"],
+        expects_answer=expects_answer,
+    )

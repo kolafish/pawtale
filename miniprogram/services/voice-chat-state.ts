@@ -1,5 +1,6 @@
 import type {
   MemoirGuidanceMode,
+  MemoirVoiceAssistantIntent,
   TTSAlignmentSegment,
   VoiceChatErrorInfo,
   VoiceChatTranscriptLine,
@@ -128,6 +129,45 @@ export function visibleAssistantLine(
   return latestMessageId === dismissedMessageId ? undefined : latest;
 }
 
+function stringFromMetadata(metadata: Record<string, unknown> | undefined, key: string): string {
+  const value = metadata?.[key];
+  return typeof value === "string" ? value : "";
+}
+
+export function assistantPrimaryIntent(line?: VoiceChatTranscriptLine): MemoirVoiceAssistantIntent | "" {
+  const metadata = line?.metadata_json;
+  const primaryIntent = stringFromMetadata(metadata, "primary_intent");
+  if (primaryIntent) {
+    return primaryIntent as MemoirVoiceAssistantIntent;
+  }
+  const source = stringFromMetadata(metadata, "source");
+  const sourceIntent = source.startsWith("ai.") ? source.slice(3) : "";
+  return sourceIntent === "no_answer_prompt"
+    ? "repair"
+    : sourceIntent as MemoirVoiceAssistantIntent | "";
+}
+
+export function assistantIntentLabel(
+  intent: MemoirVoiceAssistantIntent | string,
+  hasUserMessage: boolean,
+): string {
+  const labels: Record<string, string> = {
+    opening: "老余开场",
+    follow_up: "老余追问",
+    acknowledge: "老余回应",
+    encourage_continue: "老余鼓励",
+    reflect_summary: "阶段小结",
+    transition: "换个方向",
+    repair: "老余确认",
+  };
+  return labels[intent] || (hasUserMessage ? "老余回应" : "老余开场");
+}
+
+export function assistantExpectsAnswer(line?: VoiceChatTranscriptLine): boolean {
+  const value = line?.metadata_json?.expects_answer;
+  return typeof value === "boolean" ? value : true;
+}
+
 export function canRequestFollowUp(
   lines: VoiceChatTranscriptLine[],
   mode: MemoirGuidanceMode,
@@ -140,23 +180,23 @@ export function canRequestFollowUp(
   return followUpSourceMessageId(lines) !== lastFollowUpSourceMessageId;
 }
 
-export function assistantPanelCopy(lines: VoiceChatTranscriptLine[]): {
+export function assistantPanelCopy(
+  lines: VoiceChatTranscriptLine[],
+  assistantLine = latestAssistantLine(lines),
+): {
   assistantPromptLabel: string;
   assistantLoadingText: string;
   assistantEmptyText: string;
 } {
   const hasUserMessage = Boolean(latestUserMessageId(lines));
-  return hasUserMessage
-    ? {
-        assistantPromptLabel: "AI 追问",
-        assistantLoadingText: "正在根据刚才的内容生成下一句追问",
-        assistantEmptyText: "可以让 AI 根据刚才的内容继续追问。",
-      }
-    : {
-        assistantPromptLabel: "AI 开场",
-        assistantLoadingText: "正在准备第一句话",
-        assistantEmptyText: "AI 会先说一句，帮你开始讲。",
-      };
+  const intent = assistantPrimaryIntent(assistantLine);
+  return {
+    assistantPromptLabel: assistantIntentLabel(intent, hasUserMessage),
+    assistantLoadingText: hasUserMessage ? "老余正在想怎么接话" : "老余正在准备第一句话",
+    assistantEmptyText: hasUserMessage
+      ? "可以让老余根据刚才的内容接着聊。"
+      : "老余会先说一句，帮你开始讲。",
+  };
 }
 
 export interface AssistantTranscriptStateOptions {
@@ -171,6 +211,7 @@ export interface AssistantTranscriptStateOptions {
   followUpTTSStateText?: string;
   ttsAlignment?: TTSAlignmentSegment[];
   canRequestFollowUp?: boolean;
+  assistantExpectsAnswer?: boolean;
 }
 
 export interface AssistantTranscriptStatePatch {
@@ -180,6 +221,7 @@ export interface AssistantTranscriptStatePatch {
   assistantPromptLabel: string;
   assistantLoadingText: string;
   assistantEmptyText: string;
+  assistantExpectsAnswer: boolean;
   followUpMessageId: string;
   followUpAudioFileId: string;
   followUpTTSStateText: string;
@@ -199,7 +241,8 @@ export function assistantTranscriptState(
     transcriptLines: lines,
     latestTranscriptText: latestTranscriptText(lines),
     assistantPromptText: options.assistantPromptText ?? (assistantLine?.text || ""),
-    ...assistantPanelCopy(lines),
+    ...assistantPanelCopy(lines, assistantLine),
+    assistantExpectsAnswer: options.assistantExpectsAnswer ?? assistantExpectsAnswer(assistantLine),
     followUpMessageId: options.followUpMessageId ?? assistantMessageId,
     followUpAudioFileId: options.followUpAudioFileId ?? assistantAudioFileId,
     followUpTTSStateText: options.followUpTTSStateText

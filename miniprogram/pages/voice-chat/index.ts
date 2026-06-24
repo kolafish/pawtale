@@ -1,5 +1,6 @@
 import type {
   MemoirGuidanceMode,
+  MemoirVoiceFollowUpResponse,
   MemoirVoiceSessionDetail,
   VoiceChatErrorInfo,
   TTSAlignmentSegment,
@@ -77,6 +78,7 @@ interface VoiceChatData {
   assistantPromptLabel: string;
   assistantLoadingText: string;
   assistantEmptyText: string;
+  assistantExpectsAnswer: boolean;
   followUpLoading: boolean;
   followUpError: string;
   lastFollowUpSourceMessageId: string;
@@ -132,6 +134,20 @@ interface AutoListenGateSnapshot {
   followUpLoading: boolean;
   pendingAfterPlayback: boolean;
   canStart: boolean;
+}
+
+function assistantResponseMetadata(response: MemoirVoiceFollowUpResponse): Record<string, unknown> {
+  const metadata = { ...(response.message.metadata_json || {}) };
+  if (response.primary_intent) {
+    metadata.primary_intent = response.primary_intent;
+  }
+  if (Array.isArray(response.intent_tags)) {
+    metadata.intent_tags = response.intent_tags;
+  }
+  if (typeof response.expects_answer === "boolean") {
+    metadata.expects_answer = response.expects_answer;
+  }
+  return metadata;
 }
 
 Page<VoiceChatData, {
@@ -224,9 +240,10 @@ Page<VoiceChatData, {
     latestTranscriptText: "",
     transcriptLines: [],
     assistantPromptText: "",
-    assistantPromptLabel: "AI 开场",
-    assistantLoadingText: "正在准备第一句话",
-    assistantEmptyText: "AI 会先说一句，帮你开始讲。",
+    assistantPromptLabel: "老余开场",
+    assistantLoadingText: "老余正在准备第一句话",
+    assistantEmptyText: "老余会先说一句，帮你开始讲。",
+    assistantExpectsAnswer: true,
     followUpLoading: false,
     followUpError: "",
     lastFollowUpSourceMessageId: "",
@@ -672,20 +689,21 @@ Page<VoiceChatData, {
       followUpLoading: true,
       followUpError: "",
       canRequestFollowUp: false,
-      persistenceStateText: "AI 思考中",
+      persistenceStateText: "老余思考中",
     });
     try {
       const response = await createMemoirVoiceFollowUp(this.data.voiceSessionId, { regenerate });
       if (requestSerial !== followUpRequestSerial) {
         return;
       }
+      const metadata = assistantResponseMetadata(response);
       const line: VoiceChatTranscriptLine = {
         id: response.message.id,
         role: response.message.role,
         text: response.message.content_text,
         message_id: response.message.id,
         transcript_version_id: response.message.transcript_version_id,
-        metadata_json: response.message.metadata_json || {},
+        metadata_json: metadata,
       };
       const transcriptLines = upsertTranscriptLine(this.data.transcriptLines, line);
       this.setData({
@@ -697,7 +715,7 @@ Page<VoiceChatData, {
           followUpMessageId: response.message.id,
           followUpAudioFileId: response.message.audio_file_id || "",
           followUpTTSStateText: "",
-          ttsAlignment: ttsAlignmentFromMetadata(response.message.metadata_json),
+          ttsAlignment: ttsAlignmentFromMetadata(metadata),
           canRequestFollowUp: false,
         }),
         dismissedFollowUpMessageId: "",
@@ -706,15 +724,15 @@ Page<VoiceChatData, {
         lastFollowUpSourceMessageId: sourceMessageId,
       });
       writeMemoirVoiceSessionSnapshot(this.data.voiceSessionId, { transcriptLines });
-      void this.prepareFollowUpTTS(response.message.id, false);
+      void this.prepareFollowUpTTS(response.message.id, false, response.expects_answer !== false);
     } catch (error) {
       if (requestSerial !== followUpRequestSerial) {
         return;
       }
       this.setData({
-        followUpError: error instanceof Error ? error.message : "AI 追问生成失败",
+        followUpError: error instanceof Error ? error.message : "老余回应生成失败",
         canRequestFollowUp: true,
-        persistenceStateText: "追问失败",
+        persistenceStateText: "回应失败",
       });
     } finally {
       if (requestSerial === followUpRequestSerial) {
@@ -747,6 +765,7 @@ Page<VoiceChatData, {
       followUpTTSLoading: false,
       followUpTTSError: "",
       followUpTTSStateText: "",
+      assistantExpectsAnswer: true,
       ttsSpokenText: "",
       ttsCurrentText: "",
       ttsRemainingText: "",
@@ -758,7 +777,7 @@ Page<VoiceChatData, {
         this.data.lastFollowUpSourceMessageId,
         this.data.followUpLoading,
       ),
-      persistenceStateText: "已跳过追问",
+      persistenceStateText: "已跳过回应",
     });
   },
 
@@ -1216,21 +1235,22 @@ Page<VoiceChatData, {
       followUpLoading: true,
       followUpError: "",
       canRequestFollowUp: false,
-      persistenceStateText: "AI 正在确认",
-      autoListenStateText: "没听到回答，AI 正在确认",
+      persistenceStateText: "老余正在确认",
+      autoListenStateText: "没听到回答，老余正在确认",
     });
     try {
       const response = await createMemoirVoiceNoAnswerPrompt(this.data.voiceSessionId, { attempt });
       if (requestSerial !== this.noAnswerPromptRequestSerial) {
         return;
       }
+      const metadata = assistantResponseMetadata(response);
       const line: VoiceChatTranscriptLine = {
         id: response.message.id,
         role: response.message.role,
         text: response.message.content_text,
         message_id: response.message.id,
         transcript_version_id: response.message.transcript_version_id,
-        metadata_json: response.message.metadata_json || {},
+        metadata_json: metadata,
       };
       const transcriptLines = upsertTranscriptLine(this.data.transcriptLines, line);
       this.setData({
@@ -1242,13 +1262,13 @@ Page<VoiceChatData, {
           followUpMessageId: response.message.id,
           followUpAudioFileId: response.message.audio_file_id || "",
           followUpTTSStateText: "",
-          ttsAlignment: ttsAlignmentFromMetadata(response.message.metadata_json),
+          ttsAlignment: ttsAlignmentFromMetadata(metadata),
           canRequestFollowUp: false,
         }),
         dismissedFollowUpMessageId: "",
         followUpTTSError: "",
-        persistenceStateText: autoListenAfterPlayback ? "AI 正在确认" : "已暂停收音",
-        autoListenStateText: autoListenAfterPlayback ? "AI 确认后会继续听" : "已暂停，可点继续说话",
+        persistenceStateText: autoListenAfterPlayback ? "老余正在确认" : "已暂停收音",
+        autoListenStateText: autoListenAfterPlayback ? "老余确认后会继续听" : "已暂停，可点继续说话",
       });
       writeMemoirVoiceSessionSnapshot(this.data.voiceSessionId, { transcriptLines });
       await this.prepareFollowUpTTS(response.message.id, false, autoListenAfterPlayback);
@@ -1386,7 +1406,7 @@ Page<VoiceChatData, {
       nextData.primaryActionText = "继续说话";
       nextData.persistenceStateText = this.data.persistenceStateText === "已保存"
         || this.data.persistenceStateText === "未听到回答"
-        || this.data.persistenceStateText === "AI 正在确认"
+        || this.data.persistenceStateText === "老余正在确认"
         ? this.data.persistenceStateText
         : "正在保存";
     }

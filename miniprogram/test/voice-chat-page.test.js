@@ -69,17 +69,18 @@ function loadVoiceChatPage({
   });
   mockModule("../services/voice-chat-state.ts", {
     assistantPanelCopy: () => ({
-      assistantPromptLabel: "AI 开场",
-      assistantLoadingText: "正在准备第一句话",
-      assistantEmptyText: "AI 会先说一句，帮你开始讲。",
+      assistantPromptLabel: "老余开场",
+      assistantLoadingText: "老余正在准备第一句话",
+      assistantEmptyText: "老余会先说一句，帮你开始讲。",
     }),
     assistantTranscriptState: (lines, options = {}) => ({
       transcriptLines: lines,
       latestTranscriptText: lines.length ? lines[lines.length - 1].text : "",
       assistantPromptText: options.assistantPromptText || "",
-      assistantPromptLabel: "AI 开场",
-      assistantLoadingText: "正在准备第一句话",
-      assistantEmptyText: "AI 会先说一句，帮你开始讲。",
+      assistantPromptLabel: "老余开场",
+      assistantLoadingText: "老余正在准备第一句话",
+      assistantEmptyText: "老余会先说一句，帮你开始讲。",
+      assistantExpectsAnswer: true,
       followUpMessageId: options.followUpMessageId || "",
       followUpAudioFileId: options.followUpAudioFileId || "",
       followUpTTSStateText: options.followUpTTSStateText || "",
@@ -840,8 +841,8 @@ test("voice chat asks with AI voice when auto-listen hears no answer", async () 
     autoListenAfterPlayback: true,
   }]);
   assert.equal(context.data.assistantPromptText, "我这边没有听到声音，您可以接着刚才的问题慢慢说。");
-  assert.equal(context.data.autoListenStateText, "AI 确认后会继续听");
-  assert.equal(context.data.persistenceStateText, "AI 正在确认");
+  assert.equal(context.data.autoListenStateText, "老余确认后会继续听");
+  assert.equal(context.data.persistenceStateText, "老余正在确认");
   assert.equal(context.consecutiveNoAnswerPrompts, 1);
 
   page.handleCaptureStats.call(context, {
@@ -857,8 +858,8 @@ test("voice chat asks with AI voice when auto-listen hears no answer", async () 
   });
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(noAnswerRequests.length, 1);
-  assert.equal(context.data.autoListenStateText, "AI 确认后会继续听");
-  assert.equal(context.data.persistenceStateText, "AI 正在确认");
+  assert.equal(context.data.autoListenStateText, "老余确认后会继续听");
+  assert.equal(context.data.persistenceStateText, "老余正在确认");
 });
 
 test("voice chat ignores stale no-answer prompt after manual recording resumes", async () => {
