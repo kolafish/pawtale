@@ -235,7 +235,7 @@ class MemoirBookSourceAssignmentInput(BaseModel):
     def _valid_utterance_ids(cls, value: list[str]) -> list[str]:
         utterance_ids = [item.strip() for item in value if item.strip()]
         if not utterance_ids:
-            raise ValueError("至少选择一条转写")
+            raise ValueError("至少选择一条讲述记录")
         return list(dict.fromkeys(utterance_ids))
 
 

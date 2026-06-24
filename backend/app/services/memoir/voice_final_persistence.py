@@ -64,7 +64,7 @@ class VoiceFinalPersistenceService:
         try:
             content = event.text.strip()
             if not content:
-                raise HTTPException(status_code=400, detail="转写文本不能为空")
+                raise HTTPException(status_code=400, detail="识别文字不能为空")
             _validate_audio_span(event.start_ms, event.end_ms)
             cleaned = await generate_cleaned_transcript_text(content, strict=False)
 
@@ -183,7 +183,7 @@ class VoiceFinalPersistenceService:
         )
         voice_session = result.scalar_one_or_none()
         if not voice_session:
-            raise HTTPException(status_code=404, detail="语音会话不存在")
+            raise HTTPException(status_code=404, detail="本次语音记录不存在")
         return voice_session
 
     async def _stage_audio(self, audio: bytes | None) -> memoir_audio_files.StagedAudioFile | None:

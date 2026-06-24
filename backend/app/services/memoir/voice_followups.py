@@ -254,7 +254,7 @@ async def _load_voice_session(
     )
     voice_session = result.scalar_one_or_none()
     if not voice_session:
-        raise HTTPException(status_code=404, detail="语音会话不存在")
+        raise HTTPException(status_code=404, detail="本次语音记录不存在")
     return voice_session
 
 

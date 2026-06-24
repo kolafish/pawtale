@@ -300,7 +300,7 @@ Page<VoiceChatData, {
       primaryActionText: voiceAuthorizationAgreed ? "开始说话" : "同意后开始说话",
     });
     if (!voiceSessionId) {
-      this.setData({ error: "缺少语音会话" });
+      this.setData({ error: "缺少本次语音记录" });
       return;
     }
     this.hydrateVoiceSessionSnapshot();
@@ -332,7 +332,7 @@ Page<VoiceChatData, {
         recording: false,
         primaryActionText: "继续说话",
         persistenceStateText: "正在保存当前句",
-        recoveryNotice: "已暂停收音，返回后会恢复已保存的访谈记录",
+        recoveryNotice: "已暂停收音，返回后会恢复已保存的讲述记录",
       });
     }
   },
@@ -476,7 +476,7 @@ Page<VoiceChatData, {
         currentFollowUpTTSStateText: this.data.followUpTTSStateText,
       }),
       lastFollowUpSourceMessageId,
-      recoveryNotice: snapshot.pendingClose ? "正在恢复上次离开前的访谈记录" : this.data.recoveryNotice,
+      recoveryNotice: snapshot.pendingClose ? "正在恢复上次离开前的讲述记录" : this.data.recoveryNotice,
     });
   },
 
@@ -530,7 +530,7 @@ Page<VoiceChatData, {
       return;
     }
     this.setData({
-      recoveryNotice: "上次离开时最后一句可能未保存，请检查转写记录",
+      recoveryNotice: "上次离开时最后一句可能未保存，请检查讲述记录",
       persistenceStateText: "已恢复已保存记录",
       canReconnect: true,
       canFinishAfterDisconnect: true,
@@ -569,7 +569,7 @@ Page<VoiceChatData, {
     if (detail.session.status === "stopped") {
       sessionPatch.status = "closed";
       sessionPatch.statusText = statusText("closed");
-      sessionPatch.primaryActionText = "已结束";
+      sessionPatch.primaryActionText = "已保存";
       sessionPatch.recording = false;
       sessionPatch.persistenceStateText = "已保存";
     }
@@ -579,7 +579,7 @@ Page<VoiceChatData, {
       sessionPatch.primaryActionText = "重新开始";
       sessionPatch.recording = false;
       sessionPatch.persistenceStateText = "会话异常";
-      sessionPatch.error = detail.session.error_message || "语音会话异常结束，请返回首页重新开始";
+      sessionPatch.error = detail.session.error_message || "本次语音保存异常，请返回首页重新开始";
     }
     this.setData({
       ...sessionPatch,
@@ -641,7 +641,7 @@ Page<VoiceChatData, {
       recording: false,
       status: "closed",
       statusText: statusText("closed"),
-      primaryActionText: "已结束",
+      primaryActionText: "已保存",
       canReconnect: false,
       canFinishAfterDisconnect: false,
     });
@@ -1286,8 +1286,8 @@ Page<VoiceChatData, {
       recording: false,
       status: "stopping",
       statusText: statusText("stopping"),
-      primaryActionText: "正在结束",
-      persistenceStateText: this.data.recording ? "正在保存最后一句" : "正在结束",
+      primaryActionText: "保存中",
+      persistenceStateText: this.data.recording ? "正在保存最后一句" : "正在保存",
     });
     if (!streamingClient) {
       await this.refreshVoiceSessionSnapshot();
@@ -1300,7 +1300,7 @@ Page<VoiceChatData, {
       streamingClient = null;
       this.setData({
         recording: false,
-        primaryActionText: "已结束",
+        primaryActionText: "已保存",
         status: "closed",
         statusText: statusText("closed"),
         persistenceStateText: "正在同步",
@@ -1308,8 +1308,8 @@ Page<VoiceChatData, {
       await this.refreshVoiceSessionSnapshot();
       this.setData({ persistenceStateText: "已保存" });
       wx.showModal({
-        title: "访谈已结束",
-        content: "可以到转写记录里查看和校正文稿。",
+        title: "本次讲述已保存",
+        content: "可以到讲述记录里查看和整理文字。",
         confirmText: "查看记录",
         cancelText: "留在本页",
         success: (result) => {
@@ -1320,7 +1320,7 @@ Page<VoiceChatData, {
       });
     } catch (error) {
       await this.refreshVoiceSessionSnapshot();
-      this.handleError(error instanceof Error ? error.message : "语音会话结束失败");
+      this.handleError(error instanceof Error ? error.message : "语音保存失败");
     } finally {
       this.setData({ finishingSession: false });
     }
@@ -1475,7 +1475,7 @@ Page<VoiceChatData, {
       recording: false,
       primaryActionText: "重新连接",
       captureStateText: "录音异常",
-      recoveryNotice: error?.kind === "connection" ? "语音连接中断，已保留本地访谈记录" : this.data.recoveryNotice,
+      recoveryNotice: error?.kind === "connection" ? "语音连接中断，已保留本地讲述记录" : this.data.recoveryNotice,
       canReconnect: error?.kind === "connection",
       canFinishAfterDisconnect: error?.kind === "connection",
     };

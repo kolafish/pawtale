@@ -21,7 +21,7 @@ async def _assert_source_session_owner(db: AsyncSession, user_id: str, voice_ses
         .where(MemoirVoiceSession.id == voice_session_id, Project.user_id == user_id)
     )
     if result.scalar_one_or_none() is None:
-        raise HTTPException(status_code=404, detail="语音会话不存在")
+        raise HTTPException(status_code=404, detail="本次语音记录不存在")
 
 
 async def record_voice_authorization_consent(

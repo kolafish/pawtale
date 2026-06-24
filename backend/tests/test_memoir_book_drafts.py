@@ -463,7 +463,7 @@ async def test_mobile_memoir_book_chapter_draft_planner_can_choose_regenerate(
     assert data["metadata_json"] == {}
     assert len(fake_ai.calls) == 3
     cluster_prompt = fake_ai.calls[1]["user_prompt"]
-    assert "请把本章来源转写中讲同一件事" in cluster_prompt
+    assert "请把本章来源讲述记录中讲同一件事" in cluster_prompt
     prompt = fake_ai.calls[2]["user_prompt"]
     assert "mode: regenerate" in prompt
     assert "事件聚合规划" in prompt
@@ -631,7 +631,7 @@ async def test_mobile_memoir_book_chapter_draft_force_regenerate_ignores_previou
     assert data["metadata_json"] == {}
     assert len(fake_ai.calls) == 2
     cluster_prompt = fake_ai.calls[0]["user_prompt"]
-    assert "请把本章来源转写中讲同一件事" in cluster_prompt
+    assert "请把本章来源讲述记录中讲同一件事" in cluster_prompt
     prompt = fake_ai.calls[1]["user_prompt"]
     assert "很早以前的一条旧记录" not in prompt
     assert "原章节正文" not in prompt
@@ -646,7 +646,7 @@ async def test_mobile_memoir_book_chapter_draft_force_regenerate_ignores_previou
     assert "source_type: 新增来源" not in prompt
     assert "本章共有 3 条来源" in prompt
     assert "不能只写第一条" in prompt
-    assert "以来源转写为准" in prompt
+    assert "以来源讲述记录为准" in prompt
     assert "章节标题参考" in prompt
     assert "章节范围参考" not in prompt
     assert "每条要求覆盖的来源至少要有一处可对应的具体内容进入正文" in prompt

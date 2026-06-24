@@ -10,7 +10,7 @@
       disabled="{{finishingSession}}"
       bindtap="finishSession"
     >
-      {{finishingSession ? "结束中" : "结束"}}
+      {{finishingSession ? "保存中" : "保存离开"}}
     </button>
   </view>
 
@@ -28,13 +28,13 @@
     <text wx:if="{{recoveryNotice}}" class="recovery-text">{{recoveryNotice}}</text>
     <view wx:if="{{canReconnect || canFinishAfterDisconnect}}" class="recovery-actions">
       <button wx:if="{{canReconnect}}" class="recovery-button" bindtap="reconnectGateway">重新连接</button>
-      <button wx:if="{{canFinishAfterDisconnect}}" class="recovery-button ghost" bindtap="finishAfterDisconnect">查看记录</button>
+      <button wx:if="{{canFinishAfterDisconnect}}" class="recovery-button ghost" bindtap="finishAfterDisconnect">查看讲述记录</button>
     </view>
   </view>
 
   <view wx:if="{{!voiceAuthorizationAgreed}}" class="voice-auth-panel">
     <text class="voice-auth-title">开始录音前需要声纹授权</text>
-    <text class="voice-auth-desc">同意后才会打开麦克风，语音会用于实时转写、AI 追问、原始音频留存和回忆录成书。</text>
+    <text class="voice-auth-desc">同意后才会打开麦克风，语音会用于实时识别文字、AI 追问、原始音频留存和回忆录成书。</text>
     <checkbox-group bindchange="changeVoiceAuthorization">
       <label class="voice-auth-row">
         <checkbox
@@ -120,11 +120,11 @@
 
   <view class="history-panel">
     <view class="history-header">
-      <text>访谈记录</text>
+      <text>本次讲述</text>
       <text class="history-count">{{transcriptLines.length}} 段 · {{totalTranscriptCharCount}} 字</text>
     </view>
     <view wx:if="{{!transcriptLines.length}}" class="empty-state">
-      <text>一句话结束后，会在这里固定下来。</text>
+      <text>一句话说完后，会在这里保存下来。</text>
     </view>
     <view wx:for="{{transcriptLines}}" wx:key="id" class="transcript-line {{item.role === 'assistant' ? 'assistant' : 'user'}}">
       <text class="line-role">{{item.role === 'assistant' ? 'AI' : '我'}}</text>

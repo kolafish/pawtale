@@ -17,8 +17,8 @@ export function statusText(status: VoiceChatConnectionStatus): string {
     connecting: "连接中",
     ready: "已连接",
     listening: "正在听",
-    stopping: "收尾中",
-    closed: "已结束",
+    stopping: "保存中",
+    closed: "已保存",
     error: "异常",
   };
   return labels[status];
@@ -28,8 +28,8 @@ export function gatewayStateText(state?: VoiceGatewayState): string {
   const labels: Record<VoiceGatewayState, string> = {
     ready: "识别就绪",
     listening: "正在收音",
-    finishing: "识别收尾中",
-    stopped: "识别已结束",
+    finishing: "识别保存中",
+    stopped: "识别已保存",
     failed: "连接异常",
   };
   return state ? labels[state] : "识别未同步";

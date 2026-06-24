@@ -128,7 +128,7 @@ function errorKindFromCode(code: string): VoiceChatErrorKind {
 
 function messageFromErrorCode(code: string, kind: VoiceChatErrorKind): string {
   const messages: Partial<Record<string, string>> = {
-    asr_final_persistence_failed: "转写已返回，但保存识别结果失败",
+    asr_final_persistence_failed: "识别结果已返回，但保存讲述记录失败",
     asr_finish_timeout: "语音识别收尾超时",
     audio_frame_invalid_base64: "音频帧格式异常",
     audio_frame_missing_base64: "音频帧缺少数据",
@@ -147,7 +147,7 @@ function messageFromErrorCode(code: string, kind: VoiceChatErrorKind): string {
     voice_gateway_connection_failed: "语音连接失败，请重新连接",
     voice_gateway_connection_forbidden: "语音连接被拒绝，请返回后重新进入",
     voice_gateway_connection_timeout: "语音连接超时，请检查网络后重试",
-    voice_session_unavailable: "语音会话不存在或已失效，请重新开始",
+    voice_session_unavailable: "本次语音记录不存在或已失效，请重新开始",
     provider_empty_payload: "语音识别服务返回了空结果",
     unsupported_gateway_event: "语音连接事件不支持",
   };

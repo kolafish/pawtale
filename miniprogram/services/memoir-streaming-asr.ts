@@ -479,7 +479,7 @@ export class MemoirStreamingAsrClient {
       };
       const timer = setTimeout(() => {
         this.waiters = this.waiters.filter((waiter) => waiter !== waiterEntry);
-        reject(new Error(eventType === "audio.ended" ? "语音收尾超时" : "语音会话结束超时"));
+        reject(new Error(eventType === "audio.ended" ? "语音保存超时" : "本次语音记录保存超时"));
       }, timeoutMs);
       waiterEntry = {
         eventType,

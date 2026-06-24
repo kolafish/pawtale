@@ -26,7 +26,7 @@
       },
       {
         "pagePath": "pages/transcripts/index",
-        "text": "转写",
+        "text": "记录",
         "iconPath": "assets/tab-transcripts.png",
         "selectedIconPath": "assets/tab-transcripts-active.png"
       },
@@ -57,7 +57,7 @@
   },
   "permission": {
     "scope.record": {
-      "desc": "用于语音访谈录音、实时转写和留存音频"
+      "desc": "用于语音访谈录音、实时识别文字和留存音频"
     }
   },
   "style": "v2",

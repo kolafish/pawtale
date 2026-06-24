@@ -1,8 +1,8 @@
 <view class="progress-page">
   <view class="top-row">
     <view>
-      <text class="page-title">访谈进度</text>
-      <text class="page-subtitle">{{projectTitle ? (projectTitle + " · 当前回忆录") : "当前回忆录的访谈进度"}}</text>
+      <text class="page-title">讲述进度</text>
+      <text class="page-subtitle">{{projectTitle ? (projectTitle + " · 当前回忆录") : "当前回忆录的讲述进度"}}</text>
     </view>
     <button class="refresh-button" loading="{{loading}}" disabled="{{loading}}" bindtap="loadProgress">刷新</button>
   </view>
@@ -12,11 +12,11 @@
   <view class="summary-grid">
     <view class="summary-item">
       <text class="summary-value">{{progress.session_count || 0}}</text>
-      <text class="summary-label">访谈</text>
+      <text class="summary-label">讲述次数</text>
     </view>
     <view class="summary-item">
       <text class="summary-value">{{progress.utterance_count || 0}}</text>
-      <text class="summary-label">转写记录</text>
+      <text class="summary-label">讲述记录</text>
     </view>
     <view class="summary-item">
       <text class="summary-value">{{progress.total_user_char_count || 0}}</text>
@@ -37,14 +37,14 @@
     <view wx:for="{{modules}}" wx:key="module" class="module-row">
       <view>
         <text class="module-title">{{item.label}}</text>
-        <text class="module-meta">{{item.session_count}} 次访谈 · {{item.utterance_count}} 条转写 · {{item.user_char_count}} 字</text>
+        <text class="module-meta">{{item.session_count}} 次讲述 · {{item.utterance_count}} 段讲述 · {{item.user_char_count}} 字</text>
       </view>
     </view>
   </view>
 
   <view class="section">
     <view class="section-header">
-      <text>最近有效访谈</text>
+      <text>最近讲述</text>
       <text class="section-meta">{{sessions.length}} 次</text>
     </view>
     <view wx:if="{{!sessions.length}}" class="empty-state">还没有语音访谈记录。</view>
@@ -64,7 +64,7 @@
         </button>
       </view>
       <view class="session-stats">
-        <text>{{item.utterance_count}} 条转写</text>
+        <text>{{item.utterance_count}} 段讲述</text>
         <text>{{item.total_user_char_count}} 字</text>
         <text>{{item.assistant_message_count}} 追问</text>
         <text>{{item.durationText}}</text>

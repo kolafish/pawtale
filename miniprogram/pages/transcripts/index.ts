@@ -195,7 +195,7 @@ export function transcriptAudioText(item: MemoirVoiceTranscriptItem): string {
 }
 
 export function transcriptCreatedAtText(item: Pick<MemoirVoiceTranscriptItem, "created_at">): string {
-  return formatBeijingDateTimeShort(item.created_at) || "转写记录";
+  return formatBeijingDateTimeShort(item.created_at) || "讲述记录";
 }
 
 export function transcriptRecordNumber(total: number, offset: number, index: number): number {
@@ -450,10 +450,10 @@ function removeItem(items: TranscriptItemView[], id: string): TranscriptItemView
 
 function confirmDelete(item: TranscriptItemView): Promise<boolean> {
   return new Promise((resolve) => {
-    const preview = item.display_text || item.transcript_raw || "这条转写记录";
+    const preview = item.display_text || item.transcript_raw || "这条讲述记录";
     wx.showModal({
-      title: "删除转写",
-      content: `确定删除“${preview.slice(0, 24)}${preview.length > 24 ? "..." : ""}”？删除后不会再出现在转写记录和访谈上下文中。`,
+      title: "删除讲述记录",
+      content: `确定删除“${preview.slice(0, 24)}${preview.length > 24 ? "..." : ""}”？删除后不会再出现在讲述记录和访谈上下文中。`,
       confirmText: "删除",
       confirmColor: "#b4234a",
       success: (result) => resolve(Boolean(result.confirm)),
@@ -630,7 +630,7 @@ Page<TranscriptsData, {
         });
         return;
       }
-      this.setData({ error: error instanceof Error ? error.message : "转写记录加载失败" });
+      this.setData({ error: error instanceof Error ? error.message : "讲述记录加载失败" });
     } finally {
       if (requestToken === this.loadToken) {
         this.setData({ loading: false });
@@ -876,7 +876,7 @@ Page<TranscriptsData, {
     }
     const content = item.editingText.trim();
     if (!content) {
-      this.setData({ error: "转写内容不能为空" });
+      this.setData({ error: "整理文字不能为空" });
       return;
     }
     this.setData({ savingId: id, error: "" });

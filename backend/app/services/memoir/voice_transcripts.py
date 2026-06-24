@@ -44,7 +44,7 @@ from app.services.memoir.book_plan_sources import (
 )
 
 
-SYSTEM_PROMPT = "你是一位谨慎的中文口述稿校对助手，只做忠于原话的转写校正和口头语清理。"
+SYSTEM_PROMPT = "你是一位谨慎的中文口述稿校对助手，只做忠于原话的识别文字校正和口头语清理。"
 AI_CLEANUP_UNAVAILABLE_MESSAGE = "AI 服务暂时不可用，请稍后重试。"
 logger = logging.getLogger(__name__)
 _FILLER = r"(?:嗯+|啊+|呃+|额+|那个|这个|就是)"
@@ -129,7 +129,7 @@ async def generate_cleaned_transcript_text(
 ) -> CleanedTranscriptText:
     source_text = source_text.strip()
     if not source_text:
-        raise HTTPException(status_code=400, detail="转写内容为空，无法清理")
+        raise HTTPException(status_code=400, detail="讲述内容为空，无法整理")
 
     client: AITextClient | None = ai_client
     try:
@@ -392,7 +392,7 @@ async def _load_owned_utterance(
     )
     utterance = result.scalar_one_or_none()
     if not utterance:
-        raise HTTPException(status_code=404, detail="转写记录不存在")
+        raise HTTPException(status_code=404, detail="讲述记录不存在")
     return utterance
 
 
@@ -409,7 +409,7 @@ async def list_voice_transcripts(
     offset: int = 0,
 ) -> MemoirVoiceTranscriptListResponse:
     if included not in INCLUDED_FILTER_VALUES:
-        raise HTTPException(status_code=400, detail="不支持的转写收录筛选条件")
+        raise HTTPException(status_code=400, detail="不支持的讲述记录收录筛选条件")
     filters = _transcript_filter(user_id, project_id)
     filters.extend(_search_filter(term) for term in _search_terms(search_query))
     if guidance_mode:
@@ -505,7 +505,7 @@ async def update_voice_transcript(
 ) -> MemoirVoiceTranscriptItemResponse:
     content = req.transcript_edited.strip()
     if not content:
-        raise HTTPException(status_code=400, detail="转写内容不能为空")
+        raise HTTPException(status_code=400, detail="整理文字不能为空")
     utterance = await _load_owned_utterance(db, utterance_id, user_id)
     return await _apply_edited_text(
         db,

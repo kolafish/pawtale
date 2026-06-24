@@ -231,7 +231,7 @@ test("voice chat does not connect a stopped voice session", async () => {
   assert.equal(connectCalls, 0);
   assert.equal(context.data.status, "closed");
   assert.equal(context.data.statusText, "closed");
-  assert.equal(context.data.primaryActionText, "已结束");
+  assert.equal(context.data.primaryActionText, "已保存");
   assert.equal(context.data.persistenceStateText, "已保存");
 });
 

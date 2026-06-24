@@ -311,9 +311,9 @@ async def assign_book_sources_to_chapters(
         for utterance_id in assignment.utterance_ids:
             source = source_by_utterance.get(utterance_id)
             if not source:
-                raise HTTPException(status_code=400, detail="转写不属于当前回忆录")
+                raise HTTPException(status_code=400, detail="讲述记录不属于当前回忆录")
             if utterance_id in covered_ids:
-                raise HTTPException(status_code=400, detail="转写已收录到章节")
+                raise HTTPException(status_code=400, detail="讲述记录已收录到章节")
             refs.append(_as_dict(source.ref()))
             covered_ids.add(utterance_id)
             pending_ids.add(utterance_id)
@@ -377,7 +377,7 @@ async def move_book_source_between_chapters(
     if len(source_refs) <= 1:
         raise HTTPException(status_code=400, detail="原章节至少需要保留一条来源")
     if any(_source_ref_utterance_id(ref) == req.utterance_id for ref in target_refs):
-        raise HTTPException(status_code=400, detail="转写已收录到目标章节")
+        raise HTTPException(status_code=400, detail="讲述记录已收录到目标章节")
 
     moving_ref: dict[str, object] | None = None
     kept_source_refs: list[dict[str, object]] = []
@@ -454,7 +454,7 @@ async def generate_book_plan(
     project = await load_memoir_project(db, project_id, user_id)
     sources = await _source_segments(db, user_id=user_id, project_id=project_id)
     if not sources:
-        raise HTTPException(status_code=400, detail="暂无转写内容，无法规划章节")
+        raise HTTPException(status_code=400, detail="暂无讲述内容，无法规划章节")
     prompt = _build_plan_prompt(project.title, sources, req.max_chapters)
     client = ai_client
     try:
@@ -541,7 +541,7 @@ def _validated_chapter_updates(
             if source.utterance_id in seen_chapter_utterances:
                 continue
             if source.utterance_id in seen_plan_utterances:
-                raise HTTPException(status_code=400, detail="同一条转写不能重复归入多个章节")
+                raise HTTPException(status_code=400, detail="同一条讲述记录不能重复归入多个章节")
             refs.append(source.ref(ref.quote))
             seen_chapter_utterances.add(source.utterance_id)
             seen_plan_utterances.add(source.utterance_id)
