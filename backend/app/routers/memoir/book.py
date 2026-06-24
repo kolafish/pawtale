@@ -21,10 +21,13 @@ from app.schemas.memoir_book import (
     MemoirBookSourceAssignmentRequest,
     MemoirBookSourceCoverageResponse,
     MemoirBookSourceMoveRequest,
+    MemoirBookVoiceCommandParseRequest,
+    MemoirBookVoiceCommandParseResponse,
 )
 from app.services.memoir import book_drafts as memoir_book_drafts
 from app.services.memoir import book_outputs as memoir_book_outputs
 from app.services.memoir import book_plans as memoir_book_plans
+from app.services.memoir import book_voice_commands as memoir_book_voice_commands
 
 
 router = APIRouter()
@@ -96,6 +99,24 @@ async def create_mobile_memoir_book_plan_outline_tts(
     current_user: User = Depends(get_current_user),
 ):
     return await memoir_book_plans.synthesize_book_outline_audio(
+        db,
+        user_id=current_user.id,
+        project_id=project_id,
+        req=req,
+    )
+
+
+@router.post(
+    "/projects/{project_id}/book-voice-command/parse",
+    response_model=MemoirBookVoiceCommandParseResponse,
+)
+async def parse_mobile_memoir_book_voice_command(
+    project_id: str,
+    req: MemoirBookVoiceCommandParseRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await memoir_book_voice_commands.parse_book_voice_command(
         db,
         user_id=current_user.id,
         project_id=project_id,

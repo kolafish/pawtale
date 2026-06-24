@@ -63,11 +63,11 @@
       </button>
       <button
         class="book-voice-button primary"
-        loading="{{bookVoiceAssistantListening || bookVoiceAssistantBusy}}"
-        disabled="{{loading || generatingPlan || confirmingPlan || updatingPlanStructure || generatingBook || bookVoiceAssistantListening || bookVoiceAssistantBusy}}"
+        loading="{{bookVoiceAssistantBusy}}"
+        disabled="{{loading || generatingPlan || confirmingPlan || updatingPlanStructure || generatingBook || bookVoiceAssistantBusy}}"
         bindtap="startBookVoiceCommand"
       >
-        语音修改
+        {{bookVoiceAssistantListening ? "停止" : (bookVoiceAssistantBusy ? "理解中" : "语音修改")}}
       </button>
     </view>
     <view wx:if="{{playingTarget === 'outline' && bookTTSActiveTarget === 'outline'}}" class="book-voice-playback">
@@ -79,6 +79,14 @@
         <text wx:if="{{bookTTSCurrentText}}" class="tts-current">{{bookTTSCurrentText}}</text>
         <text class="tts-remaining">{{bookTTSRemainingText}}</text>
       </text>
+    </view>
+    <view wx:if="{{bookVoiceCommandText || bookVoiceCommandSummary}}" class="book-voice-command-preview">
+      <view class="book-voice-command-head">
+        <text class="book-voice-command-label">{{bookVoiceCommandIntentLabel || "已识别"}}</text>
+        <text class="book-voice-command-state">{{bookVoiceCommandRequiresConfirmation ? "待确认" : "已识别"}}</text>
+      </view>
+      <text wx:if="{{bookVoiceCommandText}}" class="book-voice-command-text">“{{bookVoiceCommandText}}”</text>
+      <text wx:if="{{bookVoiceCommandSummary}}" class="book-voice-command-summary">{{bookVoiceCommandSummary}}</text>
     </view>
   </view>
 

@@ -436,6 +436,46 @@ export interface MemoirBookAudioResponse {
   alignment?: TTSAlignmentSegment[];
 }
 
+export type MemoirBookVoiceCommandIntent =
+  | "read_outline"
+  | "read_chapter"
+  | "rename_chapter"
+  | "merge_chapters"
+  | "move_chapter"
+  | "split_chapter"
+  | "rewrite_chapter"
+  | "polish_chapter"
+  | "confirm_chapter"
+  | "unknown";
+
+export interface MemoirBookVoiceCommandParseRequest {
+  text: string;
+  current_chapter_id?: string;
+  ai_model?: string;
+}
+
+export interface MemoirBookVoiceCommandOperation {
+  type: MemoirBookVoiceCommandIntent;
+  chapter_id?: string | null;
+  chapter_title?: string | null;
+  target_chapter_id?: string | null;
+  target_chapter_title?: string | null;
+  new_title?: string | null;
+  direction?: "up" | "down" | string | null;
+}
+
+export interface MemoirBookVoiceCommandParseResponse {
+  original_text: string;
+  intent: MemoirBookVoiceCommandIntent;
+  intent_label: string;
+  summary: string;
+  operations: MemoirBookVoiceCommandOperation[];
+  requires_confirmation: boolean;
+  used_ai: boolean;
+  provider?: string | null;
+  model?: string | null;
+}
+
 export interface MemoirBookOutputGenerateRequest {
   force_regenerate?: boolean;
 }

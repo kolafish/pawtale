@@ -23,6 +23,7 @@ interface VoiceSearchRecorderPending {
 
 interface RecordMemoirVoiceSearchQueryOptions {
   onRecordingEnd?: () => void;
+  emptyTranscriptMessage?: string;
 }
 
 let recorderManager: WechatMiniprogram.RecorderManager | null = null;
@@ -161,7 +162,7 @@ export async function recordMemoirVoiceSearchQuery(
   const response = await transcribeMemoirVoiceSearchAudio(audioBase64, "audio/pcm");
   const transcript = response.transcript.trim();
   if (!transcript) {
-    throw new Error("没有识别到搜索内容，请换个说法再试");
+    throw new Error(options.emptyTranscriptMessage || "没有识别到搜索内容，请换个说法再试");
   }
   return transcript;
 }
