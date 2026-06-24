@@ -7,6 +7,7 @@ import type {
   MemoirBookPlanChapterUpdateInput,
   MemoirBookSourceCoverage,
   MemoirBookVoiceCommandOperation,
+  MemoirBookVoiceCommandParseRequest,
   MemoirBookVoiceCommandParseResponse,
   VoiceChatErrorInfo,
   VoiceChatTranscriptLine,
@@ -169,6 +170,14 @@ function isBookVoiceConsultationIntent(preview: MemoirBookVoiceCommandParseRespo
     || preview.intent === "review_chapter_structure";
 }
 
+function isBookVoiceAnswerIntent(preview: MemoirBookVoiceCommandParseResponse): boolean {
+  return preview.intent === "answer_book_question" || preview.intent === "capability_help";
+}
+
+function isBookVoiceClarificationIntent(preview: MemoirBookVoiceCommandParseResponse): boolean {
+  return preview.intent === "clarify_previous" || preview.intent === "unknown";
+}
+
 function isBookVoiceCommandConfirmationText(text: string): boolean {
   const normalized = trimText(text).replace(/\s+/g, "");
   return /^(确认|确认执行|执行|可以|可以执行|就这样|就这样改|好的|好|没问题|按这个改)$/.test(normalized);
@@ -185,8 +194,14 @@ function bookVoiceAssistantReplyText(preview: MemoirBookVoiceCommandParseRespons
   if (preview.intent === "read_chapter") {
     return "好，我来读这一章。读完后我会继续听你说。";
   }
+  if (isBookVoiceAnswerIntent(preview)) {
+    return preview.summary || "我可以回答当前目录状态，也可以帮你改章名、调顺序或合并章节。";
+  }
+  if (preview.intent === "clarify_previous") {
+    return preview.summary || "我还没确定你指的是哪一处，请直接说要改哪一章。";
+  }
   if (preview.intent === "unknown") {
-    return "我还没理解清楚。你可以说：把第一章改名为童年往事，或者读一下目录。";
+    return "我还没理解清楚。你可以问现在有几章、第一章是不是太短，或者直接说把第一章改名为什么。";
   }
   if (isBookVoiceConsultationIntent(preview)) {
     return `我的建议是：${preview.summary}`;
@@ -195,6 +210,18 @@ function bookVoiceAssistantReplyText(preview: MemoirBookVoiceCommandParseRespons
     return `我理解了，${preview.summary} 如果没问题，说确认执行，我再改。`;
   }
   return `我理解到的是：${preview.summary} 这个操作现在先展示预览，不会直接改动。`;
+}
+
+function bookVoiceConversationContext(
+  lines: VoiceChatTranscriptLine[],
+): NonNullable<MemoirBookVoiceCommandParseRequest["conversation_context"]> {
+  return lines
+    .filter((line) => (line.role === "user" || line.role === "assistant") && trimText(line.text))
+    .slice(-6)
+    .map((line) => ({
+      role: line.role as "user" | "assistant",
+      text: trimText(line.text).slice(0, 240),
+    }));
 }
 
 Page<BookData, {
@@ -1586,11 +1613,13 @@ Page<BookData, {
 
   applyBookVoiceCommandPreview(preview) {
     const canExecute = canExecuteBookVoiceCommand(preview);
-    const statusText = preview.intent === "unknown"
+    const statusText = isBookVoiceClarificationIntent(preview)
       ? "需要再说明"
       : (isBookVoiceReadIntent(preview)
         ? "已理解，马上朗读"
-        : (isBookVoiceConsultationIntent(preview) ? "已给建议" : "已理解，等待确认"));
+        : (isBookVoiceConsultationIntent(preview)
+          ? "已给建议"
+          : (isBookVoiceAnswerIntent(preview) ? "已回答" : "已理解，等待确认")));
     this.setData({
       bookVoiceCommandText: preview.original_text,
       bookVoiceCommandIntentLabel: preview.intent_label,
@@ -1624,7 +1653,16 @@ Page<BookData, {
     }
 
     this.setData({ bookVoiceAssistantStatusText: "正在理解修改需求" });
-    const preview = await parseMemoirBookVoiceCommand(this.data.projectId, { text });
+    const transcriptLines = this.data.bookVoiceTranscriptLines;
+    const lastLine = transcriptLines[transcriptLines.length - 1];
+    const contextLines = lastLine?.role === "user" && trimText(lastLine.text) === trimText(text)
+      ? transcriptLines.slice(0, -1)
+      : transcriptLines;
+    const conversationContext = bookVoiceConversationContext(contextLines);
+    const request: MemoirBookVoiceCommandParseRequest = conversationContext.length
+      ? { text, conversation_context: conversationContext }
+      : { text };
+    const preview = await parseMemoirBookVoiceCommand(this.data.projectId, request);
     this.applyBookVoiceCommandPreview(preview);
     wx.showToast({ title: "已识别", icon: "success" });
 
