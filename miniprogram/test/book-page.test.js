@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
+const { loadPageModule, mockModule, pageContext } = require("./page-harness");
 
 function sampleRef(id = "utterance-1", quote = "外婆家的院子") {
   return {
@@ -231,110 +232,66 @@ function planFromChapterUpdates(status, updates) {
 }
 
 function loadBookPage({ authExports = {}, voiceApiExports = {}, ttsExports = {} } = {}) {
-  const authPath = require.resolve("../services/auth.ts");
-  const voiceApiPath = require.resolve("../services/memoir-voice-api.ts");
-  const ttsPath = require.resolve("../services/tts-settings.ts");
-  const bookPath = require.resolve("../pages/book/index.ts");
-  delete require.cache[authPath];
-  delete require.cache[voiceApiPath];
-  delete require.cache[ttsPath];
-  delete require.cache[bookPath];
-  require.cache[authPath] = {
-    id: authPath,
-    filename: authPath,
-    loaded: true,
-    exports: {
-      getMemoirIdentity: async () => {
-        throw new Error("getMemoirIdentity was not mocked");
-      },
-      ...authExports,
+  mockModule("../services/auth.ts", {
+    getMemoirIdentity: async () => {
+      throw new Error("getMemoirIdentity was not mocked");
     },
-  };
-  require.cache[voiceApiPath] = {
-    id: voiceApiPath,
-    filename: voiceApiPath,
-    loaded: true,
-    exports: {
-      assignMemoirBookSources: async () => {
-        throw new Error("assignMemoirBookSources was not mocked");
-      },
-      confirmMemoirBookChapterDraft: async () => {
-        throw new Error("confirmMemoirBookChapterDraft was not mocked");
-      },
-      confirmMemoirBookPlan: async () => {
-        throw new Error("confirmMemoirBookPlan was not mocked");
-      },
-      createMemoirBookChapterDraftTTS: async () => {
-        throw new Error("createMemoirBookChapterDraftTTS was not mocked");
-      },
-      createMemoirBookOutputTTS: async () => {
-        throw new Error("createMemoirBookOutputTTS was not mocked");
-      },
-      downloadMemoirVoiceAudio: async () => {
-        throw new Error("downloadMemoirVoiceAudio was not mocked");
-      },
-      generateMemoirBookChapterTitle: async () => {
-        throw new Error("generateMemoirBookChapterTitle was not mocked");
-      },
-      generateMemoirBookChapterDraft: async () => {
-        throw new Error("generateMemoirBookChapterDraft was not mocked");
-      },
-      generateMemoirBookOutput: async () => {
-        throw new Error("generateMemoirBookOutput was not mocked");
-      },
-      generateMemoirBookPlan: async () => {
-        throw new Error("generateMemoirBookPlan was not mocked");
-      },
-      getMemoirBookChapterDraft: async () => null,
-      getMemoirBookOutput: async () => null,
-      getMemoirBookPlan: async () => {
-        throw new Error("getMemoirBookPlan was not mocked");
-      },
-      getMemoirBookSourceCoverage: async () => null,
-      updateMemoirBookChapterTitle: async () => {
-        throw new Error("updateMemoirBookChapterTitle was not mocked");
-      },
-      updateMemoirBookPlan: async () => {
-        throw new Error("updateMemoirBookPlan was not mocked");
-      },
-      updateMemoirBookChapterDraft: async () => {
-        throw new Error("updateMemoirBookChapterDraft was not mocked");
-      },
-      ...voiceApiExports,
+    ...authExports,
+  });
+  mockModule("../services/memoir-voice-api.ts", {
+    assignMemoirBookSources: async () => {
+      throw new Error("assignMemoirBookSources was not mocked");
     },
-  };
-  require.cache[ttsPath] = {
-    id: ttsPath,
-    filename: ttsPath,
-    loaded: true,
-    exports: {
-      readBookTTSSettings: () => ({ voice: "", speedRatio: 1 }),
-      ...ttsExports,
+    confirmMemoirBookChapterDraft: async () => {
+      throw new Error("confirmMemoirBookChapterDraft was not mocked");
     },
-  };
+    confirmMemoirBookPlan: async () => {
+      throw new Error("confirmMemoirBookPlan was not mocked");
+    },
+    createMemoirBookChapterDraftTTS: async () => {
+      throw new Error("createMemoirBookChapterDraftTTS was not mocked");
+    },
+    createMemoirBookOutputTTS: async () => {
+      throw new Error("createMemoirBookOutputTTS was not mocked");
+    },
+    downloadMemoirVoiceAudio: async () => {
+      throw new Error("downloadMemoirVoiceAudio was not mocked");
+    },
+    generateMemoirBookChapterTitle: async () => {
+      throw new Error("generateMemoirBookChapterTitle was not mocked");
+    },
+    generateMemoirBookChapterDraft: async () => {
+      throw new Error("generateMemoirBookChapterDraft was not mocked");
+    },
+    generateMemoirBookOutput: async () => {
+      throw new Error("generateMemoirBookOutput was not mocked");
+    },
+    generateMemoirBookPlan: async () => {
+      throw new Error("generateMemoirBookPlan was not mocked");
+    },
+    getMemoirBookChapterDraft: async () => null,
+    getMemoirBookOutput: async () => null,
+    getMemoirBookPlan: async () => {
+      throw new Error("getMemoirBookPlan was not mocked");
+    },
+    getMemoirBookSourceCoverage: async () => null,
+    updateMemoirBookChapterTitle: async () => {
+      throw new Error("updateMemoirBookChapterTitle was not mocked");
+    },
+    updateMemoirBookPlan: async () => {
+      throw new Error("updateMemoirBookPlan was not mocked");
+    },
+    updateMemoirBookChapterDraft: async () => {
+      throw new Error("updateMemoirBookChapterDraft was not mocked");
+    },
+    ...voiceApiExports,
+  });
+  mockModule("../services/tts-settings.ts", {
+    readBookTTSSettings: () => ({ voice: "", speedRatio: 1 }),
+    ...ttsExports,
+  });
 
-  let page = null;
-  const previousPage = global.Page;
-  global.Page = (definition) => {
-    page = definition;
-  };
-  const mod = require(bookPath);
-  if (previousPage === undefined) {
-    delete global.Page;
-  } else {
-    global.Page = previousPage;
-  }
-  return { mod, page };
-}
-
-function pageContext(page, dataPatch = {}) {
-  return {
-    ...page,
-    data: { ...page.data, ...dataPatch },
-    setData(patch) {
-      this.data = { ...this.data, ...patch };
-    },
-  };
+  return loadPageModule("../pages/book/index.ts");
 }
 
 test("book page summarizes chapter source count without exposing raw ids", () => {

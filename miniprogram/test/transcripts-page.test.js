@@ -2,95 +2,52 @@ require("./register-ts");
 
 const assert = require("node:assert/strict");
 const test = require("node:test");
+const { loadPageModule, mockModule, pageContext } = require("./page-harness");
 
 function loadTranscriptsPage({ authExports = {}, voiceApiExports = {}, voiceSearchExports = {} } = {}) {
-  const authPath = require.resolve("../services/auth.ts");
-  const voiceApiPath = require.resolve("../services/memoir-voice-api.ts");
-  const voiceSearchPath = require.resolve("../services/memoir-voice-search.ts");
-  const transcriptsPath = require.resolve("../pages/transcripts/index.ts");
-  delete require.cache[authPath];
-  delete require.cache[voiceApiPath];
-  delete require.cache[voiceSearchPath];
-  delete require.cache[transcriptsPath];
-  require.cache[authPath] = {
-    id: authPath,
-    filename: authPath,
-    loaded: true,
-    exports: {
-      getMemoirIdentity: async () => {
-        throw new Error("getMemoirIdentity was not mocked");
-      },
-      ...authExports,
+  mockModule("../services/auth.ts", {
+    getMemoirIdentity: async () => {
+      throw new Error("getMemoirIdentity was not mocked");
     },
-  };
-  require.cache[voiceApiPath] = {
-    id: voiceApiPath,
-    filename: voiceApiPath,
-    loaded: true,
-    exports: {
-      assignMemoirBookSources: async () => {
-        throw new Error("assignMemoirBookSources was not mocked");
-      },
-      deleteMemoirVoiceTranscript: async () => {
-        throw new Error("deleteMemoirVoiceTranscript was not mocked");
-      },
-      downloadMemoirVoiceAudio: async () => {
-        throw new Error("downloadMemoirVoiceAudio was not mocked");
-      },
-      getMemoirBookPlan: async () => null,
-      listMemoirVoiceTranscripts: async () => {
-        throw new Error("listMemoirVoiceTranscripts was not mocked");
-      },
-      parseMemoirVoiceSearchQuery: async () => {
-        throw new Error("parseMemoirVoiceSearchQuery was not mocked");
-      },
-      moveMemoirBookSource: async () => {
-        throw new Error("moveMemoirBookSource was not mocked");
-      },
-      updateMemoirVoiceTranscript: async () => {
-        throw new Error("updateMemoirVoiceTranscript was not mocked");
-      },
-      updateMemoirBookPlan: async () => {
-        throw new Error("updateMemoirBookPlan was not mocked");
-      },
-      ...voiceApiExports,
+    ...authExports,
+  });
+  mockModule("../services/memoir-voice-api.ts", {
+    assignMemoirBookSources: async () => {
+      throw new Error("assignMemoirBookSources was not mocked");
     },
-  };
-  require.cache[voiceSearchPath] = {
-    id: voiceSearchPath,
-    filename: voiceSearchPath,
-    loaded: true,
-    exports: {
-      recordMemoirVoiceSearchQuery: async () => {
-        throw new Error("recordMemoirVoiceSearchQuery was not mocked");
-      },
-      stopMemoirVoiceSearchRecording: () => {},
-      ...voiceSearchExports,
+    deleteMemoirVoiceTranscript: async () => {
+      throw new Error("deleteMemoirVoiceTranscript was not mocked");
     },
-  };
+    downloadMemoirVoiceAudio: async () => {
+      throw new Error("downloadMemoirVoiceAudio was not mocked");
+    },
+    getMemoirBookPlan: async () => null,
+    listMemoirVoiceTranscripts: async () => {
+      throw new Error("listMemoirVoiceTranscripts was not mocked");
+    },
+    parseMemoirVoiceSearchQuery: async () => {
+      throw new Error("parseMemoirVoiceSearchQuery was not mocked");
+    },
+    moveMemoirBookSource: async () => {
+      throw new Error("moveMemoirBookSource was not mocked");
+    },
+    updateMemoirVoiceTranscript: async () => {
+      throw new Error("updateMemoirVoiceTranscript was not mocked");
+    },
+    updateMemoirBookPlan: async () => {
+      throw new Error("updateMemoirBookPlan was not mocked");
+    },
+    ...voiceApiExports,
+  });
+  mockModule("../services/memoir-voice-search.ts", {
+    recordMemoirVoiceSearchQuery: async () => {
+      throw new Error("recordMemoirVoiceSearchQuery was not mocked");
+    },
+    stopMemoirVoiceSearchRecording: () => {},
+    ...voiceSearchExports,
+  });
 
-  let page = null;
-  const previousPage = global.Page;
-  global.Page = (definition) => {
-    page = definition;
-  };
-  const mod = require(transcriptsPath);
-  if (previousPage === undefined) {
-    delete global.Page;
-  } else {
-    global.Page = previousPage;
-  }
-  return { mod, page };
-}
-
-function pageContext(page, dataPatch = {}) {
-  return {
-    ...page,
-    data: { ...page.data, ...dataPatch },
-    setData(patch) {
-      this.data = { ...this.data, ...patch };
-    },
-  };
+  return loadPageModule("../pages/transcripts/index.ts");
 }
 
 function sampleTranscript(id, createdAt = "2026-06-17T00:00:00.000Z") {

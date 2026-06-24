@@ -2,17 +2,7 @@ require("./register-ts");
 
 const assert = require("node:assert/strict");
 const test = require("node:test");
-
-function mockModule(relativePath, exports) {
-  const modulePath = require.resolve(relativePath);
-  delete require.cache[modulePath];
-  require.cache[modulePath] = {
-    id: modulePath,
-    filename: modulePath,
-    loaded: true,
-    exports,
-  };
-}
+const { loadPageModule, mockModule } = require("./page-harness");
 
 function loadVoiceChatPage({
   streamingExports = {},
@@ -22,8 +12,6 @@ function loadVoiceChatPage({
   wechatPrivacyExports = {},
   voiceChatAutoListenExports = {},
 } = {}) {
-  const pagePath = require.resolve("../pages/voice-chat/index.ts");
-  delete require.cache[pagePath];
   mockModule("../services/audio-playback.ts", {
     configureAudiblePlayback: () => {},
   });
@@ -137,18 +125,7 @@ function loadVoiceChatPage({
     ...wechatPrivacyExports,
   });
 
-  let page = null;
-  const previousPage = global.Page;
-  global.Page = (definition) => {
-    page = definition;
-  };
-  require(pagePath);
-  if (previousPage === undefined) {
-    delete global.Page;
-  } else {
-    global.Page = previousPage;
-  }
-  return page;
+  return loadPageModule("../pages/voice-chat/index.ts").page;
 }
 
 function installAutoEndingAudioContext() {
