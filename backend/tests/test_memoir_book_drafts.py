@@ -429,6 +429,18 @@ async def test_mobile_memoir_book_chapter_draft_planner_can_choose_regenerate(
                 },
                 ensure_ascii=False,
             ),
+            json.dumps(
+                {
+                    "clusters": [
+                        {
+                            "title": "院子里的日光",
+                            "source_ids": [first["utterance_id"], second["utterance_id"]],
+                            "summary": "两条来源都讲外婆家院子里的日光和晾晒。",
+                        }
+                    ]
+                },
+                ensure_ascii=False,
+            ),
             "小时候，外婆家的院子总是晒着太阳，也晒着被子。",
         ]
     )
@@ -447,9 +459,13 @@ async def test_mobile_memoir_book_chapter_draft_planner_can_choose_regenerate(
     assert data["latest_version"]["version"] == 2
     assert "晒着被子" in data["latest_version"]["content"]
     assert data["metadata_json"] == {}
-    assert len(fake_ai.calls) == 2
-    prompt = fake_ai.calls[1]["user_prompt"]
+    assert len(fake_ai.calls) == 3
+    cluster_prompt = fake_ai.calls[1]["user_prompt"]
+    assert "请把本章来源转写中讲同一件事" in cluster_prompt
+    prompt = fake_ai.calls[2]["user_prompt"]
     assert "mode: regenerate" in prompt
+    assert "事件聚合规划" in prompt
+    assert "院子里的日光" in prompt
     assert "原章节正文" not in prompt
     assert "本次任务：只把 source_type 为“新增来源”" not in prompt
     assert "把院子晒太阳和晒被子写成同一段回忆" in prompt
@@ -538,6 +554,7 @@ async def test_mobile_memoir_book_chapter_draft_force_regenerate_ignores_previou
 ):
     first = await _create_voice_transcript(client, test_db, "岁首一家人围坐吃团圆饭。")
     second = await _create_voice_transcript(client, test_db, "初一早上挨家给长辈拜年。")
+    third = await _create_voice_transcript(client, test_db, "腊月里还会提前准备团圆饭要用的菜。")
     project_id = first["session"]["project_id"]
     _, chapter = await _create_book_plan(
         test_db,
@@ -545,7 +562,11 @@ async def test_mobile_memoir_book_chapter_draft_force_regenerate_ignores_previou
         source_ref=_source_ref(first, "团圆饭"),
         status=MemoirBookPlanStatus.CONFIRMED,
     )
-    chapter.source_refs_json = [_source_ref(first, "团圆饭"), _source_ref(second, "拜年")]
+    chapter.source_refs_json = [
+        _source_ref(first, "团圆饭"),
+        _source_ref(second, "拜年"),
+        _source_ref(third, "准备团圆饭要用的菜"),
+    ]
     chapter.metadata_json = {
         "pending_source_utterance_ids": [second["utterance_id"]],
         "source_assignment_updated_at": "2026-06-17T00:00:00+00:00",
@@ -570,7 +591,28 @@ async def test_mobile_memoir_book_chapter_draft_force_regenerate_ignores_previou
         )
     )
     await test_db.commit()
-    fake_ai = FakeBookDraftAI("岁首时一家人吃团圆饭，初一早上去给长辈拜年。")
+    fake_ai = FakeBookDraftAI(
+        [
+            json.dumps(
+                {
+                    "clusters": [
+                        {
+                            "title": "岁首团圆饭",
+                            "source_ids": [first["utterance_id"], third["utterance_id"]],
+                            "summary": "一家人围坐吃团圆饭，也会提前准备饭菜。",
+                        },
+                        {
+                            "title": "初一拜年",
+                            "source_ids": [second["utterance_id"]],
+                            "summary": "初一早上挨家给长辈拜年。",
+                        },
+                    ]
+                },
+                ensure_ascii=False,
+            ),
+            "岁首时一家人吃团圆饭，腊月里先备菜，初一早上去给长辈拜年。",
+        ]
+    )
     monkeypatch.setattr(
         "app.services.memoir.book_drafts.get_ai_service",
         lambda model=None: fake_ai,
@@ -585,15 +627,22 @@ async def test_mobile_memoir_book_chapter_draft_force_regenerate_ignores_previou
     data = response.json()
     assert data["latest_version"]["version"] == 2
     assert data["metadata_json"] == {}
-    prompt = fake_ai.calls[0]["user_prompt"]
+    assert len(fake_ai.calls) == 2
+    cluster_prompt = fake_ai.calls[0]["user_prompt"]
+    assert "请把本章来源转写中讲同一件事" in cluster_prompt
+    prompt = fake_ai.calls[1]["user_prompt"]
     assert "很早以前的一条旧记录" not in prompt
     assert "原章节正文" not in prompt
     assert "本次任务：只把 source_type 为“新增来源”" not in prompt
+    assert "事件聚合规划" in prompt
+    assert "岁首团圆饭" in prompt
+    assert "初一拜年" in prompt
     assert "岁首一家人围坐吃团圆饭" in prompt
     assert "初一早上挨家给长辈拜年" in prompt
-    assert prompt.count("source_type: 既有来源") == 2
+    assert "腊月里还会提前准备团圆饭要用的菜" in prompt
+    assert prompt.count("source_type: 既有来源") == 3
     assert "source_type: 新增来源" not in prompt
-    assert "本章共有 2 条来源" in prompt
+    assert "本章共有 3 条来源" in prompt
     assert "不能只写第一条" in prompt
     assert "以来源转写为准" in prompt
     assert "章节标题参考" in prompt

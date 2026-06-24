@@ -50,6 +50,7 @@ from app.services.memoir.voice_tts import TTSClient
 
 SYSTEM_PROMPT = "你是一位谨慎的中文回忆录整理写作者，只能把给定口述材料整理成章节正文。"
 REVISION_PLAN_SYSTEM_PROMPT = "你是一位谨慎的中文回忆录修订编辑，只判断新增口述材料应该如何并入已有章节。"
+EVENT_CLUSTER_SYSTEM_PROMPT = "你是一位谨慎的中文回忆录结构编辑，只根据来源转写判断哪些记录讲的是同一件事。"
 AI_BOOK_DRAFT_UNAVAILABLE_MESSAGE = "AI 服务暂时不可用，请稍后重试。"
 CHAPTER_TTS_CACHE_KEY = "chapter_tts"
 PENDING_SOURCE_UTTERANCE_IDS_KEY = "pending_source_utterance_ids"
@@ -72,6 +73,13 @@ class ChapterRevisionPlan:
     pending_source_ids: list[str]
     related_existing_source_ids: list[str]
     coverage_requirements: list[str]
+
+
+@dataclass(frozen=True)
+class ChapterEventCluster:
+    title: str
+    source_ids: list[str]
+    summary: str
 
 
 def _text_or_empty(value: str | None) -> str:
@@ -315,6 +323,93 @@ def _revision_plan_prompt_text(revision_plan: ChapterRevisionPlan | None) -> str
     )
 
 
+def _build_event_cluster_prompt(
+    *,
+    chapter: MemoirBookPlanChapter,
+    sources: list[ChapterSourceText],
+) -> str:
+    return f"""请把本章来源转写中讲同一件事、同一人物关系、同一地点或同一时间段的记录聚合到一起。
+
+章节标题参考：{chapter.title}
+
+来源转写：
+{_source_block(sources, set())}
+
+请输出严格 JSON，不要 Markdown，不要解释。格式：
+{{
+  "clusters": [
+    {{
+      "title": "事件或主题名",
+      "source_ids": ["utterance_id"],
+      "summary": "这些来源共同讲了什么"
+    }}
+  ]
+}}
+
+要求：
+- source_ids 必须来自上面给定的 utterance_id。
+- 每条来源都必须出现在一个 cluster 中，不能遗漏。
+- 如果某条来源没有相关记录，可以单独成为一个 cluster。
+- 只根据来源转写聚合，不新增事实。
+"""
+
+
+def _event_clusters_from_content(content: str, sources: list[ChapterSourceText]) -> list[ChapterEventCluster]:
+    payload = extract_json_payload(content)
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=502, detail="AI 未返回有效章节事件聚合")
+    raw_clusters = payload.get("clusters")
+    if not isinstance(raw_clusters, list):
+        raise HTTPException(status_code=502, detail="AI 未返回有效章节事件列表")
+
+    valid_source_ids = {source.ref.utterance_id for source in sources}
+    used_source_ids: set[str] = set()
+    clusters: list[ChapterEventCluster] = []
+    for item in raw_clusters:
+        if not isinstance(item, dict):
+            continue
+        source_ids = [
+            source_id
+            for source_id in _string_list(item.get("source_ids"))
+            if source_id in valid_source_ids and source_id not in used_source_ids
+        ]
+        if not source_ids:
+            continue
+        used_source_ids.update(source_ids)
+        title = _text_or_empty(item.get("title") if isinstance(item.get("title"), str) else "") or "相关回忆"
+        summary = _text_or_empty(item.get("summary") if isinstance(item.get("summary"), str) else "")
+        clusters.append(ChapterEventCluster(title=title, source_ids=source_ids, summary=summary))
+
+    for source in sources:
+        if source.ref.utterance_id not in used_source_ids:
+            clusters.append(
+                ChapterEventCluster(
+                    title="未归组来源",
+                    source_ids=[source.ref.utterance_id],
+                    summary=source.ref.quote or source.text[:120],
+                )
+            )
+    return clusters
+
+
+def _event_clusters_prompt_text(event_clusters: list[ChapterEventCluster]) -> str:
+    if not event_clusters:
+        return ""
+    cluster_text = "\n".join(
+        (
+            f"- {cluster.title}\n"
+            f"  source_ids: {', '.join(cluster.source_ids)}\n"
+            f"  summary: {cluster.summary or '无'}"
+        )
+        for cluster in event_clusters
+    )
+    return (
+        "\n事件聚合规划：\n"
+        f"{cluster_text}\n"
+        "组织要求：同一组 source_ids 应尽量写在相邻段落或同一段中；不同组之间再按时间、地点或情绪自然过渡。\n"
+    )
+
+
 def _build_draft_prompt(
     *,
     chapter: MemoirBookPlanChapter,
@@ -323,6 +418,7 @@ def _build_draft_prompt(
     previous_content: str | None = None,
     pending_source_utterance_ids: set[str] | None = None,
     revision_plan: ChapterRevisionPlan | None = None,
+    event_clusters: list[ChapterEventCluster] | None = None,
 ) -> str:
     pending_ids = pending_source_utterance_ids or set()
     source_text = _source_block(sources, pending_ids)
@@ -333,6 +429,7 @@ def _build_draft_prompt(
         else ""
     )
     revision_text = _revision_plan_prompt_text(revision_plan)
+    event_cluster_text = _event_clusters_prompt_text(event_clusters or [])
     supplement_text = (
         "\n本次任务：只把 source_type 为“新增来源”的转写里用户确实讲过的内容自然补入原章节正文；"
         "没有新增来源支撑的内容不要扩写，既有段落不要无故重写。\n"
@@ -356,6 +453,7 @@ def _build_draft_prompt(
 {feedback_text}
 {previous_text}
 {revision_text}
+{event_cluster_text}
 {supplement_text}
 {coverage_text}
 写作要求：
@@ -508,6 +606,18 @@ async def generate_chapter_draft(
                 raise HTTPException(status_code=409, detail="新增来源与本章关系不明确，请先调整章节归属")
 
         should_supplement_pending_sources = revision_plan is not None and revision_plan.mode == "supplement"
+        event_clusters: list[ChapterEventCluster] = []
+        if not should_supplement_pending_sources and len(sources) > 1:
+            cluster_prompt = _build_event_cluster_prompt(chapter=chapter, sources=sources)
+            cluster_content = await client._call_llm(
+                EVENT_CLUSTER_SYSTEM_PROMPT,
+                cluster_prompt,
+                temperature=0.1,
+                max_tokens=900,
+                timeout=60.0,
+            )
+            event_clusters = _event_clusters_from_content(str(cluster_content), sources)
+
         previous_content = (
             existing.versions[-1].content
             if existing and existing.versions and should_supplement_pending_sources
@@ -520,6 +630,7 @@ async def generate_chapter_draft(
             previous_content=previous_content,
             pending_source_utterance_ids=pending_source_ids if should_supplement_pending_sources else set(),
             revision_plan=revision_plan,
+            event_clusters=event_clusters,
         )
         content = await client._call_llm(
             SYSTEM_PROMPT,
