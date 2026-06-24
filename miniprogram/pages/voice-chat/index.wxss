@@ -432,7 +432,7 @@
   line-height: 1.5;
 }
 
-.diagnostic-strip {
+.session-state-strip {
   margin-top: 18rpx;
   display: flex;
   align-items: center;
@@ -443,40 +443,15 @@
   font-weight: 800;
 }
 
-.diagnostic-strip text {
+.session-state-strip text {
   padding: 8rpx 14rpx;
   border-radius: 999rpx;
   background: #fff1ec;
 }
 
-.diagnostic-strip .diagnostic-error {
+.session-state-strip .session-state-error {
   background: #fff1f2;
   color: #be123c;
-}
-
-.diagnostic-strip .diagnostic-count {
-  background: #ffffff;
-  color: #7a3b31;
-}
-
-.diagnostic-copy {
-  width: 144rpx;
-  height: 54rpx;
-  margin: 0;
-  border: 0;
-  border-radius: 16rpx;
-  background: #ffffff;
-  color: #9f4a3c;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 23rpx;
-  font-weight: 800;
-  line-height: 1;
-}
-
-.diagnostic-copy::after {
-  border: 0;
 }
 
 .recovery-panel {

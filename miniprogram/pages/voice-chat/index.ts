@@ -11,8 +11,6 @@ import {
   classifyVoiceClientConnectionError,
   MemoirStreamingAsrClient,
   type MemoirCaptureStats,
-  type MemoirDiagnosticValue,
-  type MemoirStreamingAsrDiagnosticEvent,
   type VoiceChatConnectionStatus,
 } from "../../services/memoir-streaming-asr";
 import {
@@ -120,8 +118,6 @@ interface VoiceChatData {
   recoveryNotice: string;
   canReconnect: boolean;
   canFinishAfterDisconnect: boolean;
-  diagnosticSummary: string;
-  diagnosticEventCount: number;
 }
 
 let streamingClient: MemoirStreamingAsrClient | null = null;
@@ -130,15 +126,6 @@ const AUTO_STOP_SILENCE_MS = 1800;
 const AUTO_STOP_MIN_RECORDING_MS = 1200;
 const AUTO_LISTEN_NO_ANSWER_MS = 15000;
 const MAX_CONSECUTIVE_NO_ANSWER_PROMPTS = 2;
-const VOICE_CHAT_DIAGNOSTIC_BUILD = "voice-chat-cleanup-2026-06-24";
-const MAX_VOICE_DIAGNOSTIC_EVENTS = 140;
-
-interface VoiceDiagnosticEntry {
-  at: string;
-  elapsedMs: number;
-  name: string;
-  data?: Record<string, MemoirDiagnosticValue>;
-}
 
 interface AutoListenGateSnapshot {
   hasClient: boolean;
@@ -149,25 +136,6 @@ interface AutoListenGateSnapshot {
   followUpLoading: boolean;
   pendingAfterPlayback: boolean;
   canStart: boolean;
-}
-
-interface ClipboardCapableWx {
-  setClipboardData?: (options: {
-    data: string;
-    success?: () => void;
-  }) => void;
-  showToast?: typeof wx.showToast;
-  getSystemInfoSync?: () => unknown;
-}
-
-function formatDiagnosticData(data?: Record<string, MemoirDiagnosticValue>): string {
-  if (!data || !Object.keys(data).length) {
-    return "";
-  }
-  return Object.keys(data)
-    .sort()
-    .map((key) => `${key}=${String(data[key] ?? "")}`)
-    .join(" ");
 }
 
 Page<VoiceChatData, {
@@ -209,9 +177,6 @@ Page<VoiceChatData, {
   stopFollowUpProgressTimer(): void;
   resetFollowUpTTSProgress(): void;
   toggleAutoStop(): void;
-  recordVoiceDiagnostic(name: string, data?: Record<string, MemoirDiagnosticValue>): void;
-  voiceDiagnosticText(): string;
-  copyVoiceDiagnostics(): void;
   autoListenGateSnapshot(): AutoListenGateSnapshot;
   connectGateway(): Promise<void>;
   startRecording(autoTriggered?: boolean): boolean;
@@ -238,10 +203,6 @@ Page<VoiceChatData, {
   consecutiveNoAnswerPrompts: number;
   handledNoAnswerFrameCount: number;
   autoListenPendingAfterPlayback: boolean;
-  voiceDiagnosticStartedAtMs: number;
-  voiceDiagnosticEvents: VoiceDiagnosticEntry[];
-  lastCaptureDiagnosticState: string;
-  lastCaptureDiagnosticFrameCount: number;
 }>({
   audio: null,
   ttsPlayToken: 0,
@@ -253,10 +214,6 @@ Page<VoiceChatData, {
   consecutiveNoAnswerPrompts: 0,
   handledNoAnswerFrameCount: -1,
   autoListenPendingAfterPlayback: false,
-  voiceDiagnosticStartedAtMs: 0,
-  voiceDiagnosticEvents: [],
-  lastCaptureDiagnosticState: "",
-  lastCaptureDiagnosticFrameCount: -1,
 
   data: {
     voiceSessionId: "",
@@ -311,75 +268,6 @@ Page<VoiceChatData, {
     recoveryNotice: "",
     canReconnect: false,
     canFinishAfterDisconnect: false,
-    diagnosticSummary: "诊断未开始",
-    diagnosticEventCount: 0,
-  },
-
-  recordVoiceDiagnostic(name, data = {}) {
-    const now = Date.now();
-    if (!this.voiceDiagnosticStartedAtMs) {
-      this.voiceDiagnosticStartedAtMs = now;
-    }
-    const event: VoiceDiagnosticEntry = {
-      at: new Date(now).toISOString(),
-      elapsedMs: now - this.voiceDiagnosticStartedAtMs,
-      name,
-      data,
-    };
-    this.voiceDiagnosticEvents.push(event);
-    if (this.voiceDiagnosticEvents.length > MAX_VOICE_DIAGNOSTIC_EVENTS) {
-      this.voiceDiagnosticEvents = this.voiceDiagnosticEvents.slice(-MAX_VOICE_DIAGNOSTIC_EVENTS);
-    }
-    const dataText = formatDiagnosticData(data);
-    this.setData({
-      diagnosticSummary: dataText ? `${name} · ${dataText}` : name,
-      diagnosticEventCount: this.voiceDiagnosticEvents.length,
-    });
-    const wxWithDiagnostics = typeof wx !== "undefined" ? wx as unknown as ClipboardCapableWx : null;
-    const shouldLogToConsole = typeof wxWithDiagnostics?.getSystemInfoSync === "function";
-    if (shouldLogToConsole && typeof console !== "undefined" && typeof console.info === "function") {
-      console.info("[voice-chat-diagnostic]", event);
-    }
-  },
-
-  voiceDiagnosticText() {
-    const header = [
-      `build=${VOICE_CHAT_DIAGNOSTIC_BUILD}`,
-      `session=${this.data.voiceSessionId || ""}`,
-      `mode=${this.data.guidanceMode}/${this.data.currentGuidanceModule || ""}`,
-      `status=${this.data.status} connecting=${this.data.connecting} recording=${this.data.recording}`,
-      `capture=${this.data.captureStateText} frames=${this.data.captureFrameCount} kb=${this.data.captureKilobytes}`,
-      `ttsLoading=${this.data.followUpTTSLoading} ttsPlaying=${this.data.followUpTTSPlaying} ttsState=${this.data.followUpTTSStateText}`,
-      `autoListen=${this.data.autoListenEnabled} pendingAfterPlayback=${this.autoListenPendingAfterPlayback} autoText=${this.data.autoListenStateText}`,
-      `error=${this.data.error || ""}`,
-    ];
-    const events = this.voiceDiagnosticEvents.map((event) => {
-      const dataText = formatDiagnosticData(event.data);
-      return `[+${event.elapsedMs}ms] ${event.name}${dataText ? ` ${dataText}` : ""}`;
-    });
-    return [...header, "events:", ...events].join("\n");
-  },
-
-  copyVoiceDiagnostics() {
-    const text = this.voiceDiagnosticText();
-    this.recordVoiceDiagnostic("page.diagnostics.copy", { eventCount: this.voiceDiagnosticEvents.length });
-    if (typeof wx !== "undefined") {
-      const clipboardWx = wx as unknown as ClipboardCapableWx;
-      if (typeof clipboardWx.setClipboardData === "function") {
-        clipboardWx.setClipboardData({
-          data: text,
-          success: () => {
-            if (typeof clipboardWx.showToast === "function") {
-              clipboardWx.showToast({ title: "诊断已复制", icon: "none" });
-            }
-          },
-        });
-        return;
-      }
-    }
-    if (typeof console !== "undefined" && typeof console.info === "function") {
-      console.info("[voice-chat-diagnostic-text]", text);
-    }
   },
 
   autoListenGateSnapshot() {
@@ -415,15 +303,7 @@ Page<VoiceChatData, {
       voiceAuthorizationAgreed,
       primaryActionText: voiceAuthorizationAgreed ? "开始说话" : "同意后开始说话",
     });
-    this.recordVoiceDiagnostic("page.onLoad", {
-      build: VOICE_CHAT_DIAGNOSTIC_BUILD,
-      hasVoiceSessionId: Boolean(voiceSessionId),
-      guidanceMode,
-      currentGuidanceModule,
-      voiceAuthorizationAgreed,
-    });
     if (!voiceSessionId) {
-      this.recordVoiceDiagnostic("page.onLoad.missingSession");
       this.setData({ error: "缺少语音会话" });
       return;
     }
@@ -446,11 +326,6 @@ Page<VoiceChatData, {
 
   onShow() {
     this.refreshVoiceAuthorizationConsent();
-    this.recordVoiceDiagnostic("page.onShow", {
-      voiceAuthorizationAgreed: this.data.voiceAuthorizationAgreed,
-      status: this.data.status,
-      hasClient: Boolean(streamingClient),
-    });
   },
 
   onHide() {
@@ -551,20 +426,16 @@ Page<VoiceChatData, {
 
   async syncVoiceAuthorizationForSession() {
     if (!readVoiceAuthorizationConsent()) {
-      this.recordVoiceDiagnostic("voiceAuthorization.localMissing");
       this.ensureVoiceAuthorization(false);
       return false;
     }
     try {
-      this.recordVoiceDiagnostic("voiceAuthorization.sync.begin");
       await syncVoiceAuthorizationConsent({
         sourceSessionId: this.data.voiceSessionId || undefined,
       });
-      this.recordVoiceDiagnostic("voiceAuthorization.sync.success");
       return true;
     } catch (error) {
       const message = error instanceof Error ? error.message : "声纹授权同步失败";
-      this.recordVoiceDiagnostic("voiceAuthorization.sync.error", { message });
       this.setData({
         error: message,
         primaryActionText: "继续说话",
@@ -578,13 +449,11 @@ Page<VoiceChatData, {
   },
 
   async syncVoiceAuthorizationAndConnect(autoTriggered = false) {
-    this.recordVoiceDiagnostic("page.syncAndConnect.begin", { autoTriggered });
     const synced = await this.syncVoiceAuthorizationForSession();
     if (!synced) {
       if (autoTriggered) {
         this.setData({ autoListenStateText: "自动收音已暂停，等待声纹授权同步" });
       }
-      this.recordVoiceDiagnostic("page.syncAndConnect.blocked", { autoTriggered });
       return;
     }
     await this.connectGateway();
@@ -998,17 +867,11 @@ Page<VoiceChatData, {
 
   async playAudioFile(audioFileId, options = {}) {
     if (!audioFileId) {
-      this.recordVoiceDiagnostic("tts.play.skip", { reason: "missingAudioFileId" });
       return;
     }
     this.stopFollowUpAudio();
     const playToken = this.ttsPlayToken + 1;
     this.ttsPlayToken = playToken;
-    this.recordVoiceDiagnostic("tts.play.begin", {
-      autoListenAfterPlayback: Boolean(options.autoListenAfterPlayback),
-      hasAudioFileId: Boolean(audioFileId),
-      playToken,
-    });
     this.setData({
       followUpTTSPlaying: true,
       followUpTTSError: "",
@@ -1018,10 +881,8 @@ Page<VoiceChatData, {
     try {
       const tempFilePath = await downloadMemoirVoiceAudio(audioFileId);
       if (playToken !== this.ttsPlayToken) {
-        this.recordVoiceDiagnostic("tts.play.download.stale", { playToken, currentToken: this.ttsPlayToken });
         return;
       }
-      this.recordVoiceDiagnostic("tts.play.download.success", { hasTempFilePath: Boolean(tempFilePath), playToken });
       const audio = wx.createInnerAudioContext();
       this.audio = audio;
       configureAudiblePlayback(audio);
@@ -1033,7 +894,6 @@ Page<VoiceChatData, {
       };
       audio.onPlay(() => {
         if (playToken === this.ttsPlayToken) {
-          this.recordVoiceDiagnostic("tts.audio.onPlay", { playToken });
           this.ttsProgressStartedAtMs = Date.now();
           this.startFollowUpProgressTimer(playToken, audio);
         }
@@ -1046,11 +906,6 @@ Page<VoiceChatData, {
           if (options.autoListenAfterPlayback) {
             this.autoListenPendingAfterPlayback = true;
           }
-          this.recordVoiceDiagnostic("tts.audio.onEnded", {
-            playToken,
-            autoListenAfterPlayback: Boolean(options.autoListenAfterPlayback),
-            pendingAfterPlayback: this.autoListenPendingAfterPlayback,
-          });
           this.stopFollowUpProgressTimer();
           this.setData({
             followUpTTSPlaying: false,
@@ -1071,7 +926,6 @@ Page<VoiceChatData, {
       });
       audio.onError(() => {
         if (playToken === this.ttsPlayToken) {
-          this.recordVoiceDiagnostic("tts.audio.onError", { playToken });
           this.stopFollowUpProgressTimer();
           this.setData({
             followUpTTSPlaying: false,
@@ -1085,13 +939,9 @@ Page<VoiceChatData, {
         }
       });
       audio.play();
-      this.recordVoiceDiagnostic("tts.audio.play.call", { playToken });
       this.startFollowUpProgressTimer(playToken, audio);
     } catch (error) {
       if (playToken === this.ttsPlayToken) {
-        this.recordVoiceDiagnostic("tts.play.error", {
-          message: error instanceof Error ? error.message : "AI 语音播放失败",
-        });
         this.setData({
           followUpTTSPlaying: false,
           followUpTTSError: error instanceof Error ? error.message : "AI 语音播放失败",
@@ -1102,11 +952,6 @@ Page<VoiceChatData, {
   },
 
   stopFollowUpAudio() {
-    this.recordVoiceDiagnostic("tts.stop", {
-      previousToken: this.ttsPlayToken,
-      hadAudio: Boolean(this.audio),
-      pendingAfterPlayback: this.autoListenPendingAfterPlayback,
-    });
     this.ttsPlayToken += 1;
     this.autoListenPendingAfterPlayback = false;
     this.stopFollowUpProgressTimer();
@@ -1206,27 +1051,16 @@ Page<VoiceChatData, {
 
   async connectGateway() {
     if (this.data.connecting || !this.data.voiceSessionId) {
-      this.recordVoiceDiagnostic("gateway.connect.skip", {
-        connecting: this.data.connecting,
-        hasVoiceSessionId: Boolean(this.data.voiceSessionId),
-      });
       return;
     }
-    this.recordVoiceDiagnostic("gateway.connect.begin", {
-      status: this.data.status,
-      pendingAfterPlayback: this.autoListenPendingAfterPlayback,
-      hadClient: Boolean(streamingClient),
-    });
     this.setData({ connecting: true, error: "" });
     let connected = false;
     let client: MemoirStreamingAsrClient | null = null;
     const isCurrentClient = () => Boolean(client && streamingClient === client);
     try {
       if (streamingClient) {
-        this.recordVoiceDiagnostic("gateway.previousClient.close");
         streamingClient.close({ force: true });
       }
-      this.recordVoiceDiagnostic("gateway.client.create.begin");
       client = new MemoirStreamingAsrClient({
         voiceSessionId: this.data.voiceSessionId,
         guidanceMode: this.data.guidanceMode,
@@ -1237,21 +1071,13 @@ Page<VoiceChatData, {
           onStatus: (status) => {
             if (isCurrentClient()) {
               this.handleStatus(status);
-              return;
             }
-            this.recordVoiceDiagnostic("gateway.stale.status", { status });
           },
           onCaptureStats: (stats) => {
             if (isCurrentClient()) {
               this.handleCaptureStats(stats);
             }
           },
-          onDiagnostic: (event: MemoirStreamingAsrDiagnosticEvent) => (
-            this.recordVoiceDiagnostic(
-              event.name,
-              isCurrentClient() ? event.data : { ...(event.data || {}), staleClient: true },
-            )
-          ),
           onEvent: (event) => {
             if (isCurrentClient()) {
               this.handleGatewayEvent(event);
@@ -1270,40 +1096,24 @@ Page<VoiceChatData, {
           onError: (message, error) => {
             if (isCurrentClient()) {
               this.handleError(message, error);
-              return;
             }
-            this.recordVoiceDiagnostic("gateway.stale.error", { message });
           },
         },
       });
       streamingClient = client;
-      this.recordVoiceDiagnostic("gateway.client.create.success");
-      this.recordVoiceDiagnostic("gateway.client.connect.call");
       await client.connect();
       connected = true;
-      this.recordVoiceDiagnostic("gateway.connect.success", { status: this.data.status });
     } catch (error) {
       if (client && streamingClient === client) {
         streamingClient = null;
       }
       if (client) {
-        try {
-          client.close({ force: true });
-        } catch (closeError) {
-          const closeMessage = closeError instanceof Error ? closeError.message : "语音连接关闭失败";
-          this.recordVoiceDiagnostic("gateway.connect.closeAfterError", { message: closeMessage });
-        }
+        client.close({ force: true });
       }
       const message = error instanceof Error ? error.message : "语音连接失败";
-      this.recordVoiceDiagnostic("gateway.connect.error", { message });
       this.handleError(message, classifyVoiceClientConnectionError(message));
     } finally {
       this.setData({ connecting: false });
-      this.recordVoiceDiagnostic("gateway.connect.finally", {
-        connected,
-        status: this.data.status,
-        pendingAfterPlayback: this.autoListenPendingAfterPlayback,
-      });
       if (connected) {
         this.tryStartAutoListenAfterTTS();
       }
@@ -1311,23 +1121,10 @@ Page<VoiceChatData, {
   },
 
   startRecording(autoTriggered = false) {
-    this.recordVoiceDiagnostic("recording.start.tap", {
-      autoTriggered,
-      hasClient: Boolean(streamingClient),
-      status: this.data.status,
-      connecting: this.data.connecting,
-      recording: this.data.recording,
-    });
     if (!this.ensureVoiceAuthorization(autoTriggered)) {
-      this.recordVoiceDiagnostic("recording.start.blocked", { reason: "voiceAuthorization", autoTriggered });
       return false;
     }
     if (!streamingClient || this.data.status === "closed" || this.data.status === "error") {
-      this.recordVoiceDiagnostic("recording.start.reconnect", {
-        autoTriggered,
-        hasClient: Boolean(streamingClient),
-        status: this.data.status,
-      });
       void this.syncVoiceAuthorizationAndConnect(autoTriggered);
       this.setData({ autoListenStateText: autoTriggered ? "正在重新连接语音" : this.data.autoListenStateText });
       return false;
@@ -1337,21 +1134,17 @@ Page<VoiceChatData, {
   },
 
   async startRecordingAfterPrivacy(autoTriggered = false) {
-    this.recordVoiceDiagnostic("recording.privacy.begin", { autoTriggered });
     if (!autoTriggered) {
       this.consecutiveNoAnswerPrompts = 0;
       this.cancelPendingNoAnswerPrompt();
     }
     if (!(await this.syncVoiceAuthorizationForSession())) {
-      this.recordVoiceDiagnostic("recording.privacy.blocked", { reason: "voiceAuthorizationSync", autoTriggered });
       return false;
     }
     try {
       await ensureRecorderPrivacyAuthorization();
-      this.recordVoiceDiagnostic("recording.privacy.success", { autoTriggered });
     } catch (error) {
       const message = error instanceof Error ? error.message : "微信隐私授权失败";
-      this.recordVoiceDiagnostic("recording.privacy.error", { message, autoTriggered });
       this.handleError(message, { kind: "recorder", code: "wechat_privacy_authorization_failed", message });
       this.setData({
         recording: false,
@@ -1361,11 +1154,6 @@ Page<VoiceChatData, {
       return false;
     }
     if (!streamingClient || this.data.status === "closed" || this.data.status === "error") {
-      this.recordVoiceDiagnostic("recording.start.reconnectAfterPrivacy", {
-        autoTriggered,
-        hasClient: Boolean(streamingClient),
-        status: this.data.status,
-      });
       void this.syncVoiceAuthorizationAndConnect(autoTriggered);
       this.setData({ autoListenStateText: autoTriggered ? "正在重新连接语音" : this.data.autoListenStateText });
       return false;
@@ -1373,7 +1161,6 @@ Page<VoiceChatData, {
     const started = streamingClient.startRecording({
       noVoiceActivityTimeoutMs: autoTriggered ? AUTO_LISTEN_NO_ANSWER_MS : 0,
     });
-    this.recordVoiceDiagnostic("recording.client.start.result", { autoTriggered, started });
     if (!started) {
       this.setData({
         error: "语音未就绪，请重新连接",
@@ -1420,14 +1207,11 @@ Page<VoiceChatData, {
 
   tryStartAutoListenAfterTTS() {
     const gate = this.autoListenGateSnapshot();
-    this.recordVoiceDiagnostic("autoListen.tryAfterTTS", { ...gate });
     if (!this.autoListenPendingAfterPlayback || !gate.canStart) {
       return false;
     }
     this.autoListenPendingAfterPlayback = false;
-    const started = this.startRecording(true);
-    this.recordVoiceDiagnostic("autoListen.startAfterTTS.result", { started });
-    return started;
+    return this.startRecording(true);
   },
 
   cancelPendingNoAnswerPrompt(clearLoading = true) {
@@ -1565,12 +1349,6 @@ Page<VoiceChatData, {
   },
 
   handleStatus(status) {
-    this.recordVoiceDiagnostic("status.update", {
-      previousStatus: this.data.status,
-      status,
-      recording: this.data.recording,
-      connecting: this.data.connecting,
-    });
     this.setData({
       status,
       statusText: statusText(status),
@@ -1608,25 +1386,6 @@ Page<VoiceChatData, {
     const noAnswerAutoStopped = stats.autoStopped && stats.autoStopReason === "no_voice";
     const noAnswerPromptAlreadyHandled = noAnswerAutoStopped
       && this.handledNoAnswerFrameCount === stats.frameCount;
-    const frameCheckpoint = stats.frameCount !== this.lastCaptureDiagnosticFrameCount
-      && (stats.frameCount <= 1 || stats.frameCount % 20 === 0);
-    const shouldRecordDiagnostic = stats.state !== this.lastCaptureDiagnosticState
-      || frameCheckpoint
-      || Boolean(stats.autoStopped);
-    if (shouldRecordDiagnostic) {
-      this.lastCaptureDiagnosticState = stats.state;
-      this.lastCaptureDiagnosticFrameCount = stats.frameCount;
-      this.recordVoiceDiagnostic("capture.stats", {
-        state: stats.state,
-        frameCount: stats.frameCount,
-        audioBytesSent: stats.audioBytesSent,
-        recordingElapsedMs: stats.recordingElapsedMs,
-        gatewayState: stats.gatewayState,
-        audioLevel: Math.round((stats.audioLevel || 0) * 1000) / 1000,
-        autoStopped: stats.autoStopped,
-        autoStopReason: stats.autoStopReason,
-      });
-    }
     if (noAnswerAutoStopped && !noAnswerPromptAlreadyHandled) {
       patch.autoListenStateText = "没听到回答，已暂停，可点继续说话";
       patch.persistenceStateText = "未听到回答";
@@ -1640,11 +1399,6 @@ Page<VoiceChatData, {
   },
 
   handleGatewayEvent(event) {
-    this.recordVoiceDiagnostic("gateway.event", {
-      type: event.type,
-      state: event.state,
-      error: event.error,
-    });
     const nextData: Partial<VoiceChatData> = {};
     if (event.state) {
       nextData.gatewayStateText = gatewayStateText(event.state);
@@ -1667,7 +1421,6 @@ Page<VoiceChatData, {
   },
 
   handlePartial(text) {
-    this.recordVoiceDiagnostic("asr.partial", { textLength: text.length });
     this.setData({
       liveText: text,
       liveCharCount: countTextChars(text),
@@ -1680,15 +1433,8 @@ Page<VoiceChatData, {
   handleFinal(event) {
     const text = event.text || "";
     if (!text) {
-      this.recordVoiceDiagnostic("asr.final.skip", { reason: "emptyText" });
       return;
     }
-    this.recordVoiceDiagnostic("asr.final", {
-      textLength: text.length,
-      hasMessageId: Boolean(event.message_id),
-      hasUtteranceId: Boolean(event.utterance_id),
-      hasAudioFileId: Boolean(event.audio_file_id),
-    });
     const line: VoiceChatTranscriptLine = {
       id: event.message_id || event.utterance_id || `${Date.now()}-${this.data.transcriptLines.length}`,
       text,
@@ -1741,12 +1487,6 @@ Page<VoiceChatData, {
   },
 
   handleError(message, error) {
-    this.recordVoiceDiagnostic("page.error", {
-      message,
-      kind: error?.kind,
-      code: error?.code,
-      state: error?.state,
-    });
     if (error?.kind === "connection") {
       this.persistPendingVoiceClose("connection_error");
     }

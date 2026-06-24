@@ -15,16 +15,14 @@
   </view>
 
   <view wx:if="{{error}}" class="error">{{error}}</view>
-  <view class="diagnostic-strip">
+  <view class="session-state-strip">
     <block wx:if="{{error}}">
-      <text class="diagnostic-error">{{errorKindText || statusText}}</text>
+      <text class="session-state-error">{{errorKindText || statusText}}</text>
     </block>
     <block wx:else>
       <text>{{gatewayStateText}}</text>
       <text>{{persistenceStateText}}</text>
     </block>
-    <text class="diagnostic-count">诊断 {{diagnosticEventCount}}</text>
-    <button class="diagnostic-copy" bindtap="copyVoiceDiagnostics">复制诊断</button>
   </view>
   <view wx:if="{{recoveryNotice || canReconnect || canFinishAfterDisconnect}}" class="recovery-panel">
     <text wx:if="{{recoveryNotice}}" class="recovery-text">{{recoveryNotice}}</text>
