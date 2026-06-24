@@ -106,6 +106,25 @@ function isLoginError(error: unknown): boolean {
   return error instanceof ApiError && [401, 403].includes(error.statusCode);
 }
 
+function bookVoiceAssistantHint(stage: BookData["stage"], chapterCount: number): string {
+  if (stage === "empty") {
+    return "生成章节后，可以听目录或说修改";
+  }
+  if (stage === "plan_draft") {
+    return chapterCount
+      ? "可以说：读一下目录，或把某一章改名"
+      : "生成章节后，可以用语音调整目录";
+  }
+  return "可以说：读本章、润色这一章，或确认本章";
+}
+
+function bookVoiceAssistantStatusText(stage: BookData["stage"]): string {
+  if (stage === "empty") {
+    return "等待章节";
+  }
+  return "我可以帮你听和改";
+}
+
 Page<BookData, {
   onShow(): Promise<void>;
   loadBookHome(): Promise<void>;
@@ -144,6 +163,8 @@ Page<BookData, {
   generateBook(): Promise<void>;
   playChapterAudio(event: DatasetEvent): Promise<void>;
   playBookAudio(): Promise<void>;
+  playBookOutlineAudio(): void;
+  startBookVoiceCommand(): void;
   requestBookAudio(target: string): Promise<MemoirBookAudioResponse>;
   playAudioFiles(
     response: MemoirBookAudioResponse,
@@ -232,6 +253,10 @@ Page<BookData, {
     bookTTSProgressPercent: 0,
     bookTTSDurationSeconds: 0,
     bookTTSAlignment: [],
+    bookVoiceAssistantHint: "生成章节后，可以听目录或说修改",
+    bookVoiceAssistantStatusText: "等待章节",
+    bookVoiceAssistantListening: false,
+    bookVoiceAssistantBusy: false,
   },
 
   async onShow() {
@@ -344,6 +369,8 @@ Page<BookData, {
       planTitle: plan?.title || `${this.data.projectTitle || "我的回忆录"}章节规划`,
       stage,
       stageText: stageText(stage),
+      bookVoiceAssistantHint: bookVoiceAssistantHint(stage, chapters.length),
+      bookVoiceAssistantStatusText: bookVoiceAssistantStatusText(stage),
       ...chapterCollectionData(chapters, stage, this.data.sourceCoverage, this.data.splitSourceSelections),
       ...sourceCoverageData(plan, this.data.sourceCoverage),
       ...(stage === "drafting" ? {} : bookOutputData(null)),
@@ -1045,6 +1072,36 @@ Page<BookData, {
         this.setData({ ttsBusyTarget: "" });
       }
     }
+  },
+
+  playBookOutlineAudio() {
+    if (!this.data.plan || !this.data.chapters.length) {
+      this.setData({
+        bookVoiceAssistantStatusText: "先生成章节",
+      });
+      wx.showToast({ title: "先生成章节规划", icon: "none" });
+      return;
+    }
+    this.setData({
+      bookVoiceAssistantStatusText: "目录朗读将在下一步接入",
+      error: "",
+    });
+    wx.showToast({ title: "下一步接入听目录", icon: "none" });
+  },
+
+  startBookVoiceCommand() {
+    if (!this.data.plan || !this.data.chapters.length) {
+      this.setData({
+        bookVoiceAssistantStatusText: "先生成章节",
+      });
+      wx.showToast({ title: "先生成章节规划", icon: "none" });
+      return;
+    }
+    this.setData({
+      bookVoiceAssistantStatusText: "语音修改将在下一步接入",
+      error: "",
+    });
+    wx.showToast({ title: "下一步接入语音修改", icon: "none" });
   },
 
   async requestBookAudio(target) {

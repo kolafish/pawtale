@@ -129,6 +129,10 @@ export interface BookData {
   bookTTSProgressPercent: number;
   bookTTSDurationSeconds: number;
   bookTTSAlignment: TTSAlignmentSegment[];
+  bookVoiceAssistantHint: string;
+  bookVoiceAssistantStatusText: string;
+  bookVoiceAssistantListening: boolean;
+  bookVoiceAssistantBusy: boolean;
 }
 
 export function trimText(value: string): string {
@@ -578,6 +582,10 @@ export function guestBookData(): Partial<BookData> {
     bookTTSProgressPercent: 0,
     bookTTSDurationSeconds: 0,
     bookTTSAlignment: [],
+    bookVoiceAssistantHint: "生成章节后，可以听目录或说修改",
+    bookVoiceAssistantStatusText: "等待章节",
+    bookVoiceAssistantListening: false,
+    bookVoiceAssistantBusy: false,
   };
 }
 
