@@ -139,6 +139,8 @@ export interface BookData {
   bookVoiceAssistantStatusText: string;
   bookVoiceAssistantListening: boolean;
   bookVoiceAssistantBusy: boolean;
+  bookVoiceAssistantConversationActive: boolean;
+  bookVoiceAssistantReplyText: string;
   bookVoiceCommandText: string;
   bookVoiceCommandIntentLabel: string;
   bookVoiceCommandSummary: string;

@@ -19,6 +19,7 @@ import {
   createMemoirBookChapterDraftTTS,
   createMemoirBookOutputTTS,
   createMemoirBookPlanOutlineTTS,
+  createMemoirBookVoiceAssistantTTS,
   generateMemoirBookChapterTitle,
   generateMemoirBookChapterDraft,
   generateMemoirBookOutput,
@@ -139,6 +140,31 @@ function bookVoiceAssistantStatusText(stage: BookData["stage"]): string {
   return "我可以帮你听和改";
 }
 
+function isBookVoiceReadIntent(preview: MemoirBookVoiceCommandParseResponse): boolean {
+  return preview.intent === "read_outline" || preview.intent === "read_chapter";
+}
+
+function isBookVoiceCommandConfirmationText(text: string): boolean {
+  const normalized = trimText(text).replace(/\s+/g, "");
+  return /^(确认|确认执行|执行|可以|可以执行|就这样|就这样改|好的|好|没问题|按这个改)$/.test(normalized);
+}
+
+function bookVoiceAssistantReplyText(preview: MemoirBookVoiceCommandParseResponse): string {
+  if (preview.intent === "read_outline") {
+    return "好，我现在读目录。读完后我会继续听你说。";
+  }
+  if (preview.intent === "read_chapter") {
+    return "好，我来读这一章。读完后我会继续听你说。";
+  }
+  if (preview.intent === "unknown") {
+    return "我还没理解清楚。你可以说：把第一章改名为童年往事，或者读一下目录。";
+  }
+  if (preview.requires_confirmation && canExecuteBookVoiceCommand(preview)) {
+    return `我理解了，${preview.summary} 如果没问题，说确认执行，我再改。`;
+  }
+  return `我理解到的是：${preview.summary} 这个操作现在先展示预览，不会直接改动。`;
+}
+
 Page<BookData, {
   onShow(): Promise<void>;
   loadBookHome(): Promise<void>;
@@ -176,14 +202,21 @@ Page<BookData, {
   regenerateMergedChapter(chapterId: string): Promise<void>;
   generateBook(): Promise<void>;
   playChapterAudio(event: DatasetEvent): Promise<void>;
-  playChapterAudioById(chapterId: string): Promise<void>;
+  playChapterAudioById(chapterId: string, options?: { autoListenAfterPlayback?: boolean }): Promise<void>;
   playBookAudio(): Promise<void>;
-  playBookOutlineAudio(): Promise<void>;
-  startBookVoiceCommand(): Promise<void>;
+  playBookOutlineAudio(options?: { autoListenAfterPlayback?: boolean }): Promise<void>;
+  startBookVoiceCommand(options?: { autoTriggered?: boolean }): Promise<void>;
   applyBookVoiceCommandPreview(preview: MemoirBookVoiceCommandParseResponse): void;
-  executeBookVoiceCommand(): Promise<void>;
+  handleBookVoiceCommandTranscript(text: string): Promise<void>;
+  executeBookVoiceCommand(options?: { confirmedByVoice?: boolean; autoListenAfterExecution?: boolean }): Promise<void>;
   undoBookVoiceCommand(): Promise<void>;
   clearBookVoiceCommandPreview(): void;
+  stopBookVoiceConversation(): void;
+  clearBookVoiceAssistantAutoListenTimer(): void;
+  canStartBookVoiceAssistantAutoListen(): boolean;
+  scheduleBookVoiceAssistantAutoListen(statusText?: string): void;
+  playBookVoiceAssistantReply(text: string, options?: { autoListenAfterPlayback?: boolean }): Promise<void>;
+  requestBookVoiceAssistantAudio(text: string): Promise<MemoirBookAudioResponse>;
   bookVoiceCommandUndoSnapshot(): BookVoiceCommandUndoSnapshot | null;
   confirmBookVoiceCommandExecution(content: string, confirmText?: string): Promise<boolean>;
   requestBookAudio(target: string): Promise<MemoirBookAudioResponse>;
@@ -222,11 +255,13 @@ Page<BookData, {
   playToken: number;
   ttsProgressTimer: number | null;
   ttsProgressStartedAtMs: number;
+  bookVoiceAutoListenTimer: number | null;
 }>({
   audio: null,
   playToken: 0,
   ttsProgressTimer: null,
   ttsProgressStartedAtMs: 0,
+  bookVoiceAutoListenTimer: null,
 
   data: {
     loading: false,
@@ -278,6 +313,8 @@ Page<BookData, {
     bookVoiceAssistantStatusText: "等待章节",
     bookVoiceAssistantListening: false,
     bookVoiceAssistantBusy: false,
+    bookVoiceAssistantConversationActive: false,
+    bookVoiceAssistantReplyText: "",
     bookVoiceCommandText: "",
     bookVoiceCommandIntentLabel: "",
     bookVoiceCommandSummary: "",
@@ -395,13 +432,18 @@ Page<BookData, {
       ? buildChapterViews(plan, draftsByChapterId, this.data.sourceCoverage, this.data.splitSourceSelections)
       : [];
     const stage = planStage(plan);
+    const shouldResetVoiceStatus = !this.data.bookVoiceAssistantConversationActive || !plan;
     this.setData({
       plan,
       planTitle: plan?.title || `${this.data.projectTitle || "我的回忆录"}章节规划`,
       stage,
       stageText: stageText(stage),
       bookVoiceAssistantHint: bookVoiceAssistantHint(stage, chapters.length),
-      bookVoiceAssistantStatusText: bookVoiceAssistantStatusText(stage),
+      ...(shouldResetVoiceStatus ? {
+        bookVoiceAssistantStatusText: bookVoiceAssistantStatusText(stage),
+        bookVoiceAssistantConversationActive: false,
+        bookVoiceAssistantReplyText: "",
+      } : {}),
       ...chapterCollectionData(chapters, stage, this.data.sourceCoverage, this.data.splitSourceSelections),
       ...sourceCoverageData(plan, this.data.sourceCoverage),
       ...(stage === "drafting" ? {} : bookOutputData(null)),
@@ -1012,7 +1054,7 @@ Page<BookData, {
     await this.playChapterAudioById(chapterId);
   },
 
-  async playChapterAudioById(chapterId) {
+  async playChapterAudioById(chapterId, options: { autoListenAfterPlayback?: boolean } = {}) {
     const chapter = this.data.chapters.find((candidate) => candidate.id === chapterId);
     if (!chapter || !this.data.projectId || this.data.updatingPlanStructure) {
       return;
@@ -1045,6 +1087,9 @@ Page<BookData, {
       }
       this.setData({ ttsBusyTarget: "" });
       await this.playAudioFiles(response, target, token, trimText(chapter.draftContent));
+      if (token === this.playToken && options.autoListenAfterPlayback) {
+        this.scheduleBookVoiceAssistantAutoListen("这一章读完了，我继续听");
+      }
     } catch (error) {
       if (isLoginError(error)) {
         wx.reLaunch({ url: "/pages/login/index" });
@@ -1109,10 +1154,11 @@ Page<BookData, {
     }
   },
 
-  async playBookOutlineAudio() {
+  async playBookOutlineAudio(options: { autoListenAfterPlayback?: boolean } = {}) {
     const target = "outline";
     if (this.data.playingTarget === target) {
       this.stopPlayback();
+      this.stopBookVoiceConversation();
       this.setData({ bookVoiceAssistantStatusText: bookVoiceAssistantStatusText(this.data.stage) });
       return;
     }
@@ -1146,7 +1192,11 @@ Page<BookData, {
       });
       await this.playAudioFiles(response, target, token, activeText);
       if (token === this.playToken) {
-        this.setData({ bookVoiceAssistantStatusText: bookVoiceAssistantStatusText(this.data.stage) });
+        if (options.autoListenAfterPlayback) {
+          this.scheduleBookVoiceAssistantAutoListen("目录读完了，我继续听");
+        } else {
+          this.setData({ bookVoiceAssistantStatusText: bookVoiceAssistantStatusText(this.data.stage) });
+        }
       }
     } catch (error) {
       if (isLoginError(error)) {
@@ -1166,9 +1216,10 @@ Page<BookData, {
     }
   },
 
-  async startBookVoiceCommand() {
+  async startBookVoiceCommand(options: { autoTriggered?: boolean } = {}) {
+    const autoTriggered = Boolean(options.autoTriggered);
     if (this.data.bookVoiceAssistantListening) {
-      stopMemoirVoiceSearchRecording();
+      this.stopBookVoiceConversation();
       this.setData({ bookVoiceAssistantStatusText: "正在保存录音" });
       return;
     }
@@ -1185,45 +1236,56 @@ Page<BookData, {
     if (!this.data.projectId || this.data.updatingPlanStructure || this.data.generatingBook) {
       return;
     }
+    this.clearBookVoiceAssistantAutoListenTimer();
     this.stopPlayback();
+    const keepCurrentPreview = autoTriggered && Boolean(this.data.bookVoiceCommandPreview);
     this.setData({
       bookVoiceAssistantListening: true,
       bookVoiceAssistantBusy: false,
-      bookVoiceAssistantStatusText: "我在听，请说想怎么改",
-      bookVoiceCommandText: "",
-      bookVoiceCommandIntentLabel: "",
-      bookVoiceCommandSummary: "",
-      bookVoiceCommandRequiresConfirmation: false,
-      bookVoiceCommandPreview: null,
-      bookVoiceCommandCanExecute: false,
-      bookVoiceCommandActionText: "确认执行",
-      bookVoiceCommandUndoText: "",
-      bookVoiceCommandUndoSnapshot: null,
+      bookVoiceAssistantConversationActive: true,
+      bookVoiceAssistantReplyText: "",
+      bookVoiceAssistantStatusText: autoTriggered ? "我继续听，你可以接着说" : "我在听，请说想怎么改",
+      ...(keepCurrentPreview ? {} : {
+        bookVoiceCommandText: "",
+        bookVoiceCommandIntentLabel: "",
+        bookVoiceCommandSummary: "",
+        bookVoiceCommandRequiresConfirmation: false,
+        bookVoiceCommandPreview: null,
+        bookVoiceCommandCanExecute: false,
+        bookVoiceCommandActionText: "确认执行",
+        bookVoiceCommandUndoText: "",
+        bookVoiceCommandUndoSnapshot: null,
+      }),
       error: "",
     });
+    let noVoiceAutoStopped = false;
     try {
       const text = await recordMemoirVoiceSearchQuery({
         emptyTranscriptMessage: "没有识别到修改内容，请换个说法再试",
+        noVoiceTranscriptMessage: "没有听到声音，语音对话已暂停",
+        onNoVoiceAutoStop: () => {
+          noVoiceAutoStopped = true;
+          this.setData({ bookVoiceAssistantStatusText: "没听到声音，先暂停" });
+        },
         onRecordingEnd: () => {
           this.setData({
             bookVoiceAssistantListening: false,
             bookVoiceAssistantBusy: true,
-            bookVoiceAssistantStatusText: "正在识别修改需求",
+            bookVoiceAssistantStatusText: noVoiceAutoStopped ? "正在结束收听" : "正在识别修改需求",
           });
         },
       });
-      this.setData({ bookVoiceAssistantStatusText: "正在理解修改需求" });
-      const preview = await parseMemoirBookVoiceCommand(this.data.projectId, { text });
-      this.applyBookVoiceCommandPreview(preview);
-      wx.showToast({ title: "已识别", icon: "success" });
+      await this.handleBookVoiceCommandTranscript(text);
     } catch (error) {
       if (isLoginError(error)) {
         wx.reLaunch({ url: "/pages/login/index" });
         return;
       }
+      const message = error instanceof Error ? error.message : "语音修改识别失败";
       this.setData({
-        error: error instanceof Error ? error.message : "语音修改识别失败",
-        bookVoiceAssistantStatusText: "没有听清",
+        error: noVoiceAutoStopped ? "" : message,
+        bookVoiceAssistantConversationActive: false,
+        bookVoiceAssistantStatusText: noVoiceAutoStopped ? "语音对话已暂停" : "没有听清",
       });
     } finally {
       this.setData({
@@ -1235,6 +1297,9 @@ Page<BookData, {
 
   applyBookVoiceCommandPreview(preview) {
     const canExecute = canExecuteBookVoiceCommand(preview);
+    const statusText = preview.intent === "unknown"
+      ? "需要再说明"
+      : (isBookVoiceReadIntent(preview) ? "已理解，马上朗读" : "已理解，等待确认");
     this.setData({
       bookVoiceCommandText: preview.original_text,
       bookVoiceCommandIntentLabel: preview.intent_label,
@@ -1245,12 +1310,43 @@ Page<BookData, {
       bookVoiceCommandActionText: canExecute ? bookVoiceCommandActionText(preview) : "暂不执行",
       bookVoiceCommandUndoText: "",
       bookVoiceCommandUndoSnapshot: null,
-      bookVoiceAssistantStatusText: preview.intent === "unknown" ? "需要再说明" : "已理解，等待确认",
+      bookVoiceAssistantStatusText: statusText,
       error: "",
     });
   },
 
-  async executeBookVoiceCommand() {
+  async handleBookVoiceCommandTranscript(text) {
+    const pendingPreview = this.data.bookVoiceCommandPreview;
+    if (
+      pendingPreview
+      && this.data.bookVoiceCommandCanExecute
+      && pendingPreview.requires_confirmation
+      && isBookVoiceCommandConfirmationText(text)
+    ) {
+      this.setData({
+        bookVoiceCommandText: text,
+        bookVoiceAssistantStatusText: "收到确认，正在执行",
+      });
+      await this.playBookVoiceAssistantReply("好的，我按刚才理解的修改。", { autoListenAfterPlayback: false });
+      await this.executeBookVoiceCommand({ confirmedByVoice: true, autoListenAfterExecution: true });
+      return;
+    }
+
+    this.setData({ bookVoiceAssistantStatusText: "正在理解修改需求" });
+    const preview = await parseMemoirBookVoiceCommand(this.data.projectId, { text });
+    this.applyBookVoiceCommandPreview(preview);
+    wx.showToast({ title: "已识别", icon: "success" });
+
+    const replyText = bookVoiceAssistantReplyText(preview);
+    await this.playBookVoiceAssistantReply(replyText, {
+      autoListenAfterPlayback: !isBookVoiceReadIntent(preview),
+    });
+    if (isBookVoiceReadIntent(preview) && canExecuteBookVoiceCommand(preview)) {
+      await this.executeBookVoiceCommand({ confirmedByVoice: true, autoListenAfterExecution: true });
+    }
+  },
+
+  async executeBookVoiceCommand(options: { confirmedByVoice?: boolean; autoListenAfterExecution?: boolean } = {}) {
     const preview = this.data.bookVoiceCommandPreview;
     const operation = preview?.operations?.[0] as MemoirBookVoiceCommandOperation | undefined;
     if (
@@ -1263,17 +1359,19 @@ Page<BookData, {
       return;
     }
     if (preview.intent === "read_outline") {
-      await this.playBookOutlineAudio();
+      await this.playBookOutlineAudio({ autoListenAfterPlayback: options.autoListenAfterExecution });
       return;
     }
     if (preview.intent === "read_chapter" && operation.chapter_id) {
-      await this.playChapterAudioById(operation.chapter_id);
+      await this.playChapterAudioById(operation.chapter_id, { autoListenAfterPlayback: options.autoListenAfterExecution });
       return;
     }
 
-    const confirmed = await this.confirmBookVoiceCommandExecution(preview.summary);
-    if (!confirmed) {
-      return;
+    if (!options.confirmedByVoice) {
+      const confirmed = await this.confirmBookVoiceCommandExecution(preview.summary);
+      if (!confirmed) {
+        return;
+      }
     }
     const undoSnapshot = this.bookVoiceCommandUndoSnapshot();
     this.setData({ bookVoiceCommandExecuting: true, error: "" });
@@ -1291,6 +1389,11 @@ Page<BookData, {
             bookVoiceCommandUndoSnapshot: undoSnapshot,
             bookVoiceAssistantStatusText: "已执行，可撤回",
           });
+          if (options.autoListenAfterExecution) {
+            await this.playBookVoiceAssistantReply("已按你说的改好了。还可以继续说新的修改。", {
+              autoListenAfterPlayback: true,
+            });
+          }
         }
         return;
       }
@@ -1311,6 +1414,11 @@ Page<BookData, {
             bookVoiceCommandUndoSnapshot: undoSnapshot,
             bookVoiceAssistantStatusText: "已执行，可撤回",
           });
+          if (options.autoListenAfterExecution) {
+            await this.playBookVoiceAssistantReply("已按你说的调整好了。还可以继续说新的修改。", {
+              autoListenAfterPlayback: true,
+            });
+          }
         }
         return;
       }
@@ -1361,6 +1469,130 @@ Page<BookData, {
       bookVoiceCommandUndoSnapshot: null,
       bookVoiceAssistantStatusText: bookVoiceAssistantStatusText(this.data.stage),
       error: "",
+    });
+  },
+
+  stopBookVoiceConversation() {
+    this.clearBookVoiceAssistantAutoListenTimer();
+    if (this.data.bookVoiceAssistantListening) {
+      stopMemoirVoiceSearchRecording();
+      this.setData({
+        bookVoiceAssistantConversationActive: false,
+        bookVoiceAssistantStatusText: "正在保存录音",
+      });
+      return;
+    }
+    this.setData({
+      bookVoiceAssistantConversationActive: false,
+      bookVoiceAssistantBusy: false,
+      bookVoiceAssistantReplyText: "",
+      bookVoiceAssistantStatusText: bookVoiceAssistantStatusText(this.data.stage),
+    });
+  },
+
+  clearBookVoiceAssistantAutoListenTimer() {
+    if (this.bookVoiceAutoListenTimer !== null) {
+      clearTimeout(this.bookVoiceAutoListenTimer);
+      this.bookVoiceAutoListenTimer = null;
+    }
+  },
+
+  canStartBookVoiceAssistantAutoListen() {
+    return Boolean(
+      this.data.bookVoiceAssistantConversationActive
+      && this.data.plan
+      && this.data.chapters.length
+      && this.data.projectId
+      && !this.data.loading
+      && !this.data.bookVoiceAssistantListening
+      && !this.data.bookVoiceAssistantBusy
+      && !this.data.ttsBusyTarget
+      && !this.data.playingTarget
+      && !this.data.updatingPlanStructure
+      && !this.data.generatingBook,
+    );
+  },
+
+  scheduleBookVoiceAssistantAutoListen(statusText = "我继续听") {
+    this.clearBookVoiceAssistantAutoListenTimer();
+    if (!this.canStartBookVoiceAssistantAutoListen()) {
+      return;
+    }
+    this.setData({
+      bookVoiceAssistantConversationActive: true,
+      bookVoiceAssistantBusy: false,
+      bookVoiceAssistantStatusText: statusText,
+    });
+    this.bookVoiceAutoListenTimer = setTimeout(() => {
+      this.bookVoiceAutoListenTimer = null;
+      if (this.canStartBookVoiceAssistantAutoListen()) {
+        void this.startBookVoiceCommand({ autoTriggered: true });
+      }
+    }, 250) as unknown as number;
+  },
+
+  async playBookVoiceAssistantReply(text, options: { autoListenAfterPlayback?: boolean } = {}) {
+    const replyText = trimText(text);
+    if (!replyText || !this.data.projectId) {
+      return;
+    }
+    const target = "book-voice-assistant";
+    this.stopPlayback();
+    this.playToken += 1;
+    const token = this.playToken;
+    this.setData({
+      ttsBusyTarget: target,
+      bookVoiceAssistantBusy: true,
+      bookVoiceAssistantReplyText: replyText,
+      bookVoiceAssistantStatusText: "AI 正在回复",
+      error: "",
+    });
+    try {
+      const response = await this.requestBookVoiceAssistantAudio(replyText);
+      if (token !== this.playToken) {
+        return;
+      }
+      this.setData({
+        ttsBusyTarget: "",
+        bookVoiceAssistantStatusText: "AI 正在说",
+      });
+      await this.playAudioFiles(response, target, token, replyText);
+      if (token !== this.playToken) {
+        return;
+      }
+      this.setData({ bookVoiceAssistantBusy: false });
+      if (options.autoListenAfterPlayback) {
+        this.scheduleBookVoiceAssistantAutoListen("我继续听");
+      } else if (this.data.bookVoiceCommandPreview && !isBookVoiceReadIntent(this.data.bookVoiceCommandPreview)) {
+        this.setData({ bookVoiceAssistantStatusText: "等你确认，或继续说" });
+      }
+    } catch (error) {
+      if (isLoginError(error)) {
+        wx.reLaunch({ url: "/pages/login/index" });
+        return;
+      }
+      if (token === this.playToken) {
+        this.setData({
+          error: error instanceof Error ? error.message : "AI 语音回复失败",
+          bookVoiceAssistantStatusText: "AI 回复失败",
+        });
+      }
+    } finally {
+      if (token === this.playToken && this.data.ttsBusyTarget === target) {
+        this.setData({ ttsBusyTarget: "" });
+      }
+      if (token === this.playToken && this.data.bookVoiceAssistantBusy) {
+        this.setData({ bookVoiceAssistantBusy: false });
+      }
+    }
+  },
+
+  async requestBookVoiceAssistantAudio(text) {
+    const settings = readBookTTSSettings();
+    return createMemoirBookVoiceAssistantTTS(this.data.projectId, {
+      text,
+      ...(settings.voice ? { voice: settings.voice } : {}),
+      ...(settings.speedRatio === 1 ? {} : { speed_ratio: settings.speedRatio }),
     });
   },
 
@@ -1438,6 +1670,7 @@ Page<BookData, {
   },
 
   onUnload() {
+    this.stopBookVoiceConversation();
     this.stopPlayback();
   },
 

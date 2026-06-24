@@ -284,6 +284,9 @@ function loadBookPage({
     createMemoirBookPlanOutlineTTS: async () => {
       throw new Error("createMemoirBookPlanOutlineTTS was not mocked");
     },
+    createMemoirBookVoiceAssistantTTS: async () => {
+      throw new Error("createMemoirBookVoiceAssistantTTS was not mocked");
+    },
     downloadMemoirVoiceAudio: async () => {
       throw new Error("downloadMemoirVoiceAudio was not mocked");
     },
@@ -1329,6 +1332,9 @@ test("book page records and previews a voice edit command", async () => {
   });
   const context = pageContext(page, { projectId: "project/1" });
   page.applyPlan.call(context, samplePlan("confirmed"));
+  context.playBookVoiceAssistantReply = async (text, options) => {
+    calls.push({ kind: "reply", text, options });
+  };
 
   await page.startBookVoiceCommand.call(context);
 
@@ -1349,7 +1355,113 @@ test("book page records and previews a voice edit command", async () => {
   assert.equal(context.data.bookVoiceAssistantListening, false);
   assert.equal(context.data.bookVoiceAssistantBusy, false);
   assert.deepEqual(calls[2], { kind: "toast", title: "已识别" });
+  assert.deepEqual(calls[3], {
+    kind: "reply",
+    text: "我理解了，准备把「外婆家的童年」改名为「童年往事」。 如果没问题，说确认执行，我再改。",
+    options: { autoListenAfterPlayback: true },
+  });
   delete global.wx;
+});
+
+test("book page plays assistant reply and auto-listens after playback", async () => {
+  const calls = [];
+  const originalSetTimeout = global.setTimeout;
+  const originalClearTimeout = global.clearTimeout;
+  global.setTimeout = (callback) => {
+    callback();
+    return 1;
+  };
+  global.clearTimeout = () => {};
+  const { page } = loadBookPage({
+    voiceApiExports: {
+      createMemoirBookVoiceAssistantTTS: async (projectId, data) => {
+        calls.push({ kind: "tts", projectId, data });
+        return sampleAudioResponse();
+      },
+    },
+  });
+  const context = pageContext(page, { projectId: "project/1" });
+  page.applyPlan.call(context, samplePlan("confirmed"));
+  context.setData({ bookVoiceAssistantConversationActive: true });
+  context.playAudioFiles = async (response, target, token, activeText) => {
+    calls.push({ kind: "play", target, token, activeText, response });
+  };
+  context.startBookVoiceCommand = async (options) => {
+    calls.push({ kind: "auto-listen", options });
+  };
+
+  try {
+    await page.playBookVoiceAssistantReply.call(context, "我理解了，请确认。", {
+      autoListenAfterPlayback: true,
+    });
+
+    assert.equal(calls[0].kind, "tts");
+    assert.deepEqual(calls[0].data, { text: "我理解了，请确认。" });
+    assert.equal(calls[1].target, "book-voice-assistant");
+    assert.equal(calls[1].activeText, "我理解了，请确认。");
+    assert.deepEqual(calls[2], { kind: "auto-listen", options: { autoTriggered: true } });
+    assert.equal(context.data.bookVoiceAssistantBusy, false);
+  } finally {
+    global.setTimeout = originalSetTimeout;
+    global.clearTimeout = originalClearTimeout;
+  }
+});
+
+test("book page keeps pending preview during auto-listen for voice confirmation", async () => {
+  const calls = [];
+  const { page } = loadBookPage({
+    voiceSearchExports: {
+      recordMemoirVoiceSearchQuery: async (options) => {
+        calls.push({ kind: "record", emptyTranscriptMessage: options.emptyTranscriptMessage });
+        options.onRecordingEnd?.();
+        return "确认执行";
+      },
+    },
+  });
+  const context = pageContext(page, { projectId: "project/1" });
+  page.applyPlan.call(context, samplePlan("confirmed"));
+  page.applyBookVoiceCommandPreview.call(context, sampleBookVoiceCommandPreview());
+  context.playBookVoiceAssistantReply = async (text, options) => {
+    calls.push({ kind: "reply", text, options });
+  };
+  context.executeBookVoiceCommand = async (options) => {
+    calls.push({ kind: "execute", options });
+  };
+
+  await page.startBookVoiceCommand.call(context, { autoTriggered: true });
+
+  assert.equal(context.data.bookVoiceCommandPreview.intent, "rename_chapter");
+  assert.equal(context.data.bookVoiceCommandText, "确认执行");
+  assert.deepEqual(calls[1], {
+    kind: "reply",
+    text: "好的，我按刚才理解的修改。",
+    options: { autoListenAfterPlayback: false },
+  });
+  assert.deepEqual(calls[2], {
+    kind: "execute",
+    options: { confirmedByVoice: true, autoListenAfterExecution: true },
+  });
+});
+
+test("book page pauses voice conversation when no speech is detected", async () => {
+  const { page } = loadBookPage({
+    voiceSearchExports: {
+      recordMemoirVoiceSearchQuery: async (options) => {
+        options.onNoVoiceAutoStop?.();
+        options.onRecordingEnd?.();
+        throw new Error(options.noVoiceTranscriptMessage);
+      },
+    },
+  });
+  const context = pageContext(page, { projectId: "project/1" });
+  page.applyPlan.call(context, samplePlan("confirmed"));
+
+  await page.startBookVoiceCommand.call(context);
+
+  assert.equal(context.data.bookVoiceAssistantConversationActive, false);
+  assert.equal(context.data.bookVoiceAssistantStatusText, "语音对话已暂停");
+  assert.equal(context.data.error, "");
+  assert.equal(context.data.bookVoiceAssistantListening, false);
 });
 
 test("book page executes a confirmed voice rename with undo snapshot", async () => {
@@ -1700,6 +1812,7 @@ test("book APIs call encoded backend routes", async () => {
         options.url.endsWith("/draft/tts")
         || options.url.endsWith("/outline/tts")
         || options.url.endsWith("/book-output/tts")
+        || options.url.endsWith("/book-voice-assistant/tts")
       ) {
         options.success({ statusCode: 200, data: sampleAudioResponse(), cookies: [], header: {} });
         return;
@@ -1732,6 +1845,7 @@ test("book APIs call encoded backend routes", async () => {
     createMemoirBookChapterDraftTTS,
     createMemoirBookOutputTTS,
     createMemoirBookPlanOutlineTTS,
+    createMemoirBookVoiceAssistantTTS,
     generateMemoirBookChapterDraft,
     generateMemoirBookChapterTitle,
     generateMemoirBookOutput,
@@ -1760,6 +1874,7 @@ test("book APIs call encoded backend routes", async () => {
   await createMemoirBookChapterDraftTTS("project/1", "chapter/1", {});
   await createMemoirBookPlanOutlineTTS("project/1", {});
   await parseMemoirBookVoiceCommand("project/1", { text: "把第一章改名为童年往事" });
+  await createMemoirBookVoiceAssistantTTS("project/1", { text: "我理解了，请确认。" });
   await getMemoirBookOutput("project/1");
   await generateMemoirBookOutput("project/1", { force_regenerate: true });
   await createMemoirBookOutputTTS("project/1", {});
@@ -1825,21 +1940,27 @@ test("book APIs call encoded backend routes", async () => {
   });
   assert.equal(
     apiRequests[14].url,
-    "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-output",
+    "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-voice-assistant/tts",
   );
-  assert.equal(apiRequests[14].method, "GET");
+  assert.equal(apiRequests[14].method, "POST");
+  assert.deepEqual(apiRequests[14].data, { text: "我理解了，请确认。" });
   assert.equal(
     apiRequests[15].url,
-    "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-output/generate",
+    "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-output",
   );
-  assert.equal(apiRequests[15].method, "POST");
-  assert.deepEqual(apiRequests[15].data, { force_regenerate: true });
+  assert.equal(apiRequests[15].method, "GET");
   assert.equal(
     apiRequests[16].url,
-    "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-output/tts",
+    "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-output/generate",
   );
   assert.equal(apiRequests[16].method, "POST");
-  assert.equal(apiRequests[16].header.Cookie, "pawtale_session=abc");
+  assert.deepEqual(apiRequests[16].data, { force_regenerate: true });
+  assert.equal(
+    apiRequests[17].url,
+    "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-output/tts",
+  );
+  assert.equal(apiRequests[17].method, "POST");
+  assert.equal(apiRequests[17].header.Cookie, "pawtale_session=abc");
   delete global.wx;
 });
 

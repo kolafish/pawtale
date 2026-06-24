@@ -51,6 +51,7 @@
       <text class="book-voice-title">成书语音助手</text>
       <text class="book-voice-hint">{{bookVoiceAssistantHint}}</text>
       <text class="book-voice-status">{{bookVoiceAssistantStatusText}}</text>
+      <text wx:if="{{bookVoiceAssistantReplyText}}" class="book-voice-reply">{{bookVoiceAssistantReplyText}}</text>
     </view>
     <view class="book-voice-actions">
       <button
@@ -67,7 +68,7 @@
         disabled="{{loading || generatingPlan || confirmingPlan || updatingPlanStructure || generatingBook || bookVoiceAssistantBusy}}"
         bindtap="startBookVoiceCommand"
       >
-        {{bookVoiceAssistantListening ? "停止" : (bookVoiceAssistantBusy ? "理解中" : "语音修改")}}
+        {{bookVoiceAssistantListening ? "停止" : (bookVoiceAssistantBusy ? "处理中" : "语音修改")}}
       </button>
     </view>
     <view wx:if="{{playingTarget === 'outline' && bookTTSActiveTarget === 'outline'}}" class="book-voice-playback">

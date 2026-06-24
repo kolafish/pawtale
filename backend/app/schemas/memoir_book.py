@@ -345,6 +345,18 @@ class MemoirBookAudioRequest(BaseModel):
         return max(0.5, min(2.0, round(float(value), 2)))
 
 
+class MemoirBookVoiceAssistantTTSRequest(MemoirBookAudioRequest):
+    text: str = Field(min_length=1, max_length=280)
+
+    @field_validator("text")
+    @classmethod
+    def _valid_text(cls, value: str) -> str:
+        text = value.strip()
+        if not text:
+            raise ValueError("语音回复内容不能为空")
+        return text
+
+
 class MemoirBookAudioResponse(BaseModel):
     audio_file_ids: list[str]
     audio_file_durations_seconds: list[float | None] = Field(default_factory=list)

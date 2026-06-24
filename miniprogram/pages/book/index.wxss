@@ -146,6 +146,15 @@
   line-height: 1.35;
 }
 
+.book-voice-reply {
+  display: block;
+  margin-top: 10rpx;
+  color: #4d271f;
+  font-size: 25rpx;
+  line-height: 1.45;
+  word-break: break-word;
+}
+
 .book-voice-actions {
   flex: 0 0 auto;
   display: flex;
