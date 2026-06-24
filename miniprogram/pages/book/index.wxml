@@ -110,14 +110,17 @@
         </text>
       </view>
 
-      <view wx:if="{{bookVoiceCommandText || bookVoiceCommandSummary}}" class="book-voice-command-preview">
+      <view wx:if="{{bookVoiceCommandText || bookVoiceCommandDetailText || bookVoiceCommandSummary}}" class="book-voice-command-preview {{bookVoiceCommandResponseKind || 'action_preview'}}">
         <view class="book-voice-command-head">
           <text class="book-voice-command-label">{{bookVoiceCommandIntentLabel || "已识别"}}</text>
-          <text class="book-voice-command-state">{{bookVoiceCommandRequiresConfirmation ? "待确认" : "已识别"}}</text>
+          <text class="book-voice-command-state">{{bookVoiceCommandStateText || (bookVoiceCommandRequiresConfirmation ? "待确认" : "已识别")}}</text>
         </view>
         <text wx:if="{{bookVoiceCommandText}}" class="book-voice-command-text">“{{bookVoiceCommandText}}”</text>
-        <text wx:if="{{bookVoiceCommandSummary}}" class="book-voice-command-summary">{{bookVoiceCommandSummary}}</text>
-        <view class="book-voice-command-actions">
+        <view wx:if="{{bookVoiceCommandDetailText || bookVoiceCommandSummary}}" class="book-voice-command-body">
+          <text wx:if="{{bookVoiceCommandPanelTitle}}" class="book-voice-command-panel-title">{{bookVoiceCommandPanelTitle}}</text>
+          <text class="book-voice-command-summary">{{bookVoiceCommandDetailText || bookVoiceCommandSummary}}</text>
+        </view>
+        <view wx:if="{{bookVoiceCommandCanExecute || bookVoiceCommandUndoText || bookVoiceCommandRequiresConfirmation}}" class="book-voice-command-actions">
           <button
             wx:if="{{!bookVoiceCommandUndoText}}"
             class="book-voice-command-button"

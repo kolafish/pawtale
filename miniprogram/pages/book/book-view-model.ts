@@ -8,6 +8,7 @@ import type {
   MemoirBookPlanChapterUpdateInput,
   MemoirBookSourceCoverage,
   MemoirBookVoiceCommandParseResponse,
+  MemoirBookVoiceCommandResponseKind,
   TTSAlignmentSegment,
   VoiceChatTranscriptLine,
 } from "../../domain/voice-chat";
@@ -149,6 +150,10 @@ export interface BookData {
   bookVoiceCaptureStateText: string;
   bookVoiceCommandText: string;
   bookVoiceCommandIntentLabel: string;
+  bookVoiceCommandResponseKind: MemoirBookVoiceCommandResponseKind | "";
+  bookVoiceCommandPanelTitle: string;
+  bookVoiceCommandStateText: string;
+  bookVoiceCommandDetailText: string;
   bookVoiceCommandSummary: string;
   bookVoiceCommandRequiresConfirmation: boolean;
   bookVoiceCommandPreview: MemoirBookVoiceCommandParseResponse | null;
@@ -663,6 +668,10 @@ export function guestBookData(): Partial<BookData> {
     bookVoiceCaptureStateText: "麦克风未开始",
     bookVoiceCommandText: "",
     bookVoiceCommandIntentLabel: "",
+    bookVoiceCommandResponseKind: "",
+    bookVoiceCommandPanelTitle: "",
+    bookVoiceCommandStateText: "",
+    bookVoiceCommandDetailText: "",
     bookVoiceCommandSummary: "",
     bookVoiceCommandRequiresConfirmation: false,
     bookVoiceCommandPreview: null,

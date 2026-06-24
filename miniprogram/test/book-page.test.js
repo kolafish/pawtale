@@ -508,12 +508,16 @@ test("book page exposes a compact voice assistant entry", () => {
   assert.match(wxml, /bindtap="playBookOutlineAudio"/);
   assert.match(wxml, /bindtap="startBookVoiceCommand"/);
   assert.match(wxml, /playingTarget === 'outline'/);
-  assert.match(wxml, /bookVoiceCommandSummary/);
+  assert.match(wxml, /bookVoiceCommandResponseKind/);
+  assert.match(wxml, /bookVoiceCommandDetailText/);
+  assert.match(wxml, /bookVoiceCommandPanelTitle/);
   assert.match(wxml, /book-voice-command-preview/);
   assert.match(wxml, /bindtap="executeBookVoiceCommand"/);
   assert.match(wxml, /bindtap="undoBookVoiceCommand"/);
   assert.match(wxss, /\.book-voice-assistant/);
   assert.match(wxss, /\.book-voice-command-preview/);
+  assert.match(wxss, /\.book-voice-command-preview\.answer/);
+  assert.match(wxss, /\.book-voice-command-preview\.consultation/);
   assert.match(wxss, /#fff6f1/);
   assert.match(wxss, /#9f4a3c/);
 });
@@ -1478,6 +1482,10 @@ test("book page records and previews a voice edit command", async () => {
   });
   assert.equal(context.data.bookVoiceCommandText, "把第一章改名为童年往事");
   assert.equal(context.data.bookVoiceCommandIntentLabel, "修改章名");
+  assert.equal(context.data.bookVoiceCommandResponseKind, "action_preview");
+  assert.equal(context.data.bookVoiceCommandPanelTitle, "操作预览");
+  assert.equal(context.data.bookVoiceCommandStateText, "待确认");
+  assert.equal(context.data.bookVoiceCommandDetailText, "准备把「外婆家的童年」改名为「童年往事」。");
   assert.equal(context.data.bookVoiceCommandSummary, "准备把「外婆家的童年」改名为「童年往事」。");
   assert.equal(context.data.bookVoiceCommandRequiresConfirmation, true);
   assert.equal(context.data.bookVoiceAssistantStatusText, "已理解，等待确认");
@@ -1546,6 +1554,13 @@ test("book page sends recent voice editing context when parsing follow-up questi
     },
   });
   assert.equal(context.data.bookVoiceAssistantStatusText, "已回答");
+  assert.equal(context.data.bookVoiceCommandResponseKind, "answer");
+  assert.equal(context.data.bookVoiceCommandPanelTitle, "回答");
+  assert.equal(context.data.bookVoiceCommandStateText, "已回答");
+  assert.equal(
+    context.data.bookVoiceCommandDetailText,
+    "现在目录有 2 章：第一章「外婆家的童年」，第二章「第一次离家」。",
+  );
   assert.deepEqual(calls[5], {
     kind: "reply",
     text: "现在目录有 2 章：第一章「外婆家的童年」，第二章「第一次离家」。",
@@ -1589,6 +1604,10 @@ test("book page treats voice editing advice as a spoken consultation", async () 
 
   assert.equal(context.data.bookVoiceCommandText, "第一章是不是太短了");
   assert.equal(context.data.bookVoiceCommandIntentLabel, "篇幅建议");
+  assert.equal(context.data.bookVoiceCommandResponseKind, "consultation");
+  assert.equal(context.data.bookVoiceCommandPanelTitle, "建议");
+  assert.equal(context.data.bookVoiceCommandStateText, "建议");
+  assert.equal(context.data.bookVoiceCommandDetailText, "这一章现在明显偏短，建议补一个具体场景或人物对话。");
   assert.equal(context.data.bookVoiceCommandRequiresConfirmation, false);
   assert.equal(context.data.bookVoiceCommandCanExecute, false);
   assert.equal(context.data.bookVoiceAssistantStatusText, "已给建议");
@@ -1788,6 +1807,8 @@ test("book page keeps unsupported voice commands as preview only", () => {
   }));
 
   assert.equal(context.data.bookVoiceCommandCanExecute, false);
+  assert.equal(context.data.bookVoiceCommandResponseKind, "action_preview");
+  assert.equal(context.data.bookVoiceCommandStateText, "仅预览");
   assert.equal(context.data.bookVoiceCommandActionText, "暂不执行");
 });
 

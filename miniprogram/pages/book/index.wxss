@@ -311,6 +311,26 @@
   box-sizing: border-box;
 }
 
+.book-voice-command-preview.answer {
+  border-color: #c7dfd6;
+  background: #f6fbf8;
+}
+
+.book-voice-command-preview.consultation {
+  border-color: #ead8af;
+  background: #fffaf0;
+}
+
+.book-voice-command-preview.clarification {
+  border-color: #e8c4ca;
+  background: #fff6f7;
+}
+
+.book-voice-command-preview.action_preview {
+  border-color: #efd6c4;
+  background: #fffdf9;
+}
+
 .book-voice-command-head {
   display: flex;
   align-items: center;
@@ -345,6 +365,28 @@
 
 .book-voice-command-summary {
   color: #685b55;
+}
+
+.book-voice-command-body {
+  margin-top: 14rpx;
+  padding: 18rpx 20rpx;
+  border-radius: 14rpx;
+  background: rgba(255, 255, 255, 0.72);
+  box-sizing: border-box;
+}
+
+.book-voice-command-panel-title {
+  display: block;
+  color: #7a3b31;
+  font-size: 24rpx;
+  font-weight: 900;
+  line-height: 1.35;
+}
+
+.book-voice-command-body .book-voice-command-summary {
+  margin-top: 8rpx;
+  color: #24100b;
+  font-size: 30rpx;
 }
 
 .book-voice-command-actions {
