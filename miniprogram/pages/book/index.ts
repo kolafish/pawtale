@@ -29,6 +29,7 @@ import {
   updateMemoirBookChapterDraft,
 } from "../../services/memoir-voice-api";
 import { ApiError } from "../../services/request";
+import { sourceAssignmentRequest } from "../../services/memoir-book-source-actions";
 import { readBookTTSSettings } from "../../services/tts-settings";
 import { writeTranscriptNavigationTarget } from "../../services/transcript-navigation";
 import {
@@ -797,14 +798,10 @@ Page<BookData, {
     this.stopPlayback();
     this.setData({ assigningSourceId: utteranceId, error: "" });
     try {
-      const plan = await assignMemoirBookSources(this.data.projectId, {
-        assignments: [
-          {
-            chapter_id: option.value,
-            utterance_ids: [utteranceId],
-          },
-        ],
-      });
+      const plan = await assignMemoirBookSources(
+        this.data.projectId,
+        sourceAssignmentRequest(option.value, utteranceId),
+      );
       const [draftsByChapterId, coverage] = await Promise.all([
         this.loadDraftsForPlan(plan),
         this.loadSourceCoverage(this.data.projectId),

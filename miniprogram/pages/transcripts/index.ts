@@ -1,12 +1,12 @@
 import type {
   MemoirBookPlan,
-  MemoirBookPlanChapter,
   MemoirGuidanceMode,
   MemoirVoiceTranscriptIncludedFilter,
   MemoirVoiceTranscriptItem,
   MemoirVoiceSearchQueryFilters,
   MemoirVoiceSearchQueryParseResponse,
 } from "../../domain/voice-chat";
+import type { ChapterPickerOption } from "../../services/memoir-book-source-actions";
 import {
   assignMemoirBookSources,
   deleteMemoirVoiceTranscript,
@@ -20,9 +20,11 @@ import {
 import { configureAudiblePlayback } from "../../services/audio-playback";
 import { getMemoirIdentity } from "../../services/auth";
 import {
-  chapterSourceRefs,
-  sourceRefMatchesUtterance,
-} from "../../services/memoir-book-sources";
+  sourceAssignmentRequest,
+  transcriptChapterAssignOptions,
+  transcriptChapterMoveOptions,
+  transcriptSourceMoveRequest,
+} from "../../services/memoir-book-source-actions";
 import { ApiError } from "../../services/request";
 import { formatBeijingDateTimeShort } from "../../services/time";
 import {
@@ -80,11 +82,6 @@ interface TranscriptSearchFilters {
 
 interface SearchChipView {
   text: string;
-}
-
-interface ChapterPickerOption {
-  label: string;
-  value: string;
 }
 
 interface TranscriptItemView extends MemoirVoiceTranscriptItem {
@@ -341,53 +338,6 @@ function searchDisplayText(query: string, filters: TranscriptSearchFilters, pars
 
 function transcriptAnchorId(id: string): string {
   return `transcript-${id.replace(/[^A-Za-z0-9_-]/g, "-")}`;
-}
-
-function sortedBookChapters(plan: MemoirBookPlan | null): MemoirBookPlanChapter[] {
-  return [...(plan?.chapters || [])].sort((left, right) => left.sort_order - right.sort_order);
-}
-
-function chapterOption(chapter: MemoirBookPlanChapter, index: number): ChapterPickerOption {
-  return {
-    label: `第 ${index + 1} 章 ${chapter.title || "未命名章节"}`,
-    value: chapter.id,
-  };
-}
-
-function sourceChaptersForTranscript(
-  item: MemoirVoiceTranscriptItem,
-  plan: MemoirBookPlan | null,
-): MemoirBookPlanChapter[] {
-  return sortedBookChapters(plan).filter((chapter) => (
-    chapterSourceRefs(chapter).some((ref) => sourceRefMatchesUtterance(ref, item.id))
-  ));
-}
-
-function transcriptChapterMoveOptions(
-  item: MemoirVoiceTranscriptItem,
-  plan: MemoirBookPlan | null,
-): ChapterPickerOption[] {
-  const sourceChapters = sourceChaptersForTranscript(item, plan);
-  if (sourceChapters.length !== 1) {
-    return [];
-  }
-  const sourceChapter = sourceChapters[0];
-  if (chapterSourceRefs(sourceChapter).length <= 1) {
-    return [];
-  }
-  return sortedBookChapters(plan).flatMap((chapter, index) => (
-    chapter.id === sourceChapter.id ? [] : [chapterOption(chapter, index)]
-  ));
-}
-
-function transcriptChapterAssignOptions(
-  item: MemoirVoiceTranscriptItem,
-  plan: MemoirBookPlan | null,
-): ChapterPickerOption[] {
-  if (item.is_included_in_book || item.included_chapters?.length) {
-    return [];
-  }
-  return sortedBookChapters(plan).map(chapterOption);
 }
 
 async function loadTranscriptBookPlan(projectId: string): Promise<MemoirBookPlan | null> {
@@ -821,14 +771,10 @@ Page<TranscriptsData, {
     this.stopPlayback();
     this.setData({ assigningSourceId: utteranceId, error: "" });
     try {
-      const updatedPlan = await assignMemoirBookSources(this.data.activeProjectId, {
-        assignments: [
-          {
-            chapter_id: option.value,
-            utterance_ids: [utteranceId],
-          },
-        ],
-      });
+      const updatedPlan = await assignMemoirBookSources(
+        this.data.activeProjectId,
+        sourceAssignmentRequest(option.value, utteranceId),
+      );
       this.setData({ bookPlan: updatedPlan, bookPlanProjectId: this.data.activeProjectId });
       await this.loadTranscripts(true);
       wx.showToast({ title: "已归入章节", icon: "success" });
@@ -862,21 +808,12 @@ Page<TranscriptsData, {
     this.setData({ movingSourceId: utteranceId, error: "" });
     try {
       const plan = this.data.bookPlan || await loadTranscriptBookPlan(this.data.activeProjectId);
-      const sourceChapters = sourceChaptersForTranscript(item, plan);
-      const sourceChapter = sourceChapters.length === 1 ? sourceChapters[0] : null;
-      if (!plan || !sourceChapter) {
-        this.setData({ error: "没有找到可移动的本章素材" });
+      const moveRequest = transcriptSourceMoveRequest(item, plan, option.value);
+      if (!moveRequest.request) {
+        this.setData({ error: moveRequest.error });
         return;
       }
-      if (chapterSourceRefs(sourceChapter).length <= 1) {
-        this.setData({ error: "本章只剩 1 条素材；请在成书页合并或删除章节来保留素材" });
-        return;
-      }
-      const updatedPlan = await moveMemoirBookSource(this.data.activeProjectId, {
-        source_chapter_id: sourceChapter.id,
-        target_chapter_id: option.value,
-        utterance_id: utteranceId,
-      });
+      const updatedPlan = await moveMemoirBookSource(this.data.activeProjectId, moveRequest.request);
       this.setData({ bookPlan: updatedPlan, bookPlanProjectId: this.data.activeProjectId });
       await this.loadTranscripts(true);
       wx.showToast({ title: "素材已移动", icon: "success" });
