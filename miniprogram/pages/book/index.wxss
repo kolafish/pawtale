@@ -102,6 +102,83 @@
   line-height: 1.35;
 }
 
+.book-voice-assistant {
+  margin-top: 24rpx;
+  padding: 24rpx;
+  border: 2rpx solid #efd6c4;
+  border-radius: 22rpx;
+  background: #fff6f1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18rpx;
+}
+
+.book-voice-copy {
+  min-width: 0;
+  flex: 1;
+}
+
+.book-voice-title {
+  display: block;
+  color: #7a3b31;
+  font-size: 28rpx;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.book-voice-hint {
+  display: block;
+  margin-top: 8rpx;
+  color: #24100b;
+  font-size: 29rpx;
+  font-weight: 800;
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+.book-voice-status {
+  display: block;
+  margin-top: 6rpx;
+  color: #685b55;
+  font-size: 24rpx;
+  line-height: 1.35;
+}
+
+.book-voice-actions {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12rpx;
+}
+
+.book-voice-button {
+  min-width: 148rpx;
+  height: 66rpx;
+  margin: 0;
+  padding: 0 18rpx;
+  border: 0;
+  border-radius: 18rpx;
+  background: #ffffff;
+  color: #9f4a3c;
+  font-size: 24rpx;
+  font-weight: 800;
+  line-height: 66rpx;
+}
+
+.book-voice-button.primary {
+  background: #9f4a3c;
+  color: #ffffff;
+}
+
+.book-voice-button::after {
+  border: 0;
+}
+
+.book-voice-button[disabled] {
+  opacity: 0.62;
+}
+
 .coverage-section {
   margin-top: 26rpx;
 }

@@ -46,6 +46,31 @@
     <text class="status-pill">{{stageText}}</text>
   </view>
 
+  <view wx:if="{{plan}}" class="book-voice-assistant">
+    <view class="book-voice-copy">
+      <text class="book-voice-title">成书语音助手</text>
+      <text class="book-voice-hint">{{bookVoiceAssistantHint}}</text>
+      <text class="book-voice-status">{{bookVoiceAssistantStatusText}}</text>
+    </view>
+    <view class="book-voice-actions">
+      <button
+        class="book-voice-button"
+        disabled="{{loading || generatingPlan || confirmingPlan || updatingPlanStructure || ttsBusyTarget}}"
+        bindtap="playBookOutlineAudio"
+      >
+        听目录
+      </button>
+      <button
+        class="book-voice-button primary"
+        loading="{{bookVoiceAssistantListening || bookVoiceAssistantBusy}}"
+        disabled="{{loading || generatingPlan || confirmingPlan || updatingPlanStructure || generatingBook || bookVoiceAssistantListening || bookVoiceAssistantBusy}}"
+        bindtap="startBookVoiceCommand"
+      >
+        语音修改
+      </button>
+    </view>
+  </view>
+
   <view wx:if="{{sourceCoverageNotice}}" class="coverage-section">
     <view class="coverage-head">
       <view class="coverage-copy">

@@ -327,6 +327,43 @@ test("book page keeps source rows read-only and splits chapter structure actions
   assert.equal((wxml.match(/structure-action-row/g) || []).length, 4);
 });
 
+test("book page exposes a compact voice assistant entry", () => {
+  const wxml = fs.readFileSync(path.join(__dirname, "../pages/book/index.wxml"), "utf8");
+  const wxss = fs.readFileSync(path.join(__dirname, "../pages/book/index.wxss"), "utf8");
+
+  assert.match(wxml, /成书语音助手/);
+  assert.match(wxml, /听目录/);
+  assert.match(wxml, /语音修改/);
+  assert.match(wxml, /bindtap="playBookOutlineAudio"/);
+  assert.match(wxml, /bindtap="startBookVoiceCommand"/);
+  assert.match(wxss, /\.book-voice-assistant/);
+  assert.match(wxss, /#fff6f1/);
+  assert.match(wxss, /#9f4a3c/);
+});
+
+test("book voice assistant placeholders give immediate feedback", () => {
+  const toastTitles = [];
+  global.wx = {
+    showToast(options) {
+      toastTitles.push(options.title);
+    },
+  };
+  const { mod, page } = loadBookPage();
+  const plan = samplePlan("draft");
+  const context = pageContext(page, {
+    plan,
+    chapters: mod.buildChapterViews(plan),
+  });
+
+  page.playBookOutlineAudio.call(context);
+  assert.equal(context.data.bookVoiceAssistantStatusText, "目录朗读将在下一步接入");
+
+  page.startBookVoiceCommand.call(context);
+  assert.equal(context.data.bookVoiceAssistantStatusText, "语音修改将在下一步接入");
+  assert.deepEqual(toastTitles, ["下一步接入听目录", "下一步接入语音修改"]);
+  delete global.wx;
+});
+
 test("book page progress counts generated and confirmed chapters", () => {
   const { mod } = loadBookPage();
   const plan = samplePlan("confirmed");
