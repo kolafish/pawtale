@@ -6,6 +6,7 @@ import type {
   MemoirBookPlan,
   MemoirBookPlanChapterUpdateInput,
   MemoirBookSourceCoverage,
+  MemoirBookVoiceCommandParseResponse,
 } from "../../domain/voice-chat";
 import type { BookChapterView, BookData } from "./book-view-model";
 import { getMemoirIdentity } from "../../services/auth";
@@ -25,12 +26,17 @@ import {
   getMemoirBookOutput,
   getMemoirBookPlan,
   getMemoirBookSourceCoverage,
+  parseMemoirBookVoiceCommand,
   updateMemoirBookChapterTitle,
   updateMemoirBookPlan,
   updateMemoirBookChapterDraft,
 } from "../../services/memoir-voice-api";
 import { ApiError } from "../../services/request";
 import { sourceAssignmentRequest } from "../../services/memoir-book-source-actions";
+import {
+  recordMemoirVoiceSearchQuery,
+  stopMemoirVoiceSearchRecording,
+} from "../../services/memoir-voice-search";
 import { readBookTTSSettings } from "../../services/tts-settings";
 import { writeTranscriptNavigationTarget } from "../../services/transcript-navigation";
 import {
@@ -167,7 +173,8 @@ Page<BookData, {
   playChapterAudio(event: DatasetEvent): Promise<void>;
   playBookAudio(): Promise<void>;
   playBookOutlineAudio(): Promise<void>;
-  startBookVoiceCommand(): void;
+  startBookVoiceCommand(): Promise<void>;
+  applyBookVoiceCommandPreview(preview: MemoirBookVoiceCommandParseResponse): void;
   requestBookAudio(target: string): Promise<MemoirBookAudioResponse>;
   playAudioFiles(
     response: MemoirBookAudioResponse,
@@ -260,6 +267,11 @@ Page<BookData, {
     bookVoiceAssistantStatusText: "等待章节",
     bookVoiceAssistantListening: false,
     bookVoiceAssistantBusy: false,
+    bookVoiceCommandText: "",
+    bookVoiceCommandIntentLabel: "",
+    bookVoiceCommandSummary: "",
+    bookVoiceCommandRequiresConfirmation: false,
+    bookVoiceCommandPreview: null,
   },
 
   async onShow() {
@@ -1134,7 +1146,15 @@ Page<BookData, {
     }
   },
 
-  startBookVoiceCommand() {
+  async startBookVoiceCommand() {
+    if (this.data.bookVoiceAssistantListening) {
+      stopMemoirVoiceSearchRecording();
+      this.setData({ bookVoiceAssistantStatusText: "正在结束录音" });
+      return;
+    }
+    if (this.data.bookVoiceAssistantBusy) {
+      return;
+    }
     if (!this.data.plan || !this.data.chapters.length) {
       this.setData({
         bookVoiceAssistantStatusText: "先生成章节",
@@ -1142,11 +1162,63 @@ Page<BookData, {
       wx.showToast({ title: "先生成章节规划", icon: "none" });
       return;
     }
+    if (!this.data.projectId || this.data.updatingPlanStructure || this.data.generatingBook) {
+      return;
+    }
+    this.stopPlayback();
     this.setData({
-      bookVoiceAssistantStatusText: "语音修改将在下一步接入",
+      bookVoiceAssistantListening: true,
+      bookVoiceAssistantBusy: false,
+      bookVoiceAssistantStatusText: "我在听，请说想怎么改",
+      bookVoiceCommandText: "",
+      bookVoiceCommandIntentLabel: "",
+      bookVoiceCommandSummary: "",
+      bookVoiceCommandRequiresConfirmation: false,
+      bookVoiceCommandPreview: null,
       error: "",
     });
-    wx.showToast({ title: "下一步接入语音修改", icon: "none" });
+    try {
+      const text = await recordMemoirVoiceSearchQuery({
+        emptyTranscriptMessage: "没有识别到修改内容，请换个说法再试",
+        onRecordingEnd: () => {
+          this.setData({
+            bookVoiceAssistantListening: false,
+            bookVoiceAssistantBusy: true,
+            bookVoiceAssistantStatusText: "正在识别修改需求",
+          });
+        },
+      });
+      this.setData({ bookVoiceAssistantStatusText: "正在理解修改需求" });
+      const preview = await parseMemoirBookVoiceCommand(this.data.projectId, { text });
+      this.applyBookVoiceCommandPreview(preview);
+      wx.showToast({ title: "已识别", icon: "success" });
+    } catch (error) {
+      if (isLoginError(error)) {
+        wx.reLaunch({ url: "/pages/login/index" });
+        return;
+      }
+      this.setData({
+        error: error instanceof Error ? error.message : "语音修改识别失败",
+        bookVoiceAssistantStatusText: "没有听清",
+      });
+    } finally {
+      this.setData({
+        bookVoiceAssistantListening: false,
+        bookVoiceAssistantBusy: false,
+      });
+    }
+  },
+
+  applyBookVoiceCommandPreview(preview) {
+    this.setData({
+      bookVoiceCommandText: preview.original_text,
+      bookVoiceCommandIntentLabel: preview.intent_label,
+      bookVoiceCommandSummary: preview.summary,
+      bookVoiceCommandRequiresConfirmation: preview.requires_confirmation,
+      bookVoiceCommandPreview: preview,
+      bookVoiceAssistantStatusText: preview.intent === "unknown" ? "需要再说明" : "已理解，等待确认",
+      error: "",
+    });
   },
 
   async requestBookAudio(target) {

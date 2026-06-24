@@ -185,6 +185,51 @@
   padding-top: 4rpx;
 }
 
+.book-voice-command-preview {
+  width: 100%;
+  padding: 18rpx 20rpx;
+  border: 2rpx solid #efd6c4;
+  border-radius: 18rpx;
+  background: #fffdf9;
+  box-sizing: border-box;
+}
+
+.book-voice-command-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16rpx;
+}
+
+.book-voice-command-label {
+  color: #7a3b31;
+  font-size: 25rpx;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.book-voice-command-state {
+  flex: 0 0 auto;
+  color: #8a4034;
+  font-size: 22rpx;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.book-voice-command-text,
+.book-voice-command-summary {
+  display: block;
+  margin-top: 10rpx;
+  color: #24100b;
+  font-size: 26rpx;
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+.book-voice-command-summary {
+  color: #685b55;
+}
+
 .coverage-section {
   margin-top: 26rpx;
 }

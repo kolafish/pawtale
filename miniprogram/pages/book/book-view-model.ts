@@ -7,6 +7,7 @@ import type {
   MemoirBookPlanChapterInput,
   MemoirBookPlanChapterUpdateInput,
   MemoirBookSourceCoverage,
+  MemoirBookVoiceCommandParseResponse,
   TTSAlignmentSegment,
 } from "../../domain/voice-chat";
 import {
@@ -133,6 +134,11 @@ export interface BookData {
   bookVoiceAssistantStatusText: string;
   bookVoiceAssistantListening: boolean;
   bookVoiceAssistantBusy: boolean;
+  bookVoiceCommandText: string;
+  bookVoiceCommandIntentLabel: string;
+  bookVoiceCommandSummary: string;
+  bookVoiceCommandRequiresConfirmation: boolean;
+  bookVoiceCommandPreview: MemoirBookVoiceCommandParseResponse | null;
 }
 
 export function trimText(value: string): string {
@@ -600,6 +606,11 @@ export function guestBookData(): Partial<BookData> {
     bookVoiceAssistantStatusText: "等待章节",
     bookVoiceAssistantListening: false,
     bookVoiceAssistantBusy: false,
+    bookVoiceCommandText: "",
+    bookVoiceCommandIntentLabel: "",
+    bookVoiceCommandSummary: "",
+    bookVoiceCommandRequiresConfirmation: false,
+    bookVoiceCommandPreview: null,
   };
 }
 

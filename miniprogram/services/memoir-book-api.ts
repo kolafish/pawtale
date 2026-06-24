@@ -15,6 +15,8 @@ import type {
   MemoirBookSourceAssignmentRequest,
   MemoirBookSourceCoverage,
   MemoirBookSourceMoveRequest,
+  MemoirBookVoiceCommandParseRequest,
+  MemoirBookVoiceCommandParseResponse,
 } from "../domain/voice-chat";
 import {
   memoirProjectPath,
@@ -201,6 +203,19 @@ export function createMemoirBookPlanOutlineTTS(
     {
       method: "POST",
       data,
+    },
+  );
+}
+
+export function parseMemoirBookVoiceCommand(
+  projectId: string,
+  data: MemoirBookVoiceCommandParseRequest,
+): Promise<MemoirBookVoiceCommandParseResponse> {
+  return memoirRequest<MemoirBookVoiceCommandParseResponse>(
+    memoirProjectPath(projectId, "/book-voice-command/parse"),
+    {
+      method: "POST",
+      data: withSelectedAIModel(data),
     },
   );
 }

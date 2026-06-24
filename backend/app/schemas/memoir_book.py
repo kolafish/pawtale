@@ -106,6 +106,50 @@ class MemoirBookPlanUpdateRequest(BaseModel):
         return title
 
 
+class MemoirBookVoiceCommandParseRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=240)
+    current_chapter_id: str | None = None
+    ai_model: str | None = None
+
+    @field_validator("text")
+    @classmethod
+    def _valid_text(cls, value: str) -> str:
+        text = value.strip()
+        if not text:
+            raise ValueError("语音指令不能为空")
+        return text
+
+    @field_validator("current_chapter_id", "ai_model")
+    @classmethod
+    def _valid_optional_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None
+
+
+class MemoirBookVoiceCommandOperationResponse(BaseModel):
+    type: str
+    chapter_id: str | None = None
+    chapter_title: str | None = None
+    target_chapter_id: str | None = None
+    target_chapter_title: str | None = None
+    new_title: str | None = None
+    direction: str | None = None
+
+
+class MemoirBookVoiceCommandParseResponse(BaseModel):
+    original_text: str
+    intent: str
+    intent_label: str
+    summary: str
+    operations: list[MemoirBookVoiceCommandOperationResponse] = Field(default_factory=list)
+    requires_confirmation: bool = True
+    used_ai: bool = False
+    provider: str | None = None
+    model: str | None = None
+
+
 class MemoirBookChapterTitleUpdateRequest(BaseModel):
     title: str
 

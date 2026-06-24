@@ -205,6 +205,28 @@ function sampleAudioResponse() {
   };
 }
 
+function sampleBookVoiceCommandPreview(overrides = {}) {
+  return {
+    original_text: "把第一章改名为童年往事",
+    intent: "rename_chapter",
+    intent_label: "修改章名",
+    summary: "准备把「外婆家的童年」改名为「童年往事」。",
+    operations: [
+      {
+        type: "rename_chapter",
+        chapter_id: "chapter-1",
+        chapter_title: "外婆家的童年",
+        new_title: "童年往事",
+      },
+    ],
+    requires_confirmation: true,
+    used_ai: true,
+    provider: "fake",
+    model: "fake-model",
+    ...overrides,
+  };
+}
+
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
@@ -231,7 +253,12 @@ function planFromChapterUpdates(status, updates) {
   };
 }
 
-function loadBookPage({ authExports = {}, voiceApiExports = {}, ttsExports = {} } = {}) {
+function loadBookPage({
+  authExports = {},
+  voiceApiExports = {},
+  voiceSearchExports = {},
+  ttsExports = {},
+} = {}) {
   mockModule("../services/auth.ts", {
     getMemoirIdentity: async () => {
       throw new Error("getMemoirIdentity was not mocked");
@@ -278,6 +305,9 @@ function loadBookPage({ authExports = {}, voiceApiExports = {}, ttsExports = {} 
       throw new Error("getMemoirBookPlan was not mocked");
     },
     getMemoirBookSourceCoverage: async () => null,
+    parseMemoirBookVoiceCommand: async () => {
+      throw new Error("parseMemoirBookVoiceCommand was not mocked");
+    },
     updateMemoirBookChapterTitle: async () => {
       throw new Error("updateMemoirBookChapterTitle was not mocked");
     },
@@ -288,6 +318,13 @@ function loadBookPage({ authExports = {}, voiceApiExports = {}, ttsExports = {} 
       throw new Error("updateMemoirBookChapterDraft was not mocked");
     },
     ...voiceApiExports,
+  });
+  mockModule("../services/memoir-voice-search.ts", {
+    recordMemoirVoiceSearchQuery: async () => {
+      throw new Error("recordMemoirVoiceSearchQuery was not mocked");
+    },
+    stopMemoirVoiceSearchRecording: () => {},
+    ...voiceSearchExports,
   });
   mockModule("../services/tts-settings.ts", {
     readBookTTSSettings: () => ({ voice: "", speedRatio: 1 }),
@@ -340,7 +377,10 @@ test("book page exposes a compact voice assistant entry", () => {
   assert.match(wxml, /bindtap="playBookOutlineAudio"/);
   assert.match(wxml, /bindtap="startBookVoiceCommand"/);
   assert.match(wxml, /playingTarget === 'outline'/);
+  assert.match(wxml, /bookVoiceCommandSummary/);
+  assert.match(wxml, /book-voice-command-preview/);
   assert.match(wxss, /\.book-voice-assistant/);
+  assert.match(wxss, /\.book-voice-command-preview/);
   assert.match(wxss, /#fff6f1/);
   assert.match(wxss, /#9f4a3c/);
 });
@@ -362,7 +402,7 @@ test("book page builds outline narration for saved chapter titles", () => {
   );
 });
 
-test("book voice assistant blocks actions before a plan exists", () => {
+test("book voice assistant blocks actions before a plan exists", async () => {
   const toastTitles = [];
   global.wx = {
     showToast(options) {
@@ -375,7 +415,7 @@ test("book voice assistant blocks actions before a plan exists", () => {
   page.playBookOutlineAudio.call(context);
   assert.equal(context.data.bookVoiceAssistantStatusText, "先生成章节");
 
-  page.startBookVoiceCommand.call(context);
+  await page.startBookVoiceCommand.call(context);
   assert.equal(context.data.bookVoiceAssistantStatusText, "先生成章节");
   assert.deepEqual(toastTitles, ["先生成章节规划", "先生成章节规划"]);
   delete global.wx;
@@ -1267,6 +1307,67 @@ test("book page restores assistant status when outline audio stops", () => {
   assert.equal(context.data.bookVoiceAssistantStatusText, "我可以帮你听和改");
 });
 
+test("book page records and previews a voice edit command", async () => {
+  const calls = [];
+  global.wx = { showToast(options) { calls.push({ kind: "toast", title: options.title }); } };
+  const { page } = loadBookPage({
+    voiceApiExports: {
+      parseMemoirBookVoiceCommand: async (projectId, data) => {
+        calls.push({ kind: "parse", projectId, data });
+        return sampleBookVoiceCommandPreview();
+      },
+    },
+    voiceSearchExports: {
+      recordMemoirVoiceSearchQuery: async (options) => {
+        calls.push({ kind: "record", emptyTranscriptMessage: options.emptyTranscriptMessage });
+        options.onRecordingEnd?.();
+        return "把第一章改名为童年往事";
+      },
+    },
+  });
+  const context = pageContext(page, { projectId: "project/1" });
+  page.applyPlan.call(context, samplePlan("confirmed"));
+
+  await page.startBookVoiceCommand.call(context);
+
+  assert.deepEqual(calls[0], {
+    kind: "record",
+    emptyTranscriptMessage: "没有识别到修改内容，请换个说法再试",
+  });
+  assert.deepEqual(calls[1], {
+    kind: "parse",
+    projectId: "project/1",
+    data: { text: "把第一章改名为童年往事" },
+  });
+  assert.equal(context.data.bookVoiceCommandText, "把第一章改名为童年往事");
+  assert.equal(context.data.bookVoiceCommandIntentLabel, "修改章名");
+  assert.equal(context.data.bookVoiceCommandSummary, "准备把「外婆家的童年」改名为「童年往事」。");
+  assert.equal(context.data.bookVoiceCommandRequiresConfirmation, true);
+  assert.equal(context.data.bookVoiceAssistantStatusText, "已理解，等待确认");
+  assert.equal(context.data.bookVoiceAssistantListening, false);
+  assert.equal(context.data.bookVoiceAssistantBusy, false);
+  assert.deepEqual(calls[2], { kind: "toast", title: "已识别" });
+  delete global.wx;
+});
+
+test("book page stops active voice edit recording on second tap", async () => {
+  const stops = [];
+  const { page } = loadBookPage({
+    voiceSearchExports: {
+      stopMemoirVoiceSearchRecording: () => stops.push("stop"),
+    },
+  });
+  const context = pageContext(page, {
+    bookVoiceAssistantListening: true,
+    bookVoiceAssistantStatusText: "我在听，请说想怎么改",
+  });
+
+  await page.startBookVoiceCommand.call(context);
+
+  assert.deepEqual(stops, ["stop"]);
+  assert.equal(context.data.bookVoiceAssistantStatusText, "正在结束录音");
+});
+
 test("book page splits active TTS text for highlighting", () => {
   const { page } = loadBookPage();
   const context = pageContext(page, {
@@ -1473,6 +1574,10 @@ test("book APIs call encoded backend routes", async () => {
         options.success({ statusCode: 200, data: sampleAudioResponse(), cookies: [], header: {} });
         return;
       }
+      if (options.url.endsWith("/book-voice-command/parse")) {
+        options.success({ statusCode: 200, data: sampleBookVoiceCommandPreview(), cookies: [], header: {} });
+        return;
+      }
       if (options.url.endsWith("/draft") || options.url.endsWith("/draft/confirm")) {
         options.success({ statusCode: 200, data: sampleDraft(), cookies: [], header: {} });
         return;
@@ -1505,6 +1610,7 @@ test("book APIs call encoded backend routes", async () => {
     getMemoirBookOutput,
     getMemoirBookPlan,
     getMemoirBookSourceCoverage,
+    parseMemoirBookVoiceCommand,
     updateMemoirBookChapterTitle,
     updateMemoirBookPlan,
     updateMemoirBookChapterDraft,
@@ -1523,6 +1629,7 @@ test("book APIs call encoded backend routes", async () => {
   await confirmMemoirBookChapterDraft("project/1", "chapter/1");
   await createMemoirBookChapterDraftTTS("project/1", "chapter/1", {});
   await createMemoirBookPlanOutlineTTS("project/1", {});
+  await parseMemoirBookVoiceCommand("project/1", { text: "把第一章改名为童年往事" });
   await getMemoirBookOutput("project/1");
   await generateMemoirBookOutput("project/1", { force_regenerate: true });
   await createMemoirBookOutputTTS("project/1", {});
@@ -1579,21 +1686,30 @@ test("book APIs call encoded backend routes", async () => {
   assert.equal(apiRequests[12].method, "POST");
   assert.equal(
     apiRequests[13].url,
-    "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-output",
+    "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-voice-command/parse",
   );
-  assert.equal(apiRequests[13].method, "GET");
+  assert.equal(apiRequests[13].method, "POST");
+  assert.deepEqual(apiRequests[13].data, {
+    text: "把第一章改名为童年往事",
+    ai_model: "doubao-seed-2-0-pro-260215",
+  });
   assert.equal(
     apiRequests[14].url,
-    "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-output/generate",
+    "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-output",
   );
-  assert.equal(apiRequests[14].method, "POST");
-  assert.deepEqual(apiRequests[14].data, { force_regenerate: true });
+  assert.equal(apiRequests[14].method, "GET");
   assert.equal(
     apiRequests[15].url,
-    "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-output/tts",
+    "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-output/generate",
   );
   assert.equal(apiRequests[15].method, "POST");
-  assert.equal(apiRequests[15].header.Cookie, "pawtale_session=abc");
+  assert.deepEqual(apiRequests[15].data, { force_regenerate: true });
+  assert.equal(
+    apiRequests[16].url,
+    "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-output/tts",
+  );
+  assert.equal(apiRequests[16].method, "POST");
+  assert.equal(apiRequests[16].header.Cookie, "pawtale_session=abc");
   delete global.wx;
 });
 
