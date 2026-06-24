@@ -230,6 +230,40 @@
   color: #685b55;
 }
 
+.book-voice-command-actions {
+  margin-top: 16rpx;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12rpx;
+}
+
+.book-voice-command-button {
+  min-width: 132rpx;
+  height: 60rpx;
+  margin: 0;
+  padding: 0 18rpx;
+  border: 0;
+  border-radius: 16rpx;
+  background: #ffffff;
+  color: #9f4a3c;
+  font-size: 23rpx;
+  font-weight: 800;
+  line-height: 60rpx;
+}
+
+.book-voice-command-button.primary {
+  background: #9f4a3c;
+  color: #ffffff;
+}
+
+.book-voice-command-button::after {
+  border: 0;
+}
+
+.book-voice-command-button[disabled] {
+  opacity: 0.62;
+}
+
 .coverage-section {
   margin-top: 26rpx;
 }

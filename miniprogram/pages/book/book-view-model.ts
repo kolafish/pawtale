@@ -84,6 +84,11 @@ export interface BookChapterView extends MemoirBookPlanChapter {
   draftError: string;
 }
 
+export interface BookVoiceCommandUndoSnapshot {
+  planTitle: string;
+  chapters: MemoirBookPlanChapterUpdateInput[];
+}
+
 export interface BookData {
   loading: boolean;
   needsLogin: boolean;
@@ -139,6 +144,11 @@ export interface BookData {
   bookVoiceCommandSummary: string;
   bookVoiceCommandRequiresConfirmation: boolean;
   bookVoiceCommandPreview: MemoirBookVoiceCommandParseResponse | null;
+  bookVoiceCommandCanExecute: boolean;
+  bookVoiceCommandActionText: string;
+  bookVoiceCommandExecuting: boolean;
+  bookVoiceCommandUndoText: string;
+  bookVoiceCommandUndoSnapshot: BookVoiceCommandUndoSnapshot | null;
 }
 
 export function trimText(value: string): string {
@@ -489,6 +499,36 @@ export function bookOutlineNarrationText(
   return lines.join("\n");
 }
 
+export function canExecuteBookVoiceCommand(preview: MemoirBookVoiceCommandParseResponse | null): boolean {
+  if (!preview || !preview.operations.length || preview.intent === "unknown") {
+    return false;
+  }
+  const operation = preview.operations[0];
+  if (preview.intent === "read_outline") {
+    return true;
+  }
+  if (preview.intent === "read_chapter") {
+    return Boolean(operation.chapter_id);
+  }
+  if (preview.intent === "rename_chapter") {
+    return Boolean(operation.chapter_id && operation.new_title);
+  }
+  if (preview.intent === "move_chapter") {
+    return Boolean(operation.chapter_id && (operation.direction === "up" || operation.direction === "down"));
+  }
+  return false;
+}
+
+export function bookVoiceCommandActionText(preview: MemoirBookVoiceCommandParseResponse | null): string {
+  if (!preview) {
+    return "确认执行";
+  }
+  if (preview.intent === "read_outline" || preview.intent === "read_chapter") {
+    return "开始朗读";
+  }
+  return "确认执行";
+}
+
 export function buildChapterViews(
   plan: MemoirBookPlan,
   draftsByChapterId: Record<string, MemoirBookChapterDraft | null> = {},
@@ -611,6 +651,11 @@ export function guestBookData(): Partial<BookData> {
     bookVoiceCommandSummary: "",
     bookVoiceCommandRequiresConfirmation: false,
     bookVoiceCommandPreview: null,
+    bookVoiceCommandCanExecute: false,
+    bookVoiceCommandActionText: "确认执行",
+    bookVoiceCommandExecuting: false,
+    bookVoiceCommandUndoText: "",
+    bookVoiceCommandUndoSnapshot: null,
   };
 }
 
