@@ -7,27 +7,23 @@ from app.domain.memoir.types import (
     MemoirBookAutoRevisionJobStatus,
     MemoirBookChapterDraftStatus,
     MemoirBookPlanStatus,
-    MemoirChatContentStatus,
-    MemoirChatMessageRole,
     MemoirCreatedBy,
-    MemoirTranscriptVersionType,
 )
 from app.models.memoir import (
-    AudioFile,
     MemoirBookAutoRevisionJob,
     MemoirBookChapterDraft,
     MemoirBookChapterDraftVersion,
-    MemoirBookPlan,
     MemoirBookPlanChapter,
-    MemoirChatMessage,
-    MemoirTranscriptVersion,
-    MemoirVoiceUtterance,
 )
 from app.services.memoir.book_auto_revision import (
     run_auto_revision_job,
     schedule_chapter_auto_revision,
 )
-from tests.memoir_helpers import post_mobile_memoir_voice_session
+from tests.memoir_helpers import (
+    create_test_book_plan,
+    create_test_voice_transcript,
+    memoir_source_ref,
+)
 
 
 class FakeBookDraftAI:
@@ -52,111 +48,6 @@ class FakeBookDraftAI:
         return self.content
 
 
-async def _active_project_id(client):
-    response = await client.get("/api/mobile/memoir/projects")
-    assert response.status_code == 200
-    active_project_id = response.json()["active_project_id"]
-    if active_project_id:
-        return active_project_id
-    created = await client.post("/api/mobile/memoir/projects", json={"title": "测试回忆录"})
-    assert created.status_code == 201
-    return created.json()["id"]
-
-
-async def _create_voice_transcript(client, test_db, text: str):
-    user = (await client.get("/api/auth/me")).json()
-    create_response = await post_mobile_memoir_voice_session(
-        client,
-        json={"guidance_mode": "free_narration", "provider": "volc_streaming_asr"},
-    )
-    assert create_response.status_code == 201
-    session = create_response.json()["session"]
-    audio_file = AudioFile(
-        user_id=user["id"],
-        storage_path=f"memoir/audio/{user['id']}/{len(text)}.pcm",
-        mime_type="audio/pcm",
-        size_bytes=3200,
-        duration_seconds=8,
-    )
-    test_db.add(audio_file)
-    version = MemoirTranscriptVersion(
-        voice_session_id=session["id"],
-        version_type=MemoirTranscriptVersionType.ASR_RAW.value,
-        content=text,
-        provider="volc_streaming_asr",
-        created_by=MemoirCreatedBy.ASR.value,
-    )
-    test_db.add(version)
-    await test_db.flush()
-    message = MemoirChatMessage(
-        project_id=session["project_id"],
-        voice_session_id=session["id"],
-        role=MemoirChatMessageRole.USER.value,
-        content_text=text,
-        content_status=MemoirChatContentStatus.FINAL.value,
-        audio_file_id=audio_file.id,
-        transcript_version_id=version.id,
-        turn_index=0,
-        metadata_json={"source": "test"},
-    )
-    test_db.add(message)
-    await test_db.flush()
-    utterance = MemoirVoiceUtterance(
-        voice_session_id=session["id"],
-        chat_message_id=message.id,
-        audio_file_id=audio_file.id,
-        transcript_raw=text,
-        transcript_edited=text,
-        start_ms=0,
-        end_ms=8000,
-        provider="volc_streaming_asr",
-        provider_payload_json={"source": "test"},
-    )
-    test_db.add(utterance)
-    await test_db.commit()
-    return {
-        "session": session,
-        "message_id": message.id,
-        "utterance_id": utterance.id,
-        "audio_file_id": audio_file.id,
-        "transcript_version_id": version.id,
-    }
-
-
-async def _create_book_plan(test_db, *, project_id: str, source_ref: dict, status: MemoirBookPlanStatus):
-    plan = MemoirBookPlan(
-        project_id=project_id,
-        title="外婆回忆录",
-        status=status.value,
-        created_by=MemoirCreatedBy.USER.value,
-    )
-    test_db.add(plan)
-    await test_db.flush()
-    chapter = MemoirBookPlanChapter(
-        plan_id=plan.id,
-        project_id=project_id,
-        title="外婆家的童年",
-        sort_order=0,
-        source_refs_json=[source_ref],
-    )
-    test_db.add(chapter)
-    await test_db.commit()
-    return plan, chapter
-
-
-def _source_ref(created: dict, quote: str = "外婆家的院子") -> dict:
-    return {
-        "voice_session_id": created["session"]["id"],
-        "message_id": created["message_id"],
-        "utterance_id": created["utterance_id"],
-        "transcript_version_id": created["transcript_version_id"],
-        "audio_file_id": created["audio_file_id"],
-        "start_ms": 0,
-        "end_ms": 8000,
-        "quote": quote,
-    }
-
-
 async def test_mobile_memoir_book_chapter_draft_routes_require_login(anonymous_client):
     response = await anonymous_client.post(
         "/api/mobile/memoir/projects/project-1/book-plan/chapters/chapter-1/draft",
@@ -167,12 +58,12 @@ async def test_mobile_memoir_book_chapter_draft_routes_require_login(anonymous_c
 
 
 async def test_mobile_memoir_book_chapter_draft_requires_confirmed_plan(client, test_db):
-    created = await _create_voice_transcript(client, test_db, "我小时候常在外婆家的院子里晒太阳。")
+    created = await create_test_voice_transcript(client, test_db, "我小时候常在外婆家的院子里晒太阳。")
     project_id = created["session"]["project_id"]
-    _, chapter = await _create_book_plan(
+    _, chapter = await create_test_book_plan(
         test_db,
         project_id=project_id,
-        source_ref=_source_ref(created),
+        source_ref=memoir_source_ref(created),
         status=MemoirBookPlanStatus.DRAFT,
     )
 
@@ -186,12 +77,12 @@ async def test_mobile_memoir_book_chapter_draft_requires_confirmed_plan(client, 
 
 
 async def test_mobile_memoir_book_chapter_draft_get_returns_404_before_draft_exists(client, test_db):
-    created = await _create_voice_transcript(client, test_db, "我小时候常在外婆家的院子里晒太阳。")
+    created = await create_test_voice_transcript(client, test_db, "我小时候常在外婆家的院子里晒太阳。")
     project_id = created["session"]["project_id"]
-    _, chapter = await _create_book_plan(
+    _, chapter = await create_test_book_plan(
         test_db,
         project_id=project_id,
-        source_ref=_source_ref(created),
+        source_ref=memoir_source_ref(created),
         status=MemoirBookPlanStatus.CONFIRMED,
     )
 
@@ -208,13 +99,13 @@ async def test_mobile_memoir_book_chapter_draft_generate_uses_chapter_sources(
     test_db,
     monkeypatch,
 ):
-    first = await _create_voice_transcript(client, test_db, "我小时候常在外婆家的院子里晒太阳。")
-    second = await _create_voice_transcript(client, test_db, "后来我第一次离家去县城读书，心里很紧张。")
+    first = await create_test_voice_transcript(client, test_db, "我小时候常在外婆家的院子里晒太阳。")
+    second = await create_test_voice_transcript(client, test_db, "后来我第一次离家去县城读书，心里很紧张。")
     project_id = first["session"]["project_id"]
-    _, chapter = await _create_book_plan(
+    _, chapter = await create_test_book_plan(
         test_db,
         project_id=project_id,
-        source_ref=_source_ref(first),
+        source_ref=memoir_source_ref(first),
         status=MemoirBookPlanStatus.CONFIRMED,
     )
     fake_ai = FakeBookDraftAI("我小时候常在外婆家的院子里晒太阳。")
@@ -262,12 +153,12 @@ async def test_mobile_memoir_book_chapter_draft_regenerate_appends_version_with_
     test_db,
     monkeypatch,
 ):
-    created = await _create_voice_transcript(client, test_db, "我小时候常在外婆家的院子里晒太阳。")
+    created = await create_test_voice_transcript(client, test_db, "我小时候常在外婆家的院子里晒太阳。")
     project_id = created["session"]["project_id"]
-    _, chapter = await _create_book_plan(
+    _, chapter = await create_test_book_plan(
         test_db,
         project_id=project_id,
-        source_ref=_source_ref(created),
+        source_ref=memoir_source_ref(created),
         status=MemoirBookPlanStatus.CONFIRMED,
     )
     fake_ai = FakeBookDraftAI("第一版正文")
@@ -300,16 +191,16 @@ async def test_mobile_memoir_book_chapter_draft_supplements_pending_sources_with
     test_db,
     monkeypatch,
 ):
-    first = await _create_voice_transcript(client, test_db, "我小时候常在外婆家的院子里晒太阳。")
-    second = await _create_voice_transcript(client, test_db, "后来我又讲了第一次离家去县城读书。")
+    first = await create_test_voice_transcript(client, test_db, "我小时候常在外婆家的院子里晒太阳。")
+    second = await create_test_voice_transcript(client, test_db, "后来我又讲了第一次离家去县城读书。")
     project_id = first["session"]["project_id"]
-    _, chapter = await _create_book_plan(
+    _, chapter = await create_test_book_plan(
         test_db,
         project_id=project_id,
-        source_ref=_source_ref(first),
+        source_ref=memoir_source_ref(first),
         status=MemoirBookPlanStatus.CONFIRMED,
     )
-    chapter.source_refs_json = [_source_ref(first), _source_ref(second, "第一次离家")]
+    chapter.source_refs_json = [memoir_source_ref(first), memoir_source_ref(second, "第一次离家")]
     chapter.metadata_json = {
         "pending_source_utterance_ids": [second["utterance_id"]],
         "source_assignment_updated_at": "2026-06-17T00:00:00+00:00",
@@ -390,16 +281,16 @@ async def test_memoir_book_auto_revision_job_supplements_pending_sources(
     test_db,
     monkeypatch,
 ):
-    first = await _create_voice_transcript(client, test_db, "我小时候常在外婆家的院子里晒太阳。")
-    second = await _create_voice_transcript(client, test_db, "后来我又讲了第一次离家去县城读书。")
+    first = await create_test_voice_transcript(client, test_db, "我小时候常在外婆家的院子里晒太阳。")
+    second = await create_test_voice_transcript(client, test_db, "后来我又讲了第一次离家去县城读书。")
     project_id = first["session"]["project_id"]
-    _, chapter = await _create_book_plan(
+    _, chapter = await create_test_book_plan(
         test_db,
         project_id=project_id,
-        source_ref=_source_ref(first),
+        source_ref=memoir_source_ref(first),
         status=MemoirBookPlanStatus.CONFIRMED,
     )
-    chapter.source_refs_json = [_source_ref(first), _source_ref(second, "第一次离家")]
+    chapter.source_refs_json = [memoir_source_ref(first), memoir_source_ref(second, "第一次离家")]
     chapter.metadata_json = {
         "pending_source_utterance_ids": [second["utterance_id"]],
         "source_assignment_updated_at": "2026-06-17T00:00:00+00:00",
@@ -494,16 +385,16 @@ async def test_mobile_memoir_book_chapter_draft_planner_can_choose_regenerate(
     test_db,
     monkeypatch,
 ):
-    first = await _create_voice_transcript(client, test_db, "我小时候常在外婆家的院子里晒太阳。")
-    second = await _create_voice_transcript(client, test_db, "后来又想起外婆也常在那个院子里晒被子。")
+    first = await create_test_voice_transcript(client, test_db, "我小时候常在外婆家的院子里晒太阳。")
+    second = await create_test_voice_transcript(client, test_db, "后来又想起外婆也常在那个院子里晒被子。")
     project_id = first["session"]["project_id"]
-    _, chapter = await _create_book_plan(
+    _, chapter = await create_test_book_plan(
         test_db,
         project_id=project_id,
-        source_ref=_source_ref(first),
+        source_ref=memoir_source_ref(first),
         status=MemoirBookPlanStatus.CONFIRMED,
     )
-    chapter.source_refs_json = [_source_ref(first), _source_ref(second, "院子里晒被子")]
+    chapter.source_refs_json = [memoir_source_ref(first), memoir_source_ref(second, "院子里晒被子")]
     chapter.metadata_json = {
         "pending_source_utterance_ids": [second["utterance_id"]],
         "source_assignment_updated_at": "2026-06-17T00:00:00+00:00",
@@ -587,16 +478,16 @@ async def test_mobile_memoir_book_chapter_draft_planner_can_request_source_revie
     test_db,
     monkeypatch,
 ):
-    first = await _create_voice_transcript(client, test_db, "我小时候常在外婆家的院子里晒太阳。")
-    second = await _create_voice_transcript(client, test_db, "多年以后我在工厂学会了修机器。")
+    first = await create_test_voice_transcript(client, test_db, "我小时候常在外婆家的院子里晒太阳。")
+    second = await create_test_voice_transcript(client, test_db, "多年以后我在工厂学会了修机器。")
     project_id = first["session"]["project_id"]
-    _, chapter = await _create_book_plan(
+    _, chapter = await create_test_book_plan(
         test_db,
         project_id=project_id,
-        source_ref=_source_ref(first),
+        source_ref=memoir_source_ref(first),
         status=MemoirBookPlanStatus.CONFIRMED,
     )
-    chapter.source_refs_json = [_source_ref(first), _source_ref(second, "工厂修机器")]
+    chapter.source_refs_json = [memoir_source_ref(first), memoir_source_ref(second, "工厂修机器")]
     chapter.metadata_json = {
         "pending_source_utterance_ids": [second["utterance_id"]],
         "source_assignment_updated_at": "2026-06-17T00:00:00+00:00",
@@ -663,20 +554,20 @@ async def test_mobile_memoir_book_chapter_draft_force_regenerate_ignores_previou
     test_db,
     monkeypatch,
 ):
-    first = await _create_voice_transcript(client, test_db, "岁首一家人围坐吃团圆饭。")
-    second = await _create_voice_transcript(client, test_db, "初一早上挨家给长辈拜年。")
-    third = await _create_voice_transcript(client, test_db, "腊月里还会提前准备团圆饭要用的菜。")
+    first = await create_test_voice_transcript(client, test_db, "岁首一家人围坐吃团圆饭。")
+    second = await create_test_voice_transcript(client, test_db, "初一早上挨家给长辈拜年。")
+    third = await create_test_voice_transcript(client, test_db, "腊月里还会提前准备团圆饭要用的菜。")
     project_id = first["session"]["project_id"]
-    _, chapter = await _create_book_plan(
+    _, chapter = await create_test_book_plan(
         test_db,
         project_id=project_id,
-        source_ref=_source_ref(first, "团圆饭"),
+        source_ref=memoir_source_ref(first, "团圆饭"),
         status=MemoirBookPlanStatus.CONFIRMED,
     )
     chapter.source_refs_json = [
-        _source_ref(first, "团圆饭"),
-        _source_ref(second, "拜年"),
-        _source_ref(third, "准备团圆饭要用的菜"),
+        memoir_source_ref(first, "团圆饭"),
+        memoir_source_ref(second, "拜年"),
+        memoir_source_ref(third, "准备团圆饭要用的菜"),
     ]
     chapter.metadata_json = {
         "pending_source_utterance_ids": [second["utterance_id"]],
@@ -767,16 +658,16 @@ async def test_mobile_memoir_book_chapter_draft_force_regenerate_ignores_previou
 
 
 async def test_mobile_memoir_book_chapter_draft_update_clears_pending_source_state(client, test_db):
-    first = await _create_voice_transcript(client, test_db, "我小时候常在外婆家的院子里晒太阳。")
-    second = await _create_voice_transcript(client, test_db, "后来我又讲了第一次离家去县城读书。")
+    first = await create_test_voice_transcript(client, test_db, "我小时候常在外婆家的院子里晒太阳。")
+    second = await create_test_voice_transcript(client, test_db, "后来我又讲了第一次离家去县城读书。")
     project_id = first["session"]["project_id"]
-    _, chapter = await _create_book_plan(
+    _, chapter = await create_test_book_plan(
         test_db,
         project_id=project_id,
-        source_ref=_source_ref(first),
+        source_ref=memoir_source_ref(first),
         status=MemoirBookPlanStatus.CONFIRMED,
     )
-    chapter.source_refs_json = [_source_ref(first), _source_ref(second, "第一次离家")]
+    chapter.source_refs_json = [memoir_source_ref(first), memoir_source_ref(second, "第一次离家")]
     chapter.metadata_json = {
         "pending_source_utterance_ids": [second["utterance_id"]],
         "source_assignment_updated_at": "2026-06-17T00:00:00+00:00",
@@ -819,12 +710,12 @@ async def test_mobile_memoir_book_chapter_draft_update_clears_pending_source_sta
 
 
 async def test_mobile_memoir_book_chapter_draft_confirm_rejects_pending_sources(client, test_db):
-    created = await _create_voice_transcript(client, test_db, "我小时候常在外婆家的院子里晒太阳。")
+    created = await create_test_voice_transcript(client, test_db, "我小时候常在外婆家的院子里晒太阳。")
     project_id = created["session"]["project_id"]
-    _, chapter = await _create_book_plan(
+    _, chapter = await create_test_book_plan(
         test_db,
         project_id=project_id,
-        source_ref=_source_ref(created),
+        source_ref=memoir_source_ref(created),
         status=MemoirBookPlanStatus.CONFIRMED,
     )
     chapter.metadata_json = {"pending_source_utterance_ids": [created["utterance_id"]]}
@@ -857,12 +748,12 @@ async def test_mobile_memoir_book_chapter_draft_confirm_rejects_pending_sources(
 
 
 async def test_mobile_memoir_book_chapter_draft_confirm_clears_removed_source_state(client, test_db):
-    created = await _create_voice_transcript(client, test_db, "我小时候常在外婆家的院子里晒太阳。")
+    created = await create_test_voice_transcript(client, test_db, "我小时候常在外婆家的院子里晒太阳。")
     project_id = created["session"]["project_id"]
-    _, chapter = await _create_book_plan(
+    _, chapter = await create_test_book_plan(
         test_db,
         project_id=project_id,
-        source_ref=_source_ref(created),
+        source_ref=memoir_source_ref(created),
         status=MemoirBookPlanStatus.CONFIRMED,
     )
     chapter.metadata_json = {
@@ -905,12 +796,12 @@ async def test_mobile_memoir_book_chapter_draft_confirm_clears_removed_source_st
 
 
 async def test_mobile_memoir_book_chapter_draft_update_and_confirm(client, test_db, monkeypatch):
-    created = await _create_voice_transcript(client, test_db, "我小时候常在外婆家的院子里晒太阳。")
+    created = await create_test_voice_transcript(client, test_db, "我小时候常在外婆家的院子里晒太阳。")
     project_id = created["session"]["project_id"]
-    _, chapter = await _create_book_plan(
+    _, chapter = await create_test_book_plan(
         test_db,
         project_id=project_id,
-        source_ref=_source_ref(created),
+        source_ref=memoir_source_ref(created),
         status=MemoirBookPlanStatus.CONFIRMED,
     )
     monkeypatch.setattr(
@@ -947,12 +838,12 @@ async def test_mobile_memoir_book_chapter_draft_post_returns_existing_without_fo
     test_db,
     monkeypatch,
 ):
-    created = await _create_voice_transcript(client, test_db, "我小时候常在外婆家的院子里晒太阳。")
+    created = await create_test_voice_transcript(client, test_db, "我小时候常在外婆家的院子里晒太阳。")
     project_id = created["session"]["project_id"]
-    _, chapter = await _create_book_plan(
+    _, chapter = await create_test_book_plan(
         test_db,
         project_id=project_id,
-        source_ref=_source_ref(created),
+        source_ref=memoir_source_ref(created),
         status=MemoirBookPlanStatus.CONFIRMED,
     )
     fake_ai = FakeBookDraftAI("第一版正文")
