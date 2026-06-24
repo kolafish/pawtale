@@ -162,11 +162,11 @@ export function sourceChangeNotice(pendingCount: number, removedCount: number): 
 }
 
 export function draftActionText(draft: MemoirBookChapterDraft | null, pendingCount: number, removedCount = 0): string {
-  if (pendingCount) {
-    return "补写新增";
-  }
   if (removedCount) {
     return "整理本章";
+  }
+  if (pendingCount) {
+    return "补写新增";
   }
   return draft?.latest_version ? "重新生成" : "生成本章";
 }

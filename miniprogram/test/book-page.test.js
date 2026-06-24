@@ -1258,7 +1258,7 @@ test("book page regenerates an existing chapter draft with force flag", async ()
   delete global.wx;
 });
 
-test("book page clears supplemental source state after chapter regeneration", async () => {
+test("book page supplements pending sources without force regeneration", async () => {
   const calls = [];
   global.wx = { showToast() {} };
   const { mod, page } = loadBookPage({
@@ -1288,11 +1288,52 @@ test("book page clears supplemental source state after chapter regeneration", as
   assert.deepEqual(calls[0], {
     projectId: "project/1",
     chapterId: "chapter-1",
-    data: { force_regenerate: true },
+    data: { force_regenerate: false },
   });
   assert.equal(context.data.chapters[0].pendingSourceCount, 0);
   assert.equal(context.data.chapters[0].draftActionText, "重新生成");
   assert.deepEqual(context.data.chapters[0].metadata_json, {});
+  delete global.wx;
+});
+
+test("book page force regenerates when source removals also need cleanup", async () => {
+  const calls = [];
+  global.wx = { showToast() {} };
+  const { mod, page } = loadBookPage({
+    voiceApiExports: {
+      generateMemoirBookChapterDraft: async (projectId, chapterId, data) => {
+        calls.push({ projectId, chapterId, data });
+        return sampleDraft(2, "draft", "整理后的正文");
+      },
+    },
+  });
+  const plan = samplePlan("confirmed");
+  plan.chapters[0].metadata_json = {
+    pending_source_utterance_ids: ["utterance-new-1"],
+    removed_source_utterance_ids: ["utterance-removed-1"],
+    source_assignment_updated_at: "2026-06-17T00:00:00+00:00",
+    source_refs_removed_at: "2026-06-17T00:00:00+00:00",
+  };
+  const context = pageContext(page, {
+    projectId: "project/1",
+    chapters: mod.buildChapterViews(plan, {
+      "chapter-1": sampleDraft(1, "draft", "第一版正文", { status_reason: "sources_changed" }),
+    }),
+  });
+
+  assert.equal(context.data.chapters[0].draftActionText, "整理本章");
+
+  await page.generateChapterDraft.call(context, {
+    currentTarget: { dataset: { id: "chapter-1" } },
+  });
+
+  assert.deepEqual(calls[0], {
+    projectId: "project/1",
+    chapterId: "chapter-1",
+    data: { force_regenerate: true },
+  });
+  assert.equal(context.data.chapters[0].draftContent, "整理后的正文");
+  assert.equal(context.data.chapters[0].draftChanged, false);
   delete global.wx;
 });
 

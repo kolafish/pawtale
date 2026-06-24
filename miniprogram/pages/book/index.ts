@@ -698,8 +698,10 @@ Page<BookData, {
     }
     this.patchChapter(chapterId, { draftBusy: true, draftError: "" });
     try {
+      const shouldSupplementPendingSources = chapter.pendingSourceCount > 0 && !chapter.removedSourceCount;
+      const forceRegenerate = Boolean(chapter.draft?.latest_version && !shouldSupplementPendingSources);
       const draft = await generateMemoirBookChapterDraft(this.data.projectId, chapterId, {
-        force_regenerate: Boolean(chapter.draft?.latest_version),
+        force_regenerate: forceRegenerate,
       });
       this.patchDraft(chapterId, draft, { clearPendingSources: true });
       wx.showToast({ title: toastTitle, icon: "success" });
