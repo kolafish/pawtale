@@ -511,6 +511,8 @@ test("book page exposes a compact voice assistant entry", () => {
   assert.match(wxml, /bookVoiceCommandResponseKind/);
   assert.match(wxml, /bookVoiceCommandDetailText/);
   assert.match(wxml, /bookVoiceCommandPanelTitle/);
+  assert.match(wxml, /bookVoiceAssistantSpeakingLineId/);
+  assert.match(wxml, /assistant-speaking/);
   assert.match(wxml, /book-voice-command-preview/);
   assert.match(wxml, /bindtap="executeBookVoiceCommand"/);
   assert.match(wxml, /bindtap="undoBookVoiceCommand"/);
@@ -1642,7 +1644,15 @@ test("book page plays assistant reply and auto-listens after playback", async ()
   page.applyPlan.call(context, samplePlan("confirmed"));
   context.setData({ bookVoiceAssistantConversationActive: true });
   context.playAudioFiles = async (response, target, token, activeText) => {
-    calls.push({ kind: "play", target, token, activeText, response });
+    calls.push({
+      kind: "play",
+      target,
+      token,
+      activeText,
+      response,
+      speakingLineId: context.data.bookVoiceAssistantSpeakingLineId,
+      transcriptLineId: context.data.bookVoiceTranscriptLines[0]?.id,
+    });
   };
   context.startBookVoiceCommand = async (options) => {
     calls.push({ kind: "auto-listen", options });
@@ -1657,6 +1667,9 @@ test("book page plays assistant reply and auto-listens after playback", async ()
     assert.deepEqual(calls[0].data, { text: "我理解了，请确认。" });
     assert.equal(calls[1].target, "book-voice-assistant");
     assert.equal(calls[1].activeText, "我理解了，请确认。");
+    assert.match(calls[1].speakingLineId, /^book-ai-/);
+    assert.equal(calls[1].speakingLineId, calls[1].transcriptLineId);
+    assert.equal(context.data.bookVoiceAssistantSpeakingLineId, "");
     assert.deepEqual(calls[2], { kind: "auto-listen", options: { autoTriggered: true } });
     assert.equal(context.data.bookVoiceAssistantBusy, false);
   } finally {
@@ -1669,7 +1682,7 @@ test("book page keeps pending preview during auto-listen for voice confirmation"
   const calls = [];
   const { page } = loadBookPage({
     streamingAsrExports: {
-      MemoirStreamingAsrClient: streamingAsrClientForFinal(calls, "确认执行"),
+      MemoirStreamingAsrClient: streamingAsrClientForFinal(calls, "确认执行。"),
     },
   });
   const context = pageContext(page, { projectId: "project/1" });
@@ -1686,7 +1699,7 @@ test("book page keeps pending preview during auto-listen for voice confirmation"
   await flushAsyncWork();
 
   assert.equal(context.data.bookVoiceCommandPreview.intent, "rename_chapter");
-  assert.equal(context.data.bookVoiceCommandText, "确认执行");
+  assert.equal(context.data.bookVoiceCommandText, "把第一章改名为童年往事");
   assert.deepEqual(calls[3], {
     kind: "reply",
     text: "好的，我按刚才理解的修改。",
@@ -1739,6 +1752,9 @@ test("book page executes a confirmed voice rename with undo snapshot", async () 
   assert.equal(calls[0].chapters[0].id, "chapter-1");
   assert.equal(calls[0].chapters[0].title, "童年往事");
   assert.equal(calls[0].chapters[1].title, "第一次离家");
+  assert.equal(context.data.bookVoiceCommandCanExecute, false);
+  assert.equal(context.data.bookVoiceCommandRequiresConfirmation, false);
+  assert.equal(context.data.bookVoiceCommandStateText, "已执行");
   assert.equal(context.data.bookVoiceCommandUndoText, "撤回语音改名");
   assert.equal(context.data.bookVoiceCommandUndoSnapshot.chapters[0].title, "外婆家的童年");
   assert.equal(context.data.bookVoiceAssistantStatusText, "已执行，可撤回");

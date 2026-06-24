@@ -297,6 +297,10 @@
   background: #fffdf9;
 }
 
+.book-voice-message.assistant .book-voice-message-text.assistant-speaking {
+  background: #fffaf0;
+}
+
 .book-voice-message.live .book-voice-message-text {
   border: 2rpx solid #c7e7d2;
 }

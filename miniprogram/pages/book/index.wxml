@@ -88,7 +88,16 @@
           class="book-voice-message {{item.role === 'assistant' ? 'assistant' : 'user'}}"
         >
           <text class="book-voice-message-role">{{item.role === "assistant" ? "AI" : "我"}}</text>
-          <text class="book-voice-message-text">{{item.text}}</text>
+          <block wx:if="{{item.id === bookVoiceAssistantSpeakingLineId && bookTTSActiveTarget === 'book-voice-assistant'}}">
+            <text class="book-voice-message-text assistant-speaking" selectable>
+              <text class="tts-spoken">{{bookTTSSpokenText}}</text>
+              <text wx:if="{{bookTTSCurrentText}}" class="tts-current">{{bookTTSCurrentText}}</text>
+              <text class="tts-remaining">{{bookTTSRemainingText}}</text>
+            </text>
+          </block>
+          <block wx:else>
+            <text class="book-voice-message-text">{{item.text}}</text>
+          </block>
         </view>
         <view wx:if="{{bookVoiceLiveText}}" class="book-voice-message user live">
           <text class="book-voice-message-role">我</text>
