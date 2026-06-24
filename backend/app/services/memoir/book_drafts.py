@@ -57,7 +57,7 @@ from app.services.memoir.voice_tts import TTSClient
 
 SYSTEM_PROMPT = "你是一位谨慎的中文回忆录整理写作者，只能把给定口述材料整理成章节正文。"
 REVISION_PLAN_SYSTEM_PROMPT = "你是一位谨慎的中文回忆录修订编辑，只判断新增口述材料应该如何并入已有章节。"
-EVENT_CLUSTER_SYSTEM_PROMPT = "你是一位谨慎的中文回忆录结构编辑，只根据来源转写判断哪些记录讲的是同一件事。"
+EVENT_CLUSTER_SYSTEM_PROMPT = "你是一位谨慎的中文回忆录结构编辑，只根据来源讲述记录判断哪些记录讲的是同一件事。"
 AI_BOOK_DRAFT_UNAVAILABLE_MESSAGE = "AI 服务暂时不可用，请稍后重试。"
 CHAPTER_TTS_CACHE_KEY = "chapter_tts"
 logger = logging.getLogger(__name__)
@@ -184,7 +184,7 @@ async def _chapter_sources(
         if isinstance(ref, dict)
     ]
     if not refs:
-        raise HTTPException(status_code=400, detail="章节缺少来源转写")
+        raise HTTPException(status_code=400, detail="章节缺少来源讲述")
     utterance_ids = [ref.utterance_id for ref in refs]
     result = await db.execute(
         select(MemoirVoiceUtterance, MemoirChatMessage)
@@ -203,11 +203,11 @@ async def _chapter_sources(
     for ref in refs:
         pair = by_utterance_id.get(ref.utterance_id)
         if not pair:
-            raise HTTPException(status_code=400, detail="章节来源转写不存在")
+            raise HTTPException(status_code=400, detail="章节来源讲述不存在")
         utterance, message = pair
         text = _display_text(utterance)
         if not text:
-            raise HTTPException(status_code=400, detail="章节来源转写为空")
+            raise HTTPException(status_code=400, detail="章节来源讲述为空")
         sources.append(
             ChapterSourceText(
                 ref=MemoirBookChapterSourceRef(
@@ -254,7 +254,7 @@ def _build_revision_plan_prompt(
 现有章节正文：
 {previous_content.strip()}
 
-来源转写：
+来源讲述记录：
 {_source_block(sources, pending_source_utterance_ids)}
 
 请输出严格 JSON，不要 Markdown，不要解释。格式：
@@ -270,7 +270,7 @@ def _build_revision_plan_prompt(
 - mode=supplement：新增来源属于本章，但与现有正文关系较弱，适合作为新段落或补充细节自然加入。
 - mode=regenerate：新增来源与现有正文讲的是同一件事、同一人物/地点/时间段，或会修正现有叙述，需要重新组织整章。
 - mode=needs_review：新增来源明显不属于本章，或缺少足够关系，应该先由用户调整章节归属。
-- 不要新增来源没有讲过的事实；判断必须基于来源转写和现有正文。
+- 不要新增来源没有讲过的事实；判断必须基于来源讲述记录和现有正文。
 """
 
 
@@ -312,11 +312,11 @@ def _build_event_cluster_prompt(
     chapter: MemoirBookPlanChapter,
     sources: list[ChapterSourceText],
 ) -> str:
-    return f"""请把本章来源转写中讲同一件事、同一人物关系、同一地点或同一时间段的记录聚合到一起。
+    return f"""请把本章来源讲述记录中讲同一件事、同一人物关系、同一地点或同一时间段的记录聚合到一起。
 
 章节标题参考：{chapter.title}
 
-来源转写：
+来源讲述记录：
 {_source_block(sources, set())}
 
 请输出严格 JSON，不要 Markdown，不要解释。格式：
@@ -334,7 +334,7 @@ def _build_event_cluster_prompt(
 - source_ids 必须来自上面给定的 utterance_id。
 - 每条来源都必须出现在一个 cluster 中，不能遗漏。
 - 如果某条来源没有相关记录，可以单独成为一个 cluster。
-- 只根据来源转写聚合，不新增事实。
+- 只根据来源讲述记录聚合，不新增事实。
 """
 
 
@@ -415,7 +415,7 @@ def _build_draft_prompt(
     revision_text = _revision_plan_prompt_text(revision_plan)
     event_cluster_text = _event_clusters_prompt_text(event_clusters or [])
     supplement_text = (
-        "\n本次任务：只把 source_type 为“新增来源”的转写里用户确实讲过的内容自然补入原章节正文；"
+        "\n本次任务：只把 source_type 为“新增来源”的讲述记录里用户确实讲过的内容自然补入原章节正文；"
         "没有新增来源支撑的内容不要扩写，既有段落不要无故重写。\n"
         if pending_ids and previous_content
         else ""
@@ -428,7 +428,7 @@ def _build_draft_prompt(
     else:
         coverage_text = (
             f"\n来源覆盖要求：本章共有 {len(sources)} 条来源；正文必须覆盖每一条 source 中叙述者实际讲过的具体信息，"
-            "不能只写第一条，也不能只写最贴合标题的一条。若章节标题与来源转写不完全一致，以来源转写为准，"
+            "不能只写第一条，也不能只写最贴合标题的一条。若章节标题与来源讲述记录不完全一致，以来源讲述记录为准，"
             "可以分段或用自然过渡串联不同主题。\n"
         )
     return f"""请把下面口述材料整理成一个回忆录章节正文。
@@ -448,7 +448,7 @@ def _build_draft_prompt(
 - 每条要求覆盖的来源至少要有一处可对应的具体内容进入正文。
 - 不要输出标题、列表、解释或 Markdown，只输出正文。
 
-来源转写：
+来源讲述记录：
 {source_text}
 """
 

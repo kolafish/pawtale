@@ -133,7 +133,7 @@ async def test_mobile_memoir_book_plan_requires_transcripts(client):
     )
 
     assert response.status_code == 400
-    assert response.json()["detail"] == "暂无转写内容，无法规划章节"
+    assert response.json()["detail"] == "暂无讲述内容，无法规划章节"
 
 
 async def test_mobile_memoir_book_plan_get_returns_404_before_plan_exists(client):
@@ -468,7 +468,7 @@ async def test_mobile_memoir_book_source_assignment_rejects_covered_source(
     )
 
     assert response.status_code == 400
-    assert response.json()["detail"] == "转写已收录到章节"
+    assert response.json()["detail"] == "讲述记录已收录到章节"
 
 
 async def test_mobile_memoir_book_source_move_updates_only_source_and_target_chapters(

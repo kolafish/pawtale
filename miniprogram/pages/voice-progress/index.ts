@@ -74,7 +74,7 @@ function statusText(status: string): string {
     created: "可继续",
     listening: "进行中",
     speaking: "AI 追问中",
-    stopped: "已结束",
+    stopped: "已保存",
     failed: "异常",
   };
   return labels[status] || status;
@@ -190,7 +190,7 @@ Page<ProgressData, {
         wx.switchTab({ url: "/pages/me/index" });
         return;
       }
-      this.setData({ error: error instanceof Error ? error.message : "访谈进度加载失败" });
+      this.setData({ error: error instanceof Error ? error.message : "讲述进度加载失败" });
     } finally {
       this.setData({ loading: false });
     }
@@ -204,7 +204,7 @@ Page<ProgressData, {
     }
     if (!item.canContinue) {
       this.setData({
-        error: item.status === "failed" ? "这次访谈异常结束，请返回首页重新开始" : "这次访谈已结束",
+        error: item.status === "failed" ? "这次讲述保存异常，请返回首页重新开始" : "这次讲述已保存",
       });
       return;
     }

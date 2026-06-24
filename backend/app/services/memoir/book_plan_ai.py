@@ -10,10 +10,10 @@ from app.services.json_utils import extract_json_payload
 from app.services.memoir.book_plan_sources import SourceSegment
 
 
-SYSTEM_PROMPT = "你是一位谨慎的中文回忆录章节规划编辑，只能根据给定口述转写整理章节。"
+SYSTEM_PROMPT = "你是一位谨慎的中文回忆录章节规划编辑，只能根据给定口述内容整理章节。"
 CHAPTER_TITLE_SYSTEM_PROMPT = "你是一位谨慎的中文回忆录目录编辑，只为已有章节重新拟标题。"
 AI_BOOK_PLAN_UNAVAILABLE_MESSAGE = "AI 服务暂时不可用，请稍后重试。"
-GENERIC_CHAPTER_TITLES = {"新收录转写", "新增转写", "转写记录", "新章节", "未命名章节"}
+GENERIC_CHAPTER_TITLES = {"新收录转写", "新增转写", "转写记录", "新收录讲述", "新增讲述", "讲述记录", "新章节", "未命名章节"}
 
 
 @dataclass(frozen=True)
@@ -46,7 +46,7 @@ def build_plan_prompt(project_title: str, sources: list[SourceSegment], max_chap
         )
         for source in sources
     )
-    return f"""请把下面的口述转写整理成回忆录章节规划。
+    return f"""请把下面的口述内容整理成回忆录章节规划。
 
 当前回忆录：{project_title}
 最多章节数：{max_chapters}
@@ -70,7 +70,7 @@ def build_plan_prompt(project_title: str, sources: list[SourceSegment], max_chap
 - evidence_quote 必须逐字来自对应 source text。
 - 如果素材很少，可以只返回 1 到 2 章。
 
-口述转写：
+口述内容：
 {source_text}
 """
 
@@ -162,7 +162,7 @@ def build_chapter_title_prompt(sources: list[ChapterTitleSourceDigest]) -> str:
 - 只根据 record_summary 和 representative_quote，不新增事实、人物、地点或情绪。
 - 必须综合全部来源记录；来源很多时，不要只看前几条，优先概括反复出现或最能代表本章的主题。
 - 标题要像书稿目录，短而正式，建议 6 到 14 个汉字。
-- 不要使用“转写”“新收录”“记录”“素材”“章节”等占位词。
+- 不要使用“转写”、“讲述”、“新收录”、“记录”、“素材”、“章节”等占位词。
 - 只输出 JSON 对象，不要解释、引号包裹全文或编号。
 """
 
@@ -181,7 +181,7 @@ def clean_generated_chapter_title(content: str) -> str:
         if title.startswith(prefix):
             title = title[len(prefix):].strip()
     title = title.strip("。；;，, ")
-    if title in GENERIC_CHAPTER_TITLES or "转写" in title or "新收录" in title:
+    if title in GENERIC_CHAPTER_TITLES or "转写" in title or "讲述" in title or "新收录" in title:
         raise HTTPException(status_code=502, detail="AI 未返回可用章节标题")
     if not title:
         raise HTTPException(status_code=502, detail="AI 未返回可用章节标题")

@@ -156,7 +156,7 @@ test("normalizes invalid gateway payloads into session errors", () => {
       kind: "persistence",
       code: "asr_final_persistence_failed",
       state: "failed",
-      message: "转写已返回，但保存识别结果失败",
+      message: "识别结果已返回，但保存讲述记录失败",
     },
   );
   assert.equal(
@@ -1494,12 +1494,12 @@ test("streaming ASR stops recorder when gateway reports an error", async () => {
   });
 
   assert.equal(recorder.stops, 1);
-  assert.deepEqual(errors, ["转写已返回，但保存识别结果失败"]);
+  assert.deepEqual(errors, ["识别结果已返回，但保存讲述记录失败"]);
   assert.deepEqual(errorInfos, [{
     kind: "persistence",
     code: "asr_final_persistence_failed",
     state: "failed",
-    message: "转写已返回，但保存识别结果失败",
+    message: "识别结果已返回，但保存讲述记录失败",
   }]);
   assert.deepEqual(sent.map((event) => event.type), ["session.start", "audio.frame"]);
   assert.equal(captureStats.at(-1).state, "error");

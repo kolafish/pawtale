@@ -345,7 +345,7 @@ test("book page summarizes chapter source count without exposing raw ids", () =>
         sampleRef("utterance-3", "第三段"),
       ],
     }),
-    "本章素材：3 条收录转写",
+    "本章素材：3 条收录讲述",
   );
 });
 
@@ -512,8 +512,8 @@ test("book page asks logged-in users to create a memoir before loading book cont
 test("book page shows source coverage notice only when there are uncovered transcripts", () => {
   const { mod } = loadBookPage();
 
-  assert.equal(mod.bookSourceCoverageNotice(samplePlan("confirmed"), sampleSourceCoverage(2)), "有 2 条新转写尚未收录到书中");
-  assert.equal(mod.bookSourceCoverageNotice(null, sampleSourceCoverage(1)), "有 1 条转写可用于生成章节");
+  assert.equal(mod.bookSourceCoverageNotice(samplePlan("confirmed"), sampleSourceCoverage(2)), "有 2 条新讲述尚未收录到书中");
+  assert.equal(mod.bookSourceCoverageNotice(null, sampleSourceCoverage(1)), "有 1 条讲述记录可用于生成章节");
   assert.equal(mod.bookSourceCoverageNotice(samplePlan("confirmed"), sampleSourceCoverage(0)), "");
   assert.equal(mod.bookSourceCoverageNotice(samplePlan("confirmed"), null), "");
 });
@@ -656,7 +656,7 @@ test("book page marks assigned sources as supplemental chapter work", () => {
 
   assert.equal(chapters[0].pendingSourceCount, 1);
   assert.equal(chapters[0].draftActionText, "补写新增");
-  assert.equal(chapters[0].sourceChangeNotice, "1 条新增转写待补写");
+  assert.equal(chapters[0].sourceChangeNotice, "1 条新增讲述待补写");
   assert.equal(chapters[1].draftActionText, "生成本章");
 });
 
@@ -1495,7 +1495,7 @@ test("book page stops active voice edit recording on second tap", async () => {
   await page.startBookVoiceCommand.call(context);
 
   assert.deepEqual(stops, ["stop"]);
-  assert.equal(context.data.bookVoiceAssistantStatusText, "正在结束录音");
+  assert.equal(context.data.bookVoiceAssistantStatusText, "正在保存录音");
 });
 
 test("book page splits active TTS text for highlighting", () => {

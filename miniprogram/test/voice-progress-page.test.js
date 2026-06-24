@@ -265,7 +265,7 @@ test("voice progress only resumes active sessions", () => {
   page.continueSession.call(context, { currentTarget: { dataset: { id: "voice-stopped" } } });
   page.continueSession.call(context, { currentTarget: { dataset: { id: "voice-listening" } } });
 
-  assert.equal(context.data.error, "这次访谈已结束");
+  assert.equal(context.data.error, "这次讲述已保存");
   assert.equal(navigations[0], "/pages/voice-chat/index?voiceSessionId=voice-listening&mode=guided_interview&module=person");
   delete global.wx;
 });

@@ -43,7 +43,7 @@
           </view>
         </label>
       </checkbox-group>
-      <text class="voice-auth-hint">同意后才会打开麦克风，并上传语音用于访谈转写、原始音频留存和成书。</text>
+      <text class="voice-auth-hint">同意后才会打开麦克风，并上传语音用于实时识别文字、原始音频留存和成书。</text>
     </view>
   </view>
 </view>

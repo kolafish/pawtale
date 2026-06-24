@@ -10,7 +10,7 @@
     <view class="login-panel">
       <text class="panel-title">登录 Pawtale</text>
       <text class="panel-copy">
-        登录后管理回忆录、转写和成书。
+        登录后管理回忆录、讲述记录和成书。
       </text>
 
       <button
@@ -140,7 +140,7 @@
         <view class="project-overview-main">
           <text class="action-title">{{projectTitle || "尚未创建回忆录"}}</text>
           <text class="action-meta">
-            {{projectCount ? ("当前使用 · " + (utteranceCount ? (utteranceCount + " 条转写记录") : "还没有转写记录")) : "创建第一本回忆录并设置讲述资料"}}
+            {{projectCount ? ("当前使用 · " + (utteranceCount ? (utteranceCount + " 条讲述记录") : "还没有讲述记录")) : "创建第一本回忆录并设置讲述资料"}}
           </text>
         </view>
       </view>
@@ -148,11 +148,11 @@
       <view class="overview-stats">
         <view class="overview-stat">
           <text class="overview-stat-value">{{sessionCount}}</text>
-          <text class="overview-stat-label">有效访谈</text>
+          <text class="overview-stat-label">讲述次数</text>
         </view>
         <view class="overview-stat">
           <text class="overview-stat-value">{{utteranceCount}}</text>
-          <text class="overview-stat-label">转写记录</text>
+          <text class="overview-stat-label">讲述记录</text>
         </view>
         <view class="overview-stat">
           <text class="overview-stat-value">{{totalUserCharCount}}</text>
@@ -170,7 +170,7 @@
           disabled="{{!projectCount}}"
           bindtap="openVoiceProgress"
         >
-          查看访谈进度
+          查看讲述进度
         </button>
       </view>
     </view>

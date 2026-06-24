@@ -176,7 +176,7 @@ export function sourceChangeNotice(pendingCount: number, removedCount: number): 
     return `${removedCount} 条素材已删除，章节稿需要更新`;
   }
   if (pendingCount) {
-    return `${pendingCount} 条新增转写待补写`;
+    return `${pendingCount} 条新增讲述待补写`;
   }
   return "";
 }
@@ -248,9 +248,9 @@ export function bookSourceCoverageNotice(
     return "";
   }
   if (!plan) {
-    return `有 ${count} 条转写可用于生成章节`;
+    return `有 ${count} 条讲述记录可用于生成章节`;
   }
-  return `有 ${count} 条新转写尚未收录到书中`;
+  return `有 ${count} 条新讲述尚未收录到书中`;
 }
 
 export function sourceCoverageData(
@@ -297,7 +297,7 @@ export function buildUncoveredSourceViews(
         recordNumber: source.source_index,
         previewText: text.length > 96 ? `${text.slice(0, 96)}...` : text,
         created_at: source.created_at,
-        createdAtText: formatBeijingDateTimeShort(source.created_at) || "转写记录",
+        createdAtText: formatBeijingDateTimeShort(source.created_at) || "讲述记录",
         sourceRef: {
           voice_session_id: source.voice_session_id,
           message_id: source.message_id,
@@ -342,7 +342,7 @@ function chapterOption(chapter: Pick<BookChapterView, "id" | "title" | "editingT
 function sourcePreviewText(ref: MemoirBookChapterSourceRef): string {
   const text = trimText(ref.quote || "");
   if (!text) {
-    return "未摘录转写内容";
+    return "未摘录讲述内容";
   }
   return text.length > 72 ? `${text.slice(0, 72)}...` : text;
 }
@@ -482,7 +482,7 @@ export function chapterCollectionData(
 }
 
 export function bookChapterSourceSummary(chapter: Pick<MemoirBookPlanChapter, "source_refs">): string {
-  return `本章素材：${chapter.source_refs.length} 条收录转写`;
+  return `本章素材：${chapter.source_refs.length} 条收录讲述`;
 }
 
 export function bookOutlineNarrationText(
@@ -677,9 +677,9 @@ export function toPlanUpdateInput(chapters: BookChapterView[]): MemoirBookPlanCh
 export function titleFromUncoveredSource(source: BookUncoveredSourceView): string {
   const text = trimText(source.previewText)
     .replace(/\s+/g, "")
-    .replace(/^(新增|新收录|补充)?转写(记录|内容)?[:：，,。]*/, "");
+    .replace(/^(新增|新收录|补充)?(转写|讲述)(记录|内容)?[:：，,。]*/, "");
   const firstClause = text.split(/[，。！？、,.!?;；:：]/).find(Boolean) || text;
-  if (!firstClause || firstClause.length < 3 || ["新增转写", "新收录转写", "转写记录"].includes(firstClause)) {
+  if (!firstClause || firstClause.length < 3 || ["新增转写", "新收录转写", "转写记录", "新增讲述", "新收录讲述", "讲述记录"].includes(firstClause)) {
     return "补记往事";
   }
   return firstClause.length > 16 ? firstClause.slice(0, 16) : firstClause;

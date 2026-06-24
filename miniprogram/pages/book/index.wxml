@@ -14,7 +14,7 @@
   <view wx:if="{{needsLogin}}" class="empty-panel guest-panel">
     <image class="empty-icon" src="/assets/memoir-gramophone.png" mode="aspectFit" />
     <text class="empty-title">浏览整理成书</text>
-    <text class="empty-copy">登录后可以把语音转写归入章节，确认章节正文，再生成全书和章节朗读。</text>
+    <text class="empty-copy">登录后可以把讲述记录归入章节，确认章节正文，再生成全书和章节朗读。</text>
     <view class="guest-steps">
       <text>1. 先生成章节规划</text>
       <text>2. 再逐章整理正文</text>
@@ -30,7 +30,7 @@
   <view wx:if="{{!projectId}}" class="empty-panel">
     <image class="empty-icon" src="/assets/memoir-gramophone.png" mode="aspectFit" />
     <text class="empty-title">还没有回忆录</text>
-    <text class="empty-copy">先创建一本回忆录并设置讲述资料，完成语音转写后再整理成书。</text>
+    <text class="empty-copy">先创建一本回忆录并设置讲述资料，完成语音聊天后再整理成书。</text>
     <view class="actions-row">
       <button class="primary-button" bindtap="createProject">创建回忆录</button>
       <button class="ghost-button" bindtap="openHome">返回首页</button>
@@ -122,12 +122,12 @@
     <view class="coverage-head">
       <view class="coverage-copy">
         <view class="coverage-title-row">
-          <text class="coverage-title">待收录转写</text>
+          <text class="coverage-title">待收录讲述</text>
           <text class="coverage-count">{{uncoveredSourceDisplayText}}</text>
         </view>
         <text class="coverage-meta">{{sourceCoverageNotice}}，新录音不会自动改动已确认章节和全书。</text>
       </view>
-      <button class="coverage-link" bindtap="openTranscripts">转写记录</button>
+      <button class="coverage-link" bindtap="openTranscripts">讲述记录</button>
     </view>
 
     <view wx:if="{{plan && chapterPickerOptions.length && uncoveredSources.length}}" class="coverage-source-list">
@@ -159,7 +159,7 @@
     </view>
 
     <view wx:elif="{{!plan}}" class="coverage-empty">
-      <text>生成章节规划后可以收录这些转写。</text>
+      <text>生成章节规划后可以收录这些讲述。</text>
     </view>
   </view>
 
@@ -169,8 +169,8 @@
 
   <view wx:elif="{{!plan}}" class="empty-panel">
     <image class="empty-icon" src="/assets/memoir-gramophone.png" mode="aspectFit" />
-    <text class="empty-title">从转写生成章节</text>
-    <text class="empty-copy">系统会先把当前回忆录转写划分为若干章节。你确认章节后，再逐章生成正文。</text>
+    <text class="empty-title">从讲述记录生成章节</text>
+    <text class="empty-copy">系统会先把当前回忆录里的讲述内容划分为若干章节。你确认章节后，再逐章生成正文。</text>
     <view class="actions-row">
       <button
         class="primary-button"
@@ -181,7 +181,7 @@
         生成章节规划
       </button>
       <button class="ghost-button" disabled="{{generatingPlan}}" bindtap="openTranscripts">
-        查看转写
+        查看记录
       </button>
     </view>
   </view>
@@ -313,7 +313,7 @@
           bindtap="removeChapter"
           disabled="{{confirmingPlan || updatingPlanStructure || chapters.length <= 1}}"
         >
-          删除本章·保留转写
+          删除本章·保留讲述
         </button>
       </view>
     </view>
@@ -542,7 +542,7 @@
           disabled="{{updatingPlanStructure || item.draftBusy || chapters.length <= 1}}"
           bindtap="deleteConfirmedChapter"
         >
-          删除本章·保留转写
+          删除本章·保留讲述
         </button>
       </view>
     </view>

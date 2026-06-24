@@ -465,7 +465,7 @@ Page<BookData, {
     }
     const invalid = chapters.find((chapter) => !chapter.title || !chapter.source_refs.length);
     if (invalid) {
-      this.setData({ error: "每个章节都需要标题和收录转写" });
+      this.setData({ error: "每个章节都需要标题和收录讲述" });
       return;
     }
     this.setData({ confirmingPlan: true, error: "" });
@@ -921,7 +921,7 @@ Page<BookData, {
     const confirmed = await new Promise<boolean>((resolve) => {
       wx.showModal({
         title: "删除章节",
-        content: `删除「${chapter.title}」会移除本章正文，收录转写会回到待收录列表。`,
+        content: `删除「${chapter.title}」会移除本章正文，收录讲述会回到待收录列表。`,
         confirmText: "删除",
         confirmColor: "#b4234a",
         success: (result) => resolve(Boolean(result.confirm)),
@@ -1169,7 +1169,7 @@ Page<BookData, {
   async startBookVoiceCommand() {
     if (this.data.bookVoiceAssistantListening) {
       stopMemoirVoiceSearchRecording();
-      this.setData({ bookVoiceAssistantStatusText: "正在结束录音" });
+      this.setData({ bookVoiceAssistantStatusText: "正在保存录音" });
       return;
     }
     if (this.data.bookVoiceAssistantBusy) {
