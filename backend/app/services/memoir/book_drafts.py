@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from typing import Literal
 
 from fastapi import HTTPException
 from sqlalchemy import func, select
@@ -33,6 +34,7 @@ from app.schemas.memoir_book import (
 )
 from app.services.ai_factory import get_ai_service
 from app.services.ai_types import AITextClient
+from app.services.json_utils import extract_json_payload
 from app.services.memoir.access import load_memoir_project
 from app.services.memoir.book_audio import (
     audio_cache_payload,
@@ -47,6 +49,7 @@ from app.services.memoir.voice_tts import TTSClient
 
 
 SYSTEM_PROMPT = "你是一位谨慎的中文回忆录整理写作者，只能把给定口述材料整理成章节正文。"
+REVISION_PLAN_SYSTEM_PROMPT = "你是一位谨慎的中文回忆录修订编辑，只判断新增口述材料应该如何并入已有章节。"
 AI_BOOK_DRAFT_UNAVAILABLE_MESSAGE = "AI 服务暂时不可用，请稍后重试。"
 CHAPTER_TTS_CACHE_KEY = "chapter_tts"
 PENDING_SOURCE_UTTERANCE_IDS_KEY = "pending_source_utterance_ids"
@@ -62,6 +65,15 @@ class ChapterSourceText:
     text: str
 
 
+@dataclass(frozen=True)
+class ChapterRevisionPlan:
+    mode: Literal["supplement", "regenerate", "needs_review"]
+    reason: str
+    pending_source_ids: list[str]
+    related_existing_source_ids: list[str]
+    coverage_requirements: list[str]
+
+
 def _text_or_empty(value: str | None) -> str:
     return (value or "").strip()
 
@@ -75,6 +87,12 @@ def _strip_generated_text(text: str) -> str:
     if len(content) >= 2 and content[0] in {"“", "「", '"', "'"} and content[-1] in {"”", "」", '"', "'"}:
         content = content[1:-1].strip()
     return content
+
+
+def _string_list(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [item.strip() for item in value if isinstance(item, str) and item.strip()]
 
 
 def _metadata_without_keys(metadata_json: dict | None, keys: set[str]) -> dict[str, object]:
@@ -217,16 +235,8 @@ async def _chapter_sources(
     return sources
 
 
-def _build_draft_prompt(
-    *,
-    chapter: MemoirBookPlanChapter,
-    sources: list[ChapterSourceText],
-    feedback: str | None,
-    previous_content: str | None = None,
-    pending_source_utterance_ids: set[str] | None = None,
-) -> str:
-    pending_ids = pending_source_utterance_ids or set()
-    source_text = "\n\n".join(
+def _source_block(sources: list[ChapterSourceText], pending_ids: set[str]) -> str:
+    return "\n\n".join(
         (
             f"source {index}\n"
             f"source_type: {'新增来源' if source.ref.utterance_id in pending_ids else '既有来源'}\n"
@@ -236,12 +246,93 @@ def _build_draft_prompt(
         )
         for index, source in enumerate(sources, start=1)
     )
+
+
+def _build_revision_plan_prompt(
+    *,
+    chapter: MemoirBookPlanChapter,
+    sources: list[ChapterSourceText],
+    previous_content: str,
+    pending_source_utterance_ids: set[str],
+) -> str:
+    return f"""请判断本章新增来源应该如何并入现有章节正文。
+
+章节标题参考：{chapter.title}
+
+现有章节正文：
+{previous_content.strip()}
+
+来源转写：
+{_source_block(sources, pending_source_utterance_ids)}
+
+请输出严格 JSON，不要 Markdown，不要解释。格式：
+{{
+  "mode": "supplement",
+  "reason": "判断理由",
+  "pending_source_ids": ["新增来源 utterance_id"],
+  "related_existing_source_ids": ["相关既有来源 utterance_id"],
+  "coverage_requirements": ["正文生成时必须覆盖的要点"]
+}}
+
+判断规则：
+- mode=supplement：新增来源属于本章，但与现有正文关系较弱，适合作为新段落或补充细节自然加入。
+- mode=regenerate：新增来源与现有正文讲的是同一件事、同一人物/地点/时间段，或会修正现有叙述，需要重新组织整章。
+- mode=needs_review：新增来源明显不属于本章，或缺少足够关系，应该先由用户调整章节归属。
+- 不要新增来源没有讲过的事实；判断必须基于来源转写和现有正文。
+"""
+
+
+def _revision_plan_from_content(content: str, pending_source_utterance_ids: set[str]) -> ChapterRevisionPlan:
+    payload = extract_json_payload(content)
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=502, detail="AI 未返回有效章节修订规划")
+    mode = payload.get("mode")
+    if mode not in {"supplement", "regenerate", "needs_review"}:
+        raise HTTPException(status_code=502, detail="AI 未返回有效章节修订模式")
+    pending_ids = _string_list(payload.get("pending_source_ids")) or sorted(pending_source_utterance_ids)
+    return ChapterRevisionPlan(
+        mode=mode,
+        reason=_text_or_empty(payload.get("reason") if isinstance(payload.get("reason"), str) else ""),
+        pending_source_ids=pending_ids,
+        related_existing_source_ids=_string_list(payload.get("related_existing_source_ids")),
+        coverage_requirements=_string_list(payload.get("coverage_requirements")),
+    )
+
+
+def _revision_plan_prompt_text(revision_plan: ChapterRevisionPlan | None) -> str:
+    if not revision_plan:
+        return ""
+    requirements = "\n".join(f"- {item}" for item in revision_plan.coverage_requirements)
+    related_ids = ", ".join(revision_plan.related_existing_source_ids) or "无"
+    pending_ids = ", ".join(revision_plan.pending_source_ids) or "无"
+    return (
+        "\n修订规划：\n"
+        f"mode: {revision_plan.mode}\n"
+        f"reason: {revision_plan.reason or '无'}\n"
+        f"pending_source_ids: {pending_ids}\n"
+        f"related_existing_source_ids: {related_ids}\n"
+        f"coverage_requirements:\n{requirements or '- 覆盖所有来源中的具体事实'}\n"
+    )
+
+
+def _build_draft_prompt(
+    *,
+    chapter: MemoirBookPlanChapter,
+    sources: list[ChapterSourceText],
+    feedback: str | None,
+    previous_content: str | None = None,
+    pending_source_utterance_ids: set[str] | None = None,
+    revision_plan: ChapterRevisionPlan | None = None,
+) -> str:
+    pending_ids = pending_source_utterance_ids or set()
+    source_text = _source_block(sources, pending_ids)
     feedback_text = f"\n用户反馈：{feedback.strip()}\n" if feedback else ""
     previous_text = (
         f"\n原章节正文（作为补写基础，尽量保留原有表达和段落）：\n{previous_content.strip()}\n"
         if previous_content
         else ""
     )
+    revision_text = _revision_plan_prompt_text(revision_plan)
     supplement_text = (
         "\n本次任务：只把 source_type 为“新增来源”的转写里用户确实讲过的内容自然补入原章节正文；"
         "没有新增来源支撑的内容不要扩写，既有段落不要无故重写。\n"
@@ -264,6 +355,7 @@ def _build_draft_prompt(
 章节标题参考：{chapter.title}
 {feedback_text}
 {previous_text}
+{revision_text}
 {supplement_text}
 {coverage_text}
 写作要求：
@@ -390,23 +482,45 @@ async def generate_chapter_draft(
         return _draft_response(existing)
 
     sources = await _chapter_sources(db, project_id=project_id, chapter=chapter)
-    should_supplement_pending_sources = bool(pending_source_ids) and not req.force_regenerate
-    previous_content = (
-        existing.versions[-1].content
-        if existing and existing.versions and should_supplement_pending_sources
-        else None
-    )
-    prompt = _build_draft_prompt(
-        chapter=chapter,
-        sources=sources,
-        feedback=req.feedback,
-        previous_content=previous_content,
-        pending_source_utterance_ids=pending_source_ids if should_supplement_pending_sources else set(),
-    )
     client = ai_client
+    revision_plan: ChapterRevisionPlan | None = None
     try:
         if client is None:
             client = get_ai_service(req.ai_model)
+        has_existing_version = bool(existing and existing.versions)
+        should_plan_pending_sources = bool(pending_source_ids) and not req.force_regenerate and has_existing_version
+        if should_plan_pending_sources:
+            plan_prompt = _build_revision_plan_prompt(
+                chapter=chapter,
+                sources=sources,
+                previous_content=existing.versions[-1].content,
+                pending_source_utterance_ids=pending_source_ids,
+            )
+            plan_content = await client._call_llm(
+                REVISION_PLAN_SYSTEM_PROMPT,
+                plan_prompt,
+                temperature=0.1,
+                max_tokens=700,
+                timeout=60.0,
+            )
+            revision_plan = _revision_plan_from_content(str(plan_content), pending_source_ids)
+            if revision_plan.mode == "needs_review":
+                raise HTTPException(status_code=409, detail="新增来源与本章关系不明确，请先调整章节归属")
+
+        should_supplement_pending_sources = revision_plan is not None and revision_plan.mode == "supplement"
+        previous_content = (
+            existing.versions[-1].content
+            if existing and existing.versions and should_supplement_pending_sources
+            else None
+        )
+        prompt = _build_draft_prompt(
+            chapter=chapter,
+            sources=sources,
+            feedback=req.feedback,
+            previous_content=previous_content,
+            pending_source_utterance_ids=pending_source_ids if should_supplement_pending_sources else set(),
+            revision_plan=revision_plan,
+        )
         content = await client._call_llm(
             SYSTEM_PROMPT,
             prompt,
