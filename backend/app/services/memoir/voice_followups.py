@@ -56,6 +56,16 @@ PRIMARY_INTENTS = {
     "transition",
     "repair",
 }
+POST_ACKNOWLEDGEMENT_NON_QUESTION_INTENTS = {
+    "acknowledge",
+    "encourage_continue",
+    "reflect_summary",
+}
+POST_ACKNOWLEDGEMENT_QUESTION_INTENTS = {
+    "follow_up",
+    "transition",
+    "repair",
+}
 
 
 @dataclass(frozen=True)
@@ -256,6 +266,27 @@ def _parse_interviewer_turn(
     )
 
 
+def _question_turn_after_acknowledgement(turn: InterviewerTurn) -> InterviewerTurn:
+    primary_intent = (
+        turn.primary_intent
+        if turn.primary_intent in POST_ACKNOWLEDGEMENT_QUESTION_INTENTS
+        else "follow_up"
+    )
+    intent_tags = [
+        tag for tag in turn.intent_tags
+        if tag not in POST_ACKNOWLEDGEMENT_NON_QUESTION_INTENTS
+    ]
+    if primary_intent not in intent_tags:
+        intent_tags.append(primary_intent)
+    return InterviewerTurn(
+        primary_intent=primary_intent,
+        intent_tags=intent_tags[:5],
+        speech_text=turn.speech_text,
+        expects_answer=True,
+        parsed_json=turn.parsed_json,
+    )
+
+
 def _build_user_prompt(
     voice_session: MemoirVoiceSession,
     *,
@@ -272,7 +303,10 @@ def _build_user_prompt(
     module_label = _module_label(voice_session.current_guidance_module)
     regenerate_instruction = "这次是在替换上一句回应，请换一个角度，不要重复上一句。" if regenerate else ""
     pipeline_instruction = (
-        "上一条老余回应只是短承接；这次直接生成下一句要推进访谈的问题或自然转向，不要重复上一条承接。"
+        "上一条老余回应已经完成了短承接；这次只生成下一句推进访谈的问题或自然转向。"
+        "不要再承接、认可、概括或复述叙述者刚才说的内容，"
+        "不要用“您刚才说”“听起来”“这个画面”“这段经历”这类开头；"
+        "primary_intent 优先 follow_up 或 transition，intent_tags 不要包含 acknowledge、encourage_continue、reflect_summary。"
         if acknowledgement_message_id
         else ""
     )
@@ -385,10 +419,12 @@ def _build_acknowledgement_prompt(
 
 承接目标：
 - 让叙述者马上感觉“刚才这段话被听见了”
-- 可以轻轻认可、复述一个具体画面、点出一种感受，或鼓励继续
+- 只做当下的自然短回应，可以轻轻认可、点出一种感受，或鼓励继续
+- 不要复述整句，不要把叙述者刚说过的人名、地点、事件串起来再说一遍
+- 避免“您刚才说”“你提到”“这个画面”“这段经历”这类模板开头
 - 不要问问题，不要引入新方向，不要总结成大段
-- 不要说空泛的“您真棒”“很有意义”；必须落在叙述者刚说过的具体内容上
-- 适合语音播放，通常 1 句，20 到 50 个汉字
+- 不要说空泛的“您真棒”“很有意义”；可以贴住情绪、语气或叙述价值，但不要机械复读内容
+- 适合语音播放，通常 1 句，14 到 36 个汉字
 - 不要编造上下文没有的信息
 - expects_answer 必须为 false
 
@@ -589,6 +625,8 @@ async def generate_voice_follow_up(
         max_tokens=llm_max_tokens,
     )
     turn = _parse_interviewer_turn(content, fallback_intent=fallback_intent)
+    if acknowledgement_message:
+        turn = _question_turn_after_acknowledgement(turn)
     return await _save_interviewer_turn(
         db,
         voice_session=voice_session,

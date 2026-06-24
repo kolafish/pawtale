@@ -862,23 +862,55 @@ test("voice chat pipelines acknowledgement before the next follow-up question", 
     messageId: item.messageId,
     autoListenAfterPlayback: item.autoListenAfterPlayback,
     expectsAnswer: item.expectsAnswer,
+    waitForNextTurnBeforePlaybackMs: item.waitForNextTurnBeforePlaybackMs,
     text: item.text,
   })), [
     {
       messageId: "assistant-ack-1",
       autoListenAfterPlayback: false,
       expectsAnswer: false,
+      waitForNextTurnBeforePlaybackMs: 900,
       text: "您刚才说的院子和外婆，一下子就有画面了。",
     },
     {
       messageId: "assistant-question-1",
       autoListenAfterPlayback: true,
       expectsAnswer: true,
+      waitForNextTurnBeforePlaybackMs: 0,
       text: "那时候在院子里，外婆最常带着您做什么？",
     },
   ]);
   assert.equal(context.data.lastFollowUpSourceMessageId, "user-message-1");
   assert.equal(context.data.persistenceStateText, "等待回答");
+});
+
+test("voice chat can bridge acknowledgement playback while the next question is preparing", async () => {
+  const page = loadVoiceChatPage();
+  const context = {
+    ...page,
+    data: {
+      ...page.data,
+      followUpLoading: true,
+      followUpTTSStateText: "",
+    },
+    assistantTurnQueue: [],
+    ttsRequestSerial: 0,
+    setData(patch) {
+      this.data = { ...this.data, ...patch };
+    },
+  };
+
+  const shouldPlay = await page.waitForNextAssistantTurnBeforePlayback.call(context, {
+    waitForNextTurnBeforePlaybackMs: 5,
+  });
+  assert.equal(shouldPlay, true);
+  assert.equal(context.data.followUpTTSStateText, "正在准备下一句语音");
+
+  const cancelled = page.waitForNextAssistantTurnBeforePlayback.call(context, {
+    waitForNextTurnBeforePlaybackMs: 5,
+  });
+  context.ttsRequestSerial += 1;
+  assert.equal(await cancelled, false);
 });
 
 test("voice chat asks with AI voice when auto-listen hears no answer", async () => {

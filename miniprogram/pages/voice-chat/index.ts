@@ -131,6 +131,10 @@ const AUTO_STOP_MIN_RECORDING_MS = 1200;
 const AUTO_LISTEN_NO_ANSWER_MS = 15000;
 const MAX_CONSECUTIVE_NO_ANSWER_PROMPTS = 2;
 
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 interface AutoListenGateSnapshot {
   hasClient: boolean;
   autoListenEnabled: boolean;
@@ -169,6 +173,7 @@ Page<VoiceChatData, {
   skipFollowUp(): void;
   enqueueAssistantTurn(item: AssistantTurnQueueItem): void;
   drainAssistantTurnQueue(): Promise<void>;
+  waitForNextAssistantTurnBeforePlayback(item: AssistantTurnQueueItem): Promise<boolean>;
   prepareAssistantTurnAudio(item: AssistantTurnQueueItem): Promise<PreparedAssistantTurnAudio>;
   showAssistantTurn(item: AssistantTurnQueueItem, patch?: Partial<VoiceChatData>): void;
   playPreparedAssistantTurn(
@@ -878,6 +883,9 @@ Page<VoiceChatData, {
           if (!prepared) {
             continue;
           }
+          if (!(await this.waitForNextAssistantTurnBeforePlayback(item))) {
+            continue;
+          }
           await this.playPreparedAssistantTurn(item, prepared);
         } catch (error) {
           if (error instanceof Error && error.message === "__assistant_audio_cancelled__") {
@@ -892,6 +900,19 @@ Page<VoiceChatData, {
     } finally {
       this.assistantTurnQueueRunning = false;
     }
+  },
+
+  async waitForNextAssistantTurnBeforePlayback(item) {
+    const waitMs = item.waitForNextTurnBeforePlaybackMs || 0;
+    if (waitMs <= 0 || this.assistantTurnQueue.length || !this.data.followUpLoading) {
+      return true;
+    }
+    const requestSerial = this.ttsRequestSerial;
+    this.setData({
+      followUpTTSStateText: "正在准备下一句语音",
+    });
+    await delay(waitMs);
+    return requestSerial === this.ttsRequestSerial;
   },
 
   async prepareAssistantTurnAudio(item) {
@@ -986,6 +1007,7 @@ Page<VoiceChatData, {
       expectsAnswer: line.metadata_json?.expects_answer !== false,
       autoListenAfterPlayback,
       forceRegenerate,
+      waitForNextTurnBeforePlaybackMs: 0,
       line,
     });
   },
