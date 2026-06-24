@@ -34,7 +34,7 @@
 
   <view wx:if="{{!voiceAuthorizationAgreed}}" class="voice-auth-panel">
     <text class="voice-auth-title">开始录音前需要声纹授权</text>
-    <text class="voice-auth-desc">同意后才会打开麦克风，语音会用于实时识别文字、AI 追问、原始音频留存和回忆录成书。</text>
+    <text class="voice-auth-desc">同意后才会打开麦克风，语音会用于实时识别文字、老余语音回应、原始音频留存和回忆录成书。</text>
     <checkbox-group bindchange="changeVoiceAuthorization">
       <label class="voice-auth-row">
         <checkbox
@@ -53,7 +53,7 @@
   <view wx:if="{{assistantPromptText || followUpLoading || followUpError || canRequestFollowUp}}" class="assistant-panel {{followUpError ? 'error-state' : ''}}">
     <view class="assistant-head">
       <text class="assistant-label">{{assistantPromptLabel}}</text>
-      <text class="assistant-state">{{followUpLoading ? "思考中" : (followUpError ? "追问失败" : (assistantPromptText ? "等待回答" : "可生成"))}}</text>
+      <text class="assistant-state">{{followUpLoading ? "思考中" : (followUpError ? "回应失败" : (assistantPromptText ? (assistantExpectsAnswer ? "等待回答" : "可继续") : "可生成"))}}</text>
     </view>
     <view wx:if="{{followUpTTSPlaying && assistantPromptText}}" class="assistant-tts-text">
       <text class="assistant-tts-spoken">{{ttsSpokenText}}</text>
@@ -81,7 +81,7 @@
         disabled="{{followUpLoading}}"
         bindtap="regenerateFollowUp"
       >
-        {{followUpError ? (assistantPromptLabel === "AI 开场" ? "重试开场" : "重试追问") : (assistantPromptText ? (assistantPromptLabel === "AI 开场" ? "换个开场" : "换个追问") : (assistantPromptLabel === "AI 开场" ? "生成开场" : "生成追问"))}}
+        {{followUpError ? "重新生成" : (assistantPromptText ? "换个说法" : "生成回应")}}
       </button>
       <button
         wx:if="{{assistantPromptText && !followUpLoading && !followUpError}}"
@@ -94,7 +94,7 @@
   </view>
 
   <view class="transcript-stage">
-    <text class="stage-eyebrow">{{recording ? captureStateText : (followUpLoading ? (assistantPromptLabel === "AI 开场" ? "AI 正在开场" : "AI 正在追问") : "准备好了")}}</text>
+    <text class="stage-eyebrow">{{recording ? captureStateText : (followUpLoading ? "老余正在回应" : "准备好了")}}</text>
     <text class="live-text">{{liveText || latestTranscriptText || (recording ? "请直接说，我会把文字显示在这里" : "点下方按钮开始回答")}}</text>
     <view class="capture-strip {{recording ? 'active' : ''}}">
       <view class="capture-dot"></view>
@@ -140,7 +140,7 @@
       bindtap="toggleRecording"
     >
       <image class="mic-icon" src="/assets/memoir-microphone.png" mode="aspectFit" />
-      <text>{{!voiceAuthorizationAgreed ? "同意后开始说话" : (connecting ? "连接中" : (followUpLoading ? "AI 思考中" : primaryActionText))}}</text>
+      <text>{{!voiceAuthorizationAgreed ? "同意后开始说话" : (connecting ? "连接中" : (followUpLoading ? "老余思考中" : primaryActionText))}}</text>
     </button>
   </view>
 </view>

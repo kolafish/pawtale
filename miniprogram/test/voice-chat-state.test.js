@@ -4,7 +4,10 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 
 const {
+  assistantExpectsAnswer,
+  assistantIntentLabel,
   assistantPanelCopy,
+  assistantPrimaryIntent,
   assistantTranscriptState,
   canRequestFollowUp,
   countTextChars,
@@ -32,6 +35,7 @@ const assistantLine = {
   text: "那时候你最记得谁？",
   message_id: "message-assistant",
   metadata_json: {
+    primary_intent: "follow_up",
     tts_timing_source: "volc_tts",
     tts_alignment: [
       {
@@ -62,10 +66,13 @@ test("derives assistant panel state from transcript lines", () => {
   assert.equal(latestAssistantMessageId(lines), "message-assistant");
   assert.equal(visibleAssistantLine(lines, ""), assistantLine);
   assert.equal(visibleAssistantLine(lines, "message-assistant"), undefined);
+  assert.equal(assistantPrimaryIntent(assistantLine), "follow_up");
+  assert.equal(assistantExpectsAnswer(assistantLine), true);
+  assert.equal(assistantIntentLabel("acknowledge", true), "老余回应");
   assert.deepEqual(assistantPanelCopy(lines), {
-    assistantPromptLabel: "AI 追问",
-    assistantLoadingText: "正在根据刚才的内容生成下一句追问",
-    assistantEmptyText: "可以让 AI 根据刚才的内容继续追问。",
+    assistantPromptLabel: "老余追问",
+    assistantLoadingText: "老余正在想怎么接话",
+    assistantEmptyText: "可以让老余根据刚才的内容接着聊。",
   });
 });
 
@@ -81,9 +88,10 @@ test("derives assistant transcript patch from lines and overrides generated assi
       transcriptLines: [userLine, assistantLine],
       latestTranscriptText: userLine.text,
       assistantPromptText: assistantLine.text,
-      assistantPromptLabel: "AI 追问",
-      assistantLoadingText: "正在根据刚才的内容生成下一句追问",
-      assistantEmptyText: "可以让 AI 根据刚才的内容继续追问。",
+      assistantPromptLabel: "老余追问",
+      assistantLoadingText: "老余正在想怎么接话",
+      assistantEmptyText: "可以让老余根据刚才的内容接着聊。",
+      assistantExpectsAnswer: true,
       followUpMessageId: "message-assistant",
       followUpAudioFileId: "",
       followUpTTSStateText: "等待语音",
@@ -116,14 +124,25 @@ test("derives assistant transcript patch from lines and overrides generated assi
     }).assistantPromptText,
     "覆盖后的追问",
   );
+  assert.equal(
+    assistantTranscriptState([userLine, {
+      ...assistantLine,
+      metadata_json: { ...assistantLine.metadata_json, expects_answer: false },
+    }], {
+      guidanceMode: "guided_interview",
+      lastFollowUpSourceMessageId: "message-user",
+      followUpLoading: false,
+    }).assistantExpectsAnswer,
+    false,
+  );
 });
 
 test("derives opening follow-up source before the first user line", () => {
   assert.equal(followUpSourceMessageId([]), "opening");
   assert.deepEqual(assistantPanelCopy([]), {
-    assistantPromptLabel: "AI 开场",
-    assistantLoadingText: "正在准备第一句话",
-    assistantEmptyText: "AI 会先说一句，帮你开始讲。",
+    assistantPromptLabel: "老余开场",
+    assistantLoadingText: "老余正在准备第一句话",
+    assistantEmptyText: "老余会先说一句，帮你开始讲。",
   });
   assert.equal(canRequestFollowUp([], "free_narration", "", false), false);
   assert.equal(canRequestFollowUp([], "guided_interview", "opening", false), false);

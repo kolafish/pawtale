@@ -4,6 +4,14 @@ export type MemoirVoiceTranscriptIncludedFilter = "all" | "included" | "not_incl
 export type MemoirVoiceSessionStatus = "created" | "listening" | "speaking" | "stopped" | "failed";
 export type MemoirChatMessageRole = "user" | "assistant" | "system";
 export type MemoirChatContentStatus = "partial" | "final" | "corrected";
+export type MemoirVoiceAssistantIntent =
+  | "opening"
+  | "follow_up"
+  | "acknowledge"
+  | "encourage_continue"
+  | "reflect_summary"
+  | "transition"
+  | "repair";
 export type MemoirCreatedBy = "user" | "ai" | "asr" | "system";
 export type MemoirBookPlanStatus = "draft" | "confirmed";
 export type MemoirBookChapterDraftStatus = "draft" | "confirmed";
@@ -133,6 +141,9 @@ export interface MemoirVoiceNoAnswerPromptRequest {
 export interface MemoirVoiceFollowUpResponse {
   message: MemoirChatMessage;
   follow_up_text: string;
+  primary_intent?: MemoirVoiceAssistantIntent | string;
+  intent_tags?: string[];
+  expects_answer?: boolean;
 }
 
 export interface MemoirAssistantTTSRequest {
