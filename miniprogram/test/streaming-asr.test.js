@@ -182,6 +182,24 @@ test("normalizes invalid gateway payloads into session errors", () => {
     },
   );
   assert.deepEqual(
+    classifyVoiceGatewayError({ type: "session.error", state: "failed", error: "voice_gateway_user_session_exists" }),
+    {
+      kind: "connection",
+      code: "voice_gateway_user_session_exists",
+      state: "failed",
+      message: "已有语音连接正在收尾，请稍后重试",
+    },
+  );
+  assert.deepEqual(
+    classifyVoiceGatewayError({ type: "session.error", state: "failed", error: "voice_gateway_capacity_reached" }),
+    {
+      kind: "connection",
+      code: "voice_gateway_capacity_reached",
+      state: "failed",
+      message: "当前语音服务繁忙，请稍后再试",
+    },
+  );
+  assert.deepEqual(
     classifyVoiceGatewayError({
       type: "session.error",
       state: "failed",

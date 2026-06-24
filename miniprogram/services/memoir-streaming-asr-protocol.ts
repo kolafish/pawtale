@@ -95,7 +95,12 @@ export function classifyVoiceClientConnectionError(message: string): VoiceChatEr
 
 function errorKindFromCode(code: string): VoiceChatErrorKind {
   const normalized = code.toLowerCase();
-  if (normalized.startsWith("voice_gateway_connection") || normalized === "voice_gateway_auth_failed") {
+  if (
+    normalized.startsWith("voice_gateway_connection")
+    || normalized === "voice_gateway_auth_failed"
+    || normalized === "voice_gateway_user_session_exists"
+    || normalized === "voice_gateway_capacity_reached"
+  ) {
     return "connection";
   }
   if (normalized.startsWith("voice_session_")) {
@@ -147,7 +152,10 @@ function messageFromErrorCode(code: string, kind: VoiceChatErrorKind): string {
     voice_gateway_connection_failed: "语音连接失败，请重新连接",
     voice_gateway_connection_forbidden: "语音连接被拒绝，请返回后重新进入",
     voice_gateway_connection_timeout: "语音连接超时，请检查网络后重试",
+    voice_gateway_user_session_exists: "已有语音连接正在收尾，请稍后重试",
+    voice_gateway_capacity_reached: "当前语音服务繁忙，请稍后再试",
     voice_session_unavailable: "本次语音记录不存在或已失效，请重新开始",
+    memoir_project_unavailable: "当前回忆录不存在或已失效，请重新进入",
     provider_empty_payload: "语音识别服务返回了空结果",
     unsupported_gateway_event: "语音连接事件不支持",
   };

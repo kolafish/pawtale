@@ -1803,6 +1803,49 @@ test("book page stops active voice edit recording on second tap", async () => {
   assert.equal(context.data.bookVoiceAssistantStatusText, "正在保存录音");
 });
 
+test("book page releases transient voice gateway when hidden", async () => {
+  const closes = [];
+  const { page } = loadBookPage({
+    streamingAsrExports: {
+      MemoirStreamingAsrClient: class {
+        constructor(options) {
+          this.options = options;
+        }
+
+        async connect() {
+          this.options.callbacks.onStatus("ready");
+        }
+
+        startRecording() {
+          this.options.callbacks.onStatus("listening");
+          this.options.callbacks.onPartial("正在说修改要求");
+          return true;
+        }
+
+        stopRecording() {}
+
+        close(options) {
+          closes.push(options);
+        }
+
+        configureAutoStop() {}
+      },
+    },
+  });
+  const context = pageContext(page, { projectId: "project/1" });
+  page.applyPlan.call(context, samplePlan("confirmed"));
+
+  await page.startBookVoiceCommand.call(context);
+  page.onHide.call(context);
+
+  assert.deepEqual(closes, [{ force: true }]);
+  assert.equal(context.data.bookVoiceAssistantListening, false);
+  assert.equal(context.data.bookVoiceAssistantBusy, false);
+  assert.equal(context.data.bookVoiceAssistantConversationActive, false);
+  assert.equal(context.data.bookVoiceLiveText, "");
+  assert.equal(context.data.bookVoiceCaptureStateText, "麦克风未开始");
+});
+
 test("book page splits active TTS text for highlighting", () => {
   const { page } = loadBookPage();
   const context = pageContext(page, {

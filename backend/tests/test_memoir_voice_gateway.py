@@ -511,6 +511,7 @@ async def test_book_voice_command_gateway_uses_transient_realtime_session(monkey
     assert calls["auth"] == (websocket, db)
     assert calls["load_project"] == (db, "project-1", "user-1")
     assert transient_session_id.startswith("book-voice-command-project-1-")
+    assert calls["capacity"] == ("user-1:book-voice-command", transient_session_id)
     assert calls["asr_factory"] == ("user-1", transient_session_id)
     assert set(calls["gateway_kwargs"]) == {"client", "asr_client_factory"}
     assert calls["gateway_kwargs"]["client"] is websocket
