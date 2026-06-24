@@ -159,6 +159,62 @@ export function assistantPanelCopy(lines: VoiceChatTranscriptLine[]): {
       };
 }
 
+export interface AssistantTranscriptStateOptions {
+  dismissedFollowUpMessageId?: string;
+  guidanceMode: MemoirGuidanceMode;
+  lastFollowUpSourceMessageId: string;
+  followUpLoading: boolean;
+  currentFollowUpTTSStateText?: string;
+  assistantPromptText?: string;
+  followUpMessageId?: string;
+  followUpAudioFileId?: string;
+  followUpTTSStateText?: string;
+  ttsAlignment?: TTSAlignmentSegment[];
+  canRequestFollowUp?: boolean;
+}
+
+export interface AssistantTranscriptStatePatch {
+  transcriptLines: VoiceChatTranscriptLine[];
+  latestTranscriptText: string;
+  assistantPromptText: string;
+  assistantPromptLabel: string;
+  assistantLoadingText: string;
+  assistantEmptyText: string;
+  followUpMessageId: string;
+  followUpAudioFileId: string;
+  followUpTTSStateText: string;
+  ttsAlignment: TTSAlignmentSegment[];
+  totalTranscriptCharCount: number;
+  canRequestFollowUp: boolean;
+}
+
+export function assistantTranscriptState(
+  lines: VoiceChatTranscriptLine[],
+  options: AssistantTranscriptStateOptions,
+): AssistantTranscriptStatePatch {
+  const assistantLine = visibleAssistantLine(lines, options.dismissedFollowUpMessageId || "");
+  const assistantMessageId = assistantLine?.message_id || assistantLine?.id || "";
+  const assistantAudioFileId = assistantLine?.audio_file_id || "";
+  return {
+    transcriptLines: lines,
+    latestTranscriptText: latestTranscriptText(lines),
+    assistantPromptText: options.assistantPromptText ?? (assistantLine?.text || ""),
+    ...assistantPanelCopy(lines),
+    followUpMessageId: options.followUpMessageId ?? assistantMessageId,
+    followUpAudioFileId: options.followUpAudioFileId ?? assistantAudioFileId,
+    followUpTTSStateText: options.followUpTTSStateText
+      ?? (assistantAudioFileId ? "语音已生成" : (options.currentFollowUpTTSStateText || "")),
+    ttsAlignment: options.ttsAlignment ?? ttsAlignmentFromAssistantLine(assistantLine),
+    totalTranscriptCharCount: totalTranscriptChars(lines),
+    canRequestFollowUp: options.canRequestFollowUp ?? canRequestFollowUp(
+      lines,
+      options.guidanceMode,
+      options.lastFollowUpSourceMessageId,
+      options.followUpLoading,
+    ),
+  };
+}
+
 export function countTextChars(text: string): number {
   return Array.from(text.replace(/\s/g, "")).length;
 }

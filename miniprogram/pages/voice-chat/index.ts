@@ -32,7 +32,7 @@ import {
 } from "../../services/voice-authorization";
 import { ensureRecorderPrivacyAuthorization } from "../../services/wechat-privacy";
 import {
-  assistantPanelCopy,
+  assistantTranscriptState,
   canRequestFollowUp,
   countTextChars,
   coveredFollowUpSourceMessageId,
@@ -41,13 +41,9 @@ import {
   formatDuration,
   gatewayStateText,
   latestAssistantMessageId,
-  latestTranscriptText,
   statusText,
-  totalTranscriptChars,
-  ttsAlignmentFromAssistantLine,
   ttsAlignmentFromMetadata,
   upsertTranscriptLine,
-  visibleAssistantLine,
 } from "../../services/voice-chat-state";
 import {
   clearMemoirVoiceSessionPendingClose,
@@ -466,31 +462,21 @@ Page<VoiceChatData, {
     }
     const guidanceMode = snapshot.detail?.session.guidance_mode || this.data.guidanceMode;
     const currentGuidanceModule = snapshot.detail?.session.current_guidance_module || this.data.currentGuidanceModule;
-    const assistantLine = visibleAssistantLine(snapshot.transcriptLines, this.data.dismissedFollowUpMessageId);
     const coveredSourceMessageId = coveredFollowUpSourceMessageId(snapshot.transcriptLines);
     const lastFollowUpSourceMessageId = coveredSourceMessageId || this.data.lastFollowUpSourceMessageId;
-    const assistantCopy = assistantPanelCopy(snapshot.transcriptLines);
     this.setData({
       guidanceMode,
       currentGuidanceModule,
       modeLabel: voiceGuidanceLabel(guidanceMode, currentGuidanceModule),
-      transcriptLines: snapshot.transcriptLines,
-      latestTranscriptText: latestTranscriptText(snapshot.transcriptLines),
-      assistantPromptText: assistantLine?.text || "",
-      ...assistantCopy,
-      followUpMessageId: assistantLine?.message_id || assistantLine?.id || "",
-      followUpAudioFileId: assistantLine?.audio_file_id || "",
-      followUpTTSStateText: assistantLine?.audio_file_id ? "语音已生成" : this.data.followUpTTSStateText,
-      ttsAlignment: ttsAlignmentFromAssistantLine(assistantLine),
-      totalTranscriptCharCount: totalTranscriptChars(snapshot.transcriptLines),
-      lastFollowUpSourceMessageId,
-      recoveryNotice: snapshot.pendingClose ? "正在恢复上次离开前的访谈记录" : this.data.recoveryNotice,
-      canRequestFollowUp: canRequestFollowUp(
-        snapshot.transcriptLines,
+      ...assistantTranscriptState(snapshot.transcriptLines, {
+        dismissedFollowUpMessageId: this.data.dismissedFollowUpMessageId,
         guidanceMode,
         lastFollowUpSourceMessageId,
-        this.data.followUpLoading,
-      ),
+        followUpLoading: this.data.followUpLoading,
+        currentFollowUpTTSStateText: this.data.followUpTTSStateText,
+      }),
+      lastFollowUpSourceMessageId,
+      recoveryNotice: snapshot.pendingClose ? "正在恢复上次离开前的访谈记录" : this.data.recoveryNotice,
     });
   },
 
@@ -579,8 +565,6 @@ Page<VoiceChatData, {
       : this.data.transcriptLines;
     const coveredSourceMessageId = coveredFollowUpSourceMessageId(nextLines);
     const lastFollowUpSourceMessageId = coveredSourceMessageId || this.data.lastFollowUpSourceMessageId;
-    const assistantLine = visibleAssistantLine(nextLines, this.data.dismissedFollowUpMessageId);
-    const assistantCopy = assistantPanelCopy(nextLines);
     const sessionPatch: Partial<VoiceChatData> = {};
     if (detail.session.status === "stopped") {
       sessionPatch.status = "closed";
@@ -602,22 +586,14 @@ Page<VoiceChatData, {
       guidanceMode,
       currentGuidanceModule,
       modeLabel: voiceGuidanceLabel(guidanceMode, currentGuidanceModule),
-      transcriptLines: nextLines,
-      latestTranscriptText: latestTranscriptText(nextLines),
-      assistantPromptText: assistantLine?.text || "",
-      ...assistantCopy,
-      followUpMessageId: assistantLine?.message_id || assistantLine?.id || "",
-      followUpAudioFileId: assistantLine?.audio_file_id || "",
-      followUpTTSStateText: assistantLine?.audio_file_id ? "语音已生成" : this.data.followUpTTSStateText,
-      ttsAlignment: ttsAlignmentFromAssistantLine(assistantLine),
-      totalTranscriptCharCount: totalTranscriptChars(nextLines),
-      lastFollowUpSourceMessageId,
-      canRequestFollowUp: canRequestFollowUp(
-        nextLines,
+      ...assistantTranscriptState(nextLines, {
+        dismissedFollowUpMessageId: this.data.dismissedFollowUpMessageId,
         guidanceMode,
         lastFollowUpSourceMessageId,
-        this.data.followUpLoading,
-      ),
+        followUpLoading: this.data.followUpLoading,
+        currentFollowUpTTSStateText: this.data.followUpTTSStateText,
+      }),
+      lastFollowUpSourceMessageId,
     });
   },
 
@@ -712,21 +688,22 @@ Page<VoiceChatData, {
         metadata_json: response.message.metadata_json || {},
       };
       const transcriptLines = upsertTranscriptLine(this.data.transcriptLines, line);
-      const assistantCopy = assistantPanelCopy(transcriptLines);
       this.setData({
-        transcriptLines,
-        assistantPromptText: response.follow_up_text,
-        ...assistantCopy,
+        ...assistantTranscriptState(transcriptLines, {
+          guidanceMode: this.data.guidanceMode,
+          lastFollowUpSourceMessageId: sourceMessageId,
+          followUpLoading: this.data.followUpLoading,
+          assistantPromptText: response.follow_up_text,
+          followUpMessageId: response.message.id,
+          followUpAudioFileId: response.message.audio_file_id || "",
+          followUpTTSStateText: "",
+          ttsAlignment: ttsAlignmentFromMetadata(response.message.metadata_json),
+          canRequestFollowUp: false,
+        }),
         dismissedFollowUpMessageId: "",
-        followUpMessageId: response.message.id,
-        followUpAudioFileId: response.message.audio_file_id || "",
         followUpTTSError: "",
-        followUpTTSStateText: "",
-        ttsAlignment: ttsAlignmentFromMetadata(response.message.metadata_json),
-        totalTranscriptCharCount: totalTranscriptChars(transcriptLines),
         persistenceStateText: "等待回答",
         lastFollowUpSourceMessageId: sourceMessageId,
-        canRequestFollowUp: false,
       });
       writeMemoirVoiceSessionSnapshot(this.data.voiceSessionId, { transcriptLines });
       void this.prepareFollowUpTTS(response.message.id, false);
@@ -1256,21 +1233,22 @@ Page<VoiceChatData, {
         metadata_json: response.message.metadata_json || {},
       };
       const transcriptLines = upsertTranscriptLine(this.data.transcriptLines, line);
-      const assistantCopy = assistantPanelCopy(transcriptLines);
       this.setData({
-        transcriptLines,
-        assistantPromptText: response.follow_up_text,
-        ...assistantCopy,
+        ...assistantTranscriptState(transcriptLines, {
+          guidanceMode: this.data.guidanceMode,
+          lastFollowUpSourceMessageId: this.data.lastFollowUpSourceMessageId,
+          followUpLoading: this.data.followUpLoading,
+          assistantPromptText: response.follow_up_text,
+          followUpMessageId: response.message.id,
+          followUpAudioFileId: response.message.audio_file_id || "",
+          followUpTTSStateText: "",
+          ttsAlignment: ttsAlignmentFromMetadata(response.message.metadata_json),
+          canRequestFollowUp: false,
+        }),
         dismissedFollowUpMessageId: "",
-        followUpMessageId: response.message.id,
-        followUpAudioFileId: response.message.audio_file_id || "",
         followUpTTSError: "",
-        followUpTTSStateText: "",
-        ttsAlignment: ttsAlignmentFromMetadata(response.message.metadata_json),
-        totalTranscriptCharCount: totalTranscriptChars(transcriptLines),
         persistenceStateText: autoListenAfterPlayback ? "AI 正在确认" : "已暂停收音",
         autoListenStateText: autoListenAfterPlayback ? "AI 确认后会继续听" : "已暂停，可点继续说话",
-        canRequestFollowUp: false,
       });
       writeMemoirVoiceSessionSnapshot(this.data.voiceSessionId, { transcriptLines });
       await this.prepareFollowUpTTS(response.message.id, false, autoListenAfterPlayback);
@@ -1447,16 +1425,21 @@ Page<VoiceChatData, {
       end_ms: event.end_ms,
     };
     const transcriptLines = upsertTranscriptLine(this.data.transcriptLines, line);
-    const assistantCopy = assistantPanelCopy(transcriptLines);
     this.consecutiveNoAnswerPrompts = 0;
     this.cancelPendingNoAnswerPrompt();
     this.setData({
       liveText: "",
       liveCharCount: 0,
-      latestTranscriptText: latestTranscriptText(transcriptLines),
-      transcriptLines,
-      ...assistantCopy,
-      totalTranscriptCharCount: totalTranscriptChars(transcriptLines),
+      ...assistantTranscriptState(transcriptLines, {
+        guidanceMode: this.data.guidanceMode,
+        lastFollowUpSourceMessageId: this.data.lastFollowUpSourceMessageId,
+        followUpLoading: false,
+        assistantPromptText: "",
+        followUpMessageId: "",
+        followUpAudioFileId: "",
+        followUpTTSStateText: "",
+        ttsAlignment: [],
+      }),
       persistenceStateText: event.message_id && event.utterance_id && event.transcript_version_id
         ? "已保存"
         : "待同步",
@@ -1469,13 +1452,6 @@ Page<VoiceChatData, {
       followUpLoading: false,
       followUpTTSLoading: false,
       followUpTTSError: "",
-      followUpTTSStateText: "",
-      canRequestFollowUp: canRequestFollowUp(
-        transcriptLines,
-        this.data.guidanceMode,
-        this.data.lastFollowUpSourceMessageId,
-        false,
-      ),
     });
     writeMemoirVoiceSessionSnapshot(this.data.voiceSessionId, { transcriptLines });
     if (event.message_id && event.utterance_id) {
