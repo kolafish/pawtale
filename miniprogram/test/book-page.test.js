@@ -1462,6 +1462,7 @@ test("book page records and previews a voice edit command", async () => {
   });
   const context = pageContext(page, { projectId: "project/1" });
   page.applyPlan.call(context, samplePlan("confirmed"));
+  page.applySourceCoverage.call(context, sampleSourceCoverage(1));
   context.playBookVoiceAssistantReply = async (text, options) => {
     calls.push({ kind: "reply", text, options });
   };
@@ -1480,7 +1481,23 @@ test("book page records and previews a voice edit command", async () => {
   assert.deepEqual(calls[3], {
     kind: "parse",
     projectId: "project/1",
-    data: { text: "把第一章改名为童年往事" },
+    data: {
+      text: "把第一章改名为童年往事",
+      book_context: {
+        source_coverage: {
+          total_source_count: 3,
+          covered_source_count: 2,
+          uncovered_source_count: 1,
+        },
+        uncovered_sources: [
+          {
+            source_index: 3,
+            utterance_id: "utterance-new-1",
+            text: "新增转写",
+          },
+        ],
+      },
+    },
   });
   assert.equal(context.data.bookVoiceCommandText, "把第一章改名为童年往事");
   assert.equal(context.data.bookVoiceCommandIntentLabel, "修改章名");
@@ -1616,6 +1633,11 @@ test("book page sends source coverage context when parsing book voice questions"
           covered_source_count: 2,
           uncovered_source_count: 7,
         },
+        uncovered_sources: Array.from({ length: 7 }, (_, index) => ({
+          source_index: index + 3,
+          utterance_id: `utterance-new-${index + 1}`,
+          text: "新增转写",
+        })),
       },
     },
   });
@@ -1857,6 +1879,69 @@ test("book page executes and undoes a voice chapter move", async () => {
   assert.equal(context.data.bookVoiceCommandUndoText, "");
   assert.equal(context.data.bookVoiceCommandUndoSnapshot, null);
   assert.equal(context.data.bookVoiceAssistantStatusText, "已撤回");
+  delete global.wx;
+});
+
+test("book page executes a voice assignment for an uncovered source", async () => {
+  global.wx = {
+    showModal(options) {
+      options.success({ confirm: true });
+    },
+    showToast() {},
+  };
+  const assignedPlan = samplePlan("confirmed");
+  assignedPlan.chapters[1].source_refs = [sampleRef("utterance-new-1", "新增转写")];
+  const calls = [];
+  const { page } = loadBookPage({
+    voiceApiExports: {
+      assignMemoirBookSources: async (projectId, data) => {
+        calls.push({ kind: "assign", projectId, data });
+        return assignedPlan;
+      },
+      getMemoirBookChapterDraft: async () => sampleDraft(1, "draft"),
+      getMemoirBookSourceCoverage: async () => sampleSourceCoverage(0),
+    },
+  });
+  const context = pageContext(page, { projectId: "project/1" });
+  page.applyPlan.call(context, samplePlan("confirmed"));
+  page.applySourceCoverage.call(context, sampleSourceCoverage(1));
+  page.applyBookOutput.call(context, sampleBookOutput(1, "旧全书"));
+  page.applyBookVoiceCommandPreview.call(context, sampleBookVoiceCommandPreview({
+    original_text: "把刚才这条归到第二章",
+    intent: "assign_source",
+    intent_label: "归入记录",
+    summary: "准备把待收录第 1 条归入「第一次离家」。",
+    operations: [
+      {
+        type: "assign_source",
+        chapter_id: "chapter-2",
+        chapter_title: "第一次离家",
+        source_position: 1,
+        source_index: 3,
+        utterance_id: "utterance-new-1",
+      },
+    ],
+  }));
+
+  await page.executeBookVoiceCommand.call(context);
+
+  assert.deepEqual(calls[0], {
+    kind: "assign",
+    projectId: "project/1",
+    data: {
+      assignments: [
+        {
+          chapter_id: "chapter-2",
+          utterance_ids: ["utterance-new-1"],
+        },
+      ],
+    },
+  });
+  assert.equal(context.data.bookVoiceCommandCanExecute, false);
+  assert.equal(context.data.bookVoiceCommandStateText, "已执行");
+  assert.equal(context.data.bookVoiceAssistantStatusText, "已归入章节");
+  assert.equal(context.data.bookOutput, null);
+  assert.equal(context.data.assigningSourceId, "");
   delete global.wx;
 });
 

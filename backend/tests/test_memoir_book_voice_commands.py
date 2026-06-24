@@ -156,6 +156,9 @@ async def test_mobile_memoir_book_voice_command_parse_uses_ai_payload(
             "target_chapter_title": None,
             "new_title": "童年往事",
             "direction": None,
+            "source_position": None,
+            "source_index": None,
+            "utterance_id": None,
         }
     ]
     assert "1. 外婆家的童年" in fake_ai.calls[0]["user_prompt"]
@@ -215,6 +218,112 @@ async def test_mobile_memoir_book_voice_command_swaps_adjacent_chapters_from_asr
     assert data["requires_confirmation"] is True
     assert data["operations"][0]["chapter_id"] == chapters[1].id
     assert data["operations"][0]["direction"] == "down"
+
+
+async def test_mobile_memoir_book_voice_command_swaps_adjacent_chapters_by_fuzzy_titles(
+    client,
+    test_db,
+    monkeypatch,
+):
+    project_id = await ensure_mobile_memoir_project(client)
+    _, chapters = await _create_two_chapter_plan(
+        test_db,
+        project_id=project_id,
+        titles=["小时候的年", "儿时庭院与家人聚散", "一生的朋友", "职场浮沉与升职加薪"],
+    )
+    fake_ai = FakeBookVoiceCommandAI(
+        {
+            "intent": "move_chapter",
+            "chapter_ref": "小时候的年",
+            "direction": "down",
+            "summary": "准备把小时候的年下移",
+        }
+    )
+    monkeypatch.setattr("app.services.memoir.book_voice_commands.get_ai_service", lambda _model: fake_ai)
+
+    response = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-voice-command/parse",
+        json={"text": "不是啊，我说医生的朋友和职场浮沉这两章的顺序换一下。"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["intent"] == "move_chapter"
+    assert data["summary"] == "准备把「一生的朋友」下移。"
+    assert data["used_ai"] is False
+    assert data["operations"][0]["chapter_id"] == chapters[2].id
+    assert data["operations"][0]["direction"] == "down"
+
+
+async def test_mobile_memoir_book_voice_command_reads_and_assigns_uncovered_sources(
+    client,
+    test_db,
+    monkeypatch,
+):
+    project_id = await ensure_mobile_memoir_project(client)
+    _, chapters = await _create_two_chapter_plan(
+        test_db,
+        project_id=project_id,
+        titles=["小时候的年", "职场浮沉与升职加薪"],
+    )
+    fake_ai = FakeBookVoiceCommandAI(error=RuntimeError("provider unavailable"))
+    monkeypatch.setattr("app.services.memoir.book_voice_commands.get_ai_service", lambda _model: fake_ai)
+    book_context = {
+        "source_coverage": {
+            "total_source_count": 32,
+            "covered_source_count": 22,
+            "uncovered_source_count": 10,
+        },
+        "uncovered_sources": [
+            {
+                "source_index": 23,
+                "utterance_id": "utterance-new-23",
+                "text": "我第一次进厂的时候，师傅带着我熟悉车间。",
+            },
+            {
+                "source_index": 24,
+                "utterance_id": "utterance-new-24",
+                "text": "后来有一次加班到很晚。",
+            },
+        ],
+    }
+
+    response = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-voice-command/parse",
+        json={
+            "text": "你先念一条，然后我告诉你归到哪个章节。",
+            "book_context": book_context,
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["intent"] == "answer_book_question"
+    assert data["requires_confirmation"] is False
+    assert "待收录第 1 条" in data["reply_text"]
+    assert "我第一次进厂" in data["reply_text"]
+
+    response = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-voice-command/parse",
+        json={
+            "text": "把刚才这条归到职场那章。",
+            "book_context": book_context,
+            "conversation_context": [
+                {"role": "assistant", "text": data["reply_text"]},
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["intent"] == "assign_source"
+    assert data["intent_label"] == "归入记录"
+    assert data["requires_confirmation"] is True
+    assert data["summary"] == "准备把待收录第 1 条归入「职场浮沉与升职加薪」。"
+    assert data["operations"][0]["chapter_id"] == chapters[1].id
+    assert data["operations"][0]["utterance_id"] == "utterance-new-23"
+    assert data["operations"][0]["source_position"] == 1
+    assert data["operations"][0]["source_index"] == 23
 
 
 async def test_mobile_memoir_book_voice_command_parse_returns_chapter_title_advice(

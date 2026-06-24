@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import logging
+import re
 
 from fastapi import HTTPException
 from sqlalchemy import func, select
@@ -132,11 +133,60 @@ GUIDED_TOPIC_LIBRARY = """主题题库参考：
 - 某一天：聊最热的一天、最冷的一天、最开心的一天、最难过的一天或最累的一天。
 - 闲聊：聊一个做过的最美的梦、最恐怖的梦、一个小秘密、印象中最好吃的一顿饭、最早的记忆里有什么，或者最饿的一次是什么时候。"""
 
+GUIDED_TOPIC_KEYWORDS = {
+    "person": ("人物", "人", "朋友", "同学", "亲人", "老师"),
+    "event": ("事情", "事件", "经历", "事儿"),
+    "family": ("家庭", "家人", "家里", "父母", "外婆", "爷爷", "奶奶"),
+    "work": ("工作", "上班", "单位", "职场", "同事", "领导", "师傅", "升职"),
+    "place": ("地点", "地方", "老家", "院子", "学校"),
+    "period": ("人生阶段", "时间段", "小时候", "童年", "年轻时候"),
+    "chat": ("闲聊", "随便聊", "梦", "吃的"),
+}
+
+GUIDED_TOPIC_SWITCH_PATTERNS = (
+    r"(聊|聊聊|讲讲|说说|谈谈|换到|换成|换个|换一个|主题|方向).{0,8}{keyword}",
+    r"{keyword}.{0,4}(吧|主题|方向)",
+)
+
 
 def _module_label(module: str | None) -> str:
     if not module:
         return "主题"
     return MODULE_LABELS.get(module, module)
+
+
+def _compact_text(value: str) -> str:
+    return re.sub(r"\s+", "", value.strip())
+
+
+def _latest_user_text(messages: list[MemoirChatMessage]) -> str:
+    for message in reversed(_ordered_messages(messages)):
+        if message.role == MemoirChatMessageRole.USER.value and message.content_text.strip():
+            return message.content_text.strip()
+    return ""
+
+
+def _requested_guidance_topic(text: str) -> tuple[str, str] | None:
+    normalized = _compact_text(text)
+    if not normalized:
+        return None
+    for module, keywords in GUIDED_TOPIC_KEYWORDS.items():
+        for keyword in keywords:
+            escaped_keyword = re.escape(keyword)
+            if any(
+                re.search(pattern.replace("{keyword}", escaped_keyword), normalized)
+                for pattern in GUIDED_TOPIC_SWITCH_PATTERNS
+            ):
+                return module, _module_label(module)
+    return None
+
+
+def _requested_topic_hint(messages: list[MemoirChatMessage]) -> str:
+    requested = _requested_guidance_topic(_latest_user_text(messages))
+    if not requested:
+        return ""
+    _, label = requested
+    return f"叙述者最新一句是在明确选择或切换到“{label}”主题。下一轮必须围绕“{label}”展开，不要继续更早的旧话题。"
 
 
 def _ordered_messages(messages: list[MemoirChatMessage]) -> list[MemoirChatMessage]:
@@ -391,6 +441,21 @@ def _voice_turn_plan_from_request(plan: MemoirVoiceTurnPlanContext | None) -> Vo
     )
 
 
+def _align_plan_to_requested_topic(plan: VoiceTurnPlan, messages: list[MemoirChatMessage]) -> VoiceTurnPlan:
+    requested = _requested_guidance_topic(_latest_user_text(messages))
+    if not requested:
+        return plan
+    _, label = requested
+    return VoiceTurnPlan(
+        user_signal="off_topic",
+        response_strategy="transition",
+        should_play_ack=False,
+        acknowledgement_text="",
+        next_question_brief=f"用户明确想聊{label}，下一问直接围绕{label}经历展开，不继续旧话题",
+        parsed_json=plan.parsed_json,
+    )
+
+
 def _planned_question_turn(turn: InterviewerTurn) -> InterviewerTurn:
     primary_intent = (
         turn.primary_intent
@@ -427,6 +492,7 @@ def _build_user_prompt(
     has_previous_user_message = _has_user_message(previous_messages)
     history_context = _previous_context(previous_messages)
     module_label = _module_label(voice_session.current_guidance_module)
+    topic_hint = _requested_topic_hint(messages)
     regenerate_instruction = "这次是在替换上一句回应，请换一个角度，不要重复上一句。" if regenerate else ""
     if turn_plan:
         played_ack = "已播放短承接" if turn_plan.should_play_ack else "未播放短承接"
@@ -516,6 +582,7 @@ primary_intent 优先 follow_up、transition 或 repair，intent_tags 不要包�
 - 遇到痛苦、遗憾、疾病、离别等内容，可以温和承接，不要强行积极
 {regenerate_instruction}
 {pipeline_instruction}
+{topic_hint}
 
 {mode_instruction}
 
@@ -546,10 +613,12 @@ def _build_turn_plan_prompt(
     *,
     previous_messages: list[MemoirChatMessage],
 ) -> str:
-    context = _recent_context(list(voice_session.messages))
+    messages = list(voice_session.messages)
+    context = _recent_context(messages)
     history_context = _previous_context(previous_messages)
     guidance_mode = MemoirGuidanceMode(voice_session.guidance_mode)
     module_label = _module_label(voice_session.current_guidance_module)
+    topic_hint = _requested_topic_hint(messages)
     mode_hint = (
         f"当前是主题讲述，当前主题线索是“{module_label}”。计划要服务于当前主题，但如果用户已经自然换题，以最近对话为准。"
         if guidance_mode == MemoirGuidanceMode.GUIDED_INTERVIEW
@@ -569,6 +638,7 @@ def _build_turn_plan_prompt(
 - 不要编造上下文没有的信息
 
 {mode_hint}
+{topic_hint}
 
 访谈上下文：
 {context}
@@ -809,7 +879,7 @@ async def plan_voice_turn(
         prompt=prompt,
         max_tokens=TURN_PLAN_MAX_TOKENS,
     )
-    plan = _parse_voice_turn_plan(content)
+    plan = _align_plan_to_requested_topic(_parse_voice_turn_plan(content), messages)
     acknowledgement: MemoirVoiceFollowUpResponse | None = None
     if plan.should_play_ack:
         turn = InterviewerTurn(
