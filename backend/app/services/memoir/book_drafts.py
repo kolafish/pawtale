@@ -45,6 +45,13 @@ from app.services.memoir.book_audio import (
     source_text_hash,
     synthesize_text_audio,
 )
+from app.services.memoir.book_plan_sources import (
+    DRAFT_STATUS_REASON_KEY,
+    REMOVED_SOURCE_UTTERANCE_IDS_KEY,
+    metadata_without_keys as _metadata_without_keys,
+    pending_source_ids as _pending_source_ids,
+    source_change_metadata_keys as _source_change_metadata_keys,
+)
 from app.services.memoir.voice_tts import TTSClient
 
 
@@ -53,10 +60,6 @@ REVISION_PLAN_SYSTEM_PROMPT = "你是一位谨慎的中文回忆录修订编辑�
 EVENT_CLUSTER_SYSTEM_PROMPT = "你是一位谨慎的中文回忆录结构编辑，只根据来源转写判断哪些记录讲的是同一件事。"
 AI_BOOK_DRAFT_UNAVAILABLE_MESSAGE = "AI 服务暂时不可用，请稍后重试。"
 CHAPTER_TTS_CACHE_KEY = "chapter_tts"
-PENDING_SOURCE_UTTERANCE_IDS_KEY = "pending_source_utterance_ids"
-SOURCE_ASSIGNMENT_UPDATED_AT_KEY = "source_assignment_updated_at"
-REMOVED_SOURCE_UTTERANCE_IDS_KEY = "removed_source_utterance_ids"
-SOURCE_REFS_REMOVED_AT_KEY = "source_refs_removed_at"
 logger = logging.getLogger(__name__)
 
 
@@ -103,27 +106,8 @@ def _string_list(value: object) -> list[str]:
     return [item.strip() for item in value if isinstance(item, str) and item.strip()]
 
 
-def _metadata_without_keys(metadata_json: dict | None, keys: set[str]) -> dict[str, object]:
-    metadata = dict(metadata_json or {})
-    for key in keys:
-        metadata.pop(key, None)
-    return metadata
-
-
 def _pending_source_utterance_ids(chapter: MemoirBookPlanChapter) -> set[str]:
-    value = (chapter.metadata_json or {}).get(PENDING_SOURCE_UTTERANCE_IDS_KEY, [])
-    if not isinstance(value, list):
-        return set()
-    return {item.strip() for item in value if isinstance(item, str) and item.strip()}
-
-
-def _source_change_metadata_keys() -> set[str]:
-    return {
-        PENDING_SOURCE_UTTERANCE_IDS_KEY,
-        SOURCE_ASSIGNMENT_UPDATED_AT_KEY,
-        REMOVED_SOURCE_UTTERANCE_IDS_KEY,
-        SOURCE_REFS_REMOVED_AT_KEY,
-    }
+    return _pending_source_ids(chapter.metadata_json)
 
 
 def _version_response(version: MemoirBookChapterDraftVersion) -> MemoirBookChapterDraftVersionResponse:
@@ -520,7 +504,7 @@ async def _append_version(
     else:
         draft.status = MemoirBookChapterDraftStatus.DRAFT.value
     if clear_source_assignment_state:
-        draft.metadata_json = _metadata_without_keys(draft.metadata_json, {"status_reason"})
+        draft.metadata_json = _metadata_without_keys(draft.metadata_json, {DRAFT_STATUS_REASON_KEY})
         if chapter:
             chapter.metadata_json = _metadata_without_keys(
                 chapter.metadata_json,
@@ -703,7 +687,10 @@ async def confirm_chapter_draft(
     if not draft or not draft.versions:
         raise HTTPException(status_code=400, detail="章节稿为空，无法确认")
     draft.status = MemoirBookChapterDraftStatus.CONFIRMED.value
-    draft.metadata_json = _metadata_without_keys(draft.metadata_json, {"status_reason", REMOVED_SOURCE_UTTERANCE_IDS_KEY})
+    draft.metadata_json = _metadata_without_keys(
+        draft.metadata_json,
+        {DRAFT_STATUS_REASON_KEY, REMOVED_SOURCE_UTTERANCE_IDS_KEY},
+    )
     chapter.metadata_json = _metadata_without_keys(chapter.metadata_json, _source_change_metadata_keys())
     db.add(chapter)
     await db.commit()

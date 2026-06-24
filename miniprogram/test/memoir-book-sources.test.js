@@ -64,6 +64,7 @@ test("clearSourceChangeMetadata only removes source-change bookkeeping keys", ()
     clearSourceChangeMetadata({
       pending_source_utterance_ids: ["utterance-1"],
       source_assignment_updated_at: "2026-06-17T00:00:00Z",
+      source_refs_updated_at: "2026-06-17T01:00:00Z",
       removed_source_utterance_ids: ["utterance-2"],
       source_refs_removed_at: "2026-06-18T00:00:00Z",
       title_updated_by: "user",

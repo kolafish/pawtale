@@ -21,6 +21,10 @@ from app.models.projects import Project
 from app.schemas.memoir_book import MemoirBookChapterDraftGenerateRequest
 from app.services.ai_types import AITextClient
 from app.services.memoir.book_drafts import generate_chapter_draft
+from app.services.memoir.book_plan_sources import (
+    pending_source_ids as _pending_source_ids,
+    removed_source_ids as _removed_source_ids,
+)
 
 
 AI_MODEL_METADATA_KEY = "ai_model"
@@ -29,13 +33,6 @@ logger = logging.getLogger(__name__)
 
 def _utcnow() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
-
-
-def _source_ids_from_metadata(metadata_json: dict | None, key: str) -> set[str]:
-    value = (metadata_json or {}).get(key, [])
-    if not isinstance(value, list):
-        return set()
-    return {item for item in value if isinstance(item, str) and item}
 
 
 def _project_ai_model(project: Project | None) -> str | None:
@@ -77,8 +74,8 @@ async def schedule_chapter_auto_revision(
     chapter = await db.get(MemoirBookPlanChapter, chapter_id)
     if not chapter or chapter.project_id != project_id:
         return None
-    pending_source_ids = _source_ids_from_metadata(chapter.metadata_json, "pending_source_utterance_ids")
-    removed_source_ids = _source_ids_from_metadata(chapter.metadata_json, "removed_source_utterance_ids")
+    pending_source_ids = _pending_source_ids(chapter.metadata_json)
+    removed_source_ids = _removed_source_ids(chapter.metadata_json)
     if not pending_source_ids or removed_source_ids:
         return None
 
@@ -187,7 +184,7 @@ async def run_auto_revision_job(
             return False
 
         chapter = await db.get(MemoirBookPlanChapter, job.chapter_id)
-        pending_source_ids = _source_ids_from_metadata(chapter.metadata_json if chapter else {}, "pending_source_utterance_ids")
+        pending_source_ids = _pending_source_ids(chapter.metadata_json if chapter else {})
         if not pending_source_ids:
             await _mark_job(db, job, MemoirBookAutoRevisionJobStatus.SKIPPED, error_message="no pending sources")
             return False

@@ -48,15 +48,20 @@ from app.services.memoir.book_plan_ai import (
     clean_generated_chapter_title as _clean_generated_chapter_title,
 )
 from app.services.memoir.book_plan_sources import (
+    NEW_SOURCES_ASSIGNED_STATUS_REASON,
     SourceSegment,
+    SOURCES_CHANGED_STATUS_REASON,
     as_dict as _as_dict,
     covered_utterance_ids as _covered_utterance_ids,
+    draft_status_metadata as _draft_status_metadata,
     included_chapters_by_utterance as _included_chapters_by_utterance,
     merge_metadata as _merge_metadata,
     plan_response as _plan_response,
+    pending_source_ids as _pending_source_ids,
+    removed_source_ids as _removed_source_ids,
+    set_source_assignment_metadata as _set_source_assignment_metadata,
     set_source_change_metadata as _set_source_change_metadata,
     source_coverage_item as _source_coverage_item,
-    source_ids_from_metadata as _source_ids_from_metadata,
     source_ref_utterance_id as _source_ref_utterance_id,
     source_ref_utterance_ids as _source_ref_utterance_ids,
     source_segments as _source_segments,
@@ -92,10 +97,7 @@ async def _mark_chapter_drafts_sources_changed(
     ).scalars().all()
     for draft in drafts:
         draft.status = MemoirBookChapterDraftStatus.DRAFT.value
-        draft.metadata_json = _merge_metadata(
-            draft.metadata_json,
-            {"status_reason": "sources_changed"},
-        )
+        draft.metadata_json = _draft_status_metadata(draft.metadata_json, SOURCES_CHANGED_STATUS_REASON)
         db.add(draft)
 
 
@@ -243,10 +245,7 @@ async def assign_book_sources_to_chapters(
             raise HTTPException(status_code=404, detail="章节不存在")
 
         refs = list(chapter.source_refs_json or [])
-        pending_ids = set(
-            item for item in (chapter.metadata_json or {}).get("pending_source_utterance_ids", [])
-            if isinstance(item, str)
-        )
+        pending_ids = _pending_source_ids(chapter.metadata_json)
         for utterance_id in assignment.utterance_ids:
             source = source_by_utterance.get(utterance_id)
             if not source:
@@ -259,13 +258,7 @@ async def assign_book_sources_to_chapters(
             affected_chapter_ids.add(chapter.id)
 
         chapter.source_refs_json = refs
-        chapter.metadata_json = _merge_metadata(
-            chapter.metadata_json,
-            {
-                "pending_source_utterance_ids": sorted(pending_ids),
-                "source_assignment_updated_at": datetime.now(UTC).isoformat(),
-            },
-        )
+        chapter.metadata_json = _set_source_assignment_metadata(chapter.metadata_json, pending_ids)
         db.add(chapter)
 
     if affected_chapter_ids:
@@ -280,9 +273,9 @@ async def assign_book_sources_to_chapters(
         for draft in drafts:
             if draft.status == MemoirBookChapterDraftStatus.CONFIRMED.value:
                 draft.status = MemoirBookChapterDraftStatus.DRAFT.value
-                draft.metadata_json = _merge_metadata(
+                draft.metadata_json = _draft_status_metadata(
                     draft.metadata_json,
-                    {"status_reason": "new_sources_assigned"},
+                    NEW_SOURCES_ASSIGNED_STATUS_REASON,
                 )
                 db.add(draft)
         await _schedule_chapter_auto_revisions(
@@ -336,13 +329,13 @@ async def move_book_source_between_chapters(
     if not kept_source_refs:
         raise HTTPException(status_code=400, detail="原章节至少需要保留一条来源")
 
-    source_pending_ids = _source_ids_from_metadata(source_chapter.metadata_json, "pending_source_utterance_ids")
+    source_pending_ids = _pending_source_ids(source_chapter.metadata_json)
     source_pending_ids.discard(req.utterance_id)
-    source_removed_ids = _source_ids_from_metadata(source_chapter.metadata_json, "removed_source_utterance_ids")
+    source_removed_ids = _removed_source_ids(source_chapter.metadata_json)
     source_removed_ids.add(req.utterance_id)
-    target_pending_ids = _source_ids_from_metadata(target_chapter.metadata_json, "pending_source_utterance_ids")
+    target_pending_ids = _pending_source_ids(target_chapter.metadata_json)
     target_pending_ids.add(req.utterance_id)
-    target_removed_ids = _source_ids_from_metadata(target_chapter.metadata_json, "removed_source_utterance_ids")
+    target_removed_ids = _removed_source_ids(target_chapter.metadata_json)
     target_removed_ids.discard(req.utterance_id)
 
     source_chapter.source_refs_json = kept_source_refs
