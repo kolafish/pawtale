@@ -418,6 +418,80 @@ async def test_mobile_memoir_voice_turn_plan_saves_ack_when_useful(
     assert metadata["turn_plan"]["next_question_brief"] == "继续问外婆当时常讲哪些年轻时候的事"
 
 
+async def test_mobile_memoir_voice_turn_plan_honors_explicit_topic_switch(
+    client,
+    test_db,
+    monkeypatch,
+):
+    create_response = await post_mobile_memoir_voice_session(
+        client,
+        json={"guidance_mode": "guided_interview", "current_guidance_module": "family"},
+    )
+    session = create_response.json()["session"]
+    messages = [
+        MemoirChatMessage(
+            project_id=session["project_id"],
+            voice_session_id=session["id"],
+            role=MemoirChatMessageRole.USER.value,
+            content_text="我小时候经常住在外婆家。",
+            content_status=MemoirChatContentStatus.FINAL.value,
+            turn_index=0,
+            metadata_json={"source": "test"},
+        ),
+        MemoirChatMessage(
+            project_id=session["project_id"],
+            voice_session_id=session["id"],
+            role=MemoirChatMessageRole.ASSISTANT.value,
+            content_text="那我们接着聊外婆。",
+            content_status=MemoirChatContentStatus.FINAL.value,
+            guidance_intent="follow_up",
+            turn_index=1,
+            metadata_json={"expects_answer": True},
+        ),
+        MemoirChatMessage(
+            project_id=session["project_id"],
+            voice_session_id=session["id"],
+            role=MemoirChatMessageRole.USER.value,
+            content_text="今天聊聊工作吧。",
+            content_status=MemoirChatContentStatus.FINAL.value,
+            turn_index=2,
+            metadata_json={"source": "test"},
+        ),
+    ]
+    test_db.add_all(messages)
+    await test_db.commit()
+    fake_ai = FakeFollowUpAI(
+        """
+        {
+          "user_signal": "continuation",
+          "response_strategy": "ack_then_follow",
+          "should_play_ack": true,
+          "acknowledgement_text": "外婆这条线还没讲完。",
+          "next_question_brief": "继续问外婆还有哪些印象深的事情"
+        }
+        """
+    )
+    monkeypatch.setattr(
+        "app.services.memoir.voice_followups.get_ai_service",
+        lambda model=None: fake_ai,
+    )
+
+    response = await client.post(
+        f"/api/mobile/memoir/voice-sessions/{session['id']}/turn-plan",
+        json={},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["acknowledgement"] is None
+    assert data["plan"]["user_signal"] == "off_topic"
+    assert data["plan"]["response_strategy"] == "transition"
+    assert data["plan"]["should_play_ack"] is False
+    assert "聊工作" in data["plan"]["next_question_brief"]
+    assert "不继续旧话题" in data["plan"]["next_question_brief"]
+    assert "明确选择或切换到“工作”主题" in fake_ai.calls[0]["user_prompt"]
+
+
 async def test_mobile_memoir_voice_follow_up_after_acknowledgement_skips_repeated_ack(
     client,
     test_db,

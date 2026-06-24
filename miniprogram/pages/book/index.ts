@@ -246,6 +246,11 @@ function bookVoiceCommandBookContext(
       covered_source_count: coverage.covered_source_count || 0,
       uncovered_source_count: coverage.uncovered_source_count || 0,
     },
+    uncovered_sources: (coverage.uncovered_sources || []).slice(0, 12).map((source) => ({
+      source_index: source.source_index,
+      utterance_id: source.utterance_id,
+      text: trimText(source.text || "").slice(0, 180),
+    })),
   };
 }
 
@@ -1867,8 +1872,40 @@ Page<BookData, {
         }
         return;
       }
+      if (preview.intent === "assign_source" && operation.chapter_id && operation.utterance_id) {
+        this.setData({ assigningSourceId: operation.utterance_id });
+        const plan = await assignMemoirBookSources(
+          this.data.projectId,
+          sourceAssignmentRequest(operation.chapter_id, operation.utterance_id),
+        );
+        const [draftsByChapterId, coverage] = await Promise.all([
+          this.loadDraftsForPlan(plan),
+          this.loadSourceCoverage(this.data.projectId),
+        ]);
+        this.applyPlan(plan, draftsByChapterId);
+        this.applySourceCoverage(coverage);
+        this.applyBookOutput(null);
+        this.setData({
+          bookVoiceCommandCanExecute: false,
+          bookVoiceCommandRequiresConfirmation: false,
+          bookVoiceCommandStateText: "已执行",
+          bookVoiceCommandActionText: "已执行",
+          bookVoiceCommandUndoText: "",
+          bookVoiceCommandUndoSnapshot: null,
+          bookVoiceAssistantStatusText: "已归入章节",
+        });
+        if (options.autoListenAfterExecution) {
+          await this.playBookVoiceAssistantReply("已归入章节。还可以继续说下一条怎么处理。", {
+            autoListenAfterPlayback: true,
+          });
+        }
+        return;
+      }
       this.setData({ error: "这个语音操作暂时只能预览" });
     } finally {
+      if (preview.intent === "assign_source") {
+        this.setData({ assigningSourceId: "" });
+      }
       this.setData({ bookVoiceCommandExecuting: false });
     }
   },

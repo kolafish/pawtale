@@ -530,6 +530,9 @@ export function canExecuteBookVoiceCommand(preview: MemoirBookVoiceCommandParseR
   if (preview.intent === "move_chapter") {
     return Boolean(operation.chapter_id && (operation.direction === "up" || operation.direction === "down"));
   }
+  if (preview.intent === "assign_source") {
+    return Boolean(operation.chapter_id && operation.utterance_id);
+  }
   return false;
 }
 

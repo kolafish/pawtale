@@ -136,8 +136,20 @@ class MemoirBookVoiceCommandSourceCoverageContext(BaseModel):
     uncovered_source_count: int = Field(default=0, ge=0)
 
 
+class MemoirBookVoiceCommandUncoveredSourceContext(BaseModel):
+    source_index: int = Field(ge=1)
+    utterance_id: str
+    text: str = Field(default="", max_length=180)
+
+    @field_validator("utterance_id", "text")
+    @classmethod
+    def _valid_text(cls, value: str) -> str:
+        return value.strip()
+
+
 class MemoirBookVoiceCommandBookContext(BaseModel):
     source_coverage: MemoirBookVoiceCommandSourceCoverageContext | None = None
+    uncovered_sources: list[MemoirBookVoiceCommandUncoveredSourceContext] = Field(default_factory=list, max_length=12)
 
 
 class MemoirBookVoiceCommandParseRequest(BaseModel):
@@ -172,6 +184,9 @@ class MemoirBookVoiceCommandOperationResponse(BaseModel):
     target_chapter_title: str | None = None
     new_title: str | None = None
     direction: str | None = None
+    source_position: int | None = None
+    source_index: int | None = None
+    utterance_id: str | None = None
 
 
 class MemoirBookVoiceCommandParseResponse(BaseModel):

@@ -476,6 +476,7 @@ export type MemoirBookVoiceCommandIntent =
   | "rename_chapter"
   | "merge_chapters"
   | "move_chapter"
+  | "assign_source"
   | "split_chapter"
   | "rewrite_chapter"
   | "polish_chapter"
@@ -503,6 +504,11 @@ export interface MemoirBookVoiceCommandBookContext {
     covered_source_count: number;
     uncovered_source_count: number;
   };
+  uncovered_sources?: Array<{
+    source_index: number;
+    utterance_id: string;
+    text: string;
+  }>;
 }
 
 export interface MemoirBookVoiceCommandParseRequest {
@@ -521,6 +527,9 @@ export interface MemoirBookVoiceCommandOperation {
   target_chapter_title?: string | null;
   new_title?: string | null;
   direction?: "up" | "down" | string | null;
+  source_position?: number | null;
+  source_index?: number | null;
+  utterance_id?: string | null;
 }
 
 export interface MemoirBookVoiceCommandParseResponse {

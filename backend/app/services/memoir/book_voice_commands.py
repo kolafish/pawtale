@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass
+from difflib import SequenceMatcher
 from typing import Any
 
 from fastapi import HTTPException
@@ -18,6 +19,7 @@ from app.schemas.memoir_book import (
     MemoirBookVoiceCommandOperationResponse,
     MemoirBookVoiceCommandParseRequest,
     MemoirBookVoiceCommandParseResponse,
+    MemoirBookVoiceCommandUncoveredSourceContext,
 )
 from app.services.ai_factory import get_ai_service
 from app.services.ai_types import AITextClient
@@ -58,10 +60,11 @@ BOOK_VOICE_COMMAND_USER_PROMPT_TEMPLATE = """请解析下面这句成书语音�
 
 JSON 格式：
 {{
-  "intent": "read_outline | read_chapter | rename_chapter | merge_chapters | move_chapter | split_chapter | rewrite_chapter | polish_chapter | confirm_chapter | review_chapter_title | review_chapter_length | review_chapter_structure | answer_book_question | capability_help | clarify_previous | unknown",
+  "intent": "read_outline | read_chapter | rename_chapter | merge_chapters | move_chapter | assign_source | split_chapter | rewrite_chapter | polish_chapter | confirm_chapter | review_chapter_title | review_chapter_length | review_chapter_structure | answer_book_question | capability_help | clarify_previous | unknown",
   "response_kind": "action_preview | consultation | answer | clarification",
   "chapter_ref": "用户提到的章节编号或标题；没有则 null",
   "target_chapter_ref": "合并目标章节编号或标题；没有则 null",
+  "source_ref": "用户提到的待收录记录编号、语音记录编号或刚才这条；没有则 null",
   "new_title": "改名后的新标题；没有则 null",
   "direction": "up | down | null",
   "summary": "用一句话说明识别出的操作或问题",
@@ -76,6 +79,8 @@ JSON 格式：
 - “把第一章和第二章合并/把第一章合并到第二章”用 merge_chapters。
 - “把某章上移/下移/往前/往后”用 move_chapter，并填 direction。
 - “把第二章和第三章顺序换一下/交换第二章和第三章”这类相邻章节交换也用 move_chapter：把前一章下移，或把后一章上移。
+- “把第 1 条待收录记录归到第二章/把刚才这条放到职场那章”用 assign_source，source_ref 填记录编号或“刚才这条”，target_chapter_ref 填目标章节。
+- “先念一条待收录记录/下一条未收入记录”用 answer_book_question，reply_text 要读出一条待收录记录摘录，并提示用户说“把这条归到哪一章”。
 - “第一章是不是需要换个名字/标题好不好/题目是否合适”用 review_chapter_title，不要生成 rename_chapter。
 - “第一章是不是太短/太长/字数够不够/篇幅是否合适”用 review_chapter_length，不要生成 rewrite_chapter。
 - “这一章结构是否合理/要不要拆分或合并/顺序是否合适”用 review_chapter_structure，除非用户明确要求执行。
@@ -94,6 +99,7 @@ SUPPORTED_INTENTS = {
     "rename_chapter",
     "merge_chapters",
     "move_chapter",
+    "assign_source",
     "split_chapter",
     "rewrite_chapter",
     "polish_chapter",
@@ -113,6 +119,7 @@ INTENT_LABELS = {
     "rename_chapter": "修改章名",
     "merge_chapters": "合并章节",
     "move_chapter": "移动章节",
+    "assign_source": "归入记录",
     "split_chapter": "拆分章节",
     "rewrite_chapter": "重写章节",
     "polish_chapter": "润色章节",
@@ -150,6 +157,7 @@ RENAME_RE = re.compile(r"(?:把|将)?(.{1,40}?)(?:的)?(?:章名|标题)?(?:改�
 MERGE_INTO_RE = re.compile(r"(?:把|将)?(.{1,40}?)(?:合并到|并到|放到)(.{1,40})")
 MERGE_WITH_RE = re.compile(r"(?:把|将)?(.{1,40}?)(?:和|跟|与)(.{1,40}?)(?:合并|并到一起|放到一起)")
 MOVE_RE = re.compile(r"(?:把|将)?(.{1,40}?)(上移|下移|往前|往后|前移|后移)")
+ASSIGN_SOURCE_RE = re.compile(r"(?:把|将)?(.{0,40}?)(?:归到|归入|收入|收录到|放到|分到|归类到)(.{1,40})")
 CHAPTER_WORD_ASR_ORDINAL_RE = re.compile(r"第\s*([0-9]{1,2}|[一二两三四五六七八九十])\s*张")
 CHAPTER_WORD_ASR_BARE_RE = re.compile(
     r"([0-9]{1,2}|[一二两三四五六七八九十])\s*张(?=(?:和|跟|与|的|换|调|移|顺序|章节|章|[，。,.!！?？、\s]|$))"
@@ -225,6 +233,9 @@ SOURCE_COVERAGE_KEYWORDS = (
     "还没归类",
 )
 SOURCE_COVERAGE_OBJECT_KEYWORDS = ("记录", "素材", "讲述", "语音", "转写")
+SOURCE_READ_KEYWORDS = ("念一条", "读一条", "先念", "先读", "下一条", "下一个", "一条一条", "逐条")
+SOURCE_ASSIGN_KEYWORDS = ("归到", "归入", "收入", "收录到", "放到", "分到", "归类到")
+CURRENT_SOURCE_REFS = ("这条", "这一条", "刚才这条", "刚念的", "刚读的", "它", "这个")
 CHAPTER_SWAP_KEYWORDS = (
     "顺序换",
     "顺序调换",
@@ -245,6 +256,7 @@ class ParsedCommandPayload:
     intent: str
     chapter_ref: str | None = None
     target_chapter_ref: str | None = None
+    source_ref: str | None = None
     new_title: str | None = None
     direction: str | None = None
     summary: str | None = None
@@ -326,6 +338,11 @@ async def _parse_payload_with_ai(
         conversation_context=req.conversation_context,
         book_context=req.book_context,
     )
+    normalized_text = _compact(_normalize_chapter_word_text(req.text))
+    if fallback.intent == "answer_book_question" and _is_source_read_request(normalized_text):
+        return fallback
+    if _is_resolved_local_action(fallback, plan, req.current_chapter_id, req.book_context):
+        return fallback
     client = ai_client
     try:
         if client is None:
@@ -348,6 +365,12 @@ async def _parse_payload_with_ai(
         parsed = _payload_from_json(payload)
         if parsed.intent == "unknown":
             return fallback
+        if (
+            parsed.intent in {"move_chapter", "assign_source"}
+            and fallback.intent == parsed.intent
+            and _is_resolved_local_action(fallback, plan, req.current_chapter_id, req.book_context)
+        ):
+            return fallback
         if parsed.intent == "move_chapter" and not parsed.direction and fallback.intent == "move_chapter":
             return fallback
         reply_text = parsed.reply_text
@@ -357,6 +380,7 @@ async def _parse_payload_with_ai(
             intent=parsed.intent,
             chapter_ref=parsed.chapter_ref,
             target_chapter_ref=parsed.target_chapter_ref,
+            source_ref=parsed.source_ref,
             new_title=parsed.new_title,
             direction=parsed.direction,
             summary=parsed.summary,
@@ -386,11 +410,32 @@ def _payload_from_json(payload: Any) -> ParsedCommandPayload:
         intent=intent,
         chapter_ref=_optional_text(payload.get("chapter_ref")),
         target_chapter_ref=_optional_text(payload.get("target_chapter_ref")),
+        source_ref=_optional_text(payload.get("source_ref")),
         new_title=_optional_text(payload.get("new_title")),
         direction=direction,
         summary=_optional_text(payload.get("summary")),
         reply_text=_clean_reply_text(payload.get("reply_text")),
     )
+
+
+def _is_resolved_local_action(
+    payload: ParsedCommandPayload,
+    plan: MemoirBookPlan,
+    current_chapter_id: str | None,
+    book_context: MemoirBookVoiceCommandBookContext | None,
+) -> bool:
+    chapters = _sorted_chapters(plan)
+    if payload.intent == "move_chapter":
+        return (
+            payload.direction in {"up", "down"}
+            and _resolve_chapter(chapters, payload.chapter_ref, current_chapter_id) is not None
+        )
+    if payload.intent == "assign_source":
+        chapter = _resolve_chapter(chapters, payload.chapter_ref, current_chapter_id)
+        target_chapter = _resolve_chapter(chapters, payload.target_chapter_ref, current_chapter_id)
+        source = _resolve_uncovered_source(book_context, payload.source_ref, None)
+        return (target_chapter is not None or chapter is not None) and source is not None
+    return False
 
 
 def _fallback_payload(
@@ -411,6 +456,13 @@ def _fallback_payload(
             intent="answer_book_question",
             summary="回答当前素材收入章节状态。",
             reply_text=_source_coverage_reply_text(plan, book_context),
+        )
+
+    if _is_source_read_request(normalized):
+        return ParsedCommandPayload(
+            intent="answer_book_question",
+            summary="读出一条待收录讲述记录。",
+            reply_text=_source_read_reply_text(book_context, conversation_context),
         )
 
     if _is_chapter_count_question(normalized) or any(keyword in normalized for keyword in OUTLINE_STATUS_KEYWORDS):
@@ -440,6 +492,10 @@ def _fallback_payload(
             intent=consultation_intent,
             chapter_ref=_fallback_chapter_ref(normalized),
         )
+
+    assign_payload = _fallback_assign_source_payload(normalized, book_context, conversation_context)
+    if assign_payload:
+        return assign_payload
 
     swap_payload = _fallback_swap_payload(normalized, plan)
     if swap_payload:
@@ -509,6 +565,8 @@ def _fallback_swap_payload(normalized: str, plan: MemoirBookPlan) -> ParsedComma
         return None
     chapter_refs = [match.group(0) for match in STRICT_CHAPTER_REF_RE.finditer(normalized)]
     if len(chapter_refs) < 2:
+        chapter_refs = _title_swap_refs(normalized)
+    if len(chapter_refs) < 2:
         return None
     chapters = _sorted_chapters(plan)
     first = _resolve_chapter(chapters, chapter_refs[0], None)
@@ -526,6 +584,47 @@ def _fallback_swap_payload(normalized: str, plan: MemoirBookPlan) -> ParsedComma
     )
 
 
+def _title_swap_refs(normalized: str) -> list[str]:
+    if not any(separator in normalized for separator in ("和", "跟", "与")):
+        return []
+    if not any(keyword in normalized for keyword in CHAPTER_SWAP_KEYWORDS):
+        return []
+    text = _compact(normalized)
+    for separator in ("和", "跟", "与"):
+        if separator not in text:
+            continue
+        left, right = text.split(separator, 1)
+        right = re.split(
+            r"(这?两(?:章|个章节)|两个章节|的?顺序|顺序|换一下|换一换|互换|对调|调换|交换|顺序换|顺序调换|顺序交换)",
+            right,
+            maxsplit=1,
+        )[0]
+        first = _clean_chapter_ref(left)
+        second = _clean_chapter_ref(right)
+        if first and second:
+            return [first, second]
+    return []
+
+
+def _clean_chapter_ref(value: str) -> str:
+    text = _compact(value).strip("，。,.!！?？、")
+    while text:
+        before = text
+        text = text.strip("，。,.!！?？、")
+        text = re.sub(
+            r"^(?:不是啊|不是|我说|我是说|我讲的是|我想|我要|你帮我|帮我|请|麻烦|把|将|那个|这个)",
+            "",
+            text,
+        )
+        if text == before:
+            break
+    return re.sub(
+        r"(这?两(?:章|个章节)|两个章节|那一章|这一章|那章|这章|章节|的?顺序|顺序|那个|这个|那|这)$",
+        "",
+        text,
+    ).strip("，。,.!！?？、")
+
+
 def _is_chapter_count_question(normalized: str) -> bool:
     return any(keyword in normalized for keyword in CHAPTER_COUNT_KEYWORDS)
 
@@ -535,6 +634,106 @@ def _is_source_coverage_question(normalized: str) -> bool:
         any(keyword in normalized for keyword in SOURCE_COVERAGE_KEYWORDS)
         and any(keyword in normalized for keyword in SOURCE_COVERAGE_OBJECT_KEYWORDS)
     )
+
+
+def _is_source_read_request(normalized: str) -> bool:
+    return (
+        any(keyword in normalized for keyword in SOURCE_READ_KEYWORDS)
+        and (
+            any(keyword in normalized for keyword in SOURCE_COVERAGE_OBJECT_KEYWORDS)
+            or any(keyword in normalized for keyword in SOURCE_COVERAGE_KEYWORDS)
+            or "条" in normalized
+        )
+    )
+
+
+def _fallback_assign_source_payload(
+    normalized: str,
+    book_context: MemoirBookVoiceCommandBookContext | None,
+    conversation_context: list[Any] | None,
+) -> ParsedCommandPayload | None:
+    if not any(keyword in normalized for keyword in SOURCE_ASSIGN_KEYWORDS):
+        return None
+    match = ASSIGN_SOURCE_RE.search(normalized)
+    if not match:
+        return None
+    source_ref = _clean_source_ref(match.group(1))
+    target_ref = _clean_chapter_ref(match.group(2))
+    if not source_ref or source_ref in {"那", "那个", "这个"}:
+        source_ref = _latest_source_ref_from_context(conversation_context) or source_ref
+    if not target_ref:
+        return None
+    source = _resolve_uncovered_source(book_context, source_ref, conversation_context)
+    if not source:
+        return None
+    return ParsedCommandPayload(
+        intent="assign_source",
+        chapter_ref=target_ref,
+        target_chapter_ref=target_ref,
+        source_ref=f"待收录第{_source_list_position(book_context, source)}条",
+    )
+
+
+def _clean_source_ref(value: str) -> str:
+    text = _compact(value).strip("，。,.!！?？、")
+    text = re.sub(r"^(把|将|那个|这个|那条|这条)", "", text)
+    return text
+
+
+def _latest_source_ref_from_context(conversation_context: list[Any] | None) -> str | None:
+    for item in reversed(conversation_context or []):
+        if getattr(item, "role", "") != "assistant":
+            continue
+        text = _compact(getattr(item, "text", "") or "")
+        match = re.search(r"待收录第\s*([0-9]{1,2}|[一二两三四五六七八九十])\s*条", text)
+        if match:
+            return f"待收录第{match.group(1)}条"
+        match = re.search(r"语音记录\s*([0-9]{1,3})", text)
+        if match:
+            return f"语音记录{match.group(1)}"
+    return None
+
+
+def _resolve_uncovered_source(
+    book_context: MemoirBookVoiceCommandBookContext | None,
+    source_ref: str | None,
+    conversation_context: list[Any] | None,
+) -> MemoirBookVoiceCommandUncoveredSourceContext | None:
+    sources = list((book_context.uncovered_sources if book_context else []) or [])
+    if not sources:
+        return None
+    ref = _compact(source_ref or "")
+    if ref in set(CURRENT_SOURCE_REFS) or not ref:
+        ref = _latest_source_ref_from_context(conversation_context) or ref
+    number = _source_ref_number(ref)
+    if number is not None:
+        if "语音记录" in ref or "记录编号" in ref:
+            return next((source for source in sources if source.source_index == number), None)
+        if 1 <= number <= len(sources):
+            return sources[number - 1]
+        return next((source for source in sources if source.source_index == number), None)
+    return None
+
+
+def _source_ref_number(ref: str) -> int | None:
+    match = re.search(r"([0-9]{1,3}|[一二两三四五六七八九十])", ref)
+    if not match:
+        return None
+    raw = match.group(1)
+    if raw.isdigit():
+        return int(raw)
+    return CHINESE_NUMBERS.get(raw)
+
+
+def _source_list_position(
+    book_context: MemoirBookVoiceCommandBookContext | None,
+    source: MemoirBookVoiceCommandUncoveredSourceContext,
+) -> int:
+    sources = list((book_context.uncovered_sources if book_context else []) or [])
+    for index, item in enumerate(sources, start=1):
+        if item.utterance_id == source.utterance_id:
+            return index
+    return 1
 
 
 def _is_ambiguous_follow_up(normalized: str) -> bool:
@@ -563,11 +762,19 @@ def _source_coverage_prompt_line(book_context: MemoirBookVoiceCommandBookContext
     coverage = book_context.source_coverage if book_context else None
     if not coverage:
         return "未提供最新素材覆盖统计。"
-    return (
+    line = (
         f"讲述记录共 {coverage.total_source_count} 条，"
         f"已收入章节 {coverage.covered_source_count} 条，"
         f"未收入章节 {coverage.uncovered_source_count} 条。"
     )
+    sources = list((book_context.uncovered_sources if book_context else []) or [])
+    if sources:
+        source_lines = []
+        for index, source in enumerate(sources[:6], start=1):
+            excerpt = _clean_reply_text(source.text) or "无文本"
+            source_lines.append(f"待收录第 {index} 条｜语音记录 {source.source_index}｜摘录：{excerpt[:80]}")
+        line += "\n待收录记录列表：\n" + "\n".join(source_lines)
+    return line
 
 
 def _conversation_prompt_lines(conversation_context: list[Any] | None) -> str:
@@ -593,9 +800,11 @@ def _book_question_reply_text(
     book_context: MemoirBookVoiceCommandBookContext | None,
 ) -> str:
     normalized = _compact(_normalize_chapter_word_text(original_text))
+    cleaned_ai_reply = _clean_reply_text(ai_reply_text)
+    if _is_source_read_request(normalized):
+        return cleaned_ai_reply or _source_read_reply_text(book_context, None)
     if _is_source_coverage_question(normalized):
         return _source_coverage_reply_text(plan, book_context)
-    cleaned_ai_reply = _clean_reply_text(ai_reply_text)
     if cleaned_ai_reply:
         return cleaned_ai_reply
     if _is_chapter_count_question(normalized) or any(keyword in normalized for keyword in OUTLINE_STATUS_KEYWORDS):
@@ -612,7 +821,7 @@ def _source_coverage_reply_text(plan: MemoirBookPlan, book_context: MemoirBookVo
                 f"这本书现在共有 {coverage.total_source_count} 条讲述记录，"
                 f"已收入章节 {coverage.covered_source_count} 条，"
                 f"还有 {coverage.uncovered_source_count} 条未收入章节。"
-                "你可以在下方待收录转写里逐条分配，或告诉我把哪条记录放到哪一章。"
+                "你可以在下方待收录记录里逐条分配，或告诉我把哪条记录放到哪一章。"
             )
         return (
             f"这本书现在共有 {coverage.total_source_count} 条讲述记录，"
@@ -622,6 +831,26 @@ def _source_coverage_reply_text(plan: MemoirBookPlan, book_context: MemoirBookVo
     return (
         f"我这里还没有拿到最新待收录统计；当前章节里已引用 {covered_count} 条素材。"
         "可以刷新成书页后再问我还有多少记录未收入章节。"
+    )
+
+
+def _source_read_reply_text(
+    book_context: MemoirBookVoiceCommandBookContext | None,
+    conversation_context: list[Any] | None,
+) -> str:
+    sources = list((book_context.uncovered_sources if book_context else []) or [])
+    if not sources:
+        return "现在没有拿到可逐条处理的待收录记录。你可以先刷新成书页，或到下方待收录记录里查看。"
+    last_position = 0
+    latest_ref = _latest_source_ref_from_context(conversation_context)
+    if latest_ref:
+        last_position = _source_ref_number(latest_ref) or 0
+    next_position = min(last_position + 1, len(sources)) if last_position else 1
+    source = sources[next_position - 1]
+    text = (_clean_reply_text(source.text) or "这条暂时没有可读文本")[:140]
+    return (
+        f"待收录第 {next_position} 条，语音记录 {source.source_index}：{text}。"
+        "你可以说，把这条归到第几章，或者说下一条。"
     )
 
 
@@ -679,6 +908,7 @@ def _response_from_payload(
     chapters = _sorted_chapters(plan)
     chapter = _resolve_chapter(chapters, payload.chapter_ref, current_chapter_id)
     target_chapter = _resolve_chapter(chapters, payload.target_chapter_ref, current_chapter_id)
+    source = _resolve_uncovered_source(book_context, payload.source_ref, None)
 
     operations: list[MemoirBookVoiceCommandOperationResponse] = []
     if intent == "read_outline":
@@ -703,6 +933,12 @@ def _response_from_payload(
         direction = payload.direction if payload.direction in {"up", "down"} else None
         if chapter and direction:
             operations.append(_operation(intent, chapter=chapter, direction=direction))
+        else:
+            intent = "unknown"
+    elif intent == "assign_source":
+        assignment_chapter = target_chapter or chapter
+        if assignment_chapter and source:
+            operations.append(_operation(intent, chapter=assignment_chapter, source=source, source_position=_source_list_position(book_context, source)))
         else:
             intent = "unknown"
     elif intent in CONSULTATION_INTENTS:
@@ -755,6 +991,8 @@ def _operation(
     *,
     chapter: MemoirBookPlanChapter | None = None,
     target_chapter: MemoirBookPlanChapter | None = None,
+    source: MemoirBookVoiceCommandUncoveredSourceContext | None = None,
+    source_position: int | None = None,
     new_title: str | None = None,
     direction: str | None = None,
 ) -> MemoirBookVoiceCommandOperationResponse:
@@ -766,6 +1004,9 @@ def _operation(
         target_chapter_title=target_chapter.title if target_chapter else None,
         new_title=new_title,
         direction=direction,
+        source_position=source_position if source else None,
+        source_index=source.source_index if source else None,
+        utterance_id=source.utterance_id if source else None,
     )
 
 
@@ -782,6 +1023,9 @@ def _summary_for_operation(intent: str, operations: list[MemoirBookVoiceCommandO
     if intent == "move_chapter" and operation:
         direction = "上移" if operation.direction == "up" else "下移"
         return f"准备把「{operation.chapter_title}」{direction}。"
+    if intent == "assign_source" and operation:
+        source_position = operation.source_position or operation.source_index or 1
+        return f"准备把待收录第 {source_position} 条归入「{operation.chapter_title}」。"
     if intent == "split_chapter" and operation:
         return f"准备拆分「{operation.chapter_title}」。"
     if intent == "rewrite_chapter" and operation:
@@ -900,7 +1144,7 @@ def _resolve_chapter(
     ref: str | None,
     current_chapter_id: str | None,
 ) -> MemoirBookPlanChapter | None:
-    text = _compact(ref or "")
+    text = _clean_chapter_ref(ref or "")
     if text in {"本章", "这一章", "当前章", "当前章节"} and current_chapter_id:
         return next((chapter for chapter in chapters if chapter.id == current_chapter_id), None)
     chapter_number = _chapter_number(text)
@@ -912,6 +1156,29 @@ def _resolve_chapter(
         title = _compact(chapter.title)
         if text == title or text in title or title in text:
             return chapter
+    fuzzy_match = _fuzzy_chapter_match(chapters, text)
+    if fuzzy_match:
+        return fuzzy_match
+    return None
+
+
+def _fuzzy_chapter_match(chapters: list[MemoirBookPlanChapter], text: str) -> MemoirBookPlanChapter | None:
+    if len(text) < 3:
+        return None
+    scored: list[tuple[float, MemoirBookPlanChapter]] = []
+    for chapter in chapters:
+        title = _compact(chapter.title)
+        if not title:
+            continue
+        score = SequenceMatcher(None, text, title).ratio()
+        scored.append((score, chapter))
+    scored.sort(key=lambda item: item[0], reverse=True)
+    if not scored:
+        return None
+    best_score, best_chapter = scored[0]
+    second_score = scored[1][0] if len(scored) > 1 else 0.0
+    if best_score >= 0.72 or (best_score >= 0.62 and best_score - second_score >= 0.16):
+        return best_chapter
     return None
 
 
