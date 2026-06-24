@@ -73,6 +73,7 @@ export interface MemoirCaptureStats {
 
 export interface MemoirStreamingAsrOptions {
   voiceSessionId: string;
+  gatewayUrl?: string;
   guidanceMode: MemoirGuidanceMode;
   currentGuidanceModule?: string;
   autoStopSilenceMs?: number;
@@ -156,7 +157,7 @@ export class MemoirStreamingAsrClient {
       if (timedOut || this.closed) {
         throw new Error("语音连接超时");
       }
-      const gatewayUrl = voiceGatewayUrl(this.options.voiceSessionId);
+      const gatewayUrl = this.options.gatewayUrl || voiceGatewayUrl(this.options.voiceSessionId);
       await new Promise<void>((resolve, reject) => {
         let settled = false;
         const settle = (callback: () => void) => {

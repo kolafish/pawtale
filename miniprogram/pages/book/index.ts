@@ -8,6 +8,9 @@ import type {
   MemoirBookSourceCoverage,
   MemoirBookVoiceCommandOperation,
   MemoirBookVoiceCommandParseResponse,
+  VoiceChatErrorInfo,
+  VoiceChatTranscriptLine,
+  VoiceGatewayServerEvent,
 } from "../../domain/voice-chat";
 import type { BookChapterView, BookData, BookVoiceCommandUndoSnapshot } from "./book-view-model";
 import { getMemoirIdentity } from "../../services/auth";
@@ -20,6 +23,7 @@ import {
   createMemoirBookOutputTTS,
   createMemoirBookPlanOutlineTTS,
   createMemoirBookVoiceAssistantTTS,
+  bookVoiceCommandGatewayUrl,
   generateMemoirBookChapterTitle,
   generateMemoirBookChapterDraft,
   generateMemoirBookOutput,
@@ -36,11 +40,19 @@ import {
 import { ApiError } from "../../services/request";
 import { sourceAssignmentRequest } from "../../services/memoir-book-source-actions";
 import {
-  recordMemoirVoiceSearchQuery,
-  stopMemoirVoiceSearchRecording,
-} from "../../services/memoir-voice-search";
+  classifyVoiceClientConnectionError,
+  MemoirStreamingAsrClient,
+  type MemoirCaptureStats,
+  type VoiceChatConnectionStatus,
+} from "../../services/memoir-streaming-asr";
 import { readBookTTSSettings } from "../../services/tts-settings";
 import { writeTranscriptNavigationTarget } from "../../services/transcript-navigation";
+import {
+  readVoiceAuthorizationConsent,
+  syncVoiceAuthorizationConsent,
+  VOICE_AUTHORIZATION_PAGE_URL,
+} from "../../services/voice-authorization";
+import { ensureRecorderPrivacyAuthorization } from "../../services/wechat-privacy";
 import {
   playBookAudioFile,
   playBookAudioFiles,
@@ -140,6 +152,13 @@ function bookVoiceAssistantStatusText(stage: BookData["stage"]): string {
   return "我可以帮你听和改";
 }
 
+const BOOK_VOICE_AUTO_STOP_SILENCE_MS = 900;
+const BOOK_VOICE_MIN_RECORDING_MS = 700;
+const BOOK_VOICE_NO_VOICE_MS = 3500;
+const BOOK_VOICE_AUTO_LISTEN_NO_VOICE_MS = 15000;
+
+let bookVoiceStreamingClient: MemoirStreamingAsrClient | null = null;
+
 function isBookVoiceReadIntent(preview: MemoirBookVoiceCommandParseResponse): boolean {
   return preview.intent === "read_outline" || preview.intent === "read_chapter";
 }
@@ -219,6 +238,15 @@ Page<BookData, {
   playBookAudio(): Promise<void>;
   playBookOutlineAudio(options?: { autoListenAfterPlayback?: boolean }): Promise<void>;
   startBookVoiceCommand(options?: { autoTriggered?: boolean }): Promise<void>;
+  connectBookVoiceCommandGateway(): Promise<boolean>;
+  ensureBookVoiceAuthorization(autoTriggered?: boolean): Promise<boolean>;
+  appendBookVoiceTranscriptLine(line: VoiceChatTranscriptLine): void;
+  handleBookVoiceStatus(status: VoiceChatConnectionStatus): void;
+  handleBookVoiceCaptureStats(stats: MemoirCaptureStats): void;
+  handleBookVoiceGatewayEvent(event: VoiceGatewayServerEvent): void;
+  handleBookVoicePartial(text: string): void;
+  handleBookVoiceFinal(event: VoiceGatewayServerEvent): Promise<void>;
+  handleBookVoiceError(message: string, error?: VoiceChatErrorInfo): void;
   applyBookVoiceCommandPreview(preview: MemoirBookVoiceCommandParseResponse): void;
   handleBookVoiceCommandTranscript(text: string): Promise<void>;
   executeBookVoiceCommand(options?: { confirmedByVoice?: boolean; autoListenAfterExecution?: boolean }): Promise<void>;
@@ -322,12 +350,17 @@ Page<BookData, {
     bookTTSProgressPercent: 0,
     bookTTSDurationSeconds: 0,
     bookTTSAlignment: [],
+    bookVoiceAssistantExpanded: false,
     bookVoiceAssistantHint: "生成章节后，可以听目录或说修改",
     bookVoiceAssistantStatusText: "等待章节",
     bookVoiceAssistantListening: false,
     bookVoiceAssistantBusy: false,
     bookVoiceAssistantConversationActive: false,
     bookVoiceAssistantReplyText: "",
+    bookVoiceLiveText: "",
+    bookVoiceTranscriptLines: [],
+    bookVoiceAudioLevelPercent: 0,
+    bookVoiceCaptureStateText: "麦克风未开始",
     bookVoiceCommandText: "",
     bookVoiceCommandIntentLabel: "",
     bookVoiceCommandSummary: "",
@@ -453,9 +486,14 @@ Page<BookData, {
       stageText: stageText(stage),
       bookVoiceAssistantHint: bookVoiceAssistantHint(stage, chapters.length),
       ...(shouldResetVoiceStatus ? {
+        bookVoiceAssistantExpanded: false,
         bookVoiceAssistantStatusText: bookVoiceAssistantStatusText(stage),
         bookVoiceAssistantConversationActive: false,
         bookVoiceAssistantReplyText: "",
+        bookVoiceLiveText: "",
+        bookVoiceTranscriptLines: [],
+        bookVoiceAudioLevelPercent: 0,
+        bookVoiceCaptureStateText: "麦克风未开始",
       } : {}),
       ...chapterCollectionData(chapters, stage, this.data.sourceCoverage, this.data.splitSourceSelections),
       ...sourceCoverageData(plan, this.data.sourceCoverage),
@@ -1232,7 +1270,7 @@ Page<BookData, {
   async startBookVoiceCommand(options: { autoTriggered?: boolean } = {}) {
     const autoTriggered = Boolean(options.autoTriggered);
     if (this.data.bookVoiceAssistantListening) {
-      this.stopBookVoiceConversation();
+      bookVoiceStreamingClient?.stopRecording();
       this.setData({ bookVoiceAssistantStatusText: "正在保存录音" });
       return;
     }
@@ -1251,12 +1289,24 @@ Page<BookData, {
     }
     this.clearBookVoiceAssistantAutoListenTimer();
     this.stopPlayback();
+    const authorized = await this.ensureBookVoiceAuthorization(autoTriggered);
+    if (!authorized) {
+      return;
+    }
+    const connected = bookVoiceStreamingClient ? true : await this.connectBookVoiceCommandGateway();
+    if (!connected || !bookVoiceStreamingClient) {
+      return;
+    }
     const keepCurrentPreview = autoTriggered && Boolean(this.data.bookVoiceCommandPreview);
     this.setData({
       bookVoiceAssistantListening: true,
       bookVoiceAssistantBusy: false,
+      bookVoiceAssistantExpanded: true,
       bookVoiceAssistantConversationActive: true,
       bookVoiceAssistantReplyText: "",
+      bookVoiceLiveText: "",
+      bookVoiceAudioLevelPercent: 0,
+      bookVoiceCaptureStateText: "正在打开麦克风",
       bookVoiceAssistantStatusText: autoTriggered ? "我继续听，你可以接着说" : "我在听，请说想怎么改",
       ...(keepCurrentPreview ? {} : {
         bookVoiceCommandText: "",
@@ -1271,34 +1321,245 @@ Page<BookData, {
       }),
       error: "",
     });
-    let noVoiceAutoStopped = false;
+    const started = bookVoiceStreamingClient.startRecording({
+      noVoiceActivityTimeoutMs: autoTriggered ? BOOK_VOICE_AUTO_LISTEN_NO_VOICE_MS : BOOK_VOICE_NO_VOICE_MS,
+    });
+    if (!started) {
+      this.setData({
+        bookVoiceAssistantListening: false,
+        bookVoiceAssistantBusy: false,
+        bookVoiceAssistantStatusText: "实时识别未就绪",
+        error: "语音未就绪，请重试",
+      });
+      bookVoiceStreamingClient?.close({ force: true });
+      bookVoiceStreamingClient = null;
+    }
+  },
+
+  async ensureBookVoiceAuthorization(autoTriggered = false) {
+    if (!readVoiceAuthorizationConsent()) {
+      this.setData({
+        bookVoiceAssistantExpanded: true,
+        bookVoiceAssistantConversationActive: false,
+        bookVoiceAssistantStatusText: autoTriggered ? "自动收听已暂停，等待声纹授权" : "请先同意声纹授权",
+        error: "请先阅读并同意《声纹授权协议》后再开始录音",
+      });
+      wx.navigateTo({ url: VOICE_AUTHORIZATION_PAGE_URL });
+      return false;
+    }
     try {
-      const text = await recordMemoirVoiceSearchQuery({
-        emptyTranscriptMessage: "没有识别到修改内容，请换个说法再试",
-        noVoiceTranscriptMessage: "没有听到声音，语音对话已暂停",
-        onNoVoiceAutoStop: () => {
-          noVoiceAutoStopped = true;
-          this.setData({ bookVoiceAssistantStatusText: "没听到声音，先暂停" });
-        },
-        onRecordingEnd: () => {
-          this.setData({
-            bookVoiceAssistantListening: false,
-            bookVoiceAssistantBusy: true,
-            bookVoiceAssistantStatusText: noVoiceAutoStopped ? "正在结束收听" : "正在识别修改需求",
-          });
+      await syncVoiceAuthorizationConsent();
+      await ensureRecorderPrivacyAuthorization();
+      return true;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "录音授权失败";
+      this.setData({
+        bookVoiceAssistantExpanded: true,
+        bookVoiceAssistantConversationActive: false,
+        bookVoiceAssistantStatusText: "录音授权失败",
+        error: message,
+      });
+      return false;
+    }
+  },
+
+  async connectBookVoiceCommandGateway() {
+    if (!this.data.projectId) {
+      return false;
+    }
+    this.setData({
+      bookVoiceAssistantExpanded: true,
+      bookVoiceAssistantBusy: true,
+      bookVoiceAssistantStatusText: "正在连接实时识别",
+      error: "",
+    });
+    let client: MemoirStreamingAsrClient | null = null;
+    const isCurrentClient = () => Boolean(client && bookVoiceStreamingClient === client);
+    try {
+      bookVoiceStreamingClient?.close({ force: true });
+      client = new MemoirStreamingAsrClient({
+        voiceSessionId: `book-voice-command-${this.data.projectId}`,
+        gatewayUrl: bookVoiceCommandGatewayUrl(this.data.projectId),
+        guidanceMode: "free_narration",
+        autoStopSilenceMs: BOOK_VOICE_AUTO_STOP_SILENCE_MS,
+        minAutoStopRecordingMs: BOOK_VOICE_MIN_RECORDING_MS,
+        callbacks: {
+          onStatus: (status) => {
+            if (isCurrentClient()) {
+              this.handleBookVoiceStatus(status);
+            }
+          },
+          onCaptureStats: (stats) => {
+            if (isCurrentClient()) {
+              this.handleBookVoiceCaptureStats(stats);
+            }
+          },
+          onEvent: (event) => {
+            if (isCurrentClient()) {
+              this.handleBookVoiceGatewayEvent(event);
+            }
+          },
+          onPartial: (text) => {
+            if (isCurrentClient()) {
+              this.handleBookVoicePartial(text);
+            }
+          },
+          onFinal: (event) => {
+            if (isCurrentClient()) {
+              return this.handleBookVoiceFinal(event);
+            }
+            return undefined;
+          },
+          onError: (message, error) => {
+            if (isCurrentClient()) {
+              this.handleBookVoiceError(message, error);
+            }
+          },
         },
       });
+      bookVoiceStreamingClient = client;
+      await client.connect();
+      this.setData({
+        bookVoiceAssistantStatusText: "实时识别已连接",
+        error: "",
+      });
+      return true;
+    } catch (error) {
+      if (client && bookVoiceStreamingClient === client) {
+        bookVoiceStreamingClient = null;
+      }
+      client?.close({ force: true });
+      const message = error instanceof Error ? error.message : "实时识别连接失败";
+      this.handleBookVoiceError(message, classifyVoiceClientConnectionError(message));
+      return false;
+    } finally {
+      this.setData({ bookVoiceAssistantBusy: false });
+    }
+  },
+
+  appendBookVoiceTranscriptLine(line) {
+    const lines = this.data.bookVoiceTranscriptLines || [];
+    const index = lines.findIndex((item) => item.id === line.id);
+    const nextLines = index >= 0
+      ? lines.map((item, itemIndex) => (itemIndex === index ? { ...item, ...line } : item))
+      : [...lines, line];
+    this.setData({ bookVoiceTranscriptLines: nextLines });
+  },
+
+  handleBookVoiceStatus(status) {
+    const statusTextMap: Record<VoiceChatConnectionStatus, string> = {
+      idle: "实时识别未连接",
+      connecting: "正在连接实时识别",
+      ready: "我可以听你说",
+      listening: "我在听，请说想怎么改",
+      stopping: "正在收尾识别",
+      closed: "语音对话已暂停",
+      error: "实时识别异常",
+    };
+    const patch: Partial<BookData> = {
+      bookVoiceAssistantListening: status === "listening",
+    };
+    const shouldPreserveSemanticStatus = status === "ready" && (
+      this.data.bookVoiceAssistantBusy
+      || !this.data.bookVoiceAssistantConversationActive
+      || Boolean(this.data.bookVoiceCommandText || this.data.bookVoiceCommandSummary)
+    );
+    if (!shouldPreserveSemanticStatus) {
+      patch.bookVoiceAssistantStatusText = statusTextMap[status];
+    }
+    this.setData(patch);
+  },
+
+  handleBookVoiceCaptureStats(stats) {
+    const labels: Record<MemoirCaptureStats["state"], string> = {
+      idle: "麦克风未开始",
+      opening: "正在打开麦克风",
+      recording: "录音中",
+      stopping: "正在收尾",
+      error: "录音异常",
+    };
+    const patch: Partial<BookData> = {
+      bookVoiceCaptureStateText: labels[stats.state],
+      bookVoiceAudioLevelPercent: Math.min(100, Math.round(Math.sqrt(stats.audioLevel || 0) * 100)),
+    };
+    if (stats.autoStopped && stats.autoStopReason === "no_voice") {
+      patch.bookVoiceAssistantListening = false;
+      patch.bookVoiceAssistantBusy = false;
+      patch.bookVoiceAssistantConversationActive = false;
+      patch.bookVoiceAssistantStatusText = "没听到声音，先暂停";
+      patch.bookVoiceLiveText = "";
+    } else if (stats.autoStopped) {
+      patch.bookVoiceAssistantStatusText = "检测到停顿，正在识别";
+    }
+    this.setData(patch);
+  },
+
+  handleBookVoiceGatewayEvent(event) {
+    if (event.type === "audio.ended") {
+      this.setData({
+        bookVoiceAssistantListening: false,
+        bookVoiceCaptureStateText: "麦克风未开始",
+        bookVoiceAudioLevelPercent: 0,
+      });
+      const hasRecognizedCommand = Boolean(
+        this.data.bookVoiceCommandText || this.data.bookVoiceCommandSummary,
+      );
+      if (!this.data.bookVoiceLiveText && !this.data.bookVoiceAssistantBusy && !hasRecognizedCommand) {
+        this.setData({
+          bookVoiceAssistantConversationActive: false,
+          bookVoiceAssistantStatusText: this.data.bookVoiceAssistantStatusText === "没听到声音，先暂停"
+            ? "语音对话已暂停"
+            : "已结束收听",
+        });
+      }
+    }
+    if (event.type === "session.stopped") {
+      this.setData({ bookVoiceAssistantListening: false });
+    }
+  },
+
+  handleBookVoicePartial(text) {
+    this.setData({
+      bookVoiceAssistantExpanded: true,
+      bookVoiceLiveText: text,
+      bookVoiceAssistantStatusText: text ? "正在实时识别" : "我在听，请说想怎么改",
+      error: "",
+    });
+  },
+
+  async handleBookVoiceFinal(event) {
+    const text = trimText(event.text || "");
+    if (!text) {
+      return;
+    }
+    this.appendBookVoiceTranscriptLine({
+      id: event.message_id || event.utterance_id || `book-user-${Date.now()}`,
+      role: "user",
+      text,
+      message_id: event.message_id,
+      utterance_id: event.utterance_id,
+      audio_file_id: event.audio_file_id,
+      transcript_version_id: event.transcript_version_id,
+      start_ms: event.start_ms,
+      end_ms: event.end_ms,
+    });
+    this.setData({
+      bookVoiceLiveText: "",
+      bookVoiceAssistantListening: false,
+      bookVoiceAssistantBusy: true,
+      bookVoiceAssistantStatusText: "正在理解修改需求",
+    });
+    try {
       await this.handleBookVoiceCommandTranscript(text);
     } catch (error) {
       if (isLoginError(error)) {
         wx.reLaunch({ url: "/pages/login/index" });
         return;
       }
-      const message = error instanceof Error ? error.message : "语音修改识别失败";
       this.setData({
-        error: noVoiceAutoStopped ? "" : message,
+        error: error instanceof Error ? error.message : "语音修改识别失败",
         bookVoiceAssistantConversationActive: false,
-        bookVoiceAssistantStatusText: noVoiceAutoStopped ? "语音对话已暂停" : "没有听清",
+        bookVoiceAssistantStatusText: "没有听清",
       });
     } finally {
       this.setData({
@@ -1306,6 +1567,20 @@ Page<BookData, {
         bookVoiceAssistantBusy: false,
       });
     }
+  },
+
+  handleBookVoiceError(message, error) {
+    const errorMessage = error?.message || message || "实时识别异常";
+    this.setData({
+      error: errorMessage,
+      bookVoiceAssistantListening: false,
+      bookVoiceAssistantBusy: false,
+      bookVoiceAssistantConversationActive: false,
+      bookVoiceAssistantStatusText: errorMessage,
+      bookVoiceCaptureStateText: "录音异常",
+    });
+    bookVoiceStreamingClient?.close({ force: true });
+    bookVoiceStreamingClient = null;
   },
 
   applyBookVoiceCommandPreview(preview) {
@@ -1483,6 +1758,7 @@ Page<BookData, {
       bookVoiceCommandUndoText: "",
       bookVoiceCommandUndoSnapshot: null,
       bookVoiceAssistantStatusText: bookVoiceAssistantStatusText(this.data.stage),
+      bookVoiceLiveText: "",
       error: "",
     });
   },
@@ -1490,17 +1766,22 @@ Page<BookData, {
   stopBookVoiceConversation() {
     this.clearBookVoiceAssistantAutoListenTimer();
     if (this.data.bookVoiceAssistantListening) {
-      stopMemoirVoiceSearchRecording();
+      bookVoiceStreamingClient?.stopRecording();
       this.setData({
         bookVoiceAssistantConversationActive: false,
         bookVoiceAssistantStatusText: "正在保存录音",
       });
       return;
     }
+    bookVoiceStreamingClient?.close({ force: true });
+    bookVoiceStreamingClient = null;
     this.setData({
       bookVoiceAssistantConversationActive: false,
       bookVoiceAssistantBusy: false,
       bookVoiceAssistantReplyText: "",
+      bookVoiceLiveText: "",
+      bookVoiceAudioLevelPercent: 0,
+      bookVoiceCaptureStateText: "麦克风未开始",
       bookVoiceAssistantStatusText: bookVoiceAssistantStatusText(this.data.stage),
     });
   },
@@ -1515,6 +1796,7 @@ Page<BookData, {
   canStartBookVoiceAssistantAutoListen() {
     return Boolean(
       this.data.bookVoiceAssistantConversationActive
+      && this.data.bookVoiceAssistantExpanded
       && this.data.plan
       && this.data.chapters.length
       && this.data.projectId
@@ -1534,6 +1816,7 @@ Page<BookData, {
       return;
     }
     this.setData({
+      bookVoiceAssistantExpanded: true,
       bookVoiceAssistantConversationActive: true,
       bookVoiceAssistantBusy: false,
       bookVoiceAssistantStatusText: statusText,
@@ -1555,7 +1838,13 @@ Page<BookData, {
     this.stopPlayback();
     this.playToken += 1;
     const token = this.playToken;
+    this.appendBookVoiceTranscriptLine({
+      id: `book-ai-${Date.now()}-${this.data.bookVoiceTranscriptLines.length}`,
+      role: "assistant",
+      text: replyText,
+    });
     this.setData({
+      bookVoiceAssistantExpanded: true,
       ttsBusyTarget: target,
       bookVoiceAssistantBusy: true,
       bookVoiceAssistantReplyText: replyText,

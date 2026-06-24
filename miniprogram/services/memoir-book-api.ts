@@ -24,6 +24,7 @@ import {
   memoirRequest,
   withSelectedAIModel,
 } from "./memoir-api-client";
+import { cleanBaseUrl, readBackendConfig } from "./request";
 
 function bookPlanPath(projectId: string, suffix = ""): string {
   return memoirProjectPath(projectId, `/book-plan${suffix}`);
@@ -219,6 +220,14 @@ export function parseMemoirBookVoiceCommand(
       data: withSelectedAIModel(data),
     },
   );
+}
+
+export function bookVoiceCommandGatewayUrl(projectId: string): string {
+  const config = readBackendConfig();
+  if (!config.wsBaseUrl) {
+    throw new Error("未配置后端 WebSocket 地址");
+  }
+  return `${cleanBaseUrl(config.wsBaseUrl)}${memoirProjectPath(projectId, "/book-voice-command/gateway")}`;
 }
 
 export function createMemoirBookVoiceAssistantTTS(

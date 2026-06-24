@@ -448,6 +448,76 @@ async def test_voice_gateway_masks_final_persistence_errors():
     assert stopped_with == ["asr_final_persistence_failed"]
 
 
+async def test_book_voice_command_gateway_uses_transient_realtime_session(monkeypatch):
+    from app.routers.memoir import voice_gateway as voice_gateway_router
+
+    calls: dict[str, Any] = {}
+
+    class FakeUser:
+        id = "user-1"
+
+    class FakeWebSocket:
+        def __init__(self) -> None:
+            self.accepted = False
+
+        async def accept(self) -> None:
+            self.accepted = True
+
+    async def fake_authenticate(websocket: Any, db: Any) -> FakeUser:
+        calls["auth"] = (websocket, db)
+        return FakeUser()
+
+    async def fake_load_project(db: Any, project_id: str, user_id: str) -> object:
+        calls["load_project"] = (db, project_id, user_id)
+        return object()
+
+    class FakeLease:
+        def __init__(self) -> None:
+            self.released = False
+
+        async def release(self) -> None:
+            self.released = True
+
+    lease = FakeLease()
+
+    class FakeCapacityManager:
+        async def acquire(self, user_id: str, session_id: str) -> FakeLease:
+            calls["capacity"] = (user_id, session_id)
+            return lease
+
+    class FakeBookGatewaySession:
+        def __init__(self, **kwargs: Any) -> None:
+            calls["gateway_kwargs"] = kwargs
+
+        async def run(self) -> None:
+            calls["asr_client"] = calls["gateway_kwargs"]["asr_client_factory"]()
+
+    def fake_create_asr_client(user_id: str, session_id: str) -> FakeStreamingASRClient:
+        calls["asr_factory"] = (user_id, session_id)
+        return FakeStreamingASRClient()
+
+    websocket = FakeWebSocket()
+    db = object()
+    monkeypatch.setattr(voice_gateway_router, "_authenticate_websocket", fake_authenticate)
+    monkeypatch.setattr(voice_gateway_router, "load_memoir_project", fake_load_project)
+    monkeypatch.setattr(voice_gateway_router, "voice_gateway_capacity_manager", FakeCapacityManager())
+    monkeypatch.setattr(voice_gateway_router, "VoiceGatewaySession", FakeBookGatewaySession)
+    monkeypatch.setattr(voice_gateway_router, "create_volc_streaming_asr_client", fake_create_asr_client)
+
+    await voice_gateway_router.mobile_memoir_book_voice_command_gateway(websocket, "project-1", db)
+
+    transient_session_id = calls["capacity"][1]
+    assert websocket.accepted
+    assert calls["auth"] == (websocket, db)
+    assert calls["load_project"] == (db, "project-1", "user-1")
+    assert transient_session_id.startswith("book-voice-command-project-1-")
+    assert calls["asr_factory"] == ("user-1", transient_session_id)
+    assert set(calls["gateway_kwargs"]) == {"client", "asr_client_factory"}
+    assert calls["gateway_kwargs"]["client"] is websocket
+    assert isinstance(calls["asr_client"], FakeStreamingASRClient)
+    assert lease.released
+
+
 async def test_voice_gateway_persistence_saves_final_message_utterance_and_audio(
     client,
     test_db,
