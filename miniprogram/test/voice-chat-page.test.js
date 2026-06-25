@@ -83,7 +83,7 @@ function loadVoiceChatPage({
       followUpTTSStateText: options.followUpTTSStateText || "",
       ttsAlignment: options.ttsAlignment || [],
       totalTranscriptCharCount: 0,
-      canRequestFollowUp: false,
+      canRequestFollowUp: options.canRequestFollowUp ?? false,
     }),
     canRequestFollowUp: () => false,
     countTextChars: (value) => value.length,
@@ -1009,6 +1009,75 @@ test("voice chat keeps completed streaming assistant turns when playback fails",
   assert.deepEqual(startCalls, []);
 });
 
+test("voice chat clears temporary streaming assistant state when the turn fails", async () => {
+  const page = loadVoiceChatPage({
+    assistantTurnStreamExports: {
+      VoiceAssistantTurnStreamClient: class {
+        constructor(voiceSessionId, callbacks) {
+          this.callbacks = callbacks;
+        }
+        async start() {
+          this.callbacks.onStarted?.({ type: "turn.started", turn_id: "turn-1" });
+          this.callbacks.onTextDelta?.({
+            type: "text.delta",
+            turn_id: "turn-1",
+            text_delta: "好，那咱们就聊聊朋友。",
+            text: "好，那咱们就聊聊朋友。",
+          });
+          throw new Error("语音合成服务暂时不可用，请稍后重试。");
+        }
+        cancel() {}
+        close() {}
+        disposeTempFiles() {}
+      },
+    },
+  });
+  const context = {
+    ...page,
+    data: {
+      ...page.data,
+      voiceSessionId: "voice-1",
+      guidanceMode: "guided_interview",
+      transcriptLines: [{
+        id: "user-line-1",
+        role: "user",
+        text: "今天我想聊聊朋友吧，不太想讲工作了。",
+        message_id: "user-message-1",
+      }],
+      followUpTTSPlaying: true,
+      ttsSpokenText: "好，那咱们就聊聊朋友。",
+      ttsProgressPercent: 18,
+      lastFollowUpSourceMessageId: "previous-source",
+    },
+    audioPlayback: {
+      currentToken: () => 1,
+      currentAudio: () => null,
+      isCurrentToken: () => true,
+      nextToken: () => 2,
+      stop() {},
+    },
+    voiceStreaming: {
+      hasClient: () => true,
+    },
+    setData(patch) {
+      this.data = { ...this.data, ...patch };
+    },
+  };
+
+  await page.generateFollowUp.call(context, false);
+
+  assert.deepEqual(context.data.transcriptLines.map((line) => line.id), ["user-line-1"]);
+  assert.equal(context.data.assistantPromptText, "");
+  assert.equal(context.data.followUpMessageId, "");
+  assert.equal(context.data.followUpAudioFileId, "");
+  assert.equal(context.data.followUpError, "语音合成服务暂时不可用，请稍后重试。");
+  assert.equal(context.data.followUpTTSPlaying, false);
+  assert.equal(context.data.followUpTTSLoading, false);
+  assert.equal(context.data.followUpTTSStateText, "");
+  assert.equal(context.data.ttsProgressPercent, 0);
+  assert.equal(context.data.persistenceStateText, "回应失败");
+});
+
 test("voice chat replays an existing assistant audio file without regenerating TTS", async () => {
   const played = [];
   const generated = [];
@@ -1125,35 +1194,6 @@ test("voice chat passes regenerate flag to streaming assistant turn", async () =
 
   assert.deepEqual(streamStarts, [{ regenerate: true }]);
   assert.equal(context.data.followUpMessageId, "assistant-question-1");
-});
-
-test("voice chat can bridge acknowledgement playback while the next question is preparing", async () => {
-  const page = loadVoiceChatPage();
-  const context = {
-    ...page,
-    data: {
-      ...page.data,
-      followUpLoading: true,
-      followUpTTSStateText: "",
-    },
-    assistantTurnQueue: [],
-    ttsRequestSerial: 0,
-    setData(patch) {
-      this.data = { ...this.data, ...patch };
-    },
-  };
-
-  const shouldPlay = await page.waitForNextAssistantTurnBeforePlayback.call(context, {
-    waitForNextTurnBeforePlaybackMs: 5,
-  });
-  assert.equal(shouldPlay, true);
-  assert.equal(context.data.followUpTTSStateText, "正在准备下一句语音");
-
-  const cancelled = page.waitForNextAssistantTurnBeforePlayback.call(context, {
-    waitForNextTurnBeforePlaybackMs: 5,
-  });
-  context.ttsRequestSerial += 1;
-  assert.equal(await cancelled, false);
 });
 
 test("voice chat asks with AI voice when auto-listen hears no answer", async () => {

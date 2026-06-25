@@ -12,7 +12,6 @@ export interface AssistantTurnQueueItem {
   expectsAnswer: boolean;
   autoListenAfterPlayback: boolean;
   forceRegenerate: boolean;
-  waitForNextTurnBeforePlaybackMs: number;
   line: VoiceChatTranscriptLine;
   prepare?: Promise<PreparedAssistantTurnAudio>;
 }
@@ -55,7 +54,6 @@ export function assistantTurnQueueItem(
   options: {
     autoListenAfterPlayback?: boolean;
     forceRegenerate?: boolean;
-    waitForNextTurnBeforePlaybackMs?: number;
   } = {},
 ): AssistantTurnQueueItem {
   const line = assistantLineFromResponse(response);
@@ -65,7 +63,6 @@ export function assistantTurnQueueItem(
     expectsAnswer: response.expects_answer !== false,
     autoListenAfterPlayback: options.autoListenAfterPlayback ?? response.expects_answer !== false,
     forceRegenerate: options.forceRegenerate ?? false,
-    waitForNextTurnBeforePlaybackMs: options.waitForNextTurnBeforePlaybackMs ?? 0,
     line,
   };
 }

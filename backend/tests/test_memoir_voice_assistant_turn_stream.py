@@ -9,10 +9,7 @@ from app.domain.memoir.types import MemoirChatContentStatus, MemoirChatMessageRo
 from app.models.memoir import AudioFile, MemoirChatMessage
 from app.services.ai_streaming import AITextStreamChunk
 from app.services.memoir.tts_alignment import TTSAlignmentSegment
-from app.services.memoir.voice_assistant_turn_stream import (
-    AssistantTurnSegmenter,
-    VoiceAssistantTurnStreamSession,
-)
+from app.services.memoir.voice_assistant_turn_stream import VoiceAssistantTurnStreamSession
 from app.services.memoir.voice_tts import StreamingTTSChunk
 from tests.memoir_helpers import create_test_voice_transcript, post_mobile_memoir_voice_session
 
@@ -73,9 +70,9 @@ async def test_voice_assistant_turn_streams_text_audio_and_persists_message(
     text_deltas = [event["text_delta"] for event in stream_client.sent if event["type"] == "text.delta"]
     assert text_deltas == ai_client.chunks
     text_segments = [event["text"] for event in stream_client.sent if event["type"] == "text.segment"]
-    assert text_segments == ["好，那我们就接着聊工作。", "第一份工作里，最让您记到现在的是哪一件事？"]
+    assert text_segments == ["好，那我们就接着聊工作。第一份工作里，最让您记到现在的是哪一件事？"]
     audio_chunks = [event for event in stream_client.sent if event["type"] == "audio.chunk"]
-    assert [base64.b64decode(event["audio"]) for event in audio_chunks] == [b"audio-0", b"audio-1"]
+    assert [base64.b64decode(event["audio"]) for event in audio_chunks] == [b"audio-0"]
     assert [call["text"] for call in tts_client.calls] == text_segments
     assert tts_client.calls[0]["voice"] == "S_test_voice"
     assert tts_client.calls[0]["speed_ratio"] == 1.1
@@ -102,9 +99,9 @@ async def test_voice_assistant_turn_streams_text_audio_and_persists_message(
     audio_file = await test_db.scalar(select(AudioFile).where(AudioFile.id == completed["audio_file_id"]))
     assert audio_file is not None
     assert audio_file.mime_type == "audio/pcm"
-    assert audio_file.size_bytes == len(b"audio-0audio-1")
+    assert audio_file.size_bytes == len(b"audio-0")
     audio_relative_path = Path(audio_file.storage_path).relative_to(Path("memoir") / "audio")
-    assert (tmp_path / "audio" / audio_relative_path).read_bytes() == b"audio-0audio-1"
+    assert (tmp_path / "audio" / audio_relative_path).read_bytes() == b"audio-0"
 
 
 async def test_voice_assistant_turn_cancel_does_not_persist_partial_message(
@@ -267,11 +264,50 @@ async def test_voice_assistant_turn_prompt_marks_explicit_topic_switch(
     assert "叙述者：今天聊聊工作吧。" in prompt
 
 
-def test_assistant_turn_segmenter_splits_on_sentence_boundary_and_flushes_tail():
-    segmenter = AssistantTurnSegmenter(min_chars=4, max_chars=12)
+async def test_voice_assistant_turn_tts_failure_does_not_persist_partial_message(
+    client,
+    test_db,
+):
+    created = await create_test_voice_transcript(
+        client,
+        test_db,
+        text="今天我想聊聊朋友吧，不太想讲工作了。",
+        guidance_mode="guided_interview",
+        current_guidance_module="work",
+    )
+    stream_client = FakeTurnClient()
+    ai_client = FakeStreamingAI(
+        [
+            "好，那我们就聊聊朋友。",
+            "你说到朋友，我想问这些年里有没有一个人让你觉得一见面还是特别亲？",
+        ]
+    )
+    session = VoiceAssistantTurnStreamSession(
+        db=test_db,
+        client=stream_client,
+        voice_session_id=created["session"]["id"],
+        user_id=created["user_id"],
+        ai_client_factory=lambda model=None: ai_client,
+        tts_client_factory=lambda: FailingStreamingTTS(),
+    )
 
-    assert segmenter.push("我们先聊工作。接着说第一份工作里") == ["我们先聊工作。"]
-    assert segmenter.flush() == ["接着说第一份工作里"]
+    run_task = asyncio.create_task(session.run())
+    await _wait_for_event(stream_client, "turn.ready")
+    await stream_client.push({"type": "turn.start"})
+    failed = await _wait_for_event(stream_client, "turn.failed")
+    await asyncio.wait_for(run_task, timeout=1)
+
+    assert "tts failed" in failed["error"]
+    assert [event["type"] for event in stream_client.sent].count("text.segment") == 1
+    assert not [event for event in stream_client.sent if event["type"] == "audio.chunk"]
+    assistant_count = await test_db.scalar(
+        select(func.count(MemoirChatMessage.id))
+        .where(
+            MemoirChatMessage.voice_session_id == created["session"]["id"],
+            MemoirChatMessage.role == MemoirChatMessageRole.ASSISTANT.value,
+        )
+    )
+    assert assistant_count == 0
 
 
 async def _run_stream_turn(
@@ -393,3 +429,17 @@ class FakeStreamingTTS:
             duration_seconds=0.4,
             is_final=True,
         )
+
+
+class FailingStreamingTTS(FakeStreamingTTS):
+    async def stream_synthesize(self, text, *, voice=None, speed_ratio=None):
+        self.calls.append({"text": text, "voice": voice, "speed_ratio": speed_ratio})
+        if False:
+            yield StreamingTTSChunk(
+                audio=b"",
+                mime_type="audio/L16",
+                provider=self.provider_name,
+                model=self.model_name,
+                voice=voice or self.default_voice,
+            )
+        raise RuntimeError("tts failed after text completed")
