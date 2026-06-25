@@ -8,6 +8,8 @@ export interface WebAudioPCMPlaybackQueueOptions {
   createContext?: () => WechatMiniprogram.WebAudioContext;
   configureAudio?: () => void;
   minLeadTimeSeconds?: number;
+  completionGraceSeconds?: number;
+  completionPollIntervalMs?: number;
   onSegmentScheduled?: (event: PCMPlaybackSegmentEvent) => void;
   onSegmentEnded?: (event: PCMPlaybackSegmentEvent) => void;
   onUnderrun?: (event: PCMPlaybackUnderrunEvent) => void;
@@ -40,10 +42,13 @@ type ScheduledPCMSource = {
   source: WechatMiniprogram.AudioBufferSourceNode;
   event: PCMPlaybackSegmentEvent;
   resolveEnded: () => void;
+  completionTimer: ReturnType<typeof setTimeout> | null;
   ended: boolean;
 };
 
 const DEFAULT_MIN_LEAD_SECONDS = 0.12;
+const DEFAULT_COMPLETION_GRACE_SECONDS = 0.15;
+const DEFAULT_COMPLETION_POLL_INTERVAL_MS = 100;
 
 export function configureAudibleWebAudioPlayback(): void {
   if (typeof wx !== "undefined" && typeof wx.setInnerAudioOption === "function") {
@@ -110,6 +115,7 @@ export class WebAudioPCMPlaybackQueue {
       source,
       event,
       resolveEnded,
+      completionTimer: null,
       ended: false,
     };
     source.onended = () => {
@@ -122,6 +128,7 @@ export class WebAudioPCMPlaybackQueue {
       this.finishSource(scheduledSource, false);
       throw error;
     }
+    this.scheduleSourceCompletion(scheduledSource);
     this.nextPlayTimeSeconds = startAtSeconds + durationSeconds;
     this.segmentIndex += 1;
     this.options.onSegmentScheduled?.(event);
@@ -183,11 +190,47 @@ export class WebAudioPCMPlaybackQueue {
     }
   }
 
+  private scheduleSourceCompletion(
+    scheduledSource: ScheduledPCMSource,
+  ): void {
+    // iOS WeChat WebAudio can miss onended; settle from the same playback clock used for highlighting.
+    if (scheduledSource.ended) {
+      return;
+    }
+    const graceSeconds = Math.max(
+      0,
+      this.options.completionGraceSeconds ?? DEFAULT_COMPLETION_GRACE_SECONDS,
+    );
+    const expectedEndSeconds = scheduledSource.event.startAtSeconds
+      + scheduledSource.event.durationSeconds
+      + graceSeconds;
+    const currentTimeSeconds = this.audioContext?.currentTime ?? 0;
+    if (currentTimeSeconds >= expectedEndSeconds) {
+      this.finishSource(scheduledSource, true);
+      return;
+    }
+    const pollIntervalMs = Math.max(
+      1,
+      Math.floor(this.options.completionPollIntervalMs ?? DEFAULT_COMPLETION_POLL_INTERVAL_MS),
+    );
+    const earliestPollMs = Math.ceil(Math.max(
+      0,
+      (expectedEndSeconds - currentTimeSeconds) * 1000,
+    ));
+    scheduledSource.completionTimer = setTimeout(() => {
+      this.scheduleSourceCompletion(scheduledSource);
+    }, Math.min(pollIntervalMs, earliestPollMs || pollIntervalMs));
+  }
+
   private finishSource(scheduledSource: ScheduledPCMSource, notifyEnded: boolean): void {
     if (scheduledSource.ended) {
       return;
     }
     scheduledSource.ended = true;
+    if (scheduledSource.completionTimer !== null) {
+      clearTimeout(scheduledSource.completionTimer);
+      scheduledSource.completionTimer = null;
+    }
     const index = this.sources.indexOf(scheduledSource);
     if (index >= 0) {
       this.sources.splice(index, 1);

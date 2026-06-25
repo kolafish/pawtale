@@ -150,6 +150,7 @@ test("WebAudioPCMPlaybackQueue schedules PCM chunks without file playback gaps",
   assert.equal(events.length, 2);
   assert.equal(queue.stats().segmentCount, 2);
   assert.equal(queue.stats().underrunCount, 0);
+  await queue.destroy();
 });
 
 test("WebAudioPCMPlaybackQueue configures audible playback before creating WebAudio context", async () => {
@@ -213,6 +214,37 @@ test("WebAudioPCMPlaybackQueue releases source when scheduling fails", async () 
   assert.equal(queue.stats().segmentCount, 0);
 });
 
+test("WebAudioPCMPlaybackQueue completes segments when WebAudio onended is missing", async () => {
+  delete require.cache[require.resolve("../services/webaudio-pcm-playback.ts")];
+  const { WebAudioPCMPlaybackQueue } = require("../services/webaudio-pcm-playback.ts");
+  const { context, scheduled } = createFakeWebAudioContext();
+  const endedEvents = [];
+  const queue = new WebAudioPCMPlaybackQueue({
+    createContext: () => context,
+    minLeadTimeSeconds: 0,
+    completionGraceSeconds: 0,
+    completionPollIntervalMs: 1,
+    onSegmentEnded: (event) => endedEvents.push(event),
+  });
+
+  const event = await queue.appendPCM16LE(new Uint8Array(32), {
+    sampleRate: 16000,
+    channels: 1,
+    bitsPerSample: 16,
+  });
+  context.currentTime = event.startAtSeconds + event.durationSeconds;
+  await Promise.race([
+    event.ended,
+    new Promise((_, reject) => setTimeout(() => reject(new Error("segment did not end")), 100)),
+  ]);
+
+  assert.equal(scheduled.length, 1);
+  assert.equal(scheduled[0].source.disconnected, true);
+  assert.equal(endedEvents.length, 1);
+  assert.equal(endedEvents[0].segmentIndex, 0);
+  assert.equal(queue.stats().segmentCount, 1);
+});
+
 test("WebAudioPCMPlaybackQueue resolves pending segment when stopped", async () => {
   delete require.cache[require.resolve("../services/webaudio-pcm-playback.ts")];
   const { WebAudioPCMPlaybackQueue } = require("../services/webaudio-pcm-playback.ts");
@@ -266,4 +298,5 @@ test("WebAudioPCMPlaybackQueue records underruns when chunks arrive too late", a
   assert.equal(underruns[0].segmentIndex, 1);
   assert.equal(scheduled[1].when, 12.2);
   assert.equal(queue.stats().underrunCount, 1);
+  await queue.destroy();
 });
