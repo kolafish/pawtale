@@ -19,12 +19,9 @@ from app.schemas.memoir_voice import (
     MemoirVoiceAuthorizationConsentRequest,
     MemoirVoiceAuthorizationConsentResponse,
     MemoirVoiceAuthorizationConsentStatusResponse,
-    MemoirVoiceFollowUpRequest,
     MemoirVoiceFollowUpResponse,
     MemoirVoiceNoAnswerPromptRequest,
     MemoirVoiceProgressResponse,
-    MemoirVoiceTurnPlanRequest,
-    MemoirVoiceTurnPlanResponse,
     MemoirVoiceSearchQueryFiltersResponse,
     MemoirVoiceSearchQueryParseRequest,
     MemoirVoiceSearchQueryParseResponse,
@@ -185,26 +182,6 @@ async def get_mobile_memoir_voice_authorization_consent(
         has_current_consent=bool(consent and consent.agreed),
         consent=consent,
     )
-
-
-@router.post("/voice-sessions/{voice_session_id}/follow-up", response_model=MemoirVoiceFollowUpResponse)
-async def create_mobile_memoir_voice_follow_up(
-    voice_session_id: str,
-    req: MemoirVoiceFollowUpRequest,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    return await memoir_voice_followups.generate_voice_follow_up(db, voice_session_id, current_user.id, req)
-
-
-@router.post("/voice-sessions/{voice_session_id}/turn-plan", response_model=MemoirVoiceTurnPlanResponse)
-async def create_mobile_memoir_voice_turn_plan(
-    voice_session_id: str,
-    req: MemoirVoiceTurnPlanRequest,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    return await memoir_voice_followups.plan_voice_turn(db, voice_session_id, current_user.id, req)
 
 
 @router.post("/voice-sessions/{voice_session_id}/no-answer-prompt", response_model=MemoirVoiceFollowUpResponse)

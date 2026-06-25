@@ -5,7 +5,7 @@ from typing import Any
 
 from sqlalchemy import func, select
 
-from app.domain.memoir.types import MemoirChatMessageRole
+from app.domain.memoir.types import MemoirChatContentStatus, MemoirChatMessageRole
 from app.models.memoir import AudioFile, MemoirChatMessage
 from app.services.ai_streaming import AITextStreamChunk
 from app.services.memoir.tts_alignment import TTSAlignmentSegment
@@ -14,7 +14,7 @@ from app.services.memoir.voice_assistant_turn_stream import (
     VoiceAssistantTurnStreamSession,
 )
 from app.services.memoir.voice_tts import StreamingTTSChunk
-from tests.memoir_helpers import create_test_voice_transcript
+from tests.memoir_helpers import create_test_voice_transcript, post_mobile_memoir_voice_session
 
 
 async def test_voice_assistant_turn_streams_text_audio_and_persists_message(
@@ -141,11 +141,164 @@ async def test_voice_assistant_turn_cancel_does_not_persist_partial_message(
     assert assistant_count == 0
 
 
+async def test_voice_assistant_turn_guided_opening_prompt_uses_topic_menu(
+    client,
+    test_db,
+):
+    response = await post_mobile_memoir_voice_session(
+        client,
+        json={"guidance_mode": "guided_interview", "current_guidance_module": "person"},
+    )
+    voice_session = response.json()["session"]
+    user_id = (await client.get("/api/auth/me")).json()["id"]
+
+    _, ai_client, _, completed = await _run_stream_turn(
+        test_db,
+        voice_session_id=voice_session["id"],
+        user_id=user_id,
+        chunks=["你想先聊哪一位亲人？"],
+        regenerate=True,
+    )
+
+    prompt = ai_client.calls[0]["user_prompt"]
+    assert completed["primary_intent"] == "opening"
+    assert ai_client.calls[0]["kwargs"]["max_tokens"] == 420
+    assert "主题讲述首次开场" in prompt
+    assert "明确介绍可聊主题" in prompt
+    assert "人物、事情、家庭、工作、地点、某一天、人生阶段、闲聊" in prompt
+
+
+async def test_voice_assistant_turn_guided_opening_references_previous_session(
+    client,
+    test_db,
+):
+    previous_response = await post_mobile_memoir_voice_session(
+        client,
+        json={"guidance_mode": "guided_interview", "current_guidance_module": "event"},
+    )
+    previous_session = previous_response.json()["session"]
+    previous_message = MemoirChatMessage(
+        project_id=previous_session["project_id"],
+        voice_session_id=previous_session["id"],
+        role=MemoirChatMessageRole.USER.value,
+        content_text="上次讲到我第一次去上海找工作。",
+        content_status=MemoirChatContentStatus.FINAL.value,
+        turn_index=0,
+        metadata_json={"source": "test"},
+    )
+    test_db.add(previous_message)
+    await test_db.commit()
+    response = await post_mobile_memoir_voice_session(
+        client,
+        json={"guidance_mode": "guided_interview", "current_guidance_module": "event"},
+    )
+    voice_session = response.json()["session"]
+    user_id = (await client.get("/api/auth/me")).json()["id"]
+
+    _, ai_client, _, _ = await _run_stream_turn(
+        test_db,
+        voice_session_id=voice_session["id"],
+        user_id=user_id,
+        chunks=["欢迎回来，咱们接着聊上次去上海找工作的事，今天想接着讲哪里？"],
+    )
+
+    prompt = ai_client.calls[0]["user_prompt"]
+    assert "主题讲述继续开场" in prompt
+    assert "叙述者之前已有同模式讲述记录" in prompt
+    assert "优先邀请叙述者接着上次的话题继续讲" in prompt
+    assert "叙述者：上次讲到我第一次去上海找工作。" in prompt
+
+
+async def test_voice_assistant_turn_prompt_marks_explicit_topic_switch(
+    client,
+    test_db,
+):
+    response = await post_mobile_memoir_voice_session(
+        client,
+        json={"guidance_mode": "guided_interview", "current_guidance_module": "family"},
+    )
+    voice_session = response.json()["session"]
+    messages = [
+        MemoirChatMessage(
+            project_id=voice_session["project_id"],
+            voice_session_id=voice_session["id"],
+            role=MemoirChatMessageRole.USER.value,
+            content_text="我小时候经常住在外婆家。",
+            content_status=MemoirChatContentStatus.FINAL.value,
+            turn_index=0,
+            metadata_json={"source": "test"},
+        ),
+        MemoirChatMessage(
+            project_id=voice_session["project_id"],
+            voice_session_id=voice_session["id"],
+            role=MemoirChatMessageRole.ASSISTANT.value,
+            content_text="那我们接着聊外婆。",
+            content_status=MemoirChatContentStatus.FINAL.value,
+            guidance_intent="follow_up",
+            turn_index=1,
+            metadata_json={"expects_answer": True},
+        ),
+        MemoirChatMessage(
+            project_id=voice_session["project_id"],
+            voice_session_id=voice_session["id"],
+            role=MemoirChatMessageRole.USER.value,
+            content_text="今天聊聊工作吧。",
+            content_status=MemoirChatContentStatus.FINAL.value,
+            turn_index=2,
+            metadata_json={"source": "test"},
+        ),
+    ]
+    test_db.add_all(messages)
+    await test_db.commit()
+    user_id = (await client.get("/api/auth/me")).json()["id"]
+
+    _, ai_client, _, _ = await _run_stream_turn(
+        test_db,
+        voice_session_id=voice_session["id"],
+        user_id=user_id,
+        chunks=["好，那我们聊工作。第一份工作里，最让您记到现在的是哪一件事？"],
+    )
+
+    prompt = ai_client.calls[0]["user_prompt"]
+    assert ai_client.calls[0]["kwargs"]["max_tokens"] == 320
+    assert "明确选择或切换到“工作”主题" in prompt
+    assert "如果用户最新一句明确要求换方向，必须尊重最新一句" in prompt
+    assert "下一句必须围绕新主题展开，不要继续旧话题" in prompt
+    assert "叙述者：今天聊聊工作吧。" in prompt
+
+
 def test_assistant_turn_segmenter_splits_on_sentence_boundary_and_flushes_tail():
     segmenter = AssistantTurnSegmenter(min_chars=4, max_chars=12)
 
     assert segmenter.push("我们先聊工作。接着说第一份工作里") == ["我们先聊工作。"]
     assert segmenter.flush() == ["接着说第一份工作里"]
+
+
+async def _run_stream_turn(
+    test_db,
+    *,
+    voice_session_id: str,
+    user_id: str,
+    chunks: list[str],
+    regenerate: bool = False,
+) -> tuple["FakeTurnClient", "FakeStreamingAI", "FakeStreamingTTS", dict[str, Any]]:
+    stream_client = FakeTurnClient()
+    ai_client = FakeStreamingAI(chunks)
+    tts_client = FakeStreamingTTS()
+    session = VoiceAssistantTurnStreamSession(
+        db=test_db,
+        client=stream_client,
+        voice_session_id=voice_session_id,
+        user_id=user_id,
+        ai_client_factory=lambda model=None: ai_client,
+        tts_client_factory=lambda: tts_client,
+    )
+    run_task = asyncio.create_task(session.run())
+    await _wait_for_event(stream_client, "turn.ready")
+    await stream_client.push({"type": "turn.start", "regenerate": regenerate})
+    completed = await _wait_for_event(stream_client, "turn.completed")
+    await asyncio.wait_for(run_task, timeout=1)
+    return stream_client, ai_client, tts_client, completed
 
 
 async def _wait_for_event(client: "FakeTurnClient", event_type: str) -> dict[str, Any]:

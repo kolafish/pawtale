@@ -63,25 +63,6 @@ class MemoirVoiceAuthorizationConsentStatusResponse(BaseModel):
     consent: MemoirVoiceAuthorizationConsentResponse | None = None
 
 
-class MemoirVoiceTurnPlanContext(BaseModel):
-    user_signal: str = Field(default="memory_detail", max_length=32)
-    response_strategy: str = Field(default="direct_follow", max_length=32)
-    should_play_ack: bool = False
-    acknowledgement_text: str = Field(default="", max_length=80)
-    next_question_brief: str = Field(default="", max_length=160)
-
-
-class MemoirVoiceTurnPlanRequest(BaseModel):
-    ai_model: str | None = None
-
-
-class MemoirVoiceFollowUpRequest(BaseModel):
-    ai_model: str | None = None
-    regenerate: bool = False
-    acknowledgement_message_id: str | None = None
-    turn_plan: MemoirVoiceTurnPlanContext | None = None
-
-
 class MemoirVoiceNoAnswerPromptRequest(BaseModel):
     attempt: int = Field(default=1, ge=1, le=3)
 
@@ -198,11 +179,6 @@ class MemoirVoiceFollowUpResponse(BaseModel):
     primary_intent: str = "follow_up"
     intent_tags: list[str] = Field(default_factory=list)
     expects_answer: bool = True
-
-
-class MemoirVoiceTurnPlanResponse(BaseModel):
-    plan: MemoirVoiceTurnPlanContext
-    acknowledgement: MemoirVoiceFollowUpResponse | None = None
 
 
 class MemoirTTSAlignmentSegmentResponse(BaseModel):

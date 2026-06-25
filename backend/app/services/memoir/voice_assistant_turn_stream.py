@@ -34,10 +34,10 @@ from app.services.memoir.voice_followup_ai import (
     _recent_context,
     _requested_topic_hint,
 )
-from app.services.memoir.voice_followups import (
-    _load_previous_project_messages,
-    _load_voice_session,
-    _next_turn_index,
+from app.services.memoir.voice_chat_context import (
+    load_previous_project_messages,
+    load_voice_session,
+    next_turn_index,
 )
 from app.services.memoir.voice_tts import (
     DEFAULT_TTS_SPEED_RATIO,
@@ -296,8 +296,8 @@ class VoiceAssistantTurnStreamSession:
         req: AssistantTurnStartRequest,
         cancel_event: asyncio.Event,
     ) -> None:
-        voice_session = await _load_voice_session(self.db, self.voice_session_id, self.user_id)
-        previous_messages = await _load_previous_project_messages(self.db, voice_session)
+        voice_session = await load_voice_session(self.db, self.voice_session_id, self.user_id)
+        previous_messages = await load_previous_project_messages(self.db, voice_session)
         messages = list(voice_session.messages)
         has_user_message = _has_user_message(messages)
         fallback_intent = "follow_up" if has_user_message else "opening"
@@ -557,7 +557,7 @@ class VoiceAssistantTurnStreamSession:
                 content_status=MemoirChatContentStatus.FINAL.value,
                 audio_file_id=staged_audio.audio_file.id if staged_audio else None,
                 guidance_intent=turn.primary_intent,
-                turn_index=await _next_turn_index(self.db, voice_session.id),
+                turn_index=await next_turn_index(self.db, voice_session.id),
                 metadata_json={
                     "source": "ai.streaming_assistant_turn",
                     "prompt_version": STREAM_PROMPT_VERSION,

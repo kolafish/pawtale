@@ -85,8 +85,10 @@ backend/app/services/memoir/book_audio.py     # 章节/全书 TTS 文本分片�
 backend/app/routers/memoir/voice.py           # 本地/服务端 voice session API
 backend/app/services/memoir/voice_gateway.py  # WebSocket voice gateway + Streaming ASR
 backend/app/services/memoir/voice_sessions.py # voice session detail/list/progress
-backend/app/services/memoir/voice_followups.py # LLM dynamic follow-up
-backend/app/services/memoir/voice_tts.py      # assistant message TTS
+backend/app/services/memoir/voice_chat_context.py # voice session 上下文读取和 turn index
+backend/app/services/memoir/voice_assistant_turn_stream.py # LLM + TTS 流式 assistant turn
+backend/app/services/memoir/voice_followups.py # no-answer prompt
+backend/app/services/memoir/voice_tts.py      # assistant message TTS / Streaming TTS
 backend/app/services/memoir/voice_transcripts.py # 转写校正和 AI 忠实清理
 ```
 
@@ -200,7 +202,7 @@ Mini Program RecorderManager
  -> Streaming ASR Provider
  -> partial/final transcript
  -> Chat Orchestrator
- -> LLM dynamic follow-up
+ -> Streaming LLM assistant turn
  -> Streaming TTS Provider
  -> Mini Program audio playback
 ```
@@ -590,7 +592,7 @@ Streaming ASR PR5 后当时仍未完成、不能按上线态理解的缺口：
 - 微信登录后端 API 已完成；ECS `/opt/pawtale/backend/.env` 仍需要配置真实 `WECHAT_MINIPROGRAM_SECRET` 后，真机微信登录才能通过 code2session。
 - 原始音频按 final utterance 粗粒度保存，尚未做更精确的 VAD 时间切片和断线续传。
 - voice session 快照只保证已固化 transcript 的页面回放，不等同于断线续传；录音帧上传中的状态仍不可恢复。
-- 低延迟 Streaming TTS、用户插话打断和断线续传尚未接入；LLM follow-up、AI 回复落库和短句 TTS 播放已在第二批完成第一版。
+- 用户插话打断和断线续传尚未接入；LLM assistant turn、AI 回复落库和 Streaming TTS 已完成第一版。
 - 转写校正页和进度页已有第一版；成稿编辑页、结构化记忆页和证据链浏览仍未迁移到新版 voice session 数据。
 - 还没有方言/噪声评测集、provider fallback、限流和成本监控。
 
@@ -638,11 +640,11 @@ Streaming ASR PR5 后当时仍未完成、不能按上线态理解的缺口：
 - 复杂 VAD。
 - 转写校正、进度和成稿编辑页面。
 
-### Phase 2: Guidance Modes and LLM Dynamic Follow-up
+### Phase 2: Guidance Modes and Streaming Assistant Turn
 
-目标：final transcript 后按强/弱引导策略生成下一句 AI 追问。第一版已完成。
+目标：final transcript 后按强/弱引导策略生成下一句 AI 追问，并通过流式 LLM + 流式 TTS 尽快播放。第一版已完成。
 
-- 已新增 `voice_followups.py`，按 `free_narration` / `guided_interview` 生成追问。
+- 已新增 `voice_assistant_turn_stream.py`，按 `free_narration` / `guided_interview` 生成并播放 assistant turn。
 - 已支持 recent messages，上下文来自当前 voice session 的 chat messages。
 - 强引导先支持人、事、地点、时间段、主题五类模块。
 - assistant message 已落库，并在前端显示 AI 追问。
