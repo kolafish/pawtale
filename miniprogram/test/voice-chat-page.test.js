@@ -814,6 +814,7 @@ test("voice chat starts pending auto listening when gateway becomes ready after 
 test("voice chat streams one assistant turn and plays pcm audio frames", async () => {
   const streamStarts = [];
   const played = [];
+  const playbackEvents = [];
   const page = loadVoiceChatPage({
     assistantTurnStreamExports: {
       VoiceAssistantTurnStreamClient: class {
@@ -873,9 +874,15 @@ test("voice chat streams one assistant turn and plays pcm audio frames", async (
     streamingSpeechPlaybackExports: {
       StreamingSpeechPlaybackController: class {
         async appendFrame(frame) {
+          playbackEvents.push("appendFrame");
           played.push(frame);
         }
-        async waitForDrain() {}
+        async waitForDrain() {
+          playbackEvents.push("waitForDrain");
+        }
+        async destroy() {
+          playbackEvents.push("destroy");
+        }
         stop() {}
       },
     },
@@ -913,6 +920,7 @@ test("voice chat streams one assistant turn and plays pcm audio frames", async (
       this.data = { ...this.data, ...patch };
     },
     startRecording(autoTriggered) {
+      playbackEvents.push("startRecording");
       startCalls.push(autoTriggered);
       return true;
     },
@@ -933,6 +941,7 @@ test("voice chat streams one assistant turn and plays pcm audio frames", async (
   assert.equal(context.data.lastFollowUpSourceMessageId, "");
   assert.equal(context.data.persistenceStateText, "等待回答");
   assert.deepEqual(startCalls, [true]);
+  assert.deepEqual(playbackEvents, ["appendFrame", "waitForDrain", "destroy", "startRecording"]);
 });
 
 test("voice chat drives first streaming highlight from WebAudio playback progress", async () => {
@@ -1103,6 +1112,7 @@ test("voice chat ignores stale streaming audio done duration", async () => {
 });
 
 test("voice chat keeps completed streaming assistant turns when playback fails", async () => {
+  let playbackDestroyed = false;
   const page = loadVoiceChatPage({
     assistantTurnStreamExports: {
       VoiceAssistantTurnStreamClient: class {
@@ -1156,6 +1166,9 @@ test("voice chat keeps completed streaming assistant turns when playback fails",
           throw new Error("pcm audio failed");
         }
         async waitForDrain() {}
+        async destroy() {
+          playbackDestroyed = true;
+        }
         stop() {}
       },
     },
@@ -1209,6 +1222,7 @@ test("voice chat keeps completed streaming assistant turns when playback fails",
   assert.equal(context.data.followUpMessageId, "assistant-question-1");
   assert.equal(context.data.followUpAudioFileId, "audio-question-1");
   assert.equal(context.data.lastFollowUpSourceMessageId, "");
+  assert.equal(playbackDestroyed, true);
   assert.deepEqual(startCalls, []);
   assert.equal(
     setDataPatches.some((patch) => patch.followUpTTSStateText === "正在整理回应"),
