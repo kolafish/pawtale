@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import base64
 import contextlib
 import logging
 import math
@@ -32,6 +31,10 @@ from app.services.memoir.voice_followup_ai import (
     _question_mark_count,
     _recent_context,
     _requested_topic_hint,
+)
+from app.services.memoir.streaming_tts_events import (
+    queued_text_chunks,
+    stream_tts_events,
 )
 from app.services.memoir.voice_chat_context import (
     load_previous_project_messages,
@@ -274,8 +277,9 @@ class VoiceAssistantTurnStreamSession:
             }
         )
 
-        await self._stream_text(
+        await self._stream_text_and_audio(
             ai_client=ai_client,
+            tts_client=tts_client,
             prompt=prompt,
             req=req,
             max_tokens=max_tokens,
@@ -288,16 +292,6 @@ class VoiceAssistantTurnStreamSession:
         turn = _parse_interviewer_turn(artifacts.text, fallback_intent=fallback_intent)
         if not turn.speech_text:
             raise HTTPException(status_code=502, detail="AI 未返回可用访谈回应")
-        await self._stream_turn_audio(
-            tts_client=tts_client,
-            req=req,
-            turn=turn,
-            turn_id=turn_id,
-            artifacts=artifacts,
-            cancel_event=cancel_event,
-        )
-        if cancel_event.is_set():
-            return
         message, audio_file_id = await self._persist_completed_turn(
             voice_session=voice_session,
             turn=turn,
@@ -323,6 +317,53 @@ class VoiceAssistantTurnStreamSession:
             }
         )
 
+    async def _stream_text_and_audio(
+        self,
+        *,
+        ai_client: AITextClient,
+        tts_client: TTSClient,
+        prompt: str,
+        req: AssistantTurnStartRequest,
+        max_tokens: int,
+        turn_id: str,
+        artifacts: AssistantTurnArtifacts,
+        cancel_event: asyncio.Event,
+    ) -> None:
+        text_queue: asyncio.Queue[str | None] = asyncio.Queue()
+        audio_task = asyncio.create_task(
+            self._stream_audio_from_text_queue(
+                tts_client=tts_client,
+                text_queue=text_queue,
+                req=req,
+                turn_id=turn_id,
+                artifacts=artifacts,
+                cancel_event=cancel_event,
+            )
+        )
+        try:
+            await self._stream_text(
+                ai_client=ai_client,
+                prompt=prompt,
+                req=req,
+                max_tokens=max_tokens,
+                turn_id=turn_id,
+                artifacts=artifacts,
+                cancel_event=cancel_event,
+                text_queue=text_queue,
+            )
+            await text_queue.put(None)
+            if cancel_event.is_set():
+                audio_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await audio_task
+                return
+            await audio_task
+        except Exception:
+            audio_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await audio_task
+            raise
+
     async def _stream_text(
         self,
         *,
@@ -333,6 +374,7 @@ class VoiceAssistantTurnStreamSession:
         turn_id: str,
         artifacts: AssistantTurnArtifacts,
         cancel_event: asyncio.Event,
+        text_queue: asyncio.Queue[str | None],
     ) -> None:
         async for chunk in ai_client.stream_llm(
             SYSTEM_PROMPT,
@@ -349,6 +391,7 @@ class VoiceAssistantTurnStreamSession:
             if not chunk.text_delta:
                 continue
             artifacts.text += chunk.text_delta
+            await text_queue.put(chunk.text_delta)
             await self.client.send_json(
                 {
                     "type": "text.delta",
@@ -359,62 +402,26 @@ class VoiceAssistantTurnStreamSession:
                 }
             )
 
-    async def _stream_turn_audio(
+    async def _stream_audio_from_text_queue(
         self,
         *,
         tts_client: TTSClient,
+        text_queue: asyncio.Queue[str | None],
         req: AssistantTurnStartRequest,
-        turn: InterviewerTurn,
         turn_id: str,
         artifacts: AssistantTurnArtifacts,
         cancel_event: asyncio.Event,
     ) -> None:
-        if cancel_event.is_set():
-            return
-        await self.client.send_json(
-            {
-                "type": "text.segment",
-                "turn_id": turn_id,
-                "voice_session_id": self.voice_session_id,
-                "segment_index": 0,
-                "text": turn.speech_text,
-            }
-        )
-        segment_duration = None
-        async for chunk in tts_client.stream_synthesize(
-            turn.speech_text,
+        await stream_tts_events(
+            client=self.client,
+            tts_client=tts_client,
+            text_chunks=queued_text_chunks(text_queue, cancel_event),
+            current_text=lambda: artifacts.text,
+            event_context={"turn_id": turn_id, "voice_session_id": self.voice_session_id},
             voice=req.voice,
             speed_ratio=req.speed_ratio,
-        ):
-            if cancel_event.is_set():
-                return
-            artifacts.append_tts_chunk(chunk)
-            if chunk.duration_seconds is not None:
-                segment_duration = chunk.duration_seconds
-            if chunk.audio:
-                await self.client.send_json(
-                    {
-                        "type": "audio.chunk",
-                        "turn_id": turn_id,
-                        "voice_session_id": self.voice_session_id,
-                        "segment_index": 0,
-                        "sequence": chunk.sequence,
-                        "audio": base64.b64encode(chunk.audio).decode("ascii"),
-                        "mime_type": chunk.mime_type,
-                        "provider": chunk.provider,
-                        "model": chunk.model,
-                        "voice": chunk.voice,
-                        "speed_ratio": chunk.speed_ratio,
-                    }
-                )
-        await self.client.send_json(
-            {
-                "type": "audio.segment_done",
-                "turn_id": turn_id,
-                "voice_session_id": self.voice_session_id,
-                "segment_index": 0,
-                "duration_seconds": segment_duration,
-            }
+            cancel_event=cancel_event,
+            on_chunk=artifacts.append_tts_chunk,
         )
 
     async def _persist_completed_turn(

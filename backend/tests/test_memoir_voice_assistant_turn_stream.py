@@ -72,10 +72,14 @@ async def test_voice_assistant_turn_streams_text_audio_and_persists_message(
     text_segments = [event["text"] for event in stream_client.sent if event["type"] == "text.segment"]
     assert text_segments == ["好，那我们就接着聊工作。第一份工作里，最让您记到现在的是哪一件事？"]
     audio_chunks = [event for event in stream_client.sent if event["type"] == "audio.chunk"]
-    assert [base64.b64decode(event["audio"]) for event in audio_chunks] == [b"audio-0"]
-    assert [call["text"] for call in tts_client.calls] == text_segments
+    assert [base64.b64decode(event["audio"]) for event in audio_chunks] == [
+        b"audio-0-1audio-0-2audio-0-3"
+    ]
+    assert tts_client.calls[0]["text_chunks"] == ai_client.chunks
     assert tts_client.calls[0]["voice"] == "S_test_voice"
     assert tts_client.calls[0]["speed_ratio"] == 1.1
+    assert tts_client.calls[0]["response_format"] == "pcm"
+    assert tts_client.calls[0]["sample_rate"] == 16000
 
     messages = (
         await test_db.execute(
@@ -99,9 +103,9 @@ async def test_voice_assistant_turn_streams_text_audio_and_persists_message(
     audio_file = await test_db.scalar(select(AudioFile).where(AudioFile.id == completed["audio_file_id"]))
     assert audio_file is not None
     assert audio_file.mime_type == "audio/pcm"
-    assert audio_file.size_bytes == len(b"audio-0")
+    assert audio_file.size_bytes == len(b"audio-0-1audio-0-2audio-0-3")
     audio_relative_path = Path(audio_file.storage_path).relative_to(Path("memoir") / "audio")
-    assert (tmp_path / "audio" / audio_relative_path).read_bytes() == b"audio-0"
+    assert (tmp_path / "audio" / audio_relative_path).read_bytes() == b"audio-0-1audio-0-2audio-0-3"
 
 
 async def test_voice_assistant_turn_cancel_does_not_persist_partial_message(
@@ -298,7 +302,7 @@ async def test_voice_assistant_turn_tts_failure_does_not_persist_partial_message
     await asyncio.wait_for(run_task, timeout=1)
 
     assert "tts failed" in failed["error"]
-    assert [event["type"] for event in stream_client.sent].count("text.segment") == 1
+    assert [event["type"] for event in stream_client.sent].count("text.segment") == 0
     assert not [event for event in stream_client.sent if event["type"] == "audio.chunk"]
     assistant_count = await test_db.scalar(
         select(func.count(MemoirChatMessage.id))
@@ -405,18 +409,39 @@ class FakeStreamingTTS:
     async def synthesize(self, *args, **kwargs):
         raise AssertionError("streaming assistant turn should not call non-streaming TTS")
 
-    async def stream_synthesize(self, text, *, voice=None, speed_ratio=None):
+    async def stream_synthesize(self, *args, **kwargs):
+        raise AssertionError("streaming assistant turn should use bidirectional TTS")
+
+    async def stream_input_synthesize(
+        self,
+        text_chunks,
+        *,
+        voice=None,
+        speed_ratio=None,
+        response_format=None,
+        sample_rate=None,
+    ):
         segment_index = len(self.calls)
-        self.calls.append({"text": text, "voice": voice, "speed_ratio": speed_ratio})
-        yield StreamingTTSChunk(
-            audio=f"audio-{segment_index}".encode(),
-            mime_type="audio/L16",
-            provider=self.provider_name,
-            model=self.model_name,
-            voice=voice or self.default_voice,
-            speed_ratio=speed_ratio or 1.0,
-            sequence=1,
-        )
+        call = {
+            "text_chunks": [],
+            "voice": voice,
+            "speed_ratio": speed_ratio,
+            "response_format": response_format,
+            "sample_rate": sample_rate,
+        }
+        self.calls.append(call)
+        async for text in text_chunks:
+            call["text_chunks"].append(text)
+            yield StreamingTTSChunk(
+                audio=f"audio-{segment_index}-{len(call['text_chunks'])}".encode(),
+                mime_type="audio/L16",
+                provider=self.provider_name,
+                model=self.model_name,
+                voice=voice or self.default_voice,
+                speed_ratio=speed_ratio or 1.0,
+                sequence=len(call["text_chunks"]),
+                sample_rate=sample_rate,
+            )
         yield StreamingTTSChunk(
             audio=b"",
             mime_type="audio/L16",
@@ -424,16 +449,34 @@ class FakeStreamingTTS:
             model=self.model_name,
             voice=voice or self.default_voice,
             speed_ratio=speed_ratio or 1.0,
-            sequence=2,
+            sequence=len(call["text_chunks"]) + 1,
             alignment=[TTSAlignmentSegment(text="好", start_ms=0, end_ms=400, text_start=0, text_end=1)],
             duration_seconds=0.4,
+            sample_rate=sample_rate,
             is_final=True,
         )
 
 
 class FailingStreamingTTS(FakeStreamingTTS):
-    async def stream_synthesize(self, text, *, voice=None, speed_ratio=None):
-        self.calls.append({"text": text, "voice": voice, "speed_ratio": speed_ratio})
+    async def stream_input_synthesize(
+        self,
+        text_chunks,
+        *,
+        voice=None,
+        speed_ratio=None,
+        response_format=None,
+        sample_rate=None,
+    ):
+        call = {
+            "text_chunks": [],
+            "voice": voice,
+            "speed_ratio": speed_ratio,
+            "response_format": response_format,
+            "sample_rate": sample_rate,
+        }
+        self.calls.append(call)
+        async for text in text_chunks:
+            call["text_chunks"].append(text)
         if False:
             yield StreamingTTSChunk(
                 audio=b"",
