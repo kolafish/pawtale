@@ -229,7 +229,7 @@ async def test_mobile_memoir_book_plan_generate_saves_source_bound_chapters(
     project_id = first["session"]["project_id"]
     fake_ai = FakeBookPlanAI()
     monkeypatch.setattr(
-        "app.services.memoir.book_plans.get_ai_service",
+        "app.services.memoir.book_plan_ai.get_ai_service",
         lambda model=None: fake_ai,
     )
 
@@ -288,7 +288,7 @@ async def test_mobile_memoir_book_plan_confirm_replaces_plan_with_user_chapters(
     created = await create_test_voice_transcript(client, test_db, "我小时候常在外婆家的院子里晒太阳。")
     project_id = created["session"]["project_id"]
     monkeypatch.setattr(
-        "app.services.memoir.book_plans.get_ai_service",
+        "app.services.memoir.book_plan_ai.get_ai_service",
         lambda model=None: FakeBookPlanAI(),
     )
     generated_response = await client.post(
@@ -351,7 +351,7 @@ async def test_mobile_memoir_book_source_coverage_detects_new_transcripts_after_
     created = await create_test_voice_transcript(client, test_db, "我小时候常在外婆家的院子里晒太阳。")
     project_id = created["session"]["project_id"]
     monkeypatch.setattr(
-        "app.services.memoir.book_plans.get_ai_service",
+        "app.services.memoir.book_plan_ai.get_ai_service",
         lambda model=None: FakeBookPlanAI(),
     )
     generated_response = await client.post(
@@ -398,7 +398,7 @@ async def test_mobile_memoir_book_source_assignment_appends_source_and_marks_dra
     created = await create_test_voice_transcript(client, test_db, "我小时候常在外婆家的院子里晒太阳。")
     project_id = created["session"]["project_id"]
     monkeypatch.setattr(
-        "app.services.memoir.book_plans.get_ai_service",
+        "app.services.memoir.book_plan_ai.get_ai_service",
         lambda model=None: FakeBookPlanAI(),
     )
     generated_response = await client.post(
@@ -489,7 +489,7 @@ async def test_mobile_memoir_book_source_assignment_rejects_covered_source(
     created = await create_test_voice_transcript(client, test_db, "我小时候常在外婆家的院子里晒太阳。")
     project_id = created["session"]["project_id"]
     monkeypatch.setattr(
-        "app.services.memoir.book_plans.get_ai_service",
+        "app.services.memoir.book_plan_ai.get_ai_service",
         lambda model=None: FakeBookPlanAI(),
     )
     generated_response = await client.post(
@@ -823,7 +823,7 @@ async def test_mobile_memoir_book_plan_reconfirm_removes_replaced_chapter_drafts
     created = await create_test_voice_transcript(client, test_db, "我小时候常在外婆家的院子里晒太阳。")
     project_id = created["session"]["project_id"]
     monkeypatch.setattr(
-        "app.services.memoir.book_plans.get_ai_service",
+        "app.services.memoir.book_plan_ai.get_ai_service",
         lambda model=None: FakeBookPlanAI(),
     )
     generated_response = await client.post(
@@ -899,7 +899,7 @@ async def test_mobile_memoir_book_plan_patch_deletes_chapter_without_replacing_r
     second = await create_test_voice_transcript(client, test_db, "后来我第一次离家去县城读书，心里很紧张。")
     project_id = first["session"]["project_id"]
     monkeypatch.setattr(
-        "app.services.memoir.book_plans.get_ai_service",
+        "app.services.memoir.book_plan_ai.get_ai_service",
         lambda model=None: FakeBookPlanAI(),
     )
     generated_response = await client.post(
@@ -997,7 +997,7 @@ async def test_mobile_memoir_book_plan_patch_adds_chapter_from_uncovered_source(
     first = await create_test_voice_transcript(client, test_db, "我小时候常在外婆家的院子里晒太阳。")
     project_id = first["session"]["project_id"]
     monkeypatch.setattr(
-        "app.services.memoir.book_plans.get_ai_service",
+        "app.services.memoir.book_plan_ai.get_ai_service",
         lambda model=None: FakeBookPlanAI(),
     )
     generated_response = await client.post(
@@ -1059,7 +1059,7 @@ async def test_mobile_memoir_book_plan_patch_updates_draft_plan_structure(
     second = await create_test_voice_transcript(client, test_db, "后来我第一次离家去县城读书，心里很紧张。")
     project_id = first["session"]["project_id"]
     monkeypatch.setattr(
-        "app.services.memoir.book_plans.get_ai_service",
+        "app.services.memoir.book_plan_ai.get_ai_service",
         lambda model=None: FakeBookPlanAI(),
     )
     generated_response = await client.post(
@@ -1111,7 +1111,7 @@ async def test_mobile_memoir_book_chapter_title_update_renames_confirmed_chapter
     created = await create_test_voice_transcript(client, test_db, "我小时候常在外婆家的院子里晒太阳。")
     project_id = created["session"]["project_id"]
     monkeypatch.setattr(
-        "app.services.memoir.book_plans.get_ai_service",
+        "app.services.memoir.book_plan_ai.get_ai_service",
         lambda model=None: FakeBookPlanAI(),
     )
     generated_response = await client.post(
@@ -1152,7 +1152,7 @@ async def test_mobile_memoir_book_chapter_title_generate_uses_chapter_sources(
     created = await create_test_voice_transcript(client, test_db, "我小时候常在外婆家的院子里晒太阳。")
     project_id = created["session"]["project_id"]
     monkeypatch.setattr(
-        "app.services.memoir.book_plans.get_ai_service",
+        "app.services.memoir.book_plan_ai.get_ai_service",
         lambda model=None: FakeBookPlanAI(),
     )
     generated_response = await client.post(
@@ -1174,7 +1174,7 @@ async def test_mobile_memoir_book_chapter_title_generate_uses_chapter_sources(
     chapter_id = confirm_response.json()["chapters"][0]["id"]
     fake_ai = FakeChapterTitleAI()
     monkeypatch.setattr(
-        "app.services.memoir.book_plans.get_ai_service",
+        "app.services.memoir.book_plan_ai.get_ai_service",
         lambda model=None: fake_ai,
     )
 

@@ -31,9 +31,7 @@ from app.schemas.memoir_book import (
     MemoirBookSourceCoverageResponse,
     MemoirBookSourceMoveRequest,
 )
-from app.services.ai_factory import get_ai_service
 from app.services.ai_types import AITextClient
-from app.services.json_utils import extract_json_payload
 from app.services.memoir.access import load_memoir_project
 from app.services.memoir.book_audio import (
     audio_cache_payload,
@@ -50,14 +48,9 @@ from app.services.memoir.book_auto_revision import (
     schedule_chapter_auto_revisions as _schedule_chapter_auto_revisions,
 )
 from app.services.memoir.book_plan_ai import (
-    AI_BOOK_PLAN_UNAVAILABLE_MESSAGE,
-    CHAPTER_TITLE_SYSTEM_PROMPT,
     ChapterTitleSourceDigest,
-    SYSTEM_PROMPT,
-    build_chapter_title_prompt as _build_chapter_title_prompt,
-    build_plan_prompt as _build_plan_prompt,
-    chapters_from_payload as _chapters_from_payload,
-    clean_generated_chapter_title as _clean_generated_chapter_title,
+    generate_book_plan_from_sources as _generate_book_plan_from_sources,
+    generate_chapter_title_from_sources as _generate_chapter_title_from_sources,
 )
 from app.services.memoir.book_plan_sources import (
     NEW_SOURCES_ASSIGNED_STATUS_REASON,
@@ -465,38 +458,22 @@ async def generate_book_plan(
     sources = await _source_segments(db, user_id=user_id, project_id=project_id)
     if not sources:
         raise HTTPException(status_code=400, detail="暂无讲述内容，无法规划章节")
-    prompt = _build_plan_prompt(project.title, sources, req.max_chapters)
-    client = ai_client
-    try:
-        if client is None:
-            client = get_ai_service(req.ai_model)
-        content = await client._call_llm(
-            SYSTEM_PROMPT,
-            prompt,
-            temperature=0.2,
-            max_tokens=2400,
-            timeout=120.0,
-        )
-    except HTTPException as exc:
-        if exc.status_code < 500:
-            raise
-        logger.exception("AI memoir book plan failed provider=%s", getattr(client, "provider_name", "unknown"))
-        raise HTTPException(status_code=503, detail=AI_BOOK_PLAN_UNAVAILABLE_MESSAGE) from exc
-    except Exception as exc:
-        logger.exception("AI memoir book plan failed provider=%s", getattr(client, "provider_name", "unknown"))
-        raise HTTPException(status_code=503, detail=AI_BOOK_PLAN_UNAVAILABLE_MESSAGE) from exc
-
-    payload = extract_json_payload(str(content))
-    title, chapters = _chapters_from_payload(payload, sources=sources, max_chapters=req.max_chapters)
+    generated = await _generate_book_plan_from_sources(
+        project_title=project.title,
+        sources=sources,
+        max_chapters=req.max_chapters,
+        ai_model=req.ai_model,
+        ai_client=ai_client,
+    )
     return await _replace_plan(
         db,
         project_id=project_id,
-        title=title,
-        chapters=chapters,
+        title=generated.title,
+        chapters=generated.chapters,
         status=MemoirBookPlanStatus.DRAFT,
         created_by=MemoirCreatedBy.AI,
-        model=getattr(client, "model_name", req.ai_model),
-        prompt_snapshot=prompt,
+        model=generated.model,
+        prompt_snapshot=generated.prompt,
         metadata_json={
             "source_utterance_count": len(sources),
             "prompt_version": "memoir_book_plan_v1",
@@ -901,36 +878,18 @@ async def generate_book_chapter_title(
         raise HTTPException(status_code=404, detail="章节规划不存在")
     chapter = _chapter_by_id(plan, chapter_id)
     sources = await _source_segments(db, user_id=user_id, project_id=project_id)
-    prompt = _build_chapter_title_prompt(_chapter_title_source_digests(chapter, sources))
-
-    client = ai_client
-    try:
-        if client is None:
-            client = get_ai_service(req.ai_model)
-        content = await client._call_llm(
-            CHAPTER_TITLE_SYSTEM_PROMPT,
-            prompt,
-            temperature=0.25,
-            max_tokens=160,
-            timeout=60.0,
-        )
-    except HTTPException as exc:
-        if exc.status_code < 500:
-            raise
-        logger.exception("AI memoir chapter title failed provider=%s", getattr(client, "provider_name", "unknown"))
-        raise HTTPException(status_code=503, detail=AI_BOOK_PLAN_UNAVAILABLE_MESSAGE) from exc
-    except Exception as exc:
-        logger.exception("AI memoir chapter title failed provider=%s", getattr(client, "provider_name", "unknown"))
-        raise HTTPException(status_code=503, detail=AI_BOOK_PLAN_UNAVAILABLE_MESSAGE) from exc
-
-    title = _clean_generated_chapter_title(str(content))
+    generated = await _generate_chapter_title_from_sources(
+        sources=_chapter_title_source_digests(chapter, sources),
+        ai_model=req.ai_model,
+        ai_client=ai_client,
+    )
     return await _save_chapter_title(
         db,
         project_id=project_id,
         plan=plan,
         chapter=chapter,
-        title=title,
+        title=generated.title,
         updated_by=MemoirCreatedBy.AI,
-        model=getattr(client, "model_name", req.ai_model),
-        prompt_snapshot=prompt,
+        model=generated.model,
+        prompt_snapshot=generated.prompt,
     )
