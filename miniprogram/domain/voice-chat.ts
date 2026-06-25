@@ -129,25 +129,6 @@ export interface MemoirVoiceSessionCreate {
   metadata_json?: Record<string, unknown>;
 }
 
-export interface MemoirVoiceFollowUpRequest {
-  ai_model?: string;
-  regenerate?: boolean;
-  acknowledgement_message_id?: string;
-  turn_plan?: MemoirVoiceTurnPlanContext;
-}
-
-export interface MemoirVoiceTurnPlanContext {
-  user_signal: string;
-  response_strategy: string;
-  should_play_ack: boolean;
-  acknowledgement_text: string;
-  next_question_brief: string;
-}
-
-export interface MemoirVoiceTurnPlanRequest {
-  ai_model?: string;
-}
-
 export interface MemoirVoiceNoAnswerPromptRequest {
   attempt?: number;
 }
@@ -158,11 +139,6 @@ export interface MemoirVoiceFollowUpResponse {
   primary_intent?: MemoirVoiceAssistantIntent | string;
   intent_tags?: string[];
   expects_answer?: boolean;
-}
-
-export interface MemoirVoiceTurnPlanResponse {
-  plan: MemoirVoiceTurnPlanContext;
-  acknowledgement?: MemoirVoiceFollowUpResponse | null;
 }
 
 export interface MemoirAssistantTTSRequest {

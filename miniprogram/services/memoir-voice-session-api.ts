@@ -1,10 +1,7 @@
 import type {
   MemoirAssistantTTSRequest,
   MemoirAssistantTTSResponse,
-  MemoirVoiceFollowUpRequest,
   MemoirVoiceFollowUpResponse,
-  MemoirVoiceTurnPlanRequest,
-  MemoirVoiceTurnPlanResponse,
   MemoirVoiceNoAnswerPromptRequest,
   MemoirVoiceProgressResponse,
   MemoirVoiceSessionCreate,
@@ -16,7 +13,6 @@ import {
   memoirRequest,
   memoirVoiceSessionPath,
   queryString,
-  withSelectedAIModel,
 } from "./memoir-api-client";
 import {
   ApiError,
@@ -38,6 +34,14 @@ export function voiceGatewayUrl(voiceSessionId: string): string {
     throw new ApiError(0, "未配置后端 WebSocket 地址", {});
   }
   return `${cleanBaseUrl(config.wsBaseUrl)}${memoirVoiceSessionPath(voiceSessionId, "/gateway")}`;
+}
+
+export function assistantTurnStreamUrl(voiceSessionId: string): string {
+  const config = readBackendConfig();
+  if (!config.wsBaseUrl) {
+    throw new ApiError(0, "未配置后端 WebSocket 地址", {});
+  }
+  return `${cleanBaseUrl(config.wsBaseUrl)}${memoirVoiceSessionPath(voiceSessionId, "/assistant-turn-stream")}`;
 }
 
 export async function backendSessionCookieHeader(): Promise<string> {
@@ -80,32 +84,6 @@ export function listMemoirVoiceSessions(
 export function getMemoirVoiceProgress(projectId: string): Promise<MemoirVoiceProgressResponse> {
   return memoirRequest<MemoirVoiceProgressResponse>(
     `/api/mobile/memoir/voice-progress${queryString({ project_id: projectId })}`,
-  );
-}
-
-export function createMemoirVoiceFollowUp(
-  voiceSessionId: string,
-  data: MemoirVoiceFollowUpRequest = {},
-): Promise<MemoirVoiceFollowUpResponse> {
-  return memoirRequest<MemoirVoiceFollowUpResponse>(
-    memoirVoiceSessionPath(voiceSessionId, "/follow-up"),
-    {
-      method: "POST",
-      data: withSelectedAIModel(data),
-    },
-  );
-}
-
-export function createMemoirVoiceTurnPlan(
-  voiceSessionId: string,
-  data: MemoirVoiceTurnPlanRequest = {},
-): Promise<MemoirVoiceTurnPlanResponse> {
-  return memoirRequest<MemoirVoiceTurnPlanResponse>(
-    memoirVoiceSessionPath(voiceSessionId, "/turn-plan"),
-    {
-      method: "POST",
-      data: withSelectedAIModel(data),
-    },
   );
 }
 

@@ -96,6 +96,32 @@ test("AudioPlaybackController plays and releases an audio file", async () => {
   assert.equal(created.audio.destroyCalls, 1);
 });
 
+test("AudioPlaybackController can play an existing temp file without download", async () => {
+  delete require.cache[require.resolve("../services/audio-playback.ts")];
+  const { AudioPlaybackController } = require("../services/audio-playback.ts");
+  const created = createManualAudioContext();
+  const downloads = [];
+  const controller = new AudioPlaybackController({
+    downloadAudioFile: async (audioFileId) => {
+      downloads.push(audioFileId);
+      return `/tmp/${audioFileId}.mp3`;
+    },
+    createAudioContext: () => created.audio,
+    configureAudio: () => {},
+  });
+
+  const token = controller.nextToken();
+  const promise = controller.playTempFile("/tmp/segment.wav", token);
+  await Promise.resolve();
+
+  assert.deepEqual(downloads, []);
+  assert.equal(created.audio.src, "/tmp/segment.wav");
+  assert.equal(created.audio.playCalls, 1);
+
+  created.callbacks.ended();
+  await promise;
+});
+
 test("AudioPlaybackController exposes current audio while playback callbacks run", async () => {
   delete require.cache[require.resolve("../services/audio-playback.ts")];
   const { AudioPlaybackController } = require("../services/audio-playback.ts");

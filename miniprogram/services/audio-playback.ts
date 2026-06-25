@@ -67,6 +67,25 @@ export class AudioPlaybackController {
     if (!this.isCurrentToken(token)) {
       return;
     }
+    await this.playSource(tempFilePath, token, options);
+  }
+
+  async playTempFile(
+    tempFilePath: string,
+    token = this.playToken,
+    options: AudioPlaybackPlayOptions = {},
+  ): Promise<void> {
+    if (!this.isCurrentToken(token)) {
+      return;
+    }
+    await this.playSource(tempFilePath, token, options);
+  }
+
+  private async playSource(
+    tempFilePath: string,
+    token: number,
+    options: AudioPlaybackPlayOptions,
+  ): Promise<void> {
     this.stopActivePlayback();
     await new Promise<void>((resolve, reject) => {
       const audio = this.createAudioContext();

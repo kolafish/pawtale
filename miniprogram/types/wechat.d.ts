@@ -103,8 +103,26 @@ declare namespace WechatMiniprogram {
     complete?(result: GeneralCallbackResult): void;
   }
 
+  interface FileSystemWriteFileOption {
+    filePath: string;
+    data: string | ArrayBuffer;
+    encoding?: "ascii" | "base64" | "binary" | "hex" | "ucs2" | "ucs-2" | "utf16le" | "utf-16le" | "utf-8" | "utf8" | "latin1";
+    success?(result: GeneralCallbackResult): void;
+    fail?(result: GeneralCallbackResult): void;
+    complete?(result: GeneralCallbackResult): void;
+  }
+
+  interface FileSystemUnlinkOption {
+    filePath: string;
+    success?(result: GeneralCallbackResult): void;
+    fail?(result: GeneralCallbackResult): void;
+    complete?(result: GeneralCallbackResult): void;
+  }
+
   interface FileSystemManager {
     readFile(option: FileSystemReadFileOption): void;
+    writeFile(option: FileSystemWriteFileOption): void;
+    unlink?(option: FileSystemUnlinkOption): void;
   }
 
   interface ConnectSocketOption {
@@ -229,6 +247,9 @@ declare namespace WechatMiniprogram {
   }
 
   interface Wx {
+    env: {
+      USER_DATA_PATH: string;
+    };
     login(option?: LoginOption): void;
     request<T = unknown>(option: RequestOption<T>): void;
     downloadFile(option: DownloadFileOption): void;
@@ -249,6 +270,7 @@ declare namespace WechatMiniprogram {
     showToast(option: ToastOption): void;
     showLoading(option: LoadingOption): void;
     hideLoading(): void;
+    base64ToArrayBuffer(value: string): ArrayBuffer;
     getStorageSync<T = unknown>(key: string): T;
     setStorageSync<T = unknown>(key: string, value: T): void;
     removeStorageSync(key: string): void;
