@@ -90,6 +90,41 @@ def as_dict(ref: MemoirBookChapterSourceRef) -> dict[str, object]:
     return ref.model_dump(mode="json")
 
 
+def sorted_chapters(plan: MemoirBookPlan) -> list[MemoirBookPlanChapter]:
+    return sorted(plan.chapters, key=lambda chapter: chapter.sort_order)
+
+
+def find_chapter_by_id(
+    chapters: list[MemoirBookPlanChapter],
+    chapter_id: str | None,
+) -> MemoirBookPlanChapter | None:
+    if not chapter_id:
+        return None
+    return next((chapter for chapter in chapters if chapter.id == chapter_id), None)
+
+
+def renumber_chapters(chapters: list[MemoirBookPlanChapter]) -> None:
+    for index, chapter in enumerate(chapters):
+        chapter.sort_order = index
+
+
+def set_temporary_chapter_orders(chapters: list[MemoirBookPlanChapter]) -> None:
+    for index, chapter in enumerate(chapters):
+        chapter.sort_order = 10000 + index
+
+
+def unique_source_ref_dicts(refs: list[dict]) -> list[dict]:
+    unique: list[dict] = []
+    seen: set[str] = set()
+    for ref in refs:
+        utterance_id = source_ref_utterance_id(ref)
+        if not utterance_id or utterance_id in seen:
+            continue
+        unique.append(dict(ref))
+        seen.add(utterance_id)
+    return unique
+
+
 def merge_metadata(metadata_json: dict | None, patch: dict[str, object]) -> dict[str, object]:
     return {**(metadata_json or {}), **patch}
 
@@ -324,12 +359,11 @@ async def source_segments(
 def covered_utterance_ids(plan: MemoirBookPlan | None) -> set[str]:
     if not plan:
         return set()
-    covered: set[str] = set()
-    for chapter in plan.chapters:
-        for ref in chapter.source_refs_json or []:
-            if isinstance(ref, dict) and isinstance(ref.get("utterance_id"), str):
-                covered.add(ref["utterance_id"])
-    return covered
+    return {
+        utterance_id
+        for chapter in plan.chapters
+        for utterance_id in source_ref_utterance_ids(chapter.source_refs_json or [])
+    }
 
 
 def included_chapters_by_utterance(
@@ -338,7 +372,7 @@ def included_chapters_by_utterance(
     if not plan:
         return {}
     included: dict[str, list[MemoirBookSourceIncludedChapter]] = {}
-    for chapter in sorted(plan.chapters, key=lambda item: item.sort_order):
+    for chapter in sorted_chapters(plan):
         chapter_item = MemoirBookSourceIncludedChapter(
             chapter_id=chapter.id,
             title=chapter.title,

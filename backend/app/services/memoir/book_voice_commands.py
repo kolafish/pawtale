@@ -32,6 +32,10 @@ from app.services.json_utils import extract_json_payload
 from app.services.memoir import book_plans as memoir_book_plans
 from app.services.memoir.access import load_memoir_project
 from app.services.memoir.book_audio import audio_response, discard_staged_audio_files, synthesize_text_audio
+from app.services.memoir.book_plan_sources import (
+    find_chapter_by_id as _chapter_by_id,
+    sorted_chapters as _sorted_chapters,
+)
 from app.services.memoir.voice_tts import TTSClient
 
 
@@ -1225,16 +1229,6 @@ def _current_chapter_prompt_line(plan: MemoirBookPlan, current_chapter_id: str |
         return "未指定"
     index = chapters.index(chapter) + 1
     return f"第 {index} 章，{chapter.title}，正文 {_draft_char_count(chapter)} 字"
-
-
-def _sorted_chapters(plan: MemoirBookPlan) -> list[MemoirBookPlanChapter]:
-    return sorted(plan.chapters, key=lambda chapter: chapter.sort_order)
-
-
-def _chapter_by_id(chapters: list[MemoirBookPlanChapter], chapter_id: str | None) -> MemoirBookPlanChapter | None:
-    if not chapter_id:
-        return None
-    return next((chapter for chapter in chapters if chapter.id == chapter_id), None)
 
 
 def _resolve_chapter(
