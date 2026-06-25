@@ -9,7 +9,7 @@ from app.models.memoir import (
 )
 from app.services.memoir.tts_alignment import TTSAlignmentSegment
 from app.services.memoir.voice_tts import TTSResult
-from tests.memoir_helpers import ensure_mobile_memoir_project
+from tests.memoir_helpers import create_test_voice_transcript, ensure_mobile_memoir_project
 
 
 class FakeBookVoiceCommandAI:
@@ -188,6 +188,110 @@ async def test_mobile_memoir_book_voice_command_parse_falls_back_when_ai_fails(
     assert data["used_ai"] is False
     assert data["operations"][0]["chapter_id"] == chapters[1].id
     assert data["operations"][0]["direction"] == "up"
+
+
+async def test_mobile_memoir_book_voice_command_execute_renames_chapter(client, test_db):
+    project_id = await ensure_mobile_memoir_project(client)
+    _, chapters = await _create_two_chapter_plan(test_db, project_id=project_id)
+
+    response = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-voice-command/execute",
+        json={
+            "intent": "rename_chapter",
+            "operation": {
+                "type": "rename_chapter",
+                "chapter_id": chapters[0].id,
+                "chapter_title": "外婆家的童年",
+                "new_title": "童年往事",
+            },
+        },
+    )
+
+    assert response.status_code == 200, response.json()
+    data = response.json()
+    assert data["intent"] == "rename_chapter"
+    assert data["summary"] == "已把「外婆家的童年」改名为「童年往事」。"
+    assert data["plan"]["chapters"][0]["title"] == "童年往事"
+    assert data["source_coverage"]["project_id"] == project_id
+
+
+async def test_mobile_memoir_book_voice_command_execute_moves_chapter(client, test_db):
+    project_id = await ensure_mobile_memoir_project(client)
+    _, chapters = await _create_two_chapter_plan(test_db, project_id=project_id)
+
+    response = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-voice-command/execute",
+        json={
+            "intent": "move_chapter",
+            "operation": {
+                "type": "move_chapter",
+                "chapter_id": chapters[1].id,
+                "chapter_title": "第一次离家",
+                "direction": "up",
+            },
+        },
+    )
+
+    assert response.status_code == 200, response.json()
+    data = response.json()
+    assert data["intent"] == "move_chapter"
+    assert data["summary"] == "已把「第一次离家」上移。"
+    assert [chapter["id"] for chapter in data["plan"]["chapters"]] == [chapters[1].id, chapters[0].id]
+
+
+async def test_mobile_memoir_book_voice_command_execute_assigns_uncovered_source(client, test_db):
+    created = await create_test_voice_transcript(client, test_db, "我第一次进厂的时候，师傅带我熟悉车间。")
+    project_id = created["session"]["project_id"]
+    _, chapters = await _create_two_chapter_plan(
+        test_db,
+        project_id=project_id,
+        titles=["小时候的年", "职场浮沉与升职加薪"],
+    )
+
+    response = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-voice-command/execute",
+        json={
+            "intent": "assign_source",
+            "operation": {
+                "type": "assign_source",
+                "chapter_id": chapters[1].id,
+                "chapter_title": "职场浮沉与升职加薪",
+                "source_position": 1,
+                "source_index": 1,
+                "utterance_id": created["utterance_id"],
+            },
+        },
+    )
+
+    assert response.status_code == 200, response.json()
+    data = response.json()
+    assert data["intent"] == "assign_source"
+    assert data["summary"] == "已把待收录第 1 条归入「职场浮沉与升职加薪」。"
+    target_chapter = next(chapter for chapter in data["plan"]["chapters"] if chapter["id"] == chapters[1].id)
+    assert [ref["utterance_id"] for ref in target_chapter["source_refs"]] == [created["utterance_id"]]
+    assert target_chapter["pending_source_count"] == 1
+    assert data["source_coverage"]["covered_source_count"] == 1
+    assert data["source_coverage"]["uncovered_source_count"] == 0
+
+
+async def test_mobile_memoir_book_voice_command_execute_rejects_preview_only_intents(client, test_db):
+    project_id = await ensure_mobile_memoir_project(client)
+    _, chapters = await _create_two_chapter_plan(test_db, project_id=project_id)
+
+    response = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-voice-command/execute",
+        json={
+            "intent": "read_chapter",
+            "operation": {
+                "type": "read_chapter",
+                "chapter_id": chapters[0].id,
+                "chapter_title": "外婆家的童年",
+            },
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "这个语音操作暂时只能预览"
 
 
 async def test_mobile_memoir_book_voice_command_swaps_adjacent_chapters_from_asr_zhang(

@@ -234,6 +234,15 @@ function sampleBookVoiceCommandPreview(overrides = {}) {
   };
 }
 
+function sampleBookVoiceCommandExecuteResponse(intent, plan, coverage = sampleSourceCoverage(0)) {
+  return {
+    intent,
+    summary: "已执行语音修改。",
+    plan,
+    source_coverage: coverage,
+  };
+}
+
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
@@ -479,6 +488,9 @@ function loadBookPage({
     },
     createMemoirBookVoiceAssistantTTS: async () => {
       throw new Error("createMemoirBookVoiceAssistantTTS was not mocked");
+    },
+    executeMemoirBookVoiceCommand: async () => {
+      throw new Error("executeMemoirBookVoiceCommand was not mocked");
     },
     downloadMemoirVoiceAudio: async () => {
       throw new Error("downloadMemoirVoiceAudio was not mocked");
@@ -1909,24 +1921,36 @@ test("book page executes a confirmed voice rename with undo snapshot", async () 
       options.success({ confirm: true });
     },
   };
-  const { page } = loadBookPage();
   const plan = samplePlan("confirmed");
-  const calls = [];
-  const context = pageContext(page, { projectId: "project/1" });
-  page.applyPlan.call(context, plan);
-  page.applyBookVoiceCommandPreview.call(context, sampleBookVoiceCommandPreview());
-  context.applyPlanStructureCommand = async (command, toastTitle) => {
-    calls.push({ command, toastTitle });
-    return planFromStructureCommand("confirmed", command);
-  };
-
-  await page.executeBookVoiceCommand.call(context);
-
-  assert.equal(calls[0].toastTitle, "已按语音改名");
-  assert.deepEqual(calls[0].command, {
+  const executedPlan = planFromStructureCommand("confirmed", {
     type: "rename_chapter",
     chapter_id: "chapter-1",
     title: "童年往事",
+  });
+  const calls = [];
+  const { page } = loadBookPage({
+    voiceApiExports: {
+      executeMemoirBookVoiceCommand: async (projectId, data) => {
+        calls.push({ projectId, data });
+        return sampleBookVoiceCommandExecuteResponse(data.intent, executedPlan);
+      },
+    },
+  });
+  const context = pageContext(page, { projectId: "project/1" });
+  page.applyPlan.call(context, plan);
+  page.applyBookVoiceCommandPreview.call(context, sampleBookVoiceCommandPreview());
+
+  await page.executeBookVoiceCommand.call(context);
+
+  assert.equal(calls[0].projectId, "project/1");
+  assert.deepEqual(calls[0].data, {
+    intent: "rename_chapter",
+    operation: {
+      type: "rename_chapter",
+      chapter_id: "chapter-1",
+      chapter_title: "外婆家的童年",
+      new_title: "童年往事",
+    },
   });
   assert.equal(context.data.bookVoiceCommandCanExecute, false);
   assert.equal(context.data.bookVoiceCommandRequiresConfirmation, false);
@@ -1943,8 +1967,20 @@ test("book page executes and undoes a voice chapter move", async () => {
       options.success({ confirm: true });
     },
   };
-  const { page } = loadBookPage();
   const calls = [];
+  const movedPlan = planFromStructureCommand("confirmed", {
+    type: "move_chapter",
+    chapter_id: "chapter-2",
+    direction: "up",
+  });
+  const { page } = loadBookPage({
+    voiceApiExports: {
+      executeMemoirBookVoiceCommand: async (projectId, data) => {
+        calls.push({ projectId, data });
+        return sampleBookVoiceCommandExecuteResponse(data.intent, movedPlan);
+      },
+    },
+  });
   const context = pageContext(page, { projectId: "project/1" });
   page.applyPlan.call(context, samplePlan("confirmed"));
   page.applyBookVoiceCommandPreview.call(context, sampleBookVoiceCommandPreview({
@@ -1961,10 +1997,6 @@ test("book page executes and undoes a voice chapter move", async () => {
       },
     ],
   }));
-  context.applyPlanStructureCommand = async (command, toastTitle) => {
-    calls.push({ command, toastTitle });
-    return planFromStructureCommand("confirmed", command);
-  };
   context.updatePlanStructure = async (chapters, toastTitle) => {
     calls.push({ chapters, toastTitle });
     return planFromChapterUpdates("confirmed", chapters);
@@ -1973,11 +2005,15 @@ test("book page executes and undoes a voice chapter move", async () => {
   await page.executeBookVoiceCommand.call(context);
   await page.undoBookVoiceCommand.call(context);
 
-  assert.equal(calls[0].toastTitle, "已按语音调整顺序");
-  assert.deepEqual(calls[0].command, {
-    type: "move_chapter",
-    chapter_id: "chapter-2",
-    direction: "up",
+  assert.equal(calls[0].projectId, "project/1");
+  assert.deepEqual(calls[0].data, {
+    intent: "move_chapter",
+    operation: {
+      type: "move_chapter",
+      chapter_id: "chapter-2",
+      chapter_title: "第一次离家",
+      direction: "up",
+    },
   });
   assert.equal(calls[1].toastTitle, "已撤回语音修改");
   assert.deepEqual(calls[1].chapters.map((chapter) => chapter.id), ["chapter-1", "chapter-2"]);
@@ -1999,12 +2035,11 @@ test("book page executes a voice assignment for an uncovered source", async () =
   const calls = [];
   const { page } = loadBookPage({
     voiceApiExports: {
-      assignMemoirBookSources: async (projectId, data) => {
-        calls.push({ kind: "assign", projectId, data });
-        return assignedPlan;
+      executeMemoirBookVoiceCommand: async (projectId, data) => {
+        calls.push({ projectId, data });
+        return sampleBookVoiceCommandExecuteResponse(data.intent, assignedPlan, sampleSourceCoverage(0));
       },
       getMemoirBookChapterDraft: async () => sampleDraft(1, "draft"),
-      getMemoirBookSourceCoverage: async () => sampleSourceCoverage(0),
     },
   });
   const context = pageContext(page, { projectId: "project/1" });
@@ -2031,15 +2066,17 @@ test("book page executes a voice assignment for an uncovered source", async () =
   await page.executeBookVoiceCommand.call(context);
 
   assert.deepEqual(calls[0], {
-    kind: "assign",
     projectId: "project/1",
     data: {
-      assignments: [
-        {
-          chapter_id: "chapter-2",
-          utterance_ids: ["utterance-new-1"],
-        },
-      ],
+      intent: "assign_source",
+      operation: {
+        type: "assign_source",
+        chapter_id: "chapter-2",
+        chapter_title: "第一次离家",
+        source_position: 1,
+        source_index: 3,
+        utterance_id: "utterance-new-1",
+      },
     },
   });
   assert.equal(context.data.bookVoiceCommandCanExecute, false);
@@ -2047,6 +2084,31 @@ test("book page executes a voice assignment for an uncovered source", async () =
   assert.equal(context.data.bookVoiceAssistantStatusText, "已归入章节");
   assert.equal(context.data.bookOutput, null);
   assert.equal(context.data.assigningSourceId, "");
+  delete global.wx;
+});
+
+test("book page shows backend voice execution errors", async () => {
+  global.wx = {
+    showModal(options) {
+      options.success({ confirm: true });
+    },
+  };
+  const { page } = loadBookPage({
+    voiceApiExports: {
+      executeMemoirBookVoiceCommand: async () => {
+        throw new Error("章节已经不存在");
+      },
+    },
+  });
+  const context = pageContext(page, { projectId: "project/1" });
+  page.applyPlan.call(context, samplePlan("confirmed"));
+  page.applyBookVoiceCommandPreview.call(context, sampleBookVoiceCommandPreview());
+
+  await page.executeBookVoiceCommand.call(context);
+
+  assert.equal(context.data.error, "章节已经不存在");
+  assert.equal(context.data.bookVoiceAssistantStatusText, "执行失败");
+  assert.equal(context.data.bookVoiceCommandExecuting, false);
   delete global.wx;
 });
 
@@ -2395,6 +2457,15 @@ test("book APIs call encoded backend routes", async () => {
         options.success({ statusCode: 200, data: sampleBookVoiceCommandPreview(), cookies: [], header: {} });
         return;
       }
+      if (options.url.endsWith("/book-voice-command/execute")) {
+        options.success({
+          statusCode: 200,
+          data: sampleBookVoiceCommandExecuteResponse("rename_chapter", samplePlan("confirmed")),
+          cookies: [],
+          header: {},
+        });
+        return;
+      }
       if (options.url.endsWith("/draft") || options.url.endsWith("/draft/confirm")) {
         options.success({ statusCode: 200, data: sampleDraft(), cookies: [], header: {} });
         return;
@@ -2428,6 +2499,7 @@ test("book APIs call encoded backend routes", async () => {
     getMemoirBookOutput,
     getMemoirBookPlan,
     getMemoirBookSourceCoverage,
+    executeMemoirBookVoiceCommand,
     parseMemoirBookVoiceCommand,
     updateMemoirBookChapterTitle,
     updateMemoirBookPlan,
@@ -2448,6 +2520,10 @@ test("book APIs call encoded backend routes", async () => {
   await createMemoirBookChapterDraftTTS("project/1", "chapter/1", {});
   await createMemoirBookPlanOutlineTTS("project/1", {});
   await parseMemoirBookVoiceCommand("project/1", { text: "把第一章改名为童年往事" });
+  await executeMemoirBookVoiceCommand("project/1", {
+    intent: "rename_chapter",
+    operation: { type: "rename_chapter", chapter_id: "chapter/1", new_title: "童年往事" },
+  });
   await createMemoirBookVoiceAssistantTTS("project/1", { text: "我理解了，请确认。" });
   await getMemoirBookOutput("project/1");
   await generateMemoirBookOutput("project/1", { force_regenerate: true });
@@ -2514,27 +2590,36 @@ test("book APIs call encoded backend routes", async () => {
   });
   assert.equal(
     apiRequests[14].url,
-    "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-voice-assistant/tts",
+    "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-voice-command/execute",
   );
   assert.equal(apiRequests[14].method, "POST");
-  assert.deepEqual(apiRequests[14].data, { text: "我理解了，请确认。" });
+  assert.deepEqual(apiRequests[14].data, {
+    intent: "rename_chapter",
+    operation: { type: "rename_chapter", chapter_id: "chapter/1", new_title: "童年往事" },
+  });
   assert.equal(
     apiRequests[15].url,
-    "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-output",
+    "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-voice-assistant/tts",
   );
-  assert.equal(apiRequests[15].method, "GET");
+  assert.equal(apiRequests[15].method, "POST");
+  assert.deepEqual(apiRequests[15].data, { text: "我理解了，请确认。" });
   assert.equal(
     apiRequests[16].url,
-    "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-output/generate",
+    "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-output",
   );
-  assert.equal(apiRequests[16].method, "POST");
-  assert.deepEqual(apiRequests[16].data, { force_regenerate: true });
+  assert.equal(apiRequests[16].method, "GET");
   assert.equal(
     apiRequests[17].url,
-    "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-output/tts",
+    "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-output/generate",
   );
   assert.equal(apiRequests[17].method, "POST");
-  assert.equal(apiRequests[17].header.Cookie, "pawtale_session=abc");
+  assert.deepEqual(apiRequests[17].data, { force_regenerate: true });
+  assert.equal(
+    apiRequests[18].url,
+    "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-output/tts",
+  );
+  assert.equal(apiRequests[18].method, "POST");
+  assert.equal(apiRequests[18].header.Cookie, "pawtale_session=abc");
   delete global.wx;
 });
 

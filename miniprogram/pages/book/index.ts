@@ -7,6 +7,7 @@ import type {
   MemoirBookPlanChapterUpdateInput,
   MemoirBookSourceCoverage,
   MemoirBookVoiceCommandOperation,
+  MemoirBookVoiceCommandExecuteResponse,
   MemoirBookVoiceCommandParseRequest,
   MemoirBookVoiceCommandParseResponse,
   MemoirBookVoiceCommandResponseKind,
@@ -27,6 +28,7 @@ import {
   createMemoirBookPlanOutlineTTS,
   createMemoirBookVoiceAssistantTTS,
   bookVoiceCommandGatewayUrl,
+  executeMemoirBookVoiceCommand,
   generateMemoirBookChapterTitle,
   generateMemoirBookChapterDraft,
   generateMemoirBookOutput,
@@ -314,6 +316,33 @@ function bookVoiceCommandDetailText(
   return trimText(preview.summary);
 }
 
+function executedVoiceCommandStatusText(intent: string): string {
+  if (intent === "assign_source") {
+    return "已归入章节";
+  }
+  return "已执行，可撤回";
+}
+
+function executedVoiceCommandUndoText(intent: string): string {
+  if (intent === "rename_chapter") {
+    return "撤回语音改名";
+  }
+  if (intent === "move_chapter") {
+    return "撤回语音排序";
+  }
+  return "";
+}
+
+function executedVoiceCommandReplyText(intent: string): string {
+  if (intent === "assign_source") {
+    return "已归入章节。还可以继续说下一条怎么处理。";
+  }
+  if (intent === "move_chapter") {
+    return "已按你说的调整好了。还可以继续说新的修改。";
+  }
+  return "已按你说的改好了。还可以继续说新的修改。";
+}
+
 Page<BookData, {
   onShow(): Promise<void>;
   loadBookHome(): Promise<void>;
@@ -371,6 +400,11 @@ Page<BookData, {
   applyBookVoiceCommandPreview(preview: MemoirBookVoiceCommandParseResponse): void;
   handleBookVoiceCommandTranscript(text: string): Promise<void>;
   executeBookVoiceCommand(options?: { confirmedByVoice?: boolean; autoListenAfterExecution?: boolean }): Promise<void>;
+  applyBookVoiceCommandExecution(
+    response: MemoirBookVoiceCommandExecuteResponse,
+    undoSnapshot: BookVoiceCommandUndoSnapshot | null,
+    options?: { autoListenAfterExecution?: boolean }
+  ): Promise<void>;
   undoBookVoiceCommand(): Promise<void>;
   clearBookVoiceCommandPreview(): void;
   stopBookVoiceConversation(): void;
@@ -1806,89 +1840,55 @@ Page<BookData, {
     const undoSnapshot = this.bookVoiceCommandUndoSnapshot();
     this.setData({ bookVoiceCommandExecuting: true, error: "" });
     try {
-      if (preview.intent === "rename_chapter" && operation.chapter_id && operation.new_title) {
-        const plan = await this.applyPlanStructureCommand({
-          type: "rename_chapter",
-          chapter_id: operation.chapter_id,
-          title: operation.new_title,
-        }, "已按语音改名");
-        if (plan && undoSnapshot) {
-          this.setData({
-            bookVoiceCommandCanExecute: false,
-            bookVoiceCommandRequiresConfirmation: false,
-            bookVoiceCommandStateText: "已执行",
-            bookVoiceCommandActionText: "已执行",
-            bookVoiceCommandUndoText: "撤回语音改名",
-            bookVoiceCommandUndoSnapshot: undoSnapshot,
-            bookVoiceAssistantStatusText: "已执行，可撤回",
-          });
-          if (options.autoListenAfterExecution) {
-            await this.playBookVoiceAssistantReply("已按你说的改好了。还可以继续说新的修改。", {
-              autoListenAfterPlayback: true,
-            });
-          }
-        }
-        return;
-      }
-      if (preview.intent === "move_chapter" && operation.chapter_id && operation.direction) {
-        const plan = await this.applyPlanStructureCommand({
-          type: "move_chapter",
-          chapter_id: operation.chapter_id,
-          direction: operation.direction === "up" ? "up" : "down",
-        }, "已按语音调整顺序");
-        if (plan && undoSnapshot) {
-          this.setData({
-            bookVoiceCommandCanExecute: false,
-            bookVoiceCommandRequiresConfirmation: false,
-            bookVoiceCommandStateText: "已执行",
-            bookVoiceCommandActionText: "已执行",
-            bookVoiceCommandUndoText: "撤回语音排序",
-            bookVoiceCommandUndoSnapshot: undoSnapshot,
-            bookVoiceAssistantStatusText: "已执行，可撤回",
-          });
-          if (options.autoListenAfterExecution) {
-            await this.playBookVoiceAssistantReply("已按你说的调整好了。还可以继续说新的修改。", {
-              autoListenAfterPlayback: true,
-            });
-          }
-        }
-        return;
-      }
-      if (preview.intent === "assign_source" && operation.chapter_id && operation.utterance_id) {
+      if (preview.intent === "assign_source" && operation.utterance_id) {
         this.setData({ assigningSourceId: operation.utterance_id });
-        const plan = await assignMemoirBookSources(
-          this.data.projectId,
-          sourceAssignmentRequest(operation.chapter_id, operation.utterance_id),
-        );
-        const [draftsByChapterId, coverage] = await Promise.all([
-          this.loadDraftsForPlan(plan),
-          this.loadSourceCoverage(this.data.projectId),
-        ]);
-        this.applyPlan(plan, draftsByChapterId);
-        this.applySourceCoverage(coverage);
-        this.applyBookOutput(null);
-        this.setData({
-          bookVoiceCommandCanExecute: false,
-          bookVoiceCommandRequiresConfirmation: false,
-          bookVoiceCommandStateText: "已执行",
-          bookVoiceCommandActionText: "已执行",
-          bookVoiceCommandUndoText: "",
-          bookVoiceCommandUndoSnapshot: null,
-          bookVoiceAssistantStatusText: "已归入章节",
-        });
-        if (options.autoListenAfterExecution) {
-          await this.playBookVoiceAssistantReply("已归入章节。还可以继续说下一条怎么处理。", {
-            autoListenAfterPlayback: true,
-          });
-        }
+      }
+      const response = await executeMemoirBookVoiceCommand(this.data.projectId, {
+        intent: preview.intent,
+        operation,
+      });
+      await this.applyBookVoiceCommandExecution(response, undoSnapshot, options);
+    } catch (error) {
+      if (isLoginError(error)) {
+        wx.switchTab({ url: "/pages/me/index" });
         return;
       }
-      this.setData({ error: "这个语音操作暂时只能预览" });
+      this.setData({
+        error: error instanceof Error ? error.message : "语音修改执行失败",
+        bookVoiceAssistantStatusText: "执行失败",
+      });
     } finally {
       if (preview.intent === "assign_source") {
         this.setData({ assigningSourceId: "" });
       }
       this.setData({ bookVoiceCommandExecuting: false });
+    }
+  },
+
+  async applyBookVoiceCommandExecution(response, undoSnapshot, options = {}) {
+    const [draftsByChapterId, output] = await Promise.all([
+      this.loadDraftsForPlan(response.plan),
+      response.intent === "assign_source" ? Promise.resolve(null) : this.loadBookOutput(this.data.projectId),
+    ]);
+    const coverage = response.source_coverage || await this.loadSourceCoverage(this.data.projectId);
+    this.applySourceCoverage(coverage);
+    this.applyPlan(response.plan, draftsByChapterId);
+    this.applyBookOutput(output);
+
+    const undoText = executedVoiceCommandUndoText(response.intent);
+    this.setData({
+      bookVoiceCommandCanExecute: false,
+      bookVoiceCommandRequiresConfirmation: false,
+      bookVoiceCommandStateText: "已执行",
+      bookVoiceCommandActionText: "已执行",
+      bookVoiceCommandUndoText: undoText,
+      bookVoiceCommandUndoSnapshot: undoText ? undoSnapshot : null,
+      bookVoiceAssistantStatusText: executedVoiceCommandStatusText(response.intent),
+    });
+    if (options.autoListenAfterExecution) {
+      await this.playBookVoiceAssistantReply(executedVoiceCommandReplyText(response.intent), {
+        autoListenAfterPlayback: true,
+      });
     }
   },
 

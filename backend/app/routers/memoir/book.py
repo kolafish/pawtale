@@ -23,6 +23,8 @@ from app.schemas.memoir_book import (
     MemoirBookSourceCoverageResponse,
     MemoirBookSourceMoveRequest,
     MemoirBookVoiceAssistantTTSRequest,
+    MemoirBookVoiceCommandExecuteRequest,
+    MemoirBookVoiceCommandExecuteResponse,
     MemoirBookVoiceCommandParseRequest,
     MemoirBookVoiceCommandParseResponse,
 )
@@ -134,6 +136,24 @@ async def parse_mobile_memoir_book_voice_command(
     current_user: User = Depends(get_current_user),
 ):
     return await memoir_book_voice_commands.parse_book_voice_command(
+        db,
+        user_id=current_user.id,
+        project_id=project_id,
+        req=req,
+    )
+
+
+@router.post(
+    "/projects/{project_id}/book-voice-command/execute",
+    response_model=MemoirBookVoiceCommandExecuteResponse,
+)
+async def execute_mobile_memoir_book_voice_command(
+    project_id: str,
+    req: MemoirBookVoiceCommandExecuteRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await memoir_book_voice_commands.execute_book_voice_command(
         db,
         user_id=current_user.id,
         project_id=project_id,
