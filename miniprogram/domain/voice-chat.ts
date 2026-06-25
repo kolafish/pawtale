@@ -329,6 +329,8 @@ export interface MemoirBookPlanChapter {
   sort_order: number;
   source_refs: MemoirBookChapterSourceRef[];
   metadata_json: Record<string, unknown>;
+  pending_source_count: number;
+  removed_source_count: number;
   created_at: string;
   updated_at: string;
 }
@@ -459,6 +461,8 @@ export interface MemoirBookChapterDraft {
   chapter_id: string;
   status: MemoirBookChapterDraftStatus;
   metadata_json: Record<string, unknown>;
+  pending_source_count: number;
+  removed_source_count: number;
   latest_version?: MemoirBookChapterDraftVersion | null;
   versions: MemoirBookChapterDraftVersion[];
   created_at: string;

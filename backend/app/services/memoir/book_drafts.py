@@ -51,6 +51,7 @@ from app.services.memoir.book_plan_sources import (
     metadata_without_keys as _metadata_without_keys,
     pending_source_ids as _pending_source_ids,
     source_change_metadata_keys as _source_change_metadata_keys,
+    source_change_counts as _source_change_counts,
 )
 from app.services.memoir.voice_tts import TTSClient
 
@@ -126,14 +127,21 @@ def _version_response(version: MemoirBookChapterDraftVersion) -> MemoirBookChapt
     )
 
 
-def _draft_response(draft: MemoirBookChapterDraft) -> MemoirBookChapterDraftResponse:
+def _draft_response(
+    draft: MemoirBookChapterDraft,
+    *,
+    chapter_metadata_json: dict | None = None,
+) -> MemoirBookChapterDraftResponse:
     versions = [_version_response(version) for version in draft.versions]
+    pending_source_count, removed_source_count = _source_change_counts(chapter_metadata_json)
     return MemoirBookChapterDraftResponse(
         id=draft.id,
         project_id=draft.project_id,
         chapter_id=draft.chapter_id,
         status=MemoirBookChapterDraftStatus(draft.status),
         metadata_json=draft.metadata_json or {},
+        pending_source_count=pending_source_count,
+        removed_source_count=removed_source_count,
         latest_version=versions[-1] if versions else None,
         versions=versions,
         created_at=draft.created_at,
@@ -530,7 +538,7 @@ async def _append_version(
     refreshed = await _load_draft(db, project_id=project_id, chapter_id=chapter_id)
     if not refreshed:
         raise HTTPException(status_code=500, detail="章节稿保存失败")
-    return _draft_response(refreshed)
+    return _draft_response(refreshed, chapter_metadata_json=chapter.metadata_json if chapter else None)
 
 
 async def get_chapter_draft(
@@ -544,7 +552,7 @@ async def get_chapter_draft(
     draft = await _load_draft(db, project_id=project_id, chapter_id=chapter_id)
     if not draft:
         raise HTTPException(status_code=404, detail="章节稿不存在")
-    return _draft_response(draft)
+    return _draft_response(draft, chapter_metadata_json=chapter.metadata_json)
 
 
 async def generate_chapter_draft(
@@ -561,7 +569,7 @@ async def generate_chapter_draft(
     existing = await _load_draft(db, project_id=project_id, chapter_id=chapter_id)
     pending_source_ids = _pending_source_utterance_ids(chapter)
     if existing and existing.versions and not req.force_regenerate and not pending_source_ids:
-        return _draft_response(existing)
+        return _draft_response(existing, chapter_metadata_json=chapter.metadata_json)
 
     sources = await _chapter_sources(db, project_id=project_id, chapter=chapter)
     client = ai_client
@@ -697,7 +705,7 @@ async def confirm_chapter_draft(
     refreshed = await _load_draft(db, project_id=project_id, chapter_id=chapter_id)
     if not refreshed:
         raise HTTPException(status_code=500, detail="章节稿确认失败")
-    return _draft_response(refreshed)
+    return _draft_response(refreshed, chapter_metadata_json=chapter.metadata_json)
 
 
 async def synthesize_chapter_draft_audio(

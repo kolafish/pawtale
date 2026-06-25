@@ -255,6 +255,8 @@ async def test_mobile_memoir_book_chapter_draft_supplements_pending_sources_with
     assert data["latest_version"]["version"] == 2
     assert "第一次离家去县城读书" in data["latest_version"]["content"]
     assert data["metadata_json"] == {}
+    assert data["pending_source_count"] == 0
+    assert data["removed_source_count"] == 0
     assert len(fake_ai.calls) == 2
     plan_prompt = fake_ai.calls[0]["user_prompt"]
     assert "请判断本章新增来源应该如何并入现有章节正文" in plan_prompt
@@ -703,6 +705,8 @@ async def test_mobile_memoir_book_chapter_draft_update_clears_pending_source_sta
     assert data["latest_version"]["version"] == 2
     assert data["latest_version"]["created_by"] == "user"
     assert data["metadata_json"] == {}
+    assert data["pending_source_count"] == 0
+    assert data["removed_source_count"] == 0
     refreshed_chapter = await test_db.scalar(
         select(MemoirBookPlanChapter).where(MemoirBookPlanChapter.id == chapter.id)
     )
@@ -789,6 +793,8 @@ async def test_mobile_memoir_book_chapter_draft_confirm_clears_removed_source_st
     data = response.json()
     assert data["status"] == "confirmed"
     assert data["metadata_json"] == {}
+    assert data["pending_source_count"] == 0
+    assert data["removed_source_count"] == 0
     refreshed_chapter = await test_db.scalar(
         select(MemoirBookPlanChapter).where(MemoirBookPlanChapter.id == chapter.id)
     )

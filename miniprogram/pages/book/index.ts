@@ -71,17 +71,15 @@ import {
   bookOutputData,
   buildChapterViews,
   chapterCollectionData,
-  clearSourceChangeMetadata,
   draftActionText,
   draftStatusText,
   draftVersionText,
   guestBookData,
   latestDraftContent,
   planStage,
-  removedSourceCount,
+  responseCount,
   sourceCoverageData,
   sourceChangeNotice,
-  sourceSupplementCount,
   stageText,
   toPlanInput,
   toPlanUpdateInput,
@@ -414,7 +412,7 @@ Page<BookData, {
   openLogin(): void;
   createProject(): void;
   patchChapter(chapterId: string, patch: Partial<BookChapterView>): void;
-  patchDraft(chapterId: string, draft: MemoirBookChapterDraft, options?: { clearPendingSources?: boolean }): void;
+  patchDraft(chapterId: string, draft: MemoirBookChapterDraft): void;
   clearBookOutput(): void;
   audio: WechatMiniprogram.InnerAudioContext | null;
   playToken: number;
@@ -953,7 +951,7 @@ Page<BookData, {
       const draft = await generateMemoirBookChapterDraft(this.data.projectId, chapterId, {
         force_regenerate: forceRegenerate,
       });
-      this.patchDraft(chapterId, draft, { clearPendingSources: true });
+      this.patchDraft(chapterId, draft);
       wx.showToast({ title: toastTitle, icon: "success" });
       return true;
     } catch (error) {
@@ -996,7 +994,7 @@ Page<BookData, {
     this.patchChapter(chapterId, { draftBusy: true, draftError: "" });
     try {
       const draft = await updateMemoirBookChapterDraft(this.data.projectId, chapterId, { content });
-      this.patchDraft(chapterId, draft, { clearPendingSources: true });
+      this.patchDraft(chapterId, draft);
       wx.showToast({ title: "章节稿已保存", icon: "success" });
     } catch (error) {
       this.patchChapter(chapterId, {
@@ -2233,16 +2231,13 @@ Page<BookData, {
     });
   },
 
-  patchDraft(chapterId, draft, options) {
-    const chapter = this.data.chapters.find((candidate) => candidate.id === chapterId);
-    const metadata = options?.clearPendingSources
-      ? clearSourceChangeMetadata(chapter?.metadata_json)
-      : (chapter?.metadata_json || {});
-    const assignedPendingCount = sourceSupplementCount(metadata, draft);
-    const assignedRemovedCount = removedSourceCount(metadata, draft);
+  patchDraft(chapterId, draft) {
+    const assignedPendingCount = responseCount(draft.pending_source_count);
+    const assignedRemovedCount = responseCount(draft.removed_source_count);
     const content = latestDraftContent(draft);
     this.patchChapter(chapterId, {
-      metadata_json: metadata,
+      pending_source_count: assignedPendingCount,
+      removed_source_count: assignedRemovedCount,
       pendingSourceCount: assignedPendingCount,
       removedSourceCount: assignedRemovedCount,
       sourceChangeNotice: sourceChangeNotice(assignedPendingCount, assignedRemovedCount),

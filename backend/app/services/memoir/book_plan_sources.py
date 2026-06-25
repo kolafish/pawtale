@@ -142,6 +142,10 @@ def removed_source_ids(metadata_json: dict | None) -> set[str]:
     return source_ids_from_metadata(metadata_json, REMOVED_SOURCE_UTTERANCE_IDS_KEY)
 
 
+def source_change_counts(metadata_json: dict | None) -> tuple[int, int]:
+    return len(pending_source_ids(metadata_json)), len(removed_source_ids(metadata_json))
+
+
 def set_source_assignment_metadata(metadata_json: dict | None, pending_ids: set[str]) -> dict[str, object]:
     metadata = dict(metadata_json or {})
     if pending_ids:
@@ -232,6 +236,7 @@ def chapter_response(
     created_at_by_utterance: dict[str, datetime] | None = None,
 ) -> MemoirBookPlanChapterResponse:
     source_created_at = created_at_by_utterance or {}
+    pending_source_count, removed_source_count = source_change_counts(chapter.metadata_json)
     return MemoirBookPlanChapterResponse(
         id=chapter.id,
         plan_id=chapter.plan_id,
@@ -244,6 +249,8 @@ def chapter_response(
             if isinstance(ref, dict)
         ],
         metadata_json=chapter.metadata_json or {},
+        pending_source_count=pending_source_count,
+        removed_source_count=removed_source_count,
         created_at=chapter.created_at,
         updated_at=chapter.updated_at,
     )
