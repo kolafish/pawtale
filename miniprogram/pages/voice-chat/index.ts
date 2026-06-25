@@ -13,7 +13,11 @@ import {
   type AssistantTurnQueueItem,
   type PreparedAssistantTurnAudio,
 } from "../../services/voice-assistant-turn-queue";
-import { runAcknowledgedQuestionPipeline } from "../../services/voice-assistant-turn-pipeline";
+import {
+  VoiceAssistantTurnStreamClient,
+  type PreparedAssistantStreamAudioSegment,
+  type VoiceAssistantTurnCompletedEvent,
+} from "../../services/voice-assistant-turn-stream";
 import {
   classifyVoiceClientConnectionError,
   type MemoirCaptureStats,
@@ -23,7 +27,6 @@ import { StreamingVoiceController } from "../../services/streaming-voice-control
 import {
   createMemoirAssistantTTS,
   createMemoirVoiceNoAnswerPrompt,
-  createMemoirVoiceFollowUp,
   getMemoirVoiceSession,
 } from "../../services/memoir-voice-api";
 import { splitTextByAudioPlaybackProgress } from "../../services/tts-text-progress";
@@ -166,7 +169,11 @@ Page<VoiceChatData, {
   finishAfterDisconnect(): Promise<void>;
   maybeGenerateOpeningFollowUp(): void;
   generateFollowUp(regenerate?: boolean): Promise<void>;
-  generateFollowUpPipeline(sourceMessageId: string): Promise<void>;
+  generateStreamingFollowUp(sourceMessageId: string, regenerate: boolean, requestSerial: number): Promise<void>;
+  applyStreamingAssistantText(text: string, sourceMessageId: string): void;
+  applyCompletedStreamingAssistantTurn(event: VoiceAssistantTurnCompletedEvent, sourceMessageId: string): void;
+  enqueueStreamingAudioSegment(segment: PreparedAssistantStreamAudioSegment, requestSerial: number): void;
+  playStreamingAudioSegment(segment: PreparedAssistantStreamAudioSegment, requestSerial: number): Promise<void>;
   regenerateFollowUp(): Promise<void>;
   skipFollowUp(): void;
   enqueueAssistantTurn(item: AssistantTurnQueueItem): void;
@@ -218,9 +225,14 @@ Page<VoiceChatData, {
   handleError(message: string, error?: VoiceChatErrorInfo): void;
   audioPlayback: AudioPlaybackController;
   voiceStreaming: StreamingVoiceController;
+  assistantTurnStream: VoiceAssistantTurnStreamClient | null;
+  assistantStreamingPlayback: Promise<void>;
+  assistantStreamingPlaybackError: Error | null;
   assistantTurnQueue: AssistantTurnQueueItem[];
   assistantTurnQueueRunning: boolean;
   assistantAudioPrepareCount: number;
+  assistantStreamLineId: string;
+  assistantStreamSpokenText: string;
   ttsPlayToken: number;
   ttsProgressTimer: number | null;
   ttsProgressStartedAtMs: number;
@@ -233,9 +245,14 @@ Page<VoiceChatData, {
 }>({
   audioPlayback: new AudioPlaybackController(),
   voiceStreaming: new StreamingVoiceController(),
+  assistantTurnStream: null,
+  assistantStreamingPlayback: Promise.resolve(),
+  assistantStreamingPlaybackError: null,
   assistantTurnQueue: [],
   assistantTurnQueueRunning: false,
   assistantAudioPrepareCount: 0,
+  assistantStreamLineId: "",
+  assistantStreamSpokenText: "",
   ttsPlayToken: 0,
   ttsProgressTimer: null,
   ttsProgressStartedAtMs: 0,
@@ -698,40 +715,33 @@ Page<VoiceChatData, {
       return;
     }
     const sourceMessageId = followUpSourceMessageId(this.data.transcriptLines);
-    if (!regenerate && sourceMessageId !== "opening") {
-      await this.generateFollowUpPipeline(sourceMessageId);
-      return;
-    }
     if (!regenerate && this.data.lastFollowUpSourceMessageId === sourceMessageId) {
       return;
     }
     const requestSerial = followUpRequestSerial + 1;
     followUpRequestSerial = requestSerial;
+    this.cancelFollowUpTTS();
+    this.assistantStreamLineId = `assistant-stream-${requestSerial}`;
+    this.assistantStreamSpokenText = "";
+    this.assistantStreamingPlayback = Promise.resolve();
+    this.assistantStreamingPlaybackError = null;
     this.setData({
       followUpLoading: true,
       followUpError: "",
+      followUpTTSLoading: true,
+      followUpTTSError: "",
+      followUpTTSStateText: "正在连接 AI 语音",
       canRequestFollowUp: false,
-      persistenceStateText: "老余思考中",
+      persistenceStateText: "老余正在回应",
     });
     try {
-      const response = await createMemoirVoiceFollowUp(this.data.voiceSessionId, { regenerate });
-      if (requestSerial !== followUpRequestSerial) {
-        return;
-      }
-      const item = assistantTurnQueueItem(response, {
-        autoListenAfterPlayback: response.expects_answer !== false,
-      });
-      this.enqueueAssistantTurn(item);
-      this.setData({
-        dismissedFollowUpMessageId: "",
-        followUpTTSError: "",
-        persistenceStateText: response.expects_answer === false ? "老余已回应" : "等待回答",
-        lastFollowUpSourceMessageId: sourceMessageId,
-      });
+      await this.generateStreamingFollowUp(sourceMessageId, regenerate, requestSerial);
     } catch (error) {
       if (requestSerial !== followUpRequestSerial) {
         return;
       }
+      this.assistantTurnStream?.disposeTempFiles();
+      this.assistantTurnStream = null;
       this.setData({
         followUpError: error instanceof Error ? error.message : "老余回应生成失败",
         canRequestFollowUp: true,
@@ -741,6 +751,7 @@ Page<VoiceChatData, {
       if (requestSerial === followUpRequestSerial) {
         this.setData({
           followUpLoading: false,
+          followUpTTSLoading: false,
           canRequestFollowUp: canRequestFollowUp(
             this.data.transcriptLines,
             this.data.guidanceMode,
@@ -752,64 +763,211 @@ Page<VoiceChatData, {
     }
   },
 
-  async generateFollowUpPipeline(sourceMessageId) {
-    if (!this.data.voiceSessionId || this.data.lastFollowUpSourceMessageId === sourceMessageId) {
+  async generateStreamingFollowUp(sourceMessageId, regenerate, requestSerial) {
+    const streamClient = new VoiceAssistantTurnStreamClient(this.data.voiceSessionId, {
+      onStarted: () => {
+        if (requestSerial !== followUpRequestSerial) {
+          return;
+        }
+        this.setData({
+          followUpTTSStateText: "老余正在说",
+          persistenceStateText: "老余正在回应",
+        });
+      },
+      onTextDelta: (event) => {
+        if (requestSerial === followUpRequestSerial) {
+          this.applyStreamingAssistantText(event.text, sourceMessageId);
+        }
+      },
+      onAudioSegment: (segment) => {
+        if (requestSerial === followUpRequestSerial) {
+          this.enqueueStreamingAudioSegment(segment, requestSerial);
+        } else {
+          segment.dispose();
+        }
+      },
+      onCompleted: (event) => {
+        if (requestSerial === followUpRequestSerial) {
+          this.applyCompletedStreamingAssistantTurn(event, sourceMessageId);
+        }
+      },
+    });
+    this.assistantTurnStream = streamClient;
+    const completed = await streamClient.start({ regenerate });
+    if (requestSerial !== followUpRequestSerial) {
       return;
     }
-    const requestSerial = followUpRequestSerial + 1;
-    followUpRequestSerial = requestSerial;
+    await this.assistantStreamingPlayback;
+    if (this.assistantStreamingPlaybackError) {
+      throw this.assistantStreamingPlaybackError;
+    }
+    if (requestSerial !== followUpRequestSerial) {
+      return;
+    }
+    this.assistantTurnStream = null;
+    streamClient.disposeTempFiles();
+    if (completed.expects_answer !== false) {
+      this.autoListenPendingAfterPlayback = true;
+    }
     this.setData({
-      followUpLoading: true,
-      followUpError: "",
-      canRequestFollowUp: false,
+      dismissedFollowUpMessageId: "",
+      followUpLoading: false,
+      followUpTTSLoading: false,
+      followUpTTSPlaying: false,
+      followUpTTSError: "",
+      followUpTTSStateText: completed.expects_answer !== false ? "播放完成，正在听你说" : "播放完成",
+      ttsSpokenText: completed.text,
+      ttsCurrentText: "",
+      ttsRemainingText: "",
+      ttsProgressPercent: 100,
+      persistenceStateText: completed.expects_answer === false ? "老余已回应" : "等待回答",
+      lastFollowUpSourceMessageId: sourceMessageId,
+    });
+    if (completed.expects_answer !== false) {
+      this.tryStartAutoListenAfterTTS();
+    }
+  },
+
+  applyStreamingAssistantText(text, sourceMessageId) {
+    const line: VoiceChatTranscriptLine = {
+      id: this.assistantStreamLineId || `assistant-stream-${Date.now()}`,
+      role: "assistant",
+      text,
+      message_id: "",
+      audio_file_id: "",
+      metadata_json: {
+        source: "ai.streaming_assistant_turn",
+        source_message_id: sourceMessageId,
+        streaming: true,
+      },
+    };
+    const transcriptLines = upsertTranscriptLine(this.data.transcriptLines, line);
+    this.setData({
+      ...assistantTranscriptState(transcriptLines, {
+        guidanceMode: this.data.guidanceMode,
+        lastFollowUpSourceMessageId: this.data.lastFollowUpSourceMessageId,
+        followUpLoading: true,
+        assistantPromptText: text,
+        followUpMessageId: "",
+        followUpAudioFileId: "",
+        followUpTTSStateText: this.data.followUpTTSStateText,
+        ttsAlignment: [],
+        assistantExpectsAnswer: true,
+        canRequestFollowUp: false,
+      }),
+      followUpTTSError: "",
       persistenceStateText: "老余正在回应",
     });
-    try {
-      const result = await runAcknowledgedQuestionPipeline({
-        voiceSessionId: this.data.voiceSessionId,
-        isCancelled: () => requestSerial !== followUpRequestSerial,
-        onStep: ({ stage, response, item }) => {
-          this.enqueueAssistantTurn(item);
-          let persistenceStateText = "等待回答";
-          if (stage === "acknowledgement") {
-            persistenceStateText = "老余正在准备下一句";
-          } else if (response.expects_answer === false) {
-            persistenceStateText = "老余已回应";
-          }
+  },
+
+  applyCompletedStreamingAssistantTurn(event, sourceMessageId) {
+    const metadata = {
+      source: "ai.streaming_assistant_turn",
+      source_message_id: sourceMessageId,
+      primary_intent: event.primary_intent,
+      intent_tags: event.intent_tags || [],
+      expects_answer: event.expects_answer,
+      usage: event.usage || {},
+      finish_reason: event.finish_reason || "",
+    };
+    const finalLine: VoiceChatTranscriptLine = {
+      id: event.message_id,
+      role: "assistant",
+      text: event.text,
+      message_id: event.message_id,
+      audio_file_id: event.audio_file_id || "",
+      metadata_json: metadata,
+    };
+    const withoutTemporaryLine = this.data.transcriptLines.filter((line) => (
+      line.id !== this.assistantStreamLineId
+      && line.message_id !== event.message_id
+    ));
+    const transcriptLines = upsertTranscriptLine(withoutTemporaryLine, finalLine);
+    this.setData({
+      ...assistantTranscriptState(transcriptLines, {
+        guidanceMode: this.data.guidanceMode,
+        lastFollowUpSourceMessageId: sourceMessageId,
+        followUpLoading: true,
+        assistantPromptText: event.text,
+        followUpMessageId: event.message_id,
+        followUpAudioFileId: event.audio_file_id || "",
+        followUpTTSStateText: this.data.followUpTTSStateText,
+        ttsAlignment: [],
+        assistantExpectsAnswer: event.expects_answer !== false,
+        canRequestFollowUp: false,
+      }),
+      followUpTTSError: "",
+    });
+    writeMemoirVoiceSessionSnapshot(this.data.voiceSessionId, { transcriptLines });
+  },
+
+  enqueueStreamingAudioSegment(segment, requestSerial) {
+    this.assistantStreamingPlayback = this.assistantStreamingPlayback
+      .then(() => this.playStreamingAudioSegment(segment, requestSerial))
+      .catch((error) => {
+        if (requestSerial === followUpRequestSerial) {
+          this.assistantStreamingPlaybackError = error instanceof Error
+            ? error
+            : new Error("AI 语音播放失败");
           this.setData({
-            dismissedFollowUpMessageId: "",
-            followUpTTSError: "",
-            persistenceStateText,
+            followUpTTSError: this.assistantStreamingPlaybackError.message,
+            followUpTTSStateText: "播放失败",
+          });
+        }
+      });
+  },
+
+  async playStreamingAudioSegment(segment, requestSerial) {
+    if (requestSerial !== followUpRequestSerial) {
+      segment.dispose();
+      return;
+    }
+    let playToken = this.ttsPlayToken;
+    if (!this.audioPlayback.isCurrentToken(playToken)) {
+      playToken = this.audioPlayback.nextToken();
+      this.ttsPlayToken = playToken;
+    }
+    const spokenBefore = this.assistantStreamSpokenText;
+    const fullText = this.data.assistantPromptText || `${spokenBefore}${segment.text}`;
+    const prefix = `${spokenBefore}${segment.text}`;
+    this.setData({
+      followUpTTSLoading: false,
+      followUpTTSPlaying: true,
+      followUpTTSError: "",
+      followUpTTSStateText: "正在播放",
+      ttsSpokenText: spokenBefore,
+      ttsCurrentText: segment.text,
+      ttsRemainingText: fullText.startsWith(prefix) ? fullText.slice(prefix.length) : "",
+    });
+    try {
+      await this.audioPlayback.playTempFile(segment.tempFilePath, playToken, {
+        onEnded: () => {
+          if (playToken !== this.ttsPlayToken) {
+            return;
+          }
+          this.assistantStreamSpokenText = `${this.assistantStreamSpokenText}${segment.text}`;
+          const latestText = this.data.assistantPromptText || this.assistantStreamSpokenText;
+          this.setData({
+            ttsSpokenText: this.assistantStreamSpokenText,
+            ttsCurrentText: "",
+            ttsRemainingText: latestText.startsWith(this.assistantStreamSpokenText)
+              ? latestText.slice(this.assistantStreamSpokenText.length)
+              : "",
+            ttsProgressPercent: 100,
           });
         },
-      });
-      if (result.cancelled || !result.followUp) {
-        return;
-      }
-      this.setData({
-        lastFollowUpSourceMessageId: sourceMessageId,
-      });
-    } catch (error) {
-      if (requestSerial !== followUpRequestSerial) {
-        return;
-      }
-      this.setData({
-        followUpError: error instanceof Error ? error.message : "老余回应生成失败",
-        canRequestFollowUp: true,
-        persistenceStateText: "回应失败",
+        onError: () => {
+          if (playToken === this.ttsPlayToken) {
+            this.setData({
+              followUpTTSError: "AI 语音播放失败",
+              followUpTTSStateText: "播放失败",
+            });
+          }
+        },
+        errorMessage: "AI 语音播放失败",
       });
     } finally {
-      if (requestSerial === followUpRequestSerial) {
-        this.setData({
-          followUpLoading: false,
-          canRequestFollowUp: canRequestFollowUp(
-            this.data.transcriptLines,
-            this.data.guidanceMode,
-            this.data.lastFollowUpSourceMessageId,
-            false,
-          ),
-        });
-      }
+      segment.dispose();
     }
   },
 
@@ -1112,6 +1270,13 @@ Page<VoiceChatData, {
 
   cancelFollowUpTTS() {
     this.ttsRequestSerial += 1;
+    this.assistantTurnStream?.cancel();
+    this.assistantTurnStream?.disposeTempFiles();
+    this.assistantTurnStream = null;
+    this.assistantStreamingPlayback = Promise.resolve();
+    this.assistantStreamingPlaybackError = null;
+    this.assistantStreamLineId = "";
+    this.assistantStreamSpokenText = "";
     this.assistantTurnQueue = [];
     this.assistantAudioPrepareCount = 0;
     this.stopFollowUpAudio();

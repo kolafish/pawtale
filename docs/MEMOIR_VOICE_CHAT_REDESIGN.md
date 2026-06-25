@@ -269,22 +269,29 @@ safety_flags
 
 ### Streaming TTS
 
-当前已实现 assistant message 驱动的第一版 TTS：
+当前存在两条 TTS 播放路径：
 
 ```text
-assistant message
+历史 assistant message / no-answer prompt
  -> backend TTS provider
  -> audio_files
  -> 小程序下载并播放
+
+AI 下一轮追问
+ -> backend assistant-turn-stream WebSocket
+ -> LLM streaming 输出文本
+ -> backend TTS provider 分段合成
+ -> 小程序顺序播放临时音频片段
+ -> turn.completed 后落库 assistant message / audio_file
 ```
 
 后端 TTS 接入收敛为火山/豆包语音 V3，环境变量为 `TTS_PROVIDER=volc`、`VOLC_TTS_APP_ID`、`VOLC_TTS_ACCESS_TOKEN`、`VOLC_TTS_RESOURCE_ID`、`VOLC_TTS_SPEAKER`、`VOLC_TTS_RESPONSE_FORMAT`。默认 `TTS_PROVIDER=disabled`，没有配置时小程序仍显示 AI 文字追问，不阻塞 ASR 和 LLM。火山 V3 默认走 `seed-tts-2.0` 和 `*_uranus_bigtts` 音色，通过 SSE 返回音频分片。
 
-小程序语音聊天页在 AI 追问生成后会请求 TTS，自动播放；播放时优先按后端返回的逐字时间轴高亮已讲到的文字，播放完成且 voice gateway 可录音时自动进入下一轮收听。用户开始说话、跳过追问、结束页面时会取消未完成合成或停止播放，避免旧追问音频和新回答冲突。
+小程序语音聊天页的下一轮 AI 追问使用 `assistant-turn-stream`，前端收到文本 delta 后即时展示，收到音频分片完成事件后顺序播放；播放完成且 voice gateway 可录音时自动进入下一轮收听。历史 assistant message 重播和 no-answer prompt 仍使用 message TTS 下载路径。用户开始说话、跳过追问、结束页面时会取消未完成合成或停止播放，避免旧追问音频和新回答冲突。
 
 为了让高亮块跟随真实语音位置移动，后端请求火山 V3 时开启 `audio_params.enable_subtitle=true`，读取 `sentence.words[].startTime/endTime` 原生字幕时间戳，转换为逐字/词 `start_ms` / `end_ms` 时间轴，保存到 `memoir_chat_messages.metadata_json.tts_alignment`，并随 TTS response 返回给小程序。小程序播放时只按该时间轴定位当前字，不再按播放百分比估算；已有旧 provider 音频不会继续复用，会在下次请求时按火山 V3 重新生成。
 
-后续真正的 Streaming TTS 仍要把 provider WebSocket/SSE 音频流直接接到播放队列，并与 LLM streaming 输出联动。当前第一版刻意保持为“短句生成后播放”：AI 追问文本较短，非流式音质和稳定性更可控，先保证 ASR、持久化、追问和播放闭环。
+当前流式体验的边界是后端按文本分段合成并向小程序推送可播放音频片段；provider 级别的逐字节播放、用户插话打断和断线续播仍属于后续增强。
 
 ## 数据模型方向
 
@@ -459,13 +466,14 @@ asr.final          # { "text": "...", "message_id": "...", "utterance_id": "..."
 session.error
 ```
 
-LLM 和 TTS 当前不走 WebSocket 事件：
+AI 下一轮追问当前走单独的 WebSocket：
 
-- LLM 追问通过 `POST /api/mobile/memoir/voice-sessions/{voice_session_id}/follow-up` 生成 assistant message。
-- TTS 通过 `POST /api/mobile/memoir/voice-sessions/{voice_session_id}/messages/{message_id}/tts` 生成并关联 `audio_file_id`。
-- 音频播放通过 `GET /api/mobile/memoir/audio-files/{audio_file_id}/playback` 下载。
+- 路径：`/api/mobile/memoir/voice-sessions/{voice_session_id}/assistant-turn-stream`。
+- 客户端发送 `turn.start` / `turn.cancel`。
+- 服务端返回 `turn.ready`、`turn.started`、`text.delta`、`text.segment`、`audio.chunk`、`audio.segment_done`、`turn.completed`、`turn.cancelled`、`turn.failed`。
+- `turn.completed` 后端已完成 assistant message 和最终音频落库；小程序用它替换流式临时展示行。
 
-后续如果要真正做低延迟 Streaming TTS，可以在现有 message/audio 数据模型不变的前提下扩展 `assistant.*` 和 `tts.*` WebSocket 事件。
+历史消息重播和 no-answer prompt 仍使用 `POST /api/mobile/memoir/voice-sessions/{voice_session_id}/messages/{message_id}/tts` 生成并关联 `audio_file_id`，再通过 `GET /api/mobile/memoir/audio-files/{audio_file_id}/playback` 下载播放。
 
 `session.start` 必须包含引导模式，后端据此选择 prompt policy：
 

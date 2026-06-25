@@ -11,6 +11,7 @@ function loadVoiceChatPage({
   voiceAuthorizationExports = {},
   wechatPrivacyExports = {},
   voiceChatAutoListenExports = {},
+  assistantTurnStreamExports = {},
 } = {}) {
   mockModule("../services/memoir-streaming-asr.ts", {
     classifyVoiceClientConnectionError: () => ({ kind: "unknown" }),
@@ -30,12 +31,6 @@ function loadVoiceChatPage({
   mockModule("../services/memoir-voice-api.ts", {
     createMemoirAssistantTTS: async () => {
       throw new Error("createMemoirAssistantTTS was not mocked");
-    },
-    createMemoirVoiceFollowUp: async () => {
-      throw new Error("createMemoirVoiceFollowUp was not mocked");
-    },
-    createMemoirVoiceTurnPlan: async () => {
-      throw new Error("createMemoirVoiceTurnPlan was not mocked");
     },
     createMemoirVoiceNoAnswerPrompt: async () => {
       throw new Error("createMemoirVoiceNoAnswerPrompt was not mocked");
@@ -127,8 +122,18 @@ function loadVoiceChatPage({
     wechatPrivacyErrorMessage: (message) => message || "微信隐私授权失败",
     ...wechatPrivacyExports,
   });
+  mockModule("../services/voice-assistant-turn-stream.ts", {
+    VoiceAssistantTurnStreamClient: assistantTurnStreamExports.VoiceAssistantTurnStreamClient || class {
+      async start() {
+        throw new Error("VoiceAssistantTurnStreamClient.start was not mocked");
+      }
+      cancel() {}
+      close() {}
+      disposeTempFiles() {}
+    },
+    ...assistantTurnStreamExports,
+  });
   clearModule("../services/voice-assistant-turn-queue.ts");
-  clearModule("../services/voice-assistant-turn-pipeline.ts");
 
   return loadPageModule("../pages/voice-chat/index.ts").page;
 }
@@ -785,56 +790,58 @@ test("voice chat starts pending auto listening when gateway becomes ready after 
   delete global.wx;
 });
 
-test("voice chat pipelines acknowledgement before the next follow-up question", async () => {
-  const requests = [];
-  const queuedTurns = [];
+test("voice chat streams one assistant turn and plays audio segments", async () => {
+  const streamStarts = [];
+  const played = [];
+  const disposed = [];
   const page = loadVoiceChatPage({
-    voiceApiExports: {
-      createMemoirVoiceTurnPlan: async (voiceSessionId, data) => {
-        requests.push({ type: "turn_plan", voiceSessionId, data });
-        return {
-          plan: {
-            user_signal: "memory_detail",
-            response_strategy: "ack_then_follow",
-            should_play_ack: true,
-            acknowledgement_text: "这段院子的记忆很具体。",
-            next_question_brief: "追问外婆在院子里最常带叙述者做什么",
-          },
-          acknowledgement: {
-            follow_up_text: "这段院子的记忆很具体。",
-            primary_intent: "acknowledge",
-            intent_tags: ["acknowledge"],
-            expects_answer: false,
-            message: {
-              id: "assistant-ack-1",
-              role: "assistant",
-              content_text: "这段院子的记忆很具体。",
-              audio_file_id: "",
-              transcript_version_id: "",
-              metadata_json: { primary_intent: "acknowledge", expects_answer: false },
-            },
-          },
-        };
-      },
-      createMemoirVoiceFollowUp: async (voiceSessionId, data) => {
-        requests.push({ type: "follow_up", voiceSessionId, data });
-        return {
-          follow_up_text: "那时候在院子里，外婆最常带着您做什么？",
-          primary_intent: "follow_up",
-          intent_tags: ["acknowledge", "follow_up"],
-          expects_answer: true,
-          message: {
-            id: "assistant-question-1",
-            role: "assistant",
-            content_text: "那时候在院子里，外婆最常带着您做什么？",
-            audio_file_id: "",
-            transcript_version_id: "",
-            metadata_json: { primary_intent: "follow_up", expects_answer: true },
-          },
-        };
+    assistantTurnStreamExports: {
+      VoiceAssistantTurnStreamClient: class {
+        constructor(voiceSessionId, callbacks) {
+          this.voiceSessionId = voiceSessionId;
+          this.callbacks = callbacks;
+        }
+        async start(options) {
+          streamStarts.push({ voiceSessionId: this.voiceSessionId, options });
+          this.callbacks.onStarted?.({ type: "turn.started", turn_id: "turn-1" });
+          this.callbacks.onTextDelta?.({
+            type: "text.delta",
+            turn_id: "turn-1",
+            text_delta: "那时候在院子里，外婆最常带着您做什么？",
+            text: "那时候在院子里，外婆最常带着您做什么？",
+          });
+          this.callbacks.onAudioSegment?.({
+            turnId: "turn-1",
+            segmentIndex: 0,
+            text: "那时候在院子里，外婆最常带着您做什么？",
+            tempFilePath: "/tmp/assistant-0.wav",
+            mimeType: "audio/wav",
+            dispose: () => disposed.push("segment-0"),
+          });
+          const completed = {
+            type: "turn.completed",
+            turn_id: "turn-1",
+            state: "completed",
+            message_id: "assistant-question-1",
+            audio_file_id: "audio-question-1",
+            text: "那时候在院子里，外婆最常带着您做什么？",
+            primary_intent: "follow_up",
+            intent_tags: ["follow_up"],
+            expects_answer: true,
+          };
+          this.callbacks.onCompleted?.(completed);
+          return completed;
+        }
+        cancel() {}
+        close() {}
+        disposeTempFiles() {}
       },
     },
+    voiceChatAutoListenExports: {
+      canAutoStartListeningAfterTTS: () => true,
+    },
   });
+  const startCalls = [];
   const context = {
     ...page,
     data: {
@@ -847,95 +854,168 @@ test("voice chat pipelines acknowledgement before the next follow-up question", 
         text: "我小时候经常和外婆在院子里摘菜。",
         message_id: "user-message-1",
       }],
-      lastFollowUpSourceMessageId: "",
+      lastFollowUpSourceMessageId: "previous-source",
+      autoListenEnabled: true,
+      status: "ready",
+    },
+    audioPlayback: {
+      currentToken: () => 1,
+      isCurrentToken: () => true,
+      nextToken: () => 1,
+      stop() {},
+      playTempFile: async (tempFilePath, token, options) => {
+        played.push({ tempFilePath, token });
+        options.onEnded?.();
+      },
+    },
+    voiceStreaming: {
+      hasClient: () => true,
     },
     setData(patch) {
       this.data = { ...this.data, ...patch };
     },
-    enqueueAssistantTurn(item) {
-      queuedTurns.push(item);
+    startRecording(autoTriggered) {
+      startCalls.push(autoTriggered);
+      return true;
     },
   };
 
-  await page.generateFollowUpPipeline.call(context, "user-message-1");
+  await page.generateFollowUp.call(context, false);
 
-  assert.deepEqual(requests, [
-    { type: "turn_plan", voiceSessionId: "voice-1", data: {} },
-    {
-      type: "follow_up",
-      voiceSessionId: "voice-1",
-      data: {
-        acknowledgement_message_id: "assistant-ack-1",
-        turn_plan: {
-          user_signal: "memory_detail",
-          response_strategy: "ack_then_follow",
-          should_play_ack: true,
-          acknowledgement_text: "这段院子的记忆很具体。",
-          next_question_brief: "追问外婆在院子里最常带叙述者做什么",
-        },
-      },
-    },
-  ]);
-  assert.deepEqual(queuedTurns.map((item) => ({
-    messageId: item.messageId,
-    autoListenAfterPlayback: item.autoListenAfterPlayback,
-    expectsAnswer: item.expectsAnswer,
-    waitForNextTurnBeforePlaybackMs: item.waitForNextTurnBeforePlaybackMs,
-    text: item.text,
-  })), [
-    {
-      messageId: "assistant-ack-1",
-      autoListenAfterPlayback: false,
-      expectsAnswer: false,
-      waitForNextTurnBeforePlaybackMs: 900,
-      text: "这段院子的记忆很具体。",
-    },
-    {
-      messageId: "assistant-question-1",
-      autoListenAfterPlayback: true,
-      expectsAnswer: true,
-      waitForNextTurnBeforePlaybackMs: 0,
-      text: "那时候在院子里，外婆最常带着您做什么？",
-    },
-  ]);
-  assert.equal(context.data.lastFollowUpSourceMessageId, "user-message-1");
+  assert.equal(streamStarts[0].voiceSessionId, "voice-1");
+  assert.equal(streamStarts[0].options.regenerate, false);
+  assert.deepEqual(played, [{ tempFilePath: "/tmp/assistant-0.wav", token: 1 }]);
+  assert.deepEqual(disposed, ["segment-0"]);
+  assert.equal(context.data.assistantPromptText, "那时候在院子里，外婆最常带着您做什么？");
+  assert.equal(context.data.followUpMessageId, "assistant-question-1");
+  assert.equal(context.data.followUpAudioFileId, "audio-question-1");
+  assert.equal(context.data.lastFollowUpSourceMessageId, "");
   assert.equal(context.data.persistenceStateText, "等待回答");
+  assert.deepEqual(startCalls, [true]);
 });
 
-test("voice chat skips acknowledgement playback when turn plan uses direct follow", async () => {
-  const requests = [];
-  const queuedTurns = [];
+test("voice chat keeps streaming assistant playback failures from completing the turn UI", async () => {
+  const disposed = [];
   const page = loadVoiceChatPage({
-    voiceApiExports: {
-      createMemoirVoiceTurnPlan: async (voiceSessionId, data) => {
-        requests.push({ type: "turn_plan", voiceSessionId, data });
-        return {
-          plan: {
-            user_signal: "short_answer",
-            response_strategy: "direct_follow",
-            should_play_ack: false,
-            acknowledgement_text: "",
-            next_question_brief: "直接追问这件事发生的大概时间",
-          },
-          acknowledgement: null,
-        };
+    assistantTurnStreamExports: {
+      VoiceAssistantTurnStreamClient: class {
+        constructor(voiceSessionId, callbacks) {
+          this.callbacks = callbacks;
+        }
+        async start() {
+          this.callbacks.onTextDelta?.({
+            type: "text.delta",
+            turn_id: "turn-1",
+            text_delta: "那时候在院子里，外婆最常带着您做什么？",
+            text: "那时候在院子里，外婆最常带着您做什么？",
+          });
+          this.callbacks.onAudioSegment?.({
+            turnId: "turn-1",
+            segmentIndex: 0,
+            text: "那时候在院子里，外婆最常带着您做什么？",
+            tempFilePath: "/tmp/assistant-0.wav",
+            mimeType: "audio/wav",
+            dispose: () => disposed.push("segment-0"),
+          });
+          const completed = {
+            type: "turn.completed",
+            turn_id: "turn-1",
+            state: "completed",
+            message_id: "assistant-question-1",
+            audio_file_id: "audio-question-1",
+            text: "那时候在院子里，外婆最常带着您做什么？",
+            primary_intent: "follow_up",
+            intent_tags: ["follow_up"],
+            expects_answer: true,
+          };
+          this.callbacks.onCompleted?.(completed);
+          return completed;
+        }
+        cancel() {}
+        close() {}
+        disposeTempFiles() {}
       },
-      createMemoirVoiceFollowUp: async (voiceSessionId, data) => {
-        requests.push({ type: "follow_up", voiceSessionId, data });
-        return {
-          follow_up_text: "那这件事大概发生在您多大的时候？",
-          primary_intent: "follow_up",
-          intent_tags: ["follow_up"],
-          expects_answer: true,
-          message: {
-            id: "assistant-question-1",
-            role: "assistant",
-            content_text: "那这件事大概发生在您多大的时候？",
+    },
+    voiceChatAutoListenExports: {
+      canAutoStartListeningAfterTTS: () => true,
+    },
+  });
+  const startCalls = [];
+  const context = {
+    ...page,
+    data: {
+      ...page.data,
+      voiceSessionId: "voice-1",
+      guidanceMode: "guided_interview",
+      transcriptLines: [{
+        id: "user-line-1",
+        role: "user",
+        text: "我小时候经常和外婆在院子里摘菜。",
+        message_id: "user-message-1",
+      }],
+      lastFollowUpSourceMessageId: "previous-source",
+      autoListenEnabled: true,
+      status: "ready",
+    },
+    audioPlayback: {
+      currentToken: () => 1,
+      isCurrentToken: () => true,
+      nextToken: () => 1,
+      stop() {},
+      playTempFile: async () => {
+        throw new Error("temp audio failed");
+      },
+    },
+    voiceStreaming: {
+      hasClient: () => true,
+    },
+    setData(patch) {
+      this.data = { ...this.data, ...patch };
+    },
+    startRecording(autoTriggered) {
+      startCalls.push(autoTriggered);
+      return true;
+    },
+  };
+
+  await page.generateFollowUp.call(context, false);
+
+  assert.deepEqual(disposed, ["segment-0"]);
+  assert.equal(context.data.followUpError, "temp audio failed");
+  assert.equal(context.data.followUpTTSStateText, "播放失败");
+  assert.equal(context.data.lastFollowUpSourceMessageId, "previous-source");
+  assert.deepEqual(startCalls, []);
+});
+
+test("voice chat passes regenerate flag to streaming assistant turn", async () => {
+  const streamStarts = [];
+  const page = loadVoiceChatPage({
+    assistantTurnStreamExports: {
+      VoiceAssistantTurnStreamClient: class {
+        constructor(voiceSessionId, callbacks) {
+          this.voiceSessionId = voiceSessionId;
+          this.callbacks = callbacks;
+        }
+        async start(options) {
+          streamStarts.push(options);
+          const completed = {
+            type: "turn.completed",
+            turn_id: "turn-1",
+            state: "completed",
+            message_id: "assistant-question-1",
             audio_file_id: "",
-            transcript_version_id: "",
-            metadata_json: { primary_intent: "follow_up", expects_answer: true },
-          },
-        };
+            text: "换个说法问：那件事大概发生在什么时候？",
+            primary_intent: "follow_up",
+            intent_tags: ["follow_up"],
+            expects_answer: true,
+          };
+          this.callbacks.onTextDelta?.({ type: "text.delta", text: completed.text });
+          this.callbacks.onCompleted?.(completed);
+          return completed;
+        }
+        cancel() {}
+        close() {}
+        disposeTempFiles() {}
       },
     },
   });
@@ -953,41 +1033,21 @@ test("voice chat skips acknowledgement playback when turn plan uses direct follo
       }],
       lastFollowUpSourceMessageId: "",
     },
+    audioPlayback: {
+      currentToken: () => 1,
+      isCurrentToken: () => true,
+      nextToken: () => 1,
+      stop() {},
+    },
     setData(patch) {
       this.data = { ...this.data, ...patch };
     },
-    enqueueAssistantTurn(item) {
-      queuedTurns.push(item);
-    },
   };
 
-  await page.generateFollowUpPipeline.call(context, "user-message-1");
+  await page.generateFollowUp.call(context, true);
 
-  assert.deepEqual(requests, [
-    { type: "turn_plan", voiceSessionId: "voice-1", data: {} },
-    {
-      type: "follow_up",
-      voiceSessionId: "voice-1",
-      data: {
-        turn_plan: {
-          user_signal: "short_answer",
-          response_strategy: "direct_follow",
-          should_play_ack: false,
-          acknowledgement_text: "",
-          next_question_brief: "直接追问这件事发生的大概时间",
-        },
-      },
-    },
-  ]);
-  assert.deepEqual(queuedTurns.map((item) => ({
-    messageId: item.messageId,
-    text: item.text,
-  })), [{
-    messageId: "assistant-question-1",
-    text: "那这件事大概发生在您多大的时候？",
-  }]);
-  assert.equal(context.data.lastFollowUpSourceMessageId, "user-message-1");
-  assert.equal(context.data.persistenceStateText, "等待回答");
+  assert.deepEqual(streamStarts, [{ regenerate: true }]);
+  assert.equal(context.data.followUpMessageId, "assistant-question-1");
 });
 
 test("voice chat can bridge acknowledgement playback while the next question is preparing", async () => {

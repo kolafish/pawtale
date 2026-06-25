@@ -280,7 +280,7 @@ test("builds voice gateway URLs from runtime backend config", () => {
   delete require.cache[require.resolve("../services/request.ts")];
   delete require.cache[require.resolve("../services/memoir-voice-api.ts")];
   const { readBackendConfig } = require("../services/request.ts");
-  const { voiceGatewayUrl } = require("../services/memoir-voice-api.ts");
+  const { assistantTurnStreamUrl, voiceGatewayUrl } = require("../services/memoir-voice-api.ts");
 
   assert.deepEqual(readBackendConfig(), {
     httpBaseUrl: "https://api.example.com/",
@@ -292,6 +292,10 @@ test("builds voice gateway URLs from runtime backend config", () => {
   assert.equal(
     voiceGatewayUrl("voice/1"),
     "wss://api.example.com/api/mobile/memoir/voice-sessions/voice%2F1/gateway",
+  );
+  assert.equal(
+    assistantTurnStreamUrl("voice/1"),
+    "wss://api.example.com/api/mobile/memoir/voice-sessions/voice%2F1/assistant-turn-stream",
   );
 
   delete global.wx;
