@@ -152,6 +152,46 @@ test("WebAudioPCMPlaybackQueue schedules PCM chunks without file playback gaps",
   assert.equal(queue.stats().underrunCount, 0);
 });
 
+test("WebAudioPCMPlaybackQueue configures audible playback before creating WebAudio context", async () => {
+  delete require.cache[require.resolve("../services/webaudio-pcm-playback.ts")];
+  const calls = [];
+  const order = [];
+  global.wx = {
+    setInnerAudioOption(options) {
+      order.push("configure");
+      calls.push(options);
+    },
+  };
+  const { WebAudioPCMPlaybackQueue } = require("../services/webaudio-pcm-playback.ts");
+  const { context } = createFakeWebAudioContext();
+  const queue = new WebAudioPCMPlaybackQueue({
+    createContext: () => {
+      order.push("createContext");
+      return context;
+    },
+  });
+  const oneSecondPcm = new Uint8Array(16000 * 2);
+
+  try {
+    await queue.appendPCM16LE(oneSecondPcm, {
+      sampleRate: 16000,
+      channels: 1,
+      bitsPerSample: 16,
+    });
+    await queue.appendPCM16LE(oneSecondPcm, {
+      sampleRate: 16000,
+      channels: 1,
+      bitsPerSample: 16,
+    });
+  } finally {
+    await queue.destroy();
+    delete global.wx;
+  }
+
+  assert.deepEqual(order.slice(0, 2), ["configure", "createContext"]);
+  assert.deepEqual(calls, [{ obeyMuteSwitch: false, mixWithOther: true }]);
+});
+
 test("WebAudioPCMPlaybackQueue releases source when scheduling fails", async () => {
   delete require.cache[require.resolve("../services/webaudio-pcm-playback.ts")];
   const { WebAudioPCMPlaybackQueue } = require("../services/webaudio-pcm-playback.ts");
