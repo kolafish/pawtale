@@ -17,6 +17,7 @@ export interface PCMPlaybackSegmentEvent {
   durationSeconds: number;
   startAtSeconds: number;
   queuedAheadSeconds: number;
+  ended: Promise<void>;
 }
 
 export interface PCMPlaybackUnderrunEvent {
@@ -34,6 +35,13 @@ export interface WebAudioPCMPlaybackStats {
   queuedAheadSeconds: number;
 }
 
+type ScheduledPCMSource = {
+  source: WechatMiniprogram.AudioBufferSourceNode;
+  event: PCMPlaybackSegmentEvent;
+  resolveEnded: () => void;
+  ended: boolean;
+};
+
 const DEFAULT_MIN_LEAD_SECONDS = 0.12;
 
 export class WebAudioPCMPlaybackQueue {
@@ -42,7 +50,7 @@ export class WebAudioPCMPlaybackQueue {
   private segmentIndex = 0;
   private underrunCount = 0;
   private stopped = false;
-  private sources: WechatMiniprogram.AudioBufferSourceNode[] = [];
+  private sources: ScheduledPCMSource[] = [];
 
   constructor(private readonly options: WebAudioPCMPlaybackQueueOptions = {}) {}
 
@@ -77,6 +85,10 @@ export class WebAudioPCMPlaybackQueue {
       startAtSeconds = minimumStartAtSeconds;
     }
 
+    let resolveEnded: () => void = () => undefined;
+    const ended = new Promise<void>((resolve) => {
+      resolveEnded = resolve;
+    });
     const source = context.createBufferSource();
     source.buffer = buffer;
     source.connect(context.destination);
@@ -85,13 +97,24 @@ export class WebAudioPCMPlaybackQueue {
       durationSeconds,
       startAtSeconds,
       queuedAheadSeconds: Math.max(0, startAtSeconds + durationSeconds - currentTimeSeconds),
+      ended,
+    };
+    const scheduledSource: ScheduledPCMSource = {
+      source,
+      event,
+      resolveEnded,
+      ended: false,
     };
     source.onended = () => {
-      this.removeSource(source);
-      this.options.onSegmentEnded?.(event);
+      this.finishSource(scheduledSource, true);
     };
-    source.start(startAtSeconds);
-    this.sources.push(source);
+    this.sources.push(scheduledSource);
+    try {
+      source.start(startAtSeconds);
+    } catch (error) {
+      this.finishSource(scheduledSource, false);
+      throw error;
+    }
     this.nextPlayTimeSeconds = startAtSeconds + durationSeconds;
     this.segmentIndex += 1;
     this.options.onSegmentScheduled?.(event);
@@ -112,13 +135,13 @@ export class WebAudioPCMPlaybackQueue {
   stop(): void {
     this.stopped = true;
     const sources = this.sources.splice(0);
-    sources.forEach((source) => {
+    sources.forEach((scheduledSource) => {
       try {
-        source.stop?.();
+        scheduledSource.source.stop?.();
       } catch {
         // Some WebAudio implementations throw if a source already ended.
       }
-      source.disconnect?.();
+      this.finishSource(scheduledSource, false);
     });
     this.nextPlayTimeSeconds = 0;
   }
@@ -151,12 +174,20 @@ export class WebAudioPCMPlaybackQueue {
     }
   }
 
-  private removeSource(source: WechatMiniprogram.AudioBufferSourceNode): void {
-    const index = this.sources.indexOf(source);
+  private finishSource(scheduledSource: ScheduledPCMSource, notifyEnded: boolean): void {
+    if (scheduledSource.ended) {
+      return;
+    }
+    scheduledSource.ended = true;
+    const index = this.sources.indexOf(scheduledSource);
     if (index >= 0) {
       this.sources.splice(index, 1);
     }
-    source.disconnect?.();
+    scheduledSource.source.disconnect?.();
+    if (notifyEnded) {
+      this.options.onSegmentEnded?.(scheduledSource.event);
+    }
+    scheduledSource.resolveEnded();
   }
 }
 
@@ -168,8 +199,14 @@ export function pcm16leToAudioBuffer(
   if (format.bitsPerSample !== 16) {
     throw new Error("WebAudio PCM 播放目前只支持 16-bit PCM");
   }
-  const channels = Math.max(1, Math.floor(format.channels));
-  const sampleRate = Math.max(8000, Math.floor(format.sampleRate));
+  const channels = Math.floor(format.channels);
+  if (!Number.isFinite(channels) || channels <= 0) {
+    throw new Error("WebAudio PCM 播放缺少有效声道数");
+  }
+  const sampleRate = Math.floor(format.sampleRate);
+  if (!Number.isFinite(sampleRate) || sampleRate < 8000) {
+    throw new Error("WebAudio PCM 播放缺少有效采样率");
+  }
   const bytesPerFrame = channels * 2;
   const frameCount = Math.floor(pcm.byteLength / bytesPerFrame);
   const buffer = context.createBuffer(channels, frameCount, sampleRate);
@@ -183,32 +220,4 @@ export function pcm16leToAudioBuffer(
     }
   }
   return buffer;
-}
-
-export function sinePCM16LEChunk(options: {
-  frequencyHz: number;
-  durationSeconds: number;
-  sampleRate: number;
-  channels?: number;
-  phase?: number;
-}): { pcm: Uint8Array; nextPhase: number } {
-  const channels = Math.max(1, Math.floor(options.channels || 1));
-  const sampleRate = Math.max(8000, Math.floor(options.sampleRate));
-  const frameCount = Math.max(1, Math.round(options.durationSeconds * sampleRate));
-  const pcm = new Uint8Array(frameCount * channels * 2);
-  const view = new DataView(pcm.buffer);
-  let phase = options.phase || 0;
-  const phaseStep = 2 * Math.PI * options.frequencyHz / sampleRate;
-  for (let frame = 0; frame < frameCount; frame += 1) {
-    const sample = Math.max(-1, Math.min(1, Math.sin(phase) * 0.35));
-    const intSample = Math.round(sample * 32767);
-    for (let channel = 0; channel < channels; channel += 1) {
-      view.setInt16((frame * channels + channel) * 2, intSample, true);
-    }
-    phase += phaseStep;
-    if (phase > 2 * Math.PI) {
-      phase -= 2 * Math.PI;
-    }
-  }
-  return { pcm, nextPhase: phase };
 }

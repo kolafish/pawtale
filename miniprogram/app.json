@@ -10,8 +10,7 @@
     "pages/voice-progress/index",
     "pages/projects/index",
     "pages/project-edit/index",
-    "pages/me/index",
-    "pages/audio-lab/index"
+    "pages/me/index"
   ],
   "tabBar": {
     "color": "#685b55",

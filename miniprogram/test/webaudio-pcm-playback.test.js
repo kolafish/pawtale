@@ -3,9 +3,10 @@ require("./register-ts");
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-function createFakeWebAudioContext() {
+function createFakeWebAudioContext(options = {}) {
   const scheduled = [];
   const buffers = [];
+  const sources = [];
   const context = {
     state: "suspended",
     currentTime: 10,
@@ -54,16 +55,20 @@ function createFakeWebAudioContext() {
           this.disconnected = true;
         },
         start(when) {
+          if (options.throwOnStart) {
+            throw new Error("start failed");
+          }
           scheduled.push({ source: this, when });
         },
         stop() {
           this.stopped = true;
         },
       };
+      sources.push(source);
       return source;
     },
   };
-  return { context, scheduled, buffers };
+  return { context, scheduled, buffers, sources };
 }
 
 test("pcm16leToAudioBuffer converts little-endian PCM to normalized channels", () => {
@@ -90,6 +95,29 @@ test("pcm16leToAudioBuffer converts little-endian PCM to normalized channels", (
   assert.deepEqual(Array.from(buffer.getChannelData(0)), [0, -1]);
   assert.equal(Math.round(buffer.getChannelData(1)[0] * 32767), 32767);
   assert.equal(Math.round(buffer.getChannelData(1)[1] * 32767), 16384);
+});
+
+test("pcm16leToAudioBuffer rejects invalid PCM format", () => {
+  delete require.cache[require.resolve("../services/webaudio-pcm-playback.ts")];
+  const { pcm16leToAudioBuffer } = require("../services/webaudio-pcm-playback.ts");
+  const { context } = createFakeWebAudioContext();
+
+  assert.throws(
+    () => pcm16leToAudioBuffer(context, new Uint8Array(2), {
+      sampleRate: 4000,
+      channels: 1,
+      bitsPerSample: 16,
+    }),
+    /有效采样率/,
+  );
+  assert.throws(
+    () => pcm16leToAudioBuffer(context, new Uint8Array(2), {
+      sampleRate: 16000,
+      channels: 0,
+      bitsPerSample: 16,
+    }),
+    /有效声道数/,
+  );
 });
 
 test("WebAudioPCMPlaybackQueue schedules PCM chunks without file playback gaps", async () => {
@@ -124,6 +152,52 @@ test("WebAudioPCMPlaybackQueue schedules PCM chunks without file playback gaps",
   assert.equal(queue.stats().underrunCount, 0);
 });
 
+test("WebAudioPCMPlaybackQueue releases source when scheduling fails", async () => {
+  delete require.cache[require.resolve("../services/webaudio-pcm-playback.ts")];
+  const { WebAudioPCMPlaybackQueue } = require("../services/webaudio-pcm-playback.ts");
+  const { context, sources } = createFakeWebAudioContext({ throwOnStart: true });
+  const queue = new WebAudioPCMPlaybackQueue({
+    createContext: () => context,
+  });
+
+  await assert.rejects(
+    () => queue.appendPCM16LE(new Uint8Array(16000 * 2), {
+      sampleRate: 16000,
+      channels: 1,
+      bitsPerSample: 16,
+    }),
+    /start failed/,
+  );
+
+  assert.equal(sources[0].disconnected, true);
+  assert.equal(queue.stats().segmentCount, 0);
+});
+
+test("WebAudioPCMPlaybackQueue resolves pending segment when stopped", async () => {
+  delete require.cache[require.resolve("../services/webaudio-pcm-playback.ts")];
+  const { WebAudioPCMPlaybackQueue } = require("../services/webaudio-pcm-playback.ts");
+  const { context, scheduled } = createFakeWebAudioContext();
+  const endedEvents = [];
+  const queue = new WebAudioPCMPlaybackQueue({
+    createContext: () => context,
+    minLeadTimeSeconds: 0.2,
+    onSegmentEnded: (event) => endedEvents.push(event),
+  });
+
+  const event = await queue.appendPCM16LE(new Uint8Array(16000 * 2), {
+    sampleRate: 16000,
+    channels: 1,
+    bitsPerSample: 16,
+  });
+  queue.stop();
+  await event.ended;
+
+  assert.equal(scheduled[0].source.stopped, true);
+  assert.equal(scheduled[0].source.disconnected, true);
+  assert.equal(endedEvents.length, 0);
+  assert.equal(queue.stats().queuedAheadSeconds, 0);
+});
+
 test("WebAudioPCMPlaybackQueue records underruns when chunks arrive too late", async () => {
   delete require.cache[require.resolve("../services/webaudio-pcm-playback.ts")];
   const { WebAudioPCMPlaybackQueue } = require("../services/webaudio-pcm-playback.ts");
@@ -152,28 +226,4 @@ test("WebAudioPCMPlaybackQueue records underruns when chunks arrive too late", a
   assert.equal(underruns[0].segmentIndex, 1);
   assert.equal(scheduled[1].when, 12.2);
   assert.equal(queue.stats().underrunCount, 1);
-});
-
-test("sinePCM16LEChunk keeps phase continuous across chunks", () => {
-  delete require.cache[require.resolve("../services/webaudio-pcm-playback.ts")];
-  const { sinePCM16LEChunk } = require("../services/webaudio-pcm-playback.ts");
-
-  const first = sinePCM16LEChunk({
-    frequencyHz: 440,
-    durationSeconds: 0.1,
-    sampleRate: 16000,
-    channels: 1,
-  });
-  const second = sinePCM16LEChunk({
-    frequencyHz: 440,
-    durationSeconds: 0.1,
-    sampleRate: 16000,
-    channels: 1,
-    phase: first.nextPhase,
-  });
-
-  assert.equal(first.pcm.byteLength, 1600 * 2);
-  assert.equal(second.pcm.byteLength, 1600 * 2);
-  assert.notEqual(first.nextPhase, 0);
-  assert.notEqual(second.nextPhase, first.nextPhase);
 });
