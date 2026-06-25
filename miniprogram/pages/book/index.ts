@@ -46,12 +46,12 @@ import { ApiError } from "../../services/request";
 import { sourceAssignmentRequest } from "../../services/memoir-book-source-actions";
 import {
   classifyVoiceClientConnectionError,
-  MemoirStreamingAsrClient,
   type MemoirCaptureStats,
   type VoiceChatConnectionStatus,
 } from "../../services/memoir-streaming-asr";
 import { readBookTTSSettings } from "../../services/tts-settings";
 import { AudioPlaybackController } from "../../services/audio-playback";
+import { StreamingVoiceController } from "../../services/streaming-voice-controller";
 import { writeTranscriptNavigationTarget } from "../../services/transcript-navigation";
 import {
   readVoiceAuthorizationConsent,
@@ -157,8 +157,6 @@ const BOOK_VOICE_AUTO_STOP_SILENCE_MS = 900;
 const BOOK_VOICE_MIN_RECORDING_MS = 700;
 const BOOK_VOICE_NO_VOICE_MS = 3500;
 const BOOK_VOICE_AUTO_LISTEN_NO_VOICE_MS = 15000;
-
-let bookVoiceStreamingClient: MemoirStreamingAsrClient | null = null;
 
 function isBookVoiceReadIntent(preview: MemoirBookVoiceCommandParseResponse): boolean {
   return preview.intent === "read_outline" || preview.intent === "read_chapter";
@@ -450,12 +448,14 @@ Page<BookData, {
   patchDraft(chapterId: string, draft: MemoirBookChapterDraft): void;
   clearBookOutput(): void;
   audioPlayback: AudioPlaybackController;
+  bookVoiceStreaming: StreamingVoiceController;
   playToken: number;
   ttsProgressTimer: number | null;
   ttsProgressStartedAtMs: number;
   bookVoiceAutoListenTimer: number | null;
 }>({
   audioPlayback: new AudioPlaybackController(),
+  bookVoiceStreaming: new StreamingVoiceController(),
   playToken: 0,
   ttsProgressTimer: null,
   ttsProgressStartedAtMs: 0,
@@ -1421,7 +1421,7 @@ Page<BookData, {
   async startBookVoiceCommand(options: { autoTriggered?: boolean } = {}) {
     const autoTriggered = Boolean(options.autoTriggered);
     if (this.data.bookVoiceAssistantListening) {
-      bookVoiceStreamingClient?.stopRecording();
+      this.bookVoiceStreaming.stopRecording();
       this.setData({ bookVoiceAssistantStatusText: "正在保存录音" });
       return;
     }
@@ -1444,8 +1444,8 @@ Page<BookData, {
     if (!authorized) {
       return;
     }
-    const connected = bookVoiceStreamingClient ? true : await this.connectBookVoiceCommandGateway();
-    if (!connected || !bookVoiceStreamingClient) {
+    const connected = this.bookVoiceStreaming.hasClient() ? true : await this.connectBookVoiceCommandGateway();
+    if (!connected || !this.bookVoiceStreaming.hasClient()) {
       return;
     }
     const keepCurrentPreview = autoTriggered && Boolean(this.data.bookVoiceCommandPreview);
@@ -1477,7 +1477,7 @@ Page<BookData, {
       }),
       error: "",
     });
-    const started = bookVoiceStreamingClient.startRecording({
+    const started = this.bookVoiceStreaming.startRecording({
       noVoiceActivityTimeoutMs: autoTriggered ? BOOK_VOICE_AUTO_LISTEN_NO_VOICE_MS : BOOK_VOICE_NO_VOICE_MS,
     });
     if (!started) {
@@ -1487,8 +1487,7 @@ Page<BookData, {
         bookVoiceAssistantStatusText: "实时识别未就绪",
         error: "语音未就绪，请重试",
       });
-      bookVoiceStreamingClient?.close({ force: true });
-      bookVoiceStreamingClient = null;
+      this.bookVoiceStreaming.close({ force: true });
     }
   },
 
@@ -1529,11 +1528,8 @@ Page<BookData, {
       bookVoiceAssistantStatusText: "正在连接实时识别",
       error: "",
     });
-    let client: MemoirStreamingAsrClient | null = null;
-    const isCurrentClient = () => Boolean(client && bookVoiceStreamingClient === client);
     try {
-      bookVoiceStreamingClient?.close({ force: true });
-      client = new MemoirStreamingAsrClient({
+      await this.bookVoiceStreaming.connect({
         voiceSessionId: `book-voice-command-${this.data.projectId}`,
         gatewayUrl: bookVoiceCommandGatewayUrl(this.data.projectId),
         guidanceMode: "free_narration",
@@ -1541,50 +1537,31 @@ Page<BookData, {
         minAutoStopRecordingMs: BOOK_VOICE_MIN_RECORDING_MS,
         callbacks: {
           onStatus: (status) => {
-            if (isCurrentClient()) {
-              this.handleBookVoiceStatus(status);
-            }
+            this.handleBookVoiceStatus(status);
           },
           onCaptureStats: (stats) => {
-            if (isCurrentClient()) {
-              this.handleBookVoiceCaptureStats(stats);
-            }
+            this.handleBookVoiceCaptureStats(stats);
           },
           onEvent: (event) => {
-            if (isCurrentClient()) {
-              this.handleBookVoiceGatewayEvent(event);
-            }
+            this.handleBookVoiceGatewayEvent(event);
           },
           onPartial: (text) => {
-            if (isCurrentClient()) {
-              this.handleBookVoicePartial(text);
-            }
+            this.handleBookVoicePartial(text);
           },
           onFinal: (event) => {
-            if (isCurrentClient()) {
-              return this.handleBookVoiceFinal(event);
-            }
-            return undefined;
+            void this.handleBookVoiceFinal(event);
           },
           onError: (message, error) => {
-            if (isCurrentClient()) {
-              this.handleBookVoiceError(message, error);
-            }
+            this.handleBookVoiceError(message, error);
           },
         },
       });
-      bookVoiceStreamingClient = client;
-      await client.connect();
       this.setData({
         bookVoiceAssistantStatusText: "实时识别已连接",
         error: "",
       });
       return true;
     } catch (error) {
-      if (client && bookVoiceStreamingClient === client) {
-        bookVoiceStreamingClient = null;
-      }
-      client?.close({ force: true });
       const message = error instanceof Error ? error.message : "实时识别连接失败";
       this.handleBookVoiceError(message, classifyVoiceClientConnectionError(message));
       return false;
@@ -1736,8 +1713,7 @@ Page<BookData, {
       bookVoiceAssistantStatusText: errorMessage,
       bookVoiceCaptureStateText: "录音异常",
     });
-    bookVoiceStreamingClient?.close({ force: true });
-    bookVoiceStreamingClient = null;
+    this.bookVoiceStreaming.close({ force: true });
   },
 
   applyBookVoiceCommandPreview(preview) {
@@ -1946,15 +1922,14 @@ Page<BookData, {
   stopBookVoiceConversation() {
     this.clearBookVoiceAssistantAutoListenTimer();
     if (this.data.bookVoiceAssistantListening) {
-      bookVoiceStreamingClient?.stopRecording();
+      this.bookVoiceStreaming.stopRecording();
       this.setData({
         bookVoiceAssistantConversationActive: false,
         bookVoiceAssistantStatusText: "正在保存录音",
       });
       return;
     }
-    bookVoiceStreamingClient?.close({ force: true });
-    bookVoiceStreamingClient = null;
+    this.bookVoiceStreaming.close({ force: true });
     this.setData({
       bookVoiceAssistantConversationActive: false,
       bookVoiceAssistantBusy: false,
@@ -2165,8 +2140,7 @@ Page<BookData, {
 
   onHide() {
     this.clearBookVoiceAssistantAutoListenTimer();
-    bookVoiceStreamingClient?.close({ force: true });
-    bookVoiceStreamingClient = null;
+    this.bookVoiceStreaming.close({ force: true });
     this.stopPlayback();
     if (
       this.data.bookVoiceAssistantConversationActive
