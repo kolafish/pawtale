@@ -977,6 +977,9 @@ Page<VoiceChatData, {
   finishStreamingAudioFrames(event, requestSerial) {
     this.assistantStreamingPlayback = this.assistantStreamingPlayback
       .then(async () => {
+        if (requestSerial !== followUpRequestSerial) {
+          return;
+        }
         const durationSeconds = Number(event.duration_seconds);
         if (Number.isFinite(durationSeconds) && durationSeconds > 0) {
           this.assistantStreamingAudioDurationSeconds = durationSeconds;

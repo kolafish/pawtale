@@ -1061,6 +1061,47 @@ test("voice chat audio done does not mark full streaming text as spoken before c
   assert.equal(context.assistantStreamingAudioDurationSeconds, 2);
 });
 
+test("voice chat ignores stale streaming audio done duration", async () => {
+  const page = loadVoiceChatPage();
+  const context = {
+    ...page,
+    data: {
+      ...page.data,
+      assistantPromptText: "欢迎回来，咱们接着聊。",
+      followUpTTSPlaying: true,
+    },
+    assistantStreamingAudioDurationSeconds: 4,
+    assistantStreamingPlaybackController: {
+      async waitForDrain() {
+        throw new Error("stale audio done should not wait for drain");
+      },
+      stop() {},
+      stats() {
+        return {
+          segmentCount: 1,
+          underrunCount: 0,
+          nextPlayTimeSeconds: 12,
+          currentTimeSeconds: 12,
+          queuedAheadSeconds: 0,
+        };
+      },
+    },
+    assistantStreamingPlayback: Promise.resolve(),
+    assistantStreamingPlaybackError: null,
+    setData(patch) {
+      this.data = { ...this.data, ...patch };
+    },
+  };
+
+  page.finishStreamingAudioFrames.call(context, {
+    duration_seconds: 9,
+  }, -1);
+  await context.assistantStreamingPlayback;
+
+  assert.equal(context.assistantStreamingAudioDurationSeconds, 4);
+  assert.equal(context.data.followUpTTSStateText, "");
+});
+
 test("voice chat keeps completed streaming assistant turns when playback fails", async () => {
   const page = loadVoiceChatPage({
     assistantTurnStreamExports: {
