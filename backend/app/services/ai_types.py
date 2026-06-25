@@ -1,4 +1,7 @@
+from collections.abc import AsyncIterator
 from typing import Protocol
+
+from app.services.ai_streaming import AITextStreamChunk
 
 
 class AITextClient(Protocol):
@@ -30,4 +33,14 @@ class AITextClient(Protocol):
         content: str,
         response_json: dict | None,
     ) -> dict:
+        ...
+
+    def stream_llm(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        temperature: float = 0.7,
+        max_tokens: int = 4000,
+        timeout: float = 60.0,
+    ) -> AsyncIterator[AITextStreamChunk]:
         ...
