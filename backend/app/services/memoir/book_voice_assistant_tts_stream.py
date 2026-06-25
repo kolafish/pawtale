@@ -12,7 +12,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.memoir.access import load_memoir_project
 from app.services.memoir.book_voice_commands import load_book_plan
-from app.services.memoir.streaming_tts_events import single_text_chunk, stream_tts_events
+from app.services.memoir.streaming_tts_events import (
+    STREAM_TTS_AUDIO_PROTOCOL_SEGMENT,
+    normalize_audio_protocol,
+    single_text_chunk,
+    stream_tts_events,
+)
 from app.services.memoir.voice_tts import TTSClient, get_tts_client
 
 
@@ -32,6 +37,7 @@ class BookVoiceAssistantTTSStartRequest:
     text: str
     voice: str | None = None
     speed_ratio: float | None = None
+    audio_protocol: str = STREAM_TTS_AUDIO_PROTOCOL_SEGMENT
 
     @classmethod
     def from_payload(cls, payload: dict) -> "BookVoiceAssistantTTSStartRequest":
@@ -47,6 +53,7 @@ class BookVoiceAssistantTTSStartRequest:
             text=text,
             voice=_optional_text(payload.get("voice")),
             speed_ratio=normalized_speed_ratio,
+            audio_protocol=normalize_audio_protocol(payload.get("audio_protocol")),
         )
 
 
@@ -150,6 +157,7 @@ class BookVoiceAssistantTTSStreamSession:
                 "state": "streaming",
                 "tts_provider": tts_client.provider_name,
                 "tts_model": tts_client.model_name,
+                "audio_protocol": req.audio_protocol,
             }
         )
         await stream_tts_events(
@@ -161,6 +169,7 @@ class BookVoiceAssistantTTSStreamSession:
             voice=req.voice,
             speed_ratio=req.speed_ratio,
             cancel_event=cancel_event,
+            audio_protocol=req.audio_protocol,
         )
         if cancel_event.is_set():
             return

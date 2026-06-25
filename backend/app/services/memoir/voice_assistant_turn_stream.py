@@ -33,6 +33,9 @@ from app.services.memoir.voice_followup_ai import (
     _requested_topic_hint,
 )
 from app.services.memoir.streaming_tts_events import (
+    STREAM_TTS_AUDIO_PROTOCOL_SEGMENT,
+    chunk_text_for_tts,
+    normalize_audio_protocol,
     queued_text_chunks,
     stream_tts_events,
 )
@@ -71,6 +74,7 @@ class AssistantTurnStartRequest:
     speed_ratio: float | None = None
     regenerate: bool = False
     temperature: float = STREAM_TEXT_TEMPERATURE
+    audio_protocol: str = STREAM_TTS_AUDIO_PROTOCOL_SEGMENT
 
     @classmethod
     def from_payload(cls, payload: dict) -> "AssistantTurnStartRequest":
@@ -95,6 +99,7 @@ class AssistantTurnStartRequest:
             speed_ratio=normalized_speed_ratio,
             regenerate=bool(payload.get("regenerate", False)),
             temperature=normalized_temperature,
+            audio_protocol=normalize_audio_protocol(payload.get("audio_protocol")),
         )
 
 
@@ -273,6 +278,7 @@ class VoiceAssistantTurnStreamSession:
                 "ai_model": ai_client.model_name,
                 "tts_provider": tts_client.provider_name,
                 "tts_model": tts_client.model_name,
+                "audio_protocol": req.audio_protocol,
                 "max_tokens": max_tokens,
             }
         )
@@ -415,12 +421,16 @@ class VoiceAssistantTurnStreamSession:
         await stream_tts_events(
             client=self.client,
             tts_client=tts_client,
-            text_chunks=queued_text_chunks(text_queue, cancel_event),
+            text_chunks=chunk_text_for_tts(
+                queued_text_chunks(text_queue, cancel_event),
+                cancel_event,
+            ),
             current_text=lambda: artifacts.text,
             event_context={"turn_id": turn_id, "voice_session_id": self.voice_session_id},
             voice=req.voice,
             speed_ratio=req.speed_ratio,
             cancel_event=cancel_event,
+            audio_protocol=req.audio_protocol,
             on_chunk=artifacts.append_tts_chunk,
         )
 
