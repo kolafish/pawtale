@@ -180,6 +180,7 @@ Page<VoiceChatData, {
   playStreamingAudioFrame(frame: PreparedAssistantStreamAudioFrame, requestSerial: number): Promise<void>;
   recordStreamingPlaybackError(error: unknown, requestSerial: number): void;
   streamingPlaybackController(): StreamingSpeechPlaybackController;
+  releaseStreamingPlaybackController(): Promise<void>;
   regenerateFollowUp(): Promise<void>;
   skipFollowUp(): void;
   enqueueAssistantTurn(item: AssistantTurnQueueItem): void;
@@ -826,6 +827,10 @@ Page<VoiceChatData, {
       return;
     }
     const playbackError = this.assistantStreamingPlaybackError;
+    await this.releaseStreamingPlaybackController();
+    if (requestSerial !== followUpRequestSerial) {
+      return;
+    }
     this.assistantTurnStream = null;
     if (!playbackError && completed.expects_answer !== false) {
       this.autoListenPendingAfterPlayback = true;
@@ -1053,6 +1058,14 @@ Page<VoiceChatData, {
       this.assistantStreamingPlaybackController = new StreamingSpeechPlaybackController();
     }
     return this.assistantStreamingPlaybackController;
+  },
+
+  async releaseStreamingPlaybackController() {
+    const controller = this.assistantStreamingPlaybackController;
+    this.assistantStreamingPlaybackController = null;
+    if (controller) {
+      await controller.destroy();
+    }
   },
 
   async regenerateFollowUp() {
