@@ -247,6 +247,18 @@ class MemoirBookVoiceCommandParseResponse(BaseModel):
     model: str | None = None
 
 
+class MemoirBookVoiceCommandExecuteRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    intent: str
+    operation: MemoirBookVoiceCommandOperationResponse
+
+    @field_validator("intent")
+    @classmethod
+    def _valid_intent(cls, value: str) -> str:
+        return value.strip()
+
+
 class MemoirBookChapterTitleUpdateRequest(BaseModel):
     title: str
 
@@ -315,6 +327,13 @@ class MemoirBookSourceCoverageResponse(BaseModel):
     uncovered_source_count: int
     sources: list[MemoirBookSourceCoverageItem] = Field(default_factory=list)
     uncovered_sources: list[MemoirBookSourceCoverageItem] = Field(default_factory=list)
+
+
+class MemoirBookVoiceCommandExecuteResponse(BaseModel):
+    intent: str
+    summary: str
+    plan: MemoirBookPlanResponse
+    source_coverage: MemoirBookSourceCoverageResponse | None = None
 
 
 class MemoirBookSourceAssignmentInput(BaseModel):

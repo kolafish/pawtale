@@ -568,6 +568,18 @@ export interface MemoirBookVoiceCommandParseResponse {
   model?: string | null;
 }
 
+export interface MemoirBookVoiceCommandExecuteRequest {
+  intent: MemoirBookVoiceCommandIntent;
+  operation: MemoirBookVoiceCommandOperation;
+}
+
+export interface MemoirBookVoiceCommandExecuteResponse {
+  intent: MemoirBookVoiceCommandIntent;
+  summary: string;
+  plan: MemoirBookPlan;
+  source_coverage?: MemoirBookSourceCoverage | null;
+}
+
 export interface MemoirBookOutputGenerateRequest {
   force_regenerate?: boolean;
 }
