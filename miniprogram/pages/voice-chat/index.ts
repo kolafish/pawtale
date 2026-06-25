@@ -132,10 +132,6 @@ const AUTO_STOP_MIN_RECORDING_MS = 1200;
 const AUTO_LISTEN_NO_ANSWER_MS = 15000;
 const MAX_CONSECUTIVE_NO_ANSWER_PROMPTS = 2;
 
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 interface AutoListenGateSnapshot {
   hasClient: boolean;
   autoListenEnabled: boolean;
@@ -170,6 +166,7 @@ Page<VoiceChatData, {
   maybeGenerateOpeningFollowUp(): void;
   generateFollowUp(regenerate?: boolean): Promise<void>;
   generateStreamingFollowUp(sourceMessageId: string, regenerate: boolean, requestSerial: number): Promise<void>;
+  clearFailedStreamingAssistantTurn(message: string): void;
   applyStreamingAssistantText(text: string, sourceMessageId: string): void;
   applyCompletedStreamingAssistantTurn(event: VoiceAssistantTurnCompletedEvent, sourceMessageId: string): void;
   enqueueStreamingAudioSegment(segment: PreparedAssistantStreamAudioSegment, requestSerial: number): void;
@@ -178,7 +175,6 @@ Page<VoiceChatData, {
   skipFollowUp(): void;
   enqueueAssistantTurn(item: AssistantTurnQueueItem): void;
   drainAssistantTurnQueue(): Promise<void>;
-  waitForNextAssistantTurnBeforePlayback(item: AssistantTurnQueueItem): Promise<boolean>;
   prepareAssistantTurnAudio(item: AssistantTurnQueueItem): Promise<PreparedAssistantTurnAudio>;
   showAssistantTurn(item: AssistantTurnQueueItem, patch?: Partial<VoiceChatData>): void;
   playPreparedAssistantTurn(
@@ -753,13 +749,7 @@ Page<VoiceChatData, {
       if (requestSerial !== followUpRequestSerial) {
         return;
       }
-      this.assistantTurnStream?.disposeTempFiles();
-      this.assistantTurnStream = null;
-      this.setData({
-        followUpError: error instanceof Error ? error.message : "老余回应生成失败",
-        canRequestFollowUp: true,
-        persistenceStateText: "回应失败",
-      });
+      this.clearFailedStreamingAssistantTurn(error instanceof Error ? error.message : "老余回应生成失败");
     } finally {
       if (requestSerial === followUpRequestSerial) {
         this.setData({
@@ -841,6 +831,44 @@ Page<VoiceChatData, {
     if (!playbackError && completed.expects_answer !== false) {
       this.tryStartAutoListenAfterTTS();
     }
+  },
+
+  clearFailedStreamingAssistantTurn(message) {
+    this.assistantTurnStream?.disposeTempFiles();
+    this.assistantTurnStream = null;
+    this.assistantStreamingPlayback = Promise.resolve();
+    this.assistantStreamingPlaybackError = null;
+    this.stopFollowUpAudio();
+    const transcriptLines = this.assistantStreamLineId
+      ? this.data.transcriptLines.filter((line) => line.id !== this.assistantStreamLineId)
+      : this.data.transcriptLines;
+    this.assistantStreamLineId = "";
+    this.assistantStreamSpokenText = "";
+    this.setData({
+      ...assistantTranscriptState(transcriptLines, {
+        guidanceMode: this.data.guidanceMode,
+        lastFollowUpSourceMessageId: this.data.lastFollowUpSourceMessageId,
+        followUpLoading: false,
+        assistantPromptText: "",
+        followUpMessageId: "",
+        followUpAudioFileId: "",
+        followUpTTSStateText: "",
+        ttsAlignment: [],
+        assistantExpectsAnswer: true,
+        canRequestFollowUp: true,
+      }),
+      dismissedFollowUpMessageId: "",
+      followUpError: message,
+      followUpTTSLoading: false,
+      followUpTTSPlaying: false,
+      followUpTTSError: "",
+      followUpTTSStateText: "",
+      ttsSpokenText: "",
+      ttsCurrentText: "",
+      ttsRemainingText: "",
+      ttsProgressPercent: 0,
+      persistenceStateText: "回应失败",
+    });
   },
 
   applyStreamingAssistantText(text, sourceMessageId) {
@@ -992,7 +1020,7 @@ Page<VoiceChatData, {
             ttsCurrentText: "",
             ttsRemainingText: remainingText,
             ttsProgressPercent: this.streamingProgressPercent(this.assistantStreamSpokenText, latestText, false),
-            followUpTTSStateText: remainingText ? "正在准备下一句语音" : "正在整理回应",
+            followUpTTSStateText: "正在整理回应",
           });
         },
         onError: () => {
@@ -1078,9 +1106,6 @@ Page<VoiceChatData, {
           if (!prepared) {
             continue;
           }
-          if (!(await this.waitForNextAssistantTurnBeforePlayback(item))) {
-            continue;
-          }
           await this.playPreparedAssistantTurn(item, prepared);
         } catch (error) {
           if (error instanceof Error && error.message === "__assistant_audio_cancelled__") {
@@ -1097,19 +1122,6 @@ Page<VoiceChatData, {
     }
   },
 
-  async waitForNextAssistantTurnBeforePlayback(item) {
-    const waitMs = item.waitForNextTurnBeforePlaybackMs || 0;
-    if (waitMs <= 0 || this.assistantTurnQueue.length || !this.data.followUpLoading) {
-      return true;
-    }
-    const requestSerial = this.ttsRequestSerial;
-    this.setData({
-      followUpTTSStateText: "正在准备下一句语音",
-    });
-    await delay(waitMs);
-    return requestSerial === this.ttsRequestSerial;
-  },
-
   async prepareAssistantTurnAudio(item) {
     if (!this.data.voiceSessionId || !item.messageId) {
       throw new Error("缺少要合成的 AI 回应");
@@ -1119,7 +1131,7 @@ Page<VoiceChatData, {
     this.setData({
       followUpTTSLoading: true,
       followUpTTSError: "",
-      followUpTTSStateText: this.data.followUpTTSPlaying ? "正在准备下一句语音" : "正在合成语音",
+      followUpTTSStateText: "正在合成语音",
     });
     try {
       const ttsSettings = readChatTTSSettings();
@@ -1202,7 +1214,6 @@ Page<VoiceChatData, {
       expectsAnswer: line.metadata_json?.expects_answer !== false,
       autoListenAfterPlayback,
       forceRegenerate,
-      waitForNextTurnBeforePlaybackMs: 0,
       line,
     });
   },

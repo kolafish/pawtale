@@ -3,8 +3,8 @@ from __future__ import annotations
 import asyncio
 import base64
 import contextlib
+import logging
 import math
-from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Protocol
 import uuid
@@ -15,7 +15,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.domain.memoir.types import MemoirChatContentStatus, MemoirChatMessageRole
 from app.models.memoir import MemoirChatMessage, MemoirVoiceSession
 from app.services.ai_factory import get_ai_service
-from app.services.ai_streaming import AITextStreamChunk
 from app.services.ai_types import AITextClient
 from app.services.memoir.audio_files import StagedAudioFile, discard_staged_audio, stage_audio_bytes
 from app.services.memoir.tts_alignment import alignment_segments_to_json
@@ -50,11 +49,8 @@ from app.services.memoir.voice_tts import (
 STREAM_PROMPT_VERSION = "memoir_voice_interviewer_stream_turn_v1"
 STREAM_TEXT_TEMPERATURE = 0.72
 STREAM_TEXT_TIMEOUT_SECONDS = 60.0
-STREAM_TTS_QUEUE_SIZE = 4
-SEGMENT_MIN_CHARS = 10
-SEGMENT_MAX_CHARS = 56
-SEGMENT_BREAK_CHARS = "。！？!?；;\n"
 _PCM_MIME_TYPES = {"audio/l16", "audio/pcm", "audio/x-pcm"}
+logger = logging.getLogger(__name__)
 
 
 class AssistantTurnStreamClient(Protocol):
@@ -99,12 +95,6 @@ class AssistantTurnStartRequest:
         )
 
 
-@dataclass(frozen=True)
-class AssistantSpeechSegment:
-    index: int
-    text: str
-
-
 @dataclass
 class AssistantTurnArtifacts:
     text: str = ""
@@ -139,56 +129,6 @@ class AssistantTurnArtifacts:
     @property
     def audio(self) -> bytes:
         return b"".join(self.audio_chunks)
-
-
-class AssistantTurnSegmenter:
-    def __init__(
-        self,
-        *,
-        min_chars: int = SEGMENT_MIN_CHARS,
-        max_chars: int = SEGMENT_MAX_CHARS,
-    ) -> None:
-        self.min_chars = min_chars
-        self.max_chars = max_chars
-        self._buffer = ""
-
-    def push(self, text_delta: str) -> list[str]:
-        self._buffer += text_delta
-        return self._drain(final=False)
-
-    def flush(self) -> list[str]:
-        return self._drain(final=True)
-
-    def _drain(self, *, final: bool) -> list[str]:
-        segments: list[str] = []
-        while True:
-            split_at = self._split_index(final=final)
-            if split_at is None:
-                return segments
-            segment = self._buffer[:split_at].strip()
-            self._buffer = self._buffer[split_at:].lstrip()
-            if segment:
-                segments.append(segment)
-
-    def _split_index(self, *, final: bool) -> int | None:
-        if not self._buffer:
-            return None
-        if final:
-            return len(self._buffer)
-        for index, char in enumerate(self._buffer):
-            if index + 1 < self.min_chars:
-                continue
-            if char in SEGMENT_BREAK_CHARS:
-                return index + 1
-        if len(self._buffer) >= self.max_chars:
-            return self._fallback_split_index()
-        return None
-
-    def _fallback_split_index(self) -> int:
-        for index in range(min(len(self._buffer), self.max_chars) - 1, self.min_chars - 1, -1):
-            if self._buffer[index] in "，,、 ":
-                return index + 1
-        return min(len(self._buffer), self.max_chars)
 
 
 class VoiceAssistantTurnStreamSession:
@@ -273,6 +213,11 @@ class VoiceAssistantTurnStreamSession:
             await stream_task
         except Exception as exc:
             await self.db.rollback()
+            logger.exception(
+                "Streaming assistant turn failed voice_session_id=%s turn_id=%s",
+                self.voice_session_id,
+                turn_id,
+            )
             await self.client.send_json(
                 {
                     "type": "turn.failed",
@@ -314,7 +259,6 @@ class VoiceAssistantTurnStreamSession:
         ai_client = self.ai_client_factory(req.ai_model)
         tts_client = self.tts_client_factory()
         artifacts = AssistantTurnArtifacts()
-        segment_queue: asyncio.Queue[AssistantSpeechSegment | None] = asyncio.Queue(STREAM_TTS_QUEUE_SIZE)
 
         await self.client.send_json(
             {
@@ -330,39 +274,30 @@ class VoiceAssistantTurnStreamSession:
             }
         )
 
-        producer = asyncio.create_task(
-            self._produce_text_segments(
-                ai_client=ai_client,
-                prompt=prompt,
-                req=req,
-                max_tokens=max_tokens,
-                turn_id=turn_id,
-                artifacts=artifacts,
-                segment_queue=segment_queue,
-                cancel_event=cancel_event,
-            )
+        await self._stream_text(
+            ai_client=ai_client,
+            prompt=prompt,
+            req=req,
+            max_tokens=max_tokens,
+            turn_id=turn_id,
+            artifacts=artifacts,
+            cancel_event=cancel_event,
         )
-        consumer = asyncio.create_task(
-            self._stream_tts_segments(
-                tts_client=tts_client,
-                req=req,
-                turn_id=turn_id,
-                artifacts=artifacts,
-                segment_queue=segment_queue,
-                cancel_event=cancel_event,
-            )
-        )
-        try:
-            await asyncio.gather(producer, consumer)
-        except Exception:
-            producer.cancel()
-            consumer.cancel()
-            await asyncio.gather(producer, consumer, return_exceptions=True)
-            raise
-
         if cancel_event.is_set():
             return
         turn = _parse_interviewer_turn(artifacts.text, fallback_intent=fallback_intent)
+        if not turn.speech_text:
+            raise HTTPException(status_code=502, detail="AI 未返回可用访谈回应")
+        await self._stream_turn_audio(
+            tts_client=tts_client,
+            req=req,
+            turn=turn,
+            turn_id=turn_id,
+            artifacts=artifacts,
+            cancel_event=cancel_event,
+        )
+        if cancel_event.is_set():
+            return
         message, audio_file_id = await self._persist_completed_turn(
             voice_session=voice_session,
             turn=turn,
@@ -388,7 +323,7 @@ class VoiceAssistantTurnStreamSession:
             }
         )
 
-    async def _produce_text_segments(
+    async def _stream_text(
         self,
         *,
         ai_client: AITextClient,
@@ -397,129 +332,90 @@ class VoiceAssistantTurnStreamSession:
         max_tokens: int,
         turn_id: str,
         artifacts: AssistantTurnArtifacts,
-        segment_queue: asyncio.Queue[AssistantSpeechSegment | None],
         cancel_event: asyncio.Event,
     ) -> None:
-        segmenter = AssistantTurnSegmenter()
-        segment_index = 0
-        try:
-            async for chunk in ai_client.stream_llm(
-                SYSTEM_PROMPT,
-                prompt,
-                temperature=req.temperature,
-                max_tokens=max_tokens,
-                timeout=STREAM_TEXT_TIMEOUT_SECONDS,
-            ):
-                if cancel_event.is_set():
-                    return
-                artifacts.finish_reason = chunk.finish_reason or artifacts.finish_reason
-                if chunk.usage:
-                    artifacts.usage = chunk.usage
-                if not chunk.text_delta:
-                    continue
-                artifacts.text += chunk.text_delta
-                await self.client.send_json(
-                    {
-                        "type": "text.delta",
-                        "turn_id": turn_id,
-                        "voice_session_id": self.voice_session_id,
-                        "text_delta": chunk.text_delta,
-                        "text": artifacts.text,
-                    }
-                )
-                for text in segmenter.push(chunk.text_delta):
-                    segment_index = await self._enqueue_segment(
-                        segment_queue,
-                        turn_id=turn_id,
-                        segment_index=segment_index,
-                        text=text,
-                        cancel_event=cancel_event,
-                    )
-            for text in segmenter.flush():
-                segment_index = await self._enqueue_segment(
-                    segment_queue,
-                    turn_id=turn_id,
-                    segment_index=segment_index,
-                    text=text,
-                    cancel_event=cancel_event,
-                )
-        finally:
-            await _finish_segment_queue(segment_queue, cancel_event=cancel_event)
+        async for chunk in ai_client.stream_llm(
+            SYSTEM_PROMPT,
+            prompt,
+            temperature=req.temperature,
+            max_tokens=max_tokens,
+            timeout=STREAM_TEXT_TIMEOUT_SECONDS,
+        ):
+            if cancel_event.is_set():
+                return
+            artifacts.finish_reason = chunk.finish_reason or artifacts.finish_reason
+            if chunk.usage:
+                artifacts.usage = chunk.usage
+            if not chunk.text_delta:
+                continue
+            artifacts.text += chunk.text_delta
+            await self.client.send_json(
+                {
+                    "type": "text.delta",
+                    "turn_id": turn_id,
+                    "voice_session_id": self.voice_session_id,
+                    "text_delta": chunk.text_delta,
+                    "text": artifacts.text,
+                }
+            )
 
-    async def _enqueue_segment(
+    async def _stream_turn_audio(
         self,
-        segment_queue: asyncio.Queue[AssistantSpeechSegment | None],
         *,
+        tts_client: TTSClient,
+        req: AssistantTurnStartRequest,
+        turn: InterviewerTurn,
         turn_id: str,
-        segment_index: int,
-        text: str,
+        artifacts: AssistantTurnArtifacts,
         cancel_event: asyncio.Event,
-    ) -> int:
+    ) -> None:
         if cancel_event.is_set():
-            return segment_index
-        segment = AssistantSpeechSegment(index=segment_index, text=text)
+            return
         await self.client.send_json(
             {
                 "type": "text.segment",
                 "turn_id": turn_id,
                 "voice_session_id": self.voice_session_id,
-                "segment_index": segment.index,
-                "text": segment.text,
+                "segment_index": 0,
+                "text": turn.speech_text,
             }
         )
-        await segment_queue.put(segment)
-        return segment_index + 1
-
-    async def _stream_tts_segments(
-        self,
-        *,
-        tts_client: TTSClient,
-        req: AssistantTurnStartRequest,
-        turn_id: str,
-        artifacts: AssistantTurnArtifacts,
-        segment_queue: asyncio.Queue[AssistantSpeechSegment | None],
-        cancel_event: asyncio.Event,
-    ) -> None:
-        while not cancel_event.is_set():
-            segment = await segment_queue.get()
-            if segment is None:
+        segment_duration = None
+        async for chunk in tts_client.stream_synthesize(
+            turn.speech_text,
+            voice=req.voice,
+            speed_ratio=req.speed_ratio,
+        ):
+            if cancel_event.is_set():
                 return
-            segment_duration = None
-            async for chunk in tts_client.stream_synthesize(
-                segment.text,
-                voice=req.voice,
-                speed_ratio=req.speed_ratio,
-            ):
-                if cancel_event.is_set():
-                    return
-                artifacts.append_tts_chunk(chunk)
-                if chunk.duration_seconds is not None:
-                    segment_duration = chunk.duration_seconds
-                if chunk.audio:
-                    await self.client.send_json(
-                        {
-                            "type": "audio.chunk",
-                            "turn_id": turn_id,
-                            "voice_session_id": self.voice_session_id,
-                            "segment_index": segment.index,
-                            "sequence": chunk.sequence,
-                            "audio": base64.b64encode(chunk.audio).decode("ascii"),
-                            "mime_type": chunk.mime_type,
-                            "provider": chunk.provider,
-                            "model": chunk.model,
-                            "voice": chunk.voice,
-                            "speed_ratio": chunk.speed_ratio,
-                        }
-                    )
-            await self.client.send_json(
-                {
-                    "type": "audio.segment_done",
-                    "turn_id": turn_id,
-                    "voice_session_id": self.voice_session_id,
-                    "segment_index": segment.index,
-                    "duration_seconds": segment_duration,
-                }
-            )
+            artifacts.append_tts_chunk(chunk)
+            if chunk.duration_seconds is not None:
+                segment_duration = chunk.duration_seconds
+            if chunk.audio:
+                await self.client.send_json(
+                    {
+                        "type": "audio.chunk",
+                        "turn_id": turn_id,
+                        "voice_session_id": self.voice_session_id,
+                        "segment_index": 0,
+                        "sequence": chunk.sequence,
+                        "audio": base64.b64encode(chunk.audio).decode("ascii"),
+                        "mime_type": chunk.mime_type,
+                        "provider": chunk.provider,
+                        "model": chunk.model,
+                        "voice": chunk.voice,
+                        "speed_ratio": chunk.speed_ratio,
+                    }
+                )
+        await self.client.send_json(
+            {
+                "type": "audio.segment_done",
+                "turn_id": turn_id,
+                "voice_session_id": self.voice_session_id,
+                "segment_index": 0,
+                "duration_seconds": segment_duration,
+            }
+        )
 
     async def _persist_completed_turn(
         self,
@@ -691,28 +587,3 @@ def _exception_message(exc: Exception) -> str:
     if isinstance(exc, HTTPException):
         return str(exc.detail)
     return str(exc) or exc.__class__.__name__
-
-
-async def _finish_segment_queue(
-    segment_queue: asyncio.Queue[AssistantSpeechSegment | None],
-    *,
-    cancel_event: asyncio.Event,
-) -> None:
-    current_task = asyncio.current_task()
-    cancelling = current_task.cancelling() if current_task else 0
-    if cancel_event.is_set() or cancelling:
-        with contextlib.suppress(asyncio.QueueFull):
-            segment_queue.put_nowait(None)
-        return
-    await segment_queue.put(None)
-
-
-async def iter_segmented_text(chunks: AsyncIterator[AITextStreamChunk]) -> AsyncIterator[str]:
-    segmenter = AssistantTurnSegmenter()
-    async for chunk in chunks:
-        if not chunk.text_delta:
-            continue
-        for segment in segmenter.push(chunk.text_delta):
-            yield segment
-    for segment in segmenter.flush():
-        yield segment
