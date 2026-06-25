@@ -10,14 +10,13 @@ import type { ChapterPickerOption } from "../../services/memoir-book-source-acti
 import {
   assignMemoirBookSources,
   deleteMemoirVoiceTranscript,
-  downloadMemoirVoiceAudio,
   getMemoirBookPlan,
   listMemoirVoiceTranscripts,
   moveMemoirBookSource,
   parseMemoirVoiceSearchQuery,
   updateMemoirVoiceTranscript,
 } from "../../services/memoir-voice-api";
-import { configureAudiblePlayback } from "../../services/audio-playback";
+import { AudioPlaybackController } from "../../services/audio-playback";
 import { getMemoirIdentity } from "../../services/auth";
 import {
   sourceAssignmentRequest,
@@ -485,7 +484,6 @@ Page<TranscriptsData, {
   resetToRaw(event: DatasetEvent): void;
   deleteTranscript(event: DatasetEvent): Promise<void>;
   playAudio(event: DatasetEvent): Promise<void>;
-  playAudioFile(audioFileId: string, token: number): Promise<void>;
   stopPlayback(): void;
   onUnload(): void;
   openHome(): void;
@@ -494,13 +492,11 @@ Page<TranscriptsData, {
   revealStoredTranscriptTarget(): Promise<void>;
   ensureTranscriptTargetLoaded(targetId: string): Promise<TranscriptItemView | null>;
   scrollToTranscript(item: TranscriptItemView): void;
-  audio: WechatMiniprogram.InnerAudioContext | null;
-  playToken: number;
+  audioPlayback: AudioPlaybackController;
   loadToken: number;
   searchDebounceTimer: number | null;
 }>({
-  audio: null,
-  playToken: 0,
+  audioPlayback: new AudioPlaybackController(),
   loadToken: 0,
   searchDebounceTimer: null,
 
@@ -947,21 +943,20 @@ Page<TranscriptsData, {
       return;
     }
     this.stopPlayback();
-    this.playToken += 1;
-    const token = this.playToken;
+    const token = this.audioPlayback.nextToken();
     this.setData({ playingId: id, error: "" });
     try {
       for (const audioFileId of audioFileIds) {
-        if (token !== this.playToken) {
+        if (!this.audioPlayback.isCurrentToken(token)) {
           return;
         }
-        await this.playAudioFile(audioFileId, token);
+        await this.audioPlayback.playFile(audioFileId, token);
       }
-      if (token === this.playToken) {
+      if (this.audioPlayback.isCurrentToken(token)) {
         this.setData({ playingId: "" });
       }
     } catch (error) {
-      if (token === this.playToken) {
+      if (this.audioPlayback.isCurrentToken(token)) {
         this.setData({
           playingId: "",
           error: error instanceof Error ? error.message : "音频播放失败",
@@ -970,47 +965,8 @@ Page<TranscriptsData, {
     }
   },
 
-  async playAudioFile(audioFileId, token) {
-    const tempFilePath = await downloadMemoirVoiceAudio(audioFileId);
-    if (token !== this.playToken) {
-      return;
-    }
-    await new Promise<void>((resolve, reject) => {
-      const audio = wx.createInnerAudioContext();
-      this.audio = audio;
-      const cleanup = () => {
-        audio.destroy();
-        if (this.audio === audio) {
-          this.audio = null;
-        }
-      };
-      configureAudiblePlayback(audio);
-      audio.src = tempFilePath;
-      audio.onEnded(() => {
-        cleanup();
-        resolve();
-      });
-      audio.onStop(() => {
-        if (this.audio === audio) {
-          this.audio = null;
-        }
-        resolve();
-      });
-      audio.onError((error) => {
-        cleanup();
-        reject(new Error(error.errMsg || "音频播放失败"));
-      });
-      audio.play();
-    });
-  },
-
   stopPlayback() {
-    this.playToken += 1;
-    if (this.audio) {
-      this.audio.stop();
-      this.audio.destroy();
-      this.audio = null;
-    }
+    this.audioPlayback.stop();
     if (this.data.playingId) {
       this.setData({ playingId: "" });
     }
