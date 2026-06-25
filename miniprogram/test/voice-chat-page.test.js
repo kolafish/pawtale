@@ -99,7 +99,17 @@ function loadVoiceChatPage({
     totalTranscriptChars: () => 0,
     ttsAlignmentFromAssistantLine: () => [],
     ttsAlignmentFromMetadata: () => [],
-    upsertTranscriptLine: (lines, line) => [...lines, line],
+    upsertTranscriptLine: (lines, nextLine) => {
+      const matchIndex = lines.findIndex((line) => Boolean(
+        (nextLine.message_id && line.message_id === nextLine.message_id)
+        || (nextLine.utterance_id && line.utterance_id === nextLine.utterance_id)
+        || (nextLine.id && line.id === nextLine.id),
+      ));
+      if (matchIndex < 0) {
+        return [...lines, nextLine];
+      }
+      return lines.map((line, index) => (index === matchIndex ? nextLine : line));
+    },
     visibleAssistantLine: () => null,
   });
   mockModule("../stores/memoir-cache.ts", {
@@ -807,7 +817,13 @@ test("voice chat streams one assistant turn and plays audio segments", async () 
           this.callbacks.onTextDelta?.({
             type: "text.delta",
             turn_id: "turn-1",
-            text_delta: "那时候在院子里，外婆最常带着您做什么？",
+            text_delta: "那时候在院子里，",
+            text: "那时候在院子里，",
+          });
+          this.callbacks.onTextDelta?.({
+            type: "text.delta",
+            turn_id: "turn-1",
+            text_delta: "外婆最常带着您做什么？",
             text: "那时候在院子里，外婆最常带着您做什么？",
           });
           this.callbacks.onAudioSegment?.({
@@ -889,12 +905,14 @@ test("voice chat streams one assistant turn and plays audio segments", async () 
   assert.equal(context.data.assistantPromptText, "那时候在院子里，外婆最常带着您做什么？");
   assert.equal(context.data.followUpMessageId, "assistant-question-1");
   assert.equal(context.data.followUpAudioFileId, "audio-question-1");
+  assert.equal(context.data.transcriptLines.length, 2);
+  assert.deepEqual(context.data.transcriptLines.map((line) => line.id), ["user-line-1", "assistant-question-1"]);
   assert.equal(context.data.lastFollowUpSourceMessageId, "");
   assert.equal(context.data.persistenceStateText, "等待回答");
   assert.deepEqual(startCalls, [true]);
 });
 
-test("voice chat keeps streaming assistant playback failures from completing the turn UI", async () => {
+test("voice chat keeps completed streaming assistant turns when playback fails", async () => {
   const disposed = [];
   const page = loadVoiceChatPage({
     assistantTurnStreamExports: {
@@ -981,10 +999,69 @@ test("voice chat keeps streaming assistant playback failures from completing the
   await page.generateFollowUp.call(context, false);
 
   assert.deepEqual(disposed, ["segment-0"]);
-  assert.equal(context.data.followUpError, "temp audio failed");
-  assert.equal(context.data.followUpTTSStateText, "播放失败");
-  assert.equal(context.data.lastFollowUpSourceMessageId, "previous-source");
+  assert.equal(context.data.followUpError, "");
+  assert.equal(context.data.followUpTTSError, "temp audio failed");
+  assert.equal(context.data.followUpTTSStateText, "语音播放失败，可重播");
+  assert.equal(context.data.persistenceStateText, "语音播放失败");
+  assert.equal(context.data.followUpMessageId, "assistant-question-1");
+  assert.equal(context.data.followUpAudioFileId, "audio-question-1");
+  assert.equal(context.data.lastFollowUpSourceMessageId, "");
   assert.deepEqual(startCalls, []);
+});
+
+test("voice chat replays an existing assistant audio file without regenerating TTS", async () => {
+  const played = [];
+  const generated = [];
+  const page = loadVoiceChatPage({
+    voiceApiExports: {
+      createMemoirAssistantTTS: async (messageId) => {
+        generated.push(messageId);
+        return {
+          audio_file_id: "new-audio",
+          message_id: messageId,
+          text: "new",
+          metadata_json: {},
+        };
+      },
+    },
+  });
+  const context = {
+    ...page,
+    data: {
+      ...page.data,
+      followUpAudioFileId: "audio-question-1",
+      followUpMessageId: "assistant-question-1",
+      assistantPromptText: "那时候在院子里，外婆最常带着您做什么？",
+      ttsAlignment: [],
+    },
+    audioPlayback: {
+      nextToken: () => 1,
+      currentToken: () => 1,
+      currentAudio: () => null,
+      isCurrentToken: () => true,
+      stop() {},
+      playFile: async (audioFileId, token, options) => {
+        played.push({ audioFileId, token });
+        options.onEnded?.();
+      },
+    },
+    setData(patch) {
+      this.data = { ...this.data, ...patch };
+    },
+  };
+
+  await page.playFollowUpAudio.call(context);
+
+  assert.deepEqual(played, [{ audioFileId: "audio-question-1", token: 1 }]);
+  assert.deepEqual(generated, []);
+});
+
+test("voice chat caps streaming playback progress before the completed turn state", () => {
+  const page = loadVoiceChatPage();
+
+  assert.equal(page.streamingProgressPercent("欢迎回来", "欢迎回来，咱们接着聊。", false), 36);
+  assert.equal(page.streamingProgressPercent("欢迎回来，咱们接着聊。", "欢迎回来，咱们接着聊。", false), 99);
+  assert.equal(page.streamingProgressPercent("欢迎回来，咱们接着聊。", "欢迎回来，咱们接着聊。", true), 100);
 });
 
 test("voice chat passes regenerate flag to streaming assistant turn", async () => {

@@ -281,7 +281,8 @@ export function upsertTranscriptLine(
 ): VoiceChatTranscriptLine[] {
   const matchIndex = lines.findIndex((line) => Boolean(
     (nextLine.message_id && line.message_id === nextLine.message_id)
-    || (nextLine.utterance_id && line.utterance_id === nextLine.utterance_id),
+    || (nextLine.utterance_id && line.utterance_id === nextLine.utterance_id)
+    || (nextLine.id && line.id === nextLine.id),
   ));
   if (matchIndex < 0) {
     return [...lines, nextLine];

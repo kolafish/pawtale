@@ -201,8 +201,21 @@ Page<VoiceChatData, {
   ): Promise<void>;
   stopFollowUpAudio(): void;
   cancelFollowUpTTS(): void;
+  updateStreamingTTSProgress(
+    spokenBefore: string,
+    segmentText: string,
+    currentTime: number,
+    duration: number,
+  ): void;
   updateFollowUpTTSProgress(currentTime: number, duration: number): void;
   playbackTimeForProgress(audio: WechatMiniprogram.InnerAudioContext): number;
+  streamingProgressPercent(spokenText: string, fullText: string, allowComplete: boolean): number;
+  startStreamingProgressTimer(
+    playToken: number,
+    audio: WechatMiniprogram.InnerAudioContext,
+    spokenBefore: string,
+    segmentText: string,
+  ): void;
   startFollowUpProgressTimer(playToken: number, audio: WechatMiniprogram.InnerAudioContext): void;
   stopFollowUpProgressTimer(): void;
   resetFollowUpTTSProgress(): void;
@@ -798,15 +811,13 @@ Page<VoiceChatData, {
       return;
     }
     await this.assistantStreamingPlayback;
-    if (this.assistantStreamingPlaybackError) {
-      throw this.assistantStreamingPlaybackError;
-    }
     if (requestSerial !== followUpRequestSerial) {
       return;
     }
+    const playbackError = this.assistantStreamingPlaybackError;
     this.assistantTurnStream = null;
     streamClient.disposeTempFiles();
-    if (completed.expects_answer !== false) {
+    if (!playbackError && completed.expects_answer !== false) {
       this.autoListenPendingAfterPlayback = true;
     }
     this.setData({
@@ -814,16 +825,20 @@ Page<VoiceChatData, {
       followUpLoading: false,
       followUpTTSLoading: false,
       followUpTTSPlaying: false,
-      followUpTTSError: "",
-      followUpTTSStateText: completed.expects_answer !== false ? "播放完成，正在听你说" : "播放完成",
-      ttsSpokenText: completed.text,
+      followUpTTSError: playbackError ? playbackError.message : "",
+      followUpTTSStateText: playbackError
+        ? "语音播放失败，可重播"
+        : (completed.expects_answer !== false ? "播放完成，正在听你说" : "播放完成"),
+      ttsSpokenText: playbackError ? this.data.ttsSpokenText : completed.text,
       ttsCurrentText: "",
-      ttsRemainingText: "",
-      ttsProgressPercent: 100,
-      persistenceStateText: completed.expects_answer === false ? "老余已回应" : "等待回答",
+      ttsRemainingText: playbackError ? this.data.ttsRemainingText : "",
+      ttsProgressPercent: playbackError ? this.data.ttsProgressPercent : 100,
+      persistenceStateText: playbackError
+        ? "语音播放失败"
+        : (completed.expects_answer === false ? "老余已回应" : "等待回答"),
       lastFollowUpSourceMessageId: sourceMessageId,
     });
-    if (completed.expects_answer !== false) {
+    if (!playbackError && completed.expects_answer !== false) {
       this.tryStartAutoListenAfterTTS();
     }
   },
@@ -939,25 +954,50 @@ Page<VoiceChatData, {
       ttsCurrentText: segment.text,
       ttsRemainingText: fullText.startsWith(prefix) ? fullText.slice(prefix.length) : "",
     });
+    this.ttsProgressStartedAtMs = 0;
+    this.updateStreamingTTSProgress(spokenBefore, segment.text, 0, 0);
     try {
       await this.audioPlayback.playTempFile(segment.tempFilePath, playToken, {
+        onPlay: (audio) => {
+          if (playToken === this.ttsPlayToken) {
+            this.ttsProgressStartedAtMs = Date.now();
+            this.startStreamingProgressTimer(playToken, audio, spokenBefore, segment.text);
+          }
+        },
+        onPlayRequested: (audio) => {
+          this.startStreamingProgressTimer(playToken, audio, spokenBefore, segment.text);
+        },
+        onTimeUpdate: (audio) => {
+          if (playToken === this.ttsPlayToken) {
+            this.updateStreamingTTSProgress(
+              spokenBefore,
+              segment.text,
+              this.playbackTimeForProgress(audio),
+              audio.duration,
+            );
+          }
+        },
         onEnded: () => {
           if (playToken !== this.ttsPlayToken) {
             return;
           }
+          this.stopFollowUpProgressTimer();
           this.assistantStreamSpokenText = `${this.assistantStreamSpokenText}${segment.text}`;
           const latestText = this.data.assistantPromptText || this.assistantStreamSpokenText;
+          const remainingText = latestText.startsWith(this.assistantStreamSpokenText)
+            ? latestText.slice(this.assistantStreamSpokenText.length)
+            : "";
           this.setData({
             ttsSpokenText: this.assistantStreamSpokenText,
             ttsCurrentText: "",
-            ttsRemainingText: latestText.startsWith(this.assistantStreamSpokenText)
-              ? latestText.slice(this.assistantStreamSpokenText.length)
-              : "",
-            ttsProgressPercent: 100,
+            ttsRemainingText: remainingText,
+            ttsProgressPercent: this.streamingProgressPercent(this.assistantStreamSpokenText, latestText, false),
+            followUpTTSStateText: remainingText ? "正在准备下一句语音" : "正在整理回应",
           });
         },
         onError: () => {
           if (playToken === this.ttsPlayToken) {
+            this.stopFollowUpProgressTimer();
             this.setData({
               followUpTTSError: "AI 语音播放失败",
               followUpTTSStateText: "播放失败",
@@ -1171,7 +1211,7 @@ Page<VoiceChatData, {
     if (this.data.followUpTTSLoading) {
       return;
     }
-    if (this.data.followUpAudioFileId && this.data.ttsAlignment.length) {
+    if (this.data.followUpAudioFileId) {
       await this.playAudioFile(this.data.followUpAudioFileId, {
         autoListenAfterPlayback: false,
         text: this.data.assistantPromptText,
@@ -1289,6 +1329,27 @@ Page<VoiceChatData, {
     }
   },
 
+  updateStreamingTTSProgress(
+    spokenBefore: string,
+    segmentText: string,
+    currentTime: number,
+    duration: number,
+  ) {
+    const latestText = this.data.assistantPromptText || `${spokenBefore}${segmentText}`;
+    const progress = splitTextByAudioPlaybackProgress(segmentText, currentTime, duration, {
+      alignment: [],
+    });
+    const segmentPrefix = `${spokenBefore}${segmentText}`;
+    const futureText = latestText.startsWith(segmentPrefix) ? latestText.slice(segmentPrefix.length) : "";
+    const spokenText = `${spokenBefore}${progress.spokenText}`;
+    this.setData({
+      ttsSpokenText: spokenText,
+      ttsCurrentText: progress.currentText,
+      ttsRemainingText: `${progress.remainingText}${futureText}`,
+      ttsProgressPercent: this.streamingProgressPercent(spokenText, latestText, false),
+    });
+  },
+
   updateFollowUpTTSProgress(currentTime, duration) {
     const text = this.data.assistantPromptText;
     if (!text) {
@@ -1315,6 +1376,50 @@ Page<VoiceChatData, {
       return Math.max(0, (Date.now() - this.ttsProgressStartedAtMs) / 1000);
     }
     return 0;
+  },
+
+  streamingProgressPercent(spokenText: string, fullText: string, allowComplete: boolean) {
+    const totalChars = countTextChars(fullText);
+    if (totalChars <= 0) {
+      return 0;
+    }
+    const spokenChars = Math.min(totalChars, countTextChars(spokenText));
+    const percent = Math.max(0, Math.round((spokenChars / totalChars) * 100));
+    return allowComplete ? percent : Math.min(percent, 99);
+  },
+
+  startStreamingProgressTimer(
+    playToken: number,
+    audio: WechatMiniprogram.InnerAudioContext,
+    spokenBefore: string,
+    segmentText: string,
+  ) {
+    this.stopFollowUpProgressTimer();
+    if (playToken !== this.ttsPlayToken) {
+      return;
+    }
+    if (this.ttsProgressStartedAtMs <= 0) {
+      this.ttsProgressStartedAtMs = Date.now();
+    }
+    const timer = setInterval(() => {
+      if (
+        playToken !== this.ttsPlayToken
+        || this.audioPlayback.currentAudio() !== audio
+        || !this.data.followUpTTSPlaying
+      ) {
+        if (this.ttsProgressTimer === timer) {
+          this.stopFollowUpProgressTimer();
+        }
+        return;
+      }
+      this.updateStreamingTTSProgress(
+        spokenBefore,
+        segmentText,
+        this.playbackTimeForProgress(audio),
+        audio.duration,
+      );
+    }, 250);
+    this.ttsProgressTimer = timer;
   },
 
   startFollowUpProgressTimer(playToken, audio) {
