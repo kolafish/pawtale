@@ -25,3 +25,127 @@ test("configureAudiblePlayback disables mute switch and sets full volume", () =>
 
   delete global.wx;
 });
+
+function createManualAudioContext() {
+  const callbacks = {};
+  const audio = {
+    src: "",
+    obeyMuteSwitch: true,
+    volume: 0,
+    stopCalls: 0,
+    destroyCalls: 0,
+    playCalls: 0,
+    onEnded(callback) {
+      callbacks.ended = callback;
+    },
+    onStop(callback) {
+      callbacks.stop = callback;
+    },
+    onError(callback) {
+      callbacks.error = callback;
+    },
+    play() {
+      this.playCalls += 1;
+    },
+    stop() {
+      this.stopCalls += 1;
+      callbacks.stop?.();
+    },
+    destroy() {
+      this.destroyCalls += 1;
+    },
+  };
+  return { audio, callbacks };
+}
+
+test("AudioPlaybackController plays and releases an audio file", async () => {
+  delete require.cache[require.resolve("../services/audio-playback.ts")];
+  const { AudioPlaybackController } = require("../services/audio-playback.ts");
+  const created = createManualAudioContext();
+  const configured = [];
+  const downloads = [];
+  const controller = new AudioPlaybackController({
+    downloadAudioFile: async (audioFileId) => {
+      downloads.push(audioFileId);
+      return `/tmp/${audioFileId}.mp3`;
+    },
+    createAudioContext: () => created.audio,
+    configureAudio: (audio) => {
+      configured.push(audio);
+    },
+  });
+
+  const token = controller.nextToken();
+  const promise = controller.playFile("audio-1", token);
+  await Promise.resolve();
+
+  assert.deepEqual(downloads, ["audio-1"]);
+  assert.equal(created.audio.src, "/tmp/audio-1.mp3");
+  assert.equal(created.audio.playCalls, 1);
+  assert.deepEqual(configured, [created.audio]);
+
+  created.callbacks.ended();
+  await promise;
+
+  assert.equal(created.audio.destroyCalls, 1);
+});
+
+test("AudioPlaybackController stop cancels the active token and resolves playback", async () => {
+  delete require.cache[require.resolve("../services/audio-playback.ts")];
+  const { AudioPlaybackController } = require("../services/audio-playback.ts");
+  const created = createManualAudioContext();
+  const controller = new AudioPlaybackController({
+    downloadAudioFile: async (audioFileId) => `/tmp/${audioFileId}.mp3`,
+    createAudioContext: () => created.audio,
+    configureAudio: () => {},
+  });
+
+  const token = controller.nextToken();
+  const promise = controller.playFile("audio-1", token);
+  await Promise.resolve();
+  controller.stop();
+  await promise;
+
+  assert.notEqual(controller.currentToken(), token);
+  assert.equal(created.audio.stopCalls, 1);
+  assert.equal(created.audio.destroyCalls, 1);
+});
+
+test("AudioPlaybackController skips stale playback after download", async () => {
+  delete require.cache[require.resolve("../services/audio-playback.ts")];
+  const { AudioPlaybackController } = require("../services/audio-playback.ts");
+  let createCalls = 0;
+  const controller = new AudioPlaybackController({
+    downloadAudioFile: async (audioFileId) => `/tmp/${audioFileId}.mp3`,
+    createAudioContext: () => {
+      createCalls += 1;
+      return createManualAudioContext().audio;
+    },
+    configureAudio: () => {},
+  });
+
+  const staleToken = controller.nextToken();
+  controller.nextToken();
+  await controller.playFile("audio-1", staleToken);
+
+  assert.equal(createCalls, 0);
+});
+
+test("AudioPlaybackController releases audio on playback error", async () => {
+  delete require.cache[require.resolve("../services/audio-playback.ts")];
+  const { AudioPlaybackController } = require("../services/audio-playback.ts");
+  const created = createManualAudioContext();
+  const controller = new AudioPlaybackController({
+    downloadAudioFile: async (audioFileId) => `/tmp/${audioFileId}.mp3`,
+    createAudioContext: () => created.audio,
+    configureAudio: () => {},
+  });
+
+  const token = controller.nextToken();
+  const promise = controller.playFile("audio-1", token);
+  await Promise.resolve();
+  created.callbacks.error({ errMsg: "boom" });
+
+  await assert.rejects(promise, /boom/);
+  assert.equal(created.audio.destroyCalls, 1);
+});
