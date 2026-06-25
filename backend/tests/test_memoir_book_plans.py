@@ -651,6 +651,7 @@ async def test_mobile_memoir_book_source_move_rejects_last_source_in_chapter(
 async def test_mobile_memoir_book_plan_structure_command_moves_and_renames_chapter(client, test_db):
     first = await create_test_voice_transcript(client, test_db, "小时候在院子里玩。")
     second = await create_test_voice_transcript(client, test_db, "后来第一次离家求学。")
+    third = await create_test_voice_transcript(client, test_db, "工作以后认识了很多朋友。")
     project_id = first["session"]["project_id"]
     confirm_response = await client.put(
         f"/api/mobile/memoir/projects/{project_id}/book-plan",
@@ -658,11 +659,12 @@ async def test_mobile_memoir_book_plan_structure_command_moves_and_renames_chapt
             "chapters": [
                 {"title": "童年院子", "source_refs": [memoir_source_ref(first)]},
                 {"title": "离家求学", "source_refs": [memoir_source_ref(second)]},
+                {"title": "一生的朋友", "source_refs": [memoir_source_ref(third)]},
             ],
         },
     )
     assert confirm_response.status_code == 200
-    first_chapter, second_chapter = confirm_response.json()["chapters"]
+    first_chapter, second_chapter, third_chapter = confirm_response.json()["chapters"]
 
     move_response = await client.post(
         f"/api/mobile/memoir/projects/{project_id}/book-plan/structure-commands",
@@ -673,8 +675,21 @@ async def test_mobile_memoir_book_plan_structure_command_moves_and_renames_chapt
     assert [chapter["id"] for chapter in move_response.json()["chapters"]] == [
         second_chapter["id"],
         first_chapter["id"],
+        third_chapter["id"],
     ]
     assert move_response.json()["metadata_json"]["structure_operation"] == "move_chapter"
+
+    move_to_last_response = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-plan/structure-commands",
+        json={"type": "move_chapter", "chapter_id": second_chapter["id"], "target_position": "last"},
+    )
+
+    assert move_to_last_response.status_code == 200, move_to_last_response.json()
+    assert [chapter["id"] for chapter in move_to_last_response.json()["chapters"]] == [
+        first_chapter["id"],
+        third_chapter["id"],
+        second_chapter["id"],
+    ]
 
     rename_response = await client.post(
         f"/api/mobile/memoir/projects/{project_id}/book-plan/structure-commands",

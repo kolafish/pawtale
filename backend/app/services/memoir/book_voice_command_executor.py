@@ -41,9 +41,8 @@ async def execute_confirmed_book_voice_command(
             ),
         )
     elif intent == "move_chapter":
-        direction = operation.direction if operation.direction in {"up", "down"} else None
-        if not direction:
-            raise HTTPException(status_code=400, detail="缺少章节移动方向")
+        if not _has_move_target(operation):
+            raise HTTPException(status_code=400, detail="缺少章节移动目标")
         plan = await memoir_book_plans.apply_book_plan_structure_command(
             db,
             user_id=user_id,
@@ -51,7 +50,11 @@ async def execute_confirmed_book_voice_command(
             req=MemoirBookPlanStructureCommandRequest(
                 type="move_chapter",
                 chapter_id=_required_operation_text(operation.chapter_id, "缺少要移动的章节"),
-                direction=direction,
+                direction=operation.direction if operation.direction in {"up", "down"} else None,
+                target_position=operation.target_position if operation.target_position in {"first", "last"} else None,
+                target_index=operation.target_index,
+                relative_chapter_id=operation.relative_chapter_id,
+                relative_position=operation.relative_position if operation.relative_position in {"before", "after"} else None,
             ),
         )
     elif intent == "assign_source":
@@ -93,12 +96,36 @@ def _required_operation_text(value: str | None, detail: str) -> str:
     return text
 
 
+def _has_move_target(operation: MemoirBookVoiceCommandOperationResponse) -> bool:
+    return (
+        operation.direction in {"up", "down"}
+        or operation.target_position in {"first", "last"}
+        or operation.target_index is not None
+        or (
+            bool(operation.relative_chapter_id)
+            and operation.relative_position in {"before", "after"}
+        )
+    )
+
+
 def _executed_summary(intent: str, operation: MemoirBookVoiceCommandOperationResponse) -> str:
     if intent == "rename_chapter":
         return f"已把「{operation.chapter_title or '该章节'}」改名为「{operation.new_title or '新章名'}」。"
     if intent == "move_chapter":
-        direction = "上移" if operation.direction == "up" else "下移"
-        return f"已把「{operation.chapter_title or '该章节'}」{direction}。"
+        title = operation.chapter_title or "该章节"
+        if operation.direction:
+            direction = "上移" if operation.direction == "up" else "下移"
+            return f"已把「{title}」{direction}。"
+        if operation.target_position == "first":
+            return f"已把「{title}」移到第一章。"
+        if operation.target_position == "last":
+            return f"已把「{title}」移到最后一章。"
+        if operation.target_index:
+            return f"已把「{title}」移到第 {operation.target_index} 章。"
+        if operation.relative_chapter_title and operation.relative_position:
+            position = "前面" if operation.relative_position == "before" else "后面"
+            return f"已把「{title}」移到「{operation.relative_chapter_title}」{position}。"
+        return f"已移动「{title}」。"
     if intent == "assign_source":
         source_position = operation.source_position or operation.source_index or 1
         return f"已把待收录第 {source_position} 条归入「{operation.chapter_title or '目标章节'}」。"

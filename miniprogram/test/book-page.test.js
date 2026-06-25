@@ -388,9 +388,24 @@ function planFromStructureCommand(status, command) {
   if (command.type === "move_chapter") {
     const chapters = [...base.chapters];
     const fromIndex = chapters.findIndex((chapter) => chapter.id === command.chapter_id);
-    const toIndex = command.direction === "up" ? fromIndex - 1 : fromIndex + 1;
-    [chapters[fromIndex], chapters[toIndex]] = [chapters[toIndex], chapters[fromIndex]];
-    return { ...base, chapters: chapters.map((chapter, index) => ({ ...chapter, sort_order: index })) };
+    const moving = chapters[fromIndex];
+    if (command.direction) {
+      const toIndex = command.direction === "up" ? fromIndex - 1 : fromIndex + 1;
+      [chapters[fromIndex], chapters[toIndex]] = [chapters[toIndex], chapters[fromIndex]];
+      return { ...base, chapters: chapters.map((chapter, index) => ({ ...chapter, sort_order: index })) };
+    }
+    const remaining = chapters.filter((chapter) => chapter.id !== command.chapter_id);
+    let toIndex = remaining.length;
+    if (command.target_position === "first") {
+      toIndex = 0;
+    } else if (typeof command.target_index === "number") {
+      toIndex = Math.min(command.target_index - 1, remaining.length);
+    } else if (command.relative_chapter_id) {
+      const relativeIndex = remaining.findIndex((chapter) => chapter.id === command.relative_chapter_id);
+      toIndex = relativeIndex + (command.relative_position === "after" ? 1 : 0);
+    }
+    remaining.splice(toIndex, 0, moving);
+    return { ...base, chapters: remaining.map((chapter, index) => ({ ...chapter, sort_order: index })) };
   }
   if (command.type === "merge_chapters") {
     const source = base.chapters.find((chapter) => chapter.id === command.chapter_id);
@@ -2070,6 +2085,62 @@ test("book page executes and undoes a voice chapter move", async () => {
   delete global.wx;
 });
 
+test("book page executes a voice chapter move to an explicit position", async () => {
+  global.wx = {
+    showModal(options) {
+      options.success({ confirm: true });
+    },
+  };
+  const calls = [];
+  const movedPlan = planFromStructureCommand("confirmed", {
+    type: "move_chapter",
+    chapter_id: "chapter-1",
+    target_position: "last",
+  });
+  const { page } = loadBookPage({
+    voiceApiExports: {
+      executeMemoirBookVoiceCommand: async (projectId, data) => {
+        calls.push({ projectId, data });
+        return sampleBookVoiceCommandExecuteResponse(data.intent, movedPlan);
+      },
+    },
+  });
+  const context = pageContext(page, { projectId: "project/1" });
+  page.applyPlan.call(context, samplePlan("confirmed"));
+  page.applyBookVoiceCommandPreview.call(context, sampleBookVoiceCommandPreview({
+    original_text: "把外婆家的童年移到最后一章",
+    intent: "move_chapter",
+    intent_label: "移动章节",
+    summary: "准备把「外婆家的童年」移到最后一章。",
+    operations: [
+      {
+        type: "move_chapter",
+        chapter_id: "chapter-1",
+        chapter_title: "外婆家的童年",
+        target_position: "last",
+      },
+    ],
+  }));
+
+  await page.executeBookVoiceCommand.call(context);
+
+  assert.deepEqual(calls[0], {
+    projectId: "project/1",
+    data: {
+      intent: "move_chapter",
+      operation: {
+        type: "move_chapter",
+        chapter_id: "chapter-1",
+        chapter_title: "外婆家的童年",
+        target_position: "last",
+      },
+    },
+  });
+  assert.deepEqual(context.data.chapters.map((chapter) => chapter.id), ["chapter-2", "chapter-1"]);
+  assert.equal(context.data.bookVoiceCommandUndoText, "撤回语音排序");
+  delete global.wx;
+});
+
 test("book page executes a voice assignment for an uncovered source", async () => {
   global.wx = {
     showModal(options) {
@@ -2195,6 +2266,10 @@ test("book page only enables executable voice commands with required fields", ()
     intent: "move_chapter",
     operations: [{ type: "move_chapter", chapter_id: "chapter-1", direction: "later" }],
   })), false);
+  assert.equal(mod.canExecuteBookVoiceCommand(sampleBookVoiceCommandPreview({
+    intent: "move_chapter",
+    operations: [{ type: "move_chapter", chapter_id: "chapter-1", target_position: "last" }],
+  })), true);
   assert.equal(mod.canExecuteBookVoiceCommand(sampleBookVoiceCommandPreview({
     intent: "read_chapter",
     operations: [{ type: "read_chapter", chapter_id: "chapter-1" }],
