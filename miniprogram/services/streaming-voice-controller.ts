@@ -58,6 +58,18 @@ export class StreamingVoiceController {
     this.client?.configureAutoStop(autoStopSilenceMs);
   }
 
+  async finishSession(): Promise<boolean> {
+    const client = this.client;
+    if (!client) {
+      return false;
+    }
+    await client.finishSession();
+    if (this.client === client) {
+      this.client = null;
+    }
+    return true;
+  }
+
   close(options?: { force?: boolean }): void {
     this.client?.close(options);
     this.client = null;

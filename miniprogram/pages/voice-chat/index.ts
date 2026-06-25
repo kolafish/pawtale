@@ -16,10 +16,10 @@ import {
 import { runAcknowledgedQuestionPipeline } from "../../services/voice-assistant-turn-pipeline";
 import {
   classifyVoiceClientConnectionError,
-  MemoirStreamingAsrClient,
   type MemoirCaptureStats,
   type VoiceChatConnectionStatus,
 } from "../../services/memoir-streaming-asr";
+import { StreamingVoiceController } from "../../services/streaming-voice-controller";
 import {
   createMemoirAssistantTTS,
   createMemoirVoiceNoAnswerPrompt,
@@ -123,7 +123,6 @@ interface VoiceChatData {
   canFinishAfterDisconnect: boolean;
 }
 
-let streamingClient: MemoirStreamingAsrClient | null = null;
 let followUpRequestSerial = 0;
 const AUTO_STOP_SILENCE_MS = 1800;
 const AUTO_STOP_MIN_RECORDING_MS = 1200;
@@ -218,6 +217,7 @@ Page<VoiceChatData, {
   handleFinal(event: VoiceGatewayServerEvent): void;
   handleError(message: string, error?: VoiceChatErrorInfo): void;
   audioPlayback: AudioPlaybackController;
+  voiceStreaming: StreamingVoiceController;
   assistantTurnQueue: AssistantTurnQueueItem[];
   assistantTurnQueueRunning: boolean;
   assistantAudioPrepareCount: number;
@@ -232,6 +232,7 @@ Page<VoiceChatData, {
   autoListenPendingAfterPlayback: boolean;
 }>({
   audioPlayback: new AudioPlaybackController(),
+  voiceStreaming: new StreamingVoiceController(),
   assistantTurnQueue: [],
   assistantTurnQueueRunning: false,
   assistantAudioPrepareCount: 0,
@@ -302,7 +303,8 @@ Page<VoiceChatData, {
   },
 
   autoListenGateSnapshot() {
-    const canStart = Boolean(streamingClient) && canAutoStartListeningAfterTTS({
+    const hasClient = this.voiceStreaming.hasClient();
+    const canStart = hasClient && canAutoStartListeningAfterTTS({
       autoListenEnabled: this.data.autoListenEnabled,
       status: this.data.status,
       recording: this.data.recording,
@@ -310,7 +312,7 @@ Page<VoiceChatData, {
       followUpLoading: this.data.followUpLoading,
     });
     return {
-      hasClient: Boolean(streamingClient),
+      hasClient,
       autoListenEnabled: this.data.autoListenEnabled,
       status: this.data.status,
       recording: this.data.recording,
@@ -360,8 +362,8 @@ Page<VoiceChatData, {
   },
 
   onHide() {
-    if (this.data.recording && streamingClient) {
-      streamingClient.stopRecording();
+    if (this.data.recording && this.voiceStreaming.hasClient()) {
+      this.voiceStreaming.stopRecording();
       this.persistPendingVoiceClose("hide");
       this.setData({
         recording: false,
@@ -379,8 +381,7 @@ Page<VoiceChatData, {
     this.persistCurrentTranscriptSnapshot();
     this.persistPendingVoiceClose("unload");
     this.cancelFollowUpTTS();
-    streamingClient?.close();
-    streamingClient = null;
+    this.voiceStreaming.close();
   },
 
   refreshVoiceAuthorizationConsent() {
@@ -402,7 +403,7 @@ Page<VoiceChatData, {
       && !this.data.connecting
       && this.data.status !== "closed"
       && this.data.status !== "error"
-      && !streamingClient
+      && !this.voiceStreaming.hasClient()
     ) {
       void this.syncVoiceAuthorizationAndConnect();
     }
@@ -411,8 +412,8 @@ Page<VoiceChatData, {
   async changeVoiceAuthorization(event) {
     const agreed = event.detail.value.includes(VOICE_AUTHORIZATION_VALUE);
     const consent = saveVoiceAuthorizationConsent(agreed);
-    if (!agreed && streamingClient && this.data.recording) {
-      streamingClient.stopRecording();
+    if (!agreed && this.voiceStreaming.hasClient() && this.data.recording) {
+      this.voiceStreaming.stopRecording();
     }
     this.setData({
       voiceAuthorizationAgreed: consent.agreed,
@@ -421,7 +422,7 @@ Page<VoiceChatData, {
       primaryActionText: agreed ? "开始说话" : "同意后开始说话",
       autoListenStateText: agreed ? "AI 说完自动听" : "同意后才会自动收音",
     });
-    if (agreed && this.data.voiceSessionId && !streamingClient && !this.data.connecting) {
+    if (agreed && this.data.voiceSessionId && !this.voiceStreaming.hasClient() && !this.data.connecting) {
       await this.syncVoiceAuthorizationAndConnect();
     } else {
       void syncVoiceAuthorizationConsent({
@@ -669,8 +670,7 @@ Page<VoiceChatData, {
   },
 
   async finishAfterDisconnect() {
-    streamingClient?.close({ force: true });
-    streamingClient = null;
+    this.voiceStreaming.close({ force: true });
     await this.refreshVoiceSessionSnapshot();
     this.setData({
       recording: false,
@@ -1192,7 +1192,7 @@ Page<VoiceChatData, {
 
   toggleAutoStop() {
     const autoStopEnabled = !this.data.autoStopEnabled;
-    streamingClient?.configureAutoStop(autoStopEnabled ? AUTO_STOP_SILENCE_MS : 0);
+    this.voiceStreaming.configureAutoStop(autoStopEnabled ? AUTO_STOP_SILENCE_MS : 0);
     this.setData({
       autoStopEnabled,
       autoStopStateText: autoStopEnabled ? "自动收尾开" : "自动收尾关",
@@ -1205,13 +1205,8 @@ Page<VoiceChatData, {
     }
     this.setData({ connecting: true, error: "" });
     let connected = false;
-    let client: MemoirStreamingAsrClient | null = null;
-    const isCurrentClient = () => Boolean(client && streamingClient === client);
     try {
-      if (streamingClient) {
-        streamingClient.close({ force: true });
-      }
-      client = new MemoirStreamingAsrClient({
+      await this.voiceStreaming.connect({
         voiceSessionId: this.data.voiceSessionId,
         guidanceMode: this.data.guidanceMode,
         currentGuidanceModule: this.data.currentGuidanceModule,
@@ -1219,47 +1214,27 @@ Page<VoiceChatData, {
         minAutoStopRecordingMs: AUTO_STOP_MIN_RECORDING_MS,
         callbacks: {
           onStatus: (status) => {
-            if (isCurrentClient()) {
-              this.handleStatus(status);
-            }
+            this.handleStatus(status);
           },
           onCaptureStats: (stats) => {
-            if (isCurrentClient()) {
-              this.handleCaptureStats(stats);
-            }
+            this.handleCaptureStats(stats);
           },
           onEvent: (event) => {
-            if (isCurrentClient()) {
-              this.handleGatewayEvent(event);
-            }
+            this.handleGatewayEvent(event);
           },
           onPartial: (text) => {
-            if (isCurrentClient()) {
-              this.handlePartial(text);
-            }
+            this.handlePartial(text);
           },
           onFinal: (event) => {
-            if (isCurrentClient()) {
-              this.handleFinal(event);
-            }
+            this.handleFinal(event);
           },
           onError: (message, error) => {
-            if (isCurrentClient()) {
-              this.handleError(message, error);
-            }
+            this.handleError(message, error);
           },
         },
       });
-      streamingClient = client;
-      await client.connect();
       connected = true;
     } catch (error) {
-      if (client && streamingClient === client) {
-        streamingClient = null;
-      }
-      if (client) {
-        client.close({ force: true });
-      }
       const message = error instanceof Error ? error.message : "语音连接失败";
       this.handleError(message, classifyVoiceClientConnectionError(message));
     } finally {
@@ -1274,7 +1249,7 @@ Page<VoiceChatData, {
     if (!this.ensureVoiceAuthorization(autoTriggered)) {
       return false;
     }
-    if (!streamingClient || this.data.status === "closed" || this.data.status === "error") {
+    if (!this.voiceStreaming.hasClient() || this.data.status === "closed" || this.data.status === "error") {
       void this.syncVoiceAuthorizationAndConnect(autoTriggered);
       this.setData({ autoListenStateText: autoTriggered ? "正在重新连接语音" : this.data.autoListenStateText });
       return false;
@@ -1303,12 +1278,12 @@ Page<VoiceChatData, {
       });
       return false;
     }
-    if (!streamingClient || this.data.status === "closed" || this.data.status === "error") {
+    if (!this.voiceStreaming.hasClient() || this.data.status === "closed" || this.data.status === "error") {
       void this.syncVoiceAuthorizationAndConnect(autoTriggered);
       this.setData({ autoListenStateText: autoTriggered ? "正在重新连接语音" : this.data.autoListenStateText });
       return false;
     }
-    const started = streamingClient.startRecording({
+    const started = this.voiceStreaming.startRecording({
       noVoiceActivityTimeoutMs: autoTriggered ? AUTO_LISTEN_NO_ANSWER_MS : 0,
     });
     if (!started) {
@@ -1339,12 +1314,12 @@ Page<VoiceChatData, {
     if (!this.ensureVoiceAuthorization(false)) {
       return;
     }
-    if (!streamingClient || this.data.status === "closed" || this.data.status === "error") {
+    if (!this.voiceStreaming.hasClient() || this.data.status === "closed" || this.data.status === "error") {
       void this.syncVoiceAuthorizationAndConnect(false);
       return;
     }
     if (this.data.recording) {
-      streamingClient.stopRecording();
+      this.voiceStreaming.stopRecording();
       this.setData({ recording: false, primaryActionText: "继续说话" });
       return;
     }
@@ -1441,15 +1416,13 @@ Page<VoiceChatData, {
       primaryActionText: "保存中",
       persistenceStateText: this.data.recording ? "正在保存最后一句" : "正在保存",
     });
-    if (!streamingClient) {
+    if (!this.voiceStreaming.hasClient()) {
       await this.refreshVoiceSessionSnapshot();
       this.setData({ finishingSession: false });
       return;
     }
-    const client = streamingClient;
     try {
-      await client.finishSession();
-      streamingClient = null;
+      await this.voiceStreaming.finishSession();
       this.setData({
         recording: false,
         primaryActionText: "已保存",

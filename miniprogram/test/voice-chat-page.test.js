@@ -26,6 +26,7 @@ function loadVoiceChatPage({
     },
     ...streamingExports,
   });
+  clearModule("../services/streaming-voice-controller.ts");
   mockModule("../services/memoir-voice-api.ts", {
     createMemoirAssistantTTS: async () => {
       throw new Error("createMemoirAssistantTTS was not mocked");

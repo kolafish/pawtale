@@ -13,6 +13,7 @@ function loadControllerWithFakeClient() {
       this.startRecordingCalls = [];
       this.stopRecordingCalls = 0;
       this.configureAutoStopCalls = [];
+      this.finishSessionCalls = 0;
       clients.push(this);
     }
 
@@ -29,6 +30,10 @@ function loadControllerWithFakeClient() {
 
     configureAutoStop(value) {
       this.configureAutoStopCalls.push(value);
+    }
+
+    async finishSession() {
+      this.finishSessionCalls += 1;
     }
 
     close(options) {
@@ -95,6 +100,20 @@ test("StreamingVoiceController proxies recording, auto-stop, and close to the cu
   assert.deepEqual(client.configureAutoStopCalls, [800]);
   assert.deepEqual(client.closeCalls, [{ force: true }]);
   assert.equal(controller.hasClient(), false);
+});
+
+test("StreamingVoiceController finishes the current session and clears the client", async () => {
+  const { StreamingVoiceController, clients } = loadControllerWithFakeClient();
+  const controller = new StreamingVoiceController();
+
+  await controller.connect(connectOptions());
+  const client = clients[0];
+
+  assert.equal(await controller.finishSession(), true);
+
+  assert.equal(client.finishSessionCalls, 1);
+  assert.equal(controller.hasClient(), false);
+  assert.equal(await controller.finishSession(), false);
 });
 
 test("StreamingVoiceController clears failed connections", async () => {
