@@ -13,6 +13,7 @@ function loadVoiceChatPage({
   voiceChatAutoListenExports = {},
   assistantTurnStreamExports = {},
   streamingSpeechPlaybackExports = {},
+  ttsTextProgressExports = {},
 } = {}) {
   mockModule("../services/memoir-streaming-asr.ts", {
     classifyVoiceClientConnectionError: () => ({ kind: "unknown" }),
@@ -57,6 +58,7 @@ function loadVoiceChatPage({
       remainingText: "",
       progressPercent: 0,
     }),
+    ...ttsTextProgressExports,
   });
   mockModule("../services/tts-settings.ts", {
     readChatTTSSettings: () => ({ voice: "", speedRatio: 1 }),
@@ -933,6 +935,173 @@ test("voice chat streams one assistant turn and plays pcm audio frames", async (
   assert.deepEqual(startCalls, [true]);
 });
 
+test("voice chat drives first streaming highlight from WebAudio playback progress", async () => {
+  const progressCalls = [];
+  const prompt = "欢迎回来，咱们接着聊。";
+  const page = loadVoiceChatPage({
+    streamingSpeechPlaybackExports: {
+      StreamingSpeechPlaybackController: class {
+        async appendFrame() {
+          return {
+            segmentIndex: 0,
+            frameIndex: 0,
+            durationSeconds: 2,
+            startAtSeconds: 10,
+            queuedAheadSeconds: 2,
+            ended: Promise.resolve(),
+          };
+        }
+        stats() {
+          return {
+            segmentCount: 1,
+            underrunCount: 0,
+            nextPlayTimeSeconds: 12,
+            currentTimeSeconds: 10.5,
+            queuedAheadSeconds: 1.5,
+          };
+        }
+        async waitForDrain() {}
+        stop() {}
+      },
+    },
+    ttsTextProgressExports: {
+      splitTextByAudioPlaybackProgress: (text, currentTime, duration) => {
+        progressCalls.push({ text, currentTime, duration });
+        return {
+          spokenText: "欢迎",
+          currentText: "回",
+          remainingText: "来，咱们接着聊。",
+          progressPercent: 25,
+        };
+      },
+    },
+  });
+  const context = {
+    ...page,
+    data: {
+      ...page.data,
+      assistantPromptText: prompt,
+      ttsSpokenText: prompt,
+      followUpTTSPlaying: false,
+    },
+    audioPlayback: {
+      currentToken: () => 1,
+      isCurrentToken: () => true,
+      nextToken: () => 1,
+      stop() {},
+    },
+    setData(patch) {
+      this.data = { ...this.data, ...patch };
+    },
+  };
+
+  await page.playStreamingAudioFrame.call(context, {
+    audio: new Uint8Array([1, 2]),
+    mimeType: "audio/L16",
+    sampleRate: 16000,
+    channels: 1,
+    bitsPerSample: 16,
+  }, 0);
+  page.stopFollowUpProgressTimer.call(context);
+
+  assert.equal(context.data.followUpTTSPlaying, true);
+  assert.equal(context.data.ttsSpokenText, "欢迎");
+  assert.equal(context.data.ttsCurrentText, "回");
+  assert.equal(context.data.ttsRemainingText, "来，咱们接着聊。");
+  assert.equal(context.data.ttsProgressPercent, 25);
+  assert.equal(progressCalls[0].text, prompt);
+  assert.equal(progressCalls[0].currentTime, 0.5);
+  assert.equal(progressCalls[0].duration, 2);
+  assert.notEqual(context.data.ttsSpokenText, prompt);
+});
+
+test("voice chat audio done does not mark full streaming text as spoken before completion", async () => {
+  const prompt = "欢迎回来，咱们接着聊。";
+  const page = loadVoiceChatPage();
+  const context = {
+    ...page,
+    data: {
+      ...page.data,
+      assistantPromptText: prompt,
+      ttsSpokenText: "欢迎",
+      ttsCurrentText: "回",
+      ttsRemainingText: "来，咱们接着聊。",
+      ttsProgressPercent: 25,
+      followUpTTSPlaying: true,
+    },
+    assistantStreamingPlaybackController: {
+      async waitForDrain() {},
+      stop() {},
+      stats() {
+        return {
+          segmentCount: 1,
+          underrunCount: 0,
+          nextPlayTimeSeconds: 12,
+          currentTimeSeconds: 12,
+          queuedAheadSeconds: 0,
+        };
+      },
+    },
+    assistantStreamingPlayback: Promise.resolve(),
+    assistantStreamingPlaybackError: null,
+    setData(patch) {
+      this.data = { ...this.data, ...patch };
+    },
+  };
+
+  page.finishStreamingAudioFrames.call(context, {
+    duration_seconds: 2,
+  }, 0);
+  await context.assistantStreamingPlayback;
+
+  assert.equal(context.data.followUpTTSStateText, "正在整理回应");
+  assert.equal(context.data.ttsSpokenText, "欢迎");
+  assert.equal(context.data.ttsCurrentText, "回");
+  assert.equal(context.data.ttsProgressPercent, 25);
+  assert.equal(context.assistantStreamingAudioDurationSeconds, 2);
+});
+
+test("voice chat ignores stale streaming audio done duration", async () => {
+  const page = loadVoiceChatPage();
+  const context = {
+    ...page,
+    data: {
+      ...page.data,
+      assistantPromptText: "欢迎回来，咱们接着聊。",
+      followUpTTSPlaying: true,
+    },
+    assistantStreamingAudioDurationSeconds: 4,
+    assistantStreamingPlaybackController: {
+      async waitForDrain() {
+        throw new Error("stale audio done should not wait for drain");
+      },
+      stop() {},
+      stats() {
+        return {
+          segmentCount: 1,
+          underrunCount: 0,
+          nextPlayTimeSeconds: 12,
+          currentTimeSeconds: 12,
+          queuedAheadSeconds: 0,
+        };
+      },
+    },
+    assistantStreamingPlayback: Promise.resolve(),
+    assistantStreamingPlaybackError: null,
+    setData(patch) {
+      this.data = { ...this.data, ...patch };
+    },
+  };
+
+  page.finishStreamingAudioFrames.call(context, {
+    duration_seconds: 9,
+  }, -1);
+  await context.assistantStreamingPlayback;
+
+  assert.equal(context.assistantStreamingAudioDurationSeconds, 4);
+  assert.equal(context.data.followUpTTSStateText, "");
+});
+
 test("voice chat keeps completed streaming assistant turns when playback fails", async () => {
   const page = loadVoiceChatPage({
     assistantTurnStreamExports: {
@@ -1160,6 +1329,70 @@ test("voice chat replays an existing assistant audio file without regenerating T
 
   assert.deepEqual(played, [{ audioFileId: "audio-question-1", token: 1 }]);
   assert.deepEqual(generated, []);
+});
+
+test("voice chat reuses streaming audio duration for the first replay highlight", async () => {
+  const prompt = "那时候在院子里，外婆最常带着您做什么？";
+  const progressCalls = [];
+  const page = loadVoiceChatPage({
+    ttsTextProgressExports: {
+      splitTextByAudioPlaybackProgress: (text, currentTime, duration) => {
+        progressCalls.push({ text, currentTime, duration });
+        if (currentTime <= 0) {
+          return {
+            spokenText: "",
+            currentText: "",
+            remainingText: text,
+            progressPercent: 0,
+          };
+        }
+        return {
+          spokenText: "那时候",
+          currentText: "在",
+          remainingText: "院子里，外婆最常带着您做什么？",
+          progressPercent: 25,
+        };
+      },
+    },
+  });
+  const context = {
+    ...page,
+    data: {
+      ...page.data,
+      followUpAudioFileId: "audio-question-1",
+      followUpMessageId: "assistant-question-1",
+      assistantPromptText: prompt,
+      ttsAlignment: [],
+      ttsSpokenText: prompt,
+      ttsProgressPercent: 100,
+    },
+    assistantStreamingAudioDurationSeconds: 4,
+    audioPlayback: {
+      nextToken: () => 1,
+      currentToken: () => 1,
+      currentAudio: () => null,
+      isCurrentToken: () => true,
+      stop() {},
+      playFile: async (_audioFileId, _token, options) => {
+        const audio = { currentTime: 1, duration: 0 };
+        options.onPlayRequested?.(audio);
+        options.onTimeUpdate?.(audio);
+        assert.equal(context.data.ttsSpokenText, "那时候");
+        assert.equal(context.data.ttsCurrentText, "在");
+        assert.equal(context.data.ttsProgressPercent, 25);
+        options.onEnded?.();
+      },
+    },
+    setData(patch) {
+      this.data = { ...this.data, ...patch };
+    },
+  };
+
+  await page.playFollowUpAudio.call(context);
+  page.stopFollowUpProgressTimer.call(context);
+
+  assert.equal(progressCalls.some((call) => call.currentTime === 1 && call.duration === 4), true);
+  assert.equal(progressCalls[0].text, prompt);
 });
 
 test("voice chat caps streaming playback progress before the completed turn state", () => {
