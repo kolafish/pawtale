@@ -1758,6 +1758,52 @@ test("book page sends source coverage context when parsing book voice questions"
   delete global.wx;
 });
 
+test("book page treats reading an uncovered source as a spoken answer", async () => {
+  const calls = [];
+  global.wx = { showToast(options) { calls.push({ kind: "toast", title: options.title }); } };
+  const answerPreview = sampleBookVoiceCommandPreview({
+    original_text: "你给我念一下第一条没收入的记录吧",
+    intent: "read_uncovered_source",
+    intent_label: "朗读记录",
+    response_kind: "answer",
+    summary: "读出一条待收录讲述记录。",
+    reply_text: "待收录第 1 条，语音记录 3：新增转写。你可以说，把这条归到第几章。",
+    operations: [],
+    requires_confirmation: false,
+  });
+  const { page } = loadBookPage({
+    voiceApiExports: {
+      parseMemoirBookVoiceCommand: async (projectId, data) => {
+        calls.push({ kind: "parse", projectId, data });
+        return answerPreview;
+      },
+    },
+    streamingAsrExports: {
+      MemoirStreamingAsrClient: streamingAsrClientForFinal(calls, "你给我念一下第一条没收入的记录吧"),
+    },
+  });
+  const context = pageContext(page, { projectId: "project/1" });
+  page.applyPlan.call(context, samplePlan("confirmed"));
+  page.applySourceCoverage.call(context, sampleSourceCoverage(1));
+  context.playBookVoiceAssistantReply = async (text, options) => {
+    calls.push({ kind: "reply", text, options });
+  };
+
+  await page.startBookVoiceCommand.call(context);
+  await flushAsyncWork();
+
+  assert.equal(context.data.bookVoiceCommandResponseKind, "answer");
+  assert.equal(context.data.bookVoiceCommandPanelTitle, "回答");
+  assert.equal(context.data.bookVoiceCommandStateText, "已回答");
+  assert.equal(context.data.bookVoiceCommandCanExecute, false);
+  assert.deepEqual(calls[5], {
+    kind: "reply",
+    text: "待收录第 1 条，语音记录 3：新增转写。你可以说，把这条归到第几章。",
+    options: { autoListenAfterPlayback: true },
+  });
+  delete global.wx;
+});
+
 test("book page treats voice editing advice as a spoken consultation", async () => {
   const calls = [];
   global.wx = { showToast(options) { calls.push({ kind: "toast", title: options.title }); } };

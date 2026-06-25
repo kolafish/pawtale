@@ -169,7 +169,9 @@ function isBookVoiceConsultationIntent(preview: MemoirBookVoiceCommandParseRespo
 }
 
 function isBookVoiceAnswerIntent(preview: MemoirBookVoiceCommandParseResponse): boolean {
-  return preview.intent === "answer_book_question" || preview.intent === "capability_help";
+  return preview.intent === "read_uncovered_source"
+    || preview.intent === "answer_book_question"
+    || preview.intent === "capability_help";
 }
 
 function isBookVoiceClarificationIntent(preview: MemoirBookVoiceCommandParseResponse): boolean {

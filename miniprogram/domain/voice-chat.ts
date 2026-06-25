@@ -495,6 +495,7 @@ export interface MemoirBookVoiceAssistantTTSRequest extends MemoirBookAudioReque
 export type MemoirBookVoiceCommandIntent =
   | "read_outline"
   | "read_chapter"
+  | "read_uncovered_source"
   | "rename_chapter"
   | "merge_chapters"
   | "move_chapter"

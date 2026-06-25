@@ -51,11 +51,11 @@ test("uses alignment in audio playback progress when available", () => {
   });
 });
 
-test("does not highlight text without native timing", () => {
+test("estimates highlighted text without native timing", () => {
   assert.deepEqual(splitTextByAudioPlaybackProgress("你好，世界", 0.5, 2), {
-    spokenText: "",
-    currentText: "",
-    remainingText: "你好，世界",
+    spokenText: "你",
+    currentText: "好",
+    remainingText: "，世界",
     progressPercent: 25,
   });
 });
@@ -71,5 +71,20 @@ test("does not highlight text before the first aligned character starts", () => 
     currentText: "",
     remainingText: "你好",
     progressPercent: 17,
+  });
+});
+
+test("falls back to estimated progress when alignment text does not match", () => {
+  const alignment = [
+    { text: "世界", start_ms: 0, end_ms: 400, text_start: 0, text_end: 2 },
+  ];
+
+  assert.deepEqual(splitTextByAudioPlaybackProgress("你好，世界", 0.5, 2, {
+    alignment,
+  }), {
+    spokenText: "你",
+    currentText: "好",
+    remainingText: "，世界",
+    progressPercent: 25,
   });
 });

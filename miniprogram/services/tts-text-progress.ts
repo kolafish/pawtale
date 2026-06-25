@@ -27,6 +27,34 @@ function textWithoutHighlight(text: string, progressPercent = 0): TTSProgressTex
   };
 }
 
+function textWithEstimatedProgress(text: string, progressPercent = 0): TTSProgressText {
+  const characters = Array.from(text || "");
+  if (!characters.length) {
+    return textWithoutHighlight(text, progressPercent);
+  }
+  const percent = Math.max(0, Math.min(100, progressPercent));
+  if (percent <= 0) {
+    return textWithoutHighlight(text, percent);
+  }
+  if (percent >= 100) {
+    return {
+      spokenText: characters.join(""),
+      currentText: "",
+      remainingText: "",
+      progressPercent: 100,
+    };
+  }
+  const progress = percent / 100;
+  const spokenLength = Math.max(0, Math.min(characters.length - 1, Math.floor(progress * characters.length)));
+  const currentEnd = Math.min(spokenLength + 1, characters.length);
+  return {
+    spokenText: characters.slice(0, spokenLength).join(""),
+    currentText: characters.slice(spokenLength, currentEnd).join(""),
+    remainingText: characters.slice(currentEnd).join(""),
+    progressPercent: percent,
+  };
+}
+
 function validAlignmentSegment(segment: TTSAlignmentSegment, textLength: number): boolean {
   return Number.isFinite(segment.start_ms)
     && Number.isFinite(segment.end_ms)
@@ -39,6 +67,35 @@ function validAlignmentSegment(segment: TTSAlignmentSegment, textLength: number)
     && segment.text_start < textLength;
 }
 
+function segmentMatchesText(segment: TTSAlignmentSegment, characters: string[]): boolean {
+  const expected = characters.slice(segment.text_start, Math.min(segment.text_end, characters.length)).join("");
+  return typeof segment.text === "string" && segment.text === expected;
+}
+
+function normalizedAlignmentSegments(
+  text: string,
+  alignment: TTSAlignmentSegment[],
+): TTSAlignmentSegment[] {
+  const characters = Array.from(text || "");
+  const segments = alignment
+    .filter((segment) => validAlignmentSegment(segment, characters.length))
+    .map((segment) => ({
+      ...segment,
+      text_end: Math.min(segment.text_end, characters.length),
+    }))
+    .filter((segment) => segmentMatchesText(segment, characters))
+    .sort((left, right) => left.start_ms - right.start_ms || left.text_start - right.text_start);
+
+  let previousTextStart = -1;
+  return segments.filter((segment) => {
+    if (segment.text_start < previousTextStart) {
+      return false;
+    }
+    previousTextStart = segment.text_start;
+    return true;
+  });
+}
+
 export function splitTextByTimedAlignment(
   text: string,
   currentTimeMs: number,
@@ -49,13 +106,7 @@ export function splitTextByTimedAlignment(
     return textWithoutHighlight(text);
   }
 
-  const segments = alignment
-    .filter((segment) => validAlignmentSegment(segment, characters.length))
-    .map((segment) => ({
-      ...segment,
-      text_end: Math.min(segment.text_end, characters.length),
-    }))
-    .sort((left, right) => left.start_ms - right.start_ms || left.text_start - right.text_start);
+  const segments = normalizedAlignmentSegments(text, alignment);
   if (!segments.length) {
     return textWithoutHighlight(text);
   }
@@ -119,8 +170,11 @@ export function splitTextByAudioPlaybackProgress(
   const currentSeconds = Math.max(0, Number.isFinite(currentTimeSeconds) ? currentTimeSeconds : 0);
   const alignment = options.alignment || [];
   if (alignment.length) {
-    return splitTextByTimedAlignment(text, currentSeconds * 1000, alignment);
+    const hasTrustedAlignment = normalizedAlignmentSegments(text, alignment).length > 0;
+    if (hasTrustedAlignment) {
+      return splitTextByTimedAlignment(text, currentSeconds * 1000, alignment);
+    }
   }
 
-  return textWithoutHighlight(text, playbackProgressPercent(currentSeconds, durationSeconds));
+  return textWithEstimatedProgress(text, playbackProgressPercent(currentSeconds, durationSeconds));
 }
