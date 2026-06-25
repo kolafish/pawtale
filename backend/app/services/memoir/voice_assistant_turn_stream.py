@@ -1,0 +1,718 @@
+from __future__ import annotations
+
+import asyncio
+import base64
+import contextlib
+import math
+from collections.abc import AsyncIterator
+from dataclasses import dataclass, field
+from typing import Protocol
+import uuid
+
+from fastapi import HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.domain.memoir.types import MemoirChatContentStatus, MemoirChatMessageRole
+from app.models.memoir import MemoirChatMessage, MemoirVoiceSession
+from app.services.ai_factory import get_ai_service
+from app.services.ai_streaming import AITextStreamChunk
+from app.services.ai_types import AITextClient
+from app.services.memoir.audio_files import StagedAudioFile, discard_staged_audio, stage_audio_bytes
+from app.services.memoir.tts_alignment import alignment_segments_to_json
+from app.services.memoir.voice_followup_ai import (
+    SYSTEM_PROMPT,
+    GUIDED_TOPIC_LIBRARY,
+    GUIDED_TOPIC_MENU,
+    PROMPT_VERSION,
+    InterviewerTurn,
+    _has_user_message,
+    _llm_max_tokens,
+    _module_label,
+    _parse_interviewer_turn,
+    _previous_context,
+    _question_mark_count,
+    _recent_context,
+    _requested_topic_hint,
+)
+from app.services.memoir.voice_followups import (
+    _load_previous_project_messages,
+    _load_voice_session,
+    _next_turn_index,
+)
+from app.services.memoir.voice_tts import (
+    DEFAULT_TTS_SPEED_RATIO,
+    TTSClient,
+    StreamingTTSChunk,
+    get_tts_client,
+)
+
+
+STREAM_PROMPT_VERSION = "memoir_voice_interviewer_stream_turn_v1"
+STREAM_TEXT_TEMPERATURE = 0.72
+STREAM_TEXT_TIMEOUT_SECONDS = 60.0
+STREAM_TTS_QUEUE_SIZE = 4
+SEGMENT_MIN_CHARS = 10
+SEGMENT_MAX_CHARS = 56
+SEGMENT_BREAK_CHARS = "。！？!?；;\n"
+_PCM_MIME_TYPES = {"audio/l16", "audio/pcm", "audio/x-pcm"}
+
+
+class AssistantTurnStreamClient(Protocol):
+    async def receive_json(self) -> dict:
+        ...
+
+    async def send_json(self, payload: dict) -> None:
+        ...
+
+
+@dataclass(frozen=True)
+class AssistantTurnStartRequest:
+    ai_model: str | None = None
+    voice: str | None = None
+    speed_ratio: float | None = None
+    regenerate: bool = False
+    temperature: float = STREAM_TEXT_TEMPERATURE
+
+    @classmethod
+    def from_payload(cls, payload: dict) -> "AssistantTurnStartRequest":
+        temperature = payload.get("temperature", STREAM_TEXT_TEMPERATURE)
+        try:
+            normalized_temperature = float(temperature)
+        except (TypeError, ValueError):
+            normalized_temperature = STREAM_TEXT_TEMPERATURE
+        normalized_temperature = max(0.0, min(1.5, normalized_temperature))
+
+        speed_ratio = payload.get("speed_ratio")
+        try:
+            normalized_speed_ratio = float(speed_ratio) if speed_ratio is not None else None
+        except (TypeError, ValueError):
+            normalized_speed_ratio = None
+        if normalized_speed_ratio is not None:
+            normalized_speed_ratio = max(0.5, min(2.0, normalized_speed_ratio))
+
+        return cls(
+            ai_model=_optional_text(payload.get("ai_model")),
+            voice=_optional_text(payload.get("voice")),
+            speed_ratio=normalized_speed_ratio,
+            regenerate=bool(payload.get("regenerate", False)),
+            temperature=normalized_temperature,
+        )
+
+
+@dataclass(frozen=True)
+class AssistantSpeechSegment:
+    index: int
+    text: str
+
+
+@dataclass
+class AssistantTurnArtifacts:
+    text: str = ""
+    finish_reason: str | None = None
+    usage: dict = field(default_factory=dict)
+    audio_chunks: list[bytes] = field(default_factory=list)
+    audio_mime_type: str | None = None
+    tts_provider: str | None = None
+    tts_model: str | None = None
+    tts_voice: str | None = None
+    tts_speed_ratio: float = DEFAULT_TTS_SPEED_RATIO
+    tts_duration_seconds: float | None = None
+    tts_alignment: list = field(default_factory=list)
+
+    def append_tts_chunk(self, chunk: StreamingTTSChunk) -> None:
+        if chunk.audio:
+            self.audio_chunks.append(chunk.audio)
+            self.audio_mime_type = self.audio_mime_type or chunk.mime_type
+            self.tts_provider = self.tts_provider or chunk.provider
+            self.tts_model = self.tts_model or chunk.model
+            self.tts_voice = self.tts_voice or chunk.voice
+            self.tts_speed_ratio = chunk.speed_ratio
+        if chunk.is_final:
+            self.audio_mime_type = self.audio_mime_type or chunk.mime_type
+            self.tts_provider = self.tts_provider or chunk.provider
+            self.tts_model = self.tts_model or chunk.model
+            self.tts_voice = self.tts_voice or chunk.voice
+            self.tts_speed_ratio = chunk.speed_ratio
+            self.tts_duration_seconds = chunk.duration_seconds
+            self.tts_alignment.extend(chunk.alignment)
+
+    @property
+    def audio(self) -> bytes:
+        return b"".join(self.audio_chunks)
+
+
+class AssistantTurnSegmenter:
+    def __init__(
+        self,
+        *,
+        min_chars: int = SEGMENT_MIN_CHARS,
+        max_chars: int = SEGMENT_MAX_CHARS,
+    ) -> None:
+        self.min_chars = min_chars
+        self.max_chars = max_chars
+        self._buffer = ""
+
+    def push(self, text_delta: str) -> list[str]:
+        self._buffer += text_delta
+        return self._drain(final=False)
+
+    def flush(self) -> list[str]:
+        return self._drain(final=True)
+
+    def _drain(self, *, final: bool) -> list[str]:
+        segments: list[str] = []
+        while True:
+            split_at = self._split_index(final=final)
+            if split_at is None:
+                return segments
+            segment = self._buffer[:split_at].strip()
+            self._buffer = self._buffer[split_at:].lstrip()
+            if segment:
+                segments.append(segment)
+
+    def _split_index(self, *, final: bool) -> int | None:
+        if not self._buffer:
+            return None
+        if final:
+            return len(self._buffer)
+        for index, char in enumerate(self._buffer):
+            if index + 1 < self.min_chars:
+                continue
+            if char in SEGMENT_BREAK_CHARS:
+                return index + 1
+        if len(self._buffer) >= self.max_chars:
+            return self._fallback_split_index()
+        return None
+
+    def _fallback_split_index(self) -> int:
+        for index in range(min(len(self._buffer), self.max_chars) - 1, self.min_chars - 1, -1):
+            if self._buffer[index] in "，,、 ":
+                return index + 1
+        return min(len(self._buffer), self.max_chars)
+
+
+class VoiceAssistantTurnStreamSession:
+    def __init__(
+        self,
+        *,
+        db: AsyncSession,
+        client: AssistantTurnStreamClient,
+        voice_session_id: str,
+        user_id: str,
+        ai_client_factory=get_ai_service,
+        tts_client_factory=get_tts_client,
+    ) -> None:
+        self.db = db
+        self.client = client
+        self.voice_session_id = voice_session_id
+        self.user_id = user_id
+        self.ai_client_factory = ai_client_factory
+        self.tts_client_factory = tts_client_factory
+
+    async def run(self) -> None:
+        await self.client.send_json(
+            {
+                "type": "turn.ready",
+                "voice_session_id": self.voice_session_id,
+                "state": "ready",
+            }
+        )
+        message = await self.client.receive_json()
+        message_type = message.get("type")
+        if message_type in {"connection.close", "turn.cancel"}:
+            return
+        if message_type != "turn.start":
+            await self.client.send_json(
+                {
+                    "type": "turn.failed",
+                    "voice_session_id": self.voice_session_id,
+                    "error": "turn_start_required",
+                }
+            )
+            return
+        await self._run_turn(AssistantTurnStartRequest.from_payload(message))
+
+    async def _run_turn(self, req: AssistantTurnStartRequest) -> None:
+        turn_id = str(uuid.uuid4())
+        cancel_event = asyncio.Event()
+        cancel_task = asyncio.create_task(self._wait_for_cancel(cancel_event))
+        stream_task = asyncio.create_task(self._stream_turn(turn_id, req, cancel_event))
+        done, _pending = await asyncio.wait(
+            {cancel_task, stream_task},
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+
+        if cancel_task in done:
+            client_disconnected = False
+            try:
+                await cancel_task
+            except Exception:
+                client_disconnected = True
+            cancel_event.set()
+            stream_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await stream_task
+            if client_disconnected:
+                await self.db.rollback()
+                return
+            await self.client.send_json(
+                {
+                    "type": "turn.cancelled",
+                    "turn_id": turn_id,
+                    "voice_session_id": self.voice_session_id,
+                    "state": "cancelled",
+                }
+            )
+            return
+
+        cancel_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await cancel_task
+
+        try:
+            await stream_task
+        except Exception as exc:
+            await self.db.rollback()
+            await self.client.send_json(
+                {
+                    "type": "turn.failed",
+                    "turn_id": turn_id,
+                    "voice_session_id": self.voice_session_id,
+                    "state": "failed",
+                    "error": _exception_message(exc),
+                }
+            )
+
+    async def _wait_for_cancel(self, cancel_event: asyncio.Event) -> None:
+        while not cancel_event.is_set():
+            message = await self.client.receive_json()
+            if message.get("type") in {"turn.cancel", "connection.close"}:
+                cancel_event.set()
+                return
+
+    async def _stream_turn(
+        self,
+        turn_id: str,
+        req: AssistantTurnStartRequest,
+        cancel_event: asyncio.Event,
+    ) -> None:
+        voice_session = await _load_voice_session(self.db, self.voice_session_id, self.user_id)
+        previous_messages = await _load_previous_project_messages(self.db, voice_session)
+        messages = list(voice_session.messages)
+        has_user_message = _has_user_message(messages)
+        fallback_intent = "follow_up" if has_user_message else "opening"
+        max_tokens = _llm_max_tokens(
+            voice_session,
+            has_user_message=has_user_message,
+            regenerate=req.regenerate,
+        )
+        prompt = _build_stream_turn_prompt(
+            voice_session,
+            previous_messages=previous_messages,
+            regenerate=req.regenerate,
+        )
+        ai_client = self.ai_client_factory(req.ai_model)
+        tts_client = self.tts_client_factory()
+        artifacts = AssistantTurnArtifacts()
+        segment_queue: asyncio.Queue[AssistantSpeechSegment | None] = asyncio.Queue(STREAM_TTS_QUEUE_SIZE)
+
+        await self.client.send_json(
+            {
+                "type": "turn.started",
+                "turn_id": turn_id,
+                "voice_session_id": self.voice_session_id,
+                "state": "streaming",
+                "ai_provider": ai_client.provider_name,
+                "ai_model": ai_client.model_name,
+                "tts_provider": tts_client.provider_name,
+                "tts_model": tts_client.model_name,
+                "max_tokens": max_tokens,
+            }
+        )
+
+        producer = asyncio.create_task(
+            self._produce_text_segments(
+                ai_client=ai_client,
+                prompt=prompt,
+                req=req,
+                max_tokens=max_tokens,
+                turn_id=turn_id,
+                artifacts=artifacts,
+                segment_queue=segment_queue,
+                cancel_event=cancel_event,
+            )
+        )
+        consumer = asyncio.create_task(
+            self._stream_tts_segments(
+                tts_client=tts_client,
+                req=req,
+                turn_id=turn_id,
+                artifacts=artifacts,
+                segment_queue=segment_queue,
+                cancel_event=cancel_event,
+            )
+        )
+        try:
+            await asyncio.gather(producer, consumer)
+        except Exception:
+            producer.cancel()
+            consumer.cancel()
+            await asyncio.gather(producer, consumer, return_exceptions=True)
+            raise
+
+        if cancel_event.is_set():
+            return
+        turn = _parse_interviewer_turn(artifacts.text, fallback_intent=fallback_intent)
+        message, audio_file_id = await self._persist_completed_turn(
+            voice_session=voice_session,
+            turn=turn,
+            artifacts=artifacts,
+            ai_client=ai_client,
+            max_tokens=max_tokens,
+            req=req,
+        )
+        await self.client.send_json(
+            {
+                "type": "turn.completed",
+                "turn_id": turn_id,
+                "voice_session_id": self.voice_session_id,
+                "state": "completed",
+                "message_id": message.id,
+                "audio_file_id": audio_file_id,
+                "text": turn.speech_text,
+                "primary_intent": turn.primary_intent,
+                "intent_tags": turn.intent_tags,
+                "expects_answer": turn.expects_answer,
+                "finish_reason": artifacts.finish_reason,
+                "usage": artifacts.usage,
+            }
+        )
+
+    async def _produce_text_segments(
+        self,
+        *,
+        ai_client: AITextClient,
+        prompt: str,
+        req: AssistantTurnStartRequest,
+        max_tokens: int,
+        turn_id: str,
+        artifacts: AssistantTurnArtifacts,
+        segment_queue: asyncio.Queue[AssistantSpeechSegment | None],
+        cancel_event: asyncio.Event,
+    ) -> None:
+        segmenter = AssistantTurnSegmenter()
+        segment_index = 0
+        try:
+            async for chunk in ai_client.stream_llm(
+                SYSTEM_PROMPT,
+                prompt,
+                temperature=req.temperature,
+                max_tokens=max_tokens,
+                timeout=STREAM_TEXT_TIMEOUT_SECONDS,
+            ):
+                if cancel_event.is_set():
+                    return
+                artifacts.finish_reason = chunk.finish_reason or artifacts.finish_reason
+                if chunk.usage:
+                    artifacts.usage = chunk.usage
+                if not chunk.text_delta:
+                    continue
+                artifacts.text += chunk.text_delta
+                await self.client.send_json(
+                    {
+                        "type": "text.delta",
+                        "turn_id": turn_id,
+                        "voice_session_id": self.voice_session_id,
+                        "text_delta": chunk.text_delta,
+                        "text": artifacts.text,
+                    }
+                )
+                for text in segmenter.push(chunk.text_delta):
+                    segment_index = await self._enqueue_segment(
+                        segment_queue,
+                        turn_id=turn_id,
+                        segment_index=segment_index,
+                        text=text,
+                        cancel_event=cancel_event,
+                    )
+            for text in segmenter.flush():
+                segment_index = await self._enqueue_segment(
+                    segment_queue,
+                    turn_id=turn_id,
+                    segment_index=segment_index,
+                    text=text,
+                    cancel_event=cancel_event,
+                )
+        finally:
+            await _finish_segment_queue(segment_queue, cancel_event=cancel_event)
+
+    async def _enqueue_segment(
+        self,
+        segment_queue: asyncio.Queue[AssistantSpeechSegment | None],
+        *,
+        turn_id: str,
+        segment_index: int,
+        text: str,
+        cancel_event: asyncio.Event,
+    ) -> int:
+        if cancel_event.is_set():
+            return segment_index
+        segment = AssistantSpeechSegment(index=segment_index, text=text)
+        await self.client.send_json(
+            {
+                "type": "text.segment",
+                "turn_id": turn_id,
+                "voice_session_id": self.voice_session_id,
+                "segment_index": segment.index,
+                "text": segment.text,
+            }
+        )
+        await segment_queue.put(segment)
+        return segment_index + 1
+
+    async def _stream_tts_segments(
+        self,
+        *,
+        tts_client: TTSClient,
+        req: AssistantTurnStartRequest,
+        turn_id: str,
+        artifacts: AssistantTurnArtifacts,
+        segment_queue: asyncio.Queue[AssistantSpeechSegment | None],
+        cancel_event: asyncio.Event,
+    ) -> None:
+        while not cancel_event.is_set():
+            segment = await segment_queue.get()
+            if segment is None:
+                return
+            segment_duration = None
+            async for chunk in tts_client.stream_synthesize(
+                segment.text,
+                voice=req.voice,
+                speed_ratio=req.speed_ratio,
+            ):
+                if cancel_event.is_set():
+                    return
+                artifacts.append_tts_chunk(chunk)
+                if chunk.duration_seconds is not None:
+                    segment_duration = chunk.duration_seconds
+                if chunk.audio:
+                    await self.client.send_json(
+                        {
+                            "type": "audio.chunk",
+                            "turn_id": turn_id,
+                            "voice_session_id": self.voice_session_id,
+                            "segment_index": segment.index,
+                            "sequence": chunk.sequence,
+                            "audio": base64.b64encode(chunk.audio).decode("ascii"),
+                            "mime_type": chunk.mime_type,
+                            "provider": chunk.provider,
+                            "model": chunk.model,
+                            "voice": chunk.voice,
+                            "speed_ratio": chunk.speed_ratio,
+                        }
+                    )
+            await self.client.send_json(
+                {
+                    "type": "audio.segment_done",
+                    "turn_id": turn_id,
+                    "voice_session_id": self.voice_session_id,
+                    "segment_index": segment.index,
+                    "duration_seconds": segment_duration,
+                }
+            )
+
+    async def _persist_completed_turn(
+        self,
+        *,
+        voice_session: MemoirVoiceSession,
+        turn: InterviewerTurn,
+        artifacts: AssistantTurnArtifacts,
+        ai_client: AITextClient,
+        max_tokens: int,
+        req: AssistantTurnStartRequest,
+    ) -> tuple[MemoirChatMessage, str | None]:
+        if not turn.speech_text:
+            raise HTTPException(status_code=502, detail="AI 未返回可用访谈回应")
+        staged_audio: StagedAudioFile | None = None
+        if artifacts.audio:
+            mime_type, extension = _storage_audio_type(artifacts.audio_mime_type)
+            staged_audio = await stage_audio_bytes(
+                self.db,
+                self.user_id,
+                artifacts.audio,
+                mime_type=mime_type,
+                extension=extension,
+                duration_seconds=(
+                    math.ceil(artifacts.tts_duration_seconds)
+                    if artifacts.tts_duration_seconds is not None
+                    else None
+                ),
+            )
+        try:
+            message = MemoirChatMessage(
+                project_id=voice_session.project_id,
+                voice_session_id=voice_session.id,
+                role=MemoirChatMessageRole.ASSISTANT.value,
+                content_text=turn.speech_text,
+                content_status=MemoirChatContentStatus.FINAL.value,
+                audio_file_id=staged_audio.audio_file.id if staged_audio else None,
+                guidance_intent=turn.primary_intent,
+                turn_index=await _next_turn_index(self.db, voice_session.id),
+                metadata_json={
+                    "source": "ai.streaming_assistant_turn",
+                    "prompt_version": STREAM_PROMPT_VERSION,
+                    "legacy_prompt_version": PROMPT_VERSION,
+                    "primary_intent": turn.primary_intent,
+                    "intent_tags": turn.intent_tags,
+                    "expects_answer": turn.expects_answer,
+                    "parsed_json": turn.parsed_json,
+                    "provider": ai_client.provider_name,
+                    "model": ai_client.model_name,
+                    "max_tokens": max_tokens,
+                    "temperature": req.temperature,
+                    "regenerate": req.regenerate,
+                    "response_chars": len(turn.speech_text),
+                    "question_mark_count": _question_mark_count(turn.speech_text),
+                    "finish_reason": artifacts.finish_reason,
+                    "usage": artifacts.usage,
+                    "tts_provider": artifacts.tts_provider,
+                    "tts_model": artifacts.tts_model,
+                    "tts_voice": artifacts.tts_voice,
+                    "tts_mime_type": artifacts.audio_mime_type,
+                    "tts_speed_ratio": artifacts.tts_speed_ratio,
+                    "tts_duration_seconds": artifacts.tts_duration_seconds,
+                    "tts_alignment": alignment_segments_to_json(artifacts.tts_alignment),
+                    "tts_timing_source": artifacts.tts_provider if artifacts.tts_alignment else None,
+                    "turn_pipeline": "streaming_llm_tts",
+                },
+            )
+            self.db.add(message)
+            await self.db.commit()
+        except Exception:
+            await self.db.rollback()
+            await discard_staged_audio(staged_audio)
+            raise
+        await self.db.refresh(message)
+        return message, staged_audio.audio_file.id if staged_audio else None
+
+
+def _build_stream_turn_prompt(
+    voice_session: MemoirVoiceSession,
+    *,
+    previous_messages: list[MemoirChatMessage],
+    regenerate: bool,
+) -> str:
+    messages = list(voice_session.messages)
+    has_user_message = _has_user_message(messages)
+    has_previous_user_message = _has_user_message(previous_messages)
+    context = _recent_context(messages)
+    history_context = _previous_context(previous_messages)
+    module_label = _module_label(voice_session.current_guidance_module)
+    topic_hint = _requested_topic_hint(messages)
+    regenerate_instruction = "这次是在替换上一句回应，请换一个角度，不要重复上一句。" if regenerate else ""
+    if voice_session.guidance_mode == "guided_interview":
+        if has_user_message:
+            mode_instruction = f"""当前是主题讲述，当前主题线索是“{module_label}”；如果最近对话中叙述者已经选择了其他主题，以最近对话为准。
+- 如果叙述者明确说想换主题，下一句必须围绕新主题展开，不要继续旧话题
+- 先从宏观问题开始，不要立刻追细节
+- 帮叙述者把当前主题讲完整：时间、地点、人物、发生了什么、当时感受、后来影响
+- 不要连续追同一个细节超过两轮
+{GUIDED_TOPIC_LIBRARY}"""
+        elif has_previous_user_message:
+            mode_instruction = f"""当前是主题讲述继续开场，叙述者之前已有同模式讲述记录。
+- 开头要明确体现回访，例如“欢迎回来，咱们接着聊”
+- 根据历史会话进度提醒上次讲到哪里，只能复述明确出现过的内容
+- 优先邀请叙述者接着上次的话题继续讲，同时允许他重新选主题
+- 主题介绍只做一句简短兜底：如果今天想换方向，也可以从这些主题里挑一个：{GUIDED_TOPIC_MENU}"""
+        else:
+            mode_instruction = f"""当前是主题讲述首次开场。
+- 先问好，并用“老余”做简短自我介绍
+- 明确介绍可聊主题：{GUIDED_TOPIC_MENU}
+- 先让叙述者选择想聊哪个主题，不要立刻进入细节"""
+    else:
+        if has_user_message:
+            mode_instruction = """当前是自由讲述，AI 只做弱引导。
+- 顺着叙述者自己的时间线走，尽量不要突然换主题
+- 如果这件事重要、有情绪或有转折，鼓励他多讲一点
+- 如果这件事已经讲得差不多，就自然引导到前后时间、相关人物，或下一段回忆"""
+        elif has_previous_user_message:
+            mode_instruction = """当前是自由讲述开场，AI 只做弱引导，叙述者之前已有讲述记录。
+- 根据历史会话进度提醒上次讲到哪里，只能复述明确出现过的内容
+- 温和提示叙述者可以从上次停下来的地方接着讲"""
+        else:
+            mode_instruction = """当前是自由讲述开场，AI 只做弱引导。
+- 先问好，并用“老余”做简短自我介绍
+- 引导叙述者可以从小时候或最早的记忆开始讲起
+- 仍然允许叙述者按自己的顺序开始，不要连续提问"""
+    return f"""请根据下面的访谈上下文，直接生成下一句“老余”要说的话。
+
+输出要求：
+- 只输出要播放的中文口语正文，不要 JSON，不要 Markdown，不要解释
+- 你可以自主组合动作：承接认可、鼓励继续讲、小结、自然换方向、继续追问，或没听清/太短时温和接住
+- 普通回应 1 到 3 句，建议 40 到 90 个汉字；开场可以稍长
+- 不要机械重复叙述者刚说过的话；认可必须落在具体内容上，但不要把用户原话换个说法再说一遍
+- 如果要问问题，一次只问一个自然问题
+- 不要编造上下文没有的信息；如果提醒“上次讲到哪里”，只能概括历史会话里明确出现过的内容
+- 如果用户最新一句明确要求换方向，必须尊重最新一句
+{regenerate_instruction}
+{topic_hint}
+
+{mode_instruction}
+
+访谈上下文：
+{context}
+
+历史会话进度：
+{history_context}
+"""
+
+
+def _storage_audio_type(mime_type: str | None) -> tuple[str, str]:
+    normalized = (mime_type or "audio/pcm").split(";")[0].strip().lower()
+    if normalized in _PCM_MIME_TYPES:
+        return "audio/pcm", ".pcm"
+    if normalized in {"audio/mpeg", "audio/mp3"}:
+        return "audio/mpeg", ".mp3"
+    if normalized in {"audio/wav", "audio/x-wav", "audio/wave"}:
+        return "audio/wav", ".wav"
+    if normalized == "audio/ogg":
+        return "audio/ogg", ".ogg"
+    return "audio/pcm", ".pcm"
+
+
+def _optional_text(value: object) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _exception_message(exc: Exception) -> str:
+    if isinstance(exc, HTTPException):
+        return str(exc.detail)
+    return str(exc) or exc.__class__.__name__
+
+
+async def _finish_segment_queue(
+    segment_queue: asyncio.Queue[AssistantSpeechSegment | None],
+    *,
+    cancel_event: asyncio.Event,
+) -> None:
+    current_task = asyncio.current_task()
+    cancelling = current_task.cancelling() if current_task else 0
+    if cancel_event.is_set() or cancelling:
+        with contextlib.suppress(asyncio.QueueFull):
+            segment_queue.put_nowait(None)
+        return
+    await segment_queue.put(None)
+
+
+async def iter_segmented_text(chunks: AsyncIterator[AITextStreamChunk]) -> AsyncIterator[str]:
+    segmenter = AssistantTurnSegmenter()
+    async for chunk in chunks:
+        if not chunk.text_delta:
+            continue
+        for segment in segmenter.push(chunk.text_delta):
+            yield segment
+    for segment in segmenter.flush():
+        yield segment

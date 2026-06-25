@@ -17,6 +17,7 @@ from app.schemas.memoir_voice import (
 from app.services.memoir import voice_sessions as memoir_voice_sessions
 from app.services.memoir.access import load_memoir_project
 from app.services.memoir.streaming_asr import create_volc_streaming_asr_client
+from app.services.memoir.voice_assistant_turn_stream import VoiceAssistantTurnStreamSession
 from app.services.memoir.voice_gateway import VoiceGatewaySession
 from app.services.memoir.voice_gateway_capacity import (
     VoiceGatewayCapacityError,
@@ -140,6 +141,45 @@ async def mobile_memoir_book_voice_command_gateway(
             ),
         )
         await gateway_session.run()
+    finally:
+        await capacity_lease.release()
+
+
+@router.websocket("/voice-sessions/{voice_session_id}/assistant-turn-stream")
+async def mobile_memoir_voice_assistant_turn_stream(
+    websocket: WebSocket,
+    voice_session_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    current_user = await _authenticate_websocket(websocket, db)
+    if current_user is None:
+        await _reject_websocket(websocket, "voice_gateway_auth_failed")
+        return
+    current_user_id = current_user.id
+
+    try:
+        await memoir_voice_sessions.get_voice_session_detail(db, voice_session_id, current_user_id)
+    except HTTPException:
+        await _reject_websocket(websocket, "voice_session_unavailable")
+        return
+
+    capacity_user_id = f"{current_user_id}:assistant-turn"
+    capacity_session_id = f"{voice_session_id}:assistant-turn"
+    try:
+        capacity_lease = await voice_gateway_capacity_manager.acquire(capacity_user_id, capacity_session_id)
+    except VoiceGatewayCapacityError as exc:
+        await _reject_websocket(websocket, exc.code)
+        return
+
+    try:
+        await websocket.accept()
+        stream_session = VoiceAssistantTurnStreamSession(
+            db=db,
+            client=websocket,
+            voice_session_id=voice_session_id,
+            user_id=current_user_id,
+        )
+        await stream_session.run()
     finally:
         await capacity_lease.release()
 
