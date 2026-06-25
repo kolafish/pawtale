@@ -50,8 +50,12 @@ import {
 } from "../../services/memoir-streaming-asr";
 import { readBookTTSSettings } from "../../services/tts-settings";
 import { AudioPlaybackController } from "../../services/audio-playback";
-import { BookVoiceAssistantTTSStreamClient } from "../../services/book-voice-assistant-tts-stream";
-import type { PreparedStreamingTTSAudioSegment } from "../../services/streaming-tts-segments";
+import {
+  BookVoiceAssistantTTSStreamClient,
+  type BookVoiceAssistantTTSAudioDoneEvent,
+  type PreparedBookVoiceAssistantTTSFrame,
+} from "../../services/book-voice-assistant-tts-stream";
+import { StreamingSpeechPlaybackController } from "../../services/streaming-speech-playback";
 import { StreamingVoiceController } from "../../services/streaming-voice-controller";
 import { writeTranscriptNavigationTarget } from "../../services/transcript-navigation";
 import {
@@ -414,11 +418,17 @@ Page<BookData, {
   canStartBookVoiceAssistantAutoListen(): boolean;
   scheduleBookVoiceAssistantAutoListen(statusText?: string): void;
   playBookVoiceAssistantReply(text: string, options?: { autoListenAfterPlayback?: boolean }): Promise<void>;
-  playBookVoiceAssistantAudioSegment(
-    segment: PreparedStreamingTTSAudioSegment,
+  playBookVoiceAssistantAudioFrame(
+    frame: PreparedBookVoiceAssistantTTSFrame,
     token: number,
     activeText: string,
   ): Promise<void>;
+  finishBookVoiceAssistantAudioFrames(
+    event: BookVoiceAssistantTTSAudioDoneEvent,
+    token: number,
+    activeText: string,
+  ): Promise<void>;
+  bookVoiceStreamingPlaybackController(): StreamingSpeechPlaybackController;
   bookVoiceCommandUndoSnapshot(): BookVoiceCommandUndoSnapshot | null;
   confirmBookVoiceCommandExecution(content: string, confirmText?: string): Promise<boolean>;
   requestBookAudio(target: string): Promise<MemoirBookAudioResponse>;
@@ -458,6 +468,7 @@ Page<BookData, {
   bookVoiceStreaming: StreamingVoiceController;
   bookVoiceTTSStreaming: BookVoiceAssistantTTSStreamClient | null;
   bookVoiceTTSPlayback: Promise<void>;
+  bookVoiceTTSPlaybackController: StreamingSpeechPlaybackController | null;
   playToken: number;
   ttsProgressTimer: number | null;
   ttsProgressStartedAtMs: number;
@@ -467,6 +478,7 @@ Page<BookData, {
   bookVoiceStreaming: new StreamingVoiceController(),
   bookVoiceTTSStreaming: null,
   bookVoiceTTSPlayback: Promise.resolve(),
+  bookVoiceTTSPlaybackController: null,
   playToken: 0,
   ttsProgressTimer: null,
   ttsProgressStartedAtMs: 0,
@@ -2043,9 +2055,14 @@ Page<BookData, {
             bookVoiceAssistantStatusText: "AI 正在说",
           });
         },
-        onAudioSegment: (segment) => {
+        onAudioFrame: (frame) => {
           this.bookVoiceTTSPlayback = this.bookVoiceTTSPlayback.then(() => (
-            this.playBookVoiceAssistantAudioSegment(segment, token, replyText)
+            this.playBookVoiceAssistantAudioFrame(frame, token, replyText)
+          ));
+        },
+        onAudioDone: (event) => {
+          this.bookVoiceTTSPlayback = this.bookVoiceTTSPlayback.then(() => (
+            this.finishBookVoiceAssistantAudioFrames(event, token, replyText)
           ));
         },
       });
@@ -2094,52 +2111,48 @@ Page<BookData, {
         this.setData({ bookVoiceAssistantSpeakingLineId: "" });
       }
       if (token === this.playToken) {
+        this.bookVoiceTTSPlaybackController?.stop();
+        this.bookVoiceTTSPlaybackController = null;
         this.bookVoiceTTSStreaming = null;
       }
     }
   },
 
-  async playBookVoiceAssistantAudioSegment(segment, token, activeText) {
+  async playBookVoiceAssistantAudioFrame(frame, token, activeText) {
     if (token !== this.playToken) {
-      segment.dispose();
       return;
     }
-    const spokenBefore = this.data.bookTTSSpokenText || "";
-    const prefix = `${spokenBefore}${segment.text}`;
     this.setData({
       bookTTSActiveTarget: "book-voice-assistant",
       bookTTSActiveText: activeText,
-      bookTTSCurrentText: segment.text,
-      bookTTSRemainingText: activeText.startsWith(prefix) ? activeText.slice(prefix.length) : "",
+      bookTTSCurrentText: activeText,
+      bookTTSRemainingText: "",
       bookVoiceAssistantStatusText: "AI 正在说",
     });
-    try {
-      await this.audioPlayback.playTempFile(segment.tempFilePath, token, {
-        onEnded: () => {
-          if (token !== this.playToken) {
-            return;
-          }
-          const spokenText = `${this.data.bookTTSSpokenText || ""}${segment.text}`;
-          this.setData({
-            bookTTSSpokenText: spokenText,
-            bookTTSCurrentText: "",
-            bookTTSRemainingText: activeText.startsWith(spokenText) ? activeText.slice(spokenText.length) : "",
-            bookTTSProgressPercent: activeText ? Math.min(100, Math.round(spokenText.length / activeText.length * 100)) : 100,
-          });
-        },
-        onError: () => {
-          if (token === this.playToken) {
-            this.setData({
-              error: "AI 语音播放失败",
-              bookVoiceAssistantStatusText: "AI 回复失败",
-            });
-          }
-        },
-        errorMessage: "AI 语音播放失败",
-      });
-    } finally {
-      segment.dispose();
+    await this.bookVoiceStreamingPlaybackController().appendFrame(frame);
+  },
+
+  async finishBookVoiceAssistantAudioFrames(_event, token, activeText) {
+    const controller = this.bookVoiceTTSPlaybackController;
+    if (controller) {
+      await controller.waitForDrain();
     }
+    if (token !== this.playToken) {
+      return;
+    }
+    this.setData({
+      bookTTSSpokenText: activeText,
+      bookTTSCurrentText: "",
+      bookTTSRemainingText: "",
+      bookTTSProgressPercent: 100,
+    });
+  },
+
+  bookVoiceStreamingPlaybackController() {
+    if (!this.bookVoiceTTSPlaybackController) {
+      this.bookVoiceTTSPlaybackController = new StreamingSpeechPlaybackController();
+    }
+    return this.bookVoiceTTSPlaybackController;
   },
 
   bookVoiceCommandUndoSnapshot() {
@@ -2214,6 +2227,9 @@ Page<BookData, {
   stopPlayback() {
     this.bookVoiceTTSStreaming?.close();
     this.bookVoiceTTSStreaming = null;
+    this.bookVoiceTTSPlayback = Promise.resolve();
+    this.bookVoiceTTSPlaybackController?.stop();
+    this.bookVoiceTTSPlaybackController = null;
     stopBookPlayback(this);
     if (this.data.bookVoiceAssistantSpeakingLineId) {
       this.setData({ bookVoiceAssistantSpeakingLineId: "" });

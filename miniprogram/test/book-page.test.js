@@ -470,6 +470,7 @@ function loadBookPage({
   voiceSearchExports = {},
   streamingAsrExports = {},
   bookVoiceTTSExports = {},
+  streamingSpeechPlaybackExports = {},
   ttsExports = {},
   voiceAuthorizationExports = {},
   wechatPrivacyExports = {},
@@ -556,6 +557,14 @@ function loadBookPage({
       close() {}
     },
     ...bookVoiceTTSExports,
+  });
+  mockModule("../services/streaming-speech-playback.ts", {
+    StreamingSpeechPlaybackController: streamingSpeechPlaybackExports.StreamingSpeechPlaybackController || class {
+      async appendFrame() {}
+      async waitForDrain() {}
+      stop() {}
+    },
+    ...streamingSpeechPlaybackExports,
   });
   mockModule("../services/memoir-voice-search.ts", {
     recordMemoirVoiceSearchQuery: async () => {
@@ -1905,13 +1914,21 @@ test("book page plays assistant reply and auto-listens after playback", async ()
         async start(options) {
           calls.push({ kind: "tts", projectId: this.projectId, options });
           this.callbacks.onStarted?.({ type: "tts.started", project_id: this.projectId });
-          this.callbacks.onAudioSegment?.({
-            segmentIndex: 0,
-            text: options.text,
-            tempFilePath: "/tmp/book-ai-reply.wav",
-            mimeType: "audio/wav",
-            durationSeconds: 1,
-            dispose: () => calls.push({ kind: "dispose" }),
+          this.callbacks.onAudioFrame?.({
+            streamId: "tts-1",
+            sequence: 1,
+            audio: new Uint8Array([1, 2, 3]),
+            mimeType: "audio/L16",
+            sampleRate: 16000,
+            channels: 1,
+            bitsPerSample: 16,
+          });
+          this.callbacks.onAudioDone?.({
+            type: "audio.done",
+            stream_id: "tts-1",
+            project_id: this.projectId,
+            frame_count: 1,
+            duration_seconds: 0.2,
           });
           this.callbacks.onCompleted?.({ type: "tts.completed", project_id: this.projectId });
           return { type: "tts.completed", project_id: this.projectId };
@@ -1922,20 +1939,25 @@ test("book page plays assistant reply and auto-listens after playback", async ()
         }
       },
     },
+    streamingSpeechPlaybackExports: {
+      StreamingSpeechPlaybackController: class {
+        async appendFrame(frame) {
+          calls.push({ kind: "frame", frame });
+        }
+        async waitForDrain() {
+          calls.push({ kind: "drain" });
+        }
+        stop() {
+          calls.push({ kind: "stop" });
+        }
+      },
+    },
   });
   const context = pageContext(page, { projectId: "project/1" });
   page.applyPlan.call(context, samplePlan("confirmed"));
   context.setData({ bookVoiceAssistantConversationActive: true });
-  context.audioPlayback.playTempFile = async (tempFilePath, token, options) => {
-    calls.push({
-      kind: "play",
-      tempFilePath,
-      token,
-      activeText: context.data.bookTTSActiveText,
-      speakingLineId: context.data.bookVoiceAssistantSpeakingLineId,
-      transcriptLineId: context.data.bookVoiceTranscriptLines[0]?.id,
-    });
-    options.onEnded?.();
+  context.audioPlayback.playTempFile = async () => {
+    throw new Error("book voice assistant reply should use PCM frame playback");
   };
   context.startBookVoiceCommand = async (options) => {
     calls.push({ kind: "auto-listen", options });
@@ -1948,13 +1970,13 @@ test("book page plays assistant reply and auto-listens after playback", async ()
 
     assert.equal(calls[0].kind, "tts");
     assert.deepEqual(calls[0].options, { text: "我理解了，请确认。" });
-    assert.equal(calls[1].tempFilePath, "/tmp/book-ai-reply.wav");
-    assert.equal(calls[1].activeText, "我理解了，请确认。");
-    assert.match(calls[1].speakingLineId, /^book-ai-/);
-    assert.equal(calls[1].speakingLineId, calls[1].transcriptLineId);
-    assert.equal(calls[2].kind, "dispose");
+    assert.equal(calls[1].kind, "frame");
+    assert.deepEqual(Array.from(calls[1].frame.audio), [1, 2, 3]);
+    assert.equal(calls[1].frame.sampleRate, 16000);
+    assert.equal(calls[2].kind, "drain");
     assert.equal(context.data.bookVoiceAssistantSpeakingLineId, "");
     assert.deepEqual(calls[3], { kind: "auto-listen", options: { autoTriggered: true } });
+    assert.equal(calls[4].kind, "stop");
     assert.equal(context.data.bookVoiceAssistantBusy, false);
   } finally {
     global.setTimeout = originalSetTimeout;

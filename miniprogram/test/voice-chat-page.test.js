@@ -140,7 +140,6 @@ function loadVoiceChatPage({
       }
       cancel() {}
       close() {}
-      disposeTempFiles() {}
     },
     ...assistantTurnStreamExports,
   });
@@ -867,7 +866,6 @@ test("voice chat streams one assistant turn and plays pcm audio frames", async (
         }
         cancel() {}
         close() {}
-        disposeTempFiles() {}
       },
     },
     streamingSpeechPlaybackExports: {
@@ -922,7 +920,6 @@ test("voice chat streams one assistant turn and plays pcm audio frames", async (
 
   assert.equal(streamStarts[0].voiceSessionId, "voice-1");
   assert.equal(streamStarts[0].options.regenerate, false);
-  assert.equal(streamStarts[0].options.audioProtocol, "pcm_frame");
   assert.equal(played.length, 1);
   assert.deepEqual(Array.from(played[0].audio), [1, 2, 3]);
   assert.equal(played[0].sampleRate, 16000);
@@ -982,7 +979,6 @@ test("voice chat keeps completed streaming assistant turns when playback fails",
         }
         cancel() {}
         close() {}
-        disposeTempFiles() {}
       },
     },
     streamingSpeechPlaybackExports: {
@@ -1070,7 +1066,6 @@ test("voice chat clears temporary streaming assistant state when the turn fails"
         }
         cancel() {}
         close() {}
-        disposeTempFiles() {}
       },
     },
   });
@@ -1203,7 +1198,6 @@ test("voice chat passes regenerate flag to streaming assistant turn", async () =
         }
         cancel() {}
         close() {}
-        disposeTempFiles() {}
       },
     },
   });
@@ -1234,7 +1228,7 @@ test("voice chat passes regenerate flag to streaming assistant turn", async () =
 
   await page.generateFollowUp.call(context, true);
 
-  assert.deepEqual(streamStarts, [{ regenerate: true, audioProtocol: "pcm_frame" }]);
+  assert.deepEqual(streamStarts, [{ regenerate: true }]);
   assert.equal(context.data.followUpMessageId, "assistant-question-1");
 });
 

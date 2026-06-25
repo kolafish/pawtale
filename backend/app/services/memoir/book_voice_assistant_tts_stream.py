@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.services.memoir.access import load_memoir_project
 from app.services.memoir.book_voice_commands import load_book_plan
 from app.services.memoir.streaming_tts_events import (
-    STREAM_TTS_AUDIO_PROTOCOL_SEGMENT,
+    STREAM_TTS_AUDIO_PROTOCOL_PCM_FRAME,
     normalize_audio_protocol,
     single_text_chunk,
     stream_tts_events,
@@ -37,7 +37,7 @@ class BookVoiceAssistantTTSStartRequest:
     text: str
     voice: str | None = None
     speed_ratio: float | None = None
-    audio_protocol: str = STREAM_TTS_AUDIO_PROTOCOL_SEGMENT
+    audio_protocol: str = STREAM_TTS_AUDIO_PROTOCOL_PCM_FRAME
 
     @classmethod
     def from_payload(cls, payload: dict) -> "BookVoiceAssistantTTSStartRequest":
@@ -164,7 +164,6 @@ class BookVoiceAssistantTTSStreamSession:
             client=self.client,
             tts_client=tts_client,
             text_chunks=single_text_chunk(req.text),
-            current_text=lambda: req.text,
             event_context={"stream_id": stream_id, "project_id": self.project_id},
             voice=req.voice,
             speed_ratio=req.speed_ratio,

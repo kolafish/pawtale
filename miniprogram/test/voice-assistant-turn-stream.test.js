@@ -6,8 +6,6 @@ const test = require("node:test");
 function installWxSocketHarness() {
   const handlers = {};
   const sent = [];
-  const writes = [];
-  const unlinks = [];
   let closeCalls = 0;
   global.wx = {
     env: { USER_DATA_PATH: "/tmp/pawtale" },
@@ -69,23 +67,8 @@ function installWxSocketHarness() {
       const buffer = Buffer.from(value, "base64");
       return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
     },
-    getFileSystemManager() {
-      return {
-        writeFile(options) {
-          writes.push({
-            filePath: options.filePath,
-            data: Buffer.from(options.data),
-          });
-          options.success?.({ errMsg: "writeFile:ok" });
-        },
-        unlink(options) {
-          unlinks.push(options.filePath);
-          options.success?.({ errMsg: "unlink:ok" });
-        },
-      };
-    },
   };
-  return { handlers, sent, writes, unlinks, closeCalls: () => closeCalls };
+  return { handlers, sent, closeCalls: () => closeCalls };
 }
 
 function socketMessage(handlers, payload) {
@@ -95,90 +78,6 @@ function socketMessage(handlers, payload) {
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
-
-test("assistant turn stream sends start payload and emits playable wav segments", async () => {
-  const harness = installWxSocketHarness();
-  delete require.cache[require.resolve("../services/request.ts")];
-  delete require.cache[require.resolve("../services/ai-model-settings.ts")];
-  delete require.cache[require.resolve("../services/tts-settings.ts")];
-  delete require.cache[require.resolve("../services/memoir-voice-api.ts")];
-  delete require.cache[require.resolve("../services/voice-assistant-turn-stream.ts")];
-  const { VoiceAssistantTurnStreamClient } = require("../services/voice-assistant-turn-stream.ts");
-  const segments = [];
-  const completedEvents = [];
-  const client = new VoiceAssistantTurnStreamClient("voice/1", {
-    onAudioSegment: (segment) => segments.push(segment),
-    onCompleted: (event) => completedEvents.push(event),
-  });
-
-  const startPromise = client.start();
-  await new Promise((resolve) => setImmediate(resolve));
-  harness.handlers.open();
-  socketMessage(harness.handlers, { type: "turn.ready" });
-  socketMessage(harness.handlers, {
-    type: "text.segment",
-    turn_id: "turn-1",
-    voice_session_id: "voice/1",
-    segment_index: 0,
-    text: "那时候在院子里，谁最常陪您？",
-  });
-  socketMessage(harness.handlers, {
-    type: "audio.chunk",
-    turn_id: "turn-1",
-    voice_session_id: "voice/1",
-    segment_index: 0,
-    sequence: 1,
-    audio: Buffer.from("pcm").toString("base64"),
-    mime_type: "audio/L16",
-  });
-  socketMessage(harness.handlers, {
-    type: "audio.segment_done",
-    turn_id: "turn-1",
-    voice_session_id: "voice/1",
-    segment_index: 0,
-    duration_seconds: 0.2,
-  });
-  socketMessage(harness.handlers, {
-    type: "turn.completed",
-    turn_id: "turn-1",
-    voice_session_id: "voice/1",
-    state: "completed",
-    message_id: "assistant-1",
-    audio_file_id: "audio-1",
-    text: "那时候在院子里，谁最常陪您？",
-    primary_intent: "follow_up",
-    intent_tags: ["follow_up"],
-    expects_answer: true,
-  });
-  const completed = await startPromise;
-
-  assert.equal(
-    harness.handlers.connectOptions.url,
-    "ws://backend.local:8000/api/mobile/memoir/voice-sessions/voice%2F1/assistant-turn-stream",
-  );
-  assert.deepEqual(harness.sent, [{
-    type: "turn.start",
-    ai_model: "deepseek-v4-pro",
-    regenerate: false,
-    voice: "zh_female_vv_uranus_bigtts",
-    speed_ratio: 1.5,
-  }]);
-  assert.equal(segments.length, 1);
-  assert.equal(segments[0].text, "那时候在院子里，谁最常陪您？");
-  assert.equal(segments[0].tempFilePath, "/tmp/pawtale/assistant-turn-turn-1-0.wav");
-  assert.equal(harness.writes[0].filePath, segments[0].tempFilePath);
-  assert.equal(harness.writes[0].data.subarray(0, 4).toString("ascii"), "RIFF");
-  assert.equal(harness.writes[0].data.subarray(8, 12).toString("ascii"), "WAVE");
-  assert.equal(harness.writes[0].data.subarray(44).toString(), "pcm");
-  assert.equal(completed.message_id, "assistant-1");
-  assert.equal(completedEvents[0].message_id, "assistant-1");
-  assert.equal(harness.closeCalls(), 1);
-  segments[0].dispose();
-  assert.deepEqual(harness.unlinks, [segments[0].tempFilePath]);
-  client.disposeTempFiles();
-  assert.deepEqual(harness.unlinks, [segments[0].tempFilePath]);
-  delete global.wx;
-});
 
 test("assistant turn stream sends pcm frame protocol and emits audio frames", async () => {
   const harness = installWxSocketHarness();
@@ -197,7 +96,7 @@ test("assistant turn stream sends pcm frame protocol and emits audio frames", as
     onAudioDone: (event) => doneEvents.push(event),
   });
 
-  const startPromise = client.start({ audioProtocol: "pcm_frame" });
+  const startPromise = client.start();
   await new Promise((resolve) => setImmediate(resolve));
   harness.handlers.open();
   socketMessage(harness.handlers, { type: "turn.ready" });
@@ -262,7 +161,6 @@ test("assistant turn stream sends pcm frame protocol and emits audio frames", as
   assert.equal(frames[0].channels, 1);
   assert.equal(frames[0].bitsPerSample, 16);
   assert.equal(doneEvents[0].frame_count, 1);
-  assert.deepEqual(harness.writes, []);
   delete global.wx;
 });
 
@@ -311,6 +209,7 @@ test("assistant turn stream connect timeout stops after socket opens", async () 
     regenerate: false,
     voice: "zh_female_vv_uranus_bigtts",
     speed_ratio: 1.5,
+    audio_protocol: "pcm_frame",
   }]);
 
   socketMessage(harness.handlers, {

@@ -806,7 +806,7 @@ Page<VoiceChatData, {
       },
     });
     this.assistantTurnStream = streamClient;
-    const completed = await streamClient.start({ regenerate, audioProtocol: "pcm_frame" });
+    const completed = await streamClient.start({ regenerate });
     if (requestSerial !== followUpRequestSerial) {
       return;
     }

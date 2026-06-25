@@ -1,8 +1,5 @@
 import { backendSessionCookieHeader, bookVoiceAssistantTTSStreamUrl } from "./memoir-voice-api";
-import {
-  type PreparedStreamingTTSAudioSegment,
-  StreamingTTSSegmentAssembler,
-} from "./streaming-tts-segments";
+import type { StreamingSpeechPCMFrame } from "./streaming-speech-playback";
 
 const SOCKET_CONNECT_TIMEOUT_MS = 10000;
 
@@ -20,6 +17,7 @@ export interface BookVoiceAssistantTTSStartedEvent {
   state: string;
   tts_provider?: string;
   tts_model?: string;
+  audio_protocol?: string;
 }
 
 export interface BookVoiceAssistantTTSTerminalEvent {
@@ -30,9 +28,54 @@ export interface BookVoiceAssistantTTSTerminalEvent {
   error?: string;
 }
 
+interface BookVoiceAssistantTTSAudioMetadata {
+  stream_id: string;
+  project_id: string;
+  sequence: number;
+  mime_type: string;
+  provider?: string;
+  model?: string;
+  voice?: string;
+  speed_ratio?: number;
+  sample_rate?: number | null;
+  channels?: number | null;
+  bits_per_sample?: number | null;
+}
+
+export interface BookVoiceAssistantTTSAudioFormatEvent extends BookVoiceAssistantTTSAudioMetadata {
+  type: "audio.format";
+}
+
+export interface BookVoiceAssistantTTSAudioFrameEvent extends BookVoiceAssistantTTSAudioMetadata {
+  type: "audio.frame";
+  audio: string;
+}
+
+export interface BookVoiceAssistantTTSAudioDoneEvent {
+  type: "audio.done";
+  stream_id: string;
+  project_id: string;
+  frame_count: number;
+  duration_seconds?: number | null;
+  provider?: string;
+  model?: string;
+  voice?: string;
+  speed_ratio?: number;
+  sample_rate?: number | null;
+  channels?: number | null;
+  bits_per_sample?: number | null;
+}
+
+export interface PreparedBookVoiceAssistantTTSFrame extends StreamingSpeechPCMFrame {
+  streamId: string;
+  sequence: number;
+}
+
 export interface BookVoiceAssistantTTSCallbacks {
   onStarted?(event: BookVoiceAssistantTTSStartedEvent): void;
-  onAudioSegment?(segment: PreparedStreamingTTSAudioSegment): void;
+  onAudioFormat?(event: BookVoiceAssistantTTSAudioFormatEvent): void;
+  onAudioFrame?(frame: PreparedBookVoiceAssistantTTSFrame): void;
+  onAudioDone?(event: BookVoiceAssistantTTSAudioDoneEvent): void;
   onCompleted?(event: BookVoiceAssistantTTSTerminalEvent): void;
   onCancelled?(event: BookVoiceAssistantTTSTerminalEvent): void;
   onFailed?(event: BookVoiceAssistantTTSTerminalEvent): void;
@@ -43,7 +86,6 @@ export class BookVoiceAssistantTTSStreamClient {
   private socketOpen = false;
   private closed = false;
   private startSent = false;
-  private segmentAssembler: StreamingTTSSegmentAssembler | null = null;
   private messageChain: Promise<void> = Promise.resolve();
   private resolveStart?: (event: BookVoiceAssistantTTSTerminalEvent) => void;
   private rejectStart?: (error: Error) => void;
@@ -57,7 +99,6 @@ export class BookVoiceAssistantTTSStreamClient {
     this.closed = false;
     this.startSent = false;
     this.messageChain = Promise.resolve();
-    this.segmentAssembler = new StreamingTTSSegmentAssembler(`book-voice-assistant-${this.projectId}-${Date.now()}`);
     const connectTimeoutMs = options.connectTimeoutMs ?? SOCKET_CONNECT_TIMEOUT_MS;
     const cookie = await backendSessionCookieHeader();
     const url = bookVoiceAssistantTTSStreamUrl(this.projectId);
@@ -164,16 +205,13 @@ export class BookVoiceAssistantTTSStreamClient {
     this.closeSocket("book voice assistant tts closed");
   }
 
-  disposeTempFiles(): void {
-    this.segmentAssembler?.disposeTempFiles();
-  }
-
   private startPayload(options: BookVoiceAssistantTTSStartOptions): Record<string, unknown> {
     return {
       type: "tts.start",
       text: options.text,
       voice: options.voice || undefined,
       speed_ratio: options.speedRatio === 1 ? undefined : options.speedRatio,
+      audio_protocol: "pcm_frame",
     };
   }
 
@@ -194,29 +232,16 @@ export class BookVoiceAssistantTTSStreamClient {
       this.callbacks.onStarted?.(event as unknown as BookVoiceAssistantTTSStartedEvent);
       return;
     }
-    if (event.type === "text.segment") {
-      this.segmentAssembler?.rememberText(event as unknown as { segment_index: number; text: string });
+    if (event.type === "audio.format") {
+      this.callbacks.onAudioFormat?.(event as unknown as BookVoiceAssistantTTSAudioFormatEvent);
       return;
     }
-    if (event.type === "audio.chunk") {
-      this.segmentAssembler?.appendChunk(event as unknown as {
-        segment_index: number;
-        audio: string;
-        mime_type: string;
-        sample_rate?: number | null;
-        channels?: number | null;
-        bits_per_sample?: number | null;
-      });
+    if (event.type === "audio.frame") {
+      this.handleAudioFrame(event as unknown as BookVoiceAssistantTTSAudioFrameEvent);
       return;
     }
-    if (event.type === "audio.segment_done") {
-      const segment = await this.segmentAssembler?.finalize(event as unknown as {
-        segment_index: number;
-        duration_seconds?: number | null;
-      });
-      if (segment) {
-        this.callbacks.onAudioSegment?.(segment);
-      }
+    if (event.type === "audio.done") {
+      this.callbacks.onAudioDone?.(event as unknown as BookVoiceAssistantTTSAudioDoneEvent);
       return;
     }
     if (event.type === "tts.completed") {
@@ -262,6 +287,28 @@ export class BookVoiceAssistantTTSStreamClient {
     this.socketTask = null;
     this.socketOpen = false;
   }
+
+  private handleAudioFrame(event: BookVoiceAssistantTTSAudioFrameEvent): void {
+    const audio = wx.base64ToArrayBuffer(event.audio || "");
+    const bitsPerSample = positiveInteger(event.bits_per_sample);
+    if (bitsPerSample !== 16) {
+      throw new Error("AI 语音帧格式不支持");
+    }
+    this.callbacks.onAudioFrame?.({
+      streamId: event.stream_id,
+      sequence: event.sequence,
+      audio,
+      mimeType: event.mime_type,
+      sampleRate: positiveInteger(event.sample_rate) || 16000,
+      channels: positiveInteger(event.channels) || 1,
+      bitsPerSample: 16,
+    });
+  }
+}
+
+function positiveInteger(value: unknown): number {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) && numeric > 0 ? Math.floor(numeric) : 0;
 }
 
 function safeJsonParse(value: string): Record<string, unknown> | null {
