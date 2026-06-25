@@ -187,6 +187,28 @@ test("upserts transcript lines by message or utterance identity", () => {
 
   const appended = upsertTranscriptLine(updatedByMessage, assistantLine);
   assert.deepEqual(appended, [{ ...userLine, text: "我想聊外婆" }, assistantLine]);
+
+  const updatedByTemporaryId = upsertTranscriptLine(appended, {
+    id: "assistant-stream-1",
+    role: "assistant",
+    text: "欢迎回来",
+  });
+  assert.deepEqual(updatedByTemporaryId, [
+    { ...userLine, text: "我想聊外婆" },
+    assistantLine,
+    { id: "assistant-stream-1", role: "assistant", text: "欢迎回来" },
+  ]);
+
+  const updatedStreamingLine = upsertTranscriptLine(updatedByTemporaryId, {
+    id: "assistant-stream-1",
+    role: "assistant",
+    text: "欢迎回来，咱们接着聊。",
+  });
+  assert.deepEqual(updatedStreamingLine, [
+    { ...userLine, text: "我想聊外婆" },
+    assistantLine,
+    { id: "assistant-stream-1", role: "assistant", text: "欢迎回来，咱们接着聊。" },
+  ]);
 });
 
 test("counts transcript characters from user lines only", () => {
