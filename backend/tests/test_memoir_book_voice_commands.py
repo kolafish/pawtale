@@ -132,7 +132,7 @@ async def test_mobile_memoir_book_voice_command_parse_uses_ai_payload(
             "summary": "准备把第一章改名为童年往事",
         }
     )
-    monkeypatch.setattr("app.services.memoir.book_voice_commands.get_ai_service", lambda _model: fake_ai)
+    monkeypatch.setattr("app.services.memoir.book_voice_command_parser.get_ai_service", lambda _model: fake_ai)
 
     response = await client.post(
         f"/api/mobile/memoir/projects/{project_id}/book-voice-command/parse",
@@ -173,7 +173,7 @@ async def test_mobile_memoir_book_voice_command_parse_falls_back_when_ai_fails(
     project_id = await ensure_mobile_memoir_project(client)
     _, chapters = await _create_two_chapter_plan(test_db, project_id=project_id)
     fake_ai = FakeBookVoiceCommandAI(error=RuntimeError("provider unavailable"))
-    monkeypatch.setattr("app.services.memoir.book_voice_commands.get_ai_service", lambda _model: fake_ai)
+    monkeypatch.setattr("app.services.memoir.book_voice_command_parser.get_ai_service", lambda _model: fake_ai)
 
     response = await client.post(
         f"/api/mobile/memoir/projects/{project_id}/book-voice-command/parse",
@@ -306,7 +306,7 @@ async def test_mobile_memoir_book_voice_command_swaps_adjacent_chapters_from_asr
         titles=["小时候的年", "儿时庭院与家人聚散", "一生的朋友"],
     )
     fake_ai = FakeBookVoiceCommandAI(error=RuntimeError("provider unavailable"))
-    monkeypatch.setattr("app.services.memoir.book_voice_commands.get_ai_service", lambda _model: fake_ai)
+    monkeypatch.setattr("app.services.memoir.book_voice_command_parser.get_ai_service", lambda _model: fake_ai)
 
     response = await client.post(
         f"/api/mobile/memoir/projects/{project_id}/book-voice-command/parse",
@@ -343,7 +343,7 @@ async def test_mobile_memoir_book_voice_command_swaps_adjacent_chapters_by_fuzzy
             "summary": "准备把小时候的年下移",
         }
     )
-    monkeypatch.setattr("app.services.memoir.book_voice_commands.get_ai_service", lambda _model: fake_ai)
+    monkeypatch.setattr("app.services.memoir.book_voice_command_parser.get_ai_service", lambda _model: fake_ai)
 
     response = await client.post(
         f"/api/mobile/memoir/projects/{project_id}/book-voice-command/parse",
@@ -371,7 +371,7 @@ async def test_mobile_memoir_book_voice_command_reads_and_assigns_uncovered_sour
         titles=["小时候的年", "职场浮沉与升职加薪"],
     )
     fake_ai = FakeBookVoiceCommandAI(error=RuntimeError("provider unavailable"))
-    monkeypatch.setattr("app.services.memoir.book_voice_commands.get_ai_service", lambda _model: fake_ai)
+    monkeypatch.setattr("app.services.memoir.book_voice_command_parser.get_ai_service", lambda _model: fake_ai)
     book_context = {
         "source_coverage": {
             "total_source_count": 32,
@@ -449,7 +449,7 @@ async def test_mobile_memoir_book_voice_command_parse_returns_chapter_title_advi
             "reply_text": "这个章名方向是对的，但还可以更具体。若重点是厨房和傍晚的故事，可以考虑突出那个场景。",
         }
     )
-    monkeypatch.setattr("app.services.memoir.book_voice_commands.get_ai_service", lambda _model: fake_ai)
+    monkeypatch.setattr("app.services.memoir.book_voice_command_parser.get_ai_service", lambda _model: fake_ai)
 
     response = await client.post(
         f"/api/mobile/memoir/projects/{project_id}/book-voice-command/parse",
@@ -483,7 +483,7 @@ async def test_mobile_memoir_book_voice_command_parse_falls_back_to_length_advic
             "第一次离家那天，我记得天还没亮，母亲把包袱塞到我手里。" * 24,
         ],
     )
-    monkeypatch.setattr("app.services.memoir.book_voice_commands.get_ai_service", lambda _model: fake_ai)
+    monkeypatch.setattr("app.services.memoir.book_voice_command_parser.get_ai_service", lambda _model: fake_ai)
 
     response = await client.post(
         f"/api/mobile/memoir/projects/{project_id}/book-voice-command/parse",
@@ -510,7 +510,7 @@ async def test_mobile_memoir_book_voice_command_answers_current_chapter_count(
     project_id = await ensure_mobile_memoir_project(client)
     await _create_two_chapter_plan(test_db, project_id=project_id)
     fake_ai = FakeBookVoiceCommandAI(error=RuntimeError("provider unavailable"))
-    monkeypatch.setattr("app.services.memoir.book_voice_commands.get_ai_service", lambda _model: fake_ai)
+    monkeypatch.setattr("app.services.memoir.book_voice_command_parser.get_ai_service", lambda _model: fake_ai)
 
     response = await client.post(
         f"/api/mobile/memoir/projects/{project_id}/book-voice-command/parse",
@@ -555,7 +555,7 @@ async def test_mobile_memoir_book_voice_command_answers_uncovered_source_count_f
             "reply_text": "目前所有素材都已归入 4 个章节，没有未归类的记录。",
         }
     )
-    monkeypatch.setattr("app.services.memoir.book_voice_commands.get_ai_service", lambda _model: fake_ai)
+    monkeypatch.setattr("app.services.memoir.book_voice_command_parser.get_ai_service", lambda _model: fake_ai)
 
     response = await client.post(
         f"/api/mobile/memoir/projects/{project_id}/book-voice-command/parse",
@@ -610,7 +610,7 @@ async def test_mobile_memoir_book_voice_command_explains_editing_capabilities(
     project_id = await ensure_mobile_memoir_project(client)
     await _create_two_chapter_plan(test_db, project_id=project_id)
     fake_ai = FakeBookVoiceCommandAI(error=RuntimeError("provider unavailable"))
-    monkeypatch.setattr("app.services.memoir.book_voice_commands.get_ai_service", lambda _model: fake_ai)
+    monkeypatch.setattr("app.services.memoir.book_voice_command_parser.get_ai_service", lambda _model: fake_ai)
 
     response = await client.post(
         f"/api/mobile/memoir/projects/{project_id}/book-voice-command/parse",
@@ -651,7 +651,7 @@ async def test_mobile_memoir_book_voice_command_passes_recent_conversation_to_ai
             "reply_text": "现在有两章，分别是外婆家的童年和第一次离家。",
         }
     )
-    monkeypatch.setattr("app.services.memoir.book_voice_commands.get_ai_service", lambda _model: fake_ai)
+    monkeypatch.setattr("app.services.memoir.book_voice_command_parser.get_ai_service", lambda _model: fake_ai)
 
     response = await client.post(
         f"/api/mobile/memoir/projects/{project_id}/book-voice-command/parse",
@@ -687,7 +687,7 @@ async def test_mobile_memoir_book_voice_command_clarifies_ai_follow_up_without_r
             "summary": "需要确认用户指代的修改对象",
         }
     )
-    monkeypatch.setattr("app.services.memoir.book_voice_commands.get_ai_service", lambda _model: fake_ai)
+    monkeypatch.setattr("app.services.memoir.book_voice_command_parser.get_ai_service", lambda _model: fake_ai)
 
     response = await client.post(
         f"/api/mobile/memoir/projects/{project_id}/book-voice-command/parse",
