@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import TypeVar
 
 
@@ -20,6 +22,16 @@ class ProviderConcurrencyLimiter:
         semaphore = await self._semaphore(key, limit)
         async with semaphore:
             return await operation()
+
+    @asynccontextmanager
+    async def slot(self, key: str, limit: int) -> AsyncIterator[None]:
+        if limit <= 0:
+            yield
+            return
+
+        semaphore = await self._semaphore(key, limit)
+        async with semaphore:
+            yield
 
     async def _semaphore(self, key: str, limit: int) -> asyncio.Semaphore:
         async with self._lock:

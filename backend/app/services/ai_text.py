@@ -1,6 +1,13 @@
+from collections.abc import AsyncIterator
+
 import httpx
 from app.config import get_settings
 from app.services.ai_base import AITextServiceBase
+from app.services.ai_streaming import (
+    AITextStreamChunk,
+    iter_sse_json_events,
+    openai_chat_stream_chunk,
+)
 from app.services.provider_limits import provider_concurrency_limiter
 
 settings = get_settings()
@@ -73,6 +80,48 @@ class DeepSeekTextService(AITextServiceBase):
         if return_raw:
             return content, result
         return content
+
+    async def stream_llm(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        temperature: float = 0.7,
+        max_tokens: int = 4000,
+        timeout: float = 60.0,
+    ) -> AsyncIterator[AITextStreamChunk]:
+        messages = []
+        if system_prompt.strip():
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": user_prompt})
+
+        payload = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "stream": True,
+            "stream_options": {"include_usage": True},
+        }
+        if self.thinking_type:
+            payload["thinking"] = {"type": self.thinking_type}
+
+        async with provider_concurrency_limiter.slot("ai_text", self.max_concurrent_requests):
+            async with httpx.AsyncClient() as client:
+                async with client.stream(
+                    "POST",
+                    f"{self.base_url}/v1/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {self.api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json=payload,
+                    timeout=timeout,
+                ) as response:
+                    response.raise_for_status()
+                    async for event in iter_sse_json_events(response.aiter_lines()):
+                        chunk: AITextStreamChunk | None = openai_chat_stream_chunk(event)
+                        if chunk:
+                            yield chunk
 
 
 # 默认文本服务实例

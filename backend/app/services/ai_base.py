@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from collections.abc import AsyncIterator
 
 from app.services.ai_debug import build_debug_info
 from app.services.ai_project_analysis import (
@@ -7,6 +8,7 @@ from app.services.ai_project_analysis import (
 from app.services.ai_revision import revise_chapter as revise_chapter_use_case
 from app.services.ai_story import generate_story as generate_story_use_case
 from app.services.json_utils import extract_json_payload, strip_json_trailing_commas, try_parse_json
+from app.services.ai_streaming import AITextStreamChunk
 
 
 class AITextServiceBase(ABC):
@@ -37,6 +39,16 @@ class AITextServiceBase(ABC):
         return_raw: bool = False,
     ) -> str | tuple[str, dict]:
         ...
+
+    def stream_llm(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        temperature: float = 0.7,
+        max_tokens: int = 4000,
+        timeout: float = 60.0,
+    ) -> AsyncIterator[AITextStreamChunk]:
+        raise NotImplementedError(f"{self.provider_name} does not support streaming text generation")
 
     def _wrap_debug(
         self,
