@@ -62,7 +62,7 @@ async def test_voice_assistant_turn_streams_text_audio_and_persists_message(
 
     assert ready["state"] == "ready"
     assert started["ai_provider"] == "fake-ai"
-    assert started["audio_protocol"] == "segment"
+    assert started["audio_protocol"] == "pcm_frame"
     assert completed["state"] == "completed"
     assert completed["text"] == "好，那我们就接着聊工作。第一份工作里，最让您记到现在的是哪一件事？"
     assert completed["primary_intent"] == "follow_up"
@@ -70,12 +70,19 @@ async def test_voice_assistant_turn_streams_text_audio_and_persists_message(
 
     text_deltas = [event["text_delta"] for event in stream_client.sent if event["type"] == "text.delta"]
     assert text_deltas == ai_client.chunks
-    text_segments = [event["text"] for event in stream_client.sent if event["type"] == "text.segment"]
-    assert text_segments == ["好，那我们就接着聊工作。第一份工作里，最让您记到现在的是哪一件事？"]
-    audio_chunks = [event for event in stream_client.sent if event["type"] == "audio.chunk"]
-    assert [base64.b64decode(event["audio"]) for event in audio_chunks] == [
-        b"audio-0-1audio-0-2"
+    assert [event["type"] for event in stream_client.sent if event["type"].startswith("audio.")] == [
+        "audio.format",
+        "audio.frame",
+        "audio.frame",
+        "audio.done",
     ]
+    frame_events = [event for event in stream_client.sent if event["type"] == "audio.frame"]
+    assert [base64.b64decode(event["audio"]) for event in frame_events] == [b"audio-0-1", b"audio-0-2"]
+    assert frame_events[0]["sample_rate"] == 16000
+    assert frame_events[0]["channels"] == 1
+    assert frame_events[0]["bits_per_sample"] == 16
+    done = [event for event in stream_client.sent if event["type"] == "audio.done"][0]
+    assert done["frame_count"] == 2
     assert tts_client.calls[0]["text_chunks"] == [
         "好，那我们就接着聊工作。",
         "第一份工作里，最让您记到现在的是哪一件事？",
@@ -108,73 +115,6 @@ async def test_voice_assistant_turn_streams_text_audio_and_persists_message(
     assert audio_file is not None
     assert audio_file.mime_type == "audio/pcm"
     assert audio_file.size_bytes == len(b"audio-0-1audio-0-2")
-    audio_relative_path = Path(audio_file.storage_path).relative_to(Path("memoir") / "audio")
-    assert (tmp_path / "audio" / audio_relative_path).read_bytes() == b"audio-0-1audio-0-2"
-
-
-async def test_voice_assistant_turn_streams_pcm_audio_frames(
-    client,
-    test_db,
-    tmp_path,
-    monkeypatch,
-):
-    monkeypatch.setattr("app.services.memoir.audio_files.MEMOIR_AUDIO_DIR", tmp_path / "audio")
-    created = await create_test_voice_transcript(
-        client,
-        test_db,
-        text="我想聊聊朋友，不太想讲工作了。",
-        guidance_mode="guided_interview",
-        current_guidance_module="work",
-    )
-    stream_client = FakeTurnClient()
-    ai_client = FakeStreamingAI(
-        [
-            "好，那我们就接着聊朋友。",
-            "这些年里，哪位朋友最让您惦记？",
-        ]
-    )
-    tts_client = FakeStreamingTTS()
-    session = VoiceAssistantTurnStreamSession(
-        db=test_db,
-        client=stream_client,
-        voice_session_id=created["session"]["id"],
-        user_id=created["user_id"],
-        ai_client_factory=lambda model=None: ai_client,
-        tts_client_factory=lambda: tts_client,
-    )
-
-    run_task = asyncio.create_task(session.run())
-    await _wait_for_event(stream_client, "turn.ready")
-    await stream_client.push({"type": "turn.start", "audio_protocol": "pcm_frame"})
-    started = await _wait_for_event(stream_client, "turn.started")
-    completed = await _wait_for_event(stream_client, "turn.completed")
-    await asyncio.wait_for(run_task, timeout=1)
-
-    assert started["audio_protocol"] == "pcm_frame"
-    assert completed["state"] == "completed"
-    assert not [event for event in stream_client.sent if event["type"] == "text.segment"]
-    assert not [event for event in stream_client.sent if event["type"] == "audio.chunk"]
-    assert not [event for event in stream_client.sent if event["type"] == "audio.segment_done"]
-    assert [event["type"] for event in stream_client.sent if event["type"].startswith("audio.")] == [
-        "audio.format",
-        "audio.frame",
-        "audio.frame",
-        "audio.done",
-    ]
-    frame_events = [event for event in stream_client.sent if event["type"] == "audio.frame"]
-    assert [base64.b64decode(event["audio"]) for event in frame_events] == [b"audio-0-1", b"audio-0-2"]
-    assert frame_events[0]["sample_rate"] == 16000
-    assert frame_events[0]["channels"] == 1
-    assert frame_events[0]["bits_per_sample"] == 16
-    done = [event for event in stream_client.sent if event["type"] == "audio.done"][0]
-    assert done["frame_count"] == 2
-    assert tts_client.calls[0]["text_chunks"] == [
-        "好，那我们就接着聊朋友。",
-        "这些年里，哪位朋友最让您惦记？",
-    ]
-
-    audio_file = await test_db.scalar(select(AudioFile).where(AudioFile.id == completed["audio_file_id"]))
-    assert audio_file is not None
     audio_relative_path = Path(audio_file.storage_path).relative_to(Path("memoir") / "audio")
     assert (tmp_path / "audio" / audio_relative_path).read_bytes() == b"audio-0-1audio-0-2"
 
@@ -373,8 +313,7 @@ async def test_voice_assistant_turn_tts_failure_does_not_persist_partial_message
     await asyncio.wait_for(run_task, timeout=1)
 
     assert "tts failed" in failed["error"]
-    assert [event["type"] for event in stream_client.sent].count("text.segment") == 0
-    assert not [event for event in stream_client.sent if event["type"] == "audio.chunk"]
+    assert not [event for event in stream_client.sent if event["type"].startswith("audio.")]
     assistant_count = await test_db.scalar(
         select(func.count(MemoirChatMessage.id))
         .where(

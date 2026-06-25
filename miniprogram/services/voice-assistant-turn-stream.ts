@@ -1,10 +1,6 @@
 import { readSelectedAIModel } from "./ai-model-settings";
 import { assistantTurnStreamUrl, backendSessionCookieHeader } from "./memoir-voice-api";
 import type { StreamingSpeechPCMFrame } from "./streaming-speech-playback";
-import {
-  type PreparedStreamingTTSAudioSegment,
-  StreamingTTSSegmentAssembler,
-} from "./streaming-tts-segments";
 import { readChatTTSSettings } from "./tts-settings";
 
 const SOCKET_CONNECT_TIMEOUT_MS = 10000;
@@ -15,7 +11,6 @@ export interface VoiceAssistantTurnStreamStartOptions {
   voice?: string;
   speedRatio?: number;
   connectTimeoutMs?: number;
-  audioProtocol?: "segment" | "pcm_frame";
 }
 
 export interface VoiceAssistantTurnStartedEvent {
@@ -37,39 +32,6 @@ export interface VoiceAssistantTurnTextDeltaEvent {
   voice_session_id: string;
   text_delta: string;
   text: string;
-}
-
-export interface VoiceAssistantTurnTextSegmentEvent {
-  type: "text.segment";
-  turn_id: string;
-  voice_session_id: string;
-  segment_index: number;
-  text: string;
-}
-
-export interface VoiceAssistantTurnAudioChunkEvent {
-  type: "audio.chunk";
-  turn_id: string;
-  voice_session_id: string;
-  segment_index: number;
-  sequence: number;
-  audio: string;
-  mime_type: string;
-  provider?: string;
-  model?: string;
-  voice?: string;
-  speed_ratio?: number;
-  sample_rate?: number | null;
-  channels?: number | null;
-  bits_per_sample?: number | null;
-}
-
-export interface VoiceAssistantTurnAudioSegmentDoneEvent {
-  type: "audio.segment_done";
-  turn_id: string;
-  voice_session_id: string;
-  segment_index: number;
-  duration_seconds?: number | null;
 }
 
 interface VoiceAssistantTurnAudioMetadata {
@@ -133,10 +95,6 @@ export interface VoiceAssistantTurnTerminalEvent {
   error?: string;
 }
 
-export interface PreparedAssistantStreamAudioSegment extends PreparedStreamingTTSAudioSegment {
-  turnId: string;
-}
-
 export interface PreparedAssistantStreamAudioFrame extends StreamingSpeechPCMFrame {
   turnId: string;
   sequence: number;
@@ -145,8 +103,6 @@ export interface PreparedAssistantStreamAudioFrame extends StreamingSpeechPCMFra
 export interface VoiceAssistantTurnStreamCallbacks {
   onStarted?(event: VoiceAssistantTurnStartedEvent): void;
   onTextDelta?(event: VoiceAssistantTurnTextDeltaEvent): void;
-  onTextSegment?(event: VoiceAssistantTurnTextSegmentEvent): void;
-  onAudioSegment?(segment: PreparedAssistantStreamAudioSegment): void;
   onAudioFormat?(event: VoiceAssistantTurnAudioFormatEvent): void;
   onAudioFrame?(frame: PreparedAssistantStreamAudioFrame): void;
   onAudioDone?(event: VoiceAssistantTurnAudioDoneEvent): void;
@@ -160,7 +116,6 @@ export class VoiceAssistantTurnStreamClient {
   private socketOpen = false;
   private closed = false;
   private startSent = false;
-  private segmentAssembler: StreamingTTSSegmentAssembler | null = null;
   private messageChain: Promise<void> = Promise.resolve();
   private resolveStart?: (event: VoiceAssistantTurnCompletedEvent | VoiceAssistantTurnTerminalEvent) => void;
   private rejectStart?: (error: Error) => void;
@@ -174,7 +129,6 @@ export class VoiceAssistantTurnStreamClient {
     this.closed = false;
     this.startSent = false;
     this.messageChain = Promise.resolve();
-    this.segmentAssembler = null;
     const connectTimeoutMs = options.connectTimeoutMs ?? SOCKET_CONNECT_TIMEOUT_MS;
     const cookie = await backendSessionCookieHeader();
     const url = assistantTurnStreamUrl(this.voiceSessionId);
@@ -284,10 +238,6 @@ export class VoiceAssistantTurnStreamClient {
     this.closeSocket("assistant turn closed");
   }
 
-  disposeTempFiles(): void {
-    this.segmentAssembler?.disposeTempFiles();
-  }
-
   private startPayload(options: VoiceAssistantTurnStreamStartOptions): Record<string, unknown> {
     const ttsSettings = readChatTTSSettings();
     const speedRatio = options.speedRatio ?? ttsSettings.speedRatio;
@@ -297,7 +247,7 @@ export class VoiceAssistantTurnStreamClient {
       regenerate: options.regenerate || false,
       voice: options.voice || ttsSettings.voice || undefined,
       speed_ratio: speedRatio === 1 ? undefined : speedRatio,
-      audio_protocol: options.audioProtocol || undefined,
+      audio_protocol: "pcm_frame",
     };
   }
 
@@ -320,22 +270,6 @@ export class VoiceAssistantTurnStreamClient {
     }
     if (event.type === "text.delta") {
       this.callbacks.onTextDelta?.(event as unknown as VoiceAssistantTurnTextDeltaEvent);
-      return;
-    }
-    if (event.type === "text.segment") {
-      this.rememberSegmentText(event as unknown as VoiceAssistantTurnTextSegmentEvent);
-      this.callbacks.onTextSegment?.(event as unknown as VoiceAssistantTurnTextSegmentEvent);
-      return;
-    }
-    if (event.type === "audio.chunk") {
-      this.appendAudioChunk(event as unknown as VoiceAssistantTurnAudioChunkEvent);
-      return;
-    }
-    if (event.type === "audio.segment_done") {
-      const segment = await this.finalizeAudioSegment(event as unknown as VoiceAssistantTurnAudioSegmentDoneEvent);
-      if (segment) {
-        this.callbacks.onAudioSegment?.(segment);
-      }
       return;
     }
     if (event.type === "audio.format") {
@@ -394,27 +328,6 @@ export class VoiceAssistantTurnStreamClient {
     this.socketOpen = false;
   }
 
-  private rememberSegmentText(event: VoiceAssistantTurnTextSegmentEvent): void {
-    this.segmentAssemblerFor(event.turn_id).rememberText(event);
-  }
-
-  private appendAudioChunk(event: VoiceAssistantTurnAudioChunkEvent): void {
-    this.segmentAssemblerFor(event.turn_id).appendChunk(event);
-  }
-
-  private async finalizeAudioSegment(
-    event: VoiceAssistantTurnAudioSegmentDoneEvent,
-  ): Promise<PreparedAssistantStreamAudioSegment | null> {
-    const segment = await this.segmentAssemblerFor(event.turn_id).finalize(event);
-    if (!segment) {
-      return null;
-    }
-    return {
-      ...segment,
-      turnId: event.turn_id,
-    };
-  }
-
   private handleAudioFrame(event: VoiceAssistantTurnAudioFrameEvent): void {
     const audio = wx.base64ToArrayBuffer(event.audio || "");
     const bitsPerSample = positiveInteger(event.bits_per_sample);
@@ -432,12 +345,6 @@ export class VoiceAssistantTurnStreamClient {
     });
   }
 
-  private segmentAssemblerFor(turnId: string): StreamingTTSSegmentAssembler {
-    if (!this.segmentAssembler) {
-      this.segmentAssembler = new StreamingTTSSegmentAssembler(`assistant-turn-${turnId}`);
-    }
-    return this.segmentAssembler;
-  }
 }
 
 function positiveInteger(value: unknown): number {

@@ -33,7 +33,7 @@ from app.services.memoir.voice_followup_ai import (
     _requested_topic_hint,
 )
 from app.services.memoir.streaming_tts_events import (
-    STREAM_TTS_AUDIO_PROTOCOL_SEGMENT,
+    STREAM_TTS_AUDIO_PROTOCOL_PCM_FRAME,
     chunk_text_for_tts,
     normalize_audio_protocol,
     queued_text_chunks,
@@ -74,7 +74,7 @@ class AssistantTurnStartRequest:
     speed_ratio: float | None = None
     regenerate: bool = False
     temperature: float = STREAM_TEXT_TEMPERATURE
-    audio_protocol: str = STREAM_TTS_AUDIO_PROTOCOL_SEGMENT
+    audio_protocol: str = STREAM_TTS_AUDIO_PROTOCOL_PCM_FRAME
 
     @classmethod
     def from_payload(cls, payload: dict) -> "AssistantTurnStartRequest":
@@ -425,7 +425,6 @@ class VoiceAssistantTurnStreamSession:
                 queued_text_chunks(text_queue, cancel_event),
                 cancel_event,
             ),
-            current_text=lambda: artifacts.text,
             event_context={"turn_id": turn_id, "voice_session_id": self.voice_session_id},
             voice=req.voice,
             speed_ratio=req.speed_ratio,

@@ -91,7 +91,6 @@ async def test_stream_tts_events_can_emit_pcm_audio_frames():
         client=client,
         tts_client=tts_client,
         text_chunks=text_chunks(),
-        current_text=lambda: "你好。继续。",
         event_context={"turn_id": "turn-1", "voice_session_id": "session-1"},
         voice="S_test",
         speed_ratio=1.2,
