@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 import json
 import logging
@@ -62,6 +63,21 @@ class TTSResult:
 
 
 @dataclass(frozen=True)
+class StreamingTTSChunk:
+    audio: bytes
+    mime_type: str
+    provider: str
+    model: str
+    voice: str
+    speed_ratio: float = DEFAULT_TTS_SPEED_RATIO
+    sequence: int = 0
+    alignment: list[TTSAlignmentSegment] = field(default_factory=list)
+    duration_seconds: float | None = None
+    is_final: bool = False
+    raw: dict[str, object] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class VolcTTSResponseFormat:
     mime_type: str
     extension: str
@@ -90,6 +106,15 @@ class TTSClient(Protocol):
     ) -> TTSResult:
         ...
 
+    def stream_synthesize(
+        self,
+        text: str,
+        *,
+        voice: str | None = None,
+        speed_ratio: float | None = None,
+    ) -> AsyncIterator[StreamingTTSChunk]:
+        raise NotImplementedError(f"{self.provider_name} does not support streaming TTS")
+
 
 class VolcTTSClient:
     provider_name = "volc_tts"
@@ -109,13 +134,13 @@ class VolcTTSClient:
     def effective_voice(self, voice: str | None = None) -> str:
         return _volc_effective_voice(voice, self.default_voice)
 
-    async def synthesize(
+    def _request_context(
         self,
         text: str,
         *,
-        voice: str | None = None,
-        speed_ratio: float | None = None,
-    ) -> TTSResult:
+        voice: str | None,
+        speed_ratio: float | None,
+    ) -> tuple[str, float, dict[str, object], dict[str, str], float]:
         if not self.app_id or not self.access_token:
             raise HTTPException(status_code=503, detail="火山 TTS app id 或 access token 未配置")
         if not self.endpoint:
@@ -143,6 +168,26 @@ class VolcTTSClient:
             "X-Api-Request-Id": request_id,
         }
         timeout = max(1.0, float(self.timeout_seconds))
+        return effective_voice, effective_speed_ratio, payload, headers, timeout
+
+    async def synthesize(
+        self,
+        text: str,
+        *,
+        voice: str | None = None,
+        speed_ratio: float | None = None,
+    ) -> TTSResult:
+        (
+            effective_voice,
+            effective_speed_ratio,
+            payload,
+            headers,
+            timeout,
+        ) = self._request_context(
+            text,
+            voice=voice,
+            speed_ratio=speed_ratio,
+        )
 
         async def request() -> httpx.Response:
             async with httpx.AsyncClient(timeout=timeout) as client:
@@ -185,6 +230,103 @@ class VolcTTSClient:
             speed_ratio=effective_speed_ratio,
             alignment=alignment,
             duration_seconds=duration_seconds,
+        )
+
+    async def stream_synthesize(
+        self,
+        text: str,
+        *,
+        voice: str | None = None,
+        speed_ratio: float | None = None,
+    ) -> AsyncIterator[StreamingTTSChunk]:
+        (
+            effective_voice,
+            effective_speed_ratio,
+            payload,
+            headers,
+            timeout,
+        ) = self._request_context(
+            text,
+            voice=voice,
+            speed_ratio=speed_ratio,
+        )
+        audio_seen = False
+        words: list[object] = []
+        sequence = 0
+
+        try:
+            async with provider_concurrency_limiter.slot("tts", self.max_concurrent_requests):
+                async with httpx.AsyncClient(timeout=timeout) as client:
+                    async with client.stream(
+                        "POST",
+                        self.endpoint,
+                        json=payload,
+                        headers=headers,
+                    ) as response:
+                        response.raise_for_status()
+                        async for payload_item in _iter_volc_sse_payloads(response.aiter_lines()):
+                            code = payload_item.get("code")
+                            if isinstance(code, int) and code not in {0, 20000000}:
+                                if not audio_seen:
+                                    raise HTTPException(status_code=503, detail=TTS_UNAVAILABLE_MESSAGE)
+                                logger.warning(
+                                    "Volc streaming TTS returned an error after audio chunks: %s",
+                                    payload_item,
+                                )
+
+                            audio = payload_item.get("data")
+                            if isinstance(audio, str) and audio:
+                                try:
+                                    decoded = base64.b64decode(audio)
+                                except (binascii.Error, ValueError):
+                                    logger.warning("Volc streaming TTS returned an invalid audio chunk")
+                                    continue
+                                if decoded:
+                                    audio_seen = True
+                                    sequence += 1
+                                    yield StreamingTTSChunk(
+                                        audio=decoded,
+                                        mime_type=self.response_format.mime_type,
+                                        provider=self.provider_name,
+                                        model=self.model_name,
+                                        voice=effective_voice,
+                                        speed_ratio=effective_speed_ratio,
+                                        sequence=sequence,
+                                        raw=payload_item,
+                                    )
+
+                            sentence = payload_item.get("sentence")
+                            if isinstance(sentence, dict):
+                                sentence_words = sentence.get("words")
+                                if isinstance(sentence_words, list):
+                                    words.extend(sentence_words)
+        except HTTPException:
+            raise
+        except httpx.HTTPStatusError as exc:
+            logger.exception(
+                "Volc streaming TTS rejected request status=%s logid=%s",
+                exc.response.status_code,
+                exc.response.headers.get("x-tt-logid"),
+            )
+            raise HTTPException(status_code=503, detail=TTS_UNAVAILABLE_MESSAGE) from exc
+        except httpx.HTTPError as exc:
+            logger.exception("Volc streaming TTS request failed")
+            raise HTTPException(status_code=503, detail=TTS_UNAVAILABLE_MESSAGE) from exc
+
+        if not audio_seen:
+            raise HTTPException(status_code=502, detail="TTS 未返回可用音频")
+        alignment = alignment_segments_from_volc_words(text, words)
+        yield StreamingTTSChunk(
+            audio=b"",
+            mime_type=self.response_format.mime_type,
+            provider=self.provider_name,
+            model=self.model_name,
+            voice=effective_voice,
+            speed_ratio=effective_speed_ratio,
+            sequence=sequence + 1,
+            alignment=alignment,
+            duration_seconds=max((segment.end_ms for segment in alignment), default=0) / 1000 if alignment else None,
+            is_final=True,
         )
 
 
@@ -267,6 +409,38 @@ def _volc_sse_payloads(response_text: str) -> list[dict[str, object]]:
         if isinstance(payload, dict):
             payloads.append(payload)
     return payloads
+
+
+async def _iter_volc_sse_payloads(lines: AsyncIterator[str]) -> AsyncIterator[dict[str, object]]:
+    data_lines: list[str] = []
+    async for raw_line in lines:
+        stripped = raw_line.strip()
+        if not stripped:
+            payload = _parse_volc_sse_data_lines(data_lines)
+            data_lines = []
+            if payload is not None:
+                yield payload
+            continue
+        if stripped.startswith("data:"):
+            data_lines.append(stripped.removeprefix("data:").strip())
+
+    payload = _parse_volc_sse_data_lines(data_lines)
+    if payload is not None:
+        yield payload
+
+
+def _parse_volc_sse_data_lines(data_lines: list[str]) -> dict[str, object] | None:
+    if not data_lines:
+        return None
+    raw_payload = "\n".join(data_lines).strip()
+    if not raw_payload or raw_payload == "[DONE]":
+        return None
+    try:
+        payload = json.loads(raw_payload)
+    except json.JSONDecodeError:
+        logger.warning("Volc TTS returned an invalid SSE payload")
+        return None
+    return payload if isinstance(payload, dict) else None
 
 
 def get_tts_client(settings: Settings | None = None) -> TTSClient:
