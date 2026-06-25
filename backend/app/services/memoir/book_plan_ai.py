@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Any
 
 from fastapi import HTTPException
 
 from app.schemas.memoir_book import MemoirBookChapterSourceRef, MemoirBookPlanChapterInput
+from app.services.ai_factory import get_ai_service
+from app.services.ai_types import AITextClient
 from app.services.json_utils import extract_json_payload
 from app.services.memoir.book_plan_sources import SourceSegment
 
@@ -14,6 +17,7 @@ SYSTEM_PROMPT = "你是一位谨慎的中文回忆录章节规划编辑，只能
 CHAPTER_TITLE_SYSTEM_PROMPT = "你是一位谨慎的中文回忆录目录编辑，只为已有章节重新拟标题。"
 AI_BOOK_PLAN_UNAVAILABLE_MESSAGE = "AI 服务暂时不可用，请稍后重试。"
 GENERIC_CHAPTER_TITLES = {"新收录转写", "新增转写", "转写记录", "新收录讲述", "新增讲述", "讲述记录", "新章节", "未命名章节"}
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -23,6 +27,21 @@ class ChapterTitleSourceDigest:
     created_at: str
     summary: str
     representative_quote: str
+
+
+@dataclass(frozen=True)
+class GeneratedBookPlan:
+    title: str
+    chapters: list[MemoirBookPlanChapterInput]
+    model: str | None
+    prompt: str
+
+
+@dataclass(frozen=True)
+class GeneratedChapterTitle:
+    title: str
+    model: str | None
+    prompt: str
 
 
 def _compact_text(value: str, max_chars: int) -> str:
@@ -186,3 +205,76 @@ def clean_generated_chapter_title(content: str) -> str:
     if not title:
         raise HTTPException(status_code=502, detail="AI 未返回可用章节标题")
     return title[:80]
+
+
+async def generate_book_plan_from_sources(
+    *,
+    project_title: str,
+    sources: list[SourceSegment],
+    max_chapters: int,
+    ai_model: str | None,
+    ai_client: AITextClient | None = None,
+) -> GeneratedBookPlan:
+    prompt = build_plan_prompt(project_title, sources, max_chapters)
+    client = ai_client
+    try:
+        if client is None:
+            client = get_ai_service(ai_model)
+        content = await client._call_llm(
+            SYSTEM_PROMPT,
+            prompt,
+            temperature=0.2,
+            max_tokens=2400,
+            timeout=120.0,
+        )
+    except HTTPException as exc:
+        if exc.status_code < 500:
+            raise
+        logger.exception("AI memoir book plan failed provider=%s", getattr(client, "provider_name", "unknown"))
+        raise HTTPException(status_code=503, detail=AI_BOOK_PLAN_UNAVAILABLE_MESSAGE) from exc
+    except Exception as exc:
+        logger.exception("AI memoir book plan failed provider=%s", getattr(client, "provider_name", "unknown"))
+        raise HTTPException(status_code=503, detail=AI_BOOK_PLAN_UNAVAILABLE_MESSAGE) from exc
+
+    payload = extract_json_payload(str(content))
+    title, chapters = chapters_from_payload(payload, sources=sources, max_chapters=max_chapters)
+    return GeneratedBookPlan(
+        title=title,
+        chapters=chapters,
+        model=getattr(client, "model_name", ai_model),
+        prompt=prompt,
+    )
+
+
+async def generate_chapter_title_from_sources(
+    *,
+    sources: list[ChapterTitleSourceDigest],
+    ai_model: str | None,
+    ai_client: AITextClient | None = None,
+) -> GeneratedChapterTitle:
+    prompt = build_chapter_title_prompt(sources)
+    client = ai_client
+    try:
+        if client is None:
+            client = get_ai_service(ai_model)
+        content = await client._call_llm(
+            CHAPTER_TITLE_SYSTEM_PROMPT,
+            prompt,
+            temperature=0.25,
+            max_tokens=160,
+            timeout=60.0,
+        )
+    except HTTPException as exc:
+        if exc.status_code < 500:
+            raise
+        logger.exception("AI memoir chapter title failed provider=%s", getattr(client, "provider_name", "unknown"))
+        raise HTTPException(status_code=503, detail=AI_BOOK_PLAN_UNAVAILABLE_MESSAGE) from exc
+    except Exception as exc:
+        logger.exception("AI memoir chapter title failed provider=%s", getattr(client, "provider_name", "unknown"))
+        raise HTTPException(status_code=503, detail=AI_BOOK_PLAN_UNAVAILABLE_MESSAGE) from exc
+
+    return GeneratedChapterTitle(
+        title=clean_generated_chapter_title(str(content)),
+        model=getattr(client, "model_name", ai_model),
+        prompt=prompt,
+    )
