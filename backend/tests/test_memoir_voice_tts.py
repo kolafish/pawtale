@@ -1,4 +1,5 @@
 import base64
+from contextlib import asynccontextmanager
 import json
 
 import httpx
@@ -138,6 +139,110 @@ async def test_volc_tts_client_posts_sse_payload_and_maps_subtitle(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_volc_tts_client_streams_sse_audio_chunks(monkeypatch):
+    calls = []
+    limiter = RecordingLimiter()
+    first_audio = b"first"
+    second_audio = b"second"
+    response_lines = [
+        f'data: {json.dumps({"code": 0, "message": "", "data": base64.b64encode(first_audio).decode()})}',
+        "",
+        f'data: {json.dumps({"code": 0, "message": "", "data": base64.b64encode(second_audio).decode()})}',
+        "",
+        'data: '
+        + json.dumps(
+            {
+                "code": 0,
+                "message": "",
+                "data": None,
+                "sentence": {
+                    "text": "你好",
+                    "words": [
+                        {"word": "你", "startTime": 0.0, "endTime": 0.2},
+                        {"word": "好", "startTime": 0.2, "endTime": 0.4},
+                    ],
+                },
+            },
+            ensure_ascii=False,
+        ),
+        "",
+    ]
+
+    class FakeStreamResponse:
+        status_code = 200
+        headers = {}
+
+        def raise_for_status(self):
+            return None
+
+        async def aiter_lines(self):
+            for line in response_lines:
+                yield line
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+    class FakeAsyncClient:
+        def __init__(self, *, timeout):
+            self.timeout = timeout
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        def stream(self, method, url, *, json, headers):
+            calls.append(
+                {
+                    "method": method,
+                    "url": url,
+                    "json": json,
+                    "headers": headers,
+                    "timeout": self.timeout,
+                }
+            )
+            return FakeStreamResponse()
+
+    monkeypatch.setattr("app.services.memoir.voice_tts.httpx.AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr("app.services.memoir.voice_tts.provider_concurrency_limiter", limiter)
+    client = VolcTTSClient(
+        Settings(
+            tts_provider="volc",
+            tts_timeout_seconds=8,
+            tts_max_concurrent_requests=3,
+            volc_tts_app_id="app-id",
+            volc_tts_access_token="access-token",
+            volc_tts_endpoint="https://openspeech.bytedance.com/api/v3/tts/unidirectional/sse",
+            volc_tts_resource_id="seed-tts-2.0",
+            volc_tts_speaker="zh_female_vv_uranus_bigtts",
+            volc_tts_response_format="pcm",
+            volc_tts_sample_rate=16000,
+        )
+    )
+
+    chunks = [chunk async for chunk in client.stream_synthesize("你好")]
+
+    assert [chunk.audio for chunk in chunks] == [first_audio, second_audio, b""]
+    assert [chunk.sequence for chunk in chunks] == [1, 2, 3]
+    assert chunks[0].mime_type == "audio/L16"
+    assert chunks[0].provider == "volc_tts"
+    assert chunks[0].model == "seed-tts-2.0"
+    assert chunks[0].voice == "zh_female_vv_uranus_bigtts"
+    assert not chunks[0].is_final
+    assert chunks[-1].is_final
+    assert chunks[-1].duration_seconds == 0.4
+    assert [segment.text for segment in chunks[-1].alignment] == ["你", "好"]
+    assert calls[0]["method"] == "POST"
+    assert calls[0]["json"]["req_params"]["audio_params"]["format"] == "pcm"
+    assert calls[0]["json"]["req_params"]["audio_params"]["sample_rate"] == 16000
+    assert limiter.slot_calls == [("tts", 3)]
+
+
+@pytest.mark.asyncio
 async def test_volc_tts_client_ignores_legacy_voice_values(monkeypatch):
     calls = []
     audio = b"audio-bytes"
@@ -212,7 +317,13 @@ async def test_volc_tts_client_fails_when_provider_returns_no_audio(monkeypatch)
 class RecordingLimiter:
     def __init__(self):
         self.calls = []
+        self.slot_calls = []
 
     async def run(self, key, limit, operation):
         self.calls.append((key, limit))
         return await operation()
+
+    @asynccontextmanager
+    async def slot(self, key, limit):
+        self.slot_calls.append((key, limit))
+        yield
