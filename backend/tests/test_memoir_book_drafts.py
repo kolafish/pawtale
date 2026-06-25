@@ -21,6 +21,7 @@ from app.services.memoir.book_auto_revision import (
 )
 from tests.memoir_helpers import (
     create_test_book_plan,
+    create_test_chapter_draft,
     create_test_voice_transcript,
     memoir_source_ref,
 )
@@ -92,6 +93,42 @@ async def test_mobile_memoir_book_chapter_draft_get_returns_404_before_draft_exi
 
     assert response.status_code == 404
     assert response.json()["detail"] == "章节稿不存在"
+
+
+async def test_mobile_memoir_book_chapter_draft_get_returns_existing_draft_with_source_change_counts(
+    client,
+    test_db,
+):
+    first = await create_test_voice_transcript(client, test_db, "我小时候常在外婆家的院子里晒太阳。")
+    second = await create_test_voice_transcript(client, test_db, "后来我又讲了第一次离家去县城读书。")
+    project_id = first["session"]["project_id"]
+    _, chapter = await create_test_book_plan(
+        test_db,
+        project_id=project_id,
+        source_refs=[memoir_source_ref(first), memoir_source_ref(second)],
+        status=MemoirBookPlanStatus.CONFIRMED,
+    )
+    chapter.metadata_json = {
+        "pending_source_utterance_ids": [second["utterance_id"]],
+        "removed_source_utterance_ids": [first["utterance_id"]],
+    }
+    await create_test_chapter_draft(
+        test_db,
+        project_id=project_id,
+        chapter_id=chapter.id,
+        content="我小时候常在外婆家的院子里晒太阳。",
+    )
+
+    response = await client.get(
+        f"/api/mobile/memoir/projects/{project_id}/book-plan/chapters/{chapter.id}/draft"
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["chapter_id"] == chapter.id
+    assert data["latest_version"]["content"] == "我小时候常在外婆家的院子里晒太阳。"
+    assert data["pending_source_count"] == 1
+    assert data["removed_source_count"] == 1
 
 
 async def test_mobile_memoir_book_chapter_draft_generate_uses_chapter_sources(

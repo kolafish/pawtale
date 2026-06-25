@@ -548,7 +548,7 @@ async def get_chapter_draft(
     project_id: str,
     chapter_id: str,
 ) -> MemoirBookChapterDraftResponse:
-    await _load_chapter(db, user_id=user_id, project_id=project_id, chapter_id=chapter_id)
+    chapter = await _load_chapter(db, user_id=user_id, project_id=project_id, chapter_id=chapter_id)
     draft = await _load_draft(db, project_id=project_id, chapter_id=chapter_id)
     if not draft:
         raise HTTPException(status_code=404, detail="章节稿不存在")
