@@ -1,8 +1,7 @@
 import type {
   MemoirBookAudioResponse,
 } from "../../domain/voice-chat";
-import { configureAudiblePlayback } from "../../services/audio-playback";
-import { downloadMemoirVoiceAudio } from "../../services/memoir-voice-api";
+import type { AudioPlaybackController } from "../../services/audio-playback";
 import { splitTextByAudioPlaybackProgress } from "../../services/tts-text-progress";
 import type { BookData } from "./book-view-model";
 import { positiveFiniteSeconds } from "./book-view-model";
@@ -17,7 +16,7 @@ export interface BookTTSHost {
     | "ttsBusyTarget"
   >;
   setData(patch: Partial<BookData>): void;
-  audio: WechatMiniprogram.InnerAudioContext | null;
+  audioPlayback: AudioPlaybackController;
   playToken: number;
   ttsProgressTimer: number | null;
   ttsProgressStartedAtMs: number;
@@ -79,71 +78,45 @@ export async function playBookAudioFile(
   elapsedBeforeSeconds: number,
   fallbackDurationSeconds: number,
 ): Promise<number> {
-  const tempFilePath = await downloadMemoirVoiceAudio(audioFileId);
   if (token !== host.playToken) {
     return 0;
   }
-  return new Promise<number>((resolve, reject) => {
-    const audio = wx.createInnerAudioContext();
-    host.audio = audio;
-    let settled = false;
-    const cleanup = () => {
-      stopBookTTSProgressTimer(host);
-      audio.destroy();
-      if (host.audio === audio) {
-        host.audio = null;
-      }
-    };
-    const elapsedSeconds = () => {
-      const duration = fallbackDurationSeconds
-        || positiveFiniteSeconds(audio.duration)
-        || playbackTimeForProgress(host, audio);
-      return positiveFiniteSeconds(duration);
-    };
-    const resolveOnce = (seconds: number) => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      cleanup();
-      resolve(seconds);
-    };
-    const rejectOnce = (error: Error) => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      cleanup();
-      reject(error);
-    };
-    configureAudiblePlayback(audio);
-    audio.src = tempFilePath;
-    audio.onPlay(() => {
+  let playedSeconds = 0;
+  const elapsedSeconds = (audio: WechatMiniprogram.InnerAudioContext): number => {
+    const duration = fallbackDurationSeconds
+      || positiveFiniteSeconds(audio.duration)
+      || playbackTimeForProgress(host, audio);
+    return positiveFiniteSeconds(duration);
+  };
+  await host.audioPlayback.playFile(audioFileId, token, {
+    onPlay: (audio) => {
       host.ttsProgressStartedAtMs = Date.now();
       startBookTTSProgressTimer(host, token, audio, elapsedBeforeSeconds, fallbackDurationSeconds);
-    });
-    audio.onTimeUpdate(() => {
-      if (token === host.playToken && host.audio === audio) {
+    },
+    onTimeUpdate: (audio) => {
+      if (token === host.playToken && host.audioPlayback.currentAudio() === audio) {
         updateBookTTSProgress(
           host,
           elapsedBeforeSeconds + playbackTimeForProgress(host, audio),
           host.data.bookTTSDurationSeconds,
         );
       }
-    });
-    audio.onEnded(() => {
-      const seconds = elapsedSeconds();
+    },
+    onEnded: (audio) => {
+      const seconds = elapsedSeconds(audio);
+      playedSeconds = seconds;
       updateBookTTSProgress(host, elapsedBeforeSeconds + seconds, host.data.bookTTSDurationSeconds);
-      resolveOnce(seconds);
-    });
-    audio.onStop(() => {
-      resolveOnce(playbackTimeForProgress(host, audio));
-    });
-    audio.onError((error) => {
-      rejectOnce(new Error(error.errMsg || "音频播放失败"));
-    });
-    audio.play();
+      stopBookTTSProgressTimer(host);
+    },
+    onStop: (audio) => {
+      playedSeconds = playbackTimeForProgress(host, audio);
+      stopBookTTSProgressTimer(host);
+    },
+    onError: () => {
+      stopBookTTSProgressTimer(host);
+    },
   });
+  return playedSeconds;
 }
 
 export function updateBookTTSProgress(
@@ -178,7 +151,7 @@ export function startBookTTSProgressTimer(
 ): void {
   stopBookTTSProgressTimer(host);
   const tick = () => {
-    if (token !== host.playToken || host.audio !== audio) {
+    if (token !== host.playToken || host.audioPlayback.currentAudio() !== audio) {
       stopBookTTSProgressTimer(host);
       return;
     }
@@ -228,13 +201,9 @@ export function playbackTimeForProgress(
 }
 
 export function stopBookPlayback(host: BookTTSHost): void {
-  host.playToken += 1;
+  host.audioPlayback.stop();
+  host.playToken = host.audioPlayback.currentToken();
   stopBookTTSProgressTimer(host);
-  if (host.audio) {
-    host.audio.stop();
-    host.audio.destroy();
-    host.audio = null;
-  }
   if (host.data.playingTarget || host.data.ttsBusyTarget) {
     host.setData({ playingTarget: "", ttsBusyTarget: "" });
   }

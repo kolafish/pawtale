@@ -8,6 +8,23 @@ export interface AudioPlaybackControllerOptions {
   configureAudio?: (audio: WechatMiniprogram.InnerAudioContext) => void;
 }
 
+export interface AudioPlaybackError {
+  errMsg?: string;
+}
+
+export interface AudioPlaybackPlayOptions {
+  onPlay?: (audio: WechatMiniprogram.InnerAudioContext) => void;
+  onPlayRequested?: (audio: WechatMiniprogram.InnerAudioContext) => void;
+  onTimeUpdate?: (audio: WechatMiniprogram.InnerAudioContext) => void;
+  onEnded?: (audio: WechatMiniprogram.InnerAudioContext) => void;
+  onStop?: (audio: WechatMiniprogram.InnerAudioContext) => void;
+  onError?: (
+    error: AudioPlaybackError,
+    audio: WechatMiniprogram.InnerAudioContext,
+  ) => void;
+  errorMessage?: string | ((error: AudioPlaybackError) => string);
+}
+
 interface ActivePlayback {
   audio: WechatMiniprogram.InnerAudioContext;
   resolve: () => void;
@@ -37,11 +54,15 @@ export class AudioPlaybackController {
     return this.playToken;
   }
 
+  currentAudio(): WechatMiniprogram.InnerAudioContext | null {
+    return this.activePlayback?.audio || null;
+  }
+
   isCurrentToken(token: number): boolean {
     return token === this.playToken;
   }
 
-  async playFile(audioFileId: string, token = this.playToken): Promise<void> {
+  async playFile(audioFileId: string, token = this.playToken, options: AudioPlaybackPlayOptions = {}): Promise<void> {
     const tempFilePath = await this.downloadAudioFile(audioFileId);
     if (!this.isCurrentToken(token)) {
       return;
@@ -58,16 +79,26 @@ export class AudioPlaybackController {
       this.activePlayback = playback;
       this.configureAudio(audio);
       audio.src = tempFilePath;
+      audio.onPlay(() => {
+        options.onPlay?.(audio);
+      });
+      audio.onTimeUpdate(() => {
+        options.onTimeUpdate?.(audio);
+      });
       audio.onEnded(() => {
+        options.onEnded?.(audio);
         this.resolvePlayback(playback);
       });
       audio.onStop(() => {
+        options.onStop?.(audio);
         this.resolvePlayback(playback);
       });
       audio.onError((error) => {
-        this.rejectPlayback(playback, new Error(error.errMsg || "音频播放失败"));
+        options.onError?.(error, audio);
+        this.rejectPlayback(playback, this.errorFromPlayback(error, options));
       });
       audio.play();
+      options.onPlayRequested?.(audio);
     });
   }
 
@@ -90,6 +121,19 @@ export class AudioPlaybackController {
 
   private configureAudio(audio: WechatMiniprogram.InnerAudioContext): void {
     (this.options.configureAudio || configureAudiblePlayback)(audio);
+  }
+
+  private errorFromPlayback(
+    error: AudioPlaybackError,
+    options: AudioPlaybackPlayOptions,
+  ): Error {
+    if (typeof options.errorMessage === "function") {
+      return new Error(options.errorMessage(error));
+    }
+    if (options.errorMessage) {
+      return new Error(options.errorMessage);
+    }
+    return new Error(error.errMsg || "音频播放失败");
   }
 
   private stopActivePlayback(): void {
