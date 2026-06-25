@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import binascii
 from collections.abc import AsyncIterator
+import contextlib
 from dataclasses import dataclass, field
 import json
 import logging
 import math
-from typing import Protocol
+import struct
+from typing import Any, Protocol
 import uuid
 
 import httpx
@@ -32,6 +35,7 @@ from app.services.memoir.tts_alignment import (
     alignment_segments_to_json,
 )
 from app.services.provider_limits import provider_concurrency_limiter
+import websockets
 
 
 logger = logging.getLogger(__name__)
@@ -47,6 +51,27 @@ TTS_ALIGNMENT_METADATA_KEY = "tts_alignment"
 TTS_TIMING_SOURCE_METADATA_KEY = "tts_timing_source"
 TTS_SPEED_RATIO_METADATA_KEY = "tts_speed_ratio"
 DEFAULT_TTS_SPEED_RATIO = 1.0
+DEFAULT_STREAM_TTS_RESPONSE_FORMAT = "pcm"
+DEFAULT_STREAM_TTS_SAMPLE_RATE = 16000
+DEFAULT_STREAM_TTS_CHANNELS = 1
+DEFAULT_STREAM_TTS_BITS_PER_SAMPLE = 16
+
+_VOLC_BIDI_MSG_FULL_CLIENT_REQUEST = 0x14
+_VOLC_BIDI_MSG_FULL_SERVER_RESPONSE = 0x94
+_VOLC_BIDI_MSG_AUDIO_ONLY_RESPONSE = 0xB4
+_VOLC_BIDI_MSG_ERROR = 0xF0
+_VOLC_BIDI_SERIALIZATION_JSON = 0x10
+_VOLC_BIDI_START_CONNECTION = 1
+_VOLC_BIDI_FINISH_CONNECTION = 2
+_VOLC_BIDI_CONNECTION_STARTED = 50
+_VOLC_BIDI_CONNECTION_FAILED = 51
+_VOLC_BIDI_START_SESSION = 100
+_VOLC_BIDI_FINISH_SESSION = 102
+_VOLC_BIDI_SESSION_STARTED = 150
+_VOLC_BIDI_SESSION_FINISHED = 152
+_VOLC_BIDI_SESSION_FAILED = 153
+_VOLC_BIDI_TASK_REQUEST = 200
+_VOLC_BIDI_TTS_RESPONSE = 352
 
 
 @dataclass(frozen=True)
@@ -73,6 +98,9 @@ class StreamingTTSChunk:
     sequence: int = 0
     alignment: list[TTSAlignmentSegment] = field(default_factory=list)
     duration_seconds: float | None = None
+    sample_rate: int | None = None
+    channels: int = DEFAULT_STREAM_TTS_CHANNELS
+    bits_per_sample: int = DEFAULT_STREAM_TTS_BITS_PER_SAMPLE
     is_final: bool = False
     raw: dict[str, object] = field(default_factory=dict)
 
@@ -115,6 +143,17 @@ class TTSClient(Protocol):
     ) -> AsyncIterator[StreamingTTSChunk]:
         raise NotImplementedError(f"{self.provider_name} does not support streaming TTS")
 
+    def stream_input_synthesize(
+        self,
+        text_chunks: AsyncIterator[str],
+        *,
+        voice: str | None = None,
+        speed_ratio: float | None = None,
+        response_format: str | None = None,
+        sample_rate: int | None = None,
+    ) -> AsyncIterator[StreamingTTSChunk]:
+        raise NotImplementedError(f"{self.provider_name} does not support bidirectional streaming TTS")
+
 
 class VolcTTSClient:
     provider_name = "volc_tts"
@@ -122,7 +161,9 @@ class VolcTTSClient:
     def __init__(self, settings: Settings):
         self.app_id = settings.volc_tts_app_id.strip()
         self.access_token = settings.volc_tts_access_token.strip()
+        self.api_key = settings.volc_tts_api_key.strip()
         self.endpoint = settings.volc_tts_endpoint.strip()
+        self.bidirectional_endpoint = settings.volc_tts_bidirectional_endpoint.strip()
         self.resource_id = settings.volc_tts_resource_id.strip()
         self.default_voice = settings.volc_tts_speaker.strip()
         self.response_format = _volc_response_format(settings.volc_tts_response_format)
@@ -329,6 +370,368 @@ class VolcTTSClient:
             is_final=True,
         )
 
+    async def stream_input_synthesize(
+        self,
+        text_chunks: AsyncIterator[str],
+        *,
+        voice: str | None = None,
+        speed_ratio: float | None = None,
+        response_format: str | None = None,
+        sample_rate: int | None = None,
+    ) -> AsyncIterator[StreamingTTSChunk]:
+        effective_voice, effective_speed_ratio, output_format, output_sample_rate, headers, timeout = (
+            self._bidirectional_context(
+                voice=voice,
+                speed_ratio=speed_ratio,
+                response_format=response_format,
+                sample_rate=sample_rate,
+            )
+        )
+        connection: Any | None = None
+        producer_task: asyncio.Task[None] | None = None
+        audio_seen = False
+        sequence = 0
+        audio_bytes_seen = 0
+        session_id = str(uuid.uuid4())
+
+        try:
+            async with provider_concurrency_limiter.slot("tts", self.max_concurrent_requests):
+                connection = await websockets.connect(
+                    self.bidirectional_endpoint,
+                    additional_headers=headers,
+                    open_timeout=timeout,
+                    ping_interval=20,
+                    ping_timeout=20,
+                )
+                await _volc_bidi_send_packet(
+                    connection,
+                    _VOLC_BIDI_START_CONNECTION,
+                    {"event": _VOLC_BIDI_START_CONNECTION},
+                )
+                connection_started = _volc_bidi_parse_packet(await connection.recv())
+                if connection_started.event != _VOLC_BIDI_CONNECTION_STARTED:
+                    raise HTTPException(status_code=503, detail=TTS_UNAVAILABLE_MESSAGE)
+
+                await _volc_bidi_send_packet(
+                    connection,
+                    _VOLC_BIDI_START_SESSION,
+                    _volc_bidi_start_session_payload(
+                        voice=effective_voice,
+                        response_format=output_format,
+                        sample_rate=output_sample_rate,
+                        speed_ratio=effective_speed_ratio,
+                    ),
+                    session_id=session_id,
+                )
+                session_started = _volc_bidi_parse_packet(await connection.recv())
+                if session_started.event != _VOLC_BIDI_SESSION_STARTED:
+                    raise HTTPException(status_code=503, detail=TTS_UNAVAILABLE_MESSAGE)
+
+                producer_task = asyncio.create_task(
+                    _volc_bidi_send_text_chunks(connection, text_chunks, session_id=session_id)
+                )
+                while True:
+                    packet = _volc_bidi_parse_packet(await connection.recv())
+                    if packet.error_code is not None:
+                        raise HTTPException(status_code=503, detail=TTS_UNAVAILABLE_MESSAGE)
+                    if packet.event in {_VOLC_BIDI_CONNECTION_FAILED, _VOLC_BIDI_SESSION_FAILED}:
+                        raise HTTPException(status_code=503, detail=TTS_UNAVAILABLE_MESSAGE)
+                    if packet.event == _VOLC_BIDI_TTS_RESPONSE and packet.audio:
+                        audio_seen = True
+                        sequence += 1
+                        audio_bytes_seen += len(packet.audio)
+                        yield StreamingTTSChunk(
+                            audio=packet.audio,
+                            mime_type=output_format.mime_type,
+                            provider=self.provider_name,
+                            model=self.model_name,
+                            voice=effective_voice,
+                            speed_ratio=effective_speed_ratio,
+                            sequence=sequence,
+                            sample_rate=output_sample_rate,
+                            channels=DEFAULT_STREAM_TTS_CHANNELS,
+                            bits_per_sample=DEFAULT_STREAM_TTS_BITS_PER_SAMPLE,
+                            raw=packet.payload,
+                        )
+                    if packet.event == _VOLC_BIDI_SESSION_FINISHED:
+                        break
+
+                if producer_task is not None:
+                    await producer_task
+                if not audio_seen:
+                    raise HTTPException(status_code=502, detail="TTS 未返回可用音频")
+                yield StreamingTTSChunk(
+                    audio=b"",
+                    mime_type=output_format.mime_type,
+                    provider=self.provider_name,
+                    model=self.model_name,
+                    voice=effective_voice,
+                    speed_ratio=effective_speed_ratio,
+                    sequence=sequence + 1,
+                    duration_seconds=_stream_audio_duration_seconds(
+                        audio_bytes_seen,
+                        output_format.mime_type,
+                        output_sample_rate,
+                    ),
+                    sample_rate=output_sample_rate,
+                    channels=DEFAULT_STREAM_TTS_CHANNELS,
+                    bits_per_sample=DEFAULT_STREAM_TTS_BITS_PER_SAMPLE,
+                    is_final=True,
+                )
+                await _volc_bidi_send_packet(
+                    connection,
+                    _VOLC_BIDI_FINISH_CONNECTION,
+                    {"event": _VOLC_BIDI_FINISH_CONNECTION},
+                )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.exception("Volc bidirectional TTS request failed")
+            raise HTTPException(status_code=503, detail=TTS_UNAVAILABLE_MESSAGE) from exc
+        finally:
+            if producer_task is not None and not producer_task.done():
+                producer_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await producer_task
+            if connection is not None:
+                with contextlib.suppress(Exception):
+                    await connection.close()
+
+    def _bidirectional_context(
+        self,
+        *,
+        voice: str | None,
+        speed_ratio: float | None,
+        response_format: str | None,
+        sample_rate: int | None,
+    ) -> tuple[str, float, VolcTTSResponseFormat, int, dict[str, str], float]:
+        if not ((self.app_id and self.access_token) or self.api_key):
+            raise HTTPException(status_code=503, detail="火山 TTS 凭证未配置")
+        if not self.bidirectional_endpoint:
+            raise HTTPException(status_code=503, detail="火山双向 TTS endpoint 未配置")
+        if not self.resource_id:
+            raise HTTPException(status_code=503, detail="火山 TTS resource id 未配置")
+        effective_voice = self.effective_voice(voice)
+        if not effective_voice:
+            raise HTTPException(status_code=503, detail="火山 TTS 音色未配置")
+        effective_speed_ratio = _effective_tts_speed_ratio(speed_ratio)
+        output_format = _volc_response_format(response_format or DEFAULT_STREAM_TTS_RESPONSE_FORMAT)
+        output_sample_rate = _effective_stream_sample_rate(sample_rate)
+        headers = {
+            "X-Api-Resource-Id": self.resource_id,
+            "X-Api-Connect-Id": str(uuid.uuid4()),
+            "X-Control-Require-Usage-Tokens-Return": "*",
+        }
+        if self.app_id and self.access_token:
+            headers["X-Api-App-Key"] = self.app_id
+            headers["X-Api-Access-Key"] = self.access_token
+        else:
+            headers["X-Api-Key"] = self.api_key
+        return (
+            effective_voice,
+            effective_speed_ratio,
+            output_format,
+            output_sample_rate,
+            headers,
+            max(1.0, float(self.timeout_seconds)),
+        )
+
+
+@dataclass(frozen=True)
+class _VolcBidirectionalPacket:
+    message_type: int
+    event: int | None = None
+    connection_id: str = ""
+    session_id: str = ""
+    audio: bytes = b""
+    payload: dict[str, object] = field(default_factory=dict)
+    error_code: int | None = None
+    error_message: str = ""
+
+
+def _volc_bidi_start_session_payload(
+    *,
+    voice: str,
+    response_format: VolcTTSResponseFormat,
+    sample_rate: int,
+    speed_ratio: float,
+) -> dict[str, object]:
+    audio_params: dict[str, object] = {
+        "format": response_format.provider_value,
+        "sample_rate": sample_rate,
+        "enable_subtitle": False,
+    }
+    speech_rate = _volc_speech_rate_from_speed_ratio(speed_ratio)
+    if speech_rate is not None:
+        audio_params["speech_rate"] = speech_rate
+    return {
+        "event": _VOLC_BIDI_START_SESSION,
+        "namespace": "BidirectionalTTS",
+        "user": {"uid": "pawtale-backend"},
+        "req_params": {
+            "speaker": voice,
+            "audio_params": audio_params,
+            "additions": json.dumps({"disable_markdown_filter": True}, separators=(",", ":")),
+        },
+    }
+
+
+async def _volc_bidi_send_text_chunks(
+    connection: Any,
+    text_chunks: AsyncIterator[str],
+    *,
+    session_id: str,
+) -> None:
+    async for text in text_chunks:
+        if not text:
+            continue
+        await _volc_bidi_send_packet(
+            connection,
+            _VOLC_BIDI_TASK_REQUEST,
+            {
+                "event": _VOLC_BIDI_TASK_REQUEST,
+                "namespace": "BidirectionalTTS",
+                "req_params": {"text": text},
+            },
+            session_id=session_id,
+        )
+    await _volc_bidi_send_packet(
+        connection,
+        _VOLC_BIDI_FINISH_SESSION,
+        {
+            "event": _VOLC_BIDI_FINISH_SESSION,
+            "namespace": "BidirectionalTTS",
+        },
+        session_id=session_id,
+    )
+
+
+async def _volc_bidi_send_packet(
+    connection: Any,
+    event: int,
+    payload: dict[str, object],
+    *,
+    session_id: str = "",
+) -> None:
+    await connection.send(_volc_bidi_client_packet(event, payload, session_id=session_id))
+
+
+def _volc_bidi_client_packet(
+    event: int,
+    payload: dict[str, object],
+    *,
+    session_id: str = "",
+) -> bytes:
+    payload_bytes = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    parts = [
+        struct.pack(
+            ">BBBBi",
+            0x11,
+            _VOLC_BIDI_MSG_FULL_CLIENT_REQUEST,
+            _VOLC_BIDI_SERIALIZATION_JSON,
+            0x00,
+            event,
+        )
+    ]
+    if session_id:
+        session_bytes = session_id.encode("utf-8")
+        parts.append(struct.pack(">I", len(session_bytes)))
+        parts.append(session_bytes)
+    parts.append(struct.pack(">I", len(payload_bytes)))
+    parts.append(payload_bytes)
+    return b"".join(parts)
+
+
+def _volc_bidi_parse_packet(message: bytes | str) -> _VolcBidirectionalPacket:
+    if isinstance(message, str):
+        try:
+            payload = json.loads(message)
+        except json.JSONDecodeError as exc:
+            raise ValueError("invalid Volc bidirectional TTS text packet") from exc
+        if not isinstance(payload, dict):
+            raise ValueError("invalid Volc bidirectional TTS text payload")
+        event = payload.get("event")
+        return _VolcBidirectionalPacket(
+            message_type=_VOLC_BIDI_MSG_FULL_SERVER_RESPONSE,
+            event=event if isinstance(event, int) else None,
+            payload=payload,
+        )
+
+    if len(message) < 8:
+        raise ValueError("invalid Volc bidirectional TTS packet")
+    message_type = message[1]
+    offset = 4
+    if message_type == _VOLC_BIDI_MSG_ERROR:
+        error_code, offset = _read_i32(message, offset)
+        raw_payload, offset = _read_length_prefixed_bytes(message, offset)
+        payload = _json_payload(raw_payload)
+        error_message = str(payload.get("message") or payload.get("error") or error_code)
+        return _VolcBidirectionalPacket(
+            message_type=message_type,
+            payload=payload,
+            error_code=error_code,
+            error_message=error_message,
+        )
+
+    event, offset = _read_i32(message, offset)
+    if event in {_VOLC_BIDI_CONNECTION_STARTED, _VOLC_BIDI_CONNECTION_FAILED}:
+        raw_connection_id, offset = _read_length_prefixed_bytes(message, offset)
+        raw_payload, offset = _read_length_prefixed_bytes(message, offset)
+        return _VolcBidirectionalPacket(
+            message_type=message_type,
+            event=event,
+            connection_id=raw_connection_id.decode("utf-8", errors="replace"),
+            payload=_json_payload(raw_payload),
+        )
+
+    raw_session_id, offset = _read_length_prefixed_bytes(message, offset)
+    if message_type == _VOLC_BIDI_MSG_AUDIO_ONLY_RESPONSE:
+        audio, offset = _read_length_prefixed_bytes(message, offset)
+        return _VolcBidirectionalPacket(
+            message_type=message_type,
+            event=event,
+            session_id=raw_session_id.decode("utf-8", errors="replace"),
+            audio=audio,
+        )
+
+    raw_payload, offset = _read_length_prefixed_bytes(message, offset)
+    return _VolcBidirectionalPacket(
+        message_type=message_type,
+        event=event,
+        session_id=raw_session_id.decode("utf-8", errors="replace"),
+        payload=_json_payload(raw_payload),
+    )
+
+
+def _read_i32(data: bytes, offset: int) -> tuple[int, int]:
+    if offset + 4 > len(data):
+        raise ValueError("invalid Volc bidirectional TTS integer")
+    return struct.unpack(">i", data[offset : offset + 4])[0], offset + 4
+
+
+def _read_u32(data: bytes, offset: int) -> tuple[int, int]:
+    if offset + 4 > len(data):
+        raise ValueError("invalid Volc bidirectional TTS length")
+    return struct.unpack(">I", data[offset : offset + 4])[0], offset + 4
+
+
+def _read_length_prefixed_bytes(data: bytes, offset: int) -> tuple[bytes, int]:
+    size, offset = _read_u32(data, offset)
+    if offset + size > len(data):
+        raise ValueError("invalid Volc bidirectional TTS payload")
+    return data[offset : offset + size], offset + size
+
+
+def _json_payload(raw_payload: bytes) -> dict[str, object]:
+    if not raw_payload:
+        return {}
+    try:
+        payload = json.loads(raw_payload.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        logger.warning("Volc bidirectional TTS returned an invalid JSON payload")
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
 
 def _volc_response_format(value: str) -> VolcTTSResponseFormat:
     normalized = (value or "mp3").strip().lower()
@@ -480,6 +883,28 @@ def _effective_tts_speed_ratio(speed_ratio: object) -> float:
     if not math.isfinite(value):
         return DEFAULT_TTS_SPEED_RATIO
     return max(0.5, min(2.0, round(value, 2)))
+
+
+def _effective_stream_sample_rate(sample_rate: object) -> int:
+    if sample_rate is None:
+        return DEFAULT_STREAM_TTS_SAMPLE_RATE
+    try:
+        value = int(sample_rate)
+    except (TypeError, ValueError):
+        return DEFAULT_STREAM_TTS_SAMPLE_RATE
+    if value <= 0:
+        return DEFAULT_STREAM_TTS_SAMPLE_RATE
+    return value
+
+
+def _stream_audio_duration_seconds(audio_bytes: int, mime_type: str, sample_rate: int) -> float | None:
+    normalized = (mime_type or "").split(";")[0].strip().lower()
+    if normalized not in {"audio/l16", "audio/pcm", "audio/x-pcm"}:
+        return None
+    bytes_per_second = sample_rate * DEFAULT_STREAM_TTS_CHANNELS * DEFAULT_STREAM_TTS_BITS_PER_SAMPLE / 8
+    if bytes_per_second <= 0:
+        return None
+    return audio_bytes / bytes_per_second
 
 
 def _volc_speech_rate_from_speed_ratio(speed_ratio: float) -> int | None:

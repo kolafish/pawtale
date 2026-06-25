@@ -1,6 +1,7 @@
 import base64
 from contextlib import asynccontextmanager
 import json
+import struct
 
 import httpx
 import pytest
@@ -243,6 +244,87 @@ async def test_volc_tts_client_streams_sse_audio_chunks(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_volc_tts_client_streams_bidirectional_text_input(monkeypatch):
+    connect_calls = []
+    limiter = RecordingLimiter()
+    server_packets = [
+        bidi_server_packet(50, connection_id="conn-1", payload={"event": 50}),
+        bidi_server_packet(150, session_id="session-1", payload={"event": 150}),
+        bidi_server_packet(352, session_id="session-1", audio=b"pcm-1", message_type=0xB4),
+        bidi_server_packet(352, session_id="session-1", audio=b"pcm-2", message_type=0xB4),
+        bidi_server_packet(152, session_id="session-1", payload={"event": 152}),
+    ]
+    connection = FakeBidirectionalConnection(server_packets)
+
+    async def fake_connect(url, *, additional_headers, open_timeout, ping_interval, ping_timeout):
+        connect_calls.append(
+            {
+                "url": url,
+                "headers": additional_headers,
+                "open_timeout": open_timeout,
+                "ping_interval": ping_interval,
+                "ping_timeout": ping_timeout,
+            }
+        )
+        return connection
+
+    async def text_chunks():
+        yield "你好"
+        yield "，继续"
+
+    monkeypatch.setattr("app.services.memoir.voice_tts.websockets.connect", fake_connect)
+    monkeypatch.setattr("app.services.memoir.voice_tts.provider_concurrency_limiter", limiter)
+    client = VolcTTSClient(
+        Settings(
+            tts_provider="volc",
+            tts_timeout_seconds=9,
+            tts_max_concurrent_requests=2,
+            volc_tts_app_id="app-id",
+            volc_tts_access_token="access-token",
+            volc_tts_bidirectional_endpoint="wss://openspeech.bytedance.com/api/v3/tts/bidirection",
+            volc_tts_resource_id="seed-tts-2.0",
+            volc_tts_speaker="zh_female_vv_uranus_bigtts",
+        )
+    )
+
+    chunks = [
+        chunk
+        async for chunk in client.stream_input_synthesize(
+            text_chunks(),
+            voice="S_test_voice",
+            speed_ratio=1.2,
+            response_format="pcm",
+            sample_rate=16000,
+        )
+    ]
+
+    assert [chunk.audio for chunk in chunks] == [b"pcm-1", b"pcm-2", b""]
+    assert [chunk.sequence for chunk in chunks] == [1, 2, 3]
+    assert chunks[0].mime_type == "audio/L16"
+    assert chunks[0].sample_rate == 16000
+    assert chunks[-1].is_final
+    assert chunks[-1].duration_seconds == len(b"pcm-1pcm-2") / (16000 * 2)
+    assert connection.closed
+    assert connect_calls[0]["url"] == "wss://openspeech.bytedance.com/api/v3/tts/bidirection"
+    assert connect_calls[0]["headers"]["X-Api-App-Key"] == "app-id"
+    assert connect_calls[0]["headers"]["X-Api-Access-Key"] == "access-token"
+    assert connect_calls[0]["headers"]["X-Api-Resource-Id"] == "seed-tts-2.0"
+    assert connect_calls[0]["open_timeout"] == 9
+    assert limiter.slot_calls == [("tts", 2)]
+
+    sent_packets = [decode_bidi_client_packet(frame) for frame in connection.sent]
+    assert [packet["event"] for packet in sent_packets] == [1, 100, 200, 200, 102, 2]
+    start_session = sent_packets[1]["payload"]
+    assert start_session["namespace"] == "BidirectionalTTS"
+    assert start_session["req_params"]["speaker"] == "S_test_voice"
+    assert start_session["req_params"]["audio_params"]["format"] == "pcm"
+    assert start_session["req_params"]["audio_params"]["sample_rate"] == 16000
+    assert start_session["req_params"]["audio_params"]["speech_rate"] == 20
+    assert sent_packets[2]["payload"]["req_params"]["text"] == "你好"
+    assert sent_packets[3]["payload"]["req_params"]["text"] == "，继续"
+
+
+@pytest.mark.asyncio
 async def test_volc_tts_client_ignores_legacy_voice_values(monkeypatch):
     calls = []
     audio = b"audio-bytes"
@@ -327,3 +409,65 @@ class RecordingLimiter:
     async def slot(self, key, limit):
         self.slot_calls.append((key, limit))
         yield
+
+
+class FakeBidirectionalConnection:
+    def __init__(self, packets):
+        self.packets = list(packets)
+        self.sent = []
+        self.closed = False
+
+    async def send(self, frame):
+        self.sent.append(frame)
+
+    async def recv(self):
+        if not self.packets:
+            raise RuntimeError("no more fake bidirectional packets")
+        return self.packets.pop(0)
+
+    async def close(self):
+        self.closed = True
+
+
+def bidi_server_packet(
+    event,
+    *,
+    session_id="",
+    connection_id="",
+    payload=None,
+    audio=b"",
+    message_type=0x94,
+):
+    parts = [struct.pack(">BBBBi", 0x11, message_type, 0x10, 0x00, event)]
+    if event in {50, 51}:
+        encoded_connection_id = connection_id.encode()
+        parts.append(struct.pack(">I", len(encoded_connection_id)))
+        parts.append(encoded_connection_id)
+    else:
+        encoded_session_id = session_id.encode()
+        parts.append(struct.pack(">I", len(encoded_session_id)))
+        parts.append(encoded_session_id)
+    if message_type == 0xB4:
+        parts.append(struct.pack(">I", len(audio)))
+        parts.append(audio)
+    else:
+        payload_bytes = json.dumps(payload or {}, ensure_ascii=False, separators=(",", ":")).encode()
+        parts.append(struct.pack(">I", len(payload_bytes)))
+        parts.append(payload_bytes)
+    return b"".join(parts)
+
+
+def decode_bidi_client_packet(frame):
+    offset = 4
+    event = struct.unpack(">i", frame[offset : offset + 4])[0]
+    offset += 4
+    session_id = ""
+    if event in {100, 102, 200}:
+        session_id_size = struct.unpack(">I", frame[offset : offset + 4])[0]
+        offset += 4
+        session_id = frame[offset : offset + session_id_size].decode()
+        offset += session_id_size
+    payload_size = struct.unpack(">I", frame[offset : offset + 4])[0]
+    offset += 4
+    payload = json.loads(frame[offset : offset + payload_size].decode())
+    return {"event": event, "session_id": session_id, "payload": payload}

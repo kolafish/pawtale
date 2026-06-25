@@ -1,11 +1,12 @@
 import { readSelectedAIModel } from "./ai-model-settings";
 import { assistantTurnStreamUrl, backendSessionCookieHeader } from "./memoir-voice-api";
+import {
+  type PreparedStreamingTTSAudioSegment,
+  StreamingTTSSegmentAssembler,
+} from "./streaming-tts-segments";
 import { readChatTTSSettings } from "./tts-settings";
 
 const SOCKET_CONNECT_TIMEOUT_MS = 10000;
-const PCM_SAMPLE_RATE = 16000;
-const PCM_CHANNELS = 1;
-const PCM_BITS_PER_SAMPLE = 16;
 
 export interface VoiceAssistantTurnStreamStartOptions {
   regenerate?: boolean;
@@ -55,6 +56,9 @@ export interface VoiceAssistantTurnAudioChunkEvent {
   model?: string;
   voice?: string;
   speed_ratio?: number;
+  sample_rate?: number | null;
+  channels?: number | null;
+  bits_per_sample?: number | null;
 }
 
 export interface VoiceAssistantTurnAudioSegmentDoneEvent {
@@ -88,14 +92,8 @@ export interface VoiceAssistantTurnTerminalEvent {
   error?: string;
 }
 
-export interface PreparedAssistantStreamAudioSegment {
+export interface PreparedAssistantStreamAudioSegment extends PreparedStreamingTTSAudioSegment {
   turnId: string;
-  segmentIndex: number;
-  text: string;
-  tempFilePath: string;
-  mimeType: string;
-  durationSeconds?: number | null;
-  dispose(): void;
 }
 
 export interface VoiceAssistantTurnStreamCallbacks {
@@ -108,20 +106,12 @@ export interface VoiceAssistantTurnStreamCallbacks {
   onFailed?(event: VoiceAssistantTurnTerminalEvent): void;
 }
 
-type SegmentBuffer = {
-  turnId: string;
-  text: string;
-  mimeType: string;
-  chunks: Uint8Array[];
-};
-
 export class VoiceAssistantTurnStreamClient {
   private socketTask: WechatMiniprogram.SocketTask | null = null;
   private socketOpen = false;
   private closed = false;
   private startSent = false;
-  private readonly segments = new Map<number, SegmentBuffer>();
-  private readonly tempFiles: string[] = [];
+  private segmentAssembler: StreamingTTSSegmentAssembler | null = null;
   private messageChain: Promise<void> = Promise.resolve();
   private resolveStart?: (event: VoiceAssistantTurnCompletedEvent | VoiceAssistantTurnTerminalEvent) => void;
   private rejectStart?: (error: Error) => void;
@@ -135,6 +125,7 @@ export class VoiceAssistantTurnStreamClient {
     this.closed = false;
     this.startSent = false;
     this.messageChain = Promise.resolve();
+    this.segmentAssembler = null;
     const connectTimeoutMs = options.connectTimeoutMs ?? SOCKET_CONNECT_TIMEOUT_MS;
     const cookie = await backendSessionCookieHeader();
     const url = assistantTurnStreamUrl(this.voiceSessionId);
@@ -245,7 +236,7 @@ export class VoiceAssistantTurnStreamClient {
   }
 
   disposeTempFiles(): void {
-    this.tempFiles.splice(0).forEach((filePath) => this.deleteTempFile(filePath));
+    this.segmentAssembler?.disposeTempFiles();
   }
 
   private startPayload(options: VoiceAssistantTurnStreamStartOptions): Record<string, unknown> {
@@ -342,77 +333,31 @@ export class VoiceAssistantTurnStreamClient {
   }
 
   private rememberSegmentText(event: VoiceAssistantTurnTextSegmentEvent): void {
-    const segment = this.segmentBuffer(event.segment_index, event.turn_id);
-    segment.text = event.text || segment.text;
+    this.segmentAssemblerFor(event.turn_id).rememberText(event);
   }
 
   private appendAudioChunk(event: VoiceAssistantTurnAudioChunkEvent): void {
-    const audio = base64ToUint8Array(event.audio);
-    if (!audio.byteLength) {
-      return;
-    }
-    const segment = this.segmentBuffer(event.segment_index, event.turn_id);
-    segment.mimeType = event.mime_type || segment.mimeType;
-    segment.chunks.push(audio);
+    this.segmentAssemblerFor(event.turn_id).appendChunk(event);
   }
 
   private async finalizeAudioSegment(
     event: VoiceAssistantTurnAudioSegmentDoneEvent,
   ): Promise<PreparedAssistantStreamAudioSegment | null> {
-    const segment = this.segments.get(event.segment_index);
-    if (!segment || !segment.chunks.length) {
-      this.segments.delete(event.segment_index);
+    const segment = await this.segmentAssemblerFor(event.turn_id).finalize(event);
+    if (!segment) {
       return null;
     }
-    this.segments.delete(event.segment_index);
-    const audio = concatUint8Arrays(segment.chunks);
-    const stored = audioBytesForPlayback(audio, segment.mimeType);
-    const filePath = `${wx.env.USER_DATA_PATH}/assistant-turn-${safeFilePart(segment.turnId)}-${event.segment_index}${stored.extension}`;
-    await writeTempFile(filePath, stored.bytes);
-    this.tempFiles.push(filePath);
-    let disposed = false;
     return {
-      turnId: segment.turnId,
-      segmentIndex: event.segment_index,
-      text: segment.text,
-      tempFilePath: filePath,
-      mimeType: stored.mimeType,
-      durationSeconds: event.duration_seconds,
-      dispose: () => {
-        if (disposed) {
-          return;
-        }
-        disposed = true;
-        this.removeTempFile(filePath);
-        this.deleteTempFile(filePath);
-      },
+      ...segment,
+      turnId: event.turn_id,
     };
   }
 
-  private removeTempFile(filePath: string): void {
-    const index = this.tempFiles.indexOf(filePath);
-    if (index >= 0) {
-      this.tempFiles.splice(index, 1);
+  private segmentAssemblerFor(turnId: string): StreamingTTSSegmentAssembler {
+    if (!this.segmentAssembler) {
+      this.segmentAssembler = new StreamingTTSSegmentAssembler(`assistant-turn-${turnId}`);
     }
-  }
-
-  private deleteTempFile(filePath: string): void {
-    wx.getFileSystemManager().unlink?.({ filePath });
-  }
-
-  private segmentBuffer(segmentIndex: number, turnId: string): SegmentBuffer {
-    const current = this.segments.get(segmentIndex);
-    if (current) {
-      return current;
-    }
-    const created: SegmentBuffer = {
-      turnId,
-      text: "",
-      mimeType: "audio/pcm",
-      chunks: [],
-    };
-    this.segments.set(segmentIndex, created);
-    return created;
+    return this.segmentAssembler;
   }
 }
 
@@ -423,101 +368,4 @@ function safeJsonParse(value: string): Record<string, unknown> | null {
   } catch {
     return null;
   }
-}
-
-function base64ToUint8Array(value: string): Uint8Array {
-  if (!value) {
-    return new Uint8Array();
-  }
-  const buffer = wx.base64ToArrayBuffer(value);
-  return new Uint8Array(buffer);
-}
-
-function concatUint8Arrays(chunks: Uint8Array[]): Uint8Array {
-  const totalLength = chunks.reduce((total, chunk) => total + chunk.byteLength, 0);
-  const output = new Uint8Array(totalLength);
-  let offset = 0;
-  chunks.forEach((chunk) => {
-    output.set(chunk, offset);
-    offset += chunk.byteLength;
-  });
-  return output;
-}
-
-function audioBytesForPlayback(audio: Uint8Array, mimeType: string): {
-  bytes: Uint8Array;
-  extension: string;
-  mimeType: string;
-} {
-  const normalized = (mimeType || "audio/pcm").split(";")[0].trim().toLowerCase();
-  if (normalized === "audio/l16" || normalized === "audio/pcm" || normalized === "audio/x-pcm") {
-    return {
-      bytes: wavBytesFromPcm(audio),
-      extension: ".wav",
-      mimeType: "audio/wav",
-    };
-  }
-  if (normalized === "audio/mpeg" || normalized === "audio/mp3") {
-    return { bytes: audio, extension: ".mp3", mimeType: "audio/mpeg" };
-  }
-  if (normalized === "audio/ogg") {
-    return { bytes: audio, extension: ".ogg", mimeType: "audio/ogg" };
-  }
-  if (normalized === "audio/wav" || normalized === "audio/x-wav" || normalized === "audio/wave") {
-    return { bytes: audio, extension: ".wav", mimeType: "audio/wav" };
-  }
-  return {
-    bytes: wavBytesFromPcm(audio),
-    extension: ".wav",
-    mimeType: "audio/wav",
-  };
-}
-
-function wavBytesFromPcm(pcm: Uint8Array): Uint8Array {
-  const header = new ArrayBuffer(44);
-  const view = new DataView(header);
-  writeAscii(view, 0, "RIFF");
-  view.setUint32(4, 36 + pcm.byteLength, true);
-  writeAscii(view, 8, "WAVE");
-  writeAscii(view, 12, "fmt ");
-  view.setUint32(16, 16, true);
-  view.setUint16(20, 1, true);
-  view.setUint16(22, PCM_CHANNELS, true);
-  view.setUint32(24, PCM_SAMPLE_RATE, true);
-  view.setUint32(28, PCM_SAMPLE_RATE * PCM_CHANNELS * PCM_BITS_PER_SAMPLE / 8, true);
-  view.setUint16(32, PCM_CHANNELS * PCM_BITS_PER_SAMPLE / 8, true);
-  view.setUint16(34, PCM_BITS_PER_SAMPLE, true);
-  writeAscii(view, 36, "data");
-  view.setUint32(40, pcm.byteLength, true);
-  const output = new Uint8Array(44 + pcm.byteLength);
-  output.set(new Uint8Array(header), 0);
-  output.set(pcm, 44);
-  return output;
-}
-
-function writeAscii(view: DataView, offset: number, text: string): void {
-  for (let index = 0; index < text.length; index += 1) {
-    view.setUint8(offset + index, text.charCodeAt(index));
-  }
-}
-
-function writeTempFile(filePath: string, data: Uint8Array): Promise<void> {
-  return new Promise((resolve, reject) => {
-    wx.getFileSystemManager().writeFile({
-      filePath,
-      data: uint8ArrayToArrayBuffer(data),
-      success: () => resolve(),
-      fail: (error) => reject(new Error(error.errMsg || "AI 语音片段写入失败")),
-    });
-  });
-}
-
-function uint8ArrayToArrayBuffer(data: Uint8Array): ArrayBuffer {
-  const output = new ArrayBuffer(data.byteLength);
-  new Uint8Array(output).set(data);
-  return output;
-}
-
-function safeFilePart(value: string): string {
-  return value.replace(/[^a-zA-Z0-9_-]/g, "");
 }

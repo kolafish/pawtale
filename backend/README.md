@@ -128,10 +128,12 @@ TTS_PROVIDER=disabled
 TTS_TIMEOUT_SECONDS=30
 TTS_MAX_CONCURRENT_REQUESTS=3
 
-# 火山/豆包语音 V3 TTS。使用 seed-tts-2.0 + *_uranus_bigtts 音色时，后端会读取原生字幕时间戳供小程序高亮。
+# 火山/豆包语音 V3 TTS。AI 访谈和成书语音编辑使用 bidirectional WebSocket，历史消息重播和长文朗读仍可使用 unidirectional SSE。
 VOLC_TTS_APP_ID=
 VOLC_TTS_ACCESS_TOKEN=
+VOLC_TTS_API_KEY=
 VOLC_TTS_ENDPOINT=https://openspeech.bytedance.com/api/v3/tts/unidirectional/sse
+VOLC_TTS_BIDIRECTIONAL_ENDPOINT=wss://openspeech.bytedance.com/api/v3/tts/bidirection
 VOLC_TTS_RESOURCE_ID=seed-tts-2.0
 VOLC_TTS_SPEAKER=zh_female_vv_uranus_bigtts
 VOLC_TTS_RESPONSE_FORMAT=mp3

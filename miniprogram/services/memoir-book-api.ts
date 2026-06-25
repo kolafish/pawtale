@@ -259,6 +259,14 @@ export function bookVoiceCommandGatewayUrl(projectId: string): string {
   return `${cleanBaseUrl(config.wsBaseUrl)}${memoirProjectPath(projectId, "/book-voice-command/gateway")}`;
 }
 
+export function bookVoiceAssistantTTSStreamUrl(projectId: string): string {
+  const config = readBackendConfig();
+  if (!config.wsBaseUrl) {
+    throw new Error("未配置后端 WebSocket 地址");
+  }
+  return `${cleanBaseUrl(config.wsBaseUrl)}${memoirProjectPath(projectId, "/book-voice-assistant/tts-stream")}`;
+}
+
 export function createMemoirBookVoiceAssistantTTS(
   projectId: string,
   data: MemoirBookVoiceAssistantTTSRequest,

@@ -34,7 +34,7 @@ async def parse_book_voice_command(
     ai_client: AITextClient | None = None,
 ) -> MemoirBookVoiceCommandParseResponse:
     await load_memoir_project(db, project_id, user_id)
-    plan = await _load_plan(db, project_id)
+    plan = await load_book_plan(db, project_id)
     if not plan:
         raise HTTPException(status_code=404, detail="章节规划不存在")
 
@@ -67,7 +67,7 @@ async def synthesize_book_voice_assistant_audio(
     tts_client: TTSClient | None = None,
 ) -> MemoirBookAudioResponse:
     await load_memoir_project(db, project_id, user_id)
-    plan = await _load_plan(db, project_id)
+    plan = await load_book_plan(db, project_id)
     if not plan:
         raise HTTPException(status_code=404, detail="章节规划不存在")
 
@@ -88,7 +88,7 @@ async def synthesize_book_voice_assistant_audio(
     return audio_response(synthesis)
 
 
-async def _load_plan(db: AsyncSession, project_id: str) -> MemoirBookPlan | None:
+async def load_book_plan(db: AsyncSession, project_id: str) -> MemoirBookPlan | None:
     return await db.scalar(
         select(MemoirBookPlan)
         .where(MemoirBookPlan.project_id == project_id)

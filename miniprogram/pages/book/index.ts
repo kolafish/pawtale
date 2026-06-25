@@ -26,7 +26,6 @@ import {
   createMemoirBookChapterDraftTTS,
   createMemoirBookOutputTTS,
   createMemoirBookPlanOutlineTTS,
-  createMemoirBookVoiceAssistantTTS,
   bookVoiceCommandGatewayUrl,
   executeMemoirBookVoiceCommand,
   generateMemoirBookChapterTitle,
@@ -51,6 +50,8 @@ import {
 } from "../../services/memoir-streaming-asr";
 import { readBookTTSSettings } from "../../services/tts-settings";
 import { AudioPlaybackController } from "../../services/audio-playback";
+import { BookVoiceAssistantTTSStreamClient } from "../../services/book-voice-assistant-tts-stream";
+import type { PreparedStreamingTTSAudioSegment } from "../../services/streaming-tts-segments";
 import { StreamingVoiceController } from "../../services/streaming-voice-controller";
 import { writeTranscriptNavigationTarget } from "../../services/transcript-navigation";
 import {
@@ -413,7 +414,11 @@ Page<BookData, {
   canStartBookVoiceAssistantAutoListen(): boolean;
   scheduleBookVoiceAssistantAutoListen(statusText?: string): void;
   playBookVoiceAssistantReply(text: string, options?: { autoListenAfterPlayback?: boolean }): Promise<void>;
-  requestBookVoiceAssistantAudio(text: string): Promise<MemoirBookAudioResponse>;
+  playBookVoiceAssistantAudioSegment(
+    segment: PreparedStreamingTTSAudioSegment,
+    token: number,
+    activeText: string,
+  ): Promise<void>;
   bookVoiceCommandUndoSnapshot(): BookVoiceCommandUndoSnapshot | null;
   confirmBookVoiceCommandExecution(content: string, confirmText?: string): Promise<boolean>;
   requestBookAudio(target: string): Promise<MemoirBookAudioResponse>;
@@ -451,6 +456,8 @@ Page<BookData, {
   clearBookOutput(): void;
   audioPlayback: AudioPlaybackController;
   bookVoiceStreaming: StreamingVoiceController;
+  bookVoiceTTSStreaming: BookVoiceAssistantTTSStreamClient | null;
+  bookVoiceTTSPlayback: Promise<void>;
   playToken: number;
   ttsProgressTimer: number | null;
   ttsProgressStartedAtMs: number;
@@ -458,6 +465,8 @@ Page<BookData, {
 }>({
   audioPlayback: new AudioPlaybackController(),
   bookVoiceStreaming: new StreamingVoiceController(),
+  bookVoiceTTSStreaming: null,
+  bookVoiceTTSPlayback: Promise.resolve(),
   playToken: 0,
   ttsProgressTimer: null,
   ttsProgressStartedAtMs: 0,
@@ -1996,6 +2005,9 @@ Page<BookData, {
     this.stopPlayback();
     const token = this.audioPlayback.nextToken();
     this.playToken = token;
+    this.bookVoiceTTSStreaming?.close();
+    this.bookVoiceTTSStreaming = null;
+    this.bookVoiceTTSPlayback = Promise.resolve();
     const lineId = `book-ai-${Date.now()}-${this.data.bookVoiceTranscriptLines.length}`;
     this.appendBookVoiceTranscriptLine({
       id: lineId,
@@ -2012,20 +2024,49 @@ Page<BookData, {
       error: "",
     });
     try {
-      const response = await this.requestBookVoiceAssistantAudio(replyText);
-      if (token !== this.playToken) {
-        return;
-      }
-      this.setData({
-        ttsBusyTarget: "",
-        bookVoiceAssistantStatusText: "AI 正在说",
+      const settings = readBookTTSSettings();
+      const streamClient = new BookVoiceAssistantTTSStreamClient(this.data.projectId, {
+        onStarted: () => {
+          if (token !== this.playToken) {
+            return;
+          }
+          this.setData({
+            ttsBusyTarget: "",
+            bookTTSActiveTarget: target,
+            bookTTSActiveText: replyText,
+            bookTTSSpokenText: "",
+            bookTTSCurrentText: "",
+            bookTTSRemainingText: replyText,
+            bookTTSProgressPercent: 0,
+            bookTTSDurationSeconds: 0,
+            bookTTSAlignment: [],
+            bookVoiceAssistantStatusText: "AI 正在说",
+          });
+        },
+        onAudioSegment: (segment) => {
+          this.bookVoiceTTSPlayback = this.bookVoiceTTSPlayback.then(() => (
+            this.playBookVoiceAssistantAudioSegment(segment, token, replyText)
+          ));
+        },
       });
-      await this.playAudioFiles(response, target, token, replyText);
+      this.bookVoiceTTSStreaming = streamClient;
+      await streamClient.start({
+        text: replyText,
+        ...(settings.voice ? { voice: settings.voice } : {}),
+        ...(settings.speedRatio === 1 ? {} : { speedRatio: settings.speedRatio }),
+      });
+      await this.bookVoiceTTSPlayback;
       if (token !== this.playToken) {
         return;
       }
       this.setData({ bookVoiceAssistantSpeakingLineId: "" });
       this.setData({ bookVoiceAssistantBusy: false });
+      this.setData({
+        bookTTSActiveTarget: "",
+        bookTTSCurrentText: "",
+        bookTTSRemainingText: "",
+        bookTTSProgressPercent: 100,
+      });
       if (options.autoListenAfterPlayback) {
         this.scheduleBookVoiceAssistantAutoListen("我继续听");
       } else if (this.data.bookVoiceCommandPreview && !isBookVoiceReadIntent(this.data.bookVoiceCommandPreview)) {
@@ -2052,16 +2093,53 @@ Page<BookData, {
       if (token === this.playToken && this.data.bookVoiceAssistantSpeakingLineId === lineId) {
         this.setData({ bookVoiceAssistantSpeakingLineId: "" });
       }
+      if (token === this.playToken) {
+        this.bookVoiceTTSStreaming = null;
+      }
     }
   },
 
-  async requestBookVoiceAssistantAudio(text) {
-    const settings = readBookTTSSettings();
-    return createMemoirBookVoiceAssistantTTS(this.data.projectId, {
-      text,
-      ...(settings.voice ? { voice: settings.voice } : {}),
-      ...(settings.speedRatio === 1 ? {} : { speed_ratio: settings.speedRatio }),
+  async playBookVoiceAssistantAudioSegment(segment, token, activeText) {
+    if (token !== this.playToken) {
+      segment.dispose();
+      return;
+    }
+    const spokenBefore = this.data.bookTTSSpokenText || "";
+    const prefix = `${spokenBefore}${segment.text}`;
+    this.setData({
+      bookTTSActiveTarget: "book-voice-assistant",
+      bookTTSActiveText: activeText,
+      bookTTSCurrentText: segment.text,
+      bookTTSRemainingText: activeText.startsWith(prefix) ? activeText.slice(prefix.length) : "",
+      bookVoiceAssistantStatusText: "AI 正在说",
     });
+    try {
+      await this.audioPlayback.playTempFile(segment.tempFilePath, token, {
+        onEnded: () => {
+          if (token !== this.playToken) {
+            return;
+          }
+          const spokenText = `${this.data.bookTTSSpokenText || ""}${segment.text}`;
+          this.setData({
+            bookTTSSpokenText: spokenText,
+            bookTTSCurrentText: "",
+            bookTTSRemainingText: activeText.startsWith(spokenText) ? activeText.slice(spokenText.length) : "",
+            bookTTSProgressPercent: activeText ? Math.min(100, Math.round(spokenText.length / activeText.length * 100)) : 100,
+          });
+        },
+        onError: () => {
+          if (token === this.playToken) {
+            this.setData({
+              error: "AI 语音播放失败",
+              bookVoiceAssistantStatusText: "AI 回复失败",
+            });
+          }
+        },
+        errorMessage: "AI 语音播放失败",
+      });
+    } finally {
+      segment.dispose();
+    }
   },
 
   bookVoiceCommandUndoSnapshot() {
@@ -2134,6 +2212,8 @@ Page<BookData, {
   },
 
   stopPlayback() {
+    this.bookVoiceTTSStreaming?.close();
+    this.bookVoiceTTSStreaming = null;
     stopBookPlayback(this);
     if (this.data.bookVoiceAssistantSpeakingLineId) {
       this.setData({ bookVoiceAssistantSpeakingLineId: "" });
@@ -2143,6 +2223,8 @@ Page<BookData, {
   onHide() {
     this.clearBookVoiceAssistantAutoListenTimer();
     this.bookVoiceStreaming.close({ force: true });
+    this.bookVoiceTTSStreaming?.close();
+    this.bookVoiceTTSStreaming = null;
     this.stopPlayback();
     if (
       this.data.bookVoiceAssistantConversationActive
@@ -2164,6 +2246,8 @@ Page<BookData, {
   },
 
   onUnload() {
+    this.bookVoiceTTSStreaming?.close();
+    this.bookVoiceTTSStreaming = null;
     this.stopBookVoiceConversation();
     this.stopPlayback();
   },

@@ -78,7 +78,9 @@ class Settings(BaseSettings):
     tts_max_concurrent_requests: int = 3
     volc_tts_app_id: str = ""
     volc_tts_access_token: str = ""
+    volc_tts_api_key: str = ""
     volc_tts_endpoint: str = "https://openspeech.bytedance.com/api/v3/tts/unidirectional/sse"
+    volc_tts_bidirectional_endpoint: str = "wss://openspeech.bytedance.com/api/v3/tts/bidirection"
     volc_tts_resource_id: str = "seed-tts-2.0"
     volc_tts_speaker: str = "zh_female_vv_uranus_bigtts"
     volc_tts_response_format: str = "mp3"

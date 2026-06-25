@@ -281,19 +281,20 @@ safety_flags
 
 AI 下一轮追问
  -> backend assistant-turn-stream WebSocket
- -> LLM streaming 输出文本
- -> backend TTS provider 分段合成
+ -> LLM streaming 输出文本 delta
+ -> backend bidirectional TTS WebSocket 接收文本流并返回音频流
+ -> 后端按小程序播放器能力切成可播放缓冲段
  -> 小程序顺序播放临时音频片段
  -> turn.completed 后落库 assistant message / audio_file
 ```
 
-后端 TTS 接入收敛为火山/豆包语音 V3，环境变量为 `TTS_PROVIDER=volc`、`VOLC_TTS_APP_ID`、`VOLC_TTS_ACCESS_TOKEN`、`VOLC_TTS_RESOURCE_ID`、`VOLC_TTS_SPEAKER`、`VOLC_TTS_RESPONSE_FORMAT`。默认 `TTS_PROVIDER=disabled`，没有配置时小程序仍显示 AI 文字追问，不阻塞 ASR 和 LLM。火山 V3 默认走 `seed-tts-2.0` 和 `*_uranus_bigtts` 音色，通过 SSE 返回音频分片。
+后端 TTS 接入收敛为火山/豆包语音 V3，环境变量为 `TTS_PROVIDER=volc`、`VOLC_TTS_APP_ID`、`VOLC_TTS_ACCESS_TOKEN`、`VOLC_TTS_API_KEY`、`VOLC_TTS_RESOURCE_ID`、`VOLC_TTS_SPEAKER`、`VOLC_TTS_RESPONSE_FORMAT`、`VOLC_TTS_BIDIRECTIONAL_ENDPOINT`。默认 `TTS_PROVIDER=disabled`，没有配置时小程序仍显示 AI 文字追问，不阻塞 ASR 和 LLM。AI 访谈和成书语音编辑使用 bidirectional TTS；历史 assistant message 重播、目录/章节/全书朗读等非实时音频仍可走 unidirectional SSE 并读取字幕时间戳。
 
 小程序语音聊天页的下一轮 AI 追问使用 `assistant-turn-stream`，前端收到文本 delta 后即时展示，收到音频分片完成事件后顺序播放；播放完成且 voice gateway 可录音时自动进入下一轮收听。历史 assistant message 重播和 no-answer prompt 仍使用 message TTS 下载路径。用户开始说话、跳过追问、结束页面时会取消未完成合成或停止播放，避免旧追问音频和新回答冲突。
 
 为了让高亮块跟随真实语音位置移动，后端请求火山 V3 时开启 `audio_params.enable_subtitle=true`，读取 `sentence.words[].startTime/endTime` 原生字幕时间戳，转换为逐字/词 `start_ms` / `end_ms` 时间轴，保存到 `memoir_chat_messages.metadata_json.tts_alignment`，并随 TTS response 返回给小程序。小程序播放时只按该时间轴定位当前字，不再按播放百分比估算；已有旧 provider 音频不会继续复用，会在下次请求时按火山 V3 重新生成。
 
-当前流式体验的边界是后端按文本分段合成并向小程序推送可播放音频片段；provider 级别的逐字节播放、用户插话打断和断线续播仍属于后续增强。
+当前流式体验的边界是：provider 已使用“流式文本输入 + 流式音频输出”，但小程序播放器仍需要临时文件，因此后端会把连续音频流切成短缓冲段推送；用户插话打断、断线续播和真正追加式播放器仍属于后续增强。
 
 ## 数据模型方向
 

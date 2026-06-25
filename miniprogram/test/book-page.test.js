@@ -469,6 +469,7 @@ function loadBookPage({
   voiceApiExports = {},
   voiceSearchExports = {},
   streamingAsrExports = {},
+  bookVoiceTTSExports = {},
   ttsExports = {},
   voiceAuthorizationExports = {},
   wechatPrivacyExports = {},
@@ -532,6 +533,9 @@ function loadBookPage({
       throw new Error("parseMemoirBookVoiceCommand was not mocked");
     },
     bookVoiceCommandGatewayUrl: (projectId) => `wss://api.example.test/book/${encodeURIComponent(projectId)}/gateway`,
+    bookVoiceAssistantTTSStreamUrl: (projectId) => (
+      `wss://api.example.test/book/${encodeURIComponent(projectId)}/assistant-tts`
+    ),
     updateMemoirBookChapterTitle: async () => {
       throw new Error("updateMemoirBookChapterTitle was not mocked");
     },
@@ -542,6 +546,16 @@ function loadBookPage({
       throw new Error("updateMemoirBookChapterDraft was not mocked");
     },
     ...voiceApiExports,
+  });
+  mockModule("../services/book-voice-assistant-tts-stream.ts", {
+    BookVoiceAssistantTTSStreamClient: class {
+      async start() {
+        throw new Error("BookVoiceAssistantTTSStreamClient was not mocked");
+      }
+
+      close() {}
+    },
+    ...bookVoiceTTSExports,
   });
   mockModule("../services/memoir-voice-search.ts", {
     recordMemoirVoiceSearchQuery: async () => {
@@ -1881,26 +1895,47 @@ test("book page plays assistant reply and auto-listens after playback", async ()
   };
   global.clearTimeout = () => {};
   const { page } = loadBookPage({
-    voiceApiExports: {
-      createMemoirBookVoiceAssistantTTS: async (projectId, data) => {
-        calls.push({ kind: "tts", projectId, data });
-        return sampleAudioResponse();
+    bookVoiceTTSExports: {
+      BookVoiceAssistantTTSStreamClient: class {
+        constructor(projectId, callbacks) {
+          this.projectId = projectId;
+          this.callbacks = callbacks;
+        }
+
+        async start(options) {
+          calls.push({ kind: "tts", projectId: this.projectId, options });
+          this.callbacks.onStarted?.({ type: "tts.started", project_id: this.projectId });
+          this.callbacks.onAudioSegment?.({
+            segmentIndex: 0,
+            text: options.text,
+            tempFilePath: "/tmp/book-ai-reply.wav",
+            mimeType: "audio/wav",
+            durationSeconds: 1,
+            dispose: () => calls.push({ kind: "dispose" }),
+          });
+          this.callbacks.onCompleted?.({ type: "tts.completed", project_id: this.projectId });
+          return { type: "tts.completed", project_id: this.projectId };
+        }
+
+        close() {
+          calls.push({ kind: "close" });
+        }
       },
     },
   });
   const context = pageContext(page, { projectId: "project/1" });
   page.applyPlan.call(context, samplePlan("confirmed"));
   context.setData({ bookVoiceAssistantConversationActive: true });
-  context.playAudioFiles = async (response, target, token, activeText) => {
+  context.audioPlayback.playTempFile = async (tempFilePath, token, options) => {
     calls.push({
       kind: "play",
-      target,
+      tempFilePath,
       token,
-      activeText,
-      response,
+      activeText: context.data.bookTTSActiveText,
       speakingLineId: context.data.bookVoiceAssistantSpeakingLineId,
       transcriptLineId: context.data.bookVoiceTranscriptLines[0]?.id,
     });
+    options.onEnded?.();
   };
   context.startBookVoiceCommand = async (options) => {
     calls.push({ kind: "auto-listen", options });
@@ -1912,13 +1947,14 @@ test("book page plays assistant reply and auto-listens after playback", async ()
     });
 
     assert.equal(calls[0].kind, "tts");
-    assert.deepEqual(calls[0].data, { text: "我理解了，请确认。" });
-    assert.equal(calls[1].target, "book-voice-assistant");
+    assert.deepEqual(calls[0].options, { text: "我理解了，请确认。" });
+    assert.equal(calls[1].tempFilePath, "/tmp/book-ai-reply.wav");
     assert.equal(calls[1].activeText, "我理解了，请确认。");
     assert.match(calls[1].speakingLineId, /^book-ai-/);
     assert.equal(calls[1].speakingLineId, calls[1].transcriptLineId);
+    assert.equal(calls[2].kind, "dispose");
     assert.equal(context.data.bookVoiceAssistantSpeakingLineId, "");
-    assert.deepEqual(calls[2], { kind: "auto-listen", options: { autoTriggered: true } });
+    assert.deepEqual(calls[3], { kind: "auto-listen", options: { autoTriggered: true } });
     assert.equal(context.data.bookVoiceAssistantBusy, false);
   } finally {
     global.setTimeout = originalSetTimeout;
