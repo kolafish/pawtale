@@ -187,10 +187,10 @@ test("assistant turn stream rejects when socket does not open before connect tim
   const { VoiceAssistantTurnStreamClient } = require("../services/voice-assistant-turn-stream.ts");
   const client = new VoiceAssistantTurnStreamClient("voice-1");
 
-  const startPromise = client.start({ connectTimeoutMs: 5 });
+  const startPromise = assert.rejects(client.start({ connectTimeoutMs: 5 }), /AI 回应连接超时/);
   await new Promise((resolve) => setImmediate(resolve));
 
-  await assert.rejects(startPromise, /AI 回应连接超时/);
+  await startPromise;
   assert.equal(harness.closeCalls(), 1);
   delete global.wx;
 });

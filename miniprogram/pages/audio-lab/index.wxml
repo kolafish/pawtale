@@ -1,0 +1,16 @@
+<view class="page">
+  <view class="section">
+    <view class="title">WebAudio PCM 验证</view>
+    <view class="status {{supported ? 'ok' : 'bad'}}">{{statusText}}</view>
+    <view class="metrics">
+      <view>支持 WebAudio：{{supported ? "是" : "否"}}</view>
+      <view>已调度：{{scheduledCount}}</view>
+      <view>已结束：{{endedCount}}</view>
+      <view>Underrun：{{underrunCount}}</view>
+      <view>预缓冲：{{queuedAheadText}}</view>
+    </view>
+    <view class="event">{{lastEventText}}</view>
+    <button class="primary" bindtap="startWebAudioPCMTest" disabled="{{!supported || running}}">开始 100ms PCM 连续播放</button>
+    <button class="secondary" bindtap="stopWebAudioPCMTest" disabled="{{!running}}">停止</button>
+  </view>
+</view>

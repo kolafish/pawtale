@@ -191,6 +191,40 @@ declare namespace WechatMiniprogram {
     complete?(result: GeneralCallbackResult): void;
   }
 
+  interface AudioBuffer {
+    readonly sampleRate: number;
+    readonly length: number;
+    readonly duration: number;
+    readonly numberOfChannels: number;
+    getChannelData(channel: number): Float32Array;
+    copyToChannel?(source: Float32Array, channelNumber: number, startInChannel?: number): void;
+  }
+
+  interface WebAudioContextNode {
+    connect(destination: WebAudioContextNode): WebAudioContextNode;
+    disconnect?(): void;
+  }
+
+  interface AudioBufferSourceNode extends WebAudioContextNode {
+    buffer: AudioBuffer | null;
+    onended?: (() => void) | null;
+    start(when?: number, offset?: number, duration?: number): void;
+    stop?(when?: number): void;
+  }
+
+  interface WebAudioContext {
+    readonly state: "suspended" | "running" | "closed";
+    readonly currentTime: number;
+    readonly destination: WebAudioContextNode;
+    readonly sampleRate: number;
+    onstatechange?: (() => void) | null;
+    createBuffer(numberOfChannels: number, length: number, sampleRate: number): AudioBuffer;
+    createBufferSource(): AudioBufferSourceNode;
+    resume(): Promise<void>;
+    suspend(): Promise<void>;
+    close(): Promise<void>;
+  }
+
   interface NavigateOption {
     url: string;
   }
@@ -257,6 +291,7 @@ declare namespace WechatMiniprogram {
     getRecorderManager(): RecorderManager;
     getFileSystemManager(): FileSystemManager;
     createInnerAudioContext(): InnerAudioContext;
+    createWebAudioContext?(): WebAudioContext;
     getPrivacySetting?(option: PrivacySettingOption): void;
     requirePrivacyAuthorize?(option: PrivacyAuthorizeOption): void;
     setInnerAudioOption?(option: InnerAudioOption): void;
