@@ -41,6 +41,8 @@ from app.services.memoir.book_plan_sources import (
     pending_source_ids as _pending_source_ids,
     removed_source_ids as _removed_source_ids,
     set_deleted_source_metadata as _set_deleted_source_metadata,
+    source_ref_utterance_id as _source_ref_utterance_id,
+    source_ref_utterance_ids as _source_ref_utterance_ids,
 )
 
 
@@ -317,12 +319,7 @@ async def _included_utterance_ids_for_filter(
     rows = (await db.execute(query)).scalars().all()
     utterance_ids: set[str] = set()
     for refs in rows:
-        for ref in refs or []:
-            if not isinstance(ref, dict):
-                continue
-            utterance_id = ref.get("utterance_id")
-            if isinstance(utterance_id, str) and utterance_id:
-                utterance_ids.add(utterance_id)
+        utterance_ids.update(_source_ref_utterance_ids(refs or []))
     return utterance_ids
 
 
@@ -633,7 +630,7 @@ async def _mark_book_sources_deleted(
     removed_at = datetime.now(timezone.utc).isoformat()
     for chapter in chapters:
         refs = [ref for ref in (chapter.source_refs_json or []) if isinstance(ref, dict)]
-        kept_refs = [ref for ref in refs if ref.get("utterance_id") != utterance_id]
+        kept_refs = [ref for ref in refs if _source_ref_utterance_id(ref) != utterance_id]
         removed_ref_count = len(refs) - len(kept_refs)
 
         pending_ids = _pending_source_ids(chapter.metadata_json)

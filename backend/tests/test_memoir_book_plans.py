@@ -15,6 +15,14 @@ from app.models.memoir import (
     MemoirBookPlanChapter,
 )
 from app.services.memoir.book_plan_ai import ChapterTitleSourceDigest, build_chapter_title_prompt
+from app.services.memoir.book_plan_sources import (
+    covered_utterance_ids,
+    find_chapter_by_id,
+    renumber_chapters,
+    set_temporary_chapter_orders,
+    sorted_chapters,
+    unique_source_ref_dicts,
+)
 from tests.memoir_helpers import (
     create_test_chapter_draft,
     create_test_voice_transcript,
@@ -96,6 +104,52 @@ def test_chapter_title_prompt_uses_all_source_digests_without_current_title():
     assert "representative_quote:" in prompt
     assert "第9条来源" in prompt
     assert '"title": "章节标题"' in prompt
+
+
+def test_book_plan_source_helpers_cover_chapter_order_and_source_refs():
+    plan = MemoirBookPlan(
+        id="plan-1",
+        project_id="project-1",
+        title="爷爷主题",
+        status="confirmed",
+        created_by=MemoirCreatedBy.USER.value,
+    )
+    first = MemoirBookPlanChapter(
+        id="chapter-1",
+        plan_id=plan.id,
+        project_id=plan.project_id,
+        title="第一章",
+        sort_order=2,
+        source_refs_json=[{"utterance_id": "u1"}, {"utterance_id": "u2"}],
+    )
+    second = MemoirBookPlanChapter(
+        id="chapter-2",
+        plan_id=plan.id,
+        project_id=plan.project_id,
+        title="第二章",
+        sort_order=1,
+        source_refs_json=[{"utterance_id": "u2"}, {"utterance_id": "u3"}, {"missing": "ignored"}],
+    )
+    plan.chapters = [first, second]
+
+    assert [chapter.id for chapter in sorted_chapters(plan)] == ["chapter-2", "chapter-1"]
+    assert find_chapter_by_id(plan.chapters, "chapter-1") is first
+    assert find_chapter_by_id(plan.chapters, None) is None
+    assert covered_utterance_ids(plan) == {"u1", "u2", "u3"}
+    assert unique_source_ref_dicts([
+        {"utterance_id": "u1", "quote": "一"},
+        {"utterance_id": "u1", "quote": "重复"},
+        {"utterance_id": "u2", "quote": "二"},
+        {"missing": "ignored"},
+    ]) == [
+        {"utterance_id": "u1", "quote": "一"},
+        {"utterance_id": "u2", "quote": "二"},
+    ]
+
+    set_temporary_chapter_orders([first, second])
+    assert [first.sort_order, second.sort_order] == [10000, 10001]
+    renumber_chapters([second, first])
+    assert [second.sort_order, first.sort_order] == [0, 1]
 
 
 async def test_mobile_memoir_book_plan_routes_require_login(anonymous_client):

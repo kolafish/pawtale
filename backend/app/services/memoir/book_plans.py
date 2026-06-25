@@ -68,17 +68,22 @@ from app.services.memoir.book_plan_sources import (
     covered_utterance_ids as _covered_utterance_ids,
     draft_status_metadata as _draft_status_metadata,
     included_chapters_by_utterance as _included_chapters_by_utterance,
+    find_chapter_by_id as _find_chapter_by_id,
     merge_metadata as _merge_metadata,
     plan_response as _plan_response,
     pending_source_ids as _pending_source_ids,
+    renumber_chapters as _renumber_chapters,
     removed_source_ids as _removed_source_ids,
     set_source_assignment_metadata as _set_source_assignment_metadata,
     set_source_change_metadata as _set_source_change_metadata,
+    set_temporary_chapter_orders as _set_temporary_chapter_orders,
     source_coverage_item as _source_coverage_item,
     source_ref_utterance_id as _source_ref_utterance_id,
     source_ref_utterance_ids as _source_ref_utterance_ids,
     source_segments as _source_segments,
+    sorted_chapters as _sorted_plan_chapters,
     text_or_empty as _text_or_empty,
+    unique_source_ref_dicts as _unique_source_ref_dicts,
 )
 from app.services.memoir.voice_tts import TTSClient
 
@@ -562,14 +567,10 @@ def _validated_chapter_updates(
 
 
 def _chapter_by_id(plan: MemoirBookPlan, chapter_id: str) -> MemoirBookPlanChapter:
-    for chapter in plan.chapters:
-        if chapter.id == chapter_id:
-            return chapter
+    chapter = _find_chapter_by_id(plan.chapters, chapter_id)
+    if chapter:
+        return chapter
     raise HTTPException(status_code=404, detail="章节不存在")
-
-
-def _sorted_plan_chapters(plan: MemoirBookPlan) -> list[MemoirBookPlanChapter]:
-    return sorted(plan.chapters, key=lambda chapter: chapter.sort_order)
 
 
 def _require_command_chapter_id(req: MemoirBookPlanStructureCommandRequest) -> str:
@@ -588,28 +589,6 @@ def _require_source_utterance_id(req: MemoirBookPlanStructureCommandRequest) -> 
     if not req.utterance_id:
         raise HTTPException(status_code=400, detail="讲述记录不能为空")
     return req.utterance_id
-
-
-def _renumber_chapters(chapters: list[MemoirBookPlanChapter]) -> None:
-    for index, chapter in enumerate(chapters):
-        chapter.sort_order = index
-
-
-def _set_temporary_chapter_orders(chapters: list[MemoirBookPlanChapter]) -> None:
-    for index, chapter in enumerate(chapters):
-        chapter.sort_order = 10000 + index
-
-
-def _unique_source_ref_dicts(refs: list[dict]) -> list[dict]:
-    unique: list[dict] = []
-    seen: set[str] = set()
-    for ref in refs:
-        utterance_id = _source_ref_utterance_id(ref)
-        if not utterance_id or utterance_id in seen:
-            continue
-        unique.append(dict(ref))
-        seen.add(utterance_id)
-    return unique
 
 
 def _chapter_title_from_source(source: SourceSegment) -> str:
