@@ -92,6 +92,10 @@ function socketMessage(handlers, payload) {
   handlers.message({ data: JSON.stringify(payload) });
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 test("assistant turn stream sends start payload and emits playable wav segments", async () => {
   const harness = installWxSocketHarness();
   delete require.cache[require.resolve("../services/request.ts")];
@@ -173,6 +177,87 @@ test("assistant turn stream sends start payload and emits playable wav segments"
   assert.deepEqual(harness.unlinks, [segments[0].tempFilePath]);
   client.disposeTempFiles();
   assert.deepEqual(harness.unlinks, [segments[0].tempFilePath]);
+  delete global.wx;
+});
+
+test("assistant turn stream rejects when socket does not open before connect timeout", async () => {
+  const harness = installWxSocketHarness();
+  delete require.cache[require.resolve("../services/request.ts")];
+  delete require.cache[require.resolve("../services/voice-assistant-turn-stream.ts")];
+  const { VoiceAssistantTurnStreamClient } = require("../services/voice-assistant-turn-stream.ts");
+  const client = new VoiceAssistantTurnStreamClient("voice-1");
+
+  const startPromise = client.start({ connectTimeoutMs: 5 });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  await assert.rejects(startPromise, /AI 回应连接超时/);
+  assert.equal(harness.closeCalls(), 1);
+  delete global.wx;
+});
+
+test("assistant turn stream connect timeout stops after socket opens", async () => {
+  const harness = installWxSocketHarness();
+  delete require.cache[require.resolve("../services/request.ts")];
+  delete require.cache[require.resolve("../services/voice-assistant-turn-stream.ts")];
+  const { VoiceAssistantTurnStreamClient } = require("../services/voice-assistant-turn-stream.ts");
+  const client = new VoiceAssistantTurnStreamClient("voice-1");
+  let resolved;
+  let rejected;
+
+  const observed = client.start({ connectTimeoutMs: 5 }).then(
+    (event) => {
+      resolved = event;
+    },
+    (error) => {
+      rejected = error;
+    },
+  );
+  await new Promise((resolve) => setImmediate(resolve));
+  harness.handlers.open();
+  socketMessage(harness.handlers, { type: "turn.ready" });
+
+  await sleep(20);
+  assert.equal(rejected, undefined);
+  assert.equal(resolved, undefined);
+  assert.deepEqual(harness.sent, [{
+    type: "turn.start",
+    ai_model: "deepseek-v4-pro",
+    regenerate: false,
+    voice: "zh_female_vv_uranus_bigtts",
+    speed_ratio: 1.5,
+  }]);
+
+  socketMessage(harness.handlers, {
+    type: "turn.completed",
+    turn_id: "turn-1",
+    voice_session_id: "voice-1",
+    state: "completed",
+    message_id: "assistant-1",
+    text: "已连接后不应该被连接超时打断。",
+    primary_intent: "follow_up",
+    intent_tags: ["follow_up"],
+    expects_answer: true,
+  });
+  await observed;
+
+  assert.equal(rejected, undefined);
+  assert.equal(resolved.message_id, "assistant-1");
+  delete global.wx;
+});
+
+test("assistant turn stream local cancel settles pending start", async () => {
+  const harness = installWxSocketHarness();
+  delete require.cache[require.resolve("../services/request.ts")];
+  delete require.cache[require.resolve("../services/voice-assistant-turn-stream.ts")];
+  const { VoiceAssistantTurnStreamClient } = require("../services/voice-assistant-turn-stream.ts");
+  const client = new VoiceAssistantTurnStreamClient("voice-1");
+
+  const startPromise = client.start({ connectTimeoutMs: 50 });
+  await new Promise((resolve) => setImmediate(resolve));
+  client.cancel();
+
+  await assert.rejects(startPromise, /AI 回应已取消/);
+  assert.equal(harness.closeCalls(), 1);
   delete global.wx;
 });
 
