@@ -4,7 +4,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
-const { loadPageModule, mockModule, pageContext } = require("./page-harness");
+const { clearModule, loadPageModule, mockModule, pageContext } = require("./page-harness");
 
 function sampleRef(id = "utterance-1", quote = "外婆家的院子") {
   return {
@@ -561,6 +561,7 @@ function loadBookPage({
     classifyVoiceClientConnectionError: (message) => ({ kind: "connection", message }),
     ...streamingAsrExports,
   });
+  clearModule("../services/streaming-voice-controller.ts");
   mockModule("../services/voice-authorization.ts", {
     readVoiceAuthorizationConsent: () => true,
     syncVoiceAuthorizationConsent: async () => {},
