@@ -1,9 +1,9 @@
 import type {
   MemoirBookAudioResponse,
   MemoirBookChapterDraft,
-  MemoirBookChapterSourceRef,
   MemoirBookOutput,
   MemoirBookPlan,
+  MemoirBookPlanStructureCommandRequest,
   MemoirBookPlanChapterUpdateInput,
   MemoirBookSourceCoverage,
   MemoirBookVoiceCommandOperation,
@@ -18,6 +18,7 @@ import type { BookChapterView, BookData, BookVoiceCommandUndoSnapshot } from "./
 import { getMemoirIdentity } from "../../services/auth";
 
 import {
+  applyMemoirBookPlanStructureCommand,
   assignMemoirBookSources,
   confirmMemoirBookChapterDraft,
   confirmMemoirBookPlan,
@@ -82,11 +83,9 @@ import {
   sourceChangeNotice,
   sourceSupplementCount,
   stageText,
-  titleFromUncoveredSource,
   toPlanInput,
   toPlanUpdateInput,
   trimText,
-  uniqueSourceRefs,
   bookChapterSourceSummary,
   bookOutlineNarrationText,
   bookVoiceCommandActionText,
@@ -106,7 +105,6 @@ export {
   buildUncoveredSourceViews,
   canExecuteBookVoiceCommand,
   latestBookContent,
-  titleFromUncoveredSource,
 } from "./book-view-model";
 
 interface DatasetEvent {
@@ -351,6 +349,10 @@ Page<BookData, {
   addUncoveredSourceAsChapter(event: DatasetEvent): Promise<void>;
   addUncoveredSourceAsChapterById(utteranceId: string): Promise<void>;
   deleteConfirmedChapter(event: DatasetEvent): Promise<void>;
+  applyPlanStructureCommand(
+    command: MemoirBookPlanStructureCommandRequest,
+    toastTitle: string
+  ): Promise<MemoirBookPlan | null>;
   updatePlanStructure(chapters: MemoirBookPlanChapterUpdateInput[], toastTitle: string): Promise<MemoirBookPlan | null>;
   regenerateMergedChapter(chapterId: string): Promise<void>;
   generateBook(): Promise<void>;
@@ -801,11 +803,11 @@ Page<BookData, {
     if (!id || this.data.confirmingPlan || this.data.updatingPlanStructure || this.data.chapters.length <= 1) {
       return;
     }
-    const chapters = this.data.chapters.filter((chapter) => chapter.id !== id);
     if (this.data.projectId && this.data.plan) {
-      await this.updatePlanStructure(toPlanUpdateInput(chapters), "章节已删除");
+      await this.applyPlanStructureCommand({ type: "delete_chapter", chapter_id: id }, "章节已删除");
       return;
     }
+    const chapters = this.data.chapters.filter((chapter) => chapter.id !== id);
     this.setData({
       ...chapterCollectionData(chapters, this.data.stage, this.data.sourceCoverage, this.data.splitSourceSelections),
       error: "",
@@ -823,10 +825,11 @@ Page<BookData, {
     if (fromIndex < 0 || toIndex < 0 || toIndex >= this.data.chapters.length) {
       return;
     }
-    const chapters = [...this.data.chapters];
-    [chapters[fromIndex], chapters[toIndex]] = [chapters[toIndex], chapters[fromIndex]];
-    const reordered = chapters.map((chapter, index) => ({ ...chapter, sort_order: index }));
-    await this.updatePlanStructure(toPlanUpdateInput(reordered), "章节顺序已调整");
+    await this.applyPlanStructureCommand({
+      type: "move_chapter",
+      chapter_id: chapterId,
+      direction: direction === "up" ? "up" : "down",
+    }, "章节顺序已调整");
   },
 
   async mergeChapterInto(event) {
@@ -853,23 +856,11 @@ Page<BookData, {
     if (!confirmed) {
       return;
     }
-    const chapters = this.data.chapters
-      .filter((chapter) => chapter.id !== sourceChapter.id)
-      .map((chapter) => {
-        if (chapter.id !== targetChapter.id) {
-          return chapter;
-        }
-        const sourceRefs = uniqueSourceRefs([...targetChapter.source_refs, ...sourceChapter.source_refs]);
-        return {
-          ...chapter,
-          source_refs: sourceRefs,
-          sourceCount: sourceRefs.length,
-          sourceSummary: bookChapterSourceSummary({ source_refs: sourceRefs }),
-          draftChanged: false,
-        };
-      })
-      .map((chapter, index) => ({ ...chapter, sort_order: index }));
-    const plan = await this.updatePlanStructure(toPlanUpdateInput(chapters), "章节已合并");
+    const plan = await this.applyPlanStructureCommand({
+      type: "merge_chapters",
+      chapter_id: sourceChapter.id,
+      target_chapter_id: targetChapter.id,
+    }, "章节已合并");
     if (plan?.status === "confirmed") {
       await this.regenerateMergedChapter(targetChapter.id);
     } else if (plan) {
@@ -910,41 +901,20 @@ Page<BookData, {
     if (!chapter || !selectedIds.size || this.data.updatingPlanStructure || chapter.draftBusy) {
       return;
     }
-    const keptRefs: MemoirBookChapterSourceRef[] = [];
-    const splitRefs: MemoirBookChapterSourceRef[] = [];
-    chapter.source_refs.forEach((ref) => {
-      if (selectedIds.has(ref.utterance_id)) {
-        splitRefs.push(ref);
-        return;
-      }
-      keptRefs.push(ref);
-    });
-    if (!splitRefs.length || !keptRefs.length) {
+    if (selectedIds.size >= chapter.source_refs.length) {
       this.setData({ error: "拆分时至少保留 1 条素材在原章节" });
       return;
     }
     const title = trimText(chapter.editingTitle || chapter.title) || "未命名章节";
-    const updates = this.data.chapters.flatMap((candidate) => {
-      if (candidate.id !== chapterId) {
-        return [candidate];
-      }
-      return [
-        {
-          ...candidate,
-          source_refs: keptRefs,
-          sourceCount: keptRefs.length,
-          sourceSummary: bookChapterSourceSummary({ source_refs: keptRefs }),
-        },
-        {
-          title: `${title}（拆出）`,
-          source_refs: splitRefs,
-        },
-      ];
-    });
     const splitSourceSelections = { ...this.data.splitSourceSelections };
     delete splitSourceSelections[chapterId];
     this.setData({ splitSourceSelections });
-    await this.updatePlanStructure(toPlanUpdateInput(updates as BookChapterView[]), "章节已拆分");
+    await this.applyPlanStructureCommand({
+      type: "split_chapter",
+      chapter_id: chapterId,
+      title: `${title}（拆出）`,
+      utterance_ids: Array.from(selectedIds),
+    }, "章节已拆分");
   },
 
   toggleChapterSources(event) {
@@ -1112,16 +1082,10 @@ Page<BookData, {
     }
     this.setData({ assigningSourceId: utteranceId });
     try {
-      await this.updatePlanStructure(
-        [
-          ...toPlanUpdateInput(this.data.chapters),
-          {
-            title: titleFromUncoveredSource(source),
-            source_refs: [source.sourceRef],
-          },
-        ],
-        "已新增章节",
-      );
+      await this.applyPlanStructureCommand({
+        type: "create_chapter_from_source",
+        utterance_id: source.utterance_id,
+      }, "已新增章节");
     } finally {
       this.setData({ assigningSourceId: "" });
     }
@@ -1152,10 +1116,36 @@ Page<BookData, {
     if (!confirmed) {
       return;
     }
-    await this.updatePlanStructure(
-      toPlanUpdateInput(this.data.chapters.filter((candidate) => candidate.id !== chapterId)),
-      "章节已删除",
-    );
+    await this.applyPlanStructureCommand({
+      type: "delete_chapter",
+      chapter_id: chapterId,
+    }, "章节已删除");
+  },
+
+  async applyPlanStructureCommand(command, toastTitle) {
+    if (!this.data.projectId || !this.data.plan || this.data.updatingPlanStructure) {
+      return null;
+    }
+    if (this.data.stage === "drafting" && this.data.hasDraftChanges) {
+      this.setData({ error: "请先保存当前章节修改，再调整章节结构" });
+      return null;
+    }
+    this.stopPlayback();
+    this.setData({ updatingPlanStructure: true, error: "" });
+    try {
+      const plan = await applyMemoirBookPlanStructureCommand(this.data.projectId, command);
+      await this.applyUpdatedPlan(plan, toastTitle);
+      return plan;
+    } catch (error) {
+      if (isLoginError(error)) {
+        wx.switchTab({ url: "/pages/me/index" });
+        return null;
+      }
+      this.setData({ error: error instanceof Error ? error.message : "目录调整失败" });
+      return null;
+    } finally {
+      this.setData({ updatingPlanStructure: false });
+    }
   },
 
   async updatePlanStructure(chapters, toastTitle) {
@@ -1819,12 +1809,11 @@ Page<BookData, {
     this.setData({ bookVoiceCommandExecuting: true, error: "" });
     try {
       if (preview.intent === "rename_chapter" && operation.chapter_id && operation.new_title) {
-        const chapters = this.data.chapters.map((chapter) => (
-          chapter.id === operation.chapter_id
-            ? { ...chapter, title: operation.new_title || chapter.title, editingTitle: operation.new_title || chapter.editingTitle }
-            : chapter
-        ));
-        const plan = await this.updatePlanStructure(toPlanUpdateInput(chapters), "已按语音改名");
+        const plan = await this.applyPlanStructureCommand({
+          type: "rename_chapter",
+          chapter_id: operation.chapter_id,
+          title: operation.new_title,
+        }, "已按语音改名");
         if (plan && undoSnapshot) {
           this.setData({
             bookVoiceCommandCanExecute: false,
@@ -1844,16 +1833,11 @@ Page<BookData, {
         return;
       }
       if (preview.intent === "move_chapter" && operation.chapter_id && operation.direction) {
-        const fromIndex = this.data.chapters.findIndex((chapter) => chapter.id === operation.chapter_id);
-        const toIndex = operation.direction === "up" ? fromIndex - 1 : fromIndex + 1;
-        if (fromIndex < 0 || toIndex < 0 || toIndex >= this.data.chapters.length) {
-          this.setData({ error: operation.direction === "up" ? "这一章已经在最前面" : "这一章已经在最后面" });
-          return;
-        }
-        const chapters = [...this.data.chapters];
-        [chapters[fromIndex], chapters[toIndex]] = [chapters[toIndex], chapters[fromIndex]];
-        const reordered = chapters.map((chapter, index) => ({ ...chapter, sort_order: index }));
-        const plan = await this.updatePlanStructure(toPlanUpdateInput(reordered), "已按语音调整顺序");
+        const plan = await this.applyPlanStructureCommand({
+          type: "move_chapter",
+          chapter_id: operation.chapter_id,
+          direction: operation.direction === "up" ? "up" : "down",
+        }, "已按语音调整顺序");
         if (plan && undoSnapshot) {
           this.setData({
             bookVoiceCommandCanExecute: false,

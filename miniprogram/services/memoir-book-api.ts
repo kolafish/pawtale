@@ -11,6 +11,7 @@ import type {
   MemoirBookPlan,
   MemoirBookPlanConfirmRequest,
   MemoirBookPlanGenerateRequest,
+  MemoirBookPlanStructureCommandRequest,
   MemoirBookPlanUpdateRequest,
   MemoirBookSourceAssignmentRequest,
   MemoirBookSourceCoverage,
@@ -72,6 +73,19 @@ export function updateMemoirBookPlan(
     bookPlanPath(projectId),
     {
       method: "PATCH",
+      data,
+    },
+  );
+}
+
+export function applyMemoirBookPlanStructureCommand(
+  projectId: string,
+  data: MemoirBookPlanStructureCommandRequest,
+): Promise<MemoirBookPlan> {
+  return memoirRequest<MemoirBookPlan>(
+    bookPlanPath(projectId, "/structure-commands"),
+    {
+      method: "POST",
       data,
     },
   );
