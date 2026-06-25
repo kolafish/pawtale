@@ -6,6 +6,7 @@ export interface PCMPlaybackFormat {
 
 export interface WebAudioPCMPlaybackQueueOptions {
   createContext?: () => WechatMiniprogram.WebAudioContext;
+  configureAudio?: () => void;
   minLeadTimeSeconds?: number;
   onSegmentScheduled?: (event: PCMPlaybackSegmentEvent) => void;
   onSegmentEnded?: (event: PCMPlaybackSegmentEvent) => void;
@@ -43,6 +44,12 @@ type ScheduledPCMSource = {
 };
 
 const DEFAULT_MIN_LEAD_SECONDS = 0.12;
+
+export function configureAudibleWebAudioPlayback(): void {
+  if (typeof wx !== "undefined" && typeof wx.setInnerAudioOption === "function") {
+    wx.setInnerAudioOption({ obeyMuteSwitch: false, mixWithOther: true });
+  }
+}
 
 export class WebAudioPCMPlaybackQueue {
   private audioContext: WechatMiniprogram.WebAudioContext | null = null;
@@ -159,7 +166,9 @@ export class WebAudioPCMPlaybackQueue {
     if (this.audioContext) {
       return this.audioContext;
     }
-    const createContext = this.options.createContext || wx.createWebAudioContext?.bind(wx);
+    (this.options.configureAudio || configureAudibleWebAudioPlayback)();
+    const createContext = this.options.createContext
+      || (typeof wx !== "undefined" ? wx.createWebAudioContext?.bind(wx) : undefined);
     if (!createContext) {
       throw new Error("当前微信版本不支持 WebAudio PCM 播放");
     }
