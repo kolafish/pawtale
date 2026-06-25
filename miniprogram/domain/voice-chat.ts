@@ -411,6 +411,24 @@ export interface MemoirBookPlanUpdateRequest {
   chapters: MemoirBookPlanChapterUpdateInput[];
 }
 
+export type MemoirBookPlanStructureCommandType =
+  | "create_chapter_from_source"
+  | "delete_chapter"
+  | "merge_chapters"
+  | "move_chapter"
+  | "rename_chapter"
+  | "split_chapter";
+
+export interface MemoirBookPlanStructureCommandRequest {
+  type: MemoirBookPlanStructureCommandType;
+  chapter_id?: string;
+  target_chapter_id?: string;
+  direction?: "up" | "down";
+  title?: string;
+  utterance_id?: string;
+  utterance_ids?: string[];
+}
+
 export interface MemoirBookChapterDraftGenerateRequest {
   ai_model?: string;
   force_regenerate?: boolean;

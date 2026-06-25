@@ -107,6 +107,50 @@ class MemoirBookPlanUpdateRequest(BaseModel):
         return title
 
 
+class MemoirBookPlanStructureCommandRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal[
+        "create_chapter_from_source",
+        "delete_chapter",
+        "merge_chapters",
+        "move_chapter",
+        "rename_chapter",
+        "split_chapter",
+    ]
+    chapter_id: str | None = None
+    target_chapter_id: str | None = None
+    direction: Literal["up", "down"] | None = None
+    title: str | None = None
+    utterance_id: str | None = None
+    utterance_ids: list[str] = Field(default_factory=list)
+
+    @field_validator("chapter_id", "target_chapter_id", "utterance_id")
+    @classmethod
+    def _valid_optional_id(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None
+
+    @field_validator("title")
+    @classmethod
+    def _valid_optional_title(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        title = value.strip()
+        if not title:
+            return None
+        if len(title) > 80:
+            raise ValueError("章节标题不能超过 80 个字")
+        return title
+
+    @field_validator("utterance_ids")
+    @classmethod
+    def _valid_utterance_ids(cls, value: list[str]) -> list[str]:
+        return list(dict.fromkeys(item.strip() for item in value if item.strip()))
+
+
 class MemoirBookVoiceCommandContextMessage(BaseModel):
     role: Literal["user", "assistant"]
     text: str = Field(min_length=1, max_length=240)

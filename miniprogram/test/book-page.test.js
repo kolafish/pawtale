@@ -341,6 +341,99 @@ function planFromChapterUpdates(status, updates) {
   };
 }
 
+function planFromStructureCommand(status, command) {
+  const base = samplePlan(status);
+  if (command.type === "create_chapter_from_source") {
+    return {
+      ...base,
+      chapters: [
+        ...base.chapters,
+        {
+          id: "chapter-3",
+          plan_id: "plan-1",
+          project_id: "project/1",
+          title: "补记往事",
+          sort_order: 2,
+          source_refs: [sampleRef(command.utterance_id, "新增转写")],
+          metadata_json: {},
+          created_at: "2026-06-17T00:00:00.000Z",
+          updated_at: "2026-06-17T00:00:00.000Z",
+        },
+      ],
+    };
+  }
+  if (command.type === "delete_chapter") {
+    return {
+      ...base,
+      chapters: base.chapters
+        .filter((chapter) => chapter.id !== command.chapter_id)
+        .map((chapter, index) => ({ ...chapter, sort_order: index })),
+    };
+  }
+  if (command.type === "move_chapter") {
+    const chapters = [...base.chapters];
+    const fromIndex = chapters.findIndex((chapter) => chapter.id === command.chapter_id);
+    const toIndex = command.direction === "up" ? fromIndex - 1 : fromIndex + 1;
+    [chapters[fromIndex], chapters[toIndex]] = [chapters[toIndex], chapters[fromIndex]];
+    return { ...base, chapters: chapters.map((chapter, index) => ({ ...chapter, sort_order: index })) };
+  }
+  if (command.type === "merge_chapters") {
+    const source = base.chapters.find((chapter) => chapter.id === command.chapter_id);
+    return {
+      ...base,
+      chapters: base.chapters
+        .filter((chapter) => chapter.id !== command.chapter_id)
+        .map((chapter, index) => (
+          chapter.id === command.target_chapter_id && source
+            ? {
+              ...chapter,
+              sort_order: index,
+              source_refs: [...chapter.source_refs, ...source.source_refs],
+            }
+            : { ...chapter, sort_order: index }
+        )),
+    };
+  }
+  if (command.type === "split_chapter") {
+    const source = base.chapters.find((chapter) => chapter.id === command.chapter_id);
+    if (!source) {
+      return base;
+    }
+    const selected = new Set(command.utterance_ids || []);
+    const keptRefs = source.source_refs.filter((ref) => !selected.has(ref.utterance_id));
+    const splitRefs = source.source_refs.filter((ref) => selected.has(ref.utterance_id));
+    return {
+      ...base,
+      chapters: [
+        { ...source, source_refs: keptRefs, sort_order: 0 },
+        {
+          id: "chapter-3",
+          plan_id: "plan-1",
+          project_id: "project/1",
+          title: command.title,
+          sort_order: 1,
+          source_refs: splitRefs,
+          metadata_json: {},
+          created_at: "2026-06-17T00:00:00.000Z",
+          updated_at: "2026-06-17T00:00:00.000Z",
+        },
+        { ...base.chapters[1], sort_order: 2 },
+      ],
+    };
+  }
+  if (command.type === "rename_chapter") {
+    return {
+      ...base,
+      chapters: base.chapters.map((chapter) => (
+        chapter.id === command.chapter_id
+          ? { ...chapter, title: command.title }
+          : chapter
+      )),
+    };
+  }
+  return base;
+}
+
 function loadBookPage({
   authExports = {},
   voiceApiExports = {},
@@ -357,6 +450,9 @@ function loadBookPage({
     ...authExports,
   });
   mockModule("../services/memoir-voice-api.ts", {
+    applyMemoirBookPlanStructureCommand: async () => {
+      throw new Error("applyMemoirBookPlanStructureCommand was not mocked");
+    },
     assignMemoirBookSources: async () => {
       throw new Error("assignMemoirBookSources was not mocked");
     },
@@ -772,13 +868,6 @@ test("book page stores uncovered source target before opening transcripts tab", 
   delete global.wx;
 });
 
-test("book page avoids placeholder title for generic uncovered transcript", () => {
-  const { mod } = loadBookPage();
-  const source = mod.buildUncoveredSourceViews(sampleSourceCoverage(1))[0];
-
-  assert.equal(mod.titleFromUncoveredSource(source), "补记往事");
-});
-
 test("book page marks assigned sources as supplemental chapter work", () => {
   const { mod } = loadBookPage();
   const plan = samplePlan("confirmed");
@@ -920,7 +1009,7 @@ test("book page adds uncovered transcript as a new chapter", async () => {
   ];
   const { page } = loadBookPage({
     voiceApiExports: {
-      updateMemoirBookPlan: async (projectId, data) => {
+      applyMemoirBookPlanStructureCommand: async (projectId, data) => {
         calls.push({ projectId, data });
         return updatedPlan;
       },
@@ -942,9 +1031,10 @@ test("book page adds uncovered transcript as a new chapter", async () => {
 
   assert.equal(calls.length, 1);
   assert.equal(calls[0].projectId, "project/1");
-  assert.equal(calls[0].data.chapters.length, 3);
-  assert.equal(calls[0].data.chapters[2].title, "补记往事");
-  assert.equal(calls[0].data.chapters[2].source_refs[0].utterance_id, "utterance-new-1");
+  assert.deepEqual(calls[0].data, {
+    type: "create_chapter_from_source",
+    utterance_id: "utterance-new-1",
+  });
   assert.equal(context.data.chapters.length, 3);
   assert.equal(context.data.assigningSourceId, "");
   delete global.wx;
@@ -973,7 +1063,7 @@ test("book page adds uncovered transcript as a new chapter from picker option", 
       assignMemoirBookSources: async () => {
         throw new Error("assignMemoirBookSources should not be called for new chapter option");
       },
-      updateMemoirBookPlan: async (projectId, data) => {
+      applyMemoirBookPlanStructureCommand: async (projectId, data) => {
         calls.push({ projectId, data });
         return updatedPlan;
       },
@@ -997,8 +1087,10 @@ test("book page adds uncovered transcript as a new chapter from picker option", 
 
   assert.equal(newChapterOptionIndex, 2);
   assert.equal(calls.length, 1);
-  assert.equal(calls[0].data.chapters.length, 3);
-  assert.equal(calls[0].data.chapters[2].title, "补记往事");
+  assert.deepEqual(calls[0].data, {
+    type: "create_chapter_from_source",
+    utterance_id: "utterance-new-1",
+  });
   assert.equal(context.data.assigningSourceId, "");
   delete global.wx;
 });
@@ -1104,7 +1196,7 @@ test("book page regenerates confirmed chapter title through AI", async () => {
   delete global.wx;
 });
 
-test("book page deletes confirmed chapter through plan structure update", async () => {
+test("book page deletes confirmed chapter through structure command", async () => {
   const calls = [];
   global.wx = {
     showModal(options) {
@@ -1118,7 +1210,7 @@ test("book page deletes confirmed chapter through plan structure update", async 
   updatedPlan.chapters[0].sort_order = 0;
   const { page } = loadBookPage({
     voiceApiExports: {
-      updateMemoirBookPlan: async (projectId, data) => {
+      applyMemoirBookPlanStructureCommand: async (projectId, data) => {
         calls.push({ projectId, data });
         return updatedPlan;
       },
@@ -1138,21 +1230,23 @@ test("book page deletes confirmed chapter through plan structure update", async 
   });
 
   assert.equal(calls.length, 1);
-  assert.equal(calls[0].data.chapters.length, 1);
-  assert.equal(calls[0].data.chapters[0].id, "chapter-2");
+  assert.deepEqual(calls[0].data, {
+    type: "delete_chapter",
+    chapter_id: "chapter-1",
+  });
   assert.equal(context.data.chapters.length, 1);
   assert.equal(context.data.chapters[0].id, "chapter-2");
   delete global.wx;
 });
 
-test("book page reorders chapters through plan structure update", async () => {
+test("book page reorders chapters through structure command", async () => {
   const calls = [];
   global.wx = { showToast() {}, switchTab() {} };
   const { page } = loadBookPage({
     voiceApiExports: {
-      updateMemoirBookPlan: async (projectId, data) => {
+      applyMemoirBookPlanStructureCommand: async (projectId, data) => {
         calls.push({ projectId, data });
-        return planFromChapterUpdates("confirmed", data.chapters);
+        return planFromStructureCommand("confirmed", data);
       },
       getMemoirBookChapterDraft: async () => null,
       getMemoirBookSourceCoverage: async () => sampleSourceCoverage(0),
@@ -1167,7 +1261,11 @@ test("book page reorders chapters through plan structure update", async () => {
   });
 
   assert.equal(calls.length, 1);
-  assert.deepEqual(calls[0].data.chapters.map((chapter) => chapter.id), ["chapter-2", "chapter-1"]);
+  assert.deepEqual(calls[0].data, {
+    type: "move_chapter",
+    chapter_id: "chapter-1",
+    direction: "down",
+  });
   assert.deepEqual(context.data.chapters.map((chapter) => chapter.id), ["chapter-2", "chapter-1"]);
   delete global.wx;
 });
@@ -1182,9 +1280,9 @@ test("book page splits selected chapter sources into a new chapter", async () =>
   ];
   const { page } = loadBookPage({
     voiceApiExports: {
-      updateMemoirBookPlan: async (projectId, data) => {
+      applyMemoirBookPlanStructureCommand: async (projectId, data) => {
         calls.push({ projectId, data });
-        return planFromChapterUpdates("confirmed", data.chapters);
+        return planFromStructureCommand("confirmed", data);
       },
       getMemoirBookChapterDraft: async () => null,
       getMemoirBookSourceCoverage: async () => sampleSourceCoverage(0),
@@ -1212,13 +1310,12 @@ test("book page splits selected chapter sources into a new chapter", async () =>
   });
 
   assert.equal(calls.length, 1);
-  assert.equal(calls[0].data.chapters.length, 3);
-  assert.equal(calls[0].data.chapters[0].id, "chapter-1");
-  assert.equal(calls[0].data.chapters[0].source_refs[0].utterance_id, "utterance-1");
-  assert.equal(calls[0].data.chapters[1].id, undefined);
-  assert.equal(calls[0].data.chapters[1].title, "外婆家的童年（拆出）");
-  assert.equal(calls[0].data.chapters[1].source_refs[0].utterance_id, "utterance-3");
-  assert.equal(calls[0].data.chapters[2].id, "chapter-2");
+  assert.deepEqual(calls[0].data, {
+    type: "split_chapter",
+    chapter_id: "chapter-1",
+    title: "外婆家的童年（拆出）",
+    utterance_ids: ["utterance-3"],
+  });
   assert.equal(context.data.splitSourceSelections["chapter-1"], undefined);
   delete global.wx;
 });
@@ -1234,13 +1331,13 @@ test("book page merges chapters and regenerates title plus draft for confirmed p
   };
   const { page } = loadBookPage({
     voiceApiExports: {
-      updateMemoirBookPlan: async (projectId, data) => {
+      applyMemoirBookPlanStructureCommand: async (projectId, data) => {
         calls.push({ kind: "update", projectId, data });
-        return planFromChapterUpdates("confirmed", data.chapters);
+        return planFromStructureCommand("confirmed", data);
       },
       generateMemoirBookChapterTitle: async (projectId, chapterId, data) => {
         calls.push({ kind: "title", projectId, chapterId, data });
-        const updated = planFromChapterUpdates("confirmed", calls[0].data.chapters);
+        const updated = planFromStructureCommand("confirmed", calls[0].data);
         updated.chapters[0].title = "童年里的离别";
         return updated;
       },
@@ -1265,13 +1362,11 @@ test("book page merges chapters and regenerates title plus draft for confirmed p
   });
 
   assert.deepEqual(calls.map((call) => call.kind), ["update", "title", "draft"]);
-  assert.equal(calls[0].data.chapters.length, 1);
-  assert.equal(calls[0].data.chapters[0].id, "chapter-1");
-  assert.deepEqual(
-    calls[0].data.chapters[0].source_refs.map((ref) => ref.utterance_id),
-    ["utterance-1", "utterance-2"],
-  );
-  assert.equal("summary" in calls[0].data.chapters[0], false);
+  assert.deepEqual(calls[0].data, {
+    type: "merge_chapters",
+    chapter_id: "chapter-2",
+    target_chapter_id: "chapter-1",
+  });
   assert.deepEqual(calls[2].data, { force_regenerate: false });
   assert.equal(context.data.chapters[0].title, "童年里的离别");
   assert.equal(context.data.chapters[0].draftContent, "合并后的章节正文");
@@ -1820,17 +1915,19 @@ test("book page executes a confirmed voice rename with undo snapshot", async () 
   const context = pageContext(page, { projectId: "project/1" });
   page.applyPlan.call(context, plan);
   page.applyBookVoiceCommandPreview.call(context, sampleBookVoiceCommandPreview());
-  context.updatePlanStructure = async (chapters, toastTitle) => {
-    calls.push({ chapters, toastTitle });
-    return planFromChapterUpdates("confirmed", chapters);
+  context.applyPlanStructureCommand = async (command, toastTitle) => {
+    calls.push({ command, toastTitle });
+    return planFromStructureCommand("confirmed", command);
   };
 
   await page.executeBookVoiceCommand.call(context);
 
   assert.equal(calls[0].toastTitle, "已按语音改名");
-  assert.equal(calls[0].chapters[0].id, "chapter-1");
-  assert.equal(calls[0].chapters[0].title, "童年往事");
-  assert.equal(calls[0].chapters[1].title, "第一次离家");
+  assert.deepEqual(calls[0].command, {
+    type: "rename_chapter",
+    chapter_id: "chapter-1",
+    title: "童年往事",
+  });
   assert.equal(context.data.bookVoiceCommandCanExecute, false);
   assert.equal(context.data.bookVoiceCommandRequiresConfirmation, false);
   assert.equal(context.data.bookVoiceCommandStateText, "已执行");
@@ -1864,6 +1961,10 @@ test("book page executes and undoes a voice chapter move", async () => {
       },
     ],
   }));
+  context.applyPlanStructureCommand = async (command, toastTitle) => {
+    calls.push({ command, toastTitle });
+    return planFromStructureCommand("confirmed", command);
+  };
   context.updatePlanStructure = async (chapters, toastTitle) => {
     calls.push({ chapters, toastTitle });
     return planFromChapterUpdates("confirmed", chapters);
@@ -1873,7 +1974,11 @@ test("book page executes and undoes a voice chapter move", async () => {
   await page.undoBookVoiceCommand.call(context);
 
   assert.equal(calls[0].toastTitle, "已按语音调整顺序");
-  assert.deepEqual(calls[0].chapters.map((chapter) => chapter.id), ["chapter-2", "chapter-1"]);
+  assert.deepEqual(calls[0].command, {
+    type: "move_chapter",
+    chapter_id: "chapter-2",
+    direction: "up",
+  });
   assert.equal(calls[1].toastTitle, "已撤回语音修改");
   assert.deepEqual(calls[1].chapters.map((chapter) => chapter.id), ["chapter-1", "chapter-2"]);
   assert.equal(context.data.bookVoiceCommandUndoText, "");
@@ -2498,6 +2603,62 @@ test("book source assignment API calls encoded backend route", async () => {
       },
     ],
     ai_model: "deepseek-v4-pro",
+  });
+  assert.equal(apiRequests[0].header.Cookie, "pawtale_session=abc");
+  delete global.wx;
+});
+
+test("book structure command API calls backend command route", async () => {
+  const requests = [];
+  global.wx = {
+    getStorageSync(key) {
+      if (key === "pawtale_backend_config") {
+        return {
+          httpBaseUrl: "http://backend.local:8000/",
+          devEmail: "local@example.com",
+          devPassword: "secret",
+        };
+      }
+      if (key === "pawtale_backend_cookie") {
+        return "pawtale_session=abc";
+      }
+      return "";
+    },
+    getExtConfigSync() {
+      return {};
+    },
+    setStorageSync() {},
+    removeStorageSync() {},
+    request(options) {
+      requests.push(options);
+      if (options.url.endsWith("/api/auth/me")) {
+        options.success({ statusCode: 200, data: { id: "user-1" }, cookies: [], header: {} });
+        return;
+      }
+      options.success({ statusCode: 200, data: samplePlan("confirmed"), cookies: [], header: {} });
+    },
+  };
+  delete require.cache[require.resolve("../services/auth.ts")];
+  delete require.cache[require.resolve("../services/request.ts")];
+  delete require.cache[require.resolve("../services/memoir-voice-api.ts")];
+  const { applyMemoirBookPlanStructureCommand } = require("../services/memoir-voice-api.ts");
+
+  await applyMemoirBookPlanStructureCommand("project/1", {
+    type: "merge_chapters",
+    chapter_id: "chapter/2",
+    target_chapter_id: "chapter/1",
+  });
+
+  const apiRequests = requests.filter((request) => request.url.includes("/api/mobile/memoir/"));
+  assert.equal(
+    apiRequests[0].url,
+    "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-plan/structure-commands",
+  );
+  assert.equal(apiRequests[0].method, "POST");
+  assert.deepEqual(apiRequests[0].data, {
+    type: "merge_chapters",
+    chapter_id: "chapter/2",
+    target_chapter_id: "chapter/1",
   });
   assert.equal(apiRequests[0].header.Cookie, "pawtale_session=abc");
   delete global.wx;

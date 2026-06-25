@@ -16,6 +16,7 @@ from app.schemas.memoir_book import (
     MemoirBookOutputResponse,
     MemoirBookPlanConfirmRequest,
     MemoirBookPlanGenerateRequest,
+    MemoirBookPlanStructureCommandRequest,
     MemoirBookPlanUpdateRequest,
     MemoirBookPlanResponse,
     MemoirBookSourceAssignmentRequest,
@@ -85,6 +86,21 @@ async def update_mobile_memoir_book_plan(
     current_user: User = Depends(get_current_user),
 ):
     return await memoir_book_plans.update_book_plan(
+        db,
+        user_id=current_user.id,
+        project_id=project_id,
+        req=req,
+    )
+
+
+@router.post("/projects/{project_id}/book-plan/structure-commands", response_model=MemoirBookPlanResponse)
+async def apply_mobile_memoir_book_plan_structure_command(
+    project_id: str,
+    req: MemoirBookPlanStructureCommandRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await memoir_book_plans.apply_book_plan_structure_command(
         db,
         user_id=current_user.id,
         project_id=project_id,

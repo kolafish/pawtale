@@ -702,14 +702,3 @@ export function toPlanUpdateInput(chapters: BookChapterView[]): MemoirBookPlanCh
     source_refs: chapter.source_refs,
   }));
 }
-
-export function titleFromUncoveredSource(source: BookUncoveredSourceView): string {
-  const text = trimText(source.previewText)
-    .replace(/\s+/g, "")
-    .replace(/^(新增|新收录|补充)?(转写|讲述)(记录|内容)?[:：，,。]*/, "");
-  const firstClause = text.split(/[，。！？、,.!?;；:：]/).find(Boolean) || text;
-  if (!firstClause || firstClause.length < 3 || ["新增转写", "新收录转写", "转写记录", "新增讲述", "新收录讲述", "讲述记录"].includes(firstClause)) {
-    return "补记往事";
-  }
-  return firstClause.length > 16 ? firstClause.slice(0, 16) : firstClause;
-}
