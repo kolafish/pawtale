@@ -156,6 +156,11 @@ async def test_mobile_memoir_book_voice_command_parse_uses_ai_payload(
             "target_chapter_title": None,
             "new_title": "童年往事",
             "direction": None,
+            "target_position": None,
+            "target_index": None,
+            "relative_chapter_id": None,
+            "relative_chapter_title": None,
+            "relative_position": None,
             "source_position": None,
             "source_index": None,
             "utterance_id": None,
@@ -237,6 +242,38 @@ async def test_mobile_memoir_book_voice_command_execute_moves_chapter(client, te
     assert data["intent"] == "move_chapter"
     assert data["summary"] == "已把「第一次离家」上移。"
     assert [chapter["id"] for chapter in data["plan"]["chapters"]] == [chapters[1].id, chapters[0].id]
+
+
+async def test_mobile_memoir_book_voice_command_execute_moves_chapter_to_last(client, test_db):
+    project_id = await ensure_mobile_memoir_project(client)
+    _, chapters = await _create_two_chapter_plan(
+        test_db,
+        project_id=project_id,
+        titles=["小时候的年", "一生的朋友", "职场浮沉与升职加薪"],
+    )
+
+    response = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-voice-command/execute",
+        json={
+            "intent": "move_chapter",
+            "operation": {
+                "type": "move_chapter",
+                "chapter_id": chapters[1].id,
+                "chapter_title": "一生的朋友",
+                "target_position": "last",
+            },
+        },
+    )
+
+    assert response.status_code == 200, response.json()
+    data = response.json()
+    assert data["intent"] == "move_chapter"
+    assert data["summary"] == "已把「一生的朋友」移到最后一章。"
+    assert [chapter["id"] for chapter in data["plan"]["chapters"]] == [
+        chapters[0].id,
+        chapters[2].id,
+        chapters[1].id,
+    ]
 
 
 async def test_mobile_memoir_book_voice_command_execute_assigns_uncovered_source(client, test_db):
@@ -357,6 +394,55 @@ async def test_mobile_memoir_book_voice_command_swaps_adjacent_chapters_by_fuzzy
     assert data["used_ai"] is False
     assert data["operations"][0]["chapter_id"] == chapters[2].id
     assert data["operations"][0]["direction"] == "down"
+
+
+async def test_mobile_memoir_book_voice_command_moves_chapter_to_named_position(
+    client,
+    test_db,
+    monkeypatch,
+):
+    project_id = await ensure_mobile_memoir_project(client)
+    _, chapters = await _create_two_chapter_plan(
+        test_db,
+        project_id=project_id,
+        titles=["小时候的年", "一生的朋友", "儿时庭院与家人聚散", "职场浮沉与升职加薪"],
+    )
+    fake_ai = FakeBookVoiceCommandAI(
+        {
+            "intent": "move_chapter",
+            "chapter_ref": "小时候的年",
+            "direction": "down",
+            "summary": "准备把小时候的年下移",
+        }
+    )
+    monkeypatch.setattr("app.services.memoir.book_voice_command_parser.get_ai_service", lambda _model: fake_ai)
+
+    response = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-voice-command/parse",
+        json={"text": "我想把一生的朋友这一章移到最后一章去。"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["intent"] == "move_chapter"
+    assert data["summary"] == "准备把「一生的朋友」移到最后一章。"
+    assert data["used_ai"] is False
+    assert data["operations"][0]["chapter_id"] == chapters[1].id
+    assert data["operations"][0]["target_position"] == "last"
+    assert data["operations"][0]["direction"] is None
+
+    response = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-voice-command/parse",
+        json={"text": "把职场浮沉与升职加薪这一章移到第 2 章。"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["intent"] == "move_chapter"
+    assert data["summary"] == "准备把「职场浮沉与升职加薪」移到第 2 章。"
+    assert data["operations"][0]["chapter_id"] == chapters[3].id
+    assert data["operations"][0]["target_index"] == 2
+    assert data["operations"][0]["direction"] is None
 
 
 async def test_mobile_memoir_book_voice_command_reads_and_assigns_uncovered_sources(

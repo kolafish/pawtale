@@ -61,6 +61,10 @@ JSON 格式：
   "source_ref": "用户提到的待收录记录编号、语音记录编号或刚才这条；没有则 null",
   "new_title": "改名后的新标题；没有则 null",
   "direction": "up | down | null",
+  "target_position": "first | last | null",
+  "target_index": "目标最终章节序号，数字；没有则 null",
+  "relative_chapter_ref": "用户说移到某章前/后时的相对章节；没有则 null",
+  "relative_position": "before | after | null",
   "summary": "用一句话说明识别出的操作或问题",
   "reply_text": "建议类问题必须给自然、具体、可直接播报的中文回复；操作类没有则 null"
 }}
@@ -72,6 +76,8 @@ JSON 格式：
 - “把第一章改名为童年往事/标题改成……”用 rename_chapter，并提取 new_title。
 - “把第一章和第二章合并/把第一章合并到第二章”用 merge_chapters。
 - “把某章上移/下移/往前/往后”用 move_chapter，并填 direction。
+- “把某章移到第一章/最后一章/第 3 章”用 move_chapter，并填 target_position 或 target_index；不要改成上移/下移。
+- “把某章移到某章前面/后面”用 move_chapter，并填 relative_chapter_ref 和 relative_position；不要改成上移/下移。
 - “把第二章和第三章顺序换一下/交换第二章和第三章”这类相邻章节交换也用 move_chapter：把前一章下移，或把后一章上移。
 - “把第 1 条待收录记录归到第二章/把刚才这条放到职场那章”用 assign_source，source_ref 填记录编号或“刚才这条”，target_chapter_ref 填目标章节。
 - “先念一条待收录记录/下一条未收入记录/念一下第一条没收入的记录”用 read_uncovered_source，source_ref 填“第几条”或“下一条”，reply_text 要读出对应待收录记录摘录，并提示用户说“把这条归到哪一章”。
@@ -148,12 +154,19 @@ CHINESE_NUMBERS = {
     "九": 9,
     "十": 10,
 }
-CHAPTER_NUMBER_RE = re.compile(r"第?\s*([0-9]{1,2}|[一二两三四五六七八九十])\s*(?:章|章节)?")
+CHAPTER_NUMBER_RE = re.compile(r"第?\s*([0-9]{1,2}|[一二两三四五六七八九十])\s*(?:章|章节)")
 STRICT_CHAPTER_REF_RE = re.compile(r"第\s*([0-9]{1,2}|[一二两三四五六七八九十])\s*(?:章|章节)")
 RENAME_RE = re.compile(r"(?:把|将)?(.{1,40}?)(?:的)?(?:章名|标题)?(?:改名为|改成|改为|叫)(.{2,40})")
 MERGE_INTO_RE = re.compile(r"(?:把|将)?(.{1,40}?)(?:合并到|并到|放到)(.{1,40})")
 MERGE_WITH_RE = re.compile(r"(?:把|将)?(.{1,40}?)(?:和|跟|与)(.{1,40}?)(?:合并|并到一起|放到一起)")
 MOVE_RE = re.compile(r"(?:把|将)?(.{1,40}?)(上移|下移|往前|往后|前移|后移)")
+MOVE_TARGET_VERBS_RE = r"(?:移到|移动到|挪到|放到|排到|调到|调整到)"
+MOVE_TO_INDEX_RE = re.compile(
+    rf"(?:把|将)?(.{{1,50}}?){MOVE_TARGET_VERBS_RE}第?\s*([0-9]{{1,2}}|[一二两三四五六七八九十])\s*(?:章|章节)(前面|后面|前|后)?"
+)
+MOVE_TO_POSITION_RE = re.compile(
+    rf"(?:把|将)?(.{{1,50}}?){MOVE_TARGET_VERBS_RE}(最前面|最前|开头|第一章|第一个章节|最后一章|最后面|最末尾|末尾|最后|最后一个章节)"
+)
 ASSIGN_SOURCE_RE = re.compile(r"(?:把|将)?(.{0,40}?)(?:归到|归入|收入|收录到|放到|分到|归类到)(.{1,40})")
 CHAPTER_WORD_ASR_ORDINAL_RE = re.compile(r"第\s*([0-9]{1,2}|[一二两三四五六七八九十])\s*张")
 CHAPTER_WORD_ASR_BARE_RE = re.compile(
@@ -271,6 +284,10 @@ class ParsedCommandPayload:
     source_ref: str | None = None
     new_title: str | None = None
     direction: str | None = None
+    target_position: str | None = None
+    target_index: int | None = None
+    relative_chapter_ref: str | None = None
+    relative_position: str | None = None
     summary: str | None = None
     reply_text: str | None = None
     used_ai: bool = False
@@ -323,7 +340,7 @@ async def parse_payload_with_ai(
             and _is_resolved_local_action(fallback, plan, req.current_chapter_id, req.book_context)
         ):
             return fallback
-        if parsed.intent == "move_chapter" and not parsed.direction and fallback.intent == "move_chapter":
+        if parsed.intent == "move_chapter" and not _payload_has_move_target(parsed) and fallback.intent == "move_chapter":
             return fallback
         reply_text = parsed.reply_text
         if parsed.intent == "clarify_previous" and not reply_text:
@@ -335,6 +352,10 @@ async def parse_payload_with_ai(
             source_ref=parsed.source_ref,
             new_title=parsed.new_title,
             direction=parsed.direction,
+            target_position=parsed.target_position,
+            target_index=parsed.target_index,
+            relative_chapter_ref=parsed.relative_chapter_ref,
+            relative_position=parsed.relative_position,
             summary=parsed.summary,
             reply_text=reply_text,
             used_ai=True,
@@ -365,6 +386,10 @@ def _payload_from_json(payload: Any) -> ParsedCommandPayload:
         source_ref=_optional_text(payload.get("source_ref")),
         new_title=_optional_text(payload.get("new_title")),
         direction=direction,
+        target_position=_normalized_target_position(payload.get("target_position")),
+        target_index=_optional_int(payload.get("target_index")),
+        relative_chapter_ref=_optional_text(payload.get("relative_chapter_ref")),
+        relative_position=_normalized_relative_position(payload.get("relative_position")),
         summary=_optional_text(payload.get("summary")),
         reply_text=_clean_reply_text(payload.get("reply_text")),
     )
@@ -379,7 +404,7 @@ def _is_resolved_local_action(
     chapters = _sorted_chapters(plan)
     if payload.intent == "move_chapter":
         return (
-            payload.direction in {"up", "down"}
+            _payload_has_move_target(payload)
             and _resolve_chapter(chapters, payload.chapter_ref, current_chapter_id) is not None
         )
     if payload.intent == "assign_source":
@@ -451,6 +476,10 @@ def _fallback_payload(
     if assign_payload:
         return assign_payload
 
+    position_move_payload = _fallback_position_move_payload(normalized)
+    if position_move_payload:
+        return position_move_payload
+
     swap_payload = _fallback_swap_payload(normalized, plan)
     if swap_payload:
         return swap_payload
@@ -512,6 +541,36 @@ def _fallback_chapter_ref(normalized: str) -> str | None:
     if match:
         return match.group(0)
     return normalized
+
+
+def _fallback_position_move_payload(normalized: str) -> ParsedCommandPayload | None:
+    index_match = MOVE_TO_INDEX_RE.search(normalized)
+    if index_match:
+        relative_position = _normalized_relative_position(index_match.group(3))
+        target_index = _source_ref_number(index_match.group(2))
+        if relative_position:
+            return ParsedCommandPayload(
+                intent="move_chapter",
+                chapter_ref=_clean_chapter_ref(index_match.group(1)),
+                relative_chapter_ref=f"第{index_match.group(2)}章",
+                relative_position=relative_position,
+            )
+        return ParsedCommandPayload(
+            intent="move_chapter",
+            chapter_ref=_clean_chapter_ref(index_match.group(1)),
+            target_index=target_index,
+        )
+
+    position_match = MOVE_TO_POSITION_RE.search(normalized)
+    if not position_match:
+        return None
+    raw_position = position_match.group(2)
+    target_position = "first" if raw_position in {"最前面", "最前", "开头", "第一章", "第一个章节"} else "last"
+    return ParsedCommandPayload(
+        intent="move_chapter",
+        chapter_ref=_clean_chapter_ref(position_match.group(1)),
+        target_position=target_position,
+    )
 
 
 def _fallback_swap_payload(normalized: str, plan: MemoirBookPlan) -> ParsedCommandPayload | None:
@@ -877,6 +936,7 @@ def response_from_payload(
     chapters = _sorted_chapters(plan)
     chapter = _resolve_chapter(chapters, payload.chapter_ref, current_chapter_id)
     target_chapter = _resolve_chapter(chapters, payload.target_chapter_ref, current_chapter_id)
+    relative_chapter = _resolve_chapter(chapters, payload.relative_chapter_ref, current_chapter_id)
     source = _resolve_uncovered_source(book_context, payload.source_ref, None)
 
     operations: list[MemoirBookVoiceCommandOperationResponse] = []
@@ -900,8 +960,22 @@ def response_from_payload(
             intent = "unknown"
     elif intent == "move_chapter":
         direction = payload.direction if payload.direction in {"up", "down"} else None
+        target_position = payload.target_position if payload.target_position in {"first", "last"} else None
+        target_index = payload.target_index if payload.target_index and 1 <= payload.target_index <= len(chapters) else None
+        relative_position = payload.relative_position if payload.relative_position in {"before", "after"} else None
         if chapter and direction:
             operations.append(_operation(intent, chapter=chapter, direction=direction))
+        elif chapter and target_position:
+            operations.append(_operation(intent, chapter=chapter, target_position=target_position))
+        elif chapter and target_index:
+            operations.append(_operation(intent, chapter=chapter, target_index=target_index))
+        elif chapter and relative_chapter and relative_position:
+            operations.append(_operation(
+                intent,
+                chapter=chapter,
+                relative_chapter=relative_chapter,
+                relative_position=relative_position,
+            ))
         else:
             intent = "unknown"
     elif intent == "assign_source":
@@ -965,10 +1039,14 @@ def _operation(
     *,
     chapter: MemoirBookPlanChapter | None = None,
     target_chapter: MemoirBookPlanChapter | None = None,
+    relative_chapter: MemoirBookPlanChapter | None = None,
     source: MemoirBookVoiceCommandUncoveredSourceContext | None = None,
     source_position: int | None = None,
     new_title: str | None = None,
     direction: str | None = None,
+    target_position: str | None = None,
+    target_index: int | None = None,
+    relative_position: str | None = None,
 ) -> MemoirBookVoiceCommandOperationResponse:
     return MemoirBookVoiceCommandOperationResponse(
         type=operation_type,
@@ -978,6 +1056,11 @@ def _operation(
         target_chapter_title=target_chapter.title if target_chapter else None,
         new_title=new_title,
         direction=direction,
+        target_position=target_position,
+        target_index=target_index,
+        relative_chapter_id=relative_chapter.id if relative_chapter else None,
+        relative_chapter_title=relative_chapter.title if relative_chapter else None,
+        relative_position=relative_position,
         source_position=source_position if source else None,
         source_index=source.source_index if source else None,
         utterance_id=source.utterance_id if source else None,
@@ -995,8 +1078,7 @@ def _summary_for_operation(intent: str, operations: list[MemoirBookVoiceCommandO
     if intent == "merge_chapters" and operation:
         return f"准备把「{operation.chapter_title}」合并到「{operation.target_chapter_title}」。"
     if intent == "move_chapter" and operation:
-        direction = "上移" if operation.direction == "up" else "下移"
-        return f"准备把「{operation.chapter_title}」{direction}。"
+        return _move_operation_summary(operation)
     if intent == "assign_source" and operation:
         source_position = operation.source_position or operation.source_index or 1
         return f"准备把待收录第 {source_position} 条归入「{operation.chapter_title}」。"
@@ -1009,6 +1091,22 @@ def _summary_for_operation(intent: str, operations: list[MemoirBookVoiceCommandO
     if intent == "confirm_chapter" and operation:
         return f"准备确认「{operation.chapter_title}」。"
     return "还没有听清要修改哪一章，请换个说法再试。"
+
+
+def _move_operation_summary(operation: MemoirBookVoiceCommandOperationResponse) -> str:
+    if operation.direction:
+        direction = "上移" if operation.direction == "up" else "下移"
+        return f"准备把「{operation.chapter_title}」{direction}。"
+    if operation.target_position == "first":
+        return f"准备把「{operation.chapter_title}」移到第一章。"
+    if operation.target_position == "last":
+        return f"准备把「{operation.chapter_title}」移到最后一章。"
+    if operation.target_index:
+        return f"准备把「{operation.chapter_title}」移到第 {operation.target_index} 章。"
+    if operation.relative_chapter_title and operation.relative_position:
+        position = "前面" if operation.relative_position == "before" else "后面"
+        return f"准备把「{operation.chapter_title}」移到「{operation.relative_chapter_title}」{position}。"
+    return f"准备移动「{operation.chapter_title}」。"
 
 
 def _summary_for_consultation(intent: str, chapter: MemoirBookPlanChapter | None) -> str:
@@ -1182,6 +1280,44 @@ def _normalized_direction(value: Any) -> str | None:
     if text in {"down", "下移", "往后", "后移"}:
         return "down"
     return None
+
+
+def _normalized_target_position(value: Any) -> str | None:
+    text = _compact(str(value or ""))
+    if text in {"first", "最前", "最前面", "开头", "第一章", "第一个章节"}:
+        return "first"
+    if text in {"last", "最后", "最后一章", "最后面", "末尾", "最末尾", "最后一个章节"}:
+        return "last"
+    return None
+
+
+def _normalized_relative_position(value: Any) -> str | None:
+    text = _compact(str(value or ""))
+    if text in {"before", "前", "前面", "之前"}:
+        return "before"
+    if text in {"after", "后", "后面", "之后"}:
+        return "after"
+    return None
+
+
+def _optional_int(value: Any) -> int | None:
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        text = _compact(value)
+        if text.isdigit():
+            return int(text)
+        return CHINESE_NUMBERS.get(text)
+    return None
+
+
+def _payload_has_move_target(payload: ParsedCommandPayload) -> bool:
+    return (
+        payload.direction in {"up", "down"}
+        or payload.target_position in {"first", "last"}
+        or payload.target_index is not None
+        or (payload.relative_chapter_ref is not None and payload.relative_position in {"before", "after"})
+    )
 
 
 def _optional_text(value: Any) -> str | None:

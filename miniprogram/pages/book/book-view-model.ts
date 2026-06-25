@@ -527,7 +527,17 @@ export function canExecuteBookVoiceCommand(preview: MemoirBookVoiceCommandParseR
     return Boolean(operation.chapter_id && operation.new_title);
   }
   if (preview.intent === "move_chapter") {
-    return Boolean(operation.chapter_id && (operation.direction === "up" || operation.direction === "down"));
+    return Boolean(operation.chapter_id && (
+      operation.direction === "up"
+      || operation.direction === "down"
+      || operation.target_position === "first"
+      || operation.target_position === "last"
+      || (typeof operation.target_index === "number" && operation.target_index > 0)
+      || Boolean(
+        operation.relative_chapter_id
+        && (operation.relative_position === "before" || operation.relative_position === "after"),
+      )
+    ));
   }
   if (preview.intent === "assign_source") {
     return Boolean(operation.chapter_id && operation.utterance_id);

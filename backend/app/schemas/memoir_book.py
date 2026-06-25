@@ -121,11 +121,15 @@ class MemoirBookPlanStructureCommandRequest(BaseModel):
     chapter_id: str | None = None
     target_chapter_id: str | None = None
     direction: Literal["up", "down"] | None = None
+    target_position: Literal["first", "last"] | None = None
+    target_index: int | None = Field(default=None, ge=1, le=99)
+    relative_chapter_id: str | None = None
+    relative_position: Literal["before", "after"] | None = None
     title: str | None = None
     utterance_id: str | None = None
     utterance_ids: list[str] = Field(default_factory=list)
 
-    @field_validator("chapter_id", "target_chapter_id", "utterance_id")
+    @field_validator("chapter_id", "target_chapter_id", "relative_chapter_id", "utterance_id")
     @classmethod
     def _valid_optional_id(cls, value: str | None) -> str | None:
         if value is None:
@@ -228,6 +232,11 @@ class MemoirBookVoiceCommandOperationResponse(BaseModel):
     target_chapter_title: str | None = None
     new_title: str | None = None
     direction: str | None = None
+    target_position: str | None = None
+    target_index: int | None = None
+    relative_chapter_id: str | None = None
+    relative_chapter_title: str | None = None
+    relative_position: str | None = None
     source_position: int | None = None
     source_index: int | None = None
     utterance_id: str | None = None

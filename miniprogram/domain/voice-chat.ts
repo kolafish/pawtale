@@ -426,6 +426,10 @@ export interface MemoirBookPlanStructureCommandRequest {
   chapter_id?: string;
   target_chapter_id?: string;
   direction?: "up" | "down";
+  target_position?: "first" | "last";
+  target_index?: number;
+  relative_chapter_id?: string;
+  relative_position?: "before" | "after";
   title?: string;
   utterance_id?: string;
   utterance_ids?: string[];
@@ -550,6 +554,11 @@ export interface MemoirBookVoiceCommandOperation {
   target_chapter_title?: string | null;
   new_title?: string | null;
   direction?: "up" | "down" | string | null;
+  target_position?: "first" | "last" | string | null;
+  target_index?: number | null;
+  relative_chapter_id?: string | null;
+  relative_chapter_title?: string | null;
+  relative_position?: "before" | "after" | string | null;
   source_position?: number | null;
   source_index?: number | null;
   utterance_id?: string | null;
