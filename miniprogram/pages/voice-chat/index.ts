@@ -15,9 +15,11 @@ import {
 } from "../../services/voice-assistant-turn-queue";
 import {
   VoiceAssistantTurnStreamClient,
-  type PreparedAssistantStreamAudioSegment,
+  type PreparedAssistantStreamAudioFrame,
   type VoiceAssistantTurnCompletedEvent,
+  type VoiceAssistantTurnAudioDoneEvent,
 } from "../../services/voice-assistant-turn-stream";
+import { StreamingSpeechPlaybackController } from "../../services/streaming-speech-playback";
 import {
   classifyVoiceClientConnectionError,
   type MemoirCaptureStats,
@@ -169,8 +171,11 @@ Page<VoiceChatData, {
   clearFailedStreamingAssistantTurn(message: string): void;
   applyStreamingAssistantText(text: string, sourceMessageId: string): void;
   applyCompletedStreamingAssistantTurn(event: VoiceAssistantTurnCompletedEvent, sourceMessageId: string): void;
-  enqueueStreamingAudioSegment(segment: PreparedAssistantStreamAudioSegment, requestSerial: number): void;
-  playStreamingAudioSegment(segment: PreparedAssistantStreamAudioSegment, requestSerial: number): Promise<void>;
+  enqueueStreamingAudioFrame(frame: PreparedAssistantStreamAudioFrame, requestSerial: number): void;
+  finishStreamingAudioFrames(event: VoiceAssistantTurnAudioDoneEvent, requestSerial: number): void;
+  playStreamingAudioFrame(frame: PreparedAssistantStreamAudioFrame, requestSerial: number): Promise<void>;
+  recordStreamingPlaybackError(error: unknown, requestSerial: number): void;
+  streamingPlaybackController(): StreamingSpeechPlaybackController;
   regenerateFollowUp(): Promise<void>;
   skipFollowUp(): void;
   enqueueAssistantTurn(item: AssistantTurnQueueItem): void;
@@ -235,6 +240,7 @@ Page<VoiceChatData, {
   audioPlayback: AudioPlaybackController;
   voiceStreaming: StreamingVoiceController;
   assistantTurnStream: VoiceAssistantTurnStreamClient | null;
+  assistantStreamingPlaybackController: StreamingSpeechPlaybackController | null;
   assistantStreamingPlayback: Promise<void>;
   assistantStreamingPlaybackError: Error | null;
   assistantTurnQueue: AssistantTurnQueueItem[];
@@ -255,6 +261,7 @@ Page<VoiceChatData, {
   audioPlayback: new AudioPlaybackController(),
   voiceStreaming: new StreamingVoiceController(),
   assistantTurnStream: null,
+  assistantStreamingPlaybackController: null,
   assistantStreamingPlayback: Promise.resolve(),
   assistantStreamingPlaybackError: null,
   assistantTurnQueue: [],
@@ -782,11 +789,14 @@ Page<VoiceChatData, {
           this.applyStreamingAssistantText(event.text, sourceMessageId);
         }
       },
-      onAudioSegment: (segment) => {
+      onAudioFrame: (frame) => {
         if (requestSerial === followUpRequestSerial) {
-          this.enqueueStreamingAudioSegment(segment, requestSerial);
-        } else {
-          segment.dispose();
+          this.enqueueStreamingAudioFrame(frame, requestSerial);
+        }
+      },
+      onAudioDone: (event) => {
+        if (requestSerial === followUpRequestSerial) {
+          this.finishStreamingAudioFrames(event, requestSerial);
         }
       },
       onCompleted: (event) => {
@@ -796,7 +806,7 @@ Page<VoiceChatData, {
       },
     });
     this.assistantTurnStream = streamClient;
-    const completed = await streamClient.start({ regenerate });
+    const completed = await streamClient.start({ regenerate, audioProtocol: "pcm_frame" });
     if (requestSerial !== followUpRequestSerial) {
       return;
     }
@@ -806,7 +816,6 @@ Page<VoiceChatData, {
     }
     const playbackError = this.assistantStreamingPlaybackError;
     this.assistantTurnStream = null;
-    streamClient.disposeTempFiles();
     if (!playbackError && completed.expects_answer !== false) {
       this.autoListenPendingAfterPlayback = true;
     }
@@ -834,8 +843,9 @@ Page<VoiceChatData, {
   },
 
   clearFailedStreamingAssistantTurn(message) {
-    this.assistantTurnStream?.disposeTempFiles();
     this.assistantTurnStream = null;
+    this.assistantStreamingPlaybackController?.stop();
+    this.assistantStreamingPlaybackController = null;
     this.assistantStreamingPlayback = Promise.resolve();
     this.assistantStreamingPlaybackError = null;
     this.stopFollowUpAudio();
@@ -944,25 +954,41 @@ Page<VoiceChatData, {
     writeMemoirVoiceSessionSnapshot(this.data.voiceSessionId, { transcriptLines });
   },
 
-  enqueueStreamingAudioSegment(segment, requestSerial) {
+  enqueueStreamingAudioFrame(frame, requestSerial) {
     this.assistantStreamingPlayback = this.assistantStreamingPlayback
-      .then(() => this.playStreamingAudioSegment(segment, requestSerial))
-      .catch((error) => {
-        if (requestSerial === followUpRequestSerial) {
-          this.assistantStreamingPlaybackError = error instanceof Error
-            ? error
-            : new Error("AI 语音播放失败");
-          this.setData({
-            followUpTTSError: this.assistantStreamingPlaybackError.message,
-            followUpTTSStateText: "播放失败",
-          });
-        }
-      });
+      .then(() => this.playStreamingAudioFrame(frame, requestSerial))
+      .catch((error) => this.recordStreamingPlaybackError(error, requestSerial));
   },
 
-  async playStreamingAudioSegment(segment, requestSerial) {
+  finishStreamingAudioFrames(_event, requestSerial) {
+    this.assistantStreamingPlayback = this.assistantStreamingPlayback
+      .then(async () => {
+        const controller = this.assistantStreamingPlaybackController;
+        if (controller) {
+          await controller.waitForDrain();
+        }
+        if (requestSerial !== followUpRequestSerial) {
+          return;
+        }
+        if (this.assistantStreamingPlaybackError) {
+          return;
+        }
+        this.stopFollowUpProgressTimer();
+        const latestText = this.data.assistantPromptText || this.assistantStreamSpokenText;
+        this.assistantStreamSpokenText = latestText;
+        this.setData({
+          ttsSpokenText: latestText,
+          ttsCurrentText: "",
+          ttsRemainingText: "",
+          ttsProgressPercent: this.streamingProgressPercent(latestText, latestText, false),
+          followUpTTSStateText: "正在整理回应",
+        });
+      })
+      .catch((error) => this.recordStreamingPlaybackError(error, requestSerial));
+  },
+
+  async playStreamingAudioFrame(frame, requestSerial) {
     if (requestSerial !== followUpRequestSerial) {
-      segment.dispose();
       return;
     }
     let playToken = this.ttsPlayToken;
@@ -970,73 +996,41 @@ Page<VoiceChatData, {
       playToken = this.audioPlayback.nextToken();
       this.ttsPlayToken = playToken;
     }
-    const spokenBefore = this.assistantStreamSpokenText;
-    const fullText = this.data.assistantPromptText || `${spokenBefore}${segment.text}`;
-    const prefix = `${spokenBefore}${segment.text}`;
+    const fullText = this.data.assistantPromptText || this.assistantStreamSpokenText;
     this.setData({
       followUpTTSLoading: false,
       followUpTTSPlaying: true,
       followUpTTSError: "",
       followUpTTSStateText: "正在播放",
-      ttsSpokenText: spokenBefore,
-      ttsCurrentText: segment.text,
-      ttsRemainingText: fullText.startsWith(prefix) ? fullText.slice(prefix.length) : "",
+      ttsSpokenText: this.data.ttsSpokenText,
+      ttsCurrentText: fullText,
+      ttsRemainingText: "",
     });
-    this.ttsProgressStartedAtMs = 0;
-    this.updateStreamingTTSProgress(spokenBefore, segment.text, 0, 0);
-    try {
-      await this.audioPlayback.playTempFile(segment.tempFilePath, playToken, {
-        onPlay: (audio) => {
-          if (playToken === this.ttsPlayToken) {
-            this.ttsProgressStartedAtMs = Date.now();
-            this.startStreamingProgressTimer(playToken, audio, spokenBefore, segment.text);
-          }
-        },
-        onPlayRequested: (audio) => {
-          this.startStreamingProgressTimer(playToken, audio, spokenBefore, segment.text);
-        },
-        onTimeUpdate: (audio) => {
-          if (playToken === this.ttsPlayToken) {
-            this.updateStreamingTTSProgress(
-              spokenBefore,
-              segment.text,
-              this.playbackTimeForProgress(audio),
-              audio.duration,
-            );
-          }
-        },
-        onEnded: () => {
-          if (playToken !== this.ttsPlayToken) {
-            return;
-          }
-          this.stopFollowUpProgressTimer();
-          this.assistantStreamSpokenText = `${this.assistantStreamSpokenText}${segment.text}`;
-          const latestText = this.data.assistantPromptText || this.assistantStreamSpokenText;
-          const remainingText = latestText.startsWith(this.assistantStreamSpokenText)
-            ? latestText.slice(this.assistantStreamSpokenText.length)
-            : "";
-          this.setData({
-            ttsSpokenText: this.assistantStreamSpokenText,
-            ttsCurrentText: "",
-            ttsRemainingText: remainingText,
-            ttsProgressPercent: this.streamingProgressPercent(this.assistantStreamSpokenText, latestText, false),
-            followUpTTSStateText: "正在整理回应",
-          });
-        },
-        onError: () => {
-          if (playToken === this.ttsPlayToken) {
-            this.stopFollowUpProgressTimer();
-            this.setData({
-              followUpTTSError: "AI 语音播放失败",
-              followUpTTSStateText: "播放失败",
-            });
-          }
-        },
-        errorMessage: "AI 语音播放失败",
-      });
-    } finally {
-      segment.dispose();
+    if (this.ttsProgressStartedAtMs <= 0) {
+      this.ttsProgressStartedAtMs = Date.now();
     }
+    await this.streamingPlaybackController().appendFrame(frame);
+  },
+
+  recordStreamingPlaybackError(error, requestSerial) {
+    if (requestSerial !== followUpRequestSerial) {
+      return;
+    }
+    this.assistantStreamingPlaybackError = error instanceof Error
+      ? error
+      : new Error("AI 语音播放失败");
+    this.stopFollowUpProgressTimer();
+    this.setData({
+      followUpTTSError: this.assistantStreamingPlaybackError.message,
+      followUpTTSStateText: "播放失败",
+    });
+  },
+
+  streamingPlaybackController() {
+    if (!this.assistantStreamingPlaybackController) {
+      this.assistantStreamingPlaybackController = new StreamingSpeechPlaybackController();
+    }
+    return this.assistantStreamingPlaybackController;
   },
 
   async regenerateFollowUp() {
@@ -1310,6 +1304,8 @@ Page<VoiceChatData, {
 
   stopFollowUpAudio() {
     this.audioPlayback.stop();
+    this.assistantStreamingPlaybackController?.stop();
+    this.assistantStreamingPlaybackController = null;
     this.ttsPlayToken = this.audioPlayback.currentToken();
     this.autoListenPendingAfterPlayback = false;
     this.stopFollowUpProgressTimer();
@@ -1322,8 +1318,9 @@ Page<VoiceChatData, {
   cancelFollowUpTTS() {
     this.ttsRequestSerial += 1;
     this.assistantTurnStream?.cancel();
-    this.assistantTurnStream?.disposeTempFiles();
     this.assistantTurnStream = null;
+    this.assistantStreamingPlaybackController?.stop();
+    this.assistantStreamingPlaybackController = null;
     this.assistantStreamingPlayback = Promise.resolve();
     this.assistantStreamingPlaybackError = null;
     this.assistantStreamLineId = "";

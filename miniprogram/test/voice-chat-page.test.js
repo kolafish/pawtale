@@ -12,6 +12,7 @@ function loadVoiceChatPage({
   wechatPrivacyExports = {},
   voiceChatAutoListenExports = {},
   assistantTurnStreamExports = {},
+  streamingSpeechPlaybackExports = {},
 } = {}) {
   mockModule("../services/memoir-streaming-asr.ts", {
     classifyVoiceClientConnectionError: () => ({ kind: "unknown" }),
@@ -142,6 +143,15 @@ function loadVoiceChatPage({
       disposeTempFiles() {}
     },
     ...assistantTurnStreamExports,
+  });
+  mockModule("../services/streaming-speech-playback.ts", {
+    StreamingSpeechPlaybackController: streamingSpeechPlaybackExports.StreamingSpeechPlaybackController || class {
+      async appendFrame() {}
+      async waitForDrain() {}
+      stop() {}
+      async destroy() {}
+    },
+    ...streamingSpeechPlaybackExports,
   });
   clearModule("../services/voice-assistant-turn-queue.ts");
 
@@ -800,10 +810,9 @@ test("voice chat starts pending auto listening when gateway becomes ready after 
   delete global.wx;
 });
 
-test("voice chat streams one assistant turn and plays audio segments", async () => {
+test("voice chat streams one assistant turn and plays pcm audio frames", async () => {
   const streamStarts = [];
   const played = [];
-  const disposed = [];
   const page = loadVoiceChatPage({
     assistantTurnStreamExports: {
       VoiceAssistantTurnStreamClient: class {
@@ -826,13 +835,21 @@ test("voice chat streams one assistant turn and plays audio segments", async () 
             text_delta: "外婆最常带着您做什么？",
             text: "那时候在院子里，外婆最常带着您做什么？",
           });
-          this.callbacks.onAudioSegment?.({
+          this.callbacks.onAudioFrame?.({
             turnId: "turn-1",
-            segmentIndex: 0,
-            text: "那时候在院子里，外婆最常带着您做什么？",
-            tempFilePath: "/tmp/assistant-0.wav",
-            mimeType: "audio/wav",
-            dispose: () => disposed.push("segment-0"),
+            sequence: 1,
+            audio: new Uint8Array([1, 2, 3]),
+            mimeType: "audio/L16",
+            sampleRate: 16000,
+            channels: 1,
+            bitsPerSample: 16,
+          });
+          this.callbacks.onAudioDone?.({
+            type: "audio.done",
+            turn_id: "turn-1",
+            voice_session_id: "voice-1",
+            frame_count: 1,
+            duration_seconds: 0.2,
           });
           const completed = {
             type: "turn.completed",
@@ -851,6 +868,15 @@ test("voice chat streams one assistant turn and plays audio segments", async () 
         cancel() {}
         close() {}
         disposeTempFiles() {}
+      },
+    },
+    streamingSpeechPlaybackExports: {
+      StreamingSpeechPlaybackController: class {
+        async appendFrame(frame) {
+          played.push(frame);
+        }
+        async waitForDrain() {}
+        stop() {}
       },
     },
     voiceChatAutoListenExports: {
@@ -879,10 +905,6 @@ test("voice chat streams one assistant turn and plays audio segments", async () 
       isCurrentToken: () => true,
       nextToken: () => 1,
       stop() {},
-      playTempFile: async (tempFilePath, token, options) => {
-        played.push({ tempFilePath, token });
-        options.onEnded?.();
-      },
     },
     voiceStreaming: {
       hasClient: () => true,
@@ -900,8 +922,10 @@ test("voice chat streams one assistant turn and plays audio segments", async () 
 
   assert.equal(streamStarts[0].voiceSessionId, "voice-1");
   assert.equal(streamStarts[0].options.regenerate, false);
-  assert.deepEqual(played, [{ tempFilePath: "/tmp/assistant-0.wav", token: 1 }]);
-  assert.deepEqual(disposed, ["segment-0"]);
+  assert.equal(streamStarts[0].options.audioProtocol, "pcm_frame");
+  assert.equal(played.length, 1);
+  assert.deepEqual(Array.from(played[0].audio), [1, 2, 3]);
+  assert.equal(played[0].sampleRate, 16000);
   assert.equal(context.data.assistantPromptText, "那时候在院子里，外婆最常带着您做什么？");
   assert.equal(context.data.followUpMessageId, "assistant-question-1");
   assert.equal(context.data.followUpAudioFileId, "audio-question-1");
@@ -913,7 +937,6 @@ test("voice chat streams one assistant turn and plays audio segments", async () 
 });
 
 test("voice chat keeps completed streaming assistant turns when playback fails", async () => {
-  const disposed = [];
   const page = loadVoiceChatPage({
     assistantTurnStreamExports: {
       VoiceAssistantTurnStreamClient: class {
@@ -927,13 +950,21 @@ test("voice chat keeps completed streaming assistant turns when playback fails",
             text_delta: "那时候在院子里，外婆最常带着您做什么？",
             text: "那时候在院子里，外婆最常带着您做什么？",
           });
-          this.callbacks.onAudioSegment?.({
+          this.callbacks.onAudioFrame?.({
             turnId: "turn-1",
-            segmentIndex: 0,
-            text: "那时候在院子里，外婆最常带着您做什么？",
-            tempFilePath: "/tmp/assistant-0.wav",
-            mimeType: "audio/wav",
-            dispose: () => disposed.push("segment-0"),
+            sequence: 1,
+            audio: new Uint8Array([1, 2, 3]),
+            mimeType: "audio/L16",
+            sampleRate: 16000,
+            channels: 1,
+            bitsPerSample: 16,
+          });
+          this.callbacks.onAudioDone?.({
+            type: "audio.done",
+            turn_id: "turn-1",
+            voice_session_id: "voice-1",
+            frame_count: 1,
+            duration_seconds: 0.2,
           });
           const completed = {
             type: "turn.completed",
@@ -954,11 +985,21 @@ test("voice chat keeps completed streaming assistant turns when playback fails",
         disposeTempFiles() {}
       },
     },
+    streamingSpeechPlaybackExports: {
+      StreamingSpeechPlaybackController: class {
+        async appendFrame() {
+          throw new Error("pcm audio failed");
+        }
+        async waitForDrain() {}
+        stop() {}
+      },
+    },
     voiceChatAutoListenExports: {
       canAutoStartListeningAfterTTS: () => true,
     },
   });
   const startCalls = [];
+  const setDataPatches = [];
   const context = {
     ...page,
     data: {
@@ -980,14 +1021,12 @@ test("voice chat keeps completed streaming assistant turns when playback fails",
       isCurrentToken: () => true,
       nextToken: () => 1,
       stop() {},
-      playTempFile: async () => {
-        throw new Error("temp audio failed");
-      },
     },
     voiceStreaming: {
       hasClient: () => true,
     },
     setData(patch) {
+      setDataPatches.push(patch);
       this.data = { ...this.data, ...patch };
     },
     startRecording(autoTriggered) {
@@ -998,15 +1037,18 @@ test("voice chat keeps completed streaming assistant turns when playback fails",
 
   await page.generateFollowUp.call(context, false);
 
-  assert.deepEqual(disposed, ["segment-0"]);
   assert.equal(context.data.followUpError, "");
-  assert.equal(context.data.followUpTTSError, "temp audio failed");
+  assert.equal(context.data.followUpTTSError, "pcm audio failed");
   assert.equal(context.data.followUpTTSStateText, "语音播放失败，可重播");
   assert.equal(context.data.persistenceStateText, "语音播放失败");
   assert.equal(context.data.followUpMessageId, "assistant-question-1");
   assert.equal(context.data.followUpAudioFileId, "audio-question-1");
   assert.equal(context.data.lastFollowUpSourceMessageId, "");
   assert.deepEqual(startCalls, []);
+  assert.equal(
+    setDataPatches.some((patch) => patch.followUpTTSStateText === "正在整理回应"),
+    false,
+  );
 });
 
 test("voice chat clears temporary streaming assistant state when the turn fails", async () => {
@@ -1192,7 +1234,7 @@ test("voice chat passes regenerate flag to streaming assistant turn", async () =
 
   await page.generateFollowUp.call(context, true);
 
-  assert.deepEqual(streamStarts, [{ regenerate: true }]);
+  assert.deepEqual(streamStarts, [{ regenerate: true, audioProtocol: "pcm_frame" }]);
   assert.equal(context.data.followUpMessageId, "assistant-question-1");
 });
 

@@ -180,6 +180,92 @@ test("assistant turn stream sends start payload and emits playable wav segments"
   delete global.wx;
 });
 
+test("assistant turn stream sends pcm frame protocol and emits audio frames", async () => {
+  const harness = installWxSocketHarness();
+  delete require.cache[require.resolve("../services/request.ts")];
+  delete require.cache[require.resolve("../services/ai-model-settings.ts")];
+  delete require.cache[require.resolve("../services/tts-settings.ts")];
+  delete require.cache[require.resolve("../services/memoir-voice-api.ts")];
+  delete require.cache[require.resolve("../services/voice-assistant-turn-stream.ts")];
+  const { VoiceAssistantTurnStreamClient } = require("../services/voice-assistant-turn-stream.ts");
+  const formats = [];
+  const frames = [];
+  const doneEvents = [];
+  const client = new VoiceAssistantTurnStreamClient("voice/1", {
+    onAudioFormat: (event) => formats.push(event),
+    onAudioFrame: (frame) => frames.push(frame),
+    onAudioDone: (event) => doneEvents.push(event),
+  });
+
+  const startPromise = client.start({ audioProtocol: "pcm_frame" });
+  await new Promise((resolve) => setImmediate(resolve));
+  harness.handlers.open();
+  socketMessage(harness.handlers, { type: "turn.ready" });
+  socketMessage(harness.handlers, {
+    type: "audio.format",
+    turn_id: "turn-1",
+    voice_session_id: "voice/1",
+    sequence: 1,
+    mime_type: "audio/L16",
+    sample_rate: 16000,
+    channels: 1,
+    bits_per_sample: 16,
+  });
+  socketMessage(harness.handlers, {
+    type: "audio.frame",
+    turn_id: "turn-1",
+    voice_session_id: "voice/1",
+    sequence: 1,
+    audio: Buffer.from("pcm-frame").toString("base64"),
+    mime_type: "audio/L16",
+    sample_rate: 16000,
+    channels: 1,
+    bits_per_sample: 16,
+  });
+  socketMessage(harness.handlers, {
+    type: "audio.done",
+    turn_id: "turn-1",
+    voice_session_id: "voice/1",
+    frame_count: 1,
+    duration_seconds: 0.2,
+    sample_rate: 16000,
+    channels: 1,
+    bits_per_sample: 16,
+  });
+  socketMessage(harness.handlers, {
+    type: "turn.completed",
+    turn_id: "turn-1",
+    voice_session_id: "voice/1",
+    state: "completed",
+    message_id: "assistant-1",
+    audio_file_id: "audio-1",
+    text: "那时候在院子里，谁最常陪您？",
+    primary_intent: "follow_up",
+    intent_tags: ["follow_up"],
+    expects_answer: true,
+  });
+  await startPromise;
+
+  assert.deepEqual(harness.sent, [{
+    type: "turn.start",
+    ai_model: "deepseek-v4-pro",
+    regenerate: false,
+    voice: "zh_female_vv_uranus_bigtts",
+    speed_ratio: 1.5,
+    audio_protocol: "pcm_frame",
+  }]);
+  assert.equal(formats.length, 1);
+  assert.equal(frames.length, 1);
+  assert.equal(Buffer.from(frames[0].audio).toString(), "pcm-frame");
+  assert.equal(frames[0].mimeType, "audio/L16");
+  assert.equal(frames[0].sampleRate, 16000);
+  assert.equal(frames[0].channels, 1);
+  assert.equal(frames[0].bitsPerSample, 16);
+  assert.equal(doneEvents[0].frame_count, 1);
+  assert.deepEqual(harness.writes, []);
+  delete global.wx;
+});
+
 test("assistant turn stream rejects when socket does not open before connect timeout", async () => {
   const harness = installWxSocketHarness();
   delete require.cache[require.resolve("../services/request.ts")];

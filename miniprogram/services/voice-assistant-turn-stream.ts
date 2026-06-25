@@ -1,5 +1,6 @@
 import { readSelectedAIModel } from "./ai-model-settings";
 import { assistantTurnStreamUrl, backendSessionCookieHeader } from "./memoir-voice-api";
+import type { StreamingSpeechPCMFrame } from "./streaming-speech-playback";
 import {
   type PreparedStreamingTTSAudioSegment,
   StreamingTTSSegmentAssembler,
@@ -14,6 +15,7 @@ export interface VoiceAssistantTurnStreamStartOptions {
   voice?: string;
   speedRatio?: number;
   connectTimeoutMs?: number;
+  audioProtocol?: "segment" | "pcm_frame";
 }
 
 export interface VoiceAssistantTurnStartedEvent {
@@ -26,6 +28,7 @@ export interface VoiceAssistantTurnStartedEvent {
   tts_provider?: string;
   tts_model?: string;
   max_tokens?: number;
+  audio_protocol?: string;
 }
 
 export interface VoiceAssistantTurnTextDeltaEvent {
@@ -69,6 +72,44 @@ export interface VoiceAssistantTurnAudioSegmentDoneEvent {
   duration_seconds?: number | null;
 }
 
+interface VoiceAssistantTurnAudioMetadata {
+  turn_id: string;
+  voice_session_id: string;
+  sequence: number;
+  mime_type: string;
+  provider?: string;
+  model?: string;
+  voice?: string;
+  speed_ratio?: number;
+  sample_rate?: number | null;
+  channels?: number | null;
+  bits_per_sample?: number | null;
+}
+
+export interface VoiceAssistantTurnAudioFormatEvent extends VoiceAssistantTurnAudioMetadata {
+  type: "audio.format";
+}
+
+export interface VoiceAssistantTurnAudioFrameEvent extends VoiceAssistantTurnAudioMetadata {
+  type: "audio.frame";
+  audio: string;
+}
+
+export interface VoiceAssistantTurnAudioDoneEvent {
+  type: "audio.done";
+  turn_id: string;
+  voice_session_id: string;
+  frame_count: number;
+  duration_seconds?: number | null;
+  provider?: string;
+  model?: string;
+  voice?: string;
+  speed_ratio?: number;
+  sample_rate?: number | null;
+  channels?: number | null;
+  bits_per_sample?: number | null;
+}
+
 export interface VoiceAssistantTurnCompletedEvent {
   type: "turn.completed";
   turn_id: string;
@@ -96,11 +137,19 @@ export interface PreparedAssistantStreamAudioSegment extends PreparedStreamingTT
   turnId: string;
 }
 
+export interface PreparedAssistantStreamAudioFrame extends StreamingSpeechPCMFrame {
+  turnId: string;
+  sequence: number;
+}
+
 export interface VoiceAssistantTurnStreamCallbacks {
   onStarted?(event: VoiceAssistantTurnStartedEvent): void;
   onTextDelta?(event: VoiceAssistantTurnTextDeltaEvent): void;
   onTextSegment?(event: VoiceAssistantTurnTextSegmentEvent): void;
   onAudioSegment?(segment: PreparedAssistantStreamAudioSegment): void;
+  onAudioFormat?(event: VoiceAssistantTurnAudioFormatEvent): void;
+  onAudioFrame?(frame: PreparedAssistantStreamAudioFrame): void;
+  onAudioDone?(event: VoiceAssistantTurnAudioDoneEvent): void;
   onCompleted?(event: VoiceAssistantTurnCompletedEvent): void;
   onCancelled?(event: VoiceAssistantTurnTerminalEvent): void;
   onFailed?(event: VoiceAssistantTurnTerminalEvent): void;
@@ -248,6 +297,7 @@ export class VoiceAssistantTurnStreamClient {
       regenerate: options.regenerate || false,
       voice: options.voice || ttsSettings.voice || undefined,
       speed_ratio: speedRatio === 1 ? undefined : speedRatio,
+      audio_protocol: options.audioProtocol || undefined,
     };
   }
 
@@ -286,6 +336,18 @@ export class VoiceAssistantTurnStreamClient {
       if (segment) {
         this.callbacks.onAudioSegment?.(segment);
       }
+      return;
+    }
+    if (event.type === "audio.format") {
+      this.callbacks.onAudioFormat?.(event as unknown as VoiceAssistantTurnAudioFormatEvent);
+      return;
+    }
+    if (event.type === "audio.frame") {
+      this.handleAudioFrame(event as unknown as VoiceAssistantTurnAudioFrameEvent);
+      return;
+    }
+    if (event.type === "audio.done") {
+      this.callbacks.onAudioDone?.(event as unknown as VoiceAssistantTurnAudioDoneEvent);
       return;
     }
     if (event.type === "turn.completed") {
@@ -353,12 +415,34 @@ export class VoiceAssistantTurnStreamClient {
     };
   }
 
+  private handleAudioFrame(event: VoiceAssistantTurnAudioFrameEvent): void {
+    const audio = wx.base64ToArrayBuffer(event.audio || "");
+    const bitsPerSample = positiveInteger(event.bits_per_sample);
+    if (bitsPerSample !== 16) {
+      throw new Error("AI 语音帧格式不支持");
+    }
+    this.callbacks.onAudioFrame?.({
+      turnId: event.turn_id,
+      sequence: event.sequence,
+      audio,
+      mimeType: event.mime_type,
+      sampleRate: positiveInteger(event.sample_rate) || 16000,
+      channels: positiveInteger(event.channels) || 1,
+      bitsPerSample: 16,
+    });
+  }
+
   private segmentAssemblerFor(turnId: string): StreamingTTSSegmentAssembler {
     if (!this.segmentAssembler) {
       this.segmentAssembler = new StreamingTTSSegmentAssembler(`assistant-turn-${turnId}`);
     }
     return this.segmentAssembler;
   }
+}
+
+function positiveInteger(value: unknown): number {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) && numeric > 0 ? Math.floor(numeric) : 0;
 }
 
 function safeJsonParse(value: string): Record<string, unknown> | null {
