@@ -6,7 +6,7 @@ import type {
   VoiceChatTranscriptLine,
   VoiceGatewayServerEvent,
 } from "../../domain/voice-chat";
-import { configureAudiblePlayback } from "../../services/audio-playback";
+import { AudioPlaybackController } from "../../services/audio-playback";
 import {
   applyAssistantTTSResponse,
   assistantTurnQueueItem,
@@ -24,7 +24,6 @@ import {
   createMemoirAssistantTTS,
   createMemoirVoiceNoAnswerPrompt,
   createMemoirVoiceFollowUp,
-  downloadMemoirVoiceAudio,
   getMemoirVoiceSession,
 } from "../../services/memoir-voice-api";
 import { splitTextByAudioPlaybackProgress } from "../../services/tts-text-progress";
@@ -218,8 +217,7 @@ Page<VoiceChatData, {
   handlePartial(text: string): void;
   handleFinal(event: VoiceGatewayServerEvent): void;
   handleError(message: string, error?: VoiceChatErrorInfo): void;
-  audio: WechatMiniprogram.InnerAudioContext | null;
-  audioPlaybackResolve: (() => void) | null;
+  audioPlayback: AudioPlaybackController;
   assistantTurnQueue: AssistantTurnQueueItem[];
   assistantTurnQueueRunning: boolean;
   assistantAudioPrepareCount: number;
@@ -233,8 +231,7 @@ Page<VoiceChatData, {
   handledNoAnswerFrameCount: number;
   autoListenPendingAfterPlayback: boolean;
 }>({
-  audio: null,
-  audioPlaybackResolve: null,
+  audioPlayback: new AudioPlaybackController(),
   assistantTurnQueue: [],
   assistantTurnQueueRunning: false,
   assistantAudioPrepareCount: 0,
@@ -1034,7 +1031,7 @@ Page<VoiceChatData, {
       return;
     }
     this.stopFollowUpAudio();
-    const playToken = this.ttsPlayToken + 1;
+    const playToken = this.audioPlayback.nextToken();
     this.ttsPlayToken = playToken;
     this.setData({
       assistantPromptText: options.text || this.data.assistantPromptText,
@@ -1045,41 +1042,22 @@ Page<VoiceChatData, {
     });
     this.updateFollowUpTTSProgress(0, 0);
     try {
-      const tempFilePath = await downloadMemoirVoiceAudio(audioFileId);
-      if (playToken !== this.ttsPlayToken) {
-        return;
-      }
-      await new Promise<void>((resolve) => {
-        const audio = wx.createInnerAudioContext();
-        const finish = () => {
-          if (this.audioPlaybackResolve === resolve) {
-            this.audioPlaybackResolve = null;
-          }
-          audio.destroy();
-          if (this.audio === audio) {
-            this.audio = null;
-          }
-          resolve();
-        };
-        this.audioPlaybackResolve = resolve;
-        this.audio = audio;
-        configureAudiblePlayback(audio);
-        audio.src = tempFilePath;
-        const refreshPlaybackProgress = () => {
-          if (playToken === this.ttsPlayToken) {
-            this.updateFollowUpTTSProgress(this.playbackTimeForProgress(audio), audio.duration);
-          }
-        };
-        audio.onPlay(() => {
+      await this.audioPlayback.playFile(audioFileId, playToken, {
+        onPlay: (audio) => {
           if (playToken === this.ttsPlayToken) {
             this.ttsProgressStartedAtMs = Date.now();
             this.startFollowUpProgressTimer(playToken, audio);
           }
-        });
-        audio.onTimeUpdate(() => {
-          refreshPlaybackProgress();
-        });
-        audio.onEnded(() => {
+        },
+        onTimeUpdate: (audio) => {
+          if (playToken === this.ttsPlayToken) {
+            this.updateFollowUpTTSProgress(this.playbackTimeForProgress(audio), audio.duration);
+          }
+        },
+        onPlayRequested: (audio) => {
+          this.startFollowUpProgressTimer(playToken, audio);
+        },
+        onEnded: () => {
           if (playToken === this.ttsPlayToken) {
             if (options.autoListenAfterPlayback) {
               this.autoListenPendingAfterPlayback = true;
@@ -1097,9 +1075,8 @@ Page<VoiceChatData, {
           if (playToken === this.ttsPlayToken && options.autoListenAfterPlayback) {
             this.tryStartAutoListenAfterTTS();
           }
-          finish();
-        });
-        audio.onError(() => {
+        },
+        onError: () => {
           if (playToken === this.ttsPlayToken) {
             this.stopFollowUpProgressTimer();
             this.setData({
@@ -1108,10 +1085,8 @@ Page<VoiceChatData, {
               followUpTTSStateText: "播放失败",
             });
           }
-          finish();
-        });
-        audio.play();
-        this.startFollowUpProgressTimer(playToken, audio);
+        },
+        errorMessage: "AI 语音播放失败",
       });
     } catch (error) {
       if (playToken === this.ttsPlayToken) {
@@ -1125,19 +1100,10 @@ Page<VoiceChatData, {
   },
 
   stopFollowUpAudio() {
-    this.ttsPlayToken += 1;
+    this.audioPlayback.stop();
+    this.ttsPlayToken = this.audioPlayback.currentToken();
     this.autoListenPendingAfterPlayback = false;
     this.stopFollowUpProgressTimer();
-    const resolvePlayback = this.audioPlaybackResolve;
-    this.audioPlaybackResolve = null;
-    if (this.audio) {
-      this.audio.stop();
-      this.audio.destroy();
-      this.audio = null;
-    }
-    if (resolvePlayback) {
-      resolvePlayback();
-    }
     if (this.data.followUpTTSPlaying) {
       this.setData({ followUpTTSPlaying: false });
     }
@@ -1192,7 +1158,11 @@ Page<VoiceChatData, {
       this.ttsProgressStartedAtMs = Date.now();
     }
     const timer = setInterval(() => {
-      if (playToken !== this.ttsPlayToken || this.audio !== audio || !this.data.followUpTTSPlaying) {
+      if (
+        playToken !== this.ttsPlayToken
+        || this.audioPlayback.currentAudio() !== audio
+        || !this.data.followUpTTSPlaying
+      ) {
         if (this.ttsProgressTimer === timer) {
           this.stopFollowUpProgressTimer();
         }

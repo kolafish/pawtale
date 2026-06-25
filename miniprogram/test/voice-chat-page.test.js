@@ -12,9 +12,6 @@ function loadVoiceChatPage({
   wechatPrivacyExports = {},
   voiceChatAutoListenExports = {},
 } = {}) {
-  mockModule("../services/audio-playback.ts", {
-    configureAudiblePlayback: () => {},
-  });
   mockModule("../services/memoir-streaming-asr.ts", {
     classifyVoiceClientConnectionError: () => ({ kind: "unknown" }),
     MemoirStreamingAsrClient: streamingExports.MemoirStreamingAsrClient || class {
@@ -55,6 +52,7 @@ function loadVoiceChatPage({
     }),
     ...voiceApiExports,
   });
+  clearModule("../services/audio-playback.ts");
   mockModule("../services/tts-text-progress.ts", {
     splitTextByAudioPlaybackProgress: () => ({
       spokenText: "",
@@ -147,6 +145,7 @@ function installAutoEndingAudioContext() {
         onEnded(callback) {
           endedCallback = callback;
         },
+        onStop() {},
         onError() {},
         play() {
           setImmediate(() => endedCallback());

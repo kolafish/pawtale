@@ -51,6 +51,7 @@ import {
   type VoiceChatConnectionStatus,
 } from "../../services/memoir-streaming-asr";
 import { readBookTTSSettings } from "../../services/tts-settings";
+import { AudioPlaybackController } from "../../services/audio-playback";
 import { writeTranscriptNavigationTarget } from "../../services/transcript-navigation";
 import {
   readVoiceAuthorizationConsent,
@@ -448,13 +449,13 @@ Page<BookData, {
   patchChapter(chapterId: string, patch: Partial<BookChapterView>): void;
   patchDraft(chapterId: string, draft: MemoirBookChapterDraft): void;
   clearBookOutput(): void;
-  audio: WechatMiniprogram.InnerAudioContext | null;
+  audioPlayback: AudioPlaybackController;
   playToken: number;
   ttsProgressTimer: number | null;
   ttsProgressStartedAtMs: number;
   bookVoiceAutoListenTimer: number | null;
 }>({
-  audio: null,
+  audioPlayback: new AudioPlaybackController(),
   playToken: 0,
   ttsProgressTimer: null,
   ttsProgressStartedAtMs: 0,
@@ -1277,8 +1278,8 @@ Page<BookData, {
       return;
     }
     this.stopPlayback();
-    this.playToken += 1;
-    const token = this.playToken;
+    const token = this.audioPlayback.nextToken();
+    this.playToken = token;
     this.setData({ ttsBusyTarget: target, error: "" });
     this.patchChapter(chapterId, { draftError: "" });
     try {
@@ -1330,8 +1331,8 @@ Page<BookData, {
       return;
     }
     this.stopPlayback();
-    this.playToken += 1;
-    const token = this.playToken;
+    const token = this.audioPlayback.nextToken();
+    this.playToken = token;
     this.setData({ ttsBusyTarget: target, error: "" });
     try {
       const response = await this.requestBookAudio(target);
@@ -1374,8 +1375,8 @@ Page<BookData, {
       return;
     }
     this.stopPlayback();
-    this.playToken += 1;
-    const token = this.playToken;
+    const token = this.audioPlayback.nextToken();
+    this.playToken = token;
     const activeText = bookOutlineNarrationText(this.data.plan.title, this.data.chapters);
     this.setData({
       ttsBusyTarget: target,
@@ -2016,8 +2017,8 @@ Page<BookData, {
     }
     const target = "book-voice-assistant";
     this.stopPlayback();
-    this.playToken += 1;
-    const token = this.playToken;
+    const token = this.audioPlayback.nextToken();
+    this.playToken = token;
     const lineId = `book-ai-${Date.now()}-${this.data.bookVoiceTranscriptLines.length}`;
     this.appendBookVoiceTranscriptLine({
       id: lineId,

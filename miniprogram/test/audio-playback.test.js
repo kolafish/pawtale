@@ -35,6 +35,12 @@ function createManualAudioContext() {
     stopCalls: 0,
     destroyCalls: 0,
     playCalls: 0,
+    onPlay(callback) {
+      callbacks.play = callback;
+    },
+    onTimeUpdate(callback) {
+      callbacks.timeUpdate = callback;
+    },
     onEnded(callback) {
       callbacks.ended = callback;
     },
@@ -88,6 +94,38 @@ test("AudioPlaybackController plays and releases an audio file", async () => {
   await promise;
 
   assert.equal(created.audio.destroyCalls, 1);
+});
+
+test("AudioPlaybackController exposes current audio while playback callbacks run", async () => {
+  delete require.cache[require.resolve("../services/audio-playback.ts")];
+  const { AudioPlaybackController } = require("../services/audio-playback.ts");
+  const created = createManualAudioContext();
+  const seen = [];
+  const controller = new AudioPlaybackController({
+    downloadAudioFile: async (audioFileId) => `/tmp/${audioFileId}.mp3`,
+    createAudioContext: () => created.audio,
+    configureAudio: () => {},
+  });
+
+  const token = controller.nextToken();
+  const promise = controller.playFile("audio-1", token, {
+    onPlay: (audio) => seen.push(["play", audio === controller.currentAudio()]),
+    onTimeUpdate: (audio) => seen.push(["time", audio === controller.currentAudio()]),
+    onEnded: (audio) => seen.push(["ended", audio === controller.currentAudio()]),
+  });
+  await Promise.resolve();
+
+  created.callbacks.play();
+  created.callbacks.timeUpdate();
+  created.callbacks.ended();
+  await promise;
+
+  assert.deepEqual(seen, [
+    ["play", true],
+    ["time", true],
+    ["ended", true],
+  ]);
+  assert.equal(controller.currentAudio(), null);
 });
 
 test("AudioPlaybackController stop cancels the active token and resolves playback", async () => {
