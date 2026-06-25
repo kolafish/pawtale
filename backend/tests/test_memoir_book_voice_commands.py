@@ -395,17 +395,35 @@ async def test_mobile_memoir_book_voice_command_reads_and_assigns_uncovered_sour
     response = await client.post(
         f"/api/mobile/memoir/projects/{project_id}/book-voice-command/parse",
         json={
-            "text": "你先念一条，然后我告诉你归到哪个章节。",
+            "text": "你给我念一下第一条没收入的记录吧。",
             "book_context": book_context,
         },
     )
 
     assert response.status_code == 200
     data = response.json()
-    assert data["intent"] == "answer_book_question"
+    assert data["intent"] == "read_uncovered_source"
+    assert data["intent_label"] == "朗读记录"
     assert data["requires_confirmation"] is False
     assert "待收录第 1 条" in data["reply_text"]
     assert "我第一次进厂" in data["reply_text"]
+
+    response = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-voice-command/parse",
+        json={
+            "text": "再读下一条。",
+            "book_context": book_context,
+            "conversation_context": [
+                {"role": "assistant", "text": data["reply_text"]},
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    next_data = response.json()
+    assert next_data["intent"] == "read_uncovered_source"
+    assert "待收录第 2 条" in next_data["reply_text"]
+    assert "后来有一次加班" in next_data["reply_text"]
 
     response = await client.post(
         f"/api/mobile/memoir/projects/{project_id}/book-voice-command/parse",

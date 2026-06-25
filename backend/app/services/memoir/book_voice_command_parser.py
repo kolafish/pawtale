@@ -54,7 +54,7 @@ BOOK_VOICE_COMMAND_USER_PROMPT_TEMPLATE = """请解析下面这句成书语音�
 
 JSON 格式：
 {{
-  "intent": "read_outline | read_chapter | rename_chapter | merge_chapters | move_chapter | assign_source | split_chapter | rewrite_chapter | polish_chapter | confirm_chapter | review_chapter_title | review_chapter_length | review_chapter_structure | answer_book_question | capability_help | clarify_previous | unknown",
+  "intent": "read_outline | read_chapter | read_uncovered_source | rename_chapter | merge_chapters | move_chapter | assign_source | split_chapter | rewrite_chapter | polish_chapter | confirm_chapter | review_chapter_title | review_chapter_length | review_chapter_structure | answer_book_question | capability_help | clarify_previous | unknown",
   "response_kind": "action_preview | consultation | answer | clarification",
   "chapter_ref": "用户提到的章节编号或标题；没有则 null",
   "target_chapter_ref": "合并目标章节编号或标题；没有则 null",
@@ -74,7 +74,7 @@ JSON 格式：
 - “把某章上移/下移/往前/往后”用 move_chapter，并填 direction。
 - “把第二章和第三章顺序换一下/交换第二章和第三章”这类相邻章节交换也用 move_chapter：把前一章下移，或把后一章上移。
 - “把第 1 条待收录记录归到第二章/把刚才这条放到职场那章”用 assign_source，source_ref 填记录编号或“刚才这条”，target_chapter_ref 填目标章节。
-- “先念一条待收录记录/下一条未收入记录”用 answer_book_question，reply_text 要读出一条待收录记录摘录，并提示用户说“把这条归到哪一章”。
+- “先念一条待收录记录/下一条未收入记录/念一下第一条没收入的记录”用 read_uncovered_source，source_ref 填“第几条”或“下一条”，reply_text 要读出对应待收录记录摘录，并提示用户说“把这条归到哪一章”。
 - “第一章是不是需要换个名字/标题好不好/题目是否合适”用 review_chapter_title，不要生成 rename_chapter。
 - “第一章是不是太短/太长/字数够不够/篇幅是否合适”用 review_chapter_length，不要生成 rewrite_chapter。
 - “这一章结构是否合理/要不要拆分或合并/顺序是否合适”用 review_chapter_structure，除非用户明确要求执行。
@@ -83,13 +83,14 @@ JSON 格式：
 - “我可以修改什么/能改哪些/可以怎么改”等能力问题用 capability_help，reply_text 要结合当前目录说明可做的修改。
 - “那个/这个/现在呢/继续”等短追问要结合最近语音对话；能判断指代就继续回答，不能判断用 clarify_previous 并问一个具体澄清问题。
 - 建议类 intent 不产生 operations，不需要确认；reply_text 要给判断理由和下一步建议，控制在 120 字以内。
-- answer_book_question、capability_help、clarify_previous 不产生 operations，不需要确认。
+- read_uncovered_source、answer_book_question、capability_help、clarify_previous 不产生 operations，不需要确认。
 - 如果缺少必要章节或无法判断，intent 用 unknown。
 """
 
 SUPPORTED_INTENTS = {
     "read_outline",
     "read_chapter",
+    "read_uncovered_source",
     "rename_chapter",
     "merge_chapters",
     "move_chapter",
@@ -110,6 +111,7 @@ SUPPORTED_INTENTS = {
 INTENT_LABELS = {
     "read_outline": "朗读目录",
     "read_chapter": "朗读章节",
+    "read_uncovered_source": "朗读记录",
     "rename_chapter": "修改章名",
     "merge_chapters": "合并章节",
     "move_chapter": "移动章节",
@@ -129,7 +131,7 @@ INTENT_LABELS = {
 
 READ_INTENTS = {"read_outline", "read_chapter"}
 CONSULTATION_INTENTS = {"review_chapter_title", "review_chapter_length", "review_chapter_structure"}
-ANSWER_INTENTS = {"answer_book_question", "capability_help"}
+ANSWER_INTENTS = {"read_uncovered_source", "answer_book_question", "capability_help"}
 CLARIFICATION_INTENTS = {"clarify_previous", "unknown"}
 NON_CONFIRMATION_INTENTS = READ_INTENTS | CONSULTATION_INTENTS | ANSWER_INTENTS | CLARIFICATION_INTENTS
 EXECUTABLE_MUTATION_INTENTS = {"rename_chapter", "move_chapter", "assign_source"}
@@ -228,7 +230,22 @@ SOURCE_COVERAGE_KEYWORDS = (
     "还没归类",
 )
 SOURCE_COVERAGE_OBJECT_KEYWORDS = ("记录", "素材", "讲述", "语音", "转写")
-SOURCE_READ_KEYWORDS = ("念一条", "读一条", "先念", "先读", "下一条", "下一个", "一条一条", "逐条")
+SOURCE_READ_KEYWORDS = (
+    "念一条",
+    "读一条",
+    "念一下",
+    "读一下",
+    "念下",
+    "读下",
+    "给我念",
+    "给我读",
+    "先念",
+    "先读",
+    "下一条",
+    "下一个",
+    "一条一条",
+    "逐条",
+)
 SOURCE_ASSIGN_KEYWORDS = ("归到", "归入", "收入", "收录到", "放到", "分到", "归类到")
 CURRENT_SOURCE_REFS = ("这条", "这一条", "刚才这条", "刚念的", "刚读的", "它", "这个")
 CHAPTER_SWAP_KEYWORDS = (
@@ -274,7 +291,7 @@ async def parse_payload_with_ai(
         book_context=req.book_context,
     )
     normalized_text = _compact(_normalize_chapter_word_text(req.text))
-    if fallback.intent == "answer_book_question" and _is_source_read_request(normalized_text):
+    if fallback.intent == "read_uncovered_source" and _is_source_read_request(normalized_text):
         return fallback
     if _is_resolved_local_action(fallback, plan, req.current_chapter_id, req.book_context):
         return fallback
@@ -386,18 +403,20 @@ def _fallback_payload(
     if any(keyword in normalized for keyword in ("读目录", "念目录", "听目录", "朗读目录")):
         return ParsedCommandPayload(intent="read_outline", summary="朗读当前章节目录")
 
+    if _is_source_read_request(normalized):
+        source_ref = _source_read_ref(normalized)
+        return ParsedCommandPayload(
+            intent="read_uncovered_source",
+            source_ref=source_ref,
+            summary="读出一条待收录讲述记录。",
+            reply_text=_source_read_reply_text(book_context, conversation_context, source_ref),
+        )
+
     if _is_source_coverage_question(normalized):
         return ParsedCommandPayload(
             intent="answer_book_question",
             summary="回答当前素材收入章节状态。",
             reply_text=_source_coverage_reply_text(plan, book_context),
-        )
-
-    if _is_source_read_request(normalized):
-        return ParsedCommandPayload(
-            intent="answer_book_question",
-            summary="读出一条待收录讲述记录。",
-            reply_text=_source_read_reply_text(book_context, conversation_context),
         )
 
     if _is_chapter_count_question(normalized) or any(keyword in normalized for keyword in OUTLINE_STATUS_KEYWORDS):
@@ -580,6 +599,15 @@ def _is_source_read_request(normalized: str) -> bool:
             or "条" in normalized
         )
     )
+
+
+def _source_read_ref(normalized: str) -> str | None:
+    if "下一条" in normalized or "下一个" in normalized:
+        return "下一条"
+    match = re.search(r"第?\s*([0-9]{1,3}|[一二两三四五六七八九十])\s*条", normalized)
+    if match:
+        return f"待收录第{match.group(1)}条"
+    return None
 
 
 def _fallback_assign_source_payload(
@@ -772,6 +800,7 @@ def _source_coverage_reply_text(plan: MemoirBookPlan, book_context: MemoirBookVo
 def _source_read_reply_text(
     book_context: MemoirBookVoiceCommandBookContext | None,
     conversation_context: list[Any] | None,
+    source_ref: str | None = None,
 ) -> str:
     sources = list((book_context.uncovered_sources if book_context else []) or [])
     if not sources:
@@ -780,7 +809,12 @@ def _source_read_reply_text(
     latest_ref = _latest_source_ref_from_context(conversation_context)
     if latest_ref:
         last_position = _source_ref_number(latest_ref) or 0
-    next_position = min(last_position + 1, len(sources)) if last_position else 1
+    ref = _compact(source_ref or "")
+    if ref in {"下一条", "下一个"}:
+        next_position = min(last_position + 1, len(sources)) if last_position else 1
+    else:
+        explicit_position = _source_ref_number(ref)
+        next_position = explicit_position if explicit_position and 1 <= explicit_position <= len(sources) else 1
     source = sources[next_position - 1]
     text = (_clean_reply_text(source.text) or "这条暂时没有可读文本")[:140]
     return (
@@ -883,6 +917,8 @@ def response_from_payload(
             operations = []
         else:
             intent = "unknown"
+    elif intent == "read_uncovered_source":
+        operations = []
     elif intent in ANSWER_INTENTS or intent == "clarify_previous":
         operations = []
 
@@ -892,6 +928,9 @@ def response_from_payload(
     elif intent == "answer_book_question":
         summary = payload.summary or "回答当前成书章节状态。"
         reply_text = _book_question_reply_text(display_text, plan, payload.reply_text, book_context)
+    elif intent == "read_uncovered_source":
+        summary = payload.summary or "读出一条待收录讲述记录。"
+        reply_text = payload.reply_text or _source_read_reply_text(book_context, None, payload.source_ref)
     elif intent == "capability_help":
         summary = payload.summary or "说明语音编辑可以做的修改。"
         reply_text = _capability_reply_text(plan, payload.reply_text)
