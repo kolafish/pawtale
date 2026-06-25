@@ -13,18 +13,12 @@ import type {
   VoiceChatTranscriptLine,
 } from "../../domain/voice-chat";
 import {
-  clearSourceChangeMetadata,
-  removedSourceCount,
   sourceRefKey,
-  sourceSupplementCount,
   uniqueSourceRefs,
 } from "../../services/memoir-book-sources";
 import { formatBeijingDateTimeShort } from "../../services/time";
 
 export {
-  clearSourceChangeMetadata,
-  removedSourceCount,
-  sourceSupplementCount,
   uniqueSourceRefs,
 } from "../../services/memoir-book-sources";
 
@@ -208,6 +202,11 @@ export function draftActionText(draft: MemoirBookChapterDraft | null, pendingCou
 export function draftVersionText(draft: MemoirBookChapterDraft | null): string {
   const version = draft?.latest_version?.version;
   return version ? `第 ${version} 版` : "暂无正文";
+}
+
+export function responseCount(value: number | null | undefined): number {
+  const count = Number(value);
+  return Number.isFinite(count) && count > 0 ? Math.floor(count) : 0;
 }
 
 export function latestBookContent(output: MemoirBookOutput | null): string {
@@ -557,8 +556,8 @@ export function buildChapterViews(
     .map((chapter) => {
       const draft = draftsByChapterId[chapter.id] || null;
       const content = latestDraftContent(draft);
-      const assignedPendingCount = sourceSupplementCount(chapter.metadata_json, draft);
-      const assignedRemovedCount = removedSourceCount(chapter.metadata_json, draft);
+      const assignedPendingCount = responseCount(chapter.pending_source_count);
+      const assignedRemovedCount = responseCount(chapter.removed_source_count);
       return {
         ...chapter,
         editingTitle: chapter.title,

@@ -404,6 +404,8 @@ async def test_mobile_memoir_book_source_assignment_appends_source_and_marks_dra
     refs = data["chapters"][0]["source_refs"]
     assert [ref["utterance_id"] for ref in refs] == [created["utterance_id"], later["utterance_id"]]
     assert later["utterance_id"] in data["chapters"][0]["metadata_json"]["pending_source_utterance_ids"]
+    assert data["chapters"][0]["pending_source_count"] == 1
+    assert data["chapters"][0]["removed_source_count"] == 0
 
     refreshed_draft = await test_db.scalar(
         select(MemoirBookChapterDraft).where(MemoirBookChapterDraft.id == draft.id)
@@ -533,9 +535,13 @@ async def test_mobile_memoir_book_source_move_updates_only_source_and_target_cha
     assert chapters_by_id[source_chapter_id]["metadata_json"]["removed_source_utterance_ids"] == [
         second["utterance_id"]
     ]
+    assert chapters_by_id[source_chapter_id]["pending_source_count"] == 0
+    assert chapters_by_id[source_chapter_id]["removed_source_count"] == 1
     assert chapters_by_id[target_chapter_id]["metadata_json"]["pending_source_utterance_ids"] == [
         second["utterance_id"]
     ]
+    assert chapters_by_id[target_chapter_id]["pending_source_count"] == 1
+    assert chapters_by_id[target_chapter_id]["removed_source_count"] == 0
 
     refreshed_source_draft = await test_db.scalar(
         select(MemoirBookChapterDraft).where(MemoirBookChapterDraft.id == source_draft.id)
@@ -672,6 +678,8 @@ async def test_mobile_memoir_book_plan_structure_command_merges_chapters_and_mar
         second["utterance_id"],
     ]
     assert data["chapters"][0]["metadata_json"]["pending_source_utterance_ids"] == [second["utterance_id"]]
+    assert data["chapters"][0]["pending_source_count"] == 1
+    assert data["chapters"][0]["removed_source_count"] == 0
     refreshed_target_draft = await test_db.scalar(
         select(MemoirBookChapterDraft).where(MemoirBookChapterDraft.id == target_draft.id)
     )

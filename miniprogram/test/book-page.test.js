@@ -40,6 +40,8 @@ function samplePlan(status = "draft") {
         sort_order: 0,
         source_refs: [sampleRef("utterance-1", "外婆家的院子")],
         metadata_json: {},
+        pending_source_count: 0,
+        removed_source_count: 0,
         created_at: "2026-06-17T00:00:00.000Z",
         updated_at: "2026-06-17T00:00:00.000Z",
       },
@@ -51,6 +53,8 @@ function samplePlan(status = "draft") {
         sort_order: 1,
         source_refs: [sampleRef("utterance-2", "第一次离家")],
         metadata_json: {},
+        pending_source_count: 0,
+        removed_source_count: 0,
         created_at: "2026-06-17T00:00:00.000Z",
         updated_at: "2026-06-17T00:00:00.000Z",
       },
@@ -70,6 +74,8 @@ function sampleDraft(
     chapter_id: "chapter-1",
     status,
     metadata_json: metadata,
+    pending_source_count: 0,
+    removed_source_count: 0,
     latest_version: {
       id: `draft-version-${version}`,
       draft_id: "draft-1",
@@ -871,13 +877,10 @@ test("book page stores uncovered source target before opening transcripts tab", 
 test("book page marks assigned sources as supplemental chapter work", () => {
   const { mod } = loadBookPage();
   const plan = samplePlan("confirmed");
-  plan.chapters[0].metadata_json = {
-    pending_source_utterance_ids: ["utterance-new-1"],
-    source_assignment_updated_at: "2026-06-17T00:00:00+00:00",
-  };
+  plan.chapters[0].pending_source_count = 1;
 
   const chapters = mod.buildChapterViews(plan, {
-    "chapter-1": sampleDraft(1, "draft", "第一版正文", { status_reason: "new_sources_assigned" }),
+    "chapter-1": sampleDraft(1, "draft", "第一版正文"),
   });
 
   assert.equal(chapters[0].pendingSourceCount, 1);
@@ -890,13 +893,10 @@ test("book page marks deleted chapter sources for review", () => {
   const { mod } = loadBookPage();
   const plan = samplePlan("confirmed");
   plan.chapters[0].source_refs = [];
-  plan.chapters[0].metadata_json = {
-    removed_source_utterance_ids: ["utterance-1"],
-    source_refs_removed_at: "2026-06-17T00:00:00+00:00",
-  };
+  plan.chapters[0].removed_source_count = 1;
 
   const chapters = mod.buildChapterViews(plan, {
-    "chapter-1": sampleDraft(1, "draft", "第一版正文", { status_reason: "sources_deleted" }),
+    "chapter-1": sampleDraft(1, "draft", "第一版正文"),
   });
 
   assert.equal(chapters[0].sourceCount, 0);
@@ -2266,14 +2266,11 @@ test("book page supplements pending sources without force regeneration", async (
     },
   });
   const plan = samplePlan("confirmed");
-  plan.chapters[0].metadata_json = {
-    pending_source_utterance_ids: ["utterance-new-1"],
-    source_assignment_updated_at: "2026-06-17T00:00:00+00:00",
-  };
+  plan.chapters[0].pending_source_count = 1;
   const context = pageContext(page, {
     projectId: "project/1",
     chapters: mod.buildChapterViews(plan, {
-      "chapter-1": sampleDraft(1, "draft", "第一版正文", { status_reason: "new_sources_assigned" }),
+      "chapter-1": sampleDraft(1, "draft", "第一版正文"),
     }),
   });
 
@@ -2288,7 +2285,7 @@ test("book page supplements pending sources without force regeneration", async (
   });
   assert.equal(context.data.chapters[0].pendingSourceCount, 0);
   assert.equal(context.data.chapters[0].draftActionText, "重新生成");
-  assert.deepEqual(context.data.chapters[0].metadata_json, {});
+  assert.equal(context.data.chapters[0].pending_source_count, 0);
   delete global.wx;
 });
 
@@ -2304,16 +2301,12 @@ test("book page force regenerates when source removals also need cleanup", async
     },
   });
   const plan = samplePlan("confirmed");
-  plan.chapters[0].metadata_json = {
-    pending_source_utterance_ids: ["utterance-new-1"],
-    removed_source_utterance_ids: ["utterance-removed-1"],
-    source_assignment_updated_at: "2026-06-17T00:00:00+00:00",
-    source_refs_removed_at: "2026-06-17T00:00:00+00:00",
-  };
+  plan.chapters[0].pending_source_count = 1;
+  plan.chapters[0].removed_source_count = 1;
   const context = pageContext(page, {
     projectId: "project/1",
     chapters: mod.buildChapterViews(plan, {
-      "chapter-1": sampleDraft(1, "draft", "第一版正文", { status_reason: "sources_changed" }),
+      "chapter-1": sampleDraft(1, "draft", "第一版正文"),
     }),
   });
 

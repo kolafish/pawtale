@@ -273,6 +273,8 @@ class MemoirBookPlanChapterResponse(BaseModel):
     sort_order: int
     source_refs: list[MemoirBookChapterSourceRef] = Field(default_factory=list)
     metadata_json: dict[str, object] = Field(default_factory=dict)
+    pending_source_count: int = 0
+    removed_source_count: int = 0
     created_at: datetime
     updated_at: datetime
 
@@ -415,6 +417,8 @@ class MemoirBookChapterDraftResponse(BaseModel):
     chapter_id: str
     status: MemoirBookChapterDraftStatus
     metadata_json: dict[str, object] = Field(default_factory=dict)
+    pending_source_count: int = 0
+    removed_source_count: int = 0
     latest_version: MemoirBookChapterDraftVersionResponse | None = None
     versions: list[MemoirBookChapterDraftVersionResponse] = Field(default_factory=list)
     created_at: datetime
