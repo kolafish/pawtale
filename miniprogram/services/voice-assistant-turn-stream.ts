@@ -2,7 +2,7 @@ import { readSelectedAIModel } from "./ai-model-settings";
 import { assistantTurnStreamUrl, backendSessionCookieHeader } from "./memoir-voice-api";
 import { readChatTTSSettings } from "./tts-settings";
 
-const CONNECT_TIMEOUT_MS = 10000;
+const SOCKET_CONNECT_TIMEOUT_MS = 10000;
 const PCM_SAMPLE_RATE = 16000;
 const PCM_CHANNELS = 1;
 const PCM_BITS_PER_SAMPLE = 16;
@@ -135,7 +135,7 @@ export class VoiceAssistantTurnStreamClient {
     this.closed = false;
     this.startSent = false;
     this.messageChain = Promise.resolve();
-    const connectTimeoutMs = options.connectTimeoutMs ?? CONNECT_TIMEOUT_MS;
+    const connectTimeoutMs = options.connectTimeoutMs ?? SOCKET_CONNECT_TIMEOUT_MS;
     const cookie = await backendSessionCookieHeader();
     const url = assistantTurnStreamUrl(this.voiceSessionId);
     const startPayload = this.startPayload(options);
@@ -143,15 +143,25 @@ export class VoiceAssistantTurnStreamClient {
       (resolve, reject) => {
         this.resolveStart = resolve;
         this.rejectStart = reject;
-        const timer = setTimeout(() => {
+        let connectTimer: ReturnType<typeof setTimeout> | null = setTimeout(() => {
+          connectTimer = null;
+          if (this.closed || this.socketOpen) {
+            return;
+          }
           this.closed = true;
           this.closeSocket("assistant turn stream timeout");
           reject(new Error("AI 回应连接超时"));
         }, connectTimeoutMs);
+        const clearConnectTimer = () => {
+          if (connectTimer !== null) {
+            clearTimeout(connectTimer);
+            connectTimer = null;
+          }
+        };
         const settle = (
           callback: () => void,
         ) => {
-          clearTimeout(timer);
+          clearConnectTimer();
           callback();
         };
         const socketTask = wx.connectSocket({
@@ -167,6 +177,7 @@ export class VoiceAssistantTurnStreamClient {
             socketTask.close({ code: 1000, reason: "assistant turn stream closed" });
             return;
           }
+          clearConnectTimer();
           this.socketOpen = true;
         });
         socketTask.onMessage((message) => {
@@ -212,10 +223,24 @@ export class VoiceAssistantTurnStreamClient {
       return;
     }
     this.sendJson({ type: "turn.cancel" });
+    this.resolveStart?.({
+      type: "turn.cancelled",
+      voice_session_id: this.voiceSessionId,
+      state: "cancelled",
+      error: "AI 回应已取消",
+    });
     this.closeSocket("assistant turn cancelled");
   }
 
   close(): void {
+    if (!this.closed) {
+      this.resolveStart?.({
+        type: "turn.cancelled",
+        voice_session_id: this.voiceSessionId,
+        state: "cancelled",
+        error: "AI 回应已取消",
+      });
+    }
     this.closeSocket("assistant turn closed");
   }
 
