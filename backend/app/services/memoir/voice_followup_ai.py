@@ -3,7 +3,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 import re
 
-from app.domain.memoir.types import MemoirAutomationEventStatus, MemoirChatMessageRole, MemoirGuidanceMode
+from app.domain.memoir.types import (
+    MemoirAutomationEventStatus,
+    MemoirAutomationEventType,
+    MemoirChatMessageRole,
+    MemoirGuidanceMode,
+)
 from app.models.memoir import MemoirChatMessage, MemoirVoiceSession
 from app.schemas.memoir_voice import MemoirAutomationEventResponse, MemoirProjectProgressSnapshotResponse
 from app.services.json_utils import extract_json_payload
@@ -19,7 +24,7 @@ FOLLOW_UP_MAX_TOKENS = 260
 GUIDED_FOLLOW_UP_MAX_TOKENS = 320
 FREE_OPENING_MAX_TOKENS = 360
 GUIDED_OPENING_MAX_TOKENS = 420
-PROGRESS_PROMPT_VERSION = "memoir_voice_progress_context_v1"
+PROGRESS_PROMPT_VERSION = "memoir_voice_progress_context_v2"
 PROGRESS_UTTERANCE_MILESTONES = {1, 3, 5, 10, 15, 20, 30, 50, 75, 100}
 
 
@@ -144,16 +149,38 @@ def build_progress_prompt_context(snapshot: MemoirProjectProgressSnapshotRespons
 
     event_ids = selected_update.get("event_ids")
     automation_event_ids = [str(item) for item in event_ids] if isinstance(event_ids, list) else []
+    prompt_text = _progress_prompt_text(selected_update)
     return ProgressPromptContext(
-        prompt_text=(
-            "项目进度事实（只允许引用以下这一条事实，不要编造数字、章节名或自动整理结果）：\n"
-            f"- 本轮可选进度鼓励：{selected_update['text']}\n"
-            "使用规则：可以不说进度；如果要说，只能一句话带过上面这一条事实，"
-            "不要堆数字，不要让进度提醒替代追问。"
-        ),
+        prompt_text=prompt_text,
         progress_update=selected_update,
         automation_event_ids=automation_event_ids,
     )
+
+
+def _progress_prompt_text(selected_update: dict[str, object]) -> str:
+    lines = [
+        "项目进度事实（只允许引用以下事实，不要编造数字、章节名或自动整理结果）：",
+        f"- 本轮可选进度鼓励：{selected_update['text']}",
+    ]
+    if selected_update.get("kind") == "book_quality_audit":
+        hint = selected_update.get("audit_hint")
+        next_actions = selected_update.get("next_actions")
+        if isinstance(hint, str) and hint.strip():
+            lines.append(f"- 可选访谈引导方向：{hint.strip()[:120]}")
+        if isinstance(next_actions, list):
+            actions = [str(item).strip() for item in next_actions if str(item).strip()]
+            if actions:
+                lines.append(f"- 审计建议下一步：{'；'.join(actions[:2])}")
+        lines.append(
+            "使用规则：审计建议只是方向，不是硬性脚本；优先顺着叙述者最新内容，"
+            "只有自然相关时才带一句进度或转向。"
+        )
+    else:
+        lines.append(
+            "使用规则：可以不说进度；如果要说，只能一句话带过上面这一条事实，"
+            "不要堆数字，不要让进度提醒替代追问。"
+        )
+    return "\n".join(lines)
 
 
 def _automation_event_progress_update(
@@ -169,17 +196,55 @@ def _automation_event_progress_update(
             MemoirAutomationEventStatus.NEEDS_REVIEW.value,
         }:
             continue
+        event_type = event.event_type.value if hasattr(event.event_type, "value") else str(event.event_type)
+        if event_type == MemoirAutomationEventType.AUDIT_COMPLETED.value:
+            return _audit_event_progress_update(event, summary=summary, status=status)
         return {
             "kind": "automation_event",
             "source": "automation_event",
             "text": summary[:120],
             "event_ids": [event.id],
-            "event_type": event.event_type.value if hasattr(event.event_type, "value") else str(event.event_type),
+            "event_type": event_type,
             "event_status": status,
             "chapter_id": event.chapter_id,
             "utterance_ids": list(event.utterance_ids),
         }
     return None
+
+
+def _audit_event_progress_update(
+    event: MemoirAutomationEventResponse,
+    *,
+    summary: str,
+    status: str,
+) -> dict[str, object]:
+    metadata = event.metadata_json if isinstance(event.metadata_json, dict) else {}
+    next_actions = metadata.get("next_actions")
+    chapter_items = metadata.get("chapter_items")
+    chapter = _first_attention_chapter(chapter_items if isinstance(chapter_items, list) else [])
+    return {
+        "kind": "book_quality_audit",
+        "source": "automation_event",
+        "text": summary[:120],
+        "event_ids": [event.id],
+        "event_type": MemoirAutomationEventType.AUDIT_COMPLETED.value,
+        "event_status": status,
+        "audit_overall_status": metadata.get("overall_status", ""),
+        "next_actions": next_actions if isinstance(next_actions, list) else [],
+        "audit_hint": chapter.get("interview_hint", "") if chapter else "",
+        "audit_chapter_id": chapter.get("chapter_id", "") if chapter else "",
+        "audit_chapter_title": chapter.get("title", "") if chapter else "",
+        "audit_chapter_status": chapter.get("status", "") if chapter else "",
+        "audit_attention": chapter.get("attention", "") if chapter else "",
+    }
+
+
+def _first_attention_chapter(chapter_items: list[object]) -> dict[str, object] | None:
+    chapters = [item for item in chapter_items if isinstance(item, dict)]
+    high = next((item for item in chapters if item.get("attention") == "high"), None)
+    if high:
+        return high
+    return next((item for item in chapters if item.get("attention") == "medium"), None)
 
 
 def _snapshot_milestone_progress_update(
