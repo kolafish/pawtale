@@ -131,6 +131,40 @@ test("voice activity detector can share logic with different pre-voice silence p
   assert.equal(streamingVad.update(silent).silentElapsedMs, 100);
 });
 
+test("streaming ASR releases recorder ownership after local recording stops", () => {
+  const recorder = recorderManagerHarness();
+  global.wx = {
+    getRecorderManager() {
+      return recorder;
+    },
+  };
+  delete require.cache[require.resolve("../services/memoir-streaming-asr.ts")];
+  const { MemoirStreamingAsrClient } = require("../services/memoir-streaming-asr.ts");
+  const client = new MemoirStreamingAsrClient({
+    voiceSessionId: "voice-1",
+    guidanceMode: "guided_interview",
+    currentGuidanceModule: "person",
+    callbacks: {
+      onStatus() {},
+      onCaptureStats() {},
+      onEvent() {},
+      onPartial() {},
+      onFinal() {},
+      onError() {},
+    },
+  });
+  client.socketOpen = true;
+
+  assert.equal(client.startRecording(), true);
+  recorder.callbacks.start();
+  client.stopRecording();
+  recorder.callbacks.stop();
+  recorder.callbacks.start();
+
+  assert.equal(recorder.stops, 1);
+  delete global.wx;
+});
+
 test("normalizes invalid gateway payloads into session errors", () => {
   const {
     classifyVoiceClientConnectionError,

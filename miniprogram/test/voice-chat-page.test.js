@@ -13,6 +13,7 @@ function loadVoiceChatPage({
   voiceChatAutoListenExports = {},
   assistantTurnStreamExports = {},
   streamingSpeechPlaybackExports = {},
+  voiceBargeInMonitorExports = {},
   ttsTextProgressExports = {},
 } = {}) {
   mockModule("../services/memoir-streaming-asr.ts", {
@@ -153,6 +154,18 @@ function loadVoiceChatPage({
       async destroy() {}
     },
     ...streamingSpeechPlaybackExports,
+  });
+  mockModule("../services/voice-barge-in-monitor.ts", {
+    VoiceBargeInMonitor: voiceBargeInMonitorExports.VoiceBargeInMonitor || class {
+      start() {
+        return true;
+      }
+      stop() {}
+      isRunning() {
+        return false;
+      }
+    },
+    ...voiceBargeInMonitorExports,
   });
   clearModule("../services/voice-assistant-turn-runtime.ts");
   clearModule("../services/voice-assistant-turn-queue.ts");
@@ -1113,6 +1126,191 @@ test("voice chat mic interrupts assistant turn before async recording checks fin
   assert.equal(started, true);
   assert.deepEqual(startOptions, [{ noVoiceActivityTimeoutMs: 0 }]);
   assert.equal(context.data.recording, true);
+});
+
+test("voice chat automatically interrupts assistant playback when local voice monitor fires", async () => {
+  let monitorOptions = null;
+  const monitor = {
+    running: false,
+    start(options) {
+      monitorOptions = options;
+      this.running = true;
+      return true;
+    },
+    stop() {
+      this.running = false;
+    },
+    isRunning() {
+      return this.running;
+    },
+  };
+  const cancelReasons = [];
+  const startOptions = [];
+  const page = loadVoiceChatPage({
+    voiceAuthorizationExports: {
+      readVoiceAuthorizationConsent: () => true,
+    },
+    voiceBargeInMonitorExports: {
+      VoiceBargeInMonitor: class {
+        constructor() {
+          return monitor;
+        }
+      },
+    },
+  });
+  const context = {
+    ...page,
+    data: {
+      ...page.data,
+      voiceSessionId: "voice-1",
+      voiceAuthorizationAgreed: true,
+      status: "ready",
+      guidanceMode: "guided_interview",
+      followUpLoading: true,
+      followUpTTSLoading: false,
+      followUpTTSPlaying: false,
+      followUpTTSStateText: "老余正在说",
+      followUpError: "",
+      assistantPromptText: "那咱们接着聊朋友。",
+      transcriptLines: [
+        { id: "user-line-1", role: "user", text: "我想聊聊朋友。" },
+        { id: "assistant-stream-1", role: "assistant", text: "那咱们接着聊朋友。" },
+      ],
+    },
+    assistantStreamLineId: "assistant-stream-1",
+    assistantTurnRuntime: {
+      cancel(reason) {
+        cancelReasons.push(reason);
+      },
+      stopPlayback() {},
+      stats() {
+        return null;
+      },
+    },
+    audioPlayback: {
+      currentToken: () => 1,
+      currentAudio: () => null,
+      isCurrentToken: () => true,
+      nextToken: () => 1,
+      stop() {},
+    },
+    voiceStreaming: {
+      hasClient: () => true,
+      startRecording(options) {
+        startOptions.push(options);
+        return true;
+      },
+      stopRecording() {},
+      close() {},
+    },
+    setData(patch) {
+      this.data = { ...this.data, ...patch };
+    },
+  };
+
+  page.prepareStreamingAudioPlayback.call(context, 0);
+  assert.equal(monitor.running, true);
+  assert.ok(monitorOptions);
+
+  monitorOptions.onBargeIn();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(monitor.running, false);
+  assert.deepEqual(cancelReasons, ["interrupted_by_user"]);
+  assert.deepEqual(startOptions, [{ noVoiceActivityTimeoutMs: 0 }]);
+  assert.equal(context.data.recording, true);
+  assert.equal(context.data.followUpTTSPlaying, false);
+});
+
+test("voice chat auto barge-in stops assistant before reconnecting a missing gateway client", async () => {
+  let monitorOptions = null;
+  const monitor = {
+    running: false,
+    start(options) {
+      monitorOptions = options;
+      this.running = true;
+      return true;
+    },
+    stop() {
+      this.running = false;
+    },
+    isRunning() {
+      return this.running;
+    },
+  };
+  const cancelReasons = [];
+  const reconnectCalls = [];
+  const page = loadVoiceChatPage({
+    voiceAuthorizationExports: {
+      readVoiceAuthorizationConsent: () => true,
+    },
+    voiceBargeInMonitorExports: {
+      VoiceBargeInMonitor: class {
+        constructor() {
+          return monitor;
+        }
+      },
+    },
+  });
+  const context = {
+    ...page,
+    data: {
+      ...page.data,
+      voiceSessionId: "voice-1",
+      voiceAuthorizationAgreed: true,
+      status: "idle",
+      guidanceMode: "guided_interview",
+      followUpLoading: true,
+      followUpTTSLoading: false,
+      followUpTTSPlaying: false,
+      followUpTTSStateText: "老余正在说",
+      assistantPromptText: "那咱们接着聊工作。",
+      transcriptLines: [
+        { id: "user-line-1", role: "user", text: "我想聊聊工作。" },
+        { id: "assistant-stream-1", role: "assistant", text: "那咱们接着聊工作。" },
+      ],
+    },
+    assistantStreamLineId: "assistant-stream-1",
+    assistantTurnRuntime: {
+      cancel(reason) {
+        cancelReasons.push(reason);
+      },
+      stopPlayback() {},
+      stats() {
+        return null;
+      },
+    },
+    audioPlayback: {
+      currentToken: () => 1,
+      currentAudio: () => null,
+      isCurrentToken: () => true,
+      nextToken: () => 1,
+      stop() {},
+    },
+    voiceStreaming: {
+      hasClient: () => false,
+      startRecording() {
+        throw new Error("startRecording should wait for reconnect");
+      },
+      stopRecording() {},
+      close() {},
+    },
+    syncVoiceAuthorizationAndConnect(autoTriggered) {
+      reconnectCalls.push(autoTriggered);
+    },
+    setData(patch) {
+      this.data = { ...this.data, ...patch };
+    },
+  };
+
+  page.prepareStreamingAudioPlayback.call(context, 0);
+  monitorOptions.onBargeIn();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(cancelReasons, ["interrupted_by_user"]);
+  assert.deepEqual(reconnectCalls, [false]);
+  assert.equal(context.data.followUpTTSPlaying, false);
+  assert.equal(context.data.autoListenStateText, "听到你说话，正在打断老余");
 });
 
 test("voice chat drives first streaming highlight from WebAudio playback progress", async () => {

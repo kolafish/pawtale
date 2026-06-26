@@ -354,9 +354,15 @@ export class MemoirStreamingAsrClient {
       if (!this.recording) {
         this.emitCaptureStats("idle");
       }
+      if (!this.recording && activeClient === this) {
+        activeClient = null;
+      }
       return;
     }
     this.finishAudioInput();
+    if (!this.recording && activeClient === this) {
+      activeClient = null;
+    }
   }
 
   handleRecorderError(message: string): void {
