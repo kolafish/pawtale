@@ -102,6 +102,39 @@ test("barge-in monitor detects user speech above uneven playback echo", () => {
   assert.equal(monitor.isRunning(), false);
 });
 
+test("barge-in monitor ignores sustained breathing below speech peak", () => {
+  const recorder = recorderHarness();
+  const { VoiceBargeInMonitor } = require("../services/voice-barge-in-monitor.ts");
+  const monitor = new VoiceBargeInMonitor(() => recorder);
+  let triggers = 0;
+
+  const started = monitor.start({
+    warmupMs: 300,
+    onBargeIn: () => {
+      triggers += 1;
+    },
+  });
+
+  assert.equal(started, true);
+  for (let index = 0; index < 3; index += 1) {
+    recorder.callbacks.frame({ frameBuffer: pcm16Frame(600), isLastFrame: false });
+  }
+
+  for (let index = 0; index < 10; index += 1) {
+    recorder.callbacks.frame({ frameBuffer: pcm16Frame(1800), isLastFrame: false });
+  }
+
+  assert.equal(triggers, 0);
+  assert.equal(monitor.isRunning(), true);
+
+  for (let index = 0; index < 2; index += 1) {
+    recorder.callbacks.frame({ frameBuffer: pcm16Frame(3600), isLastFrame: false });
+  }
+
+  assert.equal(triggers, 1);
+  assert.equal(monitor.isRunning(), false);
+});
+
 test("barge-in monitor waits for recorder onStop before releasing the microphone", async () => {
   const recorder = recorderHarness();
   recorder.stop = function stopWithoutImmediateCallback() {

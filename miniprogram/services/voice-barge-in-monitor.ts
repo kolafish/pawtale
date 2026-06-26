@@ -1,11 +1,14 @@
 import { estimatePcm16Level, pcmFrameDurationMs } from "./memoir-streaming-asr-protocol";
 import { sharedRecorderResource, WechatRecorderResource } from "./recorder-resource";
 
-const DEFAULT_WARMUP_MS = 500;
-const DEFAULT_TRIGGER_VOICE_MS = 280;
-const DEFAULT_MIN_TRIGGER_LEVEL = 0.025;
-const DEFAULT_BASELINE_MULTIPLIER = 1.45;
-const DEFAULT_PEAK_MULTIPLIER = 1.12;
+const DEFAULT_WARMUP_MS = 650;
+const DEFAULT_TRIGGER_VOICE_MS = 450;
+const DEFAULT_MIN_TRIGGER_LEVEL = 0.035;
+const DEFAULT_BASELINE_MULTIPLIER = 1.65;
+const DEFAULT_PEAK_MULTIPLIER = 1.18;
+const DEFAULT_MIN_TRIGGER_PEAK_LEVEL = 0.07;
+const DEFAULT_TRIGGER_PEAK_MULTIPLIER = 1.05;
+const DEFAULT_TRIGGER_PEAK_VOICE_MS = 160;
 const DEFAULT_RECORDING_DURATION_MS = 10 * 60 * 1000;
 const DEFAULT_FRAME_SIZE_KB = 4;
 const BARGE_IN_RECORDER_OWNER_ID = "voice-barge-in-monitor";
@@ -14,6 +17,7 @@ export interface VoiceBargeInMonitorOptions {
   warmupMs?: number;
   triggerVoiceMs?: number;
   minTriggerLevel?: number;
+  minTriggerPeakLevel?: number;
   baselineMultiplier?: number;
   onBargeIn: () => void;
   onError?: (message: string) => void;
@@ -35,6 +39,8 @@ export class VoiceBargeInMonitor {
   private triggered = false;
   private elapsedMs = 0;
   private voiceElapsedMs = 0;
+  private voicePeakLevel = 0;
+  private strongVoiceElapsedMs = 0;
   private warmupPeakLevel = 0;
   private warmupLevelSum = 0;
   private warmupFrameCount = 0;
@@ -58,6 +64,7 @@ export class VoiceBargeInMonitor {
       warmupMs: options.warmupMs ?? DEFAULT_WARMUP_MS,
       triggerVoiceMs: options.triggerVoiceMs ?? DEFAULT_TRIGGER_VOICE_MS,
       minTriggerLevel: options.minTriggerLevel ?? DEFAULT_MIN_TRIGGER_LEVEL,
+      minTriggerPeakLevel: options.minTriggerPeakLevel ?? DEFAULT_MIN_TRIGGER_PEAK_LEVEL,
       baselineMultiplier: options.baselineMultiplier ?? DEFAULT_BASELINE_MULTIPLIER,
       onBargeIn: options.onBargeIn,
       onError: options.onError ?? (() => undefined),
@@ -66,6 +73,8 @@ export class VoiceBargeInMonitor {
     this.triggered = false;
     this.elapsedMs = 0;
     this.voiceElapsedMs = 0;
+    this.voicePeakLevel = 0;
+    this.strongVoiceElapsedMs = 0;
     this.warmupPeakLevel = 0;
     this.warmupLevelSum = 0;
     this.warmupFrameCount = 0;
@@ -150,10 +159,20 @@ export class VoiceBargeInMonitor {
     }
     if (this.lastAudioLevel >= this.currentTriggerLevel()) {
       this.voiceElapsedMs += frameDurationMs;
+      this.voicePeakLevel = Math.max(this.voicePeakLevel, this.lastAudioLevel);
+      this.strongVoiceElapsedMs = this.lastAudioLevel >= this.currentTriggerPeakLevel()
+        ? this.strongVoiceElapsedMs + frameDurationMs
+        : 0;
     } else {
       this.voiceElapsedMs = 0;
+      this.voicePeakLevel = 0;
+      this.strongVoiceElapsedMs = 0;
     }
-    if (this.voiceElapsedMs >= this.options.triggerVoiceMs) {
+    if (
+      this.voiceElapsedMs >= this.options.triggerVoiceMs
+      && this.voicePeakLevel >= this.currentTriggerPeakLevel()
+      && this.strongVoiceElapsedMs >= DEFAULT_TRIGGER_PEAK_VOICE_MS
+    ) {
       this.trigger();
     }
   }
@@ -163,6 +182,11 @@ export class VoiceBargeInMonitor {
     const peakGuardLevel = this.warmupPeakLevel * DEFAULT_PEAK_MULTIPLIER;
     const minLevel = this.options?.minTriggerLevel ?? DEFAULT_MIN_TRIGGER_LEVEL;
     return Math.max(minLevel, baselineLevel, peakGuardLevel);
+  }
+
+  private currentTriggerPeakLevel(): number {
+    const minPeakLevel = this.options?.minTriggerPeakLevel ?? DEFAULT_MIN_TRIGGER_PEAK_LEVEL;
+    return Math.max(minPeakLevel, this.currentTriggerLevel() * DEFAULT_TRIGGER_PEAK_MULTIPLIER);
   }
 
   private averageWarmupLevel(): number {
