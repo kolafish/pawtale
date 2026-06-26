@@ -1,15 +1,24 @@
 require("./register-ts");
 
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
 const test = require("node:test");
 
+const { ASR_CORRECTION_RULES_CONFIG } = require("../services/asr-correction-rules.ts");
 const { normalizeMemoirAsrText } = require("../services/asr-text-normalization.ts");
 
-test("ASR correction JSON stays in sync across backend and miniprogram", () => {
+test("ASR correction rules stay in sync across backend and miniprogram", () => {
   assert.deepEqual(
     require("../../backend/app/services/memoir/asr_correction_rules.json"),
-    require("../services/asr-correction-rules.json"),
+    ASR_CORRECTION_RULES_CONFIG,
   );
+});
+
+test("ASR correction runtime avoids mini program JSON module loading", () => {
+  const servicePath = path.join(__dirname, "../services/asr-text-normalization.ts");
+  const serviceSource = fs.readFileSync(servicePath, "utf8");
+  assert.equal(serviceSource.includes("asr-correction-rules.json"), false);
 });
 
 test("normalizeMemoirAsrText corrects chapter homophones in book context", () => {

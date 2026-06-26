@@ -1,25 +1,7 @@
-type AsrCorrectionRegexRuleConfig = {
-  kind: "regex";
-  pattern: string;
-  replacement: string;
-};
-
-type AsrCorrectionContextualHomophoneRuleConfig = {
-  kind: "contextual_homophone";
-  terms: string[];
-  replacement: string;
-  before_context_patterns: string[];
-  after_context_patterns: string[];
-};
-
-type AsrCorrectionRuleConfig =
-  | AsrCorrectionRegexRuleConfig
-  | AsrCorrectionContextualHomophoneRuleConfig;
-
-type AsrCorrectionRulesConfig = {
-  version: number;
-  rules: AsrCorrectionRuleConfig[];
-};
+import {
+  ASR_CORRECTION_RULES_CONFIG,
+  type AsrCorrectionRuleConfig,
+} from "./asr-correction-rules";
 
 type RegexRule = {
   kind: "regex";
@@ -37,10 +19,7 @@ type ContextualHomophoneRule = {
 
 type AsrCorrectionRule = RegexRule | ContextualHomophoneRule;
 
-declare const require: (path: string) => AsrCorrectionRulesConfig;
-
-const correctionRules = require("./asr-correction-rules.json");
-const NORMALIZATION_RULES: AsrCorrectionRule[] = correctionRules.rules.map(compileRule);
+const NORMALIZATION_RULES: AsrCorrectionRule[] = ASR_CORRECTION_RULES_CONFIG.rules.map(compileRule);
 
 export function normalizeMemoirAsrText(text: string): string {
   let normalized = text;
