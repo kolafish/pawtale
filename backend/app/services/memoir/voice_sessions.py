@@ -11,7 +11,6 @@ from app.domain.memoir.types import MemoirChatMessageRole, MemoirVoiceSessionSta
 from app.models.memoir import MemoirChatMessage, MemoirVoiceSession, MemoirVoiceUtterance
 from app.models.projects import Project
 from app.schemas.memoir_voice import (
-    MemoirVoiceModuleProgressResponse,
     MemoirVoiceProgressResponse,
     MemoirVoiceSessionListResponse,
     MemoirVoiceSessionSummaryResponse,
@@ -19,6 +18,7 @@ from app.schemas.memoir_voice import (
     MemoirVoiceSessionDetailResponse,
     MemoirVoiceSessionStopRequest,
 )
+from app.services.memoir import progress_snapshot
 from app.services.memoir.access import load_memoir_project
 
 
@@ -197,64 +197,10 @@ async def get_voice_progress(
     *,
     project_id: str | None = None,
 ) -> MemoirVoiceProgressResponse:
-    filters = [Project.user_id == user_id]
-    if project_id:
-        await load_memoir_project(db, project_id, user_id)
-        filters.append(Project.id == project_id)
-    result = await db.execute(
-        select(MemoirVoiceSession)
-        .join(Project, MemoirVoiceSession.project_id == Project.id)
-        .where(*filters)
-        .options(*_detail_options())
-        .order_by(MemoirVoiceSession.updated_at.desc(), MemoirVoiceSession.created_at.desc())
-    )
-    sessions = result.scalars().all()
-    module_stats: dict[str, dict[str, int]] = {}
-    active_statuses = {
-        MemoirVoiceSessionStatus.CREATED.value,
-        MemoirVoiceSessionStatus.LISTENING.value,
-        MemoirVoiceSessionStatus.SPEAKING.value,
-    }
-    effective_entries: list[tuple[MemoirVoiceSession, MemoirVoiceSessionSummaryResponse]] = []
-    for voice_session in sessions:
-        summary = _session_summary(voice_session)
-        if _is_effective_session(summary):
-            effective_entries.append((voice_session, summary))
-    user_message_count = sum(summary.user_message_count for _, summary in effective_entries)
-    assistant_message_count = sum(summary.assistant_message_count for _, summary in effective_entries)
-    utterance_count = sum(summary.utterance_count for _, summary in effective_entries)
-    total_user_char_count = sum(summary.total_user_char_count for _, summary in effective_entries)
-    total_audio_seconds = sum(summary.total_audio_seconds for _, summary in effective_entries)
-    for voice_session, summary in effective_entries:
-        module = voice_session.current_guidance_module or (
-            "free_narration" if voice_session.guidance_mode == "free_narration" else "unassigned"
-        )
-        stats = module_stats.setdefault(module, {"sessions": 0, "utterances": 0, "chars": 0})
-        stats["sessions"] += 1
-        stats["utterances"] += summary.utterance_count
-        stats["chars"] += summary.total_user_char_count
-
-    return MemoirVoiceProgressResponse(
+    return await progress_snapshot.get_voice_progress_from_snapshot(
+        db,
+        user_id=user_id,
         project_id=project_id,
-        session_count=len(effective_entries),
-        active_session_count=sum(1 for session, _ in effective_entries if session.status in active_statuses),
-        stopped_session_count=sum(1 for session, _ in effective_entries if session.status == MemoirVoiceSessionStatus.STOPPED.value),
-        failed_session_count=sum(1 for session, _ in effective_entries if session.status == MemoirVoiceSessionStatus.FAILED.value),
-        utterance_count=utterance_count,
-        user_message_count=user_message_count,
-        assistant_message_count=assistant_message_count,
-        total_user_char_count=total_user_char_count,
-        total_audio_seconds=total_audio_seconds,
-        last_session_at=effective_entries[0][0].updated_at if effective_entries else None,
-        modules=[
-            MemoirVoiceModuleProgressResponse(
-                module=module,
-                session_count=stats["sessions"],
-                utterance_count=stats["utterances"],
-                user_char_count=stats["chars"],
-            )
-            for module, stats in sorted(module_stats.items())
-        ],
     )
 
 

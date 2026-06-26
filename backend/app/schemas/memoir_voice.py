@@ -3,6 +3,8 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.domain.memoir.types import (
+    MemoirAutomationEventStatus,
+    MemoirAutomationEventType,
     MemoirChatContentStatus,
     MemoirChatMessageRole,
     MemoirGuidanceMode,
@@ -159,6 +161,59 @@ class MemoirVoiceModuleProgressResponse(BaseModel):
     utterance_count: int
     user_char_count: int
 
+
+class MemoirAutomationEventResponse(BaseModel):
+    id: str
+    project_id: str
+    event_type: MemoirAutomationEventType
+    status: MemoirAutomationEventStatus
+    chapter_id: str | None = None
+    utterance_ids: list[str] = Field(default_factory=list)
+    summary_text: str
+    confidence: float | None = None
+    metadata_json: dict[str, object] = Field(default_factory=dict)
+    created_at: datetime
+    updated_at: datetime
+
+
+class MemoirAutomationEventListResponse(BaseModel):
+    items: list[MemoirAutomationEventResponse] = Field(default_factory=list)
+    total: int
+    limit: int
+
+
+class MemoirProjectProgressChapterResponse(BaseModel):
+    chapter_id: str
+    title: str
+    sort_order: int
+    source_count: int
+    pending_source_count: int
+    removed_source_count: int
+    draft_status: str | None = None
+    draft_word_count: int = 0
+
+
+class MemoirProjectProgressSnapshotResponse(BaseModel):
+    project_id: str
+    valid_utterance_count: int
+    assigned_utterance_count: int
+    pending_utterance_count: int
+    session_count: int
+    active_session_count: int
+    stopped_session_count: int
+    failed_session_count: int
+    user_message_count: int
+    assistant_message_count: int
+    source_char_count: int
+    total_audio_seconds: int
+    chapter_count: int
+    confirmed_chapter_count: int
+    draft_word_count: int
+    last_session_at: datetime | None = None
+    recent_automation_events: list[MemoirAutomationEventResponse] = Field(default_factory=list)
+    chapter_progress_items: list[MemoirProjectProgressChapterResponse] = Field(default_factory=list)
+
+
 class MemoirVoiceProgressResponse(BaseModel):
     project_id: str | None = None
     session_count: int
@@ -172,6 +227,7 @@ class MemoirVoiceProgressResponse(BaseModel):
     total_audio_seconds: int
     last_session_at: datetime | None = None
     modules: list[MemoirVoiceModuleProgressResponse] = Field(default_factory=list)
+    snapshot: MemoirProjectProgressSnapshotResponse | None = None
 
 class MemoirVoiceFollowUpResponse(BaseModel):
     message: MemoirChatMessageResponse

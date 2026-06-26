@@ -106,6 +106,65 @@ export interface MemoirVoiceModuleProgress {
   user_char_count: number;
 }
 
+export type MemoirAutomationEventType =
+  | "source_assigned"
+  | "source_held"
+  | "chapter_auto_revised"
+  | "audit_completed";
+export type MemoirAutomationEventStatus = "pending" | "completed" | "failed" | "needs_review";
+
+export interface MemoirAutomationEvent {
+  id: string;
+  project_id: string;
+  event_type: MemoirAutomationEventType;
+  status: MemoirAutomationEventStatus;
+  chapter_id?: string | null;
+  utterance_ids: string[];
+  summary_text: string;
+  confidence?: number | null;
+  metadata_json: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MemoirAutomationEventListResponse {
+  items: MemoirAutomationEvent[];
+  total: number;
+  limit: number;
+}
+
+export interface MemoirProjectProgressChapter {
+  chapter_id: string;
+  title: string;
+  sort_order: number;
+  source_count: number;
+  pending_source_count: number;
+  removed_source_count: number;
+  draft_status?: MemoirBookChapterDraftStatus | string | null;
+  draft_word_count: number;
+}
+
+export interface MemoirProjectProgressSnapshot {
+  project_id: string;
+  valid_utterance_count: number;
+  assigned_utterance_count: number;
+  pending_utterance_count: number;
+  session_count: number;
+  active_session_count: number;
+  stopped_session_count: number;
+  failed_session_count: number;
+  user_message_count: number;
+  assistant_message_count: number;
+  source_char_count: number;
+  total_audio_seconds: number;
+  chapter_count: number;
+  confirmed_chapter_count: number;
+  draft_word_count: number;
+  last_session_at?: string | null;
+  recent_automation_events: MemoirAutomationEvent[];
+  chapter_progress_items: MemoirProjectProgressChapter[];
+}
+
 export interface MemoirVoiceProgressResponse {
   project_id?: string | null;
   session_count: number;
@@ -119,6 +178,7 @@ export interface MemoirVoiceProgressResponse {
   total_audio_seconds: number;
   last_session_at?: string | null;
   modules: MemoirVoiceModuleProgress[];
+  snapshot?: MemoirProjectProgressSnapshot | null;
 }
 
 export interface MemoirVoiceSessionCreate {

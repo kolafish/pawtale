@@ -1,6 +1,8 @@
 import type {
   MemoirAssistantTTSRequest,
   MemoirAssistantTTSResponse,
+  MemoirAutomationEventListResponse,
+  MemoirProjectProgressSnapshot,
   MemoirVoiceFollowUpResponse,
   MemoirVoiceNoAnswerPromptRequest,
   MemoirVoiceProgressResponse,
@@ -84,6 +86,21 @@ export function listMemoirVoiceSessions(
 export function getMemoirVoiceProgress(projectId: string): Promise<MemoirVoiceProgressResponse> {
   return memoirRequest<MemoirVoiceProgressResponse>(
     `/api/mobile/memoir/voice-progress${queryString({ project_id: projectId })}`,
+  );
+}
+
+export function getMemoirProjectProgressSnapshot(projectId: string): Promise<MemoirProjectProgressSnapshot> {
+  return memoirRequest<MemoirProjectProgressSnapshot>(
+    `/api/mobile/memoir/projects/${encodeURIComponent(projectId)}/progress-snapshot`,
+  );
+}
+
+export function listMemoirAutomationEvents(
+  projectId: string,
+  limit = 10,
+): Promise<MemoirAutomationEventListResponse> {
+  return memoirRequest<MemoirAutomationEventListResponse>(
+    `/api/mobile/memoir/projects/${encodeURIComponent(projectId)}/automation-events${queryString({ limit })}`,
   );
 }
 

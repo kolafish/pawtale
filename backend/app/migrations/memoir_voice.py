@@ -17,6 +17,9 @@ REALTIME_VOICE_TABLES = (
     "memoir_transcript_versions",
     "memoir_voice_authorization_consents",
 )
+MEMOIR_AUXILIARY_TABLES = (
+    "memoir_automation_events",
+)
 TRANSCRIPT_FTS_TABLE = "memoir_voice_utterances_fts"
 TRANSCRIPT_FTS_TRIGGERS = (
     "memoir_voice_utterances_fts_ai",
@@ -274,6 +277,11 @@ async def migrate_memoir_voice_schema(engine: AsyncEngine) -> dict[str, list[str
     changed_triggers: list[str] = []
     changed_rows: list[str] = []
     async with engine.begin() as conn:
+        for table_name in MEMOIR_AUXILIARY_TABLES:
+            if not await _table_exists(conn, table_name):
+                await _create_metadata_table(conn, table_name)
+                changed_tables.append(table_name)
+
         if not await _table_exists(conn, "memoir_voice_authorization_consents"):
             await _create_metadata_table(conn, "memoir_voice_authorization_consents")
             changed_tables.append("memoir_voice_authorization_consents")

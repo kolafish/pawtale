@@ -1,11 +1,23 @@
 from sqlalchemy import select
 
-from app.domain.memoir.types import MemoirChatContentStatus, MemoirChatMessageRole
+from app.domain.memoir.types import (
+    MemoirAutomationEventType,
+    MemoirBookChapterDraftStatus,
+    MemoirChatContentStatus,
+    MemoirChatMessageRole,
+)
 from app.models.memoir import AudioFile, MemoirChatMessage, MemoirVoiceSession, MemoirVoiceUtterance
+from app.services.memoir import automation_events
 from app.services.memoir import voice_sessions as memoir_voice_sessions
 from app.services.memoir.tts_alignment import TTSAlignmentSegment
 from app.services.memoir.voice_tts import TTSResult
-from tests.memoir_helpers import post_mobile_memoir_voice_session
+from tests.memoir_helpers import (
+    create_test_book_plan,
+    create_test_chapter_draft,
+    create_test_voice_transcript,
+    memoir_source_ref,
+    post_mobile_memoir_voice_session,
+)
 
 
 class FakeTTS:
@@ -300,6 +312,101 @@ async def test_mobile_memoir_voice_session_list_and_progress(client, test_db):
     assert progress["total_user_char_count"] == len("我小时候住在外婆家。")
     assert {item["module"] for item in progress["modules"]} == {"person"}
     assert free_session["id"]
+
+
+async def test_mobile_memoir_project_progress_snapshot_counts_book_state(client, test_db):
+    first = await create_test_voice_transcript(
+        client,
+        test_db,
+        "我小时候住在外婆家。",
+        guidance_mode="guided_interview",
+        current_guidance_module="person",
+    )
+    second = await create_test_voice_transcript(
+        client,
+        test_db,
+        "后来我去县城读书。",
+        guidance_mode="guided_interview",
+        current_guidance_module="period",
+    )
+    empty_session_response = await post_mobile_memoir_voice_session(
+        client,
+        json={"guidance_mode": "free_narration"},
+        project_id=first["session"]["project_id"],
+    )
+    assert empty_session_response.status_code == 201
+
+    plan, chapter = await create_test_book_plan(
+        test_db,
+        project_id=first["session"]["project_id"],
+        source_ref=memoir_source_ref(first),
+    )
+    chapter.metadata_json = {
+        "pending_source_utterance_ids": [first["utterance_id"], "deleted-utterance"],
+        "removed_source_utterance_ids": ["removed-utterance"],
+    }
+    await create_test_chapter_draft(
+        test_db,
+        project_id=first["session"]["project_id"],
+        chapter_id=chapter.id,
+        status=MemoirBookChapterDraftStatus.CONFIRMED,
+        content="外婆家的院子里有一棵树。",
+    )
+    await automation_events.record_automation_event(
+        test_db,
+        project_id=first["session"]["project_id"],
+        event_type=MemoirAutomationEventType.SOURCE_ASSIGNED,
+        chapter_id=chapter.id,
+        utterance_ids=[first["utterance_id"]],
+        summary_text="1 条讲述已整理进外婆家的童年。",
+        confidence=0.9,
+    )
+    await test_db.commit()
+
+    response = await client.get(
+        f"/api/mobile/memoir/projects/{first['session']['project_id']}/progress-snapshot"
+    )
+
+    assert response.status_code == 200
+    snapshot = response.json()
+    assert snapshot["project_id"] == first["session"]["project_id"]
+    assert snapshot["valid_utterance_count"] == 2
+    assert snapshot["assigned_utterance_count"] == 1
+    assert snapshot["pending_utterance_count"] == 1
+    assert snapshot["session_count"] == 2
+    assert snapshot["chapter_count"] == 1
+    assert snapshot["confirmed_chapter_count"] == 1
+    assert snapshot["draft_word_count"] == len("外婆家的院子里有一棵树。")
+    assert snapshot["chapter_progress_items"] == [
+        {
+            "chapter_id": chapter.id,
+            "title": "外婆家的童年",
+            "sort_order": 0,
+            "source_count": 1,
+            "pending_source_count": 1,
+            "removed_source_count": 1,
+            "draft_status": "confirmed",
+            "draft_word_count": len("外婆家的院子里有一棵树。"),
+        }
+    ]
+    assert snapshot["recent_automation_events"][0]["event_type"] == "source_assigned"
+    assert snapshot["recent_automation_events"][0]["utterance_ids"] == [first["utterance_id"]]
+    assert snapshot["recent_automation_events"][0]["summary_text"] == "1 条讲述已整理进外婆家的童年。"
+
+    progress_response = await client.get(
+        f"/api/mobile/memoir/voice-progress?project_id={first['session']['project_id']}"
+    )
+    assert progress_response.status_code == 200
+    progress = progress_response.json()
+    assert progress["utterance_count"] == 2
+    assert progress["snapshot"]["assigned_utterance_count"] == 1
+    assert {item["module"] for item in progress["modules"]} == {"person", "period"}
+
+    events_response = await client.get(
+        f"/api/mobile/memoir/projects/{first['session']['project_id']}/automation-events"
+    )
+    assert events_response.status_code == 200
+    assert events_response.json()["total"] == 1
 
 
 async def test_mobile_memoir_assistant_tts_generates_audio_for_follow_up_message(

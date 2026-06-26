@@ -148,11 +148,12 @@ function formatAudioDuration(totalSeconds: number): string {
 }
 
 function voiceStatsData(progress: MemoirVoiceProgressResponse) {
+  const snapshot = progress.snapshot;
   return {
-    sessionCount: progress.session_count,
-    utteranceCount: progress.utterance_count,
-    totalUserCharCount: progress.total_user_char_count,
-    totalAudioText: formatAudioDuration(progress.total_audio_seconds),
+    sessionCount: snapshot?.session_count ?? progress.session_count,
+    utteranceCount: snapshot?.valid_utterance_count ?? progress.utterance_count,
+    totalUserCharCount: snapshot?.source_char_count ?? progress.total_user_char_count,
+    totalAudioText: formatAudioDuration(snapshot?.total_audio_seconds ?? progress.total_audio_seconds),
   };
 }
 
