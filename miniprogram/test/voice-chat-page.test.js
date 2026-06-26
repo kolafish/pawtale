@@ -792,7 +792,7 @@ test("voice chat starts auto listening after AI audio playback ends when gateway
     setData(patch) {
       this.data = { ...this.data, ...patch };
     },
-    startRecording(autoTriggered) {
+    async startRecordingAfterPrivacy(autoTriggered) {
       startCalls.push(autoTriggered);
       return true;
     },
@@ -862,7 +862,7 @@ test("voice chat starts pending auto listening when gateway becomes ready after 
     setData(patch) {
       this.data = { ...this.data, ...patch };
     },
-    startRecording(autoTriggered) {
+    async startRecordingAfterPrivacy(autoTriggered) {
       startCalls.push(autoTriggered);
       return true;
     },
@@ -996,7 +996,7 @@ test("voice chat streams one assistant turn and plays pcm audio frames", async (
     setData(patch) {
       this.data = { ...this.data, ...patch };
     },
-    startRecording(autoTriggered) {
+    async startRecordingAfterPrivacy(autoTriggered) {
       playbackEvents.push("startRecording");
       startCalls.push(autoTriggered);
       return true;
@@ -1281,6 +1281,58 @@ test("voice chat automatically interrupts assistant playback when local voice mo
   assert.deepEqual(startOptions, [{ noVoiceActivityTimeoutMs: 0 }]);
   assert.equal(context.data.recording, true);
   assert.equal(context.data.followUpTTSPlaying, false);
+});
+
+test("voice chat surfaces local barge-in monitor recorder failures", () => {
+  let monitorOptions = null;
+  const monitor = {
+    running: false,
+    start(options) {
+      monitorOptions = options;
+      this.running = true;
+      return true;
+    },
+    stop() {
+      this.running = false;
+    },
+    async stopAndWait() {
+      this.stop();
+    },
+    isRunning() {
+      return this.running;
+    },
+  };
+  const page = loadVoiceChatPage({
+    voiceBargeInMonitorExports: {
+      VoiceBargeInMonitor: class {
+        constructor() {
+          return monitor;
+        }
+      },
+    },
+  });
+  const context = {
+    ...page,
+    data: {
+      ...page.data,
+      status: "ready",
+      followUpLoading: true,
+      followUpTTSLoading: false,
+      followUpTTSPlaying: false,
+      autoListenStateText: "AI 说完自动听",
+    },
+    setData(patch) {
+      this.data = { ...this.data, ...patch };
+    },
+  };
+
+  page.startAssistantBargeInMonitor.call(context, 0);
+
+  assert.equal(context.data.autoListenStateText, "可直接说话打断老余");
+
+  monitorOptions.onError("operateRecorder:fail auth deny");
+
+  assert.equal(context.data.autoListenStateText, "自动打断未启动，可点按钮回答");
 });
 
 test("voice chat auto barge-in stops assistant before reconnecting a missing gateway client", async () => {
