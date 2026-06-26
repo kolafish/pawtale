@@ -380,6 +380,62 @@
       }
     },
     {
+      "id": "followup_021_progress_milestone",
+      "category": "voice_follow_up",
+      "guidance_mode": "guided_interview",
+      "current_guidance_module": "family",
+      "intent": "follow_up",
+      "current_messages": [
+        {"role": "user", "text": "我们小时候逢年过节都在爷爷家院子里吃饭。"}
+      ],
+      "progress_update": {
+        "kind": "valid_utterance_milestone",
+        "text": "这个项目已经留下 10 条讲述记录。"
+      },
+      "expected_checks": {
+        "one_question": true,
+        "max_chinese_chars": 100,
+        "must_include_any": ["10 条", "讲述记录", "院子", "过节"],
+        "must_not_include": ["11 条", "20 条", "已经成书", "两个问题"]
+      }
+    },
+    {
+      "id": "followup_022_progress_event",
+      "category": "voice_follow_up",
+      "guidance_mode": "free_narration",
+      "intent": "follow_up",
+      "current_messages": [
+        {"role": "user", "text": "外婆后来眼睛不太好，但还是每天摸着路去菜园。"}
+      ],
+      "progress_update": {
+        "kind": "automation_event",
+        "text": "刚才新增的 1 条讲述已补进《外婆家的菜园》。"
+      },
+      "expected_checks": {
+        "one_question": true,
+        "max_chinese_chars": 100,
+        "must_include_any": ["外婆", "菜园", "补进《外婆家的菜园》"],
+        "must_not_include": ["自动删除", "已发布", "还有 5 条"]
+      }
+    },
+    {
+      "id": "followup_023_no_progress_fabrication",
+      "category": "voice_follow_up",
+      "guidance_mode": "guided_interview",
+      "current_guidance_module": "work",
+      "intent": "follow_up",
+      "current_messages": [
+        {"role": "user", "text": "我第一份工作就是在供销社，天天和算盘打交道。"}
+      ],
+      "progress_update": null,
+      "expected_checks": {
+        "one_question": true,
+        "max_chinese_chars": 90,
+        "must_include_any": ["供销社", "算盘", "第一份工作"],
+        "must_not_include": ["已整理", "几条记录", "章节", "成书"]
+      }
+    },
+    {
       "id": "asr_cleanup_001",
       "category": "asr_cleanup",
       "raw_transcript": "我小时候啊，嗯，住在外婆家，那个院子里有棵枣树，特别大。",

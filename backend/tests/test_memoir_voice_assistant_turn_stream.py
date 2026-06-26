@@ -5,9 +5,14 @@ from typing import Any
 
 from sqlalchemy import func, select
 
-from app.domain.memoir.types import MemoirChatContentStatus, MemoirChatMessageRole
+from app.domain.memoir.types import (
+    MemoirAutomationEventType,
+    MemoirChatContentStatus,
+    MemoirChatMessageRole,
+)
 from app.models.memoir import AudioFile, MemoirChatMessage
 from app.services.ai_streaming import AITextStreamChunk
+from app.services.memoir import automation_events
 from app.services.memoir.tts_alignment import TTSAlignmentSegment
 from app.services.memoir.voice_assistant_turn_stream import VoiceAssistantTurnStreamSession
 from app.services.memoir.voice_tts import StreamingTTSChunk
@@ -67,6 +72,8 @@ async def test_voice_assistant_turn_streams_text_audio_and_persists_message(
     assert completed["text"] == "好，那我们就接着聊工作。第一份工作里，最让您记到现在的是哪一件事？"
     assert completed["primary_intent"] == "follow_up"
     assert completed["audio_file_id"]
+    assert completed["progress_update_used"] is True
+    assert completed["progress_update"]["kind"] == "valid_utterance_milestone"
 
     text_deltas = [event["text_delta"] for event in stream_client.sent if event["type"] == "text.delta"]
     assert text_deltas == ai_client.chunks
@@ -110,6 +117,10 @@ async def test_voice_assistant_turn_streams_text_audio_and_persists_message(
     assert assistant_message.metadata_json["tts_provider"] == "fake-tts"
     assert assistant_message.metadata_json["tts_duration_seconds"] == 0.4
     assert assistant_message.metadata_json["tts_alignment"][0]["text"] == "好"
+    assert assistant_message.metadata_json["progress_prompt_version"] == "memoir_voice_progress_context_v1"
+    assert assistant_message.metadata_json["progress_update_used"] is True
+    assert assistant_message.metadata_json["progress_update"]["text"] == "这个项目已经留下 1 条讲述记录。"
+    assert "本轮可选进度鼓励：这个项目已经留下 1 条讲述记录。" in ai_client.calls[0]["user_prompt"]
 
     audio_file = await test_db.scalar(select(AudioFile).where(AudioFile.id == completed["audio_file_id"]))
     assert audio_file is not None
@@ -175,10 +186,53 @@ async def test_voice_assistant_turn_guided_opening_prompt_uses_topic_menu(
 
     prompt = ai_client.calls[0]["user_prompt"]
     assert completed["primary_intent"] == "opening"
+    assert completed["progress_update_used"] is False
     assert ai_client.calls[0]["kwargs"]["max_tokens"] == 420
     assert "主题讲述首次开场" in prompt
     assert "明确介绍可聊主题" in prompt
     assert "人物、事情、家庭、工作、地点、某一天、人生阶段、闲聊" in prompt
+    assert "本轮没有可播报的结构化进度变化" in prompt
+
+
+async def test_voice_assistant_turn_progress_prompt_uses_recent_automation_event(
+    client,
+    test_db,
+):
+    created = await create_test_voice_transcript(
+        client,
+        test_db,
+        text="我小时候常在外婆家院子里摘菜。",
+        guidance_mode="guided_interview",
+        current_guidance_module="family",
+    )
+    event = await automation_events.record_automation_event(
+        test_db,
+        project_id=created["session"]["project_id"],
+        event_type=MemoirAutomationEventType.CHAPTER_AUTO_REVISED,
+        utterance_ids=[created["utterance_id"]],
+        summary_text="刚才新增的 1 条讲述已补进《外婆家的院子》。",
+        confidence=0.92,
+    )
+    await test_db.commit()
+
+    _, ai_client, _, completed = await _run_stream_turn(
+        test_db,
+        voice_session_id=created["session"]["id"],
+        user_id=created["user_id"],
+        chunks=["刚才那段已经让院子的记忆更清楚了。外婆在院子里最常做什么？"],
+    )
+
+    prompt = ai_client.calls[0]["user_prompt"]
+    assert "本轮可选进度鼓励：刚才新增的 1 条讲述已补进《外婆家的院子》。" in prompt
+    assert "只允许引用以下这一条事实" in prompt
+    assert completed["progress_update"]["kind"] == "automation_event"
+    assert completed["progress_update"]["event_ids"] == [event.id]
+
+    assistant_message = await test_db.scalar(
+        select(MemoirChatMessage).where(MemoirChatMessage.id == completed["message_id"])
+    )
+    assert assistant_message.metadata_json["progress_update"]["kind"] == "automation_event"
+    assert assistant_message.metadata_json["progress_automation_event_ids"] == [event.id]
 
 
 async def test_voice_assistant_turn_guided_opening_references_previous_session(

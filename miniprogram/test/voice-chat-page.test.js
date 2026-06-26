@@ -864,6 +864,11 @@ test("voice chat streams one assistant turn and plays pcm audio frames", async (
             primary_intent: "follow_up",
             intent_tags: ["follow_up"],
             expects_answer: true,
+            progress_update: {
+              kind: "valid_utterance_milestone",
+              text: "这个项目已经留下 1 条讲述记录。",
+            },
+            progress_update_used: true,
           };
           this.callbacks.onCompleted?.(completed);
           return completed;
@@ -939,6 +944,8 @@ test("voice chat streams one assistant turn and plays pcm audio frames", async (
   assert.equal(context.data.followUpAudioFileId, "audio-question-1");
   assert.equal(context.data.transcriptLines.length, 2);
   assert.deepEqual(context.data.transcriptLines.map((line) => line.id), ["user-line-1", "assistant-question-1"]);
+  assert.equal(context.data.transcriptLines[1].metadata_json.progress_update.kind, "valid_utterance_milestone");
+  assert.equal(context.data.transcriptLines[1].metadata_json.progress_update_used, true);
   assert.equal(context.data.lastFollowUpSourceMessageId, "");
   assert.equal(context.data.persistenceStateText, "等待回答");
   assert.deepEqual(startCalls, [true]);

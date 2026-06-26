@@ -932,6 +932,8 @@ Page<VoiceChatData, {
       expects_answer: event.expects_answer,
       usage: event.usage || {},
       finish_reason: event.finish_reason || "",
+      progress_update: event.progress_update || null,
+      progress_update_used: Boolean(event.progress_update_used),
     };
     const finalLine: VoiceChatTranscriptLine = {
       id: event.message_id,
