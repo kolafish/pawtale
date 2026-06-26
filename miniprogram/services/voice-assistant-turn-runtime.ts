@@ -1,0 +1,223 @@
+import {
+  StreamingSpeechPlaybackController,
+  type StreamingSpeechPlaybackFrameEvent,
+  type StreamingSpeechPCMFrame,
+} from "./streaming-speech-playback";
+import {
+  VoiceAssistantTurnStreamClient,
+  type PreparedAssistantStreamAudioFrame,
+  type VoiceAssistantTurnAudioDoneEvent,
+  type VoiceAssistantTurnCompletedEvent,
+  type VoiceAssistantTurnStartedEvent,
+  type VoiceAssistantTurnStreamCallbacks,
+  type VoiceAssistantTurnTextDeltaEvent,
+} from "./voice-assistant-turn-stream";
+
+interface VoiceAssistantTurnStreamClientLike {
+  start(options?: { regenerate?: boolean }): Promise<VoiceAssistantTurnCompletedEvent>;
+  cancel(): void;
+  close(): void;
+}
+
+interface StreamingSpeechPlaybackControllerLike {
+  appendFrame(frame: StreamingSpeechPCMFrame): Promise<StreamingSpeechPlaybackFrameEvent | null>;
+  waitForDrain(): Promise<void>;
+  stats(): ReturnType<StreamingSpeechPlaybackController["stats"]>;
+  stop(): void;
+  destroy(): Promise<void>;
+}
+
+export interface VoiceAssistantTurnRuntimeCallbacks {
+  onStarted?(event: VoiceAssistantTurnStartedEvent): void;
+  onTextDelta?(event: VoiceAssistantTurnTextDeltaEvent): void;
+  onAudioFrame?(frame: PreparedAssistantStreamAudioFrame): void;
+  onAudioFrameScheduled?(event: StreamingSpeechPlaybackFrameEvent): void;
+  onAudioDrained?(event: VoiceAssistantTurnAudioDoneEvent): void;
+  onCompleted?(event: VoiceAssistantTurnCompletedEvent): void;
+  onPlaybackError?(error: Error): void;
+}
+
+export interface VoiceAssistantTurnRuntimeOptions {
+  createStreamClient?: (
+    voiceSessionId: string,
+    callbacks: VoiceAssistantTurnStreamCallbacks,
+  ) => VoiceAssistantTurnStreamClientLike;
+  createPlaybackController?: () => StreamingSpeechPlaybackControllerLike;
+}
+
+export interface VoiceAssistantTurnRuntimeResult {
+  completed: VoiceAssistantTurnCompletedEvent;
+  playbackError: Error | null;
+}
+
+export class VoiceAssistantTurnRuntime {
+  private streamClient: VoiceAssistantTurnStreamClientLike | null = null;
+  private playbackController: StreamingSpeechPlaybackControllerLike | null = null;
+  private playbackChain: Promise<void> = Promise.resolve();
+  private playbackError: Error | null = null;
+  private active = false;
+
+  constructor(
+    private readonly voiceSessionId: string,
+    private readonly callbacks: VoiceAssistantTurnRuntimeCallbacks = {},
+    private readonly options: VoiceAssistantTurnRuntimeOptions = {},
+  ) {}
+
+  async start(options: { regenerate?: boolean } = {}): Promise<VoiceAssistantTurnRuntimeResult> {
+    this.active = true;
+    this.playbackChain = Promise.resolve();
+    this.playbackError = null;
+    const streamClient = this.createStreamClient();
+    this.streamClient = streamClient;
+    try {
+      const completed = await streamClient.start({ regenerate: options.regenerate });
+      if (!this.active) {
+        throw new Error("AI 回应已取消");
+      }
+      await this.playbackChain;
+      const playbackError = this.playbackError;
+      await this.releasePlaybackController();
+      this.active = false;
+      this.streamClient = null;
+      return { completed, playbackError };
+    } catch (error) {
+      this.active = false;
+      this.streamClient = null;
+      this.stopPlayback();
+      await this.releasePlaybackController();
+      throw error;
+    }
+  }
+
+  cancel(): void {
+    if (!this.active && !this.streamClient) {
+      return;
+    }
+    this.active = false;
+    this.streamClient?.cancel();
+    this.streamClient = null;
+    this.resetPlayback();
+  }
+
+  close(): void {
+    this.active = false;
+    this.streamClient?.close();
+    this.streamClient = null;
+    this.resetPlayback();
+  }
+
+  stopPlayback(): void {
+    this.playbackController?.stop();
+  }
+
+  stats(): ReturnType<StreamingSpeechPlaybackController["stats"]> | null {
+    return this.playbackController?.stats() ?? null;
+  }
+
+  private createStreamClient(): VoiceAssistantTurnStreamClientLike {
+    return (this.options.createStreamClient || ((voiceSessionId, callbacks) => (
+      new VoiceAssistantTurnStreamClient(voiceSessionId, callbacks)
+    )))(this.voiceSessionId, {
+      onStarted: (event) => {
+        if (this.active) {
+          this.callbacks.onStarted?.(event);
+        }
+      },
+      onTextDelta: (event) => {
+        if (this.active) {
+          this.callbacks.onTextDelta?.(event);
+        }
+      },
+      onAudioFrame: (frame) => {
+        if (this.active) {
+          this.enqueueAudioFrame(frame);
+        }
+      },
+      onAudioDone: (event) => {
+        if (this.active) {
+          this.finishAudioFrames(event);
+        }
+      },
+      onCompleted: (event) => {
+        if (this.active) {
+          this.callbacks.onCompleted?.(event);
+        }
+      },
+    });
+  }
+
+  private enqueueAudioFrame(frame: PreparedAssistantStreamAudioFrame): void {
+    this.playbackChain = this.playbackChain
+      .then(() => this.playAudioFrame(frame))
+      .catch((error) => this.recordPlaybackError(error));
+  }
+
+  private finishAudioFrames(event: VoiceAssistantTurnAudioDoneEvent): void {
+    this.playbackChain = this.playbackChain
+      .then(async () => {
+        if (this.playbackError) {
+          return;
+        }
+        const controller = this.playbackController;
+        if (controller) {
+          await controller.waitForDrain();
+        }
+        if (this.active && !this.playbackError) {
+          this.callbacks.onAudioDrained?.(event);
+        }
+      })
+      .catch((error) => this.recordPlaybackError(error));
+  }
+
+  private async playAudioFrame(frame: PreparedAssistantStreamAudioFrame): Promise<void> {
+    if (!this.active) {
+      return;
+    }
+    this.callbacks.onAudioFrame?.(frame);
+    const scheduled = await this.playback().appendFrame(frame);
+    if (!this.active || !scheduled) {
+      return;
+    }
+    this.callbacks.onAudioFrameScheduled?.(scheduled);
+  }
+
+  private recordPlaybackError(error: unknown): void {
+    if (!this.active) {
+      return;
+    }
+    this.playbackError = error instanceof Error ? error : new Error("AI 语音播放失败");
+    this.callbacks.onPlaybackError?.(this.playbackError);
+  }
+
+  private playback(): StreamingSpeechPlaybackControllerLike {
+    if (!this.playbackController) {
+      this.playbackController = (this.options.createPlaybackController || (() => (
+        new StreamingSpeechPlaybackController()
+      )))();
+    }
+    return this.playbackController;
+  }
+
+  private resetPlayback(): void {
+    this.stopPlayback();
+    this.playbackChain = Promise.resolve();
+    this.playbackError = null;
+    void this.releasePlaybackControllerSafely();
+  }
+
+  private async releasePlaybackController(): Promise<void> {
+    const controller = this.playbackController;
+    this.playbackController = null;
+    if (controller) {
+      await controller.destroy();
+    }
+  }
+
+  private async releasePlaybackControllerSafely(): Promise<void> {
+    try {
+      await this.releasePlaybackController();
+    } catch {
+      // Cancellation already moved ownership away from the active turn.
+    }
+  }
+}
