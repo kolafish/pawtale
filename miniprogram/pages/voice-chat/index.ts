@@ -26,6 +26,7 @@ import {
   type VoiceChatConnectionStatus,
 } from "../../services/memoir-streaming-asr";
 import { StreamingVoiceController } from "../../services/streaming-voice-controller";
+import { VoiceBargeInMonitor } from "../../services/voice-barge-in-monitor";
 import {
   createMemoirAssistantTTS,
   createMemoirVoiceNoAnswerPrompt,
@@ -202,6 +203,8 @@ Page<VoiceChatData, {
   stopFollowUpAudio(): void;
   cancelFollowUpTTS(reason?: string): void;
   assistantTurnActiveForBargeIn(): boolean;
+  startAssistantBargeInMonitor(requestSerial: number): void;
+  stopAssistantBargeInMonitor(): void;
   markStreamingAudioFrameScheduled(event: StreamingSpeechPlaybackFrameEvent): void;
   updateStreamingTTSProgress(): void;
   streamingPlaybackTimeForProgress(): number;
@@ -235,6 +238,7 @@ Page<VoiceChatData, {
   handleError(message: string, error?: VoiceChatErrorInfo): void;
   audioPlayback: AudioPlaybackController;
   voiceStreaming: StreamingVoiceController;
+  assistantBargeInMonitor: VoiceBargeInMonitor;
   assistantTurnRuntime: VoiceAssistantTurnRuntime | null;
   assistantTurnQueue: AssistantTurnQueueItem[];
   assistantTurnQueueRunning: boolean;
@@ -255,6 +259,7 @@ Page<VoiceChatData, {
 }>({
   audioPlayback: new AudioPlaybackController(),
   voiceStreaming: new StreamingVoiceController(),
+  assistantBargeInMonitor: new VoiceBargeInMonitor(),
   assistantTurnRuntime: null,
   assistantTurnQueue: [],
   assistantTurnQueueRunning: false,
@@ -389,6 +394,7 @@ Page<VoiceChatData, {
   },
 
   onHide() {
+    this.stopAssistantBargeInMonitor();
     if (this.data.recording && this.voiceStreaming.hasClient()) {
       this.voiceStreaming.stopRecording();
       this.persistPendingVoiceClose("hide");
@@ -408,6 +414,7 @@ Page<VoiceChatData, {
     this.persistCurrentTranscriptSnapshot();
     this.persistPendingVoiceClose("unload");
     this.cancelFollowUpTTS();
+    this.stopAssistantBargeInMonitor();
     this.voiceStreaming.close();
   },
 
@@ -801,6 +808,7 @@ Page<VoiceChatData, {
       },
       onAudioDrained: (event) => {
         if (requestSerial === followUpRequestSerial) {
+          this.stopAssistantBargeInMonitor();
           const durationSeconds = Number(event.duration_seconds);
           if (Number.isFinite(durationSeconds) && durationSeconds > 0) {
             this.assistantStreamingAudioDurationSeconds = durationSeconds;
@@ -829,6 +837,7 @@ Page<VoiceChatData, {
     if (!playbackError && completed.expects_answer !== false) {
       this.autoListenPendingAfterPlayback = true;
     }
+    this.stopAssistantBargeInMonitor();
     this.stopFollowUpProgressTimer();
     this.setData({
       dismissedFollowUpMessageId: "",
@@ -989,12 +998,14 @@ Page<VoiceChatData, {
         ttsProgressPercent: 0,
       } : {}),
     });
+    this.startAssistantBargeInMonitor(requestSerial);
   },
 
   markStreamingPlaybackError(error, requestSerial) {
     if (requestSerial !== followUpRequestSerial) {
       return;
     }
+    this.stopAssistantBargeInMonitor();
     this.stopFollowUpProgressTimer();
     this.setData({
       followUpTTSError: error.message,
@@ -1227,6 +1238,7 @@ Page<VoiceChatData, {
           if (playToken === this.ttsPlayToken) {
             this.ttsProgressStartedAtMs = Date.now();
             this.startFollowUpProgressTimer(playToken, audio, fallbackDuration);
+            this.startAssistantBargeInMonitor(followUpRequestSerial);
           }
         },
         onTimeUpdate: (audio) => {
@@ -1243,6 +1255,7 @@ Page<VoiceChatData, {
         },
         onEnded: () => {
           if (playToken === this.ttsPlayToken) {
+            this.stopAssistantBargeInMonitor();
             if (options.autoListenAfterPlayback) {
               this.autoListenPendingAfterPlayback = true;
             }
@@ -1262,6 +1275,7 @@ Page<VoiceChatData, {
         },
         onError: () => {
           if (playToken === this.ttsPlayToken) {
+            this.stopAssistantBargeInMonitor();
             this.stopFollowUpProgressTimer();
             this.setData({
               followUpTTSPlaying: false,
@@ -1274,6 +1288,7 @@ Page<VoiceChatData, {
       });
     } catch (error) {
       if (playToken === this.ttsPlayToken) {
+        this.stopAssistantBargeInMonitor();
         this.setData({
           followUpTTSPlaying: false,
           followUpTTSError: error instanceof Error ? error.message : "AI 语音播放失败",
@@ -1284,6 +1299,7 @@ Page<VoiceChatData, {
   },
 
   stopFollowUpAudio() {
+    this.stopAssistantBargeInMonitor();
     this.audioPlayback.stop();
     this.assistantTurnRuntime?.stopPlayback();
     this.ttsPlayToken = this.audioPlayback.currentToken();
@@ -1345,6 +1361,37 @@ Page<VoiceChatData, {
       || this.data.followUpLoading
       || this.data.followUpTTSLoading
       || this.data.followUpTTSPlaying;
+  },
+
+  startAssistantBargeInMonitor(requestSerial) {
+    if (
+      this.data.recording
+      || !this.assistantTurnActiveForBargeIn()
+      || this.assistantBargeInMonitor.isRunning()
+    ) {
+      return;
+    }
+    this.assistantBargeInMonitor.start({
+      onBargeIn: () => {
+        if (
+          requestSerial !== followUpRequestSerial
+          || this.data.recording
+          || !this.assistantTurnActiveForBargeIn()
+        ) {
+          return;
+        }
+        this.setData({
+          autoListenStateText: "听到你说话，正在打断老余",
+        });
+        if (this.ensureVoiceAuthorization(false)) {
+          void this.startRecordingAfterPrivacy(false);
+        }
+      },
+    });
+  },
+
+  stopAssistantBargeInMonitor() {
+    this.assistantBargeInMonitor.stop();
   },
 
   markStreamingAudioFrameScheduled(event) {
