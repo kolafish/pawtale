@@ -64,6 +64,20 @@ class MemoirBookAutoRevisionJobStatus(str, Enum):
     SKIPPED = "skipped"
 
 
+class MemoirEditingJobType(str, Enum):
+    ROUTE_SOURCES = "route_sources"
+    REVISE_CHAPTER = "revise_chapter"
+    QUALITY_AUDIT = "quality_audit"
+
+
+class MemoirEditingJobStatus(str, Enum):
+    PENDING = "pending"
+    RUNNING = "running"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    SKIPPED = "skipped"
+
+
 class MemoirAutomationEventType(str, Enum):
     SOURCE_ASSIGNED = "source_assigned"
     SOURCE_HELD = "source_held"

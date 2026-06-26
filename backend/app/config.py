@@ -51,6 +51,9 @@ class Settings(BaseSettings):
     memoir_auto_revision_delay_seconds: int = 300
     memoir_auto_revision_poll_seconds: int = 30
     memoir_auto_revision_batch_size: int = 3
+    memoir_editing_worker_enabled: bool = True
+    memoir_editing_poll_seconds: int = 10
+    memoir_editing_batch_size: int = 5
 
     # GitHub App one-way project backup
     github_app_id: str = ""

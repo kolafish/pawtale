@@ -10,6 +10,7 @@ from app.migrations.git_sync import migrate_git_sync_schema
 from app.migrations.memoir_voice import assert_memoir_voice_schema, migrate_memoir_voice_schema
 from app.routers import auth_router, github_router, memoir_router, projects_router
 from app.services.memoir.book_auto_revision import auto_revision_worker_loop
+from app.services.memoir.editing_jobs import editing_worker_loop
 
 
 async def _auto_migrate():
@@ -44,16 +45,19 @@ async def lifespan(app: FastAPI):
     await _auto_migrate()
     settings = get_settings()
     stop_event: asyncio.Event | None = None
-    worker_task: asyncio.Task | None = None
-    if settings.memoir_auto_revision_worker_enabled:
+    worker_tasks: list[asyncio.Task] = []
+    if settings.memoir_auto_revision_worker_enabled or settings.memoir_editing_worker_enabled:
         stop_event = asyncio.Event()
-        worker_task = asyncio.create_task(auto_revision_worker_loop(stop_event))
+    if stop_event and settings.memoir_auto_revision_worker_enabled:
+        worker_tasks.append(asyncio.create_task(auto_revision_worker_loop(stop_event)))
+    if stop_event and settings.memoir_editing_worker_enabled:
+        worker_tasks.append(asyncio.create_task(editing_worker_loop(stop_event)))
     try:
         yield
     finally:
-        if stop_event and worker_task:
+        if stop_event and worker_tasks:
             stop_event.set()
-            await worker_task
+            await asyncio.gather(*worker_tasks, return_exceptions=True)
 
 
 app = FastAPI(

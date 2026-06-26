@@ -109,6 +109,55 @@ async def test_memoir_voice_migration_creates_automation_events_table():
         await engine.dispose()
 
 
+async def test_memoir_voice_migration_creates_editing_jobs_table():
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
+    try:
+        async with engine.begin() as conn:
+            await conn.execute(
+                text(
+                    """
+                    CREATE TABLE memoir_transcript_versions (
+                        id VARCHAR(36) NOT NULL,
+                        answer_id VARCHAR(36),
+                        voice_session_id VARCHAR(36),
+                        source_artifact_id VARCHAR(36),
+                        version_type VARCHAR(30) NOT NULL,
+                        content TEXT NOT NULL,
+                        provider VARCHAR(100),
+                        confidence FLOAT,
+                        created_by VARCHAR(20) NOT NULL,
+                        created_at DATETIME,
+                        PRIMARY KEY (id)
+                    )
+                    """
+                )
+            )
+
+        result = await migrate_memoir_voice_schema(engine)
+        second_result = await migrate_memoir_voice_schema(engine)
+
+        async with engine.begin() as conn:
+            table_name = await conn.scalar(
+                text(
+                    "SELECT name FROM sqlite_master "
+                    "WHERE type = 'table' AND name = 'memoir_editing_jobs'"
+                )
+            )
+            columns = {
+                row[1]
+                for row in (
+                    await conn.execute(text("PRAGMA table_info(memoir_editing_jobs)"))
+                ).fetchall()
+            }
+
+        assert "memoir_editing_jobs" in result["changed_tables"]
+        assert "memoir_editing_jobs" not in second_result["changed_tables"]
+        assert table_name == "memoir_editing_jobs"
+        assert {"job_type", "status", "run_after", "dedupe_key", "payload_json"}.issubset(columns)
+    finally:
+        await engine.dispose()
+
+
 async def test_memoir_voice_migration_creates_transcript_fts_table_and_triggers():
     engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
     try:
