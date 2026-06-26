@@ -1,7 +1,7 @@
 import {
   ASR_CORRECTION_RULES_CONFIG,
   type AsrCorrectionRuleConfig,
-} from "./asr-correction-rules";
+} from "./asr-correction-rules-runtime";
 
 type RegexRule = {
   kind: "regex";
