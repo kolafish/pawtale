@@ -22,6 +22,8 @@ from app.schemas.memoir_book import (
     MemoirBookSourceAssignmentRequest,
     MemoirBookSourceCoverageResponse,
     MemoirBookSourceMoveRequest,
+    MemoirBookSourceRouteRequest,
+    MemoirBookSourceRouteResponse,
     MemoirBookVoiceAssistantTTSRequest,
     MemoirBookVoiceCommandExecuteRequest,
     MemoirBookVoiceCommandExecuteResponse,
@@ -31,6 +33,7 @@ from app.schemas.memoir_book import (
 from app.services.memoir import book_drafts as memoir_book_drafts
 from app.services.memoir import book_outputs as memoir_book_outputs
 from app.services.memoir import book_plans as memoir_book_plans
+from app.services.memoir import source_router as memoir_source_router
 from app.services.memoir import book_voice_commands as memoir_book_voice_commands
 
 
@@ -189,6 +192,21 @@ async def get_mobile_memoir_book_source_coverage(
         db,
         user_id=current_user.id,
         project_id=project_id,
+    )
+
+
+@router.post("/projects/{project_id}/book-source-routing/dry-run", response_model=MemoirBookSourceRouteResponse)
+async def dry_run_mobile_memoir_book_source_routing(
+    project_id: str,
+    req: MemoirBookSourceRouteRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await memoir_source_router.route_book_source(
+        db,
+        user_id=current_user.id,
+        project_id=project_id,
+        utterance_id=req.utterance_id,
     )
 
 
