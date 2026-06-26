@@ -10,6 +10,7 @@ from app.migrations.git_sync import migrate_git_sync_schema
 from app.migrations.memoir_voice import assert_memoir_voice_schema, migrate_memoir_voice_schema
 from app.routers import auth_router, github_router, memoir_router, projects_router
 from app.services.memoir.book_auto_revision import auto_revision_worker_loop
+from app.services.memoir.editing_job_handlers import register_memoir_editing_job_handlers
 from app.services.memoir.editing_jobs import editing_worker_loop
 
 
@@ -43,6 +44,7 @@ async def lifespan(app: FastAPI):
     validate_runtime_settings()
     await init_db()
     await _auto_migrate()
+    register_memoir_editing_job_handlers()
     settings = get_settings()
     stop_event: asyncio.Event | None = None
     worker_tasks: list[asyncio.Task] = []
