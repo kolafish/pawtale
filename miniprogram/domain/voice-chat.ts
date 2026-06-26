@@ -248,6 +248,9 @@ export interface VoiceGatewayServerEvent {
   detail?: Record<string, unknown>;
   provider_payload?: Record<string, unknown>;
   provider_event_type?: string;
+  segment_final?: boolean;
+  turn_final?: boolean;
+  segment_replay?: boolean;
 }
 
 export interface VoiceChatErrorInfo {

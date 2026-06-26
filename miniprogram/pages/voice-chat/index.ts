@@ -1973,7 +1973,7 @@ Page<VoiceChatData, {
     if (event.message_id && event.utterance_id) {
       void this.confirmSavedTranscriptSnapshot(event);
     }
-    if (event.message_id) {
+    if (event.message_id && event.turn_final !== false) {
       void this.generateFollowUp(false);
     }
   },
