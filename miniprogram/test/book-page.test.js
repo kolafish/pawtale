@@ -1984,6 +1984,63 @@ test("book page plays assistant reply and auto-listens after playback", async ()
   }
 });
 
+test("book page drives voice assistant reply highlight from streaming playback progress", async () => {
+  let currentTimeSeconds = 10.5;
+  const { page } = loadBookPage({
+    streamingSpeechPlaybackExports: {
+      StreamingSpeechPlaybackController: class {
+        async appendFrame() {
+          return {
+            frameIndex: 0,
+            startAtSeconds: 10,
+            durationSeconds: 2,
+            ended: Promise.resolve(),
+          };
+        }
+        stats() {
+          return {
+            currentTimeSeconds,
+            segmentCount: 1,
+            underrunCount: 0,
+            nextPlayTimeSeconds: 12,
+            queuedAheadSeconds: 1.5,
+          };
+        }
+        stop() {}
+      },
+    },
+  });
+  const context = pageContext(page, { projectId: "project/1" });
+  context.playToken = 7;
+
+  try {
+    await page.playBookVoiceAssistantAudioFrame.call(
+      context,
+      {
+        audio: new Uint8Array([1, 2, 3]),
+        mimeType: "audio/L16",
+        sampleRate: 16000,
+        channels: 1,
+        bitsPerSample: 16,
+      },
+      7,
+      "外婆回忆录",
+    );
+
+    assert.equal(context.data.bookTTSSpokenText, "外");
+    assert.equal(context.data.bookTTSCurrentText, "婆");
+    assert.equal(context.data.bookTTSRemainingText, "回忆录");
+    assert.equal(context.data.bookTTSProgressPercent, 25);
+
+    currentTimeSeconds = 11;
+    page.updateBookVoiceStreamingTTSProgress.call(context);
+    assert.notEqual(context.data.bookTTSCurrentText, "外婆回忆录");
+    assert.ok(context.data.bookTTSProgressPercent > 25);
+  } finally {
+    page.stopBookTTSProgressTimer.call(context);
+  }
+});
+
 test("book page keeps pending preview during auto-listen for voice confirmation", async () => {
   const calls = [];
   const { page } = loadBookPage({
