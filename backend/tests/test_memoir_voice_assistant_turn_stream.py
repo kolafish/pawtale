@@ -138,11 +138,12 @@ async def test_voice_assistant_turn_cancel_does_not_persist_partial_message(
     await _wait_for_event(stream_client, "turn.ready")
     await stream_client.push({"type": "turn.start"})
     await _wait_for_event(stream_client, "turn.started")
-    await stream_client.push({"type": "turn.cancel"})
+    await stream_client.push({"type": "turn.cancel", "reason": "interrupted_by_user"})
     cancelled = await _wait_for_event(stream_client, "turn.cancelled")
     await asyncio.wait_for(run_task, timeout=1)
 
-    assert cancelled["state"] == "cancelled"
+    assert cancelled["state"] == "interrupted"
+    assert cancelled["reason"] == "interrupted_by_user"
     assistant_count = await test_db.scalar(
         select(func.count(MemoirChatMessage.id))
         .where(

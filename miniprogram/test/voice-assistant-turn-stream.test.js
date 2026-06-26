@@ -295,9 +295,16 @@ test("assistant turn stream local cancel settles pending start", async () => {
 
   const startPromise = client.start({ connectTimeoutMs: 50 });
   await new Promise((resolve) => setImmediate(resolve));
-  client.cancel();
+  harness.handlers.open();
+  socketMessage(harness.handlers, { type: "turn.ready" });
+  await new Promise((resolve) => setImmediate(resolve));
+  client.cancel("interrupted_by_user");
 
   await assert.rejects(startPromise, /AI 回应已取消/);
+  assert.deepEqual(harness.sent[1], {
+    type: "turn.cancel",
+    reason: "interrupted_by_user",
+  });
   assert.equal(harness.closeCalls(), 1);
   delete global.wx;
 });

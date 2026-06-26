@@ -95,6 +95,7 @@ export interface VoiceAssistantTurnTerminalEvent {
   voice_session_id?: string;
   state?: string;
   error?: string;
+  reason?: string;
 }
 
 export interface PreparedAssistantStreamAudioFrame extends StreamingSpeechPCMFrame {
@@ -231,15 +232,16 @@ export class VoiceAssistantTurnStreamClient {
     throw new Error(terminalEvent.error || (terminalEvent.type === "turn.cancelled" ? "AI 回应已取消" : "AI 回应失败"));
   }
 
-  cancel(): void {
+  cancel(reason = "cancelled"): void {
     if (this.closed) {
       return;
     }
-    this.sendJson({ type: "turn.cancel" });
+    this.sendJson({ type: "turn.cancel", reason });
     this.resolveStart?.({
       type: "turn.cancelled",
       voice_session_id: this.voiceSessionId,
-      state: "cancelled",
+      state: reason === "interrupted_by_user" ? "interrupted" : "cancelled",
+      reason,
       error: "AI 回应已取消",
     });
     this.closeSocket("assistant turn cancelled");

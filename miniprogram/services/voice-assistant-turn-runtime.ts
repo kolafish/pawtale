@@ -15,7 +15,7 @@ import {
 
 interface VoiceAssistantTurnStreamClientLike {
   start(options?: { regenerate?: boolean }): Promise<VoiceAssistantTurnCompletedEvent>;
-  cancel(): void;
+  cancel(reason?: string): void;
   close(): void;
 }
 
@@ -89,14 +89,18 @@ export class VoiceAssistantTurnRuntime {
     }
   }
 
-  cancel(): void {
+  cancel(reason = "cancelled"): void {
     if (!this.active && !this.streamClient) {
       return;
     }
     this.active = false;
-    this.streamClient?.cancel();
+    this.streamClient?.cancel(reason);
     this.streamClient = null;
     this.resetPlayback();
+  }
+
+  interrupt(): void {
+    this.cancel("interrupted_by_user");
   }
 
   close(): void {

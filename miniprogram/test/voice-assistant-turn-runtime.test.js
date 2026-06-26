@@ -164,7 +164,7 @@ test("voice assistant turn runtime returns completed turn with playback error", 
 });
 
 test("voice assistant turn runtime cancel stops stream and playback", async () => {
-  let cancelled = false;
+  const cancelReasons = [];
   let stopped = false;
   let destroyed = false;
   const runtime = new VoiceAssistantTurnRuntime("voice-1", {}, {
@@ -181,8 +181,8 @@ test("voice assistant turn runtime cancel stops stream and playback", async () =
         });
         return new Promise(() => {});
       },
-      cancel() {
-        cancelled = true;
+      cancel(reason) {
+        cancelReasons.push(reason);
       },
       close() {},
     }),
@@ -216,9 +216,9 @@ test("voice assistant turn runtime cancel stops stream and playback", async () =
 
   void runtime.start();
   await new Promise((resolve) => setImmediate(resolve));
-  runtime.cancel();
+  runtime.cancel("interrupted_by_user");
 
-  assert.equal(cancelled, true);
+  assert.deepEqual(cancelReasons, ["interrupted_by_user"]);
   assert.equal(stopped, true);
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(destroyed, true);

@@ -945,6 +945,87 @@ test("voice chat streams one assistant turn and plays pcm audio frames", async (
   assert.deepEqual(playbackEvents, ["appendFrame", "waitForDrain", "destroy", "startRecording"]);
 });
 
+test("voice chat mic interrupts active assistant turn and starts recording", async () => {
+  const cancelReasons = [];
+  const startOptions = [];
+  let audioStopped = false;
+  const page = loadVoiceChatPage({
+    voiceAuthorizationExports: {
+      readVoiceAuthorizationConsent: () => true,
+    },
+  });
+  const context = {
+    ...page,
+    data: {
+      ...page.data,
+      voiceSessionId: "voice-1",
+      voiceAuthorizationAgreed: true,
+      status: "ready",
+      guidanceMode: "guided_interview",
+      followUpLoading: true,
+      followUpTTSLoading: true,
+      followUpTTSPlaying: true,
+      followUpTTSStateText: "老余正在说",
+      followUpError: "previous error",
+      assistantPromptText: "那时候在院子里，外婆最常带着您做什么？",
+      transcriptLines: [
+        { id: "user-line-1", role: "user", text: "我小时候经常在院子里摘菜。" },
+        {
+          id: "assistant-stream-1",
+          role: "assistant",
+          text: "那时候在院子里，外婆最常带着您做什么？",
+        },
+      ],
+    },
+    assistantStreamLineId: "assistant-stream-1",
+    assistantTurnRuntime: {
+      cancel(reason) {
+        cancelReasons.push(reason);
+      },
+      stopPlayback() {},
+      stats() {
+        return null;
+      },
+    },
+    audioPlayback: {
+      currentToken: () => 1,
+      currentAudio: () => null,
+      isCurrentToken: () => true,
+      nextToken: () => 1,
+      stop() {
+        audioStopped = true;
+      },
+    },
+    voiceStreaming: {
+      hasClient: () => true,
+      startRecording(options) {
+        startOptions.push(options);
+        return true;
+      },
+      stopRecording() {},
+      close() {},
+    },
+    setData(patch) {
+      this.data = { ...this.data, ...patch };
+    },
+  };
+
+  const started = await page.startRecordingAfterPrivacy.call(context, false);
+
+  assert.equal(started, true);
+  assert.deepEqual(cancelReasons, ["interrupted_by_user"]);
+  assert.deepEqual(startOptions, [{ noVoiceActivityTimeoutMs: 0 }]);
+  assert.equal(audioStopped, true);
+  assert.equal(context.assistantTurnRuntime, null);
+  assert.equal(context.data.recording, true);
+  assert.equal(context.data.followUpLoading, false);
+  assert.equal(context.data.followUpTTSLoading, false);
+  assert.equal(context.data.followUpTTSPlaying, false);
+  assert.equal(context.data.followUpError, "");
+  assert.equal(context.data.primaryActionText, "暂停收音");
+  assert.deepEqual(context.data.transcriptLines.map((line) => line.id), ["user-line-1"]);
+});
+
 test("voice chat drives first streaming highlight from WebAudio playback progress", async () => {
   const progressCalls = [];
   const prompt = "欢迎回来，咱们接着聊。";
