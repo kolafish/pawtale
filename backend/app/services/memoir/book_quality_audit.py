@@ -1,8 +1,18 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domain.memoir.types import MemoirAutomationEventStatus, MemoirAutomationEventType
+from app.config import get_settings
+from app.domain.memoir.types import (
+    MemoirAutomationEventStatus,
+    MemoirAutomationEventType,
+    MemoirEditingJobStatus,
+    MemoirEditingJobType,
+)
+from app.models.memoir import MemoirEditingJob
+from app.models.projects import Project
 from app.schemas.memoir_book import (
     MemoirBookQualityAuditChapterResponse,
     MemoirBookQualityAuditRunRequest,
@@ -11,6 +21,33 @@ from app.schemas.memoir_book import (
 from app.schemas.memoir_voice import MemoirAutomationEventResponse, MemoirProjectProgressChapterResponse
 from app.services.memoir import automation_events
 from app.services.memoir import progress_snapshot
+from app.services.memoir.editing_jobs import EditingJobResult, enqueue_editing_job
+
+
+def _utcnow() -> datetime:
+    return datetime.now(UTC).replace(tzinfo=None)
+
+
+async def schedule_project_quality_audit(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    reason: str,
+    run_after: datetime | None = None,
+) -> MemoirEditingJob:
+    settings = get_settings()
+    scheduled_at = run_after or (_utcnow() + timedelta(seconds=max(0, settings.memoir_quality_audit_delay_seconds)))
+    return await enqueue_editing_job(
+        db,
+        project_id=project_id,
+        job_type=MemoirEditingJobType.QUALITY_AUDIT,
+        payload_json={
+            "reason": reason.strip() or "project_updated",
+        },
+        run_after=scheduled_at,
+        dedupe_key=f"quality_audit:{project_id}",
+        replace_completed=True,
+    )
 
 
 def _chapter_audit_item(
@@ -190,4 +227,25 @@ async def run_book_quality_audit(
         next_actions=next_actions,
         chapter_items=chapter_items,
         event=event_response,
+    )
+
+
+async def run_book_quality_audit_job(db: AsyncSession, job: MemoirEditingJob) -> EditingJobResult:
+    project = await db.get(Project, job.project_id)
+    if not project or not project.user_id:
+        return EditingJobResult(status=MemoirEditingJobStatus.SKIPPED, error_message="project unavailable")
+
+    response = await run_book_quality_audit(
+        db,
+        user_id=project.user_id,
+        project_id=job.project_id,
+        req=MemoirBookQualityAuditRunRequest(record_event=True),
+    )
+    return EditingJobResult(
+        result_json={
+            "overall_status": response.overall_status,
+            "summary_text": response.summary_text,
+            "event_id": response.event.id if response.event else "",
+            "reason": str((job.payload_json or {}).get("reason") or ""),
+        },
     )

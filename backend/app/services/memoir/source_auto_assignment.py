@@ -21,6 +21,7 @@ from app.schemas.memoir_book import (
 )
 from app.schemas.memoir_voice import MemoirAutomationEventResponse
 from app.services.memoir import automation_events
+from app.services.memoir import book_quality_audit
 from app.services.memoir import book_plans
 from app.services.memoir.editing_jobs import EditingJobResult
 from app.services.memoir import source_router
@@ -288,6 +289,11 @@ async def run_source_routing_job(db: AsyncSession, job: MemoirEditingJob) -> Edi
         if exc.status_code in {400, 404}:
             return EditingJobResult(status=MemoirEditingJobStatus.SKIPPED, error_message=str(exc.detail))
         raise
+    await book_quality_audit.schedule_project_quality_audit(
+        db,
+        project_id=job.project_id,
+        reason="source_routing_completed",
+    )
     return EditingJobResult(
         result_json={
             "evaluated_source_count": response.evaluated_source_count,

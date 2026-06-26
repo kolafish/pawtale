@@ -1,7 +1,11 @@
+import pytest
 from sqlalchemy import select
 
-from app.domain.memoir.types import MemoirAutomationEventType
-from app.models.memoir import MemoirAutomationEvent
+from app.domain.memoir.types import MemoirAutomationEventType, MemoirEditingJobStatus, MemoirEditingJobType
+from app.models.memoir import MemoirAutomationEvent, MemoirEditingJob
+from app.services.memoir.book_quality_audit import schedule_project_quality_audit
+from app.services.memoir.editing_job_handlers import register_memoir_editing_job_handlers
+from app.services.memoir.editing_jobs import clear_editing_job_handlers, run_editing_job
 from tests.memoir_helpers import (
     create_test_book_plan,
     create_test_chapter_draft,
@@ -9,6 +13,13 @@ from tests.memoir_helpers import (
     ensure_mobile_memoir_project,
     memoir_source_ref,
 )
+
+
+@pytest.fixture(autouse=True)
+def clear_handlers():
+    clear_editing_job_handlers()
+    yield
+    clear_editing_job_handlers()
 
 
 async def test_book_quality_audit_flags_pending_chapter_update_and_records_event(client, test_db):
@@ -58,6 +69,54 @@ async def test_book_quality_audit_flags_pending_chapter_update_and_records_event
     assert event.metadata_json["overall_status"] == "needs_updates"
     assert event.metadata_json["chapter_items"][0]["chapter_id"] == chapter.id
     assert event.metadata_json["chapter_items"][0]["status"] == "needs_update"
+
+
+async def test_book_quality_audit_job_records_event(client, test_db):
+    register_memoir_editing_job_handlers()
+    first = await create_test_voice_transcript(client, test_db, "小时候在外婆家的院子里摘菜。")
+    second = await create_test_voice_transcript(client, test_db, "后来又讲了夏天和外婆一起剥青豆。")
+    project_id = first["session"]["project_id"]
+    _, chapter = await create_test_book_plan(
+        test_db,
+        project_id=project_id,
+        source_refs=[
+            memoir_source_ref(first, "外婆家的院子"),
+            memoir_source_ref(second, "剥青豆"),
+        ],
+        chapter_title="院子里的童年",
+    )
+    chapter.metadata_json = {"pending_source_utterance_ids": [second["utterance_id"]]}
+    await create_test_chapter_draft(
+        test_db,
+        project_id=project_id,
+        chapter_id=chapter.id,
+        content="小时候在外婆家的院子里摘菜。",
+    )
+
+    job = await schedule_project_quality_audit(
+        test_db,
+        project_id=project_id,
+        reason="test",
+    )
+    await test_db.commit()
+
+    assert job.job_type == MemoirEditingJobType.QUALITY_AUDIT.value
+    assert job.dedupe_key == f"quality_audit:{project_id}"
+    assert await run_editing_job(test_db, job.id) is True
+    await test_db.refresh(job)
+    assert job.status == MemoirEditingJobStatus.SUCCEEDED.value
+    assert job.result_json["overall_status"] == "needs_updates"
+    assert job.result_json["reason"] == "test"
+
+    event = await test_db.scalar(
+        select(MemoirAutomationEvent).where(
+            MemoirAutomationEvent.project_id == project_id,
+            MemoirAutomationEvent.event_type == MemoirAutomationEventType.AUDIT_COMPLETED.value,
+        )
+    )
+    assert event is not None
+    assert event.summary_text == "当前有 1 个章节需要优先处理。"
+    assert event.id == job.result_json["event_id"]
 
 
 async def test_book_quality_audit_returns_needs_plan_without_recording_event(client, test_db):

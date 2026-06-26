@@ -141,6 +141,17 @@ async def test_source_routing_job_assigns_high_confidence_source(client, test_db
     assert event.utterance_ids_json == [uncovered["utterance_id"]]
     assert event.summary_text == "1 条讲述已自动整理进「院子里的童年」。"
 
+    audit_job = await test_db.scalar(
+        select(MemoirEditingJob).where(
+            MemoirEditingJob.project_id == project_id,
+            MemoirEditingJob.job_type == MemoirEditingJobType.QUALITY_AUDIT.value,
+        )
+    )
+    assert audit_job is not None
+    assert audit_job.status == MemoirEditingJobStatus.PENDING.value
+    assert audit_job.dedupe_key == f"quality_audit:{project_id}"
+    assert audit_job.payload_json["reason"] == "source_routing_completed"
+
 
 async def test_source_auto_assignment_skips_new_topic_without_changing_plan(client, test_db):
     first = await create_test_voice_transcript(

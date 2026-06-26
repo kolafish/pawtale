@@ -653,6 +653,7 @@ async def test_voice_gateway_persistence_saves_final_message_utterance_and_audio
         json={"guidance_mode": "free_narration"},
     )
     voice_session_id = create_response.json()["session"]["id"]
+    project_id = create_response.json()["session"]["project_id"]
     persistence = VoiceGatewayPersistence(
         db=test_db,
         voice_session_id=voice_session_id,
@@ -683,9 +684,14 @@ async def test_voice_gateway_persistence_saves_final_message_utterance_and_audio
     corrected_version = await test_db.scalar(
         select(MemoirTranscriptVersion).where(MemoirTranscriptVersion.id == persisted["transcript_version_id"])
     )
-    editing_job = await test_db.scalar(
-        select(MemoirEditingJob).where(MemoirEditingJob.project_id == create_response.json()["session"]["project_id"])
-    )
+    editing_jobs = (
+        await test_db.execute(
+            select(MemoirEditingJob).where(
+                MemoirEditingJob.project_id == project_id
+            )
+        )
+    ).scalars().all()
+    jobs_by_type = {job.job_type: job for job in editing_jobs}
     versions = (
         await test_db.execute(
             select(MemoirTranscriptVersion)
@@ -724,12 +730,17 @@ async def test_voice_gateway_persistence_saves_final_message_utterance_and_audio
     assert corrected_version.version_type == "dialect_corrected"
     assert corrected_version.created_by == "ai"
     assert corrected_version.provider == "fake-ai"
+    editing_job = jobs_by_type.get(MemoirEditingJobType.ROUTE_SOURCES.value)
     assert editing_job is not None
-    assert editing_job.job_type == MemoirEditingJobType.ROUTE_SOURCES.value
     assert editing_job.status == MemoirEditingJobStatus.PENDING.value
     assert editing_job.dedupe_key == f"route_source:{utterance.id}"
     assert editing_job.payload_json["utterance_ids"] == [utterance.id]
     assert editing_job.payload_json["source"] == "voice_utterance_segment"
+    audit_job = jobs_by_type.get(MemoirEditingJobType.QUALITY_AUDIT.value)
+    assert audit_job is not None
+    assert audit_job.status == MemoirEditingJobStatus.PENDING.value
+    assert audit_job.dedupe_key == f"quality_audit:{project_id}"
+    assert audit_job.payload_json["reason"] == "voice_utterance_segment_saved"
 
 
 async def test_voice_gateway_persistence_rejects_audio_stream_over_limit(client, test_db, monkeypatch):

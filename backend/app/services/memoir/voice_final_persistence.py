@@ -17,6 +17,7 @@ from app.domain.memoir.types import (
 from app.models.memoir import MemoirChatMessage, MemoirTranscriptVersion, MemoirVoiceSession, MemoirVoiceUtterance
 from app.models.projects import Project
 from app.services.memoir import audio_files as memoir_audio_files
+from app.services.memoir import book_quality_audit
 from app.services.memoir import editing_jobs
 from app.services.memoir.asr import StreamingASREvent
 from app.services.memoir.voice_transcripts import (
@@ -159,6 +160,11 @@ class VoiceFinalPersistenceService:
                     "source": "voice_utterance_segment",
                 },
                 dedupe_key=f"route_source:{utterance.id}",
+            )
+            await book_quality_audit.schedule_project_quality_audit(
+                self.db,
+                project_id=voice_session.project_id,
+                reason="voice_utterance_segment_saved",
             )
             await self.db.commit()
             return VoiceFinalPersistenceResult(
