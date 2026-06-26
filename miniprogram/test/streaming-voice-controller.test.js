@@ -7,8 +7,9 @@ const { clearModule, mockModule } = require("./page-harness");
 function loadControllerWithFakeClient() {
   const clients = [];
   class FakeStreamingClient {
-    constructor(options) {
+    constructor(options, recorderResource) {
       this.options = options;
+      this.recorderResource = recorderResource;
       this.closeCalls = [];
       this.startRecordingCalls = [];
       this.stopRecordingCalls = 0;
@@ -46,7 +47,8 @@ function loadControllerWithFakeClient() {
   });
   clearModule("../services/streaming-voice-controller.ts");
   const { StreamingVoiceController } = require("../services/streaming-voice-controller.ts");
-  return { StreamingVoiceController, clients };
+  const { sharedRecorderResource } = require("../services/recorder-resource.ts");
+  return { StreamingVoiceController, clients, sharedRecorderResource };
 }
 
 function connectOptions(callbacks = {}) {
@@ -65,7 +67,7 @@ function connectOptions(callbacks = {}) {
 }
 
 test("StreamingVoiceController replaces the previous client and ignores stale callbacks", async () => {
-  const { StreamingVoiceController, clients } = loadControllerWithFakeClient();
+  const { StreamingVoiceController, clients, sharedRecorderResource } = loadControllerWithFakeClient();
   const partials = [];
   const controller = new StreamingVoiceController();
 
@@ -78,6 +80,8 @@ test("StreamingVoiceController replaces the previous client and ignores stale ca
   secondClient.options.callbacks.onPartial("new");
 
   assert.equal(controller.currentClient(), secondClient);
+  assert.equal(firstClient.recorderResource, sharedRecorderResource);
+  assert.equal(secondClient.recorderResource, sharedRecorderResource);
   assert.deepEqual(firstClient.closeCalls, [{ force: true }]);
   assert.deepEqual(partials, ["second:new"]);
 });

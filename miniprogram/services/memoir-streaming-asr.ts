@@ -13,6 +13,7 @@ import {
   clientError,
   normalizeVoiceGatewayEvent,
 } from "./memoir-streaming-asr-protocol";
+import { WechatRecorderResource } from "./recorder-resource";
 import { VoiceActivityDetector } from "./voice-activity-detector";
 import { wechatPrivacyErrorMessage } from "./wechat-privacy";
 
@@ -33,10 +34,9 @@ const SESSION_STOP_TIMEOUT_MS = 8000;
 const DEFAULT_SILENCE_LEVEL_THRESHOLD = 0.015;
 const DEFAULT_MIN_AUTO_STOP_RECORDING_MS = 1200;
 const MIN_VOICE_ACTIVITY_MS = 240;
-const recorderManager = wx.getRecorderManager();
 
 let activeClient: MemoirStreamingAsrClient | null = null;
-let recorderEventsBound = false;
+let clientSerial = 0;
 
 export type VoiceChatConnectionStatus =
   | "idle"
@@ -118,9 +118,15 @@ export class MemoirStreamingAsrClient {
     resolve: () => void;
     reject: (error: Error) => void;
   }> = [];
+  private readonly recorderOwnerId: string;
 
-  constructor(options: MemoirStreamingAsrOptions) {
+  constructor(
+    options: MemoirStreamingAsrOptions,
+    private readonly recorderResource: WechatRecorderResource = new WechatRecorderResource(),
+  ) {
     this.options = options;
+    clientSerial += 1;
+    this.recorderOwnerId = `memoir-streaming-asr-${clientSerial}`;
     this.voiceActivityDetector = this.createVoiceActivityDetector();
   }
 
@@ -225,7 +231,6 @@ export class MemoirStreamingAsrClient {
     if (!this.socketOpen || this.recording) {
       return false;
     }
-    bindRecorderEvents();
     activeClient = this;
     this.recording = true;
     this.recorderStarted = false;
@@ -249,14 +254,31 @@ export class MemoirStreamingAsrClient {
     this.captureStartedAtMs = Date.now();
     this.emitCaptureStats("opening");
     try {
-      recorderManager.start({
+      const started = this.recorderResource.start(this.recorderOwnerId, {
         duration: STREAMING_RECORDING_DURATION_MS,
         sampleRate: 16000,
         numberOfChannels: 1,
         encodeBitRate: STREAMING_ENCODE_BIT_RATE,
         format: "PCM",
         frameSize: STREAMING_FRAME_SIZE_KB,
+      }, {
+        onStart: () => {
+          this.handleRecorderStarted();
+        },
+        onFrame: (result) => {
+          this.handleFrame(result.frameBuffer, result.isLastFrame);
+        },
+        onError: (message) => {
+          this.handleRecorderError(message);
+        },
+        onStop: () => {
+          this.handleRecorderStopped();
+        },
       });
+      if (!started) {
+        this.handleRecorderError("麦克风正在使用中");
+        return false;
+      }
       this.startNoVoiceActivityTimer();
     } catch (error) {
       this.clearNoVoiceActivityTimer();
@@ -276,10 +298,14 @@ export class MemoirStreamingAsrClient {
     this.options.callbacks.onStatus("stopping");
     if (this.recorderStarted) {
       this.emitCaptureStats("stopping");
-      recorderManager.stop();
+      this.recorderResource.stop(this.recorderOwnerId);
     } else {
       this.acceptingFrames = false;
       this.emitCaptureStats("idle");
+      this.recorderResource.forceRelease(this.recorderOwnerId);
+      if (activeClient === this) {
+        activeClient = null;
+      }
     }
   }
 
@@ -378,6 +404,9 @@ export class MemoirStreamingAsrClient {
     this.rejectWaiters(readableMessage);
     this.options.callbacks.onError(readableMessage, clientError(readableMessage, "recorder"));
     this.options.callbacks.onStatus("error");
+    if (activeClient === this) {
+      activeClient = null;
+    }
   }
 
   handleRecorderStarted(): void {
@@ -387,12 +416,7 @@ export class MemoirStreamingAsrClient {
     this.recorderStarted = true;
     if (!this.recording) {
       this.emitCaptureStats("stopping");
-      try {
-        recorderManager.stop();
-      } catch {
-        this.recorderStarted = false;
-        this.emitCaptureStats("idle");
-      }
+      this.recorderResource.stop(this.recorderOwnerId);
       return;
     }
     this.acceptingFrames = true;
@@ -451,11 +475,7 @@ export class MemoirStreamingAsrClient {
     this.acceptingFrames = false;
     this.clearNoVoiceActivityTimer();
     if (this.recorderStarted) {
-      try {
-        recorderManager.stop();
-      } catch {
-        // Recorder may already be stopped by WeChat after permission or system interruptions.
-      }
+      this.recorderResource.stop(this.recorderOwnerId);
     }
     this.recorderStarted = false;
     this.emitCaptureStats(captureState);
@@ -524,6 +544,9 @@ export class MemoirStreamingAsrClient {
     this.socketTask = null;
     this.socketOpen = false;
     this.recording = false;
+    if (this.recorderStarted || this.recorderResource.isOwnedBy(this.recorderOwnerId)) {
+      this.recorderResource.stop(this.recorderOwnerId);
+    }
     this.recorderStarted = false;
     this.acceptingFrames = false;
     this.emitCaptureStats("idle");
@@ -627,25 +650,6 @@ export class MemoirStreamingAsrClient {
       },
     });
   }
-}
-
-function bindRecorderEvents(): void {
-  if (recorderEventsBound) {
-    return;
-  }
-  recorderManager.onStart(() => {
-    activeClient?.handleRecorderStarted();
-  });
-  recorderManager.onFrameRecorded((result) => {
-    activeClient?.handleFrame(result.frameBuffer, result.isLastFrame);
-  });
-  recorderManager.onError((error) => {
-    activeClient?.handleRecorderError(error.errMsg || "录音失败");
-  });
-  recorderManager.onStop(() => {
-    activeClient?.handleRecorderStopped();
-  });
-  recorderEventsBound = true;
 }
 
 function safeJsonParse(data: string): unknown {
