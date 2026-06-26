@@ -19,6 +19,7 @@ REALTIME_VOICE_TABLES = (
 )
 MEMOIR_AUXILIARY_TABLES = (
     "memoir_automation_events",
+    "memoir_editing_jobs",
 )
 TRANSCRIPT_FTS_TABLE = "memoir_voice_utterances_fts"
 TRANSCRIPT_FTS_TRIGGERS = (
