@@ -5,22 +5,21 @@ from sqlalchemy import select
 
 from app.domain.memoir.types import (
     MemoirAutomationEventType,
-    MemoirBookAutoRevisionJobStatus,
     MemoirBookChapterDraftStatus,
     MemoirBookPlanStatus,
     MemoirCreatedBy,
+    MemoirEditingJobStatus,
 )
 from app.models.memoir import (
     MemoirAutomationEvent,
-    MemoirBookAutoRevisionJob,
     MemoirBookChapterDraft,
     MemoirBookChapterDraftVersion,
+    MemoirEditingJob,
     MemoirBookPlanChapter,
 )
-from app.services.memoir.book_auto_revision import (
-    run_auto_revision_job,
-    schedule_chapter_auto_revision,
-)
+from app.services.memoir.book_auto_revision import schedule_chapter_auto_revision
+from app.services.memoir.editing_job_handlers import register_memoir_editing_job_handlers
+from app.services.memoir.editing_jobs import clear_editing_job_handlers, run_editing_job
 from tests.memoir_helpers import (
     create_test_book_plan,
     create_test_chapter_draft,
@@ -322,6 +321,8 @@ async def test_memoir_book_auto_revision_job_supplements_pending_sources(
     test_db,
     monkeypatch,
 ):
+    clear_editing_job_handlers()
+    register_memoir_editing_job_handlers()
     first = await create_test_voice_transcript(client, test_db, "我小时候常在外婆家的院子里晒太阳。")
     second = await create_test_voice_transcript(client, test_db, "后来我又讲了第一次离家去县城读书。")
     project_id = first["session"]["project_id"]
@@ -365,7 +366,7 @@ async def test_memoir_book_auto_revision_job_supplements_pending_sources(
     )
     await test_db.commit()
     assert job is not None
-    assert job.metadata_json["base_version_id"] == version.id
+    assert job.payload_json["base_version_id"] == version.id
 
     model_calls = []
     fake_ai = FakeBookDraftAI(
@@ -393,14 +394,14 @@ async def test_memoir_book_auto_revision_job_supplements_pending_sources(
         fake_get_ai_service,
     )
 
-    assert await run_auto_revision_job(test_db, job.id) is True
+    assert await run_editing_job(test_db, job.id) is True
 
     refreshed_job = await test_db.scalar(
-        select(MemoirBookAutoRevisionJob).where(MemoirBookAutoRevisionJob.id == job.id)
+        select(MemoirEditingJob).where(MemoirEditingJob.id == job.id)
     )
-    assert refreshed_job.status == MemoirBookAutoRevisionJobStatus.SUCCEEDED.value
+    assert refreshed_job.status == MemoirEditingJobStatus.SUCCEEDED.value
     assert refreshed_job.attempts == 1
-    assert refreshed_job.metadata_json["result_version_id"]
+    assert refreshed_job.result_json["result_version_id"]
     refreshed_draft = await test_db.scalar(
         select(MemoirBookChapterDraft).where(MemoirBookChapterDraft.id == draft.id)
     )

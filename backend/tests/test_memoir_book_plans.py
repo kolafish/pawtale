@@ -3,14 +3,15 @@ import json
 from sqlalchemy import select
 
 from app.domain.memoir.types import (
-    MemoirBookAutoRevisionJobStatus,
     MemoirBookChapterDraftStatus,
     MemoirCreatedBy,
+    MemoirEditingJobStatus,
+    MemoirEditingJobType,
 )
 from app.models.memoir import (
-    MemoirBookAutoRevisionJob,
     MemoirBookChapterDraft,
     MemoirBookChapterDraftVersion,
+    MemoirEditingJob,
     MemoirBookPlan,
     MemoirBookPlanChapter,
 )
@@ -467,14 +468,15 @@ async def test_mobile_memoir_book_source_assignment_appends_source_and_marks_dra
     assert refreshed_draft.status == MemoirBookChapterDraftStatus.DRAFT.value
     assert refreshed_draft.metadata_json["status_reason"] == "new_sources_assigned"
     job = await test_db.scalar(
-        select(MemoirBookAutoRevisionJob).where(MemoirBookAutoRevisionJob.chapter_id == chapter_id)
+        select(MemoirEditingJob).where(MemoirEditingJob.chapter_id == chapter_id)
     )
     assert job is not None
-    assert job.status == MemoirBookAutoRevisionJobStatus.PENDING.value
+    assert job.job_type == MemoirEditingJobType.REVISE_CHAPTER.value
+    assert job.status == MemoirEditingJobStatus.PENDING.value
     assert job.attempts == 0
-    assert job.metadata_json["base_version_id"] == version.id
-    assert job.metadata_json["pending_source_utterance_ids"] == [later["utterance_id"]]
-    assert job.metadata_json["ai_model"] == "deepseek-v4-pro"
+    assert job.payload_json["base_version_id"] == version.id
+    assert job.payload_json["pending_source_utterance_ids"] == [later["utterance_id"]]
+    assert job.payload_json["ai_model"] == "deepseek-v4-pro"
 
     coverage = await client.get(f"/api/mobile/memoir/projects/{project_id}/book-source-coverage")
     assert coverage.status_code == 200

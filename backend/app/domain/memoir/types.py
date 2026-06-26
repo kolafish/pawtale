@@ -56,14 +56,6 @@ class MemoirBookChapterDraftStatus(str, Enum):
     CONFIRMED = "confirmed"
 
 
-class MemoirBookAutoRevisionJobStatus(str, Enum):
-    PENDING = "pending"
-    RUNNING = "running"
-    SUCCEEDED = "succeeded"
-    FAILED = "failed"
-    SKIPPED = "skipped"
-
-
 class MemoirEditingJobType(str, Enum):
     ROUTE_SOURCES = "route_sources"
     REVISE_CHAPTER = "revise_chapter"

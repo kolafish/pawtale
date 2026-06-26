@@ -1,24 +1,22 @@
 from __future__ import annotations
 
-import asyncio
-import logging
 from datetime import UTC, datetime, timedelta
 
 from fastapi import HTTPException
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.config import get_settings
-from app.database import async_session_maker
 from app.domain.memoir.types import (
     MemoirAutomationEventStatus,
     MemoirAutomationEventType,
-    MemoirBookAutoRevisionJobStatus,
+    MemoirEditingJobStatus,
+    MemoirEditingJobType,
 )
 from app.models.memoir import (
-    MemoirBookAutoRevisionJob,
     MemoirBookChapterDraft,
+    MemoirEditingJob,
     MemoirBookPlanChapter,
 )
 from app.models.projects import Project
@@ -30,10 +28,10 @@ from app.services.memoir.book_plan_sources import (
     pending_source_ids as _pending_source_ids,
     removed_source_ids as _removed_source_ids,
 )
+from app.services.memoir.editing_jobs import EditingJobResult, enqueue_editing_job
 
 
 AI_MODEL_METADATA_KEY = "ai_model"
-logger = logging.getLogger(__name__)
 
 
 def _utcnow() -> datetime:
@@ -75,7 +73,7 @@ async def schedule_chapter_auto_revision(
     chapter_id: str,
     ai_model: str | None = None,
     run_after: datetime | None = None,
-) -> MemoirBookAutoRevisionJob | None:
+) -> MemoirEditingJob | None:
     chapter = await db.get(MemoirBookPlanChapter, chapter_id)
     if not chapter or chapter.project_id != project_id:
         return None
@@ -91,34 +89,22 @@ async def schedule_chapter_auto_revision(
     project = await db.get(Project, project_id)
     model = (ai_model or "").strip() or _project_ai_model(project)
     settings = get_settings()
-    scheduled_at = run_after or (_utcnow() + timedelta(seconds=max(0, settings.memoir_auto_revision_delay_seconds)))
-    metadata = {
+    scheduled_at = run_after or (_utcnow() + timedelta(seconds=max(0, settings.memoir_chapter_revision_delay_seconds)))
+    payload = {
         "base_version_id": draft.versions[-1].id,
         "pending_source_utterance_ids": sorted(pending_source_ids),
         **({"ai_model": model} if model else {}),
     }
-
-    job = await db.scalar(
-        select(MemoirBookAutoRevisionJob).where(MemoirBookAutoRevisionJob.chapter_id == chapter_id)
+    return await enqueue_editing_job(
+        db,
+        project_id=project_id,
+        chapter_id=chapter_id,
+        job_type=MemoirEditingJobType.REVISE_CHAPTER,
+        payload_json=payload,
+        run_after=scheduled_at,
+        dedupe_key=f"revise_chapter:{chapter_id}",
+        replace_completed=True,
     )
-    if not job:
-        job = MemoirBookAutoRevisionJob(
-            project_id=project_id,
-            chapter_id=chapter_id,
-            status=MemoirBookAutoRevisionJobStatus.PENDING.value,
-            run_after=scheduled_at,
-            metadata_json=metadata,
-        )
-    else:
-        job.status = MemoirBookAutoRevisionJobStatus.PENDING.value
-        job.run_after = scheduled_at
-        job.locked_at = None
-        job.attempts = 0
-        job.error_message = ""
-        job.metadata_json = metadata
-    db.add(job)
-    await db.flush()
-    return job
 
 
 async def schedule_chapter_auto_revisions(
@@ -137,64 +123,32 @@ async def schedule_chapter_auto_revisions(
         )
 
 
-async def _mark_job(
+async def run_chapter_revision_job(
     db: AsyncSession,
-    job: MemoirBookAutoRevisionJob,
-    status: MemoirBookAutoRevisionJobStatus,
-    *,
-    error_message: str = "",
-    metadata_patch: dict[str, object] | None = None,
-) -> None:
-    job.status = status.value
-    job.error_message = error_message
-    job.locked_at = None
-    if metadata_patch:
-        job.metadata_json = {**(job.metadata_json or {}), **metadata_patch}
-    db.add(job)
-    await db.commit()
-
-
-async def run_auto_revision_job(
-    db: AsyncSession,
-    job_id: str,
+    job: MemoirEditingJob,
     *,
     ai_client: AITextClient | None = None,
-) -> bool:
-    job = await db.get(MemoirBookAutoRevisionJob, job_id)
-    if not job or job.status not in {
-        MemoirBookAutoRevisionJobStatus.PENDING.value,
-        MemoirBookAutoRevisionJobStatus.RUNNING.value,
-    }:
-        return False
-
-    job.status = MemoirBookAutoRevisionJobStatus.RUNNING.value
-    job.locked_at = _utcnow()
-    job.attempts += 1
-    db.add(job)
-    await db.commit()
-
+) -> EditingJobResult:
     try:
         project = await db.get(Project, job.project_id)
         if not project or not project.user_id:
-            await _mark_job(db, job, MemoirBookAutoRevisionJobStatus.SKIPPED, error_message="project unavailable")
-            return False
+            return EditingJobResult(status=MemoirEditingJobStatus.SKIPPED, error_message="project unavailable")
+        if not job.chapter_id:
+            return EditingJobResult(status=MemoirEditingJobStatus.SKIPPED, error_message="chapter unavailable")
 
         draft = await _chapter_latest_draft(db, job.project_id, job.chapter_id)
         if not draft or not draft.versions:
-            await _mark_job(db, job, MemoirBookAutoRevisionJobStatus.SKIPPED, error_message="draft unavailable")
-            return False
-        base_version_id = str((job.metadata_json or {}).get("base_version_id") or "")
+            return EditingJobResult(status=MemoirEditingJobStatus.SKIPPED, error_message="draft unavailable")
+        base_version_id = str((job.payload_json or {}).get("base_version_id") or "")
         if draft.versions[-1].id != base_version_id:
-            await _mark_job(db, job, MemoirBookAutoRevisionJobStatus.SKIPPED, error_message="draft changed")
-            return False
+            return EditingJobResult(status=MemoirEditingJobStatus.SKIPPED, error_message="draft changed")
 
         chapter = await db.get(MemoirBookPlanChapter, job.chapter_id)
         pending_source_ids = _pending_source_ids(chapter.metadata_json if chapter else {})
         if not pending_source_ids:
-            await _mark_job(db, job, MemoirBookAutoRevisionJobStatus.SKIPPED, error_message="no pending sources")
-            return False
+            return EditingJobResult(status=MemoirEditingJobStatus.SKIPPED, error_message="no pending sources")
 
-        model = str((job.metadata_json or {}).get("ai_model") or _project_ai_model(project) or "").strip() or None
+        model = str((job.payload_json or {}).get("ai_model") or _project_ai_model(project) or "").strip() or None
         pending_source_id_list = sorted(pending_source_ids)
         draft_response = await generate_chapter_draft(
             db,
@@ -222,90 +176,16 @@ async def run_auto_revision_job(
                 **({"ai_model": model} if model else {}),
             },
         )
-        await _mark_job(
-            db,
-            job,
-            MemoirBookAutoRevisionJobStatus.SUCCEEDED,
-            metadata_patch={
+        return EditingJobResult(
+            result_json={
                 "result_version_id": draft_response.latest_version.id if draft_response.latest_version else "",
+                "pending_source_utterance_ids": pending_source_id_list,
                 "completed_at": _utcnow().isoformat(),
             },
         )
-        return True
     except HTTPException as exc:
         await db.rollback()
-        job = await db.get(MemoirBookAutoRevisionJob, job_id)
-        if job:
-            status = (
-                MemoirBookAutoRevisionJobStatus.SKIPPED
-                if exc.status_code == 409
-                else MemoirBookAutoRevisionJobStatus.FAILED
-            )
-            await _mark_job(db, job, status, error_message=str(exc.detail))
-        return False
-    except Exception as exc:
-        await db.rollback()
-        logger.exception("memoir book auto revision job failed job_id=%s", job_id)
-        job = await db.get(MemoirBookAutoRevisionJob, job_id)
-        if job:
-            await _mark_job(db, job, MemoirBookAutoRevisionJobStatus.FAILED, error_message=str(exc))
-        return False
-
-
-async def claim_due_auto_revision_jobs(
-    db: AsyncSession,
-    *,
-    now: datetime | None = None,
-    limit: int | None = None,
-) -> list[str]:
-    settings = get_settings()
-    due_at = now or _utcnow()
-    batch_size = limit or max(1, settings.memoir_auto_revision_batch_size)
-    jobs = (
-        await db.execute(
-            select(MemoirBookAutoRevisionJob)
-            .where(
-                MemoirBookAutoRevisionJob.status == MemoirBookAutoRevisionJobStatus.PENDING.value,
-                MemoirBookAutoRevisionJob.run_after <= due_at,
-            )
-            .order_by(MemoirBookAutoRevisionJob.run_after, MemoirBookAutoRevisionJob.created_at)
-            .limit(batch_size)
+        return EditingJobResult(
+            status=MemoirEditingJobStatus.SKIPPED if exc.status_code == 409 else MemoirEditingJobStatus.FAILED,
+            error_message=str(exc.detail),
         )
-    ).scalars().all()
-    job_ids: list[str] = []
-    for job in jobs:
-        job.status = MemoirBookAutoRevisionJobStatus.RUNNING.value
-        job.locked_at = due_at
-        db.add(job)
-        job_ids.append(job.id)
-    await db.commit()
-    return job_ids
-
-
-async def run_due_auto_revision_jobs(
-    session_maker: async_sessionmaker[AsyncSession] = async_session_maker,
-    *,
-    limit: int | None = None,
-) -> int:
-    async with session_maker() as db:
-        job_ids = await claim_due_auto_revision_jobs(db, limit=limit)
-    completed = 0
-    for job_id in job_ids:
-        async with session_maker() as db:
-            if await run_auto_revision_job(db, job_id):
-                completed += 1
-    return completed
-
-
-async def auto_revision_worker_loop(stop_event: asyncio.Event) -> None:
-    settings = get_settings()
-    poll_seconds = max(1, settings.memoir_auto_revision_poll_seconds)
-    while not stop_event.is_set():
-        try:
-            await run_due_auto_revision_jobs()
-        except Exception:
-            logger.exception("memoir book auto revision worker tick failed")
-        try:
-            await asyncio.wait_for(stop_event.wait(), timeout=poll_seconds)
-        except asyncio.TimeoutError:
-            pass
