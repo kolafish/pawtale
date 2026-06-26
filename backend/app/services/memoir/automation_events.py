@@ -15,6 +15,9 @@ from app.services.memoir.access import load_memoir_project
 ACKNOWLEDGED_AT_KEY = "acknowledged_at"
 ACKNOWLEDGED_BY_USER_KEY = "acknowledged_by_user"
 RESOLUTION_KEY = "resolution"
+VOICE_ANNOUNCED_AT_KEY = "voice_announced_at"
+VOICE_ANNOUNCED_SESSION_ID_KEY = "voice_announced_session_id"
+VOICE_ANNOUNCED_MESSAGE_ID_KEY = "voice_announced_message_id"
 
 
 def _utcnow_iso() -> str:
@@ -32,6 +35,11 @@ def _event_is_visible(event: MemoirAutomationEvent) -> bool:
     if metadata.get(RESOLUTION_KEY) in {"confirmed", "ignored"}:
         return False
     return True
+
+
+def _event_is_voice_unannounced(event: MemoirAutomationEvent) -> bool:
+    metadata = event.metadata_json or {}
+    return _event_is_visible(event) and not metadata.get(VOICE_ANNOUNCED_AT_KEY)
 
 
 def event_response(event: MemoirAutomationEvent) -> MemoirAutomationEventResponse:
@@ -84,6 +92,7 @@ async def list_automation_events(
     project_id: str,
     limit: int = 10,
     include_acknowledged: bool = False,
+    voice_unannounced_only: bool = False,
 ) -> MemoirAutomationEventListResponse:
     await load_memoir_project(db, project_id, user_id)
     result = await db.execute(
@@ -93,7 +102,9 @@ async def list_automation_events(
         .order_by(MemoirAutomationEvent.created_at.desc(), MemoirAutomationEvent.id.desc())
     )
     events = list(result.scalars().all())
-    if not include_acknowledged:
+    if voice_unannounced_only:
+        events = [event for event in events if _event_is_voice_unannounced(event)]
+    elif not include_acknowledged:
         events = [event for event in events if _event_is_visible(event)]
     items = events[:limit]
     return MemoirAutomationEventListResponse(
@@ -109,8 +120,51 @@ async def recent_automation_event_responses(
     user_id: str,
     project_id: str,
     limit: int = 5,
+    voice_unannounced_only: bool = False,
 ) -> list[MemoirAutomationEventResponse]:
-    return (await list_automation_events(db, user_id=user_id, project_id=project_id, limit=limit)).items
+    return (
+        await list_automation_events(
+            db,
+            user_id=user_id,
+            project_id=project_id,
+            limit=limit,
+            voice_unannounced_only=voice_unannounced_only,
+        )
+    ).items
+
+
+async def mark_automation_events_voice_announced(
+    db: AsyncSession,
+    *,
+    user_id: str,
+    project_id: str,
+    event_ids: list[str],
+    voice_session_id: str,
+    message_id: str,
+) -> None:
+    clean_ids = _clean_utterance_ids(event_ids)
+    if not clean_ids:
+        return
+    await load_memoir_project(db, project_id, user_id)
+    result = await db.execute(
+        select(MemoirAutomationEvent).where(
+            MemoirAutomationEvent.project_id == project_id,
+            MemoirAutomationEvent.id.in_(clean_ids),
+        )
+    )
+    announced_at = _utcnow_iso()
+    for event in result.scalars().all():
+        metadata = event.metadata_json or {}
+        if metadata.get(VOICE_ANNOUNCED_AT_KEY):
+            continue
+        event.metadata_json = {
+            **metadata,
+            VOICE_ANNOUNCED_AT_KEY: announced_at,
+            VOICE_ANNOUNCED_SESSION_ID_KEY: voice_session_id,
+            VOICE_ANNOUNCED_MESSAGE_ID_KEY: message_id,
+        }
+        db.add(event)
+    await db.commit()
 
 
 async def acknowledge_automation_event(

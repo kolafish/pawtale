@@ -201,6 +201,15 @@
   word-break: break-word;
 }
 
+.automation-item-detail {
+  display: block;
+  margin-top: 8rpx;
+  color: #6c4238;
+  font-size: 23rpx;
+  line-height: 1.38;
+  word-break: break-word;
+}
+
 .automation-item-meta {
   display: block;
   margin-top: 8rpx;

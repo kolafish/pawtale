@@ -853,11 +853,59 @@ test("book page shows and acknowledges automation events", async () => {
   assert.equal(context.data.automationEventItems.length, 1);
   assert.equal(context.data.automationEventItems[0].titleText, "已自动补写");
   assert.equal(context.data.automationEventItems[0].summaryText, "「外婆家的童年」已自动补写 1 条新增讲述。");
+  assert.equal(context.data.automationEventItems[0].metaText.includes("补写"), true);
 
   await page.acknowledgeAutomationEvent.call(context, { currentTarget: { dataset: { id: "event-1" } } });
 
   assert.deepEqual(acknowledged, [{ projectId: "project/1", eventId: "event-1" }]);
   assert.deepEqual(context.data.automationEventItems, []);
+});
+
+test("book page builds detailed automation event views", () => {
+  const { mod } = loadBookPage();
+
+  const items = mod.buildAutomationEventViews([
+    {
+      id: "event-held",
+      project_id: "project/1",
+      event_type: "source_held",
+      status: "needs_review",
+      chapter_id: null,
+      utterance_ids: ["utterance-1"],
+      summary_text: "1 条讲述可能是新话题，需要确认。",
+      confidence: 0.48,
+      metadata_json: {
+        route: {
+          action: "suggest_new_chapter",
+          suggested_title: "外婆家的厨房",
+          reason: "内容集中在厨房和做饭，和现有章节不完全一致",
+        },
+      },
+      created_at: "2026-06-23T12:00:00",
+      updated_at: "2026-06-23T12:00:00",
+    },
+    {
+      id: "event-audit",
+      project_id: "project/1",
+      event_type: "audit_completed",
+      status: "completed",
+      chapter_id: null,
+      utterance_ids: [],
+      summary_text: "当前有 1 个章节需要优先处理。",
+      confidence: null,
+      metadata_json: {
+        next_actions: ["整理 2 条尚未归章的讲述记录", "可以追问外婆在厨房里的细节"],
+      },
+      created_at: "2026-06-23T12:00:00",
+      updated_at: "2026-06-23T12:00:00",
+    },
+  ]);
+
+  assert.equal(items[0].titleText, "需要确认整理");
+  assert.equal(items[0].detailText, "建议新建「外婆家的厨房」：内容集中在厨房和做饭，和现有章节不完全一致");
+  assert.equal(items[0].canAcknowledge, false);
+  assert.equal(items[1].titleText, "章节审计完成");
+  assert.equal(items[1].detailText, "整理 2 条尚未归章的讲述记录；可以追问外婆在厨房里的细节");
 });
 
 test("book page shows source coverage notice only when there are uncovered transcripts", () => {

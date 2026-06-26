@@ -235,6 +235,7 @@ async def get_project_progress_snapshot(
     user_id: str,
     project_id: str,
     recent_event_limit: int = 5,
+    voice_unannounced_events_only: bool = False,
 ) -> MemoirProjectProgressSnapshotResponse:
     await load_memoir_project(db, project_id, user_id)
     sessions = await _load_project_sessions(db, project_id)
@@ -259,6 +260,7 @@ async def get_project_progress_snapshot(
         user_id=user_id,
         project_id=project_id,
         limit=recent_event_limit,
+        voice_unannounced_only=voice_unannounced_events_only,
     )
 
     return MemoirProjectProgressSnapshotResponse(

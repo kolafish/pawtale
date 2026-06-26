@@ -57,6 +57,7 @@ export interface BookAutomationEventView {
   eventType: MemoirAutomationEvent["event_type"];
   titleText: string;
   summaryText: string;
+  detailText: string;
   metaText: string;
   statusText: string;
   actionText: string;
@@ -196,6 +197,22 @@ function automationEventTitle(event: MemoirAutomationEvent): string {
   return "AI 自动处理";
 }
 
+function automationEventKindText(event: MemoirAutomationEvent): string {
+  if (event.event_type === "source_assigned") {
+    return "归章";
+  }
+  if (event.event_type === "source_held") {
+    return "待确认";
+  }
+  if (event.event_type === "chapter_auto_revised") {
+    return "补写";
+  }
+  if (event.event_type === "audit_completed") {
+    return "审计";
+  }
+  return "自动处理";
+}
+
 function automationEventStatusText(event: MemoirAutomationEvent): string {
   if (event.status === "needs_review") {
     return "待确认";
@@ -219,8 +236,46 @@ function automationEventActionText(event: MemoirAutomationEvent): string {
   return "确认";
 }
 
+function objectValue(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function stringValue(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function automationEventDetailText(event: MemoirAutomationEvent): string {
+  const metadata = objectValue(event.metadata_json);
+  if (event.event_type === "source_held") {
+    const route = objectValue(metadata.route);
+    const action = stringValue(route.action);
+    const title = stringValue(route.target_chapter_title) || stringValue(route.suggested_title);
+    const reason = stringValue(route.reason);
+    const targetText = action === "suggest_new_chapter" && title
+      ? `建议新建「${title}」`
+      : (title ? `可能归入「${title}」` : "需要人工确认归属");
+    return reason ? `${targetText}：${reason}` : targetText;
+  }
+  if (event.event_type === "audit_completed") {
+    const actions = Array.isArray(metadata.next_actions)
+      ? metadata.next_actions.map((item) => stringValue(item)).filter(Boolean)
+      : [];
+    return actions.slice(0, 2).join("；");
+  }
+  if (event.event_type === "chapter_auto_revised") {
+    const sourceIds = Array.isArray(metadata.pending_source_utterance_ids)
+      ? metadata.pending_source_utterance_ids
+      : [];
+    return sourceIds.length ? `已把 ${sourceIds.length} 条新增讲述写入章节正文。` : "";
+  }
+  return "";
+}
+
 function automationEventMetaText(event: MemoirAutomationEvent): string {
-  const parts = [formatBeijingDateTimeShort(event.updated_at || event.created_at)];
+  const parts = [
+    automationEventKindText(event),
+    formatBeijingDateTimeShort(event.updated_at || event.created_at),
+  ];
   if (event.utterance_ids.length) {
     parts.push(`${event.utterance_ids.length} 条讲述`);
   }
@@ -241,6 +296,7 @@ export function buildAutomationEventViews(
       eventType: event.event_type,
       titleText: automationEventTitle(event),
       summaryText: trimText(event.summary_text) || "AI 已完成一次自动处理。",
+      detailText: automationEventDetailText(event),
       metaText: automationEventMetaText(event),
       statusText: automationEventStatusText(event),
       actionText: automationEventActionText(event),
