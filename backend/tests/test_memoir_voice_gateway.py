@@ -5,8 +5,14 @@ from typing import Any
 import pytest
 from sqlalchemy import select
 
-from app.domain.memoir.types import MemoirCreatedBy
-from app.models.memoir import AudioFile, MemoirChatMessage, MemoirTranscriptVersion, MemoirVoiceUtterance
+from app.domain.memoir.types import MemoirCreatedBy, MemoirEditingJobStatus, MemoirEditingJobType
+from app.models.memoir import (
+    AudioFile,
+    MemoirChatMessage,
+    MemoirEditingJob,
+    MemoirTranscriptVersion,
+    MemoirVoiceUtterance,
+)
 from app.services.memoir import audio_files as memoir_audio_files
 from app.services.memoir.asr import StreamingASREvent
 from app.services.memoir.voice_final_persistence import VoiceFinalPersistenceService
@@ -330,6 +336,86 @@ async def test_voice_gateway_persists_latest_partial_when_provider_does_not_mark
     assert ended["state"] == "ready"
 
 
+async def test_voice_gateway_persists_provider_final_segment_before_audio_end():
+    client = FakeGatewayClient()
+    asr_client = ImmediateFinalStreamingASRClient("我小时候住在外婆家。")
+    persisted_events: list[StreamingASREvent] = []
+    session = VoiceGatewaySession(
+        client=client,
+        asr_client_factory=lambda: asr_client,
+        on_asr_final=lambda event: _persist_fake_final(persisted_events, event),
+    )
+
+    run_task = asyncio.create_task(session.run())
+    await _wait_for_event(client, "session.ready")
+    await client.push({"type": "session.start"})
+    await _wait_for_event(client, "session.started")
+    await client.push(
+        {
+            "type": "audio.frame",
+            "audio": base64.b64encode(b"pcm").decode("ascii"),
+        }
+    )
+    intermediate = await _wait_for_event(client, "asr.final")
+
+    assert intermediate["text"] == "我小时候住在外婆家。"
+    assert intermediate["state"] == "listening"
+    assert intermediate["segment_final"] is True
+    assert intermediate["turn_final"] is False
+    assert [event.text for event in persisted_events] == ["我小时候住在外婆家。"]
+
+    await client.push({"type": "audio.end"})
+    final_events = await _wait_for_event_count(client, "asr.final", 2)
+    await _wait_for_event(client, "audio.ended")
+    await client.push({"type": "session.stop"})
+    await asyncio.wait_for(run_task, timeout=1)
+
+    assert final_events[-1]["turn_final"] is True
+    assert final_events[-1]["segment_replay"] is True
+    assert final_events[-1]["message_id"] == "message-1"
+    assert [event.text for event in persisted_events] == ["我小时候住在外婆家。"]
+
+
+async def test_voice_gateway_persists_long_partial_segment_before_audio_end():
+    client = FakeGatewayClient()
+    long_partial = "小时候在外婆家的院子里摘菜，夏天一起剥青豆。" * 10
+    asr_client = PartialOnlyStreamingASRClient([long_partial])
+    persisted_events: list[StreamingASREvent] = []
+    session = VoiceGatewaySession(
+        client=client,
+        asr_client_factory=lambda: asr_client,
+        on_asr_final=lambda event: _persist_fake_final(persisted_events, event),
+    )
+
+    run_task = asyncio.create_task(session.run())
+    await _wait_for_event(client, "session.ready")
+    await client.push({"type": "session.start"})
+    await _wait_for_event(client, "session.started")
+    await client.push(
+        {
+            "type": "audio.frame",
+            "audio": base64.b64encode(b"pcm").decode("ascii"),
+        }
+    )
+    partial = await _wait_for_event(client, "asr.partial")
+    intermediate = await _wait_for_event(client, "asr.final")
+
+    assert partial["text"] == long_partial
+    assert intermediate["text"] == long_partial
+    assert intermediate["provider_event_type"] == "partial"
+    assert intermediate["turn_final"] is False
+    assert persisted_events[0].raw["segment_from_partial"] is True
+
+    await client.push({"type": "audio.end"})
+    final_events = await _wait_for_event_count(client, "asr.final", 2)
+    await client.push({"type": "session.stop"})
+    await asyncio.wait_for(run_task, timeout=1)
+
+    assert final_events[-1]["turn_final"] is True
+    assert final_events[-1]["segment_replay"] is True
+    assert [event.text for event in persisted_events] == [long_partial]
+
+
 async def test_voice_gateway_stop_finishes_asr_before_shutdown():
     client = FakeGatewayClient()
     asr_client = FakeStreamingASRClient()
@@ -597,6 +683,9 @@ async def test_voice_gateway_persistence_saves_final_message_utterance_and_audio
     corrected_version = await test_db.scalar(
         select(MemoirTranscriptVersion).where(MemoirTranscriptVersion.id == persisted["transcript_version_id"])
     )
+    editing_job = await test_db.scalar(
+        select(MemoirEditingJob).where(MemoirEditingJob.project_id == create_response.json()["session"]["project_id"])
+    )
     versions = (
         await test_db.execute(
             select(MemoirTranscriptVersion)
@@ -635,6 +724,12 @@ async def test_voice_gateway_persistence_saves_final_message_utterance_and_audio
     assert corrected_version.version_type == "dialect_corrected"
     assert corrected_version.created_by == "ai"
     assert corrected_version.provider == "fake-ai"
+    assert editing_job is not None
+    assert editing_job.job_type == MemoirEditingJobType.ROUTE_SOURCES.value
+    assert editing_job.status == MemoirEditingJobStatus.PENDING.value
+    assert editing_job.dedupe_key == f"route_source:{utterance.id}"
+    assert editing_job.payload_json["utterance_ids"] == [utterance.id]
+    assert editing_job.payload_json["source"] == "voice_utterance_segment"
 
 
 async def test_voice_gateway_persistence_rejects_audio_stream_over_limit(client, test_db, monkeypatch):
@@ -926,6 +1021,16 @@ class CumulativeFinalStreamingASRClient(FakeStreamingASRClient):
         for text in self.final_texts:
             await self.events_queue.put(StreamingASREvent(type="final", text=text))
         await self.events_queue.put(None)
+
+
+class ImmediateFinalStreamingASRClient(FakeStreamingASRClient):
+    def __init__(self, text: str) -> None:
+        super().__init__()
+        self.text = text
+
+    async def send_audio(self, audio: bytes) -> None:
+        self.sent_audio.append(audio)
+        await self.events_queue.put(StreamingASREvent(type="final", text=self.text))
 
 
 class PartialOnlyStreamingASRClient(FakeStreamingASRClient):

@@ -610,6 +610,42 @@ test("voice chat warns when a pending live transcript is not in backend detail",
   assert.equal(context.data.persistenceStateText, "已恢复已保存记录");
 });
 
+test("voice chat saves intermediate ASR segment without requesting follow-up", () => {
+  const page = loadVoiceChatPage();
+  let followUpCalls = 0;
+  const context = {
+    ...page,
+    data: {
+      ...page.data,
+      voiceSessionId: "voice-1",
+      guidanceMode: "guided_interview",
+      transcriptLines: [],
+      lastFollowUpSourceMessageId: "",
+    },
+    setData(patch) {
+      this.data = { ...this.data, ...patch };
+    },
+    async confirmSavedTranscriptSnapshot() {},
+    async generateFollowUp() {
+      followUpCalls += 1;
+    },
+  };
+
+  page.handleFinal.call(context, {
+    type: "asr.final",
+    text: "先讲一段很长的童年经历。",
+    message_id: "message-1",
+    utterance_id: "utterance-1",
+    transcript_version_id: "version-1",
+    turn_final: false,
+  });
+
+  assert.equal(context.data.transcriptLines.length, 1);
+  assert.equal(context.data.transcriptLines[0].text, "先讲一段很长的童年经历。");
+  assert.equal(context.data.persistenceStateText, "已保存");
+  assert.equal(followUpCalls, 0);
+});
+
 test("voice chat syncs authorization consent before reconnecting", async () => {
   const syncedOptions = [];
   const page = loadVoiceChatPage({

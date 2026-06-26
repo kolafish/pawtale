@@ -95,10 +95,13 @@ class VoiceGatewayPersistence:
     async def record_audio_frame(self, audio: bytes) -> None:
         await self._pending_audio.append(audio)
 
-    async def persist_final(self, event: StreamingASREvent) -> dict[str, Any]:
+    async def persist_segment(self, event: StreamingASREvent) -> dict[str, Any]:
         staged_audio = await self._pending_audio.stage(self.db)
-        result = await self._service.persist_final(event, staged_audio=staged_audio)
+        result = await self._service.persist_segment(event, staged_audio=staged_audio)
         return result.as_gateway_payload()
+
+    async def persist_final(self, event: StreamingASREvent) -> dict[str, Any]:
+        return await self.persist_segment(event)
 
     async def flush_unfinalized_audio(self) -> dict[str, Any] | None:
         staged_audio = await self._pending_audio.stage(self.db)
