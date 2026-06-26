@@ -6,6 +6,7 @@ const DEFAULT_MIN_TRIGGER_LEVEL = 0.055;
 const DEFAULT_BASELINE_MULTIPLIER = 1.7;
 const DEFAULT_RECORDING_DURATION_MS = 10 * 60 * 1000;
 const DEFAULT_FRAME_SIZE_KB = 4;
+const STOP_SETTLE_TIMEOUT_MS = 1500;
 
 export interface VoiceBargeInMonitorOptions {
   warmupMs?: number;
@@ -30,19 +31,22 @@ export class VoiceBargeInMonitor {
   private recorderManager: WechatMiniprogram.RecorderManager | null = null;
   private recorderEventsBound = false;
   private running = false;
+  private recorderActive = false;
   private triggered = false;
   private elapsedMs = 0;
   private voiceElapsedMs = 0;
   private warmupPeakLevel = 0;
   private lastAudioLevel = 0;
   private options: Required<VoiceBargeInMonitorOptions> | null = null;
+  private stopPromise: Promise<void> | null = null;
+  private stopWaiters: Array<() => void> = [];
 
   constructor(
     private readonly recorderManagerFactory: RecorderManagerFactory = () => wx.getRecorderManager(),
   ) {}
 
   start(options: VoiceBargeInMonitorOptions): boolean {
-    if (this.running) {
+    if (this.running || this.recorderActive || this.stopPromise) {
       return false;
     }
     const normalizedOptions: Required<VoiceBargeInMonitorOptions> = {
@@ -70,6 +74,7 @@ export class VoiceBargeInMonitor {
         format: "PCM",
         frameSize: DEFAULT_FRAME_SIZE_KB,
       });
+      this.recorderActive = true;
       return true;
     } catch (error) {
       this.running = false;
@@ -81,17 +86,31 @@ export class VoiceBargeInMonitor {
   }
 
   stop(): void {
-    if (!this.running) {
-      return;
+    void this.stopAndWait();
+  }
+
+  stopAndWait(): Promise<void> {
+    if (!this.running && !this.recorderActive) {
+      return Promise.resolve();
+    }
+    if (this.stopPromise) {
+      return this.stopPromise;
     }
     this.running = false;
     this.triggered = false;
     this.options = null;
-    try {
-      this.recorderManager?.stop();
-    } catch {
-      // The recorder may already be stopped by WeChat when playback or page state changes.
-    }
+    this.stopPromise = (async () => {
+      const stopped = this.waitForStop();
+      try {
+        this.recorderManager?.stop();
+      } catch {
+        this.markStopped();
+      }
+      await stopped;
+    })().finally(() => {
+      this.stopPromise = null;
+    });
+    return this.stopPromise;
   }
 
   isRunning(): boolean {
@@ -122,10 +141,7 @@ export class VoiceBargeInMonitor {
       this.handleRecorderError(error.errMsg || "打断监听失败");
     });
     this.recorderManager.onStop(() => {
-      if (this.running) {
-        this.running = false;
-        this.options = null;
-      }
+      this.markStopped();
     });
     this.recorderEventsBound = true;
   }
@@ -163,18 +179,44 @@ export class VoiceBargeInMonitor {
     }
     const onBargeIn = this.options.onBargeIn;
     this.triggered = true;
-    this.stop();
+    this.running = false;
     onBargeIn();
   }
 
   private handleRecorderError(message: string): void {
-    if (!this.running || !this.options) {
+    if (!this.running && !this.recorderActive) {
       return;
     }
-    const onError = this.options.onError;
+    const onError = this.options?.onError;
+    this.markStopped();
+    onError?.(message);
+  }
+
+  private waitForStop(): Promise<void> {
+    if (!this.recorderActive) {
+      return Promise.resolve();
+    }
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        this.markStopped();
+      }, STOP_SETTLE_TIMEOUT_MS);
+      this.stopWaiters.push(() => {
+        clearTimeout(timer);
+        resolve();
+      });
+    });
+  }
+
+  private markStopped(): void {
+    if (!this.running && !this.recorderActive && !this.stopWaiters.length) {
+      return;
+    }
     this.running = false;
+    this.recorderActive = false;
     this.triggered = false;
     this.options = null;
-    onError(message);
+    const waiters = this.stopWaiters;
+    this.stopWaiters = [];
+    waiters.forEach((resolve) => resolve());
   }
 }

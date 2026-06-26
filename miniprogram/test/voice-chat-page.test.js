@@ -161,6 +161,7 @@ function loadVoiceChatPage({
         return true;
       }
       stop() {}
+      async stopAndWait() {}
       isRunning() {
         return false;
       }
@@ -692,6 +693,63 @@ test("voice chat uses no-answer timeout only for auto-listen recordings", async 
   assert.equal(context.data.primaryActionText, "暂停收音");
 });
 
+test("voice chat waits for barge-in monitor recorder stop before auto-listen recording starts", async () => {
+  const startOptions = [];
+  let stopCalls = 0;
+  let releaseMonitor;
+  const monitorStopped = new Promise((resolve) => {
+    releaseMonitor = resolve;
+  });
+  const page = loadVoiceChatPage({
+    voiceAuthorizationExports: {
+      readVoiceAuthorizationConsent: () => true,
+    },
+  });
+  const context = {
+    ...page,
+    data: {
+      ...page.data,
+      voiceSessionId: "voice-1",
+      voiceAuthorizationAgreed: true,
+      status: "ready",
+    },
+    assistantBargeInMonitor: {
+      isRunning: () => false,
+      start: () => true,
+      stop() {},
+      stopAndWait() {
+        stopCalls += 1;
+        return monitorStopped;
+      },
+    },
+    voiceStreaming: {
+      hasClient: () => true,
+      startRecording(options) {
+        startOptions.push(options);
+        return true;
+      },
+      stopRecording() {},
+      close() {},
+    },
+    setData(patch) {
+      this.data = { ...this.data, ...patch };
+    },
+  };
+
+  const startedPromise = page.startRecordingAfterPrivacy.call(context, true);
+  await Promise.resolve();
+
+  assert.equal(stopCalls, 1);
+  assert.deepEqual(startOptions, []);
+
+  releaseMonitor();
+  const started = await startedPromise;
+
+  assert.equal(started, true);
+  assert.deepEqual(startOptions, [{ noVoiceActivityTimeoutMs: 15000 }]);
+  assert.equal(context.data.recording, true);
+});
+
 test("voice chat starts auto listening after AI audio playback ends when gateway is ready", async () => {
   const startCalls = [];
   installAutoEndingAudioContext();
@@ -1140,6 +1198,9 @@ test("voice chat automatically interrupts assistant playback when local voice mo
     stop() {
       this.running = false;
     },
+    async stopAndWait() {
+      this.stop();
+    },
     isRunning() {
       return this.running;
     },
@@ -1233,6 +1294,9 @@ test("voice chat auto barge-in stops assistant before reconnecting a missing gat
     },
     stop() {
       this.running = false;
+    },
+    async stopAndWait() {
+      this.stop();
     },
     isRunning() {
       return this.running;

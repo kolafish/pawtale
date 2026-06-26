@@ -50,6 +50,7 @@ test("barge-in monitor triggers after sustained voice above playback baseline", 
     baselineMultiplier: 1.5,
     onBargeIn: () => {
       triggers += 1;
+      void monitor.stopAndWait();
     },
   });
 
@@ -70,6 +71,31 @@ test("barge-in monitor triggers after sustained voice above playback baseline", 
   assert.equal(triggers, 1);
   assert.equal(monitor.isRunning(), false);
   assert.equal(recorder.stops, 1);
+});
+
+test("barge-in monitor waits for recorder onStop before releasing the microphone", async () => {
+  const recorder = recorderHarness();
+  recorder.stop = function stopWithoutImmediateCallback() {
+    this.stops += 1;
+  };
+  const { VoiceBargeInMonitor } = require("../services/voice-barge-in-monitor.ts");
+  const monitor = new VoiceBargeInMonitor(() => recorder);
+  let stopped = false;
+
+  monitor.start({ onBargeIn: () => {} });
+  const stopPromise = monitor.stopAndWait().then(() => {
+    stopped = true;
+  });
+  await Promise.resolve();
+
+  assert.equal(recorder.stops, 1);
+  assert.equal(stopped, false);
+
+  recorder.callbacks.stop();
+  await stopPromise;
+
+  assert.equal(stopped, true);
+  assert.equal(monitor.isRunning(), false);
 });
 
 test("barge-in monitor ignores stable assistant playback echo", () => {
