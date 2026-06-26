@@ -20,6 +20,25 @@ from app.services.memoir.voice_transcripts import CleanedTranscriptText
 from tests.memoir_helpers import post_mobile_memoir_voice_session
 
 
+def test_voice_gateway_normalizes_asr_payload_text_without_rewriting_provider_payload():
+    session = VoiceGatewaySession(
+        client=FakeGatewayClient(),
+        asr_client_factory=lambda: FakeStreamingASRClient(),
+    )
+
+    payload = session._asr_event_payload(
+        StreamingASREvent(
+            type="partial",
+            text="现在有几个张杰啊？",
+            raw={"provider_text": "现在有几个张杰啊？"},
+        ),
+        event_type="asr.partial",
+    )
+
+    assert payload["text"] == "现在有几个章节啊？"
+    assert payload["provider_payload"] == {"provider_text": "现在有几个张杰啊？"}
+
+
 async def test_voice_gateway_streams_audio_and_forwards_asr_events():
     client = FakeGatewayClient()
     asr_client = FakeStreamingASRClient()

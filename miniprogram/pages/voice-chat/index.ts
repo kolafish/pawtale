@@ -6,6 +6,7 @@ import type {
   VoiceChatTranscriptLine,
   VoiceGatewayServerEvent,
 } from "../../domain/voice-chat";
+import { normalizeMemoirAsrText } from "../../services/asr-text-normalization";
 import { AudioPlaybackController } from "../../services/audio-playback";
 import {
   applyAssistantTTSResponse,
@@ -1913,9 +1914,10 @@ Page<VoiceChatData, {
   },
 
   handlePartial(text) {
+    const displayText = normalizeMemoirAsrText(text || "");
     this.setData({
-      liveText: text,
-      liveCharCount: countTextChars(text),
+      liveText: displayText,
+      liveCharCount: countTextChars(displayText),
       persistenceStateText: "识别中",
       error: "",
       errorKindText: "",
@@ -1923,7 +1925,7 @@ Page<VoiceChatData, {
   },
 
   handleFinal(event) {
-    const text = event.text || "";
+    const text = normalizeMemoirAsrText(event.text || "");
     if (!text) {
       return;
     }

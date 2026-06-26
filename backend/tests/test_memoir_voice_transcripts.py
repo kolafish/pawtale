@@ -18,6 +18,7 @@ from app.models.memoir import (
     MemoirTranscriptVersion,
     MemoirVoiceUtterance,
 )
+from app.services.memoir.asr_text_normalization import normalize_memoir_asr_text
 from app.services.memoir.voice_transcripts import _remove_obvious_oral_fillers, generate_cleaned_transcript_text
 from tests.memoir_helpers import create_test_voice_transcript, post_mobile_memoir_voice_session, memoir_source_ref
 
@@ -580,6 +581,14 @@ def test_remove_obvious_oral_fillers_preserves_meaningful_deictic_phrase():
     assert _remove_obvious_oral_fillers("那个那个那个雨下得很大。") == "雨下得很大。"
 
 
+def test_normalize_memoir_asr_text_corrects_chapter_homophones_in_book_context():
+    assert normalize_memoir_asr_text("现在有几个张杰啊？") == "现在有几个章节啊？"
+    assert normalize_memoir_asr_text("这条还没收入张杰。") == "这条还没收入章节。"
+    assert normalize_memoir_asr_text("你不是一个人名的张杰，是书的张杰。") == "你不是一个人名的章节，是书的章节。"
+    assert normalize_memoir_asr_text("把第一张改名为童年往事。") == "把第一章改名为童年往事。"
+    assert normalize_memoir_asr_text("张杰这个人，在书里单独占了一章。") == "张杰这个人，在书里单独占了一章。"
+
+
 async def test_generate_cleaned_transcript_text_uses_fallback_when_not_strict():
     result = await generate_cleaned_transcript_text(
         "那个就是今天下雨了，那个那个那个雨下的很大。",
@@ -588,6 +597,18 @@ async def test_generate_cleaned_transcript_text_uses_fallback_when_not_strict():
     )
 
     assert result.content == "今天下雨了，雨下的很大。"
+    assert result.provider is None
+    assert result.created_by == MemoirCreatedBy.SYSTEM
+
+
+async def test_generate_cleaned_transcript_text_normalizes_book_domain_asr_terms_when_not_strict():
+    result = await generate_cleaned_transcript_text(
+        "现在有几个张杰啊？",
+        ai_client=FailingAIClient(),
+        strict=False,
+    )
+
+    assert result.content == "现在有几个章节啊？"
     assert result.provider is None
     assert result.created_by == MemoirCreatedBy.SYSTEM
 

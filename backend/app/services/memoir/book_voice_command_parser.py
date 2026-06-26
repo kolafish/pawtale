@@ -17,6 +17,7 @@ from app.schemas.memoir_book import (
 from app.services.ai_factory import get_ai_service
 from app.services.ai_types import AITextClient
 from app.services.json_utils import extract_json_payload
+from app.services.memoir.asr_text_normalization import normalize_memoir_asr_text
 from app.services.memoir.book_plan_sources import (
     find_chapter_by_id as _chapter_by_id,
     sorted_chapters as _sorted_chapters,
@@ -168,10 +169,6 @@ MOVE_TO_POSITION_RE = re.compile(
     rf"(?:把|将)?(.{{1,50}}?){MOVE_TARGET_VERBS_RE}(最前面|最前|开头|第一章|第一个章节|最后一章|最后面|最末尾|末尾|最后|最后一个章节)"
 )
 ASSIGN_SOURCE_RE = re.compile(r"(?:把|将)?(.{0,40}?)(?:归到|归入|收录到|放到|分到|归类到)(.{1,40})")
-CHAPTER_WORD_ASR_ORDINAL_RE = re.compile(r"第\s*([0-9]{1,2}|[一二两三四五六七八九十])\s*张")
-CHAPTER_WORD_ASR_BARE_RE = re.compile(
-    r"([0-9]{1,2}|[一二两三四五六七八九十])\s*张(?=(?:和|跟|与|的|换|调|移|顺序|章节|章|[，。,.!！?？、\s]|$))"
-)
 TITLE_REVIEW_KEYWORDS = ("换个名字", "改个名字", "名字", "标题", "题目", "章名")
 LENGTH_REVIEW_KEYWORDS = ("太短", "太长", "字数", "长度", "篇幅", "内容少", "内容多", "够不够")
 STRUCTURE_REVIEW_KEYWORDS = ("结构", "顺序", "节奏", "拆分", "合并", "拆开", "放一起")
@@ -1343,13 +1340,7 @@ def _clean_title(value: str) -> str:
 
 
 def _normalize_chapter_word_text(value: str) -> str:
-    text = value.strip()
-    text = CHAPTER_WORD_ASR_ORDINAL_RE.sub(lambda match: f"第{match.group(1)}章", text)
-    text = CHAPTER_WORD_ASR_BARE_RE.sub(lambda match: f"{match.group(1)}章", text)
-    return (
-        text.replace("几张", "几章")
-        .replace("多少张", "多少章")
-    )
+    return normalize_memoir_asr_text(value.strip())
 
 
 def _compact(value: str) -> str:

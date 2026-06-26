@@ -9,6 +9,7 @@ from enum import Enum
 from typing import Any, Awaitable, Callable, Protocol
 
 from app.services.memoir.asr import StreamingASRClient, StreamingASREvent
+from app.services.memoir.asr_text_normalization import normalize_memoir_asr_text
 
 logger = logging.getLogger(__name__)
 
@@ -284,7 +285,7 @@ class VoiceGatewaySession:
         payload: dict[str, Any] = {
             "type": event_type,
             "state": self._state.value,
-            "text": event.text,
+            "text": normalize_memoir_asr_text(event.text),
             "start_ms": event.start_ms,
             "end_ms": event.end_ms,
             "provider_payload": event.raw,

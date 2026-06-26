@@ -17,6 +17,7 @@ import type {
 } from "../../domain/voice-chat";
 import type { BookChapterView, BookData, BookVoiceCommandUndoSnapshot } from "./book-view-model";
 import { getMemoirIdentity } from "../../services/auth";
+import { normalizeMemoirAsrText } from "../../services/asr-text-normalization";
 
 import {
   applyMemoirBookPlanStructureCommand,
@@ -192,12 +193,7 @@ function isBookVoiceCommandConfirmationText(text: string): boolean {
 }
 
 function normalizeBookVoiceAsrText(text: string): string {
-  const trimmed = trimText(text);
-  return trimmed
-    .replace(/第\s*([0-9一二两三四五六七八九十]+)\s*张/g, "第$1章")
-    .replace(/([0-9一二两三四五六七八九十]+)\s*张(?=(?:和|跟|与|的|换|调|移|顺序|章节|章|[，。,.!！?？、\s]|$))/g, "$1章")
-    .replace(/几张/g, "几章")
-    .replace(/多少张/g, "多少章");
+  return normalizeMemoirAsrText(trimText(text));
 }
 
 function bookVoiceAssistantReplyText(preview: MemoirBookVoiceCommandParseResponse): string {
