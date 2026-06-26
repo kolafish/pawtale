@@ -23,6 +23,7 @@ from app.models.projects import Project
 from app.schemas.memoir_book import MemoirBookChapterDraftGenerateRequest
 from app.services.ai_types import AITextClient
 from app.services.memoir import automation_events
+from app.services.memoir import book_quality_audit
 from app.services.memoir.book_drafts import generate_chapter_draft
 from app.services.memoir.book_plan_sources import (
     pending_source_ids as _pending_source_ids,
@@ -175,6 +176,11 @@ async def run_chapter_revision_job(
                 "pending_source_utterance_ids": pending_source_id_list,
                 **({"ai_model": model} if model else {}),
             },
+        )
+        await book_quality_audit.schedule_project_quality_audit(
+            db,
+            project_id=job.project_id,
+            reason="chapter_auto_revision_completed",
         )
         return EditingJobResult(
             result_json={

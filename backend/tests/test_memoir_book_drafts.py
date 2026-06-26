@@ -9,6 +9,7 @@ from app.domain.memoir.types import (
     MemoirBookPlanStatus,
     MemoirCreatedBy,
     MemoirEditingJobStatus,
+    MemoirEditingJobType,
 )
 from app.models.memoir import (
     MemoirAutomationEvent,
@@ -432,6 +433,15 @@ async def test_memoir_book_auto_revision_job_supplements_pending_sources(
     assert event.summary_text == "「外婆家的童年」已自动补写 1 条新增讲述。"
     assert event.metadata_json["source"] == "book_auto_revision"
     assert event.metadata_json["result_version_id"] == versions[-1].id
+    audit_job = await test_db.scalar(
+        select(MemoirEditingJob).where(
+            MemoirEditingJob.project_id == project_id,
+            MemoirEditingJob.job_type == MemoirEditingJobType.QUALITY_AUDIT.value,
+        )
+    )
+    assert audit_job is not None
+    assert audit_job.status == MemoirEditingJobStatus.PENDING.value
+    assert audit_job.payload_json["reason"] == "chapter_auto_revision_completed"
 
 
 async def test_mobile_memoir_book_chapter_draft_planner_can_choose_regenerate(

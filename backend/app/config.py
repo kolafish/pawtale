@@ -48,6 +48,7 @@ class Settings(BaseSettings):
 
     # Memoir editing worker
     memoir_chapter_revision_delay_seconds: int = 300
+    memoir_quality_audit_delay_seconds: int = 120
     memoir_editing_worker_enabled: bool = True
     memoir_editing_poll_seconds: int = 10
     memoir_editing_batch_size: int = 5
