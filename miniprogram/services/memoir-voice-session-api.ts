@@ -104,6 +104,18 @@ export function listMemoirAutomationEvents(
   );
 }
 
+export function acknowledgeMemoirAutomationEvent(
+  projectId: string,
+  eventId: string,
+): Promise<MemoirAutomationEventListResponse["items"][number]> {
+  return memoirRequest<MemoirAutomationEventListResponse["items"][number]>(
+    `/api/mobile/memoir/projects/${encodeURIComponent(projectId)}/automation-events/${encodeURIComponent(eventId)}/acknowledge`,
+    {
+      method: "POST",
+    },
+  );
+}
+
 export function createMemoirVoiceNoAnswerPrompt(
   voiceSessionId: string,
   data: MemoirVoiceNoAnswerPromptRequest = {},

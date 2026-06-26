@@ -11,6 +11,7 @@ import type {
   MemoirBookVoiceCommandParseRequest,
   MemoirBookVoiceCommandParseResponse,
   MemoirBookVoiceCommandResponseKind,
+  MemoirAutomationEvent,
   VoiceChatErrorInfo,
   VoiceChatTranscriptLine,
   VoiceGatewayServerEvent,
@@ -20,6 +21,7 @@ import { getMemoirIdentity } from "../../services/auth";
 import { normalizeMemoirAsrText } from "../../services/asr-text-normalization";
 
 import {
+  acknowledgeMemoirAutomationEvent,
   applyMemoirBookPlanStructureCommand,
   assignMemoirBookSources,
   confirmMemoirBookChapterDraft,
@@ -37,6 +39,7 @@ import {
   getMemoirBookOutput,
   getMemoirBookPlan,
   getMemoirBookSourceCoverage,
+  listMemoirAutomationEvents,
   parseMemoirBookVoiceCommand,
   updateMemoirBookChapterTitle,
   updateMemoirBookPlan,
@@ -99,6 +102,7 @@ import {
   bookChapterSourceSummary,
   bookOutlineNarrationText,
   bookVoiceCommandActionText,
+  buildAutomationEventViews,
   canExecuteBookVoiceCommand,
 } from "./book-view-model";
 export {
@@ -357,9 +361,12 @@ Page<BookData, {
   loadDraftsForPlan(plan: MemoirBookPlan): Promise<Record<string, MemoirBookChapterDraft | null>>;
   loadBookOutput(projectId: string): Promise<MemoirBookOutput | null>;
   loadSourceCoverage(projectId: string): Promise<MemoirBookSourceCoverage | null>;
+  loadAutomationEvents(projectId: string): Promise<MemoirAutomationEvent[]>;
   applyPlan(plan: MemoirBookPlan | null, draftsByChapterId?: Record<string, MemoirBookChapterDraft | null>): void;
   applyBookOutput(output: MemoirBookOutput | null): void;
   applySourceCoverage(coverage: MemoirBookSourceCoverage | null): void;
+  applyAutomationEvents(events: MemoirAutomationEvent[]): void;
+  acknowledgeAutomationEvent(event: DatasetEvent): Promise<void>;
   applyUpdatedPlan(plan: MemoirBookPlan, toastTitle: string): Promise<void>;
   generatePlan(): Promise<void>;
   confirmPlan(): Promise<void>;
@@ -566,6 +573,10 @@ Page<BookData, {
     bookVoiceCommandExecuting: false,
     bookVoiceCommandUndoText: "",
     bookVoiceCommandUndoSnapshot: null,
+    automationEventItems: [],
+    automationEventBusyTarget: "",
+    automationEventLoading: false,
+    automationEventError: "",
   },
 
   async onShow() {
@@ -586,6 +597,7 @@ Page<BookData, {
         this.applyPlan(null);
         this.applySourceCoverage(null);
         this.applyBookOutput(null);
+        this.applyAutomationEvents([]);
         return;
       }
       await this.loadPlanForProject(projectId);
@@ -602,8 +614,12 @@ Page<BookData, {
 
   async loadPlanForProject(projectId: string) {
     try {
-      const coverage = await this.loadSourceCoverage(projectId);
+      const [coverage, automationEvents] = await Promise.all([
+        this.loadSourceCoverage(projectId),
+        this.loadAutomationEvents(projectId),
+      ]);
       this.applySourceCoverage(coverage);
+      this.applyAutomationEvents(automationEvents);
       const plan = await getMemoirBookPlan(projectId);
       let draftsByChapterId: Record<string, MemoirBookChapterDraft | null> = {};
       let output: MemoirBookOutput | null = null;
@@ -623,6 +639,21 @@ Page<BookData, {
         return;
       }
       throw error;
+    }
+  },
+
+  async loadAutomationEvents(projectId) {
+    this.setData({ automationEventLoading: true, automationEventError: "" });
+    try {
+      const response = await listMemoirAutomationEvents(projectId, 8);
+      return response.items || [];
+    } catch (error) {
+      this.setData({
+        automationEventError: error instanceof Error ? error.message : "自动处理记录加载失败",
+      });
+      return [];
+    } finally {
+      this.setData({ automationEventLoading: false });
     }
   },
 
@@ -703,6 +734,38 @@ Page<BookData, {
 
   applySourceCoverage(coverage) {
     this.setData(sourceCoverageData(this.data.plan, coverage));
+  },
+
+  applyAutomationEvents(events) {
+    this.setData({
+      automationEventItems: buildAutomationEventViews(events, this.data.automationEventBusyTarget),
+    });
+  },
+
+  async acknowledgeAutomationEvent(event) {
+    const eventId = event.currentTarget.dataset.id || "";
+    if (!this.data.projectId || !eventId || this.data.automationEventBusyTarget) {
+      return;
+    }
+    this.setData({
+      automationEventBusyTarget: eventId,
+      automationEventItems: this.data.automationEventItems.map((item) => (
+        item.id === eventId ? { ...item, busy: true } : item
+      )),
+      automationEventError: "",
+    });
+    try {
+      await acknowledgeMemoirAutomationEvent(this.data.projectId, eventId);
+      this.setData({
+        automationEventItems: this.data.automationEventItems.filter((item) => item.id !== eventId),
+      });
+    } catch (error) {
+      this.setData({
+        automationEventError: error instanceof Error ? error.message : "自动处理记录确认失败",
+      });
+    } finally {
+      this.setData({ automationEventBusyTarget: "" });
+    }
   },
 
   async applyUpdatedPlan(plan, toastTitle) {

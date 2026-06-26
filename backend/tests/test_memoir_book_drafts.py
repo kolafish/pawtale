@@ -4,12 +4,14 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 
 from app.domain.memoir.types import (
+    MemoirAutomationEventType,
     MemoirBookAutoRevisionJobStatus,
     MemoirBookChapterDraftStatus,
     MemoirBookPlanStatus,
     MemoirCreatedBy,
 )
 from app.models.memoir import (
+    MemoirAutomationEvent,
     MemoirBookAutoRevisionJob,
     MemoirBookChapterDraft,
     MemoirBookChapterDraftVersion,
@@ -417,6 +419,18 @@ async def test_memoir_book_auto_revision_job_supplements_pending_sources(
     )
     assert refreshed_chapter.metadata_json == {}
     assert model_calls == ["deepseek-v4-pro"]
+    event = await test_db.scalar(
+        select(MemoirAutomationEvent).where(
+            MemoirAutomationEvent.project_id == project_id,
+            MemoirAutomationEvent.event_type == MemoirAutomationEventType.CHAPTER_AUTO_REVISED.value,
+        )
+    )
+    assert event is not None
+    assert event.chapter_id == chapter.id
+    assert event.utterance_ids_json == [second["utterance_id"]]
+    assert event.summary_text == "「外婆家的童年」已自动补写 1 条新增讲述。"
+    assert event.metadata_json["source"] == "book_auto_revision"
+    assert event.metadata_json["result_version_id"] == versions[-1].id
 
 
 async def test_mobile_memoir_book_chapter_draft_planner_can_choose_regenerate(

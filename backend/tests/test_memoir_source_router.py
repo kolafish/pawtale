@@ -184,6 +184,12 @@ async def test_source_review_queue_creates_and_lists_pending_route_suggestion(cl
     assert data["total"] == 1
     assert data["items"][0]["id"] == item["id"]
 
+    acknowledge = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/automation-events/{item['id']}/acknowledge"
+    )
+    assert acknowledge.status_code == 400
+    assert acknowledge.json()["detail"] == "自动处理记录仍需处理，不能直接确认隐藏"
+
 
 async def test_source_review_queue_confirm_assigns_source_and_resolves_item(client, test_db):
     first = await create_test_voice_transcript(

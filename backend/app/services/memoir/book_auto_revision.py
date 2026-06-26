@@ -11,7 +11,11 @@ from sqlalchemy.orm import selectinload
 
 from app.config import get_settings
 from app.database import async_session_maker
-from app.domain.memoir.types import MemoirBookAutoRevisionJobStatus
+from app.domain.memoir.types import (
+    MemoirAutomationEventStatus,
+    MemoirAutomationEventType,
+    MemoirBookAutoRevisionJobStatus,
+)
 from app.models.memoir import (
     MemoirBookAutoRevisionJob,
     MemoirBookChapterDraft,
@@ -20,6 +24,7 @@ from app.models.memoir import (
 from app.models.projects import Project
 from app.schemas.memoir_book import MemoirBookChapterDraftGenerateRequest
 from app.services.ai_types import AITextClient
+from app.services.memoir import automation_events
 from app.services.memoir.book_drafts import generate_chapter_draft
 from app.services.memoir.book_plan_sources import (
     pending_source_ids as _pending_source_ids,
@@ -190,6 +195,7 @@ async def run_auto_revision_job(
             return False
 
         model = str((job.metadata_json or {}).get("ai_model") or _project_ai_model(project) or "").strip() or None
+        pending_source_id_list = sorted(pending_source_ids)
         draft_response = await generate_chapter_draft(
             db,
             user_id=project.user_id,
@@ -197,6 +203,24 @@ async def run_auto_revision_job(
             chapter_id=job.chapter_id,
             req=MemoirBookChapterDraftGenerateRequest(ai_model=model, force_regenerate=False),
             ai_client=ai_client,
+        )
+        title = chapter.title if chapter else "未命名章节"
+        source_count = len(pending_source_id_list)
+        await automation_events.record_automation_event(
+            db,
+            project_id=job.project_id,
+            event_type=MemoirAutomationEventType.CHAPTER_AUTO_REVISED,
+            status=MemoirAutomationEventStatus.COMPLETED,
+            chapter_id=job.chapter_id,
+            utterance_ids=pending_source_id_list,
+            summary_text=f"「{title}」已自动补写 {source_count} 条新增讲述。",
+            metadata_json={
+                "source": "book_auto_revision",
+                "job_id": job.id,
+                "result_version_id": draft_response.latest_version.id if draft_response.latest_version else "",
+                "pending_source_utterance_ids": pending_source_id_list,
+                **({"ai_model": model} if model else {}),
+            },
         )
         await _mark_job(
             db,
