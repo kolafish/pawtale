@@ -444,6 +444,48 @@ class MemoirBookSourceAutoAssignmentRunResponse(BaseModel):
     plan: MemoirBookPlanResponse
 
 
+class MemoirBookQualityAuditRunRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    record_event: bool = True
+
+
+class MemoirBookQualityAuditChapterResponse(BaseModel):
+    chapter_id: str
+    title: str
+    sort_order: int
+    source_count: int
+    pending_source_count: int
+    draft_word_count: int
+    status: Literal[
+        "needs_sources",
+        "needs_draft",
+        "needs_update",
+        "thin_sources",
+        "thin_draft",
+        "healthy",
+    ]
+    attention: Literal["high", "medium", "low"]
+    reason: str
+    interview_hint: str
+
+
+class MemoirBookQualityAuditRunResponse(BaseModel):
+    project_id: str
+    overall_status: Literal[
+        "needs_plan",
+        "needs_sources",
+        "needs_drafts",
+        "needs_updates",
+        "collecting",
+        "healthy",
+    ]
+    summary_text: str
+    next_actions: list[str] = Field(default_factory=list)
+    chapter_items: list[MemoirBookQualityAuditChapterResponse] = Field(default_factory=list)
+    event: MemoirAutomationEventResponse | None = None
+
+
 class MemoirBookSourceCoverageItem(BaseModel):
     source_index: int
     voice_session_id: str
