@@ -4,6 +4,7 @@ import {
   type MemoirStreamingAsrOptions,
   type MemoirStartRecordingOptions,
 } from "./memoir-streaming-asr";
+import { sharedRecorderResource } from "./recorder-resource";
 
 export type StreamingVoiceClientFactory = (
   options: MemoirStreamingAsrOptions,
@@ -15,7 +16,7 @@ export class StreamingVoiceController {
   constructor(
     private readonly createClient: StreamingVoiceClientFactory = (
       options,
-    ) => new MemoirStreamingAsrClient(options),
+    ) => new MemoirStreamingAsrClient(options, sharedRecorderResource),
   ) {}
 
   hasClient(): boolean {

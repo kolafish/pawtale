@@ -82,7 +82,7 @@ test("streaming ASR does not read constructor options from class field initializ
   assert.doesNotMatch(source, /private\s+voiceActivityDetector\s*=\s*this\.createVoiceActivityDetector\(\)/);
   assert.match(source, /private\s+voiceActivityDetector:\s*VoiceActivityDetector;/);
 
-  const constructorIndex = source.indexOf("constructor(options: MemoirStreamingAsrOptions)");
+  const constructorIndex = source.indexOf("constructor(");
   const assignOptionsIndex = source.indexOf("this.options = options;", constructorIndex);
   const createDetectorIndex = source.indexOf(
     "this.voiceActivityDetector = this.createVoiceActivityDetector();",
