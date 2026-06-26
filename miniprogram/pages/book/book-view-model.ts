@@ -9,6 +9,7 @@ import type {
   MemoirBookSourceCoverage,
   MemoirBookVoiceCommandParseResponse,
   MemoirBookVoiceCommandResponseKind,
+  MemoirAutomationEvent,
   TTSAlignmentSegment,
   VoiceChatTranscriptLine,
 } from "../../domain/voice-chat";
@@ -49,6 +50,18 @@ export interface BookChapterSourceView extends MemoirBookChapterSourceRef {
   charCount: number;
   previewText: string;
   splitSelected: boolean;
+}
+
+export interface BookAutomationEventView {
+  id: string;
+  eventType: MemoirAutomationEvent["event_type"];
+  titleText: string;
+  summaryText: string;
+  metaText: string;
+  statusText: string;
+  actionText: string;
+  canAcknowledge: boolean;
+  busy: boolean;
 }
 
 export interface BookChapterView extends MemoirBookPlanChapter {
@@ -157,10 +170,83 @@ export interface BookData {
   bookVoiceCommandExecuting: boolean;
   bookVoiceCommandUndoText: string;
   bookVoiceCommandUndoSnapshot: BookVoiceCommandUndoSnapshot | null;
+  automationEventItems: BookAutomationEventView[];
+  automationEventBusyTarget: string;
+  automationEventLoading: boolean;
+  automationEventError: string;
 }
 
 export function trimText(value: string): string {
   return value.trim();
+}
+
+function automationEventTitle(event: MemoirAutomationEvent): string {
+  if (event.event_type === "source_assigned") {
+    return "已自动归章";
+  }
+  if (event.event_type === "source_held") {
+    return event.status === "needs_review" ? "需要确认整理" : "整理建议已处理";
+  }
+  if (event.event_type === "chapter_auto_revised") {
+    return "已自动补写";
+  }
+  if (event.event_type === "audit_completed") {
+    return "章节审计完成";
+  }
+  return "AI 自动处理";
+}
+
+function automationEventStatusText(event: MemoirAutomationEvent): string {
+  if (event.status === "needs_review") {
+    return "待确认";
+  }
+  if (event.status === "failed") {
+    return "失败";
+  }
+  if (event.status === "pending") {
+    return "处理中";
+  }
+  return "已完成";
+}
+
+function automationEventActionText(event: MemoirAutomationEvent): string {
+  if (event.status === "pending") {
+    return "处理中";
+  }
+  if (event.status === "needs_review") {
+    return "待处理";
+  }
+  return "确认";
+}
+
+function automationEventMetaText(event: MemoirAutomationEvent): string {
+  const parts = [formatBeijingDateTimeShort(event.updated_at || event.created_at)];
+  if (event.utterance_ids.length) {
+    parts.push(`${event.utterance_ids.length} 条讲述`);
+  }
+  if (typeof event.confidence === "number") {
+    parts.push(`可信度 ${Math.round(event.confidence * 100)}%`);
+  }
+  return parts.filter(Boolean).join(" · ");
+}
+
+export function buildAutomationEventViews(
+  events: MemoirAutomationEvent[] = [],
+  busyTarget = "",
+): BookAutomationEventView[] {
+  return events
+    .filter((event) => !event.metadata_json?.acknowledged_at)
+    .map((event) => ({
+      id: event.id,
+      eventType: event.event_type,
+      titleText: automationEventTitle(event),
+      summaryText: trimText(event.summary_text) || "AI 已完成一次自动处理。",
+      metaText: automationEventMetaText(event),
+      statusText: automationEventStatusText(event),
+      actionText: automationEventActionText(event),
+      canAcknowledge: event.status !== "pending" && event.status !== "needs_review",
+      busy: event.id === busyTarget,
+    }));
 }
 
 export function positiveFiniteSeconds(value: number | null | undefined): number {

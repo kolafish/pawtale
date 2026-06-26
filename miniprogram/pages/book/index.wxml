@@ -46,6 +46,36 @@
     <text class="status-pill">{{stageText}}</text>
   </view>
 
+  <view wx:if="{{automationEventLoading || automationEventError || automationEventItems.length}}" class="automation-panel">
+    <view class="automation-head">
+      <view>
+        <text class="automation-title">AI 自动处理</text>
+        <text class="automation-meta">记录 AI 已自动整理、补写或发现的问题</text>
+      </view>
+      <text class="automation-count">{{automationEventLoading ? "同步中" : automationEventItems.length + " 条"}}</text>
+    </view>
+    <text wx:if="{{automationEventError}}" class="automation-error">{{automationEventError}}</text>
+    <view wx:for="{{automationEventItems}}" wx:key="id" class="automation-item {{item.eventType}}">
+      <view class="automation-item-main">
+        <view class="automation-item-title-row">
+          <text class="automation-item-title">{{item.titleText}}</text>
+          <text class="automation-item-status">{{item.statusText}}</text>
+        </view>
+        <text class="automation-item-summary">{{item.summaryText}}</text>
+        <text class="automation-item-meta">{{item.metaText}}</text>
+      </view>
+      <button
+        class="automation-ack"
+        data-id="{{item.id}}"
+        loading="{{item.busy}}"
+        disabled="{{item.busy || !item.canAcknowledge}}"
+        bindtap="acknowledgeAutomationEvent"
+      >
+        {{item.actionText}}
+      </button>
+    </view>
+  </view>
+
   <view wx:if="{{plan}}" class="book-voice-assistant {{bookVoiceAssistantExpanded ? 'expanded' : 'collapsed'}}">
     <view class="book-voice-header">
       <view class="book-voice-copy">

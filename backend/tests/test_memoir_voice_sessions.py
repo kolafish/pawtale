@@ -407,6 +407,26 @@ async def test_mobile_memoir_project_progress_snapshot_counts_book_state(client,
     )
     assert events_response.status_code == 200
     assert events_response.json()["total"] == 1
+    event_id = events_response.json()["items"][0]["id"]
+
+    acknowledge_response = await client.post(
+        f"/api/mobile/memoir/projects/{first['session']['project_id']}/automation-events/{event_id}/acknowledge"
+    )
+    assert acknowledge_response.status_code == 200
+    assert acknowledge_response.json()["metadata_json"]["acknowledged_by_user"] is True
+
+    hidden_events_response = await client.get(
+        f"/api/mobile/memoir/projects/{first['session']['project_id']}/automation-events"
+    )
+    assert hidden_events_response.status_code == 200
+    assert hidden_events_response.json()["total"] == 0
+    assert hidden_events_response.json()["items"] == []
+
+    hidden_snapshot_response = await client.get(
+        f"/api/mobile/memoir/projects/{first['session']['project_id']}/progress-snapshot"
+    )
+    assert hidden_snapshot_response.status_code == 200
+    assert hidden_snapshot_response.json()["recent_automation_events"] == []
 
 
 async def test_mobile_memoir_assistant_tts_generates_audio_for_follow_up_message(

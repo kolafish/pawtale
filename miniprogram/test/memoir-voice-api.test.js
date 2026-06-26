@@ -92,23 +92,35 @@ test("project progress APIs fetch snapshot and automation events", async () => {
       if (options.url.includes("/automation-events")) {
         options.success({
           statusCode: 200,
-          data: {
-            items: [
-              {
-                id: "event-1",
-                project_id: "project/1",
-                event_type: "source_assigned",
-                status: "completed",
-                utterance_ids: ["utterance-1"],
-                summary_text: "已整理 1 条讲述。",
-                metadata_json: {},
-                created_at: "2026-06-23T12:00:00",
-                updated_at: "2026-06-23T12:00:00",
-              },
-            ],
-            total: 1,
-            limit: 5,
-          },
+          data: options.url.includes("/acknowledge")
+            ? {
+              id: "event-1",
+              project_id: "project/1",
+              event_type: "source_assigned",
+              status: "completed",
+              utterance_ids: ["utterance-1"],
+              summary_text: "已整理 1 条讲述。",
+              metadata_json: { acknowledged_by_user: true },
+              created_at: "2026-06-23T12:00:00",
+              updated_at: "2026-06-23T12:00:00",
+            }
+            : {
+              items: [
+                {
+                  id: "event-1",
+                  project_id: "project/1",
+                  event_type: "source_assigned",
+                  status: "completed",
+                  utterance_ids: ["utterance-1"],
+                  summary_text: "已整理 1 条讲述。",
+                  metadata_json: {},
+                  created_at: "2026-06-23T12:00:00",
+                  updated_at: "2026-06-23T12:00:00",
+                },
+              ],
+              total: 1,
+              limit: 5,
+            },
           cookies: [],
           header: {},
         });
@@ -144,12 +156,14 @@ test("project progress APIs fetch snapshot and automation events", async () => {
   delete require.cache[require.resolve("../services/request.ts")];
   delete require.cache[require.resolve("../services/memoir-voice-api.ts")];
   const {
+    acknowledgeMemoirAutomationEvent,
     getMemoirProjectProgressSnapshot,
     listMemoirAutomationEvents,
   } = require("../services/memoir-voice-api.ts");
 
   const snapshot = await getMemoirProjectProgressSnapshot("project/1");
   const events = await listMemoirAutomationEvents("project/1", 5);
+  const acknowledged = await acknowledgeMemoirAutomationEvent("project/1", "event/1");
 
   const apiRequests = requests.filter((request) => request.url.includes("/api/mobile/memoir/"));
   assert.equal(
@@ -160,8 +174,14 @@ test("project progress APIs fetch snapshot and automation events", async () => {
     apiRequests[1].url,
     "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/automation-events?limit=5",
   );
+  assert.equal(
+    apiRequests[2].url,
+    "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/automation-events/event%2F1/acknowledge",
+  );
+  assert.equal(apiRequests[2].method, "POST");
   assert.equal(snapshot.assigned_utterance_count, 1);
   assert.equal(events.items[0].summary_text, "已整理 1 条讲述。");
+  assert.equal(acknowledged.metadata_json.acknowledged_by_user, true);
   delete global.wx;
 });
 

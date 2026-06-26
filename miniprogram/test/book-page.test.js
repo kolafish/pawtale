@@ -530,6 +530,8 @@ function loadBookPage({
       throw new Error("getMemoirBookPlan was not mocked");
     },
     getMemoirBookSourceCoverage: async () => null,
+    listMemoirAutomationEvents: async () => ({ items: [], total: 0, limit: 8 }),
+    acknowledgeMemoirAutomationEvent: async () => ({}),
     parseMemoirBookVoiceCommand: async () => {
       throw new Error("parseMemoirBookVoiceCommand was not mocked");
     },
@@ -797,6 +799,65 @@ test("book page asks logged-in users to create a memoir before loading book cont
   assert.equal(context.data.projectTitle, "尚未创建回忆录");
   assert.equal(context.data.progressText, "还没有章节");
   assert.equal(planCalls, 0);
+});
+
+test("book page shows and acknowledges automation events", async () => {
+  const acknowledged = [];
+  const { page } = loadBookPage({
+    authExports: {
+      getMemoirIdentity: async () => ({
+        id: "user-1",
+        email: "memoir-author@example.com",
+        password_login_enabled: true,
+        display_name: "作者",
+        created_at: "2026-06-15T00:00:00",
+        active_project_id: "project/1",
+        active_project: { id: "project/1", title: "外婆回忆录" },
+        projects: [],
+      }),
+    },
+    voiceApiExports: {
+      getMemoirBookPlan: async () => samplePlan("confirmed"),
+      getMemoirBookChapterDraft: async () => null,
+      getMemoirBookOutput: async () => null,
+      getMemoirBookSourceCoverage: async () => sampleSourceCoverage(0),
+      listMemoirAutomationEvents: async () => ({
+        items: [
+          {
+            id: "event-1",
+            project_id: "project/1",
+            event_type: "chapter_auto_revised",
+            status: "completed",
+            chapter_id: "chapter-1",
+            utterance_ids: ["utterance-2"],
+            summary_text: "「外婆家的童年」已自动补写 1 条新增讲述。",
+            confidence: null,
+            metadata_json: {},
+            created_at: "2026-06-23T12:00:00",
+            updated_at: "2026-06-23T12:00:00",
+          },
+        ],
+        total: 1,
+        limit: 8,
+      }),
+      acknowledgeMemoirAutomationEvent: async (projectId, eventId) => {
+        acknowledged.push({ projectId, eventId });
+        return {};
+      },
+    },
+  });
+  const context = pageContext(page);
+
+  await page.loadBookHome.call(context);
+
+  assert.equal(context.data.automationEventItems.length, 1);
+  assert.equal(context.data.automationEventItems[0].titleText, "已自动补写");
+  assert.equal(context.data.automationEventItems[0].summaryText, "「外婆家的童年」已自动补写 1 条新增讲述。");
+
+  await page.acknowledgeAutomationEvent.call(context, { currentTarget: { dataset: { id: "event-1" } } });
+
+  assert.deepEqual(acknowledged, [{ projectId: "project/1", eventId: "event-1" }]);
+  assert.deepEqual(context.data.automationEventItems, []);
 });
 
 test("book page shows source coverage notice only when there are uncovered transcripts", () => {
