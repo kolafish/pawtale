@@ -422,7 +422,9 @@ Page<BookData, {
   clearBookVoiceAssistantAutoListenTimer(): void;
   canStartBookVoiceAssistantAutoListen(): boolean;
   scheduleBookVoiceAssistantAutoListen(statusText?: string): void;
-  playBookVoiceAssistantReply(text: string, options?: { autoListenAfterPlayback?: boolean }): Promise<void>;
+  canInterruptBookVoiceAssistantReply(): boolean;
+  interruptBookVoiceAssistantReply(): void;
+  playBookVoiceAssistantReply(text: string, options?: { autoListenAfterPlayback?: boolean }): Promise<boolean>;
   playBookVoiceAssistantAudioFrame(
     frame: PreparedBookVoiceAssistantTTSFrame,
     token: number,
@@ -1461,7 +1463,10 @@ Page<BookData, {
       return;
     }
     if (this.data.bookVoiceAssistantBusy) {
-      return;
+      if (!this.canInterruptBookVoiceAssistantReply()) {
+        return;
+      }
+      this.interruptBookVoiceAssistantReply();
     }
     if (!this.data.plan || !this.data.chapters.length) {
       this.setData({
@@ -1791,7 +1796,13 @@ Page<BookData, {
       this.setData({
         bookVoiceAssistantStatusText: "收到确认，正在执行",
       });
-      await this.playBookVoiceAssistantReply("好的，我按刚才理解的修改。", { autoListenAfterPlayback: false });
+      const replyCompleted = await this.playBookVoiceAssistantReply(
+        "好的，我按刚才理解的修改。",
+        { autoListenAfterPlayback: false },
+      );
+      if (!replyCompleted) {
+        return;
+      }
       await this.executeBookVoiceCommand({ confirmedByVoice: true, autoListenAfterExecution: true });
       return;
     }
@@ -2020,10 +2031,44 @@ Page<BookData, {
     }, 250) as unknown as number;
   },
 
+  canInterruptBookVoiceAssistantReply() {
+    return Boolean(
+      this.data.bookVoiceAssistantConversationActive
+      && (
+        this.data.bookVoiceAssistantSpeakingLineId
+        || this.data.bookTTSActiveTarget === "book-voice-assistant"
+        || this.data.ttsBusyTarget === "book-voice-assistant"
+        || this.bookVoiceTTSStreaming
+      ),
+    );
+  },
+
+  interruptBookVoiceAssistantReply() {
+    const interruptedLineId = this.data.bookVoiceAssistantSpeakingLineId;
+    this.clearBookVoiceAssistantAutoListenTimer();
+    this.stopPlayback();
+    const transcriptLines = interruptedLineId
+      ? this.data.bookVoiceTranscriptLines.filter((line) => line.id !== interruptedLineId)
+      : this.data.bookVoiceTranscriptLines;
+    this.setData({
+      bookVoiceTranscriptLines: transcriptLines,
+      bookVoiceAssistantBusy: false,
+      bookVoiceAssistantReplyText: "",
+      bookVoiceAssistantSpeakingLineId: "",
+      bookVoiceAssistantStatusText: "已打断，正在听你说",
+      bookTTSActiveTarget: "",
+      bookTTSActiveText: "",
+      bookTTSSpokenText: "",
+      bookTTSCurrentText: "",
+      bookTTSRemainingText: "",
+      bookTTSProgressPercent: 0,
+    });
+  },
+
   async playBookVoiceAssistantReply(text, options: { autoListenAfterPlayback?: boolean } = {}) {
     const replyText = trimText(text);
     if (!replyText || !this.data.projectId) {
-      return;
+      return false;
     }
     const target = "book-voice-assistant";
     this.stopPlayback();
@@ -2088,7 +2133,7 @@ Page<BookData, {
       });
       await this.bookVoiceTTSPlayback;
       if (token !== this.playToken) {
-        return;
+        return false;
       }
       this.setData({ bookVoiceAssistantSpeakingLineId: "" });
       this.setData({ bookVoiceAssistantBusy: false });
@@ -2103,10 +2148,11 @@ Page<BookData, {
       } else if (this.data.bookVoiceCommandPreview && !isBookVoiceReadIntent(this.data.bookVoiceCommandPreview)) {
         this.setData({ bookVoiceAssistantStatusText: "等你确认，或继续说" });
       }
+      return true;
     } catch (error) {
       if (isLoginError(error)) {
         wx.reLaunch({ url: "/pages/login/index" });
-        return;
+        return false;
       }
       if (token === this.playToken) {
         this.setData({
@@ -2114,6 +2160,7 @@ Page<BookData, {
           bookVoiceAssistantStatusText: "AI 回复失败",
         });
       }
+      return false;
     } finally {
       if (token === this.playToken && this.data.ttsBusyTarget === target) {
         this.setData({ ttsBusyTarget: "" });

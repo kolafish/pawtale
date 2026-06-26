@@ -64,11 +64,11 @@
         </button>
         <button
           class="book-voice-button primary"
-          loading="{{bookVoiceAssistantBusy}}"
-          disabled="{{loading || generatingPlan || confirmingPlan || updatingPlanStructure || generatingBook || bookVoiceAssistantBusy}}"
+          loading="{{bookVoiceAssistantBusy && !bookVoiceAssistantSpeakingLineId}}"
+          disabled="{{loading || generatingPlan || confirmingPlan || updatingPlanStructure || generatingBook || (bookVoiceAssistantBusy && !bookVoiceAssistantSpeakingLineId)}}"
           bindtap="startBookVoiceCommand"
         >
-          {{bookVoiceAssistantListening ? "停止" : (bookVoiceAssistantBusy ? "处理中" : "语音修改")}}
+          {{bookVoiceAssistantListening ? "停止" : (bookVoiceAssistantBusy ? (bookVoiceAssistantSpeakingLineId ? "打断 AI" : "处理中") : "语音修改")}}
         </button>
       </view>
     </view>
