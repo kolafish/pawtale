@@ -62,3 +62,17 @@ class MemoirBookAutoRevisionJobStatus(str, Enum):
     SUCCEEDED = "succeeded"
     FAILED = "failed"
     SKIPPED = "skipped"
+
+
+class MemoirAutomationEventType(str, Enum):
+    SOURCE_ASSIGNED = "source_assigned"
+    SOURCE_HELD = "source_held"
+    CHAPTER_AUTO_REVISED = "chapter_auto_revised"
+    AUDIT_COMPLETED = "audit_completed"
+
+
+class MemoirAutomationEventStatus(str, Enum):
+    PENDING = "pending"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    NEEDS_REVIEW = "needs_review"

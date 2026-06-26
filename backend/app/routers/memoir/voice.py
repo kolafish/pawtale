@@ -16,6 +16,8 @@ from app.models.users import User
 from app.schemas.memoir_voice import (
     MemoirAssistantTTSRequest,
     MemoirAssistantTTSResponse,
+    MemoirAutomationEventListResponse,
+    MemoirProjectProgressSnapshotResponse,
     MemoirVoiceAuthorizationConsentRequest,
     MemoirVoiceAuthorizationConsentResponse,
     MemoirVoiceAuthorizationConsentStatusResponse,
@@ -37,6 +39,8 @@ from app.schemas.memoir_voice import (
     MemoirVoiceSessionStopRequest,
 )
 from app.services.memoir import projects as memoir_projects
+from app.services.memoir import automation_events as memoir_automation_events
+from app.services.memoir import progress_snapshot as memoir_progress_snapshot
 from app.services.memoir import voice_authorization as memoir_voice_authorization
 from app.services.memoir import voice_followups as memoir_voice_followups
 from app.services.memoir import voice_search as memoir_voice_search
@@ -130,6 +134,34 @@ async def get_mobile_memoir_voice_progress(
     current_user: User = Depends(get_current_user),
 ):
     return await memoir_voice_sessions.get_voice_progress(db, current_user.id, project_id=project_id)
+
+
+@router.get("/projects/{project_id}/progress-snapshot", response_model=MemoirProjectProgressSnapshotResponse)
+async def get_mobile_memoir_project_progress_snapshot(
+    project_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await memoir_progress_snapshot.get_project_progress_snapshot(
+        db,
+        user_id=current_user.id,
+        project_id=project_id,
+    )
+
+
+@router.get("/projects/{project_id}/automation-events", response_model=MemoirAutomationEventListResponse)
+async def list_mobile_memoir_automation_events(
+    project_id: str,
+    limit: int = Query(10, ge=1, le=50),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await memoir_automation_events.list_automation_events(
+        db,
+        user_id=current_user.id,
+        project_id=project_id,
+        limit=limit,
+    )
 
 
 @router.get("/voice-sessions/{voice_session_id}", response_model=MemoirVoiceSessionDetailResponse)
