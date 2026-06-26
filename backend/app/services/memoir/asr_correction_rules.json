@@ -1,0 +1,83 @@
+{
+  "version": 1,
+  "rules": [
+    {
+      "id": "chapter_ordinal_zhang_to_chapter",
+      "kind": "regex",
+      "description": "Correct ASR that hears ordinal chapter references as the measure word zhang.",
+      "pattern": "第\\s*([0-9一二两三四五六七八九十]+)\\s*张",
+      "replacement": "第{1}章"
+    },
+    {
+      "id": "chapter_bare_zhang_to_chapter",
+      "kind": "regex",
+      "description": "Correct chapter numbers such as two zhang when surrounding words imply chapter order.",
+      "pattern": "([0-9一二两三四五六七八九十]+)\\s*张(?=(?:和|跟|与|的|换|调|移|顺序|章节|章|[，。,.!！?？、\\s]|$))",
+      "replacement": "{1}章"
+    },
+    {
+      "id": "chapter_count_ji_zhang_to_chapter",
+      "kind": "regex",
+      "description": "Correct chapter count questions that ASR hears as several sheets.",
+      "pattern": "几\\s*张",
+      "replacement": "几章"
+    },
+    {
+      "id": "chapter_count_duoshao_zhang_to_chapter",
+      "kind": "regex",
+      "description": "Correct how-many chapter questions that ASR hears as how many sheets.",
+      "pattern": "多少\\s*张",
+      "replacement": "多少章"
+    },
+    {
+      "id": "chapter_term_homophones",
+      "kind": "contextual_homophone",
+      "description": "Correct person-name-like homophones when the local context points to book chapters.",
+      "terms": ["张杰", "张洁", "张节", "章杰"],
+      "replacement": "章节",
+      "before_context_patterns": [
+        "书的",
+        "本书的",
+        "成书的",
+        "目录的",
+        "回忆录的",
+        "未\\s*收入",
+        "未\\s*收录",
+        "没\\s*收入",
+        "没\\s*收录",
+        "归\\s*到",
+        "归\\s*入",
+        "收\\s*录\\s*到",
+        "收\\s*入\\s*到",
+        "放\\s*到",
+        "分\\s*到",
+        "(?:现在有|一共有|总共有)?\\s*(?:几|几个|多少|哪些|哪个|每个|所有|全部)",
+        "不是.{0,8}人名的?"
+      ],
+      "after_context_patterns": [
+        "规划",
+        "结构",
+        "顺序",
+        "目录",
+        "标题",
+        "题目",
+        "章名",
+        "正文",
+        "内容",
+        "归属",
+        "归入",
+        "归到",
+        "收录",
+        "收入",
+        "改名",
+        "改成",
+        "移动",
+        "上移",
+        "下移",
+        "合并",
+        "拆分",
+        "确认"
+      ]
+    }
+  ]
+}

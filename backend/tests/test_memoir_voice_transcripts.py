@@ -1,3 +1,6 @@
+import json
+from pathlib import Path
+
 from sqlalchemy import select
 
 from app.domain.memoir.types import (
@@ -19,7 +22,11 @@ from app.models.memoir import (
     MemoirVoiceUtterance,
 )
 from app.services.memoir.asr_text_normalization import normalize_memoir_asr_text
-from app.services.memoir.voice_transcripts import _remove_obvious_oral_fillers, generate_cleaned_transcript_text
+from app.services.memoir.voice_transcripts import (
+    MemoirTranscriptCleanupContext,
+    _remove_obvious_oral_fillers,
+    generate_cleaned_transcript_text,
+)
 from tests.memoir_helpers import create_test_voice_transcript, post_mobile_memoir_voice_session, memoir_source_ref
 
 UTC_SUFFIXES = ("Z", "+00:00")
@@ -47,6 +54,19 @@ class FailingAIClient:
 
     async def _call_llm(self, *args, **kwargs):
         raise RuntimeError("provider down")
+
+
+class CapturingAIClient:
+    provider_name = "fake-ai"
+    model_name = "fake-cleaner"
+
+    def __init__(self, response: str = "现在有几个章节啊？") -> None:
+        self.response = response
+        self.prompt = ""
+
+    async def _call_llm(self, _system_prompt, user_prompt, **_kwargs):
+        self.prompt = user_prompt
+        return self.response
 
 
 async def _append_voice_turn(
@@ -586,7 +606,21 @@ def test_normalize_memoir_asr_text_corrects_chapter_homophones_in_book_context()
     assert normalize_memoir_asr_text("这条还没收入张杰。") == "这条还没收入章节。"
     assert normalize_memoir_asr_text("你不是一个人名的张杰，是书的张杰。") == "你不是一个人名的章节，是书的章节。"
     assert normalize_memoir_asr_text("把第一张改名为童年往事。") == "把第一章改名为童年往事。"
+    assert normalize_memoir_asr_text("第一张和第二张换一下。") == "第一章和第二章换一下。"
+    assert normalize_memoir_asr_text("现在有几张啊？") == "现在有几章啊？"
     assert normalize_memoir_asr_text("张杰这个人，在书里单独占了一章。") == "张杰这个人，在书里单独占了一章。"
+
+
+def test_memoir_asr_correction_rule_files_stay_in_sync():
+    repo_root = Path(__file__).resolve().parents[2]
+    backend_rules = json.loads(
+        (repo_root / "backend/app/services/memoir/asr_correction_rules.json").read_text(encoding="utf-8")
+    )
+    miniprogram_rules = json.loads(
+        (repo_root / "miniprogram/services/asr-correction-rules.json").read_text(encoding="utf-8")
+    )
+
+    assert backend_rules == miniprogram_rules
 
 
 async def test_generate_cleaned_transcript_text_uses_fallback_when_not_strict():
@@ -599,6 +633,29 @@ async def test_generate_cleaned_transcript_text_uses_fallback_when_not_strict():
     assert result.content == "今天下雨了，雨下的很大。"
     assert result.provider is None
     assert result.created_by == MemoirCreatedBy.SYSTEM
+
+
+async def test_generate_cleaned_transcript_text_sends_recent_context_to_llm():
+    ai_client = CapturingAIClient()
+    result = await generate_cleaned_transcript_text(
+        "现在有几个张杰啊？",
+        ai_client=ai_client,
+        context=MemoirTranscriptCleanupContext(
+            scene="voice_chat",
+            guidance_mode="guided_interview",
+            current_guidance_module="family",
+            recent_user_utterances=("我刚才说到第一章。",),
+            recent_assistant_messages=("我们继续聊这本书的章节安排。",),
+        ),
+    )
+
+    assert result.content == "现在有几个章节啊？"
+    assert "上下文只用于校对判断" in ai_client.prompt
+    assert "场景：voice_chat" in ai_client.prompt
+    assert "引导模式：guided_interview" in ai_client.prompt
+    assert "当前引导模块：family" in ai_client.prompt
+    assert "我刚才说到第一章。" in ai_client.prompt
+    assert "我们继续聊这本书的章节安排。" in ai_client.prompt
 
 
 async def test_generate_cleaned_transcript_text_normalizes_book_domain_asr_terms_when_not_strict():

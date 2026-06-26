@@ -549,6 +549,8 @@ async def test_voice_gateway_persistence_saves_final_message_utterance_and_audio
     async def fake_generate_cleaned_transcript_text(text: str, *, strict: bool = True, **_kwargs):
         assert text == "嗯，我小时候就是住在外婆家。"
         assert strict is False
+        assert _kwargs["context"].scene == "voice_chat"
+        assert _kwargs["context"].guidance_mode == "free_narration"
         return CleanedTranscriptText(
             content="我小时候住在外婆家。",
             provider="fake-ai",
