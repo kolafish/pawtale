@@ -200,7 +200,8 @@ Page<VoiceChatData, {
     },
   ): Promise<void>;
   stopFollowUpAudio(): void;
-  cancelFollowUpTTS(): void;
+  cancelFollowUpTTS(reason?: string): void;
+  assistantTurnActiveForBargeIn(): boolean;
   markStreamingAudioFrameScheduled(event: StreamingSpeechPlaybackFrameEvent): void;
   updateStreamingTTSProgress(): void;
   streamingPlaybackTimeForProgress(): number;
@@ -1292,9 +1293,13 @@ Page<VoiceChatData, {
     this.resetFollowUpTTSProgress();
   },
 
-  cancelFollowUpTTS() {
+  cancelFollowUpTTS(reason = "cancelled") {
     this.ttsRequestSerial += 1;
-    this.assistantTurnRuntime?.cancel();
+    const partialAssistantLineId = this.assistantStreamLineId;
+    const transcriptLines = partialAssistantLineId
+      ? this.data.transcriptLines.filter((line) => line.id !== partialAssistantLineId)
+      : this.data.transcriptLines;
+    this.assistantTurnRuntime?.cancel(reason);
     this.assistantTurnRuntime = null;
     this.assistantStreamLineId = "";
     this.assistantStreamingAudioStartSeconds = -1;
@@ -1303,6 +1308,27 @@ Page<VoiceChatData, {
     this.assistantTurnQueue = [];
     this.assistantAudioPrepareCount = 0;
     this.stopFollowUpAudio();
+    if (partialAssistantLineId) {
+      this.setData({
+        ...assistantTranscriptState(transcriptLines, {
+          guidanceMode: this.data.guidanceMode,
+          lastFollowUpSourceMessageId: this.data.lastFollowUpSourceMessageId,
+          followUpLoading: false,
+          assistantPromptText: "",
+          followUpMessageId: "",
+          followUpAudioFileId: "",
+          followUpTTSStateText: "",
+          ttsAlignment: [],
+          assistantExpectsAnswer: true,
+          canRequestFollowUp: canRequestFollowUp(
+            transcriptLines,
+            this.data.guidanceMode,
+            this.data.lastFollowUpSourceMessageId,
+            false,
+          ),
+        }),
+      });
+    }
     if (this.data.followUpTTSLoading || this.data.followUpTTSPlaying) {
       this.setData({
         followUpTTSLoading: false,
@@ -1310,6 +1336,13 @@ Page<VoiceChatData, {
         followUpTTSStateText: this.data.followUpTTSStateText ? "语音已停止" : "",
       });
     }
+  },
+
+  assistantTurnActiveForBargeIn() {
+    return Boolean(this.assistantTurnRuntime)
+      || this.data.followUpLoading
+      || this.data.followUpTTSLoading
+      || this.data.followUpTTSPlaying;
   },
 
   markStreamingAudioFrameScheduled(event) {
@@ -1556,6 +1589,18 @@ Page<VoiceChatData, {
       this.setData({ autoListenStateText: autoTriggered ? "正在重新连接语音" : this.data.autoListenStateText });
       return false;
     }
+    const interruptingAssistant = !autoTriggered && this.assistantTurnActiveForBargeIn();
+    if (interruptingAssistant) {
+      followUpRequestSerial += 1;
+      this.cancelPendingNoAnswerPrompt(false);
+      this.cancelFollowUpTTS("interrupted_by_user");
+      this.setData({
+        followUpLoading: false,
+        followUpError: "",
+        followUpTTSStateText: "已打断，正在听你说",
+        persistenceStateText: "正在听你说",
+      });
+    }
     const started = this.voiceStreaming.startRecording({
       noVoiceActivityTimeoutMs: autoTriggered ? AUTO_LISTEN_NO_ANSWER_MS : 0,
     });
@@ -1570,7 +1615,9 @@ Page<VoiceChatData, {
       });
       return false;
     }
-    this.cancelFollowUpTTS();
+    if (!interruptingAssistant) {
+      this.cancelFollowUpTTS();
+    }
     this.handledNoAnswerFrameCount = -1;
     this.setData({
       recording: true,

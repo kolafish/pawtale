@@ -139,6 +139,16 @@ class AssistantTurnArtifacts:
         return b"".join(self.audio_chunks)
 
 
+@dataclass(frozen=True)
+class AssistantTurnCancelSignal:
+    reason: str = "cancelled"
+    client_disconnected: bool = False
+
+    @property
+    def state(self) -> str:
+        return "interrupted" if self.reason == "interrupted_by_user" else "cancelled"
+
+
 class VoiceAssistantTurnStreamSession:
     def __init__(
         self,
@@ -191,16 +201,15 @@ class VoiceAssistantTurnStreamSession:
         )
 
         if cancel_task in done:
-            client_disconnected = False
             try:
-                await cancel_task
+                cancel_signal = await cancel_task
             except Exception:
-                client_disconnected = True
+                cancel_signal = AssistantTurnCancelSignal(reason="connection_close", client_disconnected=True)
             cancel_event.set()
             stream_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await stream_task
-            if client_disconnected:
+            if cancel_signal.client_disconnected:
                 await self.db.rollback()
                 return
             await self.client.send_json(
@@ -208,7 +217,8 @@ class VoiceAssistantTurnStreamSession:
                     "type": "turn.cancelled",
                     "turn_id": turn_id,
                     "voice_session_id": self.voice_session_id,
-                    "state": "cancelled",
+                    "state": cancel_signal.state,
+                    "reason": cancel_signal.reason,
                 }
             )
             return
@@ -236,12 +246,17 @@ class VoiceAssistantTurnStreamSession:
                 }
             )
 
-    async def _wait_for_cancel(self, cancel_event: asyncio.Event) -> None:
+    async def _wait_for_cancel(self, cancel_event: asyncio.Event) -> AssistantTurnCancelSignal:
         while not cancel_event.is_set():
             message = await self.client.receive_json()
-            if message.get("type") in {"turn.cancel", "connection.close"}:
+            message_type = message.get("type")
+            if message_type == "connection.close":
                 cancel_event.set()
-                return
+                return AssistantTurnCancelSignal(reason="connection_close", client_disconnected=True)
+            if message_type == "turn.cancel":
+                cancel_event.set()
+                return AssistantTurnCancelSignal(reason=_cancel_reason(message))
+        return AssistantTurnCancelSignal()
 
     async def _stream_turn(
         self,
@@ -597,6 +612,13 @@ def _optional_text(value: object) -> str | None:
         return None
     text = str(value).strip()
     return text or None
+
+
+def _cancel_reason(message: dict) -> str:
+    reason = _optional_text(message.get("reason"))
+    if not reason:
+        return "cancelled"
+    return reason[:80]
 
 
 def _exception_message(exc: Exception) -> str:
