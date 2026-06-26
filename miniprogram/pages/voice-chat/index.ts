@@ -204,7 +204,8 @@ Page<VoiceChatData, {
   cancelFollowUpTTS(reason?: string): void;
   assistantTurnActiveForBargeIn(): boolean;
   startAssistantBargeInMonitor(requestSerial: number): void;
-  stopAssistantBargeInMonitor(): void;
+  stopAssistantBargeInMonitor(): Promise<void>;
+  handleAssistantBargeIn(requestSerial: number): Promise<void>;
   markStreamingAudioFrameScheduled(event: StreamingSpeechPlaybackFrameEvent): void;
   updateStreamingTTSProgress(): void;
   streamingPlaybackTimeForProgress(): number;
@@ -1373,25 +1374,32 @@ Page<VoiceChatData, {
     }
     this.assistantBargeInMonitor.start({
       onBargeIn: () => {
-        if (
-          requestSerial !== followUpRequestSerial
-          || this.data.recording
-          || !this.assistantTurnActiveForBargeIn()
-        ) {
-          return;
-        }
-        this.setData({
-          autoListenStateText: "听到你说话，正在打断老余",
-        });
-        if (this.ensureVoiceAuthorization(false)) {
-          void this.startRecordingAfterPrivacy(false);
-        }
+        void this.handleAssistantBargeIn(requestSerial);
       },
     });
   },
 
   stopAssistantBargeInMonitor() {
-    this.assistantBargeInMonitor.stop();
+    return this.assistantBargeInMonitor.stopAndWait();
+  },
+
+  async handleAssistantBargeIn(requestSerial) {
+    if (
+      requestSerial !== followUpRequestSerial
+      || this.data.recording
+      || !this.assistantTurnActiveForBargeIn()
+    ) {
+      await this.stopAssistantBargeInMonitor();
+      return;
+    }
+    this.setData({
+      autoListenStateText: "听到你说话，正在打断老余",
+    });
+    if (!this.ensureVoiceAuthorization(false)) {
+      await this.stopAssistantBargeInMonitor();
+      return;
+    }
+    await this.startRecordingAfterPrivacy(false);
   },
 
   markStreamingAudioFrameScheduled(event) {
@@ -1629,6 +1637,7 @@ Page<VoiceChatData, {
         persistenceStateText: "正在听你说",
       });
     }
+    await this.stopAssistantBargeInMonitor();
     if (!(await this.syncVoiceAuthorizationForSession())) {
       return false;
     }
