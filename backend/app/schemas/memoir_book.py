@@ -338,6 +338,37 @@ class MemoirBookSourceCoverageResponse(BaseModel):
     uncovered_sources: list[MemoirBookSourceCoverageItem] = Field(default_factory=list)
 
 
+class MemoirBookSourceRouteRequest(BaseModel):
+    utterance_id: str
+
+    @field_validator("utterance_id")
+    @classmethod
+    def _valid_utterance_id(cls, value: str) -> str:
+        utterance_id = value.strip()
+        if not utterance_id:
+            raise ValueError("讲述记录不能为空")
+        return utterance_id
+
+
+class MemoirBookSourceRouteEvidence(BaseModel):
+    chapter_id: str | None = None
+    utterance_id: str | None = None
+    quote: str
+    reason: str = ""
+
+
+class MemoirBookSourceRouteResponse(BaseModel):
+    action: Literal["assign_to_chapter", "suggest_new_chapter", "hold_for_review"]
+    utterance_id: str
+    source_index: int
+    target_chapter_id: str | None = None
+    target_chapter_title: str | None = None
+    suggested_title: str | None = None
+    confidence: float = Field(ge=0, le=1)
+    reason: str
+    evidence: list[MemoirBookSourceRouteEvidence] = Field(default_factory=list)
+
+
 class MemoirBookVoiceCommandExecuteResponse(BaseModel):
     intent: str
     summary: str
