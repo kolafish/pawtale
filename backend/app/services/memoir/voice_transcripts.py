@@ -70,6 +70,15 @@ class CleanedTranscriptText:
     created_by: MemoirCreatedBy
 
 
+@dataclass(frozen=True)
+class MemoirTranscriptCleanupContext:
+    scene: str | None = None
+    guidance_mode: str | None = None
+    current_guidance_module: str | None = None
+    recent_user_utterances: tuple[str, ...] = ()
+    recent_assistant_messages: tuple[str, ...] = ()
+
+
 def _text_or_empty(value: str | None) -> str:
     return (value or "").strip()
 
@@ -84,12 +93,50 @@ def _utc_datetime(value: datetime) -> datetime:
     return value.astimezone(timezone.utc)
 
 
-def _build_cleanup_prompt(source_text: str) -> str:
+def _cleanup_context_block(context: MemoirTranscriptCleanupContext | None) -> str:
+    if context is None:
+        return ""
+
+    lines: list[str] = ["近期上下文（仅供校对参考，不得扩写当前句）："]
+    if context.scene:
+        lines.append(f"- 场景：{context.scene}")
+    if context.guidance_mode:
+        lines.append(f"- 引导模式：{context.guidance_mode}")
+    if context.current_guidance_module:
+        lines.append(f"- 当前引导模块：{context.current_guidance_module}")
+    user_utterances = _compact_context_texts(context.recent_user_utterances, limit=5)
+    if user_utterances:
+        lines.append("- 最近用户原话：")
+        lines.extend(f"  {index}. {text}" for index, text in enumerate(user_utterances, start=1))
+    assistant_messages = _compact_context_texts(context.recent_assistant_messages, limit=3)
+    if assistant_messages:
+        lines.append("- 最近 AI 问题/回复：")
+        lines.extend(f"  {index}. {text}" for index, text in enumerate(assistant_messages, start=1))
+    return "\n".join(lines) + "\n"
+
+
+def _compact_context_texts(values: tuple[str, ...], *, limit: int) -> list[str]:
+    compacted: list[str] = []
+    for value in values[-limit:]:
+        text = _SPACE_RE.sub(" ", value).strip()
+        if not text:
+            continue
+        compacted.append(text[:120])
+    return compacted
+
+
+def _build_cleanup_prompt(
+    source_text: str,
+    *,
+    context: MemoirTranscriptCleanupContext | None = None,
+) -> str:
+    context_block = _cleanup_context_block(context)
     return f"""请对下面这段实时语音识别出来的中文口述内容做一次忠于原文的清理。
 
 要求：
 - 只修正 ASR 可能因方言、口音、同音词造成的明显错字或错词；无法确定时保留原文
 - 成书、目录、归章语境中，“张杰”“张洁”“张节”“章杰”很可能是“章节”；如果明显不是人名，要改成“章节”
+- 可参考下方近期上下文判断同音词、领域词和指代；上下文只用于校对判断，不得把当前句没有说出的信息补进输出
 - 必须去掉明显的口头填充词，比如句首或重复出现的“嗯”“啊”“呃”“那个”“这个”“就是”
 - 必须去掉同一句话里明显无信息增量的重复表达，例如“那个那个那个”“就是就是”
 - 可以整理基础标点和极少量语序，使句子可读
@@ -98,6 +145,7 @@ def _build_cleanup_prompt(source_text: str) -> str:
 - 输出长度应接近原文；短句保持短
 - 直接输出清理后的第一人称正文，不要标题、列表、解释或引号
 
+{context_block}
 原始口述内容：
 {source_text}
 """
@@ -132,6 +180,7 @@ async def generate_cleaned_transcript_text(
     *,
     ai_model: str | None = None,
     ai_client: AITextClient | None = None,
+    context: MemoirTranscriptCleanupContext | None = None,
     strict: bool = True,
 ) -> CleanedTranscriptText:
     source_text = source_text.strip()
@@ -144,7 +193,7 @@ async def generate_cleaned_transcript_text(
             client = get_ai_service(ai_model)
         content = await client._call_llm(
             SYSTEM_PROMPT,
-            _build_cleanup_prompt(source_text),
+            _build_cleanup_prompt(source_text, context=context),
             temperature=0.2,
             max_tokens=1200,
             timeout=90.0,
