@@ -11,6 +11,7 @@ from app.domain.memoir.types import (
     MemoirOutputStatus,
 )
 from app.schemas.memoir_voice import (
+    MemoirAutomationEventResponse,
     MemoirTTSAlignmentSegmentResponse,
 )
 
@@ -401,6 +402,45 @@ class MemoirBookSourceReviewListResponse(BaseModel):
 
 class MemoirBookSourceReviewConfirmResponse(BaseModel):
     item: MemoirBookSourceReviewItemResponse
+    plan: MemoirBookPlanResponse
+
+
+class MemoirBookSourceAutoAssignmentRunRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    confidence_threshold: float = Field(default=0.53, ge=0.52, le=0.95)
+    max_sources: int = Field(default=20, ge=1, le=100)
+    ai_model: str | None = None
+
+    @field_validator("ai_model")
+    @classmethod
+    def _valid_ai_model(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None
+
+
+class MemoirBookSourceAutoAssignmentItemResponse(BaseModel):
+    utterance_id: str
+    source_index: int
+    action: Literal["assign_to_chapter", "suggest_new_chapter", "hold_for_review"]
+    target_chapter_id: str | None = None
+    target_chapter_title: str | None = None
+    confidence: float | None = None
+    reason: str
+    assigned: bool = False
+    skip_reason: str = ""
+
+
+class MemoirBookSourceAutoAssignmentRunResponse(BaseModel):
+    project_id: str
+    confidence_threshold: float
+    evaluated_source_count: int
+    assigned_source_count: int
+    skipped_source_count: int
+    items: list[MemoirBookSourceAutoAssignmentItemResponse] = Field(default_factory=list)
+    events: list[MemoirAutomationEventResponse] = Field(default_factory=list)
     plan: MemoirBookPlanResponse
 
 
