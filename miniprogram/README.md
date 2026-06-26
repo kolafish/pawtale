@@ -11,8 +11,17 @@
  -> 创建 voice session
  -> 通过 WSS 发送录音帧
  -> Streaming ASR 实时识别并显示大字文字
+ -> AI 基于当前项目上下文追问、鼓励或引导
  -> 保存 voice session、chat message、utterance、音频证据
+ -> 后端持续沉淀进度快照、自动整理事件和成书素材
 ```
+
+下一阶段小程序侧重点不是继续单独追“流式 TTS”，而是配合后端完成：
+
+- AI 说话时支持用户点击麦克风抢占，立即停止 AI 播放并开始录音。
+- 语音聊天展示来自后端真实项目进度的自然鼓励。
+- 成书和进度页面消费后端自动归章、自动补写、章节审计和待确认事件。
+- 语音编辑只负责录音、展示 AI 解释和操作预览；复杂语义判断放到后端 planner。
 
 ## 本地运行
 
@@ -59,10 +68,10 @@ WECHAT_JSCODE2SESSION_URL=https://api.weixin.qq.com/sns/jscode2session
 - `pages/login`：微信登录、已有 Pawtale 账号登录。
 - `pages/home`：新版语音入口和当前回忆录入口，按当前回忆录绑定的讲述方式直接进入语音聊天。
 - `pages/projects`：创建、切换、重命名、删除回忆录。
-- `pages/voice-chat`：实时录音、WebSocket、partial/final transcript、AI 追问 TTS 和本地快照恢复。
+- `pages/voice-chat`：实时录音、WebSocket、partial/final transcript、AI 追问 TTS、本地快照恢复，以及下一阶段的麦克风抢占。
 - `pages/transcripts`：默认查看当前回忆录的讲述记录、识别原文、整理文字、AI 引导问题，并支持问题和回答连播。
-- `pages/book`：成书入口，先保留章节规划、章节确认和分章成稿的页面结构。
-- `pages/voice-progress`：查看会话、模块覆盖、语音段、AI 追问和累计文字。
+- `pages/book`：成书入口，支持章节规划、章节确认、分章成稿、来源记录查看，并逐步接入自动归章和自动补写事件。
+- `pages/voice-progress`：查看当前项目会话、模块覆盖、语音段、AI 追问、累计文字，并逐步改为后端统一 progress snapshot。
 - `pages/me`：账号信息、Web 登录凭据设置、当前项目统计、项目入口和 TTS 音色设置。
 
 旧 workbench、stories、profile、固定问答和整段录音上传页面已移除。
@@ -78,6 +87,11 @@ npm test
 
 ## 未完成
 
-- 真正低延迟 Streaming TTS、插话打断和断线续传。
-- 结构化记忆提取、证据链浏览和成稿编辑页。
+- 麦克风抢占：AI 播放或准备音频时，用户点击麦克风可中断 AI 并立即开始说话。
+- 项目进度快照：统一“我的”、进度页、AI 访谈使用的统计口径。
+- AI 进度鼓励：只播报后端给出的真实记录数、已归章数、成文字数和自动整理事件。
+- 后台自动整理：新记录自动判断归入已有章节、候选新章节或待确认，并触发现有自动补写。
+- 章节完整度审计：输出章节缺口和下一轮访谈建议。
+- 语音编辑 planner：自然语言语音命令由后端生成可确认的操作计划。
+- 结构化记忆提取、证据链浏览和更完整的成稿编辑页。
 - 方言/噪声评测集、provider fallback、限流和成本监控。

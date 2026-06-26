@@ -10,27 +10,30 @@
 - `asr.final` 已落 `memoir_chat_messages`、`memoir_voice_utterances`、`memoir_transcript_versions` 和原始音频 `audio_files`。
 - 强引导模式已接入 LLM 动态追问，assistant message 会落库并显示在语音聊天页。
 - PR2 交互细节已补齐：支持开场追问、手动生成追问、重试/换个追问、跳过当前追问、用户开始新回答时清掉旧追问活跃态、结束后跳转转写记录。
-- AI 追问已接入 assistant-message 驱动的 TTS 音频生成和播放；第一版是短句音频快速生成后播放，接口按后续 streaming TTS 形态保留 provider 抽象。
+- AI 追问已接入 `assistant-turn-stream`，后端使用 LLM streaming 和火山/豆包双向 TTS，按小程序播放能力切成可播放缓冲段推送。
 - 小程序已接入客户端轻量 VAD：基于 PCM 能量显示音量条、计算连续静音，并可自动收尾当前句。
 - 已有转写校正页和访谈进度页，可查看会话、模块覆盖、语音段、AI 追问数，并从记录继续访谈。
 - 小程序已拆为首页、转写、成书、我的 tab；我的页可看当前项目统计、管理项目和设置 AI TTS 音色，项目页支持创建、切换、重命名和删除回忆录。
 - 后端已新增成书章节规划、逐章成稿和全书合成 API，可基于当前转写生成章节建议、保存用户确认后的章节结构，按章节 source refs 生成/编辑/确认正文版本，并把已确认章节合成为全书稿。
 - 小程序成书页已接入章节规划确认、逐章成稿、全书生成和朗读流程。用户可先确认目录，再逐章生成、编辑和确认正文；章节正文和全书稿都可生成音频朗读。
-- 成书页已能检测继续录音后产生的未收录转写，并提示用户查看。新录音不会自动改动已确认章节和全书，后续再接入“归入章节”和“补充成稿”流程。
+- 成书页已能检测继续录音后产生的未收录转写，并提示用户查看。章节有新增 source refs 时已有后台自动补写基础，但“新记录自动归章、自动审计、访谈中播报自动整理进展”仍属于下一阶段。
 
 新的产品目标是：
 
 ```text
-VAD + Streaming ASR + LLM Dynamic Follow-up + Streaming TTS
-实时语音输入 + 动态 AI 追问 + 实时语音回复
+Realtime Interview Orchestration + Project Progress Events + Background AI Editing + Voice Editing Planner
+实时访谈编排 + 项目进度事件 + 后台自动整理 + 智能语音编辑
 ```
+
+VAD、Streaming ASR、LLM dynamic follow-up 和双向 TTS 已成为底层语音能力，不再作为下一阶段单独主线。接下来的主线是把实时语音、成书整理和语音编辑连成闭环：
 
 用户感知到的不是“回答第几个问题”，而是一次自然语音访谈：
 
 - 老人直接说话，屏幕同步显示大字转写。
-- AI 根据用户选择的引导强度接住上下文，动态追问或只做轻量陪伴。
+- AI 根据用户选择的引导强度接住上下文，动态追问、轻量陪伴，并在合适时用真实进度做鼓励。
 - AI 回复以语音播放，同时保留文字气泡。
-- 后台持续沉淀原始语音、转写、对话消息、结构化记忆和写作素材。
+- 用户可以在 AI 说话时抢占麦克风，打断当前 AI 语音并直接开口。
+- 后台持续沉淀原始语音、转写、对话消息、结构化记忆和写作素材，并自动完成可解释的归章、补写和章节完整度评估。
 
 ## 新旧版本关系
 
@@ -74,6 +77,7 @@ miniprogram/services/request.ts               # ECS HTTP + cookie session
 miniprogram/services/auth.ts                  # wx.login、backend cookie session、账号凭据设置
 miniprogram/services/memoir-voice-api.ts      # voice session API
 miniprogram/services/memoir-streaming-asr.ts  # 录音帧、WebSocket、partial/final transcript
+miniprogram/services/voice-assistant-turn-runtime.ts # assistant turn 播放、取消和后续麦克风抢占
 miniprogram/services/tts-settings.ts          # 小程序本地 TTS 音色偏好
 miniprogram/domain/voice-chat.ts              # 新版聊天消息和实时事件类型
 backend/app/routers/memoir/book.py            # 成书章节规划、章节稿、全书稿和朗读 mobile API
@@ -81,6 +85,7 @@ backend/app/services/memoir/book_plans.py     # 章节规划生成、确认和 s
 backend/app/services/memoir/book_drafts.py    # 逐章成稿、版本追加和正文确认
 backend/app/services/memoir/book_outputs.py   # 全书稿合成、版本追加和全书朗读
 backend/app/services/memoir/book_audio.py     # 章节/全书 TTS 文本分片、缓存和音频落库
+backend/app/services/memoir/book_auto_revision.py # 已归章新增 source 的后台章节补写
 
 backend/app/routers/memoir/voice.py           # 本地/服务端 voice session API
 backend/app/services/memoir/voice_gateway.py  # WebSocket voice gateway + Streaming ASR
@@ -90,6 +95,13 @@ backend/app/services/memoir/voice_assistant_turn_stream.py # LLM + TTS 流式 as
 backend/app/services/memoir/voice_followups.py # no-answer prompt
 backend/app/services/memoir/voice_tts.py      # assistant message TTS / Streaming TTS
 backend/app/services/memoir/voice_transcripts.py # 转写校正和 AI 忠实清理
+
+# 下一阶段计划新增或收敛的后端模块
+backend/app/services/memoir/progress_snapshot.py # 当前项目进度快照和统计口径
+backend/app/services/memoir/automation_events.py # 后台自动整理事件和 AI 可播报摘要
+backend/app/services/memoir/source_router.py     # 新记录自动归章 / 候选新章 / 暂缓处理判断
+backend/app/services/memoir/book_quality_audit.py # 章节完整度、缺口和访谈引导提示
+backend/app/services/memoir/voice_edit_planner.py # 语音编辑自然语言 -> 操作计划 -> 预览确认
 ```
 
 Git 上建议用以下边界区分：
@@ -99,6 +111,7 @@ Git 上建议用以下边界区分：
 - 第一批 PR 已完成 Streaming ASR、voice session 数据和小程序新入口。
 - 第二批 PR 已完成 LLM 动态追问、小程序追问交互、assistant TTS 播放、客户端自动收尾和进度页。
 - 第三批 PR 已完成自动续听、TTS 文本播放进度、转写自动校正、AI 问题与回答连播、主 tab 拆分和我的页项目/TTS 设置。
+- 当前下一批 PR 不再围绕“补 Streaming TTS”拆分，而是围绕麦克风抢占、项目进度上下文、后台自动整理和语音编辑 planner 继续演进。
 - 小程序 legacy 固定问答页面、旧非实时录音上传代码和微信云函数链路已清理。
 - 登录链路已迁移为统一 Pawtale 账号：已有 Web 用户用邮箱密码登录小程序，新用户用微信登录后直接进入小程序，Web 端邮箱密码可稍后在“我的”里设置。
 
@@ -142,11 +155,11 @@ guided_interview    # 强引导 / AI 模块化引导
 新版至少需要这些页面或等价视图：
 
 - 开始页：选择回忆录项目、叙述者、引导模式，并进入或继续一个 voice session。
-- 语音聊天页：实时录音、Streaming ASR 大字显示、AI 语音回复、暂停/继续/结束。
+- 语音聊天页：实时录音、Streaming ASR 大字显示、AI 语音回复、麦克风抢占、暂停/继续/结束。
 - 转写校正页：查看每段原始语音、ASR 原文、编辑后文本和版本记录，支持家人或编辑校正。
-- 进度页：查看已聊过的人、事、地点、时间段、主题覆盖度，以及 AI 发现的待追问问题。
+- 进度页：查看当前项目已讲述记录、已归章记录、成文字数、章节完整度、自动整理事件，以及 AI 发现的待追问问题。
 - 我的页：查看账号、当前项目统计、管理回忆录项目，并选择 AI TTS 音色。
-- 成书页：把确认后的素材组织为章节，逐章生成以用户叙述为主的正文，确认后合成为全书稿；章节和全书都支持语音朗读。
+- 成书页：把确认后的素材组织为章节，逐章生成以用户叙述为主的正文，确认后合成为全书稿；章节和全书都支持语音朗读，并展示后台自动归章、补写和待确认素材。
 
 ### 用户说话
 
@@ -177,7 +190,7 @@ partial transcript 只用于屏幕显示和本地状态，不作为事实依据�
  -> TTS 播放 AI 开场
 
 用户 final transcript
- -> LLM 根据近期对话、长期记忆、覆盖度和敏感度生成追问
+ -> LLM 根据近期对话、项目进度、自动整理事件、章节审计提示和敏感度生成追问
  -> 保存 assistant chat message
  -> Streaming TTS 播放 assistant message
  -> 页面显示 AI 文字气泡
@@ -185,10 +198,16 @@ partial transcript 只用于屏幕显示和本地状态，不作为事实依据�
 
 AI 追问不再从固定模板题库取下一题。模板只允许作为冷启动或服务不可用时的兜底。
 
+AI 可以把承接、认可、鼓励、进度提醒和下一问组合成一次自然回复，但进度提醒必须来自后端结构化快照或自动事件，不能让 LLM 自己编造。例子：
+
+- “您已经留下 22 条讲述，其中 18 条整理进章节了。”
+- “刚才新增的 3 条已经补进《岁首欢聚记》，这一章内容更完整了。”
+- “这一章人物细节已经比较清楚了，接下来可以问一问当时的地点或声音气味。”
+
 强引导和弱引导的差异主要体现在 prompt policy，而不是两套完全不同的技术链路：
 
 - 弱引导：`system prompt` 要约束 AI 少问、短问、只在停顿或上下文断裂时补位。
-- 强引导：`system prompt` 要约束 AI 按模块推进、一次一个问题、持续更新覆盖度和待追问线索。
+- 强引导：`system prompt` 要约束 AI 按模块推进、一次一个问题、持续使用进度和章节审计线索。
 - 两种模式都要把用户最新 final transcript 作为事实输入，把 AI 回复保存为 assistant message。
 
 ## 技术架构
@@ -201,10 +220,17 @@ Mini Program RecorderManager
  -> Pawtale Voice Gateway
  -> Streaming ASR Provider
  -> partial/final transcript
- -> Chat Orchestrator
+ -> Chat Orchestrator + Progress Snapshot + Audit Hints
  -> Streaming LLM assistant turn
  -> Streaming TTS Provider
  -> Mini Program audio playback
+
+Background workers
+ -> Source Router
+ -> Book Auto Revision
+ -> Book Quality Audit
+ -> Automation Events
+ -> Progress Snapshot
 ```
 
 Provider API key 不进入小程序。小程序只连接 Pawtale 自己的 voice gateway。
@@ -220,7 +246,7 @@ Provider API key 不进入小程序。小程序只连接 Pawtale 自己的 voice
 
 这不是上线态完整 VAD。后续仍需要评估：
 
-- 服务端 VAD：用于更稳定的 utterance 边界、插话打断和异常恢复。
+- 服务端 VAD：用于更稳定的 utterance 边界、自动插话打断和异常恢复。
 - Provider VAD：如果实时语音服务提供 server VAD，可以优先复用。
 - 方言、远场、背景噪声下的阈值评测和动态阈值。
 
@@ -254,6 +280,9 @@ open_questions
 coverage_state
 current_topic
 elder_profile
+project_progress_snapshot
+recent_automation_events
+chapter_audit_hints
 ```
 
 输出应是可追踪的 assistant message，而不是直接播放一次临时文本。
@@ -262,10 +291,12 @@ LLM 输出建议带结构化元数据，便于后续进度页和追问策略复�
 
 ```text
 assistant_text
-guidance_intent       # opening / follow_up / encourage_continue / clarify / switch_module / ask_detail / summarize
+guidance_intent       # opening / follow_up / acknowledge / encourage_continue / reflect_summary / transition / repair
+progress_update       # optional, only from structured backend progress or automation events
 next_module
 memory_hints
 open_question_hints
+audit_hint_used
 safety_flags
 ```
 
@@ -295,6 +326,113 @@ AI 下一轮追问
 为了让高亮块跟随真实语音位置移动，后端请求火山 V3 时开启 `audio_params.enable_subtitle=true`，读取 `sentence.words[].startTime/endTime` 原生字幕时间戳，转换为逐字/词 `start_ms` / `end_ms` 时间轴，保存到 `memoir_chat_messages.metadata_json.tts_alignment`，并随 TTS response 返回给小程序。小程序播放时只按该时间轴定位当前字，不再按播放百分比估算；已有旧 provider 音频不会继续复用，会在下次请求时按火山 V3 重新生成。
 
 当前流式体验的边界是：provider 已使用“流式文本输入 + 流式音频输出”，但小程序播放器仍需要临时文件，因此后端会把连续音频流切成短缓冲段推送；用户插话打断、断线续播和真正追加式播放器仍属于后续增强。
+
+### Realtime Turn Orchestration And Barge-in
+
+语音聊天的实时编排由小程序 `VoiceAssistantTurnRuntime`、`voice-chat` 页面状态机和后端 `assistant-turn-stream` 共同负责。下一阶段优先实现手动麦克风抢占：
+
+```text
+AI speaking / preparing audio
+ -> user taps microphone
+ -> miniprogram stops current playback and highlight timeline
+ -> client sends turn.cancel with reason=interrupted_by_user
+ -> backend stops LLM/TTS generation and marks turn as interrupted
+ -> miniprogram starts RecorderManager immediately
+ -> voice gateway continues normal ASR flow
+```
+
+第一版只做用户主动点击抢占。自动 VAD 抢占需要确认设备外放不会被麦克风误识别成用户说话，不能和手动抢占混在同一个 PR。
+
+中断后的 assistant turn 不应作为完整有效 AI 回复参与后续 prompt。后端可以记录中断元数据，用于排查状态机问题和避免旧音频继续落库，但不能把半句话当作用户听完的追问。
+
+### Project Progress Snapshot And Automation Events
+
+项目进度不能由小程序临时拼，也不能让 LLM 自己推断。后端需要提供当前项目的结构化快照：
+
+```text
+ProjectProgressSnapshot
+├─ valid_utterance_count
+├─ assigned_utterance_count
+├─ pending_utterance_count
+├─ chapter_count
+├─ confirmed_chapter_count
+├─ draft_word_count
+├─ recent_automation_events
+└─ chapter_progress_items
+```
+
+后台自动操作必须写入事件，供成书页、进度页和 AI 访谈共同消费：
+
+```text
+BookAutomationEvent
+├─ event_type            # source_assigned / source_held / chapter_auto_revised / audit_completed
+├─ project_id
+├─ chapter_id
+├─ utterance_ids
+├─ summary_text
+├─ confidence
+├─ status                # pending / completed / failed / needs_review
+└─ created_at
+```
+
+AI 访谈只允许播报这些结构化快照和事件里的事实。为了避免机械刷数字，prompt policy 应要求进度鼓励“有变化才说、一次只说一个重点、说完仍回到一个具体问题”。
+
+### Background Source Routing And Auto Editing
+
+现有 `book_auto_revision.py` 负责“章节已有新增 source refs 后如何补写正文”。下一阶段缺的是前置判断：新记录到底应该进入哪一章，还是暂缓处理。
+
+建议新增 `source_router.py`，输入是新讲述记录、现有章节标题和 source 摘要、最近几条归章事件、当前项目画像；输出是结构化决策：
+
+```text
+SourceRoutingDecision
+├─ action                # assign_to_chapter / create_candidate_chapter / hold_for_review / ignore_low_value
+├─ target_chapter_id
+├─ candidate_title
+├─ utterance_ids
+├─ confidence
+├─ rationale
+└─ evidence_summary
+```
+
+只有高置信度 `assign_to_chapter` 才自动写入章节 source refs，并触发已有自动补写任务。明显切换话题、信息过短或不确定时只能进入待确认或候选章节，不自动删除原始记录。
+
+### Book Quality Audit
+
+后台审计不是生成漂亮评分，而是给 AI 访谈和成书页提供下一步动作建议。建议 `book_quality_audit.py` 输出：
+
+- 每章 source 数、已成文字数、待补写 source 数。
+- 缺口：时间、地点、人物、事件经过、情绪、结果、时代背景。
+- 重复或相似 source 提示，供重新生成时合并相同事件。
+- 下一轮访谈建议问题，供 `voice_followup_ai.py` 选择性使用。
+
+审计结果应该是版本化快照，避免每次打开页面都重新调用 LLM，也方便解释 AI 为什么问某个方向。
+
+### Voice Editing Planner
+
+语音编辑不应继续依赖小程序端关键词或过窄的固定命令。后端应提供“自然语言 -> 操作计划 -> 用户确认 -> 执行”的 planner：
+
+```text
+user voice command
+ -> context retrieval: chapter order, chapter titles, source record numbers, pending sources
+ -> action plan candidates
+ -> preview
+ -> confirm
+ -> executor
+```
+
+动作应是显式类型，而不是自由文本：
+
+```text
+assign_source_to_chapter
+move_chapter
+rename_chapter
+merge_chapters
+split_chapter
+rewrite_chapter
+ask_clarification
+```
+
+小程序只负责展示 AI 解释、操作预览和确认按钮；复杂语义判断、章节匹配和执行校验放在后端。
 
 ## 数据模型方向
 
@@ -515,182 +653,136 @@ AI 下一轮追问当前走单独的 WebSocket：
 
 ## 实施顺序
 
-### First Version Scope: Production-shaped Streaming ASR
+### 已完成基础
 
-第一版不是一次性 demo，而是按最终上线模块形状实现最小闭环。
+下面这些能力已经进入当前主线，不再作为下一阶段 PR 目标重复规划：
 
-第一版必须做：
+- Streaming ASR、voice session、chat message、utterance、transcript version 和原始音频证据链。
+- LLM 动态追问、assistant message 落库、assistant-turn-stream 和双向 TTS 第一版。
+- 小程序语音聊天、自动续听、TTS 字幕高亮、转写记录、成书页、我的页当前项目统计和 TTS 设置。
+- legacy 固定问题、整段录音上传、微信云函数和旧小程序页面已清理。
 
-- 新增独立 voice session API 和 realtime event contract。
-- 新增 voice gateway WebSocket，所有 provider key 只在后端。
-- 小程序新增 `home` 和 `voice-chat` 第一版入口。
-- 小程序发送 16k mono PCM 音频帧，服务端转发给豆包 Streaming ASR。
-- 页面展示 `asr.partial` 大字实时转写，`asr.final` 固化成用户消息。
-- 小程序保存 voice session 本地快照，并能从后端详情回放已固化 transcript。
-- 保存 voice session、chat message、utterance、原始音频或可回溯的音频片段引用。
-- 支持 `free_narration` / `guided_interview` 两种模式字段，但第一版不做复杂 AI 引导。
-- 明确错误状态：录音权限、WebSocket 失败、provider 失败、网络中断。
-- 删除 legacy 非实时 ASR 产品代码，避免新旧 ASR 路径并行。
+下一阶段不继续围绕“是否流式”拆 PR，而是围绕实时访谈体验、项目进度上下文、后台自动整理和语音编辑能力拆分。
 
-第一版明确不做：
+### 新阶段 PR 拆分
 
-- LLM 自动追问。
-- Streaming TTS。
-- 自动 VAD 断句和用户插话打断。
-- 多 ASR provider fallback。
-- 断线续传和 session resume。
-- 转写校正页、进度页和成稿编辑页的完整实现。
-- 方言/噪声系统评测和监控大盘。
+1. PR 1: Project Progress Snapshot And Automation Events
+   - 新增项目进度快照服务，统一有效讲述记录、已归章记录、待归章记录、章节数、成文字数等统计口径。
+   - 新增后台自动整理事件模型/服务/API，先支持只读事件和最近事件摘要。
+   - 不改变 AI 追问和成书行为，为后续激励播报、自动归章和审计提供基础。
 
-第一版和上线版的差距：
+2. PR 2: Manual Microphone Barge-in
+   - AI 播放或准备音频时，用户点击麦克风可打断当前 assistant turn。
+   - 小程序停止播放和高亮，发送 `turn.cancel reason=interrupted_by_user`，随后立即开始录音。
+   - 后端明确 `interrupted` 终态，取消 LLM/TTS 生成，不把半句 AI 回复作为完整追问写入后续上下文。
 
-- 上线版需要 VAD、断线恢复、限流、成本监控、provider fallback、质量评测集和更完整的编辑校正链路。
-- 上线版需要把 `asr.final` 进一步接入 LLM 动态追问、Streaming TTS、memory extraction 和 transcript version 管理。
-- 第一版只保证实时转写主链路和数据骨架正确，后续能力都在这个骨架上迭代。
+3. PR 3: Progress-aware AI Encouragement
+   - `voice_followup_ai.py` 消费 PR 1 的 progress snapshot 和 recent automation events。
+   - AI 可以把承接、认可、进度提醒和下一问组合成自然回复。
+   - 进度鼓励必须 sparse：有变化才说，一次只说一个真实事实，不能牺牲“一次只问一个问题”。
 
-### PR 拆分建议
+4. PR 4: Source Router For New Records
+   - 新增新记录归章判断：进入已有章节、候选新章节、暂缓处理、低价值保留。
+   - 高置信度才自动写入章节 source refs；不确定或明显换话题时进入待确认。
+   - 所有判断写入 automation event，保证能解释和回溯。
 
-第一版建议拆成 5 个 PR，避免一个 PR 同时改前端、长连接、provider 和数据迁移：
+5. PR 5: Auto Assignment To Auto Revision
+   - 把 PR 4 的高置信度归章结果接到现有 `book_auto_revision.py`。
+   - 自动归章后触发章节补写，并把补写完成事件暴露给成书页和 AI 访谈。
+   - 支持 AI 播报“新增记录已补进某章”这类具体进展。
 
-1. PR 1: 删除 legacy 非实时 ASR 代码
-   - 删除 StepFun 整段转写 service、ASR job 路由、`audio-files/{id}/transcribe`。
-   - 小程序不再保留旧固定问答录音上传入口。
-   - 更新文档和测试，确认没有 provider key 暴露。
+6. PR 6: Book Quality Audit
+   - 后台生成章节完整度和项目进度审计快照。
+   - 输出每章缺口、重复素材、待补问题和下一轮访谈建议。
+   - `voice_followup_ai.py` 可以选择性使用审计提示，引导用户补足人物、地点、事件经过、情绪和结果。
 
-2. PR 2: 后端 voice session 数据骨架
-   - 新增 voice session、chat message、utterance schema/model/migration。
-   - 新增创建/停止 voice session 的 HTTP API。
-   - 暴露最小消息和 utterance 写入 API，供后续 gateway 复用。
-   - 不接 provider，只做持久化和权限边界测试。
+7. PR 7: Voice Editing Planner V2
+   - 后端提供自然语言语音编辑 planner，把用户表达转成 typed action plan。
+   - 小程序展示操作预览，用户确认后再执行。
+   - 支持归章记录、移动章节、合并章节、拆分章节、重命名、重写和需要澄清。
 
-3. PR 3: Voice gateway + 豆包 Streaming ASR adapter
-   - 新增 WebSocket gateway 和 provider adapter。
-   - 实现 `session.start`、`audio.frame`、`audio.end`、`asr.partial`、`asr.final`、`session.error`。
-   - 用本地音频样例跑集成验证。
+### 第一批详细计划
 
-4. PR 4: 小程序 `home` / `voice-chat` MVP
-   - 新增模式选择、录音帧发送、大字转写和错误状态。
-   - 真机验证 partial 延迟和 final 固化。
+第一批只做 PR 1、PR 2、PR 3。目标是先把“AI 能被打断”和“AI 能基于真实进度鼓励用户”做稳，不急着自动改书。
 
-5. PR 5: 持久化闭环和第一版验收
-   - 将 `asr.final` 落 chat message / utterance。
-   - 保存原始音频或音频片段引用。
-   - 补齐 API/小程序测试和 README 操作说明。
+#### PR 1: Project Progress Snapshot And Automation Events
 
-PR5 后第一版已经具备的闭环：
+后端：
 
-- 小程序从 `home` 创建 voice session，并进入 `voice-chat`。
-- 小程序录音为 16k mono PCM frame，通过 Pawtale voice gateway 发送。
-- 后端 provider adapter 返回 `asr.partial` / `asr.final`。
-- `asr.partial` 只用于页面大字实时显示。
-- `asr.final` 会创建 `memoir_chat_messages` 用户消息、`memoir_voice_utterances` 和 voice-session 归属的 `memoir_transcript_versions`。
-- 当前 utterance 的 PCM 音频帧会保存为 `AudioFile`，并通过 `audio_file_id` 关联到 message / utterance。
-- `voice-chat` 会优先恢复本地 voice session 快照，再异步读取后端详情，避免返回页面后丢失已固化文字。
+- 新增 `progress_snapshot.py`，从当前项目读取 voice utterances、book plan、chapter source refs、chapter drafts 和 confirmed outputs，输出 `ProjectProgressSnapshot`。
+- 新增 `automation_events.py`，提供事件写入和最近事件查询。第一版可以只支持 service 层和 mobile read API，不需要先做复杂后台 worker。
+- 在 schema 层定义明确字段，避免把核心统计藏在任意 JSON 里。
+- 我的页、进度页和 AI 访谈后续都用同一份统计，不能各自重新拼。
 
-Streaming ASR PR5 后当时仍未完成、不能按上线态理解的缺口：
+小程序：
 
-- 小程序已经统一为 backend cookie 身份；仍需要在微信公众平台配置正式 request/socket 合法域名。
-- 微信登录后端 API 已完成；ECS `/opt/pawtale/backend/.env` 仍需要配置真实 `WECHAT_MINIPROGRAM_SECRET` 后，真机微信登录才能通过 code2session。
-- 原始音频按 final utterance 粗粒度保存，尚未做更精确的 VAD 时间切片和断线续传。
-- voice session 快照只保证已固化 transcript 的页面回放，不等同于断线续传；录音帧上传中的状态仍不可恢复。
-- 用户插话打断和断线续传尚未接入；LLM assistant turn、AI 回复落库和 Streaming TTS 已完成第一版。
-- 转写校正页和进度页已有第一版；成稿编辑页、结构化记忆页和证据链浏览仍未迁移到新版 voice session 数据。
-- 还没有方言/噪声评测集、provider fallback、限流和成本监控。
+- 先不改主要 UI，只在 API 类型和必要页面数据模型里接入新的 progress snapshot。
+- 如果已有页面统计字段和新快照冲突，以新快照为准。
 
-### 当前第二批 PR 状态
+测试：
 
-在 Streaming ASR 第一版闭环之后，第二批按长期迭代方向继续补齐语音聊天能力：
+- 后端单元/API 测试覆盖有效记录、已归章记录、待归章记录、成文字数、删除记录不计入统计。
+- 小程序测试覆盖 API 字段解析和现有项目统计页面不破坏。
 
-1. AI 追问后端和小程序基础接入：已完成。`asr.final` 后可调用 LLM 生成 assistant message，并在语音聊天页展示 AI 追问。
-2. PR2 交互细节：已完成。页面支持开场追问、手动生成追问、重试追问、换个追问、跳过追问；用户开始新回答时旧追问不再保持活跃；结束访谈后可直接进入转写记录页。
-3. Assistant TTS：已完成第一版。assistant message 可生成音频并关联 `audio_file_id`，小程序自动播放并支持重播；没有配置 TTS provider 时降级为文字追问。
-4. 客户端轻量 VAD / 自动收尾：已完成第一版。小程序显示音量条、连续静音状态，并可自动结束当前句；用户可以关闭自动收尾。
-5. 访谈记录与进度页：已完成第一版。后端提供 voice session list/progress API，小程序可查看会话、模块覆盖、语音段、AI 追问和字数，并能从记录继续访谈。
+验收：
 
-当前语音聊天第一版仍不是最终上线态。后续重点是 memory extraction、结构化证据链、章节/片段产出编辑、断线恢复、provider fallback、质量评测和成本监控。
+- 同一个项目的“我的页统计、进度页统计、AI 可用统计”来自同一后端口径。
+- 可以返回最近自动事件，即使第一版事件为空。
 
-### 当前第三批 PR 状态
+#### PR 2: Manual Microphone Barge-in
 
-这批主要补齐语音聊天的连续体验和小程序页面结构：
+后端：
 
-1. 自动续听：已完成。AI TTS 自动播放完后，如果 WebSocket 和录音状态允许，会自动开始下一轮收听。
-2. TTS 文本进度：已完成。播放 AI 问题时，页面会按火山 V3 原生字幕时间轴显示已读和当前文字；没有时间轴时不做文字高亮。
-3. 转写自动校正：已完成。`asr.final` 保存时会同步生成忠实去口语化校正文；转写记录页默认展示校正文，仍保留 ASR 原文。
-4. AI 问题与回答连播：已完成。转写记录项显示对应 AI 引导问题；播放时优先播放问题音频，再播放用户回答音频。
-5. 主 tab 拆分：已完成。小程序拆为首页、语音、转写、我的四个主入口。
-6. 我的页项目和 TTS 设置：已完成。我的页展示当前项目统计、TTS 音色设置；项目页支持删除回忆录，并保留至少一本项目。
+- 扩展 `assistant-turn-stream` 的 cancel 语义，区分用户跳过、页面退出和麦克风抢占。
+- `interrupted_by_user` 不产生完整 assistant message，或只保存不会进入追问上下文的中断元数据。
+- 确保 LLM/TTS 任务、音频 chunk 和落库动作在取消后停止。
 
-### Phase 1: Streaming ASR MVP
+小程序：
 
-目标：先完成“边说边出大字”，同时把 voice session 和原始语音资产模型打牢。
+- `VoiceAssistantTurnRuntime` 增加 `interrupt(reason)`，统一停止播放、清理高亮、关闭当前 turn socket。
+- `voice-chat` 页在 AI speaking / preparing audio 状态下点击麦克风，直接走 interrupt + startRecording。
+- UI 状态从“播放中/思考中”切到“正在听你说”，避免出现播放和录音并存。
 
-- 新增 voice session API。
-- 新增 voice gateway WebSocket。
-- 小程序新增开始页和 `voice-chat` 页面，支持选择 `free_narration` / `guided_interview`。
-- `RecorderManager.onFrameRecorded` 发送音频帧。
-- 豆包 ASR 返回 partial/final。
-- final transcript 落 `memoir_chat_messages` 或临时兼容表。
-- 停止后保存完整音频并关联 transcript。
-- 页面离开再进入同一个 voice session 时，能通过本地快照和后端详情恢复已固化文字。
-- legacy 非实时 ASR endpoint 和 ASR job 不再保留。
+测试：
 
-不做：
+- runtime 单测覆盖播放中 interrupt、音频准备中 interrupt、重复 interrupt。
+- 页面单测覆盖 AI speaking 时点击麦克风会取消 turn 并启动录音。
+- 后端测试覆盖 `turn.cancel reason=interrupted_by_user` 后不会发 `turn.completed`。
 
-- AI 自动追问。
-- 流式 TTS。
-- 复杂 VAD。
-- 转写校正、进度和成稿编辑页面。
+验收：
 
-### Phase 2: Guidance Modes and Streaming Assistant Turn
+- 真机上 AI 没说完时点麦克风，AI 立刻停止，麦克风开始录。
+- 下一轮 AI 不引用被用户打断的半句内容作为已完成追问。
 
-目标：final transcript 后按强/弱引导策略生成下一句 AI 追问，并通过流式 LLM + 流式 TTS 尽快播放。第一版已完成。
+#### PR 3: Progress-aware AI Encouragement
 
-- 已新增 `voice_assistant_turn_stream.py`，按 `free_narration` / `guided_interview` 生成并播放 assistant turn。
-- 已支持 recent messages，上下文来自当前 voice session 的 chat messages。
-- 强引导先支持人、事、地点、时间段、主题五类模块。
-- assistant message 已落库，并在前端显示 AI 追问。
-- PR2 交互细节已补齐：开场追问、生成/重试/换一个、跳过、结束后查看转写记录。
+后端：
 
-下一步需要把 confirmed memories、open questions、coverage state 纳入 prompt context。
+- `voice_followup_ai.py` 增加 progress snapshot 和 automation event summary 输入。
+- prompt 明确允许多意图组合：`acknowledge + encourage_continue + follow_up`，但最终仍只问一个具体问题。
+- 进度事实必须来自结构化输入，模型不能生成未给出的数字、章节名或自动整理结果。
+- 新增输出元数据，例如 `progress_update`、`audit_hint_used`，方便后续观察 AI 是否过度播报。
 
-### Phase 3: Streaming TTS
+小程序：
 
-目标：AI 回复可边生成边播放。第一版已完成“短句生成后播放”的生产形状，尚未做到真正流式音频播放。
+- 语音聊天页无需新增复杂 UI，只正常展示和播放 AI 文本。
+- 如果后端返回 progress metadata，先保留在 message metadata，不强制展示独立标签。
 
-- assistant message 驱动 TTS 已完成。
-- 小程序支持自动播放、重播、生成失败降级文字。
-- 小程序支持基于 TTS 原生字幕时间轴的播放文字进度和 TTS 播放后自动续听。
-- 用户开始说话、跳过追问、退出页面时会取消未完成合成或停止播放。
+测试：
 
-下一步是接入真实 streaming TTS provider，把 provider 音频流接到播放队列，并补齐插话打断。
+- 后端 prompt/context 构造测试：有进度、有自动事件、无进度三种输入。
+- 基线 eval 增加少量用例：AI 能自然鼓励、不编造数字、不连续多问。
+- 小程序现有 assistant turn 流测试确认新增 metadata 不破坏播放。
 
-### Phase 4: Editing, Progress and Memory-first Integration
+验收：
 
-目标：语音聊天结果沉淀为回忆录资产，并提供可校正、可查看进度的页面。
-
-- 转写校正页已完成第一版，支持回听原始语音、编辑 ASR 转写、AI 忠实清理口语稿。
-- final transcript 保存时已自动生成忠实校正文，减少转写记录页的手动清理成本。
-- 转写记录项已显示 AI 引导问题，并支持问题音频与回答音频顺序播放。
-- 进度页已完成第一版，展示会话、模块覆盖、语音段、AI 追问、字数，并支持继续访谈。
-- 从 chat messages 提取 person/event/place/theme 仍未完成。
-- evidence 指向 transcript version 和 audio span 的结构化浏览仍未完成。
-- session summary、open questions、story fragments 和成稿编辑仍未完成。
-
-### Phase 5: Legacy Cleanup
-
-目标：新版稳定后清理旧链路。
-
-- 固定问题主入口已移除。
-- 小程序旧 `workbench`、`stories`、`profile`、固定问答、旧 review/editor 页面已下线。
-- 旧 answer-session 草稿 store、旧非实时录音上传 service 已删除。
-- 小程序端旧 dashboard/stories/review 缓存、类型和 API wrapper 已删除。
-- Backend mobile API 仅保留身份、项目管理和 voice session 链路；旧固定访谈、离线整理、stories、coverage、outputs mobile endpoints 已下线。
-- 微信云函数链路已删除；旧版只能通过 baseline commit 追溯。
-- 后续删除不再使用的 TTS source type，并把进度、校正、成稿编辑迁移到 voice session 数据。
+- AI 偶尔能说出真实进度或自动整理进展。
+- 没有进度变化时，AI 不机械重复统计。
+- 输出仍符合回忆录访谈口吻，一次只落到一个具体问题。
 
 ## 验收标准
 
-Streaming ASR MVP 必须满足：
+实时语音基础链路继续必须满足：
 
 - 真机上麦克风开始后 1 秒内出现 partial transcript。
 - final transcript 能稳定落库。
@@ -698,6 +790,14 @@ Streaming ASR MVP 必须满足：
 - 断网或 provider 错误能给出明确 UI 状态。
 - 小程序端不包含 provider key 或微信 AppSecret。
 - 旧链路不再作为产品代码路径保留。
+
+下一阶段第一批必须满足：
+
+- AI 说话或准备音频时，用户点击麦克风可以立即打断并开始录音。
+- 被打断的 AI 半句不会作为完整追问进入后续上下文。
+- 当前项目统计只有一套后端口径，删除记录、待归章记录、已归章记录和成文字数都可解释。
+- AI 的进度鼓励只引用后端给出的真实快照或事件，不编造记录数、章节名或完成度。
+- AI 鼓励不能替代访谈目标；每轮回复仍应自然落到一个具体、容易回答的问题。
 
 完整语音聊天版本必须满足：
 
@@ -708,6 +808,7 @@ Streaming ASR MVP 必须满足：
 - 每个 AI 输出都能追踪到输入消息和 prompt context。
 - 原始音频、ASR 原文、修正文、用户确认文本分层保存。
 - 家人/编辑端能追溯事实来源。
+- 后台自动归章、补写、审计和语音编辑动作都能解释来源、置信度和用户确认状态。
 
 ## Legacy 追溯
 
