@@ -87,6 +87,8 @@ export interface VoiceAssistantTurnCompletedEvent {
   expects_answer: boolean;
   finish_reason?: string | null;
   usage?: Record<string, unknown>;
+  progress_update?: Record<string, unknown> | null;
+  progress_update_used?: boolean;
 }
 
 export interface VoiceAssistantTurnTerminalEvent {

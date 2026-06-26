@@ -15,6 +15,7 @@ from app.domain.memoir.types import MemoirChatContentStatus, MemoirChatMessageRo
 from app.models.memoir import MemoirChatMessage, MemoirVoiceSession
 from app.services.ai_factory import get_ai_service
 from app.services.ai_types import AITextClient
+from app.services.memoir import progress_snapshot
 from app.services.memoir.audio_files import StagedAudioFile, discard_staged_audio, stage_audio_bytes
 from app.services.memoir.tts_alignment import alignment_segments_to_json
 from app.services.memoir.voice_followup_ai import (
@@ -22,7 +23,10 @@ from app.services.memoir.voice_followup_ai import (
     GUIDED_TOPIC_LIBRARY,
     GUIDED_TOPIC_MENU,
     PROMPT_VERSION,
+    PROGRESS_PROMPT_VERSION,
     InterviewerTurn,
+    ProgressPromptContext,
+    build_progress_prompt_context,
     _has_user_message,
     _llm_max_tokens,
     _module_label,
@@ -274,10 +278,18 @@ class VoiceAssistantTurnStreamSession:
             has_user_message=has_user_message,
             regenerate=req.regenerate,
         )
+        project_progress_context = build_progress_prompt_context(
+            await progress_snapshot.get_project_progress_snapshot(
+                self.db,
+                user_id=self.user_id,
+                project_id=voice_session.project_id,
+            )
+        )
         prompt = _build_stream_turn_prompt(
             voice_session,
             previous_messages=previous_messages,
             regenerate=req.regenerate,
+            progress_context=project_progress_context,
         )
         ai_client = self.ai_client_factory(req.ai_model)
         tts_client = self.tts_client_factory()
@@ -320,6 +332,7 @@ class VoiceAssistantTurnStreamSession:
             ai_client=ai_client,
             max_tokens=max_tokens,
             req=req,
+            progress_context=project_progress_context,
         )
         await self.client.send_json(
             {
@@ -335,6 +348,8 @@ class VoiceAssistantTurnStreamSession:
                 "expects_answer": turn.expects_answer,
                 "finish_reason": artifacts.finish_reason,
                 "usage": artifacts.usage,
+                "progress_update": project_progress_context.progress_update,
+                "progress_update_used": project_progress_context.progress_update is not None,
             }
         )
 
@@ -457,6 +472,7 @@ class VoiceAssistantTurnStreamSession:
         ai_client: AITextClient,
         max_tokens: int,
         req: AssistantTurnStartRequest,
+        progress_context: ProgressPromptContext,
     ) -> tuple[MemoirChatMessage, str | None]:
         if not turn.speech_text:
             raise HTTPException(status_code=502, detail="AI 未返回可用访谈回应")
@@ -489,6 +505,10 @@ class VoiceAssistantTurnStreamSession:
                     "source": "ai.streaming_assistant_turn",
                     "prompt_version": STREAM_PROMPT_VERSION,
                     "legacy_prompt_version": PROMPT_VERSION,
+                    "progress_prompt_version": PROGRESS_PROMPT_VERSION,
+                    "progress_update": progress_context.progress_update,
+                    "progress_update_used": progress_context.progress_update is not None,
+                    "progress_automation_event_ids": progress_context.automation_event_ids or [],
                     "primary_intent": turn.primary_intent,
                     "intent_tags": turn.intent_tags,
                     "expects_answer": turn.expects_answer,
@@ -528,6 +548,7 @@ def _build_stream_turn_prompt(
     *,
     previous_messages: list[MemoirChatMessage],
     regenerate: bool,
+    progress_context: ProgressPromptContext,
 ) -> str:
     messages = list(voice_session.messages)
     has_user_message = _has_user_message(messages)
@@ -583,6 +604,9 @@ def _build_stream_turn_prompt(
 - 如果用户最新一句明确要求换方向，必须尊重最新一句
 {regenerate_instruction}
 {topic_hint}
+
+项目进度上下文：
+{progress_context.prompt_text}
 
 {mode_instruction}
 

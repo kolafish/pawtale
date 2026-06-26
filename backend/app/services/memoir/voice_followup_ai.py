@@ -3,8 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 import re
 
-from app.domain.memoir.types import MemoirChatMessageRole, MemoirGuidanceMode
+from app.domain.memoir.types import MemoirAutomationEventStatus, MemoirChatMessageRole, MemoirGuidanceMode
 from app.models.memoir import MemoirChatMessage, MemoirVoiceSession
+from app.schemas.memoir_voice import MemoirAutomationEventResponse, MemoirProjectProgressSnapshotResponse
 from app.services.json_utils import extract_json_payload
 
 
@@ -18,6 +19,8 @@ FOLLOW_UP_MAX_TOKENS = 260
 GUIDED_FOLLOW_UP_MAX_TOKENS = 320
 FREE_OPENING_MAX_TOKENS = 360
 GUIDED_OPENING_MAX_TOKENS = 420
+PROGRESS_PROMPT_VERSION = "memoir_voice_progress_context_v1"
+PROGRESS_UTTERANCE_MILESTONES = {1, 3, 5, 10, 15, 20, 30, 50, 75, 100}
 
 
 PRIMARY_INTENTS = {
@@ -38,6 +41,13 @@ class InterviewerTurn:
     speech_text: str
     expects_answer: bool
     parsed_json: bool
+
+
+@dataclass(frozen=True)
+class ProgressPromptContext:
+    prompt_text: str
+    progress_update: dict[str, object] | None = None
+    automation_event_ids: list[str] | None = None
 
 
 MODULE_LABELS = {
@@ -115,6 +125,89 @@ def _requested_topic_hint(messages: list[MemoirChatMessage]) -> str:
         return ""
     _, label = requested
     return f"叙述者最新一句是在明确选择或切换到“{label}”主题。下一轮必须围绕“{label}”展开，不要继续更早的旧话题。"
+
+
+def build_progress_prompt_context(snapshot: MemoirProjectProgressSnapshotResponse) -> ProgressPromptContext:
+    selected_update = _automation_event_progress_update(snapshot.recent_automation_events)
+    if selected_update is None:
+        selected_update = _snapshot_milestone_progress_update(snapshot)
+
+    if not selected_update:
+        return ProgressPromptContext(
+            prompt_text=(
+                "项目进度事实：本轮没有可播报的结构化进度变化。"
+                "不要编造记录数、章节名、成文字数或自动整理结果。"
+            ),
+            progress_update=None,
+            automation_event_ids=[],
+        )
+
+    event_ids = selected_update.get("event_ids")
+    automation_event_ids = [str(item) for item in event_ids] if isinstance(event_ids, list) else []
+    return ProgressPromptContext(
+        prompt_text=(
+            "项目进度事实（只允许引用以下这一条事实，不要编造数字、章节名或自动整理结果）：\n"
+            f"- 本轮可选进度鼓励：{selected_update['text']}\n"
+            "使用规则：可以不说进度；如果要说，只能一句话带过上面这一条事实，"
+            "不要堆数字，不要让进度提醒替代追问。"
+        ),
+        progress_update=selected_update,
+        automation_event_ids=automation_event_ids,
+    )
+
+
+def _automation_event_progress_update(
+    events: list[MemoirAutomationEventResponse],
+) -> dict[str, object] | None:
+    for event in events:
+        summary = event.summary_text.strip()
+        if not summary:
+            continue
+        status = event.status.value if hasattr(event.status, "value") else str(event.status)
+        if status not in {
+            MemoirAutomationEventStatus.COMPLETED.value,
+            MemoirAutomationEventStatus.NEEDS_REVIEW.value,
+        }:
+            continue
+        return {
+            "kind": "automation_event",
+            "source": "automation_event",
+            "text": summary[:120],
+            "event_ids": [event.id],
+            "event_type": event.event_type.value if hasattr(event.event_type, "value") else str(event.event_type),
+            "event_status": status,
+            "chapter_id": event.chapter_id,
+            "utterance_ids": list(event.utterance_ids),
+        }
+    return None
+
+
+def _snapshot_milestone_progress_update(
+    snapshot: MemoirProjectProgressSnapshotResponse,
+) -> dict[str, object] | None:
+    if _is_progress_milestone(snapshot.assigned_utterance_count):
+        return {
+            "kind": "assigned_utterance_milestone",
+            "source": "progress_snapshot",
+            "text": f"已经有 {snapshot.assigned_utterance_count} 条讲述记录收进章节。",
+            "assigned_utterance_count": snapshot.assigned_utterance_count,
+            "valid_utterance_count": snapshot.valid_utterance_count,
+            "pending_utterance_count": snapshot.pending_utterance_count,
+        }
+    if _is_progress_milestone(snapshot.valid_utterance_count):
+        return {
+            "kind": "valid_utterance_milestone",
+            "source": "progress_snapshot",
+            "text": f"这个项目已经留下 {snapshot.valid_utterance_count} 条讲述记录。",
+            "valid_utterance_count": snapshot.valid_utterance_count,
+            "assigned_utterance_count": snapshot.assigned_utterance_count,
+            "pending_utterance_count": snapshot.pending_utterance_count,
+        }
+    return None
+
+
+def _is_progress_milestone(count: int) -> bool:
+    return count in PROGRESS_UTTERANCE_MILESTONES or (count >= 150 and count % 50 == 0)
 
 
 def _ordered_messages(messages: list[MemoirChatMessage]) -> list[MemoirChatMessage]:
