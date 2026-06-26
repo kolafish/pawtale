@@ -140,7 +140,7 @@ CONSULTATION_INTENTS = {"review_chapter_title", "review_chapter_length", "review
 ANSWER_INTENTS = {"read_uncovered_source", "answer_book_question", "capability_help"}
 CLARIFICATION_INTENTS = {"clarify_previous", "unknown"}
 NON_CONFIRMATION_INTENTS = READ_INTENTS | CONSULTATION_INTENTS | ANSWER_INTENTS | CLARIFICATION_INTENTS
-EXECUTABLE_MUTATION_INTENTS = {"rename_chapter", "move_chapter", "assign_source"}
+EXECUTABLE_MUTATION_INTENTS = {"rename_chapter", "merge_chapters", "move_chapter", "assign_source"}
 CHINESE_NUMBERS = {
     "一": 1,
     "二": 2,
@@ -167,7 +167,7 @@ MOVE_TO_INDEX_RE = re.compile(
 MOVE_TO_POSITION_RE = re.compile(
     rf"(?:把|将)?(.{{1,50}}?){MOVE_TARGET_VERBS_RE}(最前面|最前|开头|第一章|第一个章节|最后一章|最后面|最末尾|末尾|最后|最后一个章节)"
 )
-ASSIGN_SOURCE_RE = re.compile(r"(?:把|将)?(.{0,40}?)(?:归到|归入|收入|收录到|放到|分到|归类到)(.{1,40})")
+ASSIGN_SOURCE_RE = re.compile(r"(?:把|将)?(.{0,40}?)(?:归到|归入|收录到|放到|分到|归类到)(.{1,40})")
 CHAPTER_WORD_ASR_ORDINAL_RE = re.compile(r"第\s*([0-9]{1,2}|[一二两三四五六七八九十])\s*张")
 CHAPTER_WORD_ASR_BARE_RE = re.compile(
     r"([0-9]{1,2}|[一二两三四五六七八九十])\s*张(?=(?:和|跟|与|的|换|调|移|顺序|章节|章|[，。,.!！?？、\s]|$))"
@@ -259,7 +259,7 @@ SOURCE_READ_KEYWORDS = (
     "一条一条",
     "逐条",
 )
-SOURCE_ASSIGN_KEYWORDS = ("归到", "归入", "收入", "收录到", "放到", "分到", "归类到")
+SOURCE_ASSIGN_KEYWORDS = ("归到", "归入", "收录到", "放到", "分到", "归类到")
 CURRENT_SOURCE_REFS = ("这条", "这一条", "刚才这条", "刚念的", "刚读的", "它", "这个")
 CHAPTER_SWAP_KEYWORDS = (
     "顺序换",
@@ -437,6 +437,10 @@ def _fallback_payload(
             reply_text=_source_read_reply_text(book_context, conversation_context, source_ref),
         )
 
+    assign_payload = _fallback_assign_source_payload(normalized, book_context, conversation_context)
+    if assign_payload:
+        return assign_payload
+
     if _is_source_coverage_question(normalized):
         return ParsedCommandPayload(
             intent="answer_book_question",
@@ -471,10 +475,6 @@ def _fallback_payload(
             intent=consultation_intent,
             chapter_ref=_fallback_chapter_ref(normalized),
         )
-
-    assign_payload = _fallback_assign_source_payload(normalized, book_context, conversation_context)
-    if assign_payload:
-        return assign_payload
 
     position_move_payload = _fallback_position_move_payload(normalized)
     if position_move_payload:
