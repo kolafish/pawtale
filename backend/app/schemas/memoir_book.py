@@ -4,6 +4,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.domain.memoir.types import (
+    MemoirAutomationEventStatus,
     MemoirBookChapterDraftStatus,
     MemoirBookPlanStatus,
     MemoirCreatedBy,
@@ -313,31 +314,6 @@ class MemoirBookPlanResponse(BaseModel):
     updated_at: datetime
 
 
-class MemoirBookSourceCoverageItem(BaseModel):
-    source_index: int
-    voice_session_id: str
-    message_id: str
-    utterance_id: str
-    transcript_version_id: str | None = None
-    audio_file_id: str | None = None
-    start_ms: int | None = None
-    end_ms: int | None = None
-    text: str
-    created_at: datetime
-    is_included: bool = False
-    included_in_chapters: list[MemoirBookSourceIncludedChapter] = Field(default_factory=list)
-
-
-class MemoirBookSourceCoverageResponse(BaseModel):
-    project_id: str
-    plan_id: str | None = None
-    total_source_count: int
-    covered_source_count: int
-    uncovered_source_count: int
-    sources: list[MemoirBookSourceCoverageItem] = Field(default_factory=list)
-    uncovered_sources: list[MemoirBookSourceCoverageItem] = Field(default_factory=list)
-
-
 class MemoirBookSourceRouteRequest(BaseModel):
     utterance_id: str
 
@@ -367,6 +343,90 @@ class MemoirBookSourceRouteResponse(BaseModel):
     confidence: float = Field(ge=0, le=1)
     reason: str
     evidence: list[MemoirBookSourceRouteEvidence] = Field(default_factory=list)
+
+
+class MemoirBookSourceReviewCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    utterance_id: str
+
+    @field_validator("utterance_id")
+    @classmethod
+    def _valid_utterance_id(cls, value: str) -> str:
+        utterance_id = value.strip()
+        if not utterance_id:
+            raise ValueError("讲述记录不能为空")
+        return utterance_id
+
+
+class MemoirBookSourceReviewConfirmRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    chapter_id: str | None = None
+    create_new_chapter_title: str | None = None
+    ai_model: str | None = None
+
+    @field_validator("chapter_id", "create_new_chapter_title", "ai_model")
+    @classmethod
+    def _valid_optional_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None
+
+
+class MemoirBookSourceReviewItemResponse(BaseModel):
+    id: str
+    project_id: str
+    status: MemoirAutomationEventStatus
+    utterance_id: str
+    source_index: int
+    route_action: Literal["assign_to_chapter", "suggest_new_chapter", "hold_for_review"]
+    target_chapter_id: str | None = None
+    target_chapter_title: str | None = None
+    suggested_title: str | None = None
+    confidence: float | None = None
+    reason: str
+    summary_text: str
+    evidence: list[MemoirBookSourceRouteEvidence] = Field(default_factory=list)
+    metadata_json: dict[str, object] = Field(default_factory=dict)
+    created_at: datetime
+    updated_at: datetime
+
+
+class MemoirBookSourceReviewListResponse(BaseModel):
+    items: list[MemoirBookSourceReviewItemResponse] = Field(default_factory=list)
+    total: int
+
+
+class MemoirBookSourceReviewConfirmResponse(BaseModel):
+    item: MemoirBookSourceReviewItemResponse
+    plan: MemoirBookPlanResponse
+
+
+class MemoirBookSourceCoverageItem(BaseModel):
+    source_index: int
+    voice_session_id: str
+    message_id: str
+    utterance_id: str
+    transcript_version_id: str | None = None
+    audio_file_id: str | None = None
+    start_ms: int | None = None
+    end_ms: int | None = None
+    text: str
+    created_at: datetime
+    is_included: bool = False
+    included_in_chapters: list[MemoirBookSourceIncludedChapter] = Field(default_factory=list)
+
+
+class MemoirBookSourceCoverageResponse(BaseModel):
+    project_id: str
+    plan_id: str | None = None
+    total_source_count: int
+    covered_source_count: int
+    uncovered_source_count: int
+    sources: list[MemoirBookSourceCoverageItem] = Field(default_factory=list)
+    uncovered_sources: list[MemoirBookSourceCoverageItem] = Field(default_factory=list)
 
 
 class MemoirBookVoiceCommandExecuteResponse(BaseModel):
