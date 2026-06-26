@@ -34,6 +34,7 @@ from app.schemas.memoir_voice import (
 )
 from app.services.ai_factory import get_ai_service
 from app.services.ai_types import AITextClient
+from app.services.memoir.asr_text_normalization import normalize_memoir_asr_text
 from app.services.memoir.book_plan_sources import (
     REMOVED_SOURCE_UTTERANCE_IDS_KEY,
     SOURCES_DELETED_STATUS_REASON,
@@ -88,6 +89,7 @@ def _build_cleanup_prompt(source_text: str) -> str:
 
 要求：
 - 只修正 ASR 可能因方言、口音、同音词造成的明显错字或错词；无法确定时保留原文
+- 成书、目录、归章语境中，“张杰”“张洁”“张节”“章杰”很可能是“章节”；如果明显不是人名，要改成“章节”
 - 必须去掉明显的口头填充词，比如句首或重复出现的“嗯”“啊”“呃”“那个”“这个”“就是”
 - 必须去掉同一句话里明显无信息增量的重复表达，例如“那个那个那个”“就是就是”
 - 可以整理基础标点和极少量语序，使句子可读
@@ -117,6 +119,7 @@ def _remove_obvious_oral_fillers(text: str) -> str:
     cleaned = _SPACE_RE.sub(" ", cleaned)
     cleaned = cleaned.strip(" ，,、")
     cleaned = cleaned.replace("，。", "。").replace(",。", "。")
+    cleaned = normalize_memoir_asr_text(cleaned)
     return cleaned.strip()
 
 

@@ -755,6 +755,17 @@ async def test_mobile_memoir_book_voice_command_answers_current_chapter_count(
     assert response.status_code == 200
     assert response.json()["intent"] == "answer_book_question"
 
+    response = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-voice-command/parse",
+        json={"text": "现在有几个张杰啊"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["original_text"] == "现在有几个章节啊"
+    assert data["intent"] == "answer_book_question"
+    assert "2 章" in data["reply_text"]
+
 
 async def test_mobile_memoir_book_voice_command_answers_uncovered_source_count_from_context(
     client,
