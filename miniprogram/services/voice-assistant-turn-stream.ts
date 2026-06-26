@@ -4,6 +4,7 @@ import type { StreamingSpeechPCMFrame } from "./streaming-speech-playback";
 import { readChatTTSSettings } from "./tts-settings";
 
 const SOCKET_CONNECT_TIMEOUT_MS = 10000;
+const TURN_ACTIVITY_TIMEOUT_MS = 30000;
 
 export interface VoiceAssistantTurnStreamStartOptions {
   regenerate?: boolean;
@@ -11,6 +12,7 @@ export interface VoiceAssistantTurnStreamStartOptions {
   voice?: string;
   speedRatio?: number;
   connectTimeoutMs?: number;
+  turnActivityTimeoutMs?: number;
 }
 
 export interface VoiceAssistantTurnStartedEvent {
@@ -117,6 +119,8 @@ export class VoiceAssistantTurnStreamClient {
   private closed = false;
   private startSent = false;
   private messageChain: Promise<void> = Promise.resolve();
+  private connectTimer: ReturnType<typeof setTimeout> | null = null;
+  private activityTimer: ReturnType<typeof setTimeout> | null = null;
   private resolveStart?: (event: VoiceAssistantTurnCompletedEvent | VoiceAssistantTurnTerminalEvent) => void;
   private rejectStart?: (error: Error) => void;
 
@@ -128,8 +132,12 @@ export class VoiceAssistantTurnStreamClient {
   async start(options: VoiceAssistantTurnStreamStartOptions = {}): Promise<VoiceAssistantTurnCompletedEvent> {
     this.closed = false;
     this.startSent = false;
+    this.socketOpen = false;
+    this.socketTask = null;
     this.messageChain = Promise.resolve();
+    this.clearTimers();
     const connectTimeoutMs = options.connectTimeoutMs ?? SOCKET_CONNECT_TIMEOUT_MS;
+    const turnActivityTimeoutMs = options.turnActivityTimeoutMs ?? TURN_ACTIVITY_TIMEOUT_MS;
     const cookie = await backendSessionCookieHeader();
     const url = assistantTurnStreamUrl(this.voiceSessionId);
     const startPayload = this.startPayload(options);
@@ -137,8 +145,8 @@ export class VoiceAssistantTurnStreamClient {
       (resolve, reject) => {
         this.resolveStart = resolve;
         this.rejectStart = reject;
-        let connectTimer: ReturnType<typeof setTimeout> | null = setTimeout(() => {
-          connectTimer = null;
+        this.connectTimer = setTimeout(() => {
+          this.connectTimer = null;
           if (this.closed || this.socketOpen) {
             return;
           }
@@ -146,23 +154,31 @@ export class VoiceAssistantTurnStreamClient {
           this.closeSocket("assistant turn stream timeout");
           reject(new Error("AI 回应连接超时"));
         }, connectTimeoutMs);
-        const clearConnectTimer = () => {
-          if (connectTimer !== null) {
-            clearTimeout(connectTimer);
-            connectTimer = null;
-          }
+        const resetActivityTimer = () => {
+          this.resetActivityTimer(turnActivityTimeoutMs, () => {
+            if (this.closed) {
+              return;
+            }
+            this.closed = true;
+            this.closeSocket("assistant turn activity timeout");
+            reject(new Error("AI 回应等待超时"));
+          });
         };
         const settle = (
           callback: () => void,
         ) => {
-          clearConnectTimer();
+          this.clearTimers();
           callback();
+        };
+        const failStart = (message: string, reason: string) => {
+          settle(() => reject(new Error(message)));
+          this.closeSocket(reason);
         };
         const socketTask = wx.connectSocket({
           url,
           header: cookie ? { Cookie: cookie } : {},
           fail: (error) => {
-            settle(() => reject(new Error(error.errMsg || "AI 回应连接失败")));
+            failStart(error.errMsg || "AI 回应连接失败", "assistant turn stream connect failed");
           },
         });
         this.socketTask = socketTask;
@@ -171,8 +187,9 @@ export class VoiceAssistantTurnStreamClient {
             socketTask.close({ code: 1000, reason: "assistant turn stream closed" });
             return;
           }
-          clearConnectTimer();
+          this.clearConnectTimer();
           this.socketOpen = true;
+          resetActivityTimer();
         });
         socketTask.onMessage((message) => {
           if (!this.closed) {
@@ -181,7 +198,7 @@ export class VoiceAssistantTurnStreamClient {
                 if (this.closed) {
                   return undefined;
                 }
-                return this.handleSocketMessage(message.data, startPayload, settle);
+                return this.handleSocketMessage(message.data, startPayload, settle, resetActivityTimer);
               })
               .catch((error) => {
                 if (this.closed) {
@@ -196,11 +213,13 @@ export class VoiceAssistantTurnStreamClient {
           if (this.closed) {
             return;
           }
-          settle(() => reject(new Error(error.errMsg || "AI 回应连接失败")));
+          failStart(error.errMsg || "AI 回应连接失败", "assistant turn stream error");
         });
         socketTask.onClose(() => {
           this.socketOpen = false;
           if (!this.closed) {
+            this.closed = true;
+            this.socketTask = null;
             settle(() => reject(new Error("AI 回应连接已关闭")));
           }
         });
@@ -255,11 +274,13 @@ export class VoiceAssistantTurnStreamClient {
     data: string | ArrayBuffer,
     startPayload: Record<string, unknown>,
     settle: (callback: () => void) => void,
+    resetActivityTimer: () => void,
   ): Promise<void> {
     const event = safeJsonParse(typeof data === "string" ? data : "");
     if (!event || typeof event.type !== "string") {
       return;
     }
+    resetActivityTimer();
     if (event.type === "turn.ready") {
       this.sendStart(startPayload);
       return;
@@ -322,10 +343,38 @@ export class VoiceAssistantTurnStreamClient {
   }
 
   private closeSocket(reason: string): void {
+    this.clearTimers();
     this.closed = true;
     this.socketTask?.close({ code: 1000, reason });
     this.socketTask = null;
     this.socketOpen = false;
+  }
+
+  private resetActivityTimer(timeoutMs: number, onTimeout: () => void): void {
+    this.clearActivityTimer();
+    this.activityTimer = setTimeout(() => {
+      this.activityTimer = null;
+      onTimeout();
+    }, timeoutMs);
+  }
+
+  private clearTimers(): void {
+    this.clearConnectTimer();
+    this.clearActivityTimer();
+  }
+
+  private clearConnectTimer(): void {
+    if (this.connectTimer !== null) {
+      clearTimeout(this.connectTimer);
+      this.connectTimer = null;
+    }
+  }
+
+  private clearActivityTimer(): void {
+    if (this.activityTimer !== null) {
+      clearTimeout(this.activityTimer);
+      this.activityTimer = null;
+    }
   }
 
   private handleAudioFrame(event: VoiceAssistantTurnAudioFrameEvent): void {
