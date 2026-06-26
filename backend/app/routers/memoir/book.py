@@ -16,9 +16,11 @@ from app.schemas.memoir_book import (
     MemoirBookOutputResponse,
     MemoirBookPlanConfirmRequest,
     MemoirBookPlanGenerateRequest,
+    MemoirBookPlanResponse,
     MemoirBookPlanStructureCommandRequest,
     MemoirBookPlanUpdateRequest,
-    MemoirBookPlanResponse,
+    MemoirBookQualityAuditRunRequest,
+    MemoirBookQualityAuditRunResponse,
     MemoirBookSourceAssignmentRequest,
     MemoirBookSourceAutoAssignmentRunRequest,
     MemoirBookSourceAutoAssignmentRunResponse,
@@ -40,6 +42,7 @@ from app.schemas.memoir_book import (
 from app.services.memoir import book_drafts as memoir_book_drafts
 from app.services.memoir import book_outputs as memoir_book_outputs
 from app.services.memoir import book_plans as memoir_book_plans
+from app.services.memoir import book_quality_audit as memoir_book_quality_audit
 from app.services.memoir import source_auto_assignment as memoir_source_auto_assignment
 from app.services.memoir import source_review_queue as memoir_source_review_queue
 from app.services.memoir import source_router as memoir_source_router
@@ -317,6 +320,24 @@ async def run_mobile_memoir_book_source_auto_assignments(
     current_user: User = Depends(get_current_user),
 ):
     return await memoir_source_auto_assignment.run_source_auto_assignment(
+        db,
+        user_id=current_user.id,
+        project_id=project_id,
+        req=req,
+    )
+
+
+@router.post(
+    "/projects/{project_id}/book-quality-audit/run",
+    response_model=MemoirBookQualityAuditRunResponse,
+)
+async def run_mobile_memoir_book_quality_audit(
+    project_id: str,
+    req: MemoirBookQualityAuditRunRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await memoir_book_quality_audit.run_book_quality_audit(
         db,
         user_id=current_user.id,
         project_id=project_id,
