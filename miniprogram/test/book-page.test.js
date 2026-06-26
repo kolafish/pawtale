@@ -1611,6 +1611,7 @@ test("book page records and previews a voice edit command", async () => {
   page.applySourceCoverage.call(context, sampleSourceCoverage(1));
   context.playBookVoiceAssistantReply = async (text, options) => {
     calls.push({ kind: "reply", text, options });
+    return true;
   };
 
   await page.startBookVoiceCommand.call(context);
@@ -1702,6 +1703,7 @@ test("book page sends recent voice editing context when parsing follow-up questi
   });
   context.playBookVoiceAssistantReply = async (text, options) => {
     calls.push({ kind: "reply", text, options });
+    return true;
   };
 
   await page.startBookVoiceCommand.call(context);
@@ -2041,6 +2043,71 @@ test("book page drives voice assistant reply highlight from streaming playback p
   }
 });
 
+test("book page interrupts active assistant reply and starts voice editing capture", async () => {
+  const calls = [];
+  const { page } = loadBookPage({
+    streamingAsrExports: {
+      MemoirStreamingAsrClient: class {
+        constructor(options) {
+          this.options = options;
+          calls.push({ kind: "client", gatewayUrl: options.gatewayUrl });
+        }
+
+        async connect() {
+          calls.push({ kind: "connect" });
+          this.options.callbacks.onStatus("ready");
+        }
+
+        startRecording(options) {
+          calls.push({ kind: "record", options });
+          this.options.callbacks.onStatus("listening");
+          return true;
+        }
+
+        stopRecording() {}
+        close() {}
+        configureAutoStop() {}
+      },
+    },
+  });
+  const context = pageContext(page, { projectId: "project/1" });
+  page.applyPlan.call(context, samplePlan("confirmed"));
+  context.bookVoiceTTSStreaming = {
+    close() {
+      calls.push({ kind: "tts-close" });
+    },
+  };
+  context.bookVoiceTTSPlaybackController = {
+    stop() {
+      calls.push({ kind: "playback-stop" });
+    },
+  };
+  context.setData({
+    bookVoiceAssistantExpanded: true,
+    bookVoiceAssistantConversationActive: true,
+    bookVoiceAssistantBusy: true,
+    bookVoiceAssistantSpeakingLineId: "assistant-1",
+    bookTTSActiveTarget: "book-voice-assistant",
+    bookVoiceTranscriptLines: [
+      { id: "user-1", role: "user", text: "第一章是不是太短了" },
+      { id: "assistant-1", role: "assistant", text: "这一章还可以补一个具体场景。" },
+    ],
+  });
+
+  await page.startBookVoiceCommand.call(context);
+  await flushAsyncWork();
+
+  assert.deepEqual(
+    context.data.bookVoiceTranscriptLines.map((line) => line.id),
+    ["user-1"],
+  );
+  assert.equal(context.data.bookVoiceAssistantListening, true);
+  assert.equal(context.data.bookVoiceAssistantBusy, false);
+  assert.equal(context.data.bookVoiceAssistantSpeakingLineId, "");
+  assert.equal(context.data.bookVoiceAssistantStatusText, "我在听，请说想怎么改");
+  assert.deepEqual(calls.map((call) => call.kind), ["tts-close", "playback-stop", "client", "connect", "record"]);
+});
+
 test("book page keeps pending preview during auto-listen for voice confirmation", async () => {
   const calls = [];
   const { page } = loadBookPage({
@@ -2053,6 +2120,7 @@ test("book page keeps pending preview during auto-listen for voice confirmation"
   page.applyBookVoiceCommandPreview.call(context, sampleBookVoiceCommandPreview());
   context.playBookVoiceAssistantReply = async (text, options) => {
     calls.push({ kind: "reply", text, options });
+    return true;
   };
   context.executeBookVoiceCommand = async (options) => {
     calls.push({ kind: "execute", options });
@@ -2072,6 +2140,35 @@ test("book page keeps pending preview during auto-listen for voice confirmation"
     kind: "execute",
     options: { confirmedByVoice: true, autoListenAfterExecution: true },
   });
+});
+
+test("book page does not execute a voice confirmation when assistant reply is interrupted", async () => {
+  const calls = [];
+  const { page } = loadBookPage({
+    streamingAsrExports: {
+      MemoirStreamingAsrClient: streamingAsrClientForFinal(calls, "确认执行。"),
+    },
+  });
+  const context = pageContext(page, { projectId: "project/1" });
+  page.applyPlan.call(context, samplePlan("confirmed"));
+  page.applyBookVoiceCommandPreview.call(context, sampleBookVoiceCommandPreview());
+  context.playBookVoiceAssistantReply = async (text, options) => {
+    calls.push({ kind: "reply", text, options });
+    return false;
+  };
+  context.executeBookVoiceCommand = async (options) => {
+    calls.push({ kind: "execute", options });
+  };
+
+  await page.startBookVoiceCommand.call(context, { autoTriggered: true });
+  await flushAsyncWork();
+
+  assert.deepEqual(calls[3], {
+    kind: "reply",
+    text: "好的，我按刚才理解的修改。",
+    options: { autoListenAfterPlayback: false },
+  });
+  assert.equal(calls.some((call) => call.kind === "execute"), false);
 });
 
 test("book page pauses voice conversation when no speech is detected", async () => {
