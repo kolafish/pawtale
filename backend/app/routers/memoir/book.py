@@ -20,6 +20,8 @@ from app.schemas.memoir_book import (
     MemoirBookPlanUpdateRequest,
     MemoirBookPlanResponse,
     MemoirBookSourceAssignmentRequest,
+    MemoirBookSourceAutoAssignmentRunRequest,
+    MemoirBookSourceAutoAssignmentRunResponse,
     MemoirBookSourceCoverageResponse,
     MemoirBookSourceMoveRequest,
     MemoirBookSourceReviewConfirmRequest,
@@ -38,6 +40,7 @@ from app.schemas.memoir_book import (
 from app.services.memoir import book_drafts as memoir_book_drafts
 from app.services.memoir import book_outputs as memoir_book_outputs
 from app.services.memoir import book_plans as memoir_book_plans
+from app.services.memoir import source_auto_assignment as memoir_source_auto_assignment
 from app.services.memoir import source_review_queue as memoir_source_review_queue
 from app.services.memoir import source_router as memoir_source_router
 from app.services.memoir import book_voice_commands as memoir_book_voice_commands
@@ -296,6 +299,24 @@ async def assign_mobile_memoir_book_sources(
     current_user: User = Depends(get_current_user),
 ):
     return await memoir_book_plans.assign_book_sources_to_chapters(
+        db,
+        user_id=current_user.id,
+        project_id=project_id,
+        req=req,
+    )
+
+
+@router.post(
+    "/projects/{project_id}/book-source-auto-assignments/run",
+    response_model=MemoirBookSourceAutoAssignmentRunResponse,
+)
+async def run_mobile_memoir_book_source_auto_assignments(
+    project_id: str,
+    req: MemoirBookSourceAutoAssignmentRunRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await memoir_source_auto_assignment.run_source_auto_assignment(
         db,
         user_id=current_user.id,
         project_id=project_id,
