@@ -1033,6 +1033,88 @@ test("voice chat mic interrupts active assistant turn and starts recording", asy
   assert.deepEqual(context.data.transcriptLines.map((line) => line.id), ["user-line-1"]);
 });
 
+test("voice chat mic interrupts assistant turn before async recording checks finish", async () => {
+  const cancelReasons = [];
+  const startOptions = [];
+  let resolveConsentSync;
+  const consentSyncPromise = new Promise((resolve) => {
+    resolveConsentSync = resolve;
+  });
+  const page = loadVoiceChatPage({
+    voiceAuthorizationExports: {
+      readVoiceAuthorizationConsent: () => true,
+      syncVoiceAuthorizationConsent: () => consentSyncPromise,
+    },
+  });
+  const context = {
+    ...page,
+    data: {
+      ...page.data,
+      voiceSessionId: "voice-1",
+      voiceAuthorizationAgreed: true,
+      status: "ready",
+      guidanceMode: "guided_interview",
+      followUpLoading: true,
+      followUpTTSLoading: false,
+      followUpTTSPlaying: true,
+      followUpTTSStateText: "老余正在说",
+      assistantPromptText: "您刚才说到第一份工作，那里最难忘的一个人是谁？",
+      transcriptLines: [
+        { id: "user-line-1", role: "user", text: "我第一份工作是在供销社。" },
+        {
+          id: "assistant-stream-1",
+          role: "assistant",
+          text: "您刚才说到第一份工作，那里最难忘的一个人是谁？",
+        },
+      ],
+    },
+    assistantStreamLineId: "assistant-stream-1",
+    assistantTurnRuntime: {
+      cancel(reason) {
+        cancelReasons.push(reason);
+      },
+      stopPlayback() {},
+      stats() {
+        return null;
+      },
+    },
+    audioPlayback: {
+      currentToken: () => 1,
+      currentAudio: () => null,
+      isCurrentToken: () => true,
+      nextToken: () => 1,
+      stop() {},
+    },
+    voiceStreaming: {
+      hasClient: () => true,
+      startRecording(options) {
+        startOptions.push(options);
+        return true;
+      },
+      stopRecording() {},
+      close() {},
+    },
+    setData(patch) {
+      this.data = { ...this.data, ...patch };
+    },
+  };
+
+  const startedPromise = page.startRecordingAfterPrivacy.call(context, false);
+
+  assert.deepEqual(cancelReasons, ["interrupted_by_user"]);
+  assert.equal(context.assistantTurnRuntime, null);
+  assert.equal(context.data.followUpTTSPlaying, false);
+  assert.deepEqual(context.data.transcriptLines.map((line) => line.id), ["user-line-1"]);
+  assert.deepEqual(startOptions, []);
+
+  resolveConsentSync({ id: "consent-1" });
+  const started = await startedPromise;
+
+  assert.equal(started, true);
+  assert.deepEqual(startOptions, [{ noVoiceActivityTimeoutMs: 0 }]);
+  assert.equal(context.data.recording, true);
+});
+
 test("voice chat drives first streaming highlight from WebAudio playback progress", async () => {
   const progressCalls = [];
   const prompt = "欢迎回来，咱们接着聊。";

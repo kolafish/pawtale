@@ -1567,9 +1567,20 @@ Page<VoiceChatData, {
   },
 
   async startRecordingAfterPrivacy(autoTriggered = false) {
+    const interruptingAssistant = !autoTriggered && this.assistantTurnActiveForBargeIn();
     if (!autoTriggered) {
       this.consecutiveNoAnswerPrompts = 0;
-      this.cancelPendingNoAnswerPrompt();
+      this.cancelPendingNoAnswerPrompt(!interruptingAssistant);
+    }
+    if (interruptingAssistant) {
+      followUpRequestSerial += 1;
+      this.cancelFollowUpTTS("interrupted_by_user");
+      this.setData({
+        followUpLoading: false,
+        followUpError: "",
+        followUpTTSStateText: "已打断，正在听你说",
+        persistenceStateText: "正在听你说",
+      });
     }
     if (!(await this.syncVoiceAuthorizationForSession())) {
       return false;
@@ -1590,18 +1601,6 @@ Page<VoiceChatData, {
       void this.syncVoiceAuthorizationAndConnect(autoTriggered);
       this.setData({ autoListenStateText: autoTriggered ? "正在重新连接语音" : this.data.autoListenStateText });
       return false;
-    }
-    const interruptingAssistant = !autoTriggered && this.assistantTurnActiveForBargeIn();
-    if (interruptingAssistant) {
-      followUpRequestSerial += 1;
-      this.cancelPendingNoAnswerPrompt(false);
-      this.cancelFollowUpTTS("interrupted_by_user");
-      this.setData({
-        followUpLoading: false,
-        followUpError: "",
-        followUpTTSStateText: "已打断，正在听你说",
-        persistenceStateText: "正在听你说",
-      });
     }
     const started = this.voiceStreaming.startRecording({
       noVoiceActivityTimeoutMs: autoTriggered ? AUTO_LISTEN_NO_ANSWER_MS : 0,
