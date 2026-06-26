@@ -1,9 +1,10 @@
 import { estimatePcm16Level, pcmFrameDurationMs } from "./memoir-streaming-asr-protocol";
 
-const DEFAULT_WARMUP_MS = 700;
-const DEFAULT_TRIGGER_VOICE_MS = 420;
-const DEFAULT_MIN_TRIGGER_LEVEL = 0.055;
-const DEFAULT_BASELINE_MULTIPLIER = 1.7;
+const DEFAULT_WARMUP_MS = 500;
+const DEFAULT_TRIGGER_VOICE_MS = 280;
+const DEFAULT_MIN_TRIGGER_LEVEL = 0.025;
+const DEFAULT_BASELINE_MULTIPLIER = 1.45;
+const DEFAULT_PEAK_MULTIPLIER = 1.12;
 const DEFAULT_RECORDING_DURATION_MS = 10 * 60 * 1000;
 const DEFAULT_FRAME_SIZE_KB = 4;
 const STOP_SETTLE_TIMEOUT_MS = 1500;
@@ -36,6 +37,8 @@ export class VoiceBargeInMonitor {
   private elapsedMs = 0;
   private voiceElapsedMs = 0;
   private warmupPeakLevel = 0;
+  private warmupLevelSum = 0;
+  private warmupFrameCount = 0;
   private lastAudioLevel = 0;
   private options: Required<VoiceBargeInMonitorOptions> | null = null;
   private stopPromise: Promise<void> | null = null;
@@ -62,6 +65,8 @@ export class VoiceBargeInMonitor {
     this.elapsedMs = 0;
     this.voiceElapsedMs = 0;
     this.warmupPeakLevel = 0;
+    this.warmupLevelSum = 0;
+    this.warmupFrameCount = 0;
     this.lastAudioLevel = 0;
     this.options = normalizedOptions;
     try {
@@ -120,7 +125,7 @@ export class VoiceBargeInMonitor {
   state(): VoiceBargeInMonitorState {
     return {
       audioLevel: this.lastAudioLevel,
-      baselineLevel: this.warmupPeakLevel,
+      baselineLevel: this.averageWarmupLevel(),
       triggerLevel: this.currentTriggerLevel(),
       elapsedMs: this.elapsedMs,
       voiceElapsedMs: this.voiceElapsedMs,
@@ -155,6 +160,8 @@ export class VoiceBargeInMonitor {
     this.lastAudioLevel = estimatePcm16Level(frameBuffer);
     if (this.elapsedMs <= this.options.warmupMs) {
       this.warmupPeakLevel = Math.max(this.warmupPeakLevel, this.lastAudioLevel);
+      this.warmupLevelSum += this.lastAudioLevel;
+      this.warmupFrameCount += 1;
       return;
     }
     if (this.lastAudioLevel >= this.currentTriggerLevel()) {
@@ -168,9 +175,14 @@ export class VoiceBargeInMonitor {
   }
 
   private currentTriggerLevel(): number {
-    const baselineLevel = this.warmupPeakLevel * (this.options?.baselineMultiplier ?? DEFAULT_BASELINE_MULTIPLIER);
+    const baselineLevel = this.averageWarmupLevel() * (this.options?.baselineMultiplier ?? DEFAULT_BASELINE_MULTIPLIER);
+    const peakGuardLevel = this.warmupPeakLevel * DEFAULT_PEAK_MULTIPLIER;
     const minLevel = this.options?.minTriggerLevel ?? DEFAULT_MIN_TRIGGER_LEVEL;
-    return Math.max(minLevel, baselineLevel);
+    return Math.max(minLevel, baselineLevel, peakGuardLevel);
+  }
+
+  private averageWarmupLevel(): number {
+    return this.warmupFrameCount > 0 ? this.warmupLevelSum / this.warmupFrameCount : 0;
   }
 
   private trigger(): void {

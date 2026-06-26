@@ -227,7 +227,7 @@ Page<VoiceChatData, {
   startRecordingAfterPrivacy(autoTriggered?: boolean): Promise<boolean>;
   toggleRecording(): void;
   shouldAutoStartListening(): boolean;
-  tryStartAutoListenAfterTTS(): boolean;
+  tryStartAutoListenAfterTTS(): Promise<boolean>;
   cancelPendingNoAnswerPrompt(clearLoading?: boolean): void;
   handleNoAnswerAutoStop(): Promise<void>;
   finishSession(): Promise<void>;
@@ -859,7 +859,7 @@ Page<VoiceChatData, {
       lastFollowUpSourceMessageId: sourceMessageId,
     });
     if (!playbackError && completed.expects_answer !== false) {
-      this.tryStartAutoListenAfterTTS();
+      await this.tryStartAutoListenAfterTTS();
     }
   },
 
@@ -1271,7 +1271,7 @@ Page<VoiceChatData, {
             });
           }
           if (playToken === this.ttsPlayToken && options.autoListenAfterPlayback) {
-            this.tryStartAutoListenAfterTTS();
+            void this.tryStartAutoListenAfterTTS();
           }
         },
         onError: () => {
@@ -1372,11 +1372,23 @@ Page<VoiceChatData, {
     ) {
       return;
     }
-    this.assistantBargeInMonitor.start({
+    const started = this.assistantBargeInMonitor.start({
       onBargeIn: () => {
         void this.handleAssistantBargeIn(requestSerial);
       },
+      onError: () => {
+        if (
+          requestSerial === followUpRequestSerial
+          && !this.data.recording
+          && this.assistantTurnActiveForBargeIn()
+        ) {
+          this.setData({ autoListenStateText: "自动打断未启动，可点按钮回答" });
+        }
+      },
     });
+    if (started) {
+      this.setData({ autoListenStateText: "可直接说话打断老余" });
+    }
   },
 
   stopAssistantBargeInMonitor() {
@@ -1603,7 +1615,7 @@ Page<VoiceChatData, {
     } finally {
       this.setData({ connecting: false });
       if (connected) {
-        this.tryStartAutoListenAfterTTS();
+        await this.tryStartAutoListenAfterTTS();
       }
     }
   },
@@ -1707,13 +1719,13 @@ Page<VoiceChatData, {
     return this.autoListenGateSnapshot().canStart;
   },
 
-  tryStartAutoListenAfterTTS() {
+  async tryStartAutoListenAfterTTS() {
     const gate = this.autoListenGateSnapshot();
     if (!this.autoListenPendingAfterPlayback || !gate.canStart) {
       return false;
     }
     this.autoListenPendingAfterPlayback = false;
-    return this.startRecording(true);
+    return this.startRecordingAfterPrivacy(true);
   },
 
   cancelPendingNoAnswerPrompt(clearLoading = true) {
