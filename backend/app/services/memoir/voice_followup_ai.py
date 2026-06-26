@@ -134,8 +134,10 @@ def _requested_topic_hint(messages: list[MemoirChatMessage]) -> str:
 
 def build_progress_prompt_context(snapshot: MemoirProjectProgressSnapshotResponse) -> ProgressPromptContext:
     selected_update = _automation_event_progress_update(snapshot.recent_automation_events)
+    if selected_update is not None:
+        selected_update = _with_snapshot_facts(selected_update, snapshot)
     if selected_update is None:
-        selected_update = _snapshot_milestone_progress_update(snapshot)
+        selected_update = _snapshot_progress_update(snapshot)
 
     if not selected_update:
         return ProgressPromptContext(
@@ -159,9 +161,16 @@ def build_progress_prompt_context(snapshot: MemoirProjectProgressSnapshotRespons
 
 def _progress_prompt_text(selected_update: dict[str, object]) -> str:
     lines = [
-        "项目进度事实（只允许引用以下事实，不要编造数字、章节名或自动整理结果）：",
+        "项目进度事实（调试期偏主动；只允许引用以下事实，不要编造数字、章节名或自动整理结果）：",
         f"- 本轮可选进度鼓励：{selected_update['text']}",
     ]
+    snapshot_line = selected_update.get("snapshot_line")
+    if isinstance(snapshot_line, str) and snapshot_line.strip():
+        lines.append(f"- 当前项目进度：{snapshot_line.strip()}")
+    chapter_lines = selected_update.get("chapter_lines")
+    if isinstance(chapter_lines, list):
+        for line in [str(item).strip() for item in chapter_lines if str(item).strip()][:3]:
+            lines.append(f"- 章节状态：{line}")
     if selected_update.get("kind") == "book_quality_audit":
         hint = selected_update.get("audit_hint")
         next_actions = selected_update.get("next_actions")
@@ -173,12 +182,12 @@ def _progress_prompt_text(selected_update: dict[str, object]) -> str:
                 lines.append(f"- 审计建议下一步：{'；'.join(actions[:2])}")
         lines.append(
             "使用规则：审计建议只是方向，不是硬性脚本；优先顺着叙述者最新内容，"
-            "只有自然相关时才带一句进度或转向。"
+            "调试阶段可以更主动带一句进度或后台整理结果，但不要替代追问。"
         )
     else:
         lines.append(
-            "使用规则：可以不说进度；如果要说，只能一句话带过上面这一条事实，"
-            "不要堆数字，不要让进度提醒替代追问。"
+            "使用规则：调试阶段每次回应都尽量自然带一句进度鼓励或后台整理结果；"
+            "只说一句，不要堆数字，不要让进度提醒替代追问。"
         )
     return "\n".join(lines)
 
@@ -269,6 +278,88 @@ def _snapshot_milestone_progress_update(
             "pending_utterance_count": snapshot.pending_utterance_count,
         }
     return None
+
+
+def _snapshot_progress_update(snapshot: MemoirProjectProgressSnapshotResponse) -> dict[str, object] | None:
+    milestone = _snapshot_milestone_progress_update(snapshot)
+    if milestone:
+        return _with_snapshot_facts(milestone, snapshot)
+    if snapshot.valid_utterance_count <= 0:
+        return _with_snapshot_facts(
+            {
+                "kind": "project_progress_snapshot",
+                "source": "progress_snapshot",
+                "text": "这个项目还没有留下讲述记录，今天可以从第一条开始。",
+            },
+            snapshot,
+        )
+    return _with_snapshot_facts(
+        {
+            "kind": "project_progress_snapshot",
+            "source": "progress_snapshot",
+            "text": _snapshot_summary_text(snapshot),
+        },
+        snapshot,
+    )
+
+
+def _with_snapshot_facts(
+    update: dict[str, object],
+    snapshot: MemoirProjectProgressSnapshotResponse,
+) -> dict[str, object]:
+    enriched = dict(update)
+    enriched.update(
+        {
+            "valid_utterance_count": snapshot.valid_utterance_count,
+            "assigned_utterance_count": snapshot.assigned_utterance_count,
+            "pending_utterance_count": snapshot.pending_utterance_count,
+            "chapter_count": snapshot.chapter_count,
+            "confirmed_chapter_count": snapshot.confirmed_chapter_count,
+            "draft_word_count": snapshot.draft_word_count,
+            "source_char_count": snapshot.source_char_count,
+            "snapshot_line": _snapshot_facts_line(snapshot),
+            "chapter_lines": _chapter_progress_lines(snapshot),
+        }
+    )
+    return enriched
+
+
+def _snapshot_summary_text(snapshot: MemoirProjectProgressSnapshotResponse) -> str:
+    if snapshot.assigned_utterance_count > 0:
+        return (
+            f"这个项目已经有 {snapshot.assigned_utterance_count} 条讲述收入章节，"
+            f"还有 {snapshot.pending_utterance_count} 条待整理。"
+        )
+    return f"这个项目已经留下 {snapshot.valid_utterance_count} 条讲述记录，接下来可以慢慢整理成章节。"
+
+
+def _snapshot_facts_line(snapshot: MemoirProjectProgressSnapshotResponse) -> str:
+    return (
+        f"{snapshot.valid_utterance_count} 条讲述记录，"
+        f"{snapshot.assigned_utterance_count} 条已收入章节，"
+        f"{snapshot.pending_utterance_count} 条待整理；"
+        f"{snapshot.chapter_count} 个章节，"
+        f"{snapshot.confirmed_chapter_count} 个已确认；"
+        f"讲述原文约 {snapshot.source_char_count} 字，"
+        f"章节稿约 {snapshot.draft_word_count} 字。"
+    )
+
+
+def _chapter_progress_lines(snapshot: MemoirProjectProgressSnapshotResponse) -> list[str]:
+    lines: list[str] = []
+    for chapter in snapshot.chapter_progress_items:
+        parts = [
+            f"《{chapter.title}》",
+            f"{chapter.source_count} 条素材",
+        ]
+        if chapter.pending_source_count:
+            parts.append(f"{chapter.pending_source_count} 条待补写")
+        if chapter.removed_source_count:
+            parts.append(f"{chapter.removed_source_count} 条素材已移除待更新")
+        if chapter.draft_word_count:
+            parts.append(f"正文约 {chapter.draft_word_count} 字")
+        lines.append("，".join(parts))
+    return lines
 
 
 def _is_progress_milestone(count: int) -> bool:

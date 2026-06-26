@@ -186,12 +186,48 @@ async def test_voice_assistant_turn_guided_opening_prompt_uses_topic_menu(
 
     prompt = ai_client.calls[0]["user_prompt"]
     assert completed["primary_intent"] == "opening"
-    assert completed["progress_update_used"] is False
+    assert completed["progress_update_used"] is True
+    assert completed["progress_update"]["kind"] == "project_progress_snapshot"
     assert ai_client.calls[0]["kwargs"]["max_tokens"] == 420
     assert "主题讲述首次开场" in prompt
     assert "明确介绍可聊主题" in prompt
     assert "人物、事情、家庭、工作、地点、某一天、人生阶段、闲聊" in prompt
-    assert "本轮没有可播报的结构化进度变化" in prompt
+    assert "这个项目还没有留下讲述记录，今天可以从第一条开始。" in prompt
+    assert "调试阶段每次回应都尽量自然带一句进度鼓励或后台整理结果" in prompt
+
+
+async def test_voice_assistant_turn_progress_prompt_uses_project_snapshot_without_event(
+    client,
+    test_db,
+):
+    await create_test_voice_transcript(
+        client,
+        test_db,
+        text="第一条讲的是小时候在院子里摘菜。",
+        guidance_mode="guided_interview",
+        current_guidance_module="family",
+    )
+    created = await create_test_voice_transcript(
+        client,
+        test_db,
+        text="第二条讲的是过年时一家人在厨房忙活。",
+        guidance_mode="guided_interview",
+        current_guidance_module="family",
+    )
+
+    _, ai_client, _, completed = await _run_stream_turn(
+        test_db,
+        voice_session_id=created["session"]["id"],
+        user_id=created["user_id"],
+        chunks=["现在已经有两条讲述了，我们接着把过年的厨房讲具体一点。那天是谁先开始忙的？"],
+    )
+
+    prompt = ai_client.calls[0]["user_prompt"]
+    assert completed["progress_update_used"] is True
+    assert completed["progress_update"]["kind"] == "project_progress_snapshot"
+    assert completed["progress_update"]["valid_utterance_count"] == 2
+    assert "当前项目进度：2 条讲述记录，0 条已收入章节，2 条待整理" in prompt
+    assert "本轮可选进度鼓励：这个项目已经留下 2 条讲述记录，接下来可以慢慢整理成章节。" in prompt
 
 
 async def test_voice_assistant_turn_progress_prompt_uses_recent_automation_event(
