@@ -1,8 +1,15 @@
 from __future__ import annotations
 
+from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domain.memoir.types import MemoirAutomationEventStatus, MemoirAutomationEventType
+from app.domain.memoir.types import (
+    MemoirAutomationEventStatus,
+    MemoirAutomationEventType,
+    MemoirEditingJobStatus,
+)
+from app.models.memoir import MemoirEditingJob
+from app.models.projects import Project
 from app.schemas.memoir_book import (
     MemoirBookPlanResponse,
     MemoirBookSourceAssignmentInput,
@@ -15,6 +22,7 @@ from app.schemas.memoir_book import (
 from app.schemas.memoir_voice import MemoirAutomationEventResponse
 from app.services.memoir import automation_events
 from app.services.memoir import book_plans
+from app.services.memoir.editing_jobs import EditingJobResult
 from app.services.memoir import source_router
 
 
@@ -123,33 +131,82 @@ async def _record_assignment_events(
     return responses
 
 
-async def run_source_auto_assignment(
+async def _record_held_events(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    routes: list[MemoirBookSourceRouteResponse],
+    threshold: float,
+) -> list[MemoirAutomationEventResponse]:
+    responses: list[MemoirAutomationEventResponse] = []
+    for route in routes:
+        if _route_is_assignable(route, threshold=threshold):
+            continue
+        title = route.target_chapter_title or route.suggested_title or "待确认章节"
+        if route.action == "suggest_new_chapter":
+            summary = f"1 条讲述可能是新话题，建议确认是否新建「{title}」。"
+        elif route.action == "assign_to_chapter":
+            summary = f"1 条讲述可能属于「{title}」，但相似度还不够，需要确认。"
+        else:
+            summary = "1 条讲述暂未自动收入章节，需要确认归属。"
+        event = await automation_events.record_automation_event(
+            db,
+            project_id=project_id,
+            event_type=MemoirAutomationEventType.SOURCE_HELD,
+            status=MemoirAutomationEventStatus.NEEDS_REVIEW,
+            chapter_id=route.target_chapter_id,
+            utterance_ids=[route.utterance_id],
+            summary_text=summary,
+            confidence=route.confidence,
+            metadata_json={
+                "source": "auto_assignment",
+                "confidence_threshold": threshold,
+                "route": {
+                    "utterance_id": route.utterance_id,
+                    "source_index": route.source_index,
+                    "action": route.action,
+                    "target_chapter_id": route.target_chapter_id,
+                    "target_chapter_title": route.target_chapter_title,
+                    "suggested_title": route.suggested_title,
+                    "confidence": route.confidence,
+                    "reason": route.reason,
+                },
+            },
+        )
+        responses.append(automation_events.event_response(event))
+    await db.commit()
+    return responses
+
+
+async def run_source_auto_assignment_for_utterances(
     db: AsyncSession,
     *,
     user_id: str,
     project_id: str,
-    req: MemoirBookSourceAutoAssignmentRunRequest,
+    utterance_ids: list[str],
+    ai_model: str | None = None,
+    confidence_threshold: float = 0.53,
+    record_held_events: bool = True,
 ) -> MemoirBookSourceAutoAssignmentRunResponse:
-    coverage = await book_plans.get_book_source_coverage(db, user_id=user_id, project_id=project_id)
     routes: list[MemoirBookSourceRouteResponse] = []
-    for source in coverage.uncovered_sources[: req.max_sources]:
+    for utterance_id in dict.fromkeys(item.strip() for item in utterance_ids if item.strip()):
         routes.append(
             await source_router.route_book_source(
                 db,
                 user_id=user_id,
                 project_id=project_id,
-                utterance_id=source.utterance_id,
+                utterance_id=utterance_id,
             )
         )
 
-    assignment_inputs = _group_assignment_inputs(routes, threshold=req.confidence_threshold)
+    assignment_inputs = _group_assignment_inputs(routes, threshold=confidence_threshold)
     if assignment_inputs:
         plan = await book_plans.assign_book_sources_to_chapters(
             db,
             user_id=user_id,
             project_id=project_id,
             req=MemoirBookSourceAssignmentRequest(
-                ai_model=req.ai_model,
+                ai_model=ai_model,
                 assignments=assignment_inputs,
             ),
         )
@@ -158,11 +215,21 @@ async def run_source_auto_assignment(
             project_id=project_id,
             routes=routes,
             plan=plan,
-            threshold=req.confidence_threshold,
+            threshold=confidence_threshold,
         )
     else:
         plan = await book_plans.get_book_plan(db, user_id=user_id, project_id=project_id)
         events = []
+
+    if record_held_events:
+        events.extend(
+            await _record_held_events(
+                db,
+                project_id=project_id,
+                routes=routes,
+                threshold=confidence_threshold,
+            )
+        )
 
     assigned_ids = {
         utterance_id
@@ -178,11 +245,73 @@ async def run_source_auto_assignment(
     ]
     return MemoirBookSourceAutoAssignmentRunResponse(
         project_id=project_id,
-        confidence_threshold=req.confidence_threshold,
+        confidence_threshold=confidence_threshold,
         evaluated_source_count=len(routes),
         assigned_source_count=len(assigned_ids),
         skipped_source_count=len(routes) - len(assigned_ids),
         items=items,
         events=events,
         plan=plan,
+    )
+
+
+async def run_source_routing_job(db: AsyncSession, job: MemoirEditingJob) -> EditingJobResult:
+    project = await db.get(Project, job.project_id)
+    if not project or not project.user_id:
+        return EditingJobResult(status=MemoirEditingJobStatus.SKIPPED, error_message="project unavailable")
+    payload = job.payload_json or {}
+    raw_utterance_ids = payload.get("utterance_ids", [])
+    if not isinstance(raw_utterance_ids, list):
+        raw_utterance_ids = []
+    utterance_ids = [
+        item
+        for item in raw_utterance_ids
+        if isinstance(item, str) and item.strip()
+    ]
+    if not utterance_ids:
+        return EditingJobResult(status=MemoirEditingJobStatus.SKIPPED, error_message="empty utterance_ids")
+    raw_threshold = payload.get("confidence_threshold")
+    try:
+        confidence_threshold = float(raw_threshold if raw_threshold is not None else 0.53)
+    except (TypeError, ValueError):
+        confidence_threshold = 0.53
+    try:
+        response = await run_source_auto_assignment_for_utterances(
+            db,
+            user_id=project.user_id,
+            project_id=job.project_id,
+            utterance_ids=utterance_ids,
+            ai_model=payload.get("ai_model") if isinstance(payload.get("ai_model"), str) else None,
+            confidence_threshold=confidence_threshold,
+        )
+    except HTTPException as exc:
+        if exc.status_code in {400, 404}:
+            return EditingJobResult(status=MemoirEditingJobStatus.SKIPPED, error_message=str(exc.detail))
+        raise
+    return EditingJobResult(
+        result_json={
+            "evaluated_source_count": response.evaluated_source_count,
+            "assigned_source_count": response.assigned_source_count,
+            "skipped_source_count": response.skipped_source_count,
+            "event_ids": [event.id for event in response.events],
+        },
+    )
+
+
+async def run_source_auto_assignment(
+    db: AsyncSession,
+    *,
+    user_id: str,
+    project_id: str,
+    req: MemoirBookSourceAutoAssignmentRunRequest,
+) -> MemoirBookSourceAutoAssignmentRunResponse:
+    coverage = await book_plans.get_book_source_coverage(db, user_id=user_id, project_id=project_id)
+    return await run_source_auto_assignment_for_utterances(
+        db,
+        user_id=user_id,
+        project_id=project_id,
+        utterance_ids=[source.utterance_id for source in coverage.uncovered_sources[: req.max_sources]],
+        ai_model=req.ai_model,
+        confidence_threshold=req.confidence_threshold,
+        record_held_events=False,
     )
