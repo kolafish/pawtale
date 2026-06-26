@@ -5,13 +5,19 @@ const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
 
-const { ASR_CORRECTION_RULES_CONFIG } = require("../services/asr-correction-rules.ts");
+const { ASR_CORRECTION_RULES_CONFIG } = require("../services/asr-correction-rules-runtime.ts");
 const { normalizeMemoirAsrText } = require("../services/asr-text-normalization.ts");
 
 test("ASR correction rules stay in sync across backend and miniprogram", () => {
+  const backendRules = require("../../backend/app/services/memoir/asr_correction_rules.json");
+  const miniprogramRules = require("../services/asr-correction-rules.json");
   assert.deepEqual(
-    require("../../backend/app/services/memoir/asr_correction_rules.json"),
+    miniprogramRules,
+    backendRules,
+  );
+  assert.deepEqual(
     ASR_CORRECTION_RULES_CONFIG,
+    miniprogramRules,
   );
 });
 
