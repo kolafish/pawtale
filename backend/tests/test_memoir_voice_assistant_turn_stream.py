@@ -269,6 +269,45 @@ async def test_voice_assistant_turn_progress_prompt_uses_recent_automation_event
     )
     assert assistant_message.metadata_json["progress_update"]["kind"] == "automation_event"
     assert assistant_message.metadata_json["progress_automation_event_ids"] == [event.id]
+    await test_db.refresh(event)
+    assert event.metadata_json[automation_events.VOICE_ANNOUNCED_SESSION_ID_KEY] == created["session"]["id"]
+    assert event.metadata_json[automation_events.VOICE_ANNOUNCED_MESSAGE_ID_KEY] == completed["message_id"]
+
+
+async def test_voice_assistant_turn_skips_voice_announced_automation_event(
+    client,
+    test_db,
+):
+    created = await create_test_voice_transcript(
+        client,
+        test_db,
+        text="我小时候常在外婆家院子里摘菜。",
+        guidance_mode="guided_interview",
+        current_guidance_module="family",
+    )
+    await automation_events.record_automation_event(
+        test_db,
+        project_id=created["session"]["project_id"],
+        event_type=MemoirAutomationEventType.CHAPTER_AUTO_REVISED,
+        utterance_ids=[created["utterance_id"]],
+        summary_text="这条自动补写记录不应该重复播报。",
+        metadata_json={
+            automation_events.VOICE_ANNOUNCED_AT_KEY: "2026-06-23T12:00:00+00:00",
+            automation_events.VOICE_ANNOUNCED_SESSION_ID_KEY: "previous-session",
+        },
+    )
+    await test_db.commit()
+
+    _, ai_client, _, completed = await _run_stream_turn(
+        test_db,
+        voice_session_id=created["session"]["id"],
+        user_id=created["user_id"],
+        chunks=["那我们继续聊外婆家的院子。院子里最热闹的时候通常是什么时候？"],
+    )
+
+    prompt = ai_client.calls[0]["user_prompt"]
+    assert "这条自动补写记录不应该重复播报" not in prompt
+    assert completed["progress_update"]["kind"] != "automation_event"
 
 
 async def test_voice_assistant_turn_progress_prompt_uses_book_quality_audit_hint(

@@ -62,6 +62,7 @@
           <text class="automation-item-status">{{item.statusText}}</text>
         </view>
         <text class="automation-item-summary">{{item.summaryText}}</text>
+        <text wx:if="{{item.detailText}}" class="automation-item-detail">{{item.detailText}}</text>
         <text class="automation-item-meta">{{item.metaText}}</text>
       </view>
       <button

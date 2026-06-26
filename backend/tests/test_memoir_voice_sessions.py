@@ -352,7 +352,7 @@ async def test_mobile_memoir_project_progress_snapshot_counts_book_state(client,
         status=MemoirBookChapterDraftStatus.CONFIRMED,
         content="外婆家的院子里有一棵树。",
     )
-    await automation_events.record_automation_event(
+    event = await automation_events.record_automation_event(
         test_db,
         project_id=first["session"]["project_id"],
         event_type=MemoirAutomationEventType.SOURCE_ASSIGNED,
@@ -361,6 +361,10 @@ async def test_mobile_memoir_project_progress_snapshot_counts_book_state(client,
         summary_text="1 条讲述已整理进外婆家的童年。",
         confidence=0.9,
     )
+    event.metadata_json = {
+        automation_events.VOICE_ANNOUNCED_AT_KEY: "2026-06-23T12:00:00+00:00",
+        automation_events.VOICE_ANNOUNCED_SESSION_ID_KEY: "voice-session-1",
+    }
     await test_db.commit()
 
     response = await client.get(
@@ -392,6 +396,7 @@ async def test_mobile_memoir_project_progress_snapshot_counts_book_state(client,
     assert snapshot["recent_automation_events"][0]["event_type"] == "source_assigned"
     assert snapshot["recent_automation_events"][0]["utterance_ids"] == [first["utterance_id"]]
     assert snapshot["recent_automation_events"][0]["summary_text"] == "1 条讲述已整理进外婆家的童年。"
+    assert snapshot["recent_automation_events"][0]["metadata_json"]["voice_announced_session_id"] == "voice-session-1"
 
     progress_response = await client.get(
         f"/api/mobile/memoir/voice-progress?project_id={first['session']['project_id']}"

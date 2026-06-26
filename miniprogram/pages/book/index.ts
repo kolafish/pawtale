@@ -113,6 +113,7 @@ export {
   bookVoiceCommandActionText,
   bookProgressText,
   bookSourceCoverageNotice,
+  buildAutomationEventViews,
   buildChapterPickerOptions,
   buildChapterViews,
   buildSourceActionPickerOptions,

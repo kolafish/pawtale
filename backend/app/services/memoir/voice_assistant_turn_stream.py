@@ -15,6 +15,7 @@ from app.domain.memoir.types import MemoirChatContentStatus, MemoirChatMessageRo
 from app.models.memoir import MemoirChatMessage, MemoirVoiceSession
 from app.services.ai_factory import get_ai_service
 from app.services.ai_types import AITextClient
+from app.services.memoir import automation_events
 from app.services.memoir import progress_snapshot
 from app.services.memoir.audio_files import StagedAudioFile, discard_staged_audio, stage_audio_bytes
 from app.services.memoir.tts_alignment import alignment_segments_to_json
@@ -283,6 +284,7 @@ class VoiceAssistantTurnStreamSession:
                 self.db,
                 user_id=self.user_id,
                 project_id=voice_session.project_id,
+                voice_unannounced_events_only=True,
             )
         )
         prompt = _build_stream_turn_prompt(
@@ -333,6 +335,14 @@ class VoiceAssistantTurnStreamSession:
             max_tokens=max_tokens,
             req=req,
             progress_context=project_progress_context,
+        )
+        await automation_events.mark_automation_events_voice_announced(
+            self.db,
+            user_id=self.user_id,
+            project_id=voice_session.project_id,
+            event_ids=project_progress_context.automation_event_ids or [],
+            voice_session_id=voice_session.id,
+            message_id=message.id,
         )
         await self.client.send_json(
             {
