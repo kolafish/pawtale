@@ -2,11 +2,10 @@ from sqlalchemy import select
 
 from app.domain.memoir.types import (
     MemoirAutomationEventType,
-    MemoirBookAutoRevisionJobStatus,
     MemoirEditingJobStatus,
     MemoirEditingJobType,
 )
-from app.models.memoir import MemoirAutomationEvent, MemoirBookAutoRevisionJob
+from app.models.memoir import MemoirAutomationEvent, MemoirEditingJob
 from app.services.memoir.editing_job_handlers import register_memoir_editing_job_handlers
 from app.services.memoir.editing_jobs import clear_editing_job_handlers, enqueue_editing_job, run_editing_job
 from tests.memoir_helpers import (
@@ -83,12 +82,13 @@ async def test_source_auto_assignment_assigns_high_confidence_source_and_records
     assert event.metadata_json["confidence_threshold"] == 0.53
 
     job = await test_db.scalar(
-        select(MemoirBookAutoRevisionJob).where(MemoirBookAutoRevisionJob.chapter_id == chapter.id)
+        select(MemoirEditingJob).where(MemoirEditingJob.chapter_id == chapter.id)
     )
     assert job is not None
-    assert job.status == MemoirBookAutoRevisionJobStatus.PENDING.value
-    assert job.metadata_json["pending_source_utterance_ids"] == [uncovered["utterance_id"]]
-    assert job.metadata_json["ai_model"] == "deepseek-v4-pro"
+    assert job.job_type == MemoirEditingJobType.REVISE_CHAPTER.value
+    assert job.status == MemoirEditingJobStatus.PENDING.value
+    assert job.payload_json["pending_source_utterance_ids"] == [uncovered["utterance_id"]]
+    assert job.payload_json["ai_model"] == "deepseek-v4-pro"
 
 
 async def test_source_routing_job_assigns_high_confidence_source(client, test_db):
