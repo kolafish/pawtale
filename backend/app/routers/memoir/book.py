@@ -22,6 +22,11 @@ from app.schemas.memoir_book import (
     MemoirBookSourceAssignmentRequest,
     MemoirBookSourceCoverageResponse,
     MemoirBookSourceMoveRequest,
+    MemoirBookSourceReviewConfirmRequest,
+    MemoirBookSourceReviewConfirmResponse,
+    MemoirBookSourceReviewCreateRequest,
+    MemoirBookSourceReviewItemResponse,
+    MemoirBookSourceReviewListResponse,
     MemoirBookSourceRouteRequest,
     MemoirBookSourceRouteResponse,
     MemoirBookVoiceAssistantTTSRequest,
@@ -33,6 +38,7 @@ from app.schemas.memoir_book import (
 from app.services.memoir import book_drafts as memoir_book_drafts
 from app.services.memoir import book_outputs as memoir_book_outputs
 from app.services.memoir import book_plans as memoir_book_plans
+from app.services.memoir import source_review_queue as memoir_source_review_queue
 from app.services.memoir import source_router as memoir_source_router
 from app.services.memoir import book_voice_commands as memoir_book_voice_commands
 
@@ -207,6 +213,78 @@ async def dry_run_mobile_memoir_book_source_routing(
         user_id=current_user.id,
         project_id=project_id,
         utterance_id=req.utterance_id,
+    )
+
+
+@router.get("/projects/{project_id}/book-source-review-items", response_model=MemoirBookSourceReviewListResponse)
+async def list_mobile_memoir_book_source_review_items(
+    project_id: str,
+    include_resolved: bool = False,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await memoir_source_review_queue.list_source_review_items(
+        db,
+        user_id=current_user.id,
+        project_id=project_id,
+        include_resolved=include_resolved,
+    )
+
+
+@router.post(
+    "/projects/{project_id}/book-source-review-items",
+    response_model=MemoirBookSourceReviewItemResponse,
+    status_code=201,
+)
+async def create_mobile_memoir_book_source_review_item(
+    project_id: str,
+    req: MemoirBookSourceReviewCreateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await memoir_source_review_queue.create_source_review_item(
+        db,
+        user_id=current_user.id,
+        project_id=project_id,
+        utterance_id=req.utterance_id,
+    )
+
+
+@router.post(
+    "/projects/{project_id}/book-source-review-items/{event_id}/confirm",
+    response_model=MemoirBookSourceReviewConfirmResponse,
+)
+async def confirm_mobile_memoir_book_source_review_item(
+    project_id: str,
+    event_id: str,
+    req: MemoirBookSourceReviewConfirmRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await memoir_source_review_queue.confirm_source_review_item(
+        db,
+        user_id=current_user.id,
+        project_id=project_id,
+        event_id=event_id,
+        req=req,
+    )
+
+
+@router.post(
+    "/projects/{project_id}/book-source-review-items/{event_id}/ignore",
+    response_model=MemoirBookSourceReviewItemResponse,
+)
+async def ignore_mobile_memoir_book_source_review_item(
+    project_id: str,
+    event_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await memoir_source_review_queue.ignore_source_review_item(
+        db,
+        user_id=current_user.id,
+        project_id=project_id,
+        event_id=event_id,
     )
 
 
