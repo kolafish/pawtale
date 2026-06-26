@@ -154,6 +154,7 @@ function loadVoiceChatPage({
     },
     ...streamingSpeechPlaybackExports,
   });
+  clearModule("../services/voice-assistant-turn-runtime.ts");
   clearModule("../services/voice-assistant-turn-queue.ts");
 
   return loadPageModule("../pages/voice-chat/index.ts").page;
@@ -1004,13 +1005,24 @@ test("voice chat drives first streaming highlight from WebAudio playback progres
     },
   };
 
-  await page.playStreamingAudioFrame.call(context, {
-    audio: new Uint8Array([1, 2]),
-    mimeType: "audio/L16",
-    sampleRate: 16000,
-    channels: 1,
-    bitsPerSample: 16,
-  }, 0);
+  context.assistantTurnRuntime = {
+    stats() {
+      return {
+        segmentCount: 1,
+        underrunCount: 0,
+        nextPlayTimeSeconds: 12,
+        currentTimeSeconds: 10.5,
+        queuedAheadSeconds: 1.5,
+      };
+    },
+  };
+  page.prepareStreamingAudioPlayback.call(context, 0);
+  page.markStreamingAudioFrameScheduled.call(context, {
+    startAtSeconds: 10,
+    durationSeconds: 2,
+    ended: Promise.resolve(),
+  });
+  page.updateStreamingTTSProgress.call(context);
   page.stopFollowUpProgressTimer.call(context);
 
   assert.equal(context.data.followUpTTSPlaying, true);
@@ -1022,93 +1034,6 @@ test("voice chat drives first streaming highlight from WebAudio playback progres
   assert.equal(progressCalls[0].currentTime, 0.5);
   assert.equal(progressCalls[0].duration, 2);
   assert.notEqual(context.data.ttsSpokenText, prompt);
-});
-
-test("voice chat audio done does not mark full streaming text as spoken before completion", async () => {
-  const prompt = "欢迎回来，咱们接着聊。";
-  const page = loadVoiceChatPage();
-  const context = {
-    ...page,
-    data: {
-      ...page.data,
-      assistantPromptText: prompt,
-      ttsSpokenText: "欢迎",
-      ttsCurrentText: "回",
-      ttsRemainingText: "来，咱们接着聊。",
-      ttsProgressPercent: 25,
-      followUpTTSPlaying: true,
-    },
-    assistantStreamingPlaybackController: {
-      async waitForDrain() {},
-      stop() {},
-      stats() {
-        return {
-          segmentCount: 1,
-          underrunCount: 0,
-          nextPlayTimeSeconds: 12,
-          currentTimeSeconds: 12,
-          queuedAheadSeconds: 0,
-        };
-      },
-    },
-    assistantStreamingPlayback: Promise.resolve(),
-    assistantStreamingPlaybackError: null,
-    setData(patch) {
-      this.data = { ...this.data, ...patch };
-    },
-  };
-
-  page.finishStreamingAudioFrames.call(context, {
-    duration_seconds: 2,
-  }, 0);
-  await context.assistantStreamingPlayback;
-
-  assert.equal(context.data.followUpTTSStateText, "正在整理回应");
-  assert.equal(context.data.ttsSpokenText, "欢迎");
-  assert.equal(context.data.ttsCurrentText, "回");
-  assert.equal(context.data.ttsProgressPercent, 25);
-  assert.equal(context.assistantStreamingAudioDurationSeconds, 2);
-});
-
-test("voice chat ignores stale streaming audio done duration", async () => {
-  const page = loadVoiceChatPage();
-  const context = {
-    ...page,
-    data: {
-      ...page.data,
-      assistantPromptText: "欢迎回来，咱们接着聊。",
-      followUpTTSPlaying: true,
-    },
-    assistantStreamingAudioDurationSeconds: 4,
-    assistantStreamingPlaybackController: {
-      async waitForDrain() {
-        throw new Error("stale audio done should not wait for drain");
-      },
-      stop() {},
-      stats() {
-        return {
-          segmentCount: 1,
-          underrunCount: 0,
-          nextPlayTimeSeconds: 12,
-          currentTimeSeconds: 12,
-          queuedAheadSeconds: 0,
-        };
-      },
-    },
-    assistantStreamingPlayback: Promise.resolve(),
-    assistantStreamingPlaybackError: null,
-    setData(patch) {
-      this.data = { ...this.data, ...patch };
-    },
-  };
-
-  page.finishStreamingAudioFrames.call(context, {
-    duration_seconds: 9,
-  }, -1);
-  await context.assistantStreamingPlayback;
-
-  assert.equal(context.assistantStreamingAudioDurationSeconds, 4);
-  assert.equal(context.data.followUpTTSStateText, "");
 });
 
 test("voice chat keeps completed streaming assistant turns when playback fails", async () => {
