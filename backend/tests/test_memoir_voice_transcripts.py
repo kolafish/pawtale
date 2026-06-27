@@ -4,6 +4,8 @@ from pathlib import Path
 from sqlalchemy import select
 
 from app.domain.memoir.types import (
+    MemoirAutomationEventStatus,
+    MemoirAutomationEventType,
     MemoirBookChapterDraftStatus,
     MemoirBookPlanStatus,
     MemoirChatContentStatus,
@@ -13,6 +15,7 @@ from app.domain.memoir.types import (
 )
 from app.models.memoir import (
     AudioFile,
+    MemoirAutomationEvent,
     MemoirBookChapterDraft,
     MemoirBookChapterDraftVersion,
     MemoirBookPlan,
@@ -21,6 +24,7 @@ from app.models.memoir import (
     MemoirTranscriptVersion,
     MemoirVoiceUtterance,
 )
+from app.services.memoir import automation_events
 from app.services.memoir.asr_text_normalization import normalize_memoir_asr_text
 from app.services.memoir.voice_transcripts import (
     MemoirTranscriptCleanupContext,
@@ -368,6 +372,149 @@ async def test_mobile_memoir_deletes_voice_transcript_and_user_message(client, t
     assert progress["total_user_char_count"] == 0
     assert progress["total_audio_seconds"] == 0
     assert progress["modules"] == []
+
+
+async def test_mobile_memoir_delete_transcript_hides_related_automation_events(client, test_db):
+    deleted_source = await create_test_voice_transcript(
+        client,
+        test_db,
+        text="我小时候常在外婆家的院子里晒太阳。",
+    )
+    kept_source = await create_test_voice_transcript(
+        client,
+        test_db,
+        text="后来我第一次离家去县城读书。",
+    )
+    project_id = deleted_source["session"]["project_id"]
+    held_event = MemoirAutomationEvent(
+        project_id=project_id,
+        event_type=MemoirAutomationEventType.SOURCE_HELD.value,
+        status=MemoirAutomationEventStatus.NEEDS_REVIEW.value,
+        utterance_ids_json=[deleted_source["utterance_id"]],
+        summary_text="1 条讲述需要确认归属。",
+        metadata_json={
+            "route": {
+                "utterance_id": deleted_source["utterance_id"],
+                "action": "hold_for_review",
+                "reason": "需要人工确认",
+            }
+        },
+    )
+    assigned_event = MemoirAutomationEvent(
+        project_id=project_id,
+        event_type=MemoirAutomationEventType.SOURCE_ASSIGNED.value,
+        status=MemoirAutomationEventStatus.COMPLETED.value,
+        utterance_ids_json=[kept_source["utterance_id"]],
+        summary_text="1 条讲述已自动整理进「离家读书」。",
+        metadata_json={"routes": [{"utterance_id": kept_source["utterance_id"]}]},
+    )
+    test_db.add_all([held_event, assigned_event])
+    await test_db.commit()
+
+    response = await client.delete(f"/api/mobile/memoir/voice-transcripts/{deleted_source['utterance_id']}")
+
+    assert response.status_code == 204
+    refreshed_held = await test_db.scalar(
+        select(MemoirAutomationEvent).where(MemoirAutomationEvent.id == held_event.id)
+    )
+    assert refreshed_held.status == MemoirAutomationEventStatus.COMPLETED.value
+    assert refreshed_held.utterance_ids_json == []
+    assert refreshed_held.metadata_json["resolution"] == "ignored"
+    assert refreshed_held.metadata_json["resolution_reason"] == "source_deleted"
+    assert refreshed_held.metadata_json["deleted_utterance_ids"] == [deleted_source["utterance_id"]]
+
+    events_response = await client.get(f"/api/mobile/memoir/projects/{project_id}/automation-events")
+    assert events_response.status_code == 200
+    event_data = events_response.json()
+    assert event_data["total"] == 1
+    assert event_data["items"][0]["id"] == assigned_event.id
+
+
+async def test_cleanup_dangling_automation_events_hides_deleted_sources_and_keeps_valid_refs(client, test_db):
+    created = await create_test_voice_transcript(
+        client,
+        test_db,
+        text="我小时候常在外婆家的院子里晒太阳。",
+    )
+    project_id = created["session"]["project_id"]
+    deleted_utterance_id = "deleted-utterance-id"
+    partial_event = MemoirAutomationEvent(
+        project_id=project_id,
+        event_type=MemoirAutomationEventType.SOURCE_ASSIGNED.value,
+        status=MemoirAutomationEventStatus.COMPLETED.value,
+        utterance_ids_json=[created["utterance_id"], deleted_utterance_id],
+        summary_text="2 条讲述已自动整理进「院子里的童年」。",
+        metadata_json={
+            "routes": [
+                {"utterance_id": created["utterance_id"], "reason": "同一主题"},
+                {"utterance_id": deleted_utterance_id, "reason": "已删除"},
+            ]
+        },
+    )
+    dangling_event = MemoirAutomationEvent(
+        project_id=project_id,
+        event_type=MemoirAutomationEventType.SOURCE_HELD.value,
+        status=MemoirAutomationEventStatus.NEEDS_REVIEW.value,
+        utterance_ids_json=[deleted_utterance_id],
+        summary_text="1 条讲述需要确认归属。",
+        metadata_json={"route": {"utterance_id": deleted_utterance_id}},
+    )
+    confirmed_event = MemoirAutomationEvent(
+        project_id=project_id,
+        event_type=MemoirAutomationEventType.SOURCE_HELD.value,
+        status=MemoirAutomationEventStatus.COMPLETED.value,
+        utterance_ids_json=[deleted_utterance_id],
+        summary_text="整理建议已处理。",
+        metadata_json={
+            "route": {"utterance_id": deleted_utterance_id},
+            "resolution": "confirmed",
+            "resolved_at": "2026-06-20T12:00:00+00:00",
+        },
+    )
+    test_db.add_all([partial_event, dangling_event, confirmed_event])
+    await test_db.commit()
+
+    result = await automation_events.cleanup_dangling_automation_event_utterances(
+        test_db,
+        project_id=project_id,
+    )
+    await test_db.commit()
+
+    assert result.updated_event_count == 3
+    assert result.deleted_utterance_ids == [deleted_utterance_id]
+
+    refreshed_partial = await test_db.scalar(
+        select(MemoirAutomationEvent).where(MemoirAutomationEvent.id == partial_event.id)
+    )
+    assert refreshed_partial.utterance_ids_json == [created["utterance_id"]]
+    assert refreshed_partial.summary_text == "1 条讲述已自动整理进「院子里的童年」。"
+    assert refreshed_partial.metadata_json["deleted_utterance_ids"] == [deleted_utterance_id]
+    assert refreshed_partial.metadata_json["routes"] == [
+        {"utterance_id": created["utterance_id"], "reason": "同一主题"}
+    ]
+    assert "resolution" not in refreshed_partial.metadata_json
+
+    refreshed_dangling = await test_db.scalar(
+        select(MemoirAutomationEvent).where(MemoirAutomationEvent.id == dangling_event.id)
+    )
+    assert refreshed_dangling.status == MemoirAutomationEventStatus.COMPLETED.value
+    assert refreshed_dangling.utterance_ids_json == []
+    assert refreshed_dangling.metadata_json["resolution"] == "ignored"
+    assert refreshed_dangling.metadata_json["resolution_reason"] == "source_deleted"
+
+    refreshed_confirmed = await test_db.scalar(
+        select(MemoirAutomationEvent).where(MemoirAutomationEvent.id == confirmed_event.id)
+    )
+    assert refreshed_confirmed.utterance_ids_json == []
+    assert refreshed_confirmed.metadata_json["resolution"] == "confirmed"
+    assert "resolution_reason" not in refreshed_confirmed.metadata_json
+
+    events_response = await client.get(f"/api/mobile/memoir/projects/{project_id}/automation-events")
+    assert events_response.status_code == 200
+    event_data = events_response.json()
+    assert event_data["total"] == 1
+    assert event_data["items"][0]["id"] == partial_event.id
+    assert event_data["items"][0]["utterance_ids"] == [created["utterance_id"]]
 
 
 async def test_mobile_memoir_lists_book_inclusion_for_voice_transcripts(client, test_db):
