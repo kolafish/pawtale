@@ -3,12 +3,15 @@ import json
 from sqlalchemy import select
 
 from app.domain.memoir.types import (
+    MemoirAutomationEventStatus,
+    MemoirAutomationEventType,
     MemoirBookChapterDraftStatus,
     MemoirCreatedBy,
     MemoirEditingJobStatus,
     MemoirEditingJobType,
 )
 from app.models.memoir import (
+    MemoirAutomationEvent,
     MemoirBookChapterDraft,
     MemoirBookChapterDraftVersion,
     MemoirEditingJob,
@@ -83,6 +86,34 @@ class FakeChapterTitleAI:
             }
         )
         return json.dumps({"title": "外婆院中的日子"}, ensure_ascii=False)
+
+
+async def _create_source_held_event(test_db, *, project_id: str, utterance_id: str) -> MemoirAutomationEvent:
+    event = MemoirAutomationEvent(
+        project_id=project_id,
+        event_type=MemoirAutomationEventType.SOURCE_HELD.value,
+        status=MemoirAutomationEventStatus.NEEDS_REVIEW.value,
+        utterance_ids_json=[utterance_id],
+        summary_text="1 条讲述暂未自动收入章节，需要确认归属。",
+        metadata_json={
+            "route": {
+                "utterance_id": utterance_id,
+                "action": "suggest_new_chapter",
+                "suggested_title": "待整理讲述",
+            }
+        },
+    )
+    test_db.add(event)
+    await test_db.commit()
+    return event
+
+
+async def _assert_source_held_event_resolved(test_db, event_id: str, *, chapter_title: str) -> None:
+    event = await test_db.get(MemoirAutomationEvent, event_id)
+    assert event.status == MemoirAutomationEventStatus.COMPLETED.value
+    assert event.metadata_json["resolution"] == "confirmed"
+    assert event.metadata_json["resolution_reason"] == "source_assigned"
+    assert event.metadata_json["resolved_chapter_title"] == chapter_title
 
 
 def test_chapter_title_prompt_uses_all_source_digests_without_current_title():
@@ -228,6 +259,11 @@ async def test_mobile_memoir_book_plan_generate_saves_source_bound_chapters(
     first = await create_test_voice_transcript(client, test_db, "我小时候常在外婆家的院子里晒太阳。")
     second = await create_test_voice_transcript(client, test_db, "后来我第一次离家去县城读书，心里很紧张。")
     project_id = first["session"]["project_id"]
+    held_event = await _create_source_held_event(
+        test_db,
+        project_id=project_id,
+        utterance_id=first["utterance_id"],
+    )
     fake_ai = FakeBookPlanAI()
     monkeypatch.setattr(
         "app.services.memoir.book_plan_ai.get_ai_service",
@@ -257,6 +293,8 @@ async def test_mobile_memoir_book_plan_generate_saves_source_bound_chapters(
     assert "不新增人物、时间、地点、事件或情绪" in fake_ai.calls[0]["user_prompt"]
     assert '"summary"' not in fake_ai.calls[0]["user_prompt"]
     assert f"utterance_id: {first['utterance_id']}" in fake_ai.calls[0]["user_prompt"]
+    refreshed_held_event = await test_db.get(MemoirAutomationEvent, held_event.id)
+    assert refreshed_held_event.status == MemoirAutomationEventStatus.NEEDS_REVIEW.value
 
     stored_plan = await test_db.scalar(select(MemoirBookPlan).where(MemoirBookPlan.project_id == project_id))
     stored_chapters = (
@@ -297,6 +335,11 @@ async def test_mobile_memoir_book_plan_confirm_replaces_plan_with_user_chapters(
         json={},
     )
     source_ref = generated_response.json()["chapters"][0]["source_refs"][0]
+    held_event = await _create_source_held_event(
+        test_db,
+        project_id=project_id,
+        utterance_id=created["utterance_id"],
+    )
 
     response = await client.put(
         f"/api/mobile/memoir/projects/{project_id}/book-plan",
@@ -320,6 +363,7 @@ async def test_mobile_memoir_book_plan_confirm_replaces_plan_with_user_chapters(
     assert len(data["chapters"]) == 1
     assert data["chapters"][0]["title"] == "童年和外婆家"
     assert data["chapters"][0]["source_refs"][0]["utterance_id"] == created["utterance_id"]
+    await _assert_source_held_event_resolved(test_db, held_event.id, chapter_title="童年和外婆家")
 
     stored_chapters = (
         await test_db.execute(
@@ -440,6 +484,11 @@ async def test_mobile_memoir_book_source_assignment_appends_source_and_marks_dra
     test_db.add(version)
     await test_db.commit()
     later = await create_test_voice_transcript(client, test_db, "后来我又讲了第一次离家去县城读书。")
+    held_event = await _create_source_held_event(
+        test_db,
+        project_id=project_id,
+        utterance_id=later["utterance_id"],
+    )
 
     response = await client.post(
         f"/api/mobile/memoir/projects/{project_id}/book-source-assignments",
@@ -477,6 +526,7 @@ async def test_mobile_memoir_book_source_assignment_appends_source_and_marks_dra
     assert job.payload_json["base_version_id"] == version.id
     assert job.payload_json["pending_source_utterance_ids"] == [later["utterance_id"]]
     assert job.payload_json["ai_model"] == "deepseek-v4-pro"
+    await _assert_source_held_event_resolved(test_db, held_event.id, chapter_title="童年和外婆家")
 
     coverage = await client.get(f"/api/mobile/memoir/projects/{project_id}/book-source-coverage")
     assert coverage.status_code == 200
@@ -567,6 +617,11 @@ async def test_mobile_memoir_book_source_move_updates_only_source_and_target_cha
         project_id=project_id,
         chapter_id=target_chapter_id,
     )
+    held_event = await _create_source_held_event(
+        test_db,
+        project_id=project_id,
+        utterance_id=second["utterance_id"],
+    )
 
     response = await client.post(
         f"/api/mobile/memoir/projects/{project_id}/book-source-moves",
@@ -609,6 +664,7 @@ async def test_mobile_memoir_book_source_move_updates_only_source_and_target_cha
     assert refreshed_source_draft.metadata_json["status_reason"] == "sources_changed"
     assert refreshed_target_draft.status == MemoirBookChapterDraftStatus.DRAFT.value
     assert refreshed_target_draft.metadata_json["status_reason"] == "sources_changed"
+    await _assert_source_held_event_resolved(test_db, held_event.id, chapter_title="童年友情")
 
 
 async def test_mobile_memoir_book_source_move_rejects_last_source_in_chapter(
@@ -809,6 +865,11 @@ async def test_mobile_memoir_book_plan_structure_command_creates_and_deletes_sou
         json={"chapters": [{"title": "童年和外婆家", "source_refs": [memoir_source_ref(first)]}]},
     )
     assert confirm_response.status_code == 200
+    held_event = await _create_source_held_event(
+        test_db,
+        project_id=project_id,
+        utterance_id=later["utterance_id"],
+    )
 
     create_response = await client.post(
         f"/api/mobile/memoir/projects/{project_id}/book-plan/structure-commands",
@@ -819,6 +880,11 @@ async def test_mobile_memoir_book_plan_structure_command_creates_and_deletes_sou
     created_chapter = create_response.json()["chapters"][1]
     assert created_chapter["title"] == "后来我又讲了一个认识很多年的朋友"
     assert created_chapter["source_refs"][0]["utterance_id"] == later["utterance_id"]
+    await _assert_source_held_event_resolved(
+        test_db,
+        held_event.id,
+        chapter_title="后来我又讲了一个认识很多年的朋友",
+    )
 
     delete_response = await client.post(
         f"/api/mobile/memoir/projects/{project_id}/book-plan/structure-commands",
@@ -1037,6 +1103,11 @@ async def test_mobile_memoir_book_plan_patch_adds_chapter_from_uncovered_source(
     assert confirm_response.status_code == 200
     existing_chapter = confirm_response.json()["chapters"][0]
     later = await create_test_voice_transcript(client, test_db, "后来我又讲了一个认识很多年的朋友。")
+    held_event = await _create_source_held_event(
+        test_db,
+        project_id=project_id,
+        utterance_id=later["utterance_id"],
+    )
 
     response = await client.patch(
         f"/api/mobile/memoir/projects/{project_id}/book-plan",
@@ -1061,6 +1132,7 @@ async def test_mobile_memoir_book_plan_patch_adds_chapter_from_uncovered_source(
     assert data["chapters"][0]["id"] == existing_chapter["id"]
     assert data["chapters"][1]["id"] != existing_chapter["id"]
     assert data["chapters"][1]["source_refs"][0]["utterance_id"] == later["utterance_id"]
+    await _assert_source_held_event_resolved(test_db, held_event.id, chapter_title="朋友往事")
 
     coverage = await client.get(f"/api/mobile/memoir/projects/{project_id}/book-source-coverage")
     assert coverage.status_code == 200
