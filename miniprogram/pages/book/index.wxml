@@ -68,8 +68,10 @@
       <button
         class="automation-ack"
         data-id="{{item.id}}"
+        data-action="{{item.actionKind}}"
+        data-utterance-id="{{item.primaryUtteranceId}}"
         loading="{{item.busy}}"
-        disabled="{{item.busy || !item.canAcknowledge}}"
+        disabled="{{item.busy || !item.canAct}}"
         bindtap="acknowledgeAutomationEvent"
       >
         {{item.actionText}}

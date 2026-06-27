@@ -55,6 +55,8 @@ export interface BookChapterSourceView extends MemoirBookChapterSourceRef {
 export interface BookAutomationEventView {
   id: string;
   eventType: MemoirAutomationEvent["event_type"];
+  actionKind: "acknowledge" | "review_source" | "none";
+  primaryUtteranceId: string;
   titleText: string;
   summaryText: string;
   detailText: string;
@@ -62,6 +64,7 @@ export interface BookAutomationEventView {
   statusText: string;
   actionText: string;
   canAcknowledge: boolean;
+  canAct: boolean;
   busy: boolean;
 }
 
@@ -186,7 +189,7 @@ function automationEventTitle(event: MemoirAutomationEvent): string {
     return "已自动归章";
   }
   if (event.event_type === "source_held") {
-    return event.status === "needs_review" ? "需要确认整理" : "整理建议已处理";
+    return event.status === "needs_review" ? "待整理讲述" : "整理建议已处理";
   }
   if (event.event_type === "chapter_auto_revised") {
     return "已自动补写";
@@ -202,7 +205,7 @@ function automationEventKindText(event: MemoirAutomationEvent): string {
     return "归章";
   }
   if (event.event_type === "source_held") {
-    return "待确认";
+    return "待整理";
   }
   if (event.event_type === "chapter_auto_revised") {
     return "补写";
@@ -230,10 +233,13 @@ function automationEventActionText(event: MemoirAutomationEvent): string {
   if (event.status === "pending") {
     return "处理中";
   }
+  if (event.status === "needs_review" && event.event_type === "source_held") {
+    return "去整理";
+  }
   if (event.status === "needs_review") {
     return "待处理";
   }
-  return "确认";
+  return "知道了";
 }
 
 function objectValue(value: unknown): Record<string, unknown> {
@@ -271,6 +277,28 @@ function automationEventDetailText(event: MemoirAutomationEvent): string {
   return "";
 }
 
+function automationEventPrimaryUtteranceId(event: MemoirAutomationEvent): string {
+  const direct = event.utterance_ids.map((item) => trimText(item)).find(Boolean);
+  if (direct) {
+    return direct;
+  }
+  const metadata = objectValue(event.metadata_json);
+  const route = objectValue(metadata.route);
+  return stringValue(route.utterance_id);
+}
+
+function automationEventActionKind(event: MemoirAutomationEvent): BookAutomationEventView["actionKind"] {
+  if (event.status === "pending") {
+    return "none";
+  }
+  if (event.status === "needs_review") {
+    return event.event_type === "source_held" && automationEventPrimaryUtteranceId(event)
+      ? "review_source"
+      : "none";
+  }
+  return "acknowledge";
+}
+
 function automationEventMetaText(event: MemoirAutomationEvent): string {
   const parts = [
     automationEventKindText(event),
@@ -291,18 +319,24 @@ export function buildAutomationEventViews(
 ): BookAutomationEventView[] {
   return events
     .filter((event) => !event.metadata_json?.acknowledged_at)
-    .map((event) => ({
-      id: event.id,
-      eventType: event.event_type,
-      titleText: automationEventTitle(event),
-      summaryText: trimText(event.summary_text) || "AI 已完成一次自动处理。",
-      detailText: automationEventDetailText(event),
-      metaText: automationEventMetaText(event),
-      statusText: automationEventStatusText(event),
-      actionText: automationEventActionText(event),
-      canAcknowledge: event.status !== "pending" && event.status !== "needs_review",
-      busy: event.id === busyTarget,
-    }));
+    .map((event) => {
+      const actionKind = automationEventActionKind(event);
+      return {
+        id: event.id,
+        eventType: event.event_type,
+        actionKind,
+        primaryUtteranceId: automationEventPrimaryUtteranceId(event),
+        titleText: automationEventTitle(event),
+        summaryText: trimText(event.summary_text) || "AI 已完成一次自动处理。",
+        detailText: automationEventDetailText(event),
+        metaText: automationEventMetaText(event),
+        statusText: automationEventStatusText(event),
+        actionText: automationEventActionText(event),
+        canAcknowledge: actionKind === "acknowledge",
+        canAct: actionKind !== "none",
+        busy: event.id === busyTarget,
+      };
+    });
 }
 
 export function positiveFiniteSeconds(value: number | null | undefined): number {
