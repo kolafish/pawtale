@@ -335,7 +335,8 @@ class MemoirBookSourceRouteEvidence(BaseModel):
 
 
 class MemoirBookSourceRouteResponse(BaseModel):
-    action: Literal["assign_to_chapter", "suggest_new_chapter", "hold_for_review"]
+    material_type: Literal["memoir_content", "ai_interaction", "meta_instruction", "noise", "too_short"]
+    action: Literal["assign_to_chapter", "suggest_new_chapter", "hold_for_review", "ignore"]
     utterance_id: str
     source_index: int
     target_chapter_id: str | None = None
@@ -382,7 +383,8 @@ class MemoirBookSourceReviewItemResponse(BaseModel):
     status: MemoirAutomationEventStatus
     utterance_id: str
     source_index: int
-    route_action: Literal["assign_to_chapter", "suggest_new_chapter", "hold_for_review"]
+    material_type: Literal["memoir_content", "ai_interaction", "meta_instruction", "noise", "too_short"]
+    route_action: Literal["assign_to_chapter", "suggest_new_chapter", "hold_for_review", "ignore"]
     target_chapter_id: str | None = None
     target_chapter_title: str | None = None
     suggested_title: str | None = None
@@ -424,7 +426,8 @@ class MemoirBookSourceAutoAssignmentRunRequest(BaseModel):
 class MemoirBookSourceAutoAssignmentItemResponse(BaseModel):
     utterance_id: str
     source_index: int
-    action: Literal["assign_to_chapter", "suggest_new_chapter", "hold_for_review"]
+    material_type: Literal["memoir_content", "ai_interaction", "meta_instruction", "noise", "too_short"]
+    action: Literal["assign_to_chapter", "suggest_new_chapter", "hold_for_review", "ignore"]
     target_chapter_id: str | None = None
     target_chapter_title: str | None = None
     confidence: float | None = None

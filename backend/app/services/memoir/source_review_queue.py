@@ -26,7 +26,8 @@ from app.services.memoir.access import load_memoir_project
 
 
 SOURCE_REVIEW_EVENT_TYPE = MemoirAutomationEventType.SOURCE_HELD
-ROUTE_ACTIONS = {"assign_to_chapter", "suggest_new_chapter", "hold_for_review"}
+ROUTE_ACTIONS = {"assign_to_chapter", "suggest_new_chapter", "hold_for_review", "ignore"}
+MATERIAL_TYPES = {"memoir_content", "ai_interaction", "meta_instruction", "noise", "too_short"}
 
 
 def _utcnow_iso() -> str:
@@ -47,6 +48,16 @@ def _route_action(metadata: dict[str, object]) -> str:
     return action if isinstance(action, str) and action in ROUTE_ACTIONS else "hold_for_review"
 
 
+def _material_type(metadata: dict[str, object]) -> str:
+    material_type = metadata.get("material_type")
+    return material_type if isinstance(material_type, str) and material_type in MATERIAL_TYPES else "memoir_content"
+
+
+def _event_route_metadata(metadata: dict[str, object]) -> dict[str, object]:
+    route = metadata.get("route")
+    return route if isinstance(route, dict) else metadata
+
+
 def _evidence_items(metadata: dict[str, object]) -> list[MemoirBookSourceRouteEvidence]:
     evidence = metadata.get("evidence")
     if not isinstance(evidence, list):
@@ -64,25 +75,27 @@ def _evidence_items(metadata: dict[str, object]) -> list[MemoirBookSourceRouteEv
 
 def source_review_item_response(event: MemoirAutomationEvent) -> MemoirBookSourceReviewItemResponse:
     metadata = event.metadata_json or {}
+    route_metadata = _event_route_metadata(metadata)
     utterance_id = _event_utterance_id(event)
-    source_index = metadata.get("source_index")
-    target_chapter_title = metadata.get("target_chapter_title")
-    suggested_title = metadata.get("suggested_title")
-    reason = metadata.get("reason")
+    source_index = route_metadata.get("source_index")
+    target_chapter_title = route_metadata.get("target_chapter_title")
+    suggested_title = route_metadata.get("suggested_title")
+    reason = route_metadata.get("reason")
     return MemoirBookSourceReviewItemResponse(
         id=event.id,
         project_id=event.project_id,
         status=MemoirAutomationEventStatus(event.status),
         utterance_id=utterance_id,
         source_index=source_index if isinstance(source_index, int) else 0,
-        route_action=_route_action(metadata),
+        material_type=_material_type(route_metadata),
+        route_action=_route_action(route_metadata),
         target_chapter_id=event.chapter_id,
         target_chapter_title=target_chapter_title if isinstance(target_chapter_title, str) else None,
         suggested_title=suggested_title if isinstance(suggested_title, str) else None,
         confidence=event.confidence,
         reason=reason if isinstance(reason, str) else "",
         summary_text=event.summary_text,
-        evidence=_evidence_items(metadata),
+        evidence=_evidence_items(route_metadata),
         metadata_json=metadata,
         created_at=event.created_at,
         updated_at=event.updated_at,
@@ -94,12 +107,15 @@ def _route_summary(route: MemoirBookSourceRouteResponse) -> str:
         return f"建议将第 {route.source_index} 条讲述归入「{route.target_chapter_title}」。"
     if route.action == "suggest_new_chapter":
         return f"建议将第 {route.source_index} 条讲述作为新章节「{route.suggested_title or '新的章节'}」。"
+    if route.action == "ignore":
+        return f"第 {route.source_index} 条讲述不适合收入章节。"
     return f"第 {route.source_index} 条讲述需要确认归属。"
 
 
 def _route_metadata(route: MemoirBookSourceRouteResponse) -> dict[str, object]:
     return {
         "route_action": route.action,
+        "material_type": route.material_type,
         "utterance_id": route.utterance_id,
         "source_index": route.source_index,
         "target_chapter_title": route.target_chapter_title or "",
@@ -157,6 +173,8 @@ async def create_source_review_item(
         project_id=project_id,
         utterance_id=utterance_id,
     )
+    if route.action == "ignore":
+        raise HTTPException(status_code=400, detail="这条讲述不适合收入章节")
     existing = await _load_pending_review_for_utterance(db, project_id=project_id, utterance_id=utterance_id)
     if existing:
         existing.chapter_id = route.target_chapter_id
