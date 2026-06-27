@@ -48,11 +48,14 @@ def _auto_assignment_item(
     if not assigned:
         if route.action == "assign_to_chapter":
             skip_reason = "confidence_below_threshold"
+        elif route.action == "ignore":
+            skip_reason = "ignored_non_memoir_material"
         else:
             skip_reason = "not_existing_chapter_assignment"
     return MemoirBookSourceAutoAssignmentItemResponse(
         utterance_id=route.utterance_id,
         source_index=route.source_index,
+        material_type=route.material_type,
         action=route.action,
         target_chapter_id=route.target_chapter_id,
         target_chapter_title=route.target_chapter_title,
@@ -120,6 +123,7 @@ async def _record_assignment_events(
                     {
                         "utterance_id": route.utterance_id,
                         "source_index": route.source_index,
+                        "material_type": route.material_type,
                         "confidence": route.confidence,
                         "reason": route.reason,
                     }
@@ -143,11 +147,13 @@ async def _record_held_events(
     for route in routes:
         if _route_is_assignable(route, threshold=threshold):
             continue
+        if route.action == "ignore":
+            continue
         title = route.target_chapter_title or route.suggested_title or "待确认章节"
         if route.action == "suggest_new_chapter":
             summary = f"1 条讲述可能是新话题，建议确认是否新建「{title}」。"
         elif route.action == "assign_to_chapter":
-            summary = f"1 条讲述可能属于「{title}」，但相似度还不够，需要确认。"
+            summary = f"1 条讲述可能属于「{title}」，但判断把握还不够，需要确认。"
         else:
             summary = "1 条讲述暂未自动收入章节，需要确认归属。"
         event = await automation_events.record_automation_event(
@@ -165,12 +171,14 @@ async def _record_held_events(
                 "route": {
                     "utterance_id": route.utterance_id,
                     "source_index": route.source_index,
+                    "material_type": route.material_type,
                     "action": route.action,
                     "target_chapter_id": route.target_chapter_id,
                     "target_chapter_title": route.target_chapter_title,
                     "suggested_title": route.suggested_title,
                     "confidence": route.confidence,
                     "reason": route.reason,
+                    "evidence": [item.model_dump(mode="json") for item in route.evidence],
                 },
             },
         )
@@ -197,6 +205,7 @@ async def run_source_auto_assignment_for_utterances(
                 user_id=user_id,
                 project_id=project_id,
                 utterance_id=utterance_id,
+                ai_model=ai_model,
             )
         )
 
