@@ -8,8 +8,12 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domain.memoir.types import MemoirAutomationEventStatus, MemoirAutomationEventType
-from app.models.memoir import MemoirAutomationEvent, MemoirVoiceUtterance
+from app.domain.memoir.types import (
+    MemoirAutomationEventStatus,
+    MemoirAutomationEventType,
+    MemoirBookPlanStatus,
+)
+from app.models.memoir import MemoirAutomationEvent, MemoirBookPlan, MemoirBookPlanChapter, MemoirVoiceUtterance
 from app.models.projects import Project
 from app.schemas.memoir_voice import MemoirAutomationEventListResponse, MemoirAutomationEventResponse
 from app.services.memoir.access import load_memoir_project
@@ -19,8 +23,13 @@ ACKNOWLEDGED_BY_USER_KEY = "acknowledged_by_user"
 RESOLUTION_KEY = "resolution"
 RESOLUTION_REASON_KEY = "resolution_reason"
 SOURCE_DELETED_REASON = "source_deleted"
+SOURCE_ASSIGNED_REASON = "source_assigned"
 DELETED_UTTERANCE_IDS_KEY = "deleted_utterance_ids"
 SOURCE_DELETED_AT_KEY = "source_deleted_at"
+RESOLVED_AT_KEY = "resolved_at"
+RESOLVED_CHAPTER_ID_KEY = "resolved_chapter_id"
+RESOLVED_CHAPTER_TITLE_KEY = "resolved_chapter_title"
+RESOLVED_UTTERANCE_IDS_KEY = "resolved_utterance_ids"
 VOICE_ANNOUNCED_AT_KEY = "voice_announced_at"
 VOICE_ANNOUNCED_SESSION_ID_KEY = "voice_announced_session_id"
 VOICE_ANNOUNCED_MESSAGE_ID_KEY = "voice_announced_message_id"
@@ -34,6 +43,18 @@ UTTERANCE_ID_KEY = "utterance_id"
 class AutomationEventSourceCleanupResult:
     updated_event_count: int = 0
     deleted_utterance_ids: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class AutomationEventSourceReviewResolutionResult:
+    updated_event_count: int = 0
+    resolved_utterance_ids: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class AssignedSourceChapter:
+    chapter_id: str
+    chapter_title: str
 
 
 def _utcnow_iso() -> str:
@@ -80,6 +101,44 @@ def _event_utterance_ids(event: MemoirAutomationEvent) -> list[str]:
         _clean_unknown_utterance_ids(event.utterance_ids_json)
         + _metadata_utterance_ids(event.metadata_json or {})
     )
+
+
+def _source_ref_utterance_id(ref: object) -> str:
+    if not isinstance(ref, dict):
+        return ""
+    value = ref.get(UTTERANCE_ID_KEY)
+    return value.strip() if isinstance(value, str) else ""
+
+
+async def _assigned_source_chapters(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    utterance_ids: set[str] | None = None,
+    confirmed_plan_only: bool = False,
+) -> dict[str, AssignedSourceChapter]:
+    statement = select(MemoirBookPlanChapter).where(MemoirBookPlanChapter.project_id == project_id)
+    if confirmed_plan_only:
+        statement = statement.join(
+            MemoirBookPlan,
+            MemoirBookPlanChapter.plan_id == MemoirBookPlan.id,
+        ).where(MemoirBookPlan.status == MemoirBookPlanStatus.CONFIRMED.value)
+    result = await db.execute(
+        statement
+    )
+    assigned: dict[str, AssignedSourceChapter] = {}
+    for chapter in result.scalars().all():
+        for ref in chapter.source_refs_json or []:
+            utterance_id = _source_ref_utterance_id(ref)
+            if not utterance_id or utterance_id in assigned:
+                continue
+            if utterance_ids is not None and utterance_id not in utterance_ids:
+                continue
+            assigned[utterance_id] = AssignedSourceChapter(
+                chapter_id=chapter.id,
+                chapter_title=chapter.title,
+            )
+    return assigned
 
 
 def _without_deleted_ids(value: object, deleted_ids: set[str]) -> list[str]:
@@ -171,6 +230,38 @@ def _apply_deleted_utterance_cleanup(
             metadata[RESOLUTION_REASON_KEY] = SOURCE_DELETED_REASON
         metadata.setdefault("resolved_at", now_iso)
     event.metadata_json = metadata
+    return True
+
+
+def _apply_assigned_source_review_resolution(
+    event: MemoirAutomationEvent,
+    *,
+    assigned_sources: dict[str, AssignedSourceChapter],
+    now_iso: str,
+    reason: str,
+) -> bool:
+    if event.event_type != MemoirAutomationEventType.SOURCE_HELD.value:
+        return False
+    if event.status != MemoirAutomationEventStatus.NEEDS_REVIEW.value:
+        return False
+
+    resolved_ids = [utterance_id for utterance_id in _event_utterance_ids(event) if utterance_id in assigned_sources]
+    if not resolved_ids:
+        return False
+
+    resolved_source = assigned_sources[resolved_ids[0]]
+    event.chapter_id = resolved_source.chapter_id
+    event.status = MemoirAutomationEventStatus.COMPLETED.value
+    event.summary_text = f"讲述已整理进「{resolved_source.chapter_title}」，自动处理记录已隐藏。"
+    event.metadata_json = {
+        **(event.metadata_json or {}),
+        RESOLUTION_KEY: "confirmed",
+        RESOLUTION_REASON_KEY: reason,
+        RESOLVED_AT_KEY: now_iso,
+        RESOLVED_CHAPTER_ID_KEY: resolved_source.chapter_id,
+        RESOLVED_CHAPTER_TITLE_KEY: resolved_source.chapter_title,
+        RESOLVED_UTTERANCE_IDS_KEY: resolved_ids,
+    }
     return True
 
 
@@ -296,6 +387,55 @@ async def cleanup_dangling_automation_event_utterances(
     return AutomationEventSourceCleanupResult(
         updated_event_count=updated_count,
         deleted_utterance_ids=sorted(deleted_ids),
+    )
+
+
+async def resolve_assigned_source_review_events(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    utterance_ids: list[str] | None = None,
+    reason: str = SOURCE_ASSIGNED_REASON,
+    confirmed_plan_only: bool = False,
+) -> AutomationEventSourceReviewResolutionResult:
+    clean_ids = set(_clean_utterance_ids(utterance_ids)) if utterance_ids is not None else None
+    assigned_sources = await _assigned_source_chapters(
+        db,
+        project_id=project_id,
+        utterance_ids=clean_ids,
+        confirmed_plan_only=confirmed_plan_only,
+    )
+    if not assigned_sources:
+        return AutomationEventSourceReviewResolutionResult()
+
+    result = await db.execute(
+        select(MemoirAutomationEvent).where(
+            MemoirAutomationEvent.project_id == project_id,
+            MemoirAutomationEvent.event_type == MemoirAutomationEventType.SOURCE_HELD.value,
+            MemoirAutomationEvent.status == MemoirAutomationEventStatus.NEEDS_REVIEW.value,
+        )
+    )
+    now_iso = _utcnow_iso()
+    updated_count = 0
+    resolved_ids: list[str] = []
+    for event in result.scalars().all():
+        event_ids = [utterance_id for utterance_id in _event_utterance_ids(event) if utterance_id in assigned_sources]
+        if not event_ids:
+            continue
+        if _apply_assigned_source_review_resolution(
+            event,
+            assigned_sources=assigned_sources,
+            now_iso=now_iso,
+            reason=reason,
+        ):
+            db.add(event)
+            updated_count += 1
+            resolved_ids.extend(event_ids)
+    if updated_count:
+        await db.flush()
+    return AutomationEventSourceReviewResolutionResult(
+        updated_event_count=updated_count,
+        resolved_utterance_ids=sorted(set(resolved_ids)),
     )
 
 

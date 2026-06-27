@@ -33,6 +33,7 @@ from app.schemas.memoir_book import (
 )
 from app.services.ai_types import AITextClient
 from app.services.memoir.access import load_memoir_project
+from app.services.memoir import automation_events as _automation_events
 from app.services.memoir.book_audio import (
     audio_cache_payload,
     audio_response,
@@ -185,6 +186,9 @@ async def _replace_plan(
                 source_refs_json=[_as_dict(ref) for ref in chapter.source_refs],
             )
         )
+    if created_by == MemoirCreatedBy.USER:
+        await db.flush()
+        await _automation_events.resolve_assigned_source_review_events(db, project_id=project_id)
     await db.commit()
     refreshed = await _load_plan(db, project_id)
     if not refreshed:
@@ -304,6 +308,7 @@ async def assign_book_sources_to_chapters(
     chapter_by_id = {chapter.id: chapter for chapter in plan.chapters}
 
     affected_chapter_ids: set[str] = set()
+    assigned_utterance_ids: list[str] = []
     for assignment in req.assignments:
         chapter = chapter_by_id.get(assignment.chapter_id)
         if not chapter:
@@ -321,6 +326,7 @@ async def assign_book_sources_to_chapters(
             covered_ids.add(utterance_id)
             pending_ids.add(utterance_id)
             affected_chapter_ids.add(chapter.id)
+            assigned_utterance_ids.append(utterance_id)
 
         chapter.source_refs_json = refs
         chapter.metadata_json = _set_source_assignment_metadata(chapter.metadata_json, pending_ids)
@@ -348,6 +354,13 @@ async def assign_book_sources_to_chapters(
             project_id=project_id,
             chapter_ids=affected_chapter_ids,
             ai_model=req.ai_model,
+        )
+    if assigned_utterance_ids:
+        await db.flush()
+        await _automation_events.resolve_assigned_source_review_events(
+            db,
+            project_id=project_id,
+            utterance_ids=assigned_utterance_ids,
         )
 
     await db.commit()
@@ -438,6 +451,12 @@ async def move_book_source_between_chapters(
         project_id=project_id,
         chapter_id=target_chapter.id,
         ai_model=req.ai_model,
+    )
+    await db.flush()
+    await _automation_events.resolve_assigned_source_review_events(
+        db,
+        project_id=project_id,
+        utterance_ids=[req.utterance_id],
     )
     await db.commit()
     refreshed = await _load_plan(db, project_id)
@@ -700,6 +719,7 @@ async def update_book_plan(
     await db.flush()
 
     changed_chapter_ids: set[str] = set()
+    newly_assigned_utterance_ids: set[str] = set()
     now = datetime.now(UTC).isoformat()
     for index, chapter_update in enumerate(chapter_updates):
         if chapter_update.id:
@@ -718,8 +738,11 @@ async def update_book_plan(
                     removed_ids=removed_ids,
                 )
                 changed_chapter_ids.add(chapter.id)
+                newly_assigned_utterance_ids.update(added_ids)
             db.add(chapter)
         else:
+            new_source_ids = set(_source_ref_utterance_ids(chapter_update.source_refs))
+            newly_assigned_utterance_ids.update(new_source_ids)
             db.add(
                 MemoirBookPlanChapter(
                     plan_id=plan.id,
@@ -746,6 +769,13 @@ async def update_book_plan(
         project_id=project_id,
         chapter_ids=changed_chapter_ids,
     )
+    if changed_chapter_ids or newly_assigned_utterance_ids:
+        await db.flush()
+        await _automation_events.resolve_assigned_source_review_events(
+            db,
+            project_id=project_id,
+            utterance_ids=sorted(newly_assigned_utterance_ids) if newly_assigned_utterance_ids else None,
+        )
 
     plan.title = (req.title or plan.title).strip()[:200]
     plan.created_by = MemoirCreatedBy.USER.value
@@ -830,6 +860,13 @@ async def apply_book_plan_structure_command(
             db,
             project_id=project_id,
             chapter_ids=mutation.changed_chapter_ids,
+        )
+    if mutation.changed_chapter_ids or source:
+        await db.flush()
+        await _automation_events.resolve_assigned_source_review_events(
+            db,
+            project_id=project_id,
+            utterance_ids=[source.utterance_id] if source else None,
         )
     _touch_plan_structure(plan, operation=req.type, now=now)
     db.add(plan)
