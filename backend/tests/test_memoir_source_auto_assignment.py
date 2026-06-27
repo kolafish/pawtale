@@ -10,6 +10,7 @@ from app.domain.memoir.types import (
 from app.models.memoir import MemoirAutomationEvent, MemoirEditingJob
 from app.services.memoir.editing_job_handlers import register_memoir_editing_job_handlers
 from app.services.memoir.editing_jobs import clear_editing_job_handlers, enqueue_editing_job, run_editing_job
+from app.services.memoir.source_auto_assignment import run_source_auto_assignment_for_utterances
 from tests.memoir_helpers import (
     create_test_book_plan,
     create_test_chapter_draft,
@@ -300,6 +301,57 @@ async def test_source_routing_job_holds_new_topic_for_review(client, test_db, mo
     assert event.metadata_json["route"]["action"] == "suggest_new_chapter"
 
 
+async def test_source_auto_assignment_updates_existing_pending_review_event(client, test_db, monkeypatch):
+    first = await create_test_voice_transcript(
+        client,
+        test_db,
+        "小时候在外婆家的院子里摘菜，夏天还会剥青豆。",
+    )
+    project_id = first["session"]["project_id"]
+    await create_test_book_plan(
+        test_db,
+        project_id=project_id,
+        source_ref=memoir_source_ref(first, "外婆家的院子"),
+        chapter_title="院子里的童年",
+    )
+    uncovered = await create_test_voice_transcript(
+        client,
+        test_db,
+        "参加工作以后，我在供销社负责盘点货物，第一次拿到奖金特别高兴。",
+    )
+    _patch_source_router_ai(
+        monkeypatch,
+        _new_chapter_route("供销社工作初记"),
+        _new_chapter_route("供销社盘点往事"),
+    )
+
+    first_response = await run_source_auto_assignment_for_utterances(
+        test_db,
+        user_id=first["user_id"],
+        project_id=project_id,
+        utterance_ids=[uncovered["utterance_id"]],
+    )
+    second_response = await run_source_auto_assignment_for_utterances(
+        test_db,
+        user_id=first["user_id"],
+        project_id=project_id,
+        utterance_ids=[uncovered["utterance_id"]],
+    )
+
+    assert first_response.events[0].id == second_response.events[0].id
+    events = (
+        await test_db.execute(
+            select(MemoirAutomationEvent).where(
+                MemoirAutomationEvent.project_id == project_id,
+                MemoirAutomationEvent.event_type == MemoirAutomationEventType.SOURCE_HELD.value,
+            )
+        )
+    ).scalars().all()
+    assert len(events) == 1
+    assert events[0].summary_text == "1 条讲述可能是新话题，建议确认是否新建「供销社盘点往事」。"
+    assert events[0].metadata_json["route"]["suggested_title"] == "供销社盘点往事"
+
+
 async def test_source_routing_job_ignores_non_memoir_source_without_review_event(client, test_db, monkeypatch):
     _register_source_routing_handler()
     first = await create_test_voice_transcript(client, test_db, "小时候在老家院子里玩。")
@@ -334,3 +386,11 @@ async def test_source_routing_job_ignores_non_memoir_source_without_review_event
         )
     )
     assert event is None
+
+    audit_job = await test_db.scalar(
+        select(MemoirEditingJob).where(
+            MemoirEditingJob.project_id == project_id,
+            MemoirEditingJob.job_type == MemoirEditingJobType.QUALITY_AUDIT.value,
+        )
+    )
+    assert audit_job is None

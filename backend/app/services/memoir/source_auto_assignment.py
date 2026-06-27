@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from fastapi import HTTPException
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.memoir.types import (
@@ -8,7 +9,7 @@ from app.domain.memoir.types import (
     MemoirAutomationEventType,
     MemoirEditingJobStatus,
 )
-from app.models.memoir import MemoirEditingJob
+from app.models.memoir import MemoirAutomationEvent, MemoirEditingJob
 from app.models.projects import Project
 from app.schemas.memoir_book import (
     MemoirBookPlanResponse,
@@ -136,6 +137,56 @@ async def _record_assignment_events(
     return responses
 
 
+def _held_event_summary(route: MemoirBookSourceRouteResponse) -> str:
+    title = route.target_chapter_title or route.suggested_title or "待确认章节"
+    if route.action == "suggest_new_chapter":
+        return f"1 条讲述可能是新话题，建议确认是否新建「{title}」。"
+    if route.action == "assign_to_chapter":
+        return f"1 条讲述可能属于「{title}」，但判断把握还不够，需要确认。"
+    return "1 条讲述暂未自动收入章节，需要确认归属。"
+
+
+def _held_event_metadata(route: MemoirBookSourceRouteResponse, *, threshold: float) -> dict[str, object]:
+    return {
+        "source": "auto_assignment",
+        "confidence_threshold": threshold,
+        "route": {
+            "utterance_id": route.utterance_id,
+            "source_index": route.source_index,
+            "material_type": route.material_type,
+            "action": route.action,
+            "target_chapter_id": route.target_chapter_id,
+            "target_chapter_title": route.target_chapter_title,
+            "suggested_title": route.suggested_title,
+            "confidence": route.confidence,
+            "reason": route.reason,
+            "evidence": [item.model_dump(mode="json") for item in route.evidence],
+        },
+    }
+
+
+async def _pending_held_events_by_utterance(
+    db: AsyncSession,
+    *,
+    project_id: str,
+) -> dict[str, MemoirAutomationEvent]:
+    result = await db.execute(
+        select(MemoirAutomationEvent)
+        .where(
+            MemoirAutomationEvent.project_id == project_id,
+            MemoirAutomationEvent.event_type == MemoirAutomationEventType.SOURCE_HELD.value,
+            MemoirAutomationEvent.status == MemoirAutomationEventStatus.NEEDS_REVIEW.value,
+        )
+        .order_by(MemoirAutomationEvent.created_at.desc(), MemoirAutomationEvent.id.desc())
+    )
+    events_by_utterance: dict[str, MemoirAutomationEvent] = {}
+    for event in result.scalars().all():
+        for utterance_id in event.utterance_ids_json or []:
+            if isinstance(utterance_id, str) and utterance_id.strip():
+                events_by_utterance.setdefault(utterance_id.strip(), event)
+    return events_by_utterance
+
+
 async def _record_held_events(
     db: AsyncSession,
     *,
@@ -144,44 +195,35 @@ async def _record_held_events(
     threshold: float,
 ) -> list[MemoirAutomationEventResponse]:
     responses: list[MemoirAutomationEventResponse] = []
+    pending_events = await _pending_held_events_by_utterance(db, project_id=project_id)
     for route in routes:
         if _route_is_assignable(route, threshold=threshold):
             continue
         if route.action == "ignore":
             continue
-        title = route.target_chapter_title or route.suggested_title or "待确认章节"
-        if route.action == "suggest_new_chapter":
-            summary = f"1 条讲述可能是新话题，建议确认是否新建「{title}」。"
-        elif route.action == "assign_to_chapter":
-            summary = f"1 条讲述可能属于「{title}」，但判断把握还不够，需要确认。"
+        summary = _held_event_summary(route)
+        metadata = _held_event_metadata(route, threshold=threshold)
+        event = pending_events.get(route.utterance_id)
+        if event:
+            event.chapter_id = route.target_chapter_id
+            event.summary_text = summary
+            event.confidence = route.confidence
+            event.metadata_json = metadata
+            db.add(event)
+            await db.flush()
         else:
-            summary = "1 条讲述暂未自动收入章节，需要确认归属。"
-        event = await automation_events.record_automation_event(
-            db,
-            project_id=project_id,
-            event_type=MemoirAutomationEventType.SOURCE_HELD,
-            status=MemoirAutomationEventStatus.NEEDS_REVIEW,
-            chapter_id=route.target_chapter_id,
-            utterance_ids=[route.utterance_id],
-            summary_text=summary,
-            confidence=route.confidence,
-            metadata_json={
-                "source": "auto_assignment",
-                "confidence_threshold": threshold,
-                "route": {
-                    "utterance_id": route.utterance_id,
-                    "source_index": route.source_index,
-                    "material_type": route.material_type,
-                    "action": route.action,
-                    "target_chapter_id": route.target_chapter_id,
-                    "target_chapter_title": route.target_chapter_title,
-                    "suggested_title": route.suggested_title,
-                    "confidence": route.confidence,
-                    "reason": route.reason,
-                    "evidence": [item.model_dump(mode="json") for item in route.evidence],
-                },
-            },
-        )
+            event = await automation_events.record_automation_event(
+                db,
+                project_id=project_id,
+                event_type=MemoirAutomationEventType.SOURCE_HELD,
+                status=MemoirAutomationEventStatus.NEEDS_REVIEW,
+                chapter_id=route.target_chapter_id,
+                utterance_ids=[route.utterance_id],
+                summary_text=summary,
+                confidence=route.confidence,
+                metadata_json=metadata,
+            )
+            pending_events[route.utterance_id] = event
         responses.append(automation_events.event_response(event))
     await db.commit()
     return responses
@@ -298,11 +340,12 @@ async def run_source_routing_job(db: AsyncSession, job: MemoirEditingJob) -> Edi
         if exc.status_code in {400, 404}:
             return EditingJobResult(status=MemoirEditingJobStatus.SKIPPED, error_message=str(exc.detail))
         raise
-    await book_quality_audit.schedule_project_quality_audit(
-        db,
-        project_id=job.project_id,
-        reason="source_routing_completed",
-    )
+    if response.assigned_source_count:
+        await book_quality_audit.schedule_project_quality_audit(
+            db,
+            project_id=job.project_id,
+            reason="source_routing_completed",
+        )
     return EditingJobResult(
         result_json={
             "evaluated_source_count": response.evaluated_source_count,
