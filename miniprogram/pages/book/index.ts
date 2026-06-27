@@ -126,6 +126,7 @@ interface DatasetEvent {
   currentTarget: {
     dataset: {
       id?: string;
+      action?: string;
       direction?: string;
       utteranceId?: string;
     };
@@ -745,6 +746,20 @@ Page<BookData, {
 
   async acknowledgeAutomationEvent(event) {
     const eventId = event.currentTarget.dataset.id || "";
+    const action = event.currentTarget.dataset.action || "acknowledge";
+    if (action === "review_source") {
+      const utteranceId = event.currentTarget.dataset.utteranceId || "";
+      if (!utteranceId) {
+        this.setData({ automationEventError: "缺少要整理的讲述记录" });
+        return;
+      }
+      writeTranscriptNavigationTarget(utteranceId);
+      wx.switchTab({ url: "/pages/transcripts/index" });
+      return;
+    }
+    if (action !== "acknowledge") {
+      return;
+    }
     if (!this.data.projectId || !eventId || this.data.automationEventBusyTarget) {
       return;
     }

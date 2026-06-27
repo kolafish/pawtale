@@ -854,6 +854,8 @@ test("book page shows and acknowledges automation events", async () => {
   assert.equal(context.data.automationEventItems[0].titleText, "已自动补写");
   assert.equal(context.data.automationEventItems[0].summaryText, "「外婆家的童年」已自动补写 1 条新增讲述。");
   assert.equal(context.data.automationEventItems[0].metaText.includes("补写"), true);
+  assert.equal(context.data.automationEventItems[0].actionText, "知道了");
+  assert.equal(context.data.automationEventItems[0].canAct, true);
 
   await page.acknowledgeAutomationEvent.call(context, { currentTarget: { dataset: { id: "event-1" } } });
 
@@ -876,6 +878,7 @@ test("book page builds detailed automation event views", () => {
       confidence: 0.48,
       metadata_json: {
         route: {
+          utterance_id: "utterance-1",
           action: "suggest_new_chapter",
           suggested_title: "外婆家的厨房",
           reason: "内容集中在厨房和做饭，和现有章节不完全一致",
@@ -901,11 +904,45 @@ test("book page builds detailed automation event views", () => {
     },
   ]);
 
-  assert.equal(items[0].titleText, "需要确认整理");
+  assert.equal(items[0].titleText, "待整理讲述");
   assert.equal(items[0].detailText, "建议新建「外婆家的厨房」：内容集中在厨房和做饭，和现有章节不完全一致");
   assert.equal(items[0].canAcknowledge, false);
+  assert.equal(items[0].canAct, true);
+  assert.equal(items[0].actionText, "去整理");
+  assert.equal(items[0].actionKind, "review_source");
+  assert.equal(items[0].primaryUtteranceId, "utterance-1");
   assert.equal(items[1].titleText, "章节审计完成");
   assert.equal(items[1].detailText, "整理 2 条尚未归章的讲述记录；可以追问外婆在厨房里的细节");
+});
+
+test("book page opens transcripts for pending source automation events", async () => {
+  const switches = [];
+  const storageWrites = [];
+  global.wx = {
+    setStorageSync(key, value) {
+      storageWrites.push({ key, value });
+    },
+    switchTab(options) {
+      switches.push(options.url);
+    },
+  };
+  const { page } = loadBookPage();
+  const context = pageContext(page);
+
+  await page.acknowledgeAutomationEvent.call(context, {
+    currentTarget: {
+      dataset: {
+        id: "event-held",
+        action: "review_source",
+        utteranceId: "utterance-new-1",
+      },
+    },
+  });
+
+  assert.equal(storageWrites[0].key, "pawtale_transcript_navigation_target");
+  assert.equal(storageWrites[0].value.utterance_id, "utterance-new-1");
+  assert.deepEqual(switches, ["/pages/transcripts/index"]);
+  delete global.wx;
 });
 
 test("book page shows source coverage notice only when there are uncovered transcripts", () => {
