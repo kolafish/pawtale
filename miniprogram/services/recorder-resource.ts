@@ -19,6 +19,8 @@ export class WechatRecorderResource {
   private eventsBound = false;
   private ownerId = "";
   private handlers: RecorderResourceHandlers | null = null;
+  private recorderStarted = false;
+  private stopRequested = false;
   private stopPromise: Promise<void> | null = null;
   private stopWaiters: Array<() => void> = [];
 
@@ -49,6 +51,8 @@ export class WechatRecorderResource {
     this.ensureManager();
     this.ownerId = ownerId;
     this.handlers = handlers;
+    this.recorderStarted = false;
+    this.stopRequested = false;
     try {
       this.manager?.start(options);
       return true;
@@ -69,12 +73,15 @@ export class WechatRecorderResource {
     if (this.stopPromise) {
       return this.stopPromise;
     }
+    this.stopRequested = true;
     this.stopPromise = (async () => {
       const stopped = this.waitForStop();
       try {
         this.manager?.stop();
       } catch {
-        this.handleStop();
+        if (this.recorderStarted) {
+          this.handleStop();
+        }
       }
       await stopped;
     })().finally(() => {
@@ -97,7 +104,23 @@ export class WechatRecorderResource {
       return;
     }
     this.manager.onStart?.(() => {
+      if (!this.ownerId) {
+        try {
+          this.manager?.stop();
+        } catch {
+          // The native recorder may already be stopped; there is no owner to notify.
+        }
+        return;
+      }
+      this.recorderStarted = true;
       this.handlers?.onStart?.();
+      if (this.stopRequested) {
+        try {
+          this.manager?.stop();
+        } catch {
+          this.handleStop();
+        }
+      }
     });
     this.manager.onFrameRecorded?.((result) => {
       this.handlers?.onFrame?.(result);
@@ -138,6 +161,8 @@ export class WechatRecorderResource {
   private releaseOwner(): void {
     this.ownerId = "";
     this.handlers = null;
+    this.recorderStarted = false;
+    this.stopRequested = false;
     const waiters = this.stopWaiters;
     this.stopWaiters = [];
     waiters.forEach((resolve) => resolve());

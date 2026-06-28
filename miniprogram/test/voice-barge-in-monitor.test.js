@@ -160,6 +160,46 @@ test("barge-in monitor waits for recorder onStop before releasing the microphone
   assert.equal(monitor.isRunning(), false);
 });
 
+test("barge-in monitor stops recorder before notifying barge-in", () => {
+  const recorder = recorderHarness();
+  recorder.stop = function stopWithoutImmediateCallback() {
+    this.stops += 1;
+  };
+  const { VoiceBargeInMonitor } = require("../services/voice-barge-in-monitor.ts");
+  const monitor = new VoiceBargeInMonitor(() => recorder);
+  let triggers = 0;
+  let stopsBeforeCallback = 0;
+  let activeBeforeNativeStop = false;
+
+  monitor.start({
+    warmupMs: 300,
+    triggerVoiceMs: 250,
+    minTriggerLevel: 0.04,
+    baselineMultiplier: 1.5,
+    onBargeIn: () => {
+      triggers += 1;
+      stopsBeforeCallback = recorder.stops;
+      activeBeforeNativeStop = monitor.isRunning();
+    },
+  });
+
+  for (let index = 0; index < 3; index += 1) {
+    recorder.callbacks.frame({ frameBuffer: pcm16Frame(900), isLastFrame: false });
+  }
+  for (let index = 0; index < 3; index += 1) {
+    recorder.callbacks.frame({ frameBuffer: pcm16Frame(5000), isLastFrame: false });
+  }
+
+  assert.equal(triggers, 1);
+  assert.equal(stopsBeforeCallback, 1);
+  assert.equal(activeBeforeNativeStop, true);
+  assert.equal(monitor.isRunning(), true);
+
+  recorder.callbacks.stop();
+
+  assert.equal(monitor.isRunning(), false);
+});
+
 test("barge-in monitor ignores stable assistant playback echo", () => {
   const recorder = recorderHarness();
   const { VoiceBargeInMonitor } = require("../services/voice-barge-in-monitor.ts");

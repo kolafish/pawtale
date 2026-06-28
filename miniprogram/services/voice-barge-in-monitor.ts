@@ -131,7 +131,7 @@ export class VoiceBargeInMonitor {
   }
 
   isRunning(): boolean {
-    return this.running;
+    return this.running || this.recorderActive;
   }
 
   state(): VoiceBargeInMonitorState {
@@ -200,6 +200,7 @@ export class VoiceBargeInMonitor {
     const onBargeIn = this.options.onBargeIn;
     this.triggered = true;
     this.running = false;
+    void this.stopAndWait();
     onBargeIn();
   }
 

@@ -131,7 +131,7 @@ test("voice activity detector can share logic with different pre-voice silence p
   assert.equal(streamingVad.update(silent).silentElapsedMs, 100);
 });
 
-test("streaming ASR releases recorder ownership after local recording stops", () => {
+test("streaming ASR stops a late native recorder start after local recording stops", () => {
   const recorder = recorderManagerHarness();
   global.wx = {
     getRecorderManager() {
@@ -161,7 +161,7 @@ test("streaming ASR releases recorder ownership after local recording stops", ()
   recorder.callbacks.stop();
   recorder.callbacks.start();
 
-  assert.equal(recorder.stops, 1);
+  assert.equal(recorder.stops, 2);
   delete global.wx;
 });
 
