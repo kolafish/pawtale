@@ -161,7 +161,7 @@ async def run_chapter_revision_job(
         )
         title = chapter.title if chapter else "未命名章节"
         source_count = len(pending_source_id_list)
-        await automation_events.record_automation_event(
+        await automation_events.record_or_update_automation_event(
             db,
             project_id=job.project_id,
             event_type=MemoirAutomationEventType.CHAPTER_AUTO_REVISED,
@@ -171,6 +171,9 @@ async def run_chapter_revision_job(
             summary_text=f"「{title}」已自动补写 {source_count} 条新增讲述。",
             metadata_json={
                 "source": "book_auto_revision",
+                automation_events.EVENT_SIGNATURE_KEY: (
+                    f"book_auto_revision:{job.chapter_id}:{','.join(pending_source_id_list)}"
+                ),
                 "job_id": job.id,
                 "result_version_id": draft_response.latest_version.id if draft_response.latest_version else "",
                 "pending_source_utterance_ids": pending_source_id_list,

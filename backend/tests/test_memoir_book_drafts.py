@@ -432,6 +432,7 @@ async def test_memoir_book_auto_revision_job_supplements_pending_sources(
     assert event.utterance_ids_json == [second["utterance_id"]]
     assert event.summary_text == "「外婆家的童年」已自动补写 1 条新增讲述。"
     assert event.metadata_json["source"] == "book_auto_revision"
+    assert event.metadata_json["event_signature"] == f"book_auto_revision:{chapter.id}:{second['utterance_id']}"
     assert event.metadata_json["result_version_id"] == versions[-1].id
     audit_job = await test_db.scalar(
         select(MemoirEditingJob).where(

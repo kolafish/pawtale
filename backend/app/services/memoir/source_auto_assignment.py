@@ -108,7 +108,7 @@ async def _record_assignment_events(
         confidence_values = [route.confidence or 0 for route in chapter_routes]
         confidence = round(sum(confidence_values) / len(confidence_values), 3)
         title = titles.get(chapter_id) or chapter_routes[0].target_chapter_title or "未命名章节"
-        event = await automation_events.record_automation_event(
+        event = await automation_events.record_or_update_automation_event(
             db,
             project_id=project_id,
             event_type=MemoirAutomationEventType.SOURCE_ASSIGNED,
@@ -119,6 +119,9 @@ async def _record_assignment_events(
             confidence=confidence,
             metadata_json={
                 "source": "auto_assignment",
+                automation_events.EVENT_SIGNATURE_KEY: (
+                    f"source_assigned:{chapter_id}:{','.join(sorted(utterance_ids))}"
+                ),
                 "confidence_threshold": threshold,
                 "routes": [
                     {
