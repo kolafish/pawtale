@@ -190,10 +190,39 @@ async def test_voice_assistant_turn_guided_opening_prompt_uses_topic_menu(
     assert completed["progress_update"]["kind"] == "project_progress_snapshot"
     assert ai_client.calls[0]["kwargs"]["max_tokens"] == 420
     assert "主题讲述首次开场" in prompt
-    assert "明确介绍可聊主题" in prompt
+    assert "用“老余”做一句简短自我介绍" in prompt
+    assert "今天会陪叙述者把人生里的故事、人物、地方和感受慢慢聊出来" in prompt
+    assert "介绍可聊主题" in prompt
     assert "人物、事情、家庭、工作、地点、某一天、人生阶段、闲聊" in prompt
     assert "这个项目还没有留下讲述记录，今天可以从第一条开始。" in prompt
     assert "调试阶段每次回应都尽量自然带一句进度鼓励或后台整理结果" in prompt
+
+
+async def test_voice_assistant_turn_female_voice_opening_uses_xiaoyu_persona(
+    client,
+    test_db,
+):
+    response = await post_mobile_memoir_voice_session(
+        client,
+        json={"guidance_mode": "guided_interview", "current_guidance_module": "person"},
+    )
+    voice_session = response.json()["session"]
+    user_id = (await client.get("/api/auth/me")).json()["id"]
+
+    _, ai_client, _, completed = await _run_stream_turn(
+        test_db,
+        voice_session_id=voice_session["id"],
+        user_id=user_id,
+        chunks=["您好，我是小余。今天我会陪您慢慢聊聊这些回忆，想先从哪类人或事开始？"],
+        voice="zh_female_xiaohe_uranus_bigtts",
+    )
+
+    prompt = ai_client.calls[0]["user_prompt"]
+    assert completed["primary_intent"] == "opening"
+    assert completed["host_name"] == "小余"
+    assert "你在对话中自称“小余”" in ai_client.calls[0]["system_prompt"]
+    assert "下一句“小余”要说的话" in prompt
+    assert "用“小余”做一句简短自我介绍" in prompt
 
 
 async def test_voice_assistant_turn_progress_prompt_uses_project_snapshot_without_event(
@@ -407,7 +436,9 @@ async def test_voice_assistant_turn_guided_opening_references_previous_session(
     prompt = ai_client.calls[0]["user_prompt"]
     assert "主题讲述继续开场" in prompt
     assert "叙述者之前已有同模式讲述记录" in prompt
-    assert "优先邀请叙述者接着上次的话题继续讲" in prompt
+    assert "一句简短自我介绍和回访问候" in prompt
+    assert "不要一开场就切进上次的具体细节" in prompt
+    assert "可以接着上次的大方向讲，也可以换到这些主题里挑一个" in prompt
     assert "叙述者：上次讲到我第一次去上海找工作。" in prompt
 
 
@@ -521,6 +552,7 @@ async def _run_stream_turn(
     user_id: str,
     chunks: list[str],
     regenerate: bool = False,
+    voice: str | None = None,
 ) -> tuple["FakeTurnClient", "FakeStreamingAI", "FakeStreamingTTS", dict[str, Any]]:
     stream_client = FakeTurnClient()
     ai_client = FakeStreamingAI(chunks)
@@ -535,7 +567,10 @@ async def _run_stream_turn(
     )
     run_task = asyncio.create_task(session.run())
     await _wait_for_event(stream_client, "turn.ready")
-    await stream_client.push({"type": "turn.start", "regenerate": regenerate})
+    payload: dict[str, Any] = {"type": "turn.start", "regenerate": regenerate}
+    if voice:
+        payload["voice"] = voice
+    await stream_client.push(payload)
     completed = await _wait_for_event(stream_client, "turn.completed")
     await asyncio.wait_for(run_task, timeout=1)
     return stream_client, ai_client, tts_client, completed
