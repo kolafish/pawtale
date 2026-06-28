@@ -102,6 +102,7 @@ function sampleBookOutput(
   staleChapterTitles = [],
   structuredContent = null,
   versions = [],
+  manuscript = null,
 ) {
   const latestVersion = {
     id: `book-output-version-${version}`,
@@ -112,6 +113,7 @@ function sampleBookOutput(
     content,
     chapter_snapshot_json: [],
     structured_content: structuredContent,
+    manuscript,
     created_by: "system",
     created_at: "2026-06-17T00:00:00.000Z",
   };
@@ -131,7 +133,13 @@ function sampleBookOutput(
   };
 }
 
-function sampleBookOutputVersion(version, content, structuredContent = null, createdAt = "2026-06-17T00:00:00.000Z") {
+function sampleBookOutputVersion(
+  version,
+  content,
+  structuredContent = null,
+  createdAt = "2026-06-17T00:00:00.000Z",
+  manuscript = null,
+) {
   return {
     id: `book-output-version-${version}`,
     output_id: "book-output-1",
@@ -141,6 +149,7 @@ function sampleBookOutputVersion(version, content, structuredContent = null, cre
     content,
     chapter_snapshot_json: [],
     structured_content: structuredContent,
+    manuscript,
     created_by: "system",
     created_at: createdAt,
   };
@@ -189,6 +198,74 @@ function sampleStructuredBookContent() {
         draft_version: 1,
       },
     ],
+  };
+}
+
+function sampleBookManuscript() {
+  return {
+    schema_version: 1,
+    profile: {
+      template: "classic_family",
+      title: "外婆回忆录",
+      subtitle: "根据口述访谈整理",
+      narrator_name: "",
+      prepared_by: "家人整理",
+      interview_date_range: "",
+      privacy_note: "仅供家庭内部阅读。",
+      ai_disclosure_note: "AI 辅助整理，不新增未经确认的事实。",
+    },
+    front_matter: [
+      { kind: "cover", title: "外婆回忆录", content: "外婆回忆录\n根据口述访谈整理", enabled: true },
+      { kind: "title_page", title: "扉页", content: "口述：外婆\n整理：家人", enabled: true },
+      { kind: "generation_note", title: "生成说明", content: "本书根据口述访谈整理。", enabled: true },
+      { kind: "preface", title: "前言", content: "这些故事来自家里的讲述。", enabled: true },
+    ],
+    table_of_contents: sampleStructuredBookContent().table_of_contents,
+    chapters: [
+      {
+        chapter_id: "chapter-1",
+        index: 1,
+        title: "外婆家的童年",
+        subtitle: "",
+        intro: "这一章主要记录外婆小时候在院子里的生活。",
+        time_hint: "童年",
+        place_hint: "老家",
+        pull_quotes: [{ text: "我小时候常在院子里晒太阳。", source_ref_ids: ["utterance-1"] }],
+        people_notes: [],
+        uncertain_facts: [],
+        content: "我小时候常在院子里晒太阳。",
+        source_refs: [{ utterance_id: "utterance-1", transcript_version_id: "version-1", voice_session_id: "voice-1", quote: "院子" }],
+      },
+      {
+        chapter_id: "chapter-2",
+        index: 2,
+        title: "第一次离家",
+        subtitle: "",
+        intro: "这一章主要记录第一次离家的经历。",
+        time_hint: "",
+        place_hint: "县城",
+        pull_quotes: [],
+        people_notes: [],
+        uncertain_facts: [],
+        content: "第一次离家去县城读书。",
+        source_refs: [],
+      },
+    ],
+    back_matter: {
+      afterword: { kind: "afterword", title: "后记", content: "这些故事还可以继续补充。", enabled: true },
+      interview_records: { kind: "interview_records", title: "访谈记录", content: "当前收录两章。", enabled: true },
+      version_note: { kind: "version_note", title: "版本说明", content: "默认展示故事书版。", enabled: true },
+      unconfirmed_facts: { kind: "unconfirmed_facts", title: "未确认信息", content: "暂无。", enabled: true },
+      source_appendix: { kind: "source_appendix", title: "章节来源", content: "第1章：1 条讲述来源", enabled: true },
+    },
+    render_settings: {
+      page_size: "a5",
+      layout: "reading",
+      font_scale: "standard",
+      show_headers: true,
+      show_source_appendix: true,
+      photo_mode: "none",
+    },
   };
 }
 
@@ -757,6 +834,19 @@ test("book page exposes PDF layout and print export controls", () => {
   assert.match(wxml, /data-layout="large_print"/);
 });
 
+test("book page exposes manuscript structure sections", () => {
+  const wxml = fs.readFileSync(path.join(__dirname, "../pages/book/index.wxml"), "utf8");
+
+  assert.match(wxml, /书稿设置/);
+  assert.match(wxml, /书籍结构/);
+  assert.match(wxml, /章节书稿/);
+  assert.match(wxml, /附录与说明/);
+  assert.match(wxml, /预览与导出/);
+  assert.match(wxml, /bookManuscriptStructureItems/);
+  assert.match(wxml, /bookManuscriptChapterItems/);
+  assert.match(wxml, /bookManuscriptBackMatterItems/);
+});
+
 test("book page builds outline narration for saved chapter titles", () => {
   const { mod } = loadBookPage();
   const plan = samplePlan("confirmed");
@@ -808,7 +898,7 @@ test("book page progress counts generated and confirmed chapters", () => {
 
 test("book page summarizes latest book output version", () => {
   const { mod, page } = loadBookPage();
-  const output = sampleBookOutput(3, "全书正文", false, [], sampleStructuredBookContent());
+  const output = sampleBookOutput(3, "全书正文", false, [], sampleStructuredBookContent(), [], sampleBookManuscript());
   const context = pageContext(page);
   page.applyBookOutput.call(context, output);
   const data = context.data;
@@ -823,6 +913,14 @@ test("book page summarizes latest book output version", () => {
   assert.equal(data.bookPreviewChapters[0].indexText, "第 1 章");
   assert.equal(data.bookPreviewChapters[0].content, "我小时候常在院子里晒太阳。");
   assert.equal(data.bookPreviewChapters[0].metaText, "14 字 · 2 条素材 · 第 1 版");
+  assert.equal(data.bookManuscriptAvailable, true);
+  assert.equal(data.bookManuscriptTemplateLabel, "素雅书籍版");
+  assert.equal(data.bookManuscriptSettingsText, "A5 · 阅读排版 · 含页眉 · 含来源附录");
+  assert.equal(data.bookManuscriptStructureItems.some((item) => item.title === "目录"), true);
+  assert.equal(data.bookManuscriptFrontMatterItems.length, 4);
+  assert.equal(data.bookManuscriptChapterItems[0].intro, "这一章主要记录外婆小时候在院子里的生活。");
+  assert.equal(data.bookManuscriptChapterItems[0].quoteText, "我小时候常在院子里晒太阳。");
+  assert.equal(data.bookManuscriptBackMatterItems.some((item) => item.title === "章节来源"), true);
   assert.equal(
     mod.bookOutputStaleNotice(sampleBookOutput(3, "全书正文", true, ["外婆家的童年", "第一次离家", "县城生活"])),
     "章节「外婆家的童年、第一次离家」等章节已更新，请重新生成全书。",

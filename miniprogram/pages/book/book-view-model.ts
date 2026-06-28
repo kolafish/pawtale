@@ -1,6 +1,9 @@
 import type {
   MemoirBookChapterDraft,
   MemoirBookChapterSourceRef,
+  MemoirBookManuscript,
+  MemoirBookManuscriptSection,
+  MemoirBookManuscriptTemplate,
   MemoirBookOutput,
   MemoirBookOutputExportLayout,
   MemoirBookOutputVersion,
@@ -151,6 +154,32 @@ export interface BookOutputVersionOptionView {
   isLatest: boolean;
 }
 
+export interface BookManuscriptStructureItemView {
+  id: string;
+  title: string;
+  metaText: string;
+  statusText: string;
+}
+
+export interface BookManuscriptSectionView {
+  id: string;
+  title: string;
+  kindText: string;
+  contentPreview: string;
+  enabled: boolean;
+}
+
+export interface BookManuscriptChapterView {
+  id: string;
+  chapterId: string;
+  indexText: string;
+  title: string;
+  intro: string;
+  quoteText: string;
+  metaText: string;
+  contentPreview: string;
+}
+
 export interface BookExportLayoutOptionView {
   label: string;
   value: MemoirBookOutputExportLayout;
@@ -197,6 +226,15 @@ export interface BookData {
   bookPreviewTitle: string;
   bookPreviewTocItems: BookOutputTocView[];
   bookPreviewChapters: BookOutputChapterPreviewView[];
+  bookManuscriptAvailable: boolean;
+  bookManuscriptTitle: string;
+  bookManuscriptSubtitle: string;
+  bookManuscriptTemplateLabel: string;
+  bookManuscriptSettingsText: string;
+  bookManuscriptStructureItems: BookManuscriptStructureItemView[];
+  bookManuscriptFrontMatterItems: BookManuscriptSectionView[];
+  bookManuscriptChapterItems: BookManuscriptChapterView[];
+  bookManuscriptBackMatterItems: BookManuscriptSectionView[];
   bookVersionText: string;
   bookVersionOptions: BookOutputVersionOptionView[];
   bookSelectedVersionId: string;
@@ -685,6 +723,200 @@ export function bookOutputChapterPreviews(
     });
 }
 
+function selectedBookManuscript(output: MemoirBookOutput | null, selectedVersionId = ""): MemoirBookManuscript | null {
+  return selectedBookOutputVersion(output, selectedVersionId)?.manuscript || null;
+}
+
+function manuscriptTemplateLabel(template: MemoirBookManuscriptTemplate | undefined): string {
+  if (template === "photo_memory") {
+    return "家庭纪念版";
+  }
+  if (template === "oral_archive") {
+    return "口述档案版";
+  }
+  return "素雅书籍版";
+}
+
+function manuscriptSectionKindText(kind: string): string {
+  const labels: Record<string, string> = {
+    cover: "封面",
+    title_page: "扉页",
+    generation_note: "说明",
+    dedication: "献辞",
+    preface: "前言",
+    afterword: "后记",
+    interview_records: "访谈",
+    version_note: "版本",
+    unconfirmed_facts: "待确认",
+    source_appendix: "来源",
+  };
+  return labels[kind] || "书稿";
+}
+
+function previewText(text: string, maxLength = 72): string {
+  const value = trimText(text).replace(/\s+/g, " ");
+  return value.length > maxLength ? `${value.slice(0, maxLength)}...` : value;
+}
+
+function sectionView(section: MemoirBookManuscriptSection, index: number, prefix: string): BookManuscriptSectionView {
+  return {
+    id: `${prefix}:${section.kind}:${index}`,
+    title: trimText(section.title) || manuscriptSectionKindText(section.kind),
+    kindText: manuscriptSectionKindText(section.kind),
+    contentPreview: previewText(section.content),
+    enabled: section.enabled !== false,
+  };
+}
+
+function backMatterSections(manuscript: MemoirBookManuscript): MemoirBookManuscriptSection[] {
+  return [
+    manuscript.back_matter.afterword,
+    manuscript.back_matter.interview_records,
+    manuscript.back_matter.version_note,
+    manuscript.back_matter.unconfirmed_facts,
+    manuscript.back_matter.source_appendix,
+  ].filter(Boolean);
+}
+
+function manuscriptSettingsText(manuscript: MemoirBookManuscript | null): string {
+  if (!manuscript) {
+    return "按已确认章节生成基础书稿";
+  }
+  const settings = manuscript.render_settings;
+  const pageSize = settings.page_size === "a5" ? "A5" : "默认纸张";
+  const layout = settings.layout === "print" ? "打印排版" : "阅读排版";
+  const header = settings.show_headers ? "含页眉" : "无页眉";
+  const appendix = settings.show_source_appendix ? "含来源附录" : "隐藏来源附录";
+  return [pageSize, layout, header, appendix].join(" · ");
+}
+
+function fallbackManuscriptStructureItems(
+  output: MemoirBookOutput | null,
+  selectedVersionId = "",
+): BookManuscriptStructureItemView[] {
+  const tocItems = bookOutputTocItems(output, selectedVersionId);
+  const chapters = bookOutputChapterPreviews(output, selectedVersionId);
+  if (!tocItems.length && !chapters.length) {
+    return [];
+  }
+  return [
+    { id: "fallback:cover", title: "封面", metaText: "基础信息", statusText: "已生成" },
+    { id: "fallback:toc", title: "目录", metaText: `${tocItems.length} 章`, statusText: "已生成" },
+    { id: "fallback:chapters", title: "正文", metaText: `${chapters.length} 章`, statusText: "已生成" },
+  ];
+}
+
+function manuscriptStructureItems(
+  manuscript: MemoirBookManuscript | null,
+  output: MemoirBookOutput | null,
+  selectedVersionId = "",
+): BookManuscriptStructureItemView[] {
+  if (!manuscript) {
+    return fallbackManuscriptStructureItems(output, selectedVersionId);
+  }
+  const frontMatter = (manuscript.front_matter || []).map((section, index) => ({
+    id: `front:${section.kind}:${index}`,
+    title: trimText(section.title) || manuscriptSectionKindText(section.kind),
+    metaText: manuscriptSectionKindText(section.kind),
+    statusText: section.enabled === false ? "已隐藏" : "已生成",
+  }));
+  const backMatter = backMatterSections(manuscript).map((section, index) => ({
+    id: `back:${section.kind}:${index}`,
+    title: trimText(section.title) || manuscriptSectionKindText(section.kind),
+    metaText: manuscriptSectionKindText(section.kind),
+    statusText: section.enabled === false ? "已隐藏" : "已生成",
+  }));
+  return [
+    ...frontMatter,
+    {
+      id: "toc",
+      title: "目录",
+      metaText: `${manuscript.table_of_contents.length} 章`,
+      statusText: "已生成",
+    },
+    {
+      id: "chapters",
+      title: "正文",
+      metaText: `${manuscript.chapters.length} 章`,
+      statusText: "已生成",
+    },
+    ...backMatter,
+  ];
+}
+
+function manuscriptChapterViews(
+  manuscript: MemoirBookManuscript | null,
+  output: MemoirBookOutput | null,
+  selectedVersionId = "",
+): BookManuscriptChapterView[] {
+  if (!manuscript) {
+    return bookOutputChapterPreviews(output, selectedVersionId).map((chapter) => ({
+      id: `fallback:${chapter.id}`,
+      chapterId: chapter.chapterId,
+      indexText: chapter.indexText,
+      title: chapter.title,
+      intro: "",
+      quoteText: "",
+      metaText: chapter.metaText,
+      contentPreview: previewText(chapter.content, 96),
+    }));
+  }
+  return (manuscript.chapters || []).map((chapter, index) => {
+    const chapterIndex = responseCount(chapter.index) || index + 1;
+    const quote = (chapter.pull_quotes || []).map((item) => trimText(item.text)).find(Boolean) || "";
+    const sourceCount = chapter.source_refs?.length || 0;
+    const hintText = [trimText(chapter.time_hint), trimText(chapter.place_hint)].filter(Boolean).join(" · ");
+    return {
+      id: `${chapter.chapter_id}:${chapterIndex}`,
+      chapterId: chapter.chapter_id,
+      indexText: `第 ${chapterIndex} 章`,
+      title: trimText(chapter.title) || "未命名章节",
+      intro: trimText(chapter.intro),
+      quoteText: quote,
+      metaText: [hintText, `${trimText(chapter.content).length} 字`, bookSourceCountText(sourceCount)]
+        .filter(Boolean)
+        .join(" · "),
+      contentPreview: previewText(chapter.content, 96),
+    };
+  });
+}
+
+export function bookManuscriptData(
+  output: MemoirBookOutput | null,
+  selectedVersionId = "",
+): Pick<
+  BookData,
+  | "bookManuscriptAvailable"
+  | "bookManuscriptTitle"
+  | "bookManuscriptSubtitle"
+  | "bookManuscriptTemplateLabel"
+  | "bookManuscriptSettingsText"
+  | "bookManuscriptStructureItems"
+  | "bookManuscriptFrontMatterItems"
+  | "bookManuscriptChapterItems"
+  | "bookManuscriptBackMatterItems"
+> {
+  const manuscript = selectedBookManuscript(output, selectedVersionId);
+  const fallbackTitle = bookOutputPreviewTitle(output, selectedVersionId);
+  const structureItems = manuscriptStructureItems(manuscript, output, selectedVersionId);
+  const chapterItems = manuscriptChapterViews(manuscript, output, selectedVersionId);
+  return {
+    bookManuscriptAvailable: Boolean(manuscript || structureItems.length || chapterItems.length),
+    bookManuscriptTitle: trimText(manuscript?.profile.title || fallbackTitle),
+    bookManuscriptSubtitle: trimText(manuscript?.profile.subtitle || "根据已确认章节整理"),
+    bookManuscriptTemplateLabel: manuscript ? manuscriptTemplateLabel(manuscript.profile.template) : "基础成书版",
+    bookManuscriptSettingsText: manuscriptSettingsText(manuscript),
+    bookManuscriptStructureItems: structureItems,
+    bookManuscriptFrontMatterItems: manuscript
+      ? (manuscript.front_matter || []).map((section, index) => sectionView(section, index, "front"))
+      : [],
+    bookManuscriptChapterItems: chapterItems,
+    bookManuscriptBackMatterItems: manuscript
+      ? backMatterSections(manuscript).map((section, index) => sectionView(section, index, "back"))
+      : [],
+  };
+}
+
 export function bookOutputVersionText(output: MemoirBookOutput | null): string {
   const version = output?.latest_version?.version;
   return version ? `全书第 ${version} 版` : "尚未生成全书";
@@ -732,6 +964,15 @@ export function bookOutputData(output: MemoirBookOutput | null, selectedVersionI
   | "bookPreviewTitle"
   | "bookPreviewTocItems"
   | "bookPreviewChapters"
+  | "bookManuscriptAvailable"
+  | "bookManuscriptTitle"
+  | "bookManuscriptSubtitle"
+  | "bookManuscriptTemplateLabel"
+  | "bookManuscriptSettingsText"
+  | "bookManuscriptStructureItems"
+  | "bookManuscriptFrontMatterItems"
+  | "bookManuscriptChapterItems"
+  | "bookManuscriptBackMatterItems"
   | "bookVersionText"
   | "bookVersionOptions"
   | "bookSelectedVersionId"
@@ -743,6 +984,7 @@ export function bookOutputData(output: MemoirBookOutput | null, selectedVersionI
 > {
   const versionState = bookVersionOptions(output, selectedVersionId);
   const content = selectedBookContent(output, versionState.selectedId);
+  const manuscriptData = bookManuscriptData(output, versionState.selectedId);
   return {
     bookOutput: output,
     bookContent: content,
@@ -750,6 +992,7 @@ export function bookOutputData(output: MemoirBookOutput | null, selectedVersionI
     bookPreviewTitle: bookOutputPreviewTitle(output, versionState.selectedId),
     bookPreviewTocItems: bookOutputTocItems(output, versionState.selectedId),
     bookPreviewChapters: bookOutputChapterPreviews(output, versionState.selectedId),
+    ...manuscriptData,
     bookVersionText: selectedBookOutputVersionText(output, versionState.selectedId),
     bookVersionOptions: versionState.options,
     bookSelectedVersionId: versionState.selectedId,
@@ -1167,6 +1410,15 @@ export function guestBookData(): Partial<BookData> {
     bookPreviewTitle: "",
     bookPreviewTocItems: [],
     bookPreviewChapters: [],
+    bookManuscriptAvailable: false,
+    bookManuscriptTitle: "",
+    bookManuscriptSubtitle: "",
+    bookManuscriptTemplateLabel: "基础成书版",
+    bookManuscriptSettingsText: "",
+    bookManuscriptStructureItems: [],
+    bookManuscriptFrontMatterItems: [],
+    bookManuscriptChapterItems: [],
+    bookManuscriptBackMatterItems: [],
     bookVersionText: "尚未生成全书",
     bookVersionOptions: [],
     bookSelectedVersionId: "",
