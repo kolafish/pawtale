@@ -533,6 +533,9 @@ async def export_mobile_memoir_book_output(
         memoir_book_outputs.MemoirBookOutputExportFormat.PDF,
         alias="format",
     ),
+    layout: memoir_book_outputs.MemoirBookOutputExportLayout = Query(
+        memoir_book_outputs.MemoirBookOutputExportLayout.STANDARD
+    ),
     version_id: str | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -542,6 +545,7 @@ async def export_mobile_memoir_book_output(
         user_id=current_user.id,
         project_id=project_id,
         export_format=export_format,
+        layout=layout,
         version_id=version_id,
     )
     return Response(

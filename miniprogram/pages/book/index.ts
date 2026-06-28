@@ -2,6 +2,7 @@ import type {
   MemoirBookAudioResponse,
   MemoirBookChapterDraft,
   MemoirBookOutputExportFormat,
+  MemoirBookOutputExportLayout,
   MemoirBookOutput,
   MemoirBookPlan,
   MemoirBookPlanStructureCommandRequest,
@@ -105,6 +106,7 @@ import {
   bookOutlineNarrationText,
   bookVoiceCommandActionText,
   buildAutomationEventViews,
+  BOOK_EXPORT_LAYOUT_OPTIONS,
   canExecuteBookVoiceCommand,
 } from "./book-view-model";
 export {
@@ -132,6 +134,7 @@ interface DatasetEvent {
       action?: string;
       direction?: string;
       format?: MemoirBookOutputExportFormat;
+      layout?: MemoirBookOutputExportLayout;
       utteranceId?: string;
     };
   };
@@ -424,6 +427,7 @@ Page<BookData, {
   regenerateMergedChapter(chapterId: string): Promise<void>;
   generateBook(): Promise<void>;
   changeBookOutputVersion(event: PickerEvent): void;
+  changeBookExportLayout(event: PickerEvent): void;
   downloadBookOutputExport(event: DatasetEvent): Promise<void>;
   editBookOutputChapter(event: DatasetEvent): void;
   playChapterAudio(event: DatasetEvent): Promise<void>;
@@ -575,6 +579,11 @@ Page<BookData, {
     bookStaleNotice: "",
     bookActionText: "生成全书",
     bookExportBusyTarget: "",
+    bookExportLayout: "standard",
+    bookExportLayoutIndex: 0,
+    bookExportLayoutLabel: BOOK_EXPORT_LAYOUT_OPTIONS[0].label,
+    bookExportLayoutDetailText: BOOK_EXPORT_LAYOUT_OPTIONS[0].detailText,
+    bookExportLayoutOptions: BOOK_EXPORT_LAYOUT_OPTIONS,
     ttsBusyTarget: "",
     playingTarget: "",
     bookTTSActiveTarget: "",
@@ -783,9 +792,26 @@ Page<BookData, {
     this.setData(bookOutputData(this.data.bookOutput, option.id));
   },
 
+  changeBookExportLayout(event) {
+    const index = Number(event.detail.value);
+    const option = this.data.bookExportLayoutOptions[index];
+    if (!option) {
+      return;
+    }
+    this.setData({
+      bookExportLayout: option.value,
+      bookExportLayoutIndex: index,
+      bookExportLayoutLabel: option.label,
+      bookExportLayoutDetailText: option.detailText,
+    });
+  },
+
   async downloadBookOutputExport(event) {
     const format: MemoirBookOutputExportFormat = event.currentTarget.dataset.format === "txt" ? "txt" : "pdf";
-    const target = `book-export:${format}`;
+    const layout: MemoirBookOutputExportLayout = format === "pdf" && event.currentTarget.dataset.layout === "large_print"
+      ? "large_print"
+      : (format === "pdf" ? this.data.bookExportLayout : "standard");
+    const target = `book-export:${format}:${layout}`;
     if (!this.data.projectId || this.data.bookExportBusyTarget || this.data.generatingBook) {
       return;
     }
@@ -807,6 +833,7 @@ Page<BookData, {
         this.data.projectId,
         format,
         this.data.bookSelectedVersionId,
+        layout,
       );
       if (format === "pdf") {
         const wxWithDocument = wx as WxWithDocument;

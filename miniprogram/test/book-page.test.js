@@ -747,6 +747,16 @@ test("book page exposes a compact voice assistant entry", () => {
   assert.match(wxss, /#9f4a3c/);
 });
 
+test("book page exposes PDF layout and print export controls", () => {
+  const wxml = fs.readFileSync(path.join(__dirname, "../pages/book/index.wxml"), "utf8");
+
+  assert.match(wxml, /PDF 排版/);
+  assert.match(wxml, /bindchange="changeBookExportLayout"/);
+  assert.match(wxml, /导出 PDF/);
+  assert.match(wxml, /打印版 PDF/);
+  assert.match(wxml, /data-layout="large_print"/);
+});
+
 test("book page builds outline narration for saved chapter titles", () => {
   const { mod } = loadBookPage();
   const plan = samplePlan("confirmed");
@@ -1946,8 +1956,8 @@ test("book page downloads selected full-book output export and opens PDF", async
   };
   const { page } = loadBookPage({
     voiceApiExports: {
-      downloadMemoirBookOutputExport: async (projectId, format, versionId) => {
-        calls.push({ projectId, format, versionId });
+      downloadMemoirBookOutputExport: async (projectId, format, versionId, layout) => {
+        calls.push({ projectId, format, versionId, layout });
         return "/tmp/book.pdf";
       },
     },
@@ -1962,6 +1972,7 @@ test("book page downloads selected full-book output export and opens PDF", async
   });
   page.applyBookOutput.call(context, output);
   page.changeBookOutputVersion.call(context, { currentTarget: { dataset: {} }, detail: { value: "1" } });
+  page.changeBookExportLayout.call(context, { currentTarget: { dataset: {} }, detail: { value: "1" } });
 
   await page.downloadBookOutputExport.call(context, {
     currentTarget: { dataset: { format: "pdf" } },
@@ -1971,7 +1982,9 @@ test("book page downloads selected full-book output export and opens PDF", async
     projectId: "project/1",
     format: "pdf",
     versionId: "book-output-version-1",
+    layout: "large_print",
   });
+  assert.equal(context.data.bookExportLayoutLabel, "大字打印");
   assert.equal(opened[0].filePath, "/tmp/book.pdf");
   assert.equal(opened[0].fileType, "pdf");
   assert.equal(opened[0].showMenu, true);
@@ -3496,7 +3509,7 @@ test("book output export download uses encoded backend route and session cookie"
   assert.equal(path, "/tmp/book.pdf");
   assert.equal(
     downloads[0].url,
-    "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-output/export?format=pdf&version_id=version%2F1",
+    "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-output/export?format=pdf&layout=standard&version_id=version%2F1",
   );
   assert.equal(downloads[0].header.Cookie, "pawtale_session=abc");
   delete global.wx;

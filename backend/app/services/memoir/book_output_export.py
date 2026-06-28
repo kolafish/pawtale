@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from enum import StrEnum
 
 from app.services.file_exports import ExportFile, safe_filename
@@ -7,19 +8,50 @@ from app.services.file_exports import ExportFile, safe_filename
 
 PDF_PAGE_WIDTH = 595
 PDF_PAGE_HEIGHT = 842
-PDF_MARGIN_X = 58
-PDF_START_Y = 780
-PDF_LINE_HEIGHT = 18
-PDF_MAX_LINE_UNITS = 34
-PDF_MAX_LINES_PER_PAGE = 40
-
 
 class MemoirBookOutputExportFormat(StrEnum):
     TXT = "txt"
     PDF = "pdf"
 
 
-def _wrap_pdf_line(text: str, max_units: int = PDF_MAX_LINE_UNITS) -> list[str]:
+class MemoirBookOutputExportLayout(StrEnum):
+    STANDARD = "standard"
+    LARGE_PRINT = "large_print"
+
+
+@dataclass(frozen=True)
+class PDFLayout:
+    font_size: int
+    line_height: int
+    margin_x: int
+    start_y: int
+    max_line_units: int
+    max_lines_per_page: int
+    filename_suffix: str = ""
+
+
+PDF_LAYOUTS = {
+    MemoirBookOutputExportLayout.STANDARD: PDFLayout(
+        font_size=13,
+        line_height=18,
+        margin_x=58,
+        start_y=780,
+        max_line_units=34,
+        max_lines_per_page=40,
+    ),
+    MemoirBookOutputExportLayout.LARGE_PRINT: PDFLayout(
+        font_size=16,
+        line_height=24,
+        margin_x=64,
+        start_y=760,
+        max_line_units=26,
+        max_lines_per_page=29,
+        filename_suffix="打印版",
+    ),
+}
+
+
+def _wrap_pdf_line(text: str, max_units: int) -> list[str]:
     if not text:
         return [""]
     lines: list[str] = []
@@ -39,14 +71,14 @@ def _wrap_pdf_line(text: str, max_units: int = PDF_MAX_LINE_UNITS) -> list[str]:
     return lines
 
 
-def _pdf_lines(text: str) -> list[str]:
+def _pdf_lines(text: str, layout: PDFLayout) -> list[str]:
     lines: list[str] = []
     for raw_line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
         stripped = raw_line.strip()
         if not stripped:
             lines.append("")
             continue
-        lines.extend(_wrap_pdf_line(stripped))
+        lines.extend(_wrap_pdf_line(stripped, layout.max_line_units))
     return lines
 
 
@@ -54,16 +86,16 @@ def _pdf_hex_text(text: str) -> str:
     return text.encode("utf-16-be").hex().upper()
 
 
-def _pdf_stream(lines: list[str]) -> bytes:
+def _pdf_stream(lines: list[str], layout: PDFLayout) -> bytes:
     commands = [
         "BT",
-        "/F1 13 Tf",
-        f"{PDF_MARGIN_X} {PDF_START_Y} Td",
+        f"/F1 {layout.font_size} Tf",
+        f"{layout.margin_x} {layout.start_y} Td",
     ]
     first = True
     for line in lines:
         if not first:
-            commands.append(f"0 -{PDF_LINE_HEIGHT} Td")
+            commands.append(f"0 -{layout.line_height} Td")
         first = False
         if line:
             commands.append(f"<{_pdf_hex_text(line)}> Tj")
@@ -71,11 +103,11 @@ def _pdf_stream(lines: list[str]) -> bytes:
     return "\n".join(commands).encode("ascii")
 
 
-def _render_pdf(content: str) -> bytes:
-    lines = _pdf_lines(content.strip()) or ["我的回忆录"]
+def _render_pdf(content: str, layout: PDFLayout) -> bytes:
+    lines = _pdf_lines(content.strip(), layout) or ["我的回忆录"]
     pages = [
-        lines[index:index + PDF_MAX_LINES_PER_PAGE]
-        for index in range(0, len(lines), PDF_MAX_LINES_PER_PAGE)
+        lines[index:index + layout.max_lines_per_page]
+        for index in range(0, len(lines), layout.max_lines_per_page)
     ]
     objects: list[bytes] = []
 
@@ -102,7 +134,7 @@ def _render_pdf(content: str) -> bytes:
 
     page_ids: list[int] = []
     for page_lines in pages:
-        stream = _pdf_stream(page_lines)
+        stream = _pdf_stream(page_lines, layout)
         content_id = add_object(
             b"<< /Length " + str(len(stream)).encode("ascii") + b" >>\nstream\n" + stream + b"\nendstream"
         )
@@ -141,8 +173,15 @@ def _render_pdf(content: str) -> bytes:
     return bytes(output)
 
 
-def _book_export_filename(title: str, version: int, extension: str) -> str:
-    return safe_filename(f"{title}-全书第{version}版", extension)
+def _book_export_filename(
+    title: str,
+    version: int,
+    extension: str,
+    layout: MemoirBookOutputExportLayout,
+) -> str:
+    suffix = PDF_LAYOUTS[layout].filename_suffix if extension == "pdf" else ""
+    parts = [title, f"全书第{version}版", suffix]
+    return safe_filename("-".join(part for part in parts if part), extension)
 
 
 def render_book_output_export(
@@ -151,15 +190,17 @@ def render_book_output_export(
     version: int,
     content: str,
     export_format: MemoirBookOutputExportFormat,
+    layout: MemoirBookOutputExportLayout = MemoirBookOutputExportLayout.STANDARD,
 ) -> ExportFile:
     if export_format == MemoirBookOutputExportFormat.PDF:
+        pdf_layout = PDF_LAYOUTS.get(layout, PDF_LAYOUTS[MemoirBookOutputExportLayout.STANDARD])
         return ExportFile(
-            filename=_book_export_filename(title, version, "pdf"),
+            filename=_book_export_filename(title, version, "pdf", layout),
             media_type="application/pdf",
-            content=_render_pdf(content),
+            content=_render_pdf(content, pdf_layout),
         )
     return ExportFile(
-        filename=_book_export_filename(title, version, "txt"),
+        filename=_book_export_filename(title, version, "txt", MemoirBookOutputExportLayout.STANDARD),
         media_type="text/plain; charset=utf-8",
         content=content + "\n",
     )
