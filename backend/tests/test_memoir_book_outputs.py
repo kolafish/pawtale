@@ -146,6 +146,15 @@ async def test_mobile_memoir_book_output_requires_all_chapters_confirmed(client,
 async def test_mobile_memoir_book_output_generate_combines_confirmed_chapters(client, test_db):
     project_id = await _active_project_id(client)
     plan, chapters = await _create_confirmed_book_plan(test_db, project_id=project_id)
+    chapters[0].source_refs_json = [
+        {
+            "utterance_id": "utterance-1",
+            "transcript_version_id": "transcript-version-1",
+            "voice_session_id": "voice-session-1",
+            "quote": "我小时候常在外婆家的院子里晒太阳。",
+        }
+    ]
+    await test_db.commit()
 
     response = await client.post(
         f"/api/mobile/memoir/projects/{project_id}/book-output/generate",
@@ -173,6 +182,25 @@ async def test_mobile_memoir_book_output_generate_combines_confirmed_chapters(cl
     assert structured["chapters"][0]["chapter_id"] == chapters[0].id
     assert structured["chapters"][0]["index"] == 1
     assert structured["chapters"][0]["content"] == "我小时候常在外婆家的院子里晒太阳。"
+    manuscript = data["latest_version"]["manuscript"]
+    assert manuscript["schema_version"] == 1
+    assert manuscript["profile"]["template"] == "classic_family"
+    assert manuscript["profile"]["title"] == "外婆回忆录"
+    assert manuscript["profile"]["subtitle"] == "根据口述访谈整理"
+    assert [section["kind"] for section in manuscript["front_matter"]] == [
+        "cover",
+        "title_page",
+        "generation_note",
+        "preface",
+    ]
+    assert [item["title"] for item in manuscript["table_of_contents"]] == ["外婆家的童年", "第一次离家"]
+    assert manuscript["chapters"][0]["chapter_id"] == chapters[0].id
+    assert manuscript["chapters"][0]["intro"].startswith("这一章主要记录「外婆家的童年」")
+    assert manuscript["chapters"][0]["pull_quotes"][0]["text"] == "我小时候常在外婆家的院子里晒太阳。"
+    assert manuscript["chapters"][0]["source_refs"][0]["utterance_id"] == "utterance-1"
+    assert manuscript["back_matter"]["source_appendix"]["title"] == "章节来源"
+    assert "第1章「外婆家的童年」：1 条讲述来源" in manuscript["back_matter"]["source_appendix"]["content"]
+    assert manuscript["render_settings"]["page_size"] == "a5"
 
     stored_output = await test_db.scalar(select(MemoirBookOutput).where(MemoirBookOutput.project_id == project_id))
     stored_versions = (
@@ -182,6 +210,7 @@ async def test_mobile_memoir_book_output_generate_combines_confirmed_chapters(cl
     ).scalars().all()
     assert stored_output.plan_id == plan.id
     assert len(stored_versions) == 1
+    assert stored_versions[0].manuscript_json["profile"]["title"] == "外婆回忆录"
 
 
 async def test_mobile_memoir_book_output_generate_returns_existing_without_force(client, test_db):

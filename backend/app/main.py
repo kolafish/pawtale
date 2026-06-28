@@ -31,6 +31,12 @@ async def _auto_migrate():
         book_chapter_columns = {row[1] for row in result.fetchall()}
         if "summary" in book_chapter_columns:
             await conn.execute(text("ALTER TABLE memoir_book_plan_chapters DROP COLUMN summary"))
+        result = await conn.execute(text("PRAGMA table_info(memoir_book_output_versions)"))
+        book_output_version_columns = {row[1] for row in result.fetchall()}
+        if "manuscript_json" not in book_output_version_columns:
+            await conn.execute(
+                text("ALTER TABLE memoir_book_output_versions ADD COLUMN manuscript_json JSON NOT NULL DEFAULT '{}'")
+            )
     await migrate_auth_schema(engine)
     await migrate_git_sync_schema(engine)
     await migrate_memoir_voice_schema(engine)

@@ -22,6 +22,14 @@ from app.models.memoir import (
 from app.schemas.memoir_book import (
     MemoirBookAudioRequest,
     MemoirBookAudioResponse,
+    MemoirBookManuscript,
+    MemoirBookManuscriptBackMatter,
+    MemoirBookManuscriptChapter,
+    MemoirBookManuscriptProfile,
+    MemoirBookManuscriptQuote,
+    MemoirBookManuscriptRenderSettings,
+    MemoirBookManuscriptSection,
+    MemoirBookManuscriptSourceRef,
     MemoirBookOutputGenerateRequest,
     MemoirBookOutputResponse,
     MemoirBookOutputStructuredChapterResponse,
@@ -130,6 +138,185 @@ def _structured_content_response(
     )
 
 
+def _brief_text(text: str, *, max_chars: int) -> str:
+    normalized = " ".join(text.replace("\r\n", "\n").replace("\r", "\n").split())
+    if len(normalized) <= max_chars:
+        return normalized
+    return normalized[:max_chars].rstrip("，。；、,. ") + "。"
+
+
+def _first_sentence(text: str, *, max_chars: int) -> str:
+    normalized = " ".join(text.replace("\r\n", "\n").replace("\r", "\n").split())
+    if not normalized:
+        return ""
+    for index, char in enumerate(normalized):
+        if char in "。！？!?":
+            return _brief_text(normalized[:index + 1], max_chars=max_chars)
+    return _brief_text(normalized, max_chars=max_chars)
+
+
+def _manuscript_source_refs(raw_refs: object) -> list[MemoirBookManuscriptSourceRef]:
+    if not isinstance(raw_refs, list):
+        return []
+    refs: list[MemoirBookManuscriptSourceRef] = []
+    for item in raw_refs:
+        if not isinstance(item, dict):
+            continue
+        utterance_id = _safe_str(item.get("utterance_id"))
+        if not utterance_id:
+            continue
+        refs.append(
+            MemoirBookManuscriptSourceRef(
+                utterance_id=utterance_id,
+                transcript_version_id=_safe_str(item.get("transcript_version_id")) or None,
+                voice_session_id=_safe_str(item.get("voice_session_id")) or None,
+                quote=_safe_str(item.get("quote")),
+            )
+        )
+    return refs
+
+
+def _chapter_intro(title: str, content: str) -> str:
+    excerpt = _first_sentence(content, max_chars=70)
+    if not excerpt:
+        return f"这一章主要记录「{title}」相关的回忆，保留口述者对这段经历的讲述。"
+    return f"这一章主要记录「{title}」相关的回忆。从口述内容看，开头最清楚的记忆是：{excerpt}"
+
+
+def _chapter_pull_quotes(content: str, source_refs: list[MemoirBookManuscriptSourceRef]) -> list[MemoirBookManuscriptQuote]:
+    for ref in source_refs:
+        quote = _brief_text(ref.quote, max_chars=80)
+        if quote:
+            return [MemoirBookManuscriptQuote(text=quote, source_ref_ids=[ref.utterance_id])]
+    quote = _first_sentence(content, max_chars=80)
+    return [MemoirBookManuscriptQuote(text=quote)] if quote else []
+
+
+def _manuscript_from_snapshot(
+    *,
+    title: str,
+    content: str,
+    snapshot: list[dict[str, object]],
+) -> MemoirBookManuscript | None:
+    if not snapshot:
+        return None
+    toc: list[MemoirBookOutputTableOfContentsItemResponse] = []
+    chapters: list[MemoirBookManuscriptChapter] = []
+    for fallback_index, item in enumerate(snapshot, start=1):
+        chapter_id = _safe_str(item.get("chapter_id"))
+        chapter_title = _safe_str(item.get("chapter_title")) or _safe_str(item.get("title"))
+        chapter_content = _safe_str(item.get("content"))
+        if not chapter_id or not chapter_title or not chapter_content:
+            continue
+        chapter_index = _positive_int(item.get("chapter_index")) or fallback_index
+        source_refs = _manuscript_source_refs(item.get("source_refs"))
+        char_count = _positive_int(item.get("content_char_count")) or len(chapter_content)
+        source_count = _positive_int(item.get("source_count")) or len(source_refs)
+        toc.append(
+            MemoirBookOutputTableOfContentsItemResponse(
+                chapter_id=chapter_id,
+                index=chapter_index,
+                title=chapter_title,
+                char_count=char_count,
+                source_count=source_count,
+            )
+        )
+        chapters.append(
+            MemoirBookManuscriptChapter(
+                chapter_id=chapter_id,
+                index=chapter_index,
+                title=chapter_title,
+                intro=_chapter_intro(chapter_title, chapter_content),
+                pull_quotes=_chapter_pull_quotes(chapter_content, source_refs),
+                content=chapter_content,
+                source_refs=source_refs,
+            )
+        )
+    if not chapters:
+        return None
+    chapter_count = len(chapters)
+    front_matter = [
+        MemoirBookManuscriptSection(
+            kind="cover",
+            title=title,
+            content=f"{title}\n根据口述访谈整理",
+        ),
+        MemoirBookManuscriptSection(
+            kind="title_page",
+            title="扉页",
+            content=f"{title}\n\n口述：待补充\n整理：家人整理",
+        ),
+        MemoirBookManuscriptSection(
+            kind="generation_note",
+            title="版权、授权与生成说明",
+            content=(
+                "本书根据口述访谈整理而成。文本经过语音转写、家人复核与 AI 辅助整理；"
+                "AI 的作用包括章节归类、语句通顺、目录梳理和标题生成，不主动新增未经口述确认的事实。\n\n"
+                "本书仅供家庭内部保存与阅读。未经本人或家属同意，不得公开传播。"
+            ),
+        ),
+        MemoirBookManuscriptSection(
+            kind="preface",
+            title="前言",
+            content=(
+                f"这本书记录的是「{title}」中的家人、生活、路途和那些已经远去的日子。"
+                "它不试图概括一个时代，只是把一个人亲口说出的生活，尽量完整地留下来。"
+            ),
+        ),
+    ]
+    source_count = sum(item.source_count for item in toc)
+    back_matter = MemoirBookManuscriptBackMatter(
+        afterword=MemoirBookManuscriptSection(
+            kind="afterword",
+            title="后记",
+            content="这些讲述有些清楚，有些还需要家人继续补充。能先留下来，已经是这本书最重要的意义。",
+        ),
+        interview_records=MemoirBookManuscriptSection(
+            kind="interview_records",
+            title="访谈记录",
+            content=f"本书当前收录 {chapter_count} 章，关联 {source_count} 条讲述来源。访谈日期和方式可在后续版本中继续补充。",
+        ),
+        version_note=MemoirBookManuscriptSection(
+            kind="version_note",
+            title="版本说明",
+            content="书中正文采用故事书版表达；后台保留章节来源和口述素材，便于追溯和继续修订。",
+        ),
+        unconfirmed_facts=MemoirBookManuscriptSection(
+            kind="unconfirmed_facts",
+            title="未确认信息",
+            content="当前没有单独标记的未确认信息。后续可在章节编辑中补充时间、地点或姓名待确认项。",
+        ),
+        source_appendix=MemoirBookManuscriptSection(
+            kind="source_appendix",
+            title="章节来源",
+            content="\n".join(f"第{item.index}章「{item.title}」：{item.source_count} 条讲述来源" for item in toc),
+        ),
+    )
+    return MemoirBookManuscript(
+        profile=MemoirBookManuscriptProfile(title=title, subtitle="根据口述访谈整理"),
+        front_matter=front_matter,
+        table_of_contents=toc,
+        chapters=chapters,
+        back_matter=back_matter,
+        render_settings=MemoirBookManuscriptRenderSettings(),
+    )
+
+
+def _manuscript_response(
+    *,
+    title: str,
+    content: str,
+    snapshot: list[dict[str, object]],
+    stored: object,
+) -> MemoirBookManuscript | None:
+    if isinstance(stored, dict) and stored:
+        try:
+            return MemoirBookManuscript.model_validate(stored)
+        except ValueError:
+            pass
+    return _manuscript_from_snapshot(title=title, content=content, snapshot=snapshot)
+
+
 def _latest_chapter_version(draft: MemoirBookChapterDraft | None) -> MemoirBookChapterDraftVersion | None:
     if not draft or not draft.versions:
         return None
@@ -141,6 +328,12 @@ def _output_version_response(version: MemoirBookOutputVersion, *, title: str) ->
         item for item in (version.chapter_snapshot_json or [])
         if isinstance(item, dict)
     ]
+    manuscript = _manuscript_response(
+        title=title,
+        content=version.content,
+        snapshot=snapshot,
+        stored=version.manuscript_json,
+    )
     return MemoirBookOutputVersionResponse(
         id=version.id,
         output_id=version.output_id,
@@ -154,6 +347,7 @@ def _output_version_response(version: MemoirBookOutputVersion, *, title: str) ->
             content=version.content,
             snapshot=snapshot,
         ),
+        manuscript=manuscript,
         created_by=MemoirCreatedBy(version.created_by),
         created_at=version.created_at,
     )
@@ -250,6 +444,16 @@ def _chapter_snapshot(
 ) -> dict[str, object]:
     content = version.content.strip()
     source_refs = chapter.source_refs_json if isinstance(chapter.source_refs_json, list) else []
+    source_ref_snapshot = [
+        {
+            "utterance_id": _safe_str(item.get("utterance_id")),
+            "transcript_version_id": _safe_str(item.get("transcript_version_id")) or None,
+            "voice_session_id": _safe_str(item.get("voice_session_id")) or None,
+            "quote": _safe_str(item.get("quote")),
+        }
+        for item in source_refs
+        if isinstance(item, dict) and _safe_str(item.get("utterance_id"))
+    ]
     return {
         "chapter_id": chapter.id,
         "chapter_title": chapter.title,
@@ -259,7 +463,8 @@ def _chapter_snapshot(
         "draft_version_id": version.id,
         "draft_version": version.version,
         "content_char_count": len(content),
-        "source_count": len(source_refs),
+        "source_count": len(source_ref_snapshot),
+        "source_refs": source_ref_snapshot,
         "content": content,
     }
 
@@ -390,6 +595,7 @@ async def generate_book_output(
             BOOK_TTS_CACHE_KEY: None,
         }
 
+    manuscript = _manuscript_from_snapshot(title=title, content=content, snapshot=snapshot)
     version_number = await _latest_output_version_number(db, output.id) + 1
     db.add(
         MemoirBookOutputVersion(
@@ -399,6 +605,7 @@ async def generate_book_output(
             version=version_number,
             content=content,
             chapter_snapshot_json=snapshot,
+            manuscript_json=manuscript.model_dump(mode="json") if manuscript else {},
             created_by=MemoirCreatedBy.SYSTEM.value,
         )
     )

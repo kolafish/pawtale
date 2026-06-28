@@ -706,6 +706,91 @@ class MemoirBookOutputStructuredContentResponse(BaseModel):
     chapters: list[MemoirBookOutputStructuredChapterResponse] = Field(default_factory=list)
 
 
+class MemoirBookManuscriptProfile(BaseModel):
+    template: Literal["classic_family", "photo_memory", "oral_archive"] = "classic_family"
+    title: str
+    subtitle: str = ""
+    narrator_name: str = ""
+    prepared_by: str = "家人整理"
+    interview_date_range: str = ""
+    privacy_note: str = "本书仅供家庭内部保存与阅读。未经本人或家属同意，不得公开传播。"
+    ai_disclosure_note: str = (
+        "本书根据口述访谈整理而成。AI 的作用包括章节归类、语句通顺、目录梳理和标题生成，"
+        "不主动新增未经口述确认的事实。"
+    )
+
+
+class MemoirBookManuscriptSection(BaseModel):
+    kind: str
+    title: str
+    content: str = ""
+    enabled: bool = True
+
+
+class MemoirBookManuscriptQuote(BaseModel):
+    text: str
+    source_ref_ids: list[str] = Field(default_factory=list)
+
+
+class MemoirBookManuscriptPersonNote(BaseModel):
+    name: str
+    note: str = ""
+
+
+class MemoirBookManuscriptUnconfirmedFact(BaseModel):
+    text: str
+    source_ref_ids: list[str] = Field(default_factory=list)
+
+
+class MemoirBookManuscriptSourceRef(BaseModel):
+    utterance_id: str = ""
+    transcript_version_id: str | None = None
+    voice_session_id: str | None = None
+    quote: str = ""
+
+
+class MemoirBookManuscriptChapter(BaseModel):
+    chapter_id: str
+    index: int
+    title: str
+    subtitle: str = ""
+    intro: str = ""
+    time_hint: str = ""
+    place_hint: str = ""
+    pull_quotes: list[MemoirBookManuscriptQuote] = Field(default_factory=list)
+    people_notes: list[MemoirBookManuscriptPersonNote] = Field(default_factory=list)
+    uncertain_facts: list[MemoirBookManuscriptUnconfirmedFact] = Field(default_factory=list)
+    content: str
+    source_refs: list[MemoirBookManuscriptSourceRef] = Field(default_factory=list)
+
+
+class MemoirBookManuscriptRenderSettings(BaseModel):
+    page_size: Literal["a5"] = "a5"
+    layout: Literal["reading", "print"] = "reading"
+    font_scale: Literal["standard", "large"] = "standard"
+    show_headers: bool = True
+    show_source_appendix: bool = True
+    photo_mode: Literal["none", "chapter", "appendix"] = "none"
+
+
+class MemoirBookManuscriptBackMatter(BaseModel):
+    afterword: MemoirBookManuscriptSection
+    interview_records: MemoirBookManuscriptSection
+    version_note: MemoirBookManuscriptSection
+    unconfirmed_facts: MemoirBookManuscriptSection
+    source_appendix: MemoirBookManuscriptSection
+
+
+class MemoirBookManuscript(BaseModel):
+    schema_version: int = 1
+    profile: MemoirBookManuscriptProfile
+    front_matter: list[MemoirBookManuscriptSection] = Field(default_factory=list)
+    table_of_contents: list[MemoirBookOutputTableOfContentsItemResponse] = Field(default_factory=list)
+    chapters: list[MemoirBookManuscriptChapter] = Field(default_factory=list)
+    back_matter: MemoirBookManuscriptBackMatter
+    render_settings: MemoirBookManuscriptRenderSettings = Field(default_factory=MemoirBookManuscriptRenderSettings)
+
+
 class MemoirBookOutputVersionResponse(BaseModel):
     id: str
     output_id: str
@@ -715,6 +800,7 @@ class MemoirBookOutputVersionResponse(BaseModel):
     content: str
     chapter_snapshot_json: list[dict[str, object]] = Field(default_factory=list)
     structured_content: MemoirBookOutputStructuredContentResponse | None = None
+    manuscript: MemoirBookManuscript | None = None
     created_by: MemoirCreatedBy
     created_at: datetime
 
