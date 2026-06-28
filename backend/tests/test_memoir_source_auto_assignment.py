@@ -1,16 +1,20 @@
 import json
 
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 
 from app.domain.memoir.types import (
     MemoirAutomationEventType,
+    MemoirCreatedBy,
     MemoirEditingJobStatus,
     MemoirEditingJobType,
+    MemoirTranscriptVersionType,
 )
-from app.models.memoir import MemoirAutomationEvent, MemoirEditingJob
+from app.models.memoir import MemoirAutomationEvent, MemoirEditingJob, MemoirTranscriptVersion, MemoirVoiceUtterance
 from app.services.memoir.editing_job_handlers import register_memoir_editing_job_handlers
 from app.services.memoir.editing_jobs import clear_editing_job_handlers, enqueue_editing_job, run_editing_job
 from app.services.memoir.source_auto_assignment import run_source_auto_assignment_for_utterances
+from app.services.memoir.utterance_editing_pipeline import schedule_source_routing_for_ready_utterance
 from tests.memoir_helpers import (
     create_test_book_plan,
     create_test_chapter_draft,
@@ -76,6 +80,34 @@ def _ignore_route() -> dict[str, object]:
 def _register_source_routing_handler() -> None:
     clear_editing_job_handlers()
     register_memoir_editing_job_handlers()
+
+
+async def _load_utterance_for_routing(test_db, utterance_id: str) -> MemoirVoiceUtterance:
+    utterance = await test_db.scalar(
+        select(MemoirVoiceUtterance)
+        .where(MemoirVoiceUtterance.id == utterance_id)
+        .options(selectinload(MemoirVoiceUtterance.chat_message))
+    )
+    assert utterance is not None
+    return utterance
+
+
+async def _schedule_guarded_route_job(
+    test_db,
+    *,
+    project_id: str,
+    utterance_id: str,
+    ai_model: str | None = None,
+) -> MemoirEditingJob:
+    job = await schedule_source_routing_for_ready_utterance(
+        test_db,
+        project_id=project_id,
+        utterance=await _load_utterance_for_routing(test_db, utterance_id),
+        source="test",
+        ai_model=ai_model,
+    )
+    assert job is not None
+    return job
 
 
 async def test_source_auto_assignment_assigns_high_confidence_source_and_records_progress(
@@ -177,12 +209,11 @@ async def test_source_routing_job_assigns_high_confidence_source(client, test_db
         "后来想起外婆家的院子，最记得夏天一起摘菜和剥青豆。",
     )
     _patch_source_router_ai(monkeypatch, _assign_route(chapter.id))
-    job = await enqueue_editing_job(
+    job = await _schedule_guarded_route_job(
         test_db,
+        utterance_id=uncovered["utterance_id"],
         project_id=project_id,
-        job_type=MemoirEditingJobType.ROUTE_SOURCES,
-        payload_json={"utterance_ids": [uncovered["utterance_id"]], "ai_model": "deepseek-v4-pro"},
-        dedupe_key=f"route_source:{uncovered['utterance_id']}",
+        ai_model="deepseek-v4-pro",
     )
     await test_db.commit()
 
@@ -213,6 +244,61 @@ async def test_source_routing_job_assigns_high_confidence_source(client, test_db
     assert audit_job.status == MemoirEditingJobStatus.PENDING.value
     assert audit_job.dedupe_key == f"quality_audit:{project_id}"
     assert audit_job.payload_json["reason"] == "source_routing_completed"
+
+
+async def test_source_routing_job_skips_when_transcript_guard_is_missing(client, test_db):
+    created = await create_test_voice_transcript(client, test_db, "后来还记得老家院子里的枣树。")
+    project_id = created["session"]["project_id"]
+    job = await enqueue_editing_job(
+        test_db,
+        project_id=project_id,
+        job_type=MemoirEditingJobType.ROUTE_SOURCES,
+        payload_json={"utterance_ids": [created["utterance_id"]]},
+        dedupe_key=f"route_source:{created['utterance_id']}",
+    )
+    await test_db.commit()
+
+    assert await run_editing_job(test_db, job.id) is False
+    await test_db.refresh(job)
+    assert job.status == MemoirEditingJobStatus.SKIPPED.value
+    assert job.error_message == "source routing job missing transcript guard"
+    assert job.result_json["stale_utterance_ids"] == []
+
+
+async def test_source_routing_job_skips_when_transcript_changed_after_enqueue(client, test_db):
+    created = await create_test_voice_transcript(client, test_db, "后来还记得老家院子里的枣树。")
+    project_id = created["session"]["project_id"]
+    job = await _schedule_guarded_route_job(
+        test_db,
+        project_id=project_id,
+        utterance_id=created["utterance_id"],
+    )
+    utterance = await _load_utterance_for_routing(test_db, created["utterance_id"])
+    version = MemoirTranscriptVersion(
+        voice_session_id=utterance.voice_session_id,
+        source_artifact_id=utterance.id,
+        version_type=MemoirTranscriptVersionType.USER_EDITED.value,
+        content="用户重新整理后的讲述。",
+        created_by=MemoirCreatedBy.USER.value,
+    )
+    test_db.add(version)
+    await test_db.flush()
+    utterance.transcript_edited = "用户重新整理后的讲述。"
+    assert utterance.chat_message is not None
+    utterance.chat_message.content_text = "用户重新整理后的讲述。"
+    utterance.chat_message.transcript_version_id = version.id
+    test_db.add_all([utterance, utterance.chat_message])
+    await test_db.commit()
+
+    assert await run_editing_job(test_db, job.id) is False
+    await test_db.refresh(job)
+    assert job.status == MemoirEditingJobStatus.SKIPPED.value
+    assert job.error_message == "transcript changed before source routing"
+    assert job.result_json["stale_utterance_ids"] == [created["utterance_id"]]
+    event = await test_db.scalar(
+        select(MemoirAutomationEvent).where(MemoirAutomationEvent.project_id == project_id)
+    )
+    assert event is None
 
 
 async def test_source_auto_assignment_skips_new_topic_without_changing_plan(client, test_db, monkeypatch):
@@ -275,12 +361,10 @@ async def test_source_routing_job_holds_new_topic_for_review(client, test_db, mo
         "参加工作以后，我在供销社负责盘点货物，第一次拿到奖金特别高兴。",
     )
     _patch_source_router_ai(monkeypatch, _new_chapter_route("供销社工作初记"))
-    job = await enqueue_editing_job(
+    job = await _schedule_guarded_route_job(
         test_db,
+        utterance_id=uncovered["utterance_id"],
         project_id=project_id,
-        job_type=MemoirEditingJobType.ROUTE_SOURCES,
-        payload_json={"utterance_ids": [uncovered["utterance_id"]]},
-        dedupe_key=f"route_source:{uncovered['utterance_id']}",
     )
     await test_db.commit()
 
@@ -366,12 +450,10 @@ async def test_source_routing_job_ignores_non_memoir_source_without_review_event
     )
     ai_interaction = await create_test_voice_transcript(client, test_db, "你能不能别问了")
     _patch_source_router_ai(monkeypatch, _ignore_route())
-    job = await enqueue_editing_job(
+    job = await _schedule_guarded_route_job(
         test_db,
+        utterance_id=ai_interaction["utterance_id"],
         project_id=project_id,
-        job_type=MemoirEditingJobType.ROUTE_SOURCES,
-        payload_json={"utterance_ids": [ai_interaction["utterance_id"]]},
-        dedupe_key=f"route_source:{ai_interaction['utterance_id']}",
     )
     await test_db.commit()
 

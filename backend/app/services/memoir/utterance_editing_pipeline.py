@@ -1,17 +1,27 @@
 from __future__ import annotations
 
 import hashlib
+from dataclasses import dataclass
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.domain.memoir.types import MemoirEditingJobType
-from app.models.memoir import MemoirEditingJob, MemoirVoiceUtterance
+from app.models.memoir import MemoirEditingJob, MemoirVoiceSession, MemoirVoiceUtterance
 from app.services.memoir import editing_jobs
 
 
 ROUTE_PAYLOAD_TRANSCRIPT_VERSION_IDS_KEY = "transcript_version_ids"
 ROUTE_PAYLOAD_SOURCE_TEXT_HASHES_KEY = "source_text_hashes"
 ROUTE_PAYLOAD_SOURCE_TEXT_LENGTHS_KEY = "source_text_lengths"
+
+
+@dataclass(frozen=True)
+class SourceRoutingTranscriptGuard:
+    ok: bool
+    error_message: str = ""
+    stale_utterance_ids: tuple[str, ...] = ()
 
 
 def current_utterance_text(utterance: MemoirVoiceUtterance) -> str:
@@ -64,3 +74,50 @@ async def schedule_source_routing_for_ready_utterance(
         dedupe_key=f"route_source:{utterance.id}",
         replace_completed=replace_completed,
     )
+
+
+async def validate_source_routing_transcript_guard(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    payload_json: dict,
+    utterance_ids: list[str],
+) -> SourceRoutingTranscriptGuard:
+    expected_versions = payload_json.get(ROUTE_PAYLOAD_TRANSCRIPT_VERSION_IDS_KEY)
+    expected_hashes = payload_json.get(ROUTE_PAYLOAD_SOURCE_TEXT_HASHES_KEY)
+    if not isinstance(expected_versions, dict) or not isinstance(expected_hashes, dict):
+        return SourceRoutingTranscriptGuard(
+            ok=False,
+            error_message="source routing job missing transcript guard",
+        )
+
+    result = await db.execute(
+        select(MemoirVoiceUtterance)
+        .join(MemoirVoiceSession, MemoirVoiceUtterance.voice_session_id == MemoirVoiceSession.id)
+        .where(
+            MemoirVoiceSession.project_id == project_id,
+            MemoirVoiceUtterance.id.in_(utterance_ids),
+        )
+        .options(selectinload(MemoirVoiceUtterance.chat_message))
+    )
+    utterances = {utterance.id: utterance for utterance in result.scalars().all()}
+    stale_ids: list[str] = []
+    for utterance_id in utterance_ids:
+        utterance = utterances.get(utterance_id)
+        if utterance is None:
+            stale_ids.append(utterance_id)
+            continue
+        expected_version_id = expected_versions.get(utterance_id)
+        if current_transcript_version_id(utterance) != expected_version_id:
+            stale_ids.append(utterance_id)
+            continue
+        expected_hash = expected_hashes.get(utterance_id)
+        if source_text_hash(current_utterance_text(utterance)) != expected_hash:
+            stale_ids.append(utterance_id)
+    if stale_ids:
+        return SourceRoutingTranscriptGuard(
+            ok=False,
+            error_message="transcript changed before source routing",
+            stale_utterance_ids=tuple(stale_ids),
+        )
+    return SourceRoutingTranscriptGuard(ok=True)
