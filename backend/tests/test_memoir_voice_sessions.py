@@ -364,6 +364,14 @@ async def test_mobile_memoir_project_progress_snapshot_counts_book_state(client,
     event.metadata_json = {
         automation_events.VOICE_ANNOUNCED_AT_KEY: "2026-06-23T12:00:00+00:00",
         automation_events.VOICE_ANNOUNCED_SESSION_ID_KEY: "voice-session-1",
+        automation_events.ROUTES_KEY: [
+            {
+                "utterance_id": first["utterance_id"],
+                "source_index": 1,
+                "target_chapter_id": chapter.id,
+                "target_chapter_title": "外婆家的童年",
+            }
+        ],
     }
     await test_db.commit()
 
@@ -412,7 +420,19 @@ async def test_mobile_memoir_project_progress_snapshot_counts_book_state(client,
     )
     assert events_response.status_code == 200
     assert events_response.json()["total"] == 1
-    event_id = events_response.json()["items"][0]["id"]
+    event_item = events_response.json()["items"][0]
+    event_id = event_item["id"]
+    assert event_item["utterance_details"] == [
+        {
+            "utterance_id": first["utterance_id"],
+            "source_index": 1,
+            "record_title": "语音记录 1",
+            "preview_text": "我小时候住在外婆家。",
+            "chapter_id": chapter.id,
+            "chapter_title": "外婆家的童年",
+            "created_at": event_item["utterance_details"][0]["created_at"],
+        }
+    ]
 
     acknowledge_response = await client.post(
         f"/api/mobile/memoir/projects/{first['session']['project_id']}/automation-events/{event_id}/acknowledge"

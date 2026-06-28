@@ -326,6 +326,7 @@ class VoiceAssistantTurnStreamSession:
             max_tokens=max_tokens,
             turn_id=turn_id,
             artifacts=artifacts,
+            progress_context=project_progress_context,
             cancel_event=cancel_event,
         )
         if cancel_event.is_set():
@@ -346,7 +347,7 @@ class VoiceAssistantTurnStreamSession:
             self.db,
             user_id=self.user_id,
             project_id=voice_session.project_id,
-            event_ids=project_progress_context.automation_event_ids or [],
+            event_ids=project_progress_context.voice_announcement_event_ids or [],
             voice_session_id=voice_session.id,
             message_id=message.id,
         )
@@ -367,6 +368,7 @@ class VoiceAssistantTurnStreamSession:
                 "usage": artifacts.usage,
                 "progress_update": project_progress_context.progress_update,
                 "progress_update_used": project_progress_context.progress_update is not None,
+                "progress_spoken_text": project_progress_context.speech_prefix,
             }
         )
 
@@ -381,6 +383,7 @@ class VoiceAssistantTurnStreamSession:
         max_tokens: int,
         turn_id: str,
         artifacts: AssistantTurnArtifacts,
+        progress_context: ProgressPromptContext,
         cancel_event: asyncio.Event,
     ) -> None:
         text_queue: asyncio.Queue[str | None] = asyncio.Queue()
@@ -395,6 +398,13 @@ class VoiceAssistantTurnStreamSession:
             )
         )
         try:
+            await self._stream_progress_prefix(
+                text_queue=text_queue,
+                turn_id=turn_id,
+                artifacts=artifacts,
+                progress_context=progress_context,
+                cancel_event=cancel_event,
+            )
             await self._stream_text(
                 ai_client=ai_client,
                 system_prompt=system_prompt,
@@ -418,6 +428,31 @@ class VoiceAssistantTurnStreamSession:
             with contextlib.suppress(asyncio.CancelledError):
                 await audio_task
             raise
+
+    async def _stream_progress_prefix(
+        self,
+        *,
+        text_queue: asyncio.Queue[str | None],
+        turn_id: str,
+        artifacts: AssistantTurnArtifacts,
+        progress_context: ProgressPromptContext,
+        cancel_event: asyncio.Event,
+    ) -> None:
+        text = progress_context.speech_prefix.strip()
+        if not text or cancel_event.is_set():
+            return
+        artifacts.text += text
+        await text_queue.put(text)
+        await self.client.send_json(
+            {
+                "type": "text.delta",
+                "turn_id": turn_id,
+                "voice_session_id": self.voice_session_id,
+                "text_delta": text,
+                "text": artifacts.text,
+                "source": "progress_announcement",
+            }
+        )
 
     async def _stream_text(
         self,
@@ -530,6 +565,8 @@ class VoiceAssistantTurnStreamSession:
                     "progress_update": progress_context.progress_update,
                     "progress_update_used": progress_context.progress_update is not None,
                     "progress_automation_event_ids": progress_context.automation_event_ids or [],
+                    "progress_voice_announced_event_ids": progress_context.voice_announcement_event_ids or [],
+                    "progress_spoken_text": progress_context.speech_prefix,
                     "primary_intent": turn.primary_intent,
                     "intent_tags": turn.intent_tags,
                     "expects_answer": turn.expects_answer,

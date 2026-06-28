@@ -15,7 +15,11 @@ from app.domain.memoir.types import (
 )
 from app.models.memoir import MemoirAutomationEvent, MemoirBookPlan, MemoirBookPlanChapter, MemoirVoiceUtterance
 from app.models.projects import Project
-from app.schemas.memoir_voice import MemoirAutomationEventListResponse, MemoirAutomationEventResponse
+from app.schemas.memoir_voice import (
+    MemoirAutomationEventListResponse,
+    MemoirAutomationEventResponse,
+    MemoirAutomationEventUtteranceDetailResponse,
+)
 from app.services.memoir.access import load_memoir_project
 
 ACKNOWLEDGED_AT_KEY = "acknowledged_at"
@@ -110,6 +114,31 @@ def _source_ref_utterance_id(ref: object) -> str:
     return value.strip() if isinstance(value, str) else ""
 
 
+def _display_text(utterance: MemoirVoiceUtterance) -> str:
+    return (utterance.transcript_edited or "").strip() or (utterance.transcript_raw or "").strip()
+
+
+def _preview_text(text: str, limit: int = 72) -> str:
+    compact = re.sub(r"\s+", " ", text).strip()
+    return compact if len(compact) <= limit else f"{compact[:limit]}..."
+
+
+def _metadata_source_index(metadata: dict, utterance_id: str) -> int | None:
+    route = metadata.get(ROUTE_KEY)
+    if isinstance(route, dict) and route.get(UTTERANCE_ID_KEY) == utterance_id:
+        source_index = route.get("source_index")
+        return source_index if isinstance(source_index, int) and source_index > 0 else None
+
+    routes = metadata.get(ROUTES_KEY)
+    if isinstance(routes, list):
+        for route_item in routes:
+            if not isinstance(route_item, dict) or route_item.get(UTTERANCE_ID_KEY) != utterance_id:
+                continue
+            source_index = route_item.get("source_index")
+            return source_index if isinstance(source_index, int) and source_index > 0 else None
+    return None
+
+
 async def _assigned_source_chapters(
     db: AsyncSession,
     *,
@@ -139,6 +168,84 @@ async def _assigned_source_chapters(
                 chapter_title=chapter.title,
             )
     return assigned
+
+
+async def _utterance_details_by_event(
+    db: AsyncSession,
+    events: list[MemoirAutomationEvent],
+) -> dict[str, list[MemoirAutomationEventUtteranceDetailResponse]]:
+    event_utterance_ids = {
+        event.id: _event_utterance_ids(event)
+        for event in events
+    }
+    utterance_ids = _clean_utterance_ids(
+        [utterance_id for ids in event_utterance_ids.values() for utterance_id in ids]
+    )
+    if not utterance_ids:
+        return {event.id: [] for event in events}
+
+    utterance_result = await db.execute(
+        select(MemoirVoiceUtterance).where(MemoirVoiceUtterance.id.in_(utterance_ids))
+    )
+    utterances = {utterance.id: utterance for utterance in utterance_result.scalars().all()}
+
+    project_ids = {event.project_id for event in events}
+    chapter_result = await db.execute(
+        select(MemoirBookPlanChapter)
+        .join(MemoirBookPlan, MemoirBookPlanChapter.plan_id == MemoirBookPlan.id)
+        .where(
+            MemoirBookPlanChapter.project_id.in_(sorted(project_ids)),
+            MemoirBookPlan.status == MemoirBookPlanStatus.CONFIRMED.value,
+        )
+    )
+    chapter_by_id: dict[str, MemoirBookPlanChapter] = {}
+    assigned_by_project_utterance: dict[tuple[str, str], AssignedSourceChapter] = {}
+    for chapter in chapter_result.scalars().all():
+        chapter_by_id[chapter.id] = chapter
+        for ref in chapter.source_refs_json or []:
+            utterance_id = _source_ref_utterance_id(ref)
+            if not utterance_id:
+                continue
+            assigned_by_project_utterance[(chapter.project_id, utterance_id)] = AssignedSourceChapter(
+                chapter_id=chapter.id,
+                chapter_title=chapter.title,
+            )
+
+    details: dict[str, list[MemoirAutomationEventUtteranceDetailResponse]] = {}
+    for event in events:
+        event_details: list[MemoirAutomationEventUtteranceDetailResponse] = []
+        fallback_chapter = chapter_by_id.get(event.chapter_id or "")
+        for utterance_id in event_utterance_ids[event.id]:
+            utterance = utterances.get(utterance_id)
+            if not utterance:
+                continue
+            source_index = _metadata_source_index(event.metadata_json or {}, utterance_id)
+            assignment = assigned_by_project_utterance.get((event.project_id, utterance_id))
+            chapter_id = (
+                assignment.chapter_id
+                if assignment
+                else (fallback_chapter.id if fallback_chapter else None)
+            )
+            chapter_title = (
+                assignment.chapter_title
+                if assignment
+                else (fallback_chapter.title if fallback_chapter else None)
+            )
+            text = _display_text(utterance)
+            record_title = f"语音记录 {source_index}" if source_index else "讲述记录"
+            event_details.append(
+                MemoirAutomationEventUtteranceDetailResponse(
+                    utterance_id=utterance.id,
+                    source_index=source_index,
+                    record_title=record_title,
+                    preview_text=_preview_text(text),
+                    chapter_id=chapter_id,
+                    chapter_title=chapter_title,
+                    created_at=utterance.created_at,
+                )
+            )
+        details[event.id] = event_details
+    return details
 
 
 def _without_deleted_ids(value: object, deleted_ids: set[str]) -> list[str]:
@@ -279,7 +386,10 @@ def _event_is_voice_unannounced(event: MemoirAutomationEvent) -> bool:
     return _event_is_visible(event) and not metadata.get(VOICE_ANNOUNCED_AT_KEY)
 
 
-def event_response(event: MemoirAutomationEvent) -> MemoirAutomationEventResponse:
+def event_response(
+    event: MemoirAutomationEvent,
+    utterance_details: list[MemoirAutomationEventUtteranceDetailResponse] | None = None,
+) -> MemoirAutomationEventResponse:
     return MemoirAutomationEventResponse(
         id=event.id,
         project_id=event.project_id,
@@ -290,6 +400,7 @@ def event_response(event: MemoirAutomationEvent) -> MemoirAutomationEventRespons
         summary_text=event.summary_text,
         confidence=event.confidence,
         metadata_json=event.metadata_json or {},
+        utterance_details=utterance_details or [],
         created_at=event.created_at,
         updated_at=event.updated_at,
     )
@@ -461,8 +572,9 @@ async def list_automation_events(
     elif not include_acknowledged:
         events = [event for event in events if _event_is_visible(event)]
     items = events[:limit]
+    details_by_event = await _utterance_details_by_event(db, items)
     return MemoirAutomationEventListResponse(
-        items=[event_response(event) for event in items],
+        items=[event_response(event, details_by_event.get(event.id, [])) for event in items],
         total=len(events),
         limit=limit,
     )

@@ -53,6 +53,8 @@ class ProgressPromptContext:
     prompt_text: str
     progress_update: dict[str, object] | None = None
     automation_event_ids: list[str] | None = None
+    speech_prefix: str = ""
+    voice_announcement_event_ids: list[str] | None = None
 
 
 @dataclass(frozen=True)
@@ -121,6 +123,11 @@ def _compact_text(value: str) -> str:
     return re.sub(r"\s+", "", value.strip())
 
 
+def _quoted_title(text: str) -> str:
+    match = re.search(r"「([^」]+)」", text)
+    return match.group(1).strip() if match else ""
+
+
 def _latest_user_text(messages: list[MemoirChatMessage]) -> str:
     for message in reversed(_ordered_messages(messages)):
         if message.role == MemoirChatMessageRole.USER.value and message.content_text.strip():
@@ -166,15 +173,27 @@ def build_progress_prompt_context(snapshot: MemoirProjectProgressSnapshotRespons
             ),
             progress_update=None,
             automation_event_ids=[],
+            speech_prefix="",
+            voice_announcement_event_ids=[],
         )
 
     event_ids = selected_update.get("event_ids")
     automation_event_ids = [str(item) for item in event_ids] if isinstance(event_ids, list) else []
+    speech_prefix = _progress_speech_prefix(selected_update)
+    voice_announcement_event_ids = automation_event_ids if speech_prefix else []
+    if speech_prefix:
+        selected_update = {
+            **selected_update,
+            "speech_prefix": speech_prefix,
+            "voice_announcement_event_ids": voice_announcement_event_ids,
+        }
     prompt_text = _progress_prompt_text(selected_update)
     return ProgressPromptContext(
         prompt_text=prompt_text,
         progress_update=selected_update,
         automation_event_ids=automation_event_ids,
+        speech_prefix=speech_prefix,
+        voice_announcement_event_ids=voice_announcement_event_ids,
     )
 
 
@@ -183,6 +202,14 @@ def _progress_prompt_text(selected_update: dict[str, object]) -> str:
         "项目进度事实（调试期偏主动；只允许引用以下事实，不要编造数字、章节名或自动整理结果）：",
         f"- 本轮可选进度鼓励：{selected_update['text']}",
     ]
+    speech_prefix = selected_update.get("speech_prefix")
+    has_speech_prefix = isinstance(speech_prefix, str) and bool(speech_prefix.strip())
+    if has_speech_prefix:
+        lines.append(f"- 本轮语音开头会先播报：{speech_prefix.strip()}")
+    assignment_lines = selected_update.get("assignment_lines")
+    if isinstance(assignment_lines, list):
+        for line in [str(item).strip() for item in assignment_lines if str(item).strip()][:4]:
+            lines.append(f"- 自动归章明细：{line}")
     snapshot_line = selected_update.get("snapshot_line")
     if isinstance(snapshot_line, str) and snapshot_line.strip():
         lines.append(f"- 当前项目进度：{snapshot_line.strip()}")
@@ -203,6 +230,13 @@ def _progress_prompt_text(selected_update: dict[str, object]) -> str:
             "使用规则：审计建议只是方向，不是硬性脚本；优先顺着叙述者最新内容，"
             "调试阶段可以更主动带一句进度或后台整理结果，但不要替代追问。"
         )
+        if has_speech_prefix:
+            lines.append("如果系统已先播报审计进度，你不要重复同一条进度，直接接到访谈问题。")
+    elif has_speech_prefix:
+        lines.append(
+            "使用规则：上面的语音开头会由系统先播放；你不要重复同一条进度、数字或章节名，"
+            "只需要自然承接，然后继续访谈。"
+        )
     else:
         lines.append(
             "使用规则：调试阶段每次回应都尽量自然带一句进度鼓励或后台整理结果；"
@@ -214,6 +248,10 @@ def _progress_prompt_text(selected_update: dict[str, object]) -> str:
 def _automation_event_progress_update(
     events: list[MemoirAutomationEventResponse],
 ) -> dict[str, object] | None:
+    source_assignment_update = _source_assignment_progress_update(events)
+    if source_assignment_update is not None:
+        return source_assignment_update
+
     for event in events:
         summary = event.summary_text.strip()
         if not summary:
@@ -227,17 +265,127 @@ def _automation_event_progress_update(
         event_type = event.event_type.value if hasattr(event.event_type, "value") else str(event.event_type)
         if event_type == MemoirAutomationEventType.AUDIT_COMPLETED.value:
             return _audit_event_progress_update(event, summary=summary, status=status)
-        return {
-            "kind": "automation_event",
-            "source": "automation_event",
-            "text": summary[:120],
-            "event_ids": [event.id],
-            "event_type": event_type,
-            "event_status": status,
-            "chapter_id": event.chapter_id,
-            "utterance_ids": list(event.utterance_ids),
-        }
+        if event_type == MemoirAutomationEventType.CHAPTER_AUTO_REVISED.value and (
+            status == MemoirAutomationEventStatus.COMPLETED.value
+        ):
+            return {
+                "kind": "automation_event",
+                "source": "automation_event",
+                "text": summary[:120],
+                "event_ids": [event.id],
+                "event_type": event_type,
+                "event_status": status,
+                "chapter_id": event.chapter_id,
+                "utterance_ids": list(event.utterance_ids),
+            }
     return None
+
+
+def _event_type_value(event: MemoirAutomationEventResponse) -> str:
+    return event.event_type.value if hasattr(event.event_type, "value") else str(event.event_type)
+
+
+def _event_status_value(event: MemoirAutomationEventResponse) -> str:
+    return event.status.value if hasattr(event.status, "value") else str(event.status)
+
+
+def _source_assignment_progress_update(
+    events: list[MemoirAutomationEventResponse],
+) -> dict[str, object] | None:
+    source_events = [
+        event for event in events
+        if _event_type_value(event) == MemoirAutomationEventType.SOURCE_ASSIGNED.value
+        and _event_status_value(event) == MemoirAutomationEventStatus.COMPLETED.value
+    ]
+    if not source_events:
+        return None
+
+    event_ids = [event.id for event in source_events]
+    utterance_ids = list(dict.fromkeys(
+        utterance_id
+        for event in source_events
+        for utterance_id in event.utterance_ids
+    ))
+    detail_utterance_ids = list(dict.fromkeys(
+        detail.utterance_id
+        for event in source_events
+        for detail in event.utterance_details
+    ))
+    chapter_titles = list(dict.fromkeys(
+        detail.chapter_title.strip()
+        for event in source_events
+        for detail in event.utterance_details
+        if detail.chapter_title and detail.chapter_title.strip()
+    ))
+    if not chapter_titles:
+        chapter_titles = list(dict.fromkeys(
+            _quoted_title(event.summary_text)
+            for event in source_events
+            if _quoted_title(event.summary_text)
+        ))
+
+    assignment_lines = []
+    for event in source_events:
+        for detail in event.utterance_details:
+            chapter = f"「{detail.chapter_title}」" if detail.chapter_title else "对应章节"
+            title = detail.record_title or "讲述记录"
+            assignment_lines.append(f"{title} -> {chapter}")
+
+    assigned_count = len(utterance_ids) or len(detail_utterance_ids) or sum(
+        len(event.utterance_ids) for event in source_events
+    )
+    if assigned_count <= 0:
+        return None
+    if chapter_titles:
+        chapter_text = "、".join(f"「{title}」" for title in chapter_titles[:2])
+        if len(chapter_titles) > 2:
+            chapter_text += "等章节"
+        text = f"刚才有 {assigned_count} 条讲述已自动整理进 {len(chapter_titles)} 个章节：{chapter_text}。"
+    else:
+        text = f"刚才有 {assigned_count} 条讲述已自动整理进章节。"
+
+    return {
+        "kind": "source_assignment_batch",
+        "source": "automation_event",
+        "text": text,
+        "event_ids": event_ids,
+        "event_type": MemoirAutomationEventType.SOURCE_ASSIGNED.value,
+        "event_status": MemoirAutomationEventStatus.COMPLETED.value,
+        "utterance_ids": utterance_ids or detail_utterance_ids,
+        "assigned_utterance_count": assigned_count,
+        "chapter_titles": chapter_titles,
+        "assignment_lines": assignment_lines,
+    }
+
+
+def _sentence_text(text: str, limit: int = 90) -> str:
+    clean = re.sub(r"\s+", "", text).strip()
+    if not clean:
+        return ""
+    if len(clean) > limit:
+        clean = clean[:limit].rstrip("，、；：") + "..."
+    if clean[-1] not in "。！？!?":
+        clean += "。"
+    return clean
+
+
+def _progress_speech_prefix(update: dict[str, object]) -> str:
+    if update.get("source") != "automation_event":
+        return ""
+
+    kind = str(update.get("kind") or "")
+    event_type = str(update.get("event_type") or "")
+    text = str(update.get("text") or "").strip()
+    if not text:
+        return ""
+
+    if kind == "source_assignment_batch":
+        return _sentence_text(text)
+    if event_type == MemoirAutomationEventType.CHAPTER_AUTO_REVISED.value:
+        return _sentence_text(text)
+    if kind == "book_quality_audit":
+        return _sentence_text(text)
+    return ""
 
 
 def _audit_event_progress_update(

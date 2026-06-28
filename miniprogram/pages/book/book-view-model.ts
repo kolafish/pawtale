@@ -54,18 +54,32 @@ export interface BookChapterSourceView extends MemoirBookChapterSourceRef {
 
 export interface BookAutomationEventView {
   id: string;
+  eventIds: string[];
+  eventIdsText: string;
   eventType: MemoirAutomationEvent["event_type"];
-  actionKind: "acknowledge" | "review_source" | "none";
+  actionKind: "acknowledge" | "acknowledge_group" | "review_source" | "none";
   primaryUtteranceId: string;
   titleText: string;
   summaryText: string;
   detailText: string;
+  detailItems: BookAutomationEventDetailView[];
+  detailExpanded: boolean;
+  detailToggleText: string;
+  hasDetails: boolean;
   metaText: string;
   statusText: string;
   actionText: string;
   canAcknowledge: boolean;
   canAct: boolean;
   busy: boolean;
+}
+
+export interface BookAutomationEventDetailView {
+  id: string;
+  titleText: string;
+  chapterText: string;
+  metaText: string;
+  previewText: string;
 }
 
 export interface BookChapterView extends MemoirBookPlanChapter {
@@ -176,6 +190,7 @@ export interface BookData {
   bookVoiceCommandUndoSnapshot: BookVoiceCommandUndoSnapshot | null;
   automationEventItems: BookAutomationEventView[];
   automationEventBusyTarget: string;
+  automationEventExpandedTargets: Record<string, boolean>;
   automationEventLoading: boolean;
   automationEventError: string;
 }
@@ -250,6 +265,93 @@ function stringValue(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function quotedTitle(text: string): string {
+  const match = text.match(/「([^」]+)」/);
+  return match ? match[1].trim() : "";
+}
+
+function automationEventChapterTitle(event: MemoirAutomationEvent): string {
+  const metadata = objectValue(event.metadata_json);
+  const route = objectValue(metadata.route);
+  return stringValue(route.target_chapter_title)
+    || stringValue(route.suggested_title)
+    || quotedTitle(event.summary_text);
+}
+
+function automationEventDetailViews(event: MemoirAutomationEvent): BookAutomationEventDetailView[] {
+  const details = Array.isArray(event.utterance_details) ? event.utterance_details : [];
+  return details.map((detail) => {
+    const recordTitle = trimText(detail.record_title || "")
+      || (detail.source_index ? `语音记录 ${detail.source_index}` : "讲述记录");
+    const chapterTitle = trimText(detail.chapter_title || "") || automationEventChapterTitle(event);
+    const createdAtText = detail.created_at ? formatBeijingDateTimeShort(detail.created_at) : "";
+    const previewText = trimText(detail.preview_text || "");
+    return {
+      id: `${event.id}:${detail.utterance_id}`,
+      titleText: recordTitle,
+      chapterText: chapterTitle ? `归入「${chapterTitle}」` : "归入章节待确认",
+      metaText: createdAtText,
+      previewText: previewText.length > 90 ? `${previewText.slice(0, 90)}...` : previewText,
+    };
+  });
+}
+
+function sourceAssignmentGroupView(
+  events: MemoirAutomationEvent[],
+  busyTarget: string,
+  expandedTargets: Record<string, boolean>,
+): BookAutomationEventView | null {
+  const sourceEvents = events.filter((event) => (
+    event.event_type === "source_assigned" && event.status === "completed" && !event.metadata_json?.acknowledged_at
+  ));
+  if (!sourceEvents.length) {
+    return null;
+  }
+
+  const eventIds = sourceEvents.map((event) => event.id);
+  const groupId = `source_assigned:${eventIds.join("|")}`;
+  const detailItems = sourceEvents.flatMap((event) => automationEventDetailViews(event));
+  const utteranceCount = sourceEvents.reduce((count, event) => count + event.utterance_ids.length, 0)
+    || detailItems.length
+    || sourceEvents.length;
+  const chapterTitles = Array.from(new Set(
+    detailItems
+      .map((item) => item.chapterText.match(/「([^」]+)」/)?.[1] || "")
+      .concat(sourceEvents.map(automationEventChapterTitle))
+      .filter(Boolean),
+  ));
+  const chapterText = chapterTitles.length
+    ? `${chapterTitles.length} 个章节：${chapterTitles.slice(0, 2).map((title) => `「${title}」`).join("、")}${chapterTitles.length > 2 ? "等" : ""}`
+    : "章节";
+  const latestAt = sourceEvents
+    .map((event) => event.updated_at || event.created_at)
+    .sort((left, right) => createdAtTime(right) - createdAtTime(left))[0] || "";
+  const expanded = Boolean(expandedTargets[groupId]);
+  return {
+    id: groupId,
+    eventIds,
+    eventIdsText: eventIds.join(","),
+    eventType: "source_assigned",
+    actionKind: "acknowledge_group",
+    primaryUtteranceId: detailItems[0]?.id.split(":").pop() || "",
+    titleText: "已自动归章",
+    summaryText: `${utteranceCount} 条讲述已自动整理进 ${chapterText}。`,
+    detailText: "",
+    detailItems,
+    detailExpanded: expanded,
+    detailToggleText: expanded ? "收起详情" : `查看 ${detailItems.length || utteranceCount} 条详情`,
+    hasDetails: detailItems.length > 0,
+    metaText: ["归章", latestAt ? formatBeijingDateTimeShort(latestAt) : "", `${utteranceCount} 条讲述`]
+      .filter(Boolean)
+      .join(" · "),
+    statusText: "已完成",
+    actionText: "知道了",
+    canAcknowledge: true,
+    canAct: true,
+    busy: busyTarget === groupId,
+  };
+}
+
 function automationEventDetailText(event: MemoirAutomationEvent): string {
   const metadata = objectValue(event.metadata_json);
   if (event.event_type === "source_held") {
@@ -316,19 +418,31 @@ function automationEventMetaText(event: MemoirAutomationEvent): string {
 export function buildAutomationEventViews(
   events: MemoirAutomationEvent[] = [],
   busyTarget = "",
+  expandedTargets: Record<string, boolean> = {},
 ): BookAutomationEventView[] {
-  return events
+  const filteredEvents = events.filter((event) => !event.metadata_json?.acknowledged_at);
+  const sourceGroup = sourceAssignmentGroupView(filteredEvents, busyTarget, expandedTargets);
+  const regularViews = filteredEvents
+    .filter((event) => !(event.event_type === "source_assigned" && event.status === "completed"))
     .filter((event) => !event.metadata_json?.acknowledged_at)
     .map((event) => {
       const actionKind = automationEventActionKind(event);
+      const detailItems = automationEventDetailViews(event);
+      const expanded = Boolean(expandedTargets[event.id]);
       return {
         id: event.id,
+        eventIds: [event.id],
+        eventIdsText: event.id,
         eventType: event.event_type,
         actionKind,
         primaryUtteranceId: automationEventPrimaryUtteranceId(event),
         titleText: automationEventTitle(event),
         summaryText: trimText(event.summary_text) || "AI 已完成一次自动处理。",
         detailText: automationEventDetailText(event),
+        detailItems,
+        detailExpanded: expanded,
+        detailToggleText: expanded ? "收起详情" : `查看 ${detailItems.length} 条详情`,
+        hasDetails: detailItems.length > 0,
         metaText: automationEventMetaText(event),
         statusText: automationEventStatusText(event),
         actionText: automationEventActionText(event),
@@ -337,6 +451,7 @@ export function buildAutomationEventViews(
         busy: event.id === busyTarget,
       };
     });
+  return sourceGroup ? [sourceGroup, ...regularViews] : regularViews;
 }
 
 export function positiveFiniteSeconds(value: number | null | undefined): number {
@@ -870,6 +985,11 @@ export function guestBookData(): Partial<BookData> {
     bookVoiceCommandExecuting: false,
     bookVoiceCommandUndoText: "",
     bookVoiceCommandUndoSnapshot: null,
+    automationEventItems: [],
+    automationEventBusyTarget: "",
+    automationEventExpandedTargets: {},
+    automationEventLoading: false,
+    automationEventError: "",
   };
 }
 

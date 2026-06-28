@@ -123,8 +123,19 @@ export interface MemoirAutomationEvent {
   summary_text: string;
   confidence?: number | null;
   metadata_json: Record<string, unknown>;
+  utterance_details?: MemoirAutomationEventUtteranceDetail[];
   created_at: string;
   updated_at: string;
+}
+
+export interface MemoirAutomationEventUtteranceDetail {
+  utterance_id: string;
+  source_index?: number | null;
+  record_title: string;
+  preview_text: string;
+  chapter_id?: string | null;
+  chapter_title?: string | null;
+  created_at?: string | null;
 }
 
 export interface MemoirAutomationEventListResponse {
