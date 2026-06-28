@@ -336,7 +336,7 @@ async def test_voice_gateway_persists_latest_partial_when_provider_does_not_mark
     assert ended["state"] == "ready"
 
 
-async def test_voice_gateway_persists_provider_final_segment_before_audio_end():
+async def test_voice_gateway_streams_provider_final_text_before_audio_end_without_persisting():
     client = FakeGatewayClient()
     asr_client = ImmediateFinalStreamingASRClient("我小时候住在外婆家。")
     persisted_events: list[StreamingASREvent] = []
@@ -356,27 +356,72 @@ async def test_voice_gateway_persists_provider_final_segment_before_audio_end():
             "audio": base64.b64encode(b"pcm").decode("ascii"),
         }
     )
-    intermediate = await _wait_for_event(client, "asr.final")
+    intermediate = await _wait_for_event(client, "asr.partial")
 
     assert intermediate["text"] == "我小时候住在外婆家。"
     assert intermediate["state"] == "listening"
-    assert intermediate["segment_final"] is True
-    assert intermediate["turn_final"] is False
-    assert [event.text for event in persisted_events] == ["我小时候住在外婆家。"]
+    assert intermediate["provider_event_type"] == "final"
+    assert persisted_events == []
+    assert [event for event in client.sent if event["type"] == "asr.final"] == []
 
     await client.push({"type": "audio.end"})
-    final_events = await _wait_for_event_count(client, "asr.final", 2)
+    final = await _wait_for_event(client, "asr.final")
     await _wait_for_event(client, "audio.ended")
     await client.push({"type": "session.stop"})
     await asyncio.wait_for(run_task, timeout=1)
 
-    assert final_events[-1]["turn_final"] is True
-    assert final_events[-1]["segment_replay"] is True
-    assert final_events[-1]["message_id"] == "message-1"
+    assert final["turn_final"] is True
+    assert final["segment_final"] is True
+    assert final["message_id"] == "message-1"
     assert [event.text for event in persisted_events] == ["我小时候住在外婆家。"]
 
 
-async def test_voice_gateway_persists_long_partial_segment_before_audio_end():
+async def test_voice_gateway_persists_latest_online_cumulative_final_once_at_audio_end():
+    client = FakeGatewayClient()
+    final_texts = [
+        "要不然讲讲大学阶段吧。我大学上了7年，但是我上了大学就没怎么上学。",
+        "要不然讲讲大学阶段吧。我大学上了7年，但是我上了大学就没怎么上学。天天就净玩了，所以学习成绩也不怎么好。",
+    ]
+    asr_client = OnlineCumulativeFinalStreamingASRClient(final_texts)
+    persisted_events: list[StreamingASREvent] = []
+    session = VoiceGatewaySession(
+        client=client,
+        asr_client_factory=lambda: asr_client,
+        on_asr_final=lambda event: _persist_fake_final(persisted_events, event),
+    )
+
+    run_task = asyncio.create_task(session.run())
+    await _wait_for_event(client, "session.ready")
+    await client.push({"type": "session.start"})
+    await _wait_for_event(client, "session.started")
+    for audio in (b"pcm-1", b"pcm-2"):
+        await client.push(
+            {
+                "type": "audio.frame",
+                "audio": base64.b64encode(audio).decode("ascii"),
+            }
+        )
+
+    intermediate_events = await _wait_for_event_count(client, "asr.partial", 2)
+
+    assert [event["text"] for event in intermediate_events] == final_texts
+    assert [event["provider_event_type"] for event in intermediate_events] == ["final", "final"]
+    assert persisted_events == []
+    assert [event for event in client.sent if event["type"] == "asr.final"] == []
+
+    await client.push({"type": "audio.end"})
+    final = await _wait_for_event(client, "asr.final")
+    await _wait_for_event(client, "audio.ended")
+    await client.push({"type": "session.stop"})
+    await asyncio.wait_for(run_task, timeout=1)
+
+    assert [event.text for event in persisted_events] == [final_texts[-1]]
+    assert final["text"] == final_texts[-1]
+    assert final["turn_final"] is True
+    assert final["message_id"] == "message-1"
+
+
+async def test_voice_gateway_persists_latest_partial_once_at_audio_end():
     client = FakeGatewayClient()
     long_partial = "小时候在外婆家的院子里摘菜，夏天一起剥青豆。" * 10
     asr_client = PartialOnlyStreamingASRClient([long_partial])
@@ -398,21 +443,18 @@ async def test_voice_gateway_persists_long_partial_segment_before_audio_end():
         }
     )
     partial = await _wait_for_event(client, "asr.partial")
-    intermediate = await _wait_for_event(client, "asr.final")
 
     assert partial["text"] == long_partial
-    assert intermediate["text"] == long_partial
-    assert intermediate["provider_event_type"] == "partial"
-    assert intermediate["turn_final"] is False
-    assert persisted_events[0].raw["segment_from_partial"] is True
+    assert persisted_events == []
+    assert [event for event in client.sent if event["type"] == "asr.final"] == []
 
     await client.push({"type": "audio.end"})
-    final_events = await _wait_for_event_count(client, "asr.final", 2)
+    final = await _wait_for_event(client, "asr.final")
     await client.push({"type": "session.stop"})
     await asyncio.wait_for(run_task, timeout=1)
 
-    assert final_events[-1]["turn_final"] is True
-    assert final_events[-1]["segment_replay"] is True
+    assert final["turn_final"] is True
+    assert final["provider_event_type"] == "partial_fallback"
     assert [event.text for event in persisted_events] == [long_partial]
 
 
@@ -735,12 +777,12 @@ async def test_voice_gateway_persistence_saves_final_message_utterance_and_audio
     assert editing_job.status == MemoirEditingJobStatus.PENDING.value
     assert editing_job.dedupe_key == f"route_source:{utterance.id}"
     assert editing_job.payload_json["utterance_ids"] == [utterance.id]
-    assert editing_job.payload_json["source"] == "voice_utterance_segment"
+    assert editing_job.payload_json["source"] == "voice_utterance_final"
     audit_job = jobs_by_type.get(MemoirEditingJobType.QUALITY_AUDIT.value)
     assert audit_job is not None
     assert audit_job.status == MemoirEditingJobStatus.PENDING.value
     assert audit_job.dedupe_key == f"quality_audit:{project_id}"
-    assert audit_job.payload_json["reason"] == "voice_utterance_segment_saved"
+    assert audit_job.payload_json["reason"] == "voice_utterance_final_saved"
 
 
 async def test_voice_gateway_persistence_rejects_audio_stream_over_limit(client, test_db, monkeypatch):
@@ -1031,6 +1073,24 @@ class CumulativeFinalStreamingASRClient(FakeStreamingASRClient):
         self.finished = True
         for text in self.final_texts:
             await self.events_queue.put(StreamingASREvent(type="final", text=text))
+        await self.events_queue.put(None)
+
+
+class OnlineCumulativeFinalStreamingASRClient(FakeStreamingASRClient):
+    def __init__(self, final_texts: list[str]) -> None:
+        super().__init__()
+        self.final_texts = list(final_texts)
+        self.index = 0
+
+    async def send_audio(self, audio: bytes) -> None:
+        self.sent_audio.append(audio)
+        if self.index >= len(self.final_texts):
+            return
+        await self.events_queue.put(StreamingASREvent(type="final", text=self.final_texts[self.index]))
+        self.index += 1
+
+    async def finish(self) -> None:
+        self.finished = True
         await self.events_queue.put(None)
 
 
