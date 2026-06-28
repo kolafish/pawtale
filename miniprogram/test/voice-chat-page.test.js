@@ -49,6 +49,7 @@ function loadVoiceChatPage({
       messages: [],
       utterances: [],
     }),
+    markMemoirAutomationEventsVoicePlayed: async () => ({ updated_count: 0 }),
     ...voiceApiExports,
   });
   clearModule("../services/audio-playback.ts");
@@ -989,7 +990,14 @@ test("voice chat streams one assistant turn and plays pcm audio frames", async (
   const streamStarts = [];
   const played = [];
   const playbackEvents = [];
+  const voicePlayedCalls = [];
   const page = loadVoiceChatPage({
+    voiceApiExports: {
+      markMemoirAutomationEventsVoicePlayed: async (projectId, data) => {
+        voicePlayedCalls.push({ projectId, data });
+        return { updated_count: data.event_ids.length };
+      },
+    },
     assistantTurnStreamExports: {
       VoiceAssistantTurnStreamClient: class {
         constructor(voiceSessionId, callbacks) {
@@ -1031,6 +1039,7 @@ test("voice chat streams one assistant turn and plays pcm audio frames", async (
             type: "turn.completed",
             turn_id: "turn-1",
             state: "completed",
+            project_id: "project-1",
             message_id: "assistant-question-1",
             audio_file_id: "audio-question-1",
             text: "那时候在院子里，外婆最常带着您做什么？",
@@ -1042,6 +1051,7 @@ test("voice chat streams one assistant turn and plays pcm audio frames", async (
               text: "这个项目已经留下 1 条讲述记录。",
             },
             progress_update_used: true,
+            progress_voice_selected_event_ids: ["event-1"],
           };
           this.callbacks.onCompleted?.(completed);
           return completed;
@@ -1123,6 +1133,16 @@ test("voice chat streams one assistant turn and plays pcm audio frames", async (
   assert.equal(context.data.persistenceStateText, "等待回答");
   assert.deepEqual(startCalls, [true]);
   assert.deepEqual(playbackEvents, ["appendFrame", "waitForDrain", "destroy", "startRecording"]);
+  assert.deepEqual(voicePlayedCalls, [
+    {
+      projectId: "project-1",
+      data: {
+        event_ids: ["event-1"],
+        voice_session_id: "voice-1",
+        message_id: "assistant-question-1",
+      },
+    },
+  ]);
 });
 
 test("voice chat mic interrupts active assistant turn and starts recording", async () => {
@@ -1624,7 +1644,14 @@ test("voice chat drives first streaming highlight from WebAudio playback progres
 
 test("voice chat keeps completed streaming assistant turns when playback fails", async () => {
   let playbackDestroyed = false;
+  const voicePlayedCalls = [];
   const page = loadVoiceChatPage({
+    voiceApiExports: {
+      markMemoirAutomationEventsVoicePlayed: async (projectId, data) => {
+        voicePlayedCalls.push({ projectId, data });
+        return { updated_count: data.event_ids.length };
+      },
+    },
     assistantTurnStreamExports: {
       VoiceAssistantTurnStreamClient: class {
         constructor(voiceSessionId, callbacks) {
@@ -1657,12 +1684,14 @@ test("voice chat keeps completed streaming assistant turns when playback fails",
             type: "turn.completed",
             turn_id: "turn-1",
             state: "completed",
+            project_id: "project-1",
             message_id: "assistant-question-1",
             audio_file_id: "audio-question-1",
             text: "那时候在院子里，外婆最常带着您做什么？",
             primary_intent: "follow_up",
             intent_tags: ["follow_up"],
             expects_answer: true,
+            progress_voice_selected_event_ids: ["event-1"],
           };
           this.callbacks.onCompleted?.(completed);
           return completed;
@@ -1735,6 +1764,7 @@ test("voice chat keeps completed streaming assistant turns when playback fails",
   assert.equal(context.data.lastFollowUpSourceMessageId, "");
   assert.equal(playbackDestroyed, true);
   assert.deepEqual(startCalls, []);
+  assert.deepEqual(voicePlayedCalls, []);
   assert.equal(
     setDataPatches.some((patch) => patch.followUpTTSStateText === "正在整理回应"),
     false,

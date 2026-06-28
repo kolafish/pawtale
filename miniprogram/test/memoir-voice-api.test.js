@@ -92,7 +92,9 @@ test("project progress APIs fetch snapshot and automation events", async () => {
       if (options.url.includes("/automation-events")) {
         options.success({
           statusCode: 200,
-          data: options.url.includes("/acknowledge")
+          data: options.url.includes("/voice-played")
+            ? { updated_count: 1 }
+            : options.url.includes("/acknowledge")
             ? {
               id: "event-1",
               project_id: "project/1",
@@ -159,11 +161,17 @@ test("project progress APIs fetch snapshot and automation events", async () => {
     acknowledgeMemoirAutomationEvent,
     getMemoirProjectProgressSnapshot,
     listMemoirAutomationEvents,
+    markMemoirAutomationEventsVoicePlayed,
   } = require("../services/memoir-voice-api.ts");
 
   const snapshot = await getMemoirProjectProgressSnapshot("project/1");
   const events = await listMemoirAutomationEvents("project/1", 5);
   const acknowledged = await acknowledgeMemoirAutomationEvent("project/1", "event/1");
+  const voicePlayed = await markMemoirAutomationEventsVoicePlayed("project/1", {
+    event_ids: ["event/1"],
+    voice_session_id: "voice/1",
+    message_id: "message/1",
+  });
 
   const apiRequests = requests.filter((request) => request.url.includes("/api/mobile/memoir/"));
   assert.equal(
@@ -179,9 +187,20 @@ test("project progress APIs fetch snapshot and automation events", async () => {
     "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/automation-events/event%2F1/acknowledge",
   );
   assert.equal(apiRequests[2].method, "POST");
+  assert.equal(
+    apiRequests[3].url,
+    "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/automation-events/voice-played",
+  );
+  assert.equal(apiRequests[3].method, "POST");
+  assert.deepEqual(apiRequests[3].data, {
+    event_ids: ["event/1"],
+    voice_session_id: "voice/1",
+    message_id: "message/1",
+  });
   assert.equal(snapshot.assigned_utterance_count, 1);
   assert.equal(events.items[0].summary_text, "已整理 1 条讲述。");
   assert.equal(acknowledged.metadata_json.acknowledged_by_user, true);
+  assert.equal(voicePlayed.updated_count, 1);
   delete global.wx;
 });
 

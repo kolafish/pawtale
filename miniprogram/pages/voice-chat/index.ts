@@ -32,6 +32,7 @@ import {
   createMemoirAssistantTTS,
   createMemoirVoiceNoAnswerPrompt,
   getMemoirVoiceSession,
+  markMemoirAutomationEventsVoicePlayed,
 } from "../../services/memoir-voice-api";
 import { splitTextByAudioPlaybackProgress } from "../../services/tts-text-progress";
 import { readChatTTSSettings } from "../../services/tts-settings";
@@ -171,6 +172,7 @@ Page<VoiceChatData, {
   maybeGenerateOpeningFollowUp(): void;
   generateFollowUp(regenerate?: boolean): Promise<void>;
   generateStreamingFollowUp(sourceMessageId: string, regenerate: boolean, requestSerial: number): Promise<void>;
+  markStreamingAutomationEventsVoicePlayed(completed: VoiceAssistantTurnCompletedEvent): Promise<void>;
   clearFailedStreamingAssistantTurn(message: string): void;
   applyStreamingAssistantText(text: string, sourceMessageId: string): void;
   applyCompletedStreamingAssistantTurn(event: VoiceAssistantTurnCompletedEvent, sourceMessageId: string): void;
@@ -839,6 +841,9 @@ Page<VoiceChatData, {
     if (!playbackError && completed.expects_answer !== false) {
       this.autoListenPendingAfterPlayback = true;
     }
+    if (!playbackError) {
+      void this.markStreamingAutomationEventsVoicePlayed(completed);
+    }
     this.stopAssistantBargeInMonitor();
     this.stopFollowUpProgressTimer();
     this.setData({
@@ -861,6 +866,24 @@ Page<VoiceChatData, {
     });
     if (!playbackError && completed.expects_answer !== false) {
       await this.tryStartAutoListenAfterTTS();
+    }
+  },
+
+  async markStreamingAutomationEventsVoicePlayed(completed) {
+    const eventIds = Array.isArray(completed.progress_voice_selected_event_ids)
+      ? completed.progress_voice_selected_event_ids.filter((item) => typeof item === "string" && item)
+      : [];
+    if (!completed.project_id || !eventIds.length || !completed.message_id) {
+      return;
+    }
+    try {
+      await markMemoirAutomationEventsVoicePlayed(completed.project_id, {
+        event_ids: eventIds,
+        voice_session_id: completed.voice_session_id || this.data.voiceSessionId,
+        message_id: completed.message_id,
+      });
+    } catch (error) {
+      console.warn("mark automation voice playback failed", error);
     }
   },
 

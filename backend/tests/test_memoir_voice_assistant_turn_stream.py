@@ -307,11 +307,12 @@ async def test_voice_assistant_turn_progress_prompt_uses_recent_automation_event
     )
     assert assistant_message.metadata_json["progress_update"]["kind"] == "automation_event"
     assert assistant_message.metadata_json["progress_automation_event_ids"] == [event.id]
-    assert assistant_message.metadata_json["progress_voice_announced_event_ids"] == [event.id]
+    assert assistant_message.metadata_json["progress_voice_selected_event_ids"] == [event.id]
     assert assistant_message.metadata_json["progress_spoken_text"] == "刚才新增的1条讲述已补进《外婆家的院子》。"
     await test_db.refresh(event)
-    assert event.metadata_json[automation_events.VOICE_ANNOUNCED_SESSION_ID_KEY] == created["session"]["id"]
-    assert event.metadata_json[automation_events.VOICE_ANNOUNCED_MESSAGE_ID_KEY] == completed["message_id"]
+    assert event.metadata_json[automation_events.VOICE_SELECTED_SESSION_ID_KEY] == created["session"]["id"]
+    assert event.metadata_json[automation_events.VOICE_SELECTED_MESSAGE_ID_KEY] == completed["message_id"]
+    assert automation_events.VOICE_PLAYED_AT_KEY not in event.metadata_json
 
 
 async def test_voice_assistant_turn_speaks_grouped_source_assignment_progress(
@@ -401,11 +402,13 @@ async def test_voice_assistant_turn_speaks_grouped_source_assignment_progress(
 
     await test_db.refresh(first_event)
     await test_db.refresh(second_event)
-    assert first_event.metadata_json[automation_events.VOICE_ANNOUNCED_MESSAGE_ID_KEY] == completed["message_id"]
-    assert second_event.metadata_json[automation_events.VOICE_ANNOUNCED_MESSAGE_ID_KEY] == completed["message_id"]
+    assert first_event.metadata_json[automation_events.VOICE_SELECTED_MESSAGE_ID_KEY] == completed["message_id"]
+    assert second_event.metadata_json[automation_events.VOICE_SELECTED_MESSAGE_ID_KEY] == completed["message_id"]
+    assert automation_events.VOICE_PLAYED_AT_KEY not in first_event.metadata_json
+    assert automation_events.VOICE_PLAYED_AT_KEY not in second_event.metadata_json
 
 
-async def test_voice_assistant_turn_skips_voice_announced_automation_event(
+async def test_voice_assistant_turn_skips_voice_played_automation_event(
     client,
     test_db,
 ):
@@ -423,8 +426,8 @@ async def test_voice_assistant_turn_skips_voice_announced_automation_event(
         utterance_ids=[created["utterance_id"]],
         summary_text="这条自动补写记录不应该重复播报。",
         metadata_json={
-            automation_events.VOICE_ANNOUNCED_AT_KEY: "2026-06-23T12:00:00+00:00",
-            automation_events.VOICE_ANNOUNCED_SESSION_ID_KEY: "previous-session",
+            automation_events.VOICE_PLAYED_AT_KEY: "2026-06-23T12:00:00+00:00",
+            automation_events.VOICE_PLAYED_SESSION_ID_KEY: "previous-session",
         },
     )
     await test_db.commit()
