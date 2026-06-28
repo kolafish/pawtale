@@ -646,6 +646,31 @@ test("voice chat does not request follow-up for non-final saved ASR events", () 
   assert.equal(followUpCalls, 0);
 });
 
+test("voice chat clears live transcript when a new recording session starts", () => {
+  const page = loadVoiceChatPage();
+  const context = {
+    ...page,
+    data: {
+      ...page.data,
+      liveText: "上一轮刚保存的回答",
+      liveCharCount: 9,
+      persistenceStateText: "已保存",
+    },
+    setData(patch) {
+      this.data = { ...this.data, ...patch };
+    },
+  };
+
+  page.handleGatewayEvent.call(context, {
+    type: "session.started",
+    state: "listening",
+  });
+
+  assert.equal(context.data.liveText, "");
+  assert.equal(context.data.liveCharCount, 0);
+  assert.equal(context.data.persistenceStateText, "等待识别");
+});
+
 test("voice chat syncs authorization consent before reconnecting", async () => {
   const syncedOptions = [];
   const page = loadVoiceChatPage({
