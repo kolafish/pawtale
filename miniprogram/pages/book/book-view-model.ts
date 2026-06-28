@@ -2,6 +2,7 @@ import type {
   MemoirBookChapterDraft,
   MemoirBookChapterSourceRef,
   MemoirBookOutput,
+  MemoirBookOutputVersion,
   MemoirBookPlan,
   MemoirBookPlanChapter,
   MemoirBookPlanChapterInput,
@@ -130,6 +131,13 @@ export interface BookOutputChapterPreviewView {
   metaText: string;
 }
 
+export interface BookOutputVersionOptionView {
+  id: string;
+  label: string;
+  version: number;
+  isLatest: boolean;
+}
+
 export interface BookVoiceCommandUndoSnapshot {
   planTitle: string;
   chapters: MemoirBookPlanChapterUpdateInput[];
@@ -171,6 +179,11 @@ export interface BookData {
   bookPreviewTocItems: BookOutputTocView[];
   bookPreviewChapters: BookOutputChapterPreviewView[];
   bookVersionText: string;
+  bookVersionOptions: BookOutputVersionOptionView[];
+  bookSelectedVersionId: string;
+  bookSelectedVersionIndex: number;
+  bookViewingHistoricalVersion: boolean;
+  bookVersionNotice: string;
   bookStaleNotice: string;
   bookActionText: string;
   generatingBook: boolean;
@@ -526,16 +539,86 @@ export function latestBookContent(output: MemoirBookOutput | null): string {
   return output?.latest_version?.content || "";
 }
 
+export function bookOutputVersions(output: MemoirBookOutput | null): MemoirBookOutputVersion[] {
+  if (!output) {
+    return [];
+  }
+  const versions = [...(output.versions || [])];
+  const latest = output.latest_version || null;
+  if (latest && !versions.some((version) => version.id === latest.id)) {
+    versions.push(latest);
+  }
+  return versions
+    .filter((version) => version.id)
+    .sort((left, right) => right.version - left.version);
+}
+
+export function selectedBookOutputVersion(
+  output: MemoirBookOutput | null,
+  selectedVersionId = "",
+): MemoirBookOutputVersion | null {
+  const versions = bookOutputVersions(output);
+  if (!versions.length) {
+    return null;
+  }
+  return versions.find((version) => version.id === selectedVersionId) || versions[0];
+}
+
+export function selectedBookContent(output: MemoirBookOutput | null, selectedVersionId = ""): string {
+  return selectedBookOutputVersion(output, selectedVersionId)?.content || "";
+}
+
+function bookOutputLatestVersionId(output: MemoirBookOutput | null): string {
+  return output?.latest_version?.id || bookOutputVersions(output)[0]?.id || "";
+}
+
+export function bookVersionOptions(
+  output: MemoirBookOutput | null,
+  selectedVersionId = "",
+): {
+  options: BookOutputVersionOptionView[];
+  selectedId: string;
+  selectedIndex: number;
+  viewingHistorical: boolean;
+} {
+  const versions = bookOutputVersions(output);
+  const latestId = bookOutputLatestVersionId(output);
+  const selected = selectedBookOutputVersion(output, selectedVersionId);
+  const selectedId = selected?.id || "";
+  const options = versions.map((version) => {
+    const createdAtText = version.created_at ? formatBeijingDateTimeShort(version.created_at) : "";
+    const isLatest = version.id === latestId;
+    const label = `${isLatest ? "最新版 · " : ""}全书第 ${version.version} 版`;
+    return {
+      id: version.id,
+      label: createdAtText ? `${label} · ${createdAtText}` : label,
+      version: version.version,
+      isLatest,
+    };
+  });
+  const selectedIndex = Math.max(0, options.findIndex((option) => option.id === selectedId));
+  return {
+    options,
+    selectedId,
+    selectedIndex,
+    viewingHistorical: Boolean(selectedId && latestId && selectedId !== latestId),
+  };
+}
+
 function bookSourceCountText(count: number): string {
   return count > 0 ? `${count} 条素材` : "暂无素材计数";
 }
 
-export function bookOutputPreviewTitle(output: MemoirBookOutput | null): string {
-  return trimText(output?.latest_version?.structured_content?.title || output?.title || "");
+export function bookOutputPreviewTitle(
+  output: MemoirBookOutput | null,
+  selectedVersionId = "",
+): string {
+  const version = selectedBookOutputVersion(output, selectedVersionId);
+  return trimText(version?.structured_content?.title || output?.title || "");
 }
 
-export function bookOutputTocItems(output: MemoirBookOutput | null): BookOutputTocView[] {
-  const toc = output?.latest_version?.structured_content?.table_of_contents || [];
+export function bookOutputTocItems(output: MemoirBookOutput | null, selectedVersionId = ""): BookOutputTocView[] {
+  const toc = selectedBookOutputVersion(output, selectedVersionId)?.structured_content?.table_of_contents || [];
   return toc
     .filter((item) => item.chapter_id && item.title)
     .map((item, index) => {
@@ -553,8 +636,11 @@ export function bookOutputTocItems(output: MemoirBookOutput | null): BookOutputT
     });
 }
 
-export function bookOutputChapterPreviews(output: MemoirBookOutput | null): BookOutputChapterPreviewView[] {
-  const chapters = output?.latest_version?.structured_content?.chapters || [];
+export function bookOutputChapterPreviews(
+  output: MemoirBookOutput | null,
+  selectedVersionId = "",
+): BookOutputChapterPreviewView[] {
+  const chapters = selectedBookOutputVersion(output, selectedVersionId)?.structured_content?.chapters || [];
   return chapters
     .filter((chapter) => chapter.chapter_id && chapter.title && trimText(chapter.content))
     .map((chapter, index) => {
@@ -579,6 +665,11 @@ export function bookOutputVersionText(output: MemoirBookOutput | null): string {
   return version ? `全书第 ${version} 版` : "尚未生成全书";
 }
 
+function selectedBookOutputVersionText(output: MemoirBookOutput | null, selectedVersionId = ""): string {
+  const selected = selectedBookOutputVersion(output, selectedVersionId);
+  return selected ? `全书第 ${selected.version} 版` : "尚未生成全书";
+}
+
 export function bookOutputStaleNotice(output: MemoirBookOutput | null): string {
   if (!output?.is_stale) {
     return "";
@@ -598,7 +689,17 @@ function bookActionText(output: MemoirBookOutput | null): string {
   return output?.latest_version ? "重新生成全书" : "生成全书";
 }
 
-export function bookOutputData(output: MemoirBookOutput | null): Pick<
+function bookVersionNotice(output: MemoirBookOutput | null, viewingHistorical: boolean): string {
+  if (!output?.latest_version) {
+    return "";
+  }
+  if (viewingHistorical) {
+    return "正在查看历史版本。朗读前请切回最新版。";
+  }
+  return "";
+}
+
+export function bookOutputData(output: MemoirBookOutput | null, selectedVersionId = ""): Pick<
   BookData,
   | "bookOutput"
   | "bookContent"
@@ -607,18 +708,29 @@ export function bookOutputData(output: MemoirBookOutput | null): Pick<
   | "bookPreviewTocItems"
   | "bookPreviewChapters"
   | "bookVersionText"
+  | "bookVersionOptions"
+  | "bookSelectedVersionId"
+  | "bookSelectedVersionIndex"
+  | "bookViewingHistoricalVersion"
+  | "bookVersionNotice"
   | "bookStaleNotice"
   | "bookActionText"
 > {
-  const content = latestBookContent(output);
+  const versionState = bookVersionOptions(output, selectedVersionId);
+  const content = selectedBookContent(output, versionState.selectedId);
   return {
     bookOutput: output,
     bookContent: content,
     bookCharCount: trimText(content).length,
-    bookPreviewTitle: bookOutputPreviewTitle(output),
-    bookPreviewTocItems: bookOutputTocItems(output),
-    bookPreviewChapters: bookOutputChapterPreviews(output),
-    bookVersionText: bookOutputVersionText(output),
+    bookPreviewTitle: bookOutputPreviewTitle(output, versionState.selectedId),
+    bookPreviewTocItems: bookOutputTocItems(output, versionState.selectedId),
+    bookPreviewChapters: bookOutputChapterPreviews(output, versionState.selectedId),
+    bookVersionText: selectedBookOutputVersionText(output, versionState.selectedId),
+    bookVersionOptions: versionState.options,
+    bookSelectedVersionId: versionState.selectedId,
+    bookSelectedVersionIndex: versionState.selectedIndex,
+    bookViewingHistoricalVersion: versionState.viewingHistorical,
+    bookVersionNotice: bookVersionNotice(output, versionState.viewingHistorical),
     bookStaleNotice: bookOutputStaleNotice(output),
     bookActionText: bookActionText(output),
   };
@@ -1031,6 +1143,11 @@ export function guestBookData(): Partial<BookData> {
     bookPreviewTocItems: [],
     bookPreviewChapters: [],
     bookVersionText: "尚未生成全书",
+    bookVersionOptions: [],
+    bookSelectedVersionId: "",
+    bookSelectedVersionIndex: 0,
+    bookViewingHistoricalVersion: false,
+    bookVersionNotice: "",
     bookStaleNotice: "",
     bookActionText: "生成全书",
     ttsBusyTarget: "",
