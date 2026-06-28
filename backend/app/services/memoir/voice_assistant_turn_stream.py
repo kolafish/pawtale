@@ -37,6 +37,7 @@ from app.services.memoir.voice_followup_ai import (
     _recent_context,
     _requested_topic_hint,
     interviewer_persona_for_voice,
+    strip_streaming_speaker_label_prefix,
     system_prompt_for_persona,
 )
 from app.services.memoir.streaming_tts_events import (
@@ -469,6 +470,8 @@ class VoiceAssistantTurnStreamSession:
         cancel_event: asyncio.Event,
         text_queue: asyncio.Queue[str | None],
     ) -> None:
+        initial_text_buffer = ""
+        initial_text_resolved = False
         async for chunk in ai_client.stream_llm(
             system_prompt,
             prompt,
@@ -483,14 +486,22 @@ class VoiceAssistantTurnStreamSession:
                 artifacts.usage = chunk.usage
             if not chunk.text_delta:
                 continue
-            artifacts.text += chunk.text_delta
-            await text_queue.put(chunk.text_delta)
+            text_delta = chunk.text_delta
+            if not initial_text_resolved:
+                initial_text_buffer += text_delta
+                text_delta, initial_text_resolved = strip_streaming_speaker_label_prefix(initial_text_buffer)
+                if not initial_text_resolved:
+                    continue
+            if not text_delta:
+                continue
+            artifacts.text += text_delta
+            await text_queue.put(text_delta)
             await self.client.send_json(
                 {
                     "type": "text.delta",
                     "turn_id": turn_id,
                     "voice_session_id": self.voice_session_id,
-                    "text_delta": chunk.text_delta,
+                    "text_delta": text_delta,
                     "text": artifacts.text,
                 }
             )
@@ -665,6 +676,7 @@ def _build_stream_turn_prompt(
 
 输出要求：
 - 只输出要播放的中文口语正文，不要 JSON，不要 Markdown，不要解释
+- 不要在正文前加“{host_name}：”“老余：”“小余：”“AI：”等说话人标签；自称只能出现在自然句子里，标签不属于可播放内容
 - 你可以自主组合动作：承接认可、鼓励继续讲、小结、自然换方向、继续追问，或没听清/太短时温和接住
 - 普通回应 1 到 3 句，建议 40 到 90 个汉字；开场可以稍长
 - 开场必须先有轻量自我介绍和访谈背景，再进入问题；不要上来就追问历史细节

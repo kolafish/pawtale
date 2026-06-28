@@ -26,6 +26,7 @@ FREE_OPENING_MAX_TOKENS = 360
 GUIDED_OPENING_MAX_TOKENS = 420
 PROGRESS_PROMPT_VERSION = "memoir_voice_progress_context_v2"
 PROGRESS_UTTERANCE_MILESTONES = {1, 3, 5, 10, 15, 20, 30, 50, 75, 100}
+SPEAKER_LABELS = ("小余", "老余", "AI", "Ai", "ai", "助手", "主持人")
 
 
 PRIMARY_INTENTS = {
@@ -583,8 +584,41 @@ def _question_mark_count(text: str) -> int:
     return text.count("？") + text.count("?")
 
 
+def _strip_speaker_label_prefix(text: str) -> str:
+    labels = "|".join(re.escape(label) for label in SPEAKER_LABELS)
+    return re.sub(rf"^\s*(?:{labels})\s*[:：]\s*", "", text, count=1).strip()
+
+
+def strip_streaming_speaker_label_prefix(text: str) -> tuple[str, bool]:
+    """Return sanitized initial LLM text and whether the prefix is resolved.
+
+    Streaming LLM chunks may split a speaker label across chunks, such as
+    "小" + "余：嗯". Hold ambiguous prefixes until we can decide whether to
+    strip a label or emit normal speech.
+    """
+    raw = str(text or "")
+    if not raw:
+        return "", False
+    stripped = raw.lstrip()
+    if not stripped:
+        return "", False
+    cleaned = _strip_speaker_label_prefix(raw)
+    if cleaned != raw.strip():
+        return cleaned, True
+    compact = re.sub(r"\s+", "", stripped)
+    for label in SPEAKER_LABELS:
+        if label in {"AI", "Ai", "ai"}:
+            variants = ("AI:", "AI：", "Ai:", "Ai：", "ai:", "ai：")
+        else:
+            variants = (f"{label}:", f"{label}：")
+        if any(variant.startswith(compact) for variant in variants):
+            return "", False
+    return raw, True
+
+
 def _clean_speech_text(value: object) -> str:
-    return str(value or "").strip().strip("\"“”").strip()
+    text = str(value or "").strip().strip("\"“”").strip()
+    return _strip_speaker_label_prefix(text)
 
 
 def _normalize_primary_intent(value: object, fallback: str) -> str:
