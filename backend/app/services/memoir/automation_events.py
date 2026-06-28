@@ -37,6 +37,7 @@ RESOLVED_UTTERANCE_IDS_KEY = "resolved_utterance_ids"
 VOICE_ANNOUNCED_AT_KEY = "voice_announced_at"
 VOICE_ANNOUNCED_SESSION_ID_KEY = "voice_announced_session_id"
 VOICE_ANNOUNCED_MESSAGE_ID_KEY = "voice_announced_message_id"
+EVENT_SIGNATURE_KEY = "event_signature"
 ROUTE_KEY = "route"
 ROUTES_KEY = "routes"
 PENDING_SOURCE_UTTERANCE_IDS_KEY = "pending_source_utterance_ids"
@@ -386,6 +387,56 @@ def _event_is_voice_unannounced(event: MemoirAutomationEvent) -> bool:
     return _event_is_visible(event) and not metadata.get(VOICE_ANNOUNCED_AT_KEY)
 
 
+def _event_signature(metadata: dict) -> str:
+    value = metadata.get(EVENT_SIGNATURE_KEY)
+    return value.strip() if isinstance(value, str) and value.strip() else ""
+
+
+def _preserved_metadata(existing: dict) -> dict:
+    return {
+        key: existing[key]
+        for key in (
+            ACKNOWLEDGED_AT_KEY,
+            ACKNOWLEDGED_BY_USER_KEY,
+            VOICE_ANNOUNCED_AT_KEY,
+            VOICE_ANNOUNCED_SESSION_ID_KEY,
+            VOICE_ANNOUNCED_MESSAGE_ID_KEY,
+            RESOLUTION_KEY,
+            RESOLUTION_REASON_KEY,
+            DELETED_UTTERANCE_IDS_KEY,
+            SOURCE_DELETED_AT_KEY,
+            RESOLVED_AT_KEY,
+            RESOLVED_CHAPTER_ID_KEY,
+            RESOLVED_CHAPTER_TITLE_KEY,
+            RESOLVED_UTTERANCE_IDS_KEY,
+        )
+        if key in existing
+    }
+
+
+async def _find_matching_signature_event(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    event_type: MemoirAutomationEventType,
+    signature: str,
+) -> MemoirAutomationEvent | None:
+    if not signature:
+        return None
+    result = await db.execute(
+        select(MemoirAutomationEvent)
+        .where(
+            MemoirAutomationEvent.project_id == project_id,
+            MemoirAutomationEvent.event_type == event_type.value,
+        )
+        .order_by(MemoirAutomationEvent.created_at.desc(), MemoirAutomationEvent.id.desc())
+    )
+    for event in result.scalars().all():
+        if _event_signature(event.metadata_json or {}) == signature:
+            return event
+    return None
+
+
 def event_response(
     event: MemoirAutomationEvent,
     utterance_details: list[MemoirAutomationEventUtteranceDetailResponse] | None = None,
@@ -431,6 +482,53 @@ async def record_automation_event(
     db.add(event)
     await db.flush()
     return event
+
+
+async def record_or_update_automation_event(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    event_type: MemoirAutomationEventType,
+    summary_text: str,
+    status: MemoirAutomationEventStatus = MemoirAutomationEventStatus.COMPLETED,
+    chapter_id: str | None = None,
+    utterance_ids: list[str] | None = None,
+    confidence: float | None = None,
+    metadata_json: dict | None = None,
+) -> MemoirAutomationEvent:
+    metadata = dict(metadata_json or {})
+    signature = _event_signature(metadata)
+    existing = await _find_matching_signature_event(
+        db,
+        project_id=project_id,
+        event_type=event_type,
+        signature=signature,
+    )
+    if existing is None:
+        return await record_automation_event(
+            db,
+            project_id=project_id,
+            event_type=event_type,
+            status=status,
+            chapter_id=chapter_id,
+            utterance_ids=utterance_ids,
+            summary_text=summary_text,
+            confidence=confidence,
+            metadata_json=metadata,
+        )
+
+    existing.chapter_id = chapter_id
+    existing.status = status.value
+    existing.utterance_ids_json = _clean_utterance_ids(utterance_ids)
+    existing.summary_text = summary_text.strip()
+    existing.confidence = confidence
+    existing.metadata_json = {
+        **metadata,
+        **_preserved_metadata(existing.metadata_json or {}),
+    }
+    db.add(existing)
+    await db.flush()
+    return existing
 
 
 async def cleanup_automation_events_for_deleted_utterances(

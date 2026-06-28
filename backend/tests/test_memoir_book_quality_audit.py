@@ -3,6 +3,7 @@ from sqlalchemy import select
 
 from app.domain.memoir.types import MemoirAutomationEventType, MemoirEditingJobStatus, MemoirEditingJobType
 from app.models.memoir import MemoirAutomationEvent, MemoirEditingJob
+from app.services.memoir import automation_events
 from app.services.memoir.book_quality_audit import schedule_project_quality_audit
 from app.services.memoir.editing_job_handlers import register_memoir_editing_job_handlers
 from app.services.memoir.editing_jobs import clear_editing_job_handlers, run_editing_job
@@ -69,6 +70,64 @@ async def test_book_quality_audit_flags_pending_chapter_update_and_records_event
     assert event.metadata_json["overall_status"] == "needs_updates"
     assert event.metadata_json["chapter_items"][0]["chapter_id"] == chapter.id
     assert event.metadata_json["chapter_items"][0]["status"] == "needs_update"
+    assert event.metadata_json["event_signature"].startswith("book_quality_audit|needs_updates")
+
+
+async def test_book_quality_audit_reuses_acknowledged_equivalent_event(client, test_db):
+    first = await create_test_voice_transcript(client, test_db, "小时候在外婆家的院子里摘菜。")
+    second = await create_test_voice_transcript(client, test_db, "后来又讲了夏天和外婆一起剥青豆。")
+    project_id = first["session"]["project_id"]
+    _, chapter = await create_test_book_plan(
+        test_db,
+        project_id=project_id,
+        source_refs=[
+            memoir_source_ref(first, "外婆家的院子"),
+            memoir_source_ref(second, "剥青豆"),
+        ],
+        chapter_title="院子里的童年",
+    )
+    chapter.metadata_json = {"pending_source_utterance_ids": [second["utterance_id"]]}
+    await create_test_chapter_draft(
+        test_db,
+        project_id=project_id,
+        chapter_id=chapter.id,
+        content="小时候在外婆家的院子里摘菜。",
+    )
+    await test_db.commit()
+
+    first_response = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-quality-audit/run",
+        json={},
+    )
+    assert first_response.status_code == 200
+    event_id = first_response.json()["event"]["id"]
+
+    acknowledge_response = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/automation-events/{event_id}/acknowledge"
+    )
+    assert acknowledge_response.status_code == 200
+
+    second_response = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-quality-audit/run",
+        json={},
+    )
+    assert second_response.status_code == 200
+    assert second_response.json()["event"]["id"] == event_id
+
+    events = (
+        await test_db.execute(
+            select(MemoirAutomationEvent).where(
+                MemoirAutomationEvent.project_id == project_id,
+                MemoirAutomationEvent.event_type == MemoirAutomationEventType.AUDIT_COMPLETED.value,
+            )
+        )
+    ).scalars().all()
+    assert len(events) == 1
+    assert events[0].metadata_json[automation_events.ACKNOWLEDGED_BY_USER_KEY] is True
+
+    visible_response = await client.get(f"/api/mobile/memoir/projects/{project_id}/automation-events")
+    assert visible_response.status_code == 200
+    assert visible_response.json()["items"] == []
 
 
 async def test_book_quality_audit_job_records_event(client, test_db):

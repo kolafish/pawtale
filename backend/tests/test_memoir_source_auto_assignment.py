@@ -138,6 +138,7 @@ async def test_source_auto_assignment_assigns_high_confidence_source_and_records
     assert event.chapter_id == chapter.id
     assert event.utterance_ids_json == [uncovered["utterance_id"]]
     assert event.metadata_json["source"] == "auto_assignment"
+    assert event.metadata_json["event_signature"] == f"source_assigned:{chapter.id}:{uncovered['utterance_id']}"
     assert event.metadata_json["confidence_threshold"] == 0.53
 
     job = await test_db.scalar(
@@ -200,6 +201,7 @@ async def test_source_routing_job_assigns_high_confidence_source(client, test_db
     assert event.chapter_id == chapter.id
     assert event.utterance_ids_json == [uncovered["utterance_id"]]
     assert event.summary_text == "1 条讲述已自动整理进「院子里的童年」。"
+    assert event.metadata_json["event_signature"] == f"source_assigned:{chapter.id}:{uncovered['utterance_id']}"
 
     audit_job = await test_db.scalar(
         select(MemoirEditingJob).where(

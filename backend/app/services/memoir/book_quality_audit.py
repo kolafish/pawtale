@@ -164,11 +164,45 @@ def _event_metadata(
 ) -> dict[str, object]:
     return {
         "source": "book_quality_audit",
+        automation_events.EVENT_SIGNATURE_KEY: _event_signature(
+            overall_status=overall_status,
+            pending_utterance_count=pending_utterance_count,
+            chapter_items=chapter_items,
+        ),
         "overall_status": overall_status,
         "pending_utterance_count": pending_utterance_count,
         "next_actions": next_actions,
         "chapter_items": [item.model_dump(mode="json") for item in chapter_items],
     }
+
+
+def _event_signature(
+    *,
+    overall_status: str,
+    pending_utterance_count: int,
+    chapter_items: list[MemoirBookQualityAuditChapterResponse],
+) -> str:
+    chapter_parts = [
+        ":".join(
+            [
+                item.chapter_id,
+                item.status,
+                item.attention,
+                str(item.source_count),
+                str(item.pending_source_count),
+                str(item.draft_word_count),
+            ]
+        )
+        for item in sorted(chapter_items, key=lambda value: (value.sort_order, value.chapter_id))
+    ]
+    return "|".join(
+        [
+            "book_quality_audit",
+            overall_status,
+            f"pending={pending_utterance_count}",
+            *chapter_parts,
+        ]
+    )
 
 
 async def run_book_quality_audit(
@@ -204,7 +238,7 @@ async def run_book_quality_audit(
 
     event_response: MemoirAutomationEventResponse | None = None
     if req.record_event:
-        event = await automation_events.record_automation_event(
+        event = await automation_events.record_or_update_automation_event(
             db,
             project_id=project_id,
             event_type=MemoirAutomationEventType.AUDIT_COMPLETED,
