@@ -1,7 +1,12 @@
 import pytest
 from sqlalchemy import select
 
-from app.domain.memoir.types import MemoirAutomationEventType, MemoirEditingJobStatus, MemoirEditingJobType
+from app.domain.memoir.types import (
+    MemoirAutomationEventStatus,
+    MemoirAutomationEventType,
+    MemoirEditingJobStatus,
+    MemoirEditingJobType,
+)
 from app.models.memoir import MemoirAutomationEvent, MemoirEditingJob
 from app.services.memoir import automation_events
 from app.services.memoir.book_quality_audit import schedule_project_quality_audit
@@ -101,11 +106,31 @@ async def test_book_quality_audit_reuses_acknowledged_equivalent_event(client, t
     )
     assert first_response.status_code == 200
     event_id = first_response.json()["event"]["id"]
+    event = await test_db.get(MemoirAutomationEvent, event_id)
+    assert event is not None
+    legacy_metadata = dict(event.metadata_json)
+    legacy_metadata.pop(automation_events.EVENT_SIGNATURE_KEY)
+    event.metadata_json = legacy_metadata
+    test_db.add(event)
+    await test_db.commit()
 
     acknowledge_response = await client.post(
         f"/api/mobile/memoir/projects/{project_id}/automation-events/{event_id}/acknowledge"
     )
     assert acknowledge_response.status_code == 200
+    await automation_events.record_automation_event(
+        test_db,
+        project_id=project_id,
+        event_type=MemoirAutomationEventType.AUDIT_COMPLETED,
+        status=MemoirAutomationEventStatus.COMPLETED,
+        summary_text="当前有 1 个章节需要优先处理。",
+        metadata_json=legacy_metadata,
+    )
+    await test_db.commit()
+
+    duplicate_visible_response = await client.get(f"/api/mobile/memoir/projects/{project_id}/automation-events")
+    assert duplicate_visible_response.status_code == 200
+    assert duplicate_visible_response.json()["items"] == []
 
     second_response = await client.post(
         f"/api/mobile/memoir/projects/{project_id}/book-quality-audit/run",
@@ -122,8 +147,11 @@ async def test_book_quality_audit_reuses_acknowledged_equivalent_event(client, t
             )
         )
     ).scalars().all()
-    assert len(events) == 1
-    assert events[0].metadata_json[automation_events.ACKNOWLEDGED_BY_USER_KEY] is True
+    assert len(events) == 2
+    acknowledged_events = [
+        event for event in events if event.metadata_json.get(automation_events.ACKNOWLEDGED_BY_USER_KEY) is True
+    ]
+    assert [event.id for event in acknowledged_events] == [event_id]
 
     visible_response = await client.get(f"/api/mobile/memoir/projects/{project_id}/automation-events")
     assert visible_response.status_code == 200

@@ -392,6 +392,59 @@ def _event_signature(metadata: dict) -> str:
     return value.strip() if isinstance(value, str) and value.strip() else ""
 
 
+def _metadata_source(metadata: dict) -> str:
+    value = metadata.get("source")
+    return value.strip() if isinstance(value, str) and value.strip() else ""
+
+
+def _metadata_int(metadata: dict, key: str) -> int:
+    value = metadata.get(key)
+    return value if isinstance(value, int) else 0
+
+
+def _legacy_audit_signature(metadata: dict) -> str:
+    if _metadata_source(metadata) != "book_quality_audit":
+        return ""
+    overall_status = str(metadata.get("overall_status") or "")
+    pending_count = _metadata_int(metadata, "pending_utterance_count")
+    raw_items = metadata.get("chapter_items")
+    chapter_items = [item for item in raw_items if isinstance(item, dict)] if isinstance(raw_items, list) else []
+    chapter_parts = [
+        ":".join(
+            [
+                str(item.get("chapter_id") or ""),
+                str(item.get("status") or ""),
+                str(item.get("attention") or ""),
+                str(item.get("source_count") or 0),
+                str(item.get("pending_source_count") or 0),
+                str(item.get("draft_word_count") or 0),
+            ]
+        )
+        for item in sorted(chapter_items, key=lambda value: (value.get("sort_order") or 0, value.get("chapter_id") or ""))
+    ]
+    return "|".join(["book_quality_audit", overall_status, f"pending={pending_count}", *chapter_parts])
+
+
+def _event_semantic_signature(event: MemoirAutomationEvent) -> str:
+    metadata = event.metadata_json or {}
+    signature = _event_signature(metadata)
+    if signature:
+        return signature
+
+    event_type = event.event_type
+    source = _metadata_source(metadata)
+    if event_type == MemoirAutomationEventType.AUDIT_COMPLETED.value:
+        return _legacy_audit_signature(metadata)
+    if event_type == MemoirAutomationEventType.CHAPTER_AUTO_REVISED.value and source == "book_auto_revision":
+        pending_ids = _clean_unknown_utterance_ids(metadata.get(PENDING_SOURCE_UTTERANCE_IDS_KEY))
+        source_ids = pending_ids or _clean_unknown_utterance_ids(event.utterance_ids_json)
+        return f"book_auto_revision:{event.chapter_id or ''}:{','.join(sorted(source_ids))}" if source_ids else ""
+    if event_type == MemoirAutomationEventType.SOURCE_ASSIGNED.value and source == "auto_assignment":
+        source_ids = _clean_unknown_utterance_ids(event.utterance_ids_json)
+        return f"source_assigned:{event.chapter_id or ''}:{','.join(sorted(source_ids))}" if source_ids else ""
+    return ""
+
+
 def _preserved_metadata(existing: dict) -> dict:
     return {
         key: existing[key]
@@ -431,10 +484,49 @@ async def _find_matching_signature_event(
         )
         .order_by(MemoirAutomationEvent.created_at.desc(), MemoirAutomationEvent.id.desc())
     )
+    first_match: MemoirAutomationEvent | None = None
     for event in result.scalars().all():
-        if _event_signature(event.metadata_json or {}) == signature:
+        if _event_semantic_signature(event) != signature:
+            continue
+        if not _event_is_visible(event):
             return event
-    return None
+        if first_match is None:
+            first_match = event
+    return first_match
+
+
+def _visible_events(
+    events: list[MemoirAutomationEvent],
+    *,
+    include_acknowledged: bool,
+    voice_unannounced_only: bool,
+) -> list[MemoirAutomationEvent]:
+    if include_acknowledged and not voice_unannounced_only:
+        return events
+
+    hidden_signatures = {
+        signature
+        for event in events
+        if not _event_is_visible(event)
+        for signature in [_event_semantic_signature(event)]
+        if signature
+    }
+    seen_signatures: set[str] = set()
+    visible: list[MemoirAutomationEvent] = []
+    for event in events:
+        if voice_unannounced_only:
+            if not _event_is_voice_unannounced(event):
+                continue
+        elif not _event_is_visible(event):
+            continue
+
+        signature = _event_semantic_signature(event)
+        if signature and (signature in hidden_signatures or signature in seen_signatures):
+            continue
+        if signature:
+            seen_signatures.add(signature)
+        visible.append(event)
+    return visible
 
 
 def event_response(
@@ -665,10 +757,11 @@ async def list_automation_events(
         .order_by(MemoirAutomationEvent.created_at.desc(), MemoirAutomationEvent.id.desc())
     )
     events = list(result.scalars().all())
-    if voice_unannounced_only:
-        events = [event for event in events if _event_is_voice_unannounced(event)]
-    elif not include_acknowledged:
-        events = [event for event in events if _event_is_visible(event)]
+    events = _visible_events(
+        events,
+        include_acknowledged=include_acknowledged,
+        voice_unannounced_only=voice_unannounced_only,
+    )
     items = events[:limit]
     details_by_event = await _utterance_details_by_event(db, items)
     return MemoirAutomationEventListResponse(
