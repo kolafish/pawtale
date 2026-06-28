@@ -5,7 +5,12 @@ from typing import Any
 import pytest
 from sqlalchemy import select
 
-from app.domain.memoir.types import MemoirCreatedBy, MemoirEditingJobStatus, MemoirEditingJobType
+from app.domain.memoir.types import (
+    MemoirCreatedBy,
+    MemoirEditingJobStatus,
+    MemoirEditingJobType,
+    MemoirTranscriptVersionType,
+)
 from app.models.memoir import (
     AudioFile,
     MemoirChatMessage,
@@ -14,6 +19,7 @@ from app.models.memoir import (
     MemoirVoiceUtterance,
 )
 from app.services.memoir import audio_files as memoir_audio_files
+from app.services.memoir import voice_transcript_correction
 from app.services.memoir.asr import StreamingASREvent
 from app.services.memoir.voice_final_persistence import VoiceFinalPersistenceService
 from app.services.memoir.voice_gateway import (
@@ -674,21 +680,6 @@ async def test_voice_gateway_persistence_saves_final_message_utterance_and_audio
 ):
     monkeypatch.setattr("app.services.memoir.audio_files.MEMOIR_AUDIO_DIR", tmp_path / "audio")
 
-    async def fake_generate_cleaned_transcript_text(text: str, *, strict: bool = True, **_kwargs):
-        assert text == "嗯，我小时候就是住在外婆家。"
-        assert strict is False
-        assert _kwargs["context"].scene == "voice_chat"
-        assert _kwargs["context"].guidance_mode == "free_narration"
-        return CleanedTranscriptText(
-            content="我小时候住在外婆家。",
-            provider="fake-ai",
-            created_by=MemoirCreatedBy.AI,
-        )
-
-    monkeypatch.setattr(
-        "app.services.memoir.voice_final_persistence.generate_cleaned_transcript_text",
-        fake_generate_cleaned_transcript_text,
-    )
     user_response = await client.get("/api/auth/me")
     create_response = await post_mobile_memoir_voice_session(
         client,
@@ -723,7 +714,7 @@ async def test_voice_gateway_persistence_saves_final_message_utterance_and_audio
     audio_file = await test_db.scalar(select(AudioFile).where(AudioFile.id == persisted["audio_file_id"]))
     message = await test_db.scalar(select(MemoirChatMessage).where(MemoirChatMessage.id == persisted["message_id"]))
     utterance = await test_db.scalar(select(MemoirVoiceUtterance).where(MemoirVoiceUtterance.id == persisted["utterance_id"]))
-    corrected_version = await test_db.scalar(
+    raw_version = await test_db.scalar(
         select(MemoirTranscriptVersion).where(MemoirTranscriptVersion.id == persisted["transcript_version_id"])
     )
     editing_jobs = (
@@ -750,28 +741,31 @@ async def test_voice_gateway_persistence_saves_final_message_utterance_and_audio
     assert persistence.pending_audio_path is None
     assert persistence.pending_audio_size_bytes == 0
     assert message is not None
-    assert corrected_version is not None
-    assert message.content_text == "我小时候住在外婆家。"
-    assert message.content_status == "corrected"
+    assert raw_version is not None
+    assert message.content_text == "嗯，我小时候就是住在外婆家。"
+    assert message.content_status == "final"
     assert message.audio_file_id == audio_file.id
-    assert message.transcript_version_id == corrected_version.id
+    assert message.transcript_version_id == raw_version.id
     assert message.metadata_json["asr_transcript_version_id"] == versions[0].id
-    assert message.metadata_json["correction_provider"] == "fake-ai"
+    assert message.metadata_json["auto_corrected"] is False
+    assert message.metadata_json["correction_status"] == "pending"
     assert utterance is not None
     assert utterance.chat_message_id == message.id
     assert utterance.audio_file_id == audio_file.id
     assert utterance.transcript_raw == "嗯，我小时候就是住在外婆家。"
-    assert utterance.transcript_edited == "我小时候住在外婆家。"
-    assert len(versions) == 2
+    assert utterance.transcript_edited == ""
+    assert len(versions) == 1
     assert versions[0].answer_id is None
     assert versions[0].voice_session_id == voice_session_id
     assert versions[0].content == "嗯，我小时候就是住在外婆家。"
     assert versions[0].version_type == "asr_raw"
     assert versions[0].created_by == "asr"
-    assert corrected_version.content == "我小时候住在外婆家。"
-    assert corrected_version.version_type == "dialect_corrected"
-    assert corrected_version.created_by == "ai"
-    assert corrected_version.provider == "fake-ai"
+    correction_job = jobs_by_type.get(MemoirEditingJobType.CORRECT_TRANSCRIPT.value)
+    assert correction_job is not None
+    assert correction_job.status == MemoirEditingJobStatus.PENDING.value
+    assert correction_job.dedupe_key == f"correct_transcript:{utterance.id}"
+    assert correction_job.payload_json["utterance_id"] == utterance.id
+    assert correction_job.payload_json["raw_transcript_version_id"] == raw_version.id
     editing_job = jobs_by_type.get(MemoirEditingJobType.ROUTE_SOURCES.value)
     assert editing_job is not None
     assert editing_job.status == MemoirEditingJobStatus.PENDING.value
@@ -783,6 +777,151 @@ async def test_voice_gateway_persistence_saves_final_message_utterance_and_audio
     assert audit_job.status == MemoirEditingJobStatus.PENDING.value
     assert audit_job.dedupe_key == f"quality_audit:{project_id}"
     assert audit_job.payload_json["reason"] == "voice_utterance_final_saved"
+
+
+async def test_voice_transcript_correction_job_updates_saved_raw_turn(
+    client,
+    test_db,
+    monkeypatch,
+):
+    async def fake_generate_cleaned_transcript_text(text: str, *, strict: bool = True, **kwargs):
+        assert text == "嗯，我小时候就是住在外婆家。"
+        assert strict is False
+        assert kwargs["context"].scene == "voice_chat"
+        assert kwargs["context"].guidance_mode == "free_narration"
+        return CleanedTranscriptText(
+            content="我小时候住在外婆家。",
+            provider="fake-ai",
+            created_by=MemoirCreatedBy.AI,
+        )
+
+    monkeypatch.setattr(
+        "app.services.memoir.voice_transcript_correction.generate_cleaned_transcript_text",
+        fake_generate_cleaned_transcript_text,
+    )
+    user_response = await client.get("/api/auth/me")
+    create_response = await post_mobile_memoir_voice_session(
+        client,
+        json={"guidance_mode": "free_narration"},
+    )
+    voice_session_id = create_response.json()["session"]["id"]
+    service = VoiceFinalPersistenceService(
+        db=test_db,
+        voice_session_id=voice_session_id,
+        user_id=user_response.json()["id"],
+    )
+
+    persisted = await service.persist_final(
+        StreamingASREvent(
+            type="final",
+            text="嗯，我小时候就是住在外婆家。",
+            start_ms=0,
+            end_ms=2400,
+            raw={"payload": {"result": {"text": "嗯，我小时候就是住在外婆家。"}}},
+        )
+    )
+    correction_job = await test_db.scalar(
+        select(MemoirEditingJob).where(
+            MemoirEditingJob.job_type == MemoirEditingJobType.CORRECT_TRANSCRIPT.value
+        )
+    )
+
+    assert correction_job is not None
+    result = await voice_transcript_correction.run_transcript_correction_job(test_db, correction_job)
+    message = await test_db.scalar(select(MemoirChatMessage).where(MemoirChatMessage.id == persisted.message_id))
+    utterance = await test_db.scalar(select(MemoirVoiceUtterance).where(MemoirVoiceUtterance.id == persisted.utterance_id))
+    versions = (
+        await test_db.execute(
+            select(MemoirTranscriptVersion)
+            .where(MemoirTranscriptVersion.voice_session_id == voice_session_id)
+            .order_by(MemoirTranscriptVersion.version_type)
+        )
+    ).scalars().all()
+    corrected_versions = [
+        version for version in versions
+        if version.version_type == MemoirTranscriptVersionType.DIALECT_CORRECTED.value
+    ]
+
+    assert result.status == MemoirEditingJobStatus.SUCCEEDED
+    assert result.result_json["utterance_id"] == persisted.utterance_id
+    assert message is not None
+    assert message.content_text == "我小时候住在外婆家。"
+    assert message.content_status == "corrected"
+    assert message.metadata_json["auto_corrected"] is True
+    assert message.metadata_json["correction_status"] == "succeeded"
+    assert message.metadata_json["correction_provider"] == "fake-ai"
+    assert utterance is not None
+    assert utterance.transcript_raw == "嗯，我小时候就是住在外婆家。"
+    assert utterance.transcript_edited == "我小时候住在外婆家。"
+    assert len(corrected_versions) == 1
+    assert corrected_versions[0].content == "我小时候住在外婆家。"
+    assert corrected_versions[0].provider == "fake-ai"
+    assert message.transcript_version_id == corrected_versions[0].id
+
+
+async def test_voice_transcript_correction_job_does_not_overwrite_user_edit(
+    client,
+    test_db,
+    monkeypatch,
+):
+    async def fail_generate_cleaned_transcript_text(*_args, **_kwargs):
+        raise AssertionError("correction should be skipped after a user edit")
+
+    monkeypatch.setattr(
+        "app.services.memoir.voice_transcript_correction.generate_cleaned_transcript_text",
+        fail_generate_cleaned_transcript_text,
+    )
+    user_response = await client.get("/api/auth/me")
+    create_response = await post_mobile_memoir_voice_session(
+        client,
+        json={"guidance_mode": "free_narration"},
+    )
+    voice_session_id = create_response.json()["session"]["id"]
+    service = VoiceFinalPersistenceService(
+        db=test_db,
+        voice_session_id=voice_session_id,
+        user_id=user_response.json()["id"],
+    )
+    persisted = await service.persist_final(
+        StreamingASREvent(
+            type="final",
+            text="嗯，我小时候就是住在外婆家。",
+        )
+    )
+    message = await test_db.scalar(select(MemoirChatMessage).where(MemoirChatMessage.id == persisted.message_id))
+    utterance = await test_db.scalar(select(MemoirVoiceUtterance).where(MemoirVoiceUtterance.id == persisted.utterance_id))
+    assert message is not None
+    assert utterance is not None
+    user_version = MemoirTranscriptVersion(
+        voice_session_id=voice_session_id,
+        source_artifact_id=utterance.id,
+        version_type=MemoirTranscriptVersionType.USER_EDITED.value,
+        content="用户自己整理后的文字。",
+        created_by=MemoirCreatedBy.USER.value,
+    )
+    test_db.add(user_version)
+    await test_db.flush()
+    utterance.transcript_edited = "用户自己整理后的文字。"
+    message.content_text = "用户自己整理后的文字。"
+    message.transcript_version_id = user_version.id
+    test_db.add_all([utterance, message])
+    await test_db.commit()
+    correction_job = await test_db.scalar(
+        select(MemoirEditingJob).where(
+            MemoirEditingJob.job_type == MemoirEditingJobType.CORRECT_TRANSCRIPT.value
+        )
+    )
+
+    assert correction_job is not None
+    result = await voice_transcript_correction.run_transcript_correction_job(test_db, correction_job)
+    await test_db.refresh(message)
+    await test_db.refresh(utterance)
+
+    assert result.status == MemoirEditingJobStatus.SKIPPED
+    assert result.error_message == "transcript already edited"
+    assert message.content_text == "用户自己整理后的文字。"
+    assert message.transcript_version_id == user_version.id
+    assert utterance.transcript_edited == "用户自己整理后的文字。"
 
 
 async def test_voice_gateway_persistence_rejects_audio_stream_over_limit(client, test_db, monkeypatch):
