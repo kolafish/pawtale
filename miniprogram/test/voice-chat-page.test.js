@@ -610,7 +610,7 @@ test("voice chat warns when a pending live transcript is not in backend detail",
   assert.equal(context.data.persistenceStateText, "已恢复已保存记录");
 });
 
-test("voice chat saves intermediate ASR segment without requesting follow-up", () => {
+test("voice chat does not request follow-up for non-final saved ASR events", () => {
   const page = loadVoiceChatPage();
   let followUpCalls = 0;
   const context = {
@@ -682,6 +682,47 @@ test("voice chat syncs authorization consent before reconnecting", async () => {
   assert.deepEqual(syncedOptions, [{ sourceSessionId: "voice-1" }]);
   assert.equal(connectCalls, 1);
   assert.equal(context.data.voiceAuthorizationAgreed, true);
+});
+
+test("voice chat uses conservative silence thresholds for automatic turn ending", async () => {
+  const connectOptions = [];
+  const page = loadVoiceChatPage({
+    streamingExports: {
+      MemoirStreamingAsrClient: class {
+        constructor(options) {
+          connectOptions.push(options);
+          this.options = options;
+        }
+        async connect() {
+          this.options.callbacks.onStatus("ready");
+        }
+        close() {}
+        configureAutoStop() {}
+      },
+    },
+    voiceAuthorizationExports: {
+      readVoiceAuthorizationConsent: () => true,
+      syncVoiceAuthorizationConsent: async () => ({ id: "consent-1" }),
+    },
+  });
+  const context = {
+    ...page,
+    data: {
+      ...page.data,
+      voiceSessionId: "voice-1",
+      voiceAuthorizationAgreed: true,
+      autoStopEnabled: true,
+    },
+    setData(patch) {
+      this.data = { ...this.data, ...patch };
+    },
+  };
+
+  await page.connectGateway.call(context);
+
+  assert.equal(connectOptions.length, 1);
+  assert.equal(connectOptions[0].autoStopSilenceMs, 3500);
+  assert.equal(connectOptions[0].minAutoStopRecordingMs, 2000);
 });
 
 test("voice chat uses no-answer timeout only for auto-listen recordings", async () => {

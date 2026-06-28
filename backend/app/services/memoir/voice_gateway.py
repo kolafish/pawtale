@@ -29,7 +29,6 @@ AudioFrameHandler = Callable[[bytes], Awaitable[None]]
 ASRFinalHandler = Callable[[StreamingASREvent], Awaitable[dict[str, Any] | None]]
 ASR_FINISH_DRAIN_TIMEOUT_SECONDS = 10.0
 MAX_AUDIO_FRAME_BYTES = 256 * 1024
-PARTIAL_SEGMENT_MIN_CHARS = 180
 
 
 class VoiceGatewayClientError(RuntimeError):
@@ -44,55 +43,6 @@ class VoiceGatewayState(str, Enum):
     FINISHING = "finishing"
     STOPPED = "stopped"
     FAILED = "failed"
-
-
-def _compact_text(text: str) -> str:
-    return "".join((text or "").split())
-
-
-class VoiceGatewayASRSegmenter:
-    def __init__(self, *, partial_min_chars: int = PARTIAL_SEGMENT_MIN_CHARS) -> None:
-        self.partial_min_chars = partial_min_chars
-        self._committed_source_text = ""
-
-    def segment_event(self, event: StreamingASREvent) -> StreamingASREvent | None:
-        text = (event.text or "").strip()
-        if not text:
-            return None
-        if event.type == "partial" and self._uncommitted_char_count(text) < self.partial_min_chars:
-            return None
-        segment_text = self._uncommitted_text(text)
-        if not segment_text:
-            return None
-        raw = dict(event.raw or {})
-        raw["segment_source_text"] = text
-        raw["segment_source_event_type"] = event.type
-        if event.type == "partial":
-            raw["segment_from_partial"] = True
-        return StreamingASREvent(
-            type="final",
-            text=segment_text,
-            start_ms=event.start_ms,
-            end_ms=event.end_ms,
-            raw=raw,
-            error=event.error,
-        )
-
-    def mark_committed(self, event: StreamingASREvent) -> None:
-        source_text = str((event.raw or {}).get("segment_source_text") or event.text or "").strip()
-        if source_text:
-            self._committed_source_text = source_text
-
-    def _uncommitted_char_count(self, text: str) -> int:
-        return len(_compact_text(self._uncommitted_text(text)))
-
-    def _uncommitted_text(self, text: str) -> str:
-        value = text.strip()
-        if not self._committed_source_text:
-            return value
-        if value.startswith(self._committed_source_text):
-            return value[len(self._committed_source_text):].strip()
-        return ""
 
 
 class VoiceGatewaySession:
@@ -119,8 +69,6 @@ class VoiceGatewaySession:
         self._terminal_stop = asyncio.Event()
         self._pending_final_event: StreamingASREvent | None = None
         self._latest_text_event: StreamingASREvent | None = None
-        self._segmenter = VoiceGatewayASRSegmenter()
-        self._last_segment_payload: dict[str, Any] | None = None
 
     async def run(self) -> None:
         await self.client.send_json(self._event("session.ready"))
@@ -200,8 +148,6 @@ class VoiceGatewaySession:
         await self._close_asr_client()
         self._pending_final_event = None
         self._latest_text_event = None
-        self._segmenter = VoiceGatewayASRSegmenter()
-        self._last_segment_payload = None
         self._state = VoiceGatewayState.LISTENING
         self._asr_client = self.asr_client_factory()
         await self._asr_client.start()
@@ -280,9 +226,6 @@ class VoiceGatewaySession:
             self._latest_text_event = event
 
         if event.type == "final":
-            if self.on_asr_final and self._state == VoiceGatewayState.LISTENING:
-                await self._persist_asr_segment(event, turn_final=False)
-                return
             self._pending_final_event = event
             await self.client.send_json(
                 self._asr_event_payload(
@@ -294,35 +237,29 @@ class VoiceGatewaySession:
             return
 
         await self.client.send_json(self._asr_event_payload(event, event_type=f"asr.{event.type}"))
-        if self.on_asr_final:
-            await self._persist_asr_segment(event, turn_final=False)
 
-    async def _persist_asr_segment(self, event: StreamingASREvent, *, turn_final: bool) -> dict[str, Any] | None:
-        segment_event = self._segmenter.segment_event(event)
-        if segment_event is None:
+    async def _persist_asr_final(self, event: StreamingASREvent, *, turn_final: bool) -> dict[str, Any] | None:
+        text = (event.text or "").strip()
+        if not text:
             return None
 
         payload = self._asr_event_payload(
-            segment_event,
+            event,
             event_type="asr.final",
             provider_event_type=(
-                "partial_fallback"
-                if segment_event.raw.get("fallback_from_partial")
-                else segment_event.raw.get("segment_source_event_type", event.type)
+                "partial_fallback" if (event.raw or {}).get("fallback_from_partial") else event.type
             ),
             segment_final=True,
             turn_final=turn_final,
         )
         try:
-            persisted = await self.on_asr_final(segment_event) if self.on_asr_final else None
+            persisted = await self.on_asr_final(event) if self.on_asr_final else None
         except Exception:
-            logger.exception("Failed to persist ASR segment")
+            logger.exception("Failed to persist final ASR event")
             await self._mark_terminal_error("asr_final_persistence_failed")
             return None
         if persisted:
             payload.update(persisted)
-        self._segmenter.mark_committed(segment_event)
-        self._last_segment_payload = dict(payload)
         self._latest_text_event = None
         await self.client.send_json(payload)
         return payload
@@ -331,19 +268,9 @@ class VoiceGatewaySession:
         if self.on_asr_final:
             event = self._final_event_for_persistence()
             if event is not None:
-                payload = await self._persist_asr_segment(event, turn_final=True)
+                payload = await self._persist_asr_final(event, turn_final=True)
                 if payload is not None:
                     return
-            if self._last_segment_payload is not None:
-                payload = {
-                    **self._last_segment_payload,
-                    "turn_final": True,
-                    "segment_replay": True,
-                    "state": self._state.value,
-                }
-                await self.client.send_json(payload)
-                self._latest_text_event = None
-                return
             return
 
         event = self._final_event_for_persistence()
@@ -352,15 +279,6 @@ class VoiceGatewaySession:
         payload = self._asr_event_payload(event, event_type="asr.final")
         if self._pending_final_event is None:
             payload["provider_event_type"] = "partial_fallback"
-        if self.on_asr_final:
-            try:
-                persisted = await self.on_asr_final(event)
-            except Exception:
-                logger.exception("Failed to persist final ASR event")
-                await self._mark_terminal_error("asr_final_persistence_failed")
-                return
-            if persisted:
-                payload.update(persisted)
         self._pending_final_event = None
         self._latest_text_event = None
         await self.client.send_json(payload)

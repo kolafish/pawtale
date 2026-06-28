@@ -250,7 +250,6 @@ export interface VoiceGatewayServerEvent {
   provider_event_type?: string;
   segment_final?: boolean;
   turn_final?: boolean;
-  segment_replay?: boolean;
 }
 
 export interface VoiceChatErrorInfo {

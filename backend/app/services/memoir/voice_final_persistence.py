@@ -157,14 +157,14 @@ class VoiceFinalPersistenceService:
                 payload_json={
                     "utterance_ids": [utterance.id],
                     "voice_session_id": voice_session.id,
-                    "source": "voice_utterance_segment",
+                    "source": "voice_utterance_final",
                 },
                 dedupe_key=f"route_source:{utterance.id}",
             )
             await book_quality_audit.schedule_project_quality_audit(
                 self.db,
                 project_id=voice_session.project_id,
-                reason="voice_utterance_segment_saved",
+                reason="voice_utterance_final_saved",
             )
             await self.db.commit()
             return VoiceFinalPersistenceResult(
