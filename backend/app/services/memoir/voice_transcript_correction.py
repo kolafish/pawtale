@@ -13,6 +13,7 @@ from app.domain.memoir.types import (
 from app.models.memoir import MemoirEditingJob, MemoirTranscriptVersion, MemoirVoiceUtterance
 from app.services.memoir import editing_jobs
 from app.services.memoir.editing_jobs import EditingJobResult
+from app.services.memoir.utterance_editing_pipeline import schedule_source_routing_for_ready_utterance
 from app.services.memoir.voice_transcripts import (
     generate_cleaned_transcript_text,
     load_voice_transcript_cleanup_context,
@@ -77,13 +78,33 @@ async def run_transcript_correction_job(
     message = utterance.chat_message
     raw_transcript_version_id = str(payload.get("raw_transcript_version_id") or "").strip()
     if (utterance.transcript_edited or "").strip():
+        route_job = await schedule_source_routing_for_ready_utterance(
+            db,
+            project_id=job.project_id,
+            utterance=utterance,
+            source="transcript_already_edited",
+        )
         return EditingJobResult(
             status=MemoirEditingJobStatus.SKIPPED,
+            result_json={
+                "utterance_id": utterance.id,
+                "route_source_job_id": route_job.id if route_job else None,
+            },
             error_message="transcript already edited",
         )
     if message and raw_transcript_version_id and message.transcript_version_id != raw_transcript_version_id:
+        route_job = await schedule_source_routing_for_ready_utterance(
+            db,
+            project_id=job.project_id,
+            utterance=utterance,
+            source="transcript_version_already_changed",
+        )
         return EditingJobResult(
             status=MemoirEditingJobStatus.SKIPPED,
+            result_json={
+                "utterance_id": utterance.id,
+                "route_source_job_id": route_job.id if route_job else None,
+            },
             error_message="transcript version changed",
         )
 
@@ -128,11 +149,18 @@ async def run_transcript_correction_job(
         utterance_id=utterance.id,
         version_type=MemoirTranscriptVersionType.DIALECT_CORRECTED,
     )
+    route_job = await schedule_source_routing_for_ready_utterance(
+        db,
+        project_id=job.project_id,
+        utterance=utterance,
+        source="transcript_correction_succeeded",
+    )
     return EditingJobResult(
         result_json={
             "utterance_id": utterance.id,
             "transcript_version_id": corrected_version.id,
             "provider": cleaned.provider,
             "created_by": cleaned.created_by.value,
+            "route_source_job_id": route_job.id if route_job else None,
         }
     )
