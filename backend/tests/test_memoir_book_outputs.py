@@ -244,13 +244,27 @@ async def test_mobile_memoir_book_output_exports_txt_and_pdf(client, test_db):
     assert "第1章 外婆家的童年" in txt.text
     assert pdf.status_code == 200
     assert pdf.headers["content-type"] == "application/pdf"
-    assert pdf.content.startswith(b"%PDF-1.4")
-    assert b"/F1 13 Tf" in pdf.content
-    assert b"/STSong-Light" in pdf.content
+    assert pdf.content.startswith(b"%PDF-")
+    assert b"/MediaBox [ 0 0 420 595 ]" in pdf.content
+    assert b"/FontFile2" in pdf.content
+    assert b"NotoSansSC" in pdf.content
+    assert pdf.content.count(b"/Type /Page") >= 8
     assert print_pdf.status_code == 200
-    assert b"/F1 16 Tf" in print_pdf.content
+    assert b"/FontFile2" in print_pdf.content
     assert print_pdf.content != pdf.content
     assert "filename*=" in print_pdf.headers["content-disposition"]
+
+    stored_version = await test_db.scalar(
+        select(MemoirBookOutputVersion).where(MemoirBookOutputVersion.project_id == project_id)
+    )
+    stored_version.manuscript_json = {}
+    await test_db.commit()
+    fallback_pdf = await client.get(f"/api/mobile/memoir/projects/{project_id}/book-output/export?format=pdf")
+
+    assert fallback_pdf.status_code == 200
+    assert fallback_pdf.content.startswith(b"%PDF-")
+    assert b"/MediaBox [ 0 0 420 595 ]" in fallback_pdf.content
+    assert b"/FontFile2" in fallback_pdf.content
 
 
 async def test_mobile_memoir_book_output_exports_selected_version(client, test_db):
