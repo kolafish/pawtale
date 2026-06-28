@@ -32,6 +32,8 @@ import {
 } from "./memoir-api-client";
 import { ApiError, cleanBaseUrl, readBackendConfig, readSessionCookie } from "./request";
 
+const BOOK_OUTPUT_GENERATE_TIMEOUT_MS = 60000;
+
 function bookPlanPath(projectId: string, suffix = ""): string {
   return memoirProjectPath(projectId, `/book-plan${suffix}`);
 }
@@ -312,6 +314,7 @@ export function generateMemoirBookOutput(
     {
       method: "POST",
       data,
+      timeoutMs: BOOK_OUTPUT_GENERATE_TIMEOUT_MS,
     },
   );
 }
