@@ -84,3 +84,45 @@ test("recorder resource releases ownership before notifying stop handlers", () =
   assert.equal(nextStartResult, true);
   assert.equal(resource.currentOwner(), "asr");
 });
+
+test("recorder resource waits for native start before completing an early stop", async () => {
+  const recorder = recorderHarness();
+  recorder.stop = function stopBeforeNativeStart() {
+    this.stops += 1;
+    if (this.stops === 1) {
+      throw new Error("operateRecorder:fail recorder not start");
+    }
+  };
+  const { WechatRecorderResource } = require("../services/recorder-resource.ts");
+  const resource = new WechatRecorderResource(() => recorder);
+
+  assert.equal(resource.start("barge-in", { format: "PCM" }, {}), true);
+  const stopped = resource.stopAndWait("barge-in");
+  await Promise.resolve();
+
+  assert.equal(recorder.stops, 1);
+  assert.equal(resource.isBusy(), true);
+  assert.equal(resource.start("asr", { format: "PCM" }, {}), false);
+
+  recorder.callbacks.start();
+  assert.equal(recorder.stops, 2);
+  recorder.callbacks.stop();
+  await stopped;
+
+  assert.equal(resource.isBusy(), false);
+  assert.equal(resource.start("asr", { format: "PCM" }, {}), true);
+});
+
+test("recorder resource stops an orphan native recorder start after owner release", () => {
+  const recorder = recorderHarness();
+  const { WechatRecorderResource } = require("../services/recorder-resource.ts");
+  const resource = new WechatRecorderResource(() => recorder);
+
+  assert.equal(resource.start("asr", { format: "PCM" }, {}), true);
+  resource.forceRelease("asr");
+
+  recorder.callbacks.start();
+
+  assert.equal(recorder.stops, 1);
+  assert.equal(resource.isBusy(), false);
+});
