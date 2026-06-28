@@ -204,6 +204,9 @@ async def test_mobile_memoir_book_output_exports_txt_and_pdf(client, test_db):
 
     txt = await client.get(f"/api/mobile/memoir/projects/{project_id}/book-output/export?format=txt")
     pdf = await client.get(f"/api/mobile/memoir/projects/{project_id}/book-output/export?format=pdf")
+    print_pdf = await client.get(
+        f"/api/mobile/memoir/projects/{project_id}/book-output/export?format=pdf&layout=large_print"
+    )
 
     assert txt.status_code == 200
     assert txt.headers["content-type"].startswith("text/plain")
@@ -213,7 +216,12 @@ async def test_mobile_memoir_book_output_exports_txt_and_pdf(client, test_db):
     assert pdf.status_code == 200
     assert pdf.headers["content-type"] == "application/pdf"
     assert pdf.content.startswith(b"%PDF-1.4")
+    assert b"/F1 13 Tf" in pdf.content
     assert b"/STSong-Light" in pdf.content
+    assert print_pdf.status_code == 200
+    assert b"/F1 16 Tf" in print_pdf.content
+    assert print_pdf.content != pdf.content
+    assert "filename*=" in print_pdf.headers["content-disposition"]
 
 
 async def test_mobile_memoir_book_output_exports_selected_version(client, test_db):

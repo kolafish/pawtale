@@ -8,6 +8,7 @@ import type {
   MemoirBookChapterTitleUpdateRequest,
   MemoirBookOutput,
   MemoirBookOutputExportFormat,
+  MemoirBookOutputExportLayout,
   MemoirBookOutputGenerateRequest,
   MemoirBookPlan,
   MemoirBookPlanConfirmRequest,
@@ -319,12 +320,16 @@ export function memoirBookOutputExportUrl(
   projectId: string,
   format: MemoirBookOutputExportFormat = "pdf",
   versionId = "",
+  layout: MemoirBookOutputExportLayout = "standard",
 ): string {
   const config = readBackendConfig();
   if (!config.httpBaseUrl) {
     throw new ApiError(0, "未配置后端 HTTP 地址", {});
   }
   const params = [`format=${encodeURIComponent(format)}`];
+  if (format === "pdf") {
+    params.push(`layout=${encodeURIComponent(layout)}`);
+  }
   if (versionId) {
     params.push(`version_id=${encodeURIComponent(versionId)}`);
   }
@@ -335,10 +340,11 @@ export async function downloadMemoirBookOutputExport(
   projectId: string,
   format: MemoirBookOutputExportFormat = "pdf",
   versionId = "",
+  layout: MemoirBookOutputExportLayout = "standard",
 ): Promise<string> {
   await ensureMemoirBackendSession();
   const cookie = readSessionCookie();
-  const url = memoirBookOutputExportUrl(projectId, format, versionId);
+  const url = memoirBookOutputExportUrl(projectId, format, versionId, layout);
   return new Promise((resolve, reject) => {
     wx.downloadFile({
       url,

@@ -644,6 +644,7 @@ export interface MemoirBookOutputGenerateRequest {
 }
 
 export type MemoirBookOutputExportFormat = "pdf" | "txt";
+export type MemoirBookOutputExportLayout = "standard" | "large_print";
 
 export interface MemoirBookOutputTableOfContentsItem {
   chapter_id: string;

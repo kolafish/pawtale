@@ -2,6 +2,7 @@ import type {
   MemoirBookChapterDraft,
   MemoirBookChapterSourceRef,
   MemoirBookOutput,
+  MemoirBookOutputExportLayout,
   MemoirBookOutputVersion,
   MemoirBookPlan,
   MemoirBookPlanChapter,
@@ -28,6 +29,18 @@ export type BookStage = "empty" | "plan_draft" | "drafting";
 
 const TIMEZONE_OFFSET_RE = /(?:[zZ]|[+-]\d{2}:?\d{2})$/;
 export const NEW_CHAPTER_PICKER_VALUE = "__new_chapter__";
+export const BOOK_EXPORT_LAYOUT_OPTIONS: BookExportLayoutOptionView[] = [
+  {
+    label: "标准阅读",
+    value: "standard",
+    detailText: "适合手机预览和普通分享",
+  },
+  {
+    label: "大字打印",
+    value: "large_print",
+    detailText: "字号更大，页边距更宽",
+  },
+];
 
 export interface ChapterPickerOption {
   label: string;
@@ -138,6 +151,12 @@ export interface BookOutputVersionOptionView {
   isLatest: boolean;
 }
 
+export interface BookExportLayoutOptionView {
+  label: string;
+  value: MemoirBookOutputExportLayout;
+  detailText: string;
+}
+
 export interface BookVoiceCommandUndoSnapshot {
   planTitle: string;
   chapters: MemoirBookPlanChapterUpdateInput[];
@@ -187,6 +206,11 @@ export interface BookData {
   bookStaleNotice: string;
   bookActionText: string;
   bookExportBusyTarget: string;
+  bookExportLayout: MemoirBookOutputExportLayout;
+  bookExportLayoutIndex: number;
+  bookExportLayoutLabel: string;
+  bookExportLayoutDetailText: string;
+  bookExportLayoutOptions: BookExportLayoutOptionView[];
   generatingBook: boolean;
   ttsBusyTarget: string;
   playingTarget: string;
@@ -1152,6 +1176,11 @@ export function guestBookData(): Partial<BookData> {
     bookStaleNotice: "",
     bookActionText: "生成全书",
     bookExportBusyTarget: "",
+    bookExportLayout: "standard",
+    bookExportLayoutIndex: 0,
+    bookExportLayoutLabel: BOOK_EXPORT_LAYOUT_OPTIONS[0].label,
+    bookExportLayoutDetailText: BOOK_EXPORT_LAYOUT_OPTIONS[0].detailText,
+    bookExportLayoutOptions: BOOK_EXPORT_LAYOUT_OPTIONS,
     ttsBusyTarget: "",
     playingTarget: "",
     bookTTSActiveTarget: "",

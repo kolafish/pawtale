@@ -42,6 +42,7 @@ from app.services.memoir.book_audio import (
 )
 from app.services.memoir.book_output_export import (
     MemoirBookOutputExportFormat,
+    MemoirBookOutputExportLayout,
     render_book_output_export,
 )
 from app.services.memoir.voice_tts import TTSClient
@@ -427,6 +428,7 @@ async def export_book_output_file(
     user_id: str,
     project_id: str,
     export_format: MemoirBookOutputExportFormat,
+    layout: MemoirBookOutputExportLayout = MemoirBookOutputExportLayout.STANDARD,
     version_id: str | None = None,
 ) -> ExportFile:
     await load_memoir_project(db, project_id, user_id)
@@ -442,6 +444,7 @@ async def export_book_output_file(
         version=version.version,
         content=content,
         export_format=export_format,
+        layout=layout,
     )
 
 

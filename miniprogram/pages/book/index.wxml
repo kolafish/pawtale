@@ -674,6 +674,21 @@
         </picker>
         <text wx:if="{{bookVersionNotice}}" class="book-version-notice">{{bookVersionNotice}}</text>
         <text wx:if="{{bookStaleNotice}}" class="book-stale-notice">{{bookStaleNotice}}</text>
+        <view wx:if="{{bookContent}}" class="book-export-layout">
+          <picker
+            class="book-export-layout-picker"
+            range="{{bookExportLayoutOptions}}"
+            range-key="label"
+            value="{{bookExportLayoutIndex}}"
+            bindchange="changeBookExportLayout"
+          >
+            <view class="book-export-layout-button">
+              <text>PDF 排版</text>
+              <text>{{bookExportLayoutLabel}}</text>
+            </view>
+          </picker>
+          <text class="book-export-layout-detail">{{bookExportLayoutDetailText}}</text>
+        </view>
 
         <view wx:if="{{bookContent}}" class="book-preview">
           <block wx:if="{{playingTarget === 'book' && bookTTSActiveTarget === 'book'}}">
@@ -763,7 +778,7 @@
           <button
             class="ghost-button"
             data-format="pdf"
-            loading="{{bookExportBusyTarget === 'book-export:pdf'}}"
+            loading="{{bookExportBusyTarget === 'book-export:pdf:' + bookExportLayout}}"
             disabled="{{updatingPlanStructure || generatingBook || !bookContent || hasDraftChanges || bookStaleNotice || bookExportBusyTarget}}"
             bindtap="downloadBookOutputExport"
           >
@@ -771,8 +786,18 @@
           </button>
           <button
             class="ghost-button"
+            data-format="pdf"
+            data-layout="large_print"
+            loading="{{bookExportBusyTarget === 'book-export:pdf:large_print'}}"
+            disabled="{{updatingPlanStructure || generatingBook || !bookContent || hasDraftChanges || bookStaleNotice || bookExportBusyTarget}}"
+            bindtap="downloadBookOutputExport"
+          >
+            打印版 PDF
+          </button>
+          <button
+            class="ghost-button"
             data-format="txt"
-            loading="{{bookExportBusyTarget === 'book-export:txt'}}"
+            loading="{{bookExportBusyTarget === 'book-export:txt:standard'}}"
             disabled="{{updatingPlanStructure || generatingBook || !bookContent || hasDraftChanges || bookStaleNotice || bookExportBusyTarget}}"
             bindtap="downloadBookOutputExport"
           >
