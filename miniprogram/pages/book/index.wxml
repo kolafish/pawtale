@@ -785,6 +785,17 @@
               <text class="book-manuscript-heading">预览与导出</text>
               <text class="book-manuscript-count">PDF / 文本</text>
             </view>
+            <view class="book-export-source-toggle">
+              <view class="book-export-source-copy">
+                <text class="book-export-source-title">来源附录</text>
+                <text class="book-export-source-meta">内部留档可保留，分享打印可关闭</text>
+              </view>
+              <switch
+                color="#a64b3f"
+                checked="{{bookExportShowSourceAppendix}}"
+                bindchange="toggleBookExportSourceAppendix"
+              />
+            </view>
           </view>
         </view>
 

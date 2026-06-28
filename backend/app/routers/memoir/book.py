@@ -537,6 +537,7 @@ async def export_mobile_memoir_book_output(
         memoir_book_outputs.MemoirBookOutputExportLayout.STANDARD
     ),
     version_id: str | None = None,
+    show_source_appendix: bool | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -547,6 +548,7 @@ async def export_mobile_memoir_book_output(
         export_format=export_format,
         layout=layout,
         version_id=version_id,
+        show_source_appendix=show_source_appendix,
     )
     return Response(
         content=export_file.content,

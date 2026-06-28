@@ -637,6 +637,7 @@ async def export_book_output_file(
     export_format: MemoirBookOutputExportFormat,
     layout: MemoirBookOutputExportLayout = MemoirBookOutputExportLayout.STANDARD,
     version_id: str | None = None,
+    show_source_appendix: bool | None = None,
 ) -> ExportFile:
     await load_memoir_project(db, project_id, user_id)
     output = await _load_output(db, project_id=project_id)
@@ -651,6 +652,7 @@ async def export_book_output_file(
         version=version.version,
         content=content,
         manuscript=version.manuscript_json or {},
+        show_source_appendix=show_source_appendix,
         export_format=export_format,
         layout=layout,
     )
