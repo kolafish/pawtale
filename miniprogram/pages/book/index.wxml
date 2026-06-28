@@ -760,6 +760,24 @@
           >
             {{ttsBusyTarget === "book" ? "准备朗读" : (playingTarget === "book" ? "停止朗读" : "朗读全书")}}
           </button>
+          <button
+            class="ghost-button"
+            data-format="pdf"
+            loading="{{bookExportBusyTarget === 'book-export:pdf'}}"
+            disabled="{{updatingPlanStructure || generatingBook || !bookContent || hasDraftChanges || bookStaleNotice || bookExportBusyTarget}}"
+            bindtap="downloadBookOutputExport"
+          >
+            导出 PDF
+          </button>
+          <button
+            class="ghost-button"
+            data-format="txt"
+            loading="{{bookExportBusyTarget === 'book-export:txt'}}"
+            disabled="{{updatingPlanStructure || generatingBook || !bookContent || hasDraftChanges || bookStaleNotice || bookExportBusyTarget}}"
+            bindtap="downloadBookOutputExport"
+          >
+            导出文本
+          </button>
         </view>
       </view>
     </view>

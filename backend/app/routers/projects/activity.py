@@ -10,10 +10,10 @@ from app.schemas.projects import (
     WritingSessionCreate,
     WritingSessionResponse,
 )
+from app.services.file_exports import content_disposition
 from app.services.projects import activity as project_activity
 from app.services.projects.export import (
     ProjectExportFormat,
-    content_disposition,
     export_project_data,
     render_export_file,
 )

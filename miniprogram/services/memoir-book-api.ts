@@ -7,6 +7,7 @@ import type {
   MemoirBookChapterTitleGenerateRequest,
   MemoirBookChapterTitleUpdateRequest,
   MemoirBookOutput,
+  MemoirBookOutputExportFormat,
   MemoirBookOutputGenerateRequest,
   MemoirBookPlan,
   MemoirBookPlanConfirmRequest,
@@ -23,11 +24,12 @@ import type {
   MemoirBookVoiceCommandParseResponse,
 } from "../domain/voice-chat";
 import {
+  ensureMemoirBackendSession,
   memoirProjectPath,
   memoirRequest,
   withSelectedAIModel,
 } from "./memoir-api-client";
-import { cleanBaseUrl, readBackendConfig } from "./request";
+import { ApiError, cleanBaseUrl, readBackendConfig, readSessionCookie } from "./request";
 
 function bookPlanPath(projectId: string, suffix = ""): string {
   return memoirProjectPath(projectId, `/book-plan${suffix}`);
@@ -39,6 +41,22 @@ function bookPlanChapterPath(projectId: string, chapterId: string, suffix = ""):
 
 export function getMemoirBookPlan(projectId: string): Promise<MemoirBookPlan> {
   return memoirRequest<MemoirBookPlan>(bookPlanPath(projectId));
+}
+
+function downloadDomain(url: string): string {
+  const parts = url.split("/");
+  if (parts.length >= 3 && parts[0].startsWith("http")) {
+    return parts.slice(0, 3).join("/");
+  }
+  return url;
+}
+
+function downloadErrorMessage(errMsg: string | undefined, url: string): string {
+  const message = String(errMsg || "");
+  if (message.toLowerCase().includes("url not in domain list")) {
+    return `文件下载域名未配置，请在微信公众平台把 ${downloadDomain(url)} 添加到 downloadFile 合法域名。`;
+  }
+  return message || "文件下载失败";
 }
 
 export function generateMemoirBookPlan(
@@ -295,6 +313,50 @@ export function generateMemoirBookOutput(
       data,
     },
   );
+}
+
+export function memoirBookOutputExportUrl(
+  projectId: string,
+  format: MemoirBookOutputExportFormat = "pdf",
+  versionId = "",
+): string {
+  const config = readBackendConfig();
+  if (!config.httpBaseUrl) {
+    throw new ApiError(0, "未配置后端 HTTP 地址", {});
+  }
+  const params = [`format=${encodeURIComponent(format)}`];
+  if (versionId) {
+    params.push(`version_id=${encodeURIComponent(versionId)}`);
+  }
+  return `${cleanBaseUrl(config.httpBaseUrl)}${memoirProjectPath(projectId, `/book-output/export?${params.join("&")}`)}`;
+}
+
+export async function downloadMemoirBookOutputExport(
+  projectId: string,
+  format: MemoirBookOutputExportFormat = "pdf",
+  versionId = "",
+): Promise<string> {
+  await ensureMemoirBackendSession();
+  const cookie = readSessionCookie();
+  const url = memoirBookOutputExportUrl(projectId, format, versionId);
+  return new Promise((resolve, reject) => {
+    wx.downloadFile({
+      url,
+      header: {
+        ...(cookie ? { Cookie: cookie } : {}),
+      },
+      success: (result) => {
+        if (result.statusCode >= 200 && result.statusCode < 300) {
+          resolve(result.tempFilePath);
+          return;
+        }
+        reject(new ApiError(result.statusCode, "文件下载失败", result));
+      },
+      fail: (error) => {
+        reject(new ApiError(0, downloadErrorMessage(error.errMsg, url), error));
+      },
+    });
+  });
 }
 
 export function createMemoirBookOutputTTS(

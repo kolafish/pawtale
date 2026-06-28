@@ -1,6 +1,7 @@
 import type {
   MemoirBookAudioResponse,
   MemoirBookChapterDraft,
+  MemoirBookOutputExportFormat,
   MemoirBookOutput,
   MemoirBookPlan,
   MemoirBookPlanStructureCommandRequest,
@@ -27,6 +28,7 @@ import {
   confirmMemoirBookChapterDraft,
   confirmMemoirBookPlan,
   createMemoirBookChapterDraftTTS,
+  downloadMemoirBookOutputExport,
   createMemoirBookOutputTTS,
   createMemoirBookPlanOutlineTTS,
   bookVoiceCommandGatewayUrl,
@@ -129,6 +131,7 @@ interface DatasetEvent {
       eventIds?: string;
       action?: string;
       direction?: string;
+      format?: MemoirBookOutputExportFormat;
       utteranceId?: string;
     };
   };
@@ -153,6 +156,16 @@ type PageScrollToOptions = {
 };
 type WxWithPageScroll = WechatMiniprogram.Wx & {
   pageScrollTo?: (options: PageScrollToOptions) => void;
+};
+type OpenDocumentOptions = {
+  filePath: string;
+  fileType?: "pdf";
+  showMenu?: boolean;
+  success?: () => void;
+  fail?: (error: WechatMiniprogram.GeneralCallbackResult) => void;
+};
+type WxWithDocument = WechatMiniprogram.Wx & {
+  openDocument?: (options: OpenDocumentOptions) => void;
 };
 
 function isLoginError(error: unknown): boolean {
@@ -411,6 +424,7 @@ Page<BookData, {
   regenerateMergedChapter(chapterId: string): Promise<void>;
   generateBook(): Promise<void>;
   changeBookOutputVersion(event: PickerEvent): void;
+  downloadBookOutputExport(event: DatasetEvent): Promise<void>;
   editBookOutputChapter(event: DatasetEvent): void;
   playChapterAudio(event: DatasetEvent): Promise<void>;
   playChapterAudioById(chapterId: string, options?: { autoListenAfterPlayback?: boolean }): Promise<void>;
@@ -560,6 +574,7 @@ Page<BookData, {
     bookVersionNotice: "",
     bookStaleNotice: "",
     bookActionText: "生成全书",
+    bookExportBusyTarget: "",
     ttsBusyTarget: "",
     playingTarget: "",
     bookTTSActiveTarget: "",
@@ -766,6 +781,57 @@ Page<BookData, {
       this.stopPlayback();
     }
     this.setData(bookOutputData(this.data.bookOutput, option.id));
+  },
+
+  async downloadBookOutputExport(event) {
+    const format: MemoirBookOutputExportFormat = event.currentTarget.dataset.format === "txt" ? "txt" : "pdf";
+    const target = `book-export:${format}`;
+    if (!this.data.projectId || this.data.bookExportBusyTarget || this.data.generatingBook) {
+      return;
+    }
+    if (!this.data.bookContent) {
+      this.setData({ error: "请先生成全书" });
+      return;
+    }
+    if (this.data.hasDraftChanges) {
+      this.setData({ error: "请先保存当前章节修改，再导出全书" });
+      return;
+    }
+    if (this.data.bookOutput?.is_stale) {
+      this.setData({ error: "章节内容已更新，请先更新全书再导出" });
+      return;
+    }
+    this.setData({ bookExportBusyTarget: target, error: "" });
+    try {
+      const filePath = await downloadMemoirBookOutputExport(
+        this.data.projectId,
+        format,
+        this.data.bookSelectedVersionId,
+      );
+      if (format === "pdf") {
+        const wxWithDocument = wx as WxWithDocument;
+        if (typeof wxWithDocument.openDocument === "function") {
+          await new Promise<void>((resolve, reject) => {
+            wxWithDocument.openDocument?.({
+              filePath,
+              fileType: "pdf",
+              showMenu: true,
+              success: () => resolve(),
+              fail: (error) => reject(new Error(error.errMsg || "PDF 打开失败")),
+            });
+          });
+        }
+      }
+      wx.showToast({ title: format === "pdf" ? "PDF 已打开" : "文本已下载", icon: "success" });
+    } catch (error) {
+      if (isLoginError(error)) {
+        wx.reLaunch({ url: "/pages/login/index" });
+        return;
+      }
+      this.setData({ error: error instanceof Error ? error.message : "全书导出失败" });
+    } finally {
+      this.setData({ bookExportBusyTarget: "" });
+    }
   },
 
   applySourceCoverage(coverage) {

@@ -643,6 +643,8 @@ export interface MemoirBookOutputGenerateRequest {
   force_regenerate?: boolean;
 }
 
+export type MemoirBookOutputExportFormat = "pdf" | "txt";
+
 export interface MemoirBookOutputTableOfContentsItem {
   chapter_id: string;
   index: number;
