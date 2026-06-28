@@ -19,10 +19,9 @@ from app.models.projects import Project
 from app.services.memoir import audio_files as memoir_audio_files
 from app.services.memoir import book_quality_audit
 from app.services.memoir import editing_jobs
+from app.services.memoir import voice_transcript_correction
 from app.services.memoir.asr import StreamingASREvent
 from app.services.memoir.voice_transcripts import (
-    MemoirTranscriptCleanupContext,
-    generate_cleaned_transcript_text,
     prune_transcript_versions_for_utterance,
 )
 
@@ -75,11 +74,6 @@ class VoiceFinalPersistenceService:
             _validate_audio_span(event.start_ms, event.end_ms)
 
             voice_session = await self._load_voice_session()
-            cleaned = await generate_cleaned_transcript_text(
-                content,
-                context=await self._cleanup_context(voice_session),
-                strict=False,
-            )
             owned_staged_audio = await self._stage_audio_input(audio, owned_staged_audio)
             audio_file_id = owned_staged_audio.audio_file.id if owned_staged_audio else None
 
@@ -93,31 +87,20 @@ class VoiceFinalPersistenceService:
             self.db.add(transcript_version)
             await self.db.flush()
 
-            corrected_version = MemoirTranscriptVersion(
-                voice_session_id=voice_session.id,
-                version_type=MemoirTranscriptVersionType.DIALECT_CORRECTED.value,
-                content=cleaned.content,
-                provider=cleaned.provider,
-                created_by=cleaned.created_by.value,
-            )
-            self.db.add(corrected_version)
-            await self.db.flush()
-
             message = MemoirChatMessage(
                 project_id=voice_session.project_id,
                 voice_session_id=voice_session.id,
                 role=MemoirChatMessageRole.USER.value,
-                content_text=cleaned.content,
-                content_status=MemoirChatContentStatus.CORRECTED.value,
+                content_text=content,
+                content_status=MemoirChatContentStatus.FINAL.value,
                 audio_file_id=audio_file_id,
-                transcript_version_id=corrected_version.id,
+                transcript_version_id=transcript_version.id,
                 turn_index=await self._next_turn_index(voice_session.id),
                 metadata_json={
                     "source": "asr.final",
                     "provider": self.provider,
-                    "auto_corrected": True,
-                    "correction_provider": cleaned.provider,
-                    "correction_created_by": cleaned.created_by.value,
+                    "auto_corrected": False,
+                    "correction_status": "pending",
                     "asr_transcript_version_id": transcript_version.id,
                 },
             )
@@ -129,7 +112,7 @@ class VoiceFinalPersistenceService:
                 chat_message_id=message.id,
                 audio_file_id=audio_file_id,
                 transcript_raw=content,
-                transcript_edited=cleaned.content,
+                transcript_edited="",
                 start_ms=event.start_ms,
                 end_ms=event.end_ms,
                 provider=self.provider,
@@ -138,17 +121,18 @@ class VoiceFinalPersistenceService:
             self.db.add(utterance)
             await self.db.flush()
             transcript_version.source_artifact_id = utterance.id
-            corrected_version.source_artifact_id = utterance.id
             await self.db.flush()
             await prune_transcript_versions_for_utterance(
                 self.db,
                 utterance_id=utterance.id,
                 version_type=MemoirTranscriptVersionType.ASR_RAW,
             )
-            await prune_transcript_versions_for_utterance(
+            await voice_transcript_correction.schedule_transcript_correction_job(
                 self.db,
+                project_id=voice_session.project_id,
                 utterance_id=utterance.id,
-                version_type=MemoirTranscriptVersionType.DIALECT_CORRECTED,
+                voice_session_id=voice_session.id,
+                raw_transcript_version_id=transcript_version.id,
             )
             await editing_jobs.enqueue_editing_job(
                 self.db,
@@ -171,7 +155,7 @@ class VoiceFinalPersistenceService:
                 message_id=message.id,
                 utterance_id=utterance.id,
                 audio_file_id=audio_file_id,
-                transcript_version_id=corrected_version.id,
+                transcript_version_id=transcript_version.id,
             )
         except Exception:
             await self.db.rollback()
@@ -265,32 +249,6 @@ class VoiceFinalPersistenceService:
         )
         current = result.scalar_one_or_none()
         return 0 if current is None else int(current) + 1
-
-    async def _cleanup_context(self, voice_session: MemoirVoiceSession) -> MemoirTranscriptCleanupContext:
-        result = await self.db.execute(
-            select(MemoirChatMessage.role, MemoirChatMessage.content_text)
-            .where(
-                MemoirChatMessage.voice_session_id == voice_session.id,
-                func.trim(MemoirChatMessage.content_text) != "",
-            )
-            .order_by(MemoirChatMessage.turn_index.desc(), MemoirChatMessage.created_at.desc())
-            .limit(8)
-        )
-        recent_user: list[str] = []
-        recent_assistant: list[str] = []
-        for role, content_text in reversed(result.all()):
-            if role == MemoirChatMessageRole.USER.value:
-                recent_user.append(content_text)
-            elif role == MemoirChatMessageRole.ASSISTANT.value:
-                recent_assistant.append(content_text)
-        return MemoirTranscriptCleanupContext(
-            scene="voice_chat",
-            guidance_mode=voice_session.guidance_mode,
-            current_guidance_module=voice_session.current_guidance_module,
-            recent_user_utterances=tuple(recent_user[-5:]),
-            recent_assistant_messages=tuple(recent_assistant[-3:]),
-        )
-
 
 def _validate_audio_span(start_ms: int | None, end_ms: int | None) -> None:
     if start_ms is not None and end_ms is not None and end_ms < start_ms:

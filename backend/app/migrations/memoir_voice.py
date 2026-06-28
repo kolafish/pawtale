@@ -114,6 +114,50 @@ async def _create_metadata_table(conn, table_name: str) -> None:
     await conn.run_sync(lambda sync_conn: table.create(sync_conn, checkfirst=True))
 
 
+async def _table_sql(conn, table_name: str) -> str:
+    result = await conn.execute(
+        text("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = :table"),
+        {"table": table_name},
+    )
+    return str(result.scalar_one_or_none() or "")
+
+
+async def _ensure_editing_jobs_type_constraint(conn) -> bool:
+    if not await _table_exists(conn, "memoir_editing_jobs"):
+        return False
+    if "correct_transcript" in await _table_sql(conn, "memoir_editing_jobs"):
+        return False
+
+    register_models()
+    table = Base.metadata.tables["memoir_editing_jobs"]
+    columns = [column.name for column in table.columns]
+    column_sql = ", ".join(columns)
+    await conn.execute(text("ALTER TABLE memoir_editing_jobs RENAME TO memoir_editing_jobs_old"))
+    old_indexes = (await conn.execute(text("PRAGMA index_list(memoir_editing_jobs_old)"))).fetchall()
+    for index in old_indexes:
+        index_name = str(index[1])
+        if index_name and not index_name.startswith("sqlite_autoindex"):
+            await conn.execute(text(f"DROP INDEX IF EXISTS {index_name}"))
+    await conn.run_sync(lambda sync_conn: table.create(sync_conn, checkfirst=True))
+    select_sql = ", ".join(
+        f"COALESCE({column}, CURRENT_TIMESTAMP) AS {column}"
+        if column in {"created_at", "updated_at"}
+        else column
+        for column in columns
+    )
+    await conn.execute(
+        text(
+            f"""
+            INSERT INTO memoir_editing_jobs ({column_sql})
+            SELECT {select_sql}
+            FROM memoir_editing_jobs_old
+            """
+        )
+    )
+    await conn.execute(text("DROP TABLE memoir_editing_jobs_old"))
+    return True
+
+
 async def _drop_transcript_fts(conn) -> None:
     for trigger in TRANSCRIPT_FTS_TRIGGERS:
         await conn.execute(text(f"DROP TRIGGER IF EXISTS {trigger}"))
@@ -282,6 +326,9 @@ async def migrate_memoir_voice_schema(engine: AsyncEngine) -> dict[str, list[str
             if not await _table_exists(conn, table_name):
                 await _create_metadata_table(conn, table_name)
                 changed_tables.append(table_name)
+
+        if await _ensure_editing_jobs_type_constraint(conn):
+            changed_tables.append("memoir_editing_jobs")
 
         if not await _table_exists(conn, "memoir_voice_authorization_consents"):
             await _create_metadata_table(conn, "memoir_voice_authorization_consents")

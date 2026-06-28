@@ -244,6 +244,40 @@ async def generate_cleaned_transcript_text(
     )
 
 
+async def load_voice_transcript_cleanup_context(
+    db: AsyncSession,
+    voice_session: MemoirVoiceSession,
+    *,
+    exclude_message_id: str | None = None,
+) -> MemoirTranscriptCleanupContext:
+    conditions = [
+        MemoirChatMessage.voice_session_id == voice_session.id,
+        func.trim(MemoirChatMessage.content_text) != "",
+    ]
+    if exclude_message_id:
+        conditions.append(MemoirChatMessage.id != exclude_message_id)
+    result = await db.execute(
+        select(MemoirChatMessage.role, MemoirChatMessage.content_text)
+        .where(*conditions)
+        .order_by(MemoirChatMessage.turn_index.desc(), MemoirChatMessage.created_at.desc())
+        .limit(8)
+    )
+    recent_user: list[str] = []
+    recent_assistant: list[str] = []
+    for role, content_text in reversed(result.all()):
+        if role == MemoirChatMessageRole.USER.value:
+            recent_user.append(content_text)
+        elif role == MemoirChatMessageRole.ASSISTANT.value:
+            recent_assistant.append(content_text)
+    return MemoirTranscriptCleanupContext(
+        scene="voice_chat",
+        guidance_mode=voice_session.guidance_mode,
+        current_guidance_module=voice_session.current_guidance_module,
+        recent_user_utterances=tuple(recent_user[-5:]),
+        recent_assistant_messages=tuple(recent_assistant[-3:]),
+    )
+
+
 def _transcript_filter(user_id: str, project_id: str | None = None):
     clauses = [
         Project.user_id == user_id,

@@ -4,10 +4,15 @@ from app.domain.memoir.types import MemoirEditingJobType
 from app.services.memoir import book_auto_revision
 from app.services.memoir import book_quality_audit
 from app.services.memoir import source_auto_assignment
+from app.services.memoir import voice_transcript_correction
 from app.services.memoir.editing_jobs import register_editing_job_handler
 
 
 def register_memoir_editing_job_handlers() -> None:
+    register_editing_job_handler(
+        MemoirEditingJobType.CORRECT_TRANSCRIPT,
+        voice_transcript_correction.run_transcript_correction_job,
+    )
     register_editing_job_handler(
         MemoirEditingJobType.ROUTE_SOURCES,
         source_auto_assignment.run_source_routing_job,
