@@ -21,6 +21,7 @@ from app.models.memoir import (
 from app.services.memoir import audio_files as memoir_audio_files
 from app.services.memoir import voice_transcript_correction
 from app.services.memoir.asr import StreamingASREvent
+from app.services.memoir.utterance_editing_pipeline import source_text_hash
 from app.services.memoir.voice_final_persistence import VoiceFinalPersistenceService
 from app.services.memoir.voice_gateway import (
     MAX_AUDIO_FRAME_BYTES,
@@ -766,17 +767,8 @@ async def test_voice_gateway_persistence_saves_final_message_utterance_and_audio
     assert correction_job.dedupe_key == f"correct_transcript:{utterance.id}"
     assert correction_job.payload_json["utterance_id"] == utterance.id
     assert correction_job.payload_json["raw_transcript_version_id"] == raw_version.id
-    editing_job = jobs_by_type.get(MemoirEditingJobType.ROUTE_SOURCES.value)
-    assert editing_job is not None
-    assert editing_job.status == MemoirEditingJobStatus.PENDING.value
-    assert editing_job.dedupe_key == f"route_source:{utterance.id}"
-    assert editing_job.payload_json["utterance_ids"] == [utterance.id]
-    assert editing_job.payload_json["source"] == "voice_utterance_final"
-    audit_job = jobs_by_type.get(MemoirEditingJobType.QUALITY_AUDIT.value)
-    assert audit_job is not None
-    assert audit_job.status == MemoirEditingJobStatus.PENDING.value
-    assert audit_job.dedupe_key == f"quality_audit:{project_id}"
-    assert audit_job.payload_json["reason"] == "voice_utterance_final_saved"
+    assert MemoirEditingJobType.ROUTE_SOURCES.value not in jobs_by_type
+    assert MemoirEditingJobType.QUALITY_AUDIT.value not in jobs_by_type
 
 
 async def test_voice_transcript_correction_job_updates_saved_raw_turn(
@@ -857,6 +849,26 @@ async def test_voice_transcript_correction_job_updates_saved_raw_turn(
     assert corrected_versions[0].content == "我小时候住在外婆家。"
     assert corrected_versions[0].provider == "fake-ai"
     assert message.transcript_version_id == corrected_versions[0].id
+    route_job = await test_db.scalar(
+        select(MemoirEditingJob).where(
+            MemoirEditingJob.job_type == MemoirEditingJobType.ROUTE_SOURCES.value
+        )
+    )
+    assert route_job is not None
+    assert route_job.status == MemoirEditingJobStatus.PENDING.value
+    assert route_job.dedupe_key == f"route_source:{utterance.id}"
+    assert route_job.payload_json["utterance_ids"] == [utterance.id]
+    assert route_job.payload_json["source"] == "transcript_correction_succeeded"
+    assert route_job.payload_json["transcript_version_ids"] == {
+        utterance.id: corrected_versions[0].id,
+    }
+    assert route_job.payload_json["source_text_hashes"] == {
+        utterance.id: source_text_hash("我小时候住在外婆家。"),
+    }
+    assert route_job.payload_json["source_text_lengths"] == {
+        utterance.id: len("我小时候住在外婆家。"),
+    }
+    assert result.result_json["route_source_job_id"] == route_job.id
 
 
 async def test_voice_transcript_correction_job_does_not_overwrite_user_edit(
@@ -922,6 +934,17 @@ async def test_voice_transcript_correction_job_does_not_overwrite_user_edit(
     assert message.content_text == "用户自己整理后的文字。"
     assert message.transcript_version_id == user_version.id
     assert utterance.transcript_edited == "用户自己整理后的文字。"
+    route_job = await test_db.scalar(
+        select(MemoirEditingJob).where(
+            MemoirEditingJob.job_type == MemoirEditingJobType.ROUTE_SOURCES.value
+        )
+    )
+    assert route_job is not None
+    assert route_job.payload_json["source"] == "transcript_already_edited"
+    assert route_job.payload_json["transcript_version_ids"] == {utterance.id: user_version.id}
+    assert route_job.payload_json["source_text_hashes"] == {
+        utterance.id: source_text_hash("用户自己整理后的文字。"),
+    }
 
 
 async def test_voice_gateway_persistence_rejects_audio_stream_over_limit(client, test_db, monkeypatch):

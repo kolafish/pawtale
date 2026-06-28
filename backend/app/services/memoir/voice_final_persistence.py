@@ -11,14 +11,11 @@ from app.domain.memoir.types import (
     MemoirChatContentStatus,
     MemoirChatMessageRole,
     MemoirCreatedBy,
-    MemoirEditingJobType,
     MemoirTranscriptVersionType,
 )
 from app.models.memoir import MemoirChatMessage, MemoirTranscriptVersion, MemoirVoiceSession, MemoirVoiceUtterance
 from app.models.projects import Project
 from app.services.memoir import audio_files as memoir_audio_files
-from app.services.memoir import book_quality_audit
-from app.services.memoir import editing_jobs
 from app.services.memoir import voice_transcript_correction
 from app.services.memoir.asr import StreamingASREvent
 from app.services.memoir.voice_transcripts import (
@@ -133,22 +130,6 @@ class VoiceFinalPersistenceService:
                 utterance_id=utterance.id,
                 voice_session_id=voice_session.id,
                 raw_transcript_version_id=transcript_version.id,
-            )
-            await editing_jobs.enqueue_editing_job(
-                self.db,
-                project_id=voice_session.project_id,
-                job_type=MemoirEditingJobType.ROUTE_SOURCES,
-                payload_json={
-                    "utterance_ids": [utterance.id],
-                    "voice_session_id": voice_session.id,
-                    "source": "voice_utterance_final",
-                },
-                dedupe_key=f"route_source:{utterance.id}",
-            )
-            await book_quality_audit.schedule_project_quality_audit(
-                self.db,
-                project_id=voice_session.project_id,
-                reason="voice_utterance_final_saved",
             )
             await self.db.commit()
             return VoiceFinalPersistenceResult(
