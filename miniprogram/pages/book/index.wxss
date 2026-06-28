@@ -1323,6 +1323,39 @@
   line-height: 1.35;
 }
 
+.book-export-source-toggle {
+  min-height: 76rpx;
+  padding: 14rpx 0 2rpx;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18rpx;
+  box-sizing: border-box;
+}
+
+.book-export-source-copy {
+  min-width: 0;
+}
+
+.book-export-source-title,
+.book-export-source-meta {
+  display: block;
+  line-height: 1.35;
+}
+
+.book-export-source-title {
+  color: #24100b;
+  font-size: 24rpx;
+  font-weight: 800;
+}
+
+.book-export-source-meta {
+  margin-top: 4rpx;
+  color: #685b55;
+  font-size: 22rpx;
+  font-weight: 700;
+}
+
 .book-manuscript-panel {
   margin-top: 20rpx;
   border-top: 2rpx solid #f0e1cf;

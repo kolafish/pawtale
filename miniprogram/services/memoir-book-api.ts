@@ -324,6 +324,7 @@ export function memoirBookOutputExportUrl(
   format: MemoirBookOutputExportFormat = "pdf",
   versionId = "",
   layout: MemoirBookOutputExportLayout = "standard",
+  showSourceAppendix = true,
 ): string {
   const config = readBackendConfig();
   if (!config.httpBaseUrl) {
@@ -332,6 +333,7 @@ export function memoirBookOutputExportUrl(
   const params = [`format=${encodeURIComponent(format)}`];
   if (format === "pdf") {
     params.push(`layout=${encodeURIComponent(layout)}`);
+    params.push(`show_source_appendix=${showSourceAppendix ? "true" : "false"}`);
   }
   if (versionId) {
     params.push(`version_id=${encodeURIComponent(versionId)}`);
@@ -344,10 +346,11 @@ export async function downloadMemoirBookOutputExport(
   format: MemoirBookOutputExportFormat = "pdf",
   versionId = "",
   layout: MemoirBookOutputExportLayout = "standard",
+  showSourceAppendix = true,
 ): Promise<string> {
   await ensureMemoirBackendSession();
   const cookie = readSessionCookie();
-  const url = memoirBookOutputExportUrl(projectId, format, versionId, layout);
+  const url = memoirBookOutputExportUrl(projectId, format, versionId, layout, showSourceAppendix);
   return new Promise((resolve, reject) => {
     wx.downloadFile({
       url,

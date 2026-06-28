@@ -233,6 +233,9 @@ async def test_mobile_memoir_book_output_exports_txt_and_pdf(client, test_db):
 
     txt = await client.get(f"/api/mobile/memoir/projects/{project_id}/book-output/export?format=txt")
     pdf = await client.get(f"/api/mobile/memoir/projects/{project_id}/book-output/export?format=pdf")
+    pdf_without_sources = await client.get(
+        f"/api/mobile/memoir/projects/{project_id}/book-output/export?format=pdf&show_source_appendix=false"
+    )
     print_pdf = await client.get(
         f"/api/mobile/memoir/projects/{project_id}/book-output/export?format=pdf&layout=large_print"
     )
@@ -249,6 +252,8 @@ async def test_mobile_memoir_book_output_exports_txt_and_pdf(client, test_db):
     assert b"/FontFile2" in pdf.content
     assert b"NotoSansSC" in pdf.content
     assert pdf.content.count(b"/Type /Page") >= 8
+    assert pdf_without_sources.status_code == 200
+    assert pdf_without_sources.content.count(b"/Type /Page") < pdf.content.count(b"/Type /Page")
     assert print_pdf.status_code == 200
     assert b"/FontFile2" in print_pdf.content
     assert print_pdf.content != pdf.content

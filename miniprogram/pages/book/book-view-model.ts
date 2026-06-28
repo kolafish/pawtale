@@ -249,6 +249,7 @@ export interface BookData {
   bookExportLayoutLabel: string;
   bookExportLayoutDetailText: string;
   bookExportLayoutOptions: BookExportLayoutOptionView[];
+  bookExportShowSourceAppendix: boolean;
   generatingBook: boolean;
   ttsBusyTarget: string;
   playingTarget: string;
@@ -1433,6 +1434,7 @@ export function guestBookData(): Partial<BookData> {
     bookExportLayoutLabel: BOOK_EXPORT_LAYOUT_OPTIONS[0].label,
     bookExportLayoutDetailText: BOOK_EXPORT_LAYOUT_OPTIONS[0].detailText,
     bookExportLayoutOptions: BOOK_EXPORT_LAYOUT_OPTIONS,
+    bookExportShowSourceAppendix: true,
     ttsBusyTarget: "",
     playingTarget: "",
     bookTTSActiveTarget: "",

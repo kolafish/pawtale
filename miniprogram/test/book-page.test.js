@@ -832,6 +832,8 @@ test("book page exposes PDF layout and print export controls", () => {
   assert.match(wxml, /导出 PDF/);
   assert.match(wxml, /打印版 PDF/);
   assert.match(wxml, /data-layout="large_print"/);
+  assert.match(wxml, /来源附录/);
+  assert.match(wxml, /bindchange="toggleBookExportSourceAppendix"/);
 });
 
 test("book page exposes manuscript structure sections", () => {
@@ -2079,8 +2081,8 @@ test("book page downloads selected full-book output export and opens PDF", async
   };
   const { page } = loadBookPage({
     voiceApiExports: {
-      downloadMemoirBookOutputExport: async (projectId, format, versionId, layout) => {
-        calls.push({ projectId, format, versionId, layout });
+      downloadMemoirBookOutputExport: async (projectId, format, versionId, layout, showSourceAppendix) => {
+        calls.push({ projectId, format, versionId, layout, showSourceAppendix });
         return "/tmp/book.pdf";
       },
     },
@@ -2096,6 +2098,10 @@ test("book page downloads selected full-book output export and opens PDF", async
   page.applyBookOutput.call(context, output);
   page.changeBookOutputVersion.call(context, { currentTarget: { dataset: {} }, detail: { value: "1" } });
   page.changeBookExportLayout.call(context, { currentTarget: { dataset: {} }, detail: { value: "1" } });
+  page.toggleBookExportSourceAppendix.call(context, {
+    currentTarget: { dataset: {} },
+    detail: { value: false },
+  });
 
   await page.downloadBookOutputExport.call(context, {
     currentTarget: { dataset: { format: "pdf" } },
@@ -2106,6 +2112,7 @@ test("book page downloads selected full-book output export and opens PDF", async
     format: "pdf",
     versionId: "book-output-version-1",
     layout: "large_print",
+    showSourceAppendix: false,
   });
   assert.equal(context.data.bookExportLayoutLabel, "大字打印");
   assert.equal(opened[0].filePath, "/tmp/book.pdf");
@@ -3631,11 +3638,19 @@ test("book output export download uses encoded backend route and session cookie"
   const path = await downloadMemoirBookOutputExport("project/1", "pdf", "version/1");
 
   assert.equal(path, "/tmp/book.pdf");
+  const baseExportUrl = "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-output/export";
   assert.equal(
     downloads[0].url,
-    "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-output/export?format=pdf&layout=standard&version_id=version%2F1",
+    `${baseExportUrl}?format=pdf&layout=standard&show_source_appendix=true&version_id=version%2F1`,
   );
   assert.equal(downloads[0].header.Cookie, "pawtale_session=abc");
+
+  await downloadMemoirBookOutputExport("project/1", "pdf", "version/1", "standard", false);
+
+  assert.equal(
+    downloads[1].url,
+    `${baseExportUrl}?format=pdf&layout=standard&show_source_appendix=false&version_id=version%2F1`,
+  );
   delete global.wx;
 });
 

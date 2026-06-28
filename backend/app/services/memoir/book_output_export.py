@@ -540,6 +540,7 @@ def _render_manuscript_pdf(
     content: str,
     manuscript: dict[str, Any],
     layout: PDFLayout,
+    show_source_appendix: bool | None = None,
 ) -> bytes:
     profile = _dict(manuscript.get("profile"))
     chapters = _list(manuscript.get("chapters"))
@@ -552,7 +553,14 @@ def _render_manuscript_pdf(
     subtitle = _str(profile.get("subtitle"))
     prepared_by = _str(profile.get("prepared_by"))
     settings = _dict(manuscript.get("render_settings"))
-    include_source_appendix = settings.get("include_source_appendix") is not False
+    setting_source_appendix = settings.get("show_source_appendix")
+    if setting_source_appendix is None:
+        setting_source_appendix = settings.get("include_source_appendix")
+    include_source_appendix = (
+        show_source_appendix
+        if show_source_appendix is not None
+        else setting_source_appendix is not False
+    )
 
     builder = PDFBookBuilder(title=book_title, layout=layout)
     _add_cover_page(builder, title=book_title, subtitle=subtitle, prepared_by=prepared_by)
@@ -584,6 +592,7 @@ def render_book_output_export(
     version: int,
     content: str,
     manuscript: dict[str, Any] | None = None,
+    show_source_appendix: bool | None = None,
     export_format: MemoirBookOutputExportFormat,
     layout: MemoirBookOutputExportLayout = MemoirBookOutputExportLayout.STANDARD,
 ) -> ExportFile:
@@ -597,6 +606,7 @@ def render_book_output_export(
                 content=content,
                 manuscript=manuscript or {},
                 layout=pdf_layout,
+                show_source_appendix=show_source_appendix,
             ),
         )
     return ExportFile(

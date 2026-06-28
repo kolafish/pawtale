@@ -152,6 +152,12 @@ interface PickerEvent extends DatasetEvent {
   };
 }
 
+interface SwitchEvent extends DatasetEvent {
+  detail: {
+    value: boolean;
+  };
+}
+
 type PageScrollToOptions = {
   selector: string;
   duration?: number;
@@ -436,6 +442,7 @@ Page<BookData, {
   generateBook(): Promise<void>;
   changeBookOutputVersion(event: PickerEvent): void;
   changeBookExportLayout(event: PickerEvent): void;
+  toggleBookExportSourceAppendix(event: SwitchEvent): void;
   downloadBookOutputExport(event: DatasetEvent): Promise<void>;
   editBookOutputChapter(event: DatasetEvent): void;
   playChapterAudio(event: DatasetEvent): Promise<void>;
@@ -601,6 +608,7 @@ Page<BookData, {
     bookExportLayoutLabel: BOOK_EXPORT_LAYOUT_OPTIONS[0].label,
     bookExportLayoutDetailText: BOOK_EXPORT_LAYOUT_OPTIONS[0].detailText,
     bookExportLayoutOptions: BOOK_EXPORT_LAYOUT_OPTIONS,
+    bookExportShowSourceAppendix: true,
     ttsBusyTarget: "",
     playingTarget: "",
     bookTTSActiveTarget: "",
@@ -823,6 +831,10 @@ Page<BookData, {
     });
   },
 
+  toggleBookExportSourceAppendix(event) {
+    this.setData({ bookExportShowSourceAppendix: Boolean(event.detail.value) });
+  },
+
   async downloadBookOutputExport(event) {
     const format: MemoirBookOutputExportFormat = event.currentTarget.dataset.format === "txt" ? "txt" : "pdf";
     const layout: MemoirBookOutputExportLayout = format === "pdf" && event.currentTarget.dataset.layout === "large_print"
@@ -851,6 +863,7 @@ Page<BookData, {
         format,
         this.data.bookSelectedVersionId,
         layout,
+        format === "pdf" ? this.data.bookExportShowSourceAppendix : true,
       );
       if (format === "pdf") {
         const wxWithDocument = wx as WxWithDocument;
