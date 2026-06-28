@@ -24,6 +24,9 @@ from app.schemas.memoir_book import (
     MemoirBookAudioResponse,
     MemoirBookOutputGenerateRequest,
     MemoirBookOutputResponse,
+    MemoirBookOutputStructuredChapterResponse,
+    MemoirBookOutputStructuredContentResponse,
+    MemoirBookOutputTableOfContentsItemResponse,
     MemoirBookOutputVersionResponse,
 )
 from app.services.memoir.access import load_memoir_project
@@ -51,13 +54,87 @@ SNAPSHOT_COMPARE_KEYS = (
 )
 
 
+def _positive_int(value: object) -> int:
+    if isinstance(value, bool):
+        return 0
+    if isinstance(value, int):
+        return max(value, 0)
+    if isinstance(value, float):
+        return max(int(value), 0)
+    if isinstance(value, str):
+        try:
+            return max(int(value), 0)
+        except ValueError:
+            return 0
+    return 0
+
+
+def _optional_positive_int(value: object) -> int | None:
+    result = _positive_int(value)
+    return result or None
+
+
+def _safe_str(value: object) -> str:
+    return value.strip() if isinstance(value, str) else ""
+
+
+def _structured_content_response(
+    *,
+    title: str,
+    content: str,
+    snapshot: list[dict[str, object]],
+) -> MemoirBookOutputStructuredContentResponse | None:
+    chapters: list[MemoirBookOutputStructuredChapterResponse] = []
+    for fallback_index, item in enumerate(snapshot, start=1):
+        chapter_id = _safe_str(item.get("chapter_id"))
+        chapter_title = _safe_str(item.get("chapter_title")) or _safe_str(item.get("title"))
+        chapter_content = _safe_str(item.get("content"))
+        if not chapter_id or not chapter_title or not chapter_content:
+            continue
+        chapters.append(
+            MemoirBookOutputStructuredChapterResponse(
+                chapter_id=chapter_id,
+                index=_positive_int(item.get("chapter_index")) or fallback_index,
+                title=chapter_title,
+                content=chapter_content,
+                char_count=_positive_int(item.get("content_char_count")) or len(chapter_content),
+                source_count=_positive_int(item.get("source_count")),
+                draft_version_id=_safe_str(item.get("draft_version_id")) or None,
+                draft_version=_optional_positive_int(item.get("draft_version")),
+            )
+        )
+    if not chapters:
+        return None
+    table_of_contents = [
+        MemoirBookOutputTableOfContentsItemResponse(
+            chapter_id=chapter.chapter_id,
+            index=chapter.index,
+            title=chapter.title,
+            char_count=chapter.char_count,
+            source_count=chapter.source_count,
+        )
+        for chapter in chapters
+    ]
+    return MemoirBookOutputStructuredContentResponse(
+        title=title,
+        chapter_count=len(chapters),
+        char_count=len(content.strip()),
+        table_of_contents=table_of_contents,
+        chapters=chapters,
+    )
+
+
 def _latest_chapter_version(draft: MemoirBookChapterDraft | None) -> MemoirBookChapterDraftVersion | None:
     if not draft or not draft.versions:
         return None
     return draft.versions[-1]
 
 
-def _output_version_response(version: MemoirBookOutputVersion) -> MemoirBookOutputVersionResponse:
+def _output_version_response(version: MemoirBookOutputVersion, *, title: str) -> MemoirBookOutputVersionResponse:
+    snapshot = [
+        item for item in (version.chapter_snapshot_json or [])
+        if isinstance(item, dict)
+    ]
     return MemoirBookOutputVersionResponse(
         id=version.id,
         output_id=version.output_id,
@@ -65,10 +142,12 @@ def _output_version_response(version: MemoirBookOutputVersion) -> MemoirBookOutp
         plan_id=version.plan_id,
         version=version.version,
         content=version.content,
-        chapter_snapshot_json=[
-            item for item in (version.chapter_snapshot_json or [])
-            if isinstance(item, dict)
-        ],
+        chapter_snapshot_json=snapshot,
+        structured_content=_structured_content_response(
+            title=title,
+            content=version.content,
+            snapshot=snapshot,
+        ),
         created_by=MemoirCreatedBy(version.created_by),
         created_at=version.created_at,
     )
@@ -79,7 +158,7 @@ def _output_response(
     *,
     stale_chapter_titles: list[str] | None = None,
 ) -> MemoirBookOutputResponse:
-    versions = [_output_version_response(version) for version in output.versions]
+    versions = [_output_version_response(version, title=output.title) for version in output.versions]
     stale_titles = stale_chapter_titles or []
     return MemoirBookOutputResponse(
         id=output.id,
@@ -152,21 +231,30 @@ def _compose_book_content(
     for index, (chapter, version) in enumerate(chapters, start=1):
         content = version.content.strip()
         body_parts.append(f"第{index}章 {chapter.title}\n\n{content}")
-        snapshot.append(_chapter_snapshot(chapter, version))
+        snapshot.append(_chapter_snapshot(chapter, version, chapter_index=index))
     content = f"{title}\n\n目录\n{toc}\n\n" + "\n\n".join(body_parts)
     return content.strip(), snapshot
 
 
-def _chapter_snapshot(chapter: MemoirBookPlanChapter, version: MemoirBookChapterDraftVersion) -> dict[str, object]:
+def _chapter_snapshot(
+    chapter: MemoirBookPlanChapter,
+    version: MemoirBookChapterDraftVersion,
+    *,
+    chapter_index: int,
+) -> dict[str, object]:
     content = version.content.strip()
+    source_refs = chapter.source_refs_json if isinstance(chapter.source_refs_json, list) else []
     return {
         "chapter_id": chapter.id,
         "chapter_title": chapter.title,
+        "chapter_index": chapter_index,
         "chapter_sort_order": chapter.sort_order,
         "draft_id": chapter.draft.id if chapter.draft else "",
         "draft_version_id": version.id,
         "draft_version": version.version,
         "content_char_count": len(content),
+        "source_count": len(source_refs),
+        "content": content,
     }
 
 
@@ -176,12 +264,12 @@ def _current_book_snapshot(plan: MemoirBookPlan) -> tuple[list[dict[str, object]
     chapters = sorted(plan.chapters, key=lambda item: item.sort_order)
     snapshot: list[dict[str, object]] = []
     unavailable_titles: list[str] = []
-    for chapter in chapters:
+    for index, chapter in enumerate(chapters, start=1):
         version = _latest_chapter_version(chapter.draft)
         if not chapter.draft or chapter.draft.status != MemoirBookChapterDraftStatus.CONFIRMED.value or not version:
             unavailable_titles.append(chapter.title)
             continue
-        snapshot.append(_chapter_snapshot(chapter, version))
+        snapshot.append(_chapter_snapshot(chapter, version, chapter_index=index))
     return snapshot, unavailable_titles
 
 

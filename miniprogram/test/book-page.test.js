@@ -100,6 +100,7 @@ function sampleBookOutput(
   content = "外婆回忆录\n\n目录\n1. 外婆家的童年\n\n第1章 外婆家的童年\n\n正文",
   isStale = false,
   staleChapterTitles = [],
+  structuredContent = null,
 ) {
   return {
     id: "book-output-1",
@@ -118,12 +119,59 @@ function sampleBookOutput(
       version,
       content,
       chapter_snapshot_json: [],
+      structured_content: structuredContent,
       created_by: "system",
       created_at: "2026-06-17T00:00:00.000Z",
     },
     versions: [],
     created_at: "2026-06-17T00:00:00.000Z",
     updated_at: "2026-06-17T00:00:00.000Z",
+  };
+}
+
+function sampleStructuredBookContent() {
+  return {
+    title: "外婆回忆录",
+    chapter_count: 2,
+    char_count: 24,
+    table_of_contents: [
+      {
+        chapter_id: "chapter-1",
+        index: 1,
+        title: "外婆家的童年",
+        char_count: 14,
+        source_count: 2,
+      },
+      {
+        chapter_id: "chapter-2",
+        index: 2,
+        title: "第一次离家",
+        char_count: 10,
+        source_count: 1,
+      },
+    ],
+    chapters: [
+      {
+        chapter_id: "chapter-1",
+        index: 1,
+        title: "外婆家的童年",
+        content: "我小时候常在院子里晒太阳。",
+        char_count: 14,
+        source_count: 2,
+        draft_version_id: "draft-version-1",
+        draft_version: 1,
+      },
+      {
+        chapter_id: "chapter-2",
+        index: 2,
+        title: "第一次离家",
+        content: "第一次离家去县城读书。",
+        char_count: 10,
+        source_count: 1,
+        draft_version_id: "draft-version-2",
+        draft_version: 1,
+      },
+    ],
   };
 }
 
@@ -729,13 +777,22 @@ test("book page progress counts generated and confirmed chapters", () => {
 });
 
 test("book page summarizes latest book output version", () => {
-  const { mod } = loadBookPage();
-  const output = sampleBookOutput(3, "全书正文");
+  const { mod, page } = loadBookPage();
+  const output = sampleBookOutput(3, "全书正文", false, [], sampleStructuredBookContent());
+  const context = pageContext(page);
+  page.applyBookOutput.call(context, output);
+  const data = context.data;
 
   assert.equal(mod.latestBookContent(output), "全书正文");
   assert.equal(mod.bookOutputVersionText(output), "全书第 3 版");
   assert.equal(mod.bookOutputStaleNotice(output), "");
   assert.equal(mod.bookOutputVersionText(null), "尚未生成全书");
+  assert.equal(data.bookPreviewTitle, "外婆回忆录");
+  assert.equal(data.bookPreviewTocItems.length, 2);
+  assert.equal(data.bookPreviewTocItems[0].metaText, "14 字 · 2 条素材");
+  assert.equal(data.bookPreviewChapters[0].indexText, "第 1 章");
+  assert.equal(data.bookPreviewChapters[0].content, "我小时候常在院子里晒太阳。");
+  assert.equal(data.bookPreviewChapters[0].metaText, "14 字 · 2 条素材 · 第 1 版");
   assert.equal(
     mod.bookOutputStaleNotice(sampleBookOutput(3, "全书正文", true, ["外婆家的童年", "第一次离家", "县城生活"])),
     "章节「外婆家的童年、第一次离家」等章节已更新，请重新生成全书。",
@@ -1721,6 +1778,35 @@ test("book page generates full book output after all chapters are confirmed", as
   assert.equal(context.data.bookContent, "全书第二版正文");
   assert.equal(context.data.bookCharCount, "全书第二版正文".length);
   assert.equal(context.data.bookActionText, "重新生成全书");
+  delete global.wx;
+});
+
+test("book page links structured full-book preview back to chapter editing", () => {
+  const scrollCalls = [];
+  global.wx = {
+    pageScrollTo(options) {
+      scrollCalls.push(options);
+    },
+  };
+  const { page } = loadBookPage();
+  const context = pageContext(page, { projectId: "project/1", projectTitle: "外婆回忆录" });
+  page.applyPlan.call(context, samplePlan("confirmed"), {
+    "chapter-1": sampleDraft(1, "confirmed"),
+    "chapter-2": sampleDraft(1, "confirmed"),
+  });
+  page.applyBookOutput.call(
+    context,
+    sampleBookOutput(1, "全书正文", false, [], sampleStructuredBookContent()),
+  );
+
+  assert.equal(context.data.bookPreviewChapters.length, 2);
+  page.editBookOutputChapter.call(context, { currentTarget: { dataset: { id: "chapter-2" } } });
+
+  assert.deepEqual(scrollCalls[0], {
+    selector: "#chapter-editor-chapter-2",
+    duration: 260,
+    offsetTop: 12,
+  });
   delete global.wx;
 });
 

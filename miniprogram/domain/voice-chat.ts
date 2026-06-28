@@ -643,6 +643,33 @@ export interface MemoirBookOutputGenerateRequest {
   force_regenerate?: boolean;
 }
 
+export interface MemoirBookOutputTableOfContentsItem {
+  chapter_id: string;
+  index: number;
+  title: string;
+  char_count: number;
+  source_count: number;
+}
+
+export interface MemoirBookOutputStructuredChapter {
+  chapter_id: string;
+  index: number;
+  title: string;
+  content: string;
+  char_count: number;
+  source_count: number;
+  draft_version_id?: string | null;
+  draft_version?: number | null;
+}
+
+export interface MemoirBookOutputStructuredContent {
+  title: string;
+  chapter_count: number;
+  char_count: number;
+  table_of_contents: MemoirBookOutputTableOfContentsItem[];
+  chapters: MemoirBookOutputStructuredChapter[];
+}
+
 export interface MemoirBookOutputVersion {
   id: string;
   output_id: string;
@@ -651,6 +678,7 @@ export interface MemoirBookOutputVersion {
   version: number;
   content: string;
   chapter_snapshot_json: Record<string, unknown>[];
+  structured_content?: MemoirBookOutputStructuredContent | null;
   created_by: MemoirCreatedBy;
   created_at: string;
 }
