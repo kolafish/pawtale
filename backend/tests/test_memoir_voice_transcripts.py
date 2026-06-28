@@ -11,6 +11,8 @@ from app.domain.memoir.types import (
     MemoirChatContentStatus,
     MemoirChatMessageRole,
     MemoirCreatedBy,
+    MemoirEditingJobStatus,
+    MemoirEditingJobType,
     MemoirTranscriptVersionType,
 )
 from app.models.memoir import (
@@ -21,6 +23,7 @@ from app.models.memoir import (
     MemoirBookPlan,
     MemoirBookPlanChapter,
     MemoirChatMessage,
+    MemoirEditingJob,
     MemoirTranscriptVersion,
     MemoirVoiceUtterance,
 )
@@ -30,6 +33,11 @@ from app.services.memoir.voice_transcripts import (
     MemoirTranscriptCleanupContext,
     _remove_obvious_oral_fillers,
     generate_cleaned_transcript_text,
+)
+from app.services.memoir.utterance_editing_pipeline import (
+    ROUTE_PAYLOAD_SOURCE_TEXT_HASHES_KEY,
+    ROUTE_PAYLOAD_TRANSCRIPT_VERSION_IDS_KEY,
+    source_text_hash,
 )
 from tests.memoir_helpers import create_test_voice_transcript, post_mobile_memoir_voice_session, memoir_source_ref
 
@@ -331,6 +339,95 @@ async def test_mobile_memoir_updates_voice_transcript_without_overwriting_raw(cl
     assert versions[-1].version_type == "user_edited"
     assert versions[-1].created_by == "user"
     assert message.transcript_version_id == versions[-1].id
+
+    route_job = await test_db.scalar(
+        select(MemoirEditingJob).where(MemoirEditingJob.dedupe_key == f"route_source:{created['utterance_id']}")
+    )
+    assert route_job is not None
+    assert route_job.job_type == MemoirEditingJobType.ROUTE_SOURCES.value
+    assert route_job.payload_json["source"] == "transcript_user_edited"
+    assert route_job.payload_json[ROUTE_PAYLOAD_TRANSCRIPT_VERSION_IDS_KEY] == {
+        created["utterance_id"]: versions[-1].id,
+    }
+    assert route_job.payload_json[ROUTE_PAYLOAD_SOURCE_TEXT_HASHES_KEY] == {
+        created["utterance_id"]: source_text_hash("我小时候住在外婆家。"),
+    }
+
+
+async def test_mobile_memoir_editing_included_transcript_marks_chapter_for_revision(client, test_db):
+    created = await create_test_voice_transcript(client, test_db)
+    project_id = created["session"]["project_id"]
+    plan = MemoirBookPlan(
+        project_id=project_id,
+        title="外婆回忆录",
+        status=MemoirBookPlanStatus.CONFIRMED.value,
+        created_by=MemoirCreatedBy.USER.value,
+    )
+    test_db.add(plan)
+    await test_db.flush()
+    chapter = MemoirBookPlanChapter(
+        plan_id=plan.id,
+        project_id=project_id,
+        title="外婆家的童年",
+        sort_order=0,
+        source_refs_json=[memoir_source_ref(created, "嗯，我小时候就是住在外婆家。")],
+    )
+    test_db.add(chapter)
+    await test_db.flush()
+    draft = MemoirBookChapterDraft(
+        project_id=project_id,
+        chapter_id=chapter.id,
+        status=MemoirBookChapterDraftStatus.CONFIRMED.value,
+    )
+    test_db.add(draft)
+    await test_db.flush()
+    draft_version = MemoirBookChapterDraftVersion(
+        draft_id=draft.id,
+        project_id=project_id,
+        chapter_id=chapter.id,
+        version=1,
+        content="我小时候住在外婆家。",
+        created_by=MemoirCreatedBy.AI.value,
+    )
+    test_db.add(draft_version)
+    await test_db.flush()
+    draft_version_id = draft_version.id
+    await test_db.commit()
+
+    response = await client.patch(
+        f"/api/mobile/memoir/voice-transcripts/{created['utterance_id']}",
+        json={"transcript_edited": "我小时候住在外婆家的院子里。"},
+    )
+
+    assert response.status_code == 200
+    version = await test_db.scalar(
+        select(MemoirTranscriptVersion)
+        .where(
+            MemoirTranscriptVersion.source_artifact_id == created["utterance_id"],
+            MemoirTranscriptVersion.version_type == MemoirTranscriptVersionType.USER_EDITED.value,
+        )
+        .order_by(MemoirTranscriptVersion.created_at.desc(), MemoirTranscriptVersion.id.desc())
+    )
+    await test_db.refresh(chapter)
+    await test_db.refresh(draft)
+    assert chapter.source_refs_json[0]["transcript_version_id"] == version.id
+    assert chapter.source_refs_json[0]["quote"] == "我小时候住在外婆家的院子里。"
+    assert chapter.metadata_json["pending_source_utterance_ids"] == [created["utterance_id"]]
+    assert draft.status == MemoirBookChapterDraftStatus.DRAFT.value
+    assert draft.metadata_json["status_reason"] == "sources_changed"
+
+    route_job = await test_db.scalar(
+        select(MemoirEditingJob).where(MemoirEditingJob.dedupe_key == f"route_source:{created['utterance_id']}")
+    )
+    assert route_job is None
+    revision_job = await test_db.scalar(
+        select(MemoirEditingJob).where(MemoirEditingJob.dedupe_key == f"revise_chapter:{chapter.id}")
+    )
+    assert revision_job is not None
+    assert revision_job.job_type == MemoirEditingJobType.REVISE_CHAPTER.value
+    assert revision_job.status == MemoirEditingJobStatus.PENDING.value
+    assert revision_job.payload_json["base_version_id"] == draft_version_id
+    assert revision_job.payload_json["pending_source_utterance_ids"] == [created["utterance_id"]]
 
 
 async def test_mobile_memoir_deletes_voice_transcript_and_user_message(client, test_db):
@@ -685,6 +782,16 @@ async def test_mobile_memoir_ai_cleanup_creates_corrected_version(client, test_d
     assert version.created_by == "ai"
     assert version.provider == "fake-ai"
     assert version.content == "我小时候住在外婆家。"
+
+    route_job = await test_db.scalar(
+        select(MemoirEditingJob).where(MemoirEditingJob.dedupe_key == f"route_source:{created['utterance_id']}")
+    )
+    assert route_job is not None
+    assert route_job.payload_json["source"] == "transcript_dialect_corrected"
+    assert route_job.payload_json["ai_model"] == "deepseek"
+    assert route_job.payload_json[ROUTE_PAYLOAD_TRANSCRIPT_VERSION_IDS_KEY] == {
+        created["utterance_id"]: version.id,
+    }
 
 
 async def test_mobile_memoir_transcript_edits_keep_only_latest_three_versions(client, test_db):

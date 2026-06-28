@@ -18,6 +18,7 @@ from app.domain.memoir.types import (
     MemoirTranscriptVersionType,
 )
 from app.models.memoir import (
+    MemoirBookChapterDraft,
     MemoirBookPlanChapter,
     MemoirChatMessage,
     MemoirTranscriptVersion,
@@ -38,14 +39,19 @@ from app.services.memoir import automation_events as memoir_automation_events
 from app.services.memoir.asr_text_normalization import normalize_memoir_asr_text
 from app.services.memoir.book_plan_sources import (
     REMOVED_SOURCE_UTTERANCE_IDS_KEY,
+    SOURCES_CHANGED_STATUS_REASON,
     SOURCES_DELETED_STATUS_REASON,
     draft_status_metadata as _draft_status_metadata,
     pending_source_ids as _pending_source_ids,
     removed_source_ids as _removed_source_ids,
+    safe_quote as _safe_quote,
     set_deleted_source_metadata as _set_deleted_source_metadata,
+    set_source_change_metadata as _set_source_change_metadata,
     source_ref_utterance_id as _source_ref_utterance_id,
     source_ref_utterance_ids as _source_ref_utterance_ids,
 )
+from app.services.memoir.book_auto_revision import schedule_chapter_auto_revisions
+from app.services.memoir.utterance_editing_pipeline import schedule_source_routing_for_ready_utterance
 
 
 SYSTEM_PROMPT = "你是一位谨慎的中文口述稿校对助手，只做忠于原话的识别文字校正和口头语清理。"
@@ -599,6 +605,69 @@ async def list_voice_transcripts(
     )
 
 
+async def _sync_included_transcript_edit(
+    db: AsyncSession,
+    *,
+    utterance: MemoirVoiceUtterance,
+    content: str,
+    transcript_version_id: str,
+) -> set[str]:
+    project_id = utterance.voice_session.project_id
+    chapters = (
+        await db.execute(
+            select(MemoirBookPlanChapter).where(MemoirBookPlanChapter.project_id == project_id)
+        )
+    ).scalars().all()
+    changed_chapter_ids: set[str] = set()
+    for chapter in chapters:
+        refs: list[dict] = []
+        changed = False
+        for ref in chapter.source_refs_json or []:
+            if not isinstance(ref, dict):
+                refs.append(ref)
+                continue
+            if _source_ref_utterance_id(ref) != utterance.id:
+                refs.append(ref)
+                continue
+            next_ref = {
+                **ref,
+                "transcript_version_id": transcript_version_id,
+                "quote": _safe_quote(content),
+            }
+            refs.append(next_ref)
+            changed = changed or next_ref != ref
+        if not changed:
+            continue
+        pending_ids = _pending_source_ids(chapter.metadata_json)
+        pending_ids.add(utterance.id)
+        removed_ids = _removed_source_ids(chapter.metadata_json)
+        removed_ids.discard(utterance.id)
+        chapter.source_refs_json = refs
+        chapter.metadata_json = _set_source_change_metadata(
+            chapter.metadata_json,
+            added_ids=pending_ids,
+            removed_ids=removed_ids,
+        )
+        db.add(chapter)
+        changed_chapter_ids.add(chapter.id)
+
+    if not changed_chapter_ids:
+        return set()
+    drafts = (
+        await db.execute(
+            select(MemoirBookChapterDraft).where(
+                MemoirBookChapterDraft.project_id == project_id,
+                MemoirBookChapterDraft.chapter_id.in_(changed_chapter_ids),
+            )
+        )
+    ).scalars().all()
+    for draft in drafts:
+        draft.status = MemoirBookChapterDraftStatus.DRAFT.value
+        draft.metadata_json = _draft_status_metadata(draft.metadata_json, SOURCES_CHANGED_STATUS_REASON)
+        db.add(draft)
+    return changed_chapter_ids
+
+
 async def _apply_edited_text(
     db: AsyncSession,
     utterance: MemoirVoiceUtterance,
@@ -607,6 +676,7 @@ async def _apply_edited_text(
     version_type: MemoirTranscriptVersionType,
     created_by: MemoirCreatedBy,
     provider: str | None,
+    ai_model: str | None = None,
 ) -> MemoirVoiceTranscriptItemResponse:
     version = MemoirTranscriptVersion(
         voice_session_id=utterance.voice_session_id,
@@ -628,6 +698,27 @@ async def _apply_edited_text(
         utterance_id=utterance.id,
         version_type=version_type,
     )
+    changed_chapter_ids = await _sync_included_transcript_edit(
+        db,
+        utterance=utterance,
+        content=content,
+        transcript_version_id=version.id,
+    )
+    if changed_chapter_ids:
+        await schedule_chapter_auto_revisions(
+            db,
+            project_id=utterance.voice_session.project_id,
+            chapter_ids=changed_chapter_ids,
+            ai_model=ai_model,
+        )
+    else:
+        await schedule_source_routing_for_ready_utterance(
+            db,
+            project_id=utterance.voice_session.project_id,
+            utterance=utterance,
+            source=f"transcript_{version_type.value}",
+            ai_model=ai_model,
+        )
     await db.commit()
     inclusions = await _book_inclusions_by_utterance_ids(
         db,
@@ -679,6 +770,7 @@ async def cleanup_voice_transcript(
         version_type=MemoirTranscriptVersionType.DIALECT_CORRECTED,
         created_by=cleaned.created_by,
         provider=cleaned.provider,
+        ai_model=req.ai_model,
     )
 
 

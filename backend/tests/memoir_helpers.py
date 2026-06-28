@@ -52,6 +52,7 @@ async def create_test_voice_transcript(
     test_db,
     text: str = "嗯，我小时候就是住在外婆家。",
     *,
+    project_id: str | None = None,
     question_text: str | None = None,
     guidance_mode: str = "free_narration",
     current_guidance_module: str | None = None,
@@ -60,7 +61,7 @@ async def create_test_voice_transcript(
     session_payload = {"guidance_mode": guidance_mode, "provider": "volc_streaming_asr"}
     if current_guidance_module:
         session_payload["current_guidance_module"] = current_guidance_module
-    create_response = await post_mobile_memoir_voice_session(client, json=session_payload)
+    create_response = await post_mobile_memoir_voice_session(client, project_id=project_id, json=session_payload)
     assert create_response.status_code == 201
     session = create_response.json()["session"]
 
