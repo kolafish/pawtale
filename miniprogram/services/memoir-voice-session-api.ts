@@ -116,6 +116,23 @@ export function acknowledgeMemoirAutomationEvent(
   );
 }
 
+export function markMemoirAutomationEventsVoicePlayed(
+  projectId: string,
+  data: {
+    event_ids: string[];
+    voice_session_id: string;
+    message_id: string;
+  },
+): Promise<{ updated_count: number }> {
+  return memoirRequest<{ updated_count: number }>(
+    `/api/mobile/memoir/projects/${encodeURIComponent(projectId)}/automation-events/voice-played`,
+    {
+      method: "POST",
+      data,
+    },
+  );
+}
+
 export function createMemoirVoiceNoAnswerPrompt(
   voiceSessionId: string,
   data: MemoirVoiceNoAnswerPromptRequest = {},

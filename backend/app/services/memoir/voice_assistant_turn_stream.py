@@ -343,7 +343,7 @@ class VoiceAssistantTurnStreamSession:
             req=req,
             progress_context=project_progress_context,
         )
-        await automation_events.mark_automation_events_voice_announced(
+        await automation_events.mark_automation_events_voice_selected(
             self.db,
             user_id=self.user_id,
             project_id=voice_session.project_id,
@@ -356,6 +356,7 @@ class VoiceAssistantTurnStreamSession:
                 "type": "turn.completed",
                 "turn_id": turn_id,
                 "voice_session_id": self.voice_session_id,
+                "project_id": voice_session.project_id,
                 "state": "completed",
                 "message_id": message.id,
                 "audio_file_id": audio_file_id,
@@ -369,6 +370,7 @@ class VoiceAssistantTurnStreamSession:
                 "progress_update": project_progress_context.progress_update,
                 "progress_update_used": project_progress_context.progress_update is not None,
                 "progress_spoken_text": project_progress_context.speech_prefix,
+                "progress_voice_selected_event_ids": project_progress_context.voice_announcement_event_ids or [],
             }
         )
 
@@ -565,7 +567,7 @@ class VoiceAssistantTurnStreamSession:
                     "progress_update": progress_context.progress_update,
                     "progress_update_used": progress_context.progress_update is not None,
                     "progress_automation_event_ids": progress_context.automation_event_ids or [],
-                    "progress_voice_announced_event_ids": progress_context.voice_announcement_event_ids or [],
+                    "progress_voice_selected_event_ids": progress_context.voice_announcement_event_ids or [],
                     "progress_spoken_text": progress_context.speech_prefix,
                     "primary_intent": turn.primary_intent,
                     "intent_tags": turn.intent_tags,

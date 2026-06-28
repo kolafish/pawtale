@@ -78,6 +78,7 @@ export interface VoiceAssistantTurnCompletedEvent {
   type: "turn.completed";
   turn_id: string;
   voice_session_id: string;
+  project_id: string;
   state: "completed";
   message_id: string;
   audio_file_id?: string | null;
@@ -89,6 +90,7 @@ export interface VoiceAssistantTurnCompletedEvent {
   usage?: Record<string, unknown>;
   progress_update?: Record<string, unknown> | null;
   progress_update_used?: boolean;
+  progress_voice_selected_event_ids?: string[];
 }
 
 export interface VoiceAssistantTurnTerminalEvent {

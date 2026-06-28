@@ -193,6 +193,16 @@ class MemoirAutomationEventListResponse(BaseModel):
     limit: int
 
 
+class MemoirAutomationEventVoicePlaybackRequest(BaseModel):
+    event_ids: list[str] = Field(default_factory=list, max_length=20)
+    voice_session_id: str
+    message_id: str
+
+
+class MemoirAutomationEventVoicePlaybackResponse(BaseModel):
+    updated_count: int
+
+
 class MemoirProjectProgressChapterResponse(BaseModel):
     chapter_id: str
     title: str

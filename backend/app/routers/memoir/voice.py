@@ -18,6 +18,8 @@ from app.schemas.memoir_voice import (
     MemoirAssistantTTSResponse,
     MemoirAutomationEventListResponse,
     MemoirAutomationEventResponse,
+    MemoirAutomationEventVoicePlaybackRequest,
+    MemoirAutomationEventVoicePlaybackResponse,
     MemoirProjectProgressSnapshotResponse,
     MemoirVoiceAuthorizationConsentRequest,
     MemoirVoiceAuthorizationConsentResponse,
@@ -181,6 +183,27 @@ async def acknowledge_mobile_memoir_automation_event(
         project_id=project_id,
         event_id=event_id,
     )
+
+
+@router.post(
+    "/projects/{project_id}/automation-events/voice-played",
+    response_model=MemoirAutomationEventVoicePlaybackResponse,
+)
+async def mark_mobile_memoir_automation_events_voice_played(
+    project_id: str,
+    req: MemoirAutomationEventVoicePlaybackRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    updated_count = await memoir_automation_events.mark_automation_events_voice_played(
+        db,
+        user_id=current_user.id,
+        project_id=project_id,
+        event_ids=req.event_ids,
+        voice_session_id=req.voice_session_id,
+        message_id=req.message_id,
+    )
+    return MemoirAutomationEventVoicePlaybackResponse(updated_count=updated_count)
 
 
 @router.get("/voice-sessions/{voice_session_id}", response_model=MemoirVoiceSessionDetailResponse)

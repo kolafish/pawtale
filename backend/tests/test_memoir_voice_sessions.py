@@ -362,8 +362,8 @@ async def test_mobile_memoir_project_progress_snapshot_counts_book_state(client,
         confidence=0.9,
     )
     event.metadata_json = {
-        automation_events.VOICE_ANNOUNCED_AT_KEY: "2026-06-23T12:00:00+00:00",
-        automation_events.VOICE_ANNOUNCED_SESSION_ID_KEY: "voice-session-1",
+        automation_events.VOICE_PLAYED_AT_KEY: "2026-06-23T12:00:00+00:00",
+        automation_events.VOICE_PLAYED_SESSION_ID_KEY: "voice-session-1",
         automation_events.ROUTES_KEY: [
             {
                 "utterance_id": first["utterance_id"],
@@ -404,7 +404,7 @@ async def test_mobile_memoir_project_progress_snapshot_counts_book_state(client,
     assert snapshot["recent_automation_events"][0]["event_type"] == "source_assigned"
     assert snapshot["recent_automation_events"][0]["utterance_ids"] == [first["utterance_id"]]
     assert snapshot["recent_automation_events"][0]["summary_text"] == "1 条讲述已整理进外婆家的童年。"
-    assert snapshot["recent_automation_events"][0]["metadata_json"]["voice_announced_session_id"] == "voice-session-1"
+    assert snapshot["recent_automation_events"][0]["metadata_json"]["voice_played_session_id"] == "voice-session-1"
 
     progress_response = await client.get(
         f"/api/mobile/memoir/voice-progress?project_id={first['session']['project_id']}"
@@ -433,6 +433,17 @@ async def test_mobile_memoir_project_progress_snapshot_counts_book_state(client,
             "created_at": event_item["utterance_details"][0]["created_at"],
         }
     ]
+
+    voice_played_response = await client.post(
+        f"/api/mobile/memoir/projects/{first['session']['project_id']}/automation-events/voice-played",
+        json={
+            "event_ids": [event_id],
+            "voice_session_id": "voice-session-2",
+            "message_id": "assistant-message-2",
+        },
+    )
+    assert voice_played_response.status_code == 200
+    assert voice_played_response.json()["updated_count"] == 1
 
     acknowledge_response = await client.post(
         f"/api/mobile/memoir/projects/{first['session']['project_id']}/automation-events/{event_id}/acknowledge"

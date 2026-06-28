@@ -34,9 +34,12 @@ RESOLVED_AT_KEY = "resolved_at"
 RESOLVED_CHAPTER_ID_KEY = "resolved_chapter_id"
 RESOLVED_CHAPTER_TITLE_KEY = "resolved_chapter_title"
 RESOLVED_UTTERANCE_IDS_KEY = "resolved_utterance_ids"
-VOICE_ANNOUNCED_AT_KEY = "voice_announced_at"
-VOICE_ANNOUNCED_SESSION_ID_KEY = "voice_announced_session_id"
-VOICE_ANNOUNCED_MESSAGE_ID_KEY = "voice_announced_message_id"
+VOICE_SELECTED_AT_KEY = "voice_selected_at"
+VOICE_SELECTED_SESSION_ID_KEY = "voice_selected_session_id"
+VOICE_SELECTED_MESSAGE_ID_KEY = "voice_selected_message_id"
+VOICE_PLAYED_AT_KEY = "voice_played_at"
+VOICE_PLAYED_SESSION_ID_KEY = "voice_played_session_id"
+VOICE_PLAYED_MESSAGE_ID_KEY = "voice_played_message_id"
 EVENT_SIGNATURE_KEY = "event_signature"
 ROUTE_KEY = "route"
 ROUTES_KEY = "routes"
@@ -384,7 +387,7 @@ def _event_is_visible(event: MemoirAutomationEvent) -> bool:
 
 def _event_is_voice_unannounced(event: MemoirAutomationEvent) -> bool:
     metadata = event.metadata_json or {}
-    return _event_is_visible(event) and not metadata.get(VOICE_ANNOUNCED_AT_KEY)
+    return _event_is_visible(event) and not metadata.get(VOICE_PLAYED_AT_KEY)
 
 
 def _event_signature(metadata: dict) -> str:
@@ -451,9 +454,12 @@ def _preserved_metadata(existing: dict) -> dict:
         for key in (
             ACKNOWLEDGED_AT_KEY,
             ACKNOWLEDGED_BY_USER_KEY,
-            VOICE_ANNOUNCED_AT_KEY,
-            VOICE_ANNOUNCED_SESSION_ID_KEY,
-            VOICE_ANNOUNCED_MESSAGE_ID_KEY,
+            VOICE_SELECTED_AT_KEY,
+            VOICE_SELECTED_SESSION_ID_KEY,
+            VOICE_SELECTED_MESSAGE_ID_KEY,
+            VOICE_PLAYED_AT_KEY,
+            VOICE_PLAYED_SESSION_ID_KEY,
+            VOICE_PLAYED_MESSAGE_ID_KEY,
             RESOLUTION_KEY,
             RESOLUTION_REASON_KEY,
             DELETED_UTTERANCE_IDS_KEY,
@@ -790,7 +796,7 @@ async def recent_automation_event_responses(
     ).items
 
 
-async def mark_automation_events_voice_announced(
+async def _mark_automation_events_voice_metadata(
     db: AsyncSession,
     *,
     user_id: str,
@@ -798,10 +804,11 @@ async def mark_automation_events_voice_announced(
     event_ids: list[str],
     voice_session_id: str,
     message_id: str,
-) -> None:
+    played: bool,
+) -> int:
     clean_ids = _clean_utterance_ids(event_ids)
     if not clean_ids:
-        return
+        return 0
     await load_memoir_project(db, project_id, user_id)
     result = await db.execute(
         select(MemoirAutomationEvent).where(
@@ -809,19 +816,68 @@ async def mark_automation_events_voice_announced(
             MemoirAutomationEvent.id.in_(clean_ids),
         )
     )
-    announced_at = _utcnow_iso()
+    now_iso = _utcnow_iso()
+    updated_count = 0
     for event in result.scalars().all():
         metadata = event.metadata_json or {}
-        if metadata.get(VOICE_ANNOUNCED_AT_KEY):
-            continue
-        event.metadata_json = {
-            **metadata,
-            VOICE_ANNOUNCED_AT_KEY: announced_at,
-            VOICE_ANNOUNCED_SESSION_ID_KEY: voice_session_id,
-            VOICE_ANNOUNCED_MESSAGE_ID_KEY: message_id,
+        patch = {
+            VOICE_SELECTED_AT_KEY: metadata.get(VOICE_SELECTED_AT_KEY) or now_iso,
+            VOICE_SELECTED_SESSION_ID_KEY: voice_session_id,
+            VOICE_SELECTED_MESSAGE_ID_KEY: message_id,
         }
+        if played:
+            patch.update(
+                {
+                    VOICE_PLAYED_AT_KEY: now_iso,
+                    VOICE_PLAYED_SESSION_ID_KEY: voice_session_id,
+                    VOICE_PLAYED_MESSAGE_ID_KEY: message_id,
+                }
+            )
+        event.metadata_json = {**metadata, **patch}
         db.add(event)
+        updated_count += 1
     await db.commit()
+    return updated_count
+
+
+async def mark_automation_events_voice_selected(
+    db: AsyncSession,
+    *,
+    user_id: str,
+    project_id: str,
+    event_ids: list[str],
+    voice_session_id: str,
+    message_id: str,
+) -> int:
+    return await _mark_automation_events_voice_metadata(
+        db,
+        user_id=user_id,
+        project_id=project_id,
+        event_ids=event_ids,
+        voice_session_id=voice_session_id,
+        message_id=message_id,
+        played=False,
+    )
+
+
+async def mark_automation_events_voice_played(
+    db: AsyncSession,
+    *,
+    user_id: str,
+    project_id: str,
+    event_ids: list[str],
+    voice_session_id: str,
+    message_id: str,
+) -> int:
+    return await _mark_automation_events_voice_metadata(
+        db,
+        user_id=user_id,
+        project_id=project_id,
+        event_ids=event_ids,
+        voice_session_id=voice_session_id,
+        message_id=message_id,
+        played=True,
+    )
 
 
 async def acknowledge_automation_event(
