@@ -26,6 +26,7 @@ from app.services.memoir import book_quality_audit
 from app.services.memoir import book_plans
 from app.services.memoir.editing_jobs import EditingJobResult
 from app.services.memoir import source_router
+from app.services.memoir.utterance_editing_pipeline import validate_source_routing_transcript_guard
 
 
 def _route_is_assignable(
@@ -325,6 +326,20 @@ async def run_source_routing_job(db: AsyncSession, job: MemoirEditingJob) -> Edi
     ]
     if not utterance_ids:
         return EditingJobResult(status=MemoirEditingJobStatus.SKIPPED, error_message="empty utterance_ids")
+    guard = await validate_source_routing_transcript_guard(
+        db,
+        project_id=job.project_id,
+        payload_json=payload,
+        utterance_ids=utterance_ids,
+    )
+    if not guard.ok:
+        return EditingJobResult(
+            status=MemoirEditingJobStatus.SKIPPED,
+            result_json={
+                "stale_utterance_ids": list(guard.stale_utterance_ids),
+            },
+            error_message=guard.error_message,
+        )
     raw_threshold = payload.get("confidence_threshold")
     try:
         confidence_threshold = float(raw_threshold if raw_threshold is not None else 0.53)
