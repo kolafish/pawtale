@@ -146,6 +146,15 @@ interface PickerEvent extends DatasetEvent {
   };
 }
 
+type PageScrollToOptions = {
+  selector: string;
+  duration?: number;
+  offsetTop?: number;
+};
+type WxWithPageScroll = WechatMiniprogram.Wx & {
+  pageScrollTo?: (options: PageScrollToOptions) => void;
+};
+
 function isLoginError(error: unknown): boolean {
   return error instanceof ApiError && [401, 403].includes(error.statusCode);
 }
@@ -401,6 +410,7 @@ Page<BookData, {
   updatePlanStructure(chapters: MemoirBookPlanChapterUpdateInput[], toastTitle: string): Promise<MemoirBookPlan | null>;
   regenerateMergedChapter(chapterId: string): Promise<void>;
   generateBook(): Promise<void>;
+  editBookOutputChapter(event: DatasetEvent): void;
   playChapterAudio(event: DatasetEvent): Promise<void>;
   playChapterAudioById(chapterId: string, options?: { autoListenAfterPlayback?: boolean }): Promise<void>;
   playBookAudio(): Promise<void>;
@@ -538,6 +548,9 @@ Page<BookData, {
     bookOutput: null,
     bookContent: "",
     bookCharCount: 0,
+    bookPreviewTitle: "",
+    bookPreviewTocItems: [],
+    bookPreviewChapters: [],
     bookVersionText: "尚未生成全书",
     bookStaleNotice: "",
     bookActionText: "生成全书",
@@ -1398,6 +1411,20 @@ Page<BookData, {
     } finally {
       this.setData({ generatingBook: false });
     }
+  },
+
+  editBookOutputChapter(event) {
+    const chapterId = event.currentTarget.dataset.id || "";
+    if (!chapterId) {
+      return;
+    }
+    this.stopPlayback();
+    this.patchChapter(chapterId, { draftError: "" });
+    (wx as WxWithPageScroll).pageScrollTo?.({
+      selector: `#chapter-editor-${chapterId}`,
+      duration: 260,
+      offsetTop: 12,
+    });
   },
 
   async playChapterAudio(event) {

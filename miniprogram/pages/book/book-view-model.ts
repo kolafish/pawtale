@@ -111,6 +111,25 @@ export interface BookChapterView extends MemoirBookPlanChapter {
   draftError: string;
 }
 
+export interface BookOutputTocView {
+  id: string;
+  chapterId: string;
+  index: number;
+  indexText: string;
+  title: string;
+  metaText: string;
+}
+
+export interface BookOutputChapterPreviewView {
+  id: string;
+  chapterId: string;
+  index: number;
+  indexText: string;
+  title: string;
+  content: string;
+  metaText: string;
+}
+
 export interface BookVoiceCommandUndoSnapshot {
   planTitle: string;
   chapters: MemoirBookPlanChapterUpdateInput[];
@@ -148,6 +167,9 @@ export interface BookData {
   bookOutput: MemoirBookOutput | null;
   bookContent: string;
   bookCharCount: number;
+  bookPreviewTitle: string;
+  bookPreviewTocItems: BookOutputTocView[];
+  bookPreviewChapters: BookOutputChapterPreviewView[];
   bookVersionText: string;
   bookStaleNotice: string;
   bookActionText: string;
@@ -504,6 +526,54 @@ export function latestBookContent(output: MemoirBookOutput | null): string {
   return output?.latest_version?.content || "";
 }
 
+function bookSourceCountText(count: number): string {
+  return count > 0 ? `${count} 条素材` : "暂无素材计数";
+}
+
+export function bookOutputPreviewTitle(output: MemoirBookOutput | null): string {
+  return trimText(output?.latest_version?.structured_content?.title || output?.title || "");
+}
+
+export function bookOutputTocItems(output: MemoirBookOutput | null): BookOutputTocView[] {
+  const toc = output?.latest_version?.structured_content?.table_of_contents || [];
+  return toc
+    .filter((item) => item.chapter_id && item.title)
+    .map((item, index) => {
+      const chapterIndex = responseCount(item.index) || index + 1;
+      const charCount = responseCount(item.char_count);
+      const sourceCount = responseCount(item.source_count);
+      return {
+        id: `${item.chapter_id}:${chapterIndex}`,
+        chapterId: item.chapter_id,
+        index: chapterIndex,
+        indexText: `${chapterIndex}`,
+        title: trimText(item.title),
+        metaText: [`${charCount} 字`, bookSourceCountText(sourceCount)].join(" · "),
+      };
+    });
+}
+
+export function bookOutputChapterPreviews(output: MemoirBookOutput | null): BookOutputChapterPreviewView[] {
+  const chapters = output?.latest_version?.structured_content?.chapters || [];
+  return chapters
+    .filter((chapter) => chapter.chapter_id && chapter.title && trimText(chapter.content))
+    .map((chapter, index) => {
+      const chapterIndex = responseCount(chapter.index) || index + 1;
+      const charCount = responseCount(chapter.char_count) || trimText(chapter.content).length;
+      const sourceCount = responseCount(chapter.source_count);
+      const versionText = responseCount(chapter.draft_version) ? `第 ${chapter.draft_version} 版` : "";
+      return {
+        id: `${chapter.chapter_id}:${chapterIndex}`,
+        chapterId: chapter.chapter_id,
+        index: chapterIndex,
+        indexText: `第 ${chapterIndex} 章`,
+        title: trimText(chapter.title),
+        content: trimText(chapter.content),
+        metaText: [`${charCount} 字`, bookSourceCountText(sourceCount), versionText].filter(Boolean).join(" · "),
+      };
+    });
+}
+
 export function bookOutputVersionText(output: MemoirBookOutput | null): string {
   const version = output?.latest_version?.version;
   return version ? `全书第 ${version} 版` : "尚未生成全书";
@@ -530,13 +600,24 @@ function bookActionText(output: MemoirBookOutput | null): string {
 
 export function bookOutputData(output: MemoirBookOutput | null): Pick<
   BookData,
-  "bookOutput" | "bookContent" | "bookCharCount" | "bookVersionText" | "bookStaleNotice" | "bookActionText"
+  | "bookOutput"
+  | "bookContent"
+  | "bookCharCount"
+  | "bookPreviewTitle"
+  | "bookPreviewTocItems"
+  | "bookPreviewChapters"
+  | "bookVersionText"
+  | "bookStaleNotice"
+  | "bookActionText"
 > {
   const content = latestBookContent(output);
   return {
     bookOutput: output,
     bookContent: content,
     bookCharCount: trimText(content).length,
+    bookPreviewTitle: bookOutputPreviewTitle(output),
+    bookPreviewTocItems: bookOutputTocItems(output),
+    bookPreviewChapters: bookOutputChapterPreviews(output),
     bookVersionText: bookOutputVersionText(output),
     bookStaleNotice: bookOutputStaleNotice(output),
     bookActionText: bookActionText(output),
@@ -946,6 +1027,9 @@ export function guestBookData(): Partial<BookData> {
     bookOutput: null,
     bookContent: "",
     bookCharCount: 0,
+    bookPreviewTitle: "",
+    bookPreviewTocItems: [],
+    bookPreviewChapters: [],
     bookVersionText: "尚未生成全书",
     bookStaleNotice: "",
     bookActionText: "生成全书",

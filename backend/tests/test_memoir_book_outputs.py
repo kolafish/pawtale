@@ -164,6 +164,15 @@ async def test_mobile_memoir_book_output_generate_combines_confirmed_chapters(cl
     assert "后来我第一次离家去县城读书，心里很紧张。" in content
     snapshot = data["latest_version"]["chapter_snapshot_json"]
     assert [item["chapter_id"] for item in snapshot] == [chapters[0].id, chapters[1].id]
+    assert snapshot[0]["chapter_index"] == 1
+    assert snapshot[0]["content"] == "我小时候常在外婆家的院子里晒太阳。"
+    structured = data["latest_version"]["structured_content"]
+    assert structured["title"] == "外婆回忆录"
+    assert structured["chapter_count"] == 2
+    assert [item["title"] for item in structured["table_of_contents"]] == ["外婆家的童年", "第一次离家"]
+    assert structured["chapters"][0]["chapter_id"] == chapters[0].id
+    assert structured["chapters"][0]["index"] == 1
+    assert structured["chapters"][0]["content"] == "我小时候常在外婆家的院子里晒太阳。"
 
     stored_output = await test_db.scalar(select(MemoirBookOutput).where(MemoirBookOutput.project_id == project_id))
     stored_versions = (

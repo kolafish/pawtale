@@ -679,6 +679,33 @@ class MemoirBookOutputGenerateRequest(BaseModel):
     force_regenerate: bool = False
 
 
+class MemoirBookOutputTableOfContentsItemResponse(BaseModel):
+    chapter_id: str
+    index: int
+    title: str
+    char_count: int = 0
+    source_count: int = 0
+
+
+class MemoirBookOutputStructuredChapterResponse(BaseModel):
+    chapter_id: str
+    index: int
+    title: str
+    content: str
+    char_count: int = 0
+    source_count: int = 0
+    draft_version_id: str | None = None
+    draft_version: int | None = None
+
+
+class MemoirBookOutputStructuredContentResponse(BaseModel):
+    title: str
+    chapter_count: int = 0
+    char_count: int = 0
+    table_of_contents: list[MemoirBookOutputTableOfContentsItemResponse] = Field(default_factory=list)
+    chapters: list[MemoirBookOutputStructuredChapterResponse] = Field(default_factory=list)
+
+
 class MemoirBookOutputVersionResponse(BaseModel):
     id: str
     output_id: str
@@ -687,6 +714,7 @@ class MemoirBookOutputVersionResponse(BaseModel):
     version: int
     content: str
     chapter_snapshot_json: list[dict[str, object]] = Field(default_factory=list)
+    structured_content: MemoirBookOutputStructuredContentResponse | None = None
     created_by: MemoirCreatedBy
     created_at: datetime
 

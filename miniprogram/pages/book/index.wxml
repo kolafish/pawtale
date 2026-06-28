@@ -297,7 +297,7 @@
       <text class="section-count">{{chapters.length}} 章</text>
     </view>
 
-    <view wx:for="{{chapters}}" wx:key="id" class="chapter-card">
+    <view wx:for="{{chapters}}" wx:key="id" id="chapter-editor-{{item.id}}" class="chapter-card">
       <view class="chapter-head">
         <text class="chapter-index">第 {{index + 1}} 章</text>
         <text class="source-count">{{item.sourceCount}} 条素材</text>
@@ -439,7 +439,7 @@
       <text class="section-count">{{confirmedDraftCount}}/{{totalChapterCount}} 已确认</text>
     </view>
 
-    <view wx:for="{{chapters}}" wx:key="id" class="chapter-card">
+    <view wx:for="{{chapters}}" wx:key="id" id="chapter-editor-{{item.id}}" class="chapter-card">
       <view class="chapter-head">
         <view class="chapter-title-block">
           <text class="chapter-index">第 {{index + 1}} 章</text>
@@ -671,6 +671,57 @@
               <text wx:if="{{bookTTSCurrentText}}" class="tts-current">{{bookTTSCurrentText}}</text>
               <text class="tts-remaining">{{bookTTSRemainingText}}</text>
             </text>
+          </block>
+          <block wx:elif="{{bookPreviewChapters.length}}">
+            <view class="book-preview-cover">
+              <text class="book-preview-title">{{bookPreviewTitle}}</text>
+              <text class="book-preview-subtitle">{{bookPreviewChapters.length}} 章 · {{bookCharCount}} 字</text>
+            </view>
+            <view class="book-preview-toc">
+              <view class="book-preview-label-row">
+                <text class="book-preview-label">目录</text>
+                <text class="book-preview-label-meta">按当前章节顺序</text>
+              </view>
+              <view
+                wx:for="{{bookPreviewTocItems}}"
+                wx:for-item="toc"
+                wx:key="id"
+                class="book-toc-row"
+                data-id="{{toc.chapterId}}"
+                bindtap="editBookOutputChapter"
+              >
+                <text class="book-toc-index">{{toc.indexText}}</text>
+                <view class="book-toc-main">
+                  <text class="book-toc-title">{{toc.title}}</text>
+                  <text class="book-toc-meta">{{toc.metaText}}</text>
+                </view>
+                <text class="book-toc-action">编辑</text>
+              </view>
+            </view>
+            <view class="book-preview-chapters">
+              <view
+                wx:for="{{bookPreviewChapters}}"
+                wx:for-item="chapter"
+                wx:key="id"
+                class="book-preview-chapter"
+              >
+                <view class="book-preview-chapter-head">
+                  <view class="book-preview-chapter-title-block">
+                    <text class="book-preview-chapter-index">{{chapter.indexText}}</text>
+                    <text class="book-preview-chapter-title">{{chapter.title}}</text>
+                  </view>
+                  <button
+                    class="chapter-preview-edit"
+                    data-id="{{chapter.chapterId}}"
+                    bindtap="editBookOutputChapter"
+                  >
+                    编辑本章
+                  </button>
+                </view>
+                <text class="book-preview-chapter-meta">{{chapter.metaText}}</text>
+                <text class="book-preview-chapter-content" selectable>{{chapter.content}}</text>
+              </view>
+            </view>
           </block>
           <text wx:else class="book-output-text" selectable>{{bookContent}}</text>
         </view>
