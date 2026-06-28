@@ -95,7 +95,7 @@
 
   <view class="transcript-stage">
     <text class="stage-eyebrow">{{recording ? captureStateText : (followUpLoading ? "老余正在回应" : "准备好了")}}</text>
-    <text class="live-text">{{liveText || latestTranscriptText || (recording ? "请直接说，我会把文字显示在这里" : "点下方按钮开始回答")}}</text>
+    <text class="live-text">{{recording ? (liveText || "请直接说，我会把文字显示在这里") : (liveText || latestTranscriptText || "点下方按钮开始回答")}}</text>
     <view class="capture-strip {{recording ? 'active' : ''}}">
       <view class="capture-dot"></view>
       <text>{{captureStateText}}</text>

@@ -1907,6 +1907,8 @@ Page<VoiceChatData, {
     }
     if (event.type === "session.started") {
       nextData.persistenceStateText = "等待识别";
+      nextData.liveText = "";
+      nextData.liveCharCount = 0;
     }
     if (Object.keys(nextData).length) {
       this.setData(nextData);
