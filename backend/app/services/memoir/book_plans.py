@@ -118,6 +118,28 @@ async def _mark_chapter_drafts_sources_changed(
         db.add(draft)
 
 
+async def _handle_chapter_source_changes(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    chapter_ids: set[str],
+    ai_model: str | None = None,
+) -> None:
+    if not chapter_ids:
+        return
+    await _mark_chapter_drafts_sources_changed(
+        db,
+        project_id=project_id,
+        chapter_ids=chapter_ids,
+    )
+    await _schedule_chapter_auto_revisions(
+        db,
+        project_id=project_id,
+        chapter_ids=chapter_ids,
+        ai_model=ai_model,
+    )
+
+
 async def _load_plan(db: AsyncSession, project_id: str) -> MemoirBookPlan | None:
     return await db.scalar(
         select(MemoirBookPlan)
@@ -764,7 +786,7 @@ async def update_book_plan(
         else:
             await db.delete(chapter)
 
-    await _mark_chapter_drafts_sources_changed(
+    await _handle_chapter_source_changes(
         db,
         project_id=project_id,
         chapter_ids=changed_chapter_ids,
@@ -856,7 +878,7 @@ async def apply_book_plan_structure_command(
     for chapter in chapters:
         db.add(chapter)
     if mutation.changed_chapter_ids:
-        await _mark_chapter_drafts_sources_changed(
+        await _handle_chapter_source_changes(
             db,
             project_id=project_id,
             chapter_ids=mutation.changed_chapter_ids,

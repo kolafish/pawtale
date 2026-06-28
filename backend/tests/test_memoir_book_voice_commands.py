@@ -1,7 +1,15 @@
 import json
 
-from app.domain.memoir.types import MemoirBookPlanStatus, MemoirCreatedBy
+from sqlalchemy import select
+
+from app.domain.memoir.types import (
+    MemoirBookPlanStatus,
+    MemoirCreatedBy,
+    MemoirEditingJobStatus,
+    MemoirEditingJobType,
+)
 from app.models.memoir import (
+    MemoirEditingJob,
     MemoirBookChapterDraft,
     MemoirBookChapterDraftVersion,
     MemoirBookPlan,
@@ -9,7 +17,7 @@ from app.models.memoir import (
 )
 from app.services.memoir.tts_alignment import TTSAlignmentSegment
 from app.services.memoir.voice_tts import TTSResult
-from tests.memoir_helpers import create_test_voice_transcript, ensure_mobile_memoir_project
+from tests.memoir_helpers import create_test_voice_transcript, ensure_mobile_memoir_project, memoir_source_ref
 
 
 class FakeBookVoiceCommandAI:
@@ -303,6 +311,74 @@ async def test_mobile_memoir_book_voice_command_execute_merges_chapters(client, 
     assert data["intent"] == "merge_chapters"
     assert data["summary"] == "已把「童年友情」合并到「童年年节欢趣」。"
     assert [chapter["id"] for chapter in data["plan"]["chapters"]] == [chapters[1].id]
+
+
+async def test_mobile_memoir_book_voice_command_merge_schedules_target_chapter_revision(client, test_db):
+    first = await create_test_voice_transcript(client, test_db, "小时候放学后，我常和同学去河边玩。")
+    second = await create_test_voice_transcript(
+        client,
+        test_db,
+        "春节那几天，家里总会做很多年菜。",
+        project_id=first["session"]["project_id"],
+    )
+    project_id = first["session"]["project_id"]
+    _, chapters = await _create_two_chapter_plan(
+        test_db,
+        project_id=project_id,
+        titles=["童年友情", "童年年节欢趣"],
+    )
+    chapters[0].source_refs_json = [memoir_source_ref(first)]
+    chapters[1].source_refs_json = [memoir_source_ref(second)]
+    draft = MemoirBookChapterDraft(
+        project_id=project_id,
+        chapter_id=chapters[1].id,
+    )
+    test_db.add_all([chapters[0], chapters[1], draft])
+    await test_db.flush()
+    version = MemoirBookChapterDraftVersion(
+        draft_id=draft.id,
+        project_id=project_id,
+        chapter_id=chapters[1].id,
+        version=1,
+        content="春节那几天，家里总会做很多年菜。",
+        created_by=MemoirCreatedBy.AI.value,
+    )
+    test_db.add(version)
+    await test_db.commit()
+
+    response = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-voice-command/execute",
+        json={
+            "intent": "merge_chapters",
+            "operation": {
+                "type": "merge_chapters",
+                "chapter_id": chapters[0].id,
+                "chapter_title": "童年友情",
+                "target_chapter_id": chapters[1].id,
+                "target_chapter_title": "童年年节欢趣",
+            },
+        },
+    )
+
+    assert response.status_code == 200, response.json()
+    data = response.json()
+    target_chapter = data["plan"]["chapters"][0]
+    assert target_chapter["id"] == chapters[1].id
+    assert [ref["utterance_id"] for ref in target_chapter["source_refs"]] == [
+        second["utterance_id"],
+        first["utterance_id"],
+    ]
+    assert target_chapter["pending_source_count"] == 1
+
+    revision_job = await test_db.scalar(
+        select(MemoirEditingJob).where(MemoirEditingJob.dedupe_key == f"revise_chapter:{chapters[1].id}")
+    )
+    assert revision_job is not None
+    assert revision_job.job_type == MemoirEditingJobType.REVISE_CHAPTER.value
+    assert revision_job.status == MemoirEditingJobStatus.PENDING.value
+    assert revision_job.chapter_id == chapters[1].id
+    assert revision_job.payload_json["base_version_id"] == version.id
+    assert revision_job.payload_json["pending_source_utterance_ids"] == [first["utterance_id"]]
 
 
 async def test_mobile_memoir_book_voice_command_execute_assigns_uncovered_source(client, test_db):
