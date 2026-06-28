@@ -565,6 +565,9 @@ function loadBookPage({
     createMemoirBookOutputTTS: async () => {
       throw new Error("createMemoirBookOutputTTS was not mocked");
     },
+    downloadMemoirBookOutputExport: async () => {
+      throw new Error("downloadMemoirBookOutputExport was not mocked");
+    },
     createMemoirBookPlanOutlineTTS: async () => {
       throw new Error("createMemoirBookPlanOutlineTTS was not mocked");
     },
@@ -1926,6 +1929,55 @@ test("book page blocks full-book audio while viewing a historical version", asyn
 
   assert.equal(context.data.error, "正在查看历史版本，请先切回最新版再朗读");
   assert.equal(calls.length, 0);
+});
+
+test("book page downloads selected full-book output export and opens PDF", async () => {
+  const calls = [];
+  const opened = [];
+  const toasts = [];
+  global.wx = {
+    openDocument(options) {
+      opened.push(options);
+      options.success();
+    },
+    showToast(options) {
+      toasts.push(options);
+    },
+  };
+  const { page } = loadBookPage({
+    voiceApiExports: {
+      downloadMemoirBookOutputExport: async (projectId, format, versionId) => {
+        calls.push({ projectId, format, versionId });
+        return "/tmp/book.pdf";
+      },
+    },
+  });
+  const output = sampleBookOutput(2, "全书第二版正文", false, [], sampleStructuredBookContent(), [
+    sampleBookOutputVersion(1, "全书第一版正文", sampleStructuredBookContent(), "2026-06-16T00:00:00.000Z"),
+    sampleBookOutputVersion(2, "全书第二版正文", sampleStructuredBookContent(), "2026-06-17T00:00:00.000Z"),
+  ]);
+  const context = pageContext(page, {
+    projectId: "project/1",
+    hasDraftChanges: false,
+  });
+  page.applyBookOutput.call(context, output);
+  page.changeBookOutputVersion.call(context, { currentTarget: { dataset: {} }, detail: { value: "1" } });
+
+  await page.downloadBookOutputExport.call(context, {
+    currentTarget: { dataset: { format: "pdf" } },
+  });
+
+  assert.deepEqual(calls[0], {
+    projectId: "project/1",
+    format: "pdf",
+    versionId: "book-output-version-1",
+  });
+  assert.equal(opened[0].filePath, "/tmp/book.pdf");
+  assert.equal(opened[0].fileType, "pdf");
+  assert.equal(opened[0].showMenu, true);
+  assert.equal(toasts[0].title, "PDF 已打开");
+  assert.equal(context.data.bookExportBusyTarget, "");
+  delete global.wx;
 });
 
 test("book page sends book-specific TTS voice and speed", async () => {
@@ -3397,6 +3449,56 @@ test("book APIs call encoded backend routes", async () => {
   );
   assert.equal(apiRequests[18].method, "POST");
   assert.equal(apiRequests[18].header.Cookie, "pawtale_session=abc");
+  delete global.wx;
+});
+
+test("book output export download uses encoded backend route and session cookie", async () => {
+  const downloads = [];
+  global.wx = {
+    getStorageSync(key) {
+      if (key === "pawtale_backend_config") {
+        return {
+          httpBaseUrl: "http://backend.local:8000/",
+          devEmail: "local@example.com",
+          devPassword: "secret",
+        };
+      }
+      if (key === "pawtale_backend_cookie") {
+        return "pawtale_session=abc";
+      }
+      return "";
+    },
+    getExtConfigSync() {
+      return {};
+    },
+    setStorageSync() {},
+    request(options) {
+      if (options.url.endsWith("/api/auth/me")) {
+        options.success({ statusCode: 200, data: { id: "user-1" }, cookies: [], header: {} });
+      }
+    },
+    downloadFile(options) {
+      downloads.push(options);
+      options.success({
+        statusCode: 200,
+        tempFilePath: "/tmp/book.pdf",
+        header: {},
+        errMsg: "downloadFile:ok",
+      });
+    },
+  };
+  delete require.cache[require.resolve("../services/request.ts")];
+  delete require.cache[require.resolve("../services/memoir-voice-api.ts")];
+  const { downloadMemoirBookOutputExport } = require("../services/memoir-voice-api.ts");
+
+  const path = await downloadMemoirBookOutputExport("project/1", "pdf", "version/1");
+
+  assert.equal(path, "/tmp/book.pdf");
+  assert.equal(
+    downloads[0].url,
+    "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-output/export?format=pdf&version_id=version%2F1",
+  );
+  assert.equal(downloads[0].header.Cookie, "pawtale_session=abc");
   delete global.wx;
 });
 

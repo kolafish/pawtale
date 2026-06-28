@@ -186,6 +186,7 @@ export interface BookData {
   bookVersionNotice: string;
   bookStaleNotice: string;
   bookActionText: string;
+  bookExportBusyTarget: string;
   generatingBook: boolean;
   ttsBusyTarget: string;
   playingTarget: string;
@@ -1150,6 +1151,7 @@ export function guestBookData(): Partial<BookData> {
     bookVersionNotice: "",
     bookStaleNotice: "",
     bookActionText: "生成全书",
+    bookExportBusyTarget: "",
     ttsBusyTarget: "",
     playingTarget: "",
     bookTTSActiveTarget: "",

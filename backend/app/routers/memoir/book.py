@@ -1,9 +1,11 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
+from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_user
 from app.database import get_db
 from app.models.users import User
+from app.services.file_exports import content_disposition
 from app.schemas.memoir_book import (
     MemoirBookAudioRequest,
     MemoirBookAudioResponse,
@@ -521,6 +523,31 @@ async def generate_mobile_memoir_book_output(
         user_id=current_user.id,
         project_id=project_id,
         req=req,
+    )
+
+
+@router.get("/projects/{project_id}/book-output/export")
+async def export_mobile_memoir_book_output(
+    project_id: str,
+    export_format: memoir_book_outputs.MemoirBookOutputExportFormat = Query(
+        memoir_book_outputs.MemoirBookOutputExportFormat.PDF,
+        alias="format",
+    ),
+    version_id: str | None = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    export_file = await memoir_book_outputs.export_book_output_file(
+        db,
+        user_id=current_user.id,
+        project_id=project_id,
+        export_format=export_format,
+        version_id=version_id,
+    )
+    return Response(
+        content=export_file.content,
+        media_type=export_file.media_type,
+        headers={"Content-Disposition": content_disposition(export_file.filename)},
     )
 
 

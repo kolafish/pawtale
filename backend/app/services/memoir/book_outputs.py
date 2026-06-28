@@ -29,6 +29,7 @@ from app.schemas.memoir_book import (
     MemoirBookOutputTableOfContentsItemResponse,
     MemoirBookOutputVersionResponse,
 )
+from app.services.file_exports import ExportFile
 from app.services.memoir.access import load_memoir_project
 from app.services.memoir.book_audio import (
     audio_cache_payload,
@@ -38,6 +39,10 @@ from app.services.memoir.book_audio import (
     effective_tts_speed_ratio,
     source_text_hash,
     synthesize_text_audio,
+)
+from app.services.memoir.book_output_export import (
+    MemoirBookOutputExportFormat,
+    render_book_output_export,
 )
 from app.services.memoir.voice_tts import TTSClient
 
@@ -401,6 +406,43 @@ async def generate_book_output(
     if not refreshed:
         raise HTTPException(status_code=500, detail="全书稿保存失败")
     return _output_response(refreshed)
+
+
+def _select_output_version(
+    output: MemoirBookOutput,
+    *,
+    version_id: str | None = None,
+) -> MemoirBookOutputVersion | None:
+    versions = sorted(output.versions, key=lambda item: item.version)
+    if not versions:
+        return None
+    if version_id:
+        return next((version for version in versions if version.id == version_id), None)
+    return versions[-1]
+
+
+async def export_book_output_file(
+    db: AsyncSession,
+    *,
+    user_id: str,
+    project_id: str,
+    export_format: MemoirBookOutputExportFormat,
+    version_id: str | None = None,
+) -> ExportFile:
+    await load_memoir_project(db, project_id, user_id)
+    output = await _load_output(db, project_id=project_id)
+    if not output or not output.versions:
+        raise HTTPException(status_code=404, detail="全书稿不存在")
+    version = _select_output_version(output, version_id=version_id)
+    if not version:
+        raise HTTPException(status_code=404, detail="全书版本不存在")
+    content = version.content.strip()
+    return render_book_output_export(
+        title=output.title,
+        version=version.version,
+        content=content,
+        export_format=export_format,
+    )
 
 
 async def synthesize_book_output_audio(

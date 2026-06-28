@@ -196,6 +196,63 @@ async def test_mobile_memoir_book_output_generate_returns_existing_without_force
     assert second.json()["is_stale"] is False
 
 
+async def test_mobile_memoir_book_output_exports_txt_and_pdf(client, test_db):
+    project_id = await _active_project_id(client)
+    await _create_confirmed_book_plan(test_db, project_id=project_id)
+    generated = await client.post(f"/api/mobile/memoir/projects/{project_id}/book-output/generate", json={})
+    assert generated.status_code == 200
+
+    txt = await client.get(f"/api/mobile/memoir/projects/{project_id}/book-output/export?format=txt")
+    pdf = await client.get(f"/api/mobile/memoir/projects/{project_id}/book-output/export?format=pdf")
+
+    assert txt.status_code == 200
+    assert txt.headers["content-type"].startswith("text/plain")
+    assert "filename*=" in txt.headers["content-disposition"]
+    assert "外婆回忆录" in txt.text
+    assert "第1章 外婆家的童年" in txt.text
+    assert pdf.status_code == 200
+    assert pdf.headers["content-type"] == "application/pdf"
+    assert pdf.content.startswith(b"%PDF-1.4")
+    assert b"/STSong-Light" in pdf.content
+
+
+async def test_mobile_memoir_book_output_exports_selected_version(client, test_db):
+    project_id = await _active_project_id(client)
+    _, chapters = await _create_confirmed_book_plan(test_db, project_id=project_id)
+    first = await client.post(f"/api/mobile/memoir/projects/{project_id}/book-output/generate", json={})
+    assert first.status_code == 200
+    first_version_id = first.json()["latest_version"]["id"]
+
+    draft = await test_db.scalar(
+        select(MemoirBookChapterDraft).where(MemoirBookChapterDraft.chapter_id == chapters[0].id)
+    )
+    test_db.add(
+        MemoirBookChapterDraftVersion(
+            draft_id=draft.id,
+            project_id=project_id,
+            chapter_id=chapters[0].id,
+            version=2,
+            content="新版第一章正文。",
+            created_by=MemoirCreatedBy.USER.value,
+            prompt_snapshot="",
+        )
+    )
+    await test_db.commit()
+    second = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-output/generate",
+        json={"force_regenerate": True},
+    )
+    assert second.status_code == 200
+
+    exported = await client.get(
+        f"/api/mobile/memoir/projects/{project_id}/book-output/export?format=txt&version_id={first_version_id}"
+    )
+
+    assert exported.status_code == 200
+    assert "我小时候常在外婆家的院子里晒太阳。" in exported.text
+    assert "新版第一章正文" not in exported.text
+
+
 async def test_mobile_memoir_book_output_detects_and_regenerates_stale_chapter_versions(client, test_db):
     project_id = await _active_project_id(client)
     _, chapters = await _create_confirmed_book_plan(test_db, project_id=project_id)

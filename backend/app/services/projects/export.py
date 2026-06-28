@@ -1,11 +1,8 @@
 from __future__ import annotations
 
 import json
-import re
-from dataclasses import dataclass
 from enum import StrEnum
 from io import BytesIO
-from urllib.parse import quote
 from zipfile import ZIP_DEFLATED, ZipFile
 
 from markdown_it import MarkdownIt
@@ -13,6 +10,11 @@ from markdown_it.token import Token
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.schemas.projects import ProjectExportResponse
+from app.services.file_exports import (
+    ExportFile as ProjectExportFile,
+    safe_filename,
+    safe_path_part,
+)
 import app.services.project_documents as project_docs
 from app.services.content_storage import read_content
 from app.services.projects.access import load_project
@@ -24,31 +26,7 @@ class ProjectExportFormat(StrEnum):
     ZIP = "zip"
 
 
-@dataclass(frozen=True)
-class ProjectExportFile:
-    filename: str
-    media_type: str
-    content: str | bytes
-
-
 markdown_parser = MarkdownIt("commonmark")
-SAFE_FILENAME_RE = re.compile(r'[\\/:*?"<>|\r\n]+')
-SAFE_PATH_PART_RE = re.compile(r"[^a-zA-Z0-9._\-\u4e00-\u9fff]+")
-
-
-def safe_filename(name: str, extension: str) -> str:
-    stem = SAFE_FILENAME_RE.sub("-", name).strip(" .-") or "pawtale-export"
-    return f"{stem}.{extension}"
-
-
-def safe_path_part(name: str) -> str:
-    return SAFE_PATH_PART_RE.sub("-", name).strip(" .-") or "untitled"
-
-
-def content_disposition(filename: str) -> str:
-    quoted = quote(filename)
-    ascii_fallback = filename.encode("ascii", "ignore").decode("ascii") or "pawtale-export"
-    return f'attachment; filename="{ascii_fallback}"; filename*=UTF-8\'\'{quoted}'
 
 
 async def export_project_data(db: AsyncSession, project_id: str, user_id: str) -> ProjectExportResponse:
