@@ -650,6 +650,7 @@ async def export_book_output_file(
         title=output.title,
         version=version.version,
         content=content,
+        manuscript=version.manuscript_json or {},
         export_format=export_format,
         layout=layout,
     )
