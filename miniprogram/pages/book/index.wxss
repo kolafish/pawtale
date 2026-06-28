@@ -1258,6 +1258,37 @@
   line-height: 1.4;
 }
 
+.book-version-picker {
+  display: block;
+  margin-top: 16rpx;
+}
+
+.book-version-picker-button {
+  min-height: 72rpx;
+  padding: 16rpx 20rpx;
+  border: 2rpx solid #ead9c7;
+  border-radius: 14rpx;
+  background: #fffaf2;
+  color: #9f4a3c;
+  font-size: 24rpx;
+  font-weight: 800;
+  line-height: 1.35;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16rpx;
+  box-sizing: border-box;
+}
+
+.book-version-notice {
+  display: block;
+  margin-top: 14rpx;
+  color: #685b55;
+  font-size: 24rpx;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
 .book-preview {
   max-height: 680rpx;
   margin-top: 20rpx;

@@ -659,6 +659,20 @@
           <text>{{bookContent ? bookCharCount + " 字" : "尚未生成正文"}}</text>
           <text>按已确认章节顺序合成</text>
         </view>
+        <picker
+          wx:if="{{bookVersionOptions.length > 1}}"
+          class="book-version-picker"
+          range="{{bookVersionOptions}}"
+          range-key="label"
+          value="{{bookSelectedVersionIndex}}"
+          bindchange="changeBookOutputVersion"
+        >
+          <view class="book-version-picker-button">
+            <text>查看版本</text>
+            <text>{{bookVersionText}}</text>
+          </view>
+        </picker>
+        <text wx:if="{{bookVersionNotice}}" class="book-version-notice">{{bookVersionNotice}}</text>
         <text wx:if="{{bookStaleNotice}}" class="book-stale-notice">{{bookStaleNotice}}</text>
 
         <view wx:if="{{bookContent}}" class="book-preview">
@@ -741,7 +755,7 @@
           <button
             class="ghost-button"
             loading="{{ttsBusyTarget === 'book'}}"
-            disabled="{{updatingPlanStructure || generatingBook || !bookContent || hasDraftChanges || bookStaleNotice || ttsBusyTarget}}"
+            disabled="{{updatingPlanStructure || generatingBook || !bookContent || hasDraftChanges || bookStaleNotice || bookViewingHistoricalVersion || ttsBusyTarget}}"
             bindtap="playBookAudio"
           >
             {{ttsBusyTarget === "book" ? "准备朗读" : (playingTarget === "book" ? "停止朗读" : "朗读全书")}}

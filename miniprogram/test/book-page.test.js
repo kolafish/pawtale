@@ -101,7 +101,20 @@ function sampleBookOutput(
   isStale = false,
   staleChapterTitles = [],
   structuredContent = null,
+  versions = [],
 ) {
+  const latestVersion = {
+    id: `book-output-version-${version}`,
+    output_id: "book-output-1",
+    project_id: "project/1",
+    plan_id: "plan-1",
+    version,
+    content,
+    chapter_snapshot_json: [],
+    structured_content: structuredContent,
+    created_by: "system",
+    created_at: "2026-06-17T00:00:00.000Z",
+  };
   return {
     id: "book-output-1",
     project_id: "project/1",
@@ -111,21 +124,25 @@ function sampleBookOutput(
     metadata_json: {},
     is_stale: isStale,
     stale_chapter_titles: staleChapterTitles,
-    latest_version: {
-      id: `book-output-version-${version}`,
-      output_id: "book-output-1",
-      project_id: "project/1",
-      plan_id: "plan-1",
-      version,
-      content,
-      chapter_snapshot_json: [],
-      structured_content: structuredContent,
-      created_by: "system",
-      created_at: "2026-06-17T00:00:00.000Z",
-    },
-    versions: [],
+    latest_version: latestVersion,
+    versions,
     created_at: "2026-06-17T00:00:00.000Z",
     updated_at: "2026-06-17T00:00:00.000Z",
+  };
+}
+
+function sampleBookOutputVersion(version, content, structuredContent = null, createdAt = "2026-06-17T00:00:00.000Z") {
+  return {
+    id: `book-output-version-${version}`,
+    output_id: "book-output-1",
+    project_id: "project/1",
+    plan_id: "plan-1",
+    version,
+    content,
+    chapter_snapshot_json: [],
+    structured_content: structuredContent,
+    created_by: "system",
+    created_at: createdAt,
   };
 }
 
@@ -797,6 +814,49 @@ test("book page summarizes latest book output version", () => {
     mod.bookOutputStaleNotice(sampleBookOutput(3, "全书正文", true, ["外婆家的童年", "第一次离家", "县城生活"])),
     "章节「外婆家的童年、第一次离家」等章节已更新，请重新生成全书。",
   );
+});
+
+test("book page switches full-book output versions without changing the latest output", () => {
+  const { page } = loadBookPage();
+  const latestStructured = sampleStructuredBookContent();
+  const historicalStructured = {
+    ...sampleStructuredBookContent(),
+    chapters: [
+      {
+        ...sampleStructuredBookContent().chapters[0],
+        content: "旧版第一章正文。",
+        char_count: 8,
+      },
+    ],
+    table_of_contents: [
+      {
+        ...sampleStructuredBookContent().table_of_contents[0],
+        char_count: 8,
+      },
+    ],
+  };
+  const output = sampleBookOutput(2, "全书第二版正文", false, [], latestStructured, [
+    sampleBookOutputVersion(1, "全书第一版正文", historicalStructured, "2026-06-16T00:00:00.000Z"),
+    sampleBookOutputVersion(2, "全书第二版正文", latestStructured, "2026-06-17T00:00:00.000Z"),
+  ]);
+  const context = pageContext(page);
+
+  page.applyBookOutput.call(context, output);
+
+  assert.equal(context.data.bookSelectedVersionId, "book-output-version-2");
+  assert.equal(context.data.bookVersionOptions.length, 2);
+  assert.equal(context.data.bookVersionText, "全书第 2 版");
+  assert.equal(context.data.bookContent, "全书第二版正文");
+  assert.equal(context.data.bookViewingHistoricalVersion, false);
+
+  page.changeBookOutputVersion.call(context, { currentTarget: { dataset: {} }, detail: { value: "1" } });
+
+  assert.equal(context.data.bookSelectedVersionId, "book-output-version-1");
+  assert.equal(context.data.bookVersionText, "全书第 1 版");
+  assert.equal(context.data.bookContent, "全书第一版正文");
+  assert.equal(context.data.bookPreviewChapters[0].content, "旧版第一章正文。");
+  assert.equal(context.data.bookViewingHistoricalVersion, true);
+  assert.equal(context.data.bookVersionNotice, "正在查看历史版本。朗读前请切回最新版。");
 });
 
 test("book page stays on the book tab when login is required", async () => {
@@ -1836,6 +1896,35 @@ test("book page shows stale book output state and blocks old audio", async () =>
   await page.playBookAudio.call(context);
 
   assert.equal(context.data.error, "章节内容已更新，请先更新全书再朗读");
+  assert.equal(calls.length, 0);
+});
+
+test("book page blocks full-book audio while viewing a historical version", async () => {
+  const calls = [];
+  const { page } = loadBookPage({
+    voiceApiExports: {
+      createMemoirBookOutputTTS: async () => {
+        calls.push("tts");
+        return sampleAudioResponse();
+      },
+    },
+  });
+  const output = sampleBookOutput(2, "全书第二版正文", false, [], sampleStructuredBookContent(), [
+    sampleBookOutputVersion(1, "全书第一版正文", sampleStructuredBookContent(), "2026-06-16T00:00:00.000Z"),
+    sampleBookOutputVersion(2, "全书第二版正文", sampleStructuredBookContent(), "2026-06-17T00:00:00.000Z"),
+  ]);
+  const context = pageContext(page, {
+    projectId: "project/1",
+    allChaptersConfirmed: true,
+    canGenerateBook: true,
+    hasDraftChanges: false,
+  });
+  page.applyBookOutput.call(context, output);
+  page.changeBookOutputVersion.call(context, { currentTarget: { dataset: {} }, detail: { value: "1" } });
+
+  await page.playBookAudio.call(context);
+
+  assert.equal(context.data.error, "正在查看历史版本，请先切回最新版再朗读");
   assert.equal(calls.length, 0);
 });
 

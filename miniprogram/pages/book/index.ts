@@ -410,6 +410,7 @@ Page<BookData, {
   updatePlanStructure(chapters: MemoirBookPlanChapterUpdateInput[], toastTitle: string): Promise<MemoirBookPlan | null>;
   regenerateMergedChapter(chapterId: string): Promise<void>;
   generateBook(): Promise<void>;
+  changeBookOutputVersion(event: PickerEvent): void;
   editBookOutputChapter(event: DatasetEvent): void;
   playChapterAudio(event: DatasetEvent): Promise<void>;
   playChapterAudioById(chapterId: string, options?: { autoListenAfterPlayback?: boolean }): Promise<void>;
@@ -552,6 +553,11 @@ Page<BookData, {
     bookPreviewTocItems: [],
     bookPreviewChapters: [],
     bookVersionText: "尚未生成全书",
+    bookVersionOptions: [],
+    bookSelectedVersionId: "",
+    bookSelectedVersionIndex: 0,
+    bookViewingHistoricalVersion: false,
+    bookVersionNotice: "",
     bookStaleNotice: "",
     bookActionText: "生成全书",
     ttsBusyTarget: "",
@@ -748,6 +754,18 @@ Page<BookData, {
 
   applyBookOutput(output) {
     this.setData(bookOutputData(output));
+  },
+
+  changeBookOutputVersion(event) {
+    const index = Number(event.detail.value);
+    const option = this.data.bookVersionOptions[index];
+    if (!option || !this.data.bookOutput) {
+      return;
+    }
+    if (this.data.playingTarget === "book") {
+      this.stopPlayback();
+    }
+    this.setData(bookOutputData(this.data.bookOutput, option.id));
   },
 
   applySourceCoverage(coverage) {
@@ -1504,6 +1522,10 @@ Page<BookData, {
     }
     if (this.data.bookOutput?.is_stale) {
       this.setData({ error: "章节内容已更新，请先更新全书再朗读" });
+      return;
+    }
+    if (this.data.bookViewingHistoricalVersion) {
+      this.setData({ error: "正在查看历史版本，请先切回最新版再朗读" });
       return;
     }
     this.stopPlayback();
