@@ -20,11 +20,11 @@ from app.services.memoir import progress_snapshot
 from app.services.memoir.audio_files import StagedAudioFile, discard_staged_audio, stage_audio_bytes
 from app.services.memoir.tts_alignment import alignment_segments_to_json
 from app.services.memoir.voice_followup_ai import (
-    SYSTEM_PROMPT,
     GUIDED_TOPIC_LIBRARY,
     GUIDED_TOPIC_MENU,
     PROMPT_VERSION,
     PROGRESS_PROMPT_VERSION,
+    InterviewerPersona,
     InterviewerTurn,
     ProgressPromptContext,
     build_progress_prompt_context,
@@ -36,6 +36,8 @@ from app.services.memoir.voice_followup_ai import (
     _question_mark_count,
     _recent_context,
     _requested_topic_hint,
+    interviewer_persona_for_voice,
+    system_prompt_for_persona,
 )
 from app.services.memoir.streaming_tts_events import (
     STREAM_TTS_AUDIO_PROTOCOL_PCM_FRAME,
@@ -57,7 +59,7 @@ from app.services.memoir.voice_tts import (
 )
 
 
-STREAM_PROMPT_VERSION = "memoir_voice_interviewer_stream_turn_v1"
+STREAM_PROMPT_VERSION = "memoir_voice_interviewer_stream_turn_v2"
 STREAM_TEXT_TEMPERATURE = 0.72
 STREAM_TEXT_TIMEOUT_SECONDS = 60.0
 _PCM_MIME_TYPES = {"audio/l16", "audio/pcm", "audio/x-pcm"}
@@ -287,14 +289,16 @@ class VoiceAssistantTurnStreamSession:
                 voice_unannounced_events_only=True,
             )
         )
+        tts_client = self.tts_client_factory()
+        persona = interviewer_persona_for_voice(req.voice or tts_client.default_voice)
         prompt = _build_stream_turn_prompt(
             voice_session,
             previous_messages=previous_messages,
             regenerate=req.regenerate,
             progress_context=project_progress_context,
+            persona=persona,
         )
         ai_client = self.ai_client_factory(req.ai_model)
-        tts_client = self.tts_client_factory()
         artifacts = AssistantTurnArtifacts()
 
         await self.client.send_json(
@@ -307,6 +311,7 @@ class VoiceAssistantTurnStreamSession:
                 "ai_model": ai_client.model_name,
                 "tts_provider": tts_client.provider_name,
                 "tts_model": tts_client.model_name,
+                "host_name": persona.host_name,
                 "audio_protocol": req.audio_protocol,
                 "max_tokens": max_tokens,
             }
@@ -315,6 +320,7 @@ class VoiceAssistantTurnStreamSession:
         await self._stream_text_and_audio(
             ai_client=ai_client,
             tts_client=tts_client,
+            system_prompt=system_prompt_for_persona(persona),
             prompt=prompt,
             req=req,
             max_tokens=max_tokens,
@@ -356,6 +362,7 @@ class VoiceAssistantTurnStreamSession:
                 "primary_intent": turn.primary_intent,
                 "intent_tags": turn.intent_tags,
                 "expects_answer": turn.expects_answer,
+                "host_name": persona.host_name,
                 "finish_reason": artifacts.finish_reason,
                 "usage": artifacts.usage,
                 "progress_update": project_progress_context.progress_update,
@@ -368,6 +375,7 @@ class VoiceAssistantTurnStreamSession:
         *,
         ai_client: AITextClient,
         tts_client: TTSClient,
+        system_prompt: str,
         prompt: str,
         req: AssistantTurnStartRequest,
         max_tokens: int,
@@ -389,6 +397,7 @@ class VoiceAssistantTurnStreamSession:
         try:
             await self._stream_text(
                 ai_client=ai_client,
+                system_prompt=system_prompt,
                 prompt=prompt,
                 req=req,
                 max_tokens=max_tokens,
@@ -414,6 +423,7 @@ class VoiceAssistantTurnStreamSession:
         self,
         *,
         ai_client: AITextClient,
+        system_prompt: str,
         prompt: str,
         req: AssistantTurnStartRequest,
         max_tokens: int,
@@ -423,7 +433,7 @@ class VoiceAssistantTurnStreamSession:
         text_queue: asyncio.Queue[str | None],
     ) -> None:
         async for chunk in ai_client.stream_llm(
-            SYSTEM_PROMPT,
+            system_prompt,
             prompt,
             temperature=req.temperature,
             max_tokens=max_tokens,
@@ -487,6 +497,7 @@ class VoiceAssistantTurnStreamSession:
         if not turn.speech_text:
             raise HTTPException(status_code=502, detail="AI 未返回可用访谈回应")
         staged_audio: StagedAudioFile | None = None
+        persona = interviewer_persona_for_voice(req.voice or artifacts.tts_voice)
         if artifacts.audio:
             mime_type, extension = _storage_audio_type(artifacts.audio_mime_type)
             staged_audio = await stage_audio_bytes(
@@ -528,6 +539,8 @@ class VoiceAssistantTurnStreamSession:
                     "max_tokens": max_tokens,
                     "temperature": req.temperature,
                     "regenerate": req.regenerate,
+                    "host_name": persona.host_name,
+                    "host_voice_gender": persona.voice_gender,
                     "response_chars": len(turn.speech_text),
                     "question_mark_count": _question_mark_count(turn.speech_text),
                     "finish_reason": artifacts.finish_reason,
@@ -559,6 +572,7 @@ def _build_stream_turn_prompt(
     previous_messages: list[MemoirChatMessage],
     regenerate: bool,
     progress_context: ProgressPromptContext,
+    persona: InterviewerPersona,
 ) -> str:
     messages = list(voice_session.messages)
     has_user_message = _has_user_message(messages)
@@ -567,6 +581,7 @@ def _build_stream_turn_prompt(
     history_context = _previous_context(previous_messages)
     module_label = _module_label(voice_session.current_guidance_module)
     topic_hint = _requested_topic_hint(messages)
+    host_name = persona.host_name
     regenerate_instruction = "这次是在替换上一句回应，请换一个角度，不要重复上一句。" if regenerate else ""
     if voice_session.guidance_mode == "guided_interview":
         if has_user_message:
@@ -578,14 +593,16 @@ def _build_stream_turn_prompt(
 {GUIDED_TOPIC_LIBRARY}"""
         elif has_previous_user_message:
             mode_instruction = f"""当前是主题讲述继续开场，叙述者之前已有同模式讲述记录。
-- 开头要明确体现回访，例如“欢迎回来，咱们接着聊”
-- 根据历史会话进度提醒上次讲到哪里，只能复述明确出现过的内容
-- 优先邀请叙述者接着上次的话题继续讲，同时允许他重新选主题
-- 主题介绍只做一句简短兜底：如果今天想换方向，也可以从这些主题里挑一个：{GUIDED_TOPIC_MENU}"""
+- 先用“{host_name}”做一句简短自我介绍和回访问候，像真人访谈主持人开场
+- 简短说明背景：这是一次帮叙述者慢慢留下回忆的访谈，不是答题或考问；想不起来、跳过、换方向都可以
+- 可以用一句宽泛概括提醒上次聊到哪里，只能复述明确出现过的内容；不要一开场就切进上次的具体细节
+- 最后给两个自然选择：可以接着上次的大方向讲，也可以换到这些主题里挑一个：{GUIDED_TOPIC_MENU}"""
         else:
             mode_instruction = f"""当前是主题讲述首次开场。
-- 先问好，并用“老余”做简短自我介绍
-- 明确介绍可聊主题：{GUIDED_TOPIC_MENU}
+- 先用“{host_name}”做一句简短自我介绍，像真人访谈主持人开场
+- 简短说明背景：今天会陪叙述者把人生里的故事、人物、地方和感受慢慢聊出来，不是答题或考问
+- 明确说可以想一会儿、跳过、换方向，也可以按自己的顺序讲
+- 介绍可聊主题：{GUIDED_TOPIC_MENU}
 - 先让叙述者选择想聊哪个主题，不要立刻进入细节"""
     else:
         if has_user_message:
@@ -594,20 +611,24 @@ def _build_stream_turn_prompt(
 - 如果这件事重要、有情绪或有转折，鼓励他多讲一点
 - 如果这件事已经讲得差不多，就自然引导到前后时间、相关人物，或下一段回忆"""
         elif has_previous_user_message:
-            mode_instruction = """当前是自由讲述开场，AI 只做弱引导，叙述者之前已有讲述记录。
-- 根据历史会话进度提醒上次讲到哪里，只能复述明确出现过的内容
-- 温和提示叙述者可以从上次停下来的地方接着讲"""
+            mode_instruction = f"""当前是自由讲述开场，AI 只做弱引导，叙述者之前已有讲述记录。
+- 先用“{host_name}”做一句简短自我介绍和回访问候，像真人访谈主持人开场
+- 简短说明背景：这里是慢慢留下回忆的访谈，不是答题；可以继续、停一停或换方向
+- 可以用一句宽泛概括提醒上次聊到哪里，只能复述明确出现过的内容；不要一开场就切进上次的具体细节
+- 温和提示叙述者可以从上次停下来的大方向接着讲，也可以换到别的人、事、地方或时间段"""
         else:
-            mode_instruction = """当前是自由讲述开场，AI 只做弱引导。
-- 先问好，并用“老余”做简短自我介绍
-- 引导叙述者可以从小时候或最早的记忆开始讲起
-- 仍然允许叙述者按自己的顺序开始，不要连续提问"""
-    return f"""请根据下面的访谈上下文，直接生成下一句“老余”要说的话。
+            mode_instruction = f"""当前是自由讲述开场，AI 只做弱引导。
+- 先用“{host_name}”做一句简短自我介绍，像真人访谈主持人开场
+- 简短说明背景：今天会陪叙述者把人生里的故事慢慢聊出来，不是答题或考问
+- 说明可以从小时候、最早的记忆、一个人、一件事或一个地方开始，也可以按自己的顺序讲
+- 不要连续提问，只给一个开放入口"""
+    return f"""请根据下面的访谈上下文，直接生成下一句“{host_name}”要说的话。
 
 输出要求：
 - 只输出要播放的中文口语正文，不要 JSON，不要 Markdown，不要解释
 - 你可以自主组合动作：承接认可、鼓励继续讲、小结、自然换方向、继续追问，或没听清/太短时温和接住
 - 普通回应 1 到 3 句，建议 40 到 90 个汉字；开场可以稍长
+- 开场必须先有轻量自我介绍和访谈背景，再进入问题；不要上来就追问历史细节
 - 不要机械重复叙述者刚说过的话；认可必须落在具体内容上，但不要把用户原话换个说法再说一遍
 - 如果要问问题，一次只问一个自然问题
 - 不要编造上下文没有的信息；如果提醒“上次讲到哪里”，只能概括历史会话里明确出现过的内容

@@ -15,7 +15,7 @@ from app.services.json_utils import extract_json_payload
 
 
 SYSTEM_PROMPT = (
-    "你是一位中文回忆录语音访谈主持人，名字叫“老余”。"
+    "你是一位中文回忆录语音访谈主持人。"
     "你的任务不是审问用户，而是帮助叙述者自然地讲出人生经历、人物、事情、地点、时间和感受。"
 )
 PROMPT_VERSION = "memoir_voice_interviewer_turn_v1"
@@ -55,6 +55,12 @@ class ProgressPromptContext:
     automation_event_ids: list[str] | None = None
 
 
+@dataclass(frozen=True)
+class InterviewerPersona:
+    host_name: str
+    voice_gender: str
+
+
 MODULE_LABELS = {
     "person": "人物",
     "event": "事件",
@@ -65,6 +71,19 @@ MODULE_LABELS = {
     "theme": "主题",
     "chat": "闲聊",
 }
+
+
+def interviewer_persona_for_voice(voice: str | None) -> InterviewerPersona:
+    normalized = (voice or "").strip().lower()
+    if "female" in normalized or "xiaohe" in normalized:
+        return InterviewerPersona(host_name="小余", voice_gender="female")
+    if "male" in normalized or "m191" in normalized:
+        return InterviewerPersona(host_name="老余", voice_gender="male")
+    return InterviewerPersona(host_name="老余", voice_gender="unknown")
+
+
+def system_prompt_for_persona(persona: InterviewerPersona) -> str:
+    return f"{SYSTEM_PROMPT}你在对话中自称“{persona.host_name}”。"
 
 GUIDED_TOPIC_MENU = "人物、事情、家庭、工作、地点、某一天、人生阶段、闲聊"
 
