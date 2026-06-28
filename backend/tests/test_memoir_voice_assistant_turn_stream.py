@@ -315,6 +315,54 @@ async def test_voice_assistant_turn_progress_prompt_uses_recent_automation_event
     assert automation_events.VOICE_PLAYED_AT_KEY not in event.metadata_json
 
 
+async def test_voice_assistant_turn_strips_host_label_after_progress_prefix(
+    client,
+    test_db,
+):
+    created = await create_test_voice_transcript(
+        client,
+        test_db,
+        text="我辞职后想做一个内容创作平台。",
+        guidance_mode="guided_interview",
+        current_guidance_module="work",
+    )
+    await automation_events.record_automation_event(
+        test_db,
+        project_id=created["session"]["project_id"],
+        event_type=MemoirAutomationEventType.CHAPTER_AUTO_REVISED,
+        utterance_ids=[created["utterance_id"]],
+        summary_text="「职场浮沉与升职加薪」已自动补写 4 条新增讲述。",
+        confidence=0.92,
+    )
+    await test_db.commit()
+
+    stream_client, _, tts_client, completed = await _run_stream_turn(
+        test_db,
+        voice_session_id=created["session"]["id"],
+        user_id=created["user_id"],
+        voice="S_xiaohe_female",
+        chunks=[
+            "小",
+            "余：嗯，你刚才提到辞职后想做一人公司，",
+            "那辞职前最早是怎么进入这个行业的？",
+        ],
+    )
+
+    assert completed["host_name"] == "小余"
+    assert "小余：" not in completed["text"]
+    assert completed["text"] == (
+        "「职场浮沉与升职加薪」已自动补写4条新增讲述。"
+        "嗯，你刚才提到辞职后想做一人公司，那辞职前最早是怎么进入这个行业的？"
+    )
+    text_deltas = [event["text_delta"] for event in stream_client.sent if event["type"] == "text.delta"]
+    assert text_deltas == [
+        "「职场浮沉与升职加薪」已自动补写4条新增讲述。",
+        "嗯，你刚才提到辞职后想做一人公司，",
+        "那辞职前最早是怎么进入这个行业的？",
+    ]
+    assert all("小余：" not in chunk for chunk in tts_client.calls[0]["text_chunks"])
+
+
 async def test_voice_assistant_turn_speaks_grouped_source_assignment_progress(
     client,
     test_db,
