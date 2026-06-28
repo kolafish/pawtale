@@ -63,11 +63,30 @@
         </view>
         <text class="automation-item-summary">{{item.summaryText}}</text>
         <text wx:if="{{item.detailText}}" class="automation-item-detail">{{item.detailText}}</text>
+        <view
+          wx:if="{{item.hasDetails}}"
+          class="automation-detail-toggle"
+          data-id="{{item.id}}"
+          bindtap="toggleAutomationEventDetails"
+        >
+          <text>{{item.detailToggleText}}</text>
+        </view>
+        <view wx:if="{{item.hasDetails && item.detailExpanded}}" class="automation-detail-list">
+          <view wx:for="{{item.detailItems}}" wx:key="id" wx:for-item="detail" class="automation-detail-row">
+            <view class="automation-detail-row-head">
+              <text class="automation-detail-title">{{detail.titleText}}</text>
+              <text class="automation-detail-chapter">{{detail.chapterText}}</text>
+            </view>
+            <text wx:if="{{detail.previewText}}" class="automation-detail-preview">{{detail.previewText}}</text>
+            <text wx:if="{{detail.metaText}}" class="automation-detail-meta">{{detail.metaText}}</text>
+          </view>
+        </view>
         <text class="automation-item-meta">{{item.metaText}}</text>
       </view>
       <button
         class="automation-ack"
         data-id="{{item.id}}"
+        data-event-ids="{{item.eventIdsText}}"
         data-action="{{item.actionKind}}"
         data-utterance-id="{{item.primaryUtteranceId}}"
         loading="{{item.busy}}"

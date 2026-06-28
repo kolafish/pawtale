@@ -10,13 +10,18 @@ from app.domain.memoir.types import (
     MemoirChatContentStatus,
     MemoirChatMessageRole,
 )
-from app.models.memoir import AudioFile, MemoirChatMessage
+from app.models.memoir import AudioFile, MemoirBookPlanChapter, MemoirChatMessage
 from app.services.ai_streaming import AITextStreamChunk
 from app.services.memoir import automation_events
 from app.services.memoir.tts_alignment import TTSAlignmentSegment
 from app.services.memoir.voice_assistant_turn_stream import VoiceAssistantTurnStreamSession
 from app.services.memoir.voice_tts import StreamingTTSChunk
-from tests.memoir_helpers import create_test_voice_transcript, post_mobile_memoir_voice_session
+from tests.memoir_helpers import (
+    create_test_book_plan,
+    create_test_voice_transcript,
+    memoir_source_ref,
+    post_mobile_memoir_voice_session,
+)
 
 
 async def test_voice_assistant_turn_streams_text_audio_and_persists_message(
@@ -284,23 +289,120 @@ async def test_voice_assistant_turn_progress_prompt_uses_recent_automation_event
         test_db,
         voice_session_id=created["session"]["id"],
         user_id=created["user_id"],
-        chunks=["刚才那段已经让院子的记忆更清楚了。外婆在院子里最常做什么？"],
+        chunks=["外婆在院子里最常做什么？"],
     )
 
     prompt = ai_client.calls[0]["user_prompt"]
     assert "本轮可选进度鼓励：刚才新增的 1 条讲述已补进《外婆家的院子》。" in prompt
+    assert "本轮语音开头会先播报：刚才新增的1条讲述已补进《外婆家的院子》。" in prompt
+    assert "你不要重复同一条进度、数字或章节名" in prompt
     assert "只允许引用以下事实" in prompt
+    assert completed["text"] == "刚才新增的1条讲述已补进《外婆家的院子》。外婆在院子里最常做什么？"
     assert completed["progress_update"]["kind"] == "automation_event"
     assert completed["progress_update"]["event_ids"] == [event.id]
+    assert completed["progress_spoken_text"] == "刚才新增的1条讲述已补进《外婆家的院子》。"
 
     assistant_message = await test_db.scalar(
         select(MemoirChatMessage).where(MemoirChatMessage.id == completed["message_id"])
     )
     assert assistant_message.metadata_json["progress_update"]["kind"] == "automation_event"
     assert assistant_message.metadata_json["progress_automation_event_ids"] == [event.id]
+    assert assistant_message.metadata_json["progress_voice_announced_event_ids"] == [event.id]
+    assert assistant_message.metadata_json["progress_spoken_text"] == "刚才新增的1条讲述已补进《外婆家的院子》。"
     await test_db.refresh(event)
     assert event.metadata_json[automation_events.VOICE_ANNOUNCED_SESSION_ID_KEY] == created["session"]["id"]
     assert event.metadata_json[automation_events.VOICE_ANNOUNCED_MESSAGE_ID_KEY] == completed["message_id"]
+
+
+async def test_voice_assistant_turn_speaks_grouped_source_assignment_progress(
+    client,
+    test_db,
+):
+    first = await create_test_voice_transcript(
+        client,
+        test_db,
+        text="我小时候常在外婆家院子里摘菜。",
+        guidance_mode="guided_interview",
+        current_guidance_module="family",
+    )
+    second = await create_test_voice_transcript(
+        client,
+        test_db,
+        text="春节那几天厨房里总是特别热闹。",
+        guidance_mode="guided_interview",
+        current_guidance_module="family",
+    )
+    _, first_chapter = await create_test_book_plan(
+        test_db,
+        project_id=first["session"]["project_id"],
+        source_ref=memoir_source_ref(first),
+        chapter_title="外婆家的童年",
+    )
+    second_chapter = MemoirBookPlanChapter(
+        plan_id=first_chapter.plan_id,
+        project_id=first["session"]["project_id"],
+        title="春节厨房",
+        sort_order=1,
+        source_refs_json=[memoir_source_ref(second)],
+    )
+    test_db.add(second_chapter)
+    await test_db.flush()
+    first_event = await automation_events.record_automation_event(
+        test_db,
+        project_id=first["session"]["project_id"],
+        event_type=MemoirAutomationEventType.SOURCE_ASSIGNED,
+        chapter_id=first_chapter.id,
+        utterance_ids=[first["utterance_id"]],
+        summary_text="1 条讲述已自动整理进「外婆家的童年」。",
+        metadata_json={
+            "routes": [
+                {
+                    "utterance_id": first["utterance_id"],
+                    "source_index": 1,
+                    "target_chapter_title": "外婆家的童年",
+                }
+            ]
+        },
+    )
+    second_event = await automation_events.record_automation_event(
+        test_db,
+        project_id=first["session"]["project_id"],
+        event_type=MemoirAutomationEventType.SOURCE_ASSIGNED,
+        chapter_id=second_chapter.id,
+        utterance_ids=[second["utterance_id"]],
+        summary_text="1 条讲述已自动整理进「春节厨房」。",
+        metadata_json={
+            "routes": [
+                {
+                    "utterance_id": second["utterance_id"],
+                    "source_index": 2,
+                    "target_chapter_title": "春节厨房",
+                }
+            ]
+        },
+    )
+    await test_db.commit()
+
+    _, ai_client, _, completed = await _run_stream_turn(
+        test_db,
+        voice_session_id=second["session"]["id"],
+        user_id=second["user_id"],
+        chunks=["那春节厨房里，谁通常最先开始忙？"],
+    )
+
+    prompt = ai_client.calls[0]["user_prompt"]
+    assert "本轮可选进度鼓励：刚才有 2 条讲述已自动整理进 2 个章节" in prompt
+    assert "自动归章明细：语音记录 2 -> 「春节厨房」" in prompt
+    assert "自动归章明细：语音记录 1 -> 「外婆家的童年」" in prompt
+    assert completed["progress_update"]["kind"] == "source_assignment_batch"
+    assert set(completed["progress_update"]["event_ids"]) == {first_event.id, second_event.id}
+    assert completed["progress_spoken_text"].startswith("刚才有2条讲述已自动整理进2个章节")
+    assert completed["text"].startswith(completed["progress_spoken_text"])
+
+    await test_db.refresh(first_event)
+    await test_db.refresh(second_event)
+    assert first_event.metadata_json[automation_events.VOICE_ANNOUNCED_MESSAGE_ID_KEY] == completed["message_id"]
+    assert second_event.metadata_json[automation_events.VOICE_ANNOUNCED_MESSAGE_ID_KEY] == completed["message_id"]
 
 
 async def test_voice_assistant_turn_skips_voice_announced_automation_event(

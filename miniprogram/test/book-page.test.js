@@ -863,6 +863,128 @@ test("book page shows and acknowledges automation events", async () => {
   assert.deepEqual(context.data.automationEventItems, []);
 });
 
+test("book page groups source assignment automation events with expandable details", async () => {
+  const acknowledged = [];
+  const { page } = loadBookPage({
+    authExports: {
+      getMemoirIdentity: async () => ({
+        id: "user-1",
+        email: "memoir-author@example.com",
+        password_login_enabled: true,
+        display_name: "作者",
+        created_at: "2026-06-15T00:00:00",
+        active_project_id: "project/1",
+        active_project: { id: "project/1", title: "外婆回忆录" },
+        projects: [],
+      }),
+    },
+    voiceApiExports: {
+      getMemoirBookPlan: async () => samplePlan("confirmed"),
+      getMemoirBookChapterDraft: async () => null,
+      getMemoirBookOutput: async () => null,
+      getMemoirBookSourceCoverage: async () => sampleSourceCoverage(0),
+      listMemoirAutomationEvents: async () => ({
+        items: [
+          {
+            id: "event-1",
+            project_id: "project/1",
+            event_type: "source_assigned",
+            status: "completed",
+            chapter_id: "chapter-1",
+            utterance_ids: ["utterance-1"],
+            summary_text: "1 条讲述已自动整理进「外婆家的童年」。",
+            confidence: 0.91,
+            metadata_json: {},
+            utterance_details: [
+              {
+                utterance_id: "utterance-1",
+                source_index: 1,
+                record_title: "语音记录 1",
+                preview_text: "我小时候常在外婆家的院子里摘菜。",
+                chapter_id: "chapter-1",
+                chapter_title: "外婆家的童年",
+                created_at: "2026-06-23T12:00:00",
+              },
+            ],
+            created_at: "2026-06-23T12:00:00",
+            updated_at: "2026-06-23T12:00:00",
+          },
+          {
+            id: "event-2",
+            project_id: "project/1",
+            event_type: "source_assigned",
+            status: "completed",
+            chapter_id: "chapter-2",
+            utterance_ids: ["utterance-2"],
+            summary_text: "1 条讲述已自动整理进「第一次离家」。",
+            confidence: 0.88,
+            metadata_json: {},
+            utterance_details: [
+              {
+                utterance_id: "utterance-2",
+                source_index: 2,
+                record_title: "语音记录 2",
+                preview_text: "第一次离家去县城的时候，我心里很紧张。",
+                chapter_id: "chapter-2",
+                chapter_title: "第一次离家",
+                created_at: "2026-06-23T12:03:00",
+              },
+            ],
+            created_at: "2026-06-23T12:03:00",
+            updated_at: "2026-06-23T12:03:00",
+          },
+        ],
+        total: 2,
+        limit: 8,
+      }),
+      acknowledgeMemoirAutomationEvent: async (projectId, eventId) => {
+        acknowledged.push({ projectId, eventId });
+        return {};
+      },
+    },
+  });
+  const context = pageContext(page);
+
+  await page.loadBookHome.call(context);
+
+  assert.equal(context.data.automationEventItems.length, 1);
+  const item = context.data.automationEventItems[0];
+  assert.equal(item.titleText, "已自动归章");
+  assert.equal(item.summaryText, "2 条讲述已自动整理进 2 个章节：「外婆家的童年」、「第一次离家」。");
+  assert.equal(item.actionKind, "acknowledge_group");
+  assert.equal(item.actionText, "知道了");
+  assert.equal(item.hasDetails, true);
+  assert.equal(item.detailExpanded, false);
+  assert.equal(item.detailToggleText, "查看 2 条详情");
+  assert.deepEqual(
+    item.detailItems.map((detail) => [detail.titleText, detail.chapterText, detail.previewText]),
+    [
+      ["语音记录 1", "归入「外婆家的童年」", "我小时候常在外婆家的院子里摘菜。"],
+      ["语音记录 2", "归入「第一次离家」", "第一次离家去县城的时候，我心里很紧张。"],
+    ],
+  );
+
+  page.toggleAutomationEventDetails.call(context, { currentTarget: { dataset: { id: item.id } } });
+  assert.equal(context.data.automationEventItems[0].detailExpanded, true);
+  assert.equal(context.data.automationEventItems[0].detailToggleText, "收起详情");
+
+  await page.acknowledgeAutomationEvent.call(context, {
+    currentTarget: {
+      dataset: {
+        id: item.id,
+        eventIds: item.eventIdsText,
+        action: "acknowledge_group",
+      },
+    },
+  });
+
+  assert.deepEqual(acknowledged, [
+    { projectId: "project/1", eventId: "event-1" },
+    { projectId: "project/1", eventId: "event-2" },
+  ]);
+  assert.deepEqual(context.data.automationEventItems, []);
+});
+
 test("book page builds detailed automation event views", () => {
   const { mod } = loadBookPage();
 

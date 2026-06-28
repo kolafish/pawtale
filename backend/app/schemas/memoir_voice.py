@@ -162,6 +162,16 @@ class MemoirVoiceModuleProgressResponse(BaseModel):
     user_char_count: int
 
 
+class MemoirAutomationEventUtteranceDetailResponse(BaseModel):
+    utterance_id: str
+    source_index: int | None = None
+    record_title: str
+    preview_text: str
+    chapter_id: str | None = None
+    chapter_title: str | None = None
+    created_at: datetime | None = None
+
+
 class MemoirAutomationEventResponse(BaseModel):
     id: str
     project_id: str
@@ -172,6 +182,7 @@ class MemoirAutomationEventResponse(BaseModel):
     summary_text: str
     confidence: float | None = None
     metadata_json: dict[str, object] = Field(default_factory=dict)
+    utterance_details: list[MemoirAutomationEventUtteranceDetailResponse] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
 

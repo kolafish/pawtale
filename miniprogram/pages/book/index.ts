@@ -126,6 +126,7 @@ interface DatasetEvent {
   currentTarget: {
     dataset: {
       id?: string;
+      eventIds?: string;
       action?: string;
       direction?: string;
       utteranceId?: string;
@@ -368,6 +369,7 @@ Page<BookData, {
   applyBookOutput(output: MemoirBookOutput | null): void;
   applySourceCoverage(coverage: MemoirBookSourceCoverage | null): void;
   applyAutomationEvents(events: MemoirAutomationEvent[]): void;
+  toggleAutomationEventDetails(event: DatasetEvent): void;
   acknowledgeAutomationEvent(event: DatasetEvent): Promise<void>;
   applyUpdatedPlan(plan: MemoirBookPlan, toastTitle: string): Promise<void>;
   generatePlan(): Promise<void>;
@@ -577,6 +579,7 @@ Page<BookData, {
     bookVoiceCommandUndoSnapshot: null,
     automationEventItems: [],
     automationEventBusyTarget: "",
+    automationEventExpandedTargets: {},
     automationEventLoading: false,
     automationEventError: "",
   },
@@ -740,12 +743,42 @@ Page<BookData, {
 
   applyAutomationEvents(events) {
     this.setData({
-      automationEventItems: buildAutomationEventViews(events, this.data.automationEventBusyTarget),
+      automationEventItems: buildAutomationEventViews(
+        events,
+        this.data.automationEventBusyTarget,
+        this.data.automationEventExpandedTargets,
+      ),
+    });
+  },
+
+  toggleAutomationEventDetails(event) {
+    const eventId = event.currentTarget.dataset.id || "";
+    if (!eventId) {
+      return;
+    }
+    const expandedTargets = {
+      ...this.data.automationEventExpandedTargets,
+      [eventId]: !this.data.automationEventExpandedTargets[eventId],
+    };
+    this.setData({
+      automationEventExpandedTargets: expandedTargets,
+      automationEventItems: this.data.automationEventItems.map((item) => (
+        item.id === eventId
+          ? {
+            ...item,
+            detailExpanded: Boolean(expandedTargets[eventId]),
+            detailToggleText: expandedTargets[eventId]
+              ? "收起详情"
+              : `查看 ${item.detailItems.length} 条详情`,
+          }
+          : item
+      )),
     });
   },
 
   async acknowledgeAutomationEvent(event) {
     const eventId = event.currentTarget.dataset.id || "";
+    const eventIdsText = event.currentTarget.dataset.eventIds || eventId;
     const action = event.currentTarget.dataset.action || "acknowledge";
     if (action === "review_source") {
       const utteranceId = event.currentTarget.dataset.utteranceId || "";
@@ -757,10 +790,14 @@ Page<BookData, {
       wx.switchTab({ url: "/pages/transcripts/index" });
       return;
     }
-    if (action !== "acknowledge") {
+    if (action !== "acknowledge" && action !== "acknowledge_group") {
       return;
     }
     if (!this.data.projectId || !eventId || this.data.automationEventBusyTarget) {
+      return;
+    }
+    const eventIds = eventIdsText.split(",").map((item) => item.trim()).filter(Boolean);
+    if (!eventIds.length) {
       return;
     }
     this.setData({
@@ -771,7 +808,7 @@ Page<BookData, {
       automationEventError: "",
     });
     try {
-      await acknowledgeMemoirAutomationEvent(this.data.projectId, eventId);
+      await Promise.all(eventIds.map((id) => acknowledgeMemoirAutomationEvent(this.data.projectId, id)));
       this.setData({
         automationEventItems: this.data.automationEventItems.filter((item) => item.id !== eventId),
       });
