@@ -6,6 +6,7 @@ interface MemoirRequestOptions {
   method?: HttpMethod;
   data?: unknown;
   header?: Record<string, string>;
+  timeoutMs?: number;
 }
 
 type QueryValue = string | number | boolean | null | undefined;

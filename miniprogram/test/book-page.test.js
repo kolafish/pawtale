@@ -1854,6 +1854,31 @@ test("book page generates full book output after all chapters are confirmed", as
   delete global.wx;
 });
 
+test("book page shows a friendly timeout message for long book output generation", async () => {
+  global.wx = { showToast() {} };
+  const { page } = loadBookPage({
+    voiceApiExports: {
+      generateMemoirBookOutput: async () => {
+        throw new Error("request:fail timeout");
+      },
+    },
+  });
+  const context = pageContext(page, { projectId: "project/1" });
+  page.applyPlan.call(context, samplePlan("confirmed"), {
+    "chapter-1": sampleDraft(1, "confirmed"),
+    "chapter-2": sampleDraft(1, "confirmed"),
+  });
+
+  await page.generateBook.call(context);
+
+  assert.equal(
+    context.data.error,
+    "全书篇幅较长，生成超时了。请稍后刷新成书页查看是否已生成，或重新点击生成。",
+  );
+  assert.equal(context.data.generatingBook, false);
+  delete global.wx;
+});
+
 test("book page links structured full-book preview back to chapter editing", () => {
   const scrollCalls = [];
   global.wx = {
@@ -3456,6 +3481,7 @@ test("book APIs call encoded backend routes", async () => {
   );
   assert.equal(apiRequests[17].method, "POST");
   assert.deepEqual(apiRequests[17].data, { force_regenerate: true });
+  assert.equal(apiRequests[17].timeout, 60000);
   assert.equal(
     apiRequests[18].url,
     "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-output/tts",

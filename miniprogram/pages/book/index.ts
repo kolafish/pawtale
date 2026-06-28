@@ -175,6 +175,14 @@ function isLoginError(error: unknown): boolean {
   return error instanceof ApiError && [401, 403].includes(error.statusCode);
 }
 
+function bookOutputGenerateErrorMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : "";
+  if (message.toLowerCase().includes("timeout") || message.includes("超时")) {
+    return "全书篇幅较长，生成超时了。请稍后刷新成书页查看是否已生成，或重新点击生成。";
+  }
+  return message || "全书生成失败";
+}
+
 function bookVoiceAssistantHint(stage: BookData["stage"], chapterCount: number): string {
   if (stage === "empty") {
     return "生成章节后，可以听目录或说修改";
@@ -1518,7 +1526,7 @@ Page<BookData, {
         wx.reLaunch({ url: "/pages/login/index" });
         return;
       }
-      this.setData({ error: error instanceof Error ? error.message : "全书生成失败" });
+      this.setData({ error: bookOutputGenerateErrorMessage(error) });
     } finally {
       this.setData({ generatingBook: false });
     }
