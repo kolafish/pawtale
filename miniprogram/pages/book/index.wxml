@@ -690,6 +690,104 @@
           <text class="book-export-layout-detail">{{bookExportLayoutDetailText}}</text>
         </view>
 
+        <view wx:if="{{bookContent && bookManuscriptAvailable}}" class="book-manuscript-panel">
+          <view class="book-manuscript-section">
+            <view class="book-manuscript-heading-row">
+              <text class="book-manuscript-heading">书稿设置</text>
+              <text class="book-manuscript-badge">{{bookManuscriptTemplateLabel}}</text>
+            </view>
+            <view class="book-manuscript-cover-preview">
+              <text class="book-manuscript-title">{{bookManuscriptTitle}}</text>
+              <text class="book-manuscript-subtitle">{{bookManuscriptSubtitle}}</text>
+            </view>
+            <text class="book-manuscript-meta">{{bookManuscriptSettingsText}}</text>
+          </view>
+
+          <view class="book-manuscript-section">
+            <view class="book-manuscript-heading-row">
+              <text class="book-manuscript-heading">书籍结构</text>
+              <text class="book-manuscript-count">{{bookManuscriptStructureItems.length}} 项</text>
+            </view>
+            <view class="book-structure-list">
+              <view
+                wx:for="{{bookManuscriptStructureItems}}"
+                wx:for-item="item"
+                wx:key="id"
+                class="book-structure-row"
+              >
+                <view class="book-structure-main">
+                  <text class="book-structure-title">{{item.title}}</text>
+                  <text class="book-structure-meta">{{item.metaText}}</text>
+                </view>
+                <text class="book-structure-status">{{item.statusText}}</text>
+              </view>
+            </view>
+          </view>
+
+          <view class="book-manuscript-section">
+            <view class="book-manuscript-heading-row">
+              <text class="book-manuscript-heading">章节书稿</text>
+              <text class="book-manuscript-count">{{bookManuscriptChapterItems.length}} 章</text>
+            </view>
+            <view class="book-manuscript-chapter-list">
+              <view
+                wx:for="{{bookManuscriptChapterItems}}"
+                wx:for-item="chapter"
+                wx:key="id"
+                class="book-manuscript-chapter"
+              >
+                <view class="book-manuscript-chapter-head">
+                  <view class="book-manuscript-chapter-title-block">
+                    <text class="book-manuscript-chapter-index">{{chapter.indexText}}</text>
+                    <text class="book-manuscript-chapter-title">{{chapter.title}}</text>
+                  </view>
+                  <button
+                    class="chapter-preview-edit"
+                    data-id="{{chapter.chapterId}}"
+                    bindtap="editBookOutputChapter"
+                  >
+                    编辑本章
+                  </button>
+                </view>
+                <text wx:if="{{chapter.metaText}}" class="book-manuscript-meta">{{chapter.metaText}}</text>
+                <text wx:if="{{chapter.intro}}" class="book-manuscript-intro">{{chapter.intro}}</text>
+                <view wx:if="{{chapter.quoteText}}" class="book-manuscript-quote">
+                  <text>“{{chapter.quoteText}}”</text>
+                </view>
+                <text class="book-manuscript-preview">{{chapter.contentPreview}}</text>
+              </view>
+            </view>
+          </view>
+
+          <view wx:if="{{bookManuscriptBackMatterItems.length}}" class="book-manuscript-section">
+            <view class="book-manuscript-heading-row">
+              <text class="book-manuscript-heading">附录与说明</text>
+              <text class="book-manuscript-count">{{bookManuscriptBackMatterItems.length}} 项</text>
+            </view>
+            <view class="book-back-matter-list">
+              <view
+                wx:for="{{bookManuscriptBackMatterItems}}"
+                wx:for-item="item"
+                wx:key="id"
+                class="book-back-matter-row"
+              >
+                <text class="book-back-matter-kind">{{item.kindText}}</text>
+                <view class="book-back-matter-main">
+                  <text class="book-back-matter-title">{{item.title}}</text>
+                  <text class="book-back-matter-preview">{{item.contentPreview}}</text>
+                </view>
+              </view>
+            </view>
+          </view>
+
+          <view class="book-manuscript-section compact">
+            <view class="book-manuscript-heading-row">
+              <text class="book-manuscript-heading">预览与导出</text>
+              <text class="book-manuscript-count">PDF / 文本</text>
+            </view>
+          </view>
+        </view>
+
         <view wx:if="{{bookContent}}" class="book-preview">
           <block wx:if="{{playingTarget === 'book' && bookTTSActiveTarget === 'book'}}">
             <view class="tts-progress-bar">

@@ -673,6 +673,90 @@ export interface MemoirBookOutputStructuredContent {
   chapters: MemoirBookOutputStructuredChapter[];
 }
 
+export type MemoirBookManuscriptTemplate = "classic_family" | "photo_memory" | "oral_archive";
+
+export interface MemoirBookManuscriptProfile {
+  template: MemoirBookManuscriptTemplate;
+  title: string;
+  subtitle: string;
+  narrator_name: string;
+  prepared_by: string;
+  interview_date_range: string;
+  privacy_note: string;
+  ai_disclosure_note: string;
+}
+
+export interface MemoirBookManuscriptSection {
+  kind: string;
+  title: string;
+  content: string;
+  enabled: boolean;
+}
+
+export interface MemoirBookManuscriptQuote {
+  text: string;
+  source_ref_ids: string[];
+}
+
+export interface MemoirBookManuscriptPersonNote {
+  name: string;
+  note: string;
+}
+
+export interface MemoirBookManuscriptUnconfirmedFact {
+  text: string;
+  source_ref_ids: string[];
+}
+
+export interface MemoirBookManuscriptSourceRef {
+  utterance_id: string;
+  transcript_version_id?: string | null;
+  voice_session_id?: string | null;
+  quote: string;
+}
+
+export interface MemoirBookManuscriptChapter {
+  chapter_id: string;
+  index: number;
+  title: string;
+  subtitle: string;
+  intro: string;
+  time_hint: string;
+  place_hint: string;
+  pull_quotes: MemoirBookManuscriptQuote[];
+  people_notes: MemoirBookManuscriptPersonNote[];
+  uncertain_facts: MemoirBookManuscriptUnconfirmedFact[];
+  content: string;
+  source_refs: MemoirBookManuscriptSourceRef[];
+}
+
+export interface MemoirBookManuscriptRenderSettings {
+  page_size: "a5";
+  layout: "reading" | "print";
+  font_scale: "standard" | "large";
+  show_headers: boolean;
+  show_source_appendix: boolean;
+  photo_mode: "none" | "chapter" | "appendix";
+}
+
+export interface MemoirBookManuscriptBackMatter {
+  afterword: MemoirBookManuscriptSection;
+  interview_records: MemoirBookManuscriptSection;
+  version_note: MemoirBookManuscriptSection;
+  unconfirmed_facts: MemoirBookManuscriptSection;
+  source_appendix: MemoirBookManuscriptSection;
+}
+
+export interface MemoirBookManuscript {
+  schema_version: number;
+  profile: MemoirBookManuscriptProfile;
+  front_matter: MemoirBookManuscriptSection[];
+  table_of_contents: MemoirBookOutputTableOfContentsItem[];
+  chapters: MemoirBookManuscriptChapter[];
+  back_matter: MemoirBookManuscriptBackMatter;
+  render_settings: MemoirBookManuscriptRenderSettings;
+}
+
 export interface MemoirBookOutputVersion {
   id: string;
   output_id: string;
@@ -682,6 +766,7 @@ export interface MemoirBookOutputVersion {
   content: string;
   chapter_snapshot_json: Record<string, unknown>[];
   structured_content?: MemoirBookOutputStructuredContent | null;
+  manuscript?: MemoirBookManuscript | null;
   created_by: MemoirCreatedBy;
   created_at: string;
 }
