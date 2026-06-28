@@ -15,6 +15,11 @@ from app.services.memoir import editing_jobs
 ROUTE_PAYLOAD_TRANSCRIPT_VERSION_IDS_KEY = "transcript_version_ids"
 ROUTE_PAYLOAD_SOURCE_TEXT_HASHES_KEY = "source_text_hashes"
 ROUTE_PAYLOAD_SOURCE_TEXT_LENGTHS_KEY = "source_text_lengths"
+ROUTE_LINEAGE_EDITING_JOB_ID_KEY = "editing_job_id"
+ROUTE_LINEAGE_PIPELINE_SOURCE_KEY = "pipeline_source"
+ROUTE_LINEAGE_TRANSCRIPT_VERSION_ID_KEY = "transcript_version_id"
+ROUTE_LINEAGE_SOURCE_TEXT_HASH_KEY = "source_text_hash"
+ROUTE_LINEAGE_SOURCE_TEXT_LENGTH_KEY = "source_text_length"
 
 
 @dataclass(frozen=True)
@@ -121,3 +126,25 @@ async def validate_source_routing_transcript_guard(
             stale_utterance_ids=tuple(stale_ids),
         )
     return SourceRoutingTranscriptGuard(ok=True)
+
+
+def source_routing_lineage_by_utterance(
+    payload_json: dict,
+    *,
+    utterance_ids: list[str],
+    editing_job_id: str,
+) -> dict[str, dict[str, object]]:
+    versions = payload_json.get(ROUTE_PAYLOAD_TRANSCRIPT_VERSION_IDS_KEY)
+    hashes = payload_json.get(ROUTE_PAYLOAD_SOURCE_TEXT_HASHES_KEY)
+    lengths = payload_json.get(ROUTE_PAYLOAD_SOURCE_TEXT_LENGTHS_KEY)
+    pipeline_source = payload_json.get("source")
+    return {
+        utterance_id: {
+            ROUTE_LINEAGE_EDITING_JOB_ID_KEY: editing_job_id,
+            ROUTE_LINEAGE_PIPELINE_SOURCE_KEY: pipeline_source if isinstance(pipeline_source, str) else "",
+            ROUTE_LINEAGE_TRANSCRIPT_VERSION_ID_KEY: versions.get(utterance_id) if isinstance(versions, dict) else None,
+            ROUTE_LINEAGE_SOURCE_TEXT_HASH_KEY: hashes.get(utterance_id) if isinstance(hashes, dict) else None,
+            ROUTE_LINEAGE_SOURCE_TEXT_LENGTH_KEY: lengths.get(utterance_id) if isinstance(lengths, dict) else None,
+        }
+        for utterance_id in utterance_ids
+    }

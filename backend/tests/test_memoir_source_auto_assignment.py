@@ -14,7 +14,10 @@ from app.models.memoir import MemoirAutomationEvent, MemoirEditingJob, MemoirTra
 from app.services.memoir.editing_job_handlers import register_memoir_editing_job_handlers
 from app.services.memoir.editing_jobs import clear_editing_job_handlers, enqueue_editing_job, run_editing_job
 from app.services.memoir.source_auto_assignment import run_source_auto_assignment_for_utterances
-from app.services.memoir.utterance_editing_pipeline import schedule_source_routing_for_ready_utterance
+from app.services.memoir.utterance_editing_pipeline import (
+    schedule_source_routing_for_ready_utterance,
+    source_text_hash,
+)
 from tests.memoir_helpers import (
     create_test_book_plan,
     create_test_chapter_draft,
@@ -233,6 +236,14 @@ async def test_source_routing_job_assigns_high_confidence_source(client, test_db
     assert event.utterance_ids_json == [uncovered["utterance_id"]]
     assert event.summary_text == "1 条讲述已自动整理进「院子里的童年」。"
     assert event.metadata_json["event_signature"] == f"source_assigned:{chapter.id}:{uncovered['utterance_id']}"
+    route_metadata = event.metadata_json["routes"][0]
+    assert route_metadata["editing_job_id"] == job.id
+    assert route_metadata["pipeline_source"] == "test"
+    assert route_metadata["transcript_version_id"] == uncovered["transcript_version_id"]
+    assert route_metadata["source_text_hash"] == source_text_hash(
+        "后来想起外婆家的院子，最记得夏天一起摘菜和剥青豆。"
+    )
+    assert route_metadata["source_text_length"] == len("后来想起外婆家的院子，最记得夏天一起摘菜和剥青豆。")
 
     audit_job = await test_db.scalar(
         select(MemoirEditingJob).where(
@@ -385,6 +396,11 @@ async def test_source_routing_job_holds_new_topic_for_review(client, test_db, mo
     assert event.utterance_ids_json == [uncovered["utterance_id"]]
     assert event.metadata_json["route"]["material_type"] == "memoir_content"
     assert event.metadata_json["route"]["action"] == "suggest_new_chapter"
+    assert event.metadata_json["route"]["editing_job_id"] == job.id
+    assert event.metadata_json["route"]["transcript_version_id"] == uncovered["transcript_version_id"]
+    assert event.metadata_json["route"]["source_text_hash"] == source_text_hash(
+        "参加工作以后，我在供销社负责盘点货物，第一次拿到奖金特别高兴。"
+    )
 
 
 async def test_source_auto_assignment_updates_existing_pending_review_event(client, test_db, monkeypatch):

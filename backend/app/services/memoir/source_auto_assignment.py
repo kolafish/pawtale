@@ -26,7 +26,10 @@ from app.services.memoir import book_quality_audit
 from app.services.memoir import book_plans
 from app.services.memoir.editing_jobs import EditingJobResult
 from app.services.memoir import source_router
-from app.services.memoir.utterance_editing_pipeline import validate_source_routing_transcript_guard
+from app.services.memoir.utterance_editing_pipeline import (
+    source_routing_lineage_by_utterance,
+    validate_source_routing_transcript_guard,
+)
 
 
 def _route_is_assignable(
@@ -72,6 +75,29 @@ def _chapter_titles(plan: MemoirBookPlanResponse) -> dict[str, str]:
     return {chapter.id: chapter.title for chapter in plan.chapters}
 
 
+def _route_metadata(
+    route: MemoirBookSourceRouteResponse,
+    *,
+    source_lineage_by_utterance: dict[str, dict[str, object]] | None,
+) -> dict[str, object]:
+    metadata: dict[str, object] = {
+        "utterance_id": route.utterance_id,
+        "source_index": route.source_index,
+        "material_type": route.material_type,
+        "action": route.action,
+        "target_chapter_id": route.target_chapter_id,
+        "target_chapter_title": route.target_chapter_title,
+        "suggested_title": route.suggested_title,
+        "confidence": route.confidence,
+        "reason": route.reason,
+        "evidence": [item.model_dump(mode="json") for item in route.evidence],
+    }
+    lineage = (source_lineage_by_utterance or {}).get(route.utterance_id)
+    if lineage:
+        metadata.update(lineage)
+    return metadata
+
+
 def _group_assignment_inputs(
     routes: list[MemoirBookSourceRouteResponse],
     *,
@@ -95,6 +121,7 @@ async def _record_assignment_events(
     routes: list[MemoirBookSourceRouteResponse],
     plan: MemoirBookPlanResponse,
     threshold: float,
+    source_lineage_by_utterance: dict[str, dict[str, object]] | None = None,
 ) -> list[MemoirAutomationEventResponse]:
     routes_by_chapter: dict[str, list[MemoirBookSourceRouteResponse]] = {}
     for route in routes:
@@ -125,13 +152,7 @@ async def _record_assignment_events(
                 ),
                 "confidence_threshold": threshold,
                 "routes": [
-                    {
-                        "utterance_id": route.utterance_id,
-                        "source_index": route.source_index,
-                        "material_type": route.material_type,
-                        "confidence": route.confidence,
-                        "reason": route.reason,
-                    }
+                    _route_metadata(route, source_lineage_by_utterance=source_lineage_by_utterance)
                     for route in chapter_routes
                 ],
             },
@@ -150,22 +171,16 @@ def _held_event_summary(route: MemoirBookSourceRouteResponse) -> str:
     return "1 条讲述暂未自动收入章节，需要确认归属。"
 
 
-def _held_event_metadata(route: MemoirBookSourceRouteResponse, *, threshold: float) -> dict[str, object]:
+def _held_event_metadata(
+    route: MemoirBookSourceRouteResponse,
+    *,
+    threshold: float,
+    source_lineage_by_utterance: dict[str, dict[str, object]] | None,
+) -> dict[str, object]:
     return {
         "source": "auto_assignment",
         "confidence_threshold": threshold,
-        "route": {
-            "utterance_id": route.utterance_id,
-            "source_index": route.source_index,
-            "material_type": route.material_type,
-            "action": route.action,
-            "target_chapter_id": route.target_chapter_id,
-            "target_chapter_title": route.target_chapter_title,
-            "suggested_title": route.suggested_title,
-            "confidence": route.confidence,
-            "reason": route.reason,
-            "evidence": [item.model_dump(mode="json") for item in route.evidence],
-        },
+        "route": _route_metadata(route, source_lineage_by_utterance=source_lineage_by_utterance),
     }
 
 
@@ -197,6 +212,7 @@ async def _record_held_events(
     project_id: str,
     routes: list[MemoirBookSourceRouteResponse],
     threshold: float,
+    source_lineage_by_utterance: dict[str, dict[str, object]] | None,
 ) -> list[MemoirAutomationEventResponse]:
     responses: list[MemoirAutomationEventResponse] = []
     pending_events = await _pending_held_events_by_utterance(db, project_id=project_id)
@@ -206,7 +222,11 @@ async def _record_held_events(
         if route.action == "ignore":
             continue
         summary = _held_event_summary(route)
-        metadata = _held_event_metadata(route, threshold=threshold)
+        metadata = _held_event_metadata(
+            route,
+            threshold=threshold,
+            source_lineage_by_utterance=source_lineage_by_utterance,
+        )
         event = pending_events.get(route.utterance_id)
         if event:
             event.chapter_id = route.target_chapter_id
@@ -242,6 +262,7 @@ async def run_source_auto_assignment_for_utterances(
     ai_model: str | None = None,
     confidence_threshold: float = 0.53,
     record_held_events: bool = True,
+    source_lineage_by_utterance: dict[str, dict[str, object]] | None = None,
 ) -> MemoirBookSourceAutoAssignmentRunResponse:
     routes: list[MemoirBookSourceRouteResponse] = []
     for utterance_id in dict.fromkeys(item.strip() for item in utterance_ids if item.strip()):
@@ -272,6 +293,7 @@ async def run_source_auto_assignment_for_utterances(
             routes=routes,
             plan=plan,
             threshold=confidence_threshold,
+            source_lineage_by_utterance=source_lineage_by_utterance,
         )
     else:
         plan = await book_plans.get_book_plan(db, user_id=user_id, project_id=project_id)
@@ -284,6 +306,7 @@ async def run_source_auto_assignment_for_utterances(
                 project_id=project_id,
                 routes=routes,
                 threshold=confidence_threshold,
+                source_lineage_by_utterance=source_lineage_by_utterance,
             )
         )
 
@@ -346,6 +369,11 @@ async def run_source_routing_job(db: AsyncSession, job: MemoirEditingJob) -> Edi
     except (TypeError, ValueError):
         confidence_threshold = 0.53
     try:
+        source_lineage = source_routing_lineage_by_utterance(
+            payload,
+            utterance_ids=utterance_ids,
+            editing_job_id=job.id,
+        )
         response = await run_source_auto_assignment_for_utterances(
             db,
             user_id=project.user_id,
@@ -353,6 +381,7 @@ async def run_source_routing_job(db: AsyncSession, job: MemoirEditingJob) -> Edi
             utterance_ids=utterance_ids,
             ai_model=payload.get("ai_model") if isinstance(payload.get("ai_model"), str) else None,
             confidence_threshold=confidence_threshold,
+            source_lineage_by_utterance=source_lineage,
         )
     except HTTPException as exc:
         if exc.status_code in {400, 404}:
