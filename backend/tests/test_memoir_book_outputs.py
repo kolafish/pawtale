@@ -86,7 +86,19 @@ class FakeTitleAI:
     provider_name = "fake-ai"
     model_name = "fake-title-model"
 
+    def __init__(self):
+        self.calls = []
+
     async def _call_llm(self, system_prompt, user_prompt, temperature=0.7, max_tokens=4000, timeout=60.0, return_raw=False):
+        self.calls.append(
+            {
+                "system_prompt": system_prompt,
+                "user_prompt": user_prompt,
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+                "timeout": timeout,
+            }
+        )
         return '{"suggestions": ["外婆慢慢说", "外婆的一生", "从前的日子", "外婆主题回忆录"]}'
 
 
@@ -137,6 +149,7 @@ async def test_memoir_book_manuscript_editorial_copy_uses_llm_context():
 
 
 async def test_memoir_book_title_suggestions_filter_internal_names():
+    fake_ai = FakeTitleAI()
     suggestions = await generate_title_suggestions(
         title="外婆的回忆录",
         snapshot=[
@@ -151,11 +164,13 @@ async def test_memoir_book_title_suggestions_filter_internal_names():
         ],
         count=4,
         ai_model="fake-model",
-        ai_client=FakeTitleAI(),
+        ai_client=fake_ai,
     )
 
     assert suggestions is not None
     assert suggestions.suggestions == ["外婆慢慢说", "外婆的一生", "从前的日子"]
+    assert "一个人一生回忆" in fake_ai.calls[0]["user_prompt"]
+    assert "不要只抓某个场景、物件、单章细节" in fake_ai.calls[0]["user_prompt"]
 
 
 async def _create_confirmed_book_plan(test_db, *, project_id: str, confirmed_chapters: bool = True):
@@ -323,6 +338,7 @@ async def test_mobile_memoir_book_output_title_suggestions_use_fallback_without_
     assert "外婆的回忆录" in data["suggestions"]
     assert "外婆口述回忆录" in data["suggestions"]
     assert "外婆口述的回忆录" not in data["suggestions"]
+    assert all("外婆家的童年" not in title for title in data["suggestions"])
     assert all("主题" not in title for title in data["suggestions"])
 
 

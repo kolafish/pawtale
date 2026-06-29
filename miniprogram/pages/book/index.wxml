@@ -666,14 +666,7 @@
               <text class="book-design-title">成书信息</text>
               <text class="book-design-meta">{{bookCoverStyleLabel}} · {{bookOutput && bookOutput.latest_version ? "已生成" : "待生成"}}</text>
             </view>
-            <button
-              class="book-design-save"
-              loading="{{bookTitleSaving}}"
-              disabled="{{bookTitleSaving || generatingBook || updatingPlanStructure || bookViewingHistoricalVersion || !bookOutput || !bookOutput.latest_version || (!bookTitleChanged && !bookMetadataChanged && !bookCoverStyleChanged)}}"
-              bindtap="saveBookDesignSettings"
-            >
-              {{bookOutput && bookOutput.latest_version ? "保存设置" : "生成时应用"}}
-            </button>
+            <text class="book-design-save-status {{bookTitleSaving ? 'saving' : ''}}">{{bookDesignSaveStatusText}}</text>
           </view>
 
           <view class="book-title-editor">
@@ -682,12 +675,13 @@
               value="{{bookTitleInput}}"
               placeholder="输入书名"
               maxlength="60"
+              disabled="{{bookTitleSaving || generatingBook || updatingPlanStructure || bookViewingHistoricalVersion}}"
               bindinput="changeBookTitle"
             />
             <button
               class="book-title-ai"
               loading="{{bookTitleSuggesting}}"
-              disabled="{{bookTitleSuggesting || generatingBook || updatingPlanStructure || !allChaptersConfirmed || hasDraftChanges}}"
+              disabled="{{bookTitleSuggesting || bookTitleSaving || generatingBook || updatingPlanStructure || bookViewingHistoricalVersion || !allChaptersConfirmed || hasDraftChanges}}"
               bindtap="suggestBookTitles"
             >
               {{bookTitleSuggesting ? "起名中" : "AI 起名"}}
@@ -714,6 +708,7 @@
                 value="{{bookSubtitleInput}}"
                 placeholder="根据口述访谈整理"
                 maxlength="80"
+                disabled="{{bookTitleSaving || generatingBook || updatingPlanStructure || bookViewingHistoricalVersion}}"
                 data-key="subtitle"
                 bindinput="changeBookMetadataField"
               />
@@ -725,6 +720,7 @@
                 value="{{bookNarratorNameInput}}"
                 placeholder="例如：爷爷 / 外婆 / 某某"
                 maxlength="40"
+                disabled="{{bookTitleSaving || generatingBook || updatingPlanStructure || bookViewingHistoricalVersion}}"
                 data-key="narrator_name"
                 bindinput="changeBookMetadataField"
               />
@@ -736,6 +732,7 @@
                 value="{{bookPreparedByInput}}"
                 placeholder="家人整理"
                 maxlength="40"
+                disabled="{{bookTitleSaving || generatingBook || updatingPlanStructure || bookViewingHistoricalVersion}}"
                 data-key="prepared_by"
                 bindinput="changeBookMetadataField"
               />
@@ -750,6 +747,7 @@
               placeholder="写给家人看的开篇说明"
               maxlength="600"
               auto-height
+              disabled="{{bookTitleSaving || generatingBook || updatingPlanStructure || bookViewingHistoricalVersion}}"
               data-key="preface"
               bindinput="changeBookMetadataField"
             />
@@ -763,6 +761,7 @@
               placeholder="作为整本书结尾的一段话"
               maxlength="600"
               auto-height
+              disabled="{{bookTitleSaving || generatingBook || updatingPlanStructure || bookViewingHistoricalVersion}}"
               data-key="afterword"
               bindinput="changeBookMetadataField"
             />
@@ -776,6 +775,7 @@
               placeholder="可以放一句正文原话"
               maxlength="80"
               auto-height
+              disabled="{{bookTitleSaving || generatingBook || updatingPlanStructure || bookViewingHistoricalVersion}}"
               data-key="back_cover_quote"
               bindinput="changeBookMetadataField"
             />
@@ -786,7 +786,7 @@
             range="{{bookCoverStyleOptions}}"
             range-key="label"
             value="{{bookCoverStyleIndex}}"
-            disabled="{{generatingBook || updatingPlanStructure}}"
+            disabled="{{bookTitleSaving || generatingBook || updatingPlanStructure || bookViewingHistoricalVersion}}"
             bindchange="changeBookCoverStyle"
           >
             <view class="book-cover-style-picker">

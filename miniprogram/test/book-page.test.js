@@ -887,7 +887,8 @@ test("book page exposes manuscript structure sections", () => {
   assert.match(wxml, /bindinput="changeBookMetadataField"/);
   assert.match(wxml, /bindtap="suggestBookTitles"/);
   assert.match(wxml, /bindchange="changeBookCoverStyle"/);
-  assert.match(wxml, /bindtap="saveBookDesignSettings"/);
+  assert.match(wxml, /bookDesignSaveStatusText/);
+  assert.doesNotMatch(wxml, /bindtap="saveBookDesignSettings"/);
   assert.match(wxml, /书籍结构/);
   assert.match(wxml, /章节书稿/);
   assert.match(wxml, /附录与说明/);
@@ -1974,7 +1975,7 @@ test("book page merges chapters and regenerates title plus draft for confirmed p
   delete global.wx;
 });
 
-test("book page suggests and saves full-book title plus cover style", async () => {
+test("book page suggests and autosaves full-book title plus cover style", async () => {
   const calls = [];
   global.wx = { showToast() {} };
   const { page } = loadBookPage({
@@ -2027,7 +2028,7 @@ test("book page suggests and saves full-book title plus cover style", async () =
     currentTarget: { dataset: {} },
     detail: { value: 1 },
   });
-  await page.saveBookDesignSettings.call(context);
+  await page.autosaveBookDesignSettings.call(context);
 
   assert.deepEqual(calls[0], { kind: "suggest", projectId: "project/1", data: { count: 6 } });
   assert.deepEqual(calls[1], {
@@ -2051,6 +2052,7 @@ test("book page suggests and saves full-book title plus cover style", async () =
   assert.equal(context.data.bookPreparedByInput, "小林整理");
   assert.equal(context.data.bookCoverStyle, "warm_gray");
   assert.equal(context.data.bookCoverStyleChanged, false);
+  assert.equal(context.data.bookDesignSaveStatusText, "已自动保存");
   delete global.wx;
 });
 

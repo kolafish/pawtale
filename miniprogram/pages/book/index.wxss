@@ -1282,7 +1282,6 @@
   font-weight: 700;
 }
 
-.book-design-save,
 .book-title-ai {
   flex: 0 0 auto;
   height: 68rpx;
@@ -1297,14 +1296,29 @@
   line-height: 68rpx;
 }
 
-.book-design-save::after,
 .book-title-ai::after {
   border: 0;
 }
 
-.book-design-save[disabled],
 .book-title-ai[disabled] {
   opacity: 0.58;
+}
+
+.book-design-save-status {
+  flex: 0 0 auto;
+  min-width: 132rpx;
+  padding: 12rpx 18rpx;
+  border-radius: 999rpx;
+  background: #fff5f1;
+  color: #8a4035;
+  font-size: 22rpx;
+  font-weight: 800;
+  line-height: 1.35;
+  text-align: center;
+}
+
+.book-design-save-status.saving {
+  color: #6f625b;
 }
 
 .book-title-editor {

@@ -130,7 +130,7 @@ def build_manuscript_copy_prompt(*, title: str, snapshot: list[dict[str, object]
 
 def build_title_suggestion_prompt(*, title: str, snapshot: list[dict[str, object]], count: int) -> str:
     chapters = _chapter_context(snapshot)
-    return f"""请根据下面已经确认的回忆录章节，为这本家庭回忆录拟 {count} 个候选书名。
+    return f"""请根据下面已经确认的回忆录章节，为这本家庭回忆录拟 {count} 个候选主书名。
 
 当前暂定书名：{title}
 
@@ -141,8 +141,10 @@ def build_title_suggestion_prompt(*, title: str, snapshot: list[dict[str, object
 
 要求：
 - 只能基于给定章节标题、代表性口述和正文摘录，不新增未出现的人物、地点或事件。
-- 候选名要像家人会保存、下载、转发和打印的一本书，不要像系统项目名。
-- 可以包含朴素正式型、温和口语型、略有书感型，但都要克制。
+- 这是整本书的主标题，要有“一个人一生回忆”的全局感，像家人会保存、下载、转发和打印的一本书。
+- 不要只抓某个场景、物件、单章细节或一句话作为主书名；除非这个细节能明显象征整个人生，否则不要用。
+- 避免类似“坐在院子里看月亮”“从葡萄籽到葡萄熟”“外婆摸着进厨房”“升职加薪那些年”“我家那个院子”这类过窄标题。
+- 可以包含朴素正式型、温和口语型、略有书感型，但都要克制，例如“外婆的一生”“外婆慢慢说”“走过的这些年”“一生的来路”“某某口述回忆录”。
 - 不要出现“主题回忆录”“章节规划”“AI”“生成”等内部词。
 - 每个候选 4 到 14 个汉字，最多一个书名号内容，不要副标题。
 - 至少给出 {count} 个不同候选。
