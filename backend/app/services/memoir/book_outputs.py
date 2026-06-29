@@ -66,7 +66,10 @@ from app.services.memoir.voice_tts import TTSClient
 
 BOOK_TTS_CACHE_KEY = "book_tts"
 AI_MODEL_METADATA_KEY = "ai_model"
+MEMOIR_PROFILE_METADATA_KEY = "memoir_profile"
 DEFAULT_BOOK_COVER_STYLE = "classic_plain"
+BOOK_PROFILE_TEXT_FIELDS = ("subtitle", "narrator_name", "prepared_by")
+BOOK_SECTION_TEXT_FIELDS = ("preface", "afterword", "back_cover_quote")
 SNAPSHOT_COMPARE_KEYS = (
     "chapter_id",
     "chapter_title",
@@ -100,6 +103,21 @@ def _optional_positive_int(value: object) -> int | None:
 
 def _safe_str(value: object) -> str:
     return value.strip() if isinstance(value, str) else ""
+
+
+def _limited_book_text(value: object, *, max_chars: int) -> str:
+    text = _safe_str(value)
+    return text[:max_chars] if len(text) > max_chars else text
+
+
+def _project_narrator_name(project: object) -> str:
+    metadata = getattr(project, "metadata_json", None)
+    if not isinstance(metadata, dict):
+        return ""
+    profile = metadata.get(MEMOIR_PROFILE_METADATA_KEY)
+    if not isinstance(profile, dict):
+        return ""
+    return _limited_book_text(profile.get("narrator_name"), max_chars=80)
 
 
 def _structured_content_response(
@@ -296,6 +314,89 @@ def _chapter_intro(title: str, content: str, editorial_intro: str | None = None)
     return f"关于「{title}」，记忆先从一个清楚的画面开始：{excerpt}"
 
 
+def _front_section_content(manuscript: dict[str, object], kind: str) -> str:
+    sections = manuscript.get("front_matter")
+    if not isinstance(sections, list):
+        return ""
+    for section in sections:
+        if isinstance(section, dict) and section.get("kind") == kind:
+            return _safe_str(section.get("content"))
+    return ""
+
+
+def _back_section_content(manuscript: dict[str, object], kind: str) -> str:
+    back_matter = manuscript.get("back_matter")
+    if not isinstance(back_matter, dict):
+        return ""
+    section = back_matter.get(kind)
+    return _safe_str(section.get("content")) if isinstance(section, dict) else ""
+
+
+def _stored_manuscript_metadata(stored: object) -> dict[str, str]:
+    if not isinstance(stored, dict):
+        return {}
+    profile = stored.get("profile")
+    settings = stored.get("render_settings")
+    return {
+        "subtitle": _safe_str(profile.get("subtitle")) if isinstance(profile, dict) else "",
+        "narrator_name": _safe_str(profile.get("narrator_name")) if isinstance(profile, dict) else "",
+        "prepared_by": _safe_str(profile.get("prepared_by")) if isinstance(profile, dict) else "",
+        "preface": _front_section_content(stored, "preface"),
+        "afterword": _back_section_content(stored, "afterword"),
+        "back_cover_quote": _safe_str(settings.get("back_cover_quote")) if isinstance(settings, dict) else "",
+    }
+
+
+def _request_book_metadata_patch(req: object) -> dict[str, str]:
+    fields_set = getattr(req, "model_fields_set", set())
+    patch: dict[str, str] = {}
+    for field in (*BOOK_PROFILE_TEXT_FIELDS, *BOOK_SECTION_TEXT_FIELDS):
+        if field not in fields_set:
+            continue
+        value = getattr(req, field, None)
+        if value is None:
+            continue
+        max_chars = 1200 if field in {"preface", "afterword"} else 180
+        if field == "back_cover_quote":
+            max_chars = 160
+        patch[field] = _limited_book_text(value, max_chars=max_chars)
+    return patch
+
+
+def _effective_book_metadata(
+    *,
+    project: object | None,
+    stored: object = None,
+    patch: dict[str, str] | None = None,
+    include_empty: bool = False,
+) -> dict[str, str]:
+    metadata = {"prepared_by": "家人整理"}
+    narrator_name = _project_narrator_name(project) if project is not None else ""
+    if narrator_name:
+        metadata["narrator_name"] = narrator_name
+    stored_metadata = _stored_manuscript_metadata(stored)
+    for key, value in stored_metadata.items():
+        if value:
+            metadata[key] = value
+    metadata.update(patch or {})
+    if not metadata["prepared_by"]:
+        metadata["prepared_by"] = "家人整理"
+    if include_empty:
+        for key in (*BOOK_PROFILE_TEXT_FIELDS, *BOOK_SECTION_TEXT_FIELDS):
+            metadata.setdefault(key, "")
+    return metadata
+
+
+def _title_page_content_from_profile(*, subtitle: str, narrator_name: str, prepared_by: str) -> str:
+    lines = [
+        subtitle,
+        f"口述：{narrator_name}" if narrator_name else "",
+        f"整理：{prepared_by}" if prepared_by else "",
+        "仅供家人保存与阅读",
+    ]
+    return "\n\n".join(line for line in lines if line)
+
+
 def _chapter_pull_quotes(content: str, source_refs: list[MemoirBookManuscriptSourceRef]) -> list[MemoirBookManuscriptQuote]:
     for ref in source_refs:
         quote = _brief_text(ref.quote, max_chars=80)
@@ -312,6 +413,7 @@ def _manuscript_from_snapshot(
     snapshot: list[dict[str, object]],
     editorial_copy: GeneratedManuscriptCopy | None = None,
     cover_style: str = DEFAULT_BOOK_COVER_STYLE,
+    metadata: dict[str, str] | None = None,
 ) -> MemoirBookManuscript | None:
     if not snapshot:
         return None
@@ -354,23 +456,48 @@ def _manuscript_from_snapshot(
         )
     if not chapters:
         return None
+    metadata = metadata or {}
     chapter_count = len(chapters)
-    formal_title = _formal_book_title(editorial_copy.book_title if editorial_copy and editorial_copy.book_title else title)
+    formal_title = _formal_book_title(title)
     chapter_titles = [item.title for item in toc]
     subtitle = (
-        editorial_copy.cover_subtitle
-        if editorial_copy and editorial_copy.cover_subtitle
-        else _fallback_cover_subtitle(chapter_titles)
+        metadata["subtitle"]
+        if "subtitle" in metadata
+        else (
+            editorial_copy.cover_subtitle
+            if editorial_copy and editorial_copy.cover_subtitle
+            else _fallback_cover_subtitle(chapter_titles)
+        )
+    )
+    narrator_name = metadata.get("narrator_name", "")
+    prepared_by = metadata.get("prepared_by", "家人整理") or "家人整理"
+    title_page_content = _title_page_content_from_profile(
+        subtitle=subtitle,
+        narrator_name=narrator_name,
+        prepared_by=prepared_by,
     )
     preface = (
-        editorial_copy.preface
-        if editorial_copy and editorial_copy.preface
-        else _fallback_preface(chapter_titles)
+        metadata["preface"]
+        if "preface" in metadata
+        else (
+            editorial_copy.preface
+            if editorial_copy and editorial_copy.preface
+            else _fallback_preface(chapter_titles)
+        )
     )
     back_cover_quote = (
-        editorial_copy.back_cover_quote
-        if editorial_copy and editorial_copy.back_cover_quote
-        else _fallback_back_cover_quote(chapters)
+        metadata["back_cover_quote"]
+        if "back_cover_quote" in metadata
+        else (
+            editorial_copy.back_cover_quote
+            if editorial_copy and editorial_copy.back_cover_quote
+            else _fallback_back_cover_quote(chapters)
+        )
+    )
+    afterword = (
+        metadata["afterword"]
+        if "afterword" in metadata
+        else _expanded_afterword()
     )
     front_matter = [
         MemoirBookManuscriptSection(
@@ -381,7 +508,7 @@ def _manuscript_from_snapshot(
         MemoirBookManuscriptSection(
             kind="title_page",
             title="扉页",
-            content=f"{subtitle}\n\n整理：家人整理\n仅供家人保存与阅读",
+            content=title_page_content,
         ),
         MemoirBookManuscriptSection(
             kind="generation_note",
@@ -404,7 +531,7 @@ def _manuscript_from_snapshot(
         afterword=MemoirBookManuscriptSection(
             kind="afterword",
             title="后记",
-            content=_expanded_afterword(),
+            content=afterword,
         ),
         interview_records=MemoirBookManuscriptSection(
             kind="interview_records",
@@ -434,7 +561,8 @@ def _manuscript_from_snapshot(
         profile=MemoirBookManuscriptProfile(
             title=formal_title,
             subtitle=subtitle,
-            prepared_by="家人整理",
+            narrator_name=narrator_name,
+            prepared_by=prepared_by,
         ),
         front_matter=front_matter,
         table_of_contents=toc,
@@ -634,20 +762,32 @@ def _updated_manuscript_payload(
     content: str,
     snapshot: list[dict[str, object]],
     cover_style: str | None,
+    metadata_patch: dict[str, str] | None = None,
 ) -> dict[str, object]:
     manuscript = _manuscript_response(title=title, content=content, snapshot=snapshot, stored=stored)
     if not manuscript:
         return {}
+    metadata = _effective_book_metadata(project=None, stored=stored, patch=metadata_patch, include_empty=True)
     manuscript.profile.title = title
+    manuscript.profile.subtitle = metadata["subtitle"]
+    manuscript.profile.narrator_name = metadata["narrator_name"]
+    manuscript.profile.prepared_by = metadata["prepared_by"]
     if cover_style:
         manuscript.render_settings.cover_style = _cover_style(cover_style)
+    manuscript.render_settings.back_cover_quote = metadata["back_cover_quote"]
     for section in manuscript.front_matter:
         if section.kind == "cover":
             section.title = title
-            subtitle = manuscript.profile.subtitle or _fallback_cover_subtitle(
-                [_safe_str(item.get("chapter_title")) for item in snapshot if isinstance(item, dict)]
+            section.content = f"{title}\n{metadata['subtitle']}"
+        elif section.kind == "title_page":
+            section.content = _title_page_content_from_profile(
+                subtitle=metadata["subtitle"],
+                narrator_name=metadata["narrator_name"],
+                prepared_by=metadata["prepared_by"],
             )
-            section.content = f"{title}\n{subtitle}"
+        elif section.kind == "preface":
+            section.content = metadata["preface"]
+    manuscript.back_matter.afterword.content = metadata["afterword"]
     return manuscript.model_dump(mode="json")
 
 
@@ -812,18 +952,30 @@ async def generate_book_output(
             content, snapshot = _compose_book_content(title=title, chapters=chapters)
 
     output = await _load_output(db, project_id=project_id)
+    latest_version = output.versions[-1] if output and output.versions else None
+    metadata_patch = _request_book_metadata_patch(req)
+    book_metadata = _effective_book_metadata(
+        project=project,
+        stored=latest_version.manuscript_json if latest_version else None,
+        patch=metadata_patch,
+    )
     stale_titles = (
         _snapshot_stale_chapter_titles(output.versions[-1], snapshot, [])
         if output and output.versions
         else []
     )
-    latest_version = output.versions[-1] if output and output.versions else None
+    metadata_changed = bool(
+        latest_version
+        and metadata_patch
+        and any(_stored_manuscript_metadata(latest_version.manuscript_json or {}).get(key, "") != value for key, value in metadata_patch.items())
+    )
     title_or_style_changed = bool(
         output
         and latest_version
         and (
             (user_title and output.title != title)
             or (req.cover_style and _stored_cover_style(latest_version) != cover_style)
+            or metadata_changed
         )
     )
     if output and output.versions and not req.force_regenerate and not stale_titles and not title_or_style_changed:
@@ -854,6 +1006,7 @@ async def generate_book_output(
         snapshot=snapshot,
         editorial_copy=editorial_copy,
         cover_style=cover_style,
+        metadata=book_metadata,
     )
     version_number = await _latest_output_version_number(db, output.id) + 1
     db.add(
@@ -888,8 +1041,10 @@ async def update_book_output(
         raise HTTPException(status_code=404, detail="全书稿不存在")
     latest = output.versions[-1]
     snapshot = [item for item in (latest.chapter_snapshot_json or []) if isinstance(item, dict)]
-    title = _formal_book_title(req.title or output.title)
-    cover_style = _cover_style(req.cover_style) if req.cover_style else _stored_cover_style(latest)
+    fields_set = getattr(req, "model_fields_set", set())
+    title = _formal_book_title(req.title if "title" in fields_set and req.title is not None else output.title)
+    cover_style = _cover_style(req.cover_style) if "cover_style" in fields_set and req.cover_style else _stored_cover_style(latest)
+    metadata_patch = _request_book_metadata_patch(req)
     content = _compose_book_content_from_snapshot(title=title, snapshot=snapshot)
     latest.content = content
     latest.manuscript_json = _updated_manuscript_payload(
@@ -898,6 +1053,7 @@ async def update_book_output(
         content=content,
         snapshot=snapshot,
         cover_style=cover_style,
+        metadata_patch=metadata_patch,
     )
     output.title = title
     output.metadata_json = {

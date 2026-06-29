@@ -663,13 +663,13 @@
         <view class="book-design-panel">
           <view class="book-design-head">
             <view>
-              <text class="book-design-title">书名与封面</text>
+              <text class="book-design-title">成书信息</text>
               <text class="book-design-meta">{{bookCoverStyleLabel}} · {{bookOutput && bookOutput.latest_version ? "已生成" : "待生成"}}</text>
             </view>
             <button
               class="book-design-save"
               loading="{{bookTitleSaving}}"
-              disabled="{{bookTitleSaving || generatingBook || updatingPlanStructure || bookViewingHistoricalVersion || !bookOutput || !bookOutput.latest_version || (!bookTitleChanged && !bookCoverStyleChanged)}}"
+              disabled="{{bookTitleSaving || generatingBook || updatingPlanStructure || bookViewingHistoricalVersion || !bookOutput || !bookOutput.latest_version || (!bookTitleChanged && !bookMetadataChanged && !bookCoverStyleChanged)}}"
               bindtap="saveBookDesignSettings"
             >
               {{bookOutput && bookOutput.latest_version ? "保存设置" : "生成时应用"}}
@@ -704,6 +704,81 @@
             >
               <text>{{item}}</text>
             </view>
+          </view>
+
+          <view class="book-metadata-grid">
+            <view class="book-metadata-field">
+              <text class="book-metadata-label">副标题</text>
+              <input
+                class="book-metadata-input"
+                value="{{bookSubtitleInput}}"
+                placeholder="根据口述访谈整理"
+                maxlength="80"
+                data-key="subtitle"
+                bindinput="changeBookMetadataField"
+              />
+            </view>
+            <view class="book-metadata-field">
+              <text class="book-metadata-label">口述人</text>
+              <input
+                class="book-metadata-input"
+                value="{{bookNarratorNameInput}}"
+                placeholder="例如：爷爷 / 外婆 / 某某"
+                maxlength="40"
+                data-key="narrator_name"
+                bindinput="changeBookMetadataField"
+              />
+            </view>
+            <view class="book-metadata-field">
+              <text class="book-metadata-label">整理人</text>
+              <input
+                class="book-metadata-input"
+                value="{{bookPreparedByInput}}"
+                placeholder="家人整理"
+                maxlength="40"
+                data-key="prepared_by"
+                bindinput="changeBookMetadataField"
+              />
+            </view>
+          </view>
+
+          <view class="book-metadata-field">
+            <text class="book-metadata-label">前言</text>
+            <textarea
+              class="book-metadata-textarea"
+              value="{{bookPrefaceInput}}"
+              placeholder="写给家人看的开篇说明"
+              maxlength="600"
+              auto-height
+              data-key="preface"
+              bindinput="changeBookMetadataField"
+            />
+          </view>
+
+          <view class="book-metadata-field">
+            <text class="book-metadata-label">后记</text>
+            <textarea
+              class="book-metadata-textarea"
+              value="{{bookAfterwordInput}}"
+              placeholder="作为整本书结尾的一段话"
+              maxlength="600"
+              auto-height
+              data-key="afterword"
+              bindinput="changeBookMetadataField"
+            />
+          </view>
+
+          <view class="book-metadata-field">
+            <text class="book-metadata-label">封底摘录</text>
+            <textarea
+              class="book-metadata-textarea compact"
+              value="{{bookBackCoverQuoteInput}}"
+              placeholder="可以放一句正文原话"
+              maxlength="80"
+              auto-height
+              data-key="back_cover_quote"
+              bindinput="changeBookMetadataField"
+            />
           </view>
 
           <picker

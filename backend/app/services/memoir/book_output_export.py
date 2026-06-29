@@ -742,6 +742,7 @@ def _add_cover_page(
     *,
     title: str,
     subtitle: str,
+    narrator_name: str,
     prepared_by: str,
     cover_style: str,
 ) -> None:
@@ -804,13 +805,14 @@ def _add_cover_page(
             spacing_after=34,
         )
     builder.y = max(builder.layout.margin_bottom + 92, builder.y - 96)
-    builder.add_centered(
-        "口述：待补充",
-        font_size=builder.layout.small_font_size,
-        line_height=builder.layout.line_height,
-        max_units=builder.layout.max_line_units,
-        spacing_after=2,
-    )
+    if narrator_name:
+        builder.add_centered(
+            f"口述：{narrator_name}",
+            font_size=builder.layout.small_font_size,
+            line_height=builder.layout.line_height,
+            max_units=builder.layout.max_line_units,
+            spacing_after=2,
+        )
     builder.add_centered(
         f"整理：{prepared_by or '家人'}",
         font_size=builder.layout.small_font_size,
@@ -968,7 +970,7 @@ def _add_chapters(builder: PDFBookBuilder, chapters: list[Any]) -> None:
         builder.new_page(
             title,
             show_header=False,
-            show_footer=False,
+            show_footer=True,
             body_numbering=True,
             continuation_show_header=True,
             continuation_show_footer=True,
@@ -1155,6 +1157,7 @@ def _build_structured_manuscript_pdf_pages(
     *,
     book_title: str,
     subtitle: str,
+    narrator_name: str,
     prepared_by: str,
     back_cover_quote: str,
     cover_style: str,
@@ -1166,7 +1169,14 @@ def _build_structured_manuscript_pdf_pages(
     layout: PDFLayout,
 ) -> list[PDFPage]:
     builder = PDFBookBuilder(title=book_title, layout=layout)
-    _add_cover_page(builder, title=book_title, subtitle=subtitle, prepared_by=prepared_by, cover_style=cover_style)
+    _add_cover_page(
+        builder,
+        title=book_title,
+        subtitle=subtitle,
+        narrator_name=narrator_name,
+        prepared_by=prepared_by,
+        cover_style=cover_style,
+    )
     _add_front_matter(builder, front_matter, title=book_title, subtitle=subtitle)
     _add_table_of_contents(builder, entries=toc_entries)
     _add_chapters(builder, chapters)
@@ -1196,6 +1206,7 @@ def _build_manuscript_pdf_pages(
 
     book_title = _str(profile.get("title")) or title
     subtitle = _str(profile.get("subtitle"))
+    narrator_name = _str(profile.get("narrator_name"))
     prepared_by = _str(profile.get("prepared_by"))
     settings = _dict(manuscript.get("render_settings"))
     setting_source_appendix = settings.get("show_source_appendix")
@@ -1214,6 +1225,7 @@ def _build_manuscript_pdf_pages(
     initial_pages = _build_structured_manuscript_pdf_pages(
         book_title=book_title,
         subtitle=subtitle,
+        narrator_name=narrator_name,
         prepared_by=prepared_by,
         back_cover_quote=back_cover_quote,
         cover_style=cover_style,
@@ -1232,6 +1244,7 @@ def _build_manuscript_pdf_pages(
     return _build_structured_manuscript_pdf_pages(
         book_title=book_title,
         subtitle=subtitle,
+        narrator_name=narrator_name,
         prepared_by=prepared_by,
         back_cover_quote=back_cover_quote,
         cover_style=cover_style,

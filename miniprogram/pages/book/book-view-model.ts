@@ -225,6 +225,7 @@ export interface BookData {
   error: string;
   projectId: string;
   projectTitle: string;
+  projectNarratorName: string;
   plan: MemoirBookPlan | null;
   planTitle: string;
   stage: BookStage;
@@ -276,7 +277,14 @@ export interface BookData {
   bookExportLayoutOptions: BookExportLayoutOptionView[];
   bookExportShowSourceAppendix: boolean;
   bookTitleInput: string;
+  bookSubtitleInput: string;
+  bookNarratorNameInput: string;
+  bookPreparedByInput: string;
+  bookPrefaceInput: string;
+  bookAfterwordInput: string;
+  bookBackCoverQuoteInput: string;
   bookTitleChanged: boolean;
+  bookMetadataChanged: boolean;
   bookTitleSaving: boolean;
   bookTitleSuggesting: boolean;
   bookTitleSuggestions: string[];
@@ -764,6 +772,15 @@ function selectedBookManuscript(output: MemoirBookOutput | null, selectedVersion
   return selectedBookOutputVersion(output, selectedVersionId)?.manuscript || null;
 }
 
+function manuscriptFrontSectionContent(manuscript: MemoirBookManuscript | null, kind: string): string {
+  return trimText((manuscript?.front_matter || []).find((section) => section.kind === kind)?.content || "");
+}
+
+function manuscriptBackSectionContent(manuscript: MemoirBookManuscript | null, kind: string): string {
+  const section = manuscript?.back_matter?.[kind as keyof MemoirBookManuscript["back_matter"]];
+  return section && typeof section === "object" ? trimText(section.content || "") : "";
+}
+
 function manuscriptTemplateLabel(template: MemoirBookManuscriptTemplate | undefined): string {
   if (template === "photo_memory") {
     return "家庭纪念版";
@@ -985,6 +1002,31 @@ export function bookCoverStyleData(
   };
 }
 
+function bookMetadataInputData(
+  output: MemoirBookOutput | null,
+  selectedVersionId = "",
+): Pick<
+  BookData,
+  | "bookSubtitleInput"
+  | "bookNarratorNameInput"
+  | "bookPreparedByInput"
+  | "bookPrefaceInput"
+  | "bookAfterwordInput"
+  | "bookBackCoverQuoteInput"
+  | "bookMetadataChanged"
+> {
+  const manuscript = selectedBookManuscript(output, selectedVersionId);
+  return {
+    bookSubtitleInput: trimText(manuscript?.profile.subtitle || ""),
+    bookNarratorNameInput: trimText(manuscript?.profile.narrator_name || ""),
+    bookPreparedByInput: trimText(manuscript?.profile.prepared_by || "家人整理"),
+    bookPrefaceInput: manuscriptFrontSectionContent(manuscript, "preface"),
+    bookAfterwordInput: manuscriptBackSectionContent(manuscript, "afterword"),
+    bookBackCoverQuoteInput: trimText(manuscript?.render_settings?.back_cover_quote || ""),
+    bookMetadataChanged: false,
+  };
+}
+
 export function bookOutputVersionText(output: MemoirBookOutput | null): string {
   const version = output?.latest_version?.version;
   return version ? `全书第 ${version} 版` : "尚未生成全书";
@@ -1050,7 +1092,14 @@ export function bookOutputData(output: MemoirBookOutput | null, selectedVersionI
   | "bookStaleNotice"
   | "bookActionText"
   | "bookTitleInput"
+  | "bookSubtitleInput"
+  | "bookNarratorNameInput"
+  | "bookPreparedByInput"
+  | "bookPrefaceInput"
+  | "bookAfterwordInput"
+  | "bookBackCoverQuoteInput"
   | "bookTitleChanged"
+  | "bookMetadataChanged"
   | "bookTitleSuggestions"
   | "bookCoverStyle"
   | "bookCoverStyleIndex"
@@ -1079,6 +1128,7 @@ export function bookOutputData(output: MemoirBookOutput | null, selectedVersionI
     bookStaleNotice: bookOutputStaleNotice(output),
     bookActionText: bookActionText(output),
     bookTitleInput: manuscriptData.bookManuscriptTitle || bookOutputPreviewTitle(output, versionState.selectedId),
+    ...bookMetadataInputData(output, versionState.selectedId),
     bookTitleChanged: false,
     bookTitleSuggestions: [],
     ...bookCoverStyleData(output, versionState.selectedId),
@@ -1465,6 +1515,7 @@ export function guestBookData(): Partial<BookData> {
     needsLogin: true,
     projectId: "",
     projectTitle: "我的回忆录",
+    projectNarratorName: "",
     plan: null,
     planTitle: "",
     stage: "empty",
@@ -1515,6 +1566,22 @@ export function guestBookData(): Partial<BookData> {
     bookExportLayoutDetailText: BOOK_EXPORT_LAYOUT_OPTIONS[0].detailText,
     bookExportLayoutOptions: BOOK_EXPORT_LAYOUT_OPTIONS,
     bookExportShowSourceAppendix: true,
+    bookTitleInput: "",
+    bookSubtitleInput: "",
+    bookNarratorNameInput: "",
+    bookPreparedByInput: "家人整理",
+    bookPrefaceInput: "",
+    bookAfterwordInput: "",
+    bookBackCoverQuoteInput: "",
+    bookTitleChanged: false,
+    bookMetadataChanged: false,
+    bookTitleSuggestions: [],
+    bookCoverStyle: "classic_plain",
+    bookCoverStyleIndex: 0,
+    bookCoverStyleLabel: BOOK_COVER_STYLE_OPTIONS[0].label,
+    bookCoverStyleDetailText: BOOK_COVER_STYLE_OPTIONS[0].detailText,
+    bookCoverStyleOptions: BOOK_COVER_STYLE_OPTIONS,
+    bookCoverStyleChanged: false,
     ttsBusyTarget: "",
     playingTarget: "",
     bookTTSActiveTarget: "",

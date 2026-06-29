@@ -642,6 +642,12 @@ export interface MemoirBookVoiceCommandExecuteResponse {
 export interface MemoirBookOutputGenerateRequest {
   ai_model?: string | null;
   title?: string | null;
+  subtitle?: string | null;
+  narrator_name?: string | null;
+  prepared_by?: string | null;
+  preface?: string | null;
+  afterword?: string | null;
+  back_cover_quote?: string | null;
   cover_style?: MemoirBookCoverStyle | null;
   force_regenerate?: boolean;
 }
@@ -650,6 +656,12 @@ export type MemoirBookCoverStyle = "classic_plain" | "warm_gray" | "dark_album";
 
 export interface MemoirBookOutputUpdateRequest {
   title?: string | null;
+  subtitle?: string | null;
+  narrator_name?: string | null;
+  prepared_by?: string | null;
+  preface?: string | null;
+  afterword?: string | null;
+  back_cover_quote?: string | null;
   cover_style?: MemoirBookCoverStyle | null;
 }
 

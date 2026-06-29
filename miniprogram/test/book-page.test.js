@@ -231,12 +231,12 @@ function sampleStructuredBookContent() {
   };
 }
 
-function sampleBookManuscript() {
+function sampleBookManuscript(title = "外婆回忆录", coverStyle = "classic_plain") {
   return {
     schema_version: 1,
     profile: {
       template: "classic_family",
-      title: "外婆回忆录",
+      title,
       subtitle: "根据口述访谈整理",
       narrator_name: "",
       prepared_by: "家人整理",
@@ -245,7 +245,7 @@ function sampleBookManuscript() {
       ai_disclosure_note: "AI 辅助整理，不新增未经确认的事实。",
     },
     front_matter: [
-      { kind: "cover", title: "外婆回忆录", content: "外婆回忆录\n根据口述访谈整理", enabled: true },
+      { kind: "cover", title, content: `${title}\n根据口述访谈整理`, enabled: true },
       { kind: "title_page", title: "扉页", content: "口述：外婆\n整理：家人", enabled: true },
       { kind: "generation_note", title: "生成说明", content: "本书根据口述访谈整理。", enabled: true },
       { kind: "preface", title: "前言", content: "这些故事来自家里的讲述。", enabled: true },
@@ -295,6 +295,8 @@ function sampleBookManuscript() {
       show_headers: true,
       show_source_appendix: true,
       photo_mode: "none",
+      cover_style: coverStyle,
+      back_cover_quote: "我小时候常在院子里晒太阳。",
     },
   };
 }
@@ -876,8 +878,13 @@ test("book page exposes manuscript structure sections", () => {
   const wxml = fs.readFileSync(path.join(__dirname, "../pages/book/index.wxml"), "utf8");
 
   assert.match(wxml, /书稿设置/);
-  assert.match(wxml, /书名与封面/);
+  assert.match(wxml, /成书信息/);
   assert.match(wxml, /bindinput="changeBookTitle"/);
+  assert.match(wxml, /data-key="narrator_name"/);
+  assert.match(wxml, /data-key="preface"/);
+  assert.match(wxml, /data-key="afterword"/);
+  assert.match(wxml, /data-key="back_cover_quote"/);
+  assert.match(wxml, /bindinput="changeBookMetadataField"/);
   assert.match(wxml, /bindtap="suggestBookTitles"/);
   assert.match(wxml, /bindchange="changeBookCoverStyle"/);
   assert.match(wxml, /bindtap="saveBookDesignSettings"/);
@@ -959,6 +966,10 @@ test("book page summarizes latest book output version", () => {
   assert.equal(data.bookManuscriptAvailable, true);
   assert.equal(data.bookManuscriptTemplateLabel, "素雅书籍版");
   assert.equal(data.bookManuscriptSettingsText, "A5 · 阅读排版 · 含页眉 · 含来源附录");
+  assert.equal(data.bookSubtitleInput, "根据口述访谈整理");
+  assert.equal(data.bookPrefaceInput, "这些故事来自家里的讲述。");
+  assert.equal(data.bookAfterwordInput, "这些故事还可以继续补充。");
+  assert.equal(data.bookBackCoverQuoteInput, "我小时候常在院子里晒太阳。");
   assert.equal(data.bookManuscriptStructureItems.some((item) => item.title === "目录"), true);
   assert.equal(data.bookManuscriptFrontMatterItems.length, 4);
   assert.equal(data.bookManuscriptChapterItems[0].intro, "这一章主要记录外婆小时候在院子里的生活。");
@@ -2000,6 +2011,18 @@ test("book page suggests and saves full-book title plus cover style", async () =
 
   await page.suggestBookTitles.call(context);
   page.chooseBookTitleSuggestion.call(context, { currentTarget: { dataset: { title: "外婆慢慢说" } } });
+  page.changeBookMetadataField.call(context, {
+    currentTarget: { dataset: { key: "narrator_name" } },
+    detail: { value: "外婆" },
+  });
+  page.changeBookMetadataField.call(context, {
+    currentTarget: { dataset: { key: "prepared_by" } },
+    detail: { value: "小林整理" },
+  });
+  page.changeBookMetadataField.call(context, {
+    currentTarget: { dataset: { key: "preface" } },
+    detail: { value: "这是写给家人的前言。" },
+  });
   page.changeBookCoverStyle.call(context, {
     currentTarget: { dataset: {} },
     detail: { value: 1 },
@@ -2010,10 +2033,22 @@ test("book page suggests and saves full-book title plus cover style", async () =
   assert.deepEqual(calls[1], {
     kind: "update",
     projectId: "project/1",
-    data: { title: "外婆慢慢说", cover_style: "warm_gray" },
+    data: {
+      title: "外婆慢慢说",
+      subtitle: "根据口述访谈整理",
+      narrator_name: "外婆",
+      prepared_by: "小林整理",
+      preface: "这是写给家人的前言。",
+      afterword: "这些故事还可以继续补充。",
+      back_cover_quote: "我小时候常在院子里晒太阳。",
+      cover_style: "warm_gray",
+    },
   });
   assert.equal(context.data.bookTitleInput, "外婆慢慢说");
   assert.equal(context.data.bookTitleChanged, false);
+  assert.equal(context.data.bookMetadataChanged, false);
+  assert.equal(context.data.bookNarratorNameInput, "外婆");
+  assert.equal(context.data.bookPreparedByInput, "小林整理");
   assert.equal(context.data.bookCoverStyle, "warm_gray");
   assert.equal(context.data.bookCoverStyleChanged, false);
   delete global.wx;
@@ -2036,7 +2071,10 @@ test("book page generates full book output after all chapters are confirmed", as
     "chapter-1": sampleDraft(1, "confirmed"),
     "chapter-2": sampleDraft(1, "confirmed"),
   });
-  page.applyBookOutput.call(context, sampleBookOutput(1, "全书第一版正文"));
+  page.applyBookOutput.call(
+    context,
+    sampleBookOutput(1, "全书第一版正文", false, [], null, [], sampleBookManuscript()),
+  );
 
   await page.generateBook.call(context);
 
@@ -2045,6 +2083,11 @@ test("book page generates full book output after all chapters are confirmed", as
     data: {
       force_regenerate: true,
       title: "外婆回忆录",
+      subtitle: "根据口述访谈整理",
+      prepared_by: "家人整理",
+      preface: "这些故事来自家里的讲述。",
+      afterword: "这些故事还可以继续补充。",
+      back_cover_quote: "我小时候常在院子里晒太阳。",
       cover_style: "classic_plain",
     },
   });

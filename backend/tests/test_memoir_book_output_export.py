@@ -17,6 +17,7 @@ def _sample_manuscript(chapter_content: str) -> dict:
         "profile": {
             "title": "外婆回忆录",
             "subtitle": "根据口述访谈整理",
+            "narrator_name": "",
             "prepared_by": "家人整理",
         },
         "front_matter": [
@@ -64,6 +65,7 @@ def test_manuscript_pdf_pages_use_book_page_semantics():
     assert pages[0].text_color is not None
     assert pages[0].decorations
     assert all(decoration.kind == "line" for decoration in pages[0].decorations)
+    assert all(command.text != "口述：待补充" for command in pages[0].commands)
     assert sum(
         command.text == "根据口述访谈整理"
         for command in front_pages[1].commands
@@ -72,7 +74,7 @@ def test_manuscript_pdf_pages_use_book_page_semantics():
     chapter_pages = [page for page in pages if page.section_title == "外婆家的童年"]
     assert chapter_pages[0].body_page_number == 1
     assert chapter_pages[0].header_title == ""
-    assert chapter_pages[0].show_footer is False
+    assert chapter_pages[0].show_footer is True
     assert chapter_pages[0].anchor == "chapter-1"
     assert chapter_pages[0].outline_title == "第一章 外婆家的童年"
     assert any(command.text == "第一章" for command in chapter_pages[0].commands)
