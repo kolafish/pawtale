@@ -58,6 +58,15 @@ from app.services.memoir.book_manuscript_ai import (
     generate_manuscript_editorial_copy,
     generate_title_suggestions,
 )
+from app.services.memoir.book_manuscript_cleanup import (
+    expanded_afterword,
+    fallback_back_cover_quote,
+    fallback_chapter_intro,
+    fallback_preface,
+    formal_book_title,
+    normalize_book_identity,
+    sanitize_manuscript_payload,
+)
 from app.services.memoir.book_output_export import (
     MemoirBookOutputExportFormat,
     MemoirBookOutputExportLayout,
@@ -190,20 +199,7 @@ def _strip_title_wrappers(title: str) -> str:
 
 
 def _formal_book_title(raw_title: str) -> str:
-    title = _strip_title_wrappers(raw_title.replace("章节规划", "")).strip(" -_·：:")
-    if not title:
-        return "家庭回忆录"
-    title = title.replace("主题回忆录", "回忆录").replace("主题", "").strip(" -_·：:")
-    if title in {"回忆录", "我的回忆录"}:
-        return "家庭回忆录" if title == "回忆录" else title
-    if title == "家庭回忆录" or title.endswith("口述回忆录"):
-        return title
-    if title.endswith("的回忆录"):
-        return title
-    if title.endswith("回忆录"):
-        subject = title[: -len("回忆录")].strip(" -_·：:的")
-        return f"{subject}的回忆录" if subject else "家庭回忆录"
-    return title
+    return formal_book_title(raw_title)
 
 
 def _cover_style(value: str | None) -> str:
@@ -251,27 +247,11 @@ def _fallback_title_suggestions(base_title: str, _chapter_titles: list[str], cou
 
 
 def _fallback_preface(chapter_titles: list[str]) -> str:
-    topics = [_short_topic(title) for title in chapter_titles if _short_topic(title)]
-    if len(topics) >= 2:
-        return (
-            f"这些讲述从{topics[0]}开始，也写到{topics[1]}"
-            f"{'、' + topics[2] if len(topics) > 2 else ''}。"
-            "它们不是宏大的传记，而是一个人愿意说给家人听的生活细节。"
-            "整理成书，是为了让这些声音、场景和名字，在日后还能被慢慢翻起。"
-        )
-    return (
-        "这是一段由口述慢慢展开的人生记忆。整理时尽量保留讲述里的事实、语气和细节，"
-        "只对语句和段落做必要梳理，方便家人日后阅读、补充和修订。"
-    )
+    return fallback_preface(chapter_titles)
 
 
 def _fallback_back_cover_quote(chapters: list[MemoirBookManuscriptChapter]) -> str:
-    for chapter in chapters:
-        for quote in chapter.pull_quotes:
-            text = _brief_text(quote.text, max_chars=42)
-            if text:
-                return text
-    return "把亲口说出的生活，尽量完整地留下来。"
+    return fallback_back_cover_quote([chapter.model_dump(mode="json") for chapter in chapters])
 
 
 def _today_year_text() -> str:
@@ -280,13 +260,7 @@ def _today_year_text() -> str:
 
 
 def _expanded_afterword() -> str:
-    return (
-        "这些讲述有些清楚，有些还需要家人继续补充。记忆本来就不是一次说完的，"
-        "它会在某个名字、某个地方、某件旧物出现时，又慢慢回来。\n\n"
-        "能先留下来，已经是这本书最重要的意义。以后如果还有新的故事、新的照片，"
-        "或者家人想起了更多细节，也可以继续补进来。愿这些话被保存下来，"
-        "成为家里人以后还能反复翻看的记忆。"
-    )
+    return expanded_afterword()
 
 
 def _manuscript_source_refs(raw_refs: object) -> list[MemoirBookManuscriptSourceRef]:
@@ -313,10 +287,7 @@ def _manuscript_source_refs(raw_refs: object) -> list[MemoirBookManuscriptSource
 def _chapter_intro(title: str, content: str, editorial_intro: str | None = None) -> str:
     if editorial_intro:
         return editorial_intro
-    excerpt = _first_sentence(content, max_chars=70)
-    if not excerpt:
-        return f"记忆在「{title}」里慢慢展开，留下讲述者亲口说出的片段和语气。"
-    return f"记忆先从一个清楚的画面展开：{excerpt}"
+    return fallback_chapter_intro(title, content)
 
 
 def _front_section_content(manuscript: dict[str, object], kind: str) -> str:
@@ -462,8 +433,6 @@ def _manuscript_from_snapshot(
     if not chapters:
         return None
     metadata = metadata or {}
-    chapter_count = len(chapters)
-    formal_title = _formal_book_title(title)
     chapter_titles = [item.title for item in toc]
     subtitle = (
         metadata["subtitle"]
@@ -475,6 +444,12 @@ def _manuscript_from_snapshot(
         )
     )
     narrator_name = metadata.get("narrator_name", "")
+    formal_title, subtitle = normalize_book_identity(
+        title=title,
+        subtitle=subtitle,
+        narrator_name=narrator_name,
+        chapter_titles=chapter_titles,
+    )
     prepared_by = metadata.get("prepared_by", "家人整理") or "家人整理"
     title_page_content = _title_page_content_from_profile(
         subtitle=subtitle,
@@ -540,8 +515,8 @@ def _manuscript_from_snapshot(
         ),
         interview_records=MemoirBookManuscriptSection(
             kind="interview_records",
-            title="讲述资料",
-            content=f"本版共整理 {chapter_count} 章正文，关联 {source_count} 条口述片段。后续可以继续补充访谈时间、地点和参与整理的人。",
+            title="口述片段",
+            content=f"本书当前收录 {len(chapters)} 章，共整理自 {source_count} 条口述片段。",
         ),
         version_note=MemoirBookManuscriptSection(
             kind="version_note",
@@ -558,7 +533,7 @@ def _manuscript_from_snapshot(
         ),
         source_appendix=MemoirBookManuscriptSection(
             kind="source_appendix",
-            title="口述来源索引",
+            title="口述片段",
             content="\n".join(f"第{item.index}章「{item.title}」：{item.source_count} 条口述片段" for item in toc),
         ),
     )
@@ -590,7 +565,9 @@ def _manuscript_response(
 ) -> MemoirBookManuscript | None:
     if isinstance(stored, dict) and stored:
         try:
-            return MemoirBookManuscript.model_validate(stored)
+            return MemoirBookManuscript.model_validate(
+                sanitize_manuscript_payload(title=title, manuscript=stored)
+            )
         except ValueError:
             pass
     return _manuscript_from_snapshot(title=title, content=content, snapshot=snapshot)
@@ -1143,11 +1120,17 @@ async def export_book_output_file(
     if not version:
         raise HTTPException(status_code=404, detail="全书版本不存在")
     content = version.content.strip()
+    manuscript = _manuscript_response(
+        title=output.title,
+        content=content,
+        snapshot=[item for item in (version.chapter_snapshot_json or []) if isinstance(item, dict)],
+        stored=version.manuscript_json,
+    )
     return render_book_output_export(
         title=output.title,
         version=version.version,
         content=content,
-        manuscript=version.manuscript_json or {},
+        manuscript=manuscript.model_dump(mode="json") if manuscript else {},
         show_source_appendix=show_source_appendix,
         export_format=export_format,
         layout=layout,
