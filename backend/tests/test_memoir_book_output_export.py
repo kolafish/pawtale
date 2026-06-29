@@ -133,6 +133,45 @@ def test_moonlit_courtyard_cover_style_uses_system_backgrounds():
     assert b"/Subtype /Image" in export.content
 
 
+def test_navy_gilt_cover_style_uses_system_backgrounds():
+    manuscript = _sample_manuscript(
+        "因为是家乡，所以一想起来成都，心里面就觉得很温暖、很踏实。",
+        cover_style="navy_gilt",
+    )
+    manuscript["profile"]["title"] = "回望这一生"
+    manuscript["profile"]["subtitle"] = "余晋口述回忆录"
+    manuscript["profile"]["narrator_name"] = "余晋"
+    manuscript["render_settings"]["back_cover_quote"] = "因为是家乡，所以一想起来成都，心里面就觉得很温暖、很踏实。"
+
+    pages = _build_manuscript_pdf_pages(
+        title="回望这一生",
+        content="回望这一生",
+        manuscript=manuscript,
+        layout=PDF_LAYOUTS[MemoirBookOutputExportLayout.STANDARD],
+        show_source_appendix=None,
+    )
+
+    assert pages[0].background_image_path is not None
+    assert pages[0].background_image_path.name == "navy_gilt_cover.jpg"
+    assert pages[-1].background_image_path is not None
+    assert pages[-1].background_image_path.name == "navy_gilt_back_cover.jpg"
+    assert any(command.text == "家庭回忆录" for command in pages[0].commands)
+    assert any(command.text == "回望这一生" for command in pages[0].commands)
+    assert any("本书根据口述访谈整理" in command.text for command in pages[-1].commands)
+
+    export = render_book_output_export(
+        title="回望这一生",
+        version=1,
+        content="回望这一生",
+        manuscript=manuscript,
+        export_format=MemoirBookOutputExportFormat.PDF,
+    )
+    assert export.media_type == "application/pdf"
+    assert isinstance(export.content, bytes)
+    assert export.content.startswith(b"%PDF-")
+    assert b"/Subtype /Image" in export.content
+
+
 def test_table_of_contents_links_to_numbered_chapter_pages():
     pages = _build_manuscript_pdf_pages(
         title="外婆回忆录",

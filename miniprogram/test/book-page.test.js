@@ -1044,6 +1044,27 @@ test("book page preserves moonlit courtyard cover style from latest manuscript",
   assert.equal(context.data.bookCoverStyleChanged, false);
 });
 
+test("book page preserves navy gilt cover style from latest manuscript", () => {
+  const { page } = loadBookPage();
+  const context = pageContext(page);
+  page.applyBookOutput.call(
+    context,
+    sampleBookOutput(
+      1,
+      "全书正文",
+      false,
+      [],
+      sampleStructuredBookContent(),
+      [],
+      sampleBookManuscript("外婆回忆录", "navy_gilt"),
+    ),
+  );
+
+  assert.equal(context.data.bookCoverStyle, "navy_gilt");
+  assert.equal(context.data.bookCoverStyleLabel, "深蓝烫金");
+  assert.equal(context.data.bookCoverStyleChanged, false);
+});
+
 test("book page switches full-book output versions without changing the latest output", () => {
   const { page } = loadBookPage();
   const latestStructured = sampleStructuredBookContent();
