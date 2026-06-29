@@ -10,6 +10,7 @@ import type {
   MemoirBookOutputExportFormat,
   MemoirBookOutputExportLayout,
   MemoirBookOutputGenerateRequest,
+  MemoirBookOutputUpdateRequest,
   MemoirBookPlan,
   MemoirBookPlanConfirmRequest,
   MemoirBookPlanGenerateRequest,
@@ -18,6 +19,8 @@ import type {
   MemoirBookSourceAssignmentRequest,
   MemoirBookSourceCoverage,
   MemoirBookSourceMoveRequest,
+  MemoirBookTitleSuggestionRequest,
+  MemoirBookTitleSuggestionResponse,
   MemoirBookVoiceAssistantTTSRequest,
   MemoirBookVoiceCommandExecuteRequest,
   MemoirBookVoiceCommandExecuteResponse,
@@ -313,8 +316,34 @@ export function generateMemoirBookOutput(
     memoirProjectPath(projectId, "/book-output/generate"),
     {
       method: "POST",
-      data,
+      data: withSelectedAIModel(data),
       timeoutMs: BOOK_OUTPUT_GENERATE_TIMEOUT_MS,
+    },
+  );
+}
+
+export function updateMemoirBookOutput(
+  projectId: string,
+  data: MemoirBookOutputUpdateRequest,
+): Promise<MemoirBookOutput> {
+  return memoirRequest<MemoirBookOutput>(
+    memoirProjectPath(projectId, "/book-output"),
+    {
+      method: "PATCH",
+      data,
+    },
+  );
+}
+
+export function suggestMemoirBookOutputTitles(
+  projectId: string,
+  data: MemoirBookTitleSuggestionRequest = {},
+): Promise<MemoirBookTitleSuggestionResponse> {
+  return memoirRequest<MemoirBookTitleSuggestionResponse>(
+    memoirProjectPath(projectId, "/book-output/title-suggestions"),
+    {
+      method: "POST",
+      data: withSelectedAIModel(data),
     },
   );
 }

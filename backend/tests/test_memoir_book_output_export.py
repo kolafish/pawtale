@@ -4,8 +4,10 @@ from app.services.memoir.book_output_export import (
     PDF_LAYOUTS,
     PDFBookBuilder,
     PDFLayout,
+    MemoirBookOutputExportFormat,
     MemoirBookOutputExportLayout,
     _build_manuscript_pdf_pages,
+    render_book_output_export,
     _wrap_pdf_line,
 )
 
@@ -58,6 +60,10 @@ def test_manuscript_pdf_pages_use_book_page_semantics():
     assert all(not page.header_title for page in front_pages)
     assert all(page.body_page_number is None for page in front_pages)
     assert all(page.show_footer is False for page in front_pages)
+    assert pages[0].background_color is not None
+    assert pages[0].text_color is not None
+    assert pages[0].decorations
+    assert all(decoration.kind == "line" for decoration in pages[0].decorations)
     assert sum(
         command.text == "根据口述访谈整理"
         for command in front_pages[1].commands
@@ -118,6 +124,27 @@ def test_table_of_contents_skips_links_without_chapter_pages():
     missing_command = next(command for command in toc_page.commands if "还没有写完" in command.text)
 
     assert missing_command.target_anchor is None
+
+
+def test_export_filename_preserves_natural_memoir_titles():
+    family_export = render_book_output_export(
+        title="家庭回忆录",
+        version=1,
+        content="正文",
+        manuscript={},
+        export_format=MemoirBookOutputExportFormat.TXT,
+    )
+    oral_export = render_book_output_export(
+        title="外婆口述回忆录",
+        version=1,
+        content="正文",
+        manuscript={},
+        export_format=MemoirBookOutputExportFormat.TXT,
+    )
+
+    assert family_export.filename.startswith("家庭回忆录_")
+    assert oral_export.filename.startswith("《外婆口述回忆录》_")
+    assert "口述的回忆录" not in oral_export.filename
 
 
 def test_pdf_line_wrapping_respects_chinese_forbidden_breaks():

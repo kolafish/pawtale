@@ -23,10 +23,26 @@ PDF_FONT_PATH = (
 )
 _PDF_FONT_REGISTERED = False
 PDFColor = tuple[float, float, float]
-PDF_COVER_BACKGROUND: PDFColor = (0.96, 0.93, 0.87)
-PDF_COVER_ACCENT_GREEN: PDFColor = (0.73, 0.82, 0.73)
-PDF_COVER_ACCENT_TEA: PDFColor = (0.72, 0.51, 0.43)
-PDF_COVER_LINE: PDFColor = (0.58, 0.32, 0.27)
+PDFColorName = str
+PDF_BODY_TEXT: PDFColor = (0.08, 0.07, 0.06)
+PDF_HEADER_TEXT: PDFColor = (0.45, 0.42, 0.39)
+PDF_COVER_STYLES: dict[str, dict[PDFColorName, PDFColor]] = {
+    "classic_plain": {
+        "background": (0.96, 0.92, 0.86),
+        "text": (0.29, 0.20, 0.16),
+        "line": (0.72, 0.63, 0.54),
+    },
+    "warm_gray": {
+        "background": (0.95, 0.94, 0.91),
+        "text": (0.20, 0.19, 0.17),
+        "line": (0.66, 0.63, 0.59),
+    },
+    "dark_album": {
+        "background": (0.24, 0.22, 0.20),
+        "text": (0.95, 0.92, 0.86),
+        "line": (0.61, 0.55, 0.46),
+    },
+}
 
 
 class MemoirBookOutputExportFormat(StrEnum):
@@ -94,6 +110,7 @@ class PDFTextCommand:
     y: int
     font_size: int
     target_anchor: str | None = None
+    color: PDFColor | None = None
 
 
 @dataclass
@@ -113,6 +130,7 @@ class PDFPage:
     commands: list[PDFTextCommand]
     decorations: list[PDFDecorationCommand] = field(default_factory=list)
     background_color: PDFColor | None = None
+    text_color: PDFColor | None = None
     header_title: str = ""
     section_title: str = ""
     show_footer: bool = True
@@ -243,6 +261,7 @@ class PDFBookBuilder:
         outline_title: str | None = None,
         outline_level: int = 0,
         background_color: PDFColor | None = None,
+        text_color: PDFColor | None = None,
     ) -> None:
         self.current_section = section_title or self.current_section
         self.current_body_numbering = body_numbering
@@ -259,6 +278,7 @@ class PDFBookBuilder:
         self.current_page = PDFPage(
             commands=[],
             background_color=background_color,
+            text_color=text_color,
             header_title=self.title if show_header else "",
             section_title=self.current_section,
             show_footer=show_footer,
@@ -490,16 +510,24 @@ def _pdf_page_commands(page: PDFPage, *, page_number: int, layout: PDFLayout) ->
     commands: list[PDFTextCommand] = []
     if page.header_title:
         header_y = layout.page_height - 28
+        header_font_size = max(8, layout.small_font_size - 1)
         commands.append(
-            PDFTextCommand(page.header_title[:18], layout.margin_x, header_y, layout.small_font_size)
+            PDFTextCommand(
+                page.header_title[:18],
+                layout.margin_x,
+                header_y,
+                header_font_size,
+                color=PDF_HEADER_TEXT,
+            )
         )
         if page.section_title:
             commands.append(
                 PDFTextCommand(
                     page.section_title[:14],
-                    _right_aligned_x(page.section_title[:14], layout, layout.small_font_size),
+                    _right_aligned_x(page.section_title[:14], layout, header_font_size),
                     header_y,
-                    layout.small_font_size,
+                    header_font_size,
+                    color=PDF_HEADER_TEXT,
                 )
             )
     commands.extend(page.commands)
@@ -511,6 +539,7 @@ def _pdf_page_commands(page: PDFPage, *, page_number: int, layout: PDFLayout) ->
                 _centered_x(footer, layout, layout.small_font_size),
                 24,
                 layout.small_font_size,
+                color=PDF_HEADER_TEXT,
             )
         )
     return commands
@@ -602,6 +631,7 @@ def _render_pdf_pages(
             if not command.text:
                 continue
             pdf.setFont(PDF_FONT_NAME, command.font_size)
+            pdf.setFillColorRGB(*(command.color or page.text_color or PDF_BODY_TEXT))
             pdf.drawString(command.x, command.y, command.text)
             if command.target_anchor:
                 width = max(24, _estimated_text_width(command.text, command.font_size))
@@ -657,6 +687,15 @@ def _today_date_text() -> str:
     return datetime.now(UTC).astimezone(timezone(timedelta(hours=8))).date().isoformat()
 
 
+def _today_month_text() -> str:
+    today = datetime.now(UTC).astimezone(timezone(timedelta(hours=8))).date()
+    return f"{today.year} 年 {today.month} 月"
+
+
+def _cover_style(style: str) -> dict[PDFColorName, PDFColor]:
+    return PDF_COVER_STYLES.get(style, PDF_COVER_STYLES["classic_plain"])
+
+
 CHINESE_NUMERALS = "零一二三四五六七八九"
 
 
@@ -698,47 +737,63 @@ def _add_section_page(
         builder.add_body_text(content)
 
 
-def _add_cover_page(builder: PDFBookBuilder, *, title: str, subtitle: str, prepared_by: str) -> None:
-    builder.new_page(show_header=False, show_footer=False, background_color=PDF_COVER_BACKGROUND)
-    builder.add_decoration(
-        kind="ellipse",
-        x=builder.layout.page_width - 145,
-        y=36,
-        width=190,
-        height=160,
-        color=PDF_COVER_ACCENT_GREEN,
-    )
-    builder.add_decoration(
-        kind="rect",
-        x=0,
-        y=builder.layout.page_height - 132,
-        width=builder.layout.page_width,
-        height=16,
-        color=PDF_COVER_ACCENT_TEA,
+def _add_cover_page(
+    builder: PDFBookBuilder,
+    *,
+    title: str,
+    subtitle: str,
+    prepared_by: str,
+    cover_style: str,
+) -> None:
+    style = _cover_style(cover_style)
+    line_color = style["line"]
+    builder.new_page(
+        show_header=False,
+        show_footer=False,
+        background_color=style["background"],
+        text_color=style["text"],
     )
     builder.add_decoration(
         kind="line",
         x=builder.layout.margin_x,
-        y=builder.layout.margin_bottom + 94,
-        width=92,
+        y=builder.layout.page_height - builder.layout.margin_top + 8,
+        width=builder.layout.page_width - builder.layout.margin_x * 2,
         height=0,
-        color=PDF_COVER_LINE,
-        line_width=1.2,
+        color=line_color,
+        line_width=0.7,
     )
-    builder.add_spacer(3.5)
+    builder.add_decoration(
+        kind="line",
+        x=builder.layout.margin_x,
+        y=builder.layout.margin_bottom + 20,
+        width=builder.layout.page_width - builder.layout.margin_x * 2,
+        height=0,
+        color=line_color,
+        line_width=0.7,
+    )
+    builder.add_decoration(
+        kind="line",
+        x=builder.layout.page_width / 2 - 34,
+        y=builder.layout.page_height / 2 - 35,
+        width=68,
+        height=0,
+        color=line_color,
+        line_width=0.8,
+    )
+    builder.add_spacer(2.7)
     builder.add_centered(
         "家庭回忆录",
-        font_size=builder.layout.small_font_size,
+        font_size=max(8, builder.layout.small_font_size - 1),
         line_height=builder.layout.line_height,
         max_units=builder.layout.max_line_units,
-        spacing_after=18,
+        spacing_after=54,
     )
     builder.add_centered(
         title,
-        font_size=builder.layout.title_font_size,
-        line_height=builder.layout.line_height + 12,
+        font_size=builder.layout.title_font_size + 6,
+        line_height=builder.layout.line_height + 16,
         max_units=max(8, builder.layout.max_line_units - 6),
-        spacing_after=10,
+        spacing_after=18,
     )
     if subtitle:
         builder.add_centered(
@@ -746,16 +801,23 @@ def _add_cover_page(builder: PDFBookBuilder, *, title: str, subtitle: str, prepa
             font_size=builder.layout.font_size,
             line_height=builder.layout.line_height + 4,
             max_units=builder.layout.max_line_units - 2,
-            spacing_after=16,
+            spacing_after=34,
         )
-    if prepared_by:
-        builder.y = max(builder.layout.margin_bottom + 70, builder.y - 110)
-        builder.add_centered(
-            prepared_by,
-            font_size=builder.layout.small_font_size,
-            line_height=builder.layout.line_height,
-            max_units=builder.layout.max_line_units,
-        )
+    builder.y = max(builder.layout.margin_bottom + 92, builder.y - 96)
+    builder.add_centered(
+        "口述：待补充",
+        font_size=builder.layout.small_font_size,
+        line_height=builder.layout.line_height,
+        max_units=builder.layout.max_line_units,
+        spacing_after=2,
+    )
+    builder.add_centered(
+        f"整理：{prepared_by or '家人'}",
+        font_size=builder.layout.small_font_size,
+        line_height=builder.layout.line_height,
+        max_units=builder.layout.max_line_units,
+        spacing_after=2,
+    )
     builder.add_centered(
         _today_date_text()[:4],
         font_size=builder.layout.small_font_size,
@@ -1030,24 +1092,31 @@ def _add_back_matter(builder: PDFBookBuilder, back_matter: dict[str, Any], *, in
     _add_appendix_record_page(builder, appendix_sections)
 
 
-def _add_back_cover(builder: PDFBookBuilder, *, quote: str) -> None:
-    builder.new_page(show_header=False, show_footer=False, background_color=PDF_COVER_BACKGROUND)
+def _add_back_cover(builder: PDFBookBuilder, *, quote: str, cover_style: str) -> None:
+    style = _cover_style(cover_style)
+    builder.new_page(
+        show_header=False,
+        show_footer=False,
+        background_color=style["background"],
+        text_color=style["text"],
+    )
     builder.add_decoration(
-        kind="ellipse",
-        x=-54,
-        y=builder.layout.page_height - 155,
-        width=150,
-        height=125,
-        color=PDF_COVER_ACCENT_GREEN,
+        kind="line",
+        x=builder.layout.page_width / 2 - 36,
+        y=builder.layout.page_height / 2 + 56,
+        width=72,
+        height=0,
+        color=style["line"],
+        line_width=0.8,
     )
     builder.add_decoration(
         kind="line",
         x=builder.layout.margin_x,
-        y=builder.layout.page_height - 210,
-        width=82,
+        y=builder.layout.margin_bottom + 20,
+        width=builder.layout.page_width - builder.layout.margin_x * 2,
         height=0,
-        color=PDF_COVER_LINE,
-        line_width=1,
+        color=style["line"],
+        line_width=0.7,
     )
     builder.add_spacer(6)
     if quote:
@@ -1067,7 +1136,7 @@ def _add_back_cover(builder: PDFBookBuilder, *, quote: str) -> None:
         spacing_after=4,
     )
     builder.add_centered(
-        f"生成于 {_today_date_text()}",
+        f"整理于 {_today_month_text()}",
         font_size=builder.layout.small_font_size,
         line_height=builder.layout.line_height,
         max_units=builder.layout.max_line_units,
@@ -1088,6 +1157,7 @@ def _build_structured_manuscript_pdf_pages(
     subtitle: str,
     prepared_by: str,
     back_cover_quote: str,
+    cover_style: str,
     front_matter: list[Any],
     chapters: list[Any],
     back_matter: dict[str, Any],
@@ -1096,12 +1166,12 @@ def _build_structured_manuscript_pdf_pages(
     layout: PDFLayout,
 ) -> list[PDFPage]:
     builder = PDFBookBuilder(title=book_title, layout=layout)
-    _add_cover_page(builder, title=book_title, subtitle=subtitle, prepared_by=prepared_by)
+    _add_cover_page(builder, title=book_title, subtitle=subtitle, prepared_by=prepared_by, cover_style=cover_style)
     _add_front_matter(builder, front_matter, title=book_title, subtitle=subtitle)
     _add_table_of_contents(builder, entries=toc_entries)
     _add_chapters(builder, chapters)
     _add_back_matter(builder, back_matter, include_source_appendix=include_source_appendix)
-    _add_back_cover(builder, quote=back_cover_quote)
+    _add_back_cover(builder, quote=back_cover_quote, cover_style=cover_style)
     return builder.pages
 
 
@@ -1137,6 +1207,7 @@ def _build_manuscript_pdf_pages(
         else setting_source_appendix is not False
     )
     back_cover_quote = _str(settings.get("back_cover_quote"))
+    cover_style = _str(settings.get("cover_style")) or "classic_plain"
 
     toc_items = _list(manuscript.get("table_of_contents"))
     initial_entries = _chapter_toc_entries(toc_items=toc_items, chapters=chapters)
@@ -1145,6 +1216,7 @@ def _build_manuscript_pdf_pages(
         subtitle=subtitle,
         prepared_by=prepared_by,
         back_cover_quote=back_cover_quote,
+        cover_style=cover_style,
         front_matter=front_matter,
         chapters=chapters,
         back_matter=back_matter,
@@ -1162,6 +1234,7 @@ def _build_manuscript_pdf_pages(
         subtitle=subtitle,
         prepared_by=prepared_by,
         back_cover_quote=back_cover_quote,
+        cover_style=cover_style,
         front_matter=front_matter,
         chapters=chapters,
         back_matter=back_matter,
@@ -1202,6 +1275,8 @@ def _formal_export_title(raw_title: str) -> str:
     title = title.replace("主题回忆录", "回忆录").replace("主题", "").strip(" -_·：:")
     if not title or title == "回忆录":
         return "家庭回忆录"
+    if title == "家庭回忆录" or title.endswith("口述回忆录"):
+        return title
     if title.endswith("的回忆录"):
         return title
     if title.endswith("回忆录"):

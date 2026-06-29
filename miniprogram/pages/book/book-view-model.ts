@@ -4,6 +4,7 @@ import type {
   MemoirBookManuscript,
   MemoirBookManuscriptSection,
   MemoirBookManuscriptTemplate,
+  MemoirBookCoverStyle,
   MemoirBookOutput,
   MemoirBookOutputExportLayout,
   MemoirBookOutputVersion,
@@ -186,6 +187,30 @@ export interface BookExportLayoutOptionView {
   detailText: string;
 }
 
+export interface BookCoverStyleOptionView {
+  value: MemoirBookCoverStyle;
+  label: string;
+  detailText: string;
+}
+
+export const BOOK_COVER_STYLE_OPTIONS: BookCoverStyleOptionView[] = [
+  {
+    value: "classic_plain",
+    label: "旧纸棕",
+    detailText: "米白纸色、深褐字和细线，适合默认成书",
+  },
+  {
+    value: "warm_gray",
+    label: "暖灰书稿",
+    detailText: "暖灰底、深灰字，更像整理后的手稿",
+  },
+  {
+    value: "dark_album",
+    label: "旧书封面",
+    detailText: "深灰褐底、浅色字，适合更庄重的纪念册",
+  },
+];
+
 export interface BookVoiceCommandUndoSnapshot {
   planTitle: string;
   chapters: MemoirBookPlanChapterUpdateInput[];
@@ -250,6 +275,17 @@ export interface BookData {
   bookExportLayoutDetailText: string;
   bookExportLayoutOptions: BookExportLayoutOptionView[];
   bookExportShowSourceAppendix: boolean;
+  bookTitleInput: string;
+  bookTitleChanged: boolean;
+  bookTitleSaving: boolean;
+  bookTitleSuggesting: boolean;
+  bookTitleSuggestions: string[];
+  bookCoverStyle: MemoirBookCoverStyle;
+  bookCoverStyleIndex: number;
+  bookCoverStyleLabel: string;
+  bookCoverStyleDetailText: string;
+  bookCoverStyleOptions: BookCoverStyleOptionView[];
+  bookCoverStyleChanged: boolean;
   generatingBook: boolean;
   ttsBusyTarget: string;
   playingTarget: string;
@@ -918,6 +954,37 @@ export function bookManuscriptData(
   };
 }
 
+function selectedBookCoverStyle(output: MemoirBookOutput | null, selectedVersionId = ""): MemoirBookCoverStyle {
+  const manuscript = selectedBookManuscript(output, selectedVersionId);
+  const style = manuscript?.render_settings?.cover_style;
+  return style === "warm_gray" || style === "dark_album" ? style : "classic_plain";
+}
+
+export function bookCoverStyleData(
+  output: MemoirBookOutput | null,
+  selectedVersionId = "",
+): Pick<
+  BookData,
+  | "bookCoverStyle"
+  | "bookCoverStyleIndex"
+  | "bookCoverStyleLabel"
+  | "bookCoverStyleDetailText"
+  | "bookCoverStyleOptions"
+  | "bookCoverStyleChanged"
+> {
+  const style = selectedBookCoverStyle(output, selectedVersionId);
+  const index = Math.max(0, BOOK_COVER_STYLE_OPTIONS.findIndex((option) => option.value === style));
+  const option = BOOK_COVER_STYLE_OPTIONS[index] || BOOK_COVER_STYLE_OPTIONS[0];
+  return {
+    bookCoverStyle: option.value,
+    bookCoverStyleIndex: index,
+    bookCoverStyleLabel: option.label,
+    bookCoverStyleDetailText: option.detailText,
+    bookCoverStyleOptions: BOOK_COVER_STYLE_OPTIONS,
+    bookCoverStyleChanged: false,
+  };
+}
+
 export function bookOutputVersionText(output: MemoirBookOutput | null): string {
   const version = output?.latest_version?.version;
   return version ? `全书第 ${version} 版` : "尚未生成全书";
@@ -982,6 +1049,15 @@ export function bookOutputData(output: MemoirBookOutput | null, selectedVersionI
   | "bookVersionNotice"
   | "bookStaleNotice"
   | "bookActionText"
+  | "bookTitleInput"
+  | "bookTitleChanged"
+  | "bookTitleSuggestions"
+  | "bookCoverStyle"
+  | "bookCoverStyleIndex"
+  | "bookCoverStyleLabel"
+  | "bookCoverStyleDetailText"
+  | "bookCoverStyleOptions"
+  | "bookCoverStyleChanged"
 > {
   const versionState = bookVersionOptions(output, selectedVersionId);
   const content = selectedBookContent(output, versionState.selectedId);
@@ -1002,6 +1078,10 @@ export function bookOutputData(output: MemoirBookOutput | null, selectedVersionI
     bookVersionNotice: bookVersionNotice(output, versionState.viewingHistorical),
     bookStaleNotice: bookOutputStaleNotice(output),
     bookActionText: bookActionText(output),
+    bookTitleInput: manuscriptData.bookManuscriptTitle || bookOutputPreviewTitle(output, versionState.selectedId),
+    bookTitleChanged: false,
+    bookTitleSuggestions: [],
+    ...bookCoverStyleData(output, versionState.selectedId),
   };
 }
 

@@ -35,6 +35,9 @@ from app.schemas.memoir_book import (
     MemoirBookOutputStructuredChapterResponse,
     MemoirBookOutputStructuredContentResponse,
     MemoirBookOutputTableOfContentsItemResponse,
+    MemoirBookOutputUpdateRequest,
+    MemoirBookTitleSuggestionRequest,
+    MemoirBookTitleSuggestionResponse,
     MemoirBookOutputVersionResponse,
 )
 from app.services.file_exports import ExportFile
@@ -51,6 +54,7 @@ from app.services.memoir.book_audio import (
 from app.services.memoir.book_manuscript_ai import (
     GeneratedManuscriptCopy,
     generate_manuscript_editorial_copy,
+    generate_title_suggestions,
 )
 from app.services.memoir.book_output_export import (
     MemoirBookOutputExportFormat,
@@ -62,6 +66,7 @@ from app.services.memoir.voice_tts import TTSClient
 
 BOOK_TTS_CACHE_KEY = "book_tts"
 AI_MODEL_METADATA_KEY = "ai_model"
+DEFAULT_BOOK_COVER_STYLE = "classic_plain"
 SNAPSHOT_COMPARE_KEYS = (
     "chapter_id",
     "chapter_title",
@@ -171,12 +176,18 @@ def _formal_book_title(raw_title: str) -> str:
     title = title.replace("主题回忆录", "回忆录").replace("主题", "").strip(" -_·：:")
     if title in {"回忆录", "我的回忆录"}:
         return "家庭回忆录" if title == "回忆录" else title
+    if title == "家庭回忆录" or title.endswith("口述回忆录"):
+        return title
     if title.endswith("的回忆录"):
         return title
     if title.endswith("回忆录"):
         subject = title[: -len("回忆录")].strip(" -_·：:的")
         return f"{subject}的回忆录" if subject else "家庭回忆录"
     return title
+
+
+def _cover_style(value: str | None) -> str:
+    return value if value in {"classic_plain", "warm_gray", "dark_album"} else DEFAULT_BOOK_COVER_STYLE
 
 
 def _short_topic(title: str) -> str:
@@ -193,6 +204,32 @@ def _fallback_cover_subtitle(chapter_titles: list[str]) -> str:
     if len(topics) >= 2:
         return f"关于{'、'.join(topics[:3])}的记忆"
     return "根据口述访谈整理而成"
+
+
+def _fallback_title_suggestions(base_title: str, chapter_titles: list[str], count: int) -> list[str]:
+    formal_title = _formal_book_title(base_title)
+    subject = formal_title.removesuffix("的回忆录").removesuffix("回忆录").strip("的") or "家人"
+    topics = [_short_topic(title) for title in chapter_titles if _short_topic(title)]
+    candidates = [
+        formal_title,
+        f"{subject}慢慢说",
+        f"{subject}的一生",
+        f"{subject}口述回忆录",
+        "从前的日子",
+        "我走过的这些年",
+    ]
+    if topics:
+        candidates.insert(1, f"{topics[0]}里的记忆")
+    if len(topics) >= 2:
+        candidates.insert(2, f"{topics[0]}与{topics[1]}")
+    result: list[str] = []
+    for candidate in candidates:
+        cleaned = _formal_book_title(candidate)
+        if cleaned and cleaned not in result:
+            result.append(cleaned)
+        if len(result) >= count:
+            break
+    return result
 
 
 def _fallback_preface(chapter_titles: list[str]) -> str:
@@ -217,6 +254,16 @@ def _fallback_back_cover_quote(chapters: list[MemoirBookManuscriptChapter]) -> s
             if text:
                 return text
     return "把亲口说出的生活，尽量完整地留下来。"
+
+
+def _expanded_afterword() -> str:
+    return (
+        "这些讲述有些清楚，有些还需要家人继续补充。记忆本来就不是一次说完的，"
+        "它会在某个名字、某个地方、某件旧物出现时，又慢慢回来。\n\n"
+        "能先留下来，已经是这本书最重要的意义。以后如果还有新的故事、新的照片，"
+        "或者家人想起了更多细节，也可以继续补进来。愿这些话被保存下来，"
+        "成为家里人以后还能反复翻看的记忆。"
+    )
 
 
 def _manuscript_source_refs(raw_refs: object) -> list[MemoirBookManuscriptSourceRef]:
@@ -264,6 +311,7 @@ def _manuscript_from_snapshot(
     content: str,
     snapshot: list[dict[str, object]],
     editorial_copy: GeneratedManuscriptCopy | None = None,
+    cover_style: str = DEFAULT_BOOK_COVER_STYLE,
 ) -> MemoirBookManuscript | None:
     if not snapshot:
         return None
@@ -356,7 +404,7 @@ def _manuscript_from_snapshot(
         afterword=MemoirBookManuscriptSection(
             kind="afterword",
             title="后记",
-            content="这些讲述有些清楚，有些还需要家人继续补充。能先留下来，已经是这本书最重要的意义。",
+            content=_expanded_afterword(),
         ),
         interview_records=MemoirBookManuscriptSection(
             kind="interview_records",
@@ -393,6 +441,7 @@ def _manuscript_from_snapshot(
         chapters=chapters,
         back_matter=back_matter,
         render_settings=MemoirBookManuscriptRenderSettings(
+            cover_style=_cover_style(cover_style),
             back_cover_quote=back_cover_quote,
             editorial_copy_model=editorial_copy.model if editorial_copy else None,
         ),
@@ -556,6 +605,61 @@ def _compose_book_content(
     return content.strip(), snapshot
 
 
+def _compose_book_content_from_snapshot(
+    *,
+    title: str,
+    snapshot: list[dict[str, object]],
+) -> str:
+    toc = "\n".join(
+        f"{_positive_int(item.get('chapter_index')) or index}. {_safe_str(item.get('chapter_title')) or _safe_str(item.get('title')) or f'第{index}章'}"
+        for index, item in enumerate(snapshot, start=1)
+        if isinstance(item, dict)
+    )
+    body_parts: list[str] = []
+    for index, item in enumerate(snapshot, start=1):
+        if not isinstance(item, dict):
+            continue
+        chapter_index = _positive_int(item.get("chapter_index")) or index
+        chapter_title = _safe_str(item.get("chapter_title")) or _safe_str(item.get("title")) or f"第{chapter_index}章"
+        chapter_content = _safe_str(item.get("content"))
+        if chapter_content:
+            body_parts.append(f"第{chapter_index}章 {chapter_title}\n\n{chapter_content}")
+    return (f"{title}\n\n目录\n{toc}\n\n" + "\n\n".join(body_parts)).strip()
+
+
+def _updated_manuscript_payload(
+    *,
+    title: str,
+    stored: object,
+    content: str,
+    snapshot: list[dict[str, object]],
+    cover_style: str | None,
+) -> dict[str, object]:
+    manuscript = _manuscript_response(title=title, content=content, snapshot=snapshot, stored=stored)
+    if not manuscript:
+        return {}
+    manuscript.profile.title = title
+    if cover_style:
+        manuscript.render_settings.cover_style = _cover_style(cover_style)
+    for section in manuscript.front_matter:
+        if section.kind == "cover":
+            section.title = title
+            subtitle = manuscript.profile.subtitle or _fallback_cover_subtitle(
+                [_safe_str(item.get("chapter_title")) for item in snapshot if isinstance(item, dict)]
+            )
+            section.content = f"{title}\n{subtitle}"
+    return manuscript.model_dump(mode="json")
+
+
+def _stored_cover_style(version: MemoirBookOutputVersion | None) -> str:
+    if not version or not isinstance(version.manuscript_json, dict):
+        return DEFAULT_BOOK_COVER_STYLE
+    settings = version.manuscript_json.get("render_settings")
+    if not isinstance(settings, dict):
+        return DEFAULT_BOOK_COVER_STYLE
+    return _cover_style(settings.get("cover_style") if isinstance(settings.get("cover_style"), str) else None)
+
+
 def _chapter_snapshot(
     chapter: MemoirBookPlanChapter,
     version: MemoirBookChapterDraftVersion,
@@ -685,7 +789,9 @@ async def generate_book_output(
     project = await load_memoir_project(db, project_id, user_id)
     plan = await _load_plan(db, user_id=user_id, project_id=project_id)
     chapters = _require_confirmed_chapters(plan)
-    title = _formal_book_title(plan.title)
+    user_title = _safe_str(req.title)
+    title = _formal_book_title(user_title or plan.title)
+    cover_style = _cover_style(req.cover_style)
     content, snapshot = _compose_book_content(title=title, chapters=chapters)
     requested_ai_model = (req.ai_model or "").strip()
     ai_model = requested_ai_model or _project_ai_model(project)
@@ -699,7 +805,7 @@ async def generate_book_output(
         if ai_model
         else None
     )
-    if editorial_copy and editorial_copy.book_title:
+    if not user_title and editorial_copy and editorial_copy.book_title:
         generated_title = _formal_book_title(editorial_copy.book_title)
         if generated_title and generated_title != title:
             title = generated_title
@@ -711,7 +817,16 @@ async def generate_book_output(
         if output and output.versions
         else []
     )
-    if output and output.versions and not req.force_regenerate and not stale_titles:
+    latest_version = output.versions[-1] if output and output.versions else None
+    title_or_style_changed = bool(
+        output
+        and latest_version
+        and (
+            (user_title and output.title != title)
+            or (req.cover_style and _stored_cover_style(latest_version) != cover_style)
+        )
+    )
+    if output and output.versions and not req.force_regenerate and not stale_titles and not title_or_style_changed:
         return _output_response(output)
 
     if not output:
@@ -738,6 +853,7 @@ async def generate_book_output(
         content=content,
         snapshot=snapshot,
         editorial_copy=editorial_copy,
+        cover_style=cover_style,
     )
     version_number = await _latest_output_version_number(db, output.id) + 1
     db.add(
@@ -757,6 +873,82 @@ async def generate_book_output(
     if not refreshed:
         raise HTTPException(status_code=500, detail="全书稿保存失败")
     return _output_response(refreshed)
+
+
+async def update_book_output(
+    db: AsyncSession,
+    *,
+    user_id: str,
+    project_id: str,
+    req: MemoirBookOutputUpdateRequest,
+) -> MemoirBookOutputResponse:
+    await load_memoir_project(db, project_id, user_id)
+    output = await _load_output(db, project_id=project_id)
+    if not output or not output.versions:
+        raise HTTPException(status_code=404, detail="全书稿不存在")
+    latest = output.versions[-1]
+    snapshot = [item for item in (latest.chapter_snapshot_json or []) if isinstance(item, dict)]
+    title = _formal_book_title(req.title or output.title)
+    cover_style = _cover_style(req.cover_style) if req.cover_style else _stored_cover_style(latest)
+    content = _compose_book_content_from_snapshot(title=title, snapshot=snapshot)
+    latest.content = content
+    latest.manuscript_json = _updated_manuscript_payload(
+        title=title,
+        stored=latest.manuscript_json or {},
+        content=content,
+        snapshot=snapshot,
+        cover_style=cover_style,
+    )
+    output.title = title
+    output.metadata_json = {
+        **(output.metadata_json or {}),
+        BOOK_TTS_CACHE_KEY: None,
+    }
+    await db.commit()
+    refreshed = await _load_output(db, project_id=project_id)
+    if not refreshed:
+        raise HTTPException(status_code=500, detail="全书稿保存失败")
+    return _output_response(refreshed)
+
+
+async def suggest_book_output_titles(
+    db: AsyncSession,
+    *,
+    user_id: str,
+    project_id: str,
+    req: MemoirBookTitleSuggestionRequest,
+) -> MemoirBookTitleSuggestionResponse:
+    project = await load_memoir_project(db, project_id, user_id)
+    plan = await _load_plan(db, user_id=user_id, project_id=project_id)
+    chapters = _require_confirmed_chapters(plan)
+    base_title = _formal_book_title(plan.title)
+    _, snapshot = _compose_book_content(title=base_title, chapters=chapters)
+    requested_ai_model = (req.ai_model or "").strip()
+    ai_model = requested_ai_model or _project_ai_model(project)
+    _remember_project_ai_model(project, req.ai_model)
+    generated = await generate_title_suggestions(
+        title=base_title,
+        snapshot=snapshot,
+        count=req.count,
+        ai_model=ai_model,
+    ) if ai_model else None
+    fallback = _fallback_title_suggestions(
+        base_title,
+        [_safe_str(item.get("chapter_title")) for item in snapshot],
+        req.count,
+    )
+    suggestions: list[str] = []
+    for suggestion in [*(generated.suggestions if generated else []), *fallback]:
+        title = _formal_book_title(suggestion)
+        if title and title not in suggestions:
+            suggestions.append(title)
+        if len(suggestions) >= req.count:
+            break
+    return MemoirBookTitleSuggestionResponse(
+        suggestions=suggestions,
+        provider="ai" if generated else None,
+        model=generated.model if generated else None,
+    )
 
 
 def _select_output_version(

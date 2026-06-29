@@ -16,6 +16,7 @@ from app.schemas.memoir_book import (
     MemoirBookChapterTitleUpdateRequest,
     MemoirBookOutputGenerateRequest,
     MemoirBookOutputResponse,
+    MemoirBookOutputUpdateRequest,
     MemoirBookPlanConfirmRequest,
     MemoirBookPlanGenerateRequest,
     MemoirBookPlanResponse,
@@ -35,6 +36,8 @@ from app.schemas.memoir_book import (
     MemoirBookSourceReviewListResponse,
     MemoirBookSourceRouteRequest,
     MemoirBookSourceRouteResponse,
+    MemoirBookTitleSuggestionRequest,
+    MemoirBookTitleSuggestionResponse,
     MemoirBookVoiceAssistantTTSRequest,
     MemoirBookVoiceCommandExecuteRequest,
     MemoirBookVoiceCommandExecuteResponse,
@@ -519,6 +522,39 @@ async def generate_mobile_memoir_book_output(
     current_user: User = Depends(get_current_user),
 ):
     return await memoir_book_outputs.generate_book_output(
+        db,
+        user_id=current_user.id,
+        project_id=project_id,
+        req=req,
+    )
+
+
+@router.patch("/projects/{project_id}/book-output", response_model=MemoirBookOutputResponse)
+async def update_mobile_memoir_book_output(
+    project_id: str,
+    req: MemoirBookOutputUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await memoir_book_outputs.update_book_output(
+        db,
+        user_id=current_user.id,
+        project_id=project_id,
+        req=req,
+    )
+
+
+@router.post(
+    "/projects/{project_id}/book-output/title-suggestions",
+    response_model=MemoirBookTitleSuggestionResponse,
+)
+async def suggest_mobile_memoir_book_output_titles(
+    project_id: str,
+    req: MemoirBookTitleSuggestionRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await memoir_book_outputs.suggest_book_output_titles(
         db,
         user_id=current_user.id,
         project_id=project_id,

@@ -4,6 +4,7 @@ import type {
   MemoirBookOutputExportFormat,
   MemoirBookOutputExportLayout,
   MemoirBookOutput,
+  MemoirBookCoverStyle,
   MemoirBookPlan,
   MemoirBookPlanStructureCommandRequest,
   MemoirBookPlanChapterUpdateInput,
@@ -44,6 +45,8 @@ import {
   getMemoirBookSourceCoverage,
   listMemoirAutomationEvents,
   parseMemoirBookVoiceCommand,
+  suggestMemoirBookOutputTitles,
+  updateMemoirBookOutput,
   updateMemoirBookChapterTitle,
   updateMemoirBookPlan,
   updateMemoirBookChapterDraft,
@@ -106,6 +109,7 @@ import {
   bookOutlineNarrationText,
   bookVoiceCommandActionText,
   buildAutomationEventViews,
+  BOOK_COVER_STYLE_OPTIONS,
   BOOK_EXPORT_LAYOUT_OPTIONS,
   canExecuteBookVoiceCommand,
 } from "./book-view-model";
@@ -135,6 +139,7 @@ interface DatasetEvent {
       direction?: string;
       format?: MemoirBookOutputExportFormat;
       layout?: MemoirBookOutputExportLayout;
+      title?: string;
       utteranceId?: string;
     };
   };
@@ -187,6 +192,23 @@ function bookOutputGenerateErrorMessage(error: unknown): string {
     return "全书篇幅较长，生成超时了。请稍后刷新成书页查看是否已生成，或重新点击生成。";
   }
   return message || "全书生成失败";
+}
+
+function latestBookTitle(output: MemoirBookOutput | null): string {
+  return trimText(output?.latest_version?.manuscript?.profile?.title || output?.title || "");
+}
+
+function latestBookCoverStyle(output: MemoirBookOutput | null): MemoirBookCoverStyle {
+  const style = output?.latest_version?.manuscript?.render_settings?.cover_style;
+  return style === "warm_gray" || style === "dark_album" ? style : "classic_plain";
+}
+
+function defaultBookTitleInput(planTitle: string, projectTitle: string): string {
+  return (
+    trimText(planTitle.replace("章节规划", "").replace("主题回忆录", "回忆录").replace("主题", ""))
+    || trimText(projectTitle)
+    || "家庭回忆录"
+  );
 }
 
 function bookVoiceAssistantHint(stage: BookData["stage"], chapterCount: number): string {
@@ -439,6 +461,11 @@ Page<BookData, {
   ): Promise<MemoirBookPlan | null>;
   updatePlanStructure(chapters: MemoirBookPlanChapterUpdateInput[], toastTitle: string): Promise<MemoirBookPlan | null>;
   regenerateMergedChapter(chapterId: string): Promise<void>;
+  changeBookTitle(event: TextInputEvent): void;
+  saveBookDesignSettings(): Promise<void>;
+  suggestBookTitles(): Promise<void>;
+  chooseBookTitleSuggestion(event: DatasetEvent): void;
+  changeBookCoverStyle(event: PickerEvent): void;
   generateBook(): Promise<void>;
   changeBookOutputVersion(event: PickerEvent): void;
   changeBookExportLayout(event: PickerEvent): void;
@@ -609,6 +636,17 @@ Page<BookData, {
     bookExportLayoutDetailText: BOOK_EXPORT_LAYOUT_OPTIONS[0].detailText,
     bookExportLayoutOptions: BOOK_EXPORT_LAYOUT_OPTIONS,
     bookExportShowSourceAppendix: true,
+    bookTitleInput: "",
+    bookTitleChanged: false,
+    bookTitleSaving: false,
+    bookTitleSuggesting: false,
+    bookTitleSuggestions: [],
+    bookCoverStyle: "classic_plain",
+    bookCoverStyleIndex: 0,
+    bookCoverStyleLabel: BOOK_COVER_STYLE_OPTIONS[0].label,
+    bookCoverStyleDetailText: BOOK_COVER_STYLE_OPTIONS[0].detailText,
+    bookCoverStyleOptions: BOOK_COVER_STYLE_OPTIONS,
+    bookCoverStyleChanged: false,
     ttsBusyTarget: "",
     playingTarget: "",
     bookTTSActiveTarget: "",
@@ -802,7 +840,136 @@ Page<BookData, {
   },
 
   applyBookOutput(output) {
-    this.setData(bookOutputData(output));
+    const outputData = bookOutputData(output);
+    if (!output && !outputData.bookTitleInput) {
+      outputData.bookTitleInput = defaultBookTitleInput(this.data.planTitle, this.data.projectTitle);
+    }
+    this.setData(outputData);
+  },
+
+  changeBookTitle(event) {
+    const value = event.detail.value;
+    const storedTitle = latestBookTitle(this.data.bookOutput)
+      || this.data.bookManuscriptTitle
+      || this.data.bookPreviewTitle;
+    this.setData({
+      bookTitleInput: value,
+      bookTitleChanged: trimText(value) !== trimText(storedTitle),
+    });
+  },
+
+  async suggestBookTitles() {
+    if (!this.data.projectId || this.data.bookTitleSuggesting || this.data.generatingBook) {
+      return;
+    }
+    if (!this.data.allChaptersConfirmed) {
+      this.setData({ error: "请先确认所有章节正文" });
+      return;
+    }
+    if (this.data.hasDraftChanges) {
+      this.setData({ error: "请先保存当前章节修改" });
+      return;
+    }
+    this.setData({ bookTitleSuggesting: true, error: "" });
+    try {
+      const response = await suggestMemoirBookOutputTitles(this.data.projectId, { count: 6 });
+      const suggestions = (response.suggestions || []).map((item) => trimText(item)).filter(Boolean);
+      this.setData({ bookTitleSuggestions: suggestions });
+      if (!suggestions.length) {
+        this.setData({ error: "暂时没有生成合适的书名" });
+      }
+    } catch (error) {
+      if (isLoginError(error)) {
+        wx.reLaunch({ url: "/pages/login/index" });
+        return;
+      }
+      this.setData({ error: error instanceof Error ? error.message : "AI 起名失败" });
+    } finally {
+      this.setData({ bookTitleSuggesting: false });
+    }
+  },
+
+  chooseBookTitleSuggestion(event) {
+    const title = trimText(event.currentTarget.dataset.title || "");
+    if (!title) {
+      return;
+    }
+    const storedTitle = latestBookTitle(this.data.bookOutput)
+      || this.data.bookManuscriptTitle
+      || this.data.bookPreviewTitle;
+    this.setData({
+      bookTitleInput: title,
+      bookTitleChanged: title !== trimText(storedTitle),
+      error: "",
+    });
+  },
+
+  changeBookCoverStyle(event) {
+    const index = Number(event.detail.value);
+    const option = this.data.bookCoverStyleOptions[index];
+    if (!option) {
+      return;
+    }
+    this.setData({
+      bookCoverStyle: option.value,
+      bookCoverStyleIndex: index,
+      bookCoverStyleLabel: option.label,
+      bookCoverStyleDetailText: option.detailText,
+      bookCoverStyleChanged: option.value !== latestBookCoverStyle(this.data.bookOutput),
+      error: "",
+    });
+  },
+
+  async saveBookDesignSettings() {
+    if (!this.data.projectId || this.data.bookTitleSaving || this.data.generatingBook) {
+      return;
+    }
+    if (!this.data.bookOutput?.latest_version) {
+      wx.showToast({ title: "生成全书时应用", icon: "none" });
+      return;
+    }
+    if (this.data.bookViewingHistoricalVersion) {
+      this.setData({ error: "请切回最新版后再保存书名和封面" });
+      return;
+    }
+    const title = trimText(this.data.bookTitleInput);
+    if (!title) {
+      this.setData({ error: "书名不能为空" });
+      return;
+    }
+    const coverStyle = this.data.bookCoverStyle;
+    this.stopPlayback();
+    this.setData({ bookTitleSaving: true, error: "" });
+    try {
+      const output = await updateMemoirBookOutput(this.data.projectId, {
+        title,
+        cover_style: coverStyle,
+      });
+      this.applyBookOutput(output);
+      const option = this.data.bookCoverStyleOptions.find((candidate) => candidate.value === coverStyle)
+        || this.data.bookCoverStyleOptions[0];
+      this.setData({
+        bookTitleInput: title,
+        bookTitleChanged: false,
+        bookCoverStyle: option.value,
+        bookCoverStyleIndex: Math.max(
+          0,
+          this.data.bookCoverStyleOptions.findIndex((candidate) => candidate.value === option.value),
+        ),
+        bookCoverStyleLabel: option.label,
+        bookCoverStyleDetailText: option.detailText,
+        bookCoverStyleChanged: false,
+      });
+      wx.showToast({ title: "设置已保存", icon: "success" });
+    } catch (error) {
+      if (isLoginError(error)) {
+        wx.reLaunch({ url: "/pages/login/index" });
+        return;
+      }
+      this.setData({ error: error instanceof Error ? error.message : "保存书名和封面失败" });
+    } finally {
+      this.setData({ bookTitleSaving: false });
+    }
   },
 
   changeBookOutputVersion(event) {
@@ -1540,6 +1707,8 @@ Page<BookData, {
     try {
       const output = await generateMemoirBookOutput(this.data.projectId, {
         force_regenerate: Boolean(this.data.bookOutput?.latest_version),
+        title: trimText(this.data.bookTitleInput) || undefined,
+        cover_style: this.data.bookCoverStyle,
       });
       this.applyBookOutput(output);
       wx.showToast({ title: "全书已生成", icon: "success" });
