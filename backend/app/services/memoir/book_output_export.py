@@ -14,33 +14,44 @@ from reportlab.pdfgen import canvas as pdf_canvas
 from app.services.file_exports import ExportFile, safe_filename
 
 
-PDF_FONT_NAME = "MemoirNotoSansSC"
-PDF_FONT_PATH = (
+PDF_SANS_FONT_NAME = "MemoirNotoSansSC"
+PDF_SERIF_FONT_NAME = "MemoirNotoSerifSC"
+PDF_FONT_NAME = PDF_SERIF_FONT_NAME
+PDF_SANS_FONT_PATH = (
     Path(__file__).resolve().parents[2]
     / "assets"
     / "fonts"
     / "NotoSansSC-Regular.ttf"
 )
+PDF_SERIF_FONT_PATH = (
+    Path(__file__).resolve().parents[2]
+    / "assets"
+    / "fonts"
+    / "NotoSerifSC-Regular.ttf"
+)
 _PDF_FONT_REGISTERED = False
 PDFColor = tuple[float, float, float]
 PDFColorName = str
 PDF_BODY_TEXT: PDFColor = (0.08, 0.07, 0.06)
-PDF_HEADER_TEXT: PDFColor = (0.45, 0.42, 0.39)
+PDF_HEADER_TEXT: PDFColor = (0.58, 0.55, 0.51)
 PDF_COVER_STYLES: dict[str, dict[PDFColorName, PDFColor]] = {
     "classic_plain": {
         "background": (0.96, 0.92, 0.86),
         "text": (0.29, 0.20, 0.16),
-        "line": (0.72, 0.63, 0.54),
+        "line": (0.78, 0.70, 0.61),
+        "texture": (0.98, 0.95, 0.90),
     },
     "warm_gray": {
         "background": (0.95, 0.94, 0.91),
         "text": (0.20, 0.19, 0.17),
-        "line": (0.66, 0.63, 0.59),
+        "line": (0.73, 0.70, 0.66),
+        "texture": (0.98, 0.97, 0.94),
     },
     "dark_album": {
         "background": (0.24, 0.22, 0.20),
         "text": (0.95, 0.92, 0.86),
         "line": (0.61, 0.55, 0.46),
+        "texture": (0.27, 0.25, 0.23),
     },
 }
 
@@ -76,22 +87,22 @@ PDF_LAYOUTS = {
         page_width=420,
         page_height=595,
         font_size=12,
-        line_height=20,
-        margin_x=42,
+        line_height=21,
+        margin_x=46,
         margin_top=56,
         margin_bottom=56,
         title_font_size=24,
         heading_font_size=18,
         small_font_size=10,
-        max_line_units=27,
+        max_line_units=26,
         filename_suffix="阅读版",
     ),
     MemoirBookOutputExportLayout.LARGE_PRINT: PDFLayout(
         page_width=420,
         page_height=595,
         font_size=16,
-        line_height=25,
-        margin_x=46,
+        line_height=26,
+        margin_x=48,
         margin_top=62,
         margin_bottom=50,
         title_font_size=26,
@@ -111,6 +122,7 @@ class PDFTextCommand:
     font_size: int
     target_anchor: str | None = None
     color: PDFColor | None = None
+    font_name: str | None = None
 
 
 @dataclass
@@ -518,6 +530,7 @@ def _pdf_page_commands(page: PDFPage, *, page_number: int, layout: PDFLayout) ->
                 header_y,
                 header_font_size,
                 color=PDF_HEADER_TEXT,
+                font_name=PDF_SANS_FONT_NAME,
             )
         )
         if page.section_title:
@@ -528,6 +541,7 @@ def _pdf_page_commands(page: PDFPage, *, page_number: int, layout: PDFLayout) ->
                     header_y,
                     header_font_size,
                     color=PDF_HEADER_TEXT,
+                    font_name=PDF_SANS_FONT_NAME,
                 )
             )
     commands.extend(page.commands)
@@ -540,6 +554,7 @@ def _pdf_page_commands(page: PDFPage, *, page_number: int, layout: PDFLayout) ->
                 24,
                 layout.small_font_size,
                 color=PDF_HEADER_TEXT,
+                font_name=PDF_SANS_FONT_NAME,
             )
         )
     return commands
@@ -581,9 +596,12 @@ def _register_pdf_font() -> None:
     global _PDF_FONT_REGISTERED
     if _PDF_FONT_REGISTERED:
         return
-    if not PDF_FONT_PATH.exists():
-        raise RuntimeError(f"PDF font file not found: {PDF_FONT_PATH}")
-    pdfmetrics.registerFont(TTFont(PDF_FONT_NAME, str(PDF_FONT_PATH)))
+    if not PDF_SANS_FONT_PATH.exists():
+        raise RuntimeError(f"PDF font file not found: {PDF_SANS_FONT_PATH}")
+    if not PDF_SERIF_FONT_PATH.exists():
+        raise RuntimeError(f"PDF font file not found: {PDF_SERIF_FONT_PATH}")
+    pdfmetrics.registerFont(TTFont(PDF_SANS_FONT_NAME, str(PDF_SANS_FONT_PATH)))
+    pdfmetrics.registerFont(TTFont(PDF_SERIF_FONT_NAME, str(PDF_SERIF_FONT_PATH)))
     _PDF_FONT_REGISTERED = True
 
 
@@ -630,7 +648,7 @@ def _render_pdf_pages(
         for command in _pdf_page_commands(page, page_number=page_number, layout=layout):
             if not command.text:
                 continue
-            pdf.setFont(PDF_FONT_NAME, command.font_size)
+            pdf.setFont(command.font_name or PDF_FONT_NAME, command.font_size)
             pdf.setFillColorRGB(*(command.color or page.text_color or PDF_BODY_TEXT))
             pdf.drawString(command.x, command.y, command.text)
             if command.target_anchor:
@@ -748,12 +766,23 @@ def _add_cover_page(
 ) -> None:
     style = _cover_style(cover_style)
     line_color = style["line"]
+    texture_color = style.get("texture", style["background"])
     builder.new_page(
         show_header=False,
         show_footer=False,
         background_color=style["background"],
         text_color=style["text"],
     )
+    for offset in range(0, 3):
+        builder.add_decoration(
+            kind="line",
+            x=builder.layout.margin_x,
+            y=builder.layout.margin_bottom + 118 + offset * 132,
+            width=builder.layout.page_width - builder.layout.margin_x * 2,
+            height=0,
+            color=texture_color,
+            line_width=0.18,
+        )
     builder.add_decoration(
         kind="line",
         x=builder.layout.margin_x,
@@ -779,7 +808,7 @@ def _add_cover_page(
         width=68,
         height=0,
         color=line_color,
-        line_width=0.8,
+        line_width=0.45,
     )
     builder.add_spacer(2.7)
     builder.add_centered(
@@ -1096,12 +1125,23 @@ def _add_back_matter(builder: PDFBookBuilder, back_matter: dict[str, Any], *, in
 
 def _add_back_cover(builder: PDFBookBuilder, *, quote: str, cover_style: str) -> None:
     style = _cover_style(cover_style)
+    texture_color = style.get("texture", style["background"])
     builder.new_page(
         show_header=False,
         show_footer=False,
         background_color=style["background"],
         text_color=style["text"],
     )
+    for offset in range(0, 3):
+        builder.add_decoration(
+            kind="line",
+            x=builder.layout.margin_x,
+            y=builder.layout.margin_bottom + 118 + offset * 132,
+            width=builder.layout.page_width - builder.layout.margin_x * 2,
+            height=0,
+            color=texture_color,
+            line_width=0.18,
+        )
     builder.add_decoration(
         kind="line",
         x=builder.layout.page_width / 2 - 36,

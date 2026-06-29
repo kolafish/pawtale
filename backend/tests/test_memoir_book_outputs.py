@@ -102,6 +102,24 @@ class FakeTitleAI:
         return '{"suggestions": ["外婆慢慢说", "外婆的一生", "从前的日子", "外婆主题回忆录"]}'
 
 
+class FakeTemplateCopyAI:
+    provider_name = "fake-ai"
+    model_name = "fake-template-copy-model"
+
+    async def _call_llm(self, system_prompt, user_prompt, temperature=0.7, max_tokens=4000, timeout=60.0, return_raw=False):
+        return """
+        {
+          "book_title": "外婆慢慢说",
+          "cover_subtitle": "关于童年与离家的记忆",
+          "preface": "这本书记录的是「爷爷主题回忆录」中的生活。",
+          "chapter_intros": [
+            {"chapter_id": "chapter-1", "intro": "这一章主要记录外婆家的童年相关的回忆。"}
+          ],
+          "back_cover_quote": "凡是过往皆是序章"
+        }
+        """
+
+
 async def _active_project_id(client):
     response = await client.get("/api/mobile/memoir/projects")
     assert response.status_code == 200
@@ -171,6 +189,31 @@ async def test_memoir_book_title_suggestions_filter_internal_names():
     assert suggestions.suggestions == ["外婆慢慢说", "外婆的一生", "从前的日子"]
     assert "一个人一生回忆" in fake_ai.calls[0]["user_prompt"]
     assert "不要只抓某个场景、物件、单章细节" in fake_ai.calls[0]["user_prompt"]
+
+
+async def test_memoir_book_editorial_copy_filters_template_language():
+    copy = await generate_manuscript_editorial_copy(
+        title="外婆的回忆录",
+        snapshot=[
+            {
+                "chapter_id": "chapter-1",
+                "chapter_index": 1,
+                "chapter_title": "外婆家的童年",
+                "source_count": 1,
+                "source_refs": [{"utterance_id": "u1", "quote": "我小时候常在外婆家的院子里晒太阳。"}],
+                "content": "我小时候常在外婆家的院子里晒太阳。",
+            }
+        ],
+        ai_model="fake-model",
+        ai_client=FakeTemplateCopyAI(),
+    )
+
+    assert copy is not None
+    assert copy.book_title == "外婆慢慢说"
+    assert copy.cover_subtitle == "关于童年与离家的记忆"
+    assert copy.preface == ""
+    assert copy.chapter_intros == []
+    assert copy.back_cover_quote == ""
 
 
 async def _create_confirmed_book_plan(test_db, *, project_id: str, confirmed_chapters: bool = True):
@@ -301,14 +344,15 @@ async def test_mobile_memoir_book_output_generate_combines_confirmed_chapters(cl
     assert manuscript["front_matter"][3]["title"] == "写在前面"
     assert [item["title"] for item in manuscript["table_of_contents"]] == ["外婆家的童年", "第一次离家"]
     assert manuscript["chapters"][0]["chapter_id"] == chapters[0].id
-    assert manuscript["chapters"][0]["intro"].startswith("关于「外婆家的童年」")
+    assert manuscript["chapters"][0]["intro"].startswith("记忆先从一个清楚的画面展开")
     assert "这一章主要记录" not in manuscript["chapters"][0]["intro"]
+    assert "从口述内容看" not in manuscript["chapters"][0]["intro"]
     assert manuscript["chapters"][0]["pull_quotes"][0]["text"] == "我小时候常在外婆家的院子里晒太阳。"
     assert manuscript["chapters"][0]["source_refs"][0]["utterance_id"] == "utterance-1"
     assert manuscript["back_matter"]["interview_records"]["title"] == "讲述资料"
     assert manuscript["back_matter"]["version_note"]["title"] == "版本与修订"
     assert manuscript["back_matter"]["source_appendix"]["title"] == "口述来源索引"
-    assert "第1章「外婆家的童年」：1 条口述记录" in manuscript["back_matter"]["source_appendix"]["content"]
+    assert "第1章「外婆家的童年」：1 条口述片段" in manuscript["back_matter"]["source_appendix"]["content"]
     assert manuscript["render_settings"]["back_cover_quote"] == "我小时候常在外婆家的院子里晒太阳。"
     assert manuscript["render_settings"]["page_size"] == "a5"
 
@@ -374,7 +418,10 @@ async def test_mobile_memoir_book_output_update_title_and_cover_style(client, te
     assert latest["manuscript"]["render_settings"]["cover_style"] == "warm_gray"
     assert latest["manuscript"]["render_settings"]["back_cover_quote"] == "我小时候常在院子里晒太阳。"
     assert latest["manuscript"]["front_matter"][0]["title"] == "外婆慢慢说"
-    assert latest["manuscript"]["front_matter"][1]["content"] == "一家人记得的旧日子\n\n口述：外婆\n\n整理：小林整理\n\n仅供家人保存与阅读"
+    assert latest["manuscript"]["front_matter"][1]["content"].startswith(
+        "一家人记得的旧日子\n\n口述：外婆\n\n整理：小林整理\n\n"
+    )
+    assert "仅供家人保存与阅读" not in latest["manuscript"]["front_matter"][1]["content"]
     assert latest["manuscript"]["front_matter"][3]["content"] == "这本书从家里的讲述开始。"
     assert latest["manuscript"]["back_matter"]["afterword"]["content"] == "以后还可以继续补充。"
 
@@ -416,7 +463,10 @@ async def test_mobile_memoir_book_output_exports_txt_and_pdf(client, test_db):
     assert pdf.content.startswith(b"%PDF-")
     assert b"/MediaBox [ 0 0 420 595 ]" in pdf.content
     assert b"/FontFile2" in pdf.content
+    assert b"MemoirNotoSerifSC" in pdf.content
     assert b"NotoSansSC" in pdf.content
+    assert b"STSong-Light" not in pdf.content
+    assert b"Adobe-GB1" not in pdf.content
     assert pdf.content.count(b"/Type /Page") >= 8
     assert pdf_without_sources.status_code == 200
     assert pdf_without_sources.content != pdf.content
@@ -436,6 +486,9 @@ async def test_mobile_memoir_book_output_exports_txt_and_pdf(client, test_db):
     assert fallback_pdf.content.startswith(b"%PDF-")
     assert b"/MediaBox [ 0 0 420 595 ]" in fallback_pdf.content
     assert b"/FontFile2" in fallback_pdf.content
+    assert b"MemoirNotoSerifSC" in fallback_pdf.content
+    assert b"STSong-Light" not in fallback_pdf.content
+    assert b"Adobe-GB1" not in fallback_pdf.content
 
 
 async def test_mobile_memoir_book_output_exports_selected_version(client, test_db):
