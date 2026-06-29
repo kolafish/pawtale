@@ -20,6 +20,7 @@ from app.services.memoir.book_manuscript_cleanup import (
 
 PDF_SANS_FONT_NAME = "MemoirNotoSansSC"
 PDF_SERIF_FONT_NAME = "MemoirNotoSerifSC"
+PDF_SERIF_BOLD_FONT_NAME = "MemoirNotoSerifSCBold"
 PDF_FONT_NAME = PDF_SERIF_FONT_NAME
 PDF_SANS_FONT_PATH = (
     Path(__file__).resolve().parents[2]
@@ -32,6 +33,12 @@ PDF_SERIF_FONT_PATH = (
     / "assets"
     / "fonts"
     / "NotoSerifSC-Regular.ttf"
+)
+PDF_SERIF_BOLD_FONT_PATH = (
+    Path(__file__).resolve().parents[2]
+    / "assets"
+    / "fonts"
+    / "NotoSerifSC-Bold.ttf"
 )
 _PDF_FONT_REGISTERED = False
 PDFColor = tuple[float, float, float]
@@ -46,6 +53,7 @@ class PDFCoverStyle:
     text: PDFColor
     line: PDFColor
     subtle_line: PDFColor
+    image_layout: str = ""
     cover_background_image: Path | None = None
     back_cover_background_image: Path | None = None
 
@@ -74,8 +82,18 @@ PDF_COVER_STYLES: dict[str, PDFCoverStyle] = {
         text=(0.22, 0.13, 0.06),
         line=(0.34, 0.25, 0.16),
         subtle_line=(0.62, 0.54, 0.43),
+        image_layout="watercolor",
         cover_background_image=PDF_BOOK_COVER_ASSET_DIR / "moonlit_courtyard_cover.jpg",
         back_cover_background_image=PDF_BOOK_COVER_ASSET_DIR / "moonlit_courtyard_back_cover.jpg",
+    ),
+    "navy_gilt": PDFCoverStyle(
+        background=(0.02, 0.05, 0.08),
+        text=(0.86, 0.65, 0.34),
+        line=(0.72, 0.50, 0.24),
+        subtle_line=(0.55, 0.41, 0.23),
+        image_layout="navy_gilt",
+        cover_background_image=PDF_BOOK_COVER_ASSET_DIR / "navy_gilt_cover.jpg",
+        back_cover_background_image=PDF_BOOK_COVER_ASSET_DIR / "navy_gilt_back_cover.jpg",
     ),
 }
 
@@ -726,8 +744,11 @@ def _register_pdf_font() -> None:
         raise RuntimeError(f"PDF font file not found: {PDF_SANS_FONT_PATH}")
     if not PDF_SERIF_FONT_PATH.exists():
         raise RuntimeError(f"PDF font file not found: {PDF_SERIF_FONT_PATH}")
+    if not PDF_SERIF_BOLD_FONT_PATH.exists():
+        raise RuntimeError(f"PDF font file not found: {PDF_SERIF_BOLD_FONT_PATH}")
     pdfmetrics.registerFont(TTFont(PDF_SANS_FONT_NAME, str(PDF_SANS_FONT_PATH)))
     pdfmetrics.registerFont(TTFont(PDF_SERIF_FONT_NAME, str(PDF_SERIF_FONT_PATH)))
+    pdfmetrics.registerFont(TTFont(PDF_SERIF_BOLD_FONT_NAME, str(PDF_SERIF_BOLD_FONT_PATH)))
     _PDF_FONT_REGISTERED = True
 
 
@@ -974,6 +995,7 @@ def _add_watercolor_cover_page(
         line_height=layout.line_height + 30,
         max_units=max(6, layout.max_line_units - 12),
         color=style.text,
+        font_name=PDF_SERIF_BOLD_FONT_NAME,
         spacing_after=12,
     )
     separator_y = min(title_next_y + 24, layout.page_height - 250)
@@ -986,6 +1008,7 @@ def _add_watercolor_cover_page(
             line_height=layout.line_height + 6,
             max_units=max(10, layout.max_line_units - 6),
             color=style.text,
+            font_name=PDF_SERIF_BOLD_FONT_NAME,
         )
 
     credit_y = layout.margin_bottom + 64
@@ -1017,6 +1040,114 @@ def _add_watercolor_cover_page(
     )
 
 
+def _add_navy_gilt_separator(builder: PDFBookBuilder, *, style: PDFCoverStyle, y: int, width: int = 160) -> None:
+    gap = 30
+    left_width = (width - gap) / 2
+    center_x = builder.layout.page_width / 2
+    builder.add_decoration(
+        kind="line",
+        x=center_x - width / 2,
+        y=y,
+        width=left_width,
+        height=0,
+        color=style.line,
+        line_width=0.45,
+    )
+    builder.add_decoration(
+        kind="line",
+        x=center_x + gap / 2,
+        y=y,
+        width=left_width,
+        height=0,
+        color=style.line,
+        line_width=0.45,
+    )
+    builder.add_centered_at(
+        "◇",
+        y=y - 5,
+        font_size=max(8, builder.layout.small_font_size - 1),
+        line_height=builder.layout.line_height,
+        max_units=builder.layout.max_line_units,
+        color=style.text,
+    )
+
+
+def _add_navy_gilt_cover_page(
+    builder: PDFBookBuilder,
+    *,
+    title: str,
+    subtitle: str,
+    narrator_name: str,
+    prepared_by: str,
+    style: PDFCoverStyle,
+) -> None:
+    builder.new_page(
+        show_header=False,
+        show_footer=False,
+        background_color=style.background,
+        background_image_path=style.cover_background_image,
+        text_color=style.text,
+    )
+    layout = builder.layout
+    builder.add_centered_at(
+        "家庭回忆录",
+        y=layout.page_height - 176,
+        font_size=layout.small_font_size + 4,
+        line_height=layout.line_height,
+        max_units=layout.max_line_units,
+        color=style.text,
+    )
+    title_next_y = builder.add_centered_at(
+        title,
+        y=layout.page_height - 250,
+        font_size=layout.title_font_size + 20,
+        line_height=layout.line_height + 30,
+        max_units=max(6, layout.max_line_units - 12),
+        color=style.text,
+        font_name=PDF_SERIF_BOLD_FONT_NAME,
+        spacing_after=8,
+    )
+    _add_navy_gilt_separator(builder, style=style, y=title_next_y + 20, width=190)
+    if subtitle:
+        builder.add_centered_at(
+            subtitle,
+            y=title_next_y - 22,
+            font_size=layout.font_size + 5,
+            line_height=layout.line_height + 7,
+            max_units=max(10, layout.max_line_units - 6),
+            color=style.text,
+            font_name=PDF_SERIF_BOLD_FONT_NAME,
+        )
+
+    credit_y = layout.margin_bottom + 74
+    if narrator_name:
+        builder.add_centered_at(
+            f"口述：{narrator_name}",
+            y=credit_y + 24,
+            font_size=layout.small_font_size + 2,
+            line_height=layout.line_height,
+            max_units=layout.max_line_units,
+            color=style.text,
+        )
+    builder.add_centered_at(
+        f"整理：{prepared_by or '家人'}",
+        y=credit_y,
+        font_size=layout.small_font_size + 2,
+        line_height=layout.line_height,
+        max_units=layout.max_line_units,
+        color=style.text,
+    )
+    _add_navy_gilt_separator(builder, style=style, y=layout.margin_bottom + 2, width=92)
+    builder.add_centered_at(
+        _today_date_text()[:4],
+        y=layout.margin_bottom - 29,
+        font_size=layout.small_font_size + 4,
+        line_height=layout.line_height,
+        max_units=layout.max_line_units,
+        color=style.text,
+    )
+
+
 def _add_cover_page(
     builder: PDFBookBuilder,
     *,
@@ -1027,6 +1158,16 @@ def _add_cover_page(
     cover_style: str,
 ) -> None:
     style = _cover_style(cover_style)
+    if style.cover_background_image and style.image_layout == "navy_gilt":
+        _add_navy_gilt_cover_page(
+            builder,
+            title=title,
+            subtitle=subtitle,
+            narrator_name=narrator_name,
+            prepared_by=prepared_by,
+            style=style,
+        )
+        return
     if style.cover_background_image:
         _add_watercolor_cover_page(
             builder,
@@ -1454,6 +1595,7 @@ def _add_watercolor_back_cover(builder: PDFBookBuilder, *, quote: str, style: PD
             line_height=layout.line_height + 18,
             max_units=layout.max_line_units,
             color=style.text,
+            font_name=PDF_SERIF_BOLD_FONT_NAME,
         )
     quote_next_y -= 28
     _add_watercolor_separator(builder, style=style, y=quote_next_y + 8, width=92)
@@ -1475,8 +1617,49 @@ def _add_watercolor_back_cover(builder: PDFBookBuilder, *, quote: str, style: PD
     )
 
 
+def _add_navy_gilt_back_cover(builder: PDFBookBuilder, *, quote: str, style: PDFCoverStyle) -> None:
+    builder.new_page(
+        show_header=False,
+        show_footer=False,
+        background_color=style.background,
+        background_image_path=style.back_cover_background_image or style.cover_background_image,
+        text_color=style.text,
+    )
+    layout = builder.layout
+    quote_next_y = layout.page_height - 154
+    for line in _watercolor_back_cover_quote_lines(quote, max_units=max(13, layout.max_line_units - 10)):
+        quote_next_y = builder.add_centered_at(
+            line,
+            y=quote_next_y,
+            font_size=layout.font_size + 7,
+            line_height=layout.line_height + 17,
+            max_units=layout.max_line_units,
+            color=style.text,
+            font_name=PDF_SERIF_BOLD_FONT_NAME,
+        )
+    builder.add_centered_at(
+        "本书根据口述访谈整理",
+        y=layout.margin_bottom + 118,
+        font_size=layout.small_font_size + 1,
+        line_height=layout.line_height,
+        max_units=layout.max_line_units,
+        color=style.text,
+    )
+    builder.add_centered_at(
+        f"整理于 {_today_month_text()}",
+        y=layout.margin_bottom + 94,
+        font_size=layout.small_font_size + 1,
+        line_height=layout.line_height,
+        max_units=layout.max_line_units,
+        color=style.text,
+    )
+
+
 def _add_back_cover(builder: PDFBookBuilder, *, quote: str, cover_style: str) -> None:
     style = _cover_style(cover_style)
+    if style.back_cover_background_image and style.image_layout == "navy_gilt":
+        _add_navy_gilt_back_cover(builder, quote=quote, style=style)
+        return
     if style.back_cover_background_image:
         _add_watercolor_back_cover(builder, quote=quote, style=style)
         return

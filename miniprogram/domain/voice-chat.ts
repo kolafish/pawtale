@@ -676,7 +676,7 @@ export interface MemoirBookOutputGenerateRequest {
   force_regenerate?: boolean;
 }
 
-export type MemoirBookCoverStyle = "classic_plain" | "warm_gray" | "dark_album" | "moonlit_courtyard";
+export type MemoirBookCoverStyle = "classic_plain" | "warm_gray" | "dark_album" | "moonlit_courtyard" | "navy_gilt";
 
 export interface MemoirBookOutputUpdateRequest {
   title?: string | null;

@@ -205,7 +205,7 @@ def _formal_book_title(raw_title: str) -> str:
 def _cover_style(value: str | None) -> str:
     return (
         value
-        if value in {"classic_plain", "warm_gray", "dark_album", "moonlit_courtyard"}
+        if value in {"classic_plain", "warm_gray", "dark_album", "moonlit_courtyard", "navy_gilt"}
         else DEFAULT_BOOK_COVER_STYLE
     )
 

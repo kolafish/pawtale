@@ -214,6 +214,11 @@ export const BOOK_COVER_STYLE_OPTIONS: BookCoverStyleOptionView[] = [
     label: "月下庭院",
     detailText: "水墨庭院底图、墨褐标题，适合家庭回忆录默认封面封底",
   },
+  {
+    value: "navy_gilt",
+    label: "深蓝烫金",
+    detailText: "深蓝布面底图、金色标题和边框，适合更庄重的纪念册",
+  },
 ];
 
 export interface BookVoiceCommandUndoSnapshot {
