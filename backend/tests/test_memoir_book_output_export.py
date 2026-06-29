@@ -63,12 +63,48 @@ def test_manuscript_pdf_pages_use_book_page_semantics():
     assert chapter_pages[0].body_page_number == 1
     assert chapter_pages[0].header_title == ""
     assert chapter_pages[0].show_footer is False
+    assert chapter_pages[0].anchor == "chapter-1"
+    assert chapter_pages[0].outline_title == "第一章 外婆家的童年"
     assert any(command.text == "第一章" for command in chapter_pages[0].commands)
     assert any(command.text == "外婆家的童年" for command in chapter_pages[0].commands)
 
     assert chapter_pages[1].body_page_number == 2
     assert chapter_pages[1].header_title == "外婆回忆录"
     assert chapter_pages[1].show_footer is True
+
+
+def test_table_of_contents_links_to_numbered_chapter_pages():
+    pages = _build_manuscript_pdf_pages(
+        title="外婆回忆录",
+        content="外婆回忆录",
+        manuscript=_sample_manuscript("我小时候常在外婆家的院子里晒太阳。"),
+        layout=PDF_LAYOUTS[MemoirBookOutputExportLayout.STANDARD],
+        show_source_appendix=None,
+    )
+
+    toc_page = next(page for page in pages if page.section_title == "目录")
+    toc_command = next(command for command in toc_page.commands if "外婆家的童年" in command.text)
+
+    assert toc_command.target_anchor == "chapter-1"
+    assert toc_command.text.endswith("1")
+
+
+def test_table_of_contents_skips_links_without_chapter_pages():
+    manuscript = _sample_manuscript("我小时候常在外婆家的院子里晒太阳。")
+    manuscript["table_of_contents"].append({"index": 2, "title": "还没有写完的一章"})
+
+    pages = _build_manuscript_pdf_pages(
+        title="外婆回忆录",
+        content="外婆回忆录",
+        manuscript=manuscript,
+        layout=PDF_LAYOUTS[MemoirBookOutputExportLayout.STANDARD],
+        show_source_appendix=None,
+    )
+
+    toc_page = next(page for page in pages if page.section_title == "目录")
+    missing_command = next(command for command in toc_page.commands if "还没有写完" in command.text)
+
+    assert missing_command.target_anchor is None
 
 
 def test_pdf_line_wrapping_respects_chinese_forbidden_breaks():

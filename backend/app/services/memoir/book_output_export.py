@@ -86,6 +86,7 @@ class PDFTextCommand:
     x: int
     y: int
     font_size: int
+    target_anchor: str | None = None
 
 
 @dataclass
@@ -95,6 +96,17 @@ class PDFPage:
     section_title: str = ""
     show_footer: bool = True
     body_page_number: int | None = None
+    anchor: str | None = None
+    outline_title: str | None = None
+    outline_level: int = 0
+
+
+@dataclass(frozen=True)
+class PDFTocEntry:
+    index: int
+    title: str
+    anchor: str
+    page_number: int | None = None
 
 
 LINE_START_FORBIDDEN_CHARS = set("，。！？；：、）】》」』”’〕］｝〉〗〙〛,.!?;:)]}")
@@ -206,6 +218,9 @@ class PDFBookBuilder:
         body_numbering: bool = False,
         continuation_show_header: bool | None = None,
         continuation_show_footer: bool | None = None,
+        anchor: str | None = None,
+        outline_title: str | None = None,
+        outline_level: int = 0,
     ) -> None:
         self.current_section = section_title or self.current_section
         self.current_body_numbering = body_numbering
@@ -225,6 +240,9 @@ class PDFBookBuilder:
             section_title=self.current_section,
             show_footer=show_footer,
             body_page_number=body_page_number,
+            anchor=anchor,
+            outline_title=outline_title,
+            outline_level=outline_level,
         )
         self.pages.append(self.current_page)
         self.y = self.layout.page_height - self.layout.margin_top
@@ -264,6 +282,7 @@ class PDFBookBuilder:
         spacing_after: int = 0,
         min_start_lines: int = 1,
         keep_last_lines: int = 1,
+        target_anchor: str | None = None,
     ) -> None:
         font_size = font_size or self.layout.font_size
         line_height = line_height or self.layout.line_height
@@ -296,6 +315,7 @@ class PDFBookBuilder:
                         x=self.layout.margin_x + line_indent,
                         y=self.y,
                         font_size=font_size,
+                        target_anchor=target_anchor,
                     )
                 )
                 self.y -= line_height
@@ -422,11 +442,24 @@ def _render_pdf_pages(pages: list[PDFPage], layout: PDFLayout) -> bytes:
     pdf.setTitle(first_title)
     pdf.setAuthor("Pawtale")
     for page_number, page in enumerate(pages, start=1):
+        if page.anchor:
+            pdf.bookmarkPage(page.anchor)
+            if page.outline_title:
+                pdf.addOutlineEntry(page.outline_title, page.anchor, level=page.outline_level)
         for command in _pdf_page_commands(page, page_number=page_number, layout=layout):
             if not command.text:
                 continue
             pdf.setFont(PDF_FONT_NAME, command.font_size)
             pdf.drawString(command.x, command.y, command.text)
+            if command.target_anchor:
+                width = max(24, _estimated_text_width(command.text, command.font_size))
+                pdf.linkRect(
+                    "",
+                    command.target_anchor,
+                    (command.x, command.y - 2, command.x + width, command.y + command.font_size + 2),
+                    relative=0,
+                    thickness=0,
+                )
         pdf.showPage()
     pdf.save()
     return output.getvalue()
@@ -559,28 +592,76 @@ def _chapter_label(chapter: dict[str, Any], fallback_index: int) -> str:
     return f"第{_chinese_number(index)}章"
 
 
-def _add_table_of_contents(
-    builder: PDFBookBuilder,
+def _chapter_anchor(fallback_index: int) -> str:
+    return f"chapter-{fallback_index}"
+
+
+def _truncate_units(text: str, max_units: float) -> str:
+    if _text_units(text) <= max_units:
+        return text
+    current = ""
+    current_units = 0.0
+    for char in text:
+        char_units = _char_units(char)
+        if current and current_units + char_units > max_units:
+            return f"{current}..."
+        current += char
+        current_units += char_units
+    return current
+
+
+def _toc_line(entry: PDFTocEntry, layout: PDFLayout) -> str:
+    page_text = str(entry.page_number) if entry.page_number is not None else ""
+    label = f"{entry.index}. {entry.title}"
+    if not page_text:
+        return label
+    label = _truncate_units(label, max(8, layout.max_line_units - _text_units(page_text) - 4))
+    leader_units = layout.max_line_units - _text_units(label) - _text_units(page_text) - 2
+    leaders = "." * max(2, int(leader_units / _char_units(".")))
+    return f"{label} {leaders} {page_text}"
+
+
+def _chapter_toc_entries(
     *,
     toc_items: list[Any],
     chapters: list[Any],
-) -> None:
-    builder.new_page("目录", show_header=False, show_footer=False)
-    builder.add_heading("目录")
+    page_numbers: dict[str, int] | None = None,
+) -> list[PDFTocEntry]:
+    page_numbers = page_numbers or {}
     items = toc_items or chapters
-    if not items:
-        builder.add_text("暂无章节。")
-        return
+    entries: list[PDFTocEntry] = []
     for fallback_index, raw_item in enumerate(items, start=1):
         item = _dict(raw_item)
         index = _int(item.get("index"), fallback_index)
         title = _str(item.get("title")) or f"第{index}章"
-        source_count = _int(item.get("source_count"), 0)
-        suffix = f"（{source_count} 条讲述来源）" if source_count else ""
+        anchor = _chapter_anchor(fallback_index)
+        entries.append(
+            PDFTocEntry(
+                index=index,
+                title=title,
+                anchor=anchor,
+                page_number=page_numbers.get(anchor),
+            )
+        )
+    return entries
+
+
+def _add_table_of_contents(
+    builder: PDFBookBuilder,
+    *,
+    entries: list[PDFTocEntry],
+) -> None:
+    builder.new_page("目录", show_header=False, show_footer=False)
+    builder.add_heading("目录")
+    if not entries:
+        builder.add_text("暂无章节。")
+        return
+    for entry in entries:
         builder.add_text(
-            f"{index}. {title}{suffix}",
+            _toc_line(entry, builder.layout),
             line_height=builder.layout.line_height + 2,
             max_units=builder.layout.max_line_units - 1,
+            target_anchor=entry.anchor if entry.page_number is not None else None,
         )
 
 
@@ -589,6 +670,7 @@ def _add_chapters(builder: PDFBookBuilder, chapters: list[Any]) -> None:
         chapter = _dict(raw_chapter)
         title = _chapter_title(chapter, fallback_index)
         label = _chapter_label(chapter, fallback_index)
+        anchor = _chapter_anchor(fallback_index)
         builder.new_page(
             title,
             show_header=False,
@@ -596,6 +678,8 @@ def _add_chapters(builder: PDFBookBuilder, chapters: list[Any]) -> None:
             body_numbering=True,
             continuation_show_header=True,
             continuation_show_footer=True,
+            anchor=anchor,
+            outline_title=f"{label} {title}",
         )
         builder.add_spacer(2.5)
         builder.add_text(
@@ -706,6 +790,35 @@ def _add_back_matter(builder: PDFBookBuilder, back_matter: dict[str, Any], *, in
             )
 
 
+def _chapter_page_numbers(pages: list[PDFPage]) -> dict[str, int]:
+    page_numbers: dict[str, int] = {}
+    for page in pages:
+        if page.anchor and page.body_page_number is not None:
+            page_numbers[page.anchor] = page.body_page_number
+    return page_numbers
+
+
+def _build_structured_manuscript_pdf_pages(
+    *,
+    book_title: str,
+    subtitle: str,
+    prepared_by: str,
+    front_matter: list[Any],
+    chapters: list[Any],
+    back_matter: dict[str, Any],
+    include_source_appendix: bool,
+    toc_entries: list[PDFTocEntry],
+    layout: PDFLayout,
+) -> list[PDFPage]:
+    builder = PDFBookBuilder(title=book_title, layout=layout)
+    _add_cover_page(builder, title=book_title, subtitle=subtitle, prepared_by=prepared_by)
+    _add_front_matter(builder, front_matter, title=book_title, subtitle=subtitle)
+    _add_table_of_contents(builder, entries=toc_entries)
+    _add_chapters(builder, chapters)
+    _add_back_matter(builder, back_matter, include_source_appendix=include_source_appendix)
+    return builder.pages
+
+
 def _build_manuscript_pdf_pages(
     *,
     title: str,
@@ -738,17 +851,35 @@ def _build_manuscript_pdf_pages(
         else setting_source_appendix is not False
     )
 
-    builder = PDFBookBuilder(title=book_title, layout=layout)
-    _add_cover_page(builder, title=book_title, subtitle=subtitle, prepared_by=prepared_by)
-    _add_front_matter(builder, front_matter, title=book_title, subtitle=subtitle)
-    _add_table_of_contents(
-        builder,
-        toc_items=_list(manuscript.get("table_of_contents")),
+    toc_items = _list(manuscript.get("table_of_contents"))
+    initial_entries = _chapter_toc_entries(toc_items=toc_items, chapters=chapters)
+    initial_pages = _build_structured_manuscript_pdf_pages(
+        book_title=book_title,
+        subtitle=subtitle,
+        prepared_by=prepared_by,
+        front_matter=front_matter,
         chapters=chapters,
+        back_matter=back_matter,
+        include_source_appendix=include_source_appendix,
+        toc_entries=initial_entries,
+        layout=layout,
     )
-    _add_chapters(builder, chapters)
-    _add_back_matter(builder, back_matter, include_source_appendix=include_source_appendix)
-    return builder.pages
+    toc_entries = _chapter_toc_entries(
+        toc_items=toc_items,
+        chapters=chapters,
+        page_numbers=_chapter_page_numbers(initial_pages),
+    )
+    return _build_structured_manuscript_pdf_pages(
+        book_title=book_title,
+        subtitle=subtitle,
+        prepared_by=prepared_by,
+        front_matter=front_matter,
+        chapters=chapters,
+        back_matter=back_matter,
+        include_source_appendix=include_source_appendix,
+        toc_entries=toc_entries,
+        layout=layout,
+    )
 
 
 def _render_manuscript_pdf(
