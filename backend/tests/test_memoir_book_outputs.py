@@ -334,7 +334,16 @@ async def test_mobile_memoir_book_output_update_title_and_cover_style(client, te
 
     response = await client.patch(
         f"/api/mobile/memoir/projects/{project_id}/book-output",
-        json={"title": "外婆慢慢说", "cover_style": "warm_gray"},
+        json={
+            "title": "外婆慢慢说",
+            "subtitle": "一家人记得的旧日子",
+            "narrator_name": "外婆",
+            "prepared_by": "小林整理",
+            "preface": "这本书从家里的讲述开始。",
+            "afterword": "以后还可以继续补充。",
+            "back_cover_quote": "我小时候常在院子里晒太阳。",
+            "cover_style": "warm_gray",
+        },
     )
 
     assert response.status_code == 200
@@ -343,8 +352,15 @@ async def test_mobile_memoir_book_output_update_title_and_cover_style(client, te
     latest = data["latest_version"]
     assert latest["content"].startswith("外婆慢慢说\n\n目录")
     assert latest["manuscript"]["profile"]["title"] == "外婆慢慢说"
+    assert latest["manuscript"]["profile"]["subtitle"] == "一家人记得的旧日子"
+    assert latest["manuscript"]["profile"]["narrator_name"] == "外婆"
+    assert latest["manuscript"]["profile"]["prepared_by"] == "小林整理"
     assert latest["manuscript"]["render_settings"]["cover_style"] == "warm_gray"
+    assert latest["manuscript"]["render_settings"]["back_cover_quote"] == "我小时候常在院子里晒太阳。"
     assert latest["manuscript"]["front_matter"][0]["title"] == "外婆慢慢说"
+    assert latest["manuscript"]["front_matter"][1]["content"] == "一家人记得的旧日子\n\n口述：外婆\n\n整理：小林整理\n\n仅供家人保存与阅读"
+    assert latest["manuscript"]["front_matter"][3]["content"] == "这本书从家里的讲述开始。"
+    assert latest["manuscript"]["back_matter"]["afterword"]["content"] == "以后还可以继续补充。"
 
 
 async def test_mobile_memoir_book_output_generate_returns_existing_without_force(client, test_db):

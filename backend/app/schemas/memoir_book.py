@@ -681,10 +681,25 @@ MemoirBookCoverStyle = Literal["classic_plain", "warm_gray", "dark_album"]
 class MemoirBookOutputGenerateRequest(BaseModel):
     ai_model: str | None = None
     title: str | None = None
+    subtitle: str | None = None
+    narrator_name: str | None = None
+    prepared_by: str | None = None
+    preface: str | None = None
+    afterword: str | None = None
+    back_cover_quote: str | None = None
     cover_style: MemoirBookCoverStyle | None = None
     force_regenerate: bool = False
 
-    @field_validator("ai_model", "title")
+    @field_validator(
+        "ai_model",
+        "title",
+        "subtitle",
+        "narrator_name",
+        "prepared_by",
+        "preface",
+        "afterword",
+        "back_cover_quote",
+    )
     @classmethod
     def _valid_optional_text(cls, value: str | None) -> str | None:
         if value is None:
@@ -695,6 +710,12 @@ class MemoirBookOutputGenerateRequest(BaseModel):
 
 class MemoirBookOutputUpdateRequest(BaseModel):
     title: str | None = None
+    subtitle: str | None = None
+    narrator_name: str | None = None
+    prepared_by: str | None = None
+    preface: str | None = None
+    afterword: str | None = None
+    back_cover_quote: str | None = None
     cover_style: MemoirBookCoverStyle | None = None
 
     @field_validator("title")
@@ -706,6 +727,13 @@ class MemoirBookOutputUpdateRequest(BaseModel):
         if not title:
             raise ValueError("书名不能为空")
         return title
+
+    @field_validator("subtitle", "narrator_name", "prepared_by", "preface", "afterword", "back_cover_quote")
+    @classmethod
+    def _valid_optional_book_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return value.strip()
 
 
 class MemoirBookTitleSuggestionRequest(BaseModel):

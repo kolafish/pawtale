@@ -22,6 +22,7 @@ import type {
 import type { BookChapterView, BookData, BookVoiceCommandUndoSnapshot } from "./book-view-model";
 import { getMemoirIdentity } from "../../services/auth";
 import { normalizeMemoirAsrText } from "../../services/asr-text-normalization";
+import { memoirProjectProfile } from "../../services/memoir-project-profile";
 
 import {
   acknowledgeMemoirAutomationEvent,
@@ -135,6 +136,7 @@ interface DatasetEvent {
     dataset: {
       id?: string;
       eventIds?: string;
+      key?: string;
       action?: string;
       direction?: string;
       format?: MemoirBookOutputExportFormat;
@@ -201,6 +203,52 @@ function latestBookTitle(output: MemoirBookOutput | null): string {
 function latestBookCoverStyle(output: MemoirBookOutput | null): MemoirBookCoverStyle {
   const style = output?.latest_version?.manuscript?.render_settings?.cover_style;
   return style === "warm_gray" || style === "dark_album" ? style : "classic_plain";
+}
+
+function latestBookMetadata(output: MemoirBookOutput | null): Record<string, string> {
+  const manuscript = output?.latest_version?.manuscript || null;
+  const frontMatter = manuscript?.front_matter || [];
+  const preface = frontMatter.find((section) => section.kind === "preface")?.content || "";
+  return {
+    subtitle: trimText(manuscript?.profile?.subtitle || ""),
+    narrator_name: trimText(manuscript?.profile?.narrator_name || ""),
+    prepared_by: trimText(manuscript?.profile?.prepared_by || "家人整理"),
+    preface: trimText(preface),
+    afterword: trimText(manuscript?.back_matter?.afterword?.content || ""),
+    back_cover_quote: trimText(manuscript?.render_settings?.back_cover_quote || ""),
+  };
+}
+
+function bookMetadataChanged(data: BookData): boolean {
+  const stored = latestBookMetadata(data.bookOutput);
+  return (
+    trimText(data.bookSubtitleInput) !== stored.subtitle
+    || trimText(data.bookNarratorNameInput) !== stored.narrator_name
+    || trimText(data.bookPreparedByInput || "家人整理") !== stored.prepared_by
+    || trimText(data.bookPrefaceInput) !== stored.preface
+    || trimText(data.bookAfterwordInput) !== stored.afterword
+    || trimText(data.bookBackCoverQuoteInput) !== stored.back_cover_quote
+  );
+}
+
+function currentBookMetadataPayload(data: BookData, includeEmpty: boolean): Record<string, string> {
+  const values: Record<string, string> = {
+    subtitle: trimText(data.bookSubtitleInput),
+    narrator_name: trimText(data.bookNarratorNameInput),
+    prepared_by: trimText(data.bookPreparedByInput) || "家人整理",
+    preface: trimText(data.bookPrefaceInput),
+    afterword: trimText(data.bookAfterwordInput),
+    back_cover_quote: trimText(data.bookBackCoverQuoteInput),
+  };
+  if (includeEmpty) {
+    return values;
+  }
+  return Object.keys(values).reduce<Record<string, string>>((memo, key) => {
+    if (values[key]) {
+      memo[key] = values[key];
+    }
+    return memo;
+  }, {});
 }
 
 function defaultBookTitleInput(planTitle: string, projectTitle: string): string {
@@ -462,6 +510,7 @@ Page<BookData, {
   updatePlanStructure(chapters: MemoirBookPlanChapterUpdateInput[], toastTitle: string): Promise<MemoirBookPlan | null>;
   regenerateMergedChapter(chapterId: string): Promise<void>;
   changeBookTitle(event: TextInputEvent): void;
+  changeBookMetadataField(event: TextInputEvent): void;
   saveBookDesignSettings(): Promise<void>;
   suggestBookTitles(): Promise<void>;
   chooseBookTitleSuggestion(event: DatasetEvent): void;
@@ -586,6 +635,7 @@ Page<BookData, {
     error: "",
     projectId: "",
     projectTitle: "我的回忆录",
+    projectNarratorName: "",
     plan: null,
     planTitle: "",
     stage: "empty",
@@ -637,7 +687,14 @@ Page<BookData, {
     bookExportLayoutOptions: BOOK_EXPORT_LAYOUT_OPTIONS,
     bookExportShowSourceAppendix: true,
     bookTitleInput: "",
+    bookSubtitleInput: "",
+    bookNarratorNameInput: "",
+    bookPreparedByInput: "家人整理",
+    bookPrefaceInput: "",
+    bookAfterwordInput: "",
+    bookBackCoverQuoteInput: "",
     bookTitleChanged: false,
+    bookMetadataChanged: false,
     bookTitleSaving: false,
     bookTitleSuggesting: false,
     bookTitleSuggestions: [],
@@ -703,7 +760,8 @@ Page<BookData, {
       const identity = await getMemoirIdentity();
       const projectId = identity.active_project_id;
       const projectTitle = identity.active_project?.title || "尚未创建回忆录";
-      this.setData({ needsLogin: false, projectId, projectTitle });
+      const projectNarratorName = memoirProjectProfile(identity.active_project).narratorName;
+      this.setData({ needsLogin: false, projectId, projectTitle, projectNarratorName });
       if (!projectId) {
         this.applyPlan(null);
         this.applySourceCoverage(null);
@@ -844,6 +902,10 @@ Page<BookData, {
     if (!output && !outputData.bookTitleInput) {
       outputData.bookTitleInput = defaultBookTitleInput(this.data.planTitle, this.data.projectTitle);
     }
+    if (!outputData.bookNarratorNameInput && this.data.projectNarratorName) {
+      outputData.bookNarratorNameInput = this.data.projectNarratorName;
+      outputData.bookMetadataChanged = Boolean(output?.latest_version);
+    }
     this.setData(outputData);
   },
 
@@ -855,6 +917,29 @@ Page<BookData, {
     this.setData({
       bookTitleInput: value,
       bookTitleChanged: trimText(value) !== trimText(storedTitle),
+    });
+  },
+
+  changeBookMetadataField(event) {
+    const key = String(event.currentTarget.dataset.key || "");
+    const fieldByKey: Record<string, keyof BookData> = {
+      subtitle: "bookSubtitleInput",
+      narrator_name: "bookNarratorNameInput",
+      prepared_by: "bookPreparedByInput",
+      preface: "bookPrefaceInput",
+      afterword: "bookAfterwordInput",
+      back_cover_quote: "bookBackCoverQuoteInput",
+    };
+    const field = fieldByKey[key];
+    if (!field) {
+      return;
+    }
+    const value = event.detail.value;
+    const nextData = { ...this.data, [field]: value } as BookData;
+    this.setData({
+      [field]: value,
+      bookMetadataChanged: bookMetadataChanged(nextData),
+      error: "",
     });
   },
 
@@ -938,11 +1023,18 @@ Page<BookData, {
       return;
     }
     const coverStyle = this.data.bookCoverStyle;
+    const metadata = currentBookMetadataPayload(this.data, true);
     this.stopPlayback();
     this.setData({ bookTitleSaving: true, error: "" });
     try {
       const output = await updateMemoirBookOutput(this.data.projectId, {
         title,
+        subtitle: metadata.subtitle,
+        narrator_name: metadata.narrator_name,
+        prepared_by: metadata.prepared_by,
+        preface: metadata.preface,
+        afterword: metadata.afterword,
+        back_cover_quote: metadata.back_cover_quote,
         cover_style: coverStyle,
       });
       this.applyBookOutput(output);
@@ -950,7 +1042,14 @@ Page<BookData, {
         || this.data.bookCoverStyleOptions[0];
       this.setData({
         bookTitleInput: title,
+        bookSubtitleInput: metadata.subtitle,
+        bookNarratorNameInput: metadata.narrator_name,
+        bookPreparedByInput: metadata.prepared_by,
+        bookPrefaceInput: metadata.preface,
+        bookAfterwordInput: metadata.afterword,
+        bookBackCoverQuoteInput: metadata.back_cover_quote,
         bookTitleChanged: false,
+        bookMetadataChanged: false,
         bookCoverStyle: option.value,
         bookCoverStyleIndex: Math.max(
           0,
@@ -1705,9 +1804,11 @@ Page<BookData, {
     this.stopPlayback();
     this.setData({ generatingBook: true, error: "" });
     try {
+      const metadata = currentBookMetadataPayload(this.data, false);
       const output = await generateMemoirBookOutput(this.data.projectId, {
         force_regenerate: Boolean(this.data.bookOutput?.latest_version),
         title: trimText(this.data.bookTitleInput) || undefined,
+        ...metadata,
         cover_style: this.data.bookCoverStyle,
       });
       this.applyBookOutput(output);
