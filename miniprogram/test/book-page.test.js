@@ -896,6 +896,7 @@ test("book page exposes manuscript structure sections", () => {
   assert.match(wxml, /bookManuscriptStructureItems/);
   assert.match(wxml, /bookManuscriptChapterItems/);
   assert.match(wxml, /bookManuscriptBackMatterItems/);
+  assert.match(wxml, /bindtap="toggleBookPreviewChapters"/);
 });
 
 test("book page builds outline narration for saved chapter titles", () => {
@@ -961,6 +962,7 @@ test("book page summarizes latest book output version", () => {
   assert.equal(data.bookPreviewTitle, "外婆回忆录");
   assert.equal(data.bookPreviewTocItems.length, 2);
   assert.equal(data.bookPreviewTocItems[0].metaText, "14 字 · 2 条素材");
+  assert.equal(data.bookPreviewChaptersExpanded, false);
   assert.equal(data.bookPreviewChapters[0].indexText, "第 1 章");
   assert.equal(data.bookPreviewChapters[0].content, "我小时候常在院子里晒太阳。");
   assert.equal(data.bookPreviewChapters[0].metaText, "14 字 · 2 条素材 · 第 1 版");
@@ -980,6 +982,21 @@ test("book page summarizes latest book output version", () => {
     mod.bookOutputStaleNotice(sampleBookOutput(3, "全书正文", true, ["外婆家的童年", "第一次离家", "县城生活"])),
     "章节「外婆家的童年、第一次离家」等章节已更新，请重新生成全书。",
   );
+});
+
+test("book page toggles full-book chapter body preview", () => {
+  const { page } = loadBookPage();
+  const context = pageContext(page);
+  page.applyBookOutput.call(
+    context,
+    sampleBookOutput(3, "全书正文", false, [], sampleStructuredBookContent(), [], sampleBookManuscript()),
+  );
+
+  assert.equal(context.data.bookPreviewChaptersExpanded, false);
+  page.toggleBookPreviewChapters.call(context);
+  assert.equal(context.data.bookPreviewChaptersExpanded, true);
+  page.toggleBookPreviewChapters.call(context);
+  assert.equal(context.data.bookPreviewChaptersExpanded, false);
 });
 
 test("book page switches full-book output versions without changing the latest output", () => {
@@ -1014,12 +1031,15 @@ test("book page switches full-book output versions without changing the latest o
   assert.equal(context.data.bookVersionText, "全书第 2 版");
   assert.equal(context.data.bookContent, "全书第二版正文");
   assert.equal(context.data.bookViewingHistoricalVersion, false);
+  page.toggleBookPreviewChapters.call(context);
+  assert.equal(context.data.bookPreviewChaptersExpanded, true);
 
   page.changeBookOutputVersion.call(context, { currentTarget: { dataset: {} }, detail: { value: "1" } });
 
   assert.equal(context.data.bookSelectedVersionId, "book-output-version-1");
   assert.equal(context.data.bookVersionText, "全书第 1 版");
   assert.equal(context.data.bookContent, "全书第一版正文");
+  assert.equal(context.data.bookPreviewChaptersExpanded, false);
   assert.equal(context.data.bookPreviewChapters[0].content, "旧版第一章正文。");
   assert.equal(context.data.bookViewingHistoricalVersion, true);
   assert.equal(context.data.bookVersionNotice, "正在查看历史版本。朗读前请切回最新版。");

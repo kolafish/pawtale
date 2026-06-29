@@ -1873,6 +1873,27 @@
   flex: 0 0 auto;
 }
 
+.book-preview-toggle {
+  width: 100%;
+  height: 72rpx;
+  margin: 18rpx 0 0;
+  padding: 0;
+  border: 2rpx solid #ead9c7;
+  border-radius: 14rpx;
+  background: #fffaf2;
+  color: #9f4a3c;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 25rpx;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.book-preview-toggle::after {
+  border: 0;
+}
+
 .book-preview-chapters {
   padding-top: 8rpx;
 }

@@ -976,7 +976,13 @@
                 <text class="book-toc-action">编辑</text>
               </view>
             </view>
-            <view class="book-preview-chapters">
+            <button
+              class="book-preview-toggle"
+              bindtap="toggleBookPreviewChapters"
+            >
+              {{bookPreviewChaptersExpanded ? "收起章节正文" : "展开章节正文"}}
+            </button>
+            <view wx:if="{{bookPreviewChaptersExpanded}}" class="book-preview-chapters">
               <view
                 wx:for="{{bookPreviewChapters}}"
                 wx:for-item="chapter"

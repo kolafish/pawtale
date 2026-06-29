@@ -252,6 +252,7 @@ export interface BookData {
   bookPreviewTitle: string;
   bookPreviewTocItems: BookOutputTocView[];
   bookPreviewChapters: BookOutputChapterPreviewView[];
+  bookPreviewChaptersExpanded: boolean;
   bookManuscriptAvailable: boolean;
   bookManuscriptTitle: string;
   bookManuscriptSubtitle: string;
@@ -1547,6 +1548,7 @@ export function guestBookData(): Partial<BookData> {
     bookPreviewTitle: "",
     bookPreviewTocItems: [],
     bookPreviewChapters: [],
+    bookPreviewChaptersExpanded: false,
     bookManuscriptAvailable: false,
     bookManuscriptTitle: "",
     bookManuscriptSubtitle: "",

@@ -542,6 +542,7 @@ Page<BookData, {
   changeBookOutputVersion(event: PickerEvent): void;
   changeBookExportLayout(event: PickerEvent): void;
   toggleBookExportSourceAppendix(event: SwitchEvent): void;
+  toggleBookPreviewChapters(): void;
   downloadBookOutputExport(event: DatasetEvent): Promise<void>;
   editBookOutputChapter(event: DatasetEvent): void;
   playChapterAudio(event: DatasetEvent): Promise<void>;
@@ -687,6 +688,7 @@ Page<BookData, {
     bookPreviewTitle: "",
     bookPreviewTocItems: [],
     bookPreviewChapters: [],
+    bookPreviewChaptersExpanded: false,
     bookManuscriptAvailable: false,
     bookManuscriptTitle: "",
     bookManuscriptSubtitle: "",
@@ -932,7 +934,10 @@ Page<BookData, {
       outputData.bookNarratorNameInput = this.data.projectNarratorName;
       outputData.bookMetadataChanged = Boolean(output?.latest_version);
     }
-    this.setData(outputData);
+    this.setData({
+      ...outputData,
+      bookPreviewChaptersExpanded: false,
+    });
     if (outputData.bookMetadataChanged && output?.latest_version && this.data.projectId) {
       this.scheduleBookDesignAutosave();
     }
@@ -1163,7 +1168,10 @@ Page<BookData, {
     if (this.data.playingTarget === "book") {
       this.stopPlayback();
     }
-    this.setData(bookOutputData(this.data.bookOutput, option.id));
+    this.setData({
+      ...bookOutputData(this.data.bookOutput, option.id),
+      bookPreviewChaptersExpanded: false,
+    });
   },
 
   changeBookExportLayout(event) {
@@ -1182,6 +1190,10 @@ Page<BookData, {
 
   toggleBookExportSourceAppendix(event) {
     this.setData({ bookExportShowSourceAppendix: Boolean(event.detail.value) });
+  },
+
+  toggleBookPreviewChapters() {
+    this.setData({ bookPreviewChaptersExpanded: !this.data.bookPreviewChaptersExpanded });
   },
 
   async downloadBookOutputExport(event) {
