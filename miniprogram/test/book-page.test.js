@@ -1023,6 +1023,27 @@ test("book page toggles full-book chapter body preview", () => {
   assert.equal(context.data.bookPreviewChaptersExpanded, false);
 });
 
+test("book page preserves moonlit courtyard cover style from latest manuscript", () => {
+  const { page } = loadBookPage();
+  const context = pageContext(page);
+  page.applyBookOutput.call(
+    context,
+    sampleBookOutput(
+      1,
+      "全书正文",
+      false,
+      [],
+      sampleStructuredBookContent(),
+      [],
+      sampleBookManuscript("外婆回忆录", "moonlit_courtyard"),
+    ),
+  );
+
+  assert.equal(context.data.bookCoverStyle, "moonlit_courtyard");
+  assert.equal(context.data.bookCoverStyleLabel, "月下庭院");
+  assert.equal(context.data.bookCoverStyleChanged, false);
+});
+
 test("book page switches full-book output versions without changing the latest output", () => {
   const { page } = loadBookPage();
   const latestStructured = sampleStructuredBookContent();

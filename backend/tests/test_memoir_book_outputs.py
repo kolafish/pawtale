@@ -511,7 +511,7 @@ async def test_mobile_memoir_book_output_update_title_and_cover_style(client, te
             "preface": "这本书从家里的讲述开始。",
             "afterword": "以后还可以继续补充。",
             "back_cover_quote": "我小时候常在院子里晒太阳。",
-            "cover_style": "warm_gray",
+            "cover_style": "moonlit_courtyard",
         },
     )
 
@@ -524,7 +524,7 @@ async def test_mobile_memoir_book_output_update_title_and_cover_style(client, te
     assert latest["manuscript"]["profile"]["subtitle"] == "一家人记得的旧日子"
     assert latest["manuscript"]["profile"]["narrator_name"] == "外婆"
     assert latest["manuscript"]["profile"]["prepared_by"] == "小林整理"
-    assert latest["manuscript"]["render_settings"]["cover_style"] == "warm_gray"
+    assert latest["manuscript"]["render_settings"]["cover_style"] == "moonlit_courtyard"
     assert latest["manuscript"]["render_settings"]["back_cover_quote"] == "我小时候常在院子里晒太阳。"
     assert latest["manuscript"]["front_matter"][0]["title"] == "外婆慢慢说"
     assert latest["manuscript"]["front_matter"][1]["content"].startswith(

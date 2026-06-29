@@ -194,7 +194,8 @@ function latestBookTitle(output: MemoirBookOutput | null): string {
 
 function latestBookCoverStyle(output: MemoirBookOutput | null): MemoirBookCoverStyle {
   const style = output?.latest_version?.manuscript?.render_settings?.cover_style;
-  return style === "warm_gray" || style === "dark_album" ? style : "classic_plain";
+  const option = BOOK_COVER_STYLE_OPTIONS.find((candidate) => candidate.value === style);
+  return option ? option.value : "classic_plain";
 }
 
 function latestBookMetadata(output: MemoirBookOutput | null): Record<string, string> {
