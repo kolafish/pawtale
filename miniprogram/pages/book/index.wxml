@@ -659,6 +659,71 @@
           <text>{{bookContent ? bookCharCount + " 字" : "尚未生成正文"}}</text>
           <text>按已确认章节顺序合成</text>
         </view>
+
+        <view class="book-design-panel">
+          <view class="book-design-head">
+            <view>
+              <text class="book-design-title">书名与封面</text>
+              <text class="book-design-meta">{{bookCoverStyleLabel}} · {{bookOutput && bookOutput.latest_version ? "已生成" : "待生成"}}</text>
+            </view>
+            <button
+              class="book-design-save"
+              loading="{{bookTitleSaving}}"
+              disabled="{{bookTitleSaving || generatingBook || updatingPlanStructure || bookViewingHistoricalVersion || !bookOutput || !bookOutput.latest_version || (!bookTitleChanged && !bookCoverStyleChanged)}}"
+              bindtap="saveBookDesignSettings"
+            >
+              {{bookOutput && bookOutput.latest_version ? "保存设置" : "生成时应用"}}
+            </button>
+          </view>
+
+          <view class="book-title-editor">
+            <input
+              class="book-title-input"
+              value="{{bookTitleInput}}"
+              placeholder="输入书名"
+              maxlength="60"
+              bindinput="changeBookTitle"
+            />
+            <button
+              class="book-title-ai"
+              loading="{{bookTitleSuggesting}}"
+              disabled="{{bookTitleSuggesting || generatingBook || updatingPlanStructure || !allChaptersConfirmed || hasDraftChanges}}"
+              bindtap="suggestBookTitles"
+            >
+              {{bookTitleSuggesting ? "起名中" : "AI 起名"}}
+            </button>
+          </view>
+
+          <view wx:if="{{bookTitleSuggestions.length}}" class="book-title-suggestion-list">
+            <view
+              wx:for="{{bookTitleSuggestions}}"
+              wx:key="*this"
+              class="book-title-suggestion"
+              data-title="{{item}}"
+              bindtap="chooseBookTitleSuggestion"
+            >
+              <text>{{item}}</text>
+            </view>
+          </view>
+
+          <picker
+            mode="selector"
+            range="{{bookCoverStyleOptions}}"
+            range-key="label"
+            value="{{bookCoverStyleIndex}}"
+            disabled="{{generatingBook || updatingPlanStructure}}"
+            bindchange="changeBookCoverStyle"
+          >
+            <view class="book-cover-style-picker">
+              <view class="book-cover-style-copy">
+                <text class="book-cover-style-label">封面风格</text>
+                <text class="book-cover-style-detail">{{bookCoverStyleDetailText}}</text>
+              </view>
+              <text class="book-cover-style-value">{{bookCoverStyleLabel}}</text>
+            </view>
+          </picker>
+        </view>
+
         <picker
           wx:if="{{bookVersionOptions.length > 1}}"
           class="book-version-picker"

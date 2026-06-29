@@ -13,7 +13,7 @@ from app.models.memoir import (
     MemoirBookPlan,
     MemoirBookPlanChapter,
 )
-from app.services.memoir.book_manuscript_ai import generate_manuscript_editorial_copy
+from app.services.memoir.book_manuscript_ai import generate_manuscript_editorial_copy, generate_title_suggestions
 from app.services.memoir.book_audio import split_tts_text
 from app.services.memoir.tts_alignment import TTSAlignmentSegment
 from app.services.memoir.voice_tts import TTSResult
@@ -82,6 +82,14 @@ class FakeEditorialAI:
         """
 
 
+class FakeTitleAI:
+    provider_name = "fake-ai"
+    model_name = "fake-title-model"
+
+    async def _call_llm(self, system_prompt, user_prompt, temperature=0.7, max_tokens=4000, timeout=60.0, return_raw=False):
+        return '{"suggestions": ["外婆慢慢说", "外婆的一生", "从前的日子", "外婆主题回忆录"]}'
+
+
 async def _active_project_id(client):
     response = await client.get("/api/mobile/memoir/projects")
     assert response.status_code == 200
@@ -126,6 +134,28 @@ async def test_memoir_book_manuscript_editorial_copy_uses_llm_context():
     assert copy.back_cover_quote == "我小时候常在外婆家的院子里晒太阳。"
     assert "chapter_id: chapter-1" in fake_ai.calls[0]["user_prompt"]
     assert "representative_quote: 我小时候常在外婆家的院子里晒太阳。" in fake_ai.calls[0]["user_prompt"]
+
+
+async def test_memoir_book_title_suggestions_filter_internal_names():
+    suggestions = await generate_title_suggestions(
+        title="外婆的回忆录",
+        snapshot=[
+            {
+                "chapter_id": "chapter-1",
+                "chapter_index": 1,
+                "chapter_title": "外婆家的童年",
+                "source_count": 1,
+                "source_refs": [{"utterance_id": "u1", "quote": "我小时候常在外婆家的院子里晒太阳。"}],
+                "content": "我小时候常在外婆家的院子里晒太阳。",
+            }
+        ],
+        count=4,
+        ai_model="fake-model",
+        ai_client=FakeTitleAI(),
+    )
+
+    assert suggestions is not None
+    assert suggestions.suggestions == ["外婆慢慢说", "外婆的一生", "从前的日子"]
 
 
 async def _create_confirmed_book_plan(test_db, *, project_id: str, confirmed_chapters: bool = True):
@@ -276,6 +306,45 @@ async def test_mobile_memoir_book_output_generate_combines_confirmed_chapters(cl
     assert stored_output.plan_id == plan.id
     assert len(stored_versions) == 1
     assert stored_versions[0].manuscript_json["profile"]["title"] == "外婆的回忆录"
+
+
+async def test_mobile_memoir_book_output_title_suggestions_use_fallback_without_ai(client, test_db):
+    project_id = await _active_project_id(client)
+    await _create_confirmed_book_plan(test_db, project_id=project_id)
+
+    response = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-output/title-suggestions",
+        json={"count": 6},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data["suggestions"]) >= 3
+    assert "外婆的回忆录" in data["suggestions"]
+    assert "外婆口述回忆录" in data["suggestions"]
+    assert "外婆口述的回忆录" not in data["suggestions"]
+    assert all("主题" not in title for title in data["suggestions"])
+
+
+async def test_mobile_memoir_book_output_update_title_and_cover_style(client, test_db):
+    project_id = await _active_project_id(client)
+    await _create_confirmed_book_plan(test_db, project_id=project_id)
+    generated = await client.post(f"/api/mobile/memoir/projects/{project_id}/book-output/generate", json={})
+    assert generated.status_code == 200
+
+    response = await client.patch(
+        f"/api/mobile/memoir/projects/{project_id}/book-output",
+        json={"title": "外婆慢慢说", "cover_style": "warm_gray"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["title"] == "外婆慢慢说"
+    latest = data["latest_version"]
+    assert latest["content"].startswith("外婆慢慢说\n\n目录")
+    assert latest["manuscript"]["profile"]["title"] == "外婆慢慢说"
+    assert latest["manuscript"]["render_settings"]["cover_style"] == "warm_gray"
+    assert latest["manuscript"]["front_matter"][0]["title"] == "外婆慢慢说"
 
 
 async def test_mobile_memoir_book_output_generate_returns_existing_without_force(client, test_db):

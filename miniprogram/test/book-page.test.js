@@ -155,6 +155,36 @@ function sampleBookOutputVersion(
   };
 }
 
+function sampleBookManuscript(title = "外婆回忆录", coverStyle = "classic_plain") {
+  return {
+    schema_version: 1,
+    profile: {
+      template: "classic_family",
+      title,
+      subtitle: "根据口述访谈整理",
+      narrator_name: "",
+      prepared_by: "家人整理",
+      interview_date_range: "",
+      privacy_note: "",
+      ai_disclosure_note: "",
+    },
+    front_matter: [],
+    table_of_contents: [],
+    chapters: [],
+    back_matter: {},
+    render_settings: {
+      page_size: "a5",
+      layout: "reading",
+      font_scale: "standard",
+      show_headers: true,
+      show_source_appendix: true,
+      photo_mode: "none",
+      cover_style: coverStyle,
+      back_cover_quote: "",
+    },
+  };
+}
+
 function sampleStructuredBookContent() {
   return {
     title: "外婆回忆录",
@@ -677,6 +707,9 @@ function loadBookPage({
     getMemoirBookSourceCoverage: async () => null,
     listMemoirAutomationEvents: async () => ({ items: [], total: 0, limit: 8 }),
     acknowledgeMemoirAutomationEvent: async () => ({}),
+    suggestMemoirBookOutputTitles: async () => {
+      throw new Error("suggestMemoirBookOutputTitles was not mocked");
+    },
     parseMemoirBookVoiceCommand: async () => {
       throw new Error("parseMemoirBookVoiceCommand was not mocked");
     },
@@ -689,6 +722,9 @@ function loadBookPage({
     },
     updateMemoirBookPlan: async () => {
       throw new Error("updateMemoirBookPlan was not mocked");
+    },
+    updateMemoirBookOutput: async () => {
+      throw new Error("updateMemoirBookOutput was not mocked");
     },
     updateMemoirBookChapterDraft: async () => {
       throw new Error("updateMemoirBookChapterDraft was not mocked");
@@ -840,6 +876,11 @@ test("book page exposes manuscript structure sections", () => {
   const wxml = fs.readFileSync(path.join(__dirname, "../pages/book/index.wxml"), "utf8");
 
   assert.match(wxml, /书稿设置/);
+  assert.match(wxml, /书名与封面/);
+  assert.match(wxml, /bindinput="changeBookTitle"/);
+  assert.match(wxml, /bindtap="suggestBookTitles"/);
+  assert.match(wxml, /bindchange="changeBookCoverStyle"/);
+  assert.match(wxml, /bindtap="saveBookDesignSettings"/);
   assert.match(wxml, /书籍结构/);
   assert.match(wxml, /章节书稿/);
   assert.match(wxml, /附录与说明/);
@@ -1922,6 +1963,62 @@ test("book page merges chapters and regenerates title plus draft for confirmed p
   delete global.wx;
 });
 
+test("book page suggests and saves full-book title plus cover style", async () => {
+  const calls = [];
+  global.wx = { showToast() {} };
+  const { page } = loadBookPage({
+    voiceApiExports: {
+      suggestMemoirBookOutputTitles: async (projectId, data) => {
+        calls.push({ kind: "suggest", projectId, data });
+        return { suggestions: ["外婆慢慢说", "从前的日子"], provider: "ai", model: "fake" };
+      },
+      updateMemoirBookOutput: async (projectId, data) => {
+        calls.push({ kind: "update", projectId, data });
+        const output = sampleBookOutput(
+          1,
+          "外婆慢慢说\n\n目录\n1. 外婆家的童年",
+          false,
+          [],
+          null,
+          [],
+          sampleBookManuscript(data.title, data.cover_style),
+        );
+        output.title = data.title;
+        return output;
+      },
+    },
+  });
+  const context = pageContext(page, { projectId: "project/1", projectTitle: "外婆回忆录" });
+  page.applyPlan.call(context, samplePlan("confirmed"), {
+    "chapter-1": sampleDraft(1, "confirmed"),
+    "chapter-2": sampleDraft(1, "confirmed"),
+  });
+  page.applyBookOutput.call(
+    context,
+    sampleBookOutput(1, "外婆回忆录", false, [], null, [], sampleBookManuscript("外婆回忆录")),
+  );
+
+  await page.suggestBookTitles.call(context);
+  page.chooseBookTitleSuggestion.call(context, { currentTarget: { dataset: { title: "外婆慢慢说" } } });
+  page.changeBookCoverStyle.call(context, {
+    currentTarget: { dataset: {} },
+    detail: { value: 1 },
+  });
+  await page.saveBookDesignSettings.call(context);
+
+  assert.deepEqual(calls[0], { kind: "suggest", projectId: "project/1", data: { count: 6 } });
+  assert.deepEqual(calls[1], {
+    kind: "update",
+    projectId: "project/1",
+    data: { title: "外婆慢慢说", cover_style: "warm_gray" },
+  });
+  assert.equal(context.data.bookTitleInput, "外婆慢慢说");
+  assert.equal(context.data.bookTitleChanged, false);
+  assert.equal(context.data.bookCoverStyle, "warm_gray");
+  assert.equal(context.data.bookCoverStyleChanged, false);
+  delete global.wx;
+});
+
 test("book page generates full book output after all chapters are confirmed", async () => {
   const calls = [];
   global.wx = { showToast() {} };
@@ -1945,7 +2042,11 @@ test("book page generates full book output after all chapters are confirmed", as
 
   assert.deepEqual(calls[0], {
     projectId: "project/1",
-    data: { force_regenerate: true },
+    data: {
+      force_regenerate: true,
+      title: "外婆回忆录",
+      cover_style: "classic_plain",
+    },
   });
   assert.equal(context.data.bookVersionText, "全书第 2 版");
   assert.equal(context.data.bookContent, "全书第二版正文");
@@ -3442,6 +3543,10 @@ test("book APIs call encoded backend routes", async () => {
         options.success({ statusCode: 200, data: sampleDraft(), cookies: [], header: {} });
         return;
       }
+      if (options.url.endsWith("/book-output/title-suggestions")) {
+        options.success({ statusCode: 200, data: { suggestions: ["外婆慢慢说"] }, cookies: [], header: {} });
+        return;
+      }
       if (options.url.endsWith("/book-output") || options.url.endsWith("/book-output/generate")) {
         options.success({ statusCode: 200, data: sampleBookOutput(), cookies: [], header: {} });
         return;
@@ -3473,7 +3578,9 @@ test("book APIs call encoded backend routes", async () => {
     getMemoirBookSourceCoverage,
     executeMemoirBookVoiceCommand,
     parseMemoirBookVoiceCommand,
+    suggestMemoirBookOutputTitles,
     updateMemoirBookChapterTitle,
+    updateMemoirBookOutput,
     updateMemoirBookPlan,
     updateMemoirBookChapterDraft,
   } = require("../services/memoir-voice-api.ts");
@@ -3498,6 +3605,8 @@ test("book APIs call encoded backend routes", async () => {
   });
   await createMemoirBookVoiceAssistantTTS("project/1", { text: "我理解了，请确认。" });
   await getMemoirBookOutput("project/1");
+  await updateMemoirBookOutput("project/1", { title: "外婆慢慢说", cover_style: "warm_gray" });
+  await suggestMemoirBookOutputTitles("project/1", { count: 4 });
   await generateMemoirBookOutput("project/1", { force_regenerate: true });
   await createMemoirBookOutputTTS("project/1", {});
 
@@ -3582,17 +3691,32 @@ test("book APIs call encoded backend routes", async () => {
   assert.equal(apiRequests[16].method, "GET");
   assert.equal(
     apiRequests[17].url,
-    "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-output/generate",
+    "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-output",
   );
-  assert.equal(apiRequests[17].method, "POST");
-  assert.deepEqual(apiRequests[17].data, { force_regenerate: true });
-  assert.equal(apiRequests[17].timeout, 60000);
+  assert.equal(apiRequests[17].method, "PATCH");
+  assert.deepEqual(apiRequests[17].data, { title: "外婆慢慢说", cover_style: "warm_gray" });
   assert.equal(
     apiRequests[18].url,
-    "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-output/tts",
+    "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-output/title-suggestions",
   );
   assert.equal(apiRequests[18].method, "POST");
-  assert.equal(apiRequests[18].header.Cookie, "pawtale_session=abc");
+  assert.deepEqual(apiRequests[18].data, { count: 4, ai_model: "doubao-seed-2-0-pro-260215" });
+  assert.equal(
+    apiRequests[19].url,
+    "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-output/generate",
+  );
+  assert.equal(apiRequests[19].method, "POST");
+  assert.deepEqual(apiRequests[19].data, {
+    force_regenerate: true,
+    ai_model: "doubao-seed-2-0-pro-260215",
+  });
+  assert.equal(apiRequests[19].timeout, 60000);
+  assert.equal(
+    apiRequests[20].url,
+    "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-output/tts",
+  );
+  assert.equal(apiRequests[20].method, "POST");
+  assert.equal(apiRequests[20].header.Cookie, "pawtale_session=abc");
   delete global.wx;
 });
 

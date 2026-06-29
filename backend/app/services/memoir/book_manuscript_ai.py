@@ -38,6 +38,13 @@ class GeneratedManuscriptCopy:
     prompt: str
 
 
+@dataclass(frozen=True)
+class GeneratedTitleSuggestions:
+    suggestions: list[str]
+    model: str | None
+    prompt: str
+
+
 def _compact_text(value: str, max_chars: int) -> str:
     text = " ".join(value.replace("\r\n", "\n").replace("\r", "\n").split())
     if len(text) <= max_chars:
@@ -121,6 +128,30 @@ def build_manuscript_copy_prompt(*, title: str, snapshot: list[dict[str, object]
 """
 
 
+def build_title_suggestion_prompt(*, title: str, snapshot: list[dict[str, object]], count: int) -> str:
+    chapters = _chapter_context(snapshot)
+    return f"""请根据下面已经确认的回忆录章节，为这本家庭回忆录拟 {count} 个候选书名。
+
+当前暂定书名：{title}
+
+请输出严格 JSON，不要 Markdown，不要解释。格式：
+{{
+  "suggestions": ["书名一", "书名二"]
+}}
+
+要求：
+- 只能基于给定章节标题、代表性口述和正文摘录，不新增未出现的人物、地点或事件。
+- 候选名要像家人会保存、下载、转发和打印的一本书，不要像系统项目名。
+- 可以包含朴素正式型、温和口语型、略有书感型，但都要克制。
+- 不要出现“主题回忆录”“章节规划”“AI”“生成”等内部词。
+- 每个候选 4 到 14 个汉字，最多一个书名号内容，不要副标题。
+- 至少给出 {count} 个不同候选。
+
+章节材料：
+{chapters}
+"""
+
+
 def _text_ai_configured(ai_model: str | None) -> bool:
     settings = get_settings()
     model = (ai_model or settings.default_ai_model or "").lower()
@@ -143,6 +174,14 @@ def _clean_copy_text(value: object, *, max_chars: int) -> str:
     if any(term in text for term in forbidden):
         return ""
     return text
+
+
+def _clean_title(value: object) -> str:
+    title = _compact_text(_string(value), 32).strip("《》「」“”\"' ")
+    forbidden = ("主题回忆录", "章节规划", "AI", "生成", "系统", "后台")
+    if not title or any(term in title for term in forbidden):
+        return ""
+    return title[:32]
 
 
 def _copy_from_payload(
@@ -212,4 +251,52 @@ async def generate_manuscript_editorial_copy(
         payload,
         prompt=prompt,
         model=getattr(client, "model_name", ai_model),
+    )
+
+
+async def generate_title_suggestions(
+    *,
+    title: str,
+    snapshot: list[dict[str, object]],
+    count: int,
+    ai_model: str | None,
+    ai_client: AITextClient | None = None,
+) -> GeneratedTitleSuggestions | None:
+    prompt = build_title_suggestion_prompt(title=title, snapshot=snapshot, count=count)
+    client = ai_client
+    if client is None and not _text_ai_configured(ai_model):
+        return None
+    try:
+        if client is None:
+            client = get_ai_service(ai_model)
+        content = await client._call_llm(
+            SYSTEM_PROMPT,
+            prompt,
+            temperature=0.55,
+            max_tokens=800,
+            timeout=60.0,
+        )
+    except HTTPException as exc:
+        if exc.status_code < 500:
+            raise
+        logger.exception("AI memoir title suggestions failed provider=%s", getattr(client, "provider_name", "unknown"))
+        return None
+    except Exception:
+        logger.exception("AI memoir title suggestions failed provider=%s", getattr(client, "provider_name", "unknown"))
+        return None
+
+    payload = extract_json_payload(str(content))
+    raw_suggestions = payload.get("suggestions") if isinstance(payload, dict) else []
+    suggestions: list[str] = []
+    if isinstance(raw_suggestions, list):
+        for item in raw_suggestions:
+            suggestion = _clean_title(item)
+            if suggestion and suggestion not in suggestions:
+                suggestions.append(suggestion)
+    if not suggestions:
+        return None
+    return GeneratedTitleSuggestions(
+        suggestions=suggestions[:count],
+        model=getattr(client, "model_name", ai_model),
+        prompt=prompt,
     )

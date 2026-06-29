@@ -675,9 +675,61 @@ class MemoirBookAudioResponse(BaseModel):
     alignment: list[MemoirTTSAlignmentSegmentResponse] = Field(default_factory=list)
 
 
+MemoirBookCoverStyle = Literal["classic_plain", "warm_gray", "dark_album"]
+
+
 class MemoirBookOutputGenerateRequest(BaseModel):
     ai_model: str | None = None
+    title: str | None = None
+    cover_style: MemoirBookCoverStyle | None = None
     force_regenerate: bool = False
+
+    @field_validator("ai_model", "title")
+    @classmethod
+    def _valid_optional_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        text = value.strip()
+        return text or None
+
+
+class MemoirBookOutputUpdateRequest(BaseModel):
+    title: str | None = None
+    cover_style: MemoirBookCoverStyle | None = None
+
+    @field_validator("title")
+    @classmethod
+    def _valid_title(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        title = value.strip()
+        if not title:
+            raise ValueError("书名不能为空")
+        return title
+
+
+class MemoirBookTitleSuggestionRequest(BaseModel):
+    ai_model: str | None = None
+    count: int = 6
+
+    @field_validator("ai_model")
+    @classmethod
+    def _valid_ai_model(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        model = value.strip()
+        return model or None
+
+    @field_validator("count")
+    @classmethod
+    def _valid_count(cls, value: int) -> int:
+        return max(3, min(8, int(value)))
+
+
+class MemoirBookTitleSuggestionResponse(BaseModel):
+    suggestions: list[str]
+    provider: str | None = None
+    model: str | None = None
 
 
 class MemoirBookOutputTableOfContentsItemResponse(BaseModel):
@@ -772,6 +824,7 @@ class MemoirBookManuscriptRenderSettings(BaseModel):
     show_headers: bool = True
     show_source_appendix: bool = True
     photo_mode: Literal["none", "chapter", "appendix"] = "none"
+    cover_style: MemoirBookCoverStyle = "classic_plain"
     back_cover_quote: str = ""
     editorial_copy_model: str | None = None
 

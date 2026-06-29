@@ -640,7 +640,28 @@ export interface MemoirBookVoiceCommandExecuteResponse {
 }
 
 export interface MemoirBookOutputGenerateRequest {
+  ai_model?: string | null;
+  title?: string | null;
+  cover_style?: MemoirBookCoverStyle | null;
   force_regenerate?: boolean;
+}
+
+export type MemoirBookCoverStyle = "classic_plain" | "warm_gray" | "dark_album";
+
+export interface MemoirBookOutputUpdateRequest {
+  title?: string | null;
+  cover_style?: MemoirBookCoverStyle | null;
+}
+
+export interface MemoirBookTitleSuggestionRequest {
+  ai_model?: string | null;
+  count?: number;
+}
+
+export interface MemoirBookTitleSuggestionResponse {
+  suggestions: string[];
+  provider?: string | null;
+  model?: string | null;
 }
 
 export type MemoirBookOutputExportFormat = "pdf" | "txt";
@@ -737,6 +758,9 @@ export interface MemoirBookManuscriptRenderSettings {
   show_headers: boolean;
   show_source_appendix: boolean;
   photo_mode: "none" | "chapter" | "appendix";
+  cover_style: MemoirBookCoverStyle;
+  back_cover_quote: string;
+  editorial_copy_model?: string | null;
 }
 
 export interface MemoirBookManuscriptBackMatter {
