@@ -36,6 +36,8 @@ from app.schemas.memoir_voice import (
     MemoirVoiceTranscriptItemResponse,
     MemoirVoiceTranscriptListResponse,
     MemoirVoiceTranscriptUpdateRequest,
+    MemoirVoiceTranscriptVoiceEditPreviewRequest,
+    MemoirVoiceTranscriptVoiceEditPreviewResponse,
     MemoirVoiceSessionCreate,
     MemoirVoiceSessionDetailResponse,
     MemoirVoiceSessionListResponse,
@@ -49,6 +51,7 @@ from app.services.memoir import voice_followups as memoir_voice_followups
 from app.services.memoir import voice_search as memoir_voice_search
 from app.services.memoir import voice_sessions as memoir_voice_sessions
 from app.services.memoir import voice_tts as memoir_voice_tts
+from app.services.memoir import transcript_voice_edit as memoir_transcript_voice_edit
 from app.services.memoir import voice_transcripts as memoir_voice_transcripts
 from app.services.memoir.access import load_audio_file, load_memoir_project
 from app.services.memoir.audio_files import audio_file_path
@@ -402,6 +405,24 @@ async def cleanup_mobile_memoir_voice_transcript(
     current_user: User = Depends(get_current_user),
 ):
     return await memoir_voice_transcripts.cleanup_voice_transcript(db, utterance_id, current_user.id, req)
+
+
+@router.post(
+    "/voice-transcripts/{utterance_id}/voice-edit/preview",
+    response_model=MemoirVoiceTranscriptVoiceEditPreviewResponse,
+)
+async def preview_mobile_memoir_voice_transcript_voice_edit(
+    utterance_id: str,
+    req: MemoirVoiceTranscriptVoiceEditPreviewRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await memoir_transcript_voice_edit.preview_voice_transcript_edit(
+        db,
+        utterance_id,
+        current_user.id,
+        req,
+    )
 
 
 @router.delete("/voice-transcripts/{utterance_id}", status_code=204)

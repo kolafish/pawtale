@@ -365,3 +365,36 @@ class MemoirVoiceTranscriptUpdateRequest(BaseModel):
 
 class MemoirVoiceTranscriptCleanupRequest(BaseModel):
     ai_model: str | None = None
+
+
+class MemoirVoiceTranscriptVoiceEditPreviewRequest(BaseModel):
+    instruction_text: str = Field(min_length=1, max_length=800)
+    ai_model: str | None = None
+
+    @field_validator("instruction_text")
+    @classmethod
+    def _non_empty_instruction(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("不能为空")
+        return normalized
+
+
+class MemoirVoiceTranscriptVoiceEditChangeResponse(BaseModel):
+    before: str = ""
+    after: str = ""
+    reason: str = ""
+
+
+class MemoirVoiceTranscriptVoiceEditPreviewResponse(BaseModel):
+    utterance_id: str
+    action: str
+    original_text: str
+    current_text: str
+    edited_text: str
+    changes: list[MemoirVoiceTranscriptVoiceEditChangeResponse] = Field(default_factory=list)
+    confidence: float
+    requires_confirmation: bool = True
+    reply_text: str
+    provider: str | None = None
+    model: str | None = None
