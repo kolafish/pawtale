@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from sqlalchemy.schema import Column, Table
 
 from app.database import Base, register_models
+from app.domain.memoir.types import MemoirAutomationEventType, MemoirEditingJobType
 
 
 REALTIME_VOICE_TABLES = (
@@ -122,18 +123,20 @@ async def _table_sql(conn, table_name: str) -> str:
     return str(result.scalar_one_or_none() or "")
 
 
-async def _ensure_editing_jobs_type_constraint(conn) -> bool:
-    if not await _table_exists(conn, "memoir_editing_jobs"):
+async def _ensure_enum_check_constraint(conn, table_name: str, enum_values: set[str]) -> bool:
+    if not await _table_exists(conn, table_name):
         return False
-    if "correct_transcript" in await _table_sql(conn, "memoir_editing_jobs"):
+    table_sql = await _table_sql(conn, table_name)
+    if enum_values and all(value in table_sql for value in enum_values):
         return False
 
     register_models()
-    table = Base.metadata.tables["memoir_editing_jobs"]
+    table = Base.metadata.tables[table_name]
     columns = [column.name for column in table.columns]
     column_sql = ", ".join(columns)
-    await conn.execute(text("ALTER TABLE memoir_editing_jobs RENAME TO memoir_editing_jobs_old"))
-    old_indexes = (await conn.execute(text("PRAGMA index_list(memoir_editing_jobs_old)"))).fetchall()
+    old_table_name = f"{table_name}_old"
+    await conn.execute(text(f"ALTER TABLE {table_name} RENAME TO {old_table_name}"))
+    old_indexes = (await conn.execute(text(f"PRAGMA index_list({old_table_name})"))).fetchall()
     for index in old_indexes:
         index_name = str(index[1])
         if index_name and not index_name.startswith("sqlite_autoindex"):
@@ -148,14 +151,30 @@ async def _ensure_editing_jobs_type_constraint(conn) -> bool:
     await conn.execute(
         text(
             f"""
-            INSERT INTO memoir_editing_jobs ({column_sql})
+            INSERT INTO {table_name} ({column_sql})
             SELECT {select_sql}
-            FROM memoir_editing_jobs_old
+            FROM {old_table_name}
             """
         )
     )
-    await conn.execute(text("DROP TABLE memoir_editing_jobs_old"))
+    await conn.execute(text(f"DROP TABLE {old_table_name}"))
     return True
+
+
+async def _ensure_editing_jobs_type_constraint(conn) -> bool:
+    return await _ensure_enum_check_constraint(
+        conn,
+        "memoir_editing_jobs",
+        {item.value for item in MemoirEditingJobType},
+    )
+
+
+async def _ensure_automation_events_type_constraint(conn) -> bool:
+    return await _ensure_enum_check_constraint(
+        conn,
+        "memoir_automation_events",
+        {item.value for item in MemoirAutomationEventType},
+    )
 
 
 async def _drop_transcript_fts(conn) -> None:
@@ -329,6 +348,8 @@ async def migrate_memoir_voice_schema(engine: AsyncEngine) -> dict[str, list[str
 
         if await _ensure_editing_jobs_type_constraint(conn):
             changed_tables.append("memoir_editing_jobs")
+        if await _ensure_automation_events_type_constraint(conn):
+            changed_tables.append("memoir_automation_events")
 
         if not await _table_exists(conn, "memoir_voice_authorization_consents"):
             await _create_metadata_table(conn, "memoir_voice_authorization_consents")

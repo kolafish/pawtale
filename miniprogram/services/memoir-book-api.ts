@@ -26,6 +26,7 @@ import type {
   MemoirBookVoiceCommandExecuteResponse,
   MemoirBookVoiceCommandParseRequest,
   MemoirBookVoiceCommandParseResponse,
+  MemoirAutomationEvent,
 } from "../domain/voice-chat";
 import {
   ensureMemoirBackendSession,
@@ -196,6 +197,20 @@ export function generateMemoirBookChapterDraft(
   );
 }
 
+export function enqueueMemoirBookChapterDraftGeneration(
+  projectId: string,
+  chapterId: string,
+  data: MemoirBookChapterDraftGenerateRequest = {},
+): Promise<MemoirAutomationEvent> {
+  return memoirRequest<MemoirAutomationEvent>(
+    bookPlanChapterPath(projectId, chapterId, "/draft/jobs"),
+    {
+      method: "POST",
+      data: withSelectedAIModel(data),
+    },
+  );
+}
+
 export function updateMemoirBookChapterDraft(
   projectId: string,
   chapterId: string,
@@ -318,6 +333,19 @@ export function generateMemoirBookOutput(
       method: "POST",
       data: withSelectedAIModel(data),
       timeoutMs: BOOK_OUTPUT_GENERATE_TIMEOUT_MS,
+    },
+  );
+}
+
+export function enqueueMemoirBookOutputGeneration(
+  projectId: string,
+  data: MemoirBookOutputGenerateRequest = {},
+): Promise<MemoirAutomationEvent> {
+  return memoirRequest<MemoirAutomationEvent>(
+    memoirProjectPath(projectId, "/book-output/generate/jobs"),
+    {
+      method: "POST",
+      data: withSelectedAIModel(data),
     },
   );
 }

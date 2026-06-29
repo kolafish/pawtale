@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from app.domain.memoir.types import MemoirEditingJobType
 from app.services.memoir import book_auto_revision
+from app.services.memoir import book_generation_jobs
 from app.services.memoir import book_quality_audit
 from app.services.memoir import source_auto_assignment
 from app.services.memoir import voice_transcript_correction
@@ -24,4 +25,12 @@ def register_memoir_editing_job_handlers() -> None:
     register_editing_job_handler(
         MemoirEditingJobType.QUALITY_AUDIT,
         book_quality_audit.run_book_quality_audit_job,
+    )
+    register_editing_job_handler(
+        MemoirEditingJobType.GENERATE_CHAPTER_DRAFT,
+        book_generation_jobs.run_chapter_draft_generation_job,
+    )
+    register_editing_job_handler(
+        MemoirEditingJobType.GENERATE_BOOK_OUTPUT,
+        book_generation_jobs.run_book_output_generation_job,
     )

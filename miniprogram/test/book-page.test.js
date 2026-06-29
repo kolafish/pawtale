@@ -95,6 +95,24 @@ function sampleDraft(
   };
 }
 
+function sampleAutomationEvent(overrides = {}) {
+  const eventType = overrides.event_type || "chapter_draft_generated";
+  return {
+    id: overrides.id || `event-${eventType}`,
+    project_id: overrides.project_id || "project/1",
+    event_type: eventType,
+    status: overrides.status || "pending",
+    chapter_id: Object.prototype.hasOwnProperty.call(overrides, "chapter_id") ? overrides.chapter_id : "chapter-1",
+    utterance_ids: overrides.utterance_ids || [],
+    summary_text: overrides.summary_text || "「外婆家的童年」已提交后台生成。",
+    confidence: Object.prototype.hasOwnProperty.call(overrides, "confidence") ? overrides.confidence : null,
+    metadata_json: overrides.metadata_json || {},
+    utterance_details: overrides.utterance_details || [],
+    created_at: overrides.created_at || "2026-06-17T00:00:00.000Z",
+    updated_at: overrides.updated_at || "2026-06-17T00:00:00.000Z",
+  };
+}
+
 function sampleBookOutput(
   version = 1,
   content = "外婆回忆录\n\n目录\n1. 外婆家的童年\n\n第1章 外婆家的童年\n\n正文",
@@ -682,6 +700,12 @@ function loadBookPage({
     },
     createMemoirBookVoiceAssistantTTS: async () => {
       throw new Error("createMemoirBookVoiceAssistantTTS was not mocked");
+    },
+    enqueueMemoirBookChapterDraftGeneration: async () => {
+      throw new Error("enqueueMemoirBookChapterDraftGeneration was not mocked");
+    },
+    enqueueMemoirBookOutputGeneration: async () => {
+      throw new Error("enqueueMemoirBookOutputGeneration was not mocked");
     },
     executeMemoirBookVoiceCommand: async () => {
       throw new Error("executeMemoirBookVoiceCommand was not mocked");
@@ -1286,6 +1310,32 @@ test("book page groups source assignment automation events with expandable detai
     { projectId: "project/1", eventId: "event-2" },
   ]);
   assert.deepEqual(context.data.automationEventItems, []);
+});
+
+test("book page keeps background generation busy when automation polling fails", async () => {
+  const { mod, page } = loadBookPage({
+    voiceApiExports: {
+      listMemoirAutomationEvents: async () => {
+        throw new Error("network unavailable");
+      },
+    },
+  });
+  const plan = samplePlan("confirmed");
+  const context = pageContext(page, {
+    projectId: "project/1",
+    chapters: mod.buildChapterViews(plan, { "chapter-1": sampleDraft(1, "draft", "第一版正文") }),
+  });
+  page.applyAutomationEvents.call(context, [
+    sampleAutomationEvent({ id: "event-draft-pending", chapter_id: "chapter-1" }),
+  ]);
+  page.clearBookGenerationEventPoll.call(context);
+
+  await page.refreshAutomationEventsAfterGeneration.call(context);
+
+  assert.equal(context.data.automationEventError, "network unavailable");
+  assert.equal(context.data.chapters[0].draftBusy, true);
+  assert.equal(context.data.automationEventItems[0].titleText, "章节生成中");
+  page.clearBookGenerationEventPoll.call(context);
 });
 
 test("book page builds detailed automation event views", () => {
@@ -1963,9 +2013,13 @@ test("book page merges chapters and regenerates title plus draft for confirmed p
         updated.chapters[0].title = "童年里的离别";
         return updated;
       },
-      generateMemoirBookChapterDraft: async (projectId, chapterId, data) => {
+      enqueueMemoirBookChapterDraftGeneration: async (projectId, chapterId, data) => {
         calls.push({ kind: "draft", projectId, chapterId, data });
-        return sampleDraft(2, "draft", "合并后的章节正文");
+        return sampleAutomationEvent({
+          id: "event-merged-draft",
+          chapter_id: chapterId,
+          summary_text: "「童年里的离别」已提交后台生成。",
+        });
       },
       getMemoirBookChapterDraft: async () => null,
       getMemoirBookSourceCoverage: async () => sampleSourceCoverage(0),
@@ -1991,7 +2045,9 @@ test("book page merges chapters and regenerates title plus draft for confirmed p
   });
   assert.deepEqual(calls[2].data, { force_regenerate: false });
   assert.equal(context.data.chapters[0].title, "童年里的离别");
-  assert.equal(context.data.chapters[0].draftContent, "合并后的章节正文");
+  assert.equal(context.data.chapters[0].draftBusy, true);
+  assert.equal(context.data.automationEventItems[0].titleText, "章节生成中");
+  page.clearBookGenerationEventPoll.call(context);
   delete global.wx;
 });
 
@@ -2076,14 +2132,20 @@ test("book page suggests and autosaves full-book title plus cover style", async 
   delete global.wx;
 });
 
-test("book page generates full book output after all chapters are confirmed", async () => {
+test("book page submits full book output generation as a background job", async () => {
   const calls = [];
   global.wx = { showToast() {} };
-  const { mod, page } = loadBookPage({
+  const { page } = loadBookPage({
     voiceApiExports: {
-      generateMemoirBookOutput: async (projectId, data) => {
+      enqueueMemoirBookOutputGeneration: async (projectId, data) => {
         calls.push({ projectId, data });
-        return sampleBookOutput(2, "全书第二版正文");
+        return sampleAutomationEvent({
+          id: "event-book-output",
+          event_type: "book_output_generated",
+          status: "pending",
+          chapter_id: null,
+          summary_text: "全书已提交后台生成。",
+        });
       },
     },
   });
@@ -2113,19 +2175,20 @@ test("book page generates full book output after all chapters are confirmed", as
       cover_style: "classic_plain",
     },
   });
-  assert.equal(context.data.bookVersionText, "全书第 2 版");
-  assert.equal(context.data.bookContent, "全书第二版正文");
-  assert.equal(context.data.bookCharCount, "全书第二版正文".length);
-  assert.equal(context.data.bookActionText, "重新生成全书");
+  assert.equal(context.data.generatingBook, true);
+  assert.equal(context.data.automationEventItems.length, 1);
+  assert.equal(context.data.automationEventItems[0].titleText, "全书生成中");
+  assert.equal(context.data.bookVersionText, "全书第 1 版");
+  page.clearBookGenerationEventPoll.call(context);
   delete global.wx;
 });
 
-test("book page shows a friendly timeout message for long book output generation", async () => {
+test("book page shows submit errors when full-book background generation cannot be queued", async () => {
   global.wx = { showToast() {} };
   const { page } = loadBookPage({
     voiceApiExports: {
-      generateMemoirBookOutput: async () => {
-        throw new Error("request:fail timeout");
+      enqueueMemoirBookOutputGeneration: async () => {
+        throw new Error("request:fail network");
       },
     },
   });
@@ -2137,10 +2200,7 @@ test("book page shows a friendly timeout message for long book output generation
 
   await page.generateBook.call(context);
 
-  assert.equal(
-    context.data.error,
-    "全书篇幅较长，生成超时了。请稍后刷新成书页查看是否已生成，或重新点击生成。",
-  );
+  assert.equal(context.data.error, "request:fail network");
   assert.equal(context.data.generatingBook, false);
   delete global.wx;
 });
@@ -3427,9 +3487,9 @@ test("book page regenerates an existing chapter draft with force flag", async ()
   global.wx = { showToast() {} };
   const { mod, page } = loadBookPage({
     voiceApiExports: {
-      generateMemoirBookChapterDraft: async (projectId, chapterId, data) => {
+      enqueueMemoirBookChapterDraftGeneration: async (projectId, chapterId, data) => {
         calls.push({ projectId, chapterId, data });
-        return sampleDraft(2, "draft", "第二版正文");
+        return sampleAutomationEvent({ id: "event-draft-regenerate", chapter_id: chapterId });
       },
     },
   });
@@ -3448,9 +3508,11 @@ test("book page regenerates an existing chapter draft with force flag", async ()
     chapterId: "chapter-1",
     data: { force_regenerate: true },
   });
-  assert.equal(context.data.chapters[0].draftVersionText, "第 2 版");
-  assert.equal(context.data.chapters[0].draftContent, "第二版正文");
+  assert.equal(context.data.chapters[0].draftVersionText, "第 1 版");
+  assert.equal(context.data.chapters[0].draftBusy, true);
   assert.equal(context.data.chapters[0].draftChanged, false);
+  assert.equal(context.data.automationEventItems[0].titleText, "章节生成中");
+  page.clearBookGenerationEventPoll.call(context);
   delete global.wx;
 });
 
@@ -3459,9 +3521,9 @@ test("book page supplements pending sources without force regeneration", async (
   global.wx = { showToast() {} };
   const { mod, page } = loadBookPage({
     voiceApiExports: {
-      generateMemoirBookChapterDraft: async (projectId, chapterId, data) => {
+      enqueueMemoirBookChapterDraftGeneration: async (projectId, chapterId, data) => {
         calls.push({ projectId, chapterId, data });
-        return sampleDraft(2, "draft", "补写后的正文");
+        return sampleAutomationEvent({ id: "event-draft-supplement", chapter_id: chapterId });
       },
     },
   });
@@ -3483,9 +3545,10 @@ test("book page supplements pending sources without force regeneration", async (
     chapterId: "chapter-1",
     data: { force_regenerate: false },
   });
-  assert.equal(context.data.chapters[0].pendingSourceCount, 0);
-  assert.equal(context.data.chapters[0].draftActionText, "重新生成");
-  assert.equal(context.data.chapters[0].pending_source_count, 0);
+  assert.equal(context.data.chapters[0].pendingSourceCount, 1);
+  assert.equal(context.data.chapters[0].draftBusy, true);
+  assert.equal(context.data.automationEventItems[0].titleText, "章节生成中");
+  page.clearBookGenerationEventPoll.call(context);
   delete global.wx;
 });
 
@@ -3494,9 +3557,9 @@ test("book page force regenerates when source removals also need cleanup", async
   global.wx = { showToast() {} };
   const { mod, page } = loadBookPage({
     voiceApiExports: {
-      generateMemoirBookChapterDraft: async (projectId, chapterId, data) => {
+      enqueueMemoirBookChapterDraftGeneration: async (projectId, chapterId, data) => {
         calls.push({ projectId, chapterId, data });
-        return sampleDraft(2, "draft", "整理后的正文");
+        return sampleAutomationEvent({ id: "event-draft-cleanup", chapter_id: chapterId });
       },
     },
   });
@@ -3521,8 +3584,9 @@ test("book page force regenerates when source removals also need cleanup", async
     chapterId: "chapter-1",
     data: { force_regenerate: true },
   });
-  assert.equal(context.data.chapters[0].draftContent, "整理后的正文");
+  assert.equal(context.data.chapters[0].draftBusy, true);
   assert.equal(context.data.chapters[0].draftChanged, false);
+  page.clearBookGenerationEventPoll.call(context);
   delete global.wx;
 });
 
@@ -3530,9 +3594,9 @@ test("book page blocks regeneration while draft edits are unsaved", async () => 
   const calls = [];
   const { mod, page } = loadBookPage({
     voiceApiExports: {
-      generateMemoirBookChapterDraft: async () => {
+      enqueueMemoirBookChapterDraftGeneration: async () => {
         calls.push("called");
-        return sampleDraft(2);
+        return sampleAutomationEvent();
       },
     },
   });
@@ -3604,6 +3668,10 @@ test("book APIs call encoded backend routes", async () => {
         });
         return;
       }
+      if (options.url.endsWith("/draft/jobs")) {
+        options.success({ statusCode: 200, data: sampleAutomationEvent(), cookies: [], header: {} });
+        return;
+      }
       if (options.url.endsWith("/draft") || options.url.endsWith("/draft/confirm")) {
         options.success({ statusCode: 200, data: sampleDraft(), cookies: [], header: {} });
         return;
@@ -3614,6 +3682,19 @@ test("book APIs call encoded backend routes", async () => {
       }
       if (options.url.endsWith("/book-output") || options.url.endsWith("/book-output/generate")) {
         options.success({ statusCode: 200, data: sampleBookOutput(), cookies: [], header: {} });
+        return;
+      }
+      if (options.url.endsWith("/book-output/generate/jobs")) {
+        options.success({
+          statusCode: 200,
+          data: sampleAutomationEvent({
+            event_type: "book_output_generated",
+            chapter_id: null,
+            summary_text: "全书已提交后台生成。",
+          }),
+          cookies: [],
+          header: {},
+        });
         return;
       }
       if (options.url.endsWith("/book-source-coverage")) {
@@ -3633,6 +3714,8 @@ test("book APIs call encoded backend routes", async () => {
     createMemoirBookOutputTTS,
     createMemoirBookPlanOutlineTTS,
     createMemoirBookVoiceAssistantTTS,
+    enqueueMemoirBookChapterDraftGeneration,
+    enqueueMemoirBookOutputGeneration,
     generateMemoirBookChapterDraft,
     generateMemoirBookChapterTitle,
     generateMemoirBookOutput,
@@ -3674,6 +3757,8 @@ test("book APIs call encoded backend routes", async () => {
   await suggestMemoirBookOutputTitles("project/1", { count: 4 });
   await generateMemoirBookOutput("project/1", { force_regenerate: true });
   await createMemoirBookOutputTTS("project/1", {});
+  await enqueueMemoirBookChapterDraftGeneration("project/1", "chapter/1", { force_regenerate: true });
+  await enqueueMemoirBookOutputGeneration("project/1", { force_regenerate: true });
 
   const apiRequests = requests.filter((request) => request.url.includes("/api/mobile/memoir/"));
   assert.equal(apiRequests[0].url, "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-plan");
@@ -3782,6 +3867,24 @@ test("book APIs call encoded backend routes", async () => {
   );
   assert.equal(apiRequests[20].method, "POST");
   assert.equal(apiRequests[20].header.Cookie, "pawtale_session=abc");
+  assert.equal(
+    apiRequests[21].url,
+    "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-plan/chapters/chapter%2F1/draft/jobs",
+  );
+  assert.equal(apiRequests[21].method, "POST");
+  assert.deepEqual(apiRequests[21].data, {
+    force_regenerate: true,
+    ai_model: "doubao-seed-2-0-pro-260215",
+  });
+  assert.equal(
+    apiRequests[22].url,
+    "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-output/generate/jobs",
+  );
+  assert.equal(apiRequests[22].method, "POST");
+  assert.deepEqual(apiRequests[22].data, {
+    force_regenerate: true,
+    ai_model: "doubao-seed-2-0-pro-260215",
+  });
   delete global.wx;
 });
 

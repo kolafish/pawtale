@@ -35,10 +35,10 @@ import {
   createMemoirBookOutputTTS,
   createMemoirBookPlanOutlineTTS,
   bookVoiceCommandGatewayUrl,
+  enqueueMemoirBookChapterDraftGeneration,
+  enqueueMemoirBookOutputGeneration,
   executeMemoirBookVoiceCommand,
   generateMemoirBookChapterTitle,
-  generateMemoirBookChapterDraft,
-  generateMemoirBookOutput,
   generateMemoirBookPlan,
   getMemoirBookChapterDraft,
   getMemoirBookOutput,
@@ -188,14 +188,6 @@ function isLoginError(error: unknown): boolean {
   return error instanceof ApiError && [401, 403].includes(error.statusCode);
 }
 
-function bookOutputGenerateErrorMessage(error: unknown): string {
-  const message = error instanceof Error ? error.message : "";
-  if (message.toLowerCase().includes("timeout") || message.includes("超时")) {
-    return "全书篇幅较长，生成超时了。请稍后刷新成书页查看是否已生成，或重新点击生成。";
-  }
-  return message || "全书生成失败";
-}
-
 function latestBookTitle(output: MemoirBookOutput | null): string {
   return trimText(output?.latest_version?.manuscript?.profile?.title || output?.title || "");
 }
@@ -252,6 +244,36 @@ function currentBookMetadataPayload(data: BookData, includeEmpty: boolean): Reco
 }
 
 const BOOK_DESIGN_AUTOSAVE_DELAY_MS = 900;
+const BOOK_GENERATION_EVENT_POLL_INTERVAL_MS = 3000;
+const BOOK_GENERATION_EVENT_POLL_MAX_ATTEMPTS = 120;
+
+function isBookGenerationEvent(event: MemoirAutomationEvent): boolean {
+  return event.event_type === "chapter_draft_generated" || event.event_type === "book_output_generated";
+}
+
+function pendingBookGenerationEvents(events: MemoirAutomationEvent[]): MemoirAutomationEvent[] {
+  return events.filter((event) => isBookGenerationEvent(event) && event.status === "pending");
+}
+
+function pendingChapterDraftGenerationIds(events: MemoirAutomationEvent[]): Set<string> {
+  return new Set(
+    pendingBookGenerationEvents(events)
+      .filter((event) => event.event_type === "chapter_draft_generated")
+      .map((event) => trimText(event.chapter_id || ""))
+      .filter(Boolean),
+  );
+}
+
+function hasPendingBookOutputGeneration(events: MemoirAutomationEvent[]): boolean {
+  return pendingBookGenerationEvents(events).some((event) => event.event_type === "book_output_generated");
+}
+
+function mergeAutomationEvent(
+  events: MemoirAutomationEvent[],
+  event: MemoirAutomationEvent,
+): MemoirAutomationEvent[] {
+  return [event, ...events.filter((candidate) => candidate.id !== event.id)];
+}
 
 function bookDesignHasChanges(data: BookData): boolean {
   return data.bookTitleChanged || data.bookMetadataChanged || data.bookCoverStyleChanged;
@@ -493,6 +515,10 @@ Page<BookData, {
   loadBookOutput(projectId: string): Promise<MemoirBookOutput | null>;
   loadSourceCoverage(projectId: string): Promise<MemoirBookSourceCoverage | null>;
   loadAutomationEvents(projectId: string): Promise<MemoirAutomationEvent[]>;
+  refreshAutomationEventsAfterGeneration(): Promise<void>;
+  scheduleBookGenerationEventPoll(): void;
+  clearBookGenerationEventPoll(): void;
+  syncBookGenerationBusyState(events: MemoirAutomationEvent[]): void;
   applyPlan(plan: MemoirBookPlan | null, draftsByChapterId?: Record<string, MemoirBookChapterDraft | null>): void;
   applyBookOutput(output: MemoirBookOutput | null): void;
   applySourceCoverage(coverage: MemoirBookSourceCoverage | null): void;
@@ -514,7 +540,7 @@ Page<BookData, {
   splitSelectedChapterSources(event: DatasetEvent): Promise<void>;
   toggleChapterSources(event: DatasetEvent): void;
   generateChapterDraft(event: DatasetEvent): Promise<void>;
-  generateChapterDraftById(chapterId: string, toastTitle?: string): Promise<boolean>;
+  generateChapterDraftById(chapterId: string): Promise<boolean>;
   changeDraftContent(event: TextInputEvent): void;
   saveChapterDraft(event: DatasetEvent): Promise<void>;
   confirmChapterDraft(event: DatasetEvent): Promise<void>;
@@ -637,6 +663,11 @@ Page<BookData, {
   ttsProgressStartedAtMs: number;
   bookVoiceAutoListenTimer: number | null;
   bookDesignAutosaveTimer: number | null;
+  bookGenerationPollTimer: number | null;
+  bookGenerationPollAttempts: number;
+  automationEvents: MemoirAutomationEvent[];
+  backgroundDraftBusyChapterIds: Record<string, boolean>;
+  bookOutputGenerationSubmitting: boolean;
 }>({
   audioPlayback: new AudioPlaybackController(),
   bookVoiceStreaming: new StreamingVoiceController(),
@@ -650,6 +681,11 @@ Page<BookData, {
   ttsProgressStartedAtMs: 0,
   bookVoiceAutoListenTimer: null,
   bookDesignAutosaveTimer: null,
+  bookGenerationPollTimer: null,
+  bookGenerationPollAttempts: 0,
+  automationEvents: [],
+  backgroundDraftBusyChapterIds: {},
+  bookOutputGenerationSubmitting: false,
 
   data: {
     loading: false,
@@ -776,6 +812,7 @@ Page<BookData, {
   },
 
   async onShow() {
+    this.bookGenerationPollAttempts = 0;
     await this.loadBookHome();
   },
 
@@ -829,6 +866,7 @@ Page<BookData, {
       this.applySourceCoverage(coverage);
       this.applyPlan(plan, draftsByChapterId);
       this.applyBookOutput(output);
+      this.applyAutomationEvents(automationEvents);
     } catch (error) {
       if (error instanceof ApiError && error.statusCode === 404) {
         this.applyPlan(null);
@@ -851,6 +889,57 @@ Page<BookData, {
       return [];
     } finally {
       this.setData({ automationEventLoading: false });
+    }
+  },
+
+  async refreshAutomationEventsAfterGeneration() {
+    if (!this.data.projectId) {
+      return;
+    }
+    const hadPendingGeneration = pendingBookGenerationEvents(this.automationEvents).length > 0;
+    const events = await this.loadAutomationEvents(this.data.projectId);
+    if (this.data.automationEventError) {
+      if (hadPendingGeneration) {
+        this.scheduleBookGenerationEventPoll();
+      }
+      return;
+    }
+    const hasPendingGeneration = pendingBookGenerationEvents(events).length > 0;
+    this.applyAutomationEvents(events);
+    if (hasPendingGeneration) {
+      this.scheduleBookGenerationEventPoll();
+      return;
+    }
+    if (hadPendingGeneration) {
+      this.bookGenerationPollAttempts = 0;
+      await this.loadPlanForProject(this.data.projectId);
+    }
+  },
+
+  scheduleBookGenerationEventPoll() {
+    if (this.bookGenerationPollTimer !== null || !this.data.projectId) {
+      return;
+    }
+    if (!pendingBookGenerationEvents(this.automationEvents).length) {
+      this.bookGenerationPollAttempts = 0;
+      return;
+    }
+    if (this.bookGenerationPollAttempts >= BOOK_GENERATION_EVENT_POLL_MAX_ATTEMPTS) {
+      return;
+    }
+    this.bookGenerationPollAttempts += 1;
+    const timer = setTimeout(() => {
+      this.bookGenerationPollTimer = null;
+      void this.refreshAutomationEventsAfterGeneration();
+    }, BOOK_GENERATION_EVENT_POLL_INTERVAL_MS);
+    (timer as unknown as { unref?: () => void }).unref?.();
+    this.bookGenerationPollTimer = timer as unknown as number;
+  },
+
+  clearBookGenerationEventPoll() {
+    if (this.bookGenerationPollTimer !== null) {
+      clearTimeout(this.bookGenerationPollTimer);
+      this.bookGenerationPollTimer = null;
     }
   },
 
@@ -1256,7 +1345,36 @@ Page<BookData, {
     this.setData(sourceCoverageData(this.data.plan, coverage));
   },
 
+  syncBookGenerationBusyState(events) {
+    const pendingChapterIds = pendingChapterDraftGenerationIds(events);
+    const previousPendingIds = Object.keys(this.backgroundDraftBusyChapterIds);
+    const changedChapterIds = new Set([...previousPendingIds, ...Array.from(pendingChapterIds)]);
+    this.backgroundDraftBusyChapterIds = Array.from(pendingChapterIds).reduce<Record<string, boolean>>((memo, id) => {
+      memo[id] = true;
+      return memo;
+    }, {});
+    const hasPendingBookOutput = hasPendingBookOutputGeneration(events);
+    const dataPatch: Partial<BookData> = {
+      generatingBook: this.bookOutputGenerationSubmitting || hasPendingBookOutput,
+    };
+    if (changedChapterIds.size) {
+      const chapters = this.data.chapters.map((chapter) => (
+        changedChapterIds.has(chapter.id)
+          ? { ...chapter, draftBusy: pendingChapterIds.has(chapter.id) }
+          : chapter
+      ));
+      Object.assign(dataPatch, chapterCollectionData(
+        chapters,
+        this.data.stage,
+        this.data.sourceCoverage,
+        this.data.splitSourceSelections,
+      ));
+    }
+    this.setData(dataPatch);
+  },
+
   applyAutomationEvents(events) {
+    this.automationEvents = events;
     this.setData({
       automationEventItems: buildAutomationEventViews(
         events,
@@ -1264,6 +1382,8 @@ Page<BookData, {
         this.data.automationEventExpandedTargets,
       ),
     });
+    this.syncBookGenerationBusyState(events);
+    this.scheduleBookGenerationEventPoll();
   },
 
   toggleAutomationEventDetails(event) {
@@ -1631,10 +1751,10 @@ Page<BookData, {
 
   async generateChapterDraft(event) {
     const chapterId = event.currentTarget.dataset.id || "";
-    await this.generateChapterDraftById(chapterId, "章节稿已生成");
+    await this.generateChapterDraftById(chapterId);
   },
 
-  async generateChapterDraftById(chapterId, toastTitle = "章节稿已生成") {
+  async generateChapterDraftById(chapterId) {
     const chapter = this.data.chapters.find((candidate) => candidate.id === chapterId);
     if (!chapter || !this.data.projectId || chapter.draftBusy || this.data.updatingPlanStructure) {
       return false;
@@ -1647,19 +1767,18 @@ Page<BookData, {
     try {
       const shouldSupplementPendingSources = chapter.pendingSourceCount > 0 && !chapter.removedSourceCount;
       const forceRegenerate = Boolean(chapter.draft?.latest_version && !shouldSupplementPendingSources);
-      const draft = await generateMemoirBookChapterDraft(this.data.projectId, chapterId, {
+      const event = await enqueueMemoirBookChapterDraftGeneration(this.data.projectId, chapterId, {
         force_regenerate: forceRegenerate,
       });
-      this.patchDraft(chapterId, draft);
-      wx.showToast({ title: toastTitle, icon: "success" });
+      this.applyAutomationEvents(mergeAutomationEvent(this.automationEvents, event));
+      wx.showToast({ title: "已后台生成", icon: "success" });
       return true;
     } catch (error) {
       this.patchChapter(chapterId, {
         draftError: error instanceof Error ? error.message : "章节稿生成失败",
       });
-      return false;
-    } finally {
       this.patchChapter(chapterId, { draftBusy: false });
+      return false;
     }
   },
 
@@ -1876,7 +1995,7 @@ Page<BookData, {
 
   async regenerateMergedChapter(chapterId) {
     const renamed = await this.generateChapterTitleById(chapterId, "已重写章名");
-    const drafted = await this.generateChapterDraftById(chapterId, "合并正文已生成");
+    const drafted = await this.generateChapterDraftById(chapterId);
     if (!renamed || !drafted) {
       this.patchChapter(chapterId, {
         draftError: "章节已合并，请检查章名和正文后再确认",
@@ -1898,24 +2017,26 @@ Page<BookData, {
     }
     this.stopPlayback();
     this.setData({ generatingBook: true, error: "" });
+    this.bookOutputGenerationSubmitting = true;
     try {
       const metadata = currentBookMetadataPayload(this.data, false);
-      const output = await generateMemoirBookOutput(this.data.projectId, {
+      const event = await enqueueMemoirBookOutputGeneration(this.data.projectId, {
         force_regenerate: Boolean(this.data.bookOutput?.latest_version),
         title: trimText(this.data.bookTitleInput) || undefined,
         ...metadata,
         cover_style: this.data.bookCoverStyle,
       });
-      this.applyBookOutput(output);
-      wx.showToast({ title: "全书已生成", icon: "success" });
+      this.applyAutomationEvents(mergeAutomationEvent(this.automationEvents, event));
+      wx.showToast({ title: "已后台生成", icon: "success" });
     } catch (error) {
       if (isLoginError(error)) {
         wx.reLaunch({ url: "/pages/login/index" });
         return;
       }
-      this.setData({ error: bookOutputGenerateErrorMessage(error) });
+      this.setData({ error: error instanceof Error ? error.message : "全书生成提交失败" });
     } finally {
-      this.setData({ generatingBook: false });
+      this.bookOutputGenerationSubmitting = false;
+      this.setData({ generatingBook: hasPendingBookOutputGeneration(this.automationEvents) });
     }
   },
 
@@ -3015,6 +3136,7 @@ Page<BookData, {
 
   onHide() {
     this.flushBookDesignAutosave();
+    this.clearBookGenerationEventPoll();
     this.clearBookVoiceAssistantAutoListenTimer();
     this.bookVoiceStreaming.close({ force: true });
     this.bookVoiceTTSStreaming?.close();
@@ -3041,6 +3163,7 @@ Page<BookData, {
 
   onUnload() {
     this.flushBookDesignAutosave();
+    this.clearBookGenerationEventPoll();
     this.bookVoiceTTSStreaming?.close();
     this.bookVoiceTTSStreaming = null;
     this.stopBookVoiceConversation();
