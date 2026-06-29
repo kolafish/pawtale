@@ -286,6 +286,7 @@ export interface BookData {
   bookTitleChanged: boolean;
   bookMetadataChanged: boolean;
   bookTitleSaving: boolean;
+  bookDesignSaveStatusText: string;
   bookTitleSuggesting: boolean;
   bookTitleSuggestions: string[];
   bookCoverStyle: MemoirBookCoverStyle;
@@ -1100,6 +1101,7 @@ export function bookOutputData(output: MemoirBookOutput | null, selectedVersionI
   | "bookBackCoverQuoteInput"
   | "bookTitleChanged"
   | "bookMetadataChanged"
+  | "bookDesignSaveStatusText"
   | "bookTitleSuggestions"
   | "bookCoverStyle"
   | "bookCoverStyleIndex"
@@ -1130,6 +1132,9 @@ export function bookOutputData(output: MemoirBookOutput | null, selectedVersionI
     bookTitleInput: manuscriptData.bookManuscriptTitle || bookOutputPreviewTitle(output, versionState.selectedId),
     ...bookMetadataInputData(output, versionState.selectedId),
     bookTitleChanged: false,
+    bookDesignSaveStatusText: output?.latest_version
+      ? (versionState.viewingHistorical ? "切回最新版后自动保存" : "已保存")
+      : "生成时应用",
     bookTitleSuggestions: [],
     ...bookCoverStyleData(output, versionState.selectedId),
   };
@@ -1575,6 +1580,7 @@ export function guestBookData(): Partial<BookData> {
     bookBackCoverQuoteInput: "",
     bookTitleChanged: false,
     bookMetadataChanged: false,
+    bookDesignSaveStatusText: "生成时应用",
     bookTitleSuggestions: [],
     bookCoverStyle: "classic_plain",
     bookCoverStyleIndex: 0,

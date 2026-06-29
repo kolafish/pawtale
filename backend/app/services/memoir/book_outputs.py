@@ -224,22 +224,20 @@ def _fallback_cover_subtitle(chapter_titles: list[str]) -> str:
     return "根据口述访谈整理而成"
 
 
-def _fallback_title_suggestions(base_title: str, chapter_titles: list[str], count: int) -> list[str]:
+def _fallback_title_suggestions(base_title: str, _chapter_titles: list[str], count: int) -> list[str]:
     formal_title = _formal_book_title(base_title)
     subject = formal_title.removesuffix("的回忆录").removesuffix("回忆录").strip("的") or "家人"
-    topics = [_short_topic(title) for title in chapter_titles if _short_topic(title)]
     candidates = [
         formal_title,
-        f"{subject}慢慢说",
         f"{subject}的一生",
+        f"{subject}慢慢说",
         f"{subject}口述回忆录",
-        "从前的日子",
         "我走过的这些年",
+        "一生的来路",
+        "从前的日子",
+        "那些年我记得",
+        "家里的回忆录",
     ]
-    if topics:
-        candidates.insert(1, f"{topics[0]}里的记忆")
-    if len(topics) >= 2:
-        candidates.insert(2, f"{topics[0]}与{topics[1]}")
     result: list[str] = []
     for candidate in candidates:
         cleaned = _formal_book_title(candidate)
