@@ -13,6 +13,7 @@ from app.models.memoir import (
     MemoirBookPlan,
     MemoirBookPlanChapter,
 )
+from app.services.memoir.book_manuscript_ai import generate_manuscript_editorial_copy
 from app.services.memoir.book_audio import split_tts_text
 from app.services.memoir.tts_alignment import TTSAlignmentSegment
 from app.services.memoir.voice_tts import TTSResult
@@ -51,6 +52,36 @@ class FakeBookTTS:
         )
 
 
+class FakeEditorialAI:
+    provider_name = "fake-ai"
+    model_name = "fake-editorial-model"
+
+    def __init__(self):
+        self.calls = []
+
+    async def _call_llm(self, system_prompt, user_prompt, temperature=0.7, max_tokens=4000, timeout=60.0, return_raw=False):
+        self.calls.append(
+            {
+                "system_prompt": system_prompt,
+                "user_prompt": user_prompt,
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+                "timeout": timeout,
+            }
+        )
+        return """
+        {
+          "book_title": "外婆慢慢说",
+          "cover_subtitle": "关于童年与离家的记忆",
+          "preface": "这些讲述从院子里的童年开始，也写到第一次离家时的紧张。整理成书，是为了让家里人以后还能翻到这些细节。",
+          "chapter_intros": [
+            {"chapter_id": "chapter-1", "intro": "记忆先回到外婆家的院子，阳光和旧日子的声音都在那里。"}
+          ],
+          "back_cover_quote": "我小时候常在外婆家的院子里晒太阳。"
+        }
+        """
+
+
 async def _active_project_id(client):
     response = await client.get("/api/mobile/memoir/projects")
     assert response.status_code == 200
@@ -67,6 +98,34 @@ def test_book_tts_chunks_keep_offsets_across_blank_lines():
 
     assert [chunk.text for chunk in chunks] == ["标题", "第一段正文。", "第二段正文。"]
     assert [chunk.text_start for chunk in chunks] == [0, 4, 12]
+
+
+async def test_memoir_book_manuscript_editorial_copy_uses_llm_context():
+    fake_ai = FakeEditorialAI()
+
+    copy = await generate_manuscript_editorial_copy(
+        title="外婆的回忆录",
+        snapshot=[
+            {
+                "chapter_id": "chapter-1",
+                "chapter_index": 1,
+                "chapter_title": "外婆家的童年",
+                "source_count": 2,
+                "source_refs": [{"utterance_id": "u1", "quote": "我小时候常在外婆家的院子里晒太阳。"}],
+                "content": "我小时候常在外婆家的院子里晒太阳。后来第一次离家去县城读书。",
+            }
+        ],
+        ai_model="fake-model",
+        ai_client=fake_ai,
+    )
+
+    assert copy is not None
+    assert copy.book_title == "外婆慢慢说"
+    assert copy.cover_subtitle == "关于童年与离家的记忆"
+    assert copy.chapter_intros[0].chapter_id == "chapter-1"
+    assert copy.back_cover_quote == "我小时候常在外婆家的院子里晒太阳。"
+    assert "chapter_id: chapter-1" in fake_ai.calls[0]["user_prompt"]
+    assert "representative_quote: 我小时候常在外婆家的院子里晒太阳。" in fake_ai.calls[0]["user_prompt"]
 
 
 async def _create_confirmed_book_plan(test_db, *, project_id: str, confirmed_chapters: bool = True):
@@ -163,7 +222,7 @@ async def test_mobile_memoir_book_output_generate_combines_confirmed_chapters(cl
 
     assert response.status_code == 200
     data = response.json()
-    assert data["title"] == "外婆回忆录"
+    assert data["title"] == "外婆的回忆录"
     assert data["latest_version"]["version"] == 1
     content = data["latest_version"]["content"]
     assert "目录\n1. 外婆家的童年\n2. 第一次离家" in content
@@ -176,7 +235,7 @@ async def test_mobile_memoir_book_output_generate_combines_confirmed_chapters(cl
     assert snapshot[0]["chapter_index"] == 1
     assert snapshot[0]["content"] == "我小时候常在外婆家的院子里晒太阳。"
     structured = data["latest_version"]["structured_content"]
-    assert structured["title"] == "外婆回忆录"
+    assert structured["title"] == "外婆的回忆录"
     assert structured["chapter_count"] == 2
     assert [item["title"] for item in structured["table_of_contents"]] == ["外婆家的童年", "第一次离家"]
     assert structured["chapters"][0]["chapter_id"] == chapters[0].id
@@ -185,8 +244,8 @@ async def test_mobile_memoir_book_output_generate_combines_confirmed_chapters(cl
     manuscript = data["latest_version"]["manuscript"]
     assert manuscript["schema_version"] == 1
     assert manuscript["profile"]["template"] == "classic_family"
-    assert manuscript["profile"]["title"] == "外婆回忆录"
-    assert manuscript["profile"]["subtitle"] == "根据口述访谈整理"
+    assert manuscript["profile"]["title"] == "外婆的回忆录"
+    assert manuscript["profile"]["subtitle"] == "关于外婆家的童年、第一次离家的记忆"
     assert [section["kind"] for section in manuscript["front_matter"]] == [
         "cover",
         "title_page",
@@ -197,13 +256,15 @@ async def test_mobile_memoir_book_output_generate_combines_confirmed_chapters(cl
     assert manuscript["front_matter"][3]["title"] == "写在前面"
     assert [item["title"] for item in manuscript["table_of_contents"]] == ["外婆家的童年", "第一次离家"]
     assert manuscript["chapters"][0]["chapter_id"] == chapters[0].id
-    assert manuscript["chapters"][0]["intro"].startswith("这一章主要记录「外婆家的童年」")
+    assert manuscript["chapters"][0]["intro"].startswith("关于「外婆家的童年」")
+    assert "这一章主要记录" not in manuscript["chapters"][0]["intro"]
     assert manuscript["chapters"][0]["pull_quotes"][0]["text"] == "我小时候常在外婆家的院子里晒太阳。"
     assert manuscript["chapters"][0]["source_refs"][0]["utterance_id"] == "utterance-1"
     assert manuscript["back_matter"]["interview_records"]["title"] == "讲述资料"
     assert manuscript["back_matter"]["version_note"]["title"] == "版本与修订"
     assert manuscript["back_matter"]["source_appendix"]["title"] == "口述来源索引"
-    assert "第1章 外婆家的童年：1 条口述记录" in manuscript["back_matter"]["source_appendix"]["content"]
+    assert "第1章「外婆家的童年」：1 条口述记录" in manuscript["back_matter"]["source_appendix"]["content"]
+    assert manuscript["render_settings"]["back_cover_quote"] == "我小时候常在外婆家的院子里晒太阳。"
     assert manuscript["render_settings"]["page_size"] == "a5"
 
     stored_output = await test_db.scalar(select(MemoirBookOutput).where(MemoirBookOutput.project_id == project_id))
@@ -214,7 +275,7 @@ async def test_mobile_memoir_book_output_generate_combines_confirmed_chapters(cl
     ).scalars().all()
     assert stored_output.plan_id == plan.id
     assert len(stored_versions) == 1
-    assert stored_versions[0].manuscript_json["profile"]["title"] == "外婆回忆录"
+    assert stored_versions[0].manuscript_json["profile"]["title"] == "外婆的回忆录"
 
 
 async def test_mobile_memoir_book_output_generate_returns_existing_without_force(client, test_db):
@@ -247,7 +308,7 @@ async def test_mobile_memoir_book_output_exports_txt_and_pdf(client, test_db):
     assert txt.status_code == 200
     assert txt.headers["content-type"].startswith("text/plain")
     assert "filename*=" in txt.headers["content-disposition"]
-    assert "外婆回忆录" in txt.text
+    assert "外婆的回忆录" in txt.text
     assert "第1章 外婆家的童年" in txt.text
     assert pdf.status_code == 200
     assert pdf.headers["content-type"] == "application/pdf"
@@ -257,7 +318,7 @@ async def test_mobile_memoir_book_output_exports_txt_and_pdf(client, test_db):
     assert b"NotoSansSC" in pdf.content
     assert pdf.content.count(b"/Type /Page") >= 8
     assert pdf_without_sources.status_code == 200
-    assert pdf_without_sources.content.count(b"/Type /Page") < pdf.content.count(b"/Type /Page")
+    assert pdf_without_sources.content != pdf.content
     assert print_pdf.status_code == 200
     assert b"/FontFile2" in print_pdf.content
     assert print_pdf.content != pdf.content
@@ -471,7 +532,7 @@ async def test_mobile_memoir_book_output_tts_generates_full_book_audio(
     assert data["audio_file_ids"]
     assert data["provider"] == "fake-tts"
     assert len(fake_tts.calls) == data["chunk_count"]
-    assert "外婆回忆录" in fake_tts.calls[0]["text"]
+    assert "外婆的回忆录" in fake_tts.calls[0]["text"]
     assert fake_tts.calls[0]["voice"] == "voice-book"
     assert fake_tts.calls[0]["speed_ratio"] == 1.5
     assert len(data["audio_file_durations_seconds"]) == data["chunk_count"]

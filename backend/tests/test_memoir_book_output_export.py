@@ -93,9 +93,13 @@ def test_table_of_contents_links_to_numbered_chapter_pages():
 
     toc_page = next(page for page in pages if page.section_title == "目录")
     toc_command = next(command for command in toc_page.commands if "外婆家的童年" in command.text)
+    page_command = next(command for command in toc_page.commands if command.text == "1")
 
     assert toc_command.target_anchor == "chapter-1"
-    assert toc_command.text.endswith("1")
+    assert toc_command.text == "第一章　外婆家的童年"
+    assert page_command.target_anchor == "chapter-1"
+    assert page_command.x > toc_command.x
+    assert page_command.y == toc_command.y
 
 
 def test_table_of_contents_skips_links_without_chapter_pages():
