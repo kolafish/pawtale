@@ -53,15 +53,15 @@ PDF_LAYOUTS = {
     MemoirBookOutputExportLayout.STANDARD: PDFLayout(
         page_width=420,
         page_height=595,
-        font_size=13,
-        line_height=19,
+        font_size=12,
+        line_height=20,
         margin_x=42,
-        margin_top=58,
-        margin_bottom=48,
+        margin_top=56,
+        margin_bottom=56,
         title_font_size=24,
-        heading_font_size=17,
+        heading_font_size=18,
         small_font_size=10,
-        max_line_units=25,
+        max_line_units=27,
     ),
     MemoirBookOutputExportLayout.LARGE_PRINT: PDFLayout(
         page_width=420,
@@ -94,6 +94,7 @@ class PDFPage:
     header_title: str = ""
     section_title: str = ""
     show_footer: bool = True
+    body_page_number: int | None = None
 
 
 def _wrap_pdf_line(text: str, max_units: int) -> list[str]:
@@ -142,6 +143,10 @@ class PDFBookBuilder:
         self.pages: list[PDFPage] = []
         self.current_page: PDFPage | None = None
         self.current_section = ""
+        self.current_body_numbering = False
+        self.continuation_show_header = True
+        self.continuation_show_footer = True
+        self.body_page_count = 0
         self.y = 0
 
     def new_page(
@@ -150,13 +155,28 @@ class PDFBookBuilder:
         *,
         show_header: bool = True,
         show_footer: bool = True,
+        body_numbering: bool = False,
+        continuation_show_header: bool | None = None,
+        continuation_show_footer: bool | None = None,
     ) -> None:
         self.current_section = section_title or self.current_section
+        self.current_body_numbering = body_numbering
+        self.continuation_show_header = (
+            show_header if continuation_show_header is None else continuation_show_header
+        )
+        self.continuation_show_footer = (
+            show_footer if continuation_show_footer is None else continuation_show_footer
+        )
+        body_page_number = None
+        if body_numbering:
+            self.body_page_count += 1
+            body_page_number = self.body_page_count
         self.current_page = PDFPage(
             commands=[],
             header_title=self.title if show_header else "",
-            section_title=self.current_section if show_header else "",
+            section_title=self.current_section,
             show_footer=show_footer,
+            body_page_number=body_page_number,
         )
         self.pages.append(self.current_page)
         self.y = self.layout.page_height - self.layout.margin_top
@@ -170,7 +190,14 @@ class PDFBookBuilder:
     def _ensure_space(self, line_count: int = 1) -> None:
         required = max(1, line_count) * self.layout.line_height
         if not self.current_page or self.y - required < self.layout.margin_bottom:
-            self.new_page(self.current_section or "正文")
+            self.new_page(
+                self.current_section or "正文",
+                show_header=self.continuation_show_header,
+                show_footer=self.continuation_show_footer,
+                body_numbering=self.current_body_numbering,
+                continuation_show_header=self.continuation_show_header,
+                continuation_show_footer=self.continuation_show_footer,
+            )
 
     def add_spacer(self, lines: float = 1.0) -> None:
         self._ensure_space(1)
@@ -264,8 +291,8 @@ def _pdf_page_commands(page: PDFPage, *, page_number: int, layout: PDFLayout) ->
                 )
             )
     commands.extend(page.commands)
-    if page.show_footer:
-        footer = str(page_number)
+    if page.show_footer and page.body_page_number is not None:
+        footer = str(page.body_page_number)
         commands.append(
             PDFTextCommand(
                 footer,
@@ -317,7 +344,7 @@ def _render_pdf_pages(pages: list[PDFPage], layout: PDFLayout) -> bytes:
 
 def _render_plain_pdf(content: str, title: str, layout: PDFLayout) -> bytes:
     builder = PDFBookBuilder(title=title, layout=layout)
-    builder.new_page("正文")
+    builder.new_page("正文", body_numbering=True)
     builder.add_heading(title)
     builder.add_text(content.strip() or title)
     return _render_pdf_pages(builder.pages, layout)
@@ -347,16 +374,42 @@ def _int(value: Any, fallback: int) -> int:
     return value if isinstance(value, int) and value > 0 else fallback
 
 
+CHINESE_NUMERALS = "零一二三四五六七八九"
+
+
+def _chinese_number(value: int) -> str:
+    if value <= 0:
+        return str(value)
+    if value < 10:
+        return CHINESE_NUMERALS[value]
+    if value == 10:
+        return "十"
+    if value < 20:
+        return f"十{CHINESE_NUMERALS[value % 10]}"
+    if value < 100:
+        tens, ones = divmod(value, 10)
+        return f"{CHINESE_NUMERALS[tens]}十{CHINESE_NUMERALS[ones] if ones else ''}"
+    return str(value)
+
+
 def _add_section_page(
     builder: PDFBookBuilder,
     *,
     section_title: str,
     content: str,
     heading: str | None = None,
+    show_header: bool = False,
+    show_footer: bool = False,
+    body_numbering: bool = False,
 ) -> None:
     if not content and not (heading or section_title):
         return
-    builder.new_page(section_title)
+    builder.new_page(
+        section_title,
+        show_header=show_header,
+        show_footer=show_footer,
+        body_numbering=body_numbering,
+    )
     builder.add_heading(heading or section_title)
     if content:
         builder.add_text(content)
@@ -408,7 +461,12 @@ def _add_front_matter(builder: PDFBookBuilder, front_matter: list[Any], *, title
 def _chapter_title(chapter: dict[str, Any], fallback_index: int) -> str:
     index = _int(chapter.get("index"), fallback_index)
     title = _str(chapter.get("title")) or f"第{index}章"
-    return f"第{index}章 {title}"
+    return title
+
+
+def _chapter_label(chapter: dict[str, Any], fallback_index: int) -> str:
+    index = _int(chapter.get("index"), fallback_index)
+    return f"第{_chinese_number(index)}章"
 
 
 def _add_table_of_contents(
@@ -417,7 +475,7 @@ def _add_table_of_contents(
     toc_items: list[Any],
     chapters: list[Any],
 ) -> None:
-    builder.new_page("目录")
+    builder.new_page("目录", show_header=False, show_footer=False)
     builder.add_heading("目录")
     items = toc_items or chapters
     if not items:
@@ -440,8 +498,30 @@ def _add_chapters(builder: PDFBookBuilder, chapters: list[Any]) -> None:
     for fallback_index, raw_chapter in enumerate(chapters, start=1):
         chapter = _dict(raw_chapter)
         title = _chapter_title(chapter, fallback_index)
-        builder.new_page(title)
-        builder.add_heading(title)
+        label = _chapter_label(chapter, fallback_index)
+        builder.new_page(
+            title,
+            show_header=False,
+            show_footer=False,
+            body_numbering=True,
+            continuation_show_header=True,
+            continuation_show_footer=True,
+        )
+        builder.add_spacer(2.5)
+        builder.add_text(
+            label,
+            font_size=builder.layout.small_font_size + 1,
+            line_height=builder.layout.line_height,
+            max_units=builder.layout.max_line_units,
+            spacing_after=6,
+        )
+        builder.add_text(
+            title,
+            font_size=builder.layout.title_font_size,
+            line_height=builder.layout.line_height + 12,
+            max_units=max(10, builder.layout.max_line_units - 4),
+            spacing_after=12,
+        )
 
         hints = [
             _str(chapter.get("time_period")),
@@ -471,6 +551,9 @@ def _add_chapters(builder: PDFBookBuilder, chapters: list[Any]) -> None:
                     indent=8,
                     spacing_after=6,
                 )
+                break
+
+        builder.add_spacer(0.5)
 
         content = _str(chapter.get("content"))
         if content:
@@ -489,7 +572,7 @@ def _add_chapters(builder: PDFBookBuilder, chapters: list[Any]) -> None:
 def _add_unconfirmed_facts(builder: PDFBookBuilder, facts: list[Any]) -> None:
     if not facts:
         return
-    builder.new_page("待核实信息")
+    builder.new_page("待核实信息", show_header=True, show_footer=True, body_numbering=True)
     builder.add_heading("待核实信息")
     for index, raw_fact in enumerate(facts, start=1):
         fact = _dict(raw_fact)
@@ -521,6 +604,9 @@ def _add_back_matter(builder: PDFBookBuilder, back_matter: dict[str, Any], *, in
                 builder,
                 section_title=_section_title(section, fallback_title),
                 content=content,
+                show_header=True,
+                show_footer=True,
+                body_numbering=True,
             )
     _add_unconfirmed_facts(builder, _list(back_matter.get("unconfirmed_facts")))
     if include_source_appendix:
@@ -531,23 +617,30 @@ def _add_back_matter(builder: PDFBookBuilder, back_matter: dict[str, Any], *, in
                 builder,
                 section_title=_section_title(section, "章节来源"),
                 content=content,
+                show_header=True,
+                show_footer=True,
+                body_numbering=True,
             )
 
 
-def _render_manuscript_pdf(
+def _build_manuscript_pdf_pages(
     *,
     title: str,
     content: str,
     manuscript: dict[str, Any],
     layout: PDFLayout,
     show_source_appendix: bool | None = None,
-) -> bytes:
+) -> list[PDFPage]:
     profile = _dict(manuscript.get("profile"))
     chapters = _list(manuscript.get("chapters"))
     front_matter = _list(manuscript.get("front_matter"))
     back_matter = _dict(manuscript.get("back_matter"))
     if not profile and not chapters and not front_matter and not back_matter:
-        return _render_plain_pdf(content, title, layout)
+        builder = PDFBookBuilder(title=title, layout=layout)
+        builder.new_page("正文", body_numbering=True)
+        builder.add_heading(title)
+        builder.add_text(content.strip() or title)
+        return builder.pages
 
     book_title = _str(profile.get("title")) or title
     subtitle = _str(profile.get("subtitle"))
@@ -572,7 +665,25 @@ def _render_manuscript_pdf(
     )
     _add_chapters(builder, chapters)
     _add_back_matter(builder, back_matter, include_source_appendix=include_source_appendix)
-    return _render_pdf_pages(builder.pages, layout)
+    return builder.pages
+
+
+def _render_manuscript_pdf(
+    *,
+    title: str,
+    content: str,
+    manuscript: dict[str, Any],
+    layout: PDFLayout,
+    show_source_appendix: bool | None = None,
+) -> bytes:
+    pages = _build_manuscript_pdf_pages(
+        title=title,
+        content=content,
+        manuscript=manuscript,
+        layout=layout,
+        show_source_appendix=show_source_appendix,
+    )
+    return _render_pdf_pages(pages, layout)
 
 
 def _book_export_filename(
