@@ -445,6 +445,72 @@ async def test_memoir_book_auto_revision_job_supplements_pending_sources(
     assert audit_job.payload_json["reason"] == "chapter_auto_revision_completed"
 
 
+async def test_mobile_memoir_book_chapter_draft_generation_job_runs_in_background(
+    client,
+    test_db,
+    monkeypatch,
+):
+    clear_editing_job_handlers()
+    register_memoir_editing_job_handlers()
+    created = await create_test_voice_transcript(client, test_db, "我小时候常在外婆家的院子里晒太阳。")
+    project_id = created["session"]["project_id"]
+    _, chapter = await create_test_book_plan(
+        test_db,
+        project_id=project_id,
+        source_ref=memoir_source_ref(created),
+        status=MemoirBookPlanStatus.CONFIRMED,
+    )
+    fake_ai = FakeBookDraftAI("后台生成的章节正文")
+    monkeypatch.setattr(
+        "app.services.memoir.book_drafts.get_ai_service",
+        lambda model=None: fake_ai,
+    )
+
+    response = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-plan/chapters/{chapter.id}/draft/jobs",
+        json={"ai_model": "deepseek-v4-pro"},
+    )
+
+    assert response.status_code == 200
+    event_data = response.json()
+    assert event_data["event_type"] == MemoirAutomationEventType.CHAPTER_DRAFT_GENERATED.value
+    assert event_data["status"] == "pending"
+    assert event_data["chapter_id"] == chapter.id
+    assert event_data["summary_text"] == "「外婆家的童年」已提交后台生成。"
+    job = await test_db.scalar(
+        select(MemoirEditingJob).where(
+            MemoirEditingJob.project_id == project_id,
+            MemoirEditingJob.job_type == MemoirEditingJobType.GENERATE_CHAPTER_DRAFT.value,
+        )
+    )
+    assert job is not None
+    assert job.status == MemoirEditingJobStatus.PENDING.value
+    assert job.payload_json["request"]["ai_model"] == "deepseek-v4-pro"
+    assert job.payload_json["automation_event_id"] == event_data["id"]
+
+    assert await run_editing_job(test_db, job.id) is True
+
+    refreshed_job = await test_db.scalar(select(MemoirEditingJob).where(MemoirEditingJob.id == job.id))
+    assert refreshed_job.status == MemoirEditingJobStatus.SUCCEEDED.value
+    draft = await test_db.scalar(
+        select(MemoirBookChapterDraft).where(MemoirBookChapterDraft.chapter_id == chapter.id)
+    )
+    assert draft is not None
+    versions = (
+        await test_db.execute(
+            select(MemoirBookChapterDraftVersion)
+            .where(MemoirBookChapterDraftVersion.draft_id == draft.id)
+            .order_by(MemoirBookChapterDraftVersion.version)
+        )
+    ).scalars().all()
+    assert len(versions) == 1
+    assert versions[0].content == "后台生成的章节正文"
+    event = await test_db.get(MemoirAutomationEvent, event_data["id"])
+    assert event.status == "completed"
+    assert event.summary_text == "「外婆家的童年」章节正文已生成。"
+    assert event.metadata_json["result_version_id"] == versions[0].id
+
+
 async def test_mobile_memoir_book_chapter_draft_planner_can_choose_regenerate(
     client,
     test_db,

@@ -110,7 +110,9 @@ export type MemoirAutomationEventType =
   | "source_assigned"
   | "source_held"
   | "chapter_auto_revised"
-  | "audit_completed";
+  | "audit_completed"
+  | "chapter_draft_generated"
+  | "book_output_generated";
 export type MemoirAutomationEventStatus = "pending" | "completed" | "failed" | "needs_review";
 
 export interface MemoirAutomationEvent {

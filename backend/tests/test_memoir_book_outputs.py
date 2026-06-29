@@ -1,20 +1,27 @@
 from sqlalchemy import select
 
 from app.domain.memoir.types import (
+    MemoirAutomationEventType,
     MemoirBookChapterDraftStatus,
     MemoirBookPlanStatus,
     MemoirCreatedBy,
+    MemoirEditingJobStatus,
+    MemoirEditingJobType,
 )
 from app.models.memoir import (
+    MemoirAutomationEvent,
     MemoirBookChapterDraft,
     MemoirBookChapterDraftVersion,
     MemoirBookOutput,
     MemoirBookOutputVersion,
     MemoirBookPlan,
     MemoirBookPlanChapter,
+    MemoirEditingJob,
 )
 from app.services.memoir.book_manuscript_ai import generate_manuscript_editorial_copy, generate_title_suggestions
 from app.services.memoir.book_audio import split_tts_text
+from app.services.memoir.editing_job_handlers import register_memoir_editing_job_handlers
+from app.services.memoir.editing_jobs import clear_editing_job_handlers, run_editing_job
 from app.services.memoir.tts_alignment import TTSAlignmentSegment
 from app.services.memoir.voice_tts import TTSResult
 
@@ -365,6 +372,50 @@ async def test_mobile_memoir_book_output_generate_combines_confirmed_chapters(cl
     assert stored_output.plan_id == plan.id
     assert len(stored_versions) == 1
     assert stored_versions[0].manuscript_json["profile"]["title"] == "外婆的回忆录"
+
+
+async def test_mobile_memoir_book_output_generation_job_runs_in_background(client, test_db):
+    clear_editing_job_handlers()
+    register_memoir_editing_job_handlers()
+    project_id = await _active_project_id(client)
+    await _create_confirmed_book_plan(test_db, project_id=project_id)
+
+    response = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-output/generate/jobs",
+        json={"title": "外婆的回忆录", "force_regenerate": True},
+    )
+
+    assert response.status_code == 200
+    event_data = response.json()
+    assert event_data["event_type"] == MemoirAutomationEventType.BOOK_OUTPUT_GENERATED.value
+    assert event_data["status"] == "pending"
+    assert event_data["summary_text"] == "全书已提交后台生成。"
+    job = await test_db.scalar(
+        select(MemoirEditingJob).where(
+            MemoirEditingJob.project_id == project_id,
+            MemoirEditingJob.job_type == MemoirEditingJobType.GENERATE_BOOK_OUTPUT.value,
+        )
+    )
+    assert job is not None
+    assert job.status == MemoirEditingJobStatus.PENDING.value
+    assert job.payload_json["request"]["title"] == "外婆的回忆录"
+    assert job.payload_json["automation_event_id"] == event_data["id"]
+
+    assert await run_editing_job(test_db, job.id) is True
+
+    refreshed_job = await test_db.scalar(select(MemoirEditingJob).where(MemoirEditingJob.id == job.id))
+    assert refreshed_job.status == MemoirEditingJobStatus.SUCCEEDED.value
+    output = await test_db.scalar(select(MemoirBookOutput).where(MemoirBookOutput.project_id == project_id))
+    assert output is not None
+    version = await test_db.scalar(
+        select(MemoirBookOutputVersion).where(MemoirBookOutputVersion.output_id == output.id)
+    )
+    assert version is not None
+    assert "第1章 外婆家的童年" in version.content
+    event = await test_db.get(MemoirAutomationEvent, event_data["id"])
+    assert event.status == "completed"
+    assert event.summary_text == "全书已生成，可以预览或导出。"
+    assert event.metadata_json["result_version_id"] == version.id
 
 
 async def test_mobile_memoir_book_output_title_suggestions_use_fallback_without_ai(client, test_db):

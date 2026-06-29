@@ -43,8 +43,10 @@ from app.schemas.memoir_book import (
     MemoirBookVoiceCommandExecuteResponse,
     MemoirBookVoiceCommandParseRequest,
     MemoirBookVoiceCommandParseResponse,
+    MemoirAutomationEventResponse,
 )
 from app.services.memoir import book_drafts as memoir_book_drafts
+from app.services.memoir import book_generation_jobs as memoir_book_generation_jobs
 from app.services.memoir import book_outputs as memoir_book_outputs
 from app.services.memoir import book_plans as memoir_book_plans
 from app.services.memoir import book_quality_audit as memoir_book_quality_audit
@@ -443,6 +445,26 @@ async def generate_mobile_memoir_book_chapter_draft(
     )
 
 
+@router.post(
+    "/projects/{project_id}/book-plan/chapters/{chapter_id}/draft/jobs",
+    response_model=MemoirAutomationEventResponse,
+)
+async def enqueue_mobile_memoir_book_chapter_draft_generation(
+    project_id: str,
+    chapter_id: str,
+    req: MemoirBookChapterDraftGenerateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await memoir_book_generation_jobs.enqueue_chapter_draft_generation_job(
+        db,
+        user_id=current_user.id,
+        project_id=project_id,
+        chapter_id=chapter_id,
+        req=req,
+    )
+
+
 @router.patch(
     "/projects/{project_id}/book-plan/chapters/{chapter_id}/draft",
     response_model=MemoirBookChapterDraftResponse,
@@ -522,6 +544,21 @@ async def generate_mobile_memoir_book_output(
     current_user: User = Depends(get_current_user),
 ):
     return await memoir_book_outputs.generate_book_output(
+        db,
+        user_id=current_user.id,
+        project_id=project_id,
+        req=req,
+    )
+
+
+@router.post("/projects/{project_id}/book-output/generate/jobs", response_model=MemoirAutomationEventResponse)
+async def enqueue_mobile_memoir_book_output_generation(
+    project_id: str,
+    req: MemoirBookOutputGenerateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await memoir_book_generation_jobs.enqueue_book_output_generation_job(
         db,
         user_id=current_user.id,
         project_id=project_id,

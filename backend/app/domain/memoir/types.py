@@ -61,6 +61,8 @@ class MemoirEditingJobType(str, Enum):
     ROUTE_SOURCES = "route_sources"
     REVISE_CHAPTER = "revise_chapter"
     QUALITY_AUDIT = "quality_audit"
+    GENERATE_CHAPTER_DRAFT = "generate_chapter_draft"
+    GENERATE_BOOK_OUTPUT = "generate_book_output"
 
 
 class MemoirEditingJobStatus(str, Enum):
@@ -76,6 +78,8 @@ class MemoirAutomationEventType(str, Enum):
     SOURCE_HELD = "source_held"
     CHAPTER_AUTO_REVISED = "chapter_auto_revised"
     AUDIT_COMPLETED = "audit_completed"
+    CHAPTER_DRAFT_GENERATED = "chapter_draft_generated"
+    BOOK_OUTPUT_GENERATED = "book_output_generated"
 
 
 class MemoirAutomationEventStatus(str, Enum):
