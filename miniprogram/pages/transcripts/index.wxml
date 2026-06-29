@@ -188,15 +188,17 @@
           <text wx:if="{{change.reason}}" class="voice-edit-change-reason">{{change.reason}}</text>
         </view>
       </view>
-      <view wx:if="{{voiceEditPreview && voiceEditPreview.canConfirm}}" class="voice-edit-comparison">
-        <view class="voice-edit-column">
-          <text class="voice-edit-label">当前</text>
-          <text class="voice-edit-text">{{voiceEditPreview.currentText}}</text>
-        </view>
-        <view class="voice-edit-column">
-          <text class="voice-edit-label">修正后</text>
-          <text class="voice-edit-text revised">{{voiceEditPreview.editedText}}</text>
-        </view>
+      <view wx:if="{{voiceEditPreview && voiceEditPreview.canConfirm}}" class="voice-edit-inline-diff">
+        <text class="voice-edit-label">文稿变化</text>
+        <text class="voice-edit-diff-text">
+          <text
+            wx:for="{{voiceEditPreview.diffSegments}}"
+            wx:for-item="segment"
+            wx:for-index="segmentIndex"
+            wx:key="segmentIndex"
+            class="voice-edit-diff-segment {{segment.kind}}"
+          >{{segment.text}}</text>
+        </text>
       </view>
       <view class="actions-row compact-actions">
         <button

@@ -1,6 +1,8 @@
 require("./register-ts");
 
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
 const test = require("node:test");
 const { loadPageModule, mockModule, pageContext } = require("./page-harness");
 
@@ -203,6 +205,48 @@ test("transcript text highlighter marks every search term", () => {
   assert.deepEqual(highlightTranscriptText("没有搜索词", ""), [
     { text: "没有搜索词", highlight: false },
   ]);
+});
+
+test("transcript voice edit diff marks inline replacements, insertions, and deletions", () => {
+  const { inlineTranscriptVoiceEditDiffSegments } = loadTranscriptsPage().mod;
+
+  assert.deepEqual(
+    inlineTranscriptVoiceEditDiffSegments(
+      "他叫李月，我们是高中同学。",
+      "他叫李阅，我们是高中同学。",
+      [{ before: "李月", after: "李阅", reason: "用户明确纠正名字" }],
+    ),
+    [
+      { text: "他叫", kind: "equal" },
+      { text: "李月", kind: "delete" },
+      { text: "李阅", kind: "insert" },
+      { text: "，我们是高中同学。", kind: "equal" },
+    ],
+  );
+  assert.deepEqual(
+    inlineTranscriptVoiceEditDiffSegments("我去成都。", "我后来去成都。", []),
+    [
+      { text: "我", kind: "equal" },
+      { text: "后来", kind: "insert" },
+      { text: "去成都。", kind: "equal" },
+    ],
+  );
+  assert.deepEqual(
+    inlineTranscriptVoiceEditDiffSegments("我那天真的很开心。", "我那天很开心。", []),
+    [
+      { text: "我那天", kind: "equal" },
+      { text: "真的", kind: "delete" },
+      { text: "很开心。", kind: "equal" },
+    ],
+  );
+});
+
+test("transcripts page renders voice correction as inline diff preview", () => {
+  const wxml = fs.readFileSync(path.join(__dirname, "../pages/transcripts/index.wxml"), "utf8");
+
+  assert.match(wxml, /voice-edit-inline-diff/);
+  assert.match(wxml, /voiceEditPreview\.diffSegments/);
+  assert.doesNotMatch(wxml, /voice-edit-comparison/);
 });
 
 test("transcripts page collapses long raw and corrected text", async () => {
@@ -805,6 +849,12 @@ test("transcripts page previews and saves a voice transcript correction", async 
   assert.equal(context.data.voiceEditPreview.editedText, "我小时候住在奶奶家。");
   assert.equal(context.data.voiceEditPreview.canConfirm, true);
   assert.equal(context.data.voiceEditPreview.confidenceText, "93%");
+  assert.deepEqual(context.data.voiceEditPreview.diffSegments, [
+    { text: "我小时候住在", kind: "equal" },
+    { text: "外婆", kind: "delete" },
+    { text: "奶奶", kind: "insert" },
+    { text: "家。", kind: "equal" },
+  ]);
 
   await page.confirmVoiceEdit.call(context);
 
