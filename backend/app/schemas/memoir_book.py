@@ -676,6 +676,7 @@ class MemoirBookAudioResponse(BaseModel):
 
 
 class MemoirBookOutputGenerateRequest(BaseModel):
+    ai_model: str | None = None
     force_regenerate: bool = False
 
 
@@ -771,6 +772,8 @@ class MemoirBookManuscriptRenderSettings(BaseModel):
     show_headers: bool = True
     show_source_appendix: bool = True
     photo_mode: Literal["none", "chapter", "appendix"] = "none"
+    back_cover_quote: str = ""
+    editorial_copy_model: str | None = None
 
 
 class MemoirBookManuscriptBackMatter(BaseModel):

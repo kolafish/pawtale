@@ -48,6 +48,10 @@ from app.services.memoir.book_audio import (
     source_text_hash,
     synthesize_text_audio,
 )
+from app.services.memoir.book_manuscript_ai import (
+    GeneratedManuscriptCopy,
+    generate_manuscript_editorial_copy,
+)
 from app.services.memoir.book_output_export import (
     MemoirBookOutputExportFormat,
     MemoirBookOutputExportLayout,
@@ -57,6 +61,7 @@ from app.services.memoir.voice_tts import TTSClient
 
 
 BOOK_TTS_CACHE_KEY = "book_tts"
+AI_MODEL_METADATA_KEY = "ai_model"
 SNAPSHOT_COMPARE_KEYS = (
     "chapter_id",
     "chapter_title",
@@ -155,6 +160,65 @@ def _first_sentence(text: str, *, max_chars: int) -> str:
     return _brief_text(normalized, max_chars=max_chars)
 
 
+def _strip_title_wrappers(title: str) -> str:
+    return title.strip().strip("《》「」“”\"' ")
+
+
+def _formal_book_title(raw_title: str) -> str:
+    title = _strip_title_wrappers(raw_title.replace("章节规划", "")).strip(" -_·：:")
+    if not title:
+        return "家庭回忆录"
+    title = title.replace("主题回忆录", "回忆录").replace("主题", "").strip(" -_·：:")
+    if title in {"回忆录", "我的回忆录"}:
+        return "家庭回忆录" if title == "回忆录" else title
+    if title.endswith("的回忆录"):
+        return title
+    if title.endswith("回忆录"):
+        subject = title[: -len("回忆录")].strip(" -_·：:的")
+        return f"{subject}的回忆录" if subject else "家庭回忆录"
+    return title
+
+
+def _short_topic(title: str) -> str:
+    topic = _strip_title_wrappers(title)
+    for word in ("与", "和", "里的", "中的"):
+        if word in topic and len(topic) > 7:
+            topic = topic.split(word)[0]
+            break
+    return topic[:8]
+
+
+def _fallback_cover_subtitle(chapter_titles: list[str]) -> str:
+    topics = [_short_topic(title) for title in chapter_titles if _short_topic(title)]
+    if len(topics) >= 2:
+        return f"关于{'、'.join(topics[:3])}的记忆"
+    return "根据口述访谈整理而成"
+
+
+def _fallback_preface(chapter_titles: list[str]) -> str:
+    topics = [_short_topic(title) for title in chapter_titles if _short_topic(title)]
+    if len(topics) >= 2:
+        return (
+            f"这些讲述从{topics[0]}开始，也写到{topics[1]}"
+            f"{'、' + topics[2] if len(topics) > 2 else ''}。"
+            "它们不是宏大的传记，而是一个人愿意说给家人听的生活细节。"
+            "整理成书，是为了让这些声音、场景和名字，在日后还能被慢慢翻起。"
+        )
+    return (
+        "这是一段由口述慢慢展开的人生记忆。整理时尽量保留讲述里的事实、语气和细节，"
+        "只对语句和段落做必要梳理，方便家人日后阅读、补充和修订。"
+    )
+
+
+def _fallback_back_cover_quote(chapters: list[MemoirBookManuscriptChapter]) -> str:
+    for chapter in chapters:
+        for quote in chapter.pull_quotes:
+            text = _brief_text(quote.text, max_chars=42)
+            if text:
+                return text
+    return "把亲口说出的生活，尽量完整地留下来。"
+
+
 def _manuscript_source_refs(raw_refs: object) -> list[MemoirBookManuscriptSourceRef]:
     if not isinstance(raw_refs, list):
         return []
@@ -176,11 +240,13 @@ def _manuscript_source_refs(raw_refs: object) -> list[MemoirBookManuscriptSource
     return refs
 
 
-def _chapter_intro(title: str, content: str) -> str:
+def _chapter_intro(title: str, content: str, editorial_intro: str | None = None) -> str:
+    if editorial_intro:
+        return editorial_intro
     excerpt = _first_sentence(content, max_chars=70)
     if not excerpt:
-        return f"这一章主要记录「{title}」相关的回忆，保留口述者对这段经历的讲述。"
-    return f"这一章主要记录「{title}」相关的回忆。从口述内容看，开头最清楚的记忆是：{excerpt}"
+        return f"记忆在「{title}」里慢慢展开，留下讲述者对这段经历的片段和语气。"
+    return f"关于「{title}」，记忆先从一个清楚的画面开始：{excerpt}"
 
 
 def _chapter_pull_quotes(content: str, source_refs: list[MemoirBookManuscriptSourceRef]) -> list[MemoirBookManuscriptQuote]:
@@ -197,11 +263,17 @@ def _manuscript_from_snapshot(
     title: str,
     content: str,
     snapshot: list[dict[str, object]],
+    editorial_copy: GeneratedManuscriptCopy | None = None,
 ) -> MemoirBookManuscript | None:
     if not snapshot:
         return None
     toc: list[MemoirBookOutputTableOfContentsItemResponse] = []
     chapters: list[MemoirBookManuscriptChapter] = []
+    intro_by_chapter_id = {
+        item.chapter_id: item.intro
+        for item in (editorial_copy.chapter_intros if editorial_copy else [])
+        if item.chapter_id and item.intro
+    }
     for fallback_index, item in enumerate(snapshot, start=1):
         chapter_id = _safe_str(item.get("chapter_id"))
         chapter_title = _safe_str(item.get("chapter_title")) or _safe_str(item.get("title"))
@@ -226,7 +298,7 @@ def _manuscript_from_snapshot(
                 chapter_id=chapter_id,
                 index=chapter_index,
                 title=chapter_title,
-                intro=_chapter_intro(chapter_title, chapter_content),
+                intro=_chapter_intro(chapter_title, chapter_content, intro_by_chapter_id.get(chapter_id)),
                 pull_quotes=_chapter_pull_quotes(chapter_content, source_refs),
                 content=chapter_content,
                 source_refs=source_refs,
@@ -235,16 +307,33 @@ def _manuscript_from_snapshot(
     if not chapters:
         return None
     chapter_count = len(chapters)
+    formal_title = _formal_book_title(editorial_copy.book_title if editorial_copy and editorial_copy.book_title else title)
+    chapter_titles = [item.title for item in toc]
+    subtitle = (
+        editorial_copy.cover_subtitle
+        if editorial_copy and editorial_copy.cover_subtitle
+        else _fallback_cover_subtitle(chapter_titles)
+    )
+    preface = (
+        editorial_copy.preface
+        if editorial_copy and editorial_copy.preface
+        else _fallback_preface(chapter_titles)
+    )
+    back_cover_quote = (
+        editorial_copy.back_cover_quote
+        if editorial_copy and editorial_copy.back_cover_quote
+        else _fallback_back_cover_quote(chapters)
+    )
     front_matter = [
         MemoirBookManuscriptSection(
             kind="cover",
-            title=title,
-            content=f"{title}\n一本文字整理成的家庭回忆录",
+            title=formal_title,
+            content=f"{formal_title}\n{subtitle}",
         ),
         MemoirBookManuscriptSection(
             kind="title_page",
             title="扉页",
-            content="根据口述访谈整理\n\n整理：家人整理\n仅供家人保存与阅读",
+            content=f"{subtitle}\n\n整理：家人整理\n仅供家人保存与阅读",
         ),
         MemoirBookManuscriptSection(
             kind="generation_note",
@@ -259,10 +348,7 @@ def _manuscript_from_snapshot(
         MemoirBookManuscriptSection(
             kind="preface",
             title="写在前面",
-            content=(
-                f"这本书记录的是「{title}」中的家人、生活、路途和那些已经远去的日子。"
-                "它不试图概括一个时代，只是把一个人亲口说出的生活，尽量完整地留下来。"
-            ),
+            content=preface,
         ),
     ]
     source_count = sum(item.source_count for item in toc)
@@ -280,7 +366,10 @@ def _manuscript_from_snapshot(
         version_note=MemoirBookManuscriptSection(
             kind="version_note",
             title="版本与修订",
-            content="这是当前已确认章节生成的成书版本。后续新增讲述记录、调整章节顺序或修改正文后，可以重新生成并导出新版。",
+            content=(
+                "本书正文采用适合阅读的整理版表达。原始口述材料已保留，"
+                "便于家人日后继续补充、核对和修订。"
+            ),
         ),
         unconfirmed_facts=MemoirBookManuscriptSection(
             kind="unconfirmed_facts",
@@ -290,16 +379,23 @@ def _manuscript_from_snapshot(
         source_appendix=MemoirBookManuscriptSection(
             kind="source_appendix",
             title="口述来源索引",
-            content="\n".join(f"第{item.index}章 {item.title}：{item.source_count} 条口述记录" for item in toc),
+            content="\n".join(f"第{item.index}章「{item.title}」：{item.source_count} 条口述记录" for item in toc),
         ),
     )
     return MemoirBookManuscript(
-        profile=MemoirBookManuscriptProfile(title=title, subtitle="根据口述访谈整理"),
+        profile=MemoirBookManuscriptProfile(
+            title=formal_title,
+            subtitle=subtitle,
+            prepared_by="家人整理",
+        ),
         front_matter=front_matter,
         table_of_contents=toc,
         chapters=chapters,
         back_matter=back_matter,
-        render_settings=MemoirBookManuscriptRenderSettings(),
+        render_settings=MemoirBookManuscriptRenderSettings(
+            back_cover_quote=back_cover_quote,
+            editorial_copy_model=editorial_copy.model if editorial_copy else None,
+        ),
     )
 
 
@@ -316,6 +412,29 @@ def _manuscript_response(
         except ValueError:
             pass
     return _manuscript_from_snapshot(title=title, content=content, snapshot=snapshot)
+
+
+def _project_ai_model(project: object) -> str | None:
+    metadata = getattr(project, "metadata_json", None)
+    if not isinstance(metadata, dict):
+        return None
+    value = metadata.get(AI_MODEL_METADATA_KEY)
+    return value.strip() if isinstance(value, str) and value.strip() else None
+
+
+def _remember_project_ai_model(project: object, ai_model: str | None) -> None:
+    model = (ai_model or "").strip()
+    if not model:
+        return
+    metadata = getattr(project, "metadata_json", None)
+    setattr(
+        project,
+        "metadata_json",
+        {
+            **(metadata if isinstance(metadata, dict) else {}),
+            AI_MODEL_METADATA_KEY: model,
+        },
+    )
 
 
 def _latest_chapter_version(draft: MemoirBookChapterDraft | None) -> MemoirBookChapterDraftVersion | None:
@@ -563,10 +682,28 @@ async def generate_book_output(
     project_id: str,
     req: MemoirBookOutputGenerateRequest,
 ) -> MemoirBookOutputResponse:
+    project = await load_memoir_project(db, project_id, user_id)
     plan = await _load_plan(db, user_id=user_id, project_id=project_id)
     chapters = _require_confirmed_chapters(plan)
-    title = plan.title.replace("章节规划", "").strip() or "我的回忆录"
+    title = _formal_book_title(plan.title)
     content, snapshot = _compose_book_content(title=title, chapters=chapters)
+    requested_ai_model = (req.ai_model or "").strip()
+    ai_model = requested_ai_model or _project_ai_model(project)
+    _remember_project_ai_model(project, req.ai_model)
+    editorial_copy = (
+        await generate_manuscript_editorial_copy(
+            title=title,
+            snapshot=snapshot,
+            ai_model=ai_model,
+        )
+        if ai_model
+        else None
+    )
+    if editorial_copy and editorial_copy.book_title:
+        generated_title = _formal_book_title(editorial_copy.book_title)
+        if generated_title and generated_title != title:
+            title = generated_title
+            content, snapshot = _compose_book_content(title=title, chapters=chapters)
 
     output = await _load_output(db, project_id=project_id)
     stale_titles = (
@@ -596,7 +733,12 @@ async def generate_book_output(
             BOOK_TTS_CACHE_KEY: None,
         }
 
-    manuscript = _manuscript_from_snapshot(title=title, content=content, snapshot=snapshot)
+    manuscript = _manuscript_from_snapshot(
+        title=title,
+        content=content,
+        snapshot=snapshot,
+        editorial_copy=editorial_copy,
+    )
     version_number = await _latest_output_version_number(db, output.id) + 1
     db.add(
         MemoirBookOutputVersion(

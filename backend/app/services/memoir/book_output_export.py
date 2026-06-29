@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta, timezone
 from enum import StrEnum
 from io import BytesIO
 from pathlib import Path
@@ -21,6 +22,11 @@ PDF_FONT_PATH = (
     / "NotoSansSC-Regular.ttf"
 )
 _PDF_FONT_REGISTERED = False
+PDFColor = tuple[float, float, float]
+PDF_COVER_BACKGROUND: PDFColor = (0.96, 0.93, 0.87)
+PDF_COVER_ACCENT_GREEN: PDFColor = (0.73, 0.82, 0.73)
+PDF_COVER_ACCENT_TEA: PDFColor = (0.72, 0.51, 0.43)
+PDF_COVER_LINE: PDFColor = (0.58, 0.32, 0.27)
 
 
 class MemoirBookOutputExportFormat(StrEnum):
@@ -62,6 +68,7 @@ PDF_LAYOUTS = {
         heading_font_size=18,
         small_font_size=10,
         max_line_units=27,
+        filename_suffix="阅读版",
     ),
     MemoirBookOutputExportLayout.LARGE_PRINT: PDFLayout(
         page_width=420,
@@ -90,8 +97,22 @@ class PDFTextCommand:
 
 
 @dataclass
+class PDFDecorationCommand:
+    kind: str
+    x: float
+    y: float
+    width: float
+    height: float
+    color: PDFColor
+    stroke_color: PDFColor | None = None
+    line_width: float = 0
+
+
+@dataclass
 class PDFPage:
     commands: list[PDFTextCommand]
+    decorations: list[PDFDecorationCommand] = field(default_factory=list)
+    background_color: PDFColor | None = None
     header_title: str = ""
     section_title: str = ""
     show_footer: bool = True
@@ -221,6 +242,7 @@ class PDFBookBuilder:
         anchor: str | None = None,
         outline_title: str | None = None,
         outline_level: int = 0,
+        background_color: PDFColor | None = None,
     ) -> None:
         self.current_section = section_title or self.current_section
         self.current_body_numbering = body_numbering
@@ -236,6 +258,7 @@ class PDFBookBuilder:
             body_page_number = self.body_page_count
         self.current_page = PDFPage(
             commands=[],
+            background_color=background_color,
             header_title=self.title if show_header else "",
             section_title=self.current_section,
             show_footer=show_footer,
@@ -246,6 +269,32 @@ class PDFBookBuilder:
         )
         self.pages.append(self.current_page)
         self.y = self.layout.page_height - self.layout.margin_top
+
+    def add_decoration(
+        self,
+        *,
+        kind: str,
+        x: float,
+        y: float,
+        width: float,
+        height: float,
+        color: PDFColor,
+        stroke_color: PDFColor | None = None,
+        line_width: float = 0,
+    ) -> None:
+        page = self._ensure_page()
+        page.decorations.append(
+            PDFDecorationCommand(
+                kind=kind,
+                x=x,
+                y=y,
+                width=width,
+                height=height,
+                color=color,
+                stroke_color=stroke_color,
+                line_width=line_width,
+            )
+        )
 
     def _ensure_page(self) -> PDFPage:
         if not self.current_page:
@@ -383,6 +432,59 @@ class PDFBookBuilder:
         if spacing_after:
             self.y -= spacing_after
 
+    def add_toc_row(
+        self,
+        *,
+        label: str,
+        page_text: str,
+        target_anchor: str | None = None,
+    ) -> None:
+        font_size = self.layout.font_size
+        line_height = self.layout.line_height + 2
+        self._ensure_space(1)
+        page = self._ensure_page()
+        page_x = (
+            self.layout.page_width
+            - self.layout.margin_x
+            - _estimated_text_width(page_text, font_size)
+        )
+        max_label_units = max(8, (page_x - self.layout.margin_x - 22) / max(font_size, 1))
+        fitted_label = _truncate_units(label, max_label_units)
+        page.commands.append(
+            PDFTextCommand(
+                text=fitted_label,
+                x=self.layout.margin_x,
+                y=self.y,
+                font_size=font_size,
+                target_anchor=target_anchor,
+            )
+        )
+        if page_text:
+            label_end_x = self.layout.margin_x + _estimated_text_width(fitted_label, font_size)
+            leader_x = label_end_x + 6
+            leader_units = max(0, (page_x - leader_x - 6) / max(font_size, 1))
+            leaders = "." * max(2, int(leader_units / _char_units("."))) if leader_units > 2 else ""
+            if leaders:
+                page.commands.append(
+                    PDFTextCommand(
+                        text=leaders,
+                        x=leader_x,
+                        y=self.y,
+                        font_size=font_size,
+                        target_anchor=target_anchor,
+                    )
+                )
+            page.commands.append(
+                PDFTextCommand(
+                    text=page_text,
+                    x=page_x,
+                    y=self.y,
+                    font_size=font_size,
+                    target_anchor=target_anchor,
+                )
+            )
+        self.y -= line_height
+
 
 def _pdf_page_commands(page: PDFPage, *, page_number: int, layout: PDFLayout) -> list[PDFTextCommand]:
     commands: list[PDFTextCommand] = []
@@ -414,6 +516,38 @@ def _pdf_page_commands(page: PDFPage, *, page_number: int, layout: PDFLayout) ->
     return commands
 
 
+def _draw_pdf_decoration(pdf: pdf_canvas.Canvas, decoration: PDFDecorationCommand) -> None:
+    pdf.setFillColorRGB(*decoration.color)
+    if decoration.stroke_color:
+        pdf.setStrokeColorRGB(*decoration.stroke_color)
+        pdf.setLineWidth(decoration.line_width or 1)
+    else:
+        pdf.setStrokeColorRGB(*decoration.color)
+        pdf.setLineWidth(decoration.line_width or 0)
+    if decoration.kind == "ellipse":
+        pdf.ellipse(
+            decoration.x,
+            decoration.y,
+            decoration.x + decoration.width,
+            decoration.y + decoration.height,
+            stroke=1 if decoration.stroke_color else 0,
+            fill=1,
+        )
+    elif decoration.kind == "line":
+        pdf.setStrokeColorRGB(*(decoration.stroke_color or decoration.color))
+        pdf.setLineWidth(decoration.line_width or 1)
+        pdf.line(decoration.x, decoration.y, decoration.x + decoration.width, decoration.y + decoration.height)
+    else:
+        pdf.rect(
+            decoration.x,
+            decoration.y,
+            decoration.width,
+            decoration.height,
+            stroke=1 if decoration.stroke_color else 0,
+            fill=1,
+        )
+
+
 def _register_pdf_font() -> None:
     global _PDF_FONT_REGISTERED
     if _PDF_FONT_REGISTERED:
@@ -424,7 +558,13 @@ def _register_pdf_font() -> None:
     _PDF_FONT_REGISTERED = True
 
 
-def _render_pdf_pages(pages: list[PDFPage], layout: PDFLayout) -> bytes:
+def _render_pdf_pages(
+    pages: list[PDFPage],
+    layout: PDFLayout,
+    *,
+    metadata_title: str | None = None,
+    metadata_author: str | None = None,
+) -> bytes:
     if not pages:
         fallback = PDFBookBuilder(title="我的回忆录", layout=layout)
         fallback.new_page("正文")
@@ -438,10 +578,22 @@ def _render_pdf_pages(pages: list[PDFPage], layout: PDFLayout) -> bytes:
         pagesize=(layout.page_width, layout.page_height),
         pageCompression=1,
     )
-    first_title = next((page.header_title for page in pages if page.header_title), "我的回忆录")
+    first_title = metadata_title or next((page.header_title for page in pages if page.header_title), "家庭回忆录")
     pdf.setTitle(first_title)
-    pdf.setAuthor("Pawtale")
+    pdf.setAuthor(metadata_author or "家人整理")
+    pdf.setSubject("家庭回忆录")
+    pdf.setKeywords("回忆录, 口述史, 家庭")
+    pdf.setCreator("Pawtale")
+    if hasattr(pdf, "setProducer"):
+        pdf.setProducer("Pawtale")
+    elif hasattr(pdf, "_doc") and hasattr(pdf._doc, "info"):
+        pdf._doc.info.producer = "Pawtale"
     for page_number, page in enumerate(pages, start=1):
+        if page.background_color:
+            pdf.setFillColorRGB(*page.background_color)
+            pdf.rect(0, 0, layout.page_width, layout.page_height, stroke=0, fill=1)
+        for decoration in page.decorations:
+            _draw_pdf_decoration(pdf, decoration)
         if page.anchor:
             pdf.bookmarkPage(page.anchor)
             if page.outline_title:
@@ -470,7 +622,7 @@ def _render_plain_pdf(content: str, title: str, layout: PDFLayout) -> bytes:
     builder.new_page("正文", body_numbering=True)
     builder.add_heading(title)
     builder.add_body_text(content.strip() or title)
-    return _render_pdf_pages(builder.pages, layout)
+    return _render_pdf_pages(builder.pages, layout, metadata_title=title, metadata_author="家人整理")
 
 
 def _dict(value: Any) -> dict[str, Any]:
@@ -499,6 +651,10 @@ def _section_enabled(section: dict[str, Any]) -> bool:
 
 def _int(value: Any, fallback: int) -> int:
     return value if isinstance(value, int) and value > 0 else fallback
+
+
+def _today_date_text() -> str:
+    return datetime.now(UTC).astimezone(timezone(timedelta(hours=8))).date().isoformat()
 
 
 CHINESE_NUMERALS = "零一二三四五六七八九"
@@ -543,7 +699,32 @@ def _add_section_page(
 
 
 def _add_cover_page(builder: PDFBookBuilder, *, title: str, subtitle: str, prepared_by: str) -> None:
-    builder.new_page(show_header=False, show_footer=False)
+    builder.new_page(show_header=False, show_footer=False, background_color=PDF_COVER_BACKGROUND)
+    builder.add_decoration(
+        kind="ellipse",
+        x=builder.layout.page_width - 145,
+        y=36,
+        width=190,
+        height=160,
+        color=PDF_COVER_ACCENT_GREEN,
+    )
+    builder.add_decoration(
+        kind="rect",
+        x=0,
+        y=builder.layout.page_height - 132,
+        width=builder.layout.page_width,
+        height=16,
+        color=PDF_COVER_ACCENT_TEA,
+    )
+    builder.add_decoration(
+        kind="line",
+        x=builder.layout.margin_x,
+        y=builder.layout.margin_bottom + 94,
+        width=92,
+        height=0,
+        color=PDF_COVER_LINE,
+        line_width=1.2,
+    )
     builder.add_spacer(3.5)
     builder.add_centered(
         "家庭回忆录",
@@ -575,6 +756,12 @@ def _add_cover_page(builder: PDFBookBuilder, *, title: str, subtitle: str, prepa
             line_height=builder.layout.line_height,
             max_units=builder.layout.max_line_units,
         )
+    builder.add_centered(
+        _today_date_text()[:4],
+        font_size=builder.layout.small_font_size,
+        line_height=builder.layout.line_height,
+        max_units=builder.layout.max_line_units,
+    )
 
 
 def _add_title_page(builder: PDFBookBuilder, *, title: str, content: str) -> None:
@@ -658,7 +845,7 @@ def _truncate_units(text: str, max_units: float) -> str:
 
 def _toc_line(entry: PDFTocEntry, layout: PDFLayout) -> str:
     page_text = str(entry.page_number) if entry.page_number is not None else ""
-    label = f"{entry.index}. {entry.title}"
+    label = f"第{_chinese_number(entry.index)}章　{entry.title}"
     if not page_text:
         return label
     label = _truncate_units(label, max(8, layout.max_line_units - _text_units(page_text) - 4))
@@ -703,10 +890,9 @@ def _add_table_of_contents(
         builder.add_text("暂无章节。")
         return
     for entry in entries:
-        builder.add_text(
-            _toc_line(entry, builder.layout),
-            line_height=builder.layout.line_height + 2,
-            max_units=builder.layout.max_line_units - 1,
+        builder.add_toc_row(
+            label=_toc_line(entry, builder.layout) if entry.page_number is None else f"第{_chinese_number(entry.index)}章　{entry.title}",
+            page_text=str(entry.page_number) if entry.page_number is not None else "",
             target_anchor=entry.anchor if entry.page_number is not None else None,
         )
 
@@ -794,41 +980,98 @@ def _add_unconfirmed_facts(builder: PDFBookBuilder, facts: list[Any]) -> None:
             )
 
 
-def _add_back_matter(builder: PDFBookBuilder, back_matter: dict[str, Any], *, include_source_appendix: bool) -> None:
-    section_order = [
-        ("afterword", "后记"),
-        ("interview_records", "讲述记录"),
-        ("version_note", "版本说明"),
-    ]
-    for key, fallback_title in section_order:
-        section = _dict(back_matter.get(key))
-        if not _section_enabled(section):
+def _add_appendix_record_page(
+    builder: PDFBookBuilder,
+    sections: list[tuple[str, str]],
+) -> None:
+    if not sections:
+        return
+    builder.new_page("附录", show_header=True, show_footer=True, body_numbering=True)
+    builder.add_heading("附录：整理记录")
+    for title, content in sections:
+        if not content:
             continue
-        content = _section_content(section)
+        builder.add_text(
+            title,
+            font_size=builder.layout.small_font_size + 1,
+            line_height=builder.layout.line_height,
+            spacing_after=2,
+        )
+        builder.add_body_text(content, spacing_after=4)
+
+
+def _add_back_matter(builder: PDFBookBuilder, back_matter: dict[str, Any], *, include_source_appendix: bool) -> None:
+    afterword = _dict(back_matter.get("afterword"))
+    if _section_enabled(afterword):
+        content = _section_content(afterword)
         if content:
             _add_section_page(
                 builder,
-                section_title=_section_title(section, fallback_title),
+                section_title=_section_title(afterword, "后记"),
                 content=content,
                 show_header=True,
                 show_footer=True,
                 body_numbering=True,
             )
     _add_unconfirmed_facts(builder, _list(back_matter.get("unconfirmed_facts")))
+    appendix_sections: list[tuple[str, str]] = []
+    for key, fallback_title in [("interview_records", "讲述资料"), ("version_note", "版本与修订")]:
+        section = _dict(back_matter.get(key))
+        if _section_enabled(section):
+            content = _section_content(section)
+            if content:
+                appendix_sections.append((_section_title(section, fallback_title), content))
     if include_source_appendix:
         section = _dict(back_matter.get("source_appendix"))
-        if not _section_enabled(section):
-            return
-        content = _section_content(section)
-        if content:
-            _add_section_page(
-                builder,
-                section_title=_section_title(section, "章节来源"),
-                content=content,
-                show_header=True,
-                show_footer=True,
-                body_numbering=True,
-            )
+        if _section_enabled(section):
+            content = _section_content(section)
+            if content:
+                appendix_sections.append((_section_title(section, "章节来源"), content))
+    _add_appendix_record_page(builder, appendix_sections)
+
+
+def _add_back_cover(builder: PDFBookBuilder, *, quote: str) -> None:
+    builder.new_page(show_header=False, show_footer=False, background_color=PDF_COVER_BACKGROUND)
+    builder.add_decoration(
+        kind="ellipse",
+        x=-54,
+        y=builder.layout.page_height - 155,
+        width=150,
+        height=125,
+        color=PDF_COVER_ACCENT_GREEN,
+    )
+    builder.add_decoration(
+        kind="line",
+        x=builder.layout.margin_x,
+        y=builder.layout.page_height - 210,
+        width=82,
+        height=0,
+        color=PDF_COVER_LINE,
+        line_width=1,
+    )
+    builder.add_spacer(6)
+    if quote:
+        builder.add_centered(
+            f"“{quote}”",
+            font_size=builder.layout.font_size + 1,
+            line_height=builder.layout.line_height + 4,
+            max_units=max(10, builder.layout.max_line_units - 4),
+            spacing_after=28,
+        )
+    builder.y = max(builder.layout.margin_bottom + 90, builder.y - 160)
+    builder.add_centered(
+        "本书根据口述访谈整理",
+        font_size=builder.layout.small_font_size,
+        line_height=builder.layout.line_height,
+        max_units=builder.layout.max_line_units,
+        spacing_after=4,
+    )
+    builder.add_centered(
+        f"生成于 {_today_date_text()}",
+        font_size=builder.layout.small_font_size,
+        line_height=builder.layout.line_height,
+        max_units=builder.layout.max_line_units,
+    )
 
 
 def _chapter_page_numbers(pages: list[PDFPage]) -> dict[str, int]:
@@ -844,6 +1087,7 @@ def _build_structured_manuscript_pdf_pages(
     book_title: str,
     subtitle: str,
     prepared_by: str,
+    back_cover_quote: str,
     front_matter: list[Any],
     chapters: list[Any],
     back_matter: dict[str, Any],
@@ -857,6 +1101,7 @@ def _build_structured_manuscript_pdf_pages(
     _add_table_of_contents(builder, entries=toc_entries)
     _add_chapters(builder, chapters)
     _add_back_matter(builder, back_matter, include_source_appendix=include_source_appendix)
+    _add_back_cover(builder, quote=back_cover_quote)
     return builder.pages
 
 
@@ -891,6 +1136,7 @@ def _build_manuscript_pdf_pages(
         if show_source_appendix is not None
         else setting_source_appendix is not False
     )
+    back_cover_quote = _str(settings.get("back_cover_quote"))
 
     toc_items = _list(manuscript.get("table_of_contents"))
     initial_entries = _chapter_toc_entries(toc_items=toc_items, chapters=chapters)
@@ -898,6 +1144,7 @@ def _build_manuscript_pdf_pages(
         book_title=book_title,
         subtitle=subtitle,
         prepared_by=prepared_by,
+        back_cover_quote=back_cover_quote,
         front_matter=front_matter,
         chapters=chapters,
         back_matter=back_matter,
@@ -914,6 +1161,7 @@ def _build_manuscript_pdf_pages(
         book_title=book_title,
         subtitle=subtitle,
         prepared_by=prepared_by,
+        back_cover_quote=back_cover_quote,
         front_matter=front_matter,
         chapters=chapters,
         back_matter=back_matter,
@@ -931,6 +1179,9 @@ def _render_manuscript_pdf(
     layout: PDFLayout,
     show_source_appendix: bool | None = None,
 ) -> bytes:
+    profile = _dict((manuscript or {}).get("profile")) if isinstance(manuscript, dict) else {}
+    metadata_title = _str(profile.get("title")) or title
+    metadata_author = _str(profile.get("narrator_name")) or _str(profile.get("prepared_by")) or "家人整理"
     pages = _build_manuscript_pdf_pages(
         title=title,
         content=content,
@@ -938,7 +1189,34 @@ def _render_manuscript_pdf(
         layout=layout,
         show_source_appendix=show_source_appendix,
     )
-    return _render_pdf_pages(pages, layout)
+    return _render_pdf_pages(
+        pages,
+        layout,
+        metadata_title=metadata_title,
+        metadata_author=metadata_author,
+    )
+
+
+def _formal_export_title(raw_title: str) -> str:
+    title = raw_title.strip().strip("《》「」“”\"' ").replace("章节规划", "").strip(" -_·：:")
+    title = title.replace("主题回忆录", "回忆录").replace("主题", "").strip(" -_·：:")
+    if not title or title == "回忆录":
+        return "家庭回忆录"
+    if title.endswith("的回忆录"):
+        return title
+    if title.endswith("回忆录"):
+        subject = title[: -len("回忆录")].strip(" -_·：:的")
+        return f"{subject}的回忆录" if subject else "家庭回忆录"
+    return title
+
+
+def _export_title(title: str, manuscript: dict[str, Any] | None) -> str:
+    profile = _dict((manuscript or {}).get("profile"))
+    return _formal_export_title(_str(profile.get("title")) or title)
+
+
+def _filename_book_title(title: str) -> str:
+    return "家庭回忆录" if title == "家庭回忆录" else f"《{title}》"
 
 
 def _book_export_filename(
@@ -947,9 +1225,14 @@ def _book_export_filename(
     extension: str,
     layout: MemoirBookOutputExportLayout,
 ) -> str:
+    date_text = _today_date_text()
     suffix = PDF_LAYOUTS[layout].filename_suffix if extension == "pdf" else ""
-    parts = [title, f"全书第{version}版", suffix]
-    return safe_filename("-".join(part for part in parts if part), extension)
+    version_suffix = f"v{version}" if version > 1 else ""
+    if extension == "pdf":
+        parts = [_filename_book_title(title), suffix, date_text, version_suffix]
+    else:
+        parts = [_filename_book_title(title), date_text, version_suffix]
+    return safe_filename("_".join(part for part in parts if part), extension)
 
 
 def render_book_output_export(
@@ -962,13 +1245,14 @@ def render_book_output_export(
     export_format: MemoirBookOutputExportFormat,
     layout: MemoirBookOutputExportLayout = MemoirBookOutputExportLayout.STANDARD,
 ) -> ExportFile:
+    export_title = _export_title(title, manuscript)
     if export_format == MemoirBookOutputExportFormat.PDF:
         pdf_layout = PDF_LAYOUTS.get(layout, PDF_LAYOUTS[MemoirBookOutputExportLayout.STANDARD])
         return ExportFile(
-            filename=_book_export_filename(title, version, "pdf", layout),
+            filename=_book_export_filename(export_title, version, "pdf", layout),
             media_type="application/pdf",
             content=_render_manuscript_pdf(
-                title=title,
+                title=export_title,
                 content=content,
                 manuscript=manuscript or {},
                 layout=pdf_layout,
@@ -976,7 +1260,7 @@ def render_book_output_export(
             ),
         )
     return ExportFile(
-        filename=_book_export_filename(title, version, "txt", MemoirBookOutputExportLayout.STANDARD),
+        filename=_book_export_filename(export_title, version, "txt", MemoirBookOutputExportLayout.STANDARD),
         media_type="text/plain; charset=utf-8",
         content=content + "\n",
     )
