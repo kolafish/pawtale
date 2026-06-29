@@ -829,10 +829,10 @@ test("book page exposes PDF layout and print export controls", () => {
 
   assert.match(wxml, /PDF 排版/);
   assert.match(wxml, /bindchange="changeBookExportLayout"/);
-  assert.match(wxml, /导出 PDF/);
+  assert.match(wxml, /阅读版 PDF/);
   assert.match(wxml, /打印版 PDF/);
   assert.match(wxml, /data-layout="large_print"/);
-  assert.match(wxml, /来源附录/);
+  assert.match(wxml, /口述来源索引/);
   assert.match(wxml, /bindchange="toggleBookExportSourceAppendix"/);
 });
 
@@ -2114,7 +2114,7 @@ test("book page downloads selected full-book output export and opens PDF", async
     layout: "large_print",
     showSourceAppendix: false,
   });
-  assert.equal(context.data.bookExportLayoutLabel, "大字打印");
+  assert.equal(context.data.bookExportLayoutLabel, "打印版");
   assert.equal(opened[0].filePath, "/tmp/book.pdf");
   assert.equal(opened[0].fileType, "pdf");
   assert.equal(opened[0].showMenu, true);

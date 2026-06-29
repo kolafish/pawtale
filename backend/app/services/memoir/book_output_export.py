@@ -493,6 +493,10 @@ def _section_content(section: dict[str, Any]) -> str:
     return _str(section.get("content"))
 
 
+def _section_enabled(section: dict[str, Any]) -> bool:
+    return section.get("enabled") is not False
+
+
 def _int(value: Any, fallback: int) -> int:
     return value if isinstance(value, int) and value > 0 else fallback
 
@@ -540,7 +544,14 @@ def _add_section_page(
 
 def _add_cover_page(builder: PDFBookBuilder, *, title: str, subtitle: str, prepared_by: str) -> None:
     builder.new_page(show_header=False, show_footer=False)
-    builder.add_spacer(5)
+    builder.add_spacer(3.5)
+    builder.add_centered(
+        "家庭回忆录",
+        font_size=builder.layout.small_font_size,
+        line_height=builder.layout.line_height,
+        max_units=builder.layout.max_line_units,
+        spacing_after=18,
+    )
     builder.add_centered(
         title,
         font_size=builder.layout.title_font_size,
@@ -566,17 +577,52 @@ def _add_cover_page(builder: PDFBookBuilder, *, title: str, subtitle: str, prepa
         )
 
 
+def _add_title_page(builder: PDFBookBuilder, *, title: str, content: str) -> None:
+    builder.new_page("扉页", show_header=False, show_footer=False)
+    builder.add_spacer(4.5)
+    builder.add_centered(
+        title,
+        font_size=builder.layout.title_font_size,
+        line_height=builder.layout.line_height + 12,
+        max_units=max(8, builder.layout.max_line_units - 6),
+        spacing_after=24,
+    )
+    for raw_line in content.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+        line = raw_line.strip()
+        if not line or line == title:
+            builder.add_spacer(0.5)
+            continue
+        builder.add_centered(
+            line,
+            font_size=builder.layout.small_font_size + 1,
+            line_height=builder.layout.line_height,
+            max_units=builder.layout.max_line_units - 4,
+            spacing_after=4,
+        )
+
+
+def _title_page_content(subtitle: str, content: str) -> str:
+    first_content_line = next(
+        (line.strip() for line in content.replace("\r\n", "\n").replace("\r", "\n").split("\n") if line.strip()),
+        "",
+    )
+    if not subtitle or first_content_line == subtitle:
+        return content
+    return "\n".join(part for part in [subtitle, content] if part)
+
+
 def _add_front_matter(builder: PDFBookBuilder, front_matter: list[Any], *, title: str, subtitle: str) -> None:
     for raw_section in front_matter:
         section = _dict(raw_section)
+        if not _section_enabled(section):
+            continue
         kind = _str(section.get("kind"))
         if kind == "cover":
             continue
         section_title = _section_title(section, "书前说明")
         content = _section_content(section)
         if kind == "title_page":
-            content = "\n".join(part for part in [subtitle, content] if part)
-            _add_section_page(builder, section_title=section_title, heading=title, content=content)
+            _add_title_page(builder, title=title, content=_title_page_content(subtitle, content))
             continue
         _add_section_page(builder, section_title=section_title, content=content)
 
@@ -726,15 +772,6 @@ def _add_chapters(builder: PDFBookBuilder, chapters: list[Any]) -> None:
         if content:
             builder.add_body_text(content)
 
-        source_count = len(_list(chapter.get("source_refs")))
-        if source_count:
-            builder.add_spacer(0.75)
-            builder.add_text(
-                f"本章整理自 {source_count} 条讲述来源。",
-                font_size=builder.layout.small_font_size,
-                line_height=builder.layout.line_height,
-            )
-
 
 def _add_unconfirmed_facts(builder: PDFBookBuilder, facts: list[Any]) -> None:
     if not facts:
@@ -765,6 +802,8 @@ def _add_back_matter(builder: PDFBookBuilder, back_matter: dict[str, Any], *, in
     ]
     for key, fallback_title in section_order:
         section = _dict(back_matter.get(key))
+        if not _section_enabled(section):
+            continue
         content = _section_content(section)
         if content:
             _add_section_page(
@@ -778,6 +817,8 @@ def _add_back_matter(builder: PDFBookBuilder, back_matter: dict[str, Any], *, in
     _add_unconfirmed_facts(builder, _list(back_matter.get("unconfirmed_facts")))
     if include_source_appendix:
         section = _dict(back_matter.get("source_appendix"))
+        if not _section_enabled(section):
+            return
         content = _section_content(section)
         if content:
             _add_section_page(

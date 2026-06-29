@@ -783,12 +783,12 @@
           <view class="book-manuscript-section compact">
             <view class="book-manuscript-heading-row">
               <text class="book-manuscript-heading">预览与导出</text>
-              <text class="book-manuscript-count">PDF / 文本</text>
+              <text class="book-manuscript-count">阅读 / 打印 / 文本</text>
             </view>
             <view class="book-export-source-toggle">
               <view class="book-export-source-copy">
-                <text class="book-export-source-title">来源附录</text>
-                <text class="book-export-source-meta">内部留档可保留，分享打印可关闭</text>
+                <text class="book-export-source-title">口述来源索引</text>
+                <text class="book-export-source-meta">内部留档建议保留，分享或打印可关闭</text>
               </view>
               <switch
                 color="#a64b3f"
@@ -891,7 +891,7 @@
             disabled="{{updatingPlanStructure || generatingBook || !bookContent || hasDraftChanges || bookStaleNotice || bookExportBusyTarget}}"
             bindtap="downloadBookOutputExport"
           >
-            导出 PDF
+            阅读版 PDF
           </button>
           <button
             class="ghost-button"
