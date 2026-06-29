@@ -1,7 +1,12 @@
 from app.services.memoir.book_output_export import (
+    LINE_END_FORBIDDEN_CHARS,
+    LINE_START_FORBIDDEN_CHARS,
     PDF_LAYOUTS,
+    PDFBookBuilder,
+    PDFLayout,
     MemoirBookOutputExportLayout,
     _build_manuscript_pdf_pages,
+    _wrap_pdf_line,
 )
 
 
@@ -64,3 +69,52 @@ def test_manuscript_pdf_pages_use_book_page_semantics():
     assert chapter_pages[1].body_page_number == 2
     assert chapter_pages[1].header_title == "外婆回忆录"
     assert chapter_pages[1].show_footer is True
+
+
+def test_pdf_line_wrapping_respects_chinese_forbidden_breaks():
+    lines = _wrap_pdf_line(
+        "小时候，院子里有桂花树。后来，我们常常说：“那里像家。”",
+        max_units=7,
+    )
+
+    assert len(lines) > 1
+    assert all(line[0] not in LINE_START_FORBIDDEN_CHARS for line in lines[1:])
+    assert all(line[-1] not in LINE_END_FORBIDDEN_CHARS for line in lines[:-1])
+
+
+def test_body_text_indents_paragraphs_and_avoids_orphan_starts():
+    layout = PDFLayout(
+        page_width=420,
+        page_height=160,
+        font_size=12,
+        line_height=20,
+        margin_x=42,
+        margin_top=40,
+        margin_bottom=40,
+        title_font_size=20,
+        heading_font_size=16,
+        small_font_size=10,
+        max_line_units=8,
+    )
+    builder = PDFBookBuilder(title="外婆回忆录", layout=layout)
+    builder.new_page("正文", body_numbering=True)
+    builder.add_text("占位")
+    builder.add_text("占位")
+    builder.add_text("占位")
+
+    builder.add_body_text("第一段需要分成两行。\n第二段也要缩进。")
+
+    assert len(builder.pages) == 3
+    assert builder.pages[1].body_page_number == 2
+    first_body_line = builder.pages[1].commands[0]
+    assert first_body_line.text.startswith("第一段")
+    assert first_body_line.x == layout.margin_x + layout.font_size * 2
+
+    second_paragraph = next(
+        command
+        for page in builder.pages[1:]
+        for command in page.commands
+        if command.text.startswith("第二段")
+    )
+    assert second_paragraph.x == layout.margin_x + layout.font_size * 2
+    assert all(not command.text.startswith("第一段") for command in builder.pages[0].commands)
