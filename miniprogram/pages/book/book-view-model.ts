@@ -34,14 +34,14 @@ const TIMEZONE_OFFSET_RE = /(?:[zZ]|[+-]\d{2}:?\d{2})$/;
 export const NEW_CHAPTER_PICKER_VALUE = "__new_chapter__";
 export const BOOK_EXPORT_LAYOUT_OPTIONS: BookExportLayoutOptionView[] = [
   {
-    label: "标准阅读",
+    label: "阅读版",
     value: "standard",
-    detailText: "适合手机预览和普通分享",
+    detailText: "A5 书页，含目录页码，适合微信阅读和分享",
   },
   {
-    label: "大字打印",
+    label: "打印版",
     value: "large_print",
-    detailText: "字号更大，页边距更宽",
+    detailText: "字号更大，留白更宽，适合纸质打印",
   },
 ];
 

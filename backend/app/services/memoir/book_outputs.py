@@ -239,25 +239,26 @@ def _manuscript_from_snapshot(
         MemoirBookManuscriptSection(
             kind="cover",
             title=title,
-            content=f"{title}\n根据口述访谈整理",
+            content=f"{title}\n一本文字整理成的家庭回忆录",
         ),
         MemoirBookManuscriptSection(
             kind="title_page",
             title="扉页",
-            content=f"{title}\n\n口述：待补充\n整理：家人整理",
+            content="根据口述访谈整理\n\n整理：家人整理\n仅供家人保存与阅读",
         ),
         MemoirBookManuscriptSection(
             kind="generation_note",
-            title="版权、授权与生成说明",
+            title="整理说明",
             content=(
-                "本书根据口述访谈整理而成。文本经过语音转写、家人复核与 AI 辅助整理；"
-                "AI 的作用包括章节归类、语句通顺、目录梳理和标题生成，不主动新增未经口述确认的事实。\n\n"
-                "本书仅供家庭内部保存与阅读。未经本人或家属同意，不得公开传播。"
+                "这本书由家人的口述材料整理而成。整理过程中保留原始讲述的事实边界，"
+                "对语句、段落和章节顺序做了必要的梳理，便于日后阅读和继续修订。\n\n"
+                "书中仍可能有时间、地点或姓名需要家人补充确认。若发现遗漏或不准确之处，"
+                "可以在后续版本中继续修改。"
             ),
         ),
         MemoirBookManuscriptSection(
             kind="preface",
-            title="前言",
+            title="写在前面",
             content=(
                 f"这本书记录的是「{title}」中的家人、生活、路途和那些已经远去的日子。"
                 "它不试图概括一个时代，只是把一个人亲口说出的生活，尽量完整地留下来。"
@@ -273,13 +274,13 @@ def _manuscript_from_snapshot(
         ),
         interview_records=MemoirBookManuscriptSection(
             kind="interview_records",
-            title="访谈记录",
-            content=f"本书当前收录 {chapter_count} 章，关联 {source_count} 条讲述来源。访谈日期和方式可在后续版本中继续补充。",
+            title="讲述资料",
+            content=f"本版共整理 {chapter_count} 章正文，关联 {source_count} 条口述记录。后续可以继续补充访谈时间、地点和参与整理的人。",
         ),
         version_note=MemoirBookManuscriptSection(
             kind="version_note",
-            title="版本说明",
-            content="书中正文采用故事书版表达；后台保留章节来源和口述素材，便于追溯和继续修订。",
+            title="版本与修订",
+            content="这是当前已确认章节生成的成书版本。后续新增讲述记录、调整章节顺序或修改正文后，可以重新生成并导出新版。",
         ),
         unconfirmed_facts=MemoirBookManuscriptSection(
             kind="unconfirmed_facts",
@@ -288,8 +289,8 @@ def _manuscript_from_snapshot(
         ),
         source_appendix=MemoirBookManuscriptSection(
             kind="source_appendix",
-            title="章节来源",
-            content="\n".join(f"第{item.index}章「{item.title}」：{item.source_count} 条讲述来源" for item in toc),
+            title="口述来源索引",
+            content="\n".join(f"第{item.index}章 {item.title}：{item.source_count} 条口述记录" for item in toc),
         ),
     )
     return MemoirBookManuscript(

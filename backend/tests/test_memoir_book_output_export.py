@@ -58,6 +58,10 @@ def test_manuscript_pdf_pages_use_book_page_semantics():
     assert all(not page.header_title for page in front_pages)
     assert all(page.body_page_number is None for page in front_pages)
     assert all(page.show_footer is False for page in front_pages)
+    assert sum(
+        command.text == "根据口述访谈整理"
+        for command in front_pages[1].commands
+    ) == 1
 
     chapter_pages = [page for page in pages if page.section_title == "外婆家的童年"]
     assert chapter_pages[0].body_page_number == 1
@@ -71,6 +75,11 @@ def test_manuscript_pdf_pages_use_book_page_semantics():
     assert chapter_pages[1].body_page_number == 2
     assert chapter_pages[1].header_title == "外婆回忆录"
     assert chapter_pages[1].show_footer is True
+    assert all(
+        "本章整理自" not in command.text
+        for page in chapter_pages
+        for command in page.commands
+    )
 
 
 def test_table_of_contents_links_to_numbered_chapter_pages():

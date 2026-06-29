@@ -193,13 +193,17 @@ async def test_mobile_memoir_book_output_generate_combines_confirmed_chapters(cl
         "generation_note",
         "preface",
     ]
+    assert manuscript["front_matter"][2]["title"] == "整理说明"
+    assert manuscript["front_matter"][3]["title"] == "写在前面"
     assert [item["title"] for item in manuscript["table_of_contents"]] == ["外婆家的童年", "第一次离家"]
     assert manuscript["chapters"][0]["chapter_id"] == chapters[0].id
     assert manuscript["chapters"][0]["intro"].startswith("这一章主要记录「外婆家的童年」")
     assert manuscript["chapters"][0]["pull_quotes"][0]["text"] == "我小时候常在外婆家的院子里晒太阳。"
     assert manuscript["chapters"][0]["source_refs"][0]["utterance_id"] == "utterance-1"
-    assert manuscript["back_matter"]["source_appendix"]["title"] == "章节来源"
-    assert "第1章「外婆家的童年」：1 条讲述来源" in manuscript["back_matter"]["source_appendix"]["content"]
+    assert manuscript["back_matter"]["interview_records"]["title"] == "讲述资料"
+    assert manuscript["back_matter"]["version_note"]["title"] == "版本与修订"
+    assert manuscript["back_matter"]["source_appendix"]["title"] == "口述来源索引"
+    assert "第1章 外婆家的童年：1 条口述记录" in manuscript["back_matter"]["source_appendix"]["content"]
     assert manuscript["render_settings"]["page_size"] == "a5"
 
     stored_output = await test_db.scalar(select(MemoirBookOutput).where(MemoirBookOutput.project_id == project_id))
