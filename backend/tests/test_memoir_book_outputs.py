@@ -19,6 +19,7 @@ from app.models.memoir import (
     MemoirEditingJob,
 )
 from app.services.memoir.book_manuscript_ai import generate_manuscript_editorial_copy, generate_title_suggestions
+from app.services.memoir.book_manuscript_cleanup import sanitize_manuscript_payload
 from app.services.memoir.book_audio import split_tts_text
 from app.services.memoir.editing_job_handlers import register_memoir_editing_job_handlers
 from app.services.memoir.editing_jobs import clear_editing_job_handlers, run_editing_job
@@ -223,6 +224,63 @@ async def test_memoir_book_editorial_copy_filters_template_language():
     assert copy.back_cover_quote == ""
 
 
+def test_memoir_book_manuscript_cleanup_removes_pdf_template_language():
+    manuscript = {
+        "profile": {
+            "title": "我的小时候",
+            "subtitle": "回望这一生",
+            "narrator_name": "余晋",
+            "prepared_by": "家人整理",
+        },
+        "front_matter": [
+            {"kind": "cover", "title": "我的小时候", "content": "我的小时候\n回望这一生"},
+            {"kind": "preface", "title": "写在前面", "content": "这本书记录的是「爷爷主题回忆录」中的生活。"},
+        ],
+        "chapters": [
+            {
+                "chapter_id": "chapter-1",
+                "index": 1,
+                "title": "我的小时候",
+                "intro": "这一章主要记录小时候相关的回忆。",
+                "pull_quotes": [{"text": "夏天的晚上，我就坐在院子里边看月亮。"}],
+                "content": "夏天的晚上，我就坐在院子里边看月亮。那个院子里有一棵葡萄树。",
+                "source_refs": [{"utterance_id": "u1", "quote": "夏天的晚上，我就坐在院子里边看月亮。"}],
+            },
+            {
+                "chapter_id": "chapter-2",
+                "index": 2,
+                "title": "职场往事",
+                "intro": "从口述内容看，这一章写工作。",
+                "pull_quotes": [],
+                "content": "工作占据了人生中很长的一段时间。",
+                "source_refs": [{"utterance_id": "u2", "quote": "因为是家乡，所以一想起来成都，心里面就觉得很温暖、很踏实。"}],
+            },
+        ],
+        "back_matter": {
+            "afterword": {"kind": "afterword", "title": "后记", "content": "愿常翻看。"},
+            "interview_records": {"kind": "interview_records", "title": "讲述资料", "content": "本版共整理 2 章正文，关联 2 条讲述来源。"},
+            "version_note": {"kind": "version_note", "title": "版本说明", "content": "后台保留章节来源和口述素材"},
+            "unconfirmed_facts": {"kind": "unconfirmed_facts", "title": "未确认信息", "content": ""},
+            "source_appendix": {"kind": "source_appendix", "title": "章节来源", "content": "第1章：1 条讲述来源"},
+        },
+        "render_settings": {"back_cover_quote": "凡是过往皆是序章"},
+    }
+
+    cleaned = sanitize_manuscript_payload(title="我的小时候", manuscript=manuscript)
+
+    assert cleaned["profile"]["title"] == "回望这一生"
+    assert cleaned["profile"]["subtitle"] == "余晋口述回忆录"
+    assert "爷爷主题回忆录" not in cleaned["front_matter"][1]["content"]
+    assert "这一章主要记录" not in cleaned["chapters"][0]["intro"]
+    assert "从口述内容看" not in cleaned["chapters"][1]["intro"]
+    assert len(cleaned["back_matter"]["afterword"]["content"]) > 30
+    assert cleaned["back_matter"]["interview_records"]["title"] == "口述片段"
+    assert "讲述来源" not in cleaned["back_matter"]["interview_records"]["content"]
+    assert cleaned["back_matter"]["version_note"]["content"] == "本书正文采用适合阅读的整理版表达。原始口述材料已保留，便于家人日后继续核对、补充和修订。"
+    assert cleaned["back_matter"]["source_appendix"]["title"] == "口述片段"
+    assert cleaned["render_settings"]["back_cover_quote"] == "因为是家乡，所以一想起来成都，心里面就觉得很温暖、很踏实。"
+
+
 async def _create_confirmed_book_plan(test_db, *, project_id: str, confirmed_chapters: bool = True):
     plan = MemoirBookPlan(
         project_id=project_id,
@@ -351,14 +409,14 @@ async def test_mobile_memoir_book_output_generate_combines_confirmed_chapters(cl
     assert manuscript["front_matter"][3]["title"] == "写在前面"
     assert [item["title"] for item in manuscript["table_of_contents"]] == ["外婆家的童年", "第一次离家"]
     assert manuscript["chapters"][0]["chapter_id"] == chapters[0].id
-    assert manuscript["chapters"][0]["intro"].startswith("记忆先从一个清楚的画面展开")
+    assert manuscript["chapters"][0]["intro"].startswith("记忆先回到外婆家的童年")
     assert "这一章主要记录" not in manuscript["chapters"][0]["intro"]
     assert "从口述内容看" not in manuscript["chapters"][0]["intro"]
     assert manuscript["chapters"][0]["pull_quotes"][0]["text"] == "我小时候常在外婆家的院子里晒太阳。"
     assert manuscript["chapters"][0]["source_refs"][0]["utterance_id"] == "utterance-1"
-    assert manuscript["back_matter"]["interview_records"]["title"] == "讲述资料"
+    assert manuscript["back_matter"]["interview_records"]["title"] == "口述片段"
     assert manuscript["back_matter"]["version_note"]["title"] == "版本与修订"
-    assert manuscript["back_matter"]["source_appendix"]["title"] == "口述来源索引"
+    assert manuscript["back_matter"]["source_appendix"]["title"] == "口述片段"
     assert "第1章「外婆家的童年」：1 条口述片段" in manuscript["back_matter"]["source_appendix"]["content"]
     assert manuscript["render_settings"]["back_cover_quote"] == "我小时候常在外婆家的院子里晒太阳。"
     assert manuscript["render_settings"]["page_size"] == "a5"
@@ -516,6 +574,7 @@ async def test_mobile_memoir_book_output_exports_txt_and_pdf(client, test_db):
     assert b"/FontFile2" in pdf.content
     assert b"MemoirNotoSerifSC" in pdf.content
     assert b"NotoSansSC" in pdf.content
+    assert b"/Helvetica" not in pdf.content
     assert b"STSong-Light" not in pdf.content
     assert b"Adobe-GB1" not in pdf.content
     assert pdf.content.count(b"/Type /Page") >= 8
@@ -523,6 +582,7 @@ async def test_mobile_memoir_book_output_exports_txt_and_pdf(client, test_db):
     assert pdf_without_sources.content != pdf.content
     assert print_pdf.status_code == 200
     assert b"/FontFile2" in print_pdf.content
+    assert b"/Helvetica" not in print_pdf.content
     assert print_pdf.content != pdf.content
     assert "filename*=" in print_pdf.headers["content-disposition"]
 
@@ -538,6 +598,7 @@ async def test_mobile_memoir_book_output_exports_txt_and_pdf(client, test_db):
     assert b"/MediaBox [ 0 0 420 595 ]" in fallback_pdf.content
     assert b"/FontFile2" in fallback_pdf.content
     assert b"MemoirNotoSerifSC" in fallback_pdf.content
+    assert b"/Helvetica" not in fallback_pdf.content
     assert b"STSong-Light" not in fallback_pdf.content
     assert b"Adobe-GB1" not in fallback_pdf.content
 

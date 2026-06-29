@@ -12,6 +12,10 @@ from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen import canvas as pdf_canvas
 
 from app.services.file_exports import ExportFile, safe_filename
+from app.services.memoir.book_manuscript_cleanup import (
+    formal_book_title,
+    sanitize_manuscript_payload,
+)
 
 
 PDF_SANS_FONT_NAME = "MemoirNotoSansSC"
@@ -37,21 +41,21 @@ PDF_HEADER_TEXT: PDFColor = (0.58, 0.55, 0.51)
 PDF_COVER_STYLES: dict[str, dict[PDFColorName, PDFColor]] = {
     "classic_plain": {
         "background": (0.96, 0.92, 0.86),
-        "text": (0.29, 0.20, 0.16),
+        "text": (0.22, 0.15, 0.12),
         "line": (0.78, 0.70, 0.61),
-        "texture": (0.98, 0.95, 0.90),
+        "subtle_line": (0.88, 0.82, 0.75),
     },
     "warm_gray": {
         "background": (0.95, 0.94, 0.91),
         "text": (0.20, 0.19, 0.17),
         "line": (0.73, 0.70, 0.66),
-        "texture": (0.98, 0.97, 0.94),
+        "subtle_line": (0.84, 0.82, 0.78),
     },
     "dark_album": {
         "background": (0.24, 0.22, 0.20),
         "text": (0.95, 0.92, 0.86),
         "line": (0.61, 0.55, 0.46),
-        "texture": (0.27, 0.25, 0.23),
+        "subtle_line": (0.42, 0.38, 0.32),
     },
 }
 
@@ -162,6 +166,37 @@ class PDFTocEntry:
 
 LINE_START_FORBIDDEN_CHARS = set("，。！？；：、）】》」』”’〕］｝〉〗〙〛,.!?;:)]}")
 LINE_END_FORBIDDEN_CHARS = set("（【《「『“‘([{")
+COMMON_CHINESE_UNBREAKABLE_WORDS = {
+    "那些",
+    "事情",
+    "因为",
+    "所以",
+    "但是",
+    "然后",
+    "还有",
+    "这个",
+    "那个",
+    "我们",
+    "你们",
+    "他们",
+    "自己",
+    "时候",
+    "如果",
+    "不能",
+    "可以",
+    "没有",
+    "已经",
+    "现在",
+    "后来",
+    "以前",
+    "一起",
+    "家人",
+    "工作",
+    "朋友",
+    "小时",
+    "回忆",
+}
+CHINESE_NUMBER_UNITS = set("年月日岁个条章页册本段次分钟小时公里米斤元")
 
 
 def _char_units(char: str) -> float:
@@ -197,10 +232,38 @@ def _avoid_ascii_word_split(text: str, start: int, end: int) -> int:
     return adjusted if adjusted > start else end
 
 
+def _avoid_common_chinese_word_split(text: str, start: int, end: int) -> int:
+    if end >= len(text) or end <= start:
+        return end
+    if text[end - 1 : end + 1] in COMMON_CHINESE_UNBREAKABLE_WORDS:
+        return end - 1 if end - 1 > start else end + 1
+    return end
+
+
+def _avoid_number_unit_split(text: str, start: int, end: int) -> int:
+    if end >= len(text) or end <= start:
+        return end
+    if text[end] not in CHINESE_NUMBER_UNITS:
+        return end
+    left = end - 1
+    while left >= start and text[left].isspace():
+        left -= 1
+    if left < start or not text[left].isdigit():
+        return end
+    number_start = left
+    while number_start > start and (text[number_start - 1].isdigit() or text[number_start - 1] in ".,"):
+        number_start -= 1
+    while number_start > start and text[number_start - 1].isspace():
+        number_start -= 1
+    return number_start if number_start > start else end
+
+
 def _adjust_forbidden_line_break(text: str, start: int, end: int) -> int:
     if end >= len(text):
         return end
     end = _avoid_ascii_word_split(text, start, end)
+    end = _avoid_common_chinese_word_split(text, start, end)
+    end = _avoid_number_unit_split(text, start, end)
     while end < len(text) and text[end] in LINE_START_FORBIDDEN_CHARS:
         end += 1
     while end > start + 1 and text[end - 1] in LINE_END_FORBIDDEN_CHARS:
@@ -624,6 +687,9 @@ def _render_pdf_pages(
         output,
         pagesize=(layout.page_width, layout.page_height),
         pageCompression=1,
+        initialFontName=PDF_FONT_NAME,
+        initialFontSize=layout.font_size,
+        initialLeading=layout.line_height,
     )
     first_title = metadata_title or next((page.header_title for page in pages if page.header_title), "家庭回忆录")
     pdf.setTitle(first_title)
@@ -766,23 +832,13 @@ def _add_cover_page(
 ) -> None:
     style = _cover_style(cover_style)
     line_color = style["line"]
-    texture_color = style.get("texture", style["background"])
+    subtle_line_color = style.get("subtle_line", line_color)
     builder.new_page(
         show_header=False,
         show_footer=False,
         background_color=style["background"],
         text_color=style["text"],
     )
-    for offset in range(0, 3):
-        builder.add_decoration(
-            kind="line",
-            x=builder.layout.margin_x,
-            y=builder.layout.margin_bottom + 118 + offset * 132,
-            width=builder.layout.page_width - builder.layout.margin_x * 2,
-            height=0,
-            color=texture_color,
-            line_width=0.18,
-        )
     builder.add_decoration(
         kind="line",
         x=builder.layout.margin_x,
@@ -803,12 +859,12 @@ def _add_cover_page(
     )
     builder.add_decoration(
         kind="line",
-        x=builder.layout.page_width / 2 - 34,
+        x=builder.layout.page_width / 2 - 24,
         y=builder.layout.page_height / 2 - 35,
-        width=68,
+        width=48,
         height=0,
-        color=line_color,
-        line_width=0.45,
+        color=subtle_line_color,
+        line_width=0.35,
     )
     builder.add_spacer(2.7)
     builder.add_centered(
@@ -990,6 +1046,40 @@ def _add_table_of_contents(
         )
 
 
+def _chapter_pull_quote(chapter: dict[str, Any]) -> str:
+    for raw_quote in _list(chapter.get("pull_quotes"))[:2]:
+        quote = _str(_dict(raw_quote).get("text"))
+        if quote:
+            return quote
+    return ""
+
+
+def _quote_overlap_key(text: str) -> str:
+    return text.strip().strip("“”\"'「」").strip("，。！？；：、,.!?;: ")
+
+
+def _without_leading_quote_overlap(content: str, quote: str) -> str:
+    quote_key = _quote_overlap_key(quote)
+    if len(quote_key) < 8:
+        return content
+    stripped = content.lstrip()
+    content_key = _quote_overlap_key(stripped[: max(len(quote_key) + 4, 16)])
+    if not content_key.startswith(quote_key):
+        return content
+    remainder = stripped[len(quote_key) :].lstrip("，。！？；：、,.!?;: \n")
+    return remainder or content
+
+
+def _without_embedded_quote_overlap(text: str, quote: str) -> str:
+    quote_key = _quote_overlap_key(quote)
+    if len(quote_key) < 8:
+        return text
+    cleaned = text
+    for suffix in ("。", "！", "？", "，", "；", ""):
+        cleaned = cleaned.replace(f"{quote_key}{suffix}", "")
+    return cleaned.strip()
+
+
 def _add_chapters(builder: PDFBookBuilder, chapters: list[Any]) -> None:
     for fallback_index, raw_chapter in enumerate(chapters, start=1):
         chapter = _dict(raw_chapter)
@@ -1035,19 +1125,18 @@ def _add_chapters(builder: PDFBookBuilder, chapters: list[Any]) -> None:
             )
             builder.add_spacer(0.5)
 
+        quote = _chapter_pull_quote(chapter)
+        if quote:
+            builder.add_quote(quote, spacing_after=6)
+
         intro = _str(chapter.get("intro"))
+        intro = _without_embedded_quote_overlap(intro, quote)
         if intro:
             builder.add_body_text(intro, spacing_after=4)
 
-        for raw_quote in _list(chapter.get("pull_quotes"))[:2]:
-            quote = _str(_dict(raw_quote).get("text"))
-            if quote:
-                builder.add_quote(quote, spacing_after=6)
-                break
-
         builder.add_spacer(0.5)
 
-        content = _str(chapter.get("content"))
+        content = _without_leading_quote_overlap(_str(chapter.get("content")), quote)
         if content:
             builder.add_body_text(content)
 
@@ -1125,31 +1214,30 @@ def _add_back_matter(builder: PDFBookBuilder, back_matter: dict[str, Any], *, in
 
 def _add_back_cover(builder: PDFBookBuilder, *, quote: str, cover_style: str) -> None:
     style = _cover_style(cover_style)
-    texture_color = style.get("texture", style["background"])
+    subtle_line_color = style.get("subtle_line", style["line"])
     builder.new_page(
         show_header=False,
         show_footer=False,
         background_color=style["background"],
         text_color=style["text"],
     )
-    for offset in range(0, 3):
-        builder.add_decoration(
-            kind="line",
-            x=builder.layout.margin_x,
-            y=builder.layout.margin_bottom + 118 + offset * 132,
-            width=builder.layout.page_width - builder.layout.margin_x * 2,
-            height=0,
-            color=texture_color,
-            line_width=0.18,
-        )
     builder.add_decoration(
         kind="line",
-        x=builder.layout.page_width / 2 - 36,
-        y=builder.layout.page_height / 2 + 56,
-        width=72,
+        x=builder.layout.margin_x,
+        y=builder.layout.page_height - builder.layout.margin_top + 8,
+        width=builder.layout.page_width - builder.layout.margin_x * 2,
         height=0,
         color=style["line"],
-        line_width=0.8,
+        line_width=0.7,
+    )
+    builder.add_decoration(
+        kind="line",
+        x=builder.layout.page_width / 2 - 24,
+        y=builder.layout.page_height / 2 + 56,
+        width=48,
+        height=0,
+        color=subtle_line_color,
+        line_width=0.35,
     )
     builder.add_decoration(
         kind="line",
@@ -1233,6 +1321,7 @@ def _build_manuscript_pdf_pages(
     layout: PDFLayout,
     show_source_appendix: bool | None = None,
 ) -> list[PDFPage]:
+    manuscript = sanitize_manuscript_payload(title=title, manuscript=manuscript)
     profile = _dict(manuscript.get("profile"))
     chapters = _list(manuscript.get("chapters"))
     front_matter = _list(manuscript.get("front_matter"))
@@ -1305,6 +1394,7 @@ def _render_manuscript_pdf(
     layout: PDFLayout,
     show_source_appendix: bool | None = None,
 ) -> bytes:
+    manuscript = sanitize_manuscript_payload(title=title, manuscript=manuscript or {})
     profile = _dict((manuscript or {}).get("profile")) if isinstance(manuscript, dict) else {}
     metadata_title = _str(profile.get("title")) or title
     metadata_author = _str(profile.get("narrator_name")) or _str(profile.get("prepared_by")) or "家人整理"
@@ -1324,22 +1414,12 @@ def _render_manuscript_pdf(
 
 
 def _formal_export_title(raw_title: str) -> str:
-    title = raw_title.strip().strip("《》「」“”\"' ").replace("章节规划", "").strip(" -_·：:")
-    title = title.replace("主题回忆录", "回忆录").replace("主题", "").strip(" -_·：:")
-    if not title or title == "回忆录":
-        return "家庭回忆录"
-    if title == "家庭回忆录" or title.endswith("口述回忆录"):
-        return title
-    if title.endswith("的回忆录"):
-        return title
-    if title.endswith("回忆录"):
-        subject = title[: -len("回忆录")].strip(" -_·：:的")
-        return f"{subject}的回忆录" if subject else "家庭回忆录"
-    return title
+    return formal_book_title(raw_title)
 
 
 def _export_title(title: str, manuscript: dict[str, Any] | None) -> str:
-    profile = _dict((manuscript or {}).get("profile"))
+    sanitized = sanitize_manuscript_payload(title=title, manuscript=manuscript or {})
+    profile = _dict(sanitized.get("profile"))
     return _formal_export_title(_str(profile.get("title")) or title)
 
 

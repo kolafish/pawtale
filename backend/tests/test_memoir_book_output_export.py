@@ -1,4 +1,5 @@
 from app.services.memoir.book_output_export import (
+    COMMON_CHINESE_UNBREAKABLE_WORDS,
     LINE_END_FORBIDDEN_CHARS,
     LINE_START_FORBIDDEN_CHARS,
     PDF_LAYOUTS,
@@ -81,7 +82,7 @@ def test_manuscript_pdf_pages_use_book_page_semantics():
     assert any(command.text == "外婆家的童年" for command in chapter_pages[0].commands)
 
     assert chapter_pages[1].body_page_number == 2
-    assert chapter_pages[1].header_title == "外婆回忆录"
+    assert chapter_pages[1].header_title == "外婆的回忆录"
     assert chapter_pages[1].show_footer is True
     assert all(
         "本章整理自" not in command.text
@@ -158,6 +159,84 @@ def test_pdf_line_wrapping_respects_chinese_forbidden_breaks():
     assert len(lines) > 1
     assert all(line[0] not in LINE_START_FORBIDDEN_CHARS for line in lines[1:])
     assert all(line[-1] not in LINE_END_FORBIDDEN_CHARS for line in lines[:-1])
+
+
+def test_pdf_line_wrapping_keeps_common_words_and_number_units_together():
+    lines = _wrap_pdf_line(
+        "妈妈会把那些熟透的葡萄拿出来，因为这件事情已经过去 97 岁那年很久。",
+        max_units=8,
+    )
+    joined_breaks = "\n".join(lines)
+
+    assert COMMON_CHINESE_UNBREAKABLE_WORDS
+    assert "那\n些" not in joined_breaks
+    assert "事\n情" not in joined_breaks
+    assert "因\n为" not in joined_breaks
+    assert "97 \n岁" not in joined_breaks
+    assert "97\n岁" not in joined_breaks
+
+
+def test_manuscript_pdf_export_sanitizes_legacy_copy_and_cover_identity():
+    manuscript = _sample_manuscript("夏天的晚上，我就坐在院子里边看月亮。那个院子里有一棵葡萄树。")
+    manuscript["profile"]["title"] = "我的小时候"
+    manuscript["profile"]["subtitle"] = "回望这一生"
+    manuscript["profile"]["narrator_name"] = "余晋"
+    manuscript["front_matter"][2]["content"] = "这本书记录的是「爷爷主题回忆录」中的生活。"
+    manuscript["chapters"].append(
+        {
+            "chapter_id": "chapter-2",
+            "index": 2,
+            "title": "职场往事",
+            "intro": "从口述内容看，这一章写工作。",
+            "pull_quotes": [],
+            "content": "工作占据了人生中很长的一段时间。",
+            "source_refs": [],
+        }
+    )
+    manuscript["render_settings"]["back_cover_quote"] = "凡是过往皆是序章"
+
+    pages = _build_manuscript_pdf_pages(
+        title="我的小时候",
+        content="我的小时候",
+        manuscript=manuscript,
+        layout=PDF_LAYOUTS[MemoirBookOutputExportLayout.STANDARD],
+        show_source_appendix=None,
+    )
+
+    all_text = "\n".join(command.text for page in pages for command in page.commands)
+    assert "回望这一生" in all_text
+    assert "余晋口述回忆录" in all_text
+    assert "爷爷主题回忆录" not in all_text
+    assert "从口述内容看" not in all_text
+    assert "凡是过往皆是序章" not in all_text
+
+    export = render_book_output_export(
+        title="我的小时候",
+        version=1,
+        content="我的小时候",
+        manuscript=manuscript,
+        export_format=MemoirBookOutputExportFormat.PDF,
+    )
+    assert export.filename.startswith("《回望这一生》_阅读版_")
+
+
+def test_chapter_epigraph_does_not_repeat_as_first_body_sentence():
+    manuscript = _sample_manuscript("我小时候常在外婆家的院子里晒太阳。后来我常听外婆讲老屋的事。")
+
+    pages = _build_manuscript_pdf_pages(
+        title="外婆回忆录",
+        content="外婆回忆录",
+        manuscript=manuscript,
+        layout=PDF_LAYOUTS[MemoirBookOutputExportLayout.STANDARD],
+        show_source_appendix=None,
+    )
+    chapter_pages = [page for page in pages if page.section_title == "外婆家的童年"]
+    chapter_text = [command.text for page in chapter_pages for command in page.commands]
+
+    assert chapter_text.count("“我小时候常在外婆家的院子里晒太阳。”") == 1
+    assert any(text.startswith("后来我常听外婆讲老屋的事") for text in chapter_text)
+    body_repeats = [text for text in chapter_text if text == "　　我小时候常在外婆家的院子里晒太阳。"]
+    assert body_repeats == []
 
 
 def test_body_text_indents_paragraphs_and_avoids_orphan_starts():
