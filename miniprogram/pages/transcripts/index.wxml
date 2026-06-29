@@ -162,6 +162,61 @@
       />
     </view>
 
+    <view wx:if="{{voiceEditTargetId === item.id}}" class="voice-edit-panel">
+      <view class="section-head">
+        <text class="section-title">语音修正</text>
+        <text class="section-count">{{voiceEditStatusText || "待确认"}}</text>
+      </view>
+      <view wx:if="{{voiceEditInstructionText}}" class="voice-edit-block">
+        <text class="voice-edit-label">你说</text>
+        <text class="voice-edit-text">{{voiceEditInstructionText}}</text>
+      </view>
+      <view wx:if="{{voiceEditPreview}}" class="voice-edit-block">
+        <text class="voice-edit-label">AI 建议</text>
+        <text class="voice-edit-text">{{voiceEditPreview.replyText}}</text>
+        <text class="voice-edit-confidence">可信度 {{voiceEditPreview.confidenceText}}</text>
+      </view>
+      <view wx:if="{{voiceEditPreview && voiceEditPreview.changes.length}}" class="voice-edit-changes">
+        <view
+          wx:for="{{voiceEditPreview.changes}}"
+          wx:for-item="change"
+          wx:for-index="changeIndex"
+          wx:key="changeIndex"
+          class="voice-edit-change"
+        >
+          <text class="voice-edit-change-text">“{{change.before}}” → “{{change.after}}”</text>
+          <text wx:if="{{change.reason}}" class="voice-edit-change-reason">{{change.reason}}</text>
+        </view>
+      </view>
+      <view wx:if="{{voiceEditPreview && voiceEditPreview.canConfirm}}" class="voice-edit-comparison">
+        <view class="voice-edit-column">
+          <text class="voice-edit-label">当前</text>
+          <text class="voice-edit-text">{{voiceEditPreview.currentText}}</text>
+        </view>
+        <view class="voice-edit-column">
+          <text class="voice-edit-label">修正后</text>
+          <text class="voice-edit-text revised">{{voiceEditPreview.editedText}}</text>
+        </view>
+      </view>
+      <view class="actions-row compact-actions">
+        <button
+          class="ghost-button"
+          bindtap="cancelVoiceEdit"
+          disabled="{{voiceEditSaving}}"
+        >
+          取消
+        </button>
+        <button
+          class="small-primary"
+          bindtap="confirmVoiceEdit"
+          loading="{{voiceEditSaving}}"
+          disabled="{{voiceEditSaving || !voiceEditPreview || !voiceEditPreview.canConfirm}}"
+        >
+          确认保存
+        </button>
+      </view>
+    </view>
+
     <view wx:if="{{!item.isEditing}}" class="actions-row">
       <button
         class="ghost-button"
@@ -170,6 +225,15 @@
         disabled="{{savingId || deletingId || !item.canPlayAudio}}"
       >
         {{playingId === item.id ? "停止" : (item.question_text ? "播放问答" : "播放")}}
+      </button>
+      <button
+        class="ghost-button"
+        data-id="{{item.id}}"
+        bindtap="startVoiceEdit"
+        loading="{{voiceEditTargetId === item.id && voiceEditLoading}}"
+        disabled="{{savingId || deletingId || voiceEditSaving || voiceSearchRecording || voiceSearchTranscribing || (voiceEditTargetId !== item.id && (voiceEditRecording || voiceEditLoading))}}"
+      >
+        {{voiceEditTargetId === item.id && voiceEditRecording ? "停止修正" : (voiceEditTargetId === item.id && voiceEditLoading ? "生成中" : "语音修正")}}
       </button>
       <picker
         wx:if="{{item.canAssignChapterSource}}"

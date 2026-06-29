@@ -3,6 +3,7 @@ import type {
   MemoirGuidanceMode,
   MemoirVoiceTranscriptIncludedFilter,
   MemoirVoiceTranscriptItem,
+  MemoirVoiceTranscriptVoiceEditPreviewResponse,
   MemoirVoiceSearchQueryFilters,
   MemoirVoiceSearchQueryParseResponse,
 } from "../../domain/voice-chat";
@@ -14,6 +15,7 @@ import {
   listMemoirVoiceTranscripts,
   moveMemoirBookSource,
   parseMemoirVoiceSearchQuery,
+  previewMemoirVoiceTranscriptVoiceEdit,
   updateMemoirVoiceTranscript,
 } from "../../services/memoir-voice-api";
 import { AudioPlaybackController } from "../../services/audio-playback";
@@ -73,6 +75,22 @@ interface TranscriptTextView {
   toggleText: string;
 }
 
+interface TranscriptVoiceEditChangeView {
+  before: string;
+  after: string;
+  reason: string;
+}
+
+interface TranscriptVoiceEditPreviewView {
+  action: MemoirVoiceTranscriptVoiceEditPreviewResponse["action"];
+  currentText: string;
+  editedText: string;
+  replyText: string;
+  confidenceText: string;
+  changes: TranscriptVoiceEditChangeView[];
+  canConfirm: boolean;
+}
+
 interface TranscriptSearchFilters {
   included: MemoirVoiceTranscriptIncludedFilter;
   guidanceMode: MemoirGuidanceMode | "";
@@ -130,6 +148,13 @@ interface TranscriptsData {
   voiceSearchRecording: boolean;
   voiceSearchTranscribing: boolean;
   voiceSearchStatusText: string;
+  voiceEditTargetId: string;
+  voiceEditRecording: boolean;
+  voiceEditLoading: boolean;
+  voiceEditSaving: boolean;
+  voiceEditInstructionText: string;
+  voiceEditStatusText: string;
+  voiceEditPreview: TranscriptVoiceEditPreviewView | null;
   activeProjectId: string;
   projectTitle: string;
   bookPlan: MemoirBookPlan | null;
@@ -430,6 +455,29 @@ function changedItem(item: TranscriptItemView, editingText: string): TranscriptI
   };
 }
 
+function voiceEditPreviewView(
+  response: MemoirVoiceTranscriptVoiceEditPreviewResponse,
+): TranscriptVoiceEditPreviewView {
+  const confidence = Number.isFinite(response.confidence)
+    ? Math.round(Math.max(0, Math.min(1, response.confidence)) * 100)
+    : 0;
+  return {
+    action: response.action,
+    currentText: response.current_text,
+    editedText: response.edited_text,
+    replyText: response.reply_text,
+    confidenceText: `${confidence}%`,
+    changes: (response.changes || []).map((item) => ({
+      before: item.before,
+      after: item.after,
+      reason: item.reason,
+    })),
+    canConfirm: Boolean(response.action === "revise_transcript"
+      && response.edited_text.trim()
+      && response.edited_text.trim() !== response.current_text.trim()),
+  };
+}
+
 function replaceItem(
   items: TranscriptItemView[],
   next: MemoirVoiceTranscriptItem,
@@ -474,6 +522,9 @@ Page<TranscriptsData, {
     parsed?: MemoirVoiceSearchQueryParseResponse,
   ): Promise<void>;
   startVoiceSearch(): Promise<void>;
+  startVoiceEdit(event: DatasetEvent): Promise<void>;
+  cancelVoiceEdit(): void;
+  confirmVoiceEdit(): Promise<void>;
   toggleTranscriptText(event: DatasetEvent): void;
   assignTranscriptChapter(event: PickerEvent): Promise<void>;
   moveTranscriptChapter(event: PickerEvent): Promise<void>;
@@ -494,10 +545,12 @@ Page<TranscriptsData, {
   scrollToTranscript(item: TranscriptItemView): void;
   audioPlayback: AudioPlaybackController;
   loadToken: number;
+  voiceEditToken: number;
   searchDebounceTimer: number | null;
 }>({
   audioPlayback: new AudioPlaybackController(),
   loadToken: 0,
+  voiceEditToken: 0,
   searchDebounceTimer: null,
 
   data: {
@@ -523,6 +576,13 @@ Page<TranscriptsData, {
     voiceSearchRecording: false,
     voiceSearchTranscribing: false,
     voiceSearchStatusText: "",
+    voiceEditTargetId: "",
+    voiceEditRecording: false,
+    voiceEditLoading: false,
+    voiceEditSaving: false,
+    voiceEditInstructionText: "",
+    voiceEditStatusText: "",
+    voiceEditPreview: null,
     activeProjectId: "",
     projectTitle: "",
     bookPlan: null,
@@ -698,6 +758,10 @@ Page<TranscriptsData, {
     if (this.data.voiceSearchTranscribing) {
       return;
     }
+    if (this.data.voiceEditRecording || this.data.voiceEditLoading || this.data.voiceEditSaving) {
+      this.setData({ error: "请先完成当前语音修正" });
+      return;
+    }
     if (this.data.voiceSearchRecording) {
       stopMemoirVoiceSearchRecording();
       return;
@@ -732,6 +796,145 @@ Page<TranscriptsData, {
         voiceSearchTranscribing: false,
         voiceSearchStatusText: "",
       });
+    }
+  },
+
+  async startVoiceEdit(event) {
+    const id = event.currentTarget.dataset.id || "";
+    const item = this.data.items.find((candidate) => candidate.id === id);
+    if (
+      !id
+      || !item
+      || this.data.savingId
+      || this.data.deletingId
+      || this.data.voiceEditLoading
+      || this.data.voiceEditSaving
+    ) {
+      return;
+    }
+    if (this.data.voiceSearchRecording || this.data.voiceSearchTranscribing) {
+      this.setData({ error: "请先完成当前语音搜索" });
+      return;
+    }
+    if (this.data.voiceEditRecording) {
+      if (this.data.voiceEditTargetId === id) {
+        stopMemoirVoiceSearchRecording();
+      } else {
+        this.setData({ error: "请先停止当前语音修正" });
+      }
+      return;
+    }
+    this.stopPlayback();
+    this.voiceEditToken += 1;
+    const requestToken = this.voiceEditToken;
+    this.setData({
+      voiceEditTargetId: id,
+      voiceEditRecording: true,
+      voiceEditLoading: false,
+      voiceEditSaving: false,
+      voiceEditInstructionText: "",
+      voiceEditStatusText: "正在听你说要改哪里",
+      voiceEditPreview: null,
+      error: "",
+    });
+    try {
+      const instructionText = await recordMemoirVoiceSearchQuery({
+        onRecordingEnd: () => {
+          if (requestToken !== this.voiceEditToken) {
+            return;
+          }
+          this.setData({
+            voiceEditRecording: false,
+            voiceEditLoading: true,
+            voiceEditStatusText: "正在识别修正内容",
+          });
+        },
+        emptyTranscriptMessage: "没有识别到修正内容，请再说一次",
+        noVoiceTranscriptMessage: "没有听到修正内容，请再说一次",
+      });
+      if (requestToken !== this.voiceEditToken || this.data.voiceEditTargetId !== id) {
+        return;
+      }
+      this.setData({
+        voiceEditInstructionText: instructionText,
+        voiceEditStatusText: "正在生成修正预览",
+      });
+      const preview = await previewMemoirVoiceTranscriptVoiceEdit(id, instructionText);
+      if (requestToken !== this.voiceEditToken || this.data.voiceEditTargetId !== id) {
+        return;
+      }
+      this.setData({
+        voiceEditPreview: voiceEditPreviewView(preview),
+        voiceEditStatusText: preview.action === "revise_transcript" ? "请确认修正内容" : preview.reply_text,
+      });
+    } catch (error) {
+      if (requestToken !== this.voiceEditToken) {
+        return;
+      }
+      this.setData({
+        error: error instanceof Error ? error.message : "语音修正失败",
+        voiceEditStatusText: "",
+      });
+    } finally {
+      if (requestToken === this.voiceEditToken) {
+        this.setData({
+          voiceEditRecording: false,
+          voiceEditLoading: false,
+        });
+      }
+    }
+  },
+
+  cancelVoiceEdit() {
+    this.voiceEditToken += 1;
+    if (this.data.voiceEditRecording) {
+      stopMemoirVoiceSearchRecording();
+    }
+    this.setData({
+      voiceEditTargetId: "",
+      voiceEditRecording: false,
+      voiceEditLoading: false,
+      voiceEditSaving: false,
+      voiceEditInstructionText: "",
+      voiceEditStatusText: "",
+      voiceEditPreview: null,
+      error: "",
+    });
+  },
+
+  async confirmVoiceEdit() {
+    const id = this.data.voiceEditTargetId;
+    const preview = this.data.voiceEditPreview;
+    if (
+      !id
+      || !preview
+      || !preview.canConfirm
+      || this.data.voiceEditSaving
+      || this.data.savingId
+      || this.data.deletingId
+    ) {
+      return;
+    }
+    const content = preview.editedText.trim();
+    if (!content) {
+      this.setData({ error: "修正后的整理文字不能为空" });
+      return;
+    }
+    this.setData({ voiceEditSaving: true, savingId: id, error: "" });
+    try {
+      const updated = await updateMemoirVoiceTranscript(id, content);
+      this.setData({
+        items: replaceItem(this.data.items, updated, this.data.searchQuery, this.data.bookPlan),
+        voiceEditTargetId: "",
+        voiceEditInstructionText: "",
+        voiceEditStatusText: "",
+        voiceEditPreview: null,
+      });
+      wx.showToast({ title: "已保存修正", icon: "success" });
+    } catch (error) {
+      this.setData({ error: error instanceof Error ? error.message : "保存修正失败" });
+    } finally {
+      this.setData({ voiceEditSaving: false, savingId: "" });
     }
   },
 
@@ -977,7 +1180,8 @@ Page<TranscriptsData, {
       clearTimeout(this.searchDebounceTimer);
       this.searchDebounceTimer = null;
     }
-    if (this.data.voiceSearchRecording) {
+    this.voiceEditToken += 1;
+    if (this.data.voiceSearchRecording || this.data.voiceEditRecording) {
       stopMemoirVoiceSearchRecording();
     }
     this.stopPlayback();

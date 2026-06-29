@@ -343,6 +343,28 @@ export interface MemoirVoiceSearchQueryParseResponse {
   model?: string | null;
 }
 
+export type MemoirVoiceTranscriptVoiceEditAction = "revise_transcript" | "clarify" | "unsupported";
+
+export interface MemoirVoiceTranscriptVoiceEditChange {
+  before: string;
+  after: string;
+  reason: string;
+}
+
+export interface MemoirVoiceTranscriptVoiceEditPreviewResponse {
+  utterance_id: string;
+  action: MemoirVoiceTranscriptVoiceEditAction;
+  original_text: string;
+  current_text: string;
+  edited_text: string;
+  changes: MemoirVoiceTranscriptVoiceEditChange[];
+  confidence: number;
+  requires_confirmation: boolean;
+  reply_text: string;
+  provider?: string | null;
+  model?: string | null;
+}
+
 export interface MemoirBookChapterSourceRef {
   voice_session_id: string;
   message_id: string;
