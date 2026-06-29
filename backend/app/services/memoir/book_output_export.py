@@ -97,28 +97,76 @@ class PDFPage:
     body_page_number: int | None = None
 
 
-def _wrap_pdf_line(text: str, max_units: int) -> list[str]:
+LINE_START_FORBIDDEN_CHARS = set("，。！？；：、）】》」』”’〕］｝〉〗〙〛,.!?;:)]}")
+LINE_END_FORBIDDEN_CHARS = set("（【《「『“‘([{")
+
+
+def _char_units(char: str) -> float:
+    return 0.55 if char.isascii() else 1.0
+
+
+def _fit_line_end(text: str, start: int, max_units: float) -> int:
+    units = 0.0
+    index = start
+    while index < len(text):
+        char_units = _char_units(text[index])
+        if index > start and units + char_units > max_units:
+            break
+        units += char_units
+        index += 1
+        if units >= max_units:
+            break
+    return index
+
+
+def _is_ascii_word_char(char: str) -> bool:
+    return char.isascii() and (char.isalnum() or char in "-_./:%")
+
+
+def _avoid_ascii_word_split(text: str, start: int, end: int) -> int:
+    if end >= len(text) or end <= start + 1:
+        return end
+    if not (_is_ascii_word_char(text[end - 1]) and _is_ascii_word_char(text[end])):
+        return end
+    adjusted = end
+    while adjusted > start + 1 and _is_ascii_word_char(text[adjusted - 1]):
+        adjusted -= 1
+    return adjusted if adjusted > start else end
+
+
+def _adjust_forbidden_line_break(text: str, start: int, end: int) -> int:
+    if end >= len(text):
+        return end
+    end = _avoid_ascii_word_split(text, start, end)
+    while end < len(text) and text[end] in LINE_START_FORBIDDEN_CHARS:
+        end += 1
+    while end > start + 1 and text[end - 1] in LINE_END_FORBIDDEN_CHARS:
+        end -= 1
+    return max(end, start + 1)
+
+
+def _wrap_pdf_line(
+    text: str,
+    max_units: int,
+    *,
+    first_line_units: float | None = None,
+) -> list[str]:
     if not text:
         return [""]
     lines: list[str] = []
-    current = ""
-    current_units = 0.0
-    for char in text:
-        char_units = 0.55 if char.isascii() else 1.0
-        if current and current_units + char_units > max_units:
-            lines.append(current)
-            current = char
-            current_units = char_units
-            continue
-        current += char
-        current_units += char_units
-    if current:
-        lines.append(current)
+    start = 0
+    line_units = first_line_units or max_units
+    while start < len(text):
+        end = _fit_line_end(text, start, line_units)
+        end = _adjust_forbidden_line_break(text, start, end)
+        lines.append(text[start:end])
+        start = end
+        line_units = max_units
     return lines
 
 
 def _text_units(text: str) -> float:
-    return sum(0.55 if char.isascii() else 1.0 for char in text)
+    return sum(_char_units(char) for char in text)
 
 
 def _estimated_text_width(text: str, font_size: int) -> int:
@@ -211,7 +259,11 @@ class PDFBookBuilder:
         line_height: int | None = None,
         max_units: int | None = None,
         indent: int = 0,
+        first_line_indent: int = 0,
+        paragraph_spacing_after: int = 0,
         spacing_after: int = 0,
+        min_start_lines: int = 1,
+        keep_last_lines: int = 1,
     ) -> None:
         font_size = font_size or self.layout.font_size
         line_height = line_height or self.layout.line_height
@@ -222,23 +274,61 @@ class PDFBookBuilder:
                 self._ensure_space(1)
                 self.y -= max(8, line_height // 2)
                 continue
-            for line in _wrap_pdf_line(stripped, max_units):
-                self._ensure_space(1)
+            first_line_units = max(6, max_units - first_line_indent / max(font_size, 1))
+            lines = _wrap_pdf_line(
+                stripped,
+                max_units,
+                first_line_units=first_line_units if first_line_indent else None,
+            )
+            if len(lines) > 1 and min_start_lines > 1:
+                self._ensure_space(min(min_start_lines, len(lines)))
+            for line_index, line in enumerate(lines):
+                remaining_lines = len(lines) - line_index
+                if keep_last_lines > 1 and remaining_lines == keep_last_lines:
+                    self._ensure_space(remaining_lines)
+                else:
+                    self._ensure_space(1)
                 page = self._ensure_page()
+                line_indent = indent + (first_line_indent if line_index == 0 else 0)
                 page.commands.append(
                     PDFTextCommand(
                         text=line,
-                        x=self.layout.margin_x + indent,
+                        x=self.layout.margin_x + line_indent,
                         y=self.y,
                         font_size=font_size,
                     )
                 )
                 self.y -= line_height
+            if paragraph_spacing_after:
+                self.y -= paragraph_spacing_after
         if spacing_after:
             self.y -= spacing_after
 
+    def add_body_text(self, text: str, *, spacing_after: int = 0) -> None:
+        self.add_text(
+            text,
+            first_line_indent=self.layout.font_size * 2,
+            paragraph_spacing_after=max(3, self.layout.line_height // 5),
+            spacing_after=spacing_after,
+            min_start_lines=2,
+            keep_last_lines=2,
+        )
+
+    def add_quote(self, text: str, *, spacing_after: int = 0) -> None:
+        self.add_text(
+            f"“{text}”",
+            font_size=self.layout.small_font_size + 1,
+            line_height=self.layout.line_height,
+            max_units=max(12, self.layout.max_line_units - 4),
+            indent=12,
+            paragraph_spacing_after=0,
+            spacing_after=spacing_after,
+            min_start_lines=2,
+            keep_last_lines=2,
+        )
+
     def add_heading(self, text: str) -> None:
-        self._ensure_space(2)
+        self._ensure_space(3)
         self.add_text(
             text,
             font_size=self.layout.heading_font_size,
@@ -346,7 +436,7 @@ def _render_plain_pdf(content: str, title: str, layout: PDFLayout) -> bytes:
     builder = PDFBookBuilder(title=title, layout=layout)
     builder.new_page("正文", body_numbering=True)
     builder.add_heading(title)
-    builder.add_text(content.strip() or title)
+    builder.add_body_text(content.strip() or title)
     return _render_pdf_pages(builder.pages, layout)
 
 
@@ -412,7 +502,7 @@ def _add_section_page(
     )
     builder.add_heading(heading or section_title)
     if content:
-        builder.add_text(content)
+        builder.add_body_text(content)
 
 
 def _add_cover_page(builder: PDFBookBuilder, *, title: str, subtitle: str, prepared_by: str) -> None:
@@ -538,26 +628,19 @@ def _add_chapters(builder: PDFBookBuilder, chapters: list[Any]) -> None:
 
         intro = _str(chapter.get("intro"))
         if intro:
-            builder.add_text(intro, spacing_after=4)
+            builder.add_body_text(intro, spacing_after=4)
 
         for raw_quote in _list(chapter.get("pull_quotes"))[:2]:
             quote = _str(_dict(raw_quote).get("text"))
             if quote:
-                builder.add_text(
-                    f"“{quote}”",
-                    font_size=builder.layout.small_font_size + 1,
-                    line_height=builder.layout.line_height,
-                    max_units=max(12, builder.layout.max_line_units - 3),
-                    indent=8,
-                    spacing_after=6,
-                )
+                builder.add_quote(quote, spacing_after=6)
                 break
 
         builder.add_spacer(0.5)
 
         content = _str(chapter.get("content"))
         if content:
-            builder.add_text(content)
+            builder.add_body_text(content)
 
         source_count = len(_list(chapter.get("source_refs")))
         if source_count:
@@ -639,7 +722,7 @@ def _build_manuscript_pdf_pages(
         builder = PDFBookBuilder(title=title, layout=layout)
         builder.new_page("正文", body_numbering=True)
         builder.add_heading(title)
-        builder.add_text(content.strip() or title)
+        builder.add_body_text(content.strip() or title)
         return builder.pages
 
     book_title = _str(profile.get("title")) or title
