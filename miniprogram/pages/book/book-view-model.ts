@@ -209,6 +209,11 @@ export const BOOK_COVER_STYLE_OPTIONS: BookCoverStyleOptionView[] = [
     label: "旧书封面",
     detailText: "深灰褐底、浅色字，适合更庄重的纪念册",
   },
+  {
+    value: "moonlit_courtyard",
+    label: "月下庭院",
+    detailText: "水墨庭院底图、墨褐标题，适合家庭回忆录默认封面封底",
+  },
 ];
 
 export interface BookVoiceCommandUndoSnapshot {
@@ -991,7 +996,8 @@ export function bookManuscriptData(
 function selectedBookCoverStyle(output: MemoirBookOutput | null, selectedVersionId = ""): MemoirBookCoverStyle {
   const manuscript = selectedBookManuscript(output, selectedVersionId);
   const style = manuscript?.render_settings?.cover_style;
-  return style === "warm_gray" || style === "dark_album" ? style : "classic_plain";
+  const option = BOOK_COVER_STYLE_OPTIONS.find((candidate) => candidate.value === style);
+  return option ? option.value : "classic_plain";
 }
 
 export function bookCoverStyleData(

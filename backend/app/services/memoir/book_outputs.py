@@ -203,7 +203,11 @@ def _formal_book_title(raw_title: str) -> str:
 
 
 def _cover_style(value: str | None) -> str:
-    return value if value in {"classic_plain", "warm_gray", "dark_album"} else DEFAULT_BOOK_COVER_STYLE
+    return (
+        value
+        if value in {"classic_plain", "warm_gray", "dark_album", "moonlit_courtyard"}
+        else DEFAULT_BOOK_COVER_STYLE
+    )
 
 
 def _short_topic(title: str) -> str:

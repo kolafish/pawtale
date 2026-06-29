@@ -35,28 +35,48 @@ PDF_SERIF_FONT_PATH = (
 )
 _PDF_FONT_REGISTERED = False
 PDFColor = tuple[float, float, float]
-PDFColorName = str
 PDF_BODY_TEXT: PDFColor = (0.08, 0.07, 0.06)
 PDF_HEADER_TEXT: PDFColor = (0.58, 0.55, 0.51)
-PDF_COVER_STYLES: dict[str, dict[PDFColorName, PDFColor]] = {
-    "classic_plain": {
-        "background": (0.96, 0.92, 0.86),
-        "text": (0.22, 0.15, 0.12),
-        "line": (0.78, 0.70, 0.61),
-        "subtle_line": (0.88, 0.82, 0.75),
-    },
-    "warm_gray": {
-        "background": (0.95, 0.94, 0.91),
-        "text": (0.20, 0.19, 0.17),
-        "line": (0.73, 0.70, 0.66),
-        "subtle_line": (0.84, 0.82, 0.78),
-    },
-    "dark_album": {
-        "background": (0.24, 0.22, 0.20),
-        "text": (0.95, 0.92, 0.86),
-        "line": (0.61, 0.55, 0.46),
-        "subtle_line": (0.42, 0.38, 0.32),
-    },
+PDF_BOOK_COVER_ASSET_DIR = Path(__file__).resolve().parents[2] / "assets" / "book_covers"
+
+
+@dataclass(frozen=True)
+class PDFCoverStyle:
+    background: PDFColor
+    text: PDFColor
+    line: PDFColor
+    subtle_line: PDFColor
+    cover_background_image: Path | None = None
+    back_cover_background_image: Path | None = None
+
+
+PDF_COVER_STYLES: dict[str, PDFCoverStyle] = {
+    "classic_plain": PDFCoverStyle(
+        background=(0.96, 0.92, 0.86),
+        text=(0.22, 0.15, 0.12),
+        line=(0.78, 0.70, 0.61),
+        subtle_line=(0.88, 0.82, 0.75),
+    ),
+    "warm_gray": PDFCoverStyle(
+        background=(0.95, 0.94, 0.91),
+        text=(0.20, 0.19, 0.17),
+        line=(0.73, 0.70, 0.66),
+        subtle_line=(0.84, 0.82, 0.78),
+    ),
+    "dark_album": PDFCoverStyle(
+        background=(0.24, 0.22, 0.20),
+        text=(0.95, 0.92, 0.86),
+        line=(0.61, 0.55, 0.46),
+        subtle_line=(0.42, 0.38, 0.32),
+    ),
+    "moonlit_courtyard": PDFCoverStyle(
+        background=(0.95, 0.90, 0.80),
+        text=(0.22, 0.13, 0.06),
+        line=(0.34, 0.25, 0.16),
+        subtle_line=(0.62, 0.54, 0.43),
+        cover_background_image=PDF_BOOK_COVER_ASSET_DIR / "moonlit_courtyard_cover.jpg",
+        back_cover_background_image=PDF_BOOK_COVER_ASSET_DIR / "moonlit_courtyard_back_cover.jpg",
+    ),
 }
 
 
@@ -146,6 +166,7 @@ class PDFPage:
     commands: list[PDFTextCommand]
     decorations: list[PDFDecorationCommand] = field(default_factory=list)
     background_color: PDFColor | None = None
+    background_image_path: Path | None = None
     text_color: PDFColor | None = None
     header_title: str = ""
     section_title: str = ""
@@ -336,6 +357,7 @@ class PDFBookBuilder:
         outline_title: str | None = None,
         outline_level: int = 0,
         background_color: PDFColor | None = None,
+        background_image_path: Path | None = None,
         text_color: PDFColor | None = None,
     ) -> None:
         self.current_section = section_title or self.current_section
@@ -353,6 +375,7 @@ class PDFBookBuilder:
         self.current_page = PDFPage(
             commands=[],
             background_color=background_color,
+            background_image_path=background_image_path,
             text_color=text_color,
             header_title=self.title if show_header else "",
             section_title=self.current_section,
@@ -527,6 +550,35 @@ class PDFBookBuilder:
         if spacing_after:
             self.y -= spacing_after
 
+    def add_centered_at(
+        self,
+        text: str,
+        *,
+        y: int,
+        font_size: int,
+        line_height: int,
+        max_units: int | None = None,
+        spacing_after: int = 0,
+        color: PDFColor | None = None,
+        font_name: str | None = None,
+    ) -> int:
+        max_units = max_units or max(10, self.layout.max_line_units - 4)
+        current_y = y
+        for line in _wrap_pdf_line(text.strip(), max_units):
+            page = self._ensure_page()
+            page.commands.append(
+                PDFTextCommand(
+                    text=line,
+                    x=_centered_x(line, self.layout, font_size),
+                    y=current_y,
+                    font_size=font_size,
+                    color=color,
+                    font_name=font_name,
+                )
+            )
+            current_y -= line_height
+        return current_y - spacing_after
+
     def add_toc_row(
         self,
         *,
@@ -644,6 +696,17 @@ def _draw_pdf_decoration(pdf: pdf_canvas.Canvas, decoration: PDFDecorationComman
         pdf.setStrokeColorRGB(*(decoration.stroke_color or decoration.color))
         pdf.setLineWidth(decoration.line_width or 1)
         pdf.line(decoration.x, decoration.y, decoration.x + decoration.width, decoration.y + decoration.height)
+    elif decoration.kind == "stroke_rect":
+        pdf.setStrokeColorRGB(*(decoration.stroke_color or decoration.color))
+        pdf.setLineWidth(decoration.line_width or 1)
+        pdf.rect(
+            decoration.x,
+            decoration.y,
+            decoration.width,
+            decoration.height,
+            stroke=1,
+            fill=0,
+        )
     else:
         pdf.rect(
             decoration.x,
@@ -705,6 +768,16 @@ def _render_pdf_pages(
         if page.background_color:
             pdf.setFillColorRGB(*page.background_color)
             pdf.rect(0, 0, layout.page_width, layout.page_height, stroke=0, fill=1)
+        if page.background_image_path:
+            pdf.drawImage(
+                str(page.background_image_path),
+                0,
+                0,
+                width=layout.page_width,
+                height=layout.page_height,
+                preserveAspectRatio=False,
+                mask="auto",
+            )
         for decoration in page.decorations:
             _draw_pdf_decoration(pdf, decoration)
         if page.anchor:
@@ -776,7 +849,7 @@ def _today_month_text() -> str:
     return f"{today.year} 年 {today.month} 月"
 
 
-def _cover_style(style: str) -> dict[PDFColorName, PDFColor]:
+def _cover_style(style: str) -> PDFCoverStyle:
     return PDF_COVER_STYLES.get(style, PDF_COVER_STYLES["classic_plain"])
 
 
@@ -821,6 +894,129 @@ def _add_section_page(
         builder.add_body_text(content)
 
 
+def _add_watercolor_cover_label(builder: PDFBookBuilder, *, style: PDFCoverStyle, y: int) -> None:
+    box_width = 96
+    box_height = 20
+    box_x = (builder.layout.page_width - box_width) / 2
+    builder.add_decoration(
+        kind="stroke_rect",
+        x=box_x,
+        y=y - 6,
+        width=box_width,
+        height=box_height,
+        color=style.subtle_line,
+        line_width=0.45,
+    )
+    builder.add_centered_at(
+        "家庭回忆录",
+        y=y,
+        font_size=max(9, builder.layout.small_font_size),
+        line_height=builder.layout.line_height,
+        max_units=builder.layout.max_line_units,
+        color=style.text,
+    )
+
+
+def _add_watercolor_separator(builder: PDFBookBuilder, *, style: PDFCoverStyle, y: int, width: int = 116) -> None:
+    gap = 18
+    left_width = (width - gap) / 2
+    center_x = builder.layout.page_width / 2
+    builder.add_decoration(
+        kind="line",
+        x=center_x - width / 2,
+        y=y,
+        width=left_width,
+        height=0,
+        color=style.subtle_line,
+        line_width=0.35,
+    )
+    builder.add_decoration(
+        kind="line",
+        x=center_x + gap / 2,
+        y=y,
+        width=left_width,
+        height=0,
+        color=style.subtle_line,
+        line_width=0.35,
+    )
+    builder.add_centered_at(
+        "◇",
+        y=y - 5,
+        font_size=max(7, builder.layout.small_font_size - 2),
+        line_height=builder.layout.line_height,
+        max_units=builder.layout.max_line_units,
+        color=style.subtle_line,
+    )
+
+
+def _add_watercolor_cover_page(
+    builder: PDFBookBuilder,
+    *,
+    title: str,
+    subtitle: str,
+    narrator_name: str,
+    prepared_by: str,
+    style: PDFCoverStyle,
+) -> None:
+    builder.new_page(
+        show_header=False,
+        show_footer=False,
+        background_color=style.background,
+        background_image_path=style.cover_background_image,
+        text_color=style.text,
+    )
+    layout = builder.layout
+    _add_watercolor_cover_label(builder, style=style, y=layout.page_height - 108)
+    title_next_y = builder.add_centered_at(
+        title,
+        y=layout.page_height - 216,
+        font_size=layout.title_font_size + 18,
+        line_height=layout.line_height + 30,
+        max_units=max(6, layout.max_line_units - 12),
+        color=style.text,
+        spacing_after=12,
+    )
+    separator_y = min(title_next_y + 24, layout.page_height - 250)
+    _add_watercolor_separator(builder, style=style, y=separator_y, width=132)
+    if subtitle:
+        builder.add_centered_at(
+            subtitle,
+            y=separator_y - 31,
+            font_size=layout.font_size + 4,
+            line_height=layout.line_height + 6,
+            max_units=max(10, layout.max_line_units - 6),
+            color=style.text,
+        )
+
+    credit_y = layout.margin_bottom + 64
+    if narrator_name:
+        builder.add_centered_at(
+            f"口述：{narrator_name}",
+            y=credit_y + 20,
+            font_size=layout.small_font_size + 1,
+            line_height=layout.line_height,
+            max_units=layout.max_line_units,
+            color=style.text,
+        )
+    builder.add_centered_at(
+        f"整理：{prepared_by or '家人'}",
+        y=credit_y,
+        font_size=layout.small_font_size + 1,
+        line_height=layout.line_height,
+        max_units=layout.max_line_units,
+        color=style.text,
+    )
+    _add_watercolor_separator(builder, style=style, y=layout.margin_bottom - 7, width=86)
+    builder.add_centered_at(
+        _today_date_text()[:4],
+        y=layout.margin_bottom - 37,
+        font_size=layout.small_font_size + 3,
+        line_height=layout.line_height,
+        max_units=layout.max_line_units,
+        color=style.text,
+    )
+
+
 def _add_cover_page(
     builder: PDFBookBuilder,
     *,
@@ -831,13 +1027,24 @@ def _add_cover_page(
     cover_style: str,
 ) -> None:
     style = _cover_style(cover_style)
-    line_color = style["line"]
-    subtle_line_color = style.get("subtle_line", line_color)
+    if style.cover_background_image:
+        _add_watercolor_cover_page(
+            builder,
+            title=title,
+            subtitle=subtitle,
+            narrator_name=narrator_name,
+            prepared_by=prepared_by,
+            style=style,
+        )
+        return
+
+    line_color = style.line
+    subtle_line_color = style.subtle_line
     builder.new_page(
         show_header=False,
         show_footer=False,
-        background_color=style["background"],
-        text_color=style["text"],
+        background_color=style.background,
+        text_color=style.text,
     )
     builder.add_decoration(
         kind="line",
@@ -1212,14 +1419,74 @@ def _add_back_matter(builder: PDFBookBuilder, back_matter: dict[str, Any], *, in
     _add_appendix_record_page(builder, appendix_sections)
 
 
-def _add_back_cover(builder: PDFBookBuilder, *, quote: str, cover_style: str) -> None:
-    style = _cover_style(cover_style)
-    subtle_line_color = style.get("subtle_line", style["line"])
+def _watercolor_back_cover_quote_lines(quote: str, *, max_units: int) -> list[str]:
+    cleaned = quote.strip().strip("“”\"'「」")
+    if not cleaned:
+        return ["愿这些记忆被家人慢慢翻看。"]
+    if "，" in cleaned:
+        parts = cleaned.split("，")
+        lines = [
+            f"{part}，" if index < len(parts) - 1 else part
+            for index, part in enumerate(parts)
+            if part
+        ]
+        if lines and all(_text_units(line) <= max_units for line in lines):
+            return lines
+    return _wrap_pdf_line(cleaned, max_units)
+
+
+def _add_watercolor_back_cover(builder: PDFBookBuilder, *, quote: str, style: PDFCoverStyle) -> None:
     builder.new_page(
         show_header=False,
         show_footer=False,
-        background_color=style["background"],
-        text_color=style["text"],
+        background_color=style.background,
+        background_image_path=style.back_cover_background_image or style.cover_background_image,
+        text_color=style.text,
+    )
+    layout = builder.layout
+    _add_watercolor_cover_label(builder, style=style, y=layout.page_height - 108)
+    quote_next_y = layout.page_height - 214
+    for line in _watercolor_back_cover_quote_lines(quote, max_units=max(13, layout.max_line_units - 10)):
+        quote_next_y = builder.add_centered_at(
+            line,
+            y=quote_next_y,
+            font_size=layout.font_size + 8,
+            line_height=layout.line_height + 18,
+            max_units=layout.max_line_units,
+            color=style.text,
+        )
+    quote_next_y -= 28
+    _add_watercolor_separator(builder, style=style, y=quote_next_y + 8, width=92)
+    builder.add_centered_at(
+        "本书根据口述访谈整理",
+        y=quote_next_y - 32,
+        font_size=layout.small_font_size + 1,
+        line_height=layout.line_height,
+        max_units=layout.max_line_units,
+        color=style.text,
+    )
+    builder.add_centered_at(
+        f"整理于 {_today_month_text()}",
+        y=quote_next_y - 52,
+        font_size=layout.small_font_size + 1,
+        line_height=layout.line_height,
+        max_units=layout.max_line_units,
+        color=style.text,
+    )
+
+
+def _add_back_cover(builder: PDFBookBuilder, *, quote: str, cover_style: str) -> None:
+    style = _cover_style(cover_style)
+    if style.back_cover_background_image:
+        _add_watercolor_back_cover(builder, quote=quote, style=style)
+        return
+
+    subtle_line_color = style.subtle_line
+    builder.new_page(
+        show_header=False,
+        show_footer=False,
+        background_color=style.background,
+        text_color=style.text,
     )
     builder.add_decoration(
         kind="line",
@@ -1227,7 +1494,7 @@ def _add_back_cover(builder: PDFBookBuilder, *, quote: str, cover_style: str) ->
         y=builder.layout.page_height - builder.layout.margin_top + 8,
         width=builder.layout.page_width - builder.layout.margin_x * 2,
         height=0,
-        color=style["line"],
+        color=style.line,
         line_width=0.7,
     )
     builder.add_decoration(
@@ -1245,7 +1512,7 @@ def _add_back_cover(builder: PDFBookBuilder, *, quote: str, cover_style: str) ->
         y=builder.layout.margin_bottom + 20,
         width=builder.layout.page_width - builder.layout.margin_x * 2,
         height=0,
-        color=style["line"],
+        color=style.line,
         line_width=0.7,
     )
     builder.add_spacer(6)

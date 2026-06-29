@@ -13,7 +13,10 @@ from app.services.memoir.book_output_export import (
 )
 
 
-def _sample_manuscript(chapter_content: str) -> dict:
+def _sample_manuscript(chapter_content: str, *, cover_style: str | None = None) -> dict:
+    render_settings = {"show_source_appendix": True}
+    if cover_style:
+        render_settings["cover_style"] = cover_style
     return {
         "profile": {
             "title": "外婆回忆录",
@@ -44,7 +47,7 @@ def _sample_manuscript(chapter_content: str) -> dict:
             "version_note": {"kind": "version_note", "title": "版本说明", "content": ""},
             "source_appendix": {"kind": "source_appendix", "title": "章节来源", "content": "第1章：2 条。"},
         },
-        "render_settings": {"show_source_appendix": True},
+        "render_settings": render_settings,
     }
 
 
@@ -89,6 +92,45 @@ def test_manuscript_pdf_pages_use_book_page_semantics():
         for page in chapter_pages
         for command in page.commands
     )
+
+
+def test_moonlit_courtyard_cover_style_uses_system_backgrounds():
+    manuscript = _sample_manuscript(
+        "因为是家乡，所以一想起来成都，心里面就觉得很温暖、很踏实。",
+        cover_style="moonlit_courtyard",
+    )
+    manuscript["profile"]["title"] = "回望这一生"
+    manuscript["profile"]["subtitle"] = "余晋口述回忆录"
+    manuscript["profile"]["narrator_name"] = "余晋"
+    manuscript["render_settings"]["back_cover_quote"] = "因为是家乡，所以一想起来成都，心里面就觉得很温暖、很踏实。"
+
+    pages = _build_manuscript_pdf_pages(
+        title="回望这一生",
+        content="回望这一生",
+        manuscript=manuscript,
+        layout=PDF_LAYOUTS[MemoirBookOutputExportLayout.STANDARD],
+        show_source_appendix=None,
+    )
+
+    assert pages[0].background_image_path is not None
+    assert pages[0].background_image_path.name == "moonlit_courtyard_cover.jpg"
+    assert pages[-1].background_image_path is not None
+    assert pages[-1].background_image_path.name == "moonlit_courtyard_back_cover.jpg"
+    assert any(command.text == "家庭回忆录" for command in pages[0].commands)
+    assert any(command.text == "回望这一生" for command in pages[0].commands)
+    assert any("本书根据口述访谈整理" in command.text for command in pages[-1].commands)
+
+    export = render_book_output_export(
+        title="回望这一生",
+        version=1,
+        content="回望这一生",
+        manuscript=manuscript,
+        export_format=MemoirBookOutputExportFormat.PDF,
+    )
+    assert export.media_type == "application/pdf"
+    assert isinstance(export.content, bytes)
+    assert export.content.startswith(b"%PDF-")
+    assert b"/Subtype /Image" in export.content
 
 
 def test_table_of_contents_links_to_numbered_chapter_pages():
