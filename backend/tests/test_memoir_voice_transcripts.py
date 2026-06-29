@@ -794,6 +794,120 @@ async def test_mobile_memoir_ai_cleanup_creates_corrected_version(client, test_d
     }
 
 
+async def test_mobile_memoir_voice_edit_preview_uses_ai_without_saving(client, test_db, monkeypatch):
+    created = await create_test_voice_transcript(
+        client,
+        test_db,
+        text="我小时候住在外婆家。",
+    )
+    ai_client = CapturingAIClient(
+        json.dumps(
+            {
+                "action": "revise_transcript",
+                "edited_text": "我小时候住在奶奶家。",
+                "changes": [
+                    {"before": "外婆", "after": "奶奶", "reason": "用户明确说人物识别错了"}
+                ],
+                "confidence": 0.93,
+                "reply_text": "已把外婆改成奶奶，请确认后保存。",
+            },
+            ensure_ascii=False,
+        )
+    )
+    monkeypatch.setattr(
+        "app.services.memoir.transcript_voice_edit.get_ai_service",
+        lambda model=None: ai_client,
+    )
+    utterance_before = await test_db.scalar(
+        select(MemoirVoiceUtterance).where(MemoirVoiceUtterance.id == created["utterance_id"])
+    )
+    message_before = await test_db.scalar(select(MemoirChatMessage).where(MemoirChatMessage.id == created["message_id"]))
+    transcript_edited_before = utterance_before.transcript_edited
+    message_text_before = message_before.content_text
+
+    response = await client.post(
+        f"/api/mobile/memoir/voice-transcripts/{created['utterance_id']}/voice-edit/preview",
+        json={"instruction_text": "这里不是外婆，是奶奶", "ai_model": "deepseek"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["utterance_id"] == created["utterance_id"]
+    assert data["action"] == "revise_transcript"
+    assert data["original_text"] == "我小时候住在外婆家。"
+    assert data["current_text"] == "我小时候住在外婆家。"
+    assert data["edited_text"] == "我小时候住在奶奶家。"
+    assert data["changes"] == [
+        {"before": "外婆", "after": "奶奶", "reason": "用户明确说人物识别错了"}
+    ]
+    assert data["confidence"] == 0.93
+    assert data["requires_confirmation"] is True
+    assert data["provider"] == "fake-ai"
+    assert data["model"] == "fake-cleaner"
+    assert "只能改用户修正指令明确指出" in ai_client.prompt
+    assert "当前整理文字：我小时候住在外婆家。" in ai_client.prompt
+    assert "用户语音修正指令：\n这里不是外婆，是奶奶" in ai_client.prompt
+
+    utterance = await test_db.scalar(
+        select(MemoirVoiceUtterance).where(MemoirVoiceUtterance.id == created["utterance_id"])
+    )
+    message = await test_db.scalar(select(MemoirChatMessage).where(MemoirChatMessage.id == created["message_id"]))
+    user_versions = (
+        await test_db.execute(
+            select(MemoirTranscriptVersion).where(
+                MemoirTranscriptVersion.source_artifact_id == created["utterance_id"],
+                MemoirTranscriptVersion.version_type == MemoirTranscriptVersionType.USER_EDITED.value,
+            )
+        )
+    ).scalars().all()
+    assert utterance.transcript_edited == transcript_edited_before
+    assert message.content_text == message_text_before
+    assert user_versions == []
+
+
+async def test_mobile_memoir_voice_edit_preview_rejects_invalid_ai_payload(client, test_db, monkeypatch):
+    created = await create_test_voice_transcript(client, test_db)
+    monkeypatch.setattr(
+        "app.services.memoir.transcript_voice_edit.get_ai_service",
+        lambda model=None: CapturingAIClient("不是 JSON"),
+    )
+
+    response = await client.post(
+        f"/api/mobile/memoir/voice-transcripts/{created['utterance_id']}/voice-edit/preview",
+        json={"instruction_text": "把外婆改成奶奶"},
+    )
+
+    assert response.status_code == 502
+    assert response.json()["detail"] == "AI 未返回可用修正预览"
+
+
+async def test_mobile_memoir_voice_edit_preview_rejects_overlong_ai_result(client, test_db, monkeypatch):
+    created = await create_test_voice_transcript(client, test_db, text="我小时候住在外婆家。")
+    monkeypatch.setattr(
+        "app.services.memoir.transcript_voice_edit.get_ai_service",
+        lambda model=None: CapturingAIClient(
+            json.dumps(
+                {
+                    "action": "revise_transcript",
+                    "edited_text": "这是一段被错误扩写的内容。" * 80,
+                    "changes": [],
+                    "confidence": 0.4,
+                    "reply_text": "已修正。",
+                },
+                ensure_ascii=False,
+            )
+        ),
+    )
+
+    response = await client.post(
+        f"/api/mobile/memoir/voice-transcripts/{created['utterance_id']}/voice-edit/preview",
+        json={"instruction_text": "这里不是外婆，是奶奶"},
+    )
+
+    assert response.status_code == 502
+    assert response.json()["detail"] == "AI 修正结果过长，请重新说明要改哪一处"
+
+
 async def test_mobile_memoir_transcript_edits_keep_only_latest_three_versions(client, test_db):
     created = await create_test_voice_transcript(client, test_db)
 
