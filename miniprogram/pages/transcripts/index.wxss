@@ -393,18 +393,13 @@
   word-break: break-word;
 }
 
-.voice-edit-text.revised {
-  color: #7a3b31;
-  font-weight: 800;
-}
-
 .voice-edit-confidence {
   margin-top: 8rpx;
   color: #9f4a3c;
 }
 
 .voice-edit-changes,
-.voice-edit-comparison {
+.voice-edit-inline-diff {
   margin-top: 18rpx;
 }
 
@@ -432,14 +427,36 @@
   font-weight: 700;
 }
 
-.voice-edit-column {
+.voice-edit-inline-diff {
   padding: 18rpx;
+  border: 2rpx solid #f0dac0;
   border-radius: 16rpx;
   background: #ffffff;
 }
 
-.voice-edit-column + .voice-edit-column {
-  margin-top: 12rpx;
+.voice-edit-diff-text {
+  display: block;
+  margin-top: 10rpx;
+  color: #3a2119;
+  font-size: 28rpx;
+  line-height: 1.65;
+  word-break: break-word;
+}
+
+.voice-edit-diff-segment.delete {
+  padding: 0 4rpx;
+  border-radius: 6rpx;
+  background: #fff1f2;
+  color: #b4234a;
+  text-decoration: line-through;
+}
+
+.voice-edit-diff-segment.insert {
+  padding: 0 4rpx;
+  border-radius: 6rpx;
+  background: #e9f7ef;
+  color: #2f7a54;
+  font-weight: 800;
 }
 
 .compact-actions {
