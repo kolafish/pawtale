@@ -499,6 +499,19 @@ test("fetches voice session list and progress through backend API", async () => 
 
 test("updates and deletes voice transcripts through backend API", async () => {
   const requests = [];
+  const previewResponse = {
+    utterance_id: "utterance/1",
+    action: "revise_transcript",
+    original_text: "原文",
+    current_text: "原文",
+    edited_text: "校正文",
+    changes: [{ before: "原文", after: "校正文", reason: "用户语音修正" }],
+    confidence: 0.91,
+    requires_confirmation: true,
+    reply_text: "已生成修正预览",
+    provider: "fake-ai",
+    model: "fake-model",
+  };
   const updated = {
     id: "utterance/1",
     voice_session_id: "voice-1",
@@ -544,6 +557,10 @@ test("updates and deletes voice transcripts through backend API", async () => {
         options.success({ statusCode: 204, data: "", cookies: [], header: {} });
         return;
       }
+      if (options.url.includes("/voice-edit/preview")) {
+        options.success({ statusCode: 200, data: previewResponse, cookies: [], header: {} });
+        return;
+      }
       options.success({ statusCode: 200, data: updated, cookies: [], header: {} });
     },
   };
@@ -551,20 +568,32 @@ test("updates and deletes voice transcripts through backend API", async () => {
   delete require.cache[require.resolve("../services/memoir-voice-api.ts")];
   const {
     deleteMemoirVoiceTranscript,
+    previewMemoirVoiceTranscriptVoiceEdit,
     updateMemoirVoiceTranscript,
   } = require("../services/memoir-voice-api.ts");
 
+  const preview = await previewMemoirVoiceTranscriptVoiceEdit("utterance/1", "这里不是外婆，是奶奶", "deepseek");
   const result = await updateMemoirVoiceTranscript("utterance/1", "校正文");
   await deleteMemoirVoiceTranscript("utterance/1");
 
   const apiRequests = requests.filter((request) => request.url.includes("/api/mobile/memoir/voice-transcripts"));
+  assert.deepEqual(preview, previewResponse);
+  assert.equal(
+    apiRequests[0].url,
+    "http://backend.local:8000/api/mobile/memoir/voice-transcripts/utterance%2F1/voice-edit/preview",
+  );
+  assert.equal(apiRequests[0].method, "POST");
+  assert.deepEqual(apiRequests[0].data, {
+    instruction_text: "这里不是外婆，是奶奶",
+    ai_model: "deepseek",
+  });
   assert.deepEqual(result, updated);
-  assert.equal(apiRequests[0].url, "http://backend.local:8000/api/mobile/memoir/voice-transcripts/utterance%2F1");
-  assert.equal(apiRequests[0].method, "PATCH");
-  assert.deepEqual(apiRequests[0].data, { transcript_edited: "校正文" });
   assert.equal(apiRequests[1].url, "http://backend.local:8000/api/mobile/memoir/voice-transcripts/utterance%2F1");
-  assert.equal(apiRequests[1].method, "DELETE");
-  assert.equal(apiRequests[1].header.Cookie, "pawtale_session=abc");
+  assert.equal(apiRequests[1].method, "PATCH");
+  assert.deepEqual(apiRequests[1].data, { transcript_edited: "校正文" });
+  assert.equal(apiRequests[2].url, "http://backend.local:8000/api/mobile/memoir/voice-transcripts/utterance%2F1");
+  assert.equal(apiRequests[2].method, "DELETE");
+  assert.equal(apiRequests[2].header.Cookie, "pawtale_session=abc");
   delete global.wx;
 });
 

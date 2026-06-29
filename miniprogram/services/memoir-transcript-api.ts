@@ -4,6 +4,7 @@ import type {
   MemoirVoiceTranscriptIncludedFilter,
   MemoirVoiceTranscriptItem,
   MemoirVoiceTranscriptListResponse,
+  MemoirVoiceTranscriptVoiceEditPreviewResponse,
 } from "../domain/voice-chat";
 import {
   memoirRequest,
@@ -46,6 +47,24 @@ export function updateMemoirVoiceTranscript(
     {
       method: "PATCH",
       data: { transcript_edited: transcriptEdited },
+    },
+  );
+}
+
+export function previewMemoirVoiceTranscriptVoiceEdit(
+  utteranceId: string,
+  instructionText: string,
+  aiModel?: string,
+): Promise<MemoirVoiceTranscriptVoiceEditPreviewResponse> {
+  const selectedModel = aiModel?.trim() || readSelectedAIModel();
+  return memoirRequest<MemoirVoiceTranscriptVoiceEditPreviewResponse>(
+    `/api/mobile/memoir/voice-transcripts/${encodeURIComponent(utteranceId)}/voice-edit/preview`,
+    {
+      method: "POST",
+      data: {
+        instruction_text: instructionText,
+        ...(selectedModel ? { ai_model: selectedModel } : {}),
+      },
     },
   );
 }

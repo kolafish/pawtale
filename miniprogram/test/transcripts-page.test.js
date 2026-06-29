@@ -28,6 +28,9 @@ function loadTranscriptsPage({ authExports = {}, voiceApiExports = {}, voiceSear
     parseMemoirVoiceSearchQuery: async () => {
       throw new Error("parseMemoirVoiceSearchQuery was not mocked");
     },
+    previewMemoirVoiceTranscriptVoiceEdit: async () => {
+      throw new Error("previewMemoirVoiceTranscriptVoiceEdit was not mocked");
+    },
     moveMemoirBookSource: async () => {
       throw new Error("moveMemoirBookSource was not mocked");
     },
@@ -725,6 +728,144 @@ test("transcripts page stops active voice search recording on second tap", async
   await page.startVoiceSearch.call(context);
 
   assert.deepEqual(stops, ["stop"]);
+});
+
+test("transcripts page previews and saves a voice transcript correction", async () => {
+  const previewCalls = [];
+  const updateCalls = [];
+  const toasts = [];
+  global.wx = {
+    showToast(options) {
+      toasts.push(options);
+    },
+  };
+  const { page } = loadTranscriptsPage({
+    authExports: {
+      getMemoirIdentity: async () => ({
+        id: "user-1",
+        active_project_id: "project-1",
+        active_project: { id: "project-1", title: "我的回忆录" },
+        projects: [],
+      }),
+    },
+    voiceApiExports: {
+      listMemoirVoiceTranscripts: async () => ({
+        items: [sampleTranscript("utterance-edit")],
+        total: 1,
+        limit: 30,
+        offset: 0,
+      }),
+      previewMemoirVoiceTranscriptVoiceEdit: async (utteranceId, instructionText) => {
+        previewCalls.push({ utteranceId, instructionText });
+        return {
+          utterance_id: utteranceId,
+          action: "revise_transcript",
+          original_text: "我小时候住在外婆家。",
+          current_text: "我小时候住在外婆家。",
+          edited_text: "我小时候住在奶奶家。",
+          changes: [{ before: "外婆", after: "奶奶", reason: "用户明确纠正人物" }],
+          confidence: 0.93,
+          requires_confirmation: true,
+          reply_text: "已把外婆改成奶奶，请确认后保存。",
+          provider: "fake-ai",
+          model: "fake-model",
+        };
+      },
+      updateMemoirVoiceTranscript: async (utteranceId, content) => {
+        updateCalls.push({ utteranceId, content });
+        return {
+          ...sampleTranscript(utteranceId),
+          transcript_raw: "我小时候住在外婆家。",
+          transcript_edited: content,
+          display_text: content,
+          edited_char_count: content.length,
+          display_char_count: content.length,
+        };
+      },
+    },
+    voiceSearchExports: {
+      recordMemoirVoiceSearchQuery: async (options) => {
+        options.onRecordingEnd();
+        return "这里不是外婆，是奶奶";
+      },
+    },
+  });
+  const context = pageContext(page);
+
+  await page.loadTranscripts.call(context, true);
+  await page.startVoiceEdit.call(context, {
+    currentTarget: { dataset: { id: "utterance-edit" } },
+  });
+
+  assert.deepEqual(previewCalls, [
+    { utteranceId: "utterance-edit", instructionText: "这里不是外婆，是奶奶" },
+  ]);
+  assert.equal(context.data.voiceEditTargetId, "utterance-edit");
+  assert.equal(context.data.voiceEditInstructionText, "这里不是外婆，是奶奶");
+  assert.equal(context.data.voiceEditPreview.editedText, "我小时候住在奶奶家。");
+  assert.equal(context.data.voiceEditPreview.canConfirm, true);
+  assert.equal(context.data.voiceEditPreview.confidenceText, "93%");
+
+  await page.confirmVoiceEdit.call(context);
+
+  assert.deepEqual(updateCalls, [
+    { utteranceId: "utterance-edit", content: "我小时候住在奶奶家。" },
+  ]);
+  assert.equal(context.data.items[0].display_text, "我小时候住在奶奶家。");
+  assert.equal(context.data.voiceEditTargetId, "");
+  assert.deepEqual(toasts, [{ title: "已保存修正", icon: "success" }]);
+  delete global.wx;
+});
+
+test("transcripts page blocks voice search while a transcript correction is recording", async () => {
+  const stops = [];
+  const { page } = loadTranscriptsPage({
+    voiceSearchExports: {
+      stopMemoirVoiceSearchRecording: () => stops.push("stop"),
+    },
+  });
+  const context = pageContext(page, {
+    voiceEditRecording: true,
+    voiceEditTargetId: "utterance-edit",
+  });
+
+  await page.startVoiceSearch.call(context);
+
+  assert.deepEqual(stops, []);
+  assert.equal(context.data.error, "请先完成当前语音修正");
+});
+
+test("transcripts page ignores stale voice correction results after cancel", async () => {
+  const previewCalls = [];
+  let resolveRecording;
+  const { page } = loadTranscriptsPage({
+    voiceApiExports: {
+      previewMemoirVoiceTranscriptVoiceEdit: async (...args) => {
+        previewCalls.push(args);
+        return {};
+      },
+    },
+    voiceSearchExports: {
+      recordMemoirVoiceSearchQuery: async () => new Promise((resolve) => {
+        resolveRecording = resolve;
+      }),
+      stopMemoirVoiceSearchRecording: () => {},
+    },
+  });
+  const context = pageContext(page, {
+    items: [sampleTranscript("utterance-edit")],
+  });
+
+  const pending = page.startVoiceEdit.call(context, {
+    currentTarget: { dataset: { id: "utterance-edit" } },
+  });
+  page.cancelVoiceEdit.call(context);
+  resolveRecording("这里不是外婆，是奶奶");
+  await pending;
+
+  assert.deepEqual(previewCalls, []);
+  assert.equal(context.data.voiceEditTargetId, "");
+  assert.equal(context.data.voiceEditPreview, null);
 });
 
 test("transcripts page scrolls to stored uncovered source target", async () => {

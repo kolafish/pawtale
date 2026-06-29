@@ -362,6 +362,90 @@
   border: 2rpx solid #f0dac0;
 }
 
+.voice-edit-panel {
+  margin-top: 26rpx;
+  padding: 22rpx;
+  border: 2rpx solid #efd6c4;
+  border-radius: 20rpx;
+  background: #fffaf2;
+}
+
+.voice-edit-block {
+  margin-top: 16rpx;
+}
+
+.voice-edit-label,
+.voice-edit-confidence,
+.voice-edit-change-reason {
+  display: block;
+  color: #7a6255;
+  font-size: 24rpx;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.voice-edit-text {
+  display: block;
+  margin-top: 8rpx;
+  color: #3a2119;
+  font-size: 27rpx;
+  line-height: 1.55;
+  word-break: break-word;
+}
+
+.voice-edit-text.revised {
+  color: #7a3b31;
+  font-weight: 800;
+}
+
+.voice-edit-confidence {
+  margin-top: 8rpx;
+  color: #9f4a3c;
+}
+
+.voice-edit-changes,
+.voice-edit-comparison {
+  margin-top: 18rpx;
+}
+
+.voice-edit-change {
+  padding: 16rpx 18rpx;
+  border-radius: 16rpx;
+  background: #ffffff;
+}
+
+.voice-edit-change + .voice-edit-change {
+  margin-top: 12rpx;
+}
+
+.voice-edit-change-text {
+  display: block;
+  color: #7a3b31;
+  font-size: 26rpx;
+  font-weight: 800;
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+.voice-edit-change-reason {
+  margin-top: 6rpx;
+  font-weight: 700;
+}
+
+.voice-edit-column {
+  padding: 18rpx;
+  border-radius: 16rpx;
+  background: #ffffff;
+}
+
+.voice-edit-column + .voice-edit-column {
+  margin-top: 12rpx;
+}
+
+.compact-actions {
+  margin-top: 20rpx;
+}
+
 .text-toggle-button {
   width: auto;
   min-width: 0;
