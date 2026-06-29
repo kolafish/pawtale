@@ -119,9 +119,9 @@ def build_manuscript_copy_prompt(*, title: str, snapshot: list[dict[str, object]
 - 只能基于给定章节标题、代表性口述和正文摘录，不新增未出现的人物、地点、事件或评价。
 - book_title 要像家人会保存的一本书名，避免“主题回忆录”“章节规划”等内部词；如果原书名已经自然，可以保留。
 - cover_subtitle 控制在 12 到 28 个汉字，可概括内容；素材不足时用“根据口述访谈整理而成”。
-- preface 控制在 120 到 220 个汉字，语气安静、可信、像书，不要出现“这本书记录的是「书名」”“后台”“系统”“AI生成”等模板词。
-- 每个 chapter_intro 控制在 35 到 90 个汉字，像书籍导语，不要写“这一章主要记录”“从口述内容看”“相关的回忆”。
-- back_cover_quote 控制在 15 到 45 个汉字，可以使用口述中的短句或克制的总结，不要夸张文学化。
+- preface 控制在 120 到 220 个汉字，语气安静、可信、像书，不要直接套书名或项目名，不要出现“主题回忆录”“这本书记录的是「书名」”“后台”“系统”“AI生成”等模板词。
+- 每个 chapter_intro 控制在 35 到 90 个汉字，像书籍章节导语，用具体画面把读者带进正文；不要解释章节功能，不要写“这一章主要记录”“从口述内容看”“相关的回忆”“本章讲述”等系统摘要句。
+- back_cover_quote 控制在 15 到 45 个汉字，优先使用口述中的真实短句；不要用公共格言、励志句或“凡是过往皆是序章”这类非本人原话。
 
 章节材料：
 {chapters}
@@ -172,7 +172,19 @@ def _text_ai_configured(ai_model: str | None) -> bool:
 
 def _clean_copy_text(value: object, *, max_chars: int) -> str:
     text = _compact_text(_string(value), max_chars)
-    forbidden = ("后台", "系统", "AI生成", "AI 生成", "这一章主要记录", "从口述内容看", "相关的回忆")
+    forbidden = (
+        "后台",
+        "系统",
+        "AI生成",
+        "AI 生成",
+        "主题回忆录",
+        "章节规划",
+        "这一章主要记录",
+        "从口述内容看",
+        "相关的回忆",
+        "本章讲述",
+        "凡是过往皆是序章",
+    )
     if any(term in text for term in forbidden):
         return ""
     return text

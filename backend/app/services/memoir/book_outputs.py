@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta, timezone
+
 from fastapi import HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -272,6 +274,11 @@ def _fallback_back_cover_quote(chapters: list[MemoirBookManuscriptChapter]) -> s
     return "把亲口说出的生活，尽量完整地留下来。"
 
 
+def _today_year_text() -> str:
+    today = datetime.now(UTC).astimezone(timezone(timedelta(hours=8))).date()
+    return f"{today.year} 年"
+
+
 def _expanded_afterword() -> str:
     return (
         "这些讲述有些清楚，有些还需要家人继续补充。记忆本来就不是一次说完的，"
@@ -308,8 +315,8 @@ def _chapter_intro(title: str, content: str, editorial_intro: str | None = None)
         return editorial_intro
     excerpt = _first_sentence(content, max_chars=70)
     if not excerpt:
-        return f"记忆在「{title}」里慢慢展开，留下讲述者对这段经历的片段和语气。"
-    return f"关于「{title}」，记忆先从一个清楚的画面开始：{excerpt}"
+        return f"记忆在「{title}」里慢慢展开，留下讲述者亲口说出的片段和语气。"
+    return f"记忆先从一个清楚的画面展开：{excerpt}"
 
 
 def _front_section_content(manuscript: dict[str, object], kind: str) -> str:
@@ -390,7 +397,7 @@ def _title_page_content_from_profile(*, subtitle: str, narrator_name: str, prepa
         subtitle,
         f"口述：{narrator_name}" if narrator_name else "",
         f"整理：{prepared_by}" if prepared_by else "",
-        "仅供家人保存与阅读",
+        _today_year_text(),
     ]
     return "\n\n".join(line for line in lines if line)
 
@@ -512,7 +519,7 @@ def _manuscript_from_snapshot(
             kind="generation_note",
             title="整理说明",
             content=(
-                "这本书由家人的口述材料整理而成。整理过程中保留原始讲述的事实边界，"
+                "这本书由家人的口述材料整理而成，供家人保存与阅读。整理过程中保留原始讲述的事实边界，"
                 "对语句、段落和章节顺序做了必要的梳理，便于日后阅读和继续修订。\n\n"
                 "书中仍可能有时间、地点或姓名需要家人补充确认。若发现遗漏或不准确之处，"
                 "可以在后续版本中继续修改。"
@@ -534,7 +541,7 @@ def _manuscript_from_snapshot(
         interview_records=MemoirBookManuscriptSection(
             kind="interview_records",
             title="讲述资料",
-            content=f"本版共整理 {chapter_count} 章正文，关联 {source_count} 条口述记录。后续可以继续补充访谈时间、地点和参与整理的人。",
+            content=f"本版共整理 {chapter_count} 章正文，关联 {source_count} 条口述片段。后续可以继续补充访谈时间、地点和参与整理的人。",
         ),
         version_note=MemoirBookManuscriptSection(
             kind="version_note",
@@ -552,7 +559,7 @@ def _manuscript_from_snapshot(
         source_appendix=MemoirBookManuscriptSection(
             kind="source_appendix",
             title="口述来源索引",
-            content="\n".join(f"第{item.index}章「{item.title}」：{item.source_count} 条口述记录" for item in toc),
+            content="\n".join(f"第{item.index}章「{item.title}」：{item.source_count} 条口述片段" for item in toc),
         ),
     )
     return MemoirBookManuscript(
