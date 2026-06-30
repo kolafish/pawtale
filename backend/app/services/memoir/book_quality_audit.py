@@ -15,6 +15,9 @@ from app.models.memoir import MemoirEditingJob
 from app.models.projects import Project
 from app.schemas.memoir_book import (
     MemoirBookQualityAuditChapterResponse,
+    MemoirBookQualityAuditDisplayResponse,
+    MemoirBookQualityAuditPrimaryActionResponse,
+    MemoirBookQualityAuditPrimaryChapterResponse,
     MemoirBookQualityAuditRunRequest,
     MemoirBookQualityAuditRunResponse,
 )
@@ -155,12 +158,203 @@ def _summary_text(
     return "当前章节素材和正文已有较稳定基础。"
 
 
+def _first_chapter_with_status(
+    chapter_items: list[MemoirBookQualityAuditChapterResponse],
+    *statuses: str,
+) -> MemoirBookQualityAuditChapterResponse | None:
+    wanted = set(statuses)
+    return next((item for item in chapter_items if item.status in wanted), None)
+
+
+def _first_attention_chapter(
+    chapter_items: list[MemoirBookQualityAuditChapterResponse],
+) -> MemoirBookQualityAuditChapterResponse | None:
+    for attention in ("high", "medium", "low"):
+        item = next((chapter for chapter in chapter_items if chapter.attention == attention), None)
+        if item:
+            return item
+    return None
+
+
+def _primary_chapter_response(
+    item: MemoirBookQualityAuditChapterResponse | None,
+) -> MemoirBookQualityAuditPrimaryChapterResponse | None:
+    if item is None:
+        return None
+    return MemoirBookQualityAuditPrimaryChapterResponse(
+        chapter_id=item.chapter_id,
+        title=item.title,
+        status=item.status,
+        attention=item.attention,
+        reason=item.reason,
+    )
+
+
+def _audit_display_contract(
+    *,
+    overall_status: str,
+    chapter_items: list[MemoirBookQualityAuditChapterResponse],
+    pending_utterance_count: int,
+    next_actions: list[str],
+) -> tuple[
+    MemoirBookQualityAuditDisplayResponse,
+    MemoirBookQualityAuditPrimaryActionResponse,
+    MemoirBookQualityAuditPrimaryChapterResponse | None,
+]:
+    primary_item: MemoirBookQualityAuditChapterResponse | None = None
+    if overall_status == "needs_plan":
+        detail = (
+            f"已有 {pending_utterance_count} 条讲述可以用于生成目录。"
+            if pending_utterance_count > 0
+            else "先确认目录后，后续讲述才能稳定归入章节。"
+        )
+        return (
+            MemoirBookQualityAuditDisplayResponse(
+                title="先整理成书结构",
+                summary="还没有确认章节规划。",
+                detail=detail,
+            ),
+            MemoirBookQualityAuditPrimaryActionResponse(
+                type="generate_plan",
+                cta_text="生成目录",
+                utterance_count=pending_utterance_count,
+            ),
+            None,
+        )
+
+    if pending_utterance_count > 0:
+        primary_item = _first_chapter_with_status(chapter_items, "needs_sources") or _first_attention_chapter(
+            chapter_items
+        )
+        detail = "这些讲述还没有进入成书目录，先整理归章后再补写正文。"
+        if primary_item and primary_item.status == "needs_sources":
+            detail += f"「{primary_item.title}」也还缺少讲述素材。"
+        return (
+            MemoirBookQualityAuditDisplayResponse(
+                title=f"有 {pending_utterance_count} 条讲述待整理",
+                summary="新讲述还没有归入章节。",
+                detail=detail,
+            ),
+            MemoirBookQualityAuditPrimaryActionResponse(
+                type="assign_sources",
+                cta_text="整理讲述",
+                chapter_id=primary_item.chapter_id if primary_item else None,
+                utterance_count=pending_utterance_count,
+            ),
+            _primary_chapter_response(primary_item),
+        )
+
+    if overall_status == "needs_sources":
+        primary_item = _first_chapter_with_status(chapter_items, "needs_sources") or _first_attention_chapter(
+            chapter_items
+        )
+        title = primary_item.title if primary_item else "未命名章节"
+        return (
+            MemoirBookQualityAuditDisplayResponse(
+                title=f"「{title}」还缺讲述素材",
+                summary="这一章还没有收录可成文的讲述。",
+                detail=(primary_item.interview_hint if primary_item else "可以继续访谈，先补一件具体的人和事。"),
+            ),
+            MemoirBookQualityAuditPrimaryActionResponse(
+                type="continue_interview",
+                cta_text="继续访谈",
+                chapter_id=primary_item.chapter_id if primary_item else None,
+            ),
+            _primary_chapter_response(primary_item),
+        )
+
+    if overall_status == "needs_updates":
+        primary_item = _first_chapter_with_status(chapter_items, "needs_update") or _first_attention_chapter(
+            chapter_items
+        )
+        title = primary_item.title if primary_item else "未命名章节"
+        pending_count = primary_item.pending_source_count if primary_item else 0
+        return (
+            MemoirBookQualityAuditDisplayResponse(
+                title=f"「{title}」有新内容待写入",
+                summary=f"有 {pending_count} 条新讲述还没有补进正文。",
+                detail="建议先补写本章，再继续补充人物、地点和细节。",
+            ),
+            MemoirBookQualityAuditPrimaryActionResponse(
+                type="revise_chapter",
+                cta_text="补写本章",
+                chapter_id=primary_item.chapter_id if primary_item else None,
+                utterance_count=pending_count,
+            ),
+            _primary_chapter_response(primary_item),
+        )
+
+    if overall_status == "needs_drafts":
+        primary_item = _first_chapter_with_status(chapter_items, "needs_draft") or _first_attention_chapter(
+            chapter_items
+        )
+        title = primary_item.title if primary_item else "未命名章节"
+        source_count = primary_item.source_count if primary_item else 0
+        return (
+            MemoirBookQualityAuditDisplayResponse(
+                title=f"「{title}」可以生成正文",
+                summary=f"本章已有 {source_count} 条素材，但还没有章节正文。",
+                detail="可以先生成一版正文，再根据新增讲述继续修订。",
+            ),
+            MemoirBookQualityAuditPrimaryActionResponse(
+                type="generate_chapter_draft",
+                cta_text="生成本章",
+                chapter_id=primary_item.chapter_id if primary_item else None,
+                utterance_count=source_count,
+            ),
+            _primary_chapter_response(primary_item),
+        )
+
+    if overall_status == "collecting":
+        primary_item = _first_attention_chapter(chapter_items)
+        title = primary_item.title if primary_item else "当前章节"
+        if primary_item and primary_item.status == "thin_draft":
+            summary = "正文已有基础，但相对素材还偏薄。"
+            action_type = "revise_chapter"
+            cta_text = "完善本章"
+        else:
+            summary = "素材已有基础，还可以继续补充关键细节。"
+            action_type = "continue_interview"
+            cta_text = "继续追问"
+        return (
+            MemoirBookQualityAuditDisplayResponse(
+                title=f"「{title}」还可以继续丰富",
+                summary=summary,
+                detail=(primary_item.interview_hint if primary_item else "可以继续补充人物、地点、经过和感受。"),
+            ),
+            MemoirBookQualityAuditPrimaryActionResponse(
+                type=action_type,
+                cta_text=cta_text,
+                chapter_id=primary_item.chapter_id if primary_item else None,
+            ),
+            _primary_chapter_response(primary_item),
+        )
+
+    primary_item = _first_attention_chapter(chapter_items)
+    return (
+        MemoirBookQualityAuditDisplayResponse(
+            title="成书整理状态良好",
+            summary="当前章节素材和正文已有稳定基础。",
+            detail="可以继续录音补充新回忆，也可以进入全书稿整理。",
+        ),
+        MemoirBookQualityAuditPrimaryActionResponse(
+            type="review_book",
+            cta_text="查看成书",
+            chapter_id=primary_item.chapter_id if primary_item else None,
+        ),
+        _primary_chapter_response(primary_item),
+    )
+
+
 def _event_metadata(
     *,
     overall_status: str,
     pending_utterance_count: int,
     next_actions: list[str],
     chapter_items: list[MemoirBookQualityAuditChapterResponse],
+    display: MemoirBookQualityAuditDisplayResponse,
+    primary_action: MemoirBookQualityAuditPrimaryActionResponse,
+    primary_chapter: MemoirBookQualityAuditPrimaryChapterResponse | None,
 ) -> dict[str, object]:
     return {
         "source": "book_quality_audit",
@@ -173,6 +367,9 @@ def _event_metadata(
         "pending_utterance_count": pending_utterance_count,
         "next_actions": next_actions,
         "chapter_items": [item.model_dump(mode="json") for item in chapter_items],
+        "display": display.model_dump(mode="json"),
+        "primary_action": primary_action.model_dump(mode="json"),
+        "primary_chapter": primary_chapter.model_dump(mode="json") if primary_chapter else None,
     }
 
 
@@ -235,6 +432,12 @@ async def run_book_quality_audit(
         chapter_items=chapter_items,
         pending_utterance_count=snapshot.pending_utterance_count,
     )
+    display, primary_action, primary_chapter = _audit_display_contract(
+        overall_status=overall_status,
+        chapter_items=chapter_items,
+        pending_utterance_count=snapshot.pending_utterance_count,
+        next_actions=next_actions,
+    )
 
     event_response: MemoirAutomationEventResponse | None = None
     if req.record_event:
@@ -249,6 +452,9 @@ async def run_book_quality_audit(
                 pending_utterance_count=snapshot.pending_utterance_count,
                 next_actions=next_actions,
                 chapter_items=chapter_items,
+                display=display,
+                primary_action=primary_action,
+                primary_chapter=primary_chapter,
             ),
         )
         await db.commit()
@@ -260,6 +466,9 @@ async def run_book_quality_audit(
         summary_text=summary_text,
         next_actions=next_actions,
         chapter_items=chapter_items,
+        display=display,
+        primary_action=primary_action,
+        primary_chapter=primary_chapter,
         event=event_response,
     )
 

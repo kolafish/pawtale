@@ -473,6 +473,42 @@ class MemoirBookQualityAuditChapterResponse(BaseModel):
     interview_hint: str
 
 
+class MemoirBookQualityAuditDisplayResponse(BaseModel):
+    title: str
+    summary: str
+    detail: str = ""
+
+
+class MemoirBookQualityAuditPrimaryActionResponse(BaseModel):
+    type: Literal[
+        "generate_plan",
+        "assign_sources",
+        "continue_interview",
+        "revise_chapter",
+        "generate_chapter_draft",
+        "review_book",
+        "none",
+    ]
+    cta_text: str
+    chapter_id: str | None = None
+    utterance_count: int = 0
+
+
+class MemoirBookQualityAuditPrimaryChapterResponse(BaseModel):
+    chapter_id: str
+    title: str
+    status: Literal[
+        "needs_sources",
+        "needs_draft",
+        "needs_update",
+        "thin_sources",
+        "thin_draft",
+        "healthy",
+    ]
+    attention: Literal["high", "medium", "low"]
+    reason: str
+
+
 class MemoirBookQualityAuditRunResponse(BaseModel):
     project_id: str
     overall_status: Literal[
@@ -486,6 +522,9 @@ class MemoirBookQualityAuditRunResponse(BaseModel):
     summary_text: str
     next_actions: list[str] = Field(default_factory=list)
     chapter_items: list[MemoirBookQualityAuditChapterResponse] = Field(default_factory=list)
+    display: MemoirBookQualityAuditDisplayResponse
+    primary_action: MemoirBookQualityAuditPrimaryActionResponse
+    primary_chapter: MemoirBookQualityAuditPrimaryChapterResponse | None = None
     event: MemoirAutomationEventResponse | None = None
 
 

@@ -398,7 +398,7 @@ SourceRoutingDecision
 
 ### Book Quality Audit
 
-后台审计不是生成漂亮评分，而是给 AI 访谈和成书页提供下一步动作建议。建议 `book_quality_audit.py` 输出：
+后台审计不是生成漂亮评分，而是给 AI 访谈和成书页提供下一步动作建议。语义审计、素材卡片、章节卡片、章节素材关系结构化的连续 PR 计划见 [MEMOIR_SEMANTIC_AUDIT_REFACTOR_PLAN.md](MEMOIR_SEMANTIC_AUDIT_REFACTOR_PLAN.md)。建议 `book_quality_audit.py` 输出：
 
 - 每章 source 数、已成文字数、待补写 source 数。
 - 缺口：时间、地点、人物、事件经过、情绪、结果、时代背景。
