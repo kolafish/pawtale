@@ -59,6 +59,7 @@ class MemoirBookChapterDraftStatus(str, Enum):
 class MemoirEditingJobType(str, Enum):
     CORRECT_TRANSCRIPT = "correct_transcript"
     ROUTE_SOURCES = "route_sources"
+    GENERATE_SOURCE_CARD = "generate_source_card"
     REVISE_CHAPTER = "revise_chapter"
     QUALITY_AUDIT = "quality_audit"
     GENERATE_CHAPTER_DRAFT = "generate_chapter_draft"
