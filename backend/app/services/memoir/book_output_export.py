@@ -165,6 +165,7 @@ class PDFTextCommand:
     target_anchor: str | None = None
     color: PDFColor | None = None
     font_name: str | None = None
+    char_spacing: float = 0.0
 
 
 @dataclass
@@ -334,19 +335,23 @@ def _text_units(text: str) -> float:
     return sum(_char_units(char) for char in text)
 
 
-def _estimated_text_width(text: str, font_size: int) -> int:
-    return int(_text_units(text) * font_size)
+def _estimated_text_width(text: str, font_size: int, *, char_spacing: float = 0.0) -> int:
+    spacing_width = max(0, len(text) - 1) * char_spacing
+    return int(_text_units(text) * font_size + spacing_width)
 
 
-def _right_aligned_x(text: str, layout: PDFLayout, font_size: int) -> int:
+def _right_aligned_x(text: str, layout: PDFLayout, font_size: int, *, char_spacing: float = 0.0) -> int:
     return max(
         layout.margin_x,
-        layout.page_width - layout.margin_x - _estimated_text_width(text, font_size),
+        layout.page_width - layout.margin_x - _estimated_text_width(text, font_size, char_spacing=char_spacing),
     )
 
 
-def _centered_x(text: str, layout: PDFLayout, font_size: int) -> int:
-    return max(layout.margin_x, int((layout.page_width - _estimated_text_width(text, font_size)) / 2))
+def _centered_x(text: str, layout: PDFLayout, font_size: int, *, char_spacing: float = 0.0) -> int:
+    return max(
+        layout.margin_x,
+        int((layout.page_width - _estimated_text_width(text, font_size, char_spacing=char_spacing)) / 2),
+    )
 
 
 class PDFBookBuilder:
@@ -550,6 +555,7 @@ class PDFBookBuilder:
         line_height: int,
         max_units: int | None = None,
         spacing_after: int = 0,
+        char_spacing: float = 0.0,
     ) -> None:
         max_units = max_units or max(10, self.layout.max_line_units - 4)
         page = self._ensure_page()
@@ -559,9 +565,10 @@ class PDFBookBuilder:
             page.commands.append(
                 PDFTextCommand(
                     text=line,
-                    x=_centered_x(line, self.layout, font_size),
+                    x=_centered_x(line, self.layout, font_size, char_spacing=char_spacing),
                     y=self.y,
                     font_size=font_size,
+                    char_spacing=char_spacing,
                 )
             )
             self.y -= line_height
@@ -579,6 +586,7 @@ class PDFBookBuilder:
         spacing_after: int = 0,
         color: PDFColor | None = None,
         font_name: str | None = None,
+        char_spacing: float = 0.0,
     ) -> int:
         max_units = max_units or max(10, self.layout.max_line_units - 4)
         current_y = y
@@ -587,11 +595,12 @@ class PDFBookBuilder:
             page.commands.append(
                 PDFTextCommand(
                     text=line,
-                    x=_centered_x(line, self.layout, font_size),
+                    x=_centered_x(line, self.layout, font_size, char_spacing=char_spacing),
                     y=current_y,
                     font_size=font_size,
                     color=color,
                     font_name=font_name,
+                    char_spacing=char_spacing,
                 )
             )
             current_y -= line_height
@@ -808,11 +817,21 @@ def _render_pdf_pages(
         for command in _pdf_page_commands(page, page_number=page_number, layout=layout):
             if not command.text:
                 continue
-            pdf.setFont(command.font_name or PDF_FONT_NAME, command.font_size)
+            font_name = command.font_name or PDF_FONT_NAME
+            pdf.setFont(font_name, command.font_size)
             pdf.setFillColorRGB(*(command.color or page.text_color or PDF_BODY_TEXT))
-            pdf.drawString(command.x, command.y, command.text)
+            if command.char_spacing:
+                text_object = pdf.beginText(command.x, command.y)
+                text_object.setFont(font_name, command.font_size)
+                text_object.setCharSpace(command.char_spacing)
+                if hasattr(text_object, "setFillColorRGB"):
+                    text_object.setFillColorRGB(*(command.color or page.text_color or PDF_BODY_TEXT))
+                text_object.textOut(command.text)
+                pdf.drawText(text_object)
+            else:
+                pdf.drawString(command.x, command.y, command.text)
             if command.target_anchor:
-                width = max(24, _estimated_text_width(command.text, command.font_size))
+                width = max(24, _estimated_text_width(command.text, command.font_size, char_spacing=command.char_spacing))
                 pdf.linkRect(
                     "",
                     command.target_anchor,
@@ -935,6 +954,8 @@ def _add_watercolor_cover_label(builder: PDFBookBuilder, *, style: PDFCoverStyle
         line_height=builder.layout.line_height,
         max_units=builder.layout.max_line_units,
         color=style.text,
+        font_name=PDF_SERIF_FONT_NAME,
+        char_spacing=1.8,
     )
 
 
@@ -990,12 +1011,13 @@ def _add_watercolor_cover_page(
     _add_watercolor_cover_label(builder, style=style, y=layout.page_height - 108)
     title_next_y = builder.add_centered_at(
         title,
-        y=layout.page_height - 216,
-        font_size=layout.title_font_size + 18,
-        line_height=layout.line_height + 30,
+        y=layout.page_height - 218,
+        font_size=layout.title_font_size + 15,
+        line_height=layout.line_height + 28,
         max_units=max(6, layout.max_line_units - 12),
         color=style.text,
-        font_name=PDF_SERIF_BOLD_FONT_NAME,
+        font_name=PDF_SERIF_FONT_NAME,
+        char_spacing=2.1,
         spacing_after=12,
     )
     separator_y = min(title_next_y + 24, layout.page_height - 250)
@@ -1008,7 +1030,8 @@ def _add_watercolor_cover_page(
             line_height=layout.line_height + 6,
             max_units=max(10, layout.max_line_units - 6),
             color=style.text,
-            font_name=PDF_SERIF_BOLD_FONT_NAME,
+            font_name=PDF_SERIF_FONT_NAME,
+            char_spacing=2.4,
         )
 
     credit_y = layout.margin_bottom + 64
@@ -1020,6 +1043,8 @@ def _add_watercolor_cover_page(
             line_height=layout.line_height,
             max_units=layout.max_line_units,
             color=style.text,
+            font_name=PDF_SERIF_FONT_NAME,
+            char_spacing=0.8,
         )
     builder.add_centered_at(
         f"整理：{prepared_by or '家人'}",
@@ -1028,6 +1053,8 @@ def _add_watercolor_cover_page(
         line_height=layout.line_height,
         max_units=layout.max_line_units,
         color=style.text,
+        font_name=PDF_SERIF_FONT_NAME,
+        char_spacing=0.8,
     )
     _add_watercolor_separator(builder, style=style, y=layout.margin_bottom - 7, width=86)
     builder.add_centered_at(
@@ -1037,6 +1064,8 @@ def _add_watercolor_cover_page(
         line_height=layout.line_height,
         max_units=layout.max_line_units,
         color=style.text,
+        font_name=PDF_SERIF_FONT_NAME,
+        char_spacing=3.0,
     )
 
 
@@ -1092,19 +1121,22 @@ def _add_navy_gilt_cover_page(
     builder.add_centered_at(
         "家庭回忆录",
         y=layout.page_height - 176,
-        font_size=layout.small_font_size + 4,
+        font_size=layout.small_font_size + 5,
         line_height=layout.line_height,
         max_units=layout.max_line_units,
         color=style.text,
+        font_name=PDF_SERIF_BOLD_FONT_NAME,
+        char_spacing=2.8,
     )
     title_next_y = builder.add_centered_at(
         title,
-        y=layout.page_height - 250,
-        font_size=layout.title_font_size + 20,
-        line_height=layout.line_height + 30,
-        max_units=max(6, layout.max_line_units - 12),
+        y=layout.page_height - 248,
+        font_size=layout.title_font_size + 28,
+        line_height=layout.line_height + 38,
+        max_units=max(5, layout.max_line_units - 15),
         color=style.text,
         font_name=PDF_SERIF_BOLD_FONT_NAME,
+        char_spacing=4.6,
         spacing_after=8,
     )
     _add_navy_gilt_separator(builder, style=style, y=title_next_y + 20, width=190)
@@ -1117,6 +1149,7 @@ def _add_navy_gilt_cover_page(
             max_units=max(10, layout.max_line_units - 6),
             color=style.text,
             font_name=PDF_SERIF_BOLD_FONT_NAME,
+            char_spacing=3.1,
         )
 
     credit_y = layout.margin_bottom + 74
@@ -1128,6 +1161,8 @@ def _add_navy_gilt_cover_page(
             line_height=layout.line_height,
             max_units=layout.max_line_units,
             color=style.text,
+            font_name=PDF_SERIF_BOLD_FONT_NAME,
+            char_spacing=1.3,
         )
     builder.add_centered_at(
         f"整理：{prepared_by or '家人'}",
@@ -1136,6 +1171,8 @@ def _add_navy_gilt_cover_page(
         line_height=layout.line_height,
         max_units=layout.max_line_units,
         color=style.text,
+        font_name=PDF_SERIF_BOLD_FONT_NAME,
+        char_spacing=1.3,
     )
     _add_navy_gilt_separator(builder, style=style, y=layout.margin_bottom + 2, width=92)
     builder.add_centered_at(
@@ -1145,6 +1182,8 @@ def _add_navy_gilt_cover_page(
         line_height=layout.line_height,
         max_units=layout.max_line_units,
         color=style.text,
+        font_name=PDF_SERIF_BOLD_FONT_NAME,
+        char_spacing=6.0,
     )
 
 
@@ -1591,11 +1630,12 @@ def _add_watercolor_back_cover(builder: PDFBookBuilder, *, quote: str, style: PD
         quote_next_y = builder.add_centered_at(
             line,
             y=quote_next_y,
-            font_size=layout.font_size + 8,
-            line_height=layout.line_height + 18,
+            font_size=layout.font_size + 6,
+            line_height=layout.line_height + 17,
             max_units=layout.max_line_units,
             color=style.text,
-            font_name=PDF_SERIF_BOLD_FONT_NAME,
+            font_name=PDF_SERIF_FONT_NAME,
+            char_spacing=1.3,
         )
     quote_next_y -= 28
     _add_watercolor_separator(builder, style=style, y=quote_next_y + 8, width=92)
@@ -1606,6 +1646,8 @@ def _add_watercolor_back_cover(builder: PDFBookBuilder, *, quote: str, style: PD
         line_height=layout.line_height,
         max_units=layout.max_line_units,
         color=style.text,
+        font_name=PDF_SERIF_FONT_NAME,
+        char_spacing=0.7,
     )
     builder.add_centered_at(
         f"整理于 {_today_month_text()}",
@@ -1614,6 +1656,8 @@ def _add_watercolor_back_cover(builder: PDFBookBuilder, *, quote: str, style: PD
         line_height=layout.line_height,
         max_units=layout.max_line_units,
         color=style.text,
+        font_name=PDF_SERIF_FONT_NAME,
+        char_spacing=1.1,
     )
 
 
@@ -1631,11 +1675,12 @@ def _add_navy_gilt_back_cover(builder: PDFBookBuilder, *, quote: str, style: PDF
         quote_next_y = builder.add_centered_at(
             line,
             y=quote_next_y,
-            font_size=layout.font_size + 7,
-            line_height=layout.line_height + 17,
+            font_size=layout.font_size + 10,
+            line_height=layout.line_height + 20,
             max_units=layout.max_line_units,
             color=style.text,
             font_name=PDF_SERIF_BOLD_FONT_NAME,
+            char_spacing=2.5,
         )
     builder.add_centered_at(
         "本书根据口述访谈整理",
@@ -1644,6 +1689,8 @@ def _add_navy_gilt_back_cover(builder: PDFBookBuilder, *, quote: str, style: PDF
         line_height=layout.line_height,
         max_units=layout.max_line_units,
         color=style.text,
+        font_name=PDF_SERIF_BOLD_FONT_NAME,
+        char_spacing=1.2,
     )
     builder.add_centered_at(
         f"整理于 {_today_month_text()}",
@@ -1652,6 +1699,8 @@ def _add_navy_gilt_back_cover(builder: PDFBookBuilder, *, quote: str, style: PDF
         line_height=layout.line_height,
         max_units=layout.max_line_units,
         color=style.text,
+        font_name=PDF_SERIF_BOLD_FONT_NAME,
+        char_spacing=1.8,
     )
 
 
