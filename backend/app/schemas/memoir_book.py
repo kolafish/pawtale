@@ -451,6 +451,8 @@ class MemoirBookQualityAuditRunRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     record_event: bool = True
+    semantic_audit: bool = False
+    ai_model: str | None = None
 
 
 class MemoirBookQualityAuditChapterResponse(BaseModel):
