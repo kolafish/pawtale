@@ -7,6 +7,7 @@ from app.config import get_settings, validate_runtime_settings
 from app.database import init_db, engine
 from app.migrations.auth import migrate_auth_schema
 from app.migrations.git_sync import migrate_git_sync_schema
+from app.migrations.memoir_semantic import migrate_memoir_semantic_schema
 from app.migrations.memoir_voice import assert_memoir_voice_schema, migrate_memoir_voice_schema
 from app.routers import auth_router, github_router, memoir_router, projects_router
 from app.services.memoir.editing_job_handlers import register_memoir_editing_job_handlers
@@ -40,6 +41,7 @@ async def _auto_migrate():
     await migrate_auth_schema(engine)
     await migrate_git_sync_schema(engine)
     await migrate_memoir_voice_schema(engine)
+    await migrate_memoir_semantic_schema(engine)
     await assert_memoir_voice_schema(engine)
 
 
