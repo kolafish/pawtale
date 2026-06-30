@@ -1,8 +1,21 @@
+from datetime import UTC, datetime, timedelta
+
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
-from app.domain.memoir.types import MemoirBookPlanStatus, MemoirChapterSourceLinkStatus, MemoirCreatedBy
-from app.models.memoir import MemoirBookPlan, MemoirBookPlanChapter, MemoirChapterSourceLink
+from app.domain.memoir.types import (
+    MemoirBookChapterDraftStatus,
+    MemoirBookPlanStatus,
+    MemoirChapterSourceLinkStatus,
+    MemoirCreatedBy,
+)
+from app.models.memoir import (
+    MemoirBookChapterDraft,
+    MemoirBookChapterDraftVersion,
+    MemoirBookPlan,
+    MemoirBookPlanChapter,
+    MemoirChapterSourceLink,
+)
 from app.services.memoir.book_plan_sources import plan_response
 from app.services.memoir.book_source_links import (
     included_chapters_by_utterance,
@@ -27,6 +40,8 @@ def _link_from_created(
     created: dict,
     status: MemoirChapterSourceLinkStatus = MemoirChapterSourceLinkStatus.ACTIVE,
     quote: str = "",
+    merged_draft_version_id: str | None = None,
+    removed_at: datetime | None = None,
 ) -> MemoirChapterSourceLink:
     return MemoirChapterSourceLink(
         project_id=project_id,
@@ -39,6 +54,8 @@ def _link_from_created(
         end_ms=8000,
         quote=quote,
         status=status.value,
+        merged_draft_version_id=merged_draft_version_id,
+        removed_at=removed_at,
     )
 
 
@@ -163,3 +180,126 @@ async def test_book_source_coverage_uses_source_link_read_path(client, test_db):
     assert second["utterance_id"] in included
     assert data["covered_source_count"] == 2
     assert data["uncovered_source_count"] == 0
+
+
+async def test_link_only_chapter_sources_do_not_need_legacy_source_refs(client, test_db):
+    project_id = await ensure_mobile_memoir_project(client)
+    created = await create_test_voice_transcript(client, test_db, "外婆家的院子里有一棵桂花树。", project_id=project_id)
+
+    plan = MemoirBookPlan(
+        project_id=project_id,
+        title="家族回忆录",
+        status=MemoirBookPlanStatus.CONFIRMED.value,
+        created_by=MemoirCreatedBy.USER.value,
+    )
+    test_db.add(plan)
+    await test_db.flush()
+    chapter = MemoirBookPlanChapter(
+        project_id=project_id,
+        plan_id=plan.id,
+        title="外婆家的童年",
+        sort_order=0,
+        source_refs_json=[],
+        metadata_json={},
+    )
+    test_db.add(chapter)
+    await test_db.flush()
+    test_db.add(
+        _link_from_created(
+            project_id=project_id,
+            plan_id=plan.id,
+            chapter_id=chapter.id,
+            created=created,
+            quote="桂花树",
+        )
+    )
+    await test_db.commit()
+
+    loaded_plan = await _load_plan(test_db, plan.id)
+    response = await plan_response(test_db, loaded_plan)
+
+    assert response.chapters[0].source_refs[0].utterance_id == created["utterance_id"]
+    assert response.chapters[0].source_refs[0].quote == "桂花树"
+    assert response.chapters[0].pending_source_count == 0
+    assert response.chapters[0].removed_source_count == 0
+
+
+async def test_link_merge_state_drives_source_change_counts(client, test_db):
+    project_id = await ensure_mobile_memoir_project(client)
+    first = await create_test_voice_transcript(client, test_db, "外婆家的院子很大。", project_id=project_id)
+    second = await create_test_voice_transcript(client, test_db, "后来我离开县城去读书。", project_id=project_id)
+    third = await create_test_voice_transcript(client, test_db, "这段后来决定不放进本章。", project_id=project_id)
+
+    plan = MemoirBookPlan(
+        project_id=project_id,
+        title="家族回忆录",
+        status=MemoirBookPlanStatus.CONFIRMED.value,
+        created_by=MemoirCreatedBy.USER.value,
+    )
+    test_db.add(plan)
+    await test_db.flush()
+    chapter = MemoirBookPlanChapter(
+        project_id=project_id,
+        plan_id=plan.id,
+        title="外婆家的童年",
+        sort_order=0,
+        source_refs_json=[],
+        metadata_json={},
+    )
+    test_db.add(chapter)
+    await test_db.flush()
+    draft = MemoirBookChapterDraft(
+        project_id=project_id,
+        chapter_id=chapter.id,
+        status=MemoirBookChapterDraftStatus.DRAFT.value,
+    )
+    test_db.add(draft)
+    await test_db.flush()
+    version = MemoirBookChapterDraftVersion(
+        draft_id=draft.id,
+        project_id=project_id,
+        chapter_id=chapter.id,
+        version=1,
+        content="外婆家的院子很大。",
+        created_by=MemoirCreatedBy.AI.value,
+        prompt_snapshot="old prompt",
+    )
+    test_db.add(version)
+    await test_db.flush()
+    test_db.add_all([
+        _link_from_created(
+            project_id=project_id,
+            plan_id=plan.id,
+            chapter_id=chapter.id,
+            created=first,
+            quote="院子很大",
+            merged_draft_version_id=version.id,
+        ),
+        _link_from_created(
+            project_id=project_id,
+            plan_id=plan.id,
+            chapter_id=chapter.id,
+            created=second,
+            quote="离开县城",
+        ),
+        _link_from_created(
+            project_id=project_id,
+            plan_id=plan.id,
+            chapter_id=chapter.id,
+            created=third,
+            status=MemoirChapterSourceLinkStatus.REMOVED,
+            quote="不放进本章",
+            removed_at=datetime.now(UTC).replace(tzinfo=None) + timedelta(seconds=1),
+        ),
+    ])
+    await test_db.commit()
+
+    loaded_plan = await _load_plan(test_db, plan.id)
+    response = await plan_response(test_db, loaded_plan)
+
+    assert [ref.utterance_id for ref in response.chapters[0].source_refs] == [
+        first["utterance_id"],
+        second["utterance_id"],
+    ]
+    assert response.chapters[0].pending_source_count == 1
+    assert response.chapters[0].removed_source_count == 1

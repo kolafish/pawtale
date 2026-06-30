@@ -466,4 +466,4 @@ updated_at
 - PR 7：已完成。新增 `MemoirChapterSourceLink`、迁移表清单和 `chapter_source_links.py` 幂等 backfill/sync 服务；确认/更新章节规划、自动归章、手动分配、素材移动、结构命令、转写编辑和删除素材会继续写旧 `source_refs_json`，同时双写或同步 link 表并记录 `assigned_by`、confidence、reason 和 active/removed 状态；读路径仍保持旧 JSON。
 - PR 8：已完成。新增 `book_source_links.py` 统一读取抽象；计划响应、素材覆盖率、章节草稿生成、章节卡片、进度快照/规则审计、自动归章路由、转写收录展示、语音修正上下文和全书稿快照生成均优先读取 active link，并在缺少 link 记录时按章节/素材回退旧 `source_refs_json`；`pending_source_utterance_ids` / `removed_source_utterance_ids` 仍作为当前补写状态 metadata 保留到 PR 10 收敛。
 - PR 9：已完成。新增章节素材 link 回填、素材卡片回填、章节卡片回填和语义状态检查脚本；所有回填脚本支持 `--project-id`、默认 dry-run、输出 JSON 统计和失败原因，素材/章节卡片脚本必须显式 `--execute` 才会调用 LLM provider，不会在启动时自动执行大规模回填。
-- PR 10：未开始。
+- PR 10：已完成。收敛 `pending_source_utterance_ids` / `removed_source_utterance_ids` 主读口径到 `MemoirChapterSourceLink.merged_draft_version_id`、`status` 和 `removed_at`；`source_refs_json` 保留为写兼容和旧项目 fallback，不删除历史书稿快照或事件历史。

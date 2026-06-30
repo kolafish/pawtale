@@ -29,12 +29,10 @@ from app.schemas.memoir_voice import (
 )
 from app.services.memoir import automation_events
 from app.services.memoir.access import load_memoir_project
-from app.services.memoir.book_plan_sources import (
-    pending_source_ids,
-    removed_source_ids,
-    sorted_chapters,
-)
+from app.services.memoir.book_plan_sources import sorted_chapters
 from app.services.memoir.book_source_links import (
+    ChapterSourceChangeState,
+    chapter_source_change_states_by_chapter,
     plan_source_ref_dicts_by_chapter,
     source_ref_utterance_ids,
 )
@@ -181,6 +179,7 @@ def _chapter_items(
     *,
     valid_utterance_ids: set[str],
     source_refs_by_chapter: dict[str, list[dict[str, object]]] | None = None,
+    source_change_states_by_chapter: dict[str, ChapterSourceChangeState] | None = None,
 ) -> list[MemoirProjectProgressChapterResponse]:
     if not plan:
         return []
@@ -194,6 +193,11 @@ def _chapter_items(
             for utterance_id in source_ref_utterance_ids(refs)
             if utterance_id in valid_utterance_ids
         }
+        source_change_state = (
+            source_change_states_by_chapter.get(chapter.id)
+            if source_change_states_by_chapter is not None
+            else None
+        )
         draft = chapter.draft
         items.append(
             MemoirProjectProgressChapterResponse(
@@ -201,8 +205,8 @@ def _chapter_items(
                 title=chapter.title,
                 sort_order=chapter.sort_order,
                 source_count=len(source_ids),
-                pending_source_count=len(pending_source_ids(chapter.metadata_json) & valid_utterance_ids),
-                removed_source_count=len(removed_source_ids(chapter.metadata_json)),
+                pending_source_count=source_change_state.pending_source_count if source_change_state else 0,
+                removed_source_count=source_change_state.removed_source_count if source_change_state else 0,
                 draft_status=draft.status if draft else None,
                 draft_word_count=draft_word_counts.get(chapter.id, 0),
             )
@@ -255,6 +259,11 @@ async def get_project_progress_snapshot(
 
     plan = await _load_project_plan(db, project_id)
     source_refs_by_chapter = await plan_source_ref_dicts_by_chapter(db, plan)
+    source_change_states = await chapter_source_change_states_by_chapter(
+        db,
+        plan,
+        valid_utterance_ids=valid_utterance_ids,
+    )
     assigned_utterance_ids = {
         utterance_id
         for refs in source_refs_by_chapter.values()
@@ -265,6 +274,7 @@ async def get_project_progress_snapshot(
         plan,
         valid_utterance_ids=valid_utterance_ids,
         source_refs_by_chapter=source_refs_by_chapter,
+        source_change_states_by_chapter=source_change_states,
     )
     recent_events = await automation_events.recent_automation_event_responses(
         db,

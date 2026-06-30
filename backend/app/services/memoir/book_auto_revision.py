@@ -25,11 +25,9 @@ from app.services.ai_types import AITextClient
 from app.services.memoir import automation_events
 from app.services.memoir import book_quality_audit
 from app.services.memoir.book_drafts import generate_chapter_draft
-from app.services.memoir.book_plan_sources import (
-    pending_source_ids as _pending_source_ids,
-    removed_source_ids as _removed_source_ids,
-)
 from app.services.memoir.book_source_links import (
+    ChapterSourceChangeState,
+    chapter_source_change_state as _chapter_source_change_state,
     chapter_source_ref_dicts as _chapter_source_ref_dicts,
     source_ref_utterance_ids as _source_ref_utterance_ids,
 )
@@ -71,12 +69,19 @@ async def _chapter_latest_draft(db: AsyncSession, project_id: str, chapter_id: s
     )
 
 
-async def _current_pending_source_ids(db: AsyncSession, chapter: MemoirBookPlanChapter | None) -> set[str]:
+async def _current_source_change_state(
+    db: AsyncSession,
+    chapter: MemoirBookPlanChapter | None,
+) -> ChapterSourceChangeState:
     if not chapter:
-        return set()
+        return ChapterSourceChangeState(pending_source_ids=set(), removed_source_ids=set())
     refs = await _chapter_source_ref_dicts(db, chapter=chapter)
     current_source_ids = set(_source_ref_utterance_ids(refs))
-    return _pending_source_ids(chapter.metadata_json) & current_source_ids
+    return await _chapter_source_change_state(
+        db,
+        chapter=chapter,
+        valid_utterance_ids=current_source_ids,
+    )
 
 
 async def schedule_chapter_auto_revision(
@@ -90,9 +95,8 @@ async def schedule_chapter_auto_revision(
     chapter = await db.get(MemoirBookPlanChapter, chapter_id)
     if not chapter or chapter.project_id != project_id:
         return None
-    pending_source_ids = await _current_pending_source_ids(db, chapter)
-    removed_source_ids = _removed_source_ids(chapter.metadata_json)
-    if not pending_source_ids or removed_source_ids:
+    source_change_state = await _current_source_change_state(db, chapter)
+    if not source_change_state.pending_source_ids or source_change_state.removed_source_ids:
         return None
 
     draft = await _chapter_latest_draft(db, project_id, chapter_id)
@@ -105,7 +109,7 @@ async def schedule_chapter_auto_revision(
     scheduled_at = run_after or (_utcnow() + timedelta(seconds=max(0, settings.memoir_chapter_revision_delay_seconds)))
     payload = {
         "base_version_id": draft.versions[-1].id,
-        "pending_source_utterance_ids": sorted(pending_source_ids),
+        "pending_source_utterance_ids": sorted(source_change_state.pending_source_ids),
         **({"ai_model": model} if model else {}),
     }
     return await enqueue_editing_job(
@@ -157,7 +161,8 @@ async def run_chapter_revision_job(
             return EditingJobResult(status=MemoirEditingJobStatus.SKIPPED, error_message="draft changed")
 
         chapter = await db.get(MemoirBookPlanChapter, job.chapter_id)
-        pending_source_ids = await _current_pending_source_ids(db, chapter)
+        source_change_state = await _current_source_change_state(db, chapter)
+        pending_source_ids = source_change_state.pending_source_ids
         if not pending_source_ids:
             return EditingJobResult(status=MemoirEditingJobStatus.SKIPPED, error_message="no pending sources")
 

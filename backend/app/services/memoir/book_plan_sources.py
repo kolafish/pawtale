@@ -22,7 +22,11 @@ from app.schemas.memoir_book import (
     MemoirBookSourceIncludedChapter,
 )
 from app.services.memoir.access import load_memoir_project
-from app.services.memoir.book_source_links import plan_source_ref_dicts_by_chapter
+from app.services.memoir.book_source_links import (
+    ChapterSourceChangeState,
+    chapter_source_change_states_by_chapter,
+    plan_source_ref_dicts_by_chapter,
+)
 
 
 PENDING_SOURCE_UTTERANCE_IDS_KEY = "pending_source_utterance_ids"
@@ -271,9 +275,14 @@ def chapter_response(
     *,
     created_at_by_utterance: dict[str, datetime] | None = None,
     source_refs: list[dict[str, object]] | None = None,
+    source_change_state: ChapterSourceChangeState | None = None,
 ) -> MemoirBookPlanChapterResponse:
     source_created_at = created_at_by_utterance or {}
-    pending_source_count, removed_source_count = source_change_counts(chapter.metadata_json)
+    if source_change_state:
+        pending_source_count = source_change_state.pending_source_count
+        removed_source_count = source_change_state.removed_source_count
+    else:
+        pending_source_count, removed_source_count = source_change_counts(chapter.metadata_json)
     refs = source_refs if source_refs is not None else [
         ref for ref in (chapter.source_refs_json or []) if isinstance(ref, dict)
     ]
@@ -298,6 +307,7 @@ def chapter_response(
 
 async def plan_response(db: AsyncSession, plan: MemoirBookPlan) -> MemoirBookPlanResponse:
     refs_by_chapter = await plan_source_ref_dicts_by_chapter(db, plan)
+    source_change_states = await chapter_source_change_states_by_chapter(db, plan)
     return MemoirBookPlanResponse(
         id=plan.id,
         project_id=plan.project_id,
@@ -307,7 +317,11 @@ async def plan_response(db: AsyncSession, plan: MemoirBookPlan) -> MemoirBookPla
         model=plan.model,
         metadata_json=plan.metadata_json or {},
         chapters=[
-            chapter_response(chapter, source_refs=refs_by_chapter.get(chapter.id, []))
+            chapter_response(
+                chapter,
+                source_refs=refs_by_chapter.get(chapter.id, []),
+                source_change_state=source_change_states.get(chapter.id),
+            )
             for chapter in plan.chapters
         ],
         created_at=plan.created_at,

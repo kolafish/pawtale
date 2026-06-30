@@ -8,7 +8,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.domain.memoir.types import MemoirChapterSourceAssignedBy, MemoirChapterSourceLinkStatus
-from app.models.memoir import MemoirBookPlan, MemoirBookPlanChapter, MemoirChapterSourceLink
+from app.models.memoir import (
+    MemoirBookChapterDraftVersion,
+    MemoirBookPlan,
+    MemoirBookPlanChapter,
+    MemoirChapterSourceLink,
+)
+
+
+PENDING_SOURCE_UTTERANCE_IDS_KEY = "pending_source_utterance_ids"
 
 
 @dataclass(frozen=True)
@@ -54,6 +62,13 @@ def _optional_int_ref_value(ref: dict, key: str) -> int | None:
 
 def _source_refs(chapter: MemoirBookPlanChapter) -> list[dict]:
     return [dict(ref) for ref in (chapter.source_refs_json or []) if isinstance(ref, dict)]
+
+
+def _pending_source_ids(chapter: MemoirBookPlanChapter) -> set[str]:
+    value = (chapter.metadata_json or {}).get(PENDING_SOURCE_UTTERANCE_IDS_KEY, [])
+    if not isinstance(value, list):
+        return set()
+    return {item.strip() for item in value if isinstance(item, str) and item.strip()}
 
 
 def _link_key(chapter_id: str, utterance_id: str) -> tuple[str, str]:
@@ -119,6 +134,35 @@ async def _load_project_plan(db: AsyncSession, *, project_id: str) -> MemoirBook
     )
 
 
+async def _latest_versions_by_chapter(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    chapter_ids: set[str],
+) -> dict[str, MemoirBookChapterDraftVersion]:
+    if not chapter_ids:
+        return {}
+    rows = (
+        await db.execute(
+            select(MemoirBookChapterDraftVersion)
+            .where(
+                MemoirBookChapterDraftVersion.project_id == project_id,
+                MemoirBookChapterDraftVersion.chapter_id.in_(chapter_ids),
+            )
+            .order_by(
+                MemoirBookChapterDraftVersion.chapter_id,
+                MemoirBookChapterDraftVersion.version,
+                MemoirBookChapterDraftVersion.created_at,
+                MemoirBookChapterDraftVersion.id,
+            )
+        )
+    ).scalars().all()
+    latest_by_chapter: dict[str, MemoirBookChapterDraftVersion] = {}
+    for version in rows:
+        latest_by_chapter[version.chapter_id] = version
+    return latest_by_chapter
+
+
 async def sync_project_chapter_source_links(
     db: AsyncSession,
     *,
@@ -162,6 +206,15 @@ async def sync_plan_chapter_source_links(
         _link_key(link.chapter_id, link.utterance_id): link
         for link in existing_links
     }
+    latest_versions_by_chapter = await _latest_versions_by_chapter(
+        db,
+        project_id=plan.project_id,
+        chapter_ids={chapter.id for chapter in plan.chapters},
+    )
+    has_merge_state_by_chapter: dict[str, bool] = {}
+    for link in existing_links:
+        if link.merged_draft_version_id:
+            has_merge_state_by_chapter[link.chapter_id] = True
 
     default_metadata = ChapterSourceAssignmentMetadata(
         assigned_by=assigned_by,
@@ -174,6 +227,9 @@ async def sync_plan_chapter_source_links(
     removed_count = 0
 
     for chapter in sorted(plan.chapters, key=lambda item: item.sort_order):
+        pending_ids = _pending_source_ids(chapter)
+        latest_version = latest_versions_by_chapter.get(chapter.id)
+        should_bootstrap_merge_state = bool(latest_version) and not has_merge_state_by_chapter.get(chapter.id, False)
         for ref in _source_refs(chapter):
             utterance_id = _string_ref_value(ref, "utterance_id")
             if not utterance_id:
@@ -196,6 +252,12 @@ async def sync_plan_chapter_source_links(
                 )
                 _apply_ref_fields(link, ref)
                 _apply_assignment_metadata(link, metadata)
+                if (
+                    latest_version
+                    and should_bootstrap_merge_state
+                    and utterance_id not in pending_ids
+                ):
+                    link.merged_draft_version_id = latest_version.id
                 db.add(link)
                 created_count += 1
                 continue
@@ -204,10 +266,22 @@ async def sync_plan_chapter_source_links(
             if link.status != MemoirChapterSourceLinkStatus.ACTIVE.value:
                 link.status = MemoirChapterSourceLinkStatus.ACTIVE.value
                 link.removed_at = None
+                link.merged_draft_version_id = None
                 changed = True
                 activated_count += 1
                 changed = _apply_assignment_metadata(link, metadata) or changed
             changed = _apply_ref_fields(link, ref) or changed
+            if utterance_id in pending_ids and link.merged_draft_version_id is not None:
+                link.merged_draft_version_id = None
+                changed = True
+            elif (
+                latest_version
+                and should_bootstrap_merge_state
+                and utterance_id not in pending_ids
+                and link.merged_draft_version_id is None
+            ):
+                link.merged_draft_version_id = latest_version.id
+                changed = True
             if changed:
                 link.updated_at = _utcnow()
                 db.add(link)
@@ -304,6 +378,7 @@ async def update_utterance_link_ref_fields(
             link.quote = cleaned_quote
             changed = True
         if changed:
+            link.merged_draft_version_id = None
             link.updated_at = now
             db.add(link)
             updated_count += 1

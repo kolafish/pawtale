@@ -17,6 +17,7 @@ from app.schemas.memoir_book import (
 from app.services.ai_types import AITextClient
 from app.services.memoir.access import load_memoir_project
 from app.services.memoir.book_audio import audio_response, discard_staged_audio_files, synthesize_text_audio
+from app.services.memoir.book_source_links import source_count_by_chapter
 from app.services.memoir.book_voice_command_executor import execute_confirmed_book_voice_command
 from app.services.memoir.book_voice_command_parser import (
     parse_payload_with_ai,
@@ -38,8 +39,21 @@ async def parse_book_voice_command(
     if not plan:
         raise HTTPException(status_code=404, detail="章节规划不存在")
 
-    payload = await parse_payload_with_ai(req, plan, ai_client=ai_client)
-    return response_from_payload(req.text, plan, req.current_chapter_id, payload, req.book_context)
+    source_counts = await source_count_by_chapter(db, plan)
+    payload = await parse_payload_with_ai(
+        req,
+        plan,
+        source_count_by_chapter=source_counts,
+        ai_client=ai_client,
+    )
+    return response_from_payload(
+        req.text,
+        plan,
+        req.current_chapter_id,
+        payload,
+        req.book_context,
+        source_count_by_chapter=source_counts,
+    )
 
 
 async def execute_book_voice_command(

@@ -296,6 +296,7 @@ async def parse_payload_with_ai(
     req: MemoirBookVoiceCommandParseRequest,
     plan: MemoirBookPlan,
     *,
+    source_count_by_chapter: dict[str, int] | None = None,
     ai_client: AITextClient | None = None,
 ) -> ParsedCommandPayload:
     fallback = _fallback_payload(
@@ -303,6 +304,7 @@ async def parse_payload_with_ai(
         plan=plan,
         conversation_context=req.conversation_context,
         book_context=req.book_context,
+        source_count_by_chapter=source_count_by_chapter,
     )
     normalized_text = _compact(_normalize_chapter_word_text(req.text))
     if fallback.intent == "read_uncovered_source" and _is_source_read_request(normalized_text):
@@ -316,7 +318,7 @@ async def parse_payload_with_ai(
         content = await client._call_llm(
             BOOK_VOICE_COMMAND_SYSTEM_PROMPT,
             BOOK_VOICE_COMMAND_USER_PROMPT_TEMPLATE.format(
-                chapter_lines=_chapter_prompt_lines(plan),
+                chapter_lines=_chapter_prompt_lines(plan, source_count_by_chapter=source_count_by_chapter),
                 book_status=_book_status_prompt_line(plan),
                 source_coverage_status=_source_coverage_prompt_line(req.book_context),
                 current_chapter_line=_current_chapter_prompt_line(plan, req.current_chapter_id),
@@ -418,6 +420,7 @@ def _fallback_payload(
     plan: MemoirBookPlan,
     conversation_context: list[Any] | None = None,
     book_context: MemoirBookVoiceCommandBookContext | None = None,
+    source_count_by_chapter: dict[str, int] | None = None,
 ) -> ParsedCommandPayload:
     normalized = _compact(_normalize_chapter_word_text(text))
     if not normalized:
@@ -442,7 +445,11 @@ def _fallback_payload(
         return ParsedCommandPayload(
             intent="answer_book_question",
             summary="回答当前素材收入章节状态。",
-            reply_text=_source_coverage_reply_text(plan, book_context),
+            reply_text=_source_coverage_reply_text(
+                plan,
+                book_context,
+                source_count_by_chapter=source_count_by_chapter,
+            ),
         )
 
     if _is_chapter_count_question(normalized) or any(keyword in normalized for keyword in OUTLINE_STATUS_KEYWORDS):
@@ -517,6 +524,15 @@ def _fallback_payload(
         return ParsedCommandPayload(intent="read_chapter", chapter_ref=read_match.group(0))
 
     return ParsedCommandPayload(intent="unknown")
+
+
+def _chapter_source_count(
+    chapter: MemoirBookPlanChapter,
+    source_count_by_chapter: dict[str, int] | None = None,
+) -> int:
+    if source_count_by_chapter and chapter.id in source_count_by_chapter:
+        return source_count_by_chapter[chapter.id]
+    return len(chapter.source_refs_json or [])
 
 
 def _fallback_consultation_intent(normalized: str) -> str | None:
@@ -817,13 +833,18 @@ def _book_question_reply_text(
     plan: MemoirBookPlan,
     ai_reply_text: str | None,
     book_context: MemoirBookVoiceCommandBookContext | None,
+    source_count_by_chapter: dict[str, int] | None = None,
 ) -> str:
     normalized = _compact(_normalize_chapter_word_text(original_text))
     cleaned_ai_reply = _clean_reply_text(ai_reply_text)
     if _is_source_read_request(normalized):
         return cleaned_ai_reply or _source_read_reply_text(book_context, None)
     if _is_source_coverage_question(normalized):
-        return _source_coverage_reply_text(plan, book_context)
+        return _source_coverage_reply_text(
+            plan,
+            book_context,
+            source_count_by_chapter=source_count_by_chapter,
+        )
     if cleaned_ai_reply:
         return cleaned_ai_reply
     if _is_chapter_count_question(normalized) or any(keyword in normalized for keyword in OUTLINE_STATUS_KEYWORDS):
@@ -831,7 +852,12 @@ def _book_question_reply_text(
     return _chapter_count_reply_text(plan)
 
 
-def _source_coverage_reply_text(plan: MemoirBookPlan, book_context: MemoirBookVoiceCommandBookContext | None) -> str:
+def _source_coverage_reply_text(
+    plan: MemoirBookPlan,
+    book_context: MemoirBookVoiceCommandBookContext | None,
+    *,
+    source_count_by_chapter: dict[str, int] | None = None,
+) -> str:
     coverage = book_context.source_coverage if book_context else None
     chapters = _sorted_chapters(plan)
     if coverage:
@@ -846,7 +872,7 @@ def _source_coverage_reply_text(plan: MemoirBookPlan, book_context: MemoirBookVo
             f"这本书现在共有 {coverage.total_source_count} 条讲述记录，"
             f"都已收入当前 {len(chapters)} 个章节。"
         )
-    covered_count = sum(len(chapter.source_refs_json or []) for chapter in chapters)
+    covered_count = sum(_chapter_source_count(chapter, source_count_by_chapter) for chapter in chapters)
     return (
         f"我这里还没有拿到最新待收录统计；当前章节里已引用 {covered_count} 条素材。"
         "可以刷新成书页后再问我还有多少记录未收入章节。"
@@ -927,6 +953,7 @@ def response_from_payload(
     current_chapter_id: str | None,
     payload: ParsedCommandPayload,
     book_context: MemoirBookVoiceCommandBookContext | None = None,
+    source_count_by_chapter: dict[str, int] | None = None,
 ) -> MemoirBookVoiceCommandParseResponse:
     display_text = _normalize_chapter_word_text(original_text).strip()
     intent = payload.intent if payload.intent in SUPPORTED_INTENTS else "unknown"
@@ -995,10 +1022,22 @@ def response_from_payload(
 
     if intent in CONSULTATION_INTENTS:
         summary = payload.summary or _summary_for_consultation(intent, chapter)
-        reply_text = _consultation_reply_text(intent, chapter, chapters, payload.reply_text)
+        reply_text = _consultation_reply_text(
+            intent,
+            chapter,
+            chapters,
+            payload.reply_text,
+            source_count_by_chapter=source_count_by_chapter,
+        )
     elif intent == "answer_book_question":
         summary = payload.summary or "回答当前成书章节状态。"
-        reply_text = _book_question_reply_text(display_text, plan, payload.reply_text, book_context)
+        reply_text = _book_question_reply_text(
+            display_text,
+            plan,
+            payload.reply_text,
+            book_context,
+            source_count_by_chapter=source_count_by_chapter,
+        )
     elif intent == "read_uncovered_source":
         summary = payload.summary or "读出一条待收录讲述记录。"
         reply_text = payload.reply_text or _source_read_reply_text(book_context, None, payload.source_ref)
@@ -1121,6 +1160,7 @@ def _consultation_reply_text(
     chapter: MemoirBookPlanChapter | None,
     chapters: list[MemoirBookPlanChapter],
     ai_reply_text: str | None,
+    source_count_by_chapter: dict[str, int] | None = None,
 ) -> str:
     cleaned_ai_reply = _clean_reply_text(ai_reply_text)
     if cleaned_ai_reply:
@@ -1160,7 +1200,7 @@ def _consultation_reply_text(
 
     if intent == "review_chapter_structure":
         if chapter:
-            source_count = len(chapter.source_refs_json or [])
+            source_count = _chapter_source_count(chapter, source_count_by_chapter)
             return (
                 f"「{chapter.title}」目前收录 {source_count} 条素材。"
                 "结构上可以先按时间、地点或一个核心事件来收束；如果有两条主线，再考虑拆章。"
@@ -1173,14 +1213,18 @@ def _consultation_reply_text(
     return "我还没判断清楚。你可以直接问：第一章名字合适吗，或者第一章是不是太短了。"
 
 
-def _chapter_prompt_lines(plan: MemoirBookPlan) -> str:
+def _chapter_prompt_lines(
+    plan: MemoirBookPlan,
+    *,
+    source_count_by_chapter: dict[str, int] | None = None,
+) -> str:
     lines = []
     for index, chapter in enumerate(_sorted_chapters(plan), start=1):
         content = _latest_draft_content(chapter)
         excerpt = content[:80].replace("\n", " ")
         line = (
             f"{index}. {chapter.title}"
-            f"｜素材 {len(chapter.source_refs_json or [])} 条"
+            f"｜素材 {_chapter_source_count(chapter, source_count_by_chapter)} 条"
             f"｜正文 {_draft_char_count(chapter)} 字"
         )
         if excerpt:
