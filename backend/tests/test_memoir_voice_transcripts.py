@@ -8,6 +8,7 @@ from app.domain.memoir.types import (
     MemoirAutomationEventType,
     MemoirBookChapterDraftStatus,
     MemoirBookPlanStatus,
+    MemoirChapterSourceLinkStatus,
     MemoirChatContentStatus,
     MemoirChatMessageRole,
     MemoirCreatedBy,
@@ -22,6 +23,7 @@ from app.models.memoir import (
     MemoirBookChapterDraftVersion,
     MemoirBookPlan,
     MemoirBookPlanChapter,
+    MemoirChapterSourceLink,
     MemoirChatMessage,
     MemoirEditingJob,
     MemoirTranscriptVersion,
@@ -34,6 +36,7 @@ from app.services.memoir.voice_transcripts import (
     _remove_obvious_oral_fillers,
     generate_cleaned_transcript_text,
 )
+from app.services.memoir.chapter_source_links import backfill_project_chapter_source_links
 from app.services.memoir.utterance_editing_pipeline import (
     ROUTE_PAYLOAD_SOURCE_TEXT_HASHES_KEY,
     ROUTE_PAYLOAD_TRANSCRIPT_VERSION_IDS_KEY,
@@ -393,6 +396,8 @@ async def test_mobile_memoir_editing_included_transcript_marks_chapter_for_revis
     await test_db.flush()
     draft_version_id = draft_version.id
     await test_db.commit()
+    await backfill_project_chapter_source_links(test_db, project_id=project_id)
+    await test_db.commit()
 
     response = await client.patch(
         f"/api/mobile/memoir/voice-transcripts/{created['utterance_id']}",
@@ -412,6 +417,16 @@ async def test_mobile_memoir_editing_included_transcript_marks_chapter_for_revis
     await test_db.refresh(draft)
     assert chapter.source_refs_json[0]["transcript_version_id"] == version.id
     assert chapter.source_refs_json[0]["quote"] == "我小时候住在外婆家的院子里。"
+    link = await test_db.scalar(
+        select(MemoirChapterSourceLink).where(
+            MemoirChapterSourceLink.project_id == project_id,
+            MemoirChapterSourceLink.chapter_id == chapter.id,
+            MemoirChapterSourceLink.utterance_id == created["utterance_id"],
+        )
+    )
+    assert link is not None
+    assert link.transcript_version_id == version.id
+    assert link.quote == "我小时候住在外婆家的院子里。"
     assert chapter.metadata_json["pending_source_utterance_ids"] == [created["utterance_id"]]
     assert draft.status == MemoirBookChapterDraftStatus.DRAFT.value
     assert draft.metadata_json["status_reason"] == "sources_changed"
@@ -731,6 +746,8 @@ async def test_mobile_memoir_delete_transcript_removes_book_source_refs_and_mark
         )
     )
     await test_db.commit()
+    await backfill_project_chapter_source_links(test_db, project_id=project_id)
+    await test_db.commit()
     generated = await client.post(f"/api/mobile/memoir/projects/{project_id}/book-output/generate", json={})
     assert generated.status_code == 200
 
@@ -743,6 +760,16 @@ async def test_mobile_memoir_delete_transcript_removes_book_source_refs_and_mark
     assert [ref["utterance_id"] for ref in refreshed_chapter.source_refs_json] == [first["utterance_id"]]
     assert refreshed_chapter.metadata_json["removed_source_utterance_ids"] == [second["utterance_id"]]
     assert "source_refs_removed_at" in refreshed_chapter.metadata_json
+    removed_link = await test_db.scalar(
+        select(MemoirChapterSourceLink).where(
+            MemoirChapterSourceLink.project_id == project_id,
+            MemoirChapterSourceLink.chapter_id == chapter.id,
+            MemoirChapterSourceLink.utterance_id == second["utterance_id"],
+        )
+    )
+    assert removed_link is not None
+    assert removed_link.status == MemoirChapterSourceLinkStatus.REMOVED.value
+    assert removed_link.removed_at is not None
 
     refreshed_draft = await test_db.scalar(
         select(MemoirBookChapterDraft).where(MemoirBookChapterDraft.id == draft.id)

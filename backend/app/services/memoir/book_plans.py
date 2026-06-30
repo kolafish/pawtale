@@ -9,7 +9,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.domain.memoir.types import MemoirBookChapterDraftStatus, MemoirBookPlanStatus, MemoirCreatedBy
+from app.domain.memoir.types import (
+    MemoirBookChapterDraftStatus,
+    MemoirBookPlanStatus,
+    MemoirChapterSourceAssignedBy,
+    MemoirCreatedBy,
+)
 from app.models.memoir import (
     MemoirBookPlan,
     MemoirBookPlanChapter,
@@ -76,6 +81,10 @@ from app.services.memoir.book_plan_sources import (
     sorted_chapters as _sorted_plan_chapters,
     text_or_empty as _text_or_empty,
 )
+from app.services.memoir.chapter_source_links import (
+    ChapterSourceAssignmentMetadata,
+    sync_project_chapter_source_links as _sync_project_chapter_source_links,
+)
 from app.services.memoir.book_structure_commands import (
     apply_book_structure_command as _apply_book_structure_command,
     chapter_by_id as _chapter_by_id,
@@ -94,6 +103,14 @@ class ValidatedChapterUpdate:
     id: str | None
     title: str
     source_refs: list[MemoirBookChapterSourceRef]
+
+
+def _link_assigned_by_for_created_by(created_by: MemoirCreatedBy) -> MemoirChapterSourceAssignedBy:
+    if created_by == MemoirCreatedBy.AI:
+        return MemoirChapterSourceAssignedBy.AI
+    if created_by == MemoirCreatedBy.USER:
+        return MemoirChapterSourceAssignedBy.USER
+    return MemoirChapterSourceAssignedBy.SYSTEM
 
 
 async def _mark_chapter_drafts_sources_changed(
@@ -208,8 +225,14 @@ async def _replace_plan(
                 source_refs_json=[_as_dict(ref) for ref in chapter.source_refs],
             )
         )
+    await db.flush()
+    await _sync_project_chapter_source_links(
+        db,
+        project_id=project_id,
+        assigned_by=_link_assigned_by_for_created_by(created_by),
+        assignment_reason="replace_book_plan",
+    )
     if created_by == MemoirCreatedBy.USER:
-        await db.flush()
         await _automation_events.resolve_assigned_source_review_events(db, project_id=project_id)
     await db.commit()
     refreshed = await _load_plan(db, project_id)
@@ -315,6 +338,9 @@ async def assign_book_sources_to_chapters(
     user_id: str,
     project_id: str,
     req: MemoirBookSourceAssignmentRequest,
+    assigned_by: MemoirChapterSourceAssignedBy | str = MemoirChapterSourceAssignedBy.USER,
+    assignment_reason: str = "manual_source_assignment",
+    assignment_metadata_by_utterance: dict[str, ChapterSourceAssignmentMetadata] | None = None,
 ) -> MemoirBookPlanResponse:
     project = await load_memoir_project(db, project_id, user_id)
     _remember_project_ai_model(project, req.ai_model)
@@ -379,6 +405,13 @@ async def assign_book_sources_to_chapters(
         )
     if assigned_utterance_ids:
         await db.flush()
+        await _sync_project_chapter_source_links(
+            db,
+            project_id=project_id,
+            assigned_by=assigned_by,
+            assignment_reason=assignment_reason,
+            assignment_metadata_by_utterance=assignment_metadata_by_utterance,
+        )
         await _automation_events.resolve_assigned_source_review_events(
             db,
             project_id=project_id,
@@ -475,6 +508,12 @@ async def move_book_source_between_chapters(
         ai_model=req.ai_model,
     )
     await db.flush()
+    await _sync_project_chapter_source_links(
+        db,
+        project_id=project_id,
+        assigned_by=MemoirChapterSourceAssignedBy.USER,
+        assignment_reason="manual_source_move",
+    )
     await _automation_events.resolve_assigned_source_review_events(
         db,
         project_id=project_id,
@@ -791,8 +830,14 @@ async def update_book_plan(
         project_id=project_id,
         chapter_ids=changed_chapter_ids,
     )
-    if changed_chapter_ids or newly_assigned_utterance_ids:
+    if changed_chapter_ids or newly_assigned_utterance_ids or removed_chapters:
         await db.flush()
+        await _sync_project_chapter_source_links(
+            db,
+            project_id=project_id,
+            assigned_by=MemoirChapterSourceAssignedBy.USER,
+            assignment_reason="book_plan_update",
+        )
         await _automation_events.resolve_assigned_source_review_events(
             db,
             project_id=project_id,
@@ -883,8 +928,14 @@ async def apply_book_plan_structure_command(
             project_id=project_id,
             chapter_ids=mutation.changed_chapter_ids,
         )
-    if mutation.changed_chapter_ids or source:
+    if mutation.changed_chapter_ids or source or mutation.deleted_chapters:
         await db.flush()
+        await _sync_project_chapter_source_links(
+            db,
+            project_id=project_id,
+            assigned_by=MemoirChapterSourceAssignedBy.USER,
+            assignment_reason=req.type,
+        )
         await _automation_events.resolve_assigned_source_review_events(
             db,
             project_id=project_id,

@@ -12,6 +12,8 @@ from app.domain.memoir.types import (
     MemoirAutomationEventType,
     MemoirBookChapterDraftStatus,
     MemoirBookPlanStatus,
+    MemoirChapterSourceAssignedBy,
+    MemoirChapterSourceLinkStatus,
     MemoirEditingJobStatus,
     MemoirEditingJobType,
     MemoirChatContentStatus,
@@ -521,6 +523,58 @@ class MemoirBookQualityAuditSnapshot(Base):
     source_card_ids_json: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
     chapter_card_ids_json: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
     error_message: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    project: Mapped["Project"] = orm_relationship("Project")
+
+
+class MemoirChapterSourceLink(Base):
+    __tablename__ = "memoir_chapter_source_links"
+    __table_args__ = (
+        UniqueConstraint(
+            "project_id",
+            "chapter_id",
+            "utterance_id",
+            name="uq_memoir_chapter_source_links_chapter_utterance",
+        ),
+        CheckConstraint(
+            f"status IN ({_enum_values(MemoirChapterSourceLinkStatus)})",
+            name="ck_memoir_chapter_source_links_status",
+        ),
+        CheckConstraint(
+            f"assigned_by IN ({_enum_values(MemoirChapterSourceAssignedBy)})",
+            name="ck_memoir_chapter_source_links_assigned_by",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    project_id: Mapped[str] = mapped_column(String(36), ForeignKey("projects.id"), nullable=False, index=True)
+    plan_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    chapter_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    utterance_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    transcript_version_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    audio_file_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    start_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    end_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    quote: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(20),
+        default=MemoirChapterSourceLinkStatus.ACTIVE.value,
+        nullable=False,
+        index=True,
+    )
+    assigned_by: Mapped[str] = mapped_column(
+        String(20),
+        default=MemoirChapterSourceAssignedBy.SYSTEM.value,
+        nullable=False,
+        index=True,
+    )
+    assignment_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    assignment_reason: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    source_card_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    merged_draft_version_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    removed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

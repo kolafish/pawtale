@@ -17,6 +17,7 @@ from app.models.memoir import (
     MemoirBookPlanChapter,
     MemoirBookQualityAuditSnapshot,
     MemoirChapterCard,
+    MemoirChapterSourceLink,
     MemoirSourceCard,
     MemoirVoiceSession,
     MemoirVoiceUtterance,
@@ -57,6 +58,7 @@ async def test_memoir_semantic_migration_creates_missing_tables():
             assert "source_text_hash" in await _table_columns(conn, "memoir_source_cards")
             assert "input_signature" in await _table_columns(conn, "memoir_chapter_cards")
             assert "chapter_audits_json" in await _table_columns(conn, "memoir_book_quality_audit_snapshots")
+            assert "assignment_reason" in await _table_columns(conn, "memoir_chapter_source_links")
     finally:
         await engine.dispose()
 
@@ -106,16 +108,25 @@ async def test_memoir_semantic_tables_define_constraints_and_indexes():
                     )
                 )
             ).scalar_one()
+            source_link_sql = (
+                await conn.execute(
+                    text("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'memoir_chapter_source_links'")
+                )
+            ).scalar_one()
 
             assert "uq_memoir_source_cards_signature" in source_sql
             assert "ck_memoir_source_cards_status" in source_sql
             assert "uq_memoir_chapter_cards_signature" in chapter_sql
             assert "ck_memoir_chapter_cards_status" in chapter_sql
             assert "uq_memoir_book_quality_audit_snapshots_signature" in snapshot_sql
+            assert "uq_memoir_chapter_source_links_chapter_utterance" in source_link_sql
+            assert "ck_memoir_chapter_source_links_status" in source_link_sql
+            assert "ck_memoir_chapter_source_links_assigned_by" in source_link_sql
 
             source_indexes = await _index_names(conn, "memoir_source_cards")
             chapter_indexes = await _index_names(conn, "memoir_chapter_cards")
             snapshot_indexes = await _index_names(conn, "memoir_book_quality_audit_snapshots")
+            source_link_indexes = await _index_names(conn, "memoir_chapter_source_links")
 
             assert "ix_memoir_source_cards_project_id" in source_indexes
             assert "ix_memoir_source_cards_utterance_id" in source_indexes
@@ -123,6 +134,9 @@ async def test_memoir_semantic_tables_define_constraints_and_indexes():
             assert "ix_memoir_chapter_cards_chapter_id" in chapter_indexes
             assert "ix_memoir_book_quality_audit_snapshots_project_id" in snapshot_indexes
             assert "ix_memoir_book_quality_audit_snapshots_input_signature" in snapshot_indexes
+            assert "ix_memoir_chapter_source_links_project_id" in source_link_indexes
+            assert "ix_memoir_chapter_source_links_chapter_id" in source_link_indexes
+            assert "ix_memoir_chapter_source_links_utterance_id" in source_link_indexes
     finally:
         await engine.dispose()
 
@@ -251,3 +265,4 @@ async def test_semantic_state_upserts_reuse_signature_rows(test_db):
     assert await test_db.scalar(select(func.count()).select_from(MemoirSourceCard)) == 1
     assert await test_db.scalar(select(func.count()).select_from(MemoirChapterCard)) == 1
     assert await test_db.scalar(select(func.count()).select_from(MemoirBookQualityAuditSnapshot)) == 1
+    assert await test_db.scalar(select(func.count()).select_from(MemoirChapterSourceLink)) == 0

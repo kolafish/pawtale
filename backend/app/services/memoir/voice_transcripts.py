@@ -51,6 +51,10 @@ from app.services.memoir.book_plan_sources import (
     source_ref_utterance_ids as _source_ref_utterance_ids,
 )
 from app.services.memoir.book_auto_revision import schedule_chapter_auto_revisions
+from app.services.memoir.chapter_source_links import (
+    mark_utterance_links_removed as _mark_utterance_links_removed,
+    update_utterance_link_ref_fields as _update_utterance_link_ref_fields,
+)
 from app.services.memoir.utterance_editing_pipeline import schedule_source_routing_for_ready_utterance
 
 
@@ -653,6 +657,13 @@ async def _sync_included_transcript_edit(
 
     if not changed_chapter_ids:
         return set()
+    await _update_utterance_link_ref_fields(
+        db,
+        project_id=project_id,
+        utterance_id=utterance.id,
+        transcript_version_id=transcript_version_id,
+        quote=_safe_quote(content),
+    )
     drafts = (
         await db.execute(
             select(MemoirBookChapterDraft).where(
@@ -806,7 +817,8 @@ async def _mark_book_sources_deleted(
             .options(selectinload(MemoirBookPlanChapter.draft))
         )
     ).scalars().all()
-    removed_at = datetime.now(timezone.utc).isoformat()
+    removed_at_dt = datetime.utcnow()
+    removed_at = removed_at_dt.replace(tzinfo=timezone.utc).isoformat()
     for chapter in chapters:
         refs = [ref for ref in (chapter.source_refs_json or []) if isinstance(ref, dict)]
         kept_refs = [ref for ref in refs if _source_ref_utterance_id(ref) != utterance_id]
@@ -844,6 +856,12 @@ async def _mark_book_sources_deleted(
             draft_metadata[REMOVED_SOURCE_UTTERANCE_IDS_KEY] = sorted(draft_removed_ids)
             chapter.draft.metadata_json = draft_metadata
             db.add(chapter.draft)
+    await _mark_utterance_links_removed(
+        db,
+        project_id=project_id,
+        utterance_id=utterance_id,
+        removed_at=removed_at_dt,
+    )
 
 
 async def delete_voice_transcript(

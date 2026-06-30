@@ -10,6 +10,7 @@ MEMOIR_SEMANTIC_TABLES = (
     "memoir_source_cards",
     "memoir_chapter_cards",
     "memoir_book_quality_audit_snapshots",
+    "memoir_chapter_source_links",
 )
 
 

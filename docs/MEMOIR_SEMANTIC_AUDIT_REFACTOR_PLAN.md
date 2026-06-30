@@ -463,7 +463,7 @@ updated_at
 - PR 4：已完成。新增章节卡片生成服务、`generate_or_reuse_chapter_card`、章节输入签名、source card 优先和原文 fallback、过期/失败记录以及 high/medium/low 缺口测试；暂不让章节卡片修改正文或接管主流程。
 - PR 5：已完成。规则审计写入 `rules_v1` snapshot；显式开启语义审计时会确保 high/medium 章节的 chapter card 并生成/复用 `llm_semantic_v1` snapshot；LLM 失败降级到规则 snapshot，事件只保存 snapshot 引用和展示字段。
 - PR 6：已完成。小程序成书页优先消费 `audit_snapshot.display` / `primary_action`，并展示“建议补问 / 建议补写 / 待整理素材”；语音追问 prompt 优先使用章节卡片 `next_questions`，再降级到审计快照或旧事件字段，且明确建议只作为可改写方向。
-- PR 7：未开始。
+- PR 7：已完成。新增 `MemoirChapterSourceLink`、迁移表清单和 `chapter_source_links.py` 幂等 backfill/sync 服务；确认/更新章节规划、自动归章、手动分配、素材移动、结构命令、转写编辑和删除素材会继续写旧 `source_refs_json`，同时双写或同步 link 表并记录 `assigned_by`、confidence、reason 和 active/removed 状态；读路径仍保持旧 JSON。
 - PR 8：未开始。
 - PR 9：未开始。
 - PR 10：未开始。
