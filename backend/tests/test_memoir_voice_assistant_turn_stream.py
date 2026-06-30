@@ -13,6 +13,7 @@ from app.domain.memoir.types import (
 from app.models.memoir import AudioFile, MemoirBookPlanChapter, MemoirChatMessage
 from app.services.ai_streaming import AITextStreamChunk
 from app.services.memoir import automation_events
+from app.services.memoir.semantic_state import upsert_book_quality_audit_snapshot, upsert_chapter_card
 from app.services.memoir.tts_alignment import TTSAlignmentSegment
 from app.services.memoir.voice_assistant_turn_stream import VoiceAssistantTurnStreamSession
 from app.services.memoir.voice_tts import StreamingTTSChunk
@@ -550,6 +551,149 @@ async def test_voice_assistant_turn_progress_prompt_uses_book_quality_audit_hint
     )
     assert assistant_message.metadata_json["progress_update"]["kind"] == "book_quality_audit"
     assert assistant_message.metadata_json["progress_automation_event_ids"] == [event.id]
+
+
+async def test_voice_assistant_turn_progress_prompt_prefers_semantic_chapter_card_questions(
+    client,
+    test_db,
+):
+    created = await create_test_voice_transcript(
+        client,
+        test_db,
+        text="我小时候常在外婆家院子里摘菜。",
+        guidance_mode="guided_interview",
+        current_guidance_module="family",
+    )
+    plan, chapter = await create_test_book_plan(
+        test_db,
+        project_id=created["session"]["project_id"],
+        chapter_title="院子里的童年",
+    )
+    chapter_card = await upsert_chapter_card(
+        test_db,
+        project_id=created["session"]["project_id"],
+        plan_id=plan.id,
+        chapter_id=chapter.id,
+        input_signature="chapter-card-signature-1",
+        engine="llm_chapter_card_v1",
+        card_json={
+            "summary": "本章围绕院子里的童年生活。",
+            "gaps": [
+                {"type": "event_sequence", "severity": "medium", "message": "剥青豆的前后经过还不连贯"}
+            ],
+            "next_questions": ["外婆在院子里最常做哪件事？"],
+            "evidence_refs": [{"utterance_id": created["utterance_id"], "quote": "外婆家院子里摘菜"}],
+        },
+    )
+    audit_snapshot = await upsert_book_quality_audit_snapshot(
+        test_db,
+        project_id=created["session"]["project_id"],
+        engine="llm_semantic_v1",
+        input_signature="audit-signature-1",
+        overall_status="needs_updates",
+        summary_text="语义审计认为「院子里的童年」可以继续补充。",
+        display_json={
+            "title": "院子里的童年可以继续补问",
+            "summary": "章节已有素材，但人物动作和事件经过还可以更具体。",
+            "detail": "优先顺着院子、外婆和摘菜继续追问。",
+        },
+        primary_action_json={
+            "type": "continue_interview",
+            "cta_text": "继续补问",
+            "chapter_id": chapter.id,
+        },
+        chapter_audits_json=[
+            {
+                "chapter_id": chapter.id,
+                "summary": "审计认为可以补充剥青豆的起因。",
+                "gaps": [
+                    {"type": "event_sequence", "severity": "medium", "message": "剥青豆事件缺少起因和经过"}
+                ],
+                "next_questions": ["那天为什么会一起剥青豆？"],
+                "evidence_refs": [{"utterance_id": created["utterance_id"], "quote": "外婆家院子里摘菜"}],
+            }
+        ],
+        chapter_card_ids_json=[chapter_card.id],
+    )
+    event = await automation_events.record_automation_event(
+        test_db,
+        project_id=created["session"]["project_id"],
+        event_type=MemoirAutomationEventType.AUDIT_COMPLETED,
+        summary_text="语义审计认为「院子里的童年」可以继续补充。",
+        metadata_json={
+            "source": "book_quality_audit",
+            "snapshot_id": audit_snapshot.id,
+            "snapshot_engine": "llm_semantic_v1",
+            "overall_status": "needs_updates",
+            "display": audit_snapshot.display_json,
+            "primary_action": audit_snapshot.primary_action_json,
+        },
+    )
+    await test_db.commit()
+
+    _, ai_client, _, completed = await _run_stream_turn(
+        test_db,
+        voice_session_id=created["session"]["id"],
+        user_id=created["user_id"],
+        chunks=["那院子里和外婆有关的细节，您还记得哪一件？"],
+    )
+
+    prompt = ai_client.calls[0]["user_prompt"]
+    assert "语义追问候选（可改写，不要照读）：外婆在院子里最常做哪件事？" in prompt
+    assert "章节缺口提示：剥青豆的前后经过还不连贯" in prompt
+    assert "那天为什么会一起剥青豆？" not in prompt
+    assert completed["progress_update"]["kind"] == "book_quality_audit"
+    assert completed["progress_update"]["event_ids"] == [event.id]
+    assert completed["progress_update"]["audit_question_source"] == "chapter_card"
+    assert completed["progress_update"]["audit_chapter_title"] == "院子里的童年"
+
+
+async def test_automation_event_response_does_not_expand_other_project_audit_snapshot(
+    client,
+    test_db,
+):
+    created = await create_test_voice_transcript(
+        client,
+        test_db,
+        text="我小时候常在外婆家院子里摘菜。",
+    )
+    other_project_response = await client.post("/api/mobile/memoir/projects", json={"title": "另一本回忆录"})
+    assert other_project_response.status_code == 201
+    other_project_id = other_project_response.json()["id"]
+    other_snapshot = await upsert_book_quality_audit_snapshot(
+        test_db,
+        project_id=other_project_id,
+        engine="llm_semantic_v1",
+        input_signature="other-project-audit-signature",
+        overall_status="needs_updates",
+        summary_text="另一个项目的审计摘要。",
+        display_json={
+            "title": "不应该出现在当前项目",
+            "summary": "跨项目 snapshot 不应展开。",
+            "detail": "这是一条隔离测试。",
+        },
+    )
+    await automation_events.record_automation_event(
+        test_db,
+        project_id=created["session"]["project_id"],
+        event_type=MemoirAutomationEventType.AUDIT_COMPLETED,
+        summary_text="当前项目的事件摘要。",
+        metadata_json={
+            "source": "book_quality_audit",
+            "snapshot_id": other_snapshot.id,
+            "snapshot_engine": "llm_semantic_v1",
+        },
+    )
+    await test_db.commit()
+
+    response = await automation_events.list_automation_events(
+        test_db,
+        user_id=created["user_id"],
+        project_id=created["session"]["project_id"],
+    )
+
+    assert len(response.items) == 1
+    assert "audit_snapshot" not in response.items[0].metadata_json
 
 
 async def test_voice_assistant_turn_guided_opening_references_previous_session(

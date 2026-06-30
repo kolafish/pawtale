@@ -223,6 +223,54 @@
   word-break: break-word;
 }
 
+.automation-suggestions {
+  margin-top: 12rpx;
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+}
+
+.automation-suggestion-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10rpx;
+  padding: 10rpx 12rpx;
+  border-radius: 10rpx;
+  background: #fff8ef;
+}
+
+.automation-suggestion-label {
+  flex: 0 0 auto;
+  padding: 3rpx 8rpx;
+  border-radius: 6rpx;
+  background: #7a3b31;
+  color: #fff8ef;
+  font-size: 19rpx;
+  font-weight: 800;
+  line-height: 1.25;
+}
+
+.automation-suggestion-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3rpx;
+}
+
+.automation-suggestion-body {
+  color: #5f3229;
+  font-size: 22rpx;
+  font-weight: 700;
+  line-height: 1.36;
+  word-break: break-word;
+}
+
+.automation-suggestion-chapter {
+  color: #8e675c;
+  font-size: 20rpx;
+  line-height: 1.25;
+}
+
 .automation-detail-toggle {
   display: inline-flex;
   margin-top: 12rpx;

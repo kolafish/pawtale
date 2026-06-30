@@ -81,6 +81,8 @@ export interface BookAutomationEventView {
   summaryText: string;
   detailText: string;
   suggestedActionText: string;
+  suggestionItems: BookAutomationEventSuggestionView[];
+  hasSuggestions: boolean;
   detailItems: BookAutomationEventDetailView[];
   detailExpanded: boolean;
   detailToggleText: string;
@@ -91,6 +93,13 @@ export interface BookAutomationEventView {
   canAcknowledge: boolean;
   canAct: boolean;
   busy: boolean;
+}
+
+export interface BookAutomationEventSuggestionView {
+  id: string;
+  labelText: string;
+  bodyText: string;
+  chapterText: string;
 }
 
 export interface BookAutomationEventDetailView {
@@ -429,18 +438,45 @@ function objectValue(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
 
+function objectList(value: unknown): Record<string, unknown>[] {
+  return Array.isArray(value) ? value.filter((item) => item && typeof item === "object" && !Array.isArray(item)) as Record<string, unknown>[] : [];
+}
+
 function stringValue(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function numberValue(value: unknown): number {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? Math.floor(number) : 0;
+}
+
+function stringList(value: unknown, limit = 4): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const items: string[] = [];
+  value.forEach((item) => {
+    const text = stringValue(item);
+    if (text && !items.includes(text) && items.length < limit) {
+      items.push(text);
+    }
+  });
+  return items;
+}
+
 function automationEventDisplay(event: MemoirAutomationEvent): Record<string, unknown> {
   const metadata = objectValue(event.metadata_json);
-  return objectValue(metadata.display);
+  const auditSnapshot = objectValue(metadata.audit_snapshot);
+  const snapshotDisplay = objectValue(auditSnapshot.display);
+  return Object.keys(snapshotDisplay).length ? snapshotDisplay : objectValue(metadata.display);
 }
 
 function automationEventPrimaryAction(event: MemoirAutomationEvent): Record<string, unknown> {
   const metadata = objectValue(event.metadata_json);
-  return objectValue(metadata.primary_action);
+  const auditSnapshot = objectValue(metadata.audit_snapshot);
+  const snapshotAction = objectValue(auditSnapshot.primary_action);
+  return Object.keys(snapshotAction).length ? snapshotAction : objectValue(metadata.primary_action);
 }
 
 function automationEventSuggestedActionText(event: MemoirAutomationEvent): string {
@@ -448,6 +484,108 @@ function automationEventSuggestedActionText(event: MemoirAutomationEvent): strin
     return "";
   }
   return stringValue(automationEventPrimaryAction(event).cta_text);
+}
+
+function automationEventAuditSnapshot(event: MemoirAutomationEvent): Record<string, unknown> {
+  return objectValue(objectValue(event.metadata_json).audit_snapshot);
+}
+
+function chapterTextFromAuditItem(item: Record<string, unknown>, fallback = ""): string {
+  const title = stringValue(item.chapter_title) || fallback;
+  return title ? `《${title}》` : "";
+}
+
+function actionSuggestionLabel(actionType: string): string {
+  if (actionType === "revise_chapter") {
+    return "建议补写";
+  }
+  if (actionType === "continue_interview") {
+    return "建议补问";
+  }
+  if (actionType === "review_sources") {
+    return "待整理素材";
+  }
+  return "建议操作";
+}
+
+function pushAuditSuggestion(
+  suggestions: BookAutomationEventSuggestionView[],
+  suggestion: {
+    labelText: string;
+    bodyText: string;
+    chapterText?: string;
+  },
+): void {
+  const { labelText, bodyText, chapterText = "" } = suggestion;
+  const body = trimText(bodyText);
+  if (!body || suggestions.some((item) => item.labelText === labelText && item.bodyText === body)) {
+    return;
+  }
+  suggestions.push({
+    id: `suggestion-${suggestions.length + 1}`,
+    labelText,
+    bodyText: body.length > 120 ? `${body.slice(0, 120)}...` : body,
+    chapterText,
+  });
+}
+
+function auditSuggestionItems(event: MemoirAutomationEvent): BookAutomationEventSuggestionView[] {
+  if (event.event_type !== "audit_completed") {
+    return [];
+  }
+  const metadata = objectValue(event.metadata_json);
+  const snapshot = automationEventAuditSnapshot(event);
+  const suggestions: BookAutomationEventSuggestionView[] = [];
+  const primaryAction = automationEventPrimaryAction(event);
+  const primaryChapter = objectValue(metadata.primary_chapter);
+  const primaryChapterTitle = stringValue(primaryChapter.title);
+  const ctaText = stringValue(primaryAction.cta_text);
+  if (ctaText) {
+    pushAuditSuggestion(suggestions, {
+      labelText: actionSuggestionLabel(stringValue(primaryAction.type)),
+      bodyText: ctaText,
+      chapterText: primaryChapterTitle ? `《${primaryChapterTitle}》` : "",
+    });
+  }
+
+  const pendingCount = numberValue(metadata.pending_utterance_count);
+  if (pendingCount) {
+    pushAuditSuggestion(suggestions, {
+      labelText: "待整理素材",
+      bodyText: `还有 ${pendingCount} 条讲述需要归章或确认。`,
+    });
+  }
+
+  const chapterCards = objectList(snapshot.chapter_cards);
+  const chapterAudits = objectList(snapshot.chapter_audits);
+  const pushQuestionSuggestions = (item: Record<string, unknown>) => {
+    stringList(item.next_questions, 2).forEach((question) => {
+      pushAuditSuggestion(suggestions, {
+        labelText: "建议补问",
+        bodyText: question,
+        chapterText: chapterTextFromAuditItem(item, primaryChapterTitle),
+      });
+    });
+  };
+  const questionCount = suggestions.filter((item) => item.labelText === "建议补问").length;
+  chapterCards.forEach(pushQuestionSuggestions);
+  if (suggestions.filter((item) => item.labelText === "建议补问").length === questionCount) {
+    chapterAudits.forEach(pushQuestionSuggestions);
+  }
+  [...chapterCards, ...chapterAudits].forEach((item) => {
+    objectList(item.gaps).slice(0, 2).forEach((gap) => {
+      const message = stringValue(gap.message);
+      if (message) {
+        pushAuditSuggestion(suggestions, {
+          labelText: "建议补写",
+          bodyText: message,
+          chapterText: chapterTextFromAuditItem(item, primaryChapterTitle),
+        });
+      }
+    });
+  });
+
+  return suggestions.slice(0, 5);
 }
 
 function quotedTitle(text: string): string {
@@ -523,6 +661,8 @@ function sourceAssignmentGroupView(
     summaryText: `${utteranceCount} 条讲述已自动整理进 ${chapterText}。`,
     detailText: "",
     suggestedActionText: "",
+    suggestionItems: [],
+    hasSuggestions: false,
     detailItems,
     detailExpanded: expanded,
     detailToggleText: expanded ? "收起详情" : `查看 ${detailItems.length || utteranceCount} 条详情`,
@@ -632,6 +772,7 @@ export function buildAutomationEventViews(
     .map((event) => {
       const actionKind = automationEventActionKind(event);
       const detailItems = automationEventDetailViews(event);
+      const suggestionItems = auditSuggestionItems(event);
       const expanded = Boolean(expandedTargets[event.id]);
       return {
         id: event.id,
@@ -644,6 +785,8 @@ export function buildAutomationEventViews(
         summaryText: automationEventSummaryText(event),
         detailText: automationEventDetailText(event),
         suggestedActionText: automationEventSuggestedActionText(event),
+        suggestionItems,
+        hasSuggestions: suggestionItems.length > 0,
         detailItems,
         detailExpanded: expanded,
         detailToggleText: expanded ? "收起详情" : `查看 ${detailItems.length} 条详情`,
