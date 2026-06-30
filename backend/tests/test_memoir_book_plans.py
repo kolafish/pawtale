@@ -6,6 +6,8 @@ from app.domain.memoir.types import (
     MemoirAutomationEventStatus,
     MemoirAutomationEventType,
     MemoirBookChapterDraftStatus,
+    MemoirChapterSourceAssignedBy,
+    MemoirChapterSourceLinkStatus,
     MemoirCreatedBy,
     MemoirEditingJobStatus,
     MemoirEditingJobType,
@@ -17,6 +19,7 @@ from app.models.memoir import (
     MemoirEditingJob,
     MemoirBookPlan,
     MemoirBookPlanChapter,
+    MemoirChapterSourceLink,
 )
 from app.services.memoir.book_plan_ai import ChapterTitleSourceDigest, build_chapter_title_prompt
 from app.services.memoir.book_plan_sources import (
@@ -86,6 +89,16 @@ class FakeChapterTitleAI:
             }
         )
         return json.dumps({"title": "外婆院中的日子"}, ensure_ascii=False)
+
+
+async def _chapter_source_links(test_db, *, project_id: str) -> list[MemoirChapterSourceLink]:
+    return (
+        await test_db.execute(
+            select(MemoirChapterSourceLink)
+            .where(MemoirChapterSourceLink.project_id == project_id)
+            .order_by(MemoirChapterSourceLink.chapter_id, MemoirChapterSourceLink.utterance_id)
+        )
+    ).scalars().all()
 
 
 async def _create_source_held_event(test_db, *, project_id: str, utterance_id: str) -> MemoirAutomationEvent:
@@ -510,6 +523,13 @@ async def test_mobile_memoir_book_source_assignment_appends_source_and_marks_dra
     assert later["utterance_id"] in data["chapters"][0]["metadata_json"]["pending_source_utterance_ids"]
     assert data["chapters"][0]["pending_source_count"] == 1
     assert data["chapters"][0]["removed_source_count"] == 0
+    links = await _chapter_source_links(test_db, project_id=project_id)
+    links_by_utterance = {link.utterance_id: link for link in links}
+    assert set(links_by_utterance) == {created["utterance_id"], later["utterance_id"]}
+    assert links_by_utterance[later["utterance_id"]].chapter_id == chapter_id
+    assert links_by_utterance[later["utterance_id"]].status == MemoirChapterSourceLinkStatus.ACTIVE.value
+    assert links_by_utterance[later["utterance_id"]].assigned_by == MemoirChapterSourceAssignedBy.USER.value
+    assert links_by_utterance[later["utterance_id"]].assignment_reason == "manual_source_assignment"
 
     refreshed_draft = await test_db.scalar(
         select(MemoirBookChapterDraft).where(MemoirBookChapterDraft.id == draft.id)
@@ -653,6 +673,17 @@ async def test_mobile_memoir_book_source_move_updates_only_source_and_target_cha
     ]
     assert chapters_by_id[target_chapter_id]["pending_source_count"] == 1
     assert chapters_by_id[target_chapter_id]["removed_source_count"] == 0
+    moved_links = [
+        link
+        for link in await _chapter_source_links(test_db, project_id=project_id)
+        if link.utterance_id == second["utterance_id"]
+    ]
+    links_by_chapter = {link.chapter_id: link for link in moved_links}
+    assert links_by_chapter[source_chapter_id].status == MemoirChapterSourceLinkStatus.REMOVED.value
+    assert links_by_chapter[source_chapter_id].removed_at is not None
+    assert links_by_chapter[target_chapter_id].status == MemoirChapterSourceLinkStatus.ACTIVE.value
+    assert links_by_chapter[target_chapter_id].assigned_by == MemoirChapterSourceAssignedBy.USER.value
+    assert links_by_chapter[target_chapter_id].assignment_reason == "manual_source_move"
 
     refreshed_source_draft = await test_db.scalar(
         select(MemoirBookChapterDraft).where(MemoirBookChapterDraft.id == source_draft.id)

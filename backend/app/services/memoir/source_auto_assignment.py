@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.domain.memoir.types import (
     MemoirAutomationEventStatus,
     MemoirAutomationEventType,
+    MemoirChapterSourceAssignedBy,
     MemoirEditingJobStatus,
 )
 from app.models.memoir import MemoirAutomationEvent, MemoirEditingJob
@@ -24,6 +25,7 @@ from app.schemas.memoir_voice import MemoirAutomationEventResponse
 from app.services.memoir import automation_events
 from app.services.memoir import book_quality_audit
 from app.services.memoir import book_plans
+from app.services.memoir.chapter_source_links import ChapterSourceAssignmentMetadata
 from app.services.memoir.editing_jobs import EditingJobResult
 from app.services.memoir import source_router
 from app.services.memoir.utterance_editing_pipeline import (
@@ -112,6 +114,22 @@ def _group_assignment_inputs(
         MemoirBookSourceAssignmentInput(chapter_id=chapter_id, utterance_ids=utterance_ids)
         for chapter_id, utterance_ids in grouped.items()
     ]
+
+
+def _assignment_link_metadata(
+    routes: list[MemoirBookSourceRouteResponse],
+    *,
+    threshold: float,
+) -> dict[str, ChapterSourceAssignmentMetadata]:
+    return {
+        route.utterance_id: ChapterSourceAssignmentMetadata(
+            assigned_by=MemoirChapterSourceAssignedBy.AI,
+            confidence=route.confidence,
+            reason=route.reason,
+        )
+        for route in routes
+        if _route_is_assignable(route, threshold=threshold)
+    }
 
 
 async def _record_assignment_events(
@@ -286,6 +304,9 @@ async def run_source_auto_assignment_for_utterances(
                 ai_model=ai_model,
                 assignments=assignment_inputs,
             ),
+            assigned_by=MemoirChapterSourceAssignedBy.AI,
+            assignment_reason="auto_assignment",
+            assignment_metadata_by_utterance=_assignment_link_metadata(routes, threshold=confidence_threshold),
         )
         events = await _record_assignment_events(
             db,

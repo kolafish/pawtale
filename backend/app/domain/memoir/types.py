@@ -94,3 +94,14 @@ class MemoirSemanticCacheStatus(str, Enum):
     READY = "ready"
     STALE = "stale"
     FAILED = "failed"
+
+
+class MemoirChapterSourceLinkStatus(str, Enum):
+    ACTIVE = "active"
+    REMOVED = "removed"
+
+
+class MemoirChapterSourceAssignedBy(str, Enum):
+    AI = "ai"
+    USER = "user"
+    SYSTEM = "system"

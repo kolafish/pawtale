@@ -5,12 +5,20 @@ from sqlalchemy.orm import selectinload
 
 from app.domain.memoir.types import (
     MemoirAutomationEventType,
+    MemoirChapterSourceAssignedBy,
+    MemoirChapterSourceLinkStatus,
     MemoirCreatedBy,
     MemoirEditingJobStatus,
     MemoirEditingJobType,
     MemoirTranscriptVersionType,
 )
-from app.models.memoir import MemoirAutomationEvent, MemoirEditingJob, MemoirTranscriptVersion, MemoirVoiceUtterance
+from app.models.memoir import (
+    MemoirAutomationEvent,
+    MemoirChapterSourceLink,
+    MemoirEditingJob,
+    MemoirTranscriptVersion,
+    MemoirVoiceUtterance,
+)
 from app.services.memoir.editing_job_handlers import register_memoir_editing_job_handlers
 from app.services.memoir.editing_jobs import clear_editing_job_handlers, enqueue_editing_job, run_editing_job
 from app.services.memoir.source_auto_assignment import run_source_auto_assignment_for_utterances
@@ -175,6 +183,28 @@ async def test_source_auto_assignment_assigns_high_confidence_source_and_records
     assert event.metadata_json["source"] == "auto_assignment"
     assert event.metadata_json["event_signature"] == f"source_assigned:{chapter.id}:{uncovered['utterance_id']}"
     assert event.metadata_json["confidence_threshold"] == 0.53
+    link = await test_db.scalar(
+        select(MemoirChapterSourceLink).where(
+            MemoirChapterSourceLink.project_id == project_id,
+            MemoirChapterSourceLink.chapter_id == chapter.id,
+            MemoirChapterSourceLink.utterance_id == uncovered["utterance_id"],
+        )
+    )
+    assert link is not None
+    assert link.status == MemoirChapterSourceLinkStatus.ACTIVE.value
+    assert link.assigned_by == MemoirChapterSourceAssignedBy.AI.value
+    assert link.assignment_confidence == 0.91
+    assert link.assignment_reason == "讲述延续同一个章节主题"
+    existing_link = await test_db.scalar(
+        select(MemoirChapterSourceLink).where(
+            MemoirChapterSourceLink.project_id == project_id,
+            MemoirChapterSourceLink.chapter_id == chapter.id,
+            MemoirChapterSourceLink.utterance_id == first["utterance_id"],
+        )
+    )
+    assert existing_link is not None
+    assert existing_link.assigned_by == MemoirChapterSourceAssignedBy.SYSTEM.value
+    assert existing_link.assignment_reason == "sync_existing_source_ref"
 
     job = await test_db.scalar(
         select(MemoirEditingJob).where(MemoirEditingJob.chapter_id == chapter.id)
