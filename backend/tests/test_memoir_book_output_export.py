@@ -1,8 +1,15 @@
+from typing import get_args
+
+from app.schemas.memoir_book import MemoirBookCoverStyle
+from app.services.memoir.book_outputs import _cover_style as normalize_book_cover_style
 from app.services.memoir.book_output_export import (
     COMMON_CHINESE_UNBREAKABLE_WORDS,
     LINE_END_FORBIDDEN_CHARS,
     LINE_START_FORBIDDEN_CHARS,
+    PDF_COVER_STYLES,
     PDF_LAYOUTS,
+    PDF_SERIF_BOLD_FONT_NAME,
+    PDF_SERIF_FONT_NAME,
     PDFBookBuilder,
     PDFLayout,
     MemoirBookOutputExportFormat,
@@ -11,6 +18,15 @@ from app.services.memoir.book_output_export import (
     render_book_output_export,
     _wrap_pdf_line,
 )
+
+
+EXPECTED_PDF_COVER_STYLES = {
+    "classic_plain",
+    "warm_gray",
+    "dark_album",
+    "moonlit_courtyard",
+    "navy_gilt",
+}
 
 
 def _sample_manuscript(chapter_content: str, *, cover_style: str | None = None) -> dict:
@@ -48,6 +64,18 @@ def _sample_manuscript(chapter_content: str, *, cover_style: str | None = None) 
             "source_appendix": {"kind": "source_appendix", "title": "章节来源", "content": "第1章：2 条。"},
         },
         "render_settings": render_settings,
+    }
+
+
+def _text_command(page, text: str):
+    return next(command for command in page.commands if command.text == text)
+
+
+def test_pdf_cover_styles_are_selectable_across_schema_service_and_export():
+    assert set(get_args(MemoirBookCoverStyle)) == EXPECTED_PDF_COVER_STYLES
+    assert EXPECTED_PDF_COVER_STYLES.issubset(PDF_COVER_STYLES)
+    assert {style: normalize_book_cover_style(style) for style in EXPECTED_PDF_COVER_STYLES} == {
+        style: style for style in EXPECTED_PDF_COVER_STYLES
     }
 
 
@@ -170,6 +198,49 @@ def test_navy_gilt_cover_style_uses_system_backgrounds():
     assert isinstance(export.content, bytes)
     assert export.content.startswith(b"%PDF-")
     assert b"/Subtype /Image" in export.content
+
+
+def test_image_cover_styles_use_distinct_title_typography():
+    def build_pages(cover_style: str):
+        manuscript = _sample_manuscript(
+            "因为是家乡，所以一想起来成都，心里面就觉得很温暖、很踏实。",
+            cover_style=cover_style,
+        )
+        manuscript["profile"]["title"] = "回望这一生"
+        manuscript["profile"]["subtitle"] = "余晋口述回忆录"
+        manuscript["render_settings"]["back_cover_quote"] = (
+            "因为是家乡，所以一想起来成都，心里面就觉得很温暖、很踏实。"
+        )
+        return _build_manuscript_pdf_pages(
+            title="回望这一生",
+            content="回望这一生",
+            manuscript=manuscript,
+            layout=PDF_LAYOUTS[MemoirBookOutputExportLayout.STANDARD],
+            show_source_appendix=None,
+        )
+
+    watercolor_pages = build_pages("moonlit_courtyard")
+    navy_pages = build_pages("navy_gilt")
+
+    watercolor_title = _text_command(watercolor_pages[0], "回望这一生")
+    navy_title = _text_command(navy_pages[0], "回望这一生")
+    watercolor_subtitle = _text_command(watercolor_pages[0], "余晋口述回忆录")
+    navy_subtitle = _text_command(navy_pages[0], "余晋口述回忆录")
+    watercolor_quote = _text_command(watercolor_pages[-1], "因为是家乡，")
+    navy_quote = _text_command(navy_pages[-1], "因为是家乡，")
+
+    assert watercolor_title.font_name == PDF_SERIF_FONT_NAME
+    assert navy_title.font_name == PDF_SERIF_BOLD_FONT_NAME
+    assert watercolor_title.font_size != navy_title.font_size
+    assert watercolor_title.char_spacing != navy_title.char_spacing
+    assert watercolor_subtitle.font_name == PDF_SERIF_FONT_NAME
+    assert navy_subtitle.font_name == PDF_SERIF_BOLD_FONT_NAME
+    assert watercolor_subtitle.font_size != navy_subtitle.font_size
+    assert watercolor_subtitle.char_spacing != navy_subtitle.char_spacing
+    assert watercolor_quote.font_name == PDF_SERIF_FONT_NAME
+    assert navy_quote.font_name == PDF_SERIF_BOLD_FONT_NAME
+    assert watercolor_quote.font_size != navy_quote.font_size
+    assert watercolor_quote.char_spacing != navy_quote.char_spacing
 
 
 def test_table_of_contents_links_to_numbered_chapter_pages():

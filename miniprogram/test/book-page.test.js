@@ -898,6 +898,24 @@ test("book page exposes PDF layout and print export controls", () => {
   assert.match(wxml, /bindchange="toggleBookExportSourceAppendix"/);
 });
 
+test("book page exposes all PDF cover style options", () => {
+  const { page } = loadBookPage();
+  const context = pageContext(page);
+
+  assert.deepEqual(
+    context.data.bookCoverStyleOptions.map((option) => option.value),
+    ["classic_plain", "warm_gray", "dark_album", "moonlit_courtyard", "navy_gilt"],
+  );
+  assert.equal(
+    context.data.bookCoverStyleOptions.find((option) => option.value === "moonlit_courtyard").label,
+    "月下庭院",
+  );
+  assert.equal(
+    context.data.bookCoverStyleOptions.find((option) => option.value === "navy_gilt").label,
+    "深蓝烫金",
+  );
+});
+
 test("book page exposes manuscript structure sections", () => {
   const wxml = fs.readFileSync(path.join(__dirname, "../pages/book/index.wxml"), "utf8");
 
