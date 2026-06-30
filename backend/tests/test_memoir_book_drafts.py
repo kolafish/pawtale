@@ -7,6 +7,7 @@ from app.domain.memoir.types import (
     MemoirAutomationEventType,
     MemoirBookChapterDraftStatus,
     MemoirBookPlanStatus,
+    MemoirChapterSourceLinkStatus,
     MemoirCreatedBy,
     MemoirEditingJobStatus,
     MemoirEditingJobType,
@@ -16,6 +17,7 @@ from app.models.memoir import (
     MemoirBookChapterDraft,
     MemoirBookChapterDraftVersion,
     MemoirEditingJob,
+    MemoirChapterSourceLink,
     MemoirBookPlanChapter,
 )
 from app.services.memoir.book_auto_revision import schedule_chapter_auto_revision
@@ -315,6 +317,120 @@ async def test_mobile_memoir_book_chapter_draft_supplements_pending_sources_with
         select(MemoirBookPlanChapter).where(MemoirBookPlanChapter.id == chapter.id)
     )
     assert refreshed_chapter.metadata_json == {}
+
+
+async def test_mobile_memoir_book_chapter_draft_supplements_link_only_pending_sources(
+    client,
+    test_db,
+    monkeypatch,
+):
+    first = await create_test_voice_transcript(client, test_db, "我小时候常在外婆家的院子里晒太阳。")
+    second = await create_test_voice_transcript(client, test_db, "后来我第一次离家去县城读书，心里很紧张。")
+    project_id = first["session"]["project_id"]
+    plan, chapter = await create_test_book_plan(
+        test_db,
+        project_id=project_id,
+        source_refs=[],
+        status=MemoirBookPlanStatus.CONFIRMED,
+    )
+    draft = MemoirBookChapterDraft(
+        project_id=project_id,
+        chapter_id=chapter.id,
+        status=MemoirBookChapterDraftStatus.DRAFT.value,
+        metadata_json={},
+    )
+    test_db.add(draft)
+    await test_db.flush()
+    version = MemoirBookChapterDraftVersion(
+        draft_id=draft.id,
+        project_id=project_id,
+        chapter_id=chapter.id,
+        version=1,
+        content="我小时候常在外婆家的院子里晒太阳。",
+        created_by=MemoirCreatedBy.AI.value,
+        prompt_snapshot="old prompt",
+    )
+    test_db.add(version)
+    await test_db.flush()
+    test_db.add_all([
+        MemoirChapterSourceLink(
+            project_id=project_id,
+            plan_id=plan.id,
+            chapter_id=chapter.id,
+            utterance_id=first["utterance_id"],
+            transcript_version_id=first["transcript_version_id"],
+            audio_file_id=first["audio_file_id"],
+            start_ms=0,
+            end_ms=8000,
+            quote="外婆家的院子",
+            status=MemoirChapterSourceLinkStatus.ACTIVE.value,
+            merged_draft_version_id=version.id,
+        ),
+        MemoirChapterSourceLink(
+            project_id=project_id,
+            plan_id=plan.id,
+            chapter_id=chapter.id,
+            utterance_id=second["utterance_id"],
+            transcript_version_id=second["transcript_version_id"],
+            audio_file_id=second["audio_file_id"],
+            start_ms=0,
+            end_ms=8000,
+            quote="第一次离家",
+            status=MemoirChapterSourceLinkStatus.ACTIVE.value,
+        ),
+    ])
+    await test_db.commit()
+    fake_ai = FakeBookDraftAI(
+        [
+            json.dumps(
+                {
+                    "mode": "supplement",
+                    "reason": "新增来源是第一次离家经历，适合补入新段落。",
+                    "pending_source_ids": [second["utterance_id"]],
+                    "related_existing_source_ids": [first["utterance_id"]],
+                    "coverage_requirements": ["补入第一次离家去县城读书的经历"],
+                },
+                ensure_ascii=False,
+            ),
+            "我小时候常在外婆家的院子里晒太阳。后来我第一次离家去县城读书。",
+        ]
+    )
+    monkeypatch.setattr(
+        "app.services.memoir.book_drafts.get_ai_service",
+        lambda model=None: fake_ai,
+    )
+
+    response = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-plan/chapters/{chapter.id}/draft",
+        json={},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    latest_version_id = data["latest_version"]["id"]
+    assert data["latest_version"]["version"] == 2
+    assert data["pending_source_count"] == 0
+    assert data["removed_source_count"] == 0
+    assert len(fake_ai.calls) == 2
+    assert f"utterance_id: {first['utterance_id']}" in fake_ai.calls[1]["user_prompt"]
+    assert f"utterance_id: {second['utterance_id']}" in fake_ai.calls[1]["user_prompt"]
+    assert "source_type: 既有来源" in fake_ai.calls[1]["user_prompt"]
+    assert "source_type: 新增来源" in fake_ai.calls[1]["user_prompt"]
+
+    refreshed_chapter = await test_db.scalar(
+        select(MemoirBookPlanChapter).where(MemoirBookPlanChapter.id == chapter.id)
+    )
+    assert refreshed_chapter.source_refs_json == []
+    links = (
+        await test_db.execute(
+            select(MemoirChapterSourceLink).where(
+                MemoirChapterSourceLink.chapter_id == chapter.id,
+                MemoirChapterSourceLink.status == MemoirChapterSourceLinkStatus.ACTIVE.value,
+            )
+        )
+    ).scalars().all()
+    assert {link.utterance_id for link in links} == {first["utterance_id"], second["utterance_id"]}
+    assert {link.merged_draft_version_id for link in links} == {latest_version_id}
 
 
 async def test_memoir_book_auto_revision_job_supplements_pending_sources(

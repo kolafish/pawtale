@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from datetime import datetime
+from dataclasses import dataclass
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -8,6 +9,7 @@ from sqlalchemy.orm import selectinload
 
 from app.domain.memoir.types import MemoirChapterSourceLinkStatus
 from app.models.memoir import (
+    MemoirBookChapterDraftVersion,
     MemoirBookPlan,
     MemoirBookPlanChapter,
     MemoirChapterSourceLink,
@@ -28,6 +30,22 @@ SOURCE_REF_KEYS = {
     "created_at",
     "quote",
 }
+PENDING_SOURCE_UTTERANCE_IDS_KEY = "pending_source_utterance_ids"
+REMOVED_SOURCE_UTTERANCE_IDS_KEY = "removed_source_utterance_ids"
+
+
+@dataclass(frozen=True)
+class ChapterSourceChangeState:
+    pending_source_ids: set[str]
+    removed_source_ids: set[str]
+
+    @property
+    def pending_source_count(self) -> int:
+        return len(self.pending_source_ids)
+
+    @property
+    def removed_source_count(self) -> int:
+        return len(self.removed_source_ids)
 
 
 def _sorted_chapters(plan: MemoirBookPlan) -> list[MemoirBookPlanChapter]:
@@ -48,6 +66,27 @@ def source_ref_utterance_ids(refs: list[dict[str, object]]) -> list[str]:
         for utterance_id in (source_ref_utterance_id(ref) for ref in refs)
         if utterance_id
     ]
+
+
+def _source_ids_from_metadata(metadata_json: dict | None, key: str) -> set[str]:
+    value = (metadata_json or {}).get(key, [])
+    if not isinstance(value, list):
+        return set()
+    return {item.strip() for item in value if isinstance(item, str) and item.strip()}
+
+
+def _legacy_change_state(
+    chapter: MemoirBookPlanChapter,
+    *,
+    valid_utterance_ids: set[str] | None = None,
+) -> ChapterSourceChangeState:
+    pending_source_ids = _source_ids_from_metadata(chapter.metadata_json, PENDING_SOURCE_UTTERANCE_IDS_KEY)
+    if valid_utterance_ids is not None:
+        pending_source_ids &= valid_utterance_ids
+    return ChapterSourceChangeState(
+        pending_source_ids=pending_source_ids,
+        removed_source_ids=_source_ids_from_metadata(chapter.metadata_json, REMOVED_SOURCE_UTTERANCE_IDS_KEY),
+    )
 
 
 def _legacy_source_refs(chapter: MemoirBookPlanChapter) -> list[dict[str, object]]:
@@ -87,6 +126,35 @@ async def _links_by_chapter(
     for link in rows:
         grouped.setdefault(link.chapter_id, []).append(link)
     return grouped
+
+
+async def _latest_versions_by_chapter(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    chapter_ids: set[str],
+) -> dict[str, MemoirBookChapterDraftVersion]:
+    if not chapter_ids:
+        return {}
+    rows = (
+        await db.execute(
+            select(MemoirBookChapterDraftVersion)
+            .where(
+                MemoirBookChapterDraftVersion.project_id == project_id,
+                MemoirBookChapterDraftVersion.chapter_id.in_(chapter_ids),
+            )
+            .order_by(
+                MemoirBookChapterDraftVersion.chapter_id,
+                MemoirBookChapterDraftVersion.version,
+                MemoirBookChapterDraftVersion.created_at,
+                MemoirBookChapterDraftVersion.id,
+            )
+        )
+    ).scalars().all()
+    latest_by_chapter: dict[str, MemoirBookChapterDraftVersion] = {}
+    for version in rows:
+        latest_by_chapter[version.chapter_id] = version
+    return latest_by_chapter
 
 
 async def _utterances_by_id(
@@ -241,6 +309,140 @@ def _source_refs_for_chapter(
         ))
         seen.add(utterance_id)
     return [item[3] for item in sorted(ordered_refs, key=lambda item: (item[0], item[1], item[2]))]
+
+
+def _link_change_state(
+    *,
+    chapter: MemoirBookPlanChapter,
+    links: list[MemoirChapterSourceLink],
+    latest_version: MemoirBookChapterDraftVersion | None,
+    valid_utterance_ids: set[str] | None = None,
+) -> ChapterSourceChangeState:
+    legacy_state = _legacy_change_state(chapter, valid_utterance_ids=valid_utterance_ids)
+    if not links:
+        return legacy_state
+
+    has_merge_state = any(link.merged_draft_version_id for link in links)
+    if not latest_version or not has_merge_state:
+        return legacy_state
+
+    pending_source_ids: set[str] = set()
+    removed_source_ids: set[str] = set()
+    active_link_ids: set[str] = set()
+    removed_link_ids: set[str] = set()
+    for link in links:
+        if link.status == MemoirChapterSourceLinkStatus.ACTIVE.value:
+            active_link_ids.add(link.utterance_id)
+            if link.merged_draft_version_id == latest_version.id:
+                continue
+            if valid_utterance_ids is None or link.utterance_id in valid_utterance_ids:
+                pending_source_ids.add(link.utterance_id)
+            continue
+
+        if link.status != MemoirChapterSourceLinkStatus.REMOVED.value:
+            continue
+        removed_link_ids.add(link.utterance_id)
+        if link.merged_draft_version_id == latest_version.id:
+            continue
+        if link.removed_at and link.removed_at <= latest_version.created_at:
+            continue
+        removed_source_ids.add(link.utterance_id)
+
+    pending_source_ids.update(legacy_state.pending_source_ids - active_link_ids)
+    removed_source_ids.update(legacy_state.removed_source_ids - removed_link_ids)
+    return ChapterSourceChangeState(
+        pending_source_ids=pending_source_ids,
+        removed_source_ids=removed_source_ids,
+    )
+
+
+async def chapter_source_change_state(
+    db: AsyncSession,
+    *,
+    chapter: MemoirBookPlanChapter,
+    valid_utterance_ids: set[str] | None = None,
+) -> ChapterSourceChangeState:
+    links = (
+        await db.execute(
+            select(MemoirChapterSourceLink).where(
+                MemoirChapterSourceLink.project_id == chapter.project_id,
+                MemoirChapterSourceLink.chapter_id == chapter.id,
+            )
+        )
+    ).scalars().all()
+    latest_version = (
+        await _latest_versions_by_chapter(
+            db,
+            project_id=chapter.project_id,
+            chapter_ids={chapter.id},
+        )
+    ).get(chapter.id)
+    return _link_change_state(
+        chapter=chapter,
+        links=list(links),
+        latest_version=latest_version,
+        valid_utterance_ids=valid_utterance_ids,
+    )
+
+
+async def chapter_source_change_states_by_chapter(
+    db: AsyncSession,
+    plan: MemoirBookPlan | None,
+    *,
+    valid_utterance_ids: set[str] | None = None,
+) -> dict[str, ChapterSourceChangeState]:
+    if not plan:
+        return {}
+    chapters = _sorted_chapters(plan)
+    links_by_chapter = await _links_by_chapter(db, plan=plan)
+    latest_versions_by_chapter = await _latest_versions_by_chapter(
+        db,
+        project_id=plan.project_id,
+        chapter_ids={chapter.id for chapter in chapters},
+    )
+    return {
+        chapter.id: _link_change_state(
+            chapter=chapter,
+            links=links_by_chapter.get(chapter.id, []),
+            latest_version=latest_versions_by_chapter.get(chapter.id),
+            valid_utterance_ids=valid_utterance_ids,
+        )
+        for chapter in chapters
+    }
+
+
+async def mark_chapter_sources_merged(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    chapter_id: str,
+    draft_version_id: str,
+    include_removed: bool = False,
+) -> int:
+    statuses = [MemoirChapterSourceLinkStatus.ACTIVE.value]
+    if include_removed:
+        statuses.append(MemoirChapterSourceLinkStatus.REMOVED.value)
+    links = (
+        await db.execute(
+            select(MemoirChapterSourceLink).where(
+                MemoirChapterSourceLink.project_id == project_id,
+                MemoirChapterSourceLink.chapter_id == chapter_id,
+                MemoirChapterSourceLink.status.in_(statuses),
+            )
+        )
+    ).scalars().all()
+    updated_count = 0
+    now = datetime.now(UTC).replace(tzinfo=None)
+    for link in links:
+        if link.merged_draft_version_id == draft_version_id:
+            continue
+        link.merged_draft_version_id = draft_version_id
+        link.updated_at = now
+        db.add(link)
+        updated_count += 1
+    if updated_count:
+        await db.flush()
+    return updated_count
 
 
 async def plan_source_ref_dicts_by_chapter(
