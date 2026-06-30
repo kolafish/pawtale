@@ -80,6 +80,7 @@ export interface BookAutomationEventView {
   titleText: string;
   summaryText: string;
   detailText: string;
+  suggestedActionText: string;
   detailItems: BookAutomationEventDetailView[];
   detailExpanded: boolean;
   detailToggleText: string;
@@ -365,7 +366,7 @@ function automationEventTitle(event: MemoirAutomationEvent): string {
     return "已自动补写";
   }
   if (event.event_type === "audit_completed") {
-    return "章节审计完成";
+    return stringValue(automationEventDisplay(event).title) || "成书整理建议";
   }
   if (event.event_type === "chapter_draft_generated") {
     return event.status === "pending" ? "章节生成中" : "章节已生成";
@@ -430,6 +431,23 @@ function objectValue(value: unknown): Record<string, unknown> {
 
 function stringValue(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function automationEventDisplay(event: MemoirAutomationEvent): Record<string, unknown> {
+  const metadata = objectValue(event.metadata_json);
+  return objectValue(metadata.display);
+}
+
+function automationEventPrimaryAction(event: MemoirAutomationEvent): Record<string, unknown> {
+  const metadata = objectValue(event.metadata_json);
+  return objectValue(metadata.primary_action);
+}
+
+function automationEventSuggestedActionText(event: MemoirAutomationEvent): string {
+  if (event.event_type !== "audit_completed") {
+    return "";
+  }
+  return stringValue(automationEventPrimaryAction(event).cta_text);
 }
 
 function quotedTitle(text: string): string {
@@ -504,6 +522,7 @@ function sourceAssignmentGroupView(
     titleText: "已自动归章",
     summaryText: `${utteranceCount} 条讲述已自动整理进 ${chapterText}。`,
     detailText: "",
+    suggestedActionText: "",
     detailItems,
     detailExpanded: expanded,
     detailToggleText: expanded ? "收起详情" : `查看 ${detailItems.length || utteranceCount} 条详情`,
@@ -521,6 +540,7 @@ function sourceAssignmentGroupView(
 
 function automationEventDetailText(event: MemoirAutomationEvent): string {
   const metadata = objectValue(event.metadata_json);
+  const display = automationEventDisplay(event);
   if (event.event_type === "source_held") {
     const route = objectValue(metadata.route);
     const action = stringValue(route.action);
@@ -532,6 +552,10 @@ function automationEventDetailText(event: MemoirAutomationEvent): string {
     return reason ? `${targetText}：${reason}` : targetText;
   }
   if (event.event_type === "audit_completed") {
+    const detail = stringValue(display.detail);
+    if (detail) {
+      return detail;
+    }
     const actions = Array.isArray(metadata.next_actions)
       ? metadata.next_actions.map((item) => stringValue(item)).filter(Boolean)
       : [];
@@ -585,6 +609,16 @@ function automationEventMetaText(event: MemoirAutomationEvent): string {
   return parts.filter(Boolean).join(" · ");
 }
 
+function automationEventSummaryText(event: MemoirAutomationEvent): string {
+  if (event.event_type === "audit_completed") {
+    const summary = stringValue(automationEventDisplay(event).summary);
+    if (summary) {
+      return summary;
+    }
+  }
+  return trimText(event.summary_text) || "AI 已完成一次自动处理。";
+}
+
 export function buildAutomationEventViews(
   events: MemoirAutomationEvent[] = [],
   busyTarget = "",
@@ -607,8 +641,9 @@ export function buildAutomationEventViews(
         actionKind,
         primaryUtteranceId: automationEventPrimaryUtteranceId(event),
         titleText: automationEventTitle(event),
-        summaryText: trimText(event.summary_text) || "AI 已完成一次自动处理。",
+        summaryText: automationEventSummaryText(event),
         detailText: automationEventDetailText(event),
+        suggestedActionText: automationEventSuggestedActionText(event),
         detailItems,
         detailExpanded: expanded,
         detailToggleText: expanded ? "收起详情" : `查看 ${detailItems.length} 条详情`,

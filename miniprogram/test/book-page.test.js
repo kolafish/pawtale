@@ -1171,6 +1171,8 @@ test("book page asks logged-in users to create a memoir before loading book cont
 });
 
 test("book page shows and acknowledges automation events", async () => {
+  const wxml = fs.readFileSync(path.join(__dirname, "../pages/book/index.wxml"), "utf8");
+  assert.match(wxml, /suggestedActionText/);
   const acknowledged = [];
   const { page } = loadBookPage({
     authExports: {
@@ -1414,6 +1416,32 @@ test("book page builds detailed automation event views", () => {
       summary_text: "当前有 1 个章节需要优先处理。",
       confidence: null,
       metadata_json: {
+        display: {
+          title: "「院子里的童年」有新内容待写入",
+          summary: "有 1 条新讲述还没有补进正文。",
+          detail: "建议先补写本章，再继续补充人物、地点和细节。",
+        },
+        primary_action: {
+          type: "revise_chapter",
+          cta_text: "补写本章",
+          chapter_id: "chapter-1",
+          utterance_count: 1,
+        },
+        next_actions: ["整理 2 条尚未归章的讲述记录", "可以追问外婆在厨房里的细节"],
+      },
+      created_at: "2026-06-23T12:00:00",
+      updated_at: "2026-06-23T12:00:00",
+    },
+    {
+      id: "event-audit-legacy",
+      project_id: "project/1",
+      event_type: "audit_completed",
+      status: "completed",
+      chapter_id: null,
+      utterance_ids: [],
+      summary_text: "当前有 1 个章节需要优先处理。",
+      confidence: null,
+      metadata_json: {
         next_actions: ["整理 2 条尚未归章的讲述记录", "可以追问外婆在厨房里的细节"],
       },
       created_at: "2026-06-23T12:00:00",
@@ -1428,8 +1456,15 @@ test("book page builds detailed automation event views", () => {
   assert.equal(items[0].actionText, "去整理");
   assert.equal(items[0].actionKind, "review_source");
   assert.equal(items[0].primaryUtteranceId, "utterance-1");
-  assert.equal(items[1].titleText, "章节审计完成");
-  assert.equal(items[1].detailText, "整理 2 条尚未归章的讲述记录；可以追问外婆在厨房里的细节");
+  assert.equal(items[1].titleText, "「院子里的童年」有新内容待写入");
+  assert.equal(items[1].summaryText, "有 1 条新讲述还没有补进正文。");
+  assert.equal(items[1].detailText, "建议先补写本章，再继续补充人物、地点和细节。");
+  assert.equal(items[1].suggestedActionText, "补写本章");
+  assert.equal(items[1].actionText, "知道了");
+  assert.equal(items[2].titleText, "成书整理建议");
+  assert.equal(items[2].summaryText, "当前有 1 个章节需要优先处理。");
+  assert.equal(items[2].detailText, "整理 2 条尚未归章的讲述记录；可以追问外婆在厨房里的细节");
+  assert.equal(items[2].suggestedActionText, "");
 });
 
 test("book page opens transcripts for pending source automation events", async () => {
