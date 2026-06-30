@@ -19,6 +19,7 @@ from app.domain.memoir.types import (
     MemoirCreatedBy,
     MemoirGuidanceMode,
     MemoirOutputStatus,
+    MemoirSemanticCacheStatus,
     MemoirTranscriptVersionType,
     MemoirVoiceSessionStatus,
 )
@@ -397,6 +398,133 @@ class MemoirBookOutputVersion(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     output: Mapped[MemoirBookOutput] = orm_relationship("MemoirBookOutput", back_populates="versions")
+
+
+class MemoirSourceCard(Base):
+    __tablename__ = "memoir_source_cards"
+    __table_args__ = (
+        UniqueConstraint(
+            "project_id",
+            "utterance_id",
+            "engine",
+            "source_text_hash",
+            name="uq_memoir_source_cards_signature",
+        ),
+        CheckConstraint(
+            f"status IN ({_enum_values(MemoirSemanticCacheStatus)})",
+            name="ck_memoir_source_cards_status",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    project_id: Mapped[str] = mapped_column(String(36), ForeignKey("projects.id"), nullable=False, index=True)
+    utterance_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("memoir_voice_utterances.id"),
+        nullable=False,
+        index=True,
+    )
+    transcript_version_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("memoir_transcript_versions.id"),
+        nullable=True,
+        index=True,
+    )
+    source_text_hash: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    engine: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(
+        String(20),
+        default=MemoirSemanticCacheStatus.READY.value,
+        nullable=False,
+        index=True,
+    )
+    card_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    error_message: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    project: Mapped["Project"] = orm_relationship("Project")
+    utterance: Mapped[MemoirVoiceUtterance] = orm_relationship("MemoirVoiceUtterance")
+    transcript_version: Mapped[MemoirTranscriptVersion | None] = orm_relationship("MemoirTranscriptVersion")
+
+
+class MemoirChapterCard(Base):
+    __tablename__ = "memoir_chapter_cards"
+    __table_args__ = (
+        UniqueConstraint(
+            "project_id",
+            "chapter_id",
+            "engine",
+            "input_signature",
+            name="uq_memoir_chapter_cards_signature",
+        ),
+        CheckConstraint(
+            f"status IN ({_enum_values(MemoirSemanticCacheStatus)})",
+            name="ck_memoir_chapter_cards_status",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    project_id: Mapped[str] = mapped_column(String(36), ForeignKey("projects.id"), nullable=False, index=True)
+    plan_id: Mapped[str] = mapped_column(String(36), ForeignKey("memoir_book_plans.id"), nullable=False, index=True)
+    chapter_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("memoir_book_plan_chapters.id"),
+        nullable=False,
+        index=True,
+    )
+    draft_version_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("memoir_book_chapter_draft_versions.id"),
+        nullable=True,
+        index=True,
+    )
+    input_signature: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    engine: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(
+        String(20),
+        default=MemoirSemanticCacheStatus.READY.value,
+        nullable=False,
+        index=True,
+    )
+    card_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    error_message: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    project: Mapped["Project"] = orm_relationship("Project")
+    plan: Mapped[MemoirBookPlan] = orm_relationship("MemoirBookPlan")
+    chapter: Mapped[MemoirBookPlanChapter] = orm_relationship("MemoirBookPlanChapter")
+    draft_version: Mapped[MemoirBookChapterDraftVersion | None] = orm_relationship("MemoirBookChapterDraftVersion")
+
+
+class MemoirBookQualityAuditSnapshot(Base):
+    __tablename__ = "memoir_book_quality_audit_snapshots"
+    __table_args__ = (
+        UniqueConstraint(
+            "project_id",
+            "engine",
+            "input_signature",
+            name="uq_memoir_book_quality_audit_snapshots_signature",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    project_id: Mapped[str] = mapped_column(String(36), ForeignKey("projects.id"), nullable=False, index=True)
+    engine: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    input_signature: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    overall_status: Mapped[str] = mapped_column(String(40), default="", nullable=False, index=True)
+    summary_text: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    display_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    primary_action_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    chapter_audits_json: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    source_card_ids_json: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    chapter_card_ids_json: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    error_message: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    project: Mapped["Project"] = orm_relationship("Project")
 
 
 class MemoirEditingJob(Base):

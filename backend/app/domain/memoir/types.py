@@ -87,3 +87,9 @@ class MemoirAutomationEventStatus(str, Enum):
     COMPLETED = "completed"
     FAILED = "failed"
     NEEDS_REVIEW = "needs_review"
+
+
+class MemoirSemanticCacheStatus(str, Enum):
+    READY = "ready"
+    STALE = "stale"
+    FAILED = "failed"

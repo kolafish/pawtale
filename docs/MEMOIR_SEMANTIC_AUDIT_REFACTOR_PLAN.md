@@ -458,7 +458,7 @@ updated_at
 ## 当前状态
 
 - PR 1：已完成。审计展示契约已落地，后端输出并写入 `display`、`primary_action`、`primary_chapter`，小程序成书页已优先展示这些字段并保留旧事件 fallback。
-- PR 2：未开始。
+- PR 2：已完成。新增 `MemoirSourceCard`、`MemoirChapterCard`、`MemoirBookQualityAuditSnapshot` 派生表、基础 schema、幂等 upsert helper 和迁移/索引约束测试；暂不接入 LLM 或现有成书主流程。
 - PR 3：未开始。
 - PR 4：未开始。
 - PR 5：未开始。
