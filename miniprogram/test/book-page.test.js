@@ -1434,17 +1434,61 @@ test("book page builds detailed automation event views", () => {
       summary_text: "当前有 1 个章节需要优先处理。",
       confidence: null,
       metadata_json: {
+        audit_snapshot: {
+          id: "snapshot-1",
+          engine: "llm_semantic_v1",
+          overall_status: "needs_updates",
+          display: {
+            title: "「院子里的童年」有新内容待写入",
+            summary: "有 1 条新讲述还没有补进正文。",
+            detail: "建议先补写本章，再继续补充人物、地点和细节。",
+          },
+          primary_action: {
+            type: "revise_chapter",
+            cta_text: "补写本章",
+            chapter_id: "chapter-1",
+            utterance_count: 1,
+          },
+          chapter_cards: [
+            {
+              id: "chapter-card-1",
+              chapter_id: "chapter-1",
+              chapter_title: "院子里的童年",
+              summary: "本章围绕院子里的童年生活。",
+              gaps: [
+                { type: "event_sequence", severity: "medium", message: "剥青豆的前后经过还不连贯" },
+              ],
+              next_questions: ["外婆在院子里最常做什么？"],
+            },
+          ],
+          chapter_audits: [
+            {
+              chapter_id: "chapter-1",
+              chapter_title: "院子里的童年",
+              summary: "新增剥青豆素材待写入。",
+              gaps: [
+                { type: "event_sequence", severity: "medium", message: "剥青豆事件缺少起因和经过" },
+              ],
+              next_questions: ["那天为什么会一起剥青豆？"],
+            },
+          ],
+        },
         display: {
-          title: "「院子里的童年」有新内容待写入",
-          summary: "有 1 条新讲述还没有补进正文。",
-          detail: "建议先补写本章，再继续补充人物、地点和细节。",
+          title: "旧展示标题",
+          summary: "旧展示摘要。",
+          detail: "旧展示详情。",
         },
         primary_action: {
           type: "revise_chapter",
-          cta_text: "补写本章",
+          cta_text: "旧操作",
           chapter_id: "chapter-1",
           utterance_count: 1,
         },
+        primary_chapter: {
+          chapter_id: "chapter-1",
+          title: "院子里的童年",
+        },
+        pending_utterance_count: 2,
         next_actions: ["整理 2 条尚未归章的讲述记录", "可以追问外婆在厨房里的细节"],
       },
       created_at: "2026-06-23T12:00:00",
@@ -1478,11 +1522,73 @@ test("book page builds detailed automation event views", () => {
   assert.equal(items[1].summaryText, "有 1 条新讲述还没有补进正文。");
   assert.equal(items[1].detailText, "建议先补写本章，再继续补充人物、地点和细节。");
   assert.equal(items[1].suggestedActionText, "补写本章");
+  assert.equal(items[1].hasSuggestions, true);
+  assert.equal(items[1].suggestionItems[0].labelText, "建议补写");
+  assert.equal(items[1].suggestionItems[0].bodyText, "补写本章");
+  assert.equal(items[1].suggestionItems[1].labelText, "待整理素材");
+  assert.equal(items[1].suggestionItems[1].bodyText, "还有 2 条讲述需要归章或确认。");
+  assert.equal(items[1].suggestionItems[2].labelText, "建议补问");
+  assert.equal(items[1].suggestionItems[2].bodyText, "外婆在院子里最常做什么？");
+  assert.equal(items[1].suggestionItems[2].chapterText, "《院子里的童年》");
   assert.equal(items[1].actionText, "知道了");
   assert.equal(items[2].titleText, "成书整理建议");
   assert.equal(items[2].summaryText, "当前有 1 个章节需要优先处理。");
   assert.equal(items[2].detailText, "整理 2 条尚未归章的讲述记录；可以追问外婆在厨房里的细节");
   assert.equal(items[2].suggestedActionText, "");
+  assert.equal(items[2].hasSuggestions, false);
+});
+
+test("book page falls back to audit snapshot questions when chapter card has none", () => {
+  const { mod } = loadBookPage();
+
+  const items = mod.buildAutomationEventViews([
+    {
+      id: "event-audit",
+      project_id: "project/1",
+      event_type: "audit_completed",
+      status: "completed",
+      chapter_id: null,
+      utterance_ids: [],
+      summary_text: "当前有 1 个章节需要继续补问。",
+      confidence: null,
+      metadata_json: {
+        audit_snapshot: {
+          id: "snapshot-1",
+          display: {
+            title: "院子里的童年可以继续补问",
+            summary: "章节已有素材，但还缺少细节。",
+            detail: "顺着院子和外婆继续追问。",
+          },
+          primary_action: {
+            type: "continue_interview",
+            cta_text: "继续补问",
+            chapter_id: "chapter-1",
+          },
+          chapter_cards: [
+            {
+              id: "chapter-card-1",
+              chapter_id: "chapter-1",
+              chapter_title: "院子里的童年",
+              next_questions: [],
+            },
+          ],
+          chapter_audits: [
+            {
+              chapter_id: "chapter-1",
+              chapter_title: "院子里的童年",
+              next_questions: ["那时外婆在院子里最常做什么？"],
+            },
+          ],
+        },
+      },
+      created_at: "2026-06-23T12:00:00",
+      updated_at: "2026-06-23T12:00:00",
+    },
+  ]);
+
+  assert.equal(items[0].hasSuggestions, true);
+  assert.equal(items[0].suggestionItems[1].labelText, "建议补问");
+  assert.equal(items[0].suggestionItems[1].bodyText, "那时外婆在院子里最常做什么？");
 });
 
 test("book page opens transcripts for pending source automation events", async () => {

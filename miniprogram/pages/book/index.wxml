@@ -63,7 +63,16 @@
         </view>
         <text class="automation-item-summary">{{item.summaryText}}</text>
         <text wx:if="{{item.detailText}}" class="automation-item-detail">{{item.detailText}}</text>
-        <text wx:if="{{item.suggestedActionText}}" class="automation-item-suggestion">建议操作：{{item.suggestedActionText}}</text>
+        <view wx:if="{{item.hasSuggestions}}" class="automation-suggestions">
+          <view wx:for="{{item.suggestionItems}}" wx:key="id" wx:for-item="suggestion" class="automation-suggestion-row">
+            <text class="automation-suggestion-label">{{suggestion.labelText}}</text>
+            <view class="automation-suggestion-copy">
+              <text class="automation-suggestion-body">{{suggestion.bodyText}}</text>
+              <text wx:if="{{suggestion.chapterText}}" class="automation-suggestion-chapter">{{suggestion.chapterText}}</text>
+            </view>
+          </view>
+        </view>
+        <text wx:if="{{item.suggestedActionText && !item.hasSuggestions}}" class="automation-item-suggestion">建议操作：{{item.suggestedActionText}}</text>
         <view
           wx:if="{{item.hasDetails}}"
           class="automation-detail-toggle"

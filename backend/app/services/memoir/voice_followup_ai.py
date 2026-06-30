@@ -221,9 +221,22 @@ def _progress_prompt_text(selected_update: dict[str, object]) -> str:
     if selected_update.get("kind") == "book_quality_audit":
         hint = selected_update.get("audit_hint")
         next_actions = selected_update.get("next_actions")
+        semantic_questions = selected_update.get("audit_next_questions")
+        semantic_gaps = selected_update.get("audit_gap_hints")
+        if isinstance(semantic_questions, list):
+            questions = [str(item).strip() for item in semantic_questions if str(item).strip()]
+            if questions:
+                lines.append(f"- 语义追问候选（可改写，不要照读）：{'；'.join(questions[:3])}")
+        if isinstance(semantic_gaps, list):
+            gaps = [str(item).strip() for item in semantic_gaps if str(item).strip()]
+            if gaps:
+                lines.append(f"- 章节缺口提示：{'；'.join(gaps[:3])}")
         if isinstance(hint, str) and hint.strip():
             lines.append(f"- 可选访谈引导方向：{hint.strip()[:120]}")
-        if isinstance(next_actions, list):
+        if isinstance(next_actions, list) and not (
+            isinstance(semantic_questions, list)
+            and any(str(item).strip() for item in semantic_questions)
+        ):
             actions = [str(item).strip() for item in next_actions if str(item).strip()]
             if actions:
                 lines.append(f"- 审计建议下一步：{'；'.join(actions[:2])}")
@@ -408,9 +421,13 @@ def _audit_event_progress_update(
         "event_status": status,
         "audit_overall_status": metadata.get("overall_status", ""),
         "next_actions": next_actions if isinstance(next_actions, list) else [],
-        "audit_hint": chapter.get("interview_hint", "") if chapter else "",
-        "audit_chapter_id": chapter.get("chapter_id", "") if chapter else "",
-        "audit_chapter_title": chapter.get("title", "") if chapter else "",
+        "audit_hint": _audit_hint(metadata, chapter),
+        "audit_next_questions": _audit_next_questions(metadata),
+        "audit_question_source": _audit_question_source(metadata),
+        "audit_gap_hints": _audit_gap_hints(metadata),
+        "audit_chapter_id": _audit_chapter_value(metadata, chapter, "chapter_id"),
+        "audit_chapter_title": _audit_chapter_value(metadata, chapter, "chapter_title")
+        or _audit_chapter_value(metadata, chapter, "title"),
         "audit_chapter_status": chapter.get("status", "") if chapter else "",
         "audit_attention": chapter.get("attention", "") if chapter else "",
     }
@@ -422,6 +439,108 @@ def _first_attention_chapter(chapter_items: list[object]) -> dict[str, object] |
     if high:
         return high
     return next((item for item in chapters if item.get("attention") == "medium"), None)
+
+
+def _object_dict(value: object) -> dict[str, object]:
+    return value if isinstance(value, dict) else {}
+
+
+def _object_items(value: object) -> list[dict[str, object]]:
+    return [item for item in value if isinstance(item, dict)] if isinstance(value, list) else []
+
+
+def _clean_hint_text(value: object, *, limit: int = 120) -> str:
+    text = re.sub(r"\s+", " ", str(value or "")).strip()
+    return text[:limit].rstrip() if len(text) > limit else text
+
+
+def _audit_snapshot(metadata: dict[str, object]) -> dict[str, object]:
+    return _object_dict(metadata.get("audit_snapshot"))
+
+
+def _audit_snapshot_chapter_cards(metadata: dict[str, object]) -> list[dict[str, object]]:
+    return _object_items(_audit_snapshot(metadata).get("chapter_cards"))
+
+
+def _audit_snapshot_chapter_audits(metadata: dict[str, object]) -> list[dict[str, object]]:
+    return _object_items(_audit_snapshot(metadata).get("chapter_audits"))
+
+
+def _audit_questions_from_items(items: list[dict[str, object]]) -> list[str]:
+    questions: list[str] = []
+    for item in items:
+        for question in item.get("next_questions", []) if isinstance(item.get("next_questions"), list) else []:
+            text = _clean_hint_text(question, limit=100)
+            if text and text not in questions:
+                questions.append(text)
+            if len(questions) >= 4:
+                return questions
+    return questions
+
+
+def _audit_next_questions(metadata: dict[str, object]) -> list[str]:
+    return (
+        _audit_questions_from_items(_audit_snapshot_chapter_cards(metadata))
+        or _audit_questions_from_items(_audit_snapshot_chapter_audits(metadata))
+        or _audit_questions_from_items([_audit_snapshot(metadata)])
+    )
+
+
+def _audit_question_source(metadata: dict[str, object]) -> str:
+    if _audit_questions_from_items(_audit_snapshot_chapter_cards(metadata)):
+        return "chapter_card"
+    if _audit_questions_from_items(_audit_snapshot_chapter_audits(metadata)):
+        return "audit_snapshot"
+    if _audit_questions_from_items([_audit_snapshot(metadata)]):
+        return "audit_snapshot"
+    return ""
+
+
+def _audit_gap_hints(metadata: dict[str, object]) -> list[str]:
+    hints: list[str] = []
+    for item in _audit_snapshot_chapter_cards(metadata) + _audit_snapshot_chapter_audits(metadata):
+        for gap in item.get("gaps", []) if isinstance(item.get("gaps"), list) else []:
+            if not isinstance(gap, dict):
+                continue
+            message = _clean_hint_text(gap.get("message"), limit=120)
+            if message and message not in hints:
+                hints.append(message)
+            if len(hints) >= 4:
+                return hints
+    return hints
+
+
+def _first_audit_snapshot_chapter(metadata: dict[str, object]) -> dict[str, object]:
+    for item in _audit_snapshot_chapter_cards(metadata) + _audit_snapshot_chapter_audits(metadata):
+        if item.get("chapter_id"):
+            return item
+    return {}
+
+
+def _audit_chapter_value(
+    metadata: dict[str, object],
+    legacy_chapter: dict[str, object] | None,
+    key: str,
+) -> str:
+    snapshot_chapter = _first_audit_snapshot_chapter(metadata)
+    value = _clean_hint_text(snapshot_chapter.get(key), limit=120)
+    if value:
+        return value
+    return _clean_hint_text(legacy_chapter.get(key), limit=120) if legacy_chapter else ""
+
+
+def _audit_hint(metadata: dict[str, object], legacy_chapter: dict[str, object] | None) -> str:
+    questions = _audit_next_questions(metadata)
+    if questions:
+        return ""
+    gaps = _audit_gap_hints(metadata)
+    if gaps:
+        return gaps[0]
+    snapshot_chapter = _first_audit_snapshot_chapter(metadata)
+    summary = _clean_hint_text(snapshot_chapter.get("summary"), limit=120)
+    if summary:
+        return summary
+    return _clean_hint_text(legacy_chapter.get("interview_hint"), limit=120) if legacy_chapter else ""
 
 
 def _snapshot_milestone_progress_update(
