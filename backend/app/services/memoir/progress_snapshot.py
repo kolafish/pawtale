@@ -33,6 +33,9 @@ from app.services.memoir.book_plan_sources import (
     pending_source_ids,
     removed_source_ids,
     sorted_chapters,
+)
+from app.services.memoir.book_source_links import (
+    plan_source_ref_dicts_by_chapter,
     source_ref_utterance_ids,
 )
 
@@ -177,15 +180,18 @@ def _chapter_items(
     plan: MemoirBookPlan | None,
     *,
     valid_utterance_ids: set[str],
+    source_refs_by_chapter: dict[str, list[dict[str, object]]] | None = None,
 ) -> list[MemoirProjectProgressChapterResponse]:
     if not plan:
         return []
     draft_word_counts = _latest_draft_word_counts(plan)
     items: list[MemoirProjectProgressChapterResponse] = []
+    refs_by_chapter = source_refs_by_chapter
     for chapter in sorted_chapters(plan):
+        refs = refs_by_chapter.get(chapter.id, []) if refs_by_chapter is not None else (chapter.source_refs_json or [])
         source_ids = {
             utterance_id
-            for utterance_id in source_ref_utterance_ids(chapter.source_refs_json or [])
+            for utterance_id in source_ref_utterance_ids(refs)
             if utterance_id in valid_utterance_ids
         }
         draft = chapter.draft
@@ -248,13 +254,18 @@ async def get_project_progress_snapshot(
     valid_utterance_ids = {utterance.id for utterance in visible}
 
     plan = await _load_project_plan(db, project_id)
+    source_refs_by_chapter = await plan_source_ref_dicts_by_chapter(db, plan)
     assigned_utterance_ids = {
         utterance_id
-        for chapter in (plan.chapters if plan else [])
-        for utterance_id in source_ref_utterance_ids(chapter.source_refs_json or [])
+        for refs in source_refs_by_chapter.values()
+        for utterance_id in source_ref_utterance_ids(refs)
         if utterance_id in valid_utterance_ids
     }
-    chapter_items = _chapter_items(plan, valid_utterance_ids=valid_utterance_ids)
+    chapter_items = _chapter_items(
+        plan,
+        valid_utterance_ids=valid_utterance_ids,
+        source_refs_by_chapter=source_refs_by_chapter,
+    )
     recent_events = await automation_events.recent_automation_event_responses(
         db,
         user_id=user_id,

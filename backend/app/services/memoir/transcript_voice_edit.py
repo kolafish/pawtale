@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.models.memoir import MemoirBookPlanChapter, MemoirChatMessage, MemoirVoiceSession, MemoirVoiceUtterance
+from app.models.memoir import MemoirBookPlan, MemoirChatMessage, MemoirVoiceSession, MemoirVoiceUtterance
 from app.models.projects import Project
 from app.schemas.memoir_voice import (
     MemoirVoiceTranscriptVoiceEditChangeResponse,
@@ -18,7 +18,7 @@ from app.schemas.memoir_voice import (
 from app.services.ai_factory import get_ai_service
 from app.services.ai_types import AITextClient
 from app.services.json_utils import extract_json_payload
-from app.services.memoir.book_plan_sources import source_ref_utterance_id
+from app.services.memoir.book_source_links import plan_source_ref_dicts_by_chapter, source_ref_utterance_id
 
 
 SYSTEM_PROMPT = "你是一位谨慎的中文口述记录修正助手，只能按用户明确指出的细节错误修正当前这一条讲述记录。"
@@ -79,18 +79,20 @@ async def _included_chapter_titles(
     project_id: str,
     utterance_id: str,
 ) -> list[str]:
-    chapters = (
+    plans = (
         await db.execute(
-            select(MemoirBookPlanChapter)
-            .where(MemoirBookPlanChapter.project_id == project_id)
-            .order_by(MemoirBookPlanChapter.sort_order)
+            select(MemoirBookPlan)
+            .where(MemoirBookPlan.project_id == project_id)
+            .options(selectinload(MemoirBookPlan.chapters))
         )
     ).scalars().all()
     titles: list[str] = []
-    for chapter in chapters:
-        refs = [ref for ref in (chapter.source_refs_json or []) if isinstance(ref, dict)]
-        if any(source_ref_utterance_id(ref) == utterance_id for ref in refs):
-            titles.append(chapter.title)
+    for plan in plans:
+        refs_by_chapter = await plan_source_ref_dicts_by_chapter(db, plan)
+        for chapter in sorted(plan.chapters, key=lambda item: item.sort_order):
+            refs = refs_by_chapter.get(chapter.id, [])
+            if any(source_ref_utterance_id(ref) == utterance_id for ref in refs):
+                titles.append(chapter.title)
     return titles
 
 

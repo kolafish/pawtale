@@ -63,9 +63,7 @@ from app.services.memoir.book_plan_sources import (
     SourceSegment,
     SOURCES_CHANGED_STATUS_REASON,
     as_dict as _as_dict,
-    covered_utterance_ids as _covered_utterance_ids,
     draft_status_metadata as _draft_status_metadata,
-    included_chapters_by_utterance as _included_chapters_by_utterance,
     merge_metadata as _merge_metadata,
     plan_response as _plan_response,
     pending_source_ids as _pending_source_ids,
@@ -80,6 +78,11 @@ from app.services.memoir.book_plan_sources import (
     source_segments as _source_segments,
     sorted_chapters as _sorted_plan_chapters,
     text_or_empty as _text_or_empty,
+)
+from app.services.memoir.book_source_links import (
+    covered_utterance_ids as _covered_utterance_ids,
+    included_chapters_by_utterance as _included_chapters_by_utterance,
+    plan_source_ref_dicts_by_chapter as _plan_source_ref_dicts_by_chapter,
 )
 from app.services.memoir.chapter_source_links import (
     ChapterSourceAssignmentMetadata,
@@ -267,7 +270,12 @@ async def synthesize_book_outline_audio(
     if not plan:
         raise HTTPException(status_code=404, detail="章节规划不存在")
 
-    text = build_book_outline_audio_text(plan)
+    refs_by_chapter = await _plan_source_ref_dicts_by_chapter(db, plan)
+    source_counts_by_chapter = {
+        chapter_id: len(refs)
+        for chapter_id, refs in refs_by_chapter.items()
+    }
+    text = build_book_outline_audio_text(plan, source_counts_by_chapter=source_counts_by_chapter)
     text_hash = source_text_hash(text)
     speed_ratio = effective_tts_speed_ratio(req.speed_ratio)
     cached = cached_audio_response(
@@ -311,7 +319,7 @@ async def get_book_source_coverage(
 ) -> MemoirBookSourceCoverageResponse:
     sources = await _source_segments(db, user_id=user_id, project_id=project_id)
     plan = await _load_plan(db, project_id)
-    included_by_utterance = _included_chapters_by_utterance(plan)
+    included_by_utterance = await _included_chapters_by_utterance(db, plan)
     covered_ids = set(included_by_utterance)
     uncovered_sources = [
         source for source in sources
@@ -352,7 +360,7 @@ async def assign_book_sources_to_chapters(
 
     sources = await _source_segments(db, user_id=user_id, project_id=project_id)
     source_by_utterance = {source.utterance_id: source for source in sources}
-    covered_ids = _covered_utterance_ids(plan)
+    covered_ids = await _covered_utterance_ids(db, plan)
     chapter_by_id = {chapter.id: chapter for chapter in plan.chapters}
 
     affected_chapter_ids: set[str] = set()
@@ -638,7 +646,11 @@ def _touch_plan_structure(plan: MemoirBookPlan, *, operation: str, now: str) -> 
     )
 
 
-def build_book_outline_audio_text(plan: MemoirBookPlan) -> str:
+def build_book_outline_audio_text(
+    plan: MemoirBookPlan,
+    *,
+    source_counts_by_chapter: dict[str, int] | None = None,
+) -> str:
     chapters = sorted(plan.chapters, key=lambda chapter: chapter.sort_order)
     title = (plan.title or "回忆录章节规划").strip() or "回忆录章节规划"
     if not chapters:
@@ -647,7 +659,11 @@ def build_book_outline_audio_text(plan: MemoirBookPlan) -> str:
     lines = [f"《{title}》现在有 {len(chapters)} 章。"]
     for index, chapter in enumerate(chapters, start=1):
         chapter_title = (chapter.title or "未命名章节").strip() or "未命名章节"
-        source_count = len(chapter.source_refs_json or [])
+        source_count = (
+            source_counts_by_chapter.get(chapter.id, 0)
+            if source_counts_by_chapter is not None
+            else len(chapter.source_refs_json or [])
+        )
         lines.append(f"第 {index} 章，{chapter_title}。本章收录 {source_count} 条语音素材。")
     lines.append("你可以继续调整章节顺序、合并章节，或者说出想修改的地方。")
     return "\n".join(lines)
@@ -656,10 +672,13 @@ def build_book_outline_audio_text(plan: MemoirBookPlan) -> str:
 def _chapter_title_source_digests(
     chapter: MemoirBookPlanChapter,
     sources: list[SourceSegment],
+    *,
+    source_refs: list[dict[str, object]] | None = None,
 ) -> list[ChapterTitleSourceDigest]:
     source_by_utterance = {source.utterance_id: source for source in sources}
     digests: list[ChapterTitleSourceDigest] = []
-    for ref in chapter.source_refs_json or []:
+    refs = source_refs if source_refs is not None else (chapter.source_refs_json or [])
+    for ref in refs:
         if not isinstance(ref, dict):
             continue
         utterance_id = ref.get("utterance_id")
@@ -897,7 +916,7 @@ async def apply_book_plan_structure_command(
     source: SourceSegment | None = None
     if req.type == "create_chapter_from_source":
         utterance_id = _require_source_utterance_id(req)
-        if utterance_id in _covered_utterance_ids(plan):
+        if utterance_id in await _covered_utterance_ids(db, plan):
             raise HTTPException(status_code=400, detail="讲述记录已收录到章节")
         sources = await _source_segments(db, user_id=user_id, project_id=project_id)
         source = next((item for item in sources if item.utterance_id == utterance_id), None)
@@ -988,8 +1007,13 @@ async def generate_book_chapter_title(
         raise HTTPException(status_code=404, detail="章节规划不存在")
     chapter = _chapter_by_id(plan, chapter_id)
     sources = await _source_segments(db, user_id=user_id, project_id=project_id)
+    refs_by_chapter = await _plan_source_ref_dicts_by_chapter(db, plan)
     generated = await _generate_chapter_title_from_sources(
-        sources=_chapter_title_source_digests(chapter, sources),
+        sources=_chapter_title_source_digests(
+            chapter,
+            sources,
+            source_refs=refs_by_chapter.get(chapter.id, []),
+        ),
         ai_model=req.ai_model,
         ai_client=ai_client,
     )

@@ -19,6 +19,7 @@ from app.domain.memoir.types import (
 )
 from app.models.memoir import (
     MemoirBookChapterDraft,
+    MemoirBookPlan,
     MemoirBookPlanChapter,
     MemoirChatMessage,
     MemoirTranscriptVersion,
@@ -48,9 +49,12 @@ from app.services.memoir.book_plan_sources import (
     set_deleted_source_metadata as _set_deleted_source_metadata,
     set_source_change_metadata as _set_source_change_metadata,
     source_ref_utterance_id as _source_ref_utterance_id,
-    source_ref_utterance_ids as _source_ref_utterance_ids,
 )
 from app.services.memoir.book_auto_revision import schedule_chapter_auto_revisions
+from app.services.memoir.book_source_links import (
+    plan_source_ref_dicts_by_chapter as _plan_source_ref_dicts_by_chapter,
+    source_ref_utterance_ids as _source_ref_utterance_ids,
+)
 from app.services.memoir.chapter_source_links import (
     mark_utterance_links_removed as _mark_utterance_links_removed,
     update_utterance_link_ref_fields as _update_utterance_link_ref_fields,
@@ -407,16 +411,19 @@ async def _included_utterance_ids_for_filter(
     project_id: str | None = None,
 ) -> set[str]:
     query = (
-        select(MemoirBookPlanChapter.source_refs_json)
-        .join(Project, MemoirBookPlanChapter.project_id == Project.id)
+        select(MemoirBookPlan)
+        .join(Project, MemoirBookPlan.project_id == Project.id)
         .where(Project.user_id == user_id)
+        .options(selectinload(MemoirBookPlan.chapters))
     )
     if project_id:
         query = query.where(Project.id == project_id)
-    rows = (await db.execute(query)).scalars().all()
+    plans = (await db.execute(query)).scalars().all()
     utterance_ids: set[str] = set()
-    for refs in rows:
-        utterance_ids.update(_source_ref_utterance_ids(refs or []))
+    for plan in plans:
+        refs_by_chapter = await _plan_source_ref_dicts_by_chapter(db, plan)
+        for refs in refs_by_chapter.values():
+            utterance_ids.update(_source_ref_utterance_ids(refs))
     return utterance_ids
 
 
@@ -501,24 +508,24 @@ async def _book_inclusions_by_utterance_ids(
     clean_utterance_ids = list(dict.fromkeys(item for item in utterance_ids if item))
     if not clean_utterance_ids:
         return {}
-    query = select(MemoirBookPlanChapter)
+    query = select(MemoirBookPlan).options(selectinload(MemoirBookPlan.chapters))
     if project_ids:
-        query = query.where(MemoirBookPlanChapter.project_id.in_(list(dict.fromkeys(project_ids))))
-    chapters = (await db.execute(query)).scalars().all()
+        query = query.where(MemoirBookPlan.project_id.in_(list(dict.fromkeys(project_ids))))
+    plans = (await db.execute(query)).scalars().all()
     utterance_id_set = set(clean_utterance_ids)
     inclusions: dict[str, list[MemoirVoiceTranscriptIncludedChapterResponse]] = {}
-    for chapter in sorted(chapters, key=lambda item: (item.sort_order, item.created_at, item.id)):
-        included_chapter = MemoirVoiceTranscriptIncludedChapterResponse(
-            chapter_id=chapter.id,
-            title=chapter.title,
-            sort_order=chapter.sort_order,
-        )
-        for ref in chapter.source_refs_json or []:
-            if not isinstance(ref, dict):
-                continue
-            utterance_id = ref.get("utterance_id")
-            if isinstance(utterance_id, str) and utterance_id in utterance_id_set:
-                inclusions.setdefault(utterance_id, []).append(included_chapter)
+    for plan in plans:
+        refs_by_chapter = await _plan_source_ref_dicts_by_chapter(db, plan)
+        chapters = sorted(plan.chapters, key=lambda item: (item.sort_order, item.created_at, item.id))
+        for chapter in chapters:
+            included_chapter = MemoirVoiceTranscriptIncludedChapterResponse(
+                chapter_id=chapter.id,
+                title=chapter.title,
+                sort_order=chapter.sort_order,
+            )
+            for utterance_id in _source_ref_utterance_ids(refs_by_chapter.get(chapter.id, [])):
+                if utterance_id in utterance_id_set:
+                    inclusions.setdefault(utterance_id, []).append(included_chapter)
     return inclusions
 
 

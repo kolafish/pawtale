@@ -7,6 +7,7 @@ import re
 from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.domain.memoir.types import (
     MemoirAutomationEventStatus,
@@ -28,6 +29,10 @@ from app.schemas.memoir_voice import (
     MemoirAutomationEventUtteranceDetailResponse,
 )
 from app.services.memoir.access import load_memoir_project
+from app.services.memoir.book_source_links import (
+    plan_source_ref_dicts_by_chapter,
+    source_ref_utterance_id,
+)
 
 ACKNOWLEDGED_AT_KEY = "acknowledged_at"
 ACKNOWLEDGED_BY_USER_KEY = "acknowledged_by_user"
@@ -120,13 +125,6 @@ def _event_utterance_ids(event: MemoirAutomationEvent) -> list[str]:
     )
 
 
-def _source_ref_utterance_id(ref: object) -> str:
-    if not isinstance(ref, dict):
-        return ""
-    value = ref.get(UTTERANCE_ID_KEY)
-    return value.strip() if isinstance(value, str) else ""
-
-
 def _display_text(utterance: MemoirVoiceUtterance) -> str:
     return (utterance.transcript_edited or "").strip() or (utterance.transcript_raw or "").strip()
 
@@ -159,27 +157,30 @@ async def _assigned_source_chapters(
     utterance_ids: set[str] | None = None,
     confirmed_plan_only: bool = False,
 ) -> dict[str, AssignedSourceChapter]:
-    statement = select(MemoirBookPlanChapter).where(MemoirBookPlanChapter.project_id == project_id)
+    statement = (
+        select(MemoirBookPlan)
+        .where(MemoirBookPlan.project_id == project_id)
+        .options(selectinload(MemoirBookPlan.chapters))
+    )
     if confirmed_plan_only:
-        statement = statement.join(
-            MemoirBookPlan,
-            MemoirBookPlanChapter.plan_id == MemoirBookPlan.id,
-        ).where(MemoirBookPlan.status == MemoirBookPlanStatus.CONFIRMED.value)
+        statement = statement.where(MemoirBookPlan.status == MemoirBookPlanStatus.CONFIRMED.value)
     result = await db.execute(
         statement
     )
     assigned: dict[str, AssignedSourceChapter] = {}
-    for chapter in result.scalars().all():
-        for ref in chapter.source_refs_json or []:
-            utterance_id = _source_ref_utterance_id(ref)
-            if not utterance_id or utterance_id in assigned:
-                continue
-            if utterance_ids is not None and utterance_id not in utterance_ids:
-                continue
-            assigned[utterance_id] = AssignedSourceChapter(
-                chapter_id=chapter.id,
-                chapter_title=chapter.title,
-            )
+    for plan in result.scalars().all():
+        refs_by_chapter = await plan_source_ref_dicts_by_chapter(db, plan)
+        for chapter in sorted(plan.chapters, key=lambda item: (item.sort_order, item.id)):
+            for ref in refs_by_chapter.get(chapter.id, []):
+                utterance_id = source_ref_utterance_id(ref)
+                if not utterance_id or utterance_id in assigned:
+                    continue
+                if utterance_ids is not None and utterance_id not in utterance_ids:
+                    continue
+                assigned[utterance_id] = AssignedSourceChapter(
+                    chapter_id=chapter.id,
+                    chapter_title=chapter.title,
+                )
     return assigned
 
 
@@ -203,26 +204,28 @@ async def _utterance_details_by_event(
     utterances = {utterance.id: utterance for utterance in utterance_result.scalars().all()}
 
     project_ids = {event.project_id for event in events}
-    chapter_result = await db.execute(
-        select(MemoirBookPlanChapter)
-        .join(MemoirBookPlan, MemoirBookPlanChapter.plan_id == MemoirBookPlan.id)
+    plan_result = await db.execute(
+        select(MemoirBookPlan)
         .where(
-            MemoirBookPlanChapter.project_id.in_(sorted(project_ids)),
+            MemoirBookPlan.project_id.in_(sorted(project_ids)),
             MemoirBookPlan.status == MemoirBookPlanStatus.CONFIRMED.value,
         )
+        .options(selectinload(MemoirBookPlan.chapters))
     )
     chapter_by_id: dict[str, MemoirBookPlanChapter] = {}
     assigned_by_project_utterance: dict[tuple[str, str], AssignedSourceChapter] = {}
-    for chapter in chapter_result.scalars().all():
-        chapter_by_id[chapter.id] = chapter
-        for ref in chapter.source_refs_json or []:
-            utterance_id = _source_ref_utterance_id(ref)
-            if not utterance_id:
-                continue
-            assigned_by_project_utterance[(chapter.project_id, utterance_id)] = AssignedSourceChapter(
-                chapter_id=chapter.id,
-                chapter_title=chapter.title,
-            )
+    for plan in plan_result.scalars().all():
+        refs_by_chapter = await plan_source_ref_dicts_by_chapter(db, plan)
+        for chapter in plan.chapters:
+            chapter_by_id[chapter.id] = chapter
+            for ref in refs_by_chapter.get(chapter.id, []):
+                utterance_id = source_ref_utterance_id(ref)
+                if not utterance_id:
+                    continue
+                assigned_by_project_utterance[(chapter.project_id, utterance_id)] = AssignedSourceChapter(
+                    chapter_id=chapter.id,
+                    chapter_title=chapter.title,
+                )
 
     details: dict[str, list[MemoirAutomationEventUtteranceDetailResponse]] = {}
     for event in events:
