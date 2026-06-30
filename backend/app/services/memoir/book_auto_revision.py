@@ -29,6 +29,10 @@ from app.services.memoir.book_plan_sources import (
     pending_source_ids as _pending_source_ids,
     removed_source_ids as _removed_source_ids,
 )
+from app.services.memoir.book_source_links import (
+    chapter_source_ref_dicts as _chapter_source_ref_dicts,
+    source_ref_utterance_ids as _source_ref_utterance_ids,
+)
 from app.services.memoir.editing_jobs import EditingJobResult, enqueue_editing_job
 
 
@@ -67,6 +71,14 @@ async def _chapter_latest_draft(db: AsyncSession, project_id: str, chapter_id: s
     )
 
 
+async def _current_pending_source_ids(db: AsyncSession, chapter: MemoirBookPlanChapter | None) -> set[str]:
+    if not chapter:
+        return set()
+    refs = await _chapter_source_ref_dicts(db, chapter=chapter)
+    current_source_ids = set(_source_ref_utterance_ids(refs))
+    return _pending_source_ids(chapter.metadata_json) & current_source_ids
+
+
 async def schedule_chapter_auto_revision(
     db: AsyncSession,
     *,
@@ -78,7 +90,7 @@ async def schedule_chapter_auto_revision(
     chapter = await db.get(MemoirBookPlanChapter, chapter_id)
     if not chapter or chapter.project_id != project_id:
         return None
-    pending_source_ids = _pending_source_ids(chapter.metadata_json)
+    pending_source_ids = await _current_pending_source_ids(db, chapter)
     removed_source_ids = _removed_source_ids(chapter.metadata_json)
     if not pending_source_ids or removed_source_ids:
         return None
@@ -145,7 +157,7 @@ async def run_chapter_revision_job(
             return EditingJobResult(status=MemoirEditingJobStatus.SKIPPED, error_message="draft changed")
 
         chapter = await db.get(MemoirBookPlanChapter, job.chapter_id)
-        pending_source_ids = _pending_source_ids(chapter.metadata_json if chapter else {})
+        pending_source_ids = await _current_pending_source_ids(db, chapter)
         if not pending_source_ids:
             return EditingJobResult(status=MemoirEditingJobStatus.SKIPPED, error_message="no pending sources")
 

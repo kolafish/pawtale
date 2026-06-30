@@ -24,10 +24,13 @@ from app.services.json_utils import extract_json_payload
 from app.services.memoir.access import load_memoir_project
 from app.services.memoir.book_plan_sources import (
     SourceSegment,
-    covered_utterance_ids,
     source_ref_utterance_ids,
     source_segments,
     sorted_chapters,
+)
+from app.services.memoir.book_source_links import (
+    covered_utterance_ids,
+    plan_source_ref_dicts_by_chapter,
 )
 
 
@@ -60,12 +63,12 @@ def _source_by_utterance(sources: list[SourceSegment]) -> dict[str, SourceSegmen
 
 
 def _chapter_source_quotes(
-    chapter: MemoirBookPlanChapter,
     *,
+    source_refs: list[dict[str, object]],
     sources_by_utterance: dict[str, SourceSegment],
 ) -> list[str]:
     quotes: list[str] = []
-    for utterance_id in source_ref_utterance_ids(chapter.source_refs_json or []):
+    for utterance_id in source_ref_utterance_ids(source_refs):
         source = sources_by_utterance.get(utterance_id)
         if source and source.text.strip():
             quotes.append(f"#{source.source_index}: {source.text.strip()[:180]}")
@@ -75,13 +78,17 @@ def _chapter_source_quotes(
 def _chapter_digest(
     chapter: MemoirBookPlanChapter,
     *,
+    source_refs: list[dict[str, object]],
     sources_by_utterance: dict[str, SourceSegment],
 ) -> dict[str, object]:
     draft_text = _latest_draft_text(chapter)
     return {
         "chapter_id": chapter.id,
         "title": chapter.title,
-        "source_quotes": _chapter_source_quotes(chapter, sources_by_utterance=sources_by_utterance),
+        "source_quotes": _chapter_source_quotes(
+            source_refs=source_refs,
+            sources_by_utterance=sources_by_utterance,
+        ),
         "latest_draft_excerpt": draft_text[:MAX_DRAFT_CONTEXT_CHARS],
     }
 
@@ -320,10 +327,11 @@ async def route_book_source(
     source = source_by_utterance.get(utterance_id)
     if not source:
         raise HTTPException(status_code=404, detail="讲述记录不存在")
-    if utterance_id in covered_utterance_ids(plan):
+    if utterance_id in await covered_utterance_ids(db, plan):
         raise HTTPException(status_code=400, detail="讲述记录已收录到章节")
 
     chapters = sorted_chapters(plan)
+    refs_by_chapter = await plan_source_ref_dicts_by_chapter(db, plan)
     chapters_by_id = {chapter.id: chapter for chapter in chapters}
     question_text, conversation_context = await _conversation_context(db, source)
     prompt = _build_route_prompt(
@@ -331,7 +339,11 @@ async def route_book_source(
         question_text=question_text,
         conversation_context=conversation_context,
         chapters=[
-            _chapter_digest(chapter, sources_by_utterance=source_by_utterance)
+            _chapter_digest(
+                chapter,
+                source_refs=refs_by_chapter.get(chapter.id, []),
+                sources_by_utterance=source_by_utterance,
+            )
             for chapter in chapters
         ],
     )

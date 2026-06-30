@@ -72,6 +72,7 @@ from app.services.memoir.book_output_export import (
     MemoirBookOutputExportLayout,
     render_book_output_export,
 )
+from app.services.memoir.book_source_links import plan_source_ref_dicts_by_chapter
 from app.services.memoir.voice_tts import TTSClient
 
 
@@ -707,6 +708,7 @@ def _compose_book_content(
     *,
     title: str,
     chapters: list[tuple[MemoirBookPlanChapter, MemoirBookChapterDraftVersion]],
+    source_refs_by_chapter: dict[str, list[dict[str, object]]] | None = None,
 ) -> tuple[str, list[dict[str, object]]]:
     toc = "\n".join(f"{index}. {chapter.title}" for index, (chapter, _) in enumerate(chapters, start=1))
     body_parts: list[str] = []
@@ -714,7 +716,14 @@ def _compose_book_content(
     for index, (chapter, version) in enumerate(chapters, start=1):
         content = version.content.strip()
         body_parts.append(f"第{index}章 {chapter.title}\n\n{content}")
-        snapshot.append(_chapter_snapshot(chapter, version, chapter_index=index))
+        snapshot.append(
+            _chapter_snapshot(
+                chapter,
+                version,
+                chapter_index=index,
+                source_refs=(source_refs_by_chapter or {}).get(chapter.id),
+            )
+        )
     content = f"{title}\n\n目录\n{toc}\n\n" + "\n\n".join(body_parts)
     return content.strip(), snapshot
 
@@ -791,9 +800,12 @@ def _chapter_snapshot(
     version: MemoirBookChapterDraftVersion,
     *,
     chapter_index: int,
+    source_refs: list[dict[str, object]] | None = None,
 ) -> dict[str, object]:
     content = version.content.strip()
-    source_refs = chapter.source_refs_json if isinstance(chapter.source_refs_json, list) else []
+    refs = source_refs if source_refs is not None else (
+        chapter.source_refs_json if isinstance(chapter.source_refs_json, list) else []
+    )
     source_ref_snapshot = [
         {
             "utterance_id": _safe_str(item.get("utterance_id")),
@@ -801,7 +813,7 @@ def _chapter_snapshot(
             "voice_session_id": _safe_str(item.get("voice_session_id")) or None,
             "quote": _safe_str(item.get("quote")),
         }
-        for item in source_refs
+        for item in refs
         if isinstance(item, dict) and _safe_str(item.get("utterance_id"))
     ]
     return {
@@ -819,7 +831,11 @@ def _chapter_snapshot(
     }
 
 
-def _current_book_snapshot(plan: MemoirBookPlan) -> tuple[list[dict[str, object]], list[str]]:
+def _current_book_snapshot(
+    plan: MemoirBookPlan,
+    *,
+    source_refs_by_chapter: dict[str, list[dict[str, object]]] | None = None,
+) -> tuple[list[dict[str, object]], list[str]]:
     if plan.status != MemoirBookPlanStatus.CONFIRMED.value:
         return [], ["章节规划"]
     chapters = sorted(plan.chapters, key=lambda item: item.sort_order)
@@ -830,7 +846,14 @@ def _current_book_snapshot(plan: MemoirBookPlan) -> tuple[list[dict[str, object]
         if not chapter.draft or chapter.draft.status != MemoirBookChapterDraftStatus.CONFIRMED.value or not version:
             unavailable_titles.append(chapter.title)
             continue
-        snapshot.append(_chapter_snapshot(chapter, version, chapter_index=index))
+        snapshot.append(
+            _chapter_snapshot(
+                chapter,
+                version,
+                chapter_index=index,
+                source_refs=(source_refs_by_chapter or {}).get(chapter.id),
+            )
+        )
     return snapshot, unavailable_titles
 
 
@@ -863,8 +886,16 @@ def _snapshot_stale_chapter_titles(
     return stale_titles
 
 
-def _output_stale_chapter_titles(output: MemoirBookOutput, plan: MemoirBookPlan) -> list[str]:
-    current_snapshot, unavailable_titles = _current_book_snapshot(plan)
+def _output_stale_chapter_titles(
+    output: MemoirBookOutput,
+    plan: MemoirBookPlan,
+    *,
+    source_refs_by_chapter: dict[str, list[dict[str, object]]] | None = None,
+) -> list[str]:
+    current_snapshot, unavailable_titles = _current_book_snapshot(
+        plan,
+        source_refs_by_chapter=source_refs_by_chapter,
+    )
     latest_version = output.versions[-1] if output.versions else None
     return _snapshot_stale_chapter_titles(latest_version, current_snapshot, unavailable_titles)
 
@@ -902,7 +933,15 @@ async def get_book_output(
     if not output:
         raise HTTPException(status_code=404, detail="全书稿不存在")
     plan = await _load_plan(db, user_id=user_id, project_id=project_id)
-    return _output_response(output, stale_chapter_titles=_output_stale_chapter_titles(output, plan))
+    refs_by_chapter = await plan_source_ref_dicts_by_chapter(db, plan)
+    return _output_response(
+        output,
+        stale_chapter_titles=_output_stale_chapter_titles(
+            output,
+            plan,
+            source_refs_by_chapter=refs_by_chapter,
+        ),
+    )
 
 
 async def generate_book_output(
@@ -915,10 +954,15 @@ async def generate_book_output(
     project = await load_memoir_project(db, project_id, user_id)
     plan = await _load_plan(db, user_id=user_id, project_id=project_id)
     chapters = _require_confirmed_chapters(plan)
+    refs_by_chapter = await plan_source_ref_dicts_by_chapter(db, plan)
     user_title = _safe_str(req.title)
     title = _formal_book_title(user_title or plan.title)
     cover_style = _cover_style(req.cover_style)
-    content, snapshot = _compose_book_content(title=title, chapters=chapters)
+    content, snapshot = _compose_book_content(
+        title=title,
+        chapters=chapters,
+        source_refs_by_chapter=refs_by_chapter,
+    )
     requested_ai_model = (req.ai_model or "").strip()
     ai_model = requested_ai_model or _project_ai_model(project)
     _remember_project_ai_model(project, req.ai_model)
@@ -935,7 +979,11 @@ async def generate_book_output(
         generated_title = _formal_book_title(editorial_copy.book_title)
         if generated_title and generated_title != title:
             title = generated_title
-            content, snapshot = _compose_book_content(title=title, chapters=chapters)
+            content, snapshot = _compose_book_content(
+                title=title,
+                chapters=chapters,
+                source_refs_by_chapter=refs_by_chapter,
+            )
 
     output = await _load_output(db, project_id=project_id)
     latest_version = output.versions[-1] if output and output.versions else None
@@ -1064,7 +1112,12 @@ async def suggest_book_output_titles(
     plan = await _load_plan(db, user_id=user_id, project_id=project_id)
     chapters = _require_confirmed_chapters(plan)
     base_title = _formal_book_title(plan.title)
-    _, snapshot = _compose_book_content(title=base_title, chapters=chapters)
+    refs_by_chapter = await plan_source_ref_dicts_by_chapter(db, plan)
+    _, snapshot = _compose_book_content(
+        title=base_title,
+        chapters=chapters,
+        source_refs_by_chapter=refs_by_chapter,
+    )
     requested_ai_model = (req.ai_model or "").strip()
     ai_model = requested_ai_model or _project_ai_model(project)
     _remember_project_ai_model(project, req.ai_model)

@@ -22,6 +22,7 @@ from app.schemas.memoir_book import (
     MemoirBookSourceIncludedChapter,
 )
 from app.services.memoir.access import load_memoir_project
+from app.services.memoir.book_source_links import plan_source_ref_dicts_by_chapter
 
 
 PENDING_SOURCE_UTTERANCE_IDS_KEY = "pending_source_utterance_ids"
@@ -269,9 +270,13 @@ def chapter_response(
     chapter: MemoirBookPlanChapter,
     *,
     created_at_by_utterance: dict[str, datetime] | None = None,
+    source_refs: list[dict[str, object]] | None = None,
 ) -> MemoirBookPlanChapterResponse:
     source_created_at = created_at_by_utterance or {}
     pending_source_count, removed_source_count = source_change_counts(chapter.metadata_json)
+    refs = source_refs if source_refs is not None else [
+        ref for ref in (chapter.source_refs_json or []) if isinstance(ref, dict)
+    ]
     return MemoirBookPlanChapterResponse(
         id=chapter.id,
         plan_id=chapter.plan_id,
@@ -280,7 +285,7 @@ def chapter_response(
         sort_order=chapter.sort_order,
         source_refs=[
             source_ref_response(ref, source_created_at)
-            for ref in (chapter.source_refs_json or [])
+            for ref in refs
             if isinstance(ref, dict)
         ],
         metadata_json=chapter.metadata_json or {},
@@ -292,7 +297,7 @@ def chapter_response(
 
 
 async def plan_response(db: AsyncSession, plan: MemoirBookPlan) -> MemoirBookPlanResponse:
-    created_at_by_utterance = await source_ref_created_at_by_utterance(db, plan)
+    refs_by_chapter = await plan_source_ref_dicts_by_chapter(db, plan)
     return MemoirBookPlanResponse(
         id=plan.id,
         project_id=plan.project_id,
@@ -302,7 +307,7 @@ async def plan_response(db: AsyncSession, plan: MemoirBookPlan) -> MemoirBookPla
         model=plan.model,
         metadata_json=plan.metadata_json or {},
         chapters=[
-            chapter_response(chapter, created_at_by_utterance=created_at_by_utterance)
+            chapter_response(chapter, source_refs=refs_by_chapter.get(chapter.id, []))
             for chapter in plan.chapters
         ],
         created_at=plan.created_at,

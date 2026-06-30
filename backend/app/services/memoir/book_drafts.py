@@ -56,6 +56,7 @@ from app.services.memoir.book_plan_sources import (
     source_change_counts as _source_change_counts,
     text_or_empty as _text_or_empty,
 )
+from app.services.memoir.book_source_links import chapter_source_ref_dicts as _chapter_source_ref_dicts
 from app.services.memoir.voice_tts import TTSClient
 
 
@@ -148,7 +149,7 @@ async def _chapter_sources(
 ) -> list[ChapterSourceText]:
     refs = [
         MemoirBookChapterSourceRef.model_validate(ref)
-        for ref in (chapter.source_refs_json or [])
+        for ref in await _chapter_source_ref_dicts(db, chapter=chapter)
         if isinstance(ref, dict)
     ]
     if not refs:

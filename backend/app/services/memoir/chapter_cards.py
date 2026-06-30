@@ -27,6 +27,7 @@ from app.schemas.memoir_book import MemoirBookChapterSourceRef
 from app.services.ai_factory import get_ai_service
 from app.services.ai_types import AITextClient
 from app.services.json_utils import extract_json_payload
+from app.services.memoir.book_source_links import chapter_source_ref_dicts as _chapter_source_ref_dicts
 from app.services.memoir.semantic_state import upsert_chapter_card
 from app.services.memoir.source_cards import SOURCE_CARD_ENGINE, source_text_for_utterance, source_text_hash
 
@@ -108,10 +109,10 @@ def _source_ref_utterance_id(ref: object) -> str:
     return ""
 
 
-def _source_refs(chapter: MemoirBookPlanChapter) -> list[MemoirBookChapterSourceRef]:
+def _source_refs(ref_items: list[dict[str, object]]) -> list[MemoirBookChapterSourceRef]:
     refs: list[MemoirBookChapterSourceRef] = []
     seen: set[str] = set()
-    for item in chapter.source_refs_json or []:
+    for item in ref_items:
         if not isinstance(item, dict):
             continue
         try:
@@ -231,7 +232,7 @@ async def build_chapter_card_context(
     chapter_id: str,
 ) -> ChapterCardContext:
     chapter = await _load_chapter(db, project_id=project_id, chapter_id=chapter_id)
-    refs = _source_refs(chapter)
+    refs = _source_refs(await _chapter_source_ref_dicts(db, chapter=chapter))
     utterance_ids = [_source_ref_utterance_id(ref) for ref in refs]
     utterances = await _utterances_by_id(db, project_id=project_id, utterance_ids=utterance_ids)
     source_hashes = {
