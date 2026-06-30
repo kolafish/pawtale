@@ -1,3 +1,5 @@
+import json
+
 import pytest
 from sqlalchemy import select
 
@@ -7,9 +9,10 @@ from app.domain.memoir.types import (
     MemoirEditingJobStatus,
     MemoirEditingJobType,
 )
-from app.models.memoir import MemoirAutomationEvent, MemoirEditingJob
+from app.models.memoir import MemoirAutomationEvent, MemoirBookQualityAuditSnapshot, MemoirEditingJob
+from app.schemas.memoir_book import MemoirBookQualityAuditRunRequest
 from app.services.memoir import automation_events
-from app.services.memoir.book_quality_audit import schedule_project_quality_audit
+from app.services.memoir.book_quality_audit import run_book_quality_audit, schedule_project_quality_audit
 from app.services.memoir.editing_job_handlers import register_memoir_editing_job_handlers
 from app.services.memoir.editing_jobs import clear_editing_job_handlers, run_editing_job
 from tests.memoir_helpers import (
@@ -26,6 +29,64 @@ def clear_handlers():
     clear_editing_job_handlers()
     yield
     clear_editing_job_handlers()
+
+
+class FakeAuditAI:
+    provider_name = "fake"
+    model_name = "fake-audit"
+
+    def __init__(self, responses: list[dict] | None = None, *, error: Exception | None = None):
+        self.responses = list(responses or [])
+        self.error = error
+        self.calls: list[dict[str, object]] = []
+
+    async def _call_llm(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        temperature: float = 0.7,
+        max_tokens: int = 4000,
+        timeout: float = 60.0,
+        return_raw: bool = False,
+    ) -> str:
+        self.calls.append(
+            {
+                "system_prompt": system_prompt,
+                "user_prompt": user_prompt,
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+                "timeout": timeout,
+            }
+        )
+        if self.error:
+            raise self.error
+        payload = self.responses.pop(0) if self.responses else {}
+        return json.dumps(payload, ensure_ascii=False)
+
+
+async def _create_needs_update_audit_context(client, test_db):
+    first = await create_test_voice_transcript(client, test_db, "小时候在外婆家的院子里摘菜。")
+    second = await create_test_voice_transcript(client, test_db, "后来又讲了夏天和外婆一起剥青豆。")
+    project_id = first["session"]["project_id"]
+    _, chapter = await create_test_book_plan(
+        test_db,
+        project_id=project_id,
+        source_refs=[
+            memoir_source_ref(first, "外婆家的院子"),
+            memoir_source_ref(second, "剥青豆"),
+        ],
+        chapter_title="院子里的童年",
+    )
+    chapter.metadata_json = {"pending_source_utterance_ids": [second["utterance_id"]]}
+    await create_test_chapter_draft(
+        test_db,
+        project_id=project_id,
+        chapter_id=chapter.id,
+        content="小时候在外婆家的院子里摘菜。",
+    )
+    await test_db.commit()
+    user = (await client.get("/api/auth/me")).json()
+    return user["id"], project_id, chapter, second
 
 
 async def test_book_quality_audit_flags_pending_chapter_update_and_records_event(client, test_db):
@@ -85,13 +146,193 @@ async def test_book_quality_audit_flags_pending_chapter_update_and_records_event
     )
     assert event is not None
     assert event.summary_text == "当前有 1 个章节需要优先处理。"
+    assert event.metadata_json["snapshot_engine"] == "rules_v1"
+    assert event.metadata_json["snapshot_id"]
     assert event.metadata_json["overall_status"] == "needs_updates"
-    assert event.metadata_json["chapter_items"][0]["chapter_id"] == chapter.id
-    assert event.metadata_json["chapter_items"][0]["status"] == "needs_update"
+    assert "chapter_items" not in event.metadata_json
     assert event.metadata_json["display"]["title"] == "「院子里的童年」有新内容待写入"
     assert event.metadata_json["primary_action"]["cta_text"] == "补写本章"
     assert event.metadata_json["primary_chapter"]["chapter_id"] == chapter.id
     assert event.metadata_json["event_signature"].startswith("book_quality_audit|needs_updates")
+
+
+async def test_book_quality_audit_writes_semantic_snapshot_when_requested(client, test_db):
+    user_id, project_id, chapter, second = await _create_needs_update_audit_context(client, test_db)
+    chapter_ai = FakeAuditAI([
+        {
+            "summary": "本章围绕院子里的童年记忆。",
+            "covered": {"time": ["小时候"], "places": ["外婆家的院子"], "people": ["外婆"], "events": ["摘菜"]},
+            "gaps": [{"type": "event_sequence", "severity": "medium", "message": "剥青豆的前后经过还不连贯"}],
+            "next_questions": ["那次剥青豆是怎么开始的？"],
+            "evidence_refs": [{"utterance_id": second["utterance_id"], "quote": "剥青豆"}],
+        }
+    ])
+    semantic_ai = FakeAuditAI([
+        {
+            "overall_status": "needs_updates",
+            "summary_text": "语义审计认为「院子里的童年」需要补写新素材。",
+            "display": {
+                "title": "语义审计：院子里的童年待补写",
+                "summary": "新讲述已经出现，但正文还没吸收。",
+                "detail": "先补写剥青豆的经过，再继续追问细节。",
+            },
+            "primary_action": {
+                "type": "revise_chapter",
+                "cta_text": "补写本章",
+                "chapter_id": chapter.id,
+                "utterance_count": 1,
+            },
+            "chapter_audits": [
+                {
+                    "chapter_id": chapter.id,
+                    "summary": "新增剥青豆素材待写入。",
+                    "gaps": [
+                        {"type": "event_sequence", "severity": "medium", "message": "剥青豆事件缺少起因和经过"}
+                    ],
+                    "next_questions": ["那天为什么会一起剥青豆？"],
+                    "evidence_refs": [{"utterance_id": second["utterance_id"], "quote": "剥青豆"}],
+                }
+            ],
+        }
+    ])
+
+    response = await run_book_quality_audit(
+        test_db,
+        user_id=user_id,
+        project_id=project_id,
+        req=MemoirBookQualityAuditRunRequest(record_event=True, semantic_audit=True),
+        chapter_card_ai_client=chapter_ai,
+        semantic_ai_client=semantic_ai,
+    )
+
+    assert response.summary_text == "语义审计认为「院子里的童年」需要补写新素材。"
+    assert response.display.title == "语义审计：院子里的童年待补写"
+    assert len(chapter_ai.calls) == 1
+    assert len(semantic_ai.calls) == 1
+
+    snapshots = (
+        await test_db.execute(
+            select(MemoirBookQualityAuditSnapshot).where(
+                MemoirBookQualityAuditSnapshot.project_id == project_id,
+            )
+        )
+    ).scalars().all()
+    snapshots_by_engine = {snapshot.engine: snapshot for snapshot in snapshots}
+    assert set(snapshots_by_engine) == {"rules_v1", "llm_semantic_v1"}
+    semantic_snapshot = snapshots_by_engine["llm_semantic_v1"]
+    assert semantic_snapshot.chapter_audits_json[0]["gaps"][0]["message"] == "剥青豆事件缺少起因和经过"
+    assert semantic_snapshot.chapter_card_ids_json
+
+    event = await test_db.scalar(
+        select(MemoirAutomationEvent).where(
+            MemoirAutomationEvent.project_id == project_id,
+            MemoirAutomationEvent.event_type == MemoirAutomationEventType.AUDIT_COMPLETED.value,
+        )
+    )
+    assert event is not None
+    assert event.metadata_json["snapshot_id"] == semantic_snapshot.id
+    assert event.metadata_json["snapshot_engine"] == "llm_semantic_v1"
+    assert "chapter_items" not in event.metadata_json
+
+
+async def test_book_quality_audit_reuses_semantic_snapshot_for_same_input(client, test_db):
+    user_id, project_id, chapter, second = await _create_needs_update_audit_context(client, test_db)
+    chapter_ai = FakeAuditAI([
+        {
+            "summary": "本章围绕院子里的童年记忆。",
+            "covered": {"time": ["小时候"], "places": ["外婆家的院子"], "people": ["外婆"], "events": ["摘菜"]},
+            "gaps": [{"type": "event_sequence", "severity": "medium", "message": "剥青豆的前后经过还不连贯"}],
+            "next_questions": ["那次剥青豆是怎么开始的？"],
+            "evidence_refs": [{"utterance_id": second["utterance_id"], "quote": "剥青豆"}],
+        }
+    ])
+    semantic_ai = FakeAuditAI([
+        {
+            "overall_status": "needs_updates",
+            "summary_text": "语义审计认为需要补写。",
+            "display": {"title": "语义审计待补写", "summary": "需要补写。", "detail": ""},
+            "primary_action": {"type": "revise_chapter", "cta_text": "补写本章", "chapter_id": chapter.id},
+            "chapter_audits": [
+                {
+                    "chapter_id": chapter.id,
+                    "summary": "新增素材待写入。",
+                    "gaps": [{"type": "event_sequence", "severity": "medium", "message": "还缺经过"}],
+                    "next_questions": ["那天为什么会一起剥青豆？"],
+                    "evidence_refs": [{"utterance_id": second["utterance_id"], "quote": "剥青豆"}],
+                }
+            ],
+        }
+    ])
+
+    first = await run_book_quality_audit(
+        test_db,
+        user_id=user_id,
+        project_id=project_id,
+        req=MemoirBookQualityAuditRunRequest(record_event=False, semantic_audit=True),
+        chapter_card_ai_client=chapter_ai,
+        semantic_ai_client=semantic_ai,
+    )
+    second_response = await run_book_quality_audit(
+        test_db,
+        user_id=user_id,
+        project_id=project_id,
+        req=MemoirBookQualityAuditRunRequest(record_event=False, semantic_audit=True),
+        chapter_card_ai_client=chapter_ai,
+        semantic_ai_client=semantic_ai,
+    )
+
+    assert first.summary_text == second_response.summary_text
+    assert len(chapter_ai.calls) == 1
+    assert len(semantic_ai.calls) == 1
+    semantic_count = await test_db.scalar(
+        select(MemoirBookQualityAuditSnapshot).where(
+            MemoirBookQualityAuditSnapshot.project_id == project_id,
+            MemoirBookQualityAuditSnapshot.engine == "llm_semantic_v1",
+            MemoirBookQualityAuditSnapshot.error_message == "",
+        )
+    )
+    assert semantic_count is not None
+
+
+async def test_book_quality_audit_falls_back_to_rules_snapshot_when_semantic_fails(client, test_db):
+    user_id, project_id, chapter, second = await _create_needs_update_audit_context(client, test_db)
+    chapter_ai = FakeAuditAI([
+        {
+            "summary": "本章围绕院子里的童年记忆。",
+            "covered": {"time": ["小时候"], "places": ["外婆家的院子"], "people": ["外婆"], "events": ["摘菜"]},
+            "gaps": [{"type": "event_sequence", "severity": "medium", "message": "剥青豆的前后经过还不连贯"}],
+            "next_questions": ["那次剥青豆是怎么开始的？"],
+            "evidence_refs": [{"utterance_id": second["utterance_id"], "quote": "剥青豆"}],
+        }
+    ])
+
+    response = await run_book_quality_audit(
+        test_db,
+        user_id=user_id,
+        project_id=project_id,
+        req=MemoirBookQualityAuditRunRequest(record_event=True, semantic_audit=True),
+        chapter_card_ai_client=chapter_ai,
+        semantic_ai_client=FakeAuditAI(error=RuntimeError("semantic provider down")),
+    )
+
+    assert response.summary_text == "当前有 1 个章节需要优先处理。"
+    event = await test_db.scalar(
+        select(MemoirAutomationEvent).where(
+            MemoirAutomationEvent.project_id == project_id,
+            MemoirAutomationEvent.event_type == MemoirAutomationEventType.AUDIT_COMPLETED.value,
+        )
+    )
+    assert event is not None
+    assert event.metadata_json["snapshot_engine"] == "rules_v1"
+    failed_snapshot = await test_db.scalar(
+        select(MemoirBookQualityAuditSnapshot).where(
+            MemoirBookQualityAuditSnapshot.project_id == project_id,
+            MemoirBookQualityAuditSnapshot.engine == "llm_semantic_v1",
+            MemoirBookQualityAuditSnapshot.error_message != "",
+        )
+    )
+    assert failed_snapshot is not None
+    assert "semantic provider down" in failed_snapshot.error_message
 
 
 async def test_book_quality_audit_reuses_acknowledged_equivalent_event(client, test_db):
@@ -121,11 +362,20 @@ async def test_book_quality_audit_reuses_acknowledged_equivalent_event(client, t
         json={},
     )
     assert first_response.status_code == 200
-    event_id = first_response.json()["event"]["id"]
+    first_data = first_response.json()
+    event_id = first_data["event"]["id"]
     event = await test_db.get(MemoirAutomationEvent, event_id)
     assert event is not None
-    legacy_metadata = dict(event.metadata_json)
-    legacy_metadata.pop(automation_events.EVENT_SIGNATURE_KEY)
+    legacy_metadata = {
+        "source": "book_quality_audit",
+        "overall_status": first_data["overall_status"],
+        "pending_utterance_count": 0,
+        "next_actions": first_data["next_actions"],
+        "chapter_items": first_data["chapter_items"],
+        "display": first_data["display"],
+        "primary_action": first_data["primary_action"],
+        "primary_chapter": first_data["primary_chapter"],
+    }
     event.metadata_json = legacy_metadata
     test_db.add(event)
     await test_db.commit()
