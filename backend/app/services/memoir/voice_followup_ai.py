@@ -271,12 +271,23 @@ def _automation_event_progress_update(
         if not summary:
             continue
         status = event.status.value if hasattr(event.status, "value") else str(event.status)
+        event_type = event.event_type.value if hasattr(event.event_type, "value") else str(event.event_type)
+        if status == MemoirAutomationEventStatus.FAILED.value:
+            return {
+                "kind": "automation_event_failure",
+                "source": "automation_event",
+                "text": summary[:120],
+                "event_ids": [event.id],
+                "event_type": event_type,
+                "event_status": status,
+                "chapter_id": event.chapter_id,
+                "utterance_ids": list(event.utterance_ids),
+            }
         if status not in {
             MemoirAutomationEventStatus.COMPLETED.value,
             MemoirAutomationEventStatus.NEEDS_REVIEW.value,
         }:
             continue
-        event_type = event.event_type.value if hasattr(event.event_type, "value") else str(event.event_type)
         if event_type == MemoirAutomationEventType.AUDIT_COMPLETED.value:
             return _audit_event_progress_update(event, summary=summary, status=status)
         if event_type == MemoirAutomationEventType.CHAPTER_AUTO_REVISED.value and (
@@ -394,6 +405,8 @@ def _progress_speech_prefix(update: dict[str, object]) -> str:
         return ""
 
     if kind == "source_assignment_batch":
+        return _sentence_text(text)
+    if kind == "automation_event_failure":
         return _sentence_text(text)
     if event_type == MemoirAutomationEventType.CHAPTER_AUTO_REVISED.value:
         return _sentence_text(text)
