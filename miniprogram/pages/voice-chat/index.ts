@@ -1,5 +1,4 @@
 import type {
-  MemoirGuidanceMode,
   MemoirVoiceSessionDetail,
   VoiceChatErrorInfo,
   TTSAlignmentSegment,
@@ -66,6 +65,12 @@ import {
   writeMemoirVoiceSessionPendingClose,
   writeMemoirVoiceSessionSnapshot,
 } from "../../stores/memoir-cache";
+import {
+  type AutoListenGateSnapshot,
+  type VoiceChatData,
+  initialVoiceChatData,
+  voiceChatAutoListenGateSnapshot,
+} from "./voice-chat-page-state";
 
 const VOICE_AUTHORIZATION_VALUE = "voice_authorization";
 
@@ -75,79 +80,12 @@ interface CheckboxChangeEvent {
   };
 }
 
-interface VoiceChatData {
-  voiceSessionId: string;
-  guidanceMode: MemoirGuidanceMode;
-  currentGuidanceModule: string;
-  status: VoiceChatConnectionStatus;
-  statusText: string;
-  recording: boolean;
-  connecting: boolean;
-  error: string;
-  liveText: string;
-  latestTranscriptText: string;
-  transcriptLines: VoiceChatTranscriptLine[];
-  assistantPromptText: string;
-  assistantPromptLabel: string;
-  assistantLoadingText: string;
-  assistantEmptyText: string;
-  assistantExpectsAnswer: boolean;
-  followUpLoading: boolean;
-  followUpError: string;
-  lastFollowUpSourceMessageId: string;
-  dismissedFollowUpMessageId: string;
-  canRequestFollowUp: boolean;
-  followUpMessageId: string;
-  followUpAudioFileId: string;
-  followUpTTSLoading: boolean;
-  followUpTTSPlaying: boolean;
-  followUpTTSError: string;
-  followUpTTSStateText: string;
-  ttsSpokenText: string;
-  ttsCurrentText: string;
-  ttsRemainingText: string;
-  ttsProgressPercent: number;
-  ttsAlignment: TTSAlignmentSegment[];
-  modeLabel: string;
-  primaryActionText: string;
-  captureStateText: string;
-  captureFrameCount: number;
-  captureKilobytes: number;
-  captureDurationText: string;
-  audioLevelPercent: number;
-  autoStopEnabled: boolean;
-  autoStopStateText: string;
-  autoListenEnabled: boolean;
-  autoListenStateText: string;
-  liveCharCount: number;
-  totalTranscriptCharCount: number;
-  gatewayStateText: string;
-  persistenceStateText: string;
-  errorKindText: string;
-  voiceAuthorizationAgreed: boolean;
-  finishingSession: boolean;
-  recoveryNotice: string;
-  canReconnect: boolean;
-  canFinishAfterDisconnect: boolean;
-}
-
 let followUpRequestSerial = 0;
 const AUTO_STOP_SILENCE_MS = 3500;
 const AUTO_STOP_MIN_RECORDING_MS = 2000;
 const AUTO_LISTEN_NO_ANSWER_MS = 15000;
 const MAX_CONSECUTIVE_NO_ANSWER_PROMPTS = 2;
 const STREAMING_TTS_PROGRESS_HOLD_SECONDS = 0.2;
-
-interface AutoListenGateSnapshot {
-  hasClient: boolean;
-  autoListenEnabled: boolean;
-  status: VoiceChatConnectionStatus;
-  recording: boolean;
-  connecting: boolean;
-  followUpLoading: boolean;
-  pendingAfterPlayback: boolean;
-  canStart: boolean;
-}
 
 Page<VoiceChatData, {
   onLoad(query?: Record<string, string | undefined>): Promise<void>;
@@ -282,61 +220,7 @@ Page<VoiceChatData, {
   handledNoAnswerFrameCount: -1,
   autoListenPendingAfterPlayback: false,
 
-  data: {
-    voiceSessionId: "",
-    guidanceMode: "free_narration",
-    currentGuidanceModule: "",
-    status: "idle",
-    statusText: "未连接",
-    recording: false,
-    connecting: false,
-    error: "",
-    liveText: "",
-    latestTranscriptText: "",
-    transcriptLines: [],
-    assistantPromptText: "",
-    assistantPromptLabel: "老余开场",
-    assistantLoadingText: "老余正在准备第一句话",
-    assistantEmptyText: "老余会先说一句，帮你开始讲。",
-    assistantExpectsAnswer: true,
-    followUpLoading: false,
-    followUpError: "",
-    lastFollowUpSourceMessageId: "",
-    dismissedFollowUpMessageId: "",
-    canRequestFollowUp: false,
-    followUpMessageId: "",
-    followUpAudioFileId: "",
-    followUpTTSLoading: false,
-    followUpTTSPlaying: false,
-    followUpTTSError: "",
-    followUpTTSStateText: "",
-    ttsSpokenText: "",
-    ttsCurrentText: "",
-    ttsRemainingText: "",
-    ttsProgressPercent: 0,
-    ttsAlignment: [],
-    modeLabel: "自由讲述",
-    primaryActionText: "开始说话",
-    captureStateText: "麦克风未开始",
-    captureFrameCount: 0,
-    captureKilobytes: 0,
-    captureDurationText: "00:00",
-    audioLevelPercent: 0,
-    autoStopEnabled: true,
-    autoStopStateText: "自动收尾开",
-    autoListenEnabled: true,
-    autoListenStateText: "AI 说完自动听",
-    liveCharCount: 0,
-    totalTranscriptCharCount: 0,
-    gatewayStateText: "识别未同步",
-    persistenceStateText: "等待识别",
-    errorKindText: "",
-    voiceAuthorizationAgreed: false,
-    finishingSession: false,
-    recoveryNotice: "",
-    canReconnect: false,
-    canFinishAfterDisconnect: false,
-  },
+  data: initialVoiceChatData(),
 
   autoListenGateSnapshot() {
     const hasClient = this.voiceStreaming.hasClient();
@@ -347,16 +231,11 @@ Page<VoiceChatData, {
       connecting: this.data.connecting,
       followUpLoading: this.data.followUpLoading,
     });
-    return {
+    return voiceChatAutoListenGateSnapshot(this.data, {
       hasClient,
-      autoListenEnabled: this.data.autoListenEnabled,
-      status: this.data.status,
-      recording: this.data.recording,
-      connecting: this.data.connecting,
-      followUpLoading: this.data.followUpLoading,
       pendingAfterPlayback: this.autoListenPendingAfterPlayback,
       canStart,
-    };
+    });
   },
 
   async onLoad(query) {
