@@ -1,7 +1,9 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { LogOut, UserCircle } from 'lucide-react';
+import { useState } from 'react';
+import { BarChart3, FolderOpen, LogOut, UserCircle } from 'lucide-react';
 import { useAppStore } from '../stores/appStore';
 import { WritingWorkspace } from './WritingWorkspace';
+import { UserAuditDashboard } from './audit/UserAuditDashboard';
 import { AI_MODEL_OPTIONS } from '../constants/aiModels';
 import type { User } from '../types';
 
@@ -13,8 +15,12 @@ interface LayoutProps {
 export function Layout({ user, onLogout }: LayoutProps) {
   const queryClient = useQueryClient();
   const { defaultAiModel, setDefaultAiModel, closeProject } = useAppStore();
+  const [activeView, setActiveView] = useState<'workspace' | 'audit'>('workspace');
+  const canViewAudit = user.role === 'admin';
+  const currentView = canViewAudit ? activeView : 'workspace';
 
   const handleLogoClick = () => {
+    setActiveView('workspace');
     closeProject();
     queryClient.invalidateQueries({ queryKey: ['projects'] });
   };
@@ -36,6 +42,39 @@ export function Layout({ user, onLogout }: LayoutProps) {
               Pawtale
             </span>
           </button>
+          {canViewAudit && (
+            <div className="flex items-center gap-1 rounded-lg border border-pink-100 bg-pink-50/60 p-1">
+              <button
+                type="button"
+                onClick={() => setActiveView('workspace')}
+                className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm transition-colors ${
+                  currentView === 'workspace'
+                    ? 'bg-white text-pink-600 shadow-sm'
+                    : 'text-gray-500 hover:bg-white/70 hover:text-gray-700'
+                }`}
+                title="项目工作区"
+              >
+                <FolderOpen size={15} />
+                <span className="hidden md:inline">项目</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  closeProject();
+                  setActiveView('audit');
+                }}
+                className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm transition-colors ${
+                  currentView === 'audit'
+                    ? 'bg-white text-pink-600 shadow-sm'
+                    : 'text-gray-500 hover:bg-white/70 hover:text-gray-700'
+                }`}
+                title="用户审计"
+              >
+                <BarChart3 size={15} />
+                <span className="hidden md:inline">审计</span>
+              </button>
+            </div>
+          )}
         </div>
 
         <div className="flex items-center gap-3">
@@ -69,7 +108,7 @@ export function Layout({ user, onLogout }: LayoutProps) {
 
       {/* Main content */}
       <main className="flex-1 flex overflow-hidden">
-        <WritingWorkspace />
+        {currentView === 'audit' ? <UserAuditDashboard /> : <WritingWorkspace />}
       </main>
     </div>
   );

@@ -7,7 +7,112 @@ export interface User {
   email: string;
   display_name: string;
   avatar_url?: string;
+  role: string;
   created_at: string;
+}
+
+// -- User audit types -----------------------------------------------------
+
+export type AuditPlatform = 'miniprogram' | 'web';
+
+export interface AuditUserBrief {
+  id: string;
+  email: string;
+  display_name: string;
+  role: string;
+}
+
+export interface AuditDashboardFilters {
+  from: string;
+  to: string;
+  user_id?: string;
+  platform?: AuditPlatform;
+  feature_code?: string;
+}
+
+export interface AuditDashboardSummary {
+  active_ms: number;
+  session_count: number;
+  event_count: number;
+  user_count: number;
+  top_exit_page_path?: string | null;
+  top_exit_feature_code?: string | null;
+}
+
+export interface AuditDailyUserUsage {
+  user: AuditUserBrief;
+  date: string;
+  platform: string;
+  active_ms: number;
+  session_count: number;
+  event_count: number;
+  last_exit_page_path: string;
+  last_exit_feature_code: string;
+  last_exit_reason: string;
+  last_seen_at?: string | null;
+}
+
+export interface AuditDailyFeatureUsage {
+  user: AuditUserBrief;
+  date: string;
+  platform: string;
+  feature_code: string;
+  active_ms: number;
+  event_count: number;
+  last_seen_at?: string | null;
+}
+
+export interface AuditExitLocation {
+  page_path: string;
+  feature_code: string;
+  reason: string;
+  count: number;
+}
+
+export interface AuditDashboardResponse {
+  summary: AuditDashboardSummary;
+  daily_users: AuditDailyUserUsage[];
+  feature_usage: AuditDailyFeatureUsage[];
+  exit_locations: AuditExitLocation[];
+}
+
+export interface AuditEvent {
+  id: string;
+  client_event_id: string;
+  event_type: string;
+  event_date: string;
+  platform: string;
+  page_path: string;
+  feature_code: string;
+  project_id?: string | null;
+  voice_session_id?: string | null;
+  occurred_at: string;
+  duration_ms: number;
+  active_ms: number;
+  exit_reason: string;
+  metadata_json: Record<string, unknown>;
+}
+
+export interface AuditSession {
+  id: string;
+  client_session_id: string;
+  platform: string;
+  started_at: string;
+  last_seen_at: string;
+  ended_at?: string | null;
+  active_ms: number;
+  exit_page_path: string;
+  exit_feature_code: string;
+  exit_reason: string;
+  app_version: string;
+  device_summary: string;
+  events: AuditEvent[];
+}
+
+export interface AuditUserDayResponse {
+  user: AuditUserBrief;
+  date: string;
+  sessions: AuditSession[];
 }
 
 export interface AIDebugInfo {
