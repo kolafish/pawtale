@@ -424,42 +424,68 @@ async def test_book_quality_audit_reuses_acknowledged_equivalent_event(client, t
     assert visible_response.json()["items"] == []
 
 
-async def test_book_quality_audit_job_records_event(client, test_db):
+async def test_book_quality_audit_job_records_semantic_event_by_default(client, test_db, monkeypatch):
     register_memoir_editing_job_handlers()
-    first = await create_test_voice_transcript(client, test_db, "小时候在外婆家的院子里摘菜。")
-    second = await create_test_voice_transcript(client, test_db, "后来又讲了夏天和外婆一起剥青豆。")
-    project_id = first["session"]["project_id"]
-    _, chapter = await create_test_book_plan(
-        test_db,
-        project_id=project_id,
-        source_refs=[
-            memoir_source_ref(first, "外婆家的院子"),
-            memoir_source_ref(second, "剥青豆"),
-        ],
-        chapter_title="院子里的童年",
-    )
-    chapter.metadata_json = {"pending_source_utterance_ids": [second["utterance_id"]]}
-    await create_test_chapter_draft(
-        test_db,
-        project_id=project_id,
-        chapter_id=chapter.id,
-        content="小时候在外婆家的院子里摘菜。",
-    )
+    _, project_id, chapter, second = await _create_needs_update_audit_context(client, test_db)
+    chapter_ai = FakeAuditAI([
+        {
+            "summary": "本章围绕院子里的童年记忆。",
+            "covered": {"time": ["小时候"], "places": ["外婆家的院子"], "people": ["外婆"], "events": ["摘菜"]},
+            "gaps": [{"type": "event_sequence", "severity": "medium", "message": "剥青豆的前后经过还不连贯"}],
+            "next_questions": ["那次剥青豆是怎么开始的？"],
+            "evidence_refs": [{"utterance_id": second["utterance_id"], "quote": "剥青豆"}],
+        }
+    ])
+    semantic_ai = FakeAuditAI([
+        {
+            "overall_status": "needs_updates",
+            "summary_text": "后台语义审计认为「院子里的童年」需要补写新素材。",
+            "display": {
+                "title": "语义审计：院子里的童年待补写",
+                "summary": "新讲述已经出现，但正文还没吸收。",
+                "detail": "先补写剥青豆的经过，再继续追问细节。",
+            },
+            "primary_action": {
+                "type": "revise_chapter",
+                "cta_text": "补写本章",
+                "chapter_id": chapter.id,
+                "utterance_count": 1,
+            },
+            "chapter_audits": [
+                {
+                    "chapter_id": chapter.id,
+                    "summary": "新增剥青豆素材待写入。",
+                    "gaps": [{"type": "event_sequence", "severity": "medium", "message": "还缺经过"}],
+                    "next_questions": ["那天为什么会一起剥青豆？"],
+                    "evidence_refs": [{"utterance_id": second["utterance_id"], "quote": "剥青豆"}],
+                }
+            ],
+        }
+    ])
+    monkeypatch.setattr("app.services.memoir.chapter_cards.get_ai_service", lambda ai_model=None: chapter_ai)
+    monkeypatch.setattr("app.services.memoir.book_quality_audit.get_ai_service", lambda ai_model=None: semantic_ai)
 
     job = await schedule_project_quality_audit(
         test_db,
         project_id=project_id,
         reason="test",
+        ai_model="fake-job-model",
     )
     await test_db.commit()
 
     assert job.job_type == MemoirEditingJobType.QUALITY_AUDIT.value
     assert job.dedupe_key == f"quality_audit:{project_id}"
+    assert job.payload_json["semantic_audit"] is True
+    assert job.payload_json["ai_model"] == "fake-job-model"
     assert await run_editing_job(test_db, job.id) is True
     await test_db.refresh(job)
     assert job.status == MemoirEditingJobStatus.SUCCEEDED.value
     assert job.result_json["overall_status"] == "needs_updates"
     assert job.result_json["reason"] == "test"
+    assert job.result_json["semantic_audit"] is True
+    assert job.result_json["snapshot_engine"] == "llm_semantic_v1"
+    assert len(chapter_ai.calls) == 1
+    assert len(semantic_ai.calls) == 1
 
     event = await test_db.scalar(
         select(MemoirAutomationEvent).where(
@@ -468,8 +494,44 @@ async def test_book_quality_audit_job_records_event(client, test_db):
         )
     )
     assert event is not None
-    assert event.summary_text == "当前有 1 个章节需要优先处理。"
+    assert event.summary_text == "后台语义审计认为「院子里的童年」需要补写新素材。"
     assert event.id == job.result_json["event_id"]
+    assert event.metadata_json["snapshot_engine"] == "llm_semantic_v1"
+
+
+async def test_book_quality_audit_job_can_disable_semantic_audit(client, test_db, monkeypatch):
+    register_memoir_editing_job_handlers()
+    _, project_id, _, _ = await _create_needs_update_audit_context(client, test_db)
+
+    def fail_get_ai_service(ai_model=None):
+        raise AssertionError("semantic audit should not request AI when disabled")
+
+    monkeypatch.setattr("app.services.memoir.chapter_cards.get_ai_service", fail_get_ai_service)
+    monkeypatch.setattr("app.services.memoir.book_quality_audit.get_ai_service", fail_get_ai_service)
+
+    job = await schedule_project_quality_audit(
+        test_db,
+        project_id=project_id,
+        reason="test",
+        semantic_audit=False,
+    )
+    await test_db.commit()
+
+    assert job.payload_json["semantic_audit"] is False
+    assert await run_editing_job(test_db, job.id) is True
+    await test_db.refresh(job)
+    assert job.status == MemoirEditingJobStatus.SUCCEEDED.value
+    assert job.result_json["semantic_audit"] is False
+    assert job.result_json["snapshot_engine"] == "rules_v1"
+
+    event = await test_db.scalar(
+        select(MemoirAutomationEvent).where(
+            MemoirAutomationEvent.project_id == project_id,
+            MemoirAutomationEvent.event_type == MemoirAutomationEventType.AUDIT_COMPLETED.value,
+        )
+    )
+    assert event is not None
+    assert event.metadata_json["snapshot_engine"] == "rules_v1"
 
 
 async def test_book_quality_audit_returns_needs_plan_without_recording_event(client, test_db):

@@ -467,3 +467,60 @@ updated_at
 - PR 8：已完成。新增 `book_source_links.py` 统一读取抽象；计划响应、素材覆盖率、章节草稿生成、章节卡片、进度快照/规则审计、自动归章路由、转写收录展示、语音修正上下文和全书稿快照生成均优先读取 active link，并在缺少 link 记录时按章节/素材回退旧 `source_refs_json`；`pending_source_utterance_ids` / `removed_source_utterance_ids` 仍作为当前补写状态 metadata 保留到 PR 10 收敛。
 - PR 9：已完成。新增章节素材 link 回填、素材卡片回填、章节卡片回填和语义状态检查脚本；所有回填脚本支持 `--project-id`、默认 dry-run、输出 JSON 统计和失败原因，素材/章节卡片脚本必须显式 `--execute` 才会调用 LLM provider，不会在启动时自动执行大规模回填。
 - PR 10：已完成。收敛 `pending_source_utterance_ids` / `removed_source_utterance_ids` 主读口径到 `MemoirChapterSourceLink.merged_draft_version_id`、`status` 和 `removed_at`；`source_refs_json` 保留为写兼容和旧项目 fallback，不删除历史书稿快照或事件历史。
+
+## 后台编辑优化拆分
+
+前 10 个 PR 已完成底层数据结构和主读路径收敛。下一阶段不继续大改模型，而是让 AI 后台编辑链路主动使用这些结构。
+
+### 后台编辑优化 PR 1：后台自动语义审计默认化
+
+目标：自动归章、自动补写等后台链路触发质量审计时，默认进入 LLM 语义审计路径，并在失败时降级到规则审计。
+
+范围：
+
+- `schedule_project_quality_audit` 写入 `semantic_audit` 和可选 `ai_model` payload。
+- `run_book_quality_audit_job` 从 job payload 构造 `MemoirBookQualityAuditRunRequest`。
+- job result 写入实际 `snapshot_engine`，方便确认本次后台审计使用规则还是语义 snapshot。
+- 测试覆盖默认语义审计和显式关闭语义审计。
+
+状态：本 PR 完成。
+
+### 后台编辑优化 PR 2：素材卡片事件驱动刷新
+
+目标：让新素材、转写校正和素材文本变化后自动生成或刷新 `MemoirSourceCard`，并把可用卡片绑定到章节素材关系。
+
+范围：
+
+- ASR ready、转写校正、手动文本编辑后排 `GENERATE_SOURCE_CARD`。
+- source card ready 后回填 active `MemoirChapterSourceLink.source_card_id`。
+- 不要求 source card 成功才能归章、补写或用户编辑。
+
+### 后台编辑优化 PR 3：卡片驱动自动归章
+
+目标：自动归章时优先使用 source card 和 chapter card 的结构化语义，提高路由稳定性。
+
+范围：
+
+- route source 前生成或复用当前素材 source card。
+- 候选章节摘要优先使用 chapter card，缺失时 fallback 到旧 digest。
+- 保持现有 confidence threshold 和 hold-for-review 逻辑。
+
+### 后台编辑优化 PR 4：卡片驱动章节补写和删除素材改稿
+
+目标：章节自动改稿使用 source card/chapter card 的关键事实和缺口，并补上 deletion-only revision。
+
+范围：
+
+- 章节 draft prompt 增加 source card 的关键事实、时间、地点、人物和 open questions。
+- revision 根据 SourceLink change state 区分新增素材、素材文本变化、删除素材。
+- 删除素材后可自动生成移除过期内容的修订稿，但不直接覆盖用户确认稿。
+
+### 后台编辑优化 PR 5：后台语义状态检查和追问建议
+
+目标：给后台和小程序提供可解释的语义状态入口。
+
+范围：
+
+- 增加项目级 semantic state inspector，展示 source/chapter/audit snapshot 的 ready/stale/failed 状态。
+- 从 latest chapter cards 和 audit snapshot 汇总建议追问。
+- 只产出建议和事件，不直接改正文。
