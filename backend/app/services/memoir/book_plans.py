@@ -19,6 +19,8 @@ from app.models.memoir import (
     MemoirBookPlan,
     MemoirBookPlanChapter,
     MemoirBookChapterDraft,
+    MemoirVoiceSession,
+    MemoirVoiceUtterance,
 )
 from app.schemas.memoir_book import (
     MemoirBookAudioRequest,
@@ -94,11 +96,13 @@ from app.services.memoir.book_structure_commands import (
     command_chapter_id as _require_command_chapter_id,
     source_utterance_id as _require_source_utterance_id,
 )
+from app.services.memoir.utterance_editing_pipeline import schedule_source_routing_for_ready_utterance
 from app.services.memoir.voice_tts import TTSClient
 
 
 logger = logging.getLogger(__name__)
 BOOK_OUTLINE_TTS_CACHE_KEY = "outline_tts_audio"
+PLAN_CONFIRMED_SOURCE_ROUTING_SOURCE = "book_plan_confirmed"
 
 
 @dataclass(frozen=True)
@@ -338,6 +342,45 @@ async def get_book_source_coverage(
         ],
         uncovered_sources=[_source_coverage_item(source) for source in uncovered_sources],
     )
+
+
+async def _schedule_uncovered_source_routing_after_plan_confirmation(
+    db: AsyncSession,
+    *,
+    user_id: str,
+    project_id: str,
+) -> int:
+    coverage = await get_book_source_coverage(db, user_id=user_id, project_id=project_id)
+    utterance_ids = [source.utterance_id for source in coverage.uncovered_sources]
+    if not utterance_ids:
+        return 0
+
+    result = await db.execute(
+        select(MemoirVoiceUtterance)
+        .join(MemoirVoiceSession, MemoirVoiceUtterance.voice_session_id == MemoirVoiceSession.id)
+        .where(
+            MemoirVoiceSession.project_id == project_id,
+            MemoirVoiceUtterance.id.in_(utterance_ids),
+        )
+        .options(selectinload(MemoirVoiceUtterance.chat_message))
+    )
+    utterances_by_id = {utterance.id: utterance for utterance in result.scalars().all()}
+    scheduled_count = 0
+    for utterance_id in utterance_ids:
+        utterance = utterances_by_id.get(utterance_id)
+        if not utterance:
+            continue
+        job = await schedule_source_routing_for_ready_utterance(
+            db,
+            project_id=project_id,
+            utterance=utterance,
+            source=PLAN_CONFIRMED_SOURCE_ROUTING_SOURCE,
+        )
+        if job:
+            scheduled_count += 1
+    if scheduled_count:
+        await db.commit()
+    return scheduled_count
 
 
 async def assign_book_sources_to_chapters(
@@ -757,7 +800,7 @@ async def confirm_book_plan(
     project = await load_memoir_project(db, project_id, user_id)
     sources = await _source_segments(db, user_id=user_id, project_id=project_id)
     chapters = _validated_chapters(req, sources)
-    return await _replace_plan(
+    response = await _replace_plan(
         db,
         project_id=project_id,
         title=req.title or f"{project.title}章节规划",
@@ -771,6 +814,12 @@ async def confirm_book_plan(
             "confirmed_by": "user",
         },
     )
+    await _schedule_uncovered_source_routing_after_plan_confirmation(
+        db,
+        user_id=user_id,
+        project_id=project_id,
+    )
+    return response
 
 
 async def update_book_plan(
