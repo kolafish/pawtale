@@ -1,6 +1,7 @@
 import type {
   MemoirBookAudioResponse,
   MemoirBookChapterDraft,
+  MemoirBookEditorialCopyTarget,
   MemoirBookOutputExportFormat,
   MemoirBookOutputExportLayout,
   MemoirBookOutput,
@@ -43,8 +44,10 @@ import {
   getMemoirBookPlan,
   getMemoirBookSourceCoverage,
   listMemoirAutomationEvents,
+  regenerateMemoirBookOutputEditorialCopy,
   suggestMemoirBookOutputTitles,
   updateMemoirBookOutput,
+  updateMemoirBookOutputChapterEditorialCopy,
   updateMemoirBookChapterTitle,
   updateMemoirBookPlan,
   updateMemoirBookChapterDraft,
@@ -150,6 +153,7 @@ interface DatasetEvent {
       direction?: string;
       format?: MemoirBookOutputExportFormat;
       layout?: MemoirBookOutputExportLayout;
+      target?: MemoirBookEditorialCopyTarget;
       title?: string;
       utteranceId?: string;
     };
@@ -289,6 +293,30 @@ function bookDesignHasChanges(data: BookData): boolean {
   return data.bookTitleChanged || data.bookMetadataChanged || data.bookCoverStyleChanged;
 }
 
+function bookEditorialCopyBlockedMessage(data: BookData): string {
+  if (!data.bookOutput?.latest_version || !data.bookContent) {
+    return "请先生成全书";
+  }
+  if (data.bookViewingHistoricalVersion) {
+    return "请切回最新版后再编辑成书文案";
+  }
+  if (data.hasDraftChanges) {
+    return "请先保存当前章节修改，再编辑成书文案";
+  }
+  if (data.bookOutput.is_stale) {
+    return "章节内容已更新，请先更新全书再编辑成书文案";
+  }
+  return "";
+}
+
+function isBookLevelEditorialCopyTarget(target: string): target is MemoirBookEditorialCopyTarget {
+  return target === "preface" || target === "afterword" || target === "back_cover_quote";
+}
+
+function isChapterEditorialCopyTarget(target: string): target is MemoirBookEditorialCopyTarget {
+  return target === "chapter_intros" || target === "pull_quotes";
+}
+
 function bookDesignSaveStatusText(data: BookData): string {
   if (!data.bookOutput?.latest_version) {
     return "生成时应用";
@@ -373,6 +401,13 @@ Page<BookData, {
   suggestBookTitles(): Promise<void>;
   chooseBookTitleSuggestion(event: DatasetEvent): void;
   changeBookCoverStyle(event: PickerEvent): void;
+  ensureBookDesignSavedForEditorialCopy(): Promise<boolean>;
+  regenerateBookEditorialCopy(event: DatasetEvent): Promise<void>;
+  regenerateBookChapterEditorialCopy(event: DatasetEvent): Promise<void>;
+  openBookChapterEditorialEditor(event: DatasetEvent): void;
+  closeBookChapterEditorialEditor(): void;
+  changeBookChapterEditorialField(event: TextInputEvent): void;
+  saveBookChapterEditorialCopy(): Promise<void>;
   generateBook(): Promise<void>;
   changeBookOutputVersion(event: PickerEvent): void;
   changeBookExportLayout(event: PickerEvent): void;
@@ -571,6 +606,14 @@ Page<BookData, {
     bookCoverStyleDetailText: BOOK_COVER_STYLE_OPTIONS[0].detailText,
     bookCoverStyleOptions: BOOK_COVER_STYLE_OPTIONS,
     bookCoverStyleChanged: false,
+    bookEditorialCopyBusyTarget: "",
+    bookChapterEditorialEditorVisible: false,
+    bookChapterEditorialChapterId: "",
+    bookChapterEditorialChapterTitle: "",
+    bookChapterEditorialIntroInput: "",
+    bookChapterEditorialPullQuoteInput: "",
+    bookChapterEditorialSourceRefId: "",
+    bookChapterEditorialSourceText: "",
     ttsBusyTarget: "",
     playingTarget: "",
     bookTTSActiveTarget: "",
@@ -1051,6 +1094,173 @@ Page<BookData, {
     await this.autosaveBookDesignSettings();
   },
 
+  async ensureBookDesignSavedForEditorialCopy() {
+    this.clearBookDesignAutosaveTimer();
+    if (!bookDesignHasChanges(this.data)) {
+      return true;
+    }
+    await this.autosaveBookDesignSettings();
+    return !bookDesignHasChanges(this.data);
+  },
+
+  async regenerateBookEditorialCopy(event) {
+    const target = String(event.currentTarget.dataset.target || "");
+    if (!isBookLevelEditorialCopyTarget(target)) {
+      return;
+    }
+    if (!this.data.projectId || this.data.bookEditorialCopyBusyTarget || this.data.bookTitleSaving) {
+      return;
+    }
+    const blockedMessage = bookEditorialCopyBlockedMessage(this.data);
+    if (blockedMessage) {
+      this.setData({ error: blockedMessage });
+      return;
+    }
+    if (!(await this.ensureBookDesignSavedForEditorialCopy())) {
+      return;
+    }
+    this.stopPlayback();
+    this.setData({ bookEditorialCopyBusyTarget: target, error: "" });
+    try {
+      const output = await regenerateMemoirBookOutputEditorialCopy(this.data.projectId, { targets: [target] });
+      this.applyBookOutput(output);
+      wx.showToast({ title: "已生成", icon: "success" });
+    } catch (error) {
+      if (isLoginError(error)) {
+        wx.reLaunch({ url: "/pages/login/index" });
+        return;
+      }
+      this.setData({ error: error instanceof Error ? error.message : "成书文案生成失败" });
+    } finally {
+      this.setData({ bookEditorialCopyBusyTarget: "" });
+    }
+  },
+
+  async regenerateBookChapterEditorialCopy(event) {
+    const chapterId = event.currentTarget.dataset.id || "";
+    const target = String(event.currentTarget.dataset.target || "");
+    if (!chapterId || !isChapterEditorialCopyTarget(target)) {
+      return;
+    }
+    const busyTarget = `${target}:${chapterId}`;
+    if (!this.data.projectId || this.data.bookEditorialCopyBusyTarget || this.data.bookTitleSaving) {
+      return;
+    }
+    const blockedMessage = bookEditorialCopyBlockedMessage(this.data);
+    if (blockedMessage) {
+      this.setData({ error: blockedMessage });
+      return;
+    }
+    if (!(await this.ensureBookDesignSavedForEditorialCopy())) {
+      return;
+    }
+    this.stopPlayback();
+    this.setData({ bookEditorialCopyBusyTarget: busyTarget, error: "" });
+    try {
+      const output = await regenerateMemoirBookOutputEditorialCopy(this.data.projectId, {
+        targets: [target],
+        chapter_ids: [chapterId],
+      });
+      this.applyBookOutput(output);
+      wx.showToast({ title: "已生成", icon: "success" });
+    } catch (error) {
+      if (isLoginError(error)) {
+        wx.reLaunch({ url: "/pages/login/index" });
+        return;
+      }
+      this.setData({ error: error instanceof Error ? error.message : "章节文案生成失败" });
+    } finally {
+      this.setData({ bookEditorialCopyBusyTarget: "" });
+    }
+  },
+
+  openBookChapterEditorialEditor(event) {
+    const chapterId = event.currentTarget.dataset.id || "";
+    if (!chapterId) {
+      return;
+    }
+    const blockedMessage = bookEditorialCopyBlockedMessage(this.data);
+    if (blockedMessage) {
+      this.setData({ error: blockedMessage });
+      return;
+    }
+    const chapter = this.data.bookManuscriptChapterItems.find((candidate) => candidate.chapterId === chapterId);
+    if (!chapter) {
+      this.setData({ error: "没有找到可编辑的章节文案" });
+      return;
+    }
+    this.stopPlayback();
+    this.setData({
+      bookChapterEditorialEditorVisible: true,
+      bookChapterEditorialChapterId: chapter.chapterId,
+      bookChapterEditorialChapterTitle: chapter.title,
+      bookChapterEditorialIntroInput: chapter.intro,
+      bookChapterEditorialPullQuoteInput: chapter.quoteText,
+      bookChapterEditorialSourceRefId: chapter.quoteSourceRefId,
+      bookChapterEditorialSourceText: chapter.quoteSourceText,
+      error: "",
+    });
+  },
+
+  closeBookChapterEditorialEditor() {
+    this.setData({
+      bookChapterEditorialEditorVisible: false,
+      bookChapterEditorialChapterId: "",
+      bookChapterEditorialChapterTitle: "",
+      bookChapterEditorialIntroInput: "",
+      bookChapterEditorialPullQuoteInput: "",
+      bookChapterEditorialSourceRefId: "",
+      bookChapterEditorialSourceText: "",
+    });
+  },
+
+  changeBookChapterEditorialField(event) {
+    const key = String(event.currentTarget.dataset.key || "");
+    if (key === "intro") {
+      this.setData({ bookChapterEditorialIntroInput: event.detail.value, error: "" });
+      return;
+    }
+    if (key === "pull_quote") {
+      this.setData({ bookChapterEditorialPullQuoteInput: event.detail.value, error: "" });
+    }
+  },
+
+  async saveBookChapterEditorialCopy() {
+    const chapterId = this.data.bookChapterEditorialChapterId;
+    if (!chapterId || !this.data.projectId || this.data.bookEditorialCopyBusyTarget || this.data.bookTitleSaving) {
+      return;
+    }
+    const blockedMessage = bookEditorialCopyBlockedMessage(this.data);
+    if (blockedMessage) {
+      this.setData({ error: blockedMessage });
+      return;
+    }
+    if (!(await this.ensureBookDesignSavedForEditorialCopy())) {
+      return;
+    }
+    const busyTarget = `manual:${chapterId}`;
+    this.stopPlayback();
+    this.setData({ bookEditorialCopyBusyTarget: busyTarget, error: "" });
+    try {
+      const output = await updateMemoirBookOutputChapterEditorialCopy(this.data.projectId, chapterId, {
+        intro: trimText(this.data.bookChapterEditorialIntroInput),
+        pull_quote: trimText(this.data.bookChapterEditorialPullQuoteInput),
+        pull_quote_source_ref_id: trimText(this.data.bookChapterEditorialSourceRefId) || null,
+      });
+      this.applyBookOutput(output);
+      this.closeBookChapterEditorialEditor();
+      wx.showToast({ title: "已保存", icon: "success" });
+    } catch (error) {
+      if (isLoginError(error)) {
+        wx.reLaunch({ url: "/pages/login/index" });
+        return;
+      }
+      this.setData({ error: error instanceof Error ? error.message : "章节文案保存失败" });
+    } finally {
+      this.setData({ bookEditorialCopyBusyTarget: "" });
+    }
+  },
+
   changeBookOutputVersion(event) {
     const index = Number(event.detail.value);
     const option = this.data.bookVersionOptions[index];
@@ -1063,6 +1273,7 @@ Page<BookData, {
     this.setData({
       ...bookOutputData(this.data.bookOutput, option.id),
       bookPreviewChaptersExpanded: false,
+      bookChapterEditorialEditorVisible: false,
     });
   },
 

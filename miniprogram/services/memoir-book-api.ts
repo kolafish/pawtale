@@ -6,7 +6,9 @@ import type {
   MemoirBookChapterDraftUpdateRequest,
   MemoirBookChapterTitleGenerateRequest,
   MemoirBookChapterTitleUpdateRequest,
+  MemoirBookOutputChapterEditorialCopyUpdateRequest,
   MemoirBookOutput,
+  MemoirBookOutputEditorialCopyRegenerateRequest,
   MemoirBookOutputExportFormat,
   MemoirBookOutputExportLayout,
   MemoirBookOutputGenerateRequest,
@@ -342,6 +344,34 @@ export function updateMemoirBookOutput(
 ): Promise<MemoirBookOutput> {
   return memoirRequest<MemoirBookOutput>(
     memoirProjectPath(projectId, "/book-output"),
+    {
+      method: "PATCH",
+      data,
+    },
+  );
+}
+
+export function regenerateMemoirBookOutputEditorialCopy(
+  projectId: string,
+  data: MemoirBookOutputEditorialCopyRegenerateRequest = {},
+): Promise<MemoirBookOutput> {
+  return memoirRequest<MemoirBookOutput>(
+    memoirProjectPath(projectId, "/book-output/editorial-copy/regenerate"),
+    {
+      method: "POST",
+      data: withSelectedAIModel(data),
+      timeoutMs: BOOK_OUTPUT_GENERATE_TIMEOUT_MS,
+    },
+  );
+}
+
+export function updateMemoirBookOutputChapterEditorialCopy(
+  projectId: string,
+  chapterId: string,
+  data: MemoirBookOutputChapterEditorialCopyUpdateRequest,
+): Promise<MemoirBookOutput> {
+  return memoirRequest<MemoirBookOutput>(
+    memoirProjectPath(projectId, `/book-output/chapters/${encodeURIComponent(chapterId)}/editorial-copy`),
     {
       method: "PATCH",
       data,

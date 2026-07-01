@@ -750,7 +750,18 @@
           </view>
 
           <view class="book-metadata-field">
-            <text class="book-metadata-label">前言</text>
+            <view class="book-metadata-label-row">
+              <text class="book-metadata-label">前言</text>
+              <button
+                class="book-editorial-generate"
+                data-target="preface"
+                loading="{{bookEditorialCopyBusyTarget === 'preface'}}"
+                disabled="{{bookTitleSaving || generatingBook || updatingPlanStructure || bookViewingHistoricalVersion || bookEditorialCopyBusyTarget || !bookContent || bookStaleNotice}}"
+                bindtap="regenerateBookEditorialCopy"
+              >
+                重生成
+              </button>
+            </view>
             <textarea
               class="book-metadata-textarea"
               value="{{bookPrefaceInput}}"
@@ -764,7 +775,18 @@
           </view>
 
           <view class="book-metadata-field">
-            <text class="book-metadata-label">后记</text>
+            <view class="book-metadata-label-row">
+              <text class="book-metadata-label">后记</text>
+              <button
+                class="book-editorial-generate"
+                data-target="afterword"
+                loading="{{bookEditorialCopyBusyTarget === 'afterword'}}"
+                disabled="{{bookTitleSaving || generatingBook || updatingPlanStructure || bookViewingHistoricalVersion || bookEditorialCopyBusyTarget || !bookContent || bookStaleNotice}}"
+                bindtap="regenerateBookEditorialCopy"
+              >
+                重生成
+              </button>
+            </view>
             <textarea
               class="book-metadata-textarea"
               value="{{bookAfterwordInput}}"
@@ -778,7 +800,18 @@
           </view>
 
           <view class="book-metadata-field">
-            <text class="book-metadata-label">封底摘录</text>
+            <view class="book-metadata-label-row">
+              <text class="book-metadata-label">封底摘录</text>
+              <button
+                class="book-editorial-generate"
+                data-target="back_cover_quote"
+                loading="{{bookEditorialCopyBusyTarget === 'back_cover_quote'}}"
+                disabled="{{bookTitleSaving || generatingBook || updatingPlanStructure || bookViewingHistoricalVersion || bookEditorialCopyBusyTarget || !bookContent || bookStaleNotice}}"
+                bindtap="regenerateBookEditorialCopy"
+              >
+                重生成
+              </button>
+            </view>
             <textarea
               class="book-metadata-textarea compact"
               value="{{bookBackCoverQuoteInput}}"
@@ -891,18 +924,50 @@
                     <text class="book-manuscript-chapter-index">{{chapter.indexText}}</text>
                     <text class="book-manuscript-chapter-title">{{chapter.title}}</text>
                   </view>
-                  <button
-                    class="chapter-preview-edit"
-                    data-id="{{chapter.chapterId}}"
-                    bindtap="editBookOutputChapter"
-                  >
-                    编辑本章
-                  </button>
+                  <view class="book-manuscript-chapter-actions">
+                    <button
+                      class="chapter-preview-edit"
+                      data-id="{{chapter.chapterId}}"
+                      bindtap="editBookOutputChapter"
+                    >
+                      正文
+                    </button>
+                    <button
+                      class="chapter-preview-edit"
+                      data-id="{{chapter.chapterId}}"
+                      bindtap="openBookChapterEditorialEditor"
+                    >
+                      文案
+                    </button>
+                  </view>
                 </view>
                 <text wx:if="{{chapter.metaText}}" class="book-manuscript-meta">{{chapter.metaText}}</text>
                 <text wx:if="{{chapter.intro}}" class="book-manuscript-intro">{{chapter.intro}}</text>
                 <view wx:if="{{chapter.quoteText}}" class="book-manuscript-quote">
                   <text>“{{chapter.quoteText}}”</text>
+                  <text wx:if="{{chapter.quoteSourceText}}" class="book-manuscript-quote-source">{{chapter.quoteSourceText}}</text>
+                </view>
+                <view class="book-manuscript-copy-actions">
+                  <button
+                    class="book-editorial-generate"
+                    data-id="{{chapter.chapterId}}"
+                    data-target="chapter_intros"
+                    loading="{{bookEditorialCopyBusyTarget === 'chapter_intros:' + chapter.chapterId}}"
+                    disabled="{{bookTitleSaving || generatingBook || updatingPlanStructure || bookViewingHistoricalVersion || bookEditorialCopyBusyTarget || bookStaleNotice}}"
+                    bindtap="regenerateBookChapterEditorialCopy"
+                  >
+                    重写导语
+                  </button>
+                  <button
+                    class="book-editorial-generate"
+                    data-id="{{chapter.chapterId}}"
+                    data-target="pull_quotes"
+                    loading="{{bookEditorialCopyBusyTarget === 'pull_quotes:' + chapter.chapterId}}"
+                    disabled="{{bookTitleSaving || generatingBook || updatingPlanStructure || bookViewingHistoricalVersion || bookEditorialCopyBusyTarget || bookStaleNotice}}"
+                    bindtap="regenerateBookChapterEditorialCopy"
+                  >
+                    重选引语
+                  </button>
                 </view>
                 <text class="book-manuscript-preview">{{chapter.contentPreview}}</text>
               </view>
@@ -946,6 +1011,60 @@
                 bindchange="toggleBookExportSourceAppendix"
               />
             </view>
+          </view>
+        </view>
+
+        <view wx:if="{{bookChapterEditorialEditorVisible}}" class="book-chapter-editorial-panel">
+          <view class="book-manuscript-heading-row">
+            <view class="book-chapter-editorial-title-block">
+              <text class="book-manuscript-heading">章节文案</text>
+              <text class="book-manuscript-meta">{{bookChapterEditorialChapterTitle}}</text>
+            </view>
+            <button class="chapter-preview-edit" bindtap="closeBookChapterEditorialEditor">收起</button>
+          </view>
+          <view class="book-metadata-field">
+            <text class="book-metadata-label">章节导语</text>
+            <textarea
+              class="book-metadata-textarea compact"
+              value="{{bookChapterEditorialIntroInput}}"
+              placeholder="35-90 字，像书里的自然过渡"
+              maxlength="180"
+              auto-height
+              disabled="{{bookEditorialCopyBusyTarget || bookTitleSaving}}"
+              data-key="intro"
+              bindinput="changeBookChapterEditorialField"
+            />
+          </view>
+          <view class="book-metadata-field">
+            <text class="book-metadata-label">章首引语</text>
+            <textarea
+              class="book-metadata-textarea compact"
+              value="{{bookChapterEditorialPullQuoteInput}}"
+              placeholder="优先保留原始口述原句"
+              maxlength="120"
+              auto-height
+              disabled="{{bookEditorialCopyBusyTarget || bookTitleSaving}}"
+              data-key="pull_quote"
+              bindinput="changeBookChapterEditorialField"
+            />
+            <text wx:if="{{bookChapterEditorialSourceText}}" class="book-chapter-editorial-source">{{bookChapterEditorialSourceText}}</text>
+          </view>
+          <view class="actions-row compact">
+            <button
+              class="primary-button"
+              loading="{{bookEditorialCopyBusyTarget === 'manual:' + bookChapterEditorialChapterId}}"
+              disabled="{{bookEditorialCopyBusyTarget || bookTitleSaving}}"
+              bindtap="saveBookChapterEditorialCopy"
+            >
+              保存文案
+            </button>
+            <button
+              class="ghost-button"
+              disabled="{{bookEditorialCopyBusyTarget || bookTitleSaving}}"
+              bindtap="closeBookChapterEditorialEditor"
+            >
+              取消
+            </button>
           </view>
         </view>
 

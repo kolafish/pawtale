@@ -187,6 +187,8 @@ export interface BookManuscriptChapterView {
   title: string;
   intro: string;
   quoteText: string;
+  quoteSourceRefId: string;
+  quoteSourceText: string;
   metaText: string;
   contentPreview: string;
 }
@@ -316,6 +318,14 @@ export interface BookData {
   bookCoverStyleDetailText: string;
   bookCoverStyleOptions: BookCoverStyleOptionView[];
   bookCoverStyleChanged: boolean;
+  bookEditorialCopyBusyTarget: string;
+  bookChapterEditorialEditorVisible: boolean;
+  bookChapterEditorialChapterId: string;
+  bookChapterEditorialChapterTitle: string;
+  bookChapterEditorialIntroInput: string;
+  bookChapterEditorialPullQuoteInput: string;
+  bookChapterEditorialSourceRefId: string;
+  bookChapterEditorialSourceText: string;
   generatingBook: boolean;
   ttsBusyTarget: string;
   playingTarget: string;
@@ -1116,13 +1126,20 @@ function manuscriptChapterViews(
       title: chapter.title,
       intro: "",
       quoteText: "",
+      quoteSourceRefId: "",
+      quoteSourceText: "",
       metaText: chapter.metaText,
       contentPreview: previewText(chapter.content, 96),
     }));
   }
   return (manuscript.chapters || []).map((chapter, index) => {
     const chapterIndex = responseCount(chapter.index) || index + 1;
-    const quote = (chapter.pull_quotes || []).map((item) => trimText(item.text)).find(Boolean) || "";
+    const quote = (chapter.pull_quotes || []).find((item) => trimText(item.text));
+    const quoteText = trimText(quote?.text || "");
+    const quoteSourceRefId = trimText(quote?.source_ref_ids?.[0] || "");
+    const quoteSourceText = quoteSourceRefId
+      ? "来自原始口述"
+      : (quote?.source === "manual" ? "手动编辑" : (quoteText ? "整理生成" : ""));
     const sourceCount = chapter.source_refs?.length || 0;
     const hintText = [trimText(chapter.time_hint), trimText(chapter.place_hint)].filter(Boolean).join(" · ");
     return {
@@ -1131,7 +1148,9 @@ function manuscriptChapterViews(
       indexText: `第 ${chapterIndex} 章`,
       title: trimText(chapter.title) || "未命名章节",
       intro: trimText(chapter.intro),
-      quoteText: quote,
+      quoteText,
+      quoteSourceRefId,
+      quoteSourceText,
       metaText: [hintText, `${trimText(chapter.content).length} 字`, bookSourceCountText(sourceCount)]
         .filter(Boolean)
         .join(" · "),

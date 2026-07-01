@@ -835,6 +835,57 @@ class MemoirBookOutputUpdateRequest(BaseModel):
         return value.strip()
 
 
+MemoirBookEditorialCopyTarget = Literal[
+    "preface",
+    "afterword",
+    "back_cover_quote",
+    "chapter_intros",
+    "pull_quotes",
+]
+
+
+class MemoirBookOutputEditorialCopyRegenerateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    ai_model: str | None = None
+    targets: list[MemoirBookEditorialCopyTarget] = Field(default_factory=list)
+    chapter_ids: list[str] = Field(default_factory=list)
+    feedback: str | None = None
+
+    @field_validator("ai_model", "feedback")
+    @classmethod
+    def _valid_optional_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        text = value.strip()
+        return text or None
+
+    @field_validator("chapter_ids")
+    @classmethod
+    def _valid_chapter_ids(cls, value: list[str]) -> list[str]:
+        return list(dict.fromkeys(item.strip() for item in value if item.strip()))
+
+    @field_validator("targets")
+    @classmethod
+    def _valid_targets(cls, value: list[MemoirBookEditorialCopyTarget]) -> list[MemoirBookEditorialCopyTarget]:
+        return list(dict.fromkeys(value))
+
+
+class MemoirBookOutputChapterEditorialCopyUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    intro: str | None = None
+    pull_quote: str | None = None
+    pull_quote_source_ref_id: str | None = None
+
+    @field_validator("intro", "pull_quote", "pull_quote_source_ref_id")
+    @classmethod
+    def _valid_optional_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return value.strip()
+
+
 class MemoirBookTitleSuggestionRequest(BaseModel):
     ai_model: str | None = None
     count: int = 6
@@ -910,6 +961,7 @@ class MemoirBookManuscriptSection(BaseModel):
 class MemoirBookManuscriptQuote(BaseModel):
     text: str
     source_ref_ids: list[str] = Field(default_factory=list)
+    source: Literal["original_quote", "editorial_generated", "manual"] = "original_quote"
 
 
 class MemoirBookManuscriptPersonNote(BaseModel):

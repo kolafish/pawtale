@@ -845,6 +845,9 @@ function loadBookPage({
     parseMemoirBookVoiceCommand: async () => {
       throw new Error("parseMemoirBookVoiceCommand was not mocked");
     },
+    regenerateMemoirBookOutputEditorialCopy: async () => {
+      throw new Error("regenerateMemoirBookOutputEditorialCopy was not mocked");
+    },
     bookVoiceCommandGatewayUrl: (projectId) => `wss://api.example.test/book/${encodeURIComponent(projectId)}/gateway`,
     bookVoiceAssistantTurnStreamUrl: (projectId) => (
       `wss://api.example.test/book/${encodeURIComponent(projectId)}/assistant-turn`
@@ -857,6 +860,9 @@ function loadBookPage({
     },
     updateMemoirBookOutput: async () => {
       throw new Error("updateMemoirBookOutput was not mocked");
+    },
+    updateMemoirBookOutputChapterEditorialCopy: async () => {
+      throw new Error("updateMemoirBookOutputChapterEditorialCopy was not mocked");
     },
     updateMemoirBookChapterDraft: async () => {
       throw new Error("updateMemoirBookChapterDraft was not mocked");
@@ -1048,6 +1054,10 @@ test("book page exposes manuscript structure sections", () => {
   assert.match(wxml, /data-key="back_cover_quote"/);
   assert.match(wxml, /bindinput="changeBookMetadataField"/);
   assert.match(wxml, /bindtap="suggestBookTitles"/);
+  assert.match(wxml, /bindtap="regenerateBookEditorialCopy"/);
+  assert.match(wxml, /bindtap="regenerateBookChapterEditorialCopy"/);
+  assert.match(wxml, /bindtap="openBookChapterEditorialEditor"/);
+  assert.match(wxml, /bindtap="saveBookChapterEditorialCopy"/);
   assert.match(wxml, /bindchange="changeBookCoverStyle"/);
   assert.match(wxml, /bookDesignSaveStatusText/);
   assert.doesNotMatch(wxml, /bindtap="saveBookDesignSettings"/);
@@ -1139,6 +1149,8 @@ test("book page summarizes latest book output version", () => {
   assert.equal(data.bookManuscriptFrontMatterItems.length, 4);
   assert.equal(data.bookManuscriptChapterItems[0].intro, "这一章主要记录外婆小时候在院子里的生活。");
   assert.equal(data.bookManuscriptChapterItems[0].quoteText, "我小时候常在院子里晒太阳。");
+  assert.equal(data.bookManuscriptChapterItems[0].quoteSourceRefId, "utterance-1");
+  assert.equal(data.bookManuscriptChapterItems[0].quoteSourceText, "来自原始口述");
   assert.equal(data.bookManuscriptBackMatterItems.some((item) => item.title === "章节来源"), true);
   assert.equal(
     mod.bookOutputStaleNotice(sampleBookOutput(3, "全书正文", true, ["外婆家的童年", "第一次离家", "县城生活"])),
@@ -2450,6 +2462,118 @@ test("book page suggests and autosaves full-book title plus cover style", async 
   assert.equal(context.data.bookCoverStyle, "warm_gray");
   assert.equal(context.data.bookCoverStyleChanged, false);
   assert.equal(context.data.bookDesignSaveStatusText, "已自动保存");
+  delete global.wx;
+});
+
+test("book page regenerates full-book and chapter editorial copy", async () => {
+  const calls = [];
+  const toastTitles = [];
+  global.wx = {
+    showToast(options) {
+      toastTitles.push(options.title);
+    },
+  };
+  const { page } = loadBookPage({
+    voiceApiExports: {
+      regenerateMemoirBookOutputEditorialCopy: async (projectId, data) => {
+        calls.push({ projectId, data });
+        const manuscript = sampleBookManuscript();
+        if ((data.targets || []).includes("preface")) {
+          manuscript.front_matter = manuscript.front_matter.map((section) => (
+            section.kind === "preface"
+              ? { ...section, content: "这些讲述来自家里一次次慢慢说起的记忆。" }
+              : section
+          ));
+        }
+        if ((data.targets || []).includes("pull_quotes")) {
+          manuscript.chapters[0].pull_quotes = [
+            { text: "那时候院子里总是很亮。", source_ref_ids: ["utterance-1"], source: "original_quote" },
+          ];
+        }
+        return sampleBookOutput(2, "全书正文", false, [], null, [], manuscript);
+      },
+    },
+  });
+  const context = pageContext(page, { projectId: "project/1" });
+  page.applyBookOutput.call(
+    context,
+    sampleBookOutput(1, "全书正文", false, [], null, [], sampleBookManuscript()),
+  );
+
+  await page.regenerateBookEditorialCopy.call(context, {
+    currentTarget: { dataset: { target: "preface" } },
+  });
+  assert.equal(context.data.bookPrefaceInput, "这些讲述来自家里一次次慢慢说起的记忆。");
+
+  await page.regenerateBookChapterEditorialCopy.call(context, {
+    currentTarget: { dataset: { id: "chapter-1", target: "pull_quotes" } },
+  });
+
+  assert.deepEqual(calls[0], {
+    projectId: "project/1",
+    data: { targets: ["preface"] },
+  });
+  assert.deepEqual(calls[1], {
+    projectId: "project/1",
+    data: { targets: ["pull_quotes"], chapter_ids: ["chapter-1"] },
+  });
+  assert.equal(context.data.bookManuscriptChapterItems[0].quoteText, "那时候院子里总是很亮。");
+  assert.equal(context.data.bookEditorialCopyBusyTarget, "");
+  assert.deepEqual(toastTitles, ["已生成", "已生成"]);
+  delete global.wx;
+});
+
+test("book page edits and saves chapter editorial copy", async () => {
+  const calls = [];
+  global.wx = { showToast() {} };
+  const { page } = loadBookPage({
+    voiceApiExports: {
+      updateMemoirBookOutputChapterEditorialCopy: async (projectId, chapterId, data) => {
+        calls.push({ projectId, chapterId, data });
+        const manuscript = sampleBookManuscript();
+        manuscript.chapters[0].intro = data.intro;
+        manuscript.chapters[0].pull_quotes = [
+          { text: data.pull_quote, source_ref_ids: [data.pull_quote_source_ref_id], source: "manual" },
+        ];
+        return sampleBookOutput(1, "全书正文", false, [], null, [], manuscript);
+      },
+    },
+  });
+  const context = pageContext(page, { projectId: "project/1" });
+  page.applyBookOutput.call(
+    context,
+    sampleBookOutput(1, "全书正文", false, [], null, [], sampleBookManuscript()),
+  );
+
+  page.openBookChapterEditorialEditor.call(context, {
+    currentTarget: { dataset: { id: "chapter-1" } },
+  });
+  assert.equal(context.data.bookChapterEditorialEditorVisible, true);
+  assert.equal(context.data.bookChapterEditorialIntroInput, "这一章主要记录外婆小时候在院子里的生活。");
+  assert.equal(context.data.bookChapterEditorialPullQuoteInput, "我小时候常在院子里晒太阳。");
+
+  page.changeBookChapterEditorialField.call(context, {
+    currentTarget: { dataset: { key: "intro" } },
+    detail: { value: "童年的院子从这里接上，像家里人翻开旧相册时说起的第一段。" },
+  });
+  page.changeBookChapterEditorialField.call(context, {
+    currentTarget: { dataset: { key: "pull_quote" } },
+    detail: { value: "我小时候常在院子里晒太阳。" },
+  });
+  await page.saveBookChapterEditorialCopy.call(context);
+
+  assert.deepEqual(calls[0], {
+    projectId: "project/1",
+    chapterId: "chapter-1",
+    data: {
+      intro: "童年的院子从这里接上，像家里人翻开旧相册时说起的第一段。",
+      pull_quote: "我小时候常在院子里晒太阳。",
+      pull_quote_source_ref_id: "utterance-1",
+    },
+  });
+  assert.equal(context.data.bookChapterEditorialEditorVisible, false);
+  assert.equal(context.data.bookManuscriptChapterItems[0].intro, "童年的院子从这里接上，像家里人翻开旧相册时说起的第一段。");
+  assert.equal(context.data.bookManuscriptChapterItems[0].quoteSourceText, "来自原始口述");
   delete global.wx;
 });
 
@@ -3779,6 +3903,13 @@ test("book APIs call encoded backend routes", async () => {
         options.success({ statusCode: 200, data: { suggestions: ["外婆慢慢说"] }, cookies: [], header: {} });
         return;
       }
+      if (
+        options.url.endsWith("/book-output/editorial-copy/regenerate")
+        || options.url.includes("/book-output/chapters/")
+      ) {
+        options.success({ statusCode: 200, data: sampleBookOutput(), cookies: [], header: {} });
+        return;
+      }
       if (options.url.endsWith("/book-output") || options.url.endsWith("/book-output/generate")) {
         options.success({ statusCode: 200, data: sampleBookOutput(), cookies: [], header: {} });
         return;
@@ -3825,9 +3956,11 @@ test("book APIs call encoded backend routes", async () => {
     executeMemoirBookVoiceCommand,
     parseMemoirBookVoiceCommand,
     bookVoiceAssistantTurnStreamUrl,
+    regenerateMemoirBookOutputEditorialCopy,
     suggestMemoirBookOutputTitles,
     updateMemoirBookChapterTitle,
     updateMemoirBookOutput,
+    updateMemoirBookOutputChapterEditorialCopy,
     updateMemoirBookPlan,
     updateMemoirBookChapterDraft,
   } = require("../services/memoir-voice-api.ts");
@@ -3861,6 +3994,16 @@ test("book APIs call encoded backend routes", async () => {
   await createMemoirBookOutputTTS("project/1", {});
   await enqueueMemoirBookChapterDraftGeneration("project/1", "chapter/1", { force_regenerate: true });
   await enqueueMemoirBookOutputGeneration("project/1", { force_regenerate: true });
+  await regenerateMemoirBookOutputEditorialCopy("project/1", {
+    targets: ["preface"],
+    chapter_ids: ["chapter/1"],
+    feedback: "更自然",
+  });
+  await updateMemoirBookOutputChapterEditorialCopy("project/1", "chapter/1", {
+    intro: "导语",
+    pull_quote: "原话",
+    pull_quote_source_ref_id: "utterance/1",
+  });
 
   const apiRequests = requests.filter((request) => request.url.includes("/api/mobile/memoir/"));
   assert.equal(apiRequests[0].url, "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-plan");
@@ -3980,6 +4123,28 @@ test("book APIs call encoded backend routes", async () => {
   assert.deepEqual(apiRequests[21].data, {
     force_regenerate: true,
     ai_model: "doubao-seed-2-0-pro-260215",
+  });
+  assert.equal(
+    apiRequests[22].url,
+    "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-output/editorial-copy/regenerate",
+  );
+  assert.equal(apiRequests[22].method, "POST");
+  assert.deepEqual(apiRequests[22].data, {
+    targets: ["preface"],
+    chapter_ids: ["chapter/1"],
+    feedback: "更自然",
+    ai_model: "doubao-seed-2-0-pro-260215",
+  });
+  assert.equal(apiRequests[22].timeout, 60000);
+  assert.equal(
+    apiRequests[23].url,
+    "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-output/chapters/chapter%2F1/editorial-copy",
+  );
+  assert.equal(apiRequests[23].method, "PATCH");
+  assert.deepEqual(apiRequests[23].data, {
+    intro: "导语",
+    pull_quote: "原话",
+    pull_quote_source_ref_id: "utterance/1",
   });
   delete global.wx;
 });
