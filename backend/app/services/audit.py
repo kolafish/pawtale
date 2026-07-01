@@ -197,7 +197,9 @@ async def ingest_events(
 
         session.last_seen_at = max(session.last_seen_at, occurred_at)
         session.active_ms += active_ms
-        if item.event_type in EXIT_EVENT_TYPES:
+        if item.event_type in EXIT_EVENT_TYPES and (
+            session.ended_at is None or occurred_at >= session.ended_at
+        ):
             session.ended_at = occurred_at
             session.exit_page_path = page_path
             session.exit_feature_code = feature_code

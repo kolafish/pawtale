@@ -90,6 +90,38 @@ async def test_audit_ingest_records_session_events_and_daily_rollups(client, tes
     assert daily_feature.event_count == 3
 
 
+async def test_audit_late_older_page_leave_does_not_replace_latest_exit(client, test_db):
+    response = await client.post("/api/audit/events", json=audit_payload())
+    assert response.status_code == 200
+
+    late_leave = {
+        "client_session_id": "client-session-1",
+        "platform": "miniprogram",
+        "events": [
+            {
+                "client_event_id": "late-leave",
+                "event_type": "page_leave",
+                "occurred_at": "2026-07-01T10:00:10+08:00",
+                "event_date": "2026-07-01",
+                "page_path": "/pages/home/index",
+                "feature_code": "home.view",
+                "duration_ms": 1000,
+                "exit_reason": "navigate",
+            },
+        ],
+    }
+    late_response = await client.post("/api/audit/events", json=late_leave)
+    assert late_response.status_code == 200
+    assert late_response.json()["accepted"] == 1
+
+    session = await test_db.scalar(select(AuditSession))
+    assert session is not None
+    assert session.active_ms == 91_000
+    assert session.exit_page_path == "/pages/voice-chat/index"
+    assert session.exit_feature_code == "voice_chat.session"
+    assert session.exit_reason == "app_background"
+
+
 async def test_audit_dashboard_requires_admin(client):
     response = await client.get("/api/audit/dashboard", params={"from": "2026-07-01", "to": "2026-07-01"})
 
