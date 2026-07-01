@@ -20,6 +20,7 @@ from app.models.memoir import (
     MemoirEditingJob,
     MemoirChapterSourceLink,
     MemoirBookPlanChapter,
+    MemoirChapterEventClusterSnapshot,
 )
 from app.services.memoir import automation_events
 from app.services.memoir.book_auto_revision import schedule_chapter_auto_revision
@@ -1549,6 +1550,70 @@ async def test_mobile_memoir_book_chapter_draft_force_regenerate_ignores_previou
         select(MemoirBookPlanChapter).where(MemoirBookPlanChapter.id == chapter.id)
     )
     assert refreshed_chapter.metadata_json == {}
+
+
+async def test_mobile_memoir_book_chapter_draft_reuses_event_cluster_snapshot(
+    client,
+    test_db,
+    monkeypatch,
+):
+    first = await create_test_voice_transcript(client, test_db, "岁首一家人围坐吃团圆饭。")
+    second = await create_test_voice_transcript(client, test_db, "初一早上挨家给长辈拜年。")
+    project_id = first["session"]["project_id"]
+    _, chapter = await create_test_book_plan(
+        test_db,
+        project_id=project_id,
+        source_refs=[memoir_source_ref(first, "团圆饭"), memoir_source_ref(second, "拜年")],
+        status=MemoirBookPlanStatus.CONFIRMED,
+    )
+    fake_ai = FakeBookDraftAI(
+        [
+            json.dumps(
+                {
+                    "clusters": [
+                        {
+                            "title": "年节团圆",
+                            "source_ids": [first["utterance_id"], second["utterance_id"]],
+                            "summary": "两条来源都讲春节前后的家庭活动。",
+                        }
+                    ]
+                },
+                ensure_ascii=False,
+            ),
+            "岁首时，一家人围坐吃团圆饭，初一早上再去给长辈拜年。",
+            "第二版里仍然写团圆饭和拜年。",
+        ]
+    )
+    monkeypatch.setattr(
+        "app.services.memoir.book_drafts.get_ai_service",
+        lambda model=None: fake_ai,
+    )
+
+    first_response = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-plan/chapters/{chapter.id}/draft",
+        json={"force_regenerate": True},
+    )
+    second_response = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-plan/chapters/{chapter.id}/draft",
+        json={"force_regenerate": True},
+    )
+
+    assert first_response.status_code == 200
+    assert second_response.status_code == 200
+    assert second_response.json()["latest_version"]["content"] == "第二版里仍然写团圆饭和拜年。"
+    assert len(fake_ai.calls) == 3
+    assert "请把本章来源讲述记录中讲同一件事" in fake_ai.calls[0]["user_prompt"]
+    assert "请把本章来源讲述记录中讲同一件事" not in fake_ai.calls[2]["user_prompt"]
+    assert "事件聚合规划" in fake_ai.calls[2]["user_prompt"]
+    snapshot = await test_db.scalar(
+        select(MemoirChapterEventClusterSnapshot).where(
+            MemoirChapterEventClusterSnapshot.project_id == project_id,
+            MemoirChapterEventClusterSnapshot.chapter_id == chapter.id,
+        )
+    )
+    assert snapshot is not None
+    assert snapshot.clusters_json[0]["title"] == "年节团圆"
+    assert snapshot.source_ids_json == [first["utterance_id"], second["utterance_id"]]
 
 
 async def test_mobile_memoir_book_chapter_draft_update_clears_pending_source_state(client, test_db):

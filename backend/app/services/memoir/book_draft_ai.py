@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 import logging
 from typing import Literal
@@ -411,7 +412,7 @@ def _fallback_event_clusters(sources: list[ChapterSourceText]) -> list[ChapterEv
     return [_fallback_event_cluster(source) for source in sources]
 
 
-async def _generate_event_clusters(
+async def generate_event_clusters(
     client: AITextClient,
     *,
     chapter: MemoirBookPlanChapter,
@@ -569,6 +570,7 @@ async def generate_chapter_draft_text(
     pending_source_utterance_ids: set[str],
     removed_sources: list[RemovedChapterSourceText] | None = None,
     chapter_card: ChapterCardPromptContext | None = None,
+    event_cluster_provider: Callable[[], Awaitable[list[ChapterEventCluster]]] | None = None,
     force_regenerate: bool,
 ) -> GeneratedChapterDraft:
     revision_plan: ChapterRevisionPlan | None = None
@@ -619,11 +621,14 @@ async def generate_chapter_draft_text(
     )
     event_clusters: list[ChapterEventCluster] = []
     if not should_supplement_pending_sources and len(sources) > 1:
-        event_clusters = await _generate_event_clusters(
-            client,
-            chapter=chapter,
-            sources=sources,
-        )
+        if event_cluster_provider:
+            event_clusters = await event_cluster_provider()
+        else:
+            event_clusters = await generate_event_clusters(
+                client,
+                chapter=chapter,
+                sources=sources,
+            )
 
     should_label_pending_sources = (
         bool(pending_source_utterance_ids)
