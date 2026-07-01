@@ -70,6 +70,7 @@ from app.services.memoir.book_source_links import (
     mark_chapter_sources_merged as _mark_chapter_sources_merged,
 )
 from app.services.memoir.chapter_cards import CHAPTER_CARD_ENGINE, build_chapter_card_context
+from app.services.memoir.chapter_event_clusters import get_or_build_chapter_event_clusters
 from app.services.memoir.source_cards import (
     SOURCE_CARD_ENGINE,
     source_text_for_utterance as _source_card_text_for_utterance,
@@ -600,6 +601,15 @@ async def generate_chapter_draft(
             if existing and existing.versions
             else None
         )
+
+        async def event_cluster_provider():
+            return await get_or_build_chapter_event_clusters(
+                db,
+                client=client,
+                chapter=chapter,
+                sources=sources,
+            )
+
         generated = await generate_chapter_draft_text(
             client,
             chapter=chapter,
@@ -609,6 +619,7 @@ async def generate_chapter_draft(
             pending_source_utterance_ids=pending_source_ids,
             removed_sources=removed_sources,
             chapter_card=chapter_card,
+            event_cluster_provider=event_cluster_provider,
             force_regenerate=req.force_regenerate,
         )
     except HTTPException as exc:
