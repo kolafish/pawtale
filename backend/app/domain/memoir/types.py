@@ -64,6 +64,7 @@ class MemoirEditingJobType(str, Enum):
     QUALITY_AUDIT = "quality_audit"
     GENERATE_CHAPTER_DRAFT = "generate_chapter_draft"
     GENERATE_BOOK_OUTPUT = "generate_book_output"
+    GENERATE_BOOK_EDITORIAL_COPY = "generate_book_editorial_copy"
 
 
 class MemoirEditingJobStatus(str, Enum):
@@ -81,6 +82,7 @@ class MemoirAutomationEventType(str, Enum):
     AUDIT_COMPLETED = "audit_completed"
     CHAPTER_DRAFT_GENERATED = "chapter_draft_generated"
     BOOK_OUTPUT_GENERATED = "book_output_generated"
+    BOOK_EDITORIAL_COPY_GENERATED = "book_editorial_copy_generated"
 
 
 class MemoirAutomationEventStatus(str, Enum):

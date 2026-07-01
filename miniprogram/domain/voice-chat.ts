@@ -112,7 +112,8 @@ export type MemoirAutomationEventType =
   | "chapter_auto_revised"
   | "audit_completed"
   | "chapter_draft_generated"
-  | "book_output_generated";
+  | "book_output_generated"
+  | "book_editorial_copy_generated";
 export type MemoirAutomationEventStatus = "pending" | "completed" | "failed" | "needs_review";
 
 export interface MemoirAutomationEvent {

@@ -39,3 +39,7 @@ def register_memoir_editing_job_handlers() -> None:
         MemoirEditingJobType.GENERATE_BOOK_OUTPUT,
         book_generation_jobs.run_book_output_generation_job,
     )
+    register_editing_job_handler(
+        MemoirEditingJobType.GENERATE_BOOK_EDITORIAL_COPY,
+        book_generation_jobs.run_book_editorial_copy_generation_job,
+    )

@@ -53,6 +53,7 @@ _FAILURE_EVENT_TYPES: dict[MemoirEditingJobType, MemoirAutomationEventType] = {
     MemoirEditingJobType.QUALITY_AUDIT: MemoirAutomationEventType.AUDIT_COMPLETED,
     MemoirEditingJobType.GENERATE_CHAPTER_DRAFT: MemoirAutomationEventType.CHAPTER_DRAFT_GENERATED,
     MemoirEditingJobType.GENERATE_BOOK_OUTPUT: MemoirAutomationEventType.BOOK_OUTPUT_GENERATED,
+    MemoirEditingJobType.GENERATE_BOOK_EDITORIAL_COPY: MemoirAutomationEventType.BOOK_EDITORIAL_COPY_GENERATED,
 }
 
 _FAILURE_SUMMARIES: dict[MemoirEditingJobType, str] = {
@@ -61,6 +62,7 @@ _FAILURE_SUMMARIES: dict[MemoirEditingJobType, str] = {
     MemoirEditingJobType.QUALITY_AUDIT: "章节整理检查失败，稍后可重试。",
     MemoirEditingJobType.GENERATE_CHAPTER_DRAFT: "章节初稿生成失败，稍后可重试。",
     MemoirEditingJobType.GENERATE_BOOK_OUTPUT: "全书稿生成失败，稍后可重试。",
+    MemoirEditingJobType.GENERATE_BOOK_EDITORIAL_COPY: "成书文案生成失败，稍后可重试。",
 }
 
 

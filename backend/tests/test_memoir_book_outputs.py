@@ -611,6 +611,78 @@ async def test_mobile_memoir_book_output_regenerates_editorial_copy_targets(clie
     assert "chapter_summary: 这一章写外婆家的院子和童年生活。" in fake_ai.calls[0]["user_prompt"]
 
 
+async def test_mobile_memoir_book_output_editorial_copy_generation_job_runs_in_background(
+    client,
+    test_db,
+    monkeypatch,
+):
+    clear_editing_job_handlers()
+    register_memoir_editing_job_handlers()
+    project_id = await _active_project_id(client)
+    _, chapters = await _create_confirmed_book_plan(test_db, project_id=project_id)
+    chapters[0].metadata_json = {"chapter_summary": "这一章写外婆家的院子和童年生活。"}
+    chapters[0].source_refs_json = [
+        {
+            "utterance_id": "u1",
+            "summary": "讲述小时候在院子里晒太阳。",
+            "quote": "我小时候常在外婆家的院子里晒太阳。",
+        }
+    ]
+    await test_db.commit()
+    generated = await client.post(f"/api/mobile/memoir/projects/{project_id}/book-output/generate", json={})
+    assert generated.status_code == 200
+    fake_ai = FakeEditorialAI()
+    monkeypatch.setattr("app.services.memoir.book_manuscript_ai._text_ai_configured", lambda ai_model: True)
+    monkeypatch.setattr("app.services.memoir.book_manuscript_ai.get_ai_service", lambda ai_model: fake_ai)
+
+    response = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-output/editorial-copy/regenerate/jobs",
+        json={
+            "ai_model": "fake-model",
+            "targets": ["pull_quotes"],
+            "chapter_ids": [chapters[0].id],
+            "feedback": "只换章首引语",
+        },
+    )
+
+    assert response.status_code == 200
+    event_data = response.json()
+    assert event_data["event_type"] == MemoirAutomationEventType.BOOK_EDITORIAL_COPY_GENERATED.value
+    assert event_data["status"] == "pending"
+    assert event_data["summary_text"] == "章首引语已提交后台重生成。"
+    job = await test_db.scalar(
+        select(MemoirEditingJob).where(
+            MemoirEditingJob.project_id == project_id,
+            MemoirEditingJob.job_type == MemoirEditingJobType.GENERATE_BOOK_EDITORIAL_COPY.value,
+        )
+    )
+    assert job is not None
+    assert job.status == MemoirEditingJobStatus.PENDING.value
+    assert job.payload_json["request"]["targets"] == ["pull_quotes"]
+    assert job.payload_json["request"]["chapter_ids"] == [chapters[0].id]
+    assert job.payload_json["automation_event_id"] == event_data["id"]
+
+    assert await run_editing_job(test_db, job.id) is True
+
+    event = await test_db.get(MemoirAutomationEvent, event_data["id"])
+    assert event.status == "completed"
+    assert event.summary_text == "章首引语已重生成，可以预览或导出。"
+    output = await test_db.scalar(select(MemoirBookOutput).where(MemoirBookOutput.project_id == project_id))
+    version = await test_db.scalar(
+        select(MemoirBookOutputVersion).where(MemoirBookOutputVersion.output_id == output.id)
+    )
+    assert event.metadata_json["result_version_id"] == version.id
+    assert version.manuscript_json["chapters"][0]["pull_quotes"] == [
+        {
+            "text": "我小时候常在外婆家的院子里晒太阳。",
+            "source_ref_ids": ["u1"],
+            "source": "original_quote",
+        }
+    ]
+    assert "本次生成目标：pull_quotes" in fake_ai.calls[0]["user_prompt"]
+    assert "用户本次反馈：只换章首引语" in fake_ai.calls[0]["user_prompt"]
+
+
 async def test_mobile_memoir_book_output_updates_chapter_editorial_copy(client, test_db):
     project_id = await _active_project_id(client)
     _, chapters = await _create_confirmed_book_plan(test_db, project_id=project_id)
