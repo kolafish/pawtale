@@ -9,6 +9,7 @@ from app.database import Base, register_models
 MEMOIR_SEMANTIC_TABLES = (
     "memoir_source_cards",
     "memoir_chapter_cards",
+    "memoir_chapter_event_cluster_snapshots",
     "memoir_book_quality_audit_snapshots",
     "memoir_chapter_source_links",
 )
