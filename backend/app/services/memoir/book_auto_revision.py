@@ -96,7 +96,7 @@ async def schedule_chapter_auto_revision(
     if not chapter or chapter.project_id != project_id:
         return None
     source_change_state = await _current_source_change_state(db, chapter)
-    if not source_change_state.pending_source_ids or source_change_state.removed_source_ids:
+    if not source_change_state.pending_source_ids and not source_change_state.removed_source_ids:
         return None
 
     draft = await _chapter_latest_draft(db, project_id, chapter_id)
@@ -110,6 +110,7 @@ async def schedule_chapter_auto_revision(
     payload = {
         "base_version_id": draft.versions[-1].id,
         "pending_source_utterance_ids": sorted(source_change_state.pending_source_ids),
+        "removed_source_utterance_ids": sorted(source_change_state.removed_source_ids),
         **({"ai_model": model} if model else {}),
     }
     return await enqueue_editing_job(
@@ -163,11 +164,14 @@ async def run_chapter_revision_job(
         chapter = await db.get(MemoirBookPlanChapter, job.chapter_id)
         source_change_state = await _current_source_change_state(db, chapter)
         pending_source_ids = source_change_state.pending_source_ids
-        if not pending_source_ids:
-            return EditingJobResult(status=MemoirEditingJobStatus.SKIPPED, error_message="no pending sources")
+        removed_source_ids = source_change_state.removed_source_ids
+        if not pending_source_ids and not removed_source_ids:
+            return EditingJobResult(status=MemoirEditingJobStatus.SKIPPED, error_message="no source changes")
 
         model = str((job.payload_json or {}).get("ai_model") or _project_ai_model(project) or "").strip() or None
         pending_source_id_list = sorted(pending_source_ids)
+        removed_source_id_list = sorted(removed_source_ids)
+        changed_source_id_list = sorted(pending_source_ids | removed_source_ids)
         draft_response = await generate_chapter_draft(
             db,
             user_id=project.user_id,
@@ -177,23 +181,36 @@ async def run_chapter_revision_job(
             ai_client=ai_client,
         )
         title = chapter.title if chapter else "未命名章节"
-        source_count = len(pending_source_id_list)
+        pending_count = len(pending_source_id_list)
+        removed_count = len(removed_source_id_list)
+        if pending_count and removed_count:
+            summary_text = f"「{title}」已自动补写 {pending_count} 条新增/变化讲述，并移除 {removed_count} 条已删除讲述。"
+        elif pending_count:
+            summary_text = f"「{title}」已自动补写 {pending_count} 条新增讲述。"
+        else:
+            summary_text = f"「{title}」已自动移除 {removed_count} 条已删除讲述对应内容。"
+        signature_source_ids = (
+            ",".join(pending_source_id_list)
+            if not removed_source_id_list
+            else f"pending={','.join(pending_source_id_list)};removed={','.join(removed_source_id_list)}"
+        )
         await automation_events.record_or_update_automation_event(
             db,
             project_id=job.project_id,
             event_type=MemoirAutomationEventType.CHAPTER_AUTO_REVISED,
             status=MemoirAutomationEventStatus.COMPLETED,
             chapter_id=job.chapter_id,
-            utterance_ids=pending_source_id_list,
-            summary_text=f"「{title}」已自动补写 {source_count} 条新增讲述。",
+            utterance_ids=changed_source_id_list,
+            summary_text=summary_text,
             metadata_json={
                 "source": "book_auto_revision",
                 automation_events.EVENT_SIGNATURE_KEY: (
-                    f"book_auto_revision:{job.chapter_id}:{','.join(pending_source_id_list)}"
+                    f"book_auto_revision:{job.chapter_id}:{signature_source_ids}"
                 ),
                 "job_id": job.id,
                 "result_version_id": draft_response.latest_version.id if draft_response.latest_version else "",
                 "pending_source_utterance_ids": pending_source_id_list,
+                "removed_source_utterance_ids": removed_source_id_list,
                 **({"ai_model": model} if model else {}),
             },
         )
@@ -206,6 +223,7 @@ async def run_chapter_revision_job(
             result_json={
                 "result_version_id": draft_response.latest_version.id if draft_response.latest_version else "",
                 "pending_source_utterance_ids": pending_source_id_list,
+                "removed_source_utterance_ids": removed_source_id_list,
                 "completed_at": _utcnow().isoformat(),
             },
         )

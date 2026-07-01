@@ -21,8 +21,12 @@ from app.models.memoir import (
     MemoirBookPlanChapter,
 )
 from app.services.memoir.book_auto_revision import schedule_chapter_auto_revision
+from app.services.memoir.chapter_cards import CHAPTER_CARD_ENGINE, build_chapter_card_context
+from app.services.memoir.chapter_source_links import mark_utterance_links_removed
 from app.services.memoir.editing_job_handlers import register_memoir_editing_job_handlers
 from app.services.memoir.editing_jobs import clear_editing_job_handlers, run_editing_job
+from app.services.memoir.semantic_state import upsert_chapter_card, upsert_source_card
+from app.services.memoir.source_cards import SOURCE_CARD_ENGINE, source_text_hash
 from tests.memoir_helpers import (
     create_test_book_plan,
     create_test_chapter_draft,
@@ -189,6 +193,81 @@ async def test_mobile_memoir_book_chapter_draft_generate_uses_chapter_sources(
     assert stored_versions[0].created_by == "ai"
 
 
+async def test_mobile_memoir_book_chapter_draft_prompt_uses_source_and_chapter_cards(
+    client,
+    test_db,
+    monkeypatch,
+):
+    created = await create_test_voice_transcript(
+        client,
+        test_db,
+        "小时候在外婆家的院子里晒太阳，夏天还会一起剥青豆。",
+    )
+    project_id = created["session"]["project_id"]
+    _, chapter = await create_test_book_plan(
+        test_db,
+        project_id=project_id,
+        source_ref=memoir_source_ref(created, "外婆家的院子"),
+        status=MemoirBookPlanStatus.CONFIRMED,
+    )
+    await upsert_source_card(
+        test_db,
+        project_id=project_id,
+        utterance_id=created["utterance_id"],
+        transcript_version_id=created["transcript_version_id"],
+        source_text_hash=source_text_hash("小时候在外婆家的院子里晒太阳，夏天还会一起剥青豆。"),
+        engine=SOURCE_CARD_ENGINE,
+        card_json={
+            "summary": "回忆小时候在外婆家院子晒太阳和剥青豆。",
+            "people": ["外婆", "我"],
+            "places": ["外婆家院子"],
+            "time_hints": ["小时候", "夏天"],
+            "event_tags": ["晒太阳", "剥青豆"],
+            "key_facts": [
+                {"text": "夏天一起剥青豆", "evidence_quote": "夏天还会一起剥青豆"}
+            ],
+            "open_questions": ["剥青豆时外婆说过什么？"],
+        },
+    )
+    context = await build_chapter_card_context(test_db, project_id=project_id, chapter_id=chapter.id)
+    await upsert_chapter_card(
+        test_db,
+        project_id=project_id,
+        plan_id=chapter.plan_id,
+        chapter_id=chapter.id,
+        draft_version_id=None,
+        input_signature=context.input_signature,
+        engine=CHAPTER_CARD_ENGINE,
+        card_json={
+            "summary": "本章围绕外婆家院子的童年片段。",
+            "covered": {"places": ["外婆家院子"], "events": ["晒太阳"]},
+            "gaps": [{"severity": "medium", "message": "剥青豆的细节还可以补充"}],
+            "next_questions": ["剥青豆前后还有什么场景？"],
+        },
+    )
+    await test_db.commit()
+    fake_ai = FakeBookDraftAI("我小时候常在外婆家的院子里晒太阳，夏天也会和外婆一起剥青豆。")
+    monkeypatch.setattr(
+        "app.services.memoir.book_drafts.get_ai_service",
+        lambda model=None: fake_ai,
+    )
+
+    response = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-plan/chapters/{chapter.id}/draft",
+        json={},
+    )
+
+    assert response.status_code == 200
+    prompt = fake_ai.calls[0]["user_prompt"]
+    assert "source_card_summary: 回忆小时候在外婆家院子晒太阳和剥青豆。" in prompt
+    assert "source_card_people: ['外婆', '我']" in prompt
+    assert "source_card_key_facts: ['夏天一起剥青豆（证据：夏天还会一起剥青豆）']" in prompt
+    assert "source_card_open_questions: ['剥青豆时外婆说过什么？']" in prompt
+    assert "当前章节卡片" in prompt
+    assert "summary: 本章围绕外婆家院子的童年片段。" in prompt
+    assert "medium: 剥青豆的细节还可以补充" in prompt
+
+
 async def test_mobile_memoir_book_chapter_draft_regenerate_appends_version_with_feedback(
     client,
     test_db,
@@ -300,7 +379,7 @@ async def test_mobile_memoir_book_chapter_draft_supplements_pending_sources_with
     assert data["removed_source_count"] == 0
     assert len(fake_ai.calls) == 2
     plan_prompt = fake_ai.calls[0]["user_prompt"]
-    assert "请判断本章新增来源应该如何并入现有章节正文" in plan_prompt
+    assert "请判断本章来源变化应该如何修订现有章节正文" in plan_prompt
     assert '"mode": "supplement"' in plan_prompt
     assert f"utterance_id: {second['utterance_id']}" in plan_prompt
     prompt = fake_ai.calls[1]["user_prompt"]
@@ -559,6 +638,127 @@ async def test_memoir_book_auto_revision_job_supplements_pending_sources(
     assert audit_job is not None
     assert audit_job.status == MemoirEditingJobStatus.PENDING.value
     assert audit_job.payload_json["reason"] == "chapter_auto_revision_completed"
+
+
+async def test_memoir_book_auto_revision_job_handles_removed_only_sources(
+    client,
+    test_db,
+    monkeypatch,
+):
+    clear_editing_job_handlers()
+    register_memoir_editing_job_handlers()
+    first = await create_test_voice_transcript(client, test_db, "我小时候常在外婆家的院子里晒太阳。")
+    second = await create_test_voice_transcript(client, test_db, "后来我第一次离家去县城读书。")
+    project_id = first["session"]["project_id"]
+    plan, chapter = await create_test_book_plan(
+        test_db,
+        project_id=project_id,
+        source_refs=[memoir_source_ref(first), memoir_source_ref(second, "第一次离家")],
+        status=MemoirBookPlanStatus.CONFIRMED,
+    )
+    draft = MemoirBookChapterDraft(
+        project_id=project_id,
+        chapter_id=chapter.id,
+        status=MemoirBookChapterDraftStatus.CONFIRMED.value,
+        metadata_json={},
+    )
+    test_db.add(draft)
+    await test_db.flush()
+    version = MemoirBookChapterDraftVersion(
+        draft_id=draft.id,
+        project_id=project_id,
+        chapter_id=chapter.id,
+        version=1,
+        content="我小时候常在外婆家的院子里晒太阳。后来我第一次离家去县城读书。",
+        created_by=MemoirCreatedBy.USER.value,
+        prompt_snapshot="",
+    )
+    test_db.add(version)
+    await test_db.flush()
+    test_db.add_all([
+        MemoirChapterSourceLink(
+            project_id=project_id,
+            plan_id=plan.id,
+            chapter_id=chapter.id,
+            utterance_id=first["utterance_id"],
+            transcript_version_id=first["transcript_version_id"],
+            audio_file_id=first["audio_file_id"],
+            quote="外婆家的院子",
+            status=MemoirChapterSourceLinkStatus.ACTIVE.value,
+            merged_draft_version_id=version.id,
+        ),
+        MemoirChapterSourceLink(
+            project_id=project_id,
+            plan_id=plan.id,
+            chapter_id=chapter.id,
+            utterance_id=second["utterance_id"],
+            transcript_version_id=second["transcript_version_id"],
+            audio_file_id=second["audio_file_id"],
+            quote="第一次离家",
+            status=MemoirChapterSourceLinkStatus.ACTIVE.value,
+            merged_draft_version_id=version.id,
+        ),
+    ])
+    chapter.source_refs_json = [memoir_source_ref(first)]
+    await test_db.flush()
+    await mark_utterance_links_removed(test_db, project_id=project_id, utterance_id=second["utterance_id"])
+    await test_db.commit()
+
+    job = await schedule_chapter_auto_revision(
+        test_db,
+        project_id=project_id,
+        chapter_id=chapter.id,
+        run_after=datetime.now(UTC).replace(tzinfo=None),
+    )
+    await test_db.commit()
+    assert job is not None
+    assert job.payload_json["pending_source_utterance_ids"] == []
+    assert job.payload_json["removed_source_utterance_ids"] == [second["utterance_id"]]
+
+    fake_ai = FakeBookDraftAI("我小时候常在外婆家的院子里晒太阳。")
+    monkeypatch.setattr(
+        "app.services.memoir.book_drafts.get_ai_service",
+        lambda model=None: fake_ai,
+    )
+
+    assert await run_editing_job(test_db, job.id) is True
+
+    refreshed_draft = await test_db.scalar(
+        select(MemoirBookChapterDraft).where(MemoirBookChapterDraft.id == draft.id)
+    )
+    assert refreshed_draft.status == MemoirBookChapterDraftStatus.DRAFT.value
+    versions = (
+        await test_db.execute(
+            select(MemoirBookChapterDraftVersion)
+            .where(MemoirBookChapterDraftVersion.draft_id == draft.id)
+            .order_by(MemoirBookChapterDraftVersion.version)
+        )
+    ).scalars().all()
+    assert len(versions) == 2
+    assert versions[0].created_by == MemoirCreatedBy.USER.value
+    assert "第一次离家去县城读书" in versions[0].content
+    assert versions[-1].created_by == MemoirCreatedBy.AI.value
+    assert "第一次离家去县城读书" not in versions[-1].content
+    assert len(fake_ai.calls) == 1
+    prompt = fake_ai.calls[0]["user_prompt"]
+    assert "已删除来源" in prompt
+    assert f"utterance_id: {second['utterance_id']}" in prompt
+    assert "quote: 第一次离家" in prompt
+    assert "不得继续写入 removed_source_ids" in prompt
+
+    event = await test_db.scalar(
+        select(MemoirAutomationEvent).where(
+            MemoirAutomationEvent.project_id == project_id,
+            MemoirAutomationEvent.event_type == MemoirAutomationEventType.CHAPTER_AUTO_REVISED.value,
+        )
+    )
+    assert event is not None
+    assert event.utterance_ids_json == [second["utterance_id"]]
+    assert event.summary_text == "「外婆家的童年」已自动移除 1 条已删除讲述对应内容。"
+    assert event.metadata_json["removed_source_utterance_ids"] == [second["utterance_id"]]
+    assert event.metadata_json["event_signature"] == (
+        f"book_auto_revision:{chapter.id}:pending=;removed={second['utterance_id']}"
+    )
 
 
 async def test_mobile_memoir_book_chapter_draft_generation_job_runs_in_background(

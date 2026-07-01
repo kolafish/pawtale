@@ -10,7 +10,9 @@ from sqlalchemy.orm import selectinload
 from app.domain.memoir.types import (
     MemoirBookChapterDraftStatus,
     MemoirBookPlanStatus,
+    MemoirChapterSourceLinkStatus,
     MemoirCreatedBy,
+    MemoirSemanticCacheStatus,
 )
 from app.models.memoir import (
     MemoirBookChapterDraft,
@@ -18,6 +20,9 @@ from app.models.memoir import (
     MemoirBookPlan,
     MemoirBookPlanChapter,
     MemoirChatMessage,
+    MemoirChapterCard,
+    MemoirChapterSourceLink,
+    MemoirSourceCard,
     MemoirVoiceSession,
     MemoirVoiceUtterance,
 )
@@ -44,7 +49,10 @@ from app.services.memoir.book_audio import (
 )
 from app.services.memoir.book_draft_ai import (
     AI_BOOK_DRAFT_UNAVAILABLE_MESSAGE,
+    ChapterCardPromptContext,
+    ChapterSourceCardContext,
     ChapterSourceText,
+    RemovedChapterSourceText,
     generate_chapter_draft_text,
 )
 from app.services.memoir.book_plan_sources import (
@@ -56,9 +64,16 @@ from app.services.memoir.book_plan_sources import (
     text_or_empty as _text_or_empty,
 )
 from app.services.memoir.book_source_links import (
+    ChapterSourceChangeState,
     chapter_source_change_state as _chapter_source_change_state,
     chapter_source_ref_dicts as _chapter_source_ref_dicts,
     mark_chapter_sources_merged as _mark_chapter_sources_merged,
+)
+from app.services.memoir.chapter_cards import CHAPTER_CARD_ENGINE, build_chapter_card_context
+from app.services.memoir.source_cards import (
+    SOURCE_CARD_ENGINE,
+    source_text_for_utterance as _source_card_text_for_utterance,
+    source_text_hash as _source_card_text_hash,
 )
 from app.services.memoir.voice_tts import TTSClient
 
@@ -69,6 +84,164 @@ logger = logging.getLogger(__name__)
 
 def _display_text(utterance: MemoirVoiceUtterance) -> str:
     return _text_or_empty(utterance.transcript_edited) or _text_or_empty(utterance.transcript_raw)
+
+
+def _latest_draft_version(draft: MemoirBookChapterDraft | None) -> MemoirBookChapterDraftVersion | None:
+    if not draft or not draft.versions:
+        return None
+    return sorted(draft.versions, key=lambda version: (version.version, version.created_at, version.id))[-1]
+
+
+def _string_items(value: object, *, limit: int = 6, item_limit: int = 80) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    items: list[str] = []
+    for item in value:
+        text = str(item or "").strip()
+        if text and text not in items:
+            items.append(text[:item_limit])
+        if len(items) >= limit:
+            break
+    return items
+
+
+def _source_card_context(card: MemoirSourceCard | None) -> ChapterSourceCardContext | None:
+    if not card or card.status != MemoirSemanticCacheStatus.READY.value or not isinstance(card.card_json, dict):
+        return None
+    key_facts: list[str] = []
+    raw_key_facts = card.card_json.get("key_facts")
+    if isinstance(raw_key_facts, list):
+        for item in raw_key_facts:
+            if not isinstance(item, dict):
+                continue
+            text = str(item.get("text") or "").strip()
+            quote = str(item.get("evidence_quote") or "").strip()
+            if text and quote:
+                key_facts.append(f"{text}（证据：{quote[:80]}）")
+            elif text:
+                key_facts.append(text[:120])
+            if len(key_facts) >= 5:
+                break
+    return ChapterSourceCardContext(
+        source_card_id=card.id,
+        summary=str(card.card_json.get("summary") or "").strip()[:260],
+        people=_string_items(card.card_json.get("people")),
+        places=_string_items(card.card_json.get("places")),
+        time_hints=_string_items(card.card_json.get("time_hints")),
+        event_tags=_string_items(card.card_json.get("event_tags")),
+        key_facts=key_facts,
+        open_questions=_string_items(card.card_json.get("open_questions"), limit=4),
+    )
+
+
+def _chapter_card_context(card: MemoirChapterCard | None) -> ChapterCardPromptContext | None:
+    if not card or card.status != MemoirSemanticCacheStatus.READY.value or not isinstance(card.card_json, dict):
+        return None
+    gaps: list[str] = []
+    raw_gaps = card.card_json.get("gaps")
+    if isinstance(raw_gaps, list):
+        for item in raw_gaps:
+            if not isinstance(item, dict):
+                continue
+            message = str(item.get("message") or "").strip()
+            severity = str(item.get("severity") or "").strip()
+            if message:
+                gaps.append(f"{severity or 'medium'}: {message[:140]}")
+            if len(gaps) >= 4:
+                break
+    return ChapterCardPromptContext(
+        chapter_card_id=card.id,
+        summary=str(card.card_json.get("summary") or "").strip()[:300],
+        covered=card.card_json.get("covered") if isinstance(card.card_json.get("covered"), dict) else {},
+        gaps=gaps,
+        next_questions=_string_items(card.card_json.get("next_questions"), limit=4),
+    )
+
+
+def _source_change_type(
+    *,
+    utterance_id: str,
+    link: MemoirChapterSourceLink | None,
+    latest_version: MemoirBookChapterDraftVersion | None,
+    pending_source_ids: set[str],
+) -> str:
+    if utterance_id not in pending_source_ids:
+        return "existing"
+    if not link or not latest_version:
+        return "new"
+    if link.created_at and link.created_at <= latest_version.created_at:
+        return "changed"
+    return "new"
+
+
+async def _active_links_by_utterance(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    chapter_id: str,
+) -> dict[str, MemoirChapterSourceLink]:
+    rows = (
+        await db.execute(
+            select(MemoirChapterSourceLink).where(
+                MemoirChapterSourceLink.project_id == project_id,
+                MemoirChapterSourceLink.chapter_id == chapter_id,
+                MemoirChapterSourceLink.status == MemoirChapterSourceLinkStatus.ACTIVE.value,
+            )
+        )
+    ).scalars().all()
+    return {link.utterance_id: link for link in rows}
+
+
+async def _ready_source_cards_by_utterance(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    source_text_by_utterance: dict[str, str],
+) -> dict[str, MemoirSourceCard]:
+    if not source_text_by_utterance:
+        return {}
+    source_hash_by_utterance = {
+        utterance_id: _source_card_text_hash(text)
+        for utterance_id, text in source_text_by_utterance.items()
+    }
+    rows = (
+        await db.execute(
+            select(MemoirSourceCard).where(
+                MemoirSourceCard.project_id == project_id,
+                MemoirSourceCard.utterance_id.in_(list(source_hash_by_utterance.keys())),
+                MemoirSourceCard.engine == SOURCE_CARD_ENGINE,
+                MemoirSourceCard.status == MemoirSemanticCacheStatus.READY.value,
+            )
+        )
+    ).scalars().all()
+    return {
+        card.utterance_id: card
+        for card in rows
+        if card.source_text_hash == source_hash_by_utterance.get(card.utterance_id)
+    }
+
+
+async def _ready_chapter_card_context(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    chapter_id: str,
+) -> ChapterCardPromptContext | None:
+    try:
+        context = await build_chapter_card_context(db, project_id=project_id, chapter_id=chapter_id)
+        card = await db.scalar(
+            select(MemoirChapterCard).where(
+                MemoirChapterCard.project_id == project_id,
+                MemoirChapterCard.chapter_id == chapter_id,
+                MemoirChapterCard.engine == CHAPTER_CARD_ENGINE,
+                MemoirChapterCard.input_signature == context.input_signature,
+                MemoirChapterCard.status == MemoirSemanticCacheStatus.READY.value,
+            )
+        )
+    except Exception:
+        logger.exception("memoir chapter draft chapter card context failed chapter_id=%s", chapter_id)
+        return None
+    return _chapter_card_context(card)
 
 
 def _version_response(version: MemoirBookChapterDraftVersion) -> MemoirBookChapterDraftVersionResponse:
@@ -148,6 +321,7 @@ async def _chapter_sources(
     *,
     project_id: str,
     chapter: MemoirBookPlanChapter,
+    source_change_state: ChapterSourceChangeState,
 ) -> list[ChapterSourceText]:
     refs = [
         MemoirBookChapterSourceRef.model_validate(ref)
@@ -170,6 +344,22 @@ async def _chapter_sources(
         utterance.id: (utterance, message)
         for utterance, message in result.all()
     }
+    source_text_by_utterance: dict[str, str] = {}
+    for ref in refs:
+        pair = by_utterance_id.get(ref.utterance_id)
+        if pair:
+            source_text_by_utterance[ref.utterance_id] = _source_card_text_for_utterance(pair[0])
+    cards_by_utterance = await _ready_source_cards_by_utterance(
+        db,
+        project_id=project_id,
+        source_text_by_utterance=source_text_by_utterance,
+    )
+    links_by_utterance = await _active_links_by_utterance(
+        db,
+        project_id=project_id,
+        chapter_id=chapter.id,
+    )
+    latest_version = _latest_draft_version(chapter.draft)
     sources: list[ChapterSourceText] = []
     for ref in refs:
         pair = by_utterance_id.get(ref.utterance_id)
@@ -193,9 +383,57 @@ async def _chapter_sources(
                     quote=ref.quote,
                 ),
                 text=text,
+                change_type=_source_change_type(
+                    utterance_id=ref.utterance_id,
+                    link=links_by_utterance.get(ref.utterance_id),
+                    latest_version=latest_version,
+                    pending_source_ids=source_change_state.pending_source_ids,
+                ),
+                source_card=_source_card_context(cards_by_utterance.get(ref.utterance_id)),
             )
         )
     return sources
+
+
+async def _removed_chapter_sources(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    chapter_id: str,
+    removed_source_ids: set[str],
+) -> list[RemovedChapterSourceText]:
+    if not removed_source_ids:
+        return []
+    links = (
+        await db.execute(
+            select(MemoirChapterSourceLink).where(
+                MemoirChapterSourceLink.project_id == project_id,
+                MemoirChapterSourceLink.chapter_id == chapter_id,
+                MemoirChapterSourceLink.utterance_id.in_(removed_source_ids),
+                MemoirChapterSourceLink.status == MemoirChapterSourceLinkStatus.REMOVED.value,
+            )
+        )
+    ).scalars().all()
+    links_by_utterance = {link.utterance_id: link for link in links}
+    existing_utterances = (
+        await db.execute(
+            select(MemoirVoiceUtterance)
+            .join(MemoirVoiceSession, MemoirVoiceUtterance.voice_session_id == MemoirVoiceSession.id)
+            .where(
+                MemoirVoiceSession.project_id == project_id,
+                MemoirVoiceUtterance.id.in_(removed_source_ids),
+            )
+        )
+    ).scalars().all()
+    text_by_utterance = {utterance.id: _display_text(utterance) for utterance in existing_utterances}
+    return [
+        RemovedChapterSourceText(
+            utterance_id=utterance_id,
+            quote=(links_by_utterance.get(utterance_id).quote if links_by_utterance.get(utterance_id) else ""),
+            text=text_by_utterance.get(utterance_id, ""),
+        )
+        for utterance_id in sorted(removed_source_ids)
+    ]
 
 
 async def _load_draft(
@@ -325,7 +563,14 @@ async def generate_chapter_draft(
     existing = await _load_draft(db, project_id=project_id, chapter_id=chapter_id)
     source_change_state = await _chapter_source_change_state(db, chapter=chapter)
     pending_source_ids = source_change_state.pending_source_ids
-    if existing and existing.versions and not req.force_regenerate and not pending_source_ids:
+    removed_source_ids = source_change_state.removed_source_ids
+    if (
+        existing
+        and existing.versions
+        and not req.force_regenerate
+        and not pending_source_ids
+        and not removed_source_ids
+    ):
         return _draft_response(
             existing,
             chapter_metadata_json=chapter.metadata_json,
@@ -333,7 +578,19 @@ async def generate_chapter_draft(
             removed_source_count=source_change_state.removed_source_count,
         )
 
-    sources = await _chapter_sources(db, project_id=project_id, chapter=chapter)
+    sources = await _chapter_sources(
+        db,
+        project_id=project_id,
+        chapter=chapter,
+        source_change_state=source_change_state,
+    )
+    removed_sources = await _removed_chapter_sources(
+        db,
+        project_id=project_id,
+        chapter_id=chapter.id,
+        removed_source_ids=removed_source_ids,
+    )
+    chapter_card = await _ready_chapter_card_context(db, project_id=project_id, chapter_id=chapter.id)
     client = ai_client
     try:
         if client is None:
@@ -350,6 +607,8 @@ async def generate_chapter_draft(
             feedback=req.feedback,
             previous_content=previous_content,
             pending_source_utterance_ids=pending_source_ids,
+            removed_sources=removed_sources,
+            chapter_card=chapter_card,
             force_regenerate=req.force_regenerate,
         )
     except HTTPException as exc:

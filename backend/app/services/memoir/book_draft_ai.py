@@ -13,15 +13,45 @@ from app.services.memoir.book_plan_sources import text_or_empty
 
 
 SYSTEM_PROMPT = "你是一位谨慎的中文回忆录整理写作者，只能把给定口述材料整理成章节正文。"
-REVISION_PLAN_SYSTEM_PROMPT = "你是一位谨慎的中文回忆录修订编辑，只判断新增口述材料应该如何并入已有章节。"
+REVISION_PLAN_SYSTEM_PROMPT = "你是一位谨慎的中文回忆录修订编辑，只判断口述材料变化应该如何修订已有章节。"
 EVENT_CLUSTER_SYSTEM_PROMPT = "你是一位谨慎的中文回忆录结构编辑，只根据来源讲述记录判断哪些记录讲的是同一件事。"
 AI_BOOK_DRAFT_UNAVAILABLE_MESSAGE = "AI 服务暂时不可用，请稍后重试。"
+
+
+@dataclass(frozen=True)
+class ChapterSourceCardContext:
+    source_card_id: str
+    summary: str = ""
+    people: list[str] | None = None
+    places: list[str] | None = None
+    time_hints: list[str] | None = None
+    event_tags: list[str] | None = None
+    key_facts: list[str] | None = None
+    open_questions: list[str] | None = None
+
+
+@dataclass(frozen=True)
+class ChapterCardPromptContext:
+    chapter_card_id: str
+    summary: str = ""
+    covered: dict[str, object] | None = None
+    gaps: list[str] | None = None
+    next_questions: list[str] | None = None
+
+
+@dataclass(frozen=True)
+class RemovedChapterSourceText:
+    utterance_id: str
+    quote: str = ""
+    text: str = ""
 
 
 @dataclass(frozen=True)
 class ChapterSourceText:
     ref: MemoirBookChapterSourceRef
     text: str
+    change_type: Literal["existing", "new", "changed"] = "existing"
+    source_card: ChapterSourceCardContext | None = None
 
 
 @dataclass(frozen=True)
@@ -29,6 +59,7 @@ class ChapterRevisionPlan:
     mode: Literal["supplement", "regenerate", "needs_review"]
     reason: str
     pending_source_ids: list[str]
+    removed_source_ids: list[str]
     related_existing_source_ids: list[str]
     coverage_requirements: list[str]
 
@@ -59,16 +90,71 @@ def _string_list(value: object) -> list[str]:
     return [item.strip() for item in value if isinstance(item, str) and item.strip()]
 
 
+def _change_type_label(source: ChapterSourceText, pending_ids: set[str]) -> str:
+    if source.ref.utterance_id not in pending_ids:
+        return "既有来源"
+    if source.change_type == "changed":
+        return "文本已变化来源"
+    return "新增来源"
+
+
+def _source_card_text(card: ChapterSourceCardContext | None) -> str:
+    if not card:
+        return "source_card: 无"
+    return "\n".join(
+        [
+            f"source_card_id: {card.source_card_id}",
+            f"source_card_summary: {card.summary or '无'}",
+            f"source_card_people: {card.people or []}",
+            f"source_card_places: {card.places or []}",
+            f"source_card_time_hints: {card.time_hints or []}",
+            f"source_card_event_tags: {card.event_tags or []}",
+            f"source_card_key_facts: {card.key_facts or []}",
+            f"source_card_open_questions: {card.open_questions or []}",
+        ]
+    )
+
+
 def _source_block(sources: list[ChapterSourceText], pending_ids: set[str]) -> str:
     return "\n\n".join(
         (
             f"source {index}\n"
-            f"source_type: {'新增来源' if source.ref.utterance_id in pending_ids else '既有来源'}\n"
+            f"source_type: {_change_type_label(source, pending_ids)}\n"
             f"utterance_id: {source.ref.utterance_id}\n"
+            f"{_source_card_text(source.source_card)}\n"
             f"quote: {source.ref.quote}\n"
             f"transcript: {source.text}"
         )
         for index, source in enumerate(sources, start=1)
+    )
+
+
+def _removed_source_block(removed_sources: list[RemovedChapterSourceText]) -> str:
+    if not removed_sources:
+        return "无"
+    return "\n\n".join(
+        (
+            f"removed_source {index}\n"
+            f"utterance_id: {source.utterance_id}\n"
+            f"quote: {source.quote or '无'}\n"
+            f"transcript: {source.text or '无'}"
+        )
+        for index, source in enumerate(removed_sources, start=1)
+    )
+
+
+def _chapter_card_prompt_text(chapter_card: ChapterCardPromptContext | None) -> str:
+    if not chapter_card:
+        return ""
+    gaps = "\n".join(f"- {item}" for item in (chapter_card.gaps or []))
+    questions = "\n".join(f"- {item}" for item in (chapter_card.next_questions or []))
+    return (
+        "\n当前章节卡片：\n"
+        f"chapter_card_id: {chapter_card.chapter_card_id}\n"
+        f"summary: {chapter_card.summary or '无'}\n"
+        f"covered: {chapter_card.covered or {}}\n"
+        f"gaps:\n{gaps or '- 无'}\n"
+        f"next_questions:\n{questions or '- 无'}\n"
     )
 
 
@@ -78,35 +164,48 @@ def _build_revision_plan_prompt(
     sources: list[ChapterSourceText],
     previous_content: str,
     pending_source_utterance_ids: set[str],
+    removed_sources: list[RemovedChapterSourceText],
+    chapter_card: ChapterCardPromptContext | None = None,
 ) -> str:
-    return f"""请判断本章新增来源应该如何并入现有章节正文。
+    removed_ids = {source.utterance_id for source in removed_sources}
+    return f"""请判断本章来源变化应该如何修订现有章节正文。
 
 章节标题参考：{chapter.title}
+{_chapter_card_prompt_text(chapter_card)}
 
 现有章节正文：
 {previous_content.strip()}
 
-来源讲述记录：
+当前仍保留的来源讲述记录：
 {_source_block(sources, pending_source_utterance_ids)}
+
+已删除来源：
+{_removed_source_block(removed_sources)}
 
 请输出严格 JSON，不要 Markdown，不要解释。格式：
 {{
   "mode": "supplement",
   "reason": "判断理由",
-  "pending_source_ids": ["新增来源 utterance_id"],
+  "pending_source_ids": ["新增或文本已变化来源 utterance_id"],
+  "removed_source_ids": ["已删除来源 utterance_id"],
   "related_existing_source_ids": ["相关既有来源 utterance_id"],
   "coverage_requirements": ["正文生成时必须覆盖的要点"]
 }}
 
 判断规则：
-- mode=supplement：新增来源属于本章，但与现有正文关系较弱，适合作为新段落或补充细节自然加入。
-- mode=regenerate：新增来源与现有正文讲的是同一件事、同一人物/地点/时间段，或会修正现有叙述，需要重新组织整章。
+- mode=supplement：新增或文本已变化来源属于本章，但与现有正文关系较弱，适合作为新段落或补充细节自然加入，且没有删除来源需要处理。
+- mode=regenerate：新增/变化来源与现有正文讲的是同一件事、同一人物/地点/时间段，会修正现有叙述，或存在已删除来源需要从正文中移除，需要重新组织整章。
 - mode=needs_review：新增来源明显不属于本章，或缺少足够关系，应该先由用户调整章节归属。
-- 不要新增来源没有讲过的事实；判断必须基于来源讲述记录和现有正文。
+- 不要保留仅由已删除来源支撑的内容；判断必须基于当前来源讲述记录、已删除来源和现有正文。
+- removed_source_ids 只能来自已删除来源列表；当前列表为：{", ".join(sorted(removed_ids)) or "无"}。
 """
 
 
-def _revision_plan_from_content(content: str, pending_source_utterance_ids: set[str]) -> ChapterRevisionPlan:
+def _revision_plan_from_content(
+    content: str,
+    pending_source_utterance_ids: set[str],
+    removed_source_utterance_ids: set[str],
+) -> ChapterRevisionPlan:
     payload = extract_json_payload(content)
     if not isinstance(payload, dict):
         raise HTTPException(status_code=502, detail="AI 未返回有效章节修订规划")
@@ -118,6 +217,7 @@ def _revision_plan_from_content(content: str, pending_source_utterance_ids: set[
         mode=mode,
         reason=text_or_empty(payload.get("reason") if isinstance(payload.get("reason"), str) else ""),
         pending_source_ids=pending_ids,
+        removed_source_ids=_string_list(payload.get("removed_source_ids")) or sorted(removed_source_utterance_ids),
         related_existing_source_ids=_string_list(payload.get("related_existing_source_ids")),
         coverage_requirements=_string_list(payload.get("coverage_requirements")),
     )
@@ -129,11 +229,13 @@ def _revision_plan_prompt_text(revision_plan: ChapterRevisionPlan | None) -> str
     requirements = "\n".join(f"- {item}" for item in revision_plan.coverage_requirements)
     related_ids = ", ".join(revision_plan.related_existing_source_ids) or "无"
     pending_ids = ", ".join(revision_plan.pending_source_ids) or "无"
+    removed_ids = ", ".join(revision_plan.removed_source_ids) or "无"
     return (
         "\n修订规划：\n"
         f"mode: {revision_plan.mode}\n"
         f"reason: {revision_plan.reason or '无'}\n"
         f"pending_source_ids: {pending_ids}\n"
+        f"removed_source_ids: {removed_ids}\n"
         f"related_existing_source_ids: {related_ids}\n"
         f"coverage_requirements:\n{requirements or '- 覆盖所有来源中的具体事实'}\n"
     )
@@ -233,29 +335,49 @@ def _build_draft_prompt(
     feedback: str | None,
     previous_content: str | None = None,
     pending_source_utterance_ids: set[str] | None = None,
+    removed_sources: list[RemovedChapterSourceText] | None = None,
     revision_plan: ChapterRevisionPlan | None = None,
     event_clusters: list[ChapterEventCluster] | None = None,
+    chapter_card: ChapterCardPromptContext | None = None,
 ) -> str:
     pending_ids = pending_source_utterance_ids or set()
+    removed_source_items = removed_sources or []
+    removed_ids = {source.utterance_id for source in removed_source_items}
     source_text = _source_block(sources, pending_ids)
     feedback_text = f"\n用户反馈：{feedback.strip()}\n" if feedback else ""
     previous_text = (
-        f"\n原章节正文（作为补写基础，尽量保留原有表达和段落）：\n{previous_content.strip()}\n"
+        f"\n原章节正文（作为修订基础，保留仍由当前来源支撑的表达和段落）：\n{previous_content.strip()}\n"
         if previous_content
         else ""
     )
+    chapter_card_text = _chapter_card_prompt_text(chapter_card)
     revision_text = _revision_plan_prompt_text(revision_plan)
     event_cluster_text = _event_clusters_prompt_text(event_clusters or [])
-    supplement_text = (
-        "\n本次任务：只把 source_type 为“新增来源”的讲述记录里用户确实讲过的内容自然补入原章节正文；"
-        "没有新增来源支撑的内容不要扩写，既有段落不要无故重写。\n"
-        if pending_ids and previous_content
+    removed_source_text = (
+        f"\n已删除来源（这些 utterance_id 对应内容不得继续作为本章事实依据）：\n"
+        f"{_removed_source_block(removed_source_items)}\n"
+        if removed_source_items
         else ""
     )
-    if pending_ids and previous_content:
+    if removed_ids and previous_content:
+        task_text = (
+            "\n本次任务：基于当前仍保留的来源修订原章节正文，移除已删除来源独有支撑的内容；"
+            "不要为了填补被删除内容而新增未讲过的事实。可以保留当前来源仍能支撑的原有表达。\n"
+        )
+    elif pending_ids and previous_content:
+        task_text = (
+            "\n本次任务：只把 source_type 为“新增来源”或“文本已变化来源”的讲述记录里用户确实讲过的内容自然补入或修正原章节正文；"
+            "source_type 为“文本已变化来源”的记录应按最新 transcript/素材卡片修正原文；"
+            "没有新增或变化来源支撑的内容不要扩写，既有段落不要无故重写。\n"
+        )
+    else:
+        task_text = ""
+    if (pending_ids or removed_ids) and previous_content:
         coverage_text = (
-            f"\n来源覆盖要求：本章共有 {len(sources)} 条来源；本次必须覆盖所有 source_type 为“新增来源”的内容，"
-            "既有来源只用于衔接和核对。即使章节标题更像旧内容，也不能忽略新增来源。\n"
+            f"\n来源覆盖要求：本章当前共有 {len(sources)} 条保留来源；"
+            "本次必须覆盖所有 source_type 为“新增来源”或“文本已变化来源”的内容，"
+            "既有来源用于衔接、核对和保留原文。"
+            f"不得继续写入 removed_source_ids={sorted(removed_ids) or []} 独有支撑的内容。\n"
         )
     else:
         coverage_text = (
@@ -268,9 +390,11 @@ def _build_draft_prompt(
 章节标题参考：{chapter.title}
 {feedback_text}
 {previous_text}
+{chapter_card_text}
 {revision_text}
 {event_cluster_text}
-{supplement_text}
+{removed_source_text}
+{task_text}
 {coverage_text}
 写作要求：
 - 必须以叙述者已讲述的内容为主，使用第一人称或贴近原话的叙述。
@@ -293,9 +417,13 @@ async def generate_chapter_draft_text(
     feedback: str | None,
     previous_content: str | None,
     pending_source_utterance_ids: set[str],
+    removed_sources: list[RemovedChapterSourceText] | None = None,
+    chapter_card: ChapterCardPromptContext | None = None,
     force_regenerate: bool,
 ) -> GeneratedChapterDraft:
     revision_plan: ChapterRevisionPlan | None = None
+    removed_source_items = removed_sources or []
+    removed_source_ids = {source.utterance_id for source in removed_source_items}
     should_plan_pending_sources = (
         bool(pending_source_utterance_ids)
         and not force_regenerate
@@ -307,6 +435,8 @@ async def generate_chapter_draft_text(
             sources=sources,
             previous_content=previous_content or "",
             pending_source_utterance_ids=pending_source_utterance_ids,
+            removed_sources=removed_source_items,
+            chapter_card=chapter_card,
         )
         plan_content = await client._call_llm(
             REVISION_PLAN_SYSTEM_PROMPT,
@@ -315,11 +445,28 @@ async def generate_chapter_draft_text(
             max_tokens=700,
             timeout=60.0,
         )
-        revision_plan = _revision_plan_from_content(str(plan_content), pending_source_utterance_ids)
+        revision_plan = _revision_plan_from_content(
+            str(plan_content),
+            pending_source_utterance_ids,
+            removed_source_ids,
+        )
         if revision_plan.mode == "needs_review":
             raise HTTPException(status_code=409, detail="新增来源与本章关系不明确，请先调整章节归属")
+    elif removed_source_ids and not force_regenerate and previous_content is not None:
+        revision_plan = ChapterRevisionPlan(
+            mode="regenerate",
+            reason="本章有来源被删除，需要基于保留来源移除过期内容。",
+            pending_source_ids=[],
+            removed_source_ids=sorted(removed_source_ids),
+            related_existing_source_ids=[],
+            coverage_requirements=["移除已删除来源独有支撑的内容，保留当前来源仍能支撑的事实"],
+        )
 
-    should_supplement_pending_sources = revision_plan is not None and revision_plan.mode == "supplement"
+    should_supplement_pending_sources = (
+        revision_plan is not None
+        and revision_plan.mode == "supplement"
+        and not removed_source_ids
+    )
     event_clusters: list[ChapterEventCluster] = []
     if not should_supplement_pending_sources and len(sources) > 1:
         cluster_prompt = _build_event_cluster_prompt(chapter=chapter, sources=sources)
@@ -332,7 +479,7 @@ async def generate_chapter_draft_text(
         )
         event_clusters = _event_clusters_from_content(str(cluster_content), sources)
 
-    draft_previous_content = previous_content if should_supplement_pending_sources else None
+    draft_previous_content = previous_content if (should_supplement_pending_sources or removed_source_ids) else None
     draft_pending_ids = pending_source_utterance_ids if should_supplement_pending_sources else set()
     prompt = _build_draft_prompt(
         chapter=chapter,
@@ -340,8 +487,10 @@ async def generate_chapter_draft_text(
         feedback=feedback,
         previous_content=draft_previous_content,
         pending_source_utterance_ids=draft_pending_ids,
+        removed_sources=removed_source_items,
         revision_plan=revision_plan,
         event_clusters=event_clusters,
+        chapter_card=chapter_card,
     )
     content = await client._call_llm(
         SYSTEM_PROMPT,
