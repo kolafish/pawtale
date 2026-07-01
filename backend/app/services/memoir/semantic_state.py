@@ -7,7 +7,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.memoir.types import MemoirSemanticCacheStatus
-from app.models.memoir import MemoirBookQualityAuditSnapshot, MemoirChapterCard, MemoirSourceCard
+from app.models.memoir import (
+    MemoirBookQualityAuditSnapshot,
+    MemoirChapterCard,
+    MemoirChapterEventClusterSnapshot,
+    MemoirSourceCard,
+)
 
 
 def _utcnow() -> datetime:
@@ -111,6 +116,54 @@ async def upsert_chapter_card(
     db.add(chapter_card)
     await db.flush()
     return chapter_card
+
+
+async def upsert_chapter_event_cluster_snapshot(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    plan_id: str,
+    chapter_id: str,
+    engine: str,
+    input_signature: str,
+    status: MemoirSemanticCacheStatus | str = MemoirSemanticCacheStatus.READY,
+    clusters_json: list | None = None,
+    source_ids_json: list[str] | None = None,
+    error_message: str = "",
+) -> MemoirChapterEventClusterSnapshot:
+    existing = await db.scalar(
+        select(MemoirChapterEventClusterSnapshot).where(
+            MemoirChapterEventClusterSnapshot.project_id == project_id,
+            MemoirChapterEventClusterSnapshot.chapter_id == chapter_id,
+            MemoirChapterEventClusterSnapshot.engine == engine,
+            MemoirChapterEventClusterSnapshot.input_signature == input_signature,
+        )
+    )
+    if existing:
+        existing.plan_id = plan_id
+        existing.status = _status_value(status)
+        existing.clusters_json = clusters_json or []
+        existing.source_ids_json = source_ids_json or []
+        existing.error_message = error_message
+        existing.updated_at = _utcnow()
+        db.add(existing)
+        await db.flush()
+        return existing
+
+    snapshot = MemoirChapterEventClusterSnapshot(
+        project_id=project_id,
+        plan_id=plan_id,
+        chapter_id=chapter_id,
+        engine=engine,
+        input_signature=input_signature,
+        status=_status_value(status),
+        clusters_json=clusters_json or [],
+        source_ids_json=source_ids_json or [],
+        error_message=error_message,
+    )
+    db.add(snapshot)
+    await db.flush()
+    return snapshot
 
 
 async def upsert_book_quality_audit_snapshot(
