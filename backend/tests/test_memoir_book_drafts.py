@@ -761,6 +761,102 @@ async def test_memoir_book_auto_revision_job_handles_removed_only_sources(
     )
 
 
+async def test_memoir_book_auto_revision_skips_removed_only_when_no_active_sources(
+    client,
+    test_db,
+):
+    clear_editing_job_handlers()
+    register_memoir_editing_job_handlers()
+    created = await create_test_voice_transcript(client, test_db, "我小时候常在外婆家的院子里晒太阳。")
+    project_id = created["session"]["project_id"]
+    plan, chapter = await create_test_book_plan(
+        test_db,
+        project_id=project_id,
+        source_refs=[memoir_source_ref(created, "外婆家的院子")],
+        status=MemoirBookPlanStatus.CONFIRMED,
+    )
+    draft = MemoirBookChapterDraft(
+        project_id=project_id,
+        chapter_id=chapter.id,
+        status=MemoirBookChapterDraftStatus.CONFIRMED.value,
+        metadata_json={},
+    )
+    test_db.add(draft)
+    await test_db.flush()
+    version = MemoirBookChapterDraftVersion(
+        draft_id=draft.id,
+        project_id=project_id,
+        chapter_id=chapter.id,
+        version=1,
+        content="我小时候常在外婆家的院子里晒太阳。",
+        created_by=MemoirCreatedBy.USER.value,
+        prompt_snapshot="",
+    )
+    test_db.add(version)
+    await test_db.flush()
+    test_db.add(
+        MemoirChapterSourceLink(
+            project_id=project_id,
+            plan_id=plan.id,
+            chapter_id=chapter.id,
+            utterance_id=created["utterance_id"],
+            transcript_version_id=created["transcript_version_id"],
+            audio_file_id=created["audio_file_id"],
+            quote="外婆家的院子",
+            status=MemoirChapterSourceLinkStatus.ACTIVE.value,
+            merged_draft_version_id=version.id,
+        )
+    )
+    chapter.source_refs_json = []
+    await test_db.flush()
+    await mark_utterance_links_removed(test_db, project_id=project_id, utterance_id=created["utterance_id"])
+    await test_db.commit()
+
+    scheduled_job = await schedule_chapter_auto_revision(
+        test_db,
+        project_id=project_id,
+        chapter_id=chapter.id,
+        run_after=datetime.now(UTC).replace(tzinfo=None),
+    )
+    assert scheduled_job is None
+
+    queued_job = MemoirEditingJob(
+        project_id=project_id,
+        chapter_id=chapter.id,
+        job_type=MemoirEditingJobType.REVISE_CHAPTER.value,
+        status=MemoirEditingJobStatus.PENDING.value,
+        run_after=datetime.now(UTC).replace(tzinfo=None),
+        payload_json={
+            "base_version_id": version.id,
+            "pending_source_utterance_ids": [],
+            "removed_source_utterance_ids": [created["utterance_id"]],
+        },
+    )
+    test_db.add(queued_job)
+    await test_db.commit()
+
+    assert await run_editing_job(test_db, queued_job.id) is False
+
+    refreshed_job = await test_db.get(MemoirEditingJob, queued_job.id)
+    assert refreshed_job.status == MemoirEditingJobStatus.SKIPPED.value
+    assert refreshed_job.error_message == "no source changes"
+    versions = (
+        await test_db.execute(
+            select(MemoirBookChapterDraftVersion)
+            .where(MemoirBookChapterDraftVersion.draft_id == draft.id)
+            .order_by(MemoirBookChapterDraftVersion.version)
+        )
+    ).scalars().all()
+    assert len(versions) == 1
+    event = await test_db.scalar(
+        select(MemoirAutomationEvent).where(
+            MemoirAutomationEvent.project_id == project_id,
+            MemoirAutomationEvent.event_type == MemoirAutomationEventType.CHAPTER_AUTO_REVISED.value,
+        )
+    )
+    assert event is None
+
+
 async def test_mobile_memoir_book_chapter_draft_labels_pending_sources_when_removing_old_sources(
     client,
     test_db,

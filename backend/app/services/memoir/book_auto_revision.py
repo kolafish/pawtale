@@ -77,6 +77,8 @@ async def _current_source_change_state(
         return ChapterSourceChangeState(pending_source_ids=set(), removed_source_ids=set())
     refs = await _chapter_source_ref_dicts(db, chapter=chapter)
     current_source_ids = set(_source_ref_utterance_ids(refs))
+    if not current_source_ids:
+        return ChapterSourceChangeState(pending_source_ids=set(), removed_source_ids=set())
     return await _chapter_source_change_state(
         db,
         chapter=chapter,
