@@ -1,5 +1,7 @@
 import json
 
+from app.services.memoir.chapter_cards import CHAPTER_CARD_ENGINE, build_chapter_card_context
+from app.services.memoir.semantic_state import upsert_chapter_card
 from app.models.memoir import MemoirBookPlanChapter
 from tests.memoir_helpers import (
     create_test_book_plan,
@@ -26,8 +28,38 @@ class FakeSourceRouterAI:
         return json.dumps(payload, ensure_ascii=False)
 
 
+class FakeSourceCardAI:
+    provider_name = "fake-ai"
+    model_name = "fake-source-card"
+
+    async def _call_llm(self, system_prompt: str, user_prompt: str, **kwargs):
+        return json.dumps(
+            {
+                "short_title": "外婆家院子",
+                "summary": "回忆外婆家院子里夏天摘菜和剥青豆。",
+                "people": ["外婆", "我"],
+                "places": ["外婆家院子"],
+                "time_hints": ["夏天"],
+                "event_tags": ["摘菜", "剥青豆"],
+                "emotion_tags": ["怀念"],
+                "key_facts": [
+                    {"text": "夏天一起摘菜和剥青豆", "evidence_quote": "夏天一起摘菜和剥青豆"}
+                ],
+                "open_questions": ["那次剥青豆是怎么开始的？"],
+            },
+            ensure_ascii=False,
+        )
+
+
+def _patch_source_card_ai(monkeypatch) -> FakeSourceCardAI:
+    fake = FakeSourceCardAI()
+    monkeypatch.setattr("app.services.memoir.source_cards.get_ai_service", lambda ai_model=None: fake)
+    return fake
+
+
 def _patch_source_router_ai(monkeypatch, *payloads: dict[str, object] | str) -> FakeSourceRouterAI:
     fake = FakeSourceRouterAI(*payloads)
+    _patch_source_card_ai(monkeypatch)
     monkeypatch.setattr("app.services.memoir.source_router.get_ai_service", lambda ai_model=None: fake)
     return fake
 
@@ -130,6 +162,56 @@ async def test_source_router_assigns_related_uncovered_source_to_existing_chapte
     assert data["evidence"][0]["utterance_id"] == uncovered["utterance_id"]
     assert fake_ai.calls
     assert "已有章节" in fake_ai.calls[0]["user_prompt"]
+
+
+async def test_source_router_prompt_uses_source_and_chapter_cards(client, test_db, monkeypatch):
+    first = await create_test_voice_transcript(
+        client,
+        test_db,
+        "小时候在外婆家的院子里摘菜，夏天还会剥青豆。",
+    )
+    project_id = first["session"]["project_id"]
+    _, chapter = await create_test_book_plan(
+        test_db,
+        project_id=project_id,
+        source_ref=memoir_source_ref(first, "外婆家的院子"),
+        chapter_title="院子里的童年",
+    )
+    context = await build_chapter_card_context(test_db, project_id=project_id, chapter_id=chapter.id)
+    await upsert_chapter_card(
+        test_db,
+        project_id=project_id,
+        plan_id=chapter.plan_id,
+        chapter_id=chapter.id,
+        draft_version_id=context.draft_version.id if context.draft_version else None,
+        input_signature=context.input_signature,
+        engine=CHAPTER_CARD_ENGINE,
+        card_json={
+            "summary": "本章已经覆盖外婆家院子里的童年生活。",
+            "covered": {"places": ["外婆家院子"], "events": ["摘菜"]},
+            "gaps": [{"severity": "medium", "message": "剥青豆的前后经过还不完整"}],
+            "next_questions": ["那次剥青豆是怎么开始的？"],
+        },
+    )
+    await test_db.commit()
+    uncovered = await create_test_voice_transcript(
+        client,
+        test_db,
+        "后来想起外婆家的院子，最记得夏天一起摘菜和剥青豆。",
+    )
+    fake_ai = _patch_source_router_ai(monkeypatch, _assign_route(chapter))
+
+    response = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-source-routing/dry-run",
+        json={"utterance_id": uncovered["utterance_id"]},
+    )
+
+    assert response.status_code == 200
+    prompt = fake_ai.calls[0]["user_prompt"]
+    assert "当前讲述素材卡片" in prompt
+    assert "回忆外婆家院子里夏天摘菜和剥青豆" in prompt
+    assert "chapter_card_summary: 本章已经覆盖外婆家院子里的童年生活。" in prompt
+    assert "chapter_card_gaps: ['medium: 剥青豆的前后经过还不完整']" in prompt
 
 
 async def test_source_router_suggests_new_chapter_for_clear_new_topic(client, test_db, monkeypatch):

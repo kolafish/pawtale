@@ -47,8 +47,32 @@ class FakeSourceRouterAI:
         return json.dumps(self.payloads.pop(0), ensure_ascii=False)
 
 
+class FakeSourceCardAI:
+    provider_name = "fake-ai"
+    model_name = "fake-source-card"
+
+    async def _call_llm(self, system_prompt: str, user_prompt: str, **kwargs):
+        return json.dumps(
+            {
+                "short_title": "外婆家院子",
+                "summary": "回忆外婆家院子里夏天摘菜和剥青豆。",
+                "people": ["外婆", "我"],
+                "places": ["外婆家院子"],
+                "time_hints": ["夏天"],
+                "event_tags": ["摘菜", "剥青豆"],
+                "emotion_tags": ["怀念"],
+                "key_facts": [
+                    {"text": "夏天一起摘菜和剥青豆", "evidence_quote": "夏天一起摘菜和剥青豆"}
+                ],
+                "open_questions": ["那次剥青豆是怎么开始的？"],
+            },
+            ensure_ascii=False,
+        )
+
+
 def _patch_source_router_ai(monkeypatch, *payloads: dict[str, object]) -> None:
     fake = FakeSourceRouterAI(*payloads)
+    monkeypatch.setattr("app.services.memoir.source_cards.get_ai_service", lambda ai_model=None: FakeSourceCardAI())
     monkeypatch.setattr("app.services.memoir.source_router.get_ai_service", lambda ai_model=None: fake)
 
 

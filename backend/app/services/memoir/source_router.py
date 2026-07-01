@@ -7,11 +7,13 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.domain.memoir.types import MemoirBookPlanStatus, MemoirChatMessageRole
+from app.domain.memoir.types import MemoirBookPlanStatus, MemoirChatMessageRole, MemoirSemanticCacheStatus
 from app.models.memoir import (
     MemoirBookChapterDraft,
     MemoirBookPlan,
     MemoirBookPlanChapter,
+    MemoirChapterCard,
+    MemoirSourceCard,
     MemoirVoiceSession,
 )
 from app.schemas.memoir_book import (
@@ -32,6 +34,8 @@ from app.services.memoir.book_source_links import (
     covered_utterance_ids,
     plan_source_ref_dicts_by_chapter,
 )
+from app.services.memoir.chapter_cards import CHAPTER_CARD_ENGINE, build_chapter_card_context
+from app.services.memoir.source_cards import generate_or_reuse_source_card
 
 
 SYSTEM_PROMPT = "你是一位谨慎的中文回忆录素材整理编辑。你只根据给定上下文判断一条讲述是否应该进入回忆录章节。"
@@ -80,16 +84,84 @@ def _chapter_digest(
     *,
     source_refs: list[dict[str, object]],
     sources_by_utterance: dict[str, SourceSegment],
+    chapter_card: MemoirChapterCard | None = None,
 ) -> dict[str, object]:
     draft_text = _latest_draft_text(chapter)
     return {
         "chapter_id": chapter.id,
         "title": chapter.title,
+        "chapter_card": _chapter_card_digest(chapter_card),
         "source_quotes": _chapter_source_quotes(
             source_refs=source_refs,
             sources_by_utterance=sources_by_utterance,
         ),
         "latest_draft_excerpt": draft_text[:MAX_DRAFT_CONTEXT_CHARS],
+    }
+
+
+def _string_items(value: object, *, limit: int = 6) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    items: list[str] = []
+    for item in value:
+        text = str(item or "").strip()
+        if text and text not in items:
+            items.append(text[:120])
+        if len(items) >= limit:
+            break
+    return items
+
+
+def _source_card_digest(card: MemoirSourceCard | None) -> dict[str, object] | None:
+    if not card or card.status != MemoirSemanticCacheStatus.READY.value or not isinstance(card.card_json, dict):
+        return None
+    key_facts: list[str] = []
+    raw_key_facts = card.card_json.get("key_facts")
+    if isinstance(raw_key_facts, list):
+        for item in raw_key_facts:
+            if not isinstance(item, dict):
+                continue
+            text = str(item.get("text") or "").strip()
+            quote = str(item.get("evidence_quote") or "").strip()
+            if text and quote:
+                key_facts.append(f"{text}（证据：{quote[:80]}）")
+            elif text:
+                key_facts.append(text[:120])
+            if len(key_facts) >= 5:
+                break
+    return {
+        "source_card_id": card.id,
+        "summary": str(card.card_json.get("summary") or "").strip()[:260],
+        "people": _string_items(card.card_json.get("people")),
+        "places": _string_items(card.card_json.get("places")),
+        "time_hints": _string_items(card.card_json.get("time_hints")),
+        "event_tags": _string_items(card.card_json.get("event_tags")),
+        "key_facts": key_facts,
+        "open_questions": _string_items(card.card_json.get("open_questions"), limit=4),
+    }
+
+
+def _chapter_card_digest(card: MemoirChapterCard | None) -> dict[str, object] | None:
+    if not card or card.status != MemoirSemanticCacheStatus.READY.value or not isinstance(card.card_json, dict):
+        return None
+    gaps: list[str] = []
+    raw_gaps = card.card_json.get("gaps")
+    if isinstance(raw_gaps, list):
+        for item in raw_gaps:
+            if not isinstance(item, dict):
+                continue
+            severity = str(item.get("severity") or "").strip()
+            message = str(item.get("message") or "").strip()
+            if message:
+                gaps.append(f"{severity or 'medium'}: {message[:140]}")
+            if len(gaps) >= 4:
+                break
+    return {
+        "chapter_card_id": card.id,
+        "summary": str(card.card_json.get("summary") or "").strip()[:300],
+        "covered": card.card_json.get("covered") if isinstance(card.card_json.get("covered"), dict) else {},
+        "gaps": gaps,
+        "next_questions": _string_items(card.card_json.get("next_questions"), limit=4),
     }
 
 
@@ -144,25 +216,106 @@ async def _conversation_context(db: AsyncSession, source: SourceSegment) -> tupl
     return question, "\n".join(context_lines)
 
 
+async def _generate_or_reuse_route_source_card(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    utterance_id: str,
+    ai_model: str | None,
+) -> MemoirSourceCard | None:
+    try:
+        card = await generate_or_reuse_source_card(
+            db,
+            project_id=project_id,
+            utterance_id=utterance_id,
+            ai_model=ai_model,
+        )
+    except Exception:
+        logger.exception("memoir source routing source card context failed utterance_id=%s", utterance_id)
+        return None
+    return card if card.status == MemoirSemanticCacheStatus.READY.value else None
+
+
+async def _ready_chapter_card_for_route(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    chapter_id: str,
+) -> MemoirChapterCard | None:
+    try:
+        context = await build_chapter_card_context(db, project_id=project_id, chapter_id=chapter_id)
+    except Exception:
+        logger.exception("memoir source routing chapter card context failed chapter_id=%s", chapter_id)
+        return None
+    return await db.scalar(
+        select(MemoirChapterCard).where(
+            MemoirChapterCard.project_id == project_id,
+            MemoirChapterCard.chapter_id == chapter_id,
+            MemoirChapterCard.engine == CHAPTER_CARD_ENGINE,
+            MemoirChapterCard.input_signature == context.input_signature,
+            MemoirChapterCard.status == MemoirSemanticCacheStatus.READY.value,
+        )
+    )
+
+
+async def _ready_chapter_cards_for_route(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    chapter_ids: list[str],
+) -> dict[str, MemoirChapterCard]:
+    cards: dict[str, MemoirChapterCard] = {}
+    for chapter_id in chapter_ids:
+        card = await _ready_chapter_card_for_route(db, project_id=project_id, chapter_id=chapter_id)
+        if card:
+            cards[chapter_id] = card
+    return cards
+
+
 def _build_route_prompt(
     *,
     source: SourceSegment,
+    source_card: dict[str, object] | None,
     question_text: str,
     conversation_context: str,
     chapters: list[dict[str, object]],
 ) -> str:
+    source_card_lines: list[str] = []
+    if source_card:
+        source_card_lines = [
+            f"- source_card_id: {source_card.get('source_card_id')}",
+            f"- summary: {source_card.get('summary') or '无'}",
+            f"- people: {source_card.get('people') or []}",
+            f"- places: {source_card.get('places') or []}",
+            f"- time_hints: {source_card.get('time_hints') or []}",
+            f"- event_tags: {source_card.get('event_tags') or []}",
+            f"- key_facts: {source_card.get('key_facts') or []}",
+            f"- open_questions: {source_card.get('open_questions') or []}",
+        ]
+
     chapter_lines: list[str] = []
     for chapter in chapters:
         source_quotes = chapter.get("source_quotes")
         quote_lines = []
         if isinstance(source_quotes, list):
             quote_lines = [f"    - {str(item).strip()}" for item in source_quotes if str(item).strip()]
+        chapter_card = chapter.get("chapter_card")
+        chapter_card_lines = ["  chapter_card: 无"]
+        if isinstance(chapter_card, dict) and chapter_card:
+            chapter_card_lines = [
+                f"  chapter_card_id: {chapter_card.get('chapter_card_id')}",
+                f"  chapter_card_summary: {chapter_card.get('summary') or '无'}",
+                f"  chapter_card_covered: {chapter_card.get('covered') or {}}",
+                f"  chapter_card_gaps: {chapter_card.get('gaps') or []}",
+                f"  chapter_card_next_questions: {chapter_card.get('next_questions') or []}",
+            ]
         draft_excerpt = str(chapter.get("latest_draft_excerpt") or "").strip()
         chapter_lines.append(
             "\n".join(
                 [
                     f"- chapter_id: {chapter['chapter_id']}",
                     f"  title: {chapter['title']}",
+                    *chapter_card_lines,
                     "  existing_source_quotes:",
                     *(quote_lines or ["    - 无"]),
                     f"  latest_draft_excerpt: {draft_excerpt or '无'}",
@@ -206,6 +359,9 @@ def _build_route_prompt(
 - source_index: {source.source_index}
 - utterance_id: {source.utterance_id}
 - text: {source.text.strip()[:MAX_SOURCE_TEXT_CHARS]}
+
+当前讲述素材卡片：
+{chr(10).join(source_card_lines) or "无"}
 
 这条记录前最近的 AI 提问：
 {question_text or "无"}
@@ -334,8 +490,20 @@ async def route_book_source(
     refs_by_chapter = await plan_source_ref_dicts_by_chapter(db, plan)
     chapters_by_id = {chapter.id: chapter for chapter in chapters}
     question_text, conversation_context = await _conversation_context(db, source)
+    route_source_card = await _generate_or_reuse_route_source_card(
+        db,
+        project_id=project_id,
+        utterance_id=utterance_id,
+        ai_model=ai_model,
+    )
+    chapter_cards_by_id = await _ready_chapter_cards_for_route(
+        db,
+        project_id=project_id,
+        chapter_ids=[chapter.id for chapter in chapters],
+    )
     prompt = _build_route_prompt(
         source=source,
+        source_card=_source_card_digest(route_source_card),
         question_text=question_text,
         conversation_context=conversation_context,
         chapters=[
@@ -343,6 +511,7 @@ async def route_book_source(
                 chapter,
                 source_refs=refs_by_chapter.get(chapter.id, []),
                 sources_by_utterance=source_by_utterance,
+                chapter_card=chapter_cards_by_id.get(chapter.id),
             )
             for chapter in chapters
         ],
