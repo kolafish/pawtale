@@ -359,7 +359,13 @@ def _build_draft_prompt(
         if removed_source_items
         else ""
     )
-    if removed_ids and previous_content:
+    if removed_ids and pending_ids and previous_content:
+        task_text = (
+            "\n本次任务：基于当前仍保留的来源修订原章节正文，移除已删除来源独有支撑的内容；"
+            "同时只把 source_type 为“新增来源”或“文本已变化来源”的讲述记录里用户确实讲过的内容自然补入或修正原章节正文。"
+            "不要为了填补被删除内容而新增未讲过的事实，可以保留当前来源仍能支撑的原有表达。\n"
+        )
+    elif removed_ids and previous_content:
         task_text = (
             "\n本次任务：基于当前仍保留的来源修订原章节正文，移除已删除来源独有支撑的内容；"
             "不要为了填补被删除内容而新增未讲过的事实。可以保留当前来源仍能支撑的原有表达。\n"
@@ -479,8 +485,18 @@ async def generate_chapter_draft_text(
         )
         event_clusters = _event_clusters_from_content(str(cluster_content), sources)
 
+    should_label_pending_sources = (
+        bool(pending_source_utterance_ids)
+        and bool(removed_source_ids)
+        and not force_regenerate
+        and previous_content is not None
+    )
     draft_previous_content = previous_content if (should_supplement_pending_sources or removed_source_ids) else None
-    draft_pending_ids = pending_source_utterance_ids if should_supplement_pending_sources else set()
+    draft_pending_ids = (
+        pending_source_utterance_ids
+        if should_supplement_pending_sources or should_label_pending_sources
+        else set()
+    )
     prompt = _build_draft_prompt(
         chapter=chapter,
         sources=sources,
