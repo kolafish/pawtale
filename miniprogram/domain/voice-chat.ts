@@ -685,6 +685,26 @@ export interface MemoirBookOutputUpdateRequest {
   cover_style?: MemoirBookCoverStyle | null;
 }
 
+export type MemoirBookEditorialCopyTarget =
+  | "preface"
+  | "afterword"
+  | "back_cover_quote"
+  | "chapter_intros"
+  | "pull_quotes";
+
+export interface MemoirBookOutputEditorialCopyRegenerateRequest {
+  ai_model?: string | null;
+  targets?: MemoirBookEditorialCopyTarget[];
+  chapter_ids?: string[];
+  feedback?: string | null;
+}
+
+export interface MemoirBookOutputChapterEditorialCopyUpdateRequest {
+  intro?: string | null;
+  pull_quote?: string | null;
+  pull_quote_source_ref_id?: string | null;
+}
+
 export interface MemoirBookTitleSuggestionRequest {
   ai_model?: string | null;
   count?: number;
@@ -749,6 +769,7 @@ export interface MemoirBookManuscriptSection {
 export interface MemoirBookManuscriptQuote {
   text: string;
   source_ref_ids: string[];
+  source?: "original_quote" | "editorial_generated" | "manual";
 }
 
 export interface MemoirBookManuscriptPersonNote {

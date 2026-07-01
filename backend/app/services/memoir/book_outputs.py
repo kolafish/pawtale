@@ -32,6 +32,8 @@ from app.schemas.memoir_book import (
     MemoirBookManuscriptRenderSettings,
     MemoirBookManuscriptSection,
     MemoirBookManuscriptSourceRef,
+    MemoirBookOutputChapterEditorialCopyUpdateRequest,
+    MemoirBookOutputEditorialCopyRegenerateRequest,
     MemoirBookOutputGenerateRequest,
     MemoirBookOutputResponse,
     MemoirBookOutputStructuredChapterResponse,
@@ -82,6 +84,13 @@ MEMOIR_PROFILE_METADATA_KEY = "memoir_profile"
 DEFAULT_BOOK_COVER_STYLE = "classic_plain"
 BOOK_PROFILE_TEXT_FIELDS = ("subtitle", "narrator_name", "prepared_by")
 BOOK_SECTION_TEXT_FIELDS = ("preface", "afterword", "back_cover_quote")
+BOOK_EDITORIAL_COPY_TARGETS = {
+    "preface",
+    "afterword",
+    "back_cover_quote",
+    "chapter_intros",
+    "pull_quotes",
+}
 SNAPSHOT_COMPARE_KEYS = (
     "chapter_id",
     "chapter_title",
@@ -382,9 +391,27 @@ def _chapter_pull_quotes(content: str, source_refs: list[MemoirBookManuscriptSou
     for ref in source_refs:
         quote = _brief_text(ref.quote, max_chars=80)
         if quote:
-            return [MemoirBookManuscriptQuote(text=quote, source_ref_ids=[ref.utterance_id])]
+            return [MemoirBookManuscriptQuote(text=quote, source_ref_ids=[ref.utterance_id], source="original_quote")]
     quote = _first_sentence(content, max_chars=80)
-    return [MemoirBookManuscriptQuote(text=quote)] if quote else []
+    return [MemoirBookManuscriptQuote(text=quote, source="editorial_generated")] if quote else []
+
+
+def _generated_chapter_pull_quote(
+    *,
+    chapter_id: str,
+    editorial_copy: GeneratedManuscriptCopy | None,
+) -> MemoirBookManuscriptQuote | None:
+    if not editorial_copy:
+        return None
+    for item in editorial_copy.chapter_intros:
+        if item.chapter_id != chapter_id or not item.pull_quote:
+            continue
+        return MemoirBookManuscriptQuote(
+            text=item.pull_quote,
+            source_ref_ids=[item.pull_quote_source_ref_id] if item.pull_quote_source_ref_id else [],
+            source="original_quote" if item.pull_quote_source_ref_id else "editorial_generated",
+        )
+    return None
 
 
 def _manuscript_from_snapshot(
@@ -424,13 +451,14 @@ def _manuscript_from_snapshot(
                 source_count=source_count,
             )
         )
+        generated_pull_quote = _generated_chapter_pull_quote(chapter_id=chapter_id, editorial_copy=editorial_copy)
         chapters.append(
             MemoirBookManuscriptChapter(
                 chapter_id=chapter_id,
                 index=chapter_index,
                 title=chapter_title,
                 intro=_chapter_intro(chapter_title, chapter_content, intro_by_chapter_id.get(chapter_id)),
-                pull_quotes=_chapter_pull_quotes(chapter_content, source_refs),
+                pull_quotes=[generated_pull_quote] if generated_pull_quote else _chapter_pull_quotes(chapter_content, source_refs),
                 content=chapter_content,
                 source_refs=source_refs,
             )
@@ -482,7 +510,11 @@ def _manuscript_from_snapshot(
     afterword = (
         metadata["afterword"]
         if "afterword" in metadata
-        else _expanded_afterword()
+        else (
+            editorial_copy.afterword
+            if editorial_copy and editorial_copy.afterword
+            else _expanded_afterword()
+        )
     )
     front_matter = [
         MemoirBookManuscriptSection(
@@ -786,6 +818,86 @@ def _updated_manuscript_payload(
     return manuscript.model_dump(mode="json")
 
 
+def _target_set(targets: list[str]) -> set[str]:
+    requested = {target for target in targets if target in BOOK_EDITORIAL_COPY_TARGETS}
+    return requested or set(BOOK_EDITORIAL_COPY_TARGETS)
+
+
+def _chapter_id_set(chapter_ids: list[str]) -> set[str]:
+    return {chapter_id for chapter_id in chapter_ids if chapter_id}
+
+
+def _set_preface(manuscript: MemoirBookManuscript, value: str) -> None:
+    for section in manuscript.front_matter:
+        if section.kind == "preface":
+            section.content = value
+            return
+    manuscript.front_matter.append(
+        MemoirBookManuscriptSection(kind="preface", title="写在前面", content=value)
+    )
+
+
+def _apply_editorial_copy(
+    manuscript: MemoirBookManuscript,
+    editorial_copy: GeneratedManuscriptCopy,
+    *,
+    targets: set[str],
+    chapter_ids: set[str],
+) -> None:
+    if "preface" in targets and editorial_copy.preface:
+        _set_preface(manuscript, editorial_copy.preface)
+    if "afterword" in targets and editorial_copy.afterword:
+        manuscript.back_matter.afterword.content = editorial_copy.afterword
+    if "back_cover_quote" in targets and editorial_copy.back_cover_quote:
+        manuscript.render_settings.back_cover_quote = editorial_copy.back_cover_quote
+    if editorial_copy.model:
+        manuscript.render_settings.editorial_copy_model = editorial_copy.model
+
+    generated_by_chapter = {
+        item.chapter_id: item
+        for item in editorial_copy.chapter_intros
+        if item.chapter_id
+    }
+    for chapter in manuscript.chapters:
+        if chapter_ids and chapter.chapter_id not in chapter_ids:
+            continue
+        generated = generated_by_chapter.get(chapter.chapter_id)
+        if not generated:
+            continue
+        if "chapter_intros" in targets and generated.intro:
+            chapter.intro = generated.intro
+        if "pull_quotes" in targets and generated.pull_quote:
+            chapter.pull_quotes = [
+                MemoirBookManuscriptQuote(
+                    text=generated.pull_quote,
+                    source_ref_ids=[generated.pull_quote_source_ref_id] if generated.pull_quote_source_ref_id else [],
+                    source="original_quote" if generated.pull_quote_source_ref_id else "editorial_generated",
+                )
+            ]
+
+
+def _find_manuscript_chapter(
+    manuscript: MemoirBookManuscript,
+    chapter_id: str,
+) -> MemoirBookManuscriptChapter:
+    for chapter in manuscript.chapters:
+        if chapter.chapter_id == chapter_id:
+            return chapter
+    raise HTTPException(status_code=404, detail="章节不存在")
+
+
+def _manual_pull_quote_source_ids(
+    chapter: MemoirBookManuscriptChapter,
+    source_ref_id: str | None,
+) -> list[str]:
+    if source_ref_id:
+        return [source_ref_id]
+    for quote in chapter.pull_quotes:
+        if quote.source_ref_ids:
+            return quote.source_ref_ids
+    return []
+
+
 def _stored_cover_style(version: MemoirBookOutputVersion | None) -> str:
     if not version or not isinstance(version.manuscript_json, dict):
         return DEFAULT_BOOK_COVER_STYLE
@@ -812,15 +924,24 @@ def _chapter_snapshot(
             "transcript_version_id": _safe_str(item.get("transcript_version_id")) or None,
             "voice_session_id": _safe_str(item.get("voice_session_id")) or None,
             "quote": _safe_str(item.get("quote")),
+            "summary": _safe_str(item.get("summary")) or _safe_str(item.get("source_summary")),
+            "representative_quote": _safe_str(item.get("representative_quote")) or _safe_str(item.get("quote")),
         }
         for item in refs
         if isinstance(item, dict) and _safe_str(item.get("utterance_id"))
     ]
+    chapter_metadata = chapter.metadata_json if isinstance(chapter.metadata_json, dict) else {}
     return {
         "chapter_id": chapter.id,
         "chapter_title": chapter.title,
         "chapter_index": chapter_index,
         "chapter_sort_order": chapter.sort_order,
+        "chapter_summary": (
+            _safe_str(chapter_metadata.get("chapter_summary"))
+            or _safe_str(chapter_metadata.get("summary"))
+            or _safe_str(chapter_metadata.get("editorial_summary"))
+        ),
+        "metadata_json": chapter_metadata,
         "draft_id": chapter.draft.id if chapter.draft else "",
         "draft_version_id": version.id,
         "draft_version": version.version,
@@ -1090,6 +1211,120 @@ async def update_book_output(
         metadata_patch=metadata_patch,
     )
     output.title = title
+    output.metadata_json = {
+        **(output.metadata_json or {}),
+        BOOK_TTS_CACHE_KEY: None,
+    }
+    await db.commit()
+    refreshed = await _load_output(db, project_id=project_id)
+    if not refreshed:
+        raise HTTPException(status_code=500, detail="全书稿保存失败")
+    return _output_response(refreshed)
+
+
+async def regenerate_book_output_editorial_copy(
+    db: AsyncSession,
+    *,
+    user_id: str,
+    project_id: str,
+    req: MemoirBookOutputEditorialCopyRegenerateRequest,
+) -> MemoirBookOutputResponse:
+    project = await load_memoir_project(db, project_id, user_id)
+    output = await _load_output(db, project_id=project_id)
+    if not output or not output.versions:
+        raise HTTPException(status_code=404, detail="全书稿不存在")
+    latest = output.versions[-1]
+    snapshot = [item for item in (latest.chapter_snapshot_json or []) if isinstance(item, dict)]
+    manuscript = _manuscript_response(
+        title=output.title,
+        content=latest.content,
+        snapshot=snapshot,
+        stored=latest.manuscript_json,
+    )
+    if not manuscript:
+        raise HTTPException(status_code=400, detail="全书稿结构不可用")
+
+    requested_ai_model = (req.ai_model or "").strip()
+    ai_model = requested_ai_model or _project_ai_model(project)
+    _remember_project_ai_model(project, req.ai_model)
+    targets = _target_set(req.targets)
+    chapter_ids = _chapter_id_set(req.chapter_ids)
+    editorial_copy = await generate_manuscript_editorial_copy(
+        title=output.title,
+        snapshot=snapshot,
+        ai_model=ai_model,
+        targets=sorted(targets),
+        chapter_ids=sorted(chapter_ids),
+        feedback=req.feedback,
+    )
+    if not editorial_copy:
+        raise HTTPException(status_code=503, detail="成书文案生成服务暂时不可用")
+
+    _apply_editorial_copy(
+        manuscript,
+        editorial_copy,
+        targets=targets,
+        chapter_ids=chapter_ids,
+    )
+    latest.manuscript_json = manuscript.model_dump(mode="json")
+    output.metadata_json = {
+        **(output.metadata_json or {}),
+        BOOK_TTS_CACHE_KEY: None,
+    }
+    await db.commit()
+    refreshed = await _load_output(db, project_id=project_id)
+    if not refreshed:
+        raise HTTPException(status_code=500, detail="全书稿保存失败")
+    return _output_response(refreshed)
+
+
+async def update_book_output_chapter_editorial_copy(
+    db: AsyncSession,
+    *,
+    user_id: str,
+    project_id: str,
+    chapter_id: str,
+    req: MemoirBookOutputChapterEditorialCopyUpdateRequest,
+) -> MemoirBookOutputResponse:
+    await load_memoir_project(db, project_id, user_id)
+    output = await _load_output(db, project_id=project_id)
+    if not output or not output.versions:
+        raise HTTPException(status_code=404, detail="全书稿不存在")
+    latest = output.versions[-1]
+    snapshot = [item for item in (latest.chapter_snapshot_json or []) if isinstance(item, dict)]
+    manuscript = _manuscript_response(
+        title=output.title,
+        content=latest.content,
+        snapshot=snapshot,
+        stored=latest.manuscript_json,
+    )
+    if not manuscript:
+        raise HTTPException(status_code=400, detail="全书稿结构不可用")
+    chapter = _find_manuscript_chapter(manuscript, chapter_id)
+
+    fields_set = getattr(req, "model_fields_set", set())
+    if "intro" in fields_set:
+        chapter.intro = req.intro or ""
+    if "pull_quote" in fields_set:
+        source_ref_id = req.pull_quote_source_ref_id if "pull_quote_source_ref_id" in fields_set else None
+        if source_ref_id and not any(ref.utterance_id == source_ref_id for ref in chapter.source_refs):
+            raise HTTPException(status_code=400, detail="章首引语来源不属于当前章节")
+        quote_text = req.pull_quote or ""
+        chapter.pull_quotes = [
+            MemoirBookManuscriptQuote(
+                text=quote_text,
+                source_ref_ids=_manual_pull_quote_source_ids(chapter, source_ref_id),
+                source="manual",
+            )
+        ] if quote_text else []
+    elif "pull_quote_source_ref_id" in fields_set and req.pull_quote_source_ref_id:
+        if not any(ref.utterance_id == req.pull_quote_source_ref_id for ref in chapter.source_refs):
+            raise HTTPException(status_code=400, detail="章首引语来源不属于当前章节")
+        if chapter.pull_quotes:
+            chapter.pull_quotes[0].source_ref_ids = [req.pull_quote_source_ref_id]
+            chapter.pull_quotes[0].source = "manual"
+
+    latest.manuscript_json = manuscript.model_dump(mode="json")
     output.metadata_json = {
         **(output.metadata_json or {}),
         BOOK_TTS_CACHE_KEY: None,

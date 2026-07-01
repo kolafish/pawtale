@@ -12,6 +12,8 @@ from app.schemas.memoir_book import (
     MemoirBookChapterDraftGenerateRequest,
     MemoirBookChapterDraftResponse,
     MemoirBookChapterDraftUpdateRequest,
+    MemoirBookOutputChapterEditorialCopyUpdateRequest,
+    MemoirBookOutputEditorialCopyRegenerateRequest,
     MemoirBookChapterTitleGenerateRequest,
     MemoirBookChapterTitleUpdateRequest,
     MemoirBookOutputGenerateRequest,
@@ -573,6 +575,44 @@ async def update_mobile_memoir_book_output(
         db,
         user_id=current_user.id,
         project_id=project_id,
+        req=req,
+    )
+
+
+@router.post(
+    "/projects/{project_id}/book-output/editorial-copy/regenerate",
+    response_model=MemoirBookOutputResponse,
+)
+async def regenerate_mobile_memoir_book_output_editorial_copy(
+    project_id: str,
+    req: MemoirBookOutputEditorialCopyRegenerateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await memoir_book_outputs.regenerate_book_output_editorial_copy(
+        db,
+        user_id=current_user.id,
+        project_id=project_id,
+        req=req,
+    )
+
+
+@router.patch(
+    "/projects/{project_id}/book-output/chapters/{chapter_id}/editorial-copy",
+    response_model=MemoirBookOutputResponse,
+)
+async def update_mobile_memoir_book_output_chapter_editorial_copy(
+    project_id: str,
+    chapter_id: str,
+    req: MemoirBookOutputChapterEditorialCopyUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await memoir_book_outputs.update_book_output_chapter_editorial_copy(
+        db,
+        user_id=current_user.id,
+        project_id=project_id,
+        chapter_id=chapter_id,
         req=req,
     )
 

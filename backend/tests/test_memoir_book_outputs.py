@@ -77,16 +77,26 @@ class FakeEditorialAI:
                 "timeout": timeout,
             }
         )
-        return """
-        {
+        chapter_id = "chapter-1"
+        marker = "chapter_id: "
+        if marker in user_prompt:
+            chapter_id = user_prompt.split(marker, 1)[1].splitlines()[0].strip()
+        return f"""
+        {{
           "book_title": "外婆慢慢说",
           "cover_subtitle": "关于童年与离家的记忆",
           "preface": "这些讲述从院子里的童年开始，也写到第一次离家时的紧张。整理成书，是为了让家里人以后还能翻到这些细节。",
+          "afterword": "这一次先把已经讲出来的童年、离家和家里的细节留下来。以后家人如果想起新的年份、地点或照片，还可以继续补进书里，让这些话慢慢成为家里共同保存的记忆。",
           "chapter_intros": [
-            {"chapter_id": "chapter-1", "intro": "记忆先回到外婆家的院子，阳光和旧日子的声音都在那里。"}
+            {{
+              "chapter_id": "{chapter_id}",
+              "intro": "记忆先回到外婆家的院子，阳光和旧日子的声音都在那里。",
+              "pull_quote": "我小时候常在外婆家的院子里晒太阳。",
+              "pull_quote_source_ref_id": "u1"
+            }}
           ],
           "back_cover_quote": "我小时候常在外婆家的院子里晒太阳。"
-        }
+        }}
         """
 
 
@@ -120,8 +130,14 @@ class FakeTemplateCopyAI:
           "book_title": "外婆慢慢说",
           "cover_subtitle": "关于童年与离家的记忆",
           "preface": "这本书记录的是「爷爷主题回忆录」中的生活。",
+          "afterword": "愿常翻看。",
           "chapter_intros": [
-            {"chapter_id": "chapter-1", "intro": "这一章主要记录外婆家的童年相关的回忆。"}
+            {
+              "chapter_id": "chapter-1",
+              "intro": "这一章主要记录外婆家的童年相关的回忆。",
+              "pull_quote": "这句不是原始口述里的金句。",
+              "pull_quote_source_ref_id": "u1"
+            }
           ],
           "back_cover_quote": "凡是过往皆是序章"
         }
@@ -157,7 +173,14 @@ async def test_memoir_book_manuscript_editorial_copy_uses_llm_context():
                 "chapter_index": 1,
                 "chapter_title": "外婆家的童年",
                 "source_count": 2,
-                "source_refs": [{"utterance_id": "u1", "quote": "我小时候常在外婆家的院子里晒太阳。"}],
+                "chapter_summary": "这一章围绕外婆家的院子和第一次离家的记忆展开。",
+                "source_refs": [
+                    {
+                        "utterance_id": "u1",
+                        "summary": "讲述小时候在院子里晒太阳，也记得外婆忙碌的身影。",
+                        "quote": "我小时候常在外婆家的院子里晒太阳。",
+                    }
+                ],
                 "content": "我小时候常在外婆家的院子里晒太阳。后来第一次离家去县城读书。",
             }
         ],
@@ -168,10 +191,16 @@ async def test_memoir_book_manuscript_editorial_copy_uses_llm_context():
     assert copy is not None
     assert copy.book_title == "外婆慢慢说"
     assert copy.cover_subtitle == "关于童年与离家的记忆"
+    assert copy.afterword.startswith("这一次先把已经讲出来的童年")
     assert copy.chapter_intros[0].chapter_id == "chapter-1"
+    assert copy.chapter_intros[0].pull_quote == "我小时候常在外婆家的院子里晒太阳。"
+    assert copy.chapter_intros[0].pull_quote_source_ref_id == "u1"
     assert copy.back_cover_quote == "我小时候常在外婆家的院子里晒太阳。"
     assert "chapter_id: chapter-1" in fake_ai.calls[0]["user_prompt"]
-    assert "representative_quote: 我小时候常在外婆家的院子里晒太阳。" in fake_ai.calls[0]["user_prompt"]
+    assert "chapter_summary: 这一章围绕外婆家的院子和第一次离家的记忆展开。" in fake_ai.calls[0]["user_prompt"]
+    assert "source_summaries: 讲述小时候在院子里晒太阳，也记得外婆忙碌的身影。" in fake_ai.calls[0]["user_prompt"]
+    assert "representative_quotes: 我小时候常在外婆家的院子里晒太阳。" in fake_ai.calls[0]["user_prompt"]
+    assert "source_ref_id: u1; quote: 我小时候常在外婆家的院子里晒太阳。" in fake_ai.calls[0]["user_prompt"]
 
 
 async def test_memoir_book_title_suggestions_filter_internal_names():
@@ -220,6 +249,7 @@ async def test_memoir_book_editorial_copy_filters_template_language():
     assert copy.book_title == "外婆慢慢说"
     assert copy.cover_subtitle == "关于童年与离家的记忆"
     assert copy.preface == ""
+    assert copy.afterword == ""
     assert copy.chapter_intros == []
     assert copy.back_cover_quote == ""
 
@@ -533,6 +563,93 @@ async def test_mobile_memoir_book_output_update_title_and_cover_style(client, te
     assert "仅供家人保存与阅读" not in latest["manuscript"]["front_matter"][1]["content"]
     assert latest["manuscript"]["front_matter"][3]["content"] == "这本书从家里的讲述开始。"
     assert latest["manuscript"]["back_matter"]["afterword"]["content"] == "以后还可以继续补充。"
+
+
+async def test_mobile_memoir_book_output_regenerates_editorial_copy_targets(client, test_db, monkeypatch):
+    project_id = await _active_project_id(client)
+    _, chapters = await _create_confirmed_book_plan(test_db, project_id=project_id)
+    chapters[0].metadata_json = {"chapter_summary": "这一章写外婆家的院子和童年生活。"}
+    chapters[0].source_refs_json = [
+        {
+            "utterance_id": "u1",
+            "summary": "讲述小时候在院子里晒太阳，也记得外婆忙碌的身影。",
+            "quote": "我小时候常在外婆家的院子里晒太阳。",
+        }
+    ]
+    await test_db.commit()
+    generated = await client.post(f"/api/mobile/memoir/projects/{project_id}/book-output/generate", json={})
+    assert generated.status_code == 200
+    fake_ai = FakeEditorialAI()
+    monkeypatch.setattr("app.services.memoir.book_manuscript_ai._text_ai_configured", lambda ai_model: True)
+    monkeypatch.setattr("app.services.memoir.book_manuscript_ai.get_ai_service", lambda ai_model: fake_ai)
+
+    response = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-output/editorial-copy/regenerate",
+        json={
+            "ai_model": "fake-model",
+            "targets": ["afterword", "chapter_intros", "pull_quotes", "back_cover_quote"],
+            "chapter_ids": [chapters[0].id],
+            "feedback": "更像家人整理后的书稿",
+        },
+    )
+
+    assert response.status_code == 200
+    manuscript = response.json()["latest_version"]["manuscript"]
+    assert manuscript["back_matter"]["afterword"]["content"].startswith("这一次先把已经讲出来的童年")
+    assert manuscript["render_settings"]["back_cover_quote"] == "我小时候常在外婆家的院子里晒太阳。"
+    first_chapter = manuscript["chapters"][0]
+    assert first_chapter["intro"] == "记忆先回到外婆家的院子，阳光和旧日子的声音都在那里。"
+    assert first_chapter["pull_quotes"] == [
+        {
+            "text": "我小时候常在外婆家的院子里晒太阳。",
+            "source_ref_ids": ["u1"],
+            "source": "original_quote",
+        }
+    ]
+    assert "本次生成目标：afterword、back_cover_quote、chapter_intros、pull_quotes" in fake_ai.calls[0]["user_prompt"]
+    assert "用户本次反馈：更像家人整理后的书稿" in fake_ai.calls[0]["user_prompt"]
+    assert "chapter_summary: 这一章写外婆家的院子和童年生活。" in fake_ai.calls[0]["user_prompt"]
+
+
+async def test_mobile_memoir_book_output_updates_chapter_editorial_copy(client, test_db):
+    project_id = await _active_project_id(client)
+    _, chapters = await _create_confirmed_book_plan(test_db, project_id=project_id)
+    chapters[0].source_refs_json = [
+        {
+            "utterance_id": "u1",
+            "quote": "那棵葡萄树我到现在都记得。",
+        }
+    ]
+    await test_db.commit()
+    generated = await client.post(f"/api/mobile/memoir/projects/{project_id}/book-output/generate", json={})
+    assert generated.status_code == 200
+
+    response = await client.patch(
+        f"/api/mobile/memoir/projects/{project_id}/book-output/chapters/{chapters[0].id}/editorial-copy",
+        json={
+            "intro": "记忆从院子里那棵葡萄树开始，慢慢带出一家人在夏天里的日子。",
+            "pull_quote": "那棵葡萄树我到现在都记得。",
+            "pull_quote_source_ref_id": "u1",
+        },
+    )
+
+    assert response.status_code == 200
+    chapter = response.json()["latest_version"]["manuscript"]["chapters"][0]
+    assert chapter["intro"] == "记忆从院子里那棵葡萄树开始，慢慢带出一家人在夏天里的日子。"
+    assert chapter["pull_quotes"] == [
+        {
+            "text": "那棵葡萄树我到现在都记得。",
+            "source_ref_ids": ["u1"],
+            "source": "manual",
+        }
+    ]
+
+    invalid = await client.patch(
+        f"/api/mobile/memoir/projects/{project_id}/book-output/chapters/{chapters[0].id}/editorial-copy",
+        json={"pull_quote": "不是本章来源。", "pull_quote_source_ref_id": "missing-source"},
+    )
+    assert invalid.status_code == 400
+    assert invalid.json()["detail"] == "章首引语来源不属于当前章节"
 
 
 async def test_mobile_memoir_book_output_generate_returns_existing_without_force(client, test_db):
