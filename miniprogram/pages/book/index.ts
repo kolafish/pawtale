@@ -18,6 +18,7 @@ import type {
   VoiceChatTranscriptLine,
   VoiceGatewayServerEvent,
 } from "../../domain/voice-chat";
+import { trackAuditAction } from "../../services/audit-tracker";
 import type { BookChapterView, BookData, BookVoiceCommandUndoSnapshot } from "./book-view-model";
 import { getMemoirIdentity } from "../../services/auth";
 import { memoirProjectProfile } from "../../services/memoir-project-profile";
@@ -1501,6 +1502,7 @@ Page<BookData, {
     try {
       const plan = await generateMemoirBookPlan(this.data.projectId, { max_chapters: 8 });
       this.applyPlan(plan);
+      trackAuditAction("book.plan_generate", { chapter_count: plan.chapters.length }, { projectId: this.data.projectId });
       wx.showToast({ title: "已生成章节", icon: "success" });
     } catch (error) {
       if (isLoginError(error)) {
@@ -1535,6 +1537,7 @@ Page<BookData, {
       });
       const draftsByChapterId = await this.loadDraftsForPlan(plan);
       this.applyPlan(plan, draftsByChapterId);
+      trackAuditAction("book.plan_confirm", { chapter_count: plan.chapters.length }, { projectId: this.data.projectId });
       wx.showToast({ title: "章节已确认", icon: "success" });
     } catch (error) {
       if (isLoginError(error)) {
@@ -1615,6 +1618,7 @@ Page<BookData, {
     try {
       const plan = await generateMemoirBookChapterTitle(this.data.projectId, chapterId, {});
       await this.applyUpdatedPlan(plan, toastTitle);
+      trackAuditAction("book.chapter_title_generate", {}, { projectId: this.data.projectId });
       return true;
     } catch (error) {
       if (isLoginError(error)) {
@@ -1790,6 +1794,11 @@ Page<BookData, {
         force_regenerate: forceRegenerate,
       });
       this.applyAutomationEvents(mergeAutomationEvent(this.automationEvents, event));
+      trackAuditAction(
+        "book.chapter_draft_generate",
+        { force_regenerate: forceRegenerate },
+        { projectId: this.data.projectId },
+      );
       wx.showToast({ title: "已后台生成", icon: "success" });
       return true;
     } catch (error) {
@@ -1858,6 +1867,7 @@ Page<BookData, {
     try {
       const draft = await confirmMemoirBookChapterDraft(this.data.projectId, chapterId);
       this.patchDraft(chapterId, draft);
+      trackAuditAction("book.chapter_draft_confirm", {}, { projectId: this.data.projectId });
       wx.showToast({ title: "本章已确认", icon: "success" });
     } catch (error) {
       this.patchChapter(chapterId, {
@@ -2046,6 +2056,11 @@ Page<BookData, {
         cover_style: this.data.bookCoverStyle,
       });
       this.applyAutomationEvents(mergeAutomationEvent(this.automationEvents, event));
+      trackAuditAction(
+        "book.output_generate",
+        { force_regenerate: Boolean(this.data.bookOutput?.latest_version) },
+        { projectId: this.data.projectId },
+      );
       wx.showToast({ title: "已后台生成", icon: "success" });
     } catch (error) {
       if (isLoginError(error)) {
@@ -2317,7 +2332,13 @@ Page<BookData, {
         error: "语音未就绪，请重试",
       });
       this.bookVoiceStreaming.close({ force: true });
+      return;
     }
+    trackAuditAction(
+      "book.voice_command_start",
+      { auto_triggered: autoTriggered },
+      { projectId: this.data.projectId },
+    );
   },
 
   async ensureBookVoiceAuthorization(autoTriggered = false) {
@@ -2789,6 +2810,11 @@ Page<BookData, {
         operation,
       });
       await this.applyBookVoiceCommandExecution(response, undoSnapshot, options);
+      trackAuditAction(
+        "book.voice_command_execute",
+        { intent: response.intent, confirmed_by_voice: Boolean(options.confirmedByVoice) },
+        { projectId: this.data.projectId },
+      );
     } catch (error) {
       if (isLoginError(error)) {
         wx.switchTab({ url: "/pages/me/index" });

@@ -146,3 +146,38 @@ test("audit tracker wraps Page lifecycle without replacing page handlers", async
   delete global.Page;
   delete global.wx;
 });
+
+test("audit action events include project and voice session context", async () => {
+  const requests = installWxMock(successResponse);
+  const tracker = trackerModule();
+  tracker.trackAuditAction(
+    "voice_chat.start",
+    { guidance_mode: "guided_interview" },
+    { projectId: "project-1", voiceSessionId: "voice-1" },
+  );
+  await tracker.flushAuditEvents();
+
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].data.events.length, 1);
+  assert.equal(requests[0].data.events[0].event_type, "action");
+  assert.equal(requests[0].data.events[0].feature_code, "voice_chat.start");
+  assert.equal(requests[0].data.events[0].project_id, "project-1");
+  assert.equal(requests[0].data.events[0].voice_session_id, "voice-1");
+  assert.deepEqual(requests[0].data.events[0].metadata_json, {
+    guidance_mode: "guided_interview",
+  });
+
+  tracker.__resetAuditTrackerForTest();
+  delete global.wx;
+});
+
+test("audit tracker drops queued events when storage APIs are unavailable", async () => {
+  const tracker = trackerModule();
+  global.wx = {};
+
+  tracker.trackAuditAction("project.manage");
+  await tracker.flushAuditEvents();
+
+  tracker.__resetAuditTrackerForTest();
+  delete global.wx;
+});

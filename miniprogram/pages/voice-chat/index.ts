@@ -6,6 +6,7 @@ import type {
   VoiceGatewayServerEvent,
 } from "../../domain/voice-chat";
 import { normalizeMemoirAsrText } from "../../services/asr-text-normalization";
+import { trackAuditAction } from "../../services/audit-tracker";
 import { AudioPlaybackController } from "../../services/audio-playback";
 import {
   applyAssistantTTSResponse,
@@ -1599,6 +1600,11 @@ Page<VoiceChatData, {
       primaryActionText: "暂停收音",
       autoListenStateText: autoTriggered ? "AI 说完，正在听你说" : "AI 说完自动听",
     });
+    trackAuditAction(
+      "voice_chat.recording_start",
+      { auto_triggered: autoTriggered },
+      { voiceSessionId: this.data.voiceSessionId },
+    );
     return true;
   },
 
@@ -1715,6 +1721,7 @@ Page<VoiceChatData, {
     }
     try {
       await this.voiceStreaming.finishSession();
+      trackAuditAction("voice_chat.finish", {}, { voiceSessionId: this.data.voiceSessionId });
       this.setData({
         recording: false,
         primaryActionText: "已保存",
@@ -1874,6 +1881,14 @@ Page<VoiceChatData, {
       followUpTTSError: "",
     });
     writeMemoirVoiceSessionSnapshot(this.data.voiceSessionId, { transcriptLines });
+    trackAuditAction(
+      "voice_chat.asr_final",
+      {
+        turn_final: event.turn_final !== false,
+        has_audio: Boolean(event.audio_file_id),
+      },
+      { voiceSessionId: this.data.voiceSessionId },
+    );
     if (event.message_id && event.utterance_id) {
       void this.confirmSavedTranscriptSnapshot(event);
     }

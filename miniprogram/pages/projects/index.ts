@@ -1,5 +1,6 @@
 import type { MemoirProjectListResponse, Project } from "../../domain/memoir";
 import { getMemoirIdentity } from "../../services/auth";
+import { trackAuditAction } from "../../services/audit-tracker";
 import {
   activateMemoirProject,
   deleteMemoirProject,
@@ -132,6 +133,7 @@ Page<ProjectsData, {
     try {
       await activateMemoirProject(id);
       await getMemoirIdentity();
+      trackAuditAction("project.activate", {}, { projectId: id });
       wx.showToast({ title: "已切换", icon: "success" });
       await this.loadProjects();
     } catch (error) {

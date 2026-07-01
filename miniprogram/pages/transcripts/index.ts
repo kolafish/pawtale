@@ -8,6 +8,7 @@ import type {
   MemoirVoiceSearchQueryParseResponse,
 } from "../../domain/voice-chat";
 import type { ChapterPickerOption } from "../../services/memoir-book-source-actions";
+import { trackAuditAction } from "../../services/audit-tracker";
 import {
   assignMemoirBookSources,
   deleteMemoirVoiceTranscript,
@@ -809,6 +810,13 @@ Page<TranscriptsData, {
         hasSearchCriteria,
         highlightedId: reset ? "" : this.data.highlightedId,
       });
+      if (reset) {
+        trackAuditAction(
+          "transcript.view",
+          { total: response.total, has_search_criteria: hasSearchCriteria },
+          { projectId: activeProjectId },
+        );
+      }
     } catch (error) {
       if (requestToken !== this.loadToken) {
         return;
@@ -930,6 +938,11 @@ Page<TranscriptsData, {
       const parsed = await parseMemoirVoiceSearchQuery(query);
       const parsedFilters = filtersFromParsedSearch(parsed);
       await this.applySearch(parsed.query || query, parsedFilters, parsed);
+      trackAuditAction(
+        "transcript.voice_search",
+        { has_filters: searchCriteriaActive(parsed.query || query, parsedFilters) },
+        { projectId: this.data.activeProjectId },
+      );
       wx.showToast({ title: "已识别", icon: "success" });
     } catch (error) {
       this.setData({ error: error instanceof Error ? error.message : "语音搜索失败" });
@@ -1010,6 +1023,11 @@ Page<TranscriptsData, {
         voiceEditPreview: voiceEditPreviewView(preview),
         voiceEditStatusText: preview.action === "revise_transcript" ? "请确认修正内容" : preview.reply_text,
       });
+      trackAuditAction(
+        "transcript.voice_edit_preview",
+        { action: preview.action },
+        { projectId: this.data.activeProjectId },
+      );
     } catch (error) {
       if (requestToken !== this.voiceEditToken) {
         return;
@@ -1073,6 +1091,7 @@ Page<TranscriptsData, {
         voiceEditStatusText: "",
         voiceEditPreview: null,
       });
+      trackAuditAction("transcript.voice_edit_save", {}, { projectId: this.data.activeProjectId });
       wx.showToast({ title: "已保存修正", icon: "success" });
     } catch (error) {
       this.setData({ error: error instanceof Error ? error.message : "保存修正失败" });
@@ -1225,6 +1244,7 @@ Page<TranscriptsData, {
     try {
       const updated = await updateMemoirVoiceTranscript(id, content);
       this.setData({ items: replaceItem(this.data.items, updated, this.data.searchQuery, this.data.bookPlan) });
+      trackAuditAction("transcript.edit_save", {}, { projectId: this.data.activeProjectId });
       wx.showToast({ title: "已保存", icon: "success" });
     } catch (error) {
       this.setData({ error: error instanceof Error ? error.message : "保存失败" });
