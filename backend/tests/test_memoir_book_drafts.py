@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 
 from app.domain.memoir.types import (
+    MemoirAutomationEventStatus,
     MemoirAutomationEventType,
     MemoirBookChapterDraftStatus,
     MemoirBookPlanStatus,
@@ -20,6 +21,7 @@ from app.models.memoir import (
     MemoirChapterSourceLink,
     MemoirBookPlanChapter,
 )
+from app.services.memoir import automation_events
 from app.services.memoir.book_auto_revision import schedule_chapter_auto_revision
 from app.services.memoir.chapter_cards import CHAPTER_CARD_ENGINE, build_chapter_card_context
 from app.services.memoir.chapter_source_links import mark_utterance_links_removed
@@ -551,6 +553,65 @@ async def test_memoir_book_auto_revision_job_supplements_pending_sources(
         prompt_snapshot="old prompt",
     )
     test_db.add(version)
+    stale_audit_event = MemoirAutomationEvent(
+        project_id=project_id,
+        chapter_id=chapter.id,
+        event_type=MemoirAutomationEventType.AUDIT_COMPLETED.value,
+        status=MemoirAutomationEventStatus.COMPLETED.value,
+        summary_text="当前有 1 个章节需要优先处理。",
+        metadata_json={
+            "source": "book_quality_audit",
+            "overall_status": "needs_updates",
+            "pending_utterance_count": 0,
+            "display": {
+                "title": "「外婆家的童年」有新内容待写入",
+                "summary": "有 1 条新讲述还没有补进正文。",
+                "detail": "建议先补写本章，再继续补充人物、地点和细节。",
+            },
+            "primary_action": {
+                "type": "revise_chapter",
+                "cta_text": "补写本章",
+                "chapter_id": chapter.id,
+                "utterance_count": 1,
+            },
+            "primary_chapter": {
+                "chapter_id": chapter.id,
+                "title": "外婆家的童年",
+                "status": "needs_update",
+            },
+            automation_events.EVENT_SIGNATURE_KEY: f"book_quality_audit|needs_updates|{chapter.id}",
+        },
+    )
+    test_db.add(stale_audit_event)
+    still_relevant_audit_event = MemoirAutomationEvent(
+        project_id=project_id,
+        chapter_id=chapter.id,
+        event_type=MemoirAutomationEventType.AUDIT_COMPLETED.value,
+        status=MemoirAutomationEventStatus.COMPLETED.value,
+        summary_text="当前章节还可以继续丰富。",
+        metadata_json={
+            "source": "book_quality_audit",
+            "overall_status": "collecting",
+            "pending_utterance_count": 0,
+            "display": {
+                "title": "「外婆家的童年」还可以继续丰富",
+                "summary": "正文已有基础，但相对素材还偏薄。",
+                "detail": "可以继续补充人物、地点、经过和感受。",
+            },
+            "primary_action": {
+                "type": "revise_chapter",
+                "cta_text": "完善本章",
+                "chapter_id": chapter.id,
+            },
+            "primary_chapter": {
+                "chapter_id": chapter.id,
+                "title": "外婆家的童年",
+                "status": "thin_draft",
+            },
+            automation_events.EVENT_SIGNATURE_KEY: f"book_quality_audit|collecting|{chapter.id}",
+        },
+    )
+    test_db.add(still_relevant_audit_event)
     await test_db.commit()
 
     job = await schedule_chapter_auto_revision(
@@ -629,6 +690,29 @@ async def test_memoir_book_auto_revision_job_supplements_pending_sources(
     assert event.metadata_json["source"] == "book_auto_revision"
     assert event.metadata_json["event_signature"] == f"book_auto_revision:{chapter.id}:{second['utterance_id']}"
     assert event.metadata_json["result_version_id"] == versions[-1].id
+    resolved_audit_event = await test_db.scalar(
+        select(MemoirAutomationEvent).where(MemoirAutomationEvent.id == stale_audit_event.id)
+    )
+    assert resolved_audit_event is not None
+    assert resolved_audit_event.metadata_json[automation_events.RESOLUTION_KEY] == "confirmed"
+    assert (
+        resolved_audit_event.metadata_json[automation_events.RESOLUTION_REASON_KEY]
+        == automation_events.CHAPTER_AUTO_REVISED_REASON
+    )
+    assert resolved_audit_event.metadata_json[automation_events.RESOLVED_CHAPTER_ID_KEY] == chapter.id
+    assert resolved_audit_event.metadata_json[automation_events.RESOLVED_BY_EVENT_ID_KEY] == event.id
+    assert resolved_audit_event.metadata_json[automation_events.RESOLVED_RESULT_VERSION_ID_KEY] == versions[-1].id
+    still_relevant_event = await test_db.scalar(
+        select(MemoirAutomationEvent).where(MemoirAutomationEvent.id == still_relevant_audit_event.id)
+    )
+    assert still_relevant_event is not None
+    assert automation_events.RESOLUTION_KEY not in still_relevant_event.metadata_json
+    visible_response = await client.get(f"/api/mobile/memoir/projects/{project_id}/automation-events")
+    assert visible_response.status_code == 200
+    visible_event_ids = [item["id"] for item in visible_response.json()["items"]]
+    assert event.id in visible_event_ids
+    assert still_relevant_audit_event.id in visible_event_ids
+    assert stale_audit_event.id not in visible_event_ids
     audit_job = await test_db.scalar(
         select(MemoirEditingJob).where(
             MemoirEditingJob.project_id == project_id,

@@ -38,12 +38,15 @@ from app.services.memoir.automation_event_metadata import (
     ACKNOWLEDGED_BY_USER_KEY,
     AUDIT_SNAPSHOT_ID_KEY,
     AUDIT_SNAPSHOT_KEY,
+    CHAPTER_AUTO_REVISED_REASON,
     DELETED_UTTERANCE_IDS_KEY,
     EVENT_SIGNATURE_KEY,
     PENDING_SOURCE_UTTERANCE_IDS_KEY,
     RESOLVED_AT_KEY,
+    RESOLVED_BY_EVENT_ID_KEY,
     RESOLVED_CHAPTER_ID_KEY,
     RESOLVED_CHAPTER_TITLE_KEY,
+    RESOLVED_RESULT_VERSION_ID_KEY,
     RESOLVED_UTTERANCE_IDS_KEY,
     RESOLUTION_KEY,
     RESOLUTION_REASON_KEY,
@@ -84,6 +87,12 @@ class AutomationEventSourceCleanupResult:
 class AutomationEventSourceReviewResolutionResult:
     updated_event_count: int = 0
     resolved_utterance_ids: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class AutomationEventChapterAuditResolutionResult:
+    updated_event_count: int = 0
+    resolved_chapter_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -316,6 +325,63 @@ def _apply_assigned_source_review_resolution(
         RESOLVED_CHAPTER_TITLE_KEY: resolved_source.chapter_title,
         RESOLVED_UTTERANCE_IDS_KEY: resolved_ids,
     }
+    return True
+
+
+def _metadata_dict(value: object) -> dict:
+    return value if isinstance(value, dict) else {}
+
+
+def _metadata_chapter_id(value: object) -> str:
+    if not isinstance(value, str):
+        return ""
+    return value.strip()
+
+
+def _audit_event_matches_revised_chapter(event: MemoirAutomationEvent, *, chapter_id: str) -> bool:
+    if event.event_type != MemoirAutomationEventType.AUDIT_COMPLETED.value:
+        return False
+    if not _event_is_visible(event):
+        return False
+
+    metadata = _metadata_dict(event.metadata_json)
+    if metadata.get("source") != "book_quality_audit":
+        return False
+
+    primary_action = _metadata_dict(metadata.get("primary_action"))
+    action_chapter_id = _metadata_chapter_id(primary_action.get("chapter_id"))
+    if primary_action.get("type") == "revise_chapter" and action_chapter_id == chapter_id:
+        return metadata.get("overall_status") == "needs_updates"
+
+    primary_chapter = _metadata_dict(metadata.get("primary_chapter"))
+    return (
+        _metadata_chapter_id(primary_chapter.get("chapter_id")) == chapter_id
+        and primary_chapter.get("status") == "needs_update"
+    )
+
+
+def _apply_revised_chapter_audit_resolution(
+    event: MemoirAutomationEvent,
+    *,
+    chapter_id: str,
+    now_iso: str,
+    reason: str,
+    revision_event_id: str | None,
+    result_version_id: str | None,
+) -> bool:
+    if not _audit_event_matches_revised_chapter(event, chapter_id=chapter_id):
+        return False
+
+    metadata = dict(event.metadata_json or {})
+    metadata[RESOLUTION_KEY] = "confirmed"
+    metadata[RESOLUTION_REASON_KEY] = reason
+    metadata[RESOLVED_AT_KEY] = now_iso
+    metadata[RESOLVED_CHAPTER_ID_KEY] = chapter_id
+    if revision_event_id:
+        metadata[RESOLVED_BY_EVENT_ID_KEY] = revision_event_id
+    if result_version_id:
+        metadata[RESOLVED_RESULT_VERSION_ID_KEY] = result_version_id
+    event.metadata_json = metadata
     return True
 
 
@@ -823,6 +889,45 @@ async def resolve_assigned_source_review_events(
     return AutomationEventSourceReviewResolutionResult(
         updated_event_count=updated_count,
         resolved_utterance_ids=sorted(set(resolved_ids)),
+    )
+
+
+async def resolve_revised_chapter_audit_events(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    chapter_id: str,
+    revision_event_id: str | None = None,
+    result_version_id: str | None = None,
+    reason: str = CHAPTER_AUTO_REVISED_REASON,
+) -> AutomationEventChapterAuditResolutionResult:
+    if not chapter_id:
+        return AutomationEventChapterAuditResolutionResult()
+
+    result = await db.execute(
+        select(MemoirAutomationEvent).where(
+            MemoirAutomationEvent.project_id == project_id,
+            MemoirAutomationEvent.event_type == MemoirAutomationEventType.AUDIT_COMPLETED.value,
+        )
+    )
+    now_iso = _utcnow_iso()
+    updated_count = 0
+    for event in result.scalars().all():
+        if _apply_revised_chapter_audit_resolution(
+            event,
+            chapter_id=chapter_id,
+            now_iso=now_iso,
+            reason=reason,
+            revision_event_id=revision_event_id,
+            result_version_id=result_version_id,
+        ):
+            db.add(event)
+            updated_count += 1
+    if updated_count:
+        await db.flush()
+    return AutomationEventChapterAuditResolutionResult(
+        updated_event_count=updated_count,
+        resolved_chapter_id=chapter_id if updated_count else "",
     )
 
 
