@@ -20,6 +20,10 @@ from app.schemas.memoir_voice import (
 )
 from app.services.memoir import progress_snapshot
 from app.services.memoir.access import load_memoir_project
+from app.services.memoir.source_disposition import (
+    IGNORED_SOURCE_MATERIAL_TYPES,
+    is_countable_source_utterance,
+)
 
 
 def _detail_options():
@@ -92,7 +96,11 @@ def _utterance_text(utterance: MemoirVoiceUtterance) -> str:
 
 
 def _visible_utterances(voice_session: MemoirVoiceSession) -> list[MemoirVoiceUtterance]:
-    return [utterance for utterance in voice_session.utterances if _utterance_text(utterance)]
+    return [
+        utterance
+        for utterance in voice_session.utterances
+        if is_countable_source_utterance(utterance, _utterance_text(utterance))
+    ]
 
 
 def _assistant_message_expects_answer(message: MemoirChatMessage) -> bool:
@@ -102,9 +110,15 @@ def _assistant_message_expects_answer(message: MemoirChatMessage) -> bool:
 
 def _visible_utterance_exists_clause():
     return MemoirVoiceSession.utterances.any(
-        or_(
-            func.trim(MemoirVoiceUtterance.transcript_raw) != "",
-            func.trim(MemoirVoiceUtterance.transcript_edited) != "",
+        (
+            or_(
+                func.trim(MemoirVoiceUtterance.transcript_raw) != "",
+                func.trim(MemoirVoiceUtterance.transcript_edited) != "",
+            )
+            & ~(
+                (MemoirVoiceUtterance.source_route_action == "ignore")
+                & MemoirVoiceUtterance.source_material_type.in_(IGNORED_SOURCE_MATERIAL_TYPES)
+            )
         )
     )
 

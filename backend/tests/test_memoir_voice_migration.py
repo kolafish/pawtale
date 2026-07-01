@@ -158,6 +158,97 @@ async def test_memoir_voice_migration_creates_editing_jobs_table():
         await engine.dispose()
 
 
+async def test_memoir_voice_migration_adds_source_route_disposition_columns():
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
+    try:
+        async with engine.begin() as conn:
+            await conn.execute(
+                text(
+                    """
+                    CREATE TABLE memoir_transcript_versions (
+                        id VARCHAR(36) NOT NULL,
+                        answer_id VARCHAR(36),
+                        voice_session_id VARCHAR(36),
+                        source_artifact_id VARCHAR(36),
+                        version_type VARCHAR(30) NOT NULL,
+                        content TEXT NOT NULL,
+                        provider VARCHAR(100),
+                        confidence FLOAT,
+                        created_by VARCHAR(20) NOT NULL,
+                        created_at DATETIME,
+                        PRIMARY KEY (id)
+                    )
+                    """
+                )
+            )
+            await conn.execute(
+                text(
+                    """
+                    CREATE TABLE memoir_voice_utterances (
+                        id VARCHAR(36) NOT NULL,
+                        voice_session_id VARCHAR(36) NOT NULL,
+                        chat_message_id VARCHAR(36),
+                        audio_file_id VARCHAR(36),
+                        transcript_raw TEXT NOT NULL,
+                        transcript_edited TEXT NOT NULL,
+                        start_ms INTEGER,
+                        end_ms INTEGER,
+                        provider VARCHAR(100),
+                        provider_payload_json JSON NOT NULL,
+                        created_at DATETIME,
+                        PRIMARY KEY (id)
+                    )
+                    """
+                )
+            )
+            await conn.execute(
+                text(
+                    """
+                    INSERT INTO memoir_voice_utterances (
+                        id, voice_session_id, transcript_raw, transcript_edited, provider_payload_json
+                    )
+                    VALUES ('utterance-1', 'session-1', '你能不能别问了', '', '{}')
+                    """
+                )
+            )
+
+        result = await migrate_memoir_voice_schema(engine)
+        second_result = await migrate_memoir_voice_schema(engine)
+
+        async with engine.begin() as conn:
+            rows = (
+                await conn.execute(
+                    text(
+                        """
+                        SELECT
+                            source_material_type,
+                            source_route_action,
+                            source_route_confidence,
+                            source_route_reason,
+                            source_route_updated_at
+                        FROM memoir_voice_utterances
+                        """
+                    )
+                )
+            ).fetchall()
+
+        assert {
+            column
+            for column in result["changed_columns"]
+            if column.startswith("memoir_voice_utterances.source_")
+        } == {
+            "memoir_voice_utterances.source_material_type",
+            "memoir_voice_utterances.source_route_action",
+            "memoir_voice_utterances.source_route_confidence",
+            "memoir_voice_utterances.source_route_reason",
+            "memoir_voice_utterances.source_route_updated_at",
+        }
+        assert second_result["changed_columns"] == []
+        assert rows == [("", "", None, "", None)]
+    finally:
+        await engine.dispose()
+
+
 async def test_memoir_voice_migration_updates_editing_job_type_constraint():
     engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
     try:

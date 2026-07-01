@@ -571,3 +571,26 @@ async def test_source_routing_job_ignores_non_memoir_source_without_review_event
         )
     )
     assert audit_job is None
+
+    ignored_utterance = await test_db.get(MemoirVoiceUtterance, ai_interaction["utterance_id"])
+    assert ignored_utterance is not None
+    assert ignored_utterance.source_material_type == "ai_interaction"
+    assert ignored_utterance.source_route_action == "ignore"
+    assert ignored_utterance.source_route_confidence == 0.94
+    assert ignored_utterance.source_route_reason == "这是和 AI 的对话，不是回忆素材"
+    assert ignored_utterance.source_route_updated_at is not None
+
+    snapshot_response = await client.get(f"/api/mobile/memoir/projects/{project_id}/progress-snapshot")
+    assert snapshot_response.status_code == 200
+    snapshot = snapshot_response.json()
+    assert snapshot["valid_utterance_count"] == 1
+    assert snapshot["assigned_utterance_count"] == 1
+    assert snapshot["pending_utterance_count"] == 0
+
+    coverage_response = await client.get(f"/api/mobile/memoir/projects/{project_id}/book-source-coverage")
+    assert coverage_response.status_code == 200
+    coverage = coverage_response.json()
+    assert coverage["total_source_count"] == 1
+    assert coverage["covered_source_count"] == 1
+    assert coverage["uncovered_source_count"] == 0
+    assert [item["utterance_id"] for item in coverage["sources"]] == [first["utterance_id"]]

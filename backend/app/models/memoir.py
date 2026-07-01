@@ -177,6 +177,11 @@ class MemoirVoiceUtterance(Base):
     end_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     provider: Mapped[str | None] = mapped_column(String(100), nullable=True)
     provider_payload_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    source_material_type: Mapped[str] = mapped_column(String(40), default="", nullable=False)
+    source_route_action: Mapped[str] = mapped_column(String(40), default="", nullable=False)
+    source_route_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    source_route_reason: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    source_route_updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     voice_session: Mapped[MemoirVoiceSession] = orm_relationship("MemoirVoiceSession", back_populates="utterances")

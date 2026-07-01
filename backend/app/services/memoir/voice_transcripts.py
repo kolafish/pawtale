@@ -39,6 +39,7 @@ from app.services.ai_types import AITextClient
 from app.services.memoir import automation_events as memoir_automation_events
 from app.services.memoir import source_cards
 from app.services.memoir.asr_text_normalization import normalize_memoir_asr_text
+from app.services.memoir.source_disposition import clear_source_route_disposition
 from app.services.memoir.book_plan_sources import (
     REMOVED_SOURCE_UTTERANCE_IDS_KEY,
     SOURCES_CHANGED_STATUS_REASON,
@@ -708,6 +709,7 @@ async def _apply_edited_text(
     db.add(version)
     await db.flush()
     utterance.transcript_edited = content
+    clear_source_route_disposition(utterance)
     if utterance.chat_message:
         utterance.chat_message.content_text = content
         utterance.chat_message.content_status = MemoirChatContentStatus.CORRECTED.value
