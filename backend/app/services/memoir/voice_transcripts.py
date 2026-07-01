@@ -37,6 +37,7 @@ from app.schemas.memoir_voice import (
 from app.services.ai_factory import get_ai_service
 from app.services.ai_types import AITextClient
 from app.services.memoir import automation_events as memoir_automation_events
+from app.services.memoir import source_cards
 from app.services.memoir.asr_text_normalization import normalize_memoir_asr_text
 from app.services.memoir.book_plan_sources import (
     REMOVED_SOURCE_UTTERANCE_IDS_KEY,
@@ -721,6 +722,13 @@ async def _apply_edited_text(
         utterance=utterance,
         content=content,
         transcript_version_id=version.id,
+    )
+    await source_cards.schedule_source_card_generation_job(
+        db,
+        project_id=utterance.voice_session.project_id,
+        utterance_id=utterance.id,
+        ai_model=ai_model,
+        reason=f"transcript_{version_type.value}",
     )
     if changed_chapter_ids:
         await schedule_chapter_auto_revisions(

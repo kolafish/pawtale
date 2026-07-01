@@ -5,6 +5,7 @@ from app.models.memoir import MemoirBookPlan, MemoirBookPlanChapter, MemoirChapt
 from app.models.projects import Project
 from app.services.memoir.chapter_source_links import (
     backfill_project_chapter_source_links,
+    bind_source_card_to_active_utterance_links,
     mark_utterance_links_removed,
     sync_project_chapter_source_links,
     update_utterance_link_ref_fields,
@@ -126,6 +127,10 @@ async def test_chapter_source_links_update_and_remove_by_utterance(test_db):
     project, _, _ = await _create_plan_with_source(test_db)
     await backfill_project_chapter_source_links(test_db, project_id=project.id)
     await test_db.commit()
+    link = (await _links(test_db))[0]
+    link.source_card_id = "source-card-1"
+    test_db.add(link)
+    await test_db.commit()
 
     updated_count = await update_utterance_link_ref_fields(
         test_db,
@@ -146,5 +151,33 @@ async def test_chapter_source_links_update_and_remove_by_utterance(test_db):
     assert removed_count == 1
     assert link.transcript_version_id == "version-2"
     assert link.quote == "外婆在院子里摘菜"
+    assert link.source_card_id is None
     assert link.status == MemoirChapterSourceLinkStatus.REMOVED.value
     assert link.removed_at is not None
+
+
+async def test_chapter_source_links_bind_source_card_requires_matching_transcript_version(test_db):
+    project, _, _ = await _create_plan_with_source(test_db)
+    await backfill_project_chapter_source_links(test_db, project_id=project.id)
+    await test_db.commit()
+
+    skipped_count = await bind_source_card_to_active_utterance_links(
+        test_db,
+        project_id=project.id,
+        utterance_id="utterance-1",
+        source_card_id="source-card-1",
+        transcript_version_id="version-2",
+    )
+    bound_count = await bind_source_card_to_active_utterance_links(
+        test_db,
+        project_id=project.id,
+        utterance_id="utterance-1",
+        source_card_id="source-card-1",
+        transcript_version_id="version-1",
+    )
+    await test_db.commit()
+
+    link = (await _links(test_db))[0]
+    assert skipped_count == 0
+    assert bound_count == 1
+    assert link.source_card_id == "source-card-1"
