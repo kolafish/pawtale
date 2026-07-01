@@ -530,3 +530,5 @@ updated_at
 - 增加项目级 semantic state inspector，展示 source/chapter/audit snapshot 的 ready/stale/failed 状态。
 - 从 latest chapter cards 和 audit snapshot 汇总建议追问。
 - 只产出建议和事件，不直接改正文。
+
+状态：本 PR 完成。
