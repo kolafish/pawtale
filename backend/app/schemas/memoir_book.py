@@ -530,6 +530,71 @@ class MemoirBookQualityAuditRunResponse(BaseModel):
     event: MemoirAutomationEventResponse | None = None
 
 
+class MemoirSemanticCacheStatusCountsResponse(BaseModel):
+    ready: int = 0
+    stale: int = 0
+    failed: int = 0
+    missing_current_ready: int = 0
+
+
+class MemoirSemanticChapterSourceStateResponse(BaseModel):
+    chapter_count: int = 0
+    legacy_source_ref_count: int = 0
+    active_link_count: int = 0
+    removed_link_count: int = 0
+    legacy_refs_without_any_link_count: int = 0
+    active_links_without_legacy_ref_count: int = 0
+
+
+class MemoirSemanticAuditSnapshotLatestResponse(BaseModel):
+    snapshot_id: str
+    engine: str
+    overall_status: str = ""
+    summary_text: str = ""
+    error_message: str = ""
+    updated_at: datetime
+
+
+class MemoirSemanticAuditSnapshotStateResponse(BaseModel):
+    ready: int = 0
+    stale: int = 0
+    failed: int = 0
+    by_engine_status: dict[str, int] = Field(default_factory=dict)
+    latest: list[MemoirSemanticAuditSnapshotLatestResponse] = Field(default_factory=list)
+
+
+class MemoirSemanticFollowUpSuggestionResponse(BaseModel):
+    source: Literal["chapter_card", "audit_snapshot"]
+    chapter_id: str | None = None
+    chapter_title: str = ""
+    question: str
+    reason: str = ""
+    priority: Literal["high", "medium", "low"] = "medium"
+    card_id: str | None = None
+    snapshot_id: str | None = None
+
+
+class MemoirSemanticStateFailureResponse(BaseModel):
+    chapter_id: str | None = None
+    error: str
+
+
+class MemoirSemanticStateResponse(BaseModel):
+    project_id: str
+    title: str
+    inspected_at: datetime
+    voice_utterance_count: int = 0
+    nonempty_utterance_count: int = 0
+    source_cards: MemoirSemanticCacheStatusCountsResponse
+    chapter_sources: MemoirSemanticChapterSourceStateResponse
+    chapter_cards: MemoirSemanticCacheStatusCountsResponse
+    audit_snapshots: MemoirSemanticAuditSnapshotStateResponse
+    latest_audit_event_ids: list[str] = Field(default_factory=list)
+    follow_up_suggestions: list[MemoirSemanticFollowUpSuggestionResponse] = Field(default_factory=list)
+    failure_count: int = 0
+    failures: list[MemoirSemanticStateFailureResponse] = Field(default_factory=list)
+
+
 class MemoirBookSourceCoverageItem(BaseModel):
     source_index: int
     voice_session_id: str

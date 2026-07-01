@@ -43,6 +43,7 @@ from app.schemas.memoir_book import (
     MemoirBookVoiceCommandParseRequest,
     MemoirBookVoiceCommandParseResponse,
     MemoirAutomationEventResponse,
+    MemoirSemanticStateResponse,
 )
 from app.services.memoir import book_drafts as memoir_book_drafts
 from app.services.memoir import book_generation_jobs as memoir_book_generation_jobs
@@ -53,6 +54,7 @@ from app.services.memoir import source_auto_assignment as memoir_source_auto_ass
 from app.services.memoir import source_review_queue as memoir_source_review_queue
 from app.services.memoir import source_router as memoir_source_router
 from app.services.memoir import book_voice_commands as memoir_book_voice_commands
+from app.services.memoir import semantic_inspector as memoir_semantic_inspector
 
 
 router = APIRouter()
@@ -330,6 +332,19 @@ async def run_mobile_memoir_book_quality_audit(
         user_id=current_user.id,
         project_id=project_id,
         req=req,
+    )
+
+
+@router.get("/projects/{project_id}/semantic-state", response_model=MemoirSemanticStateResponse)
+async def get_mobile_memoir_semantic_state(
+    project_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await memoir_semantic_inspector.get_project_semantic_state(
+        db,
+        user_id=current_user.id,
+        project_id=project_id,
     )
 
 
