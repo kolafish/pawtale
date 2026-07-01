@@ -1,5 +1,6 @@
 import type { MemoirGuidanceMode } from "../../domain/voice-chat";
 import { getMemoirIdentity } from "../../services/auth";
+import { trackAuditAction } from "../../services/audit-tracker";
 import { createMemoirVoiceSession } from "../../services/memoir-voice-api";
 import {
   guidanceModeLabel,
@@ -179,6 +180,11 @@ Page<HomeData, {
       }, {
         projectId: this.data.projectId,
       });
+      trackAuditAction(
+        "voice_chat.start",
+        { guidance_mode: this.data.selectedMode, entry: "home" },
+        { projectId: this.data.projectId, voiceSessionId: detail.session.id },
+      );
       const params = [
         `voiceSessionId=${encodeURIComponent(detail.session.id)}`,
         `mode=${encodeURIComponent(this.data.selectedMode)}`,

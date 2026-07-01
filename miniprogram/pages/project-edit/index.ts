@@ -1,6 +1,7 @@
 import type { MemoirGuidanceMode } from "../../domain/voice-chat";
 import type { MemoirNarratorGender } from "../../services/memoir";
 import { getMemoirIdentity } from "../../services/auth";
+import { trackAuditAction } from "../../services/audit-tracker";
 import {
   activateMemoirProject,
   createMemoirProject,
@@ -184,9 +185,13 @@ Page<ProjectEditData, {
     try {
       if (this.data.projectId) {
         await updateMemoirProject(this.data.projectId, payload);
+        trackAuditAction("project.update", {}, { projectId: this.data.projectId });
       } else {
         const project = await createMemoirProject(payload);
         await activateMemoirProject(project.id);
+        trackAuditAction("project.create", {
+          default_guidance_mode: this.data.defaultGuidanceMode,
+        }, { projectId: project.id });
       }
       await getMemoirIdentity();
       wx.showToast({ title: "已保存", icon: "success" });

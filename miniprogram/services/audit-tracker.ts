@@ -10,6 +10,8 @@ interface AuditEventPayload {
   event_date: string;
   page_path: string;
   feature_code: string;
+  project_id?: string;
+  voice_session_id?: string;
   duration_ms?: number;
   exit_reason?: string;
   metadata_json?: Record<string, unknown>;
@@ -115,6 +117,8 @@ function eventPayload(
     durationMs?: number;
     exitReason?: AuditExitReason | string;
     metadata?: Record<string, unknown>;
+    projectId?: string;
+    voiceSessionId?: string;
   } = {},
 ): AuditEventPayload {
   const eventTime = options.eventTime || now();
@@ -125,6 +129,8 @@ function eventPayload(
     event_date: localDate(eventTime),
     page_path: normalizePagePath(pagePath),
     feature_code: featureCode,
+    ...(options.projectId ? { project_id: options.projectId } : {}),
+    ...(options.voiceSessionId ? { voice_session_id: options.voiceSessionId } : {}),
     duration_ms: Math.max(0, Math.round(options.durationMs || 0)),
     ...(options.exitReason ? { exit_reason: options.exitReason } : {}),
     ...(options.metadata ? { metadata_json: options.metadata } : {}),
@@ -162,12 +168,20 @@ function discardOrRequeue(sentEvents: AuditEventPayload[], error: unknown): void
   queue = [...sentEvents, ...queue].slice(-MAX_QUEUE_EVENTS);
 }
 
+function hasSessionCookie(): boolean {
+  try {
+    return Boolean(readSessionCookie());
+  } catch {
+    return false;
+  }
+}
+
 export function flushAuditEvents(): Promise<void> {
   if (flushPromise) {
     return flushPromise;
   }
-  if (queue.length === 0 || !readSessionCookie()) {
-    if (!readSessionCookie()) {
+  if (queue.length === 0 || !hasSessionCookie()) {
+    if (!hasSessionCookie()) {
       queue = [];
     }
     return Promise.resolve();
@@ -256,11 +270,14 @@ export function trackAuditPageLeave(reason: AuditExitReason | string = "page_unl
 export function trackAuditAction(
   featureCode: string,
   metadata: Record<string, unknown> = {},
+  context: { projectId?: string; voiceSessionId?: string } = {},
 ): void {
   const pagePath = activePage?.pagePath || "";
   enqueue(
     eventPayload("action", pagePath, featureCode, {
       metadata,
+      projectId: context.projectId,
+      voiceSessionId: context.voiceSessionId,
     }),
   );
   void flushAuditEvents();
