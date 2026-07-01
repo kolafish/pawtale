@@ -1796,19 +1796,21 @@
 }
 
 .book-manuscript-chapter-head {
-  justify-content: space-between;
-  gap: 18rpx;
+  justify-content: flex-start;
+  align-items: flex-start;
 }
 
 .book-manuscript-chapter-actions {
-  display: flex;
-  align-items: center;
-  gap: 10rpx;
-  flex: 0 0 auto;
+  width: 100%;
+  margin-top: 14rpx;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12rpx;
 }
 
 .book-manuscript-chapter-actions .chapter-preview-edit {
-  min-width: 104rpx;
+  width: 100%;
+  min-width: 0;
   padding: 0 16rpx;
 }
 
@@ -1856,14 +1858,15 @@
 }
 
 .book-manuscript-copy-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10rpx;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12rpx;
   margin-top: 12rpx;
 }
 
 .book-manuscript-copy-actions .book-editorial-generate {
-  flex: 0 1 auto;
+  width: 100%;
+  min-width: 0;
 }
 
 .book-back-matter-row {

@@ -1058,6 +1058,17 @@ test("book page exposes manuscript structure sections", () => {
   assert.match(wxml, /bindtap="regenerateBookChapterEditorialCopy"/);
   assert.match(wxml, /bindtap="openBookChapterEditorialEditor"/);
   assert.match(wxml, /bindtap="saveBookChapterEditorialCopy"/);
+  const bookEditorialButtons = wxml.match(/<button(?=[^>]*bindtap="regenerateBookEditorialCopy")[^>]*>/g) || [];
+  assert.equal(bookEditorialButtons.length, 3);
+  bookEditorialButtons.forEach((button) => {
+    assert.doesNotMatch(button, /bookStaleNotice/);
+  });
+  const chapterEditorialButtons = wxml.match(/<button(?=[^>]*bindtap="regenerateBookChapterEditorialCopy")[^>]*>/g) || [];
+  assert.equal(chapterEditorialButtons.length, 2);
+  chapterEditorialButtons.forEach((button) => {
+    assert.doesNotMatch(button, /bookStaleNotice/);
+  });
+  assert.match(wxml, /<\/view>\s*<view class="book-manuscript-chapter-actions">/);
   assert.match(wxml, /bindchange="changeBookCoverStyle"/);
   assert.match(wxml, /bookDesignSaveStatusText/);
   assert.doesNotMatch(wxml, /bindtap="saveBookDesignSettings"/);
@@ -2497,14 +2508,19 @@ test("book page regenerates full-book and chapter editorial copy", async () => {
   const context = pageContext(page, { projectId: "project/1" });
   page.applyBookOutput.call(
     context,
-    sampleBookOutput(1, "全书正文", false, [], null, [], sampleBookManuscript()),
+    sampleBookOutput(1, "全书正文", true, ["外婆家的童年"], null, [], sampleBookManuscript()),
   );
+  assert.equal(context.data.bookStaleNotice, "章节「外婆家的童年」已更新，请重新生成全书。");
 
   await page.regenerateBookEditorialCopy.call(context, {
     currentTarget: { dataset: { target: "preface" } },
   });
   assert.equal(context.data.bookPrefaceInput, "这些讲述来自家里一次次慢慢说起的记忆。");
 
+  page.applyBookOutput.call(
+    context,
+    sampleBookOutput(1, "全书正文", true, ["外婆家的童年"], null, [], sampleBookManuscript()),
+  );
   await page.regenerateBookChapterEditorialCopy.call(context, {
     currentTarget: { dataset: { id: "chapter-1", target: "pull_quotes" } },
   });

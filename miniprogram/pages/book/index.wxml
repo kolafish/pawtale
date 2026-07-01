@@ -756,7 +756,7 @@
                 class="book-editorial-generate"
                 data-target="preface"
                 loading="{{bookEditorialCopyBusyTarget === 'preface'}}"
-                disabled="{{bookTitleSaving || generatingBook || updatingPlanStructure || bookViewingHistoricalVersion || bookEditorialCopyBusyTarget || !bookContent || bookStaleNotice}}"
+                disabled="{{bookTitleSaving || generatingBook || updatingPlanStructure || bookViewingHistoricalVersion || bookEditorialCopyBusyTarget || !bookContent}}"
                 bindtap="regenerateBookEditorialCopy"
               >
                 重生成
@@ -781,7 +781,7 @@
                 class="book-editorial-generate"
                 data-target="afterword"
                 loading="{{bookEditorialCopyBusyTarget === 'afterword'}}"
-                disabled="{{bookTitleSaving || generatingBook || updatingPlanStructure || bookViewingHistoricalVersion || bookEditorialCopyBusyTarget || !bookContent || bookStaleNotice}}"
+                disabled="{{bookTitleSaving || generatingBook || updatingPlanStructure || bookViewingHistoricalVersion || bookEditorialCopyBusyTarget || !bookContent}}"
                 bindtap="regenerateBookEditorialCopy"
               >
                 重生成
@@ -806,7 +806,7 @@
                 class="book-editorial-generate"
                 data-target="back_cover_quote"
                 loading="{{bookEditorialCopyBusyTarget === 'back_cover_quote'}}"
-                disabled="{{bookTitleSaving || generatingBook || updatingPlanStructure || bookViewingHistoricalVersion || bookEditorialCopyBusyTarget || !bookContent || bookStaleNotice}}"
+                disabled="{{bookTitleSaving || generatingBook || updatingPlanStructure || bookViewingHistoricalVersion || bookEditorialCopyBusyTarget || !bookContent}}"
                 bindtap="regenerateBookEditorialCopy"
               >
                 重生成
@@ -924,22 +924,22 @@
                     <text class="book-manuscript-chapter-index">{{chapter.indexText}}</text>
                     <text class="book-manuscript-chapter-title">{{chapter.title}}</text>
                   </view>
-                  <view class="book-manuscript-chapter-actions">
-                    <button
-                      class="chapter-preview-edit"
-                      data-id="{{chapter.chapterId}}"
-                      bindtap="editBookOutputChapter"
-                    >
-                      正文
-                    </button>
-                    <button
-                      class="chapter-preview-edit"
-                      data-id="{{chapter.chapterId}}"
-                      bindtap="openBookChapterEditorialEditor"
-                    >
-                      文案
-                    </button>
-                  </view>
+                </view>
+                <view class="book-manuscript-chapter-actions">
+                  <button
+                    class="chapter-preview-edit"
+                    data-id="{{chapter.chapterId}}"
+                    bindtap="editBookOutputChapter"
+                  >
+                    正文
+                  </button>
+                  <button
+                    class="chapter-preview-edit"
+                    data-id="{{chapter.chapterId}}"
+                    bindtap="openBookChapterEditorialEditor"
+                  >
+                    文案
+                  </button>
                 </view>
                 <text wx:if="{{chapter.metaText}}" class="book-manuscript-meta">{{chapter.metaText}}</text>
                 <text wx:if="{{chapter.intro}}" class="book-manuscript-intro">{{chapter.intro}}</text>
@@ -953,7 +953,7 @@
                     data-id="{{chapter.chapterId}}"
                     data-target="chapter_intros"
                     loading="{{bookEditorialCopyBusyTarget === 'chapter_intros:' + chapter.chapterId}}"
-                    disabled="{{bookTitleSaving || generatingBook || updatingPlanStructure || bookViewingHistoricalVersion || bookEditorialCopyBusyTarget || bookStaleNotice}}"
+                    disabled="{{bookTitleSaving || generatingBook || updatingPlanStructure || bookViewingHistoricalVersion || bookEditorialCopyBusyTarget}}"
                     bindtap="regenerateBookChapterEditorialCopy"
                   >
                     重写导语
@@ -963,7 +963,7 @@
                     data-id="{{chapter.chapterId}}"
                     data-target="pull_quotes"
                     loading="{{bookEditorialCopyBusyTarget === 'pull_quotes:' + chapter.chapterId}}"
-                    disabled="{{bookTitleSaving || generatingBook || updatingPlanStructure || bookViewingHistoricalVersion || bookEditorialCopyBusyTarget || bookStaleNotice}}"
+                    disabled="{{bookTitleSaving || generatingBook || updatingPlanStructure || bookViewingHistoricalVersion || bookEditorialCopyBusyTarget}}"
                     bindtap="regenerateBookChapterEditorialCopy"
                   >
                     重选引语

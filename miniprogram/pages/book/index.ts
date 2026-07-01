@@ -303,9 +303,6 @@ function bookEditorialCopyBlockedMessage(data: BookData): string {
   if (data.hasDraftChanges) {
     return "请先保存当前章节修改，再编辑成书文案";
   }
-  if (data.bookOutput.is_stale) {
-    return "章节内容已更新，请先更新全书再编辑成书文案";
-  }
   return "";
 }
 
