@@ -342,9 +342,9 @@ def _link_change_state(
         if link.status != MemoirChapterSourceLinkStatus.REMOVED.value:
             continue
         removed_link_ids.add(link.utterance_id)
-        if link.merged_draft_version_id == latest_version.id:
-            continue
         if link.removed_at and link.removed_at <= latest_version.created_at:
+            continue
+        if link.merged_draft_version_id == latest_version.id and not link.removed_at:
             continue
         removed_source_ids.add(link.utterance_id)
 
