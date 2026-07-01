@@ -121,6 +121,11 @@ class MemoirVoiceUtteranceResponse(BaseModel):
     end_ms: int | None = None
     provider: str | None = None
     provider_payload_json: dict[str, object] = Field(default_factory=dict)
+    source_material_type: str = ""
+    source_route_action: str = ""
+    source_route_confidence: float | None = None
+    source_route_reason: str = ""
+    source_route_updated_at: datetime | None = None
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)

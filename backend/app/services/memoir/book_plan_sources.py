@@ -27,6 +27,7 @@ from app.services.memoir.book_source_links import (
     chapter_source_change_states_by_chapter,
     plan_source_ref_dicts_by_chapter,
 )
+from app.services.memoir.source_disposition import is_ignored_non_memoir_source
 
 
 PENDING_SOURCE_UTTERANCE_IDS_KEY = "pending_source_utterance_ids"
@@ -61,6 +62,11 @@ class SourceSegment:
     end_ms: int | None
     text: str
     created_at: datetime
+    source_material_type: str
+    source_route_action: str
+    source_route_confidence: float | None
+    source_route_reason: str
+    source_route_updated_at: datetime | None
 
     def ref(self, quote: str = "") -> MemoirBookChapterSourceRef:
         return MemoirBookChapterSourceRef(
@@ -334,6 +340,7 @@ async def source_segments(
     *,
     user_id: str,
     project_id: str,
+    include_ignored: bool = False,
 ) -> list[SourceSegment]:
     await load_memoir_project(db, project_id, user_id)
     result = await db.execute(
@@ -358,6 +365,8 @@ async def source_segments(
         text = display_text(utterance)
         if not text:
             continue
+        if not include_ignored and is_ignored_non_memoir_source(utterance):
+            continue
         segments.append(
             SourceSegment(
                 source_index=len(segments) + 1,
@@ -370,6 +379,11 @@ async def source_segments(
                 end_ms=utterance.end_ms,
                 text=text,
                 created_at=utterance.created_at,
+                source_material_type=utterance.source_material_type,
+                source_route_action=utterance.source_route_action,
+                source_route_confidence=utterance.source_route_confidence,
+                source_route_reason=utterance.source_route_reason,
+                source_route_updated_at=utterance.source_route_updated_at,
             )
         )
     return segments
@@ -420,6 +434,11 @@ def source_coverage_item(
         end_ms=source.end_ms,
         text=source.text,
         created_at=source.created_at,
+        source_material_type=source.source_material_type,
+        source_route_action=source.source_route_action,
+        source_route_confidence=source.source_route_confidence,
+        source_route_reason=source.source_route_reason,
+        source_route_updated_at=source.source_route_updated_at,
         is_included=bool(included),
         included_in_chapters=included,
     )

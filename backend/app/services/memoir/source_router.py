@@ -478,7 +478,7 @@ async def route_book_source(
     if plan.status != MemoirBookPlanStatus.CONFIRMED.value:
         raise HTTPException(status_code=400, detail="请先确认章节规划")
 
-    sources = await source_segments(db, user_id=user_id, project_id=project_id)
+    sources = await source_segments(db, user_id=user_id, project_id=project_id, include_ignored=True)
     source_by_utterance = _source_by_utterance(sources)
     source = source_by_utterance.get(utterance_id)
     if not source:

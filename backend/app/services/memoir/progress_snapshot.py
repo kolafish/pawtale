@@ -36,6 +36,7 @@ from app.services.memoir.book_source_links import (
     plan_source_ref_dicts_by_chapter,
     source_ref_utterance_ids,
 )
+from app.services.memoir.source_disposition import is_countable_source_utterance
 
 
 @dataclass(frozen=True)
@@ -62,7 +63,11 @@ def utterance_text(utterance: MemoirVoiceUtterance) -> str:
 
 
 def visible_utterances(voice_session: MemoirVoiceSession) -> list[MemoirVoiceUtterance]:
-    return [utterance for utterance in voice_session.utterances if utterance_text(utterance)]
+    return [
+        utterance
+        for utterance in voice_session.utterances
+        if is_countable_source_utterance(utterance, utterance_text(utterance))
+    ]
 
 
 def assistant_message_expects_answer(message: MemoirChatMessage) -> bool:

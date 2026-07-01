@@ -606,6 +606,11 @@ class MemoirBookSourceCoverageItem(BaseModel):
     end_ms: int | None = None
     text: str
     created_at: datetime
+    source_material_type: str = ""
+    source_route_action: str = ""
+    source_route_confidence: float | None = None
+    source_route_reason: str = ""
+    source_route_updated_at: datetime | None = None
     is_included: bool = False
     included_in_chapters: list[MemoirBookSourceIncludedChapter] = Field(default_factory=list)
 

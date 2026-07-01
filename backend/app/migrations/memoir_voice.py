@@ -358,6 +358,22 @@ async def migrate_memoir_voice_schema(engine: AsyncEngine) -> dict[str, list[str
         if not await _table_exists(conn, "memoir_transcript_versions"):
             raise RuntimeError("Missing required table: memoir_transcript_versions")
 
+        if await _table_exists(conn, "memoir_voice_utterances"):
+            utterance_columns = await _table_columns(conn, "memoir_voice_utterances")
+            utterance_column_definitions = {
+                "source_material_type": "VARCHAR(40) NOT NULL DEFAULT ''",
+                "source_route_action": "VARCHAR(40) NOT NULL DEFAULT ''",
+                "source_route_confidence": "FLOAT",
+                "source_route_reason": "TEXT NOT NULL DEFAULT ''",
+                "source_route_updated_at": "DATETIME",
+            }
+            for column_name, column_type in utterance_column_definitions.items():
+                if column_name not in utterance_columns:
+                    await conn.execute(
+                        text(f"ALTER TABLE memoir_voice_utterances ADD COLUMN {column_name} {column_type}")
+                    )
+                    changed_columns.append(f"memoir_voice_utterances.{column_name}")
+
         columns = await _table_columns(conn, "memoir_transcript_versions")
         if "voice_session_id" not in columns:
             await conn.execute(

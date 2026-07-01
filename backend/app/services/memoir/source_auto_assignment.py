@@ -10,7 +10,7 @@ from app.domain.memoir.types import (
     MemoirChapterSourceAssignedBy,
     MemoirEditingJobStatus,
 )
-from app.models.memoir import MemoirAutomationEvent, MemoirEditingJob
+from app.models.memoir import MemoirAutomationEvent, MemoirEditingJob, MemoirVoiceSession, MemoirVoiceUtterance
 from app.models.projects import Project
 from app.schemas.memoir_book import (
     MemoirBookPlanResponse,
@@ -29,6 +29,7 @@ from app.services.memoir import source_cards
 from app.services.memoir.chapter_source_links import ChapterSourceAssignmentMetadata
 from app.services.memoir.editing_jobs import EditingJobResult
 from app.services.memoir import source_router
+from app.services.memoir.source_disposition import apply_source_route_disposition
 from app.services.memoir.utterance_editing_pipeline import (
     source_routing_lineage_by_utterance,
     validate_source_routing_transcript_guard,
@@ -131,6 +132,29 @@ def _assignment_link_metadata(
         for route in routes
         if _route_is_assignable(route, threshold=threshold)
     }
+
+
+async def _record_route_dispositions(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    routes: list[MemoirBookSourceRouteResponse],
+) -> None:
+    route_by_utterance = {route.utterance_id: route for route in routes}
+    if not route_by_utterance:
+        return
+    result = await db.execute(
+        select(MemoirVoiceUtterance)
+        .join(MemoirVoiceSession, MemoirVoiceUtterance.voice_session_id == MemoirVoiceSession.id)
+        .where(
+            MemoirVoiceSession.project_id == project_id,
+            MemoirVoiceUtterance.id.in_(list(route_by_utterance)),
+        )
+    )
+    for utterance in result.scalars().all():
+        apply_source_route_disposition(utterance, route_by_utterance[utterance.id])
+        db.add(utterance)
+    await db.flush()
 
 
 async def _record_assignment_events(
@@ -295,6 +319,8 @@ async def run_source_auto_assignment_for_utterances(
             )
         )
 
+    await _record_route_dispositions(db, project_id=project_id, routes=routes)
+
     assignment_inputs = _group_assignment_inputs(routes, threshold=confidence_threshold)
     assigned_ids = {
         utterance_id
@@ -344,6 +370,9 @@ async def run_source_auto_assignment_for_utterances(
                 source_lineage_by_utterance=source_lineage_by_utterance,
             )
         )
+
+    if routes:
+        await db.commit()
 
     items = [
         _auto_assignment_item(
