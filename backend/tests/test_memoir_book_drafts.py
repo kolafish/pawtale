@@ -316,6 +316,95 @@ async def test_mobile_memoir_book_chapter_draft_prompt_uses_source_and_chapter_c
     assert "medium: 剥青豆的细节还可以补充" in prompt
 
 
+async def test_mobile_memoir_book_chapter_event_clustering_uses_source_card_context(
+    client,
+    test_db,
+    monkeypatch,
+):
+    first_text = "小时候在外婆家的院子里晒太阳，午后会看见墙角一排蓝色搪瓷盆。"
+    second_text = "夏天外婆会在院子里晒被子，被子上有淡淡的皂角味。"
+    first = await create_test_voice_transcript(client, test_db, first_text)
+    second = await create_test_voice_transcript(client, test_db, second_text)
+    project_id = first["session"]["project_id"]
+    _, chapter = await create_test_book_plan(
+        test_db,
+        project_id=project_id,
+        source_refs=[memoir_source_ref(first, "外婆家院子"), memoir_source_ref(second, "晒被子")],
+        status=MemoirBookPlanStatus.CONFIRMED,
+    )
+    await upsert_source_card(
+        test_db,
+        project_id=project_id,
+        utterance_id=first["utterance_id"],
+        transcript_version_id=first["transcript_version_id"],
+        source_text_hash=source_text_hash(first_text),
+        engine=SOURCE_CARD_ENGINE,
+        card_json={
+            "summary": "回忆小时候在外婆家院子晒太阳。",
+            "people": ["外婆", "我"],
+            "places": ["外婆家院子"],
+            "time_hints": ["小时候"],
+            "event_tags": ["晒太阳"],
+            "key_facts": [{"text": "院子里晒太阳", "evidence_quote": "院子里晒太阳"}],
+        },
+    )
+    await upsert_source_card(
+        test_db,
+        project_id=project_id,
+        utterance_id=second["utterance_id"],
+        transcript_version_id=second["transcript_version_id"],
+        source_text_hash=source_text_hash(second_text),
+        engine=SOURCE_CARD_ENGINE,
+        card_json={
+            "summary": "讲述外婆夏天在院子里晒被子。",
+            "people": ["外婆"],
+            "places": ["院子"],
+            "time_hints": ["夏天"],
+            "event_tags": ["晒被子"],
+            "key_facts": [{"text": "被子有皂角味", "evidence_quote": "皂角味"}],
+        },
+    )
+    await test_db.commit()
+    fake_ai = FakeBookDraftAI(
+        [
+            json.dumps(
+                {
+                    "clusters": [
+                        {
+                            "title": "外婆家的院子",
+                            "source_ids": [first["utterance_id"], second["utterance_id"]],
+                            "summary": "两条来源都讲外婆家院子里的夏天日常。",
+                        }
+                    ]
+                },
+                ensure_ascii=False,
+            ),
+            "小时候，我常在外婆家的院子里晒太阳，也记得夏天外婆在那里晒被子。",
+        ]
+    )
+    monkeypatch.setattr(
+        "app.services.memoir.book_drafts.get_ai_service",
+        lambda model=None: fake_ai,
+    )
+
+    response = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-plan/chapters/{chapter.id}/draft",
+        json={"force_regenerate": True},
+    )
+
+    assert response.status_code == 200
+    assert len(fake_ai.calls) == 2
+    cluster_prompt = fake_ai.calls[0]["user_prompt"]
+    assert "来源聚类线索" in cluster_prompt
+    assert "source_card_summary: 回忆小时候在外婆家院子晒太阳。" in cluster_prompt
+    assert "source_card_key_facts: ['院子里晒太阳（证据：院子里晒太阳）']" in cluster_prompt
+    assert "transcript:" not in cluster_prompt
+    assert "墙角一排蓝色搪瓷盆" not in cluster_prompt
+    draft_prompt = fake_ai.calls[1]["user_prompt"]
+    assert "transcript:" in draft_prompt
+    assert "墙角一排蓝色搪瓷盆" in draft_prompt
+
+
 async def test_mobile_memoir_book_chapter_draft_regenerate_appends_version_with_feedback(
     client,
     test_db,
