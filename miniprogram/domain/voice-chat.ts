@@ -565,10 +565,6 @@ export interface MemoirBookAudioResponse {
   alignment?: TTSAlignmentSegment[];
 }
 
-export interface MemoirBookVoiceAssistantTTSRequest extends MemoirBookAudioRequest {
-  text: string;
-}
-
 export type MemoirBookVoiceCommandIntent =
   | "read_outline"
   | "read_chapter"

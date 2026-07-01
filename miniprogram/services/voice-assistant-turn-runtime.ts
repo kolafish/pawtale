@@ -7,14 +7,16 @@ import {
   VoiceAssistantTurnStreamClient,
   type PreparedAssistantStreamAudioFrame,
   type VoiceAssistantTurnAudioDoneEvent,
+  type VoiceAssistantTurnCommandPreviewEvent,
   type VoiceAssistantTurnCompletedEvent,
   type VoiceAssistantTurnStartedEvent,
+  type VoiceAssistantTurnStreamStartOptions,
   type VoiceAssistantTurnStreamCallbacks,
   type VoiceAssistantTurnTextDeltaEvent,
 } from "./voice-assistant-turn-stream";
 
 interface VoiceAssistantTurnStreamClientLike {
-  start(options?: { regenerate?: boolean }): Promise<VoiceAssistantTurnCompletedEvent>;
+  start(options?: VoiceAssistantTurnStreamStartOptions): Promise<VoiceAssistantTurnCompletedEvent>;
   cancel(reason?: string): void;
   close(): void;
 }
@@ -33,6 +35,7 @@ export interface VoiceAssistantTurnRuntimeCallbacks {
   onAudioFrame?(frame: PreparedAssistantStreamAudioFrame): void;
   onAudioFrameScheduled?(event: StreamingSpeechPlaybackFrameEvent): void;
   onAudioDrained?(event: VoiceAssistantTurnAudioDoneEvent): void;
+  onCommandPreview?(event: VoiceAssistantTurnCommandPreviewEvent): void;
   onCompleted?(event: VoiceAssistantTurnCompletedEvent): void;
   onPlaybackError?(error: Error): void;
 }
@@ -63,14 +66,14 @@ export class VoiceAssistantTurnRuntime {
     private readonly options: VoiceAssistantTurnRuntimeOptions = {},
   ) {}
 
-  async start(options: { regenerate?: boolean } = {}): Promise<VoiceAssistantTurnRuntimeResult> {
+  async start(options: VoiceAssistantTurnStreamStartOptions = {}): Promise<VoiceAssistantTurnRuntimeResult> {
     this.active = true;
     this.playbackChain = Promise.resolve();
     this.playbackError = null;
     const streamClient = this.createStreamClient();
     this.streamClient = streamClient;
     try {
-      const completed = await streamClient.start({ regenerate: options.regenerate });
+      const completed = await streamClient.start(options);
       if (!this.active) {
         throw new Error("AI 回应已取消");
       }
@@ -140,6 +143,11 @@ export class VoiceAssistantTurnRuntime {
       onAudioDone: (event) => {
         if (this.active) {
           this.finishAudioFrames(event);
+        }
+      },
+      onCommandPreview: (event) => {
+        if (this.active) {
+          this.callbacks.onCommandPreview?.(event);
         }
       },
       onCompleted: (event) => {

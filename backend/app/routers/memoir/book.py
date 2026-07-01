@@ -38,7 +38,6 @@ from app.schemas.memoir_book import (
     MemoirBookSourceRouteResponse,
     MemoirBookTitleSuggestionRequest,
     MemoirBookTitleSuggestionResponse,
-    MemoirBookVoiceAssistantTTSRequest,
     MemoirBookVoiceCommandExecuteRequest,
     MemoirBookVoiceCommandExecuteResponse,
     MemoirBookVoiceCommandParseRequest,
@@ -176,24 +175,6 @@ async def execute_mobile_memoir_book_voice_command(
     current_user: User = Depends(get_current_user),
 ):
     return await memoir_book_voice_commands.execute_book_voice_command(
-        db,
-        user_id=current_user.id,
-        project_id=project_id,
-        req=req,
-    )
-
-
-@router.post(
-    "/projects/{project_id}/book-voice-assistant/tts",
-    response_model=MemoirBookAudioResponse,
-)
-async def create_mobile_memoir_book_voice_assistant_tts(
-    project_id: str,
-    req: MemoirBookVoiceAssistantTTSRequest,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    return await memoir_book_voice_commands.synthesize_book_voice_assistant_audio(
         db,
         user_id=current_user.id,
         project_id=project_id,

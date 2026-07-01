@@ -15,8 +15,6 @@ from app.models.memoir import (
     MemoirBookPlan,
     MemoirBookPlanChapter,
 )
-from app.services.memoir.tts_alignment import TTSAlignmentSegment
-from app.services.memoir.voice_tts import TTSResult
 from tests.memoir_helpers import create_test_voice_transcript, ensure_mobile_memoir_project, memoir_source_ref
 
 
@@ -40,38 +38,6 @@ class FakeBookVoiceCommandAI:
         if self.error:
             raise self.error
         return json.dumps(self.payload, ensure_ascii=False)
-
-
-class FakeBookVoiceAssistantTTS:
-    provider_name = "fake-tts"
-    model_name = "fake-tts-model"
-    default_voice = ""
-
-    def __init__(self):
-        self.calls = []
-
-    async def synthesize(self, text, *, voice=None, speed_ratio=None):
-        self.calls.append({"text": text, "voice": voice, "speed_ratio": speed_ratio})
-        duration_seconds = max(0.2, min(8, len(text)) * 0.08)
-        return TTSResult(
-            audio=b"voice-assistant-audio",
-            mime_type="audio/mpeg",
-            extension=".mp3",
-            provider=self.provider_name,
-            model=self.model_name,
-            voice=voice or self.default_voice,
-            speed_ratio=speed_ratio or 1.0,
-            alignment=[
-                TTSAlignmentSegment(
-                    text=text[:4],
-                    start_ms=0,
-                    end_ms=int(duration_seconds * 1000),
-                    text_start=0,
-                    text_end=min(4, len(text)),
-                )
-            ],
-            duration_seconds=duration_seconds,
-        )
 
 
 async def _create_two_chapter_plan(
@@ -1012,43 +978,3 @@ async def test_mobile_memoir_book_voice_command_clarifies_ai_follow_up_without_r
     assert data["requires_confirmation"] is False
     assert data["operations"] == []
     assert "想改章名、调整顺序" in data["reply_text"]
-
-
-async def test_mobile_memoir_book_voice_assistant_tts_generates_short_reply(
-    client,
-    test_db,
-    tmp_path,
-    monkeypatch,
-):
-    monkeypatch.setattr("app.services.memoir.audio_files.MEMOIR_AUDIO_DIR", tmp_path / "audio")
-    project_id = await ensure_mobile_memoir_project(client)
-    await _create_two_chapter_plan(test_db, project_id=project_id)
-    fake_tts = FakeBookVoiceAssistantTTS()
-    monkeypatch.setattr("app.services.memoir.book_audio.get_tts_client", lambda: fake_tts)
-
-    response = await client.post(
-        f"/api/mobile/memoir/projects/{project_id}/book-voice-assistant/tts",
-        json={"text": "我理解了，请确认后我再改。", "voice": "voice-a", "speed_ratio": 1.2},
-    )
-
-    assert response.status_code == 200
-    data = response.json()
-    assert data["audio_file_ids"]
-    assert data["provider"] == "fake-tts"
-    assert data["model"] == "fake-tts-model"
-    assert data["alignment_provider"] == "fake-tts"
-    assert fake_tts.calls == [
-        {"text": "我理解了，请确认后我再改。", "voice": "voice-a", "speed_ratio": 1.2}
-    ]
-
-
-async def test_mobile_memoir_book_voice_assistant_tts_requires_plan(client):
-    project_id = await ensure_mobile_memoir_project(client)
-
-    response = await client.post(
-        f"/api/mobile/memoir/projects/{project_id}/book-voice-assistant/tts",
-        json={"text": "我先等你生成章节。"},
-    )
-
-    assert response.status_code == 404
-    assert response.json()["detail"] == "章节规划不存在"
