@@ -21,6 +21,9 @@ import type {
   AnalyzeApplyRequest,
   AnalyzeApplyResponse,
   ReferenceType,
+  AuditDashboardFilters,
+  AuditDashboardResponse,
+  AuditUserDayResponse,
 } from '../types';
 import { parseContentDispositionFilename } from '../utils/download';
 
@@ -37,6 +40,14 @@ export const authApi = {
   register: (data: { email: string; password: string; display_name?: string }) =>
     api.post<{ user: User }>('/auth/register', data).then(res => res.data),
   logout: () => api.post('/auth/logout'),
+};
+
+// User audit API
+export const auditApi = {
+  dashboard: (filters: AuditDashboardFilters) =>
+    api.get<AuditDashboardResponse>('/audit/dashboard', { params: filters }).then(r => r.data),
+  userDay: (userId: string, day: string) =>
+    api.get<AuditUserDayResponse>(`/audit/users/${encodeURIComponent(userId)}/days/${day}`).then(r => r.data),
 };
 
 // Projects API

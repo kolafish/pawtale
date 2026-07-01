@@ -1,0 +1,579 @@
+import { useMemo, useState } from 'react';
+import type { ReactNode } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import {
+  Activity,
+  ChevronRight,
+  Clock3,
+  DoorOpen,
+  Eye,
+  Filter,
+  MousePointerClick,
+  RefreshCw,
+  Users,
+  X,
+} from 'lucide-react';
+import { auditApi } from '../../api';
+import type {
+  AuditDashboardFilters,
+  AuditDailyFeatureUsage,
+  AuditDailyUserUsage,
+  AuditPlatform,
+  AuditSession,
+} from '../../types';
+
+const PLATFORM_LABELS: Record<string, string> = {
+  miniprogram: '小程序',
+  web: 'Web',
+};
+
+const EVENT_TYPE_LABELS: Record<string, string> = {
+  page_view: '进入页面',
+  page_leave: '离开页面',
+  feature_start: '开始功能',
+  feature_end: '结束功能',
+  action: '功能动作',
+  heartbeat: '心跳',
+};
+
+const EXIT_REASON_LABELS: Record<string, string> = {
+  app_background: '退到后台',
+  page_unload: '页面卸载',
+  logout: '退出登录',
+  timeout: '超时',
+  navigate: '跳转',
+  unknown: '未知',
+};
+
+function toDateInput(date: Date): string {
+  const localDate = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+  return localDate.toISOString().slice(0, 10);
+}
+
+function defaultDateRange() {
+  const to = new Date();
+  const from = new Date();
+  from.setDate(to.getDate() - 6);
+  return { from: toDateInput(from), to: toDateInput(to) };
+}
+
+function formatDuration(ms: number): string {
+  if (!Number.isFinite(ms) || ms <= 0) return '0 分钟';
+  const totalSeconds = Math.round(ms / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  if (hours > 0) return `${hours} 小时 ${minutes} 分`;
+  if (minutes > 0) return `${minutes} 分 ${seconds} 秒`;
+  return `${seconds} 秒`;
+}
+
+function formatDateTime(value?: string | null): string {
+  if (!value) return '-';
+  return new Date(value).toLocaleString('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function labelOrDash(value?: string | null): string {
+  const trimmed = value?.trim();
+  return trimmed || '-';
+}
+
+function platformLabel(platform: string): string {
+  return PLATFORM_LABELS[platform] || platform || '-';
+}
+
+function exitReasonLabel(reason: string): string {
+  return EXIT_REASON_LABELS[reason] || reason || '-';
+}
+
+function featureDisplay(featureCode: string): string {
+  return featureCode || '未归类功能';
+}
+
+function userDisplay(row: Pick<AuditDailyUserUsage, 'user'> | Pick<AuditDailyFeatureUsage, 'user'>): string {
+  return row.user.display_name || row.user.email;
+}
+
+interface FeatureTotal {
+  key: string;
+  feature_code: string;
+  platform: string;
+  active_ms: number;
+  event_count: number;
+  user_count: number;
+  last_seen_at?: string | null;
+}
+
+function aggregateFeatures(rows: AuditDailyFeatureUsage[]): FeatureTotal[] {
+  const byFeature = new Map<string, FeatureTotal & { userIds: Set<string> }>();
+  for (const row of rows) {
+    const key = `${row.platform}:${row.feature_code}`;
+    const current = byFeature.get(key) ?? {
+      key,
+      feature_code: row.feature_code,
+      platform: row.platform,
+      active_ms: 0,
+      event_count: 0,
+      user_count: 0,
+      last_seen_at: row.last_seen_at,
+      userIds: new Set<string>(),
+    };
+    current.active_ms += row.active_ms;
+    current.event_count += row.event_count;
+    current.userIds.add(row.user.id);
+    if (!current.last_seen_at || (row.last_seen_at && row.last_seen_at > current.last_seen_at)) {
+      current.last_seen_at = row.last_seen_at;
+    }
+    byFeature.set(key, current);
+  }
+  return Array.from(byFeature.values())
+    .map(({ userIds, ...row }) => ({ ...row, user_count: userIds.size }))
+    .sort((a, b) => b.active_ms - a.active_ms || b.event_count - a.event_count)
+    .slice(0, 20);
+}
+
+interface MetricProps {
+  icon: ReactNode;
+  label: string;
+  value: string;
+  subLabel?: string;
+}
+
+function Metric({ icon, label, value, subLabel }: MetricProps) {
+  return (
+    <div className="rounded-lg border border-gray-200 bg-white p-4">
+      <div className="mb-3 flex items-center justify-between text-gray-500">
+        <span className="text-sm">{label}</span>
+        {icon}
+      </div>
+      <div className="text-2xl font-semibold text-gray-900">{value}</div>
+      {subLabel && <div className="mt-1 text-xs text-gray-500">{subLabel}</div>}
+    </div>
+  );
+}
+
+interface SelectedUserDay {
+  userId: string;
+  date: string;
+  name: string;
+}
+
+export function UserAuditDashboard() {
+  const defaultRange = useMemo(() => defaultDateRange(), []);
+  const [fromDate, setFromDate] = useState(defaultRange.from);
+  const [toDate, setToDate] = useState(defaultRange.to);
+  const [platform, setPlatform] = useState<'' | AuditPlatform>('');
+  const [userId, setUserId] = useState('');
+  const [featureCode, setFeatureCode] = useState('');
+  const [selectedDay, setSelectedDay] = useState<SelectedUserDay | null>(null);
+  const invalidRange = Boolean(fromDate && toDate && fromDate > toDate);
+
+  const dashboardFilters = useMemo<AuditDashboardFilters>(() => ({
+    from: fromDate,
+    to: toDate,
+    ...(platform ? { platform } : {}),
+    ...(userId.trim() ? { user_id: userId.trim() } : {}),
+    ...(featureCode.trim() ? { feature_code: featureCode.trim() } : {}),
+  }), [featureCode, fromDate, platform, toDate, userId]);
+
+  const dashboardQuery = useQuery({
+    queryKey: ['audit', 'dashboard', dashboardFilters],
+    queryFn: () => auditApi.dashboard(dashboardFilters),
+    enabled: !invalidRange,
+    staleTime: 30_000,
+  });
+
+  const dayQuery = useQuery({
+    queryKey: ['audit', 'user-day', selectedDay?.userId, selectedDay?.date],
+    queryFn: () => auditApi.userDay(selectedDay?.userId || '', selectedDay?.date || ''),
+    enabled: Boolean(selectedDay),
+    staleTime: 30_000,
+  });
+
+  const dashboard = dashboardQuery.data;
+  const featureTotals = useMemo(
+    () => aggregateFeatures(dashboard?.feature_usage ?? []),
+    [dashboard?.feature_usage],
+  );
+
+  const clearFilters = () => {
+    setFromDate(defaultRange.from);
+    setToDate(defaultRange.to);
+    setPlatform('');
+    setUserId('');
+    setFeatureCode('');
+  };
+
+  const openUserDay = (row: AuditDailyUserUsage) => {
+    setSelectedDay({ userId: row.user.id, date: row.date, name: userDisplay(row) });
+  };
+
+  return (
+    <div className="flex-1 overflow-y-auto bg-gray-50">
+      <div className="mx-auto flex max-w-7xl flex-col gap-5 px-5 py-5">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <h1 className="text-xl font-semibold text-gray-900">用户审计</h1>
+            <p className="mt-1 text-sm text-gray-500">按用户、日期、平台和功能查看使用时长、行为和离开位置。</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => dashboardQuery.refetch()}
+            disabled={dashboardQuery.isFetching || invalidRange}
+            className="inline-flex w-fit items-center gap-2 rounded-md border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 transition-colors hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <RefreshCw size={15} className={dashboardQuery.isFetching ? 'animate-spin' : ''} />
+            刷新
+          </button>
+        </div>
+
+        <section className="rounded-lg border border-gray-200 bg-white p-4">
+          <div className="mb-3 flex items-center gap-2 text-sm font-medium text-gray-700">
+            <Filter size={15} />
+            筛选
+          </div>
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
+            <label className="flex flex-col gap-1 text-sm text-gray-600">
+              <span>开始日期</span>
+              <input
+                type="date"
+                value={fromDate}
+                onChange={(event) => setFromDate(event.target.value)}
+                className="rounded-md border border-gray-200 px-3 py-2 text-gray-900 focus:outline-none focus:ring-2 focus:ring-pink-500"
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-sm text-gray-600">
+              <span>结束日期</span>
+              <input
+                type="date"
+                value={toDate}
+                onChange={(event) => setToDate(event.target.value)}
+                className="rounded-md border border-gray-200 px-3 py-2 text-gray-900 focus:outline-none focus:ring-2 focus:ring-pink-500"
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-sm text-gray-600">
+              <span>平台</span>
+              <select
+                value={platform}
+                onChange={(event) => setPlatform(event.target.value as '' | AuditPlatform)}
+                className="rounded-md border border-gray-200 px-3 py-2 text-gray-900 focus:outline-none focus:ring-2 focus:ring-pink-500"
+              >
+                <option value="">全部</option>
+                <option value="miniprogram">小程序</option>
+                <option value="web">Web</option>
+              </select>
+            </label>
+            <label className="flex flex-col gap-1 text-sm text-gray-600">
+              <span>用户 ID</span>
+              <input
+                value={userId}
+                onChange={(event) => setUserId(event.target.value)}
+                placeholder="按用户精确筛选"
+                className="rounded-md border border-gray-200 px-3 py-2 text-gray-900 focus:outline-none focus:ring-2 focus:ring-pink-500"
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-sm text-gray-600">
+              <span>功能编码</span>
+              <input
+                value={featureCode}
+                onChange={(event) => setFeatureCode(event.target.value)}
+                placeholder="如 voice_chat.start"
+                className="rounded-md border border-gray-200 px-3 py-2 text-gray-900 focus:outline-none focus:ring-2 focus:ring-pink-500"
+              />
+            </label>
+            <div className="flex items-end">
+              <button
+                type="button"
+                onClick={clearFilters}
+                className="inline-flex w-full items-center justify-center gap-2 rounded-md border border-gray-200 px-3 py-2 text-sm text-gray-600 transition-colors hover:bg-gray-50"
+              >
+                <X size={15} />
+                重置
+              </button>
+            </div>
+          </div>
+          {invalidRange && <p className="mt-3 text-sm text-red-600">开始日期不能晚于结束日期。</p>}
+        </section>
+
+        {dashboardQuery.isError && (
+          <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            审计数据加载失败，请确认当前账号有管理员权限。
+          </div>
+        )}
+
+        <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <Metric
+            icon={<Clock3 size={18} />}
+            label="总活跃时长"
+            value={formatDuration(dashboard?.summary.active_ms ?? 0)}
+            subLabel={dashboard?.summary.top_exit_page_path ? `最多离开：${dashboard.summary.top_exit_page_path}` : '暂无离开位置'}
+          />
+          <Metric
+            icon={<Users size={18} />}
+            label="活跃用户"
+            value={`${dashboard?.summary.user_count ?? 0}`}
+            subLabel={`${dashboard?.summary.session_count ?? 0} 个会话`}
+          />
+          <Metric
+            icon={<MousePointerClick size={18} />}
+            label="事件数"
+            value={`${dashboard?.summary.event_count ?? 0}`}
+            subLabel={`${dashboard?.feature_usage.length ?? 0} 条功能明细`}
+          />
+          <Metric
+            icon={<DoorOpen size={18} />}
+            label="最多离开功能"
+            value={dashboard?.summary.top_exit_feature_code || '-'}
+            subLabel="来自每日最后离开位置"
+          />
+        </section>
+
+        <div className="grid gap-5 xl:grid-cols-[minmax(0,1.45fr)_minmax(360px,0.9fr)]">
+          <section className="rounded-lg border border-gray-200 bg-white">
+            <div className="flex items-center justify-between border-b border-gray-100 px-4 py-3">
+              <div>
+                <h2 className="text-base font-semibold text-gray-900">每日用户使用</h2>
+                <p className="mt-0.5 text-xs text-gray-500">按天统计每个用户的活跃时长、会话数和最后离开位置。</p>
+              </div>
+              {dashboardQuery.isFetching && <RefreshCw size={16} className="animate-spin text-gray-400" />}
+            </div>
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-100 text-sm">
+                <thead className="bg-gray-50 text-xs uppercase tracking-wide text-gray-500">
+                  <tr>
+                    <th className="px-4 py-3 text-left font-medium">用户</th>
+                    <th className="px-4 py-3 text-left font-medium">日期</th>
+                    <th className="px-4 py-3 text-left font-medium">平台</th>
+                    <th className="px-4 py-3 text-left font-medium">活跃时长</th>
+                    <th className="px-4 py-3 text-left font-medium">会话/事件</th>
+                    <th className="px-4 py-3 text-left font-medium">最后离开</th>
+                    <th className="px-4 py-3 text-right font-medium">详情</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {(dashboard?.daily_users ?? []).map((row) => (
+                    <tr key={`${row.user.id}:${row.date}:${row.platform}`} className="hover:bg-pink-50/40">
+                      <td className="px-4 py-3">
+                        <div className="font-medium text-gray-900">{userDisplay(row)}</div>
+                        <div className="text-xs text-gray-500">{row.user.email}</div>
+                      </td>
+                      <td className="px-4 py-3 text-gray-700">{row.date}</td>
+                      <td className="px-4 py-3 text-gray-700">{platformLabel(row.platform)}</td>
+                      <td className="px-4 py-3 text-gray-900">{formatDuration(row.active_ms)}</td>
+                      <td className="px-4 py-3 text-gray-700">
+                        {row.session_count} / {row.event_count}
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="max-w-72 truncate text-gray-800">{labelOrDash(row.last_exit_page_path)}</div>
+                        <div className="text-xs text-gray-500">
+                          {labelOrDash(row.last_exit_feature_code)} · {exitReasonLabel(row.last_exit_reason)}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <button
+                          type="button"
+                          onClick={() => openUserDay(row)}
+                          className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-sm text-pink-600 transition-colors hover:bg-pink-50"
+                        >
+                          查看
+                          <ChevronRight size={14} />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                  {!dashboardQuery.isLoading && (dashboard?.daily_users.length ?? 0) === 0 && (
+                    <tr>
+                      <td colSpan={7} className="px-4 py-10 text-center text-gray-500">
+                        当前筛选范围内暂无用户审计数据。
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <div className="flex flex-col gap-5">
+            <section className="rounded-lg border border-gray-200 bg-white">
+              <div className="border-b border-gray-100 px-4 py-3">
+                <h2 className="text-base font-semibold text-gray-900">功能使用排行</h2>
+                <p className="mt-0.5 text-xs text-gray-500">同平台同功能聚合后的活跃时长和事件数。</p>
+              </div>
+              <div className="divide-y divide-gray-100">
+                {featureTotals.map((row) => (
+                  <div key={row.key} className="px-4 py-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="truncate font-medium text-gray-900">{featureDisplay(row.feature_code)}</div>
+                        <div className="mt-1 text-xs text-gray-500">
+                          {platformLabel(row.platform)} · {row.user_count} 位用户 · 最近 {formatDateTime(row.last_seen_at)}
+                        </div>
+                      </div>
+                      <div className="shrink-0 text-right">
+                        <div className="text-sm font-semibold text-gray-900">{formatDuration(row.active_ms)}</div>
+                        <div className="text-xs text-gray-500">{row.event_count} 事件</div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+                {!dashboardQuery.isLoading && featureTotals.length === 0 && (
+                  <div className="px-4 py-8 text-center text-sm text-gray-500">暂无功能使用数据。</div>
+                )}
+              </div>
+            </section>
+
+            <section className="rounded-lg border border-gray-200 bg-white">
+              <div className="border-b border-gray-100 px-4 py-3">
+                <h2 className="text-base font-semibold text-gray-900">离开位置</h2>
+                <p className="mt-0.5 text-xs text-gray-500">按每日最后离开位置聚合。</p>
+              </div>
+              <div className="divide-y divide-gray-100">
+                {(dashboard?.exit_locations ?? []).map((row) => (
+                  <div key={`${row.page_path}:${row.feature_code}:${row.reason}`} className="px-4 py-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="truncate font-medium text-gray-900">{labelOrDash(row.page_path)}</div>
+                        <div className="mt-1 text-xs text-gray-500">
+                          {labelOrDash(row.feature_code)} · {exitReasonLabel(row.reason)}
+                        </div>
+                      </div>
+                      <span className="rounded-md bg-gray-100 px-2 py-1 text-xs font-medium text-gray-700">
+                        {row.count}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+                {!dashboardQuery.isLoading && (dashboard?.exit_locations.length ?? 0) === 0 && (
+                  <div className="px-4 py-8 text-center text-sm text-gray-500">暂无离开位置数据。</div>
+                )}
+              </div>
+            </section>
+          </div>
+        </div>
+
+        {selectedDay && (
+          <section className="rounded-lg border border-gray-200 bg-white">
+            <div className="flex flex-col gap-3 border-b border-gray-100 px-4 py-3 md:flex-row md:items-center md:justify-between">
+              <div>
+                <h2 className="text-base font-semibold text-gray-900">{selectedDay.name} 的当天详情</h2>
+                <p className="mt-0.5 text-xs text-gray-500">{selectedDay.date} 的 session、事件、项目和语音会话线索。</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedDay(null)}
+                className="inline-flex w-fit items-center gap-1 rounded-md px-2 py-1 text-sm text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700"
+              >
+                <X size={14} />
+                关闭
+              </button>
+            </div>
+
+            {dayQuery.isLoading ? (
+              <div className="flex items-center justify-center gap-2 px-4 py-10 text-sm text-gray-500">
+                <RefreshCw size={16} className="animate-spin" />
+                加载当天详情...
+              </div>
+            ) : dayQuery.isError ? (
+              <div className="px-4 py-8 text-sm text-red-600">当天详情加载失败。</div>
+            ) : (
+              <div className="divide-y divide-gray-100">
+                {(dayQuery.data?.sessions ?? []).map((session) => (
+                  <SessionDetail key={session.id} session={session} />
+                ))}
+                {(dayQuery.data?.sessions.length ?? 0) === 0 && (
+                  <div className="px-4 py-8 text-center text-sm text-gray-500">当天没有 session 记录。</div>
+                )}
+              </div>
+            )}
+          </section>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function SessionDetail({ session }: { session: AuditSession }) {
+  const events = [...session.events].sort(
+    (a, b) => new Date(a.occurred_at).getTime() - new Date(b.occurred_at).getTime(),
+  );
+
+  return (
+    <div className="px-4 py-4">
+      <div className="mb-3 grid gap-3 text-sm md:grid-cols-5">
+        <div>
+          <div className="text-xs text-gray-500">平台</div>
+          <div className="font-medium text-gray-900">{platformLabel(session.platform)}</div>
+        </div>
+        <div>
+          <div className="text-xs text-gray-500">开始</div>
+          <div className="font-medium text-gray-900">{formatDateTime(session.started_at)}</div>
+        </div>
+        <div>
+          <div className="text-xs text-gray-500">最后活跃</div>
+          <div className="font-medium text-gray-900">{formatDateTime(session.last_seen_at)}</div>
+        </div>
+        <div>
+          <div className="text-xs text-gray-500">活跃时长</div>
+          <div className="font-medium text-gray-900">{formatDuration(session.active_ms)}</div>
+        </div>
+        <div>
+          <div className="text-xs text-gray-500">离开</div>
+          <div className="truncate font-medium text-gray-900">{labelOrDash(session.exit_page_path)}</div>
+        </div>
+      </div>
+      {(session.app_version || session.device_summary) && (
+        <div className="mb-3 flex flex-wrap gap-2 text-xs text-gray-500">
+          {session.app_version && <span className="rounded-md bg-gray-100 px-2 py-1">版本 {session.app_version}</span>}
+          {session.device_summary && <span className="rounded-md bg-gray-100 px-2 py-1">{session.device_summary}</span>}
+        </div>
+      )}
+      <div className="overflow-x-auto rounded-lg border border-gray-100">
+        <table className="min-w-full divide-y divide-gray-100 text-sm">
+          <thead className="bg-gray-50 text-xs uppercase tracking-wide text-gray-500">
+            <tr>
+              <th className="px-3 py-2 text-left font-medium">时间</th>
+              <th className="px-3 py-2 text-left font-medium">事件</th>
+              <th className="px-3 py-2 text-left font-medium">页面/功能</th>
+              <th className="px-3 py-2 text-left font-medium">时长</th>
+              <th className="px-3 py-2 text-left font-medium">关联</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            {events.map((event) => (
+              <tr key={event.id}>
+                <td className="px-3 py-2 text-gray-700">{formatDateTime(event.occurred_at)}</td>
+                <td className="px-3 py-2">
+                  <span className="inline-flex items-center gap-1 rounded-md bg-gray-100 px-2 py-1 text-xs font-medium text-gray-700">
+                    {event.event_type === 'page_view' ? <Eye size={12} /> : <Activity size={12} />}
+                    {EVENT_TYPE_LABELS[event.event_type] || event.event_type}
+                  </span>
+                </td>
+                <td className="px-3 py-2">
+                  <div className="max-w-80 truncate text-gray-900">{labelOrDash(event.page_path)}</div>
+                  <div className="text-xs text-gray-500">{featureDisplay(event.feature_code)}</div>
+                </td>
+                <td className="px-3 py-2 text-gray-700">{formatDuration(event.active_ms || event.duration_ms)}</td>
+                <td className="px-3 py-2 text-xs text-gray-500">
+                  <div className="max-w-64 truncate">项目：{labelOrDash(event.project_id)}</div>
+                  <div className="max-w-64 truncate">语音：{labelOrDash(event.voice_session_id)}</div>
+                </td>
+              </tr>
+            ))}
+            {events.length === 0 && (
+              <tr>
+                <td colSpan={5} className="px-3 py-6 text-center text-gray-500">
+                  这个 session 没有当天事件。
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
