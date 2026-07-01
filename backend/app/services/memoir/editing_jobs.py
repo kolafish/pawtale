@@ -11,8 +11,25 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.config import get_settings
 from app.database import async_session_maker
-from app.domain.memoir.types import MemoirEditingJobStatus, MemoirEditingJobType
+from app.domain.memoir.types import (
+    MemoirAutomationEventStatus,
+    MemoirAutomationEventType,
+    MemoirEditingJobStatus,
+    MemoirEditingJobType,
+)
 from app.models.memoir import MemoirEditingJob
+from app.services.memoir import automation_events
+from app.services.memoir.automation_event_metadata import (
+    ACKNOWLEDGED_AT_KEY,
+    ACKNOWLEDGED_BY_USER_KEY,
+    EVENT_SIGNATURE_KEY,
+    VOICE_PLAYED_AT_KEY,
+    VOICE_PLAYED_MESSAGE_ID_KEY,
+    VOICE_PLAYED_SESSION_ID_KEY,
+    VOICE_SELECTED_AT_KEY,
+    VOICE_SELECTED_MESSAGE_ID_KEY,
+    VOICE_SELECTED_SESSION_ID_KEY,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -28,10 +45,96 @@ class EditingJobResult:
 
 
 _HANDLERS: dict[MemoirEditingJobType, EditingJobHandler] = {}
+EDITING_JOB_FAILURE_EVENT_SOURCE = "editing_job_failure"
+
+_FAILURE_EVENT_TYPES: dict[MemoirEditingJobType, MemoirAutomationEventType] = {
+    MemoirEditingJobType.ROUTE_SOURCES: MemoirAutomationEventType.SOURCE_HELD,
+    MemoirEditingJobType.REVISE_CHAPTER: MemoirAutomationEventType.CHAPTER_AUTO_REVISED,
+    MemoirEditingJobType.QUALITY_AUDIT: MemoirAutomationEventType.AUDIT_COMPLETED,
+    MemoirEditingJobType.GENERATE_CHAPTER_DRAFT: MemoirAutomationEventType.CHAPTER_DRAFT_GENERATED,
+    MemoirEditingJobType.GENERATE_BOOK_OUTPUT: MemoirAutomationEventType.BOOK_OUTPUT_GENERATED,
+}
+
+_FAILURE_SUMMARIES: dict[MemoirEditingJobType, str] = {
+    MemoirEditingJobType.ROUTE_SOURCES: "自动判断讲述归属失败，稍后会继续重试或可手动整理。",
+    MemoirEditingJobType.REVISE_CHAPTER: "章节自动补写失败，稍后可重试。",
+    MemoirEditingJobType.QUALITY_AUDIT: "章节整理检查失败，稍后可重试。",
+    MemoirEditingJobType.GENERATE_CHAPTER_DRAFT: "章节初稿生成失败，稍后可重试。",
+    MemoirEditingJobType.GENERATE_BOOK_OUTPUT: "全书稿生成失败，稍后可重试。",
+}
 
 
 def _utcnow() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
+
+
+def _compact_error_message(message: str) -> str:
+    return " ".join(str(message or "").split())[:500]
+
+
+def _payload_utterance_ids(payload: dict) -> list[str]:
+    ids: list[str] = []
+    for key in ("utterance_ids", "pending_source_utterance_ids", "removed_source_utterance_ids"):
+        value = payload.get(key)
+        if isinstance(value, list):
+            ids.extend(item for item in value if isinstance(item, str))
+    return list(dict.fromkeys(item.strip() for item in ids if item.strip()))
+
+
+async def _record_job_failure_event(
+    db: AsyncSession,
+    job: MemoirEditingJob,
+    *,
+    error_message: str,
+) -> None:
+    try:
+        job_type = MemoirEditingJobType(job.job_type)
+    except ValueError:
+        return
+    event_type = _FAILURE_EVENT_TYPES.get(job_type)
+    if event_type is None:
+        return
+
+    payload = job.payload_json if isinstance(job.payload_json, dict) else {}
+    error = _compact_error_message(error_message)
+    metadata: dict[str, object] = {
+        "source": EDITING_JOB_FAILURE_EVENT_SOURCE,
+        EVENT_SIGNATURE_KEY: f"editing_job_failed:{job.id}",
+        "editing_job_id": job.id,
+        "job_type": job_type.value,
+        "dedupe_key": job.dedupe_key or "",
+        "attempts": job.attempts,
+        "error_message": error,
+    }
+    payload_source = payload.get("source")
+    if isinstance(payload_source, str) and payload_source.strip():
+        metadata["pipeline_source"] = payload_source.strip()
+
+    event = await automation_events.record_or_update_automation_event(
+        db,
+        project_id=job.project_id,
+        event_type=event_type,
+        status=MemoirAutomationEventStatus.FAILED,
+        chapter_id=job.chapter_id,
+        utterance_ids=_payload_utterance_ids(payload),
+        summary_text=_FAILURE_SUMMARIES[job_type],
+        metadata_json=metadata,
+    )
+    updated_metadata = dict(event.metadata_json or {})
+    for key in (
+        ACKNOWLEDGED_AT_KEY,
+        ACKNOWLEDGED_BY_USER_KEY,
+        VOICE_SELECTED_AT_KEY,
+        VOICE_SELECTED_SESSION_ID_KEY,
+        VOICE_SELECTED_MESSAGE_ID_KEY,
+        VOICE_PLAYED_AT_KEY,
+        VOICE_PLAYED_SESSION_ID_KEY,
+        VOICE_PLAYED_MESSAGE_ID_KEY,
+    ):
+        updated_metadata.pop(key, None)
+    event.metadata_json = updated_metadata
+    db.add(event)
+    await db.flush()
 
 
 def register_editing_job_handler(
@@ -142,6 +245,8 @@ async def _mark_job(
     job.result_json = result_json or {}
     job.error_message = error_message
     db.add(job)
+    if status == MemoirEditingJobStatus.FAILED:
+        await _record_job_failure_event(db, job, error_message=error_message)
     await db.commit()
 
 

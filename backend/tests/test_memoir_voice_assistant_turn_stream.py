@@ -6,6 +6,7 @@ from typing import Any
 from sqlalchemy import func, select
 
 from app.domain.memoir.types import (
+    MemoirAutomationEventStatus,
     MemoirAutomationEventType,
     MemoirChatContentStatus,
     MemoirChatMessageRole,
@@ -362,6 +363,44 @@ async def test_voice_assistant_turn_strips_host_label_after_progress_prefix(
         "那辞职前最早是怎么进入这个行业的？",
     ]
     assert all("小余：" not in chunk for chunk in tts_client.calls[0]["text_chunks"])
+
+
+async def test_voice_assistant_turn_progress_prompt_uses_failed_automation_event(
+    client,
+    test_db,
+):
+    created = await create_test_voice_transcript(
+        client,
+        test_db,
+        text="我小时候常在外婆家院子里摘菜。",
+        guidance_mode="guided_interview",
+        current_guidance_module="family",
+    )
+    event = await automation_events.record_automation_event(
+        test_db,
+        project_id=created["session"]["project_id"],
+        event_type=MemoirAutomationEventType.CHAPTER_AUTO_REVISED,
+        status=MemoirAutomationEventStatus.FAILED,
+        utterance_ids=[created["utterance_id"]],
+        summary_text="章节自动补写失败，稍后可重试。",
+    )
+    await test_db.commit()
+
+    _, ai_client, _, completed = await _run_stream_turn(
+        test_db,
+        voice_session_id=created["session"]["id"],
+        user_id=created["user_id"],
+        chunks=["那我们继续聊外婆家的院子。"],
+    )
+
+    prompt = ai_client.calls[0]["user_prompt"]
+    assert "本轮可选进度鼓励：章节自动补写失败，稍后可重试。" in prompt
+    assert "本轮语音开头会先播报：章节自动补写失败，稍后可重试。" in prompt
+    assert completed["progress_update"]["kind"] == "automation_event_failure"
+    assert completed["progress_update"]["event_ids"] == [event.id]
+    assert completed["progress_update"]["event_status"] == "failed"
+    assert completed["progress_spoken_text"] == "章节自动补写失败，稍后可重试。"
+    assert completed["text"].startswith("章节自动补写失败，稍后可重试。")
 
 
 async def test_voice_assistant_turn_speaks_grouped_source_assignment_progress(
