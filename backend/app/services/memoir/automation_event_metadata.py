@@ -21,11 +21,14 @@ RESOLUTION_KEY = "resolution"
 RESOLUTION_REASON_KEY = "resolution_reason"
 SOURCE_DELETED_REASON = "source_deleted"
 SOURCE_ASSIGNED_REASON = "source_assigned"
+CHAPTER_AUTO_REVISED_REASON = "chapter_auto_revised"
 DELETED_UTTERANCE_IDS_KEY = "deleted_utterance_ids"
 SOURCE_DELETED_AT_KEY = "source_deleted_at"
 RESOLVED_AT_KEY = "resolved_at"
+RESOLVED_BY_EVENT_ID_KEY = "resolved_by_event_id"
 RESOLVED_CHAPTER_ID_KEY = "resolved_chapter_id"
 RESOLVED_CHAPTER_TITLE_KEY = "resolved_chapter_title"
+RESOLVED_RESULT_VERSION_ID_KEY = "resolved_result_version_id"
 RESOLVED_UTTERANCE_IDS_KEY = "resolved_utterance_ids"
 VOICE_SELECTED_AT_KEY = "voice_selected_at"
 VOICE_SELECTED_SESSION_ID_KEY = "voice_selected_session_id"
@@ -218,8 +221,10 @@ def _preserved_metadata(existing: dict) -> dict:
             DELETED_UTTERANCE_IDS_KEY,
             SOURCE_DELETED_AT_KEY,
             RESOLVED_AT_KEY,
+            RESOLVED_BY_EVENT_ID_KEY,
             RESOLVED_CHAPTER_ID_KEY,
             RESOLVED_CHAPTER_TITLE_KEY,
+            RESOLVED_RESULT_VERSION_ID_KEY,
             RESOLVED_UTTERANCE_IDS_KEY,
         )
         if key in existing

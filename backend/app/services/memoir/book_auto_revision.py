@@ -196,7 +196,7 @@ async def run_chapter_revision_job(
             if not removed_source_id_list
             else f"pending={','.join(pending_source_id_list)};removed={','.join(removed_source_id_list)}"
         )
-        await automation_events.record_or_update_automation_event(
+        revision_event = await automation_events.record_or_update_automation_event(
             db,
             project_id=job.project_id,
             event_type=MemoirAutomationEventType.CHAPTER_AUTO_REVISED,
@@ -215,6 +215,13 @@ async def run_chapter_revision_job(
                 "removed_source_utterance_ids": removed_source_id_list,
                 **({"ai_model": model} if model else {}),
             },
+        )
+        await automation_events.resolve_revised_chapter_audit_events(
+            db,
+            project_id=job.project_id,
+            chapter_id=job.chapter_id,
+            revision_event_id=revision_event.id,
+            result_version_id=draft_response.latest_version.id if draft_response.latest_version else "",
         )
         await book_quality_audit.schedule_project_quality_audit(
             db,
