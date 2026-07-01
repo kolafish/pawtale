@@ -1,5 +1,9 @@
 import { readSelectedAIModel } from "./ai-model-settings";
 import { assistantTurnStreamUrl, backendSessionCookieHeader } from "./memoir-voice-api";
+import type {
+  MemoirBookVoiceCommandExecuteResponse,
+  MemoirBookVoiceCommandParseResponse,
+} from "../domain/voice-chat";
 import type { StreamingSpeechPCMFrame } from "./streaming-speech-playback";
 import { readChatTTSSettings } from "./tts-settings";
 
@@ -11,8 +15,13 @@ export interface VoiceAssistantTurnStreamStartOptions {
   aiModel?: string;
   voice?: string;
   speedRatio?: number;
+  extraPayload?: Record<string, unknown>;
   connectTimeoutMs?: number;
   turnActivityTimeoutMs?: number;
+}
+
+export interface VoiceAssistantTurnStreamClientOptions {
+  streamUrl?: string;
 }
 
 export interface VoiceAssistantTurnStartedEvent {
@@ -32,6 +41,7 @@ export interface VoiceAssistantTurnTextDeltaEvent {
   type: "text.delta";
   turn_id: string;
   voice_session_id: string;
+  project_id?: string;
   text_delta: string;
   text: string;
 }
@@ -91,6 +101,18 @@ export interface VoiceAssistantTurnCompletedEvent {
   progress_update?: Record<string, unknown> | null;
   progress_update_used?: boolean;
   progress_voice_selected_event_ids?: string[];
+  command_preview?: MemoirBookVoiceCommandParseResponse | null;
+  execution_result?: MemoirBookVoiceCommandExecuteResponse | null;
+  turn_pipeline?: string;
+}
+
+export interface VoiceAssistantTurnCommandPreviewEvent {
+  type: "command.preview";
+  turn_id: string;
+  voice_session_id: string;
+  project_id: string;
+  command_preview: MemoirBookVoiceCommandParseResponse;
+  execute_after_reply?: boolean;
 }
 
 export interface VoiceAssistantTurnTerminalEvent {
@@ -113,6 +135,7 @@ export interface VoiceAssistantTurnStreamCallbacks {
   onAudioFormat?(event: VoiceAssistantTurnAudioFormatEvent): void;
   onAudioFrame?(frame: PreparedAssistantStreamAudioFrame): void;
   onAudioDone?(event: VoiceAssistantTurnAudioDoneEvent): void;
+  onCommandPreview?(event: VoiceAssistantTurnCommandPreviewEvent): void;
   onCompleted?(event: VoiceAssistantTurnCompletedEvent): void;
   onCancelled?(event: VoiceAssistantTurnTerminalEvent): void;
   onFailed?(event: VoiceAssistantTurnTerminalEvent): void;
@@ -132,6 +155,7 @@ export class VoiceAssistantTurnStreamClient {
   constructor(
     private readonly voiceSessionId: string,
     private readonly callbacks: VoiceAssistantTurnStreamCallbacks = {},
+    private readonly options: VoiceAssistantTurnStreamClientOptions = {},
   ) {}
 
   async start(options: VoiceAssistantTurnStreamStartOptions = {}): Promise<VoiceAssistantTurnCompletedEvent> {
@@ -144,7 +168,7 @@ export class VoiceAssistantTurnStreamClient {
     const connectTimeoutMs = options.connectTimeoutMs ?? SOCKET_CONNECT_TIMEOUT_MS;
     const turnActivityTimeoutMs = options.turnActivityTimeoutMs ?? TURN_ACTIVITY_TIMEOUT_MS;
     const cookie = await backendSessionCookieHeader();
-    const url = assistantTurnStreamUrl(this.voiceSessionId);
+    const url = this.options.streamUrl || assistantTurnStreamUrl(this.voiceSessionId);
     const startPayload = this.startPayload(options);
     const terminalEvent = await new Promise<VoiceAssistantTurnCompletedEvent | VoiceAssistantTurnTerminalEvent>(
       (resolve, reject) => {
@@ -267,6 +291,7 @@ export class VoiceAssistantTurnStreamClient {
     const ttsSettings = readChatTTSSettings();
     const speedRatio = options.speedRatio ?? ttsSettings.speedRatio;
     return {
+      ...(options.extraPayload || {}),
       type: "turn.start",
       ai_model: options.aiModel || readSelectedAIModel(),
       regenerate: options.regenerate || false,
@@ -309,6 +334,10 @@ export class VoiceAssistantTurnStreamClient {
     }
     if (event.type === "audio.done") {
       this.callbacks.onAudioDone?.(event as unknown as VoiceAssistantTurnAudioDoneEvent);
+      return;
+    }
+    if (event.type === "command.preview") {
+      this.callbacks.onCommandPreview?.(event as unknown as VoiceAssistantTurnCommandPreviewEvent);
       return;
     }
     if (event.type === "turn.completed") {

@@ -16,7 +16,7 @@ from app.schemas.memoir_voice import (
 )
 from app.services.memoir import voice_sessions as memoir_voice_sessions
 from app.services.memoir.access import load_memoir_project
-from app.services.memoir.book_voice_assistant_tts_stream import BookVoiceAssistantTTSStreamSession
+from app.services.memoir.book_voice_assistant_turn_stream import BookVoiceAssistantTurnStreamSession
 from app.services.memoir.streaming_asr import create_volc_streaming_asr_client
 from app.services.memoir.voice_assistant_turn_stream import VoiceAssistantTurnStreamSession
 from app.services.memoir.voice_gateway import VoiceGatewaySession
@@ -146,8 +146,8 @@ async def mobile_memoir_book_voice_command_gateway(
         await capacity_lease.release()
 
 
-@router.websocket("/projects/{project_id}/book-voice-assistant/tts-stream")
-async def mobile_memoir_book_voice_assistant_tts_stream(
+@router.websocket("/projects/{project_id}/book-voice-assistant/turn-stream")
+async def mobile_memoir_book_voice_assistant_turn_stream(
     websocket: WebSocket,
     project_id: str,
     db: AsyncSession = Depends(get_db),
@@ -164,8 +164,8 @@ async def mobile_memoir_book_voice_assistant_tts_stream(
         await _reject_websocket(websocket, "memoir_project_unavailable")
         return
 
-    capacity_user_id = f"{current_user_id}:book-voice-assistant-tts"
-    capacity_session_id = f"book-voice-assistant-tts-{project_id}-{uuid.uuid4().hex}"
+    capacity_user_id = f"{current_user_id}:book-voice-assistant-turn"
+    capacity_session_id = f"book-voice-assistant-turn-{project_id}-{uuid.uuid4().hex}"
     try:
         capacity_lease = await voice_gateway_capacity_manager.acquire(capacity_user_id, capacity_session_id)
     except VoiceGatewayCapacityError as exc:
@@ -174,7 +174,7 @@ async def mobile_memoir_book_voice_assistant_tts_stream(
 
     try:
         await websocket.accept()
-        stream_session = BookVoiceAssistantTTSStreamSession(
+        stream_session = BookVoiceAssistantTurnStreamSession(
             db=db,
             client=websocket,
             project_id=project_id,
