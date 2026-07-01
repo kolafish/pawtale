@@ -1,6 +1,9 @@
+from datetime import datetime, timedelta
+
 from sqlalchemy import select
 
 from app.domain.memoir.types import (
+    MemoirAutomationEventStatus,
     MemoirAutomationEventType,
     MemoirBookChapterDraftStatus,
     MemoirChatContentStatus,
@@ -463,6 +466,66 @@ async def test_mobile_memoir_project_progress_snapshot_counts_book_state(client,
     )
     assert hidden_snapshot_response.status_code == 200
     assert hidden_snapshot_response.json()["recent_automation_events"] == []
+
+
+async def test_mobile_memoir_automation_events_prioritize_action_required_items(client, test_db):
+    created = await create_test_voice_transcript(client, test_db, "我小时候住在外婆家。")
+    project_id = created["session"]["project_id"]
+    base_time = datetime(2026, 7, 1, 12, 0, 0)
+    action_events = [
+        (
+            MemoirAutomationEventStatus.PENDING,
+            MemoirAutomationEventType.CHAPTER_DRAFT_GENERATED,
+            "章节初稿正在生成。",
+        ),
+        (
+            MemoirAutomationEventStatus.NEEDS_REVIEW,
+            MemoirAutomationEventType.SOURCE_HELD,
+            "1 条讲述需要确认归属。",
+        ),
+        (
+            MemoirAutomationEventStatus.FAILED,
+            MemoirAutomationEventType.CHAPTER_AUTO_REVISED,
+            "章节自动补写失败，稍后可重试。",
+        ),
+    ]
+    for index, (status, event_type, summary) in enumerate(action_events):
+        event = await automation_events.record_automation_event(
+            test_db,
+            project_id=project_id,
+            event_type=event_type,
+            status=status,
+            utterance_ids=[created["utterance_id"]],
+            summary_text=summary,
+        )
+        event.created_at = base_time + timedelta(minutes=index)
+        event.updated_at = event.created_at
+        test_db.add(event)
+    for index in range(5):
+        event = await automation_events.record_automation_event(
+            test_db,
+            project_id=project_id,
+            event_type=MemoirAutomationEventType.CHAPTER_AUTO_REVISED,
+            status=MemoirAutomationEventStatus.COMPLETED,
+            utterance_ids=[created["utterance_id"]],
+            summary_text=f"较新的完成事件 {index}",
+        )
+        event.created_at = base_time + timedelta(hours=1, minutes=index)
+        event.updated_at = event.created_at
+        test_db.add(event)
+    await test_db.commit()
+
+    response = await client.get(f"/api/mobile/memoir/projects/{project_id}/automation-events?limit=3")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["total"] == 8
+    assert [item["status"] for item in data["items"]] == ["failed", "needs_review", "pending"]
+    assert [item["summary_text"] for item in data["items"]] == [
+        "章节自动补写失败，稍后可重试。",
+        "1 条讲述需要确认归属。",
+        "章节初稿正在生成。",
+    ]
 
 
 async def test_mobile_memoir_assistant_tts_generates_audio_for_follow_up_message(

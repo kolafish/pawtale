@@ -513,6 +513,21 @@ def _visible_events(
     return visible
 
 
+def _action_required_event_priority(event: MemoirAutomationEvent) -> int:
+    status = event.status
+    if status == MemoirAutomationEventStatus.FAILED.value:
+        return 0
+    if status == MemoirAutomationEventStatus.NEEDS_REVIEW.value:
+        return 1
+    if status == MemoirAutomationEventStatus.PENDING.value:
+        return 2
+    return 3
+
+
+def _prioritized_events(events: list[MemoirAutomationEvent]) -> list[MemoirAutomationEvent]:
+    return sorted(events, key=_action_required_event_priority)
+
+
 async def _audit_snapshot_metadata_by_event(
     db: AsyncSession,
     events: list[MemoirAutomationEvent],
@@ -833,6 +848,7 @@ async def list_automation_events(
         include_acknowledged=include_acknowledged,
         voice_unannounced_only=voice_unannounced_only,
     )
+    events = _prioritized_events(events)
     items = events[:limit]
     details_by_event = await _utterance_details_by_event(db, items)
     audit_snapshots_by_event = await _audit_snapshot_metadata_by_event(db, items)
