@@ -129,6 +129,7 @@ async def upsert_chapter_event_cluster_snapshot(
     status: MemoirSemanticCacheStatus | str = MemoirSemanticCacheStatus.READY,
     clusters_json: list | None = None,
     source_ids_json: list[str] | None = None,
+    source_fingerprints_json: dict | None = None,
     error_message: str = "",
 ) -> MemoirChapterEventClusterSnapshot:
     existing = await db.scalar(
@@ -144,6 +145,7 @@ async def upsert_chapter_event_cluster_snapshot(
         existing.status = _status_value(status)
         existing.clusters_json = clusters_json or []
         existing.source_ids_json = source_ids_json or []
+        existing.source_fingerprints_json = source_fingerprints_json or {}
         existing.error_message = error_message
         existing.updated_at = _utcnow()
         db.add(existing)
@@ -159,6 +161,7 @@ async def upsert_chapter_event_cluster_snapshot(
         status=_status_value(status),
         clusters_json=clusters_json or [],
         source_ids_json=source_ids_json or [],
+        source_fingerprints_json=source_fingerprints_json or {},
         error_message=error_message,
     )
     db.add(snapshot)

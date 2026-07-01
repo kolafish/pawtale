@@ -1614,6 +1614,203 @@ async def test_mobile_memoir_book_chapter_draft_reuses_event_cluster_snapshot(
     assert snapshot is not None
     assert snapshot.clusters_json[0]["title"] == "年节团圆"
     assert snapshot.source_ids_json == [first["utterance_id"], second["utterance_id"]]
+    assert snapshot.source_fingerprints_json[first["utterance_id"]]
+    assert snapshot.source_fingerprints_json[second["utterance_id"]]
+
+
+async def test_mobile_memoir_book_chapter_draft_incrementally_clusters_added_source(
+    client,
+    test_db,
+    monkeypatch,
+):
+    first = await create_test_voice_transcript(client, test_db, "岁首一家人围坐吃团圆饭。")
+    second = await create_test_voice_transcript(client, test_db, "初一早上挨家给长辈拜年。")
+    third = await create_test_voice_transcript(client, test_db, "正月里还会去镇上的庙会看灯。")
+    project_id = first["session"]["project_id"]
+    _, chapter = await create_test_book_plan(
+        test_db,
+        project_id=project_id,
+        source_refs=[memoir_source_ref(first, "团圆饭"), memoir_source_ref(second, "拜年")],
+        status=MemoirBookPlanStatus.CONFIRMED,
+    )
+    fake_ai = FakeBookDraftAI(
+        [
+            json.dumps(
+                {
+                    "clusters": [
+                        {
+                            "title": "年节团圆",
+                            "source_ids": [first["utterance_id"], second["utterance_id"]],
+                            "summary": "两条来源都讲春节前后的家庭活动。",
+                        }
+                    ]
+                },
+                ensure_ascii=False,
+            ),
+            "第一版写团圆饭和拜年。",
+            json.dumps(
+                {
+                    "assignments": [
+                        {
+                            "source_id": third["utterance_id"],
+                            "target_cluster_index": 1,
+                            "summary": "春节团圆和拜年延伸到正月庙会。",
+                        }
+                    ]
+                },
+                ensure_ascii=False,
+            ),
+            "第二版写团圆饭、拜年和正月庙会。",
+        ]
+    )
+    monkeypatch.setattr(
+        "app.services.memoir.book_drafts.get_ai_service",
+        lambda model=None: fake_ai,
+    )
+
+    first_response = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-plan/chapters/{chapter.id}/draft",
+        json={"force_regenerate": True},
+    )
+    chapter.source_refs_json = [
+        memoir_source_ref(first, "团圆饭"),
+        memoir_source_ref(second, "拜年"),
+        memoir_source_ref(third, "庙会看灯"),
+    ]
+    await test_db.commit()
+    second_response = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-plan/chapters/{chapter.id}/draft",
+        json={"force_regenerate": True},
+    )
+
+    assert first_response.status_code == 200
+    assert second_response.status_code == 200
+    assert second_response.json()["latest_version"]["content"] == "第二版写团圆饭、拜年和正月庙会。"
+    assert len(fake_ai.calls) == 4
+    assert "请把本章来源讲述记录中讲同一件事" in fake_ai.calls[0]["user_prompt"]
+    incremental_prompt = fake_ai.calls[2]["user_prompt"]
+    assert "已有事件聚合" in incremental_prompt
+    assert "新增来源" in incremental_prompt
+    assert "请把本章来源讲述记录中讲同一件事" not in incremental_prompt
+    draft_prompt = fake_ai.calls[3]["user_prompt"]
+    assert "事件聚合规划" in draft_prompt
+    assert "年节团圆" in draft_prompt
+    assert third["utterance_id"] in draft_prompt
+
+    snapshots = (
+        await test_db.execute(
+            select(MemoirChapterEventClusterSnapshot).where(
+                MemoirChapterEventClusterSnapshot.project_id == project_id,
+                MemoirChapterEventClusterSnapshot.chapter_id == chapter.id,
+            )
+        )
+    ).scalars().all()
+    assert len(snapshots) == 2
+    latest_snapshot = next(
+        snapshot
+        for snapshot in snapshots
+        if snapshot.source_ids_json == [
+            first["utterance_id"],
+            second["utterance_id"],
+            third["utterance_id"],
+        ]
+    )
+    assert latest_snapshot.clusters_json[0]["source_ids"] == [
+        first["utterance_id"],
+        second["utterance_id"],
+        third["utterance_id"],
+    ]
+    assert latest_snapshot.source_fingerprints_json[third["utterance_id"]]
+
+
+async def test_mobile_memoir_book_chapter_draft_prunes_cluster_snapshot_for_removed_source(
+    client,
+    test_db,
+    monkeypatch,
+):
+    first = await create_test_voice_transcript(client, test_db, "小时候除夕要一起贴春联。")
+    second = await create_test_voice_transcript(client, test_db, "初一早上挨家给长辈拜年。")
+    third = await create_test_voice_transcript(client, test_db, "正月里还会去镇上的庙会看灯。")
+    project_id = first["session"]["project_id"]
+    _, chapter = await create_test_book_plan(
+        test_db,
+        project_id=project_id,
+        source_refs=[
+            memoir_source_ref(first, "贴春联"),
+            memoir_source_ref(second, "拜年"),
+            memoir_source_ref(third, "庙会看灯"),
+        ],
+        status=MemoirBookPlanStatus.CONFIRMED,
+    )
+    fake_ai = FakeBookDraftAI(
+        [
+            json.dumps(
+                {
+                    "clusters": [
+                        {
+                            "title": "春节习俗",
+                            "source_ids": [
+                                first["utterance_id"],
+                                second["utterance_id"],
+                                third["utterance_id"],
+                            ],
+                            "summary": "三条来源都讲春节前后的家庭和集镇活动。",
+                        }
+                    ]
+                },
+                ensure_ascii=False,
+            ),
+            "第一版写贴春联、拜年和庙会。",
+            "第二版只写贴春联和庙会。",
+        ]
+    )
+    monkeypatch.setattr(
+        "app.services.memoir.book_drafts.get_ai_service",
+        lambda model=None: fake_ai,
+    )
+
+    first_response = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-plan/chapters/{chapter.id}/draft",
+        json={"force_regenerate": True},
+    )
+    chapter.source_refs_json = [
+        memoir_source_ref(first, "贴春联"),
+        memoir_source_ref(third, "庙会看灯"),
+    ]
+    await test_db.commit()
+    second_response = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-plan/chapters/{chapter.id}/draft",
+        json={"force_regenerate": True},
+    )
+
+    assert first_response.status_code == 200
+    assert second_response.status_code == 200
+    assert second_response.json()["latest_version"]["content"] == "第二版只写贴春联和庙会。"
+    assert len(fake_ai.calls) == 3
+    assert "请把本章来源讲述记录中讲同一件事" in fake_ai.calls[0]["user_prompt"]
+    assert "请把本章来源讲述记录中讲同一件事" not in fake_ai.calls[2]["user_prompt"]
+    assert "事件聚合规划" in fake_ai.calls[2]["user_prompt"]
+    assert second["utterance_id"] not in fake_ai.calls[2]["user_prompt"]
+
+    snapshots = (
+        await test_db.execute(
+            select(MemoirChapterEventClusterSnapshot).where(
+                MemoirChapterEventClusterSnapshot.project_id == project_id,
+                MemoirChapterEventClusterSnapshot.chapter_id == chapter.id,
+            )
+        )
+    ).scalars().all()
+    assert len(snapshots) == 2
+    pruned_snapshot = next(
+        snapshot
+        for snapshot in snapshots
+        if snapshot.source_ids_json == [first["utterance_id"], third["utterance_id"]]
+    )
+    assert pruned_snapshot.clusters_json[0]["source_ids"] == [
+        first["utterance_id"],
+        third["utterance_id"],
+    ]
+    assert second["utterance_id"] not in pruned_snapshot.source_fingerprints_json
 
 
 async def test_mobile_memoir_book_chapter_draft_update_clears_pending_source_state(client, test_db):

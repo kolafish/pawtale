@@ -540,6 +540,7 @@ class MemoirChapterEventClusterSnapshot(Base):
     )
     clusters_json: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
     source_ids_json: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    source_fingerprints_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     error_message: Mapped[str] = mapped_column(Text, default="", nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

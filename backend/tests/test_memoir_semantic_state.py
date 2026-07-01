@@ -60,8 +60,57 @@ async def test_memoir_semantic_migration_creates_missing_tables():
             assert "source_text_hash" in await _table_columns(conn, "memoir_source_cards")
             assert "input_signature" in await _table_columns(conn, "memoir_chapter_cards")
             assert "clusters_json" in await _table_columns(conn, "memoir_chapter_event_cluster_snapshots")
+            assert "source_fingerprints_json" in await _table_columns(
+                conn,
+                "memoir_chapter_event_cluster_snapshots",
+            )
             assert "chapter_audits_json" in await _table_columns(conn, "memoir_book_quality_audit_snapshots")
             assert "assignment_reason" in await _table_columns(conn, "memoir_chapter_source_links")
+    finally:
+        await engine.dispose()
+
+
+async def test_memoir_semantic_migration_adds_cluster_source_fingerprints_column():
+    register_models()
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+            await conn.execute(text("DROP TABLE memoir_chapter_event_cluster_snapshots"))
+            await conn.execute(
+                text(
+                    """
+                    CREATE TABLE memoir_chapter_event_cluster_snapshots (
+                        id VARCHAR(36) PRIMARY KEY,
+                        project_id VARCHAR(36) NOT NULL,
+                        plan_id VARCHAR(36) NOT NULL,
+                        chapter_id VARCHAR(36) NOT NULL,
+                        engine VARCHAR(80) NOT NULL,
+                        input_signature VARCHAR(128) NOT NULL,
+                        status VARCHAR(20) NOT NULL,
+                        clusters_json JSON NOT NULL,
+                        source_ids_json JSON NOT NULL,
+                        error_message TEXT NOT NULL,
+                        created_at DATETIME,
+                        updated_at DATETIME
+                    )
+                    """
+                )
+            )
+
+        result = await migrate_memoir_semantic_schema(engine)
+        second_result = await migrate_memoir_semantic_schema(engine)
+
+        assert result["changed_tables"] == []
+        assert result["changed_columns"] == [
+            "memoir_chapter_event_cluster_snapshots.source_fingerprints_json"
+        ]
+        assert second_result["changed_columns"] == []
+        async with engine.begin() as conn:
+            assert "source_fingerprints_json" in await _table_columns(
+                conn,
+                "memoir_chapter_event_cluster_snapshots",
+            )
     finally:
         await engine.dispose()
 
@@ -264,6 +313,7 @@ async def test_semantic_state_upserts_reuse_signature_rows(test_db):
             }
         ],
         source_ids_json=[utterance.id],
+        source_fingerprints_json={utterance.id: "fingerprint-1"},
     )
     cluster_snapshot_again = await upsert_chapter_event_cluster_snapshot(
         test_db,
@@ -281,6 +331,7 @@ async def test_semantic_state_upserts_reuse_signature_rows(test_db):
             }
         ],
         source_ids_json=[utterance.id],
+        source_fingerprints_json={utterance.id: "fingerprint-2"},
     )
 
     snapshot = await upsert_book_quality_audit_snapshot(
@@ -313,6 +364,7 @@ async def test_semantic_state_upserts_reuse_signature_rows(test_db):
     assert cluster_snapshot_again.id == cluster_snapshot.id
     assert cluster_snapshot_again.status == MemoirSemanticCacheStatus.STALE.value
     assert cluster_snapshot_again.clusters_json[0]["title"] == "更新后的厨房回忆"
+    assert cluster_snapshot_again.source_fingerprints_json == {utterance.id: "fingerprint-2"}
     assert snapshot_again.id == snapshot.id
     assert snapshot_again.overall_status == "healthy"
 
