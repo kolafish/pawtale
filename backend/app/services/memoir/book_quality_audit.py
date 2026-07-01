@@ -62,6 +62,27 @@ VALID_PRIMARY_ACTION_TYPES = {
 logger = logging.getLogger(__name__)
 
 
+def _payload_bool(payload: dict[str, Any], key: str, default: bool) -> bool:
+    value = payload.get(key)
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+    return default
+
+
+def _payload_optional_string(payload: dict[str, Any], key: str) -> str | None:
+    value = payload.get(key)
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    return normalized or None
+
+
 def _utcnow() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
 
@@ -135,16 +156,22 @@ async def schedule_project_quality_audit(
     project_id: str,
     reason: str,
     run_after: datetime | None = None,
+    semantic_audit: bool = True,
+    ai_model: str | None = None,
 ) -> MemoirEditingJob:
     settings = get_settings()
     scheduled_at = run_after or (_utcnow() + timedelta(seconds=max(0, settings.memoir_quality_audit_delay_seconds)))
+    payload_json: dict[str, Any] = {
+        "reason": reason.strip() or "project_updated",
+        "semantic_audit": semantic_audit,
+    }
+    if ai_model:
+        payload_json["ai_model"] = ai_model
     return await enqueue_editing_job(
         db,
         project_id=project_id,
         job_type=MemoirEditingJobType.QUALITY_AUDIT,
-        payload_json={
-            "reason": reason.strip() or "project_updated",
-        },
+        payload_json=payload_json,
         run_after=scheduled_at,
         dedupe_key=f"quality_audit:{project_id}",
         replace_completed=True,
@@ -1001,17 +1028,27 @@ async def run_book_quality_audit_job(db: AsyncSession, job: MemoirEditingJob) ->
     if not project or not project.user_id:
         return EditingJobResult(status=MemoirEditingJobStatus.SKIPPED, error_message="project unavailable")
 
+    payload = job.payload_json or {}
+    semantic_audit = _payload_bool(payload, "semantic_audit", True)
+    ai_model = _payload_optional_string(payload, "ai_model")
     response = await run_book_quality_audit(
         db,
         user_id=project.user_id,
         project_id=job.project_id,
-        req=MemoirBookQualityAuditRunRequest(record_event=True),
+        req=MemoirBookQualityAuditRunRequest(
+            record_event=True,
+            semantic_audit=semantic_audit,
+            ai_model=ai_model,
+        ),
     )
+    event_metadata = response.event.metadata_json if response.event else {}
     return EditingJobResult(
         result_json={
             "overall_status": response.overall_status,
             "summary_text": response.summary_text,
             "event_id": response.event.id if response.event else "",
-            "reason": str((job.payload_json or {}).get("reason") or ""),
+            "reason": str(payload.get("reason") or ""),
+            "semantic_audit": semantic_audit,
+            "snapshot_engine": str(event_metadata.get("snapshot_engine") or ""),
         },
     )
