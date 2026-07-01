@@ -507,6 +507,8 @@ updated_at
 - 候选章节摘要优先使用 chapter card，缺失时 fallback 到旧 digest。
 - 保持现有 confidence threshold 和 hold-for-review 逻辑。
 
+状态：本 PR 完成。
+
 ### 后台编辑优化 PR 4：卡片驱动章节补写和删除素材改稿
 
 目标：章节自动改稿使用 source card/chapter card 的关键事实和缺口，并补上 deletion-only revision。
