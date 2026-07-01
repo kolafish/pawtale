@@ -122,6 +122,45 @@ def _source_card_text(card: ChapterSourceCardContext | None) -> str:
     )
 
 
+def _compact_prompt_text(value: str, *, limit: int = 120) -> str:
+    text = " ".join((value or "").split()).strip()
+    return text[:limit].rstrip()
+
+
+def _cluster_source_card_text(card: ChapterSourceCardContext | None) -> str:
+    if not card:
+        return "source_card: 无"
+    return "\n".join(
+        [
+            f"source_card_id: {card.source_card_id}",
+            f"source_card_summary: {card.summary or '无'}",
+            f"source_card_people: {card.people or []}",
+            f"source_card_places: {card.places or []}",
+            f"source_card_time_hints: {card.time_hints or []}",
+            f"source_card_event_tags: {card.event_tags or []}",
+            f"source_card_key_facts: {card.key_facts or []}",
+        ]
+    )
+
+
+def _cluster_source_block(sources: list[ChapterSourceText]) -> str:
+    return "\n\n".join(
+        (
+            f"source {index}\n"
+            f"source_type: {_change_type_label(source, set())}\n"
+            f"utterance_id: {source.ref.utterance_id}\n"
+            f"{_cluster_source_card_text(source.source_card)}\n"
+            f"quote: {source.ref.quote or '无'}"
+            + (
+                ""
+                if source.source_card
+                else f"\ntranscript_preview: {_compact_prompt_text(source.text, limit=160)}"
+            )
+        )
+        for index, source in enumerate(sources, start=1)
+    )
+
+
 def _source_block(sources: list[ChapterSourceText], pending_ids: set[str]) -> str:
     return "\n\n".join(
         (
@@ -257,8 +296,8 @@ def _build_event_cluster_prompt(
 
 章节标题参考：{chapter.title}
 
-来源讲述记录：
-{_source_block(sources, set())}
+来源聚类线索：
+{_cluster_source_block(sources)}
 
 请输出严格 JSON，不要 Markdown，不要解释。格式：
 {{
