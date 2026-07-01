@@ -195,6 +195,52 @@ async def test_mobile_memoir_book_chapter_draft_generate_uses_chapter_sources(
     assert stored_versions[0].created_by == "ai"
 
 
+async def test_mobile_memoir_book_chapter_draft_falls_back_when_event_clustering_truncates(
+    client,
+    test_db,
+    monkeypatch,
+):
+    first = await create_test_voice_transcript(client, test_db, "我小时候常在外婆家的院子里晒太阳。")
+    second = await create_test_voice_transcript(client, test_db, "夏天外婆会在院子里晒被子。")
+    project_id = first["session"]["project_id"]
+    _, chapter = await create_test_book_plan(
+        test_db,
+        project_id=project_id,
+        source_refs=[memoir_source_ref(first, "院子里晒太阳"), memoir_source_ref(second, "院子里晒被子")],
+        status=MemoirBookPlanStatus.CONFIRMED,
+    )
+    fake_ai = FakeBookDraftAI(
+        [
+            (
+                '{"clusters": [{"title": "院子里的夏天", "source_ids": [',
+                {"choices": [{"finish_reason": "length"}]},
+            ),
+            "我小时候常在外婆家的院子里晒太阳，也记得夏天外婆会在院子里晒被子。",
+        ]
+    )
+    monkeypatch.setattr(
+        "app.services.memoir.book_drafts.get_ai_service",
+        lambda model=None: fake_ai,
+    )
+
+    response = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-plan/chapters/{chapter.id}/draft",
+        json={"force_regenerate": True},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert "晒被子" in data["latest_version"]["content"]
+    assert len(fake_ai.calls) == 2
+    cluster_call = fake_ai.calls[0]
+    assert cluster_call["kwargs"]["return_raw"] is True
+    assert cluster_call["kwargs"]["max_tokens"] >= 1200
+    prompt = fake_ai.calls[1]["user_prompt"]
+    assert "事件聚合规划" in prompt
+    assert "院子里晒太阳" in prompt
+    assert "院子里晒被子" in prompt
+
+
 async def test_mobile_memoir_book_chapter_draft_prompt_uses_source_and_chapter_cards(
     client,
     test_db,
