@@ -19,6 +19,7 @@ class User(Base):
         default=True,
         server_default=text("1"),
     )
+    role: Mapped[str] = mapped_column(String(20), nullable=False, default="user", server_default=text("'user'"))
     display_name: Mapped[str] = mapped_column(String(100), nullable=False)
     avatar_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
