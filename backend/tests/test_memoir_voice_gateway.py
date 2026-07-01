@@ -869,6 +869,16 @@ async def test_voice_transcript_correction_job_updates_saved_raw_turn(
         utterance.id: len("我小时候住在外婆家。"),
     }
     assert result.result_json["route_source_job_id"] == route_job.id
+    source_card_job = await test_db.scalar(
+        select(MemoirEditingJob).where(
+            MemoirEditingJob.job_type == MemoirEditingJobType.GENERATE_SOURCE_CARD.value
+        )
+    )
+    assert source_card_job is not None
+    assert source_card_job.dedupe_key == f"generate_source_card:{utterance.id}"
+    assert source_card_job.payload_json["utterance_id"] == utterance.id
+    assert source_card_job.payload_json["reason"] == "transcript_correction_succeeded"
+    assert result.result_json["source_card_job_id"] == source_card_job.id
 
 
 async def test_voice_transcript_correction_job_does_not_overwrite_user_edit(
@@ -945,6 +955,15 @@ async def test_voice_transcript_correction_job_does_not_overwrite_user_edit(
     assert route_job.payload_json["source_text_hashes"] == {
         utterance.id: source_text_hash("用户自己整理后的文字。"),
     }
+    source_card_job = await test_db.scalar(
+        select(MemoirEditingJob).where(
+            MemoirEditingJob.job_type == MemoirEditingJobType.GENERATE_SOURCE_CARD.value
+        )
+    )
+    assert source_card_job is not None
+    assert source_card_job.dedupe_key == f"generate_source_card:{utterance.id}"
+    assert source_card_job.payload_json["reason"] == "transcript_already_edited"
+    assert result.result_json["source_card_job_id"] == source_card_job.id
 
 
 async def test_voice_gateway_persistence_rejects_audio_stream_over_limit(client, test_db, monkeypatch):

@@ -25,6 +25,7 @@ from app.schemas.memoir_voice import MemoirAutomationEventResponse
 from app.services.memoir import automation_events
 from app.services.memoir import book_quality_audit
 from app.services.memoir import book_plans
+from app.services.memoir import source_cards
 from app.services.memoir.chapter_source_links import ChapterSourceAssignmentMetadata
 from app.services.memoir.editing_jobs import EditingJobResult
 from app.services.memoir import source_router
@@ -295,6 +296,11 @@ async def run_source_auto_assignment_for_utterances(
         )
 
     assignment_inputs = _group_assignment_inputs(routes, threshold=confidence_threshold)
+    assigned_ids = {
+        utterance_id
+        for assignment in assignment_inputs
+        for utterance_id in assignment.utterance_ids
+    }
     if assignment_inputs:
         plan = await book_plans.assign_book_sources_to_chapters(
             db,
@@ -308,6 +314,14 @@ async def run_source_auto_assignment_for_utterances(
             assignment_reason="auto_assignment",
             assignment_metadata_by_utterance=_assignment_link_metadata(routes, threshold=confidence_threshold),
         )
+        for utterance_id in sorted(assigned_ids):
+            await source_cards.schedule_source_card_generation_job(
+                db,
+                project_id=project_id,
+                utterance_id=utterance_id,
+                ai_model=ai_model,
+                reason="source_auto_assigned",
+            )
         events = await _record_assignment_events(
             db,
             project_id=project_id,
@@ -331,11 +345,6 @@ async def run_source_auto_assignment_for_utterances(
             )
         )
 
-    assigned_ids = {
-        utterance_id
-        for assignment in assignment_inputs
-        for utterance_id in assignment.utterance_ids
-    }
     items = [
         _auto_assignment_item(
             route,

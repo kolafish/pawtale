@@ -443,6 +443,15 @@ async def test_mobile_memoir_editing_included_transcript_marks_chapter_for_revis
     assert revision_job.status == MemoirEditingJobStatus.PENDING.value
     assert revision_job.payload_json["base_version_id"] == draft_version_id
     assert revision_job.payload_json["pending_source_utterance_ids"] == [created["utterance_id"]]
+    source_card_job = await test_db.scalar(
+        select(MemoirEditingJob).where(
+            MemoirEditingJob.dedupe_key == f"generate_source_card:{created['utterance_id']}"
+        )
+    )
+    assert source_card_job is not None
+    assert source_card_job.job_type == MemoirEditingJobType.GENERATE_SOURCE_CARD.value
+    assert source_card_job.payload_json["utterance_id"] == created["utterance_id"]
+    assert source_card_job.payload_json["reason"] == "transcript_user_edited"
 
 
 async def test_mobile_memoir_deletes_voice_transcript_and_user_message(client, test_db):
@@ -819,6 +828,16 @@ async def test_mobile_memoir_ai_cleanup_creates_corrected_version(client, test_d
     assert route_job.payload_json[ROUTE_PAYLOAD_TRANSCRIPT_VERSION_IDS_KEY] == {
         created["utterance_id"]: version.id,
     }
+    source_card_job = await test_db.scalar(
+        select(MemoirEditingJob).where(
+            MemoirEditingJob.dedupe_key == f"generate_source_card:{created['utterance_id']}"
+        )
+    )
+    assert source_card_job is not None
+    assert source_card_job.job_type == MemoirEditingJobType.GENERATE_SOURCE_CARD.value
+    assert source_card_job.payload_json["utterance_id"] == created["utterance_id"]
+    assert source_card_job.payload_json["reason"] == "transcript_dialect_corrected"
+    assert source_card_job.payload_json["ai_model"] == "deepseek"
 
 
 async def test_mobile_memoir_voice_edit_preview_uses_ai_without_saving(client, test_db, monkeypatch):

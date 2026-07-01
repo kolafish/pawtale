@@ -16,6 +16,7 @@ from app.models.memoir import MemoirEditingJob, MemoirSourceCard, MemoirTranscri
 from app.services.ai_factory import get_ai_service
 from app.services.ai_types import AITextClient
 from app.services.json_utils import extract_json_payload
+from app.services.memoir.chapter_source_links import bind_source_card_to_active_utterance_links
 from app.services.memoir.editing_jobs import EditingJobResult, enqueue_editing_job
 from app.services.memoir.semantic_state import upsert_source_card
 
@@ -375,6 +376,15 @@ async def run_source_card_generation_job(db: AsyncSession, job: MemoirEditingJob
         if exc.status_code in {400, 404}:
             return EditingJobResult(status=MemoirEditingJobStatus.SKIPPED, error_message=str(exc.detail))
         raise
+    linked_source_count = 0
+    if card.status == MemoirSemanticCacheStatus.READY.value:
+        linked_source_count = await bind_source_card_to_active_utterance_links(
+            db,
+            project_id=job.project_id,
+            utterance_id=utterance_id,
+            source_card_id=card.id,
+            transcript_version_id=card.transcript_version_id,
+        )
     return EditingJobResult(
         result_json={
             "source_card_id": card.id,
@@ -382,5 +392,6 @@ async def run_source_card_generation_job(db: AsyncSession, job: MemoirEditingJob
             "source_text_hash": card.source_text_hash,
             "status": card.status,
             "error_message": card.error_message,
+            "linked_source_count": linked_source_count,
         }
     )

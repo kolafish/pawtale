@@ -214,6 +214,18 @@ async def test_source_auto_assignment_assigns_high_confidence_source_and_records
     assert job.status == MemoirEditingJobStatus.PENDING.value
     assert job.payload_json["pending_source_utterance_ids"] == [uncovered["utterance_id"]]
     assert job.payload_json["ai_model"] == "deepseek-v4-pro"
+    source_card_job = await test_db.scalar(
+        select(MemoirEditingJob).where(
+            MemoirEditingJob.project_id == project_id,
+            MemoirEditingJob.job_type == MemoirEditingJobType.GENERATE_SOURCE_CARD.value,
+            MemoirEditingJob.dedupe_key == f"generate_source_card:{uncovered['utterance_id']}",
+        )
+    )
+    assert source_card_job is not None
+    assert source_card_job.status == MemoirEditingJobStatus.PENDING.value
+    assert source_card_job.payload_json["utterance_id"] == uncovered["utterance_id"]
+    assert source_card_job.payload_json["reason"] == "source_auto_assigned"
+    assert source_card_job.payload_json["ai_model"] == "deepseek-v4-pro"
 
 
 async def test_source_routing_job_assigns_high_confidence_source(client, test_db, monkeypatch):
@@ -285,6 +297,17 @@ async def test_source_routing_job_assigns_high_confidence_source(client, test_db
     assert audit_job.status == MemoirEditingJobStatus.PENDING.value
     assert audit_job.dedupe_key == f"quality_audit:{project_id}"
     assert audit_job.payload_json["reason"] == "source_routing_completed"
+    source_card_job = await test_db.scalar(
+        select(MemoirEditingJob).where(
+            MemoirEditingJob.project_id == project_id,
+            MemoirEditingJob.job_type == MemoirEditingJobType.GENERATE_SOURCE_CARD.value,
+            MemoirEditingJob.dedupe_key == f"generate_source_card:{uncovered['utterance_id']}",
+        )
+    )
+    assert source_card_job is not None
+    assert source_card_job.status == MemoirEditingJobStatus.PENDING.value
+    assert source_card_job.payload_json["reason"] == "source_auto_assigned"
+    assert source_card_job.payload_json["ai_model"] == "deepseek-v4-pro"
 
 
 async def test_source_routing_job_skips_when_transcript_guard_is_missing(client, test_db):

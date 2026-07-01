@@ -379,9 +379,43 @@ async def update_utterance_link_ref_fields(
             changed = True
         if changed:
             link.merged_draft_version_id = None
+            link.source_card_id = None
             link.updated_at = now
             db.add(link)
             updated_count += 1
+    if updated_count:
+        await db.flush()
+    return updated_count
+
+
+async def bind_source_card_to_active_utterance_links(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    utterance_id: str,
+    source_card_id: str,
+    transcript_version_id: str | None,
+) -> int:
+    links = (
+        await db.execute(
+            select(MemoirChapterSourceLink).where(
+                MemoirChapterSourceLink.project_id == project_id,
+                MemoirChapterSourceLink.utterance_id == utterance_id,
+                MemoirChapterSourceLink.status == MemoirChapterSourceLinkStatus.ACTIVE.value,
+            )
+        )
+    ).scalars().all()
+    updated_count = 0
+    now = _utcnow()
+    for link in links:
+        if link.transcript_version_id and link.transcript_version_id != transcript_version_id:
+            continue
+        if link.source_card_id == source_card_id:
+            continue
+        link.source_card_id = source_card_id
+        link.updated_at = now
+        db.add(link)
+        updated_count += 1
     if updated_count:
         await db.flush()
     return updated_count

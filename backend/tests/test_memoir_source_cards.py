@@ -5,12 +5,22 @@ import json
 from sqlalchemy import func, select
 
 from app.domain.memoir.types import (
+    MemoirBookPlanStatus,
+    MemoirChapterSourceLinkStatus,
     MemoirEditingJobStatus,
     MemoirEditingJobType,
     MemoirGuidanceMode,
     MemoirSemanticCacheStatus,
 )
-from app.models.memoir import MemoirEditingJob, MemoirSourceCard, MemoirVoiceSession, MemoirVoiceUtterance
+from app.models.memoir import (
+    MemoirBookPlan,
+    MemoirBookPlanChapter,
+    MemoirChapterSourceLink,
+    MemoirEditingJob,
+    MemoirSourceCard,
+    MemoirVoiceSession,
+    MemoirVoiceUtterance,
+)
 from app.models.projects import Project
 from app.services.memoir.editing_jobs import run_editing_job
 from app.services.memoir.editing_job_handlers import register_memoir_editing_job_handlers
@@ -246,7 +256,65 @@ async def test_source_card_generation_job_schedules_deduped_work(test_db, monkey
     assert job is not None
     assert job.status == MemoirEditingJobStatus.SUCCEEDED.value
     assert job.result_json["status"] == MemoirSemanticCacheStatus.READY.value
+    assert job.result_json["linked_source_count"] == 0
     assert await test_db.scalar(select(func.count()).select_from(MemoirSourceCard)) == 1
+
+
+async def test_source_card_generation_job_binds_active_chapter_source_links(test_db, monkeypatch):
+    project, utterance = await _create_utterance(test_db, text="小时候常在外婆家厨房帮忙。")
+    plan = MemoirBookPlan(
+        project_id=project.id,
+        title="童年",
+        status=MemoirBookPlanStatus.CONFIRMED.value,
+    )
+    test_db.add(plan)
+    await test_db.flush()
+    chapter = MemoirBookPlanChapter(
+        project_id=project.id,
+        plan_id=plan.id,
+        title="外婆家的童年",
+        sort_order=0,
+    )
+    test_db.add(chapter)
+    await test_db.flush()
+    link = MemoirChapterSourceLink(
+        project_id=project.id,
+        plan_id=plan.id,
+        chapter_id=chapter.id,
+        utterance_id=utterance.id,
+        status=MemoirChapterSourceLinkStatus.ACTIVE.value,
+    )
+    test_db.add(link)
+    job = await schedule_source_card_generation_job(
+        test_db,
+        project_id=project.id,
+        utterance_id=utterance.id,
+        reason="source_auto_assigned",
+    )
+    await test_db.commit()
+
+    async def fake_generate_or_reuse_source_card(db, *, project_id, utterance_id, ai_model=None):
+        return await generate_or_reuse_source_card(
+            db,
+            project_id=project_id,
+            utterance_id=utterance_id,
+            ai_client=FakeSourceCardAI(),
+        )
+
+    monkeypatch.setattr(
+        "app.services.memoir.source_cards.generate_or_reuse_source_card",
+        fake_generate_or_reuse_source_card,
+    )
+    register_memoir_editing_job_handlers()
+    assert await run_editing_job(test_db, job.id)
+
+    await test_db.refresh(job)
+    await test_db.refresh(link)
+    card = await test_db.scalar(select(MemoirSourceCard).where(MemoirSourceCard.utterance_id == utterance.id))
+    assert card is not None
+    assert link.source_card_id == card.id
+    assert job.result_json["source_card_id"] == card.id
+    assert job.result_json["linked_source_count"] == 1
 
 
 def test_source_card_payload_falls_back_to_real_quote_when_ai_omits_valid_evidence():

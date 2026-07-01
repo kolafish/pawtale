@@ -495,6 +495,8 @@ updated_at
 - source card ready 后回填 active `MemoirChapterSourceLink.source_card_id`。
 - 不要求 source card 成功才能归章、补写或用户编辑。
 
+状态：本 PR 完成。
+
 ### 后台编辑优化 PR 3：卡片驱动自动归章
 
 目标：自动归章时优先使用 source card 和 chapter card 的结构化语义，提高路由稳定性。
