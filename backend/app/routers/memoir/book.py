@@ -597,6 +597,24 @@ async def regenerate_mobile_memoir_book_output_editorial_copy(
     )
 
 
+@router.post(
+    "/projects/{project_id}/book-output/editorial-copy/regenerate/jobs",
+    response_model=MemoirAutomationEventResponse,
+)
+async def enqueue_mobile_memoir_book_output_editorial_copy_generation(
+    project_id: str,
+    req: MemoirBookOutputEditorialCopyRegenerateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await memoir_book_generation_jobs.enqueue_book_editorial_copy_generation_job(
+        db,
+        user_id=current_user.id,
+        project_id=project_id,
+        req=req,
+    )
+
+
 @router.patch(
     "/projects/{project_id}/book-output/chapters/{chapter_id}/editorial-copy",
     response_model=MemoirBookOutputResponse,

@@ -18,13 +18,17 @@ from app.domain.memoir.types import (
 )
 from app.models.memoir import MemoirAutomationEvent, MemoirBookPlan, MemoirBookPlanChapter, MemoirEditingJob
 from app.models.projects import Project
-from app.schemas.memoir_book import MemoirBookChapterDraftGenerateRequest, MemoirBookOutputGenerateRequest
+from app.schemas.memoir_book import (
+    MemoirBookChapterDraftGenerateRequest,
+    MemoirBookOutputEditorialCopyRegenerateRequest,
+    MemoirBookOutputGenerateRequest,
+)
 from app.schemas.memoir_voice import MemoirAutomationEventResponse
 from app.services.ai_types import AITextClient
 from app.services.memoir import automation_events
 from app.services.memoir.access import load_memoir_project
 from app.services.memoir.book_drafts import generate_chapter_draft
-from app.services.memoir.book_outputs import generate_book_output
+from app.services.memoir.book_outputs import generate_book_output, regenerate_book_output_editorial_copy
 from app.services.memoir.editing_jobs import EditingJobResult, enqueue_editing_job
 
 
@@ -51,6 +55,31 @@ def _request_payload(req: object) -> dict:
     if callable(model_dump):
         return model_dump(exclude_unset=True, exclude_none=True)
     return {}
+
+
+def _editorial_copy_label(req: MemoirBookOutputEditorialCopyRegenerateRequest) -> str:
+    labels = {
+        "preface": "前言",
+        "afterword": "后记",
+        "back_cover_quote": "封底摘录",
+        "chapter_intros": "章节导语",
+        "pull_quotes": "章首引语",
+    }
+    targets = [target for target in req.targets if target in labels]
+    if len(targets) == 1:
+        return labels[targets[0]]
+    if len(targets) > 1:
+        return "、".join(labels[target] for target in targets)
+    return "成书文案"
+
+
+def _editorial_copy_dedupe_key(
+    project_id: str,
+    req: MemoirBookOutputEditorialCopyRegenerateRequest,
+) -> str:
+    target_key = ",".join(sorted(req.targets)) or "all"
+    chapter_key = ",".join(sorted(req.chapter_ids)) or "book"
+    return f"generate_book_editorial_copy:{project_id}:{target_key}:{chapter_key}"
 
 
 async def _existing_active_generation_job(
@@ -267,6 +296,45 @@ async def enqueue_book_output_generation_job(
     return automation_events.event_response(event)
 
 
+async def enqueue_book_editorial_copy_generation_job(
+    db: AsyncSession,
+    *,
+    user_id: str,
+    project_id: str,
+    req: MemoirBookOutputEditorialCopyRegenerateRequest,
+) -> MemoirAutomationEventResponse:
+    await load_memoir_project(db, project_id, user_id)
+    request_id = str(uuid4())
+    label = _editorial_copy_label(req)
+    job = await _enqueue_generation_job(
+        db,
+        project_id=project_id,
+        chapter_id=None,
+        job_type=MemoirEditingJobType.GENERATE_BOOK_EDITORIAL_COPY,
+        dedupe_key=_editorial_copy_dedupe_key(project_id, req),
+        payload_json={
+            "request_id": request_id,
+            "user_id": user_id,
+            "request": _request_payload(req),
+            "target_label": label,
+        },
+    )
+    event = await _ensure_generation_event(
+        db,
+        job=job,
+        event_type=MemoirAutomationEventType.BOOK_EDITORIAL_COPY_GENERATED,
+        summary_text=f"{label}已提交后台重生成。",
+        metadata_json={
+            "request_id": _safe_str((job.payload_json or {}).get("request_id")) or request_id,
+            "targets": list(req.targets),
+            "chapter_ids": list(req.chapter_ids),
+            "target_label": label,
+        },
+    )
+    await db.commit()
+    return automation_events.event_response(event)
+
+
 def _job_request_payload(job: MemoirEditingJob) -> dict:
     request = (job.payload_json or {}).get("request")
     return request if isinstance(request, dict) else {}
@@ -464,5 +532,85 @@ async def run_book_output_generation_job(
             job=job,
             event_type=MemoirAutomationEventType.BOOK_OUTPUT_GENERATED,
             summary_text="全书后台生成失败。",
+            error_message=str(exc),
+        )
+
+
+async def run_book_editorial_copy_generation_job(
+    db: AsyncSession,
+    job: MemoirEditingJob,
+) -> EditingJobResult:
+    job_id = job.id
+    payload = dict(job.payload_json or {})
+    label = _safe_str(payload.get("target_label")) or "成书文案"
+    try:
+        project = await db.get(Project, job.project_id)
+        user_id = _safe_str(payload.get("user_id")) or (project.user_id if project else "")
+        if not project or not user_id:
+            return await _failed_result(
+                db,
+                job=job,
+                event_type=MemoirAutomationEventType.BOOK_EDITORIAL_COPY_GENERATED,
+                summary_text=f"{label}后台重生成失败。",
+                error_message="project unavailable",
+            )
+        req = MemoirBookOutputEditorialCopyRegenerateRequest(**_job_request_payload(job))
+        label = _editorial_copy_label(req)
+        output = await regenerate_book_output_editorial_copy(
+            db,
+            user_id=user_id,
+            project_id=job.project_id,
+            req=req,
+        )
+        latest_version = output.latest_version
+        await _update_generation_event(
+            db,
+            job=job,
+            event_type=MemoirAutomationEventType.BOOK_EDITORIAL_COPY_GENERATED,
+            status=MemoirAutomationEventStatus.COMPLETED,
+            summary_text=f"{label}已重生成，可以预览或导出。",
+            metadata_json={
+                "result_version_id": latest_version.id if latest_version else "",
+                "book_title": output.title,
+                "targets": list(req.targets),
+                "chapter_ids": list(req.chapter_ids),
+                "target_label": label,
+            },
+        )
+        return EditingJobResult(
+            result_json={
+                "result_version_id": latest_version.id if latest_version else "",
+                "completed_at": _utcnow().isoformat(),
+            },
+        )
+    except HTTPException as exc:
+        await db.rollback()
+        job = await db.get(MemoirEditingJob, job_id) or job
+        return await _failed_result(
+            db,
+            job=job,
+            event_type=MemoirAutomationEventType.BOOK_EDITORIAL_COPY_GENERATED,
+            summary_text=f"{label}后台重生成失败。",
+            error_message=str(exc.detail),
+        )
+    except ValidationError as exc:
+        await db.rollback()
+        job = await db.get(MemoirEditingJob, job_id) or job
+        return await _failed_result(
+            db,
+            job=job,
+            event_type=MemoirAutomationEventType.BOOK_EDITORIAL_COPY_GENERATED,
+            summary_text=f"{label}后台重生成失败。",
+            error_message=str(exc),
+        )
+    except Exception as exc:
+        await db.rollback()
+        logger.exception("memoir book editorial copy generation job failed job_id=%s", job_id)
+        job = await db.get(MemoirEditingJob, job_id) or job
+        return await _failed_result(
+            db,
+            job=job,
+            event_type=MemoirAutomationEventType.BOOK_EDITORIAL_COPY_GENERATED,
+            summary_text=f"{label}后台重生成失败。",
             error_message=str(exc),
         )

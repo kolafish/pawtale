@@ -813,6 +813,9 @@ function loadBookPage({
     enqueueMemoirBookOutputGeneration: async () => {
       throw new Error("enqueueMemoirBookOutputGeneration was not mocked");
     },
+    enqueueMemoirBookOutputEditorialCopyGeneration: async () => {
+      throw new Error("enqueueMemoirBookOutputEditorialCopyGeneration was not mocked");
+    },
     executeMemoirBookVoiceCommand: async () => {
       throw new Error("executeMemoirBookVoiceCommand was not mocked");
     },
@@ -1062,11 +1065,16 @@ test("book page exposes manuscript structure sections", () => {
   assert.equal(bookEditorialButtons.length, 3);
   bookEditorialButtons.forEach((button) => {
     assert.doesNotMatch(button, /bookStaleNotice/);
+    assert.doesNotMatch(button, /\|\| bookEditorialCopyBusyTarget \|\|/);
   });
+  assert.match(wxml, /bookEditorialCopyBusyTarget === 'preface'/);
+  assert.match(wxml, /bookEditorialCopyBusyTarget === 'afterword'/);
+  assert.match(wxml, /bookEditorialCopyBusyTarget === 'back_cover_quote'/);
   const chapterEditorialButtons = wxml.match(/<button(?=[^>]*bindtap="regenerateBookChapterEditorialCopy")[^>]*>/g) || [];
   assert.equal(chapterEditorialButtons.length, 2);
   chapterEditorialButtons.forEach((button) => {
     assert.doesNotMatch(button, /bookStaleNotice/);
+    assert.doesNotMatch(button, /\|\| bookEditorialCopyBusyTarget}}/);
   });
   assert.match(wxml, /<\/view>\s*<view class="book-manuscript-chapter-actions">/);
   assert.match(wxml, /bindchange="changeBookCoverStyle"/);
@@ -2476,7 +2484,7 @@ test("book page suggests and autosaves full-book title plus cover style", async 
   delete global.wx;
 });
 
-test("book page regenerates full-book and chapter editorial copy", async () => {
+test("book page submits full-book and chapter editorial copy regeneration jobs", async () => {
   const calls = [];
   const toastTitles = [];
   global.wx = {
@@ -2486,22 +2494,14 @@ test("book page regenerates full-book and chapter editorial copy", async () => {
   };
   const { page } = loadBookPage({
     voiceApiExports: {
-      regenerateMemoirBookOutputEditorialCopy: async (projectId, data) => {
+      enqueueMemoirBookOutputEditorialCopyGeneration: async (projectId, data) => {
         calls.push({ projectId, data });
-        const manuscript = sampleBookManuscript();
-        if ((data.targets || []).includes("preface")) {
-          manuscript.front_matter = manuscript.front_matter.map((section) => (
-            section.kind === "preface"
-              ? { ...section, content: "这些讲述来自家里一次次慢慢说起的记忆。" }
-              : section
-          ));
-        }
-        if ((data.targets || []).includes("pull_quotes")) {
-          manuscript.chapters[0].pull_quotes = [
-            { text: "那时候院子里总是很亮。", source_ref_ids: ["utterance-1"], source: "original_quote" },
-          ];
-        }
-        return sampleBookOutput(2, "全书正文", false, [], null, [], manuscript);
+        return sampleAutomationEvent({
+          id: `event-editorial-${calls.length}`,
+          event_type: "book_editorial_copy_generated",
+          chapter_id: null,
+          summary_text: "成书文案已提交后台重生成。",
+        });
       },
     },
   });
@@ -2515,7 +2515,6 @@ test("book page regenerates full-book and chapter editorial copy", async () => {
   await page.regenerateBookEditorialCopy.call(context, {
     currentTarget: { dataset: { target: "preface" } },
   });
-  assert.equal(context.data.bookPrefaceInput, "这些讲述来自家里一次次慢慢说起的记忆。");
 
   page.applyBookOutput.call(
     context,
@@ -2533,9 +2532,13 @@ test("book page regenerates full-book and chapter editorial copy", async () => {
     projectId: "project/1",
     data: { targets: ["pull_quotes"], chapter_ids: ["chapter-1"] },
   });
-  assert.equal(context.data.bookManuscriptChapterItems[0].quoteText, "那时候院子里总是很亮。");
+  assert.deepEqual(
+    context.automationEvents.map((item) => item.id),
+    ["event-editorial-2", "event-editorial-1"],
+  );
+  assert.equal(context.data.automationEventItems[0].titleText, "文案生成中");
   assert.equal(context.data.bookEditorialCopyBusyTarget, "");
-  assert.deepEqual(toastTitles, ["已生成", "已生成"]);
+  assert.deepEqual(toastTitles, ["已后台生成", "已后台生成"]);
   delete global.wx;
 });
 
@@ -3919,6 +3922,19 @@ test("book APIs call encoded backend routes", async () => {
         options.success({ statusCode: 200, data: { suggestions: ["外婆慢慢说"] }, cookies: [], header: {} });
         return;
       }
+      if (options.url.endsWith("/book-output/editorial-copy/regenerate/jobs")) {
+        options.success({
+          statusCode: 200,
+          data: sampleAutomationEvent({
+            event_type: "book_editorial_copy_generated",
+            chapter_id: null,
+            summary_text: "成书文案已提交后台重生成。",
+          }),
+          cookies: [],
+          header: {},
+        });
+        return;
+      }
       if (
         options.url.endsWith("/book-output/editorial-copy/regenerate")
         || options.url.includes("/book-output/chapters/")
@@ -3960,6 +3976,7 @@ test("book APIs call encoded backend routes", async () => {
     createMemoirBookOutputTTS,
     createMemoirBookPlanOutlineTTS,
     enqueueMemoirBookChapterDraftGeneration,
+    enqueueMemoirBookOutputEditorialCopyGeneration,
     enqueueMemoirBookOutputGeneration,
     generateMemoirBookChapterDraft,
     generateMemoirBookChapterTitle,
@@ -4010,6 +4027,11 @@ test("book APIs call encoded backend routes", async () => {
   await createMemoirBookOutputTTS("project/1", {});
   await enqueueMemoirBookChapterDraftGeneration("project/1", "chapter/1", { force_regenerate: true });
   await enqueueMemoirBookOutputGeneration("project/1", { force_regenerate: true });
+  await enqueueMemoirBookOutputEditorialCopyGeneration("project/1", {
+    targets: ["preface"],
+    chapter_ids: ["chapter/1"],
+    feedback: "更自然",
+  });
   await regenerateMemoirBookOutputEditorialCopy("project/1", {
     targets: ["preface"],
     chapter_ids: ["chapter/1"],
@@ -4142,7 +4164,7 @@ test("book APIs call encoded backend routes", async () => {
   });
   assert.equal(
     apiRequests[22].url,
-    "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-output/editorial-copy/regenerate",
+    "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-output/editorial-copy/regenerate/jobs",
   );
   assert.equal(apiRequests[22].method, "POST");
   assert.deepEqual(apiRequests[22].data, {
@@ -4151,13 +4173,24 @@ test("book APIs call encoded backend routes", async () => {
     feedback: "更自然",
     ai_model: "doubao-seed-2-0-pro-260215",
   });
-  assert.equal(apiRequests[22].timeout, 60000);
   assert.equal(
     apiRequests[23].url,
+    "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-output/editorial-copy/regenerate",
+  );
+  assert.equal(apiRequests[23].method, "POST");
+  assert.deepEqual(apiRequests[23].data, {
+    targets: ["preface"],
+    chapter_ids: ["chapter/1"],
+    feedback: "更自然",
+    ai_model: "doubao-seed-2-0-pro-260215",
+  });
+  assert.equal(apiRequests[23].timeout, 60000);
+  assert.equal(
+    apiRequests[24].url,
     "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-output/chapters/chapter%2F1/editorial-copy",
   );
-  assert.equal(apiRequests[23].method, "PATCH");
-  assert.deepEqual(apiRequests[23].data, {
+  assert.equal(apiRequests[24].method, "PATCH");
+  assert.deepEqual(apiRequests[24].data, {
     intro: "导语",
     pull_quote: "原话",
     pull_quote_source_ref_id: "utterance/1",

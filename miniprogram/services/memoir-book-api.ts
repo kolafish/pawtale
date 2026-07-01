@@ -365,6 +365,19 @@ export function regenerateMemoirBookOutputEditorialCopy(
   );
 }
 
+export function enqueueMemoirBookOutputEditorialCopyGeneration(
+  projectId: string,
+  data: MemoirBookOutputEditorialCopyRegenerateRequest = {},
+): Promise<MemoirAutomationEvent> {
+  return memoirRequest<MemoirAutomationEvent>(
+    memoirProjectPath(projectId, "/book-output/editorial-copy/regenerate/jobs"),
+    {
+      method: "POST",
+      data: withSelectedAIModel(data),
+    },
+  );
+}
+
 export function updateMemoirBookOutputChapterEditorialCopy(
   projectId: string,
   chapterId: string,

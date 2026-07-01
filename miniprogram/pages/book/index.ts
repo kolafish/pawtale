@@ -35,6 +35,7 @@ import {
   bookVoiceCommandGatewayUrl,
   bookVoiceAssistantTurnStreamUrl,
   enqueueMemoirBookChapterDraftGeneration,
+  enqueueMemoirBookOutputEditorialCopyGeneration,
   enqueueMemoirBookOutputGeneration,
   executeMemoirBookVoiceCommand,
   generateMemoirBookChapterTitle,
@@ -44,7 +45,6 @@ import {
   getMemoirBookPlan,
   getMemoirBookSourceCoverage,
   listMemoirAutomationEvents,
-  regenerateMemoirBookOutputEditorialCopy,
   suggestMemoirBookOutputTitles,
   updateMemoirBookOutput,
   updateMemoirBookOutputChapterEditorialCopy,
@@ -262,7 +262,11 @@ const BOOK_GENERATION_EVENT_POLL_INTERVAL_MS = 3000;
 const BOOK_GENERATION_EVENT_POLL_MAX_ATTEMPTS = 120;
 
 function isBookGenerationEvent(event: MemoirAutomationEvent): boolean {
-  return event.event_type === "chapter_draft_generated" || event.event_type === "book_output_generated";
+  return (
+    event.event_type === "chapter_draft_generated"
+    || event.event_type === "book_output_generated"
+    || event.event_type === "book_editorial_copy_generated"
+  );
 }
 
 function pendingBookGenerationEvents(events: MemoirAutomationEvent[]): MemoirAutomationEvent[] {
@@ -1105,7 +1109,7 @@ Page<BookData, {
     if (!isBookLevelEditorialCopyTarget(target)) {
       return;
     }
-    if (!this.data.projectId || this.data.bookEditorialCopyBusyTarget || this.data.bookTitleSaving) {
+    if (!this.data.projectId || this.data.bookEditorialCopyBusyTarget === target || this.data.bookTitleSaving) {
       return;
     }
     const blockedMessage = bookEditorialCopyBlockedMessage(this.data);
@@ -1119,17 +1123,19 @@ Page<BookData, {
     this.stopPlayback();
     this.setData({ bookEditorialCopyBusyTarget: target, error: "" });
     try {
-      const output = await regenerateMemoirBookOutputEditorialCopy(this.data.projectId, { targets: [target] });
-      this.applyBookOutput(output);
-      wx.showToast({ title: "已生成", icon: "success" });
+      const event = await enqueueMemoirBookOutputEditorialCopyGeneration(this.data.projectId, { targets: [target] });
+      this.applyAutomationEvents(mergeAutomationEvent(this.automationEvents, event));
+      wx.showToast({ title: "已后台生成", icon: "success" });
     } catch (error) {
       if (isLoginError(error)) {
         wx.reLaunch({ url: "/pages/login/index" });
         return;
       }
-      this.setData({ error: error instanceof Error ? error.message : "成书文案生成失败" });
+      this.setData({ error: error instanceof Error ? error.message : "成书文案提交失败" });
     } finally {
-      this.setData({ bookEditorialCopyBusyTarget: "" });
+      if (this.data.bookEditorialCopyBusyTarget === target) {
+        this.setData({ bookEditorialCopyBusyTarget: "" });
+      }
     }
   },
 
@@ -1140,7 +1146,7 @@ Page<BookData, {
       return;
     }
     const busyTarget = `${target}:${chapterId}`;
-    if (!this.data.projectId || this.data.bookEditorialCopyBusyTarget || this.data.bookTitleSaving) {
+    if (!this.data.projectId || this.data.bookEditorialCopyBusyTarget === busyTarget || this.data.bookTitleSaving) {
       return;
     }
     const blockedMessage = bookEditorialCopyBlockedMessage(this.data);
@@ -1154,20 +1160,22 @@ Page<BookData, {
     this.stopPlayback();
     this.setData({ bookEditorialCopyBusyTarget: busyTarget, error: "" });
     try {
-      const output = await regenerateMemoirBookOutputEditorialCopy(this.data.projectId, {
+      const event = await enqueueMemoirBookOutputEditorialCopyGeneration(this.data.projectId, {
         targets: [target],
         chapter_ids: [chapterId],
       });
-      this.applyBookOutput(output);
-      wx.showToast({ title: "已生成", icon: "success" });
+      this.applyAutomationEvents(mergeAutomationEvent(this.automationEvents, event));
+      wx.showToast({ title: "已后台生成", icon: "success" });
     } catch (error) {
       if (isLoginError(error)) {
         wx.reLaunch({ url: "/pages/login/index" });
         return;
       }
-      this.setData({ error: error instanceof Error ? error.message : "章节文案生成失败" });
+      this.setData({ error: error instanceof Error ? error.message : "章节文案提交失败" });
     } finally {
-      this.setData({ bookEditorialCopyBusyTarget: "" });
+      if (this.data.bookEditorialCopyBusyTarget === busyTarget) {
+        this.setData({ bookEditorialCopyBusyTarget: "" });
+      }
     }
   },
 

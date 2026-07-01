@@ -393,6 +393,12 @@ function automationEventTitle(event: MemoirAutomationEvent): string {
   if (event.event_type === "book_output_generated") {
     return event.status === "pending" ? "全书生成中" : "全书已生成";
   }
+  if (event.event_type === "book_editorial_copy_generated") {
+    if (event.status === "failed") {
+      return "文案生成失败";
+    }
+    return event.status === "pending" ? "文案生成中" : "文案已更新";
+  }
   return "AI 自动处理";
 }
 
@@ -414,6 +420,9 @@ function automationEventKindText(event: MemoirAutomationEvent): string {
   }
   if (event.event_type === "book_output_generated") {
     return "全书生成";
+  }
+  if (event.event_type === "book_editorial_copy_generated") {
+    return "成书文案";
   }
   return "自动处理";
 }
@@ -717,7 +726,11 @@ function automationEventDetailText(event: MemoirAutomationEvent): string {
       : [];
     return sourceIds.length ? `已把 ${sourceIds.length} 条新增讲述写入章节正文。` : "";
   }
-  if (event.event_type === "chapter_draft_generated" || event.event_type === "book_output_generated") {
+  if (
+    event.event_type === "chapter_draft_generated"
+    || event.event_type === "book_output_generated"
+    || event.event_type === "book_editorial_copy_generated"
+  ) {
     return stringValue(metadata.error_message);
   }
   return "";
