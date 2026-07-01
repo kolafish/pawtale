@@ -19,10 +19,20 @@ from app.models.users import User
 
 SESSION_COOKIE_NAME = "pawtale_session"
 PASSWORD_ITERATIONS = 390_000
+ADMIN_ROLE = "admin"
 
 
 def normalize_email(email: str) -> str:
     return email.strip().lower()
+
+
+def _configured_admin_emails() -> set[str]:
+    raw = get_settings().admin_emails
+    return {normalize_email(item) for item in raw.split(",") if item.strip()}
+
+
+def is_admin_user(user: User) -> bool:
+    return user.role == ADMIN_ROLE or normalize_email(user.email) in _configured_admin_emails()
 
 
 def hash_password(password: str) -> str:
@@ -127,3 +137,9 @@ async def get_current_user(
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="用户不存在")
     return user
+
+
+async def get_current_admin_user(current_user: User = Depends(get_current_user)) -> User:
+    if not is_admin_user(current_user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="需要管理员权限")
+    return current_user

@@ -68,6 +68,9 @@ async def migrate_auth_schema(engine: AsyncEngine) -> dict:
                 text("ALTER TABLE users ADD COLUMN password_login_enabled BOOLEAN NOT NULL DEFAULT 1")
             )
             changed_columns.append("users.password_login_enabled")
+        if "role" not in user_columns:
+            await conn.execute(text("ALTER TABLE users ADD COLUMN role VARCHAR(20) NOT NULL DEFAULT 'user'"))
+            changed_columns.append("users.role")
 
         if not await _table_exists(conn, "auth_identities"):
             await conn.execute(

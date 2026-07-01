@@ -10,6 +10,7 @@ from app.auth import (
     clear_session_cookie,
     get_current_user,
     hash_password,
+    is_admin_user,
     normalize_email,
     set_session_cookie,
     verify_password,
@@ -81,10 +82,20 @@ async def _find_wechat_identity(db: AsyncSession, openid: str) -> AuthIdentity |
 
 
 def _auth_response(user: User) -> AuthResponse:
+    user_response = UserResponse.model_validate(user)
+    if is_admin_user(user):
+        user_response.role = "admin"
     return AuthResponse(
-        user=UserResponse.model_validate(user),
+        user=user_response,
         needs_credentials=not user.password_login_enabled,
     )
+
+
+def _user_response(user: User) -> UserResponse:
+    response = UserResponse.model_validate(user)
+    if is_admin_user(user):
+        response.role = "admin"
+    return response
 
 
 @router.post("/register", response_model=AuthResponse, status_code=201)
@@ -239,7 +250,7 @@ async def logout(response: Response):
 
 @router.get("/me", response_model=UserResponse)
 async def me(current_user: User = Depends(get_current_user)):
-    return UserResponse.model_validate(current_user)
+    return _user_response(current_user)
 
 
 @router.patch("/me", response_model=UserResponse)
@@ -251,4 +262,4 @@ async def update_me(
     current_user.display_name = req.display_name
     await db.commit()
     await db.refresh(current_user)
-    return UserResponse.model_validate(current_user)
+    return _user_response(current_user)

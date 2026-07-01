@@ -7,6 +7,7 @@ class UserResponse(BaseModel):
     id: str
     email: str
     password_login_enabled: bool
+    role: str = "user"
     display_name: str
     avatar_url: str | None = None
     created_at: datetime

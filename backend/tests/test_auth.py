@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.migrations.auth import migrate_auth_schema
 from app.models.users import AuthIdentity, User
+from app.config import Settings
 from app.services.wechat_auth import WeChatAuthError, WeChatSession
 
 
@@ -49,6 +50,27 @@ class TestAuthAPI:
     async def test_project_routes_require_login(self, anonymous_client):
         response = await anonymous_client.get("/api/projects")
         assert response.status_code == 401
+
+    async def test_auth_response_uses_configured_admin_email_role(self, anonymous_client, monkeypatch):
+        monkeypatch.setattr(
+            "app.auth.get_settings",
+            lambda: Settings(admin_emails="config-admin@example.com"),
+        )
+
+        register = await anonymous_client.post(
+            "/api/auth/register",
+            json={
+                "email": "config-admin@example.com",
+                "password": "password123",
+                "display_name": "配置管理员",
+            },
+        )
+        assert register.status_code == 201
+        assert register.json()["user"]["role"] == "admin"
+
+        me = await anonymous_client.get("/api/auth/me")
+        assert me.status_code == 200
+        assert me.json()["role"] == "admin"
 
     async def test_update_me_display_name(self, anonymous_client, test_db):
         register = await anonymous_client.post(
@@ -427,10 +449,12 @@ async def test_auth_migration_creates_identity_table_and_credentials_flag():
             )
 
         assert "users.password_login_enabled" in result["changed_columns"]
+        assert "users.role" in result["changed_columns"]
         assert "auth_identities" in result["changed_tables"]
         assert second_result["changed_columns"] == []
         assert second_result["changed_tables"] == []
         assert "password_login_enabled" in user_columns
+        assert "role" in user_columns
         assert identity_table == "auth_identities"
     finally:
         await engine.dispose()
