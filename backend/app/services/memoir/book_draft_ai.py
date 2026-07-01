@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 from typing import Literal
 
 from fastapi import HTTPException
@@ -16,6 +17,12 @@ SYSTEM_PROMPT = "你是一位谨慎的中文回忆录整理写作者，只能把
 REVISION_PLAN_SYSTEM_PROMPT = "你是一位谨慎的中文回忆录修订编辑，只判断口述材料变化应该如何修订已有章节。"
 EVENT_CLUSTER_SYSTEM_PROMPT = "你是一位谨慎的中文回忆录结构编辑，只根据来源讲述记录判断哪些记录讲的是同一件事。"
 AI_BOOK_DRAFT_UNAVAILABLE_MESSAGE = "AI 服务暂时不可用，请稍后重试。"
+EVENT_CLUSTER_MIN_TOKENS = 1200
+EVENT_CLUSTER_MAX_TOKENS = 4000
+EVENT_CLUSTER_BASE_TOKENS = 700
+EVENT_CLUSTER_PER_SOURCE_TOKENS = 90
+TRUNCATED_FINISH_REASONS = {"length", "max_tokens", "max_output_tokens", "incomplete"}
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -310,6 +317,104 @@ def _event_clusters_from_content(content: str, sources: list[ChapterSourceText])
     return clusters
 
 
+def _event_cluster_max_tokens(sources: list[ChapterSourceText]) -> int:
+    source_text_chars = sum(len(source.text) + len(source.ref.quote or "") for source in sources)
+    estimated = EVENT_CLUSTER_BASE_TOKENS + len(sources) * EVENT_CLUSTER_PER_SOURCE_TOKENS + source_text_chars // 40
+    return min(EVENT_CLUSTER_MAX_TOKENS, max(EVENT_CLUSTER_MIN_TOKENS, estimated))
+
+
+def _llm_content_and_raw(response: object) -> tuple[str, dict | None]:
+    if isinstance(response, tuple) and len(response) >= 2:
+        content = response[0]
+        raw = response[1] if isinstance(response[1], dict) else None
+        return str(content or ""), raw
+    return str(response or ""), None
+
+
+def _response_finish_reason(raw: dict | None) -> str:
+    if not raw:
+        return ""
+
+    choices = raw.get("choices")
+    if isinstance(choices, list) and choices:
+        first = choices[0] if isinstance(choices[0], dict) else {}
+        finish_reason = first.get("finish_reason")
+        if isinstance(finish_reason, str) and finish_reason.strip():
+            return finish_reason.strip()
+
+    incomplete_details = raw.get("incomplete_details")
+    if isinstance(incomplete_details, dict):
+        reason = incomplete_details.get("reason")
+        if isinstance(reason, str) and reason.strip():
+            return reason.strip()
+
+    status = raw.get("status")
+    return status.strip() if isinstance(status, str) and status.strip() else ""
+
+
+def _fallback_event_cluster(source: ChapterSourceText) -> ChapterEventCluster:
+    title = text_or_empty(source.ref.quote) or (
+        source.source_card.summary if source.source_card and source.source_card.summary else ""
+    )
+    summary = (
+        source.source_card.summary
+        if source.source_card and source.source_card.summary
+        else (source.ref.quote or source.text[:120])
+    )
+    return ChapterEventCluster(
+        title=(title or "单条讲述").strip()[:40],
+        source_ids=[source.ref.utterance_id],
+        summary=summary.strip()[:160],
+    )
+
+
+def _fallback_event_clusters(sources: list[ChapterSourceText]) -> list[ChapterEventCluster]:
+    return [_fallback_event_cluster(source) for source in sources]
+
+
+async def _generate_event_clusters(
+    client: AITextClient,
+    *,
+    chapter: MemoirBookPlanChapter,
+    sources: list[ChapterSourceText],
+) -> list[ChapterEventCluster]:
+    cluster_prompt = _build_event_cluster_prompt(chapter=chapter, sources=sources)
+    max_tokens = _event_cluster_max_tokens(sources)
+    try:
+        cluster_response = await client._call_llm(
+            EVENT_CLUSTER_SYSTEM_PROMPT,
+            cluster_prompt,
+            temperature=0.1,
+            max_tokens=max_tokens,
+            timeout=60.0,
+            return_raw=True,
+        )
+        cluster_content, raw_response = _llm_content_and_raw(cluster_response)
+        finish_reason = _response_finish_reason(raw_response)
+        if finish_reason in TRUNCATED_FINISH_REASONS:
+            raise HTTPException(status_code=502, detail=f"AI 章节事件聚合输出被截断: {finish_reason}")
+        return _event_clusters_from_content(cluster_content, sources)
+    except HTTPException as exc:
+        logger.warning(
+            "AI memoir chapter event clustering failed; fallback to singleton clusters provider=%s "
+            "chapter_id=%s source_count=%s reason=%s",
+            getattr(client, "provider_name", "unknown"),
+            chapter.id,
+            len(sources),
+            exc.detail,
+        )
+    except Exception:
+        logger.warning(
+            "AI memoir chapter event clustering failed; fallback to singleton clusters provider=%s "
+            "chapter_id=%s source_count=%s",
+            getattr(client, "provider_name", "unknown"),
+            chapter.id,
+            len(sources),
+            exc_info=True,
+        )
+    return _fallback_event_clusters(sources)
+
+
 def _event_clusters_prompt_text(event_clusters: list[ChapterEventCluster]) -> str:
     if not event_clusters:
         return ""
@@ -475,15 +580,11 @@ async def generate_chapter_draft_text(
     )
     event_clusters: list[ChapterEventCluster] = []
     if not should_supplement_pending_sources and len(sources) > 1:
-        cluster_prompt = _build_event_cluster_prompt(chapter=chapter, sources=sources)
-        cluster_content = await client._call_llm(
-            EVENT_CLUSTER_SYSTEM_PROMPT,
-            cluster_prompt,
-            temperature=0.1,
-            max_tokens=900,
-            timeout=60.0,
+        event_clusters = await _generate_event_clusters(
+            client,
+            chapter=chapter,
+            sources=sources,
         )
-        event_clusters = _event_clusters_from_content(str(cluster_content), sources)
 
     should_label_pending_sources = (
         bool(pending_source_utterance_ids)
