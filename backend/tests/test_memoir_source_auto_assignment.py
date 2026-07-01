@@ -334,6 +334,74 @@ async def test_source_routing_job_assigns_high_confidence_source(client, test_db
     assert source_card_job.payload_json["ai_model"] == "deepseek-v4-pro"
 
 
+async def test_confirming_book_plan_requeues_sources_skipped_before_plan(client, test_db, monkeypatch):
+    _register_source_routing_handler()
+    first = await create_test_voice_transcript(
+        client,
+        test_db,
+        "小时候在外婆家的院子里摘菜，夏天还会剥青豆。",
+    )
+    project_id = first["session"]["project_id"]
+    uncovered = await create_test_voice_transcript(
+        client,
+        test_db,
+        "后来想起外婆家的院子，最记得夏天一起摘菜和剥青豆。",
+        project_id=project_id,
+    )
+    job = await _schedule_guarded_route_job(
+        test_db,
+        project_id=project_id,
+        utterance_id=uncovered["utterance_id"],
+    )
+    await test_db.commit()
+
+    assert await run_editing_job(test_db, job.id) is False
+    await test_db.refresh(job)
+    assert job.status == MemoirEditingJobStatus.SKIPPED.value
+    assert job.error_message == "章节规划不存在"
+
+    confirm_response = await client.put(
+        f"/api/mobile/memoir/projects/{project_id}/book-plan",
+        json={
+            "title": "外婆家的童年",
+            "chapters": [
+                {
+                    "title": "院子里的童年",
+                    "source_refs": [memoir_source_ref(first, "外婆家的院子")],
+                }
+            ],
+        },
+    )
+
+    assert confirm_response.status_code == 200, confirm_response.json()
+    chapter_id = confirm_response.json()["chapters"][0]["id"]
+    await test_db.refresh(job)
+    assert job.status == MemoirEditingJobStatus.PENDING.value
+    assert job.attempts == 0
+    assert job.payload_json["source"] == "book_plan_confirmed"
+    assert job.payload_json["utterance_ids"] == [uncovered["utterance_id"]]
+    assert job.result_json == {}
+    assert job.error_message == ""
+
+    _patch_source_router_ai(monkeypatch, _assign_route(chapter_id))
+
+    assert await run_editing_job(test_db, job.id) is True
+    await test_db.refresh(job)
+    assert job.status == MemoirEditingJobStatus.SUCCEEDED.value
+    assert job.result_json["assigned_source_count"] == 1
+
+    event = await test_db.scalar(
+        select(MemoirAutomationEvent).where(
+            MemoirAutomationEvent.project_id == project_id,
+            MemoirAutomationEvent.event_type == MemoirAutomationEventType.SOURCE_ASSIGNED.value,
+        )
+    )
+    assert event is not None
+    assert event.chapter_id == chapter_id
+    assert event.utterance_ids_json == [uncovered["utterance_id"]]
+    assert event.metadata_json["routes"][0]["pipeline_source"] == "book_plan_confirmed"
+
+
 async def test_source_routing_job_skips_when_transcript_guard_is_missing(client, test_db):
     created = await create_test_voice_transcript(client, test_db, "后来还记得老家院子里的枣树。")
     project_id = created["session"]["project_id"]
