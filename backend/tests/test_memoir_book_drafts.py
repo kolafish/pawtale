@@ -761,6 +761,138 @@ async def test_memoir_book_auto_revision_job_handles_removed_only_sources(
     )
 
 
+async def test_mobile_memoir_book_chapter_draft_labels_pending_sources_when_removing_old_sources(
+    client,
+    test_db,
+    monkeypatch,
+):
+    first = await create_test_voice_transcript(client, test_db, "我小时候常在外婆家的院子里晒太阳。")
+    second = await create_test_voice_transcript(client, test_db, "后来我想起外婆还会在院子里晒被子。")
+    third = await create_test_voice_transcript(client, test_db, "我以前误把第一次离家也写进了这一章。")
+    project_id = first["session"]["project_id"]
+    plan, chapter = await create_test_book_plan(
+        test_db,
+        project_id=project_id,
+        source_refs=[
+            memoir_source_ref(first, "院子里晒太阳"),
+            memoir_source_ref(second, "院子里晒被子"),
+            memoir_source_ref(third, "第一次离家"),
+        ],
+        status=MemoirBookPlanStatus.CONFIRMED,
+    )
+    draft = MemoirBookChapterDraft(
+        project_id=project_id,
+        chapter_id=chapter.id,
+        status=MemoirBookChapterDraftStatus.DRAFT.value,
+        metadata_json={},
+    )
+    test_db.add(draft)
+    await test_db.flush()
+    version = MemoirBookChapterDraftVersion(
+        draft_id=draft.id,
+        project_id=project_id,
+        chapter_id=chapter.id,
+        version=1,
+        content="我小时候常在外婆家的院子里晒太阳。后来第一次离家去县城读书。",
+        created_by=MemoirCreatedBy.AI.value,
+        prompt_snapshot="old prompt",
+    )
+    test_db.add(version)
+    await test_db.flush()
+    test_db.add_all([
+        MemoirChapterSourceLink(
+            project_id=project_id,
+            plan_id=plan.id,
+            chapter_id=chapter.id,
+            utterance_id=first["utterance_id"],
+            transcript_version_id=first["transcript_version_id"],
+            audio_file_id=first["audio_file_id"],
+            quote="院子里晒太阳",
+            status=MemoirChapterSourceLinkStatus.ACTIVE.value,
+            merged_draft_version_id=version.id,
+        ),
+        MemoirChapterSourceLink(
+            project_id=project_id,
+            plan_id=plan.id,
+            chapter_id=chapter.id,
+            utterance_id=second["utterance_id"],
+            transcript_version_id=second["transcript_version_id"],
+            audio_file_id=second["audio_file_id"],
+            quote="院子里晒被子",
+            status=MemoirChapterSourceLinkStatus.ACTIVE.value,
+        ),
+        MemoirChapterSourceLink(
+            project_id=project_id,
+            plan_id=plan.id,
+            chapter_id=chapter.id,
+            utterance_id=third["utterance_id"],
+            transcript_version_id=third["transcript_version_id"],
+            audio_file_id=third["audio_file_id"],
+            quote="第一次离家",
+            status=MemoirChapterSourceLinkStatus.ACTIVE.value,
+            merged_draft_version_id=version.id,
+        ),
+    ])
+    chapter.source_refs_json = [
+        memoir_source_ref(first, "院子里晒太阳"),
+        memoir_source_ref(second, "院子里晒被子"),
+    ]
+    await test_db.flush()
+    await mark_utterance_links_removed(test_db, project_id=project_id, utterance_id=third["utterance_id"])
+    await test_db.commit()
+    fake_ai = FakeBookDraftAI(
+        [
+            json.dumps(
+                {
+                    "mode": "regenerate",
+                    "reason": "新增来源仍属于院子主题，同时需要移除误归入的离家内容。",
+                    "pending_source_ids": [second["utterance_id"]],
+                    "removed_source_ids": [third["utterance_id"]],
+                    "related_existing_source_ids": [first["utterance_id"]],
+                    "coverage_requirements": ["补入晒被子的细节，并移除第一次离家内容"],
+                },
+                ensure_ascii=False,
+            ),
+            json.dumps(
+                {
+                    "clusters": [
+                        {
+                            "title": "外婆家的院子",
+                            "source_ids": [first["utterance_id"], second["utterance_id"]],
+                            "summary": "两条当前来源都讲外婆家院子里的日常。",
+                        }
+                    ]
+                },
+                ensure_ascii=False,
+            ),
+            "我小时候常在外婆家的院子里晒太阳，也记得外婆会在那里晒被子。",
+        ]
+    )
+    monkeypatch.setattr(
+        "app.services.memoir.book_drafts.get_ai_service",
+        lambda model=None: fake_ai,
+    )
+
+    response = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-plan/chapters/{chapter.id}/draft",
+        json={},
+    )
+
+    assert response.status_code == 200
+    assert len(fake_ai.calls) == 3
+    prompt = fake_ai.calls[2]["user_prompt"]
+    assert "原章节正文" in prompt
+    assert "已删除来源" in prompt
+    assert "同时只把 source_type 为“新增来源”" in prompt
+    assert f"utterance_id: {first['utterance_id']}" in prompt
+    assert f"utterance_id: {second['utterance_id']}" in prompt
+    assert f"utterance_id: {third['utterance_id']}" in prompt
+    assert "source_type: 既有来源" in prompt
+    assert "source_type: 新增来源" in prompt
+    assert "quote: 第一次离家" in prompt
+    assert "不得继续写入 removed_source_ids" in prompt
+
+
 async def test_mobile_memoir_book_chapter_draft_generation_job_runs_in_background(
     client,
     test_db,
