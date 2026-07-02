@@ -15,6 +15,7 @@ import {
   updateMemoirBookOutput,
 } from "../../services/memoir-voice-api";
 import { ApiError } from "../../services/request";
+import { routeAuthError } from "../../services/navigation";
 import {
   bookOutputData,
   buildChapterViews,
@@ -144,10 +145,6 @@ type BookExportData = Pick<
 
 const BOOK_DESIGN_AUTOSAVE_DELAY_MS = 900;
 
-function isLoginError(error: unknown): boolean {
-  return error instanceof ApiError && [401, 403].includes(error.statusCode);
-}
-
 function exportNotice(action: string): string {
   if (action === "reading_pdf") {
     return "阅读版适合发给家人在线阅读。";
@@ -264,8 +261,7 @@ Page<BookExportData, {
       ]);
       this.applyBookExportData(plan, output);
     } catch (error) {
-      if (isLoginError(error)) {
-        wx.reLaunch({ url: "/pages/login/index" });
+      if (routeAuthError(error, "login")) {
         return;
       }
       this.setData({ error: error instanceof Error ? error.message : "预览与导出页加载失败" });
@@ -359,8 +355,7 @@ Page<BookExportData, {
         this.setData({ error: "暂时没有生成合适的书名" });
       }
     } catch (error) {
-      if (isLoginError(error)) {
-        wx.reLaunch({ url: "/pages/login/index" });
+      if (routeAuthError(error, "login")) {
         return;
       }
       this.setData({ error: error instanceof Error ? error.message : "小余起名失败" });
@@ -502,8 +497,7 @@ Page<BookExportData, {
         bookDesignSaveStatusText: "已自动保存",
       });
     } catch (error) {
-      if (isLoginError(error)) {
-        wx.reLaunch({ url: "/pages/login/index" });
+      if (routeAuthError(error, "login")) {
         return;
       }
       this.setData({
@@ -549,8 +543,7 @@ Page<BookExportData, {
       await enqueueMemoirBookOutputEditorialCopyGeneration(this.data.projectId, { targets: [target] });
       wx.showToast({ title: "已后台生成", icon: "success" });
     } catch (error) {
-      if (isLoginError(error)) {
-        wx.reLaunch({ url: "/pages/login/index" });
+      if (routeAuthError(error, "login")) {
         return;
       }
       this.setData({ error: error instanceof Error ? error.message : "成书文案提交失败" });
@@ -588,8 +581,7 @@ Page<BookExportData, {
       this.setData({ exportNotice: "已提交重新整理，当前书稿会保留；新版本完成后可在历史版本里查看。" });
       wx.showToast({ title: "已后台生成", icon: "success" });
     } catch (error) {
-      if (isLoginError(error)) {
-        wx.reLaunch({ url: "/pages/login/index" });
+      if (routeAuthError(error, "login")) {
         return;
       }
       this.setData({ error: error instanceof Error ? error.message : "书稿整理提交失败" });
@@ -667,8 +659,7 @@ Page<BookExportData, {
       }
       wx.showToast({ title: format === "pdf" ? "PDF 已打开" : "文本已下载", icon: "success" });
     } catch (error) {
-      if (isLoginError(error)) {
-        wx.reLaunch({ url: "/pages/login/index" });
+      if (routeAuthError(error, "login")) {
         return;
       }
       this.setData({ error: error instanceof Error ? error.message : "导出失败" });

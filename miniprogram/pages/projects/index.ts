@@ -7,6 +7,7 @@ import {
   listMemoirProjects,
 } from "../../services/memoir";
 import { projectProfileSummary } from "../../services/memoir-project-profile";
+import { switchToMe } from "../../services/navigation";
 
 interface DatasetEvent {
   currentTarget: {
@@ -79,7 +80,7 @@ Page<ProjectsData, {
   activateProject(event: DatasetEvent): Promise<void>;
   openProjectEdit(event: DatasetEvent): void;
   deleteProject(event: DatasetEvent): Promise<void>;
-  openHome(): void;
+  openMe(): void;
 }>({
   data: {
     loading: false,
@@ -178,7 +179,7 @@ Page<ProjectsData, {
     }
   },
 
-  openHome() {
-    wx.switchTab({ url: "/pages/me/index" });
+  openMe() {
+    switchToMe();
   },
 });

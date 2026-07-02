@@ -3,6 +3,7 @@ import {
   loginWithEmail,
   loginWithWeChat,
 } from "../../services/auth";
+import { relaunchHome } from "../../services/navigation";
 
 interface InputEvent {
   detail: {
@@ -57,7 +58,7 @@ Page<LoginData, {
     this.setData({ wechatLoading: true, error: "" });
     try {
       await loginWithWeChat();
-      wx.reLaunch({ url: "/pages/home/index" });
+      relaunchHome();
     } catch (error) {
       this.setData({
         error: error instanceof Error ? error.message : "微信登录失败",
@@ -84,7 +85,7 @@ Page<LoginData, {
     this.setData({ loading: true, error: "" });
     try {
       await loginWithEmail({ email, password });
-      wx.reLaunch({ url: "/pages/home/index" });
+      relaunchHome();
     } catch (error) {
       this.setData({
         error: error instanceof Error ? error.message : "登录失败",

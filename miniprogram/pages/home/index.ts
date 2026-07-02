@@ -10,7 +10,7 @@ import {
   guidanceModeLabel,
   memoirProjectProfile,
 } from "../../services/memoir-project-profile";
-import { ApiError } from "../../services/request";
+import { isAuthError, switchToMe } from "../../services/navigation";
 import {
   readVoiceAuthorizationConsent,
   saveVoiceAuthorizationConsent,
@@ -56,10 +56,6 @@ export function userDisplayName(displayName: string, email: string): string {
     return "作者";
   }
   return email.split("@", 1)[0].trim() || "作者";
-}
-
-function goToMeLogin(): void {
-  wx.switchTab({ url: "/pages/me/index" });
 }
 
 function guidancePatch(mode: MemoirGuidanceMode): Pick<HomeData, "selectedMode" | "guidanceLabel"> {
@@ -122,7 +118,7 @@ Page<HomeData, {
         ...guidancePatch(profile.defaultGuidanceMode),
       });
     } catch (error) {
-      if (error instanceof ApiError && [401, 403].includes(error.statusCode)) {
+      if (isAuthError(error)) {
         this.setData({
           needsLogin: true,
           displayName: "作者",
@@ -166,7 +162,7 @@ Page<HomeData, {
       return;
     }
     if (this.data.needsLogin) {
-      goToMeLogin();
+      switchToMe();
       return;
     }
     if (!this.data.projectId) {
@@ -206,8 +202,8 @@ Page<HomeData, {
       }
       wx.navigateTo({ url: `/pages/voice-chat/index?${params.join("&")}` });
     } catch (error) {
-      if (error instanceof ApiError && [401, 403].includes(error.statusCode)) {
-        goToMeLogin();
+      if (isAuthError(error)) {
+        switchToMe();
         return;
       }
       this.setData({
