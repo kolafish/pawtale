@@ -349,6 +349,14 @@ export function bookChapterDetailUrl(projectId: string, chapterId: string, tab =
   return `/pages/book-chapter/index?${params.join("&")}`;
 }
 
+export function bookExportPageUrl(projectId: string, action = "preview"): string {
+  const params = [
+    `projectId=${encodeURIComponent(projectId)}`,
+    `action=${encodeURIComponent(action)}`,
+  ];
+  return `/pages/book-export/index?${params.join("&")}`;
+}
+
 const BOOK_VOICE_AUTO_STOP_SILENCE_MS = 900;
 const BOOK_VOICE_MIN_RECORDING_MS = 700;
 const BOOK_VOICE_NO_VOICE_MS = 3500;
@@ -380,6 +388,7 @@ Page<BookData, {
   openChapterEditor(event: DatasetEvent): void;
   closeChapterEditor(): void;
   openChapterSources(event: DatasetEvent): void;
+  openBookExportPage(event: DatasetEvent): void;
   changeChapterTitle(event: TextInputEvent): void;
   saveChapterTitle(event: DatasetEvent): Promise<void>;
   generateChapterTitle(event: DatasetEvent): Promise<void>;
@@ -1619,6 +1628,18 @@ Page<BookData, {
       return;
     }
     wx.navigateTo({ url: bookChapterDetailUrl(this.data.projectId, chapterId, "sources") });
+  },
+
+  openBookExportPage(event) {
+    if (!this.data.projectId) {
+      return;
+    }
+    if (!this.data.bookContent) {
+      this.setData({ error: "请先生成书稿" });
+      return;
+    }
+    const action = String(event.currentTarget.dataset.action || "preview");
+    wx.navigateTo({ url: bookExportPageUrl(this.data.projectId, action) });
   },
 
   changeChapterTitle(event) {

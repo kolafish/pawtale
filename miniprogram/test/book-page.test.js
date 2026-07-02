@@ -1021,6 +1021,34 @@ test("book page routes chapter card actions to the chapter detail page", () => {
   delete global.wx;
 });
 
+test("book page routes progress export actions to the full-book export page", () => {
+  const navigations = [];
+  global.wx = {
+    navigateTo(options) {
+      navigations.push(options.url);
+    },
+  };
+  const { mod, page } = loadBookPage();
+  const context = pageContext(page, {
+    projectId: "project/1",
+    bookContent: "全书正文",
+  });
+
+  assert.equal(
+    mod.bookExportPageUrl("project/1", "print_pdf"),
+    "/pages/book-export/index?projectId=project%2F1&action=print_pdf",
+  );
+
+  page.openBookExportPage.call(context, { currentTarget: { dataset: { action: "preview" } } });
+  page.openBookExportPage.call(context, { currentTarget: { dataset: { action: "reading_pdf" } } });
+
+  assert.deepEqual(navigations, [
+    "/pages/book-export/index?projectId=project%2F1&action=preview",
+    "/pages/book-export/index?projectId=project%2F1&action=reading_pdf",
+  ]);
+  delete global.wx;
+});
+
 test("book page keeps source rows read-only and splits chapter structure actions", () => {
   const wxml = fs.readFileSync(path.join(__dirname, "../pages/book/index.wxml"), "utf8");
 
@@ -1065,6 +1093,7 @@ test("book page exposes PDF layout and print export controls", () => {
   assert.match(wxml, /PDF 排版/);
   assert.match(wxml, /bindchange="changeBookExportLayout"/);
   assert.match(wxml, /book-export-hero/);
+  assert.match(wxml, /bindtap="openBookExportPage"/);
   assert.match(wxml, /bindtap="previewBookOutput"/);
   assert.match(wxml, /阅读版 PDF/);
   assert.match(wxml, /打印版 PDF/);
