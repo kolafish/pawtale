@@ -183,11 +183,19 @@ test("transcript detail page uses content-first inclusion labels", async () => {
 });
 
 test("transcript detail page keeps serious evidence and editing labels", () => {
+  const pageJson = fs.readFileSync(
+    path.join(__dirname, "../pages/transcript-detail/index.json"),
+    "utf8",
+  );
   const wxml = fs.readFileSync(
     path.join(__dirname, "../pages/transcript-detail/index.wxml"),
     "utf8",
   );
 
+  assert.match(pageJson, /这段讲述/);
+  assert.match(wxml, /这段讲述/);
+  assert.match(wxml, /登录后查看讲述/);
+  assert.match(wxml, /没有找到这段讲述/);
   assert.match(wxml, /成书文字/);
   assert.match(wxml, /这段会用于章节正文/);
   assert.match(wxml, /原始讲述/);
@@ -198,7 +206,9 @@ test("transcript detail page keeps serious evidence and editing labels", () => {
   assert.match(wxml, /更多操作/);
   assert.match(wxml, /删除后，这条原始讲述会从素材库移除/);
   assert.match(wxml, /相关章节会标记为需重新确认/);
+  assert.doesNotMatch(pageJson, /素材详情/);
   assert.doesNotMatch(wxml, /整理后文字|原始识别|校对整理文字|说出修改|危险操作|语音修正|语音校对|播放问答/);
+  assert.doesNotMatch(wxml, /素材详情|登录后查看素材|没有找到这条素材/);
 });
 
 test("transcript detail page collapses long question context by default", async () => {
