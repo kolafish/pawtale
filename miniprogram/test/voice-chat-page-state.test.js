@@ -44,7 +44,11 @@ test("voice chat page keeps one main status and a clear recording action", () =>
   assert.match(wxml, /这一段已经记下来了/);
   assert.match(wxml, /正在帮您整理成文字/);
   assert.match(wxml, /小余正在读问题/);
-  assert.match(wxml, /!recording && !followUpLoading && \(assistantPromptText \|\| followUpError \|\| canRequestFollowUp\)/);
+  assert.match(wxml, /!recording && \(assistantPromptText \|\| followUpLoading \|\| followUpError \|\| canRequestFollowUp\)/);
+  assert.match(wxml, /assistantPromptText \|\| \(followUpLoading \? assistantLoadingText/);
+  assert.match(wxml, /followUpTTSLoading && assistantPromptText/);
+  assert.match(wxml, /小余正在准备第一句话/);
+  assert.match(wxml, /小余先问一句，稍等一下。/);
   assert.match(wxml, /今天想先讲哪一段/);
   assert.match(wxml, /openingTopicOptions/);
   assert.match(wxml, /bindtap="chooseOpeningTopic"/);

@@ -49,7 +49,7 @@
     </checkbox-group>
   </view>
 
-  <view wx:if="{{!recording && !followUpLoading && (assistantPromptText || followUpError || canRequestFollowUp)}}" class="assistant-panel {{followUpError ? 'error-state' : ''}}">
+  <view wx:if="{{!recording && (assistantPromptText || followUpLoading || followUpError || canRequestFollowUp)}}" class="assistant-panel {{followUpError ? 'error-state' : ''}}">
     <view class="assistant-head">
       <text class="assistant-label">{{followUpError ? "小余没说好" : "小余想听您讲讲"}}</text>
     </view>
@@ -74,7 +74,7 @@
       <text class="assistant-tts-current">{{ttsCurrentText}}</text>
       <text>{{ttsRemainingText}}</text>
     </view>
-    <text wx:else class="assistant-text">{{followUpLoading ? assistantLoadingText : (followUpError || assistantPromptText || assistantEmptyText)}}</text>
+    <text wx:else class="assistant-text">{{assistantPromptText || (followUpLoading ? assistantLoadingText : (followUpError || assistantEmptyText))}}</text>
     <view wx:if="{{assistantPromptText && followUpTTSPlaying}}" class="tts-progress-track">
       <view class="tts-progress-fill" style="width: {{ttsProgressPercent}}%;"></view>
     </view>
@@ -109,9 +109,9 @@
 
   <view class="transcript-stage">
     <text class="stage-status {{error ? 'error' : (recording ? 'listening' : '')}}">
-      {{error ? "需要处理一下" : (recording ? "我在听，您慢慢说" : (persistenceStateText === "已保存" ? "这一段已经记下来了" : ((followUpTTSPlaying || followUpTTSLoading) ? "小余正在读问题" : (followUpLoading ? (latestTranscriptText ? "正在帮您整理成文字" : "小余正在准备问题") : "可以开始讲了"))))}}
+      {{error ? "需要处理一下" : (recording ? "我在听，您慢慢说" : (persistenceStateText === "已保存" ? "这一段已经记下来了" : ((followUpTTSPlaying || (followUpTTSLoading && assistantPromptText)) ? "小余正在读问题" : (followUpLoading ? (latestTranscriptText ? "正在帮您整理成文字" : "小余正在准备问题") : "可以开始讲了"))))}}
     </text>
-    <text class="live-text">{{recording ? (liveText || "直接说就行，我会帮您记下来") : (liveText || latestTranscriptText || "点下方“我来说一段”")}}</text>
+    <text class="live-text">{{recording ? (liveText || "直接说就行，我会帮您记下来") : (liveText || latestTranscriptText || assistantPromptText || (followUpLoading ? "小余正在准备第一句话" : "点下方“我来说一段”"))}}</text>
     <view class="capture-strip {{recording ? 'active' : ''}}">
       <view class="capture-dot"></view>
       <text wx:if="{{recording}}">已说 {{captureDurationText}}</text>
@@ -149,7 +149,7 @@
   </view>
 
   <view class="control-bar">
-    <text class="control-hint">{{recording ? "说完请点这里" : ((followUpLoading || followUpTTSLoading || followUpTTSPlaying) ? "点这里就可以开始说" : "说一两句也可以，我会帮您记下来。")}}</text>
+    <text class="control-hint">{{recording ? "说完请点这里" : ((followUpLoading && !assistantPromptText) ? "小余先问一句，稍等一下。" : ((followUpLoading || followUpTTSLoading || followUpTTSPlaying) ? "点这里就可以开始说" : "说一两句也可以，我会帮您记下来。"))}}</text>
     <button
       class="mic-button {{recording ? 'recording' : ''}}"
       loading="{{connecting}}"
