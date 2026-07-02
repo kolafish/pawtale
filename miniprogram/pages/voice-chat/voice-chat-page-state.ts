@@ -5,6 +5,12 @@ import type {
 } from "../../domain/voice-chat";
 import type { VoiceChatConnectionStatus } from "../../services/memoir-streaming-asr";
 
+export interface OpeningTopicOption {
+  id: string;
+  label: string;
+  promptText: string;
+}
+
 export interface VoiceChatData {
   voiceSessionId: string;
   projectTitle: string;
@@ -22,6 +28,8 @@ export interface VoiceChatData {
   assistantPromptLabel: string;
   assistantLoadingText: string;
   assistantEmptyText: string;
+  openingTopicOptions: OpeningTopicOption[];
+  selectedOpeningTopicText: string;
   assistantExpectsAnswer: boolean;
   followUpLoading: boolean;
   followUpError: string;
@@ -91,6 +99,14 @@ export function initialVoiceChatData(): VoiceChatData {
     assistantPromptLabel: "小余想听您讲讲",
     assistantLoadingText: "小余正在准备第一句话",
     assistantEmptyText: "小余会先问一句，帮您开始讲。",
+    openingTopicOptions: [
+      { id: "family", label: "家人", promptText: "那我们先讲家人。可以说一件您想到的家里的小事。" },
+      { id: "work", label: "工作", promptText: "那我们先讲工作。可以说说那时候每天最忙的一件事。" },
+      { id: "friends", label: "朋友", promptText: "那我们先讲朋友。可以说一个您现在还记得的人。" },
+      { id: "place", label: "一个地方", promptText: "那我们先讲一个地方。可以说说您最先想到的是哪里。" },
+      { id: "free", label: "随便聊聊", promptText: "那就想到哪儿说到哪儿。先说一件刚想起来的小事就好。" },
+    ],
+    selectedOpeningTopicText: "",
     assistantExpectsAnswer: true,
     followUpLoading: false,
     followUpError: "",

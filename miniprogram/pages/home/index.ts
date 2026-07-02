@@ -1,6 +1,10 @@
 import type { MemoirGuidanceMode } from "../../domain/voice-chat";
 import { getMemoirIdentity } from "../../services/auth";
 import { trackAuditAction } from "../../services/audit-tracker";
+import {
+  memoirHomePrompt,
+  memoirStoryTitle,
+} from "../../services/memoir-display-copy";
 import { createMemoirVoiceSession } from "../../services/memoir-voice-api";
 import {
   guidanceModeLabel,
@@ -25,6 +29,8 @@ interface HomeData {
   displayName: string;
   projectId: string;
   projectTitle: string;
+  projectDisplayTitle: string;
+  projectPromptText: string;
   hasProject: boolean;
   selectedMode: MemoirGuidanceMode;
   guidanceLabel: string;
@@ -80,6 +86,8 @@ Page<HomeData, {
     displayName: "",
     projectId: "",
     projectTitle: "",
+    projectDisplayTitle: "",
+    projectPromptText: "不用讲完整，先说一件您想起来的事。",
     hasProject: false,
     selectedMode: "free_narration",
     guidanceLabel: "慢慢讲",
@@ -108,6 +116,8 @@ Page<HomeData, {
         displayName: userDisplayName(identity.display_name, identity.email),
         projectId: identity.active_project_id,
         projectTitle: identity.active_project?.title || "还没有回忆录",
+        projectDisplayTitle: hasProject ? memoirStoryTitle(identity.active_project?.title || "") : "还没有回忆录",
+        projectPromptText: memoirHomePrompt(identity.active_project?.title || ""),
         hasProject,
         ...guidancePatch(profile.defaultGuidanceMode),
       });
@@ -118,6 +128,8 @@ Page<HomeData, {
           displayName: "作者",
           projectId: "",
           projectTitle: "登录后创建回忆录",
+          projectDisplayTitle: "登录后创建回忆录",
+          projectPromptText: "登录后，我在这里等你。",
           hasProject: false,
           ...guidancePatch("free_narration"),
         });
@@ -190,7 +202,7 @@ Page<HomeData, {
         `mode=${encodeURIComponent(this.data.selectedMode)}`,
       ];
       if (this.data.projectTitle) {
-        params.push(`projectTitle=${encodeURIComponent(this.data.projectTitle)}`);
+        params.push(`projectTitle=${encodeURIComponent(this.data.projectDisplayTitle || this.data.projectTitle)}`);
       }
       wx.navigateTo({ url: `/pages/voice-chat/index?${params.join("&")}` });
     } catch (error) {

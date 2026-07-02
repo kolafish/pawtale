@@ -15,11 +15,8 @@
   </view>
 
   <view class="topic-panel">
-    <text class="topic-kicker">今天继续讲：</text>
+    <text class="topic-kicker">正在聊：</text>
     <text class="topic-title">{{projectTitle || "这段回忆"}}</text>
-    <text class="status-label {{error ? 'error' : (recording ? 'listening' : '')}}">
-      {{error ? "需要处理一下" : (recording ? "正在听您讲" : (followUpLoading ? "正在帮您整理" : (followUpTTSPlaying ? "小余正在读问题" : (persistenceStateText === "已保存" ? "已保存这一段" : "可以开始了"))))}}
-    </text>
   </view>
 
   <view wx:if="{{error}}" class="error">{{error}}</view>
@@ -52,23 +49,36 @@
     </checkbox-group>
   </view>
 
-  <view wx:if="{{assistantPromptText || followUpLoading || followUpError || canRequestFollowUp}}" class="assistant-panel {{followUpError ? 'error-state' : ''}}">
+  <view wx:if="{{!recording && !followUpLoading && (assistantPromptText || followUpError || canRequestFollowUp)}}" class="assistant-panel {{followUpError ? 'error-state' : ''}}">
     <view class="assistant-head">
       <text class="assistant-label">{{followUpError ? "小余没说好" : "小余想听您讲讲"}}</text>
-      <text class="assistant-state">{{followUpLoading ? "正在想一想" : (followUpError ? "再试一次" : (followUpTTSPlaying ? "正在读" : "等您讲"))}}</text>
     </view>
-    <view wx:if="{{followUpTTSPlaying && assistantPromptText}}" class="assistant-tts-text">
+    <view wx:if="{{!latestTranscriptText && !followUpLoading && !followUpError && !selectedOpeningTopicText}}" class="assistant-opening">
+      <text class="assistant-context">今天可以接着讲，也可以换个方向。想不起来也没关系。</text>
+      <text class="assistant-question">{{assistantPromptText || "今天想先讲哪一段？"}}</text>
+      <view class="assistant-topic-options">
+        <button
+          wx:for="{{openingTopicOptions}}"
+          wx:key="id"
+          class="assistant-topic-button"
+          data-prompt-text="{{item.promptText}}"
+          bindtap="chooseOpeningTopic"
+        >
+          {{item.label}}
+        </button>
+      </view>
+    </view>
+    <text wx:elif="{{selectedOpeningTopicText}}" class="assistant-text">{{selectedOpeningTopicText}}</text>
+    <view wx:elif="{{followUpTTSPlaying && assistantPromptText}}" class="assistant-tts-text">
       <text class="assistant-tts-spoken">{{ttsSpokenText}}</text>
       <text class="assistant-tts-current">{{ttsCurrentText}}</text>
       <text>{{ttsRemainingText}}</text>
     </view>
     <text wx:else class="assistant-text">{{followUpLoading ? assistantLoadingText : (followUpError || assistantPromptText || assistantEmptyText)}}</text>
-    <view wx:if="{{assistantPromptText && (followUpTTSPlaying || followUpTTSError || followUpTTSLoading)}}" class="tts-strip {{followUpTTSError ? 'error' : ''}}">
-      <text>{{followUpTTSError || (followUpTTSLoading ? "正在准备朗读" : "小余正在读问题")}}</text>
-      <view wx:if="{{followUpTTSPlaying}}" class="tts-progress-track">
-        <view class="tts-progress-fill" style="width: {{ttsProgressPercent}}%;"></view>
-      </view>
+    <view wx:if="{{assistantPromptText && followUpTTSPlaying}}" class="tts-progress-track">
+      <view class="tts-progress-fill" style="width: {{ttsProgressPercent}}%;"></view>
     </view>
+    <text wx:if="{{followUpTTSError}}" class="tts-error">{{followUpTTSError}}</text>
     <view class="assistant-actions">
       <button
         wx:if="{{assistantPromptText}}"
@@ -92,20 +102,31 @@
         class="assistant-button ghost"
         bindtap="skipFollowUp"
       >
-        跳过这句
+        跳过
       </button>
     </view>
   </view>
 
   <view class="transcript-stage">
-    <text class="stage-eyebrow">{{recording ? "我在听，您慢慢说" : (followUpLoading ? "小余正在想一想" : (assistantPromptText ? "轮到您了" : "可以开始讲了"))}}</text>
-    <text class="live-text">{{recording ? (liveText || "直接说就行，我会帮您记下来") : (liveText || latestTranscriptText || "点下方“我开始讲了”")}}</text>
+    <text class="stage-status {{error ? 'error' : (recording ? 'listening' : '')}}">
+      {{error ? "需要处理一下" : (recording ? "我在听，您慢慢说" : (persistenceStateText === "已保存" ? "这一段已经记下来了" : ((followUpTTSPlaying || followUpTTSLoading) ? "小余正在读问题" : (followUpLoading ? (latestTranscriptText ? "正在帮您整理成文字" : "小余正在准备问题") : "可以开始讲了"))))}}
+    </text>
+    <text class="live-text">{{recording ? (liveText || "直接说就行，我会帮您记下来") : (liveText || latestTranscriptText || "点下方“我来说一段”")}}</text>
     <view class="capture-strip {{recording ? 'active' : ''}}">
       <view class="capture-dot"></view>
       <text wx:if="{{recording}}">已说 {{captureDurationText}}</text>
       <text wx:else>说完后点“说完了”，我会帮您整理成文字。</text>
       <text wx:if="{{recording && liveCharCount}}">本句 {{liveCharCount}} 字</text>
     </view>
+    <button
+      wx:if="{{recording && !liveText && canRequestFollowUp}}"
+      class="inline-help-button"
+      loading="{{followUpLoading}}"
+      disabled="{{followUpLoading}}"
+      bindtap="stopAndAskFollowUp"
+    >
+      不知道讲什么，让小余问一句
+    </button>
     <view wx:if="{{recording}}" class="voice-activity">
       <view class="level-track">
         <view class="level-fill" style="width: {{audioLevelPercent}}%;"></view>
@@ -128,6 +149,7 @@
   </view>
 
   <view class="control-bar">
+    <text class="control-hint">{{recording ? "说完请点这里" : ((followUpLoading || followUpTTSLoading || followUpTTSPlaying) ? "点这里就可以开始说" : "说一两句也可以，我会帮您记下来。")}}</text>
     <button
       class="mic-button {{recording ? 'recording' : ''}}"
       loading="{{connecting}}"
@@ -135,8 +157,7 @@
       bindtap="toggleRecording"
     >
       <image class="mic-icon" src="/assets/memoir-microphone.png" mode="aspectFit" />
-      <text>{{!voiceAuthorizationAgreed ? "同意后开始说话" : (connecting ? "正在准备" : (recording ? "说完了" : ((followUpLoading || followUpTTSLoading || followUpTTSPlaying) ? "我想说了" : (primaryActionText === "开始说话" ? "我开始讲了" : (primaryActionText === "继续说话" ? "继续讲" : primaryActionText)))))}}</text>
+      <text>{{!voiceAuthorizationAgreed ? "同意后开始说话" : (connecting ? "正在准备" : (recording ? "说完了，帮我整理" : ((followUpLoading || followUpTTSLoading || followUpTTSPlaying) ? "我来讲了" : (primaryActionText === "开始说话" ? "我来说一段" : (primaryActionText === "继续说话" ? "继续讲" : primaryActionText)))))}}</text>
     </button>
-    <text class="control-hint">{{recording ? "说完请点这里，我会帮您整理成文字。" : "说一段就行，我会帮您记下来。"}}</text>
   </view>
 </view>

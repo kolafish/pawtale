@@ -197,10 +197,11 @@ async def test_voice_assistant_turn_guided_opening_prompt_uses_topic_menu(
     assert completed["progress_update"]["kind"] == "project_progress_snapshot"
     assert ai_client.calls[0]["kwargs"]["max_tokens"] == 420
     assert "主题讲述首次开场" in prompt
-    assert "用“老余”做一句简短自我介绍" in prompt
-    assert "今天会陪叙述者把人生里的故事、人物、地方和感受慢慢聊出来" in prompt
-    assert "介绍可聊主题" in prompt
+    assert "用“老余”做很短的自我介绍" in prompt
+    assert "今天想先讲哪一段" in prompt
+    assert "不要念成长列表" in prompt
     assert "人物、事情、家庭、工作、地点、某一天、人生阶段、闲聊" in prompt
+    assert "开场最多 2 句" in prompt
     assert "这个项目还没有留下讲述记录，今天可以从第一条开始。" in prompt
     assert "调试阶段每次回应都尽量自然带一句进度鼓励或后台整理结果" in prompt
 
@@ -229,7 +230,7 @@ async def test_voice_assistant_turn_female_voice_opening_uses_xiaoyu_persona(
     assert completed["host_name"] == "小余"
     assert "你在对话中自称“小余”" in ai_client.calls[0]["system_prompt"]
     assert "下一句“小余”要说的话" in prompt
-    assert "用“小余”做一句简短自我介绍" in prompt
+    assert "用“小余”做很短的自我介绍" in prompt
 
 
 async def test_voice_assistant_turn_progress_prompt_uses_project_snapshot_without_event(
@@ -772,9 +773,9 @@ async def test_voice_assistant_turn_guided_opening_references_previous_session(
     prompt = ai_client.calls[0]["user_prompt"]
     assert "主题讲述继续开场" in prompt
     assert "叙述者之前已有同模式讲述记录" in prompt
-    assert "一句简短自我介绍和回访问候" in prompt
+    assert "今天想先讲哪一段" in prompt
     assert "不要一开场就切进上次的具体细节" in prompt
-    assert "可以接着上次的大方向讲，也可以换到这些主题里挑一个" in prompt
+    assert "想不起来也没关系" in prompt
     assert "叙述者：上次讲到我第一次去上海找工作。" in prompt
 
 

@@ -81,6 +81,14 @@ interface CheckboxChangeEvent {
   };
 }
 
+interface OpeningTopicTapEvent {
+  currentTarget: {
+    dataset: {
+      promptText?: string;
+    };
+  };
+}
+
 let followUpRequestSerial = 0;
 const AUTO_STOP_SILENCE_MS = 3500;
 const AUTO_STOP_MIN_RECORDING_MS = 2000;
@@ -130,6 +138,8 @@ Page<VoiceChatData, {
   markStreamingPlaybackError(error: Error, requestSerial: number): void;
   regenerateFollowUp(): Promise<void>;
   skipFollowUp(): void;
+  chooseOpeningTopic(event: OpeningTopicTapEvent): void;
+  stopAndAskFollowUp(): void;
   enqueueAssistantTurn(item: AssistantTurnQueueItem): void;
   drainAssistantTurnQueue(): Promise<void>;
   prepareAssistantTurnAudio(item: AssistantTurnQueueItem): Promise<PreparedAssistantTurnAudio>;
@@ -650,6 +660,7 @@ Page<VoiceChatData, {
       ttsRemainingText: "",
       ttsProgressPercent: 0,
       canRequestFollowUp: false,
+      selectedOpeningTopicText: "",
       persistenceStateText: "小余正在回应",
     });
     try {
@@ -959,8 +970,47 @@ Page<VoiceChatData, {
         this.data.lastFollowUpSourceMessageId,
         this.data.followUpLoading,
       ),
+      selectedOpeningTopicText: "",
       persistenceStateText: "已跳过回应",
     });
+  },
+
+  chooseOpeningTopic(event) {
+    const promptText = event.currentTarget.dataset.promptText || "";
+    if (!promptText || this.data.followUpLoading) {
+      return;
+    }
+    if (this.data.followUpTTSLoading || this.data.followUpTTSPlaying) {
+      this.cancelFollowUpTTS("opening_topic_selected");
+    }
+    this.setData({
+      selectedOpeningTopicText: promptText,
+      assistantPromptText: promptText,
+      followUpError: "",
+      followUpTTSLoading: false,
+      followUpTTSError: "",
+      followUpTTSStateText: "",
+      assistantExpectsAnswer: true,
+      canRequestFollowUp: false,
+      persistenceStateText: "等待回答",
+      autoListenStateText: "可以点按钮开始讲",
+    });
+  },
+
+  stopAndAskFollowUp() {
+    if (this.data.followUpLoading) {
+      return;
+    }
+    if (this.data.recording && this.voiceStreaming.hasClient()) {
+      this.voiceStreaming.stopRecording();
+      this.setData({
+        recording: false,
+        primaryActionText: "继续说话",
+        persistenceStateText: "已暂停收音",
+        autoListenStateText: "小余准备问一句",
+      });
+    }
+    void this.generateFollowUp(true);
   },
 
   enqueueAssistantTurn(item) {
@@ -1610,6 +1660,7 @@ Page<VoiceChatData, {
       error: "",
       liveText: "",
       liveCharCount: 0,
+      selectedOpeningTopicText: "",
       primaryActionText: "暂停收音",
       autoListenStateText: autoTriggered ? "小余说完，正在听您说" : "小余说完自动听",
     });
@@ -1886,6 +1937,7 @@ Page<VoiceChatData, {
       error: "",
       errorKindText: "",
       assistantPromptText: "",
+      selectedOpeningTopicText: "",
       dismissedFollowUpMessageId: "",
       followUpMessageId: "",
       followUpAudioFileId: "",
