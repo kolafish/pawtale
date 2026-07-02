@@ -1,4 +1,5 @@
 import type {
+  MemoirGuidanceMode,
   MemoirVoiceSessionDetail,
   VoiceChatErrorInfo,
   TTSAlignmentSegment,
@@ -72,6 +73,13 @@ import {
   initialVoiceChatData,
   voiceChatAutoListenGateSnapshot,
 } from "./voice-chat-page-state";
+import {
+  datasetString,
+  queryChoice,
+  queryParam,
+  type PageDatasetEvent,
+  type PageQuery,
+} from "../../services/page-input";
 
 const VOICE_AUTHORIZATION_VALUE = "voice_authorization";
 
@@ -81,13 +89,11 @@ interface CheckboxChangeEvent {
   };
 }
 
-interface OpeningTopicTapEvent {
-  currentTarget: {
-    dataset: {
-      promptText?: string;
-    };
-  };
+interface OpeningTopicDataset {
+  promptText?: string;
 }
+
+type OpeningTopicTapEvent = PageDatasetEvent<OpeningTopicDataset>;
 
 let followUpRequestSerial = 0;
 const AUTO_STOP_SILENCE_MS = 3500;
@@ -95,20 +101,10 @@ const AUTO_STOP_MIN_RECORDING_MS = 2000;
 const AUTO_LISTEN_NO_ANSWER_MS = 15000;
 const MAX_CONSECUTIVE_NO_ANSWER_PROMPTS = 2;
 const STREAMING_TTS_PROGRESS_HOLD_SECONDS = 0.2;
-
-function queryText(value?: string): string {
-  if (!value) {
-    return "";
-  }
-  try {
-    return decodeURIComponent(value);
-  } catch {
-    return value;
-  }
-}
+const GUIDANCE_MODE_VALUES: readonly MemoirGuidanceMode[] = ["free_narration", "guided_interview"];
 
 Page<VoiceChatData, {
-  onLoad(query?: Record<string, string | undefined>): Promise<void>;
+  onLoad(query?: PageQuery): Promise<void>;
   onShow(): void;
   onHide(): void;
   onUnload(): void;
@@ -261,10 +257,10 @@ Page<VoiceChatData, {
   },
 
   async onLoad(query) {
-    const voiceSessionId = query?.voiceSessionId || "";
-    const guidanceMode = query?.mode === "guided_interview" ? "guided_interview" : "free_narration";
-    const currentGuidanceModule = query?.module || "";
-    const projectTitle = queryText(query?.projectTitle);
+    const voiceSessionId = queryParam(query, "voiceSessionId");
+    const guidanceMode = queryChoice(query, "mode", GUIDANCE_MODE_VALUES, "free_narration");
+    const currentGuidanceModule = queryParam(query, "module");
+    const projectTitle = queryParam(query, "projectTitle");
     const voiceAuthorizationAgreed = readVoiceAuthorizationConsent();
     this.setData({
       voiceSessionId,
@@ -976,7 +972,7 @@ Page<VoiceChatData, {
   },
 
   chooseOpeningTopic(event) {
-    const promptText = event.currentTarget.dataset.promptText || "";
+    const promptText = datasetString(event, "promptText");
     if (!promptText || this.data.followUpLoading) {
       return;
     }

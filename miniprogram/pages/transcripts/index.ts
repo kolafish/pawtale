@@ -52,6 +52,14 @@ import {
   type TranscriptTextSegment,
   type TranscriptVoiceEditPreviewView,
 } from "../../services/transcript-view-model";
+import {
+  datasetString,
+  pageUrl,
+  pickerIndex,
+  type PageDatasetEvent,
+  type PagePickerEvent,
+  type PageTextInputEvent,
+} from "../../services/page-input";
 
 export {
   inlineTranscriptVoiceEditDiffSegments,
@@ -59,19 +67,12 @@ export {
   transcriptCreatedAtText,
 } from "../../services/transcript-view-model";
 
-interface DatasetEvent {
-  currentTarget: {
-    dataset: {
-      id?: string;
-    };
-  };
+interface TranscriptDataset {
+  id?: string;
 }
 
-interface TextAreaEvent extends DatasetEvent {
-  detail: {
-    value: string;
-  };
-}
+type DatasetEvent = PageDatasetEvent<TranscriptDataset>;
+type TextAreaEvent = PageTextInputEvent<TranscriptDataset>;
 
 interface SearchInputEvent {
   detail: {
@@ -79,11 +80,7 @@ interface SearchInputEvent {
   };
 }
 
-interface PickerEvent extends DatasetEvent {
-  detail: {
-    value: string | number;
-  };
-}
+type PickerEvent = PagePickerEvent<TranscriptDataset>;
 
 interface TranscriptTextView {
   segments: TranscriptTextSegment[];
@@ -677,19 +674,19 @@ Page<TranscriptsData, {
   },
 
   openTranscriptDetail(event) {
-    const id = event.currentTarget.dataset.id || "";
+    const id = datasetString(event, "id");
     if (!id) {
       return;
     }
-    wx.navigateTo({ url: `/pages/transcript-detail/index?id=${encodeURIComponent(id)}` });
+    wx.navigateTo({ url: pageUrl("/pages/transcript-detail/index", { id }) });
   },
 
   openTranscriptEdit(event) {
-    const id = event.currentTarget.dataset.id || "";
+    const id = datasetString(event, "id");
     if (!id) {
       return;
     }
-    wx.navigateTo({ url: `/pages/transcript-detail/index?id=${encodeURIComponent(id)}&mode=edit` });
+    wx.navigateTo({ url: pageUrl("/pages/transcript-detail/index", { id, mode: "edit" }) });
   },
 
   stopCardTap() {
@@ -799,7 +796,7 @@ Page<TranscriptsData, {
   },
 
   async startVoiceEdit(event) {
-    const id = event.currentTarget.dataset.id || "";
+    const id = datasetString(event, "id");
     const item = this.data.items.find((candidate) => candidate.id === id);
     if (
       !id
@@ -944,7 +941,7 @@ Page<TranscriptsData, {
   },
 
   toggleTranscriptText(event) {
-    const id = event.currentTarget.dataset.id || "";
+    const id = datasetString(event, "id");
     if (!id) {
       return;
     }
@@ -958,9 +955,9 @@ Page<TranscriptsData, {
   },
 
   async assignTranscriptChapter(event) {
-    const utteranceId = event.currentTarget.dataset.id || "";
+    const utteranceId = datasetString(event, "id");
     const item = this.data.items.find((candidate) => candidate.id === utteranceId);
-    const optionIndex = Number(event.detail.value);
+    const optionIndex = pickerIndex(event);
     const option = item?.chapterAssignOptions[optionIndex];
     if (
       !utteranceId
@@ -993,9 +990,9 @@ Page<TranscriptsData, {
   },
 
   async moveTranscriptChapter(event) {
-    const utteranceId = event.currentTarget.dataset.id || "";
+    const utteranceId = datasetString(event, "id");
     const item = this.data.items.find((candidate) => candidate.id === utteranceId);
-    const optionIndex = Number(event.detail.value);
+    const optionIndex = pickerIndex(event);
     const option = item?.chapterMoveOptions[optionIndex];
     if (
       !utteranceId
@@ -1031,7 +1028,7 @@ Page<TranscriptsData, {
   },
 
   beginEdit(event) {
-    const id = event.currentTarget.dataset.id || "";
+    const id = datasetString(event, "id");
     const index = this.data.items.findIndex((item) => item.id === id);
     if (index < 0 || this.data.savingId || this.data.deletingId) {
       return;
@@ -1049,7 +1046,7 @@ Page<TranscriptsData, {
   },
 
   changeText(event) {
-    const id = event.currentTarget.dataset.id || "";
+    const id = datasetString(event, "id");
     const index = this.data.items.findIndex((item) => item.id === id);
     if (index < 0) {
       return;
@@ -1060,7 +1057,7 @@ Page<TranscriptsData, {
   },
 
   cancelEdit(event) {
-    const id = event.currentTarget.dataset.id || "";
+    const id = datasetString(event, "id");
     const index = this.data.items.findIndex((item) => item.id === id);
     if (index < 0 || this.data.savingId || this.data.deletingId) {
       return;
@@ -1071,7 +1068,7 @@ Page<TranscriptsData, {
   },
 
   async saveTranscript(event) {
-    const id = event.currentTarget.dataset.id || "";
+    const id = datasetString(event, "id");
     const item = this.data.items.find((candidate) => candidate.id === id);
     if (!item || this.data.savingId || this.data.deletingId) {
       return;
@@ -1095,7 +1092,7 @@ Page<TranscriptsData, {
   },
 
   resetToRaw(event) {
-    const id = event.currentTarget.dataset.id || "";
+    const id = datasetString(event, "id");
     const index = this.data.items.findIndex((item) => item.id === id);
     if (index < 0) {
       return;
@@ -1106,7 +1103,7 @@ Page<TranscriptsData, {
   },
 
   async deleteTranscript(event) {
-    const id = event.currentTarget.dataset.id || "";
+    const id = datasetString(event, "id");
     const item = this.data.items.find((candidate) => candidate.id === id);
     if (!id || !item || this.data.savingId || this.data.deletingId) {
       return;
@@ -1135,7 +1132,7 @@ Page<TranscriptsData, {
   },
 
   async playAudio(event) {
-    const id = event.currentTarget.dataset.id || "";
+    const id = datasetString(event, "id");
     const item = this.data.items.find((candidate) => candidate.id === id);
     const audioFileIds = [item?.question_audio_file_id, item?.audio_file_id].filter(Boolean) as string[];
     if (!audioFileIds.length) {

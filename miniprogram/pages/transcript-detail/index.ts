@@ -40,18 +40,16 @@ import {
   type TranscriptTextSegment,
   type TranscriptVoiceEditPreviewView,
 } from "../../services/transcript-view-model";
+import {
+  pickerIndex,
+  queryParam,
+  type PagePickerEvent,
+  type PageQuery,
+  type PageTextInputEvent,
+} from "../../services/page-input";
 
-interface TextAreaEvent {
-  detail: {
-    value: string;
-  };
-}
-
-interface PickerEvent {
-  detail: {
-    value: string | number;
-  };
-}
+type TextAreaEvent = PageTextInputEvent;
+type PickerEvent = PagePickerEvent;
 
 interface TranscriptDetailItemView extends MemoirVoiceTranscriptItem {
   titleText: string;
@@ -173,7 +171,7 @@ function confirmDelete(item: TranscriptDetailItemView): Promise<boolean> {
 }
 
 Page<TranscriptDetailData, {
-  onLoad(options?: Record<string, string | undefined>): Promise<void>;
+  onLoad(options?: PageQuery): Promise<void>;
   loadTranscript(): Promise<void>;
   beginEdit(): void;
   toggleQuestionExpanded(): void;
@@ -224,14 +222,14 @@ Page<TranscriptDetailData, {
   },
 
   async onLoad(options) {
-    const utteranceId = options?.id ? decodeURIComponent(options.id) : "";
+    const utteranceId = queryParam(options, "id");
     this.setData({
       utteranceId,
       questionExpanded: false,
       moreActionsExpanded: false,
     });
     await this.loadTranscript();
-    if (options?.mode === "edit") {
+    if (queryParam(options, "mode") === "edit") {
       this.beginEdit();
     }
   },
@@ -478,7 +476,7 @@ Page<TranscriptDetailData, {
 
   async assignTranscriptChapter(event) {
     const item = this.data.item;
-    const optionIndex = Number(event.detail.value);
+    const optionIndex = pickerIndex(event);
     const option = item?.chapterAssignOptions[optionIndex];
     if (!item || !option || this.data.assigning || this.data.moving) {
       return;
@@ -507,7 +505,7 @@ Page<TranscriptDetailData, {
 
   async moveTranscriptChapter(event) {
     const item = this.data.item;
-    const optionIndex = Number(event.detail.value);
+    const optionIndex = pickerIndex(event);
     const option = item?.chapterMoveOptions[optionIndex];
     if (!item || !option || this.data.assigning || this.data.moving) {
       return;

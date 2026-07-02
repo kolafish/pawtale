@@ -8,14 +8,17 @@ import {
 } from "../../services/memoir";
 import { projectProfileSummary } from "../../services/memoir-project-profile";
 import { switchToMe } from "../../services/navigation";
+import {
+  datasetString,
+  pageUrl,
+  type PageDatasetEvent,
+} from "../../services/page-input";
 
-interface DatasetEvent {
-  currentTarget: {
-    dataset: {
-      id?: string;
-    };
-  };
+interface ProjectDataset {
+  id?: string;
 }
+
+type DatasetEvent = PageDatasetEvent<ProjectDataset>;
 
 interface ProjectItem extends Project {
   active: boolean;
@@ -126,7 +129,7 @@ Page<ProjectsData, {
   },
 
   async activateProject(event) {
-    const id = event.currentTarget.dataset.id || "";
+    const id = datasetString(event, "id");
     if (!id || id === this.data.activeProjectId || this.data.busy) {
       return;
     }
@@ -145,15 +148,15 @@ Page<ProjectsData, {
   },
 
   openProjectEdit(event) {
-    const id = event.currentTarget.dataset.id || "";
+    const id = datasetString(event, "id");
     if (!id) {
       return;
     }
-    wx.navigateTo({ url: `/pages/project-edit/index?projectId=${encodeURIComponent(id)}` });
+    wx.navigateTo({ url: pageUrl("/pages/project-edit/index", { projectId: id }) });
   },
 
   async deleteProject(event) {
-    const id = event.currentTarget.dataset.id || "";
+    const id = datasetString(event, "id");
     const project = this.data.projects.find((item) => item.id === id);
     if (!project || this.data.busy) {
       return;

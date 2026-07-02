@@ -1,7 +1,6 @@
 import type {
   MemoirBookAudioResponse,
   MemoirBookChapterDraft,
-  MemoirBookEditorialCopyTarget,
   MemoirBookOutput,
   MemoirBookPlan,
   MemoirBookPlanStructureCommandRequest,
@@ -54,6 +53,15 @@ import {
   switchToHome,
   switchToMe,
 } from "../../services/navigation";
+import {
+  datasetChoice,
+  datasetString,
+  pageUrl,
+  pickerIndex,
+  type PageDatasetEvent,
+  type PagePickerEvent,
+  type PageTextInputEvent,
+} from "../../services/page-input";
 import { sourceAssignmentRequest } from "../../services/memoir-book-source-actions";
 import {
   classifyVoiceClientConnectionError,
@@ -149,35 +157,24 @@ export {
   latestBookContent,
 } from "./book-view-model";
 
-interface DatasetEvent {
-  currentTarget: {
-    dataset: {
-      id?: string;
-      eventIds?: string;
-      key?: string;
-      action?: string;
-      direction?: string;
-      target?: MemoirBookEditorialCopyTarget;
-      title?: string;
-      utteranceId?: string;
-    };
-  };
+interface BookDataset {
+  id?: string;
+  eventIds?: string;
+  key?: string;
+  action?: string;
+  direction?: string;
+  target?: string;
+  title?: string;
+  utteranceId?: string;
 }
 
-interface TextInputEvent extends DatasetEvent {
-  detail: {
-    value: string;
-  };
-}
-
-interface PickerEvent extends DatasetEvent {
-  detail: {
-    value: string | number;
-  };
-}
+type DatasetEvent = PageDatasetEvent<BookDataset>;
+type TextInputEvent = PageTextInputEvent<BookDataset>;
+type PickerEvent = PagePickerEvent<BookDataset>;
 
 const BOOK_GENERATION_EVENT_POLL_INTERVAL_MS = 3000;
 const BOOK_GENERATION_EVENT_POLL_MAX_ATTEMPTS = 120;
+const CHAPTER_MOVE_DIRECTIONS = ["up", "down"] as const;
 
 function isBookGenerationEvent(event: MemoirAutomationEvent): boolean {
   return (
@@ -220,20 +217,11 @@ function defaultBookTitleInput(planTitle: string, projectTitle: string): string 
 }
 
 export function bookChapterDetailUrl(projectId: string, chapterId: string, tab = "content"): string {
-  const params = [
-    `projectId=${encodeURIComponent(projectId)}`,
-    `chapterId=${encodeURIComponent(chapterId)}`,
-    `tab=${encodeURIComponent(tab)}`,
-  ];
-  return `/pages/book-chapter/index?${params.join("&")}`;
+  return pageUrl("/pages/book-chapter/index", { projectId, chapterId, tab });
 }
 
 export function bookExportPageUrl(projectId: string, action = "preview"): string {
-  const params = [
-    `projectId=${encodeURIComponent(projectId)}`,
-    `action=${encodeURIComponent(action)}`,
-  ];
-  return `/pages/book-export/index?${params.join("&")}`;
+  return pageUrl("/pages/book-export/index", { projectId, action });
 }
 
 const BOOK_VOICE_AUTO_STOP_SILENCE_MS = 900;
@@ -773,8 +761,8 @@ Page<BookData, {
   },
 
   async regenerateBookChapterEditorialCopy(event) {
-    const chapterId = event.currentTarget.dataset.id || "";
-    const target = String(event.currentTarget.dataset.target || "");
+    const chapterId = datasetString(event, "id");
+    const target = datasetString(event, "target");
     if (!chapterId || !isChapterEditorialCopyTarget(target)) {
       return;
     }
@@ -809,7 +797,7 @@ Page<BookData, {
   },
 
   openBookChapterEditorialEditor(event) {
-    const chapterId = event.currentTarget.dataset.id || "";
+    const chapterId = datasetString(event, "id");
     if (!chapterId) {
       return;
     }
@@ -849,7 +837,7 @@ Page<BookData, {
   },
 
   changeBookChapterEditorialField(event) {
-    const key = String(event.currentTarget.dataset.key || "");
+    const key = datasetString(event, "key");
     if (key === "intro") {
       this.setData({ bookChapterEditorialIntroInput: event.detail.value, error: "" });
       return;
@@ -892,7 +880,7 @@ Page<BookData, {
   },
 
   changeBookOutputVersion(event) {
-    const index = Number(event.detail.value);
+    const index = pickerIndex(event);
     const option = this.data.bookVersionOptions[index];
     if (!option || !this.data.bookOutput) {
       return;
@@ -961,7 +949,7 @@ Page<BookData, {
   },
 
   toggleAutomationEventDetails(event) {
-    const eventId = event.currentTarget.dataset.id || "";
+    const eventId = datasetString(event, "id");
     if (!eventId) {
       return;
     }
@@ -986,11 +974,11 @@ Page<BookData, {
   },
 
   async acknowledgeAutomationEvent(event) {
-    const eventId = event.currentTarget.dataset.id || "";
-    const eventIdsText = event.currentTarget.dataset.eventIds || eventId;
-    const action = event.currentTarget.dataset.action || "acknowledge";
+    const eventId = datasetString(event, "id");
+    const eventIdsText = datasetString(event, "eventIds") || eventId;
+    const action = datasetString(event, "action") || "acknowledge";
     if (action === "review_source") {
-      const utteranceId = event.currentTarget.dataset.utteranceId || "";
+      const utteranceId = datasetString(event, "utteranceId");
       if (!utteranceId) {
         this.setData({ automationEventError: "缺少要整理的讲述记录" });
         return;
@@ -1107,7 +1095,7 @@ Page<BookData, {
   },
 
   openChapterEditor(event) {
-    const chapterId = event.currentTarget.dataset.id || "";
+    const chapterId = datasetString(event, "id");
     if (!chapterId || !this.data.projectId) {
       this.setData({ error: "缺少章节信息" });
       return;
@@ -1121,7 +1109,7 @@ Page<BookData, {
   },
 
   openChapterSources(event) {
-    const chapterId = event.currentTarget.dataset.id || "";
+    const chapterId = datasetString(event, "id");
     if (!chapterId || !this.data.projectId) {
       this.setData({ error: "缺少章节信息" });
       return;
@@ -1130,7 +1118,7 @@ Page<BookData, {
   },
 
   openChapterMoreActions(event) {
-    const chapterId = event.currentTarget.dataset.id || "";
+    const chapterId = datasetString(event, "id");
     const chapter = this.data.chapters.find((candidate) => candidate.id === chapterId);
     if (!chapter || !this.data.projectId) {
       this.setData({ error: "缺少章节信息" });
@@ -1172,12 +1160,12 @@ Page<BookData, {
       this.setData({ error: "请先生成书稿" });
       return;
     }
-    const action = String(event.currentTarget.dataset.action || "preview");
+    const action = datasetString(event, "action") || "preview";
     wx.navigateTo({ url: bookExportPageUrl(this.data.projectId, action) });
   },
 
   changeChapterTitle(event) {
-    const id = event.currentTarget.dataset.id || "";
+    const id = datasetString(event, "id");
     const chapter = this.data.chapters.find((candidate) => candidate.id === id);
     this.patchChapter(id, {
       editingTitle: event.detail.value,
@@ -1186,7 +1174,7 @@ Page<BookData, {
   },
 
   async saveChapterTitle(event) {
-    const chapterId = event.currentTarget.dataset.id || "";
+    const chapterId = datasetString(event, "id");
     const chapter = this.data.chapters.find((candidate) => candidate.id === chapterId);
     if (!chapter || !this.data.projectId || this.data.titleBusyTarget || this.data.updatingPlanStructure) {
       return;
@@ -1224,7 +1212,7 @@ Page<BookData, {
   },
 
   async generateChapterTitle(event) {
-    const chapterId = event.currentTarget.dataset.id || "";
+    const chapterId = datasetString(event, "id");
     await this.generateChapterTitleById(chapterId, "已重新起名");
   },
 
@@ -1259,7 +1247,7 @@ Page<BookData, {
   },
 
   async removeChapter(event) {
-    const id = event.currentTarget.dataset.id || "";
+    const id = datasetString(event, "id");
     if (!id || this.data.confirmingPlan || this.data.updatingPlanStructure || this.data.chapters.length <= 1) {
       return;
     }
@@ -1275,8 +1263,8 @@ Page<BookData, {
   },
 
   async moveChapter(event) {
-    const chapterId = event.currentTarget.dataset.id || "";
-    const direction = event.currentTarget.dataset.direction;
+    const chapterId = datasetString(event, "id");
+    const direction = datasetChoice(event, "direction", CHAPTER_MOVE_DIRECTIONS, "down");
     if (!chapterId || this.data.updatingPlanStructure) {
       return;
     }
@@ -1293,8 +1281,8 @@ Page<BookData, {
   },
 
   async mergeChapterInto(event) {
-    const sourceChapterId = event.currentTarget.dataset.id || "";
-    const optionIndex = Number(event.detail.value);
+    const sourceChapterId = datasetString(event, "id");
+    const optionIndex = pickerIndex(event);
     const sourceChapter = this.data.chapters.find((chapter) => chapter.id === sourceChapterId);
     const option = sourceChapter?.mergeTargetOptions[optionIndex];
     const targetChapter = option
@@ -1329,8 +1317,8 @@ Page<BookData, {
   },
 
   toggleSplitSource(event) {
-    const chapterId = event.currentTarget.dataset.id || "";
-    const utteranceId = event.currentTarget.dataset.utteranceId || "";
+    const chapterId = datasetString(event, "id");
+    const utteranceId = datasetString(event, "utteranceId");
     const chapter = this.data.chapters.find((candidate) => candidate.id === chapterId);
     if (!chapter || !utteranceId || chapter.source_refs.length <= 1 || this.data.updatingPlanStructure || chapter.draftBusy) {
       return;
@@ -1355,7 +1343,7 @@ Page<BookData, {
   },
 
   async splitSelectedChapterSources(event) {
-    const chapterId = event.currentTarget.dataset.id || "";
+    const chapterId = datasetString(event, "id");
     const chapter = this.data.chapters.find((candidate) => candidate.id === chapterId);
     const selectedIds = new Set(this.data.splitSourceSelections[chapterId] || []);
     if (!chapter || !selectedIds.size || this.data.updatingPlanStructure || chapter.draftBusy) {
@@ -1378,7 +1366,7 @@ Page<BookData, {
   },
 
   toggleChapterSources(event) {
-    const chapterId = event.currentTarget.dataset.id || "";
+    const chapterId = datasetString(event, "id");
     const chapters = this.data.chapters.map((chapter) => (
       chapter.id === chapterId
         ? { ...chapter, sourceListExpanded: !chapter.sourceListExpanded }
@@ -1393,7 +1381,7 @@ Page<BookData, {
   },
 
   async generateChapterDraft(event) {
-    const chapterId = event.currentTarget.dataset.id || "";
+    const chapterId = datasetString(event, "id");
     await this.generateChapterDraftById(chapterId);
   },
 
@@ -1431,7 +1419,7 @@ Page<BookData, {
   },
 
   changeDraftContent(event) {
-    const chapterId = event.currentTarget.dataset.id || "";
+    const chapterId = datasetString(event, "id");
     const value = event.detail.value;
     const chapter = this.data.chapters.find((candidate) => candidate.id === chapterId);
     if (!chapter) {
@@ -1447,7 +1435,7 @@ Page<BookData, {
   },
 
   async saveChapterDraft(event) {
-    const chapterId = event.currentTarget.dataset.id || "";
+    const chapterId = datasetString(event, "id");
     const chapter = this.data.chapters.find((candidate) => candidate.id === chapterId);
     if (!chapter || !this.data.projectId || chapter.draftBusy || this.data.updatingPlanStructure) {
       return;
@@ -1472,7 +1460,7 @@ Page<BookData, {
   },
 
   async confirmChapterDraft(event) {
-    const chapterId = event.currentTarget.dataset.id || "";
+    const chapterId = datasetString(event, "id");
     const chapter = this.data.chapters.find((candidate) => candidate.id === chapterId);
     if (
       !chapter
@@ -1499,8 +1487,8 @@ Page<BookData, {
   },
 
   async assignUncoveredSource(event) {
-    const utteranceId = event.currentTarget.dataset.id || "";
-    const optionIndex = Number(event.detail.value);
+    const utteranceId = datasetString(event, "id");
+    const optionIndex = pickerIndex(event);
     const option = this.data.chapterPickerOptions[optionIndex];
     if (!utteranceId || !option || !this.data.projectId || this.data.assigningSourceId) {
       return;
@@ -1535,7 +1523,7 @@ Page<BookData, {
   },
 
   async addUncoveredSourceAsChapter(event) {
-    const utteranceId = event.currentTarget.dataset.id || "";
+    const utteranceId = datasetString(event, "id");
     await this.addUncoveredSourceAsChapterById(utteranceId);
   },
 
@@ -1556,7 +1544,7 @@ Page<BookData, {
   },
 
   async deleteConfirmedChapter(event) {
-    const chapterId = event.currentTarget.dataset.id || "";
+    const chapterId = datasetString(event, "id");
     const chapter = this.data.chapters.find((candidate) => candidate.id === chapterId);
     if (
       !chapter
@@ -1691,7 +1679,7 @@ Page<BookData, {
   },
 
   editBookOutputChapter(event) {
-    const chapterId = event.currentTarget.dataset.id || "";
+    const chapterId = datasetString(event, "id");
     if (!chapterId || !this.data.projectId) {
       this.setData({ error: "缺少章节信息" });
       return;
@@ -1701,7 +1689,7 @@ Page<BookData, {
   },
 
   async playChapterAudio(event) {
-    const chapterId = event.currentTarget.dataset.id || "";
+    const chapterId = datasetString(event, "id");
     await this.playChapterAudioById(chapterId);
   },
 
