@@ -103,7 +103,7 @@ export function transcriptSourceMoveRequest(
     return { request: null, error: "没有找到可移动的本章素材" };
   }
   if (chapterSourceRefs(sourceChapter).length <= 1) {
-    return { request: null, error: "本章只剩 1 条素材；请在成书页合并或删除章节来保留素材" };
+    return { request: null, error: "本章只剩 1 条素材；请在书稿页合并或删除章节来保留素材" };
   }
   if (!targetChapter || targetChapter.id === sourceChapter.id) {
     return { request: null, error: "请选择要移动到的章节" };

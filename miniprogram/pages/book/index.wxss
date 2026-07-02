@@ -147,7 +147,7 @@
 
 .automation-panel {
   margin-top: 22rpx;
-  padding: 24rpx;
+  padding: 20rpx;
   box-sizing: border-box;
 }
 
@@ -195,8 +195,8 @@
 }
 
 .automation-item {
-  margin-top: 18rpx;
-  padding: 18rpx;
+  margin-top: 14rpx;
+  padding: 16rpx;
   border: 2rpx solid #f4dfc6;
   border-radius: 18rpx;
   background: #fcf7ed;
@@ -417,7 +417,9 @@
 }
 
 .book-voice-assistant.collapsed {
-  padding-bottom: 24rpx;
+  padding: 18rpx 22rpx;
+  border-color: #f0dfcd;
+  border-radius: 16rpx;
 }
 
 .book-voice-header {
@@ -436,7 +438,7 @@
 .book-voice-title {
   display: block;
   color: #7b4a40;
-  font-size: 30rpx;
+  font-size: 28rpx;
   font-weight: 800;
   line-height: 1.35;
 }
@@ -904,8 +906,8 @@
 
 .draft-status.confirmed,
 .chapter-summary-status.confirmed {
-  background: #edf7f2;
-  color: #2f6f55;
+  background: #f4faf6;
+  color: #4f8067;
 }
 
 .source-count,
@@ -1151,12 +1153,12 @@
 .chapter-summary-status-hint {
   margin-top: 2rpx;
   font-size: 18rpx;
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .chapter-summary-actions {
   display: grid;
-  grid-template-columns: minmax(0, 1.2fr) repeat(2, minmax(0, 0.85fr));
+  grid-template-columns: minmax(0, 1fr) minmax(128rpx, 0.42fr);
   gap: 12rpx;
 }
 

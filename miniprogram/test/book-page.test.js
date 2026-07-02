@@ -980,15 +980,22 @@ test("book page renders chapter source counts in plan and drafting cards", () =>
 });
 
 test("book page defaults to progress cards with single chapter editing", () => {
+  const appJson = JSON.parse(fs.readFileSync(path.join(__dirname, "../app.json"), "utf8"));
+  const pageJson = JSON.parse(fs.readFileSync(path.join(__dirname, "../pages/book/index.json"), "utf8"));
   const wxml = fs.readFileSync(path.join(__dirname, "../pages/book/index.wxml"), "utf8");
   const wxss = fs.readFileSync(path.join(__dirname, "../pages/book/index.wxss"), "utf8");
 
+  assert.equal(appJson.tabBar.list.find((item) => item.pagePath === "pages/book/index").text, "书稿");
+  assert.equal(pageJson.navigationBarTitleText, "书稿");
+  assert.match(wxml, /<text class="page-title">书稿<\/text>/);
   assert.match(wxml, /chapter-summary-card/);
   assert.doesNotMatch(wxml, /editingChapterId/);
   assert.match(wxml, /bindtap="openChapterEditor"/);
-  assert.match(wxml, /bindtap="openChapterSources"/);
+  assert.match(wxml, /bindtap="openChapterMoreActions"/);
   assert.match(wxml, /编辑正文/);
-  assert.match(wxml, /原始讲述/);
+  assert.match(wxml, /更多/);
+  assert.doesNotMatch(wxml, />\s*原始讲述\s*<\/button>/);
+  assert.doesNotMatch(wxml, /bindtap="playChapterAudio"/);
   assert.doesNotMatch(wxml, /bindinput="changeDraftContent"/);
   assert.doesNotMatch(wxml, /bindtap="saveChapterDraft"/);
   assert.doesNotMatch(wxml, /chapter-action-groups/);
@@ -1018,6 +1025,43 @@ test("book page routes chapter card actions to the chapter detail page", () => {
     "/pages/book-chapter/index?projectId=project%2F1&chapterId=chapter%2F1&tab=content",
     "/pages/book-chapter/index?projectId=project%2F1&chapterId=chapter%2F1&tab=sources",
   ]);
+  delete global.wx;
+});
+
+test("book page opens secondary chapter actions from the more sheet", () => {
+  const navigations = [];
+  const actionSheets = [];
+  const audioCalls = [];
+  global.wx = {
+    navigateTo(options) {
+      navigations.push(options.url);
+    },
+    showActionSheet(options) {
+      actionSheets.push(options.itemList);
+      options.success({ tapIndex: actionSheets.length === 1 ? 0 : 1 });
+    },
+    showToast() {},
+  };
+  const { mod, page } = loadBookPage();
+  const chapters = mod.buildChapterViews(samplePlan("confirmed"), {
+    "chapter-1": sampleDraft(1, "draft"),
+  });
+  const context = pageContext(page, { projectId: "project/1", chapters });
+  context.playChapterAudioById = (chapterId) => {
+    audioCalls.push(chapterId);
+  };
+
+  page.openChapterMoreActions.call(context, { currentTarget: { dataset: { id: "chapter-1" } } });
+  page.openChapterMoreActions.call(context, { currentTarget: { dataset: { id: "chapter-1" } } });
+
+  assert.deepEqual(actionSheets, [
+    ["看素材", "朗读"],
+    ["看素材", "朗读"],
+  ]);
+  assert.deepEqual(navigations, [
+    "/pages/book-chapter/index?projectId=project%2F1&chapterId=chapter-1&tab=sources",
+  ]);
+  assert.deepEqual(audioCalls, ["chapter-1"]);
   delete global.wx;
 });
 
@@ -1064,6 +1108,7 @@ test("book page exposes a compact voice assistant entry", () => {
   const wxml = fs.readFileSync(path.join(__dirname, "../pages/book/index.wxml"), "utf8");
   const wxss = fs.readFileSync(path.join(__dirname, "../pages/book/index.wxss"), "utf8");
 
+  assert.match(wxml, /语音修改书稿/);
   assert.match(wxml, /对书稿说一句/);
   assert.match(wxml, /把这一段说得朴素一点/);
   assert.match(wxml, /听目录/);
@@ -1137,10 +1182,11 @@ test("book page keeps chapter editing separate from full-book export settings", 
 
   assert.match(wxml, /逐章成稿/);
   assert.match(wxml, /编辑正文/);
-  assert.match(wxml, /原始讲述/);
+  assert.match(wxml, /更多/);
   assert.match(wxml, /bindtap="openChapterEditor"/);
-  assert.match(wxml, /bindtap="openChapterSources"/);
-  assert.match(wxml, /bindtap="playChapterAudio"/);
+  assert.match(wxml, /bindtap="openChapterMoreActions"/);
+  assert.doesNotMatch(wxml, />\s*原始讲述\s*<\/button>/);
+  assert.doesNotMatch(wxml, /bindtap="playChapterAudio"/);
   assert.doesNotMatch(wxml, /成书信息/);
   assert.doesNotMatch(wxml, /书稿设置/);
   assert.doesNotMatch(wxml, /书籍结构/);

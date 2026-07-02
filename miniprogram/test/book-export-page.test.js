@@ -188,14 +188,21 @@ function loadBookExportPage(voiceApiExports = {}) {
 
 test("book export page is registered and exposes preview/export controls", () => {
   const appJson = JSON.parse(fs.readFileSync(path.join(__dirname, "../app.json"), "utf8"));
+  const pageJson = JSON.parse(fs.readFileSync(path.join(__dirname, "../pages/book-export/index.json"), "utf8"));
   const wxml = fs.readFileSync(path.join(__dirname, "../pages/book-export/index.wxml"), "utf8");
   const wxss = fs.readFileSync(path.join(__dirname, "../pages/book-export/index.wxss"), "utf8");
 
   assert.ok(appJson.pages.includes("pages/book-export/index"));
-  assert.match(wxml, /全书导出/);
+  assert.equal(pageJson.navigationBarTitleText, "预览与导出");
+  assert.match(wxml, /预览与导出/);
+  assert.match(wxml, /全书预览/);
   assert.match(wxml, /阅读版 PDF/);
   assert.match(wxml, /打印版 PDF/);
   assert.match(wxml, /导出文本/);
+  assert.match(wxml, /data-layout="standard"/);
+  assert.match(wxml, /data-layout="large_print"/);
+  assert.match(wxml, /export-action-hint/);
+  assert.match(wxml, /bindtouchstart="previewExportActionHint"/);
   assert.match(wxml, /成书信息/);
   assert.match(wxml, /bindinput="changeBookTitle"/);
   assert.match(wxml, /小余起名/);
@@ -203,6 +210,8 @@ test("book export page is registered and exposes preview/export controls", () =>
   assert.match(wxml, /口述人/);
   assert.match(wxml, /封面风格/);
   assert.match(wxml, /保存成书信息/);
+  assert.match(wxml, /历史版本与重新整理/);
+  assert.match(wxml, /有历史版本/);
   assert.match(wxml, /重新整理一版/);
   assert.match(wxml, /当前书稿会保留/);
   assert.match(wxml, /bindtap="generateBook"/);
@@ -213,12 +222,15 @@ test("book export page is registered and exposes preview/export controls", () =>
   assert.match(wxml, /bookManuscriptStructureItems/);
   assert.match(wxml, /bookManuscriptChapterItems/);
   assert.match(wxml, /bookManuscriptBackMatterItems/);
-  assert.match(wxml, /bindchange="changeBookExportLayout"/);
+  assert.doesNotMatch(wxml, /PDF 排版/);
+  assert.doesNotMatch(wxml, /bindchange="changeBookExportLayout"/);
   assert.match(wxml, /bindchange="toggleBookExportSourceAppendix"/);
   assert.match(wxml, /历史版本/);
   assert.match(wxss, /\.book-design-panel/);
-  assert.match(wxss, /\.regenerate-card/);
+  assert.doesNotMatch(wxss, /\.regenerate-card/);
   assert.match(wxss, /\.manuscript-card/);
+  assert.match(wxss, /\.advanced-card/);
+  assert.match(wxss, /\.export-action-hint/);
   assert.match(wxss, /\.book-cover-preview\.moonlit-courtyard/);
   assert.match(wxss, /\.export-actions/);
   assert.match(wxss, /\.preview-card/);
@@ -247,6 +259,7 @@ test("book export page loads plan and output from query project", async () => {
   assert.equal(context.data.projectId, "project/1");
   assert.equal(context.data.requestedAction, "print_pdf");
   assert.equal(context.data.exportNotice, "打印版字号更大，适合装订保存。");
+  assert.equal(context.data.exportActionHintText, "适合拿去打印装订，页边距更宽。");
   assert.equal(context.data.bookContent, "全书第二版正文");
   assert.equal(context.data.bookPreviewChapters.length, 1);
   assert.equal(context.data.bookManuscriptAvailable, true);
@@ -254,6 +267,21 @@ test("book export page loads plan and output from query project", async () => {
   assert.equal(context.data.bookManuscriptStructureItems.some((item) => item.title === "目录"), true);
   assert.equal(context.data.bookManuscriptChapterItems[0].intro, "这一章主要记录外婆小时候在院子里的生活。");
   assert.equal(context.data.bookManuscriptBackMatterItems.some((item) => item.title === "原始讲述索引"), true);
+});
+
+test("book export page explains the selected export action", () => {
+  const { page } = loadBookExportPage();
+  const context = pageContext(page);
+
+  page.previewExportActionHint.call(context, {
+    currentTarget: { dataset: { action: "text" } },
+  });
+  assert.equal(context.data.exportActionHintText, "导出纯文字，方便复制和继续编辑。");
+
+  page.previewExportActionHint.call(context, {
+    currentTarget: { dataset: { action: "reading_pdf" } },
+  });
+  assert.equal(context.data.exportActionHintText, "适合微信分享和手机阅读。");
 });
 
 test("book export page saves full-book metadata and cover style", async () => {
@@ -395,7 +423,45 @@ test("book export page downloads selected PDF layout and source appendix setting
   assert.equal(opened[0].filePath, "/tmp/book.pdf");
   assert.equal(opened[0].fileType, "pdf");
   assert.equal(toasts[0].title, "PDF 已打开");
+  assert.equal(context.data.exportActionHintText, "适合拿去打印装订，页边距更宽。");
   assert.equal(context.data.bookExportBusyTarget, "");
+  delete global.wx;
+});
+
+test("book export page downloads reading PDF with the standard layout", async () => {
+  const exportCalls = [];
+  const opened = [];
+  const toasts = [];
+  global.wx = {
+    openDocument(options) {
+      opened.push(options);
+      options.success();
+    },
+    showToast(options) {
+      toasts.push(options);
+    },
+  };
+  const { page } = loadBookExportPage({
+    downloadMemoirBookOutputExport: async (projectId, format, versionId, layout, showSourceAppendix) => {
+      exportCalls.push({ projectId, format, versionId, layout, showSourceAppendix });
+      return "/tmp/reading.pdf";
+    },
+  });
+  const context = pageContext(page, {
+    projectId: "project/1",
+    bookExportLayout: "large_print",
+  });
+  page.applyBookExportData.call(context, samplePlan(), sampleBookOutput());
+
+  await page.downloadBookOutputExport.call(context, {
+    currentTarget: { dataset: { format: "pdf", layout: "standard" } },
+  });
+
+  assert.equal(exportCalls[0].layout, "standard");
+  assert.equal(exportCalls[0].showSourceAppendix, true);
+  assert.equal(opened[0].filePath, "/tmp/reading.pdf");
+  assert.equal(toasts[0].title, "PDF 已打开");
+  assert.equal(context.data.exportActionHintText, "适合微信分享和手机阅读。");
   delete global.wx;
 });
 

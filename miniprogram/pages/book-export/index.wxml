@@ -10,13 +10,13 @@
   <block wx:else>
     <view class="export-hero">
       <view>
-        <text class="eyebrow">全书导出</text>
+        <text class="eyebrow">预览与导出</text>
         <text class="hero-title">{{bookManuscriptTitle || bookPreviewTitle || planTitle}}</text>
         <text class="hero-meta">
           {{totalChapterCount}} 章 · {{bookCharCount || 0}} 字 · {{bookContent ? "已生成书稿" : "尚未生成书稿"}}
         </text>
       </view>
-      <text wx:if="{{bookVersionText}}" class="version-pill">{{bookVersionText}}</text>
+      <text wx:if="{{bookVersionOptions.length > 1}}" class="version-pill">有历史版本</text>
     </view>
 
     <view wx:if="{{bookStaleNotice}}" class="notice warn">{{bookStaleNotice}}</view>
@@ -24,55 +24,88 @@
     <view wx:if="{{bookVersionNotice}}" class="notice subtle">{{bookVersionNotice}}</view>
 
     <view wx:if="{{!bookContent}}" class="state-card">
-      <text>回到成书页生成全书后，可以在这里预览和导出。</text>
+      <text>回到书稿页生成全书后，可以在这里预览和导出。</text>
     </view>
 
     <block wx:else>
+      <view class="preview-card">
+        <view class="section-head">
+          <text class="section-title">全书预览</text>
+        </view>
+
+        <view wx:if="{{bookPreviewTocItems.length}}" class="toc-list">
+          <text wx:for="{{bookPreviewTocItems}}" wx:key="id" class="toc-item">
+            {{item.indexText}} {{item.title}}
+          </text>
+        </view>
+
+        <view class="preview-toggle-row">
+          <text class="preview-count">{{bookPreviewChapters.length}} 章预览</text>
+          <button class="text-button" bindtap="toggleBookPreviewChapters">
+            {{bookPreviewChaptersExpanded ? "收起" : "展开"}}
+          </button>
+        </view>
+        <view wx:if="{{bookPreviewChaptersExpanded && bookPreviewChapters.length}}" class="chapter-preview-list">
+          <view wx:for="{{bookPreviewChapters}}" wx:key="id" class="chapter-preview">
+            <text class="chapter-title">{{item.title}}</text>
+            <text class="chapter-excerpt">{{item.excerpt}}</text>
+          </view>
+        </view>
+        <text wx:if="{{!bookPreviewChapters.length}}" class="book-output-text" selectable>{{bookContent}}</text>
+      </view>
+
+      <view class="export-settings">
+        <view class="setting-row">
+          <view>
+            <text class="setting-title">原始讲述索引</text>
+            <text class="setting-meta">附上原始讲述，方便以后核对和补充；分享或打印可关闭</text>
+          </view>
+          <switch
+            checked="{{bookExportShowSourceAppendix}}"
+            color="#A64B3E"
+            bindchange="toggleBookExportSourceAppendix"
+          />
+        </view>
+      </view>
+
       <view class="export-actions">
         <button
           class="primary-button"
+          data-action="reading_pdf"
           data-format="pdf"
-          loading="{{bookExportBusyTarget === 'book-export:pdf:' + bookExportLayout}}"
+          data-layout="standard"
+          loading="{{bookExportBusyTarget === 'book-export:pdf:standard'}}"
           disabled="{{bookStaleNotice || bookExportBusyTarget}}"
+          bindtouchstart="previewExportActionHint"
           bindtap="downloadBookOutputExport"
         >
           阅读版 PDF
         </button>
         <button
           class="ghost-button"
+          data-action="print_pdf"
           data-format="pdf"
           data-layout="large_print"
           loading="{{bookExportBusyTarget === 'book-export:pdf:large_print'}}"
           disabled="{{bookStaleNotice || bookExportBusyTarget}}"
+          bindtouchstart="previewExportActionHint"
           bindtap="downloadBookOutputExport"
         >
           打印版 PDF
         </button>
         <button
           class="ghost-button"
+          data-action="text"
           data-format="txt"
           loading="{{bookExportBusyTarget === 'book-export:txt:standard'}}"
           disabled="{{bookStaleNotice || bookExportBusyTarget}}"
+          bindtouchstart="previewExportActionHint"
           bindtap="downloadBookOutputExport"
         >
           导出文本
         </button>
       </view>
-
-      <view class="regenerate-card">
-        <view class="regenerate-copy">
-          <text class="regenerate-title">重新整理一版</text>
-          <text class="regenerate-meta">当前书稿会保留，新版本完成后可在历史版本里查看。</text>
-        </view>
-        <button
-          class="ghost-button compact"
-          loading="{{generatingBook}}"
-          disabled="{{generatingBook || bookTitleSaving || bookViewingHistoricalVersion || !bookContent}}"
-          bindtap="generateBook"
-        >
-          重新整理
-        </button>
-      </view>
+      <text class="export-action-hint">{{exportActionHintText}}</text>
 
       <view class="book-design-panel">
         <view class="book-design-head">
@@ -340,70 +373,51 @@
         </view>
       </view>
 
-      <view class="export-settings">
+      <view class="advanced-card">
+        <view class="section-head">
+          <text class="section-title">历史版本与重新整理</text>
+          <text class="section-count">高级操作</text>
+        </view>
+
         <picker
-          class="setting-picker"
+          wx:if="{{bookVersionOptions.length > 1}}"
           mode="selector"
-          range="{{bookExportLayoutOptions}}"
+          range="{{bookVersionOptions}}"
           range-key="label"
-          value="{{bookExportLayoutIndex}}"
-          bindchange="changeBookExportLayout"
+          value="{{bookSelectedVersionIndex}}"
+          bindchange="changeBookOutputVersion"
         >
-          <view class="setting-row">
-            <view>
-              <text class="setting-title">PDF 排版</text>
-              <text class="setting-meta">{{bookExportLayoutDetailText}}</text>
+          <view class="advanced-row">
+            <view class="advanced-copy">
+              <text class="advanced-title">历史版本：{{bookVersionText}}</text>
+              <text class="advanced-meta">可以切回旧版本预览，不会改动当前书稿。</text>
             </view>
-            <text class="setting-value">{{bookExportLayoutLabel}}</text>
+            <text class="advanced-value">查看</text>
           </view>
         </picker>
-        <view class="setting-row">
-          <view>
-            <text class="setting-title">原始讲述索引</text>
-            <text class="setting-meta">附上原始讲述，方便以后核对和补充；分享或打印可关闭</text>
+
+        <view wx:else class="advanced-row">
+          <view class="advanced-copy">
+            <text class="advanced-title">历史版本</text>
+            <text class="advanced-meta">当前还没有历史版本。</text>
           </view>
-          <switch
-            checked="{{bookExportShowSourceAppendix}}"
-            color="#A64B3E"
-            bindchange="toggleBookExportSourceAppendix"
-          />
+          <text class="advanced-value muted">暂无</text>
         </view>
-      </view>
 
-      <view class="preview-card">
-        <view class="section-head">
-          <text class="section-title">全书预览</text>
-          <picker
-            wx:if="{{bookVersionOptions.length > 1}}"
-            mode="selector"
-            range="{{bookVersionOptions}}"
-            range-key="label"
-            value="{{bookSelectedVersionIndex}}"
-            bindchange="changeBookOutputVersion"
+        <view class="advanced-row">
+          <view class="advanced-copy">
+            <text class="advanced-title">重新整理一版</text>
+            <text class="advanced-meta">当前书稿会保留，新版本完成后可在历史版本里查看。</text>
+          </view>
+          <button
+            class="ghost-button compact"
+            loading="{{generatingBook}}"
+            disabled="{{generatingBook || bookTitleSaving || bookViewingHistoricalVersion || !bookContent}}"
+            bindtap="generateBook"
           >
-            <text class="version-link">历史版本</text>
-          </picker>
-        </view>
-
-        <view wx:if="{{bookPreviewTocItems.length}}" class="toc-list">
-          <text wx:for="{{bookPreviewTocItems}}" wx:key="id" class="toc-item">
-            {{item.indexText}} {{item.title}}
-          </text>
-        </view>
-
-        <view class="preview-toggle-row">
-          <text class="preview-count">{{bookPreviewChapters.length}} 章预览</text>
-          <button class="text-button" bindtap="toggleBookPreviewChapters">
-            {{bookPreviewChaptersExpanded ? "收起" : "展开"}}
+            重新整理
           </button>
         </view>
-        <view wx:if="{{bookPreviewChaptersExpanded && bookPreviewChapters.length}}" class="chapter-preview-list">
-          <view wx:for="{{bookPreviewChapters}}" wx:key="id" class="chapter-preview">
-            <text class="chapter-title">{{item.title}}</text>
-            <text class="chapter-excerpt">{{item.excerpt}}</text>
-          </view>
-        </view>
-        <text wx:if="{{!bookPreviewChapters.length}}" class="book-output-text" selectable>{{bookContent}}</text>
       </view>
     </block>
   </block>

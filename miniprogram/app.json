@@ -35,7 +35,7 @@
       },
       {
         "pagePath": "pages/book/index",
-        "text": "成书",
+        "text": "书稿",
         "iconPath": "assets/tab-book.png",
         "selectedIconPath": "assets/tab-book-active.png"
       },
