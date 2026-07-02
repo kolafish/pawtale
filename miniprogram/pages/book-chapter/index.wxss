@@ -225,6 +225,129 @@
   border-color: #dfc8b8;
 }
 
+.title-card,
+.action-card {
+  background: #fffdf9;
+}
+
+.chapter-title-input,
+.draft-textarea {
+  width: 100%;
+  padding: 20rpx 22rpx;
+  border: 2rpx solid #e6d6c8;
+  border-radius: 14rpx;
+  background: #fffaf4;
+  color: #24100b;
+  font-size: 30rpx;
+  line-height: 1.45;
+  box-sizing: border-box;
+}
+
+.chapter-title-input {
+  height: 82rpx;
+}
+
+.draft-textarea {
+  min-height: 420rpx;
+}
+
+.actions-row {
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+  margin-top: 20rpx;
+}
+
+.actions-row.compact {
+  flex-wrap: wrap;
+}
+
+.primary-button,
+.ghost-button {
+  min-height: 70rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  padding: 0 24rpx;
+  border-radius: 14rpx;
+  font-size: 27rpx;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.primary-button {
+  background: #9f4a3c;
+  color: #ffffff;
+}
+
+.ghost-button {
+  border: 2rpx solid #d8c7b9;
+  background: #fffaf4;
+  color: #6d4b3f;
+}
+
+.primary-button::after,
+.ghost-button::after {
+  border: 0;
+}
+
+.primary-button[disabled],
+.ghost-button[disabled] {
+  opacity: 0.52;
+}
+
+.draft-empty {
+  min-height: 180rpx;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 18rpx;
+  color: #8a7a70;
+  font-size: 28rpx;
+}
+
+.chapter-error {
+  margin-top: 20rpx;
+  padding: 20rpx 24rpx;
+  border-radius: 16rpx;
+  background: #fff1f2;
+  color: #b4234a;
+  font-size: 26rpx;
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+.chapter-action-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 22rpx;
+}
+
+.chapter-action-group {
+  padding: 20rpx;
+  border: 2rpx solid #eadfd2;
+  border-radius: 16rpx;
+  background: #fffaf4;
+}
+
+.chapter-action-label {
+  display: block;
+  color: #24100b;
+  font-size: 26rpx;
+  font-weight: 850;
+  line-height: 1.35;
+}
+
+.chapter-action-hint {
+  display: block;
+  margin-top: 12rpx;
+  color: #8a7a70;
+  font-size: 24rpx;
+  line-height: 1.45;
+}
+
 .body-text {
   display: block;
   color: #3b2a22;

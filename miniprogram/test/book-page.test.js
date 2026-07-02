@@ -995,7 +995,7 @@ test("book page defaults to progress cards with single chapter editing", () => {
   assert.match(wxss, /\.chapter-action-groups/);
 });
 
-test("book page routes chapter sources to the chapter detail page", () => {
+test("book page routes chapter card actions to the chapter detail page", () => {
   const navigations = [];
   global.wx = {
     navigateTo(options) {
@@ -1010,9 +1010,11 @@ test("book page routes chapter sources to the chapter detail page", () => {
     "/pages/book-chapter/index?projectId=project%2F1&chapterId=chapter%2F1&tab=sources",
   );
 
+  page.openChapterEditor.call(context, { currentTarget: { dataset: { id: "chapter/1" } } });
   page.openChapterSources.call(context, { currentTarget: { dataset: { id: "chapter/1" } } });
 
   assert.deepEqual(navigations, [
+    "/pages/book-chapter/index?projectId=project%2F1&chapterId=chapter%2F1&tab=content",
     "/pages/book-chapter/index?projectId=project%2F1&chapterId=chapter%2F1&tab=sources",
   ]);
   delete global.wx;
@@ -2716,11 +2718,11 @@ test("book page shows submit errors when full-book background generation cannot 
   delete global.wx;
 });
 
-test("book page links structured full-book preview back to chapter editing", () => {
-  const scrollCalls = [];
+test("book page links structured full-book preview to the chapter detail page", () => {
+  const navigations = [];
   global.wx = {
-    pageScrollTo(options) {
-      scrollCalls.push(options);
+    navigateTo(options) {
+      navigations.push(options.url);
     },
   };
   const { page } = loadBookPage();
@@ -2737,11 +2739,9 @@ test("book page links structured full-book preview back to chapter editing", () 
   assert.equal(context.data.bookPreviewChapters.length, 2);
   page.editBookOutputChapter.call(context, { currentTarget: { dataset: { id: "chapter-2" } } });
 
-  assert.deepEqual(scrollCalls[0], {
-    selector: "#chapter-editor-chapter-2",
-    duration: 260,
-    offsetTop: 12,
-  });
+  assert.deepEqual(navigations, [
+    "/pages/book-chapter/index?projectId=project%2F1&chapterId=chapter-2&tab=content",
+  ]);
   delete global.wx;
 });
 

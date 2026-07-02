@@ -3,15 +3,22 @@ import type {
   MemoirBookPlan,
   MemoirBookSourceCoverage,
 } from "../../domain/voice-chat";
+import { trackAuditAction } from "../../services/audit-tracker";
 import {
+  confirmMemoirBookChapterDraft,
+  enqueueMemoirBookChapterDraftGeneration,
+  generateMemoirBookChapterTitle,
   getMemoirBookChapterDraft,
   getMemoirBookPlan,
   getMemoirBookSourceCoverage,
+  updateMemoirBookChapterDraft,
+  updateMemoirBookChapterTitle,
 } from "../../services/memoir-voice-api";
 import { ApiError } from "../../services/request";
 import type { BookChapterView } from "../book/book-view-model";
 import {
   buildChapterViews,
+  latestDraftContent,
   trimText,
 } from "../book/book-view-model";
 
@@ -31,6 +38,12 @@ interface DatasetEvent {
   };
 }
 
+interface TextInputEvent {
+  detail: {
+    value: string;
+  };
+}
+
 interface ChapterMoreActionView {
   id: string;
   title: string;
@@ -44,11 +57,14 @@ interface BookChapterPageData {
   chapterId: string;
   activeTab: ChapterDetailTab;
   planTitle: string;
+  plan: MemoirBookPlan | null;
+  sourceCoverage: MemoirBookSourceCoverage | null;
   chapter: BookChapterView | null;
   chapterIndexText: string;
   contentText: string;
   sourceCountText: string;
   sourceEmptyText: string;
+  titleBusy: boolean;
   moreActions: ChapterMoreActionView[];
 }
 
@@ -100,6 +116,10 @@ function moreActionsForChapter(chapter: BookChapterView): ChapterMoreActionView[
   ];
 }
 
+function isLoginError(error: unknown): boolean {
+  return error instanceof ApiError && [401, 403].includes(error.statusCode);
+}
+
 async function loadChapterDraft(projectId: string, chapterId: string): Promise<MemoirBookChapterDraft | null> {
   try {
     return await getMemoirBookChapterDraft(projectId, chapterId);
@@ -125,7 +145,21 @@ async function loadSourceCoverage(projectId: string): Promise<MemoirBookSourceCo
 Page<BookChapterPageData, {
   onLoad(query?: PageQuery): Promise<void>;
   loadChapter(projectId: string, chapterId: string): Promise<void>;
+  applyChapterData(
+    plan: MemoirBookPlan,
+    coverage: MemoirBookSourceCoverage | null,
+    draft: MemoirBookChapterDraft | null,
+  ): void;
+  patchChapter(patch: Partial<BookChapterView>): void;
+  patchDraft(draft: MemoirBookChapterDraft): void;
   changeTab(event: DatasetEvent): void;
+  changeChapterTitle(event: TextInputEvent): void;
+  saveChapterTitle(): Promise<void>;
+  generateChapterTitle(): Promise<void>;
+  changeDraftContent(event: TextInputEvent): void;
+  generateChapterDraft(): Promise<void>;
+  saveChapterDraft(): Promise<void>;
+  confirmChapterDraft(): Promise<void>;
   goBack(): void;
 }>({
   data: {
@@ -135,11 +169,14 @@ Page<BookChapterPageData, {
     chapterId: "",
     activeTab: "content",
     planTitle: "",
+    plan: null,
+    sourceCoverage: null,
     chapter: null,
     chapterIndexText: "章节",
     contentText: "",
     sourceCountText: "0 条原始讲述",
     sourceEmptyText: "本章还没有关联原始讲述",
+    titleBusy: false,
     moreActions: [],
   },
 
@@ -166,30 +203,7 @@ Page<BookChapterPageData, {
         loadSourceCoverage(projectId),
         loadChapterDraft(projectId, chapterId),
       ]);
-      const chapters = buildChapterViews(plan, { [chapterId]: draft }, coverage);
-      const chapter = chapters.find((item) => item.id === chapterId) || null;
-      if (!chapter) {
-        this.setData({
-          chapter: null,
-          planTitle: plan.title,
-          chapterIndexText: "章节",
-          contentText: "",
-          sourceCountText: "0 条原始讲述",
-          moreActions: [],
-          error: "没有找到这一章",
-        });
-        return;
-      }
-      const contentText = trimText(chapter.draftContent);
-      this.setData({
-        planTitle: plan.title,
-        chapter,
-        chapterIndexText: chapterIndexText(plan, chapterId),
-        contentText: contentText || "本章正文还没有生成",
-        sourceCountText: `${chapter.sourceCount} 条原始讲述`,
-        sourceEmptyText: "本章还没有关联原始讲述",
-        moreActions: moreActionsForChapter(chapter),
-      });
+      this.applyChapterData(plan, coverage, draft);
     } catch (error) {
       this.setData({ error: error instanceof Error ? error.message : "章节详情加载失败" });
     } finally {
@@ -197,9 +211,212 @@ Page<BookChapterPageData, {
     }
   },
 
+  applyChapterData(plan, coverage, draft) {
+    const chapters = buildChapterViews(plan, { [this.data.chapterId]: draft }, coverage);
+    const chapter = chapters.find((item) => item.id === this.data.chapterId) || null;
+    if (!chapter) {
+      this.setData({
+        plan,
+        sourceCoverage: coverage,
+        chapter: null,
+        planTitle: plan.title,
+        chapterIndexText: "章节",
+        contentText: "",
+        sourceCountText: "0 条原始讲述",
+        moreActions: [],
+        error: "没有找到这一章",
+      });
+      return;
+    }
+    const contentText = trimText(chapter.draftContent);
+    this.setData({
+      plan,
+      sourceCoverage: coverage,
+      planTitle: plan.title,
+      chapter,
+      chapterIndexText: chapterIndexText(plan, this.data.chapterId),
+      contentText: contentText || "本章正文还没有生成",
+      sourceCountText: `${chapter.sourceCount} 条原始讲述`,
+      sourceEmptyText: "本章还没有关联原始讲述",
+      moreActions: moreActionsForChapter(chapter),
+    });
+  },
+
+  patchChapter(patch) {
+    if (!this.data.chapter) {
+      return;
+    }
+    const chapter = { ...this.data.chapter, ...patch };
+    const contentText = trimText(chapter.draftContent);
+    this.setData({
+      chapter,
+      contentText: contentText || "本章正文还没有生成",
+      sourceCountText: `${chapter.sourceCount} 条原始讲述`,
+      moreActions: moreActionsForChapter(chapter),
+    });
+  },
+
+  patchDraft(draft) {
+    if (!this.data.plan) {
+      return;
+    }
+    this.applyChapterData(this.data.plan, this.data.sourceCoverage, draft);
+  },
+
   changeTab(event) {
     const tab = String(event.currentTarget.dataset.tab || "");
     this.setData({ activeTab: normalizeTab(tab) });
+  },
+
+  changeChapterTitle(event) {
+    const chapter = this.data.chapter;
+    if (!chapter) {
+      return;
+    }
+    this.patchChapter({
+      editingTitle: event.detail.value,
+      titleChanged: trimText(event.detail.value) !== trimText(chapter.title),
+      draftError: "",
+    });
+  },
+
+  async saveChapterTitle() {
+    const chapter = this.data.chapter;
+    if (!chapter || !this.data.projectId || this.data.titleBusy || chapter.draftBusy) {
+      return;
+    }
+    const title = trimText(chapter.editingTitle);
+    if (!title) {
+      this.patchChapter({ draftError: "章节名不能为空" });
+      return;
+    }
+    if (title === trimText(chapter.title)) {
+      this.patchChapter({ titleChanged: false, draftError: "" });
+      wx.showToast({ title: "章名已保存", icon: "success" });
+      return;
+    }
+    this.setData({ titleBusy: true, error: "" });
+    this.patchChapter({ draftError: "" });
+    try {
+      const plan = await updateMemoirBookChapterTitle(this.data.projectId, this.data.chapterId, { title });
+      this.applyChapterData(plan, this.data.sourceCoverage, chapter.draft);
+      wx.showToast({ title: "章名已保存", icon: "success" });
+    } catch (error) {
+      if (isLoginError(error)) {
+        wx.switchTab({ url: "/pages/me/index" });
+        return;
+      }
+      this.patchChapter({ draftError: error instanceof Error ? error.message : "章节名保存失败" });
+    } finally {
+      this.setData({ titleBusy: false });
+    }
+  },
+
+  async generateChapterTitle() {
+    const chapter = this.data.chapter;
+    if (!chapter || !this.data.projectId || this.data.titleBusy || chapter.draftBusy) {
+      return;
+    }
+    this.setData({ titleBusy: true, error: "" });
+    this.patchChapter({ draftError: "" });
+    try {
+      const plan = await generateMemoirBookChapterTitle(this.data.projectId, this.data.chapterId, {});
+      this.applyChapterData(plan, this.data.sourceCoverage, chapter.draft);
+      trackAuditAction("book.chapter_title_generate", {}, { projectId: this.data.projectId });
+      wx.showToast({ title: "已重新起名", icon: "success" });
+    } catch (error) {
+      if (isLoginError(error)) {
+        wx.switchTab({ url: "/pages/me/index" });
+        return;
+      }
+      this.patchChapter({ draftError: error instanceof Error ? error.message : "AI 起名失败" });
+    } finally {
+      this.setData({ titleBusy: false });
+    }
+  },
+
+  changeDraftContent(event) {
+    const chapter = this.data.chapter;
+    if (!chapter) {
+      return;
+    }
+    const value = event.detail.value;
+    const original = latestDraftContent(chapter.draft);
+    this.patchChapter({
+      draftContent: value,
+      draftCharCount: trimText(value).length,
+      draftChanged: trimText(value) !== trimText(original),
+      draftError: "",
+    });
+  },
+
+  async generateChapterDraft() {
+    const chapter = this.data.chapter;
+    if (!chapter || !this.data.projectId || chapter.draftBusy) {
+      return;
+    }
+    if (chapter.draftChanged) {
+      this.patchChapter({ draftError: "请先保存当前修改，再生成新版本" });
+      return;
+    }
+    this.patchChapter({ draftBusy: true, draftError: "" });
+    try {
+      const shouldSupplementPendingSources = chapter.pendingSourceCount > 0 && !chapter.removedSourceCount;
+      const forceRegenerate = Boolean(chapter.draft?.latest_version && !shouldSupplementPendingSources);
+      await enqueueMemoirBookChapterDraftGeneration(this.data.projectId, this.data.chapterId, {
+        force_regenerate: forceRegenerate,
+      });
+      trackAuditAction(
+        "book.chapter_draft_generate",
+        { force_regenerate: forceRegenerate },
+        { projectId: this.data.projectId },
+      );
+      wx.showToast({ title: "已后台生成", icon: "success" });
+    } catch (error) {
+      this.patchChapter({ draftError: error instanceof Error ? error.message : "章节稿生成失败" });
+    } finally {
+      this.patchChapter({ draftBusy: false });
+    }
+  },
+
+  async saveChapterDraft() {
+    const chapter = this.data.chapter;
+    if (!chapter || !this.data.projectId || chapter.draftBusy) {
+      return;
+    }
+    const content = trimText(chapter.draftContent);
+    if (!content) {
+      this.patchChapter({ draftError: "章节稿内容不能为空" });
+      return;
+    }
+    this.patchChapter({ draftBusy: true, draftError: "" });
+    try {
+      const draft = await updateMemoirBookChapterDraft(this.data.projectId, this.data.chapterId, { content });
+      this.patchDraft(draft);
+      wx.showToast({ title: "章节稿已保存", icon: "success" });
+    } catch (error) {
+      this.patchChapter({ draftError: error instanceof Error ? error.message : "章节稿保存失败" });
+    } finally {
+      this.patchChapter({ draftBusy: false });
+    }
+  },
+
+  async confirmChapterDraft() {
+    const chapter = this.data.chapter;
+    if (!chapter || !this.data.projectId || chapter.draftBusy || !chapter.draft?.latest_version) {
+      return;
+    }
+    this.patchChapter({ draftBusy: true, draftError: "" });
+    try {
+      const draft = await confirmMemoirBookChapterDraft(this.data.projectId, this.data.chapterId);
+      this.patchDraft(draft);
+      trackAuditAction("book.chapter_draft_confirm", {}, { projectId: this.data.projectId });
+      wx.showToast({ title: "本章已确认", icon: "success" });
+    } catch (error) {
+      this.patchChapter({ draftError: error instanceof Error ? error.message : "章节稿确认失败" });
+    } finally {
+      this.patchChapter({ draftBusy: false });
+    }
   },
 
   goBack() {
