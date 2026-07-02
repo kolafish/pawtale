@@ -967,15 +967,30 @@ test("book page summarizes chapter source count without exposing raw ids", () =>
         sampleRef("utterance-3", "第三段"),
       ],
     }),
-    "本章素材：3 条收录讲述",
+    "本章素材：3 条原始讲述",
   );
 });
 
 test("book page renders chapter source counts in plan and drafting cards", () => {
   const wxml = fs.readFileSync(path.join(__dirname, "../pages/book/index.wxml"), "utf8");
-  const matches = wxml.match(/{{item\.sourceCount}} 条素材/g) || [];
+  const matches = wxml.match(/{{item\.sourceCount}} 条原始讲述/g) || [];
 
   assert.equal(matches.length, 2);
+});
+
+test("book page defaults to progress cards with single chapter editing", () => {
+  const wxml = fs.readFileSync(path.join(__dirname, "../pages/book/index.wxml"), "utf8");
+  const wxss = fs.readFileSync(path.join(__dirname, "../pages/book/index.wxss"), "utf8");
+
+  assert.match(wxml, /chapter-summary-card/);
+  assert.match(wxml, /editingChapterId/);
+  assert.match(wxml, /bindtap="openChapterEditor"/);
+  assert.match(wxml, /编辑正文/);
+  assert.match(wxml, /chapter-action-groups/);
+  assert.match(wxml, /chapter-action-hint/);
+  assert.match(wxss, /\.chapter-card\.summary/);
+  assert.match(wxss, /\.chapter-summary-actions/);
+  assert.match(wxss, /\.chapter-action-groups/);
 });
 
 test("book page keeps source rows read-only and splits chapter structure actions", () => {
@@ -993,7 +1008,8 @@ test("book page exposes a compact voice assistant entry", () => {
   const wxml = fs.readFileSync(path.join(__dirname, "../pages/book/index.wxml"), "utf8");
   const wxss = fs.readFileSync(path.join(__dirname, "../pages/book/index.wxss"), "utf8");
 
-  assert.match(wxml, /成书语音助手/);
+  assert.match(wxml, /对书稿说一句/);
+  assert.match(wxml, /把这一段说得朴素一点/);
   assert.match(wxml, /听目录/);
   assert.match(wxml, /语音修改/);
   assert.match(wxml, /bindtap="playBookOutlineAudio"/);
@@ -1020,10 +1036,12 @@ test("book page exposes PDF layout and print export controls", () => {
 
   assert.match(wxml, /PDF 排版/);
   assert.match(wxml, /bindchange="changeBookExportLayout"/);
+  assert.match(wxml, /book-export-hero/);
+  assert.match(wxml, /bindtap="previewBookOutput"/);
   assert.match(wxml, /阅读版 PDF/);
   assert.match(wxml, /打印版 PDF/);
   assert.match(wxml, /data-layout="large_print"/);
-  assert.match(wxml, /口述来源索引/);
+  assert.match(wxml, /原始讲述索引/);
   assert.match(wxml, /bindchange="toggleBookExportSourceAppendix"/);
 });
 
@@ -1038,6 +1056,10 @@ test("book page exposes all PDF cover style options", () => {
   assert.equal(
     context.data.bookCoverStyleOptions.find((option) => option.value === "moonlit_courtyard").label,
     "月下庭院",
+  );
+  assert.equal(
+    context.data.bookCoverStyleOptions.find((option) => option.value === "moonlit_courtyard").previewClass,
+    "moonlit-courtyard",
   );
   assert.equal(
     context.data.bookCoverStyleOptions.find((option) => option.value === "navy_gilt").label,
@@ -1147,19 +1169,19 @@ test("book page summarizes latest book output version", () => {
   const data = context.data;
 
   assert.equal(mod.latestBookContent(output), "全书正文");
-  assert.equal(mod.bookOutputVersionText(output), "全书第 3 版");
+  assert.equal(mod.bookOutputVersionText(output), "已修改 3 次");
   assert.equal(mod.bookOutputStaleNotice(output), "");
   assert.equal(mod.bookOutputVersionText(null), "尚未生成全书");
   assert.equal(data.bookPreviewTitle, "外婆回忆录");
   assert.equal(data.bookPreviewTocItems.length, 2);
-  assert.equal(data.bookPreviewTocItems[0].metaText, "14 字 · 2 条素材");
+  assert.equal(data.bookPreviewTocItems[0].metaText, "14 字 · 2 条原始讲述");
   assert.equal(data.bookPreviewChaptersExpanded, false);
   assert.equal(data.bookPreviewChapters[0].indexText, "第 1 章");
   assert.equal(data.bookPreviewChapters[0].content, "我小时候常在院子里晒太阳。");
-  assert.equal(data.bookPreviewChapters[0].metaText, "14 字 · 2 条素材 · 第 1 版");
+  assert.equal(data.bookPreviewChapters[0].metaText, "14 字 · 2 条原始讲述 · 已修改 1 次");
   assert.equal(data.bookManuscriptAvailable, true);
   assert.equal(data.bookManuscriptTemplateLabel, "素雅书籍版");
-  assert.equal(data.bookManuscriptSettingsText, "A5 · 阅读排版 · 含页眉 · 含来源附录");
+  assert.equal(data.bookManuscriptSettingsText, "A5 · 阅读排版 · 含页眉 · 附上原始讲述");
   assert.equal(data.bookSubtitleInput, "根据口述访谈整理");
   assert.equal(data.bookPrefaceInput, "这些故事来自家里的讲述。");
   assert.equal(data.bookAfterwordInput, "这些故事还可以继续补充。");
@@ -1170,10 +1192,10 @@ test("book page summarizes latest book output version", () => {
   assert.equal(data.bookManuscriptChapterItems[0].quoteText, "我小时候常在院子里晒太阳。");
   assert.equal(data.bookManuscriptChapterItems[0].quoteSourceRefId, "utterance-1");
   assert.equal(data.bookManuscriptChapterItems[0].quoteSourceText, "来自原始口述");
-  assert.equal(data.bookManuscriptBackMatterItems.some((item) => item.title === "章节来源"), true);
+  assert.equal(data.bookManuscriptBackMatterItems.some((item) => item.title === "原始讲述索引"), true);
   assert.equal(
     mod.bookOutputStaleNotice(sampleBookOutput(3, "全书正文", true, ["外婆家的童年", "第一次离家", "县城生活"])),
-    "章节「外婆家的童年、第一次离家」等章节已更新，请重新生成全书。",
+    "章节「外婆家的童年、第一次离家」等章节已更新，请重新整理一版。",
   );
 });
 
@@ -1263,7 +1285,7 @@ test("book page switches full-book output versions without changing the latest o
 
   assert.equal(context.data.bookSelectedVersionId, "book-output-version-2");
   assert.equal(context.data.bookVersionOptions.length, 2);
-  assert.equal(context.data.bookVersionText, "全书第 2 版");
+  assert.equal(context.data.bookVersionText, "已修改 2 次");
   assert.equal(context.data.bookContent, "全书第二版正文");
   assert.equal(context.data.bookViewingHistoricalVersion, false);
   page.toggleBookPreviewChapters.call(context);
@@ -1272,7 +1294,7 @@ test("book page switches full-book output versions without changing the latest o
   page.changeBookOutputVersion.call(context, { currentTarget: { dataset: {} }, detail: { value: "1" } });
 
   assert.equal(context.data.bookSelectedVersionId, "book-output-version-1");
-  assert.equal(context.data.bookVersionText, "全书第 1 版");
+  assert.equal(context.data.bookVersionText, "已修改 1 次");
   assert.equal(context.data.bookContent, "全书第一版正文");
   assert.equal(context.data.bookPreviewChaptersExpanded, false);
   assert.equal(context.data.bookPreviewChapters[0].content, "旧版第一章正文。");
@@ -1394,7 +1416,7 @@ test("book page shows and acknowledges automation events", async () => {
   assert.equal(context.data.automationEventItems[0].titleText, "已自动补写");
   assert.equal(context.data.automationEventItems[0].summaryText, "「外婆家的童年」已自动补写 1 条新增讲述。");
   assert.equal(context.data.automationEventItems[0].metaText.includes("补写"), true);
-  assert.equal(context.data.automationEventItems[0].actionText, "知道了");
+  assert.equal(context.data.automationEventItems[0].actionText, "收起");
   assert.equal(context.data.automationEventItems[0].canAct, true);
 
   await page.acknowledgeAutomationEvent.call(context, { currentTarget: { dataset: { id: "event-1" } } });
@@ -1492,7 +1514,7 @@ test("book page groups source assignment automation events with expandable detai
   assert.equal(item.titleText, "已自动归章");
   assert.equal(item.summaryText, "2 条讲述已自动整理进 2 个章节：「外婆家的童年」、「第一次离家」。");
   assert.equal(item.actionKind, "acknowledge_group");
-  assert.equal(item.actionText, "知道了");
+  assert.equal(item.actionText, "收起");
   assert.equal(item.hasDetails, true);
   assert.equal(item.detailExpanded, false);
   assert.equal(item.detailToggleText, "查看 2 条详情");
@@ -1681,7 +1703,7 @@ test("book page builds detailed automation event views", () => {
   assert.equal(items[1].suggestionItems[2].labelText, "建议补问");
   assert.equal(items[1].suggestionItems[2].bodyText, "外婆在院子里最常做什么？");
   assert.equal(items[1].suggestionItems[2].chapterText, "《院子里的童年》");
-  assert.equal(items[1].actionText, "知道了");
+  assert.equal(items[1].actionText, "收起");
   assert.equal(items[2].titleText, "成书整理建议");
   assert.equal(items[2].summaryText, "当前有 1 个章节需要优先处理。");
   assert.equal(items[2].detailText, "整理 2 条尚未归章的讲述记录；可以追问外婆在厨房里的细节");
@@ -1926,7 +1948,7 @@ test("book page marks deleted chapter sources for review", () => {
   assert.equal(chapters[0].sourceCount, 0);
   assert.equal(chapters[0].removedSourceCount, 1);
   assert.equal(chapters[0].draftActionText, "整理本章");
-  assert.equal(chapters[0].sourceChangeNotice, "1 条素材已删除，章节稿需要更新");
+  assert.equal(chapters[0].sourceChangeNotice, "1 条原始讲述已删除，章节稿需要更新");
 });
 
 test("book page confirms chapters with trimmed user edits and original source refs", async () => {
@@ -2510,7 +2532,7 @@ test("book page submits full-book and chapter editorial copy regeneration jobs",
     context,
     sampleBookOutput(1, "全书正文", true, ["外婆家的童年"], null, [], sampleBookManuscript()),
   );
-  assert.equal(context.data.bookStaleNotice, "章节「外婆家的童年」已更新，请重新生成全书。");
+  assert.equal(context.data.bookStaleNotice, "章节「外婆家的童年」已更新，请重新整理一版。");
 
   await page.regenerateBookEditorialCopy.call(context, {
     currentTarget: { dataset: { target: "preface" } },
@@ -2641,8 +2663,8 @@ test("book page submits full book output generation as a background job", async 
   });
   assert.equal(context.data.generatingBook, true);
   assert.equal(context.data.automationEventItems.length, 1);
-  assert.equal(context.data.automationEventItems[0].titleText, "全书生成中");
-  assert.equal(context.data.bookVersionText, "全书第 1 版");
+  assert.equal(context.data.automationEventItems[0].titleText, "书稿整理中");
+  assert.equal(context.data.bookVersionText, "已修改 1 次");
   page.clearBookGenerationEventPoll.call(context);
   delete global.wx;
 });
@@ -2718,12 +2740,12 @@ test("book page shows stale book output state and blocks old audio", async () =>
   });
   page.applyBookOutput.call(context, context.data.bookOutput);
 
-  assert.equal(context.data.bookActionText, "更新全书");
-  assert.equal(context.data.bookStaleNotice, "章节「外婆家的童年」已更新，请重新生成全书。");
+  assert.equal(context.data.bookActionText, "更新书稿");
+  assert.equal(context.data.bookStaleNotice, "章节「外婆家的童年」已更新，请重新整理一版。");
 
   await page.playBookAudio.call(context);
 
-  assert.equal(context.data.error, "章节内容已更新，请先更新全书再朗读");
+  assert.equal(context.data.error, "章节内容已更新，请先更新书稿再朗读");
   assert.equal(calls.length, 0);
 });
 
@@ -3750,7 +3772,7 @@ test("book page regenerates an existing chapter draft with force flag", async ()
     chapterId: "chapter-1",
     data: { force_regenerate: true },
   });
-  assert.equal(context.data.chapters[0].draftVersionText, "第 1 版");
+  assert.equal(context.data.chapters[0].draftVersionText, "历史版本 · 已修改 1 次");
   assert.equal(context.data.chapters[0].draftBusy, true);
   assert.equal(context.data.chapters[0].draftChanged, false);
   assert.equal(context.data.automationEventItems[0].titleText, "章节生成中");
@@ -3855,7 +3877,7 @@ test("book page blocks regeneration while draft edits are unsaved", async () => 
   });
 
   assert.equal(calls.length, 0);
-  assert.equal(context.data.chapters[0].draftError, "请先保存当前修改，再重新生成");
+  assert.equal(context.data.chapters[0].draftError, "请先保存当前修改，再生成新版本");
 });
 
 test("book APIs call encoded backend routes", async () => {
