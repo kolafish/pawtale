@@ -317,74 +317,20 @@
   font-weight: 600;
 }
 
+.summary-preview {
+  display: block;
+  margin-top: 22rpx;
+  color: #3a2a25;
+  font-size: 28rpx;
+  line-height: 46rpx;
+  word-break: break-word;
+}
+
 .question-box,
 .raw-box,
 .display-box,
 .edit-box {
   margin-top: 26rpx;
-}
-
-.record-section {
-  margin-top: 22rpx;
-  padding: 22rpx 24rpx;
-  border-radius: 20rpx;
-}
-
-.question-section {
-  background: #fff9f3;
-}
-
-.raw-section {
-  background: #fff5f1;
-}
-
-.display-section {
-  border: 1rpx solid #f0e5d8;
-  background: #ffffff;
-}
-
-.record-section-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14rpx;
-  margin-bottom: 10rpx;
-}
-
-.record-section-label {
-  display: block;
-  margin-bottom: 10rpx;
-  color: #7b6f68;
-  font-size: 24rpx;
-  font-weight: 600;
-  line-height: 32rpx;
-}
-
-.record-section-head .record-section-label {
-  margin-bottom: 0;
-}
-
-.book-ready-tag {
-  flex: 0 0 auto;
-  padding: 6rpx 12rpx;
-  border-radius: 999rpx;
-  background: #eef4ea;
-  color: #5f7e55;
-  font-size: 22rpx;
-  font-weight: 600;
-  line-height: 30rpx;
-}
-
-.record-section-text {
-  display: block;
-  color: #3a2a25;
-  font-size: 30rpx;
-  line-height: 50rpx;
-  word-break: break-word;
-}
-
-.raw-section .record-section-text {
-  color: #6e5e56;
 }
 
 .section-head {
