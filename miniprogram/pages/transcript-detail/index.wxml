@@ -13,7 +13,7 @@
 
   <view wx:if="{{needsLogin}}" class="empty-panel">
     <text class="empty-title">登录后查看素材</text>
-    <text class="empty-copy">登录后可以核对原始识别、整理文字和音频资料。</text>
+    <text class="empty-copy">登录后可以核对原始讲述、成书文字和音频资料。</text>
     <button class="primary-button" bindtap="openLogin">登录后查看</button>
   </view>
 
@@ -37,7 +37,7 @@
           bindtap="beginEdit"
           disabled="{{saving || deleting || item.isEditing}}"
         >
-          编辑整理文字
+          编辑成书文字
         </button>
         <button
           class="ghost-button"
@@ -52,8 +52,8 @@
     <view wx:if="{{!item.isEditing}}" class="section-card manuscript-card">
       <view class="section-head">
         <view class="section-heading">
-          <text class="section-title">整理后文字</text>
-          <text class="section-hint">用于生成章节正文</text>
+          <text class="section-title">成书文字</text>
+          <text class="section-hint">这段会用于章节正文</text>
         </view>
         <text class="section-count">{{item.display_char_count}} 字</text>
       </view>
@@ -70,8 +70,8 @@
     <view wx:else class="section-card edit-card">
       <view class="section-head">
         <view class="section-heading">
-          <text class="section-title">编辑整理文字</text>
-          <text class="section-hint">用于生成章节正文</text>
+          <text class="section-title">编辑成书文字</text>
+          <text class="section-hint">修改后会更新这段章节素材</text>
         </view>
         <text class="section-count">{{item.editingCharCount}} 字</text>
       </view>
@@ -84,7 +84,7 @@
         cursor-spacing="24"
       />
       <view class="actions-row">
-        <button class="ghost-button" bindtap="resetToRaw" disabled="{{saving || deleting}}">恢复原文</button>
+        <button class="ghost-button" bindtap="resetToRaw" disabled="{{saving || deleting}}">恢复原始讲述</button>
         <button class="ghost-button" bindtap="cancelEdit" disabled="{{saving || deleting}}">取消</button>
         <button
           class="primary-button"
@@ -97,7 +97,7 @@
       </view>
     </view>
 
-    <view wx:if="{{item.question_text}}" class="section-card">
+    <view wx:if="{{item.question_text}}" class="section-card question-card">
       <view class="section-head">
         <view class="section-heading">
           <text class="section-title">小余刚才问了</text>
@@ -105,7 +105,7 @@
         </view>
         <text class="section-count">{{item.question_audio_file_id ? "有语音" : "无语音"}}</text>
       </view>
-      <text class="body-text question-text">
+      <text class="body-text question-text {{!questionExpanded && item.questionCanExpand ? 'collapsed' : ''}}">
         <text
           wx:for="{{item.questionSegments}}"
           wx:for-item="segment"
@@ -113,13 +113,31 @@
           wx:key="segmentIndex"
         >{{segment.text}}</text>
       </text>
+      <view class="inline-actions">
+        <button
+          wx:if="{{item.questionCanExpand}}"
+          class="text-action-button"
+          bindtap="toggleQuestionExpanded"
+          disabled="{{saving || deleting}}"
+        >
+          {{questionExpanded ? "收起问题" : "展开完整问题"}}
+        </button>
+        <button
+          wx:if="{{item.canPlayAudio}}"
+          class="text-action-button"
+          bindtap="playAudio"
+          disabled="{{saving || deleting || !item.canPlayAudio}}"
+        >
+          {{playing ? "停止播放" : "听当时问答"}}
+        </button>
+      </view>
     </view>
 
     <view class="section-card evidence-card">
       <view class="section-head">
         <view class="section-heading">
-          <text class="section-title">原始识别</text>
-          <text class="section-hint">保留口述，不建议直接改成书稿</text>
+          <text class="section-title">原始讲述</text>
+          <text class="section-hint">根据录音识别，保留口述痕迹</text>
         </view>
         <text class="section-count">{{item.raw_char_count}} 字</text>
       </view>
@@ -133,14 +151,32 @@
       </text>
     </view>
 
-    <view class="section-card">
+    <view wx:if="{{!item.isEditing}}" class="section-card edit-tools-card">
       <view class="section-head">
         <view class="section-heading">
-          <text class="section-title">校对整理文字</text>
-          <text class="section-hint">说出要改的句子或事实，确认后再保存</text>
+          <text class="section-title">修改这段文字</text>
+          <text class="section-hint">可以直接编辑，也可以说出要改哪里。说完后先预览，确认后才保存。</text>
         </view>
-        <text class="section-count">{{voiceEditStatusText || "待校对"}}</text>
+        <text class="section-count">{{voiceEditStatusText || "可修改"}}</text>
       </view>
+      <view class="actions-row edit-choice-actions">
+        <button
+          class="primary-button"
+          bindtap="beginEdit"
+          disabled="{{saving || deleting || item.isEditing}}"
+        >
+          手动编辑
+        </button>
+        <button
+          class="ghost-button"
+          bindtap="startVoiceEdit"
+          loading="{{voiceEditLoading}}"
+          disabled="{{saving || deleting || voiceEditSaving || voiceEditLoading}}"
+        >
+          {{voiceEditRecording ? "停止录入" : (voiceEditLoading ? "生成中" : "说修改意见")}}
+        </button>
+      </view>
+      <text class="voice-edit-example">例如：把“身体挺硬朗”改成“身体还算硬朗”。</text>
       <view wx:if="{{voiceEditInstructionText}}" class="voice-edit-block">
         <text class="voice-edit-label">你说</text>
         <text class="voice-edit-text">{{voiceEditInstructionText}}</text>
@@ -174,25 +210,15 @@
           >{{segment.text}}</text>
         </text>
       </view>
-      <view class="actions-row">
+      <view wx:if="{{voiceEditPreview}}" class="actions-row">
         <button
-          class="ghost-button"
-          bindtap="startVoiceEdit"
-          loading="{{voiceEditLoading}}"
-          disabled="{{saving || deleting || voiceEditSaving || voiceEditLoading}}"
-        >
-          {{voiceEditRecording ? "停止录入" : (voiceEditLoading ? "生成中" : "说出修改")}}
-        </button>
-        <button
-          wx:if="{{voiceEditPreview}}"
           class="ghost-button"
           bindtap="cancelVoiceEdit"
           disabled="{{voiceEditSaving}}"
         >
-          取消校对
+          取消修改
         </button>
         <button
-          wx:if="{{voiceEditPreview}}"
           class="primary-button"
           bindtap="confirmVoiceEdit"
           loading="{{voiceEditSaving}}"
@@ -237,21 +263,26 @@
       </view>
     </view>
 
-    <view class="section-card danger-card">
-      <view class="section-head">
+    <view class="section-card more-actions-card">
+      <view class="section-head more-actions-head" bindtap="toggleMoreActionsExpanded">
         <view class="section-heading">
-          <text class="section-title danger-title">危险操作</text>
-          <text class="section-hint danger-hint">删除后不会再出现在讲述记录和访谈上下文中</text>
+          <text class="section-title">更多操作</text>
+          <text class="section-hint">删除等低频操作收在这里</text>
         </view>
+        <text class="more-actions-toggle">{{moreActionsExpanded ? "收起" : "展开"}}</text>
       </view>
-      <button
-        class="danger-button"
-        bindtap="deleteTranscript"
-        loading="{{deleting}}"
-        disabled="{{saving || deleting}}"
-      >
-        删除这条讲述记录
-      </button>
+      <view wx:if="{{moreActionsExpanded}}" class="danger-panel">
+        <text class="danger-panel-title">删除这条讲述</text>
+        <text class="danger-panel-copy">删除后，这条原始讲述会从素材库移除；如果已放入章节，相关章节会标记为需重新确认，已生成正文不会自动改写。</text>
+        <button
+          class="danger-button"
+          bindtap="deleteTranscript"
+          loading="{{deleting}}"
+          disabled="{{saving || deleting}}"
+        >
+          删除这条讲述
+        </button>
+      </view>
     </view>
   </block>
 

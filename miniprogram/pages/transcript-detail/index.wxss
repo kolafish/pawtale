@@ -138,6 +138,11 @@
   border-color: #e4d9cf;
 }
 
+.question-card {
+  background: #fbf8f3;
+  border-color: #e8ded2;
+}
+
 .manuscript-card,
 .edit-card {
   background: #ffffff;
@@ -204,6 +209,13 @@
   border: 2rpx solid #e4d9cf;
 }
 
+.question-text.collapsed {
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+}
+
 .raw-text {
   background: #f1ede8;
   color: #4d4038;
@@ -232,6 +244,13 @@
   flex-wrap: wrap;
   gap: 14rpx;
   margin-top: 24rpx;
+}
+
+.inline-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12rpx;
+  margin-top: 16rpx;
 }
 
 .primary-actions {
@@ -289,8 +308,49 @@
   opacity: 0.62;
 }
 
+.text-action-button {
+  height: 58rpx;
+  margin: 0;
+  padding: 0 18rpx;
+  border: 0;
+  border-radius: 999rpx;
+  background: #f3efea;
+  color: #8f3e35;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24rpx;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.text-action-button::after {
+  border: 0;
+}
+
+.text-action-button[disabled] {
+  opacity: 0.62;
+}
+
 .picker-action {
   width: 100%;
+}
+
+.edit-tools-card {
+  background: #fffdf9;
+}
+
+.edit-choice-actions {
+  justify-content: flex-start;
+}
+
+.voice-edit-example {
+  display: block;
+  margin-top: 16rpx;
+  color: #7b6f68;
+  font-size: 24rpx;
+  line-height: 1.45;
+  word-break: break-word;
 }
 
 .voice-edit-block {
@@ -382,18 +442,47 @@
   font-weight: 800;
 }
 
-.danger-card {
+.more-actions-card {
   margin-top: 40rpx;
-  border-color: #f4c2ca;
+  border-color: #e7d8c9;
+  background: #ffffff;
+}
+
+.more-actions-head {
+  margin-bottom: 0;
+}
+
+.more-actions-toggle {
+  flex: 0 0 auto;
+  color: #8f3e35;
+  font-size: 24rpx;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.danger-panel {
+  margin-top: 20rpx;
+  padding: 20rpx;
+  border: 1rpx solid #f1c8cf;
+  border-radius: 16rpx;
   background: #fff8f9;
 }
 
-.danger-title {
+.danger-panel-title {
+  display: block;
   color: #b84a5a;
+  font-size: 27rpx;
+  font-weight: 800;
+  line-height: 1.35;
 }
 
-.danger-hint {
-  color: #9f334b;
+.danger-panel-copy {
+  display: block;
+  margin-top: 8rpx;
+  color: #8a5661;
+  font-size: 24rpx;
+  line-height: 1.45;
+  word-break: break-word;
 }
 
 .bottom-spacer {

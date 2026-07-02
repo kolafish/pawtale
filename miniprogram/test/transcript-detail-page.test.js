@@ -149,6 +149,9 @@ test("transcript detail page loads a single transcript and chapter options", asy
   assert.equal(context.data.item.audioText, "32 秒");
   assert.equal(context.data.item.recordMetaText, "07-01 15:38 · 32 秒");
   assert.equal(context.data.item.bookInclusionText, "尚未入章");
+  assert.equal(context.data.item.questionCanExpand, false);
+  assert.equal(context.data.questionExpanded, false);
+  assert.equal(context.data.moreActionsExpanded, false);
   assert.deepEqual(context.data.item.chapterAssignOptions, [
     { label: "第 1 章 退休后的日子", value: "chapter-1" },
     { label: "第 2 章 家庭记忆", value: "chapter-2" },
@@ -185,14 +188,59 @@ test("transcript detail page keeps serious evidence and editing labels", () => {
     "utf8",
   );
 
-  assert.match(wxml, /整理后文字/);
-  assert.match(wxml, /用于生成章节正文/);
-  assert.match(wxml, /原始识别/);
-  assert.match(wxml, /保留口述，不建议直接改成书稿/);
-  assert.match(wxml, /校对整理文字/);
-  assert.match(wxml, /说出修改/);
-  assert.match(wxml, /危险操作/);
-  assert.doesNotMatch(wxml, /语音修正|语音校对|播放问答/);
+  assert.match(wxml, /成书文字/);
+  assert.match(wxml, /这段会用于章节正文/);
+  assert.match(wxml, /原始讲述/);
+  assert.match(wxml, /根据录音识别，保留口述痕迹/);
+  assert.match(wxml, /修改这段文字/);
+  assert.match(wxml, /手动编辑/);
+  assert.match(wxml, /说修改意见/);
+  assert.match(wxml, /更多操作/);
+  assert.match(wxml, /删除后，这条原始讲述会从素材库移除/);
+  assert.match(wxml, /相关章节会标记为需重新确认/);
+  assert.doesNotMatch(wxml, /整理后文字|原始识别|校对整理文字|说出修改|危险操作|语音修正|语音校对|播放问答/);
+});
+
+test("transcript detail page collapses long question context by default", async () => {
+  const longQuestion = "刚才讲到爷爷八十岁还骑车上班，下雨天摔了一跤，那后来家里人是怎么照顾他的，他自己又怎么说这件事？当时有没有影响他继续上班，家里人有没有劝过他少骑车？";
+  const { page } = loadTranscriptDetailPage({
+    voiceApiExports: {
+      getMemoirVoiceTranscript: async (id) => sampleTranscript(id, {
+        question_text: longQuestion,
+      }),
+    },
+  });
+  const context = pageContext(page);
+
+  await page.onLoad.call(context, { id: "utterance-long-question" });
+
+  assert.equal(context.data.item.questionCanExpand, true);
+  assert.equal(context.data.questionExpanded, false);
+
+  page.toggleQuestionExpanded.call(context);
+
+  assert.equal(context.data.questionExpanded, true);
+
+  page.toggleQuestionExpanded.call(context);
+
+  assert.equal(context.data.questionExpanded, false);
+});
+
+test("transcript detail page folds low-frequency actions", async () => {
+  const { page } = loadTranscriptDetailPage({
+    voiceApiExports: {
+      getMemoirVoiceTranscript: async (id) => sampleTranscript(id),
+    },
+  });
+  const context = pageContext(page);
+
+  await page.onLoad.call(context, { id: "utterance-more-actions" });
+
+  assert.equal(context.data.moreActionsExpanded, false);
+
+  page.toggleMoreActionsExpanded.call(context);
+
+  assert.equal(context.data.moreActionsExpanded, true);
 });
 
 test("transcript detail page can open directly in edit mode", async () => {
@@ -251,8 +299,10 @@ test("transcript detail page deletes after confirmation and navigates back", asy
   const deleted = [];
   const toasts = [];
   const navigations = [];
+  const modals = [];
   global.wx = {
     showModal(options) {
+      modals.push(options);
       options.success({ confirm: true });
     },
     showToast(options) {
@@ -276,6 +326,9 @@ test("transcript detail page deletes after confirmation and navigates back", asy
   await page.deleteTranscript.call(context);
 
   assert.deepEqual(deleted, ["utterance-delete"]);
+  assert.match(modals[0].content, /这条原始讲述会从素材库移除/);
+  assert.match(modals[0].content, /相关章节会标记为需重新确认/);
+  assert.match(modals[0].content, /已生成正文不会自动改写/);
   assert.deepEqual(toasts, [{ title: "已删除", icon: "success" }]);
   assert.deepEqual(navigations, [{ delta: 1 }]);
   delete global.wx;

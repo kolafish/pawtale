@@ -83,6 +83,7 @@ interface TranscriptDetailItemView extends MemoirVoiceTranscriptItem {
   canMoveChapterSource: boolean;
   chapterMoveOptions: ChapterPickerOption[];
   canPlayAudio: boolean;
+  questionCanExpand: boolean;
   questionSegments: TranscriptTextSegment[];
   rawSegments: TranscriptTextSegment[];
   displaySegments: TranscriptTextSegment[];
@@ -102,6 +103,8 @@ interface TranscriptDetailData {
   utteranceId: string;
   item: TranscriptDetailItemView | null;
   bookPlan: MemoirBookPlan | null;
+  questionExpanded: boolean;
+  moreActionsExpanded: boolean;
   voiceEditRecording: boolean;
   voiceEditLoading: boolean;
   voiceEditSaving: boolean;
@@ -111,6 +114,7 @@ interface TranscriptDetailData {
 }
 
 const MAX_INLINE_DIFF_PRODUCT = 400000;
+const COLLAPSIBLE_QUESTION_CHAR_COUNT = 72;
 
 function formatDurationSeconds(value: number): string {
   const seconds = Math.max(0, Math.round(value));
@@ -191,6 +195,7 @@ function toViewItem(
   const chapterMoveOptions = transcriptChapterMoveOptions(item, bookPlan);
   const createdAtText = transcriptCreatedAtText(item);
   const audioText = transcriptAudioText(item);
+  const questionText = item.question_text.trim();
   return {
     ...item,
     titleText: transcriptTitleText(item),
@@ -206,6 +211,7 @@ function toViewItem(
     canMoveChapterSource: chapterMoveOptions.length > 0,
     chapterMoveOptions,
     canPlayAudio: Boolean(item.audio_file_id || item.question_audio_file_id),
+    questionCanExpand: Array.from(questionText).length > COLLAPSIBLE_QUESTION_CHAR_COUNT,
     questionSegments: plainSegments(item.question_text),
     rawSegments: plainSegments(item.transcript_raw),
     displaySegments: plainSegments(item.display_text),
@@ -388,7 +394,7 @@ function confirmDelete(item: TranscriptDetailItemView): Promise<boolean> {
     const preview = item.titleText || item.display_text || item.transcript_raw || "这条讲述记录";
     wx.showModal({
       title: "删除讲述记录",
-      content: `确定删除“${preview.slice(0, 24)}${preview.length > 24 ? "..." : ""}”？删除后不会再出现在讲述记录和访谈上下文中。`,
+      content: `确定删除“${preview.slice(0, 24)}${preview.length > 24 ? "..." : ""}”？删除后，这条原始讲述会从素材库移除；如果已放入章节，相关章节会标记为需重新确认，已生成正文不会自动改写。`,
       confirmText: "删除",
       confirmColor: "#b84a5a",
       success: (result) => resolve(Boolean(result.confirm)),
@@ -401,6 +407,8 @@ Page<TranscriptDetailData, {
   onLoad(options?: Record<string, string | undefined>): Promise<void>;
   loadTranscript(): Promise<void>;
   beginEdit(): void;
+  toggleQuestionExpanded(): void;
+  toggleMoreActionsExpanded(): void;
   changeText(event: TextAreaEvent): void;
   cancelEdit(): void;
   saveTranscript(): Promise<void>;
@@ -436,6 +444,8 @@ Page<TranscriptDetailData, {
     utteranceId: "",
     item: null,
     bookPlan: null,
+    questionExpanded: false,
+    moreActionsExpanded: false,
     voiceEditRecording: false,
     voiceEditLoading: false,
     voiceEditSaving: false,
@@ -446,7 +456,11 @@ Page<TranscriptDetailData, {
 
   async onLoad(options) {
     const utteranceId = options?.id ? decodeURIComponent(options.id) : "";
-    this.setData({ utteranceId });
+    this.setData({
+      utteranceId,
+      questionExpanded: false,
+      moreActionsExpanded: false,
+    });
     await this.loadTranscript();
     if (options?.mode === "edit") {
       this.beginEdit();
@@ -507,6 +521,17 @@ Page<TranscriptDetailData, {
     });
   },
 
+  toggleQuestionExpanded() {
+    if (!this.data.item?.questionCanExpand) {
+      return;
+    }
+    this.setData({ questionExpanded: !this.data.questionExpanded });
+  },
+
+  toggleMoreActionsExpanded() {
+    this.setData({ moreActionsExpanded: !this.data.moreActionsExpanded });
+  },
+
   changeText(event) {
     const item = this.data.item;
     if (!item) {
@@ -530,7 +555,7 @@ Page<TranscriptDetailData, {
     }
     const content = item.editingText.trim();
     if (!content) {
-      this.setData({ error: "整理文字不能为空" });
+      this.setData({ error: "成书文字不能为空" });
       return;
     }
     this.setData({ saving: true, error: "" });
@@ -577,7 +602,7 @@ Page<TranscriptDetailData, {
       voiceEditLoading: false,
       voiceEditSaving: false,
       voiceEditInstructionText: "",
-      voiceEditStatusText: "正在听你说要改哪里",
+      voiceEditStatusText: "正在听你说修改意见",
       voiceEditPreview: null,
       error: "",
     });
@@ -590,18 +615,18 @@ Page<TranscriptDetailData, {
           this.setData({
             voiceEditRecording: false,
             voiceEditLoading: true,
-            voiceEditStatusText: "正在识别校对内容",
+            voiceEditStatusText: "正在识别修改意见",
           });
         },
-        emptyTranscriptMessage: "没有识别到校对内容，请再说一次",
-        noVoiceTranscriptMessage: "没有听到校对内容，请再说一次",
+        emptyTranscriptMessage: "没有识别到修改意见，请再说一次",
+        noVoiceTranscriptMessage: "没有听到修改意见，请再说一次",
       });
       if (requestToken !== this.voiceEditToken) {
         return;
       }
       this.setData({
         voiceEditInstructionText: instructionText,
-        voiceEditStatusText: "正在生成校对预览",
+        voiceEditStatusText: "正在生成修改预览",
       });
       const preview = await previewMemoirVoiceTranscriptVoiceEdit(item.id, instructionText);
       if (requestToken !== this.voiceEditToken) {
@@ -609,7 +634,7 @@ Page<TranscriptDetailData, {
       }
       this.setData({
         voiceEditPreview: voiceEditPreviewView(preview),
-        voiceEditStatusText: preview.action === "revise_transcript" ? "请确认校对内容" : preview.reply_text,
+        voiceEditStatusText: preview.action === "revise_transcript" ? "请确认修改内容" : preview.reply_text,
       });
       trackAuditAction("transcript.detail_voice_edit_preview", { action: preview.action }, { projectId: item.project_id });
     } catch (error) {
@@ -617,7 +642,7 @@ Page<TranscriptDetailData, {
         return;
       }
       this.setData({
-        error: error instanceof Error ? error.message : "校对文字失败",
+        error: error instanceof Error ? error.message : "语音修改失败",
         voiceEditStatusText: "",
       });
     } finally {
@@ -661,7 +686,7 @@ Page<TranscriptDetailData, {
     }
     const content = preview.editedText.trim();
     if (!content) {
-      this.setData({ error: "校对后的整理文字不能为空" });
+      this.setData({ error: "修改后的成书文字不能为空" });
       return;
     }
     this.setData({ voiceEditSaving: true, saving: true, error: "" });
@@ -674,9 +699,9 @@ Page<TranscriptDetailData, {
         voiceEditPreview: null,
       });
       trackAuditAction("transcript.detail_voice_edit_save", {}, { projectId: updated.project_id });
-      wx.showToast({ title: "已保存校对", icon: "success" });
+      wx.showToast({ title: "已保存修改", icon: "success" });
     } catch (error) {
-      this.setData({ error: error instanceof Error ? error.message : "保存校对失败" });
+      this.setData({ error: error instanceof Error ? error.message : "保存修改失败" });
     } finally {
       this.setData({ voiceEditSaving: false, saving: false });
     }
