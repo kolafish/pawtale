@@ -200,13 +200,91 @@
       <view class="section-head">
         <view class="section-heading">
           <text class="section-title">更多操作</text>
-          <text class="section-hint">章节结构和版本入口</text>
+          <text class="section-hint">章节结构和历史版本</text>
         </view>
       </view>
-      <view class="more-list">
-        <view wx:for="{{moreActions}}" wx:key="id" class="more-row">
-          <text class="more-title">{{item.title}}</text>
-          <text class="more-detail">{{item.detailText}}</text>
+
+      <view wx:if="{{chapter.draftError}}" class="chapter-error inline">{{chapter.draftError}}</view>
+
+      <view class="chapter-action-groups">
+        <view class="chapter-action-group">
+          <text class="chapter-action-label">移动章节顺序</text>
+          <view class="actions-row compact">
+            <button
+              class="ghost-button"
+              data-direction="up"
+              disabled="{{updatingPlanStructure || chapter.draftBusy || !chapter.canMoveUp}}"
+              bindtap="moveChapter"
+            >
+              上移
+            </button>
+            <button
+              class="ghost-button"
+              data-direction="down"
+              disabled="{{updatingPlanStructure || chapter.draftBusy || !chapter.canMoveDown}}"
+              bindtap="moveChapter"
+            >
+              下移
+            </button>
+          </view>
+        </view>
+
+        <view class="chapter-action-group">
+          <text class="chapter-action-label">合并到其他章节</text>
+          <picker
+            range="{{chapter.mergeTargetOptions}}"
+            range-key="label"
+            disabled="{{updatingPlanStructure || chapter.draftBusy || !chapter.mergeTargetOptions.length}}"
+            bindchange="mergeChapterInto"
+          >
+            <view class="picker-button {{updatingPlanStructure || chapter.draftBusy || !chapter.mergeTargetOptions.length ? 'disabled' : ''}}">
+              选择要合并到的章节
+            </view>
+          </picker>
+        </view>
+
+        <view class="chapter-action-group">
+          <text class="chapter-action-label">拆分原始讲述</text>
+          <view wx:if="{{chapter.sourceViews.length > 1}}" class="split-source-list">
+            <view wx:for="{{chapter.sourceViews}}" wx:for-item="source" wx:key="utterance_id" class="source-row {{source.splitSelected ? 'selected' : ''}}">
+              <view class="source-main">
+                <text class="source-label">{{source.labelText}}</text>
+                <text class="source-text">{{source.previewText}}</text>
+              </view>
+              <button
+                class="source-split-toggle {{source.splitSelected ? 'selected' : ''}}"
+                data-utterance-id="{{source.utterance_id}}"
+                disabled="{{updatingPlanStructure || chapter.draftBusy}}"
+                bindtap="toggleSplitSource"
+              >
+                {{source.splitSelected ? "已选" : "选择"}}
+              </button>
+            </view>
+          </view>
+          <text wx:else class="chapter-action-hint">至少需要 2 条原始讲述才能拆分。</text>
+          <button
+            class="ghost-button split-action"
+            disabled="{{updatingPlanStructure || chapter.draftBusy || !chapter.canSplitSelectedSources}}"
+            bindtap="splitSelectedChapterSources"
+          >
+            {{chapter.splitActionText}}
+          </button>
+        </view>
+
+        <view class="chapter-action-group">
+          <text class="chapter-action-label">历史版本</text>
+          <text class="chapter-action-hint">{{chapter.draftVersionText || "尚未生成版本"}}</text>
+        </view>
+
+        <view class="chapter-action-group danger-zone">
+          <text class="chapter-action-label">删除章节</text>
+          <button
+            class="danger-button"
+            disabled="{{updatingPlanStructure || chapter.draftBusy}}"
+            bindtap="deleteChapter"
+          >
+            删除本章，保留讲述
+          </button>
         </view>
       </view>
     </view>
