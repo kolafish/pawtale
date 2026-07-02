@@ -112,11 +112,16 @@ interface SearchChipView {
 
 interface TranscriptItemView extends MemoirVoiceTranscriptItem {
   recordNumber: number;
+  summaryTitleText: string;
+  summaryPreviewText: string;
+  summarySegments: TranscriptTextSegment[];
   editingText: string;
   editingCharCount: number;
   createdAtText: string;
+  durationText: string;
   anchorId: string;
   audioText: string;
+  recordMetaText: string;
   bookInclusionText: string;
   isIncludedInBook: boolean;
   canAssignChapterSource: boolean;
@@ -221,6 +226,10 @@ function formatDuration(item: MemoirVoiceTranscriptItem): string {
     return formatDurationSeconds(seconds);
   }
   return "";
+}
+
+function transcriptDurationText(item: MemoirVoiceTranscriptItem): string {
+  return formatDuration(item);
 }
 
 export function transcriptAudioText(item: MemoirVoiceTranscriptItem): string {
@@ -388,14 +397,35 @@ async function loadTranscriptBookPlan(projectId: string): Promise<MemoirBookPlan
 export function transcriptBookInclusionText(item: MemoirVoiceTranscriptItem): string {
   const chapters = [...(item.included_chapters || [])]
     .sort((left, right) => left.sort_order - right.sort_order)
-    .map((chapter) => chapter.title.trim())
-    .filter(Boolean);
+    .map((chapter) => ({
+      title: chapter.title.trim() || "未命名章节",
+      chapterNumber: chapter.sort_order + 1,
+    }));
   if (!chapters.length) {
-    return "未收录到章节";
+    return "尚未入章";
   }
-  const visible = chapters.slice(0, 2).join("、");
-  const suffix = chapters.length > 2 ? "等章节" : "";
-  return `已收录：${visible}${suffix}`;
+  const first = chapters[0];
+  const suffix = chapters.length > 1 ? `等 ${chapters.length} 章` : "";
+  return `已放入第 ${first.chapterNumber} 章：${first.title}${suffix}`;
+}
+
+function transcriptSummaryTitle(item: MemoirVoiceTranscriptItem): string {
+  const title = (item.summary_title || "").trim();
+  if (title) {
+    return title;
+  }
+  const fallback = (item.display_text || item.transcript_edited || item.transcript_raw || "").trim();
+  return fallback ? fallback.slice(0, 32) : "讲述记录";
+}
+
+function transcriptSummaryPreview(item: MemoirVoiceTranscriptItem): string {
+  const summary = (item.summary_text || "").trim();
+  const fallback = (item.display_text || item.transcript_edited || item.transcript_raw || "").trim();
+  const text = summary || fallback;
+  if (text.length <= 96) {
+    return text;
+  }
+  return `${text.slice(0, 96)}...`;
 }
 
 function toViewItem(
@@ -410,15 +440,26 @@ function toViewItem(
   const displayView = transcriptTextView(item.display_text, searchQuery);
   const chapterAssignOptions = transcriptChapterAssignOptions(item, bookPlan);
   const chapterMoveOptions = transcriptChapterMoveOptions(item, bookPlan);
+  const summaryTitleText = transcriptSummaryTitle(item);
+  const summaryPreviewText = transcriptSummaryPreview(item);
+  const createdAtText = transcriptCreatedAtText(item);
+  const durationText = transcriptDurationText(item);
+  const bookInclusionText = transcriptBookInclusionText(item);
+  const recordMetaText = [createdAtText, durationText, bookInclusionText].filter(Boolean).join(" · ");
   return {
     ...item,
     recordNumber,
+    summaryTitleText,
+    summaryPreviewText,
+    summarySegments: highlightTranscriptText(summaryPreviewText, searchQuery),
     editingText,
     editingCharCount: editingText.trim().length,
-    createdAtText: transcriptCreatedAtText(item),
+    createdAtText,
+    durationText,
     anchorId: transcriptAnchorId(item.id),
     audioText: transcriptAudioText(item),
-    bookInclusionText: transcriptBookInclusionText(item),
+    recordMetaText,
+    bookInclusionText,
     isIncludedInBook,
     canAssignChapterSource: chapterAssignOptions.length > 0,
     chapterAssignOptions,
@@ -658,6 +699,8 @@ Page<TranscriptsData, {
   loadTranscripts(reset?: boolean): Promise<void>;
   loadMore(): Promise<void>;
   openTranscriptDetail(event: DatasetEvent): void;
+  openTranscriptEdit(event: DatasetEvent): void;
+  stopCardTap(): void;
   onSearchInput(event: SearchInputEvent): void;
   onSearchConfirm(): Promise<void>;
   clearSearch(): Promise<void>;
@@ -859,6 +902,17 @@ Page<TranscriptsData, {
       return;
     }
     wx.navigateTo({ url: `/pages/transcript-detail/index?id=${encodeURIComponent(id)}` });
+  },
+
+  openTranscriptEdit(event) {
+    const id = event.currentTarget.dataset.id || "";
+    if (!id) {
+      return;
+    }
+    wx.navigateTo({ url: `/pages/transcript-detail/index?id=${encodeURIComponent(id)}&mode=edit` });
+  },
+
+  stopCardTap() {
   },
 
   onSearchInput(event) {

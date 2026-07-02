@@ -151,6 +151,20 @@ test("transcript detail page loads a single transcript and chapter options", asy
   ]);
 });
 
+test("transcript detail page can open directly in edit mode", async () => {
+  const { page } = loadTranscriptDetailPage({
+    voiceApiExports: {
+      getMemoirVoiceTranscript: async (id) => sampleTranscript(id),
+    },
+  });
+  const context = pageContext(page);
+
+  await page.onLoad.call(context, { id: "utterance-edit", mode: "edit" });
+
+  assert.equal(context.data.item.isEditing, true);
+  assert.equal(context.data.item.editingText, "爷爷退休后还在帮公司做事。");
+});
+
 test("transcript detail page saves edited display text", async () => {
   const updates = [];
   const toasts = [];
