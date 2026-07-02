@@ -109,13 +109,13 @@ def write_checksums(backup_dir: Path) -> None:
     checksum_path.write_text("\n".join(rows) + "\n", encoding="utf-8")
 
 
-def create_backup(label: str | None = None) -> Path:
+def create_backup(label: str | None = None, prefix: str = "auth_migration") -> Path:
     if not DB_PATH.exists():
         raise FileNotFoundError(f"Database does not exist: {DB_PATH}")
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     suffix = f"_{label}" if label else ""
-    backup_dir = BACKUPS_DIR / f"auth_migration_{timestamp}{suffix}"
+    backup_dir = BACKUPS_DIR / f"{prefix}_{timestamp}{suffix}"
     backup_dir.mkdir(parents=True, exist_ok=False)
 
     db_backup = backup_dir / "pawtale.db"

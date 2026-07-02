@@ -19,8 +19,11 @@ python3.12 -m venv venv
 source venv/bin/activate
 pip install -r requirements-dev.txt
 cp .env.example .env
+PYTHONPATH=. python scripts/migrate_runtime_schema.py --skip-backup
 PYTHONPATH=. uvicorn app.main:app --reload --port 8000
 ```
+
+已有本地数据库时，去掉 `--skip-backup` 会先在 `data/backups/` 下创建备份再迁移。API 启动只做 schema 校验，不会自动创建或修改数据库表。
 
 macOS 上如果 `python3.12` 指向 Miniforge/Conda，建议用 Homebrew Python 创建 venv：
 `/opt/homebrew/opt/python@3.12/bin/python3.12 -m venv venv`。
