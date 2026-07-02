@@ -1,0 +1,283 @@
+.chapter-detail-page {
+  min-height: 100vh;
+  padding: 44rpx 36rpx 120rpx;
+  background: #f7f3ed;
+  box-sizing: border-box;
+}
+
+.top-row {
+  display: flex;
+  align-items: center;
+  gap: 22rpx;
+  margin-bottom: 28rpx;
+}
+
+.back-hit {
+  width: 72rpx;
+  height: 72rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.back-mark {
+  color: #9f4a3c;
+  font-size: 72rpx;
+  line-height: 1;
+}
+
+.title-block {
+  min-width: 0;
+}
+
+.page-title {
+  display: block;
+  color: #24100b;
+  font-size: 44rpx;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.page-meta {
+  display: block;
+  margin-top: 8rpx;
+  color: #685b55;
+  font-size: 26rpx;
+  line-height: 1.35;
+}
+
+.error {
+  margin-bottom: 24rpx;
+  padding: 22rpx 26rpx;
+  border-radius: 18rpx;
+  background: #fff1f2;
+  color: #b4234a;
+  font-size: 28rpx;
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+.empty-panel,
+.hero-panel,
+.section-card {
+  margin-top: 24rpx;
+  border: 2rpx solid #e7d8c9;
+  border-radius: 18rpx;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 10rpx 28rpx rgba(64, 43, 24, 0.06);
+  box-sizing: border-box;
+}
+
+.empty-panel {
+  padding: 48rpx 34rpx;
+  color: #685b55;
+  font-size: 30rpx;
+  line-height: 1.5;
+}
+
+.empty-title {
+  display: block;
+  color: #24100b;
+  font-size: 34rpx;
+  font-weight: 800;
+}
+
+.empty-copy {
+  display: block;
+  margin-top: 14rpx;
+  color: #685b55;
+  font-size: 28rpx;
+  line-height: 1.5;
+}
+
+.hero-panel {
+  padding: 32rpx 30rpx;
+  border-color: #dfc8b8;
+  background: #fffdf9;
+}
+
+.chapter-kicker-row,
+.section-head,
+.source-head {
+  display: flex;
+  align-items: center;
+}
+
+.chapter-kicker-row,
+.section-head {
+  justify-content: space-between;
+  gap: 18rpx;
+}
+
+.chapter-index {
+  color: #9f4a3c;
+  font-size: 25rpx;
+  font-weight: 800;
+}
+
+.chapter-status {
+  padding: 8rpx 14rpx;
+  border-radius: 999rpx;
+  background: #f4f1ec;
+  color: #62554d;
+  font-size: 24rpx;
+  font-weight: 800;
+}
+
+.chapter-status.confirmed {
+  background: #edf7f2;
+  color: #2f6f55;
+}
+
+.chapter-title {
+  display: block;
+  margin-top: 16rpx;
+  color: #24100b;
+  font-size: 42rpx;
+  font-weight: 850;
+  line-height: 1.3;
+  word-break: break-word;
+}
+
+.chapter-meta,
+.chapter-notice {
+  display: block;
+  margin-top: 12rpx;
+  color: #685b55;
+  font-size: 26rpx;
+  line-height: 1.45;
+}
+
+.chapter-notice {
+  color: #9f4a3c;
+  font-weight: 700;
+}
+
+.tab-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12rpx;
+  margin-top: 28rpx;
+  padding: 8rpx;
+  border-radius: 16rpx;
+  background: #ede3d7;
+}
+
+.tab-item {
+  min-height: 64rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12rpx;
+  color: #685b55;
+  font-size: 27rpx;
+  font-weight: 800;
+}
+
+.tab-item.active {
+  background: #fffdf9;
+  color: #9f4a3c;
+  box-shadow: 0 6rpx 16rpx rgba(64, 43, 24, 0.08);
+}
+
+.section-card {
+  padding: 28rpx;
+}
+
+.section-head {
+  margin-bottom: 18rpx;
+}
+
+.section-heading {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.section-title,
+.section-hint,
+.section-count {
+  display: block;
+}
+
+.section-title {
+  color: #24100b;
+  font-size: 32rpx;
+  font-weight: 850;
+  line-height: 1.35;
+}
+
+.section-hint {
+  margin-top: 6rpx;
+  color: #8a7a70;
+  font-size: 24rpx;
+  line-height: 1.35;
+}
+
+.section-count {
+  flex: 0 0 auto;
+  color: #9f4a3c;
+  font-size: 24rpx;
+  font-weight: 800;
+}
+
+.manuscript-card {
+  background: #ffffff;
+  border-color: #dfc8b8;
+}
+
+.body-text {
+  display: block;
+  color: #3b2a22;
+  font-size: 30rpx;
+  line-height: 1.75;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.manuscript-text {
+  min-height: 240rpx;
+}
+
+.source-list,
+.more-list {
+  display: flex;
+  flex-direction: column;
+  gap: 18rpx;
+}
+
+.source-row,
+.more-row {
+  padding: 22rpx;
+  border: 2rpx solid #eadfd2;
+  border-radius: 16rpx;
+  background: #fffaf4;
+}
+
+.source-head {
+  justify-content: space-between;
+  gap: 16rpx;
+}
+
+.source-label,
+.more-title {
+  color: #24100b;
+  font-size: 28rpx;
+  font-weight: 850;
+  line-height: 1.35;
+}
+
+.source-meta {
+  flex: 0 0 auto;
+  color: #8a7a70;
+  font-size: 23rpx;
+}
+
+.source-text,
+.more-detail {
+  display: block;
+  margin-top: 10rpx;
+  color: #685b55;
+  font-size: 26rpx;
+  line-height: 1.5;
+  word-break: break-word;
+}

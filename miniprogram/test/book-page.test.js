@@ -985,12 +985,37 @@ test("book page defaults to progress cards with single chapter editing", () => {
   assert.match(wxml, /chapter-summary-card/);
   assert.match(wxml, /editingChapterId/);
   assert.match(wxml, /bindtap="openChapterEditor"/);
+  assert.match(wxml, /bindtap="openChapterSources"/);
   assert.match(wxml, /编辑正文/);
+  assert.match(wxml, /原始讲述/);
   assert.match(wxml, /chapter-action-groups/);
   assert.match(wxml, /chapter-action-hint/);
   assert.match(wxss, /\.chapter-card\.summary/);
   assert.match(wxss, /\.chapter-summary-actions/);
   assert.match(wxss, /\.chapter-action-groups/);
+});
+
+test("book page routes chapter sources to the chapter detail page", () => {
+  const navigations = [];
+  global.wx = {
+    navigateTo(options) {
+      navigations.push(options.url);
+    },
+  };
+  const { mod, page } = loadBookPage();
+  const context = pageContext(page, { projectId: "project/1" });
+
+  assert.equal(
+    mod.bookChapterDetailUrl("project/1", "chapter/1", "sources"),
+    "/pages/book-chapter/index?projectId=project%2F1&chapterId=chapter%2F1&tab=sources",
+  );
+
+  page.openChapterSources.call(context, { currentTarget: { dataset: { id: "chapter/1" } } });
+
+  assert.deepEqual(navigations, [
+    "/pages/book-chapter/index?projectId=project%2F1&chapterId=chapter%2F1&tab=sources",
+  ]);
+  delete global.wx;
 });
 
 test("book page keeps source rows read-only and splits chapter structure actions", () => {

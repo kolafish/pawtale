@@ -340,6 +340,15 @@ function defaultBookTitleInput(planTitle: string, projectTitle: string): string 
   );
 }
 
+export function bookChapterDetailUrl(projectId: string, chapterId: string, tab = "content"): string {
+  const params = [
+    `projectId=${encodeURIComponent(projectId)}`,
+    `chapterId=${encodeURIComponent(chapterId)}`,
+    `tab=${encodeURIComponent(tab)}`,
+  ];
+  return `/pages/book-chapter/index?${params.join("&")}`;
+}
+
 const BOOK_VOICE_AUTO_STOP_SILENCE_MS = 900;
 const BOOK_VOICE_MIN_RECORDING_MS = 700;
 const BOOK_VOICE_NO_VOICE_MS = 3500;
@@ -370,6 +379,7 @@ Page<BookData, {
   changePlanTitle(event: TextInputEvent): void;
   openChapterEditor(event: DatasetEvent): void;
   closeChapterEditor(): void;
+  openChapterSources(event: DatasetEvent): void;
   changeChapterTitle(event: TextInputEvent): void;
   saveChapterTitle(event: DatasetEvent): Promise<void>;
   generateChapterTitle(event: DatasetEvent): Promise<void>;
@@ -1605,6 +1615,15 @@ Page<BookData, {
 
   closeChapterEditor() {
     this.setData({ editingChapterId: "" });
+  },
+
+  openChapterSources(event) {
+    const chapterId = event.currentTarget.dataset.id || "";
+    if (!chapterId || !this.data.projectId) {
+      this.setData({ error: "缺少章节信息" });
+      return;
+    }
+    wx.navigateTo({ url: bookChapterDetailUrl(this.data.projectId, chapterId, "sources") });
   },
 
   changeChapterTitle(event) {
