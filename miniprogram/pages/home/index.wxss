@@ -97,6 +97,8 @@
 }
 
 .voice-start-button[disabled] {
+  background: #a64b3e;
+  color: #ffffff;
   opacity: 0.72;
 }
 

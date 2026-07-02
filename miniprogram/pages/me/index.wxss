@@ -123,9 +123,21 @@
   color: #ffffff;
 }
 
-.primary-button[disabled],
-.mode-button[disabled],
+.primary-button[disabled] {
+  background: #a64b3e;
+  color: #ffffff;
+  opacity: 0.72;
+}
+
+.mode-button[disabled] {
+  background: #fff3ef;
+  color: #a64b3e;
+  opacity: 0.72;
+}
+
 .secondary-button[disabled] {
+  background: #2b1713;
+  color: #ffffff;
   opacity: 0.72;
 }
 
