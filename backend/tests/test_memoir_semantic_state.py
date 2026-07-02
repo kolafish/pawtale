@@ -1,7 +1,6 @@
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import create_async_engine
 
-import app.main as app_main
 from app.database import Base, register_models
 from app.domain.memoir.types import (
     MemoirBookPlanStatus,
@@ -10,6 +9,7 @@ from app.domain.memoir.types import (
     MemoirSemanticCacheStatus,
 )
 from app.migrations.memoir_semantic import MEMOIR_SEMANTIC_TABLES, migrate_memoir_semantic_schema
+from app.migrations.runtime import migrate_runtime_schema
 from app.models.memoir import (
     MemoirBookChapterDraft,
     MemoirBookChapterDraftVersion,
@@ -115,7 +115,7 @@ async def test_memoir_semantic_migration_adds_cluster_source_fingerprints_column
         await engine.dispose()
 
 
-async def test_auto_migrate_creates_memoir_semantic_tables(monkeypatch):
+async def test_runtime_migration_creates_memoir_semantic_tables():
     register_models()
     engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
     try:
@@ -124,10 +124,8 @@ async def test_auto_migrate_creates_memoir_semantic_tables(monkeypatch):
             for table_name in reversed(MEMOIR_SEMANTIC_TABLES):
                 await conn.execute(text(f"DROP TABLE {table_name}"))
 
-        monkeypatch.setattr(app_main, "engine", engine)
-
-        await app_main._auto_migrate()
-        await app_main._auto_migrate()
+        await migrate_runtime_schema(engine)
+        await migrate_runtime_schema(engine)
 
         async with engine.begin() as conn:
             for table_name in MEMOIR_SEMANTIC_TABLES:
