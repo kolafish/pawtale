@@ -137,6 +137,14 @@
   line-height: 38rpx;
 }
 
+.progress-note {
+  display: block;
+  margin-top: 10rpx;
+  color: #a64b3e;
+  font-size: 24rpx;
+  line-height: 34rpx;
+}
+
 .automation-panel {
   margin-top: 22rpx;
   padding: 24rpx;

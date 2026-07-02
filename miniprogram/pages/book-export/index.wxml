@@ -59,6 +59,21 @@
         </button>
       </view>
 
+      <view class="regenerate-card">
+        <view class="regenerate-copy">
+          <text class="regenerate-title">重新整理一版</text>
+          <text class="regenerate-meta">当前书稿会保留，新版本完成后可在历史版本里查看。</text>
+        </view>
+        <button
+          class="ghost-button compact"
+          loading="{{generatingBook}}"
+          disabled="{{generatingBook || bookTitleSaving || bookViewingHistoricalVersion || !bookContent}}"
+          bindtap="generateBook"
+        >
+          重新整理
+        </button>
+      </view>
+
       <view class="book-design-panel">
         <view class="book-design-head">
           <view>
@@ -241,6 +256,88 @@
         >
           保存成书信息
         </button>
+      </view>
+
+      <view wx:if="{{bookManuscriptAvailable}}" class="manuscript-card">
+        <view class="manuscript-section">
+          <view class="section-head">
+            <text class="section-title">书稿设置</text>
+            <text class="section-count">{{bookManuscriptTemplateLabel}}</text>
+          </view>
+          <view class="manuscript-cover-summary">
+            <text class="manuscript-title">{{bookManuscriptTitle}}</text>
+            <text class="manuscript-subtitle">{{bookManuscriptSubtitle}}</text>
+          </view>
+          <text class="manuscript-meta">{{bookManuscriptSettingsText}}</text>
+        </view>
+
+        <view class="manuscript-section">
+          <view class="section-head">
+            <text class="section-title">书籍结构</text>
+            <text class="section-count">{{bookManuscriptStructureItems.length}} 项</text>
+          </view>
+          <view class="structure-list">
+            <view
+              wx:for="{{bookManuscriptStructureItems}}"
+              wx:for-item="item"
+              wx:key="id"
+              class="structure-row"
+            >
+              <view class="structure-main">
+                <text class="structure-title">{{item.title}}</text>
+                <text class="structure-meta">{{item.metaText}}</text>
+              </view>
+              <text class="structure-status">{{item.statusText}}</text>
+            </view>
+          </view>
+        </view>
+
+        <view class="manuscript-section">
+          <view class="section-head">
+            <text class="section-title">章节书稿</text>
+            <text class="section-count">{{bookManuscriptChapterItems.length}} 章</text>
+          </view>
+          <view class="manuscript-chapter-list">
+            <view
+              wx:for="{{bookManuscriptChapterItems}}"
+              wx:for-item="chapter"
+              wx:key="id"
+              class="manuscript-chapter"
+            >
+              <view class="chapter-heading">
+                <text class="chapter-index">{{chapter.indexText}}</text>
+                <text class="chapter-title">{{chapter.title}}</text>
+              </view>
+              <text wx:if="{{chapter.metaText}}" class="manuscript-meta">{{chapter.metaText}}</text>
+              <text wx:if="{{chapter.intro}}" class="chapter-intro">{{chapter.intro}}</text>
+              <view wx:if="{{chapter.quoteText}}" class="chapter-quote">
+                <text>“{{chapter.quoteText}}”</text>
+                <text wx:if="{{chapter.quoteSourceText}}" class="chapter-quote-source">{{chapter.quoteSourceText}}</text>
+              </view>
+            </view>
+          </view>
+        </view>
+
+        <view wx:if="{{bookManuscriptBackMatterItems.length}}" class="manuscript-section">
+          <view class="section-head">
+            <text class="section-title">附录与说明</text>
+            <text class="section-count">{{bookManuscriptBackMatterItems.length}} 项</text>
+          </view>
+          <view class="back-matter-list">
+            <view
+              wx:for="{{bookManuscriptBackMatterItems}}"
+              wx:for-item="item"
+              wx:key="id"
+              class="back-matter-row"
+            >
+              <text class="back-matter-kind">{{item.kindText}}</text>
+              <view class="back-matter-main">
+                <text class="back-matter-title">{{item.title}}</text>
+                <text class="back-matter-preview">{{item.contentPreview}}</text>
+              </view>
+            </view>
+          </view>
+        </view>
       </view>
 
       <view class="export-settings">

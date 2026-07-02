@@ -1087,19 +1087,27 @@ test("book page exposes a compact voice assistant entry", () => {
   assert.match(wxss, /#a64b3e/);
 });
 
-test("book page exposes PDF layout and print export controls", () => {
+test("book page keeps full-book export tools behind the export page", () => {
   const wxml = fs.readFileSync(path.join(__dirname, "../pages/book/index.wxml"), "utf8");
+  const wxss = fs.readFileSync(path.join(__dirname, "../pages/book/index.wxss"), "utf8");
 
-  assert.match(wxml, /PDF 排版/);
-  assert.match(wxml, /bindchange="changeBookExportLayout"/);
-  assert.match(wxml, /book-export-hero/);
   assert.match(wxml, /bindtap="openBookExportPage"/);
-  assert.match(wxml, /bindtap="previewBookOutput"/);
+  assert.match(wxml, /bindtap="generateBook"/);
+  assert.match(wxml, /bookStaleNotice/);
+  assert.match(wxml, /progress-note/);
+  assert.match(wxml, /{{bookActionText}}/);
+  assert.match(wxml, /预览全书/);
   assert.match(wxml, /阅读版 PDF/);
   assert.match(wxml, /打印版 PDF/);
-  assert.match(wxml, /data-layout="large_print"/);
-  assert.match(wxml, /原始讲述索引/);
-  assert.match(wxml, /bindchange="toggleBookExportSourceAppendix"/);
+  assert.match(wxss, /\.progress-note/);
+  assert.doesNotMatch(wxml, /id="book-output-card"/);
+  assert.doesNotMatch(wxml, /book-export-hero/);
+  assert.doesNotMatch(wxml, /PDF 排版/);
+  assert.doesNotMatch(wxml, /bindchange="changeBookExportLayout"/);
+  assert.doesNotMatch(wxml, /原始讲述索引/);
+  assert.doesNotMatch(wxml, /bindchange="toggleBookExportSourceAppendix"/);
+  assert.doesNotMatch(wxml, /bindtap="downloadBookOutputExport"/);
+  assert.doesNotMatch(wxml, /bindtap="previewBookOutput"/);
 });
 
 test("book page exposes all PDF cover style options", () => {
@@ -1124,49 +1132,27 @@ test("book page exposes all PDF cover style options", () => {
   );
 });
 
-test("book page exposes manuscript structure sections", () => {
+test("book page keeps chapter editing separate from full-book export settings", () => {
   const wxml = fs.readFileSync(path.join(__dirname, "../pages/book/index.wxml"), "utf8");
 
-  assert.match(wxml, /书稿设置/);
-  assert.match(wxml, /成书信息/);
-  assert.match(wxml, /bindinput="changeBookTitle"/);
-  assert.match(wxml, /data-key="narrator_name"/);
-  assert.match(wxml, /data-key="preface"/);
-  assert.match(wxml, /data-key="afterword"/);
-  assert.match(wxml, /data-key="back_cover_quote"/);
-  assert.match(wxml, /bindinput="changeBookMetadataField"/);
-  assert.match(wxml, /bindtap="suggestBookTitles"/);
-  assert.match(wxml, /bindtap="regenerateBookEditorialCopy"/);
-  assert.match(wxml, /bindtap="regenerateBookChapterEditorialCopy"/);
-  assert.match(wxml, /bindtap="openBookChapterEditorialEditor"/);
-  assert.match(wxml, /bindtap="saveBookChapterEditorialCopy"/);
-  const bookEditorialButtons = wxml.match(/<button(?=[^>]*bindtap="regenerateBookEditorialCopy")[^>]*>/g) || [];
-  assert.equal(bookEditorialButtons.length, 3);
-  bookEditorialButtons.forEach((button) => {
-    assert.doesNotMatch(button, /bookStaleNotice/);
-    assert.doesNotMatch(button, /\|\| bookEditorialCopyBusyTarget \|\|/);
-  });
-  assert.match(wxml, /bookEditorialCopyBusyTarget === 'preface'/);
-  assert.match(wxml, /bookEditorialCopyBusyTarget === 'afterword'/);
-  assert.match(wxml, /bookEditorialCopyBusyTarget === 'back_cover_quote'/);
-  const chapterEditorialButtons = wxml.match(/<button(?=[^>]*bindtap="regenerateBookChapterEditorialCopy")[^>]*>/g) || [];
-  assert.equal(chapterEditorialButtons.length, 2);
-  chapterEditorialButtons.forEach((button) => {
-    assert.doesNotMatch(button, /bookStaleNotice/);
-    assert.doesNotMatch(button, /\|\| bookEditorialCopyBusyTarget}}/);
-  });
-  assert.match(wxml, /<\/view>\s*<view class="book-manuscript-chapter-actions">/);
-  assert.match(wxml, /bindchange="changeBookCoverStyle"/);
-  assert.match(wxml, /bookDesignSaveStatusText/);
-  assert.doesNotMatch(wxml, /bindtap="saveBookDesignSettings"/);
-  assert.match(wxml, /书籍结构/);
-  assert.match(wxml, /章节书稿/);
-  assert.match(wxml, /附录与说明/);
-  assert.match(wxml, /预览与导出/);
-  assert.match(wxml, /bookManuscriptStructureItems/);
-  assert.match(wxml, /bookManuscriptChapterItems/);
-  assert.match(wxml, /bookManuscriptBackMatterItems/);
-  assert.match(wxml, /bindtap="toggleBookPreviewChapters"/);
+  assert.match(wxml, /逐章成稿/);
+  assert.match(wxml, /编辑正文/);
+  assert.match(wxml, /原始讲述/);
+  assert.match(wxml, /bindtap="openChapterEditor"/);
+  assert.match(wxml, /bindtap="openChapterSources"/);
+  assert.match(wxml, /bindtap="playChapterAudio"/);
+  assert.doesNotMatch(wxml, /成书信息/);
+  assert.doesNotMatch(wxml, /书稿设置/);
+  assert.doesNotMatch(wxml, /书籍结构/);
+  assert.doesNotMatch(wxml, /附录与说明/);
+  assert.doesNotMatch(wxml, /bindinput="changeBookTitle"/);
+  assert.doesNotMatch(wxml, /bindtap="suggestBookTitles"/);
+  assert.doesNotMatch(wxml, /bindtap="regenerateBookEditorialCopy"/);
+  assert.doesNotMatch(wxml, /bindtap="regenerateBookChapterEditorialCopy"/);
+  assert.doesNotMatch(wxml, /bindtap="openBookChapterEditorialEditor"/);
+  assert.doesNotMatch(wxml, /bookManuscriptStructureItems/);
+  assert.doesNotMatch(wxml, /bookManuscriptChapterItems/);
+  assert.doesNotMatch(wxml, /bookManuscriptBackMatterItems/);
 });
 
 test("book page builds outline narration for saved chapter titles", () => {
