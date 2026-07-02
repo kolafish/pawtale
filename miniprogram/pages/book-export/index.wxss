@@ -1,0 +1,266 @@
+.page {
+  min-height: 100vh;
+  box-sizing: border-box;
+  padding: 28rpx;
+  background: #fcf7ed;
+  color: #332822;
+}
+
+.book-export-page {
+  display: flex;
+  flex-direction: column;
+  gap: 24rpx;
+}
+
+.export-hero,
+.state-card,
+.export-settings,
+.preview-card {
+  box-sizing: border-box;
+  border: 1rpx solid #ead9c8;
+  border-radius: 12rpx;
+  background: #fffaf3;
+  box-shadow: 0 10rpx 24rpx rgba(93, 59, 40, 0.06);
+}
+
+.export-hero {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 20rpx;
+  padding: 28rpx;
+}
+
+.eyebrow,
+.hero-title,
+.hero-meta,
+.version-pill,
+.notice,
+.section-title,
+.setting-title,
+.setting-meta,
+.setting-value,
+.toc-item,
+.preview-count,
+.chapter-title,
+.chapter-excerpt,
+.book-output-text,
+.state-card {
+  display: block;
+}
+
+.eyebrow {
+  margin-bottom: 8rpx;
+  color: #9b6a52;
+  font-size: 24rpx;
+}
+
+.hero-title {
+  color: #2f241f;
+  font-size: 42rpx;
+  font-weight: 700;
+  line-height: 1.28;
+}
+
+.hero-meta {
+  margin-top: 10rpx;
+  color: #7b6f68;
+  font-size: 26rpx;
+  line-height: 1.5;
+}
+
+.version-pill {
+  flex-shrink: 0;
+  padding: 8rpx 16rpx;
+  border-radius: 999rpx;
+  background: #f1e1d2;
+  color: #6f5144;
+  font-size: 22rpx;
+  line-height: 1.4;
+}
+
+.notice {
+  padding: 18rpx 22rpx;
+  border: 1rpx solid #e5d2c1;
+  border-radius: 10rpx;
+  background: #fffdf8;
+  color: #6f5144;
+  font-size: 25rpx;
+  line-height: 1.5;
+}
+
+.notice.warn {
+  border-color: #e7b1a6;
+  background: #fff5f2;
+  color: #a64b3e;
+}
+
+.notice.subtle {
+  background: #f7efe7;
+  color: #7b6f68;
+}
+
+.state-card {
+  padding: 30rpx;
+  color: #7b6f68;
+  font-size: 27rpx;
+  line-height: 1.6;
+}
+
+.state-card.error {
+  border-color: #e7b1a6;
+  color: #a64b3e;
+}
+
+.export-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(180rpx, 1fr));
+  gap: 16rpx;
+}
+
+.primary-button,
+.ghost-button,
+.text-button {
+  margin: 0;
+  border-radius: 10rpx;
+  font-size: 26rpx;
+  line-height: 2.6;
+}
+
+.primary-button {
+  background: #a64b3e;
+  color: #fff;
+}
+
+.ghost-button {
+  border: 1rpx solid #d7bba8;
+  background: #fffaf3;
+  color: #6f5144;
+}
+
+.text-button {
+  padding: 0;
+  background: transparent;
+  color: #a64b3e;
+  line-height: 1.6;
+}
+
+.text-button::after {
+  border: 0;
+}
+
+.export-settings {
+  overflow: hidden;
+}
+
+.setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 18rpx;
+  padding: 24rpx 26rpx;
+  border-bottom: 1rpx solid #f0e2d4;
+}
+
+.setting-row:last-child {
+  border-bottom: 0;
+}
+
+.setting-title {
+  color: #332822;
+  font-size: 28rpx;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.setting-meta {
+  margin-top: 6rpx;
+  color: #7b6f68;
+  font-size: 24rpx;
+  line-height: 1.45;
+}
+
+.setting-value {
+  flex-shrink: 0;
+  color: #a64b3e;
+  font-size: 25rpx;
+  white-space: nowrap;
+}
+
+.preview-card {
+  padding: 26rpx;
+}
+
+.section-head,
+.preview-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18rpx;
+}
+
+.section-title {
+  color: #332822;
+  font-size: 32rpx;
+  font-weight: 700;
+}
+
+.version-link {
+  color: #a64b3e;
+  font-size: 25rpx;
+}
+
+.toc-list,
+.chapter-preview-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14rpx;
+  margin-top: 22rpx;
+}
+
+.toc-item {
+  color: #6f5144;
+  font-size: 26rpx;
+  line-height: 1.5;
+}
+
+.preview-toggle-row {
+  margin-top: 26rpx;
+  padding-top: 20rpx;
+  border-top: 1rpx solid #f0e2d4;
+}
+
+.preview-count {
+  color: #7b6f68;
+  font-size: 25rpx;
+}
+
+.chapter-preview {
+  padding: 20rpx;
+  border-radius: 10rpx;
+  background: #fffdf8;
+}
+
+.chapter-title {
+  color: #332822;
+  font-size: 28rpx;
+  font-weight: 600;
+  line-height: 1.45;
+}
+
+.chapter-excerpt {
+  margin-top: 10rpx;
+  color: #6f5144;
+  font-size: 25rpx;
+  line-height: 1.65;
+}
+
+.book-output-text {
+  margin-top: 22rpx;
+  color: #4d3d34;
+  font-size: 26rpx;
+  line-height: 1.75;
+  white-space: pre-wrap;
+}

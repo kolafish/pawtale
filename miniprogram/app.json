@@ -9,6 +9,7 @@
     "pages/transcript-detail/index",
     "pages/book/index",
     "pages/book-chapter/index",
+    "pages/book-export/index",
     "pages/voice-progress/index",
     "pages/projects/index",
     "pages/project-edit/index",

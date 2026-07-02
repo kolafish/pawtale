@@ -51,27 +51,25 @@
     <view wx:if="{{stage === 'drafting'}}" class="progress-actions">
       <button
         class="primary-button small"
+        data-action="preview"
         disabled="{{!bookContent || hasDraftChanges || bookStaleNotice || bookViewingHistoricalVersion}}"
-        bindtap="previewBookOutput"
+        bindtap="openBookExportPage"
       >
         预览全书
       </button>
       <button
         class="ghost-button small"
-        data-format="pdf"
-        loading="{{bookExportBusyTarget === 'book-export:pdf:' + bookExportLayout}}"
+        data-action="reading_pdf"
         disabled="{{updatingPlanStructure || generatingBook || !bookContent || hasDraftChanges || bookStaleNotice || bookExportBusyTarget}}"
-        bindtap="downloadBookOutputExport"
+        bindtap="openBookExportPage"
       >
         阅读版 PDF
       </button>
       <button
         class="ghost-button small"
-        data-format="pdf"
-        data-layout="large_print"
-        loading="{{bookExportBusyTarget === 'book-export:pdf:large_print'}}"
+        data-action="print_pdf"
         disabled="{{updatingPlanStructure || generatingBook || !bookContent || hasDraftChanges || bookStaleNotice || bookExportBusyTarget}}"
-        bindtap="downloadBookOutputExport"
+        bindtap="openBookExportPage"
       >
         打印版 PDF
       </button>
