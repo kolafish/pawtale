@@ -1,6 +1,8 @@
 require("./register-ts");
 
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
 const test = require("node:test");
 const { loadPageModule, mockModule, pageContext } = require("./page-harness");
 
@@ -144,11 +146,53 @@ test("transcript detail page loads a single transcript and chapter options", asy
   assert.deepEqual(calls, ["utterance-new"]);
   assert.equal(context.data.item.titleText, "爷爷退休后仍帮公司做事");
   assert.equal(context.data.item.createdAtText, "07-01 15:38");
-  assert.equal(context.data.item.audioText, "时长 32 秒");
+  assert.equal(context.data.item.audioText, "32 秒");
+  assert.equal(context.data.item.recordMetaText, "07-01 15:38 · 32 秒");
+  assert.equal(context.data.item.bookInclusionText, "尚未入章");
   assert.deepEqual(context.data.item.chapterAssignOptions, [
     { label: "第 1 章 退休后的日子", value: "chapter-1" },
     { label: "第 2 章 家庭记忆", value: "chapter-2" },
   ]);
+});
+
+test("transcript detail page uses content-first inclusion labels", async () => {
+  const { page } = loadTranscriptDetailPage({
+    voiceApiExports: {
+      getMemoirVoiceTranscript: async (id) => sampleTranscript(id, {
+        is_included_in_book: true,
+        included_chapters: [
+          { chapter_id: "chapter-2", title: "家庭记忆", sort_order: 1 },
+          { chapter_id: "chapter-1", title: "退休后的日子", sort_order: 0 },
+        ],
+      }),
+      getMemoirBookPlan: async () => sampleBookPlan(),
+    },
+  });
+  const context = pageContext(page);
+
+  await page.onLoad.call(context, { id: "utterance-included" });
+
+  assert.equal(context.data.item.bookInclusionText, "已放入第 1 章：退休后的日子等 2 章");
+  assert.equal(context.data.item.isIncludedInBook, true);
+  assert.deepEqual(context.data.item.chapterMoveOptions, [
+    { label: "第 2 章 家庭记忆", value: "chapter-2" },
+  ]);
+});
+
+test("transcript detail page keeps serious evidence and editing labels", () => {
+  const wxml = fs.readFileSync(
+    path.join(__dirname, "../pages/transcript-detail/index.wxml"),
+    "utf8",
+  );
+
+  assert.match(wxml, /整理后文字/);
+  assert.match(wxml, /用于生成章节正文/);
+  assert.match(wxml, /原始识别/);
+  assert.match(wxml, /保留口述，不建议直接改成书稿/);
+  assert.match(wxml, /校对整理文字/);
+  assert.match(wxml, /说出修改/);
+  assert.match(wxml, /危险操作/);
+  assert.doesNotMatch(wxml, /语音修正|语音校对|播放问答/);
 });
 
 test("transcript detail page can open directly in edit mode", async () => {

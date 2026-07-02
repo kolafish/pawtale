@@ -75,6 +75,7 @@ interface TranscriptDetailItemView extends MemoirVoiceTranscriptItem {
   editingCharCount: number;
   createdAtText: string;
   audioText: string;
+  recordMetaText: string;
   bookInclusionText: string;
   isIncludedInBook: boolean;
   canAssignChapterSource: boolean;
@@ -133,7 +134,7 @@ function formatDuration(item: MemoirVoiceTranscriptItem): string {
 
 function transcriptAudioText(item: MemoirVoiceTranscriptItem): string {
   const duration = formatDuration(item);
-  return duration ? `时长 ${duration}` : "时长未知";
+  return duration || "时长未知";
 }
 
 function transcriptCreatedAtText(item: Pick<MemoirVoiceTranscriptItem, "created_at">): string {
@@ -156,14 +157,16 @@ function transcriptTitleText(item: MemoirVoiceTranscriptItem): string {
 function transcriptBookInclusionText(item: MemoirVoiceTranscriptItem): string {
   const chapters = [...(item.included_chapters || [])]
     .sort((left, right) => left.sort_order - right.sort_order)
-    .map((chapter) => chapter.title.trim())
-    .filter(Boolean);
+    .map((chapter) => ({
+      title: chapter.title.trim() || "未命名章节",
+      chapterNumber: chapter.sort_order + 1,
+    }));
   if (!chapters.length) {
-    return "未收录到章节";
+    return "尚未入章";
   }
-  const visible = chapters.slice(0, 2).join("、");
-  const suffix = chapters.length > 2 ? "等章节" : "";
-  return `已收录：${visible}${suffix}`;
+  const first = chapters[0];
+  const suffix = chapters.length > 1 ? `等 ${chapters.length} 章` : "";
+  return `已放入第 ${first.chapterNumber} 章：${first.title}${suffix}`;
 }
 
 async function loadTranscriptBookPlan(projectId: string): Promise<MemoirBookPlan | null> {
@@ -186,13 +189,16 @@ function toViewItem(
   const isIncludedInBook = Boolean(item.is_included_in_book || item.included_chapters?.length);
   const chapterAssignOptions = transcriptChapterAssignOptions(item, bookPlan);
   const chapterMoveOptions = transcriptChapterMoveOptions(item, bookPlan);
+  const createdAtText = transcriptCreatedAtText(item);
+  const audioText = transcriptAudioText(item);
   return {
     ...item,
     titleText: transcriptTitleText(item),
     editingText: previous?.isEditing ? previous.editingText : editingText,
     editingCharCount: (previous?.isEditing ? previous.editingText : editingText).trim().length,
-    createdAtText: transcriptCreatedAtText(item),
-    audioText: transcriptAudioText(item),
+    createdAtText,
+    audioText,
+    recordMetaText: [createdAtText, audioText].filter(Boolean).join(" · "),
     bookInclusionText: transcriptBookInclusionText(item),
     isIncludedInBook,
     canAssignChapterSource: chapterAssignOptions.length > 0,
@@ -584,18 +590,18 @@ Page<TranscriptDetailData, {
           this.setData({
             voiceEditRecording: false,
             voiceEditLoading: true,
-            voiceEditStatusText: "正在识别修正内容",
+            voiceEditStatusText: "正在识别校对内容",
           });
         },
-        emptyTranscriptMessage: "没有识别到修正内容，请再说一次",
-        noVoiceTranscriptMessage: "没有听到修正内容，请再说一次",
+        emptyTranscriptMessage: "没有识别到校对内容，请再说一次",
+        noVoiceTranscriptMessage: "没有听到校对内容，请再说一次",
       });
       if (requestToken !== this.voiceEditToken) {
         return;
       }
       this.setData({
         voiceEditInstructionText: instructionText,
-        voiceEditStatusText: "正在生成修正预览",
+        voiceEditStatusText: "正在生成校对预览",
       });
       const preview = await previewMemoirVoiceTranscriptVoiceEdit(item.id, instructionText);
       if (requestToken !== this.voiceEditToken) {
@@ -603,7 +609,7 @@ Page<TranscriptDetailData, {
       }
       this.setData({
         voiceEditPreview: voiceEditPreviewView(preview),
-        voiceEditStatusText: preview.action === "revise_transcript" ? "请确认修正内容" : preview.reply_text,
+        voiceEditStatusText: preview.action === "revise_transcript" ? "请确认校对内容" : preview.reply_text,
       });
       trackAuditAction("transcript.detail_voice_edit_preview", { action: preview.action }, { projectId: item.project_id });
     } catch (error) {
@@ -611,7 +617,7 @@ Page<TranscriptDetailData, {
         return;
       }
       this.setData({
-        error: error instanceof Error ? error.message : "语音修正失败",
+        error: error instanceof Error ? error.message : "校对文字失败",
         voiceEditStatusText: "",
       });
     } finally {
@@ -655,7 +661,7 @@ Page<TranscriptDetailData, {
     }
     const content = preview.editedText.trim();
     if (!content) {
-      this.setData({ error: "修正后的整理文字不能为空" });
+      this.setData({ error: "校对后的整理文字不能为空" });
       return;
     }
     this.setData({ voiceEditSaving: true, saving: true, error: "" });
@@ -668,9 +674,9 @@ Page<TranscriptDetailData, {
         voiceEditPreview: null,
       });
       trackAuditAction("transcript.detail_voice_edit_save", {}, { projectId: updated.project_id });
-      wx.showToast({ title: "已保存修正", icon: "success" });
+      wx.showToast({ title: "已保存校对", icon: "success" });
     } catch (error) {
-      this.setData({ error: error instanceof Error ? error.message : "保存修正失败" });
+      this.setData({ error: error instanceof Error ? error.message : "保存校对失败" });
     } finally {
       this.setData({ voiceEditSaving: false, saving: false });
     }

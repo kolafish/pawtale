@@ -29,7 +29,7 @@
   <block wx:else>
     <view class="hero-panel">
       <text class="record-title">{{item.titleText}}</text>
-      <text class="record-meta">{{item.createdAtText}} · {{item.audioText}}</text>
+      <text class="record-meta">{{item.recordMetaText}}</text>
       <text class="book-status {{item.isIncludedInBook ? 'included' : ''}}">{{item.bookInclusionText}}</text>
       <view class="actions-row primary-actions">
         <button
@@ -49,44 +49,11 @@
       </view>
     </view>
 
-    <view wx:if="{{item.question_text}}" class="section-card">
-      <view class="section-head">
-        <text class="section-title">AI 引导问题</text>
-        <text class="section-count">{{item.question_audio_file_id ? "有语音" : "无语音"}}</text>
-      </view>
-      <text class="body-text question-text">
-        <text
-          wx:for="{{item.questionSegments}}"
-          wx:for-item="segment"
-          wx:for-index="segmentIndex"
-          wx:key="segmentIndex"
-        >{{segment.text}}</text>
-      </text>
-    </view>
-
-    <view class="section-card evidence-card">
-      <view class="section-head">
-        <view>
-          <text class="section-title">原始识别</text>
-          <text class="section-hint">保留口述原貌，用于核对事实来源。</text>
-        </view>
-        <text class="section-count">{{item.raw_char_count}} 字</text>
-      </view>
-      <text class="body-text raw-text">
-        <text
-          wx:for="{{item.rawSegments}}"
-          wx:for-item="segment"
-          wx:for-index="segmentIndex"
-          wx:key="segmentIndex"
-        >{{segment.text}}</text>
-      </text>
-    </view>
-
     <view wx:if="{{!item.isEditing}}" class="section-card manuscript-card">
       <view class="section-head">
-        <view>
+        <view class="section-heading">
           <text class="section-title">整理后文字</text>
-          <text class="section-hint">用于生成章节正文。</text>
+          <text class="section-hint">用于生成章节正文</text>
         </view>
         <text class="section-count">{{item.display_char_count}} 字</text>
       </view>
@@ -102,7 +69,10 @@
 
     <view wx:else class="section-card edit-card">
       <view class="section-head">
-        <text class="section-title">编辑整理文字</text>
+        <view class="section-heading">
+          <text class="section-title">编辑整理文字</text>
+          <text class="section-hint">用于生成章节正文</text>
+        </view>
         <text class="section-count">{{item.editingCharCount}} 字</text>
       </view>
       <textarea
@@ -127,10 +97,49 @@
       </view>
     </view>
 
+    <view wx:if="{{item.question_text}}" class="section-card">
+      <view class="section-head">
+        <view class="section-heading">
+          <text class="section-title">AI 引导问题</text>
+          <text class="section-hint">这段讲述当时回答的问题</text>
+        </view>
+        <text class="section-count">{{item.question_audio_file_id ? "有语音" : "无语音"}}</text>
+      </view>
+      <text class="body-text question-text">
+        <text
+          wx:for="{{item.questionSegments}}"
+          wx:for-item="segment"
+          wx:for-index="segmentIndex"
+          wx:key="segmentIndex"
+        >{{segment.text}}</text>
+      </text>
+    </view>
+
+    <view class="section-card evidence-card">
+      <view class="section-head">
+        <view class="section-heading">
+          <text class="section-title">原始识别</text>
+          <text class="section-hint">保留口述，不建议直接改成书稿</text>
+        </view>
+        <text class="section-count">{{item.raw_char_count}} 字</text>
+      </view>
+      <text class="body-text raw-text">
+        <text
+          wx:for="{{item.rawSegments}}"
+          wx:for-item="segment"
+          wx:for-index="segmentIndex"
+          wx:key="segmentIndex"
+        >{{segment.text}}</text>
+      </text>
+    </view>
+
     <view class="section-card">
       <view class="section-head">
-        <text class="section-title">文字校对</text>
-        <text class="section-count">{{voiceEditStatusText || "可语音说明要修改的地方"}}</text>
+        <view class="section-heading">
+          <text class="section-title">校对整理文字</text>
+          <text class="section-hint">说出要改的句子或事实，确认后再保存</text>
+        </view>
+        <text class="section-count">{{voiceEditStatusText || "待校对"}}</text>
       </view>
       <view wx:if="{{voiceEditInstructionText}}" class="voice-edit-block">
         <text class="voice-edit-label">你说</text>
@@ -172,7 +181,7 @@
           loading="{{voiceEditLoading}}"
           disabled="{{saving || deleting || voiceEditSaving || voiceEditLoading}}"
         >
-          {{voiceEditRecording ? "停止录入" : (voiceEditLoading ? "生成中" : "语音校对")}}
+          {{voiceEditRecording ? "停止录入" : (voiceEditLoading ? "生成中" : "说出修改")}}
         </button>
         <button
           wx:if="{{voiceEditPreview}}"
@@ -196,8 +205,11 @@
 
     <view class="section-card">
       <view class="section-head">
-        <text class="section-title">章节位置</text>
-        <text class="section-count">{{item.bookInclusionText}}</text>
+        <view class="section-heading">
+          <text class="section-title">章节位置</text>
+          <text class="section-hint">{{item.bookInclusionText}}</text>
+        </view>
+        <text class="section-count">{{item.isIncludedInBook ? "已入章" : "未入章"}}</text>
       </view>
       <view class="actions-row">
         <picker
@@ -227,7 +239,10 @@
 
     <view class="section-card danger-card">
       <view class="section-head">
-        <text class="section-title danger-title">危险操作</text>
+        <view class="section-heading">
+          <text class="section-title danger-title">危险操作</text>
+          <text class="section-hint danger-hint">删除后不会再出现在讲述记录和访谈上下文中</text>
+        </view>
       </view>
       <button
         class="danger-button"
