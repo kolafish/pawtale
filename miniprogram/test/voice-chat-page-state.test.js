@@ -13,9 +13,9 @@ test("voice chat initial data keeps the assistant ready for opening narration", 
   const second = initialVoiceChatData();
 
   assert.equal(first.status, "idle");
-  assert.equal(first.modeLabel, "自由讲述");
+  assert.equal(first.modeLabel, "慢慢讲");
   assert.equal(first.primaryActionText, "开始说话");
-  assert.equal(first.assistantPromptLabel, "老余开场");
+  assert.equal(first.assistantPromptLabel, "小余想听您讲讲");
   assert.equal(first.autoStopEnabled, true);
   assert.equal(first.autoListenEnabled, true);
   assert.deepEqual(first.transcriptLines, []);

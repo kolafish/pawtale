@@ -8,7 +8,7 @@
 
   <view class="home-card">
     <view class="project-row">
-      <text class="panel-label">当前回忆录</text>
+      <text class="panel-label">{{hasProject ? "今天继续讲" : "准备开始"}}</text>
       <text class="mode-tag">{{hasProject ? guidanceLabel : "待创建"}}</text>
     </view>
     <text class="project-title">{{projectTitle || "正在加载回忆录"}}</text>
@@ -17,17 +17,22 @@
     </text>
 
     <button
-      class="mic-button"
+      class="voice-start-button"
       loading="{{creatingVoice}}"
       disabled="{{loading || creatingVoice}}"
       bindtap="startVoiceChat"
-      hover-class="mic-button-hover"
+      hover-class="voice-start-button-hover"
     >
-      <image class="mic-icon" src="/assets/memoir-microphone.png" mode="aspectFit" />
+      <image class="voice-start-icon" src="/assets/memoir-microphone.png" mode="aspectFit" />
+      <view class="voice-start-copy">
+        <text class="voice-start-title">
+          {{needsLogin ? "登录后开始" : (!hasProject ? "创建回忆录" : (!voiceAuthorizationAgreed ? "同意协议后开始" : (creatingVoice ? "正在准备" : "点这里开始讲")))}}
+        </text>
+        <text class="voice-start-subtitle">
+          {{needsLogin ? "先登录，再继续讲回忆。" : (!hasProject ? "先起个名字，我再听您讲。" : (!voiceAuthorizationAgreed ? "同意后才会打开麦克风。" : (creatingVoice ? "我马上开始听。" : "说一段就行，我会帮您记下来。")))}}
+        </text>
+      </view>
     </button>
-    <text class="mic-button-label">
-      {{needsLogin ? "登录后开始" : (!hasProject ? "创建回忆录" : (!voiceAuthorizationAgreed ? "同意协议后开始" : (creatingVoice ? "正在准备" : "点麦克风开始")))}}
-    </text>
 
     <view wx:if="{{!voiceAuthorizationAgreed}}" class="voice-auth-panel">
       <checkbox-group bindchange="changeVoiceAuthorization">

@@ -197,7 +197,7 @@ export class VoiceAssistantTurnRuntime {
     if (!this.active) {
       return;
     }
-    this.playbackError = error instanceof Error ? error : new Error("AI 语音播放失败");
+    this.playbackError = error instanceof Error ? error : new Error("小余语音播放失败");
     this.callbacks.onPlaybackError?.(this.playbackError);
   }
 

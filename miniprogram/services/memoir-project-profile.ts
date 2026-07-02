@@ -8,8 +8,8 @@ export interface GuidanceOption<T extends string> {
 }
 
 export const MEMOIR_GUIDANCE_MODE_OPTIONS: Array<GuidanceOption<MemoirGuidanceMode>> = [
-  { value: "free_narration", label: "自由讲述" },
-  { value: "guided_interview", label: "AI 引导" },
+  { value: "free_narration", label: "自己慢慢讲" },
+  { value: "guided_interview", label: "小余陪着问" },
 ];
 
 export const MEMOIR_GUIDANCE_MODULE_OPTIONS: Array<GuidanceOption<MemoirGuidanceModule>> = [
@@ -76,7 +76,7 @@ export function memoirProjectProfile(project?: Pick<Project, "metadata_json"> | 
 }
 
 export function guidanceModeLabel(mode: MemoirGuidanceMode): string {
-  return mode === "guided_interview" ? "主题讲述" : "自由讲述";
+  return mode === "guided_interview" ? "小余陪着问" : "慢慢讲";
 }
 
 export function normalizeGuidanceModule(value?: string | null): MemoirGuidanceModule {
@@ -91,7 +91,7 @@ export function guidanceModuleLabel(module?: string | null): string {
 }
 
 export function voiceGuidanceLabel(mode: MemoirGuidanceMode, module?: string | null): string {
-  return mode === "guided_interview" ? `AI 引导 · ${guidanceModuleLabel(module)}` : "自由讲述";
+  return mode === "guided_interview" ? `小余陪着问 · ${guidanceModuleLabel(module)}` : "慢慢讲";
 }
 
 export function narratorGenderLabel(gender: MemoirNarratorGender): string {

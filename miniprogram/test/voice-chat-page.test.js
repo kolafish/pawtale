@@ -71,17 +71,17 @@ function loadVoiceChatPage({
   });
   mockModule("../services/voice-chat-state.ts", {
     assistantPanelCopy: () => ({
-      assistantPromptLabel: "老余开场",
-      assistantLoadingText: "老余正在准备第一句话",
-      assistantEmptyText: "老余会先说一句，帮你开始讲。",
+      assistantPromptLabel: "小余想听您讲讲",
+      assistantLoadingText: "小余正在准备第一句话",
+      assistantEmptyText: "小余会先问一句，帮您开始讲。",
     }),
     assistantTranscriptState: (lines, options = {}) => ({
       transcriptLines: lines,
       latestTranscriptText: lines.length ? lines[lines.length - 1].text : "",
       assistantPromptText: options.assistantPromptText || "",
-      assistantPromptLabel: "老余开场",
-      assistantLoadingText: "老余正在准备第一句话",
-      assistantEmptyText: "老余会先说一句，帮你开始讲。",
+      assistantPromptLabel: "小余想听您讲讲",
+      assistantLoadingText: "小余正在准备第一句话",
+      assistantEmptyText: "小余会先问一句，帮您开始讲。",
       assistantExpectsAnswer: true,
       followUpMessageId: options.followUpMessageId || "",
       followUpAudioFileId: options.followUpAudioFileId || "",
@@ -99,7 +99,7 @@ function loadVoiceChatPage({
     gatewayStateText: () => "识别未同步",
     latestAssistantMessageId: () => "",
     latestTranscriptText: () => "",
-    modeLabel: (mode) => (mode === "guided_interview" ? "主题讲述" : "自由讲述"),
+    modeLabel: (mode) => (mode === "guided_interview" ? "小余陪着问" : "慢慢讲"),
     statusText: (status) => status,
     totalTranscriptChars: () => 0,
     ttsAlignmentFromAssistantLine: () => [],
@@ -1165,7 +1165,7 @@ test("voice chat mic interrupts active assistant turn and starts recording", asy
       followUpLoading: true,
       followUpTTSLoading: true,
       followUpTTSPlaying: true,
-      followUpTTSStateText: "老余正在说",
+      followUpTTSStateText: "小余正在说",
       followUpError: "previous error",
       assistantPromptText: "那时候在院子里，外婆最常带着您做什么？",
       transcriptLines: [
@@ -1250,7 +1250,7 @@ test("voice chat mic interrupts assistant turn before async recording checks fin
       followUpLoading: true,
       followUpTTSLoading: false,
       followUpTTSPlaying: true,
-      followUpTTSStateText: "老余正在说",
+      followUpTTSStateText: "小余正在说",
       assistantPromptText: "您刚才说到第一份工作，那里最难忘的一个人是谁？",
       transcriptLines: [
         { id: "user-line-1", role: "user", text: "我第一份工作是在供销社。" },
@@ -1352,7 +1352,7 @@ test("voice chat automatically interrupts assistant playback when local voice mo
       followUpLoading: true,
       followUpTTSLoading: false,
       followUpTTSPlaying: false,
-      followUpTTSStateText: "老余正在说",
+      followUpTTSStateText: "小余正在说",
       followUpError: "",
       assistantPromptText: "那咱们接着聊朋友。",
       transcriptLines: [
@@ -1441,7 +1441,7 @@ test("voice chat surfaces local barge-in monitor recorder failures", () => {
       followUpLoading: true,
       followUpTTSLoading: false,
       followUpTTSPlaying: false,
-      autoListenStateText: "AI 说完自动听",
+      autoListenStateText: "小余说完自动听",
     },
     setData(patch) {
       this.data = { ...this.data, ...patch };
@@ -1450,11 +1450,11 @@ test("voice chat surfaces local barge-in monitor recorder failures", () => {
 
   page.startAssistantBargeInMonitor.call(context, 0);
 
-  assert.equal(context.data.autoListenStateText, "可直接说话打断老余");
+  assert.equal(context.data.autoListenStateText, "想说时可以直接开口");
 
   monitorOptions.onError("operateRecorder:fail auth deny");
 
-  assert.equal(context.data.autoListenStateText, "自动打断未启动，可点按钮回答");
+  assert.equal(context.data.autoListenStateText, "可以点按钮回答");
 });
 
 test("voice chat auto barge-in stops assistant before reconnecting a missing gateway client", async () => {
@@ -1501,7 +1501,7 @@ test("voice chat auto barge-in stops assistant before reconnecting a missing gat
       followUpLoading: true,
       followUpTTSLoading: false,
       followUpTTSPlaying: false,
-      followUpTTSStateText: "老余正在说",
+      followUpTTSStateText: "小余正在说",
       assistantPromptText: "那咱们接着聊工作。",
       transcriptLines: [
         { id: "user-line-1", role: "user", text: "我想聊聊工作。" },
@@ -1548,7 +1548,7 @@ test("voice chat auto barge-in stops assistant before reconnecting a missing gat
   assert.deepEqual(cancelReasons, ["interrupted_by_user"]);
   assert.deepEqual(reconnectCalls, [false]);
   assert.equal(context.data.followUpTTSPlaying, false);
-  assert.equal(context.data.autoListenStateText, "听到你说话，正在打断老余");
+  assert.equal(context.data.autoListenStateText, "听到您说话了");
 });
 
 test("voice chat drives first streaming highlight from WebAudio playback progress", async () => {
@@ -2050,7 +2050,7 @@ test("voice chat asks with AI voice when auto-listen hears no answer", async () 
       ...page.data,
       voiceSessionId: "voice-1",
       autoStopEnabled: true,
-      autoListenStateText: "AI 说完，正在听你说",
+      autoListenStateText: "小余说完，正在听您说",
       persistenceStateText: "等待识别",
       primaryActionText: "暂停收音",
     },
@@ -2094,8 +2094,8 @@ test("voice chat asks with AI voice when auto-listen hears no answer", async () 
     text: "我这边没有听到声音，您可以接着刚才的问题慢慢说。",
   }]);
   assert.equal(context.data.assistantPromptText, "我这边没有听到声音，您可以接着刚才的问题慢慢说。");
-  assert.equal(context.data.autoListenStateText, "老余确认后会继续听");
-  assert.equal(context.data.persistenceStateText, "老余正在确认");
+  assert.equal(context.data.autoListenStateText, "小余问完会继续听");
+  assert.equal(context.data.persistenceStateText, "小余正在确认");
   assert.equal(context.consecutiveNoAnswerPrompts, 1);
 
   page.handleCaptureStats.call(context, {
@@ -2111,8 +2111,8 @@ test("voice chat asks with AI voice when auto-listen hears no answer", async () 
   });
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(noAnswerRequests.length, 1);
-  assert.equal(context.data.autoListenStateText, "老余确认后会继续听");
-  assert.equal(context.data.persistenceStateText, "老余正在确认");
+  assert.equal(context.data.autoListenStateText, "小余问完会继续听");
+  assert.equal(context.data.persistenceStateText, "小余正在确认");
 });
 
 test("voice chat ignores stale no-answer prompt after manual recording resumes", async () => {
@@ -2169,7 +2169,7 @@ test("voice chat ignores stale no-answer prompt after manual recording resumes",
       voiceAuthorizationAgreed: true,
       status: "ready",
       autoStopEnabled: true,
-      autoListenStateText: "AI 说完，正在听你说",
+      autoListenStateText: "小余说完，正在听您说",
       persistenceStateText: "等待识别",
       primaryActionText: "暂停收音",
     },
@@ -2242,7 +2242,7 @@ test("voice chat pauses after the second consecutive no-answer prompt", async ()
       ...page.data,
       voiceSessionId: "voice-1",
       autoStopEnabled: true,
-      autoListenStateText: "AI 说完，正在听你说",
+      autoListenStateText: "小余说完，正在听您说",
       persistenceStateText: "等待识别",
       primaryActionText: "暂停收音",
     },

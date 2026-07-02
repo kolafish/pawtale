@@ -89,18 +89,20 @@ test("home keeps voice entry free of per-session guidance controls", () => {
   assert.equal(wxml.includes("voice-mode-row"), false);
 });
 
-test("home uses one warm memoir card with a microphone start button", () => {
+test("home uses one warm memoir card with a clear voice start button", () => {
   const wxml = fs.readFileSync(path.join(__dirname, "../pages/home/index.wxml"), "utf8");
   const wxss = fs.readFileSync(path.join(__dirname, "../pages/home/index.wxss"), "utf8");
 
   assert.match(wxml, /class="home-card"/);
   assert.equal(wxml.includes('class="project-panel"'), false);
   assert.equal(wxml.includes('class="voice-panel"'), false);
-  assert.match(wxml, /class="mic-button"/);
+  assert.match(wxml, /class="voice-start-button"/);
   assert.match(wxml, /我在听，请讲吧/);
+  assert.match(wxml, /点这里开始讲/);
+  assert.match(wxml, /说一段就行，我会帮您记下来/);
   assert.equal(wxss.includes("#2f7d63"), false);
-  assert.match(wxss, /\.mic-button[\s\S]*#fff1ec/);
-  assert.match(wxss, /\.mic-button-label[\s\S]*#9f4a3c/);
+  assert.match(wxss, /\.voice-start-button[\s\S]*#9f4a3c/);
+  assert.match(wxss, /\.voice-start-title[\s\S]*#ffffff/);
 });
 
 test("home userDisplayName hides wechat placeholder display name", () => {
@@ -185,7 +187,7 @@ test("home refreshes guidance mode from current project on load", async () => {
   await page.loadHome.call(context);
 
   assert.equal(context.data.selectedMode, "guided_interview");
-  assert.equal(context.data.guidanceLabel, "主题讲述");
+  assert.equal(context.data.guidanceLabel, "小余陪着问");
   assert.equal(context.data.projectTitle, "外婆回忆录");
   assert.equal(context.data.hasProject, true);
 });
@@ -252,6 +254,7 @@ test("home creates voice sessions with the project-bound guidance mode", async (
       ...page.data,
       selectedMode: "guided_interview",
       projectId: "project/1",
+      projectTitle: "爷爷的故事",
       hasProject: true,
       voiceAuthorizationAgreed: true,
     },
@@ -268,7 +271,7 @@ test("home creates voice sessions with the project-bound guidance mode", async (
   assert.equal(createdSessions[0].input.current_guidance_module, undefined);
   assert.equal(createdSessions[0].input.metadata_json.entry, "miniprogram_home");
   assert.deepEqual(createdSessions[0].options, { projectId: "project/1" });
-  assert.equal(navigations[0], "/pages/voice-chat/index?voiceSessionId=voice%2F1&mode=guided_interview");
+  assert.equal(navigations[0], "/pages/voice-chat/index?voiceSessionId=voice%2F1&mode=guided_interview&projectTitle=%E7%88%B7%E7%88%B7%E7%9A%84%E6%95%85%E4%BA%8B");
   assert.equal(context.data.creatingVoice, false);
   delete global.wx;
 });
@@ -298,6 +301,7 @@ test("home creates free narration voice sessions without a guidance module", asy
       ...page.data,
       selectedMode: "free_narration",
       projectId: "project/1",
+      projectTitle: "自由回忆",
       hasProject: true,
       voiceAuthorizationAgreed: true,
     },
@@ -311,7 +315,7 @@ test("home creates free narration voice sessions without a guidance module", asy
   assert.equal(createdSessions.length, 1);
   assert.equal(createdSessions[0].input.guidance_mode, "free_narration");
   assert.equal(createdSessions[0].input.current_guidance_module, undefined);
-  assert.equal(navigations[0], "/pages/voice-chat/index?voiceSessionId=voice%2Ffree&mode=free_narration");
+  assert.equal(navigations[0], "/pages/voice-chat/index?voiceSessionId=voice%2Ffree&mode=free_narration&projectTitle=%E8%87%AA%E7%94%B1%E5%9B%9E%E5%BF%86");
   delete global.wx;
 });
 

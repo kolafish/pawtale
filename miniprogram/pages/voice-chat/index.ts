@@ -88,6 +88,17 @@ const AUTO_LISTEN_NO_ANSWER_MS = 15000;
 const MAX_CONSECUTIVE_NO_ANSWER_PROMPTS = 2;
 const STREAMING_TTS_PROGRESS_HOLD_SECONDS = 0.2;
 
+function queryText(value?: string): string {
+  if (!value) {
+    return "";
+  }
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
 Page<VoiceChatData, {
   onLoad(query?: Record<string, string | undefined>): Promise<void>;
   onShow(): void;
@@ -243,9 +254,11 @@ Page<VoiceChatData, {
     const voiceSessionId = query?.voiceSessionId || "";
     const guidanceMode = query?.mode === "guided_interview" ? "guided_interview" : "free_narration";
     const currentGuidanceModule = query?.module || "";
+    const projectTitle = queryText(query?.projectTitle);
     const voiceAuthorizationAgreed = readVoiceAuthorizationConsent();
     this.setData({
       voiceSessionId,
+      projectTitle,
       guidanceMode,
       currentGuidanceModule,
       modeLabel: voiceGuidanceLabel(guidanceMode, currentGuidanceModule),
@@ -308,7 +321,7 @@ Page<VoiceChatData, {
     if (voiceAuthorizationAgreed && this.data.primaryActionText === "同意后开始说话") {
       patch.primaryActionText = "开始说话";
       patch.error = "";
-      patch.autoListenStateText = "AI 说完自动听";
+      patch.autoListenStateText = "小余说完自动听";
     }
     if (!voiceAuthorizationAgreed && !this.data.recording) {
       patch.primaryActionText = "同意后开始说话";
@@ -338,7 +351,7 @@ Page<VoiceChatData, {
       recording: agreed ? this.data.recording : false,
       error: agreed ? "" : this.data.error,
       primaryActionText: agreed ? "开始说话" : "同意后开始说话",
-      autoListenStateText: agreed ? "AI 说完自动听" : "同意后才会自动收音",
+      autoListenStateText: agreed ? "小余说完自动听" : "同意后才会自动收音",
     });
     if (agreed && this.data.voiceSessionId && !this.voiceStreaming.hasClient() && !this.data.connecting) {
       await this.syncVoiceAuthorizationAndConnect();
@@ -631,13 +644,13 @@ Page<VoiceChatData, {
       followUpError: "",
       followUpTTSLoading: true,
       followUpTTSError: "",
-      followUpTTSStateText: "正在连接 AI 语音",
+      followUpTTSStateText: "正在准备小余语音",
       ttsSpokenText: "",
       ttsCurrentText: "",
       ttsRemainingText: "",
       ttsProgressPercent: 0,
       canRequestFollowUp: false,
-      persistenceStateText: "老余正在回应",
+      persistenceStateText: "小余正在回应",
     });
     try {
       await this.generateStreamingFollowUp(sourceMessageId, regenerate, requestSerial);
@@ -645,7 +658,7 @@ Page<VoiceChatData, {
       if (requestSerial !== followUpRequestSerial) {
         return;
       }
-      this.clearFailedStreamingAssistantTurn(error instanceof Error ? error.message : "老余回应生成失败");
+      this.clearFailedStreamingAssistantTurn(error instanceof Error ? error.message : "小余回应生成失败");
     } finally {
       if (requestSerial === followUpRequestSerial) {
         this.setData({
@@ -669,8 +682,8 @@ Page<VoiceChatData, {
           return;
         }
         this.setData({
-          followUpTTSStateText: "老余正在说",
-          persistenceStateText: "老余正在回应",
+          followUpTTSStateText: "小余正在说",
+          persistenceStateText: "小余正在回应",
         });
       },
       onTextDelta: (event) => {
@@ -741,7 +754,7 @@ Page<VoiceChatData, {
       ttsProgressPercent: playbackError ? this.data.ttsProgressPercent : 100,
       persistenceStateText: playbackError
         ? "语音播放失败"
-        : (completed.expects_answer === false ? "老余已回应" : "等待回答"),
+        : (completed.expects_answer === false ? "小余已回应" : "等待回答"),
       lastFollowUpSourceMessageId: sourceMessageId,
     });
     if (!playbackError && completed.expects_answer !== false) {
@@ -833,7 +846,7 @@ Page<VoiceChatData, {
         canRequestFollowUp: false,
       }),
       followUpTTSError: "",
-      persistenceStateText: "老余正在回应",
+      persistenceStateText: "小余正在回应",
     });
   },
 
@@ -895,7 +908,7 @@ Page<VoiceChatData, {
       followUpTTSLoading: false,
       followUpTTSPlaying: true,
       followUpTTSError: "",
-      followUpTTSStateText: "正在播放",
+      followUpTTSStateText: "小余正在读问题",
       ...(firstStreamingFrame ? {
         ttsSpokenText: "",
         ttsCurrentText: "",
@@ -991,7 +1004,7 @@ Page<VoiceChatData, {
             continue;
           }
           this.setData({
-            followUpTTSError: error instanceof Error ? error.message : "AI 语音生成失败",
+            followUpTTSError: error instanceof Error ? error.message : "小余语音生成失败",
             followUpTTSStateText: "语音暂不可用",
           });
         }
@@ -1031,7 +1044,7 @@ Page<VoiceChatData, {
       writeMemoirVoiceSessionSnapshot(this.data.voiceSessionId, { transcriptLines: lines });
       return prepared;
     } catch (error) {
-      throw error instanceof Error ? error : new Error("AI 语音生成失败");
+      throw error instanceof Error ? error : new Error("小余语音生成失败");
     } finally {
       this.assistantAudioPrepareCount = Math.max(0, this.assistantAudioPrepareCount - 1);
       if (this.assistantAudioPrepareCount === 0) {
@@ -1127,7 +1140,7 @@ Page<VoiceChatData, {
       ttsAlignment: options.alignment || this.data.ttsAlignment,
       followUpTTSPlaying: true,
       followUpTTSError: "",
-      followUpTTSStateText: "正在播放",
+      followUpTTSStateText: "小余正在读问题",
       ttsSpokenText: "",
       ttsCurrentText: "",
       ttsRemainingText: options.text || this.data.assistantPromptText,
@@ -1184,19 +1197,19 @@ Page<VoiceChatData, {
             this.stopFollowUpProgressTimer();
             this.setData({
               followUpTTSPlaying: false,
-              followUpTTSError: "AI 语音播放失败",
+              followUpTTSError: "小余语音播放失败",
               followUpTTSStateText: "播放失败",
             });
           }
         },
-        errorMessage: "AI 语音播放失败",
+        errorMessage: "小余语音播放失败",
       });
     } catch (error) {
       if (playToken === this.ttsPlayToken) {
         this.stopAssistantBargeInMonitor();
         this.setData({
           followUpTTSPlaying: false,
-          followUpTTSError: error instanceof Error ? error.message : "AI 语音播放失败",
+          followUpTTSError: error instanceof Error ? error.message : "小余语音播放失败",
           followUpTTSStateText: "播放失败",
         });
       }
@@ -1286,12 +1299,12 @@ Page<VoiceChatData, {
           && !this.data.recording
           && this.assistantTurnActiveForBargeIn()
         ) {
-          this.setData({ autoListenStateText: "自动打断未启动，可点按钮回答" });
+          this.setData({ autoListenStateText: "可以点按钮回答" });
         }
       },
     });
     if (started) {
-      this.setData({ autoListenStateText: "可直接说话打断老余" });
+      this.setData({ autoListenStateText: "想说时可以直接开口" });
     }
   },
 
@@ -1309,7 +1322,7 @@ Page<VoiceChatData, {
       return;
     }
     this.setData({
-      autoListenStateText: "听到你说话，正在打断老余",
+      autoListenStateText: "听到您说话了",
     });
     if (!this.ensureVoiceAuthorization(false)) {
       await this.stopAssistantBargeInMonitor();
@@ -1549,7 +1562,7 @@ Page<VoiceChatData, {
       this.setData({
         followUpLoading: false,
         followUpError: "",
-        followUpTTSStateText: "已打断，正在听你说",
+        followUpTTSStateText: "正在听您说",
         persistenceStateText: "正在听你说",
       });
     }
@@ -1598,7 +1611,7 @@ Page<VoiceChatData, {
       liveText: "",
       liveCharCount: 0,
       primaryActionText: "暂停收音",
-      autoListenStateText: autoTriggered ? "AI 说完，正在听你说" : "AI 说完自动听",
+      autoListenStateText: autoTriggered ? "小余说完，正在听您说" : "小余说完自动听",
     });
     trackAuditAction(
       "voice_chat.recording_start",
@@ -1662,8 +1675,8 @@ Page<VoiceChatData, {
       followUpLoading: true,
       followUpError: "",
       canRequestFollowUp: false,
-      persistenceStateText: "老余正在确认",
-      autoListenStateText: "没听到回答，老余正在确认",
+      persistenceStateText: "小余正在确认",
+      autoListenStateText: "没听到回答，小余再问一句",
     });
     try {
       const response = await createMemoirVoiceNoAnswerPrompt(this.data.voiceSessionId, { attempt });
@@ -1674,15 +1687,15 @@ Page<VoiceChatData, {
       this.setData({
         dismissedFollowUpMessageId: "",
         followUpTTSError: "",
-        persistenceStateText: autoListenAfterPlayback ? "老余正在确认" : "已暂停收音",
-        autoListenStateText: autoListenAfterPlayback ? "老余确认后会继续听" : "已暂停，可点继续说话",
+        persistenceStateText: autoListenAfterPlayback ? "小余正在确认" : "已暂停收音",
+        autoListenStateText: autoListenAfterPlayback ? "小余问完会继续听" : "已暂停，可点继续说话",
       });
     } catch (error) {
       if (requestSerial !== this.noAnswerPromptRequestSerial) {
         return;
       }
       this.setData({
-        followUpError: error instanceof Error ? error.message : "AI 确认生成失败",
+        followUpError: error instanceof Error ? error.message : "小余确认生成失败",
         persistenceStateText: "确认失败",
         autoListenStateText: "没听到回答，可点继续说话",
         canRequestFollowUp: canRequestFollowUp(
@@ -1810,7 +1823,7 @@ Page<VoiceChatData, {
       nextData.primaryActionText = "继续说话";
       nextData.persistenceStateText = this.data.persistenceStateText === "已保存"
         || this.data.persistenceStateText === "未听到回答"
-        || this.data.persistenceStateText === "老余正在确认"
+        || this.data.persistenceStateText === "小余正在确认"
         ? this.data.persistenceStateText
         : "正在保存";
     }

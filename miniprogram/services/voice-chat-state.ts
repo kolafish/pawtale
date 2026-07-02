@@ -9,7 +9,7 @@ import type {
 import type { VoiceChatConnectionStatus } from "./memoir-streaming-asr";
 
 export function modeLabel(mode: MemoirGuidanceMode): string {
-  return mode === "guided_interview" ? "主题讲述" : "自由讲述";
+  return mode === "guided_interview" ? "小余陪着问" : "慢慢讲";
 }
 
 export function statusText(status: VoiceChatConnectionStatus): string {
@@ -152,15 +152,15 @@ export function assistantIntentLabel(
   hasUserMessage: boolean,
 ): string {
   const labels: Record<string, string> = {
-    opening: "老余开场",
-    follow_up: "老余追问",
-    acknowledge: "老余回应",
-    encourage_continue: "老余鼓励",
+    opening: "小余想听您讲讲",
+    follow_up: "小余想听您讲讲",
+    acknowledge: "小余帮您接着整理",
+    encourage_continue: "小余陪您继续讲",
     reflect_summary: "阶段小结",
     transition: "换个方向",
-    repair: "老余确认",
+    repair: "小余再问一句",
   };
-  return labels[intent] || (hasUserMessage ? "老余回应" : "老余开场");
+  return labels[intent] || (hasUserMessage ? "小余帮您接着整理" : "小余想听您讲讲");
 }
 
 export function assistantExpectsAnswer(line?: VoiceChatTranscriptLine): boolean {
@@ -192,10 +192,10 @@ export function assistantPanelCopy(
   const intent = assistantPrimaryIntent(assistantLine);
   return {
     assistantPromptLabel: assistantIntentLabel(intent, hasUserMessage),
-    assistantLoadingText: hasUserMessage ? "老余正在想怎么接话" : "老余正在准备第一句话",
+    assistantLoadingText: hasUserMessage ? "小余正在想一想" : "小余正在准备第一句话",
     assistantEmptyText: hasUserMessage
-      ? "可以让老余根据刚才的内容接着聊。"
-      : "老余会先说一句，帮你开始讲。",
+      ? "可以让小余根据刚才的内容接着问。"
+      : "小余会先问一句，帮您开始讲。",
   };
 }
 

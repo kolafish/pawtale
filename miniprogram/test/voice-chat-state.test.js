@@ -68,11 +68,11 @@ test("derives assistant panel state from transcript lines", () => {
   assert.equal(visibleAssistantLine(lines, "message-assistant"), undefined);
   assert.equal(assistantPrimaryIntent(assistantLine), "follow_up");
   assert.equal(assistantExpectsAnswer(assistantLine), true);
-  assert.equal(assistantIntentLabel("acknowledge", true), "老余回应");
+  assert.equal(assistantIntentLabel("acknowledge", true), "小余帮您接着整理");
   assert.deepEqual(assistantPanelCopy(lines), {
-    assistantPromptLabel: "老余追问",
-    assistantLoadingText: "老余正在想怎么接话",
-    assistantEmptyText: "可以让老余根据刚才的内容接着聊。",
+    assistantPromptLabel: "小余想听您讲讲",
+    assistantLoadingText: "小余正在想一想",
+    assistantEmptyText: "可以让小余根据刚才的内容接着问。",
   });
 });
 
@@ -102,9 +102,9 @@ test("derives assistant transcript patch from lines and overrides generated assi
       transcriptLines: [userLine, assistantLine],
       latestTranscriptText: userLine.text,
       assistantPromptText: assistantLine.text,
-      assistantPromptLabel: "老余追问",
-      assistantLoadingText: "老余正在想怎么接话",
-      assistantEmptyText: "可以让老余根据刚才的内容接着聊。",
+      assistantPromptLabel: "小余想听您讲讲",
+      assistantLoadingText: "小余正在想一想",
+      assistantEmptyText: "可以让小余根据刚才的内容接着问。",
       assistantExpectsAnswer: true,
       followUpMessageId: "message-assistant",
       followUpAudioFileId: "",
@@ -154,9 +154,9 @@ test("derives assistant transcript patch from lines and overrides generated assi
 test("derives opening follow-up source before the first user line", () => {
   assert.equal(followUpSourceMessageId([]), "opening");
   assert.deepEqual(assistantPanelCopy([]), {
-    assistantPromptLabel: "老余开场",
-    assistantLoadingText: "老余正在准备第一句话",
-    assistantEmptyText: "老余会先说一句，帮你开始讲。",
+    assistantPromptLabel: "小余想听您讲讲",
+    assistantLoadingText: "小余正在准备第一句话",
+    assistantEmptyText: "小余会先问一句，帮您开始讲。",
   });
   assert.equal(canRequestFollowUp([], "free_narration", "", false), false);
   assert.equal(canRequestFollowUp([], "guided_interview", "opening", false), false);

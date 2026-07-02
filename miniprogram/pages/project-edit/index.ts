@@ -85,8 +85,8 @@ Page<ProjectEditData, {
       { value: "unspecified", label: "未填写" },
     ],
     guidanceOptions: [
-      { value: "free_narration", label: "自由讲述" },
-      { value: "guided_interview", label: "主题讲述" },
+      { value: "free_narration", label: "自己慢慢讲" },
+      { value: "guided_interview", label: "小余陪着问" },
     ],
   },
 

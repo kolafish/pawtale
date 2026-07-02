@@ -155,8 +155,19 @@
   color: #be123c;
 }
 
-.tts-progress-text {
-  color: #9f4a3c;
+.tts-progress-track {
+  flex: 0 0 160rpx;
+  height: 10rpx;
+  border-radius: 999rpx;
+  background: #f7e7d7;
+  overflow: hidden;
+}
+
+.tts-progress-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: #9f4a3c;
+  transition: width 160ms ease;
 }
 
 .assistant-actions {
@@ -251,16 +262,6 @@
 .capture-strip.active .capture-dot {
   background: #b85c45;
   box-shadow: 0 0 0 10rpx rgba(184, 92, 69, 0.12);
-}
-
-.capture-metrics {
-  margin-left: auto;
-  color: #9f4a3c;
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  flex-wrap: wrap;
-  gap: 10rpx 16rpx;
 }
 
 .voice-activity {
@@ -362,7 +363,7 @@
 
 .line-role {
   display: inline-flex;
-  min-width: 52rpx;
+  min-width: 70rpx;
   height: 42rpx;
   margin-right: 14rpx;
   border-radius: 999rpx;

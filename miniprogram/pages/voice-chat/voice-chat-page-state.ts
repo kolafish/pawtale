@@ -7,6 +7,7 @@ import type { VoiceChatConnectionStatus } from "../../services/memoir-streaming-
 
 export interface VoiceChatData {
   voiceSessionId: string;
+  projectTitle: string;
   guidanceMode: MemoirGuidanceMode;
   currentGuidanceModule: string;
   status: VoiceChatConnectionStatus;
@@ -75,6 +76,7 @@ export interface AutoListenGateSnapshot {
 export function initialVoiceChatData(): VoiceChatData {
   return {
     voiceSessionId: "",
+    projectTitle: "",
     guidanceMode: "free_narration",
     currentGuidanceModule: "",
     status: "idle",
@@ -86,9 +88,9 @@ export function initialVoiceChatData(): VoiceChatData {
     latestTranscriptText: "",
     transcriptLines: [],
     assistantPromptText: "",
-    assistantPromptLabel: "老余开场",
-    assistantLoadingText: "老余正在准备第一句话",
-    assistantEmptyText: "老余会先说一句，帮你开始讲。",
+    assistantPromptLabel: "小余想听您讲讲",
+    assistantLoadingText: "小余正在准备第一句话",
+    assistantEmptyText: "小余会先问一句，帮您开始讲。",
     assistantExpectsAnswer: true,
     followUpLoading: false,
     followUpError: "",
@@ -106,7 +108,7 @@ export function initialVoiceChatData(): VoiceChatData {
     ttsRemainingText: "",
     ttsProgressPercent: 0,
     ttsAlignment: [],
-    modeLabel: "自由讲述",
+    modeLabel: "慢慢讲",
     primaryActionText: "开始说话",
     captureStateText: "麦克风未开始",
     captureFrameCount: 0,
@@ -116,7 +118,7 @@ export function initialVoiceChatData(): VoiceChatData {
     autoStopEnabled: true,
     autoStopStateText: "自动收尾开",
     autoListenEnabled: true,
-    autoListenStateText: "AI 说完自动听",
+    autoListenStateText: "小余说完自动听",
     liveCharCount: 0,
     totalTranscriptCharCount: 0,
     gatewayStateText: "识别未同步",
