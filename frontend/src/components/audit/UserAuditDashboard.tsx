@@ -34,7 +34,7 @@ const EVENT_TYPE_LABELS: Record<string, string> = {
   feature_start: '开始功能',
   feature_end: '结束功能',
   action: '功能动作',
-  heartbeat: '心跳',
+  heartbeat: '停留记录',
 };
 
 const EVENT_TYPE_ORDER = [
@@ -53,6 +53,47 @@ const EXIT_REASON_LABELS: Record<string, string> = {
   timeout: '超时',
   navigate: '跳转',
   unknown: '未知',
+};
+
+const PAGE_PATH_LABELS: Record<string, string> = {
+  '/pages/home/index': '小程序首页',
+  '/pages/index/index': '旧版首页',
+  '/pages/login/index': '登录页',
+  '/pages/voice-authorization/index': '语音授权页',
+  '/pages/voice-chat/index': '语音访谈页',
+  '/pages/transcripts/index': '讲述记录页',
+  '/pages/book/index': '成书页',
+  '/pages/voice-progress/index': '访谈进度页',
+  '/pages/projects/index': '项目列表页',
+  '/pages/project-edit/index': '项目编辑页',
+  '/pages/me/index': '我的页面',
+};
+
+const FEATURE_LABELS: Record<string, string> = {
+  'home.view': '首页浏览',
+  'page.view': '页面浏览',
+  'voice_chat.session': '语音访谈页停留',
+  'voice_chat.start': '开始语音访谈',
+  'voice_chat.recording_start': '开始录音',
+  'voice_chat.asr_final': '保存一段转写',
+  'voice_chat.finish': '结束访谈',
+  'transcript.view': '查看讲述记录',
+  'transcript.voice_search': '语音搜索记录',
+  'transcript.voice_edit_preview': '预览语音修正',
+  'transcript.voice_edit_save': '保存语音修正',
+  'transcript.edit_save': '保存文字修正',
+  'book.view': '查看成书页',
+  'book.plan_generate': '生成成书目录',
+  'book.plan_confirm': '确认成书目录',
+  'book.chapter_title_generate': '生成章节标题',
+  'book.chapter_draft_generate': '生成章节草稿',
+  'book.chapter_draft_confirm': '确认章节草稿',
+  'book.output_generate': '生成全书',
+  'book.voice_command_start': '开始成书语音指令',
+  'book.voice_command_execute': '执行成书语音指令',
+  'project.create': '新建项目',
+  'project.update': '更新项目',
+  'project.activate': '切换项目',
 };
 
 function toDateInput(date: Date): string {
@@ -101,8 +142,23 @@ function exitReasonLabel(reason: string): string {
   return EXIT_REASON_LABELS[reason] || reason || '-';
 }
 
-function featureDisplay(featureCode: string): string {
-  return featureCode || '未归类功能';
+function normalizedPagePath(pagePath: string): string {
+  if (!pagePath) return '';
+  return pagePath.startsWith('/') ? pagePath : `/${pagePath}`;
+}
+
+function pagePathLabel(pagePath: string): string {
+  const normalized = normalizedPagePath(pagePath);
+  return PAGE_PATH_LABELS[normalized] || pagePath || '未记录页面';
+}
+
+function featureLabel(featureCode: string): string {
+  return FEATURE_LABELS[featureCode] || featureCode || '未归类功能';
+}
+
+function featureOptionLabel(featureCode: string): string {
+  const label = featureLabel(featureCode);
+  return label === featureCode ? featureCode : `${label}（${featureCode}）`;
 }
 
 function userDisplay(row: Pick<AuditDailyUserUsage, 'user'> | Pick<AuditDailyFeatureUsage, 'user'>): string {
@@ -138,7 +194,9 @@ function eventMatchesDetailFilters(event: AuditEvent, filters: DetailEventFilter
     event.event_type,
     eventTypeLabel(event.event_type),
     event.page_path,
+    pagePathLabel(event.page_path),
     event.feature_code,
+    featureLabel(event.feature_code),
     event.project_id,
     event.voice_session_id,
     event.exit_reason,
@@ -402,7 +460,7 @@ export function UserAuditDashboard() {
             icon={<Clock3 size={18} />}
             label="总活跃时长"
             value={formatDuration(dashboard?.summary.active_ms ?? 0)}
-            subLabel={dashboard?.summary.top_exit_page_path ? `最多离开：${dashboard.summary.top_exit_page_path}` : '暂无离开位置'}
+            subLabel={dashboard?.summary.top_exit_page_path ? `最多离开：${pagePathLabel(dashboard.summary.top_exit_page_path)}` : '暂无离开位置'}
           />
           <Metric
             icon={<Users size={18} />}
@@ -419,7 +477,7 @@ export function UserAuditDashboard() {
           <Metric
             icon={<DoorOpen size={18} />}
             label="最多离开功能"
-            value={dashboard?.summary.top_exit_feature_code || '-'}
+            value={dashboard?.summary.top_exit_feature_code ? featureLabel(dashboard.summary.top_exit_feature_code) : '-'}
             subLabel="来自每日最后离开位置"
           />
         </section>
@@ -460,9 +518,9 @@ export function UserAuditDashboard() {
                         {row.session_count} / {row.event_count}
                       </td>
                       <td className="px-4 py-3">
-                        <div className="max-w-72 truncate text-gray-800">{labelOrDash(row.last_exit_page_path)}</div>
+                        <div className="max-w-72 truncate text-gray-800">{pagePathLabel(row.last_exit_page_path)}</div>
                         <div className="text-xs text-gray-500">
-                          {labelOrDash(row.last_exit_feature_code)} · {exitReasonLabel(row.last_exit_reason)}
+                          {row.last_exit_feature_code ? featureLabel(row.last_exit_feature_code) : '-'} · {exitReasonLabel(row.last_exit_reason)}
                         </div>
                       </td>
                       <td className="px-4 py-3 text-right">
@@ -500,9 +558,9 @@ export function UserAuditDashboard() {
                   <div key={row.key} className="px-4 py-3">
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <div className="truncate font-medium text-gray-900">{featureDisplay(row.feature_code)}</div>
+                        <div className="truncate font-medium text-gray-900">{featureLabel(row.feature_code)}</div>
                         <div className="mt-1 text-xs text-gray-500">
-                          {platformLabel(row.platform)} · {row.user_count} 位用户 · 最近 {formatDateTime(row.last_seen_at)}
+                          {row.feature_code} · {platformLabel(row.platform)} · {row.user_count} 位用户 · 最近 {formatDateTime(row.last_seen_at)}
                         </div>
                       </div>
                       <div className="shrink-0 text-right">
@@ -528,9 +586,9 @@ export function UserAuditDashboard() {
                   <div key={`${row.page_path}:${row.feature_code}:${row.reason}`} className="px-4 py-3">
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <div className="truncate font-medium text-gray-900">{labelOrDash(row.page_path)}</div>
+                        <div className="truncate font-medium text-gray-900">{pagePathLabel(row.page_path)}</div>
                         <div className="mt-1 text-xs text-gray-500">
-                          {labelOrDash(row.feature_code)} · {exitReasonLabel(row.reason)}
+                          {row.feature_code ? featureLabel(row.feature_code) : '-'} · {exitReasonLabel(row.reason)}
                         </div>
                       </div>
                       <span className="rounded-md bg-gray-100 px-2 py-1 text-xs font-medium text-gray-700">
@@ -623,7 +681,7 @@ export function UserAuditDashboard() {
                           <option value="">全部功能</option>
                           {detailFeatureOptions.map((option) => (
                             <option key={option} value={option}>
-                              {option}
+                              {featureOptionLabel(option)}
                             </option>
                           ))}
                         </select>
@@ -647,7 +705,7 @@ export function UserAuditDashboard() {
                               : 'border-gray-200 text-gray-600 hover:bg-gray-50'
                           }`}
                         >
-                          {detailShowHeartbeat ? '隐藏心跳' : '显示心跳'}
+                          {detailShowHeartbeat ? '隐藏停留记录' : '显示停留记录'}
                         </button>
                       </div>
                       <div className="flex items-end">
@@ -712,7 +770,7 @@ function SessionDetail({ session, filters }: { session: AuditSession; filters: D
         </div>
         <div>
           <div className="text-xs text-gray-500">离开</div>
-          <div className="truncate font-medium text-gray-900">{labelOrDash(session.exit_page_path)}</div>
+          <div className="truncate font-medium text-gray-900">{pagePathLabel(session.exit_page_path)}</div>
         </div>
       </div>
       <div className="mb-3 text-xs text-gray-500">
@@ -746,8 +804,11 @@ function SessionDetail({ session, filters }: { session: AuditSession; filters: D
                   </span>
                 </td>
                 <td className="px-3 py-2">
-                  <div className="max-w-80 truncate text-gray-900">{labelOrDash(event.page_path)}</div>
-                  <div className="text-xs text-gray-500">{featureDisplay(event.feature_code)}</div>
+                  <div className="max-w-80 truncate text-gray-900">{pagePathLabel(event.page_path)}</div>
+                  <div className="text-xs text-gray-500">
+                    {featureLabel(event.feature_code)}
+                    {event.feature_code && FEATURE_LABELS[event.feature_code] ? ` · ${event.feature_code}` : ''}
+                  </div>
                 </td>
                 <td className="px-3 py-2 text-gray-700">{formatDuration(event.active_ms || event.duration_ms)}</td>
                 <td className="px-3 py-2 text-xs text-gray-500">
