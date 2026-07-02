@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
@@ -299,6 +299,17 @@ export function UserAuditDashboard() {
   const [detailKeyword, setDetailKeyword] = useState('');
   const [detailShowHeartbeat, setDetailShowHeartbeat] = useState(false);
   const invalidRange = Boolean(fromDate && toDate && fromDate > toDate);
+  const detailSectionRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    if (!selectedDay) return undefined;
+
+    const timer = window.setTimeout(() => {
+      detailSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 0);
+
+    return () => window.clearTimeout(timer);
+  }, [selectedDay]);
 
   const dashboardFilters = useMemo<AuditDashboardFilters>(() => ({
     from: fromDate,
@@ -492,29 +503,34 @@ export function UserAuditDashboard() {
               {dashboardQuery.isFetching && <RefreshCw size={16} className="animate-spin text-gray-400" />}
             </div>
             <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-gray-100 text-sm">
+              <table className="min-w-[1120px] divide-y divide-gray-100 text-sm">
                 <thead className="bg-gray-50 text-xs uppercase tracking-wide text-gray-500">
                   <tr>
-                    <th className="px-4 py-3 text-left font-medium">用户</th>
-                    <th className="px-4 py-3 text-left font-medium">日期</th>
-                    <th className="px-4 py-3 text-left font-medium">平台</th>
-                    <th className="px-4 py-3 text-left font-medium">活跃时长</th>
-                    <th className="px-4 py-3 text-left font-medium">会话/事件</th>
+                    <th className="w-56 px-4 py-3 text-left font-medium">用户</th>
+                    <th className="w-32 px-4 py-3 text-left font-medium">日期</th>
+                    <th className="w-24 px-4 py-3 text-left font-medium">平台</th>
+                    <th className="w-36 px-4 py-3 text-left font-medium">活跃时长</th>
+                    <th className="w-28 px-4 py-3 text-left font-medium">会话/事件</th>
                     <th className="px-4 py-3 text-left font-medium">最后离开</th>
-                    <th className="px-4 py-3 text-right font-medium">详情</th>
+                    <th className="w-32 px-4 py-3 text-right font-medium">详情</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
                   {(dashboard?.daily_users ?? []).map((row) => (
-                    <tr key={`${row.user.id}:${row.date}:${row.platform}`} className="hover:bg-pink-50/40">
+                    <tr
+                      key={`${row.user.id}:${row.date}:${row.platform}`}
+                      className="cursor-pointer hover:bg-pink-50/40"
+                      title="点击查看当天详情"
+                      onClick={() => openUserDay(row)}
+                    >
                       <td className="px-4 py-3">
                         <div className="font-medium text-gray-900">{userDisplay(row)}</div>
                         <div className="text-xs text-gray-500">{row.user.email}</div>
                       </td>
-                      <td className="px-4 py-3 text-gray-700">{row.date}</td>
-                      <td className="px-4 py-3 text-gray-700">{platformLabel(row.platform)}</td>
-                      <td className="px-4 py-3 text-gray-900">{formatDuration(row.active_ms)}</td>
-                      <td className="px-4 py-3 text-gray-700">
+                      <td className="whitespace-nowrap px-4 py-3 text-gray-700">{row.date}</td>
+                      <td className="whitespace-nowrap px-4 py-3 text-gray-700">{platformLabel(row.platform)}</td>
+                      <td className="whitespace-nowrap px-4 py-3 text-gray-900">{formatDuration(row.active_ms)}</td>
+                      <td className="whitespace-nowrap px-4 py-3 text-gray-700">
                         {row.session_count} / {row.event_count}
                       </td>
                       <td className="px-4 py-3">
@@ -526,10 +542,13 @@ export function UserAuditDashboard() {
                       <td className="px-4 py-3 text-right">
                         <button
                           type="button"
-                          onClick={() => openUserDay(row)}
-                          className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-sm text-pink-600 transition-colors hover:bg-pink-50"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            openUserDay(row);
+                          }}
+                          className="inline-flex min-w-24 items-center justify-center gap-1 whitespace-nowrap rounded-md px-2 py-1 text-sm text-pink-600 transition-colors hover:bg-pink-50"
                         >
-                          查看
+                          查看详情
                           <ChevronRight size={14} />
                         </button>
                       </td>
@@ -606,7 +625,7 @@ export function UserAuditDashboard() {
         </div>
 
         {selectedDay && (
-          <section className="rounded-lg border border-gray-200 bg-white">
+          <section ref={detailSectionRef} className="rounded-lg border border-gray-200 bg-white">
             <div className="flex flex-col gap-3 border-b border-gray-100 px-4 py-3 md:flex-row md:items-center md:justify-between">
               <div>
                 <h2 className="text-base font-semibold text-gray-900">{selectedDay.name} 的当天详情</h2>
