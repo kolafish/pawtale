@@ -1,4 +1,5 @@
 import type {
+  MemoirBookEditorialCopyTarget,
   MemoirBookOutput,
   MemoirBookOutputExportFormat,
   MemoirBookOutputExportLayout,
@@ -6,8 +7,11 @@ import type {
 } from "../../domain/voice-chat";
 import {
   downloadMemoirBookOutputExport,
+  enqueueMemoirBookOutputEditorialCopyGeneration,
   getMemoirBookOutput,
   getMemoirBookPlan,
+  suggestMemoirBookOutputTitles,
+  updateMemoirBookOutput,
 } from "../../services/memoir-voice-api";
 import { ApiError } from "../../services/request";
 import {
@@ -19,13 +23,32 @@ import {
   trimText,
   type BookData,
 } from "../book/book-view-model";
+import {
+  bookDesignHasChanges,
+  bookDesignSaveStatusText,
+  bookEditorialCopyBlockedMessage,
+  bookMetadataChanged,
+  currentBookMetadataPayload,
+  isBookLevelEditorialCopyTarget,
+  latestBookCoverStyle,
+  latestBookTitle,
+} from "../book/book-design-model";
 
 interface DatasetEvent {
   currentTarget: {
     dataset: {
       format?: MemoirBookOutputExportFormat;
+      key?: string;
       layout?: MemoirBookOutputExportLayout;
+      target?: MemoirBookEditorialCopyTarget;
+      title?: string;
     };
+  };
+}
+
+interface TextInputEvent extends DatasetEvent {
+  detail: {
+    value: string;
   };
 }
 
@@ -90,10 +113,33 @@ type BookExportData = Pick<
   | "bookExportLayoutDetailText"
   | "bookExportLayoutOptions"
   | "bookExportShowSourceAppendix"
+  | "bookTitleInput"
+  | "bookSubtitleInput"
+  | "bookNarratorNameInput"
+  | "bookPreparedByInput"
+  | "bookPrefaceInput"
+  | "bookAfterwordInput"
+  | "bookBackCoverQuoteInput"
+  | "bookTitleChanged"
+  | "bookMetadataChanged"
+  | "bookTitleSaving"
+  | "bookDesignSaveStatusText"
+  | "bookTitleSuggesting"
+  | "bookTitleSuggestions"
+  | "bookCoverStyle"
+  | "bookCoverStylePreviewClass"
+  | "bookCoverStyleIndex"
+  | "bookCoverStyleLabel"
+  | "bookCoverStyleDetailText"
+  | "bookCoverStyleOptions"
+  | "bookCoverStyleChanged"
+  | "bookEditorialCopyBusyTarget"
 > & {
   requestedAction: string;
   exportNotice: string;
 };
+
+const BOOK_DESIGN_AUTOSAVE_DELAY_MS = 900;
 
 function isLoginError(error: unknown): boolean {
   return error instanceof ApiError && [401, 403].includes(error.statusCode);
@@ -121,15 +167,31 @@ function defaultTitle(plan: MemoirBookPlan | null, output: MemoirBookOutput | nu
 
 Page<BookExportData, {
   onLoad(query?: Record<string, string | undefined>): Promise<void>;
+  onUnload(): void;
   loadBookExportPage(projectId: string): Promise<void>;
   loadBookOutput(projectId: string): Promise<MemoirBookOutput | null>;
   applyBookExportData(plan: MemoirBookPlan | null, output: MemoirBookOutput | null): void;
+  changeBookTitle(event: TextInputEvent): void;
+  changeBookMetadataField(event: TextInputEvent): void;
+  suggestBookTitles(): Promise<void>;
+  chooseBookTitleSuggestion(event: DatasetEvent): void;
+  changeBookCoverStyle(event: PickerEvent): void;
+  scheduleBookDesignAutosave(): void;
+  clearBookDesignAutosaveTimer(): void;
+  flushBookDesignAutosave(): void;
+  autosaveBookDesignSettings(): Promise<void>;
+  saveBookDesignSettings(): Promise<void>;
+  ensureBookDesignSavedForEditorialCopy(): Promise<boolean>;
+  regenerateBookEditorialCopy(event: DatasetEvent): Promise<void>;
   changeBookOutputVersion(event: PickerEvent): void;
   changeBookExportLayout(event: PickerEvent): void;
   toggleBookExportSourceAppendix(event: SwitchEvent): void;
   toggleBookPreviewChapters(): void;
   downloadBookOutputExport(event: DatasetEvent): Promise<void>;
+  bookDesignAutosaveTimer: number | null;
 }>({
+  bookDesignAutosaveTimer: null,
+
   data: {
     loading: false,
     error: "",
@@ -149,6 +211,9 @@ Page<BookExportData, {
     bookExportLayoutDetailText: BOOK_EXPORT_LAYOUT_OPTIONS[0].detailText,
     bookExportLayoutOptions: BOOK_EXPORT_LAYOUT_OPTIONS,
     bookExportShowSourceAppendix: true,
+    bookTitleSaving: false,
+    bookTitleSuggesting: false,
+    bookEditorialCopyBusyTarget: "",
     requestedAction: "preview",
     exportNotice: exportNotice("preview"),
     ...bookOutputData(null),
@@ -167,6 +232,10 @@ Page<BookExportData, {
       return;
     }
     await this.loadBookExportPage(projectId);
+  },
+
+  onUnload() {
+    this.flushBookDesignAutosave();
   },
 
   async loadBookExportPage(projectId) {
@@ -208,6 +277,9 @@ Page<BookExportData, {
     const chapters = plan ? buildChapterViews(plan, {}, null, {}) : [];
     const stage = planStage(plan);
     const outputData = bookOutputData(output);
+    if (!output && !outputData.bookTitleInput) {
+      outputData.bookTitleInput = defaultTitle(plan, output);
+    }
     this.setData({
       plan,
       planTitle: defaultTitle(plan, output),
@@ -220,6 +292,261 @@ Page<BookExportData, {
       bookPreviewChaptersExpanded: true,
       bookExportBusyTarget: "",
     });
+  },
+
+  changeBookTitle(event) {
+    const value = event.detail.value;
+    const storedTitle = latestBookTitle(this.data.bookOutput)
+      || this.data.bookManuscriptTitle
+      || this.data.bookPreviewTitle;
+    this.setData({
+      bookTitleInput: value,
+      bookTitleChanged: trimText(value) !== trimText(storedTitle),
+    });
+    this.scheduleBookDesignAutosave();
+  },
+
+  changeBookMetadataField(event) {
+    const key = String(event.currentTarget.dataset.key || "");
+    const fieldByKey: Record<string, keyof BookExportData> = {
+      subtitle: "bookSubtitleInput",
+      narrator_name: "bookNarratorNameInput",
+      prepared_by: "bookPreparedByInput",
+      preface: "bookPrefaceInput",
+      afterword: "bookAfterwordInput",
+      back_cover_quote: "bookBackCoverQuoteInput",
+    };
+    const field = fieldByKey[key];
+    if (!field) {
+      return;
+    }
+    const value = event.detail.value;
+    const nextData = { ...this.data, [field]: value } as BookExportData;
+    this.setData({
+      [field]: value,
+      bookMetadataChanged: bookMetadataChanged(nextData),
+      error: "",
+    });
+    this.scheduleBookDesignAutosave();
+  },
+
+  async suggestBookTitles() {
+    if (!this.data.projectId || this.data.bookTitleSuggesting || this.data.bookTitleSaving) {
+      return;
+    }
+    if (!this.data.bookContent) {
+      this.setData({ error: "请先生成书稿" });
+      return;
+    }
+    this.setData({ bookTitleSuggesting: true, error: "" });
+    try {
+      const response = await suggestMemoirBookOutputTitles(this.data.projectId, { count: 6 });
+      const suggestions = (response.suggestions || []).map((item) => trimText(item)).filter(Boolean);
+      this.setData({ bookTitleSuggestions: suggestions });
+      if (!suggestions.length) {
+        this.setData({ error: "暂时没有生成合适的书名" });
+      }
+    } catch (error) {
+      if (isLoginError(error)) {
+        wx.reLaunch({ url: "/pages/login/index" });
+        return;
+      }
+      this.setData({ error: error instanceof Error ? error.message : "小余起名失败" });
+    } finally {
+      this.setData({ bookTitleSuggesting: false });
+    }
+  },
+
+  chooseBookTitleSuggestion(event) {
+    const title = trimText(event.currentTarget.dataset.title || "");
+    if (!title) {
+      return;
+    }
+    const storedTitle = latestBookTitle(this.data.bookOutput)
+      || this.data.bookManuscriptTitle
+      || this.data.bookPreviewTitle;
+    this.setData({
+      bookTitleInput: title,
+      bookTitleChanged: title !== trimText(storedTitle),
+      error: "",
+    });
+    this.scheduleBookDesignAutosave();
+  },
+
+  changeBookCoverStyle(event) {
+    const index = Number(event.detail.value);
+    const option = this.data.bookCoverStyleOptions[index];
+    if (!option) {
+      return;
+    }
+    this.setData({
+      bookCoverStyle: option.value,
+      bookCoverStylePreviewClass: option.previewClass,
+      bookCoverStyleIndex: index,
+      bookCoverStyleLabel: option.label,
+      bookCoverStyleDetailText: option.detailText,
+      bookCoverStyleChanged: option.value !== latestBookCoverStyle(this.data.bookOutput),
+      error: "",
+    });
+    this.scheduleBookDesignAutosave();
+  },
+
+  scheduleBookDesignAutosave() {
+    this.clearBookDesignAutosaveTimer();
+    if (!this.data.bookOutput?.latest_version || this.data.bookViewingHistoricalVersion) {
+      this.setData({ bookDesignSaveStatusText: bookDesignSaveStatusText(this.data) });
+      return;
+    }
+    if (!bookDesignHasChanges(this.data)) {
+      this.setData({ bookDesignSaveStatusText: "已保存" });
+      return;
+    }
+    this.setData({ bookDesignSaveStatusText: "待自动保存" });
+    if (this.data.bookTitleSaving) {
+      return;
+    }
+    this.bookDesignAutosaveTimer = setTimeout(() => {
+      this.bookDesignAutosaveTimer = null;
+      void this.autosaveBookDesignSettings();
+    }, BOOK_DESIGN_AUTOSAVE_DELAY_MS);
+  },
+
+  clearBookDesignAutosaveTimer() {
+    if (this.bookDesignAutosaveTimer !== null) {
+      clearTimeout(this.bookDesignAutosaveTimer);
+      this.bookDesignAutosaveTimer = null;
+    }
+  },
+
+  flushBookDesignAutosave() {
+    const hadPendingAutosave = this.bookDesignAutosaveTimer !== null;
+    this.clearBookDesignAutosaveTimer();
+    if (hadPendingAutosave && bookDesignHasChanges(this.data)) {
+      void this.autosaveBookDesignSettings();
+    }
+  },
+
+  async autosaveBookDesignSettings() {
+    this.clearBookDesignAutosaveTimer();
+    if (!this.data.projectId || this.data.bookTitleSaving) {
+      return;
+    }
+    if (!this.data.bookOutput?.latest_version) {
+      this.setData({ bookDesignSaveStatusText: "生成时应用" });
+      return;
+    }
+    if (this.data.bookViewingHistoricalVersion) {
+      this.setData({
+        error: "请切回最新版后再自动保存成书信息",
+        bookDesignSaveStatusText: "切回最新版后自动保存",
+      });
+      return;
+    }
+    if (!bookDesignHasChanges(this.data)) {
+      this.setData({ bookDesignSaveStatusText: "已保存" });
+      return;
+    }
+    const title = trimText(this.data.bookTitleInput);
+    if (!title) {
+      this.setData({ error: "书名不能为空", bookDesignSaveStatusText: "保存失败" });
+      return;
+    }
+    const coverStyle = this.data.bookCoverStyle;
+    const metadata = currentBookMetadataPayload(this.data, true);
+    this.setData({ bookTitleSaving: true, bookDesignSaveStatusText: "保存中", error: "" });
+    try {
+      const output = await updateMemoirBookOutput(this.data.projectId, {
+        title,
+        subtitle: metadata.subtitle,
+        narrator_name: metadata.narrator_name,
+        prepared_by: metadata.prepared_by,
+        preface: metadata.preface,
+        afterword: metadata.afterword,
+        back_cover_quote: metadata.back_cover_quote,
+        cover_style: coverStyle,
+      });
+      this.applyBookExportData(this.data.plan, output);
+      const option = this.data.bookCoverStyleOptions.find((candidate) => candidate.value === coverStyle)
+        || this.data.bookCoverStyleOptions[0];
+      this.setData({
+        bookTitleInput: title,
+        bookSubtitleInput: metadata.subtitle,
+        bookNarratorNameInput: metadata.narrator_name,
+        bookPreparedByInput: metadata.prepared_by,
+        bookPrefaceInput: metadata.preface,
+        bookAfterwordInput: metadata.afterword,
+        bookBackCoverQuoteInput: metadata.back_cover_quote,
+        bookTitleChanged: false,
+        bookMetadataChanged: false,
+        bookCoverStyle: option.value,
+        bookCoverStylePreviewClass: option.previewClass,
+        bookCoverStyleIndex: Math.max(
+          0,
+          this.data.bookCoverStyleOptions.findIndex((candidate) => candidate.value === option.value),
+        ),
+        bookCoverStyleLabel: option.label,
+        bookCoverStyleDetailText: option.detailText,
+        bookCoverStyleChanged: false,
+        bookDesignSaveStatusText: "已自动保存",
+      });
+    } catch (error) {
+      if (isLoginError(error)) {
+        wx.reLaunch({ url: "/pages/login/index" });
+        return;
+      }
+      this.setData({
+        error: error instanceof Error ? error.message : "保存成书信息失败",
+        bookDesignSaveStatusText: "保存失败",
+      });
+    } finally {
+      this.setData({ bookTitleSaving: false });
+    }
+  },
+
+  async saveBookDesignSettings() {
+    await this.autosaveBookDesignSettings();
+  },
+
+  async ensureBookDesignSavedForEditorialCopy() {
+    this.clearBookDesignAutosaveTimer();
+    if (!bookDesignHasChanges(this.data)) {
+      return true;
+    }
+    await this.autosaveBookDesignSettings();
+    return !bookDesignHasChanges(this.data);
+  },
+
+  async regenerateBookEditorialCopy(event) {
+    const target = String(event.currentTarget.dataset.target || "");
+    if (!isBookLevelEditorialCopyTarget(target)) {
+      return;
+    }
+    if (!this.data.projectId || this.data.bookEditorialCopyBusyTarget === target || this.data.bookTitleSaving) {
+      return;
+    }
+    const blockedMessage = bookEditorialCopyBlockedMessage(this.data);
+    if (blockedMessage) {
+      this.setData({ error: blockedMessage });
+      return;
+    }
+    if (!(await this.ensureBookDesignSavedForEditorialCopy())) {
+      return;
+    }
+    this.setData({ bookEditorialCopyBusyTarget: target, error: "" });
+    try {
+      await enqueueMemoirBookOutputEditorialCopyGeneration(this.data.projectId, { targets: [target] });
+      wx.showToast({ title: "已后台生成", icon: "success" });
+    } catch (error) {
+      if (isLoginError(error)) {
+        wx.reLaunch({ url: "/pages/login/index" });
+        return;
+      }
+      this.setData({ error: error instanceof Error ? error.message : "成书文案提交失败" });
+    } finally {
+      if (this.data.bookEditorialCopyBusyTarget === target) {
+        this.setData({ bookEditorialCopyBusyTarget: "" });
+      }
+    }
   },
 
   changeBookOutputVersion(event) {

@@ -5,7 +5,6 @@ import type {
   MemoirBookOutputExportFormat,
   MemoirBookOutputExportLayout,
   MemoirBookOutput,
-  MemoirBookCoverStyle,
   MemoirBookPlan,
   MemoirBookPlanStructureCommandRequest,
   MemoirBookPlanChapterUpdateInput,
@@ -117,6 +116,17 @@ import {
   canExecuteBookVoiceCommand,
 } from "./book-view-model";
 import {
+  bookDesignHasChanges,
+  bookDesignSaveStatusText,
+  bookEditorialCopyBlockedMessage,
+  bookMetadataChanged,
+  currentBookMetadataPayload,
+  isBookLevelEditorialCopyTarget,
+  isChapterEditorialCopyTarget,
+  latestBookCoverStyle,
+  latestBookTitle,
+} from "./book-design-model";
+import {
   bookVoiceAssistantHint,
   bookVoiceAssistantStatusText,
   bookVoiceCommandParseRequest,
@@ -202,62 +212,6 @@ function isLoginError(error: unknown): boolean {
   return error instanceof ApiError && [401, 403].includes(error.statusCode);
 }
 
-function latestBookTitle(output: MemoirBookOutput | null): string {
-  return trimText(output?.latest_version?.manuscript?.profile?.title || output?.title || "");
-}
-
-function latestBookCoverStyle(output: MemoirBookOutput | null): MemoirBookCoverStyle {
-  const style = output?.latest_version?.manuscript?.render_settings?.cover_style;
-  const option = BOOK_COVER_STYLE_OPTIONS.find((candidate) => candidate.value === style);
-  return option ? option.value : "classic_plain";
-}
-
-function latestBookMetadata(output: MemoirBookOutput | null): Record<string, string> {
-  const manuscript = output?.latest_version?.manuscript || null;
-  const frontMatter = manuscript?.front_matter || [];
-  const preface = frontMatter.find((section) => section.kind === "preface")?.content || "";
-  return {
-    subtitle: trimText(manuscript?.profile?.subtitle || ""),
-    narrator_name: trimText(manuscript?.profile?.narrator_name || ""),
-    prepared_by: trimText(manuscript?.profile?.prepared_by || "家人整理"),
-    preface: trimText(preface),
-    afterword: trimText(manuscript?.back_matter?.afterword?.content || ""),
-    back_cover_quote: trimText(manuscript?.render_settings?.back_cover_quote || ""),
-  };
-}
-
-function bookMetadataChanged(data: BookData): boolean {
-  const stored = latestBookMetadata(data.bookOutput);
-  return (
-    trimText(data.bookSubtitleInput) !== stored.subtitle
-    || trimText(data.bookNarratorNameInput) !== stored.narrator_name
-    || trimText(data.bookPreparedByInput || "家人整理") !== stored.prepared_by
-    || trimText(data.bookPrefaceInput) !== stored.preface
-    || trimText(data.bookAfterwordInput) !== stored.afterword
-    || trimText(data.bookBackCoverQuoteInput) !== stored.back_cover_quote
-  );
-}
-
-function currentBookMetadataPayload(data: BookData, includeEmpty: boolean): Record<string, string> {
-  const values: Record<string, string> = {
-    subtitle: trimText(data.bookSubtitleInput),
-    narrator_name: trimText(data.bookNarratorNameInput),
-    prepared_by: trimText(data.bookPreparedByInput) || "家人整理",
-    preface: trimText(data.bookPrefaceInput),
-    afterword: trimText(data.bookAfterwordInput),
-    back_cover_quote: trimText(data.bookBackCoverQuoteInput),
-  };
-  if (includeEmpty) {
-    return values;
-  }
-  return Object.keys(values).reduce<Record<string, string>>((memo, key) => {
-    if (values[key]) {
-      memo[key] = values[key];
-    }
-    return memo;
-  }, {});
-}
-
 const BOOK_DESIGN_AUTOSAVE_DELAY_MS = 900;
 const BOOK_GENERATION_EVENT_POLL_INTERVAL_MS = 3000;
 const BOOK_GENERATION_EVENT_POLL_MAX_ATTEMPTS = 120;
@@ -292,44 +246,6 @@ function mergeAutomationEvent(
   event: MemoirAutomationEvent,
 ): MemoirAutomationEvent[] {
   return [event, ...events.filter((candidate) => candidate.id !== event.id)];
-}
-
-function bookDesignHasChanges(data: BookData): boolean {
-  return data.bookTitleChanged || data.bookMetadataChanged || data.bookCoverStyleChanged;
-}
-
-function bookEditorialCopyBlockedMessage(data: BookData): string {
-  if (!data.bookOutput?.latest_version || !data.bookContent) {
-    return "请先生成书稿";
-  }
-  if (data.bookViewingHistoricalVersion) {
-    return "请切回最新版后再编辑成书文案";
-  }
-  if (data.hasDraftChanges) {
-    return "请先保存当前章节修改，再编辑成书文案";
-  }
-  return "";
-}
-
-function isBookLevelEditorialCopyTarget(target: string): target is MemoirBookEditorialCopyTarget {
-  return target === "preface" || target === "afterword" || target === "back_cover_quote";
-}
-
-function isChapterEditorialCopyTarget(target: string): target is MemoirBookEditorialCopyTarget {
-  return target === "chapter_intros" || target === "pull_quotes";
-}
-
-function bookDesignSaveStatusText(data: BookData): string {
-  if (!data.bookOutput?.latest_version) {
-    return "生成时应用";
-  }
-  if (data.bookViewingHistoricalVersion) {
-    return "切回最新版后自动保存";
-  }
-  if (data.bookTitleSaving) {
-    return "保存中";
-  }
-  return bookDesignHasChanges(data) ? "待自动保存" : "已保存";
 }
 
 function defaultBookTitleInput(planTitle: string, projectTitle: string): string {

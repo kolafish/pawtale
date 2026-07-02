@@ -120,6 +120,9 @@ function loadBookExportPage(voiceApiExports = {}) {
     getMemoirBookPlan: async () => samplePlan(),
     getMemoirBookOutput: async () => sampleBookOutput(),
     downloadMemoirBookOutputExport: async () => "/tmp/book.pdf",
+    suggestMemoirBookOutputTitles: async () => ({ suggestions: [] }),
+    updateMemoirBookOutput: async () => sampleBookOutput(),
+    enqueueMemoirBookOutputEditorialCopyGeneration: async () => ({ id: "event-1" }),
     ...voiceApiExports,
   });
   return loadPageModule("../pages/book-export/index.ts");
@@ -135,9 +138,18 @@ test("book export page is registered and exposes preview/export controls", () =>
   assert.match(wxml, /阅读版 PDF/);
   assert.match(wxml, /打印版 PDF/);
   assert.match(wxml, /导出文本/);
+  assert.match(wxml, /成书信息/);
+  assert.match(wxml, /bindinput="changeBookTitle"/);
+  assert.match(wxml, /小余起名/);
+  assert.match(wxml, /副标题/);
+  assert.match(wxml, /口述人/);
+  assert.match(wxml, /封面风格/);
+  assert.match(wxml, /保存成书信息/);
   assert.match(wxml, /bindchange="changeBookExportLayout"/);
   assert.match(wxml, /bindchange="toggleBookExportSourceAppendix"/);
   assert.match(wxml, /历史版本/);
+  assert.match(wxss, /\.book-design-panel/);
+  assert.match(wxss, /\.book-cover-preview\.moonlit-courtyard/);
   assert.match(wxss, /\.export-actions/);
   assert.match(wxss, /\.preview-card/);
 });
@@ -167,6 +179,104 @@ test("book export page loads plan and output from query project", async () => {
   assert.equal(context.data.exportNotice, "打印版字号更大，适合装订保存。");
   assert.equal(context.data.bookContent, "全书第二版正文");
   assert.equal(context.data.bookPreviewChapters.length, 1);
+});
+
+test("book export page saves full-book metadata and cover style", async () => {
+  const updates = [];
+  const { page } = loadBookExportPage({
+    updateMemoirBookOutput: async (projectId, payload) => {
+      updates.push({ projectId, payload });
+      return sampleBookOutput();
+    },
+  });
+  const context = pageContext(page, { projectId: "project/1" });
+  page.applyBookExportData.call(context, samplePlan(), sampleBookOutput());
+
+  page.changeBookTitle.call(context, {
+    currentTarget: { dataset: {} },
+    detail: { value: "外婆的月光" },
+  });
+  page.changeBookMetadataField.call(context, {
+    currentTarget: { dataset: { key: "subtitle" } },
+    detail: { value: "根据口述访谈整理" },
+  });
+  page.changeBookMetadataField.call(context, {
+    currentTarget: { dataset: { key: "narrator_name" } },
+    detail: { value: "外婆" },
+  });
+  page.changeBookMetadataField.call(context, {
+    currentTarget: { dataset: { key: "preface" } },
+    detail: { value: "写给家人的开篇。" },
+  });
+  page.changeBookCoverStyle.call(context, {
+    currentTarget: { dataset: {} },
+    detail: { value: "3" },
+  });
+
+  await page.saveBookDesignSettings.call(context);
+
+  assert.deepEqual(updates[0], {
+    projectId: "project/1",
+    payload: {
+      title: "外婆的月光",
+      subtitle: "根据口述访谈整理",
+      narrator_name: "外婆",
+      prepared_by: "家人整理",
+      preface: "写给家人的开篇。",
+      afterword: "",
+      back_cover_quote: "",
+      cover_style: "moonlit_courtyard",
+    },
+  });
+  assert.equal(context.data.bookTitleChanged, false);
+  assert.equal(context.data.bookMetadataChanged, false);
+  assert.equal(context.data.bookCoverStyleChanged, false);
+  assert.equal(context.data.bookDesignSaveStatusText, "已自动保存");
+});
+
+test("book export page suggests titles and queues book-level editorial copy", async () => {
+  const titleRequests = [];
+  const editorialRequests = [];
+  const toasts = [];
+  global.wx = {
+    showToast(options) {
+      toasts.push(options);
+    },
+  };
+  const { page } = loadBookExportPage({
+    suggestMemoirBookOutputTitles: async (projectId, payload) => {
+      titleRequests.push({ projectId, payload });
+      return { suggestions: [" 外婆的月光 ", "庭院往事"] };
+    },
+    enqueueMemoirBookOutputEditorialCopyGeneration: async (projectId, payload) => {
+      editorialRequests.push({ projectId, payload });
+      return { id: "event-1" };
+    },
+  });
+  const context = pageContext(page, { projectId: "project/1" });
+  page.applyBookExportData.call(context, samplePlan(), sampleBookOutput());
+
+  await page.suggestBookTitles.call(context);
+  page.chooseBookTitleSuggestion.call(context, {
+    currentTarget: { dataset: { title: "外婆的月光" } },
+  });
+  assert.deepEqual(context.data.bookTitleSuggestions, ["外婆的月光", "庭院往事"]);
+  assert.equal(context.data.bookTitleInput, "外婆的月光");
+
+  page.clearBookDesignAutosaveTimer.call(context);
+  await page.regenerateBookEditorialCopy.call(context, {
+    currentTarget: { dataset: { target: "afterword" } },
+  });
+
+  assert.deepEqual(titleRequests[0], { projectId: "project/1", payload: { count: 6 } });
+  assert.equal(context.data.bookTitleInput, "外婆的月光");
+  assert.deepEqual(editorialRequests[0], {
+    projectId: "project/1",
+    payload: { targets: ["afterword"] },
+  });
+  assert.equal(toasts[0].title, "已后台生成");
+  assert.equal(context.data.bookEditorialCopyBusyTarget, "");
+  delete global.wx;
 });
 
 test("book export page downloads selected PDF layout and source appendix setting", async () => {
