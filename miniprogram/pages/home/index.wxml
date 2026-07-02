@@ -8,12 +8,12 @@
 
   <view class="home-card">
     <view class="project-row">
-      <text class="panel-label">{{hasProject ? "今天继续讲" : "准备开始"}}</text>
-      <text class="mode-tag">{{hasProject ? guidanceLabel : "待创建"}}</text>
+      <text class="panel-label">{{loading ? "正在准备" : (hasProject ? "今天继续讲" : "准备开始")}}</text>
+      <text class="mode-tag">{{loading ? "加载中" : (hasProject ? guidanceLabel : "待创建")}}</text>
     </view>
     <text class="project-title">{{projectTitle || "正在加载回忆录"}}</text>
     <text class="project-meta">
-      {{needsLogin ? "登录后，我在这里等你。" : (!hasProject ? "先创建一本回忆录，我再听你讲。" : "我在听，请讲吧……")}}
+      {{loading ? "我先确认当前回忆录。" : (needsLogin ? "登录后，我在这里等你。" : (!hasProject ? "先创建一本回忆录，我再听你讲。" : "我在听，请讲吧……"))}}
     </text>
 
     <button
@@ -26,10 +26,10 @@
       <image class="voice-start-icon" src="/assets/memoir-microphone.png" mode="aspectFit" />
       <view class="voice-start-copy">
         <text class="voice-start-title">
-          {{needsLogin ? "登录后开始" : (!hasProject ? "创建回忆录" : (!voiceAuthorizationAgreed ? "同意协议后开始" : (creatingVoice ? "正在准备" : "点这里开始讲")))}}
+          {{loading ? "正在加载" : (needsLogin ? "登录后开始" : (!hasProject ? "创建回忆录" : (!voiceAuthorizationAgreed ? "同意协议后开始" : (creatingVoice ? "正在准备" : "点这里开始讲"))))}}
         </text>
         <text class="voice-start-subtitle">
-          {{needsLogin ? "先登录，再继续讲回忆。" : (!hasProject ? "先起个名字，我再听您讲。" : (!voiceAuthorizationAgreed ? "同意后才会打开麦克风。" : (creatingVoice ? "我马上开始听。" : "说一段就行，我会帮您记下来。")))}}
+          {{loading ? "马上就好。" : (needsLogin ? "先登录，再继续讲回忆。" : (!hasProject ? "先起个名字，我再听您讲。" : (!voiceAuthorizationAgreed ? "同意后才会打开麦克风。" : (creatingVoice ? "我马上开始听。" : "说一段就行，我会帮您记下来。"))))}}
         </text>
       </view>
     </button>

@@ -1,6 +1,8 @@
 require("./register-ts");
 
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
 const test = require("node:test");
 
 function loadMePage({
@@ -180,6 +182,17 @@ test("me shows the login panel instead of redirecting when the session is missin
   assert.equal(context.data.loggedIn, false);
   assert.equal(context.data.error, "");
   assert.equal(context.data.loading, false);
+});
+
+test("me keeps disabled login buttons visually readable while loading", () => {
+  const wxss = fs.readFileSync(path.join(__dirname, "../pages/me/index.wxss"), "utf8");
+
+  assert.match(wxss, /\.primary-button\[disabled\][\s\S]*background: #a64b3e/);
+  assert.match(wxss, /\.primary-button\[disabled\][\s\S]*color: #ffffff/);
+  assert.match(wxss, /\.mode-button\[disabled\][\s\S]*background: #fff3ef/);
+  assert.match(wxss, /\.mode-button\[disabled\][\s\S]*color: #a64b3e/);
+  assert.match(wxss, /\.secondary-button\[disabled\][\s\S]*background: #2b1713/);
+  assert.match(wxss, /\.secondary-button\[disabled\][\s\S]*color: #ffffff/);
 });
 
 test("me treats wechat-only users as logged in and shows wechat profile", async () => {

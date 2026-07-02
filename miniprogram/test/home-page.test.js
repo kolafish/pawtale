@@ -100,8 +100,14 @@ test("home uses one warm memoir card with a clear voice start button", () => {
   assert.match(wxml, /我在听，请讲吧/);
   assert.match(wxml, /点这里开始讲/);
   assert.match(wxml, /说一段就行，我会帮您记下来/);
+  assert.match(wxml, /loading \? "加载中"/);
+  assert.match(wxml, /loading \? "我先确认当前回忆录。"/);
+  assert.match(wxml, /loading \? "正在加载"/);
+  assert.match(wxml, /loading \? "马上就好。"/);
   assert.equal(wxss.includes("#2f7d63"), false);
   assert.match(wxss, /\.voice-start-button[\s\S]*#a64b3e/);
+  assert.match(wxss, /\.voice-start-button\[disabled\][\s\S]*background: #a64b3e/);
+  assert.match(wxss, /\.voice-start-button\[disabled\][\s\S]*color: #ffffff/);
   assert.match(wxss, /\.voice-start-title[\s\S]*#ffffff/);
 });
 
