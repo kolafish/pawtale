@@ -4,6 +4,10 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
+const {
+  memoirHomePrompt,
+  memoirStoryTitle,
+} = require("../services/memoir-display-copy.ts");
 
 function loadHomePage({ authExports = {}, voiceApiExports = {}, voiceAuthorizationExports = {} } = {}) {
   const authPath = require.resolve("../services/auth.ts");
@@ -96,19 +100,28 @@ test("home uses one warm memoir card with a clear voice start button", () => {
   assert.match(wxml, /class="home-card"/);
   assert.equal(wxml.includes('class="project-panel"'), false);
   assert.equal(wxml.includes('class="voice-panel"'), false);
-  assert.match(wxml, /class="voice-start-button"/);
-  assert.match(wxml, /我在听，请讲吧/);
-  assert.match(wxml, /点这里开始讲/);
-  assert.match(wxml, /说一段就行，我会帮您记下来/);
+  assert.match(wxml, /class="voice-start-button/);
+  assert.match(wxml, /今天接着聊/);
+  assert.match(wxml, /继续上次/);
+  assert.match(wxml, /projectPromptText/);
+  assert.match(wxml, /我来说一段/);
+  assert.match(wxml, /说一两句也可以，我会帮您记下来/);
   assert.match(wxml, /loading \? "加载中"/);
   assert.match(wxml, /loading \? "我先确认当前回忆录。"/);
   assert.match(wxml, /loading \? "正在加载"/);
   assert.match(wxml, /loading \? "马上就好。"/);
   assert.equal(wxss.includes("#2f7d63"), false);
   assert.match(wxss, /\.voice-start-button[\s\S]*#a64b3e/);
-  assert.match(wxss, /\.voice-start-button\[disabled\][\s\S]*background: #a64b3e/);
-  assert.match(wxss, /\.voice-start-button\[disabled\][\s\S]*color: #ffffff/);
+  assert.match(wxss, /\.voice-start-button[\s\S]*border-radius: 999rpx/);
+  assert.match(wxss, /\.voice-start-button\.button-blocked[\s\S]*background: #a64b3e/);
+  assert.equal(wxml.includes('disabled="{{loading || creatingVoice}}"'), false);
   assert.match(wxss, /\.voice-start-title[\s\S]*#ffffff/);
+});
+
+test("home presents internal project titles as natural story copy", () => {
+  assert.equal(memoirStoryTitle("爷爷主题"), "爷爷的故事");
+  assert.equal(memoirStoryTitle("外婆回忆录"), "外婆回忆录");
+  assert.equal(memoirHomePrompt("爷爷主题"), "不用讲完整，可以先说一件和爷爷有关的小事。");
 });
 
 test("home userDisplayName hides wechat placeholder display name", () => {
@@ -195,6 +208,7 @@ test("home refreshes guidance mode from current project on load", async () => {
   assert.equal(context.data.selectedMode, "guided_interview");
   assert.equal(context.data.guidanceLabel, "小余陪着问");
   assert.equal(context.data.projectTitle, "外婆回忆录");
+  assert.equal(context.data.projectDisplayTitle, "外婆回忆录");
   assert.equal(context.data.hasProject, true);
 });
 

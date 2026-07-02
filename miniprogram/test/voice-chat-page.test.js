@@ -564,6 +564,44 @@ test("voice chat stores pending close state for connection errors", () => {
   assert.match(context.data.recoveryNotice, /语音连接中断/);
 });
 
+test("voice chat opening topic option turns into a concrete starter prompt", () => {
+  const page = loadVoiceChatPage();
+  const promptText = page.data.openingTopicOptions[0].promptText;
+  let cancelReason = "";
+  const context = {
+    ...page,
+    data: {
+      ...page.data,
+      followUpTTSLoading: true,
+      followUpTTSPlaying: true,
+      assistantPromptText: "今天想先讲哪一段？",
+      persistenceStateText: "小余正在回应",
+    },
+    setData(patch) {
+      this.data = { ...this.data, ...patch };
+    },
+    cancelFollowUpTTS(reason) {
+      cancelReason = reason;
+      this.setData({
+        followUpTTSLoading: false,
+        followUpTTSPlaying: false,
+      });
+    },
+  };
+
+  page.chooseOpeningTopic.call(context, {
+    currentTarget: {
+      dataset: { promptText },
+    },
+  });
+
+  assert.equal(cancelReason, "opening_topic_selected");
+  assert.equal(context.data.selectedOpeningTopicText, promptText);
+  assert.equal(context.data.assistantPromptText, promptText);
+  assert.equal(context.data.persistenceStateText, "等待回答");
+  assert.equal(context.data.autoListenStateText, "可以点按钮开始讲");
+});
+
 test("voice chat warns when a pending live transcript is not in backend detail", () => {
   let clearCalls = 0;
   const page = loadVoiceChatPage({
