@@ -9,14 +9,21 @@ const {
   memoirStoryTitle,
 } = require("../services/memoir-display-copy.ts");
 
-function loadHomePage({ authExports = {}, voiceApiExports = {}, voiceAuthorizationExports = {} } = {}) {
+function loadHomePage({
+  authExports = {},
+  voiceApiExports = {},
+  voiceAuthorizationExports = {},
+  launchStateExports = {},
+} = {}) {
   const authPath = require.resolve("../services/auth.ts");
   const voiceApiPath = require.resolve("../services/memoir-voice-api.ts");
   const voiceAuthorizationPath = require.resolve("../services/voice-authorization.ts");
+  const launchStatePath = require.resolve("../services/home-launch-state.ts");
   const homePath = require.resolve("../pages/home/index.ts");
   delete require.cache[authPath];
   delete require.cache[voiceApiPath];
   delete require.cache[voiceAuthorizationPath];
+  delete require.cache[launchStatePath];
   delete require.cache[homePath];
   require.cache[authPath] = {
     id: authPath,
@@ -38,6 +45,7 @@ function loadHomePage({ authExports = {}, voiceApiExports = {}, voiceAuthorizati
       createMemoirVoiceSession: async () => {
         throw new Error("createMemoirVoiceSession was not mocked");
       },
+      listMemoirVoiceTranscripts: async () => ({ items: [], total: 0, limit: 1, offset: 0 }),
       ...voiceApiExports,
     },
   };
@@ -55,6 +63,16 @@ function loadHomePage({ authExports = {}, voiceApiExports = {}, voiceAuthorizati
       syncVoiceAuthorizationConsent: async () => ({ id: "consent-1" }),
       VOICE_AUTHORIZATION_PAGE_URL: "/pages/voice-authorization/index",
       ...voiceAuthorizationExports,
+    },
+  };
+  require.cache[launchStatePath] = {
+    id: launchStatePath,
+    filename: launchStatePath,
+    loaded: true,
+    exports: {
+      dismissHomeLaunch: () => {},
+      resolveHomeLaunch: () => "none",
+      ...launchStateExports,
     },
   };
 
@@ -124,6 +142,32 @@ test("home presents internal project titles as natural story copy", () => {
   assert.equal(memoirHomePrompt("爷爷主题"), "不用讲完整，可以先说一件和爷爷有关的小事。");
 });
 
+test("home creates concise resume hints from the latest transcript", () => {
+  const { homeResumeHint } = loadHomePage().mod;
+
+  assert.equal(homeResumeHint({
+    summary_title: "爷爷退休后还在忙公司的事。",
+    summary_text: "",
+    display_text: "",
+    transcript_edited: "",
+    transcript_raw: "",
+  }), "爷爷退休后还在忙公司的事");
+  assert.equal(homeResumeHint({
+    summary_title: "",
+    summary_text: "  ",
+    display_text: "那年在县城读书，住在外婆家。",
+    transcript_edited: "",
+    transcript_raw: "",
+  }), "那年在县城读书，住在外婆家");
+  assert.equal(homeResumeHint({
+    summary_title: "这是一段很长很长的讲述标题，用来确认首页只展示一句短短的续讲提示",
+    summary_text: "",
+    display_text: "",
+    transcript_edited: "",
+    transcript_raw: "",
+  }), "这是一段很长很长的讲述标题，用来确认首页只展示一句短短的...");
+});
+
 test("home userDisplayName hides wechat placeholder display name", () => {
   const { userDisplayName } = loadHomePage().mod;
 
@@ -174,6 +218,7 @@ test("home treats wechat-only accounts as logged in users without projects", asy
 });
 
 test("home refreshes guidance mode from current project on load", async () => {
+  const transcriptCalls = [];
   const { page } = loadHomePage({
     authExports: {
       getMemoirIdentity: async () => ({
@@ -195,6 +240,23 @@ test("home refreshes guidance mode from current project on load", async () => {
         projects: [],
       }),
     },
+    voiceApiExports: {
+      listMemoirVoiceTranscripts: async (options) => {
+        transcriptCalls.push(options);
+        return {
+          items: [{
+            summary_title: "爷爷退休后还在忙公司的事。",
+            summary_text: "",
+            display_text: "",
+            transcript_edited: "",
+            transcript_raw: "",
+          }],
+          total: 1,
+          limit: 1,
+          offset: 0,
+        };
+      },
+    },
   });
   const context = {
     data: { ...page.data },
@@ -210,6 +272,10 @@ test("home refreshes guidance mode from current project on load", async () => {
   assert.equal(context.data.projectTitle, "外婆回忆录");
   assert.equal(context.data.projectDisplayTitle, "外婆回忆录");
   assert.equal(context.data.hasProject, true);
+  assert.deepEqual(transcriptCalls, [{ projectId: "project-1", limit: 1 }]);
+  assert.equal(context.data.lastStoryHint, "爷爷退休后还在忙公司的事");
+  assert.equal(context.data.lastStoryText, "上次您说到：爷爷退休后还在忙公司的事。");
+  assert.equal(context.data.hasLastStoryHint, true);
 });
 
 test("home shows explicit project creation state for logged-in users without projects", async () => {
@@ -242,6 +308,68 @@ test("home shows explicit project creation state for logged-in users without pro
   assert.equal(context.data.hasProject, false);
 });
 
+test("home shows first-visit launch copy from launch state", async () => {
+  const { page } = loadHomePage({
+    authExports: {
+      getMemoirIdentity: async () => ({
+        id: "user-1",
+        email: "memoir-author@example.com",
+        password_login_enabled: true,
+        display_name: "作者",
+        created_at: "2026-06-15T00:00:00",
+        active_project_id: "",
+        active_project: null,
+        projects: [],
+      }),
+    },
+    launchStateExports: {
+      resolveHomeLaunch: () => "first_visit",
+    },
+  });
+  const context = {
+    ...page,
+    data: { ...page.data },
+    setData(patch) {
+      this.data = { ...this.data, ...patch };
+    },
+  };
+
+  await page.loadHome.call(context);
+
+  assert.equal(context.data.launchVariant, "first_visit");
+  assert.equal(context.data.showLaunchPanel, true);
+  assert.equal(context.data.launchEyebrow, "聊出一本书");
+  assert.equal(context.data.launchTitle, "我的故事，慢慢讲");
+});
+
+test("home dismisses one-time new-project launch markers", () => {
+  const dismissals = [];
+  const { page } = loadHomePage({
+    launchStateExports: {
+      dismissHomeLaunch: (...args) => dismissals.push(args),
+    },
+  });
+  const context = {
+    ...page,
+    data: {
+      ...page.data,
+      userId: "user-1",
+      projectId: "project-1",
+      launchVariant: "new_project",
+      showLaunchPanel: true,
+    },
+    setData(patch) {
+      this.data = { ...this.data, ...patch };
+    },
+  };
+
+  page.dismissLaunchPanel.call(context);
+
+  assert.deepEqual(dismissals, [["user-1", "new_project", "project-1"]]);
+  assert.equal(context.data.launchVariant, "none");
+  assert.equal(context.data.showLaunchPanel, false);
+});
+
 test("home creates voice sessions with the project-bound guidance mode", async () => {
   const createdSessions = [];
   const navigations = [];
@@ -270,6 +398,7 @@ test("home creates voice sessions with the project-bound guidance mode", async (
     },
   });
   const context = {
+    ...page,
     data: {
       ...page.data,
       selectedMode: "guided_interview",
@@ -317,6 +446,7 @@ test("home creates free narration voice sessions without a guidance module", asy
     },
   });
   const context = {
+    ...page,
     data: {
       ...page.data,
       selectedMode: "free_narration",
@@ -339,6 +469,55 @@ test("home creates free narration voice sessions without a guidance module", asy
   delete global.wx;
 });
 
+test("home daily actions create free narration and guided interview sessions", async () => {
+  const createdSessions = [];
+  const navigations = [];
+  global.wx = {
+    navigateTo(options) {
+      navigations.push(options.url);
+    },
+  };
+  const { page } = loadHomePage({
+    voiceApiExports: {
+      createMemoirVoiceSession: async (input, options) => {
+        createdSessions.push({ input, options });
+        return {
+          session: {
+            id: `voice/${createdSessions.length}`,
+          },
+        };
+      },
+    },
+  });
+  const context = {
+    ...page,
+    data: {
+      ...page.data,
+      projectId: "project/1",
+      projectTitle: "爷爷的故事",
+      projectDisplayTitle: "爷爷的故事",
+      hasProject: true,
+      voiceAuthorizationAgreed: true,
+      lastStoryHint: "爷爷退休后还在忙公司的事",
+      hasLastStoryHint: true,
+    },
+    setData(patch) {
+      this.data = { ...this.data, ...patch };
+    },
+  };
+
+  await page.startFreeNarration.call(context);
+  await page.startGuidedInterview.call(context);
+
+  assert.equal(createdSessions[0].input.guidance_mode, "free_narration");
+  assert.equal(createdSessions[0].input.metadata_json.entry, "miniprogram_home_resume");
+  assert.equal(createdSessions[0].input.metadata_json.resume_hint, "爷爷退休后还在忙公司的事");
+  assert.equal(createdSessions[1].input.guidance_mode, "guided_interview");
+  assert.equal(createdSessions[1].input.metadata_json.entry, "miniprogram_home_resume");
+  assert.equal(navigations.length, 2);
+  delete global.wx;
+});
+
 test("home does not create voice sessions when consent audit sync fails", async () => {
   let createCalls = 0;
   const { page } = loadHomePage({
@@ -355,6 +534,7 @@ test("home does not create voice sessions when consent audit sync fails", async 
     },
   });
   const context = {
+    ...page,
     data: {
       ...page.data,
       projectId: "project/1",
@@ -419,6 +599,7 @@ test("home sends login-required voice starts to the me tab", async () => {
   };
   const { page } = loadHomePage();
   const context = {
+    ...page,
     data: {
       ...page.data,
       needsLogin: true,
@@ -452,6 +633,7 @@ test("home blocks voice session creation before voice authorization consent", as
     },
   });
   const context = {
+    ...page,
     data: {
       ...page.data,
       needsLogin: false,
