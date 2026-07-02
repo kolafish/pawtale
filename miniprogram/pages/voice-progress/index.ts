@@ -48,7 +48,7 @@ const MODULE_LABELS: Record<string, string> = {
   place: "地点",
   period: "时间段",
   theme: "主题",
-  free_narration: "自由讲述",
+  free_narration: "慢慢讲",
   unassigned: "未分配",
 };
 
@@ -66,14 +66,14 @@ const EMPTY_PROGRESS: MemoirVoiceProgressResponse = {
 };
 
 function modeText(mode: MemoirGuidanceMode): string {
-  return mode === "guided_interview" ? "AI 引导" : "自由讲述";
+  return mode === "guided_interview" ? "小余陪着问" : "慢慢讲";
 }
 
 function statusText(status: string): string {
   const labels: Record<string, string> = {
     created: "可继续",
     listening: "进行中",
-    speaking: "AI 追问中",
+    speaking: "小余在问",
     stopped: "已保存",
     failed: "异常",
   };
@@ -123,7 +123,7 @@ function toSessionView(item: MemoirVoiceSessionSummary): VoiceSessionSummaryView
     ...item,
     modeText: modeText(item.guidance_mode),
     statusText: statusText(item.status),
-    moduleText: item.guidance_mode === "free_narration" ? "自由讲述" : moduleText(item.current_guidance_module),
+    moduleText: item.guidance_mode === "free_narration" ? "慢慢讲" : moduleText(item.current_guidance_module),
     updatedText: formatDate(item.updated_at || item.created_at),
     durationText: formatDuration(item.total_audio_seconds),
     canContinue: canContinueVoiceSession(item.status),

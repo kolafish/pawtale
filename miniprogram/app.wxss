@@ -1,7 +1,7 @@
 page {
   min-height: 100vh;
-  background: #fffaf2;
-  color: #2d1710;
+  background: #fcf7ed;
+  color: #3a2a25;
   font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", "Helvetica Neue", Helvetica, Arial, sans-serif;
 }
 
@@ -37,6 +37,7 @@ image {
 .page {
   min-height: 100vh;
   padding: 40rpx 32rpx 56rpx;
+  background: #fcf7ed;
 }
 
 .stack {
@@ -47,40 +48,41 @@ image {
 
 .surface {
   background: #ffffff;
-  border: 1rpx solid #f0dac0;
-  border-radius: 16rpx;
+  border: 1rpx solid #e8d8c3;
+  border-radius: 24rpx;
   padding: 32rpx;
+  box-shadow: 0 6rpx 20rpx rgba(93, 61, 42, 0.06);
 }
 
 .eyebrow {
-  color: #9f4a3c;
-  font-size: 26rpx;
-  font-weight: 700;
+  color: #a64b3e;
+  font-size: 24rpx;
+  font-weight: 600;
   letter-spacing: 0;
 }
 
 .title {
-  color: #24100b;
+  color: #2b1713;
   font-size: 40rpx;
   font-weight: 700;
-  line-height: 1.25;
+  line-height: 52rpx;
   letter-spacing: 0;
 }
 
 .subtitle {
-  color: #685b55;
+  color: #7b6f68;
   font-size: 28rpx;
   line-height: 1.6;
 }
 
 .body-text {
-  color: #2d1710;
+  color: #3a2a25;
   font-size: 30rpx;
   line-height: 1.72;
 }
 
 .muted {
-  color: #685b55;
+  color: #7b6f68;
   font-size: 26rpx;
 }
 
@@ -88,10 +90,10 @@ image {
   width: 100%;
   min-height: 260rpx;
   padding: 26rpx;
-  border: 1rpx solid #f2cbbb;
-  border-radius: 14rpx;
+  border: 1rpx solid #e8d8c3;
+  border-radius: 18rpx;
   background: #ffffff;
-  color: #24100b;
+  color: #3a2a25;
   font-size: 30rpx;
   line-height: 1.6;
 }
@@ -102,31 +104,32 @@ image {
 }
 
 .button {
-  min-height: 92rpx;
-  border-radius: 999rpx;
+  min-height: 88rpx;
+  border-radius: 24rpx;
   font-size: 30rpx;
-  font-weight: 700;
-  line-height: 92rpx;
+  font-weight: 600;
+  line-height: 88rpx;
 }
 
 .button-primary {
-  background: #9f4a3c;
+  background: #a64b3e;
   color: #ffffff;
 }
 
 .button-secondary {
-  background: #fff6f1;
-  color: #9f4a3c;
+  background: #f8e8e2;
+  color: #8f3e35;
 }
 
 .button-quiet {
-  background: #fff6f1;
-  color: #5b4038;
+  background: #ffffff;
+  color: #7b4a40;
+  border: 1rpx solid #d8c4b2;
 }
 
 .button-danger {
-  background: #fff1f2;
-  color: #be123c;
+  background: #fff1f3;
+  color: #b84a5a;
 }
 
 .stat-row {
@@ -137,29 +140,84 @@ image {
 .stat {
   flex: 1;
   padding: 24rpx;
-  border-radius: 14rpx;
-  background: #fff6f1;
+  border-radius: 18rpx;
+  background: #fff9f3;
 }
 
 .stat-value {
-  color: #9f4a3c;
+  color: #a64b3e;
   font-size: 38rpx;
   font-weight: 800;
 }
 
 .stat-label {
   margin-top: 6rpx;
-  color: #685b55;
+  color: #7b6f68;
   font-size: 24rpx;
 }
 
 .error {
   padding: 24rpx;
-  border-radius: 14rpx;
-  background: #fff1f2;
-  color: #be123c;
+  border-radius: 18rpx;
+  background: #fff1f3;
+  color: #b84a5a;
   font-size: 26rpx;
   line-height: 1.5;
+}
+
+.tag-status {
+  display: inline-flex;
+  padding: 8rpx 14rpx;
+  border-radius: 999rpx;
+  background: #eef4ea;
+  color: #5f7e55;
+  font-size: 24rpx;
+  font-weight: 600;
+  line-height: 32rpx;
+}
+
+.tag-count {
+  display: inline-flex;
+  padding: 8rpx 14rpx;
+  border-radius: 999rpx;
+  background: #f6eee5;
+  color: #8b6a55;
+  font-size: 24rpx;
+  font-weight: 600;
+  line-height: 32rpx;
+}
+
+.tag-chapter {
+  display: inline-flex;
+  padding: 8rpx 14rpx;
+  border-radius: 999rpx;
+  background: #fff3ef;
+  color: #a64b3e;
+  font-size: 24rpx;
+  font-weight: 600;
+  line-height: 32rpx;
+}
+
+.tag-warning {
+  display: inline-flex;
+  padding: 8rpx 14rpx;
+  border-radius: 999rpx;
+  background: #fff2d9;
+  color: #9a6a24;
+  font-size: 24rpx;
+  font-weight: 600;
+  line-height: 32rpx;
+}
+
+.tag-ai {
+  display: inline-flex;
+  padding: 8rpx 14rpx;
+  border-radius: 999rpx;
+  background: #f3efea;
+  color: #7a6b60;
+  font-size: 24rpx;
+  font-weight: 600;
+  line-height: 32rpx;
 }
 
 .tap-hover {
@@ -173,7 +231,7 @@ image {
   bottom: 0;
   min-height: 132rpx;
   padding: 14rpx 18rpx 26rpx;
-  border-top: 1rpx solid #f0dac0;
+  border-top: 1rpx solid #efe6da;
   background: rgba(255, 255, 255, 0.96);
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -184,7 +242,7 @@ image {
 .bottom-nav-item {
   min-width: 0;
   height: 92rpx;
-  color: #685b55;
+  color: #7b6f68;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -196,7 +254,7 @@ image {
 }
 
 .bottom-nav-item.active {
-  color: #9f4a3c;
+  color: #a64b3e;
 }
 
 .bottom-nav-item text {

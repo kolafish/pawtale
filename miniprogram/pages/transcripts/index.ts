@@ -357,7 +357,7 @@ function searchChips(filters: TranscriptSearchFilters, parsed?: MemoirVoiceSearc
     chips.push({ text: "未收录" });
   }
   if (filters.guidanceMode === "free_narration") {
-    chips.push({ text: "自由讲述" });
+    chips.push({ text: "慢慢讲" });
   } else if (filters.guidanceMode === "guided_interview") {
     chips.push({ text: "引导访谈" });
   }
@@ -445,7 +445,7 @@ function toViewItem(
   const createdAtText = transcriptCreatedAtText(item);
   const durationText = transcriptDurationText(item);
   const bookInclusionText = transcriptBookInclusionText(item);
-  const recordMetaText = [createdAtText, durationText, bookInclusionText].filter(Boolean).join(" · ");
+  const recordMetaText = [createdAtText, durationText].filter(Boolean).join(" · ");
   return {
     ...item,
     recordNumber,
@@ -687,7 +687,7 @@ function confirmDelete(item: TranscriptItemView): Promise<boolean> {
       title: "删除讲述记录",
       content: `确定删除“${preview.slice(0, 24)}${preview.length > 24 ? "..." : ""}”？删除后不会再出现在讲述记录和访谈上下文中。`,
       confirmText: "删除",
-      confirmColor: "#b4234a",
+      confirmColor: "#b84a5a",
       success: (result) => resolve(Boolean(result.confirm)),
       fail: () => resolve(false),
     });

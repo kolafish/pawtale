@@ -24,7 +24,7 @@
     </view>
     <view class="summary-item">
       <text class="summary-value">{{progress.assistant_message_count || 0}}</text>
-      <text class="summary-label">AI 追问</text>
+      <text class="summary-label">小余追问</text>
     </view>
   </view>
 

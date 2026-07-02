@@ -12,7 +12,7 @@
 
     <view class="section">
       <text class="section-title">二、收集目的</text>
-      <text class="paragraph">这些信息仅用于回忆录功能，包括语音访谈、实时识别文字、生成 AI 追问、保存原始音频证据、整理讲述记录、生成章节和全书内容，以及在你需要时回放或核对访谈材料。</text>
+      <text class="paragraph">这些信息仅用于回忆录功能，包括语音访谈、实时识别文字、生成小余追问、保存原始音频证据、整理讲述记录、生成章节和全书内容，以及在你需要时回放或核对访谈材料。</text>
     </view>
 
     <view class="section">

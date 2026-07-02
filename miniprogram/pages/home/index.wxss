@@ -1,7 +1,7 @@
 .home-page {
   min-height: 100vh;
-  padding: 52rpx 36rpx 120rpx;
-  background: #fffaf2;
+  padding: 52rpx 32rpx 120rpx;
+  background: #fcf7ed;
 }
 
 .header {
@@ -10,27 +10,27 @@
 
 .hello {
   display: block;
-  color: #24100b;
-  font-size: 44rpx;
-  font-weight: 800;
-  line-height: 1.2;
+  color: #2b1713;
+  font-size: 40rpx;
+  font-weight: 700;
+  line-height: 52rpx;
 }
 
 .subtitle {
   display: block;
   margin-top: 10rpx;
-  color: #7a3b31;
+  color: #7b6f68;
   font-size: 28rpx;
-  font-weight: 700;
-  line-height: 1.35;
+  font-weight: 400;
+  line-height: 42rpx;
 }
 
 .home-card {
-  border: 2rpx solid #f0dac0;
+  border: 1rpx solid #e8d8c3;
   border-radius: 24rpx;
   background: #ffffff;
-  box-shadow: 0 16rpx 40rpx rgba(64, 43, 24, 0.08);
-  padding: 30rpx;
+  box-shadow: 0 6rpx 20rpx rgba(93, 61, 42, 0.06);
+  padding: 32rpx;
 }
 
 .project-row {
@@ -41,38 +41,39 @@
 }
 
 .panel-label {
-  color: #7a3b31;
+  color: #7b6f68;
   font-size: 26rpx;
-  font-weight: 800;
-  line-height: 1.3;
+  font-weight: 400;
+  line-height: 38rpx;
 }
 
 .mode-tag {
   flex: 0 0 auto;
   padding: 8rpx 16rpx;
   border-radius: 999rpx;
-  background: #fff1ec;
-  color: #9f4a3c;
+  background: #f3efea;
+  color: #7a6b60;
   font-size: 24rpx;
-  font-weight: 800;
-  line-height: 1.25;
+  font-weight: 600;
+  line-height: 32rpx;
 }
 
 .project-title {
   display: block;
   margin-top: 14rpx;
-  color: #24100b;
-  font-size: 42rpx;
-  font-weight: 800;
-  line-height: 1.25;
+  color: #2b1713;
+  font-size: 40rpx;
+  font-weight: 700;
+  line-height: 52rpx;
 }
 
 .project-meta {
   display: block;
   margin-top: 18rpx;
-  color: #685b55;
-  font-size: 31rpx;
-  line-height: 1.5;
+  color: #3a2a25;
+  font-size: 30rpx;
+  font-weight: 400;
+  line-height: 50rpx;
 }
 
 .voice-start-button {
@@ -80,9 +81,9 @@
   min-height: 148rpx;
   margin: 46rpx 0 0;
   border: 0;
-  border-radius: 36rpx;
-  background: #9f4a3c;
-  box-shadow: 0 18rpx 36rpx rgba(159, 74, 60, 0.18);
+  border-radius: 24rpx;
+  background: #a64b3e;
+  box-shadow: 0 12rpx 28rpx rgba(166, 75, 62, 0.16);
   display: flex;
   align-items: center;
   justify-content: flex-start;
@@ -100,7 +101,7 @@
 }
 
 .voice-start-button-hover {
-  background: #b85c45;
+  background: #8f3e35;
 }
 
 .voice-start-icon {
@@ -118,26 +119,26 @@
 .voice-start-title {
   display: block;
   color: #ffffff;
-  font-size: 38rpx;
-  font-weight: 800;
-  line-height: 1.25;
+  font-size: 34rpx;
+  font-weight: 700;
+  line-height: 46rpx;
 }
 
 .voice-start-subtitle {
   display: block;
   margin-top: 8rpx;
-  color: #fff1ec;
-  font-size: 27rpx;
-  font-weight: 700;
-  line-height: 1.35;
+  color: #fff3ef;
+  font-size: 26rpx;
+  font-weight: 400;
+  line-height: 38rpx;
 }
 
 .voice-auth-panel {
   margin-top: 32rpx;
   padding: 22rpx;
-  border: 2rpx solid #efd6c4;
-  border-radius: 18rpx;
-  background: #fffaf2;
+  border: 1rpx solid #e8d8c3;
+  border-radius: 20rpx;
+  background: #fff9f3;
 }
 
 .voice-auth-row {
@@ -149,20 +150,20 @@
 .voice-auth-copy {
   flex: 1;
   min-width: 0;
-  color: #24100b;
+  color: #3a2a25;
   font-size: 28rpx;
-  font-weight: 800;
+  font-weight: 600;
   line-height: 1.45;
 }
 
 .voice-auth-link {
-  color: #9f4a3c;
+  color: #a64b3e;
 }
 
 .voice-auth-hint {
   display: block;
   margin-top: 14rpx;
-  color: #685b55;
+  color: #7b6f68;
   font-size: 25rpx;
   line-height: 1.45;
 }
@@ -171,8 +172,8 @@
   margin-bottom: 24rpx;
   padding: 22rpx 26rpx;
   border-radius: 18rpx;
-  background: #fff1f2;
-  color: #be123c;
+  background: #fff1f3;
+  color: #b84a5a;
   font-size: 26rpx;
   line-height: 1.45;
 }

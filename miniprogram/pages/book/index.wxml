@@ -162,7 +162,7 @@
           disabled="{{loading || generatingPlan || confirmingPlan || updatingPlanStructure || generatingBook || (bookVoiceAssistantBusy && !bookVoiceAssistantSpeakingLineId)}}"
           bindtap="startBookVoiceCommand"
         >
-          {{bookVoiceAssistantListening ? "停止" : (bookVoiceAssistantBusy ? (bookVoiceAssistantSpeakingLineId ? "打断 AI" : "处理中") : "语音修改")}}
+          {{bookVoiceAssistantListening ? "停止" : (bookVoiceAssistantBusy ? (bookVoiceAssistantSpeakingLineId ? "我想说了" : "处理中") : "语音修改")}}
         </button>
       </view>
     </view>
@@ -181,7 +181,7 @@
           wx:key="id"
           class="book-voice-message {{item.role === 'assistant' ? 'assistant' : 'user'}}"
         >
-          <text class="book-voice-message-role">{{item.role === "assistant" ? "AI" : "我"}}</text>
+          <text class="book-voice-message-role">{{item.role === "assistant" ? "小余" : "我"}}</text>
           <block wx:if="{{item.id === bookVoiceAssistantSpeakingLineId && bookTTSActiveTarget === 'book-voice-assistant'}}">
             <text class="book-voice-message-text assistant-speaking" selectable>
               <text class="tts-spoken">{{bookTTSSpokenText}}</text>
@@ -198,7 +198,7 @@
           <text class="book-voice-message-text">{{bookVoiceLiveText}}</text>
         </view>
         <text wx:if="{{!bookVoiceTranscriptLines.length && !bookVoiceLiveText}}" class="book-voice-dialog-empty">
-          点击语音修改后，我会实时显示你说的话和 AI 的回复。
+          点击语音修改后，我会实时显示你说的话和小余的回复。
         </text>
       </view>
 
@@ -442,7 +442,7 @@
           bindtap="generateChapterTitle"
           disabled="{{confirmingPlan || generatingPlan || titleBusyTarget || updatingPlanStructure}}"
         >
-          {{titleBusyTarget === item.id ? "起名中" : "AI 起名"}}
+            {{titleBusyTarget === item.id ? "起名中" : "小余起名"}}
         </button>
         <button
           class="danger-button"
@@ -628,7 +628,7 @@
               disabled="{{bookTitleSuggesting || bookTitleSaving || generatingBook || updatingPlanStructure || bookViewingHistoricalVersion || !allChaptersConfirmed || hasDraftChanges}}"
               bindtap="suggestBookTitles"
             >
-              {{bookTitleSuggesting ? "起名中" : "AI 起名"}}
+              {{bookTitleSuggesting ? "起名中" : "小余起名"}}
             </button>
           </view>
 

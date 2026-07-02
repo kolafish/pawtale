@@ -1,10 +1,8 @@
 <view class="voice-chat-page">
   <view class="top-bar">
-    <view>
-      <text class="mode-label">正在聊：{{projectTitle || "这段回忆"}}</text>
-      <text class="status-label {{error ? 'error' : (recording ? 'listening' : '')}}">
-        {{error ? "需要处理一下" : (recording ? "我在听，您慢慢说" : (followUpLoading ? "小余正在想一想" : (followUpTTSPlaying ? "小余正在读问题" : (persistenceStateText === "已保存" ? "已保存这一段" : "可以开始讲了"))))}}
-      </text>
+    <view class="top-copy">
+      <text class="mode-label">语音访谈</text>
+      <text class="top-subtitle">小余陪您慢慢讲</text>
     </view>
     <button
       class="finish-button"
@@ -14,6 +12,14 @@
     >
       {{finishingSession ? "保存中" : "保存离开"}}
     </button>
+  </view>
+
+  <view class="topic-panel">
+    <text class="topic-kicker">今天继续讲：</text>
+    <text class="topic-title">{{projectTitle || "这段回忆"}}</text>
+    <text class="status-label {{error ? 'error' : (recording ? 'listening' : '')}}">
+      {{error ? "需要处理一下" : (recording ? "正在听您讲" : (followUpLoading ? "正在帮您整理" : (followUpTTSPlaying ? "小余正在读问题" : (persistenceStateText === "已保存" ? "已保存这一段" : "可以开始了"))))}}
+    </text>
   </view>
 
   <view wx:if="{{error}}" class="error">{{error}}</view>
@@ -36,7 +42,7 @@
         <checkbox
           value="voice_authorization"
           checked="{{voiceAuthorizationAgreed}}"
-          color="#9f4a3c"
+          color="#a64b3e"
         />
         <view class="voice-auth-copy">
           <text>我已阅读并同意</text>
@@ -131,5 +137,6 @@
       <image class="mic-icon" src="/assets/memoir-microphone.png" mode="aspectFit" />
       <text>{{!voiceAuthorizationAgreed ? "同意后开始说话" : (connecting ? "正在准备" : (recording ? "说完了" : ((followUpLoading || followUpTTSLoading || followUpTTSPlaying) ? "我想说了" : (primaryActionText === "开始说话" ? "我开始讲了" : (primaryActionText === "继续说话" ? "继续讲" : primaryActionText)))))}}</text>
     </button>
+    <text class="control-hint">{{recording ? "说完请点这里，我会帮您整理成文字。" : "说一段就行，我会帮您记下来。"}}</text>
   </view>
 </view>

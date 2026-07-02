@@ -1,7 +1,7 @@
 .chapter-detail-page {
   min-height: 100vh;
-  padding: 44rpx 36rpx 120rpx;
-  background: #f7f3ed;
+  padding: 44rpx 32rpx 120rpx;
+  background: #fcf7ed;
   box-sizing: border-box;
 }
 
@@ -21,7 +21,7 @@
 }
 
 .back-mark {
-  color: #9f4a3c;
+  color: #a64b3e;
   font-size: 72rpx;
   line-height: 1;
 }
@@ -32,16 +32,16 @@
 
 .page-title {
   display: block;
-  color: #24100b;
-  font-size: 44rpx;
-  font-weight: 800;
-  line-height: 1.2;
+  color: #2b1713;
+  font-size: 40rpx;
+  font-weight: 700;
+  line-height: 52rpx;
 }
 
 .page-meta {
   display: block;
   margin-top: 8rpx;
-  color: #685b55;
+  color: #7b6f68;
   font-size: 26rpx;
   line-height: 1.35;
 }
@@ -50,8 +50,8 @@
   margin-bottom: 24rpx;
   padding: 22rpx 26rpx;
   border-radius: 18rpx;
-  background: #fff1f2;
-  color: #b4234a;
+  background: #fff1f3;
+  color: #b84a5a;
   font-size: 28rpx;
   line-height: 1.45;
   word-break: break-word;
@@ -61,39 +61,39 @@
 .hero-panel,
 .section-card {
   margin-top: 24rpx;
-  border: 2rpx solid #e7d8c9;
-  border-radius: 18rpx;
-  background: rgba(255, 255, 255, 0.96);
-  box-shadow: 0 10rpx 28rpx rgba(64, 43, 24, 0.06);
+  border: 1rpx solid #e8d8c3;
+  border-radius: 24rpx;
+  background: #ffffff;
+  box-shadow: 0 6rpx 20rpx rgba(93, 61, 42, 0.06);
   box-sizing: border-box;
 }
 
 .empty-panel {
   padding: 48rpx 34rpx;
-  color: #685b55;
+  color: #7b6f68;
   font-size: 30rpx;
   line-height: 1.5;
 }
 
 .empty-title {
   display: block;
-  color: #24100b;
+  color: #2b1713;
   font-size: 34rpx;
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .empty-copy {
   display: block;
   margin-top: 14rpx;
-  color: #685b55;
+  color: #7b6f68;
   font-size: 28rpx;
   line-height: 1.5;
 }
 
 .hero-panel {
-  padding: 32rpx 30rpx;
-  border-color: #dfc8b8;
-  background: #fffdf9;
+  padding: 32rpx;
+  border-color: #e8d8c3;
+  background: #fff9f3;
 }
 
 .chapter-kicker-row,
@@ -110,32 +110,32 @@
 }
 
 .chapter-index {
-  color: #9f4a3c;
+  color: #a64b3e;
   font-size: 25rpx;
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .chapter-status {
   padding: 8rpx 14rpx;
   border-radius: 999rpx;
-  background: #f4f1ec;
-  color: #62554d;
+  background: #fff2d9;
+  color: #9a6a24;
   font-size: 24rpx;
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .chapter-status.confirmed {
-  background: #edf7f2;
-  color: #2f6f55;
+  background: #eef4ea;
+  color: #5f7e55;
 }
 
 .chapter-title {
   display: block;
   margin-top: 16rpx;
-  color: #24100b;
+  color: #2b1713;
   font-size: 42rpx;
-  font-weight: 850;
-  line-height: 1.3;
+  font-weight: 700;
+  line-height: 54rpx;
   word-break: break-word;
 }
 
@@ -143,13 +143,13 @@
 .chapter-notice {
   display: block;
   margin-top: 12rpx;
-  color: #685b55;
+  color: #7b6f68;
   font-size: 26rpx;
   line-height: 1.45;
 }
 
 .chapter-notice {
-  color: #9f4a3c;
+  color: #a64b3e;
   font-weight: 700;
 }
 
@@ -159,8 +159,8 @@
   gap: 12rpx;
   margin-top: 28rpx;
   padding: 8rpx;
-  border-radius: 16rpx;
-  background: #ede3d7;
+  border-radius: 20rpx;
+  background: #f0e5d8;
 }
 
 .tab-item {
@@ -168,16 +168,16 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 12rpx;
-  color: #685b55;
+  border-radius: 16rpx;
+  color: #7b6f68;
   font-size: 27rpx;
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .tab-item.active {
-  background: #fffdf9;
-  color: #9f4a3c;
-  box-shadow: 0 6rpx 16rpx rgba(64, 43, 24, 0.08);
+  background: #ffffff;
+  color: #a64b3e;
+  box-shadow: 0 6rpx 16rpx rgba(93, 61, 42, 0.06);
 }
 
 .section-card {
@@ -200,46 +200,46 @@
 }
 
 .section-title {
-  color: #24100b;
+  color: #2b1713;
   font-size: 32rpx;
-  font-weight: 850;
-  line-height: 1.35;
+  font-weight: 700;
+  line-height: 44rpx;
 }
 
 .section-hint {
   margin-top: 6rpx;
-  color: #8a7a70;
+  color: #7b6f68;
   font-size: 24rpx;
   line-height: 1.35;
 }
 
 .section-count {
   flex: 0 0 auto;
-  color: #9f4a3c;
+  color: #8b6a55;
   font-size: 24rpx;
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .manuscript-card {
-  background: #ffffff;
-  border-color: #dfc8b8;
+  background: #fffcf7;
+  border-color: #e8d8c3;
 }
 
 .title-card,
 .action-card {
-  background: #fffdf9;
+  background: #fff9f3;
 }
 
 .chapter-title-input,
 .draft-textarea {
   width: 100%;
   padding: 20rpx 22rpx;
-  border: 2rpx solid #e6d6c8;
-  border-radius: 14rpx;
-  background: #fffaf4;
-  color: #24100b;
+  border: 1rpx solid #e8d8c3;
+  border-radius: 18rpx;
+  background: #fffcf7;
+  color: #3a2a25;
   font-size: 30rpx;
-  line-height: 1.45;
+  line-height: 48rpx;
   box-sizing: border-box;
 }
 
@@ -270,21 +270,21 @@
   justify-content: center;
   margin: 0;
   padding: 0 24rpx;
-  border-radius: 14rpx;
+  border-radius: 22rpx;
   font-size: 27rpx;
-  font-weight: 800;
+  font-weight: 600;
   line-height: 1.2;
 }
 
 .primary-button {
-  background: #9f4a3c;
+  background: #a64b3e;
   color: #ffffff;
 }
 
 .ghost-button {
-  border: 2rpx solid #d8c7b9;
-  background: #fffaf4;
-  color: #6d4b3f;
+  border: 1rpx solid #d8c4b2;
+  background: #ffffff;
+  color: #7b4a40;
 }
 
 .primary-button::after,
@@ -304,7 +304,7 @@
   align-items: flex-start;
   justify-content: center;
   gap: 18rpx;
-  color: #8a7a70;
+  color: #7b6f68;
   font-size: 28rpx;
 }
 
@@ -312,8 +312,8 @@
   margin-top: 20rpx;
   padding: 20rpx 24rpx;
   border-radius: 16rpx;
-  background: #fff1f2;
-  color: #b4234a;
+  background: #fff1f3;
+  color: #b84a5a;
   font-size: 26rpx;
   line-height: 1.45;
   word-break: break-word;
@@ -331,23 +331,23 @@
 
 .chapter-action-group {
   padding: 20rpx;
-  border: 2rpx solid #eadfd2;
-  border-radius: 16rpx;
-  background: #fffaf4;
+  border: 1rpx solid #f0e5d8;
+  border-radius: 20rpx;
+  background: #fffcf7;
 }
 
 .chapter-action-label {
   display: block;
-  color: #24100b;
+  color: #2b1713;
   font-size: 26rpx;
-  font-weight: 850;
-  line-height: 1.35;
+  font-weight: 700;
+  line-height: 36rpx;
 }
 
 .chapter-action-hint {
   display: block;
   margin-top: 12rpx;
-  color: #8a7a70;
+  color: #7b6f68;
   font-size: 24rpx;
   line-height: 1.45;
 }
@@ -358,12 +358,12 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 2rpx solid #d8c7b9;
-  border-radius: 14rpx;
-  background: #fffaf4;
-  color: #6d4b3f;
+  border: 1rpx solid #d8c4b2;
+  border-radius: 22rpx;
+  background: #ffffff;
+  color: #7b4a40;
   font-size: 27rpx;
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .picker-button.disabled {
@@ -383,8 +383,8 @@
 }
 
 .source-row.selected {
-  border-color: #c88f73;
-  background: #fff4ec;
+  border-color: #a64b3e;
+  background: #fff3ef;
 }
 
 .source-split-toggle {
@@ -396,17 +396,17 @@
   justify-content: center;
   margin: 0;
   padding: 0 18rpx;
-  border: 2rpx solid #d8c7b9;
-  border-radius: 12rpx;
-  background: #fffdf9;
-  color: #6d4b3f;
+  border: 1rpx solid #d8c4b2;
+  border-radius: 18rpx;
+  background: #ffffff;
+  color: #7b4a40;
   font-size: 24rpx;
-  font-weight: 800;
+  font-weight: 600;
 }
 
 .source-split-toggle.selected {
-  border-color: #9f4a3c;
-  background: #9f4a3c;
+  border-color: #a64b3e;
+  background: #a64b3e;
   color: #ffffff;
 }
 
@@ -419,7 +419,7 @@
 }
 
 .danger-zone {
-  border-color: #f1c3c9;
+  border-color: #f3c4cc;
   background: #fff7f7;
 }
 
@@ -430,11 +430,11 @@
   justify-content: center;
   margin: 18rpx 0 0;
   padding: 0 24rpx;
-  border-radius: 14rpx;
-  background: #b4234a;
+  border-radius: 22rpx;
+  background: #b84a5a;
   color: #ffffff;
   font-size: 27rpx;
-  font-weight: 800;
+  font-weight: 600;
   line-height: 1.2;
 }
 
@@ -448,9 +448,9 @@
 
 .body-text {
   display: block;
-  color: #3b2a22;
-  font-size: 30rpx;
-  line-height: 1.75;
+  color: #2b211d;
+  font-size: 32rpx;
+  line-height: 60rpx;
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -467,9 +467,9 @@
 
 .source-row {
   padding: 22rpx;
-  border: 2rpx solid #eadfd2;
-  border-radius: 16rpx;
-  background: #fffaf4;
+  border: 1rpx solid #f0e5d8;
+  border-radius: 18rpx;
+  background: #fff5f1;
 }
 
 .source-head {
@@ -478,22 +478,22 @@
 }
 
 .source-label {
-  color: #24100b;
+  color: #2b1713;
   font-size: 28rpx;
-  font-weight: 850;
+  font-weight: 700;
   line-height: 1.35;
 }
 
 .source-meta {
   flex: 0 0 auto;
-  color: #8a7a70;
+  color: #7b6f68;
   font-size: 23rpx;
 }
 
 .source-text {
   display: block;
   margin-top: 10rpx;
-  color: #685b55;
+  color: #6e5e56;
   font-size: 26rpx;
   line-height: 1.5;
   word-break: break-word;

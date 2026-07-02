@@ -1,7 +1,7 @@
 .login-page {
   min-height: 100vh;
   padding: 72rpx 36rpx 80rpx;
-  background: #fffaf2;
+  background: #fcf7ed;
 }
 
 .brand-row {
@@ -24,7 +24,7 @@
 
 .brand-title {
   display: block;
-  color: #24100b;
+  color: #2b1713;
   font-size: 48rpx;
   font-weight: 800;
   line-height: 1.2;
@@ -33,14 +33,14 @@
 .brand-subtitle {
   display: block;
   margin-top: 12rpx;
-  color: #685b55;
+  color: #7b6f68;
   font-size: 28rpx;
   line-height: 1.35;
 }
 
 .login-panel {
   padding: 36rpx 32rpx;
-  border: 2rpx solid #f0dac0;
+  border: 2rpx solid #e8d8c3;
   border-radius: 16rpx;
   background: #ffffff;
   box-shadow: 0 16rpx 40rpx rgba(64, 43, 24, 0.08);
@@ -48,7 +48,7 @@
 
 .panel-title {
   display: block;
-  color: #24100b;
+  color: #2b1713;
   font-size: 40rpx;
   font-weight: 800;
   line-height: 1.25;
@@ -57,7 +57,7 @@
 .panel-copy {
   display: block;
   margin-top: 14rpx;
-  color: #685b55;
+  color: #7b6f68;
   font-size: 26rpx;
   line-height: 1.45;
 }
@@ -68,7 +68,7 @@
 
 .field-label {
   display: block;
-  color: #9f4a3c;
+  color: #a64b3e;
   font-size: 26rpx;
   font-weight: 800;
   line-height: 1.2;
@@ -78,10 +78,10 @@
   height: 92rpx;
   margin-top: 14rpx;
   padding: 0 22rpx;
-  border: 2rpx solid #f0dac0;
+  border: 2rpx solid #e8d8c3;
   border-radius: 14rpx;
-  background: #fffaf2;
-  color: #24100b;
+  background: #fcf7ed;
+  color: #2b1713;
   font-size: 30rpx;
 }
 
@@ -111,17 +111,17 @@
 }
 
 .primary-button {
-  background: #9f4a3c;
+  background: #a64b3e;
   color: #ffffff;
 }
 
 .mode-button {
-  background: #fff1ec;
-  color: #9f4a3c;
+  background: #fff3ef;
+  color: #a64b3e;
 }
 
 .secondary-button {
-  background: #24100b;
+  background: #2b1713;
   color: #ffffff;
 }
 
@@ -135,8 +135,8 @@
   margin-top: 22rpx;
   padding: 20rpx 22rpx;
   border-radius: 14rpx;
-  background: #fff1f2;
-  color: #be123c;
+  background: #fff1f3;
+  color: #b84a5a;
   font-size: 26rpx;
   line-height: 1.45;
 }

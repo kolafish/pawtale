@@ -15,9 +15,9 @@
     "pages/me/index"
   ],
   "tabBar": {
-    "color": "#685b55",
-    "selectedColor": "#9f4a3c",
-    "backgroundColor": "#fffaf2",
+    "color": "#7B6F68",
+    "selectedColor": "#A64B3E",
+    "backgroundColor": "#FCF7ED",
     "borderStyle": "black",
     "list": [
       {
@@ -48,9 +48,9 @@
   },
   "window": {
     "navigationBarTitleText": "余主任留声机",
-    "navigationBarBackgroundColor": "#9f4a3c",
+    "navigationBarBackgroundColor": "#A64B3E",
     "navigationBarTextStyle": "white",
-    "backgroundColor": "#fffaf2"
+    "backgroundColor": "#FCF7ED"
   },
   "networkTimeout": {
     "request": 60000,

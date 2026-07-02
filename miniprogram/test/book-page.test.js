@@ -1055,8 +1055,8 @@ test("book page exposes a compact voice assistant entry", () => {
   assert.match(wxss, /\.book-voice-command-preview/);
   assert.match(wxss, /\.book-voice-command-preview\.answer/);
   assert.match(wxss, /\.book-voice-command-preview\.consultation/);
-  assert.match(wxss, /#fff6f1/);
-  assert.match(wxss, /#9f4a3c/);
+  assert.match(wxss, /#fff9f3/);
+  assert.match(wxss, /#a64b3e/);
 });
 
 test("book page exposes PDF layout and print export controls", () => {

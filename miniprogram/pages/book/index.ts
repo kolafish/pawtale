@@ -962,7 +962,7 @@ Page<BookData, {
         wx.reLaunch({ url: "/pages/login/index" });
         return;
       }
-      this.setData({ error: error instanceof Error ? error.message : "AI 起名失败" });
+      this.setData({ error: error instanceof Error ? error.message : "小余起名失败" });
     } finally {
       this.setData({ bookTitleSuggesting: false });
     }
@@ -1692,7 +1692,7 @@ Page<BookData, {
         wx.switchTab({ url: "/pages/me/index" });
         return false;
       }
-      const message = error instanceof Error ? error.message : "AI 起名失败";
+      const message = error instanceof Error ? error.message : "小余起名失败";
       this.patchChapter(chapterId, {
         draftError: message,
       });
@@ -1755,7 +1755,7 @@ Page<BookData, {
         title: "合并章节",
         content: `把「${sourceChapter.title}」合并到「${targetChapter.title}」，本章素材会保留在合并后的章节中。`,
         confirmText: "合并",
-        confirmColor: "#9f4a3c",
+        confirmColor: "#a64b3e",
         success: (result) => resolve(Boolean(result.confirm)),
         fail: () => resolve(false),
       });
@@ -2020,7 +2020,7 @@ Page<BookData, {
         title: "删除章节",
         content: `删除「${chapter.title}」会移除本章正文，收录讲述会回到待收录列表。`,
         confirmText: "删除",
-        confirmColor: "#b4234a",
+        confirmColor: "#b84a5a",
         success: (result) => resolve(Boolean(result.confirm)),
         fail: () => resolve(false),
       });
@@ -2662,7 +2662,7 @@ Page<BookData, {
     const runtime = new VoiceAssistantTurnRuntime(`book-voice-command-${this.data.projectId}`, {
       onStarted: () => {
         if (token === this.playToken) {
-          this.setData({ bookVoiceAssistantStatusText: "AI 正在回复" });
+          this.setData({ bookVoiceAssistantStatusText: "小余正在回复" });
         }
       },
       onCommandPreview: (event) => {
@@ -2682,7 +2682,7 @@ Page<BookData, {
             bookTTSActiveTarget: "book-voice-assistant",
             bookTTSActiveText: this.data.bookVoiceAssistantReplyText,
             bookTTSRemainingText: this.data.bookVoiceAssistantReplyText,
-            bookVoiceAssistantStatusText: "AI 正在说",
+            bookVoiceAssistantStatusText: "小余正在说",
           });
         }
       },
@@ -2702,7 +2702,7 @@ Page<BookData, {
         if (token === this.playToken) {
           this.setData({
             error: error.message,
-            bookVoiceAssistantStatusText: "AI 语音播放失败",
+            bookVoiceAssistantStatusText: "小余语音播放失败",
           });
         }
       },
@@ -2802,7 +2802,7 @@ Page<BookData, {
       bookVoiceAssistantSpeakingLineId: lineId,
       bookTTSActiveText: replyText,
       bookTTSRemainingText: replyText,
-      bookVoiceAssistantStatusText: "AI 正在回复",
+      bookVoiceAssistantStatusText: "小余正在回复",
       error: "",
     });
   },
@@ -3064,7 +3064,7 @@ Page<BookData, {
       bookVoiceAssistantBusy: false,
       bookVoiceAssistantReplyText: "",
       bookVoiceAssistantSpeakingLineId: "",
-      bookVoiceAssistantStatusText: "已打断，正在听你说",
+      bookVoiceAssistantStatusText: "正在听您说",
       bookTTSActiveTarget: "",
       bookTTSActiveText: "",
       bookTTSSpokenText: "",
@@ -3163,7 +3163,7 @@ Page<BookData, {
         title: "语音修改",
         content,
         confirmText,
-        confirmColor: "#9f4a3c",
+        confirmColor: "#a64b3e",
         success: (result) => resolve(Boolean(result.confirm)),
         fail: () => resolve(false),
       });

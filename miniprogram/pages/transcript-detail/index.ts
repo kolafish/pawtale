@@ -390,7 +390,7 @@ function confirmDelete(item: TranscriptDetailItemView): Promise<boolean> {
       title: "删除讲述记录",
       content: `确定删除“${preview.slice(0, 24)}${preview.length > 24 ? "..." : ""}”？删除后不会再出现在讲述记录和访谈上下文中。`,
       confirmText: "删除",
-      confirmColor: "#b4234a",
+      confirmColor: "#b84a5a",
       success: (result) => resolve(Boolean(result.confirm)),
       fail: () => resolve(false),
     });
