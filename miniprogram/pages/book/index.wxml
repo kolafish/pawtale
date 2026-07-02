@@ -38,19 +38,51 @@
   </view>
 
   <block wx:else>
-  <view class="status-panel">
-    <view>
-      <text class="status-title">{{planTitle || "整理成书"}}</text>
-      <text class="status-meta">{{progressText}}</text>
+  <view class="status-panel progress-panel">
+    <view class="progress-main">
+      <view class="progress-title-row">
+        <text class="status-title">{{bookPreviewTitle || planTitle || "整理成书"}}</text>
+        <text class="status-pill">{{stageText}}</text>
+      </view>
+      <text class="status-meta">
+        {{totalChapterCount}} 章 · {{bookCharCount || 0}} 字 · {{bookContent ? "已生成书稿" : progressText}}
+      </text>
     </view>
-    <text class="status-pill">{{stageText}}</text>
+    <view wx:if="{{stage === 'drafting'}}" class="progress-actions">
+      <button
+        class="primary-button small"
+        disabled="{{!bookContent || hasDraftChanges || bookStaleNotice || bookViewingHistoricalVersion}}"
+        bindtap="previewBookOutput"
+      >
+        预览全书
+      </button>
+      <button
+        class="ghost-button small"
+        data-format="pdf"
+        loading="{{bookExportBusyTarget === 'book-export:pdf:' + bookExportLayout}}"
+        disabled="{{updatingPlanStructure || generatingBook || !bookContent || hasDraftChanges || bookStaleNotice || bookExportBusyTarget}}"
+        bindtap="downloadBookOutputExport"
+      >
+        阅读版 PDF
+      </button>
+      <button
+        class="ghost-button small"
+        data-format="pdf"
+        data-layout="large_print"
+        loading="{{bookExportBusyTarget === 'book-export:pdf:large_print'}}"
+        disabled="{{updatingPlanStructure || generatingBook || !bookContent || hasDraftChanges || bookStaleNotice || bookExportBusyTarget}}"
+        bindtap="downloadBookOutputExport"
+      >
+        打印版 PDF
+      </button>
+    </view>
   </view>
 
   <view wx:if="{{automationEventLoading || automationEventError || automationEventItems.length}}" class="automation-panel">
     <view class="automation-head">
       <view>
-        <text class="automation-title">AI 自动处理</text>
-        <text class="automation-meta">记录 AI 已自动整理、补写或发现的问题</text>
+        <text class="automation-title">整理进度</text>
+        <text class="automation-meta">书稿整理、补写和待确认事项会在这里汇总</text>
       </view>
       <text class="automation-count">{{automationEventLoading ? "同步中" : automationEventItems.length + " 条"}}</text>
     </view>
@@ -111,8 +143,8 @@
   <view wx:if="{{plan}}" class="book-voice-assistant {{bookVoiceAssistantExpanded ? 'expanded' : 'collapsed'}}">
     <view class="book-voice-header">
       <view class="book-voice-copy">
-        <text class="book-voice-title">成书语音助手</text>
-        <text class="book-voice-hint">{{bookVoiceAssistantHint}}</text>
+        <text class="book-voice-title">对书稿说一句</text>
+        <text class="book-voice-hint">例如：读一下第 2 章 / 把这一段说得朴素一点</text>
         <text class="book-voice-status">{{bookVoiceAssistantStatusText}}</text>
       </view>
       <view class="book-voice-actions">
@@ -310,7 +342,7 @@
     <view wx:for="{{chapters}}" wx:key="id" id="chapter-editor-{{item.id}}" class="chapter-card">
       <view class="chapter-head">
         <text class="chapter-index">第 {{index + 1}} 章</text>
-        <text class="source-count">{{item.sourceCount}} 条素材</text>
+        <text class="source-count">{{item.sourceCount}} 条原始讲述</text>
       </view>
 
       <input
@@ -418,7 +450,7 @@
           bindtap="removeChapter"
           disabled="{{confirmingPlan || updatingPlanStructure || chapters.length <= 1}}"
         >
-          删除本章·保留讲述
+          删除本章，保留讲述
         </button>
       </view>
     </view>
@@ -449,15 +481,75 @@
       <text class="section-count">{{confirmedDraftCount}}/{{totalChapterCount}} 已确认</text>
     </view>
 
-    <view wx:for="{{chapters}}" wx:key="id" id="chapter-editor-{{item.id}}" class="chapter-card">
+    <view wx:for="{{chapters}}" wx:key="id" id="chapter-editor-{{item.id}}" class="chapter-card {{item.id === editingChapterId ? 'editing' : 'summary'}}">
+      <view wx:if="{{item.id !== editingChapterId}}" class="chapter-summary-card">
+        <view class="chapter-summary-head">
+          <view class="chapter-summary-title-block">
+            <text class="chapter-index">第 {{index + 1}} 章</text>
+            <text class="chapter-summary-title">{{item.editingTitle || item.title || "未命名章节"}}</text>
+            <text class="chapter-summary-meta">{{item.chapterSummaryMetaText}}</text>
+          </view>
+          <view class="chapter-summary-status {{item.draft && item.draft.status === 'confirmed' ? 'confirmed' : ''}}">
+            <text>{{item.draftStatusText}}</text>
+            <text wx:if="{{item.draft && item.draft.status === 'confirmed'}}" class="chapter-summary-status-hint">可继续修改</text>
+          </view>
+        </view>
+        <text wx:if="{{item.sourceChangeNotice}}" class="draft-pending compact">{{item.sourceChangeNotice}}</text>
+        <view class="chapter-summary-actions">
+          <button
+            class="primary-button small"
+            data-id="{{item.id}}"
+            bindtap="openChapterEditor"
+            disabled="{{updatingPlanStructure || item.draftBusy}}"
+          >
+            编辑正文
+          </button>
+          <button
+            class="ghost-button small"
+            data-id="{{item.id}}"
+            bindtap="toggleChapterSources"
+            disabled="{{!item.sourceViews.length}}"
+          >
+            {{item.sourceListExpanded ? "收起素材" : "查看素材"}}
+          </button>
+          <button
+            class="ghost-button small"
+            data-id="{{item.id}}"
+            loading="{{ttsBusyTarget === item.ttsTarget}}"
+            disabled="{{updatingPlanStructure || item.draftBusy || item.draftChanged || !item.draft || !item.draft.latest_version || ttsBusyTarget}}"
+            bindtap="playChapterAudio"
+          >
+            {{playingTarget === item.ttsTarget ? "停止朗读" : "朗读"}}
+          </button>
+        </view>
+        <view wx:if="{{item.sourceViews.length && item.sourceListExpanded}}" class="source-ref-list compact">
+          <view wx:for="{{item.sourceViews}}" wx:for-item="source" wx:key="utterance_id" class="source-ref-row">
+            <view
+              class="source-ref-main"
+              data-id="{{source.utterance_id}}"
+              bindtap="openTranscripts"
+              hover-class="coverage-source-main-active"
+            >
+              <text class="source-ref-label">{{source.labelText}}</text>
+              <text class="source-ref-text">{{source.previewText}}</text>
+            </view>
+          </view>
+        </view>
+      </view>
+
+      <block wx:else>
       <view class="chapter-head">
         <view class="chapter-title-block">
           <text class="chapter-index">第 {{index + 1}} 章</text>
-          <text class="source-count">{{item.sourceCount}} 条素材</text>
+          <text class="source-count">{{item.sourceCount}} 条原始讲述</text>
         </view>
-        <text class="draft-status {{item.draft && item.draft.status === 'confirmed' ? 'confirmed' : ''}}">
-          {{item.draftStatusText}}
-        </text>
+        <view class="draft-status-block">
+          <text class="draft-status {{item.draft && item.draft.status === 'confirmed' ? 'confirmed' : ''}}">
+            {{item.draftStatusText}}
+          </text>
+          <text class="draft-status-hint">{{item.draftStatusHintText}}</text>
+        </view>
+        <button class="chapter-close-button" bindtap="closeChapterEditor">收起</button>
       </view>
 
       <view class="chapter-title-edit-row">
@@ -607,52 +699,69 @@
 
       <view wx:if="{{item.draftError}}" class="chapter-error">{{item.draftError}}</view>
 
-      <view class="actions-row">
-        <button
-          class="ghost-button"
-          data-id="{{item.id}}"
-          disabled="{{updatingPlanStructure || item.draftBusy || item.draftChanged || (item.removedSourceCount && !item.sourceCount)}}"
-          bindtap="generateChapterDraft"
-        >
-          {{item.draftActionText}}
-        </button>
-        <button
-          class="ghost-button"
-          data-id="{{item.id}}"
-          disabled="{{updatingPlanStructure || item.draftBusy || !item.draftChanged}}"
-          bindtap="saveChapterDraft"
-        >
-          保存修改
-        </button>
-        <button
-          class="primary-button"
-          data-id="{{item.id}}"
-          disabled="{{updatingPlanStructure || item.draftBusy || !item.draft || !item.draft.latest_version || item.draft.status === 'confirmed' || item.draftChanged}}"
-          bindtap="confirmChapterDraft"
-        >
-          确认本章
-        </button>
-        <button
-          class="ghost-button"
-          data-id="{{item.id}}"
-          loading="{{ttsBusyTarget === item.ttsTarget}}"
-          disabled="{{updatingPlanStructure || item.draftBusy || item.draftChanged || !item.draft || !item.draft.latest_version || ttsBusyTarget}}"
-          bindtap="playChapterAudio"
-        >
-          {{ttsBusyTarget === item.ttsTarget ? "准备朗读" : (playingTarget === item.ttsTarget ? "停止朗读" : "朗读本章")}}
-        </button>
-        <button
-          class="danger-button"
-          data-id="{{item.id}}"
-          disabled="{{updatingPlanStructure || item.draftBusy || chapters.length <= 1}}"
-          bindtap="deleteConfirmedChapter"
-        >
-          删除本章·保留讲述
-        </button>
+      <view class="chapter-action-groups">
+        <view class="chapter-action-group">
+          <text class="chapter-action-label">常用操作</text>
+          <view class="actions-row compact">
+            <button
+              class="ghost-button"
+              data-id="{{item.id}}"
+              loading="{{ttsBusyTarget === item.ttsTarget}}"
+              disabled="{{updatingPlanStructure || item.draftBusy || item.draftChanged || !item.draft || !item.draft.latest_version || ttsBusyTarget}}"
+              bindtap="playChapterAudio"
+            >
+              {{ttsBusyTarget === item.ttsTarget ? "准备朗读" : (playingTarget === item.ttsTarget ? "停止朗读" : "朗读本章")}}
+            </button>
+          </view>
+        </view>
+        <view class="chapter-action-group">
+          <text class="chapter-action-label">确认流程</text>
+          <view class="actions-row compact">
+            <button
+              class="ghost-button"
+              data-id="{{item.id}}"
+              disabled="{{updatingPlanStructure || item.draftBusy || !item.draftChanged}}"
+              bindtap="saveChapterDraft"
+            >
+              保存修改
+            </button>
+            <button
+              class="primary-button"
+              data-id="{{item.id}}"
+              disabled="{{updatingPlanStructure || item.draftBusy || !item.draft || !item.draft.latest_version || item.draft.status === 'confirmed' || item.draftChanged}}"
+              bindtap="confirmChapterDraft"
+            >
+              确认本章
+            </button>
+          </view>
+        </view>
+        <view class="chapter-action-group">
+          <text class="chapter-action-label">更多操作</text>
+          <view class="actions-row compact">
+            <button
+              class="ghost-button"
+              data-id="{{item.id}}"
+              disabled="{{updatingPlanStructure || item.draftBusy || item.draftChanged || (item.removedSourceCount && !item.sourceCount)}}"
+              bindtap="generateChapterDraft"
+            >
+              {{item.draftActionText}}
+            </button>
+            <button
+              class="danger-button"
+              data-id="{{item.id}}"
+              disabled="{{updatingPlanStructure || item.draftBusy || chapters.length <= 1}}"
+              bindtap="deleteConfirmedChapter"
+            >
+              删除本章，保留讲述
+            </button>
+          </view>
+          <text wx:if="{{item.draftActionHintText}}" class="chapter-action-hint">{{item.draftActionHintText}}</text>
+        </view>
       </view>
+      </block>
     </view>
 
-    <view class="book-output-card">
+    <view id="book-output-card" class="book-output-card">
       <view class="section-head inline">
         <text class="section-title">全书成稿</text>
         <text class="section-count">{{bookVersionText}}</text>
@@ -670,6 +779,67 @@
           <text>按已确认章节顺序合成</text>
         </view>
 
+        <view class="book-export-hero">
+          <view class="book-export-hero-copy">
+            <text class="book-export-hero-title">全书导出</text>
+            <text class="book-export-hero-meta">
+              {{bookContent ? "可以预览阅读版，或导出给家人阅读和打印。" : "生成全书后可以预览、导出 PDF 或文本。"}}
+            </text>
+          </view>
+          <view class="book-export-hero-actions">
+            <button
+              class="primary-button small"
+              disabled="{{!bookContent || hasDraftChanges || bookStaleNotice || bookViewingHistoricalVersion}}"
+              bindtap="previewBookOutput"
+            >
+              预览全书
+            </button>
+            <button
+              class="ghost-button small"
+              data-format="pdf"
+              loading="{{bookExportBusyTarget === 'book-export:pdf:' + bookExportLayout}}"
+              disabled="{{updatingPlanStructure || generatingBook || !bookContent || hasDraftChanges || bookStaleNotice || bookExportBusyTarget}}"
+              bindtap="downloadBookOutputExport"
+            >
+              阅读版 PDF
+            </button>
+            <button
+              class="ghost-button small"
+              data-format="pdf"
+              data-layout="large_print"
+              loading="{{bookExportBusyTarget === 'book-export:pdf:large_print'}}"
+              disabled="{{updatingPlanStructure || generatingBook || !bookContent || hasDraftChanges || bookStaleNotice || bookExportBusyTarget}}"
+              bindtap="downloadBookOutputExport"
+            >
+              打印版 PDF
+            </button>
+            <button
+              class="ghost-button small"
+              data-format="txt"
+              loading="{{bookExportBusyTarget === 'book-export:txt:standard'}}"
+              disabled="{{updatingPlanStructure || generatingBook || !bookContent || hasDraftChanges || bookStaleNotice || bookExportBusyTarget}}"
+              bindtap="downloadBookOutputExport"
+            >
+              导出文本
+            </button>
+          </view>
+          <view class="book-export-secondary-actions">
+            <button
+              class="ghost-button small"
+              loading="{{generatingBook}}"
+              disabled="{{updatingPlanStructure || generatingBook || ttsBusyTarget || !canGenerateBook}}"
+              bindtap="generateBook"
+            >
+              {{bookActionText}}
+            </button>
+            <text wx:if="{{bookOutput && bookOutput.latest_version}}" class="book-export-action-hint">当前书稿会保留</text>
+          </view>
+          <button class="book-output-details-toggle" bindtap="toggleBookOutputDetails">
+            {{bookOutputDetailsExpanded ? "收起全书设置" : "编辑全书设置"}}
+          </button>
+        </view>
+
+        <view wx:if="{{bookOutputDetailsExpanded}}" class="book-output-details">
         <view class="book-design-panel">
           <view class="book-design-head">
             <view>
@@ -759,7 +929,7 @@
                 disabled="{{bookTitleSaving || generatingBook || updatingPlanStructure || bookViewingHistoricalVersion || bookEditorialCopyBusyTarget === 'preface' || !bookContent}}"
                 bindtap="regenerateBookEditorialCopy"
               >
-                重生成
+                重写
               </button>
             </view>
             <textarea
@@ -784,7 +954,7 @@
                 disabled="{{bookTitleSaving || generatingBook || updatingPlanStructure || bookViewingHistoricalVersion || bookEditorialCopyBusyTarget === 'afterword' || !bookContent}}"
                 bindtap="regenerateBookEditorialCopy"
               >
-                重生成
+                重写
               </button>
             </view>
             <textarea
@@ -809,7 +979,7 @@
                 disabled="{{bookTitleSaving || generatingBook || updatingPlanStructure || bookViewingHistoricalVersion || bookEditorialCopyBusyTarget === 'back_cover_quote' || !bookContent}}"
                 bindtap="regenerateBookEditorialCopy"
               >
-                重生成
+                重写
               </button>
             </view>
             <textarea
@@ -833,6 +1003,9 @@
             bindchange="changeBookCoverStyle"
           >
             <view class="book-cover-style-picker">
+              <view class="book-cover-preview {{bookCoverStylePreviewClass}}">
+                <text class="book-cover-preview-title">{{bookTitleInput || bookPreviewTitle || "回忆录"}}</text>
+              </view>
               <view class="book-cover-style-copy">
                 <text class="book-cover-style-label">封面风格</text>
                 <text class="book-cover-style-detail">{{bookCoverStyleDetailText}}</text>
@@ -1002,8 +1175,8 @@
             </view>
             <view class="book-export-source-toggle">
               <view class="book-export-source-copy">
-                <text class="book-export-source-title">口述来源索引</text>
-                <text class="book-export-source-meta">内部留档建议保留，分享或打印可关闭</text>
+                <text class="book-export-source-title">原始讲述索引</text>
+                <text class="book-export-source-meta">附上原始讲述，方便以后核对和补充；分享或打印可关闭</text>
               </view>
               <switch
                 color="#a64b3f"
@@ -1141,10 +1314,11 @@
         <view wx:else class="draft-empty">
           <text>全书会直接使用已确认章节正文，不额外扩写叙述内容。</text>
         </view>
+        </view>
 
-        <view class="actions-row">
+        <view wx:if="{{bookOutputDetailsExpanded}}" class="actions-row">
           <button
-            class="primary-button"
+            class="ghost-button"
             loading="{{generatingBook}}"
             disabled="{{updatingPlanStructure || generatingBook || ttsBusyTarget || !canGenerateBook}}"
             bindtap="generateBook"

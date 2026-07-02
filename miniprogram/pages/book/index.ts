@@ -300,7 +300,7 @@ function bookDesignHasChanges(data: BookData): boolean {
 
 function bookEditorialCopyBlockedMessage(data: BookData): string {
   if (!data.bookOutput?.latest_version || !data.bookContent) {
-    return "请先生成全书";
+    return "请先生成书稿";
   }
   if (data.bookViewingHistoricalVersion) {
     return "请切回最新版后再编辑成书文案";
@@ -368,6 +368,8 @@ Page<BookData, {
   generatePlan(): Promise<void>;
   confirmPlan(): Promise<void>;
   changePlanTitle(event: TextInputEvent): void;
+  openChapterEditor(event: DatasetEvent): void;
+  closeChapterEditor(): void;
   changeChapterTitle(event: TextInputEvent): void;
   saveChapterTitle(event: DatasetEvent): Promise<void>;
   generateChapterTitle(event: DatasetEvent): Promise<void>;
@@ -415,6 +417,8 @@ Page<BookData, {
   changeBookExportLayout(event: PickerEvent): void;
   toggleBookExportSourceAppendix(event: SwitchEvent): void;
   toggleBookPreviewChapters(): void;
+  toggleBookOutputDetails(): void;
+  previewBookOutput(): void;
   downloadBookOutputExport(event: DatasetEvent): Promise<void>;
   editBookOutputChapter(event: DatasetEvent): void;
   playChapterAudio(event: DatasetEvent): Promise<void>;
@@ -543,6 +547,7 @@ Page<BookData, {
     stage: "empty",
     stageText: "等待生成章节",
     chapters: [],
+    editingChapterId: "",
     splitSourceSelections: {},
     confirmedDraftCount: 0,
     totalChapterCount: 0,
@@ -565,6 +570,7 @@ Page<BookData, {
     bookPreviewTocItems: [],
     bookPreviewChapters: [],
     bookPreviewChaptersExpanded: false,
+    bookOutputDetailsExpanded: false,
     bookManuscriptAvailable: false,
     bookManuscriptTitle: "",
     bookManuscriptSubtitle: "",
@@ -603,6 +609,7 @@ Page<BookData, {
     bookTitleSuggesting: false,
     bookTitleSuggestions: [],
     bookCoverStyle: "classic_plain",
+    bookCoverStylePreviewClass: BOOK_COVER_STYLE_OPTIONS[0].previewClass,
     bookCoverStyleIndex: 0,
     bookCoverStyleLabel: BOOK_COVER_STYLE_OPTIONS[0].label,
     bookCoverStyleDetailText: BOOK_COVER_STYLE_OPTIONS[0].detailText,
@@ -838,12 +845,16 @@ Page<BookData, {
       ? buildChapterViews(plan, draftsByChapterId, this.data.sourceCoverage, this.data.splitSourceSelections)
       : [];
     const stage = planStage(plan);
+    const editingChapterId = chapters.some((chapter) => chapter.id === this.data.editingChapterId)
+      ? this.data.editingChapterId
+      : "";
     const shouldResetVoiceStatus = !this.data.bookVoiceAssistantConversationActive || !plan;
     this.setData({
       plan,
       planTitle: plan?.title || `${this.data.projectTitle || "我的回忆录"}章节规划`,
       stage,
       stageText: stageText(stage),
+      editingChapterId,
       bookVoiceAssistantHint: bookVoiceAssistantHint(stage, chapters.length),
       ...(shouldResetVoiceStatus ? {
         bookVoiceAssistantExpanded: false,
@@ -971,6 +982,7 @@ Page<BookData, {
     }
     this.setData({
       bookCoverStyle: option.value,
+      bookCoverStylePreviewClass: option.previewClass,
       bookCoverStyleIndex: index,
       bookCoverStyleLabel: option.label,
       bookCoverStyleDetailText: option.detailText,
@@ -1069,6 +1081,7 @@ Page<BookData, {
         bookTitleChanged: false,
         bookMetadataChanged: false,
         bookCoverStyle: option.value,
+        bookCoverStylePreviewClass: option.previewClass,
         bookCoverStyleIndex: Math.max(
           0,
           this.data.bookCoverStyleOptions.findIndex((candidate) => candidate.value === option.value),
@@ -1305,6 +1318,27 @@ Page<BookData, {
     this.setData({ bookPreviewChaptersExpanded: !this.data.bookPreviewChaptersExpanded });
   },
 
+  toggleBookOutputDetails() {
+    this.setData({ bookOutputDetailsExpanded: !this.data.bookOutputDetailsExpanded });
+  },
+
+  previewBookOutput() {
+    if (!this.data.bookContent) {
+      this.setData({ error: "请先生成书稿" });
+      return;
+    }
+    this.setData({
+      bookPreviewChaptersExpanded: true,
+      bookOutputDetailsExpanded: true,
+      error: "",
+    });
+    (wx as WxWithPageScroll).pageScrollTo?.({
+      selector: "#book-output-card",
+      duration: 260,
+      offsetTop: 12,
+    });
+  },
+
   async downloadBookOutputExport(event) {
     const format: MemoirBookOutputExportFormat = event.currentTarget.dataset.format === "txt" ? "txt" : "pdf";
     const layout: MemoirBookOutputExportLayout = format === "pdf" && event.currentTarget.dataset.layout === "large_print"
@@ -1315,15 +1349,15 @@ Page<BookData, {
       return;
     }
     if (!this.data.bookContent) {
-      this.setData({ error: "请先生成全书" });
+      this.setData({ error: "请先生成书稿" });
       return;
     }
     if (this.data.hasDraftChanges) {
-      this.setData({ error: "请先保存当前章节修改，再导出全书" });
+      this.setData({ error: "请先保存当前章节修改，再导出书稿" });
       return;
     }
     if (this.data.bookOutput?.is_stale) {
-      this.setData({ error: "章节内容已更新，请先更新全书再导出" });
+      this.setData({ error: "章节内容已更新，请先更新书稿再导出" });
       return;
     }
     this.setData({ bookExportBusyTarget: target, error: "" });
@@ -1554,6 +1588,25 @@ Page<BookData, {
     this.setData({ planTitle: event.detail.value });
   },
 
+  openChapterEditor(event) {
+    const chapterId = event.currentTarget.dataset.id || "";
+    if (!chapterId) {
+      return;
+    }
+    this.stopPlayback();
+    this.patchChapter(chapterId, { draftError: "" });
+    this.setData({ editingChapterId: chapterId });
+    (wx as WxWithPageScroll).pageScrollTo?.({
+      selector: `#chapter-editor-${chapterId}`,
+      duration: 260,
+      offsetTop: 12,
+    });
+  },
+
+  closeChapterEditor() {
+    this.setData({ editingChapterId: "" });
+  },
+
   changeChapterTitle(event) {
     const id = event.currentTarget.dataset.id || "";
     const chapter = this.data.chapters.find((candidate) => candidate.id === id);
@@ -1742,7 +1795,7 @@ Page<BookData, {
       return;
     }
     if (selectedIds.size >= chapter.source_refs.length) {
-      this.setData({ error: "拆分时至少保留 1 条素材在原章节" });
+      this.setData({ error: "拆分时至少保留 1 条原始讲述在原章节" });
       return;
     }
     const title = trimText(chapter.editingTitle || chapter.title) || "未命名章节";
@@ -1783,7 +1836,7 @@ Page<BookData, {
       return false;
     }
     if (chapter.draftChanged) {
-      this.patchChapter(chapterId, { draftError: "请先保存当前修改，再重新生成" });
+      this.patchChapter(chapterId, { draftError: "请先保存当前修改，再生成新版本" });
       return false;
     }
     this.patchChapter(chapterId, { draftBusy: true, draftError: "" });
@@ -2067,7 +2120,7 @@ Page<BookData, {
         wx.reLaunch({ url: "/pages/login/index" });
         return;
       }
-      this.setData({ error: error instanceof Error ? error.message : "全书生成提交失败" });
+      this.setData({ error: error instanceof Error ? error.message : "书稿整理提交失败" });
     } finally {
       this.bookOutputGenerationSubmitting = false;
       this.setData({ generatingBook: hasPendingBookOutputGeneration(this.automationEvents) });
@@ -2081,6 +2134,7 @@ Page<BookData, {
     }
     this.stopPlayback();
     this.patchChapter(chapterId, { draftError: "" });
+    this.setData({ editingChapterId: chapterId });
     (wx as WxWithPageScroll).pageScrollTo?.({
       selector: `#chapter-editor-${chapterId}`,
       duration: 260,
@@ -2156,15 +2210,15 @@ Page<BookData, {
       return;
     }
     if (!this.data.bookContent) {
-      this.setData({ error: "请先生成全书" });
+      this.setData({ error: "请先生成书稿" });
       return;
     }
     if (this.data.hasDraftChanges) {
-      this.setData({ error: "请先保存当前章节修改，再朗读全书" });
+      this.setData({ error: "请先保存当前章节修改，再朗读书稿" });
       return;
     }
     if (this.data.bookOutput?.is_stale) {
-      this.setData({ error: "章节内容已更新，请先更新全书再朗读" });
+      this.setData({ error: "章节内容已更新，请先更新书稿再朗读" });
       return;
     }
     if (this.data.bookViewingHistoricalVersion) {
@@ -3251,8 +3305,12 @@ Page<BookData, {
       draftCharCount: trimText(content).length,
       draftChanged: false,
       draftStatusText: draftStatusText(draft),
+      draftStatusHintText: draft.status === "confirmed" ? "修改后需要重新确认" : "确认前可继续修改",
       draftVersionText: draftVersionText(draft),
       draftActionText: draftActionText(draft, assignedPendingCount, assignedRemovedCount),
+      draftActionHintText: draft?.latest_version
+        ? (assignedPendingCount ? "只补入新增讲述" : "不覆盖当前版本")
+        : "",
       draftError: "",
     });
     this.clearBookOutput();

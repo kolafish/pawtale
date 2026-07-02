@@ -116,6 +116,7 @@ export interface BookChapterView extends MemoirBookPlanChapter {
   ttsTarget: string;
   sourceCount: number;
   sourceSummary: string;
+  chapterSummaryMetaText: string;
   sourceViews: BookChapterSourceView[];
   sourceListExpanded: boolean;
   sourceToggleText: string;
@@ -133,8 +134,10 @@ export interface BookChapterView extends MemoirBookPlanChapter {
   draftCharCount: number;
   draftChanged: boolean;
   draftStatusText: string;
+  draftStatusHintText: string;
   draftVersionText: string;
   draftActionText: string;
+  draftActionHintText: string;
   draftBusy: boolean;
   draftError: string;
 }
@@ -203,6 +206,7 @@ export interface BookCoverStyleOptionView {
   value: MemoirBookCoverStyle;
   label: string;
   detailText: string;
+  previewClass: string;
 }
 
 export const BOOK_COVER_STYLE_OPTIONS: BookCoverStyleOptionView[] = [
@@ -210,26 +214,31 @@ export const BOOK_COVER_STYLE_OPTIONS: BookCoverStyleOptionView[] = [
     value: "classic_plain",
     label: "旧纸棕",
     detailText: "米白纸色、深褐字和细线，适合默认成书",
+    previewClass: "classic-plain",
   },
   {
     value: "warm_gray",
     label: "暖灰书稿",
     detailText: "暖灰底、深灰字，更像整理后的手稿",
+    previewClass: "warm-gray",
   },
   {
     value: "dark_album",
     label: "旧书封面",
     detailText: "深灰褐底、浅色字，适合更庄重的纪念册",
+    previewClass: "dark-album",
   },
   {
     value: "moonlit_courtyard",
     label: "月下庭院",
     detailText: "水墨庭院底图、墨褐标题，适合家庭回忆录默认封面封底",
+    previewClass: "moonlit-courtyard",
   },
   {
     value: "navy_gilt",
     label: "深蓝烫金",
     detailText: "深蓝布面底图、金色标题和边框，适合更庄重的纪念册",
+    previewClass: "navy-gilt",
   },
 ];
 
@@ -253,6 +262,7 @@ export interface BookData {
   stage: BookStage;
   stageText: string;
   chapters: BookChapterView[];
+  editingChapterId: string;
   splitSourceSelections: Record<string, string[]>;
   confirmedDraftCount: number;
   totalChapterCount: number;
@@ -275,6 +285,7 @@ export interface BookData {
   bookPreviewTocItems: BookOutputTocView[];
   bookPreviewChapters: BookOutputChapterPreviewView[];
   bookPreviewChaptersExpanded: boolean;
+  bookOutputDetailsExpanded: boolean;
   bookManuscriptAvailable: boolean;
   bookManuscriptTitle: string;
   bookManuscriptSubtitle: string;
@@ -313,6 +324,7 @@ export interface BookData {
   bookTitleSuggesting: boolean;
   bookTitleSuggestions: string[];
   bookCoverStyle: MemoirBookCoverStyle;
+  bookCoverStylePreviewClass: string;
   bookCoverStyleIndex: number;
   bookCoverStyleLabel: string;
   bookCoverStyleDetailText: string;
@@ -391,7 +403,10 @@ function automationEventTitle(event: MemoirAutomationEvent): string {
     return event.status === "pending" ? "章节生成中" : "章节已生成";
   }
   if (event.event_type === "book_output_generated") {
-    return event.status === "pending" ? "全书生成中" : "全书已生成";
+    if (event.status === "failed") {
+      return "书稿整理失败";
+    }
+    return event.status === "pending" ? "书稿整理中" : "书稿整理完成";
   }
   if (event.event_type === "book_editorial_copy_generated") {
     if (event.status === "failed") {
@@ -399,7 +414,7 @@ function automationEventTitle(event: MemoirAutomationEvent): string {
     }
     return event.status === "pending" ? "文案生成中" : "文案已更新";
   }
-  return "AI 自动处理";
+  return "自动整理";
 }
 
 function automationEventKindText(event: MemoirAutomationEvent): string {
@@ -419,7 +434,7 @@ function automationEventKindText(event: MemoirAutomationEvent): string {
     return "章节生成";
   }
   if (event.event_type === "book_output_generated") {
-    return "全书生成";
+    return "书稿整理";
   }
   if (event.event_type === "book_editorial_copy_generated") {
     return "成书文案";
@@ -450,7 +465,7 @@ function automationEventActionText(event: MemoirAutomationEvent): string {
   if (event.status === "needs_review") {
     return "待处理";
   }
-  return "知道了";
+  return "收起";
 }
 
 function objectValue(value: unknown): Record<string, unknown> {
@@ -690,7 +705,7 @@ function sourceAssignmentGroupView(
       .filter(Boolean)
       .join(" · "),
     statusText: "已完成",
-    actionText: "知道了",
+    actionText: "收起",
     canAcknowledge: true,
     canAct: true,
     busy: busyTarget === groupId,
@@ -773,6 +788,9 @@ function automationEventMetaText(event: MemoirAutomationEvent): string {
 }
 
 function automationEventSummaryText(event: MemoirAutomationEvent): string {
+  if (event.event_type === "book_output_generated" && event.status === "completed") {
+    return "书稿已经整理好，可以预览或继续修改。";
+  }
   if (event.event_type === "audit_completed") {
     const summary = stringValue(automationEventDisplay(event).summary);
     if (summary) {
@@ -841,9 +859,19 @@ export function draftStatusText(draft: MemoirBookChapterDraft | null): string {
   return draft.status === "confirmed" ? "已确认" : "待确认";
 }
 
+function draftStatusHintText(draft: MemoirBookChapterDraft | null): string {
+  if (!draft?.latest_version) {
+    return "先生成正文后再确认";
+  }
+  if (draft.status === "confirmed") {
+    return "修改后需要重新确认";
+  }
+  return "确认前可继续修改";
+}
+
 export function sourceChangeNotice(pendingCount: number, removedCount: number): string {
   if (removedCount) {
-    return `${removedCount} 条素材已删除，章节稿需要更新`;
+    return `${removedCount} 条原始讲述已删除，章节稿需要更新`;
   }
   if (pendingCount) {
     return `${pendingCount} 条新增讲述待补写`;
@@ -858,12 +886,22 @@ export function draftActionText(draft: MemoirBookChapterDraft | null, pendingCou
   if (pendingCount) {
     return "补写新增";
   }
-  return draft?.latest_version ? "重新生成" : "生成本章";
+  return draft?.latest_version ? "生成新版本" : "生成本章";
+}
+
+function draftActionHintText(draft: MemoirBookChapterDraft | null, pendingCount: number, removedCount = 0): string {
+  if (removedCount) {
+    return "会保留剩余讲述并更新正文";
+  }
+  if (pendingCount) {
+    return "只补入新增讲述";
+  }
+  return draft?.latest_version ? "不覆盖当前版本" : "";
 }
 
 export function draftVersionText(draft: MemoirBookChapterDraft | null): string {
   const version = draft?.latest_version?.version;
-  return version ? `第 ${version} 版` : "暂无正文";
+  return version ? `历史版本 · 已修改 ${version} 次` : "暂无正文";
 }
 
 export function responseCount(value: number | null | undefined): number {
@@ -924,7 +962,7 @@ export function bookVersionOptions(
   const options = versions.map((version) => {
     const createdAtText = version.created_at ? formatBeijingDateTimeShort(version.created_at) : "";
     const isLatest = version.id === latestId;
-    const label = `${isLatest ? "最新版 · " : ""}全书第 ${version.version} 版`;
+    const label = `${isLatest ? "最新版 · " : ""}已修改 ${version.version} 次`;
     return {
       id: version.id,
       label: createdAtText ? `${label} · ${createdAtText}` : label,
@@ -942,7 +980,11 @@ export function bookVersionOptions(
 }
 
 function bookSourceCountText(count: number): string {
-  return count > 0 ? `${count} 条素材` : "暂无素材计数";
+  return count > 0 ? `${count} 条原始讲述` : "暂无原始讲述计数";
+}
+
+function bookOralSourceCountText(count: number): string {
+  return count > 0 ? `${count} 条口述` : "暂无口述";
 }
 
 export function bookOutputPreviewTitle(
@@ -983,7 +1025,7 @@ export function bookOutputChapterPreviews(
       const chapterIndex = responseCount(chapter.index) || index + 1;
       const charCount = responseCount(chapter.char_count) || trimText(chapter.content).length;
       const sourceCount = responseCount(chapter.source_count);
-      const versionText = responseCount(chapter.draft_version) ? `第 ${chapter.draft_version} 版` : "";
+      const versionText = responseCount(chapter.draft_version) ? `已修改 ${chapter.draft_version} 次` : "";
       return {
         id: `${chapter.chapter_id}:${chapterIndex}`,
         chapterId: chapter.chapter_id,
@@ -1027,12 +1069,22 @@ function manuscriptSectionKindText(kind: string): string {
     dedication: "献辞",
     preface: "前言",
     afterword: "后记",
-    interview_records: "访谈",
-    version_note: "版本",
-    unconfirmed_facts: "待确认",
-    source_appendix: "来源",
+    interview_records: "原始讲述",
+    version_note: "整理说明",
+    unconfirmed_facts: "待补充",
+    source_appendix: "讲述来源",
   };
   return labels[kind] || "书稿";
+}
+
+function manuscriptSectionTitle(section: Pick<MemoirBookManuscriptSection, "kind" | "title">): string {
+  const titles: Record<string, string> = {
+    interview_records: "原始讲述",
+    version_note: "整理说明",
+    unconfirmed_facts: "待补充的信息",
+    source_appendix: "原始讲述索引",
+  };
+  return titles[section.kind] || trimText(section.title) || manuscriptSectionKindText(section.kind);
 }
 
 function previewText(text: string, maxLength = 72): string {
@@ -1043,7 +1095,7 @@ function previewText(text: string, maxLength = 72): string {
 function sectionView(section: MemoirBookManuscriptSection, index: number, prefix: string): BookManuscriptSectionView {
   return {
     id: `${prefix}:${section.kind}:${index}`,
-    title: trimText(section.title) || manuscriptSectionKindText(section.kind),
+    title: manuscriptSectionTitle(section),
     kindText: manuscriptSectionKindText(section.kind),
     contentPreview: previewText(section.content),
     enabled: section.enabled !== false,
@@ -1068,7 +1120,7 @@ function manuscriptSettingsText(manuscript: MemoirBookManuscript | null): string
   const pageSize = settings.page_size === "a5" ? "A5" : "默认纸张";
   const layout = settings.layout === "print" ? "打印排版" : "阅读排版";
   const header = settings.show_headers ? "含页眉" : "无页眉";
-  const appendix = settings.show_source_appendix ? "含来源附录" : "隐藏来源附录";
+  const appendix = settings.show_source_appendix ? "附上原始讲述" : "隐藏原始讲述";
   return [pageSize, layout, header, appendix].join(" · ");
 }
 
@@ -1098,13 +1150,13 @@ function manuscriptStructureItems(
   }
   const frontMatter = (manuscript.front_matter || []).map((section, index) => ({
     id: `front:${section.kind}:${index}`,
-    title: trimText(section.title) || manuscriptSectionKindText(section.kind),
+    title: manuscriptSectionTitle(section),
     metaText: manuscriptSectionKindText(section.kind),
     statusText: section.enabled === false ? "已隐藏" : "已生成",
   }));
   const backMatter = backMatterSections(manuscript).map((section, index) => ({
     id: `back:${section.kind}:${index}`,
-    title: trimText(section.title) || manuscriptSectionKindText(section.kind),
+    title: manuscriptSectionTitle(section),
     metaText: manuscriptSectionKindText(section.kind),
     statusText: section.enabled === false ? "已隐藏" : "已生成",
   }));
@@ -1221,6 +1273,7 @@ export function bookCoverStyleData(
 ): Pick<
   BookData,
   | "bookCoverStyle"
+  | "bookCoverStylePreviewClass"
   | "bookCoverStyleIndex"
   | "bookCoverStyleLabel"
   | "bookCoverStyleDetailText"
@@ -1232,6 +1285,7 @@ export function bookCoverStyleData(
   const option = BOOK_COVER_STYLE_OPTIONS[index] || BOOK_COVER_STYLE_OPTIONS[0];
   return {
     bookCoverStyle: option.value,
+    bookCoverStylePreviewClass: option.previewClass,
     bookCoverStyleIndex: index,
     bookCoverStyleLabel: option.label,
     bookCoverStyleDetailText: option.detailText,
@@ -1267,12 +1321,12 @@ function bookMetadataInputData(
 
 export function bookOutputVersionText(output: MemoirBookOutput | null): string {
   const version = output?.latest_version?.version;
-  return version ? `全书第 ${version} 版` : "尚未生成全书";
+  return version ? `已修改 ${version} 次` : "尚未生成全书";
 }
 
 function selectedBookOutputVersionText(output: MemoirBookOutput | null, selectedVersionId = ""): string {
   const selected = selectedBookOutputVersion(output, selectedVersionId);
-  return selected ? `全书第 ${selected.version} 版` : "尚未生成全书";
+  return selected ? `已修改 ${selected.version} 次` : "尚未生成全书";
 }
 
 export function bookOutputStaleNotice(output: MemoirBookOutput | null): string {
@@ -1281,17 +1335,17 @@ export function bookOutputStaleNotice(output: MemoirBookOutput | null): string {
   }
   const titles = (output.stale_chapter_titles || []).filter(Boolean).slice(0, 2);
   if (!titles.length) {
-    return "章节内容已更新，请重新生成全书。";
+    return "章节内容已更新，请重新整理一版。";
   }
   const suffix = (output.stale_chapter_titles || []).length > 2 ? "等章节" : "";
-  return `章节「${titles.join("、")}」${suffix}已更新，请重新生成全书。`;
+  return `章节「${titles.join("、")}」${suffix}已更新，请重新整理一版。`;
 }
 
 function bookActionText(output: MemoirBookOutput | null): string {
   if (output?.is_stale) {
-    return "更新全书";
+    return "更新书稿";
   }
-  return output?.latest_version ? "重新生成全书" : "生成全书";
+  return output?.latest_version ? "重新整理一版" : "生成全书";
 }
 
 function bookVersionNotice(output: MemoirBookOutput | null, viewingHistorical: boolean): string {
@@ -1341,6 +1395,7 @@ export function bookOutputData(output: MemoirBookOutput | null, selectedVersionI
   | "bookDesignSaveStatusText"
   | "bookTitleSuggestions"
   | "bookCoverStyle"
+  | "bookCoverStylePreviewClass"
   | "bookCoverStyleIndex"
   | "bookCoverStyleLabel"
   | "bookCoverStyleDetailText"
@@ -1563,6 +1618,7 @@ function decorateChapterStructureOptions(
     const selectedCount = chapter.source_refs.filter((ref) => selectedSourceIds.has(ref.utterance_id)).length;
     return {
       ...chapter,
+      chapterSummaryMetaText: chapterSummaryMetaText(chapter),
       sourceViews: chapter.source_refs.map((ref, sourceIndex) => (
         chapterSourceView(ref, sourceIndex, recordNumbers, fallbackRecordNumbers, selectedSourceIds)
       )),
@@ -1620,7 +1676,17 @@ export function chapterCollectionData(
 }
 
 export function bookChapterSourceSummary(chapter: Pick<MemoirBookPlanChapter, "source_refs">): string {
-  return `本章素材：${chapter.source_refs.length} 条收录讲述`;
+  return `本章素材：${chapter.source_refs.length} 条原始讲述`;
+}
+
+function chapterSummaryMetaText(
+  chapter: Pick<BookChapterView, "sourceCount" | "draftCharCount" | "draft" | "draftStatusText">,
+): string {
+  const sourceText = bookOralSourceCountText(chapter.sourceCount);
+  if (!chapter.draft?.latest_version) {
+    return `${sourceText} · 尚未生成正文`;
+  }
+  return `${sourceText} · ${chapter.draftCharCount} 字 · ${chapter.draftStatusText}`;
 }
 
 export function bookOutlineNarrationText(
@@ -1693,6 +1759,14 @@ export function buildChapterViews(
       const content = latestDraftContent(draft);
       const assignedPendingCount = responseCount(chapter.pending_source_count);
       const assignedRemovedCount = responseCount(chapter.removed_source_count);
+      const draftCharCount = trimText(content).length;
+      const statusText = draftStatusText(draft);
+      const viewBase = {
+        sourceCount: chapter.source_refs.length,
+        draftCharCount,
+        draft,
+        draftStatusText: statusText,
+      };
       return {
         ...chapter,
         editingTitle: chapter.title,
@@ -1700,6 +1774,7 @@ export function buildChapterViews(
         ttsTarget: `chapter:${chapter.id}`,
         sourceCount: chapter.source_refs.length,
         sourceSummary: bookChapterSourceSummary(chapter),
+        chapterSummaryMetaText: chapterSummaryMetaText(viewBase),
         sourceViews: [],
         sourceListExpanded: false,
         sourceToggleText: "",
@@ -1714,11 +1789,13 @@ export function buildChapterViews(
         sourceChangeNotice: sourceChangeNotice(assignedPendingCount, assignedRemovedCount),
         draft,
         draftContent: content,
-        draftCharCount: trimText(content).length,
+        draftCharCount,
         draftChanged: false,
-        draftStatusText: draftStatusText(draft),
+        draftStatusText: statusText,
+        draftStatusHintText: draftStatusHintText(draft),
         draftVersionText: draftVersionText(draft),
         draftActionText: draftActionText(draft, assignedPendingCount, assignedRemovedCount),
+        draftActionHintText: draftActionHintText(draft, assignedPendingCount, assignedRemovedCount),
         draftBusy: false,
         draftError: "",
       };
@@ -1763,6 +1840,7 @@ export function guestBookData(): Partial<BookData> {
     stage: "empty",
     stageText: stageText("empty"),
     chapters: [],
+    editingChapterId: "",
     confirmedDraftCount: 0,
     totalChapterCount: 0,
     allChaptersConfirmed: false,
@@ -1785,6 +1863,7 @@ export function guestBookData(): Partial<BookData> {
     bookPreviewTocItems: [],
     bookPreviewChapters: [],
     bookPreviewChaptersExpanded: false,
+    bookOutputDetailsExpanded: false,
     bookManuscriptAvailable: false,
     bookManuscriptTitle: "",
     bookManuscriptSubtitle: "",
@@ -1821,6 +1900,7 @@ export function guestBookData(): Partial<BookData> {
     bookDesignSaveStatusText: "生成时应用",
     bookTitleSuggestions: [],
     bookCoverStyle: "classic_plain",
+    bookCoverStylePreviewClass: BOOK_COVER_STYLE_OPTIONS[0].previewClass,
     bookCoverStyleIndex: 0,
     bookCoverStyleLabel: BOOK_COVER_STYLE_OPTIONS[0].label,
     bookCoverStyleDetailText: BOOK_COVER_STYLE_OPTIONS[0].detailText,
