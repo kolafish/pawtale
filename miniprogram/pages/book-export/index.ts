@@ -16,7 +16,6 @@ import {
 } from "../../services/memoir-voice-api";
 import { ApiError } from "../../services/request";
 import {
-  BOOK_EXPORT_LAYOUT_OPTIONS,
   bookOutputData,
   buildChapterViews,
   planStage,
@@ -38,6 +37,7 @@ import {
 interface DatasetEvent {
   currentTarget: {
     dataset: {
+      action?: string;
       format?: MemoirBookOutputExportFormat;
       key?: string;
       layout?: MemoirBookOutputExportLayout;
@@ -113,11 +113,6 @@ type BookExportData = Pick<
   | "bookStaleNotice"
   | "bookActionText"
   | "bookExportBusyTarget"
-  | "bookExportLayout"
-  | "bookExportLayoutIndex"
-  | "bookExportLayoutLabel"
-  | "bookExportLayoutDetailText"
-  | "bookExportLayoutOptions"
   | "bookExportShowSourceAppendix"
   | "bookTitleInput"
   | "bookSubtitleInput"
@@ -144,6 +139,7 @@ type BookExportData = Pick<
 > & {
   requestedAction: string;
   exportNotice: string;
+  exportActionHintText: string;
 };
 
 const BOOK_DESIGN_AUTOSAVE_DELAY_MS = 900;
@@ -160,6 +156,16 @@ function exportNotice(action: string): string {
     return "打印版字号更大，适合装订保存。";
   }
   return "可以先预览全书，再导出阅读版或打印版。";
+}
+
+function exportActionHint(action: string): string {
+  if (action === "print_pdf") {
+    return "适合拿去打印装订，页边距更宽。";
+  }
+  if (action === "text") {
+    return "导出纯文字，方便复制和继续编辑。";
+  }
+  return "适合微信分享和手机阅读。";
 }
 
 function defaultTitle(plan: MemoirBookPlan | null, output: MemoirBookOutput | null): string {
@@ -192,8 +198,8 @@ Page<BookExportData, {
   regenerateBookEditorialCopy(event: DatasetEvent): Promise<void>;
   generateBook(): Promise<void>;
   changeBookOutputVersion(event: PickerEvent): void;
-  changeBookExportLayout(event: PickerEvent): void;
   toggleBookExportSourceAppendix(event: SwitchEvent): void;
+  previewExportActionHint(event: DatasetEvent): void;
   toggleBookPreviewChapters(): void;
   downloadBookOutputExport(event: DatasetEvent): Promise<void>;
   bookDesignAutosaveTimer: number | null;
@@ -205,7 +211,7 @@ Page<BookExportData, {
     error: "",
     projectId: "",
     plan: null,
-    planTitle: "全书导出",
+    planTitle: "预览与导出",
     stage: "empty",
     stageText: "尚未整理",
     chapters: [],
@@ -213,11 +219,6 @@ Page<BookExportData, {
     allChaptersConfirmed: false,
     bookPreviewChaptersExpanded: true,
     bookExportBusyTarget: "",
-    bookExportLayout: "standard",
-    bookExportLayoutIndex: 0,
-    bookExportLayoutLabel: BOOK_EXPORT_LAYOUT_OPTIONS[0].label,
-    bookExportLayoutDetailText: BOOK_EXPORT_LAYOUT_OPTIONS[0].detailText,
-    bookExportLayoutOptions: BOOK_EXPORT_LAYOUT_OPTIONS,
     bookExportShowSourceAppendix: true,
     bookTitleSaving: false,
     bookTitleSuggesting: false,
@@ -225,6 +226,7 @@ Page<BookExportData, {
     generatingBook: false,
     requestedAction: "preview",
     exportNotice: exportNotice("preview"),
+    exportActionHintText: exportActionHint("reading_pdf"),
     ...bookOutputData(null),
   },
 
@@ -235,6 +237,7 @@ Page<BookExportData, {
       projectId,
       requestedAction: action,
       exportNotice: exportNotice(action),
+      exportActionHintText: exportActionHint(action),
     });
     if (!projectId) {
       this.setData({ error: "缺少回忆录项目信息" });
@@ -265,7 +268,7 @@ Page<BookExportData, {
         wx.reLaunch({ url: "/pages/login/index" });
         return;
       }
-      this.setData({ error: error instanceof Error ? error.message : "全书导出页加载失败" });
+      this.setData({ error: error instanceof Error ? error.message : "预览与导出页加载失败" });
     } finally {
       this.setData({ loading: false });
     }
@@ -607,22 +610,12 @@ Page<BookExportData, {
     });
   },
 
-  changeBookExportLayout(event) {
-    const index = Number(event.detail.value);
-    const option = this.data.bookExportLayoutOptions[index];
-    if (!option) {
-      return;
-    }
-    this.setData({
-      bookExportLayout: option.value,
-      bookExportLayoutIndex: index,
-      bookExportLayoutLabel: option.label,
-      bookExportLayoutDetailText: option.detailText,
-    });
-  },
-
   toggleBookExportSourceAppendix(event) {
     this.setData({ bookExportShowSourceAppendix: Boolean(event.detail.value) });
+  },
+
+  previewExportActionHint(event) {
+    this.setData({ exportActionHintText: exportActionHint(String(event.currentTarget.dataset.action || "")) });
   },
 
   toggleBookPreviewChapters() {
@@ -631,10 +624,13 @@ Page<BookExportData, {
 
   async downloadBookOutputExport(event) {
     const format: MemoirBookOutputExportFormat = event.currentTarget.dataset.format === "txt" ? "txt" : "pdf";
-    const layout: MemoirBookOutputExportLayout = format === "pdf" && event.currentTarget.dataset.layout === "large_print"
+    const requestedLayout = event.currentTarget.dataset.layout;
+    const layout: MemoirBookOutputExportLayout = format === "pdf" && requestedLayout === "large_print"
       ? "large_print"
-      : (format === "pdf" ? this.data.bookExportLayout : "standard");
+      : "standard";
+    const action = format === "txt" ? "text" : (layout === "large_print" ? "print_pdf" : "reading_pdf");
     const target = `book-export:${format}:${layout}`;
+    this.setData({ exportActionHintText: exportActionHint(action) });
     if (!this.data.projectId || this.data.bookExportBusyTarget) {
       return;
     }
@@ -675,7 +671,7 @@ Page<BookExportData, {
         wx.reLaunch({ url: "/pages/login/index" });
         return;
       }
-      this.setData({ error: error instanceof Error ? error.message : "全书导出失败" });
+      this.setData({ error: error instanceof Error ? error.message : "导出失败" });
     } finally {
       this.setData({ bookExportBusyTarget: "" });
     }

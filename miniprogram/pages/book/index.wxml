@@ -4,7 +4,7 @@
       <text class="back-mark">‹</text>
     </view>
     <view class="title-block">
-      <text class="page-title">成书</text>
+      <text class="page-title">书稿</text>
       <text class="page-meta">{{projectTitle || "我的回忆录"}} · {{stageText}}</text>
     </view>
   </view>
@@ -13,7 +13,7 @@
 
   <view wx:if="{{needsLogin}}" class="empty-panel guest-panel">
     <image class="empty-icon" src="/assets/memoir-gramophone.png" mode="aspectFit" />
-    <text class="empty-title">浏览整理成书</text>
+    <text class="empty-title">浏览书稿</text>
     <text class="empty-copy">登录后可以把讲述记录归入章节，确认章节正文，再生成全书和章节朗读。</text>
     <view class="guest-steps">
       <text>1. 先生成章节规划</text>
@@ -30,7 +30,7 @@
   <view wx:if="{{!projectId}}" class="empty-panel">
     <image class="empty-icon" src="/assets/memoir-gramophone.png" mode="aspectFit" />
     <text class="empty-title">还没有回忆录</text>
-    <text class="empty-copy">先创建一本回忆录并设置讲述资料，完成语音聊天后再整理成书。</text>
+    <text class="empty-copy">先创建一本回忆录并设置讲述资料，完成语音聊天后再整理书稿。</text>
     <view class="actions-row">
       <button class="primary-button" bindtap="createProject">创建回忆录</button>
       <button class="ghost-button" bindtap="openHome">返回首页</button>
@@ -41,7 +41,7 @@
   <view class="status-panel progress-panel">
     <view class="progress-main">
       <view class="progress-title-row">
-        <text class="status-title">{{bookPreviewTitle || planTitle || "整理成书"}}</text>
+        <text class="status-title">{{bookPreviewTitle || planTitle || "书稿"}}</text>
         <text class="status-pill">{{stageText}}</text>
       </view>
       <text class="status-meta">
@@ -91,7 +91,7 @@
     <view class="automation-head">
       <view>
         <text class="automation-title">整理进度</text>
-        <text class="automation-meta">书稿整理、补写和待确认事项会在这里汇总</text>
+        <text class="automation-meta">书稿整理状态会在这里汇总</text>
       </view>
       <text class="automation-count">{{automationEventLoading ? "同步中" : automationEventItems.length + " 条"}}</text>
     </view>
@@ -152,9 +152,9 @@
   <view wx:if="{{plan}}" class="book-voice-assistant {{bookVoiceAssistantExpanded ? 'expanded' : 'collapsed'}}">
     <view class="book-voice-header">
       <view class="book-voice-copy">
-        <text class="book-voice-title">对书稿说一句</text>
-        <text class="book-voice-hint">例如：读一下第 2 章 / 把这一段说得朴素一点</text>
-        <text class="book-voice-status">{{bookVoiceAssistantStatusText}}</text>
+        <text class="book-voice-title">{{bookVoiceAssistantExpanded ? "对书稿说一句" : "语音修改书稿"}}</text>
+        <text wx:if="{{bookVoiceAssistantExpanded}}" class="book-voice-hint">例如：读一下第 2 章 / 把这一段说得朴素一点</text>
+        <text wx:if="{{bookVoiceAssistantExpanded}}" class="book-voice-status">{{bookVoiceAssistantStatusText}}</text>
       </view>
       <view class="book-voice-actions">
         <button
@@ -516,19 +516,10 @@
           <button
             class="ghost-button small"
             data-id="{{item.id}}"
-            bindtap="openChapterSources"
-            disabled="{{!item.sourceViews.length}}"
+            bindtap="openChapterMoreActions"
+            disabled="{{updatingPlanStructure}}"
           >
-            原始讲述
-          </button>
-          <button
-            class="ghost-button small"
-            data-id="{{item.id}}"
-            loading="{{ttsBusyTarget === item.ttsTarget}}"
-            disabled="{{updatingPlanStructure || item.draftBusy || item.draftChanged || !item.draft || !item.draft.latest_version || ttsBusyTarget}}"
-            bindtap="playChapterAudio"
-          >
-            {{playingTarget === item.ttsTarget ? "停止朗读" : "朗读"}}
+            更多
           </button>
         </view>
       </view>

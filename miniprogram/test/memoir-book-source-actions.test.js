@@ -115,7 +115,7 @@ test("transcript source move helpers build requests and enforce source chapter b
   assert.deepEqual(transcriptChapterMoveOptions(transcript("utterance-3", true), currentPlan), []);
   assert.deepEqual(
     transcriptSourceMoveRequest(transcript("utterance-3", true), currentPlan, "chapter-1"),
-    { request: null, error: "本章只剩 1 条素材；请在成书页合并或删除章节来保留素材" },
+    { request: null, error: "本章只剩 1 条素材；请在书稿页合并或删除章节来保留素材" },
   );
   assert.deepEqual(
     transcriptSourceMoveRequest(transcript("utterance-2", true), currentPlan, "missing-chapter"),

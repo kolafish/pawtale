@@ -17,7 +17,7 @@
 
   <view wx:elif="{{!chapter}}" class="empty-panel">
     <text class="empty-title">没有找到这一章</text>
-    <text class="empty-copy">请回到成书页重新选择章节。</text>
+    <text class="empty-copy">请回到书稿页重新选择章节。</text>
   </view>
 
   <block wx:else>

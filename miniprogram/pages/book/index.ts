@@ -304,6 +304,7 @@ Page<BookData, {
   openChapterEditor(event: DatasetEvent): void;
   closeChapterEditor(): void;
   openChapterSources(event: DatasetEvent): void;
+  openChapterMoreActions(event: DatasetEvent): void;
   openBookExportPage(event: DatasetEvent): void;
   changeChapterTitle(event: TextInputEvent): void;
   saveChapterTitle(event: DatasetEvent): Promise<void>;
@@ -630,7 +631,7 @@ Page<BookData, {
         this.setData(guestBookData());
         return;
       }
-      this.setData({ error: error instanceof Error ? error.message : "成书页面加载失败" });
+      this.setData({ error: error instanceof Error ? error.message : "书稿页面加载失败" });
     } finally {
       this.setData({ loading: false });
     }
@@ -1324,7 +1325,7 @@ Page<BookData, {
         wx.reLaunch({ url: "/pages/login/index" });
         return;
       }
-      this.setData({ error: error instanceof Error ? error.message : "全书导出失败" });
+      this.setData({ error: error instanceof Error ? error.message : "导出失败" });
     } finally {
       this.setData({ bookExportBusyTarget: "" });
     }
@@ -1544,6 +1545,41 @@ Page<BookData, {
       return;
     }
     wx.navigateTo({ url: bookChapterDetailUrl(this.data.projectId, chapterId, "sources") });
+  },
+
+  openChapterMoreActions(event) {
+    const chapterId = event.currentTarget.dataset.id || "";
+    const chapter = this.data.chapters.find((candidate) => candidate.id === chapterId);
+    if (!chapter || !this.data.projectId) {
+      this.setData({ error: "缺少章节信息" });
+      return;
+    }
+    const actions: Array<{ label: string; run: () => void | Promise<void> }> = [];
+    if (chapter.sourceViews.length) {
+      actions.push({
+        label: "看素材",
+        run: () => wx.navigateTo({ url: bookChapterDetailUrl(this.data.projectId, chapterId, "sources") }),
+      });
+    }
+    if (chapter.draft?.latest_version) {
+      actions.push({
+        label: this.data.playingTarget === chapter.ttsTarget ? "停止朗读" : "朗读",
+        run: () => this.playChapterAudioById(chapterId),
+      });
+    }
+    if (!actions.length) {
+      wx.showToast({ title: "暂无可用操作", icon: "none" });
+      return;
+    }
+    wx.showActionSheet({
+      itemList: actions.map((item) => item.label),
+      success: (result) => {
+        const action = actions[result.tapIndex];
+        if (action) {
+          void action.run();
+        }
+      },
+    });
   },
 
   openBookExportPage(event) {
