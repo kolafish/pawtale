@@ -9,7 +9,7 @@ import {
   listMemoirVoiceSessions,
 } from "../../services/memoir-voice-api";
 import { getMemoirIdentity } from "../../services/auth";
-import { ApiError } from "../../services/request";
+import { routeAuthError } from "../../services/navigation";
 
 interface VoiceSessionSummaryView extends MemoirVoiceSessionSummary {
   modeText: string;
@@ -186,8 +186,7 @@ Page<ProgressData, {
         modules: progress.modules.map(toModuleView),
       });
     } catch (error) {
-      if (error instanceof ApiError && [401, 403].includes(error.statusCode)) {
-        wx.switchTab({ url: "/pages/me/index" });
+      if (routeAuthError(error, "me")) {
         return;
       }
       this.setData({ error: error instanceof Error ? error.message : "讲述进度加载失败" });

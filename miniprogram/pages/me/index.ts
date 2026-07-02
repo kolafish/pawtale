@@ -10,7 +10,7 @@ import {
   updateBackendProfile,
 } from "../../services/auth";
 import { getMemoirVoiceProgress } from "../../services/memoir-voice-api";
-import { ApiError } from "../../services/request";
+import { isAuthError } from "../../services/navigation";
 import {
   AI_MODEL_OPTIONS,
   aiModelLabel,
@@ -356,7 +356,7 @@ Page<MeData, {
         await this.loadVoiceStats(activeProjectId);
       }
     } catch (error) {
-      if (error instanceof ApiError && [401, 403].includes(error.statusCode)) {
+      if (isAuthError(error)) {
         this.setData(loggedOutData());
         return;
       }

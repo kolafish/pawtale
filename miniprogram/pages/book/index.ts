@@ -48,6 +48,12 @@ import {
   updateMemoirBookChapterDraft,
 } from "../../services/memoir-voice-api";
 import { ApiError } from "../../services/request";
+import {
+  isAuthError,
+  routeAuthError,
+  switchToHome,
+  switchToMe,
+} from "../../services/navigation";
 import { sourceAssignmentRequest } from "../../services/memoir-book-source-actions";
 import {
   classifyVoiceClientConnectionError,
@@ -168,10 +174,6 @@ interface PickerEvent extends DatasetEvent {
   detail: {
     value: string | number;
   };
-}
-
-function isLoginError(error: unknown): boolean {
-  return error instanceof ApiError && [401, 403].includes(error.statusCode);
 }
 
 const BOOK_GENERATION_EVENT_POLL_INTERVAL_MS = 3000;
@@ -573,7 +575,7 @@ Page<BookData, {
       }
       await this.loadPlanForProject(projectId);
     } catch (error) {
-      if (isLoginError(error)) {
+      if (isAuthError(error)) {
         this.setData(guestBookData());
         return;
       }
@@ -795,8 +797,7 @@ Page<BookData, {
       this.applyAutomationEvents(mergeAutomationEvent(this.automationEvents, event));
       wx.showToast({ title: "已后台生成", icon: "success" });
     } catch (error) {
-      if (isLoginError(error)) {
-        wx.reLaunch({ url: "/pages/login/index" });
+      if (routeAuthError(error, "login")) {
         return;
       }
       this.setData({ error: error instanceof Error ? error.message : "章节文案提交失败" });
@@ -881,8 +882,7 @@ Page<BookData, {
       this.closeBookChapterEditorialEditor();
       wx.showToast({ title: "已保存", icon: "success" });
     } catch (error) {
-      if (isLoginError(error)) {
-        wx.reLaunch({ url: "/pages/login/index" });
+      if (routeAuthError(error, "login")) {
         return;
       }
       this.setData({ error: error instanceof Error ? error.message : "章节文案保存失败" });
@@ -1059,8 +1059,7 @@ Page<BookData, {
       trackAuditAction("book.plan_generate", { chapter_count: plan.chapters.length }, { projectId: this.data.projectId });
       wx.showToast({ title: "已生成章节", icon: "success" });
     } catch (error) {
-      if (isLoginError(error)) {
-        wx.switchTab({ url: "/pages/me/index" });
+      if (routeAuthError(error, "me")) {
         return;
       }
       this.setData({ error: error instanceof Error ? error.message : "章节生成失败" });
@@ -1094,8 +1093,7 @@ Page<BookData, {
       trackAuditAction("book.plan_confirm", { chapter_count: plan.chapters.length }, { projectId: this.data.projectId });
       wx.showToast({ title: "章节已确认", icon: "success" });
     } catch (error) {
-      if (isLoginError(error)) {
-        wx.switchTab({ url: "/pages/me/index" });
+      if (routeAuthError(error, "me")) {
         return;
       }
       this.setData({ error: error instanceof Error ? error.message : "章节确认失败" });
@@ -1210,8 +1208,7 @@ Page<BookData, {
       const plan = await updateMemoirBookChapterTitle(this.data.projectId, chapterId, { title });
       await this.applyUpdatedPlan(plan, "章名已保存");
     } catch (error) {
-      if (isLoginError(error)) {
-        wx.switchTab({ url: "/pages/me/index" });
+      if (routeAuthError(error, "me")) {
         return;
       }
       const message = error instanceof Error ? error.message : "章节名保存失败";
@@ -1245,8 +1242,7 @@ Page<BookData, {
       trackAuditAction("book.chapter_title_generate", {}, { projectId: this.data.projectId });
       return true;
     } catch (error) {
-      if (isLoginError(error)) {
-        wx.switchTab({ url: "/pages/me/index" });
+      if (routeAuthError(error, "me")) {
         return false;
       }
       const message = error instanceof Error ? error.message : "小余起名失败";
@@ -1529,8 +1525,7 @@ Page<BookData, {
       this.applyBookOutput(null);
       wx.showToast({ title: "已归入章节", icon: "success" });
     } catch (error) {
-      if (isLoginError(error)) {
-        wx.switchTab({ url: "/pages/me/index" });
+      if (routeAuthError(error, "me")) {
         return;
       }
       this.setData({ error: error instanceof Error ? error.message : "归入章节失败" });
@@ -1606,8 +1601,7 @@ Page<BookData, {
       await this.applyUpdatedPlan(plan, toastTitle);
       return plan;
     } catch (error) {
-      if (isLoginError(error)) {
-        wx.switchTab({ url: "/pages/me/index" });
+      if (routeAuthError(error, "me")) {
         return null;
       }
       this.setData({ error: error instanceof Error ? error.message : "目录调整失败" });
@@ -1635,8 +1629,7 @@ Page<BookData, {
       await this.applyUpdatedPlan(plan, toastTitle);
       return plan;
     } catch (error) {
-      if (isLoginError(error)) {
-        wx.switchTab({ url: "/pages/me/index" });
+      if (routeAuthError(error, "me")) {
         return null;
       }
       this.setData({ error: error instanceof Error ? error.message : "目录调整失败" });
@@ -1687,8 +1680,7 @@ Page<BookData, {
       );
       wx.showToast({ title: "已后台生成", icon: "success" });
     } catch (error) {
-      if (isLoginError(error)) {
-        wx.reLaunch({ url: "/pages/login/index" });
+      if (routeAuthError(error, "login")) {
         return;
       }
       this.setData({ error: error instanceof Error ? error.message : "书稿整理提交失败" });
@@ -1756,8 +1748,7 @@ Page<BookData, {
         this.scheduleBookVoiceAssistantAutoListen("这一章读完了，我继续听");
       }
     } catch (error) {
-      if (isLoginError(error)) {
-        wx.reLaunch({ url: "/pages/login/index" });
+      if (routeAuthError(error, "login")) {
         return;
       }
       if (token === this.playToken) {
@@ -1809,8 +1800,7 @@ Page<BookData, {
       this.setData({ ttsBusyTarget: "" });
       await this.playAudioFiles(response, target, token, trimText(this.data.bookContent));
     } catch (error) {
-      if (isLoginError(error)) {
-        wx.reLaunch({ url: "/pages/login/index" });
+      if (routeAuthError(error, "login")) {
         return;
       }
       if (token === this.playToken) {
@@ -1868,8 +1858,7 @@ Page<BookData, {
         }
       }
     } catch (error) {
-      if (isLoginError(error)) {
-        wx.reLaunch({ url: "/pages/login/index" });
+      if (routeAuthError(error, "login")) {
         return;
       }
       if (token === this.playToken) {
@@ -2162,8 +2151,7 @@ Page<BookData, {
     try {
       await this.handleBookVoiceCommandTranscript(text);
     } catch (error) {
-      if (isLoginError(error)) {
-        wx.reLaunch({ url: "/pages/login/index" });
+      if (routeAuthError(error, "login")) {
         return;
       }
       this.setData({
@@ -2300,8 +2288,7 @@ Page<BookData, {
       }
       return !playbackError;
     } catch (error) {
-      if (isLoginError(error)) {
-        wx.reLaunch({ url: "/pages/login/index" });
+      if (routeAuthError(error, "login")) {
         return false;
       }
       if (token === this.playToken) {
@@ -2442,8 +2429,7 @@ Page<BookData, {
         { projectId: this.data.projectId },
       );
     } catch (error) {
-      if (isLoginError(error)) {
-        wx.switchTab({ url: "/pages/me/index" });
+      if (routeAuthError(error, "me")) {
         return;
       }
       this.setData({
@@ -2830,12 +2816,12 @@ Page<BookData, {
 
   openHome() {
     this.stopPlayback();
-    wx.switchTab({ url: "/pages/home/index" });
+    switchToHome();
   },
 
   openLogin() {
     this.stopPlayback();
-    wx.switchTab({ url: "/pages/me/index" });
+    switchToMe();
   },
 
   createProject() {

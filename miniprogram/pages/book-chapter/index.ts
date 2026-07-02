@@ -17,6 +17,7 @@ import {
   updateMemoirBookChapterTitle,
 } from "../../services/memoir-voice-api";
 import { ApiError } from "../../services/request";
+import { routeAuthError } from "../../services/navigation";
 import type { BookChapterView } from "../book/book-view-model";
 import {
   buildChapterViews,
@@ -94,10 +95,6 @@ function chapterIndexText(plan: MemoirBookPlan | null, chapterId: string): strin
     .sort((left, right) => left.sort_order - right.sort_order)
     .findIndex((chapter) => chapter.id === chapterId) ?? -1;
   return index >= 0 ? `第 ${index + 1} 章` : "章节";
-}
-
-function isLoginError(error: unknown): boolean {
-  return error instanceof ApiError && [401, 403].includes(error.statusCode);
 }
 
 async function loadChapterDraft(projectId: string, chapterId: string): Promise<MemoirBookChapterDraft | null> {
@@ -270,8 +267,7 @@ Page<BookChapterPageData, {
       wx.showToast({ title: toastTitle, icon: "success" });
       return plan;
     } catch (error) {
-      if (isLoginError(error)) {
-        wx.switchTab({ url: "/pages/me/index" });
+      if (routeAuthError(error, "me")) {
         return null;
       }
       this.setData({ error: error instanceof Error ? error.message : "目录调整失败" });
@@ -320,8 +316,7 @@ Page<BookChapterPageData, {
       this.applyChapterData(plan, this.data.sourceCoverage, chapter.draft);
       wx.showToast({ title: "章名已保存", icon: "success" });
     } catch (error) {
-      if (isLoginError(error)) {
-        wx.switchTab({ url: "/pages/me/index" });
+      if (routeAuthError(error, "me")) {
         return;
       }
       this.patchChapter({ draftError: error instanceof Error ? error.message : "章节名保存失败" });
@@ -343,8 +338,7 @@ Page<BookChapterPageData, {
       trackAuditAction("book.chapter_title_generate", {}, { projectId: this.data.projectId });
       wx.showToast({ title: "已重新起名", icon: "success" });
     } catch (error) {
-      if (isLoginError(error)) {
-        wx.switchTab({ url: "/pages/me/index" });
+      if (routeAuthError(error, "me")) {
         return;
       }
       this.patchChapter({ draftError: error instanceof Error ? error.message : "小余起名失败" });

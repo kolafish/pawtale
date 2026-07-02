@@ -1,7 +1,9 @@
+import { switchToHome } from "../../services/navigation";
+
 Page({
   data: {},
 
   onLoad() {
-    wx.switchTab({ url: "/pages/home/index" });
+    switchToHome();
   },
 });

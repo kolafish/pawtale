@@ -28,6 +28,12 @@ import {
 } from "../../services/memoir-book-source-actions";
 import { ApiError } from "../../services/request";
 import {
+  isAuthError,
+  routeAuthError,
+  switchToHome,
+  switchToMe,
+} from "../../services/navigation";
+import {
   clearTranscriptNavigationTarget,
   readTranscriptNavigationTarget,
 } from "../../services/transcript-navigation";
@@ -639,7 +645,7 @@ Page<TranscriptsData, {
       if (requestToken !== this.loadToken) {
         return;
       }
-      if (error instanceof ApiError && [401, 403].includes(error.statusCode)) {
+      if (isAuthError(error)) {
         this.setData({
           needsLogin: true,
           activeProjectId: "",
@@ -977,8 +983,7 @@ Page<TranscriptsData, {
       await this.loadTranscripts(true);
       wx.showToast({ title: "已归入章节", icon: "success" });
     } catch (error) {
-      if (error instanceof ApiError && [401, 403].includes(error.statusCode)) {
-        wx.switchTab({ url: "/pages/me/index" });
+      if (routeAuthError(error, "me")) {
         return;
       }
       this.setData({ error: error instanceof Error ? error.message : "归入章节失败" });
@@ -1016,8 +1021,7 @@ Page<TranscriptsData, {
       await this.loadTranscripts(true);
       wx.showToast({ title: "素材已移动", icon: "success" });
     } catch (error) {
-      if (error instanceof ApiError && [401, 403].includes(error.statusCode)) {
-        wx.switchTab({ url: "/pages/me/index" });
+      if (routeAuthError(error, "me")) {
         return;
       }
       this.setData({ error: error instanceof Error ? error.message : "素材移动失败" });
@@ -1189,12 +1193,12 @@ Page<TranscriptsData, {
 
   openHome() {
     this.stopPlayback();
-    wx.switchTab({ url: "/pages/home/index" });
+    switchToHome();
   },
 
   openLogin() {
     this.stopPlayback();
-    wx.switchTab({ url: "/pages/me/index" });
+    switchToMe();
   },
 
   createProject() {
