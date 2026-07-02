@@ -18,6 +18,7 @@ import type {
   AuditDashboardFilters,
   AuditDailyFeatureUsage,
   AuditDailyUserUsage,
+  AuditEvent,
   AuditPlatform,
   AuditSession,
 } from '../../types';
@@ -35,6 +36,15 @@ const EVENT_TYPE_LABELS: Record<string, string> = {
   action: '功能动作',
   heartbeat: '心跳',
 };
+
+const EVENT_TYPE_ORDER = [
+  'page_view',
+  'page_leave',
+  'action',
+  'feature_start',
+  'feature_end',
+  'heartbeat',
+];
 
 const EXIT_REASON_LABELS: Record<string, string> = {
   app_background: '退到后台',
@@ -97,6 +107,61 @@ function featureDisplay(featureCode: string): string {
 
 function userDisplay(row: Pick<AuditDailyUserUsage, 'user'> | Pick<AuditDailyFeatureUsage, 'user'>): string {
   return row.user.display_name || row.user.email;
+}
+
+interface DetailEventFilters {
+  eventType: string;
+  featureCode: string;
+  keyword: string;
+  showHeartbeat: boolean;
+}
+
+function eventTypeLabel(eventType: string): string {
+  return EVENT_TYPE_LABELS[eventType] || eventType || '未知事件';
+}
+
+function sortedSessionEvents(session: AuditSession): AuditEvent[] {
+  return [...session.events].sort(
+    (a, b) => new Date(a.occurred_at).getTime() - new Date(b.occurred_at).getTime(),
+  );
+}
+
+function eventMatchesDetailFilters(event: AuditEvent, filters: DetailEventFilters): boolean {
+  if (filters.eventType && event.event_type !== filters.eventType) return false;
+  if (!filters.showHeartbeat && event.event_type === 'heartbeat') return false;
+  if (filters.featureCode && event.feature_code !== filters.featureCode) return false;
+
+  const keyword = filters.keyword.trim().toLowerCase();
+  if (!keyword) return true;
+
+  const searchableText = [
+    event.event_type,
+    eventTypeLabel(event.event_type),
+    event.page_path,
+    event.feature_code,
+    event.project_id,
+    event.voice_session_id,
+    event.exit_reason,
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+  return searchableText.includes(keyword);
+}
+
+function flattenEvents(sessions: AuditSession[]): AuditEvent[] {
+  return sessions.flatMap((session) => sortedSessionEvents(session));
+}
+
+function countEventsByType(events: AuditEvent[]): Record<string, number> {
+  return events.reduce<Record<string, number>>((counts, event) => {
+    counts[event.event_type] = (counts[event.event_type] || 0) + 1;
+    return counts;
+  }, {});
+}
+
+function featureCodeOptions(events: AuditEvent[]): string[] {
+  return Array.from(new Set(events.map((event) => event.feature_code).filter(Boolean))).sort((a, b) => a.localeCompare(b));
 }
 
 interface FeatureTotal {
@@ -171,6 +236,10 @@ export function UserAuditDashboard() {
   const [userId, setUserId] = useState('');
   const [featureCode, setFeatureCode] = useState('');
   const [selectedDay, setSelectedDay] = useState<SelectedUserDay | null>(null);
+  const [detailEventType, setDetailEventType] = useState('');
+  const [detailFeatureCode, setDetailFeatureCode] = useState('');
+  const [detailKeyword, setDetailKeyword] = useState('');
+  const [detailShowHeartbeat, setDetailShowHeartbeat] = useState(false);
   const invalidRange = Boolean(fromDate && toDate && fromDate > toDate);
 
   const dashboardFilters = useMemo<AuditDashboardFilters>(() => ({
@@ -200,6 +269,20 @@ export function UserAuditDashboard() {
     () => aggregateFeatures(dashboard?.feature_usage ?? []),
     [dashboard?.feature_usage],
   );
+  const daySessions = useMemo(() => dayQuery.data?.sessions ?? [], [dayQuery.data?.sessions]);
+  const dayEvents = useMemo(() => flattenEvents(daySessions), [daySessions]);
+  const detailFilters = useMemo<DetailEventFilters>(() => ({
+    eventType: detailEventType,
+    featureCode: detailFeatureCode,
+    keyword: detailKeyword,
+    showHeartbeat: detailShowHeartbeat,
+  }), [detailEventType, detailFeatureCode, detailKeyword, detailShowHeartbeat]);
+  const detailEventCounts = useMemo(() => countEventsByType(dayEvents), [dayEvents]);
+  const detailFeatureOptions = useMemo(() => featureCodeOptions(dayEvents), [dayEvents]);
+  const filteredDayEventCount = useMemo(
+    () => dayEvents.filter((event) => eventMatchesDetailFilters(event, detailFilters)).length,
+    [dayEvents, detailFilters],
+  );
 
   const clearFilters = () => {
     setFromDate(defaultRange.from);
@@ -209,7 +292,15 @@ export function UserAuditDashboard() {
     setFeatureCode('');
   };
 
+  const clearDetailFilters = () => {
+    setDetailEventType('');
+    setDetailFeatureCode('');
+    setDetailKeyword('');
+    setDetailShowHeartbeat(false);
+  };
+
   const openUserDay = (row: AuditDailyUserUsage) => {
+    clearDetailFilters();
     setSelectedDay({ userId: row.user.id, date: row.date, name: userDisplay(row) });
   };
 
@@ -481,14 +572,109 @@ export function UserAuditDashboard() {
             ) : dayQuery.isError ? (
               <div className="px-4 py-8 text-sm text-red-600">当天详情加载失败。</div>
             ) : (
-              <div className="divide-y divide-gray-100">
-                {(dayQuery.data?.sessions ?? []).map((session) => (
-                  <SessionDetail key={session.id} session={session} />
-                ))}
-                {(dayQuery.data?.sessions.length ?? 0) === 0 && (
-                  <div className="px-4 py-8 text-center text-sm text-gray-500">当天没有 session 记录。</div>
+              <>
+                {dayEvents.length > 0 && (
+                  <div className="border-b border-gray-100 px-4 py-4">
+                    <div className="mb-3 flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setDetailEventType('')}
+                          className={`rounded-md px-2.5 py-1.5 text-sm transition-colors ${
+                            !detailEventType
+                              ? 'bg-pink-500 text-white'
+                              : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                          }`}
+                        >
+                          全部 {dayEvents.length}
+                        </button>
+                        {EVENT_TYPE_ORDER.filter((eventType) => detailEventCounts[eventType]).map((eventType) => (
+                          <button
+                            key={eventType}
+                            type="button"
+                            onClick={() => {
+                              setDetailEventType(eventType);
+                              if (eventType === 'heartbeat') {
+                                setDetailShowHeartbeat(true);
+                              }
+                            }}
+                            className={`rounded-md px-2.5 py-1.5 text-sm transition-colors ${
+                              detailEventType === eventType
+                                ? 'bg-pink-500 text-white'
+                                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                            }`}
+                          >
+                            {eventTypeLabel(eventType)} {detailEventCounts[eventType]}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="text-sm text-gray-500">
+                        显示 {filteredDayEventCount} / {dayEvents.length} 事件
+                      </div>
+                    </div>
+                    <div className="grid gap-3 md:grid-cols-[minmax(180px,240px)_minmax(220px,1fr)_auto_auto]">
+                      <label className="flex flex-col gap-1 text-sm text-gray-600">
+                        <span>功能编码</span>
+                        <select
+                          value={detailFeatureCode}
+                          onChange={(event) => setDetailFeatureCode(event.target.value)}
+                          className="rounded-md border border-gray-200 px-3 py-2 text-gray-900 focus:outline-none focus:ring-2 focus:ring-pink-500"
+                        >
+                          <option value="">全部功能</option>
+                          {detailFeatureOptions.map((option) => (
+                            <option key={option} value={option}>
+                              {option}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="flex flex-col gap-1 text-sm text-gray-600">
+                        <span>搜索</span>
+                        <input
+                          value={detailKeyword}
+                          onChange={(event) => setDetailKeyword(event.target.value)}
+                          placeholder="页面、功能、项目或语音会话"
+                          className="rounded-md border border-gray-200 px-3 py-2 text-gray-900 focus:outline-none focus:ring-2 focus:ring-pink-500"
+                        />
+                      </label>
+                      <div className="flex items-end">
+                        <button
+                          type="button"
+                          onClick={() => setDetailShowHeartbeat((value) => !value)}
+                          className={`inline-flex w-full items-center justify-center rounded-md border px-3 py-2 text-sm transition-colors ${
+                            detailShowHeartbeat
+                              ? 'border-pink-200 bg-pink-50 text-pink-700'
+                              : 'border-gray-200 text-gray-600 hover:bg-gray-50'
+                          }`}
+                        >
+                          {detailShowHeartbeat ? '隐藏心跳' : '显示心跳'}
+                        </button>
+                      </div>
+                      <div className="flex items-end">
+                        <button
+                          type="button"
+                          onClick={clearDetailFilters}
+                          className="inline-flex w-full items-center justify-center gap-2 rounded-md border border-gray-200 px-3 py-2 text-sm text-gray-600 transition-colors hover:bg-gray-50"
+                        >
+                          <X size={15} />
+                          重置
+                        </button>
+                      </div>
+                    </div>
+                  </div>
                 )}
-              </div>
+                <div className="divide-y divide-gray-100">
+                  {daySessions.map((session) => (
+                    <SessionDetail key={session.id} session={session} filters={detailFilters} />
+                  ))}
+                  {daySessions.length === 0 && (
+                    <div className="px-4 py-8 text-center text-sm text-gray-500">当天没有 session 记录。</div>
+                  )}
+                  {daySessions.length > 0 && filteredDayEventCount === 0 && (
+                    <div className="px-4 py-8 text-center text-sm text-gray-500">当前筛选下没有匹配事件。</div>
+                  )}
+                </div>
+              </>
             )}
           </section>
         )}
@@ -497,10 +683,13 @@ export function UserAuditDashboard() {
   );
 }
 
-function SessionDetail({ session }: { session: AuditSession }) {
-  const events = [...session.events].sort(
-    (a, b) => new Date(a.occurred_at).getTime() - new Date(b.occurred_at).getTime(),
-  );
+function SessionDetail({ session, filters }: { session: AuditSession; filters: DetailEventFilters }) {
+  const allEvents = sortedSessionEvents(session);
+  const events = allEvents.filter((event) => eventMatchesDetailFilters(event, filters));
+
+  if (events.length === 0) {
+    return null;
+  }
 
   return (
     <div className="px-4 py-4">
@@ -525,6 +714,9 @@ function SessionDetail({ session }: { session: AuditSession }) {
           <div className="text-xs text-gray-500">离开</div>
           <div className="truncate font-medium text-gray-900">{labelOrDash(session.exit_page_path)}</div>
         </div>
+      </div>
+      <div className="mb-3 text-xs text-gray-500">
+        筛选后事件 {events.length} / {allEvents.length}
       </div>
       {(session.app_version || session.device_summary) && (
         <div className="mb-3 flex flex-wrap gap-2 text-xs text-gray-500">
