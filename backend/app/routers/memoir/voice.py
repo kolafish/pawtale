@@ -387,6 +387,15 @@ async def list_mobile_memoir_voice_transcripts(
     )
 
 
+@router.get("/voice-transcripts/{utterance_id}", response_model=MemoirVoiceTranscriptItemResponse)
+async def get_mobile_memoir_voice_transcript(
+    utterance_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await memoir_voice_transcripts.get_voice_transcript(db, utterance_id, current_user.id)
+
+
 @router.patch("/voice-transcripts/{utterance_id}", response_model=MemoirVoiceTranscriptItemResponse)
 async def update_mobile_memoir_voice_transcript(
     utterance_id: str,

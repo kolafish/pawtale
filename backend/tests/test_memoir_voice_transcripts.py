@@ -14,6 +14,7 @@ from app.domain.memoir.types import (
     MemoirCreatedBy,
     MemoirEditingJobStatus,
     MemoirEditingJobType,
+    MemoirSemanticCacheStatus,
     MemoirTranscriptVersionType,
 )
 from app.models.memoir import (
@@ -26,9 +27,11 @@ from app.models.memoir import (
     MemoirChapterSourceLink,
     MemoirChatMessage,
     MemoirEditingJob,
+    MemoirSourceCard,
     MemoirTranscriptVersion,
     MemoirVoiceUtterance,
 )
+from app.services.memoir import source_cards
 from app.services.memoir import automation_events
 from app.services.memoir.asr_text_normalization import normalize_memoir_asr_text
 from app.services.memoir.voice_transcripts import (
@@ -82,6 +85,44 @@ class CapturingAIClient:
     async def _call_llm(self, _system_prompt, user_prompt, **_kwargs):
         self.prompt = user_prompt
         return self.response
+
+
+async def add_ready_source_card(
+    test_db,
+    created: dict,
+    *,
+    short_title: str = "外婆家院子里的童年",
+    summary: str = "讲述者回忆小时候住在外婆家，在院子里生活的片段。",
+    source_text: str | None = None,
+) -> MemoirSourceCard:
+    if source_text is None:
+        utterance = await test_db.scalar(
+            select(MemoirVoiceUtterance).where(MemoirVoiceUtterance.id == created["utterance_id"])
+        )
+        assert utterance is not None
+        source_text = source_cards.source_text_for_utterance(utterance)
+    card = MemoirSourceCard(
+        project_id=created["session"]["project_id"],
+        utterance_id=created["utterance_id"],
+        transcript_version_id=created["transcript_version_id"],
+        source_text_hash=source_cards.source_text_hash(source_text),
+        engine=source_cards.SOURCE_CARD_ENGINE,
+        status=MemoirSemanticCacheStatus.READY.value,
+        card_json={
+            "short_title": short_title,
+            "summary": summary,
+            "people": [],
+            "places": [],
+            "time_hints": [],
+            "event_tags": [],
+            "emotion_tags": [],
+            "key_facts": [],
+            "open_questions": [],
+        },
+    )
+    test_db.add(card)
+    await test_db.commit()
+    return card
 
 
 async def _append_voice_turn(
@@ -177,11 +218,67 @@ async def test_mobile_memoir_lists_saved_voice_transcripts(client, test_db):
     assert item["audio_size_bytes"] == 3200
     assert item["audio_duration_seconds"] == 8
     assert item["display_text"] == "嗯，我小时候就是住在外婆家。"
+    assert item["summary_title"] == "嗯，我小时候就是住在外婆家。"
+    assert item["summary_text"] == "嗯，我小时候就是住在外婆家。"
+    assert item["summary_source"] == "fallback"
     assert item["display_char_count"] == len("嗯，我小时候就是住在外婆家。")
     assert item["is_included_in_book"] is False
     assert item["included_chapters"] == []
     assert item["created_at"].endswith(UTC_SUFFIXES)
     assert item["session_created_at"].endswith(UTC_SUFFIXES)
+
+
+async def test_mobile_memoir_voice_transcripts_use_source_card_summary(client, test_db):
+    created = await create_test_voice_transcript(
+        client,
+        test_db,
+        text="爷爷退休后还在帮公司做事，大家都很信任他。",
+    )
+    await add_ready_source_card(
+        test_db,
+        created,
+        short_title="爷爷退休后仍帮公司做事",
+        summary="讲述者提到爷爷退休后仍继续帮公司处理事务，说明大家信任他。",
+    )
+
+    list_response = await client.get("/api/mobile/memoir/voice-transcripts")
+    detail_response = await client.get(f"/api/mobile/memoir/voice-transcripts/{created['utterance_id']}")
+
+    assert list_response.status_code == 200
+    item = list_response.json()["items"][0]
+    assert item["summary_title"] == "爷爷退休后仍帮公司做事"
+    assert item["summary_text"] == "讲述者提到爷爷退休后仍继续帮公司处理事务，说明大家信任他。"
+    assert item["summary_source"] == "source_card"
+
+    assert detail_response.status_code == 200
+    detail = detail_response.json()
+    assert detail["id"] == created["utterance_id"]
+    assert detail["summary_title"] == item["summary_title"]
+    assert detail["summary_text"] == item["summary_text"]
+    assert detail["summary_source"] == "source_card"
+
+
+async def test_mobile_memoir_voice_transcripts_ignore_stale_source_card_summary(client, test_db):
+    created = await create_test_voice_transcript(
+        client,
+        test_db,
+        text="小时候院子里的葡萄架夏天会遮出一大片阴凉。",
+    )
+    await add_ready_source_card(
+        test_db,
+        created,
+        short_title="过期标题不应显示",
+        summary="这条摘要来自旧文本。",
+        source_text="这是一段已经过期的旧文本。",
+    )
+
+    response = await client.get("/api/mobile/memoir/voice-transcripts")
+
+    assert response.status_code == 200
+    item = response.json()["items"][0]
+    assert item["summary_title"] == "小时候院子里的葡萄架夏天会遮出一大片阴凉。"
+    assert item["summary_text"] == "小时候院子里的葡萄架夏天会遮出一大片阴凉。"
+    assert item["summary_source"] == "fallback"
 
 
 async def test_mobile_memoir_searches_voice_transcripts_by_text_and_question(client, test_db):
