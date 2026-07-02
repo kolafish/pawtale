@@ -38,6 +38,14 @@ export function listMemoirVoiceTranscripts(
   );
 }
 
+export function getMemoirVoiceTranscript(
+  utteranceId: string,
+): Promise<MemoirVoiceTranscriptItem> {
+  return memoirRequest<MemoirVoiceTranscriptItem>(
+    `/api/mobile/memoir/voice-transcripts/${encodeURIComponent(utteranceId)}`,
+  );
+}
+
 export function updateMemoirVoiceTranscript(
   utteranceId: string,
   transcriptEdited: string,

@@ -657,6 +657,7 @@ Page<TranscriptsData, {
   onShow(): Promise<void>;
   loadTranscripts(reset?: boolean): Promise<void>;
   loadMore(): Promise<void>;
+  openTranscriptDetail(event: DatasetEvent): void;
   onSearchInput(event: SearchInputEvent): void;
   onSearchConfirm(): Promise<void>;
   clearSearch(): Promise<void>;
@@ -850,6 +851,14 @@ Page<TranscriptsData, {
       return;
     }
     await this.loadTranscripts(false);
+  },
+
+  openTranscriptDetail(event) {
+    const id = event.currentTarget.dataset.id || "";
+    if (!id) {
+      return;
+    }
+    wx.navigateTo({ url: `/pages/transcript-detail/index?id=${encodeURIComponent(id)}` });
   },
 
   onSearchInput(event) {
