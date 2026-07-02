@@ -90,6 +90,18 @@ function sampleDraft() {
   };
 }
 
+function sampleDraftWithContent(content, status = "draft", version = 2) {
+  const draft = sampleDraft();
+  draft.status = status;
+  draft.latest_version = {
+    ...draft.latest_version,
+    id: `draft-version-${version}`,
+    version,
+    content,
+  };
+  return draft;
+}
+
 function sampleSourceCoverage() {
   return {
     project_id: "project/1",
@@ -138,9 +150,24 @@ function loadBookChapterPage({
   voiceApiExports = {},
 } = {}) {
   mockModule("../services/memoir-voice-api.ts", {
+    confirmMemoirBookChapterDraft: async () => {
+      throw new Error("confirmMemoirBookChapterDraft was not mocked");
+    },
+    enqueueMemoirBookChapterDraftGeneration: async () => {
+      throw new Error("enqueueMemoirBookChapterDraftGeneration was not mocked");
+    },
+    generateMemoirBookChapterTitle: async () => {
+      throw new Error("generateMemoirBookChapterTitle was not mocked");
+    },
     getMemoirBookPlan: async () => plan,
     getMemoirBookChapterDraft: async () => draft,
     getMemoirBookSourceCoverage: async () => coverage,
+    updateMemoirBookChapterDraft: async () => {
+      throw new Error("updateMemoirBookChapterDraft was not mocked");
+    },
+    updateMemoirBookChapterTitle: async () => {
+      throw new Error("updateMemoirBookChapterTitle was not mocked");
+    },
     ...voiceApiExports,
   });
   return loadPageModule("../pages/book-chapter/index.ts");
@@ -156,8 +183,15 @@ test("book chapter page is registered and renders the detail tabs", () => {
   assert.match(wxml, /data-tab="content"/);
   assert.match(wxml, /data-tab="sources"/);
   assert.match(wxml, /data-tab="more"/);
+  assert.match(wxml, /bindinput="changeChapterTitle"/);
+  assert.match(wxml, /bindinput="changeDraftContent"/);
+  assert.match(wxml, /bindtap="saveChapterTitle"/);
+  assert.match(wxml, /bindtap="saveChapterDraft"/);
+  assert.match(wxml, /bindtap="confirmChapterDraft"/);
+  assert.match(wxml, /bindtap="generateChapterDraft"/);
   assert.match(wxss, /\.tab-row/);
   assert.match(wxss, /\.source-row/);
+  assert.match(wxss, /\.draft-textarea/);
 });
 
 test("book chapter page loads a chapter from route query", async () => {
@@ -194,4 +228,117 @@ test("book chapter page handles missing route query and tab changes", async () =
 
   page.changeTab.call(context, { currentTarget: { dataset: { tab: "unknown" } } });
   assert.equal(context.data.activeTab, "content");
+});
+
+test("book chapter page saves edited chapter title", async () => {
+  const toasts = [];
+  global.wx = {
+    showToast(options) {
+      toasts.push(options.title);
+    },
+  };
+  const updatedPlan = samplePlan();
+  updatedPlan.chapters[0].title = "童年院子";
+  const updates = [];
+  const { page } = loadBookChapterPage({
+    voiceApiExports: {
+      updateMemoirBookChapterTitle: async (projectId, chapterId, data) => {
+        updates.push({ projectId, chapterId, data });
+        return updatedPlan;
+      },
+    },
+  });
+  const context = pageContext(page);
+  await page.onLoad.call(context, { projectId: "project%2F1", chapterId: "chapter-1" });
+
+  page.changeChapterTitle.call(context, { detail: { value: "童年院子" } });
+  assert.equal(context.data.chapter.titleChanged, true);
+  await page.saveChapterTitle.call(context);
+
+  assert.deepEqual(updates, [
+    { projectId: "project/1", chapterId: "chapter-1", data: { title: "童年院子" } },
+  ]);
+  assert.equal(context.data.chapter.title, "童年院子");
+  assert.equal(context.data.chapter.titleChanged, false);
+  assert.deepEqual(toasts, ["章名已保存"]);
+  delete global.wx;
+});
+
+test("book chapter page saves and confirms edited draft content", async () => {
+  const toasts = [];
+  global.wx = {
+    showToast(options) {
+      toasts.push(options.title);
+    },
+  };
+  const updates = [];
+  const confirms = [];
+  const { page } = loadBookChapterPage({
+    draft: sampleDraftWithContent("旧正文", "draft", 1),
+    voiceApiExports: {
+      updateMemoirBookChapterDraft: async (projectId, chapterId, data) => {
+        updates.push({ projectId, chapterId, data });
+        return sampleDraftWithContent(data.content, "draft", 2);
+      },
+      confirmMemoirBookChapterDraft: async (projectId, chapterId) => {
+        confirms.push({ projectId, chapterId });
+        return sampleDraftWithContent("新正文", "confirmed", 2);
+      },
+    },
+  });
+  const context = pageContext(page);
+  await page.onLoad.call(context, { projectId: "project%2F1", chapterId: "chapter-1" });
+
+  page.changeDraftContent.call(context, { detail: { value: "新正文" } });
+  assert.equal(context.data.chapter.draftChanged, true);
+  await page.saveChapterDraft.call(context);
+
+  assert.deepEqual(updates, [
+    { projectId: "project/1", chapterId: "chapter-1", data: { content: "新正文" } },
+  ]);
+  assert.equal(context.data.chapter.draftChanged, false);
+  assert.equal(context.data.chapter.draftVersionText, "历史版本 · 已修改 2 次");
+
+  await page.confirmChapterDraft.call(context);
+
+  assert.deepEqual(confirms, [{ projectId: "project/1", chapterId: "chapter-1" }]);
+  assert.equal(context.data.chapter.draft.status, "confirmed");
+  assert.deepEqual(toasts, ["章节稿已保存", "本章已确认"]);
+  delete global.wx;
+});
+
+test("book chapter page generates a new draft version without overwriting unsaved edits", async () => {
+  const toasts = [];
+  const calls = [];
+  global.wx = {
+    showToast(options) {
+      toasts.push(options.title);
+    },
+  };
+  const { page } = loadBookChapterPage({
+    draft: sampleDraftWithContent("第一版正文", "draft", 1),
+    voiceApiExports: {
+      enqueueMemoirBookChapterDraftGeneration: async (projectId, chapterId, data) => {
+        calls.push({ projectId, chapterId, data });
+        return {};
+      },
+    },
+  });
+  const context = pageContext(page);
+  await page.onLoad.call(context, { projectId: "project%2F1", chapterId: "chapter-1" });
+
+  await page.generateChapterDraft.call(context);
+
+  assert.deepEqual(calls, [
+    { projectId: "project/1", chapterId: "chapter-1", data: { force_regenerate: true } },
+  ]);
+  assert.equal(context.data.chapter.draftBusy, false);
+  assert.deepEqual(toasts, ["已后台生成"]);
+
+  page.changeDraftContent.call(context, { detail: { value: "未保存正文" } });
+  await page.generateChapterDraft.call(context);
+
+  assert.equal(calls.length, 1);
+  assert.equal(context.data.chapter.draftError, "请先保存当前修改，再生成新版本");
+  delete global.wx;
 });

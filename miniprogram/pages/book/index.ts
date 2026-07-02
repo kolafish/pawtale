@@ -1600,17 +1600,12 @@ Page<BookData, {
 
   openChapterEditor(event) {
     const chapterId = event.currentTarget.dataset.id || "";
-    if (!chapterId) {
+    if (!chapterId || !this.data.projectId) {
+      this.setData({ error: "缺少章节信息" });
       return;
     }
     this.stopPlayback();
-    this.patchChapter(chapterId, { draftError: "" });
-    this.setData({ editingChapterId: chapterId });
-    (wx as WxWithPageScroll).pageScrollTo?.({
-      selector: `#chapter-editor-${chapterId}`,
-      duration: 260,
-      offsetTop: 12,
-    });
+    wx.navigateTo({ url: bookChapterDetailUrl(this.data.projectId, chapterId, "content") });
   },
 
   closeChapterEditor() {
@@ -2148,17 +2143,12 @@ Page<BookData, {
 
   editBookOutputChapter(event) {
     const chapterId = event.currentTarget.dataset.id || "";
-    if (!chapterId) {
+    if (!chapterId || !this.data.projectId) {
+      this.setData({ error: "缺少章节信息" });
       return;
     }
     this.stopPlayback();
-    this.patchChapter(chapterId, { draftError: "" });
-    this.setData({ editingChapterId: chapterId });
-    (wx as WxWithPageScroll).pageScrollTo?.({
-      selector: `#chapter-editor-${chapterId}`,
-      duration: 260,
-      offsetTop: 12,
-    });
+    wx.navigateTo({ url: bookChapterDetailUrl(this.data.projectId, chapterId, "content") });
   },
 
   async playChapterAudio(event) {
