@@ -1156,6 +1156,24 @@
   font-weight: 600;
 }
 
+.chapter-summary-error,
+.chapter-audio-status {
+  display: block;
+  margin-top: 12rpx;
+  font-size: 23rpx;
+  line-height: 1.35;
+}
+
+.chapter-summary-error {
+  color: #8f3e35;
+  font-weight: 700;
+}
+
+.chapter-audio-status {
+  color: #7b6f68;
+  font-weight: 600;
+}
+
 .chapter-summary-actions {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(128rpx, 0.42fr);

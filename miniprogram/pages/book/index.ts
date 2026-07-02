@@ -358,7 +358,10 @@ Page<BookData, {
   downloadBookOutputExport(event: DatasetEvent): Promise<void>;
   editBookOutputChapter(event: DatasetEvent): void;
   playChapterAudio(event: DatasetEvent): Promise<void>;
-  playChapterAudioById(chapterId: string, options?: { autoListenAfterPlayback?: boolean }): Promise<void>;
+  playChapterAudioById(
+    chapterId: string,
+    options?: { autoListenAfterPlayback?: boolean; showPreparingToast?: boolean },
+  ): Promise<void>;
   playBookAudio(): Promise<void>;
   playBookOutlineAudio(options?: { autoListenAfterPlayback?: boolean }): Promise<void>;
   startBookVoiceCommand(options?: { autoTriggered?: boolean }): Promise<void>;
@@ -1564,7 +1567,7 @@ Page<BookData, {
     if (chapter.draft?.latest_version) {
       actions.push({
         label: this.data.playingTarget === chapter.ttsTarget ? "停止朗读" : "朗读",
-        run: () => this.playChapterAudioById(chapterId),
+        run: () => this.playChapterAudioById(chapterId, { showPreparingToast: true }),
       });
     }
     if (!actions.length) {
@@ -2129,7 +2132,10 @@ Page<BookData, {
     await this.playChapterAudioById(chapterId);
   },
 
-  async playChapterAudioById(chapterId, options: { autoListenAfterPlayback?: boolean } = {}) {
+  async playChapterAudioById(
+    chapterId,
+    options: { autoListenAfterPlayback?: boolean; showPreparingToast?: boolean } = {},
+  ) {
     const chapter = this.data.chapters.find((candidate) => candidate.id === chapterId);
     if (!chapter || !this.data.projectId || this.data.updatingPlanStructure) {
       return;
@@ -2149,6 +2155,9 @@ Page<BookData, {
     if (chapter.draftChanged) {
       this.patchChapter(chapterId, { draftError: "请先保存当前修改" });
       return;
+    }
+    if (options.showPreparingToast) {
+      wx.showToast({ title: "正在准备朗读", icon: "none" });
     }
     this.stopPlayback();
     const token = this.audioPlayback.nextToken();
