@@ -1016,7 +1016,7 @@ Page<VoiceChatData, {
 
   async prepareAssistantTurnAudio(item) {
     if (!this.data.voiceSessionId || !item.messageId) {
-      throw new Error("缺少要合成的 AI 回应");
+      throw new Error("缺少要合成的小余回应");
     }
     const requestSerial = this.ttsRequestSerial;
     this.assistantAudioPrepareCount += 1;

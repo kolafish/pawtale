@@ -1,7 +1,7 @@
 .voice-authorization-page {
   min-height: 100vh;
   padding: 44rpx 36rpx 160rpx;
-  background: #fffaf2;
+  background: #fcf7ed;
   box-sizing: border-box;
 }
 
@@ -11,7 +11,7 @@
 
 .page-title {
   display: block;
-  color: #24100b;
+  color: #2b1713;
   font-size: 46rpx;
   font-weight: 800;
   line-height: 1.2;
@@ -20,14 +20,14 @@
 .page-meta {
   display: block;
   margin-top: 10rpx;
-  color: #685b55;
+  color: #7b6f68;
   font-size: 25rpx;
   line-height: 1.35;
 }
 
 .agreement-panel {
   padding: 32rpx;
-  border: 2rpx solid #f0dac0;
+  border: 2rpx solid #e8d8c3;
   border-radius: 24rpx;
   background: #ffffff;
   box-shadow: 0 12rpx 32rpx rgba(64, 43, 24, 0.07);
@@ -39,7 +39,7 @@
 
 .section-title {
   display: block;
-  color: #7a3b31;
+  color: #7b4a40;
   font-size: 30rpx;
   font-weight: 800;
   line-height: 1.35;
@@ -48,7 +48,7 @@
 .paragraph {
   display: block;
   margin-top: 12rpx;
-  color: #24100b;
+  color: #2b1713;
   font-size: 29rpx;
   line-height: 1.65;
   word-break: break-word;
@@ -61,7 +61,7 @@
   bottom: 0;
   padding: 24rpx 36rpx 42rpx;
   background: rgba(255, 250, 242, 0.96);
-  border-top: 2rpx solid #f0dac0;
+  border-top: 2rpx solid #e8d8c3;
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
   gap: 18rpx;
@@ -87,11 +87,11 @@
 }
 
 .ghost-button {
-  background: #fff1ec;
-  color: #7a3b31;
+  background: #fff3ef;
+  color: #7b4a40;
 }
 
 .primary-button {
-  background: #9f4a3c;
+  background: #a64b3e;
   color: #ffffff;
 }

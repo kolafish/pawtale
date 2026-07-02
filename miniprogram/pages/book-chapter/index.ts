@@ -347,7 +347,7 @@ Page<BookChapterPageData, {
         wx.switchTab({ url: "/pages/me/index" });
         return;
       }
-      this.patchChapter({ draftError: error instanceof Error ? error.message : "AI 起名失败" });
+      this.patchChapter({ draftError: error instanceof Error ? error.message : "小余起名失败" });
     } finally {
       this.setData({ titleBusy: false });
     }
@@ -465,7 +465,7 @@ Page<BookChapterPageData, {
         title: "合并章节",
         content: `把「${chapter.title}」合并到「${option.label}」，本章原始讲述会保留在合并后的章节中。`,
         confirmText: "合并",
-        confirmColor: "#9f4a3c",
+        confirmColor: "#a64b3e",
         success: (result) => resolve(Boolean(result.confirm)),
         fail: () => resolve(false),
       });
@@ -534,7 +534,7 @@ Page<BookChapterPageData, {
         title: "删除章节",
         content: `删除「${chapter.title}」会移除本章正文，收录讲述会回到待收录列表。`,
         confirmText: "删除",
-        confirmColor: "#b4234a",
+        confirmColor: "#b84a5a",
         success: (result) => resolve(Boolean(result.confirm)),
         fail: () => resolve(false),
       });

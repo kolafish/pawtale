@@ -85,19 +85,52 @@
       <view class="record-main">
         <text class="record-title">{{item.summaryTitleText}}</text>
         <text class="record-meta">{{item.recordMetaText}}</text>
+        <text class="book-status {{item.isIncludedInBook ? 'included' : ''}}">{{item.bookInclusionText}}</text>
       </view>
       <text class="record-count">{{item.display_char_count}} 字</text>
     </view>
 
-    <text class="summary-preview">
-      <text
-        wx:for="{{item.summarySegments}}"
-        wx:for-item="segment"
-        wx:for-index="segmentIndex"
-        wx:key="segmentIndex"
-        class="{{segment.highlight ? 'search-hit' : ''}}"
-      >{{segment.text}}</text>
-    </text>
+    <view wx:if="{{item.questionSegments.length}}" class="record-section question-section">
+      <text class="record-section-label">刚才问了</text>
+      <text class="record-section-text">
+        <text
+          wx:for="{{item.questionSegments}}"
+          wx:for-item="segment"
+          wx:for-index="segmentIndex"
+          wx:key="segmentIndex"
+          class="{{segment.highlight ? 'search-hit' : ''}}"
+        >{{segment.text}}</text>
+      </text>
+    </view>
+
+    <view wx:if="{{item.rawSegments.length}}" class="record-section raw-section">
+      <text class="record-section-label">原始讲述</text>
+      <text class="record-section-text">
+        <text
+          wx:for="{{item.rawSegments}}"
+          wx:for-item="segment"
+          wx:for-index="segmentIndex"
+          wx:key="segmentIndex"
+          class="{{segment.highlight ? 'search-hit' : ''}}"
+        >{{segment.text}}</text>
+      </text>
+    </view>
+
+    <view class="record-section display-section">
+      <view class="record-section-head">
+        <text class="record-section-label">整理后文字</text>
+        <text class="book-ready-tag">用于成书</text>
+      </view>
+      <text class="record-section-text">
+        <text
+          wx:for="{{item.summarySegments}}"
+          wx:for-item="segment"
+          wx:for-index="segmentIndex"
+          wx:key="segmentIndex"
+          class="{{segment.highlight ? 'search-hit' : ''}}"
+        >{{segment.text}}</text>
+      </text>
+    </view>
 
     <view class="actions-row list-actions" catchtap="stopCardTap">
       <button

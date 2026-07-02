@@ -40,7 +40,7 @@
           <checkbox
             value="voice_authorization"
             checked="{{voiceAuthorizationAgreed}}"
-            color="#9f4a3c"
+            color="#a64b3e"
           />
           <view class="voice-auth-copy">
             <text>我已阅读并同意</text>

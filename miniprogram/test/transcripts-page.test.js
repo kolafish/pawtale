@@ -365,7 +365,8 @@ test("transcripts page uses summary fields for browse cards", async () => {
 
   assert.equal(context.data.items[0].summaryTitleText, "爷爷退休后仍帮公司做事");
   assert.equal(context.data.items[0].summaryPreviewText, "讲述者提到爷爷退休后仍继续帮公司处理事务，大家都很信任他。");
-  assert.equal(context.data.items[0].recordMetaText, "07-01 15:38 · 32 秒 · 尚未入章");
+  assert.equal(context.data.items[0].recordMetaText, "07-01 15:38 · 32 秒");
+  assert.equal(context.data.items[0].bookInclusionText, "尚未入章");
 });
 
 test("transcripts page opens transcript detail from record header", () => {

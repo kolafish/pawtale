@@ -82,7 +82,7 @@ Page<HomeData, {
     projectTitle: "",
     hasProject: false,
     selectedMode: "free_narration",
-    guidanceLabel: "自由讲述",
+    guidanceLabel: "慢慢讲",
     voiceAuthorizationAgreed: false,
   },
 

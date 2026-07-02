@@ -80,7 +80,7 @@
             disabled="{{titleBusy || chapter.draftBusy}}"
             bindtap="generateChapterTitle"
           >
-            AI 起名
+            小余起名
           </button>
           <button
             class="primary-button"
@@ -96,13 +96,13 @@
       <view wx:if="{{!chapter.draft || !chapter.draft.latest_version}}" class="section-card manuscript-card">
         <view class="section-head">
           <view class="section-heading">
-            <text class="section-title">章节正文</text>
+            <text class="section-title">正文</text>
             <text class="section-hint">尚未生成版本</text>
           </view>
           <text class="section-count">0 字</text>
         </view>
         <view class="draft-empty">
-          <text>还没有章节正文</text>
+          <text>还没有正文</text>
           <button
             class="primary-button"
             loading="{{chapter.draftBusy}}"
@@ -117,7 +117,7 @@
       <view wx:else class="section-card manuscript-card">
         <view class="section-head">
           <view class="section-heading">
-            <text class="section-title">章节正文</text>
+            <text class="section-title">正文</text>
             <text class="section-hint">{{chapter.draftVersionText}}</text>
           </view>
           <text class="section-count">{{chapter.draftCharCount}} 字</text>
@@ -179,8 +179,8 @@
     <view wx:elif="{{activeTab === 'sources'}}" class="section-card">
       <view class="section-head">
         <view class="section-heading">
-          <text class="section-title">原始讲述</text>
-          <text class="section-hint">用于整理这一章</text>
+          <text class="section-title">引用自原始口述</text>
+          <text class="section-hint">这些内容是整理这一章的依据</text>
         </view>
         <text class="section-count">{{sourceCountText}}</text>
       </view>

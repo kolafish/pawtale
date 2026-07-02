@@ -3,8 +3,8 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #fffaf2;
-  color: #9f4a3c;
+  background: #fcf7ed;
+  color: #a64b3e;
   font-size: 30rpx;
   font-weight: 800;
 }

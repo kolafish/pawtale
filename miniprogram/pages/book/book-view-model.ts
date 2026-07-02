@@ -797,7 +797,7 @@ function automationEventSummaryText(event: MemoirAutomationEvent): string {
       return summary;
     }
   }
-  return trimText(event.summary_text) || "AI 已完成一次自动处理。";
+  return trimText(event.summary_text) || "小余已完成一次自动处理。";
 }
 
 export function buildAutomationEventViews(
