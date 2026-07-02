@@ -994,6 +994,11 @@ test("book page defaults to progress cards with single chapter editing", () => {
   assert.match(wxml, /bindtap="openChapterMoreActions"/);
   assert.match(wxml, /编辑正文/);
   assert.match(wxml, /更多/);
+  assert.match(wxml, /准备朗读/);
+  assert.match(wxml, /朗读中/);
+  assert.match(wxml, /正在准备朗读/);
+  assert.match(wxml, /正在朗读本章/);
+  assert.match(wxml, /item\.draftError/);
   assert.doesNotMatch(wxml, />\s*原始讲述\s*<\/button>/);
   assert.doesNotMatch(wxml, /bindtap="playChapterAudio"/);
   assert.doesNotMatch(wxml, /bindinput="changeDraftContent"/);
@@ -1001,6 +1006,8 @@ test("book page defaults to progress cards with single chapter editing", () => {
   assert.doesNotMatch(wxml, /chapter-action-groups/);
   assert.match(wxss, /\.chapter-card\.summary/);
   assert.match(wxss, /\.chapter-summary-actions/);
+  assert.match(wxss, /\.chapter-summary-error/);
+  assert.match(wxss, /\.chapter-audio-status/);
 });
 
 test("book page routes chapter card actions to the chapter detail page", () => {
@@ -2979,6 +2986,37 @@ test("book page sends book-specific TTS voice and speed", async () => {
       },
     },
   ]);
+});
+
+test("book page shows chapter narration toast only after preflight passes", async () => {
+  const toasts = [];
+  const { mod, page } = loadBookPage({
+    voiceApiExports: {
+      createMemoirBookChapterDraftTTS: async () => sampleAudioResponse(),
+    },
+  });
+  global.wx = {
+    showToast(options) {
+      toasts.push(options.title);
+    },
+  };
+  const chapters = mod.buildChapterViews(samplePlan("confirmed"), {
+    "chapter-1": sampleDraft(1, "draft"),
+  });
+  chapters[0].draftChanged = true;
+  const context = pageContext(page, { projectId: "project/1", chapters });
+  context.playAudioFiles = async () => {};
+
+  await page.playChapterAudioById.call(context, "chapter-1", { showPreparingToast: true });
+
+  assert.deepEqual(toasts, []);
+  assert.equal(context.data.chapters[0].draftError, "请先保存当前修改");
+
+  context.data.chapters[0].draftChanged = false;
+  await page.playChapterAudioById.call(context, "chapter-1", { showPreparingToast: true });
+
+  assert.deepEqual(toasts, ["正在准备朗读"]);
+  delete global.wx;
 });
 
 test("book page plays outline audio through the voice assistant", async () => {
