@@ -189,6 +189,9 @@ Page<HomeData, {
         `voiceSessionId=${encodeURIComponent(detail.session.id)}`,
         `mode=${encodeURIComponent(this.data.selectedMode)}`,
       ];
+      if (this.data.projectTitle) {
+        params.push(`projectTitle=${encodeURIComponent(this.data.projectTitle)}`);
+      }
       wx.navigateTo({ url: `/pages/voice-chat/index?${params.join("&")}` });
     } catch (error) {
       if (error instanceof ApiError && [401, 403].includes(error.statusCode)) {

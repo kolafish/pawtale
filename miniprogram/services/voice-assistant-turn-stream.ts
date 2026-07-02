@@ -416,7 +416,7 @@ export class VoiceAssistantTurnStreamClient {
     const audio = wx.base64ToArrayBuffer(event.audio || "");
     const bitsPerSample = positiveInteger(event.bits_per_sample);
     if (bitsPerSample !== 16) {
-      throw new Error("AI 语音帧格式不支持");
+      throw new Error("小余语音帧格式不支持");
     }
     this.callbacks.onAudioFrame?.({
       turnId: event.turn_id,

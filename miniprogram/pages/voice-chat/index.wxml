@@ -1,8 +1,10 @@
 <view class="voice-chat-page">
   <view class="top-bar">
     <view>
-      <text class="mode-label">{{modeLabel}}</text>
-      <text class="status-label {{status}}">{{statusText}}</text>
+      <text class="mode-label">正在聊：{{projectTitle || "这段回忆"}}</text>
+      <text class="status-label {{error ? 'error' : (recording ? 'listening' : '')}}">
+        {{error ? "需要处理一下" : (recording ? "我在听，您慢慢说" : (followUpLoading ? "小余正在想一想" : (followUpTTSPlaying ? "小余正在读问题" : (persistenceStateText === "已保存" ? "已保存这一段" : "可以开始讲了"))))}}
+      </text>
     </view>
     <button
       class="finish-button"
@@ -15,14 +17,8 @@
   </view>
 
   <view wx:if="{{error}}" class="error">{{error}}</view>
-  <view class="session-state-strip">
-    <block wx:if="{{error}}">
-      <text class="session-state-error">{{errorKindText || statusText}}</text>
-    </block>
-    <block wx:else>
-      <text>{{gatewayStateText}}</text>
-      <text>{{persistenceStateText}}</text>
-    </block>
+  <view wx:if="{{error && errorKindText}}" class="session-state-strip">
+    <text class="session-state-error">{{errorKindText}}</text>
   </view>
   <view wx:if="{{recoveryNotice || canReconnect || canFinishAfterDisconnect}}" class="recovery-panel">
     <text wx:if="{{recoveryNotice}}" class="recovery-text">{{recoveryNotice}}</text>
@@ -34,7 +30,7 @@
 
   <view wx:if="{{!voiceAuthorizationAgreed}}" class="voice-auth-panel">
     <text class="voice-auth-title">开始录音前需要声纹授权</text>
-    <text class="voice-auth-desc">同意后才会打开麦克风，语音会用于实时识别文字、老余语音回应、原始音频留存和回忆录成书。</text>
+    <text class="voice-auth-desc">同意后才会打开麦克风，语音会用于实时识别文字、小余语音回应、原始音频留存和回忆录成书。</text>
     <checkbox-group bindchange="changeVoiceAuthorization">
       <label class="voice-auth-row">
         <checkbox
@@ -52,8 +48,8 @@
 
   <view wx:if="{{assistantPromptText || followUpLoading || followUpError || canRequestFollowUp}}" class="assistant-panel {{followUpError ? 'error-state' : ''}}">
     <view class="assistant-head">
-      <text class="assistant-label">{{assistantPromptLabel}}</text>
-      <text class="assistant-state">{{followUpLoading ? "思考中" : (followUpError ? "回应失败" : (assistantPromptText ? (assistantExpectsAnswer ? "等待回答" : "可继续") : "可生成"))}}</text>
+      <text class="assistant-label">{{followUpError ? "小余没说好" : "小余想听您讲讲"}}</text>
+      <text class="assistant-state">{{followUpLoading ? "正在想一想" : (followUpError ? "再试一次" : (followUpTTSPlaying ? "正在读" : "等您讲"))}}</text>
     </view>
     <view wx:if="{{followUpTTSPlaying && assistantPromptText}}" class="assistant-tts-text">
       <text class="assistant-tts-spoken">{{ttsSpokenText}}</text>
@@ -61,9 +57,11 @@
       <text>{{ttsRemainingText}}</text>
     </view>
     <text wx:else class="assistant-text">{{followUpLoading ? assistantLoadingText : (followUpError || assistantPromptText || assistantEmptyText)}}</text>
-    <view wx:if="{{assistantPromptText && (followUpTTSStateText || followUpTTSError || followUpTTSLoading)}}" class="tts-strip {{followUpTTSError ? 'error' : ''}}">
-      <text>{{followUpTTSLoading ? "正在准备 AI 语音" : (followUpTTSError || followUpTTSStateText)}}</text>
-      <text wx:if="{{followUpTTSPlaying}}" class="tts-progress-text">{{ttsProgressPercent}}%</text>
+    <view wx:if="{{assistantPromptText && (followUpTTSPlaying || followUpTTSError || followUpTTSLoading)}}" class="tts-strip {{followUpTTSError ? 'error' : ''}}">
+      <text>{{followUpTTSError || (followUpTTSLoading ? "正在准备朗读" : "小余正在读问题")}}</text>
+      <view wx:if="{{followUpTTSPlaying}}" class="tts-progress-track">
+        <view class="tts-progress-fill" style="width: {{ttsProgressPercent}}%;"></view>
+      </view>
     </view>
     <view class="assistant-actions">
       <button
@@ -73,7 +71,7 @@
         disabled="{{followUpTTSLoading}}"
         bindtap="playFollowUpAudio"
       >
-        {{followUpAudioFileId ? (followUpTTSPlaying ? "播放中" : "重播语音") : (followUpTTSError ? "重试语音" : "播放语音")}}
+        {{followUpAudioFileId ? "重听一遍" : (followUpTTSError ? "重试朗读" : "读给我听")}}
       </button>
       <button
         class="assistant-button"
@@ -81,40 +79,31 @@
         disabled="{{followUpLoading}}"
         bindtap="regenerateFollowUp"
       >
-        {{followUpError ? "重新生成" : (assistantPromptText ? "换个说法" : "生成回应")}}
+        {{followUpError ? "再问一次" : (assistantPromptText ? "换个问法" : "让小余问一句")}}
       </button>
       <button
         wx:if="{{assistantPromptText && !followUpLoading && !followUpError}}"
         class="assistant-button ghost"
         bindtap="skipFollowUp"
       >
-        跳过
+        跳过这句
       </button>
     </view>
   </view>
 
   <view class="transcript-stage">
-    <text class="stage-eyebrow">{{recording ? captureStateText : (followUpLoading ? "老余正在回应" : "准备好了")}}</text>
-    <text class="live-text">{{recording ? (liveText || "请直接说，我会把文字显示在这里") : (liveText || latestTranscriptText || "点下方按钮开始回答")}}</text>
+    <text class="stage-eyebrow">{{recording ? "我在听，您慢慢说" : (followUpLoading ? "小余正在想一想" : (assistantPromptText ? "轮到您了" : "可以开始讲了"))}}</text>
+    <text class="live-text">{{recording ? (liveText || "直接说就行，我会帮您记下来") : (liveText || latestTranscriptText || "点下方“我开始讲了”")}}</text>
     <view class="capture-strip {{recording ? 'active' : ''}}">
       <view class="capture-dot"></view>
-      <text>{{captureStateText}}</text>
-      <view class="capture-metrics">
-        <text>{{captureDurationText}}</text>
-        <text>本句 {{liveCharCount}} 字</text>
-        <text wx:if="{{captureFrameCount}}">{{captureFrameCount}} 帧</text>
-        <text wx:if="{{captureFrameCount}}">{{captureKilobytes}} KB</text>
-      </view>
+      <text wx:if="{{recording}}">已说 {{captureDurationText}}</text>
+      <text wx:else>说完后点“说完了”，我会帮您整理成文字。</text>
+      <text wx:if="{{recording && liveCharCount}}">本句 {{liveCharCount}} 字</text>
     </view>
-    <view class="voice-activity">
+    <view wx:if="{{recording}}" class="voice-activity">
       <view class="level-track">
         <view class="level-fill" style="width: {{audioLevelPercent}}%;"></view>
       </view>
-      <text class="auto-listen-text">{{autoListenStateText}}</text>
-      <text class="auto-stop-text">{{autoStopStateText}}</text>
-      <button class="auto-stop-toggle" bindtap="toggleAutoStop">
-        {{autoStopEnabled ? "关闭" : "开启"}}
-      </button>
     </view>
   </view>
 
@@ -127,7 +116,7 @@
       <text>一句话说完后，会在这里保存下来。</text>
     </view>
     <view wx:for="{{transcriptLines}}" wx:key="id" class="transcript-line {{item.role === 'assistant' ? 'assistant' : 'user'}}">
-      <text class="line-role">{{item.role === 'assistant' ? 'AI' : '我'}}</text>
+      <text class="line-role">{{item.role === 'assistant' ? '小余' : '我'}}</text>
       <text>{{item.text}}</text>
     </view>
   </view>
@@ -140,7 +129,7 @@
       bindtap="toggleRecording"
     >
       <image class="mic-icon" src="/assets/memoir-microphone.png" mode="aspectFit" />
-      <text>{{!voiceAuthorizationAgreed ? "同意后开始说话" : (connecting ? "连接中" : ((followUpLoading || followUpTTSLoading || followUpTTSPlaying) ? "打断老余" : primaryActionText))}}</text>
+      <text>{{!voiceAuthorizationAgreed ? "同意后开始说话" : (connecting ? "正在准备" : (recording ? "说完了" : ((followUpLoading || followUpTTSLoading || followUpTTSPlaying) ? "我想说了" : (primaryActionText === "开始说话" ? "我开始讲了" : (primaryActionText === "继续说话" ? "继续讲" : primaryActionText)))))}}</text>
     </button>
   </view>
 </view>
