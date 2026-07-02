@@ -10,6 +10,11 @@ import {
 } from "../../services/memoir-voice-api";
 import { getMemoirIdentity } from "../../services/auth";
 import { routeAuthError } from "../../services/navigation";
+import {
+  datasetString,
+  pageUrl,
+  type PageDatasetEvent,
+} from "../../services/page-input";
 
 interface VoiceSessionSummaryView extends MemoirVoiceSessionSummary {
   modeText: string;
@@ -34,13 +39,11 @@ interface ProgressData {
   modules: ModuleProgressView[];
 }
 
-interface DatasetEvent {
-  currentTarget: {
-    dataset: {
-      id?: string;
-    };
-  };
+interface ProgressDataset {
+  id?: string;
 }
+
+type DatasetEvent = PageDatasetEvent<ProgressDataset>;
 
 const MODULE_LABELS: Record<string, string> = {
   person: "人物",
@@ -196,7 +199,7 @@ Page<ProgressData, {
   },
 
   continueSession(event) {
-    const id = String(event.currentTarget.dataset.id || "");
+    const id = datasetString(event, "id");
     const item = this.data.sessions.find((candidate) => candidate.id === id);
     if (!item) {
       return;
@@ -207,13 +210,12 @@ Page<ProgressData, {
       });
       return;
     }
-    const query = [
-      `voiceSessionId=${encodeURIComponent(item.id)}`,
-      `mode=${encodeURIComponent(item.guidance_mode)}`,
-    ];
-    if (item.current_guidance_module) {
-      query.push(`module=${encodeURIComponent(item.current_guidance_module)}`);
-    }
-    wx.navigateTo({ url: `/pages/voice-chat/index?${query.join("&")}` });
+    wx.navigateTo({
+      url: pageUrl("/pages/voice-chat/index", {
+        voiceSessionId: item.id,
+        mode: item.guidance_mode,
+        module: item.current_guidance_module,
+      }),
+    });
   },
 });

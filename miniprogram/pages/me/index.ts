@@ -12,6 +12,13 @@ import {
 import { getMemoirVoiceProgress } from "../../services/memoir-voice-api";
 import { isAuthError } from "../../services/navigation";
 import {
+  datasetChoice,
+  datasetNumber,
+  datasetString,
+  type PageDatasetEvent,
+  type PageTextInputEvent,
+} from "../../services/page-input";
+import {
   AI_MODEL_OPTIONS,
   aiModelLabel,
   readSelectedAIModel,
@@ -83,37 +90,19 @@ interface MeData {
   ttsSpeedOptions: TTSSpeedOption[];
 }
 
-interface VoiceDatasetEvent {
-  currentTarget: {
-    dataset: {
-      scope?: TTSSettingsScope;
-      voice?: string;
-    };
-  };
+interface MeDataset {
+  scope?: string;
+  voice?: string;
+  speed?: string | number;
+  model?: string;
 }
 
-interface SpeedDatasetEvent {
-  currentTarget: {
-    dataset: {
-      scope?: TTSSettingsScope;
-      speed?: string | number;
-    };
-  };
-}
+type VoiceDatasetEvent = PageDatasetEvent<MeDataset>;
+type SpeedDatasetEvent = PageDatasetEvent<MeDataset>;
+type ModelDatasetEvent = PageDatasetEvent<MeDataset>;
+type InputEvent = PageTextInputEvent;
 
-interface ModelDatasetEvent {
-  currentTarget: {
-    dataset: {
-      model?: string;
-    };
-  };
-}
-
-interface InputEvent {
-  detail: {
-    value: string;
-  };
-}
+const TTS_SCOPE_VALUES: readonly TTSSettingsScope[] = ["chat", "book"];
 
 function isProvisionalWeChatEmail(email: string): boolean {
   return email.trim().toLowerCase().endsWith("@wechat.local");
@@ -551,23 +540,24 @@ Page<MeData, {
   },
 
   selectTTSVoice(event) {
-    const scope = event.currentTarget.dataset.scope === "book" ? "book" : "chat";
-    const voice = event.currentTarget.dataset.voice || "";
+    const scope = datasetChoice(event, "scope", TTS_SCOPE_VALUES, "chat");
+    const voice = datasetString(event, "voice");
     const settings = saveScopedTTSSettings(scope, { ...readScopedTTSSettings(scope), voice });
     this.setData(ttsScopeData(scope, settings));
     wx.showToast({ title: "已保存", icon: "success" });
   },
 
   selectTTSSpeed(event) {
-    const scope = event.currentTarget.dataset.scope === "book" ? "book" : "chat";
-    const speedRatio = Number(event.currentTarget.dataset.speed);
-    const settings = saveScopedTTSSettings(scope, { ...readScopedTTSSettings(scope), speedRatio });
+    const scope = datasetChoice(event, "scope", TTS_SCOPE_VALUES, "chat");
+    const current = readScopedTTSSettings(scope);
+    const speedRatio = datasetNumber(event, "speed", current.speedRatio);
+    const settings = saveScopedTTSSettings(scope, { ...current, speedRatio });
     this.setData(ttsScopeData(scope, settings));
     wx.showToast({ title: "已保存", icon: "success" });
   },
 
   selectAIModel(event) {
-    const model = saveSelectedAIModel(event.currentTarget.dataset.model || "");
+    const model = saveSelectedAIModel(datasetString(event, "model"));
     this.setData({
       aiModel: model,
       aiModelLabel: aiModelLabel(model),

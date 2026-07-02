@@ -9,21 +9,21 @@ import {
   updateMemoirProject,
 } from "../../services/memoir";
 import { memoirProjectProfile } from "../../services/memoir-project-profile";
+import {
+  datasetChoice,
+  queryParam,
+  type PageDatasetEvent,
+  type PageQuery,
+  type PageTextInputEvent,
+} from "../../services/page-input";
 
-interface DatasetEvent {
-  currentTarget: {
-    dataset: {
-      gender?: MemoirNarratorGender;
-      mode?: MemoirGuidanceMode;
-    };
-  };
+interface ProjectEditDataset {
+  gender?: string;
+  mode?: string;
 }
 
-interface InputEvent {
-  detail: {
-    value: string;
-  };
-}
+type DatasetEvent = PageDatasetEvent<ProjectEditDataset>;
+type InputEvent = PageTextInputEvent;
 
 interface Option<T extends string> {
   value: T;
@@ -45,6 +45,9 @@ interface ProjectEditData {
   guidanceOptions: Array<Option<MemoirGuidanceMode>>;
 }
 
+const GENDER_VALUES: readonly MemoirNarratorGender[] = ["male", "female", "unspecified"];
+const GUIDANCE_VALUES: readonly MemoirGuidanceMode[] = ["free_narration", "guided_interview"];
+
 function ageFromText(value: string): number | null {
   const trimmed = value.trim();
   if (!trimmed) {
@@ -58,7 +61,7 @@ function ageFromText(value: string): number | null {
 }
 
 Page<ProjectEditData, {
-  onLoad(query?: Record<string, string | undefined>): Promise<void>;
+  onLoad(query?: PageQuery): Promise<void>;
   loadProject(projectId: string): Promise<void>;
   changeTitle(event: InputEvent): void;
   changeOrigin(event: InputEvent): void;
@@ -91,7 +94,7 @@ Page<ProjectEditData, {
   },
 
   async onLoad(query) {
-    const projectId = query?.projectId || "";
+    const projectId = queryParam(query, "projectId");
     if (projectId) {
       this.setData({ projectId, pageTitle: "编辑回忆录" });
       await this.loadProject(projectId);
@@ -145,14 +148,14 @@ Page<ProjectEditData, {
   },
 
   selectGender(event) {
-    const gender = event.currentTarget.dataset.gender;
+    const gender = datasetChoice(event, "gender", GENDER_VALUES, this.data.narratorGender);
     if (gender) {
       this.setData({ narratorGender: gender, error: "" });
     }
   },
 
   selectGuidanceMode(event) {
-    const mode = event.currentTarget.dataset.mode;
+    const mode = datasetChoice(event, "mode", GUIDANCE_VALUES, this.data.defaultGuidanceMode);
     if (mode) {
       this.setData({ defaultGuidanceMode: mode, error: "" });
     }

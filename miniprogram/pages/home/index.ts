@@ -11,6 +11,7 @@ import {
   memoirProjectProfile,
 } from "../../services/memoir-project-profile";
 import { isAuthError, switchToMe } from "../../services/navigation";
+import { pageUrl } from "../../services/page-input";
 import {
   readVoiceAuthorizationConsent,
   saveVoiceAuthorizationConsent,
@@ -193,14 +194,13 @@ Page<HomeData, {
         { guidance_mode: this.data.selectedMode, entry: "home" },
         { projectId: this.data.projectId, voiceSessionId: detail.session.id },
       );
-      const params = [
-        `voiceSessionId=${encodeURIComponent(detail.session.id)}`,
-        `mode=${encodeURIComponent(this.data.selectedMode)}`,
-      ];
-      if (this.data.projectTitle) {
-        params.push(`projectTitle=${encodeURIComponent(this.data.projectDisplayTitle || this.data.projectTitle)}`);
-      }
-      wx.navigateTo({ url: `/pages/voice-chat/index?${params.join("&")}` });
+      wx.navigateTo({
+        url: pageUrl("/pages/voice-chat/index", {
+          voiceSessionId: detail.session.id,
+          mode: this.data.selectedMode,
+          projectTitle: this.data.projectTitle ? this.data.projectDisplayTitle || this.data.projectTitle : "",
+        }),
+      });
     } catch (error) {
       if (isAuthError(error)) {
         switchToMe();

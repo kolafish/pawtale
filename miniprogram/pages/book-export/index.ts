@@ -1,5 +1,4 @@
 import type {
-  MemoirBookEditorialCopyTarget,
   MemoirBookOutput,
   MemoirBookOutputExportFormat,
   MemoirBookOutputExportLayout,
@@ -16,6 +15,17 @@ import {
 } from "../../services/memoir-voice-api";
 import { ApiError } from "../../services/request";
 import { routeAuthError } from "../../services/navigation";
+import {
+  datasetChoice,
+  datasetString,
+  pickerIndex,
+  queryParam,
+  type PageDatasetEvent,
+  type PagePickerEvent,
+  type PageQuery,
+  type PageSwitchEvent,
+  type PageTextInputEvent,
+} from "../../services/page-input";
 import {
   bookOutputData,
   buildChapterViews,
@@ -35,36 +45,19 @@ import {
   latestBookTitle,
 } from "../book/book-design-model";
 
-interface DatasetEvent {
-  currentTarget: {
-    dataset: {
-      action?: string;
-      format?: MemoirBookOutputExportFormat;
-      key?: string;
-      layout?: MemoirBookOutputExportLayout;
-      target?: MemoirBookEditorialCopyTarget;
-      title?: string;
-    };
-  };
+interface BookExportDataset {
+  action?: string;
+  format?: string;
+  key?: string;
+  layout?: string;
+  target?: string;
+  title?: string;
 }
 
-interface TextInputEvent extends DatasetEvent {
-  detail: {
-    value: string;
-  };
-}
-
-interface PickerEvent extends DatasetEvent {
-  detail: {
-    value: string | number;
-  };
-}
-
-interface SwitchEvent extends DatasetEvent {
-  detail: {
-    value: boolean;
-  };
-}
+type DatasetEvent = PageDatasetEvent<BookExportDataset>;
+type TextInputEvent = PageTextInputEvent<BookExportDataset>;
+type PickerEvent = PagePickerEvent<BookExportDataset>;
+type SwitchEvent = PageSwitchEvent<BookExportDataset>;
 
 interface OpenDocumentOptions {
   filePath: string;
@@ -144,6 +137,8 @@ type BookExportData = Pick<
 };
 
 const BOOK_DESIGN_AUTOSAVE_DELAY_MS = 900;
+const BOOK_EXPORT_FORMATS: readonly MemoirBookOutputExportFormat[] = ["pdf", "txt"];
+const BOOK_EXPORT_LAYOUTS: readonly MemoirBookOutputExportLayout[] = ["standard", "large_print"];
 
 function exportNotice(action: string): string {
   if (action === "reading_pdf") {
@@ -176,7 +171,7 @@ function defaultTitle(plan: MemoirBookPlan | null, output: MemoirBookOutput | nu
 }
 
 Page<BookExportData, {
-  onLoad(query?: Record<string, string | undefined>): Promise<void>;
+  onLoad(query?: PageQuery): Promise<void>;
   onUnload(): void;
   loadBookExportPage(projectId: string): Promise<void>;
   loadBookOutput(projectId: string): Promise<MemoirBookOutput | null>;
@@ -228,8 +223,8 @@ Page<BookExportData, {
   },
 
   async onLoad(query = {}) {
-    const projectId = String(query.projectId || "");
-    const action = String(query.action || "preview");
+    const projectId = queryParam(query, "projectId");
+    const action = queryParam(query, "action") || "preview";
     this.setData({
       projectId,
       requestedAction: action,
@@ -315,7 +310,7 @@ Page<BookExportData, {
   },
 
   changeBookMetadataField(event) {
-    const key = String(event.currentTarget.dataset.key || "");
+    const key = datasetString(event, "key");
     const fieldByKey: Record<string, keyof BookExportData> = {
       subtitle: "bookSubtitleInput",
       narrator_name: "bookNarratorNameInput",
@@ -365,7 +360,7 @@ Page<BookExportData, {
   },
 
   chooseBookTitleSuggestion(event) {
-    const title = trimText(event.currentTarget.dataset.title || "");
+    const title = trimText(datasetString(event, "title"));
     if (!title) {
       return;
     }
@@ -381,7 +376,7 @@ Page<BookExportData, {
   },
 
   changeBookCoverStyle(event) {
-    const index = Number(event.detail.value);
+    const index = pickerIndex(event);
     const option = this.data.bookCoverStyleOptions[index];
     if (!option) {
       return;
@@ -523,7 +518,7 @@ Page<BookExportData, {
   },
 
   async regenerateBookEditorialCopy(event) {
-    const target = String(event.currentTarget.dataset.target || "");
+    const target = datasetString(event, "target");
     if (!isBookLevelEditorialCopyTarget(target)) {
       return;
     }
@@ -591,7 +586,7 @@ Page<BookExportData, {
   },
 
   changeBookOutputVersion(event) {
-    const index = Number(event.detail.value);
+    const index = pickerIndex(event);
     const option = this.data.bookVersionOptions[index];
     if (!option || !this.data.bookOutput) {
       return;
@@ -607,7 +602,7 @@ Page<BookExportData, {
   },
 
   previewExportActionHint(event) {
-    this.setData({ exportActionHintText: exportActionHint(String(event.currentTarget.dataset.action || "")) });
+    this.setData({ exportActionHintText: exportActionHint(datasetString(event, "action")) });
   },
 
   toggleBookPreviewChapters() {
@@ -615,8 +610,8 @@ Page<BookExportData, {
   },
 
   async downloadBookOutputExport(event) {
-    const format: MemoirBookOutputExportFormat = event.currentTarget.dataset.format === "txt" ? "txt" : "pdf";
-    const requestedLayout = event.currentTarget.dataset.layout;
+    const format = datasetChoice(event, "format", BOOK_EXPORT_FORMATS, "pdf");
+    const requestedLayout = datasetChoice(event, "layout", BOOK_EXPORT_LAYOUTS, "standard");
     const layout: MemoirBookOutputExportLayout = format === "pdf" && requestedLayout === "large_print"
       ? "large_print"
       : "standard";

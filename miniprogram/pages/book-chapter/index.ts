@@ -18,6 +18,17 @@ import {
 } from "../../services/memoir-voice-api";
 import { ApiError } from "../../services/request";
 import { routeAuthError } from "../../services/navigation";
+import {
+  datasetChoice,
+  datasetString,
+  pickerIndex,
+  queryChoice,
+  queryParam,
+  type PageDatasetEvent,
+  type PagePickerEvent,
+  type PageQuery,
+  type PageTextInputEvent,
+} from "../../services/page-input";
 import type { BookChapterView } from "../book/book-view-model";
 import {
   buildChapterViews,
@@ -25,35 +36,20 @@ import {
   trimText,
 } from "../book/book-view-model";
 
-type ChapterDetailTab = "content" | "sources" | "more";
+const TAB_VALUES = ["content", "sources", "more"] as const;
+const CHAPTER_MOVE_DIRECTIONS = ["up", "down"] as const;
 
-interface PageQuery {
-  projectId?: string;
-  chapterId?: string;
+type ChapterDetailTab = (typeof TAB_VALUES)[number];
+
+interface ChapterDataset {
   tab?: string;
+  direction?: string;
+  utteranceId?: string;
 }
 
-interface DatasetEvent {
-  currentTarget: {
-    dataset: {
-      tab?: string;
-      direction?: string;
-      utteranceId?: string;
-    };
-  };
-}
-
-interface PickerEvent {
-  detail: {
-    value: string | number;
-  };
-}
-
-interface TextInputEvent {
-  detail: {
-    value: string;
-  };
-}
+type DatasetEvent = PageDatasetEvent<ChapterDataset>;
+type PickerEvent = PagePickerEvent;
+type TextInputEvent = PageTextInputEvent;
 
 interface BookChapterPageData {
   loading: boolean;
@@ -72,21 +68,6 @@ interface BookChapterPageData {
   titleBusy: boolean;
   updatingPlanStructure: boolean;
   splitSourceSelections: string[];
-}
-
-const TAB_VALUES: ChapterDetailTab[] = ["content", "sources", "more"];
-
-function decodeQueryValue(value = ""): string {
-  try {
-    return decodeURIComponent(value);
-  } catch {
-    return value;
-  }
-}
-
-function normalizeTab(value = ""): ChapterDetailTab {
-  const tab = decodeQueryValue(value) as ChapterDetailTab;
-  return TAB_VALUES.includes(tab) ? tab : "content";
 }
 
 function chapterIndexText(plan: MemoirBookPlan | null, chapterId: string): string {
@@ -168,9 +149,9 @@ Page<BookChapterPageData, {
   },
 
   async onLoad(query = {}) {
-    const projectId = decodeQueryValue(query.projectId || "");
-    const chapterId = decodeQueryValue(query.chapterId || "");
-    const activeTab = normalizeTab(query.tab || "");
+    const projectId = queryParam(query, "projectId");
+    const chapterId = queryParam(query, "chapterId");
+    const activeTab = queryChoice(query, "tab", TAB_VALUES, "content");
     this.setData({ projectId, chapterId, activeTab, error: "" });
     if (!projectId || !chapterId) {
       this.setData({ error: "缺少章节信息" });
@@ -278,8 +259,7 @@ Page<BookChapterPageData, {
   },
 
   changeTab(event) {
-    const tab = String(event.currentTarget.dataset.tab || "");
-    this.setData({ activeTab: normalizeTab(tab) });
+    this.setData({ activeTab: datasetChoice(event, "tab", TAB_VALUES, "content") });
   },
 
   changeChapterTitle(event) {
@@ -432,7 +412,7 @@ Page<BookChapterPageData, {
   },
 
   async moveChapter(event) {
-    const direction = event.currentTarget.dataset.direction === "up" ? "up" : "down";
+    const direction = datasetChoice(event, "direction", CHAPTER_MOVE_DIRECTIONS, "down");
     const chapter = this.data.chapter;
     if (!chapter || (direction === "up" && !chapter.canMoveUp) || (direction === "down" && !chapter.canMoveDown)) {
       return;
@@ -449,7 +429,7 @@ Page<BookChapterPageData, {
 
   async mergeChapterInto(event) {
     const chapter = this.data.chapter;
-    const optionIndex = Number(event.detail.value);
+    const optionIndex = pickerIndex(event);
     const option = chapter?.mergeTargetOptions[optionIndex];
     if (!chapter || !option || this.data.updatingPlanStructure) {
       return;
@@ -478,7 +458,7 @@ Page<BookChapterPageData, {
   },
 
   toggleSplitSource(event) {
-    const utteranceId = event.currentTarget.dataset.utteranceId || "";
+    const utteranceId = datasetString(event, "utteranceId");
     const chapter = this.data.chapter;
     if (!chapter || !utteranceId || chapter.source_refs.length <= 1 || this.data.updatingPlanStructure || chapter.draftBusy) {
       return;
