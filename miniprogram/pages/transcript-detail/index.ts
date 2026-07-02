@@ -442,6 +442,9 @@ Page<TranscriptDetailData, {
     const utteranceId = options?.id ? decodeURIComponent(options.id) : "";
     this.setData({ utteranceId });
     await this.loadTranscript();
+    if (options?.mode === "edit") {
+      this.beginEdit();
+    }
   },
 
   async loadTranscript() {

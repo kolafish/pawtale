@@ -178,7 +178,7 @@ test("transcript audio summary falls back to utterance timestamps", () => {
   );
 });
 
-test("transcript book inclusion text shows included chapter titles", () => {
+test("transcript book inclusion text shows chapter placement", () => {
   const { transcriptBookInclusionText } = loadTranscriptsPage().mod;
 
   assert.equal(
@@ -188,9 +188,9 @@ test("transcript book inclusion text shows included chapter titles", () => {
         { chapter_id: "chapter-1", title: "童年院子", sort_order: 0 },
       ],
     }),
-    "已收录：童年院子、离家求学",
+    "已放入第 1 章：童年院子等 2 章",
   );
-  assert.equal(transcriptBookInclusionText({ included_chapters: [] }), "未收录到章节");
+  assert.equal(transcriptBookInclusionText({ included_chapters: [] }), "尚未入章");
 });
 
 test("transcript text highlighter marks every search term", () => {
@@ -241,11 +241,15 @@ test("transcript voice edit diff marks inline replacements, insertions, and dele
   );
 });
 
-test("transcripts page renders voice correction as inline diff preview", () => {
+test("transcripts list leaves full correction UI to the detail page", () => {
   const wxml = fs.readFileSync(path.join(__dirname, "../pages/transcripts/index.wxml"), "utf8");
+  const detailWxml = fs.readFileSync(path.join(__dirname, "../pages/transcript-detail/index.wxml"), "utf8");
 
-  assert.match(wxml, /voice-edit-inline-diff/);
-  assert.match(wxml, /voiceEditPreview\.diffSegments/);
+  assert.doesNotMatch(wxml, /voice-edit-inline-diff/);
+  assert.doesNotMatch(wxml, /class="raw-box"/);
+  assert.doesNotMatch(wxml, /section-title">整理文字/);
+  assert.match(detailWxml, /voice-edit-inline-diff/);
+  assert.match(detailWxml, /voiceEditPreview\.diffSegments/);
   assert.doesNotMatch(wxml, /voice-edit-comparison/);
 });
 
@@ -328,6 +332,42 @@ test("transcripts page formats record time without timezone label", async () => 
   assert.equal(context.data.items[0].recordNumber, 1);
 });
 
+test("transcripts page uses summary fields for browse cards", async () => {
+  const { page } = loadTranscriptsPage({
+    authExports: {
+      getMemoirIdentity: async () => ({
+        id: "user-1",
+        active_project_id: "project-1",
+        active_project: { id: "project-1", title: "我的回忆录" },
+        projects: [],
+      }),
+    },
+    voiceApiExports: {
+      listMemoirVoiceTranscripts: async () => ({
+        items: [
+          {
+            ...sampleTranscript("utterance-summary", "2026-07-01T07:38:00.000Z"),
+            summary_title: "爷爷退休后仍帮公司做事",
+            summary_text: "讲述者提到爷爷退休后仍继续帮公司处理事务，大家都很信任他。",
+            summary_source: "source_card",
+            audio_duration_seconds: 32,
+          },
+        ],
+        total: 1,
+        limit: 30,
+        offset: 0,
+      }),
+    },
+  });
+  const context = pageContext(page);
+
+  await page.loadTranscripts.call(context, true);
+
+  assert.equal(context.data.items[0].summaryTitleText, "爷爷退休后仍帮公司做事");
+  assert.equal(context.data.items[0].summaryPreviewText, "讲述者提到爷爷退休后仍继续帮公司处理事务，大家都很信任他。");
+  assert.equal(context.data.items[0].recordMetaText, "07-01 15:38 · 32 秒 · 尚未入章");
+});
+
 test("transcripts page opens transcript detail from record header", () => {
   const navigations = [];
   global.wx = {
@@ -345,6 +385,14 @@ test("transcripts page opens transcript detail from record header", () => {
   assert.deepEqual(navigations, [
     { url: "/pages/transcript-detail/index?id=utterance%2Fdetail%20id" },
   ]);
+
+  page.openTranscriptEdit.call(context, {
+    currentTarget: { dataset: { id: "utterance/edit id" } },
+  });
+
+  assert.deepEqual(navigations[1], {
+    url: "/pages/transcript-detail/index?id=utterance%2Fedit%20id&mode=edit",
+  });
   delete global.wx;
 });
 

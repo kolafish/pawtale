@@ -78,164 +78,35 @@
     wx:key="id"
     id="{{item.anchorId}}"
     class="transcript-card {{highlightedId === item.id ? 'highlighted' : ''}}"
+    data-id="{{item.id}}"
+    bindtap="openTranscriptDetail"
   >
-    <view class="record-head" data-id="{{item.id}}" bindtap="openTranscriptDetail">
-      <view>
-        <text class="record-title">语音记录 {{item.recordNumber}}</text>
-        <text class="record-time">{{item.createdAtText}}</text>
-        <text class="record-project">{{item.project_title || "我的回忆录"}}</text>
-        <text class="record-meta">{{item.audioText}}</text>
-        <text class="book-status {{item.isIncludedInBook ? 'included' : ''}}">{{item.bookInclusionText}}</text>
+    <view class="record-head">
+      <view class="record-main">
+        <text class="record-title">{{item.summaryTitleText}}</text>
+        <text class="record-meta">{{item.recordMetaText}}</text>
       </view>
       <text class="record-count">{{item.display_char_count}} 字</text>
     </view>
 
-    <view wx:if="{{item.question_text}}" class="question-box">
-      <view class="section-head">
-        <text class="section-title">AI 引导问题</text>
-        <text class="section-count">{{item.question_audio_file_id ? "可播放" : "无语音"}}</text>
-      </view>
-      <text class="question-text">
-        <text
-          wx:for="{{item.questionSegments}}"
-          wx:for-item="segment"
-          wx:for-index="segmentIndex"
-          wx:key="segmentIndex"
-          class="{{segment.highlight ? 'search-hit' : ''}}"
-        >{{segment.text}}</text>
-      </text>
-    </view>
+    <text class="summary-preview">
+      <text
+        wx:for="{{item.summarySegments}}"
+        wx:for-item="segment"
+        wx:for-index="segmentIndex"
+        wx:key="segmentIndex"
+        class="{{segment.highlight ? 'search-hit' : ''}}"
+      >{{segment.text}}</text>
+    </text>
 
-    <view class="raw-box">
-      <view class="section-head">
-        <text class="section-title">识别原文</text>
-        <text class="section-count">{{item.raw_char_count}} 字</text>
-      </view>
-      <text class="raw-text">
-        <text
-          wx:for="{{item.rawSegments}}"
-          wx:for-item="segment"
-          wx:for-index="segmentIndex"
-          wx:key="segmentIndex"
-          class="{{segment.highlight ? 'search-hit' : ''}}"
-        >{{segment.text}}</text>
-      </text>
-    </view>
-
-    <view wx:if="{{!item.isEditing}}" class="display-box">
-      <view class="section-head">
-        <text class="section-title">整理文字</text>
-        <text class="section-count">{{item.display_char_count}} 字</text>
-      </view>
-      <text class="display-text">
-        <text
-          wx:for="{{item.displaySegments}}"
-          wx:for-item="segment"
-          wx:for-index="segmentIndex"
-          wx:key="segmentIndex"
-          class="{{segment.highlight ? 'search-hit' : ''}}"
-        >{{segment.text}}</text>
-      </text>
-      <button
-        wx:if="{{item.detailsCollapsible}}"
-        class="text-toggle-button record-toggle-button"
-        data-id="{{item.id}}"
-        bindtap="toggleTranscriptText"
-      >
-        {{item.detailsToggleText}}
-      </button>
-    </view>
-
-    <view wx:else class="edit-box">
-      <view class="section-head">
-        <text class="section-title">编辑整理文字</text>
-        <text class="section-count">{{item.editingCharCount}} 字</text>
-      </view>
-      <textarea
-        class="transcript-textarea"
-        value="{{item.editingText}}"
-        data-id="{{item.id}}"
-        bindinput="changeText"
-        maxlength="-1"
-        auto-height
-        cursor-spacing="24"
-      />
-    </view>
-
-    <view wx:if="{{voiceEditTargetId === item.id}}" class="voice-edit-panel">
-      <view class="section-head">
-        <text class="section-title">语音修正</text>
-        <text class="section-count">{{voiceEditStatusText || "待确认"}}</text>
-      </view>
-      <view wx:if="{{voiceEditInstructionText}}" class="voice-edit-block">
-        <text class="voice-edit-label">你说</text>
-        <text class="voice-edit-text">{{voiceEditInstructionText}}</text>
-      </view>
-      <view wx:if="{{voiceEditPreview}}" class="voice-edit-block">
-        <text class="voice-edit-label">AI 建议</text>
-        <text class="voice-edit-text">{{voiceEditPreview.replyText}}</text>
-        <text class="voice-edit-confidence">可信度 {{voiceEditPreview.confidenceText}}</text>
-      </view>
-      <view wx:if="{{voiceEditPreview && voiceEditPreview.changes.length}}" class="voice-edit-changes">
-        <view
-          wx:for="{{voiceEditPreview.changes}}"
-          wx:for-item="change"
-          wx:for-index="changeIndex"
-          wx:key="changeIndex"
-          class="voice-edit-change"
-        >
-          <text class="voice-edit-change-text">“{{change.before}}” → “{{change.after}}”</text>
-          <text wx:if="{{change.reason}}" class="voice-edit-change-reason">{{change.reason}}</text>
-        </view>
-      </view>
-      <view wx:if="{{voiceEditPreview && voiceEditPreview.canConfirm}}" class="voice-edit-inline-diff">
-        <text class="voice-edit-label">文稿变化</text>
-        <text class="voice-edit-diff-text">
-          <text
-            wx:for="{{voiceEditPreview.diffSegments}}"
-            wx:for-item="segment"
-            wx:for-index="segmentIndex"
-            wx:key="segmentIndex"
-            class="voice-edit-diff-segment {{segment.kind}}"
-          >{{segment.text}}</text>
-        </text>
-      </view>
-      <view class="actions-row compact-actions">
-        <button
-          class="ghost-button"
-          bindtap="cancelVoiceEdit"
-          disabled="{{voiceEditSaving}}"
-        >
-          取消
-        </button>
-        <button
-          class="small-primary"
-          bindtap="confirmVoiceEdit"
-          loading="{{voiceEditSaving}}"
-          disabled="{{voiceEditSaving || !voiceEditPreview || !voiceEditPreview.canConfirm}}"
-        >
-          确认保存
-        </button>
-      </view>
-    </view>
-
-    <view wx:if="{{!item.isEditing}}" class="actions-row">
+    <view class="actions-row list-actions" catchtap="stopCardTap">
       <button
         class="ghost-button"
         data-id="{{item.id}}"
-        bindtap="playAudio"
+        catchtap="playAudio"
         disabled="{{savingId || deletingId || !item.canPlayAudio}}"
       >
-        {{playingId === item.id ? "停止" : (item.question_text ? "播放问答" : "播放")}}
-      </button>
-      <button
-        class="ghost-button"
-        data-id="{{item.id}}"
-        bindtap="startVoiceEdit"
-        loading="{{voiceEditTargetId === item.id && voiceEditLoading}}"
-        disabled="{{savingId || deletingId || voiceEditSaving || voiceSearchRecording || voiceSearchTranscribing || (voiceEditTargetId !== item.id && (voiceEditRecording || voiceEditLoading))}}"
-      >
-        {{voiceEditTargetId === item.id && voiceEditRecording ? "停止修正" : (voiceEditTargetId === item.id && voiceEditLoading ? "生成中" : "语音修正")}}
+        {{playingId === item.id ? "停止" : "听原音"}}
       </button>
       <picker
         wx:if="{{item.canAssignChapterSource}}"
@@ -245,76 +116,19 @@
         data-id="{{item.id}}"
         disabled="{{savingId || deletingId || assigningSourceId || movingSourceId}}"
         bindchange="assignTranscriptChapter"
+        catchtap="stopCardTap"
       >
-        <view class="ghost-button picker-action {{savingId || deletingId || assigningSourceId || movingSourceId ? 'disabled' : ''}}">
-          {{assigningSourceId === item.id ? "归入中" : "归入章节"}}
+        <view class="small-primary picker-action {{savingId || deletingId || assigningSourceId || movingSourceId ? 'disabled' : ''}}">
+          {{assigningSourceId === item.id ? "放入中" : "放入章节"}}
         </view>
       </picker>
-      <picker
-        wx:if="{{item.canMoveChapterSource}}"
-        class="chapter-move-picker"
-        range="{{item.chapterMoveOptions}}"
-        range-key="label"
-        data-id="{{item.id}}"
-        disabled="{{savingId || deletingId || assigningSourceId || movingSourceId}}"
-        bindchange="moveTranscriptChapter"
-      >
-        <view class="ghost-button picker-action {{savingId || deletingId || assigningSourceId || movingSourceId ? 'disabled' : ''}}">
-          {{movingSourceId === item.id ? "移动中" : "移动章节"}}
-        </view>
-      </picker>
-      <button
-        class="ghost-button"
-        data-id="{{item.id}}"
-        bindtap="beginEdit"
-        disabled="{{savingId || deletingId}}"
-      >
-        编辑
-      </button>
-      <button
-        class="danger-button"
-        data-id="{{item.id}}"
-        bindtap="deleteTranscript"
-        loading="{{deletingId === item.id}}"
-        disabled="{{savingId || deletingId}}"
-      >
-        删除
-      </button>
-    </view>
-
-    <view wx:else class="actions-row">
-      <button
-        class="ghost-button"
-        data-id="{{item.id}}"
-        bindtap="playAudio"
-        disabled="{{savingId || deletingId || !item.canPlayAudio}}"
-      >
-        {{playingId === item.id ? "停止" : (item.question_text ? "播放问答" : "播放")}}
-      </button>
-      <button
-        class="ghost-button"
-        data-id="{{item.id}}"
-        bindtap="resetToRaw"
-        disabled="{{savingId || deletingId}}"
-      >
-        恢复原文
-      </button>
-      <button
-        class="ghost-button"
-        data-id="{{item.id}}"
-        bindtap="cancelEdit"
-        disabled="{{savingId || deletingId}}"
-      >
-        取消
-      </button>
       <button
         class="small-primary"
         data-id="{{item.id}}"
-        bindtap="saveTranscript"
-        loading="{{savingId === item.id}}"
-        disabled="{{savingId || deletingId || !item.changed}}"
+        catchtap="openTranscriptEdit"
+        disabled="{{savingId || deletingId}}"
       >
-        保存
+        编辑整理文字
       </button>
     </view>
   </view>
