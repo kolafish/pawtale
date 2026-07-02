@@ -81,6 +81,21 @@ import {
   voiceSessionSnapshotPatch,
 } from "./voice-chat-page-state";
 import {
+  finishSessionSavedPatch,
+  finishSessionStartPatch,
+  noAnswerPromptFailedPatch,
+  noAnswerPromptPlan,
+  noAnswerPromptQueuedPatch,
+  noAnswerPromptStartPatch,
+  voiceAssistantInterruptedPatch,
+  voiceClientUnavailableForRecording,
+  voiceRecorderPrivacyDeniedPatch,
+  voiceRecordingReconnectPatch,
+  voiceRecordingStartedPatch,
+  voiceRecordingStoppedPatch,
+  voiceRecordingUnavailablePatch,
+} from "./voice-chat-recording-flow";
+import {
   datasetString,
   queryChoice,
   queryParam,
@@ -1510,9 +1525,9 @@ Page<VoiceChatData, {
     if (!this.ensureVoiceAuthorization(autoTriggered)) {
       return false;
     }
-    if (!this.voiceStreaming.hasClient() || this.data.status === "closed" || this.data.status === "error") {
+    if (voiceClientUnavailableForRecording(this.voiceStreaming.hasClient(), this.data.status)) {
       void this.syncVoiceAuthorizationAndConnect(autoTriggered);
-      this.setData({ autoListenStateText: autoTriggered ? "正在重新连接语音" : this.data.autoListenStateText });
+      this.setData(voiceRecordingReconnectPatch(autoTriggered, this.data.autoListenStateText));
       return false;
     }
     void this.startRecordingAfterPrivacy(autoTriggered);
@@ -1528,12 +1543,7 @@ Page<VoiceChatData, {
     if (interruptingAssistant) {
       followUpRequestSerial += 1;
       this.cancelFollowUpTTS("interrupted_by_user");
-      this.setData({
-        followUpLoading: false,
-        followUpError: "",
-        followUpTTSStateText: "正在听您说",
-        persistenceStateText: "正在听你说",
-      });
+      this.setData(voiceAssistantInterruptedPatch());
     }
     await this.stopAssistantBargeInMonitor();
     if (!(await this.syncVoiceAuthorizationForSession())) {
@@ -1544,45 +1554,26 @@ Page<VoiceChatData, {
     } catch (error) {
       const message = error instanceof Error ? error.message : "微信隐私授权失败";
       this.handleError(message, { kind: "recorder", code: "wechat_privacy_authorization_failed", message });
-      this.setData({
-        recording: false,
-        primaryActionText: "继续说话",
-        autoListenStateText: autoTriggered ? "自动收音已暂停，等待隐私授权" : this.data.autoListenStateText,
-      });
+      this.setData(voiceRecorderPrivacyDeniedPatch(autoTriggered, this.data.autoListenStateText));
       return false;
     }
-    if (!this.voiceStreaming.hasClient() || this.data.status === "closed" || this.data.status === "error") {
+    if (voiceClientUnavailableForRecording(this.voiceStreaming.hasClient(), this.data.status)) {
       void this.syncVoiceAuthorizationAndConnect(autoTriggered);
-      this.setData({ autoListenStateText: autoTriggered ? "正在重新连接语音" : this.data.autoListenStateText });
+      this.setData(voiceRecordingReconnectPatch(autoTriggered, this.data.autoListenStateText));
       return false;
     }
     const started = this.voiceStreaming.startRecording({
       noVoiceActivityTimeoutMs: autoTriggered ? AUTO_LISTEN_NO_ANSWER_MS : 0,
     });
     if (!started) {
-      this.setData({
-        error: "语音未就绪，请重新连接",
-        status: "error",
-        statusText: statusText("error"),
-        primaryActionText: "重新连接",
-        canReconnect: true,
-        autoListenStateText: autoTriggered ? "自动收音未就绪" : this.data.autoListenStateText,
-      });
+      this.setData(voiceRecordingUnavailablePatch(autoTriggered, this.data.autoListenStateText));
       return false;
     }
     if (!interruptingAssistant) {
       this.cancelFollowUpTTS();
     }
     this.handledNoAnswerFrameCount = -1;
-    this.setData({
-      recording: true,
-      error: "",
-      liveText: "",
-      liveCharCount: 0,
-      selectedOpeningTopicText: "",
-      primaryActionText: "暂停收音",
-      autoListenStateText: autoTriggered ? "小余说完，正在听您说" : "小余说完自动听",
-    });
+    this.setData(voiceRecordingStartedPatch(autoTriggered));
     trackAuditAction(
       "voice_chat.recording_start",
       { auto_triggered: autoTriggered },
@@ -1595,13 +1586,13 @@ Page<VoiceChatData, {
     if (!this.ensureVoiceAuthorization(false)) {
       return;
     }
-    if (!this.voiceStreaming.hasClient() || this.data.status === "closed" || this.data.status === "error") {
+    if (voiceClientUnavailableForRecording(this.voiceStreaming.hasClient(), this.data.status)) {
       void this.syncVoiceAuthorizationAndConnect(false);
       return;
     }
     if (this.data.recording) {
       this.voiceStreaming.stopRecording();
-      this.setData({ recording: false, primaryActionText: "继续说话" });
+      this.setData(voiceRecordingStoppedPatch());
       return;
     }
     this.startRecording(false);
@@ -1638,43 +1629,32 @@ Page<VoiceChatData, {
     this.noAnswerPromptInFlight = true;
     const requestSerial = this.noAnswerPromptRequestSerial + 1;
     this.noAnswerPromptRequestSerial = requestSerial;
-    const attempt = Math.min(this.consecutiveNoAnswerPrompts + 1, MAX_CONSECUTIVE_NO_ANSWER_PROMPTS);
-    const autoListenAfterPlayback = attempt < MAX_CONSECUTIVE_NO_ANSWER_PROMPTS;
+    const { attempt, autoListenAfterPlayback } = noAnswerPromptPlan(
+      this.consecutiveNoAnswerPrompts,
+      MAX_CONSECUTIVE_NO_ANSWER_PROMPTS,
+    );
     this.consecutiveNoAnswerPrompts = attempt;
-    this.setData({
-      followUpLoading: true,
-      followUpError: "",
-      canRequestFollowUp: false,
-      persistenceStateText: "小余正在确认",
-      autoListenStateText: "没听到回答，小余再问一句",
-    });
+    this.setData(noAnswerPromptStartPatch());
     try {
       const response = await createMemoirVoiceNoAnswerPrompt(this.data.voiceSessionId, { attempt });
       if (requestSerial !== this.noAnswerPromptRequestSerial) {
         return;
       }
       this.enqueueAssistantTurn(assistantTurnQueueItem(response, { autoListenAfterPlayback }));
-      this.setData({
-        dismissedFollowUpMessageId: "",
-        followUpTTSError: "",
-        persistenceStateText: autoListenAfterPlayback ? "小余正在确认" : "已暂停收音",
-        autoListenStateText: autoListenAfterPlayback ? "小余问完会继续听" : "已暂停，可点继续说话",
-      });
+      this.setData(noAnswerPromptQueuedPatch(autoListenAfterPlayback));
     } catch (error) {
       if (requestSerial !== this.noAnswerPromptRequestSerial) {
         return;
       }
-      this.setData({
-        followUpError: error instanceof Error ? error.message : "小余确认生成失败",
-        persistenceStateText: "确认失败",
-        autoListenStateText: "没听到回答，可点继续说话",
-        canRequestFollowUp: canRequestFollowUp(
+      this.setData(noAnswerPromptFailedPatch(
+        canRequestFollowUp(
           this.data.transcriptLines,
           this.data.guidanceMode,
           this.data.lastFollowUpSourceMessageId,
           false,
         ),
-      });
+        error instanceof Error ? error.message : "小余确认生成失败",
+      ));
     } finally {
       if (requestSerial === this.noAnswerPromptRequestSerial) {
         this.noAnswerPromptInFlight = false;
@@ -1688,15 +1668,7 @@ Page<VoiceChatData, {
       return;
     }
     this.cancelFollowUpTTS();
-    this.setData({
-      finishingSession: true,
-      error: "",
-      recording: false,
-      status: "stopping",
-      statusText: statusText("stopping"),
-      primaryActionText: "保存中",
-      persistenceStateText: this.data.recording ? "正在保存最后一句" : "正在保存",
-    });
+    this.setData(finishSessionStartPatch(this.data.recording));
     if (!this.voiceStreaming.hasClient()) {
       await this.refreshVoiceSessionSnapshot();
       this.setData({ finishingSession: false });
@@ -1705,13 +1677,7 @@ Page<VoiceChatData, {
     try {
       await this.voiceStreaming.finishSession();
       trackAuditAction("voice_chat.finish", {}, { voiceSessionId: this.data.voiceSessionId });
-      this.setData({
-        recording: false,
-        primaryActionText: "已保存",
-        status: "closed",
-        statusText: statusText("closed"),
-        persistenceStateText: "正在同步",
-      });
+      this.setData(finishSessionSavedPatch());
       await this.refreshVoiceSessionSnapshot();
       this.setData({ persistenceStateText: "已保存" });
       wx.showModal({
