@@ -1,0 +1,244 @@
+<view class="detail-page">
+  <view class="top-row">
+    <view class="back-hit" bindtap="goBack">
+      <text class="back-mark">‹</text>
+    </view>
+    <view class="title-block">
+      <text class="page-title">素材详情</text>
+      <text class="page-meta">{{item ? (item.project_title || "我的回忆录") : "讲述记录"}}</text>
+    </view>
+  </view>
+
+  <view wx:if="{{error}}" class="error">{{error}}</view>
+
+  <view wx:if="{{needsLogin}}" class="empty-panel">
+    <text class="empty-title">登录后查看素材</text>
+    <text class="empty-copy">登录后可以核对原始识别、整理文字和音频资料。</text>
+    <button class="primary-button" bindtap="openLogin">登录后查看</button>
+  </view>
+
+  <view wx:elif="{{loading && !item}}" class="empty-panel">
+    <text>正在加载</text>
+  </view>
+
+  <view wx:elif="{{!item}}" class="empty-panel">
+    <text class="empty-title">没有找到这条素材</text>
+    <text class="empty-copy">这条讲述记录可能已删除，或不属于当前账号。</text>
+  </view>
+
+  <block wx:else>
+    <view class="hero-panel">
+      <text class="record-title">{{item.titleText}}</text>
+      <text class="record-meta">{{item.createdAtText}} · {{item.audioText}}</text>
+      <text class="book-status {{item.isIncludedInBook ? 'included' : ''}}">{{item.bookInclusionText}}</text>
+      <view class="actions-row primary-actions">
+        <button
+          class="primary-button"
+          bindtap="beginEdit"
+          disabled="{{saving || deleting || item.isEditing}}"
+        >
+          编辑整理文字
+        </button>
+        <button
+          class="ghost-button"
+          bindtap="playAudio"
+          disabled="{{saving || deleting || !item.canPlayAudio}}"
+        >
+          {{playing ? "停止播放" : "听原音"}}
+        </button>
+      </view>
+    </view>
+
+    <view wx:if="{{item.question_text}}" class="section-card">
+      <view class="section-head">
+        <text class="section-title">AI 引导问题</text>
+        <text class="section-count">{{item.question_audio_file_id ? "有语音" : "无语音"}}</text>
+      </view>
+      <text class="body-text question-text">
+        <text
+          wx:for="{{item.questionSegments}}"
+          wx:for-item="segment"
+          wx:for-index="segmentIndex"
+          wx:key="segmentIndex"
+        >{{segment.text}}</text>
+      </text>
+    </view>
+
+    <view class="section-card evidence-card">
+      <view class="section-head">
+        <view>
+          <text class="section-title">原始识别</text>
+          <text class="section-hint">保留口述原貌，用于核对事实来源。</text>
+        </view>
+        <text class="section-count">{{item.raw_char_count}} 字</text>
+      </view>
+      <text class="body-text raw-text">
+        <text
+          wx:for="{{item.rawSegments}}"
+          wx:for-item="segment"
+          wx:for-index="segmentIndex"
+          wx:key="segmentIndex"
+        >{{segment.text}}</text>
+      </text>
+    </view>
+
+    <view wx:if="{{!item.isEditing}}" class="section-card manuscript-card">
+      <view class="section-head">
+        <view>
+          <text class="section-title">整理后文字</text>
+          <text class="section-hint">用于生成章节正文。</text>
+        </view>
+        <text class="section-count">{{item.display_char_count}} 字</text>
+      </view>
+      <text class="body-text display-text">
+        <text
+          wx:for="{{item.displaySegments}}"
+          wx:for-item="segment"
+          wx:for-index="segmentIndex"
+          wx:key="segmentIndex"
+        >{{segment.text}}</text>
+      </text>
+    </view>
+
+    <view wx:else class="section-card edit-card">
+      <view class="section-head">
+        <text class="section-title">编辑整理文字</text>
+        <text class="section-count">{{item.editingCharCount}} 字</text>
+      </view>
+      <textarea
+        class="transcript-textarea"
+        value="{{item.editingText}}"
+        bindinput="changeText"
+        maxlength="-1"
+        auto-height
+        cursor-spacing="24"
+      />
+      <view class="actions-row">
+        <button class="ghost-button" bindtap="resetToRaw" disabled="{{saving || deleting}}">恢复原文</button>
+        <button class="ghost-button" bindtap="cancelEdit" disabled="{{saving || deleting}}">取消</button>
+        <button
+          class="primary-button"
+          bindtap="saveTranscript"
+          loading="{{saving}}"
+          disabled="{{saving || deleting || !item.changed}}"
+        >
+          保存
+        </button>
+      </view>
+    </view>
+
+    <view class="section-card">
+      <view class="section-head">
+        <text class="section-title">文字校对</text>
+        <text class="section-count">{{voiceEditStatusText || "可语音说明要修改的地方"}}</text>
+      </view>
+      <view wx:if="{{voiceEditInstructionText}}" class="voice-edit-block">
+        <text class="voice-edit-label">你说</text>
+        <text class="voice-edit-text">{{voiceEditInstructionText}}</text>
+      </view>
+      <view wx:if="{{voiceEditPreview}}" class="voice-edit-block">
+        <text class="voice-edit-label">AI 建议</text>
+        <text class="voice-edit-text">{{voiceEditPreview.replyText}}</text>
+        <text class="voice-edit-confidence">可信度 {{voiceEditPreview.confidenceText}}</text>
+      </view>
+      <view wx:if="{{voiceEditPreview && voiceEditPreview.changes.length}}" class="voice-edit-changes">
+        <view
+          wx:for="{{voiceEditPreview.changes}}"
+          wx:for-item="change"
+          wx:for-index="changeIndex"
+          wx:key="changeIndex"
+          class="voice-edit-change"
+        >
+          <text class="voice-edit-change-text">“{{change.before}}” → “{{change.after}}”</text>
+          <text wx:if="{{change.reason}}" class="voice-edit-change-reason">{{change.reason}}</text>
+        </view>
+      </view>
+      <view wx:if="{{voiceEditPreview && voiceEditPreview.canConfirm}}" class="voice-edit-inline-diff">
+        <text class="voice-edit-label">文稿变化</text>
+        <text class="voice-edit-diff-text">
+          <text
+            wx:for="{{voiceEditPreview.diffSegments}}"
+            wx:for-item="segment"
+            wx:for-index="segmentIndex"
+            wx:key="segmentIndex"
+            class="voice-edit-diff-segment {{segment.kind}}"
+          >{{segment.text}}</text>
+        </text>
+      </view>
+      <view class="actions-row">
+        <button
+          class="ghost-button"
+          bindtap="startVoiceEdit"
+          loading="{{voiceEditLoading}}"
+          disabled="{{saving || deleting || voiceEditSaving || voiceEditLoading}}"
+        >
+          {{voiceEditRecording ? "停止录入" : (voiceEditLoading ? "生成中" : "语音校对")}}
+        </button>
+        <button
+          wx:if="{{voiceEditPreview}}"
+          class="ghost-button"
+          bindtap="cancelVoiceEdit"
+          disabled="{{voiceEditSaving}}"
+        >
+          取消校对
+        </button>
+        <button
+          wx:if="{{voiceEditPreview}}"
+          class="primary-button"
+          bindtap="confirmVoiceEdit"
+          loading="{{voiceEditSaving}}"
+          disabled="{{voiceEditSaving || !voiceEditPreview.canConfirm}}"
+        >
+          确认保存
+        </button>
+      </view>
+    </view>
+
+    <view class="section-card">
+      <view class="section-head">
+        <text class="section-title">章节位置</text>
+        <text class="section-count">{{item.bookInclusionText}}</text>
+      </view>
+      <view class="actions-row">
+        <picker
+          wx:if="{{item.canAssignChapterSource}}"
+          range="{{item.chapterAssignOptions}}"
+          range-key="label"
+          disabled="{{assigning || moving || saving || deleting}}"
+          bindchange="assignTranscriptChapter"
+        >
+          <view class="primary-button picker-action {{assigning || moving || saving || deleting ? 'disabled' : ''}}">
+            {{assigning ? "归入中" : "放入章节"}}
+          </view>
+        </picker>
+        <picker
+          wx:if="{{item.canMoveChapterSource}}"
+          range="{{item.chapterMoveOptions}}"
+          range-key="label"
+          disabled="{{assigning || moving || saving || deleting}}"
+          bindchange="moveTranscriptChapter"
+        >
+          <view class="ghost-button picker-action {{assigning || moving || saving || deleting ? 'disabled' : ''}}">
+            {{moving ? "移动中" : "移动章节"}}
+          </view>
+        </picker>
+      </view>
+    </view>
+
+    <view class="section-card danger-card">
+      <view class="section-head">
+        <text class="section-title danger-title">危险操作</text>
+      </view>
+      <button
+        class="danger-button"
+        bindtap="deleteTranscript"
+        loading="{{deleting}}"
+        disabled="{{saving || deleting}}"
+      >
+        删除这条讲述记录
+      </button>
+    </view>
+  </block>
+
+  <view class="bottom-spacer"></view>
+</view>

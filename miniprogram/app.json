@@ -6,6 +6,7 @@
     "pages/voice-authorization/index",
     "pages/voice-chat/index",
     "pages/transcripts/index",
+    "pages/transcript-detail/index",
     "pages/book/index",
     "pages/voice-progress/index",
     "pages/projects/index",

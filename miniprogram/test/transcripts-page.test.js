@@ -328,6 +328,26 @@ test("transcripts page formats record time without timezone label", async () => 
   assert.equal(context.data.items[0].recordNumber, 1);
 });
 
+test("transcripts page opens transcript detail from record header", () => {
+  const navigations = [];
+  global.wx = {
+    navigateTo(options) {
+      navigations.push(options);
+    },
+  };
+  const { page } = loadTranscriptsPage();
+  const context = pageContext(page);
+
+  page.openTranscriptDetail.call(context, {
+    currentTarget: { dataset: { id: "utterance/detail id" } },
+  });
+
+  assert.deepEqual(navigations, [
+    { url: "/pages/transcript-detail/index?id=utterance%2Fdetail%20id" },
+  ]);
+  delete global.wx;
+});
+
 test("transcripts page numbers newest-first records from the oldest record", async () => {
   const { page } = loadTranscriptsPage({
     authExports: {

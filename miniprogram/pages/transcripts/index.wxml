@@ -79,7 +79,7 @@
     id="{{item.anchorId}}"
     class="transcript-card {{highlightedId === item.id ? 'highlighted' : ''}}"
   >
-    <view class="record-head">
+    <view class="record-head" data-id="{{item.id}}" bindtap="openTranscriptDetail">
       <view>
         <text class="record-title">语音记录 {{item.recordNumber}}</text>
         <text class="record-time">{{item.createdAtText}}</text>
