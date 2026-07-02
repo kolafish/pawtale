@@ -801,9 +801,6 @@ function loadBookPage({
     createMemoirBookOutputTTS: async () => {
       throw new Error("createMemoirBookOutputTTS was not mocked");
     },
-    downloadMemoirBookOutputExport: async () => {
-      throw new Error("downloadMemoirBookOutputExport was not mocked");
-    },
     createMemoirBookPlanOutlineTTS: async () => {
       throw new Error("createMemoirBookPlanOutlineTTS was not mocked");
     },
@@ -842,9 +839,6 @@ function loadBookPage({
     getMemoirBookSourceCoverage: async () => null,
     listMemoirAutomationEvents: async () => ({ items: [], total: 0, limit: 8 }),
     acknowledgeMemoirAutomationEvent: async () => ({}),
-    suggestMemoirBookOutputTitles: async () => {
-      throw new Error("suggestMemoirBookOutputTitles was not mocked");
-    },
     parseMemoirBookVoiceCommand: async () => {
       throw new Error("parseMemoirBookVoiceCommand was not mocked");
     },
@@ -860,9 +854,6 @@ function loadBookPage({
     },
     updateMemoirBookPlan: async () => {
       throw new Error("updateMemoirBookPlan was not mocked");
-    },
-    updateMemoirBookOutput: async () => {
-      throw new Error("updateMemoirBookOutput was not mocked");
     },
     updateMemoirBookOutputChapterEditorialCopy: async () => {
       throw new Error("updateMemoirBookOutputChapterEditorialCopy was not mocked");
@@ -2521,88 +2512,7 @@ test("book page merges chapters and regenerates title plus draft for confirmed p
   delete global.wx;
 });
 
-test("book page suggests and autosaves full-book title plus cover style", async () => {
-  const calls = [];
-  global.wx = { showToast() {} };
-  const { page } = loadBookPage({
-    voiceApiExports: {
-      suggestMemoirBookOutputTitles: async (projectId, data) => {
-        calls.push({ kind: "suggest", projectId, data });
-        return { suggestions: ["外婆慢慢说", "从前的日子"], provider: "ai", model: "fake" };
-      },
-      updateMemoirBookOutput: async (projectId, data) => {
-        calls.push({ kind: "update", projectId, data });
-        const output = sampleBookOutput(
-          1,
-          "外婆慢慢说\n\n目录\n1. 外婆家的童年",
-          false,
-          [],
-          null,
-          [],
-          sampleBookManuscript(data.title, data.cover_style),
-        );
-        output.title = data.title;
-        return output;
-      },
-    },
-  });
-  const context = pageContext(page, { projectId: "project/1", projectTitle: "外婆回忆录" });
-  page.applyPlan.call(context, samplePlan("confirmed"), {
-    "chapter-1": sampleDraft(1, "confirmed"),
-    "chapter-2": sampleDraft(1, "confirmed"),
-  });
-  page.applyBookOutput.call(
-    context,
-    sampleBookOutput(1, "外婆回忆录", false, [], null, [], sampleBookManuscript("外婆回忆录")),
-  );
-
-  await page.suggestBookTitles.call(context);
-  page.chooseBookTitleSuggestion.call(context, { currentTarget: { dataset: { title: "外婆慢慢说" } } });
-  page.changeBookMetadataField.call(context, {
-    currentTarget: { dataset: { key: "narrator_name" } },
-    detail: { value: "外婆" },
-  });
-  page.changeBookMetadataField.call(context, {
-    currentTarget: { dataset: { key: "prepared_by" } },
-    detail: { value: "小林整理" },
-  });
-  page.changeBookMetadataField.call(context, {
-    currentTarget: { dataset: { key: "preface" } },
-    detail: { value: "这是写给家人的前言。" },
-  });
-  page.changeBookCoverStyle.call(context, {
-    currentTarget: { dataset: {} },
-    detail: { value: 1 },
-  });
-  await page.autosaveBookDesignSettings.call(context);
-
-  assert.deepEqual(calls[0], { kind: "suggest", projectId: "project/1", data: { count: 6 } });
-  assert.deepEqual(calls[1], {
-    kind: "update",
-    projectId: "project/1",
-    data: {
-      title: "外婆慢慢说",
-      subtitle: "根据口述访谈整理",
-      narrator_name: "外婆",
-      prepared_by: "小林整理",
-      preface: "这是写给家人的前言。",
-      afterword: "这些故事还可以继续补充。",
-      back_cover_quote: "我小时候常在院子里晒太阳。",
-      cover_style: "warm_gray",
-    },
-  });
-  assert.equal(context.data.bookTitleInput, "外婆慢慢说");
-  assert.equal(context.data.bookTitleChanged, false);
-  assert.equal(context.data.bookMetadataChanged, false);
-  assert.equal(context.data.bookNarratorNameInput, "外婆");
-  assert.equal(context.data.bookPreparedByInput, "小林整理");
-  assert.equal(context.data.bookCoverStyle, "warm_gray");
-  assert.equal(context.data.bookCoverStyleChanged, false);
-  assert.equal(context.data.bookDesignSaveStatusText, "已自动保存");
-  delete global.wx;
-});
-
-test("book page submits full-book and chapter editorial copy regeneration jobs", async () => {
+test("book page submits chapter editorial copy regeneration jobs", async () => {
   const calls = [];
   const toastTitles = [];
   global.wx = {
@@ -2630,33 +2540,21 @@ test("book page submits full-book and chapter editorial copy regeneration jobs",
   );
   assert.equal(context.data.bookStaleNotice, "章节「外婆家的童年」已更新，请重新整理一版。");
 
-  await page.regenerateBookEditorialCopy.call(context, {
-    currentTarget: { dataset: { target: "preface" } },
-  });
-
-  page.applyBookOutput.call(
-    context,
-    sampleBookOutput(1, "全书正文", true, ["外婆家的童年"], null, [], sampleBookManuscript()),
-  );
   await page.regenerateBookChapterEditorialCopy.call(context, {
     currentTarget: { dataset: { id: "chapter-1", target: "pull_quotes" } },
   });
 
   assert.deepEqual(calls[0], {
     projectId: "project/1",
-    data: { targets: ["preface"] },
-  });
-  assert.deepEqual(calls[1], {
-    projectId: "project/1",
     data: { targets: ["pull_quotes"], chapter_ids: ["chapter-1"] },
   });
   assert.deepEqual(
     context.automationEvents.map((item) => item.id),
-    ["event-editorial-2", "event-editorial-1"],
+    ["event-editorial-1"],
   );
   assert.equal(context.data.automationEventItems[0].titleText, "文案生成中");
   assert.equal(context.data.bookEditorialCopyBusyTarget, "");
-  assert.deepEqual(toastTitles, ["已后台生成", "已后台生成"]);
+  assert.deepEqual(toastTitles, ["已后台生成"]);
   delete global.wx;
 });
 
@@ -2870,63 +2768,6 @@ test("book page blocks full-book audio while viewing a historical version", asyn
 
   assert.equal(context.data.error, "正在查看历史版本，请先切回最新版再朗读");
   assert.equal(calls.length, 0);
-});
-
-test("book page downloads selected full-book output export and opens PDF", async () => {
-  const calls = [];
-  const opened = [];
-  const toasts = [];
-  global.wx = {
-    openDocument(options) {
-      opened.push(options);
-      options.success();
-    },
-    showToast(options) {
-      toasts.push(options);
-    },
-  };
-  const { page } = loadBookPage({
-    voiceApiExports: {
-      downloadMemoirBookOutputExport: async (projectId, format, versionId, layout, showSourceAppendix) => {
-        calls.push({ projectId, format, versionId, layout, showSourceAppendix });
-        return "/tmp/book.pdf";
-      },
-    },
-  });
-  const output = sampleBookOutput(2, "全书第二版正文", false, [], sampleStructuredBookContent(), [
-    sampleBookOutputVersion(1, "全书第一版正文", sampleStructuredBookContent(), "2026-06-16T00:00:00.000Z"),
-    sampleBookOutputVersion(2, "全书第二版正文", sampleStructuredBookContent(), "2026-06-17T00:00:00.000Z"),
-  ]);
-  const context = pageContext(page, {
-    projectId: "project/1",
-    hasDraftChanges: false,
-  });
-  page.applyBookOutput.call(context, output);
-  page.changeBookOutputVersion.call(context, { currentTarget: { dataset: {} }, detail: { value: "1" } });
-  page.changeBookExportLayout.call(context, { currentTarget: { dataset: {} }, detail: { value: "1" } });
-  page.toggleBookExportSourceAppendix.call(context, {
-    currentTarget: { dataset: {} },
-    detail: { value: false },
-  });
-
-  await page.downloadBookOutputExport.call(context, {
-    currentTarget: { dataset: { format: "pdf" } },
-  });
-
-  assert.deepEqual(calls[0], {
-    projectId: "project/1",
-    format: "pdf",
-    versionId: "book-output-version-1",
-    layout: "large_print",
-    showSourceAppendix: false,
-  });
-  assert.equal(context.data.bookExportLayoutLabel, "打印版");
-  assert.equal(opened[0].filePath, "/tmp/book.pdf");
-  assert.equal(opened[0].fileType, "pdf");
-  assert.equal(opened[0].showMenu, true);
-  assert.equal(toasts[0].title, "PDF 已打开");
-  assert.equal(context.data.bookExportBusyTarget, "");
-  delete global.wx;
 });
 
 test("book page sends book-specific TTS voice and speed", async () => {
