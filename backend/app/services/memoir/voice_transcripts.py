@@ -15,6 +15,7 @@ from app.domain.memoir.types import (
     MemoirChatContentStatus,
     MemoirChatMessageRole,
     MemoirCreatedBy,
+    MemoirSemanticCacheStatus,
     MemoirTranscriptVersionType,
 )
 from app.models.memoir import (
@@ -22,6 +23,7 @@ from app.models.memoir import (
     MemoirBookPlan,
     MemoirBookPlanChapter,
     MemoirChatMessage,
+    MemoirSourceCard,
     MemoirTranscriptVersion,
     MemoirVoiceSession,
     MemoirVoiceUtterance,
@@ -78,6 +80,8 @@ _BOUNDARY_DEICTIC_RE = re.compile(
 _DUPLICATE_PUNCTUATION_RE = re.compile(r"([，,。！？!?；;])\1+")
 _SPACE_RE = re.compile(r"\s+")
 INCLUDED_FILTER_VALUES = {"all", "included", "not_included"}
+FALLBACK_SUMMARY_TITLE_LIMIT = 32
+FALLBACK_SUMMARY_TEXT_LIMIT = 120
 
 
 @dataclass(frozen=True)
@@ -102,6 +106,46 @@ def _text_or_empty(value: str | None) -> str:
 
 def _current_text(utterance: MemoirVoiceUtterance) -> str:
     return _text_or_empty(utterance.transcript_edited) or _text_or_empty(utterance.transcript_raw)
+
+
+def _compact_display_text(value: str) -> str:
+    return _SPACE_RE.sub(" ", value or "").strip()
+
+
+def _preview_sentence(value: str, *, limit: int) -> str:
+    text = _compact_display_text(value)
+    if len(text) <= limit:
+        return text
+    for marker in ("。", "！", "？", "；", ";", "!", "?"):
+        index = text.find(marker)
+        if 0 < index + 1 <= limit:
+            return text[: index + 1].strip()
+    return text[:limit].rstrip()
+
+
+def _trim_card_text(value: object, *, limit: int) -> str:
+    if not isinstance(value, str):
+        return ""
+    return _compact_display_text(value)[:limit]
+
+
+def _summary_fields(display_text: str, source_card: MemoirSourceCard | None) -> tuple[str, str, str]:
+    if source_card:
+        card_json = source_card.card_json or {}
+        card_title = _trim_card_text(card_json.get("short_title"), limit=40)
+        card_summary = _trim_card_text(card_json.get("summary"), limit=260)
+        if card_title or card_summary:
+            fallback_title = _preview_sentence(display_text, limit=FALLBACK_SUMMARY_TITLE_LIMIT)
+            fallback_summary = _preview_sentence(display_text, limit=FALLBACK_SUMMARY_TEXT_LIMIT)
+            return (
+                card_title or fallback_title or "讲述记录",
+                card_summary or fallback_summary or card_title or "这条讲述记录暂无摘要。",
+                "source_card",
+            )
+
+    title = _preview_sentence(display_text, limit=FALLBACK_SUMMARY_TITLE_LIMIT) or "讲述记录"
+    summary = _preview_sentence(display_text, limit=FALLBACK_SUMMARY_TEXT_LIMIT) or title
+    return title, summary, "fallback"
 
 
 def _utc_datetime(value: datetime) -> datetime:
@@ -432,6 +476,7 @@ async def _included_utterance_ids_for_filter(
 def _item_response(
     utterance: MemoirVoiceUtterance,
     included_chapters: list[MemoirVoiceTranscriptIncludedChapterResponse] | None = None,
+    source_card: MemoirSourceCard | None = None,
 ) -> MemoirVoiceTranscriptItemResponse:
     voice_session = utterance.voice_session
     chat_message = utterance.chat_message
@@ -441,6 +486,7 @@ def _item_response(
     edited = utterance.transcript_edited or ""
     display_text = edited.strip() or raw.strip()
     inclusions = included_chapters or []
+    summary_title, summary_text, summary_source = _summary_fields(display_text, source_card)
     return MemoirVoiceTranscriptItemResponse(
         id=utterance.id,
         voice_session_id=utterance.voice_session_id,
@@ -458,6 +504,9 @@ def _item_response(
         transcript_raw=raw,
         transcript_edited=edited,
         display_text=display_text,
+        summary_title=summary_title,
+        summary_text=summary_text,
+        summary_source=summary_source,
         raw_char_count=len(raw.strip()),
         edited_char_count=len(edited.strip()),
         display_char_count=len(display_text),
@@ -529,6 +578,31 @@ async def _book_inclusions_by_utterance_ids(
                 if utterance_id in utterance_id_set:
                     inclusions.setdefault(utterance_id, []).append(included_chapter)
     return inclusions
+
+
+async def _source_cards_by_utterance(
+    db: AsyncSession,
+    utterances: list[MemoirVoiceUtterance],
+) -> dict[str, MemoirSourceCard]:
+    source_hashes = {
+        utterance.id: source_cards.source_text_hash(source_cards.source_text_for_utterance(utterance))
+        for utterance in utterances
+    }
+    utterance_ids = list(source_hashes)
+    if not utterance_ids:
+        return {}
+    result = await db.execute(
+        select(MemoirSourceCard).where(
+            MemoirSourceCard.utterance_id.in_(utterance_ids),
+            MemoirSourceCard.engine == source_cards.SOURCE_CARD_ENGINE,
+            MemoirSourceCard.status == MemoirSemanticCacheStatus.READY.value,
+        )
+    )
+    cards: dict[str, MemoirSourceCard] = {}
+    for card in result.scalars().all():
+        if card.source_text_hash == source_hashes.get(card.utterance_id):
+            cards[card.utterance_id] = card
+    return cards
 
 
 async def _load_owned_utterance(
@@ -606,8 +680,9 @@ async def list_voice_transcripts(
         [utterance.id for utterance in utterances],
         project_ids=[utterance.voice_session.project_id for utterance in utterances],
     )
+    cards = await _source_cards_by_utterance(db, list(utterances))
     items = [
-        _item_response(utterance, inclusions.get(utterance.id, []))
+        _item_response(utterance, inclusions.get(utterance.id, []), cards.get(utterance.id))
         for utterance in utterances
     ]
     return MemoirVoiceTranscriptListResponse(
@@ -615,6 +690,25 @@ async def list_voice_transcripts(
         total=total or 0,
         limit=limit,
         offset=offset,
+    )
+
+
+async def get_voice_transcript(
+    db: AsyncSession,
+    utterance_id: str,
+    user_id: str,
+) -> MemoirVoiceTranscriptItemResponse:
+    utterance = await _load_owned_utterance(db, utterance_id, user_id)
+    inclusions = await _book_inclusions_by_utterance_ids(
+        db,
+        [utterance.id],
+        project_ids=[utterance.voice_session.project_id],
+    )
+    cards = await _source_cards_by_utterance(db, [utterance])
+    return _item_response(
+        utterance,
+        inclusions.get(utterance.id, []),
+        cards.get(utterance.id),
     )
 
 

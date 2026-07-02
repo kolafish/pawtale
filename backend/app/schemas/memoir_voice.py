@@ -303,6 +303,9 @@ class MemoirVoiceTranscriptItemResponse(BaseModel):
     transcript_raw: str
     transcript_edited: str
     display_text: str
+    summary_title: str = ""
+    summary_text: str = ""
+    summary_source: str = "fallback"
     raw_char_count: int
     edited_char_count: int
     display_char_count: int

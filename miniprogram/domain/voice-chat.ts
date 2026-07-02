@@ -303,6 +303,9 @@ export interface MemoirVoiceTranscriptItem {
   transcript_raw: string;
   transcript_edited: string;
   display_text: string;
+  summary_title: string;
+  summary_text: string;
+  summary_source: string;
   raw_char_count: number;
   edited_char_count: number;
   display_char_count: number;
