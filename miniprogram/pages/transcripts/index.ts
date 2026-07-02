@@ -3,7 +3,6 @@ import type {
   MemoirGuidanceMode,
   MemoirVoiceTranscriptIncludedFilter,
   MemoirVoiceTranscriptItem,
-  MemoirVoiceTranscriptVoiceEditPreviewResponse,
   MemoirVoiceSearchQueryFilters,
   MemoirVoiceSearchQueryParseResponse,
 } from "../../domain/voice-chat";
@@ -28,7 +27,6 @@ import {
   transcriptSourceMoveRequest,
 } from "../../services/memoir-book-source-actions";
 import { ApiError } from "../../services/request";
-import { formatBeijingDateTimeShort } from "../../services/time";
 import {
   clearTranscriptNavigationTarget,
   readTranscriptNavigationTarget,
@@ -37,6 +35,23 @@ import {
   recordMemoirVoiceSearchQuery,
   stopMemoirVoiceSearchRecording,
 } from "../../services/memoir-voice-search";
+import {
+  inlineTranscriptVoiceEditDiffSegments,
+  transcriptAudioText as baseTranscriptAudioText,
+  transcriptBookInclusionText,
+  transcriptCreatedAtText,
+  transcriptDurationText,
+  transcriptTitleText,
+  transcriptVoiceEditPreviewView,
+  type TranscriptTextSegment,
+  type TranscriptVoiceEditPreviewView,
+} from "../../services/transcript-view-model";
+
+export {
+  inlineTranscriptVoiceEditDiffSegments,
+  transcriptBookInclusionText,
+  transcriptCreatedAtText,
+} from "../../services/transcript-view-model";
 
 interface DatasetEvent {
   currentTarget: {
@@ -64,40 +79,11 @@ interface PickerEvent extends DatasetEvent {
   };
 }
 
-interface TranscriptTextSegment {
-  text: string;
-  highlight: boolean;
-}
-
 interface TranscriptTextView {
   segments: TranscriptTextSegment[];
   collapsible: boolean;
   expanded: boolean;
   toggleText: string;
-}
-
-interface TranscriptVoiceEditChangeView {
-  before: string;
-  after: string;
-  reason: string;
-}
-
-type TranscriptVoiceEditDiffKind = "equal" | "delete" | "insert";
-
-interface TranscriptVoiceEditDiffSegment {
-  text: string;
-  kind: TranscriptVoiceEditDiffKind;
-}
-
-interface TranscriptVoiceEditPreviewView {
-  action: MemoirVoiceTranscriptVoiceEditPreviewResponse["action"];
-  currentText: string;
-  editedText: string;
-  replyText: string;
-  confidenceText: string;
-  changes: TranscriptVoiceEditChangeView[];
-  diffSegments: TranscriptVoiceEditDiffSegment[];
-  canConfirm: boolean;
 }
 
 interface TranscriptSearchFilters {
@@ -179,7 +165,6 @@ interface TranscriptsData {
 const DEFAULT_LIMIT = 30;
 const SEARCH_DEBOUNCE_MS = 300;
 const COLLAPSED_TRANSCRIPT_CHAR_LIMIT = 180;
-const MAX_INLINE_DIFF_PRODUCT = 400000;
 const DEFAULT_SEARCH_FILTERS: TranscriptSearchFilters = {
   included: "all",
   guidanceMode: "",
@@ -207,38 +192,8 @@ type WxWithPageScrollTo = typeof wx & {
   pageScrollTo?: PageScrollTo;
 };
 
-function formatDurationSeconds(value: number): string {
-  const seconds = Math.max(0, Math.round(value));
-  if (seconds < 60) {
-    return `${seconds} 秒`;
-  }
-  const minutes = Math.floor(seconds / 60);
-  const remainingSeconds = seconds % 60;
-  return remainingSeconds ? `${minutes} 分 ${remainingSeconds} 秒` : `${minutes} 分`;
-}
-
-function formatDuration(item: MemoirVoiceTranscriptItem): string {
-  if (item.audio_duration_seconds !== null && item.audio_duration_seconds !== undefined) {
-    return formatDurationSeconds(item.audio_duration_seconds);
-  }
-  if (item.start_ms !== null && item.start_ms !== undefined && item.end_ms !== null && item.end_ms !== undefined) {
-    const seconds = Math.max(0, Math.round((item.end_ms - item.start_ms) / 1000));
-    return formatDurationSeconds(seconds);
-  }
-  return "";
-}
-
-function transcriptDurationText(item: MemoirVoiceTranscriptItem): string {
-  return formatDuration(item);
-}
-
 export function transcriptAudioText(item: MemoirVoiceTranscriptItem): string {
-  const duration = formatDuration(item);
-  return duration ? `时长 ${duration}` : "时长未知";
-}
-
-export function transcriptCreatedAtText(item: Pick<MemoirVoiceTranscriptItem, "created_at">): string {
-  return formatBeijingDateTimeShort(item.created_at) || "讲述记录";
+  return baseTranscriptAudioText(item, { includeDurationLabel: true });
 }
 
 export function transcriptRecordNumber(total: number, offset: number, index: number): number {
@@ -394,30 +349,6 @@ async function loadTranscriptBookPlan(projectId: string): Promise<MemoirBookPlan
   }
 }
 
-export function transcriptBookInclusionText(item: MemoirVoiceTranscriptItem): string {
-  const chapters = [...(item.included_chapters || [])]
-    .sort((left, right) => left.sort_order - right.sort_order)
-    .map((chapter) => ({
-      title: chapter.title.trim() || "未命名章节",
-      chapterNumber: chapter.sort_order + 1,
-    }));
-  if (!chapters.length) {
-    return "尚未入章";
-  }
-  const first = chapters[0];
-  const suffix = chapters.length > 1 ? `等 ${chapters.length} 章` : "";
-  return `已放入第 ${first.chapterNumber} 章：${first.title}${suffix}`;
-}
-
-function transcriptSummaryTitle(item: MemoirVoiceTranscriptItem): string {
-  const title = (item.summary_title || "").trim();
-  if (title) {
-    return title;
-  }
-  const fallback = (item.display_text || item.transcript_edited || item.transcript_raw || "").trim();
-  return fallback ? fallback.slice(0, 32) : "讲述记录";
-}
-
 function transcriptSummaryPreview(item: MemoirVoiceTranscriptItem): string {
   const summary = (item.summary_text || "").trim();
   const fallback = (item.display_text || item.transcript_edited || item.transcript_raw || "").trim();
@@ -440,7 +371,7 @@ function toViewItem(
   const displayView = transcriptTextView(item.display_text, searchQuery);
   const chapterAssignOptions = transcriptChapterAssignOptions(item, bookPlan);
   const chapterMoveOptions = transcriptChapterMoveOptions(item, bookPlan);
-  const summaryTitleText = transcriptSummaryTitle(item);
+  const summaryTitleText = transcriptTitleText(item);
   const summaryPreviewText = transcriptSummaryPreview(item);
   const createdAtText = transcriptCreatedAtText(item);
   const durationText = transcriptDurationText(item);
@@ -503,163 +434,6 @@ function changedItem(item: TranscriptItemView, editingText: string): TranscriptI
     editingCharCount: editingText.trim().length,
     changed: editingText.trim() !== (item.transcript_edited || item.transcript_raw).trim(),
     isEditing: true,
-  };
-}
-
-function pushDiffSegment(
-  segments: TranscriptVoiceEditDiffSegment[],
-  kind: TranscriptVoiceEditDiffKind,
-  text: string,
-) {
-  if (!text) {
-    return;
-  }
-  const last = segments[segments.length - 1];
-  if (last?.kind === kind) {
-    last.text += text;
-    return;
-  }
-  segments.push({ kind, text });
-}
-
-function editedTextFromDiffSegments(segments: TranscriptVoiceEditDiffSegment[]): string {
-  return segments
-    .filter((segment) => segment.kind !== "delete")
-    .map((segment) => segment.text)
-    .join("");
-}
-
-function diffSegmentsFromChangeList(
-  currentText: string,
-  editedText: string,
-  changes: TranscriptVoiceEditChangeView[],
-): TranscriptVoiceEditDiffSegment[] | null {
-  if (!changes.length) {
-    return null;
-  }
-  const segments: TranscriptVoiceEditDiffSegment[] = [];
-  let cursor = 0;
-  for (const change of changes) {
-    const before = change.before || "";
-    const after = change.after || "";
-    if (!before && !after) {
-      continue;
-    }
-    if (!before) {
-      return null;
-    }
-    const index = currentText.indexOf(before, cursor);
-    if (index < 0) {
-      return null;
-    }
-    pushDiffSegment(segments, "equal", currentText.slice(cursor, index));
-    pushDiffSegment(segments, "delete", before);
-    pushDiffSegment(segments, "insert", after);
-    cursor = index + before.length;
-  }
-  pushDiffSegment(segments, "equal", currentText.slice(cursor));
-  return editedTextFromDiffSegments(segments) === editedText ? segments : null;
-}
-
-function textDiffSegments(currentText: string, editedText: string): TranscriptVoiceEditDiffSegment[] {
-  const left = Array.from(currentText);
-  const right = Array.from(editedText);
-  const segments: TranscriptVoiceEditDiffSegment[] = [];
-  let prefixLength = 0;
-  while (
-    prefixLength < left.length
-    && prefixLength < right.length
-    && left[prefixLength] === right[prefixLength]
-  ) {
-    prefixLength += 1;
-  }
-  let suffixLength = 0;
-  while (
-    suffixLength < left.length - prefixLength
-    && suffixLength < right.length - prefixLength
-    && left[left.length - suffixLength - 1] === right[right.length - suffixLength - 1]
-  ) {
-    suffixLength += 1;
-  }
-  pushDiffSegment(segments, "equal", left.slice(0, prefixLength).join(""));
-  const leftMiddle = left.slice(prefixLength, left.length - suffixLength);
-  const rightMiddle = right.slice(prefixLength, right.length - suffixLength);
-  if (!leftMiddle.length) {
-    pushDiffSegment(segments, "insert", rightMiddle.join(""));
-  } else if (!rightMiddle.length) {
-    pushDiffSegment(segments, "delete", leftMiddle.join(""));
-  } else if (leftMiddle.length * rightMiddle.length > MAX_INLINE_DIFF_PRODUCT) {
-    pushDiffSegment(segments, "delete", leftMiddle.join(""));
-    pushDiffSegment(segments, "insert", rightMiddle.join(""));
-  } else {
-    const width = rightMiddle.length + 1;
-    const table = new Uint32Array((leftMiddle.length + 1) * width);
-    for (let leftIndex = leftMiddle.length - 1; leftIndex >= 0; leftIndex -= 1) {
-      for (let rightIndex = rightMiddle.length - 1; rightIndex >= 0; rightIndex -= 1) {
-        const current = leftIndex * width + rightIndex;
-        table[current] = leftMiddle[leftIndex] === rightMiddle[rightIndex]
-          ? table[(leftIndex + 1) * width + rightIndex + 1] + 1
-          : Math.max(table[(leftIndex + 1) * width + rightIndex], table[leftIndex * width + rightIndex + 1]);
-      }
-    }
-    let leftIndex = 0;
-    let rightIndex = 0;
-    while (leftIndex < leftMiddle.length && rightIndex < rightMiddle.length) {
-      if (leftMiddle[leftIndex] === rightMiddle[rightIndex]) {
-        pushDiffSegment(segments, "equal", leftMiddle[leftIndex]);
-        leftIndex += 1;
-        rightIndex += 1;
-      } else if (
-        table[(leftIndex + 1) * width + rightIndex] >= table[leftIndex * width + rightIndex + 1]
-      ) {
-        pushDiffSegment(segments, "delete", leftMiddle[leftIndex]);
-        leftIndex += 1;
-      } else {
-        pushDiffSegment(segments, "insert", rightMiddle[rightIndex]);
-        rightIndex += 1;
-      }
-    }
-    pushDiffSegment(segments, "delete", leftMiddle.slice(leftIndex).join(""));
-    pushDiffSegment(segments, "insert", rightMiddle.slice(rightIndex).join(""));
-  }
-  pushDiffSegment(segments, "equal", suffixLength ? left.slice(left.length - suffixLength).join("") : "");
-  return segments;
-}
-
-export function inlineTranscriptVoiceEditDiffSegments(
-  currentText: string,
-  editedText: string,
-  changes: TranscriptVoiceEditChangeView[] = [],
-): TranscriptVoiceEditDiffSegment[] {
-  if (currentText === editedText) {
-    return currentText ? [{ text: currentText, kind: "equal" }] : [];
-  }
-  const changeListSegments = diffSegmentsFromChangeList(currentText, editedText, changes);
-  return changeListSegments || textDiffSegments(currentText, editedText);
-}
-
-function voiceEditPreviewView(
-  response: MemoirVoiceTranscriptVoiceEditPreviewResponse,
-): TranscriptVoiceEditPreviewView {
-  const confidence = Number.isFinite(response.confidence)
-    ? Math.round(Math.max(0, Math.min(1, response.confidence)) * 100)
-    : 0;
-  const changes = (response.changes || []).map((item) => ({
-    before: item.before,
-    after: item.after,
-    reason: item.reason,
-  }));
-  return {
-    action: response.action,
-    currentText: response.current_text,
-    editedText: response.edited_text,
-    replyText: response.reply_text,
-    confidenceText: `${confidence}%`,
-    changes,
-    diffSegments: inlineTranscriptVoiceEditDiffSegments(response.current_text, response.edited_text, changes),
-    canConfirm: Boolean(response.action === "revise_transcript"
-      && response.edited_text.trim()
-      && response.edited_text.trim() !== response.current_text.trim()),
   };
 }
 
@@ -1083,7 +857,7 @@ Page<TranscriptsData, {
         return;
       }
       this.setData({
-        voiceEditPreview: voiceEditPreviewView(preview),
+        voiceEditPreview: transcriptVoiceEditPreviewView(preview),
         voiceEditStatusText: preview.action === "revise_transcript" ? "请确认修正内容" : preview.reply_text,
       });
       trackAuditAction(
