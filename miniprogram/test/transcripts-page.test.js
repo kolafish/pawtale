@@ -247,7 +247,10 @@ test("transcripts list leaves full correction UI to the detail page", () => {
 
   assert.doesNotMatch(wxml, /voice-edit-inline-diff/);
   assert.doesNotMatch(wxml, /class="raw-box"/);
+  assert.doesNotMatch(wxml, /raw-section|question-section|record-section-text|原始讲述|刚才问了/);
   assert.doesNotMatch(wxml, /section-title">整理文字/);
+  assert.match(wxml, /summary-preview/);
+  assert.match(wxml, /book-status/);
   assert.match(detailWxml, /voice-edit-inline-diff/);
   assert.match(detailWxml, /voiceEditPreview\.diffSegments/);
   assert.doesNotMatch(wxml, /voice-edit-comparison/);
