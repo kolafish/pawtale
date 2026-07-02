@@ -7,7 +7,14 @@ const test = require("node:test");
 
 const {
   initialVoiceChatData,
+  voiceAuthorizationChangePatch,
+  voiceAuthorizationConsentPatch,
+  voiceCaptureStatsPatch,
+  voiceChatErrorPatch,
   voiceChatAutoListenGateSnapshot,
+  voiceConnectionStatusPatch,
+  voiceGatewayEventPatch,
+  voiceSessionDetailPatch,
 } = require("../pages/voice-chat/voice-chat-page-state.ts");
 
 test("voice chat initial data keeps the assistant ready for opening narration", () => {
@@ -90,4 +97,120 @@ test("voice chat auto-listen gate snapshot keeps page and computed gate state to
       canStart: true,
     },
   );
+});
+
+test("voice chat authorization selectors keep consent text consistent", () => {
+  assert.deepEqual(
+    voiceAuthorizationConsentPatch({ primaryActionText: "同意后开始说话", recording: false }, true),
+    {
+      voiceAuthorizationAgreed: true,
+      primaryActionText: "开始说话",
+      error: "",
+      autoListenStateText: "小余说完自动听",
+    },
+  );
+  assert.deepEqual(
+    voiceAuthorizationChangePatch({ recording: true, error: "旧错误" }, false),
+    {
+      voiceAuthorizationAgreed: false,
+      recording: false,
+      error: "旧错误",
+      primaryActionText: "同意后开始说话",
+      autoListenStateText: "同意后才会自动收音",
+    },
+  );
+});
+
+test("voice chat session detail selector applies saved and assistant state", () => {
+  const data = initialVoiceChatData();
+  const patch = voiceSessionDetailPatch({
+    session: {
+      status: "stopped",
+      guidance_mode: "guided_interview",
+      current_guidance_module: "person",
+    },
+    messages: [
+      {
+        id: "message-user",
+        role: "user",
+        content_text: "我想讲外婆",
+        turn_index: 1,
+        created_at: "2026-01-01T00:00:00Z",
+      },
+      {
+        id: "message-assistant",
+        role: "assistant",
+        content_text: "外婆最常做的一件事是什么？",
+        turn_index: 2,
+        created_at: "2026-01-01T00:00:01Z",
+        audio_file_id: "audio-assistant",
+        metadata_json: { expects_answer: true },
+      },
+    ],
+    utterances: [
+      {
+        id: "utterance-1",
+        chat_message_id: "message-user",
+        transcript_raw: "我想讲外婆",
+        transcript_edited: "",
+        created_at: "2026-01-01T00:00:00Z",
+        audio_file_id: "audio-user",
+      },
+    ],
+  }, data);
+
+  assert.equal(patch.status, "closed");
+  assert.equal(patch.primaryActionText, "已保存");
+  assert.equal(patch.currentGuidanceModule, "person");
+  assert.equal(patch.latestTranscriptText, "我想讲外婆");
+  assert.equal(patch.assistantPromptText, "外婆最常做的一件事是什么？");
+  assert.equal(patch.followUpAudioFileId, "audio-assistant");
+});
+
+test("voice chat realtime selectors derive capture, gateway, status, and error patches", () => {
+  assert.deepEqual(voiceConnectionStatusPatch("listening", { recording: false }), {
+    status: "listening",
+    statusText: "正在听",
+    recording: true,
+  });
+
+  const capture = voiceCaptureStatsPatch({
+    state: "recording",
+    frameCount: 12,
+    audioBytesSent: 3072,
+    recordingElapsedMs: 61000,
+    silentElapsedMs: 4000,
+    audioLevel: 0.25,
+    gatewayState: "listening",
+    autoStopped: true,
+    autoStopReason: "no_voice",
+  }, {
+    autoStopEnabled: true,
+    noAnswerPromptAlreadyHandled: false,
+  });
+  assert.equal(capture.shouldHandleNoAnswerAutoStop, true);
+  assert.equal(capture.patch.captureKilobytes, 3);
+  assert.equal(capture.patch.captureDurationText, "01:01");
+  assert.equal(capture.patch.autoStopStateText, "未听到回答，已暂停收音");
+  assert.equal(capture.patch.primaryActionText, "继续说话");
+
+  assert.deepEqual(
+    voiceGatewayEventPatch({ type: "audio.ended", state: "finishing" }, { persistenceStateText: "识别中" }),
+    {
+      gatewayStateText: "识别保存中",
+      recording: false,
+      primaryActionText: "继续说话",
+      persistenceStateText: "正在保存",
+    },
+  );
+
+  const errorPatch = voiceChatErrorPatch(
+    "连接断开",
+    { kind: "connection", state: "failed", message: "连接断开" },
+    { persistenceStateText: "识别中", recoveryNotice: "" },
+  );
+  assert.equal(errorPatch.status, "error");
+  assert.equal(errorPatch.errorKindText, "连接错误");
+  assert.equal(errorPatch.gatewayStateText, "连接异常");
+  assert.equal(errorPatch.canReconnect, true);
 });

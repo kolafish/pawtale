@@ -38,7 +38,6 @@ import {
 import { splitTextByAudioPlaybackProgress } from "../../services/tts-text-progress";
 import { readChatTTSSettings } from "../../services/tts-settings";
 import { canAutoStartListeningAfterTTS } from "../../services/voice-chat-auto-listen";
-import { voiceGuidanceLabel } from "../../services/memoir-project-profile";
 import {
   readVoiceAuthorizationConsent,
   saveVoiceAuthorizationConsent,
@@ -50,11 +49,7 @@ import {
   assistantTranscriptState,
   canRequestFollowUp,
   countTextChars,
-  coveredFollowUpSourceMessageId,
-  errorKindText,
   followUpSourceMessageId,
-  formatDuration,
-  gatewayStateText,
   latestAssistantMessageId,
   statusText,
   ttsAlignmentFromMetadata,
@@ -71,7 +66,19 @@ import {
   type AutoListenGateSnapshot,
   type VoiceChatData,
   initialVoiceChatData,
+  voiceAuthorizationChangePatch,
+  voiceAuthorizationConsentPatch,
+  voiceAuthorizationRequiredPatch,
+  voiceAuthorizationSyncFailedPatch,
+  voiceAuthorizationWaitingPatch,
+  voiceCaptureStatsPatch,
+  voiceChatErrorPatch,
   voiceChatAutoListenGateSnapshot,
+  voiceChatSessionEntryPatch,
+  voiceConnectionStatusPatch,
+  voiceGatewayEventPatch,
+  voiceSessionDetailPatch,
+  voiceSessionSnapshotPatch,
 } from "./voice-chat-page-state";
 import {
   datasetString,
@@ -262,15 +269,13 @@ Page<VoiceChatData, {
     const currentGuidanceModule = queryParam(query, "module");
     const projectTitle = queryParam(query, "projectTitle");
     const voiceAuthorizationAgreed = readVoiceAuthorizationConsent();
-    this.setData({
+    this.setData(voiceChatSessionEntryPatch({
       voiceSessionId,
       projectTitle,
       guidanceMode,
       currentGuidanceModule,
-      modeLabel: voiceGuidanceLabel(guidanceMode, currentGuidanceModule),
       voiceAuthorizationAgreed,
-      primaryActionText: voiceAuthorizationAgreed ? "开始说话" : "同意后开始说话",
-    });
+    }));
     if (!voiceSessionId) {
       this.setData({ error: "缺少本次语音记录" });
       return;
@@ -285,10 +290,7 @@ Page<VoiceChatData, {
       await this.syncVoiceAuthorizationAndConnect();
     }
     if (!this.data.voiceAuthorizationAgreed) {
-      this.setData({
-        statusText: "等待声纹授权",
-        autoListenStateText: "同意后才会自动收音",
-      });
+      this.setData(voiceAuthorizationWaitingPatch());
     }
   },
 
@@ -323,17 +325,7 @@ Page<VoiceChatData, {
 
   refreshVoiceAuthorizationConsent() {
     const voiceAuthorizationAgreed = readVoiceAuthorizationConsent();
-    const patch: Partial<VoiceChatData> = { voiceAuthorizationAgreed };
-    if (voiceAuthorizationAgreed && this.data.primaryActionText === "同意后开始说话") {
-      patch.primaryActionText = "开始说话";
-      patch.error = "";
-      patch.autoListenStateText = "小余说完自动听";
-    }
-    if (!voiceAuthorizationAgreed && !this.data.recording) {
-      patch.primaryActionText = "同意后开始说话";
-      patch.autoListenStateText = "同意后才会自动收音";
-    }
-    this.setData(patch);
+    this.setData(voiceAuthorizationConsentPatch(this.data, voiceAuthorizationAgreed));
     if (
       voiceAuthorizationAgreed
       && this.data.voiceSessionId
@@ -352,13 +344,7 @@ Page<VoiceChatData, {
     if (!agreed && this.voiceStreaming.hasClient() && this.data.recording) {
       this.voiceStreaming.stopRecording();
     }
-    this.setData({
-      voiceAuthorizationAgreed: consent.agreed,
-      recording: agreed ? this.data.recording : false,
-      error: agreed ? "" : this.data.error,
-      primaryActionText: agreed ? "开始说话" : "同意后开始说话",
-      autoListenStateText: agreed ? "小余说完自动听" : "同意后才会自动收音",
-    });
+    this.setData(voiceAuthorizationChangePatch(this.data, consent.agreed));
     if (agreed && this.data.voiceSessionId && !this.voiceStreaming.hasClient() && !this.data.connecting) {
       await this.syncVoiceAuthorizationAndConnect();
     } else {
@@ -383,12 +369,7 @@ Page<VoiceChatData, {
       }
       return true;
     }
-    this.setData({
-      voiceAuthorizationAgreed: false,
-      error: "请先阅读并同意《声纹授权协议》后再开始录音",
-      primaryActionText: "同意后开始说话",
-      autoListenStateText: autoTriggered ? "自动收音已暂停，等待声纹授权" : "同意后才会自动收音",
-    });
+    this.setData(voiceAuthorizationRequiredPatch(autoTriggered));
     wx.showToast({ title: "请先同意声纹授权协议", icon: "none" });
     return false;
   },
@@ -405,11 +386,7 @@ Page<VoiceChatData, {
       return true;
     } catch (error) {
       const message = error instanceof Error ? error.message : "声纹授权同步失败";
-      this.setData({
-        error: message,
-        primaryActionText: "继续说话",
-        autoListenStateText: "声纹授权同步失败",
-      });
+      this.setData(voiceAuthorizationSyncFailedPatch(message));
       if (typeof wx !== "undefined" && typeof wx.showToast === "function") {
         wx.showToast({ title: "声纹授权同步失败", icon: "none" });
       }
@@ -433,24 +410,7 @@ Page<VoiceChatData, {
     if (!snapshot.hasSession) {
       return;
     }
-    const guidanceMode = snapshot.detail?.session.guidance_mode || this.data.guidanceMode;
-    const currentGuidanceModule = snapshot.detail?.session.current_guidance_module || this.data.currentGuidanceModule;
-    const coveredSourceMessageId = coveredFollowUpSourceMessageId(snapshot.transcriptLines);
-    const lastFollowUpSourceMessageId = coveredSourceMessageId || this.data.lastFollowUpSourceMessageId;
-    this.setData({
-      guidanceMode,
-      currentGuidanceModule,
-      modeLabel: voiceGuidanceLabel(guidanceMode, currentGuidanceModule),
-      ...assistantTranscriptState(snapshot.transcriptLines, {
-        dismissedFollowUpMessageId: this.data.dismissedFollowUpMessageId,
-        guidanceMode,
-        lastFollowUpSourceMessageId,
-        followUpLoading: this.data.followUpLoading,
-        currentFollowUpTTSStateText: this.data.followUpTTSStateText,
-      }),
-      lastFollowUpSourceMessageId,
-      recoveryNotice: snapshot.pendingClose ? "正在恢复上次离开前的讲述记录" : this.data.recoveryNotice,
-    });
+    this.setData(voiceSessionSnapshotPatch(snapshot, this.data));
   },
 
   async refreshVoiceSessionSnapshot() {
@@ -530,44 +490,7 @@ Page<VoiceChatData, {
   },
 
   applyVoiceSessionDetail(detail) {
-    const detailLines = transcriptLinesFromVoiceSessionDetail(detail);
-    const guidanceMode = detail.session.guidance_mode || this.data.guidanceMode;
-    const currentGuidanceModule = detail.session.current_guidance_module || this.data.currentGuidanceModule;
-    const nextLines = detailLines.length >= this.data.transcriptLines.length
-      ? detailLines
-      : this.data.transcriptLines;
-    const coveredSourceMessageId = coveredFollowUpSourceMessageId(nextLines);
-    const lastFollowUpSourceMessageId = coveredSourceMessageId || this.data.lastFollowUpSourceMessageId;
-    const sessionPatch: Partial<VoiceChatData> = {};
-    if (detail.session.status === "stopped") {
-      sessionPatch.status = "closed";
-      sessionPatch.statusText = statusText("closed");
-      sessionPatch.primaryActionText = "已保存";
-      sessionPatch.recording = false;
-      sessionPatch.persistenceStateText = "已保存";
-    }
-    if (detail.session.status === "failed") {
-      sessionPatch.status = "error";
-      sessionPatch.statusText = statusText("error");
-      sessionPatch.primaryActionText = "重新开始";
-      sessionPatch.recording = false;
-      sessionPatch.persistenceStateText = "会话异常";
-      sessionPatch.error = detail.session.error_message || "本次语音保存异常，请返回首页重新开始";
-    }
-    this.setData({
-      ...sessionPatch,
-      guidanceMode,
-      currentGuidanceModule,
-      modeLabel: voiceGuidanceLabel(guidanceMode, currentGuidanceModule),
-      ...assistantTranscriptState(nextLines, {
-        dismissedFollowUpMessageId: this.data.dismissedFollowUpMessageId,
-        guidanceMode,
-        lastFollowUpSourceMessageId,
-        followUpLoading: this.data.followUpLoading,
-        currentFollowUpTTSStateText: this.data.followUpTTSStateText,
-      }),
-      lastFollowUpSourceMessageId,
-    });
+    this.setData(voiceSessionDetailPatch(detail, this.data));
   },
 
   persistCurrentTranscriptSnapshot() {
@@ -1811,74 +1734,26 @@ Page<VoiceChatData, {
   },
 
   handleStatus(status) {
-    this.setData({
-      status,
-      statusText: statusText(status),
-      recording: status === "listening"
-        ? true
-        : this.data.recording && status !== "stopping" && status !== "closed" && status !== "error",
-    });
+    this.setData(voiceConnectionStatusPatch(status, this.data));
   },
 
   handleCaptureStats(stats) {
-    const labels: Record<MemoirCaptureStats["state"], string> = {
-      idle: "麦克风未开始",
-      opening: "正在打开麦克风",
-      recording: "录音中",
-      stopping: "正在收尾",
-      error: "录音异常",
-    };
-    let autoStopStateText = `自动收尾开 · 静音 ${formatDuration(stats.silentElapsedMs || 0)}`;
-    if (stats.autoStopped && stats.autoStopReason === "no_voice") {
-      autoStopStateText = "未听到回答，已暂停收音";
-    } else if (!this.data.autoStopEnabled) {
-      autoStopStateText = "自动收尾关";
-    } else if (stats.autoStopped) {
-      autoStopStateText = "检测到停顿，已自动收尾";
-    }
-    const patch: Partial<VoiceChatData> = {
-      captureStateText: labels[stats.state],
-      captureFrameCount: stats.frameCount,
-      captureKilobytes: Math.round(stats.audioBytesSent / 1024),
-      captureDurationText: formatDuration(stats.recordingElapsedMs),
-      gatewayStateText: gatewayStateText(stats.gatewayState),
-      audioLevelPercent: Math.min(100, Math.round(Math.sqrt(stats.audioLevel || 0) * 100)),
-      autoStopStateText,
-    };
     const noAnswerAutoStopped = stats.autoStopped && stats.autoStopReason === "no_voice";
     const noAnswerPromptAlreadyHandled = noAnswerAutoStopped
       && this.handledNoAnswerFrameCount === stats.frameCount;
-    if (noAnswerAutoStopped && !noAnswerPromptAlreadyHandled) {
-      patch.autoListenStateText = "没听到回答，已暂停，可点继续说话";
-      patch.persistenceStateText = "未听到回答";
-      patch.primaryActionText = "继续说话";
-    }
+    const { patch, shouldHandleNoAnswerAutoStop } = voiceCaptureStatsPatch(stats, {
+      autoStopEnabled: this.data.autoStopEnabled,
+      noAnswerPromptAlreadyHandled,
+    });
     this.setData(patch);
-    if (noAnswerAutoStopped && !noAnswerPromptAlreadyHandled) {
+    if (shouldHandleNoAnswerAutoStop) {
       this.handledNoAnswerFrameCount = stats.frameCount;
       void this.handleNoAnswerAutoStop();
     }
   },
 
   handleGatewayEvent(event) {
-    const nextData: Partial<VoiceChatData> = {};
-    if (event.state) {
-      nextData.gatewayStateText = gatewayStateText(event.state);
-    }
-    if (event.type === "audio.ended") {
-      nextData.recording = false;
-      nextData.primaryActionText = "继续说话";
-      nextData.persistenceStateText = this.data.persistenceStateText === "已保存"
-        || this.data.persistenceStateText === "未听到回答"
-        || this.data.persistenceStateText === "小余正在确认"
-        ? this.data.persistenceStateText
-        : "正在保存";
-    }
-    if (event.type === "session.started") {
-      nextData.persistenceStateText = "等待识别";
-      nextData.liveText = "";
-      nextData.liveCharCount = 0;
-    }
+    const nextData = voiceGatewayEventPatch(event, this.data);
     if (Object.keys(nextData).length) {
       this.setData(nextData);
     }
@@ -1962,22 +1837,6 @@ Page<VoiceChatData, {
     if (error?.kind === "connection") {
       this.persistPendingVoiceClose("connection_error");
     }
-    const nextData: Partial<VoiceChatData> = {
-      error: message,
-      errorKindText: errorKindText(error),
-      persistenceStateText: error?.kind === "persistence" ? "保存失败" : this.data.persistenceStateText,
-      status: "error",
-      statusText: statusText("error"),
-      recording: false,
-      primaryActionText: "重新连接",
-      captureStateText: "录音异常",
-      recoveryNotice: error?.kind === "connection" ? "语音连接中断，已保留本地讲述记录" : this.data.recoveryNotice,
-      canReconnect: error?.kind === "connection",
-      canFinishAfterDisconnect: error?.kind === "connection",
-    };
-    if (error?.state) {
-      nextData.gatewayStateText = gatewayStateText(error.state);
-    }
-    this.setData(nextData);
+    this.setData(voiceChatErrorPatch(message, error, this.data));
   },
 });
