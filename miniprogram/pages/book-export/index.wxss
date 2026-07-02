@@ -14,7 +14,9 @@
 
 .export-hero,
 .state-card,
+.regenerate-card,
 .export-settings,
+.manuscript-card,
 .preview-card {
   box-sizing: border-box;
   border: 1rpx solid #ead9c8;
@@ -45,6 +47,22 @@
 .preview-count,
 .chapter-title,
 .chapter-excerpt,
+.regenerate-title,
+.regenerate-meta,
+.section-count,
+.manuscript-title,
+.manuscript-subtitle,
+.manuscript-meta,
+.structure-title,
+.structure-meta,
+.structure-status,
+.chapter-index,
+.chapter-intro,
+.chapter-quote,
+.chapter-quote-source,
+.back-matter-kind,
+.back-matter-title,
+.back-matter-preview,
 .book-output-text,
 .state-card {
   display: block;
@@ -119,6 +137,33 @@
   gap: 16rpx;
 }
 
+.regenerate-card {
+  padding: 22rpx 24rpx;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18rpx;
+}
+
+.regenerate-copy {
+  min-width: 0;
+  flex: 1;
+}
+
+.regenerate-title {
+  color: #332822;
+  font-size: 28rpx;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.regenerate-meta {
+  margin-top: 4rpx;
+  color: #7b6f68;
+  font-size: 24rpx;
+  line-height: 1.45;
+}
+
 .primary-button,
 .ghost-button,
 .text-button {
@@ -148,6 +193,12 @@
 
 .text-button::after {
   border: 0;
+}
+
+.ghost-button.compact {
+  flex-shrink: 0;
+  min-width: 168rpx;
+  padding: 0 18rpx;
 }
 
 .book-design-panel {
@@ -465,6 +516,133 @@
 .save-design-button {
   width: 100%;
   margin-top: 18rpx;
+}
+
+.manuscript-card {
+  padding: 26rpx;
+}
+
+.manuscript-section + .manuscript-section {
+  margin-top: 26rpx;
+  padding-top: 24rpx;
+  border-top: 1rpx solid #f0e2d4;
+}
+
+.section-count {
+  flex-shrink: 0;
+  color: #9b6a52;
+  font-size: 24rpx;
+  line-height: 1.35;
+}
+
+.manuscript-cover-summary {
+  margin-top: 18rpx;
+  padding: 22rpx;
+  border-radius: 10rpx;
+  background: #fffdf8;
+}
+
+.manuscript-title {
+  color: #2f241f;
+  font-size: 30rpx;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.manuscript-subtitle,
+.manuscript-meta,
+.structure-meta,
+.chapter-intro,
+.back-matter-preview {
+  color: #7b6f68;
+  font-size: 24rpx;
+  line-height: 1.55;
+}
+
+.manuscript-subtitle,
+.manuscript-meta {
+  margin-top: 6rpx;
+}
+
+.structure-list,
+.manuscript-chapter-list,
+.back-matter-list {
+  margin-top: 18rpx;
+  display: flex;
+  flex-direction: column;
+  gap: 14rpx;
+}
+
+.structure-row,
+.back-matter-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16rpx;
+  padding: 18rpx;
+  border-radius: 10rpx;
+  background: #fffdf8;
+}
+
+.structure-main,
+.back-matter-main {
+  min-width: 0;
+  flex: 1;
+}
+
+.structure-title,
+.back-matter-title {
+  color: #332822;
+  font-size: 26rpx;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.structure-status,
+.back-matter-kind {
+  flex-shrink: 0;
+  color: #a64b3e;
+  font-size: 23rpx;
+  line-height: 1.45;
+}
+
+.manuscript-chapter {
+  padding: 20rpx;
+  border-radius: 10rpx;
+  background: #fffdf8;
+}
+
+.chapter-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 12rpx;
+}
+
+.chapter-index {
+  flex-shrink: 0;
+  color: #9b6a52;
+  font-size: 23rpx;
+  line-height: 1.4;
+}
+
+.chapter-intro {
+  margin-top: 10rpx;
+}
+
+.chapter-quote {
+  margin-top: 12rpx;
+  padding-left: 16rpx;
+  border-left: 4rpx solid #e0c2ae;
+  color: #6f5144;
+  font-size: 24rpx;
+  line-height: 1.55;
+}
+
+.chapter-quote-source {
+  margin-top: 6rpx;
+  color: #9b6a52;
+  font-size: 22rpx;
+  line-height: 1.4;
 }
 
 .export-settings {

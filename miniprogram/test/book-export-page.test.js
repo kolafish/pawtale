@@ -78,7 +78,64 @@ function sampleStructuredBookContent() {
   };
 }
 
-function sampleBookOutputVersion(version, content, createdAt = "2026-06-17T00:00:00.000Z") {
+function sampleBookManuscript(title = "外婆回忆录", coverStyle = "classic_plain") {
+  return {
+    schema_version: 1,
+    profile: {
+      template: "classic_family",
+      title,
+      subtitle: "根据口述访谈整理",
+      narrator_name: "外婆",
+      prepared_by: "家人整理",
+      interview_date_range: "",
+      privacy_note: "仅供家庭内部阅读。",
+      ai_disclosure_note: "AI 辅助整理，不新增未经确认的事实。",
+    },
+    front_matter: [
+      { kind: "cover", title, content: `${title}\n根据口述访谈整理`, enabled: true },
+      { kind: "preface", title: "前言", content: "这些故事来自家里的讲述。", enabled: true },
+    ],
+    table_of_contents: sampleStructuredBookContent().table_of_contents,
+    chapters: [
+      {
+        chapter_id: "chapter-1",
+        index: 1,
+        title: "外婆家的童年",
+        subtitle: "",
+        intro: "这一章主要记录外婆小时候在院子里的生活。",
+        time_hint: "童年",
+        place_hint: "老家",
+        pull_quotes: [{ text: "我小时候常在院子里晒太阳。", source_ref_ids: ["utterance-1"] }],
+        people_notes: [],
+        uncertain_facts: [],
+        content: "我小时候常在院子里晒太阳。",
+        source_refs: [{ utterance_id: "utterance-1", transcript_version_id: "version-1", voice_session_id: "voice-1", quote: "院子" }],
+      },
+    ],
+    back_matter: {
+      afterword: { kind: "afterword", title: "后记", content: "这些故事还可以继续补充。", enabled: true },
+      version_note: { kind: "version_note", title: "整理说明", content: "默认展示故事书版。", enabled: true },
+      source_appendix: { kind: "source_appendix", title: "原始讲述索引", content: "第1章：1 条讲述来源", enabled: true },
+    },
+    render_settings: {
+      page_size: "a5",
+      layout: "reading",
+      font_scale: "standard",
+      show_headers: true,
+      show_source_appendix: true,
+      photo_mode: "none",
+      cover_style: coverStyle,
+      back_cover_quote: "我小时候常在院子里晒太阳。",
+    },
+  };
+}
+
+function sampleBookOutputVersion(
+  version,
+  content,
+  createdAt = "2026-06-17T00:00:00.000Z",
+  manuscript = sampleBookManuscript(),
+) {
   return {
     id: `book-output-version-${version}`,
     output_id: "book-output-1",
@@ -88,7 +145,7 @@ function sampleBookOutputVersion(version, content, createdAt = "2026-06-17T00:00
     content,
     chapter_snapshot_json: [],
     structured_content: sampleStructuredBookContent(),
-    manuscript: null,
+    manuscript,
     created_by: "system",
     created_at: createdAt,
   };
@@ -122,6 +179,7 @@ function loadBookExportPage(voiceApiExports = {}) {
     downloadMemoirBookOutputExport: async () => "/tmp/book.pdf",
     suggestMemoirBookOutputTitles: async () => ({ suggestions: [] }),
     updateMemoirBookOutput: async () => sampleBookOutput(),
+    enqueueMemoirBookOutputGeneration: async () => ({ id: "event-book-output" }),
     enqueueMemoirBookOutputEditorialCopyGeneration: async () => ({ id: "event-1" }),
     ...voiceApiExports,
   });
@@ -145,10 +203,22 @@ test("book export page is registered and exposes preview/export controls", () =>
   assert.match(wxml, /口述人/);
   assert.match(wxml, /封面风格/);
   assert.match(wxml, /保存成书信息/);
+  assert.match(wxml, /重新整理一版/);
+  assert.match(wxml, /当前书稿会保留/);
+  assert.match(wxml, /bindtap="generateBook"/);
+  assert.match(wxml, /书稿设置/);
+  assert.match(wxml, /书籍结构/);
+  assert.match(wxml, /章节书稿/);
+  assert.match(wxml, /附录与说明/);
+  assert.match(wxml, /bookManuscriptStructureItems/);
+  assert.match(wxml, /bookManuscriptChapterItems/);
+  assert.match(wxml, /bookManuscriptBackMatterItems/);
   assert.match(wxml, /bindchange="changeBookExportLayout"/);
   assert.match(wxml, /bindchange="toggleBookExportSourceAppendix"/);
   assert.match(wxml, /历史版本/);
   assert.match(wxss, /\.book-design-panel/);
+  assert.match(wxss, /\.regenerate-card/);
+  assert.match(wxss, /\.manuscript-card/);
   assert.match(wxss, /\.book-cover-preview\.moonlit-courtyard/);
   assert.match(wxss, /\.export-actions/);
   assert.match(wxss, /\.preview-card/);
@@ -179,6 +249,11 @@ test("book export page loads plan and output from query project", async () => {
   assert.equal(context.data.exportNotice, "打印版字号更大，适合装订保存。");
   assert.equal(context.data.bookContent, "全书第二版正文");
   assert.equal(context.data.bookPreviewChapters.length, 1);
+  assert.equal(context.data.bookManuscriptAvailable, true);
+  assert.equal(context.data.bookManuscriptTemplateLabel, "素雅书籍版");
+  assert.equal(context.data.bookManuscriptStructureItems.some((item) => item.title === "目录"), true);
+  assert.equal(context.data.bookManuscriptChapterItems[0].intro, "这一章主要记录外婆小时候在院子里的生活。");
+  assert.equal(context.data.bookManuscriptBackMatterItems.some((item) => item.title === "原始讲述索引"), true);
 });
 
 test("book export page saves full-book metadata and cover style", async () => {
@@ -223,8 +298,8 @@ test("book export page saves full-book metadata and cover style", async () => {
       narrator_name: "外婆",
       prepared_by: "家人整理",
       preface: "写给家人的开篇。",
-      afterword: "",
-      back_cover_quote: "",
+      afterword: "这些故事还可以继续补充。",
+      back_cover_quote: "我小时候常在院子里晒太阳。",
       cover_style: "moonlit_courtyard",
     },
   });
@@ -321,5 +396,44 @@ test("book export page downloads selected PDF layout and source appendix setting
   assert.equal(opened[0].fileType, "pdf");
   assert.equal(toasts[0].title, "PDF 已打开");
   assert.equal(context.data.bookExportBusyTarget, "");
+  delete global.wx;
+});
+
+test("book export page submits full-book regeneration as a new version", async () => {
+  const requests = [];
+  const toasts = [];
+  global.wx = {
+    showToast(options) {
+      toasts.push(options);
+    },
+  };
+  const { page } = loadBookExportPage({
+    enqueueMemoirBookOutputGeneration: async (projectId, payload) => {
+      requests.push({ projectId, payload });
+      return { id: "event-book-output" };
+    },
+  });
+  const context = pageContext(page, { projectId: "project/1" });
+  page.applyBookExportData.call(context, samplePlan(), sampleBookOutput());
+
+  await page.generateBook.call(context);
+
+  assert.deepEqual(requests[0], {
+    projectId: "project/1",
+    payload: {
+      force_regenerate: true,
+      title: "外婆回忆录",
+      subtitle: "根据口述访谈整理",
+      narrator_name: "外婆",
+      prepared_by: "家人整理",
+      preface: "这些故事来自家里的讲述。",
+      afterword: "这些故事还可以继续补充。",
+      back_cover_quote: "我小时候常在院子里晒太阳。",
+      cover_style: "classic_plain",
+    },
+  });
+  assert.equal(context.data.generatingBook, false);
+  assert.equal(context.data.exportNotice, "已提交重新整理，当前书稿会保留；新版本完成后可在历史版本里查看。");
+  assert.equal(toasts[0].title, "已后台生成");
   delete global.wx;
 });

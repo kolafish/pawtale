@@ -7,6 +7,7 @@ import type {
 } from "../../domain/voice-chat";
 import {
   downloadMemoirBookOutputExport,
+  enqueueMemoirBookOutputGeneration,
   enqueueMemoirBookOutputEditorialCopyGeneration,
   getMemoirBookOutput,
   getMemoirBookPlan,
@@ -98,6 +99,11 @@ type BookExportData = Pick<
   | "bookManuscriptAvailable"
   | "bookManuscriptTitle"
   | "bookManuscriptSubtitle"
+  | "bookManuscriptTemplateLabel"
+  | "bookManuscriptSettingsText"
+  | "bookManuscriptStructureItems"
+  | "bookManuscriptChapterItems"
+  | "bookManuscriptBackMatterItems"
   | "bookVersionText"
   | "bookVersionOptions"
   | "bookSelectedVersionId"
@@ -134,6 +140,7 @@ type BookExportData = Pick<
   | "bookCoverStyleOptions"
   | "bookCoverStyleChanged"
   | "bookEditorialCopyBusyTarget"
+  | "generatingBook"
 > & {
   requestedAction: string;
   exportNotice: string;
@@ -183,6 +190,7 @@ Page<BookExportData, {
   saveBookDesignSettings(): Promise<void>;
   ensureBookDesignSavedForEditorialCopy(): Promise<boolean>;
   regenerateBookEditorialCopy(event: DatasetEvent): Promise<void>;
+  generateBook(): Promise<void>;
   changeBookOutputVersion(event: PickerEvent): void;
   changeBookExportLayout(event: PickerEvent): void;
   toggleBookExportSourceAppendix(event: SwitchEvent): void;
@@ -214,6 +222,7 @@ Page<BookExportData, {
     bookTitleSaving: false,
     bookTitleSuggesting: false,
     bookEditorialCopyBusyTarget: "",
+    generatingBook: false,
     requestedAction: "preview",
     exportNotice: exportNotice("preview"),
     ...bookOutputData(null),
@@ -546,6 +555,43 @@ Page<BookExportData, {
       if (this.data.bookEditorialCopyBusyTarget === target) {
         this.setData({ bookEditorialCopyBusyTarget: "" });
       }
+    }
+  },
+
+  async generateBook() {
+    if (!this.data.projectId || this.data.generatingBook || this.data.bookTitleSaving) {
+      return;
+    }
+    if (!this.data.bookContent) {
+      this.setData({ error: "请先生成书稿" });
+      return;
+    }
+    if (this.data.bookViewingHistoricalVersion) {
+      this.setData({ error: "请切回最新版后再重新整理" });
+      return;
+    }
+    if (!(await this.ensureBookDesignSavedForEditorialCopy())) {
+      return;
+    }
+    const metadata = currentBookMetadataPayload(this.data, false);
+    this.setData({ generatingBook: true, error: "" });
+    try {
+      await enqueueMemoirBookOutputGeneration(this.data.projectId, {
+        force_regenerate: true,
+        title: trimText(this.data.bookTitleInput) || undefined,
+        ...metadata,
+        cover_style: this.data.bookCoverStyle,
+      });
+      this.setData({ exportNotice: "已提交重新整理，当前书稿会保留；新版本完成后可在历史版本里查看。" });
+      wx.showToast({ title: "已后台生成", icon: "success" });
+    } catch (error) {
+      if (isLoginError(error)) {
+        wx.reLaunch({ url: "/pages/login/index" });
+        return;
+      }
+      this.setData({ error: error instanceof Error ? error.message : "书稿整理提交失败" });
+    } finally {
+      this.setData({ generatingBook: false });
     }
   },
 
