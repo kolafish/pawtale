@@ -6,20 +6,52 @@
 
   <view wx:if="{{error}}" class="error">{{error}}</view>
 
-  <view class="home-card">
+  <view wx:if="{{showLaunchPanel}}" class="launch-card">
+    <view class="project-row">
+      <text class="panel-label">{{launchEyebrow}}</text>
+      <text class="mode-tag">{{launchVariant === "new_project" ? "新故事本" : "第一次来"}}</text>
+    </view>
+    <text class="launch-title">{{launchTitle}}</text>
+    <text class="launch-body">{{launchBody}}</text>
+    <button
+      class="voice-start-button {{(loading || creatingVoice) ? 'button-blocked' : ''}}"
+      loading="{{creatingVoice}}"
+      bindtap="startLaunchVoiceChat"
+      hover-class="voice-start-button-hover"
+    >
+      <image class="voice-start-icon" src="/assets/memoir-microphone.png" mode="aspectFit" />
+      <text class="voice-start-title">{{creatingVoice ? "正在准备" : launchPrimaryText}}</text>
+    </button>
+    <button class="launch-secondary-button" bindtap="dismissLaunchPanel" hover-class="launch-secondary-button-hover">
+      {{launchSecondaryText}}
+    </button>
+  </view>
+
+  <view wx:else class="home-card">
+    <view wx:if="{{showReturnPrompt}}" class="return-prompt">
+      <view class="return-prompt-copy">
+        <text class="return-prompt-title">好久不见，今天接着讲一段？</text>
+        <text class="return-prompt-text">可以从上次停下的地方继续，也可以随便说点别的。</text>
+      </view>
+      <text class="return-prompt-close" bindtap="dismissReturnPrompt">×</text>
+    </view>
+
     <view class="project-row">
       <text class="panel-label">{{loading ? "正在准备" : (hasProject ? "今天接着聊" : "准备开始")}}</text>
       <text class="mode-tag">{{loading ? "加载中" : (hasProject ? "继续上次" : "待创建")}}</text>
     </view>
-    <text class="project-title">{{projectDisplayTitle || projectTitle || "正在加载回忆录"}}</text>
-    <text class="project-meta">
-      {{loading ? "我先确认当前回忆录。" : (needsLogin ? "登录后，我在这里等你。" : (!hasProject ? "先创建一本回忆录，我再听你讲。" : projectPromptText))}}
+    <text class="project-title">
+      {{loading ? "正在加载回忆录" : (hasProject ? "今天接着讲一段" : (projectDisplayTitle || projectTitle || "还没有回忆录"))}}
     </text>
+    <text class="project-meta">
+      {{loading ? "我先确认当前回忆录。" : (needsLogin ? "登录后，我在这里等你。" : (!hasProject ? "先创建一本回忆录，我再听你讲。" : (hasLastStoryHint ? lastStoryText : projectPromptText)))}}
+    </text>
+    <text wx:if="{{hasProject}}" class="resume-note">可以接着这里讲，也可以随便说点别的。</text>
 
     <button
       class="voice-start-button {{(loading || creatingVoice) ? 'button-blocked' : ''}}"
       loading="{{creatingVoice}}"
-      bindtap="startVoiceChat"
+      bindtap="startPrimaryVoiceChat"
       hover-class="voice-start-button-hover"
     >
       <image class="voice-start-icon" src="/assets/memoir-microphone.png" mode="aspectFit" />
@@ -31,21 +63,31 @@
       {{loading ? "马上就好。" : (needsLogin ? "先登录，再继续讲回忆。" : (!hasProject ? "先起个名字，我再听您讲。" : (!voiceAuthorizationAgreed ? "同意后才会打开麦克风。" : (creatingVoice ? "我马上开始听。" : "说一两句也可以，我会帮您记下来。"))))}}
     </text>
 
-    <view wx:if="{{!voiceAuthorizationAgreed}}" class="voice-auth-panel">
-      <checkbox-group bindchange="changeVoiceAuthorization">
-        <label class="voice-auth-row">
-          <checkbox
-            value="voice_authorization"
-            checked="{{voiceAuthorizationAgreed}}"
-            color="#a64b3e"
-          />
-          <view class="voice-auth-copy">
-            <text>我已阅读并同意</text>
-            <text class="voice-auth-link" catchtap="openVoiceAuthorization">《声纹授权协议》</text>
-          </view>
-        </label>
-      </checkbox-group>
-      <text class="voice-auth-hint">同意后才会打开麦克风，并上传语音用于实时识别文字、原始音频留存和成书。</text>
+    <view wx:if="{{hasProject && !needsLogin}}" class="resume-actions">
+      <button
+        class="resume-ask-button {{(loading || creatingVoice) ? 'button-blocked' : ''}}"
+        bindtap="startGuidedInterview"
+        hover-class="resume-ask-button-hover"
+      >
+        让小余问一句
+      </button>
     </view>
+  </view>
+
+  <view wx:if="{{!voiceAuthorizationAgreed}}" class="voice-auth-panel">
+    <checkbox-group bindchange="changeVoiceAuthorization">
+      <label class="voice-auth-row">
+        <checkbox
+          value="voice_authorization"
+          checked="{{voiceAuthorizationAgreed}}"
+          color="#a64b3e"
+        />
+        <view class="voice-auth-copy">
+          <text>我已阅读并同意</text>
+          <text class="voice-auth-link" catchtap="openVoiceAuthorization">《声纹授权协议》</text>
+        </view>
+      </label>
+    </checkbox-group>
+    <text class="voice-auth-hint">同意后才会打开麦克风，并上传语音用于实时识别文字、原始音频留存和成书。</text>
   </view>
 </view>

@@ -8,6 +8,7 @@ import {
   listMemoirProjects,
   updateMemoirProject,
 } from "../../services/memoir";
+import { markHomeLaunchProjectCreated } from "../../services/home-launch-state";
 import { memoirProjectProfile } from "../../services/memoir-project-profile";
 import {
   datasetChoice,
@@ -186,17 +187,26 @@ Page<ProjectEditData, {
       default_guidance_mode: this.data.defaultGuidanceMode,
     };
     try {
+      let createdProject: { id: string; title: string } | null = null;
       if (this.data.projectId) {
         await updateMemoirProject(this.data.projectId, payload);
         trackAuditAction("project.update", {}, { projectId: this.data.projectId });
       } else {
         const project = await createMemoirProject(payload);
+        createdProject = { id: project.id, title: project.title };
         await activateMemoirProject(project.id);
         trackAuditAction("project.create", {
           default_guidance_mode: this.data.defaultGuidanceMode,
         }, { projectId: project.id });
       }
-      await getMemoirIdentity();
+      const identity = await getMemoirIdentity();
+      if (createdProject) {
+        markHomeLaunchProjectCreated({
+          userId: identity.id,
+          projectId: createdProject.id,
+          projectTitle: createdProject.title,
+        });
+      }
       wx.showToast({ title: "已保存", icon: "success" });
       wx.navigateBack({ delta: 1 });
     } catch (error) {

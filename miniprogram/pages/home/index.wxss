@@ -25,12 +25,100 @@
   line-height: 42rpx;
 }
 
-.home-card {
+.home-card,
+.launch-card {
   border: 1rpx solid #e8d8c3;
   border-radius: 24rpx;
   background: #ffffff;
   box-shadow: 0 6rpx 20rpx rgba(93, 61, 42, 0.06);
   padding: 32rpx;
+}
+
+.launch-title {
+  display: block;
+  margin-top: 18rpx;
+  color: #2b1713;
+  font-size: 44rpx;
+  font-weight: 700;
+  line-height: 58rpx;
+}
+
+.launch-body {
+  display: block;
+  margin-top: 20rpx;
+  color: #3a2a25;
+  font-size: 30rpx;
+  font-weight: 400;
+  line-height: 52rpx;
+}
+
+.launch-secondary-button {
+  width: 72%;
+  min-height: 88rpx;
+  margin: 18rpx auto 0;
+  border: 0;
+  border-radius: 999rpx;
+  background: #f3efea;
+  color: #5c4b43;
+  font-size: 30rpx;
+  font-weight: 600;
+  line-height: 42rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.launch-secondary-button::after {
+  border: 0;
+}
+
+.launch-secondary-button-hover {
+  background: #ebe3da;
+}
+
+.return-prompt {
+  display: flex;
+  align-items: flex-start;
+  gap: 18rpx;
+  margin-bottom: 28rpx;
+  padding: 22rpx;
+  border-radius: 18rpx;
+  background: #fff9f3;
+  border: 1rpx solid #ead8c5;
+}
+
+.return-prompt-copy {
+  flex: 1;
+  min-width: 0;
+}
+
+.return-prompt-title {
+  display: block;
+  color: #2b1713;
+  font-size: 28rpx;
+  font-weight: 700;
+  line-height: 40rpx;
+}
+
+.return-prompt-text {
+  display: block;
+  margin-top: 8rpx;
+  color: #7b6f68;
+  font-size: 25rpx;
+  font-weight: 400;
+  line-height: 36rpx;
+}
+
+.return-prompt-close {
+  flex: 0 0 auto;
+  width: 44rpx;
+  height: 44rpx;
+  border-radius: 50%;
+  background: #f3efea;
+  color: #7b6f68;
+  font-size: 32rpx;
+  line-height: 40rpx;
+  text-align: center;
 }
 
 .project-row {
@@ -74,6 +162,15 @@
   font-size: 30rpx;
   font-weight: 400;
   line-height: 50rpx;
+}
+
+.resume-note {
+  display: block;
+  margin-top: 12rpx;
+  color: #7b6f68;
+  font-size: 27rpx;
+  font-weight: 400;
+  line-height: 40rpx;
 }
 
 .voice-start-button {
@@ -133,6 +230,38 @@
   font-weight: 400;
   line-height: 38rpx;
   text-align: center;
+}
+
+.resume-actions {
+  margin-top: 18rpx;
+}
+
+.resume-ask-button {
+  width: 92%;
+  min-height: 96rpx;
+  margin: 0 auto;
+  border: 1rpx solid #d8c8bb;
+  border-radius: 999rpx;
+  background: #ffffff;
+  color: #5c4b43;
+  font-size: 31rpx;
+  font-weight: 700;
+  line-height: 44rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.resume-ask-button::after {
+  border: 0;
+}
+
+.resume-ask-button.button-blocked {
+  opacity: 0.72;
+}
+
+.resume-ask-button-hover {
+  background: #fff9f3;
 }
 
 .voice-auth-panel {
