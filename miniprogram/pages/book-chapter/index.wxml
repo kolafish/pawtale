@@ -1,0 +1,106 @@
+<view class="chapter-detail-page">
+  <view class="top-row">
+    <view class="back-hit" bindtap="goBack">
+      <text class="back-mark">‹</text>
+    </view>
+    <view class="title-block">
+      <text class="page-title">章节详情</text>
+      <text class="page-meta">{{planTitle || "回忆录书稿"}}</text>
+    </view>
+  </view>
+
+  <view wx:if="{{error}}" class="error">{{error}}</view>
+
+  <view wx:if="{{loading && !chapter}}" class="empty-panel">
+    <text>正在加载</text>
+  </view>
+
+  <view wx:elif="{{!chapter}}" class="empty-panel">
+    <text class="empty-title">没有找到这一章</text>
+    <text class="empty-copy">请回到成书页重新选择章节。</text>
+  </view>
+
+  <block wx:else>
+    <view class="hero-panel">
+      <view class="chapter-kicker-row">
+        <text class="chapter-index">{{chapterIndexText}}</text>
+        <text class="chapter-status {{chapter.draft && chapter.draft.status === 'confirmed' ? 'confirmed' : ''}}">
+          {{chapter.draftStatusText}}
+        </text>
+      </view>
+      <text class="chapter-title">{{chapter.title || "未命名章节"}}</text>
+      <text class="chapter-meta">{{chapter.chapterSummaryMetaText}}</text>
+      <text wx:if="{{chapter.sourceChangeNotice}}" class="chapter-notice">{{chapter.sourceChangeNotice}}</text>
+    </view>
+
+    <view class="tab-row">
+      <view
+        class="tab-item {{activeTab === 'content' ? 'active' : ''}}"
+        data-tab="content"
+        bindtap="changeTab"
+      >
+        正文
+      </view>
+      <view
+        class="tab-item {{activeTab === 'sources' ? 'active' : ''}}"
+        data-tab="sources"
+        bindtap="changeTab"
+      >
+        原始讲述
+      </view>
+      <view
+        class="tab-item {{activeTab === 'more' ? 'active' : ''}}"
+        data-tab="more"
+        bindtap="changeTab"
+      >
+        更多
+      </view>
+    </view>
+
+    <view wx:if="{{activeTab === 'content'}}" class="section-card manuscript-card">
+      <view class="section-head">
+        <view class="section-heading">
+          <text class="section-title">章节正文</text>
+          <text class="section-hint">{{chapter.draftVersionText || "尚未生成版本"}}</text>
+        </view>
+        <text class="section-count">{{chapter.draftCharCount}} 字</text>
+      </view>
+      <text class="body-text manuscript-text" selectable>{{contentText}}</text>
+    </view>
+
+    <view wx:elif="{{activeTab === 'sources'}}" class="section-card">
+      <view class="section-head">
+        <view class="section-heading">
+          <text class="section-title">原始讲述</text>
+          <text class="section-hint">用于整理这一章</text>
+        </view>
+        <text class="section-count">{{sourceCountText}}</text>
+      </view>
+      <view wx:if="{{chapter.sourceViews.length}}" class="source-list">
+        <view wx:for="{{chapter.sourceViews}}" wx:for-item="source" wx:key="utterance_id" class="source-row">
+          <view class="source-head">
+            <text class="source-label">{{source.labelText}}</text>
+            <text class="source-meta">{{source.createdAtText}}</text>
+          </view>
+          <text class="source-text">{{source.previewText}}</text>
+        </view>
+      </view>
+      <text wx:else class="empty-copy">{{sourceEmptyText}}</text>
+    </view>
+
+    <view wx:else class="section-card">
+      <view class="section-head">
+        <view class="section-heading">
+          <text class="section-title">更多操作</text>
+          <text class="section-hint">章节结构和版本入口</text>
+        </view>
+      </view>
+      <view class="more-list">
+        <view wx:for="{{moreActions}}" wx:key="id" class="more-row">
+          <text class="more-title">{{item.title}}</text>
+          <text class="more-detail">{{item.detailText}}</text>
+        </view>
+      </view>
+    </view>
+  </block>
+</view>

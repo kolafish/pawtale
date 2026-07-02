@@ -8,6 +8,7 @@
     "pages/transcripts/index",
     "pages/transcript-detail/index",
     "pages/book/index",
+    "pages/book-chapter/index",
     "pages/voice-progress/index",
     "pages/projects/index",
     "pages/project-edit/index",

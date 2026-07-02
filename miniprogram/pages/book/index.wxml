@@ -507,10 +507,10 @@
           <button
             class="ghost-button small"
             data-id="{{item.id}}"
-            bindtap="toggleChapterSources"
+            bindtap="openChapterSources"
             disabled="{{!item.sourceViews.length}}"
           >
-            {{item.sourceListExpanded ? "收起素材" : "查看素材"}}
+            原始讲述
           </button>
           <button
             class="ghost-button small"
