@@ -1,7 +1,7 @@
 .detail-page {
   min-height: 100vh;
   padding: 44rpx 36rpx 120rpx;
-  background: #fffaf2;
+  background: #f7f3ed;
   box-sizing: border-box;
 }
 
@@ -61,8 +61,8 @@
 .hero-panel,
 .section-card {
   margin-top: 24rpx;
-  border: 2rpx solid #f0dac0;
-  border-radius: 24rpx;
+  border: 2rpx solid #e7d8c9;
+  border-radius: 18rpx;
   background: rgba(255, 255, 255, 0.96);
   box-shadow: 0 10rpx 28rpx rgba(64, 43, 24, 0.06);
   box-sizing: border-box;
@@ -89,6 +89,8 @@
 
 .hero-panel {
   padding: 32rpx 30rpx;
+  border-color: #dfc8b8;
+  background: #fffdf9;
 }
 
 .record-title {
@@ -114,8 +116,8 @@
   margin-top: 16rpx;
   padding: 12rpx 18rpx;
   border-radius: 999rpx;
-  background: #fff8ef;
-  color: #7a6255;
+  background: #f4f1ec;
+  color: #62554d;
   font-size: 26rpx;
   font-weight: 800;
   line-height: 1.35;
@@ -123,8 +125,8 @@
 }
 
 .book-status.included {
-  background: #fff1ec;
-  color: #8a4034;
+  background: #edf6ef;
+  color: #2f6f4e;
 }
 
 .section-card {
@@ -132,12 +134,14 @@
 }
 
 .evidence-card {
-  background: #fff8f1;
+  background: #f8f5f1;
+  border-color: #e4d9cf;
 }
 
 .manuscript-card,
 .edit-card {
   background: #ffffff;
+  border-color: #dfc8b8;
 }
 
 .section-head,
@@ -152,6 +156,11 @@
   margin-bottom: 16rpx;
 }
 
+.section-heading {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .section-title {
   display: block;
   color: #7a3b31;
@@ -163,9 +172,10 @@
 .section-hint {
   display: block;
   margin-top: 6rpx;
-  color: #7a6255;
+  color: #6f625a;
   font-size: 23rpx;
   line-height: 1.35;
+  word-break: break-word;
 }
 
 .section-count {
@@ -190,18 +200,18 @@
 }
 
 .question-text {
-  background: #fffaf2;
-  border: 2rpx solid #f0dac0;
+  background: #f8f5f1;
+  border: 2rpx solid #e4d9cf;
 }
 
 .raw-text {
-  background: #fff4ec;
-  color: #4d352d;
+  background: #f1ede8;
+  color: #4d4038;
 }
 
 .display-text {
   background: #ffffff;
-  border: 2rpx solid #f0dac0;
+  border: 2rpx solid #e7d8c9;
 }
 
 .transcript-textarea {
@@ -373,12 +383,17 @@
 }
 
 .danger-card {
+  margin-top: 40rpx;
   border-color: #f4c2ca;
   background: #fff8f9;
 }
 
 .danger-title {
   color: #b4234a;
+}
+
+.danger-hint {
+  color: #9f334b;
 }
 
 .bottom-spacer {
