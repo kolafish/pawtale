@@ -975,7 +975,8 @@ test("book page renders chapter source counts in plan and drafting cards", () =>
   const wxml = fs.readFileSync(path.join(__dirname, "../pages/book/index.wxml"), "utf8");
   const matches = wxml.match(/{{item\.sourceCount}} 条原始讲述/g) || [];
 
-  assert.equal(matches.length, 2);
+  assert.equal(matches.length, 1);
+  assert.match(wxml, /{{item\.chapterSummaryMetaText}}/);
 });
 
 test("book page defaults to progress cards with single chapter editing", () => {
@@ -983,16 +984,16 @@ test("book page defaults to progress cards with single chapter editing", () => {
   const wxss = fs.readFileSync(path.join(__dirname, "../pages/book/index.wxss"), "utf8");
 
   assert.match(wxml, /chapter-summary-card/);
-  assert.match(wxml, /editingChapterId/);
+  assert.doesNotMatch(wxml, /editingChapterId/);
   assert.match(wxml, /bindtap="openChapterEditor"/);
   assert.match(wxml, /bindtap="openChapterSources"/);
   assert.match(wxml, /编辑正文/);
   assert.match(wxml, /原始讲述/);
-  assert.match(wxml, /chapter-action-groups/);
-  assert.match(wxml, /chapter-action-hint/);
+  assert.doesNotMatch(wxml, /bindinput="changeDraftContent"/);
+  assert.doesNotMatch(wxml, /bindtap="saveChapterDraft"/);
+  assert.doesNotMatch(wxml, /chapter-action-groups/);
   assert.match(wxss, /\.chapter-card\.summary/);
   assert.match(wxss, /\.chapter-summary-actions/);
-  assert.match(wxss, /\.chapter-action-groups/);
 });
 
 test("book page routes chapter card actions to the chapter detail page", () => {
@@ -1028,7 +1029,7 @@ test("book page keeps source rows read-only and splits chapter structure actions
   assert.equal(wxml.includes('bindchange="splitChapter"'), false);
   assert.equal(wxml.includes('bindtap="toggleSplitSource"'), true);
   assert.equal(wxml.includes('bindtap="splitSelectedChapterSources"'), true);
-  assert.equal((wxml.match(/structure-action-row/g) || []).length, 4);
+  assert.equal((wxml.match(/structure-action-row/g) || []).length, 2);
 });
 
 test("book page exposes a compact voice assistant entry", () => {

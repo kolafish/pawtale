@@ -1,10 +1,12 @@
 import type {
   MemoirBookChapterDraft,
   MemoirBookPlan,
+  MemoirBookPlanStructureCommandRequest,
   MemoirBookSourceCoverage,
 } from "../../domain/voice-chat";
 import { trackAuditAction } from "../../services/audit-tracker";
 import {
+  applyMemoirBookPlanStructureCommand,
   confirmMemoirBookChapterDraft,
   enqueueMemoirBookChapterDraftGeneration,
   generateMemoirBookChapterTitle,
@@ -34,7 +36,15 @@ interface DatasetEvent {
   currentTarget: {
     dataset: {
       tab?: string;
+      direction?: string;
+      utteranceId?: string;
     };
+  };
+}
+
+interface PickerEvent {
+  detail: {
+    value: string | number;
   };
 }
 
@@ -42,12 +52,6 @@ interface TextInputEvent {
   detail: {
     value: string;
   };
-}
-
-interface ChapterMoreActionView {
-  id: string;
-  title: string;
-  detailText: string;
 }
 
 interface BookChapterPageData {
@@ -65,7 +69,8 @@ interface BookChapterPageData {
   sourceCountText: string;
   sourceEmptyText: string;
   titleBusy: boolean;
-  moreActions: ChapterMoreActionView[];
+  updatingPlanStructure: boolean;
+  splitSourceSelections: string[];
 }
 
 const TAB_VALUES: ChapterDetailTab[] = ["content", "sources", "more"];
@@ -89,31 +94,6 @@ function chapterIndexText(plan: MemoirBookPlan | null, chapterId: string): strin
     .sort((left, right) => left.sort_order - right.sort_order)
     .findIndex((chapter) => chapter.id === chapterId) ?? -1;
   return index >= 0 ? `第 ${index + 1} 章` : "章节";
-}
-
-function moreActionsForChapter(chapter: BookChapterView): ChapterMoreActionView[] {
-  return [
-    {
-      id: "history",
-      title: "历史版本",
-      detailText: chapter.draftVersionText || "查看本章历史版本",
-    },
-    {
-      id: "move",
-      title: "移动章节顺序",
-      detailText: "调整这一章在全书里的位置",
-    },
-    {
-      id: "merge",
-      title: "合并到其他章节",
-      detailText: "把这一章并入相邻或指定章节",
-    },
-    {
-      id: "split",
-      title: "拆分原始讲述",
-      detailText: chapter.sourceCount ? `从 ${chapter.sourceCount} 条原始讲述里拆出新章` : "本章暂无原始讲述",
-    },
-  ];
 }
 
 function isLoginError(error: unknown): boolean {
@@ -152,6 +132,10 @@ Page<BookChapterPageData, {
   ): void;
   patchChapter(patch: Partial<BookChapterView>): void;
   patchDraft(draft: MemoirBookChapterDraft): void;
+  applyPlanStructureCommand(
+    command: MemoirBookPlanStructureCommandRequest,
+    toastTitle: string,
+  ): Promise<MemoirBookPlan | null>;
   changeTab(event: DatasetEvent): void;
   changeChapterTitle(event: TextInputEvent): void;
   saveChapterTitle(): Promise<void>;
@@ -160,6 +144,11 @@ Page<BookChapterPageData, {
   generateChapterDraft(): Promise<void>;
   saveChapterDraft(): Promise<void>;
   confirmChapterDraft(): Promise<void>;
+  moveChapter(event: DatasetEvent): Promise<void>;
+  mergeChapterInto(event: PickerEvent): Promise<void>;
+  toggleSplitSource(event: DatasetEvent): void;
+  splitSelectedChapterSources(): Promise<void>;
+  deleteChapter(): Promise<void>;
   goBack(): void;
 }>({
   data: {
@@ -177,7 +166,8 @@ Page<BookChapterPageData, {
     sourceCountText: "0 条原始讲述",
     sourceEmptyText: "本章还没有关联原始讲述",
     titleBusy: false,
-    moreActions: [],
+    updatingPlanStructure: false,
+    splitSourceSelections: [],
   },
 
   async onLoad(query = {}) {
@@ -212,7 +202,12 @@ Page<BookChapterPageData, {
   },
 
   applyChapterData(plan, coverage, draft) {
-    const chapters = buildChapterViews(plan, { [this.data.chapterId]: draft }, coverage);
+    const chapters = buildChapterViews(
+      plan,
+      { [this.data.chapterId]: draft },
+      coverage,
+      { [this.data.chapterId]: this.data.splitSourceSelections },
+    );
     const chapter = chapters.find((item) => item.id === this.data.chapterId) || null;
     if (!chapter) {
       this.setData({
@@ -223,7 +218,6 @@ Page<BookChapterPageData, {
         chapterIndexText: "章节",
         contentText: "",
         sourceCountText: "0 条原始讲述",
-        moreActions: [],
         error: "没有找到这一章",
       });
       return;
@@ -238,7 +232,6 @@ Page<BookChapterPageData, {
       contentText: contentText || "本章正文还没有生成",
       sourceCountText: `${chapter.sourceCount} 条原始讲述`,
       sourceEmptyText: "本章还没有关联原始讲述",
-      moreActions: moreActionsForChapter(chapter),
     });
   },
 
@@ -252,7 +245,6 @@ Page<BookChapterPageData, {
       chapter,
       contentText: contentText || "本章正文还没有生成",
       sourceCountText: `${chapter.sourceCount} 条原始讲述`,
-      moreActions: moreActionsForChapter(chapter),
     });
   },
 
@@ -261,6 +253,32 @@ Page<BookChapterPageData, {
       return;
     }
     this.applyChapterData(this.data.plan, this.data.sourceCoverage, draft);
+  },
+
+  async applyPlanStructureCommand(command, toastTitle) {
+    if (!this.data.projectId || !this.data.plan || this.data.updatingPlanStructure) {
+      return null;
+    }
+    if (this.data.chapter?.draftChanged) {
+      this.patchChapter({ draftError: "请先保存当前修改，再调整章节结构" });
+      return null;
+    }
+    this.setData({ updatingPlanStructure: true, error: "" });
+    this.patchChapter({ draftError: "" });
+    try {
+      const plan = await applyMemoirBookPlanStructureCommand(this.data.projectId, command);
+      wx.showToast({ title: toastTitle, icon: "success" });
+      return plan;
+    } catch (error) {
+      if (isLoginError(error)) {
+        wx.switchTab({ url: "/pages/me/index" });
+        return null;
+      }
+      this.setData({ error: error instanceof Error ? error.message : "目录调整失败" });
+      return null;
+    } finally {
+      this.setData({ updatingPlanStructure: false });
+    }
   },
 
   changeTab(event) {
@@ -416,6 +434,120 @@ Page<BookChapterPageData, {
       this.patchChapter({ draftError: error instanceof Error ? error.message : "章节稿确认失败" });
     } finally {
       this.patchChapter({ draftBusy: false });
+    }
+  },
+
+  async moveChapter(event) {
+    const direction = event.currentTarget.dataset.direction === "up" ? "up" : "down";
+    const chapter = this.data.chapter;
+    if (!chapter || (direction === "up" && !chapter.canMoveUp) || (direction === "down" && !chapter.canMoveDown)) {
+      return;
+    }
+    const plan = await this.applyPlanStructureCommand({
+      type: "move_chapter",
+      chapter_id: this.data.chapterId,
+      direction,
+    }, "章节顺序已调整");
+    if (plan) {
+      this.applyChapterData(plan, this.data.sourceCoverage, chapter.draft);
+    }
+  },
+
+  async mergeChapterInto(event) {
+    const chapter = this.data.chapter;
+    const optionIndex = Number(event.detail.value);
+    const option = chapter?.mergeTargetOptions[optionIndex];
+    if (!chapter || !option || this.data.updatingPlanStructure) {
+      return;
+    }
+    const confirmed = await new Promise<boolean>((resolve) => {
+      wx.showModal({
+        title: "合并章节",
+        content: `把「${chapter.title}」合并到「${option.label}」，本章原始讲述会保留在合并后的章节中。`,
+        confirmText: "合并",
+        confirmColor: "#9f4a3c",
+        success: (result) => resolve(Boolean(result.confirm)),
+        fail: () => resolve(false),
+      });
+    });
+    if (!confirmed) {
+      return;
+    }
+    const plan = await this.applyPlanStructureCommand({
+      type: "merge_chapters",
+      chapter_id: this.data.chapterId,
+      target_chapter_id: option.value,
+    }, "章节已合并");
+    if (plan) {
+      wx.navigateBack();
+    }
+  },
+
+  toggleSplitSource(event) {
+    const utteranceId = event.currentTarget.dataset.utteranceId || "";
+    const chapter = this.data.chapter;
+    if (!chapter || !utteranceId || chapter.source_refs.length <= 1 || this.data.updatingPlanStructure || chapter.draftBusy) {
+      return;
+    }
+    const selected = new Set(this.data.splitSourceSelections);
+    if (selected.has(utteranceId)) {
+      selected.delete(utteranceId);
+    } else {
+      selected.add(utteranceId);
+    }
+    this.setData({ splitSourceSelections: Array.from(selected), error: "" });
+    if (this.data.plan) {
+      this.applyChapterData(this.data.plan, this.data.sourceCoverage, chapter.draft);
+    }
+  },
+
+  async splitSelectedChapterSources() {
+    const chapter = this.data.chapter;
+    if (!chapter || !this.data.splitSourceSelections.length || this.data.updatingPlanStructure || chapter.draftBusy) {
+      return;
+    }
+    if (this.data.splitSourceSelections.length >= chapter.source_refs.length) {
+      this.patchChapter({ draftError: "拆分时至少保留 1 条原始讲述在原章节" });
+      return;
+    }
+    const title = trimText(chapter.editingTitle || chapter.title) || "未命名章节";
+    const plan = await this.applyPlanStructureCommand({
+      type: "split_chapter",
+      chapter_id: this.data.chapterId,
+      title: `${title}（拆出）`,
+      utterance_ids: this.data.splitSourceSelections,
+    }, "章节已拆分");
+    if (plan) {
+      this.setData({ splitSourceSelections: [] });
+      this.applyChapterData(plan, this.data.sourceCoverage, chapter.draft);
+    }
+  },
+
+  async deleteChapter() {
+    const chapter = this.data.chapter;
+    const plan = this.data.plan;
+    if (!chapter || !plan || plan.chapters.length <= 1 || this.data.updatingPlanStructure || chapter.draftBusy) {
+      return;
+    }
+    const confirmed = await new Promise<boolean>((resolve) => {
+      wx.showModal({
+        title: "删除章节",
+        content: `删除「${chapter.title}」会移除本章正文，收录讲述会回到待收录列表。`,
+        confirmText: "删除",
+        confirmColor: "#b4234a",
+        success: (result) => resolve(Boolean(result.confirm)),
+        fail: () => resolve(false),
+      });
+    });
+    if (!confirmed) {
+      return;
+    }
+    const updatedPlan = await this.applyPlanStructureCommand({
+      type: "delete_chapter",
+      chapter_id: this.data.chapterId,
+    }, "章节已删除");
+    if (updatedPlan) {
+      wx.navigateBack();
     }
   },
 

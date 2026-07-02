@@ -150,6 +150,9 @@ function loadBookChapterPage({
   voiceApiExports = {},
 } = {}) {
   mockModule("../services/memoir-voice-api.ts", {
+    applyMemoirBookPlanStructureCommand: async () => {
+      throw new Error("applyMemoirBookPlanStructureCommand was not mocked");
+    },
     confirmMemoirBookChapterDraft: async () => {
       throw new Error("confirmMemoirBookChapterDraft was not mocked");
     },
@@ -189,9 +192,15 @@ test("book chapter page is registered and renders the detail tabs", () => {
   assert.match(wxml, /bindtap="saveChapterDraft"/);
   assert.match(wxml, /bindtap="confirmChapterDraft"/);
   assert.match(wxml, /bindtap="generateChapterDraft"/);
+  assert.match(wxml, /bindtap="moveChapter"/);
+  assert.match(wxml, /bindchange="mergeChapterInto"/);
+  assert.match(wxml, /bindtap="toggleSplitSource"/);
+  assert.match(wxml, /bindtap="splitSelectedChapterSources"/);
+  assert.match(wxml, /bindtap="deleteChapter"/);
   assert.match(wxss, /\.tab-row/);
   assert.match(wxss, /\.source-row/);
   assert.match(wxss, /\.draft-textarea/);
+  assert.match(wxss, /\.danger-button/);
 });
 
 test("book chapter page loads a chapter from route query", async () => {
@@ -213,7 +222,7 @@ test("book chapter page loads a chapter from route query", async () => {
   assert.equal(context.data.contentText, "我小时候常在外婆家的院子里晒太阳。");
   assert.equal(context.data.sourceCountText, "1 条原始讲述");
   assert.match(context.data.chapter.sourceViews[0].labelText, /语音记录 1/);
-  assert.equal(context.data.moreActions[0].title, "历史版本");
+  assert.equal(context.data.chapter.mergeTargetOptions[0].value, "chapter-2");
 });
 
 test("book chapter page handles missing route query and tab changes", async () => {
@@ -340,5 +349,99 @@ test("book chapter page generates a new draft version without overwriting unsave
 
   assert.equal(calls.length, 1);
   assert.equal(context.data.chapter.draftError, "请先保存当前修改，再生成新版本");
+  delete global.wx;
+});
+
+test("book chapter page moves and splits chapters through structure commands", async () => {
+  const plan = samplePlan();
+  plan.chapters[0].source_refs.push(sampleRef("utterance-3", "屋檐下的夏天"));
+  const commands = [];
+  const toasts = [];
+  global.wx = {
+    showToast(options) {
+      toasts.push(options.title);
+    },
+  };
+  const { page } = loadBookChapterPage({
+    plan,
+    voiceApiExports: {
+      applyMemoirBookPlanStructureCommand: async (projectId, command) => {
+        commands.push({ projectId, command });
+        return plan;
+      },
+    },
+  });
+  const context = pageContext(page);
+  await page.onLoad.call(context, { projectId: "project%2F1", chapterId: "chapter-1", tab: "more" });
+
+  await page.moveChapter.call(context, { currentTarget: { dataset: { direction: "down" } } });
+  page.toggleSplitSource.call(context, { currentTarget: { dataset: { utteranceId: "utterance-1" } } });
+  assert.equal(context.data.chapter.splitSelectedCount, 1);
+  assert.equal(context.data.chapter.canSplitSelectedSources, true);
+  await page.splitSelectedChapterSources.call(context);
+
+  assert.deepEqual(commands, [
+    {
+      projectId: "project/1",
+      command: { type: "move_chapter", chapter_id: "chapter-1", direction: "down" },
+    },
+    {
+      projectId: "project/1",
+      command: {
+        type: "split_chapter",
+        chapter_id: "chapter-1",
+        title: "外婆家的童年（拆出）",
+        utterance_ids: ["utterance-1"],
+      },
+    },
+  ]);
+  assert.deepEqual(toasts, ["章节顺序已调整", "章节已拆分"]);
+  assert.deepEqual(context.data.splitSourceSelections, []);
+  delete global.wx;
+});
+
+test("book chapter page confirms merge and delete structure commands", async () => {
+  const commands = [];
+  const navigations = [];
+  const toasts = [];
+  global.wx = {
+    showModal(options) {
+      options.success({ confirm: true });
+    },
+    showToast(options) {
+      toasts.push(options.title);
+    },
+    navigateBack() {
+      navigations.push("back");
+    },
+  };
+  const plan = samplePlan();
+  const { page } = loadBookChapterPage({
+    plan,
+    voiceApiExports: {
+      applyMemoirBookPlanStructureCommand: async (projectId, command) => {
+        commands.push({ projectId, command });
+        return plan;
+      },
+    },
+  });
+  const context = pageContext(page);
+  await page.onLoad.call(context, { projectId: "project%2F1", chapterId: "chapter-1", tab: "more" });
+
+  await page.mergeChapterInto.call(context, { detail: { value: "0" } });
+  await page.deleteChapter.call(context);
+
+  assert.deepEqual(commands, [
+    {
+      projectId: "project/1",
+      command: { type: "merge_chapters", chapter_id: "chapter-1", target_chapter_id: "chapter-2" },
+    },
+    {
+      projectId: "project/1",
+      command: { type: "delete_chapter", chapter_id: "chapter-1" },
+    },
+  ]);
+  assert.deepEqual(toasts, ["章节已合并", "章节已删除"]);
+  assert.deepEqual(navigations, ["back", "back"]);
   delete global.wx;
 });

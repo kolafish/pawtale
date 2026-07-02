@@ -319,6 +319,10 @@
   word-break: break-word;
 }
 
+.chapter-error.inline {
+  margin-bottom: 20rpx;
+}
+
 .chapter-action-groups {
   display: flex;
   flex-direction: column;
@@ -348,6 +352,100 @@
   line-height: 1.45;
 }
 
+.picker-button {
+  margin-top: 18rpx;
+  min-height: 70rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2rpx solid #d8c7b9;
+  border-radius: 14rpx;
+  background: #fffaf4;
+  color: #6d4b3f;
+  font-size: 27rpx;
+  font-weight: 800;
+}
+
+.picker-button.disabled {
+  opacity: 0.52;
+}
+
+.split-source-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14rpx;
+  margin-top: 18rpx;
+}
+
+.source-main {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.source-row.selected {
+  border-color: #c88f73;
+  background: #fff4ec;
+}
+
+.source-split-toggle {
+  flex: 0 0 auto;
+  min-width: 104rpx;
+  min-height: 58rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  padding: 0 18rpx;
+  border: 2rpx solid #d8c7b9;
+  border-radius: 12rpx;
+  background: #fffdf9;
+  color: #6d4b3f;
+  font-size: 24rpx;
+  font-weight: 800;
+}
+
+.source-split-toggle.selected {
+  border-color: #9f4a3c;
+  background: #9f4a3c;
+  color: #ffffff;
+}
+
+.source-split-toggle::after {
+  border: 0;
+}
+
+.split-action {
+  margin-top: 18rpx;
+}
+
+.danger-zone {
+  border-color: #f1c3c9;
+  background: #fff7f7;
+}
+
+.danger-button {
+  min-height: 70rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 18rpx 0 0;
+  padding: 0 24rpx;
+  border-radius: 14rpx;
+  background: #b4234a;
+  color: #ffffff;
+  font-size: 27rpx;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.danger-button::after {
+  border: 0;
+}
+
+.danger-button[disabled] {
+  opacity: 0.52;
+}
+
 .body-text {
   display: block;
   color: #3b2a22;
@@ -361,15 +459,13 @@
   min-height: 240rpx;
 }
 
-.source-list,
-.more-list {
+.source-list {
   display: flex;
   flex-direction: column;
   gap: 18rpx;
 }
 
-.source-row,
-.more-row {
+.source-row {
   padding: 22rpx;
   border: 2rpx solid #eadfd2;
   border-radius: 16rpx;
@@ -381,8 +477,7 @@
   gap: 16rpx;
 }
 
-.source-label,
-.more-title {
+.source-label {
   color: #24100b;
   font-size: 28rpx;
   font-weight: 850;
@@ -395,8 +490,7 @@
   font-size: 23rpx;
 }
 
-.source-text,
-.more-detail {
+.source-text {
   display: block;
   margin-top: 10rpx;
   color: #685b55;
