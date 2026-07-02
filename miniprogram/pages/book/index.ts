@@ -2,8 +2,6 @@ import type {
   MemoirBookAudioResponse,
   MemoirBookChapterDraft,
   MemoirBookEditorialCopyTarget,
-  MemoirBookOutputExportFormat,
-  MemoirBookOutputExportLayout,
   MemoirBookOutput,
   MemoirBookPlan,
   MemoirBookPlanStructureCommandRequest,
@@ -29,7 +27,6 @@ import {
   confirmMemoirBookChapterDraft,
   confirmMemoirBookPlan,
   createMemoirBookChapterDraftTTS,
-  downloadMemoirBookOutputExport,
   createMemoirBookOutputTTS,
   createMemoirBookPlanOutlineTTS,
   bookVoiceCommandGatewayUrl,
@@ -45,8 +42,6 @@ import {
   getMemoirBookPlan,
   getMemoirBookSourceCoverage,
   listMemoirAutomationEvents,
-  suggestMemoirBookOutputTitles,
-  updateMemoirBookOutput,
   updateMemoirBookOutputChapterEditorialCopy,
   updateMemoirBookChapterTitle,
   updateMemoirBookPlan,
@@ -116,15 +111,9 @@ import {
   canExecuteBookVoiceCommand,
 } from "./book-view-model";
 import {
-  bookDesignHasChanges,
-  bookDesignSaveStatusText,
   bookEditorialCopyBlockedMessage,
-  bookMetadataChanged,
   currentBookMetadataPayload,
-  isBookLevelEditorialCopyTarget,
   isChapterEditorialCopyTarget,
-  latestBookCoverStyle,
-  latestBookTitle,
 } from "./book-design-model";
 import {
   bookVoiceAssistantHint,
@@ -162,8 +151,6 @@ interface DatasetEvent {
       key?: string;
       action?: string;
       direction?: string;
-      format?: MemoirBookOutputExportFormat;
-      layout?: MemoirBookOutputExportLayout;
       target?: MemoirBookEditorialCopyTarget;
       title?: string;
       utteranceId?: string;
@@ -183,36 +170,10 @@ interface PickerEvent extends DatasetEvent {
   };
 }
 
-interface SwitchEvent extends DatasetEvent {
-  detail: {
-    value: boolean;
-  };
-}
-
-type PageScrollToOptions = {
-  selector: string;
-  duration?: number;
-  offsetTop?: number;
-};
-type WxWithPageScroll = WechatMiniprogram.Wx & {
-  pageScrollTo?: (options: PageScrollToOptions) => void;
-};
-type OpenDocumentOptions = {
-  filePath: string;
-  fileType?: "pdf";
-  showMenu?: boolean;
-  success?: () => void;
-  fail?: (error: WechatMiniprogram.GeneralCallbackResult) => void;
-};
-type WxWithDocument = WechatMiniprogram.Wx & {
-  openDocument?: (options: OpenDocumentOptions) => void;
-};
-
 function isLoginError(error: unknown): boolean {
   return error instanceof ApiError && [401, 403].includes(error.statusCode);
 }
 
-const BOOK_DESIGN_AUTOSAVE_DELAY_MS = 900;
 const BOOK_GENERATION_EVENT_POLL_INTERVAL_MS = 3000;
 const BOOK_GENERATION_EVENT_POLL_MAX_ATTEMPTS = 120;
 
@@ -331,18 +292,6 @@ Page<BookData, {
   ): Promise<MemoirBookPlan | null>;
   updatePlanStructure(chapters: MemoirBookPlanChapterUpdateInput[], toastTitle: string): Promise<MemoirBookPlan | null>;
   regenerateMergedChapter(chapterId: string): Promise<void>;
-  changeBookTitle(event: TextInputEvent): void;
-  changeBookMetadataField(event: TextInputEvent): void;
-  scheduleBookDesignAutosave(): void;
-  clearBookDesignAutosaveTimer(): void;
-  flushBookDesignAutosave(): void;
-  autosaveBookDesignSettings(): Promise<void>;
-  saveBookDesignSettings(): Promise<void>;
-  suggestBookTitles(): Promise<void>;
-  chooseBookTitleSuggestion(event: DatasetEvent): void;
-  changeBookCoverStyle(event: PickerEvent): void;
-  ensureBookDesignSavedForEditorialCopy(): Promise<boolean>;
-  regenerateBookEditorialCopy(event: DatasetEvent): Promise<void>;
   regenerateBookChapterEditorialCopy(event: DatasetEvent): Promise<void>;
   openBookChapterEditorialEditor(event: DatasetEvent): void;
   closeBookChapterEditorialEditor(): void;
@@ -350,12 +299,8 @@ Page<BookData, {
   saveBookChapterEditorialCopy(): Promise<void>;
   generateBook(): Promise<void>;
   changeBookOutputVersion(event: PickerEvent): void;
-  changeBookExportLayout(event: PickerEvent): void;
-  toggleBookExportSourceAppendix(event: SwitchEvent): void;
   toggleBookPreviewChapters(): void;
   toggleBookOutputDetails(): void;
-  previewBookOutput(): void;
-  downloadBookOutputExport(event: DatasetEvent): Promise<void>;
   editBookOutputChapter(event: DatasetEvent): void;
   playChapterAudio(event: DatasetEvent): Promise<void>;
   playChapterAudioById(
@@ -447,7 +392,6 @@ Page<BookData, {
   ttsProgressTimer: number | null;
   ttsProgressStartedAtMs: number;
   bookVoiceAutoListenTimer: number | null;
-  bookDesignAutosaveTimer: number | null;
   bookGenerationPollTimer: number | null;
   bookGenerationPollAttempts: number;
   automationEvents: MemoirAutomationEvent[];
@@ -463,7 +407,6 @@ Page<BookData, {
   ttsProgressTimer: null,
   ttsProgressStartedAtMs: 0,
   bookVoiceAutoListenTimer: null,
-  bookDesignAutosaveTimer: null,
   bookGenerationPollTimer: null,
   bookGenerationPollAttempts: 0,
   automationEvents: [],
@@ -825,271 +768,6 @@ Page<BookData, {
       ...outputData,
       bookPreviewChaptersExpanded: false,
     });
-    if (outputData.bookMetadataChanged && output?.latest_version && this.data.projectId) {
-      this.scheduleBookDesignAutosave();
-    }
-  },
-
-  changeBookTitle(event) {
-    const value = event.detail.value;
-    const storedTitle = latestBookTitle(this.data.bookOutput)
-      || this.data.bookManuscriptTitle
-      || this.data.bookPreviewTitle;
-    this.setData({
-      bookTitleInput: value,
-      bookTitleChanged: trimText(value) !== trimText(storedTitle),
-    });
-    this.scheduleBookDesignAutosave();
-  },
-
-  changeBookMetadataField(event) {
-    const key = String(event.currentTarget.dataset.key || "");
-    const fieldByKey: Record<string, keyof BookData> = {
-      subtitle: "bookSubtitleInput",
-      narrator_name: "bookNarratorNameInput",
-      prepared_by: "bookPreparedByInput",
-      preface: "bookPrefaceInput",
-      afterword: "bookAfterwordInput",
-      back_cover_quote: "bookBackCoverQuoteInput",
-    };
-    const field = fieldByKey[key];
-    if (!field) {
-      return;
-    }
-    const value = event.detail.value;
-    const nextData = { ...this.data, [field]: value } as BookData;
-    this.setData({
-      [field]: value,
-      bookMetadataChanged: bookMetadataChanged(nextData),
-      error: "",
-    });
-    this.scheduleBookDesignAutosave();
-  },
-
-  async suggestBookTitles() {
-    if (!this.data.projectId || this.data.bookTitleSuggesting || this.data.generatingBook) {
-      return;
-    }
-    if (!this.data.allChaptersConfirmed) {
-      this.setData({ error: "请先确认所有章节正文" });
-      return;
-    }
-    if (this.data.hasDraftChanges) {
-      this.setData({ error: "请先保存当前章节修改" });
-      return;
-    }
-    this.setData({ bookTitleSuggesting: true, error: "" });
-    try {
-      const response = await suggestMemoirBookOutputTitles(this.data.projectId, { count: 6 });
-      const suggestions = (response.suggestions || []).map((item) => trimText(item)).filter(Boolean);
-      this.setData({ bookTitleSuggestions: suggestions });
-      if (!suggestions.length) {
-        this.setData({ error: "暂时没有生成合适的书名" });
-      }
-    } catch (error) {
-      if (isLoginError(error)) {
-        wx.reLaunch({ url: "/pages/login/index" });
-        return;
-      }
-      this.setData({ error: error instanceof Error ? error.message : "小余起名失败" });
-    } finally {
-      this.setData({ bookTitleSuggesting: false });
-    }
-  },
-
-  chooseBookTitleSuggestion(event) {
-    const title = trimText(event.currentTarget.dataset.title || "");
-    if (!title) {
-      return;
-    }
-    const storedTitle = latestBookTitle(this.data.bookOutput)
-      || this.data.bookManuscriptTitle
-      || this.data.bookPreviewTitle;
-    this.setData({
-      bookTitleInput: title,
-      bookTitleChanged: title !== trimText(storedTitle),
-      error: "",
-    });
-    this.scheduleBookDesignAutosave();
-  },
-
-  changeBookCoverStyle(event) {
-    const index = Number(event.detail.value);
-    const option = this.data.bookCoverStyleOptions[index];
-    if (!option) {
-      return;
-    }
-    this.setData({
-      bookCoverStyle: option.value,
-      bookCoverStylePreviewClass: option.previewClass,
-      bookCoverStyleIndex: index,
-      bookCoverStyleLabel: option.label,
-      bookCoverStyleDetailText: option.detailText,
-      bookCoverStyleChanged: option.value !== latestBookCoverStyle(this.data.bookOutput),
-      error: "",
-    });
-    this.scheduleBookDesignAutosave();
-  },
-
-  scheduleBookDesignAutosave() {
-    this.clearBookDesignAutosaveTimer();
-    if (!this.data.bookOutput?.latest_version || this.data.bookViewingHistoricalVersion) {
-      this.setData({ bookDesignSaveStatusText: bookDesignSaveStatusText(this.data) });
-      return;
-    }
-    if (!bookDesignHasChanges(this.data)) {
-      this.setData({ bookDesignSaveStatusText: "已保存" });
-      return;
-    }
-    this.setData({ bookDesignSaveStatusText: "待自动保存" });
-    if (this.data.bookTitleSaving || this.data.generatingBook || this.data.updatingPlanStructure) {
-      return;
-    }
-    this.bookDesignAutosaveTimer = setTimeout(() => {
-      this.bookDesignAutosaveTimer = null;
-      void this.autosaveBookDesignSettings();
-    }, BOOK_DESIGN_AUTOSAVE_DELAY_MS);
-  },
-
-  clearBookDesignAutosaveTimer() {
-    if (this.bookDesignAutosaveTimer !== null) {
-      clearTimeout(this.bookDesignAutosaveTimer);
-      this.bookDesignAutosaveTimer = null;
-    }
-  },
-
-  flushBookDesignAutosave() {
-    const hadPendingAutosave = this.bookDesignAutosaveTimer !== null;
-    this.clearBookDesignAutosaveTimer();
-    if (hadPendingAutosave && bookDesignHasChanges(this.data)) {
-      void this.autosaveBookDesignSettings();
-    }
-  },
-
-  async autosaveBookDesignSettings() {
-    this.clearBookDesignAutosaveTimer();
-    if (!this.data.projectId || this.data.bookTitleSaving || this.data.generatingBook) {
-      return;
-    }
-    if (!this.data.bookOutput?.latest_version) {
-      this.setData({ bookDesignSaveStatusText: "生成时应用" });
-      return;
-    }
-    if (this.data.bookViewingHistoricalVersion) {
-      this.setData({
-        error: "请切回最新版后再自动保存成书信息",
-        bookDesignSaveStatusText: "切回最新版后自动保存",
-      });
-      return;
-    }
-    if (!bookDesignHasChanges(this.data)) {
-      this.setData({ bookDesignSaveStatusText: "已保存" });
-      return;
-    }
-    const title = trimText(this.data.bookTitleInput);
-    if (!title) {
-      this.setData({ error: "书名不能为空", bookDesignSaveStatusText: "保存失败" });
-      return;
-    }
-    const coverStyle = this.data.bookCoverStyle;
-    const metadata = currentBookMetadataPayload(this.data, true);
-    this.stopPlayback();
-    this.setData({ bookTitleSaving: true, bookDesignSaveStatusText: "保存中", error: "" });
-    try {
-      const output = await updateMemoirBookOutput(this.data.projectId, {
-        title,
-        subtitle: metadata.subtitle,
-        narrator_name: metadata.narrator_name,
-        prepared_by: metadata.prepared_by,
-        preface: metadata.preface,
-        afterword: metadata.afterword,
-        back_cover_quote: metadata.back_cover_quote,
-        cover_style: coverStyle,
-      });
-      this.applyBookOutput(output);
-      const option = this.data.bookCoverStyleOptions.find((candidate) => candidate.value === coverStyle)
-        || this.data.bookCoverStyleOptions[0];
-      this.setData({
-        bookTitleInput: title,
-        bookSubtitleInput: metadata.subtitle,
-        bookNarratorNameInput: metadata.narrator_name,
-        bookPreparedByInput: metadata.prepared_by,
-        bookPrefaceInput: metadata.preface,
-        bookAfterwordInput: metadata.afterword,
-        bookBackCoverQuoteInput: metadata.back_cover_quote,
-        bookTitleChanged: false,
-        bookMetadataChanged: false,
-        bookCoverStyle: option.value,
-        bookCoverStylePreviewClass: option.previewClass,
-        bookCoverStyleIndex: Math.max(
-          0,
-          this.data.bookCoverStyleOptions.findIndex((candidate) => candidate.value === option.value),
-        ),
-        bookCoverStyleLabel: option.label,
-        bookCoverStyleDetailText: option.detailText,
-        bookCoverStyleChanged: false,
-        bookDesignSaveStatusText: "已自动保存",
-      });
-    } catch (error) {
-      if (isLoginError(error)) {
-        wx.reLaunch({ url: "/pages/login/index" });
-        return;
-      }
-      this.setData({
-        error: error instanceof Error ? error.message : "保存成书信息失败",
-        bookDesignSaveStatusText: "保存失败",
-      });
-    } finally {
-      this.setData({ bookTitleSaving: false });
-    }
-  },
-
-  async saveBookDesignSettings() {
-    await this.autosaveBookDesignSettings();
-  },
-
-  async ensureBookDesignSavedForEditorialCopy() {
-    this.clearBookDesignAutosaveTimer();
-    if (!bookDesignHasChanges(this.data)) {
-      return true;
-    }
-    await this.autosaveBookDesignSettings();
-    return !bookDesignHasChanges(this.data);
-  },
-
-  async regenerateBookEditorialCopy(event) {
-    const target = String(event.currentTarget.dataset.target || "");
-    if (!isBookLevelEditorialCopyTarget(target)) {
-      return;
-    }
-    if (!this.data.projectId || this.data.bookEditorialCopyBusyTarget === target || this.data.bookTitleSaving) {
-      return;
-    }
-    const blockedMessage = bookEditorialCopyBlockedMessage(this.data);
-    if (blockedMessage) {
-      this.setData({ error: blockedMessage });
-      return;
-    }
-    if (!(await this.ensureBookDesignSavedForEditorialCopy())) {
-      return;
-    }
-    this.stopPlayback();
-    this.setData({ bookEditorialCopyBusyTarget: target, error: "" });
-    try {
-      const event = await enqueueMemoirBookOutputEditorialCopyGeneration(this.data.projectId, { targets: [target] });
-      this.applyAutomationEvents(mergeAutomationEvent(this.automationEvents, event));
-      wx.showToast({ title: "已后台生成", icon: "success" });
-    } catch (error) {
-      if (isLoginError(error)) {
-        wx.reLaunch({ url: "/pages/login/index" });
-        return;
-      }
-      this.setData({ error: error instanceof Error ? error.message : "成书文案提交失败" });
-    } finally {
-      if (this.data.bookEditorialCopyBusyTarget === target) {
-        this.setData({ bookEditorialCopyBusyTarget: "" });
-      }
-    }
   },
 
   async regenerateBookChapterEditorialCopy(event) {
@@ -1099,15 +777,12 @@ Page<BookData, {
       return;
     }
     const busyTarget = `${target}:${chapterId}`;
-    if (!this.data.projectId || this.data.bookEditorialCopyBusyTarget === busyTarget || this.data.bookTitleSaving) {
+    if (!this.data.projectId || this.data.bookEditorialCopyBusyTarget === busyTarget) {
       return;
     }
     const blockedMessage = bookEditorialCopyBlockedMessage(this.data);
     if (blockedMessage) {
       this.setData({ error: blockedMessage });
-      return;
-    }
-    if (!(await this.ensureBookDesignSavedForEditorialCopy())) {
       return;
     }
     this.stopPlayback();
@@ -1185,15 +860,12 @@ Page<BookData, {
 
   async saveBookChapterEditorialCopy() {
     const chapterId = this.data.bookChapterEditorialChapterId;
-    if (!chapterId || !this.data.projectId || this.data.bookEditorialCopyBusyTarget || this.data.bookTitleSaving) {
+    if (!chapterId || !this.data.projectId || this.data.bookEditorialCopyBusyTarget) {
       return;
     }
     const blockedMessage = bookEditorialCopyBlockedMessage(this.data);
     if (blockedMessage) {
       this.setData({ error: blockedMessage });
-      return;
-    }
-    if (!(await this.ensureBookDesignSavedForEditorialCopy())) {
       return;
     }
     const busyTarget = `manual:${chapterId}`;
@@ -1235,103 +907,12 @@ Page<BookData, {
     });
   },
 
-  changeBookExportLayout(event) {
-    const index = Number(event.detail.value);
-    const option = this.data.bookExportLayoutOptions[index];
-    if (!option) {
-      return;
-    }
-    this.setData({
-      bookExportLayout: option.value,
-      bookExportLayoutIndex: index,
-      bookExportLayoutLabel: option.label,
-      bookExportLayoutDetailText: option.detailText,
-    });
-  },
-
-  toggleBookExportSourceAppendix(event) {
-    this.setData({ bookExportShowSourceAppendix: Boolean(event.detail.value) });
-  },
-
   toggleBookPreviewChapters() {
     this.setData({ bookPreviewChaptersExpanded: !this.data.bookPreviewChaptersExpanded });
   },
 
   toggleBookOutputDetails() {
     this.setData({ bookOutputDetailsExpanded: !this.data.bookOutputDetailsExpanded });
-  },
-
-  previewBookOutput() {
-    if (!this.data.bookContent) {
-      this.setData({ error: "请先生成书稿" });
-      return;
-    }
-    this.setData({
-      bookPreviewChaptersExpanded: true,
-      bookOutputDetailsExpanded: true,
-      error: "",
-    });
-    (wx as WxWithPageScroll).pageScrollTo?.({
-      selector: "#book-output-card",
-      duration: 260,
-      offsetTop: 12,
-    });
-  },
-
-  async downloadBookOutputExport(event) {
-    const format: MemoirBookOutputExportFormat = event.currentTarget.dataset.format === "txt" ? "txt" : "pdf";
-    const layout: MemoirBookOutputExportLayout = format === "pdf" && event.currentTarget.dataset.layout === "large_print"
-      ? "large_print"
-      : (format === "pdf" ? this.data.bookExportLayout : "standard");
-    const target = `book-export:${format}:${layout}`;
-    if (!this.data.projectId || this.data.bookExportBusyTarget || this.data.generatingBook) {
-      return;
-    }
-    if (!this.data.bookContent) {
-      this.setData({ error: "请先生成书稿" });
-      return;
-    }
-    if (this.data.hasDraftChanges) {
-      this.setData({ error: "请先保存当前章节修改，再导出书稿" });
-      return;
-    }
-    if (this.data.bookOutput?.is_stale) {
-      this.setData({ error: "章节内容已更新，请先更新书稿再导出" });
-      return;
-    }
-    this.setData({ bookExportBusyTarget: target, error: "" });
-    try {
-      const filePath = await downloadMemoirBookOutputExport(
-        this.data.projectId,
-        format,
-        this.data.bookSelectedVersionId,
-        layout,
-        format === "pdf" ? this.data.bookExportShowSourceAppendix : true,
-      );
-      if (format === "pdf") {
-        const wxWithDocument = wx as WxWithDocument;
-        if (typeof wxWithDocument.openDocument === "function") {
-          await new Promise<void>((resolve, reject) => {
-            wxWithDocument.openDocument?.({
-              filePath,
-              fileType: "pdf",
-              showMenu: true,
-              success: () => resolve(),
-              fail: (error) => reject(new Error(error.errMsg || "PDF 打开失败")),
-            });
-          });
-        }
-      }
-      wx.showToast({ title: format === "pdf" ? "PDF 已打开" : "文本已下载", icon: "success" });
-    } catch (error) {
-      if (isLoginError(error)) {
-        wx.reLaunch({ url: "/pages/login/index" });
-        return;
-      }
-      this.setData({ error: error instanceof Error ? error.message : "导出失败" });
-    } finally {
-      this.setData({ bookExportBusyTarget: "" });
-    }
   },
 
   applySourceCoverage(coverage) {
@@ -3210,7 +2791,6 @@ Page<BookData, {
   },
 
   onHide() {
-    this.flushBookDesignAutosave();
     this.clearBookGenerationEventPoll();
     this.clearBookVoiceAssistantAutoListenTimer();
     this.bookVoiceStreaming.close({ force: true });
@@ -3235,7 +2815,6 @@ Page<BookData, {
   },
 
   onUnload() {
-    this.flushBookDesignAutosave();
     this.clearBookGenerationEventPoll();
     this.stopBookVoiceConversation();
     this.stopPlayback();
