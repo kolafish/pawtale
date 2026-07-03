@@ -1131,14 +1131,16 @@ Page<BookData, {
         run: () => wx.navigateTo({ url: bookChapterDetailUrl(this.data.projectId, chapterId, "sources") }),
       });
     }
-    if (chapter.draft?.latest_version) {
+    const canShowAudioAction = Boolean(chapter.draft?.latest_version)
+      && (!this.data.ttsBusyTarget || this.data.playingTarget === chapter.ttsTarget);
+    if (canShowAudioAction) {
       actions.push({
         label: this.data.playingTarget === chapter.ttsTarget ? "停止朗读" : "朗读",
         run: () => this.playChapterAudioById(chapterId, { showPreparingToast: true }),
       });
     }
     if (!actions.length) {
-      wx.showToast({ title: "暂无可用操作", icon: "none" });
+      wx.showToast({ title: this.data.ttsBusyTarget ? "正在准备朗读，稍后再试" : "暂无可用操作", icon: "none" });
       return;
     }
     wx.showActionSheet({
