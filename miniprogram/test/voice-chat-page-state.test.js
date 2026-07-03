@@ -7,6 +7,7 @@ const test = require("node:test");
 
 const {
   initialVoiceChatData,
+  voiceChatViewPatch,
   voiceAuthorizationChangePatch,
   voiceAuthorizationConsentPatch,
   voiceCaptureStatsPatch,
@@ -27,7 +28,12 @@ test("voice chat initial data keeps the assistant ready for opening narration", 
   assert.equal(first.assistantPromptLabel, "小余想听您讲讲");
   assert.equal(first.autoStopEnabled, true);
   assert.equal(first.autoListenEnabled, true);
+  assert.equal(first.showVoiceAuthorizationPanel, true);
+  assert.equal(first.micButtonDisabled, true);
+  assert.equal(first.micButtonText, "同意后开始说话");
+  assert.equal(first.historyCountText, "0 段 · 0 字");
   assert.deepEqual(first.transcriptLines, []);
+  assert.deepEqual(first.transcriptLineViews, []);
   assert.equal(first.openingTopicOptions.length, 5);
   assert.deepEqual(first.openingTopicOptions.map((item) => item.label), [
     "家人",
@@ -37,32 +43,89 @@ test("voice chat initial data keeps the assistant ready for opening narration", 
     "随便聊聊",
   ]);
   assert.notEqual(first.transcriptLines, second.transcriptLines);
+  assert.notEqual(first.transcriptLineViews, second.transcriptLineViews);
   assert.notEqual(first.ttsAlignment, second.ttsAlignment);
   assert.notEqual(first.openingTopicOptions, second.openingTopicOptions);
+});
+
+test("voice chat view patch derives simple fields for first assistant turn", () => {
+  const data = {
+    ...initialVoiceChatData(),
+    voiceAuthorizationAgreed: true,
+    projectTitle: "外婆的故事",
+    followUpLoading: true,
+    followUpTTSLoading: true,
+  };
+  const patch = voiceChatViewPatch(data);
+
+  assert.equal(patch.topicTitleText, "外婆的故事");
+  assert.equal(patch.showVoiceAuthorizationPanel, false);
+  assert.equal(patch.showAssistantPanel, true);
+  assert.equal(patch.assistantDisplayText, "小余正在准备第一句话");
+  assert.equal(patch.stageStatusText, "小余正在准备问题");
+  assert.equal(patch.liveDisplayText, "小余正在准备第一句话");
+  assert.equal(patch.controlHintText, "小余先问一句，稍等一下。");
+  assert.equal(patch.micButtonText, "我来讲了");
+  assert.equal(patch.micButtonDisabled, false);
+});
+
+test("voice chat view patch derives transcript and recording render fields", () => {
+  const data = {
+    ...initialVoiceChatData(),
+    voiceAuthorizationAgreed: true,
+    recording: true,
+    liveText: "",
+    liveCharCount: 8,
+    canRequestFollowUp: true,
+    transcriptLines: [
+      { id: "assistant-1", role: "assistant", text: "先从哪段开始讲？" },
+      { id: "user-1", role: "user", text: "我想讲外婆。" },
+    ],
+    totalTranscriptCharCount: 7,
+  };
+  const patch = voiceChatViewPatch(data);
+
+  assert.equal(patch.stageStatusClass, "stage-status listening");
+  assert.equal(patch.stageStatusText, "我在听，您慢慢说");
+  assert.equal(patch.liveDisplayText, "直接说就行，我会帮您记下来");
+  assert.equal(patch.captureStripClass, "capture-strip active");
+  assert.equal(patch.showLiveCharCount, true);
+  assert.equal(patch.showInlineHelp, true);
+  assert.equal(patch.historyCountText, "2 段 · 7 字");
+  assert.equal(patch.showHistoryEmpty, false);
+  assert.deepEqual(patch.transcriptLineViews.map((line) => [line.lineClass, line.roleText]), [
+    ["transcript-line assistant", "小余"],
+    ["transcript-line user", "我"],
+  ]);
+  assert.equal(patch.controlHintText, "说完请点这里");
+  assert.equal(patch.micButtonClass, "mic-button recording");
+  assert.equal(patch.micButtonText, "说完了，帮我整理");
 });
 
 test("voice chat page keeps one main status and a clear recording action", () => {
   const wxml = fs.readFileSync(path.join(__dirname, "../pages/voice-chat/index.wxml"), "utf8");
   const wxss = fs.readFileSync(path.join(__dirname, "../pages/voice-chat/index.wxss"), "utf8");
+  const bindings = [...wxml.matchAll(/{{([^}]*)}}/g)].map((match) => match[1]);
 
   assert.match(wxml, /class="topic-panel"/);
   assert.match(wxml, /正在聊：/);
-  assert.match(wxml, /class="stage-status/);
-  assert.match(wxml, /这一段已经记下来了/);
-  assert.match(wxml, /正在帮您整理成文字/);
-  assert.match(wxml, /小余正在读问题/);
-  assert.match(wxml, /!recording && \(assistantPromptText \|\| followUpLoading \|\| followUpError \|\| canRequestFollowUp\)/);
-  assert.match(wxml, /assistantPromptText \|\| \(followUpLoading \? assistantLoadingText/);
-  assert.match(wxml, /followUpTTSLoading && assistantPromptText/);
-  assert.match(wxml, /小余正在准备第一句话/);
-  assert.match(wxml, /小余先问一句，稍等一下。/);
-  assert.match(wxml, /今天想先讲哪一段/);
+  assert.match(wxml, /{{finishButtonText}}/);
+  assert.match(wxml, /{{topicTitleText}}/);
+  assert.match(wxml, /wx:if="{{showAssistantPanel}}"/);
+  assert.match(wxml, /{{assistantDisplayText}}/);
+  assert.match(wxml, /{{stageStatusText}}/);
+  assert.match(wxml, /{{liveDisplayText}}/);
+  assert.match(wxml, /{{historyCountText}}/);
+  assert.match(wxml, /wx:for="{{transcriptLineViews}}"/);
+  assert.match(wxml, /{{controlHintText}}/);
+  assert.match(wxml, /{{micButtonText}}/);
   assert.match(wxml, /openingTopicOptions/);
   assert.match(wxml, /bindtap="chooseOpeningTopic"/);
   assert.match(wxml, /selectedOpeningTopicText/);
-  assert.match(wxml, /我来讲了/);
-  assert.match(wxml, /说完了，帮我整理/);
   assert.match(wxml, /不知道讲什么，让小余问一句/);
+  for (const binding of bindings) {
+    assert.doesNotMatch(binding, /\?|&&|\|\||===|!==|\.length/);
+  }
   assert.equal(wxml.includes("assistant-state"), false);
   assert.equal(wxml.includes("status-label"), false);
   assert.match(wxss, /\.mic-button[\s\S]*border-radius: 999rpx/);
