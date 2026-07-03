@@ -1,6 +1,6 @@
 <view class="home-page">
   <view class="header">
-    <text class="hello">你好，{{displayName || "作者"}}</text>
+    <text class="hello">{{greetingText}}</text>
     <text class="subtitle">余主任留声机</text>
   </view>
 
@@ -9,18 +9,18 @@
   <view wx:if="{{showLaunchPanel}}" class="launch-card">
     <view class="project-row">
       <text class="panel-label">{{launchEyebrow}}</text>
-      <text class="mode-tag">{{launchVariant === "new_project" ? "新故事本" : "第一次来"}}</text>
+      <text class="mode-tag">{{launchModeTagText}}</text>
     </view>
     <text class="launch-title">{{launchTitle}}</text>
     <text class="launch-body">{{launchBody}}</text>
     <button
-      class="voice-start-button {{(loading || creatingVoice) ? 'button-blocked' : ''}}"
+      class="{{voiceStartButtonClass}}"
       loading="{{creatingVoice}}"
       bindtap="startLaunchVoiceChat"
-      hover-class="{{(loading || creatingVoice) ? 'none' : 'voice-start-button-hover'}}"
+      hover-class="{{voiceStartButtonHoverClass}}"
     >
       <image class="voice-start-icon" src="/assets/memoir-microphone.png" mode="aspectFit" />
-      <text class="voice-start-title">{{creatingVoice ? "正在准备" : launchPrimaryText}}</text>
+      <text class="voice-start-title">{{launchVoiceButtonTitle}}</text>
     </button>
     <button class="launch-secondary-button" bindtap="dismissLaunchPanel" hover-class="launch-secondary-button-hover">
       {{launchSecondaryText}}
@@ -37,44 +37,44 @@
     </view>
 
     <view class="project-row">
-      <text class="panel-label">{{loading ? "正在准备" : (hasProject ? "今天接着聊" : "准备开始")}}</text>
-      <text class="mode-tag">{{loading ? "加载中" : (hasProject ? "继续上次" : "待创建")}}</text>
+      <text class="panel-label">{{panelLabelText}}</text>
+      <text class="mode-tag">{{modeTagText}}</text>
     </view>
     <text class="project-title">
-      {{loading ? "正在加载回忆录" : (hasProject ? "今天接着讲一段" : (projectDisplayTitle || projectTitle || "还没有回忆录"))}}
+      {{projectHeadingText}}
     </text>
     <text class="project-meta">
-      {{loading ? "我先确认当前回忆录。" : (needsLogin ? "登录后，我在这里等你。" : (!hasProject ? "先创建一本回忆录，我再听你讲。" : (hasLastStoryHint ? lastStoryText : projectPromptText)))}}
+      {{projectMetaText}}
     </text>
     <text wx:if="{{hasProject}}" class="resume-note">可以接着这里讲，也可以随便说点别的。</text>
 
     <button
-      class="voice-start-button {{(loading || creatingVoice) ? 'button-blocked' : ''}}"
+      class="{{voiceStartButtonClass}}"
       loading="{{creatingVoice}}"
       bindtap="startPrimaryVoiceChat"
-      hover-class="{{(loading || creatingVoice) ? 'none' : 'voice-start-button-hover'}}"
+      hover-class="{{voiceStartButtonHoverClass}}"
     >
       <image class="voice-start-icon" src="/assets/memoir-microphone.png" mode="aspectFit" />
       <text class="voice-start-title">
-        {{loading ? "正在加载" : (needsLogin ? "登录后开始" : (!hasProject ? "创建回忆录" : (!voiceAuthorizationAgreed ? "同意协议后开始" : (creatingVoice ? "正在准备" : "我来说一段"))))}}
+        {{primaryVoiceButtonTitle}}
       </text>
     </button>
     <text class="voice-start-note">
-      {{loading ? "马上就好。" : (needsLogin ? "先登录，再继续讲回忆。" : (!hasProject ? "先起个名字，我再听您讲。" : (!voiceAuthorizationAgreed ? "同意后才会打开麦克风。" : (creatingVoice ? "我马上开始听。" : "说一两句也可以，我会帮您记下来。"))))}}
+      {{voiceStartNoteText}}
     </text>
 
-    <view wx:if="{{hasProject && !needsLogin}}" class="resume-actions">
+    <view wx:if="{{showResumeActions}}" class="resume-actions">
       <button
-        class="resume-ask-button {{(loading || creatingVoice) ? 'button-blocked' : ''}}"
+        class="{{resumeAskButtonClass}}"
         bindtap="startGuidedInterview"
-        hover-class="{{(loading || creatingVoice) ? 'none' : 'resume-ask-button-hover'}}"
+        hover-class="{{resumeAskButtonHoverClass}}"
       >
         让小余问一句
       </button>
     </view>
   </view>
 
-  <view wx:if="{{!voiceAuthorizationAgreed}}" class="voice-auth-panel">
+  <view wx:if="{{showVoiceAuthorizationPanel}}" class="voice-auth-panel">
     <checkbox-group bindchange="changeVoiceAuthorization">
       <label class="voice-auth-row">
         <checkbox

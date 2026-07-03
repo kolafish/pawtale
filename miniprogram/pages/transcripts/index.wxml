@@ -5,7 +5,7 @@
     </view>
     <view class="title-block">
       <text class="page-title">讲述记录</text>
-      <text class="page-meta">{{projectTitle || "当前回忆录"}} · {{total}} 条讲述</text>
+      <text class="page-meta">{{pageMetaText}}</text>
     </view>
   </view>
 
@@ -21,17 +21,17 @@
         bindinput="onSearchInput"
         bindconfirm="onSearchConfirm"
       />
-      <button wx:if="{{searchInput || hasSearchCriteria}}" class="search-clear" bindtap="clearSearch">×</button>
+      <button wx:if="{{showSearchClear}}" class="search-clear" bindtap="clearSearch">×</button>
       <button
-        class="voice-search-button {{voiceSearchRecording ? 'recording' : ''}}"
+        class="{{voiceSearchButtonClass}}"
         bindtap="startVoiceSearch"
         loading="{{voiceSearchTranscribing}}"
-        disabled="{{voiceSearchTranscribing}}"
+        disabled="{{voiceSearchDisabled}}"
       >
-        {{voiceSearchRecording ? "停止" : (voiceSearchTranscribing ? "识别中" : "语音")}}
+        {{voiceSearchButtonText}}
       </button>
     </view>
-    <view wx:if="{{searchChips.length}}" class="search-chips">
+    <view wx:if="{{showSearchChips}}" class="search-chips">
       <text
         wx:for="{{searchChips}}"
         wx:for-item="chip"
@@ -52,22 +52,22 @@
     <button class="login-button" bindtap="openLogin">登录后查看</button>
   </view>
 
-  <view wx:elif="{{!activeProjectId}}" class="empty-panel">
+  <view wx:elif="{{showNoProjectPanel}}" class="empty-panel">
     <text class="empty-title">还没有回忆录</text>
     <text class="empty-copy">先创建一本回忆录，完成语音聊天后，讲述记录会显示在这里。</text>
     <button class="login-button" bindtap="createProject">创建回忆录</button>
   </view>
 
-  <view wx:elif="{{loading && !items.length}}" class="empty-panel">
-    <text>{{hasSearchCriteria ? "正在搜索" : "正在加载"}}</text>
+  <view wx:elif="{{showLoadingEmpty}}" class="empty-panel">
+    <text>{{loadingEmptyText}}</text>
   </view>
 
-  <view wx:elif="{{hasSearchCriteria && !items.length}}" class="empty-panel">
+  <view wx:elif="{{showSearchEmpty}}" class="empty-panel">
     <text class="empty-title">没有找到相关记录</text>
     <text class="empty-copy">没有匹配“{{searchDisplayText}}”的讲述记录。</text>
   </view>
 
-  <view wx:elif="{{!items.length}}" class="empty-panel">
+  <view wx:elif="{{showGenericEmpty}}" class="empty-panel">
     <text class="empty-title">暂无讲述记录</text>
     <text class="empty-copy">完成一次语音聊天后，保存的语音和文字会显示在这里。</text>
   </view>
@@ -77,7 +77,7 @@
     wx:for-index="index"
     wx:key="id"
     id="{{item.anchorId}}"
-    class="transcript-card {{highlightedId === item.id ? 'highlighted' : ''}}"
+    class="{{item.cardClass}}"
     data-id="{{item.id}}"
     bindtap="openTranscriptDetail"
   >
@@ -85,7 +85,7 @@
       <view class="record-main">
         <text class="record-title">{{item.summaryTitleText}}</text>
         <text class="record-meta">{{item.recordMetaText}}</text>
-        <text class="book-status {{item.isIncludedInBook ? 'included' : ''}}">{{item.bookInclusionText}}</text>
+        <text class="{{item.bookStatusClass}}">{{item.bookInclusionText}}</text>
       </view>
       <text class="record-count">{{item.display_char_count}} 字</text>
     </view>
@@ -96,7 +96,7 @@
         wx:for-item="segment"
         wx:for-index="segmentIndex"
         wx:key="segmentIndex"
-        class="{{segment.highlight ? 'search-hit' : ''}}"
+        class="search-hit-{{segment.highlight}}"
       >{{segment.text}}</text>
     </text>
 
@@ -105,9 +105,9 @@
         class="ghost-button"
         data-id="{{item.id}}"
         catchtap="playAudio"
-        disabled="{{savingId || deletingId || !item.canPlayAudio}}"
+        disabled="{{item.playAudioDisabled}}"
       >
-        {{playingId === item.id ? "停止" : "听原音"}}
+        {{item.playAudioText}}
       </button>
       <picker
         wx:if="{{item.canAssignChapterSource}}"
@@ -115,19 +115,19 @@
         range="{{item.chapterAssignOptions}}"
         range-key="label"
         data-id="{{item.id}}"
-        disabled="{{savingId || deletingId || assigningSourceId || movingSourceId}}"
+        disabled="{{item.assignPickerDisabled}}"
         bindchange="assignTranscriptChapter"
         catchtap="stopCardTap"
       >
-        <view class="small-primary picker-action {{savingId || deletingId || assigningSourceId || movingSourceId ? 'disabled' : ''}}">
-          {{assigningSourceId === item.id ? "放入中" : "放入章节"}}
+        <view class="{{item.assignPickerActionClass}}">
+          {{item.assignPickerText}}
         </view>
       </picker>
       <button
         class="small-primary"
         data-id="{{item.id}}"
         catchtap="openTranscriptEdit"
-        disabled="{{savingId || deletingId}}"
+        disabled="{{item.editButtonDisabled}}"
       >
         编辑整理文字
       </button>
@@ -135,7 +135,7 @@
   </view>
 
   <button
-    wx:if="{{items.length < total}}"
+    wx:if="{{showLoadMore}}"
     class="load-more"
     loading="{{loading}}"
     disabled="{{loading}}"

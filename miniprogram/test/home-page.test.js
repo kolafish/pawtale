@@ -99,7 +99,7 @@ test("mini program opens on the browseable home tab", () => {
 test("home only shows voice authorization panel before current consent", () => {
   const wxml = fs.readFileSync(path.join(__dirname, "../pages/home/index.wxml"), "utf8");
 
-  assert.match(wxml, /wx:if="{{!voiceAuthorizationAgreed}}" class="voice-auth-panel"/);
+  assert.match(wxml, /wx:if="{{showVoiceAuthorizationPanel}}" class="voice-auth-panel"/);
 });
 
 test("home keeps voice entry free of per-session guidance controls", () => {
@@ -118,16 +118,16 @@ test("home uses one warm memoir card with a clear voice start button", () => {
   assert.match(wxml, /class="home-card"/);
   assert.equal(wxml.includes('class="project-panel"'), false);
   assert.equal(wxml.includes('class="voice-panel"'), false);
-  assert.match(wxml, /class="voice-start-button/);
-  assert.match(wxml, /今天接着聊/);
-  assert.match(wxml, /继续上次/);
-  assert.match(wxml, /projectPromptText/);
-  assert.match(wxml, /我来说一段/);
-  assert.match(wxml, /说一两句也可以，我会帮您记下来/);
-  assert.match(wxml, /loading \? "加载中"/);
-  assert.match(wxml, /loading \? "我先确认当前回忆录。"/);
-  assert.match(wxml, /loading \? "正在加载"/);
-  assert.match(wxml, /loading \? "马上就好。"/);
+  assert.match(wxml, /class="{{voiceStartButtonClass}}"/);
+  assert.match(wxml, /{{panelLabelText}}/);
+  assert.match(wxml, /{{modeTagText}}/);
+  assert.match(wxml, /{{projectMetaText}}/);
+  assert.match(wxml, /{{primaryVoiceButtonTitle}}/);
+  assert.match(wxml, /{{voiceStartNoteText}}/);
+  assert.equal(wxml.includes('loading ? "加载中"'), false);
+  assert.equal(wxml.includes('loading ? "我先确认当前回忆录。"'), false);
+  assert.equal(wxml.includes('loading ? "正在加载"'), false);
+  assert.equal(wxml.includes('loading ? "马上就好。"'), false);
   assert.equal(wxss.includes("#2f7d63"), false);
   assert.match(wxss, /\.voice-start-button[\s\S]*#a64b3e/);
   assert.match(wxss, /\.voice-start-button[\s\S]*border-radius: 999rpx/);
@@ -148,8 +148,9 @@ test("home polish keeps surfaces tactile without broad transitions", () => {
   assert.match(wxss, /\.resume-ask-button-hover[\s\S]*transform: scale\(0\.96\)/);
   assert.match(wxss, /\.launch-secondary-button-hover[\s\S]*transform: scale\(0\.96\)/);
   assert.match(wxss, /\.return-prompt-close[\s\S]*width: 80rpx/);
-  assert.match(wxml, /hover-class="{{\(loading \|\| creatingVoice\) \? 'none' : 'voice-start-button-hover'}}"/);
-  assert.match(wxml, /hover-class="{{\(loading \|\| creatingVoice\) \? 'none' : 'resume-ask-button-hover'}}"/);
+  assert.match(wxml, /hover-class="{{voiceStartButtonHoverClass}}"/);
+  assert.match(wxml, /hover-class="{{resumeAskButtonHoverClass}}"/);
+  assert.equal(wxml.includes("loading || creatingVoice"), false);
   assert.match(wxml, /<view class="return-prompt-close"[^>]*hover-class="return-prompt-close-hover"/);
 });
 
@@ -183,6 +184,64 @@ test("home creates concise resume hints from the latest transcript", () => {
     transcript_edited: "",
     transcript_raw: "",
   }), "这是一段很长很长的讲述标题，用来确认首页只展示一句短短的...");
+});
+
+test("home view patch keeps first-screen template state simple", () => {
+  const { homeViewPatch } = loadHomePage().mod;
+  const baseData = {
+    loading: false,
+    creatingVoice: false,
+    needsLogin: false,
+    error: "",
+    userId: "user-1",
+    displayName: "余主任",
+    projectId: "project-1",
+    projectTitle: "爷爷主题",
+    projectDisplayTitle: "爷爷的故事",
+    projectPromptText: "不用讲完整，可以先说一件和爷爷有关的小事。",
+    lastStoryHint: "爷爷退休后还在忙公司的事",
+    lastStoryText: "上次您说到：爷爷退休后还在忙公司的事。",
+    hasLastStoryHint: true,
+    launchVariant: "new_project",
+    showLaunchPanel: true,
+    showReturnPrompt: false,
+    launchEyebrow: "新的故事本",
+    launchTitle: "爷爷的故事，慢慢讲",
+    launchBody: "",
+    launchPrimaryText: "今天先聊一段",
+    launchSecondaryText: "先看看首页",
+    hasProject: true,
+    selectedMode: "free_narration",
+    guidanceLabel: "慢慢讲",
+    voiceAuthorizationAgreed: true,
+  };
+
+  assert.deepEqual(
+    {
+      greetingText: homeViewPatch(baseData).greetingText,
+      launchModeTagText: homeViewPatch(baseData).launchModeTagText,
+      panelLabelText: homeViewPatch(baseData).panelLabelText,
+      projectHeadingText: homeViewPatch(baseData).projectHeadingText,
+      projectMetaText: homeViewPatch(baseData).projectMetaText,
+      primaryVoiceButtonTitle: homeViewPatch(baseData).primaryVoiceButtonTitle,
+      voiceStartButtonClass: homeViewPatch({ ...baseData, creatingVoice: true }).voiceStartButtonClass,
+      voiceStartButtonHoverClass: homeViewPatch({ ...baseData, creatingVoice: true }).voiceStartButtonHoverClass,
+      showResumeActions: homeViewPatch(baseData).showResumeActions,
+      showVoiceAuthorizationPanel: homeViewPatch(baseData).showVoiceAuthorizationPanel,
+    },
+    {
+      greetingText: "你好，余主任",
+      launchModeTagText: "新故事本",
+      panelLabelText: "今天接着聊",
+      projectHeadingText: "今天接着讲一段",
+      projectMetaText: "上次您说到：爷爷退休后还在忙公司的事。",
+      primaryVoiceButtonTitle: "我来说一段",
+      voiceStartButtonClass: "voice-start-button button-blocked",
+      voiceStartButtonHoverClass: "none",
+      showResumeActions: true,
+      showVoiceAuthorizationPanel: false,
+    },
+  );
 });
 
 test("home userDisplayName hides wechat placeholder display name", () => {

@@ -250,10 +250,59 @@ test("transcripts list leaves full correction UI to the detail page", () => {
   assert.doesNotMatch(wxml, /raw-section|question-section|record-section-text|原始讲述|刚才问了/);
   assert.doesNotMatch(wxml, /section-title">整理文字/);
   assert.match(wxml, /summary-preview/);
-  assert.match(wxml, /book-status/);
+  assert.match(wxml, /{{pageMetaText}}/);
+  assert.match(wxml, /{{item.bookStatusClass}}/);
+  assert.match(wxml, /{{item.playAudioText}}/);
+  assert.match(wxml, /{{item.assignPickerActionClass}}/);
+  assert.doesNotMatch(wxml, /\? |\|\||===|&&|!|\.length/);
   assert.match(detailWxml, /voice-edit-inline-diff/);
   assert.match(detailWxml, /voiceEditPreview\.diffSegments/);
   assert.doesNotMatch(wxml, /voice-edit-comparison/);
+});
+
+test("transcripts view patch keeps empty states mutually exclusive", () => {
+  const { mod, page } = loadTranscriptsPage();
+  const baseData = { ...page.data };
+  const emptyFlags = (patch) => {
+    const viewPatch = mod.transcriptsViewPatch({ ...baseData, ...patch });
+    return {
+      showNoProjectPanel: viewPatch.showNoProjectPanel,
+      showLoadingEmpty: viewPatch.showLoadingEmpty,
+      showSearchEmpty: viewPatch.showSearchEmpty,
+      showGenericEmpty: viewPatch.showGenericEmpty,
+    };
+  };
+
+  assert.deepEqual(emptyFlags({ loading: true, activeProjectId: "" }), {
+    showNoProjectPanel: false,
+    showLoadingEmpty: true,
+    showSearchEmpty: false,
+    showGenericEmpty: false,
+  });
+  assert.deepEqual(emptyFlags({ loading: false, activeProjectId: "" }), {
+    showNoProjectPanel: true,
+    showLoadingEmpty: false,
+    showSearchEmpty: false,
+    showGenericEmpty: false,
+  });
+  assert.deepEqual(emptyFlags({ loading: false, activeProjectId: "project-1", hasSearchCriteria: true }), {
+    showNoProjectPanel: false,
+    showLoadingEmpty: false,
+    showSearchEmpty: true,
+    showGenericEmpty: false,
+  });
+  assert.deepEqual(emptyFlags({ loading: false, activeProjectId: "project-1", hasSearchCriteria: false }), {
+    showNoProjectPanel: false,
+    showLoadingEmpty: false,
+    showSearchEmpty: false,
+    showGenericEmpty: true,
+  });
+  assert.deepEqual(emptyFlags({ loading: false, needsLogin: true, activeProjectId: "" }), {
+    showNoProjectPanel: false,
+    showLoadingEmpty: false,
+    showSearchEmpty: false,
+    showGenericEmpty: false,
+  });
 });
 
 test("transcripts page collapses long raw and corrected text", async () => {
@@ -370,6 +419,15 @@ test("transcripts page uses summary fields for browse cards", async () => {
   assert.equal(context.data.items[0].summaryPreviewText, "讲述者提到爷爷退休后仍继续帮公司处理事务，大家都很信任他。");
   assert.equal(context.data.items[0].recordMetaText, "07-01 15:38 · 32 秒");
   assert.equal(context.data.items[0].bookInclusionText, "尚未入章");
+  assert.equal(context.data.pageMetaText, "我的回忆录 · 1 条讲述");
+  assert.equal(context.data.showNoProjectPanel, false);
+  assert.equal(context.data.showGenericEmpty, false);
+  assert.equal(context.data.showLoadMore, false);
+  assert.equal(context.data.items[0].cardClass, "transcript-card");
+  assert.equal(context.data.items[0].bookStatusClass, "book-status");
+  assert.equal(context.data.items[0].playAudioDisabled, false);
+  assert.equal(context.data.items[0].playAudioText, "听原音");
+  assert.equal(context.data.items[0].editButtonDisabled, false);
 });
 
 test("transcripts page opens transcript detail from record header", () => {

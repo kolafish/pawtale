@@ -59,6 +59,21 @@ interface HomeData {
   selectedMode: MemoirGuidanceMode;
   guidanceLabel: string;
   voiceAuthorizationAgreed: boolean;
+  greetingText: string;
+  launchModeTagText: string;
+  launchVoiceButtonTitle: string;
+  panelLabelText: string;
+  modeTagText: string;
+  projectHeadingText: string;
+  projectMetaText: string;
+  voiceStartButtonClass: string;
+  voiceStartButtonHoverClass: string;
+  primaryVoiceButtonTitle: string;
+  voiceStartNoteText: string;
+  resumeAskButtonClass: string;
+  resumeAskButtonHoverClass: string;
+  showResumeActions: boolean;
+  showVoiceAuthorizationPanel: boolean;
 }
 
 interface CheckboxChangeEvent {
@@ -66,6 +81,30 @@ interface CheckboxChangeEvent {
     value: string[];
   };
 }
+
+type HomeViewPatch = Pick<
+  HomeData,
+  | "greetingText"
+  | "launchModeTagText"
+  | "launchVoiceButtonTitle"
+  | "panelLabelText"
+  | "modeTagText"
+  | "projectHeadingText"
+  | "projectMetaText"
+  | "voiceStartButtonClass"
+  | "voiceStartButtonHoverClass"
+  | "primaryVoiceButtonTitle"
+  | "voiceStartNoteText"
+  | "resumeAskButtonClass"
+  | "resumeAskButtonHoverClass"
+  | "showResumeActions"
+  | "showVoiceAuthorizationPanel"
+>;
+
+type HomeContext = {
+  data: HomeData;
+  setData(patch: Partial<HomeData>): void;
+};
 
 function isProvisionalWeChatEmail(email: string): boolean {
   return email.trim().toLowerCase().endsWith("@wechat.local");
@@ -160,6 +199,65 @@ function launchCopy(
   };
 }
 
+export function homeViewPatch(state: HomeData): HomeViewPatch {
+  const blocked = state.loading || state.creatingVoice;
+  const voiceStartButtonClass = blocked ? "voice-start-button button-blocked" : "voice-start-button";
+  const voiceStartButtonHoverClass = blocked ? "none" : "voice-start-button-hover";
+  return {
+    greetingText: `你好，${state.displayName || "作者"}`,
+    launchModeTagText: state.launchVariant === "new_project" ? "新故事本" : "第一次来",
+    launchVoiceButtonTitle: state.creatingVoice ? "正在准备" : state.launchPrimaryText,
+    panelLabelText: state.loading ? "正在准备" : (state.hasProject ? "今天接着聊" : "准备开始"),
+    modeTagText: state.loading ? "加载中" : (state.hasProject ? "继续上次" : "待创建"),
+    projectHeadingText: state.loading
+      ? "正在加载回忆录"
+      : (state.hasProject ? "今天接着讲一段" : (state.projectDisplayTitle || state.projectTitle || "还没有回忆录")),
+    projectMetaText: state.loading
+      ? "我先确认当前回忆录。"
+      : (
+          state.needsLogin
+            ? "登录后，我在这里等你。"
+            : (!state.hasProject ? "先创建一本回忆录，我再听你讲。" : (state.hasLastStoryHint ? state.lastStoryText : state.projectPromptText))
+        ),
+    voiceStartButtonClass,
+    voiceStartButtonHoverClass,
+    primaryVoiceButtonTitle: state.loading
+      ? "正在加载"
+      : (
+          state.needsLogin
+            ? "登录后开始"
+            : (
+                !state.hasProject
+                  ? "创建回忆录"
+                  : (!state.voiceAuthorizationAgreed ? "同意协议后开始" : (state.creatingVoice ? "正在准备" : "我来说一段"))
+              )
+        ),
+    voiceStartNoteText: state.loading
+      ? "马上就好。"
+      : (
+          state.needsLogin
+            ? "先登录，再继续讲回忆。"
+            : (
+                !state.hasProject
+                  ? "先起个名字，我再听您讲。"
+                  : (!state.voiceAuthorizationAgreed ? "同意后才会打开麦克风。" : (state.creatingVoice ? "我马上开始听。" : "说一两句也可以，我会帮您记下来。"))
+              )
+        ),
+    resumeAskButtonClass: blocked ? "resume-ask-button button-blocked" : "resume-ask-button",
+    resumeAskButtonHoverClass: blocked ? "none" : "resume-ask-button-hover",
+    showResumeActions: state.hasProject && !state.needsLogin,
+    showVoiceAuthorizationPanel: !state.voiceAuthorizationAgreed,
+  };
+}
+
+function setHomeData(context: HomeContext, patch: Partial<HomeData>): void {
+  const nextData: HomeData = { ...context.data, ...patch };
+  context.setData({
+    ...patch,
+    ...homeViewPatch(nextData),
+  });
+}
+
 async function loadLastStoryHint(projectId: string): Promise<string> {
   if (!projectId) {
     return "";
@@ -215,6 +313,21 @@ Page<HomeData, {
     selectedMode: "free_narration",
     guidanceLabel: "慢慢讲",
     voiceAuthorizationAgreed: false,
+    greetingText: "你好，作者",
+    launchModeTagText: "第一次来",
+    launchVoiceButtonTitle: "今天先聊一段",
+    panelLabelText: "准备开始",
+    modeTagText: "待创建",
+    projectHeadingText: "还没有回忆录",
+    projectMetaText: "先创建一本回忆录，我再听你讲。",
+    voiceStartButtonClass: "voice-start-button",
+    voiceStartButtonHoverClass: "voice-start-button-hover",
+    primaryVoiceButtonTitle: "创建回忆录",
+    voiceStartNoteText: "先起个名字，我再听您讲。",
+    resumeAskButtonClass: "resume-ask-button",
+    resumeAskButtonHoverClass: "resume-ask-button-hover",
+    showResumeActions: false,
+    showVoiceAuthorizationPanel: true,
   },
 
   async onShow() {
@@ -225,11 +338,11 @@ Page<HomeData, {
   },
 
   refreshVoiceAuthorizationConsent() {
-    this.setData({ voiceAuthorizationAgreed: readVoiceAuthorizationConsent() });
+    setHomeData(this, { voiceAuthorizationAgreed: readVoiceAuthorizationConsent() });
   },
 
   async loadHome() {
-    this.setData({ loading: true, error: "" });
+    setHomeData(this, { loading: true, error: "" });
     try {
       const identity = await getMemoirIdentity();
       const hasProject = Boolean(identity.active_project_id && identity.active_project);
@@ -240,7 +353,7 @@ Page<HomeData, {
         projectId: identity.active_project_id,
         hasProject,
       });
-      this.setData({
+      setHomeData(this, {
         needsLogin: false,
         userId: identity.id,
         displayName: userDisplayName(identity.display_name, identity.email),
@@ -258,7 +371,7 @@ Page<HomeData, {
       });
     } catch (error) {
       if (isAuthError(error)) {
-        this.setData({
+        setHomeData(this, {
           needsLogin: true,
           userId: "",
           displayName: "作者",
@@ -276,16 +389,16 @@ Page<HomeData, {
         });
         return;
       }
-      this.setData({ error: error instanceof Error ? error.message : "首页加载失败" });
+      setHomeData(this, { error: error instanceof Error ? error.message : "首页加载失败" });
     } finally {
-      this.setData({ loading: false });
+      setHomeData(this, { loading: false });
     }
   },
 
   changeVoiceAuthorization(event) {
     const agreed = event.detail.value.includes(VOICE_AUTHORIZATION_VALUE);
     const consent = saveVoiceAuthorizationConsent(agreed);
-    this.setData({
+    setHomeData(this, {
       voiceAuthorizationAgreed: consent.agreed,
       error: agreed ? "" : this.data.error,
     });
@@ -300,14 +413,14 @@ Page<HomeData, {
 
   dismissLaunchPanel() {
     dismissHomeLaunch(this.data.userId, this.data.launchVariant, this.data.projectId);
-    this.setData({
+    setHomeData(this, {
       launchVariant: "none",
       ...launchCopy("none", this.data.projectDisplayTitle),
     });
   },
 
   dismissReturnPrompt() {
-    this.setData({ launchVariant: "none", showReturnPrompt: false });
+    setHomeData(this, { launchVariant: "none", showReturnPrompt: false });
   },
 
   createProject() {
@@ -347,11 +460,11 @@ Page<HomeData, {
       return;
     }
     if (!this.data.voiceAuthorizationAgreed) {
-      this.setData({ error: "请先阅读并同意《声纹授权协议》后再开始语音聊天" });
+      setHomeData(this, { error: "请先阅读并同意《声纹授权协议》后再开始语音聊天" });
       wx.showToast({ title: "请先同意声纹授权协议", icon: "none" });
       return;
     }
-    this.setData({ creatingVoice: true, error: "" });
+    setHomeData(this, { creatingVoice: true, error: "" });
     try {
       await syncVoiceAuthorizationConsent();
       const detail = await createMemoirVoiceSession({
@@ -387,11 +500,11 @@ Page<HomeData, {
         switchToMe();
         return;
       }
-      this.setData({
+      setHomeData(this, {
         error: error instanceof Error ? error.message : "语音访谈创建失败",
       });
     } finally {
-      this.setData({ creatingVoice: false });
+      setHomeData(this, { creatingVoice: false });
     }
   },
 });

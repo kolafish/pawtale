@@ -505,7 +505,7 @@
   border: 0;
 }
 
-.search-hit {
+.search-hit-true {
   background: #ffe7a3;
   color: #2b1713;
   font-weight: 800;
