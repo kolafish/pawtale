@@ -141,6 +141,8 @@ test("home polish keeps surfaces tactile without broad transitions", () => {
   const wxss = fs.readFileSync(path.join(__dirname, "../pages/home/index.wxss"), "utf8");
 
   assert.equal(wxss.includes("transition: all"), false);
+  assert.equal(wxss.includes("text-wrap:"), false);
+  assert.equal(wxss.includes("font-smoothing"), false);
   assert.match(wxss, /\.home-card,[\s\S]*box-shadow:\s*\n\s*0 0 0 1rpx/);
   assert.match(wxss, /\.voice-start-button-hover[\s\S]*transform: scale\(0\.96\)/);
   assert.match(wxss, /\.resume-ask-button-hover[\s\S]*transform: scale\(0\.96\)/);
