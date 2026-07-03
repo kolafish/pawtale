@@ -990,6 +990,8 @@ test("book page defaults to progress cards with single chapter editing", () => {
   assert.match(wxml, /正在准备朗读/);
   assert.match(wxml, /正在朗读本章/);
   assert.match(wxml, /item\.draftError/);
+  assert.match(wxml, /disabled="{{updatingPlanStructure \|\| ttsBusyTarget === item\.ttsTarget}}"/);
+  assert.doesNotMatch(wxml, /disabled="{{updatingPlanStructure \|\| ttsBusyTarget}}"/);
   assert.doesNotMatch(wxml, />\s*原始讲述\s*<\/button>/);
   assert.doesNotMatch(wxml, /bindtap="playChapterAudio"/);
   assert.doesNotMatch(wxml, /bindinput="changeDraftContent"/);
@@ -997,6 +999,8 @@ test("book page defaults to progress cards with single chapter editing", () => {
   assert.doesNotMatch(wxml, /chapter-action-groups/);
   assert.match(wxss, /\.chapter-card\.summary/);
   assert.match(wxss, /\.chapter-summary-actions/);
+  assert.match(wxss, /grid-template-columns:\s*minmax\(0,\s*1fr\)\s+176rpx/);
+  assert.doesNotMatch(wxss, /minmax\(128rpx,\s*0\.42fr\)/);
   assert.match(wxss, /\.chapter-summary-error/);
   assert.match(wxss, /\.chapter-audio-status/);
 });
@@ -1036,7 +1040,10 @@ test("book page opens secondary chapter actions from the more sheet", () => {
     },
     showActionSheet(options) {
       actionSheets.push(options.itemList);
-      options.success({ tapIndex: actionSheets.length === 1 ? 0 : 1 });
+      const tapIndex = actionSheets.length === 1 ? 0 : 1;
+      if (tapIndex < options.itemList.length) {
+        options.success({ tapIndex });
+      }
     },
     showToast() {},
   };
@@ -1051,10 +1058,13 @@ test("book page opens secondary chapter actions from the more sheet", () => {
 
   page.openChapterMoreActions.call(context, { currentTarget: { dataset: { id: "chapter-1" } } });
   page.openChapterMoreActions.call(context, { currentTarget: { dataset: { id: "chapter-1" } } });
+  context.data.ttsBusyTarget = "chapter:chapter-2";
+  page.openChapterMoreActions.call(context, { currentTarget: { dataset: { id: "chapter-1" } } });
 
   assert.deepEqual(actionSheets, [
     ["看素材", "朗读"],
     ["看素材", "朗读"],
+    ["看素材"],
   ]);
   assert.deepEqual(navigations, [
     "/pages/book-chapter/index?projectId=project%2F1&chapterId=chapter-1&tab=sources",
@@ -4076,11 +4086,13 @@ test("book APIs call encoded backend routes", async () => {
     "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-plan/chapters/chapter%2F1/draft/tts",
   );
   assert.equal(apiRequests[11].method, "POST");
+  assert.equal(apiRequests[11].timeout, 180000);
   assert.equal(
     apiRequests[12].url,
     "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-plan/outline/tts",
   );
   assert.equal(apiRequests[12].method, "POST");
+  assert.equal(apiRequests[12].timeout, 180000);
   assert.equal(
     apiRequests[13].url,
     "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-voice-command/parse",
@@ -4131,6 +4143,7 @@ test("book APIs call encoded backend routes", async () => {
     "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-output/tts",
   );
   assert.equal(apiRequests[19].method, "POST");
+  assert.equal(apiRequests[19].timeout, 180000);
   assert.equal(apiRequests[19].header.Cookie, "pawtale_session=abc");
   assert.equal(
     apiRequests[20].url,

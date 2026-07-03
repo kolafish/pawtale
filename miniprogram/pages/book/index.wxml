@@ -525,7 +525,7 @@
             data-id="{{item.id}}"
             loading="{{ttsBusyTarget === item.ttsTarget}}"
             bindtap="openChapterMoreActions"
-            disabled="{{updatingPlanStructure || ttsBusyTarget}}"
+            disabled="{{updatingPlanStructure || ttsBusyTarget === item.ttsTarget}}"
           >
             {{ttsBusyTarget === item.ttsTarget ? "准备朗读" : (playingTarget === item.ttsTarget ? "朗读中" : "更多")}}
           </button>

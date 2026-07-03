@@ -38,6 +38,7 @@ import {
 import { ApiError, cleanBaseUrl, readBackendConfig, readSessionCookie } from "./request";
 
 const BOOK_OUTPUT_GENERATE_TIMEOUT_MS = 60000;
+const BOOK_TTS_TIMEOUT_MS = 180000;
 
 function bookPlanPath(projectId: string, suffix = ""): string {
   return memoirProjectPath(projectId, `/book-plan${suffix}`);
@@ -248,6 +249,7 @@ export function createMemoirBookChapterDraftTTS(
     {
       method: "POST",
       data,
+      timeoutMs: BOOK_TTS_TIMEOUT_MS,
     },
   );
 }
@@ -261,6 +263,7 @@ export function createMemoirBookPlanOutlineTTS(
     {
       method: "POST",
       data,
+      timeoutMs: BOOK_TTS_TIMEOUT_MS,
     },
   );
 }
@@ -466,6 +469,7 @@ export function createMemoirBookOutputTTS(
     {
       method: "POST",
       data,
+      timeoutMs: BOOK_TTS_TIMEOUT_MS,
     },
   );
 }
