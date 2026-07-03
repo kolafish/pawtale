@@ -17,7 +17,7 @@
       class="voice-start-button {{(loading || creatingVoice) ? 'button-blocked' : ''}}"
       loading="{{creatingVoice}}"
       bindtap="startLaunchVoiceChat"
-      hover-class="voice-start-button-hover"
+      hover-class="{{(loading || creatingVoice) ? 'none' : 'voice-start-button-hover'}}"
     >
       <image class="voice-start-icon" src="/assets/memoir-microphone.png" mode="aspectFit" />
       <text class="voice-start-title">{{creatingVoice ? "正在准备" : launchPrimaryText}}</text>
@@ -33,7 +33,7 @@
         <text class="return-prompt-title">好久不见，今天接着讲一段？</text>
         <text class="return-prompt-text">可以从上次停下的地方继续，也可以随便说点别的。</text>
       </view>
-      <text class="return-prompt-close" bindtap="dismissReturnPrompt">×</text>
+      <view class="return-prompt-close" bindtap="dismissReturnPrompt" hover-class="return-prompt-close-hover">×</view>
     </view>
 
     <view class="project-row">
@@ -52,7 +52,7 @@
       class="voice-start-button {{(loading || creatingVoice) ? 'button-blocked' : ''}}"
       loading="{{creatingVoice}}"
       bindtap="startPrimaryVoiceChat"
-      hover-class="voice-start-button-hover"
+      hover-class="{{(loading || creatingVoice) ? 'none' : 'voice-start-button-hover'}}"
     >
       <image class="voice-start-icon" src="/assets/memoir-microphone.png" mode="aspectFit" />
       <text class="voice-start-title">
@@ -67,7 +67,7 @@
       <button
         class="resume-ask-button {{(loading || creatingVoice) ? 'button-blocked' : ''}}"
         bindtap="startGuidedInterview"
-        hover-class="resume-ask-button-hover"
+        hover-class="{{(loading || creatingVoice) ? 'none' : 'resume-ask-button-hover'}}"
       >
         让小余问一句
       </button>

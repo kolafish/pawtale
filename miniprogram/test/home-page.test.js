@@ -136,6 +136,21 @@ test("home uses one warm memoir card with a clear voice start button", () => {
   assert.match(wxss, /\.voice-start-title[\s\S]*#ffffff/);
 });
 
+test("home polish keeps surfaces tactile without broad transitions", () => {
+  const wxml = fs.readFileSync(path.join(__dirname, "../pages/home/index.wxml"), "utf8");
+  const wxss = fs.readFileSync(path.join(__dirname, "../pages/home/index.wxss"), "utf8");
+
+  assert.equal(wxss.includes("transition: all"), false);
+  assert.match(wxss, /\.home-card,[\s\S]*box-shadow:\s*\n\s*0 0 0 1rpx/);
+  assert.match(wxss, /\.voice-start-button-hover[\s\S]*transform: scale\(0\.96\)/);
+  assert.match(wxss, /\.resume-ask-button-hover[\s\S]*transform: scale\(0\.96\)/);
+  assert.match(wxss, /\.launch-secondary-button-hover[\s\S]*transform: scale\(0\.96\)/);
+  assert.match(wxss, /\.return-prompt-close[\s\S]*width: 80rpx/);
+  assert.match(wxml, /hover-class="{{\(loading \|\| creatingVoice\) \? 'none' : 'voice-start-button-hover'}}"/);
+  assert.match(wxml, /hover-class="{{\(loading \|\| creatingVoice\) \? 'none' : 'resume-ask-button-hover'}}"/);
+  assert.match(wxml, /<view class="return-prompt-close"[^>]*hover-class="return-prompt-close-hover"/);
+});
+
 test("home presents internal project titles as natural story copy", () => {
   assert.equal(memoirStoryTitle("爷爷主题"), "爷爷的故事");
   assert.equal(memoirStoryTitle("外婆回忆录"), "外婆回忆录");
