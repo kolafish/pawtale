@@ -283,6 +283,88 @@ test("voice chat does not connect a stopped voice session", async () => {
   assert.equal(context.data.persistenceStateText, "已保存");
 });
 
+test("voice chat starts the opening assistant turn after a normal session load", async () => {
+  let connectCalls = 0;
+  const followUpCalls = [];
+  const page = loadVoiceChatPage({
+    voiceAuthorizationExports: {
+      readVoiceAuthorizationConsent: () => true,
+    },
+  });
+  const context = {
+    ...page,
+    data: { ...page.data },
+    setData(patch) {
+      this.data = { ...this.data, ...patch };
+    },
+    async connectGateway() {
+      connectCalls += 1;
+      this.data = { ...this.data, status: "ready" };
+    },
+    generateFollowUp(regenerate) {
+      followUpCalls.push(regenerate);
+      this.data = { ...this.data, followUpLoading: true };
+      return Promise.resolve();
+    },
+  };
+
+  await page.onLoad.call(context, {
+    voiceSessionId: "voice-1",
+    mode: "free_narration",
+  });
+
+  assert.deepEqual(followUpCalls, [false]);
+  assert.equal(connectCalls, 1);
+  assert.equal(context.data.status, "ready");
+});
+
+test("voice chat shows an error instead of continuing when session load fails", async () => {
+  let connectCalls = 0;
+  let followUpCalls = 0;
+  const originalWarn = console.warn;
+  console.warn = () => {};
+  try {
+    const page = loadVoiceChatPage({
+      voiceApiExports: {
+        getMemoirVoiceSession: async () => {
+          throw new Error("语音记录不存在");
+        },
+      },
+      voiceAuthorizationExports: {
+        readVoiceAuthorizationConsent: () => true,
+      },
+    });
+    const context = {
+      ...page,
+      data: { ...page.data },
+      setData(patch) {
+        this.data = { ...this.data, ...patch };
+      },
+      async connectGateway() {
+        connectCalls += 1;
+      },
+      generateFollowUp() {
+        followUpCalls += 1;
+        return Promise.resolve();
+      },
+    };
+
+    await page.onLoad.call(context, {
+      voiceSessionId: "missing-voice",
+      mode: "free_narration",
+    });
+
+    assert.equal(connectCalls, 0);
+    assert.equal(followUpCalls, 0);
+    assert.equal(context.data.status, "error");
+    assert.equal(context.data.persistenceStateText, "会话加载失败");
+    assert.equal(context.data.primaryActionText, "重新进入");
+    assert.equal(context.data.error, "语音记录不存在");
+  } finally {
+    console.warn = originalWarn;
+  }
+});
+
 test("voice chat does not show microphone connecting while session refresh is pending", async () => {
   let resolveDetail;
   const detailPromise = new Promise((resolve) => {

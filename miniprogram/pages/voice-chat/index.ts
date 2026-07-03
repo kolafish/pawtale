@@ -66,6 +66,7 @@ import {
   type AutoListenGateSnapshot,
   type VoiceChatData,
   initialVoiceChatData,
+  voiceChatViewPatch,
   voiceAuthorizationChangePatch,
   voiceAuthorizationConsentPatch,
   voiceAuthorizationRequiredPatch,
@@ -124,6 +125,19 @@ const AUTO_LISTEN_NO_ANSWER_MS = 15000;
 const MAX_CONSECUTIVE_NO_ANSWER_PROMPTS = 2;
 const STREAMING_TTS_PROGRESS_HOLD_SECONDS = 0.2;
 const GUIDANCE_MODE_VALUES: readonly MemoirGuidanceMode[] = ["free_narration", "guided_interview"];
+
+interface VoiceChatDataContext {
+  data: VoiceChatData;
+  setData(patch: Partial<VoiceChatData>): void;
+}
+
+function setVoiceChatData(context: VoiceChatDataContext, patch: Partial<VoiceChatData>): void {
+  const nextData: VoiceChatData = { ...context.data, ...patch };
+  context.setData({
+    ...patch,
+    ...voiceChatViewPatch(nextData),
+  });
+}
 
 Page<VoiceChatData, {
   onLoad(query?: PageQuery): Promise<void>;
@@ -284,7 +298,7 @@ Page<VoiceChatData, {
     const currentGuidanceModule = queryParam(query, "module");
     const projectTitle = queryParam(query, "projectTitle");
     const voiceAuthorizationAgreed = readVoiceAuthorizationConsent();
-    this.setData(voiceChatSessionEntryPatch({
+    setVoiceChatData(this, voiceChatSessionEntryPatch({
       voiceSessionId,
       projectTitle,
       guidanceMode,
@@ -292,7 +306,7 @@ Page<VoiceChatData, {
       voiceAuthorizationAgreed,
     }));
     if (!voiceSessionId) {
-      this.setData({ error: "缺少本次语音记录" });
+      setVoiceChatData(this, { error: "缺少本次语音记录" });
       return;
     }
     this.hydrateVoiceSessionSnapshot();
@@ -305,7 +319,7 @@ Page<VoiceChatData, {
       await this.syncVoiceAuthorizationAndConnect();
     }
     if (!this.data.voiceAuthorizationAgreed) {
-      this.setData(voiceAuthorizationWaitingPatch());
+      setVoiceChatData(this, voiceAuthorizationWaitingPatch());
     }
   },
 
@@ -318,7 +332,7 @@ Page<VoiceChatData, {
     if (this.data.recording && this.voiceStreaming.hasClient()) {
       this.voiceStreaming.stopRecording();
       this.persistPendingVoiceClose("hide");
-      this.setData({
+      setVoiceChatData(this, {
         recording: false,
         primaryActionText: "继续说话",
         persistenceStateText: "正在保存当前句",
@@ -340,7 +354,7 @@ Page<VoiceChatData, {
 
   refreshVoiceAuthorizationConsent() {
     const voiceAuthorizationAgreed = readVoiceAuthorizationConsent();
-    this.setData(voiceAuthorizationConsentPatch(this.data, voiceAuthorizationAgreed));
+    setVoiceChatData(this, voiceAuthorizationConsentPatch(this.data, voiceAuthorizationAgreed));
     if (
       voiceAuthorizationAgreed
       && this.data.voiceSessionId
@@ -359,7 +373,7 @@ Page<VoiceChatData, {
     if (!agreed && this.voiceStreaming.hasClient() && this.data.recording) {
       this.voiceStreaming.stopRecording();
     }
-    this.setData(voiceAuthorizationChangePatch(this.data, consent.agreed));
+    setVoiceChatData(this, voiceAuthorizationChangePatch(this.data, consent.agreed));
     if (agreed && this.data.voiceSessionId && !this.voiceStreaming.hasClient() && !this.data.connecting) {
       await this.syncVoiceAuthorizationAndConnect();
     } else {
@@ -380,11 +394,11 @@ Page<VoiceChatData, {
     const latestConsent = readVoiceAuthorizationConsent();
     if (latestConsent) {
       if (!this.data.voiceAuthorizationAgreed) {
-        this.setData({ voiceAuthorizationAgreed: true, error: "" });
+        setVoiceChatData(this, { voiceAuthorizationAgreed: true, error: "" });
       }
       return true;
     }
-    this.setData(voiceAuthorizationRequiredPatch(autoTriggered));
+    setVoiceChatData(this, voiceAuthorizationRequiredPatch(autoTriggered));
     wx.showToast({ title: "请先同意声纹授权协议", icon: "none" });
     return false;
   },
@@ -401,7 +415,7 @@ Page<VoiceChatData, {
       return true;
     } catch (error) {
       const message = error instanceof Error ? error.message : "声纹授权同步失败";
-      this.setData(voiceAuthorizationSyncFailedPatch(message));
+      setVoiceChatData(this, voiceAuthorizationSyncFailedPatch(message));
       if (typeof wx !== "undefined" && typeof wx.showToast === "function") {
         wx.showToast({ title: "声纹授权同步失败", icon: "none" });
       }
@@ -413,7 +427,7 @@ Page<VoiceChatData, {
     const synced = await this.syncVoiceAuthorizationForSession();
     if (!synced) {
       if (autoTriggered) {
-        this.setData({ autoListenStateText: "自动收音已暂停，等待声纹授权同步" });
+        setVoiceChatData(this, { autoListenStateText: "自动收音已暂停，等待声纹授权同步" });
       }
       return;
     }
@@ -425,7 +439,7 @@ Page<VoiceChatData, {
     if (!snapshot.hasSession) {
       return;
     }
-    this.setData(voiceSessionSnapshotPatch(snapshot, this.data));
+    setVoiceChatData(this, voiceSessionSnapshotPatch(snapshot, this.data));
   },
 
   async refreshVoiceSessionSnapshot() {
@@ -443,6 +457,19 @@ Page<VoiceChatData, {
       return detail;
     } catch (error) {
       console.warn("refresh voice session snapshot failed", error);
+      const message = error instanceof Error ? error.message : "语音会话加载失败";
+      setVoiceChatData(this, {
+        status: "error",
+        statusText: statusText("error"),
+        recording: false,
+        connecting: false,
+        error: message,
+        persistenceStateText: "会话加载失败",
+        primaryActionText: "重新进入",
+        recoveryNotice: "",
+        canReconnect: false,
+        canFinishAfterDisconnect: false,
+      });
       return null;
     }
   },
@@ -470,14 +497,14 @@ Page<VoiceChatData, {
     const pendingLiveTextSaved = !pendingLiveText || savedTexts.some((text) => text.includes(pendingLiveText));
     if (pendingLinesSaved && pendingLiveTextSaved) {
       clearMemoirVoiceSessionPendingClose(this.data.voiceSessionId);
-      this.setData({
+      setVoiceChatData(this, {
         recoveryNotice: "",
         canReconnect: false,
         canFinishAfterDisconnect: false,
       });
       return;
     }
-    this.setData({
+    setVoiceChatData(this, {
       recoveryNotice: "上次离开时最后一句可能未保存，请检查讲述记录",
       persistenceStateText: "已恢复已保存记录",
       canReconnect: true,
@@ -495,17 +522,17 @@ Page<VoiceChatData, {
       this.applyVoiceSessionDetail(detail);
       const persisted = detail.messages.some((message) => message.id === event.message_id)
         && detail.utterances.some((utterance) => utterance.id === event.utterance_id);
-      this.setData({
+      setVoiceChatData(this, {
         persistenceStateText: persisted ? "已保存" : "已识别，记录同步中",
       });
     } catch (error) {
       console.warn("confirm saved voice transcript failed", error);
-      this.setData({ persistenceStateText: "已保存，本地已缓存" });
+      setVoiceChatData(this, { persistenceStateText: "已保存，本地已缓存" });
     }
   },
 
   applyVoiceSessionDetail(detail) {
-    this.setData(voiceSessionDetailPatch(detail, this.data));
+    setVoiceChatData(this, voiceSessionDetailPatch(detail, this.data));
   },
 
   persistCurrentTranscriptSnapshot() {
@@ -534,7 +561,7 @@ Page<VoiceChatData, {
   },
 
   async reconnectGateway() {
-    this.setData({
+    setVoiceChatData(this, {
       recoveryNotice: "",
       canReconnect: false,
       canFinishAfterDisconnect: false,
@@ -547,7 +574,7 @@ Page<VoiceChatData, {
   async finishAfterDisconnect() {
     this.voiceStreaming.close({ force: true });
     await this.refreshVoiceSessionSnapshot();
-    this.setData({
+    setVoiceChatData(this, {
       recording: false,
       status: "closed",
       statusText: statusText("closed"),
@@ -583,7 +610,7 @@ Page<VoiceChatData, {
     this.assistantStreamingAudioStartSeconds = -1;
     this.assistantStreamingAudioEndSeconds = 0;
     this.assistantStreamingAudioDurationSeconds = 0;
-    this.setData({
+    setVoiceChatData(this, {
       followUpLoading: true,
       followUpError: "",
       followUpTTSLoading: true,
@@ -606,7 +633,7 @@ Page<VoiceChatData, {
       this.clearFailedStreamingAssistantTurn(error instanceof Error ? error.message : "小余回应生成失败");
     } finally {
       if (requestSerial === followUpRequestSerial) {
-        this.setData({
+        setVoiceChatData(this, {
           followUpLoading: false,
           followUpTTSLoading: false,
           canRequestFollowUp: canRequestFollowUp(
@@ -626,7 +653,7 @@ Page<VoiceChatData, {
         if (requestSerial !== followUpRequestSerial) {
           return;
         }
-        this.setData({
+        setVoiceChatData(this, {
           followUpTTSStateText: "小余正在说",
           persistenceStateText: "小余正在回应",
         });
@@ -656,7 +683,7 @@ Page<VoiceChatData, {
             this.assistantStreamingAudioDurationSeconds = durationSeconds;
           }
           this.stopFollowUpProgressTimer();
-          this.setData({
+          setVoiceChatData(this, {
             followUpTTSStateText: "正在整理回应",
           });
         }
@@ -684,7 +711,7 @@ Page<VoiceChatData, {
     }
     this.stopAssistantBargeInMonitor();
     this.stopFollowUpProgressTimer();
-    this.setData({
+    setVoiceChatData(this, {
       dismissedFollowUpMessageId: "",
       followUpLoading: false,
       followUpTTSLoading: false,
@@ -736,7 +763,7 @@ Page<VoiceChatData, {
     this.assistantStreamingAudioStartSeconds = -1;
     this.assistantStreamingAudioEndSeconds = 0;
     this.assistantStreamingAudioDurationSeconds = 0;
-    this.setData({
+    setVoiceChatData(this, {
       ...assistantTranscriptState(transcriptLines, {
         guidanceMode: this.data.guidanceMode,
         lastFollowUpSourceMessageId: this.data.lastFollowUpSourceMessageId,
@@ -777,7 +804,7 @@ Page<VoiceChatData, {
       },
     };
     const transcriptLines = upsertTranscriptLine(this.data.transcriptLines, line);
-    this.setData({
+    setVoiceChatData(this, {
       ...assistantTranscriptState(transcriptLines, {
         guidanceMode: this.data.guidanceMode,
         lastFollowUpSourceMessageId: this.data.lastFollowUpSourceMessageId,
@@ -820,7 +847,7 @@ Page<VoiceChatData, {
       && line.message_id !== event.message_id
     ));
     const transcriptLines = upsertTranscriptLine(withoutTemporaryLine, finalLine);
-    this.setData({
+    setVoiceChatData(this, {
       ...assistantTranscriptState(transcriptLines, {
         guidanceMode: this.data.guidanceMode,
         lastFollowUpSourceMessageId: sourceMessageId,
@@ -849,7 +876,7 @@ Page<VoiceChatData, {
     }
     const fullText = this.data.assistantPromptText;
     const firstStreamingFrame = this.assistantStreamingAudioStartSeconds < 0;
-    this.setData({
+    setVoiceChatData(this, {
       followUpTTSLoading: false,
       followUpTTSPlaying: true,
       followUpTTSError: "",
@@ -870,7 +897,7 @@ Page<VoiceChatData, {
     }
     this.stopAssistantBargeInMonitor();
     this.stopFollowUpProgressTimer();
-    this.setData({
+    setVoiceChatData(this, {
       followUpTTSError: error.message,
       followUpTTSStateText: "播放失败",
     });
@@ -883,7 +910,7 @@ Page<VoiceChatData, {
   skipFollowUp() {
     const dismissedFollowUpMessageId = latestAssistantMessageId(this.data.transcriptLines);
     this.cancelFollowUpTTS();
-    this.setData({
+    setVoiceChatData(this, {
       assistantPromptText: "",
       followUpError: "",
       dismissedFollowUpMessageId,
@@ -917,7 +944,7 @@ Page<VoiceChatData, {
     if (this.data.followUpTTSLoading || this.data.followUpTTSPlaying) {
       this.cancelFollowUpTTS("opening_topic_selected");
     }
-    this.setData({
+    setVoiceChatData(this, {
       selectedOpeningTopicText: promptText,
       assistantPromptText: promptText,
       followUpError: "",
@@ -937,7 +964,7 @@ Page<VoiceChatData, {
     }
     if (this.data.recording && this.voiceStreaming.hasClient()) {
       this.voiceStreaming.stopRecording();
-      this.setData({
+      setVoiceChatData(this, {
         recording: false,
         primaryActionText: "继续说话",
         persistenceStateText: "已暂停收音",
@@ -952,7 +979,7 @@ Page<VoiceChatData, {
       return;
     }
     const transcriptLines = upsertTranscriptLine(this.data.transcriptLines, item.line);
-    this.setData({
+    setVoiceChatData(this, {
       transcriptLines,
     });
     writeMemoirVoiceSessionSnapshot(this.data.voiceSessionId, { transcriptLines });
@@ -987,7 +1014,7 @@ Page<VoiceChatData, {
           if (error instanceof Error && error.message === "__assistant_audio_cancelled__") {
             continue;
           }
-          this.setData({
+          setVoiceChatData(this, {
             followUpTTSError: error instanceof Error ? error.message : "小余语音生成失败",
             followUpTTSStateText: "语音暂不可用",
           });
@@ -1004,7 +1031,7 @@ Page<VoiceChatData, {
     }
     const requestSerial = this.ttsRequestSerial;
     this.assistantAudioPrepareCount += 1;
-    this.setData({
+    setVoiceChatData(this, {
       followUpTTSLoading: true,
       followUpTTSError: "",
       followUpTTSStateText: "正在合成语音",
@@ -1020,7 +1047,7 @@ Page<VoiceChatData, {
         throw new Error("__assistant_audio_cancelled__");
       }
       const { lines, prepared } = applyAssistantTTSResponse(this.data.transcriptLines, response);
-      this.setData({
+      setVoiceChatData(this, {
         transcriptLines: lines,
         followUpTTSError: "",
         followUpTTSStateText: this.data.followUpTTSPlaying ? "下一句语音已准备" : "语音已生成",
@@ -1032,14 +1059,14 @@ Page<VoiceChatData, {
     } finally {
       this.assistantAudioPrepareCount = Math.max(0, this.assistantAudioPrepareCount - 1);
       if (this.assistantAudioPrepareCount === 0) {
-        this.setData({ followUpTTSLoading: false });
+        setVoiceChatData(this, { followUpTTSLoading: false });
       }
     }
   },
 
   showAssistantTurn(item, patch = {}) {
     const transcriptLines = upsertTranscriptLine(this.data.transcriptLines, item.line);
-    this.setData({
+    setVoiceChatData(this, {
       ...assistantTranscriptState(transcriptLines, {
         guidanceMode: this.data.guidanceMode,
         lastFollowUpSourceMessageId: this.data.lastFollowUpSourceMessageId,
@@ -1119,7 +1146,7 @@ Page<VoiceChatData, {
     this.stopFollowUpAudio();
     const playToken = this.audioPlayback.nextToken();
     this.ttsPlayToken = playToken;
-    this.setData({
+    setVoiceChatData(this, {
       assistantPromptText: options.text || this.data.assistantPromptText,
       ttsAlignment: options.alignment || this.data.ttsAlignment,
       followUpTTSPlaying: true,
@@ -1162,7 +1189,7 @@ Page<VoiceChatData, {
               this.autoListenPendingAfterPlayback = true;
             }
             this.stopFollowUpProgressTimer();
-            this.setData({
+            setVoiceChatData(this, {
               followUpTTSPlaying: false,
               followUpTTSStateText: options.autoListenAfterPlayback ? "播放完成，正在听你说" : "播放完成",
               ttsSpokenText: this.data.assistantPromptText,
@@ -1179,7 +1206,7 @@ Page<VoiceChatData, {
           if (playToken === this.ttsPlayToken) {
             this.stopAssistantBargeInMonitor();
             this.stopFollowUpProgressTimer();
-            this.setData({
+            setVoiceChatData(this, {
               followUpTTSPlaying: false,
               followUpTTSError: "小余语音播放失败",
               followUpTTSStateText: "播放失败",
@@ -1191,7 +1218,7 @@ Page<VoiceChatData, {
     } catch (error) {
       if (playToken === this.ttsPlayToken) {
         this.stopAssistantBargeInMonitor();
-        this.setData({
+        setVoiceChatData(this, {
           followUpTTSPlaying: false,
           followUpTTSError: error instanceof Error ? error.message : "小余语音播放失败",
           followUpTTSStateText: "播放失败",
@@ -1208,7 +1235,7 @@ Page<VoiceChatData, {
     this.autoListenPendingAfterPlayback = false;
     this.stopFollowUpProgressTimer();
     if (this.data.followUpTTSPlaying) {
-      this.setData({ followUpTTSPlaying: false });
+      setVoiceChatData(this, { followUpTTSPlaying: false });
     }
     this.resetFollowUpTTSProgress();
   },
@@ -1229,7 +1256,7 @@ Page<VoiceChatData, {
     this.assistantAudioPrepareCount = 0;
     this.stopFollowUpAudio();
     if (partialAssistantLineId) {
-      this.setData({
+      setVoiceChatData(this, {
         ...assistantTranscriptState(transcriptLines, {
           guidanceMode: this.data.guidanceMode,
           lastFollowUpSourceMessageId: this.data.lastFollowUpSourceMessageId,
@@ -1250,7 +1277,7 @@ Page<VoiceChatData, {
       });
     }
     if (this.data.followUpTTSLoading || this.data.followUpTTSPlaying) {
-      this.setData({
+      setVoiceChatData(this, {
         followUpTTSLoading: false,
         followUpTTSPlaying: false,
         followUpTTSStateText: this.data.followUpTTSStateText ? "语音已停止" : "",
@@ -1283,12 +1310,12 @@ Page<VoiceChatData, {
           && !this.data.recording
           && this.assistantTurnActiveForBargeIn()
         ) {
-          this.setData({ autoListenStateText: "可以点按钮回答" });
+          setVoiceChatData(this, { autoListenStateText: "可以点按钮回答" });
         }
       },
     });
     if (started) {
-      this.setData({ autoListenStateText: "想说时可以直接开口" });
+      setVoiceChatData(this, { autoListenStateText: "想说时可以直接开口" });
     }
   },
 
@@ -1305,7 +1332,7 @@ Page<VoiceChatData, {
       await this.stopAssistantBargeInMonitor();
       return;
     }
-    this.setData({
+    setVoiceChatData(this, {
       autoListenStateText: "听到您说话了",
     });
     if (!this.ensureVoiceAuthorization(false)) {
@@ -1344,7 +1371,7 @@ Page<VoiceChatData, {
     const progress = splitTextByAudioPlaybackProgress(text, currentTime, duration, {
       alignment: [],
     });
-    this.setData({
+    setVoiceChatData(this, {
       ttsSpokenText: progress.spokenText,
       ttsCurrentText: progress.currentText,
       ttsRemainingText: progress.remainingText,
@@ -1371,7 +1398,7 @@ Page<VoiceChatData, {
     const progress = splitTextByAudioPlaybackProgress(text, currentTime, effectiveDuration, {
       alignment: this.data.ttsAlignment,
     });
-    this.setData({
+    setVoiceChatData(this, {
       ttsSpokenText: progress.spokenText,
       ttsCurrentText: progress.currentText,
       ttsRemainingText: progress.remainingText,
@@ -1458,7 +1485,7 @@ Page<VoiceChatData, {
   },
 
   resetFollowUpTTSProgress() {
-    this.setData({
+    setVoiceChatData(this, {
       ttsSpokenText: "",
       ttsCurrentText: "",
       ttsRemainingText: "",
@@ -1469,7 +1496,7 @@ Page<VoiceChatData, {
   toggleAutoStop() {
     const autoStopEnabled = !this.data.autoStopEnabled;
     this.voiceStreaming.configureAutoStop(autoStopEnabled ? AUTO_STOP_SILENCE_MS : 0);
-    this.setData({
+    setVoiceChatData(this, {
       autoStopEnabled,
       autoStopStateText: autoStopEnabled ? "自动收尾开" : "自动收尾关",
     });
@@ -1479,7 +1506,7 @@ Page<VoiceChatData, {
     if (this.data.connecting || !this.data.voiceSessionId) {
       return;
     }
-    this.setData({ connecting: true, error: "" });
+    setVoiceChatData(this, { connecting: true, error: "" });
     let connected = false;
     try {
       await this.voiceStreaming.connect({
@@ -1514,7 +1541,7 @@ Page<VoiceChatData, {
       const message = error instanceof Error ? error.message : "语音连接失败";
       this.handleError(message, classifyVoiceClientConnectionError(message));
     } finally {
-      this.setData({ connecting: false });
+      setVoiceChatData(this, { connecting: false });
       if (connected) {
         await this.tryStartAutoListenAfterTTS();
       }
@@ -1527,7 +1554,7 @@ Page<VoiceChatData, {
     }
     if (voiceClientUnavailableForRecording(this.voiceStreaming.hasClient(), this.data.status)) {
       void this.syncVoiceAuthorizationAndConnect(autoTriggered);
-      this.setData(voiceRecordingReconnectPatch(autoTriggered, this.data.autoListenStateText));
+      setVoiceChatData(this, voiceRecordingReconnectPatch(autoTriggered, this.data.autoListenStateText));
       return false;
     }
     void this.startRecordingAfterPrivacy(autoTriggered);
@@ -1543,7 +1570,7 @@ Page<VoiceChatData, {
     if (interruptingAssistant) {
       followUpRequestSerial += 1;
       this.cancelFollowUpTTS("interrupted_by_user");
-      this.setData(voiceAssistantInterruptedPatch());
+      setVoiceChatData(this, voiceAssistantInterruptedPatch());
     }
     await this.stopAssistantBargeInMonitor();
     if (!(await this.syncVoiceAuthorizationForSession())) {
@@ -1554,26 +1581,26 @@ Page<VoiceChatData, {
     } catch (error) {
       const message = error instanceof Error ? error.message : "微信隐私授权失败";
       this.handleError(message, { kind: "recorder", code: "wechat_privacy_authorization_failed", message });
-      this.setData(voiceRecorderPrivacyDeniedPatch(autoTriggered, this.data.autoListenStateText));
+      setVoiceChatData(this, voiceRecorderPrivacyDeniedPatch(autoTriggered, this.data.autoListenStateText));
       return false;
     }
     if (voiceClientUnavailableForRecording(this.voiceStreaming.hasClient(), this.data.status)) {
       void this.syncVoiceAuthorizationAndConnect(autoTriggered);
-      this.setData(voiceRecordingReconnectPatch(autoTriggered, this.data.autoListenStateText));
+      setVoiceChatData(this, voiceRecordingReconnectPatch(autoTriggered, this.data.autoListenStateText));
       return false;
     }
     const started = this.voiceStreaming.startRecording({
       noVoiceActivityTimeoutMs: autoTriggered ? AUTO_LISTEN_NO_ANSWER_MS : 0,
     });
     if (!started) {
-      this.setData(voiceRecordingUnavailablePatch(autoTriggered, this.data.autoListenStateText));
+      setVoiceChatData(this, voiceRecordingUnavailablePatch(autoTriggered, this.data.autoListenStateText));
       return false;
     }
     if (!interruptingAssistant) {
       this.cancelFollowUpTTS();
     }
     this.handledNoAnswerFrameCount = -1;
-    this.setData(voiceRecordingStartedPatch(autoTriggered));
+    setVoiceChatData(this, voiceRecordingStartedPatch(autoTriggered));
     trackAuditAction(
       "voice_chat.recording_start",
       { auto_triggered: autoTriggered },
@@ -1592,7 +1619,7 @@ Page<VoiceChatData, {
     }
     if (this.data.recording) {
       this.voiceStreaming.stopRecording();
-      this.setData(voiceRecordingStoppedPatch());
+      setVoiceChatData(this, voiceRecordingStoppedPatch());
       return;
     }
     this.startRecording(false);
@@ -1618,7 +1645,7 @@ Page<VoiceChatData, {
     }
     this.noAnswerPromptInFlight = false;
     if (clearLoading) {
-      this.setData({ followUpLoading: false });
+      setVoiceChatData(this, { followUpLoading: false });
     }
   },
 
@@ -1634,19 +1661,19 @@ Page<VoiceChatData, {
       MAX_CONSECUTIVE_NO_ANSWER_PROMPTS,
     );
     this.consecutiveNoAnswerPrompts = attempt;
-    this.setData(noAnswerPromptStartPatch());
+    setVoiceChatData(this, noAnswerPromptStartPatch());
     try {
       const response = await createMemoirVoiceNoAnswerPrompt(this.data.voiceSessionId, { attempt });
       if (requestSerial !== this.noAnswerPromptRequestSerial) {
         return;
       }
       this.enqueueAssistantTurn(assistantTurnQueueItem(response, { autoListenAfterPlayback }));
-      this.setData(noAnswerPromptQueuedPatch(autoListenAfterPlayback));
+      setVoiceChatData(this, noAnswerPromptQueuedPatch(autoListenAfterPlayback));
     } catch (error) {
       if (requestSerial !== this.noAnswerPromptRequestSerial) {
         return;
       }
-      this.setData(noAnswerPromptFailedPatch(
+      setVoiceChatData(this, noAnswerPromptFailedPatch(
         canRequestFollowUp(
           this.data.transcriptLines,
           this.data.guidanceMode,
@@ -1658,7 +1685,7 @@ Page<VoiceChatData, {
     } finally {
       if (requestSerial === this.noAnswerPromptRequestSerial) {
         this.noAnswerPromptInFlight = false;
-        this.setData({ followUpLoading: false });
+        setVoiceChatData(this, { followUpLoading: false });
       }
     }
   },
@@ -1668,18 +1695,18 @@ Page<VoiceChatData, {
       return;
     }
     this.cancelFollowUpTTS();
-    this.setData(finishSessionStartPatch(this.data.recording));
+    setVoiceChatData(this, finishSessionStartPatch(this.data.recording));
     if (!this.voiceStreaming.hasClient()) {
       await this.refreshVoiceSessionSnapshot();
-      this.setData({ finishingSession: false });
+      setVoiceChatData(this, { finishingSession: false });
       return;
     }
     try {
       await this.voiceStreaming.finishSession();
       trackAuditAction("voice_chat.finish", {}, { voiceSessionId: this.data.voiceSessionId });
-      this.setData(finishSessionSavedPatch());
+      setVoiceChatData(this, finishSessionSavedPatch());
       await this.refreshVoiceSessionSnapshot();
-      this.setData({ persistenceStateText: "已保存" });
+      setVoiceChatData(this, { persistenceStateText: "已保存" });
       wx.showModal({
         title: "本次讲述已保存",
         content: "可以到讲述记录里查看和整理文字。",
@@ -1695,12 +1722,12 @@ Page<VoiceChatData, {
       await this.refreshVoiceSessionSnapshot();
       this.handleError(error instanceof Error ? error.message : "语音保存失败");
     } finally {
-      this.setData({ finishingSession: false });
+      setVoiceChatData(this, { finishingSession: false });
     }
   },
 
   handleStatus(status) {
-    this.setData(voiceConnectionStatusPatch(status, this.data));
+    setVoiceChatData(this, voiceConnectionStatusPatch(status, this.data));
   },
 
   handleCaptureStats(stats) {
@@ -1711,7 +1738,7 @@ Page<VoiceChatData, {
       autoStopEnabled: this.data.autoStopEnabled,
       noAnswerPromptAlreadyHandled,
     });
-    this.setData(patch);
+    setVoiceChatData(this, patch);
     if (shouldHandleNoAnswerAutoStop) {
       this.handledNoAnswerFrameCount = stats.frameCount;
       void this.handleNoAnswerAutoStop();
@@ -1721,13 +1748,13 @@ Page<VoiceChatData, {
   handleGatewayEvent(event) {
     const nextData = voiceGatewayEventPatch(event, this.data);
     if (Object.keys(nextData).length) {
-      this.setData(nextData);
+      setVoiceChatData(this, nextData);
     }
   },
 
   handlePartial(text) {
     const displayText = normalizeMemoirAsrText(text || "");
-    this.setData({
+    setVoiceChatData(this, {
       liveText: displayText,
       liveCharCount: countTextChars(displayText),
       persistenceStateText: "识别中",
@@ -1755,7 +1782,7 @@ Page<VoiceChatData, {
     const transcriptLines = upsertTranscriptLine(this.data.transcriptLines, line);
     this.consecutiveNoAnswerPrompts = 0;
     this.cancelPendingNoAnswerPrompt();
-    this.setData({
+    setVoiceChatData(this, {
       liveText: "",
       liveCharCount: 0,
       ...assistantTranscriptState(transcriptLines, {
@@ -1803,6 +1830,6 @@ Page<VoiceChatData, {
     if (error?.kind === "connection") {
       this.persistPendingVoiceClose("connection_error");
     }
-    this.setData(voiceChatErrorPatch(message, error, this.data));
+    setVoiceChatData(this, voiceChatErrorPatch(message, error, this.data));
   },
 });

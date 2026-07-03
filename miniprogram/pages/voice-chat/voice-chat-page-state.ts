@@ -30,6 +30,11 @@ export interface OpeningTopicOption {
   promptText: string;
 }
 
+export interface VoiceChatTranscriptLineView extends VoiceChatTranscriptLine {
+  lineClass: string;
+  roleText: string;
+}
+
 export interface VoiceChatData {
   voiceSessionId: string;
   projectTitle: string;
@@ -87,6 +92,37 @@ export interface VoiceChatData {
   recoveryNotice: string;
   canReconnect: boolean;
   canFinishAfterDisconnect: boolean;
+  finishButtonText: string;
+  topicTitleText: string;
+  showErrorKindStrip: boolean;
+  showRecoveryPanel: boolean;
+  showRecoveryActions: boolean;
+  showVoiceAuthorizationPanel: boolean;
+  showAssistantPanel: boolean;
+  assistantPanelClass: string;
+  assistantLabelText: string;
+  showAssistantOpening: boolean;
+  assistantQuestionText: string;
+  showSelectedOpeningTopic: boolean;
+  showAssistantTTS: boolean;
+  assistantDisplayText: string;
+  showTTSProgress: boolean;
+  replayButtonText: string;
+  followUpButtonText: string;
+  showSkipFollowUp: boolean;
+  stageStatusClass: string;
+  stageStatusText: string;
+  liveDisplayText: string;
+  captureStripClass: string;
+  showLiveCharCount: boolean;
+  showInlineHelp: boolean;
+  historyCountText: string;
+  showHistoryEmpty: boolean;
+  transcriptLineViews: VoiceChatTranscriptLineView[];
+  controlHintText: string;
+  micButtonClass: string;
+  micButtonDisabled: boolean;
+  micButtonText: string;
 }
 
 export interface AutoListenGateSnapshot {
@@ -164,6 +200,165 @@ export function initialVoiceChatData(): VoiceChatData {
     recoveryNotice: "",
     canReconnect: false,
     canFinishAfterDisconnect: false,
+    finishButtonText: "保存离开",
+    topicTitleText: "这段回忆",
+    showErrorKindStrip: false,
+    showRecoveryPanel: false,
+    showRecoveryActions: false,
+    showVoiceAuthorizationPanel: true,
+    showAssistantPanel: false,
+    assistantPanelClass: "assistant-panel",
+    assistantLabelText: "小余想听您讲讲",
+    showAssistantOpening: true,
+    assistantQuestionText: "今天想先讲哪一段？",
+    showSelectedOpeningTopic: false,
+    showAssistantTTS: false,
+    assistantDisplayText: "小余会先问一句，帮您开始讲。",
+    showTTSProgress: false,
+    replayButtonText: "读给我听",
+    followUpButtonText: "让小余问一句",
+    showSkipFollowUp: false,
+    stageStatusClass: "stage-status",
+    stageStatusText: "可以开始讲了",
+    liveDisplayText: "点下方“我来说一段”",
+    captureStripClass: "capture-strip",
+    showLiveCharCount: false,
+    showInlineHelp: false,
+    historyCountText: "0 段 · 0 字",
+    showHistoryEmpty: true,
+    transcriptLineViews: [],
+    controlHintText: "说一两句也可以，我会帮您记下来。",
+    micButtonClass: "mic-button",
+    micButtonDisabled: true,
+    micButtonText: "同意后开始说话",
+  };
+}
+
+export type VoiceChatPatch = Partial<VoiceChatData>;
+
+export type VoiceChatViewPatch = Pick<
+  VoiceChatData,
+  | "finishButtonText"
+  | "topicTitleText"
+  | "showErrorKindStrip"
+  | "showRecoveryPanel"
+  | "showRecoveryActions"
+  | "showVoiceAuthorizationPanel"
+  | "showAssistantPanel"
+  | "assistantPanelClass"
+  | "assistantLabelText"
+  | "showAssistantOpening"
+  | "assistantQuestionText"
+  | "showSelectedOpeningTopic"
+  | "showAssistantTTS"
+  | "assistantDisplayText"
+  | "showTTSProgress"
+  | "replayButtonText"
+  | "followUpButtonText"
+  | "showSkipFollowUp"
+  | "stageStatusClass"
+  | "stageStatusText"
+  | "liveDisplayText"
+  | "captureStripClass"
+  | "showLiveCharCount"
+  | "showInlineHelp"
+  | "historyCountText"
+  | "showHistoryEmpty"
+  | "transcriptLineViews"
+  | "controlHintText"
+  | "micButtonClass"
+  | "micButtonDisabled"
+  | "micButtonText"
+>;
+
+export function voiceChatViewPatch(state: VoiceChatData): VoiceChatViewPatch {
+  const assistantBusy = state.followUpLoading || state.followUpTTSLoading || state.followUpTTSPlaying;
+  const hasAssistantPrompt = Boolean(state.assistantPromptText);
+  const showAssistantPanel = !state.recording
+    && Boolean(hasAssistantPrompt || state.followUpLoading || state.followUpError || state.canRequestFollowUp);
+  let stageStatusText = "可以开始讲了";
+  if (state.error) {
+    stageStatusText = "需要处理一下";
+  } else if (state.recording) {
+    stageStatusText = "我在听，您慢慢说";
+  } else if (state.persistenceStateText === "已保存") {
+    stageStatusText = "这一段已经记下来了";
+  } else if (state.followUpTTSPlaying || (state.followUpTTSLoading && hasAssistantPrompt)) {
+    stageStatusText = "小余正在读问题";
+  } else if (state.followUpLoading) {
+    stageStatusText = state.latestTranscriptText ? "正在帮您整理成文字" : "小余正在准备问题";
+  }
+  let liveDisplayText = "点下方“我来说一段”";
+  if (state.recording) {
+    liveDisplayText = state.liveText || "直接说就行，我会帮您记下来";
+  } else {
+    liveDisplayText = state.liveText
+      || state.latestTranscriptText
+      || state.assistantPromptText
+      || (state.followUpLoading ? "小余正在准备第一句话" : "点下方“我来说一段”");
+  }
+  let controlHintText = "说一两句也可以，我会帮您记下来。";
+  if (state.recording) {
+    controlHintText = "说完请点这里";
+  } else if (state.followUpLoading && !hasAssistantPrompt) {
+    controlHintText = "小余先问一句，稍等一下。";
+  } else if (assistantBusy) {
+    controlHintText = "点这里就可以开始说";
+  }
+  let micButtonText = state.primaryActionText;
+  if (!state.voiceAuthorizationAgreed) {
+    micButtonText = "同意后开始说话";
+  } else if (state.connecting) {
+    micButtonText = "正在准备";
+  } else if (state.recording) {
+    micButtonText = "说完了，帮我整理";
+  } else if (assistantBusy) {
+    micButtonText = "我来讲了";
+  } else if (state.primaryActionText === "开始说话") {
+    micButtonText = "我来说一段";
+  } else if (state.primaryActionText === "继续说话") {
+    micButtonText = "继续讲";
+  }
+  return {
+    finishButtonText: state.finishingSession ? "保存中" : "保存离开",
+    topicTitleText: state.projectTitle || "这段回忆",
+    showErrorKindStrip: Boolean(state.error && state.errorKindText),
+    showRecoveryPanel: Boolean(state.recoveryNotice || state.canReconnect || state.canFinishAfterDisconnect),
+    showRecoveryActions: Boolean(state.canReconnect || state.canFinishAfterDisconnect),
+    showVoiceAuthorizationPanel: !state.voiceAuthorizationAgreed,
+    showAssistantPanel,
+    assistantPanelClass: state.followUpError ? "assistant-panel error-state" : "assistant-panel",
+    assistantLabelText: state.followUpError ? "小余没说好" : "小余想听您讲讲",
+    showAssistantOpening: !state.latestTranscriptText
+      && !state.followUpLoading
+      && !state.followUpError
+      && !state.selectedOpeningTopicText,
+    assistantQuestionText: state.assistantPromptText || "今天想先讲哪一段？",
+    showSelectedOpeningTopic: Boolean(state.selectedOpeningTopicText),
+    showAssistantTTS: Boolean(state.followUpTTSPlaying && state.assistantPromptText),
+    assistantDisplayText: state.assistantPromptText
+      || (state.followUpLoading ? state.assistantLoadingText : (state.followUpError || state.assistantEmptyText)),
+    showTTSProgress: Boolean(state.assistantPromptText && state.followUpTTSPlaying),
+    replayButtonText: state.followUpAudioFileId ? "重听一遍" : (state.followUpTTSError ? "重试朗读" : "读给我听"),
+    followUpButtonText: state.followUpError ? "再问一次" : (state.assistantPromptText ? "换个问法" : "让小余问一句"),
+    showSkipFollowUp: Boolean(state.assistantPromptText && !state.followUpLoading && !state.followUpError),
+    stageStatusClass: state.error ? "stage-status error" : (state.recording ? "stage-status listening" : "stage-status"),
+    stageStatusText,
+    liveDisplayText,
+    captureStripClass: state.recording ? "capture-strip active" : "capture-strip",
+    showLiveCharCount: Boolean(state.recording && state.liveCharCount),
+    showInlineHelp: Boolean(state.recording && !state.liveText && state.canRequestFollowUp),
+    historyCountText: `${state.transcriptLines.length} 段 · ${state.totalTranscriptCharCount} 字`,
+    showHistoryEmpty: state.transcriptLines.length === 0,
+    transcriptLineViews: state.transcriptLines.map((line) => ({
+      ...line,
+      lineClass: line.role === "assistant" ? "transcript-line assistant" : "transcript-line user",
+      roleText: line.role === "assistant" ? "小余" : "我",
+    })),
+    controlHintText,
+    micButtonClass: state.recording ? "mic-button recording" : "mic-button",
+    micButtonDisabled: state.connecting || !state.voiceAuthorizationAgreed,
+    micButtonText,
   };
 }
 
@@ -189,8 +384,6 @@ export function voiceChatAutoListenGateSnapshot(
     canStart: options.canStart,
   };
 }
-
-type VoiceChatPatch = Partial<VoiceChatData>;
 
 type VoiceSessionPatchCurrent = Pick<
   VoiceChatData,
