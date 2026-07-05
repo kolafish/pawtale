@@ -1,6 +1,6 @@
 .voice-chat-page {
   min-height: 100vh;
-  padding: 34rpx 32rpx 340rpx;
+  padding: 34rpx 30rpx 350rpx;
   background: #fcf7ed;
 }
 
@@ -19,60 +19,63 @@
 .mode-label {
   display: block;
   color: #2b1713;
-  font-size: 40rpx;
+  font-size: 44rpx;
   font-weight: 700;
-  line-height: 52rpx;
+  line-height: 58rpx;
 }
 
 .top-subtitle {
   display: block;
   margin-top: 4rpx;
   color: #7b6f68;
-  font-size: 26rpx;
-  line-height: 38rpx;
+  font-size: 30rpx;
+  line-height: 42rpx;
 }
 
 .topic-panel {
   margin-top: 18rpx;
-  padding: 32rpx;
-  border: 1rpx solid #e8d8c3;
-  border-radius: 24rpx;
+  padding: 32rpx 34rpx;
+  border: 0;
+  border-radius: 30rpx;
   background: #fff9f3;
-  box-shadow: 0 6rpx 20rpx rgba(93, 61, 42, 0.06);
+  box-shadow:
+    0 0 0 1rpx rgba(43, 23, 19, 0.06),
+    0 10rpx 26rpx rgba(93, 61, 42, 0.07);
 }
 
 .topic-kicker {
   display: block;
   color: #7b6f68;
-  font-size: 26rpx;
-  line-height: 38rpx;
+  font-size: 30rpx;
+  line-height: 42rpx;
 }
 
 .topic-title {
   display: block;
   margin-top: 8rpx;
   color: #2b1713;
-  font-size: 40rpx;
+  font-size: 44rpx;
   font-weight: 700;
-  line-height: 52rpx;
+  line-height: 58rpx;
   word-break: break-word;
 }
 
 .finish-button {
-  width: 136rpx;
-  height: 72rpx;
+  width: 156rpx;
+  height: 78rpx;
   margin: 0;
   border: 0;
-  border-radius: 22rpx;
+  border-radius: 24rpx;
   background: #ffffff;
   color: #7b4a40;
-  border: 1rpx solid #d8c4b2;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 28rpx;
+  font-size: 30rpx;
   font-weight: 600;
-  box-shadow: 0 6rpx 18rpx rgba(93, 61, 42, 0.05);
+  box-shadow:
+    0 0 0 1rpx rgba(43, 23, 19, 0.08),
+    0 6rpx 18rpx rgba(93, 61, 42, 0.05);
 }
 
 .finish-button::after {
@@ -80,13 +83,16 @@
 }
 
 .transcript-stage {
-  min-height: 460rpx;
+  min-height: 440rpx;
   margin-top: 28rpx;
-  padding: 40rpx 32rpx;
-  border: 1rpx solid #e8d8c3;
-  border-radius: 24rpx;
+  padding: 40rpx 34rpx;
+  border: 0;
+  border-radius: 32rpx;
   background: #ffffff;
-  box-shadow: 0 6rpx 20rpx rgba(93, 61, 42, 0.06);
+  box-shadow:
+    0 0 0 1rpx rgba(43, 23, 19, 0.06),
+    0 8rpx 18rpx -6rpx rgba(43, 23, 19, 0.10),
+    0 22rpx 50rpx rgba(93, 61, 42, 0.08);
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -94,11 +100,13 @@
 
 .assistant-panel {
   margin-top: 24rpx;
-  padding: 32rpx;
-  border: 1rpx solid #e5cdbb;
-  border-radius: 24rpx;
+  padding: 34rpx;
+  border: 0;
+  border-radius: 32rpx;
   background: #fff9f3;
-  box-shadow: 0 6rpx 20rpx rgba(93, 61, 42, 0.06);
+  box-shadow:
+    0 0 0 1rpx rgba(43, 23, 19, 0.06),
+    0 10rpx 26rpx rgba(93, 61, 42, 0.07);
 }
 
 .assistant-head {
@@ -108,28 +116,35 @@
 }
 
 .assistant-label {
-  color: #7b6f68;
-  font-size: 28rpx;
+  display: inline-flex;
+  align-items: center;
+  min-height: 52rpx;
+  padding: 0 18rpx;
+  border-radius: 999rpx;
+  background: #eef4ea;
+  color: #5f7e55;
+  font-size: 30rpx;
   font-weight: 600;
+  line-height: 38rpx;
 }
 
 .assistant-text {
   display: block;
-  margin-top: 18rpx;
+  margin-top: 22rpx;
   color: #2b1713;
-  font-size: 32rpx;
+  font-size: 38rpx;
   font-weight: 600;
-  line-height: 1.42;
+  line-height: 1.48;
   word-break: break-word;
 }
 
 .assistant-tts-text {
   display: block;
-  margin-top: 18rpx;
+  margin-top: 22rpx;
   color: #2b1713;
-  font-size: 32rpx;
+  font-size: 38rpx;
   font-weight: 600;
-  line-height: 1.42;
+  line-height: 1.48;
   word-break: break-word;
 }
 
@@ -140,15 +155,15 @@
 .assistant-context {
   display: block;
   color: #7b6f68;
-  font-size: 28rpx;
-  line-height: 1.48;
+  font-size: 30rpx;
+  line-height: 1.55;
 }
 
 .assistant-question {
   display: block;
   margin-top: 18rpx;
   color: #2b1713;
-  font-size: 38rpx;
+  font-size: 46rpx;
   font-weight: 700;
   line-height: 1.35;
 }
@@ -161,20 +176,20 @@
 }
 
 .assistant-topic-button {
-  min-height: 58rpx;
+  min-height: 68rpx;
   margin: 0;
-  padding: 0 18rpx;
+  padding: 0 24rpx;
   border: 0;
   border-radius: 999rpx;
   background: #ffffff;
   color: #7b4a40;
-  border: 1rpx solid #e8d8c3;
+  box-shadow: 0 0 0 1rpx rgba(43, 23, 19, 0.08);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 25rpx;
+  font-size: 29rpx;
   font-weight: 700;
-  line-height: 34rpx;
+  line-height: 38rpx;
 }
 
 .assistant-topic-button::after {
@@ -212,7 +227,7 @@
   display: block;
   margin-top: 16rpx;
   color: #b84a5a;
-  font-size: 25rpx;
+  font-size: 28rpx;
   line-height: 1.4;
 }
 
@@ -226,19 +241,20 @@
 }
 
 .assistant-button {
-  min-width: 168rpx;
-  height: 80rpx;
+  min-width: 180rpx;
+  min-height: 86rpx;
   margin: 0;
   border: 0;
-  border-radius: 22rpx;
+  border-radius: 24rpx;
   background: #ffffff;
   color: #7b4a40;
-  border: 1rpx solid #d8c4b2;
+  box-shadow: 0 0 0 1rpx rgba(43, 23, 19, 0.08);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 26rpx;
+  font-size: 29rpx;
   font-weight: 600;
+  line-height: 38rpx;
 }
 
 .assistant-button::after {
@@ -251,13 +267,15 @@
 
 .assistant-button.ghost {
   background: #f8e8e2;
-  border-color: transparent;
+  box-shadow: none;
   color: #8f3e35;
 }
 
 .assistant-panel.error-state {
-  border-color: #f3c4cc;
   background: #fff1f3;
+  box-shadow:
+    0 0 0 1rpx rgba(184, 74, 90, 0.12),
+    0 10rpx 26rpx rgba(184, 74, 90, 0.06);
 }
 
 .assistant-panel.error-state .assistant-label,
@@ -268,13 +286,13 @@
 .stage-status {
   display: inline-flex;
   align-self: flex-start;
-  padding: 8rpx 16rpx;
+  padding: 10rpx 18rpx;
   border-radius: 999rpx;
   background: #eef4ea;
   color: #5f7e55;
-  font-size: 26rpx;
+  font-size: 30rpx;
   font-weight: 700;
-  line-height: 34rpx;
+  line-height: 40rpx;
 }
 
 .stage-status.error {
@@ -289,17 +307,17 @@
 
 .live-text {
   display: block;
-  margin-top: 30rpx;
+  margin-top: 32rpx;
   color: #2b1713;
-  font-size: 52rpx;
+  font-size: 50rpx;
   font-weight: 700;
-  line-height: 1.38;
+  line-height: 1.42;
   word-break: break-all;
 }
 
 .capture-strip {
   margin-top: 34rpx;
-  padding: 18rpx 22rpx;
+  padding: 20rpx 24rpx;
   border-radius: 18rpx;
   background: #fff3ef;
   color: #7b6f68;
@@ -307,8 +325,9 @@
   align-items: center;
   flex-wrap: wrap;
   gap: 14rpx;
-  font-size: 24rpx;
+  font-size: 28rpx;
   font-weight: 500;
+  font-variant-numeric: tabular-nums;
 }
 
 .capture-strip.active {
@@ -337,7 +356,7 @@
 
 .inline-help-button {
   align-self: flex-start;
-  min-height: 64rpx;
+  min-height: 76rpx;
   margin: 22rpx 0 0;
   border: 0;
   border-radius: 999rpx;
@@ -347,7 +366,7 @@
   align-items: center;
   justify-content: center;
   padding: 0 22rpx;
-  font-size: 25rpx;
+  font-size: 28rpx;
   font-weight: 700;
 }
 
@@ -372,13 +391,13 @@
 
 .auto-stop-text {
   color: #7b4a40;
-  font-size: 24rpx;
+  font-size: 28rpx;
   font-weight: 800;
 }
 
 .auto-listen-text {
   color: #a64b3e;
-  font-size: 24rpx;
+  font-size: 28rpx;
   font-weight: 800;
 }
 
@@ -403,11 +422,13 @@
 
 .history-panel {
   margin-top: 30rpx;
-  padding: 32rpx;
-  border: 1rpx solid #e8d8c3;
-  border-radius: 24rpx;
+  padding: 34rpx;
+  border: 0;
+  border-radius: 30rpx;
   background: #ffffff;
-  box-shadow: 0 6rpx 20rpx rgba(93, 61, 42, 0.06);
+  box-shadow:
+    0 0 0 1rpx rgba(43, 23, 19, 0.06),
+    0 10rpx 26rpx rgba(93, 61, 42, 0.06);
 }
 
 .history-header {
@@ -415,18 +436,19 @@
   align-items: center;
   justify-content: space-between;
   color: #2b1713;
-  font-size: 32rpx;
+  font-size: 34rpx;
   font-weight: 700;
 }
 
 .history-count {
   color: #8b6a55;
+  font-variant-numeric: tabular-nums;
 }
 
 .empty-state {
   margin-top: 22rpx;
   color: #7b6f68;
-  font-size: 28rpx;
+  font-size: 30rpx;
   line-height: 1.5;
 }
 
@@ -436,13 +458,13 @@
   border-radius: 20rpx;
   background: #fff9f3;
   color: #3a2a25;
-  font-size: 32rpx;
+  font-size: 34rpx;
   line-height: 1.55;
 }
 
 .transcript-line.assistant {
   background: #ffffff;
-  border: 1rpx solid #e8d8c3;
+  box-shadow: 0 0 0 1rpx rgba(43, 23, 19, 0.06);
 }
 
 .line-role {
@@ -472,7 +494,7 @@
   bottom: 0;
   padding: 26rpx 32rpx 42rpx;
   background: rgba(252, 247, 237, 0.96);
-  border-top: 1rpx solid #efe6da;
+  box-shadow: 0 -1rpx 0 rgba(43, 23, 19, 0.06);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -481,29 +503,32 @@
 .mic-button {
   width: 100%;
   max-width: 620rpx;
-  min-height: 108rpx;
+  min-height: 118rpx;
   margin: 0;
   border: 0;
   border-radius: 999rpx;
   background: #fff3ef;
   color: #a64b3e;
-  border: 2rpx solid #e7cabb;
-  box-shadow: 0 12rpx 36rpx rgba(166, 75, 62, 0.12);
+  box-shadow:
+    0 0 0 2rpx rgba(166, 75, 62, 0.16),
+    0 12rpx 36rpx rgba(166, 75, 62, 0.12);
   display: flex;
   flex-direction: row;
   align-items: center;
   justify-content: center;
-  gap: 14rpx;
-  padding: 22rpx 28rpx;
-  font-size: 32rpx;
+  gap: 16rpx;
+  padding: 22rpx 30rpx;
+  font-size: 36rpx;
   font-weight: 700;
-  line-height: 42rpx;
+  line-height: 46rpx;
 }
 
 .mic-button.recording {
   background: #a64b3e;
   color: #ffffff;
-  border-color: #a64b3e;
+  box-shadow:
+    0 0 0 1rpx rgba(255, 255, 255, 0.18) inset,
+    0 12rpx 36rpx rgba(166, 75, 62, 0.18);
 }
 
 .mic-button::after {
@@ -514,17 +539,32 @@
   opacity: 0.72;
 }
 
+.mic-icon-shell {
+  flex: 0 0 auto;
+  width: 72rpx;
+  height: 72rpx;
+  border-radius: 999rpx;
+  background: rgba(166, 75, 62, 0.10);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.mic-button.recording .mic-icon-shell {
+  background: rgba(255, 255, 255, 0.18);
+}
+
 .mic-icon {
-  width: 54rpx;
-  height: 54rpx;
+  width: 48rpx;
+  height: 48rpx;
 }
 
 .control-hint {
   display: block;
   margin: 0 0 14rpx;
   color: #7b6f68;
-  font-size: 26rpx;
-  line-height: 38rpx;
+  font-size: 30rpx;
+  line-height: 42rpx;
   text-align: center;
 }
 
@@ -534,7 +574,7 @@
   border-radius: 18rpx;
   background: #fff1f3;
   color: #b84a5a;
-  font-size: 26rpx;
+  font-size: 28rpx;
   line-height: 1.5;
 }
 
@@ -545,7 +585,7 @@
   flex-wrap: wrap;
   gap: 12rpx;
   color: #a64b3e;
-  font-size: 24rpx;
+  font-size: 28rpx;
   font-weight: 800;
 }
 
@@ -563,15 +603,16 @@
 .recovery-panel {
   margin-top: 18rpx;
   padding: 22rpx;
-  border: 2rpx solid #e8d8c3;
+  border: 0;
   border-radius: 18rpx;
   background: #fff9f3;
+  box-shadow: 0 0 0 1rpx rgba(43, 23, 19, 0.08);
 }
 
 .recovery-text {
   display: block;
   color: #7b4a40;
-  font-size: 26rpx;
+  font-size: 30rpx;
   font-weight: 800;
   line-height: 1.45;
 }
@@ -595,7 +636,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 25rpx;
+  font-size: 28rpx;
   font-weight: 800;
 }
 
@@ -611,15 +652,18 @@
 .voice-auth-panel {
   margin-top: 24rpx;
   padding: 28rpx;
-  border: 2rpx solid #e4c6b3;
-  border-radius: 22rpx;
+  border: 0;
+  border-radius: 28rpx;
   background: #fff9f3;
+  box-shadow:
+    0 0 0 1rpx rgba(43, 23, 19, 0.08),
+    0 8rpx 20rpx rgba(93, 61, 42, 0.05);
 }
 
 .voice-auth-title {
   display: block;
   color: #7b4a40;
-  font-size: 30rpx;
+  font-size: 32rpx;
   font-weight: 800;
   line-height: 1.35;
 }
@@ -628,7 +672,7 @@
   display: block;
   margin-top: 12rpx;
   color: #7b6f68;
-  font-size: 26rpx;
+  font-size: 30rpx;
   line-height: 1.5;
 }
 
@@ -643,7 +687,7 @@
   flex: 1;
   min-width: 0;
   color: #2b1713;
-  font-size: 28rpx;
+  font-size: 30rpx;
   font-weight: 800;
   line-height: 1.45;
 }
