@@ -19,8 +19,12 @@
       bindtap="startLaunchVoiceChat"
       hover-class="{{voiceStartButtonHoverClass}}"
     >
-      <image class="voice-start-icon" src="/assets/memoir-microphone.png" mode="aspectFit" />
-      <text class="voice-start-title">{{launchVoiceButtonTitle}}</text>
+      <view class="voice-start-icon-shell">
+        <image class="voice-start-icon" src="/assets/memoir-microphone.png" mode="aspectFit" />
+      </view>
+      <view class="voice-start-copy">
+        <text class="voice-start-title">{{launchVoiceButtonTitle}}</text>
+      </view>
     </button>
     <button class="launch-secondary-button" bindtap="dismissLaunchPanel" hover-class="launch-secondary-button-hover">
       {{launchSecondaryText}}
@@ -54,10 +58,14 @@
       bindtap="startPrimaryVoiceChat"
       hover-class="{{voiceStartButtonHoverClass}}"
     >
-      <image class="voice-start-icon" src="/assets/memoir-microphone.png" mode="aspectFit" />
-      <text class="voice-start-title">
-        {{primaryVoiceButtonTitle}}
-      </text>
+      <view class="voice-start-icon-shell">
+        <image class="voice-start-icon" src="/assets/memoir-microphone.png" mode="aspectFit" />
+      </view>
+      <view class="voice-start-copy">
+        <text class="voice-start-title">
+          {{primaryVoiceButtonTitle}}
+        </text>
+      </view>
     </button>
     <text class="voice-start-note">
       {{voiceStartNoteText}}

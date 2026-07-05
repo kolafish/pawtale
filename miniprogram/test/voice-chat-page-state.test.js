@@ -129,7 +129,7 @@ test("voice chat page keeps one main status and a clear recording action", () =>
   assert.equal(wxml.includes("assistant-state"), false);
   assert.equal(wxml.includes("status-label"), false);
   assert.match(wxss, /\.mic-button[\s\S]*border-radius: 999rpx/);
-  assert.match(wxss, /\.assistant-text[\s\S]*font-size: 32rpx/);
+  assert.match(wxss, /\.assistant-text[\s\S]*font-size: 38rpx/);
   assert.match(wxss, /\.assistant-topic-button[\s\S]*border-radius: 999rpx/);
 });
 

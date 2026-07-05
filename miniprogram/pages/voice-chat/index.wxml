@@ -156,7 +156,9 @@
       disabled="{{micButtonDisabled}}"
       bindtap="toggleRecording"
     >
-      <image class="mic-icon" src="/assets/memoir-microphone.png" mode="aspectFit" />
+      <view class="mic-icon-shell">
+        <image class="mic-icon" src="/assets/memoir-microphone.png" mode="aspectFit" />
+      </view>
       <text>{{micButtonText}}</text>
     </button>
   </view>

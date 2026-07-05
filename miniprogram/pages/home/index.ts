@@ -208,10 +208,14 @@ export function homeViewPatch(state: HomeData): HomeViewPatch {
     launchModeTagText: state.launchVariant === "new_project" ? "新故事本" : "第一次来",
     launchVoiceButtonTitle: state.creatingVoice ? "正在准备" : state.launchPrimaryText,
     panelLabelText: state.loading ? "正在准备" : (state.hasProject ? "今天接着聊" : "准备开始"),
-    modeTagText: state.loading ? "加载中" : (state.hasProject ? "继续上次" : "待创建"),
+    modeTagText: state.loading ? "加载中" : (state.hasProject ? "慢慢讲" : "待创建"),
     projectHeadingText: state.loading
       ? "正在加载回忆录"
-      : (state.hasProject ? "今天接着讲一段" : (state.projectDisplayTitle || state.projectTitle || "还没有回忆录")),
+      : (
+          state.hasProject
+            ? (state.projectDisplayTitle || state.projectTitle || "这段回忆")
+            : (state.projectDisplayTitle || state.projectTitle || "还没有回忆录")
+        ),
     projectMetaText: state.loading
       ? "我先确认当前回忆录。"
       : (

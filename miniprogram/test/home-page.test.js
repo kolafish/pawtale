@@ -147,7 +147,7 @@ test("home polish keeps surfaces tactile without broad transitions", () => {
   assert.match(wxss, /\.voice-start-button-hover[\s\S]*transform: scale\(0\.96\)/);
   assert.match(wxss, /\.resume-ask-button-hover[\s\S]*transform: scale\(0\.96\)/);
   assert.match(wxss, /\.launch-secondary-button-hover[\s\S]*transform: scale\(0\.96\)/);
-  assert.match(wxss, /\.return-prompt-close[\s\S]*width: 80rpx/);
+  assert.match(wxss, /\.return-prompt-close[\s\S]*width: 84rpx/);
   assert.match(wxml, /hover-class="{{voiceStartButtonHoverClass}}"/);
   assert.match(wxml, /hover-class="{{resumeAskButtonHoverClass}}"/);
   assert.equal(wxml.includes("loading || creatingVoice"), false);
@@ -233,7 +233,7 @@ test("home view patch keeps first-screen template state simple", () => {
       greetingText: "你好，余主任",
       launchModeTagText: "新故事本",
       panelLabelText: "今天接着聊",
-      projectHeadingText: "今天接着讲一段",
+      projectHeadingText: "爷爷的故事",
       projectMetaText: "上次您说到：爷爷退休后还在忙公司的事。",
       primaryVoiceButtonTitle: "我来说一段",
       voiceStartButtonClass: "voice-start-button button-blocked",
