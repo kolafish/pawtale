@@ -102,12 +102,13 @@
 
     <view class="actions-row list-actions" catchtap="stopCardTap">
       <button
-        class="ghost-button"
+        class="danger-button"
         data-id="{{item.id}}"
-        catchtap="playAudio"
-        disabled="{{item.playAudioDisabled}}"
+        catchtap="deleteTranscript"
+        loading="{{item.deleteButtonLoading}}"
+        disabled="{{item.deleteButtonDisabled}}"
       >
-        {{item.playAudioText}}
+        {{item.deleteButtonText}}
       </button>
       <picker
         wx:if="{{item.canAssignChapterSource}}"

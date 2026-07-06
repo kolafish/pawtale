@@ -252,8 +252,9 @@ test("transcripts list leaves full correction UI to the detail page", () => {
   assert.match(wxml, /summary-preview/);
   assert.match(wxml, /{{pageMetaText}}/);
   assert.match(wxml, /{{item.bookStatusClass}}/);
-  assert.match(wxml, /{{item.playAudioText}}/);
+  assert.match(wxml, /{{item.deleteButtonText}}/);
   assert.match(wxml, /{{item.assignPickerActionClass}}/);
+  assert.doesNotMatch(wxml, /playAudio|playAudioText|听讲述/);
   assert.doesNotMatch(wxml, /\? |\|\||===|&&|!|\.length/);
   assert.match(detailWxml, /voice-edit-inline-diff/);
   assert.match(detailWxml, /voiceEditPreview\.diffSegments/);
@@ -425,14 +426,24 @@ test("transcripts page uses summary fields for browse cards", async () => {
   assert.equal(context.data.showLoadMore, false);
   assert.equal(context.data.items[0].cardClass, "transcript-card");
   assert.equal(context.data.items[0].bookStatusClass, "book-status");
-  assert.equal(context.data.items[0].playAudioDisabled, false);
-  assert.equal(context.data.items[0].playAudioText, "听讲述");
+  assert.equal(context.data.items[0].deleteButtonDisabled, false);
+  assert.equal(context.data.items[0].deleteButtonText, "删除");
   assert.equal(context.data.items[0].editButtonDisabled, false);
 });
 
-test("transcripts page quick playback only plays narrator audio", async () => {
-  const played = [];
-  let activeToken = 0;
+test("transcripts page deletes a record from the first-screen list action", async () => {
+  const deleted = [];
+  const modals = [];
+  const toasts = [];
+  global.wx = {
+    showModal(options) {
+      modals.push(options);
+      options.success({ confirm: true });
+    },
+    showToast(options) {
+      toasts.push(options);
+    },
+  };
   const { page } = loadTranscriptsPage({
     authExports: {
       getMemoirIdentity: async () => ({
@@ -444,45 +455,31 @@ test("transcripts page quick playback only plays narrator audio", async () => {
     },
     voiceApiExports: {
       listMemoirVoiceTranscripts: async () => ({
-        items: [
-          {
-            ...sampleTranscript("utterance-audio"),
-            question_text: "那时候家里谁照顾你？",
-            question_audio_file_id: "question-audio-utterance-audio",
-          },
-        ],
+        items: [sampleTranscript("utterance-delete")],
         total: 1,
         limit: 30,
         offset: 0,
       }),
+      deleteMemoirVoiceTranscript: async (id) => {
+        deleted.push(id);
+      },
     },
   });
   const context = pageContext(page);
-  context.audioPlayback = {
-    nextToken() {
-      activeToken += 1;
-      return activeToken;
-    },
-    isCurrentToken(token) {
-      return token === activeToken;
-    },
-    stop() {
-      activeToken += 1;
-    },
-    async playFile(audioFileId) {
-      played.push(audioFileId);
-    },
-  };
 
   await page.loadTranscripts.call(context, true);
-  assert.equal(context.data.items[0].playAudioText, "听讲述");
+  assert.equal(context.data.items[0].deleteButtonText, "删除");
 
-  await page.playAudio.call(context, {
-    currentTarget: { dataset: { id: "utterance-audio" } },
+  await page.deleteTranscript.call(context, {
+    currentTarget: { dataset: { id: "utterance-delete" } },
   });
 
-  assert.deepEqual(played, ["audio-utterance-audio"]);
-  assert.equal(context.data.playingId, "");
+  assert.deepEqual(deleted, ["utterance-delete"]);
+  assert.match(modals[0].content, /这条原始讲述会从素材库移除/);
+  assert.equal(context.data.items.length, 0);
+  assert.equal(context.data.total, 0);
+  assert.deepEqual(toasts, [{ title: "已删除", icon: "success" }]);
+  delete global.wx;
 });
 
 test("transcripts page opens transcript detail from record header", () => {

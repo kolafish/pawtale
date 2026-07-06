@@ -49,6 +49,39 @@
       </view>
     </view>
 
+    <view wx:if="{{answerPlaybackVisible}}" class="playback-panel">
+      <view class="playback-head">
+        <view class="section-heading">
+          <text class="section-title">讲述原音</text>
+          <text class="section-hint">只播放家人的这段回答</text>
+        </view>
+        <text class="section-count">{{answerPlaybackStatusText}}</text>
+      </view>
+      <view class="playback-track">
+        <view class="playback-fill" style="{{answerPlaybackProgressStyle}}"></view>
+      </view>
+      <view class="playback-time-row">
+        <text>{{answerPlaybackCurrentText}}</text>
+        <text>{{answerPlaybackDurationText}}</text>
+      </view>
+      <view class="actions-row playback-actions">
+        <button
+          class="ghost-button"
+          bindtap="toggleAnswerPlaybackPause"
+          disabled="{{!answerPlaybackCanTogglePause}}"
+        >
+          {{answerPlaybackPaused ? "继续播放" : "暂停"}}
+        </button>
+        <button
+          class="ghost-button"
+          bindtap="stopPlayback"
+          disabled="{{!answerPlaybackCanStop}}"
+        >
+          {{answerPlaybackStopText}}
+        </button>
+      </view>
+    </view>
+
     <view wx:if="{{!item.isEditing}}" class="section-card manuscript-card">
       <view class="section-head">
         <view class="section-heading">

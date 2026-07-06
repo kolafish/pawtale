@@ -18,7 +18,6 @@ import {
   previewMemoirVoiceTranscriptVoiceEdit,
   updateMemoirVoiceTranscript,
 } from "../../services/memoir-voice-api";
-import { AudioPlaybackController } from "../../services/audio-playback";
 import { getMemoirIdentity } from "../../services/auth";
 import {
   sourceAssignmentRequest,
@@ -117,7 +116,6 @@ interface TranscriptItemView extends MemoirVoiceTranscriptItem {
   chapterAssignOptions: ChapterPickerOption[];
   canMoveChapterSource: boolean;
   chapterMoveOptions: ChapterPickerOption[];
-  canPlayAudio: boolean;
   questionSegments: TranscriptTextSegment[];
   rawSegments: TranscriptTextSegment[];
   displaySegments: TranscriptTextSegment[];
@@ -128,8 +126,9 @@ interface TranscriptItemView extends MemoirVoiceTranscriptItem {
   isEditing: boolean;
   cardClass: string;
   bookStatusClass: string;
-  playAudioDisabled: boolean;
-  playAudioText: string;
+  deleteButtonLoading: boolean;
+  deleteButtonDisabled: boolean;
+  deleteButtonText: string;
   assignPickerDisabled: boolean;
   assignPickerActionClass: string;
   assignPickerText: string;
@@ -143,7 +142,6 @@ interface TranscriptsData {
   deletingId: string;
   assigningSourceId: string;
   movingSourceId: string;
-  playingId: string;
   error: string;
   items: TranscriptItemView[];
   total: number;
@@ -249,7 +247,7 @@ function withTranscriptRuntimeState(
   item: TranscriptItemView,
   state: Pick<
     TranscriptsData,
-    "savingId" | "deletingId" | "assigningSourceId" | "movingSourceId" | "playingId" | "highlightedId"
+    "savingId" | "deletingId" | "assigningSourceId" | "movingSourceId" | "highlightedId"
   >,
 ): TranscriptItemView {
   const editBusy = Boolean(state.savingId || state.deletingId);
@@ -258,8 +256,9 @@ function withTranscriptRuntimeState(
     ...item,
     cardClass: state.highlightedId === item.id ? "transcript-card highlighted" : "transcript-card",
     bookStatusClass: item.isIncludedInBook ? "book-status included" : "book-status",
-    playAudioDisabled: editBusy || !item.canPlayAudio,
-    playAudioText: state.playingId === item.id ? "停止讲述" : "听讲述",
+    deleteButtonLoading: state.deletingId === item.id,
+    deleteButtonDisabled: editBusy,
+    deleteButtonText: state.deletingId === item.id ? "删除中" : "删除",
     assignPickerDisabled: chapterBusy,
     assignPickerActionClass: chapterBusy ? "small-primary picker-action disabled" : "small-primary picker-action",
     assignPickerText: state.assigningSourceId === item.id ? "放入中" : "放入章节",
@@ -492,7 +491,6 @@ function toViewItem(
     chapterAssignOptions,
     canMoveChapterSource: chapterMoveOptions.length > 0,
     chapterMoveOptions,
-    canPlayAudio: Boolean(item.audio_file_id),
     questionSegments: highlightTranscriptText(item.question_text, searchQuery),
     rawSegments: rawView.segments,
     displaySegments: displayView.segments,
@@ -503,8 +501,9 @@ function toViewItem(
     isEditing: false,
     cardClass: "transcript-card",
     bookStatusClass: isIncludedInBook ? "book-status included" : "book-status",
-    playAudioDisabled: !Boolean(item.audio_file_id),
-    playAudioText: "听讲述",
+    deleteButtonLoading: false,
+    deleteButtonDisabled: false,
+    deleteButtonText: "删除",
     assignPickerDisabled: false,
     assignPickerActionClass: "small-primary picker-action",
     assignPickerText: "放入章节",
@@ -560,10 +559,10 @@ function removeItem(items: TranscriptItemView[], id: string): TranscriptItemView
 
 function confirmDelete(item: TranscriptItemView): Promise<boolean> {
   return new Promise((resolve) => {
-    const preview = item.display_text || item.transcript_raw || "这条讲述记录";
+    const preview = item.summaryTitleText || item.display_text || item.transcript_raw || "这条讲述记录";
     wx.showModal({
       title: "删除讲述记录",
-      content: `确定删除“${preview.slice(0, 24)}${preview.length > 24 ? "..." : ""}”？删除后不会再出现在讲述记录和访谈上下文中。`,
+      content: `确定删除“${preview.slice(0, 24)}${preview.length > 24 ? "..." : ""}”？删除后，这条原始讲述会从素材库移除；如果已放入章节，相关章节会标记为需重新确认，已生成正文不会自动改写。`,
       confirmText: "删除",
       confirmColor: "#b84a5a",
       success: (result) => resolve(Boolean(result.confirm)),
@@ -600,8 +599,6 @@ Page<TranscriptsData, {
   saveTranscript(event: DatasetEvent): Promise<void>;
   resetToRaw(event: DatasetEvent): void;
   deleteTranscript(event: DatasetEvent): Promise<void>;
-  playAudio(event: DatasetEvent): Promise<void>;
-  stopPlayback(): void;
   onUnload(): void;
   openHome(): void;
   openLogin(): void;
@@ -609,12 +606,10 @@ Page<TranscriptsData, {
   revealStoredTranscriptTarget(): Promise<void>;
   ensureTranscriptTargetLoaded(targetId: string): Promise<TranscriptItemView | null>;
   scrollToTranscript(item: TranscriptItemView): void;
-  audioPlayback: AudioPlaybackController;
   loadToken: number;
   voiceEditToken: number;
   searchDebounceTimer: number | null;
 }>({
-  audioPlayback: new AudioPlaybackController(),
   loadToken: 0,
   voiceEditToken: 0,
   searchDebounceTimer: null,
@@ -626,7 +621,6 @@ Page<TranscriptsData, {
     deletingId: "",
     assigningSourceId: "",
     movingSourceId: "",
-    playingId: "",
     error: "",
     items: [],
     total: 0,
@@ -841,7 +835,6 @@ Page<TranscriptsData, {
     ) {
       return;
     }
-    this.stopPlayback();
     setTranscriptsData(this, {
       searchInput: nextInput,
       searchQuery,
@@ -870,7 +863,6 @@ Page<TranscriptsData, {
       stopMemoirVoiceSearchRecording();
       return;
     }
-    this.stopPlayback();
     setTranscriptsData(this, {
       voiceSearchRecording: true,
       voiceSearchTranscribing: false,
@@ -933,7 +925,6 @@ Page<TranscriptsData, {
       }
       return;
     }
-    this.stopPlayback();
     this.voiceEditToken += 1;
     const requestToken = this.voiceEditToken;
     setTranscriptsData(this, {
@@ -1082,7 +1073,6 @@ Page<TranscriptsData, {
     ) {
       return;
     }
-    this.stopPlayback();
     setTranscriptsData(this, { assigningSourceId: utteranceId, error: "" });
     try {
       const updatedPlan = await assignMemoirBookSources(
@@ -1117,7 +1107,6 @@ Page<TranscriptsData, {
     ) {
       return;
     }
-    this.stopPlayback();
     setTranscriptsData(this, { movingSourceId: utteranceId, error: "" });
     try {
       const plan = this.data.bookPlan || await loadTranscriptBookPlan(this.data.activeProjectId);
@@ -1225,9 +1214,6 @@ Page<TranscriptsData, {
     if (!confirmed) {
       return;
     }
-    if (this.data.playingId === id) {
-      this.stopPlayback();
-    }
     setTranscriptsData(this, { deletingId: id, error: "" });
     try {
       await deleteMemoirVoiceTranscript(id);
@@ -1244,46 +1230,6 @@ Page<TranscriptsData, {
     }
   },
 
-  async playAudio(event) {
-    const id = datasetString(event, "id");
-    const item = this.data.items.find((candidate) => candidate.id === id);
-    const audioFileId = item?.audio_file_id;
-    if (!audioFileId) {
-      setTranscriptsData(this, { error: "这段讲述没有可播放的原音" });
-      return;
-    }
-    if (this.data.playingId === id) {
-      this.stopPlayback();
-      return;
-    }
-    if (this.data.savingId || this.data.deletingId) {
-      return;
-    }
-    this.stopPlayback();
-    const token = this.audioPlayback.nextToken();
-    setTranscriptsData(this, { playingId: id, error: "" });
-    try {
-      await this.audioPlayback.playFile(audioFileId, token);
-      if (this.audioPlayback.isCurrentToken(token)) {
-        setTranscriptsData(this, { playingId: "" });
-      }
-    } catch (error) {
-      if (this.audioPlayback.isCurrentToken(token)) {
-        setTranscriptsData(this, {
-          playingId: "",
-          error: error instanceof Error ? error.message : "音频播放失败",
-        });
-      }
-    }
-  },
-
-  stopPlayback() {
-    this.audioPlayback.stop();
-    if (this.data.playingId) {
-      setTranscriptsData(this, { playingId: "" });
-    }
-  },
-
   onUnload() {
     if (this.searchDebounceTimer !== null) {
       clearTimeout(this.searchDebounceTimer);
@@ -1293,21 +1239,17 @@ Page<TranscriptsData, {
     if (this.data.voiceSearchRecording || this.data.voiceEditRecording) {
       stopMemoirVoiceSearchRecording();
     }
-    this.stopPlayback();
   },
 
   openHome() {
-    this.stopPlayback();
     switchToHome();
   },
 
   openLogin() {
-    this.stopPlayback();
     switchToMe();
   },
 
   createProject() {
-    this.stopPlayback();
     wx.navigateTo({ url: "/pages/project-edit/index" });
   },
 

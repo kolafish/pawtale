@@ -203,6 +203,11 @@ test("transcript detail page keeps serious evidence and editing labels", () => {
   assert.match(wxml, /说修改意见/);
   assert.match(wxml, /听讲述原音/);
   assert.match(wxml, /听小余提问/);
+  assert.match(wxml, /只播放家人的这段回答/);
+  assert.match(wxml, /answerPlaybackProgressStyle/);
+  assert.match(wxml, /answerPlaybackStopText/);
+  assert.match(wxml, /继续播放/);
+  assert.match(wxml, /暂停/);
   assert.match(wxml, /停止讲述/);
   assert.match(wxml, /停止提问/);
   assert.match(wxml, /更多操作/);
@@ -292,6 +297,101 @@ test("transcript detail page plays question and answer audio separately", async 
   assert.deepEqual(played, ["audio-utterance-audio", "question-audio-utterance-audio"]);
   assert.equal(context.data.playing, false);
   assert.equal(context.data.playingAudioKind, "");
+});
+
+test("transcript detail answer playback shows progress and supports pause", async () => {
+  const played = [];
+  let activeToken = 0;
+  let activeAudio = null;
+  let finishPlayback = null;
+  const audio = {
+    currentTime: 0,
+    duration: 32,
+    pauseCalls: 0,
+    playCalls: 0,
+    play() {
+      this.playCalls += 1;
+    },
+    pause() {
+      this.pauseCalls += 1;
+    },
+  };
+  const { page } = loadTranscriptDetailPage({
+    voiceApiExports: {
+      getMemoirVoiceTranscript: async (id) => sampleTranscript(id, {
+        audio_duration_seconds: 32,
+      }),
+    },
+  });
+  const context = pageContext(page, { utteranceId: "utterance-progress" });
+  context.audioPlayback = {
+    nextToken() {
+      activeToken += 1;
+      return activeToken;
+    },
+    isCurrentToken(token) {
+      return token === activeToken;
+    },
+    currentAudio() {
+      return activeAudio;
+    },
+    stop() {
+      activeToken += 1;
+      if (finishPlayback) {
+        finishPlayback();
+      }
+    },
+    async playFile(audioFileId, _token, options) {
+      played.push(audioFileId);
+      activeAudio = audio;
+      options.onPlay?.(audio);
+      await new Promise((resolve) => {
+        finishPlayback = () => {
+          options.onEnded?.(audio);
+          activeAudio = null;
+          resolve();
+        };
+      });
+    },
+  };
+
+  await page.loadTranscript.call(context);
+  const playbackPromise = page.playAnswerAudio.call(context);
+  await Promise.resolve();
+
+  assert.deepEqual(played, ["audio-utterance-progress"]);
+  assert.equal(context.data.answerPlaybackVisible, true);
+  assert.equal(context.data.answerPlaybackStatusText, "正在播放");
+  assert.equal(context.data.answerPlaybackCurrentText, "0:00");
+  assert.equal(context.data.answerPlaybackDurationText, "0:32");
+  assert.equal(context.data.answerPlaybackProgressStyle, "width: 0%;");
+  assert.equal(context.data.answerPlaybackCanTogglePause, true);
+
+  audio.currentTime = 8;
+  context.updateAnswerPlaybackProgress(audio.currentTime, audio.duration, "正在播放");
+  assert.equal(context.data.answerPlaybackCurrentText, "0:08");
+  assert.equal(context.data.answerPlaybackProgressStyle, "width: 25%;");
+
+  page.toggleAnswerPlaybackPause.call(context);
+  assert.equal(audio.pauseCalls, 1);
+  assert.equal(context.data.answerPlaybackPaused, true);
+  assert.equal(context.data.answerPlaybackStatusText, "已暂停");
+
+  page.toggleAnswerPlaybackPause.call(context);
+  assert.equal(audio.playCalls, 1);
+  assert.equal(context.data.answerPlaybackPaused, false);
+  assert.equal(context.data.answerPlaybackStatusText, "正在播放");
+
+  finishPlayback();
+  await playbackPromise;
+  assert.equal(context.data.answerPlaybackStatusText, "播放完成");
+  assert.equal(context.data.answerPlaybackProgressStyle, "width: 100%;");
+  assert.equal(context.data.answerPlaybackCanTogglePause, false);
+  assert.equal(context.data.answerPlaybackCanStop, true);
+  assert.equal(context.data.answerPlaybackStopText, "收起");
+
+  page.stopPlayback.call(context);
+  assert.equal(context.data.answerPlaybackVisible, false);
 });
 
 test("transcript detail page can open directly in edit mode", async () => {

@@ -84,6 +84,15 @@ interface TranscriptDetailData {
   moving: boolean;
   playing: boolean;
   playingAudioKind: TranscriptDetailAudioKind | "";
+  answerPlaybackVisible: boolean;
+  answerPlaybackPaused: boolean;
+  answerPlaybackStatusText: string;
+  answerPlaybackCurrentText: string;
+  answerPlaybackDurationText: string;
+  answerPlaybackProgressStyle: string;
+  answerPlaybackCanTogglePause: boolean;
+  answerPlaybackCanStop: boolean;
+  answerPlaybackStopText: string;
   error: string;
   utteranceId: string;
   item: TranscriptDetailItemView | null;
@@ -100,6 +109,54 @@ interface TranscriptDetailData {
 
 const COLLAPSIBLE_QUESTION_CHAR_COUNT = 72;
 type TranscriptDetailAudioKind = "question" | "answer";
+
+function positiveSeconds(value: unknown): number {
+  const seconds = Number(value);
+  return Number.isFinite(seconds) && seconds > 0 ? seconds : 0;
+}
+
+function answerAudioFallbackDuration(item: MemoirVoiceTranscriptItem | null): number {
+  if (!item) {
+    return 0;
+  }
+  const durationSeconds = positiveSeconds(item.audio_duration_seconds);
+  if (durationSeconds) {
+    return durationSeconds;
+  }
+  if (item.start_ms !== null && item.start_ms !== undefined && item.end_ms !== null && item.end_ms !== undefined) {
+    return positiveSeconds((item.end_ms - item.start_ms) / 1000);
+  }
+  return 0;
+}
+
+function playbackClockText(seconds: number): string {
+  const totalSeconds = Math.max(0, Math.floor(seconds));
+  const minutes = Math.floor(totalSeconds / 60);
+  const remainingSeconds = totalSeconds % 60;
+  return `${minutes}:${remainingSeconds.toString().padStart(2, "0")}`;
+}
+
+function answerPlaybackPatch(
+  currentSeconds: number,
+  durationSeconds: number,
+  statusText: string,
+): Pick<
+  TranscriptDetailData,
+  | "answerPlaybackStatusText"
+  | "answerPlaybackCurrentText"
+  | "answerPlaybackDurationText"
+  | "answerPlaybackProgressStyle"
+> {
+  const duration = positiveSeconds(durationSeconds);
+  const current = Math.max(0, Math.min(positiveSeconds(currentSeconds), duration || positiveSeconds(currentSeconds)));
+  const progressPercent = duration ? Math.max(0, Math.min(100, Math.round((current / duration) * 100))) : 0;
+  return {
+    answerPlaybackStatusText: statusText,
+    answerPlaybackCurrentText: playbackClockText(current),
+    answerPlaybackDurationText: duration ? playbackClockText(duration) : "时长未知",
+    answerPlaybackProgressStyle: `width: ${progressPercent}%;`,
+  };
+}
 
 async function loadTranscriptBookPlan(projectId: string): Promise<MemoirBookPlan | null> {
   try {
@@ -195,6 +252,12 @@ Page<TranscriptDetailData, {
   playAnswerAudio(): Promise<void>;
   playQuestionAudio(): Promise<void>;
   playAudio(kind: TranscriptDetailAudioKind): Promise<void>;
+  toggleAnswerPlaybackPause(): void;
+  updateAnswerPlaybackProgress(
+    currentSeconds: number,
+    durationSeconds: number,
+    statusText: string,
+  ): void;
   stopPlayback(): void;
   goBack(): void;
   openLogin(): void;
@@ -216,6 +279,15 @@ Page<TranscriptDetailData, {
     moving: false,
     playing: false,
     playingAudioKind: "",
+    answerPlaybackVisible: false,
+    answerPlaybackPaused: false,
+    answerPlaybackStatusText: "",
+    answerPlaybackCurrentText: "0:00",
+    answerPlaybackDurationText: "时长未知",
+    answerPlaybackProgressStyle: "width: 0%;",
+    answerPlaybackCanTogglePause: false,
+    answerPlaybackCanStop: false,
+    answerPlaybackStopText: "停止",
     error: "",
     utteranceId: "",
     item: null,
@@ -592,24 +664,129 @@ Page<TranscriptDetailData, {
     }
     this.stopPlayback();
     const token = this.audioPlayback.nextToken();
-    this.setData({ playing: true, playingAudioKind: kind, error: "" });
+    const fallbackDuration = kind === "answer" ? answerAudioFallbackDuration(item) : 0;
+    this.setData({
+      playing: true,
+      playingAudioKind: kind,
+      ...(kind === "answer"
+        ? {
+          answerPlaybackVisible: true,
+          answerPlaybackPaused: false,
+          answerPlaybackCanTogglePause: false,
+          answerPlaybackCanStop: true,
+          answerPlaybackStopText: "停止",
+          ...answerPlaybackPatch(0, fallbackDuration, "正在准备原音"),
+        }
+        : {}),
+      error: "",
+    });
     try {
-      await this.audioPlayback.playFile(audioFileId, token);
+      await this.audioPlayback.playFile(audioFileId, token, kind === "answer"
+        ? {
+          onPlay: (audio) => {
+            if (!this.audioPlayback.isCurrentToken(token) || this.audioPlayback.currentAudio() !== audio) {
+              return;
+            }
+            this.setData({
+              answerPlaybackPaused: false,
+              answerPlaybackCanTogglePause: true,
+              answerPlaybackCanStop: true,
+              answerPlaybackStopText: "停止",
+            });
+            this.updateAnswerPlaybackProgress(audio.currentTime, audio.duration || fallbackDuration, "正在播放");
+          },
+          onTimeUpdate: (audio) => {
+            if (!this.audioPlayback.isCurrentToken(token) || this.audioPlayback.currentAudio() !== audio) {
+              return;
+            }
+            this.updateAnswerPlaybackProgress(audio.currentTime, audio.duration || fallbackDuration, "正在播放");
+          },
+          onEnded: (audio) => {
+            if (!this.audioPlayback.isCurrentToken(token)) {
+              return;
+            }
+            const duration = positiveSeconds(audio.duration) || fallbackDuration;
+            this.setData({
+              answerPlaybackPaused: false,
+              answerPlaybackCanTogglePause: false,
+              answerPlaybackCanStop: true,
+              answerPlaybackStopText: "收起",
+              ...answerPlaybackPatch(duration, duration, "播放完成"),
+            });
+          },
+        }
+        : undefined);
     } catch (error) {
       if (this.audioPlayback.isCurrentToken(token)) {
-        this.setData({ error: error instanceof Error ? error.message : "播放失败" });
+        this.setData({
+          error: error instanceof Error ? error.message : "播放失败",
+          ...(kind === "answer"
+            ? {
+              answerPlaybackPaused: false,
+              answerPlaybackCanTogglePause: false,
+              answerPlaybackCanStop: true,
+              answerPlaybackStopText: "收起",
+              answerPlaybackStatusText: "播放失败",
+            }
+            : {}),
+        });
       }
     } finally {
       if (this.audioPlayback.isCurrentToken(token)) {
-        this.setData({ playing: false, playingAudioKind: "" });
+        this.setData({
+          playing: false,
+          playingAudioKind: "",
+          ...(kind === "answer"
+            ? {
+              answerPlaybackPaused: false,
+              answerPlaybackCanTogglePause: false,
+            }
+            : {}),
+        });
       }
     }
   },
 
+  toggleAnswerPlaybackPause() {
+    if (!this.data.answerPlaybackCanTogglePause || this.data.playingAudioKind !== "answer") {
+      return;
+    }
+    const audio = this.audioPlayback.currentAudio();
+    if (!audio) {
+      return;
+    }
+    if (this.data.answerPlaybackPaused) {
+      audio.play();
+      this.setData({
+        answerPlaybackPaused: false,
+        answerPlaybackStatusText: "正在播放",
+      });
+      return;
+    }
+    audio.pause();
+    this.setData({
+      answerPlaybackPaused: true,
+      answerPlaybackStatusText: "已暂停",
+    });
+  },
+
+  updateAnswerPlaybackProgress(currentSeconds, durationSeconds, statusText) {
+    this.setData(answerPlaybackPatch(currentSeconds, durationSeconds, statusText));
+  },
+
   stopPlayback() {
     this.audioPlayback.stop();
-    if (this.data.playing) {
-      this.setData({ playing: false, playingAudioKind: "" });
+    if (this.data.playing || this.data.answerPlaybackVisible) {
+      this.setData({
+        playing: false,
+        playingAudioKind: "",
+        answerPlaybackVisible: false,
+        answerPlaybackPaused: false,
+        answerPlaybackStatusText: "",
+        answerPlaybackCanTogglePause: false,
+        answerPlaybackCanStop: false,
+        answerPlaybackStopText: "停止",
+      });
     }
   },
 
