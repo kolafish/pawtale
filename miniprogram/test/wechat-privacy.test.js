@@ -63,3 +63,20 @@ test("wechat privacy errors explain missing mini program privacy declaration", a
   );
   delete global.wx;
 });
+
+test("wechat recorder errors hide native sync channel details", () => {
+  const { wechatRecorderErrorMessage } = privacyModule();
+
+  assert.match(
+    wechatRecorderErrorMessage("received error code 1 on sync-0"),
+    /麦克风启动失败/,
+  );
+  assert.match(
+    wechatRecorderErrorMessage("operateRecorder:fail auth deny"),
+    /没有麦克风权限/,
+  );
+  assert.match(
+    wechatRecorderErrorMessage("operateRecorder:fail is recording or paused"),
+    /麦克风正在使用中/,
+  );
+});

@@ -15,7 +15,7 @@ import {
 } from "./memoir-streaming-asr-protocol";
 import { WechatRecorderResource } from "./recorder-resource";
 import { VoiceActivityDetector } from "./voice-activity-detector";
-import { wechatPrivacyErrorMessage } from "./wechat-privacy";
+import { wechatRecorderErrorMessage } from "./wechat-privacy";
 
 export {
   arrayBufferToBase64,
@@ -392,7 +392,10 @@ export class MemoirStreamingAsrClient {
   }
 
   handleRecorderError(message: string): void {
-    const readableMessage = wechatPrivacyErrorMessage(message);
+    const readableMessage = wechatRecorderErrorMessage(message);
+    if (message && message !== readableMessage) {
+      console.warn("recorder native error", message);
+    }
     this.recording = false;
     this.recorderStarted = false;
     this.clearNoVoiceActivityTimer();
