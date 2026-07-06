@@ -22,9 +22,13 @@ test("debug speaker page explains that realtime transcript is not saved", () => 
   );
 
   assert.match(wxml, /本次识别不保存到素材库/);
+  assert.match(wxml, /scroll-into-view/);
+  assert.match(wxml, /partialScrollTarget/);
   assert.match(wxml, /speaker-list/);
   assert.match(wxml, /audioLevelStyle/);
   assert.match(wxss, /font-variant-numeric: tabular-nums/);
+  assert.match(wxss, /\.partial-scroll\.long[\s\S]*height: 420rpx/);
+  assert.match(wxss, /\.line-text[\s\S]*font-size: 44rpx/);
   assert.doesNotMatch(wxml, /章节|成书文字|素材库移除/);
 });
 
@@ -58,6 +62,33 @@ test("debug speaker page groups partial and final text by speaker windows", () =
   assert.equal(context.data.speakers[1].lines[0].metaText, "0:01-0:03 · 置信度 86%");
   assert.equal(context.data.showEmpty, false);
   assert.equal(context.data.clearDisabled, false);
+});
+
+test("debug speaker page scrolls long partial text to the newest progress", () => {
+  const { page } = loadDebugSpeakerPage();
+  const context = pageContext(page);
+  const longPartial = "这是一段很长的实时识别文字，".repeat(8);
+
+  page.handleSpeakerEvent.call(context, {
+    type: "speaker.partial",
+    speaker_id: "speaker_2",
+    text: longPartial,
+  });
+  const firstSpeaker = context.data.speakers[0];
+
+  assert.equal(firstSpeaker.partialText, longPartial);
+  assert.equal(firstSpeaker.partialScrollClass, "partial-scroll long");
+  assert.equal(firstSpeaker.partialScrollTop, 10000);
+  assert.equal(firstSpeaker.partialScrollTarget, firstSpeaker.partialEndId);
+
+  page.handleSpeakerEvent.call(context, {
+    type: "speaker.partial",
+    speaker_id: "speaker_2",
+    text: `${longPartial}继续补充到最新进度。`,
+  });
+
+  assert.equal(context.data.speakers[0].partialScrollTop, 20000);
+  assert.match(context.data.speakers[0].partialScrollTarget, /speaker_2-partial-end-20000/);
 });
 
 test("debug speaker page clears transcript only while idle", () => {

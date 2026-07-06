@@ -14,6 +14,10 @@ interface SpeakerWindowView {
   speakerId: string;
   title: string;
   partialText: string;
+  partialEndId: string;
+  partialScrollClass: string;
+  partialScrollTarget: string;
+  partialScrollTop: number;
   lines: SpeakerLineView[];
   segmentCountText: string;
   cardClass: string;
@@ -87,16 +91,25 @@ function formatSegmentMeta(event: DebugSpeakerGatewayEvent): string {
   return [range, confidence].filter(Boolean).join(" · ");
 }
 
+function speakerDomId(speakerId: string): string {
+  return speakerId.replace(/[^a-zA-Z0-9_-]/g, "_");
+}
+
 function speakerWindow(
   speakerId: string,
   speakerIndex: number,
   patch: Partial<SpeakerWindowView> = {},
 ): SpeakerWindowView {
   const lines = patch.lines || [];
+  const partialEndId = patch.partialEndId || `${speakerDomId(speakerId)}-partial-end`;
   return {
     speakerId,
     title: debugSpeakerTitle(speakerId, speakerIndex),
     partialText: "",
+    partialEndId,
+    partialScrollClass: "partial-scroll",
+    partialScrollTarget: "",
+    partialScrollTop: 0,
     lines,
     segmentCountText: `${lines.length} 段`,
     cardClass: "speaker-window",
@@ -219,6 +232,10 @@ Page<DebugSpeakerPageData, {
     const text = event.text || "";
     const nextLines = existing.lines.slice();
     let partialText = existing.partialText;
+    let partialEndId = existing.partialEndId;
+    let partialScrollClass = existing.partialScrollClass;
+    let partialScrollTarget = existing.partialScrollTarget;
+    let partialScrollTop = existing.partialScrollTop;
     if (event.type === "speaker.final") {
       if (text) {
         nextLines.unshift({
@@ -228,12 +245,23 @@ Page<DebugSpeakerPageData, {
         });
       }
       partialText = "";
+      partialScrollClass = "partial-scroll";
+      partialScrollTarget = "";
+      partialScrollTop = 0;
     } else if (event.type === "speaker.partial") {
       partialText = text;
+      partialScrollClass = text.length > 90 ? "partial-scroll long" : "partial-scroll";
+      partialScrollTop += 10000;
+      partialEndId = `${speakerDomId(speakerId)}-partial-end-${partialScrollTop}`;
+      partialScrollTarget = partialEndId;
     }
     const nextSpeaker = speakerWindow(speakerId, speakerIndex, {
       ...existing,
       partialText,
+      partialEndId,
+      partialScrollClass,
+      partialScrollTarget,
+      partialScrollTop,
       lines: nextLines.slice(0, 20),
       segmentCountText: `${nextLines.length} 段`,
       cardClass: partialText ? "speaker-window active" : "speaker-window",
