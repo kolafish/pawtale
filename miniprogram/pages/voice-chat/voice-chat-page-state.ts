@@ -278,6 +278,19 @@ export type VoiceChatViewPatch = Pick<
   | "voiceChatPageClass"
 >;
 
+function largeTextFocusClass(state: VoiceChatData, showAssistantPanel: boolean): string {
+  if (!state.largeTextEnabled) {
+    return "";
+  }
+  if (state.recording) {
+    return "capture-focus";
+  }
+  if (showAssistantPanel) {
+    return "assistant-focus";
+  }
+  return "idle-focus";
+}
+
 export function voiceChatViewPatch(state: VoiceChatData): VoiceChatViewPatch {
   const assistantBusy = state.followUpLoading || state.followUpTTSLoading || state.followUpTTSPlaying;
   const hasAssistantPrompt = Boolean(state.assistantPromptText);
@@ -298,10 +311,15 @@ export function voiceChatViewPatch(state: VoiceChatData): VoiceChatViewPatch {
   let liveDisplayText = "点下方“我来说一段”";
   if (state.recording) {
     liveDisplayText = state.liveText || "直接说就行，我会帮您记下来";
+  } else if (state.followUpLoading && state.latestTranscriptText) {
+    liveDisplayText = "刚才那段正在整理，请稍等";
+  } else if (state.followUpLoading && !hasAssistantPrompt) {
+    liveDisplayText = "小余正在准备第一句话";
+  } else if (state.followUpTTSLoading || state.followUpTTSPlaying || hasAssistantPrompt || state.selectedOpeningTopicText) {
+    liveDisplayText = "听完后，点下方“我来讲了”开始回答";
   } else {
     liveDisplayText = state.liveText
       || state.latestTranscriptText
-      || state.assistantPromptText
       || (state.followUpLoading ? "小余正在准备第一句话" : "点下方“我来说一段”");
   }
   let controlHintText = "说一两句也可以，我会帮您记下来。";
@@ -326,8 +344,13 @@ export function voiceChatViewPatch(state: VoiceChatData): VoiceChatViewPatch {
   } else if (state.primaryActionText === "继续说话") {
     micButtonText = "继续讲";
   }
+  const pageClass = ["voice-chat-page"];
+  const focusClass = largeTextFocusClass(state, showAssistantPanel);
+  if (state.largeTextEnabled) {
+    pageClass.push("large-text", focusClass);
+  }
   return {
-    voiceChatPageClass: state.largeTextEnabled ? "voice-chat-page large-text" : "voice-chat-page",
+    voiceChatPageClass: pageClass.filter(Boolean).join(" "),
     finishButtonText: state.finishingSession ? "保存中" : "保存离开",
     topicTitleText: state.projectTitle || "这段回忆",
     showErrorKindStrip: Boolean(state.error && state.errorKindText),

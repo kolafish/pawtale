@@ -136,17 +136,36 @@ test("voice chat page keeps one main status and a clear recording action", () =>
   assert.match(wxss, /\.mic-button[\s\S]*border-radius: 999rpx/);
   assert.match(wxss, /\.assistant-text[\s\S]*font-size: 38rpx/);
   assert.match(wxss, /\.assistant-topic-button[\s\S]*border-radius: 999rpx/);
-  assert.match(wxss, /\.voice-chat-page\.large-text \.assistant-question[\s\S]*font-size: 62rpx/);
-  assert.match(wxss, /\.voice-chat-page\.large-text \.mic-button[\s\S]*font-size: 50rpx/);
+  assert.match(wxss, /\.voice-chat-page\.large-text \.assistant-question[\s\S]*font-size: 70rpx/);
+  assert.match(wxss, /\.voice-chat-page\.large-text\.assistant-focus \.assistant-question[\s\S]*font-size: 78rpx/);
+  assert.match(wxss, /\.voice-chat-page\.large-text\.capture-focus \.live-text[\s\S]*font-size: 82rpx/);
+  assert.match(wxss, /\.voice-chat-page\.large-text \.mic-button[\s\S]*font-size: 56rpx/);
 });
 
-test("voice chat view patch switches only the root class for large text mode", () => {
-  const patch = voiceChatViewPatch({
+test("voice chat view patch adds focused large text root classes", () => {
+  const idlePatch = voiceChatViewPatch({
     ...initialVoiceChatData(),
     largeTextEnabled: true,
   });
+  const assistantPatch = voiceChatViewPatch({
+    ...initialVoiceChatData(),
+    largeTextEnabled: true,
+    voiceAuthorizationAgreed: true,
+    assistantPromptText: "爷爷退休以后还在忙什么？",
+  });
+  const capturePatch = voiceChatViewPatch({
+    ...initialVoiceChatData(),
+    largeTextEnabled: true,
+    voiceAuthorizationAgreed: true,
+    recording: true,
+    liveText: "我想先讲爷爷退休后的事",
+  });
 
-  assert.equal(patch.voiceChatPageClass, "voice-chat-page large-text");
+  assert.equal(idlePatch.voiceChatPageClass, "voice-chat-page large-text idle-focus");
+  assert.equal(assistantPatch.voiceChatPageClass, "voice-chat-page large-text assistant-focus");
+  assert.equal(assistantPatch.liveDisplayText, "听完后，点下方“我来讲了”开始回答");
+  assert.equal(capturePatch.voiceChatPageClass, "voice-chat-page large-text capture-focus");
+  assert.equal(capturePatch.liveDisplayText, "我想先讲爷爷退休后的事");
 });
 
 test("voice chat auto-listen gate snapshot keeps page and computed gate state together", () => {

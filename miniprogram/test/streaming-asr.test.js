@@ -952,6 +952,38 @@ test("streaming ASR maps recorder privacy ban to setup guidance", () => {
   delete global.wx;
 });
 
+test("streaming ASR maps native recorder sync errors to a readable retry message", () => {
+  const recorder = recorderManagerHarness();
+  let reportedMessage = "";
+  global.wx = {
+    getRecorderManager() {
+      return recorder;
+    },
+  };
+  delete require.cache[require.resolve("../services/memoir-streaming-asr.ts")];
+  const { MemoirStreamingAsrClient } = require("../services/memoir-streaming-asr.ts");
+
+  const client = new MemoirStreamingAsrClient({
+    voiceSessionId: "voice-1",
+    guidanceMode: "free_narration",
+    callbacks: {
+      onStatus() {},
+      onEvent() {},
+      onPartial() {},
+      onFinal() {},
+      onError(message) {
+        reportedMessage = message;
+      },
+    },
+  });
+
+  client.handleRecorderError("received error code 1 on sync-0");
+
+  assert.match(reportedMessage, /麦克风启动失败/);
+  assert.doesNotMatch(reportedMessage, /sync-0/);
+  delete global.wx;
+});
+
 test("streaming ASR stop before recorder start does not call recorder stop", async () => {
   const recorder = recorderManagerHarness();
   const sent = [];
