@@ -15,10 +15,8 @@ interface SpeakerLineView {
   metaText: string;
   startMs: number | null;
   endMs: number | null;
-  proofreadText: string;
   proofreadStatusText: string;
   proofreadLoading: boolean;
-  proofreadError: string;
 }
 
 interface SpeakerWindowView {
@@ -166,10 +164,8 @@ function finalLineFromSpeakerEvent(
     }),
     startMs,
     endMs: eventEndMs(event),
-    proofreadText: "",
     proofreadStatusText: "",
     proofreadLoading: false,
-    proofreadError: "",
   };
 }
 
@@ -179,7 +175,7 @@ function debugSpeakerProofreadContextLines(
 ): DebugSpeakerProofreadContextLine[] {
   const lines = speakers.flatMap((speaker) => speaker.lines.map((line) => ({
     speakerId: speaker.speakerId,
-    text: (line.proofreadText || line.text).trim(),
+    text: line.text.trim(),
     startMs: line.startMs,
     endMs: line.endMs,
     sortMs: line.endMs ?? line.startMs ?? 0,
@@ -213,10 +209,6 @@ function patchSpeakerLine(
       )),
     };
   });
-}
-
-function errorMessage(error: unknown, fallback: string): string {
-  return error instanceof Error ? error.message : fallback;
 }
 
 function speakerWindow(
@@ -395,7 +387,7 @@ Page<DebugSpeakerPageData, {
       if (line) {
         proofreadContextLines = debugSpeakerProofreadContextLines(this.data.speakers);
         line.proofreadLoading = true;
-        line.proofreadStatusText = "AI 校对中";
+        line.proofreadStatusText = "校对中";
         nextLines.unshift(line);
         lineForProofread = line;
       }
@@ -457,17 +449,15 @@ Page<DebugSpeakerPageData, {
       const result = await proofreadDebugSpeakerTranscriptLine(text, contextLines);
       const proofreadText = result.proofread_text.trim();
       const speakers = patchSpeakerLine(this.data.speakers, speakerId, lineId, {
-        proofreadText,
+        text: proofreadText || text,
         proofreadLoading: false,
-        proofreadError: "",
-        proofreadStatusText: result.changed ? "AI 校对后" : "AI 校对后（无明显修改）",
+        proofreadStatusText: "已校对",
       });
       this.setData({ speakers });
-    } catch (error) {
+    } catch (_error) {
       const speakers = patchSpeakerLine(this.data.speakers, speakerId, lineId, {
         proofreadLoading: false,
-        proofreadStatusText: "AI 校对失败",
-        proofreadError: errorMessage(error, "校对暂时不可用"),
+        proofreadStatusText: "校对失败",
       });
       this.setData({ speakers });
     }

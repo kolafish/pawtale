@@ -97,18 +97,13 @@
         wx:key="id"
         class="line-item"
       >
-        <text wx:if="{{line.metaText}}" class="line-meta">{{line.metaText}}</text>
-        <text class="line-label">原始识别</text>
-        <text class="line-text">{{line.text}}</text>
-        <view
-          wx:if="{{line.proofreadLoading || line.proofreadText || line.proofreadError}}"
-          class="proofread-block {{line.proofreadError ? 'has-error' : ''}}"
-        >
-          <text class="proofread-status">{{line.proofreadStatusText}}</text>
-          <text wx:if="{{line.proofreadText}}" class="proofread-text">{{line.proofreadText}}</text>
-          <text wx:elif="{{line.proofreadError}}" class="proofread-error">{{line.proofreadError}}</text>
-          <text wx:else class="proofread-waiting">正在结合最近几段上下文校对</text>
+        <view wx:if="{{line.metaText || line.proofreadStatusText}}" class="line-meta-row">
+          <text wx:if="{{line.metaText}}" class="line-meta">{{line.metaText}}</text>
+          <text wx:if="{{line.proofreadStatusText}}" class="line-status {{line.proofreadLoading ? 'loading' : ''}}">
+            {{line.proofreadStatusText}}
+          </text>
         </view>
+        <text class="line-text">{{line.text}}</text>
       </view>
     </view>
   </view>

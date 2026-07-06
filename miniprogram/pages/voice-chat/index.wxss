@@ -726,19 +726,19 @@
 }
 
 .voice-chat-page.large-text .mode-label {
-  font-size: 60rpx;
+  font-size: 56rpx;
   line-height: 74rpx;
 }
 
 .voice-chat-page.large-text .top-subtitle {
-  font-size: 40rpx;
+  font-size: 36rpx;
   line-height: 56rpx;
 }
 
 .voice-chat-page.large-text .finish-button {
   width: 184rpx;
   height: 92rpx;
-  font-size: 36rpx;
+  font-size: 34rpx;
 }
 
 .voice-chat-page.large-text .topic-panel,
@@ -752,42 +752,42 @@
 .voice-chat-page.large-text .assistant-label,
 .voice-chat-page.large-text .stage-status,
 .voice-chat-page.large-text .control-hint {
-  font-size: 40rpx;
+  font-size: 36rpx;
   line-height: 56rpx;
 }
 
 .voice-chat-page.large-text .topic-title {
-  font-size: 64rpx;
+  font-size: 58rpx;
   line-height: 80rpx;
 }
 
 .voice-chat-page.large-text .assistant-context {
-  font-size: 42rpx;
+  font-size: 38rpx;
   line-height: 62rpx;
 }
 
 .voice-chat-page.large-text .assistant-question {
-  font-size: 70rpx;
+  font-size: 64rpx;
   line-height: 88rpx;
 }
 
 .voice-chat-page.large-text .assistant-text,
 .voice-chat-page.large-text .assistant-tts-text {
-  font-size: 58rpx;
+  font-size: 52rpx;
   line-height: 78rpx;
 }
 
 .voice-chat-page.large-text .assistant-topic-button {
   min-height: 92rpx;
   padding: 0 30rpx;
-  font-size: 40rpx;
+  font-size: 36rpx;
   line-height: 52rpx;
 }
 
 .voice-chat-page.large-text .assistant-button {
   min-width: 214rpx;
   min-height: 104rpx;
-  font-size: 38rpx;
+  font-size: 36rpx;
   line-height: 50rpx;
 }
 
@@ -798,7 +798,7 @@
 }
 
 .voice-chat-page.large-text .live-text {
-  font-size: 70rpx;
+  font-size: 64rpx;
   line-height: 92rpx;
 }
 
@@ -814,23 +814,23 @@
 .voice-chat-page.large-text .error,
 .voice-chat-page.large-text .session-state-strip,
 .voice-chat-page.large-text .recovery-text {
-  font-size: 38rpx;
+  font-size: 36rpx;
   line-height: 56rpx;
 }
 
 .voice-chat-page.large-text .history-header {
-  font-size: 42rpx;
+  font-size: 38rpx;
 }
 
 .voice-chat-page.large-text .transcript-line {
-  font-size: 44rpx;
+  font-size: 40rpx;
   line-height: 68rpx;
 }
 
 .voice-chat-page.large-text .line-role {
   min-width: 92rpx;
   height: 56rpx;
-  font-size: 30rpx;
+  font-size: 28rpx;
 }
 
 .voice-chat-page.large-text .control-bar {
@@ -842,7 +842,7 @@
   min-width: 620rpx;
   min-height: 154rpx;
   max-width: 702rpx;
-  font-size: 56rpx;
+  font-size: 52rpx;
   line-height: 68rpx;
   gap: 20rpx;
   padding-left: 34rpx;
@@ -860,11 +860,11 @@
 }
 
 .voice-chat-page.large-text .voice-auth-title {
-  font-size: 44rpx;
+  font-size: 40rpx;
 }
 
 .voice-chat-page.large-text .voice-auth-copy {
-  font-size: 38rpx;
+  font-size: 36rpx;
   line-height: 56rpx;
 }
 
@@ -875,7 +875,7 @@
 
 .voice-chat-page.large-text.assistant-focus .mode-label,
 .voice-chat-page.large-text.capture-focus .mode-label {
-  font-size: 50rpx;
+  font-size: 46rpx;
   line-height: 62rpx;
 }
 
@@ -893,14 +893,14 @@
 
 .voice-chat-page.large-text.assistant-focus .topic-kicker,
 .voice-chat-page.large-text.capture-focus .topic-kicker {
-  font-size: 32rpx;
+  font-size: 30rpx;
   line-height: 44rpx;
 }
 
 .voice-chat-page.large-text.assistant-focus .topic-title,
 .voice-chat-page.large-text.capture-focus .topic-title {
   margin-top: 2rpx;
-  font-size: 48rpx;
+  font-size: 44rpx;
   line-height: 60rpx;
 }
 
@@ -917,23 +917,23 @@
 .voice-chat-page.large-text.assistant-focus .assistant-label {
   min-height: 64rpx;
   padding: 0 24rpx;
-  font-size: 42rpx;
+  font-size: 38rpx;
   line-height: 54rpx;
 }
 
 .voice-chat-page.large-text.assistant-focus .assistant-context {
-  font-size: 44rpx;
+  font-size: 40rpx;
   line-height: 64rpx;
 }
 
 .voice-chat-page.large-text.assistant-focus .assistant-question {
-  font-size: 78rpx;
+  font-size: 72rpx;
   line-height: 98rpx;
 }
 
 .voice-chat-page.large-text.assistant-focus .assistant-text,
 .voice-chat-page.large-text.assistant-focus .assistant-tts-text {
-  font-size: 66rpx;
+  font-size: 60rpx;
   line-height: 88rpx;
 }
 
@@ -960,7 +960,7 @@
 }
 
 .voice-chat-page.large-text.assistant-focus .transcript-stage .stage-status {
-  font-size: 32rpx;
+  font-size: 30rpx;
   line-height: 44rpx;
 }
 
@@ -970,7 +970,7 @@
 
 .voice-chat-page.large-text.assistant-focus .live-text {
   color: #7b6f68;
-  font-size: 40rpx;
+  font-size: 36rpx;
   font-weight: 600;
   line-height: 58rpx;
 }
@@ -992,7 +992,7 @@
 
 .voice-chat-page.large-text.capture-focus .stage-status {
   padding: 12rpx 22rpx;
-  font-size: 46rpx;
+  font-size: 42rpx;
   line-height: 60rpx;
 }
 
@@ -1006,15 +1006,15 @@
 }
 
 .voice-chat-page.large-text.capture-focus .live-text {
-  font-size: 82rpx;
-  line-height: 104rpx;
+  font-size: 76rpx;
+  line-height: 96rpx;
 }
 
 .voice-chat-page.large-text.capture-focus .capture-strip {
   margin-top: 40rpx;
   padding: 24rpx 28rpx;
   border-radius: 24rpx;
-  font-size: 42rpx;
+  font-size: 38rpx;
   line-height: 58rpx;
 }
 
@@ -1031,13 +1031,13 @@
 
 .voice-chat-page.large-text.assistant-focus .history-header,
 .voice-chat-page.large-text.capture-focus .history-header {
-  font-size: 36rpx;
+  font-size: 34rpx;
 }
 
 .voice-chat-page.large-text.assistant-focus .empty-state,
 .voice-chat-page.large-text.capture-focus .empty-state {
   margin-top: 16rpx;
-  font-size: 32rpx;
+  font-size: 30rpx;
   line-height: 46rpx;
 }
 
@@ -1045,7 +1045,7 @@
 .voice-chat-page.large-text.capture-focus .transcript-line {
   margin-top: 16rpx;
   padding: 20rpx;
-  font-size: 34rpx;
+  font-size: 32rpx;
   line-height: 52rpx;
 }
 
@@ -1053,5 +1053,5 @@
 .voice-chat-page.large-text.capture-focus .line-role {
   min-width: 76rpx;
   height: 46rpx;
-  font-size: 24rpx;
+  font-size: 22rpx;
 }

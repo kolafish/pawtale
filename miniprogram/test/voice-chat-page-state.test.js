@@ -145,12 +145,12 @@ test("voice chat page keeps one main status and a clear recording action", () =>
   assert.match(wxss, /\.assistant-topic-button[\s\S]*border-radius: 999rpx/);
   assert.match(wxss, /\.mic-button-text[\s\S]*white-space: nowrap/);
   assert.match(wxss, /\.mic-button-text[\s\S]*word-break: keep-all/);
-  assert.match(wxss, /\.voice-chat-page\.large-text \.assistant-question[\s\S]*font-size: 70rpx/);
-  assert.match(wxss, /\.voice-chat-page\.large-text\.assistant-focus \.assistant-question[\s\S]*font-size: 78rpx/);
-  assert.match(wxss, /\.voice-chat-page\.large-text\.capture-focus \.live-text[\s\S]*font-size: 82rpx/);
+  assert.match(wxss, /\.voice-chat-page\.large-text \.assistant-question[\s\S]*font-size: 64rpx/);
+  assert.match(wxss, /\.voice-chat-page\.large-text\.assistant-focus \.assistant-question[\s\S]*font-size: 72rpx/);
+  assert.match(wxss, /\.voice-chat-page\.large-text\.capture-focus \.live-text[\s\S]*font-size: 76rpx/);
   assert.match(wxss, /\.voice-chat-page\.large-text\.capture-focus \.live-scroll\.long[\s\S]*height: 420rpx/);
   assert.match(wxss, /\.voice-chat-page\.large-text \.mic-button[\s\S]*min-width: 620rpx/);
-  assert.match(wxss, /\.voice-chat-page\.large-text \.mic-button[\s\S]*font-size: 56rpx/);
+  assert.match(wxss, /\.voice-chat-page\.large-text \.mic-button[\s\S]*font-size: 52rpx/);
 });
 
 test("voice chat view patch adds focused large text root classes", () => {
