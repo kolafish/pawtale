@@ -755,3 +755,16 @@ test("me keeps memoir management, voice progress, and debug speaker tools as sep
   ]);
   delete global.wx;
 });
+
+test("me surfaces debug speaker transcribe near the top of the signed-in page", () => {
+  const wxml = fs.readFileSync(path.join(__dirname, "../pages/me/index.wxml"), "utf8");
+  const debugIndex = wxml.indexOf("多人实时转写");
+  const webLoginIndex = wxml.indexOf("Web 登录账号");
+  const memoirIndex = wxml.indexOf("当前回忆录");
+
+  assert.ok(debugIndex > -1);
+  assert.ok(webLoginIndex > -1);
+  assert.ok(memoirIndex > -1);
+  assert.ok(debugIndex < webLoginIndex);
+  assert.ok(debugIndex < memoirIndex);
+});

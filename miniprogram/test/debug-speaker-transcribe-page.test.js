@@ -6,7 +6,7 @@ const path = require("node:path");
 const test = require("node:test");
 const { loadPageModule, mockModule, pageContext } = require("./page-harness");
 
-function loadDebugSpeakerPage({ accessibilityExports = {} } = {}) {
+function loadDebugSpeakerPage({ accessibilityExports = {}, proofreadExports = {} } = {}) {
   mockModule("../services/accessibility-settings.ts", {
     readAccessibilitySettings: () => ({
       largeTextEnabled: false,
@@ -14,8 +14,22 @@ function loadDebugSpeakerPage({ accessibilityExports = {} } = {}) {
     }),
     ...accessibilityExports,
   });
+  mockModule("../services/debug-speaker-proofread.ts", {
+    proofreadDebugSpeakerTranscriptLine: async (text, contextLines = []) => ({
+      text,
+      proofread_text: text,
+      changed: false,
+      provider: "test",
+      context_line_count: contextLines.length,
+    }),
+    ...proofreadExports,
+  });
   delete require.cache[require.resolve("../pages/debug-speaker-transcribe/index.ts")];
   return loadPageModule("../pages/debug-speaker-transcribe/index.ts");
+}
+
+function flushPromises() {
+  return new Promise((resolve) => setImmediate(resolve));
 }
 
 test("debug speaker page explains that realtime transcript is not saved", () => {
@@ -34,11 +48,17 @@ test("debug speaker page explains that realtime transcript is not saved", () => 
   assert.match(wxml, /partialScrollTarget/);
   assert.match(wxml, /speaker-list/);
   assert.match(wxml, /audioLevelStyle/);
+  assert.match(wxml, /正在结合最近几段上下文校对/);
+  assert.match(wxml, /proofread-status/);
+  assert.match(wxml, /proofread-block/);
   assert.match(wxss, /font-variant-numeric: tabular-nums/);
   assert.match(wxss, /\.partial-scroll\.long[\s\S]*height: 420rpx/);
   assert.match(wxss, /\.line-text[\s\S]*font-size: 44rpx/);
+  assert.match(wxss, /\.proofread-text[\s\S]*font-size: 44rpx/);
   assert.match(wxss, /\.debug-speaker-page\.large-text \.partial-text,[\s\S]*font-size: 82rpx/);
+  assert.match(wxss, /\.debug-speaker-page\.large-text \.partial-text,[\s\S]*\.proofread-text[\s\S]*font-size: 82rpx/);
   assert.doesNotMatch(wxml, /章节|成书文字|素材库移除/);
+  assert.doesNotMatch(wxml, /二次识别|重新识别/);
 });
 
 test("debug speaker page groups partial and final text by speaker windows", () => {
@@ -114,6 +134,60 @@ test("debug speaker page keeps only new text from cumulative final results", () 
     "0:06-0:13",
     "0:00-0:06",
   ]);
+});
+
+test("debug speaker page proofreads final lines with recent context", async () => {
+  const calls = [];
+  const { page } = loadDebugSpeakerPage({
+    proofreadExports: {
+      proofreadDebugSpeakerTranscriptLine: async (text, contextLines = []) => {
+        calls.push({ text, contextLines });
+        return {
+          text,
+          proofread_text: text.includes("得不得行") ? "四川话得不得行吗？" : "我们来告一下，看能不能看清楚。",
+          changed: true,
+          provider: "fake",
+          context_line_count: contextLines.length,
+        };
+      },
+    },
+  });
+  const context = pageContext(page);
+
+  page.handleSpeakerEvent.call(context, {
+    type: "speaker.final",
+    speaker_id: "speaker_1",
+    segment_id: "seg-1",
+    text: "来，我们来告一下嘛，看能不能看清楚哈。",
+    start_ms: 0,
+    end_ms: 6000,
+  });
+  await flushPromises();
+
+  page.handleSpeakerEvent.call(context, {
+    type: "speaker.final",
+    speaker_id: "speaker_2",
+    segment_id: "seg-2",
+    text: "四川话得不得行嘛？",
+    start_ms: 7000,
+    end_ms: 10000,
+  });
+  await flushPromises();
+
+  const speakerTwo = context.data.speakers.find((speaker) => speaker.speakerId === "speaker_2");
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].contextLines.length, 0);
+  assert.deepEqual(calls[1].contextLines, [
+    {
+      speakerId: "speaker_1",
+      text: "我们来告一下，看能不能看清楚。",
+      startMs: 0,
+      endMs: 6000,
+    },
+  ]);
+  assert.equal(speakerTwo.lines[0].proofreadText, "四川话得不得行吗？");
+  assert.equal(speakerTwo.lines[0].proofreadLoading, false);
+  assert.equal(speakerTwo.lines[0].proofreadStatusText, "AI 校对后");
 });
 
 test("debug speaker page preserves repeated text when provider reports a new start time", () => {

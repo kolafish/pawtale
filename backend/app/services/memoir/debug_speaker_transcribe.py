@@ -5,15 +5,22 @@ import base64
 import binascii
 import contextlib
 from dataclasses import dataclass
-from typing import Any, Callable, Protocol
+from typing import Any, Callable, Protocol, Sequence
 
 from app.services.memoir.asr import StreamingASRClient, StreamingASREvent
 from app.services.memoir.asr_text_normalization import normalize_memoir_asr_text
 from app.services.memoir.voice_gateway import MAX_AUDIO_FRAME_BYTES
+from app.services.memoir.voice_transcripts import (
+    CleanedTranscriptText,
+    MemoirTranscriptCleanupContext,
+    generate_cleaned_transcript_text,
+)
 
 
 DebugSpeakerTranscriberFactory = Callable[[], StreamingASRClient]
 DEBUG_SPEAKER_FINISH_DRAIN_TIMEOUT_SECONDS = 10.0
+DEBUG_SPEAKER_PROOFREAD_CONTEXT_LIMIT = 8
+DEBUG_SPEAKER_PROOFREAD_CONTEXT_TEXT_LIMIT = 160
 
 
 @dataclass(frozen=True)
@@ -25,6 +32,14 @@ class DebugSpeakerSegment:
     end_ms: int | None = None
     confidence: float | None = None
     provider_payload: dict[str, Any] | None = None
+
+
+@dataclass(frozen=True)
+class DebugSpeakerProofreadContextLine:
+    speaker_id: str | None
+    text: str
+    start_ms: int | None = None
+    end_ms: int | None = None
 
 
 class DebugSpeakerTranscribeClient(Protocol):
@@ -261,6 +276,49 @@ class DebugSpeakerTranscribeSession:
             "state": self._state,
             **payload,
         }
+
+
+def debug_speaker_cleanup_context(
+    context_lines: Sequence[DebugSpeakerProofreadContextLine],
+) -> MemoirTranscriptCleanupContext:
+    utterances: list[str] = []
+    for line in context_lines[-DEBUG_SPEAKER_PROOFREAD_CONTEXT_LIMIT:]:
+        text = " ".join(line.text.split()).strip()
+        if not text:
+            continue
+        label = _speaker_context_label(line.speaker_id)
+        prefix = f"{label}：" if label else ""
+        utterances.append(f"{prefix}{text[:DEBUG_SPEAKER_PROOFREAD_CONTEXT_TEXT_LIMIT]}")
+    return MemoirTranscriptCleanupContext(
+        scene="多人实时转写调试",
+        recent_user_utterances=tuple(utterances),
+    )
+
+
+async def proofread_debug_speaker_transcript_text(
+    text: str,
+    *,
+    context_lines: Sequence[DebugSpeakerProofreadContextLine] = (),
+    ai_model: str | None = None,
+) -> CleanedTranscriptText:
+    return await generate_cleaned_transcript_text(
+        text,
+        ai_model=ai_model,
+        context=debug_speaker_cleanup_context(context_lines),
+        strict=False,
+    )
+
+
+def _speaker_context_label(speaker_id: str | None) -> str:
+    value = (speaker_id or "").strip()
+    if not value:
+        return ""
+    if value == "speaker_unknown":
+        return "未分辨说话人"
+    if value.startswith("speaker_"):
+        suffix = value.removeprefix("speaker_").strip()
+        return f"说话人 {suffix}" if suffix else "说话人"
+    return value
 
 
 def speaker_segments_from_asr_event(event: StreamingASREvent) -> list[DebugSpeakerSegment]:

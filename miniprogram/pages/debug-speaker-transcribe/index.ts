@@ -4,6 +4,10 @@ import {
   DebugSpeakerTranscribeClient,
   debugSpeakerTitle,
 } from "../../services/debug-speaker-transcribe";
+import {
+  proofreadDebugSpeakerTranscriptLine,
+  type DebugSpeakerProofreadContextLine,
+} from "../../services/debug-speaker-proofread";
 
 interface SpeakerLineView {
   id: string;
@@ -11,6 +15,10 @@ interface SpeakerLineView {
   metaText: string;
   startMs: number | null;
   endMs: number | null;
+  proofreadText: string;
+  proofreadStatusText: string;
+  proofreadLoading: boolean;
+  proofreadError: string;
 }
 
 interface SpeakerWindowView {
@@ -149,7 +157,7 @@ function finalLineFromSpeakerEvent(
     ? existing.cumulativeFinalEndMs
     : eventStart;
   return {
-    id: event.segment_id || fallbackId,
+    id: fallbackId,
     text: incrementalText,
     metaText: formatSegmentMeta({
       ...event,
@@ -158,7 +166,57 @@ function finalLineFromSpeakerEvent(
     }),
     startMs,
     endMs: eventEndMs(event),
+    proofreadText: "",
+    proofreadStatusText: "",
+    proofreadLoading: false,
+    proofreadError: "",
   };
+}
+
+function debugSpeakerProofreadContextLines(
+  speakers: SpeakerWindowView[],
+  limit = 6,
+): DebugSpeakerProofreadContextLine[] {
+  const lines = speakers.flatMap((speaker) => speaker.lines.map((line) => ({
+    speakerId: speaker.speakerId,
+    text: (line.proofreadText || line.text).trim(),
+    startMs: line.startMs,
+    endMs: line.endMs,
+    sortMs: line.endMs ?? line.startMs ?? 0,
+  })));
+  return lines
+    .filter((line) => line.text)
+    .sort((left, right) => left.sortMs - right.sortMs)
+    .slice(-limit)
+    .map(({ speakerId, text, startMs, endMs }) => ({
+      speakerId,
+      text,
+      startMs,
+      endMs,
+    }));
+}
+
+function patchSpeakerLine(
+  speakers: SpeakerWindowView[],
+  speakerId: string,
+  lineId: string,
+  patch: Partial<SpeakerLineView>,
+): SpeakerWindowView[] {
+  return speakers.map((speaker) => {
+    if (speaker.speakerId !== speakerId) {
+      return speaker;
+    }
+    return {
+      ...speaker,
+      lines: speaker.lines.map((line) => (
+        line.id === lineId ? { ...line, ...patch } : line
+      )),
+    };
+  });
+}
+
+function errorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback;
 }
 
 function speakerWindow(
@@ -224,6 +282,12 @@ Page<DebugSpeakerPageData, {
   refreshAccessibilitySettings(): void;
   setStatus(status: DebugSpeakerConnectionStatus): void;
   handleSpeakerEvent(event: DebugSpeakerGatewayEvent): void;
+  proofreadFinalLine(
+    speakerId: string,
+    lineId: string,
+    text: string,
+    contextLines: DebugSpeakerProofreadContextLine[],
+  ): Promise<void>;
   toggleRecording(): Promise<void>;
   clearTranscript(): void;
   goBack(): void;
@@ -324,10 +388,16 @@ Page<DebugSpeakerPageData, {
     let cumulativeFinalText = existing.cumulativeFinalText;
     let cumulativeFinalStartMs = existing.cumulativeFinalStartMs;
     let cumulativeFinalEndMs = existing.cumulativeFinalEndMs;
+    let lineForProofread: SpeakerLineView | null = null;
+    let proofreadContextLines: DebugSpeakerProofreadContextLine[] = [];
     if (event.type === "speaker.final") {
       const line = finalLineFromSpeakerEvent(event, existing, `${speakerId}-${Date.now()}-${nextLines.length}`);
       if (line) {
+        proofreadContextLines = debugSpeakerProofreadContextLines(this.data.speakers);
+        line.proofreadLoading = true;
+        line.proofreadStatusText = "AI 校对中";
         nextLines.unshift(line);
+        lineForProofread = line;
       }
       partialText = "";
       partialScrollClass = "partial-scroll";
@@ -372,6 +442,35 @@ Page<DebugSpeakerPageData, {
       speakers,
       ...pagePatch(this.data.recording ? "listening" : "ready", speakers),
     });
+    if (lineForProofread) {
+      void this.proofreadFinalLine(
+        speakerId,
+        lineForProofread.id,
+        lineForProofread.text,
+        proofreadContextLines,
+      );
+    }
+  },
+
+  async proofreadFinalLine(speakerId, lineId, text, contextLines) {
+    try {
+      const result = await proofreadDebugSpeakerTranscriptLine(text, contextLines);
+      const proofreadText = result.proofread_text.trim();
+      const speakers = patchSpeakerLine(this.data.speakers, speakerId, lineId, {
+        proofreadText,
+        proofreadLoading: false,
+        proofreadError: "",
+        proofreadStatusText: result.changed ? "AI 校对后" : "AI 校对后（无明显修改）",
+      });
+      this.setData({ speakers });
+    } catch (error) {
+      const speakers = patchSpeakerLine(this.data.speakers, speakerId, lineId, {
+        proofreadLoading: false,
+        proofreadStatusText: "AI 校对失败",
+        proofreadError: errorMessage(error, "校对暂时不可用"),
+      });
+      this.setData({ speakers });
+    }
   },
 
   clearTranscript() {
@@ -401,4 +500,5 @@ export {
   formatSegmentMeta as formatDebugSpeakerSegmentMeta,
   pagePatch as debugSpeakerPagePatch,
   debugSpeakerPageClass,
+  debugSpeakerProofreadContextLines,
 };
