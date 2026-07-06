@@ -135,6 +135,31 @@ function incrementalSpeakerText(text: string, previousText: string, sameCumulati
   return cleanText;
 }
 
+function hasReliableDistinctStart(eventStart: number | null, previousEnd: number | null): boolean {
+  return eventStart !== null && previousEnd !== null && eventStart >= previousEnd;
+}
+
+function isCumulativeSpeakerText(
+  text: string,
+  previousText: string,
+  eventStart: number | null,
+  previousStart: number | null,
+  previousEnd: number | null,
+): boolean {
+  const cleanText = text.trim();
+  const cleanPrevious = previousText.trim();
+  if (!cleanText || !cleanPrevious) {
+    return false;
+  }
+  if (previousStart !== null && eventStart === previousStart) {
+    return true;
+  }
+  if (hasReliableDistinctStart(eventStart, previousEnd)) {
+    return false;
+  }
+  return cleanText.startsWith(cleanPrevious) || cleanPrevious.startsWith(cleanText);
+}
+
 function finalLineFromSpeakerEvent(
   event: DebugSpeakerGatewayEvent,
   existing: SpeakerWindowView,
@@ -145,8 +170,13 @@ function finalLineFromSpeakerEvent(
     return null;
   }
   const eventStart = eventStartMs(event);
-  const sameCumulativeRun = existing.cumulativeFinalStartMs !== null
-    && eventStart === existing.cumulativeFinalStartMs;
+  const sameCumulativeRun = isCumulativeSpeakerText(
+    text,
+    existing.cumulativeFinalText,
+    eventStart,
+    existing.cumulativeFinalStartMs,
+    existing.cumulativeFinalEndMs,
+  );
   const incrementalText = incrementalSpeakerText(text, existing.cumulativeFinalText, sameCumulativeRun);
   if (!incrementalText) {
     return null;
@@ -402,8 +432,13 @@ Page<DebugSpeakerPageData, {
       }
     } else if (event.type === "speaker.partial") {
       const eventStart = eventStartMs(event);
-      const sameCumulativeRun = existing.cumulativeFinalStartMs !== null
-        && eventStart === existing.cumulativeFinalStartMs;
+      const sameCumulativeRun = isCumulativeSpeakerText(
+        text,
+        existing.cumulativeFinalText,
+        eventStart,
+        existing.cumulativeFinalStartMs,
+        existing.cumulativeFinalEndMs,
+      );
       partialText = incrementalSpeakerText(text, existing.cumulativeFinalText, sameCumulativeRun);
       partialScrollClass = partialText.length > 90 ? "partial-scroll long" : "partial-scroll";
       partialScrollTop += 10000;

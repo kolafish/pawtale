@@ -133,6 +133,37 @@ test("debug speaker page keeps only new text from cumulative final results", () 
   ]);
 });
 
+test("debug speaker page keeps only new final text when cumulative provider results omit timestamps", () => {
+  const { page } = loadDebugSpeakerPage();
+  const context = pageContext(page);
+
+  page.handleSpeakerEvent.call(context, {
+    type: "speaker.final",
+    speaker_id: "speaker_unknown",
+    segment_id: "seg-1",
+    text: "来，我们来告一下嘛，看能不能看清楚哈。",
+  });
+  page.handleSpeakerEvent.call(context, {
+    type: "speaker.final",
+    speaker_id: "speaker_unknown",
+    segment_id: "seg-2",
+    text: "来，我们来告一下嘛，看能不能看清楚哈。那个到底四川话识不识别得清楚嘛？",
+  });
+  page.handleSpeakerEvent.call(context, {
+    type: "speaker.final",
+    speaker_id: "speaker_unknown",
+    segment_id: "seg-3",
+    text: "来，我们来告一下嘛，看能不能看清楚哈。那个到底四川话识不识别得清楚嘛？",
+  });
+
+  assert.equal(context.data.speakers.length, 1);
+  assert.equal(context.data.speakers[0].segmentCountText, "2 段");
+  assert.deepEqual(context.data.speakers[0].lines.map((line) => line.text), [
+    "那个到底四川话识不识别得清楚嘛？",
+    "来，我们来告一下嘛，看能不能看清楚哈。",
+  ]);
+});
+
 test("debug speaker page proofreads final lines with recent context", async () => {
   const calls = [];
   const { page } = loadDebugSpeakerPage({
@@ -204,13 +235,13 @@ test("debug speaker page preserves repeated text when provider reports a new sta
     speaker_id: "speaker_unknown",
     segment_id: "seg-2",
     text: "好。",
-    start_ms: 2500,
-    end_ms: 3300,
+    start_ms: 1000,
+    end_ms: 2200,
   });
 
   assert.equal(context.data.speakers[0].segmentCountText, "2 段");
   assert.deepEqual(context.data.speakers[0].lines.map((line) => line.text), ["好。", "好。"]);
-  assert.deepEqual(context.data.speakers[0].lines.map((line) => line.metaText), ["0:02-0:03", "0:00-0:01"]);
+  assert.deepEqual(context.data.speakers[0].lines.map((line) => line.metaText), ["0:01-0:02", "0:00-0:01"]);
 });
 
 test("debug speaker page keeps only new text from cumulative partial results", () => {
@@ -231,6 +262,26 @@ test("debug speaker page keeps only new text from cumulative partial results", (
     text: "来，我们来告一下嘛，看能不能看清楚哈。那个到底四川话识不识别得清楚嘛？",
     start_ms: 0,
     end_ms: 13000,
+  });
+
+  assert.equal(context.data.speakers[0].partialText, "那个到底四川话识不识别得清楚嘛？");
+  assert.equal(context.data.speakers[0].lines.length, 1);
+});
+
+test("debug speaker page keeps only new partial text when cumulative provider results omit timestamps", () => {
+  const { page } = loadDebugSpeakerPage();
+  const context = pageContext(page);
+
+  page.handleSpeakerEvent.call(context, {
+    type: "speaker.final",
+    speaker_id: "speaker_unknown",
+    segment_id: "seg-1",
+    text: "来，我们来告一下嘛，看能不能看清楚哈。",
+  });
+  page.handleSpeakerEvent.call(context, {
+    type: "speaker.partial",
+    speaker_id: "speaker_unknown",
+    text: "来，我们来告一下嘛，看能不能看清楚哈。那个到底四川话识不识别得清楚嘛？",
   });
 
   assert.equal(context.data.speakers[0].partialText, "那个到底四川话识不识别得清楚嘛？");
