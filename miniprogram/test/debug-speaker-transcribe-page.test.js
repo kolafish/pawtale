@@ -4,9 +4,16 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
-const { loadPageModule, pageContext } = require("./page-harness");
+const { loadPageModule, mockModule, pageContext } = require("./page-harness");
 
-function loadDebugSpeakerPage() {
+function loadDebugSpeakerPage({ accessibilityExports = {} } = {}) {
+  mockModule("../services/accessibility-settings.ts", {
+    readAccessibilitySettings: () => ({
+      largeTextEnabled: false,
+      autoBargeInEnabled: true,
+    }),
+    ...accessibilityExports,
+  });
   delete require.cache[require.resolve("../pages/debug-speaker-transcribe/index.ts")];
   return loadPageModule("../pages/debug-speaker-transcribe/index.ts");
 }
@@ -22,6 +29,7 @@ test("debug speaker page explains that realtime transcript is not saved", () => 
   );
 
   assert.match(wxml, /本次识别不保存到素材库/);
+  assert.match(wxml, /class="{{pageClass}}"/);
   assert.match(wxml, /scroll-into-view/);
   assert.match(wxml, /partialScrollTarget/);
   assert.match(wxml, /speaker-list/);
@@ -29,6 +37,7 @@ test("debug speaker page explains that realtime transcript is not saved", () => 
   assert.match(wxss, /font-variant-numeric: tabular-nums/);
   assert.match(wxss, /\.partial-scroll\.long[\s\S]*height: 420rpx/);
   assert.match(wxss, /\.line-text[\s\S]*font-size: 44rpx/);
+  assert.match(wxss, /\.debug-speaker-page\.large-text \.partial-text,[\s\S]*font-size: 82rpx/);
   assert.doesNotMatch(wxml, /章节|成书文字|素材库移除/);
 });
 
@@ -64,6 +73,99 @@ test("debug speaker page groups partial and final text by speaker windows", () =
   assert.equal(context.data.clearDisabled, false);
 });
 
+test("debug speaker page keeps only new text from cumulative final results", () => {
+  const { page } = loadDebugSpeakerPage();
+  const context = pageContext(page);
+
+  page.handleSpeakerEvent.call(context, {
+    type: "speaker.final",
+    speaker_id: "speaker_unknown",
+    segment_id: "seg-1",
+    text: "来，我们来告一下嘛，看能不能看清楚哈。",
+    start_ms: 0,
+    end_ms: 6000,
+  });
+  page.handleSpeakerEvent.call(context, {
+    type: "speaker.final",
+    speaker_id: "speaker_unknown",
+    segment_id: "seg-2",
+    text: "来，我们来告一下嘛，看能不能看清楚哈。那个到底四川话识不识别得清楚嘛？",
+    start_ms: 0,
+    end_ms: 13000,
+  });
+  page.handleSpeakerEvent.call(context, {
+    type: "speaker.final",
+    speaker_id: "speaker_unknown",
+    segment_id: "seg-3",
+    text: "来，我们来告一下嘛，看能不能看清楚哈。那个到底四川话识不识别得清楚嘛？四川话得不得行嘛？",
+    start_ms: 0,
+    end_ms: 24000,
+  });
+
+  assert.equal(context.data.speakers.length, 1);
+  assert.equal(context.data.speakers[0].segmentCountText, "3 段");
+  assert.deepEqual(context.data.speakers[0].lines.map((line) => line.text), [
+    "四川话得不得行嘛？",
+    "那个到底四川话识不识别得清楚嘛？",
+    "来，我们来告一下嘛，看能不能看清楚哈。",
+  ]);
+  assert.deepEqual(context.data.speakers[0].lines.map((line) => line.metaText), [
+    "0:13-0:24",
+    "0:06-0:13",
+    "0:00-0:06",
+  ]);
+});
+
+test("debug speaker page preserves repeated text when provider reports a new start time", () => {
+  const { page } = loadDebugSpeakerPage();
+  const context = pageContext(page);
+
+  page.handleSpeakerEvent.call(context, {
+    type: "speaker.final",
+    speaker_id: "speaker_unknown",
+    segment_id: "seg-1",
+    text: "好。",
+    start_ms: 0,
+    end_ms: 1000,
+  });
+  page.handleSpeakerEvent.call(context, {
+    type: "speaker.final",
+    speaker_id: "speaker_unknown",
+    segment_id: "seg-2",
+    text: "好。",
+    start_ms: 2500,
+    end_ms: 3300,
+  });
+
+  assert.equal(context.data.speakers[0].segmentCountText, "2 段");
+  assert.deepEqual(context.data.speakers[0].lines.map((line) => line.text), ["好。", "好。"]);
+  assert.deepEqual(context.data.speakers[0].lines.map((line) => line.metaText), ["0:02-0:03", "0:00-0:01"]);
+});
+
+test("debug speaker page keeps only new text from cumulative partial results", () => {
+  const { page } = loadDebugSpeakerPage();
+  const context = pageContext(page);
+
+  page.handleSpeakerEvent.call(context, {
+    type: "speaker.final",
+    speaker_id: "speaker_unknown",
+    segment_id: "seg-1",
+    text: "来，我们来告一下嘛，看能不能看清楚哈。",
+    start_ms: 0,
+    end_ms: 6000,
+  });
+  page.handleSpeakerEvent.call(context, {
+    type: "speaker.partial",
+    speaker_id: "speaker_unknown",
+    text: "来，我们来告一下嘛，看能不能看清楚哈。那个到底四川话识不识别得清楚嘛？",
+    start_ms: 0,
+    end_ms: 13000,
+  });
+
+  assert.equal(context.data.speakers[0].partialText, "那个到底四川话识不识别得清楚嘛？");
+  assert.equal(context.data.speakers[0].lines.length, 1);
+});
+
 test("debug speaker page scrolls long partial text to the newest progress", () => {
   const { page } = loadDebugSpeakerPage();
   const context = pageContext(page);
@@ -89,6 +191,24 @@ test("debug speaker page scrolls long partial text to the newest progress", () =
 
   assert.equal(context.data.speakers[0].partialScrollTop, 20000);
   assert.match(context.data.speakers[0].partialScrollTarget, /speaker_2-partial-end-20000/);
+});
+
+test("debug speaker page follows the shared large text setting", () => {
+  const { mod, page } = loadDebugSpeakerPage({
+    accessibilityExports: {
+      readAccessibilitySettings: () => ({
+        largeTextEnabled: true,
+        autoBargeInEnabled: true,
+      }),
+    },
+  });
+  const context = pageContext(page);
+
+  page.onLoad.call(context);
+
+  assert.equal(context.data.pageClass, "debug-speaker-page large-text");
+  assert.equal(mod.debugSpeakerPageClass(false), "debug-speaker-page");
+  assert.equal(mod.debugSpeakerPageClass(true), "debug-speaker-page large-text");
 });
 
 test("debug speaker page clears transcript only while idle", () => {

@@ -330,6 +330,82 @@
   font-variant-numeric: tabular-nums;
 }
 
+.debug-speaker-page.large-text {
+  padding-left: 24rpx;
+  padding-right: 24rpx;
+}
+
+.debug-speaker-page.large-text .page-title {
+  font-size: 56rpx;
+}
+
+.debug-speaker-page.large-text .page-meta,
+.debug-speaker-page.large-text .control-meta,
+.debug-speaker-page.large-text .stat-label,
+.debug-speaker-page.large-text .line-meta {
+  font-size: 36rpx;
+  line-height: 1.35;
+}
+
+.debug-speaker-page.large-text .control-panel,
+.debug-speaker-page.large-text .empty-panel,
+.debug-speaker-page.large-text .speaker-window {
+  border-radius: 30rpx;
+}
+
+.debug-speaker-page.large-text .control-panel,
+.debug-speaker-page.large-text .speaker-window {
+  padding: 38rpx;
+}
+
+.debug-speaker-page.large-text .control-title,
+.debug-speaker-page.large-text .speaker-title,
+.debug-speaker-page.large-text .empty-title {
+  font-size: 48rpx;
+  line-height: 1.25;
+}
+
+.debug-speaker-page.large-text .status-pill,
+.debug-speaker-page.large-text .speaker-count,
+.debug-speaker-page.large-text .stat-value {
+  font-size: 40rpx;
+}
+
+.debug-speaker-page.large-text .primary-button,
+.debug-speaker-page.large-text .secondary-button {
+  height: 116rpx;
+  font-size: 44rpx;
+}
+
+.debug-speaker-page.large-text .secondary-button {
+  width: 212rpx;
+  flex-basis: 212rpx;
+}
+
+.debug-speaker-page.large-text .empty-copy,
+.debug-speaker-page.large-text .speaker-empty {
+  font-size: 40rpx;
+  line-height: 1.45;
+}
+
+.debug-speaker-page.large-text .partial-label {
+  font-size: 36rpx;
+}
+
+.debug-speaker-page.large-text .partial-scroll {
+  max-height: 420rpx;
+}
+
+.debug-speaker-page.large-text .partial-scroll.long {
+  height: 420rpx;
+}
+
+.debug-speaker-page.large-text .partial-text,
+.debug-speaker-page.large-text .line-text {
+  font-size: 82rpx;
+  line-height: 104rpx;
+}
+
 .bottom-spacer {
   height: 36rpx;
 }

@@ -1,4 +1,4 @@
-<view class="debug-speaker-page">
+<view class="{{pageClass}}">
   <view class="top-row">
     <view class="back-hit" bindtap="goBack">
       <text class="back-mark">‹</text>
