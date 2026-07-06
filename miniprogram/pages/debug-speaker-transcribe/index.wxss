@@ -392,6 +392,79 @@
   color: #7b6f68;
 }
 
+.history-preview-layer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 30;
+  display: flex;
+  align-items: flex-end;
+  padding: 0 24rpx 28rpx;
+  padding-bottom: calc(28rpx + env(safe-area-inset-bottom));
+  background: rgba(43, 23, 19, 0.1);
+  box-sizing: border-box;
+}
+
+.history-preview-panel {
+  width: 100%;
+  padding: 28rpx 30rpx 32rpx;
+  border-radius: 26rpx;
+  background: #2b1713;
+  color: #fffdf9;
+  box-shadow: 0 18rpx 48rpx rgba(43, 23, 19, 0.26);
+  box-sizing: border-box;
+}
+
+.history-preview-meta-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12rpx;
+}
+
+.history-preview-speaker {
+  color: #fffdf9;
+  font-size: 32rpx;
+  font-weight: 850;
+  line-height: 1.25;
+}
+
+.history-preview-meta {
+  color: rgba(255, 253, 249, 0.74);
+  font-size: 28rpx;
+  font-weight: 750;
+  line-height: 1.25;
+  font-variant-numeric: tabular-nums;
+}
+
+.history-preview-status {
+  min-height: 40rpx;
+  padding: 0 12rpx;
+  border-radius: 999rpx;
+  background: rgba(255, 253, 249, 0.12);
+  color: #f2c4b1;
+  font-size: 26rpx;
+  font-weight: 850;
+  line-height: 40rpx;
+}
+
+.history-preview-scroll {
+  max-height: 620rpx;
+  margin-top: 18rpx;
+}
+
+.history-preview-text {
+  display: block;
+  color: #fffdf9;
+  font-size: 64rpx;
+  font-weight: 850;
+  line-height: 82rpx;
+  word-break: break-word;
+  text-wrap: pretty;
+}
+
 .debug-speaker-page.large-text {
   padding-left: 24rpx;
   padding-right: 24rpx;
@@ -472,6 +545,21 @@
 .debug-speaker-page.large-text .line-text.history {
   font-size: 46rpx;
   line-height: 72rpx;
+}
+
+.debug-speaker-page.large-text .history-preview-speaker,
+.debug-speaker-page.large-text .history-preview-meta,
+.debug-speaker-page.large-text .history-preview-status {
+  font-size: 34rpx;
+}
+
+.debug-speaker-page.large-text .history-preview-scroll {
+  max-height: 680rpx;
+}
+
+.debug-speaker-page.large-text .history-preview-text {
+  font-size: 76rpx;
+  line-height: 96rpx;
 }
 
 .bottom-spacer {

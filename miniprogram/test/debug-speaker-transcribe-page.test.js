@@ -30,6 +30,24 @@ function flushPromises() {
   return new Promise((resolve) => setImmediate(resolve));
 }
 
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function lineTouchEvent(speakerId, lineId, previewEnabled = true, clientX = 24, clientY = 36) {
+  return {
+    currentTarget: {
+      dataset: {
+        speakerId,
+        lineId,
+        previewEnabled,
+      },
+    },
+    touches: [{ clientX, clientY }],
+    changedTouches: [{ clientX, clientY }],
+  };
+}
+
 test("debug speaker page groups partial and final text by speaker windows", () => {
   const { page } = loadDebugSpeakerPage();
   const context = pageContext(page);
@@ -141,6 +159,95 @@ test("debug speaker page keeps only the newest final line visually large", async
   assert.equal(context.data.latestFinalLineId, secondLineId);
   assert.equal(proofreadSpeakerOne.lines[0].lineClass, "line-item history");
   assert.equal(proofreadSpeakerTwo.lines[0].lineClass, "line-item latest");
+});
+
+test("debug speaker page previews historical final text while pressed", async () => {
+  const { page } = loadDebugSpeakerPage();
+  const context = pageContext(page);
+
+  page.handleSpeakerEvent.call(context, {
+    type: "speaker.final",
+    speaker_id: "speaker_1",
+    segment_id: "seg-1",
+    text: "第一句会变成历史文字。",
+    start_ms: 0,
+    end_ms: 1600,
+  });
+  page.handleSpeakerEvent.call(context, {
+    type: "speaker.final",
+    speaker_id: "speaker_1",
+    segment_id: "seg-2",
+    text: "第二句是最新文字。",
+    start_ms: 1700,
+    end_ms: 3400,
+  });
+  await flushPromises();
+
+  const speaker = context.data.speakers[0];
+  const latestLine = speaker.lines[0];
+  const historyLine = speaker.lines[1];
+
+  assert.equal(latestLine.previewEnabled, false);
+  assert.equal(historyLine.previewEnabled, true);
+
+  page.handleLineTouchStart.call(
+    context,
+    lineTouchEvent(speaker.speakerId, historyLine.id, historyLine.previewEnabled),
+  );
+  assert.equal(context.data.historyLinePreview.visible, false);
+
+  await wait(180);
+
+  assert.equal(context.data.historyLinePreview.visible, true);
+  assert.equal(context.data.historyLinePreview.speakerTitle, "说话人 1");
+  assert.equal(context.data.historyLinePreview.metaText, "0:00-0:01");
+  assert.equal(context.data.historyLinePreview.statusText, "已校对");
+  assert.equal(context.data.historyLinePreview.text, "第一句会变成历史文字。");
+
+  page.handleLineTouchEnd.call(context);
+
+  assert.equal(context.data.historyLinePreview.visible, false);
+});
+
+test("debug speaker page does not preview latest final text or scrolling touches", async () => {
+  const { page } = loadDebugSpeakerPage();
+  const context = pageContext(page);
+
+  page.handleSpeakerEvent.call(context, {
+    type: "speaker.final",
+    speaker_id: "speaker_1",
+    segment_id: "seg-1",
+    text: "先说的历史内容。",
+  });
+  page.handleSpeakerEvent.call(context, {
+    type: "speaker.final",
+    speaker_id: "speaker_1",
+    segment_id: "seg-2",
+    text: "当前最新内容。",
+  });
+
+  const speaker = context.data.speakers[0];
+  const latestLine = speaker.lines[0];
+  const historyLine = speaker.lines[1];
+
+  page.handleLineTouchStart.call(
+    context,
+    lineTouchEvent(speaker.speakerId, latestLine.id, latestLine.previewEnabled),
+  );
+  await wait(180);
+  assert.equal(context.data.historyLinePreview.visible, false);
+
+  page.handleLineTouchStart.call(
+    context,
+    lineTouchEvent(speaker.speakerId, historyLine.id, historyLine.previewEnabled, 30, 40),
+  );
+  page.handleLineTouchMove.call(
+    context,
+    lineTouchEvent(speaker.speakerId, historyLine.id, historyLine.previewEnabled, 30, 70),
+  );
+  await wait(180);
+
+  assert.equal(context.data.historyLinePreview.visible, false);
 });
 
 test("debug speaker page keeps only new text from cumulative final results", () => {
