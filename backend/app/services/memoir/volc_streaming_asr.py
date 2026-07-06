@@ -38,11 +38,13 @@ class VolcStreamingASRClient:
         config: VolcStreamingASRConfig,
         user_id: str,
         voice_session_id: str,
+        request_options: dict[str, Any] | None = None,
         codec: VolcASRProtocolCodec | None = None,
     ) -> None:
         self.config = config
         self.user_id = user_id
         self.voice_session_id = voice_session_id
+        self.request_options = request_options or {}
         self.codec = codec or VolcASRProtocolCodec()
         self.request_id = str(uuid.uuid4())
         self._connection: Any | None = None
@@ -114,7 +116,7 @@ class VolcStreamingASRClient:
         return headers
 
     def _initial_request(self) -> dict[str, Any]:
-        return {
+        request = {
             "user": {"uid": self.user_id},
             "audio": {
                 "format": "pcm",
@@ -134,6 +136,8 @@ class VolcStreamingASRClient:
                 "voice_session_id": self.voice_session_id,
             },
         }
+        request["request"].update(self.request_options)
+        return request
 
     def _next_sequence(self) -> int:
         sequence = self._sequence

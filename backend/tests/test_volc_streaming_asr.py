@@ -228,6 +228,34 @@ def test_volc_headers_prefer_app_access_credentials_over_api_key():
     assert "X-Api-Key" not in headers
 
 
+def test_volc_initial_request_can_add_debug_request_options_without_changing_defaults():
+    default_client = VolcStreamingASRClient(
+        config=VolcStreamingASRConfig(
+            ws_url="wss://example.test",
+            resource_id="volc.seedasr.sauc.duration",
+            api_key="api",
+        ),
+        user_id="user-1",
+        voice_session_id="voice-session-1",
+    )
+    debug_client = VolcStreamingASRClient(
+        config=VolcStreamingASRConfig(
+            ws_url="wss://example.test",
+            resource_id="volc.seedasr.sauc.duration",
+            api_key="api",
+        ),
+        user_id="user-1",
+        voice_session_id="debug-speaker-1",
+        request_options={"enable_speaker_info": True},
+    )
+
+    default_request = default_client._initial_request()
+    debug_request = debug_client._initial_request()
+
+    assert "enable_speaker_info" not in default_request["request"]
+    assert debug_request["request"]["enable_speaker_info"] is True
+
+
 def test_volc_client_maps_protocol_parse_error_to_stable_provider_event():
     declared_payload_size = 999
     bad_frame = (
