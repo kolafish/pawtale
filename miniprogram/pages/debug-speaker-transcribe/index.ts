@@ -1,4 +1,5 @@
 import type { DebugSpeakerConnectionStatus, DebugSpeakerGatewayEvent } from "../../services/debug-speaker-transcribe";
+import { readAccessibilitySettings } from "../../services/accessibility-settings";
 import {
   DebugSpeakerTranscribeClient,
   debugSpeakerTitle,
@@ -8,6 +9,8 @@ interface SpeakerLineView {
   id: string;
   text: string;
   metaText: string;
+  startMs: number | null;
+  endMs: number | null;
 }
 
 interface SpeakerWindowView {
@@ -18,6 +21,9 @@ interface SpeakerWindowView {
   partialScrollClass: string;
   partialScrollTarget: string;
   partialScrollTop: number;
+  cumulativeFinalText: string;
+  cumulativeFinalStartMs: number | null;
+  cumulativeFinalEndMs: number | null;
   lines: SpeakerLineView[];
   segmentCountText: string;
   cardClass: string;
@@ -25,6 +31,7 @@ interface SpeakerWindowView {
 }
 
 interface DebugSpeakerPageData {
+  pageClass: string;
   statusText: string;
   statusClass: string;
   primaryButtonText: string;
@@ -95,6 +102,65 @@ function speakerDomId(speakerId: string): string {
   return speakerId.replace(/[^a-zA-Z0-9_-]/g, "_");
 }
 
+function debugSpeakerPageClass(largeTextEnabled = readAccessibilitySettings().largeTextEnabled): string {
+  return largeTextEnabled ? "debug-speaker-page large-text" : "debug-speaker-page";
+}
+
+function eventStartMs(event: DebugSpeakerGatewayEvent): number | null {
+  return typeof event.start_ms === "number" ? event.start_ms : null;
+}
+
+function eventEndMs(event: DebugSpeakerGatewayEvent): number | null {
+  return typeof event.end_ms === "number" ? event.end_ms : null;
+}
+
+function incrementalSpeakerText(text: string, previousText: string, sameCumulativeRun: boolean): string {
+  const cleanText = text.trim();
+  const cleanPrevious = previousText.trim();
+  if (!cleanText || !cleanPrevious || !sameCumulativeRun) {
+    return cleanText;
+  }
+  if (cleanText.startsWith(cleanPrevious)) {
+    return cleanText.slice(cleanPrevious.length).trim();
+  }
+  if (cleanPrevious.startsWith(cleanText)) {
+    return "";
+  }
+  return cleanText;
+}
+
+function finalLineFromSpeakerEvent(
+  event: DebugSpeakerGatewayEvent,
+  existing: SpeakerWindowView,
+  fallbackId: string,
+): SpeakerLineView | null {
+  const text = (event.text || "").trim();
+  if (!text) {
+    return null;
+  }
+  const eventStart = eventStartMs(event);
+  const sameCumulativeRun = existing.cumulativeFinalStartMs !== null
+    && eventStart === existing.cumulativeFinalStartMs;
+  const incrementalText = incrementalSpeakerText(text, existing.cumulativeFinalText, sameCumulativeRun);
+  if (!incrementalText) {
+    return null;
+  }
+  const startMs = sameCumulativeRun && existing.cumulativeFinalText
+    ? existing.cumulativeFinalEndMs
+    : eventStart;
+  return {
+    id: event.segment_id || fallbackId,
+    text: incrementalText,
+    metaText: formatSegmentMeta({
+      ...event,
+      text: incrementalText,
+      start_ms: startMs,
+    }),
+    startMs,
+    endMs: eventEndMs(event),
+  };
+}
+
 function speakerWindow(
   speakerId: string,
   speakerIndex: number,
@@ -110,6 +176,9 @@ function speakerWindow(
     partialScrollClass: "partial-scroll",
     partialScrollTarget: "",
     partialScrollTop: 0,
+    cumulativeFinalText: "",
+    cumulativeFinalStartMs: null,
+    cumulativeFinalEndMs: null,
     lines,
     segmentCountText: `${lines.length} 段`,
     cardClass: "speaker-window",
@@ -149,7 +218,10 @@ function pagePatch(
 Page<DebugSpeakerPageData, {
   client: DebugSpeakerTranscribeClient | null;
   speakerOrder: string[];
+  onLoad(): void;
+  onShow(): void;
   onUnload(): void;
+  refreshAccessibilitySettings(): void;
   setStatus(status: DebugSpeakerConnectionStatus): void;
   handleSpeakerEvent(event: DebugSpeakerGatewayEvent): void;
   toggleRecording(): Promise<void>;
@@ -160,6 +232,7 @@ Page<DebugSpeakerPageData, {
   speakerOrder: [],
 
   data: {
+    pageClass: "debug-speaker-page",
     statusText: "未开始",
     statusClass: "status-pill",
     primaryButtonText: "开始识别",
@@ -176,9 +249,21 @@ Page<DebugSpeakerPageData, {
     clearDisabled: true,
   },
 
+  onLoad() {
+    this.refreshAccessibilitySettings();
+  },
+
+  onShow() {
+    this.refreshAccessibilitySettings();
+  },
+
   onUnload() {
     this.client?.close();
     this.client = null;
+  },
+
+  refreshAccessibilitySettings() {
+    this.setData({ pageClass: debugSpeakerPageClass() });
   },
 
   setStatus(status) {
@@ -236,21 +321,29 @@ Page<DebugSpeakerPageData, {
     let partialScrollClass = existing.partialScrollClass;
     let partialScrollTarget = existing.partialScrollTarget;
     let partialScrollTop = existing.partialScrollTop;
+    let cumulativeFinalText = existing.cumulativeFinalText;
+    let cumulativeFinalStartMs = existing.cumulativeFinalStartMs;
+    let cumulativeFinalEndMs = existing.cumulativeFinalEndMs;
     if (event.type === "speaker.final") {
-      if (text) {
-        nextLines.unshift({
-          id: event.segment_id || `${speakerId}-${Date.now()}-${nextLines.length}`,
-          text,
-          metaText: formatSegmentMeta(event),
-        });
+      const line = finalLineFromSpeakerEvent(event, existing, `${speakerId}-${Date.now()}-${nextLines.length}`);
+      if (line) {
+        nextLines.unshift(line);
       }
       partialText = "";
       partialScrollClass = "partial-scroll";
       partialScrollTarget = "";
       partialScrollTop = 0;
+      if (text.trim()) {
+        cumulativeFinalText = text.trim();
+        cumulativeFinalStartMs = eventStartMs(event);
+        cumulativeFinalEndMs = eventEndMs(event);
+      }
     } else if (event.type === "speaker.partial") {
-      partialText = text;
-      partialScrollClass = text.length > 90 ? "partial-scroll long" : "partial-scroll";
+      const eventStart = eventStartMs(event);
+      const sameCumulativeRun = existing.cumulativeFinalStartMs !== null
+        && eventStart === existing.cumulativeFinalStartMs;
+      partialText = incrementalSpeakerText(text, existing.cumulativeFinalText, sameCumulativeRun);
+      partialScrollClass = partialText.length > 90 ? "partial-scroll long" : "partial-scroll";
       partialScrollTop += 10000;
       partialEndId = `${speakerDomId(speakerId)}-partial-end-${partialScrollTop}`;
       partialScrollTarget = partialEndId;
@@ -262,6 +355,9 @@ Page<DebugSpeakerPageData, {
       partialScrollClass,
       partialScrollTarget,
       partialScrollTop,
+      cumulativeFinalText,
+      cumulativeFinalStartMs,
+      cumulativeFinalEndMs,
       lines: nextLines.slice(0, 20),
       segmentCountText: `${nextLines.length} 段`,
       cardClass: partialText ? "speaker-window active" : "speaker-window",
@@ -304,4 +400,5 @@ export {
   formatElapsed as formatDebugSpeakerElapsed,
   formatSegmentMeta as formatDebugSpeakerSegmentMeta,
   pagePatch as debugSpeakerPagePatch,
+  debugSpeakerPageClass,
 };
