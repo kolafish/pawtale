@@ -312,11 +312,22 @@
 .line-text {
   display: block;
   color: #2b1713;
+  word-break: break-word;
+  text-wrap: pretty;
+}
+
+.partial-text,
+.line-text.latest {
   font-size: 44rpx;
   font-weight: 800;
   line-height: 1.55;
-  word-break: break-word;
-  text-wrap: pretty;
+}
+
+.line-text.history {
+  color: #3c2b25;
+  font-size: 38rpx;
+  font-weight: 700;
+  line-height: 1.55;
 }
 
 .partial-text {
@@ -341,6 +352,10 @@
   margin-top: 24rpx;
   padding-top: 24rpx;
   border-top: 1rpx solid rgba(43, 23, 19, 0.08);
+}
+
+.line-item.latest {
+  border-top-color: rgba(166, 75, 62, 0.18);
 }
 
 .line-meta-row {
@@ -449,9 +464,14 @@
 }
 
 .debug-speaker-page.large-text .partial-text,
-.debug-speaker-page.large-text .line-text {
+.debug-speaker-page.large-text .line-text.latest {
   font-size: 76rpx;
   line-height: 96rpx;
+}
+
+.debug-speaker-page.large-text .line-text.history {
+  font-size: 46rpx;
+  line-height: 72rpx;
 }
 
 .bottom-spacer {

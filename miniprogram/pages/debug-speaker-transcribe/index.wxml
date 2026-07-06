@@ -99,7 +99,7 @@
         wx:for="{{item.lines}}"
         wx:for-item="line"
         wx:key="id"
-        class="line-item"
+        class="{{line.lineClass}}"
       >
         <view wx:if="{{line.metaText || line.proofreadStatusText}}" class="line-meta-row">
           <text wx:if="{{line.metaText}}" class="line-meta">{{line.metaText}}</text>
@@ -107,7 +107,7 @@
             {{line.proofreadStatusText}}
           </text>
         </view>
-        <text class="line-text">{{line.text}}</text>
+        <text class="{{line.textClass}}">{{line.text}}</text>
       </view>
     </view>
   </view>
