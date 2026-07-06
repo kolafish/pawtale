@@ -12,6 +12,8 @@ import {
 interface SpeakerLineView {
   id: string;
   text: string;
+  lineClass: string;
+  textClass: string;
   metaText: string;
   startMs: number | null;
   endMs: number | null;
@@ -55,6 +57,7 @@ interface DebugSpeakerPageData {
   showDiarizationNotice: boolean;
   diarizationNotice: string;
   diarizationNoticeClass: string;
+  latestFinalLineId: string;
 }
 
 function statusText(status: DebugSpeakerConnectionStatus): string {
@@ -190,6 +193,8 @@ function finalLineFromSpeakerEvent(
   return {
     id: fallbackId,
     text: incrementalText,
+    lineClass: "line-item history",
+    textClass: "line-text history",
     metaText: formatSegmentMeta({
       ...event,
       text: incrementalText,
@@ -200,6 +205,27 @@ function finalLineFromSpeakerEvent(
     proofreadStatusText: "",
     proofreadLoading: false,
   };
+}
+
+function lineClasses(lineId: string, latestLineId: string): Pick<SpeakerLineView, "lineClass" | "textClass"> {
+  const stateClass = lineId === latestLineId ? "latest" : "history";
+  return {
+    lineClass: `line-item ${stateClass}`,
+    textClass: `line-text ${stateClass}`,
+  };
+}
+
+function applyLatestLineClasses(
+  speakers: SpeakerWindowView[],
+  latestLineId: string,
+): SpeakerWindowView[] {
+  return speakers.map((speaker) => ({
+    ...speaker,
+    lines: speaker.lines.map((line) => ({
+      ...line,
+      ...lineClasses(line.id, latestLineId),
+    })),
+  }));
 }
 
 function debugSpeakerProofreadContextLines(
@@ -340,6 +366,7 @@ Page<DebugSpeakerPageData, {
     showDiarizationNotice: false,
     diarizationNotice: "",
     diarizationNoticeClass: "diarization-notice",
+    latestFinalLineId: "",
   },
 
   onLoad() {
@@ -425,6 +452,7 @@ Page<DebugSpeakerPageData, {
     let cumulativeFinalEndMs = existing.cumulativeFinalEndMs;
     let lineForProofread: SpeakerLineView | null = null;
     let proofreadContextLines: DebugSpeakerProofreadContextLine[] = [];
+    let latestFinalLineId = this.data.latestFinalLineId;
     if (event.type === "speaker.final") {
       const line = finalLineFromSpeakerEvent(event, existing, `${speakerId}-${Date.now()}-${nextLines.length}`);
       if (line) {
@@ -433,6 +461,7 @@ Page<DebugSpeakerPageData, {
         line.proofreadStatusText = "校对中";
         nextLines.unshift(line);
         lineForProofread = line;
+        latestFinalLineId = line.id;
       }
       partialText = "";
       partialScrollClass = "partial-scroll";
@@ -478,9 +507,11 @@ Page<DebugSpeakerPageData, {
     } else {
       speakers.push(nextSpeaker);
     }
+    const visibleSpeakers = applyLatestLineClasses(speakers, latestFinalLineId);
     this.setData({
-      speakers,
-      ...pagePatch(this.data.recording ? "listening" : "ready", speakers),
+      speakers: visibleSpeakers,
+      latestFinalLineId,
+      ...pagePatch(this.data.recording ? "listening" : "ready", visibleSpeakers),
     });
     if (lineForProofread) {
       void this.proofreadFinalLine(
@@ -507,17 +538,23 @@ Page<DebugSpeakerPageData, {
     try {
       const result = await proofreadDebugSpeakerTranscriptLine(text, contextLines);
       const proofreadText = result.proofread_text.trim();
-      const speakers = patchSpeakerLine(this.data.speakers, speakerId, lineId, {
-        text: proofreadText || text,
-        proofreadLoading: false,
-        proofreadStatusText: "已校对",
-      });
+      const speakers = applyLatestLineClasses(
+        patchSpeakerLine(this.data.speakers, speakerId, lineId, {
+          text: proofreadText || text,
+          proofreadLoading: false,
+          proofreadStatusText: "已校对",
+        }),
+        this.data.latestFinalLineId,
+      );
       this.setData({ speakers });
     } catch (_error) {
-      const speakers = patchSpeakerLine(this.data.speakers, speakerId, lineId, {
-        proofreadLoading: false,
-        proofreadStatusText: "校对失败",
-      });
+      const speakers = applyLatestLineClasses(
+        patchSpeakerLine(this.data.speakers, speakerId, lineId, {
+          proofreadLoading: false,
+          proofreadStatusText: "校对失败",
+        }),
+        this.data.latestFinalLineId,
+      );
       this.setData({ speakers });
     }
   },
@@ -537,6 +574,7 @@ Page<DebugSpeakerPageData, {
       showDiarizationNotice: false,
       diarizationNotice: "",
       diarizationNoticeClass: "diarization-notice",
+      latestFinalLineId: "",
       ...pagePatch("idle", speakers),
     });
   },

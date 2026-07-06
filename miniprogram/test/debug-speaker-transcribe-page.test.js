@@ -58,6 +58,8 @@ test("debug speaker page groups partial and final text by speaker windows", () =
   assert.equal(context.data.speakers[1].title, "说话人 2");
   assert.equal(context.data.speakers[1].lines[0].text, "住在厂里的家属院。");
   assert.equal(context.data.speakers[1].lines[0].metaText, "0:01-0:03 · 置信度 86%");
+  assert.equal(context.data.speakers[1].lines[0].lineClass, "line-item latest");
+  assert.equal(context.data.speakers[1].lines[0].textClass, "line-text latest");
   assert.equal(context.data.showEmpty, false);
   assert.equal(context.data.clearDisabled, false);
 });
@@ -83,6 +85,62 @@ test("debug speaker page shows provider diarization diagnostics", () => {
 
   assert.equal(context.data.diarizationNoticeClass, "diarization-notice ok");
   assert.equal(context.data.diarizationNotice, "已收到说话人标签，会按不同人分窗口显示。");
+});
+
+test("debug speaker page keeps only the newest final line visually large", async () => {
+  const pendingProofreads = [];
+  const { page } = loadDebugSpeakerPage({
+    proofreadExports: {
+      proofreadDebugSpeakerTranscriptLine: (text) => new Promise((resolve) => {
+        pendingProofreads.push({ text, resolve });
+      }),
+    },
+  });
+  const context = pageContext(page);
+
+  page.handleSpeakerEvent.call(context, {
+    type: "speaker.final",
+    speaker_id: "speaker_1",
+    segment_id: "seg-1",
+    text: "第一位说话人先说了一句。",
+    start_ms: 0,
+    end_ms: 2400,
+  });
+  const firstLineId = context.data.speakers[0].lines[0].id;
+
+  page.handleSpeakerEvent.call(context, {
+    type: "speaker.final",
+    speaker_id: "speaker_2",
+    segment_id: "seg-2",
+    text: "第二位说话人接着补充。",
+    start_ms: 2500,
+    end_ms: 5200,
+  });
+  const speakerOne = context.data.speakers.find((speaker) => speaker.speakerId === "speaker_1");
+  const speakerTwo = context.data.speakers.find((speaker) => speaker.speakerId === "speaker_2");
+  const secondLineId = speakerTwo.lines[0].id;
+
+  assert.equal(context.data.latestFinalLineId, secondLineId);
+  assert.equal(speakerOne.lines[0].id, firstLineId);
+  assert.equal(speakerOne.lines[0].lineClass, "line-item history");
+  assert.equal(speakerOne.lines[0].textClass, "line-text history");
+  assert.equal(speakerTwo.lines[0].lineClass, "line-item latest");
+  assert.equal(speakerTwo.lines[0].textClass, "line-text latest");
+
+  pendingProofreads[1].resolve({
+    proofread_text: "第二位说话人接着补充。",
+  });
+  await flushPromises();
+  pendingProofreads[0].resolve({
+    proofread_text: "第一位说话人先说了一句。",
+  });
+  await flushPromises();
+
+  const proofreadSpeakerOne = context.data.speakers.find((speaker) => speaker.speakerId === "speaker_1");
+  const proofreadSpeakerTwo = context.data.speakers.find((speaker) => speaker.speakerId === "speaker_2");
+  assert.equal(context.data.latestFinalLineId, secondLineId);
+  assert.equal(proofreadSpeakerOne.lines[0].lineClass, "line-item history");
+  assert.equal(proofreadSpeakerTwo.lines[0].lineClass, "line-item latest");
 });
 
 test("debug speaker page keeps only new text from cumulative final results", () => {
@@ -120,6 +178,11 @@ test("debug speaker page keeps only new text from cumulative final results", () 
     "四川话得不得行嘛？",
     "那个到底四川话识不识别得清楚嘛？",
     "来，我们来告一下嘛，看能不能看清楚哈。",
+  ]);
+  assert.deepEqual(context.data.speakers[0].lines.map((line) => line.textClass), [
+    "line-text latest",
+    "line-text history",
+    "line-text history",
   ]);
   assert.deepEqual(context.data.speakers[0].lines.map((line) => line.metaText), [
     "0:13-0:24",
@@ -348,6 +411,7 @@ test("debug speaker page clears transcript only while idle", () => {
   assert.deepEqual(context.data.speakers, []);
   assert.equal(context.data.showEmpty, true);
   assert.equal(context.data.showDiarizationNotice, false);
+  assert.equal(context.data.latestFinalLineId, "");
   assert.equal(context.data.elapsedText, "0:00");
 });
 
