@@ -687,15 +687,20 @@ Page<DebugSpeakerPageData, {
       : [...this.speakerOrder, speakerId];
     this.speakerOrder = speakerOrder;
     const speakerIndex = speakerOrder.indexOf(speakerId) + 1;
+    const previousSpeakerGender = this.speakerGenderById[speakerId] || "";
     const speakerLabel = this.speakerLabelForEvent(speakerId, speakerIndex, event.speaker_gender);
+    const speakerLabelsChanged = previousSpeakerGender !== (this.speakerGenderById[speakerId] || "");
     const speakers = [...this.data.speakers];
     const existingIndex = speakers.findIndex((item) => item.speakerId === speakerId);
     const existing = existingIndex >= 0
       ? speakers[existingIndex]
       : speakerWindow(speakerId, speakerIndex);
-    let conversationLines = this.refreshConversationSpeakerLabels(this.data.conversationLines);
+    let conversationLines = speakerLabelsChanged
+      ? this.refreshConversationSpeakerLabels(this.data.conversationLines)
+      : this.data.conversationLines;
+    let conversationLinesChanged = speakerLabelsChanged;
     let activePartial = this.data.activePartial;
-    let conversationScrollTarget = this.data.conversationScrollTarget;
+    let conversationScrollTarget = "";
     const text = event.text || "";
     const nextLines = existing.lines.slice();
     let partialText = existing.partialText;
@@ -724,8 +729,8 @@ Page<DebugSpeakerPageData, {
           speakerLabel.badgeClass,
           line,
         );
-        conversationLines = [...conversationLines, conversationLine];
-        conversationScrollTarget = conversationLine.domId;
+        conversationLines = [conversationLine, ...conversationLines];
+        conversationLinesChanged = true;
       }
       partialText = "";
       partialScrollClass = "partial-scroll";
@@ -764,7 +769,6 @@ Page<DebugSpeakerPageData, {
           partialScrollTop,
         }
         : EMPTY_ACTIVE_PARTIAL;
-      conversationScrollTarget = "active-partial-card";
     }
     const nextSpeaker = speakerWindow(speakerId, speakerIndex, {
       ...existing,
@@ -788,12 +792,13 @@ Page<DebugSpeakerPageData, {
       speakers.push(nextSpeaker);
     }
     const visibleSpeakers = applyLatestLineClasses(speakers, latestFinalLineId);
-    const visibleConversationLines = this.refreshConversationSpeakerLabels(
-      applyLatestConversationLineClasses(conversationLines, latestFinalLineId),
-    );
-    this.setData({
+    const visibleConversationLines = conversationLinesChanged
+      ? this.refreshConversationSpeakerLabels(
+        applyLatestConversationLineClasses(conversationLines, latestFinalLineId),
+      )
+      : this.data.conversationLines;
+    const dataPatch: Partial<DebugSpeakerPageData> = {
       speakers: visibleSpeakers,
-      conversationLines: visibleConversationLines,
       activePartial,
       conversationScrollTarget,
       latestFinalLineId,
@@ -801,7 +806,11 @@ Page<DebugSpeakerPageData, {
         this.data.recording ? "listening" : "ready",
         visibleConversationLines.length > 0 || activePartial.visible,
       ),
-    });
+    };
+    if (conversationLinesChanged) {
+      dataPatch.conversationLines = visibleConversationLines;
+    }
+    this.setData(dataPatch);
     if (lineForProofread) {
       void this.proofreadFinalLine(
         speakerId,

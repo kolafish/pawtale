@@ -292,6 +292,7 @@
 }
 
 .active-partial {
+  margin-top: 0;
   border: 2rpx solid #d7a28c;
   background: #fffdf9;
 }

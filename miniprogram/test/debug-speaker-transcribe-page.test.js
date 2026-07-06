@@ -63,6 +63,7 @@ test("debug speaker page shows partial and final text in conversation flow", () 
   assert.equal(context.data.activePartial.visible, true);
   assert.equal(context.data.activePartial.speakerTitle, "说话人 1");
   assert.equal(context.data.activePartial.text, "你小时候住在哪里？");
+  assert.equal(context.data.conversationScrollTarget, "");
 
   page.handleSpeakerEvent.call(context, {
     type: "speaker.final",
@@ -86,11 +87,12 @@ test("debug speaker page shows partial and final text in conversation flow", () 
   assert.equal(context.data.conversationLines[0].metaText, "0:01-0:03 · 置信度 86%");
   assert.equal(context.data.conversationLines[0].lineClass, "line-item latest");
   assert.equal(context.data.conversationLines[0].textClass, "line-text latest");
+  assert.equal(context.data.conversationScrollTarget, "");
   assert.equal(context.data.showEmpty, false);
   assert.equal(context.data.clearDisabled, false);
 });
 
-test("debug speaker page keeps final text in spoken order with gender labels", async () => {
+test("debug speaker page keeps final text newest-first with gender labels", async () => {
   const { page } = loadDebugSpeakerPage();
   const context = pageContext(page);
 
@@ -130,14 +132,14 @@ test("debug speaker page keeps final text in spoken order with gender labels", a
     "男1",
   ]);
   assert.deepEqual(context.data.conversationLines.map((line) => line.text), [
-    "我先说第一句。",
-    "我接着说第二句。",
     "我再补第三句。",
+    "我接着说第二句。",
+    "我先说第一句。",
   ]);
   assert.deepEqual(context.data.conversationLines.map((line) => line.textClass), [
-    "line-text history",
-    "line-text history",
     "line-text latest",
+    "line-text history",
+    "line-text history",
   ]);
 });
 
@@ -193,14 +195,15 @@ test("debug speaker page keeps only the newest final line visually large", async
     start_ms: 2500,
     end_ms: 5200,
   });
-  const secondLineId = context.data.conversationLines[1].id;
+  const secondLineId = context.data.conversationLines[0].id;
 
   assert.equal(context.data.latestFinalLineId, secondLineId);
-  assert.equal(context.data.conversationLines[0].id, firstLineId);
-  assert.equal(context.data.conversationLines[0].lineClass, "line-item history");
-  assert.equal(context.data.conversationLines[0].textClass, "line-text history");
-  assert.equal(context.data.conversationLines[1].lineClass, "line-item latest");
-  assert.equal(context.data.conversationLines[1].textClass, "line-text latest");
+  assert.equal(context.data.conversationLines[0].id, secondLineId);
+  assert.equal(context.data.conversationLines[0].lineClass, "line-item latest");
+  assert.equal(context.data.conversationLines[0].textClass, "line-text latest");
+  assert.equal(context.data.conversationLines[1].id, firstLineId);
+  assert.equal(context.data.conversationLines[1].lineClass, "line-item history");
+  assert.equal(context.data.conversationLines[1].textClass, "line-text history");
 
   pendingProofreads[1].resolve({
     proofread_text: "第二位说话人接着补充。",
@@ -212,8 +215,8 @@ test("debug speaker page keeps only the newest final line visually large", async
   await flushPromises();
 
   assert.equal(context.data.latestFinalLineId, secondLineId);
-  assert.equal(context.data.conversationLines[0].lineClass, "line-item history");
-  assert.equal(context.data.conversationLines[1].lineClass, "line-item latest");
+  assert.equal(context.data.conversationLines[0].lineClass, "line-item latest");
+  assert.equal(context.data.conversationLines[1].lineClass, "line-item history");
 });
 
 test("debug speaker page previews historical final text while pressed", async () => {
@@ -238,8 +241,8 @@ test("debug speaker page previews historical final text while pressed", async ()
   });
   await flushPromises();
 
-  const historyLine = context.data.conversationLines[0];
-  const latestLine = context.data.conversationLines[1];
+  const latestLine = context.data.conversationLines[0];
+  const historyLine = context.data.conversationLines[1];
 
   assert.equal(latestLine.previewEnabled, false);
   assert.equal(historyLine.previewEnabled, true);
@@ -280,8 +283,8 @@ test("debug speaker page does not preview latest final text or scrolling touches
     text: "当前最新内容。",
   });
 
-  const historyLine = context.data.conversationLines[0];
-  const latestLine = context.data.conversationLines[1];
+  const latestLine = context.data.conversationLines[0];
+  const historyLine = context.data.conversationLines[1];
 
   page.handleLineTouchStart.call(
     context,
@@ -335,19 +338,19 @@ test("debug speaker page keeps only new text from cumulative final results", () 
   assert.equal(context.data.speakers.length, 1);
   assert.equal(context.data.speakers[0].segmentCountText, "3 段");
   assert.deepEqual(context.data.conversationLines.map((line) => line.text), [
-    "来，我们来告一下嘛，看能不能看清楚哈。",
-    "那个到底四川话识不识别得清楚嘛？",
     "四川话得不得行嘛？",
+    "那个到底四川话识不识别得清楚嘛？",
+    "来，我们来告一下嘛，看能不能看清楚哈。",
   ]);
   assert.deepEqual(context.data.conversationLines.map((line) => line.textClass), [
-    "line-text history",
-    "line-text history",
     "line-text latest",
+    "line-text history",
+    "line-text history",
   ]);
   assert.deepEqual(context.data.conversationLines.map((line) => line.metaText), [
-    "0:00-0:06",
-    "0:06-0:13",
     "0:13-0:24",
+    "0:06-0:13",
+    "0:00-0:06",
   ]);
 });
 
@@ -377,8 +380,8 @@ test("debug speaker page keeps only new final text when cumulative provider resu
   assert.equal(context.data.speakers.length, 1);
   assert.equal(context.data.speakers[0].segmentCountText, "2 段");
   assert.deepEqual(context.data.conversationLines.map((line) => line.text), [
-    "来，我们来告一下嘛，看能不能看清楚哈。",
     "那个到底四川话识不识别得清楚嘛？",
+    "来，我们来告一下嘛，看能不能看清楚哈。",
   ]);
 });
 
@@ -430,9 +433,9 @@ test("debug speaker page proofreads final lines with recent context", async () =
       endMs: 6000,
     },
   ]);
-  assert.equal(context.data.conversationLines[1].text, "四川话得不得行吗？");
-  assert.equal(context.data.conversationLines[1].proofreadLoading, false);
-  assert.equal(context.data.conversationLines[1].proofreadStatusText, "已校对");
+  assert.equal(context.data.conversationLines[0].text, "四川话得不得行吗？");
+  assert.equal(context.data.conversationLines[0].proofreadLoading, false);
+  assert.equal(context.data.conversationLines[0].proofreadStatusText, "已校对");
 });
 
 test("debug speaker page preserves repeated text when provider reports a new start time", () => {
@@ -458,7 +461,7 @@ test("debug speaker page preserves repeated text when provider reports a new sta
 
   assert.equal(context.data.speakers[0].segmentCountText, "2 段");
   assert.deepEqual(context.data.conversationLines.map((line) => line.text), ["好。", "好。"]);
-  assert.deepEqual(context.data.conversationLines.map((line) => line.metaText), ["0:00-0:01", "0:01-0:02"]);
+  assert.deepEqual(context.data.conversationLines.map((line) => line.metaText), ["0:01-0:02", "0:00-0:01"]);
 });
 
 test("debug speaker page keeps only new text from cumulative partial results", () => {
