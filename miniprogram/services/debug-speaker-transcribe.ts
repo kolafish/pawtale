@@ -25,6 +25,7 @@ export interface DebugSpeakerGatewayEvent {
   error?: string;
   segment_id?: string;
   speaker_id?: string;
+  speaker_gender?: string | null;
   text?: string;
   start_ms?: number | null;
   end_ms?: number | null;

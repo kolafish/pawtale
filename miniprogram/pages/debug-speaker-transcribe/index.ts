@@ -22,6 +22,13 @@ interface SpeakerLineView {
   proofreadLoading: boolean;
 }
 
+interface ConversationLineView extends SpeakerLineView {
+  speakerId: string;
+  speakerTitle: string;
+  speakerBadgeClass: string;
+  domId: string;
+}
+
 interface SpeakerWindowView {
   speakerId: string;
   title: string;
@@ -37,6 +44,18 @@ interface SpeakerWindowView {
   segmentCountText: string;
   cardClass: string;
   showNoLines: boolean;
+}
+
+interface ActivePartialView {
+  visible: boolean;
+  speakerId: string;
+  speakerTitle: string;
+  speakerBadgeClass: string;
+  text: string;
+  partialEndId: string;
+  partialScrollClass: string;
+  partialScrollTarget: string;
+  partialScrollTop: number;
 }
 
 interface HistoryLinePreviewView {
@@ -57,6 +76,9 @@ interface DebugSpeakerPageData {
   busy: boolean;
   error: string;
   speakers: SpeakerWindowView[];
+  conversationLines: ConversationLineView[];
+  activePartial: ActivePartialView;
+  conversationScrollTarget: string;
   showEmpty: boolean;
   elapsedText: string;
   frameCountText: string;
@@ -76,7 +98,6 @@ interface TouchPoint {
 }
 
 interface HistoryLineTouch {
-  speakerId: string;
   lineId: string;
   startX: number;
   startY: number;
@@ -85,7 +106,6 @@ interface HistoryLineTouch {
 interface LineTouchEvent {
   currentTarget: {
     dataset: {
-      speakerId?: string;
       lineId?: string;
       previewEnabled?: boolean | string;
     };
@@ -102,6 +122,17 @@ const EMPTY_HISTORY_LINE_PREVIEW: HistoryLinePreviewView = {
   metaText: "",
   statusText: "",
   text: "",
+};
+const EMPTY_ACTIVE_PARTIAL: ActivePartialView = {
+  visible: false,
+  speakerId: "",
+  speakerTitle: "",
+  speakerBadgeClass: "speaker-badge",
+  text: "",
+  partialEndId: "active-partial-end",
+  partialScrollClass: "partial-scroll",
+  partialScrollTarget: "",
+  partialScrollTop: 0,
 };
 
 function statusText(status: DebugSpeakerConnectionStatus): string {
@@ -158,8 +189,43 @@ function speakerDomId(speakerId: string): string {
   return speakerId.replace(/[^a-zA-Z0-9_-]/g, "_");
 }
 
+function lineDomId(lineId: string): string {
+  return `conversation-${speakerDomId(lineId)}`;
+}
+
 function debugSpeakerPageClass(largeTextEnabled = readAccessibilitySettings().largeTextEnabled): string {
   return largeTextEnabled ? "debug-speaker-page large-text" : "debug-speaker-page";
+}
+
+function normalizeSpeakerGender(value: string | null | undefined): "male" | "female" | "" {
+  const text = (value || "").trim().toLowerCase();
+  if (["male", "man", "m", "男", "男声", "男性"].includes(text)) {
+    return "male";
+  }
+  if (["female", "woman", "f", "女", "女声", "女性"].includes(text)) {
+    return "female";
+  }
+  return "";
+}
+
+function speakerBadgeClass(gender: string): string {
+  if (gender === "male") {
+    return "speaker-badge male";
+  }
+  if (gender === "female") {
+    return "speaker-badge female";
+  }
+  return "speaker-badge";
+}
+
+function genderSpeakerTitle(gender: string, genderIndex: number): string {
+  if (gender === "male") {
+    return `男${genderIndex}`;
+  }
+  if (gender === "female") {
+    return `女${genderIndex}`;
+  }
+  return "";
 }
 
 function eventStartMs(event: DebugSpeakerGatewayEvent): number | null {
@@ -274,6 +340,41 @@ function applyLatestLineClasses(
   }));
 }
 
+function conversationLineFromSpeakerLine(
+  speakerId: string,
+  speakerTitle: string,
+  speakerClass: string,
+  line: SpeakerLineView,
+): ConversationLineView {
+  return {
+    ...line,
+    speakerId,
+    speakerTitle,
+    speakerBadgeClass: speakerClass,
+    domId: lineDomId(line.id),
+  };
+}
+
+function patchConversationLine(
+  lines: ConversationLineView[],
+  lineId: string,
+  patch: Partial<ConversationLineView>,
+): ConversationLineView[] {
+  return lines.map((line) => (
+    line.id === lineId ? { ...line, ...patch } : line
+  ));
+}
+
+function applyLatestConversationLineClasses(
+  lines: ConversationLineView[],
+  latestLineId: string,
+): ConversationLineView[] {
+  return lines.map((line) => ({
+    ...line,
+    ...lineClasses(line.id, latestLineId),
+  }));
+}
+
 function isPreviewEnabled(value: boolean | string | undefined): boolean {
   return value === true || value === "true";
 }
@@ -284,19 +385,17 @@ function touchPoint(event: LineTouchEvent): TouchPoint | null {
 }
 
 function historyLinePreview(
-  speakers: SpeakerWindowView[],
-  speakerId: string,
+  lines: ConversationLineView[],
   lineId: string,
   latestLineId: string,
 ): HistoryLinePreviewView {
-  const speaker = speakers.find((item) => item.speakerId === speakerId);
-  const line = speaker?.lines.find((item) => item.id === lineId);
-  if (!speaker || !line || line.id === latestLineId || !line.text.trim()) {
+  const line = lines.find((item) => item.id === lineId);
+  if (!line || line.id === latestLineId || !line.text.trim()) {
     return EMPTY_HISTORY_LINE_PREVIEW;
   }
   return {
     visible: true,
-    speakerTitle: speaker.title,
+    speakerTitle: line.speakerTitle,
     metaText: line.metaText,
     statusText: line.proofreadStatusText,
     text: line.text,
@@ -304,16 +403,16 @@ function historyLinePreview(
 }
 
 function debugSpeakerProofreadContextLines(
-  speakers: SpeakerWindowView[],
+  conversationLines: ConversationLineView[],
   limit = 6,
 ): DebugSpeakerProofreadContextLine[] {
-  const lines = speakers.flatMap((speaker) => speaker.lines.map((line) => ({
-    speakerId: speaker.speakerId,
+  const lines = conversationLines.map((line) => ({
+    speakerId: line.speakerId,
     text: line.text.trim(),
     startMs: line.startMs,
     endMs: line.endMs,
     sortMs: line.endMs ?? line.startMs ?? 0,
-  })));
+  }));
   return lines
     .filter((line) => line.text)
     .sort((left, right) => left.sortMs - right.sortMs)
@@ -373,7 +472,7 @@ function speakerWindow(
 
 function pagePatch(
   status: DebugSpeakerConnectionStatus,
-  speakers: SpeakerWindowView[],
+  hasTranscript: boolean,
 ): Pick<
   DebugSpeakerPageData,
   | "statusText"
@@ -394,14 +493,16 @@ function pagePatch(
     primaryButtonClass: recording ? "primary-button stop" : "primary-button",
     recording,
     busy,
-    showEmpty: speakers.length === 0,
-    clearDisabled: busy || recording || speakers.length === 0,
+    showEmpty: !hasTranscript,
+    clearDisabled: busy || recording || !hasTranscript,
   };
 }
 
 Page<DebugSpeakerPageData, {
   client: DebugSpeakerTranscribeClient | null;
   speakerOrder: string[];
+  speakerGenderById: Record<string, "male" | "female" | "">;
+  genderSpeakerOrder: Record<"male" | "female", string[]>;
   historyPreviewTimer: number | null;
   historyPreviewTouch: HistoryLineTouch | null;
   onLoad(): void;
@@ -409,6 +510,16 @@ Page<DebugSpeakerPageData, {
   onUnload(): void;
   refreshAccessibilitySettings(): void;
   setStatus(status: DebugSpeakerConnectionStatus): void;
+  hasTranscript(): boolean;
+  speakerLabelForEvent(speakerId: string, speakerIndex: number, speakerGender?: string | null): {
+    title: string;
+    badgeClass: string;
+  };
+  speakerLabelForId(speakerId: string, speakerIndex: number): {
+    title: string;
+    badgeClass: string;
+  };
+  refreshConversationSpeakerLabels(lines: ConversationLineView[]): ConversationLineView[];
   handleSpeakerEvent(event: DebugSpeakerGatewayEvent): void;
   handleDiarizationStatus(event: DebugSpeakerGatewayEvent): void;
   handleLineTouchStart(event: LineTouchEvent): void;
@@ -416,7 +527,7 @@ Page<DebugSpeakerPageData, {
   handleLineTouchEnd(): void;
   handleLineTouchCancel(): void;
   cancelHistoryPreviewTimer(): void;
-  showHistoryLinePreview(speakerId: string, lineId: string): void;
+  showHistoryLinePreview(lineId: string): void;
   hideHistoryLinePreview(): void;
   proofreadFinalLine(
     speakerId: string,
@@ -430,6 +541,11 @@ Page<DebugSpeakerPageData, {
 }>({
   client: null,
   speakerOrder: [],
+  speakerGenderById: {},
+  genderSpeakerOrder: {
+    male: [],
+    female: [],
+  },
   historyPreviewTimer: null as number | null,
   historyPreviewTouch: null as HistoryLineTouch | null,
 
@@ -443,6 +559,9 @@ Page<DebugSpeakerPageData, {
     busy: false,
     error: "",
     speakers: [],
+    conversationLines: [],
+    activePartial: EMPTY_ACTIVE_PARTIAL,
+    conversationScrollTarget: "",
     showEmpty: true,
     elapsedText: "0:00",
     frameCountText: "0 帧",
@@ -475,7 +594,52 @@ Page<DebugSpeakerPageData, {
   },
 
   setStatus(status) {
-    this.setData(pagePatch(status, this.data.speakers));
+    this.setData(pagePatch(status, this.hasTranscript()));
+  },
+
+  hasTranscript() {
+    return this.data.conversationLines.length > 0 || this.data.activePartial.visible;
+  },
+
+  speakerLabelForEvent(speakerId, speakerIndex, speakerGender) {
+    const eventGender = normalizeSpeakerGender(speakerGender);
+    if (eventGender && !this.speakerGenderById[speakerId]) {
+      this.speakerGenderById[speakerId] = eventGender;
+      if (!this.genderSpeakerOrder[eventGender].includes(speakerId)) {
+        this.genderSpeakerOrder[eventGender] = [...this.genderSpeakerOrder[eventGender], speakerId];
+      }
+    }
+    return this.speakerLabelForId(speakerId, speakerIndex);
+  },
+
+  speakerLabelForId(speakerId, speakerIndex) {
+    const gender = this.speakerGenderById[speakerId] || "";
+    if (gender) {
+      const genderIndex = this.genderSpeakerOrder[gender].indexOf(speakerId) + 1;
+      const title = genderSpeakerTitle(gender, genderIndex || 1);
+      if (title) {
+        return {
+          title,
+          badgeClass: speakerBadgeClass(gender),
+        };
+      }
+    }
+    return {
+      title: debugSpeakerTitle(speakerId, speakerIndex),
+      badgeClass: speakerBadgeClass(""),
+    };
+  },
+
+  refreshConversationSpeakerLabels(lines) {
+    return lines.map((line) => {
+      const speakerIndex = this.speakerOrder.indexOf(line.speakerId) + 1;
+      const label = this.speakerLabelForId(line.speakerId, speakerIndex || 1);
+      return {
+        ...line,
+        speakerTitle: label.title,
+        speakerBadgeClass: label.badgeClass,
+      };
+    });
   },
 
   async toggleRecording() {
@@ -523,11 +687,15 @@ Page<DebugSpeakerPageData, {
       : [...this.speakerOrder, speakerId];
     this.speakerOrder = speakerOrder;
     const speakerIndex = speakerOrder.indexOf(speakerId) + 1;
+    const speakerLabel = this.speakerLabelForEvent(speakerId, speakerIndex, event.speaker_gender);
     const speakers = [...this.data.speakers];
     const existingIndex = speakers.findIndex((item) => item.speakerId === speakerId);
     const existing = existingIndex >= 0
       ? speakers[existingIndex]
       : speakerWindow(speakerId, speakerIndex);
+    let conversationLines = this.refreshConversationSpeakerLabels(this.data.conversationLines);
+    let activePartial = this.data.activePartial;
+    let conversationScrollTarget = this.data.conversationScrollTarget;
     const text = event.text || "";
     const nextLines = existing.lines.slice();
     let partialText = existing.partialText;
@@ -544,17 +712,26 @@ Page<DebugSpeakerPageData, {
     if (event.type === "speaker.final") {
       const line = finalLineFromSpeakerEvent(event, existing, `${speakerId}-${Date.now()}-${nextLines.length}`);
       if (line) {
-        proofreadContextLines = debugSpeakerProofreadContextLines(this.data.speakers);
+        proofreadContextLines = debugSpeakerProofreadContextLines(conversationLines);
         line.proofreadLoading = true;
         line.proofreadStatusText = "校对中";
         nextLines.unshift(line);
         lineForProofread = line;
         latestFinalLineId = line.id;
+        const conversationLine = conversationLineFromSpeakerLine(
+          speakerId,
+          speakerLabel.title,
+          speakerLabel.badgeClass,
+          line,
+        );
+        conversationLines = [...conversationLines, conversationLine];
+        conversationScrollTarget = conversationLine.domId;
       }
       partialText = "";
       partialScrollClass = "partial-scroll";
       partialScrollTarget = "";
       partialScrollTop = 0;
+      activePartial = EMPTY_ACTIVE_PARTIAL;
       if (text.trim()) {
         cumulativeFinalText = text.trim();
         cumulativeFinalStartMs = eventStartMs(event);
@@ -574,9 +751,24 @@ Page<DebugSpeakerPageData, {
       partialScrollTop += 10000;
       partialEndId = `${speakerDomId(speakerId)}-partial-end-${partialScrollTop}`;
       partialScrollTarget = partialEndId;
+      activePartial = partialText
+        ? {
+          visible: true,
+          speakerId,
+          speakerTitle: speakerLabel.title,
+          speakerBadgeClass: speakerLabel.badgeClass,
+          text: partialText,
+          partialEndId,
+          partialScrollClass,
+          partialScrollTarget,
+          partialScrollTop,
+        }
+        : EMPTY_ACTIVE_PARTIAL;
+      conversationScrollTarget = "active-partial-card";
     }
     const nextSpeaker = speakerWindow(speakerId, speakerIndex, {
       ...existing,
+      title: speakerLabel.title,
       partialText,
       partialEndId,
       partialScrollClass,
@@ -596,10 +788,19 @@ Page<DebugSpeakerPageData, {
       speakers.push(nextSpeaker);
     }
     const visibleSpeakers = applyLatestLineClasses(speakers, latestFinalLineId);
+    const visibleConversationLines = this.refreshConversationSpeakerLabels(
+      applyLatestConversationLineClasses(conversationLines, latestFinalLineId),
+    );
     this.setData({
       speakers: visibleSpeakers,
+      conversationLines: visibleConversationLines,
+      activePartial,
+      conversationScrollTarget,
       latestFinalLineId,
-      ...pagePatch(this.data.recording ? "listening" : "ready", visibleSpeakers),
+      ...pagePatch(
+        this.data.recording ? "listening" : "ready",
+        visibleConversationLines.length > 0 || activePartial.visible,
+      ),
     });
     if (lineForProofread) {
       void this.proofreadFinalLine(
@@ -616,22 +817,21 @@ Page<DebugSpeakerPageData, {
     this.setData({
       showDiarizationNotice: true,
       diarizationNotice: event.message || (available
-        ? "已收到说话人标签，会按不同人分窗口显示。"
-        : "当前 ASR 返回结果没有说话人标签，暂时只能显示在一个窗口。"),
+        ? "已收到说话人标签，会按不同人标注显示。"
+        : "当前 ASR 返回结果没有说话人标签，暂时只能标成未分辨说话人。"),
       diarizationNoticeClass: available ? "diarization-notice ok" : "diarization-notice warning",
     });
   },
 
   handleLineTouchStart(event) {
     this.cancelHistoryPreviewTimer();
-    const { speakerId = "", lineId = "", previewEnabled } = event.currentTarget.dataset;
+    const { lineId = "", previewEnabled } = event.currentTarget.dataset;
     const point = touchPoint(event);
-    if (!speakerId || !lineId || !isPreviewEnabled(previewEnabled) || !point) {
+    if (!lineId || !isPreviewEnabled(previewEnabled) || !point) {
       this.historyPreviewTouch = null;
       return;
     }
     this.historyPreviewTouch = {
-      speakerId,
       lineId,
       startX: point.clientX,
       startY: point.clientY,
@@ -639,8 +839,8 @@ Page<DebugSpeakerPageData, {
     this.historyPreviewTimer = setTimeout(() => {
       this.historyPreviewTimer = null;
       const pendingTouch = this.historyPreviewTouch;
-      if (pendingTouch?.speakerId === speakerId && pendingTouch.lineId === lineId) {
-        this.showHistoryLinePreview(speakerId, lineId);
+      if (pendingTouch?.lineId === lineId) {
+        this.showHistoryLinePreview(lineId);
       }
     }, HISTORY_PREVIEW_HOLD_MS);
   },
@@ -679,10 +879,9 @@ Page<DebugSpeakerPageData, {
     }
   },
 
-  showHistoryLinePreview(speakerId, lineId) {
+  showHistoryLinePreview(lineId) {
     const preview = historyLinePreview(
-      this.data.speakers,
-      speakerId,
+      this.data.conversationLines,
       lineId,
       this.data.latestFinalLineId,
     );
@@ -699,24 +898,38 @@ Page<DebugSpeakerPageData, {
     try {
       const result = await proofreadDebugSpeakerTranscriptLine(text, contextLines);
       const proofreadText = result.proofread_text.trim();
+      const linePatch = {
+        text: proofreadText || text,
+        proofreadLoading: false,
+        proofreadStatusText: "已校对",
+      };
       const speakers = applyLatestLineClasses(
-        patchSpeakerLine(this.data.speakers, speakerId, lineId, {
-          text: proofreadText || text,
-          proofreadLoading: false,
-          proofreadStatusText: "已校对",
-        }),
+        patchSpeakerLine(this.data.speakers, speakerId, lineId, linePatch),
         this.data.latestFinalLineId,
       );
-      this.setData({ speakers });
+      const conversationLines = this.refreshConversationSpeakerLabels(
+        applyLatestConversationLineClasses(
+          patchConversationLine(this.data.conversationLines, lineId, linePatch),
+          this.data.latestFinalLineId,
+        ),
+      );
+      this.setData({ speakers, conversationLines });
     } catch (_error) {
+      const linePatch = {
+        proofreadLoading: false,
+        proofreadStatusText: "校对失败",
+      };
       const speakers = applyLatestLineClasses(
-        patchSpeakerLine(this.data.speakers, speakerId, lineId, {
-          proofreadLoading: false,
-          proofreadStatusText: "校对失败",
-        }),
+        patchSpeakerLine(this.data.speakers, speakerId, lineId, linePatch),
         this.data.latestFinalLineId,
       );
-      this.setData({ speakers });
+      const conversationLines = this.refreshConversationSpeakerLabels(
+        applyLatestConversationLineClasses(
+          patchConversationLine(this.data.conversationLines, lineId, linePatch),
+          this.data.latestFinalLineId,
+        ),
+      );
+      this.setData({ speakers, conversationLines });
     }
   },
 
@@ -727,9 +940,17 @@ Page<DebugSpeakerPageData, {
     this.cancelHistoryPreviewTimer();
     this.historyPreviewTouch = null;
     this.speakerOrder = [];
+    this.speakerGenderById = {};
+    this.genderSpeakerOrder = {
+      male: [],
+      female: [],
+    };
     const speakers: SpeakerWindowView[] = [];
     this.setData({
       speakers,
+      conversationLines: [],
+      activePartial: EMPTY_ACTIVE_PARTIAL,
+      conversationScrollTarget: "",
       elapsedText: "0:00",
       frameCountText: "0 帧",
       audioBytesText: "0 B",
@@ -739,7 +960,7 @@ Page<DebugSpeakerPageData, {
       diarizationNoticeClass: "diarization-notice",
       latestFinalLineId: "",
       historyLinePreview: EMPTY_HISTORY_LINE_PREVIEW,
-      ...pagePatch("idle", speakers),
+      ...pagePatch("idle", false),
     });
   },
 

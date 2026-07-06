@@ -128,7 +128,7 @@
     <view class="action-card debug-card" bindtap="openDebugSpeakerTranscribe" hover-class="tap-hover">
       <view>
         <text class="action-title">多人实时转写</text>
-        <text class="action-meta">按本次连接里的说话人分窗口显示，不进入素材库。</text>
+        <text class="action-meta">按本次连接里的说话人顺序标注，不进入素材库。</text>
       </view>
       <text class="chevron">›</text>
     </view>
