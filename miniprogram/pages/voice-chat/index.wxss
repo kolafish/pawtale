@@ -501,6 +501,7 @@
 }
 
 .mic-button {
+  box-sizing: border-box;
   width: 100%;
   max-width: 620rpx;
   min-height: 118rpx;
@@ -521,6 +522,12 @@
   font-size: 36rpx;
   font-weight: 700;
   line-height: 46rpx;
+}
+
+.mic-button-text {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  word-break: keep-all;
 }
 
 .mic-button.recording {
@@ -812,11 +819,15 @@
 }
 
 .voice-chat-page.large-text .mic-button {
+  width: 100%;
+  min-width: 620rpx;
   min-height: 154rpx;
-  max-width: 690rpx;
+  max-width: 702rpx;
   font-size: 56rpx;
   line-height: 68rpx;
   gap: 20rpx;
+  padding-left: 34rpx;
+  padding-right: 32rpx;
 }
 
 .voice-chat-page.large-text .mic-icon-shell {

@@ -160,6 +160,8 @@ test("home polish keeps surfaces tactile without broad transitions", () => {
   assert.match(wxss, /\.voice-start-button-hover[\s\S]*transform: scale\(0\.96\)/);
   assert.match(wxss, /\.resume-ask-button-hover[\s\S]*transform: scale\(0\.96\)/);
   assert.match(wxss, /\.launch-secondary-button-hover[\s\S]*transform: scale\(0\.96\)/);
+  assert.match(wxss, /\.voice-start-title[\s\S]*white-space: nowrap/);
+  assert.match(wxss, /\.voice-start-title[\s\S]*word-break: keep-all/);
   assert.match(wxss, /\.return-prompt-close[\s\S]*width: 84rpx/);
   assert.match(wxml, /hover-class="{{voiceStartButtonHoverClass}}"/);
   assert.match(wxml, /hover-class="{{resumeAskButtonHoverClass}}"/);
@@ -184,6 +186,8 @@ test("home supports a local large text mode without changing the default class",
   };
 
   assert.match(wxss, /\.home-page\.large-text \.project-title[\s\S]*font-size: 74rpx/);
+  assert.match(wxss, /\.home-page\.large-text \.voice-start-button[\s\S]*min-width: 600rpx/);
+  assert.match(wxss, /\.home-page\.large-text \.voice-start-title[\s\S]*font-size: 60rpx/);
   page.refreshAccessibilitySettings.call(context);
   assert.equal(context.data.largeTextEnabled, true);
   assert.equal(context.data.homePageClass, "home-page large-text");

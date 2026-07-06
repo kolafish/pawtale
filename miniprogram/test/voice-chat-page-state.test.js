@@ -124,6 +124,7 @@ test("voice chat page keeps one main status and a clear recording action", () =>
   assert.match(wxml, /wx:for="{{transcriptLineViews}}"/);
   assert.match(wxml, /{{controlHintText}}/);
   assert.match(wxml, /{{micButtonText}}/);
+  assert.match(wxml, /class="mic-button-text"/);
   assert.match(wxml, /openingTopicOptions/);
   assert.match(wxml, /bindtap="chooseOpeningTopic"/);
   assert.match(wxml, /selectedOpeningTopicText/);
@@ -136,9 +137,12 @@ test("voice chat page keeps one main status and a clear recording action", () =>
   assert.match(wxss, /\.mic-button[\s\S]*border-radius: 999rpx/);
   assert.match(wxss, /\.assistant-text[\s\S]*font-size: 38rpx/);
   assert.match(wxss, /\.assistant-topic-button[\s\S]*border-radius: 999rpx/);
+  assert.match(wxss, /\.mic-button-text[\s\S]*white-space: nowrap/);
+  assert.match(wxss, /\.mic-button-text[\s\S]*word-break: keep-all/);
   assert.match(wxss, /\.voice-chat-page\.large-text \.assistant-question[\s\S]*font-size: 70rpx/);
   assert.match(wxss, /\.voice-chat-page\.large-text\.assistant-focus \.assistant-question[\s\S]*font-size: 78rpx/);
   assert.match(wxss, /\.voice-chat-page\.large-text\.capture-focus \.live-text[\s\S]*font-size: 82rpx/);
+  assert.match(wxss, /\.voice-chat-page\.large-text \.mic-button[\s\S]*min-width: 620rpx/);
   assert.match(wxss, /\.voice-chat-page\.large-text \.mic-button[\s\S]*font-size: 56rpx/);
 });
 
