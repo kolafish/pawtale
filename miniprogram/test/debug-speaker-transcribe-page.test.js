@@ -95,6 +95,35 @@ test("debug speaker page shows partial and final text in conversation flow", () 
   assert.equal(context.data.clearDisabled, false);
 });
 
+test("debug speaker page shows live tail above finalized utterance", () => {
+  const { page } = loadDebugSpeakerPage();
+  const context = pageContext(page);
+
+  page.handleSpeakerEvent.call(context, {
+    type: "speaker.final",
+    speaker_id: "speaker_1",
+    segment_id: "seg-1",
+    text: "第一句已经稳定。",
+    start_ms: 0,
+    end_ms: 1800,
+  });
+  page.handleSpeakerEvent.call(context, {
+    type: "speaker.partial",
+    speaker_id: "speaker_unknown",
+    segment_id: "seg-tail",
+    text: "第二句还在实时说",
+    start_ms: 1800,
+    provider_event_type: "final",
+  });
+
+  assert.equal(context.data.conversationLines.length, 1);
+  assert.equal(context.data.conversationLines[0].text, "第一句已经稳定。");
+  assert.equal(context.data.activePartial.visible, true);
+  assert.equal(context.data.activePartial.speakerTitle, "未分辨说话人");
+  assert.equal(context.data.activePartial.text, "第二句还在实时说");
+  assert.equal(context.data.showEmpty, false);
+});
+
 test("debug speaker page keeps transcript area high after recording stops", () => {
   const { page } = loadDebugSpeakerPage();
   const context = pageContext(page);
