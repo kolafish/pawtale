@@ -68,6 +68,8 @@ interface HistoryLinePreviewView {
 
 interface DebugSpeakerPageData {
   pageClass: string;
+  controlPanelClass: string;
+  showFullControls: boolean;
   statusText: string;
   statusClass: string;
   primaryButtonText: string;
@@ -134,6 +136,7 @@ const EMPTY_ACTIVE_PARTIAL: ActivePartialView = {
   partialScrollTarget: "",
   partialScrollTop: 0,
 };
+const DEBUG_SPEAKER_STATS_RENDER_INTERVAL_MS = 800;
 
 function statusText(status: DebugSpeakerConnectionStatus): string {
   const texts: Record<DebugSpeakerConnectionStatus, string> = {
@@ -195,6 +198,10 @@ function lineDomId(lineId: string): string {
 
 function debugSpeakerPageClass(largeTextEnabled = readAccessibilitySettings().largeTextEnabled): string {
   return largeTextEnabled ? "debug-speaker-page large-text" : "debug-speaker-page";
+}
+
+function debugSpeakerControlPanelClass(hasTranscript: boolean): string {
+  return hasTranscript ? "control-panel compact" : "control-panel";
 }
 
 function normalizeSpeakerGender(value: string | null | undefined): "male" | "female" | "" {
@@ -475,6 +482,8 @@ function pagePatch(
   hasTranscript: boolean,
 ): Pick<
   DebugSpeakerPageData,
+  | "controlPanelClass"
+  | "showFullControls"
   | "statusText"
   | "statusClass"
   | "primaryButtonText"
@@ -487,6 +496,8 @@ function pagePatch(
   const recording = status === "listening";
   const busy = status === "connecting" || status === "stopping";
   return {
+    controlPanelClass: debugSpeakerControlPanelClass(hasTranscript),
+    showFullControls: !hasTranscript,
     statusText: statusText(status),
     statusClass: statusClass(status),
     primaryButtonText: recording ? "停止识别" : (busy ? statusText(status) : "开始识别"),
@@ -500,6 +511,7 @@ function pagePatch(
 
 Page<DebugSpeakerPageData, {
   client: DebugSpeakerTranscribeClient | null;
+  lastStatsRenderMs: number;
   speakerOrder: string[];
   speakerGenderById: Record<string, "male" | "female" | "">;
   genderSpeakerOrder: Record<"male" | "female", string[]>;
@@ -511,6 +523,7 @@ Page<DebugSpeakerPageData, {
   refreshAccessibilitySettings(): void;
   setStatus(status: DebugSpeakerConnectionStatus): void;
   hasTranscript(): boolean;
+  shouldRenderStats(nowMs: number): boolean;
   speakerLabelForEvent(speakerId: string, speakerIndex: number, speakerGender?: string | null): {
     title: string;
     badgeClass: string;
@@ -540,6 +553,7 @@ Page<DebugSpeakerPageData, {
   goBack(): void;
 }>({
   client: null,
+  lastStatsRenderMs: 0,
   speakerOrder: [],
   speakerGenderById: {},
   genderSpeakerOrder: {
@@ -551,6 +565,8 @@ Page<DebugSpeakerPageData, {
 
   data: {
     pageClass: "debug-speaker-page",
+    controlPanelClass: "control-panel",
+    showFullControls: true,
     statusText: "未开始",
     statusClass: "status-pill",
     primaryButtonText: "开始识别",
@@ -599,6 +615,18 @@ Page<DebugSpeakerPageData, {
 
   hasTranscript() {
     return this.data.conversationLines.length > 0 || this.data.activePartial.visible;
+  },
+
+  shouldRenderStats(nowMs) {
+    if (!this.data.recording) {
+      this.lastStatsRenderMs = nowMs;
+      return true;
+    }
+    if (nowMs - this.lastStatsRenderMs < DEBUG_SPEAKER_STATS_RENDER_INTERVAL_MS) {
+      return false;
+    }
+    this.lastStatsRenderMs = nowMs;
+    return true;
   },
 
   speakerLabelForEvent(speakerId, speakerIndex, speakerGender) {
@@ -653,6 +681,9 @@ Page<DebugSpeakerPageData, {
     const client = new DebugSpeakerTranscribeClient({
       onStatus: (status) => this.setStatus(status),
       onStats: (stats) => {
+        if (!this.shouldRenderStats(Date.now())) {
+          return;
+        }
         const levelPercent = Math.round(Math.max(0, Math.min(1, stats.audioLevel)) * 100);
         this.setData({
           elapsedText: formatElapsed(stats.recordingElapsedMs),
@@ -666,6 +697,7 @@ Page<DebugSpeakerPageData, {
       onError: (message) => this.setData({ error: message }),
     });
     this.client = client;
+    this.lastStatsRenderMs = 0;
     this.setData({
       error: "",
       showDiarizationNotice: false,
@@ -682,6 +714,7 @@ Page<DebugSpeakerPageData, {
 
   handleSpeakerEvent(event) {
     const speakerId = event.speaker_id || "speaker_unknown";
+    const previousHasTranscript = this.hasTranscript();
     const speakerOrder = this.speakerOrder.includes(speakerId)
       ? this.speakerOrder
       : [...this.speakerOrder, speakerId];
@@ -752,10 +785,15 @@ Page<DebugSpeakerPageData, {
         existing.cumulativeFinalEndMs,
       );
       partialText = incrementalSpeakerText(text, existing.cumulativeFinalText, sameCumulativeRun);
-      partialScrollClass = partialText.length > 90 ? "partial-scroll long" : "partial-scroll";
-      partialScrollTop += 10000;
-      partialEndId = `${speakerDomId(speakerId)}-partial-end-${partialScrollTop}`;
-      partialScrollTarget = partialEndId;
+      const partialIsLong = partialText.length > 90;
+      partialScrollClass = partialIsLong ? "partial-scroll long" : "partial-scroll";
+      if (partialIsLong) {
+        partialScrollTop += 10000;
+        partialEndId = `${speakerDomId(speakerId)}-partial-end-${partialScrollTop}`;
+        partialScrollTarget = partialEndId;
+      } else {
+        partialScrollTarget = "";
+      }
       activePartial = partialText
         ? {
           visible: true,
@@ -802,11 +840,14 @@ Page<DebugSpeakerPageData, {
       activePartial,
       conversationScrollTarget,
       latestFinalLineId,
-      ...pagePatch(
-        this.data.recording ? "listening" : "ready",
-        visibleConversationLines.length > 0 || activePartial.visible,
-      ),
     };
+    const hasTranscript = visibleConversationLines.length > 0 || activePartial.visible;
+    if (previousHasTranscript !== hasTranscript) {
+      Object.assign(
+        dataPatch,
+        pagePatch(this.data.recording ? "listening" : "ready", hasTranscript),
+      );
+    }
     if (conversationLinesChanged) {
       dataPatch.conversationLines = visibleConversationLines;
     }

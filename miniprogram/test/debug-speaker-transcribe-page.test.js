@@ -64,6 +64,9 @@ test("debug speaker page shows partial and final text in conversation flow", () 
   assert.equal(context.data.activePartial.speakerTitle, "说话人 1");
   assert.equal(context.data.activePartial.text, "你小时候住在哪里？");
   assert.equal(context.data.conversationScrollTarget, "");
+  assert.equal(context.data.showEmpty, false);
+  assert.equal(context.data.controlPanelClass, "control-panel compact");
+  assert.equal(context.data.showFullControls, false);
 
   page.handleSpeakerEvent.call(context, {
     type: "speaker.final",
@@ -90,6 +93,23 @@ test("debug speaker page shows partial and final text in conversation flow", () 
   assert.equal(context.data.conversationScrollTarget, "");
   assert.equal(context.data.showEmpty, false);
   assert.equal(context.data.clearDisabled, false);
+});
+
+test("debug speaker page keeps transcript area high after recording stops", () => {
+  const { page } = loadDebugSpeakerPage();
+  const context = pageContext(page);
+
+  page.handleSpeakerEvent.call(context, {
+    type: "speaker.final",
+    speaker_id: "speaker_1",
+    segment_id: "seg-1",
+    text: "这句识别出来以后，控制区应该收起来。",
+  });
+  page.setStatus.call(context, "closed");
+
+  assert.equal(context.data.controlPanelClass, "control-panel compact");
+  assert.equal(context.data.showFullControls, false);
+  assert.equal(context.data.showEmpty, false);
 });
 
 test("debug speaker page keeps final text newest-first with gender labels", async () => {
@@ -552,6 +572,20 @@ test("debug speaker page follows the shared large text setting", () => {
   assert.equal(mod.debugSpeakerPageClass(true), "debug-speaker-page large-text");
 });
 
+test("debug speaker page throttles stats rendering while recording", () => {
+  const { page } = loadDebugSpeakerPage();
+  const context = pageContext(page);
+  context.data.recording = true;
+
+  assert.equal(page.shouldRenderStats.call(context, 1000), true);
+  assert.equal(page.shouldRenderStats.call(context, 1200), false);
+  assert.equal(page.shouldRenderStats.call(context, 1799), false);
+  assert.equal(page.shouldRenderStats.call(context, 1800), true);
+
+  context.data.recording = false;
+  assert.equal(page.shouldRenderStats.call(context, 1801), true);
+});
+
 test("debug speaker page clears transcript only while idle", () => {
   const { page } = loadDebugSpeakerPage();
   const context = pageContext(page);
@@ -574,6 +608,8 @@ test("debug speaker page clears transcript only while idle", () => {
   assert.deepEqual(context.data.conversationLines, []);
   assert.equal(context.data.activePartial.visible, false);
   assert.equal(context.data.showEmpty, true);
+  assert.equal(context.data.controlPanelClass, "control-panel");
+  assert.equal(context.data.showFullControls, true);
   assert.equal(context.data.showDiarizationNotice, false);
   assert.equal(context.data.latestFinalLineId, "");
   assert.equal(context.data.elapsedText, "0:00");

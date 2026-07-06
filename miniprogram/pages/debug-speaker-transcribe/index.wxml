@@ -11,7 +11,7 @@
 
   <view wx:if="{{error}}" class="error">{{error}}</view>
 
-  <view class="control-panel">
+  <view class="{{controlPanelClass}}">
     <view class="control-head">
       <view>
         <text class="control-title">实时对话流</text>
@@ -20,11 +20,11 @@
       <text class="{{statusClass}}">{{statusText}}</text>
     </view>
 
-    <view class="level-track">
+    <view wx:if="{{showFullControls}}" class="level-track">
       <view class="level-fill" style="{{audioLevelStyle}}"></view>
     </view>
 
-    <view class="stats-grid">
+    <view wx:if="{{showFullControls}}" class="stats-grid">
       <view class="stat-cell">
         <text class="stat-value">{{elapsedText}}</text>
         <text class="stat-label">时长</text>
@@ -57,7 +57,7 @@
       </button>
     </view>
 
-    <view wx:if="{{showDiarizationNotice}}" class="{{diarizationNoticeClass}}">
+    <view wx:if="{{showFullControls && showDiarizationNotice}}" class="{{diarizationNoticeClass}}">
       <text>{{diarizationNotice}}</text>
     </view>
   </view>
