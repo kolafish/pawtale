@@ -330,6 +330,68 @@
   font-variant-numeric: tabular-nums;
 }
 
+.line-label {
+  display: block;
+  margin-bottom: 8rpx;
+  color: #a64b3e;
+  font-size: 26rpx;
+  font-weight: 850;
+  line-height: 1.25;
+}
+
+.proofread-block {
+  margin-top: 18rpx;
+  padding: 22rpx 24rpx;
+  border-left: 6rpx solid #a64b3e;
+  border-radius: 16rpx;
+  background: #f8f4ef;
+}
+
+.proofread-block.has-error {
+  border-left-color: #b84a5a;
+  background: #fff1f3;
+}
+
+.proofread-status {
+  display: block;
+  color: #a64b3e;
+  font-size: 28rpx;
+  font-weight: 850;
+  line-height: 1.25;
+}
+
+.proofread-block.has-error .proofread-status {
+  color: #b84a5a;
+}
+
+.proofread-text {
+  display: block;
+  margin-top: 10rpx;
+  color: #2b1713;
+  font-size: 44rpx;
+  font-weight: 850;
+  line-height: 1.55;
+  word-break: break-word;
+  text-wrap: pretty;
+}
+
+.proofread-waiting,
+.proofread-error {
+  display: block;
+  margin-top: 10rpx;
+  font-size: 32rpx;
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+.proofread-waiting {
+  color: #7b6f68;
+}
+
+.proofread-error {
+  color: #b84a5a;
+}
+
 .debug-speaker-page.large-text {
   padding-left: 24rpx;
   padding-right: 24rpx;
@@ -342,7 +404,9 @@
 .debug-speaker-page.large-text .page-meta,
 .debug-speaker-page.large-text .control-meta,
 .debug-speaker-page.large-text .stat-label,
-.debug-speaker-page.large-text .line-meta {
+.debug-speaker-page.large-text .line-meta,
+.debug-speaker-page.large-text .line-label,
+.debug-speaker-page.large-text .proofread-status {
   font-size: 36rpx;
   line-height: 1.35;
 }
@@ -383,7 +447,9 @@
 }
 
 .debug-speaker-page.large-text .empty-copy,
-.debug-speaker-page.large-text .speaker-empty {
+.debug-speaker-page.large-text .speaker-empty,
+.debug-speaker-page.large-text .proofread-waiting,
+.debug-speaker-page.large-text .proofread-error {
   font-size: 40rpx;
   line-height: 1.45;
 }
@@ -401,7 +467,8 @@
 }
 
 .debug-speaker-page.large-text .partial-text,
-.debug-speaker-page.large-text .line-text {
+.debug-speaker-page.large-text .line-text,
+.debug-speaker-page.large-text .proofread-text {
   font-size: 82rpx;
   line-height: 104rpx;
 }

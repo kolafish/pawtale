@@ -2,11 +2,15 @@ import asyncio
 import base64
 from typing import Any
 
+from app.domain.memoir.types import MemoirCreatedBy
 from app.services.memoir.asr import StreamingASREvent
 from app.services.memoir.debug_speaker_transcribe import (
+    DebugSpeakerProofreadContextLine,
     DebugSpeakerTranscribeSession,
+    proofread_debug_speaker_transcript_text,
     speaker_segments_from_asr_event,
 )
+from app.services.memoir.voice_transcripts import CleanedTranscriptText
 
 
 def test_debug_speaker_segments_extract_provider_speaker_utterances():
@@ -149,6 +153,139 @@ async def test_debug_speaker_transcribe_session_falls_back_to_unknown_speaker():
 
     assert event["speaker_id"] == "speaker_unknown"
     assert event["text"] == "我小时候住在厂里的家属院。"
+
+
+async def test_debug_speaker_proofread_uses_recent_context(monkeypatch):
+    captured: dict[str, Any] = {}
+
+    async def fake_generate_cleaned_transcript_text(
+        source_text: str,
+        *,
+        ai_model: str | None = None,
+        context: Any = None,
+        strict: bool = True,
+    ) -> CleanedTranscriptText:
+        captured["source_text"] = source_text
+        captured["ai_model"] = ai_model
+        captured["context"] = context
+        captured["strict"] = strict
+        return CleanedTranscriptText(
+            content="四川话得不得行吗？",
+            provider="fake",
+            created_by=MemoirCreatedBy.AI,
+        )
+
+    monkeypatch.setattr(
+        "app.services.memoir.debug_speaker_transcribe.generate_cleaned_transcript_text",
+        fake_generate_cleaned_transcript_text,
+    )
+
+    result = await proofread_debug_speaker_transcript_text(
+        "四川话得不得行嘛？",
+        context_lines=[
+            DebugSpeakerProofreadContextLine(
+                speaker_id="speaker_1",
+                text="来，我们先试一下四川话识别。",
+                start_ms=0,
+                end_ms=3000,
+            ),
+            DebugSpeakerProofreadContextLine(
+                speaker_id="speaker_2",
+                text="刚才讲的是四川话。",
+                start_ms=3100,
+                end_ms=4500,
+            ),
+        ],
+        ai_model="doubao-test",
+    )
+
+    assert result.content == "四川话得不得行吗？"
+    assert captured["source_text"] == "四川话得不得行嘛？"
+    assert captured["ai_model"] == "doubao-test"
+    assert captured["strict"] is False
+    assert captured["context"].scene == "多人实时转写调试"
+    assert captured["context"].recent_user_utterances == (
+        "说话人 1：来，我们先试一下四川话识别。",
+        "说话人 2：刚才讲的是四川话。",
+    )
+
+
+async def test_debug_speaker_proofread_endpoint_requires_login_and_returns_cleaned_text(
+    anonymous_client,
+    monkeypatch,
+):
+    captured: dict[str, Any] = {}
+
+    async def fake_proofread_debug_speaker_transcript_text(
+        text: str,
+        *,
+        context_lines: list[DebugSpeakerProofreadContextLine],
+        ai_model: str | None = None,
+    ) -> CleanedTranscriptText:
+        captured["text"] = text
+        captured["context_lines"] = context_lines
+        captured["ai_model"] = ai_model
+        return CleanedTranscriptText(
+            content="四川话得不得行吗？",
+            provider="fake",
+            created_by=MemoirCreatedBy.AI,
+        )
+
+    monkeypatch.setattr(
+        "app.routers.memoir.debug_speaker.proofread_debug_speaker_transcript_text",
+        fake_proofread_debug_speaker_transcript_text,
+    )
+
+    unauthorized = await anonymous_client.post(
+        "/api/mobile/memoir/debug/speaker-transcribe/proofread",
+        json={"text": "四川话得不得行嘛？"},
+    )
+    assert unauthorized.status_code == 401
+
+    register = await anonymous_client.post(
+        "/api/auth/register",
+        json={
+            "email": "debug-speaker@example.com",
+            "password": "password123",
+            "display_name": "调试用户",
+        },
+    )
+    assert register.status_code == 201
+
+    response = await anonymous_client.post(
+        "/api/mobile/memoir/debug/speaker-transcribe/proofread",
+        json={
+            "text": "四川话得不得行嘛？",
+            "context_lines": [
+                {
+                    "speaker_id": "speaker_1",
+                    "text": "来，我们先试一下四川话识别。",
+                    "start_ms": 0,
+                    "end_ms": 3000,
+                }
+            ],
+            "ai_model": "doubao-test",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "text": "四川话得不得行嘛？",
+        "proofread_text": "四川话得不得行吗？",
+        "changed": True,
+        "provider": "fake",
+        "context_line_count": 1,
+    }
+    assert captured["text"] == "四川话得不得行嘛？"
+    assert captured["ai_model"] == "doubao-test"
+    assert captured["context_lines"] == [
+        DebugSpeakerProofreadContextLine(
+            speaker_id="speaker_1",
+            text="来，我们先试一下四川话识别。",
+            start_ms=0,
+            end_ms=3000,
+        )
+    ]
 
 
 async def _wait_for_event(client: "FakeGatewayClient", event_type: str) -> dict[str, Any]:
