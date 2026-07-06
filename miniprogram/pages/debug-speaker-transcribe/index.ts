@@ -52,6 +52,9 @@ interface DebugSpeakerPageData {
   audioBytesText: string;
   audioLevelStyle: string;
   clearDisabled: boolean;
+  showDiarizationNotice: boolean;
+  diarizationNotice: string;
+  diarizationNoticeClass: string;
 }
 
 function statusText(status: DebugSpeakerConnectionStatus): string {
@@ -304,6 +307,7 @@ Page<DebugSpeakerPageData, {
   refreshAccessibilitySettings(): void;
   setStatus(status: DebugSpeakerConnectionStatus): void;
   handleSpeakerEvent(event: DebugSpeakerGatewayEvent): void;
+  handleDiarizationStatus(event: DebugSpeakerGatewayEvent): void;
   proofreadFinalLine(
     speakerId: string,
     lineId: string,
@@ -333,6 +337,9 @@ Page<DebugSpeakerPageData, {
     audioBytesText: "0 B",
     audioLevelStyle: "width: 0%;",
     clearDisabled: true,
+    showDiarizationNotice: false,
+    diarizationNotice: "",
+    diarizationNoticeClass: "diarization-notice",
   },
 
   onLoad() {
@@ -376,10 +383,16 @@ Page<DebugSpeakerPageData, {
         });
       },
       onSpeakerEvent: (event) => this.handleSpeakerEvent(event),
+      onDiarizationStatus: (event) => this.handleDiarizationStatus(event),
       onError: (message) => this.setData({ error: message }),
     });
     this.client = client;
-    this.setData({ error: "" });
+    this.setData({
+      error: "",
+      showDiarizationNotice: false,
+      diarizationNotice: "",
+      diarizationNoticeClass: "diarization-notice",
+    });
     try {
       await client.start();
     } catch (error) {
@@ -479,6 +492,17 @@ Page<DebugSpeakerPageData, {
     }
   },
 
+  handleDiarizationStatus(event) {
+    const available = event.status === "available";
+    this.setData({
+      showDiarizationNotice: true,
+      diarizationNotice: event.message || (available
+        ? "已收到说话人标签，会按不同人分窗口显示。"
+        : "当前 ASR 返回结果没有说话人标签，暂时只能显示在一个窗口。"),
+      diarizationNoticeClass: available ? "diarization-notice ok" : "diarization-notice warning",
+    });
+  },
+
   async proofreadFinalLine(speakerId, lineId, text, contextLines) {
     try {
       const result = await proofreadDebugSpeakerTranscriptLine(text, contextLines);
@@ -510,6 +534,9 @@ Page<DebugSpeakerPageData, {
       frameCountText: "0 帧",
       audioBytesText: "0 B",
       audioLevelStyle: "width: 0%;",
+      showDiarizationNotice: false,
+      diarizationNotice: "",
+      diarizationNoticeClass: "diarization-notice",
       ...pagePatch("idle", speakers),
     });
   },

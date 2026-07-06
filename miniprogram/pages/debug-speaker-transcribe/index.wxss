@@ -223,6 +223,29 @@
   opacity: 0.62;
 }
 
+.diarization-notice {
+  margin-top: 22rpx;
+  padding: 20rpx 22rpx;
+  border-radius: 16rpx;
+  color: #62554d;
+  background: #f8f4ef;
+  font-size: 30rpx;
+  font-weight: 750;
+  line-height: 1.45;
+}
+
+.diarization-notice.warning {
+  border: 2rpx solid #e2b36d;
+  background: #fff8e8;
+  color: #6e4c14;
+}
+
+.diarization-notice.ok {
+  border: 2rpx solid #a8d1ad;
+  background: #edf6ef;
+  color: #2f6f4e;
+}
+
 .empty-panel {
   margin-top: 24rpx;
   padding: 46rpx 34rpx;

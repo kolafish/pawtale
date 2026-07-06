@@ -4,6 +4,7 @@ import asyncio
 import base64
 import binascii
 import contextlib
+import json
 from dataclasses import dataclass
 from typing import Any, Callable, Protocol, Sequence
 
@@ -72,6 +73,8 @@ class DebugSpeakerTranscribeSession:
         self._terminal_error = ""
         self._terminal_stop = asyncio.Event()
         self._next_segment_index = 1
+        self._sent_missing_speaker_labels_status = False
+        self._sent_available_speaker_labels_status = False
 
     async def run(self) -> None:
         await self.client.send_json(self._event("session.ready"))
@@ -198,7 +201,9 @@ class DebugSpeakerTranscribeSession:
         if event.type == "error":
             await self._mark_terminal_error(event.error or "debug_speaker_provider_error")
             return
-        for segment in self._segments_for_event(event):
+        segments = self._segments_for_event(event)
+        await self._send_speaker_label_status(event, segments)
+        for segment in segments:
             await self.client.send_json(
                 self._event(
                     "speaker.final" if event.type == "final" else "speaker.partial",
@@ -212,6 +217,36 @@ class DebugSpeakerTranscribeSession:
                     provider_payload=segment.provider_payload or event.raw,
                 )
             )
+
+    async def _send_speaker_label_status(
+        self,
+        event: StreamingASREvent,
+        segments: Sequence[DebugSpeakerSegment],
+    ) -> None:
+        if any(segment.speaker_id != "speaker_unknown" for segment in segments):
+            if self._sent_available_speaker_labels_status:
+                return
+            self._sent_available_speaker_labels_status = True
+            await self.client.send_json(
+                self._event(
+                    "speaker.diarization",
+                    status="available",
+                    message="已收到说话人标签，会按不同人分窗口显示。",
+                    provider_event_type=event.type,
+                )
+            )
+            return
+        if not event.text.strip() or self._sent_missing_speaker_labels_status:
+            return
+        self._sent_missing_speaker_labels_status = True
+        await self.client.send_json(
+            self._event(
+                "speaker.diarization",
+                status="missing_provider_labels",
+                message="当前 ASR 返回结果没有说话人标签，暂时只能显示在一个窗口；请确认服务商已开启说话人聚类分离。",
+                provider_event_type=event.type,
+            )
+        )
 
     def _segments_for_event(self, event: StreamingASREvent) -> list[DebugSpeakerSegment]:
         raw_segments = speaker_segments_from_asr_event(event)
@@ -388,18 +423,77 @@ def _provider_text_bases(payload: dict[str, Any]) -> list[dict[str, Any]]:
     return bases
 
 
+SPEAKER_ID_KEYS = (
+    "speaker_id",
+    "speaker",
+    "speaker_label",
+    "spk_id",
+    "spk",
+    "speakerId",
+    "speakerID",
+    "speaker_no",
+    "speakerNo",
+)
+
+SPEAKER_CONTAINER_KEYS = ("speaker_info", "speakerInfo", "additions", "speaker")
+
+
 def _speaker_id(utterance: dict[str, Any]) -> str:
-    for key in ("speaker_id", "speaker", "speaker_label", "spk_id", "spk"):
-        value = utterance.get(key)
-        if value is not None and str(value).strip():
-            return _normalize_speaker_id(value)
-    speaker_info = utterance.get("speaker_info")
-    if isinstance(speaker_info, dict):
-        for key in ("speaker_id", "speaker", "id", "label"):
-            value = speaker_info.get(key)
-            if value is not None and str(value).strip():
-                return _normalize_speaker_id(value)
+    for key in SPEAKER_ID_KEYS:
+        speaker = _speaker_id_from_value(utterance.get(key))
+        if speaker:
+            return speaker
+    for key in SPEAKER_CONTAINER_KEYS:
+        container = _as_dict(utterance.get(key))
+        if container is None:
+            continue
+        speaker = _speaker_id_from_mapping(container)
+        if speaker:
+            return speaker
     return ""
+
+
+def _speaker_id_from_mapping(value: dict[str, Any]) -> str:
+    for key in SPEAKER_ID_KEYS + ("id", "label"):
+        speaker = _speaker_id_from_value(value.get(key))
+        if speaker:
+            return speaker
+    return ""
+
+
+def _speaker_id_from_value(value: Any) -> str:
+    if value is None:
+        return ""
+    nested = _as_dict(value)
+    if nested is not None:
+        return _speaker_id_from_mapping(nested)
+    if isinstance(value, (list, tuple)):
+        for item in value:
+            speaker = _speaker_id_from_value(item)
+            if speaker:
+                return speaker
+        return ""
+    if isinstance(value, bool):
+        return ""
+    text = str(value).strip()
+    if not text:
+        return ""
+    return _normalize_speaker_id(text)
+
+
+def _as_dict(value: Any) -> dict[str, Any] | None:
+    if isinstance(value, dict):
+        return value
+    if not isinstance(value, str):
+        return None
+    raw = value.strip()
+    if not raw.startswith("{"):
+        return None
+    try:
+        decoded = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    return decoded if isinstance(decoded, dict) else None
 
 
 def _normalize_speaker_id(value: Any) -> str:

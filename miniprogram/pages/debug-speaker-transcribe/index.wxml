@@ -56,6 +56,10 @@
         清空
       </button>
     </view>
+
+    <view wx:if="{{showDiarizationNotice}}" class="{{diarizationNoticeClass}}">
+      <text>{{diarizationNotice}}</text>
+    </view>
   </view>
 
   <view wx:if="{{showEmpty}}" class="empty-panel">
