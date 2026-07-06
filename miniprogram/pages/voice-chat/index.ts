@@ -126,6 +126,8 @@ const AUTO_LISTEN_NO_ANSWER_MS = 15000;
 const MAX_CONSECUTIVE_NO_ANSWER_PROMPTS = 2;
 const STREAMING_TTS_PROGRESS_HOLD_SECONDS = 0.2;
 const GUIDANCE_MODE_VALUES: readonly MemoirGuidanceMode[] = ["free_narration", "guided_interview"];
+const LIVE_TRANSCRIPT_SCROLL_THRESHOLD = 44;
+const LIVE_TRANSCRIPT_SCROLL_STEP = 10000;
 
 interface VoiceChatDataContext {
   data: VoiceChatData;
@@ -138,6 +140,29 @@ function setVoiceChatData(context: VoiceChatDataContext, patch: Partial<VoiceCha
     ...patch,
     ...voiceChatViewPatch(nextData),
   });
+}
+
+function liveTranscriptScrollPatch(text: string, currentScrollTop: number): Partial<VoiceChatData> {
+  if (!text) {
+    return resetLiveTranscriptScrollPatch();
+  }
+  const scrollTop = currentScrollTop + LIVE_TRANSCRIPT_SCROLL_STEP;
+  const endId = `live-text-end-${scrollTop}`;
+  return {
+    liveScrollClass: text.length > LIVE_TRANSCRIPT_SCROLL_THRESHOLD ? "live-scroll long" : "live-scroll",
+    liveScrollTop: scrollTop,
+    liveTextEndId: endId,
+    liveScrollTarget: endId,
+  };
+}
+
+function resetLiveTranscriptScrollPatch(): Partial<VoiceChatData> {
+  return {
+    liveScrollClass: "live-scroll",
+    liveScrollTarget: "",
+    liveScrollTop: 0,
+    liveTextEndId: "live-text-end",
+  };
 }
 
 Page<VoiceChatData, {
@@ -1777,6 +1802,7 @@ Page<VoiceChatData, {
     setVoiceChatData(this, {
       liveText: displayText,
       liveCharCount: countTextChars(displayText),
+      ...liveTranscriptScrollPatch(displayText, this.data.liveScrollTop),
       persistenceStateText: "识别中",
       error: "",
       errorKindText: "",
@@ -1805,6 +1831,7 @@ Page<VoiceChatData, {
     setVoiceChatData(this, {
       liveText: "",
       liveCharCount: 0,
+      ...resetLiveTranscriptScrollPatch(),
       ...assistantTranscriptState(transcriptLines, {
         guidanceMode: this.data.guidanceMode,
         lastFollowUpSourceMessageId: this.data.lastFollowUpSourceMessageId,

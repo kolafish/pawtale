@@ -34,6 +34,10 @@ test("voice chat initial data keeps the assistant ready for opening narration", 
   assert.equal(first.showVoiceAuthorizationPanel, true);
   assert.equal(first.micButtonDisabled, true);
   assert.equal(first.micButtonText, "同意后开始说话");
+  assert.equal(first.liveScrollClass, "live-scroll");
+  assert.equal(first.liveScrollTarget, "");
+  assert.equal(first.liveScrollTop, 0);
+  assert.equal(first.liveTextEndId, "live-text-end");
   assert.equal(first.historyCountText, "0 段 · 0 字");
   assert.deepEqual(first.transcriptLines, []);
   assert.deepEqual(first.transcriptLineViews, []);
@@ -120,6 +124,8 @@ test("voice chat page keeps one main status and a clear recording action", () =>
   assert.match(wxml, /{{assistantDisplayText}}/);
   assert.match(wxml, /{{stageStatusText}}/);
   assert.match(wxml, /{{liveDisplayText}}/);
+  assert.match(wxml, /scroll-into-view="{{liveScrollTarget}}"/);
+  assert.match(wxml, /id="{{liveTextEndId}}"/);
   assert.match(wxml, /{{historyCountText}}/);
   assert.match(wxml, /wx:for="{{transcriptLineViews}}"/);
   assert.match(wxml, /{{controlHintText}}/);
@@ -142,6 +148,7 @@ test("voice chat page keeps one main status and a clear recording action", () =>
   assert.match(wxss, /\.voice-chat-page\.large-text \.assistant-question[\s\S]*font-size: 70rpx/);
   assert.match(wxss, /\.voice-chat-page\.large-text\.assistant-focus \.assistant-question[\s\S]*font-size: 78rpx/);
   assert.match(wxss, /\.voice-chat-page\.large-text\.capture-focus \.live-text[\s\S]*font-size: 82rpx/);
+  assert.match(wxss, /\.voice-chat-page\.large-text\.capture-focus \.live-scroll\.long[\s\S]*height: 420rpx/);
   assert.match(wxss, /\.voice-chat-page\.large-text \.mic-button[\s\S]*min-width: 620rpx/);
   assert.match(wxss, /\.voice-chat-page\.large-text \.mic-button[\s\S]*font-size: 56rpx/);
 });
