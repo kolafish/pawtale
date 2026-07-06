@@ -654,6 +654,151 @@ test("voice chat stores pending close state for connection errors", () => {
   assert.match(context.data.recoveryNotice, /语音连接中断/);
 });
 
+test("voice chat refreshes session on show only after page suspension", () => {
+  let refreshCalls = 0;
+  const page = loadVoiceChatPage();
+  const context = {
+    ...page,
+    pageSuspended: false,
+    data: {
+      ...page.data,
+      voiceSessionId: "voice-1",
+      status: "ready",
+      connecting: false,
+    },
+    refreshVoiceSessionSnapshot() {
+      refreshCalls += 1;
+      return Promise.resolve(null);
+    },
+    setData(patch) {
+      this.data = { ...this.data, ...patch };
+    },
+  };
+
+  page.onShow.call(context);
+  assert.equal(refreshCalls, 0);
+
+  context.pageSuspended = true;
+  page.onShow.call(context);
+
+  assert.equal(refreshCalls, 1);
+  assert.equal(context.pageSuspended, false);
+});
+
+test("voice chat stops active AI speech when the page is hidden", () => {
+  const cancelReasons = [];
+  const pendingWrites = [];
+  let audioStopped = false;
+  let stopRecordingCalls = 0;
+  const page = loadVoiceChatPage({
+    memoirCacheExports: {
+      writeMemoirVoiceSessionPendingClose: (voiceSessionId, pendingClose) => {
+        pendingWrites.push({ voiceSessionId, pendingClose });
+      },
+    },
+  });
+  const context = {
+    ...page,
+    data: {
+      ...page.data,
+      voiceSessionId: "voice-1",
+      recording: true,
+      liveText: "最后一句还在识别",
+      transcriptLines: [
+        { id: "user-line-1", role: "user", text: "已经说完的一句" },
+        { id: "assistant-stream-1", role: "assistant", text: "那后来怎么样？" },
+      ],
+      followUpLoading: true,
+      followUpTTSLoading: true,
+      followUpTTSPlaying: true,
+      followUpTTSStateText: "小余正在说",
+      assistantPromptText: "那后来怎么样？",
+    },
+    assistantStreamLineId: "assistant-stream-1",
+    assistantTurnRuntime: {
+      cancel(reason) {
+        cancelReasons.push(reason);
+      },
+      stopPlayback() {},
+      stats() {
+        return null;
+      },
+    },
+    audioPlayback: {
+      currentToken: () => 4,
+      currentAudio: () => null,
+      isCurrentToken: () => true,
+      nextToken: () => 4,
+      stop() {
+        audioStopped = true;
+      },
+    },
+    voiceStreaming: {
+      hasClient: () => true,
+      stopRecording() {
+        stopRecordingCalls += 1;
+      },
+    },
+    setData(patch) {
+      this.data = { ...this.data, ...patch };
+    },
+  };
+
+  page.onHide.call(context);
+
+  assert.equal(context.pageSuspended, true);
+  assert.deepEqual(cancelReasons, ["page_hidden"]);
+  assert.equal(audioStopped, true);
+  assert.equal(stopRecordingCalls, 1);
+  assert.equal(context.assistantTurnRuntime, null);
+  assert.deepEqual(context.data.transcriptLines.map((line) => line.id), ["user-line-1"]);
+  assert.equal(context.data.recording, false);
+  assert.equal(context.data.followUpLoading, false);
+  assert.equal(context.data.followUpTTSLoading, false);
+  assert.equal(context.data.followUpTTSPlaying, false);
+  assert.equal(context.data.persistenceStateText, "正在保存当前句");
+  assert.equal(pendingWrites.length, 1);
+  assert.equal(pendingWrites[0].voiceSessionId, "voice-1");
+  assert.equal(pendingWrites[0].pendingClose.reason, "hide");
+  assert.equal(pendingWrites[0].pendingClose.live_text, "最后一句还在识别");
+});
+
+test("voice chat keeps hidden ASR final text without starting a new AI turn", () => {
+  let followUpCalls = 0;
+  const page = loadVoiceChatPage();
+  const context = {
+    ...page,
+    pageSuspended: true,
+    data: {
+      ...page.data,
+      voiceSessionId: "voice-1",
+      guidanceMode: "guided_interview",
+      transcriptLines: [],
+    },
+    generateFollowUp() {
+      followUpCalls += 1;
+    },
+    confirmSavedTranscriptSnapshot() {},
+    setData(patch) {
+      this.data = { ...this.data, ...patch };
+    },
+  };
+
+  page.handleFinal.call(context, {
+    type: "asr.final",
+    text: "我小时候经常在院子里摘菜。",
+    message_id: "message-1",
+    utterance_id: "utterance-1",
+    transcript_version_id: "version-1",
+    turn_final: true,
+  });
+
+  assert.equal(followUpCalls, 0);
+  assert.equal(context.data.transcriptLines.length, 1);
+  assert.equal(context.data.transcriptLines[0].text, "我小时候经常在院子里摘菜。");
+  assert.equal(context.data.followUpLoading, false);
+});
+
 test("voice chat opening topic option turns into a concrete starter prompt", () => {
   const page = loadVoiceChatPage();
   const promptText = page.data.openingTopicOptions[0].promptText;

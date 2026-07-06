@@ -170,6 +170,7 @@ Page<VoiceChatData, {
   onShow(): void;
   onHide(): void;
   onUnload(): void;
+  suspendVoiceChat(reason: "hide" | "unload"): void;
   refreshVoiceAuthorizationConsent(): void;
   refreshAccessibilitySettings(): void;
   changeVoiceAuthorization(event: CheckboxChangeEvent): Promise<void>;
@@ -279,6 +280,7 @@ Page<VoiceChatData, {
   consecutiveNoAnswerPrompts: number;
   handledNoAnswerFrameCount: number;
   autoListenPendingAfterPlayback: boolean;
+  pageSuspended: boolean;
 }>({
   audioPlayback: new AudioPlaybackController(),
   voiceStreaming: new StreamingVoiceController(),
@@ -300,6 +302,7 @@ Page<VoiceChatData, {
   consecutiveNoAnswerPrompts: 0,
   handledNoAnswerFrameCount: -1,
   autoListenPendingAfterPlayback: false,
+  pageSuspended: false,
 
   data: initialVoiceChatData(),
 
@@ -352,8 +355,19 @@ Page<VoiceChatData, {
   },
 
   onShow() {
+    const wasSuspended = this.pageSuspended;
+    this.pageSuspended = false;
     this.refreshAccessibilitySettings();
     this.refreshVoiceAuthorizationConsent();
+    if (
+      wasSuspended
+      && this.data.voiceSessionId
+      && !this.data.connecting
+      && this.data.status !== "closed"
+      && this.data.status !== "error"
+    ) {
+      void this.refreshVoiceSessionSnapshot();
+    }
   },
 
   refreshAccessibilitySettings() {
@@ -369,10 +383,25 @@ Page<VoiceChatData, {
   },
 
   onHide() {
-    this.stopAssistantBargeInMonitor();
+    this.suspendVoiceChat("hide");
+  },
+
+  onUnload() {
+    this.suspendVoiceChat("unload");
+    this.voiceStreaming.close();
+  },
+
+  suspendVoiceChat(reason) {
+    this.pageSuspended = true;
+    followUpRequestSerial += 1;
+    this.noAnswerPromptRequestSerial += 1;
+    this.noAnswerPromptInFlight = false;
+    this.persistCurrentTranscriptSnapshot();
+    this.persistPendingVoiceClose(reason);
+    this.cancelFollowUpTTS(reason === "hide" ? "page_hidden" : "page_unloaded");
+    void this.stopAssistantBargeInMonitor();
     if (this.data.recording && this.voiceStreaming.hasClient()) {
       this.voiceStreaming.stopRecording();
-      this.persistPendingVoiceClose("hide");
       setVoiceChatData(this, {
         recording: false,
         primaryActionText: "继续说话",
@@ -380,17 +409,6 @@ Page<VoiceChatData, {
         recoveryNotice: "已暂停收音，返回后会恢复已保存的讲述记录",
       });
     }
-  },
-
-  onUnload() {
-    followUpRequestSerial += 1;
-    this.noAnswerPromptRequestSerial += 1;
-    this.noAnswerPromptInFlight = false;
-    this.persistCurrentTranscriptSnapshot();
-    this.persistPendingVoiceClose("unload");
-    this.cancelFollowUpTTS();
-    this.stopAssistantBargeInMonitor();
-    this.voiceStreaming.close();
   },
 
   refreshVoiceAuthorizationConsent() {
@@ -627,7 +645,7 @@ Page<VoiceChatData, {
   },
 
   maybeGenerateOpeningFollowUp() {
-    if (this.data.followUpLoading) {
+    if (this.pageSuspended || this.data.followUpLoading) {
       return;
     }
     const hasAnyLine = this.data.transcriptLines.some((line) => line.text.trim());
@@ -637,7 +655,7 @@ Page<VoiceChatData, {
   },
 
   async generateFollowUp(regenerate = false) {
-    if (!this.data.voiceSessionId || this.data.followUpLoading) {
+    if (this.pageSuspended || !this.data.voiceSessionId || this.data.followUpLoading) {
       return;
     }
     const sourceMessageId = followUpSourceMessageId(this.data.transcriptLines);
@@ -1317,8 +1335,9 @@ Page<VoiceChatData, {
         }),
       });
     }
-    if (this.data.followUpTTSLoading || this.data.followUpTTSPlaying) {
+    if (this.data.followUpLoading || this.data.followUpTTSLoading || this.data.followUpTTSPlaying) {
       setVoiceChatData(this, {
+        followUpLoading: false,
         followUpTTSLoading: false,
         followUpTTSPlaying: false,
         followUpTTSStateText: this.data.followUpTTSStateText ? "语音已停止" : "",
@@ -1675,6 +1694,9 @@ Page<VoiceChatData, {
   },
 
   async tryStartAutoListenAfterTTS() {
+    if (this.pageSuspended) {
+      return false;
+    }
     const gate = this.autoListenGateSnapshot();
     if (!this.autoListenPendingAfterPlayback || !gate.canStart) {
       return false;
@@ -1784,7 +1806,7 @@ Page<VoiceChatData, {
       noAnswerPromptAlreadyHandled,
     });
     setVoiceChatData(this, patch);
-    if (shouldHandleNoAnswerAutoStop) {
+    if (shouldHandleNoAnswerAutoStop && !this.pageSuspended) {
       this.handledNoAnswerFrameCount = stats.frameCount;
       void this.handleNoAnswerAutoStop();
     }
@@ -1868,7 +1890,7 @@ Page<VoiceChatData, {
     if (event.message_id && event.utterance_id) {
       void this.confirmSavedTranscriptSnapshot(event);
     }
-    if (event.message_id && event.turn_final !== false) {
+    if (event.message_id && event.turn_final !== false && !this.pageSuspended) {
       void this.generateFollowUp(false);
     }
   },
