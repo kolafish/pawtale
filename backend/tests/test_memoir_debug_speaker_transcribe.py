@@ -169,6 +169,35 @@ async def test_debug_speaker_transcribe_session_streams_speaker_windows_without_
     assert transcriber.closed
 
 
+async def test_debug_speaker_transcribe_session_keeps_provider_definite_utterances_live():
+    client = FakeGatewayClient()
+    transcriber = FakeDefinitePartialSpeakerTranscriber()
+    session = DebugSpeakerTranscribeSession(
+        client=client,
+        transcriber_factory=lambda: transcriber,
+    )
+
+    run_task = asyncio.create_task(session.run())
+    await _wait_for_event(client, "session.ready")
+    await client.push({"type": "session.start"})
+    await _wait_for_event(client, "session.started")
+    await client.push(
+        {
+            "type": "audio.frame",
+            "audio": base64.b64encode(b"pcm").decode("ascii"),
+        }
+    )
+    event = await _wait_for_event(client, "speaker.partial")
+    await asyncio.sleep(0.05)
+    await client.push({"type": "session.stop"})
+    await asyncio.wait_for(run_task, timeout=1)
+
+    assert event["speaker_id"] == "speaker_1"
+    assert event["text"] == "正在说的话。"
+    assert event["provider_event_type"] == "partial"
+    assert [item for item in client.sent if item["type"] == "speaker.final"] == []
+
+
 async def test_debug_speaker_transcribe_session_dedupes_repeated_provider_full_results():
     client = FakeGatewayClient()
     transcriber = FakeSpeakerTranscriber()
@@ -503,5 +532,33 @@ class FakeCumulativeSpeakerTranscriber(FakeSpeakerTranscriber):
                 type="partial",
                 text="".join(item["text"] for item in utterances),
                 raw={"payload": {"result": [{"utterances": utterances}]}},
+            )
+        )
+
+
+class FakeDefinitePartialSpeakerTranscriber(FakeSpeakerTranscriber):
+    async def send_audio(self, audio: bytes) -> None:
+        self.sent_audio.append(audio)
+        await self.events_queue.put(
+            StreamingASREvent(
+                type="partial",
+                text="正在说的话。",
+                raw={
+                    "payload": {
+                        "result": [
+                            {
+                                "utterances": [
+                                    {
+                                        "text": "正在说的话。",
+                                        "speaker_id": "1",
+                                        "start_time": 0,
+                                        "end_time": 1200,
+                                        "definite": True,
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                },
             )
         )
