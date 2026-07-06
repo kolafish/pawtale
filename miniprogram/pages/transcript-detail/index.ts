@@ -65,6 +65,8 @@ interface TranscriptDetailItemView extends MemoirVoiceTranscriptItem {
   canMoveChapterSource: boolean;
   chapterMoveOptions: ChapterPickerOption[];
   canPlayAudio: boolean;
+  canPlayAnswerAudio: boolean;
+  canPlayQuestionAudio: boolean;
   questionCanExpand: boolean;
   questionSegments: TranscriptTextSegment[];
   rawSegments: TranscriptTextSegment[];
@@ -81,6 +83,7 @@ interface TranscriptDetailData {
   assigning: boolean;
   moving: boolean;
   playing: boolean;
+  playingAudioKind: TranscriptDetailAudioKind | "";
   error: string;
   utteranceId: string;
   item: TranscriptDetailItemView | null;
@@ -96,6 +99,7 @@ interface TranscriptDetailData {
 }
 
 const COLLAPSIBLE_QUESTION_CHAR_COUNT = 72;
+type TranscriptDetailAudioKind = "question" | "answer";
 
 async function loadTranscriptBookPlan(projectId: string): Promise<MemoirBookPlan | null> {
   try {
@@ -135,6 +139,8 @@ function toViewItem(
     canMoveChapterSource: chapterMoveOptions.length > 0,
     chapterMoveOptions,
     canPlayAudio: Boolean(item.audio_file_id || item.question_audio_file_id),
+    canPlayAnswerAudio: Boolean(item.audio_file_id),
+    canPlayQuestionAudio: Boolean(item.question_audio_file_id),
     questionCanExpand: Array.from(questionText).length > COLLAPSIBLE_QUESTION_CHAR_COUNT,
     questionSegments: plainTranscriptSegments(item.question_text),
     rawSegments: plainTranscriptSegments(item.transcript_raw),
@@ -186,7 +192,9 @@ Page<TranscriptDetailData, {
   assignTranscriptChapter(event: PickerEvent): Promise<void>;
   moveTranscriptChapter(event: PickerEvent): Promise<void>;
   deleteTranscript(): Promise<void>;
-  playAudio(): Promise<void>;
+  playAnswerAudio(): Promise<void>;
+  playQuestionAudio(): Promise<void>;
+  playAudio(kind: TranscriptDetailAudioKind): Promise<void>;
   stopPlayback(): void;
   goBack(): void;
   openLogin(): void;
@@ -207,6 +215,7 @@ Page<TranscriptDetailData, {
     assigning: false,
     moving: false,
     playing: false,
+    playingAudioKind: "",
     error: "",
     utteranceId: "",
     item: null,
@@ -557,14 +566,24 @@ Page<TranscriptDetailData, {
     }
   },
 
-  async playAudio() {
+  async playAnswerAudio() {
+    await this.playAudio("answer");
+  },
+
+  async playQuestionAudio() {
+    await this.playAudio("question");
+  },
+
+  async playAudio(kind) {
     const item = this.data.item;
-    const audioFileIds = [item?.question_audio_file_id, item?.audio_file_id].filter(Boolean) as string[];
-    if (!audioFileIds.length) {
-      this.setData({ error: "这条记录没有可播放的音频" });
+    const audioFileId = kind === "question" ? item?.question_audio_file_id : item?.audio_file_id;
+    if (!audioFileId) {
+      this.setData({
+        error: kind === "question" ? "小余提问没有可播放的语音" : "这段讲述没有可播放的原音",
+      });
       return;
     }
-    if (this.data.playing) {
+    if (this.data.playing && this.data.playingAudioKind === kind) {
       this.stopPlayback();
       return;
     }
@@ -573,21 +592,16 @@ Page<TranscriptDetailData, {
     }
     this.stopPlayback();
     const token = this.audioPlayback.nextToken();
-    this.setData({ playing: true, error: "" });
+    this.setData({ playing: true, playingAudioKind: kind, error: "" });
     try {
-      for (const audioFileId of audioFileIds) {
-        if (!this.audioPlayback.isCurrentToken(token)) {
-          return;
-        }
-        await this.audioPlayback.playFile(audioFileId, token);
-      }
+      await this.audioPlayback.playFile(audioFileId, token);
     } catch (error) {
       if (this.audioPlayback.isCurrentToken(token)) {
         this.setData({ error: error instanceof Error ? error.message : "播放失败" });
       }
     } finally {
       if (this.audioPlayback.isCurrentToken(token)) {
-        this.setData({ playing: false });
+        this.setData({ playing: false, playingAudioKind: "" });
       }
     }
   },
@@ -595,7 +609,7 @@ Page<TranscriptDetailData, {
   stopPlayback() {
     this.audioPlayback.stop();
     if (this.data.playing) {
-      this.setData({ playing: false });
+      this.setData({ playing: false, playingAudioKind: "" });
     }
   },
 

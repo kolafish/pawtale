@@ -426,8 +426,63 @@ test("transcripts page uses summary fields for browse cards", async () => {
   assert.equal(context.data.items[0].cardClass, "transcript-card");
   assert.equal(context.data.items[0].bookStatusClass, "book-status");
   assert.equal(context.data.items[0].playAudioDisabled, false);
-  assert.equal(context.data.items[0].playAudioText, "听原音");
+  assert.equal(context.data.items[0].playAudioText, "听讲述");
   assert.equal(context.data.items[0].editButtonDisabled, false);
+});
+
+test("transcripts page quick playback only plays narrator audio", async () => {
+  const played = [];
+  let activeToken = 0;
+  const { page } = loadTranscriptsPage({
+    authExports: {
+      getMemoirIdentity: async () => ({
+        id: "user-1",
+        active_project_id: "project-1",
+        active_project: { id: "project-1", title: "我的回忆录" },
+        projects: [],
+      }),
+    },
+    voiceApiExports: {
+      listMemoirVoiceTranscripts: async () => ({
+        items: [
+          {
+            ...sampleTranscript("utterance-audio"),
+            question_text: "那时候家里谁照顾你？",
+            question_audio_file_id: "question-audio-utterance-audio",
+          },
+        ],
+        total: 1,
+        limit: 30,
+        offset: 0,
+      }),
+    },
+  });
+  const context = pageContext(page);
+  context.audioPlayback = {
+    nextToken() {
+      activeToken += 1;
+      return activeToken;
+    },
+    isCurrentToken(token) {
+      return token === activeToken;
+    },
+    stop() {
+      activeToken += 1;
+    },
+    async playFile(audioFileId) {
+      played.push(audioFileId);
+    },
+  };
+
+  await page.loadTranscripts.call(context, true);
+  assert.equal(context.data.items[0].playAudioText, "听讲述");
+
+  await page.playAudio.call(context, {
+    currentTarget: { dataset: { id: "utterance-audio" } },
+  });
+
+  assert.deepEqual(played, ["audio-utterance-audio"]);
+  assert.equal(context.data.playingId, "");
 });
 
 test("transcripts page opens transcript detail from record header", () => {

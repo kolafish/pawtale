@@ -201,10 +201,14 @@ test("transcript detail page keeps serious evidence and editing labels", () => {
   assert.match(wxml, /修改这段文字/);
   assert.match(wxml, /手动编辑/);
   assert.match(wxml, /说修改意见/);
+  assert.match(wxml, /听讲述原音/);
+  assert.match(wxml, /听小余提问/);
+  assert.match(wxml, /停止讲述/);
+  assert.match(wxml, /停止提问/);
   assert.match(wxml, /更多操作/);
   assert.match(wxml, /删除后，这条原始讲述会从素材库移除/);
   assert.match(wxml, /相关章节会标记为需重新确认/);
-  assert.doesNotMatch(wxml, /整理后文字|原始识别|校对整理文字|说出修改|危险操作|语音修正|语音校对|播放问答/);
+  assert.doesNotMatch(wxml, /整理后文字|原始识别|校对整理文字|说出修改|危险操作|语音修正|语音校对|播放问答|听当时问答|停止播放/);
 });
 
 test("transcript detail page collapses long question context by default", async () => {
@@ -247,6 +251,47 @@ test("transcript detail page folds low-frequency actions", async () => {
   page.toggleMoreActionsExpanded.call(context);
 
   assert.equal(context.data.moreActionsExpanded, true);
+});
+
+test("transcript detail page plays question and answer audio separately", async () => {
+  const played = [];
+  let activeToken = 0;
+  const { page } = loadTranscriptDetailPage({
+    voiceApiExports: {
+      getMemoirVoiceTranscript: async (id) => sampleTranscript(id),
+    },
+  });
+  const context = pageContext(page, { utteranceId: "utterance-audio" });
+  context.audioPlayback = {
+    nextToken() {
+      activeToken += 1;
+      return activeToken;
+    },
+    isCurrentToken(token) {
+      return token === activeToken;
+    },
+    stop() {
+      activeToken += 1;
+    },
+    async playFile(audioFileId) {
+      played.push(audioFileId);
+    },
+  };
+
+  await page.loadTranscript.call(context);
+
+  assert.equal(context.data.item.canPlayAnswerAudio, true);
+  assert.equal(context.data.item.canPlayQuestionAudio, true);
+
+  await page.playAnswerAudio.call(context);
+  assert.deepEqual(played, ["audio-utterance-audio"]);
+  assert.equal(context.data.playing, false);
+  assert.equal(context.data.playingAudioKind, "");
+
+  await page.playQuestionAudio.call(context);
+  assert.deepEqual(played, ["audio-utterance-audio", "question-audio-utterance-audio"]);
+  assert.equal(context.data.playing, false);
+  assert.equal(context.data.playingAudioKind, "");
 });
 
 test("transcript detail page can open directly in edit mode", async () => {
