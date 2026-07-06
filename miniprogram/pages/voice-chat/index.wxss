@@ -305,14 +305,28 @@
   color: #a64b3e;
 }
 
+.live-scroll {
+  max-height: 300rpx;
+  margin-top: 32rpx;
+  overflow: hidden;
+}
+
+.live-scroll.long {
+  height: 300rpx;
+}
+
 .live-text {
   display: block;
-  margin-top: 32rpx;
   color: #2b1713;
   font-size: 50rpx;
   font-weight: 700;
   line-height: 1.42;
   word-break: break-all;
+  text-wrap: pretty;
+}
+
+.live-text-end {
+  height: 2rpx;
 }
 
 .capture-strip {
@@ -788,6 +802,11 @@
   line-height: 92rpx;
 }
 
+.voice-chat-page.large-text .live-scroll.long {
+  height: 360rpx;
+  max-height: 360rpx;
+}
+
 .voice-chat-page.large-text .capture-strip,
 .voice-chat-page.large-text .inline-help-button,
 .voice-chat-page.large-text .empty-state,
@@ -945,8 +964,11 @@
   line-height: 44rpx;
 }
 
-.voice-chat-page.large-text.assistant-focus .live-text {
+.voice-chat-page.large-text.assistant-focus .live-scroll {
   margin-top: 22rpx;
+}
+
+.voice-chat-page.large-text.assistant-focus .live-text {
   color: #7b6f68;
   font-size: 40rpx;
   font-weight: 600;
@@ -974,8 +996,16 @@
   line-height: 60rpx;
 }
 
-.voice-chat-page.large-text.capture-focus .live-text {
+.voice-chat-page.large-text.capture-focus .live-scroll {
   margin-top: 40rpx;
+  max-height: 420rpx;
+}
+
+.voice-chat-page.large-text.capture-focus .live-scroll.long {
+  height: 420rpx;
+}
+
+.voice-chat-page.large-text.capture-focus .live-text {
   font-size: 82rpx;
   line-height: 104rpx;
 }

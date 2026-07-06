@@ -113,6 +113,10 @@ export interface VoiceChatData {
   stageStatusClass: string;
   stageStatusText: string;
   liveDisplayText: string;
+  liveScrollClass: string;
+  liveScrollTarget: string;
+  liveScrollTop: number;
+  liveTextEndId: string;
   captureStripClass: string;
   showLiveCharCount: boolean;
   showInlineHelp: boolean;
@@ -224,6 +228,10 @@ export function initialVoiceChatData(): VoiceChatData {
     stageStatusClass: "stage-status",
     stageStatusText: "可以开始讲了",
     liveDisplayText: "点下方“我来说一段”",
+    liveScrollClass: "live-scroll",
+    liveScrollTarget: "",
+    liveScrollTop: 0,
+    liveTextEndId: "live-text-end",
     captureStripClass: "capture-strip",
     showLiveCharCount: false,
     showInlineHelp: false,
@@ -265,6 +273,10 @@ export type VoiceChatViewPatch = Pick<
   | "stageStatusClass"
   | "stageStatusText"
   | "liveDisplayText"
+  | "liveScrollClass"
+  | "liveScrollTarget"
+  | "liveScrollTop"
+  | "liveTextEndId"
   | "captureStripClass"
   | "showLiveCharCount"
   | "showInlineHelp"
@@ -376,6 +388,10 @@ export function voiceChatViewPatch(state: VoiceChatData): VoiceChatViewPatch {
     stageStatusClass: state.error ? "stage-status error" : (state.recording ? "stage-status listening" : "stage-status"),
     stageStatusText,
     liveDisplayText,
+    liveScrollClass: state.liveScrollClass,
+    liveScrollTarget: state.liveScrollTarget,
+    liveScrollTop: state.liveScrollTop,
+    liveTextEndId: state.liveTextEndId,
     captureStripClass: state.recording ? "capture-strip active" : "capture-strip",
     showLiveCharCount: Boolean(state.recording && state.liveCharCount),
     showInlineHelp: Boolean(state.recording && !state.liveText && state.canRequestFollowUp),
@@ -660,6 +676,10 @@ export function voiceGatewayEventPatch(
     nextData.persistenceStateText = "等待识别";
     nextData.liveText = "";
     nextData.liveCharCount = 0;
+    nextData.liveScrollClass = "live-scroll";
+    nextData.liveScrollTarget = "";
+    nextData.liveScrollTop = 0;
+    nextData.liveTextEndId = "live-text-end";
   }
   return nextData;
 }

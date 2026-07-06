@@ -797,7 +797,49 @@ test("voice chat clears live transcript when a new recording session starts", ()
 
   assert.equal(context.data.liveText, "");
   assert.equal(context.data.liveCharCount, 0);
+  assert.equal(context.data.liveScrollClass, "live-scroll");
+  assert.equal(context.data.liveScrollTarget, "");
+  assert.equal(context.data.liveScrollTop, 0);
   assert.equal(context.data.persistenceStateText, "等待识别");
+});
+
+test("voice chat scrolls long live transcript to the newest recognized text", () => {
+  const page = loadVoiceChatPage();
+  const context = {
+    ...page,
+    data: {
+      ...page.data,
+      voiceSessionId: "voice-1",
+      recording: true,
+    },
+    setData(patch) {
+      this.data = { ...this.data, ...patch };
+    },
+  };
+  const longPartial = "这是一段很长的正常访谈实时识别文字，".repeat(6);
+
+  page.handlePartial.call(context, longPartial);
+
+  assert.equal(context.data.liveText, longPartial);
+  assert.equal(context.data.liveScrollClass, "live-scroll long");
+  assert.equal(context.data.liveScrollTop, 10000);
+  assert.equal(context.data.liveScrollTarget, context.data.liveTextEndId);
+  assert.equal(context.data.liveDisplayText, longPartial);
+
+  page.handlePartial.call(context, `${longPartial}继续说到最新进度。`);
+
+  assert.equal(context.data.liveScrollTop, 20000);
+  assert.match(context.data.liveScrollTarget, /live-text-end-20000/);
+
+  page.handleFinal.call(context, {
+    type: "asr.final",
+    text: "最终保存的一句话。",
+  });
+
+  assert.equal(context.data.liveText, "");
+  assert.equal(context.data.liveScrollClass, "live-scroll");
+  assert.equal(context.data.liveScrollTop, 0);
+  assert.equal(context.data.liveScrollTarget, "");
 });
 
 test("voice chat syncs authorization consent before reconnecting", async () => {

@@ -111,7 +111,15 @@
     <text class="{{stageStatusClass}}">
       {{stageStatusText}}
     </text>
-    <text class="live-text">{{liveDisplayText}}</text>
+    <scroll-view
+      class="{{liveScrollClass}}"
+      scroll-y="{{true}}"
+      scroll-top="{{liveScrollTop}}"
+      scroll-into-view="{{liveScrollTarget}}"
+    >
+      <text class="live-text">{{liveDisplayText}}</text>
+      <view id="{{liveTextEndId}}" class="live-text-end"></view>
+    </scroll-view>
     <view class="{{captureStripClass}}">
       <view class="capture-dot"></view>
       <text wx:if="{{recording}}">已说 {{captureDurationText}}</text>
