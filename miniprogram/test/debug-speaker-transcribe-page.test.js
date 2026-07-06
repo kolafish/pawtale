@@ -48,15 +48,12 @@ test("debug speaker page explains that realtime transcript is not saved", () => 
   assert.match(wxml, /partialScrollTarget/);
   assert.match(wxml, /speaker-list/);
   assert.match(wxml, /audioLevelStyle/);
-  assert.match(wxml, /正在结合最近几段上下文校对/);
-  assert.match(wxml, /proofread-status/);
-  assert.match(wxml, /proofread-block/);
+  assert.match(wxml, /line-status/);
   assert.match(wxss, /font-variant-numeric: tabular-nums/);
   assert.match(wxss, /\.partial-scroll\.long[\s\S]*height: 420rpx/);
   assert.match(wxss, /\.line-text[\s\S]*font-size: 44rpx/);
-  assert.match(wxss, /\.proofread-text[\s\S]*font-size: 44rpx/);
-  assert.match(wxss, /\.debug-speaker-page\.large-text \.partial-text,[\s\S]*font-size: 82rpx/);
-  assert.match(wxss, /\.debug-speaker-page\.large-text \.partial-text,[\s\S]*\.proofread-text[\s\S]*font-size: 82rpx/);
+  assert.match(wxss, /\.debug-speaker-page\.large-text \.partial-text,[\s\S]*font-size: 76rpx/);
+  assert.doesNotMatch(wxml, /proofread-block|proofread-text|proofread-waiting/);
   assert.doesNotMatch(wxml, /章节|成书文字|素材库移除/);
   assert.doesNotMatch(wxml, /二次识别|重新识别/);
 });
@@ -185,9 +182,9 @@ test("debug speaker page proofreads final lines with recent context", async () =
       endMs: 6000,
     },
   ]);
-  assert.equal(speakerTwo.lines[0].proofreadText, "四川话得不得行吗？");
+  assert.equal(speakerTwo.lines[0].text, "四川话得不得行吗？");
   assert.equal(speakerTwo.lines[0].proofreadLoading, false);
-  assert.equal(speakerTwo.lines[0].proofreadStatusText, "AI 校对后");
+  assert.equal(speakerTwo.lines[0].proofreadStatusText, "已校对");
 });
 
 test("debug speaker page preserves repeated text when provider reports a new start time", () => {

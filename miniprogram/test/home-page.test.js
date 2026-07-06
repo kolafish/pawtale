@@ -185,9 +185,9 @@ test("home supports a local large text mode without changing the default class",
     },
   };
 
-  assert.match(wxss, /\.home-page\.large-text \.project-title[\s\S]*font-size: 74rpx/);
+  assert.match(wxss, /\.home-page\.large-text \.project-title[\s\S]*font-size: 68rpx/);
   assert.match(wxss, /\.home-page\.large-text \.voice-start-button[\s\S]*min-width: 600rpx/);
-  assert.match(wxss, /\.home-page\.large-text \.voice-start-title[\s\S]*font-size: 60rpx/);
+  assert.match(wxss, /\.home-page\.large-text \.voice-start-title[\s\S]*font-size: 54rpx/);
   page.refreshAccessibilitySettings.call(context);
   assert.equal(context.data.largeTextEnabled, true);
   assert.equal(context.data.homePageClass, "home-page large-text");
