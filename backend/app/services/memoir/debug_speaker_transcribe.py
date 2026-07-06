@@ -30,7 +30,6 @@ class DebugSpeakerSegment:
     speaker_id: str
     text: str
     stable_key: str = ""
-    is_final: bool = False
     speaker_gender: str | None = None
     start_ms: int | None = None
     end_ms: int | None = None
@@ -210,7 +209,7 @@ class DebugSpeakerTranscribeSession:
         segments = self._segments_for_event(event)
         await self._send_speaker_label_status(event, segments)
         for segment in segments:
-            event_type = "speaker.final" if event.type == "final" or segment.is_final else "speaker.partial"
+            event_type = "speaker.final" if event.type == "final" else "speaker.partial"
             await self.client.send_json(
                 self._event(
                     event_type,
@@ -271,7 +270,6 @@ class DebugSpeakerTranscribeSession:
                     index=1,
                     start_ms=event.start_ms,
                 ),
-                is_final=event.type == "final",
                 speaker_gender=None,
                 start_ms=event.start_ms,
                 end_ms=event.end_ms,
@@ -296,7 +294,7 @@ class DebugSpeakerTranscribeSession:
                 index=index,
                 start_ms=segment.start_ms,
             )
-            outgoing_is_final = event_type == "final" or segment.is_final
+            outgoing_is_final = event_type == "final"
             if not self._should_emit_segment(key, text=text, is_final=outgoing_is_final):
                 continue
             emit_segments.append(
@@ -305,7 +303,6 @@ class DebugSpeakerTranscribeSession:
                     speaker_id=segment.speaker_id,
                     text=text,
                     stable_key=key,
-                    is_final=outgoing_is_final,
                     speaker_gender=segment.speaker_gender,
                     start_ms=segment.start_ms,
                     end_ms=segment.end_ms,
@@ -443,7 +440,6 @@ def speaker_segments_from_asr_event(event: StreamingASREvent) -> list[DebugSpeak
                     start_ms=start_ms,
                     text=text,
                 ),
-                is_final=_segment_is_final(utterance),
                 speaker_gender=_speaker_gender(utterance),
                 start_ms=start_ms,
                 end_ms=end_ms,
@@ -472,7 +468,6 @@ def speaker_segments_from_asr_event(event: StreamingASREvent) -> list[DebugSpeak
                     start_ms=start_ms,
                     text=text,
                 ),
-                is_final=_segment_is_final(base),
                 speaker_gender=_speaker_gender(base),
                 start_ms=start_ms,
                 end_ms=end_ms,
@@ -585,15 +580,6 @@ def _fallback_segment_key(
 
 def _text_key(text: str) -> str:
     return "".join(str(text).split()).lower()[:120]
-
-
-def _segment_is_final(payload: dict[str, Any]) -> bool:
-    return bool(
-        payload.get("definite")
-        or payload.get("is_final")
-        or payload.get("isFinal")
-        or payload.get("final")
-    )
 
 
 def _speaker_id(utterance: dict[str, Any]) -> str:
