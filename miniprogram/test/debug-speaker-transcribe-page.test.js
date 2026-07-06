@@ -62,6 +62,29 @@ test("debug speaker page groups partial and final text by speaker windows", () =
   assert.equal(context.data.clearDisabled, false);
 });
 
+test("debug speaker page shows provider diarization diagnostics", () => {
+  const { page } = loadDebugSpeakerPage();
+  const context = pageContext(page);
+
+  page.handleDiarizationStatus.call(context, {
+    type: "speaker.diarization",
+    status: "missing_provider_labels",
+    message: "当前 ASR 返回结果没有说话人标签，暂时只能显示在一个窗口。",
+  });
+
+  assert.equal(context.data.showDiarizationNotice, true);
+  assert.equal(context.data.diarizationNoticeClass, "diarization-notice warning");
+  assert.equal(context.data.diarizationNotice, "当前 ASR 返回结果没有说话人标签，暂时只能显示在一个窗口。");
+
+  page.handleDiarizationStatus.call(context, {
+    type: "speaker.diarization",
+    status: "available",
+  });
+
+  assert.equal(context.data.diarizationNoticeClass, "diarization-notice ok");
+  assert.equal(context.data.diarizationNotice, "已收到说话人标签，会按不同人分窗口显示。");
+});
+
 test("debug speaker page keeps only new text from cumulative final results", () => {
   const { page } = loadDebugSpeakerPage();
   const context = pageContext(page);
@@ -316,10 +339,15 @@ test("debug speaker page clears transcript only while idle", () => {
   });
 
   assert.equal(context.data.speakers[0].title, "未分辨说话人");
+  page.handleDiarizationStatus.call(context, {
+    type: "speaker.diarization",
+    status: "missing_provider_labels",
+  });
   page.clearTranscript.call(context);
 
   assert.deepEqual(context.data.speakers, []);
   assert.equal(context.data.showEmpty, true);
+  assert.equal(context.data.showDiarizationNotice, false);
   assert.equal(context.data.elapsedText, "0:00");
 });
 

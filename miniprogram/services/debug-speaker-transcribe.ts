@@ -31,6 +31,7 @@ export interface DebugSpeakerGatewayEvent {
   confidence?: number | null;
   provider_event_type?: string;
   provider_payload?: Record<string, unknown>;
+  message?: string;
 }
 
 export interface DebugSpeakerCaptureStats {
@@ -44,6 +45,7 @@ export interface DebugSpeakerTranscribeCallbacks {
   onStatus(status: DebugSpeakerConnectionStatus): void;
   onStats(stats: DebugSpeakerCaptureStats): void;
   onSpeakerEvent(event: DebugSpeakerGatewayEvent): void;
+  onDiarizationStatus?(event: DebugSpeakerGatewayEvent): void;
   onError(message: string): void;
 }
 
@@ -262,6 +264,10 @@ export class DebugSpeakerTranscribeClient {
     }
     if (event.type === "speaker.partial" || event.type === "speaker.final" || event.type === "speaker.reassign") {
       this.callbacks.onSpeakerEvent(event);
+      return;
+    }
+    if (event.type === "speaker.diarization") {
+      this.callbacks.onDiarizationStatus?.(event);
       return;
     }
     if (event.type === "session.stopped") {

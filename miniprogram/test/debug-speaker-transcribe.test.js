@@ -112,3 +112,67 @@ test("debug speaker client releases recorder when socket errors", async () => {
   assert.equal(statuses.at(-1), "error");
   delete global.wx;
 });
+
+test("debug speaker client forwards provider diarization diagnostics", async () => {
+  const socketHandlers = {};
+  global.wx = {
+    connectSocket() {
+      return {
+        onOpen(callback) {
+          socketHandlers.open = callback;
+        },
+        onMessage(callback) {
+          socketHandlers.message = callback;
+        },
+        onError(callback) {
+          socketHandlers.error = callback;
+        },
+        onClose(callback) {
+          socketHandlers.close = callback;
+        },
+        send() {},
+        close() {},
+      };
+    },
+  };
+  const recorder = {
+    owned: false,
+    start() {
+      this.owned = true;
+      return true;
+    },
+    stop() {
+      this.owned = false;
+    },
+    isOwnedBy() {
+      return this.owned;
+    },
+  };
+  const diagnostics = [];
+  const { DebugSpeakerTranscribeClient } = debugSpeakerModuleWithSocketMocks();
+  const client = new DebugSpeakerTranscribeClient({
+    onStatus: () => {},
+    onStats: () => {},
+    onSpeakerEvent: () => {},
+    onDiarizationStatus: (event) => diagnostics.push(event),
+    onError: () => {},
+  }, recorder);
+
+  const started = client.start();
+  await Promise.resolve();
+  socketHandlers.open();
+  await started;
+  socketHandlers.message({
+    data: JSON.stringify({
+      type: "speaker.diarization",
+      status: "missing_provider_labels",
+      message: "当前 ASR 返回结果没有说话人标签。",
+    }),
+  });
+
+  assert.equal(diagnostics.length, 1);
+  assert.equal(diagnostics[0].status, "missing_provider_labels");
+  assert.equal(diagnostics[0].message, "当前 ASR 返回结果没有说话人标签。");
+  client.close();
+  delete global.wx;
+});

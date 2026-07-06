@@ -91,6 +91,42 @@ def test_debug_speaker_segments_extract_single_result_speaker_label():
     assert segments[0].end_ms == 1800
 
 
+def test_debug_speaker_segments_extract_volc_additions_speaker_label():
+    event = StreamingASREvent(
+        type="final",
+        text="先讲讲小时候吧。住在厂里的家属院。",
+        raw={
+            "payload": {
+                "result": [
+                    {
+                        "utterances": [
+                            {
+                                "text": "先讲讲小时候吧。",
+                                "additions": {"speaker": "1"},
+                                "start_time": 0,
+                                "end_time": 1200,
+                            },
+                            {
+                                "text": "住在厂里的家属院。",
+                                "additions": "{\"speaker\":\"2\"}",
+                                "start_time": 1500,
+                                "end_time": 3200,
+                            },
+                        ],
+                    }
+                ]
+            }
+        },
+    )
+
+    segments = speaker_segments_from_asr_event(event)
+
+    assert [(segment.speaker_id, segment.text) for segment in segments] == [
+        ("speaker_1", "先讲讲小时候吧。"),
+        ("speaker_2", "住在厂里的家属院。"),
+    ]
+
+
 async def test_debug_speaker_transcribe_session_streams_speaker_windows_without_persistence():
     client = FakeGatewayClient()
     transcriber = FakeSpeakerTranscriber()
@@ -110,6 +146,7 @@ async def test_debug_speaker_transcribe_session_streams_speaker_windows_without_
         }
     )
     speaker_events = await _wait_for_event_count(client, "speaker.partial", 2)
+    diarization = await _wait_for_event(client, "speaker.diarization")
     await client.push({"type": "audio.end"})
     ended = await _wait_for_event(client, "audio.ended")
     await client.push({"type": "session.stop"})
@@ -123,6 +160,7 @@ async def test_debug_speaker_transcribe_session_streams_speaker_windows_without_
         ("speaker_1", "你小时候住在哪里？"),
         ("speaker_2", "住在厂里的家属院。"),
     ]
+    assert diarization["status"] == "available"
     assert speaker_events[0]["provider_event_type"] == "partial"
     assert ended["state"] == "ready"
     assert stopped["status"] == "stopped"
@@ -148,11 +186,13 @@ async def test_debug_speaker_transcribe_session_falls_back_to_unknown_speaker():
         }
     )
     event = await _wait_for_event(client, "speaker.partial")
+    diarization = await _wait_for_event(client, "speaker.diarization")
     await client.push({"type": "session.stop"})
     await asyncio.wait_for(run_task, timeout=1)
 
     assert event["speaker_id"] == "speaker_unknown"
     assert event["text"] == "我小时候住在厂里的家属院。"
+    assert diarization["status"] == "missing_provider_labels"
 
 
 async def test_debug_speaker_proofread_uses_recent_context(monkeypatch):
