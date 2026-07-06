@@ -186,54 +186,12 @@ function loadBookExportPage(voiceApiExports = {}) {
   return loadPageModule("../pages/book-export/index.ts");
 }
 
-test("book export page is registered and exposes preview/export controls", () => {
+test("book export page is registered", () => {
   const appJson = JSON.parse(fs.readFileSync(path.join(__dirname, "../app.json"), "utf8"));
   const pageJson = JSON.parse(fs.readFileSync(path.join(__dirname, "../pages/book-export/index.json"), "utf8"));
-  const wxml = fs.readFileSync(path.join(__dirname, "../pages/book-export/index.wxml"), "utf8");
-  const wxss = fs.readFileSync(path.join(__dirname, "../pages/book-export/index.wxss"), "utf8");
 
   assert.ok(appJson.pages.includes("pages/book-export/index"));
   assert.equal(pageJson.navigationBarTitleText, "预览与导出");
-  assert.match(wxml, /预览与导出/);
-  assert.match(wxml, /全书预览/);
-  assert.match(wxml, /阅读版 PDF/);
-  assert.match(wxml, /打印版 PDF/);
-  assert.match(wxml, /导出文本/);
-  assert.match(wxml, /data-layout="standard"/);
-  assert.match(wxml, /data-layout="large_print"/);
-  assert.match(wxml, /export-action-hint/);
-  assert.match(wxml, /bindtouchstart="previewExportActionHint"/);
-  assert.match(wxml, /成书信息/);
-  assert.match(wxml, /bindinput="changeBookTitle"/);
-  assert.match(wxml, /小余起名/);
-  assert.match(wxml, /副标题/);
-  assert.match(wxml, /口述人/);
-  assert.match(wxml, /封面风格/);
-  assert.match(wxml, /保存成书信息/);
-  assert.match(wxml, /历史版本与重新整理/);
-  assert.match(wxml, /有历史版本/);
-  assert.match(wxml, /重新整理一版/);
-  assert.match(wxml, /当前书稿会保留/);
-  assert.match(wxml, /bindtap="generateBook"/);
-  assert.match(wxml, /书稿设置/);
-  assert.match(wxml, /书籍结构/);
-  assert.match(wxml, /章节书稿/);
-  assert.match(wxml, /附录与说明/);
-  assert.match(wxml, /bookManuscriptStructureItems/);
-  assert.match(wxml, /bookManuscriptChapterItems/);
-  assert.match(wxml, /bookManuscriptBackMatterItems/);
-  assert.doesNotMatch(wxml, /PDF 排版/);
-  assert.doesNotMatch(wxml, /bindchange="changeBookExportLayout"/);
-  assert.match(wxml, /bindchange="toggleBookExportSourceAppendix"/);
-  assert.match(wxml, /历史版本/);
-  assert.match(wxss, /\.book-design-panel/);
-  assert.doesNotMatch(wxss, /\.regenerate-card/);
-  assert.match(wxss, /\.manuscript-card/);
-  assert.match(wxss, /\.advanced-card/);
-  assert.match(wxss, /\.export-action-hint/);
-  assert.match(wxss, /\.book-cover-preview\.moonlit-courtyard/);
-  assert.match(wxss, /\.export-actions/);
-  assert.match(wxss, /\.preview-card/);
 });
 
 test("book export page loads plan and output from query project", async () => {

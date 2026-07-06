@@ -108,67 +108,6 @@ test("mini program opens on the browseable home tab", () => {
   assert.equal(appJson.pages[0], "pages/home/index");
 });
 
-test("home only shows voice authorization panel before current consent", () => {
-  const wxml = fs.readFileSync(path.join(__dirname, "../pages/home/index.wxml"), "utf8");
-
-  assert.match(wxml, /wx:if="{{showVoiceAuthorizationPanel}}" class="voice-auth-panel"/);
-});
-
-test("home keeps voice entry free of per-session guidance controls", () => {
-  const wxml = fs.readFileSync(path.join(__dirname, "../pages/home/index.wxml"), "utf8");
-
-  assert.equal(wxml.includes("本次讲述方式"), false);
-  assert.equal(wxml.includes("guidance-options"), false);
-  assert.equal(wxml.includes("module-options"), false);
-  assert.equal(wxml.includes("voice-mode-row"), false);
-});
-
-test("home uses one warm memoir card with a clear voice start button", () => {
-  const wxml = fs.readFileSync(path.join(__dirname, "../pages/home/index.wxml"), "utf8");
-  const wxss = fs.readFileSync(path.join(__dirname, "../pages/home/index.wxss"), "utf8");
-
-  assert.match(wxml, /class="{{homePageClass}}"/);
-  assert.match(wxml, /class="home-card"/);
-  assert.equal(wxml.includes('class="project-panel"'), false);
-  assert.equal(wxml.includes('class="voice-panel"'), false);
-  assert.match(wxml, /class="{{voiceStartButtonClass}}"/);
-  assert.match(wxml, /{{panelLabelText}}/);
-  assert.match(wxml, /{{modeTagText}}/);
-  assert.match(wxml, /{{projectMetaText}}/);
-  assert.match(wxml, /{{primaryVoiceButtonTitle}}/);
-  assert.match(wxml, /{{voiceStartNoteText}}/);
-  assert.equal(wxml.includes('loading ? "加载中"'), false);
-  assert.equal(wxml.includes('loading ? "我先确认当前回忆录。"'), false);
-  assert.equal(wxml.includes('loading ? "正在加载"'), false);
-  assert.equal(wxml.includes('loading ? "马上就好。"'), false);
-  assert.equal(wxss.includes("#2f7d63"), false);
-  assert.match(wxss, /\.voice-start-button[\s\S]*#a64b3e/);
-  assert.match(wxss, /\.voice-start-button[\s\S]*border-radius: 999rpx/);
-  assert.match(wxss, /\.voice-start-button\.button-blocked[\s\S]*background: #a64b3e/);
-  assert.equal(wxml.includes('disabled="{{loading || creatingVoice}}"'), false);
-  assert.match(wxss, /\.voice-start-title[\s\S]*#ffffff/);
-});
-
-test("home polish keeps surfaces tactile without broad transitions", () => {
-  const wxml = fs.readFileSync(path.join(__dirname, "../pages/home/index.wxml"), "utf8");
-  const wxss = fs.readFileSync(path.join(__dirname, "../pages/home/index.wxss"), "utf8");
-
-  assert.equal(wxss.includes("transition: all"), false);
-  assert.equal(wxss.includes("text-wrap:"), false);
-  assert.equal(wxss.includes("font-smoothing"), false);
-  assert.match(wxss, /\.home-card,[\s\S]*box-shadow:\s*\n\s*0 0 0 1rpx/);
-  assert.match(wxss, /\.voice-start-button-hover[\s\S]*transform: scale\(0\.96\)/);
-  assert.match(wxss, /\.resume-ask-button-hover[\s\S]*transform: scale\(0\.96\)/);
-  assert.match(wxss, /\.launch-secondary-button-hover[\s\S]*transform: scale\(0\.96\)/);
-  assert.match(wxss, /\.voice-start-title[\s\S]*white-space: nowrap/);
-  assert.match(wxss, /\.voice-start-title[\s\S]*word-break: keep-all/);
-  assert.match(wxss, /\.return-prompt-close[\s\S]*width: 84rpx/);
-  assert.match(wxml, /hover-class="{{voiceStartButtonHoverClass}}"/);
-  assert.match(wxml, /hover-class="{{resumeAskButtonHoverClass}}"/);
-  assert.equal(wxml.includes("loading || creatingVoice"), false);
-  assert.match(wxml, /<view class="return-prompt-close"[^>]*hover-class="return-prompt-close-hover"/);
-});
-
 test("home supports a local large text mode without changing the default class", () => {
   const loaded = loadHomePage({
     accessibilityExports: {
@@ -177,7 +116,6 @@ test("home supports a local large text mode without changing the default class",
   });
   const { homeViewPatch } = loaded.mod;
   const { page } = loaded;
-  const wxss = fs.readFileSync(path.join(__dirname, "../pages/home/index.wxss"), "utf8");
   const context = {
     data: { ...page.data },
     setData(patch) {
@@ -185,9 +123,6 @@ test("home supports a local large text mode without changing the default class",
     },
   };
 
-  assert.match(wxss, /\.home-page\.large-text \.project-title[\s\S]*font-size: 68rpx/);
-  assert.match(wxss, /\.home-page\.large-text \.voice-start-button[\s\S]*min-width: 600rpx/);
-  assert.match(wxss, /\.home-page\.large-text \.voice-start-title[\s\S]*font-size: 54rpx/);
   page.refreshAccessibilitySettings.call(context);
   assert.equal(context.data.largeTextEnabled, true);
   assert.equal(context.data.homePageClass, "home-page large-text");

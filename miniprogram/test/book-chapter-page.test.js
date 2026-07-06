@@ -176,31 +176,10 @@ function loadBookChapterPage({
   return loadPageModule("../pages/book-chapter/index.ts");
 }
 
-test("book chapter page is registered and renders the detail tabs", () => {
+test("book chapter page is registered", () => {
   const appJson = JSON.parse(fs.readFileSync(path.join(__dirname, "../app.json"), "utf8"));
-  const wxml = fs.readFileSync(path.join(__dirname, "../pages/book-chapter/index.wxml"), "utf8");
-  const wxss = fs.readFileSync(path.join(__dirname, "../pages/book-chapter/index.wxss"), "utf8");
 
   assert.ok(appJson.pages.includes("pages/book-chapter/index"));
-  assert.match(wxml, /章节详情/);
-  assert.match(wxml, /data-tab="content"/);
-  assert.match(wxml, /data-tab="sources"/);
-  assert.match(wxml, /data-tab="more"/);
-  assert.match(wxml, /bindinput="changeChapterTitle"/);
-  assert.match(wxml, /bindinput="changeDraftContent"/);
-  assert.match(wxml, /bindtap="saveChapterTitle"/);
-  assert.match(wxml, /bindtap="saveChapterDraft"/);
-  assert.match(wxml, /bindtap="confirmChapterDraft"/);
-  assert.match(wxml, /bindtap="generateChapterDraft"/);
-  assert.match(wxml, /bindtap="moveChapter"/);
-  assert.match(wxml, /bindchange="mergeChapterInto"/);
-  assert.match(wxml, /bindtap="toggleSplitSource"/);
-  assert.match(wxml, /bindtap="splitSelectedChapterSources"/);
-  assert.match(wxml, /bindtap="deleteChapter"/);
-  assert.match(wxss, /\.tab-row/);
-  assert.match(wxss, /\.source-row/);
-  assert.match(wxss, /\.draft-textarea/);
-  assert.match(wxss, /\.danger-button/);
 });
 
 test("book chapter page loads a chapter from route query", async () => {

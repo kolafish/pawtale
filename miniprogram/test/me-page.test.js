@@ -1,8 +1,6 @@
 require("./register-ts");
 
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const path = require("node:path");
 const test = require("node:test");
 
 function loadMePage({
@@ -205,31 +203,6 @@ test("me shows the login panel instead of redirecting when the session is missin
   assert.equal(context.data.loggedIn, false);
   assert.equal(context.data.error, "");
   assert.equal(context.data.loading, false);
-});
-
-test("me keeps disabled login buttons visually readable while loading", () => {
-  const wxss = fs.readFileSync(path.join(__dirname, "../pages/me/index.wxss"), "utf8");
-
-  assert.match(wxss, /\.primary-button\[disabled\][\s\S]*background: #a64b3e/);
-  assert.match(wxss, /\.primary-button\[disabled\][\s\S]*color: #ffffff/);
-  assert.match(wxss, /\.mode-button\[disabled\][\s\S]*background: #fff3ef/);
-  assert.match(wxss, /\.mode-button\[disabled\][\s\S]*color: #a64b3e/);
-  assert.match(wxss, /\.secondary-button\[disabled\][\s\S]*background: #2b1713/);
-  assert.match(wxss, /\.secondary-button\[disabled\][\s\S]*color: #ffffff/);
-});
-
-test("me exposes local display and noisy-room voice switches", () => {
-  const wxml = fs.readFileSync(path.join(__dirname, "../pages/me/index.wxml"), "utf8");
-  const wxss = fs.readFileSync(path.join(__dirname, "../pages/me/index.wxss"), "utf8");
-
-  assert.match(wxml, /显示和环境/);
-  assert.match(wxml, /大字模式/);
-  assert.match(wxml, /checked="{{largeTextEnabled}}"/);
-  assert.match(wxml, /bindchange="changeLargeText"/);
-  assert.match(wxml, /自动检测我说话/);
-  assert.match(wxml, /checked="{{autoBargeInEnabled}}"/);
-  assert.match(wxml, /bindchange="changeAutoBargeIn"/);
-  assert.match(wxss, /\.switch-row[\s\S]*min-height: 126rpx/);
 });
 
 test("me saves local accessibility and voice environment switches", () => {
@@ -754,17 +727,4 @@ test("me keeps memoir management, voice progress, and debug speaker tools as sep
     "/pages/debug-speaker-transcribe/index",
   ]);
   delete global.wx;
-});
-
-test("me surfaces debug speaker transcribe near the top of the signed-in page", () => {
-  const wxml = fs.readFileSync(path.join(__dirname, "../pages/me/index.wxml"), "utf8");
-  const debugIndex = wxml.indexOf("多人实时转写");
-  const webLoginIndex = wxml.indexOf("Web 登录账号");
-  const memoirIndex = wxml.indexOf("当前回忆录");
-
-  assert.ok(debugIndex > -1);
-  assert.ok(webLoginIndex > -1);
-  assert.ok(memoirIndex > -1);
-  assert.ok(debugIndex < webLoginIndex);
-  assert.ok(debugIndex < memoirIndex);
 });

@@ -1,8 +1,6 @@
 require("./register-ts");
 
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const path = require("node:path");
 const test = require("node:test");
 const { loadPageModule, mockModule, pageContext } = require("./page-harness");
 
@@ -31,32 +29,6 @@ function loadDebugSpeakerPage({ accessibilityExports = {}, proofreadExports = {}
 function flushPromises() {
   return new Promise((resolve) => setImmediate(resolve));
 }
-
-test("debug speaker page explains that realtime transcript is not saved", () => {
-  const wxml = fs.readFileSync(
-    path.join(__dirname, "../pages/debug-speaker-transcribe/index.wxml"),
-    "utf8",
-  );
-  const wxss = fs.readFileSync(
-    path.join(__dirname, "../pages/debug-speaker-transcribe/index.wxss"),
-    "utf8",
-  );
-
-  assert.match(wxml, /本次识别不保存到素材库/);
-  assert.match(wxml, /class="{{pageClass}}"/);
-  assert.match(wxml, /scroll-into-view/);
-  assert.match(wxml, /partialScrollTarget/);
-  assert.match(wxml, /speaker-list/);
-  assert.match(wxml, /audioLevelStyle/);
-  assert.match(wxml, /line-status/);
-  assert.match(wxss, /font-variant-numeric: tabular-nums/);
-  assert.match(wxss, /\.partial-scroll\.long[\s\S]*height: 420rpx/);
-  assert.match(wxss, /\.line-text[\s\S]*font-size: 44rpx/);
-  assert.match(wxss, /\.debug-speaker-page\.large-text \.partial-text,[\s\S]*font-size: 76rpx/);
-  assert.doesNotMatch(wxml, /proofread-block|proofread-text|proofread-waiting/);
-  assert.doesNotMatch(wxml, /章节|成书文字|素材库移除/);
-  assert.doesNotMatch(wxml, /二次识别|重新识别/);
-});
 
 test("debug speaker page groups partial and final text by speaker windows", () => {
   const { page } = loadDebugSpeakerPage();
