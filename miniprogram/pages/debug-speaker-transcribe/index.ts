@@ -14,6 +14,7 @@ interface SpeakerLineView {
   text: string;
   lineClass: string;
   textClass: string;
+  previewEnabled: boolean;
   metaText: string;
   startMs: number | null;
   endMs: number | null;
@@ -38,6 +39,14 @@ interface SpeakerWindowView {
   showNoLines: boolean;
 }
 
+interface HistoryLinePreviewView {
+  visible: boolean;
+  speakerTitle: string;
+  metaText: string;
+  statusText: string;
+  text: string;
+}
+
 interface DebugSpeakerPageData {
   pageClass: string;
   statusText: string;
@@ -58,7 +67,42 @@ interface DebugSpeakerPageData {
   diarizationNotice: string;
   diarizationNoticeClass: string;
   latestFinalLineId: string;
+  historyLinePreview: HistoryLinePreviewView;
 }
+
+interface TouchPoint {
+  clientX: number;
+  clientY: number;
+}
+
+interface HistoryLineTouch {
+  speakerId: string;
+  lineId: string;
+  startX: number;
+  startY: number;
+}
+
+interface LineTouchEvent {
+  currentTarget: {
+    dataset: {
+      speakerId?: string;
+      lineId?: string;
+      previewEnabled?: boolean | string;
+    };
+  };
+  touches?: TouchPoint[];
+  changedTouches?: TouchPoint[];
+}
+
+const HISTORY_PREVIEW_HOLD_MS = 160;
+const HISTORY_PREVIEW_CANCEL_DISTANCE = 18;
+const EMPTY_HISTORY_LINE_PREVIEW: HistoryLinePreviewView = {
+  visible: false,
+  speakerTitle: "",
+  metaText: "",
+  statusText: "",
+  text: "",
+};
 
 function statusText(status: DebugSpeakerConnectionStatus): string {
   const texts: Record<DebugSpeakerConnectionStatus, string> = {
@@ -195,6 +239,7 @@ function finalLineFromSpeakerEvent(
     text: incrementalText,
     lineClass: "line-item history",
     textClass: "line-text history",
+    previewEnabled: true,
     metaText: formatSegmentMeta({
       ...event,
       text: incrementalText,
@@ -207,11 +252,12 @@ function finalLineFromSpeakerEvent(
   };
 }
 
-function lineClasses(lineId: string, latestLineId: string): Pick<SpeakerLineView, "lineClass" | "textClass"> {
+function lineClasses(lineId: string, latestLineId: string): Pick<SpeakerLineView, "lineClass" | "textClass" | "previewEnabled"> {
   const stateClass = lineId === latestLineId ? "latest" : "history";
   return {
     lineClass: `line-item ${stateClass}`,
     textClass: `line-text ${stateClass}`,
+    previewEnabled: stateClass === "history",
   };
 }
 
@@ -226,6 +272,35 @@ function applyLatestLineClasses(
       ...lineClasses(line.id, latestLineId),
     })),
   }));
+}
+
+function isPreviewEnabled(value: boolean | string | undefined): boolean {
+  return value === true || value === "true";
+}
+
+function touchPoint(event: LineTouchEvent): TouchPoint | null {
+  const point = event.touches?.[0] || event.changedTouches?.[0];
+  return point || null;
+}
+
+function historyLinePreview(
+  speakers: SpeakerWindowView[],
+  speakerId: string,
+  lineId: string,
+  latestLineId: string,
+): HistoryLinePreviewView {
+  const speaker = speakers.find((item) => item.speakerId === speakerId);
+  const line = speaker?.lines.find((item) => item.id === lineId);
+  if (!speaker || !line || line.id === latestLineId || !line.text.trim()) {
+    return EMPTY_HISTORY_LINE_PREVIEW;
+  }
+  return {
+    visible: true,
+    speakerTitle: speaker.title,
+    metaText: line.metaText,
+    statusText: line.proofreadStatusText,
+    text: line.text,
+  };
 }
 
 function debugSpeakerProofreadContextLines(
@@ -327,6 +402,8 @@ function pagePatch(
 Page<DebugSpeakerPageData, {
   client: DebugSpeakerTranscribeClient | null;
   speakerOrder: string[];
+  historyPreviewTimer: number | null;
+  historyPreviewTouch: HistoryLineTouch | null;
   onLoad(): void;
   onShow(): void;
   onUnload(): void;
@@ -334,6 +411,13 @@ Page<DebugSpeakerPageData, {
   setStatus(status: DebugSpeakerConnectionStatus): void;
   handleSpeakerEvent(event: DebugSpeakerGatewayEvent): void;
   handleDiarizationStatus(event: DebugSpeakerGatewayEvent): void;
+  handleLineTouchStart(event: LineTouchEvent): void;
+  handleLineTouchMove(event: LineTouchEvent): void;
+  handleLineTouchEnd(): void;
+  handleLineTouchCancel(): void;
+  cancelHistoryPreviewTimer(): void;
+  showHistoryLinePreview(speakerId: string, lineId: string): void;
+  hideHistoryLinePreview(): void;
   proofreadFinalLine(
     speakerId: string,
     lineId: string,
@@ -346,6 +430,8 @@ Page<DebugSpeakerPageData, {
 }>({
   client: null,
   speakerOrder: [],
+  historyPreviewTimer: null as number | null,
+  historyPreviewTouch: null as HistoryLineTouch | null,
 
   data: {
     pageClass: "debug-speaker-page",
@@ -367,6 +453,7 @@ Page<DebugSpeakerPageData, {
     diarizationNotice: "",
     diarizationNoticeClass: "diarization-notice",
     latestFinalLineId: "",
+    historyLinePreview: EMPTY_HISTORY_LINE_PREVIEW,
   },
 
   onLoad() {
@@ -378,6 +465,7 @@ Page<DebugSpeakerPageData, {
   },
 
   onUnload() {
+    this.cancelHistoryPreviewTimer();
     this.client?.close();
     this.client = null;
   },
@@ -534,6 +622,79 @@ Page<DebugSpeakerPageData, {
     });
   },
 
+  handleLineTouchStart(event) {
+    this.cancelHistoryPreviewTimer();
+    const { speakerId = "", lineId = "", previewEnabled } = event.currentTarget.dataset;
+    const point = touchPoint(event);
+    if (!speakerId || !lineId || !isPreviewEnabled(previewEnabled) || !point) {
+      this.historyPreviewTouch = null;
+      return;
+    }
+    this.historyPreviewTouch = {
+      speakerId,
+      lineId,
+      startX: point.clientX,
+      startY: point.clientY,
+    };
+    this.historyPreviewTimer = setTimeout(() => {
+      this.historyPreviewTimer = null;
+      const pendingTouch = this.historyPreviewTouch;
+      if (pendingTouch?.speakerId === speakerId && pendingTouch.lineId === lineId) {
+        this.showHistoryLinePreview(speakerId, lineId);
+      }
+    }, HISTORY_PREVIEW_HOLD_MS);
+  },
+
+  handleLineTouchMove(event) {
+    const pendingTouch = this.historyPreviewTouch;
+    const point = touchPoint(event);
+    if (!pendingTouch || !point) {
+      return;
+    }
+    const movedX = Math.abs(point.clientX - pendingTouch.startX);
+    const movedY = Math.abs(point.clientY - pendingTouch.startY);
+    if (movedX > HISTORY_PREVIEW_CANCEL_DISTANCE || movedY > HISTORY_PREVIEW_CANCEL_DISTANCE) {
+      this.cancelHistoryPreviewTimer();
+      this.historyPreviewTouch = null;
+      this.hideHistoryLinePreview();
+    }
+  },
+
+  handleLineTouchEnd() {
+    this.cancelHistoryPreviewTimer();
+    this.historyPreviewTouch = null;
+    this.hideHistoryLinePreview();
+  },
+
+  handleLineTouchCancel() {
+    this.cancelHistoryPreviewTimer();
+    this.historyPreviewTouch = null;
+    this.hideHistoryLinePreview();
+  },
+
+  cancelHistoryPreviewTimer() {
+    if (this.historyPreviewTimer !== null) {
+      clearTimeout(this.historyPreviewTimer);
+      this.historyPreviewTimer = null;
+    }
+  },
+
+  showHistoryLinePreview(speakerId, lineId) {
+    const preview = historyLinePreview(
+      this.data.speakers,
+      speakerId,
+      lineId,
+      this.data.latestFinalLineId,
+    );
+    this.setData({ historyLinePreview: preview });
+  },
+
+  hideHistoryLinePreview() {
+    if (this.data.historyLinePreview.visible) {
+      this.setData({ historyLinePreview: EMPTY_HISTORY_LINE_PREVIEW });
+    }
+  },
+
   async proofreadFinalLine(speakerId, lineId, text, contextLines) {
     try {
       const result = await proofreadDebugSpeakerTranscriptLine(text, contextLines);
@@ -563,6 +724,8 @@ Page<DebugSpeakerPageData, {
     if (this.data.recording || this.data.busy) {
       return;
     }
+    this.cancelHistoryPreviewTimer();
+    this.historyPreviewTouch = null;
     this.speakerOrder = [];
     const speakers: SpeakerWindowView[] = [];
     this.setData({
@@ -575,6 +738,7 @@ Page<DebugSpeakerPageData, {
       diarizationNotice: "",
       diarizationNoticeClass: "diarization-notice",
       latestFinalLineId: "",
+      historyLinePreview: EMPTY_HISTORY_LINE_PREVIEW,
       ...pagePatch("idle", speakers),
     });
   },

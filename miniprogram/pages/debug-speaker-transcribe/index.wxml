@@ -100,6 +100,13 @@
         wx:for-item="line"
         wx:key="id"
         class="{{line.lineClass}}"
+        data-speaker-id="{{item.speakerId}}"
+        data-line-id="{{line.id}}"
+        data-preview-enabled="{{line.previewEnabled}}"
+        bindtouchstart="handleLineTouchStart"
+        bindtouchmove="handleLineTouchMove"
+        bindtouchend="handleLineTouchEnd"
+        bindtouchcancel="handleLineTouchCancel"
       >
         <view wx:if="{{line.metaText || line.proofreadStatusText}}" class="line-meta-row">
           <text wx:if="{{line.metaText}}" class="line-meta">{{line.metaText}}</text>
@@ -109,6 +116,29 @@
         </view>
         <text class="{{line.textClass}}">{{line.text}}</text>
       </view>
+    </view>
+  </view>
+
+  <view
+    wx:if="{{historyLinePreview.visible}}"
+    class="history-preview-layer"
+    bindtap="hideHistoryLinePreview"
+    bindtouchend="hideHistoryLinePreview"
+    bindtouchcancel="hideHistoryLinePreview"
+  >
+    <view class="history-preview-panel">
+      <view class="history-preview-meta-row">
+        <text class="history-preview-speaker">{{historyLinePreview.speakerTitle}}</text>
+        <text wx:if="{{historyLinePreview.metaText}}" class="history-preview-meta">
+          {{historyLinePreview.metaText}}
+        </text>
+        <text wx:if="{{historyLinePreview.statusText}}" class="history-preview-status">
+          {{historyLinePreview.statusText}}
+        </text>
+      </view>
+      <scroll-view class="history-preview-scroll" scroll-y="{{true}}">
+        <text class="history-preview-text">{{historyLinePreview.text}}</text>
+      </scroll-view>
     </view>
   </view>
 
