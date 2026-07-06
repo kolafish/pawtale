@@ -268,6 +268,8 @@
   font-size: 38rpx;
   font-weight: 700;
   line-height: 48rpx;
+  white-space: nowrap;
+  word-break: keep-all;
 }
 
 .voice-start-note {
@@ -427,6 +429,9 @@
 }
 
 .home-page.large-text .voice-start-button {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 600rpx;
   min-height: 156rpx;
   margin-top: 36rpx;
   padding: 26rpx 32rpx;
@@ -443,7 +448,12 @@
   height: 64rpx;
 }
 
+.home-page.large-text .voice-start-copy {
+  flex: 0 0 auto;
+}
+
 .home-page.large-text .voice-start-title {
+  flex: 0 0 auto;
   font-size: 60rpx;
   line-height: 72rpx;
 }

@@ -159,7 +159,7 @@
       <view class="mic-icon-shell">
         <image class="mic-icon" src="/assets/memoir-microphone.png" mode="aspectFit" />
       </view>
-      <text>{{micButtonText}}</text>
+      <text class="mic-button-text">{{micButtonText}}</text>
     </button>
   </view>
 </view>
