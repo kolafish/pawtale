@@ -331,8 +331,7 @@
 }
 
 .partial-scroll {
-  min-height: 168rpx;
-  max-height: 420rpx;
+  height: 420rpx;
   margin-top: 12rpx;
   overflow: hidden;
 }
@@ -619,8 +618,7 @@
 }
 
 .debug-speaker-page.large-text .partial-scroll {
-  min-height: 260rpx;
-  max-height: 420rpx;
+  height: 420rpx;
 }
 
 .debug-speaker-page.large-text .partial-scroll.long {

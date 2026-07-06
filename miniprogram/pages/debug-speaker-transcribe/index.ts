@@ -192,6 +192,11 @@ function speakerDomId(speakerId: string): string {
   return speakerId.replace(/[^a-zA-Z0-9_-]/g, "_");
 }
 
+function stableLineIdForEvent(speakerId: string, event: DebugSpeakerGatewayEvent, fallbackId: string): string {
+  const segmentId = (event.segment_id || "").trim();
+  return segmentId ? `${speakerDomId(speakerId)}-${speakerDomId(segmentId)}` : fallbackId;
+}
+
 function lineDomId(lineId: string): string {
   return `conversation-${speakerDomId(lineId)}`;
 }
@@ -512,6 +517,7 @@ function pagePatch(
 Page<DebugSpeakerPageData, {
   client: DebugSpeakerTranscribeClient | null;
   lastStatsRenderMs: number;
+  lastPartialSignature: string;
   speakerOrder: string[];
   speakerGenderById: Record<string, "male" | "female" | "">;
   genderSpeakerOrder: Record<"male" | "female", string[]>;
@@ -554,6 +560,7 @@ Page<DebugSpeakerPageData, {
 }>({
   client: null,
   lastStatsRenderMs: 0,
+  lastPartialSignature: "",
   speakerOrder: [],
   speakerGenderById: {},
   genderSpeakerOrder: {
@@ -748,22 +755,65 @@ Page<DebugSpeakerPageData, {
     let proofreadContextLines: DebugSpeakerProofreadContextLine[] = [];
     let latestFinalLineId = this.data.latestFinalLineId;
     if (event.type === "speaker.final") {
-      const line = finalLineFromSpeakerEvent(event, existing, `${speakerId}-${Date.now()}-${nextLines.length}`);
+      this.lastPartialSignature = "";
+      const lineId = stableLineIdForEvent(
+        speakerId,
+        event,
+        `${speakerId}-${Date.now()}-${nextLines.length}`,
+      );
+      const line = finalLineFromSpeakerEvent(event, existing, lineId);
       if (line) {
-        proofreadContextLines = debugSpeakerProofreadContextLines(conversationLines);
-        line.proofreadLoading = true;
-        line.proofreadStatusText = "校对中";
-        nextLines.unshift(line);
-        lineForProofread = line;
-        latestFinalLineId = line.id;
-        const conversationLine = conversationLineFromSpeakerLine(
-          speakerId,
-          speakerLabel.title,
-          speakerLabel.badgeClass,
-          line,
-        );
-        conversationLines = [conversationLine, ...conversationLines];
-        conversationLinesChanged = true;
+        let finalLineChanged = false;
+        const existingConversationLine = conversationLines.find((item) => item.id === line.id);
+        const existingSpeakerLine = nextLines.find((item) => item.id === line.id);
+        if (existingConversationLine && existingConversationLine.text === line.text && existingConversationLine.metaText === line.metaText) {
+          lineForProofread = null;
+        } else if (existingConversationLine || existingSpeakerLine) {
+          const previousLine = existingConversationLine || existingSpeakerLine;
+          const textChanged = previousLine?.text !== line.text;
+          if (textChanged) {
+            proofreadContextLines = debugSpeakerProofreadContextLines(
+              conversationLines.filter((item) => item.id !== line.id),
+            );
+          }
+          const linePatch = {
+            ...line,
+            proofreadLoading: textChanged
+              ? true
+              : existingConversationLine?.proofreadLoading || existingSpeakerLine?.proofreadLoading || false,
+            proofreadStatusText: textChanged
+              ? "校对中"
+              : existingConversationLine?.proofreadStatusText || existingSpeakerLine?.proofreadStatusText || "",
+          };
+          for (let index = 0; index < nextLines.length; index += 1) {
+            if (nextLines[index].id === line.id) {
+              nextLines[index] = { ...nextLines[index], ...linePatch };
+            }
+          }
+          conversationLines = patchConversationLine(conversationLines, line.id, linePatch);
+          if (textChanged) {
+            lineForProofread = { ...line, proofreadLoading: true, proofreadStatusText: "校对中" };
+          }
+          finalLineChanged = true;
+        } else {
+          proofreadContextLines = debugSpeakerProofreadContextLines(conversationLines);
+          line.proofreadLoading = true;
+          line.proofreadStatusText = "校对中";
+          nextLines.unshift(line);
+          lineForProofread = line;
+          const conversationLine = conversationLineFromSpeakerLine(
+            speakerId,
+            speakerLabel.title,
+            speakerLabel.badgeClass,
+            line,
+          );
+          conversationLines = [conversationLine, ...conversationLines];
+          finalLineChanged = true;
+        }
+        if (finalLineChanged) {
+          latestFinalLineId = line.id;
+          conversationLinesChanged = true;
+        }
       }
       partialText = "";
       partialScrollClass = "partial-scroll";
@@ -774,6 +824,9 @@ Page<DebugSpeakerPageData, {
         cumulativeFinalText = text.trim();
         cumulativeFinalStartMs = eventStartMs(event);
         cumulativeFinalEndMs = eventEndMs(event);
+      }
+      if (!conversationLinesChanged && !this.data.activePartial.visible && !speakerLabelsChanged) {
+        return;
       }
     } else if (event.type === "speaker.partial") {
       const eventStart = eventStartMs(event);
@@ -788,11 +841,16 @@ Page<DebugSpeakerPageData, {
       const partialIsLong = partialText.length > 90;
       partialScrollClass = partialIsLong ? "partial-scroll long" : "partial-scroll";
       if (partialIsLong) {
-        partialScrollTop += 10000;
-        partialEndId = `${speakerDomId(speakerId)}-partial-end-${partialScrollTop}`;
-        partialScrollTarget = partialEndId;
+        if (partialText !== existing.partialText) {
+          partialScrollTop += 10000;
+          partialEndId = `${speakerDomId(speakerId)}-partial-end-${partialScrollTop}`;
+          partialScrollTarget = partialEndId;
+        } else {
+          partialScrollTarget = "";
+        }
       } else {
         partialScrollTarget = "";
+        partialScrollTop = 0;
       }
       activePartial = partialText
         ? {
@@ -807,6 +865,17 @@ Page<DebugSpeakerPageData, {
           partialScrollTop,
         }
         : EMPTY_ACTIVE_PARTIAL;
+      const partialSignature = [
+        speakerId,
+        event.segment_id || "",
+        partialText,
+        partialScrollClass,
+        String(partialScrollTop),
+      ].join("|");
+      if (!speakerLabelsChanged && partialSignature === this.lastPartialSignature) {
+        return;
+      }
+      this.lastPartialSignature = partialSignature;
     }
     const nextSpeaker = speakerWindow(speakerId, speakerIndex, {
       ...existing,
@@ -995,6 +1064,7 @@ Page<DebugSpeakerPageData, {
       male: [],
       female: [],
     };
+    this.lastPartialSignature = "";
     const speakers: SpeakerWindowView[] = [];
     this.setData({
       speakers,
