@@ -259,7 +259,7 @@ function withTranscriptRuntimeState(
     cardClass: state.highlightedId === item.id ? "transcript-card highlighted" : "transcript-card",
     bookStatusClass: item.isIncludedInBook ? "book-status included" : "book-status",
     playAudioDisabled: editBusy || !item.canPlayAudio,
-    playAudioText: state.playingId === item.id ? "停止" : "听原音",
+    playAudioText: state.playingId === item.id ? "停止讲述" : "听讲述",
     assignPickerDisabled: chapterBusy,
     assignPickerActionClass: chapterBusy ? "small-primary picker-action disabled" : "small-primary picker-action",
     assignPickerText: state.assigningSourceId === item.id ? "放入中" : "放入章节",
@@ -492,7 +492,7 @@ function toViewItem(
     chapterAssignOptions,
     canMoveChapterSource: chapterMoveOptions.length > 0,
     chapterMoveOptions,
-    canPlayAudio: Boolean(item.audio_file_id || item.question_audio_file_id),
+    canPlayAudio: Boolean(item.audio_file_id),
     questionSegments: highlightTranscriptText(item.question_text, searchQuery),
     rawSegments: rawView.segments,
     displaySegments: displayView.segments,
@@ -503,8 +503,8 @@ function toViewItem(
     isEditing: false,
     cardClass: "transcript-card",
     bookStatusClass: isIncludedInBook ? "book-status included" : "book-status",
-    playAudioDisabled: !Boolean(item.audio_file_id || item.question_audio_file_id),
-    playAudioText: "听原音",
+    playAudioDisabled: !Boolean(item.audio_file_id),
+    playAudioText: "听讲述",
     assignPickerDisabled: false,
     assignPickerActionClass: "small-primary picker-action",
     assignPickerText: "放入章节",
@@ -1247,9 +1247,9 @@ Page<TranscriptsData, {
   async playAudio(event) {
     const id = datasetString(event, "id");
     const item = this.data.items.find((candidate) => candidate.id === id);
-    const audioFileIds = [item?.question_audio_file_id, item?.audio_file_id].filter(Boolean) as string[];
-    if (!audioFileIds.length) {
-      setTranscriptsData(this, { error: "这条记录没有可播放的音频" });
+    const audioFileId = item?.audio_file_id;
+    if (!audioFileId) {
+      setTranscriptsData(this, { error: "这段讲述没有可播放的原音" });
       return;
     }
     if (this.data.playingId === id) {
@@ -1263,12 +1263,7 @@ Page<TranscriptsData, {
     const token = this.audioPlayback.nextToken();
     setTranscriptsData(this, { playingId: id, error: "" });
     try {
-      for (const audioFileId of audioFileIds) {
-        if (!this.audioPlayback.isCurrentToken(token)) {
-          return;
-        }
-        await this.audioPlayback.playFile(audioFileId, token);
-      }
+      await this.audioPlayback.playFile(audioFileId, token);
       if (this.audioPlayback.isCurrentToken(token)) {
         setTranscriptsData(this, { playingId: "" });
       }

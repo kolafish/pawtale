@@ -41,10 +41,10 @@
         </button>
         <button
           class="ghost-button"
-          bindtap="playAudio"
-          disabled="{{saving || deleting || !item.canPlayAudio}}"
+          bindtap="playAnswerAudio"
+          disabled="{{saving || deleting || !item.canPlayAnswerAudio}}"
         >
-          {{playing ? "停止播放" : "听原音"}}
+          {{playingAudioKind === "answer" ? "停止讲述" : "听讲述原音"}}
         </button>
       </view>
     </view>
@@ -103,7 +103,7 @@
           <text class="section-title">小余刚才问了</text>
           <text class="section-hint">这段讲述当时回答的问题</text>
         </view>
-        <text class="section-count">{{item.question_audio_file_id ? "有语音" : "无语音"}}</text>
+        <text class="section-count">{{item.canPlayQuestionAudio ? "有提问语音" : "无提问语音"}}</text>
       </view>
       <text class="body-text question-text {{!questionExpanded && item.questionCanExpand ? 'collapsed' : ''}}">
         <text
@@ -123,12 +123,12 @@
           {{questionExpanded ? "收起问题" : "展开完整问题"}}
         </button>
         <button
-          wx:if="{{item.canPlayAudio}}"
+          wx:if="{{item.canPlayQuestionAudio}}"
           class="text-action-button"
-          bindtap="playAudio"
-          disabled="{{saving || deleting || !item.canPlayAudio}}"
+          bindtap="playQuestionAudio"
+          disabled="{{saving || deleting || !item.canPlayQuestionAudio}}"
         >
-          {{playing ? "停止播放" : "听当时问答"}}
+          {{playingAudioKind === "question" ? "停止提问" : "听小余提问"}}
         </button>
       </view>
     </view>
