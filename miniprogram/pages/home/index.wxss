@@ -370,3 +370,104 @@
   line-height: 1.45;
   box-shadow: 0 0 0 1rpx rgba(184, 74, 90, 0.08);
 }
+
+.home-page.large-text {
+  padding: 42rpx 24rpx 136rpx;
+}
+
+.home-page.large-text .header {
+  margin-bottom: 30rpx;
+}
+
+.home-page.large-text .hello {
+  font-size: 58rpx;
+  line-height: 72rpx;
+}
+
+.home-page.large-text .subtitle {
+  font-size: 38rpx;
+  line-height: 52rpx;
+}
+
+.home-page.large-text .home-card,
+.home-page.large-text .launch-card {
+  padding: 34rpx 30rpx;
+  border-radius: 36rpx;
+}
+
+.home-page.large-text .panel-label {
+  font-size: 38rpx;
+  line-height: 52rpx;
+}
+
+.home-page.large-text .mode-tag {
+  padding: 10rpx 18rpx;
+  font-size: 32rpx;
+  line-height: 42rpx;
+}
+
+.home-page.large-text .launch-title,
+.home-page.large-text .project-title {
+  margin-top: 18rpx;
+  font-size: 64rpx;
+  line-height: 76rpx;
+}
+
+.home-page.large-text .launch-body,
+.home-page.large-text .project-meta {
+  margin-top: 22rpx;
+  font-size: 46rpx;
+  line-height: 68rpx;
+}
+
+.home-page.large-text .resume-note,
+.home-page.large-text .voice-start-note {
+  font-size: 38rpx;
+  line-height: 54rpx;
+}
+
+.home-page.large-text .voice-start-button {
+  min-height: 136rpx;
+  margin-top: 34rpx;
+  padding: 24rpx 30rpx;
+  gap: 18rpx;
+}
+
+.home-page.large-text .voice-start-icon-shell {
+  width: 84rpx;
+  height: 84rpx;
+}
+
+.home-page.large-text .voice-start-icon {
+  width: 56rpx;
+  height: 56rpx;
+}
+
+.home-page.large-text .voice-start-title {
+  font-size: 52rpx;
+  line-height: 62rpx;
+}
+
+.home-page.large-text .resume-ask-button,
+.home-page.large-text .launch-secondary-button {
+  min-height: 112rpx;
+  font-size: 40rpx;
+  line-height: 54rpx;
+}
+
+.home-page.large-text .return-prompt-title {
+  font-size: 40rpx;
+  line-height: 54rpx;
+}
+
+.home-page.large-text .return-prompt-text,
+.home-page.large-text .voice-auth-copy {
+  font-size: 34rpx;
+  line-height: 50rpx;
+}
+
+.home-page.large-text .voice-auth-hint,
+.home-page.large-text .error {
+  font-size: 34rpx;
+  line-height: 50rpx;
+}

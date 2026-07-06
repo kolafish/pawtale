@@ -695,3 +695,145 @@
 .voice-auth-link {
   color: #a64b3e;
 }
+
+.voice-chat-page.large-text {
+  padding: 28rpx 24rpx 380rpx;
+}
+
+.voice-chat-page.large-text .top-bar {
+  min-height: 104rpx;
+}
+
+.voice-chat-page.large-text .mode-label {
+  font-size: 56rpx;
+  line-height: 70rpx;
+}
+
+.voice-chat-page.large-text .top-subtitle {
+  font-size: 38rpx;
+  line-height: 54rpx;
+}
+
+.voice-chat-page.large-text .finish-button {
+  width: 176rpx;
+  height: 88rpx;
+  font-size: 34rpx;
+}
+
+.voice-chat-page.large-text .topic-panel,
+.voice-chat-page.large-text .assistant-panel,
+.voice-chat-page.large-text .history-panel {
+  padding: 34rpx 30rpx;
+  border-radius: 34rpx;
+}
+
+.voice-chat-page.large-text .topic-kicker,
+.voice-chat-page.large-text .assistant-label,
+.voice-chat-page.large-text .stage-status,
+.voice-chat-page.large-text .control-hint {
+  font-size: 38rpx;
+  line-height: 52rpx;
+}
+
+.voice-chat-page.large-text .topic-title {
+  font-size: 58rpx;
+  line-height: 72rpx;
+}
+
+.voice-chat-page.large-text .assistant-context {
+  font-size: 38rpx;
+  line-height: 56rpx;
+}
+
+.voice-chat-page.large-text .assistant-question {
+  font-size: 62rpx;
+  line-height: 78rpx;
+}
+
+.voice-chat-page.large-text .assistant-text,
+.voice-chat-page.large-text .assistant-tts-text {
+  font-size: 48rpx;
+  line-height: 68rpx;
+}
+
+.voice-chat-page.large-text .assistant-topic-button {
+  min-height: 84rpx;
+  padding: 0 28rpx;
+  font-size: 36rpx;
+  line-height: 48rpx;
+}
+
+.voice-chat-page.large-text .assistant-button {
+  min-width: 204rpx;
+  min-height: 96rpx;
+  font-size: 34rpx;
+  line-height: 46rpx;
+}
+
+.voice-chat-page.large-text .transcript-stage {
+  min-height: 480rpx;
+  padding: 42rpx 30rpx;
+  border-radius: 34rpx;
+}
+
+.voice-chat-page.large-text .live-text {
+  font-size: 62rpx;
+  line-height: 82rpx;
+}
+
+.voice-chat-page.large-text .capture-strip,
+.voice-chat-page.large-text .inline-help-button,
+.voice-chat-page.large-text .empty-state,
+.voice-chat-page.large-text .voice-auth-desc,
+.voice-chat-page.large-text .error,
+.voice-chat-page.large-text .session-state-strip,
+.voice-chat-page.large-text .recovery-text {
+  font-size: 36rpx;
+  line-height: 52rpx;
+}
+
+.voice-chat-page.large-text .history-header {
+  font-size: 40rpx;
+}
+
+.voice-chat-page.large-text .transcript-line {
+  font-size: 42rpx;
+  line-height: 64rpx;
+}
+
+.voice-chat-page.large-text .line-role {
+  min-width: 86rpx;
+  height: 52rpx;
+  font-size: 28rpx;
+}
+
+.voice-chat-page.large-text .control-bar {
+  padding: 28rpx 24rpx 46rpx;
+}
+
+.voice-chat-page.large-text .mic-button {
+  min-height: 138rpx;
+  max-width: 660rpx;
+  font-size: 50rpx;
+  line-height: 62rpx;
+  gap: 18rpx;
+}
+
+.voice-chat-page.large-text .mic-icon-shell {
+  width: 86rpx;
+  height: 86rpx;
+}
+
+.voice-chat-page.large-text .mic-icon {
+  width: 58rpx;
+  height: 58rpx;
+}
+
+.voice-chat-page.large-text .voice-auth-title {
+  font-size: 40rpx;
+}
+
+.voice-chat-page.large-text .voice-auth-copy {
+  font-size: 36rpx;
+  line-height: 52rpx;
+}

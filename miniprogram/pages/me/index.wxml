@@ -6,6 +6,35 @@
 
   <view wx:if="{{error}}" class="error">{{error}}</view>
 
+  <view class="section">
+    <text class="section-title">显示和环境</text>
+    <view class="settings-card">
+      <view class="switch-row">
+        <view class="switch-copy">
+          <text class="action-title">大字模式</text>
+          <text class="action-meta">打开后，首页和语音访谈页会使用更大的字号。</text>
+        </view>
+        <switch
+          checked="{{largeTextEnabled}}"
+          color="#a64b3e"
+          bindchange="changeLargeText"
+        />
+      </view>
+      <view class="settings-divider"></view>
+      <view class="switch-row">
+        <view class="switch-copy">
+          <text class="action-title">自动检测我说话</text>
+          <text class="action-meta">环境嘈杂时可以关闭，改成点按钮后再开始回答。</text>
+        </view>
+        <switch
+          checked="{{autoBargeInEnabled}}"
+          color="#a64b3e"
+          bindchange="changeAutoBargeIn"
+        />
+      </view>
+    </view>
+  </view>
+
   <block wx:if="{{!loggedIn}}">
     <view class="login-panel">
       <text class="panel-title">登录 Pawtale</text>

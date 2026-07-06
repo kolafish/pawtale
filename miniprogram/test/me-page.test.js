@@ -10,18 +10,21 @@ function loadMePage({
   voiceApiExports = {},
   ttsExports = {},
   aiModelExports = {},
+  accessibilityExports = {},
   voiceAuthorizationExports = {},
 } = {}) {
   const authPath = require.resolve("../services/auth.ts");
   const voiceApiPath = require.resolve("../services/memoir-voice-api.ts");
   const ttsPath = require.resolve("../services/tts-settings.ts");
   const aiModelPath = require.resolve("../services/ai-model-settings.ts");
+  const accessibilityPath = require.resolve("../services/accessibility-settings.ts");
   const voiceAuthorizationPath = require.resolve("../services/voice-authorization.ts");
   const mePath = require.resolve("../pages/me/index.ts");
   delete require.cache[authPath];
   delete require.cache[voiceApiPath];
   delete require.cache[ttsPath];
   delete require.cache[aiModelPath];
+  delete require.cache[accessibilityPath];
   delete require.cache[voiceAuthorizationPath];
   delete require.cache[mePath];
   require.cache[authPath] = {
@@ -118,6 +121,26 @@ function loadMePage({
       ...aiModelExports,
     },
   };
+  require.cache[accessibilityPath] = {
+    id: accessibilityPath,
+    filename: accessibilityPath,
+    loaded: true,
+    exports: {
+      readAccessibilitySettings: () => ({
+        largeTextEnabled: false,
+        autoBargeInEnabled: true,
+      }),
+      saveLargeTextEnabled: (largeTextEnabled) => ({
+        largeTextEnabled,
+        autoBargeInEnabled: true,
+      }),
+      saveAutoBargeInEnabled: (autoBargeInEnabled) => ({
+        largeTextEnabled: false,
+        autoBargeInEnabled,
+      }),
+      ...accessibilityExports,
+    },
+  };
   require.cache[voiceAuthorizationPath] = {
     id: voiceAuthorizationPath,
     filename: voiceAuthorizationPath,
@@ -193,6 +216,62 @@ test("me keeps disabled login buttons visually readable while loading", () => {
   assert.match(wxss, /\.mode-button\[disabled\][\s\S]*color: #a64b3e/);
   assert.match(wxss, /\.secondary-button\[disabled\][\s\S]*background: #2b1713/);
   assert.match(wxss, /\.secondary-button\[disabled\][\s\S]*color: #ffffff/);
+});
+
+test("me exposes local display and noisy-room voice switches", () => {
+  const wxml = fs.readFileSync(path.join(__dirname, "../pages/me/index.wxml"), "utf8");
+  const wxss = fs.readFileSync(path.join(__dirname, "../pages/me/index.wxss"), "utf8");
+
+  assert.match(wxml, /显示和环境/);
+  assert.match(wxml, /大字模式/);
+  assert.match(wxml, /checked="{{largeTextEnabled}}"/);
+  assert.match(wxml, /bindchange="changeLargeText"/);
+  assert.match(wxml, /自动检测我说话/);
+  assert.match(wxml, /checked="{{autoBargeInEnabled}}"/);
+  assert.match(wxml, /bindchange="changeAutoBargeIn"/);
+  assert.match(wxss, /\.switch-row[\s\S]*min-height: 126rpx/);
+});
+
+test("me saves local accessibility and voice environment switches", () => {
+  const savedLargeText = [];
+  const savedBargeIn = [];
+  const toasts = [];
+  global.wx = {
+    showToast(options) {
+      toasts.push(options.title);
+    },
+  };
+  const { page } = loadMePage({
+    accessibilityExports: {
+      readAccessibilitySettings: () => ({
+        largeTextEnabled: true,
+        autoBargeInEnabled: false,
+      }),
+      saveLargeTextEnabled: (largeTextEnabled) => {
+        savedLargeText.push(largeTextEnabled);
+        return { largeTextEnabled, autoBargeInEnabled: false };
+      },
+      saveAutoBargeInEnabled: (autoBargeInEnabled) => {
+        savedBargeIn.push(autoBargeInEnabled);
+        return { largeTextEnabled: true, autoBargeInEnabled };
+      },
+    },
+  });
+  const context = pageContext(page);
+
+  page.refreshAccessibilitySettings.call(context);
+  assert.equal(context.data.largeTextEnabled, true);
+  assert.equal(context.data.autoBargeInEnabled, false);
+
+  page.changeLargeText.call(context, { detail: { value: false } });
+  page.changeAutoBargeIn.call(context, { detail: { value: true } });
+
+  assert.deepEqual(savedLargeText, [false]);
+  assert.deepEqual(savedBargeIn, [true]);
+  assert.equal(context.data.largeTextEnabled, true);
+  assert.equal(context.data.autoBargeInEnabled, true);
+  assert.deepEqual(toasts, ["大字模式已关闭", "自动检测已打开"]);
+  delete global.wx;
 });
 
 test("me treats wechat-only users as logged in and shows wechat profile", async () => {

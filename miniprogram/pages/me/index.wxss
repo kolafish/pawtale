@@ -29,7 +29,8 @@
 .credential-panel,
 .action-card,
 .project-overview,
-.voice-options {
+.voice-options,
+.settings-card {
   border: 2rpx solid #e8d8c3;
   border-radius: 24rpx;
   background: #ffffff;
@@ -418,6 +419,28 @@
   padding: 12rpx;
   display: grid;
   gap: 10rpx;
+}
+
+.settings-card {
+  padding: 10rpx 28rpx;
+}
+
+.switch-row {
+  min-height: 126rpx;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 28rpx;
+}
+
+.switch-copy {
+  flex: 1;
+  min-width: 0;
+}
+
+.settings-divider {
+  height: 1rpx;
+  background: rgba(43, 23, 19, 0.08);
 }
 
 .voice-option {

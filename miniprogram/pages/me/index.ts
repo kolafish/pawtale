@@ -25,6 +25,11 @@ import {
   saveSelectedAIModel,
   type AIModelOption,
 } from "../../services/ai-model-settings";
+import {
+  readAccessibilitySettings,
+  saveAutoBargeInEnabled,
+  saveLargeTextEnabled,
+} from "../../services/accessibility-settings";
 import { formatBeijingDateTime } from "../../services/time";
 import {
   readScopedTTSSettings,
@@ -88,6 +93,8 @@ interface MeData {
   bookTTSSpeedRatio: number;
   bookTTSSpeedLabel: string;
   ttsSpeedOptions: TTSSpeedOption[];
+  largeTextEnabled: boolean;
+  autoBargeInEnabled: boolean;
 }
 
 interface MeDataset {
@@ -101,6 +108,12 @@ type VoiceDatasetEvent = PageDatasetEvent<MeDataset>;
 type SpeedDatasetEvent = PageDatasetEvent<MeDataset>;
 type ModelDatasetEvent = PageDatasetEvent<MeDataset>;
 type InputEvent = PageTextInputEvent;
+
+interface SwitchChangeEvent {
+  detail: {
+    value: boolean;
+  };
+}
 
 const TTS_SCOPE_VALUES: readonly TTSSettingsScope[] = ["chat", "book"];
 
@@ -200,6 +213,14 @@ function voiceAuthorizationSettingsData(): Pick<
   };
 }
 
+function accessibilitySettingsData(): Pick<MeData, "largeTextEnabled" | "autoBargeInEnabled"> {
+  const settings = readAccessibilitySettings();
+  return {
+    largeTextEnabled: settings.largeTextEnabled,
+    autoBargeInEnabled: settings.autoBargeInEnabled,
+  };
+}
+
 function loggedOutData(): Partial<MeData> {
   return {
     loggedIn: false,
@@ -226,6 +247,7 @@ function loggedOutData(): Partial<MeData> {
     totalUserCharCount: 0,
     totalAudioText: "0 秒",
     ...voiceAuthorizationSettingsData(),
+    ...accessibilitySettingsData(),
   };
 }
 
@@ -234,6 +256,7 @@ Page<MeData, {
   loadMe(): Promise<void>;
   loadVoiceStats(projectId: string): Promise<void>;
   refreshVoiceAuthorizationConsent(): void;
+  refreshAccessibilitySettings(): void;
   changeEmailInput(event: InputEvent): void;
   changePassword(event: InputEvent): void;
   changeCredentialEmail(event: InputEvent): void;
@@ -249,6 +272,8 @@ Page<MeData, {
   selectTTSVoice(event: VoiceDatasetEvent): void;
   selectTTSSpeed(event: SpeedDatasetEvent): void;
   selectAIModel(event: ModelDatasetEvent): void;
+  changeLargeText(event: SwitchChangeEvent): void;
+  changeAutoBargeIn(event: SwitchChangeEvent): void;
   openVoiceAuthorization(): void;
   openProjects(): void;
   openVoiceProgress(): void;
@@ -294,10 +319,13 @@ Page<MeData, {
     bookTTSSpeedRatio: 1,
     bookTTSSpeedLabel: "正常 1.0x",
     ttsSpeedOptions: TTS_SPEED_OPTIONS,
+    largeTextEnabled: false,
+    autoBargeInEnabled: true,
   },
 
   async onShow() {
     this.refreshVoiceAuthorizationConsent();
+    this.refreshAccessibilitySettings();
     if (!this.data.loading) {
       await this.loadMe();
     }
@@ -305,6 +333,10 @@ Page<MeData, {
 
   refreshVoiceAuthorizationConsent() {
     this.setData(voiceAuthorizationSettingsData());
+  },
+
+  refreshAccessibilitySettings() {
+    this.setData(accessibilitySettingsData());
   },
 
   async loadMe() {
@@ -340,6 +372,7 @@ Page<MeData, {
         }),
         ...aiModelSettingsData(),
         ...ttsProfilesData(),
+        ...accessibilitySettingsData(),
       });
       if (activeProjectId) {
         await this.loadVoiceStats(activeProjectId);
@@ -564,6 +597,24 @@ Page<MeData, {
       aiModelOptions: AI_MODEL_OPTIONS,
     });
     wx.showToast({ title: "已保存", icon: "success" });
+  },
+
+  changeLargeText(event) {
+    const settings = saveLargeTextEnabled(event.detail.value);
+    this.setData({
+      largeTextEnabled: settings.largeTextEnabled,
+      autoBargeInEnabled: settings.autoBargeInEnabled,
+    });
+    wx.showToast({ title: settings.largeTextEnabled ? "大字模式已打开" : "大字模式已关闭", icon: "none" });
+  },
+
+  changeAutoBargeIn(event) {
+    const settings = saveAutoBargeInEnabled(event.detail.value);
+    this.setData({
+      largeTextEnabled: settings.largeTextEnabled,
+      autoBargeInEnabled: settings.autoBargeInEnabled,
+    });
+    wx.showToast({ title: settings.autoBargeInEnabled ? "自动检测已打开" : "自动检测已关闭", icon: "none" });
   },
 
   openVoiceAuthorization() {

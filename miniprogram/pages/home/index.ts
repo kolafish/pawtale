@@ -5,6 +5,7 @@ import {
   memoirHomePrompt,
   memoirStoryTitle,
 } from "../../services/memoir-display-copy";
+import { readLargeTextEnabled } from "../../services/accessibility-settings";
 import {
   createMemoirVoiceSession,
   listMemoirVoiceTranscripts,
@@ -74,6 +75,8 @@ interface HomeData {
   resumeAskButtonHoverClass: string;
   showResumeActions: boolean;
   showVoiceAuthorizationPanel: boolean;
+  largeTextEnabled: boolean;
+  homePageClass: string;
 }
 
 interface CheckboxChangeEvent {
@@ -99,6 +102,7 @@ type HomeViewPatch = Pick<
   | "resumeAskButtonHoverClass"
   | "showResumeActions"
   | "showVoiceAuthorizationPanel"
+  | "homePageClass"
 >;
 
 type HomeContext = {
@@ -204,6 +208,7 @@ export function homeViewPatch(state: HomeData): HomeViewPatch {
   const voiceStartButtonClass = blocked ? "voice-start-button button-blocked" : "voice-start-button";
   const voiceStartButtonHoverClass = blocked ? "none" : "voice-start-button-hover";
   return {
+    homePageClass: state.largeTextEnabled ? "home-page large-text" : "home-page",
     greetingText: `你好，${state.displayName || "作者"}`,
     launchModeTagText: state.launchVariant === "new_project" ? "新故事本" : "第一次来",
     launchVoiceButtonTitle: state.creatingVoice ? "正在准备" : state.launchPrimaryText,
@@ -278,6 +283,7 @@ async function loadLastStoryHint(projectId: string): Promise<string> {
 Page<HomeData, {
   onShow(): Promise<void>;
   loadHome(): Promise<void>;
+  refreshAccessibilitySettings(): void;
   refreshVoiceAuthorizationConsent(): void;
   changeVoiceAuthorization(event: CheckboxChangeEvent): void;
   openVoiceAuthorization(): void;
@@ -332,13 +338,20 @@ Page<HomeData, {
     resumeAskButtonHoverClass: "resume-ask-button-hover",
     showResumeActions: false,
     showVoiceAuthorizationPanel: true,
+    largeTextEnabled: false,
+    homePageClass: "home-page",
   },
 
   async onShow() {
+    this.refreshAccessibilitySettings();
     this.refreshVoiceAuthorizationConsent();
     if (!this.data.loading) {
       await this.loadHome();
     }
+  },
+
+  refreshAccessibilitySettings() {
+    setHomeData(this, { largeTextEnabled: readLargeTextEnabled() });
   },
 
   refreshVoiceAuthorizationConsent() {

@@ -14,16 +14,19 @@ function loadHomePage({
   voiceApiExports = {},
   voiceAuthorizationExports = {},
   launchStateExports = {},
+  accessibilityExports = {},
 } = {}) {
   const authPath = require.resolve("../services/auth.ts");
   const voiceApiPath = require.resolve("../services/memoir-voice-api.ts");
   const voiceAuthorizationPath = require.resolve("../services/voice-authorization.ts");
   const launchStatePath = require.resolve("../services/home-launch-state.ts");
+  const accessibilityPath = require.resolve("../services/accessibility-settings.ts");
   const homePath = require.resolve("../pages/home/index.ts");
   delete require.cache[authPath];
   delete require.cache[voiceApiPath];
   delete require.cache[voiceAuthorizationPath];
   delete require.cache[launchStatePath];
+  delete require.cache[accessibilityPath];
   delete require.cache[homePath];
   require.cache[authPath] = {
     id: authPath,
@@ -75,6 +78,15 @@ function loadHomePage({
       ...launchStateExports,
     },
   };
+  require.cache[accessibilityPath] = {
+    id: accessibilityPath,
+    filename: accessibilityPath,
+    loaded: true,
+    exports: {
+      readLargeTextEnabled: () => false,
+      ...accessibilityExports,
+    },
+  };
 
   let page = null;
   const previousPage = global.Page;
@@ -115,6 +127,7 @@ test("home uses one warm memoir card with a clear voice start button", () => {
   const wxml = fs.readFileSync(path.join(__dirname, "../pages/home/index.wxml"), "utf8");
   const wxss = fs.readFileSync(path.join(__dirname, "../pages/home/index.wxss"), "utf8");
 
+  assert.match(wxml, /class="{{homePageClass}}"/);
   assert.match(wxml, /class="home-card"/);
   assert.equal(wxml.includes('class="project-panel"'), false);
   assert.equal(wxml.includes('class="voice-panel"'), false);
@@ -152,6 +165,29 @@ test("home polish keeps surfaces tactile without broad transitions", () => {
   assert.match(wxml, /hover-class="{{resumeAskButtonHoverClass}}"/);
   assert.equal(wxml.includes("loading || creatingVoice"), false);
   assert.match(wxml, /<view class="return-prompt-close"[^>]*hover-class="return-prompt-close-hover"/);
+});
+
+test("home supports a local large text mode without changing the default class", () => {
+  const loaded = loadHomePage({
+    accessibilityExports: {
+      readLargeTextEnabled: () => true,
+    },
+  });
+  const { homeViewPatch } = loaded.mod;
+  const { page } = loaded;
+  const wxss = fs.readFileSync(path.join(__dirname, "../pages/home/index.wxss"), "utf8");
+  const context = {
+    data: { ...page.data },
+    setData(patch) {
+      this.data = { ...this.data, ...patch };
+    },
+  };
+
+  assert.match(wxss, /\.home-page\.large-text \.project-title[\s\S]*font-size: 64rpx/);
+  page.refreshAccessibilitySettings.call(context);
+  assert.equal(context.data.largeTextEnabled, true);
+  assert.equal(context.data.homePageClass, "home-page large-text");
+  assert.equal(homeViewPatch({ ...context.data, largeTextEnabled: false }).homePageClass, "home-page");
 });
 
 test("home presents internal project titles as natural story copy", () => {

@@ -15,7 +15,15 @@ function loadVoiceChatPage({
   streamingSpeechPlaybackExports = {},
   voiceBargeInMonitorExports = {},
   ttsTextProgressExports = {},
+  accessibilityExports = {},
 } = {}) {
+  mockModule("../services/accessibility-settings.ts", {
+    readAccessibilitySettings: () => ({
+      largeTextEnabled: false,
+      autoBargeInEnabled: true,
+    }),
+    ...accessibilityExports,
+  });
   mockModule("../services/memoir-streaming-asr.ts", {
     classifyVoiceClientConnectionError: () => ({ kind: "unknown" }),
     MemoirStreamingAsrClient: streamingExports.MemoirStreamingAsrClient || class {
@@ -1523,6 +1531,55 @@ test("voice chat automatically interrupts assistant playback when local voice mo
   assert.deepEqual(startOptions, [{ noVoiceActivityTimeoutMs: 0 }]);
   assert.equal(context.data.recording, true);
   assert.equal(context.data.followUpTTSPlaying, false);
+});
+
+test("voice chat does not start local barge-in monitor when the setting is off", () => {
+  let startCount = 0;
+  const monitor = {
+    start() {
+      startCount += 1;
+      return true;
+    },
+    stop() {},
+    async stopAndWait() {},
+    isRunning() {
+      return false;
+    },
+  };
+  const page = loadVoiceChatPage({
+    accessibilityExports: {
+      readAccessibilitySettings: () => ({
+        largeTextEnabled: false,
+        autoBargeInEnabled: false,
+      }),
+    },
+    voiceBargeInMonitorExports: {
+      VoiceBargeInMonitor: class {
+        constructor() {
+          return monitor;
+        }
+      },
+    },
+  });
+  const context = {
+    ...page,
+    data: {
+      ...page.data,
+      autoBargeInEnabled: false,
+      followUpLoading: true,
+      followUpTTSLoading: false,
+      followUpTTSPlaying: false,
+      assistantPromptText: "那咱们接着聊朋友。",
+    },
+    setData(patch) {
+      this.data = { ...this.data, ...patch };
+    },
+  };
+
+  page.startAssistantBargeInMonitor.call(context, 0);
+
+  assert.equal(startCount, 0);
+  assert.equal(context.data.autoListenStateText, "可以点按钮回答");
 });
 
 test("voice chat surfaces local barge-in monitor recorder failures", () => {

@@ -123,6 +123,9 @@ export interface VoiceChatData {
   micButtonClass: string;
   micButtonDisabled: boolean;
   micButtonText: string;
+  largeTextEnabled: boolean;
+  autoBargeInEnabled: boolean;
+  voiceChatPageClass: string;
 }
 
 export interface AutoListenGateSnapshot {
@@ -231,6 +234,9 @@ export function initialVoiceChatData(): VoiceChatData {
     micButtonClass: "mic-button",
     micButtonDisabled: true,
     micButtonText: "同意后开始说话",
+    largeTextEnabled: false,
+    autoBargeInEnabled: true,
+    voiceChatPageClass: "voice-chat-page",
   };
 }
 
@@ -269,6 +275,7 @@ export type VoiceChatViewPatch = Pick<
   | "micButtonClass"
   | "micButtonDisabled"
   | "micButtonText"
+  | "voiceChatPageClass"
 >;
 
 export function voiceChatViewPatch(state: VoiceChatData): VoiceChatViewPatch {
@@ -320,6 +327,7 @@ export function voiceChatViewPatch(state: VoiceChatData): VoiceChatViewPatch {
     micButtonText = "继续讲";
   }
   return {
+    voiceChatPageClass: state.largeTextEnabled ? "voice-chat-page large-text" : "voice-chat-page",
     finishButtonText: state.finishingSession ? "保存中" : "保存离开",
     topicTitleText: state.projectTitle || "这段回忆",
     showErrorKindStrip: Boolean(state.error && state.errorKindText),
