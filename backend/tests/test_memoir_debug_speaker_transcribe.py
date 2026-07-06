@@ -169,6 +169,78 @@ async def test_debug_speaker_transcribe_session_streams_speaker_windows_without_
     assert transcriber.closed
 
 
+async def test_debug_speaker_transcribe_session_dedupes_repeated_provider_full_results():
+    client = FakeGatewayClient()
+    transcriber = FakeSpeakerTranscriber()
+    session = DebugSpeakerTranscribeSession(
+        client=client,
+        transcriber_factory=lambda: transcriber,
+    )
+
+    run_task = asyncio.create_task(session.run())
+    await _wait_for_event(client, "session.ready")
+    await client.push({"type": "session.start"})
+    await _wait_for_event(client, "session.started")
+    await client.push(
+        {
+            "type": "audio.frame",
+            "audio": base64.b64encode(b"pcm-1").decode("ascii"),
+        }
+    )
+    await _wait_for_event_count(client, "speaker.partial", 2)
+    await client.push(
+        {
+            "type": "audio.frame",
+            "audio": base64.b64encode(b"pcm-2").decode("ascii"),
+        }
+    )
+    await asyncio.sleep(0.05)
+    await client.push({"type": "session.stop"})
+    await asyncio.wait_for(run_task, timeout=1)
+
+    speaker_events = [event for event in client.sent if event["type"] == "speaker.partial"]
+    assert [(event["segment_id"], event["speaker_id"], event["text"]) for event in speaker_events] == [
+        ("seg_1", "speaker_1", "你小时候住在哪里？"),
+        ("seg_2", "speaker_2", "住在厂里的家属院。"),
+    ]
+
+
+async def test_debug_speaker_transcribe_session_only_streams_new_items_from_cumulative_provider_results():
+    client = FakeGatewayClient()
+    transcriber = FakeCumulativeSpeakerTranscriber()
+    session = DebugSpeakerTranscribeSession(
+        client=client,
+        transcriber_factory=lambda: transcriber,
+    )
+
+    run_task = asyncio.create_task(session.run())
+    await _wait_for_event(client, "session.ready")
+    await client.push({"type": "session.start"})
+    await _wait_for_event(client, "session.started")
+    await client.push(
+        {
+            "type": "audio.frame",
+            "audio": base64.b64encode(b"pcm-1").decode("ascii"),
+        }
+    )
+    await _wait_for_event_count(client, "speaker.partial", 1)
+    await client.push(
+        {
+            "type": "audio.frame",
+            "audio": base64.b64encode(b"pcm-2").decode("ascii"),
+        }
+    )
+    await _wait_for_event_count(client, "speaker.partial", 2)
+    await client.push({"type": "session.stop"})
+    await asyncio.wait_for(run_task, timeout=1)
+
+    speaker_events = [event for event in client.sent if event["type"] == "speaker.partial"]
+    assert [(event["segment_id"], event["speaker_id"], event["text"]) for event in speaker_events] == [
+        ("seg_1", "speaker_1", "第一句话。"),
+        ("seg_2", "speaker_2", "第二句话。"),
+    ]
+
+
 async def test_debug_speaker_transcribe_session_falls_back_to_unknown_speaker():
     client = FakeGatewayClient()
     transcriber = FakeSpeakerTranscriber(with_speaker_labels=False)
@@ -414,3 +486,22 @@ class FakeSpeakerTranscriber:
 
     async def close(self) -> None:
         self.closed = True
+
+
+class FakeCumulativeSpeakerTranscriber(FakeSpeakerTranscriber):
+    async def send_audio(self, audio: bytes) -> None:
+        self.sent_audio.append(audio)
+        utterances = [
+            {"text": "第一句话。", "speaker_id": "1", "start_time": 0, "end_time": 1000},
+        ]
+        if len(self.sent_audio) > 1:
+            utterances.append(
+                {"text": "第二句话。", "speaker_id": "2", "start_time": 1100, "end_time": 2200}
+            )
+        await self.events_queue.put(
+            StreamingASREvent(
+                type="partial",
+                text="".join(item["text"] for item in utterances),
+                raw={"payload": {"result": [{"utterances": utterances}]}},
+            )
+        )

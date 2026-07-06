@@ -29,6 +29,8 @@ class DebugSpeakerSegment:
     segment_id: str
     speaker_id: str
     text: str
+    stable_key: str = ""
+    is_final: bool = False
     speaker_gender: str | None = None
     start_ms: int | None = None
     end_ms: int | None = None
@@ -74,6 +76,9 @@ class DebugSpeakerTranscribeSession:
         self._terminal_error = ""
         self._terminal_stop = asyncio.Event()
         self._next_segment_index = 1
+        self._segment_ids_by_key: dict[str, str] = {}
+        self._segment_text_by_key: dict[str, str] = {}
+        self._final_segment_keys: set[str] = set()
         self._sent_missing_speaker_labels_status = False
         self._sent_available_speaker_labels_status = False
 
@@ -205,13 +210,14 @@ class DebugSpeakerTranscribeSession:
         segments = self._segments_for_event(event)
         await self._send_speaker_label_status(event, segments)
         for segment in segments:
+            event_type = "speaker.final" if event.type == "final" or segment.is_final else "speaker.partial"
             await self.client.send_json(
                 self._event(
-                    "speaker.final" if event.type == "final" else "speaker.partial",
+                    event_type,
                     segment_id=segment.segment_id,
                     speaker_id=segment.speaker_id,
                     speaker_gender=segment.speaker_gender,
-                    text=normalize_memoir_asr_text(segment.text),
+                    text=segment.text,
                     start_ms=segment.start_ms,
                     end_ms=segment.end_ms,
                     confidence=segment.confidence,
@@ -253,30 +259,82 @@ class DebugSpeakerTranscribeSession:
     def _segments_for_event(self, event: StreamingASREvent) -> list[DebugSpeakerSegment]:
         raw_segments = speaker_segments_from_asr_event(event)
         if raw_segments:
-            return [
+            return self._dedupe_segments(raw_segments, event_type=event.type)
+        return self._dedupe_segments([
+            DebugSpeakerSegment(
+                segment_id="",
+                speaker_id="speaker_unknown",
+                text=event.text,
+                stable_key=_fallback_segment_key(
+                    speaker_id="speaker_unknown",
+                    text=event.text,
+                    index=1,
+                    start_ms=event.start_ms,
+                ),
+                is_final=event.type == "final",
+                speaker_gender=None,
+                start_ms=event.start_ms,
+                end_ms=event.end_ms,
+                provider_payload=event.raw,
+            )
+        ], event_type=event.type)
+
+    def _dedupe_segments(
+        self,
+        segments: Sequence[DebugSpeakerSegment],
+        *,
+        event_type: str,
+    ) -> list[DebugSpeakerSegment]:
+        emit_segments: list[DebugSpeakerSegment] = []
+        for index, segment in enumerate(segments, start=1):
+            text = normalize_memoir_asr_text(segment.text).strip()
+            if not text:
+                continue
+            key = segment.stable_key or _fallback_segment_key(
+                speaker_id=segment.speaker_id,
+                text=text,
+                index=index,
+                start_ms=segment.start_ms,
+            )
+            outgoing_is_final = event_type == "final" or segment.is_final
+            if not self._should_emit_segment(key, text=text, is_final=outgoing_is_final):
+                continue
+            emit_segments.append(
                 DebugSpeakerSegment(
-                    segment_id=self._next_segment_id(),
+                    segment_id=self._segment_id_for_key(key),
                     speaker_id=segment.speaker_id,
-                    text=segment.text,
+                    text=text,
+                    stable_key=key,
+                    is_final=outgoing_is_final,
                     speaker_gender=segment.speaker_gender,
                     start_ms=segment.start_ms,
                     end_ms=segment.end_ms,
                     confidence=segment.confidence,
                     provider_payload=segment.provider_payload,
                 )
-                for segment in raw_segments
-            ]
-        return [
-            DebugSpeakerSegment(
-                segment_id=self._next_segment_id(),
-                speaker_id="speaker_unknown",
-                text=event.text,
-                speaker_gender=None,
-                start_ms=event.start_ms,
-                end_ms=event.end_ms,
-                provider_payload=event.raw,
             )
-        ]
+        return emit_segments
+
+    def _should_emit_segment(self, key: str, *, text: str, is_final: bool) -> bool:
+        previous_text = self._segment_text_by_key.get(key, "")
+        if is_final:
+            if key in self._final_segment_keys and previous_text == text:
+                return False
+            self._segment_text_by_key[key] = text
+            self._final_segment_keys.add(key)
+            return True
+        if key in self._final_segment_keys or previous_text == text:
+            return False
+        self._segment_text_by_key[key] = text
+        return True
+
+    def _segment_id_for_key(self, key: str) -> str:
+        existing = self._segment_ids_by_key.get(key)
+        if existing:
+            return existing
+        segment_id = self._next_segment_id()
+        self._segment_ids_by_key[key] = segment_id
+        return segment_id
 
     def _next_segment_id(self) -> str:
         segment_id = f"seg_{self._next_segment_index}"
@@ -371,14 +429,24 @@ def speaker_segments_from_asr_event(event: StreamingASREvent) -> list[DebugSpeak
         speaker = _speaker_id(utterance)
         if not text or not speaker:
             continue
+        start_ms = _optional_int(utterance.get("start_ms") or utterance.get("start_time"))
+        end_ms = _optional_int(utterance.get("end_ms") or utterance.get("end_time"))
         segments.append(
             DebugSpeakerSegment(
                 segment_id=f"provider_{index}",
                 speaker_id=speaker,
                 text=text,
+                stable_key=_segment_stable_key(
+                    utterance,
+                    speaker_id=speaker,
+                    index=index,
+                    start_ms=start_ms,
+                    text=text,
+                ),
+                is_final=_segment_is_final(utterance),
                 speaker_gender=_speaker_gender(utterance),
-                start_ms=_optional_int(utterance.get("start_ms") or utterance.get("start_time")),
-                end_ms=_optional_int(utterance.get("end_ms") or utterance.get("end_time")),
+                start_ms=start_ms,
+                end_ms=end_ms,
                 confidence=_optional_float(utterance.get("confidence")),
                 provider_payload=utterance,
             )
@@ -390,14 +458,24 @@ def speaker_segments_from_asr_event(event: StreamingASREvent) -> list[DebugSpeak
         speaker = _speaker_id(base)
         if not text or not speaker:
             continue
+        start_ms = _optional_int(base.get("start_ms") or base.get("start_time"))
+        end_ms = _optional_int(base.get("end_ms") or base.get("end_time"))
         segments.append(
             DebugSpeakerSegment(
                 segment_id=f"provider_{index}",
                 speaker_id=speaker,
                 text=text,
+                stable_key=_segment_stable_key(
+                    base,
+                    speaker_id=speaker,
+                    index=index,
+                    start_ms=start_ms,
+                    text=text,
+                ),
+                is_final=_segment_is_final(base),
                 speaker_gender=_speaker_gender(base),
-                start_ms=_optional_int(base.get("start_ms") or base.get("start_time")),
-                end_ms=_optional_int(base.get("end_ms") or base.get("end_time")),
+                start_ms=start_ms,
+                end_ms=end_ms,
                 confidence=_optional_float(base.get("confidence")),
                 provider_payload=base,
             )
@@ -442,6 +520,17 @@ SPEAKER_ID_KEYS = (
 )
 
 SPEAKER_CONTAINER_KEYS = ("speaker_info", "speakerInfo", "additions", "speaker")
+SEGMENT_ID_KEYS = (
+    "utterance_id",
+    "utteranceId",
+    "utt_id",
+    "uttId",
+    "segment_id",
+    "segmentId",
+    "result_id",
+    "resultId",
+    "id",
+)
 SPEAKER_GENDER_KEYS = (
     "speaker_gender",
     "speakerGender",
@@ -450,6 +539,61 @@ SPEAKER_GENDER_KEYS = (
     "voice_gender",
     "voiceGender",
 )
+
+
+def _segment_stable_key(
+    payload: dict[str, Any],
+    *,
+    speaker_id: str,
+    index: int,
+    start_ms: int | None,
+    text: str,
+) -> str:
+    explicit_key = _explicit_segment_key(payload)
+    if explicit_key:
+        return f"id:{speaker_id}:{explicit_key}"
+    return _fallback_segment_key(
+        speaker_id=speaker_id,
+        text=text,
+        index=index,
+        start_ms=start_ms,
+    )
+
+
+def _explicit_segment_key(payload: dict[str, Any]) -> str:
+    for key in SEGMENT_ID_KEYS:
+        value = payload.get(key)
+        if value is None or isinstance(value, bool):
+            continue
+        text = str(value).strip()
+        if text:
+            return text.lower()
+    return ""
+
+
+def _fallback_segment_key(
+    *,
+    speaker_id: str,
+    text: str,
+    index: int,
+    start_ms: int | None,
+) -> str:
+    if start_ms is not None:
+        return f"span:{speaker_id}:{start_ms}"
+    return f"text:{speaker_id}:{index}:{_text_key(text)}"
+
+
+def _text_key(text: str) -> str:
+    return "".join(str(text).split()).lower()[:120]
+
+
+def _segment_is_final(payload: dict[str, Any]) -> bool:
+    return bool(
+        payload.get("definite")
+        or payload.get("is_final")
+        or payload.get("isFinal")
+        or payload.get("final")
+    )
 
 
 def _speaker_id(utterance: dict[str, Any]) -> str:

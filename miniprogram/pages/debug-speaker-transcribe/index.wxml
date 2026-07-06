@@ -81,7 +81,6 @@
         class="{{activePartial.partialScrollClass}}"
         scroll-y="{{true}}"
         scroll-top="{{activePartial.partialScrollTop}}"
-        scroll-into-view="{{activePartial.partialScrollTarget}}"
       >
         <text class="partial-text">{{activePartial.text}}</text>
         <view id="{{activePartial.partialEndId}}" class="partial-end"></view>

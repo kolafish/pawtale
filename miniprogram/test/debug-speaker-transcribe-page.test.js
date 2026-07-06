@@ -405,6 +405,38 @@ test("debug speaker page keeps only new final text when cumulative provider resu
   ]);
 });
 
+test("debug speaker page ignores repeated final segment events", () => {
+  const { page } = loadDebugSpeakerPage({
+    proofreadExports: {
+      proofreadDebugSpeakerTranscriptLine: () => new Promise(() => {}),
+    },
+  });
+  const context = pageContext(page);
+  let setDataCalls = 0;
+  const originalSetData = context.setData;
+  context.setData = function setDataWithCount(patch) {
+    setDataCalls += 1;
+    return originalSetData.call(this, patch);
+  };
+
+  const event = {
+    type: "speaker.final",
+    speaker_id: "speaker_unknown",
+    segment_id: "seg-1",
+    text: "这句话只应该出现一次。",
+    start_ms: 0,
+    end_ms: 3000,
+  };
+
+  page.handleSpeakerEvent.call(context, event);
+  const callsAfterFirstFinal = setDataCalls;
+  page.handleSpeakerEvent.call(context, event);
+
+  assert.equal(context.data.speakers[0].segmentCountText, "1 段");
+  assert.deepEqual(context.data.conversationLines.map((line) => line.text), ["这句话只应该出现一次。"]);
+  assert.equal(setDataCalls, callsAfterFirstFinal);
+});
+
 test("debug speaker page proofreads final lines with recent context", async () => {
   const calls = [];
   const { page } = loadDebugSpeakerPage({
@@ -552,6 +584,34 @@ test("debug speaker page scrolls long partial text to the newest progress", () =
 
   assert.equal(context.data.activePartial.partialScrollTop, 20000);
   assert.match(context.data.activePartial.partialScrollTarget, /speaker_2-partial-end-20000/);
+});
+
+test("debug speaker page ignores repeated partial text without moving scroll", () => {
+  const { page } = loadDebugSpeakerPage();
+  const context = pageContext(page);
+  const longPartial = "这是一段很长的实时识别文字，".repeat(8);
+  let setDataCalls = 0;
+  const originalSetData = context.setData;
+  context.setData = function setDataWithCount(patch) {
+    setDataCalls += 1;
+    return originalSetData.call(this, patch);
+  };
+
+  const event = {
+    type: "speaker.partial",
+    speaker_id: "speaker_2",
+    segment_id: "seg-2",
+    text: longPartial,
+  };
+
+  page.handleSpeakerEvent.call(context, event);
+  const callsAfterFirstPartial = setDataCalls;
+  const scrollTopAfterFirstPartial = context.data.activePartial.partialScrollTop;
+  page.handleSpeakerEvent.call(context, event);
+
+  assert.equal(context.data.activePartial.text, longPartial);
+  assert.equal(context.data.activePartial.partialScrollTop, scrollTopAfterFirstPartial);
+  assert.equal(setDataCalls, callsAfterFirstPartial);
 });
 
 test("debug speaker page follows the shared large text setting", () => {
