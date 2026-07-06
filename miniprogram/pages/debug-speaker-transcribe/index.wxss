@@ -349,13 +349,30 @@
 }
 
 .line-item {
+  position: relative;
   margin-top: 24rpx;
   padding-top: 24rpx;
   border-top: 1rpx solid rgba(43, 23, 19, 0.08);
 }
 
+.line-item.history {
+  padding-bottom: 8rpx;
+}
+
 .line-item.latest {
+  padding-left: 18rpx;
   border-top-color: rgba(166, 75, 62, 0.18);
+}
+
+.line-item.latest::before {
+  content: "";
+  position: absolute;
+  top: 26rpx;
+  bottom: 4rpx;
+  left: 0;
+  width: 6rpx;
+  border-radius: 999rpx;
+  background: #d7a28c;
 }
 
 .line-meta-row {
@@ -409,6 +426,7 @@
 
 .history-preview-panel {
   width: 100%;
+  max-height: 76vh;
   padding: 28rpx 30rpx 32rpx;
   border-radius: 26rpx;
   background: #2b1713;
@@ -545,6 +563,21 @@
 .debug-speaker-page.large-text .line-text.history {
   font-size: 46rpx;
   line-height: 72rpx;
+}
+
+.debug-speaker-page.large-text .line-item.latest {
+  padding-left: 22rpx;
+}
+
+.debug-speaker-page.large-text .line-item.latest::before {
+  top: 30rpx;
+  bottom: 6rpx;
+  width: 8rpx;
+}
+
+.debug-speaker-page.large-text .history-preview-panel {
+  padding: 34rpx;
+  border-radius: 30rpx;
 }
 
 .debug-speaker-page.large-text .history-preview-speaker,
