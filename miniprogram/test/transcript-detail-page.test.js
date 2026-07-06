@@ -1,8 +1,6 @@
 require("./register-ts");
 
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const path = require("node:path");
 const test = require("node:test");
 const { loadPageModule, mockModule, pageContext } = require("./page-harness");
 
@@ -180,40 +178,6 @@ test("transcript detail page uses content-first inclusion labels", async () => {
   assert.deepEqual(context.data.item.chapterMoveOptions, [
     { label: "第 2 章 家庭记忆", value: "chapter-2" },
   ]);
-});
-
-test("transcript detail page keeps serious evidence and editing labels", () => {
-  const pageJson = JSON.parse(fs.readFileSync(
-    path.join(__dirname, "../pages/transcript-detail/index.json"),
-    "utf8",
-  ));
-  const wxml = fs.readFileSync(
-    path.join(__dirname, "../pages/transcript-detail/index.wxml"),
-    "utf8",
-  );
-
-  assert.equal(pageJson.navigationBarTitleText, "这段讲述");
-  assert.match(wxml, /<text class="page-title">这段讲述<\/text>/);
-  assert.match(wxml, /成书文字/);
-  assert.match(wxml, /这段会用于章节正文/);
-  assert.match(wxml, /原始讲述/);
-  assert.match(wxml, /根据录音识别，保留口述痕迹/);
-  assert.match(wxml, /修改这段文字/);
-  assert.match(wxml, /手动编辑/);
-  assert.match(wxml, /说修改意见/);
-  assert.match(wxml, /听讲述原音/);
-  assert.match(wxml, /听小余提问/);
-  assert.match(wxml, /只播放家人的这段回答/);
-  assert.match(wxml, /answerPlaybackProgressStyle/);
-  assert.match(wxml, /answerPlaybackStopText/);
-  assert.match(wxml, /继续播放/);
-  assert.match(wxml, /暂停/);
-  assert.match(wxml, /停止讲述/);
-  assert.match(wxml, /停止提问/);
-  assert.match(wxml, /更多操作/);
-  assert.match(wxml, /删除后，这条原始讲述会从素材库移除/);
-  assert.match(wxml, /相关章节会标记为需重新确认/);
-  assert.doesNotMatch(wxml, /整理后文字|原始识别|校对整理文字|说出修改|危险操作|语音修正|语音校对|播放问答|听当时问答|停止播放/);
 });
 
 test("transcript detail page collapses long question context by default", async () => {

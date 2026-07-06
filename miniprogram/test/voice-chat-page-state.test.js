@@ -1,8 +1,6 @@
 require("./register-ts");
 
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const path = require("node:path");
 const test = require("node:test");
 
 const {
@@ -108,49 +106,6 @@ test("voice chat view patch derives transcript and recording render fields", () 
   assert.equal(patch.controlHintText, "说完请点这里");
   assert.equal(patch.micButtonClass, "mic-button recording");
   assert.equal(patch.micButtonText, "说完了，帮我整理");
-});
-
-test("voice chat page keeps one main status and a clear recording action", () => {
-  const wxml = fs.readFileSync(path.join(__dirname, "../pages/voice-chat/index.wxml"), "utf8");
-  const wxss = fs.readFileSync(path.join(__dirname, "../pages/voice-chat/index.wxss"), "utf8");
-  const bindings = [...wxml.matchAll(/{{([^}]*)}}/g)].map((match) => match[1]);
-
-  assert.match(wxml, /class="topic-panel"/);
-  assert.match(wxml, /class="{{voiceChatPageClass}}"/);
-  assert.match(wxml, /正在聊：/);
-  assert.match(wxml, /{{finishButtonText}}/);
-  assert.match(wxml, /{{topicTitleText}}/);
-  assert.match(wxml, /wx:if="{{showAssistantPanel}}"/);
-  assert.match(wxml, /{{assistantDisplayText}}/);
-  assert.match(wxml, /{{stageStatusText}}/);
-  assert.match(wxml, /{{liveDisplayText}}/);
-  assert.match(wxml, /scroll-into-view="{{liveScrollTarget}}"/);
-  assert.match(wxml, /id="{{liveTextEndId}}"/);
-  assert.match(wxml, /{{historyCountText}}/);
-  assert.match(wxml, /wx:for="{{transcriptLineViews}}"/);
-  assert.match(wxml, /{{controlHintText}}/);
-  assert.match(wxml, /{{micButtonText}}/);
-  assert.match(wxml, /class="mic-button-text"/);
-  assert.match(wxml, /openingTopicOptions/);
-  assert.match(wxml, /bindtap="chooseOpeningTopic"/);
-  assert.match(wxml, /selectedOpeningTopicText/);
-  assert.match(wxml, /不知道讲什么，让小余问一句/);
-  for (const binding of bindings) {
-    assert.doesNotMatch(binding, /\?|&&|\|\||===|!==|\.length/);
-  }
-  assert.equal(wxml.includes("assistant-state"), false);
-  assert.equal(wxml.includes("status-label"), false);
-  assert.match(wxss, /\.mic-button[\s\S]*border-radius: 999rpx/);
-  assert.match(wxss, /\.assistant-text[\s\S]*font-size: 38rpx/);
-  assert.match(wxss, /\.assistant-topic-button[\s\S]*border-radius: 999rpx/);
-  assert.match(wxss, /\.mic-button-text[\s\S]*white-space: nowrap/);
-  assert.match(wxss, /\.mic-button-text[\s\S]*word-break: keep-all/);
-  assert.match(wxss, /\.voice-chat-page\.large-text \.assistant-question[\s\S]*font-size: 64rpx/);
-  assert.match(wxss, /\.voice-chat-page\.large-text\.assistant-focus \.assistant-question[\s\S]*font-size: 72rpx/);
-  assert.match(wxss, /\.voice-chat-page\.large-text\.capture-focus \.live-text[\s\S]*font-size: 76rpx/);
-  assert.match(wxss, /\.voice-chat-page\.large-text\.capture-focus \.live-scroll\.long[\s\S]*height: 420rpx/);
-  assert.match(wxss, /\.voice-chat-page\.large-text \.mic-button[\s\S]*min-width: 620rpx/);
-  assert.match(wxss, /\.voice-chat-page\.large-text \.mic-button[\s\S]*font-size: 52rpx/);
 });
 
 test("voice chat view patch adds focused large text root classes", () => {

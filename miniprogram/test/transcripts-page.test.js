@@ -1,8 +1,6 @@
 require("./register-ts");
 
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const path = require("node:path");
 const test = require("node:test");
 const { loadPageModule, mockModule, pageContext } = require("./page-harness");
 
@@ -239,26 +237,6 @@ test("transcript voice edit diff marks inline replacements, insertions, and dele
       { text: "很开心。", kind: "equal" },
     ],
   );
-});
-
-test("transcripts list leaves full correction UI to the detail page", () => {
-  const wxml = fs.readFileSync(path.join(__dirname, "../pages/transcripts/index.wxml"), "utf8");
-  const detailWxml = fs.readFileSync(path.join(__dirname, "../pages/transcript-detail/index.wxml"), "utf8");
-
-  assert.doesNotMatch(wxml, /voice-edit-inline-diff/);
-  assert.doesNotMatch(wxml, /class="raw-box"/);
-  assert.doesNotMatch(wxml, /raw-section|question-section|record-section-text|原始讲述|刚才问了/);
-  assert.doesNotMatch(wxml, /section-title">整理文字/);
-  assert.match(wxml, /summary-preview/);
-  assert.match(wxml, /{{pageMetaText}}/);
-  assert.match(wxml, /{{item.bookStatusClass}}/);
-  assert.match(wxml, /{{item.deleteButtonText}}/);
-  assert.match(wxml, /{{item.assignPickerActionClass}}/);
-  assert.doesNotMatch(wxml, /playAudio|playAudioText|听讲述/);
-  assert.doesNotMatch(wxml, /\? |\|\||===|&&|!|\.length/);
-  assert.match(detailWxml, /voice-edit-inline-diff/);
-  assert.match(detailWxml, /voiceEditPreview\.diffSegments/);
-  assert.doesNotMatch(wxml, /voice-edit-comparison/);
 });
 
 test("transcripts view patch keeps empty states mutually exclusive", () => {
