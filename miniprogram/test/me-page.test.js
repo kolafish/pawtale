@@ -734,7 +734,7 @@ test("me saves selected AI model", () => {
   delete global.wx;
 });
 
-test("me keeps memoir management and voice progress as separate entries", () => {
+test("me keeps memoir management, voice progress, and debug speaker tools as separate entries", () => {
   const navigations = [];
   global.wx = {
     navigateTo(options) {
@@ -746,10 +746,12 @@ test("me keeps memoir management and voice progress as separate entries", () => 
 
   page.openVoiceProgress.call(context);
   page.openProjects.call(context);
+  page.openDebugSpeakerTranscribe.call(context);
 
   assert.deepEqual(navigations, [
     "/pages/voice-progress/index",
     "/pages/projects/index",
+    "/pages/debug-speaker-transcribe/index",
   ]);
   delete global.wx;
 });

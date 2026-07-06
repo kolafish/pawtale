@@ -1,0 +1,99 @@
+<view class="debug-speaker-page">
+  <view class="top-row">
+    <view class="back-hit" bindtap="goBack">
+      <text class="back-mark">‹</text>
+    </view>
+    <view class="title-block">
+      <text class="page-title">多人实时转写</text>
+      <text class="page-meta">本次识别不保存到素材库</text>
+    </view>
+  </view>
+
+  <view wx:if="{{error}}" class="error">{{error}}</view>
+
+  <view class="control-panel">
+    <view class="control-head">
+      <view>
+        <text class="control-title">实时说话人窗口</text>
+        <text class="control-meta">按本次连接里的声音分组显示</text>
+      </view>
+      <text class="{{statusClass}}">{{statusText}}</text>
+    </view>
+
+    <view class="level-track">
+      <view class="level-fill" style="{{audioLevelStyle}}"></view>
+    </view>
+
+    <view class="stats-grid">
+      <view class="stat-cell">
+        <text class="stat-value">{{elapsedText}}</text>
+        <text class="stat-label">时长</text>
+      </view>
+      <view class="stat-cell">
+        <text class="stat-value">{{frameCountText}}</text>
+        <text class="stat-label">音频帧</text>
+      </view>
+      <view class="stat-cell">
+        <text class="stat-value">{{audioBytesText}}</text>
+        <text class="stat-label">已发送</text>
+      </view>
+    </view>
+
+    <view class="actions-row">
+      <button
+        class="{{primaryButtonClass}}"
+        loading="{{busy}}"
+        disabled="{{busy}}"
+        bindtap="toggleRecording"
+      >
+        {{primaryButtonText}}
+      </button>
+      <button
+        class="secondary-button"
+        disabled="{{clearDisabled}}"
+        bindtap="clearTranscript"
+      >
+        清空
+      </button>
+    </view>
+  </view>
+
+  <view wx:if="{{showEmpty}}" class="empty-panel">
+    <text class="empty-title">等待实时转写</text>
+    <text class="empty-copy">开始后，不同说话人的文字会分到不同窗口。</text>
+  </view>
+
+  <view class="speaker-list">
+    <view
+      wx:for="{{speakers}}"
+      wx:key="speakerId"
+      class="{{item.cardClass}}"
+    >
+      <view class="speaker-head">
+        <text class="speaker-title">{{item.title}}</text>
+        <text class="speaker-count">{{item.segmentCountText}}</text>
+      </view>
+
+      <view wx:if="{{item.partialText}}" class="partial-box">
+        <text class="partial-label">正在说</text>
+        <text class="partial-text">{{item.partialText}}</text>
+      </view>
+
+      <view wx:if="{{item.showNoLines}}" class="speaker-empty">
+        <text>还没有完整片段</text>
+      </view>
+
+      <view
+        wx:for="{{item.lines}}"
+        wx:for-item="line"
+        wx:key="id"
+        class="line-item"
+      >
+        <text wx:if="{{line.metaText}}" class="line-meta">{{line.metaText}}</text>
+        <text class="line-text">{{line.text}}</text>
+      </view>
+    </view>
+  </view>
+
+  <view class="bottom-spacer"></view>
+</view>
