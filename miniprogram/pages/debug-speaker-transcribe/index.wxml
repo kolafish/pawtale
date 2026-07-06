@@ -76,7 +76,15 @@
 
       <view wx:if="{{item.partialText}}" class="partial-box">
         <text class="partial-label">正在说</text>
-        <text class="partial-text">{{item.partialText}}</text>
+        <scroll-view
+          class="{{item.partialScrollClass}}"
+          scroll-y="{{true}}"
+          scroll-top="{{item.partialScrollTop}}"
+          scroll-into-view="{{item.partialScrollTarget}}"
+        >
+          <text class="partial-text">{{item.partialText}}</text>
+          <view id="{{item.partialEndId}}" class="partial-end"></view>
+        </scroll-view>
       </view>
 
       <view wx:if="{{item.showNoLines}}" class="speaker-empty">
