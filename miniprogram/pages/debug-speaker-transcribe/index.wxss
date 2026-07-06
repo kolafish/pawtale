@@ -73,6 +73,10 @@
   background: #fffdf9;
 }
 
+.control-panel.compact {
+  padding: 22rpx 24rpx;
+}
+
 .control-head,
 .speaker-head,
 .actions-row {
@@ -101,6 +105,10 @@
   color: #7b6f68;
   font-size: 28rpx;
   line-height: 1.35;
+}
+
+.control-panel.compact .control-meta {
+  display: none;
 }
 
 .status-pill,
@@ -182,6 +190,10 @@
   margin-top: 24rpx;
 }
 
+.control-panel.compact .actions-row {
+  margin-top: 18rpx;
+}
+
 .primary-button,
 .secondary-button {
   height: 98rpx;
@@ -194,6 +206,13 @@
   font-size: 34rpx;
   font-weight: 850;
   line-height: 1;
+}
+
+.control-panel.compact .primary-button,
+.control-panel.compact .secondary-button {
+  height: 82rpx;
+  border-radius: 16rpx;
+  font-size: 32rpx;
 }
 
 .primary-button::after,
@@ -274,6 +293,12 @@
   box-sizing: border-box;
 }
 
+.control-panel.compact + .conversation-scroll {
+  height: calc(100vh - 330rpx - env(safe-area-inset-bottom));
+  min-height: 620rpx;
+  margin-top: 18rpx;
+}
+
 .speaker-window {
   padding: 34rpx;
   background: #ffffff;
@@ -306,6 +331,7 @@
 }
 
 .partial-scroll {
+  min-height: 168rpx;
   max-height: 420rpx;
   margin-top: 12rpx;
   overflow: hidden;
@@ -593,11 +619,28 @@
 }
 
 .debug-speaker-page.large-text .partial-scroll {
+  min-height: 260rpx;
   max-height: 420rpx;
 }
 
 .debug-speaker-page.large-text .partial-scroll.long {
   height: 420rpx;
+}
+
+.debug-speaker-page.large-text .control-panel.compact {
+  padding: 24rpx;
+}
+
+.debug-speaker-page.large-text .control-panel.compact .primary-button,
+.debug-speaker-page.large-text .control-panel.compact .secondary-button {
+  height: 92rpx;
+  font-size: 36rpx;
+}
+
+.debug-speaker-page.large-text .control-panel.compact + .conversation-scroll {
+  height: calc(100vh - 360rpx - env(safe-area-inset-bottom));
+  min-height: 600rpx;
+  margin-top: 18rpx;
 }
 
 .debug-speaker-page.large-text .partial-text,
