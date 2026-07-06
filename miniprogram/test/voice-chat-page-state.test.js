@@ -28,6 +28,9 @@ test("voice chat initial data keeps the assistant ready for opening narration", 
   assert.equal(first.assistantPromptLabel, "小余想听您讲讲");
   assert.equal(first.autoStopEnabled, true);
   assert.equal(first.autoListenEnabled, true);
+  assert.equal(first.largeTextEnabled, false);
+  assert.equal(first.autoBargeInEnabled, true);
+  assert.equal(first.voiceChatPageClass, "voice-chat-page");
   assert.equal(first.showVoiceAuthorizationPanel, true);
   assert.equal(first.micButtonDisabled, true);
   assert.equal(first.micButtonText, "同意后开始说话");
@@ -59,6 +62,7 @@ test("voice chat view patch derives simple fields for first assistant turn", () 
   const patch = voiceChatViewPatch(data);
 
   assert.equal(patch.topicTitleText, "外婆的故事");
+  assert.equal(patch.voiceChatPageClass, "voice-chat-page");
   assert.equal(patch.showVoiceAuthorizationPanel, false);
   assert.equal(patch.showAssistantPanel, true);
   assert.equal(patch.assistantDisplayText, "小余正在准备第一句话");
@@ -108,6 +112,7 @@ test("voice chat page keeps one main status and a clear recording action", () =>
   const bindings = [...wxml.matchAll(/{{([^}]*)}}/g)].map((match) => match[1]);
 
   assert.match(wxml, /class="topic-panel"/);
+  assert.match(wxml, /class="{{voiceChatPageClass}}"/);
   assert.match(wxml, /正在聊：/);
   assert.match(wxml, /{{finishButtonText}}/);
   assert.match(wxml, /{{topicTitleText}}/);
@@ -131,6 +136,17 @@ test("voice chat page keeps one main status and a clear recording action", () =>
   assert.match(wxss, /\.mic-button[\s\S]*border-radius: 999rpx/);
   assert.match(wxss, /\.assistant-text[\s\S]*font-size: 38rpx/);
   assert.match(wxss, /\.assistant-topic-button[\s\S]*border-radius: 999rpx/);
+  assert.match(wxss, /\.voice-chat-page\.large-text \.assistant-question[\s\S]*font-size: 62rpx/);
+  assert.match(wxss, /\.voice-chat-page\.large-text \.mic-button[\s\S]*font-size: 50rpx/);
+});
+
+test("voice chat view patch switches only the root class for large text mode", () => {
+  const patch = voiceChatViewPatch({
+    ...initialVoiceChatData(),
+    largeTextEnabled: true,
+  });
+
+  assert.equal(patch.voiceChatPageClass, "voice-chat-page large-text");
 });
 
 test("voice chat auto-listen gate snapshot keeps page and computed gate state together", () => {

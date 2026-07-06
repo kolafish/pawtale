@@ -1,4 +1,4 @@
-<view class="home-page">
+<view class="{{homePageClass}}">
   <view class="header">
     <text class="hello">{{greetingText}}</text>
     <text class="subtitle">余主任留声机</text>

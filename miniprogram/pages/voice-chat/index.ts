@@ -9,6 +9,7 @@ import type {
 import { normalizeMemoirAsrText } from "../../services/asr-text-normalization";
 import { trackAuditAction } from "../../services/audit-tracker";
 import { AudioPlaybackController } from "../../services/audio-playback";
+import { readAccessibilitySettings } from "../../services/accessibility-settings";
 import {
   applyAssistantTTSResponse,
   assistantTurnQueueItem,
@@ -145,6 +146,7 @@ Page<VoiceChatData, {
   onHide(): void;
   onUnload(): void;
   refreshVoiceAuthorizationConsent(): void;
+  refreshAccessibilitySettings(): void;
   changeVoiceAuthorization(event: CheckboxChangeEvent): Promise<void>;
   openVoiceAuthorization(): void;
   ensureVoiceAuthorization(autoTriggered?: boolean): boolean;
@@ -293,6 +295,7 @@ Page<VoiceChatData, {
   },
 
   async onLoad(query) {
+    this.refreshAccessibilitySettings();
     const voiceSessionId = queryParam(query, "voiceSessionId");
     const guidanceMode = queryChoice(query, "mode", GUIDANCE_MODE_VALUES, "free_narration");
     const currentGuidanceModule = queryParam(query, "module");
@@ -324,7 +327,20 @@ Page<VoiceChatData, {
   },
 
   onShow() {
+    this.refreshAccessibilitySettings();
     this.refreshVoiceAuthorizationConsent();
+  },
+
+  refreshAccessibilitySettings() {
+    const settings = readAccessibilitySettings();
+    setVoiceChatData(this, {
+      largeTextEnabled: settings.largeTextEnabled,
+      autoBargeInEnabled: settings.autoBargeInEnabled,
+      ...(settings.autoBargeInEnabled ? {} : { autoListenStateText: "可以点按钮回答" }),
+    });
+    if (!settings.autoBargeInEnabled) {
+      void this.stopAssistantBargeInMonitor();
+    }
   },
 
   onHide() {
@@ -1295,9 +1311,13 @@ Page<VoiceChatData, {
   startAssistantBargeInMonitor(requestSerial) {
     if (
       this.data.recording
+      || !this.data.autoBargeInEnabled
       || !this.assistantTurnActiveForBargeIn()
       || this.assistantBargeInMonitor.isRunning()
     ) {
+      if (!this.data.autoBargeInEnabled && this.assistantTurnActiveForBargeIn()) {
+        setVoiceChatData(this, { autoListenStateText: "可以点按钮回答" });
+      }
       return;
     }
     const started = this.assistantBargeInMonitor.start({
