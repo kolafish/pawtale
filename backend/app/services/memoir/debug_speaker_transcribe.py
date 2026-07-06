@@ -29,6 +29,7 @@ class DebugSpeakerSegment:
     segment_id: str
     speaker_id: str
     text: str
+    speaker_gender: str | None = None
     start_ms: int | None = None
     end_ms: int | None = None
     confidence: float | None = None
@@ -209,6 +210,7 @@ class DebugSpeakerTranscribeSession:
                     "speaker.final" if event.type == "final" else "speaker.partial",
                     segment_id=segment.segment_id,
                     speaker_id=segment.speaker_id,
+                    speaker_gender=segment.speaker_gender,
                     text=normalize_memoir_asr_text(segment.text),
                     start_ms=segment.start_ms,
                     end_ms=segment.end_ms,
@@ -231,7 +233,7 @@ class DebugSpeakerTranscribeSession:
                 self._event(
                     "speaker.diarization",
                     status="available",
-                    message="已收到说话人标签，会按不同人分窗口显示。",
+                    message="已收到说话人标签，会按不同人标注显示。",
                     provider_event_type=event.type,
                 )
             )
@@ -243,7 +245,7 @@ class DebugSpeakerTranscribeSession:
             self._event(
                 "speaker.diarization",
                 status="missing_provider_labels",
-                message="当前 ASR 返回结果没有说话人标签，暂时只能显示在一个窗口；请确认服务商已开启说话人聚类分离。",
+                message="当前 ASR 返回结果没有说话人标签，暂时只能标成未分辨说话人；请确认服务商已开启说话人聚类分离。",
                 provider_event_type=event.type,
             )
         )
@@ -256,6 +258,7 @@ class DebugSpeakerTranscribeSession:
                     segment_id=self._next_segment_id(),
                     speaker_id=segment.speaker_id,
                     text=segment.text,
+                    speaker_gender=segment.speaker_gender,
                     start_ms=segment.start_ms,
                     end_ms=segment.end_ms,
                     confidence=segment.confidence,
@@ -268,6 +271,7 @@ class DebugSpeakerTranscribeSession:
                 segment_id=self._next_segment_id(),
                 speaker_id="speaker_unknown",
                 text=event.text,
+                speaker_gender=None,
                 start_ms=event.start_ms,
                 end_ms=event.end_ms,
                 provider_payload=event.raw,
@@ -372,6 +376,7 @@ def speaker_segments_from_asr_event(event: StreamingASREvent) -> list[DebugSpeak
                 segment_id=f"provider_{index}",
                 speaker_id=speaker,
                 text=text,
+                speaker_gender=_speaker_gender(utterance),
                 start_ms=_optional_int(utterance.get("start_ms") or utterance.get("start_time")),
                 end_ms=_optional_int(utterance.get("end_ms") or utterance.get("end_time")),
                 confidence=_optional_float(utterance.get("confidence")),
@@ -390,6 +395,7 @@ def speaker_segments_from_asr_event(event: StreamingASREvent) -> list[DebugSpeak
                 segment_id=f"provider_{index}",
                 speaker_id=speaker,
                 text=text,
+                speaker_gender=_speaker_gender(base),
                 start_ms=_optional_int(base.get("start_ms") or base.get("start_time")),
                 end_ms=_optional_int(base.get("end_ms") or base.get("end_time")),
                 confidence=_optional_float(base.get("confidence")),
@@ -436,6 +442,14 @@ SPEAKER_ID_KEYS = (
 )
 
 SPEAKER_CONTAINER_KEYS = ("speaker_info", "speakerInfo", "additions", "speaker")
+SPEAKER_GENDER_KEYS = (
+    "speaker_gender",
+    "speakerGender",
+    "gender",
+    "sex",
+    "voice_gender",
+    "voiceGender",
+)
 
 
 def _speaker_id(utterance: dict[str, Any]) -> str:
@@ -451,6 +465,45 @@ def _speaker_id(utterance: dict[str, Any]) -> str:
         if speaker:
             return speaker
     return ""
+
+
+def _speaker_gender(utterance: dict[str, Any]) -> str | None:
+    for key in SPEAKER_GENDER_KEYS:
+        gender = _speaker_gender_from_value(utterance.get(key))
+        if gender:
+            return gender
+    for key in SPEAKER_CONTAINER_KEYS:
+        container = _as_dict(utterance.get(key))
+        if container is None:
+            continue
+        gender = _speaker_gender_from_mapping(container)
+        if gender:
+            return gender
+    return None
+
+
+def _speaker_gender_from_mapping(value: dict[str, Any]) -> str | None:
+    for key in SPEAKER_GENDER_KEYS:
+        gender = _speaker_gender_from_value(value.get(key))
+        if gender:
+            return gender
+    return None
+
+
+def _speaker_gender_from_value(value: Any) -> str | None:
+    if value is None or isinstance(value, bool):
+        return None
+    nested = _as_dict(value)
+    if nested is not None:
+        return _speaker_gender_from_mapping(nested)
+    text = str(value).strip().lower()
+    if not text:
+        return None
+    if text in {"male", "man", "m", "男", "男声", "男性"}:
+        return "male"
+    if text in {"female", "woman", "f", "女", "女声", "女性"}:
+        return "female"
+    return None
 
 
 def _speaker_id_from_mapping(value: dict[str, Any]) -> str:

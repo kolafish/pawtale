@@ -102,13 +102,13 @@ def test_debug_speaker_segments_extract_volc_additions_speaker_label():
                         "utterances": [
                             {
                                 "text": "先讲讲小时候吧。",
-                                "additions": {"speaker": "1"},
+                                "additions": {"speaker": "1", "gender": "male"},
                                 "start_time": 0,
                                 "end_time": 1200,
                             },
                             {
                                 "text": "住在厂里的家属院。",
-                                "additions": "{\"speaker\":\"2\"}",
+                                "additions": "{\"speaker\":\"2\",\"gender\":\"女声\"}",
                                 "start_time": 1500,
                                 "end_time": 3200,
                             },
@@ -125,6 +125,7 @@ def test_debug_speaker_segments_extract_volc_additions_speaker_label():
         ("speaker_1", "先讲讲小时候吧。"),
         ("speaker_2", "住在厂里的家属院。"),
     ]
+    assert [segment.speaker_gender for segment in segments] == ["male", "female"]
 
 
 async def test_debug_speaker_transcribe_session_streams_speaker_windows_without_persistence():
@@ -160,6 +161,7 @@ async def test_debug_speaker_transcribe_session_streams_speaker_windows_without_
         ("speaker_1", "你小时候住在哪里？"),
         ("speaker_2", "住在厂里的家属院。"),
     ]
+    assert [event.get("speaker_gender") for event in speaker_events] == [None, "female"]
     assert diarization["status"] == "available"
     assert speaker_events[0]["provider_event_type"] == "partial"
     assert ended["state"] == "ready"
@@ -382,7 +384,7 @@ class FakeSpeakerTranscriber:
                                 {
                                     "utterances": [
                                         {"text": "你小时候住在哪里？", "speaker_id": "1"},
-                                        {"text": "住在厂里的家属院。", "speaker_id": "2"},
+                                        {"text": "住在厂里的家属院。", "speaker_id": "2", "gender": "female"},
                                     ]
                                 }
                             ]

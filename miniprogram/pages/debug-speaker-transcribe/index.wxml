@@ -14,8 +14,8 @@
   <view class="control-panel">
     <view class="control-head">
       <view>
-        <text class="control-title">实时说话人窗口</text>
-        <text class="control-meta">按本次连接里的声音分组显示</text>
+        <text class="control-title">实时对话流</text>
+        <text class="control-meta">按实际说话顺序显示，不保存到素材库</text>
       </view>
       <text class="{{statusClass}}">{{statusText}}</text>
     </view>
@@ -64,60 +64,53 @@
 
   <view wx:if="{{showEmpty}}" class="empty-panel">
     <text class="empty-title">等待实时转写</text>
-    <text class="empty-copy">开始后，不同说话人的文字会分到不同窗口。</text>
+    <text class="empty-copy">开始后，不同说话人的文字会按先后顺序显示。</text>
   </view>
 
-  <view class="speaker-list">
+  <scroll-view
+    wx:if="{{!showEmpty}}"
+    class="conversation-scroll"
+    scroll-y="{{true}}"
+    scroll-into-view="{{conversationScrollTarget}}"
+  >
     <view
-      wx:for="{{speakers}}"
-      wx:key="speakerId"
-      class="{{item.cardClass}}"
+      wx:for="{{conversationLines}}"
+      wx:key="id"
+      id="{{item.domId}}"
+      class="{{item.lineClass}}"
+      data-line-id="{{item.id}}"
+      data-preview-enabled="{{item.previewEnabled}}"
+      bindtouchstart="handleLineTouchStart"
+      bindtouchmove="handleLineTouchMove"
+      bindtouchend="handleLineTouchEnd"
+      bindtouchcancel="handleLineTouchCancel"
     >
-      <view class="speaker-head">
-        <text class="speaker-title">{{item.title}}</text>
-        <text class="speaker-count">{{item.segmentCountText}}</text>
+      <view class="line-meta-row">
+        <text class="{{item.speakerBadgeClass}}">{{item.speakerTitle}}</text>
+        <text wx:if="{{item.metaText}}" class="line-meta">{{item.metaText}}</text>
+        <text wx:if="{{item.proofreadStatusText}}" class="line-status {{item.proofreadLoading ? 'loading' : ''}}">
+          {{item.proofreadStatusText}}
+        </text>
       </view>
-
-      <view wx:if="{{item.partialText}}" class="partial-box">
-        <text class="partial-label">正在说</text>
-        <scroll-view
-          class="{{item.partialScrollClass}}"
-          scroll-y="{{true}}"
-          scroll-top="{{item.partialScrollTop}}"
-          scroll-into-view="{{item.partialScrollTarget}}"
-        >
-          <text class="partial-text">{{item.partialText}}</text>
-          <view id="{{item.partialEndId}}" class="partial-end"></view>
-        </scroll-view>
-      </view>
-
-      <view wx:if="{{item.showNoLines}}" class="speaker-empty">
-        <text>还没有完整片段</text>
-      </view>
-
-      <view
-        wx:for="{{item.lines}}"
-        wx:for-item="line"
-        wx:key="id"
-        class="{{line.lineClass}}"
-        data-speaker-id="{{item.speakerId}}"
-        data-line-id="{{line.id}}"
-        data-preview-enabled="{{line.previewEnabled}}"
-        bindtouchstart="handleLineTouchStart"
-        bindtouchmove="handleLineTouchMove"
-        bindtouchend="handleLineTouchEnd"
-        bindtouchcancel="handleLineTouchCancel"
-      >
-        <view wx:if="{{line.metaText || line.proofreadStatusText}}" class="line-meta-row">
-          <text wx:if="{{line.metaText}}" class="line-meta">{{line.metaText}}</text>
-          <text wx:if="{{line.proofreadStatusText}}" class="line-status {{line.proofreadLoading ? 'loading' : ''}}">
-            {{line.proofreadStatusText}}
-          </text>
-        </view>
-        <text class="{{line.textClass}}">{{line.text}}</text>
-      </view>
+      <text class="{{item.textClass}}">{{item.text}}</text>
     </view>
-  </view>
+
+    <view wx:if="{{activePartial.visible}}" id="active-partial-card" class="partial-box active-partial">
+      <view class="line-meta-row">
+        <text class="{{activePartial.speakerBadgeClass}}">{{activePartial.speakerTitle}}</text>
+        <text class="partial-label">正在说</text>
+      </view>
+      <scroll-view
+        class="{{activePartial.partialScrollClass}}"
+        scroll-y="{{true}}"
+        scroll-top="{{activePartial.partialScrollTop}}"
+        scroll-into-view="{{activePartial.partialScrollTarget}}"
+      >
+        <text class="partial-text">{{activePartial.text}}</text>
+        <view id="{{activePartial.partialEndId}}" class="partial-end"></view>
+      </scroll-view>
+    </view>
+  </scroll-view>
 
   <view
     wx:if="{{historyLinePreview.visible}}"
