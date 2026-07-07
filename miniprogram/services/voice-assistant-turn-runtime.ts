@@ -46,6 +46,7 @@ export interface VoiceAssistantTurnRuntimeOptions {
     callbacks: VoiceAssistantTurnStreamCallbacks,
   ) => VoiceAssistantTurnStreamClientLike;
   createPlaybackController?: () => StreamingSpeechPlaybackControllerLike;
+  isActive?: () => boolean;
 }
 
 export interface VoiceAssistantTurnRuntimeResult {
@@ -126,32 +127,32 @@ export class VoiceAssistantTurnRuntime {
       new VoiceAssistantTurnStreamClient(voiceSessionId, callbacks)
     )))(this.voiceSessionId, {
       onStarted: (event) => {
-        if (this.active) {
+        if (this.callbacksActive()) {
           this.callbacks.onStarted?.(event);
         }
       },
       onTextDelta: (event) => {
-        if (this.active) {
+        if (this.callbacksActive()) {
           this.callbacks.onTextDelta?.(event);
         }
       },
       onAudioFrame: (frame) => {
-        if (this.active) {
+        if (this.callbacksActive()) {
           this.enqueueAudioFrame(frame);
         }
       },
       onAudioDone: (event) => {
-        if (this.active) {
+        if (this.callbacksActive()) {
           this.finishAudioFrames(event);
         }
       },
       onCommandPreview: (event) => {
-        if (this.active) {
+        if (this.callbacksActive()) {
           this.callbacks.onCommandPreview?.(event);
         }
       },
       onCompleted: (event) => {
-        if (this.active) {
+        if (this.callbacksActive()) {
           this.callbacks.onCompleted?.(event);
         }
       },
@@ -174,7 +175,7 @@ export class VoiceAssistantTurnRuntime {
         if (controller) {
           await controller.waitForDrain();
         }
-        if (this.active && !this.playbackError) {
+        if (this.callbacksActive() && !this.playbackError) {
           this.callbacks.onAudioDrained?.(event);
         }
       })
@@ -182,24 +183,26 @@ export class VoiceAssistantTurnRuntime {
   }
 
   private async playAudioFrame(frame: PreparedAssistantStreamAudioFrame): Promise<void> {
-    if (!this.active) {
+    if (!this.callbacksActive()) {
       return;
     }
     this.callbacks.onAudioFrame?.(frame);
     const scheduled = await this.playback().appendFrame(frame);
-    if (!this.active || !scheduled) {
+    if (!this.callbacksActive() || !scheduled) {
       return;
     }
     this.callbacks.onAudioFrameScheduled?.(scheduled);
   }
 
   private recordPlaybackError(error: unknown): void {
-    if (!this.active) {
+    if (!this.callbacksActive()) {
       return;
     }
     this.playbackError = error instanceof Error ? error : new Error("小余语音播放失败");
     this.callbacks.onPlaybackError?.(this.playbackError);
   }
+
+  private callbacksActive(): boolean { return this.active && (this.options.isActive?.() ?? true); }
 
   private playback(): StreamingSpeechPlaybackControllerLike {
     if (!this.playbackController) {

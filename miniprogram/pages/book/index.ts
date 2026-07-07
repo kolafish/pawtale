@@ -1948,52 +1948,39 @@ definePage<BookData>()({
     const settings = readBookTTSSettings();
     const runtime = new VoiceAssistantTurnRuntime(`book-voice-command-${this.data.projectId}`, {
       onStarted: () => {
-        if (token === this.playToken) {
-          this.setData({ bookVoiceAssistantStatusText: "小余正在回复" });
-        }
+        this.setData({ bookVoiceAssistantStatusText: "小余正在回复" });
       },
       onCommandPreview: (event) => {
-        if (token === this.playToken) {
-          this.handleBookVoiceCommandPreview(event);
-        }
+        this.handleBookVoiceCommandPreview(event);
       },
       onTextDelta: (event) => {
-        if (token === this.playToken) {
-          this.applyBookVoiceAssistantTurnText(event.text);
-        }
+        this.applyBookVoiceAssistantTurnText(event.text);
       },
       onAudioFrame: () => {
-        if (token === this.playToken) {
-          this.setData({
-            ttsBusyTarget: "",
-            bookTTSActiveTarget: "book-voice-assistant",
-            bookTTSActiveText: this.data.bookVoiceAssistantReplyText,
-            bookTTSRemainingText: this.data.bookVoiceAssistantReplyText,
-            bookVoiceAssistantStatusText: "小余正在说",
-          });
-        }
+        this.setData({
+          ttsBusyTarget: "",
+          bookTTSActiveTarget: "book-voice-assistant",
+          bookTTSActiveText: this.data.bookVoiceAssistantReplyText,
+          bookTTSRemainingText: this.data.bookVoiceAssistantReplyText,
+          bookVoiceAssistantStatusText: "小余正在说",
+        });
       },
       onAudioFrameScheduled: (event) => {
-        if (token === this.playToken) {
-          this.markBookVoiceStreamingAudioFrameScheduled(event);
-          this.updateBookVoiceStreamingTTSProgress();
-          this.startBookVoiceStreamingTTSProgressTimer(token);
-        }
+        this.markBookVoiceStreamingAudioFrameScheduled(event);
+        this.updateBookVoiceStreamingTTSProgress();
+        this.startBookVoiceStreamingTTSProgressTimer(token);
       },
       onAudioDrained: () => {
-        if (token === this.playToken) {
-          void this.finishBookVoiceAssistantAudioFrames(token, this.data.bookVoiceAssistantReplyText);
-        }
+        void this.finishBookVoiceAssistantAudioFrames(token, this.data.bookVoiceAssistantReplyText);
       },
       onPlaybackError: (error) => {
-        if (token === this.playToken) {
-          this.setData({
-            error: error.message,
-            bookVoiceAssistantStatusText: "小余语音播放失败",
-          });
-        }
+        this.setData({
+          error: error.message,
+          bookVoiceAssistantStatusText: "小余语音播放失败",
+        });
       },
     }, {
+      isActive: () => token === this.playToken,
       createStreamClient: (voiceSessionId, callbacks) => (
         new VoiceAssistantTurnStreamClient(voiceSessionId, callbacks, {
           streamUrl: bookVoiceAssistantTurnStreamUrl(this.data.projectId),

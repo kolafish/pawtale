@@ -578,50 +578,39 @@ definePage<VoiceChatData>()({
   async generateStreamingFollowUp(sourceMessageId: string, regenerate: boolean, requestSerial: number) {
     const runtime = new VoiceAssistantTurnRuntime(this.data.voiceSessionId, {
       onStarted: () => {
-        if (requestSerial !== followUpRequestSerial) {
-          return;
-        }
         setVoiceChatData(this, {
           followUpTTSStateText: "小余正在说",
           persistenceStateText: "小余正在回应",
         });
       },
       onTextDelta: (event) => {
-        if (requestSerial === followUpRequestSerial) {
-          this.applyStreamingAssistantText(event.text, sourceMessageId);
-        }
+        this.applyStreamingAssistantText(event.text, sourceMessageId);
       },
       onAudioFrame: () => {
-        if (requestSerial === followUpRequestSerial) {
-          this.prepareStreamingAudioPlayback(requestSerial);
-        }
+        this.prepareStreamingAudioPlayback(requestSerial);
       },
       onAudioFrameScheduled: (event) => {
-        if (requestSerial === followUpRequestSerial) {
-          this.markStreamingAudioFrameScheduled(event);
-          this.startStreamingProgressTimer(this.ttsPlayToken);
-          this.updateStreamingTTSProgress();
-        }
+        this.markStreamingAudioFrameScheduled(event);
+        this.startStreamingProgressTimer(this.ttsPlayToken);
+        this.updateStreamingTTSProgress();
       },
       onAudioDrained: (event) => {
-        if (requestSerial === followUpRequestSerial) {
-          this.stopAssistantBargeInMonitor();
-          const durationSeconds = Number(event.duration_seconds);
-          this.ttsProgress.setStreamingDurationSeconds(durationSeconds);
-          this.stopFollowUpProgressTimer();
-          setVoiceChatData(this, {
-            followUpTTSStateText: "正在整理回应",
-          });
-        }
+        this.stopAssistantBargeInMonitor();
+        const durationSeconds = Number(event.duration_seconds);
+        this.ttsProgress.setStreamingDurationSeconds(durationSeconds);
+        this.stopFollowUpProgressTimer();
+        setVoiceChatData(this, {
+          followUpTTSStateText: "正在整理回应",
+        });
       },
       onCompleted: (event) => {
-        if (requestSerial === followUpRequestSerial) {
-          this.applyCompletedStreamingAssistantTurn(event, sourceMessageId);
-        }
+        this.applyCompletedStreamingAssistantTurn(event, sourceMessageId);
       },
       onPlaybackError: (error) => {
         this.markStreamingPlaybackError(error, requestSerial);
       },
+    }, {
+      isActive: () => requestSerial === followUpRequestSerial,
     });
     this.assistantTurnRuntime = runtime;
     const { completed, playbackError } = await runtime.start({ regenerate });
