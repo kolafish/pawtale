@@ -60,6 +60,64 @@
   word-break: break-word;
 }
 
+.speaker-role-panel {
+  margin-top: 20rpx;
+  padding: 24rpx;
+  border-radius: 28rpx;
+  background: #ffffff;
+  box-shadow:
+    0 0 0 1rpx rgba(43, 23, 19, 0.06),
+    0 8rpx 18rpx rgba(93, 61, 42, 0.05);
+}
+
+.speaker-role-label {
+  display: block;
+  color: #7b6f68;
+  font-size: 28rpx;
+  font-weight: 600;
+  line-height: 40rpx;
+}
+
+.speaker-role-switch {
+  margin-top: 14rpx;
+  padding: 8rpx;
+  border-radius: 24rpx;
+  background: #f3efea;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8rpx;
+}
+
+.speaker-role-button {
+  min-height: 76rpx;
+  margin: 0;
+  border: 0;
+  border-radius: 16rpx;
+  background: transparent;
+  color: #5c4b43;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 30rpx;
+  font-weight: 800;
+  line-height: 40rpx;
+  transition-property: transform, background-color, box-shadow, color;
+  transition-duration: 150ms;
+  transition-timing-function: ease-out;
+}
+
+.speaker-role-button::after {
+  border: 0;
+}
+
+.speaker-role-button.active {
+  background: #a64b3e;
+  color: #ffffff;
+  box-shadow:
+    0 0 0 1rpx rgba(255, 255, 255, 0.18) inset,
+    0 6rpx 14rpx rgba(166, 75, 62, 0.16);
+}
+
 .finish-button {
   width: 156rpx;
   height: 78rpx;
@@ -481,6 +539,12 @@
   box-shadow: 0 0 0 1rpx rgba(43, 23, 19, 0.06);
 }
 
+.transcript-line.interviewer {
+  background: #f4f7f8;
+  color: #26353a;
+  box-shadow: 0 0 0 1rpx rgba(38, 53, 58, 0.06);
+}
+
 .line-role {
   display: inline-flex;
   min-width: 70rpx;
@@ -499,6 +563,11 @@
 .transcript-line.assistant .line-role {
   background: #f3efea;
   color: #7a6b60;
+}
+
+.transcript-line.interviewer .line-role {
+  background: #57727b;
+  color: #ffffff;
 }
 
 .control-bar {
@@ -742,6 +811,7 @@
 }
 
 .voice-chat-page.large-text .topic-panel,
+.voice-chat-page.large-text .speaker-role-panel,
 .voice-chat-page.large-text .assistant-panel,
 .voice-chat-page.large-text .history-panel {
   padding: 36rpx 32rpx;
@@ -749,6 +819,7 @@
 }
 
 .voice-chat-page.large-text .topic-kicker,
+.voice-chat-page.large-text .speaker-role-label,
 .voice-chat-page.large-text .assistant-label,
 .voice-chat-page.large-text .stage-status,
 .voice-chat-page.large-text .control-hint {
@@ -759,6 +830,18 @@
 .voice-chat-page.large-text .topic-title {
   font-size: 58rpx;
   line-height: 80rpx;
+}
+
+.voice-chat-page.large-text .speaker-role-switch {
+  padding: 10rpx;
+  border-radius: 28rpx;
+}
+
+.voice-chat-page.large-text .speaker-role-button {
+  min-height: 96rpx;
+  border-radius: 18rpx;
+  font-size: 38rpx;
+  line-height: 54rpx;
 }
 
 .voice-chat-page.large-text .assistant-context {

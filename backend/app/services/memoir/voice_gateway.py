@@ -5,9 +5,11 @@ import base64
 import binascii
 import contextlib
 import logging
+from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Awaitable, Callable, Protocol
 
+from app.domain.memoir.types import MemoirSpeakerRole
 from app.services.memoir.asr import StreamingASRClient, StreamingASREvent
 from app.services.memoir.asr_text_normalization import normalize_memoir_asr_text
 
@@ -24,6 +26,7 @@ class VoiceGatewayClient(Protocol):
 
 StreamingASRClientFactory = Callable[[], StreamingASRClient]
 SessionStartHandler = Callable[[], Awaitable[None]]
+TurnStartHandler = Callable[["VoiceGatewayTurnContext"], Awaitable[None]]
 SessionStopHandler = Callable[[str | None], Awaitable[None]]
 AudioFrameHandler = Callable[[bytes], Awaitable[None]]
 ASRFinalHandler = Callable[[StreamingASREvent], Awaitable[dict[str, Any] | None]]
@@ -45,6 +48,12 @@ class VoiceGatewayState(str, Enum):
     FAILED = "failed"
 
 
+@dataclass(frozen=True)
+class VoiceGatewayTurnContext:
+    speaker_role: str = MemoirSpeakerRole.NARRATOR.value
+    parent_message_id: str | None = None
+
+
 class VoiceGatewaySession:
     def __init__(
         self,
@@ -52,6 +61,7 @@ class VoiceGatewaySession:
         client: VoiceGatewayClient,
         asr_client_factory: StreamingASRClientFactory,
         on_start: SessionStartHandler | None = None,
+        on_turn_start: TurnStartHandler | None = None,
         on_stop: SessionStopHandler | None = None,
         on_audio_frame: AudioFrameHandler | None = None,
         on_asr_final: ASRFinalHandler | None = None,
@@ -59,6 +69,7 @@ class VoiceGatewaySession:
         self.client = client
         self.asr_client_factory = asr_client_factory
         self.on_start = on_start
+        self.on_turn_start = on_turn_start
         self.on_stop = on_stop
         self.on_audio_frame = on_audio_frame
         self.on_asr_final = on_asr_final
@@ -69,6 +80,7 @@ class VoiceGatewaySession:
         self._terminal_stop = asyncio.Event()
         self._pending_final_event: StreamingASREvent | None = None
         self._latest_text_event: StreamingASREvent | None = None
+        self._turn_context = VoiceGatewayTurnContext()
 
     async def run(self) -> None:
         await self.client.send_json(self._event("session.ready"))
@@ -121,7 +133,7 @@ class VoiceGatewaySession:
     async def _handle_client_message(self, message: dict[str, Any]) -> bool:
         message_type = message.get("type")
         if message_type == "session.start":
-            await self._start_asr()
+            await self._start_asr(message)
             return False
         if message_type == "audio.frame":
             await self._send_audio_frame(message)
@@ -137,9 +149,11 @@ class VoiceGatewaySession:
         await self._send_error("unsupported_gateway_event", {"received_type": message_type})
         return False
 
-    async def _start_asr(self) -> None:
+    async def _start_asr(self, message: dict[str, Any]) -> None:
         if self._state == VoiceGatewayState.LISTENING:
-            await self.client.send_json(self._event("session.started"))
+            await self.client.send_json(
+                self._event("session.started", speaker_role=self._turn_context.speaker_role)
+            )
             return
         if self._state == VoiceGatewayState.FINISHING:
             await self._send_error("asr_session_finishing")
@@ -148,13 +162,33 @@ class VoiceGatewaySession:
         await self._close_asr_client()
         self._pending_final_event = None
         self._latest_text_event = None
+        self._turn_context = self._turn_context_from_message(message)
         self._state = VoiceGatewayState.LISTENING
         self._asr_client = self.asr_client_factory()
         await self._asr_client.start()
+        if self.on_turn_start:
+            await self.on_turn_start(self._turn_context)
         if self.on_start:
             await self.on_start()
         self._asr_task = asyncio.create_task(self._forward_asr_events())
-        await self.client.send_json(self._event("session.started"))
+        await self.client.send_json(
+            self._event(
+                "session.started",
+                speaker_role=self._turn_context.speaker_role,
+            )
+        )
+
+    def _turn_context_from_message(self, message: dict[str, Any]) -> VoiceGatewayTurnContext:
+        raw_role = message.get("speaker_role") or MemoirSpeakerRole.NARRATOR.value
+        speaker_role = str(raw_role).strip()
+        if speaker_role not in {MemoirSpeakerRole.NARRATOR.value, MemoirSpeakerRole.INTERVIEWER.value}:
+            raise VoiceGatewayClientError("unsupported_speaker_role")
+        raw_parent_message_id = message.get("parent_message_id")
+        parent_message_id = str(raw_parent_message_id).strip() if raw_parent_message_id else None
+        return VoiceGatewayTurnContext(
+            speaker_role=speaker_role,
+            parent_message_id=parent_message_id,
+        )
 
     async def _send_audio_frame(self, message: dict[str, Any]) -> None:
         if self._state != VoiceGatewayState.LISTENING or self._asr_client is None:
@@ -251,6 +285,7 @@ class VoiceGatewaySession:
             ),
             segment_final=True,
             turn_final=turn_final,
+            speaker_role=self._turn_context.speaker_role,
         )
         try:
             persisted = await self.on_asr_final(event) if self.on_asr_final else None

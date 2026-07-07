@@ -10,6 +10,7 @@ from sqlalchemy.orm import selectinload
 from app.domain.memoir.types import MemoirEditingJobType
 from app.models.memoir import MemoirEditingJob, MemoirVoiceSession, MemoirVoiceUtterance
 from app.services.memoir import editing_jobs
+from app.services.memoir.source_disposition import is_ignored_non_memoir_source
 
 
 ROUTE_PAYLOAD_TRANSCRIPT_VERSION_IDS_KEY = "transcript_version_ids"
@@ -52,6 +53,8 @@ async def schedule_source_routing_for_ready_utterance(
 ) -> MemoirEditingJob | None:
     text = current_utterance_text(utterance)
     if not text:
+        return None
+    if is_ignored_non_memoir_source(utterance):
         return None
     text_hash = source_text_hash(text)
     transcript_version_id = current_transcript_version_id(utterance)

@@ -8,12 +8,14 @@ from app.domain.memoir.types import (
     MemoirChatContentStatus,
     MemoirChatMessageRole,
     MemoirGuidanceMode,
+    MemoirInterviewType,
     MemoirVoiceSessionStatus,
 )
 
 
 class MemoirVoiceSessionCreate(BaseModel):
     guidance_mode: MemoirGuidanceMode = MemoirGuidanceMode.FREE_NARRATION
+    interview_type: MemoirInterviewType = MemoirInterviewType.AI_INTERVIEW
     current_guidance_module: str | None = None
     provider: str | None = None
     input_format: str | None = None
@@ -80,6 +82,7 @@ class MemoirVoiceSessionResponse(BaseModel):
     project_id: str
     status: MemoirVoiceSessionStatus
     guidance_mode: MemoirGuidanceMode
+    interview_type: MemoirInterviewType
     current_guidance_module: str | None = None
     provider: str | None = None
     input_format: str | None = None
@@ -140,6 +143,7 @@ class MemoirVoiceSessionSummaryResponse(BaseModel):
     project_id: str
     status: MemoirVoiceSessionStatus
     guidance_mode: MemoirGuidanceMode
+    interview_type: MemoirInterviewType
     current_guidance_module: str | None = None
     started_at: datetime | None = None
     stopped_at: datetime | None = None
@@ -314,6 +318,7 @@ class MemoirVoiceTranscriptItemResponse(BaseModel):
     provider: str | None = None
     session_status: MemoirVoiceSessionStatus
     guidance_mode: MemoirGuidanceMode
+    interview_type: MemoirInterviewType = MemoirInterviewType.AI_INTERVIEW
     current_guidance_module: str | None = None
     is_included_in_book: bool = False
     included_chapters: list[MemoirVoiceTranscriptIncludedChapterResponse] = Field(default_factory=list)

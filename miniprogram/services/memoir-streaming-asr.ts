@@ -1,5 +1,6 @@
 import type {
   MemoirGuidanceMode,
+  MemoirSpeakerRole,
   VoiceChatErrorInfo,
   VoiceGatewayState,
   VoiceGatewayClientEvent,
@@ -75,6 +76,7 @@ export interface MemoirStreamingAsrOptions {
   voiceSessionId: string;
   gatewayUrl?: string;
   guidanceMode: MemoirGuidanceMode;
+  speakerRole?: MemoirSpeakerRole;
   currentGuidanceModule?: string;
   autoStopSilenceMs?: number;
   noVoiceActivityTimeoutMs?: number;
@@ -86,6 +88,8 @@ export interface MemoirStreamingAsrOptions {
 
 export interface MemoirStartRecordingOptions {
   noVoiceActivityTimeoutMs?: number;
+  speakerRole?: MemoirSpeakerRole;
+  parentMessageId?: string;
 }
 
 export class MemoirStreamingAsrClient {
@@ -109,6 +113,8 @@ export class MemoirStreamingAsrClient {
   private voiceActivityDetector: VoiceActivityDetector;
   private autoStopped = false;
   private autoStopReason: MemoirAutoStopReason | "" = "";
+  private currentSpeakerRole: MemoirSpeakerRole = "narrator";
+  private currentParentMessageId = "";
   private noVoiceActivityTimeoutMs = 0;
   private gatewayState: VoiceGatewayState | undefined;
   private noVoiceActivityTimer: ReturnType<typeof setTimeout> | null = null;
@@ -247,6 +253,8 @@ export class MemoirStreamingAsrClient {
     this.voiceActivityDetector = this.createVoiceActivityDetector();
     this.autoStopped = false;
     this.autoStopReason = "";
+    this.currentSpeakerRole = recordingOptions.speakerRole || this.options.speakerRole || "narrator";
+    this.currentParentMessageId = recordingOptions.parentMessageId || "";
     this.noVoiceActivityTimeoutMs = Math.max(
       0,
       recordingOptions.noVoiceActivityTimeoutMs ?? this.options.noVoiceActivityTimeoutMs ?? 0,
@@ -427,6 +435,8 @@ export class MemoirStreamingAsrClient {
       type: "session.start",
       guidance_mode: this.options.guidanceMode,
       current_guidance_module: this.options.currentGuidanceModule,
+      speaker_role: this.currentSpeakerRole,
+      parent_message_id: this.currentParentMessageId || undefined,
     });
     this.options.callbacks.onStatus("listening");
     this.emitCaptureStats("recording");

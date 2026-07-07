@@ -1,5 +1,7 @@
 import type {
   MemoirGuidanceMode,
+  MemoirInterviewType,
+  MemoirSpeakerRole,
   MemoirVoiceSessionDetail,
   VoiceChatErrorInfo,
   TTSAlignmentSegment,
@@ -119,6 +121,7 @@ interface OpeningTopicDataset {
 }
 
 type OpeningTopicTapEvent = PageDatasetEvent<OpeningTopicDataset>;
+type SpeakerRoleTapEvent = PageDatasetEvent<{ role?: string }>;
 
 let followUpRequestSerial = 0;
 const AUTO_STOP_SILENCE_MS = 3500;
@@ -127,6 +130,8 @@ const AUTO_LISTEN_NO_ANSWER_MS = 15000;
 const MAX_CONSECUTIVE_NO_ANSWER_PROMPTS = 2;
 const STREAMING_TTS_PROGRESS_HOLD_SECONDS = 0.2;
 const GUIDANCE_MODE_VALUES: readonly MemoirGuidanceMode[] = ["free_narration", "guided_interview"];
+const INTERVIEW_TYPE_VALUES: readonly MemoirInterviewType[] = ["ai_interview", "human_interview"];
+const SPEAKER_ROLE_VALUES: readonly MemoirSpeakerRole[] = ["narrator", "interviewer"];
 
 interface VoiceChatDataContext {
   data: VoiceChatData;
@@ -175,6 +180,7 @@ Page<VoiceChatData, {
   regenerateFollowUp(): Promise<void>;
   skipFollowUp(): void;
   chooseOpeningTopic(event: OpeningTopicTapEvent): void;
+  changeSpeakerRole(event: SpeakerRoleTapEvent): void;
   stopAndAskFollowUp(): void;
   enqueueAssistantTurn(item: AssistantTurnQueueItem): void;
   drainAssistantTurnQueue(): Promise<void>;
@@ -302,6 +308,7 @@ Page<VoiceChatData, {
     this.refreshAccessibilitySettings();
     const voiceSessionId = queryParam(query, "voiceSessionId");
     const guidanceMode = queryChoice(query, "mode", GUIDANCE_MODE_VALUES, "free_narration");
+    const interviewType = queryChoice(query, "interviewType", INTERVIEW_TYPE_VALUES, "ai_interview");
     const currentGuidanceModule = queryParam(query, "module");
     const projectTitle = queryParam(query, "projectTitle");
     const voiceAuthorizationAgreed = readVoiceAuthorizationConsent();
@@ -310,6 +317,7 @@ Page<VoiceChatData, {
       projectTitle,
       guidanceMode,
       currentGuidanceModule,
+      interviewType,
       voiceAuthorizationAgreed,
     }));
     if (!voiceSessionId) {
@@ -621,7 +629,7 @@ Page<VoiceChatData, {
   },
 
   maybeGenerateOpeningFollowUp() {
-    if (this.pageSuspended || this.data.followUpLoading) {
+    if (this.data.interviewType === "human_interview" || this.pageSuspended || this.data.followUpLoading) {
       return;
     }
     const hasAnyLine = this.data.transcriptLines.some((line) => line.text.trim());
@@ -631,7 +639,12 @@ Page<VoiceChatData, {
   },
 
   async generateFollowUp(regenerate = false) {
-    if (this.pageSuspended || !this.data.voiceSessionId || this.data.followUpLoading) {
+    if (
+      this.data.interviewType === "human_interview"
+      || this.pageSuspended
+      || !this.data.voiceSessionId
+      || this.data.followUpLoading
+    ) {
       return;
     }
     const sourceMessageId = followUpSourceMessageId(this.data.transcriptLines);
@@ -972,6 +985,9 @@ Page<VoiceChatData, {
   },
 
   chooseOpeningTopic(event) {
+    if (this.data.interviewType === "human_interview") {
+      return;
+    }
     const promptText = datasetString(event, "promptText");
     if (!promptText || this.data.followUpLoading) {
       return;
@@ -993,7 +1009,23 @@ Page<VoiceChatData, {
     });
   },
 
+  changeSpeakerRole(event) {
+    if (this.data.recording || this.data.interviewType !== "human_interview") {
+      return;
+    }
+    const role = queryChoice({ role: datasetString(event, "role") }, "role", SPEAKER_ROLE_VALUES, "narrator");
+    setVoiceChatData(this, {
+      speakerRole: role,
+      liveText: "",
+      liveCharCount: 0,
+      primaryActionText: "开始说话",
+    });
+  },
+
   stopAndAskFollowUp() {
+    if (this.data.interviewType === "human_interview") {
+      return;
+    }
     if (this.data.followUpLoading) {
       return;
     }
@@ -1629,9 +1661,16 @@ Page<VoiceChatData, {
       setVoiceChatData(this, voiceRecordingReconnectPatch(autoTriggered, this.data.autoListenStateText));
       return false;
     }
-    const started = this.voiceStreaming.startRecording({
+    const recordingOptions: {
+      noVoiceActivityTimeoutMs: number;
+      speakerRole?: MemoirSpeakerRole;
+    } = {
       noVoiceActivityTimeoutMs: autoTriggered ? AUTO_LISTEN_NO_ANSWER_MS : 0,
-    });
+    };
+    if (this.data.interviewType === "human_interview") {
+      recordingOptions.speakerRole = this.data.speakerRole;
+    }
+    const started = this.voiceStreaming.startRecording(recordingOptions);
     if (!started) {
       setVoiceChatData(this, voiceRecordingUnavailablePatch(autoTriggered, this.data.autoListenStateText));
       return false;
@@ -1666,11 +1705,14 @@ Page<VoiceChatData, {
   },
 
   shouldAutoStartListening() {
+    if (this.data.interviewType === "human_interview") {
+      return false;
+    }
     return this.autoListenGateSnapshot().canStart;
   },
 
   async tryStartAutoListenAfterTTS() {
-    if (this.pageSuspended) {
+    if (this.data.interviewType === "human_interview" || this.pageSuspended) {
       return false;
     }
     const gate = this.autoListenGateSnapshot();
@@ -1693,6 +1735,9 @@ Page<VoiceChatData, {
   },
 
   async handleNoAnswerAutoStop() {
+    if (this.data.interviewType === "human_interview") {
+      return;
+    }
     if (this.noAnswerPromptInFlight || !this.data.voiceSessionId) {
       return;
     }
@@ -1827,7 +1872,12 @@ Page<VoiceChatData, {
     if (event.message_id && event.utterance_id) {
       void this.confirmSavedTranscriptSnapshot(event);
     }
-    if (event.message_id && event.turn_final !== false && !this.pageSuspended) {
+    if (
+      this.data.interviewType !== "human_interview"
+      && event.message_id
+      && event.turn_final !== false
+      && !this.pageSuspended
+    ) {
       void this.generateFollowUp(false);
     }
   },

@@ -10,6 +10,7 @@ from sqlalchemy.orm import selectinload
 from app.domain.memoir.types import (
     MemoirBookChapterDraftStatus,
     MemoirChatMessageRole,
+    MemoirInterviewType,
     MemoirVoiceSessionStatus,
 )
 from app.models.memoir import (
@@ -131,7 +132,9 @@ def build_voice_progress_metrics(sessions: list[MemoirVoiceSession]) -> VoicePro
         total_audio_seconds += session_seconds
 
         module = voice_session.current_guidance_module or (
-            "free_narration" if voice_session.guidance_mode == "free_narration" else "unassigned"
+            MemoirInterviewType.HUMAN_INTERVIEW.value
+            if voice_session.interview_type == MemoirInterviewType.HUMAN_INTERVIEW.value
+            else ("free_narration" if voice_session.guidance_mode == "free_narration" else "unassigned")
         )
         stats = module_stats.setdefault(module, {"sessions": 0, "utterances": 0, "chars": 0})
         stats["sessions"] += 1

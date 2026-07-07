@@ -145,7 +145,7 @@ function voiceFinalTranscriptLine(
   return {
     id: event.message_id || event.utterance_id || fallbackId,
     text,
-    role: "user",
+    role: event.speaker_role === "interviewer" ? "interviewer" : "user",
     message_id: event.message_id,
     utterance_id: event.utterance_id,
     audio_file_id: event.audio_file_id,

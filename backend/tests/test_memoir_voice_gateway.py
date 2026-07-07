@@ -3,6 +3,7 @@ import base64
 from typing import Any
 
 import pytest
+from fastapi import HTTPException
 from sqlalchemy import select
 
 from app.domain.memoir.types import (
@@ -769,6 +770,115 @@ async def test_voice_gateway_persistence_saves_final_message_utterance_and_audio
     assert correction_job.payload_json["raw_transcript_version_id"] == raw_version.id
     assert MemoirEditingJobType.ROUTE_SOURCES.value not in jobs_by_type
     assert MemoirEditingJobType.QUALITY_AUDIT.value not in jobs_by_type
+
+
+async def test_voice_gateway_persistence_saves_human_interviewer_turn_as_ignored_context(
+    client,
+    test_db,
+):
+    user_response = await client.get("/api/auth/me")
+    create_response = await post_mobile_memoir_voice_session(
+        client,
+        json={
+            "guidance_mode": "free_narration",
+            "interview_type": "human_interview",
+            "provider": "volc_streaming_asr",
+        },
+    )
+    session = create_response.json()["session"]
+    service = VoiceFinalPersistenceService(
+        db=test_db,
+        voice_session_id=session["id"],
+        user_id=user_response.json()["id"],
+    )
+
+    interviewer = await service.persist_final(
+        StreamingASREvent(
+            type="final",
+            text="你小时候家里有几口人？",
+            start_ms=0,
+            end_ms=1200,
+            raw={"payload": {"result": {"text": "你小时候家里有几口人？"}}},
+        ),
+        speaker_role="interviewer",
+    )
+    narrator = await service.persist_final(
+        StreamingASREvent(
+            type="final",
+            text="我们家那时候有六口人。",
+            start_ms=1300,
+            end_ms=3000,
+            raw={"payload": {"result": {"text": "我们家那时候有六口人。"}}},
+        ),
+        speaker_role="narrator",
+    )
+
+    interviewer_message = await test_db.scalar(
+        select(MemoirChatMessage).where(MemoirChatMessage.id == interviewer.message_id)
+    )
+    interviewer_utterance = await test_db.scalar(
+        select(MemoirVoiceUtterance).where(MemoirVoiceUtterance.id == interviewer.utterance_id)
+    )
+    narrator_message = await test_db.scalar(
+        select(MemoirChatMessage).where(MemoirChatMessage.id == narrator.message_id)
+    )
+    editing_jobs = (
+        await test_db.execute(
+            select(MemoirEditingJob).where(MemoirEditingJob.project_id == session["project_id"])
+        )
+    ).scalars().all()
+
+    assert interviewer_message is not None
+    assert interviewer_message.role == "interviewer"
+    assert interviewer_message.parent_message_id is None
+    assert interviewer_message.metadata_json["speaker_role"] == "interviewer"
+    assert interviewer_message.metadata_json["interview_type"] == "human_interview"
+    assert interviewer_message.metadata_json["correction_status"] == "skipped"
+    assert interviewer_utterance is not None
+    assert interviewer_utterance.source_material_type == "interviewer_prompt"
+    assert interviewer_utterance.source_route_action == "ignore"
+    assert narrator_message is not None
+    assert narrator_message.role == "user"
+    assert narrator_message.parent_message_id == interviewer_message.id
+    assert narrator_message.metadata_json["speaker_role"] == "narrator"
+    assert [job.job_type for job in editing_jobs] == [MemoirEditingJobType.CORRECT_TRANSCRIPT.value]
+    assert editing_jobs[0].payload_json["utterance_id"] == narrator.utterance_id
+
+
+async def test_voice_gateway_persistence_rejects_interviewer_role_for_ai_session(
+    client,
+    test_db,
+):
+    user_response = await client.get("/api/auth/me")
+    create_response = await post_mobile_memoir_voice_session(
+        client,
+        json={"guidance_mode": "free_narration"},
+    )
+    session = create_response.json()["session"]
+    service = VoiceFinalPersistenceService(
+        db=test_db,
+        voice_session_id=session["id"],
+        user_id=user_response.json()["id"],
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await service.persist_final(
+            StreamingASREvent(
+                type="final",
+                text="你小时候家里有几口人？",
+                start_ms=0,
+                end_ms=1200,
+                raw={"payload": {"result": {"text": "你小时候家里有几口人？"}}},
+            ),
+            speaker_role="interviewer",
+        )
+
+    messages = (await test_db.execute(select(MemoirChatMessage))).scalars().all()
+    utterances = (await test_db.execute(select(MemoirVoiceUtterance))).scalars().all()
+    assert exc.value.status_code == 400
+    assert exc.value.detail == "只有人工访谈支持采访者录音"
+    assert messages == []
+    assert utterances == []
 
 
 async def test_voice_transcript_correction_job_updates_saved_raw_turn(

@@ -1,8 +1,8 @@
 <view class="{{voiceChatPageClass}}">
   <view class="top-bar">
     <view class="top-copy">
-      <text class="mode-label">语音访谈</text>
-      <text class="top-subtitle">小余陪您慢慢讲</text>
+      <text class="mode-label">{{topModeLabel}}</text>
+      <text class="top-subtitle">{{topSubtitle}}</text>
     </view>
     <button
       class="finish-button"
@@ -17,6 +17,26 @@
   <view class="topic-panel">
     <text class="topic-kicker">正在聊：</text>
     <text class="topic-title">{{topicTitleText}}</text>
+  </view>
+
+  <view wx:if="{{showSpeakerRoleSwitch}}" class="speaker-role-panel">
+    <text class="speaker-role-label">当前录音对象</text>
+    <view class="speaker-role-switch">
+      <button
+        class="{{narratorRoleButtonClass}}"
+        data-role="narrator"
+        bindtap="changeSpeakerRole"
+      >
+        被访者
+      </button>
+      <button
+        class="{{interviewerRoleButtonClass}}"
+        data-role="interviewer"
+        bindtap="changeSpeakerRole"
+      >
+        采访者
+      </button>
+    </view>
   </view>
 
   <view wx:if="{{error}}" class="error">{{error}}</view>

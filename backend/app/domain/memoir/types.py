@@ -9,6 +9,16 @@ class MemoirVoiceSessionStatus(str, Enum):
     FAILED = "failed"
 
 
+class MemoirInterviewType(str, Enum):
+    AI_INTERVIEW = "ai_interview"
+    HUMAN_INTERVIEW = "human_interview"
+
+
+class MemoirSpeakerRole(str, Enum):
+    NARRATOR = "narrator"
+    INTERVIEWER = "interviewer"
+
+
 class MemoirGuidanceMode(str, Enum):
     FREE_NARRATION = "free_narration"
     GUIDED_INTERVIEW = "guided_interview"
@@ -17,6 +27,7 @@ class MemoirGuidanceMode(str, Enum):
 class MemoirChatMessageRole(str, Enum):
     USER = "user"
     ASSISTANT = "assistant"
+    INTERVIEWER = "interviewer"
     SYSTEM = "system"
 
 

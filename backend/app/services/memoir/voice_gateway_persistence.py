@@ -8,9 +8,10 @@ import aiofiles
 import aiofiles.os
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domain.memoir.types import MemoirSpeakerRole
 from app.services.memoir import audio_files as memoir_audio_files
 from app.services.memoir.asr import StreamingASREvent
-from app.services.memoir.voice_gateway import VoiceGatewayClientError
+from app.services.memoir.voice_gateway import VoiceGatewayClientError, VoiceGatewayTurnContext
 from app.services.memoir.voice_final_persistence import VoiceFinalPersistenceService
 
 
@@ -91,13 +92,26 @@ class VoiceGatewayPersistence:
             user_id=user_id,
             voice_session_id=voice_session_id,
         )
+        self._turn_context = VoiceGatewayTurnContext()
+
+    async def set_turn_context(self, context: VoiceGatewayTurnContext) -> None:
+        speaker_role = context.speaker_role or MemoirSpeakerRole.NARRATOR.value
+        self._turn_context = VoiceGatewayTurnContext(
+            speaker_role=speaker_role,
+            parent_message_id=context.parent_message_id,
+        )
 
     async def record_audio_frame(self, audio: bytes) -> None:
         await self._pending_audio.append(audio)
 
     async def persist_segment(self, event: StreamingASREvent) -> dict[str, Any]:
         staged_audio = await self._pending_audio.stage(self.db)
-        result = await self._service.persist_segment(event, staged_audio=staged_audio)
+        result = await self._service.persist_segment(
+            event,
+            staged_audio=staged_audio,
+            speaker_role=self._turn_context.speaker_role,
+            parent_message_id=self._turn_context.parent_message_id,
+        )
         return result.as_gateway_payload()
 
     async def persist_final(self, event: StreamingASREvent) -> dict[str, Any]:

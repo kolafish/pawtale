@@ -136,7 +136,11 @@ export function transcriptLinesFromVoiceSessionDetail(
       .map((utterance) => [utterance.chat_message_id as string, utterance]),
   );
   const textMessages = detail.messages
-    .filter((message) => (message.role === "user" || message.role === "assistant") && message.content_text.trim())
+    .filter((message) => (
+      message.role === "user"
+      || message.role === "assistant"
+      || message.role === "interviewer"
+    ) && message.content_text.trim())
     .sort(compareVoiceMessages);
   if (textMessages.length) {
     return textMessages.map((message) => {

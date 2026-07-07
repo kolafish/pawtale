@@ -1,4 +1,4 @@
-import type { MemoirGuidanceMode, MemoirVoiceTranscriptItem } from "../../domain/voice-chat";
+import type { MemoirGuidanceMode, MemoirInterviewType, MemoirVoiceTranscriptItem } from "../../domain/voice-chat";
 import { getMemoirIdentity } from "../../services/auth";
 import { trackAuditAction } from "../../services/audit-tracker";
 import {
@@ -295,7 +295,12 @@ Page<HomeData, {
   startLaunchVoiceChat(): Promise<void>;
   startFreeNarration(): Promise<void>;
   startGuidedInterview(): Promise<void>;
-  startVoiceChatWithMode(mode: MemoirGuidanceMode, entry: HomeVoiceEntry): Promise<void>;
+  startHumanInterview(): Promise<void>;
+  startVoiceChatWithMode(
+    mode: MemoirGuidanceMode,
+    entry: HomeVoiceEntry,
+    interviewType?: MemoirInterviewType,
+  ): Promise<void>;
 }>({
   data: {
     loading: false,
@@ -464,7 +469,11 @@ Page<HomeData, {
     await this.startVoiceChatWithMode("guided_interview", "home_resume");
   },
 
-  async startVoiceChatWithMode(mode, entry) {
+  async startHumanInterview() {
+    await this.startVoiceChatWithMode("free_narration", "home_resume", "human_interview");
+  },
+
+  async startVoiceChatWithMode(mode, entry, interviewType = "ai_interview") {
     if (this.data.loading || this.data.creatingVoice) {
       return;
     }
@@ -486,10 +495,12 @@ Page<HomeData, {
       await syncVoiceAuthorizationConsent();
       const detail = await createMemoirVoiceSession({
         guidance_mode: mode,
+        interview_type: interviewType,
         provider: "volc_streaming_asr",
         input_format: "pcm_s16le_16000_mono",
         metadata_json: {
           entry: entry === "home" ? "miniprogram_home" : `miniprogram_${entry}`,
+          interview_type: interviewType,
           first_version: true,
           ...(this.data.launchVariant !== "none" ? { launch_variant: this.data.launchVariant } : {}),
           ...(entry === "home_resume" && this.data.hasLastStoryHint ? { resume_hint: this.data.lastStoryHint } : {}),
@@ -499,7 +510,7 @@ Page<HomeData, {
       });
       trackAuditAction(
         "voice_chat.start",
-        { guidance_mode: mode, entry, launch_variant: this.data.launchVariant },
+        { guidance_mode: mode, interview_type: interviewType, entry, launch_variant: this.data.launchVariant },
         { projectId: this.data.projectId, voiceSessionId: detail.session.id },
       );
       if (entry === "home_launch") {
@@ -509,6 +520,7 @@ Page<HomeData, {
         url: pageUrl("/pages/voice-chat/index", {
           voiceSessionId: detail.session.id,
           mode,
+          interviewType,
           projectTitle: this.data.projectTitle ? this.data.projectDisplayTitle || this.data.projectTitle : "",
         }),
       });
