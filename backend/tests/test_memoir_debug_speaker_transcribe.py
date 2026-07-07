@@ -7,6 +7,7 @@ from app.services.memoir.asr import StreamingASREvent
 from app.services.memoir.debug_speaker_transcribe import (
     DebugSpeakerProofreadContextLine,
     DebugSpeakerTranscribeSession,
+    live_text_after_confirmed_prefix,
     proofread_debug_speaker_transcript_text,
     speaker_segments_from_asr_event,
 )
@@ -161,6 +162,25 @@ def test_debug_speaker_segments_keep_live_tail_when_utterances_lag_full_text():
     assert segments[1].start_ms == 1800
 
 
+def test_debug_speaker_live_text_after_confirmed_prefix_keeps_current_tail():
+    assert live_text_after_confirmed_prefix(
+        "第一句已经稳定。第二句还在实时说",
+        "第一句已经稳定。",
+    ) == "第二句还在实时说"
+    assert live_text_after_confirmed_prefix(
+        "第二句还在实时说",
+        "第一句已经稳定。",
+    ) == "第二句还在实时说"
+    assert live_text_after_confirmed_prefix(
+        "已经稳定。第二句还在实时说",
+        "第一句已经稳定。",
+    ) == "第二句还在实时说"
+    assert live_text_after_confirmed_prefix(
+        "第一句已经稳定。",
+        "第一句已经稳定。",
+    ) == ""
+
+
 async def test_debug_speaker_transcribe_session_streams_speaker_windows_without_persistence():
     client = FakeGatewayClient()
     transcriber = FakeSpeakerTranscriber()
@@ -260,6 +280,42 @@ async def test_debug_speaker_transcribe_session_streams_live_tail_from_provider_
     assert partial_event["speaker_id"] == "speaker_unknown"
     assert partial_event["text"] == "第二句还在实时说"
     assert partial_event["provider_event_type"] == "final"
+
+
+async def test_debug_speaker_transcribe_session_streams_live_asr_tail_when_speaker_stream_lags():
+    client = FakeGatewayClient()
+    speaker_transcriber = FakeStableOnlySpeakerTranscriber()
+    live_transcriber = FakeLivePartialTranscriber()
+    session = DebugSpeakerTranscribeSession(
+        client=client,
+        transcriber_factory=lambda: speaker_transcriber,
+        live_transcriber_factory=lambda: live_transcriber,
+    )
+
+    run_task = asyncio.create_task(session.run())
+    await _wait_for_event(client, "session.ready")
+    await client.push({"type": "session.start"})
+    await _wait_for_event(client, "session.started")
+    await client.push(
+        {
+            "type": "audio.frame",
+            "audio": base64.b64encode(b"pcm").decode("ascii"),
+        }
+    )
+    final_event = await _wait_for_event(client, "speaker.final")
+    partial_event = await _wait_for_event(client, "speaker.partial")
+    await client.push({"type": "session.stop"})
+    await asyncio.wait_for(run_task, timeout=1)
+
+    assert speaker_transcriber.sent_audio == [b"pcm"]
+    assert live_transcriber.sent_audio == [b"pcm"]
+    assert final_event["text"] == "第一句已经稳定。"
+    assert final_event["speaker_id"] == "speaker_1"
+    assert partial_event["text"] == "第二句还在实时说"
+    assert partial_event["speaker_id"] == "speaker_unknown"
+    assert partial_event["provider_event_type"] == "live.partial"
+    assert speaker_transcriber.closed
+    assert live_transcriber.closed
 
 
 async def test_debug_speaker_transcribe_session_dedupes_repeated_provider_full_results():
@@ -653,5 +709,47 @@ class FakeLaggingUtteranceSpeakerTranscriber(FakeSpeakerTranscriber):
                         ]
                     }
                 },
+            )
+        )
+
+
+class FakeStableOnlySpeakerTranscriber(FakeSpeakerTranscriber):
+    async def send_audio(self, audio: bytes) -> None:
+        self.sent_audio.append(audio)
+        await self.events_queue.put(
+            StreamingASREvent(
+                type="final",
+                text="第一句已经稳定。",
+                raw={
+                    "payload": {
+                        "result": [
+                            {
+                                "text": "第一句已经稳定。",
+                                "utterances": [
+                                    {
+                                        "text": "第一句已经稳定。",
+                                        "speaker_id": "1",
+                                        "start_time": 0,
+                                        "end_time": 1800,
+                                        "definite": True,
+                                    }
+                                ],
+                            }
+                        ]
+                    }
+                },
+            )
+        )
+
+
+class FakeLivePartialTranscriber(FakeSpeakerTranscriber):
+    async def send_audio(self, audio: bytes) -> None:
+        self.sent_audio.append(audio)
+        await asyncio.sleep(0.01)
+        await self.events_queue.put(
+            StreamingASREvent(
+                type="partial",
+                text="第一句已经稳定。第二句还在实时说",
+                raw={"payload": {"result": [{"text": "第一句已经稳定。第二句还在实时说"}]}},
             )
         )
