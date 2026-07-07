@@ -22,6 +22,8 @@ from app.models.memoir import (
 from app.models.projects import Project
 from app.schemas.memoir_book import MemoirBookChapterDraftGenerateRequest
 from app.services.ai_types import AITextClient
+from app.services.memoir import automation_event_metadata
+from app.services.memoir import automation_event_resolution
 from app.services.memoir import automation_events
 from app.services.memoir import book_quality_audit
 from app.services.memoir.book_drafts import generate_chapter_draft
@@ -206,7 +208,7 @@ async def run_chapter_revision_job(
             summary_text=summary_text,
             metadata_json={
                 "source": "book_auto_revision",
-                automation_events.EVENT_SIGNATURE_KEY: (
+                automation_event_metadata.EVENT_SIGNATURE_KEY: (
                     f"book_auto_revision:{job.chapter_id}:{signature_source_ids}"
                 ),
                 "job_id": job.id,
@@ -216,7 +218,7 @@ async def run_chapter_revision_job(
                 **({"ai_model": model} if model else {}),
             },
         )
-        await automation_events.resolve_revised_chapter_audit_events(
+        await automation_event_resolution.resolve_revised_chapter_audit_events(
             db,
             project_id=job.project_id,
             chapter_id=job.chapter_id,

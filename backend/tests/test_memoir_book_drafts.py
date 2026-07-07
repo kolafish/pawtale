@@ -22,7 +22,7 @@ from app.models.memoir import (
     MemoirBookPlanChapter,
     MemoirChapterEventClusterSnapshot,
 )
-from app.services.memoir import automation_events
+from app.services.memoir import automation_event_metadata
 from app.services.memoir.book_auto_revision import schedule_chapter_auto_revision
 from app.services.memoir.chapter_cards import CHAPTER_CARD_ENGINE, build_chapter_card_context
 from app.services.memoir.chapter_source_links import mark_utterance_links_removed
@@ -844,7 +844,7 @@ async def test_memoir_book_auto_revision_job_supplements_pending_sources(
                 "title": "外婆家的童年",
                 "status": "needs_update",
             },
-            automation_events.EVENT_SIGNATURE_KEY: f"book_quality_audit|needs_updates|{chapter.id}",
+            automation_event_metadata.EVENT_SIGNATURE_KEY: f"book_quality_audit|needs_updates|{chapter.id}",
         },
     )
     test_db.add(stale_audit_event)
@@ -873,7 +873,7 @@ async def test_memoir_book_auto_revision_job_supplements_pending_sources(
                 "title": "外婆家的童年",
                 "status": "thin_draft",
             },
-            automation_events.EVENT_SIGNATURE_KEY: f"book_quality_audit|collecting|{chapter.id}",
+            automation_event_metadata.EVENT_SIGNATURE_KEY: f"book_quality_audit|collecting|{chapter.id}",
         },
     )
     test_db.add(still_relevant_audit_event)
@@ -959,19 +959,19 @@ async def test_memoir_book_auto_revision_job_supplements_pending_sources(
         select(MemoirAutomationEvent).where(MemoirAutomationEvent.id == stale_audit_event.id)
     )
     assert resolved_audit_event is not None
-    assert resolved_audit_event.metadata_json[automation_events.RESOLUTION_KEY] == "confirmed"
+    assert resolved_audit_event.metadata_json[automation_event_metadata.RESOLUTION_KEY] == "confirmed"
     assert (
-        resolved_audit_event.metadata_json[automation_events.RESOLUTION_REASON_KEY]
-        == automation_events.CHAPTER_AUTO_REVISED_REASON
+        resolved_audit_event.metadata_json[automation_event_metadata.RESOLUTION_REASON_KEY]
+        == automation_event_metadata.CHAPTER_AUTO_REVISED_REASON
     )
-    assert resolved_audit_event.metadata_json[automation_events.RESOLVED_CHAPTER_ID_KEY] == chapter.id
-    assert resolved_audit_event.metadata_json[automation_events.RESOLVED_BY_EVENT_ID_KEY] == event.id
-    assert resolved_audit_event.metadata_json[automation_events.RESOLVED_RESULT_VERSION_ID_KEY] == versions[-1].id
+    assert resolved_audit_event.metadata_json[automation_event_metadata.RESOLVED_CHAPTER_ID_KEY] == chapter.id
+    assert resolved_audit_event.metadata_json[automation_event_metadata.RESOLVED_BY_EVENT_ID_KEY] == event.id
+    assert resolved_audit_event.metadata_json[automation_event_metadata.RESOLVED_RESULT_VERSION_ID_KEY] == versions[-1].id
     still_relevant_event = await test_db.scalar(
         select(MemoirAutomationEvent).where(MemoirAutomationEvent.id == still_relevant_audit_event.id)
     )
     assert still_relevant_event is not None
-    assert automation_events.RESOLUTION_KEY not in still_relevant_event.metadata_json
+    assert automation_event_metadata.RESOLUTION_KEY not in still_relevant_event.metadata_json
     visible_response = await client.get(f"/api/mobile/memoir/projects/{project_id}/automation-events")
     assert visible_response.status_code == 200
     visible_event_ids = [item["id"] for item in visible_response.json()["items"]]

@@ -23,7 +23,7 @@ from app.schemas.memoir_book import (
     MemoirBookSourceCoverageResponse,
     MemoirBookSourceMoveRequest,
 )
-from app.services.memoir import automation_events as _automation_events
+from app.services.memoir import automation_event_resolution as _automation_event_resolution
 from app.services.memoir.access import load_memoir_project
 from app.services.memoir.book_auto_revision import (
     remember_project_ai_model as _remember_project_ai_model,
@@ -211,7 +211,7 @@ async def assign_book_sources_to_chapters(
             assignment_reason=assignment_reason,
             assignment_metadata_by_utterance=assignment_metadata_by_utterance,
         )
-        await _automation_events.resolve_assigned_source_review_events(
+        await _automation_event_resolution.resolve_assigned_source_review_events(
             db,
             project_id=project_id,
             utterance_ids=assigned_utterance_ids,
@@ -338,7 +338,7 @@ async def move_book_source_between_chapters(
         assigned_by=MemoirChapterSourceAssignedBy.USER,
         assignment_reason="manual_source_move",
     )
-    await _automation_events.resolve_assigned_source_review_events(
+    await _automation_event_resolution.resolve_assigned_source_review_events(
         db,
         project_id=project_id,
         utterance_ids=[req.utterance_id],

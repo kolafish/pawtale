@@ -13,9 +13,9 @@ from app.models.memoir import (
     MemoirAutomationEvent,
     MemoirBookQualityAuditSnapshot,
     MemoirChapterSourceLink,
-    MemoirEditingJob,
 )
 from app.schemas.memoir_book import MemoirBookQualityAuditRunRequest
+from app.services.memoir import automation_event_metadata
 from app.services.memoir import automation_events
 from app.services.memoir.book_quality_audit import run_book_quality_audit, schedule_project_quality_audit
 from app.services.memoir.editing_job_handlers import register_memoir_editing_job_handlers
@@ -432,7 +432,7 @@ async def test_book_quality_audit_reuses_acknowledged_equivalent_event(client, t
     ).scalars().all()
     assert len(events) == 2
     acknowledged_events = [
-        event for event in events if event.metadata_json.get(automation_events.ACKNOWLEDGED_BY_USER_KEY) is True
+        event for event in events if event.metadata_json.get(automation_event_metadata.ACKNOWLEDGED_BY_USER_KEY) is True
     ]
     assert [event.id for event in acknowledged_events] == [event_id]
 
