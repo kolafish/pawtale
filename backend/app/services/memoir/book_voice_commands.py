@@ -16,10 +16,8 @@ from app.services.ai_types import AITextClient
 from app.services.memoir.access import load_memoir_project
 from app.services.memoir.book_source_links import source_count_by_chapter
 from app.services.memoir.book_voice_command_executor import execute_confirmed_book_voice_command
-from app.services.memoir.book_voice_command_parser import (
-    parse_payload_with_ai,
-    response_from_payload,
-)
+from app.services.memoir.book_voice_command_parser import parse_payload_with_ai
+from app.services.memoir.book_voice_command_response_builder import response_from_payload
 
 
 async def parse_book_voice_command(

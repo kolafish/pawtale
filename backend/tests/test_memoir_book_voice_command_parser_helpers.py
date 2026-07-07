@@ -4,7 +4,7 @@ from app.schemas.memoir_book import (
     MemoirBookVoiceCommandBookContext,
     MemoirBookVoiceCommandUncoveredSourceContext,
 )
-from app.services.memoir.book_voice_command_parser import _resolve_uncovered_source
+from app.services.memoir.book_voice_command_resolution import resolve_uncovered_source
 
 
 def test_resolve_uncovered_source_falls_back_to_source_index_after_list_position():
@@ -23,7 +23,7 @@ def test_resolve_uncovered_source_falls_back_to_source_index_after_list_position
         ]
     )
 
-    source = _resolve_uncovered_source(book_context, "待收录第7条", None)
+    source = resolve_uncovered_source(book_context, "待收录第7条", None)
 
     assert source is not None
     assert source.utterance_id == "utterance-7"
