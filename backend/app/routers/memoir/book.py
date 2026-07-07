@@ -51,6 +51,7 @@ from app.services.memoir import book_drafts as memoir_book_drafts
 from app.services.memoir import book_generation_jobs as memoir_book_generation_jobs
 from app.services.memoir import book_outputs as memoir_book_outputs
 from app.services.memoir import book_plans as memoir_book_plans
+from app.services.memoir import book_plan_write_workflow as memoir_book_plan_write_workflow
 from app.services.memoir import book_quality_audit as memoir_book_quality_audit
 from app.services.memoir import book_source_workflow as memoir_book_source_workflow
 from app.services.memoir import source_auto_assignment as memoir_source_auto_assignment
@@ -83,7 +84,7 @@ async def generate_mobile_memoir_book_plan(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return await memoir_book_plans.generate_book_plan(
+    return await memoir_book_plan_write_workflow.generate_book_plan(
         db,
         user_id=current_user.id,
         project_id=project_id,
@@ -98,7 +99,7 @@ async def confirm_mobile_memoir_book_plan(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return await memoir_book_plans.confirm_book_plan(
+    return await memoir_book_plan_write_workflow.confirm_book_plan(
         db,
         user_id=current_user.id,
         project_id=project_id,
@@ -113,7 +114,7 @@ async def update_mobile_memoir_book_plan(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return await memoir_book_plans.update_book_plan(
+    return await memoir_book_plan_write_workflow.update_book_plan(
         db,
         user_id=current_user.id,
         project_id=project_id,
@@ -128,7 +129,7 @@ async def apply_mobile_memoir_book_plan_structure_command(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return await memoir_book_plans.apply_book_plan_structure_command(
+    return await memoir_book_plan_write_workflow.apply_book_plan_structure_command(
         db,
         user_id=current_user.id,
         project_id=project_id,
@@ -377,7 +378,7 @@ async def update_mobile_memoir_book_chapter_title(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return await memoir_book_plans.update_book_chapter_title(
+    return await memoir_book_plan_write_workflow.update_book_chapter_title(
         db,
         user_id=current_user.id,
         project_id=project_id,
@@ -397,7 +398,7 @@ async def generate_mobile_memoir_book_chapter_title(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return await memoir_book_plans.generate_book_chapter_title(
+    return await memoir_book_plan_write_workflow.generate_book_chapter_title(
         db,
         user_id=current_user.id,
         project_id=project_id,

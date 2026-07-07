@@ -20,7 +20,7 @@ from app.schemas.memoir_book import (
     MemoirBookSourceRouteEvidence,
     MemoirBookSourceRouteResponse,
 )
-from app.services.memoir import book_plans
+from app.services.memoir import book_plan_write_workflow
 from app.services.memoir import book_source_workflow
 from app.services.memoir import source_router
 from app.services.memoir.access import load_memoir_project
@@ -283,7 +283,7 @@ async def confirm_source_review_item(
         title = req.create_new_chapter_title or item.suggested_title
         if not title:
             raise HTTPException(status_code=400, detail="缺少目标章节")
-        plan = await book_plans.apply_book_plan_structure_command(
+        plan = await book_plan_write_workflow.apply_book_plan_structure_command(
             db,
             user_id=user_id,
             project_id=project_id,
