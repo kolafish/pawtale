@@ -57,6 +57,8 @@ interface ActivePartialView {
   speakerToneClass: string;
   partialBoxClass: string;
   text: string;
+  startMs: number | null;
+  endMs: number | null;
   partialEndId: string;
   partialScrollClass: string;
   partialScrollTarget: string;
@@ -128,6 +130,17 @@ interface ComparableSpeechChar {
   end: number;
 }
 
+interface SpeechTextSpan {
+  start: number;
+  end: number;
+  key: string;
+}
+
+type FinalizedSpeechLine = Pick<
+  ConversationLineView,
+  "text" | "sourceText" | "startMs" | "endMs"
+>;
+
 const HISTORY_PREVIEW_HOLD_MS = 160;
 const HISTORY_PREVIEW_CANCEL_DISTANCE = 18;
 const FUZZY_SPEECH_MIN_CHARS = 6;
@@ -135,6 +148,8 @@ const FUZZY_SPEECH_MAX_CHARS = 40;
 const FUZZY_SPEECH_MAX_LENGTH_RATIO = 1.6;
 const FUZZY_SPEECH_MIN_COMMON_OF_SHORTER = 0.68;
 const FUZZY_SPEECH_MIN_COMMON_OF_LONGER = 0.48;
+const FUZZY_SPEECH_MAX_WINDOW_SPANS = 3;
+const LIVE_PARTIAL_FINAL_TIME_PADDING_MS = 1500;
 const BEIJING_TIME_OFFSET_MS = 8 * 60 * 60 * 1000;
 const UNKNOWN_SPEAKER_ID = "speaker_unknown";
 const SPEAKER_TONE_COUNT = 8;
@@ -154,6 +169,8 @@ const EMPTY_ACTIVE_PARTIAL: ActivePartialView = {
   speakerToneClass: "",
   partialBoxClass: "partial-box active-partial",
   text: "",
+  startMs: null,
+  endMs: null,
   partialEndId: "active-partial-end",
   partialScrollClass: "partial-scroll",
   partialScrollTarget: "",
@@ -521,6 +538,10 @@ function isSpeechBoundaryChar(char: string): boolean {
   return /[\s，。？！、；：,.?!;:]/.test(char);
 }
 
+function isSpeechSentenceBoundaryChar(char: string): boolean {
+  return /[。？！；.!?;]/.test(char);
+}
+
 function consumeFollowingSpeechBoundary(text: string, offset: number): number {
   let nextOffset = offset;
   while (nextOffset < text.length) {
@@ -531,6 +552,37 @@ function consumeFollowingSpeechBoundary(text: string, offset: number): number {
     nextOffset += char.length;
   }
   return nextOffset;
+}
+
+function speechTextSpans(text: string): SpeechTextSpan[] {
+  const spans: SpeechTextSpan[] = [];
+  let spanStart = 0;
+  let offset = 0;
+  while (offset < text.length) {
+    const char = Array.from(text.slice(offset))[0] || "";
+    if (!char) {
+      break;
+    }
+    const nextOffset = offset + char.length;
+    if (!isSpeechSentenceBoundaryChar(char)) {
+      offset = nextOffset;
+      continue;
+    }
+    const spanEnd = nextOffset;
+    const key = comparableSpeechText(text.slice(spanStart, spanEnd));
+    if (key) {
+      spans.push({ start: spanStart, end: spanEnd, key });
+    }
+    spanStart = consumeFollowingSpeechBoundary(text, spanEnd);
+    offset = spanStart;
+  }
+  if (spanStart < text.length) {
+    const key = comparableSpeechText(text.slice(spanStart));
+    if (key) {
+      spans.push({ start: spanStart, end: text.length, key });
+    }
+  }
+  return spans;
 }
 
 function commonSpeechSubsequenceLength(left: string, right: string): number {
@@ -553,6 +605,16 @@ function commonSpeechSubsequenceLength(left: string, right: string): number {
   return previous[right.length];
 }
 
+function speechTextSimilarityScore(left: string, right: string): number {
+  const shorterLength = Math.min(left.length, right.length);
+  const longerLength = Math.max(left.length, right.length);
+  if (!shorterLength || !longerLength) {
+    return 0;
+  }
+  const commonLength = commonSpeechSubsequenceLength(left, right);
+  return (commonLength / shorterLength) + (commonLength / longerLength);
+}
+
 function isLikelySameShortSpeechText(partialKey: string, finalKey: string): boolean {
   const shorterLength = Math.min(partialKey.length, finalKey.length);
   const longerLength = Math.max(partialKey.length, finalKey.length);
@@ -568,6 +630,46 @@ function isLikelySameShortSpeechText(partialKey: string, finalKey: string): bool
   const commonLength = commonSpeechSubsequenceLength(partialKey, finalKey);
   return commonLength / shorterLength >= FUZZY_SPEECH_MIN_COMMON_OF_SHORTER
     && commonLength / longerLength >= FUZZY_SPEECH_MIN_COMMON_OF_LONGER;
+}
+
+function removeLikelyFinalSpeechWindow(partialText: string, finalKey: string): string | null {
+  const spans = speechTextSpans(partialText);
+  let bestMatch: { start: number; end: number; score: number } | null = null;
+  for (let startIndex = 0; startIndex < spans.length; startIndex += 1) {
+    let windowKey = "";
+    const maxEndIndex = Math.min(spans.length, startIndex + FUZZY_SPEECH_MAX_WINDOW_SPANS);
+    for (let endIndex = startIndex; endIndex < maxEndIndex; endIndex += 1) {
+      windowKey += spans[endIndex].key;
+      if (windowKey.length > FUZZY_SPEECH_MAX_CHARS) {
+        break;
+      }
+      if (!isLikelySameShortSpeechText(windowKey, finalKey)) {
+        continue;
+      }
+      const score = speechTextSimilarityScore(windowKey, finalKey);
+      const candidate = {
+        start: spans[startIndex].start,
+        end: spans[endIndex].end,
+        score,
+      };
+      const expandsSameRightEdge = bestMatch
+        && candidate.end === bestMatch.end
+        && candidate.start < bestMatch.start;
+      const shrinksSameRightEdge = bestMatch
+        && candidate.end === bestMatch.end
+        && candidate.start > bestMatch.start;
+      if (!bestMatch || expandsSameRightEdge || (!shrinksSameRightEdge && score > bestMatch.score)) {
+        bestMatch = {
+          ...candidate,
+        };
+      }
+    }
+  }
+  if (!bestMatch) {
+    return null;
+  }
+  const end = consumeFollowingSpeechBoundary(partialText, bestMatch.end);
+  return trimSpeechBoundary(`${partialText.slice(0, bestMatch.start)}${partialText.slice(end)}`);
 }
 
 function removeFinalTextFromPartialText(partialText: string, finalText: string): string {
@@ -586,6 +688,10 @@ function removeFinalTextFromPartialText(partialText: string, finalText: string):
   }
   const matchIndex = partialKey.indexOf(finalKey);
   if (matchIndex < 0) {
+    const textWithoutLikelyWindow = removeLikelyFinalSpeechWindow(cleanPartial, finalKey);
+    if (textWithoutLikelyWindow !== null) {
+      return textWithoutLikelyWindow;
+    }
     if (isLikelySameShortSpeechText(partialKey, finalKey)) {
       return "";
     }
@@ -604,11 +710,28 @@ function removeFinalTextFromPartialText(partialText: string, finalText: string):
   return trimSpeechBoundary(`${cleanPartial.slice(0, start)}${cleanPartial.slice(end)}`);
 }
 
+function lineMayOverlapPartial(
+  line: FinalizedSpeechLine,
+  partialStartMs: number | null,
+  partialEndMs: number | null,
+): boolean {
+  const lineStartMs = line.startMs;
+  const lineEndMs = line.endMs;
+  if (partialStartMs === null || partialEndMs === null || lineStartMs === null || lineEndMs === null) {
+    return true;
+  }
+  return partialStartMs - LIVE_PARTIAL_FINAL_TIME_PADDING_MS <= lineEndMs
+    && lineStartMs <= partialEndMs + LIVE_PARTIAL_FINAL_TIME_PADDING_MS;
+}
+
 function removeConversationTextFromUnknownPartial(
   partialText: string,
-  conversationLines: ConversationLineView[],
+  conversationLines: FinalizedSpeechLine[],
+  partialStartMs: number | null = null,
+  partialEndMs: number | null = null,
 ): string {
   return conversationLines
+    .filter((line) => lineMayOverlapPartial(line, partialStartMs, partialEndMs))
     .slice()
     .reverse()
     .reduce((text, line) => {
@@ -620,9 +743,9 @@ function removeConversationTextFromUnknownPartial(
     }, partialText.trim());
 }
 
-function activePartialAfterFinal(
+function activePartialAfterConversationLines(
   activePartial: ActivePartialView,
-  finalText: string,
+  conversationLines: FinalizedSpeechLine[],
 ): ActivePartialView {
   if (!activePartial.visible) {
     return EMPTY_ACTIVE_PARTIAL;
@@ -630,7 +753,12 @@ function activePartialAfterFinal(
   if (activePartial.speakerId && activePartial.speakerId !== UNKNOWN_SPEAKER_ID) {
     return EMPTY_ACTIVE_PARTIAL;
   }
-  const nextText = removeFinalTextFromPartialText(activePartial.text, finalText);
+  const nextText = removeConversationTextFromUnknownPartial(
+    activePartial.text,
+    conversationLines,
+    activePartial.startMs,
+    activePartial.endMs,
+  );
   if (!nextText) {
     return EMPTY_ACTIVE_PARTIAL;
   }
@@ -1062,7 +1190,7 @@ Page<DebugSpeakerPageData, {
       partialScrollClass = "partial-scroll";
       partialScrollTarget = "";
       partialScrollTop = 0;
-      activePartial = activePartialAfterFinal(this.data.activePartial, text);
+      activePartial = activePartialAfterConversationLines(this.data.activePartial, conversationLines);
       if (activePartial.visible) {
         conversationScrollTarget = "active-partial-card";
       }
@@ -1085,7 +1213,12 @@ Page<DebugSpeakerPageData, {
       );
       partialText = incrementalSpeakerText(text, existing.cumulativeFinalText, sameCumulativeRun);
       if (speakerId === UNKNOWN_SPEAKER_ID) {
-        partialText = removeConversationTextFromUnknownPartial(partialText, conversationLines);
+        partialText = removeConversationTextFromUnknownPartial(
+          partialText,
+          conversationLines,
+          eventStart,
+          eventEndMs(event),
+        );
       }
       const partialIsLong = partialText.length > 90;
       partialScrollClass = partialIsLong ? "partial-scroll long" : "partial-scroll";
@@ -1110,6 +1243,8 @@ Page<DebugSpeakerPageData, {
           speakerToneClass: speakerLabel.toneClass,
           partialBoxClass: partialBoxClass(speakerLabel.toneClass),
           text: partialText,
+          startMs: eventStart,
+          endMs: eventEndMs(event),
           partialEndId,
           partialScrollClass,
           partialScrollTarget,
@@ -1285,7 +1420,8 @@ Page<DebugSpeakerPageData, {
           this.data.latestFinalLineId,
         ),
       );
-      this.setData({ speakers, conversationLines });
+      const activePartial = activePartialAfterConversationLines(this.data.activePartial, conversationLines);
+      this.setData({ speakers, conversationLines, activePartial });
     } catch (_error) {
       const linePatch = {
         proofreadLoading: false,

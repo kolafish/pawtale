@@ -251,6 +251,109 @@ test("debug speaker page clears stale unknown preview when two ASR streams disag
   assert.equal(context.data.activePartial.visible, false);
 });
 
+test("debug speaker page removes only the stale time-overlapping sentence window", () => {
+  const { page } = loadDebugSpeakerPage();
+  const context = pageContext(page);
+  const liveText = "然后这道吗？应该就是第四道了哈。第五次现在还在继续说。";
+
+  page.handleSpeakerEvent.call(context, {
+    type: "speaker.partial",
+    speaker_id: "speaker_unknown",
+    segment_id: "live-current",
+    text: liveText,
+    start_ms: 44_000,
+    end_ms: 50_000,
+    provider_event_type: "live.partial",
+  });
+  page.handleSpeakerEvent.call(context, {
+    type: "speaker.final",
+    speaker_id: "speaker_2",
+    segment_id: "seg-2",
+    text: "现在应该是第八道了哈。",
+    start_ms: 44_000,
+    end_ms: 47_000,
+  });
+
+  assert.equal(context.data.activePartial.visible, true);
+  assert.equal(context.data.activePartial.text, "第五次现在还在继续说。");
+
+  page.handleSpeakerEvent.call(context, {
+    type: "speaker.partial",
+    speaker_id: "speaker_unknown",
+    segment_id: "live-current",
+    text: liveText,
+    start_ms: 44_000,
+    end_ms: 50_000,
+    provider_event_type: "live.partial",
+  });
+
+  assert.equal(context.data.activePartial.visible, true);
+  assert.equal(context.data.activePartial.text, "第五次现在还在继续说。");
+});
+
+test("debug speaker page keeps repeated words when final line is outside the partial time range", () => {
+  const { page } = loadDebugSpeakerPage();
+  const context = pageContext(page);
+
+  page.handleSpeakerEvent.call(context, {
+    type: "speaker.final",
+    speaker_id: "speaker_1",
+    segment_id: "seg-1",
+    text: "好。",
+    start_ms: 0,
+    end_ms: 1000,
+  });
+  page.handleSpeakerEvent.call(context, {
+    type: "speaker.partial",
+    speaker_id: "speaker_unknown",
+    segment_id: "live-current",
+    text: "好。",
+    start_ms: 7000,
+    end_ms: 8000,
+    provider_event_type: "live.partial",
+  });
+
+  assert.equal(context.data.activePartial.visible, true);
+  assert.equal(context.data.activePartial.text, "好。");
+});
+
+test("debug speaker page re-cleans active unknown preview after proofread changes final text", async () => {
+  const { page } = loadDebugSpeakerPage({
+    proofreadExports: {
+      proofreadDebugSpeakerTranscriptLine: async () => ({
+        proofread_text: "第四道残留。",
+      }),
+    },
+  });
+  const context = pageContext(page);
+
+  page.handleSpeakerEvent.call(context, {
+    type: "speaker.partial",
+    speaker_id: "speaker_unknown",
+    segment_id: "live-current",
+    text: "第四道残留。后面新的话。",
+    start_ms: 10_000,
+    end_ms: 15_000,
+    provider_event_type: "live.partial",
+  });
+  page.handleSpeakerEvent.call(context, {
+    type: "speaker.final",
+    speaker_id: "speaker_2",
+    segment_id: "seg-2",
+    text: "识别得不准。",
+    start_ms: 10_000,
+    end_ms: 12_000,
+  });
+
+  assert.equal(context.data.activePartial.text, "第四道残留。后面新的话。");
+
+  await flushPromises();
+
+  assert.equal(context.data.conversationLines[0].text, "第四道残留。");
+  assert.equal(context.data.activePartial.visible, true);
+  assert.equal(context.data.activePartial.text, "后面新的话。");
+});
+
 test("debug speaker page keeps unrelated unknown preview when final text is not the same utterance", () => {
   const { page } = loadDebugSpeakerPage();
   const context = pageContext(page);
