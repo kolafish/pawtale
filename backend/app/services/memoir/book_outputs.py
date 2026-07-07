@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta, timezone
-
 from fastapi import HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,25 +22,14 @@ from app.models.memoir import (
 from app.schemas.memoir_book import (
     MemoirBookAudioRequest,
     MemoirBookAudioResponse,
-    MemoirBookManuscript,
-    MemoirBookManuscriptBackMatter,
-    MemoirBookManuscriptChapter,
-    MemoirBookManuscriptProfile,
-    MemoirBookManuscriptQuote,
-    MemoirBookManuscriptRenderSettings,
-    MemoirBookManuscriptSection,
-    MemoirBookManuscriptSourceRef,
     MemoirBookOutputChapterEditorialCopyUpdateRequest,
     MemoirBookOutputEditorialCopyRegenerateRequest,
     MemoirBookOutputGenerateRequest,
     MemoirBookOutputResponse,
-    MemoirBookOutputStructuredChapterResponse,
-    MemoirBookOutputStructuredContentResponse,
-    MemoirBookOutputTableOfContentsItemResponse,
     MemoirBookOutputUpdateRequest,
+    MemoirBookOutputVersionResponse,
     MemoirBookTitleSuggestionRequest,
     MemoirBookTitleSuggestionResponse,
-    MemoirBookOutputVersionResponse,
 )
 from app.services.file_exports import ExportFile
 from app.services.memoir.access import load_memoir_project
@@ -55,19 +42,26 @@ from app.services.memoir.book_audio import (
     source_text_hash,
     synthesize_text_audio,
 )
-from app.services.memoir.book_manuscript_ai import (
-    GeneratedManuscriptCopy,
-    generate_manuscript_editorial_copy,
-    generate_title_suggestions,
-)
-from app.services.memoir.book_manuscript_cleanup import (
-    expanded_afterword,
-    fallback_back_cover_quote,
-    fallback_chapter_intro,
-    fallback_preface,
-    formal_book_title,
-    normalize_book_identity,
-    sanitize_manuscript_payload,
+from app.services.memoir.book_manuscript_ai import generate_manuscript_editorial_copy, generate_title_suggestions
+from app.services.memoir.book_output_manuscript import (
+    DEFAULT_BOOK_COVER_STYLE,
+    apply_editorial_copy as _apply_editorial_copy,
+    chapter_id_set as _chapter_id_set,
+    cover_style as _cover_style,
+    effective_book_metadata as _effective_book_metadata,
+    fallback_title_suggestions as _fallback_title_suggestions,
+    formal_book_title as _formal_book_title,
+    manuscript_from_snapshot as _manuscript_from_snapshot,
+    manuscript_response as _manuscript_response,
+    positive_int as _positive_int,
+    request_book_metadata_patch as _request_book_metadata_patch,
+    safe_str as _safe_str,
+    stored_cover_style as _stored_cover_style,
+    stored_manuscript_metadata as _stored_manuscript_metadata,
+    structured_content_response as _structured_content_response,
+    target_set as _target_set,
+    update_chapter_editorial_copy as _update_chapter_editorial_copy,
+    updated_manuscript_payload as _updated_manuscript_payload,
 )
 from app.services.memoir.book_output_export import (
     MemoirBookOutputExportFormat,
@@ -80,17 +74,6 @@ from app.services.memoir.voice_tts import TTSClient
 
 BOOK_TTS_CACHE_KEY = "book_tts"
 AI_MODEL_METADATA_KEY = "ai_model"
-MEMOIR_PROFILE_METADATA_KEY = "memoir_profile"
-DEFAULT_BOOK_COVER_STYLE = "classic_plain"
-BOOK_PROFILE_TEXT_FIELDS = ("subtitle", "narrator_name", "prepared_by")
-BOOK_SECTION_TEXT_FIELDS = ("preface", "afterword", "back_cover_quote")
-BOOK_EDITORIAL_COPY_TARGETS = {
-    "preface",
-    "afterword",
-    "back_cover_quote",
-    "chapter_intros",
-    "pull_quotes",
-}
 SNAPSHOT_COMPARE_KEYS = (
     "chapter_id",
     "chapter_title",
@@ -100,514 +83,6 @@ SNAPSHOT_COMPARE_KEYS = (
     "draft_version",
     "content_char_count",
 )
-
-
-def _positive_int(value: object) -> int:
-    if isinstance(value, bool):
-        return 0
-    if isinstance(value, int):
-        return max(value, 0)
-    if isinstance(value, float):
-        return max(int(value), 0)
-    if isinstance(value, str):
-        try:
-            return max(int(value), 0)
-        except ValueError:
-            return 0
-    return 0
-
-
-def _optional_positive_int(value: object) -> int | None:
-    result = _positive_int(value)
-    return result or None
-
-
-def _safe_str(value: object) -> str:
-    return value.strip() if isinstance(value, str) else ""
-
-
-def _limited_book_text(value: object, *, max_chars: int) -> str:
-    text = _safe_str(value)
-    return text[:max_chars] if len(text) > max_chars else text
-
-
-def _project_narrator_name(project: object) -> str:
-    metadata = getattr(project, "metadata_json", None)
-    if not isinstance(metadata, dict):
-        return ""
-    profile = metadata.get(MEMOIR_PROFILE_METADATA_KEY)
-    if not isinstance(profile, dict):
-        return ""
-    return _limited_book_text(profile.get("narrator_name"), max_chars=80)
-
-
-def _structured_content_response(
-    *,
-    title: str,
-    content: str,
-    snapshot: list[dict[str, object]],
-) -> MemoirBookOutputStructuredContentResponse | None:
-    chapters: list[MemoirBookOutputStructuredChapterResponse] = []
-    for fallback_index, item in enumerate(snapshot, start=1):
-        chapter_id = _safe_str(item.get("chapter_id"))
-        chapter_title = _safe_str(item.get("chapter_title")) or _safe_str(item.get("title"))
-        chapter_content = _safe_str(item.get("content"))
-        if not chapter_id or not chapter_title or not chapter_content:
-            continue
-        chapters.append(
-            MemoirBookOutputStructuredChapterResponse(
-                chapter_id=chapter_id,
-                index=_positive_int(item.get("chapter_index")) or fallback_index,
-                title=chapter_title,
-                content=chapter_content,
-                char_count=_positive_int(item.get("content_char_count")) or len(chapter_content),
-                source_count=_positive_int(item.get("source_count")),
-                draft_version_id=_safe_str(item.get("draft_version_id")) or None,
-                draft_version=_optional_positive_int(item.get("draft_version")),
-            )
-        )
-    if not chapters:
-        return None
-    table_of_contents = [
-        MemoirBookOutputTableOfContentsItemResponse(
-            chapter_id=chapter.chapter_id,
-            index=chapter.index,
-            title=chapter.title,
-            char_count=chapter.char_count,
-            source_count=chapter.source_count,
-        )
-        for chapter in chapters
-    ]
-    return MemoirBookOutputStructuredContentResponse(
-        title=title,
-        chapter_count=len(chapters),
-        char_count=len(content.strip()),
-        table_of_contents=table_of_contents,
-        chapters=chapters,
-    )
-
-
-def _brief_text(text: str, *, max_chars: int) -> str:
-    normalized = " ".join(text.replace("\r\n", "\n").replace("\r", "\n").split())
-    if len(normalized) <= max_chars:
-        return normalized
-    return normalized[:max_chars].rstrip("，。；、,. ") + "。"
-
-
-def _first_sentence(text: str, *, max_chars: int) -> str:
-    normalized = " ".join(text.replace("\r\n", "\n").replace("\r", "\n").split())
-    if not normalized:
-        return ""
-    for index, char in enumerate(normalized):
-        if char in "。！？!?":
-            return _brief_text(normalized[:index + 1], max_chars=max_chars)
-    return _brief_text(normalized, max_chars=max_chars)
-
-
-def _strip_title_wrappers(title: str) -> str:
-    return title.strip().strip("《》「」“”\"' ")
-
-
-def _formal_book_title(raw_title: str) -> str:
-    return formal_book_title(raw_title)
-
-
-def _cover_style(value: str | None) -> str:
-    return (
-        value
-        if value in {"classic_plain", "warm_gray", "dark_album", "moonlit_courtyard", "navy_gilt"}
-        else DEFAULT_BOOK_COVER_STYLE
-    )
-
-
-def _short_topic(title: str) -> str:
-    topic = _strip_title_wrappers(title)
-    for word in ("与", "和", "里的", "中的"):
-        if word in topic and len(topic) > 7:
-            topic = topic.split(word)[0]
-            break
-    return topic[:8]
-
-
-def _fallback_cover_subtitle(chapter_titles: list[str]) -> str:
-    topics = [_short_topic(title) for title in chapter_titles if _short_topic(title)]
-    if len(topics) >= 2:
-        return f"关于{'、'.join(topics[:3])}的记忆"
-    return "根据口述访谈整理而成"
-
-
-def _fallback_title_suggestions(base_title: str, _chapter_titles: list[str], count: int) -> list[str]:
-    formal_title = _formal_book_title(base_title)
-    subject = formal_title.removesuffix("的回忆录").removesuffix("回忆录").strip("的") or "家人"
-    candidates = [
-        formal_title,
-        f"{subject}的一生",
-        f"{subject}慢慢说",
-        f"{subject}口述回忆录",
-        "我走过的这些年",
-        "一生的来路",
-        "从前的日子",
-        "那些年我记得",
-        "家里的回忆录",
-    ]
-    result: list[str] = []
-    for candidate in candidates:
-        cleaned = _formal_book_title(candidate)
-        if cleaned and cleaned not in result:
-            result.append(cleaned)
-        if len(result) >= count:
-            break
-    return result
-
-
-def _fallback_preface(chapter_titles: list[str]) -> str:
-    return fallback_preface(chapter_titles)
-
-
-def _fallback_back_cover_quote(chapters: list[MemoirBookManuscriptChapter]) -> str:
-    return fallback_back_cover_quote([chapter.model_dump(mode="json") for chapter in chapters])
-
-
-def _today_year_text() -> str:
-    today = datetime.now(UTC).astimezone(timezone(timedelta(hours=8))).date()
-    return f"{today.year} 年"
-
-
-def _expanded_afterword() -> str:
-    return expanded_afterword()
-
-
-def _manuscript_source_refs(raw_refs: object) -> list[MemoirBookManuscriptSourceRef]:
-    if not isinstance(raw_refs, list):
-        return []
-    refs: list[MemoirBookManuscriptSourceRef] = []
-    for item in raw_refs:
-        if not isinstance(item, dict):
-            continue
-        utterance_id = _safe_str(item.get("utterance_id"))
-        if not utterance_id:
-            continue
-        refs.append(
-            MemoirBookManuscriptSourceRef(
-                utterance_id=utterance_id,
-                transcript_version_id=_safe_str(item.get("transcript_version_id")) or None,
-                voice_session_id=_safe_str(item.get("voice_session_id")) or None,
-                quote=_safe_str(item.get("quote")),
-            )
-        )
-    return refs
-
-
-def _chapter_intro(title: str, content: str, editorial_intro: str | None = None) -> str:
-    if editorial_intro:
-        return editorial_intro
-    return fallback_chapter_intro(title, content)
-
-
-def _front_section_content(manuscript: dict[str, object], kind: str) -> str:
-    sections = manuscript.get("front_matter")
-    if not isinstance(sections, list):
-        return ""
-    for section in sections:
-        if isinstance(section, dict) and section.get("kind") == kind:
-            return _safe_str(section.get("content"))
-    return ""
-
-
-def _back_section_content(manuscript: dict[str, object], kind: str) -> str:
-    back_matter = manuscript.get("back_matter")
-    if not isinstance(back_matter, dict):
-        return ""
-    section = back_matter.get(kind)
-    return _safe_str(section.get("content")) if isinstance(section, dict) else ""
-
-
-def _stored_manuscript_metadata(stored: object) -> dict[str, str]:
-    if not isinstance(stored, dict):
-        return {}
-    profile = stored.get("profile")
-    settings = stored.get("render_settings")
-    return {
-        "subtitle": _safe_str(profile.get("subtitle")) if isinstance(profile, dict) else "",
-        "narrator_name": _safe_str(profile.get("narrator_name")) if isinstance(profile, dict) else "",
-        "prepared_by": _safe_str(profile.get("prepared_by")) if isinstance(profile, dict) else "",
-        "preface": _front_section_content(stored, "preface"),
-        "afterword": _back_section_content(stored, "afterword"),
-        "back_cover_quote": _safe_str(settings.get("back_cover_quote")) if isinstance(settings, dict) else "",
-    }
-
-
-def _request_book_metadata_patch(req: object) -> dict[str, str]:
-    fields_set = getattr(req, "model_fields_set", set())
-    patch: dict[str, str] = {}
-    for field in (*BOOK_PROFILE_TEXT_FIELDS, *BOOK_SECTION_TEXT_FIELDS):
-        if field not in fields_set:
-            continue
-        value = getattr(req, field, None)
-        if value is None:
-            continue
-        max_chars = 1200 if field in {"preface", "afterword"} else 180
-        if field == "back_cover_quote":
-            max_chars = 160
-        patch[field] = _limited_book_text(value, max_chars=max_chars)
-    return patch
-
-
-def _effective_book_metadata(
-    *,
-    project: object | None,
-    stored: object = None,
-    patch: dict[str, str] | None = None,
-    include_empty: bool = False,
-) -> dict[str, str]:
-    metadata = {"prepared_by": "家人整理"}
-    narrator_name = _project_narrator_name(project) if project is not None else ""
-    if narrator_name:
-        metadata["narrator_name"] = narrator_name
-    stored_metadata = _stored_manuscript_metadata(stored)
-    for key, value in stored_metadata.items():
-        if value:
-            metadata[key] = value
-    metadata.update(patch or {})
-    if not metadata["prepared_by"]:
-        metadata["prepared_by"] = "家人整理"
-    if include_empty:
-        for key in (*BOOK_PROFILE_TEXT_FIELDS, *BOOK_SECTION_TEXT_FIELDS):
-            metadata.setdefault(key, "")
-    return metadata
-
-
-def _title_page_content_from_profile(*, subtitle: str, narrator_name: str, prepared_by: str) -> str:
-    lines = [
-        subtitle,
-        f"口述：{narrator_name}" if narrator_name else "",
-        f"整理：{prepared_by}" if prepared_by else "",
-        _today_year_text(),
-    ]
-    return "\n\n".join(line for line in lines if line)
-
-
-def _chapter_pull_quotes(content: str, source_refs: list[MemoirBookManuscriptSourceRef]) -> list[MemoirBookManuscriptQuote]:
-    for ref in source_refs:
-        quote = _brief_text(ref.quote, max_chars=80)
-        if quote:
-            return [MemoirBookManuscriptQuote(text=quote, source_ref_ids=[ref.utterance_id], source="original_quote")]
-    quote = _first_sentence(content, max_chars=80)
-    return [MemoirBookManuscriptQuote(text=quote, source="editorial_generated")] if quote else []
-
-
-def _generated_chapter_pull_quote(
-    *,
-    chapter_id: str,
-    editorial_copy: GeneratedManuscriptCopy | None,
-) -> MemoirBookManuscriptQuote | None:
-    if not editorial_copy:
-        return None
-    for item in editorial_copy.chapter_intros:
-        if item.chapter_id != chapter_id or not item.pull_quote:
-            continue
-        return MemoirBookManuscriptQuote(
-            text=item.pull_quote,
-            source_ref_ids=[item.pull_quote_source_ref_id] if item.pull_quote_source_ref_id else [],
-            source="original_quote" if item.pull_quote_source_ref_id else "editorial_generated",
-        )
-    return None
-
-
-def _manuscript_from_snapshot(
-    *,
-    title: str,
-    content: str,
-    snapshot: list[dict[str, object]],
-    editorial_copy: GeneratedManuscriptCopy | None = None,
-    cover_style: str = DEFAULT_BOOK_COVER_STYLE,
-    metadata: dict[str, str] | None = None,
-) -> MemoirBookManuscript | None:
-    if not snapshot:
-        return None
-    toc: list[MemoirBookOutputTableOfContentsItemResponse] = []
-    chapters: list[MemoirBookManuscriptChapter] = []
-    intro_by_chapter_id = {
-        item.chapter_id: item.intro
-        for item in (editorial_copy.chapter_intros if editorial_copy else [])
-        if item.chapter_id and item.intro
-    }
-    for fallback_index, item in enumerate(snapshot, start=1):
-        chapter_id = _safe_str(item.get("chapter_id"))
-        chapter_title = _safe_str(item.get("chapter_title")) or _safe_str(item.get("title"))
-        chapter_content = _safe_str(item.get("content"))
-        if not chapter_id or not chapter_title or not chapter_content:
-            continue
-        chapter_index = _positive_int(item.get("chapter_index")) or fallback_index
-        source_refs = _manuscript_source_refs(item.get("source_refs"))
-        char_count = _positive_int(item.get("content_char_count")) or len(chapter_content)
-        source_count = _positive_int(item.get("source_count")) or len(source_refs)
-        toc.append(
-            MemoirBookOutputTableOfContentsItemResponse(
-                chapter_id=chapter_id,
-                index=chapter_index,
-                title=chapter_title,
-                char_count=char_count,
-                source_count=source_count,
-            )
-        )
-        generated_pull_quote = _generated_chapter_pull_quote(chapter_id=chapter_id, editorial_copy=editorial_copy)
-        chapters.append(
-            MemoirBookManuscriptChapter(
-                chapter_id=chapter_id,
-                index=chapter_index,
-                title=chapter_title,
-                intro=_chapter_intro(chapter_title, chapter_content, intro_by_chapter_id.get(chapter_id)),
-                pull_quotes=[generated_pull_quote] if generated_pull_quote else _chapter_pull_quotes(chapter_content, source_refs),
-                content=chapter_content,
-                source_refs=source_refs,
-            )
-        )
-    if not chapters:
-        return None
-    metadata = metadata or {}
-    chapter_titles = [item.title for item in toc]
-    subtitle = (
-        metadata["subtitle"]
-        if "subtitle" in metadata
-        else (
-            editorial_copy.cover_subtitle
-            if editorial_copy and editorial_copy.cover_subtitle
-            else _fallback_cover_subtitle(chapter_titles)
-        )
-    )
-    narrator_name = metadata.get("narrator_name", "")
-    formal_title, subtitle = normalize_book_identity(
-        title=title,
-        subtitle=subtitle,
-        narrator_name=narrator_name,
-        chapter_titles=chapter_titles,
-    )
-    prepared_by = metadata.get("prepared_by", "家人整理") or "家人整理"
-    title_page_content = _title_page_content_from_profile(
-        subtitle=subtitle,
-        narrator_name=narrator_name,
-        prepared_by=prepared_by,
-    )
-    preface = (
-        metadata["preface"]
-        if "preface" in metadata
-        else (
-            editorial_copy.preface
-            if editorial_copy and editorial_copy.preface
-            else _fallback_preface(chapter_titles)
-        )
-    )
-    back_cover_quote = (
-        metadata["back_cover_quote"]
-        if "back_cover_quote" in metadata
-        else (
-            editorial_copy.back_cover_quote
-            if editorial_copy and editorial_copy.back_cover_quote
-            else _fallback_back_cover_quote(chapters)
-        )
-    )
-    afterword = (
-        metadata["afterword"]
-        if "afterword" in metadata
-        else (
-            editorial_copy.afterword
-            if editorial_copy and editorial_copy.afterword
-            else _expanded_afterword()
-        )
-    )
-    front_matter = [
-        MemoirBookManuscriptSection(
-            kind="cover",
-            title=formal_title,
-            content=f"{formal_title}\n{subtitle}",
-        ),
-        MemoirBookManuscriptSection(
-            kind="title_page",
-            title="扉页",
-            content=title_page_content,
-        ),
-        MemoirBookManuscriptSection(
-            kind="generation_note",
-            title="整理说明",
-            content=(
-                "这本书由家人的口述材料整理而成，供家人保存与阅读。整理过程中保留原始讲述的事实边界，"
-                "对语句、段落和章节顺序做了必要的梳理，便于日后阅读和继续修订。\n\n"
-                "书中仍可能有时间、地点或姓名需要家人补充确认。若发现遗漏或不准确之处，"
-                "可以在后续版本中继续修改。"
-            ),
-        ),
-        MemoirBookManuscriptSection(
-            kind="preface",
-            title="写在前面",
-            content=preface,
-        ),
-    ]
-    source_count = sum(item.source_count for item in toc)
-    back_matter = MemoirBookManuscriptBackMatter(
-        afterword=MemoirBookManuscriptSection(
-            kind="afterword",
-            title="后记",
-            content=afterword,
-        ),
-        interview_records=MemoirBookManuscriptSection(
-            kind="interview_records",
-            title="口述片段",
-            content=f"本书当前收录 {len(chapters)} 章，共整理自 {source_count} 条口述片段。",
-        ),
-        version_note=MemoirBookManuscriptSection(
-            kind="version_note",
-            title="版本与修订",
-            content=(
-                "本书正文采用适合阅读的整理版表达。原始口述材料已保留，"
-                "便于家人日后继续补充、核对和修订。"
-            ),
-        ),
-        unconfirmed_facts=MemoirBookManuscriptSection(
-            kind="unconfirmed_facts",
-            title="未确认信息",
-            content="当前没有单独标记的未确认信息。后续可在章节编辑中补充时间、地点或姓名待确认项。",
-        ),
-        source_appendix=MemoirBookManuscriptSection(
-            kind="source_appendix",
-            title="口述片段",
-            content="\n".join(f"第{item.index}章「{item.title}」：{item.source_count} 条口述片段" for item in toc),
-        ),
-    )
-    return MemoirBookManuscript(
-        profile=MemoirBookManuscriptProfile(
-            title=formal_title,
-            subtitle=subtitle,
-            narrator_name=narrator_name,
-            prepared_by=prepared_by,
-        ),
-        front_matter=front_matter,
-        table_of_contents=toc,
-        chapters=chapters,
-        back_matter=back_matter,
-        render_settings=MemoirBookManuscriptRenderSettings(
-            cover_style=_cover_style(cover_style),
-            back_cover_quote=back_cover_quote,
-            editorial_copy_model=editorial_copy.model if editorial_copy else None,
-        ),
-    )
-
-
-def _manuscript_response(
-    *,
-    title: str,
-    content: str,
-    snapshot: list[dict[str, object]],
-    stored: object,
-) -> MemoirBookManuscript | None:
-    if isinstance(stored, dict) and stored:
-        try:
-            return MemoirBookManuscript.model_validate(
-                sanitize_manuscript_payload(title=title, manuscript=stored)
-            )
-        except ValueError:
-            pass
-    return _manuscript_from_snapshot(title=title, content=content, snapshot=snapshot)
 
 
 def _project_ai_model(project: object) -> str | None:
@@ -780,131 +255,6 @@ def _compose_book_content_from_snapshot(
         if chapter_content:
             body_parts.append(f"第{chapter_index}章 {chapter_title}\n\n{chapter_content}")
     return (f"{title}\n\n目录\n{toc}\n\n" + "\n\n".join(body_parts)).strip()
-
-
-def _updated_manuscript_payload(
-    *,
-    title: str,
-    stored: object,
-    content: str,
-    snapshot: list[dict[str, object]],
-    cover_style: str | None,
-    metadata_patch: dict[str, str] | None = None,
-) -> dict[str, object]:
-    manuscript = _manuscript_response(title=title, content=content, snapshot=snapshot, stored=stored)
-    if not manuscript:
-        return {}
-    metadata = _effective_book_metadata(project=None, stored=stored, patch=metadata_patch, include_empty=True)
-    manuscript.profile.title = title
-    manuscript.profile.subtitle = metadata["subtitle"]
-    manuscript.profile.narrator_name = metadata["narrator_name"]
-    manuscript.profile.prepared_by = metadata["prepared_by"]
-    if cover_style:
-        manuscript.render_settings.cover_style = _cover_style(cover_style)
-    manuscript.render_settings.back_cover_quote = metadata["back_cover_quote"]
-    for section in manuscript.front_matter:
-        if section.kind == "cover":
-            section.title = title
-            section.content = f"{title}\n{metadata['subtitle']}"
-        elif section.kind == "title_page":
-            section.content = _title_page_content_from_profile(
-                subtitle=metadata["subtitle"],
-                narrator_name=metadata["narrator_name"],
-                prepared_by=metadata["prepared_by"],
-            )
-        elif section.kind == "preface":
-            section.content = metadata["preface"]
-    manuscript.back_matter.afterword.content = metadata["afterword"]
-    return manuscript.model_dump(mode="json")
-
-
-def _target_set(targets: list[str]) -> set[str]:
-    requested = {target for target in targets if target in BOOK_EDITORIAL_COPY_TARGETS}
-    return requested or set(BOOK_EDITORIAL_COPY_TARGETS)
-
-
-def _chapter_id_set(chapter_ids: list[str]) -> set[str]:
-    return {chapter_id for chapter_id in chapter_ids if chapter_id}
-
-
-def _set_preface(manuscript: MemoirBookManuscript, value: str) -> None:
-    for section in manuscript.front_matter:
-        if section.kind == "preface":
-            section.content = value
-            return
-    manuscript.front_matter.append(
-        MemoirBookManuscriptSection(kind="preface", title="写在前面", content=value)
-    )
-
-
-def _apply_editorial_copy(
-    manuscript: MemoirBookManuscript,
-    editorial_copy: GeneratedManuscriptCopy,
-    *,
-    targets: set[str],
-    chapter_ids: set[str],
-) -> None:
-    if "preface" in targets and editorial_copy.preface:
-        _set_preface(manuscript, editorial_copy.preface)
-    if "afterword" in targets and editorial_copy.afterword:
-        manuscript.back_matter.afterword.content = editorial_copy.afterword
-    if "back_cover_quote" in targets and editorial_copy.back_cover_quote:
-        manuscript.render_settings.back_cover_quote = editorial_copy.back_cover_quote
-    if editorial_copy.model:
-        manuscript.render_settings.editorial_copy_model = editorial_copy.model
-
-    generated_by_chapter = {
-        item.chapter_id: item
-        for item in editorial_copy.chapter_intros
-        if item.chapter_id
-    }
-    for chapter in manuscript.chapters:
-        if chapter_ids and chapter.chapter_id not in chapter_ids:
-            continue
-        generated = generated_by_chapter.get(chapter.chapter_id)
-        if not generated:
-            continue
-        if "chapter_intros" in targets and generated.intro:
-            chapter.intro = generated.intro
-        if "pull_quotes" in targets and generated.pull_quote:
-            chapter.pull_quotes = [
-                MemoirBookManuscriptQuote(
-                    text=generated.pull_quote,
-                    source_ref_ids=[generated.pull_quote_source_ref_id] if generated.pull_quote_source_ref_id else [],
-                    source="original_quote" if generated.pull_quote_source_ref_id else "editorial_generated",
-                )
-            ]
-
-
-def _find_manuscript_chapter(
-    manuscript: MemoirBookManuscript,
-    chapter_id: str,
-) -> MemoirBookManuscriptChapter:
-    for chapter in manuscript.chapters:
-        if chapter.chapter_id == chapter_id:
-            return chapter
-    raise HTTPException(status_code=404, detail="章节不存在")
-
-
-def _manual_pull_quote_source_ids(
-    chapter: MemoirBookManuscriptChapter,
-    source_ref_id: str | None,
-) -> list[str]:
-    if source_ref_id:
-        return [source_ref_id]
-    for quote in chapter.pull_quotes:
-        if quote.source_ref_ids:
-            return quote.source_ref_ids
-    return []
-
-
-def _stored_cover_style(version: MemoirBookOutputVersion | None) -> str:
-    if not version or not isinstance(version.manuscript_json, dict):
-        return DEFAULT_BOOK_COVER_STYLE
-    settings = version.manuscript_json.get("render_settings")
-    if not isinstance(settings, dict):
-        return DEFAULT_BOOK_COVER_STYLE
-    return _cover_style(settings.get("cover_style") if isinstance(settings.get("cover_style"), str) else None)
 
 
 def _chapter_snapshot(
@@ -1158,7 +508,7 @@ async def generate_book_output(
         content=content,
         snapshot=snapshot,
         editorial_copy=editorial_copy,
-        cover_style=cover_style,
+        cover_style_value=cover_style,
         metadata=book_metadata,
     )
     version_number = await _latest_output_version_number(db, output.id) + 1
@@ -1205,7 +555,7 @@ async def update_book_output(
         stored=latest.manuscript_json or {},
         content=content,
         snapshot=snapshot,
-        cover_style=cover_style,
+        cover_style_value=cover_style,
         metadata_patch=metadata_patch,
     )
     output.title = title
@@ -1298,29 +648,14 @@ async def update_book_output_chapter_editorial_copy(
     )
     if not manuscript:
         raise HTTPException(status_code=400, detail="全书稿结构不可用")
-    chapter = _find_manuscript_chapter(manuscript, chapter_id)
-
-    fields_set = getattr(req, "model_fields_set", set())
-    if "intro" in fields_set:
-        chapter.intro = req.intro or ""
-    if "pull_quote" in fields_set:
-        source_ref_id = req.pull_quote_source_ref_id if "pull_quote_source_ref_id" in fields_set else None
-        if source_ref_id and not any(ref.utterance_id == source_ref_id for ref in chapter.source_refs):
-            raise HTTPException(status_code=400, detail="章首引语来源不属于当前章节")
-        quote_text = req.pull_quote or ""
-        chapter.pull_quotes = [
-            MemoirBookManuscriptQuote(
-                text=quote_text,
-                source_ref_ids=_manual_pull_quote_source_ids(chapter, source_ref_id),
-                source="manual",
-            )
-        ] if quote_text else []
-    elif "pull_quote_source_ref_id" in fields_set and req.pull_quote_source_ref_id:
-        if not any(ref.utterance_id == req.pull_quote_source_ref_id for ref in chapter.source_refs):
-            raise HTTPException(status_code=400, detail="章首引语来源不属于当前章节")
-        if chapter.pull_quotes:
-            chapter.pull_quotes[0].source_ref_ids = [req.pull_quote_source_ref_id]
-            chapter.pull_quotes[0].source = "manual"
+    _update_chapter_editorial_copy(
+        manuscript,
+        chapter_id,
+        fields_set=getattr(req, "model_fields_set", set()),
+        intro=req.intro,
+        pull_quote=req.pull_quote,
+        pull_quote_source_ref_id=req.pull_quote_source_ref_id,
+    )
 
     latest.manuscript_json = manuscript.model_dump(mode="json")
     output.metadata_json = {
@@ -1360,11 +695,7 @@ async def suggest_book_output_titles(
         count=req.count,
         ai_model=ai_model,
     ) if ai_model else None
-    fallback = _fallback_title_suggestions(
-        base_title,
-        [_safe_str(item.get("chapter_title")) for item in snapshot],
-        req.count,
-    )
+    fallback = _fallback_title_suggestions(base_title, req.count)
     suggestions: list[str] = []
     for suggestion in [*(generated.suggestions if generated else []), *fallback]:
         title = _formal_book_title(suggestion)
