@@ -11,7 +11,7 @@ from app.schemas.memoir_book import (
     MemoirBookVoiceCommandExecuteResponse,
     MemoirBookVoiceCommandOperationResponse,
 )
-from app.services.memoir import book_plans as memoir_book_plans
+from app.services.memoir import book_plan_write_workflow as memoir_book_plan_write_workflow
 from app.services.memoir import book_source_workflow as memoir_book_source_workflow
 from app.services.memoir.book_voice_command_parser import EXECUTABLE_MUTATION_INTENTS
 
@@ -31,7 +31,7 @@ async def execute_confirmed_book_voice_command(
         raise HTTPException(status_code=400, detail="这个语音操作暂时只能预览")
 
     if intent == "rename_chapter":
-        plan = await memoir_book_plans.apply_book_plan_structure_command(
+        plan = await memoir_book_plan_write_workflow.apply_book_plan_structure_command(
             db,
             user_id=user_id,
             project_id=project_id,
@@ -42,7 +42,7 @@ async def execute_confirmed_book_voice_command(
             ),
         )
     elif intent == "merge_chapters":
-        plan = await memoir_book_plans.apply_book_plan_structure_command(
+        plan = await memoir_book_plan_write_workflow.apply_book_plan_structure_command(
             db,
             user_id=user_id,
             project_id=project_id,
@@ -55,7 +55,7 @@ async def execute_confirmed_book_voice_command(
     elif intent == "move_chapter":
         if not _has_move_target(operation):
             raise HTTPException(status_code=400, detail="缺少章节移动目标")
-        plan = await memoir_book_plans.apply_book_plan_structure_command(
+        plan = await memoir_book_plan_write_workflow.apply_book_plan_structure_command(
             db,
             user_id=user_id,
             project_id=project_id,
