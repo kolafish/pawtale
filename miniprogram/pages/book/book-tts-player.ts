@@ -24,20 +24,16 @@ export interface BookTTSHost {
   playToken: number;
 }
 
-export function bookTTSProgressPatch(patch: VoiceAssistantTTSProgressPatch): Partial<BookData> {
-  return {
-    bookTTSSpokenText: patch.ttsSpokenText,
-    bookTTSCurrentText: patch.ttsCurrentText,
-    bookTTSRemainingText: patch.ttsRemainingText,
-    bookTTSProgressPercent: patch.ttsProgressPercent,
-  };
-}
-
 export function applyBookTTSProgressPatch(
   host: BookTTSHost,
   patch: VoiceAssistantTTSProgressPatch,
 ): void {
-  host.setData(bookTTSProgressPatch(patch));
+  host.setData({
+    bookTTSSpokenText: patch.ttsSpokenText,
+    bookTTSCurrentText: patch.ttsCurrentText,
+    bookTTSRemainingText: patch.ttsRemainingText,
+    bookTTSProgressPercent: patch.ttsProgressPercent,
+  });
 }
 
 export async function playBookAudioFiles(
