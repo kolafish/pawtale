@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.domain.memoir.types import MemoirBookPlanStatus, MemoirCreatedBy
 from app.models.memoir import (
@@ -171,6 +172,15 @@ def source_ref_utterance_id(ref: object) -> str:
     if isinstance(ref, dict) and isinstance(ref.get("utterance_id"), str):
         return ref["utterance_id"]
     return ""
+
+
+async def load_plan_with_chapters(db: AsyncSession, project_id: str) -> MemoirBookPlan | None:
+    return await db.scalar(
+        select(MemoirBookPlan)
+        .where(MemoirBookPlan.project_id == project_id)
+        .options(selectinload(MemoirBookPlan.chapters))
+        .execution_options(populate_existing=True)
+    )
 
 
 def source_ids_from_metadata(metadata_json: dict | None, key: str) -> set[str]:

@@ -25,6 +25,7 @@ from app.schemas.memoir_voice import MemoirAutomationEventResponse
 from app.services.memoir import automation_events
 from app.services.memoir import book_quality_audit
 from app.services.memoir import book_plans
+from app.services.memoir import book_source_workflow
 from app.services.memoir import source_cards
 from app.services.memoir.chapter_source_links import ChapterSourceAssignmentMetadata
 from app.services.memoir.editing_jobs import EditingJobResult
@@ -328,7 +329,7 @@ async def run_source_auto_assignment_for_utterances(
         for utterance_id in assignment.utterance_ids
     }
     if assignment_inputs:
-        plan = await book_plans.assign_book_sources_to_chapters(
+        plan = await book_source_workflow.assign_book_sources_to_chapters(
             db,
             user_id=user_id,
             project_id=project_id,
@@ -469,7 +470,7 @@ async def run_source_auto_assignment(
     project_id: str,
     req: MemoirBookSourceAutoAssignmentRunRequest,
 ) -> MemoirBookSourceAutoAssignmentRunResponse:
-    coverage = await book_plans.get_book_source_coverage(db, user_id=user_id, project_id=project_id)
+    coverage = await book_source_workflow.get_book_source_coverage(db, user_id=user_id, project_id=project_id)
     return await run_source_auto_assignment_for_utterances(
         db,
         user_id=user_id,
