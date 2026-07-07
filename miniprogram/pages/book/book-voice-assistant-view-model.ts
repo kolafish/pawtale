@@ -32,6 +32,59 @@ export type BookVoiceCommandPreviewPatch = Pick<
   | "error"
 >;
 
+export type BookVoiceCommandResetPatch = Omit<
+  BookVoiceCommandPreviewPatch,
+  "bookVoiceAssistantStatusText" | "error"
+>;
+
+export function bookVoiceCommandResetPatch(): BookVoiceCommandResetPatch {
+  return {
+    bookVoiceCommandText: "",
+    bookVoiceCommandIntentLabel: "",
+    bookVoiceCommandResponseKind: "",
+    bookVoiceCommandPanelTitle: "",
+    bookVoiceCommandStateText: "",
+    bookVoiceCommandDetailText: "",
+    bookVoiceCommandSummary: "",
+    bookVoiceCommandRequiresConfirmation: false,
+    bookVoiceCommandPreview: null,
+    bookVoiceCommandCanExecute: false,
+    bookVoiceCommandActionText: "确认执行",
+    bookVoiceCommandUndoText: "",
+    bookVoiceCommandUndoSnapshot: null,
+  };
+}
+
+export function bookVoiceListeningStartPatch(
+  autoTriggered: boolean,
+  keepCurrentPreview: boolean,
+): Partial<BookData> {
+  return {
+    bookVoiceAssistantListening: true,
+    bookVoiceAssistantBusy: false,
+    bookVoiceAssistantExpanded: true,
+    bookVoiceAssistantConversationActive: true,
+    bookVoiceAssistantReplyText: "",
+    bookVoiceAssistantSpeakingLineId: "",
+    bookVoiceLiveText: "",
+    bookVoiceAudioLevelPercent: 0,
+    bookVoiceCaptureStateText: "正在打开麦克风",
+    bookVoiceAssistantStatusText: autoTriggered ? "我继续听，你可以接着说" : "我在听，请说想怎么改",
+    ...(keepCurrentPreview ? {} : bookVoiceCommandResetPatch()),
+    error: "",
+  };
+}
+
+export function clearBookVoiceCommandPreviewPatch(stage: BookData["stage"]): Partial<BookData> {
+  return {
+    ...bookVoiceCommandResetPatch(),
+    bookVoiceAssistantStatusText: bookVoiceAssistantStatusText(stage),
+    bookVoiceAssistantSpeakingLineId: "",
+    bookVoiceLiveText: "",
+    error: "",
+  };
+}
+
 export function bookVoiceAssistantHint(stage: BookData["stage"], chapterCount: number): string {
   if (stage === "empty") {
     return "生成章节后，可以听目录或说修改";

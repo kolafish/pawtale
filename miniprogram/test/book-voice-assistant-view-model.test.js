@@ -5,8 +5,10 @@ const test = require("node:test");
 
 const {
   bookVoiceAssistantReplyText,
+  bookVoiceListeningStartPatch,
   bookVoiceCommandParseRequest,
   bookVoiceCommandPreviewPatch,
+  clearBookVoiceCommandPreviewPatch,
   isBookVoiceCommandConfirmationText,
 } = require("../pages/book/book-voice-assistant-view-model.ts");
 
@@ -92,6 +94,24 @@ test("book voice parse request sends prior conversation and capped source covera
       ],
     },
   });
+});
+
+test("book voice listening and clear patches keep command reset rules stable", () => {
+  const manualStart = bookVoiceListeningStartPatch(false, false);
+  assert.equal(manualStart.bookVoiceAssistantListening, true);
+  assert.equal(manualStart.bookVoiceAssistantStatusText, "我在听，请说想怎么改");
+  assert.equal(manualStart.bookVoiceCommandPreview, null);
+  assert.equal(manualStart.bookVoiceCommandActionText, "确认执行");
+
+  const autoStart = bookVoiceListeningStartPatch(true, true);
+  assert.equal(autoStart.bookVoiceAssistantStatusText, "我继续听，你可以接着说");
+  assert.equal(Object.prototype.hasOwnProperty.call(autoStart, "bookVoiceCommandPreview"), false);
+
+  const clearPatch = clearBookVoiceCommandPreviewPatch("drafting");
+  assert.equal(clearPatch.bookVoiceAssistantStatusText, "我可以帮你听和改");
+  assert.equal(clearPatch.bookVoiceAssistantSpeakingLineId, "");
+  assert.equal(clearPatch.bookVoiceLiveText, "");
+  assert.equal(clearPatch.error, "");
 });
 
 test("book voice reply and confirmation helpers keep command flow copy stable", () => {

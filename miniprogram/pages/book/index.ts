@@ -148,8 +148,11 @@ import {
 import {
   bookVoiceAssistantHint,
   bookVoiceAssistantStatusText,
+  bookVoiceCommandResetPatch,
+  bookVoiceListeningStartPatch,
   bookVoiceCommandParseRequest,
   bookVoiceCommandPreviewPatch,
+  clearBookVoiceCommandPreviewPatch,
   executedVoiceCommandStatusText,
   executedVoiceCommandUndoText,
   isBookVoiceCommandConfirmationText,
@@ -368,20 +371,8 @@ definePage<BookData>()({
     bookVoiceTranscriptLines: [],
     bookVoiceAudioLevelPercent: 0,
     bookVoiceCaptureStateText: "麦克风未开始",
-    bookVoiceCommandText: "",
-    bookVoiceCommandIntentLabel: "",
-    bookVoiceCommandResponseKind: "",
-    bookVoiceCommandPanelTitle: "",
-    bookVoiceCommandStateText: "",
-    bookVoiceCommandDetailText: "",
-    bookVoiceCommandSummary: "",
-    bookVoiceCommandRequiresConfirmation: false,
-    bookVoiceCommandPreview: null,
-    bookVoiceCommandCanExecute: false,
-    bookVoiceCommandActionText: "确认执行",
+    ...bookVoiceCommandResetPatch(),
     bookVoiceCommandExecuting: false,
-    bookVoiceCommandUndoText: "",
-    bookVoiceCommandUndoSnapshot: null,
     automationEventItems: [],
     automationEventBusyTarget: "",
     automationEventExpandedTargets: {},
@@ -1714,34 +1705,7 @@ definePage<BookData>()({
       return;
     }
     const keepCurrentPreview = autoTriggered && Boolean(this.data.bookVoiceCommandPreview);
-    this.setData({
-      bookVoiceAssistantListening: true,
-      bookVoiceAssistantBusy: false,
-      bookVoiceAssistantExpanded: true,
-      bookVoiceAssistantConversationActive: true,
-      bookVoiceAssistantReplyText: "",
-      bookVoiceAssistantSpeakingLineId: "",
-      bookVoiceLiveText: "",
-      bookVoiceAudioLevelPercent: 0,
-      bookVoiceCaptureStateText: "正在打开麦克风",
-      bookVoiceAssistantStatusText: autoTriggered ? "我继续听，你可以接着说" : "我在听，请说想怎么改",
-      ...(keepCurrentPreview ? {} : {
-        bookVoiceCommandText: "",
-        bookVoiceCommandIntentLabel: "",
-        bookVoiceCommandResponseKind: "",
-        bookVoiceCommandPanelTitle: "",
-        bookVoiceCommandStateText: "",
-        bookVoiceCommandDetailText: "",
-        bookVoiceCommandSummary: "",
-        bookVoiceCommandRequiresConfirmation: false,
-        bookVoiceCommandPreview: null,
-        bookVoiceCommandCanExecute: false,
-        bookVoiceCommandActionText: "确认执行",
-        bookVoiceCommandUndoText: "",
-        bookVoiceCommandUndoSnapshot: null,
-      }),
-      error: "",
-    });
+    this.setData(bookVoiceListeningStartPatch(autoTriggered, keepCurrentPreview));
     const started = this.bookVoiceStreaming.startRecording({
       noVoiceActivityTimeoutMs: autoTriggered ? BOOK_VOICE_AUTO_LISTEN_NO_VOICE_MS : BOOK_VOICE_NO_VOICE_MS,
     });
@@ -2311,25 +2275,7 @@ definePage<BookData>()({
   },
 
   clearBookVoiceCommandPreview() {
-    this.setData({
-      bookVoiceCommandText: "",
-      bookVoiceCommandIntentLabel: "",
-      bookVoiceCommandResponseKind: "",
-      bookVoiceCommandPanelTitle: "",
-      bookVoiceCommandStateText: "",
-      bookVoiceCommandDetailText: "",
-      bookVoiceCommandSummary: "",
-      bookVoiceCommandRequiresConfirmation: false,
-      bookVoiceCommandPreview: null,
-      bookVoiceCommandCanExecute: false,
-      bookVoiceCommandActionText: "确认执行",
-      bookVoiceCommandUndoText: "",
-      bookVoiceCommandUndoSnapshot: null,
-      bookVoiceAssistantStatusText: bookVoiceAssistantStatusText(this.data.stage),
-      bookVoiceAssistantSpeakingLineId: "",
-      bookVoiceLiveText: "",
-      error: "",
-    });
+    this.setData(clearBookVoiceCommandPreviewPatch(this.data.stage));
   },
 
   stopBookVoiceConversation() {
