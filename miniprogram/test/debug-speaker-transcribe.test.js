@@ -46,6 +46,77 @@ test("debug speaker titles keep session-local speaker labels", () => {
   assert.equal(debugSpeakerTitle("speaker_unknown", 1), "未分辨说话人");
 });
 
+test("debug speaker client annotates speaker events with occurrence wall time", async () => {
+  const socketHandlers = {};
+  const originalNow = Date.now;
+  Date.now = () => Date.UTC(2026, 6, 7, 5, 30, 0);
+  global.wx = {
+    connectSocket() {
+      return {
+        onOpen(callback) {
+          socketHandlers.open = callback;
+        },
+        onMessage(callback) {
+          socketHandlers.message = callback;
+        },
+        onError(callback) {
+          socketHandlers.error = callback;
+        },
+        onClose(callback) {
+          socketHandlers.close = callback;
+        },
+        send() {},
+        close() {},
+      };
+    },
+  };
+  const recorder = {
+    owned: false,
+    start() {
+      this.owned = true;
+      return true;
+    },
+    stop() {
+      this.owned = false;
+    },
+    isOwnedBy() {
+      return this.owned;
+    },
+  };
+  const speakerEvents = [];
+  const { DebugSpeakerTranscribeClient } = debugSpeakerModuleWithSocketMocks();
+  const client = new DebugSpeakerTranscribeClient({
+    onStatus: () => {},
+    onStats: () => {},
+    onSpeakerEvent: (event) => speakerEvents.push(event),
+    onError: () => {},
+  }, recorder);
+
+  try {
+    const started = client.start();
+    await Promise.resolve();
+    socketHandlers.open();
+    await started;
+    socketHandlers.message({
+      data: JSON.stringify({
+        type: "speaker.final",
+        speaker_id: "speaker_2",
+        text: "现在应该是第八道了哈。",
+        start_ms: 44_000,
+        end_ms: 47_000,
+      }),
+    });
+
+    assert.equal(speakerEvents.length, 1);
+    assert.equal(speakerEvents[0].occurred_start_at_ms, Date.UTC(2026, 6, 7, 5, 30, 44));
+    assert.equal(speakerEvents[0].occurred_end_at_ms, Date.UTC(2026, 6, 7, 5, 30, 47));
+  } finally {
+    client.close();
+    delete global.wx;
+    Date.now = originalNow;
+  }
+});
+
 test("debug speaker client releases recorder when socket errors", async () => {
   const socketHandlers = {};
   let closeCalls = 0;
