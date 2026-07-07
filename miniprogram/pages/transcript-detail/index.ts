@@ -67,6 +67,7 @@ interface TranscriptDetailItemView extends MemoirVoiceTranscriptItem {
   canPlayAudio: boolean;
   canPlayAnswerAudio: boolean;
   canPlayQuestionAudio: boolean;
+  questionTitleText: string;
   questionCanExpand: boolean;
   questionSegments: TranscriptTextSegment[];
   rawSegments: TranscriptTextSegment[];
@@ -198,6 +199,7 @@ function toViewItem(
     canPlayAudio: Boolean(item.audio_file_id || item.question_audio_file_id),
     canPlayAnswerAudio: Boolean(item.audio_file_id),
     canPlayQuestionAudio: Boolean(item.question_audio_file_id),
+    questionTitleText: item.interview_type === "human_interview" ? "采访者刚才问了" : "小余刚才问了",
     questionCanExpand: Array.from(questionText).length > COLLAPSIBLE_QUESTION_CHAR_COUNT,
     questionSegments: plainTranscriptSegments(item.question_text),
     rawSegments: plainTranscriptSegments(item.transcript_raw),

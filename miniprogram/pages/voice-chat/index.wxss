@@ -4,6 +4,10 @@
   background: #fcf7ed;
 }
 
+.voice-chat-page.no-control-bar {
+  padding-bottom: 60rpx;
+}
+
 .top-bar {
   min-height: 96rpx;
   display: flex;
@@ -525,9 +529,10 @@
   align-items: center;
 }
 
-.human-record-actions {
+.human-record-panel {
   width: 100%;
   max-width: 660rpx;
+  margin: 20rpx auto 0;
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 18rpx;
@@ -926,7 +931,7 @@
   padding: 30rpx 24rpx 50rpx;
 }
 
-.voice-chat-page.large-text .human-record-actions {
+.voice-chat-page.large-text .human-record-panel {
   max-width: 702rpx;
   gap: 16rpx;
 }

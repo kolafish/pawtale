@@ -215,6 +215,170 @@ async def _append_voice_turn(
     }
 
 
+async def _append_human_interview_turn(
+    test_db,
+    *,
+    user_id: str,
+    session: dict,
+    interviewer_text: str,
+    narrator_text: str | None = None,
+    later_interviewer_text: str | None = None,
+) -> dict:
+    interviewer_audio = AudioFile(
+        user_id=user_id,
+        storage_path=f"memoir/audio/{user_id}/human-interviewer-{len(interviewer_text)}.pcm",
+        mime_type="audio/pcm",
+        size_bytes=1600,
+        duration_seconds=4,
+    )
+    interviewer_version = MemoirTranscriptVersion(
+        voice_session_id=session["id"],
+        version_type=MemoirTranscriptVersionType.ASR_RAW.value,
+        content=interviewer_text,
+        provider="volc_streaming_asr",
+        created_by=MemoirCreatedBy.ASR.value,
+    )
+    test_db.add_all([interviewer_audio, interviewer_version])
+    await test_db.flush()
+    interviewer_message = MemoirChatMessage(
+        project_id=session["project_id"],
+        voice_session_id=session["id"],
+        role=MemoirChatMessageRole.INTERVIEWER.value,
+        content_text=interviewer_text,
+        content_status=MemoirChatContentStatus.FINAL.value,
+        audio_file_id=interviewer_audio.id,
+        transcript_version_id=interviewer_version.id,
+        turn_index=0,
+        metadata_json={"source": "test", "speaker_role": "interviewer", "interview_type": "human_interview"},
+    )
+    test_db.add(interviewer_message)
+    await test_db.flush()
+    interviewer_utterance = MemoirVoiceUtterance(
+        voice_session_id=session["id"],
+        chat_message_id=interviewer_message.id,
+        audio_file_id=interviewer_audio.id,
+        transcript_raw=interviewer_text,
+        transcript_edited="",
+        start_ms=0,
+        end_ms=4000,
+        provider="volc_streaming_asr",
+        provider_payload_json={"source": "test"},
+        source_material_type="interviewer_prompt",
+        source_route_action="ignore",
+    )
+    test_db.add(interviewer_utterance)
+    await test_db.flush()
+    interviewer_version.source_artifact_id = interviewer_utterance.id
+
+    later_interviewer_message = None
+    later_interviewer_utterance = None
+    if later_interviewer_text is not None:
+        later_interviewer_audio = AudioFile(
+            user_id=user_id,
+            storage_path=f"memoir/audio/{user_id}/human-later-interviewer-{len(later_interviewer_text)}.pcm",
+            mime_type="audio/pcm",
+            size_bytes=1600,
+            duration_seconds=4,
+        )
+        later_interviewer_version = MemoirTranscriptVersion(
+            voice_session_id=session["id"],
+            version_type=MemoirTranscriptVersionType.ASR_RAW.value,
+            content=later_interviewer_text,
+            provider="volc_streaming_asr",
+            created_by=MemoirCreatedBy.ASR.value,
+        )
+        test_db.add_all([later_interviewer_audio, later_interviewer_version])
+        await test_db.flush()
+        later_interviewer_message = MemoirChatMessage(
+            project_id=session["project_id"],
+            voice_session_id=session["id"],
+            role=MemoirChatMessageRole.INTERVIEWER.value,
+            content_text=later_interviewer_text,
+            content_status=MemoirChatContentStatus.FINAL.value,
+            audio_file_id=later_interviewer_audio.id,
+            transcript_version_id=later_interviewer_version.id,
+            turn_index=1,
+            metadata_json={"source": "test", "speaker_role": "interviewer", "interview_type": "human_interview"},
+        )
+        test_db.add(later_interviewer_message)
+        await test_db.flush()
+        later_interviewer_utterance = MemoirVoiceUtterance(
+            voice_session_id=session["id"],
+            chat_message_id=later_interviewer_message.id,
+            audio_file_id=later_interviewer_audio.id,
+            transcript_raw=later_interviewer_text,
+            transcript_edited="",
+            start_ms=4100,
+            end_ms=8100,
+            provider="volc_streaming_asr",
+            provider_payload_json={"source": "test"},
+            source_material_type="interviewer_prompt",
+            source_route_action="ignore",
+        )
+        test_db.add(later_interviewer_utterance)
+        await test_db.flush()
+        later_interviewer_version.source_artifact_id = later_interviewer_utterance.id
+
+    narrator_message = None
+    narrator_utterance = None
+    if narrator_text is not None:
+        narrator_turn_index = 2 if later_interviewer_message else 1
+        narrator_audio = AudioFile(
+            user_id=user_id,
+            storage_path=f"memoir/audio/{user_id}/human-narrator-{len(narrator_text)}.pcm",
+            mime_type="audio/pcm",
+            size_bytes=3200,
+            duration_seconds=8,
+        )
+        narrator_version = MemoirTranscriptVersion(
+            voice_session_id=session["id"],
+            version_type=MemoirTranscriptVersionType.ASR_RAW.value,
+            content=narrator_text,
+            provider="volc_streaming_asr",
+            created_by=MemoirCreatedBy.ASR.value,
+        )
+        test_db.add_all([narrator_audio, narrator_version])
+        await test_db.flush()
+        narrator_message = MemoirChatMessage(
+            project_id=session["project_id"],
+            voice_session_id=session["id"],
+            role=MemoirChatMessageRole.USER.value,
+            content_text=narrator_text,
+            content_status=MemoirChatContentStatus.FINAL.value,
+            audio_file_id=narrator_audio.id,
+            transcript_version_id=narrator_version.id,
+            parent_message_id=interviewer_message.id,
+            turn_index=narrator_turn_index,
+            metadata_json={"source": "test", "speaker_role": "narrator", "interview_type": "human_interview"},
+        )
+        test_db.add(narrator_message)
+        await test_db.flush()
+        narrator_utterance = MemoirVoiceUtterance(
+            voice_session_id=session["id"],
+            chat_message_id=narrator_message.id,
+            audio_file_id=narrator_audio.id,
+            transcript_raw=narrator_text,
+            transcript_edited="",
+            start_ms=4100,
+            end_ms=12100,
+            provider="volc_streaming_asr",
+            provider_payload_json={"source": "test"},
+        )
+        test_db.add(narrator_utterance)
+        await test_db.flush()
+        narrator_version.source_artifact_id = narrator_utterance.id
+
+    await test_db.commit()
+    return {
+        "interviewer_message_id": interviewer_message.id,
+        "interviewer_utterance_id": interviewer_utterance.id,
+        "later_interviewer_message_id": later_interviewer_message.id if later_interviewer_message else None,
+        "later_interviewer_utterance_id": later_interviewer_utterance.id if later_interviewer_utterance else None,
+        "narrator_message_id": narrator_message.id if narrator_message else None,
+        "narrator_utterance_id": narrator_utterance.id if narrator_utterance else None,
+    }
+
+
 async def test_mobile_memoir_lists_saved_voice_transcripts(client, test_db):
     created = await create_test_voice_transcript(client, test_db, question_text="你小时候住在哪里？")
 
@@ -245,6 +409,105 @@ async def test_mobile_memoir_lists_saved_voice_transcripts(client, test_db):
     assert item["included_chapters"] == []
     assert item["created_at"].endswith(UTC_SUFFIXES)
     assert item["session_created_at"].endswith(UTC_SUFFIXES)
+
+
+async def test_mobile_memoir_groups_paired_human_interview_transcripts(client, test_db):
+    user = (await client.get("/api/auth/me")).json()
+    create_response = await post_mobile_memoir_voice_session(
+        client,
+        json={
+            "guidance_mode": "free_narration",
+            "interview_type": "human_interview",
+            "provider": "volc_streaming_asr",
+        },
+    )
+    assert create_response.status_code == 201
+    session = create_response.json()["session"]
+    created = await _append_human_interview_turn(
+        test_db,
+        user_id=user["id"],
+        session=session,
+        interviewer_text="你小时候家里有几口人？",
+        narrator_text="我们家那时候有六口人。",
+    )
+
+    response = await client.get("/api/mobile/memoir/voice-transcripts")
+    question_search_response = await client.get("/api/mobile/memoir/voice-transcripts", params={"q": "几口人"})
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["total"] == 1
+    assert data["items"][0]["id"] == created["narrator_utterance_id"]
+    assert data["items"][0]["question_message_id"] == created["interviewer_message_id"]
+    assert data["items"][0]["question_text"] == "你小时候家里有几口人？"
+    assert data["items"][0]["display_text"] == "我们家那时候有六口人。"
+    assert question_search_response.status_code == 200
+    assert question_search_response.json()["total"] == 1
+    assert question_search_response.json()["items"][0]["id"] == created["narrator_utterance_id"]
+
+
+async def test_mobile_memoir_keeps_unpaired_human_interviewer_transcript(client, test_db):
+    user = (await client.get("/api/auth/me")).json()
+    create_response = await post_mobile_memoir_voice_session(
+        client,
+        json={
+            "guidance_mode": "free_narration",
+            "interview_type": "human_interview",
+            "provider": "volc_streaming_asr",
+        },
+    )
+    assert create_response.status_code == 201
+    session = create_response.json()["session"]
+    created = await _append_human_interview_turn(
+        test_db,
+        user_id=user["id"],
+        session=session,
+        interviewer_text="你后来是什么时候去县城读书的？",
+    )
+
+    response = await client.get("/api/mobile/memoir/voice-transcripts")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["total"] == 1
+    assert data["items"][0]["id"] == created["interviewer_utterance_id"]
+    assert data["items"][0]["question_message_id"] is None
+    assert data["items"][0]["question_text"] == ""
+    assert data["items"][0]["display_text"] == "你后来是什么时候去县城读书的？"
+
+
+async def test_mobile_memoir_searches_explicit_parent_question_for_human_pair(client, test_db):
+    user = (await client.get("/api/auth/me")).json()
+    create_response = await post_mobile_memoir_voice_session(
+        client,
+        json={
+            "guidance_mode": "free_narration",
+            "interview_type": "human_interview",
+            "provider": "volc_streaming_asr",
+        },
+    )
+    assert create_response.status_code == 201
+    session = create_response.json()["session"]
+    created = await _append_human_interview_turn(
+        test_db,
+        user_id=user["id"],
+        session=session,
+        interviewer_text="你小时候家里有几口人？",
+        later_interviewer_text="你后来是什么时候去县城读书的？",
+        narrator_text="我们家那时候有六口人。",
+    )
+
+    parent_response = await client.get("/api/mobile/memoir/voice-transcripts", params={"q": "几口人"})
+    later_response = await client.get("/api/mobile/memoir/voice-transcripts", params={"q": "县城读书"})
+
+    assert parent_response.status_code == 200
+    assert parent_response.json()["total"] == 1
+    assert parent_response.json()["items"][0]["id"] == created["narrator_utterance_id"]
+    assert parent_response.json()["items"][0]["question_message_id"] == created["interviewer_message_id"]
+    assert later_response.status_code == 200
+    assert later_response.json()["total"] == 1
+    assert later_response.json()["items"][0]["id"] == created["later_interviewer_utterance_id"]
+    assert later_response.json()["items"][0]["question_text"] == ""
 
 
 async def test_mobile_memoir_voice_transcripts_use_source_card_summary(client, test_db):

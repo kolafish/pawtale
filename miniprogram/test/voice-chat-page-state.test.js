@@ -129,13 +129,18 @@ test("voice chat view patch combines human speaker choice with record actions", 
   });
 
   assert.equal(idlePatch.showHumanRecordActions, true);
+  assert.equal(idlePatch.showControlBar, false);
+  assert.equal(idlePatch.voiceChatPageClass, "voice-chat-page no-control-bar");
   assert.equal(idlePatch.controlHintText, "");
+  assert.equal(idlePatch.liveDisplayText, "点上方开始记录采访者");
   assert.equal(idlePatch.narratorRecordButtonClass, "role-record-button narrator");
   assert.equal(idlePatch.interviewerRecordButtonClass, "role-record-button interviewer");
   assert.equal(recordingPatch.showHumanRecordActions, false);
+  assert.equal(recordingPatch.showControlBar, true);
   assert.equal(recordingPatch.controlHintText, "正在记录采访者");
   assert.equal(recordingPatch.micButtonText, "说完了，保存这段");
   assert.equal(authorizationPatch.showHumanRecordActions, false);
+  assert.equal(authorizationPatch.showControlBar, true);
   assert.equal(authorizationPatch.micButtonText, "同意后开始说话");
 });
 
