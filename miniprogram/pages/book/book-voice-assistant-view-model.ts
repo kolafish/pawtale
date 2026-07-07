@@ -1,5 +1,7 @@
 import type {
   MemoirBookSourceCoverage,
+  MemoirBookVoiceCommandIntent,
+  MemoirBookVoiceCommandOperation,
   MemoirBookVoiceCommandParseRequest,
   MemoirBookVoiceCommandParseResponse,
   MemoirBookVoiceCommandResponseKind,
@@ -8,10 +10,96 @@ import type {
 import { normalizeMemoirAsrText } from "../../services/asr-text-normalization";
 import type { BookData } from "./book-view-model";
 import {
-  bookVoiceCommandActionText,
-  canExecuteBookVoiceCommand,
   trimText,
 } from "./book-view-model";
+
+export type BookVoiceCommandExecutionMode = "remote" | "read_outline" | "read_chapter";
+
+interface BookVoiceCommandRule {
+  canExecute?: (operation: MemoirBookVoiceCommandOperation) => boolean;
+  executionMode?: BookVoiceCommandExecutionMode;
+  actionText?: string;
+  executedStatusText?: string;
+  undoText?: string;
+  reloadBookOutput?: boolean;
+}
+
+const BOOK_VOICE_COMMAND_RULES: Partial<Record<MemoirBookVoiceCommandIntent, BookVoiceCommandRule>> = {
+  read_outline: {
+    canExecute: () => true,
+    executionMode: "read_outline",
+    actionText: "开始朗读",
+  },
+  read_chapter: {
+    canExecute: (operation) => Boolean(operation.chapter_id),
+    executionMode: "read_chapter",
+    actionText: "开始朗读",
+  },
+  rename_chapter: {
+    canExecute: (operation) => Boolean(operation.chapter_id && operation.new_title),
+    undoText: "撤回语音改名",
+  },
+  move_chapter: {
+    canExecute: (operation) => Boolean(operation.chapter_id && (
+      operation.direction === "up"
+      || operation.direction === "down"
+      || operation.target_position === "first"
+      || operation.target_position === "last"
+      || (typeof operation.target_index === "number" && operation.target_index > 0)
+      || Boolean(
+        operation.relative_chapter_id
+        && (operation.relative_position === "before" || operation.relative_position === "after"),
+      )
+    )),
+    undoText: "撤回语音排序",
+  },
+  assign_source: {
+    canExecute: (operation) => Boolean(operation.chapter_id && operation.utterance_id),
+    executedStatusText: "已归入章节",
+    reloadBookOutput: false,
+  },
+};
+
+function bookVoiceCommandRule(intent: MemoirBookVoiceCommandIntent): BookVoiceCommandRule | null {
+  return BOOK_VOICE_COMMAND_RULES[intent] || null;
+}
+
+function firstBookVoiceCommandOperation(
+  preview: MemoirBookVoiceCommandParseResponse | null,
+): MemoirBookVoiceCommandOperation | null {
+  return preview?.operations?.[0] || null;
+}
+
+export function canExecuteBookVoiceCommand(preview: MemoirBookVoiceCommandParseResponse | null): boolean {
+  const operation = firstBookVoiceCommandOperation(preview);
+  if (!preview || !operation || preview.intent === "unknown") {
+    return false;
+  }
+  return Boolean(bookVoiceCommandRule(preview.intent)?.canExecute?.(operation));
+}
+
+export function bookVoiceCommandActionText(preview: MemoirBookVoiceCommandParseResponse | null): string {
+  return preview ? bookVoiceCommandRule(preview.intent)?.actionText || "确认执行" : "确认执行";
+}
+
+export function bookVoiceCommandExecutionMode(
+  preview: MemoirBookVoiceCommandParseResponse,
+): BookVoiceCommandExecutionMode {
+  return bookVoiceCommandRule(preview.intent)?.executionMode || "remote";
+}
+
+export function bookVoiceCommandAssigningSourceId(
+  preview: MemoirBookVoiceCommandParseResponse,
+): string {
+  if (preview.intent !== "assign_source") {
+    return "";
+  }
+  return firstBookVoiceCommandOperation(preview)?.utterance_id || "";
+}
+
+export function shouldReloadBookOutputAfterVoiceCommand(intent: MemoirBookVoiceCommandIntent): boolean {
+  return bookVoiceCommandRule(intent)?.reloadBookOutput !== false;
+}
 
 export type BookVoiceCommandPreviewPatch = Pick<
   BookData,
@@ -132,7 +220,8 @@ export function bookVoiceIdlePatch(
 }
 
 export function isBookVoiceReadIntent(preview: MemoirBookVoiceCommandParseResponse): boolean {
-  return preview.intent === "read_outline" || preview.intent === "read_chapter";
+  const executionMode = bookVoiceCommandExecutionMode(preview);
+  return executionMode === "read_outline" || executionMode === "read_chapter";
 }
 
 export function isBookVoiceConsultationIntent(preview: MemoirBookVoiceCommandParseResponse): boolean {
@@ -344,28 +433,9 @@ export function bookVoiceCommandPreviewPatch(
 }
 
 export function executedVoiceCommandStatusText(intent: string): string {
-  if (intent === "assign_source") {
-    return "已归入章节";
-  }
-  return "已执行，可撤回";
+  return bookVoiceCommandRule(intent as MemoirBookVoiceCommandIntent)?.executedStatusText || "已执行，可撤回";
 }
 
 export function executedVoiceCommandUndoText(intent: string): string {
-  if (intent === "rename_chapter") {
-    return "撤回语音改名";
-  }
-  if (intent === "move_chapter") {
-    return "撤回语音排序";
-  }
-  return "";
-}
-
-export function executedVoiceCommandReplyText(intent: string): string {
-  if (intent === "assign_source") {
-    return "已归入章节。还可以继续说下一条怎么处理。";
-  }
-  if (intent === "move_chapter") {
-    return "已按你说的调整好了。还可以继续说新的修改。";
-  }
-  return "已按你说的改好了。还可以继续说新的修改。";
+  return bookVoiceCommandRule(intent as MemoirBookVoiceCommandIntent)?.undoText || "";
 }

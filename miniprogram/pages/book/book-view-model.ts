@@ -1206,49 +1206,6 @@ export function bookOutlineNarrationText(
   return lines.join("\n");
 }
 
-export function canExecuteBookVoiceCommand(preview: MemoirBookVoiceCommandParseResponse | null): boolean {
-  if (!preview || !preview.operations.length || preview.intent === "unknown") {
-    return false;
-  }
-  const operation = preview.operations[0];
-  if (preview.intent === "read_outline") {
-    return true;
-  }
-  if (preview.intent === "read_chapter") {
-    return Boolean(operation.chapter_id);
-  }
-  if (preview.intent === "rename_chapter") {
-    return Boolean(operation.chapter_id && operation.new_title);
-  }
-  if (preview.intent === "move_chapter") {
-    return Boolean(operation.chapter_id && (
-      operation.direction === "up"
-      || operation.direction === "down"
-      || operation.target_position === "first"
-      || operation.target_position === "last"
-      || (typeof operation.target_index === "number" && operation.target_index > 0)
-      || Boolean(
-        operation.relative_chapter_id
-        && (operation.relative_position === "before" || operation.relative_position === "after"),
-      )
-    ));
-  }
-  if (preview.intent === "assign_source") {
-    return Boolean(operation.chapter_id && operation.utterance_id);
-  }
-  return false;
-}
-
-export function bookVoiceCommandActionText(preview: MemoirBookVoiceCommandParseResponse | null): string {
-  if (!preview) {
-    return "确认执行";
-  }
-  if (preview.intent === "read_outline" || preview.intent === "read_chapter") {
-    return "开始朗读";
-  }
-  return "确认执行";
-}
-
 export function buildChapterViews(
   plan: MemoirBookPlan,
   draftsByChapterId: Record<string, MemoirBookChapterDraft | null> = {},
