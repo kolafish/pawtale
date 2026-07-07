@@ -153,6 +153,7 @@ import {
   bookVoiceAssistantHint,
   bookVoiceAssistantStatusText,
   bookVoiceCommandResetPatch,
+  bookVoiceIdlePatch,
   bookVoiceListeningStartPatch,
   bookVoiceCommandParseRequest,
   bookVoiceCommandPreviewPatch,
@@ -542,17 +543,11 @@ definePage<BookData>()({
       stageText: stageText(stage),
       editingChapterId,
       bookVoiceAssistantHint: bookVoiceAssistantHint(stage, chapters.length),
-      ...(shouldResetVoiceStatus ? {
-        bookVoiceAssistantExpanded: false,
-        bookVoiceAssistantStatusText: bookVoiceAssistantStatusText(stage),
-        bookVoiceAssistantConversationActive: false,
-        bookVoiceAssistantReplyText: "",
-        bookVoiceAssistantSpeakingLineId: "",
-        bookVoiceLiveText: "",
-        bookVoiceTranscriptLines: [],
-        bookVoiceAudioLevelPercent: 0,
-        bookVoiceCaptureStateText: "麦克风未开始",
-      } : {}),
+      ...(shouldResetVoiceStatus ? bookVoiceIdlePatch(stage, {
+        collapse: true,
+        clearReply: true,
+        clearTranscript: true,
+      }) : {}),
       ...chapterCollectionData(chapters, stage, this.data.sourceCoverage, this.data.splitSourceSelections),
       ...sourceCoverageData(plan, this.data.sourceCoverage),
       ...(stage === "drafting" ? {} : bookOutputData(null)),
@@ -2263,16 +2258,10 @@ definePage<BookData>()({
       return;
     }
     this.bookVoiceStreaming.close({ force: true });
-    this.setData({
-      bookVoiceAssistantConversationActive: false,
-      bookVoiceAssistantBusy: false,
-      bookVoiceAssistantReplyText: "",
-      bookVoiceAssistantSpeakingLineId: "",
-      bookVoiceLiveText: "",
-      bookVoiceAudioLevelPercent: 0,
-      bookVoiceCaptureStateText: "麦克风未开始",
-      bookVoiceAssistantStatusText: bookVoiceAssistantStatusText(this.data.stage),
-    });
+    this.setData(bookVoiceIdlePatch(this.data.stage, {
+      clearBusy: true,
+      clearReply: true,
+    }));
   },
 
   clearBookVoiceAssistantAutoListenTimer() {
@@ -2501,16 +2490,10 @@ definePage<BookData>()({
       || this.data.bookVoiceAssistantBusy
       || this.data.bookVoiceLiveText
     ) {
-      this.setData({
-        bookVoiceAssistantListening: false,
-        bookVoiceAssistantBusy: false,
-        bookVoiceAssistantConversationActive: false,
-        bookVoiceAssistantSpeakingLineId: "",
-        bookVoiceLiveText: "",
-        bookVoiceAudioLevelPercent: 0,
-        bookVoiceCaptureStateText: "麦克风未开始",
-        bookVoiceAssistantStatusText: bookVoiceAssistantStatusText(this.data.stage),
-      });
+      this.setData(bookVoiceIdlePatch(this.data.stage, {
+        stopListening: true,
+        clearBusy: true,
+      }));
     }
   },
 
