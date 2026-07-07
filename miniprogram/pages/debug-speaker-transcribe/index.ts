@@ -27,12 +27,14 @@ interface ConversationLineView extends SpeakerLineView {
   speakerId: string;
   speakerTitle: string;
   speakerBadgeClass: string;
+  speakerToneClass: string;
   domId: string;
 }
 
 interface SpeakerWindowView {
   speakerId: string;
   title: string;
+  speakerToneClass: string;
   partialText: string;
   partialEndId: string;
   partialScrollClass: string;
@@ -52,6 +54,8 @@ interface ActivePartialView {
   speakerId: string;
   speakerTitle: string;
   speakerBadgeClass: string;
+  speakerToneClass: string;
+  partialBoxClass: string;
   text: string;
   partialEndId: string;
   partialScrollClass: string;
@@ -62,6 +66,7 @@ interface ActivePartialView {
 interface HistoryLinePreviewView {
   visible: boolean;
   speakerTitle: string;
+  speakerToneClass: string;
   metaText: string;
   statusText: string;
   text: string;
@@ -131,9 +136,12 @@ const FUZZY_SPEECH_MAX_LENGTH_RATIO = 1.6;
 const FUZZY_SPEECH_MIN_COMMON_OF_SHORTER = 0.68;
 const FUZZY_SPEECH_MIN_COMMON_OF_LONGER = 0.48;
 const BEIJING_TIME_OFFSET_MS = 8 * 60 * 60 * 1000;
+const UNKNOWN_SPEAKER_ID = "speaker_unknown";
+const SPEAKER_TONE_COUNT = 8;
 const EMPTY_HISTORY_LINE_PREVIEW: HistoryLinePreviewView = {
   visible: false,
   speakerTitle: "",
+  speakerToneClass: "",
   metaText: "",
   statusText: "",
   text: "",
@@ -143,6 +151,8 @@ const EMPTY_ACTIVE_PARTIAL: ActivePartialView = {
   speakerId: "",
   speakerTitle: "",
   speakerBadgeClass: "speaker-badge",
+  speakerToneClass: "",
+  partialBoxClass: "partial-box active-partial",
   text: "",
   partialEndId: "active-partial-end",
   partialScrollClass: "partial-scroll",
@@ -256,14 +266,31 @@ function normalizeSpeakerGender(value: string | null | undefined): "male" | "fem
   return "";
 }
 
-function speakerBadgeClass(gender: string): string {
-  if (gender === "male") {
-    return "speaker-badge male";
+function knownSpeakerDisplayIndex(speakerId: string, speakerOrder: string[]): number {
+  if (speakerId === UNKNOWN_SPEAKER_ID) {
+    return 0;
   }
-  if (gender === "female") {
-    return "speaker-badge female";
-  }
-  return "speaker-badge";
+  const knownSpeakerIndex = speakerOrder
+    .filter((id) => id !== UNKNOWN_SPEAKER_ID)
+    .indexOf(speakerId);
+  return knownSpeakerIndex >= 0 ? knownSpeakerIndex + 1 : 0;
+}
+
+function speakerToneClass(speakerId: string, speakerOrder: string[]): string {
+  const displayIndex = knownSpeakerDisplayIndex(speakerId, speakerOrder);
+  return displayIndex > 0 ? `tone-${(displayIndex - 1) % SPEAKER_TONE_COUNT}` : "";
+}
+
+function classNames(...values: string[]): string {
+  return values.filter(Boolean).join(" ");
+}
+
+function speakerBadgeClass(toneClass: string): string {
+  return classNames("speaker-badge", toneClass);
+}
+
+function partialBoxClass(toneClass: string): string {
+  return classNames("partial-box active-partial", toneClass);
 }
 
 function genderSpeakerTitle(gender: string, genderIndex: number): string {
@@ -367,10 +394,14 @@ function finalLineFromSpeakerEvent(
   };
 }
 
-function lineClasses(lineId: string, latestLineId: string): Pick<SpeakerLineView, "lineClass" | "textClass" | "previewEnabled"> {
+function lineClasses(
+  lineId: string,
+  latestLineId: string,
+  toneClass = "",
+): Pick<SpeakerLineView, "lineClass" | "textClass" | "previewEnabled"> {
   const stateClass = lineId === latestLineId ? "latest" : "history";
   return {
-    lineClass: `line-item ${stateClass}`,
+    lineClass: classNames("line-item", stateClass, toneClass),
     textClass: `line-text ${stateClass}`,
     previewEnabled: stateClass === "history",
   };
@@ -384,7 +415,7 @@ function applyLatestLineClasses(
     ...speaker,
     lines: speaker.lines.map((line) => ({
       ...line,
-      ...lineClasses(line.id, latestLineId),
+      ...lineClasses(line.id, latestLineId, speaker.speakerToneClass),
     })),
   }));
 }
@@ -393,6 +424,7 @@ function conversationLineFromSpeakerLine(
   speakerId: string,
   speakerTitle: string,
   speakerClass: string,
+  speakerTone: string,
   line: SpeakerLineView,
 ): ConversationLineView {
   return {
@@ -400,6 +432,7 @@ function conversationLineFromSpeakerLine(
     speakerId,
     speakerTitle,
     speakerBadgeClass: speakerClass,
+    speakerToneClass: speakerTone,
     domId: lineDomId(line.id),
   };
 }
@@ -420,7 +453,7 @@ function applyLatestConversationLineClasses(
 ): ConversationLineView[] {
   return lines.map((line) => ({
     ...line,
-    ...lineClasses(line.id, latestLineId),
+    ...lineClasses(line.id, latestLineId, line.speakerToneClass),
   }));
 }
 
@@ -445,6 +478,7 @@ function historyLinePreview(
   return {
     visible: true,
     speakerTitle: line.speakerTitle,
+    speakerToneClass: line.speakerToneClass,
     metaText: line.metaText,
     statusText: line.proofreadStatusText,
     text: line.text,
@@ -593,7 +627,7 @@ function activePartialAfterFinal(
   if (!activePartial.visible) {
     return EMPTY_ACTIVE_PARTIAL;
   }
-  if (activePartial.speakerId && activePartial.speakerId !== "speaker_unknown") {
+  if (activePartial.speakerId && activePartial.speakerId !== UNKNOWN_SPEAKER_ID) {
     return EMPTY_ACTIVE_PARTIAL;
   }
   const nextText = removeFinalTextFromPartialText(activePartial.text, finalText);
@@ -665,6 +699,7 @@ function speakerWindow(
   return {
     speakerId,
     title: debugSpeakerTitle(speakerId, speakerIndex),
+    speakerToneClass: "",
     partialText: "",
     partialEndId,
     partialScrollClass: "partial-scroll",
@@ -732,10 +767,12 @@ Page<DebugSpeakerPageData, {
   speakerLabelForEvent(speakerId: string, speakerIndex: number, speakerGender?: string | null): {
     title: string;
     badgeClass: string;
+    toneClass: string;
   };
   speakerLabelForId(speakerId: string, speakerIndex: number): {
     title: string;
     badgeClass: string;
+    toneClass: string;
   };
   refreshConversationSpeakerLabels(lines: ConversationLineView[]): ConversationLineView[];
   handleSpeakerEvent(event: DebugSpeakerGatewayEvent): void;
@@ -848,19 +885,23 @@ Page<DebugSpeakerPageData, {
 
   speakerLabelForId(speakerId, speakerIndex) {
     const gender = this.speakerGenderById[speakerId] || "";
+    const toneClass = speakerToneClass(speakerId, this.speakerOrder);
+    const displayIndex = knownSpeakerDisplayIndex(speakerId, this.speakerOrder) || speakerIndex;
     if (gender) {
       const genderIndex = this.genderSpeakerOrder[gender].indexOf(speakerId) + 1;
       const title = genderSpeakerTitle(gender, genderIndex || 1);
       if (title) {
         return {
           title,
-          badgeClass: speakerBadgeClass(gender),
+          badgeClass: speakerBadgeClass(toneClass),
+          toneClass,
         };
       }
     }
     return {
-      title: debugSpeakerTitle(speakerId, speakerIndex),
-      badgeClass: speakerBadgeClass(""),
+      title: debugSpeakerTitle(speakerId, displayIndex),
+      badgeClass: speakerBadgeClass(toneClass),
+      toneClass,
     };
   },
 
@@ -872,6 +913,7 @@ Page<DebugSpeakerPageData, {
         ...line,
         speakerTitle: label.title,
         speakerBadgeClass: label.badgeClass,
+        speakerToneClass: label.toneClass,
       };
     });
   },
@@ -919,7 +961,7 @@ Page<DebugSpeakerPageData, {
   },
 
   handleSpeakerEvent(event) {
-    const speakerId = event.speaker_id || "speaker_unknown";
+    const speakerId = event.speaker_id || UNKNOWN_SPEAKER_ID;
     const previousHasTranscript = this.hasTranscript();
     const speakerOrder = this.speakerOrder.includes(speakerId)
       ? this.speakerOrder
@@ -1004,6 +1046,7 @@ Page<DebugSpeakerPageData, {
             speakerId,
             speakerLabel.title,
             speakerLabel.badgeClass,
+            speakerLabel.toneClass,
             line,
           );
           conversationLines = [conversationLine, ...conversationLines];
@@ -1041,7 +1084,7 @@ Page<DebugSpeakerPageData, {
         existing.cumulativeFinalEndMs,
       );
       partialText = incrementalSpeakerText(text, existing.cumulativeFinalText, sameCumulativeRun);
-      if (speakerId === "speaker_unknown") {
+      if (speakerId === UNKNOWN_SPEAKER_ID) {
         partialText = removeConversationTextFromUnknownPartial(partialText, conversationLines);
       }
       const partialIsLong = partialText.length > 90;
@@ -1064,6 +1107,8 @@ Page<DebugSpeakerPageData, {
           speakerId,
           speakerTitle: speakerLabel.title,
           speakerBadgeClass: speakerLabel.badgeClass,
+          speakerToneClass: speakerLabel.toneClass,
+          partialBoxClass: partialBoxClass(speakerLabel.toneClass),
           text: partialText,
           partialEndId,
           partialScrollClass,
@@ -1087,6 +1132,7 @@ Page<DebugSpeakerPageData, {
     const nextSpeaker = speakerWindow(speakerId, speakerIndex, {
       ...existing,
       title: speakerLabel.title,
+      speakerToneClass: speakerLabel.toneClass,
       partialText,
       partialEndId,
       partialScrollClass,

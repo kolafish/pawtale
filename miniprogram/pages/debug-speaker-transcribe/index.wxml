@@ -74,7 +74,7 @@
     scroll-into-view="{{conversationScrollTarget}}"
     scroll-with-animation="{{false}}"
   >
-    <view wx:if="{{activePartial.visible}}" id="active-partial-card" class="partial-box active-partial">
+    <view wx:if="{{activePartial.visible}}" id="active-partial-card" class="{{activePartial.partialBoxClass}}">
       <view class="line-meta-row">
         <text class="{{activePartial.speakerBadgeClass}}">{{activePartial.speakerTitle}}</text>
         <text class="partial-label">正在说</text>
@@ -121,7 +121,7 @@
   >
     <view class="history-preview-panel">
       <view class="history-preview-meta-row">
-        <text class="history-preview-speaker">{{historyLinePreview.speakerTitle}}</text>
+        <text class="history-preview-speaker {{historyLinePreview.speakerToneClass}}">{{historyLinePreview.speakerTitle}}</text>
         <text wx:if="{{historyLinePreview.metaText}}" class="history-preview-meta">
           {{historyLinePreview.metaText}}
         </text>
