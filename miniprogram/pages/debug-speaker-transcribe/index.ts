@@ -266,14 +266,19 @@ function normalizeSpeakerGender(value: string | null | undefined): "male" | "fem
   return "";
 }
 
-function speakerToneClass(speakerId: string, speakerOrder: string[]): string {
+function knownSpeakerDisplayIndex(speakerId: string, speakerOrder: string[]): number {
   if (speakerId === UNKNOWN_SPEAKER_ID) {
-    return "";
+    return 0;
   }
   const knownSpeakerIndex = speakerOrder
     .filter((id) => id !== UNKNOWN_SPEAKER_ID)
     .indexOf(speakerId);
-  return knownSpeakerIndex >= 0 ? `tone-${knownSpeakerIndex % SPEAKER_TONE_COUNT}` : "";
+  return knownSpeakerIndex >= 0 ? knownSpeakerIndex + 1 : 0;
+}
+
+function speakerToneClass(speakerId: string, speakerOrder: string[]): string {
+  const displayIndex = knownSpeakerDisplayIndex(speakerId, speakerOrder);
+  return displayIndex > 0 ? `tone-${(displayIndex - 1) % SPEAKER_TONE_COUNT}` : "";
 }
 
 function classNames(...values: string[]): string {
@@ -881,6 +886,7 @@ Page<DebugSpeakerPageData, {
   speakerLabelForId(speakerId, speakerIndex) {
     const gender = this.speakerGenderById[speakerId] || "";
     const toneClass = speakerToneClass(speakerId, this.speakerOrder);
+    const displayIndex = knownSpeakerDisplayIndex(speakerId, this.speakerOrder) || speakerIndex;
     if (gender) {
       const genderIndex = this.genderSpeakerOrder[gender].indexOf(speakerId) + 1;
       const title = genderSpeakerTitle(gender, genderIndex || 1);
@@ -893,7 +899,7 @@ Page<DebugSpeakerPageData, {
       }
     }
     return {
-      title: debugSpeakerTitle(speakerId, speakerIndex),
+      title: debugSpeakerTitle(speakerId, displayIndex),
       badgeClass: speakerBadgeClass(toneClass),
       toneClass,
     };

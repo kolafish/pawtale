@@ -404,6 +404,11 @@ test("debug speaker page assigns speaker tones by first seen order instead of id
     "speaker_2",
     "speaker_7",
   ]);
+  assert.deepEqual(context.data.conversationLines.map((line) => line.speakerTitle), [
+    "说话人 1",
+    "说话人 2",
+    "说话人 1",
+  ]);
   assert.deepEqual(context.data.conversationLines.map((line) => line.speakerBadgeClass), [
     "speaker-badge tone-0",
     "speaker-badge tone-1",
@@ -424,6 +429,7 @@ test("debug speaker page assigns speaker tones by first seen order instead of id
   });
 
   assert.equal(context.data.conversationLines[0].speakerBadgeClass, "speaker-badge tone-0");
+  assert.equal(context.data.conversationLines[0].speakerTitle, "说话人 1");
   assert.equal(context.data.conversationLines[0].lineClass, "line-item latest tone-0");
 });
 
