@@ -6,7 +6,6 @@ import type {
   VoiceChatTranscriptLine,
   VoiceGatewayServerEvent,
 } from "../../domain/voice-chat";
-import { normalizeMemoirAsrText } from "../../services/asr-text-normalization";
 import { trackAuditAction } from "../../services/audit-tracker";
 import { AudioPlaybackController } from "../../services/audio-playback";
 import { readAccessibilitySettings } from "../../services/accessibility-settings";
@@ -89,8 +88,10 @@ import {
   noAnswerPromptPlan,
   noAnswerPromptQueuedPatch,
   noAnswerPromptStartPatch,
+  voiceFinalTranscriptResult,
   voiceAssistantInterruptedPatch,
   voiceClientUnavailableForRecording,
+  voiceLiveTranscriptPatch,
   voiceRecorderPrivacyDeniedPatch,
   voiceRecordingReconnectPatch,
   voiceRecordingStartedPatch,
@@ -126,8 +127,6 @@ const AUTO_LISTEN_NO_ANSWER_MS = 15000;
 const MAX_CONSECUTIVE_NO_ANSWER_PROMPTS = 2;
 const STREAMING_TTS_PROGRESS_HOLD_SECONDS = 0.2;
 const GUIDANCE_MODE_VALUES: readonly MemoirGuidanceMode[] = ["free_narration", "guided_interview"];
-const LIVE_TRANSCRIPT_SCROLL_THRESHOLD = 44;
-const LIVE_TRANSCRIPT_SCROLL_STEP = 10000;
 
 interface VoiceChatDataContext {
   data: VoiceChatData;
@@ -140,29 +139,6 @@ function setVoiceChatData(context: VoiceChatDataContext, patch: Partial<VoiceCha
     ...patch,
     ...voiceChatViewPatch(nextData),
   });
-}
-
-function liveTranscriptScrollPatch(text: string, currentScrollTop: number): Partial<VoiceChatData> {
-  if (!text) {
-    return resetLiveTranscriptScrollPatch();
-  }
-  const scrollTop = currentScrollTop + LIVE_TRANSCRIPT_SCROLL_STEP;
-  const endId = `live-text-end-${scrollTop}`;
-  return {
-    liveScrollClass: text.length > LIVE_TRANSCRIPT_SCROLL_THRESHOLD ? "live-scroll long" : "live-scroll",
-    liveScrollTop: scrollTop,
-    liveTextEndId: endId,
-    liveScrollTarget: endId,
-  };
-}
-
-function resetLiveTranscriptScrollPatch(): Partial<VoiceChatData> {
-  return {
-    liveScrollClass: "live-scroll",
-    liveScrollTarget: "",
-    liveScrollTop: 0,
-    liveTextEndId: "live-text-end",
-  };
 }
 
 Page<VoiceChatData, {
@@ -1820,65 +1796,26 @@ Page<VoiceChatData, {
   },
 
   handlePartial(text) {
-    const displayText = normalizeMemoirAsrText(text || "");
-    setVoiceChatData(this, {
-      liveText: displayText,
-      liveCharCount: countTextChars(displayText),
-      ...liveTranscriptScrollPatch(displayText, this.data.liveScrollTop),
-      persistenceStateText: "识别中",
-      error: "",
-      errorKindText: "",
-    });
+    setVoiceChatData(this, voiceLiveTranscriptPatch(text, this.data.liveScrollTop));
   },
 
   handleFinal(event) {
-    const text = normalizeMemoirAsrText(event.text || "");
-    if (!text) {
-      return;
-    }
-    const line: VoiceChatTranscriptLine = {
-      id: event.message_id || event.utterance_id || `${Date.now()}-${this.data.transcriptLines.length}`,
-      text,
-      role: "user",
-      message_id: event.message_id,
-      utterance_id: event.utterance_id,
-      audio_file_id: event.audio_file_id,
-      transcript_version_id: event.transcript_version_id,
-      start_ms: event.start_ms,
-      end_ms: event.end_ms,
-    };
-    const transcriptLines = upsertTranscriptLine(this.data.transcriptLines, line);
-    this.consecutiveNoAnswerPrompts = 0;
-    this.cancelPendingNoAnswerPrompt();
-    setVoiceChatData(this, {
-      liveText: "",
-      liveCharCount: 0,
-      ...resetLiveTranscriptScrollPatch(),
-      ...assistantTranscriptState(transcriptLines, {
+    const result = voiceFinalTranscriptResult(
+      event,
+      {
+        transcriptLines: this.data.transcriptLines,
         guidanceMode: this.data.guidanceMode,
         lastFollowUpSourceMessageId: this.data.lastFollowUpSourceMessageId,
-        followUpLoading: false,
-        assistantPromptText: "",
-        followUpMessageId: "",
-        followUpAudioFileId: "",
-        followUpTTSStateText: "",
-        ttsAlignment: [],
-      }),
-      persistenceStateText: event.message_id && event.utterance_id && event.transcript_version_id
-        ? "已保存"
-        : "待同步",
-      error: "",
-      errorKindText: "",
-      assistantPromptText: "",
-      selectedOpeningTopicText: "",
-      dismissedFollowUpMessageId: "",
-      followUpMessageId: "",
-      followUpAudioFileId: "",
-      followUpLoading: false,
-      followUpTTSLoading: false,
-      followUpTTSError: "",
-    });
-    writeMemoirVoiceSessionSnapshot(this.data.voiceSessionId, { transcriptLines });
+      },
+      `${Date.now()}-${this.data.transcriptLines.length}`,
+    );
+    if (!result) {
+      return;
+    }
+    this.consecutiveNoAnswerPrompts = 0;
+    this.cancelPendingNoAnswerPrompt();
+    setVoiceChatData(this, result.patch);
+    writeMemoirVoiceSessionSnapshot(this.data.voiceSessionId, { transcriptLines: result.transcriptLines });
     trackAuditAction(
       "voice_chat.asr_final",
       {
