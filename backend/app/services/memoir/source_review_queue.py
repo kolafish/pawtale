@@ -21,6 +21,7 @@ from app.schemas.memoir_book import (
     MemoirBookSourceRouteResponse,
 )
 from app.services.memoir import book_plans
+from app.services.memoir import book_source_workflow
 from app.services.memoir import source_router
 from app.services.memoir.access import load_memoir_project
 
@@ -264,7 +265,7 @@ async def confirm_source_review_item(
     utterance_id = item.utterance_id
     target_chapter_id = req.chapter_id or item.target_chapter_id
     if target_chapter_id:
-        plan = await book_plans.assign_book_sources_to_chapters(
+        plan = await book_source_workflow.assign_book_sources_to_chapters(
             db,
             user_id=user_id,
             project_id=project_id,

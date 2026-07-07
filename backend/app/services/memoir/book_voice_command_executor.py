@@ -12,6 +12,7 @@ from app.schemas.memoir_book import (
     MemoirBookVoiceCommandOperationResponse,
 )
 from app.services.memoir import book_plans as memoir_book_plans
+from app.services.memoir import book_source_workflow as memoir_book_source_workflow
 from app.services.memoir.book_voice_command_parser import EXECUTABLE_MUTATION_INTENTS
 
 
@@ -69,7 +70,7 @@ async def execute_confirmed_book_voice_command(
             ),
         )
     elif intent == "assign_source":
-        plan = await memoir_book_plans.assign_book_sources_to_chapters(
+        plan = await memoir_book_source_workflow.assign_book_sources_to_chapters(
             db,
             user_id=user_id,
             project_id=project_id,
@@ -87,7 +88,7 @@ async def execute_confirmed_book_voice_command(
     else:
         raise HTTPException(status_code=400, detail="这个语音操作暂时只能预览")
 
-    source_coverage = await memoir_book_plans.get_book_source_coverage(
+    source_coverage = await memoir_book_source_workflow.get_book_source_coverage(
         db,
         user_id=user_id,
         project_id=project_id,

@@ -52,6 +52,7 @@ from app.services.memoir import book_generation_jobs as memoir_book_generation_j
 from app.services.memoir import book_outputs as memoir_book_outputs
 from app.services.memoir import book_plans as memoir_book_plans
 from app.services.memoir import book_quality_audit as memoir_book_quality_audit
+from app.services.memoir import book_source_workflow as memoir_book_source_workflow
 from app.services.memoir import source_auto_assignment as memoir_source_auto_assignment
 from app.services.memoir import source_review_queue as memoir_source_review_queue
 from app.services.memoir import source_router as memoir_source_router
@@ -192,7 +193,7 @@ async def get_mobile_memoir_book_source_coverage(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return await memoir_book_plans.get_book_source_coverage(
+    return await memoir_book_source_workflow.get_book_source_coverage(
         db,
         user_id=current_user.id,
         project_id=project_id,
@@ -293,7 +294,7 @@ async def assign_mobile_memoir_book_sources(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return await memoir_book_plans.assign_book_sources_to_chapters(
+    return await memoir_book_source_workflow.assign_book_sources_to_chapters(
         db,
         user_id=current_user.id,
         project_id=project_id,
@@ -357,7 +358,7 @@ async def move_mobile_memoir_book_source(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return await memoir_book_plans.move_book_source_between_chapters(
+    return await memoir_book_source_workflow.move_book_source_between_chapters(
         db,
         user_id=current_user.id,
         project_id=project_id,
