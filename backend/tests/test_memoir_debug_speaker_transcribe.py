@@ -135,6 +135,10 @@ def test_debug_speaker_live_text_after_confirmed_prefix_keeps_current_tail():
         "第一句已经稳定。",
     ) == "第二句还在实时说"
     assert live_text_after_confirmed_prefix(
+        "第一句已经稳定第二句还在实时说",
+        "第一句已经稳定。",
+    ) == "第二句还在实时说"
+    assert live_text_after_confirmed_prefix(
         "第二句还在实时说",
         "第一句已经稳定。",
     ) == "第二句还在实时说"

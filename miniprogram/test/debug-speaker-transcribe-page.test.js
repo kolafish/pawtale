@@ -95,7 +95,7 @@ test("debug speaker page shows partial and final text in conversation flow", () 
   assert.equal(context.data.clearDisabled, false);
 });
 
-test("debug speaker page keeps live unknown partial when an earlier speaker final arrives", () => {
+test("debug speaker page removes finalized text from live unknown partial", () => {
   const { page } = loadDebugSpeakerPage();
   const context = pageContext(page);
 
@@ -117,7 +117,7 @@ test("debug speaker page keeps live unknown partial when an earlier speaker fina
 
   assert.equal(context.data.conversationLines.length, 1);
   assert.equal(context.data.activePartial.visible, true);
-  assert.equal(context.data.activePartial.text, "第一句已经稳定。第二句还在实时说");
+  assert.equal(context.data.activePartial.text, "第二句还在实时说");
   assert.equal(context.data.conversationScrollTarget, "active-partial-card");
 });
 
@@ -141,6 +141,58 @@ test("debug speaker page clears live unknown partial when final text covers it",
 
   assert.equal(context.data.activePartial.visible, false);
   assert.equal(context.data.conversationScrollTarget, "conversation-speaker_2-seg-2");
+});
+
+test("debug speaker page does not re-add finalized speaker text to cumulative unknown preview", () => {
+  const { page } = loadDebugSpeakerPage();
+  const context = pageContext(page);
+  const cumulativeLiveText = "分糖的？七分糖。认出来了吗？嗯。认出来了，是认出来了，有点问题。";
+
+  page.handleSpeakerEvent.call(context, {
+    type: "speaker.partial",
+    speaker_id: "speaker_unknown",
+    segment_id: "live-current",
+    text: cumulativeLiveText,
+    provider_event_type: "live.partial",
+  });
+  page.handleSpeakerEvent.call(context, {
+    type: "speaker.final",
+    speaker_id: "speaker_9",
+    segment_id: "seg-9",
+    text: "分糖的？七分糖。",
+    start_ms: 83_000,
+    end_ms: 84_000,
+  });
+
+  assert.equal(context.data.activePartial.visible, true);
+  assert.equal(context.data.activePartial.text, "认出来了吗？嗯。认出来了，是认出来了，有点问题。");
+
+  page.handleSpeakerEvent.call(context, {
+    type: "speaker.final",
+    speaker_id: "speaker_3",
+    segment_id: "seg-3",
+    text: "认出来了，是认出来了，有点问题。",
+    start_ms: 84_000,
+    end_ms: 87_000,
+  });
+
+  assert.equal(context.data.activePartial.visible, true);
+  assert.equal(context.data.activePartial.text, "认出来了吗？嗯。");
+
+  page.handleSpeakerEvent.call(context, {
+    type: "speaker.partial",
+    speaker_id: "speaker_unknown",
+    segment_id: "live-current",
+    text: cumulativeLiveText,
+    provider_event_type: "live.partial",
+  });
+
+  assert.equal(context.data.activePartial.visible, true);
+  assert.equal(context.data.activePartial.text, "认出来了吗？嗯。");
+  assert.deepEqual(context.data.conversationLines.map((line) => line.text), [
+    "认出来了，是认出来了，有点问题。",
+    "分糖的？七分糖。",
+  ]);
 });
 
 test("debug speaker page keeps transcript area high after recording stops", () => {

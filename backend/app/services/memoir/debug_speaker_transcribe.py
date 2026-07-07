@@ -675,19 +675,43 @@ def _text_key(text: str) -> str:
     return "".join(str(text).split()).lower()[:120]
 
 
+@dataclass(frozen=True)
+class _ComparableSpeechChar:
+    char: str
+    end: int
+
+
+def _comparable_speech_chars(text: str) -> list[_ComparableSpeechChar]:
+    return [
+        _ComparableSpeechChar(char=char.lower(), end=index + len(char))
+        for index, char in enumerate(text)
+        if char.isalnum()
+    ]
+
+
+def _trim_speech_boundary(text: str) -> str:
+    return text.strip().lstrip("，。？！、；：,.?!;:").strip()
+
+
 def live_text_after_confirmed_prefix(text: str, confirmed_prefix: str) -> str:
     clean_text = text.strip()
     clean_prefix = confirmed_prefix.strip()
     if not clean_text or not clean_prefix:
         return clean_text
-    if clean_text.startswith(clean_prefix):
-        return clean_text[len(clean_prefix):].strip()
-    if clean_prefix.startswith(clean_text) or clean_prefix.endswith(clean_text):
+    text_chars = _comparable_speech_chars(clean_text)
+    prefix_chars = _comparable_speech_chars(clean_prefix)
+    if not text_chars or not prefix_chars:
+        return clean_text
+    text_key = "".join(char.char for char in text_chars)
+    prefix_key = "".join(char.char for char in prefix_chars)
+    if text_key.startswith(prefix_key):
+        return _trim_speech_boundary(clean_text[text_chars[len(prefix_chars) - 1].end :])
+    if prefix_key.startswith(text_key) or prefix_key.endswith(text_key):
         return ""
-    max_overlap = min(len(clean_text), len(clean_prefix))
+    max_overlap = min(len(text_key), len(prefix_key))
     for size in range(max_overlap, 0, -1):
-        if clean_prefix.endswith(clean_text[:size]):
-            return clean_text[size:].strip()
+        if prefix_key.endswith(text_key[:size]):
+            return _trim_speech_boundary(clean_text[text_chars[size - 1].end :])
     return clean_text
 
 
