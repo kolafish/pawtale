@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import hashlib
 import logging
 import re
 from typing import Any
@@ -18,7 +17,7 @@ from app.services.ai_types import AITextClient
 from app.services.json_utils import extract_json_payload
 from app.services.memoir.chapter_source_links import bind_source_card_to_active_utterance_links
 from app.services.memoir.editing_jobs import EditingJobResult, enqueue_editing_job
-from app.services.memoir.semantic_state import upsert_source_card
+from app.services.memoir.semantic_state import semantic_text_hash, upsert_source_card
 
 
 SOURCE_CARD_ENGINE = "llm_source_card_v1"
@@ -44,7 +43,7 @@ def source_text_for_utterance(utterance: MemoirVoiceUtterance) -> str:
 
 
 def source_text_hash(source_text: str) -> str:
-    return hashlib.sha256(source_text.encode("utf-8")).hexdigest()
+    return semantic_text_hash(source_text)
 
 
 def _trim_text(value: object, *, limit: int = 120) -> str:

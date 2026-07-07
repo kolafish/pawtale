@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import hashlib
-import json
 import logging
 import re
 from typing import Any
@@ -28,7 +26,7 @@ from app.services.ai_factory import get_ai_service
 from app.services.ai_types import AITextClient
 from app.services.json_utils import extract_json_payload
 from app.services.memoir.book_source_links import chapter_source_ref_dicts as _chapter_source_ref_dicts
-from app.services.memoir.semantic_state import upsert_chapter_card
+from app.services.memoir.semantic_state import semantic_json_signature, upsert_chapter_card
 from app.services.memoir.source_cards import SOURCE_CARD_ENGINE, source_text_for_utterance, source_text_hash
 
 
@@ -130,11 +128,6 @@ def _latest_draft_version(draft: MemoirBookChapterDraft | None) -> MemoirBookCha
     if not draft or not draft.versions:
         return None
     return max(draft.versions, key=lambda item: (item.version, item.created_at, item.id))
-
-
-def _json_signature(payload: dict[str, object]) -> str:
-    raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
 def _card_summary(card: MemoirSourceCard | None, source_text: str) -> str:
@@ -263,7 +256,7 @@ async def build_chapter_card_context(
             source_text=source_text,
             source_card_id=card.id if card else None,
             source_card_hash=card.source_text_hash if card else None,
-            source_card_signature=_json_signature(
+            source_card_signature=semantic_json_signature(
                 {
                     "id": card.id,
                     "source_text_hash": card.source_text_hash,
@@ -298,7 +291,7 @@ async def build_chapter_card_context(
         chapter=chapter,
         draft_version=draft_version,
         sources=sources,
-        input_signature=_json_signature(signature_payload),
+        input_signature=semantic_json_signature(signature_payload),
         signature_payload=signature_payload,
     )
 

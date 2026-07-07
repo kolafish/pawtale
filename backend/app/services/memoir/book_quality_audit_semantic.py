@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 from typing import Any
@@ -19,7 +18,7 @@ from app.services.ai_factory import get_ai_service
 from app.services.ai_types import AITextClient
 from app.services.json_utils import extract_json_payload
 from app.services.memoir.chapter_cards import generate_or_reuse_chapter_card
-from app.services.memoir.semantic_state import upsert_book_quality_audit_snapshot
+from app.services.memoir.semantic_state import semantic_json_signature, upsert_book_quality_audit_snapshot
 
 
 SEMANTIC_AUDIT_ENGINE = "llm_semantic_v1"
@@ -43,11 +42,6 @@ VALID_PRIMARY_ACTION_TYPES = {
     "none",
 }
 logger = logging.getLogger(__name__)
-
-
-def _json_signature(payload: dict[str, object]) -> str:
-    raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
 def _compact_text(value: object, *, limit: int = 240) -> str:
@@ -130,7 +124,7 @@ def _semantic_signature(
     rules_snapshot: MemoirBookQualityAuditSnapshot,
     chapter_cards: list[MemoirChapterCard],
 ) -> str:
-    return _json_signature(
+    return semantic_json_signature(
         {
             "engine": SEMANTIC_AUDIT_ENGINE,
             "rules_snapshot_signature": rules_snapshot.input_signature,

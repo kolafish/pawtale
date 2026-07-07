@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import hashlib
-import json
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -15,7 +13,7 @@ from app.schemas.memoir_book import (
     MemoirBookQualityAuditPrimaryChapterResponse,
 )
 from app.schemas.memoir_voice import MemoirProjectProgressChapterResponse
-from app.services.memoir.semantic_state import upsert_book_quality_audit_snapshot
+from app.services.memoir.semantic_state import semantic_json_signature, upsert_book_quality_audit_snapshot
 
 
 RULES_AUDIT_ENGINE = "rules_v1"
@@ -74,11 +72,6 @@ CHAPTER_AUDIT_RULES: tuple[ChapterAuditRule, ...] = (
         interview_hint=lambda item: f"「{item.title}」已有基础，可以在自然聊到时再补充。",
     ),
 )
-
-
-def _json_signature(payload: dict[str, object]) -> str:
-    raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
 def chapter_audit_item(
@@ -379,7 +372,7 @@ def _rules_snapshot_signature(
     pending_utterance_count: int,
     chapter_items: list[MemoirBookQualityAuditChapterResponse],
 ) -> str:
-    return _json_signature(
+    return semantic_json_signature(
         {
             "engine": RULES_AUDIT_ENGINE,
             "event_signature": event_signature(
