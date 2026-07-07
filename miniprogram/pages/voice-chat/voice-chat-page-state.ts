@@ -100,10 +100,9 @@ export interface VoiceChatData {
   topModeLabel: string;
   topSubtitle: string;
   topicTitleText: string;
-  showSpeakerRoleSwitch: boolean;
-  speakerRoleLabel: string;
-  narratorRoleButtonClass: string;
-  interviewerRoleButtonClass: string;
+  showHumanRecordActions: boolean;
+  narratorRecordButtonClass: string;
+  interviewerRecordButtonClass: string;
   showErrorKindStrip: boolean;
   showRecoveryPanel: boolean;
   showRecoveryActions: boolean;
@@ -223,10 +222,9 @@ export function initialVoiceChatData(): VoiceChatData {
     topModeLabel: "AI 访谈",
     topSubtitle: "小余陪您慢慢讲",
     topicTitleText: "这段回忆",
-    showSpeakerRoleSwitch: false,
-    speakerRoleLabel: "被访者",
-    narratorRoleButtonClass: "speaker-role-button active",
-    interviewerRoleButtonClass: "speaker-role-button",
+    showHumanRecordActions: false,
+    narratorRecordButtonClass: "role-record-button narrator",
+    interviewerRecordButtonClass: "role-record-button interviewer",
     showErrorKindStrip: false,
     showRecoveryPanel: false,
     showRecoveryActions: false,
@@ -274,10 +272,9 @@ export type VoiceChatViewPatch = Pick<
   | "topModeLabel"
   | "topSubtitle"
   | "topicTitleText"
-  | "showSpeakerRoleSwitch"
-  | "speakerRoleLabel"
-  | "narratorRoleButtonClass"
-  | "interviewerRoleButtonClass"
+  | "showHumanRecordActions"
+  | "narratorRecordButtonClass"
+  | "interviewerRecordButtonClass"
   | "showErrorKindStrip"
   | "showRecoveryPanel"
   | "showRecoveryActions"
@@ -367,10 +364,10 @@ export function voiceChatViewPatch(state: VoiceChatData): VoiceChatViewPatch {
       ));
   }
   let controlHintText = isHumanInterview
-    ? `当前记录：${speakerRoleLabel(state.speakerRole)}`
+    ? ""
     : "说一两句也可以，我会帮您记下来。";
   if (state.recording) {
-    controlHintText = "说完请点这里";
+    controlHintText = isHumanInterview ? `正在记录${speakerRoleLabel(state.speakerRole)}` : "说完请点这里";
   } else if (!isHumanInterview && state.followUpLoading && !hasAssistantPrompt) {
     controlHintText = "小余先问一句，稍等一下。";
   } else if (!isHumanInterview && assistantBusy) {
@@ -401,14 +398,9 @@ export function voiceChatViewPatch(state: VoiceChatData): VoiceChatViewPatch {
     topModeLabel: isHumanInterview ? "人工访谈" : "AI 访谈",
     topSubtitle: isHumanInterview ? "实时记录采访者和被访者" : "小余陪您慢慢讲",
     topicTitleText: state.projectTitle || "这段回忆",
-    showSpeakerRoleSwitch: isHumanInterview && !state.recording,
-    speakerRoleLabel: speakerRoleLabel(state.speakerRole),
-    narratorRoleButtonClass: state.speakerRole === "narrator"
-      ? "speaker-role-button active"
-      : "speaker-role-button",
-    interviewerRoleButtonClass: state.speakerRole === "interviewer"
-      ? "speaker-role-button active"
-      : "speaker-role-button",
+    showHumanRecordActions: isHumanInterview && !state.recording && state.voiceAuthorizationAgreed,
+    narratorRecordButtonClass: "role-record-button narrator",
+    interviewerRecordButtonClass: "role-record-button interviewer",
     showErrorKindStrip: Boolean(state.error && state.errorKindText),
     showRecoveryPanel: Boolean(state.recoveryNotice || state.canReconnect || state.canFinishAfterDisconnect),
     showRecoveryActions: Boolean(state.canReconnect || state.canFinishAfterDisconnect),

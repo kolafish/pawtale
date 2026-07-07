@@ -19,26 +19,6 @@
     <text class="topic-title">{{topicTitleText}}</text>
   </view>
 
-  <view wx:if="{{showSpeakerRoleSwitch}}" class="speaker-role-panel">
-    <text class="speaker-role-label">当前录音对象</text>
-    <view class="speaker-role-switch">
-      <button
-        class="{{narratorRoleButtonClass}}"
-        data-role="narrator"
-        bindtap="changeSpeakerRole"
-      >
-        被访者
-      </button>
-      <button
-        class="{{interviewerRoleButtonClass}}"
-        data-role="interviewer"
-        bindtap="changeSpeakerRole"
-      >
-        采访者
-      </button>
-    </view>
-  </view>
-
   <view wx:if="{{error}}" class="error">{{error}}</view>
   <view wx:if="{{showErrorKindStrip}}" class="session-state-strip">
     <text class="session-state-error">{{errorKindText}}</text>
@@ -177,8 +157,35 @@
   </view>
 
   <view class="control-bar">
-    <text class="control-hint">{{controlHintText}}</text>
+    <text wx:if="{{controlHintText}}" class="control-hint">{{controlHintText}}</text>
+    <view wx:if="{{showHumanRecordActions}}" class="human-record-actions">
+      <button
+        class="{{narratorRecordButtonClass}}"
+        data-role="narrator"
+        loading="{{connecting}}"
+        disabled="{{micButtonDisabled}}"
+        bindtap="startRecordingAsSpeaker"
+      >
+        <view class="role-record-icon-shell">
+          <image class="role-record-icon" src="/assets/memoir-microphone.png" mode="aspectFit" />
+        </view>
+        <text class="role-record-text">记录被访者</text>
+      </button>
+      <button
+        class="{{interviewerRecordButtonClass}}"
+        data-role="interviewer"
+        loading="{{connecting}}"
+        disabled="{{micButtonDisabled}}"
+        bindtap="startRecordingAsSpeaker"
+      >
+        <view class="role-record-icon-shell">
+          <image class="role-record-icon" src="/assets/memoir-microphone.png" mode="aspectFit" />
+        </view>
+        <text class="role-record-text">记录采访者</text>
+      </button>
+    </view>
     <button
+      wx:else
       class="{{micButtonClass}}"
       loading="{{connecting}}"
       disabled="{{micButtonDisabled}}"

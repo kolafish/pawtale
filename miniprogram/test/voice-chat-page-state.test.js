@@ -108,6 +108,37 @@ test("voice chat view patch derives transcript and recording render fields", () 
   assert.equal(patch.micButtonText, "说完了，帮我整理");
 });
 
+test("voice chat view patch combines human speaker choice with record actions", () => {
+  const idlePatch = voiceChatViewPatch({
+    ...initialVoiceChatData(),
+    interviewType: "human_interview",
+    voiceAuthorizationAgreed: true,
+    speakerRole: "interviewer",
+  });
+  const recordingPatch = voiceChatViewPatch({
+    ...initialVoiceChatData(),
+    interviewType: "human_interview",
+    voiceAuthorizationAgreed: true,
+    speakerRole: "interviewer",
+    recording: true,
+  });
+  const authorizationPatch = voiceChatViewPatch({
+    ...initialVoiceChatData(),
+    interviewType: "human_interview",
+    voiceAuthorizationAgreed: false,
+  });
+
+  assert.equal(idlePatch.showHumanRecordActions, true);
+  assert.equal(idlePatch.controlHintText, "");
+  assert.equal(idlePatch.narratorRecordButtonClass, "role-record-button narrator");
+  assert.equal(idlePatch.interviewerRecordButtonClass, "role-record-button interviewer");
+  assert.equal(recordingPatch.showHumanRecordActions, false);
+  assert.equal(recordingPatch.controlHintText, "正在记录采访者");
+  assert.equal(recordingPatch.micButtonText, "说完了，保存这段");
+  assert.equal(authorizationPatch.showHumanRecordActions, false);
+  assert.equal(authorizationPatch.micButtonText, "同意后开始说话");
+});
+
 test("voice chat view patch adds focused large text root classes", () => {
   const idlePatch = voiceChatViewPatch({
     ...initialVoiceChatData(),

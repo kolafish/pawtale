@@ -181,6 +181,7 @@ Page<VoiceChatData, {
   skipFollowUp(): void;
   chooseOpeningTopic(event: OpeningTopicTapEvent): void;
   changeSpeakerRole(event: SpeakerRoleTapEvent): void;
+  startRecordingAsSpeaker(event: SpeakerRoleTapEvent): void;
   stopAndAskFollowUp(): void;
   enqueueAssistantTurn(item: AssistantTurnQueueItem): void;
   drainAssistantTurnQueue(): Promise<void>;
@@ -228,8 +229,8 @@ Page<VoiceChatData, {
   toggleAutoStop(): void;
   autoListenGateSnapshot(): AutoListenGateSnapshot;
   connectGateway(): Promise<void>;
-  startRecording(autoTriggered?: boolean): boolean;
-  startRecordingAfterPrivacy(autoTriggered?: boolean): Promise<boolean>;
+  startRecording(autoTriggered?: boolean, speakerRole?: MemoirSpeakerRole): boolean;
+  startRecordingAfterPrivacy(autoTriggered?: boolean, speakerRole?: MemoirSpeakerRole): Promise<boolean>;
   toggleRecording(): void;
   shouldAutoStartListening(): boolean;
   tryStartAutoListenAfterTTS(): Promise<boolean>;
@@ -1022,6 +1023,20 @@ Page<VoiceChatData, {
     });
   },
 
+  startRecordingAsSpeaker(event) {
+    if (this.data.recording || this.data.interviewType !== "human_interview") {
+      return;
+    }
+    const role = queryChoice({ role: datasetString(event, "role") }, "role", SPEAKER_ROLE_VALUES, "narrator");
+    setVoiceChatData(this, {
+      speakerRole: role,
+      liveText: "",
+      liveCharCount: 0,
+      primaryActionText: "开始说话",
+    });
+    this.startRecording(false, role);
+  },
+
   stopAndAskFollowUp() {
     if (this.data.interviewType === "human_interview") {
       return;
@@ -1620,7 +1635,7 @@ Page<VoiceChatData, {
     }
   },
 
-  startRecording(autoTriggered = false) {
+  startRecording(autoTriggered = false, speakerRole?: MemoirSpeakerRole) {
     if (!this.ensureVoiceAuthorization(autoTriggered)) {
       return false;
     }
@@ -1629,11 +1644,11 @@ Page<VoiceChatData, {
       setVoiceChatData(this, voiceRecordingReconnectPatch(autoTriggered, this.data.autoListenStateText));
       return false;
     }
-    void this.startRecordingAfterPrivacy(autoTriggered);
+    void this.startRecordingAfterPrivacy(autoTriggered, speakerRole);
     return true;
   },
 
-  async startRecordingAfterPrivacy(autoTriggered = false) {
+  async startRecordingAfterPrivacy(autoTriggered = false, speakerRole?: MemoirSpeakerRole) {
     const interruptingAssistant = !autoTriggered && this.assistantTurnActiveForBargeIn();
     if (!autoTriggered) {
       this.consecutiveNoAnswerPrompts = 0;
@@ -1668,7 +1683,7 @@ Page<VoiceChatData, {
       noVoiceActivityTimeoutMs: autoTriggered ? AUTO_LISTEN_NO_ANSWER_MS : 0,
     };
     if (this.data.interviewType === "human_interview") {
-      recordingOptions.speakerRole = this.data.speakerRole;
+      recordingOptions.speakerRole = speakerRole || this.data.speakerRole;
     }
     const started = this.voiceStreaming.startRecording(recordingOptions);
     if (!started) {

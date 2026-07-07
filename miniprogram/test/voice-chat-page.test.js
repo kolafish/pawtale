@@ -243,6 +243,54 @@ test("voice chat blocks recording before voice authorization consent", () => {
   delete global.wx;
 });
 
+test("human interview record action starts the selected speaker in one tap", async () => {
+  const startOptions = [];
+  const page = loadVoiceChatPage({
+    voiceAuthorizationExports: {
+      readVoiceAuthorizationConsent: () => true,
+      syncVoiceAuthorizationConsent: async () => ({ id: "consent-1" }),
+    },
+  });
+  const context = {
+    ...page,
+    data: {
+      ...page.data,
+      voiceSessionId: "voice-1",
+      interviewType: "human_interview",
+      voiceAuthorizationAgreed: true,
+      status: "ready",
+      connecting: false,
+      speakerRole: "narrator",
+    },
+    voiceStreaming: {
+      hasClient: () => true,
+      startRecording(options) {
+        startOptions.push(options);
+        return true;
+      },
+      stopRecording() {},
+      close() {},
+    },
+    async syncVoiceAuthorizationForSession() {
+      return true;
+    },
+    async stopAssistantBargeInMonitor() {},
+    setData(patch) {
+      this.data = { ...this.data, ...patch };
+    },
+  };
+
+  page.startRecordingAsSpeaker.call(context, {
+    currentTarget: { dataset: { role: "interviewer" } },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(context.data.speakerRole, "interviewer");
+  assert.equal(context.data.recording, true);
+  assert.equal(context.data.primaryActionText, "暂停收音");
+  assert.deepEqual(startOptions, [{ noVoiceActivityTimeoutMs: 0, speakerRole: "interviewer" }]);
+});
+
 test("voice chat does not connect a stopped voice session", async () => {
   let connectCalls = 0;
   const page = loadVoiceChatPage({
