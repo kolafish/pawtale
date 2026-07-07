@@ -56,7 +56,6 @@ import {
 import {
   datasetChoice,
   datasetString,
-  pageUrl,
   pickerIndex,
   type PageDatasetEvent,
   type PagePickerEvent,
@@ -100,6 +99,17 @@ import {
   updateBookTTSProgress as updateBookTTSPlaybackProgress,
 } from "./book-tts-player";
 import {
+  CHAPTER_MOVE_DIRECTIONS,
+  bookChapterDetailUrl,
+  bookExportPageUrl,
+  chapterMoveCommand,
+  findBookChapter,
+  removeLocalChapterPatch,
+  splitSelectedChapterSourcesPlan,
+  toggleBookChapterSourcesPatch,
+  toggleBookSplitSourcePatch,
+} from "./book-page-plan-helpers";
+import {
   NEW_CHAPTER_PICKER_VALUE,
   bookOutputData,
   buildChapterViews,
@@ -141,6 +151,10 @@ import {
   normalizeBookVoiceAsrText,
 } from "./book-voice-assistant-view-model";
 export {
+  bookChapterDetailUrl,
+  bookExportPageUrl,
+} from "./book-page-plan-helpers";
+export {
   bookChapterSourceSummary,
   bookOutputStaleNotice,
   bookOutputVersionText,
@@ -174,7 +188,6 @@ type PickerEvent = PagePickerEvent<BookDataset>;
 
 const BOOK_GENERATION_EVENT_POLL_INTERVAL_MS = 3000;
 const BOOK_GENERATION_EVENT_POLL_MAX_ATTEMPTS = 120;
-const CHAPTER_MOVE_DIRECTIONS = ["up", "down"] as const;
 
 function isBookGenerationEvent(event: MemoirAutomationEvent): boolean {
   return (
@@ -214,14 +227,6 @@ function defaultBookTitleInput(planTitle: string, projectTitle: string): string 
     || trimText(projectTitle)
     || "家庭回忆录"
   );
-}
-
-export function bookChapterDetailUrl(projectId: string, chapterId: string, tab = "content"): string {
-  return pageUrl("/pages/book-chapter/index", { projectId, chapterId, tab });
-}
-
-export function bookExportPageUrl(projectId: string, action = "preview"): string {
-  return pageUrl("/pages/book-export/index", { projectId, action });
 }
 
 const BOOK_VOICE_AUTO_STOP_SILENCE_MS = 900;
@@ -1119,7 +1124,7 @@ Page<BookData, {
 
   openChapterMoreActions(event) {
     const chapterId = datasetString(event, "id");
-    const chapter = this.data.chapters.find((candidate) => candidate.id === chapterId);
+    const chapter = findBookChapter(this.data.chapters, chapterId);
     if (!chapter || !this.data.projectId) {
       this.setData({ error: "缺少章节信息" });
       return;
@@ -1168,7 +1173,7 @@ Page<BookData, {
 
   changeChapterTitle(event) {
     const id = datasetString(event, "id");
-    const chapter = this.data.chapters.find((candidate) => candidate.id === id);
+    const chapter = findBookChapter(this.data.chapters, id);
     this.patchChapter(id, {
       editingTitle: event.detail.value,
       titleChanged: chapter ? trimText(event.detail.value) !== trimText(chapter.title) : false,
@@ -1177,7 +1182,7 @@ Page<BookData, {
 
   async saveChapterTitle(event) {
     const chapterId = datasetString(event, "id");
-    const chapter = this.data.chapters.find((candidate) => candidate.id === chapterId);
+    const chapter = findBookChapter(this.data.chapters, chapterId);
     if (!chapter || !this.data.projectId || this.data.titleBusyTarget || this.data.updatingPlanStructure) {
       return;
     }
@@ -1219,7 +1224,7 @@ Page<BookData, {
   },
 
   async generateChapterTitleById(chapterId, toastTitle = "已重新起名") {
-    const chapter = this.data.chapters.find((candidate) => candidate.id === chapterId);
+    const chapter = findBookChapter(this.data.chapters, chapterId);
     if (!chapter || !this.data.projectId || this.data.titleBusyTarget || this.data.updatingPlanStructure) {
       return false;
     }
@@ -1257,11 +1262,10 @@ Page<BookData, {
       await this.applyPlanStructureCommand({ type: "delete_chapter", chapter_id: id }, "章节已删除");
       return;
     }
-    const chapters = this.data.chapters.filter((chapter) => chapter.id !== id);
-    this.setData({
-      ...chapterCollectionData(chapters, this.data.stage, this.data.sourceCoverage, this.data.splitSourceSelections),
-      error: "",
-    });
+    const patch = removeLocalChapterPatch(this.data, id);
+    if (patch) {
+      this.setData(patch);
+    }
   },
 
   async moveChapter(event) {
@@ -1270,26 +1274,21 @@ Page<BookData, {
     if (!chapterId || this.data.updatingPlanStructure) {
       return;
     }
-    const fromIndex = this.data.chapters.findIndex((chapter) => chapter.id === chapterId);
-    const toIndex = direction === "up" ? fromIndex - 1 : fromIndex + 1;
-    if (fromIndex < 0 || toIndex < 0 || toIndex >= this.data.chapters.length) {
+    const command = chapterMoveCommand(this.data.chapters, chapterId, direction);
+    if (!command) {
       return;
     }
-    await this.applyPlanStructureCommand({
-      type: "move_chapter",
-      chapter_id: chapterId,
-      direction: direction === "up" ? "up" : "down",
-    }, "章节顺序已调整");
+    await this.applyPlanStructureCommand(command, "章节顺序已调整");
   },
 
   async mergeChapterInto(event) {
     const sourceChapterId = datasetString(event, "id");
     const optionIndex = pickerIndex(event);
-    const sourceChapter = this.data.chapters.find((chapter) => chapter.id === sourceChapterId);
+    const sourceChapter = findBookChapter(this.data.chapters, sourceChapterId);
     const option = sourceChapter?.mergeTargetOptions[optionIndex];
     const targetChapter = option
-      ? this.data.chapters.find((chapter) => chapter.id === option.value)
-      : undefined;
+      ? findBookChapter(this.data.chapters, option.value)
+      : null;
     if (!sourceChapter || !targetChapter || this.data.updatingPlanStructure) {
       return;
     }
@@ -1321,65 +1320,39 @@ Page<BookData, {
   toggleSplitSource(event) {
     const chapterId = datasetString(event, "id");
     const utteranceId = datasetString(event, "utteranceId");
-    const chapter = this.data.chapters.find((candidate) => candidate.id === chapterId);
-    if (!chapter || !utteranceId || chapter.source_refs.length <= 1 || this.data.updatingPlanStructure || chapter.draftBusy) {
+    if (this.data.updatingPlanStructure) {
       return;
     }
-    const selected = new Set(this.data.splitSourceSelections[chapterId] || []);
-    if (selected.has(utteranceId)) {
-      selected.delete(utteranceId);
-    } else {
-      selected.add(utteranceId);
+    const patch = toggleBookSplitSourcePatch(this.data, chapterId, utteranceId);
+    if (patch) {
+      this.setData(patch);
     }
-    const splitSourceSelections = { ...this.data.splitSourceSelections };
-    if (selected.size) {
-      splitSourceSelections[chapterId] = Array.from(selected);
-    } else {
-      delete splitSourceSelections[chapterId];
-    }
-    this.setData({
-      splitSourceSelections,
-      ...chapterCollectionData(this.data.chapters, this.data.stage, this.data.sourceCoverage, splitSourceSelections),
-      error: "",
-    });
   },
 
   async splitSelectedChapterSources(event) {
     const chapterId = datasetString(event, "id");
-    const chapter = this.data.chapters.find((candidate) => candidate.id === chapterId);
-    const selectedIds = new Set(this.data.splitSourceSelections[chapterId] || []);
-    if (!chapter || !selectedIds.size || this.data.updatingPlanStructure || chapter.draftBusy) {
+    if (this.data.updatingPlanStructure) {
       return;
     }
-    if (selectedIds.size >= chapter.source_refs.length) {
-      this.setData({ error: "拆分时至少保留 1 条原始讲述在原章节" });
+    const plan = splitSelectedChapterSourcesPlan(this.data, chapterId);
+    if (!plan) {
       return;
     }
-    const title = trimText(chapter.editingTitle || chapter.title) || "未命名章节";
-    const splitSourceSelections = { ...this.data.splitSourceSelections };
-    delete splitSourceSelections[chapterId];
-    this.setData({ splitSourceSelections });
-    await this.applyPlanStructureCommand({
-      type: "split_chapter",
-      chapter_id: chapterId,
-      title: `${title}（拆出）`,
-      utterance_ids: Array.from(selectedIds),
-    }, "章节已拆分");
+    if (plan.error) {
+      this.setData({ error: plan.error });
+      return;
+    }
+    if (plan.patch) {
+      this.setData(plan.patch);
+    }
+    if (plan.command) {
+      await this.applyPlanStructureCommand(plan.command, "章节已拆分");
+    }
   },
 
   toggleChapterSources(event) {
     const chapterId = datasetString(event, "id");
-    const chapters = this.data.chapters.map((chapter) => (
-      chapter.id === chapterId
-        ? { ...chapter, sourceListExpanded: !chapter.sourceListExpanded }
-        : chapter
-    ));
-    this.setData(chapterCollectionData(
-      chapters,
-      this.data.stage,
-      this.data.sourceCoverage,
-      this.data.splitSourceSelections,
-    ));
+    this.setData(toggleBookChapterSourcesPatch(this.data, chapterId));
   },
 
   async generateChapterDraft(event) {
@@ -1388,7 +1361,7 @@ Page<BookData, {
   },
 
   async generateChapterDraftById(chapterId) {
-    const chapter = this.data.chapters.find((candidate) => candidate.id === chapterId);
+    const chapter = findBookChapter(this.data.chapters, chapterId);
     if (!chapter || !this.data.projectId || chapter.draftBusy || this.data.updatingPlanStructure) {
       return false;
     }
@@ -1423,7 +1396,7 @@ Page<BookData, {
   changeDraftContent(event) {
     const chapterId = datasetString(event, "id");
     const value = event.detail.value;
-    const chapter = this.data.chapters.find((candidate) => candidate.id === chapterId);
+    const chapter = findBookChapter(this.data.chapters, chapterId);
     if (!chapter) {
       return;
     }
@@ -1438,7 +1411,7 @@ Page<BookData, {
 
   async saveChapterDraft(event) {
     const chapterId = datasetString(event, "id");
-    const chapter = this.data.chapters.find((candidate) => candidate.id === chapterId);
+    const chapter = findBookChapter(this.data.chapters, chapterId);
     if (!chapter || !this.data.projectId || chapter.draftBusy || this.data.updatingPlanStructure) {
       return;
     }
@@ -1463,7 +1436,7 @@ Page<BookData, {
 
   async confirmChapterDraft(event) {
     const chapterId = datasetString(event, "id");
-    const chapter = this.data.chapters.find((candidate) => candidate.id === chapterId);
+    const chapter = findBookChapter(this.data.chapters, chapterId);
     if (
       !chapter
       || !this.data.projectId
@@ -1547,7 +1520,7 @@ Page<BookData, {
 
   async deleteConfirmedChapter(event) {
     const chapterId = datasetString(event, "id");
-    const chapter = this.data.chapters.find((candidate) => candidate.id === chapterId);
+    const chapter = findBookChapter(this.data.chapters, chapterId);
     if (
       !chapter
       || this.data.stage !== "drafting"
@@ -1699,7 +1672,7 @@ Page<BookData, {
     chapterId,
     options: { autoListenAfterPlayback?: boolean; showPreparingToast?: boolean } = {},
   ) {
-    const chapter = this.data.chapters.find((candidate) => candidate.id === chapterId);
+    const chapter = findBookChapter(this.data.chapters, chapterId);
     if (!chapter || !this.data.projectId || this.data.updatingPlanStructure) {
       return;
     }
