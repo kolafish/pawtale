@@ -11,7 +11,7 @@ def chapter_source_count(
 ) -> int:
     if source_count_by_chapter and chapter.id in source_count_by_chapter:
         return source_count_by_chapter[chapter.id]
-    return len(chapter.source_refs_json or [])
+    return 0
 
 
 def latest_draft_content(chapter: MemoirBookPlanChapter) -> str:

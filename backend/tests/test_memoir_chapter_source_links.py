@@ -1,13 +1,13 @@
+import pytest
 from sqlalchemy import select
 
 from app.domain.memoir.types import MemoirBookPlanStatus, MemoirChapterSourceAssignedBy, MemoirChapterSourceLinkStatus
 from app.models.memoir import MemoirBookPlan, MemoirBookPlanChapter, MemoirChapterSourceLink
 from app.models.projects import Project
 from app.services.memoir.chapter_source_links import (
-    backfill_project_chapter_source_links,
     bind_source_card_to_active_utterance_links,
     mark_utterance_links_removed,
-    sync_project_chapter_source_links,
+    sync_plan_chapter_source_links,
     update_utterance_link_ref_fields,
 )
 
@@ -31,7 +31,7 @@ def _source_ref(
     }
 
 
-async def _create_plan_with_source(test_db, *, source_ref: dict[str, object] | None = None):
+async def _create_plan(test_db):
     project = Project(title="回忆录项目", type="memoir")
     test_db.add(project)
     await test_db.flush()
@@ -47,9 +47,9 @@ async def _create_plan_with_source(test_db, *, source_ref: dict[str, object] | N
         plan_id=plan.id,
         title="外婆家的童年",
         sort_order=0,
-        source_refs_json=[source_ref or _source_ref()],
     )
     test_db.add(chapter)
+    await test_db.flush()
     await test_db.commit()
     return project, plan, chapter
 
@@ -65,11 +65,22 @@ async def _links(test_db) -> list[MemoirChapterSourceLink]:
     ).scalars().all()
 
 
-async def test_chapter_source_links_backfill_is_idempotent(test_db):
-    project, _, chapter = await _create_plan_with_source(test_db)
+async def test_chapter_source_links_sync_explicit_refs_is_idempotent(test_db):
+    project, plan, chapter = await _create_plan(test_db)
+    source_refs_by_chapter = {chapter.id: [_source_ref()]}
 
-    first = await backfill_project_chapter_source_links(test_db, project_id=project.id)
-    second = await backfill_project_chapter_source_links(test_db, project_id=project.id)
+    first = await sync_plan_chapter_source_links(
+        test_db,
+        plan=plan,
+        source_refs_by_chapter=source_refs_by_chapter,
+        assignment_reason="replace_book_plan",
+    )
+    second = await sync_plan_chapter_source_links(
+        test_db,
+        plan=plan,
+        source_refs_by_chapter=source_refs_by_chapter,
+        assignment_reason="replace_book_plan",
+    )
     await test_db.commit()
 
     links = await _links(test_db)
@@ -86,30 +97,67 @@ async def test_chapter_source_links_backfill_is_idempotent(test_db):
     assert links[0].quote == "外婆家的院子"
     assert links[0].status == MemoirChapterSourceLinkStatus.ACTIVE.value
     assert links[0].assigned_by == MemoirChapterSourceAssignedBy.SYSTEM.value
-    assert links[0].assignment_reason == "backfill_source_refs_json"
+    assert links[0].assignment_reason == "replace_book_plan"
+
+
+async def test_chapter_source_links_sync_requires_complete_chapter_ref_map(test_db):
+    _, plan, chapter = await _create_plan(test_db)
+    other_chapter = MemoirBookPlanChapter(
+        project_id=plan.project_id,
+        plan_id=plan.id,
+        title="春节厨房",
+        sort_order=1,
+    )
+    test_db.add(other_chapter)
+    await test_db.flush()
+    await sync_plan_chapter_source_links(
+        test_db,
+        plan=plan,
+        source_refs_by_chapter={
+            chapter.id: [_source_ref("utterance-1")],
+            other_chapter.id: [_source_ref("utterance-2")],
+        },
+    )
+    await test_db.commit()
+
+    with pytest.raises(ValueError):
+        await sync_plan_chapter_source_links(
+            test_db,
+            plan=plan,
+            source_refs_by_chapter={chapter.id: [_source_ref("utterance-1")]},
+        )
+
+    links = await _links(test_db)
+    assert {
+        (link.chapter_id, link.utterance_id, link.status)
+        for link in links
+    } == {
+        (chapter.id, "utterance-1", MemoirChapterSourceLinkStatus.ACTIVE.value),
+        (other_chapter.id, "utterance-2", MemoirChapterSourceLinkStatus.ACTIVE.value),
+    }
 
 
 async def test_chapter_source_links_sync_marks_missing_removed_and_reactivates(test_db):
-    project, _, chapter = await _create_plan_with_source(test_db)
-    await backfill_project_chapter_source_links(test_db, project_id=project.id)
+    _, plan, chapter = await _create_plan(test_db)
+    await sync_plan_chapter_source_links(test_db, plan=plan, source_refs_by_chapter={chapter.id: [_source_ref()]})
     await test_db.commit()
 
-    chapter.source_refs_json = []
-    test_db.add(chapter)
-    await test_db.commit()
-    removed = await sync_project_chapter_source_links(test_db, project_id=project.id, assignment_reason="plan_update")
+    removed = await sync_plan_chapter_source_links(
+        test_db,
+        plan=plan,
+        source_refs_by_chapter={chapter.id: []},
+        assignment_reason="plan_update",
+    )
     await test_db.commit()
     removed_link = (await _links(test_db))[0]
     assert removed.removed_count == 1
     assert removed_link.status == MemoirChapterSourceLinkStatus.REMOVED.value
     assert removed_link.removed_at is not None
 
-    chapter.source_refs_json = [_source_ref(quote="更新后的院子")]
-    test_db.add(chapter)
-    await test_db.commit()
-    activated = await sync_project_chapter_source_links(
+    activated = await sync_plan_chapter_source_links(
         test_db,
-        project_id=project.id,
+        plan=plan,
+        source_refs_by_chapter={chapter.id: [_source_ref(quote="更新后的院子")]},
         assigned_by=MemoirChapterSourceAssignedBy.USER,
         assignment_reason="manual_readd",
     )
@@ -124,8 +172,8 @@ async def test_chapter_source_links_sync_marks_missing_removed_and_reactivates(t
 
 
 async def test_chapter_source_links_update_and_remove_by_utterance(test_db):
-    project, _, _ = await _create_plan_with_source(test_db)
-    await backfill_project_chapter_source_links(test_db, project_id=project.id)
+    project, plan, chapter = await _create_plan(test_db)
+    await sync_plan_chapter_source_links(test_db, plan=plan, source_refs_by_chapter={chapter.id: [_source_ref()]})
     await test_db.commit()
     link = (await _links(test_db))[0]
     link.source_card_id = "source-card-1"
@@ -157,8 +205,8 @@ async def test_chapter_source_links_update_and_remove_by_utterance(test_db):
 
 
 async def test_chapter_source_links_bind_source_card_requires_matching_transcript_version(test_db):
-    project, _, _ = await _create_plan_with_source(test_db)
-    await backfill_project_chapter_source_links(test_db, project_id=project.id)
+    project, plan, chapter = await _create_plan(test_db)
+    await sync_plan_chapter_source_links(test_db, plan=plan, source_refs_by_chapter={chapter.id: [_source_ref()]})
     await test_db.commit()
 
     skipped_count = await bind_source_card_to_active_utterance_links(

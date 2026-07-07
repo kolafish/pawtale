@@ -4,6 +4,7 @@ from app.services.memoir.chapter_cards import CHAPTER_CARD_ENGINE, build_chapter
 from app.services.memoir.semantic_state import upsert_chapter_card
 from app.models.memoir import MemoirBookPlanChapter
 from tests.memoir_helpers import (
+    add_test_chapter_source_links,
     create_test_book_plan,
     create_test_voice_transcript,
     memoir_source_ref,
@@ -106,10 +107,17 @@ async def _add_chapter(test_db, plan, *, project_id: str, title: str, source_ref
         project_id=project_id,
         title=title,
         sort_order=sort_order,
-        source_refs_json=[source_ref],
         metadata_json={},
     )
     test_db.add(chapter)
+    await test_db.flush()
+    await add_test_chapter_source_links(
+        test_db,
+        project_id=project_id,
+        plan_id=plan.id,
+        chapter_id=chapter.id,
+        source_refs=[source_ref],
+    )
     await test_db.commit()
     return chapter
 
@@ -405,7 +413,7 @@ async def test_source_review_queue_confirm_assigns_source_and_resolves_item(clie
     chapters = {item["id"]: item for item in data["plan"]["chapters"]}
     source_ids = [ref["utterance_id"] for ref in chapters[chapter.id]["source_refs"]]
     assert uncovered["utterance_id"] in source_ids
-    assert chapters[chapter.id]["pending_source_count"] == 1
+    assert chapters[chapter.id]["pending_source_count"] == 0
 
     pending = await client.get(f"/api/mobile/memoir/projects/{project_id}/book-source-review-items")
     assert pending.json()["total"] == 0

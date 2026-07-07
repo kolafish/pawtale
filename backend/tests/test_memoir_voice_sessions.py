@@ -6,15 +6,23 @@ from app.domain.memoir.types import (
     MemoirAutomationEventStatus,
     MemoirAutomationEventType,
     MemoirBookChapterDraftStatus,
+    MemoirChapterSourceLinkStatus,
     MemoirChatContentStatus,
     MemoirChatMessageRole,
 )
-from app.models.memoir import AudioFile, MemoirChatMessage, MemoirVoiceSession, MemoirVoiceUtterance
+from app.models.memoir import (
+    AudioFile,
+    MemoirChapterSourceLink,
+    MemoirChatMessage,
+    MemoirVoiceSession,
+    MemoirVoiceUtterance,
+)
 from app.services.memoir import automation_events
 from app.services.memoir import voice_sessions as memoir_voice_sessions
 from app.services.memoir.tts_alignment import TTSAlignmentSegment
 from app.services.memoir.voice_tts import TTSResult
 from tests.memoir_helpers import (
+    add_test_chapter_source_links,
     create_test_book_plan,
     create_test_chapter_draft,
     create_test_voice_transcript,
@@ -344,10 +352,6 @@ async def test_mobile_memoir_project_progress_snapshot_counts_book_state(client,
         project_id=first["session"]["project_id"],
         source_ref=memoir_source_ref(first),
     )
-    chapter.metadata_json = {
-        "pending_source_utterance_ids": [first["utterance_id"], "deleted-utterance"],
-        "removed_source_utterance_ids": ["removed-utterance"],
-    }
     await create_test_chapter_draft(
         test_db,
         project_id=first["session"]["project_id"],
@@ -355,6 +359,26 @@ async def test_mobile_memoir_project_progress_snapshot_counts_book_state(client,
         status=MemoirBookChapterDraftStatus.CONFIRMED,
         content="外婆家的院子里有一棵树。",
     )
+    await add_test_chapter_source_links(
+        test_db,
+        project_id=first["session"]["project_id"],
+        plan_id=plan.id,
+        chapter_id=chapter.id,
+        source_refs=[memoir_source_ref(second, "后来我去县城读书。")],
+    )
+    removed_at = datetime.utcnow()
+    links = (
+        await test_db.execute(
+            select(MemoirChapterSourceLink).where(MemoirChapterSourceLink.chapter_id == chapter.id)
+        )
+    ).scalars().all()
+    for link in links:
+        if link.utterance_id == first["utterance_id"]:
+            link.merged_draft_version_id = None
+        if link.utterance_id == second["utterance_id"]:
+            link.status = MemoirChapterSourceLinkStatus.REMOVED.value
+            link.removed_at = removed_at
+        test_db.add(link)
     event = await automation_events.record_automation_event(
         test_db,
         project_id=first["session"]["project_id"],

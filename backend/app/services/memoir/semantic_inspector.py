@@ -27,7 +27,6 @@ from app.models.memoir import (
 from app.models.projects import Project
 from app.services.memoir.access import load_memoir_project
 from app.services.memoir.book_quality_audit import SEMANTIC_AUDIT_ENGINE
-from app.services.memoir.book_source_links import source_ref_utterance_id
 from app.services.memoir.chapter_cards import CHAPTER_CARD_ENGINE, build_chapter_card_context
 from app.services.memoir.source_cards import SOURCE_CARD_ENGINE, source_text_for_utterance, source_text_hash
 
@@ -384,17 +383,7 @@ async def inspect_project_semantic_state(db: AsyncSession, project: Project) -> 
 
     plans = await _project_plans(db, project.id)
     chapters = [chapter for plan in plans for chapter in plan.chapters]
-    legacy_keys: set[tuple[str, str]] = set()
-    legacy_ref_count = 0
-    for chapter in chapters:
-        for ref in chapter.source_refs_json or []:
-            utterance_id = source_ref_utterance_id(ref)
-            if not utterance_id:
-                continue
-            legacy_ref_count += 1
-            legacy_keys.add((chapter.id, utterance_id))
-
-    link_status_counts, active_link_keys, all_link_keys = await _link_counts(db, project.id)
+    link_status_counts, _, _ = await _link_counts(db, project.id)
     source_status_counts = await _source_card_status_counts(db, project.id)
     chapter_status_counts = await _chapter_card_status_counts(db, project.id)
     ready_current_chapter_cards: list[MemoirChapterCard] = []
@@ -437,11 +426,8 @@ async def inspect_project_semantic_state(db: AsyncSession, project: Project) -> 
         },
         "chapter_sources": {
             "chapter_count": len(chapters),
-            "legacy_source_ref_count": legacy_ref_count,
             "active_link_count": link_status_counts.get(MemoirChapterSourceLinkStatus.ACTIVE.value, 0),
             "removed_link_count": link_status_counts.get(MemoirChapterSourceLinkStatus.REMOVED.value, 0),
-            "legacy_refs_without_any_link_count": len(legacy_keys - all_link_keys),
-            "active_links_without_legacy_ref_count": len(active_link_keys - legacy_keys),
         },
         "chapter_cards": {
             "ready": _status_count(chapter_status_counts, "ready"),

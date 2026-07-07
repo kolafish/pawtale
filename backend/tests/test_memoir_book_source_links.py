@@ -59,7 +59,7 @@ def _link_from_created(
     )
 
 
-async def test_source_link_read_prefers_active_links_and_falls_back_to_legacy_json(client, test_db):
+async def test_source_link_read_uses_active_links_and_ignores_stored_json_refs(client, test_db):
     project_id = await ensure_mobile_memoir_project(client)
     first = await create_test_voice_transcript(client, test_db, "外婆家的院子很大。", project_id=project_id)
     second = await create_test_voice_transcript(client, test_db, "后来我去县城读书。", project_id=project_id)
@@ -118,20 +118,19 @@ async def test_source_link_read_prefers_active_links_and_falls_back_to_legacy_js
     assert refs_by_chapter[first_chapter.id][0]["quote"] == "link 表里的院子 quote"
     assert refs_by_chapter[first_chapter.id][0]["voice_session_id"] == first["session"]["id"]
     assert refs_by_chapter[first_chapter.id][0]["message_id"] == first["message_id"]
-    assert [ref["utterance_id"] for ref in refs_by_chapter[second_chapter.id]] == [third["utterance_id"]]
+    assert refs_by_chapter[second_chapter.id] == []
 
     included = await included_chapters_by_utterance(test_db, loaded_plan)
     assert first["utterance_id"] in included
     assert second["utterance_id"] not in included
-    assert included[third["utterance_id"]][0].chapter_id == second_chapter.id
+    assert third["utterance_id"] not in included
 
     response = await plan_response(test_db, loaded_plan)
     first_response_refs = response.chapters[0].source_refs
-    second_response_refs = response.chapters[1].source_refs
     assert [ref.utterance_id for ref in first_response_refs] == [first["utterance_id"]]
     assert first_response_refs[0].quote == "link 表里的院子 quote"
     assert first_response_refs[0].created_at is not None
-    assert [ref.utterance_id for ref in second_response_refs] == [third["utterance_id"]]
+    assert response.chapters[1].source_refs == []
 
 
 async def test_book_source_coverage_uses_source_link_read_path(client, test_db):
@@ -176,13 +175,13 @@ async def test_book_source_coverage_uses_source_link_read_path(client, test_db):
         for item in data["sources"]
         if item["is_included"]
     }
-    assert first["utterance_id"] in included
+    assert first["utterance_id"] not in included
     assert second["utterance_id"] in included
-    assert data["covered_source_count"] == 2
-    assert data["uncovered_source_count"] == 0
+    assert data["covered_source_count"] == 1
+    assert data["uncovered_source_count"] == 1
 
 
-async def test_link_only_chapter_sources_do_not_need_legacy_source_refs(client, test_db):
+async def test_link_only_chapter_sources_are_enough(client, test_db):
     project_id = await ensure_mobile_memoir_project(client)
     created = await create_test_voice_transcript(client, test_db, "外婆家的院子里有一棵桂花树。", project_id=project_id)
 

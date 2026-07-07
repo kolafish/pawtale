@@ -23,7 +23,6 @@ from app.models.memoir import (
 )
 from app.services.memoir.book_plan_ai import ChapterTitleSourceDigest, build_chapter_title_prompt
 from app.services.memoir.book_plan_sources import (
-    covered_utterance_ids,
     find_chapter_by_id,
     renumber_chapters,
     set_temporary_chapter_orders,
@@ -165,7 +164,6 @@ def test_book_plan_source_helpers_cover_chapter_order_and_source_refs():
         project_id=plan.project_id,
         title="第一章",
         sort_order=2,
-        source_refs_json=[{"utterance_id": "u1"}, {"utterance_id": "u2"}],
     )
     second = MemoirBookPlanChapter(
         id="chapter-2",
@@ -173,14 +171,12 @@ def test_book_plan_source_helpers_cover_chapter_order_and_source_refs():
         project_id=plan.project_id,
         title="第二章",
         sort_order=1,
-        source_refs_json=[{"utterance_id": "u2"}, {"utterance_id": "u3"}, {"missing": "ignored"}],
     )
     plan.chapters = [first, second]
 
     assert [chapter.id for chapter in sorted_chapters(plan)] == ["chapter-2", "chapter-1"]
     assert find_chapter_by_id(plan.chapters, "chapter-1") is first
     assert find_chapter_by_id(plan.chapters, None) is None
-    assert covered_utterance_ids(plan) == {"u1", "u2", "u3"}
     assert unique_source_ref_dicts([
         {"utterance_id": "u1", "quote": "一"},
         {"utterance_id": "u1", "quote": "重复"},
@@ -319,13 +315,13 @@ async def test_mobile_memoir_book_plan_generate_saves_source_bound_chapters(
     ).scalars().all()
     assert stored_plan.status == "draft"
     assert len(stored_chapters) == 2
-    assert stored_chapters[0].source_refs_json[0]["quote"] == "外婆家的院子"
-
-    legacy_ref = dict(stored_chapters[0].source_refs_json[0])
-    legacy_ref.pop("created_at", None)
-    stored_chapters[0].source_refs_json = [legacy_ref]
-    test_db.add(stored_chapters[0])
-    await test_db.commit()
+    links_by_utterance = {
+        link.utterance_id: link
+        for link in await _chapter_source_links(test_db, project_id=project_id)
+    }
+    assert links_by_utterance[first["utterance_id"]].chapter_id == stored_chapters[0].id
+    assert links_by_utterance[first["utterance_id"]].quote == "外婆家的院子"
+    assert links_by_utterance[second["utterance_id"]].chapter_id == stored_chapters[1].id
 
     get_response = await client.get(f"/api/mobile/memoir/projects/{project_id}/book-plan")
     assert get_response.status_code == 200
@@ -495,6 +491,13 @@ async def test_mobile_memoir_book_source_assignment_appends_source_and_marks_dra
         prompt_snapshot="",
     )
     test_db.add(version)
+    await test_db.flush()
+    links_by_utterance = {
+        link.utterance_id: link
+        for link in await _chapter_source_links(test_db, project_id=project_id)
+    }
+    links_by_utterance[created["utterance_id"]].merged_draft_version_id = version.id
+    test_db.add(links_by_utterance[created["utterance_id"]])
     await test_db.commit()
     later = await create_test_voice_transcript(client, test_db, "后来我又讲了第一次离家去县城读书。")
     held_event = await _create_source_held_event(

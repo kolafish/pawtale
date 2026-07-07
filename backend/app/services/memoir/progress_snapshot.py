@@ -192,7 +192,7 @@ def _chapter_items(
     items: list[MemoirProjectProgressChapterResponse] = []
     refs_by_chapter = source_refs_by_chapter
     for chapter in sorted_chapters(plan):
-        refs = refs_by_chapter.get(chapter.id, []) if refs_by_chapter is not None else (chapter.source_refs_json or [])
+        refs = refs_by_chapter.get(chapter.id, []) if refs_by_chapter is not None else []
         source_ids = {
             utterance_id
             for utterance_id in source_ref_utterance_ids(refs)

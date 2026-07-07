@@ -915,9 +915,7 @@ def _chapter_snapshot(
     source_refs: list[dict[str, object]] | None = None,
 ) -> dict[str, object]:
     content = version.content.strip()
-    refs = source_refs if source_refs is not None else (
-        chapter.source_refs_json if isinstance(chapter.source_refs_json, list) else []
-    )
+    refs = source_refs or []
     source_ref_snapshot = [
         {
             "utterance_id": _safe_str(item.get("utterance_id")),

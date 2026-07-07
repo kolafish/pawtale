@@ -4,6 +4,8 @@ from app.domain.memoir.types import (
     MemoirAutomationEventType,
     MemoirBookChapterDraftStatus,
     MemoirBookPlanStatus,
+    MemoirChatContentStatus,
+    MemoirChatMessageRole,
     MemoirCreatedBy,
     MemoirEditingJobStatus,
     MemoirEditingJobType,
@@ -16,7 +18,10 @@ from app.models.memoir import (
     MemoirBookOutputVersion,
     MemoirBookPlan,
     MemoirBookPlanChapter,
+    MemoirChatMessage,
     MemoirEditingJob,
+    MemoirVoiceSession,
+    MemoirVoiceUtterance,
 )
 from app.services.memoir.book_manuscript_ai import generate_manuscript_editorial_copy, generate_title_suggestions
 from app.services.memoir.book_manuscript_cleanup import sanitize_manuscript_payload
@@ -25,6 +30,7 @@ from app.services.memoir.editing_job_handlers import register_memoir_editing_job
 from app.services.memoir.editing_jobs import clear_editing_job_handlers, run_editing_job
 from app.services.memoir.tts_alignment import TTSAlignmentSegment
 from app.services.memoir.voice_tts import TTSResult
+from tests.memoir_helpers import add_test_chapter_source_links
 
 
 class FakeBookTTS:
@@ -363,6 +369,59 @@ async def _create_confirmed_book_plan(test_db, *, project_id: str, confirmed_cha
     return plan, chapters
 
 
+async def _add_output_source_link(
+    test_db,
+    *,
+    project_id: str,
+    plan_id: str,
+    chapter_id: str,
+    utterance_id: str,
+    quote: str,
+    text: str | None = None,
+) -> None:
+    source_text = text or quote
+    session = MemoirVoiceSession(project_id=project_id)
+    test_db.add(session)
+    await test_db.flush()
+    message = MemoirChatMessage(
+        project_id=project_id,
+        voice_session_id=session.id,
+        role=MemoirChatMessageRole.USER.value,
+        content_text=source_text,
+        content_status=MemoirChatContentStatus.FINAL.value,
+        turn_index=0,
+    )
+    test_db.add(message)
+    await test_db.flush()
+    utterance = MemoirVoiceUtterance(
+        id=utterance_id,
+        voice_session_id=session.id,
+        chat_message_id=message.id,
+        transcript_raw=source_text,
+        transcript_edited=source_text,
+        start_ms=0,
+        end_ms=8000,
+    )
+    test_db.add(utterance)
+    await test_db.flush()
+    await add_test_chapter_source_links(
+        test_db,
+        project_id=project_id,
+        plan_id=plan_id,
+        chapter_id=chapter_id,
+        source_refs=[
+            {
+                "voice_session_id": session.id,
+                "message_id": message.id,
+                "utterance_id": utterance.id,
+                "start_ms": 0,
+                "end_ms": 8000,
+                "quote": quote,
+            }
+        ],
+    )
+
+
 async def test_mobile_memoir_book_output_routes_require_login(anonymous_client):
     response = await anonymous_client.post(
         "/api/mobile/memoir/projects/project-1/book-output/generate",
@@ -388,14 +447,14 @@ async def test_mobile_memoir_book_output_requires_all_chapters_confirmed(client,
 async def test_mobile_memoir_book_output_generate_combines_confirmed_chapters(client, test_db):
     project_id = await _active_project_id(client)
     plan, chapters = await _create_confirmed_book_plan(test_db, project_id=project_id)
-    chapters[0].source_refs_json = [
-        {
-            "utterance_id": "utterance-1",
-            "transcript_version_id": "transcript-version-1",
-            "voice_session_id": "voice-session-1",
-            "quote": "我小时候常在外婆家的院子里晒太阳。",
-        }
-    ]
+    await _add_output_source_link(
+        test_db,
+        project_id=project_id,
+        plan_id=plan.id,
+        chapter_id=chapters[0].id,
+        utterance_id="utterance-1",
+        quote="我小时候常在外婆家的院子里晒太阳。",
+    )
     await test_db.commit()
 
     response = await client.post(
@@ -567,15 +626,17 @@ async def test_mobile_memoir_book_output_update_title_and_cover_style(client, te
 
 async def test_mobile_memoir_book_output_regenerates_editorial_copy_targets(client, test_db, monkeypatch):
     project_id = await _active_project_id(client)
-    _, chapters = await _create_confirmed_book_plan(test_db, project_id=project_id)
+    plan, chapters = await _create_confirmed_book_plan(test_db, project_id=project_id)
     chapters[0].metadata_json = {"chapter_summary": "这一章写外婆家的院子和童年生活。"}
-    chapters[0].source_refs_json = [
-        {
-            "utterance_id": "u1",
-            "summary": "讲述小时候在院子里晒太阳，也记得外婆忙碌的身影。",
-            "quote": "我小时候常在外婆家的院子里晒太阳。",
-        }
-    ]
+    await _add_output_source_link(
+        test_db,
+        project_id=project_id,
+        plan_id=plan.id,
+        chapter_id=chapters[0].id,
+        utterance_id="u1",
+        quote="我小时候常在外婆家的院子里晒太阳。",
+        text="讲述小时候在院子里晒太阳，也记得外婆忙碌的身影。",
+    )
     await test_db.commit()
     generated = await client.post(f"/api/mobile/memoir/projects/{project_id}/book-output/generate", json={})
     assert generated.status_code == 200
@@ -619,15 +680,17 @@ async def test_mobile_memoir_book_output_editorial_copy_generation_job_runs_in_b
     clear_editing_job_handlers()
     register_memoir_editing_job_handlers()
     project_id = await _active_project_id(client)
-    _, chapters = await _create_confirmed_book_plan(test_db, project_id=project_id)
+    plan, chapters = await _create_confirmed_book_plan(test_db, project_id=project_id)
     chapters[0].metadata_json = {"chapter_summary": "这一章写外婆家的院子和童年生活。"}
-    chapters[0].source_refs_json = [
-        {
-            "utterance_id": "u1",
-            "summary": "讲述小时候在院子里晒太阳。",
-            "quote": "我小时候常在外婆家的院子里晒太阳。",
-        }
-    ]
+    await _add_output_source_link(
+        test_db,
+        project_id=project_id,
+        plan_id=plan.id,
+        chapter_id=chapters[0].id,
+        utterance_id="u1",
+        quote="我小时候常在外婆家的院子里晒太阳。",
+        text="讲述小时候在院子里晒太阳。",
+    )
     await test_db.commit()
     generated = await client.post(f"/api/mobile/memoir/projects/{project_id}/book-output/generate", json={})
     assert generated.status_code == 200
@@ -685,13 +748,15 @@ async def test_mobile_memoir_book_output_editorial_copy_generation_job_runs_in_b
 
 async def test_mobile_memoir_book_output_updates_chapter_editorial_copy(client, test_db):
     project_id = await _active_project_id(client)
-    _, chapters = await _create_confirmed_book_plan(test_db, project_id=project_id)
-    chapters[0].source_refs_json = [
-        {
-            "utterance_id": "u1",
-            "quote": "那棵葡萄树我到现在都记得。",
-        }
-    ]
+    plan, chapters = await _create_confirmed_book_plan(test_db, project_id=project_id)
+    await _add_output_source_link(
+        test_db,
+        project_id=project_id,
+        plan_id=plan.id,
+        chapter_id=chapters[0].id,
+        utterance_id="u1",
+        quote="那棵葡萄树我到现在都记得。",
+    )
     await test_db.commit()
     generated = await client.post(f"/api/mobile/memoir/projects/{project_id}/book-output/generate", json={})
     assert generated.status_code == 200
@@ -935,9 +1000,31 @@ async def test_mobile_memoir_book_outline_tts_generates_and_reuses_audio(
 ):
     monkeypatch.setattr("app.services.memoir.audio_files.MEMOIR_AUDIO_DIR", tmp_path / "audio")
     project_id = await _active_project_id(client)
-    _, chapters = await _create_confirmed_book_plan(test_db, project_id=project_id)
-    chapters[0].source_refs_json = [{"utterance_id": "utterance-1"}]
-    chapters[1].source_refs_json = [{"utterance_id": "utterance-2"}, {"utterance_id": "utterance-3"}]
+    plan, chapters = await _create_confirmed_book_plan(test_db, project_id=project_id)
+    await _add_output_source_link(
+        test_db,
+        project_id=project_id,
+        plan_id=plan.id,
+        chapter_id=chapters[0].id,
+        utterance_id="utterance-1",
+        quote="第一章素材",
+    )
+    await _add_output_source_link(
+        test_db,
+        project_id=project_id,
+        plan_id=plan.id,
+        chapter_id=chapters[1].id,
+        utterance_id="utterance-2",
+        quote="第二章素材一",
+    )
+    await _add_output_source_link(
+        test_db,
+        project_id=project_id,
+        plan_id=plan.id,
+        chapter_id=chapters[1].id,
+        utterance_id="utterance-3",
+        quote="第二章素材二",
+    )
     await test_db.commit()
     fake_tts = FakeBookTTS()
     monkeypatch.setattr("app.services.memoir.book_audio.get_tts_client", lambda: fake_tts)

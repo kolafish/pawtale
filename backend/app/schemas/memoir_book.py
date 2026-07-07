@@ -539,11 +539,8 @@ class MemoirSemanticCacheStatusCountsResponse(BaseModel):
 
 class MemoirSemanticChapterSourceStateResponse(BaseModel):
     chapter_count: int = 0
-    legacy_source_ref_count: int = 0
     active_link_count: int = 0
     removed_link_count: int = 0
-    legacy_refs_without_any_link_count: int = 0
-    active_links_without_legacy_ref_count: int = 0
 
 
 class MemoirSemanticAuditSnapshotLatestResponse(BaseModel):

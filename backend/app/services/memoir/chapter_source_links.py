@@ -5,7 +5,6 @@ from datetime import datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from app.domain.memoir.types import MemoirChapterSourceAssignedBy, MemoirChapterSourceLinkStatus
 from app.models.memoir import (
@@ -58,10 +57,6 @@ def _optional_string_ref_value(ref: dict, key: str) -> str | None:
 def _optional_int_ref_value(ref: dict, key: str) -> int | None:
     value = ref.get(key)
     return value if isinstance(value, int) else None
-
-
-def _source_refs(chapter: MemoirBookPlanChapter) -> list[dict]:
-    return [dict(ref) for ref in (chapter.source_refs_json or []) if isinstance(ref, dict)]
 
 
 def _pending_source_ids(chapter: MemoirBookPlanChapter) -> set[str]:
@@ -129,9 +124,25 @@ async def _load_project_plan(db: AsyncSession, *, project_id: str) -> MemoirBook
     return await db.scalar(
         select(MemoirBookPlan)
         .where(MemoirBookPlan.project_id == project_id)
-        .options(selectinload(MemoirBookPlan.chapters))
         .execution_options(populate_existing=True)
     )
+
+
+async def _load_plan_chapters(
+    db: AsyncSession,
+    *,
+    plan: MemoirBookPlan,
+) -> list[MemoirBookPlanChapter]:
+    return (
+        await db.execute(
+            select(MemoirBookPlanChapter)
+            .where(
+                MemoirBookPlanChapter.project_id == plan.project_id,
+                MemoirBookPlanChapter.plan_id == plan.id,
+            )
+            .order_by(MemoirBookPlanChapter.sort_order, MemoirBookPlanChapter.id)
+        )
+    ).scalars().all()
 
 
 async def _latest_versions_by_chapter(
@@ -167,6 +178,7 @@ async def sync_project_chapter_source_links(
     db: AsyncSession,
     *,
     project_id: str,
+    source_refs_by_chapter: dict[str, list[dict[str, object]]],
     assigned_by: MemoirChapterSourceAssignedBy | str = MemoirChapterSourceAssignedBy.SYSTEM,
     assignment_reason: str = "",
     assignment_metadata_by_utterance: dict[str, ChapterSourceAssignmentMetadata] | None = None,
@@ -178,6 +190,7 @@ async def sync_project_chapter_source_links(
     return await sync_plan_chapter_source_links(
         db,
         plan=plan,
+        source_refs_by_chapter=source_refs_by_chapter,
         assigned_by=assigned_by,
         assignment_reason=assignment_reason,
         assignment_metadata_by_utterance=assignment_metadata_by_utterance,
@@ -189,11 +202,17 @@ async def sync_plan_chapter_source_links(
     db: AsyncSession,
     *,
     plan: MemoirBookPlan,
+    source_refs_by_chapter: dict[str, list[dict[str, object]]],
     assigned_by: MemoirChapterSourceAssignedBy | str = MemoirChapterSourceAssignedBy.SYSTEM,
     assignment_reason: str = "",
     assignment_metadata_by_utterance: dict[str, ChapterSourceAssignmentMetadata] | None = None,
     mark_missing_removed: bool = True,
 ) -> ChapterSourceLinkSyncResult:
+    chapters = await _load_plan_chapters(db, plan=plan)
+    chapter_ids = {chapter.id for chapter in chapters}
+    missing_chapter_ids = chapter_ids - set(source_refs_by_chapter)
+    if mark_missing_removed and missing_chapter_ids:
+        raise ValueError("source_refs_by_chapter must include every current plan chapter")
     existing_links = (
         await db.execute(
             select(MemoirChapterSourceLink).where(
@@ -209,7 +228,7 @@ async def sync_plan_chapter_source_links(
     latest_versions_by_chapter = await _latest_versions_by_chapter(
         db,
         project_id=plan.project_id,
-        chapter_ids={chapter.id for chapter in plan.chapters},
+        chapter_ids=chapter_ids,
     )
     has_merge_state_by_chapter: dict[str, bool] = {}
     for link in existing_links:
@@ -226,11 +245,11 @@ async def sync_plan_chapter_source_links(
     updated_count = 0
     removed_count = 0
 
-    for chapter in sorted(plan.chapters, key=lambda item: item.sort_order):
+    for chapter in chapters:
         pending_ids = _pending_source_ids(chapter)
         latest_version = latest_versions_by_chapter.get(chapter.id)
         should_bootstrap_merge_state = bool(latest_version) and not has_merge_state_by_chapter.get(chapter.id, False)
-        for ref in _source_refs(chapter):
+        for ref in source_refs_by_chapter.get(chapter.id, []):
             utterance_id = _string_ref_value(ref, "utterance_id")
             if not utterance_id:
                 continue
@@ -305,20 +324,6 @@ async def sync_plan_chapter_source_links(
         activated_count=activated_count,
         updated_count=updated_count,
         removed_count=removed_count,
-    )
-
-
-async def backfill_project_chapter_source_links(
-    db: AsyncSession,
-    *,
-    project_id: str,
-) -> ChapterSourceLinkSyncResult:
-    return await sync_project_chapter_source_links(
-        db,
-        project_id=project_id,
-        assigned_by=MemoirChapterSourceAssignedBy.SYSTEM,
-        assignment_reason="backfill_source_refs_json",
-        mark_missing_removed=False,
     )
 
 

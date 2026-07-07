@@ -88,7 +88,7 @@ from app.services.memoir.book_source_links import (
 )
 from app.services.memoir.chapter_source_links import (
     ChapterSourceAssignmentMetadata,
-    sync_project_chapter_source_links as _sync_project_chapter_source_links,
+    sync_plan_chapter_source_links as _sync_plan_chapter_source_links,
 )
 from app.services.memoir.book_structure_commands import (
     apply_book_structure_command as _apply_book_structure_command,
@@ -222,20 +222,22 @@ async def _replace_plan(
     plan.prompt_snapshot = prompt_snapshot
     plan.metadata_json = metadata_json or {}
 
+    pending_source_refs: list[tuple[MemoirBookPlanChapter, list[dict[str, object]]]] = []
     for index, chapter in enumerate(chapters):
-        db.add(
-            MemoirBookPlanChapter(
-                plan_id=plan.id,
-                project_id=project_id,
-                title=chapter.title.strip()[:200],
-                sort_order=index,
-                source_refs_json=[_as_dict(ref) for ref in chapter.source_refs],
-            )
+        plan_chapter = MemoirBookPlanChapter(
+            plan_id=plan.id,
+            project_id=project_id,
+            title=chapter.title.strip()[:200],
+            sort_order=index,
         )
+        db.add(plan_chapter)
+        pending_source_refs.append((plan_chapter, [_as_dict(ref) for ref in chapter.source_refs]))
     await db.flush()
-    await _sync_project_chapter_source_links(
+    source_refs_by_chapter = {chapter.id: refs for chapter, refs in pending_source_refs}
+    await _sync_plan_chapter_source_links(
         db,
-        project_id=project_id,
+        plan=plan,
+        source_refs_by_chapter=source_refs_by_chapter,
         assigned_by=_link_assigned_by_for_created_by(created_by),
         assignment_reason="replace_book_plan",
     )
@@ -405,6 +407,7 @@ async def assign_book_sources_to_chapters(
     source_by_utterance = {source.utterance_id: source for source in sources}
     covered_ids = await _covered_utterance_ids(db, plan)
     chapter_by_id = {chapter.id: chapter for chapter in plan.chapters}
+    refs_by_chapter = await _plan_source_ref_dicts_by_chapter(db, plan)
 
     affected_chapter_ids: set[str] = set()
     assigned_utterance_ids: list[str] = []
@@ -413,7 +416,7 @@ async def assign_book_sources_to_chapters(
         if not chapter:
             raise HTTPException(status_code=404, detail="章节不存在")
 
-        refs = list(chapter.source_refs_json or [])
+        refs = list(refs_by_chapter.get(chapter.id, []))
         pending_ids = _pending_source_ids(chapter.metadata_json)
         for utterance_id in assignment.utterance_ids:
             source = source_by_utterance.get(utterance_id)
@@ -427,10 +430,25 @@ async def assign_book_sources_to_chapters(
             affected_chapter_ids.add(chapter.id)
             assigned_utterance_ids.append(utterance_id)
 
-        chapter.source_refs_json = refs
+        refs_by_chapter[chapter.id] = refs
         chapter.metadata_json = _set_source_assignment_metadata(chapter.metadata_json, pending_ids)
         db.add(chapter)
 
+    if assigned_utterance_ids:
+        await db.flush()
+        await _sync_plan_chapter_source_links(
+            db,
+            plan=plan,
+            source_refs_by_chapter=refs_by_chapter,
+            assigned_by=assigned_by,
+            assignment_reason=assignment_reason,
+            assignment_metadata_by_utterance=assignment_metadata_by_utterance,
+        )
+        await _automation_events.resolve_assigned_source_review_events(
+            db,
+            project_id=project_id,
+            utterance_ids=assigned_utterance_ids,
+        )
     if affected_chapter_ids:
         drafts = (
             await db.execute(
@@ -453,20 +471,6 @@ async def assign_book_sources_to_chapters(
             project_id=project_id,
             chapter_ids=affected_chapter_ids,
             ai_model=req.ai_model,
-        )
-    if assigned_utterance_ids:
-        await db.flush()
-        await _sync_project_chapter_source_links(
-            db,
-            project_id=project_id,
-            assigned_by=assigned_by,
-            assignment_reason=assignment_reason,
-            assignment_metadata_by_utterance=assignment_metadata_by_utterance,
-        )
-        await _automation_events.resolve_assigned_source_review_events(
-            db,
-            project_id=project_id,
-            utterance_ids=assigned_utterance_ids,
         )
 
     await db.commit()
@@ -493,8 +497,9 @@ async def move_book_source_between_chapters(
 
     source_chapter = _chapter_by_id(plan, req.source_chapter_id)
     target_chapter = _chapter_by_id(plan, req.target_chapter_id)
-    source_refs = list(source_chapter.source_refs_json or [])
-    target_refs = list(target_chapter.source_refs_json or [])
+    refs_by_chapter = await _plan_source_ref_dicts_by_chapter(db, plan)
+    source_refs = list(refs_by_chapter.get(source_chapter.id, []))
+    target_refs = list(refs_by_chapter.get(target_chapter.id, []))
 
     if len(source_refs) <= 1:
         raise HTTPException(status_code=400, detail="原章节至少需要保留一条来源")
@@ -522,13 +527,13 @@ async def move_book_source_between_chapters(
     target_removed_ids = _removed_source_ids(target_chapter.metadata_json)
     target_removed_ids.discard(req.utterance_id)
 
-    source_chapter.source_refs_json = kept_source_refs
+    refs_by_chapter[source_chapter.id] = kept_source_refs
     source_chapter.metadata_json = _set_source_change_metadata(
         source_chapter.metadata_json,
         added_ids=source_pending_ids,
         removed_ids=source_removed_ids,
     )
-    target_chapter.source_refs_json = [*target_refs, moving_ref]
+    refs_by_chapter[target_chapter.id] = [*target_refs, moving_ref]
     target_chapter.metadata_json = _set_source_change_metadata(
         target_chapter.metadata_json,
         added_ids=target_pending_ids,
@@ -559,9 +564,10 @@ async def move_book_source_between_chapters(
         ai_model=req.ai_model,
     )
     await db.flush()
-    await _sync_project_chapter_source_links(
+    await _sync_plan_chapter_source_links(
         db,
-        project_id=project_id,
+        plan=plan,
+        source_refs_by_chapter=refs_by_chapter,
         assigned_by=MemoirChapterSourceAssignedBy.USER,
         assignment_reason="manual_source_move",
     )
@@ -705,7 +711,7 @@ def build_book_outline_audio_text(
         source_count = (
             source_counts_by_chapter.get(chapter.id, 0)
             if source_counts_by_chapter is not None
-            else len(chapter.source_refs_json or [])
+            else 0
         )
         lines.append(f"第 {index} 章，{chapter_title}。本章收录 {source_count} 条语音素材。")
     lines.append("你可以继续调整章节顺序、合并章节，或者说出想修改的地方。")
@@ -720,8 +726,7 @@ def _chapter_title_source_digests(
 ) -> list[ChapterTitleSourceDigest]:
     source_by_utterance = {source.utterance_id: source for source in sources}
     digests: list[ChapterTitleSourceDigest] = []
-    refs = source_refs if source_refs is not None else (chapter.source_refs_json or [])
-    for ref in refs:
+    for ref in source_refs or []:
         if not isinstance(ref, dict):
             continue
         utterance_id = ref.get("utterance_id")
@@ -837,6 +842,7 @@ async def update_book_plan(
     sources = await _source_segments(db, user_id=user_id, project_id=project_id)
     chapter_updates = _validated_chapter_updates(req, sources)
     existing_by_id = {chapter.id: chapter for chapter in plan.chapters}
+    current_refs_by_chapter = await _plan_source_ref_dicts_by_chapter(db, plan)
     retained_ids = {chapter.id for chapter in chapter_updates if chapter.id}
     unknown_ids = retained_ids - set(existing_by_id)
     if unknown_ids:
@@ -849,17 +855,18 @@ async def update_book_plan(
 
     changed_chapter_ids: set[str] = set()
     newly_assigned_utterance_ids: set[str] = set()
+    pending_source_refs: list[tuple[MemoirBookPlanChapter, list[dict[str, object]]]] = []
     now = datetime.now(UTC).isoformat()
     for index, chapter_update in enumerate(chapter_updates):
         if chapter_update.id:
             chapter = existing_by_id[chapter_update.id]
-            old_ids = set(_source_ref_utterance_ids(chapter.source_refs_json or []))
+            old_ids = set(_source_ref_utterance_ids(current_refs_by_chapter.get(chapter.id, [])))
             new_ids = set(_source_ref_utterance_ids(chapter_update.source_refs))
             added_ids = new_ids - old_ids
             removed_ids = old_ids - new_ids
             chapter.title = chapter_update.title.strip()[:200]
             chapter.sort_order = index
-            chapter.source_refs_json = [_as_dict(ref) for ref in chapter_update.source_refs]
+            pending_source_refs.append((chapter, [_as_dict(ref) for ref in chapter_update.source_refs]))
             if added_ids or removed_ids:
                 chapter.metadata_json = _set_source_change_metadata(
                     chapter.metadata_json,
@@ -872,16 +879,15 @@ async def update_book_plan(
         else:
             new_source_ids = set(_source_ref_utterance_ids(chapter_update.source_refs))
             newly_assigned_utterance_ids.update(new_source_ids)
-            db.add(
-                MemoirBookPlanChapter(
-                    plan_id=plan.id,
-                    project_id=project_id,
-                    title=chapter_update.title.strip()[:200],
-                    sort_order=index,
-                    source_refs_json=[_as_dict(ref) for ref in chapter_update.source_refs],
-                    metadata_json={"created_from_plan_update_at": now},
-                )
+            chapter = MemoirBookPlanChapter(
+                plan_id=plan.id,
+                project_id=project_id,
+                title=chapter_update.title.strip()[:200],
+                sort_order=index,
+                metadata_json={"created_from_plan_update_at": now},
             )
+            db.add(chapter)
+            pending_source_refs.append((chapter, [_as_dict(ref) for ref in chapter_update.source_refs]))
 
     removed_chapters = [
         chapter for chapter_id, chapter in existing_by_id.items()
@@ -893,16 +899,13 @@ async def update_book_plan(
         else:
             await db.delete(chapter)
 
-    await _handle_chapter_source_changes(
-        db,
-        project_id=project_id,
-        chapter_ids=changed_chapter_ids,
-    )
     if changed_chapter_ids or newly_assigned_utterance_ids or removed_chapters:
         await db.flush()
-        await _sync_project_chapter_source_links(
+        refs_by_chapter = {chapter.id: refs for chapter, refs in pending_source_refs}
+        await _sync_plan_chapter_source_links(
             db,
-            project_id=project_id,
+            plan=plan,
+            source_refs_by_chapter=refs_by_chapter,
             assigned_by=MemoirChapterSourceAssignedBy.USER,
             assignment_reason="book_plan_update",
         )
@@ -911,6 +914,11 @@ async def update_book_plan(
             project_id=project_id,
             utterance_ids=sorted(newly_assigned_utterance_ids) if newly_assigned_utterance_ids else None,
         )
+    await _handle_chapter_source_changes(
+        db,
+        project_id=project_id,
+        chapter_ids=changed_chapter_ids,
+    )
 
     plan.title = (req.title or plan.title).strip()[:200]
     plan.created_by = MemoirCreatedBy.USER.value
@@ -963,6 +971,7 @@ async def apply_book_plan_structure_command(
 
     now = datetime.now(UTC).isoformat()
     source: SourceSegment | None = None
+    refs_by_chapter = await _plan_source_ref_dicts_by_chapter(db, plan)
     if req.type == "create_chapter_from_source":
         utterance_id = _require_source_utterance_id(req)
         if utterance_id in await _covered_utterance_ids(db, plan):
@@ -978,6 +987,7 @@ async def apply_book_plan_structure_command(
         req=req,
         project_id=project_id,
         now=now,
+        source_refs_by_chapter=refs_by_chapter,
         source=source,
     )
     chapters = mutation.chapters
@@ -990,17 +1000,12 @@ async def apply_book_plan_structure_command(
     _renumber_chapters(chapters)
     for chapter in chapters:
         db.add(chapter)
-    if mutation.changed_chapter_ids:
-        await _handle_chapter_source_changes(
-            db,
-            project_id=project_id,
-            chapter_ids=mutation.changed_chapter_ids,
-        )
     if mutation.changed_chapter_ids or source or mutation.deleted_chapters:
         await db.flush()
-        await _sync_project_chapter_source_links(
+        await _sync_plan_chapter_source_links(
             db,
-            project_id=project_id,
+            plan=plan,
+            source_refs_by_chapter=mutation.source_refs_by_chapter,
             assigned_by=MemoirChapterSourceAssignedBy.USER,
             assignment_reason=req.type,
         )
@@ -1008,6 +1013,12 @@ async def apply_book_plan_structure_command(
             db,
             project_id=project_id,
             utterance_ids=[source.utterance_id] if source else None,
+        )
+    if mutation.changed_chapter_ids:
+        await _handle_chapter_source_changes(
+            db,
+            project_id=project_id,
+            chapter_ids=mutation.changed_chapter_ids,
         )
     _touch_plan_structure(plan, operation=req.type, now=now)
     db.add(plan)
