@@ -35,7 +35,13 @@ export type {
   BookAutomationEventSuggestionView,
   BookAutomationEventView,
 } from "./book-automation-view-model";
-export { buildAutomationEventViews } from "./book-automation-view-model";
+export {
+  buildAutomationEventViews,
+  hasPendingBookOutputGeneration,
+  mergeAutomationEvent,
+  pendingBookGenerationEvents,
+  pendingChapterDraftGenerationIds,
+} from "./book-automation-view-model";
 export { trimText } from "./book-view-model-utils";
 
 export type BookStage = "empty" | "plan_draft" | "drafting";
