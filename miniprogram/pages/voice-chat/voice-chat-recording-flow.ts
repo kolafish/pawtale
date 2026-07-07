@@ -1,8 +1,22 @@
+import type {
+  MemoirGuidanceMode,
+  VoiceChatTranscriptLine,
+  VoiceGatewayServerEvent,
+} from "../../domain/voice-chat";
+import { normalizeMemoirAsrText } from "../../services/asr-text-normalization";
 import type { VoiceChatConnectionStatus } from "../../services/memoir-streaming-asr";
-import { statusText } from "../../services/voice-chat-state";
+import {
+  assistantTranscriptState,
+  countTextChars,
+  statusText,
+  upsertTranscriptLine,
+} from "../../services/voice-chat-state";
 import type { VoiceChatData } from "./voice-chat-page-state";
 
 type VoiceChatPatch = Partial<VoiceChatData>;
+
+const LIVE_TRANSCRIPT_SCROLL_THRESHOLD = 44;
+const LIVE_TRANSCRIPT_SCROLL_STEP = 10000;
 
 export function voiceClientUnavailableForRecording(
   hasClient: boolean,
@@ -70,6 +84,120 @@ export function voiceRecordingStoppedPatch(): VoiceChatPatch {
   return {
     recording: false,
     primaryActionText: "继续说话",
+  };
+}
+
+function resetLiveTranscriptScrollPatch(): VoiceChatPatch {
+  return {
+    liveScrollClass: "live-scroll",
+    liveScrollTarget: "",
+    liveScrollTop: 0,
+    liveTextEndId: "live-text-end",
+  };
+}
+
+function liveTranscriptScrollPatch(text: string, currentScrollTop: number): VoiceChatPatch {
+  if (!text) {
+    return resetLiveTranscriptScrollPatch();
+  }
+  const scrollTop = currentScrollTop + LIVE_TRANSCRIPT_SCROLL_STEP;
+  const endId = `live-text-end-${scrollTop}`;
+  return {
+    liveScrollClass: text.length > LIVE_TRANSCRIPT_SCROLL_THRESHOLD ? "live-scroll long" : "live-scroll",
+    liveScrollTop: scrollTop,
+    liveTextEndId: endId,
+    liveScrollTarget: endId,
+  };
+}
+
+export function voiceLiveTranscriptPatch(text: string, currentScrollTop: number): VoiceChatPatch {
+  const displayText = normalizeMemoirAsrText(text || "");
+  return {
+    liveText: displayText,
+    liveCharCount: countTextChars(displayText),
+    ...liveTranscriptScrollPatch(displayText, currentScrollTop),
+    persistenceStateText: "识别中",
+    error: "",
+    errorKindText: "",
+  };
+}
+
+export interface VoiceFinalTranscriptResult {
+  line: VoiceChatTranscriptLine;
+  transcriptLines: VoiceChatTranscriptLine[];
+  patch: VoiceChatPatch;
+}
+
+function savedTranscriptStateText(event: VoiceGatewayServerEvent): string {
+  return event.message_id && event.utterance_id && event.transcript_version_id
+    ? "已保存"
+    : "待同步";
+}
+
+function voiceFinalTranscriptLine(
+  event: VoiceGatewayServerEvent,
+  fallbackId: string,
+): VoiceChatTranscriptLine | null {
+  const text = normalizeMemoirAsrText(event.text || "");
+  if (!text) {
+    return null;
+  }
+  return {
+    id: event.message_id || event.utterance_id || fallbackId,
+    text,
+    role: "user",
+    message_id: event.message_id,
+    utterance_id: event.utterance_id,
+    audio_file_id: event.audio_file_id,
+    transcript_version_id: event.transcript_version_id,
+    start_ms: event.start_ms,
+    end_ms: event.end_ms,
+  };
+}
+
+export function voiceFinalTranscriptResult(
+  event: VoiceGatewayServerEvent,
+  current: {
+    transcriptLines: VoiceChatTranscriptLine[];
+    guidanceMode: MemoirGuidanceMode;
+    lastFollowUpSourceMessageId: string;
+  },
+  fallbackId: string,
+): VoiceFinalTranscriptResult | null {
+  const line = voiceFinalTranscriptLine(event, fallbackId);
+  if (!line) {
+    return null;
+  }
+  const transcriptLines = upsertTranscriptLine(current.transcriptLines, line);
+  return {
+    line,
+    transcriptLines,
+    patch: {
+      liveText: "",
+      liveCharCount: 0,
+      ...resetLiveTranscriptScrollPatch(),
+      ...assistantTranscriptState(transcriptLines, {
+        guidanceMode: current.guidanceMode,
+        lastFollowUpSourceMessageId: current.lastFollowUpSourceMessageId,
+        followUpLoading: false,
+        assistantPromptText: "",
+        followUpMessageId: "",
+        followUpAudioFileId: "",
+        followUpTTSStateText: "",
+        ttsAlignment: [],
+      }),
+      persistenceStateText: savedTranscriptStateText(event),
+      error: "",
+      errorKindText: "",
+      assistantPromptText: "",
+      selectedOpeningTopicText: "",
+      dismissedFollowUpMessageId: "",
+      followUpMessageId: "",
+      followUpAudioFileId: "",
+      followUpLoading: false,
+      followUpTTSLoading: false,
+      followUpTTSError: "",
+    },
   };
 }
 
