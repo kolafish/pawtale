@@ -219,6 +219,33 @@ function bookVoiceTurnRuntimeMock(calls, {
   };
 }
 
+function installConfirmingWx(extra = {}) {
+  global.wx = {
+    showModal(options) {
+      options.success({ confirm: true });
+    },
+    ...extra,
+  };
+}
+
+function bookVoiceCommandExecutionHarness(responseFactory, voiceApiExports = {}) {
+  const calls = [];
+  const { page } = loadBookPage({
+    voiceApiExports: {
+      executeMemoirBookVoiceCommand: async (projectId, data) => {
+        calls.push({ projectId, data });
+        return responseFactory(projectId, data);
+      },
+      ...voiceApiExports,
+    },
+  });
+  return {
+    page,
+    context: pageContext(page, { projectId: "project/1" }),
+    calls,
+  };
+}
+
 function planFromChapterUpdates(status, updates) {
   const base = samplePlan(status);
   return {
@@ -2747,27 +2774,16 @@ test("book page pauses voice conversation when no speech is detected", async () 
 });
 
 test("book page executes a confirmed voice rename with undo snapshot", async () => {
-  global.wx = {
-    showModal(options) {
-      options.success({ confirm: true });
-    },
-  };
+  installConfirmingWx();
   const plan = samplePlan("confirmed");
   const executedPlan = planFromStructureCommand("confirmed", {
     type: "rename_chapter",
     chapter_id: "chapter-1",
     title: "童年往事",
   });
-  const calls = [];
-  const { page } = loadBookPage({
-    voiceApiExports: {
-      executeMemoirBookVoiceCommand: async (projectId, data) => {
-        calls.push({ projectId, data });
-        return sampleBookVoiceCommandExecuteResponse(data.intent, executedPlan);
-      },
-    },
-  });
-  const context = pageContext(page, { projectId: "project/1" });
+  const { page, context, calls } = bookVoiceCommandExecutionHarness((_, data) => (
+    sampleBookVoiceCommandExecuteResponse(data.intent, executedPlan)
+  ));
   page.applyPlan.call(context, plan);
   page.applyBookVoiceCommandPreview.call(context, sampleBookVoiceCommandPreview());
 
@@ -2793,26 +2809,15 @@ test("book page executes a confirmed voice rename with undo snapshot", async () 
 });
 
 test("book page executes and undoes a voice chapter move", async () => {
-  global.wx = {
-    showModal(options) {
-      options.success({ confirm: true });
-    },
-  };
-  const calls = [];
+  installConfirmingWx();
   const movedPlan = planFromStructureCommand("confirmed", {
     type: "move_chapter",
     chapter_id: "chapter-2",
     direction: "up",
   });
-  const { page } = loadBookPage({
-    voiceApiExports: {
-      executeMemoirBookVoiceCommand: async (projectId, data) => {
-        calls.push({ projectId, data });
-        return sampleBookVoiceCommandExecuteResponse(data.intent, movedPlan);
-      },
-    },
-  });
-  const context = pageContext(page, { projectId: "project/1" });
+  const { page, context, calls } = bookVoiceCommandExecutionHarness((_, data) => (
+    sampleBookVoiceCommandExecuteResponse(data.intent, movedPlan)
+  ));
   page.applyPlan.call(context, samplePlan("confirmed"));
   page.applyBookVoiceCommandPreview.call(context, sampleBookVoiceCommandPreview({
     original_text: "把第二章上移",
@@ -2855,26 +2860,15 @@ test("book page executes and undoes a voice chapter move", async () => {
 });
 
 test("book page executes a voice chapter move to an explicit position", async () => {
-  global.wx = {
-    showModal(options) {
-      options.success({ confirm: true });
-    },
-  };
-  const calls = [];
+  installConfirmingWx();
   const movedPlan = planFromStructureCommand("confirmed", {
     type: "move_chapter",
     chapter_id: "chapter-1",
     target_position: "last",
   });
-  const { page } = loadBookPage({
-    voiceApiExports: {
-      executeMemoirBookVoiceCommand: async (projectId, data) => {
-        calls.push({ projectId, data });
-        return sampleBookVoiceCommandExecuteResponse(data.intent, movedPlan);
-      },
-    },
-  });
-  const context = pageContext(page, { projectId: "project/1" });
+  const { page, context, calls } = bookVoiceCommandExecutionHarness((_, data) => (
+    sampleBookVoiceCommandExecuteResponse(data.intent, movedPlan)
+  ));
   page.applyPlan.call(context, samplePlan("confirmed"));
   page.applyBookVoiceCommandPreview.call(context, sampleBookVoiceCommandPreview({
     original_text: "把外婆家的童年移到最后一章",
@@ -2911,25 +2905,13 @@ test("book page executes a voice chapter move to an explicit position", async ()
 });
 
 test("book page executes a voice assignment for an uncovered source", async () => {
-  global.wx = {
-    showModal(options) {
-      options.success({ confirm: true });
-    },
-    showToast() {},
-  };
+  installConfirmingWx({ showToast() {} });
   const assignedPlan = samplePlan("confirmed");
   assignedPlan.chapters[1].source_refs = [sampleRef("utterance-new-1", "新增转写")];
-  const calls = [];
-  const { page } = loadBookPage({
-    voiceApiExports: {
-      executeMemoirBookVoiceCommand: async (projectId, data) => {
-        calls.push({ projectId, data });
-        return sampleBookVoiceCommandExecuteResponse(data.intent, assignedPlan, sampleSourceCoverage(0));
-      },
-      getMemoirBookChapterDraft: async () => sampleDraft(1, "draft"),
-    },
-  });
-  const context = pageContext(page, { projectId: "project/1" });
+  const { page, context, calls } = bookVoiceCommandExecutionHarness(
+    (_, data) => sampleBookVoiceCommandExecuteResponse(data.intent, assignedPlan, sampleSourceCoverage(0)),
+    { getMemoirBookChapterDraft: async () => sampleDraft(1, "draft") },
+  );
   page.applyPlan.call(context, samplePlan("confirmed"));
   page.applySourceCoverage.call(context, sampleSourceCoverage(1));
   page.applyBookOutput.call(context, sampleBookOutput(1, "旧全书"));
@@ -2975,19 +2957,10 @@ test("book page executes a voice assignment for an uncovered source", async () =
 });
 
 test("book page shows backend voice execution errors", async () => {
-  global.wx = {
-    showModal(options) {
-      options.success({ confirm: true });
-    },
-  };
-  const { page } = loadBookPage({
-    voiceApiExports: {
-      executeMemoirBookVoiceCommand: async () => {
-        throw new Error("章节已经不存在");
-      },
-    },
+  installConfirmingWx();
+  const { page, context } = bookVoiceCommandExecutionHarness(() => {
+    throw new Error("章节已经不存在");
   });
-  const context = pageContext(page, { projectId: "project/1" });
   page.applyPlan.call(context, samplePlan("confirmed"));
   page.applyBookVoiceCommandPreview.call(context, sampleBookVoiceCommandPreview());
 

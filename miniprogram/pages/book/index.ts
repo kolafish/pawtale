@@ -138,7 +138,6 @@ import {
   buildAutomationEventViews,
   BOOK_COVER_STYLE_OPTIONS,
   BOOK_EXPORT_LAYOUT_OPTIONS,
-  canExecuteBookVoiceCommand,
   hasPendingBookOutputGeneration,
   mergeAutomationEvent,
   pendingBookGenerationEvents,
@@ -158,11 +157,14 @@ import {
   bookVoiceCommandParseRequest,
   bookVoiceCommandPreviewPatch,
   clearBookVoiceCommandPreviewPatch,
+  bookVoiceCommandAssigningSourceId,
+  bookVoiceCommandExecutionMode,
+  canExecuteBookVoiceCommand,
   executedVoiceCommandStatusText,
   executedVoiceCommandUndoText,
   isBookVoiceCommandConfirmationText,
-  isBookVoiceReadIntent,
   normalizeBookVoiceAsrText,
+  shouldReloadBookOutputAfterVoiceCommand,
 } from "./book-voice-assistant-view-model";
 export {
   bookChapterDetailUrl,
@@ -173,7 +175,6 @@ export {
   bookOutputStaleNotice,
   bookOutputVersionText,
   bookOutlineNarrationText,
-  bookVoiceCommandActionText,
   bookProgressText,
   bookSourceCoverageNotice,
   buildAutomationEventViews,
@@ -181,9 +182,12 @@ export {
   buildChapterViews,
   buildSourceActionPickerOptions,
   buildUncoveredSourceViews,
-  canExecuteBookVoiceCommand,
   latestBookContent,
 } from "./book-view-model";
+export {
+  bookVoiceCommandActionText,
+  canExecuteBookVoiceCommand,
+} from "./book-voice-assistant-view-model";
 
 interface BookDataset {
   id?: string;
@@ -2099,11 +2103,13 @@ definePage<BookData>()({
       }
       return;
     }
-    if (preview && isBookVoiceReadIntent(preview) && canExecuteBookVoiceCommand(preview)) {
+    const previewExecutionMode = preview ? bookVoiceCommandExecutionMode(preview) : null;
+    const isReadCommand = previewExecutionMode === "read_outline" || previewExecutionMode === "read_chapter";
+    if (isReadCommand && canExecuteBookVoiceCommand(preview)) {
       await this.executeBookVoiceCommand({ confirmedByVoice: true, autoListenAfterExecution: autoListenAfterTurn });
       return;
     }
-    if (autoListenAfterTurn && preview && !isBookVoiceReadIntent(preview)) {
+    if (autoListenAfterTurn && preview && !isReadCommand) {
       this.scheduleBookVoiceAssistantAutoListen(
         preview.requires_confirmation && canExecuteBookVoiceCommand(preview)
           ? "等你确认，或继续说"
@@ -2124,11 +2130,12 @@ definePage<BookData>()({
     ) {
       return;
     }
-    if (preview.intent === "read_outline") {
+    const executionMode = bookVoiceCommandExecutionMode(preview);
+    if (executionMode === "read_outline") {
       await this.playBookOutlineAudio({ autoListenAfterPlayback: options.autoListenAfterExecution });
       return;
     }
-    if (preview.intent === "read_chapter" && operation.chapter_id) {
+    if (executionMode === "read_chapter" && operation.chapter_id) {
       await this.playChapterAudioById(operation.chapter_id, { autoListenAfterPlayback: options.autoListenAfterExecution });
       return;
     }
@@ -2140,10 +2147,11 @@ definePage<BookData>()({
       }
     }
     const undoSnapshot = this.bookVoiceCommandUndoSnapshot();
+    const assigningSourceId = bookVoiceCommandAssigningSourceId(preview);
     this.setData({ bookVoiceCommandExecuting: true, error: "" });
     try {
-      if (preview.intent === "assign_source" && operation.utterance_id) {
-        this.setData({ assigningSourceId: operation.utterance_id });
+      if (assigningSourceId) {
+        this.setData({ assigningSourceId });
       }
       const response = await executeMemoirBookVoiceCommand(this.data.projectId, {
         intent: preview.intent,
@@ -2164,7 +2172,7 @@ definePage<BookData>()({
         bookVoiceAssistantStatusText: "执行失败",
       });
     } finally {
-      if (preview.intent === "assign_source") {
+      if (assigningSourceId) {
         this.setData({ assigningSourceId: "" });
       }
       this.setData({ bookVoiceCommandExecuting: false });
@@ -2178,7 +2186,9 @@ definePage<BookData>()({
   ) {
     const [draftsByChapterId, output] = await Promise.all([
       this.loadDraftsForPlan(response.plan),
-      response.intent === "assign_source" ? Promise.resolve(null) : this.loadBookOutput(this.data.projectId),
+      shouldReloadBookOutputAfterVoiceCommand(response.intent)
+        ? this.loadBookOutput(this.data.projectId)
+        : Promise.resolve(null),
     ]);
     const coverage = response.source_coverage || await this.loadSourceCoverage(this.data.projectId);
     this.applySourceCoverage(coverage);
