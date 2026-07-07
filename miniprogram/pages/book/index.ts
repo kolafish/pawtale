@@ -139,6 +139,10 @@ import {
   BOOK_COVER_STYLE_OPTIONS,
   BOOK_EXPORT_LAYOUT_OPTIONS,
   canExecuteBookVoiceCommand,
+  hasPendingBookOutputGeneration,
+  mergeAutomationEvent,
+  pendingBookGenerationEvents,
+  pendingChapterDraftGenerationIds,
 } from "./book-view-model";
 import {
   bookEditorialCopyBlockedMessage,
@@ -197,38 +201,6 @@ type PickerEvent = PagePickerEvent<BookDataset>;
 
 const BOOK_GENERATION_EVENT_POLL_INTERVAL_MS = 3000;
 const BOOK_GENERATION_EVENT_POLL_MAX_ATTEMPTS = 120;
-
-function isBookGenerationEvent(event: MemoirAutomationEvent): boolean {
-  return (
-    event.event_type === "chapter_draft_generated"
-    || event.event_type === "book_output_generated"
-    || event.event_type === "book_editorial_copy_generated"
-  );
-}
-
-function pendingBookGenerationEvents(events: MemoirAutomationEvent[]): MemoirAutomationEvent[] {
-  return events.filter((event) => isBookGenerationEvent(event) && event.status === "pending");
-}
-
-function pendingChapterDraftGenerationIds(events: MemoirAutomationEvent[]): Set<string> {
-  return new Set(
-    pendingBookGenerationEvents(events)
-      .filter((event) => event.event_type === "chapter_draft_generated")
-      .map((event) => trimText(event.chapter_id || ""))
-      .filter(Boolean),
-  );
-}
-
-function hasPendingBookOutputGeneration(events: MemoirAutomationEvent[]): boolean {
-  return pendingBookGenerationEvents(events).some((event) => event.event_type === "book_output_generated");
-}
-
-function mergeAutomationEvent(
-  events: MemoirAutomationEvent[],
-  event: MemoirAutomationEvent,
-): MemoirAutomationEvent[] {
-  return [event, ...events.filter((candidate) => candidate.id !== event.id)];
-}
 
 function defaultBookTitleInput(planTitle: string, projectTitle: string): string {
   return (
