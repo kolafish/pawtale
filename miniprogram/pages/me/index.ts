@@ -1,4 +1,5 @@
 import type { MemoirVoiceProgressResponse } from "../../domain/voice-chat";
+import { definePage } from "../../services/page-definition";
 import type { TTSSpeedOption, TTSSettingsScope, TTSVoiceOption } from "../../services/tts-settings";
 import {
   getMemoirIdentity,
@@ -251,34 +252,7 @@ function loggedOutData(): Partial<MeData> {
   };
 }
 
-Page<MeData, {
-  onShow(): Promise<void>;
-  loadMe(): Promise<void>;
-  loadVoiceStats(projectId: string): Promise<void>;
-  refreshVoiceAuthorizationConsent(): void;
-  refreshAccessibilitySettings(): void;
-  changeEmailInput(event: InputEvent): void;
-  changePassword(event: InputEvent): void;
-  changeCredentialEmail(event: InputEvent): void;
-  changeCredentialPassword(event: InputEvent): void;
-  toggleAccountMode(): void;
-  submitWeChat(): Promise<void>;
-  submitAccount(): Promise<void>;
-  submitCredentials(): Promise<void>;
-  startEditName(): void;
-  changeNameDraft(event: InputEvent): void;
-  cancelEditName(): void;
-  saveDisplayName(): Promise<void>;
-  selectTTSVoice(event: VoiceDatasetEvent): void;
-  selectTTSSpeed(event: SpeedDatasetEvent): void;
-  selectAIModel(event: ModelDatasetEvent): void;
-  changeLargeText(event: SwitchChangeEvent): void;
-  changeAutoBargeIn(event: SwitchChangeEvent): void;
-  openVoiceAuthorization(): void;
-  openProjects(): void;
-  openVoiceProgress(): void;
-  logout(): Promise<void>;
-}>({
+definePage<MeData>()({
   data: {
     loading: false,
     loggedIn: false,
@@ -391,19 +365,19 @@ Page<MeData, {
     }
   },
 
-  changeEmailInput(event) {
+  changeEmailInput(event: InputEvent) {
     this.setData({ emailInput: event.detail.value, error: "" });
   },
 
-  changePassword(event) {
+  changePassword(event: InputEvent) {
     this.setData({ password: event.detail.value, error: "" });
   },
 
-  changeCredentialEmail(event) {
+  changeCredentialEmail(event: InputEvent) {
     this.setData({ credentialEmail: event.detail.value, error: "" });
   },
 
-  changeCredentialPassword(event) {
+  changeCredentialPassword(event: InputEvent) {
     this.setData({ credentialPassword: event.detail.value, error: "" });
   },
 
@@ -512,7 +486,7 @@ Page<MeData, {
     this.setData({ editingName: true, nameDraft: this.data.displayName, error: "" });
   },
 
-  changeNameDraft(event) {
+  changeNameDraft(event: InputEvent) {
     this.setData({ nameDraft: event.detail.value, error: "" });
   },
 
@@ -554,7 +528,7 @@ Page<MeData, {
     }
   },
 
-  async loadVoiceStats(projectId) {
+  async loadVoiceStats(projectId: string) {
     if (!projectId) {
       return;
     }
@@ -572,7 +546,7 @@ Page<MeData, {
     }
   },
 
-  selectTTSVoice(event) {
+  selectTTSVoice(event: VoiceDatasetEvent) {
     const scope = datasetChoice(event, "scope", TTS_SCOPE_VALUES, "chat");
     const voice = datasetString(event, "voice");
     const settings = saveScopedTTSSettings(scope, { ...readScopedTTSSettings(scope), voice });
@@ -580,7 +554,7 @@ Page<MeData, {
     wx.showToast({ title: "已保存", icon: "success" });
   },
 
-  selectTTSSpeed(event) {
+  selectTTSSpeed(event: SpeedDatasetEvent) {
     const scope = datasetChoice(event, "scope", TTS_SCOPE_VALUES, "chat");
     const current = readScopedTTSSettings(scope);
     const speedRatio = datasetNumber(event, "speed", current.speedRatio);
@@ -589,7 +563,7 @@ Page<MeData, {
     wx.showToast({ title: "已保存", icon: "success" });
   },
 
-  selectAIModel(event) {
+  selectAIModel(event: ModelDatasetEvent) {
     const model = saveSelectedAIModel(datasetString(event, "model"));
     this.setData({
       aiModel: model,
@@ -599,7 +573,7 @@ Page<MeData, {
     wx.showToast({ title: "已保存", icon: "success" });
   },
 
-  changeLargeText(event) {
+  changeLargeText(event: SwitchChangeEvent) {
     const settings = saveLargeTextEnabled(event.detail.value);
     this.setData({
       largeTextEnabled: settings.largeTextEnabled,
@@ -608,7 +582,7 @@ Page<MeData, {
     wx.showToast({ title: settings.largeTextEnabled ? "大字模式已打开" : "大字模式已关闭", icon: "none" });
   },
 
-  changeAutoBargeIn(event) {
+  changeAutoBargeIn(event: SwitchChangeEvent) {
     const settings = saveAutoBargeInEnabled(event.detail.value);
     this.setData({
       largeTextEnabled: settings.largeTextEnabled,

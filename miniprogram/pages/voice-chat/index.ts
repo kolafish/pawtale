@@ -8,6 +8,7 @@ import type {
   VoiceChatTranscriptLine,
   VoiceGatewayServerEvent,
 } from "../../domain/voice-chat";
+import { definePage } from "../../services/page-definition";
 import { trackAuditAction } from "../../services/audit-tracker";
 import { AudioPlaybackController } from "../../services/audio-playback";
 import { readAccessibilitySettings } from "../../services/accessibility-settings";
@@ -146,130 +147,12 @@ function setVoiceChatData(context: VoiceChatDataContext, patch: Partial<VoiceCha
   });
 }
 
-Page<VoiceChatData, {
-  onLoad(query?: PageQuery): Promise<void>;
-  onShow(): void;
-  onHide(): void;
-  onUnload(): void;
-  suspendVoiceChat(reason: "hide" | "unload"): void;
-  refreshVoiceAuthorizationConsent(): void;
-  refreshAccessibilitySettings(): void;
-  changeVoiceAuthorization(event: CheckboxChangeEvent): Promise<void>;
-  openVoiceAuthorization(): void;
-  ensureVoiceAuthorization(autoTriggered?: boolean): boolean;
-  syncVoiceAuthorizationForSession(): Promise<boolean>;
-  syncVoiceAuthorizationAndConnect(autoTriggered?: boolean): Promise<void>;
-  hydrateVoiceSessionSnapshot(): void;
-  refreshVoiceSessionSnapshot(): Promise<MemoirVoiceSessionDetail | null>;
-  reconcilePendingClose(detail: MemoirVoiceSessionDetail): void;
-  confirmSavedTranscriptSnapshot(event: VoiceGatewayServerEvent): Promise<void>;
-  applyVoiceSessionDetail(detail: MemoirVoiceSessionDetail): void;
-  persistCurrentTranscriptSnapshot(): void;
-  persistPendingVoiceClose(reason: "hide" | "unload" | "connection_error"): void;
-  reconnectGateway(): Promise<void>;
-  finishAfterDisconnect(): Promise<void>;
-  maybeGenerateOpeningFollowUp(): void;
-  generateFollowUp(regenerate?: boolean): Promise<void>;
-  generateStreamingFollowUp(sourceMessageId: string, regenerate: boolean, requestSerial: number): Promise<void>;
-  markStreamingAutomationEventsVoicePlayed(completed: VoiceAssistantTurnCompletedEvent): Promise<void>;
-  clearFailedStreamingAssistantTurn(message: string): void;
-  applyStreamingAssistantText(text: string, sourceMessageId: string): void;
-  applyCompletedStreamingAssistantTurn(event: VoiceAssistantTurnCompletedEvent, sourceMessageId: string): void;
-  prepareStreamingAudioPlayback(requestSerial: number): void;
-  markStreamingPlaybackError(error: Error, requestSerial: number): void;
-  regenerateFollowUp(): Promise<void>;
-  skipFollowUp(): void;
-  chooseOpeningTopic(event: OpeningTopicTapEvent): void;
-  changeSpeakerRole(event: SpeakerRoleTapEvent): void;
-  startRecordingAsSpeaker(event: SpeakerRoleTapEvent): void;
-  stopAndAskFollowUp(): void;
-  enqueueAssistantTurn(item: AssistantTurnQueueItem): void;
-  drainAssistantTurnQueue(): Promise<void>;
-  prepareAssistantTurnAudio(item: AssistantTurnQueueItem): Promise<PreparedAssistantTurnAudio>;
-  showAssistantTurn(item: AssistantTurnQueueItem, patch?: Partial<VoiceChatData>): void;
-  playPreparedAssistantTurn(
-    item: AssistantTurnQueueItem,
-    prepared: PreparedAssistantTurnAudio,
-  ): Promise<void>;
-  prepareFollowUpTTS(
-    messageId: string,
-    forceRegenerate?: boolean,
-    autoListenAfterPlayback?: boolean,
-  ): Promise<void>;
-  playFollowUpAudio(): Promise<void>;
-  playAudioFile(
-    audioFileId: string,
-    options?: {
-      autoListenAfterPlayback?: boolean;
-      text?: string;
-      alignment?: TTSAlignmentSegment[];
-      durationSeconds?: number;
-    },
-  ): Promise<void>;
-  stopFollowUpAudio(): void;
-  cancelFollowUpTTS(reason?: string): void;
-  assistantTurnActiveForBargeIn(): boolean;
-  startAssistantBargeInMonitor(requestSerial: number): void;
-  stopAssistantBargeInMonitor(): Promise<void>;
-  handleAssistantBargeIn(requestSerial: number): Promise<void>;
-  markStreamingAudioFrameScheduled(event: StreamingSpeechPlaybackFrameEvent): void;
-  updateStreamingTTSProgress(): void;
-  streamingPlaybackTimeForProgress(): number;
-  updateFollowUpTTSProgress(currentTime: number, duration: number, fallbackDuration?: number): void;
-  playbackTimeForProgress(audio: WechatMiniprogram.InnerAudioContext): number;
-  streamingProgressPercent(spokenText: string, fullText: string, allowComplete: boolean): number;
-  startStreamingProgressTimer(playToken: number): void;
-  startFollowUpProgressTimer(
-    playToken: number,
-    audio: WechatMiniprogram.InnerAudioContext,
-    fallbackDuration?: number,
-  ): void;
-  stopFollowUpProgressTimer(): void;
-  resetFollowUpTTSProgress(): void;
-  toggleAutoStop(): void;
-  autoListenGateSnapshot(): AutoListenGateSnapshot;
-  connectGateway(): Promise<void>;
-  startRecording(autoTriggered?: boolean, speakerRole?: MemoirSpeakerRole): boolean;
-  startRecordingAfterPrivacy(autoTriggered?: boolean, speakerRole?: MemoirSpeakerRole): Promise<boolean>;
-  toggleRecording(): void;
-  shouldAutoStartListening(): boolean;
-  tryStartAutoListenAfterTTS(): Promise<boolean>;
-  cancelPendingNoAnswerPrompt(clearLoading?: boolean): void;
-  handleNoAnswerAutoStop(): Promise<void>;
-  finishSession(): Promise<void>;
-  handleStatus(status: VoiceChatConnectionStatus): void;
-  handleCaptureStats(stats: MemoirCaptureStats): void;
-  handleGatewayEvent(event: VoiceGatewayServerEvent): void;
-  handlePartial(text: string): void;
-  handleFinal(event: VoiceGatewayServerEvent): void;
-  handleError(message: string, error?: VoiceChatErrorInfo): void;
-  audioPlayback: AudioPlaybackController;
-  voiceStreaming: StreamingVoiceController;
-  assistantBargeInMonitor: VoiceBargeInMonitor;
-  assistantTurnRuntime: VoiceAssistantTurnRuntime | null;
-  assistantTurnQueue: AssistantTurnQueueItem[];
-  assistantTurnQueueRunning: boolean;
-  assistantAudioPrepareCount: number;
-  assistantStreamLineId: string;
-  assistantStreamingAudioStartSeconds: number;
-  assistantStreamingAudioEndSeconds: number;
-  assistantStreamingAudioDurationSeconds: number;
-  ttsPlayToken: number;
-  ttsProgressTimer: number | null;
-  ttsProgressStartedAtMs: number;
-  ttsRequestSerial: number;
-  noAnswerPromptInFlight: boolean;
-  noAnswerPromptRequestSerial: number;
-  consecutiveNoAnswerPrompts: number;
-  handledNoAnswerFrameCount: number;
-  autoListenPendingAfterPlayback: boolean;
-  pageSuspended: boolean;
-}>({
+definePage<VoiceChatData>()({
   audioPlayback: new AudioPlaybackController(),
   voiceStreaming: new StreamingVoiceController(),
   assistantBargeInMonitor: new VoiceBargeInMonitor(),
-  assistantTurnRuntime: null,
-  assistantTurnQueue: [],
+  assistantTurnRuntime: null as VoiceAssistantTurnRuntime | null,
+  assistantTurnQueue: [] as AssistantTurnQueueItem[],
   assistantTurnQueueRunning: false,
   assistantAudioPrepareCount: 0,
   assistantStreamLineId: "",
@@ -277,7 +160,7 @@ Page<VoiceChatData, {
   assistantStreamingAudioEndSeconds: 0,
   assistantStreamingAudioDurationSeconds: 0,
   ttsPlayToken: 0,
-  ttsProgressTimer: null,
+  ttsProgressTimer: null as number | null,
   ttsProgressStartedAtMs: 0,
   ttsRequestSerial: 0,
   noAnswerPromptInFlight: false,
@@ -305,7 +188,7 @@ Page<VoiceChatData, {
     });
   },
 
-  async onLoad(query) {
+  async onLoad(query?: PageQuery) {
     this.refreshAccessibilitySettings();
     const voiceSessionId = queryParam(query, "voiceSessionId");
     const guidanceMode = queryChoice(query, "mode", GUIDANCE_MODE_VALUES, "free_narration");
@@ -376,7 +259,7 @@ Page<VoiceChatData, {
     this.voiceStreaming.close();
   },
 
-  suspendVoiceChat(reason) {
+  suspendVoiceChat(reason: "hide" | "unload") {
     this.pageSuspended = true;
     followUpRequestSerial += 1;
     this.noAnswerPromptRequestSerial += 1;
@@ -411,7 +294,7 @@ Page<VoiceChatData, {
     }
   },
 
-  async changeVoiceAuthorization(event) {
+  async changeVoiceAuthorization(event: CheckboxChangeEvent) {
     const agreed = event.detail.value.includes(VOICE_AUTHORIZATION_VALUE);
     const consent = saveVoiceAuthorizationConsent(agreed);
     if (!agreed && this.voiceStreaming.hasClient() && this.data.recording) {
@@ -434,7 +317,7 @@ Page<VoiceChatData, {
     wx.navigateTo({ url: VOICE_AUTHORIZATION_PAGE_URL });
   },
 
-  ensureVoiceAuthorization(autoTriggered = false) {
+  ensureVoiceAuthorization(autoTriggered: boolean = false) {
     const latestConsent = readVoiceAuthorizationConsent();
     if (latestConsent) {
       if (!this.data.voiceAuthorizationAgreed) {
@@ -467,7 +350,7 @@ Page<VoiceChatData, {
     }
   },
 
-  async syncVoiceAuthorizationAndConnect(autoTriggered = false) {
+  async syncVoiceAuthorizationAndConnect(autoTriggered: boolean = false) {
     const synced = await this.syncVoiceAuthorizationForSession();
     if (!synced) {
       if (autoTriggered) {
@@ -518,7 +401,7 @@ Page<VoiceChatData, {
     }
   },
 
-  reconcilePendingClose(detail) {
+  reconcilePendingClose(detail: MemoirVoiceSessionDetail) {
     const snapshot = readMemoirVoiceSessionSnapshot(this.data.voiceSessionId);
     const pending = snapshot.pendingClose;
     if (!pending) {
@@ -556,7 +439,7 @@ Page<VoiceChatData, {
     });
   },
 
-  async confirmSavedTranscriptSnapshot(event) {
+  async confirmSavedTranscriptSnapshot(event: VoiceGatewayServerEvent) {
     if (!this.data.voiceSessionId || !event.message_id || !event.utterance_id) {
       return;
     }
@@ -575,7 +458,7 @@ Page<VoiceChatData, {
     }
   },
 
-  applyVoiceSessionDetail(detail) {
+  applyVoiceSessionDetail(detail: MemoirVoiceSessionDetail) {
     setVoiceChatData(this, voiceSessionDetailPatch(detail, this.data));
   },
 
@@ -588,7 +471,7 @@ Page<VoiceChatData, {
     });
   },
 
-  persistPendingVoiceClose(reason) {
+  persistPendingVoiceClose(reason: "hide" | "unload" | "connection_error") {
     if (!this.data.voiceSessionId) {
       return;
     }
@@ -639,7 +522,7 @@ Page<VoiceChatData, {
     }
   },
 
-  async generateFollowUp(regenerate = false) {
+  async generateFollowUp(regenerate: boolean = false) {
     if (
       this.data.interviewType === "human_interview"
       || this.pageSuspended
@@ -696,7 +579,7 @@ Page<VoiceChatData, {
     }
   },
 
-  async generateStreamingFollowUp(sourceMessageId, regenerate, requestSerial) {
+  async generateStreamingFollowUp(sourceMessageId: string, regenerate: boolean, requestSerial: number) {
     const runtime = new VoiceAssistantTurnRuntime(this.data.voiceSessionId, {
       onStarted: () => {
         if (requestSerial !== followUpRequestSerial) {
@@ -783,7 +666,7 @@ Page<VoiceChatData, {
     }
   },
 
-  async markStreamingAutomationEventsVoicePlayed(completed) {
+  async markStreamingAutomationEventsVoicePlayed(completed: VoiceAssistantTurnCompletedEvent) {
     const eventIds = Array.isArray(completed.progress_voice_selected_event_ids)
       ? completed.progress_voice_selected_event_ids.filter((item) => typeof item === "string" && item)
       : [];
@@ -801,7 +684,7 @@ Page<VoiceChatData, {
     }
   },
 
-  clearFailedStreamingAssistantTurn(message) {
+  clearFailedStreamingAssistantTurn(message: string) {
     this.assistantTurnRuntime?.stopPlayback();
     this.assistantTurnRuntime = null;
     this.stopFollowUpAudio();
@@ -839,7 +722,7 @@ Page<VoiceChatData, {
     });
   },
 
-  applyStreamingAssistantText(text, sourceMessageId) {
+  applyStreamingAssistantText(text: string, sourceMessageId: string) {
     const line: VoiceChatTranscriptLine = {
       id: this.assistantStreamLineId || `assistant-stream-${Date.now()}`,
       role: "assistant",
@@ -871,7 +754,7 @@ Page<VoiceChatData, {
     });
   },
 
-  applyCompletedStreamingAssistantTurn(event, sourceMessageId) {
+  applyCompletedStreamingAssistantTurn(event: VoiceAssistantTurnCompletedEvent, sourceMessageId: string) {
     const metadata = {
       source: "ai.streaming_assistant_turn",
       source_message_id: sourceMessageId,
@@ -914,7 +797,7 @@ Page<VoiceChatData, {
     writeMemoirVoiceSessionSnapshot(this.data.voiceSessionId, { transcriptLines });
   },
 
-  prepareStreamingAudioPlayback(requestSerial) {
+  prepareStreamingAudioPlayback(requestSerial: number) {
     if (requestSerial !== followUpRequestSerial) {
       return;
     }
@@ -940,7 +823,7 @@ Page<VoiceChatData, {
     this.startAssistantBargeInMonitor(requestSerial);
   },
 
-  markStreamingPlaybackError(error, requestSerial) {
+  markStreamingPlaybackError(error: Error, requestSerial: number) {
     if (requestSerial !== followUpRequestSerial) {
       return;
     }
@@ -985,7 +868,7 @@ Page<VoiceChatData, {
     });
   },
 
-  chooseOpeningTopic(event) {
+  chooseOpeningTopic(event: OpeningTopicTapEvent) {
     if (this.data.interviewType === "human_interview") {
       return;
     }
@@ -1010,7 +893,7 @@ Page<VoiceChatData, {
     });
   },
 
-  changeSpeakerRole(event) {
+  changeSpeakerRole(event: SpeakerRoleTapEvent) {
     if (this.data.recording || this.data.interviewType !== "human_interview") {
       return;
     }
@@ -1023,7 +906,7 @@ Page<VoiceChatData, {
     });
   },
 
-  startRecordingAsSpeaker(event) {
+  startRecordingAsSpeaker(event: SpeakerRoleTapEvent) {
     if (this.data.recording || this.data.interviewType !== "human_interview") {
       return;
     }
@@ -1056,7 +939,7 @@ Page<VoiceChatData, {
     void this.generateFollowUp(true);
   },
 
-  enqueueAssistantTurn(item) {
+  enqueueAssistantTurn(item: AssistantTurnQueueItem) {
     if (!item.messageId) {
       return;
     }
@@ -1107,7 +990,7 @@ Page<VoiceChatData, {
     }
   },
 
-  async prepareAssistantTurnAudio(item) {
+  async prepareAssistantTurnAudio(item: AssistantTurnQueueItem) {
     if (!this.data.voiceSessionId || !item.messageId) {
       throw new Error("缺少要合成的小余回应");
     }
@@ -1146,7 +1029,7 @@ Page<VoiceChatData, {
     }
   },
 
-  showAssistantTurn(item, patch = {}) {
+  showAssistantTurn(item: AssistantTurnQueueItem, patch: Partial<VoiceChatData> = {}) {
     const transcriptLines = upsertTranscriptLine(this.data.transcriptLines, item.line);
     setVoiceChatData(this, {
       ...assistantTranscriptState(transcriptLines, {
@@ -1165,7 +1048,7 @@ Page<VoiceChatData, {
     });
   },
 
-  async playPreparedAssistantTurn(item, prepared) {
+  async playPreparedAssistantTurn(item: AssistantTurnQueueItem, prepared: PreparedAssistantTurnAudio) {
     this.showAssistantTurn({
       ...item,
       line: {
@@ -1185,7 +1068,7 @@ Page<VoiceChatData, {
     });
   },
 
-  async prepareFollowUpTTS(messageId, forceRegenerate = false, autoListenAfterPlayback = true) {
+  async prepareFollowUpTTS(messageId: string, forceRegenerate: boolean = false, autoListenAfterPlayback: boolean = true) {
     if (!this.data.voiceSessionId || !messageId) {
       return;
     }
@@ -1221,7 +1104,12 @@ Page<VoiceChatData, {
     }
   },
 
-  async playAudioFile(audioFileId, options = {}) {
+  async playAudioFile(audioFileId: string, options: {
+      autoListenAfterPlayback?: boolean;
+      text?: string;
+      alignment?: TTSAlignmentSegment[];
+      durationSeconds?: number;
+    } = {}) {
     if (!audioFileId) {
       return;
     }
@@ -1322,7 +1210,7 @@ Page<VoiceChatData, {
     this.resetFollowUpTTSProgress();
   },
 
-  cancelFollowUpTTS(reason = "cancelled") {
+  cancelFollowUpTTS(reason: string = "cancelled") {
     this.ttsRequestSerial += 1;
     const partialAssistantLineId = this.assistantStreamLineId;
     const transcriptLines = partialAssistantLineId
@@ -1375,7 +1263,7 @@ Page<VoiceChatData, {
       || this.data.followUpTTSPlaying;
   },
 
-  startAssistantBargeInMonitor(requestSerial) {
+  startAssistantBargeInMonitor(requestSerial: number) {
     if (
       this.data.recording
       || !this.data.autoBargeInEnabled
@@ -1410,7 +1298,7 @@ Page<VoiceChatData, {
     return this.assistantBargeInMonitor.stopAndWait();
   },
 
-  async handleAssistantBargeIn(requestSerial) {
+  async handleAssistantBargeIn(requestSerial: number) {
     if (
       requestSerial !== followUpRequestSerial
       || this.data.recording
@@ -1429,7 +1317,7 @@ Page<VoiceChatData, {
     await this.startRecordingAfterPrivacy(false);
   },
 
-  markStreamingAudioFrameScheduled(event) {
+  markStreamingAudioFrameScheduled(event: StreamingSpeechPlaybackFrameEvent) {
     if (this.assistantStreamingAudioStartSeconds < 0) {
       this.assistantStreamingAudioStartSeconds = event.startAtSeconds;
     }
@@ -1475,7 +1363,7 @@ Page<VoiceChatData, {
     return Math.max(0, current - this.assistantStreamingAudioStartSeconds);
   },
 
-  updateFollowUpTTSProgress(currentTime, duration, fallbackDuration = 0) {
+  updateFollowUpTTSProgress(currentTime: number, duration: number, fallbackDuration: number = 0) {
     const text = this.data.assistantPromptText;
     if (!text) {
       this.resetFollowUpTTSProgress();
@@ -1493,7 +1381,7 @@ Page<VoiceChatData, {
     });
   },
 
-  playbackTimeForProgress(audio) {
+  playbackTimeForProgress(audio: WechatMiniprogram.InnerAudioContext) {
     const currentTime = Number(audio.currentTime);
     if (Number.isFinite(currentTime) && currentTime > 0) {
       return currentTime;
@@ -1538,7 +1426,7 @@ Page<VoiceChatData, {
     this.ttsProgressTimer = timer;
   },
 
-  startFollowUpProgressTimer(playToken, audio, fallbackDuration = 0) {
+  startFollowUpProgressTimer(playToken: number, audio: WechatMiniprogram.InnerAudioContext, fallbackDuration: number = 0) {
     this.stopFollowUpProgressTimer();
     if (this.ttsProgressStartedAtMs <= 0) {
       this.ttsProgressStartedAtMs = Date.now();
@@ -1635,7 +1523,7 @@ Page<VoiceChatData, {
     }
   },
 
-  startRecording(autoTriggered = false, speakerRole?: MemoirSpeakerRole) {
+  startRecording(autoTriggered: boolean = false, speakerRole?: MemoirSpeakerRole) {
     if (!this.ensureVoiceAuthorization(autoTriggered)) {
       return false;
     }
@@ -1648,7 +1536,7 @@ Page<VoiceChatData, {
     return true;
   },
 
-  async startRecordingAfterPrivacy(autoTriggered = false, speakerRole?: MemoirSpeakerRole) {
+  async startRecordingAfterPrivacy(autoTriggered: boolean = false, speakerRole?: MemoirSpeakerRole) {
     const interruptingAssistant = !autoTriggered && this.assistantTurnActiveForBargeIn();
     if (!autoTriggered) {
       this.consecutiveNoAnswerPrompts = 0;
@@ -1738,7 +1626,7 @@ Page<VoiceChatData, {
     return this.startRecordingAfterPrivacy(true);
   },
 
-  cancelPendingNoAnswerPrompt(clearLoading = true) {
+  cancelPendingNoAnswerPrompt(clearLoading: boolean = true) {
     this.noAnswerPromptRequestSerial += 1;
     if (!this.noAnswerPromptInFlight) {
       return;
@@ -1829,11 +1717,11 @@ Page<VoiceChatData, {
     }
   },
 
-  handleStatus(status) {
+  handleStatus(status: VoiceChatConnectionStatus) {
     setVoiceChatData(this, voiceConnectionStatusPatch(status, this.data));
   },
 
-  handleCaptureStats(stats) {
+  handleCaptureStats(stats: MemoirCaptureStats) {
     const noAnswerAutoStopped = stats.autoStopped && stats.autoStopReason === "no_voice";
     const noAnswerPromptAlreadyHandled = noAnswerAutoStopped
       && this.handledNoAnswerFrameCount === stats.frameCount;
@@ -1848,18 +1736,18 @@ Page<VoiceChatData, {
     }
   },
 
-  handleGatewayEvent(event) {
+  handleGatewayEvent(event: VoiceGatewayServerEvent) {
     const nextData = voiceGatewayEventPatch(event, this.data);
     if (Object.keys(nextData).length) {
       setVoiceChatData(this, nextData);
     }
   },
 
-  handlePartial(text) {
+  handlePartial(text: string) {
     setVoiceChatData(this, voiceLiveTranscriptPatch(text, this.data.liveScrollTop));
   },
 
-  handleFinal(event) {
+  handleFinal(event: VoiceGatewayServerEvent) {
     const result = voiceFinalTranscriptResult(
       event,
       {
@@ -1897,7 +1785,7 @@ Page<VoiceChatData, {
     }
   },
 
-  handleError(message, error) {
+  handleError(message: string, error?: VoiceChatErrorInfo) {
     if (error?.kind === "connection") {
       this.persistPendingVoiceClose("connection_error");
     }

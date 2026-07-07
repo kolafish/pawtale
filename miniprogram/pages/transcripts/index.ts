@@ -6,6 +6,7 @@ import type {
   MemoirVoiceSearchQueryFilters,
   MemoirVoiceSearchQueryParseResponse,
 } from "../../domain/voice-chat";
+import { definePage } from "../../services/page-definition";
 import type { ChapterPickerOption } from "../../services/memoir-book-source-actions";
 import { trackAuditAction } from "../../services/audit-tracker";
 import {
@@ -571,48 +572,10 @@ function confirmDelete(item: TranscriptItemView): Promise<boolean> {
   });
 }
 
-Page<TranscriptsData, {
-  onShow(): Promise<void>;
-  loadTranscripts(reset?: boolean): Promise<void>;
-  loadMore(): Promise<void>;
-  openTranscriptDetail(event: DatasetEvent): void;
-  openTranscriptEdit(event: DatasetEvent): void;
-  stopCardTap(): void;
-  onSearchInput(event: SearchInputEvent): void;
-  onSearchConfirm(): Promise<void>;
-  clearSearch(): Promise<void>;
-  applySearch(
-    rawQuery?: string,
-    filters?: Partial<TranscriptSearchFilters>,
-    parsed?: MemoirVoiceSearchQueryParseResponse,
-  ): Promise<void>;
-  startVoiceSearch(): Promise<void>;
-  startVoiceEdit(event: DatasetEvent): Promise<void>;
-  cancelVoiceEdit(): void;
-  confirmVoiceEdit(): Promise<void>;
-  toggleTranscriptText(event: DatasetEvent): void;
-  assignTranscriptChapter(event: PickerEvent): Promise<void>;
-  moveTranscriptChapter(event: PickerEvent): Promise<void>;
-  beginEdit(event: DatasetEvent): void;
-  changeText(event: TextAreaEvent): void;
-  cancelEdit(event: DatasetEvent): void;
-  saveTranscript(event: DatasetEvent): Promise<void>;
-  resetToRaw(event: DatasetEvent): void;
-  deleteTranscript(event: DatasetEvent): Promise<void>;
-  onUnload(): void;
-  openHome(): void;
-  openLogin(): void;
-  createProject(): void;
-  revealStoredTranscriptTarget(): Promise<void>;
-  ensureTranscriptTargetLoaded(targetId: string): Promise<TranscriptItemView | null>;
-  scrollToTranscript(item: TranscriptItemView): void;
-  loadToken: number;
-  voiceEditToken: number;
-  searchDebounceTimer: number | null;
-}>({
+definePage<TranscriptsData>()({
   loadToken: 0,
   voiceEditToken: 0,
-  searchDebounceTimer: null,
+  searchDebounceTimer: null as number | null,
 
   data: {
     loading: false,
@@ -667,7 +630,7 @@ Page<TranscriptsData, {
     await this.revealStoredTranscriptTarget();
   },
 
-  async loadTranscripts(reset = false) {
+  async loadTranscripts(reset: boolean = false) {
     if (this.data.loading && !reset) {
       return;
     }
@@ -780,7 +743,7 @@ Page<TranscriptsData, {
     await this.loadTranscripts(false);
   },
 
-  openTranscriptDetail(event) {
+  openTranscriptDetail(event: DatasetEvent) {
     const id = datasetString(event, "id");
     if (!id) {
       return;
@@ -788,7 +751,7 @@ Page<TranscriptsData, {
     wx.navigateTo({ url: pageUrl("/pages/transcript-detail/index", { id }) });
   },
 
-  openTranscriptEdit(event) {
+  openTranscriptEdit(event: DatasetEvent) {
     const id = datasetString(event, "id");
     if (!id) {
       return;
@@ -799,7 +762,7 @@ Page<TranscriptsData, {
   stopCardTap() {
   },
 
-  onSearchInput(event) {
+  onSearchInput(event: SearchInputEvent) {
     const value = event.detail.value;
     setTranscriptsData(this, { searchInput: value });
     if (this.searchDebounceTimer !== null) {
@@ -818,7 +781,7 @@ Page<TranscriptsData, {
     await this.applySearch("");
   },
 
-  async applySearch(rawQuery, filters, parsed) {
+  async applySearch(rawQuery?: string, filters?: Partial<TranscriptSearchFilters>, parsed?: MemoirVoiceSearchQueryParseResponse) {
     if (this.searchDebounceTimer !== null) {
       clearTimeout(this.searchDebounceTimer);
       this.searchDebounceTimer = null;
@@ -900,7 +863,7 @@ Page<TranscriptsData, {
     }
   },
 
-  async startVoiceEdit(event) {
+  async startVoiceEdit(event: DatasetEvent) {
     const id = datasetString(event, "id");
     const item = this.data.items.find((candidate) => candidate.id === id);
     if (
@@ -1044,7 +1007,7 @@ Page<TranscriptsData, {
     }
   },
 
-  toggleTranscriptText(event) {
+  toggleTranscriptText(event: DatasetEvent) {
     const id = datasetString(event, "id");
     if (!id) {
       return;
@@ -1058,7 +1021,7 @@ Page<TranscriptsData, {
     setTranscriptsData(this, { items });
   },
 
-  async assignTranscriptChapter(event) {
+  async assignTranscriptChapter(event: PickerEvent) {
     const utteranceId = datasetString(event, "id");
     const item = this.data.items.find((candidate) => candidate.id === utteranceId);
     const optionIndex = pickerIndex(event);
@@ -1092,7 +1055,7 @@ Page<TranscriptsData, {
     }
   },
 
-  async moveTranscriptChapter(event) {
+  async moveTranscriptChapter(event: PickerEvent) {
     const utteranceId = datasetString(event, "id");
     const item = this.data.items.find((candidate) => candidate.id === utteranceId);
     const optionIndex = pickerIndex(event);
@@ -1129,7 +1092,7 @@ Page<TranscriptsData, {
     }
   },
 
-  beginEdit(event) {
+  beginEdit(event: DatasetEvent) {
     const id = datasetString(event, "id");
     const index = this.data.items.findIndex((item) => item.id === id);
     if (index < 0 || this.data.savingId || this.data.deletingId) {
@@ -1147,7 +1110,7 @@ Page<TranscriptsData, {
     setTranscriptsData(this, { items, error: "" });
   },
 
-  changeText(event) {
+  changeText(event: TextAreaEvent) {
     const id = datasetString(event, "id");
     const index = this.data.items.findIndex((item) => item.id === id);
     if (index < 0) {
@@ -1158,7 +1121,7 @@ Page<TranscriptsData, {
     setTranscriptsData(this, { items });
   },
 
-  cancelEdit(event) {
+  cancelEdit(event: DatasetEvent) {
     const id = datasetString(event, "id");
     const index = this.data.items.findIndex((item) => item.id === id);
     if (index < 0 || this.data.savingId || this.data.deletingId) {
@@ -1169,7 +1132,7 @@ Page<TranscriptsData, {
     setTranscriptsData(this, { items, error: "" });
   },
 
-  async saveTranscript(event) {
+  async saveTranscript(event: DatasetEvent) {
     const id = datasetString(event, "id");
     const item = this.data.items.find((candidate) => candidate.id === id);
     if (!item || this.data.savingId || this.data.deletingId) {
@@ -1193,7 +1156,7 @@ Page<TranscriptsData, {
     }
   },
 
-  resetToRaw(event) {
+  resetToRaw(event: DatasetEvent) {
     const id = datasetString(event, "id");
     const index = this.data.items.findIndex((item) => item.id === id);
     if (index < 0) {
@@ -1204,7 +1167,7 @@ Page<TranscriptsData, {
     setTranscriptsData(this, { items });
   },
 
-  async deleteTranscript(event) {
+  async deleteTranscript(event: DatasetEvent) {
     const id = datasetString(event, "id");
     const item = this.data.items.find((candidate) => candidate.id === id);
     if (!id || !item || this.data.savingId || this.data.deletingId) {
@@ -1279,7 +1242,7 @@ Page<TranscriptsData, {
     this.scrollToTranscript(item);
   },
 
-  async ensureTranscriptTargetLoaded(targetId) {
+  async ensureTranscriptTargetLoaded(targetId: string) {
     let item = this.data.items.find((candidate) => candidate.id === targetId) || null;
     while (!item && this.data.items.length < this.data.total) {
       const previousCount = this.data.items.length;
@@ -1292,7 +1255,7 @@ Page<TranscriptsData, {
     return item;
   },
 
-  scrollToTranscript(item) {
+  scrollToTranscript(item: TranscriptItemView) {
     const pageScrollTo = (wx as WxWithPageScrollTo).pageScrollTo;
     if (typeof pageScrollTo !== "function") {
       return;
