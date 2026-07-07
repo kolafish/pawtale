@@ -70,6 +70,7 @@ function loadVoiceChatPage({
     }),
     ...ttsTextProgressExports,
   });
+  clearModule("../services/voice-assistant-tts-progress.ts");
   mockModule("../services/tts-settings.ts", {
     readChatTTSSettings: () => ({ voice: "", speedRatio: 1 }),
   });
@@ -2294,7 +2295,6 @@ test("voice chat reuses streaming audio duration for the first replay highlight"
       ttsSpokenText: prompt,
       ttsProgressPercent: 100,
     },
-    assistantStreamingAudioDurationSeconds: 4,
     audioPlayback: {
       nextToken: () => 1,
       currentToken: () => 1,
@@ -2315,6 +2315,7 @@ test("voice chat reuses streaming audio duration for the first replay highlight"
       this.data = { ...this.data, ...patch };
     },
   };
+  context.ttsProgress.setStreamingDurationSeconds(4);
 
   await page.playFollowUpAudio.call(context);
   page.stopFollowUpProgressTimer.call(context);
