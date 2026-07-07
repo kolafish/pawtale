@@ -281,10 +281,6 @@
   gap: 24rpx;
 }
 
-.debug-card {
-  background: #fffdf9;
-}
-
 .action-title {
   display: block;
   color: #2b1713;
