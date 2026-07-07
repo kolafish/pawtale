@@ -5,7 +5,6 @@ from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from app.domain.memoir.types import MemoirChapterSourceLinkStatus
 from app.models.memoir import (
@@ -17,21 +16,6 @@ from app.models.memoir import (
     MemoirVoiceUtterance,
 )
 from app.schemas.memoir_book import MemoirBookSourceIncludedChapter
-
-
-SOURCE_REF_KEYS = {
-    "voice_session_id",
-    "message_id",
-    "utterance_id",
-    "transcript_version_id",
-    "audio_file_id",
-    "start_ms",
-    "end_ms",
-    "created_at",
-    "quote",
-}
-PENDING_SOURCE_UTTERANCE_IDS_KEY = "pending_source_utterance_ids"
-REMOVED_SOURCE_UTTERANCE_IDS_KEY = "removed_source_utterance_ids"
 
 
 @dataclass(frozen=True)
@@ -52,6 +36,19 @@ def _sorted_chapters(plan: MemoirBookPlan) -> list[MemoirBookPlanChapter]:
     return sorted(plan.chapters, key=lambda chapter: chapter.sort_order)
 
 
+async def _load_plan_chapters(db: AsyncSession, plan: MemoirBookPlan) -> list[MemoirBookPlanChapter]:
+    return (
+        await db.execute(
+            select(MemoirBookPlanChapter)
+            .where(
+                MemoirBookPlanChapter.project_id == plan.project_id,
+                MemoirBookPlanChapter.plan_id == plan.id,
+            )
+            .order_by(MemoirBookPlanChapter.sort_order, MemoirBookPlanChapter.id)
+        )
+    ).scalars().all()
+
+
 def source_ref_utterance_id(ref: object) -> str:
     if isinstance(ref, dict):
         value = ref.get("utterance_id")
@@ -66,41 +63,6 @@ def source_ref_utterance_ids(refs: list[dict[str, object]]) -> list[str]:
         for utterance_id in (source_ref_utterance_id(ref) for ref in refs)
         if utterance_id
     ]
-
-
-def _source_ids_from_metadata(metadata_json: dict | None, key: str) -> set[str]:
-    value = (metadata_json or {}).get(key, [])
-    if not isinstance(value, list):
-        return set()
-    return {item.strip() for item in value if isinstance(item, str) and item.strip()}
-
-
-def _legacy_change_state(
-    chapter: MemoirBookPlanChapter,
-    *,
-    valid_utterance_ids: set[str] | None = None,
-) -> ChapterSourceChangeState:
-    pending_source_ids = _source_ids_from_metadata(chapter.metadata_json, PENDING_SOURCE_UTTERANCE_IDS_KEY)
-    if valid_utterance_ids is not None:
-        pending_source_ids &= valid_utterance_ids
-    return ChapterSourceChangeState(
-        pending_source_ids=pending_source_ids,
-        removed_source_ids=_source_ids_from_metadata(chapter.metadata_json, REMOVED_SOURCE_UTTERANCE_IDS_KEY),
-    )
-
-
-def _legacy_source_refs(chapter: MemoirBookPlanChapter) -> list[dict[str, object]]:
-    refs: list[dict[str, object]] = []
-    seen: set[str] = set()
-    for ref in chapter.source_refs_json or []:
-        if not isinstance(ref, dict):
-            continue
-        utterance_id = source_ref_utterance_id(ref)
-        if not utterance_id or utterance_id in seen:
-            continue
-        refs.append(dict(ref))
-        seen.add(utterance_id)
-    return refs
 
 
 async def _links_by_chapter(
@@ -184,49 +146,12 @@ def _created_at_value(value: object) -> datetime | str | None:
     return None
 
 
-def _legacy_ref_by_utterance(refs: list[dict[str, object]]) -> dict[str, dict[str, object]]:
-    by_utterance: dict[str, dict[str, object]] = {}
-    for ref in refs:
-        utterance_id = source_ref_utterance_id(ref)
-        if utterance_id and utterance_id not in by_utterance:
-            by_utterance[utterance_id] = ref
-    return by_utterance
-
-
-def _legacy_order(refs: list[dict[str, object]]) -> dict[str, int]:
-    order: dict[str, int] = {}
-    for index, ref in enumerate(refs):
-        utterance_id = source_ref_utterance_id(ref)
-        if utterance_id and utterance_id not in order:
-            order[utterance_id] = index
-    return order
-
-
-def _legacy_ref_with_utterance(
-    ref: dict[str, object],
-    *,
-    utterance: MemoirVoiceUtterance | None,
-) -> dict[str, object]:
-    data = {key: value for key, value in dict(ref).items() if key in SOURCE_REF_KEYS}
-    if utterance:
-        data.setdefault("voice_session_id", utterance.voice_session_id)
-        data.setdefault("message_id", utterance.chat_message_id or "")
-        data.setdefault("audio_file_id", utterance.audio_file_id)
-        data.setdefault("start_ms", utterance.start_ms)
-        data.setdefault("end_ms", utterance.end_ms)
-        data.setdefault("created_at", utterance.created_at)
-    return data
-
-
 def _link_ref(
     link: MemoirChapterSourceLink,
     *,
     utterance: MemoirVoiceUtterance | None,
-    legacy_ref: dict[str, object] | None,
 ) -> dict[str, object] | None:
     data: dict[str, object] = {}
-    if legacy_ref:
-        data.update({key: value for key, value in legacy_ref.items() if key in SOURCE_REF_KEYS})
     data["utterance_id"] = link.utterance_id
     if utterance:
         data["voice_session_id"] = utterance.voice_session_id
@@ -264,15 +189,10 @@ def _link_ref(
 
 def _source_refs_for_chapter(
     *,
-    chapter: MemoirBookPlanChapter,
     links: list[MemoirChapterSourceLink],
     utterances: dict[str, MemoirVoiceUtterance],
 ) -> list[dict[str, object]]:
-    legacy_refs = _legacy_source_refs(chapter)
-    legacy_by_utterance = _legacy_ref_by_utterance(legacy_refs)
-    order_by_utterance = _legacy_order(legacy_refs)
-    link_status_by_utterance = {link.utterance_id: link.status for link in links}
-    ordered_refs: list[tuple[int, datetime, str, dict[str, object]]] = []
+    ordered_refs: list[tuple[datetime, str, dict[str, object]]] = []
 
     for link in links:
         if link.status != MemoirChapterSourceLinkStatus.ACTIVE.value:
@@ -280,35 +200,15 @@ def _source_refs_for_chapter(
         ref = _link_ref(
             link,
             utterance=utterances.get(link.utterance_id),
-            legacy_ref=legacy_by_utterance.get(link.utterance_id),
         )
         if not ref:
             continue
         ordered_refs.append((
-            order_by_utterance.get(link.utterance_id, 1000000),
             link.created_at or datetime.min,
             link.id,
             ref,
         ))
-
-    seen = {
-        source_ref_utterance_id(item[3])
-        for item in ordered_refs
-    }
-    for legacy_ref in legacy_refs:
-        utterance_id = source_ref_utterance_id(legacy_ref)
-        if not utterance_id or utterance_id in seen:
-            continue
-        if utterance_id in link_status_by_utterance:
-            continue
-        ordered_refs.append((
-            order_by_utterance.get(utterance_id, 1000000),
-            datetime.min,
-            utterance_id,
-            _legacy_ref_with_utterance(legacy_ref, utterance=utterances.get(utterance_id)),
-        ))
-        seen.add(utterance_id)
-    return [item[3] for item in sorted(ordered_refs, key=lambda item: (item[0], item[1], item[2]))]
+    return [item[2] for item in sorted(ordered_refs, key=lambda item: (item[0], item[1]))]
 
 
 def _link_change_state(
@@ -318,21 +218,16 @@ def _link_change_state(
     latest_version: MemoirBookChapterDraftVersion | None,
     valid_utterance_ids: set[str] | None = None,
 ) -> ChapterSourceChangeState:
-    legacy_state = _legacy_change_state(chapter, valid_utterance_ids=valid_utterance_ids)
     if not links:
-        return legacy_state
+        return ChapterSourceChangeState(pending_source_ids=set(), removed_source_ids=set())
 
-    has_merge_state = any(link.merged_draft_version_id for link in links)
-    if not latest_version or not has_merge_state:
-        return legacy_state
+    if not latest_version:
+        return ChapterSourceChangeState(pending_source_ids=set(), removed_source_ids=set())
 
     pending_source_ids: set[str] = set()
     removed_source_ids: set[str] = set()
-    active_link_ids: set[str] = set()
-    removed_link_ids: set[str] = set()
     for link in links:
         if link.status == MemoirChapterSourceLinkStatus.ACTIVE.value:
-            active_link_ids.add(link.utterance_id)
             if link.merged_draft_version_id == latest_version.id:
                 continue
             if valid_utterance_ids is None or link.utterance_id in valid_utterance_ids:
@@ -341,15 +236,12 @@ def _link_change_state(
 
         if link.status != MemoirChapterSourceLinkStatus.REMOVED.value:
             continue
-        removed_link_ids.add(link.utterance_id)
         if link.removed_at and link.removed_at <= latest_version.created_at:
             continue
         if link.merged_draft_version_id == latest_version.id and not link.removed_at:
             continue
         removed_source_ids.add(link.utterance_id)
 
-    pending_source_ids.update(legacy_state.pending_source_ids - active_link_ids)
-    removed_source_ids.update(legacy_state.removed_source_ids - removed_link_ids)
     return ChapterSourceChangeState(
         pending_source_ids=pending_source_ids,
         removed_source_ids=removed_source_ids,
@@ -393,7 +285,7 @@ async def chapter_source_change_states_by_chapter(
 ) -> dict[str, ChapterSourceChangeState]:
     if not plan:
         return {}
-    chapters = _sorted_chapters(plan)
+    chapters = await _load_plan_chapters(db, plan)
     links_by_chapter = await _links_by_chapter(db, plan=plan)
     latest_versions_by_chapter = await _latest_versions_by_chapter(
         db,
@@ -451,7 +343,7 @@ async def plan_source_ref_dicts_by_chapter(
 ) -> dict[str, list[dict[str, object]]]:
     if not plan:
         return {}
-    chapters = _sorted_chapters(plan)
+    chapters = await _load_plan_chapters(db, plan)
     links_by_chapter = await _links_by_chapter(db, plan=plan)
     utterance_ids = {
         link.utterance_id
@@ -459,15 +351,9 @@ async def plan_source_ref_dicts_by_chapter(
         for link in links
         if link.status == MemoirChapterSourceLinkStatus.ACTIVE.value
     }
-    utterance_ids.update(
-        utterance_id
-        for chapter in chapters
-        for utterance_id in source_ref_utterance_ids(_legacy_source_refs(chapter))
-    )
     utterances = await _utterances_by_id(db, project_id=plan.project_id, utterance_ids=utterance_ids)
     return {
         chapter.id: _source_refs_for_chapter(
-            chapter=chapter,
             links=links_by_chapter.get(chapter.id, []),
             utterances=utterances,
         )
@@ -486,13 +372,9 @@ async def chapter_source_ref_dicts(
             MemoirBookPlan.id == chapter.plan_id,
             MemoirBookPlan.project_id == chapter.project_id,
         )
-        .options(selectinload(MemoirBookPlan.chapters))
     )
     if not plan:
-        return [
-            _legacy_ref_with_utterance(ref, utterance=None)
-            for ref in _legacy_source_refs(chapter)
-        ]
+        return []
     return (await plan_source_ref_dicts_by_chapter(db, plan)).get(chapter.id, [])
 
 
@@ -513,7 +395,7 @@ async def included_chapters_by_utterance(
         return {}
     refs_by_chapter = await plan_source_ref_dicts_by_chapter(db, plan)
     included: dict[str, list[MemoirBookSourceIncludedChapter]] = {}
-    for chapter in _sorted_chapters(plan):
+    for chapter in await _load_plan_chapters(db, plan):
         chapter_item = MemoirBookSourceIncludedChapter(
             chapter_id=chapter.id,
             title=chapter.title,

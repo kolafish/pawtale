@@ -14,6 +14,7 @@ from app.domain.memoir.types import (
     MemoirBookChapterDraftStatus,
     MemoirChatContentStatus,
     MemoirChatMessageRole,
+    MemoirChapterSourceLinkStatus,
     MemoirCreatedBy,
     MemoirSemanticCacheStatus,
     MemoirTranscriptVersionType,
@@ -23,6 +24,7 @@ from app.models.memoir import (
     MemoirBookPlan,
     MemoirBookPlanChapter,
     MemoirChatMessage,
+    MemoirChapterSourceLink,
     MemoirSourceCard,
     MemoirTranscriptVersion,
     MemoirVoiceSession,
@@ -52,7 +54,6 @@ from app.services.memoir.book_plan_sources import (
     safe_quote as _safe_quote,
     set_deleted_source_metadata as _set_deleted_source_metadata,
     set_source_change_metadata as _set_source_change_metadata,
-    source_ref_utterance_id as _source_ref_utterance_id,
 )
 from app.services.memoir.book_auto_revision import schedule_chapter_auto_revisions
 from app.services.memoir.book_source_links import (
@@ -720,53 +721,47 @@ async def _sync_included_transcript_edit(
     transcript_version_id: str,
 ) -> set[str]:
     project_id = utterance.voice_session.project_id
-    chapters = (
+    links = (
         await db.execute(
-            select(MemoirBookPlanChapter).where(MemoirBookPlanChapter.project_id == project_id)
+            select(MemoirChapterSourceLink).where(
+                MemoirChapterSourceLink.project_id == project_id,
+                MemoirChapterSourceLink.utterance_id == utterance.id,
+                MemoirChapterSourceLink.status == MemoirChapterSourceLinkStatus.ACTIVE.value,
+            )
         )
     ).scalars().all()
-    changed_chapter_ids: set[str] = set()
-    for chapter in chapters:
-        refs: list[dict] = []
-        changed = False
-        for ref in chapter.source_refs_json or []:
-            if not isinstance(ref, dict):
-                refs.append(ref)
-                continue
-            if _source_ref_utterance_id(ref) != utterance.id:
-                refs.append(ref)
-                continue
-            next_ref = {
-                **ref,
-                "transcript_version_id": transcript_version_id,
-                "quote": _safe_quote(content),
-            }
-            refs.append(next_ref)
-            changed = changed or next_ref != ref
-        if not changed:
-            continue
-        pending_ids = _pending_source_ids(chapter.metadata_json)
-        pending_ids.add(utterance.id)
-        removed_ids = _removed_source_ids(chapter.metadata_json)
-        removed_ids.discard(utterance.id)
-        chapter.source_refs_json = refs
-        chapter.metadata_json = _set_source_change_metadata(
-            chapter.metadata_json,
-            added_ids=pending_ids,
-            removed_ids=removed_ids,
-        )
-        db.add(chapter)
-        changed_chapter_ids.add(chapter.id)
-
-    if not changed_chapter_ids:
+    if not links:
         return set()
-    await _update_utterance_link_ref_fields(
+    changed_count = await _update_utterance_link_ref_fields(
         db,
         project_id=project_id,
         utterance_id=utterance.id,
         transcript_version_id=transcript_version_id,
         quote=_safe_quote(content),
     )
+    if not changed_count:
+        return set()
+    changed_chapter_ids = {link.chapter_id for link in links}
+    chapters = (
+        await db.execute(
+            select(MemoirBookPlanChapter).where(
+                MemoirBookPlanChapter.project_id == project_id,
+                MemoirBookPlanChapter.id.in_(changed_chapter_ids),
+            )
+        )
+    ).scalars().all()
+    for chapter in chapters:
+        pending_ids = _pending_source_ids(chapter.metadata_json)
+        pending_ids.add(utterance.id)
+        removed_ids = _removed_source_ids(chapter.metadata_json)
+        removed_ids.discard(utterance.id)
+        chapter.metadata_json = _set_source_change_metadata(
+            chapter.metadata_json,
+            added_ids=pending_ids,
+            removed_ids=removed_ids,
+        )
+        db.add(chapter)
+
     drafts = (
         await db.execute(
             select(MemoirBookChapterDraft).where(
@@ -921,33 +916,35 @@ async def _mark_book_sources_deleted(
     project_id: str,
     utterance_id: str,
 ) -> None:
+    links = (
+        await db.execute(
+            select(MemoirChapterSourceLink).where(
+                MemoirChapterSourceLink.project_id == project_id,
+                MemoirChapterSourceLink.utterance_id == utterance_id,
+                MemoirChapterSourceLink.status == MemoirChapterSourceLinkStatus.ACTIVE.value,
+            )
+        )
+    ).scalars().all()
+    affected_chapter_ids = {link.chapter_id for link in links}
+    if not affected_chapter_ids:
+        return
     chapters = (
         await db.execute(
             select(MemoirBookPlanChapter)
-            .where(MemoirBookPlanChapter.project_id == project_id)
+            .where(
+                MemoirBookPlanChapter.project_id == project_id,
+                MemoirBookPlanChapter.id.in_(affected_chapter_ids),
+            )
             .options(selectinload(MemoirBookPlanChapter.draft))
         )
     ).scalars().all()
     removed_at_dt = datetime.utcnow()
     removed_at = removed_at_dt.replace(tzinfo=timezone.utc).isoformat()
     for chapter in chapters:
-        refs = [ref for ref in (chapter.source_refs_json or []) if isinstance(ref, dict)]
-        kept_refs = [ref for ref in refs if _source_ref_utterance_id(ref) != utterance_id]
-        removed_ref_count = len(refs) - len(kept_refs)
-
         pending_ids = _pending_source_ids(chapter.metadata_json)
         removed_ids = _removed_source_ids(chapter.metadata_json)
-        pending_changed = utterance_id in pending_ids
-        if pending_changed:
-            pending_ids.discard(utterance_id)
-
-        if not removed_ref_count and not pending_changed:
-            continue
-
-        if removed_ref_count:
-            removed_ids.add(utterance_id)
-            chapter.source_refs_json = kept_refs
-
+        pending_ids.discard(utterance_id)
+        removed_ids.add(utterance_id)
         chapter.metadata_json = _set_deleted_source_metadata(
             chapter.metadata_json,
             pending_ids=pending_ids,

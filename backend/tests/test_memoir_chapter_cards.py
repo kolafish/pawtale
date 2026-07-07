@@ -30,6 +30,7 @@ from app.services.memoir.chapter_cards import (
 )
 from app.services.memoir.semantic_state import upsert_source_card
 from app.services.memoir.source_cards import SOURCE_CARD_ENGINE, source_text_hash
+from tests.memoir_helpers import add_test_chapter_source_links
 
 
 class FakeChapterCardAI:
@@ -116,22 +117,25 @@ async def _create_chapter_setup(
         plan_id=plan.id,
         title="外婆家的厨房",
         sort_order=0,
-        source_refs_json=[
+    )
+    test_db.add(chapter)
+    await test_db.flush()
+    await add_test_chapter_source_links(
+        test_db,
+        project_id=project.id,
+        plan_id=plan.id,
+        chapter_id=chapter.id,
+        source_refs=[
             {
                 "voice_session_id": voice_session.id,
                 "message_id": "message-1",
                 "utterance_id": utterance.id,
                 "transcript_version_id": None,
                 "audio_file_id": None,
-                "start_ms": None,
-                "end_ms": None,
                 "quote": "小时候常在外婆家厨房帮忙",
-                "created_at": utterance.created_at.isoformat(),
             }
         ],
     )
-    test_db.add(chapter)
-    await test_db.flush()
     draft = MemoirBookChapterDraft(
         project_id=project.id,
         chapter_id=chapter.id,

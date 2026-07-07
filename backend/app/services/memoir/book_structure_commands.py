@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import uuid
 from dataclasses import dataclass, field
 
 from fastapi import HTTPException
@@ -24,6 +25,7 @@ from app.services.memoir.book_plan_sources import (
 @dataclass
 class BookStructureCommandMutation:
     chapters: list[MemoirBookPlanChapter]
+    source_refs_by_chapter: dict[str, list[dict[str, object]]]
     changed_chapter_ids: set[str] = field(default_factory=set)
     deleted_chapters: list[MemoirBookPlanChapter] = field(default_factory=list)
 
@@ -72,26 +74,44 @@ def apply_book_structure_command(
     req: MemoirBookPlanStructureCommandRequest,
     project_id: str,
     now: str,
+    source_refs_by_chapter: dict[str, list[dict[str, object]]],
     source: SourceSegment | None = None,
 ) -> BookStructureCommandMutation:
     if req.type == "move_chapter":
-        return _move_chapter(chapters, req)
+        return _move_chapter(chapters, req, source_refs_by_chapter=source_refs_by_chapter)
     if req.type == "delete_chapter":
-        return _delete_chapter(plan, chapters, req)
+        return _delete_chapter(plan, chapters, req, source_refs_by_chapter=source_refs_by_chapter)
     if req.type == "merge_chapters":
-        return _merge_chapters(plan, chapters, req)
+        return _merge_chapters(plan, chapters, req, source_refs_by_chapter=source_refs_by_chapter)
     if req.type == "split_chapter":
-        return _split_chapter(plan, chapters, req, project_id=project_id, now=now)
+        return _split_chapter(
+            plan,
+            chapters,
+            req,
+            project_id=project_id,
+            now=now,
+            source_refs_by_chapter=source_refs_by_chapter,
+        )
     if req.type == "create_chapter_from_source":
         if source is None:
             raise HTTPException(status_code=400, detail="讲述记录不属于当前回忆录")
-        return _create_chapter_from_source(plan, chapters, req, project_id=project_id, now=now, source=source)
+        return _create_chapter_from_source(
+            plan,
+            chapters,
+            req,
+            project_id=project_id,
+            now=now,
+            source_refs_by_chapter=source_refs_by_chapter,
+            source=source,
+        )
     raise HTTPException(status_code=400, detail="不支持的章节结构操作")
 
 
 def _move_chapter(
     chapters: list[MemoirBookPlanChapter],
     req: MemoirBookPlanStructureCommandRequest,
+    *,
+    source_refs_by_chapter: dict[str, list[dict[str, object]]],
 ) -> BookStructureCommandMutation:
     chapter_id = command_chapter_id(req)
     from_index = next((index for index, chapter in enumerate(chapters) if chapter.id == chapter_id), -1)
@@ -105,7 +125,7 @@ def _move_chapter(
             raise HTTPException(status_code=400, detail="这一章已经在最后面")
         next_chapters = list(chapters)
         next_chapters[from_index], next_chapters[to_index] = next_chapters[to_index], next_chapters[from_index]
-        return BookStructureCommandMutation(chapters=next_chapters)
+        return BookStructureCommandMutation(chapters=next_chapters, source_refs_by_chapter=source_refs_by_chapter)
 
     next_chapters = [chapter for chapter in chapters if chapter.id != chapter_id]
     moving_chapter = chapters[from_index]
@@ -113,7 +133,7 @@ def _move_chapter(
     next_chapters.insert(to_index, moving_chapter)
     if [chapter.id for chapter in next_chapters] == [chapter.id for chapter in chapters]:
         raise HTTPException(status_code=400, detail="这一章已经在目标位置")
-    return BookStructureCommandMutation(chapters=next_chapters)
+    return BookStructureCommandMutation(chapters=next_chapters, source_refs_by_chapter=source_refs_by_chapter)
 
 
 def _move_insert_index(
@@ -148,13 +168,18 @@ def _delete_chapter(
     plan: MemoirBookPlan,
     chapters: list[MemoirBookPlanChapter],
     req: MemoirBookPlanStructureCommandRequest,
+    *,
+    source_refs_by_chapter: dict[str, list[dict[str, object]]],
 ) -> BookStructureCommandMutation:
     chapter_id = command_chapter_id(req)
     if len(chapters) <= 1:
         raise HTTPException(status_code=400, detail="至少需要保留一个章节")
     chapter = chapter_by_id(plan, chapter_id)
+    next_refs_by_chapter = dict(source_refs_by_chapter)
+    next_refs_by_chapter.pop(chapter.id, None)
     return BookStructureCommandMutation(
         chapters=[item for item in chapters if item.id != chapter_id],
+        source_refs_by_chapter=next_refs_by_chapter,
         deleted_chapters=[chapter],
     )
 
@@ -163,6 +188,8 @@ def _merge_chapters(
     plan: MemoirBookPlan,
     chapters: list[MemoirBookPlanChapter],
     req: MemoirBookPlanStructureCommandRequest,
+    *,
+    source_refs_by_chapter: dict[str, list[dict[str, object]]],
 ) -> BookStructureCommandMutation:
     source_chapter_id = command_chapter_id(req)
     target_chapter_id_value = target_chapter_id(req)
@@ -170,15 +197,16 @@ def _merge_chapters(
         raise HTTPException(status_code=400, detail="不能合并到同一章节")
     source_chapter = chapter_by_id(plan, source_chapter_id)
     target_chapter = chapter_by_id(plan, target_chapter_id_value)
-    old_target_ids = set(source_ref_utterance_ids(target_chapter.source_refs_json or []))
+    source_refs = source_refs_by_chapter.get(source_chapter.id, [])
+    target_refs = source_refs_by_chapter.get(target_chapter.id, [])
+    old_target_ids = set(source_ref_utterance_ids(target_refs))
     merged_refs = unique_source_ref_dicts([
-        *(target_chapter.source_refs_json or []),
-        *(source_chapter.source_refs_json or []),
+        *target_refs,
+        *source_refs,
     ])
     new_target_ids = set(source_ref_utterance_ids(merged_refs))
     added_ids = new_target_ids - old_target_ids
     changed_chapter_ids: set[str] = set()
-    target_chapter.source_refs_json = merged_refs
     if added_ids:
         target_pending_ids = pending_source_ids(target_chapter.metadata_json)
         target_pending_ids.update(added_ids)
@@ -190,8 +218,12 @@ def _merge_chapters(
             removed_ids=target_removed_ids,
         )
         changed_chapter_ids.add(target_chapter.id)
+    next_refs_by_chapter = dict(source_refs_by_chapter)
+    next_refs_by_chapter[target_chapter.id] = merged_refs
+    next_refs_by_chapter.pop(source_chapter.id, None)
     return BookStructureCommandMutation(
         chapters=[item for item in chapters if item.id != source_chapter_id],
+        source_refs_by_chapter=next_refs_by_chapter,
         changed_chapter_ids=changed_chapter_ids,
         deleted_chapters=[source_chapter],
     )
@@ -204,6 +236,7 @@ def _split_chapter(
     *,
     project_id: str,
     now: str,
+    source_refs_by_chapter: dict[str, list[dict[str, object]]],
 ) -> BookStructureCommandMutation:
     chapter_id = command_chapter_id(req)
     selected_ids = set(req.utterance_ids)
@@ -212,7 +245,7 @@ def _split_chapter(
     chapter = chapter_by_id(plan, chapter_id)
     kept_refs: list[dict] = []
     split_refs: list[dict] = []
-    for ref in chapter.source_refs_json or []:
+    for ref in source_refs_by_chapter.get(chapter.id, []):
         utterance_id = source_ref_utterance_id(ref)
         if utterance_id in selected_ids:
             split_refs.append(dict(ref))
@@ -228,7 +261,6 @@ def _split_chapter(
     source_pending_ids = pending_source_ids(chapter.metadata_json) & kept_ids
     source_removed_ids = removed_source_ids(chapter.metadata_json)
     source_removed_ids.update(split_ids)
-    chapter.source_refs_json = kept_refs
     chapter.metadata_json = set_source_change_metadata(
         chapter.metadata_json,
         added_ids=source_pending_ids,
@@ -237,15 +269,19 @@ def _split_chapter(
 
     source_index = chapters.index(chapter)
     new_chapter = MemoirBookPlanChapter(
+        id=str(uuid.uuid4()),
         plan_id=plan.id,
         project_id=project_id,
         title=(req.title or f"{chapter.title}（拆出）").strip()[:200],
         sort_order=10000 + len(chapters),
-        source_refs_json=split_refs,
         metadata_json={"created_from_split_at": now, "split_from_chapter_id": chapter.id},
     )
+    next_refs_by_chapter = dict(source_refs_by_chapter)
+    next_refs_by_chapter[chapter.id] = kept_refs
+    next_refs_by_chapter[new_chapter.id] = split_refs
     return BookStructureCommandMutation(
         chapters=[*chapters[:source_index + 1], new_chapter, *chapters[source_index + 1:]],
+        source_refs_by_chapter=next_refs_by_chapter,
         changed_chapter_ids={chapter.id},
     )
 
@@ -257,14 +293,20 @@ def _create_chapter_from_source(
     *,
     project_id: str,
     now: str,
+    source_refs_by_chapter: dict[str, list[dict[str, object]]],
     source: SourceSegment,
 ) -> BookStructureCommandMutation:
     new_chapter = MemoirBookPlanChapter(
+        id=str(uuid.uuid4()),
         plan_id=plan.id,
         project_id=project_id,
         title=(req.title or chapter_title_from_source(source)).strip()[:200],
         sort_order=10000 + len(chapters),
-        source_refs_json=[as_dict(source.ref())],
         metadata_json={"created_from_source_at": now},
     )
-    return BookStructureCommandMutation(chapters=[*chapters, new_chapter])
+    next_refs_by_chapter = dict(source_refs_by_chapter)
+    next_refs_by_chapter[new_chapter.id] = [as_dict(source.ref())]
+    return BookStructureCommandMutation(
+        chapters=[*chapters, new_chapter],
+        source_refs_by_chapter=next_refs_by_chapter,
+    )

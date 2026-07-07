@@ -19,14 +19,12 @@ def _chapter(
     title: str,
     sort_order: int,
     content: str = "",
-    source_refs: list[dict] | None = None,
 ):
     versions = [SimpleNamespace(content=content)] if content else []
     return SimpleNamespace(
         id=chapter_id,
         title=title,
         sort_order=sort_order,
-        source_refs_json=source_refs or [],
         draft=SimpleNamespace(versions=versions) if versions else None,
     )
 
@@ -82,10 +80,9 @@ def test_book_voice_prompt_helpers_use_source_count_override_and_latest_draft():
         title="外婆家的童年",
         sort_order=0,
         content=" 第一版\n第二版 ",
-        source_refs=[{"utterance_id": "u1"}, {"utterance_id": "u2"}],
     )
 
-    assert chapter_source_count(chapter) == 2
+    assert chapter_source_count(chapter) == 0
     assert chapter_source_count(chapter, {"chapter-1": 5}) == 5
     assert latest_draft_content(chapter) == "第一版\n第二版"
     assert draft_char_count(chapter) == 6

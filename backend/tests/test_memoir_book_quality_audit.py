@@ -9,7 +9,12 @@ from app.domain.memoir.types import (
     MemoirEditingJobStatus,
     MemoirEditingJobType,
 )
-from app.models.memoir import MemoirAutomationEvent, MemoirBookQualityAuditSnapshot, MemoirEditingJob
+from app.models.memoir import (
+    MemoirAutomationEvent,
+    MemoirBookQualityAuditSnapshot,
+    MemoirChapterSourceLink,
+    MemoirEditingJob,
+)
 from app.schemas.memoir_book import MemoirBookQualityAuditRunRequest
 from app.services.memoir import automation_events
 from app.services.memoir.book_quality_audit import run_book_quality_audit, schedule_project_quality_audit
@@ -64,6 +69,18 @@ class FakeAuditAI:
         return json.dumps(payload, ensure_ascii=False)
 
 
+async def _mark_source_pending(test_db, *, chapter_id: str, utterance_id: str) -> None:
+    link = await test_db.scalar(
+        select(MemoirChapterSourceLink).where(
+            MemoirChapterSourceLink.chapter_id == chapter_id,
+            MemoirChapterSourceLink.utterance_id == utterance_id,
+        )
+    )
+    assert link is not None
+    link.merged_draft_version_id = None
+    test_db.add(link)
+
+
 async def _create_needs_update_audit_context(client, test_db):
     first = await create_test_voice_transcript(client, test_db, "小时候在外婆家的院子里摘菜。")
     second = await create_test_voice_transcript(client, test_db, "后来又讲了夏天和外婆一起剥青豆。")
@@ -77,13 +94,13 @@ async def _create_needs_update_audit_context(client, test_db):
         ],
         chapter_title="院子里的童年",
     )
-    chapter.metadata_json = {"pending_source_utterance_ids": [second["utterance_id"]]}
     await create_test_chapter_draft(
         test_db,
         project_id=project_id,
         chapter_id=chapter.id,
         content="小时候在外婆家的院子里摘菜。",
     )
+    await _mark_source_pending(test_db, chapter_id=chapter.id, utterance_id=second["utterance_id"])
     await test_db.commit()
     user = (await client.get("/api/auth/me")).json()
     return user["id"], project_id, chapter, second
@@ -102,13 +119,13 @@ async def test_book_quality_audit_flags_pending_chapter_update_and_records_event
         ],
         chapter_title="院子里的童年",
     )
-    chapter.metadata_json = {"pending_source_utterance_ids": [second["utterance_id"]]}
     await create_test_chapter_draft(
         test_db,
         project_id=project_id,
         chapter_id=chapter.id,
         content="小时候在外婆家的院子里摘菜。",
     )
+    await _mark_source_pending(test_db, chapter_id=chapter.id, utterance_id=second["utterance_id"])
     await test_db.commit()
 
     response = await client.post(

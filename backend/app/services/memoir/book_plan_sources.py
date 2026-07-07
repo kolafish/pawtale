@@ -256,26 +256,6 @@ def source_ref_response(
     return MemoirBookChapterSourceRef.model_validate(data)
 
 
-async def source_ref_created_at_by_utterance(
-    db: AsyncSession,
-    plan: MemoirBookPlan,
-) -> dict[str, datetime]:
-    utterance_ids = {
-        ref["utterance_id"]
-        for chapter in plan.chapters
-        for ref in (chapter.source_refs_json or [])
-        if isinstance(ref, dict) and isinstance(ref.get("utterance_id"), str)
-    }
-    if not utterance_ids:
-        return {}
-    result = await db.execute(
-        select(MemoirVoiceUtterance.id, MemoirVoiceUtterance.created_at).where(
-            MemoirVoiceUtterance.id.in_(utterance_ids)
-        )
-    )
-    return {utterance_id: created_at for utterance_id, created_at in result.all()}
-
-
 def chapter_response(
     chapter: MemoirBookPlanChapter,
     *,
@@ -289,9 +269,7 @@ def chapter_response(
         removed_source_count = source_change_state.removed_source_count
     else:
         pending_source_count, removed_source_count = source_change_counts(chapter.metadata_json)
-    refs = source_refs if source_refs is not None else [
-        ref for ref in (chapter.source_refs_json or []) if isinstance(ref, dict)
-    ]
+    refs = source_refs or []
     return MemoirBookPlanChapterResponse(
         id=chapter.id,
         plan_id=chapter.plan_id,
@@ -387,35 +365,6 @@ async def source_segments(
             )
         )
     return segments
-
-
-def covered_utterance_ids(plan: MemoirBookPlan | None) -> set[str]:
-    if not plan:
-        return set()
-    return {
-        utterance_id
-        for chapter in plan.chapters
-        for utterance_id in source_ref_utterance_ids(chapter.source_refs_json or [])
-    }
-
-
-def included_chapters_by_utterance(
-    plan: MemoirBookPlan | None,
-) -> dict[str, list[MemoirBookSourceIncludedChapter]]:
-    if not plan:
-        return {}
-    included: dict[str, list[MemoirBookSourceIncludedChapter]] = {}
-    for chapter in sorted_chapters(plan):
-        chapter_item = MemoirBookSourceIncludedChapter(
-            chapter_id=chapter.id,
-            title=chapter.title,
-            sort_order=chapter.sort_order,
-        )
-        for ref in chapter.source_refs_json or []:
-            if not isinstance(ref, dict) or not isinstance(ref.get("utterance_id"), str):
-                continue
-            included.setdefault(ref["utterance_id"], []).append(chapter_item)
-    return included
 
 
 def source_coverage_item(

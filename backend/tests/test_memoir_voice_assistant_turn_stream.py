@@ -19,6 +19,7 @@ from app.services.memoir.tts_alignment import TTSAlignmentSegment
 from app.services.memoir.voice_assistant_turn_stream import VoiceAssistantTurnStreamSession
 from app.services.memoir.voice_tts import StreamingTTSChunk
 from tests.memoir_helpers import (
+    add_test_chapter_source_links,
     create_test_book_plan,
     create_test_voice_transcript,
     memoir_source_ref,
@@ -433,10 +434,16 @@ async def test_voice_assistant_turn_speaks_grouped_source_assignment_progress(
         project_id=first["session"]["project_id"],
         title="春节厨房",
         sort_order=1,
-        source_refs_json=[memoir_source_ref(second)],
     )
     test_db.add(second_chapter)
     await test_db.flush()
+    await add_test_chapter_source_links(
+        test_db,
+        project_id=first["session"]["project_id"],
+        plan_id=first_chapter.plan_id,
+        chapter_id=second_chapter.id,
+        source_refs=[memoir_source_ref(second)],
+    )
     first_event = await automation_events.record_automation_event(
         test_db,
         project_id=first["session"]["project_id"],

@@ -4,7 +4,13 @@ import json
 
 from sqlalchemy import func, select
 
-from app.domain.memoir.types import MemoirBookPlanStatus, MemoirCreatedBy, MemoirGuidanceMode, MemoirSemanticCacheStatus
+from app.domain.memoir.types import (
+    MemoirBookPlanStatus,
+    MemoirChapterSourceLinkStatus,
+    MemoirCreatedBy,
+    MemoirGuidanceMode,
+    MemoirSemanticCacheStatus,
+)
 from app.models.memoir import (
     MemoirBookPlan,
     MemoirBookPlanChapter,
@@ -16,7 +22,6 @@ from app.models.memoir import (
 )
 from app.models.projects import Project
 from scripts.backfill_memoir_chapter_cards import run_chapter_card_backfill
-from scripts.backfill_memoir_chapter_source_links import run_chapter_source_link_backfill
 from scripts.backfill_memoir_source_cards import run_source_card_backfill
 from scripts.inspect_memoir_semantic_state import run_semantic_state_inspection
 
@@ -108,40 +113,21 @@ async def _create_project_with_chapter(test_db):
         plan_id=plan.id,
         title="外婆家的厨房",
         sort_order=0,
-        source_refs_json=[
-            {
-                "voice_session_id": voice_session.id,
-                "message_id": "message-1",
-                "utterance_id": utterance.id,
-                "transcript_version_id": None,
-                "audio_file_id": None,
-                "start_ms": None,
-                "end_ms": None,
-                "quote": "小时候常在外婆家厨房帮忙",
-                "created_at": utterance.created_at.isoformat(),
-            }
-        ],
     )
     test_db.add(chapter)
+    await test_db.flush()
+    test_db.add(
+        MemoirChapterSourceLink(
+            project_id=project.id,
+            plan_id=plan.id,
+            chapter_id=chapter.id,
+            utterance_id=utterance.id,
+            quote="小时候常在外婆家厨房帮忙",
+            status=MemoirChapterSourceLinkStatus.ACTIVE.value,
+        )
+    )
     await test_db.commit()
     return project, chapter, utterance
-
-
-async def test_chapter_source_link_backfill_dry_run_and_execute(test_db):
-    project, _, _ = await _create_project_with_chapter(test_db)
-    project_id = project.id
-
-    dry_run = await run_chapter_source_link_backfill(test_db, project_id=project_id, dry_run=True)
-    assert dry_run["created_count"] == 1
-    assert await test_db.scalar(select(func.count()).select_from(MemoirChapterSourceLink)) == 0
-
-    executed = await run_chapter_source_link_backfill(test_db, project_id=project_id, dry_run=False)
-    assert executed["created_count"] == 1
-    assert await test_db.scalar(select(func.count()).select_from(MemoirChapterSourceLink)) == 1
-
-    second = await run_chapter_source_link_backfill(test_db, project_id=project_id, dry_run=False)
-    assert second["created_count"] == 0
-    assert second["failure_count"] == 0
 
 
 async def test_source_card_backfill_dry_run_does_not_call_ai_or_write(test_db):
@@ -217,5 +203,4 @@ async def test_inspection_reports_missing_cards(test_db):
     project_state = inspection["projects"][0]
     assert project_state["source_cards"]["missing_current_ready"] == 1
     assert project_state["chapter_cards"]["missing_current_ready"] == 1
-    assert project_state["chapter_sources"]["legacy_source_ref_count"] == 1
-    assert project_state["chapter_sources"]["legacy_refs_without_any_link_count"] == 1
+    assert project_state["chapter_sources"]["active_link_count"] == 1

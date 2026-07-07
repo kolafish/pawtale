@@ -39,15 +39,34 @@ from app.services.memoir.voice_transcripts import (
     _remove_obvious_oral_fillers,
     generate_cleaned_transcript_text,
 )
-from app.services.memoir.chapter_source_links import backfill_project_chapter_source_links
 from app.services.memoir.utterance_editing_pipeline import (
     ROUTE_PAYLOAD_SOURCE_TEXT_HASHES_KEY,
     ROUTE_PAYLOAD_TRANSCRIPT_VERSION_IDS_KEY,
     source_text_hash,
 )
-from tests.memoir_helpers import create_test_voice_transcript, post_mobile_memoir_voice_session, memoir_source_ref
+from tests.memoir_helpers import create_test_voice_transcript, post_mobile_memoir_voice_session
 
 UTC_SUFFIXES = ("Z", "+00:00")
+
+
+def _chapter_source_link(
+    *,
+    project_id: str,
+    plan_id: str,
+    chapter_id: str,
+    created: dict,
+    quote: str,
+) -> MemoirChapterSourceLink:
+    return MemoirChapterSourceLink(
+        project_id=project_id,
+        plan_id=plan_id,
+        chapter_id=chapter_id,
+        utterance_id=created["utterance_id"],
+        transcript_version_id=created.get("transcript_version_id"),
+        audio_file_id=created.get("audio_file_id"),
+        quote=quote,
+        status=MemoirChapterSourceLinkStatus.ACTIVE.value,
+    )
 
 
 class FakeAIClient:
@@ -470,10 +489,17 @@ async def test_mobile_memoir_editing_included_transcript_marks_chapter_for_revis
         project_id=project_id,
         title="外婆家的童年",
         sort_order=0,
-        source_refs_json=[memoir_source_ref(created, "嗯，我小时候就是住在外婆家。")],
     )
     test_db.add(chapter)
     await test_db.flush()
+    source_link = _chapter_source_link(
+        project_id=project_id,
+        plan_id=plan.id,
+        chapter_id=chapter.id,
+        created=created,
+        quote="嗯，我小时候就是住在外婆家。",
+    )
+    test_db.add(source_link)
     draft = MemoirBookChapterDraft(
         project_id=project_id,
         chapter_id=chapter.id,
@@ -492,8 +518,8 @@ async def test_mobile_memoir_editing_included_transcript_marks_chapter_for_revis
     test_db.add(draft_version)
     await test_db.flush()
     draft_version_id = draft_version.id
-    await test_db.commit()
-    await backfill_project_chapter_source_links(test_db, project_id=project_id)
+    source_link.merged_draft_version_id = draft_version_id
+    test_db.add(source_link)
     await test_db.commit()
 
     response = await client.patch(
@@ -512,8 +538,6 @@ async def test_mobile_memoir_editing_included_transcript_marks_chapter_for_revis
     )
     await test_db.refresh(chapter)
     await test_db.refresh(draft)
-    assert chapter.source_refs_json[0]["transcript_version_id"] == version.id
-    assert chapter.source_refs_json[0]["quote"] == "我小时候住在外婆家的院子里。"
     link = await test_db.scalar(
         select(MemoirChapterSourceLink).where(
             MemoirChapterSourceLink.project_id == project_id,
@@ -746,13 +770,21 @@ async def test_mobile_memoir_lists_book_inclusion_for_voice_transcripts(client, 
     )
     test_db.add(plan)
     await test_db.flush()
+    chapter = MemoirBookPlanChapter(
+        plan_id=plan.id,
+        project_id=project_id,
+        title="院子里的童年",
+        sort_order=0,
+    )
+    test_db.add(chapter)
+    await test_db.flush()
     test_db.add(
-        MemoirBookPlanChapter(
-            plan_id=plan.id,
+        _chapter_source_link(
             project_id=project_id,
-            title="院子里的童年",
-            sort_order=0,
-            source_refs_json=[memoir_source_ref(created, "外婆家的院子", transcript_version_id=None)],
+            plan_id=plan.id,
+            chapter_id=chapter.id,
+            created=created,
+            quote="外婆家的院子",
         )
     )
     await test_db.commit()
@@ -780,13 +812,21 @@ async def test_mobile_memoir_filters_voice_transcripts_by_book_inclusion(client,
     )
     test_db.add(plan)
     await test_db.flush()
+    chapter = MemoirBookPlanChapter(
+        plan_id=plan.id,
+        project_id=project_id,
+        title="院子里的童年",
+        sort_order=0,
+    )
+    test_db.add(chapter)
+    await test_db.flush()
     test_db.add(
-        MemoirBookPlanChapter(
-            plan_id=plan.id,
+        _chapter_source_link(
             project_id=project_id,
-            title="院子里的童年",
-            sort_order=0,
-            source_refs_json=[memoir_source_ref(included, "外婆家的院子", transcript_version_id=None)],
+            plan_id=plan.id,
+            chapter_id=chapter.id,
+            created=included,
+            quote="外婆家的院子",
         )
     )
     await test_db.commit()
@@ -826,13 +866,25 @@ async def test_mobile_memoir_delete_transcript_removes_book_source_refs_and_mark
         project_id=project_id,
         title="童年和离家",
         sort_order=0,
-        source_refs_json=[
-            memoir_source_ref(first, "外婆家的院子", transcript_version_id=None),
-            memoir_source_ref(second, "第一次离家", transcript_version_id=None),
-        ],
     )
     test_db.add(chapter)
     await test_db.flush()
+    test_db.add_all([
+        _chapter_source_link(
+            project_id=project_id,
+            plan_id=plan.id,
+            chapter_id=chapter.id,
+            created=first,
+            quote="外婆家的院子",
+        ),
+        _chapter_source_link(
+            project_id=project_id,
+            plan_id=plan.id,
+            chapter_id=chapter.id,
+            created=second,
+            quote="第一次离家",
+        ),
+    ])
     draft = MemoirBookChapterDraft(
         project_id=project_id,
         chapter_id=chapter.id,
@@ -852,8 +904,6 @@ async def test_mobile_memoir_delete_transcript_removes_book_source_refs_and_mark
         )
     )
     await test_db.commit()
-    await backfill_project_chapter_source_links(test_db, project_id=project_id)
-    await test_db.commit()
     generated = await client.post(f"/api/mobile/memoir/projects/{project_id}/book-output/generate", json={})
     assert generated.status_code == 200
 
@@ -863,7 +913,6 @@ async def test_mobile_memoir_delete_transcript_removes_book_source_refs_and_mark
     refreshed_chapter = await test_db.scalar(
         select(MemoirBookPlanChapter).where(MemoirBookPlanChapter.id == chapter.id)
     )
-    assert [ref["utterance_id"] for ref in refreshed_chapter.source_refs_json] == [first["utterance_id"]]
     assert refreshed_chapter.metadata_json["removed_source_utterance_ids"] == [second["utterance_id"]]
     assert "source_refs_removed_at" in refreshed_chapter.metadata_json
     removed_link = await test_db.scalar(

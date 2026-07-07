@@ -1,8 +1,11 @@
 from pathlib import Path
 
+from sqlalchemy import select
+
 from app.domain.memoir.types import (
     MemoirBookChapterDraftStatus,
     MemoirBookPlanStatus,
+    MemoirChapterSourceLinkStatus,
     MemoirChatContentStatus,
     MemoirChatMessageRole,
     MemoirCreatedBy,
@@ -14,6 +17,7 @@ from app.models.memoir import (
     MemoirBookChapterDraftVersion,
     MemoirBookPlan,
     MemoirBookPlanChapter,
+    MemoirChapterSourceLink,
     MemoirChatMessage,
     MemoirTranscriptVersion,
     MemoirVoiceUtterance,
@@ -179,6 +183,52 @@ def memoir_source_ref(
     }
 
 
+def _string_ref_value(ref: dict, key: str) -> str | None:
+    value = ref.get(key)
+    return value.strip() if isinstance(value, str) and value.strip() else None
+
+
+def _int_ref_value(ref: dict, key: str) -> int | None:
+    value = ref.get(key)
+    return value if isinstance(value, int) else None
+
+
+async def add_test_chapter_source_links(
+    test_db,
+    *,
+    project_id: str,
+    plan_id: str,
+    chapter_id: str,
+    source_refs: list[dict],
+    status: MemoirChapterSourceLinkStatus = MemoirChapterSourceLinkStatus.ACTIVE,
+    merged_draft_version_id: str | None = None,
+) -> list[MemoirChapterSourceLink]:
+    links: list[MemoirChapterSourceLink] = []
+    for ref in source_refs:
+        utterance_id = _string_ref_value(ref, "utterance_id")
+        if not utterance_id:
+            continue
+        link = MemoirChapterSourceLink(
+            project_id=project_id,
+            plan_id=plan_id,
+            chapter_id=chapter_id,
+            utterance_id=utterance_id,
+            transcript_version_id=_string_ref_value(ref, "transcript_version_id"),
+            audio_file_id=_string_ref_value(ref, "audio_file_id"),
+            start_ms=_int_ref_value(ref, "start_ms"),
+            end_ms=_int_ref_value(ref, "end_ms"),
+            quote=_string_ref_value(ref, "quote") or "",
+            status=status.value,
+            assignment_reason="sync_existing_source_ref",
+            merged_draft_version_id=merged_draft_version_id,
+        )
+        test_db.add(link)
+        links.append(link)
+    if links:
+        await test_db.flush()
+    return links
+
+
 async def create_test_book_plan(
     test_db,
     *,
@@ -202,9 +252,18 @@ async def create_test_book_plan(
         project_id=project_id,
         title=chapter_title,
         sort_order=0,
-        source_refs_json=source_refs if source_refs is not None else ([source_ref] if source_ref else []),
+        source_refs_json=[],
     )
     test_db.add(chapter)
+    await test_db.flush()
+    refs = source_refs if source_refs is not None else ([source_ref] if source_ref else [])
+    await add_test_chapter_source_links(
+        test_db,
+        project_id=project_id,
+        plan_id=plan.id,
+        chapter_id=chapter.id,
+        source_refs=refs,
+    )
     await test_db.commit()
     return plan, chapter
 
@@ -224,16 +283,29 @@ async def create_test_chapter_draft(
     )
     test_db.add(draft)
     await test_db.flush()
-    test_db.add(
-        MemoirBookChapterDraftVersion(
-            draft_id=draft.id,
-            project_id=project_id,
-            chapter_id=chapter_id,
-            version=1,
-            content=content,
-            created_by=MemoirCreatedBy.USER.value,
-            prompt_snapshot="",
-        )
+    version = MemoirBookChapterDraftVersion(
+        draft_id=draft.id,
+        project_id=project_id,
+        chapter_id=chapter_id,
+        version=1,
+        content=content,
+        created_by=MemoirCreatedBy.USER.value,
+        prompt_snapshot="",
     )
+    test_db.add(version)
+    await test_db.flush()
+    if status == MemoirBookChapterDraftStatus.CONFIRMED:
+        links = (
+            await test_db.execute(
+                select(MemoirChapterSourceLink).where(
+                    MemoirChapterSourceLink.project_id == project_id,
+                    MemoirChapterSourceLink.chapter_id == chapter_id,
+                    MemoirChapterSourceLink.status == MemoirChapterSourceLinkStatus.ACTIVE.value,
+                )
+            )
+        ).scalars().all()
+        for link in links:
+            link.merged_draft_version_id = version.id
+            test_db.add(link)
     await test_db.commit()
     return draft

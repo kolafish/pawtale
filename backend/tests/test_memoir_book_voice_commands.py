@@ -14,8 +14,14 @@ from app.models.memoir import (
     MemoirBookChapterDraftVersion,
     MemoirBookPlan,
     MemoirBookPlanChapter,
+    MemoirChapterSourceLink,
 )
-from tests.memoir_helpers import create_test_voice_transcript, ensure_mobile_memoir_project, memoir_source_ref
+from tests.memoir_helpers import (
+    add_test_chapter_source_links,
+    create_test_voice_transcript,
+    ensure_mobile_memoir_project,
+    memoir_source_ref,
+)
 
 
 class FakeBookVoiceCommandAI:
@@ -293,8 +299,20 @@ async def test_mobile_memoir_book_voice_command_merge_schedules_target_chapter_r
         project_id=project_id,
         titles=["童年友情", "童年年节欢趣"],
     )
-    chapters[0].source_refs_json = [memoir_source_ref(first)]
-    chapters[1].source_refs_json = [memoir_source_ref(second)]
+    await add_test_chapter_source_links(
+        test_db,
+        project_id=project_id,
+        plan_id=chapters[0].plan_id,
+        chapter_id=chapters[0].id,
+        source_refs=[memoir_source_ref(first)],
+    )
+    await add_test_chapter_source_links(
+        test_db,
+        project_id=project_id,
+        plan_id=chapters[1].plan_id,
+        chapter_id=chapters[1].id,
+        source_refs=[memoir_source_ref(second)],
+    )
     draft = MemoirBookChapterDraft(
         project_id=project_id,
         chapter_id=chapters[1].id,
@@ -310,6 +328,16 @@ async def test_mobile_memoir_book_voice_command_merge_schedules_target_chapter_r
         created_by=MemoirCreatedBy.AI.value,
     )
     test_db.add(version)
+    await test_db.flush()
+    second_link = await test_db.scalar(
+        select(MemoirChapterSourceLink).where(
+            MemoirChapterSourceLink.chapter_id == chapters[1].id,
+            MemoirChapterSourceLink.utterance_id == second["utterance_id"],
+        )
+    )
+    assert second_link is not None
+    second_link.merged_draft_version_id = version.id
+    test_db.add(second_link)
     await test_db.commit()
 
     response = await client.post(
@@ -377,7 +405,7 @@ async def test_mobile_memoir_book_voice_command_execute_assigns_uncovered_source
     assert data["summary"] == "已把待收录第 1 条归入「职场浮沉与升职加薪」。"
     target_chapter = next(chapter for chapter in data["plan"]["chapters"] if chapter["id"] == chapters[1].id)
     assert [ref["utterance_id"] for ref in target_chapter["source_refs"]] == [created["utterance_id"]]
-    assert target_chapter["pending_source_count"] == 1
+    assert target_chapter["pending_source_count"] == 0
     assert data["source_coverage"]["covered_source_count"] == 1
     assert data["source_coverage"]["uncovered_source_count"] == 0
 
