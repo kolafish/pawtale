@@ -29,6 +29,8 @@ export interface DebugSpeakerGatewayEvent {
   text?: string;
   start_ms?: number | null;
   end_ms?: number | null;
+  occurred_start_at_ms?: number | null;
+  occurred_end_at_ms?: number | null;
   confidence?: number | null;
   provider_event_type?: string;
   provider_payload?: Record<string, unknown>;
@@ -264,7 +266,7 @@ export class DebugSpeakerTranscribeClient {
       return;
     }
     if (event.type === "speaker.partial" || event.type === "speaker.final" || event.type === "speaker.reassign") {
-      this.callbacks.onSpeakerEvent(event);
+      this.callbacks.onSpeakerEvent(this.eventWithOccurrenceTime(event));
       return;
     }
     if (event.type === "speaker.diarization") {
@@ -291,6 +293,21 @@ export class DebugSpeakerTranscribeClient {
       recordingElapsedMs: this.captureStartedAtMs ? Date.now() - this.captureStartedAtMs : 0,
       audioLevel,
     });
+  }
+
+  private eventWithOccurrenceTime(event: DebugSpeakerGatewayEvent): DebugSpeakerGatewayEvent {
+    if (!this.captureStartedAtMs) {
+      return event;
+    }
+    return {
+      ...event,
+      occurred_start_at_ms: typeof event.start_ms === "number"
+        ? this.captureStartedAtMs + event.start_ms
+        : null,
+      occurred_end_at_ms: typeof event.end_ms === "number"
+        ? this.captureStartedAtMs + event.end_ms
+        : null,
+    };
   }
 
   private sendJson(event: DebugSpeakerClientEvent): void {

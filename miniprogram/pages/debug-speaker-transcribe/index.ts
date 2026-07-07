@@ -130,6 +130,7 @@ const FUZZY_SPEECH_MAX_CHARS = 40;
 const FUZZY_SPEECH_MAX_LENGTH_RATIO = 1.6;
 const FUZZY_SPEECH_MIN_COMMON_OF_SHORTER = 0.68;
 const FUZZY_SPEECH_MIN_COMMON_OF_LONGER = 0.48;
+const BEIJING_TIME_OFFSET_MS = 8 * 60 * 60 * 1000;
 const EMPTY_HISTORY_LINE_PREVIEW: HistoryLinePreviewView = {
   visible: false,
   speakerTitle: "",
@@ -190,10 +191,33 @@ function formatBytes(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
-function formatSegmentMeta(event: DebugSpeakerGatewayEvent): string {
-  const range = typeof event.start_ms === "number" && typeof event.end_ms === "number"
+function formatBeijingClockTime(epochMs: number): string {
+  const date = new Date(epochMs + BEIJING_TIME_OFFSET_MS);
+  const hours = date.getUTCHours().toString().padStart(2, "0");
+  const minutes = date.getUTCMinutes().toString().padStart(2, "0");
+  const seconds = date.getUTCSeconds().toString().padStart(2, "0");
+  return `${hours}:${minutes}:${seconds}`;
+}
+
+function formatSegmentTime(event: DebugSpeakerGatewayEvent): string {
+  if (typeof event.occurred_start_at_ms === "number" && typeof event.occurred_end_at_ms === "number") {
+    const start = formatBeijingClockTime(event.occurred_start_at_ms);
+    const end = formatBeijingClockTime(event.occurred_end_at_ms);
+    return start === end ? start : `${start}-${end}`;
+  }
+  if (typeof event.occurred_start_at_ms === "number") {
+    return formatBeijingClockTime(event.occurred_start_at_ms);
+  }
+  if (typeof event.occurred_end_at_ms === "number") {
+    return formatBeijingClockTime(event.occurred_end_at_ms);
+  }
+  return typeof event.start_ms === "number" && typeof event.end_ms === "number"
     ? `${formatElapsed(event.start_ms)}-${formatElapsed(event.end_ms)}`
     : "";
+}
+
+function formatSegmentMeta(event: DebugSpeakerGatewayEvent): string {
+  const range = formatSegmentTime(event);
   const confidence = typeof event.confidence === "number"
     ? `置信度 ${Math.round(event.confidence * 100)}%`
     : "";

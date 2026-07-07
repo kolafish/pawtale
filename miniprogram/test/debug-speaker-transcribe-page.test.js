@@ -95,6 +95,22 @@ test("debug speaker page shows partial and final text in conversation flow", () 
   assert.equal(context.data.clearDisabled, false);
 });
 
+test("debug speaker page formats segment meta as Beijing occurrence time when available", () => {
+  const { mod } = loadDebugSpeakerPage();
+
+  assert.equal(
+    mod.formatDebugSpeakerSegmentMeta({
+      type: "speaker.final",
+      occurred_start_at_ms: Date.UTC(2026, 6, 7, 5, 30, 44),
+      occurred_end_at_ms: Date.UTC(2026, 6, 7, 5, 30, 47),
+      start_ms: 44_000,
+      end_ms: 47_000,
+      confidence: 0.86,
+    }),
+    "13:30:44-13:30:47 · 置信度 86%",
+  );
+});
+
 test("debug speaker page removes finalized text from live unknown partial", () => {
   const { page } = loadDebugSpeakerPage();
   const context = pageContext(page);
