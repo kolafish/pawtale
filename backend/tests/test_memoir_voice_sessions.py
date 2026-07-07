@@ -89,6 +89,7 @@ async def test_mobile_memoir_creates_voice_session_for_existing_project(client, 
     session = data["session"]
     assert session["status"] == "created"
     assert session["guidance_mode"] == "guided_interview"
+    assert session["interview_type"] == "ai_interview"
     assert session["current_guidance_module"] == "person"
     assert session["provider"] == "volc_streaming_asr"
     assert session["input_format"] == "pcm_s16le_16000_mono"
@@ -100,6 +101,7 @@ async def test_mobile_memoir_creates_voice_session_for_existing_project(client, 
     stored = await test_db.scalar(select(MemoirVoiceSession).where(MemoirVoiceSession.id == session["id"]))
     assert stored is not None
     assert stored.guidance_mode == "guided_interview"
+    assert stored.interview_type == "ai_interview"
 
     current_user = (await client.get("/api/auth/me")).json()
     listening = await memoir_voice_sessions.mark_voice_session_listening(test_db, session["id"], current_user["id"])
@@ -107,6 +109,26 @@ async def test_mobile_memoir_creates_voice_session_for_existing_project(client, 
     assert listening.session.status == "listening"
     await test_db.refresh(stored)
     assert stored.status == "listening"
+
+
+async def test_mobile_memoir_creates_human_interview_session(client, test_db):
+    response = await post_mobile_memoir_voice_session(
+        client,
+        json={
+            "guidance_mode": "free_narration",
+            "interview_type": "human_interview",
+            "provider": "volc_streaming_asr",
+        },
+    )
+
+    assert response.status_code == 201
+    session = response.json()["session"]
+    assert session["guidance_mode"] == "free_narration"
+    assert session["interview_type"] == "human_interview"
+
+    stored = await test_db.scalar(select(MemoirVoiceSession).where(MemoirVoiceSession.id == session["id"]))
+    assert stored is not None
+    assert stored.interview_type == "human_interview"
 
 
 async def test_mobile_memoir_voice_session_rejects_invalid_guidance_mode(client):

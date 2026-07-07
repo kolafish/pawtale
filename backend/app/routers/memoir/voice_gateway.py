@@ -91,6 +91,7 @@ async def mobile_memoir_voice_gateway(
                 voice_session_id,
             ),
             on_start=on_start,
+            on_turn_start=persistence.set_turn_context,
             on_stop=on_stop,
             on_audio_frame=persistence.record_audio_frame,
             on_asr_final=persistence.persist_final,

@@ -1,5 +1,7 @@
 import type {
   MemoirGuidanceMode,
+  MemoirInterviewType,
+  MemoirSpeakerRole,
   MemoirVoiceSessionDetail,
   TTSAlignmentSegment,
   VoiceChatErrorInfo,
@@ -40,6 +42,8 @@ export interface VoiceChatData {
   projectTitle: string;
   guidanceMode: MemoirGuidanceMode;
   currentGuidanceModule: string;
+  interviewType: MemoirInterviewType;
+  speakerRole: MemoirSpeakerRole;
   status: VoiceChatConnectionStatus;
   statusText: string;
   recording: boolean;
@@ -93,7 +97,13 @@ export interface VoiceChatData {
   canReconnect: boolean;
   canFinishAfterDisconnect: boolean;
   finishButtonText: string;
+  topModeLabel: string;
+  topSubtitle: string;
   topicTitleText: string;
+  showSpeakerRoleSwitch: boolean;
+  speakerRoleLabel: string;
+  narratorRoleButtonClass: string;
+  interviewerRoleButtonClass: string;
   showErrorKindStrip: boolean;
   showRecoveryPanel: boolean;
   showRecoveryActions: boolean;
@@ -149,6 +159,8 @@ export function initialVoiceChatData(): VoiceChatData {
     projectTitle: "",
     guidanceMode: "free_narration",
     currentGuidanceModule: "",
+    interviewType: "ai_interview",
+    speakerRole: "narrator",
     status: "idle",
     statusText: "未连接",
     recording: false,
@@ -208,7 +220,13 @@ export function initialVoiceChatData(): VoiceChatData {
     canReconnect: false,
     canFinishAfterDisconnect: false,
     finishButtonText: "保存离开",
+    topModeLabel: "AI 访谈",
+    topSubtitle: "小余陪您慢慢讲",
     topicTitleText: "这段回忆",
+    showSpeakerRoleSwitch: false,
+    speakerRoleLabel: "被访者",
+    narratorRoleButtonClass: "speaker-role-button active",
+    interviewerRoleButtonClass: "speaker-role-button",
     showErrorKindStrip: false,
     showRecoveryPanel: false,
     showRecoveryActions: false,
@@ -253,7 +271,13 @@ export type VoiceChatPatch = Partial<VoiceChatData>;
 export type VoiceChatViewPatch = Pick<
   VoiceChatData,
   | "finishButtonText"
+  | "topModeLabel"
+  | "topSubtitle"
   | "topicTitleText"
+  | "showSpeakerRoleSwitch"
+  | "speakerRoleLabel"
+  | "narratorRoleButtonClass"
+  | "interviewerRoleButtonClass"
   | "showErrorKindStrip"
   | "showRecoveryPanel"
   | "showRecoveryActions"
@@ -303,16 +327,22 @@ function largeTextFocusClass(state: VoiceChatData, showAssistantPanel: boolean):
   return "idle-focus";
 }
 
+function speakerRoleLabel(role: MemoirSpeakerRole): string {
+  return role === "interviewer" ? "采访者" : "被访者";
+}
+
 export function voiceChatViewPatch(state: VoiceChatData): VoiceChatViewPatch {
   const assistantBusy = state.followUpLoading || state.followUpTTSLoading || state.followUpTTSPlaying;
   const hasAssistantPrompt = Boolean(state.assistantPromptText);
-  const showAssistantPanel = !state.recording
+  const isHumanInterview = state.interviewType === "human_interview";
+  const showAssistantPanel = !isHumanInterview
+    && !state.recording
     && Boolean(hasAssistantPrompt || state.followUpLoading || state.followUpError || state.canRequestFollowUp);
   let stageStatusText = "可以开始讲了";
   if (state.error) {
     stageStatusText = "需要处理一下";
   } else if (state.recording) {
-    stageStatusText = "我在听，您慢慢说";
+    stageStatusText = isHumanInterview ? `正在记录${speakerRoleLabel(state.speakerRole)}` : "我在听，您慢慢说";
   } else if (state.persistenceStateText === "已保存") {
     stageStatusText = "这一段已经记下来了";
   } else if (state.followUpTTSPlaying || (state.followUpTTSLoading && hasAssistantPrompt)) {
@@ -320,9 +350,9 @@ export function voiceChatViewPatch(state: VoiceChatData): VoiceChatViewPatch {
   } else if (state.followUpLoading) {
     stageStatusText = state.latestTranscriptText ? "正在帮您整理成文字" : "小余正在准备问题";
   }
-  let liveDisplayText = "点下方“我来说一段”";
+  let liveDisplayText = isHumanInterview ? `点下方开始记录${speakerRoleLabel(state.speakerRole)}` : "点下方“我来说一段”";
   if (state.recording) {
-    liveDisplayText = state.liveText || "直接说就行，我会帮您记下来";
+    liveDisplayText = state.liveText || (isHumanInterview ? "直接说，系统会实时转成文字" : "直接说就行，我会帮您记下来");
   } else if (state.followUpLoading && state.latestTranscriptText) {
     liveDisplayText = "刚才那段正在整理，请稍等";
   } else if (state.followUpLoading && !hasAssistantPrompt) {
@@ -332,14 +362,18 @@ export function voiceChatViewPatch(state: VoiceChatData): VoiceChatViewPatch {
   } else {
     liveDisplayText = state.liveText
       || state.latestTranscriptText
-      || (state.followUpLoading ? "小余正在准备第一句话" : "点下方“我来说一段”");
+      || (state.followUpLoading ? "小余正在准备第一句话" : (
+        isHumanInterview ? `点下方开始记录${speakerRoleLabel(state.speakerRole)}` : "点下方“我来说一段”"
+      ));
   }
-  let controlHintText = "说一两句也可以，我会帮您记下来。";
+  let controlHintText = isHumanInterview
+    ? `当前记录：${speakerRoleLabel(state.speakerRole)}`
+    : "说一两句也可以，我会帮您记下来。";
   if (state.recording) {
     controlHintText = "说完请点这里";
-  } else if (state.followUpLoading && !hasAssistantPrompt) {
+  } else if (!isHumanInterview && state.followUpLoading && !hasAssistantPrompt) {
     controlHintText = "小余先问一句，稍等一下。";
-  } else if (assistantBusy) {
+  } else if (!isHumanInterview && assistantBusy) {
     controlHintText = "点这里就可以开始说";
   }
   let micButtonText = state.primaryActionText;
@@ -348,11 +382,11 @@ export function voiceChatViewPatch(state: VoiceChatData): VoiceChatViewPatch {
   } else if (state.connecting) {
     micButtonText = "正在准备";
   } else if (state.recording) {
-    micButtonText = "说完了，帮我整理";
-  } else if (assistantBusy) {
+    micButtonText = isHumanInterview ? "说完了，保存这段" : "说完了，帮我整理";
+  } else if (!isHumanInterview && assistantBusy) {
     micButtonText = "我来讲了";
   } else if (state.primaryActionText === "开始说话") {
-    micButtonText = "我来说一段";
+    micButtonText = isHumanInterview ? `记录${speakerRoleLabel(state.speakerRole)}` : "我来说一段";
   } else if (state.primaryActionText === "继续说话") {
     micButtonText = "继续讲";
   }
@@ -364,7 +398,17 @@ export function voiceChatViewPatch(state: VoiceChatData): VoiceChatViewPatch {
   return {
     voiceChatPageClass: pageClass.filter(Boolean).join(" "),
     finishButtonText: state.finishingSession ? "保存中" : "保存离开",
+    topModeLabel: isHumanInterview ? "人工访谈" : "AI 访谈",
+    topSubtitle: isHumanInterview ? "实时记录采访者和被访者" : "小余陪您慢慢讲",
     topicTitleText: state.projectTitle || "这段回忆",
+    showSpeakerRoleSwitch: isHumanInterview && !state.recording,
+    speakerRoleLabel: speakerRoleLabel(state.speakerRole),
+    narratorRoleButtonClass: state.speakerRole === "narrator"
+      ? "speaker-role-button active"
+      : "speaker-role-button",
+    interviewerRoleButtonClass: state.speakerRole === "interviewer"
+      ? "speaker-role-button active"
+      : "speaker-role-button",
     showErrorKindStrip: Boolean(state.error && state.errorKindText),
     showRecoveryPanel: Boolean(state.recoveryNotice || state.canReconnect || state.canFinishAfterDisconnect),
     showRecoveryActions: Boolean(state.canReconnect || state.canFinishAfterDisconnect),
@@ -394,13 +438,17 @@ export function voiceChatViewPatch(state: VoiceChatData): VoiceChatViewPatch {
     liveTextEndId: state.liveTextEndId,
     captureStripClass: state.recording ? "capture-strip active" : "capture-strip",
     showLiveCharCount: Boolean(state.recording && state.liveCharCount),
-    showInlineHelp: Boolean(state.recording && !state.liveText && state.canRequestFollowUp),
+    showInlineHelp: Boolean(!isHumanInterview && state.recording && !state.liveText && state.canRequestFollowUp),
     historyCountText: `${state.transcriptLines.length} 段 · ${state.totalTranscriptCharCount} 字`,
     showHistoryEmpty: state.transcriptLines.length === 0,
     transcriptLineViews: state.transcriptLines.map((line) => ({
       ...line,
-      lineClass: line.role === "assistant" ? "transcript-line assistant" : "transcript-line user",
-      roleText: line.role === "assistant" ? "小余" : "我",
+      lineClass: line.role === "assistant"
+        ? "transcript-line assistant"
+        : (line.role === "interviewer" ? "transcript-line interviewer" : "transcript-line user"),
+      roleText: line.role === "assistant"
+        ? "小余"
+        : (line.role === "interviewer" ? "采访者" : (isHumanInterview ? "被访者" : "我")),
     })),
     controlHintText,
     micButtonClass: state.recording ? "mic-button recording" : "mic-button",
@@ -436,6 +484,7 @@ type VoiceSessionPatchCurrent = Pick<
   VoiceChatData,
   | "guidanceMode"
   | "currentGuidanceModule"
+  | "interviewType"
   | "transcriptLines"
   | "lastFollowUpSourceMessageId"
   | "dismissedFollowUpMessageId"
@@ -449,16 +498,22 @@ export function voiceChatSessionEntryPatch(options: {
   projectTitle: string;
   guidanceMode: MemoirGuidanceMode;
   currentGuidanceModule: string;
+  interviewType: MemoirInterviewType;
   voiceAuthorizationAgreed: boolean;
 }): VoiceChatPatch {
+  const isHumanInterview = options.interviewType === "human_interview";
   return {
     voiceSessionId: options.voiceSessionId,
     projectTitle: options.projectTitle,
     guidanceMode: options.guidanceMode,
     currentGuidanceModule: options.currentGuidanceModule,
+    interviewType: options.interviewType,
     modeLabel: voiceGuidanceLabel(options.guidanceMode, options.currentGuidanceModule),
     voiceAuthorizationAgreed: options.voiceAuthorizationAgreed,
     primaryActionText: options.voiceAuthorizationAgreed ? "开始说话" : "同意后开始说话",
+    autoListenEnabled: !isHumanInterview,
+    autoListenStateText: isHumanInterview ? "人工访谈不自动追问" : "小余说完自动听",
+    canRequestFollowUp: false,
   };
 }
 
@@ -523,6 +578,7 @@ function assistantSessionPatch(
 ): VoiceChatPatch {
   const coveredSourceMessageId = coveredFollowUpSourceMessageId(lines);
   const lastFollowUpSourceMessageId = coveredSourceMessageId || current.lastFollowUpSourceMessageId;
+  const isHumanInterview = current.interviewType === "human_interview";
   return {
     guidanceMode,
     modeLabel: voiceGuidanceLabel(guidanceMode, current.currentGuidanceModule),
@@ -532,6 +588,7 @@ function assistantSessionPatch(
       lastFollowUpSourceMessageId,
       followUpLoading: current.followUpLoading,
       currentFollowUpTTSStateText: current.followUpTTSStateText,
+      canRequestFollowUp: isHumanInterview ? false : undefined,
     }),
     lastFollowUpSourceMessageId,
   };
@@ -543,12 +600,15 @@ export function voiceSessionSnapshotPatch(
 ): VoiceChatPatch {
   const guidanceMode = snapshot.detail?.session.guidance_mode || current.guidanceMode;
   const currentGuidanceModule = snapshot.detail?.session.current_guidance_module || current.currentGuidanceModule;
+  const interviewType = snapshot.detail?.session.interview_type || current.interviewType;
   return {
     ...assistantSessionPatch(snapshot.transcriptLines, guidanceMode, {
       ...current,
       currentGuidanceModule,
+      interviewType,
     }),
     currentGuidanceModule,
+    interviewType,
     recoveryNotice: snapshot.pendingClose ? "正在恢复上次离开前的讲述记录" : current.recoveryNotice,
   };
 }
@@ -583,6 +643,7 @@ export function voiceSessionDetailPatch(
   const detailLines = transcriptLinesFromVoiceSessionDetail(detail);
   const guidanceMode = detail.session.guidance_mode || current.guidanceMode;
   const currentGuidanceModule = detail.session.current_guidance_module || current.currentGuidanceModule;
+  const interviewType = detail.session.interview_type || current.interviewType;
   const nextLines = detailLines.length >= current.transcriptLines.length
     ? detailLines
     : current.transcriptLines;
@@ -591,8 +652,10 @@ export function voiceSessionDetailPatch(
     ...assistantSessionPatch(nextLines, guidanceMode, {
       ...current,
       currentGuidanceModule,
+      interviewType,
     }),
     currentGuidanceModule,
+    interviewType,
   };
 }
 

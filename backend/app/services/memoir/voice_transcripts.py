@@ -328,7 +328,7 @@ async def load_voice_transcript_cleanup_context(
     for role, content_text in reversed(result.all()):
         if role == MemoirChatMessageRole.USER.value:
             recent_user.append(content_text)
-        elif role == MemoirChatMessageRole.ASSISTANT.value:
+        elif role in {MemoirChatMessageRole.ASSISTANT.value, MemoirChatMessageRole.INTERVIEWER.value}:
             recent_assistant.append(content_text)
     return MemoirTranscriptCleanupContext(
         scene="voice_chat",
@@ -395,7 +395,9 @@ def _question_search_filter(pattern: str):
         select(later_question.id)
         .where(
             later_question.voice_session_id == MemoirVoiceUtterance.voice_session_id,
-            later_question.role == MemoirChatMessageRole.ASSISTANT.value,
+            later_question.role.in_(
+                [MemoirChatMessageRole.ASSISTANT.value, MemoirChatMessageRole.INTERVIEWER.value]
+            ),
             func.trim(later_question.content_text) != "",
             later_question.turn_index > question_message.turn_index,
             later_question.turn_index < user_message.turn_index,
@@ -408,7 +410,9 @@ def _question_search_filter(pattern: str):
         .join(user_message, user_message.id == MemoirVoiceUtterance.chat_message_id)
         .where(
             question_message.voice_session_id == MemoirVoiceUtterance.voice_session_id,
-            question_message.role == MemoirChatMessageRole.ASSISTANT.value,
+            question_message.role.in_(
+                [MemoirChatMessageRole.ASSISTANT.value, MemoirChatMessageRole.INTERVIEWER.value]
+            ),
             func.trim(question_message.content_text) != "",
             question_message.content_text.ilike(pattern, escape="\\"),
             question_message.turn_index < user_message.turn_index,
@@ -516,6 +520,7 @@ def _item_response(
         provider=utterance.provider,
         session_status=voice_session.status,
         guidance_mode=voice_session.guidance_mode,
+        interview_type=voice_session.interview_type,
         current_guidance_module=voice_session.current_guidance_module,
         is_included_in_book=bool(inclusions),
         included_chapters=inclusions,
@@ -532,7 +537,10 @@ def _question_message_for_utterance(utterance: MemoirVoiceUtterance) -> MemoirCh
         message
         for message in utterance.voice_session.messages
         if (
-            message.role == MemoirChatMessageRole.ASSISTANT.value
+            message.role in {
+                MemoirChatMessageRole.ASSISTANT.value,
+                MemoirChatMessageRole.INTERVIEWER.value,
+            }
             and message.content_text.strip()
             and message.turn_index < user_message.turn_index
         )

@@ -74,6 +74,13 @@
     <view wx:if="{{showResumeActions}}" class="resume-actions">
       <button
         class="{{resumeAskButtonClass}}"
+        bindtap="startHumanInterview"
+        hover-class="{{resumeAskButtonHoverClass}}"
+      >
+        人工访谈
+      </button>
+      <button
+        class="{{resumeAskButtonClass}}"
         bindtap="startGuidedInterview"
         hover-class="{{resumeAskButtonHoverClass}}"
       >

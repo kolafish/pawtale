@@ -11,6 +11,8 @@ from app.domain.memoir.types import (
     MemoirChatContentStatus,
     MemoirChatMessageRole,
     MemoirCreatedBy,
+    MemoirInterviewType,
+    MemoirSpeakerRole,
     MemoirTranscriptVersionType,
 )
 from app.models.memoir import MemoirChatMessage, MemoirTranscriptVersion, MemoirVoiceSession, MemoirVoiceUtterance
@@ -18,6 +20,10 @@ from app.models.projects import Project
 from app.services.memoir import audio_files as memoir_audio_files
 from app.services.memoir import voice_transcript_correction
 from app.services.memoir.asr import StreamingASREvent
+from app.services.memoir.source_disposition import (
+    IGNORED_SOURCE_ROUTE_ACTION,
+    INTERVIEWER_SOURCE_MATERIAL_TYPE,
+)
 from app.services.memoir.voice_transcripts import (
     prune_transcript_versions_for_utterance,
 )
@@ -62,6 +68,8 @@ class VoiceFinalPersistenceService:
         *,
         audio: bytes | None = None,
         staged_audio: memoir_audio_files.StagedAudioFile | None = None,
+        speaker_role: str = MemoirSpeakerRole.NARRATOR.value,
+        parent_message_id: str | None = None,
     ) -> VoiceFinalPersistenceResult:
         owned_staged_audio = staged_audio
         try:
@@ -71,6 +79,14 @@ class VoiceFinalPersistenceService:
             _validate_audio_span(event.start_ms, event.end_ms)
 
             voice_session = await self._load_voice_session()
+            normalized_speaker_role = _normalize_speaker_role(speaker_role)
+            _validate_speaker_role_for_session(voice_session, normalized_speaker_role)
+            chat_role = _chat_role_for_speaker(normalized_speaker_role)
+            resolved_parent_message_id = await self._resolve_parent_message_id(
+                voice_session,
+                normalized_speaker_role,
+                parent_message_id,
+            )
             owned_staged_audio = await self._stage_audio_input(audio, owned_staged_audio)
             audio_file_id = owned_staged_audio.audio_file.id if owned_staged_audio else None
 
@@ -87,17 +103,22 @@ class VoiceFinalPersistenceService:
             message = MemoirChatMessage(
                 project_id=voice_session.project_id,
                 voice_session_id=voice_session.id,
-                role=MemoirChatMessageRole.USER.value,
+                role=chat_role,
                 content_text=content,
                 content_status=MemoirChatContentStatus.FINAL.value,
                 audio_file_id=audio_file_id,
                 transcript_version_id=transcript_version.id,
+                parent_message_id=resolved_parent_message_id,
                 turn_index=await self._next_turn_index(voice_session.id),
                 metadata_json={
                     "source": "asr.final",
                     "provider": self.provider,
+                    "speaker_role": normalized_speaker_role,
+                    "interview_type": voice_session.interview_type,
                     "auto_corrected": False,
-                    "correction_status": "pending",
+                    "correction_status": (
+                        "skipped" if normalized_speaker_role == MemoirSpeakerRole.INTERVIEWER.value else "pending"
+                    ),
                     "asr_transcript_version_id": transcript_version.id,
                 },
             )
@@ -114,6 +135,21 @@ class VoiceFinalPersistenceService:
                 end_ms=event.end_ms,
                 provider=self.provider,
                 provider_payload_json=event.raw,
+                source_material_type=(
+                    INTERVIEWER_SOURCE_MATERIAL_TYPE
+                    if normalized_speaker_role == MemoirSpeakerRole.INTERVIEWER.value
+                    else ""
+                ),
+                source_route_action=(
+                    IGNORED_SOURCE_ROUTE_ACTION
+                    if normalized_speaker_role == MemoirSpeakerRole.INTERVIEWER.value
+                    else ""
+                ),
+                source_route_reason=(
+                    "真人采访者问题只作为上下文，不作为回忆录正文素材。"
+                    if normalized_speaker_role == MemoirSpeakerRole.INTERVIEWER.value
+                    else ""
+                ),
             )
             self.db.add(utterance)
             await self.db.flush()
@@ -124,13 +160,14 @@ class VoiceFinalPersistenceService:
                 utterance_id=utterance.id,
                 version_type=MemoirTranscriptVersionType.ASR_RAW,
             )
-            await voice_transcript_correction.schedule_transcript_correction_job(
-                self.db,
-                project_id=voice_session.project_id,
-                utterance_id=utterance.id,
-                voice_session_id=voice_session.id,
-                raw_transcript_version_id=transcript_version.id,
-            )
+            if normalized_speaker_role == MemoirSpeakerRole.NARRATOR.value:
+                await voice_transcript_correction.schedule_transcript_correction_job(
+                    self.db,
+                    project_id=voice_session.project_id,
+                    utterance_id=utterance.id,
+                    voice_session_id=voice_session.id,
+                    raw_transcript_version_id=transcript_version.id,
+                )
             await self.db.commit()
             return VoiceFinalPersistenceResult(
                 message_id=message.id,
@@ -149,8 +186,16 @@ class VoiceFinalPersistenceService:
         *,
         audio: bytes | None = None,
         staged_audio: memoir_audio_files.StagedAudioFile | None = None,
+        speaker_role: str = MemoirSpeakerRole.NARRATOR.value,
+        parent_message_id: str | None = None,
     ) -> VoiceFinalPersistenceResult:
-        return await self.persist_segment(event, audio=audio, staged_audio=staged_audio)
+        return await self.persist_segment(
+            event,
+            audio=audio,
+            staged_audio=staged_audio,
+            speaker_role=speaker_role,
+            parent_message_id=parent_message_id,
+        )
 
     async def persist_unfinalized_audio(
         self,
@@ -231,6 +276,60 @@ class VoiceFinalPersistenceService:
         current = result.scalar_one_or_none()
         return 0 if current is None else int(current) + 1
 
+
+    async def _resolve_parent_message_id(
+        self,
+        voice_session: MemoirVoiceSession,
+        speaker_role: str,
+        parent_message_id: str | None,
+    ) -> str | None:
+        normalized_parent_id = (parent_message_id or "").strip()
+        if normalized_parent_id:
+            exists = await self.db.scalar(
+                select(MemoirChatMessage.id).where(
+                    MemoirChatMessage.id == normalized_parent_id,
+                    MemoirChatMessage.voice_session_id == voice_session.id,
+                )
+            )
+            if not exists:
+                raise HTTPException(status_code=400, detail="父级消息不属于本次访谈")
+            return normalized_parent_id
+        if (
+            voice_session.interview_type != MemoirInterviewType.HUMAN_INTERVIEW.value
+            or speaker_role != MemoirSpeakerRole.NARRATOR.value
+        ):
+            return None
+        return await self.db.scalar(
+            select(MemoirChatMessage.id)
+            .where(
+                MemoirChatMessage.voice_session_id == voice_session.id,
+                MemoirChatMessage.role == MemoirChatMessageRole.INTERVIEWER.value,
+            )
+            .order_by(MemoirChatMessage.turn_index.desc(), MemoirChatMessage.created_at.desc())
+            .limit(1)
+        )
+
 def _validate_audio_span(start_ms: int | None, end_ms: int | None) -> None:
     if start_ms is not None and end_ms is not None and end_ms < start_ms:
         raise HTTPException(status_code=400, detail="音频结束时间不能早于开始时间")
+
+
+def _normalize_speaker_role(speaker_role: str) -> str:
+    value = (speaker_role or MemoirSpeakerRole.NARRATOR.value).strip()
+    if value not in {MemoirSpeakerRole.NARRATOR.value, MemoirSpeakerRole.INTERVIEWER.value}:
+        raise HTTPException(status_code=400, detail="不支持的说话人角色")
+    return value
+
+
+def _validate_speaker_role_for_session(voice_session: MemoirVoiceSession, speaker_role: str) -> None:
+    if (
+        speaker_role == MemoirSpeakerRole.INTERVIEWER.value
+        and voice_session.interview_type != MemoirInterviewType.HUMAN_INTERVIEW.value
+    ):
+        raise HTTPException(status_code=400, detail="只有人工访谈支持采访者录音")
+
+
+def _chat_role_for_speaker(speaker_role: str) -> str:
+    if speaker_role == MemoirSpeakerRole.INTERVIEWER.value:
+        return MemoirChatMessageRole.INTERVIEWER.value
+    return MemoirChatMessageRole.USER.value

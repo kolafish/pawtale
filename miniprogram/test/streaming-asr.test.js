@@ -155,7 +155,7 @@ test("streaming ASR stops a late native recorder start after local recording sto
   });
   client.socketOpen = true;
 
-  assert.equal(client.startRecording(), true);
+  assert.equal(client.startRecording({ speakerRole: "interviewer" }), true);
   recorder.callbacks.start();
   client.stopRecording();
   recorder.callbacks.stop();
@@ -902,7 +902,7 @@ test("streaming ASR starts provider only after recording starts", async () => {
   assert.deepEqual(statuses, ["connecting", "ready"]);
   assert.deepEqual(sent, []);
   assert.equal(captureStats.at(-1).state, "idle");
-  assert.equal(client.startRecording(), true);
+  assert.equal(client.startRecording({ speakerRole: "interviewer" }), true);
   assert.deepEqual(sent, []);
   assert.equal(recorder.starts.length, 1);
   assert.equal(recorder.starts[0].sampleRate, 16000);
@@ -913,6 +913,7 @@ test("streaming ASR starts provider only after recording starts", async () => {
 
   assert.equal(sent.length, 1);
   assert.equal(sent[0].type, "session.start");
+  assert.equal(sent[0].speaker_role, "interviewer");
   assert.equal(captureStats.at(-1).state, "recording");
   delete global.wx;
 });

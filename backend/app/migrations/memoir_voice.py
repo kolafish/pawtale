@@ -7,7 +7,12 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from sqlalchemy.schema import Column, Table
 
 from app.database import Base, register_models
-from app.domain.memoir.types import MemoirAutomationEventType, MemoirEditingJobType
+from app.domain.memoir.types import (
+    MemoirAutomationEventType,
+    MemoirChatMessageRole,
+    MemoirEditingJobType,
+    MemoirInterviewType,
+)
 
 
 REALTIME_VOICE_TABLES = (
@@ -174,6 +179,22 @@ async def _ensure_automation_events_type_constraint(conn) -> bool:
         conn,
         "memoir_automation_events",
         {item.value for item in MemoirAutomationEventType},
+    )
+
+
+async def _ensure_chat_messages_role_constraint(conn) -> bool:
+    return await _ensure_enum_check_constraint(
+        conn,
+        "memoir_chat_messages",
+        {item.value for item in MemoirChatMessageRole},
+    )
+
+
+async def _ensure_voice_sessions_interview_type_constraint(conn) -> bool:
+    return await _ensure_enum_check_constraint(
+        conn,
+        "memoir_voice_sessions",
+        {item.value for item in MemoirInterviewType},
     )
 
 
@@ -354,6 +375,22 @@ async def migrate_memoir_voice_schema(engine: AsyncEngine) -> dict[str, list[str
         if not await _table_exists(conn, "memoir_voice_authorization_consents"):
             await _create_metadata_table(conn, "memoir_voice_authorization_consents")
             changed_tables.append("memoir_voice_authorization_consents")
+
+        if await _table_exists(conn, "memoir_voice_sessions"):
+            voice_session_columns = await _table_columns(conn, "memoir_voice_sessions")
+            if "interview_type" not in voice_session_columns:
+                await conn.execute(
+                    text(
+                        "ALTER TABLE memoir_voice_sessions "
+                        "ADD COLUMN interview_type VARCHAR(30) NOT NULL DEFAULT 'ai_interview'"
+                    )
+                )
+                changed_columns.append("memoir_voice_sessions.interview_type")
+            if await _ensure_voice_sessions_interview_type_constraint(conn):
+                changed_tables.append("memoir_voice_sessions")
+
+        if await _ensure_chat_messages_role_constraint(conn):
+            changed_tables.append("memoir_chat_messages")
 
         if not await _table_exists(conn, "memoir_transcript_versions"):
             raise RuntimeError("Missing required table: memoir_transcript_versions")

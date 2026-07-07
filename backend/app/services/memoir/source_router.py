@@ -193,7 +193,10 @@ async def _conversation_context(db: AsyncSession, source: SourceSegment) -> tupl
             message
             for message in messages
             if (
-                message.role == MemoirChatMessageRole.ASSISTANT.value
+                message.role in {
+                    MemoirChatMessageRole.ASSISTANT.value,
+                    MemoirChatMessageRole.INTERVIEWER.value,
+                }
                 and message.content_text.strip()
                 and message.turn_index < user_message.turn_index
             )
@@ -211,7 +214,12 @@ async def _conversation_context(db: AsyncSession, source: SourceSegment) -> tupl
     else:
         nearby = [message for message in messages if message.content_text.strip()][-MAX_RECENT_CONTEXT_MESSAGES:]
     for message in nearby:
-        speaker = "叙述者" if message.role == MemoirChatMessageRole.USER.value else "AI"
+        if message.role == MemoirChatMessageRole.USER.value:
+            speaker = "叙述者"
+        elif message.role == MemoirChatMessageRole.INTERVIEWER.value:
+            speaker = "采访者"
+        else:
+            speaker = "AI"
         context_lines.append(f"{speaker}：{message.content_text.strip()}")
     return question, "\n".join(context_lines)
 

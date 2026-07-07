@@ -20,6 +20,7 @@ from app.domain.memoir.types import (
     MemoirChatMessageRole,
     MemoirCreatedBy,
     MemoirGuidanceMode,
+    MemoirInterviewType,
     MemoirOutputStatus,
     MemoirSemanticCacheStatus,
     MemoirTranscriptVersionType,
@@ -39,6 +40,10 @@ class MemoirVoiceSession(Base):
             f"guidance_mode IN ({_enum_values(MemoirGuidanceMode)})",
             name="ck_memoir_voice_sessions_guidance_mode",
         ),
+        CheckConstraint(
+            f"interview_type IN ({_enum_values(MemoirInterviewType)})",
+            name="ck_memoir_voice_sessions_interview_type",
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -53,6 +58,11 @@ class MemoirVoiceSession(Base):
     guidance_mode: Mapped[str] = mapped_column(
         String(30),
         default=MemoirGuidanceMode.FREE_NARRATION.value,
+        nullable=False,
+    )
+    interview_type: Mapped[str] = mapped_column(
+        String(30),
+        default=MemoirInterviewType.AI_INTERVIEW.value,
         nullable=False,
     )
     current_guidance_module: Mapped[str | None] = mapped_column(String(80), nullable=True)

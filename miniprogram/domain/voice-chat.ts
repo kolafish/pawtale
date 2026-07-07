@@ -1,8 +1,10 @@
 export type MemoirGuidanceMode = "free_narration" | "guided_interview";
+export type MemoirInterviewType = "ai_interview" | "human_interview";
+export type MemoirSpeakerRole = "narrator" | "interviewer";
 export type MemoirGuidanceModule = "person" | "event" | "place" | "period" | "theme";
 export type MemoirVoiceTranscriptIncludedFilter = "all" | "included" | "not_included";
 export type MemoirVoiceSessionStatus = "created" | "listening" | "speaking" | "stopped" | "failed";
-export type MemoirChatMessageRole = "user" | "assistant" | "system";
+export type MemoirChatMessageRole = "user" | "assistant" | "interviewer" | "system";
 export type MemoirChatContentStatus = "partial" | "final" | "corrected";
 export type MemoirVoiceAssistantIntent =
   | "opening"
@@ -24,6 +26,7 @@ export interface MemoirVoiceSession {
   project_id: string;
   status: MemoirVoiceSessionStatus;
   guidance_mode: MemoirGuidanceMode;
+  interview_type: MemoirInterviewType;
   current_guidance_module?: string | null;
   provider?: string | null;
   input_format?: string | null;
@@ -77,6 +80,7 @@ export interface MemoirVoiceSessionSummary {
   project_id: string;
   status: MemoirVoiceSessionStatus;
   guidance_mode: MemoirGuidanceMode;
+  interview_type: MemoirInterviewType;
   current_guidance_module?: string | null;
   started_at?: string | null;
   stopped_at?: string | null;
@@ -197,6 +201,7 @@ export interface MemoirVoiceProgressResponse {
 
 export interface MemoirVoiceSessionCreate {
   guidance_mode: MemoirGuidanceMode;
+  interview_type?: MemoirInterviewType;
   current_guidance_module?: string;
   provider?: string;
   input_format?: string;
@@ -242,7 +247,13 @@ export interface MemoirAssistantTTSResponse {
 }
 
 export type VoiceGatewayClientEvent =
-  | { type: "session.start"; guidance_mode: MemoirGuidanceMode; current_guidance_module?: string }
+  | {
+      type: "session.start";
+      guidance_mode: MemoirGuidanceMode;
+      current_guidance_module?: string;
+      speaker_role?: MemoirSpeakerRole;
+      parent_message_id?: string;
+    }
   | { type: "audio.frame"; audio: string }
   | { type: "audio.end" }
   | { type: "session.stop" };
@@ -264,6 +275,7 @@ export interface VoiceGatewayServerEvent {
   provider_event_type?: string;
   segment_final?: boolean;
   turn_final?: boolean;
+  speaker_role?: MemoirSpeakerRole;
 }
 
 export interface VoiceChatErrorInfo {
@@ -314,6 +326,7 @@ export interface MemoirVoiceTranscriptItem {
   provider?: string | null;
   session_status: MemoirVoiceSessionStatus;
   guidance_mode: MemoirGuidanceMode;
+  interview_type: MemoirInterviewType;
   current_guidance_module?: string | null;
   is_included_in_book?: boolean;
   included_chapters?: MemoirBookSourceIncludedChapter[];

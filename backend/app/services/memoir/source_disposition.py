@@ -7,8 +7,15 @@ from app.schemas.memoir_book import MemoirBookSourceRouteResponse
 
 
 MEMOIR_SOURCE_MATERIAL_TYPE = "memoir_content"
+INTERVIEWER_SOURCE_MATERIAL_TYPE = "interviewer_prompt"
 IGNORED_SOURCE_ROUTE_ACTION = "ignore"
-IGNORED_SOURCE_MATERIAL_TYPES = {"ai_interaction", "meta_instruction", "noise", "too_short"}
+IGNORED_SOURCE_MATERIAL_TYPES = {
+    "ai_interaction",
+    INTERVIEWER_SOURCE_MATERIAL_TYPE,
+    "meta_instruction",
+    "noise",
+    "too_short",
+}
 
 
 def source_route_material_type(utterance: MemoirVoiceUtterance) -> str:
