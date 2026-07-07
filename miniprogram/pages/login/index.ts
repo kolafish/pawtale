@@ -4,6 +4,7 @@ import {
   loginWithWeChat,
 } from "../../services/auth";
 import { relaunchHome } from "../../services/navigation";
+import { definePage } from "../../services/page-definition";
 
 interface InputEvent {
   detail: {
@@ -20,13 +21,7 @@ interface LoginData {
   error: string;
 }
 
-Page<LoginData, {
-  changeEmail(event: InputEvent): void;
-  changePassword(event: InputEvent): void;
-  toggleAccountMode(): void;
-  submitWeChat(): Promise<void>;
-  submitAccount(): Promise<void>;
-}>({
+definePage<LoginData>()({
   data: {
     email: "",
     password: "",
@@ -36,11 +31,11 @@ Page<LoginData, {
     error: "",
   },
 
-  changeEmail(event) {
+  changeEmail(event: InputEvent) {
     this.setData({ email: event.detail.value, error: "" });
   },
 
-  changePassword(event) {
+  changePassword(event: InputEvent) {
     this.setData({ password: event.detail.value, error: "" });
   },
 
