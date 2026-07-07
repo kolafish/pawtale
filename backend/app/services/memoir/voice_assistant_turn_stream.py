@@ -52,11 +52,11 @@ from app.services.memoir.voice_chat_context import (
     load_voice_session,
     next_turn_index,
 )
-from app.services.memoir.voice_tts import (
+from app.services.memoir.voice_tts import get_tts_client
+from app.services.memoir.voice_tts_types import (
     DEFAULT_TTS_SPEED_RATIO,
     TTSClient,
     StreamingTTSChunk,
-    get_tts_client,
 )
 
 

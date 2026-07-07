@@ -42,7 +42,8 @@ from app.services.memoir.voice_assistant_turn_stream import (
     _cancel_reason,
     _exception_message,
 )
-from app.services.memoir.voice_tts import TTSClient, get_tts_client
+from app.services.memoir.voice_tts import get_tts_client
+from app.services.memoir.voice_tts_types import TTSClient
 
 
 logger = logging.getLogger(__name__)

@@ -8,7 +8,7 @@ from app.services.memoir.streaming_tts_events import (
     chunk_text_for_tts,
     stream_tts_events,
 )
-from app.services.memoir.voice_tts import StreamingTTSChunk
+from app.services.memoir.voice_tts_types import StreamingTTSChunk
 
 
 @pytest.mark.asyncio

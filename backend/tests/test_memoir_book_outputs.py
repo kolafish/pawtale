@@ -29,7 +29,7 @@ from app.services.memoir.book_audio import split_tts_text
 from app.services.memoir.editing_job_handlers import register_memoir_editing_job_handlers
 from app.services.memoir.editing_jobs import clear_editing_job_handlers, run_editing_job
 from app.services.memoir.tts_alignment import TTSAlignmentSegment
-from app.services.memoir.voice_tts import TTSResult
+from app.services.memoir.voice_tts_types import TTSResult
 from tests.memoir_helpers import add_test_chapter_source_links, ensure_mobile_memoir_project
 
 

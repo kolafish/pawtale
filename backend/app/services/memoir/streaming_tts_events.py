@@ -5,7 +5,7 @@ import base64
 from collections.abc import AsyncIterator, Callable
 from typing import Protocol
 
-from app.services.memoir.voice_tts import (
+from app.services.memoir.voice_tts_types import (
     DEFAULT_STREAM_TTS_SAMPLE_RATE,
     StreamingTTSChunk,
     TTSClient,

@@ -18,7 +18,7 @@ from app.services.memoir import automation_events
 from app.services.memoir.semantic_state import upsert_book_quality_audit_snapshot, upsert_chapter_card
 from app.services.memoir.tts_alignment import TTSAlignmentSegment
 from app.services.memoir.voice_assistant_turn_stream import VoiceAssistantTurnStreamSession
-from app.services.memoir.voice_tts import StreamingTTSChunk
+from app.services.memoir.voice_tts_types import StreamingTTSChunk
 from tests.memoir_helpers import (
     add_test_chapter_source_links,
     create_test_book_plan,

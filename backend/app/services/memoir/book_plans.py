@@ -28,7 +28,7 @@ from app.services.memoir.book_plan_sources import (
 from app.services.memoir.book_source_links import (
     plan_source_ref_dicts_by_chapter as _plan_source_ref_dicts_by_chapter,
 )
-from app.services.memoir.voice_tts import TTSClient
+from app.services.memoir.voice_tts_types import TTSClient
 
 
 BOOK_OUTLINE_TTS_CACHE_KEY = "outline_tts_audio"

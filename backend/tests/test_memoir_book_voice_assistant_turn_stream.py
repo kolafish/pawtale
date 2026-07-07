@@ -11,7 +11,7 @@ from app.services.memoir.book_voice_assistant_turn_stream import (
     BookVoiceAssistantTurnStreamSession,
 )
 from app.services.memoir.tts_alignment import TTSAlignmentSegment
-from app.services.memoir.voice_tts import StreamingTTSChunk
+from app.services.memoir.voice_tts_types import StreamingTTSChunk
 from tests.memoir_helpers import create_test_book_plan, ensure_mobile_memoir_project
 
 

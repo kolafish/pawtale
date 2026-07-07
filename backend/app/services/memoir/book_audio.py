@@ -15,7 +15,8 @@ from app.services.memoir.tts_alignment import (
     alignment_segments_from_json,
     alignment_segments_to_json,
 )
-from app.services.memoir.voice_tts import TTSClient, TTS_UNAVAILABLE_MESSAGE, get_tts_client
+from app.services.memoir.voice_tts import get_tts_client
+from app.services.memoir.voice_tts_types import TTSClient, TTS_UNAVAILABLE_MESSAGE
 
 
 MAX_TTS_CHARS_PER_CHUNK = 900
