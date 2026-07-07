@@ -163,6 +163,26 @@ test("voice assistant turn runtime returns completed turn with playback error", 
   assert.deepEqual(drained, []);
 });
 
+test("voice assistant turn runtime suppresses stale callbacks", async () => {
+  const events = [];
+  const runtime = new VoiceAssistantTurnRuntime("voice-1", {
+    onTextDelta: () => events.push("text"),
+  }, {
+    isActive: () => false,
+    createStreamClient: (_voiceSessionId, callbacks) => ({
+      async start() {
+        callbacks.onTextDelta?.({ type: "text.delta", text: "stale" });
+        return completedTurn();
+      },
+      cancel() {}, close() {},
+    }),
+  });
+
+  await runtime.start();
+
+  assert.deepEqual(events, []);
+});
+
 test("voice assistant turn runtime cancel stops stream and playback", async () => {
   const cancelReasons = [];
   let stopped = false;
