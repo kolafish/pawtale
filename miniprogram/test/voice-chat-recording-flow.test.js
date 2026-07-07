@@ -8,7 +8,9 @@ const {
   noAnswerPromptFailedPatch,
   noAnswerPromptPlan,
   noAnswerPromptQueuedPatch,
+  voiceFinalTranscriptResult,
   voiceClientUnavailableForRecording,
+  voiceLiveTranscriptPatch,
   voiceRecordingStartedPatch,
   voiceRecordingUnavailablePatch,
 } = require("../pages/voice-chat/voice-chat-recording-flow.ts");
@@ -38,6 +40,53 @@ test("voice recording flow derives recording start and unavailable patches", () 
     canReconnect: true,
     autoListenStateText: "原状态",
   });
+});
+
+test("voice recording flow derives live transcript patches", () => {
+  const longPartial = "这是一段很长的正常访谈实时识别文字，".repeat(6);
+
+  const firstPatch = voiceLiveTranscriptPatch(longPartial, 0);
+  assert.equal(firstPatch.liveText, longPartial);
+  assert.equal(firstPatch.liveCharCount, longPartial.length);
+  assert.equal(firstPatch.liveScrollClass, "live-scroll long");
+  assert.equal(firstPatch.liveScrollTop, 10000);
+  assert.equal(firstPatch.liveScrollTarget, "live-text-end-10000");
+  assert.equal(firstPatch.liveTextEndId, "live-text-end-10000");
+  assert.equal(firstPatch.persistenceStateText, "识别中");
+
+  const secondPatch = voiceLiveTranscriptPatch(`${longPartial}继续说到最新进度。`, firstPatch.liveScrollTop);
+  assert.equal(secondPatch.liveScrollTop, 20000);
+  assert.equal(secondPatch.liveScrollTarget, "live-text-end-20000");
+});
+
+test("voice recording flow derives final transcript result", () => {
+  const result = voiceFinalTranscriptResult(
+    {
+      type: "asr.final",
+      text: "最终保存的一句话。",
+      message_id: "message-1",
+      utterance_id: "utterance-1",
+      transcript_version_id: "version-1",
+    },
+    {
+      transcriptLines: [],
+      guidanceMode: "guided_interview",
+      lastFollowUpSourceMessageId: "",
+    },
+    "fallback-1",
+  );
+
+  assert.ok(result);
+  assert.equal(result.line.id, "message-1");
+  assert.equal(result.line.text, "最终保存的一句话。");
+  assert.deepEqual(result.transcriptLines.map((line) => line.id), ["message-1"]);
+  assert.equal(result.patch.liveText, "");
+  assert.equal(result.patch.liveCharCount, 0);
+  assert.equal(result.patch.liveScrollClass, "live-scroll");
+  assert.equal(result.patch.liveScrollTarget, "");
+  assert.equal(result.patch.liveScrollTop, 0);
+  assert.equal(result.patch.persistenceStateText, "已保存");
+  assert.equal(result.patch.followUpLoading, false);
 });
 
 test("voice recording flow plans no-answer prompts", () => {
