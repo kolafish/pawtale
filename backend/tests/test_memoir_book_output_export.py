@@ -3,19 +3,21 @@ from typing import get_args
 from app.schemas.memoir_book import MemoirBookCoverStyle
 from app.services.memoir.book_outputs import _cover_style as normalize_book_cover_style
 from app.services.memoir.book_output_export import (
+    PDF_COVER_STYLES,
+    MemoirBookOutputExportFormat,
+    _build_manuscript_pdf_pages,
+    render_book_output_export,
+)
+from app.services.memoir.book_output_pdf_renderer import (
     COMMON_CHINESE_UNBREAKABLE_WORDS,
     LINE_END_FORBIDDEN_CHARS,
     LINE_START_FORBIDDEN_CHARS,
-    PDF_COVER_STYLES,
     PDF_LAYOUTS,
     PDF_SERIF_BOLD_FONT_NAME,
     PDF_SERIF_FONT_NAME,
     PDFBookBuilder,
     PDFLayout,
-    MemoirBookOutputExportFormat,
     MemoirBookOutputExportLayout,
-    _build_manuscript_pdf_pages,
-    render_book_output_export,
     _wrap_pdf_line,
 )
 
