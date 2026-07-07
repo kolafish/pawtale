@@ -33,6 +33,7 @@ function sampleTranscript(id, overrides = {}) {
     provider: "fake",
     session_status: "stopped",
     guidance_mode: "free_narration",
+    interview_type: "ai_interview",
     current_guidance_module: null,
     is_included_in_book: false,
     included_chapters: [],
@@ -147,6 +148,7 @@ test("transcript detail page loads a single transcript and chapter options", asy
   assert.equal(context.data.item.audioText, "32 秒");
   assert.equal(context.data.item.recordMetaText, "07-01 15:38 · 32 秒");
   assert.equal(context.data.item.bookInclusionText, "尚未入章");
+  assert.equal(context.data.item.questionTitleText, "小余刚才问了");
   assert.equal(context.data.item.questionCanExpand, false);
   assert.equal(context.data.questionExpanded, false);
   assert.equal(context.data.moreActionsExpanded, false);
@@ -154,6 +156,22 @@ test("transcript detail page loads a single transcript and chapter options", asy
     { label: "第 1 章 退休后的日子", value: "chapter-1" },
     { label: "第 2 章 家庭记忆", value: "chapter-2" },
   ]);
+});
+
+test("transcript detail page labels human interviewer questions", async () => {
+  const { page } = loadTranscriptDetailPage({
+    voiceApiExports: {
+      getMemoirVoiceTranscript: async (id) => sampleTranscript(id, {
+        interview_type: "human_interview",
+        question_text: "你小时候家里有几口人？",
+      }),
+    },
+  });
+  const context = pageContext(page);
+
+  await page.onLoad.call(context, { id: "utterance-human" });
+
+  assert.equal(context.data.item.questionTitleText, "采访者刚才问了");
 });
 
 test("transcript detail page uses content-first inclusion labels", async () => {

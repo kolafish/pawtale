@@ -101,6 +101,7 @@ export interface VoiceChatData {
   topSubtitle: string;
   topicTitleText: string;
   showHumanRecordActions: boolean;
+  showControlBar: boolean;
   narratorRecordButtonClass: string;
   interviewerRecordButtonClass: string;
   showErrorKindStrip: boolean;
@@ -223,6 +224,7 @@ export function initialVoiceChatData(): VoiceChatData {
     topSubtitle: "小余陪您慢慢讲",
     topicTitleText: "这段回忆",
     showHumanRecordActions: false,
+    showControlBar: true,
     narratorRecordButtonClass: "role-record-button narrator",
     interviewerRecordButtonClass: "role-record-button interviewer",
     showErrorKindStrip: false,
@@ -273,6 +275,7 @@ export type VoiceChatViewPatch = Pick<
   | "topSubtitle"
   | "topicTitleText"
   | "showHumanRecordActions"
+  | "showControlBar"
   | "narratorRecordButtonClass"
   | "interviewerRecordButtonClass"
   | "showErrorKindStrip"
@@ -335,6 +338,8 @@ export function voiceChatViewPatch(state: VoiceChatData): VoiceChatViewPatch {
   const showAssistantPanel = !isHumanInterview
     && !state.recording
     && Boolean(hasAssistantPrompt || state.followUpLoading || state.followUpError || state.canRequestFollowUp);
+  const showHumanRecordActions = isHumanInterview && !state.recording && state.voiceAuthorizationAgreed;
+  const showControlBar = !showHumanRecordActions;
   let stageStatusText = "可以开始讲了";
   if (state.error) {
     stageStatusText = "需要处理一下";
@@ -347,7 +352,7 @@ export function voiceChatViewPatch(state: VoiceChatData): VoiceChatViewPatch {
   } else if (state.followUpLoading) {
     stageStatusText = state.latestTranscriptText ? "正在帮您整理成文字" : "小余正在准备问题";
   }
-  let liveDisplayText = isHumanInterview ? `点下方开始记录${speakerRoleLabel(state.speakerRole)}` : "点下方“我来说一段”";
+  let liveDisplayText = isHumanInterview ? `点上方开始记录${speakerRoleLabel(state.speakerRole)}` : "点下方“我来说一段”";
   if (state.recording) {
     liveDisplayText = state.liveText || (isHumanInterview ? "直接说，系统会实时转成文字" : "直接说就行，我会帮您记下来");
   } else if (state.followUpLoading && state.latestTranscriptText) {
@@ -360,7 +365,7 @@ export function voiceChatViewPatch(state: VoiceChatData): VoiceChatViewPatch {
     liveDisplayText = state.liveText
       || state.latestTranscriptText
       || (state.followUpLoading ? "小余正在准备第一句话" : (
-        isHumanInterview ? `点下方开始记录${speakerRoleLabel(state.speakerRole)}` : "点下方“我来说一段”"
+        isHumanInterview ? `点上方开始记录${speakerRoleLabel(state.speakerRole)}` : "点下方“我来说一段”"
       ));
   }
   let controlHintText = isHumanInterview
@@ -388,6 +393,9 @@ export function voiceChatViewPatch(state: VoiceChatData): VoiceChatViewPatch {
     micButtonText = "继续讲";
   }
   const pageClass = ["voice-chat-page"];
+  if (!showControlBar) {
+    pageClass.push("no-control-bar");
+  }
   const focusClass = largeTextFocusClass(state, showAssistantPanel);
   if (state.largeTextEnabled) {
     pageClass.push("large-text", focusClass);
@@ -398,7 +406,8 @@ export function voiceChatViewPatch(state: VoiceChatData): VoiceChatViewPatch {
     topModeLabel: isHumanInterview ? "人工访谈" : "AI 访谈",
     topSubtitle: isHumanInterview ? "实时记录采访者和被访者" : "小余陪您慢慢讲",
     topicTitleText: state.projectTitle || "这段回忆",
-    showHumanRecordActions: isHumanInterview && !state.recording && state.voiceAuthorizationAgreed,
+    showHumanRecordActions,
+    showControlBar,
     narratorRecordButtonClass: "role-record-button narrator",
     interviewerRecordButtonClass: "role-record-button interviewer",
     showErrorKindStrip: Boolean(state.error && state.errorKindText),

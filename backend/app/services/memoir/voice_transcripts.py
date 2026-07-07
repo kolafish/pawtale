@@ -16,6 +16,7 @@ from app.domain.memoir.types import (
     MemoirChatMessageRole,
     MemoirChapterSourceLinkStatus,
     MemoirCreatedBy,
+    MemoirInterviewType,
     MemoirSemanticCacheStatus,
     MemoirTranscriptVersionType,
 )
@@ -43,7 +44,11 @@ from app.services.ai_types import AITextClient
 from app.services.memoir import automation_event_resolution
 from app.services.memoir import source_cards
 from app.services.memoir.asr_text_normalization import normalize_memoir_asr_text
-from app.services.memoir.source_disposition import clear_source_route_disposition
+from app.services.memoir.source_disposition import (
+    IGNORED_SOURCE_ROUTE_ACTION,
+    INTERVIEWER_SOURCE_MATERIAL_TYPE,
+    clear_source_route_disposition,
+)
 from app.services.memoir.book_plan_sources import (
     REMOVED_SOURCE_UTTERANCE_IDS_KEY,
     SOURCES_CHANGED_STATUS_REASON,
@@ -346,10 +351,36 @@ def _transcript_filter(user_id: str, project_id: str | None = None):
             func.trim(MemoirVoiceUtterance.transcript_raw) != "",
             func.trim(MemoirVoiceUtterance.transcript_edited) != "",
         ),
+        ~_paired_human_interviewer_prompt_exists(),
     ]
     if project_id:
         clauses.append(Project.id == project_id)
     return clauses
+
+
+def _paired_human_interviewer_prompt_exists():
+    interviewer_message = aliased(MemoirChatMessage)
+    answer_message = aliased(MemoirChatMessage)
+    answer_utterance = aliased(MemoirVoiceUtterance)
+    return (
+        select(answer_utterance.id)
+        .select_from(interviewer_message)
+        .join(answer_message, answer_message.parent_message_id == interviewer_message.id)
+        .join(answer_utterance, answer_utterance.chat_message_id == answer_message.id)
+        .where(
+            MemoirVoiceSession.interview_type == MemoirInterviewType.HUMAN_INTERVIEW.value,
+            interviewer_message.id == MemoirVoiceUtterance.chat_message_id,
+            interviewer_message.role == MemoirChatMessageRole.INTERVIEWER.value,
+            MemoirVoiceUtterance.source_material_type == INTERVIEWER_SOURCE_MATERIAL_TYPE,
+            MemoirVoiceUtterance.source_route_action == IGNORED_SOURCE_ROUTE_ACTION,
+            answer_message.role == MemoirChatMessageRole.USER.value,
+            or_(
+                func.trim(answer_utterance.transcript_raw) != "",
+                func.trim(answer_utterance.transcript_edited) != "",
+            ),
+        )
+        .exists()
+    )
 
 
 def _like_pattern(value: str) -> str:
@@ -409,6 +440,8 @@ def _question_search_filter(pattern: str):
         .select_from(question_message)
         .join(user_message, user_message.id == MemoirVoiceUtterance.chat_message_id)
         .where(
+            user_message.role == MemoirChatMessageRole.USER.value,
+            user_message.parent_message_id.is_(None),
             question_message.voice_session_id == MemoirVoiceUtterance.voice_session_id,
             question_message.role.in_(
                 [MemoirChatMessageRole.ASSISTANT.value, MemoirChatMessageRole.INTERVIEWER.value]
@@ -422,10 +455,31 @@ def _question_search_filter(pattern: str):
     )
 
 
+def _parent_question_search_filter(pattern: str):
+    user_message = aliased(MemoirChatMessage)
+    parent_question = aliased(MemoirChatMessage)
+    return (
+        select(parent_question.id)
+        .select_from(parent_question)
+        .join(user_message, user_message.parent_message_id == parent_question.id)
+        .where(
+            user_message.id == MemoirVoiceUtterance.chat_message_id,
+            user_message.role == MemoirChatMessageRole.USER.value,
+            parent_question.role.in_(
+                [MemoirChatMessageRole.ASSISTANT.value, MemoirChatMessageRole.INTERVIEWER.value]
+            ),
+            func.trim(parent_question.content_text) != "",
+            parent_question.content_text.ilike(pattern, escape="\\"),
+        )
+        .exists()
+    )
+
+
 def _search_filter(term: str):
     pattern = _like_pattern(term)
     return or_(
         _transcript_text_search_filter(term),
+        _parent_question_search_filter(pattern),
         _question_search_filter(pattern),
     )
 
@@ -533,6 +587,18 @@ def _question_message_for_utterance(utterance: MemoirVoiceUtterance) -> MemoirCh
     user_message = utterance.chat_message
     if not user_message:
         return None
+    if user_message.role != MemoirChatMessageRole.USER.value:
+        return None
+    parent_message = user_message.parent_message
+    if (
+        parent_message
+        and parent_message.role in {
+            MemoirChatMessageRole.ASSISTANT.value,
+            MemoirChatMessageRole.INTERVIEWER.value,
+        }
+        and parent_message.content_text.strip()
+    ):
+        return parent_message
     candidates = [
         message
         for message in utterance.voice_session.messages
@@ -554,7 +620,7 @@ def _detail_options():
     return (
         selectinload(MemoirVoiceUtterance.voice_session).selectinload(MemoirVoiceSession.messages),
         selectinload(MemoirVoiceUtterance.voice_session).selectinload(MemoirVoiceSession.project),
-        selectinload(MemoirVoiceUtterance.chat_message),
+        selectinload(MemoirVoiceUtterance.chat_message).selectinload(MemoirChatMessage.parent_message),
         selectinload(MemoirVoiceUtterance.audio_file),
     )
 

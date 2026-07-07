@@ -133,7 +133,7 @@
     <view wx:if="{{item.question_text}}" class="section-card question-card">
       <view class="section-head">
         <view class="section-heading">
-          <text class="section-title">小余刚才问了</text>
+          <text class="section-title">{{item.questionTitleText}}</text>
           <text class="section-hint">这段讲述当时回答的问题</text>
         </view>
         <text class="section-count">{{item.canPlayQuestionAudio ? "有提问语音" : "无提问语音"}}</text>
