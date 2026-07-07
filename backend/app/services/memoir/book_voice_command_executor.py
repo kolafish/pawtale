@@ -13,7 +13,7 @@ from app.schemas.memoir_book import (
 )
 from app.services.memoir import book_plan_write_workflow as memoir_book_plan_write_workflow
 from app.services.memoir import book_source_workflow as memoir_book_source_workflow
-from app.services.memoir.book_voice_command_parser import EXECUTABLE_MUTATION_INTENTS
+from app.services.memoir.book_voice_command_rules import EXECUTABLE_MUTATION_INTENTS
 
 
 async def execute_confirmed_book_voice_command(

@@ -23,11 +23,11 @@ from app.services.ai_factory import get_ai_service
 from app.services.memoir.access import load_memoir_project
 from app.services.memoir.book_source_links import source_count_by_chapter
 from app.services.memoir.book_voice_command_executor import execute_confirmed_book_voice_command
-from app.services.memoir.book_voice_command_parser import (
+from app.services.memoir.book_voice_command_parser import parse_payload_with_ai
+from app.services.memoir.book_voice_command_response_builder import response_from_payload
+from app.services.memoir.book_voice_command_rules import (
     CONSULTATION_INTENTS,
     EXECUTABLE_MUTATION_INTENTS,
-    response_from_payload,
-    parse_payload_with_ai,
 )
 from app.services.memoir.book_voice_commands import load_book_plan
 from app.services.memoir.streaming_tts_events import (
