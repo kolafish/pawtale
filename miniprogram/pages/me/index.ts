@@ -277,7 +277,6 @@ Page<MeData, {
   openVoiceAuthorization(): void;
   openProjects(): void;
   openVoiceProgress(): void;
-  openDebugSpeakerTranscribe(): void;
   logout(): Promise<void>;
 }>({
   data: {
@@ -628,10 +627,6 @@ Page<MeData, {
 
   openVoiceProgress() {
     wx.navigateTo({ url: "/pages/voice-progress/index" });
-  },
-
-  openDebugSpeakerTranscribe() {
-    wx.navigateTo({ url: "/pages/debug-speaker-transcribe/index" });
   },
 
   async logout() {

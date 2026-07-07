@@ -11,7 +11,6 @@
     "pages/book-chapter/index",
     "pages/book-export/index",
     "pages/voice-progress/index",
-    "pages/debug-speaker-transcribe/index",
     "pages/projects/index",
     "pages/project-edit/index",
     "pages/me/index"

@@ -123,17 +123,6 @@
     <button wx:else class="edit-name-button" disabled="{{loading}}" bindtap="startEditName">编辑</button>
   </view>
 
-  <view class="section">
-    <text class="section-title">开发调试</text>
-    <view class="action-card debug-card" bindtap="openDebugSpeakerTranscribe" hover-class="tap-hover">
-      <view>
-        <text class="action-title">多人实时转写</text>
-        <text class="action-meta">按本次连接里的说话人顺序标注，不进入素材库。</text>
-      </view>
-      <text class="chevron">›</text>
-    </view>
-  </view>
-
   <view wx:if="{{!passwordLoginEnabled}}" class="section">
     <text class="section-title">Web 登录账号</text>
     <view class="credential-panel">
