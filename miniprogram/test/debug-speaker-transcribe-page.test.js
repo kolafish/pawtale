@@ -85,14 +85,30 @@ test("debug speaker page shows partial and final text in conversation flow", () 
   assert.equal(context.data.activePartial.visible, false);
   assert.equal(context.data.conversationLines.length, 1);
   assert.equal(context.data.conversationLines[0].speakerTitle, "女1");
-  assert.equal(context.data.conversationLines[0].speakerBadgeClass, "speaker-badge female");
+  assert.equal(context.data.conversationLines[0].speakerBadgeClass, "speaker-badge tone-1");
   assert.equal(context.data.conversationLines[0].text, "住在厂里的家属院。");
   assert.equal(context.data.conversationLines[0].metaText, "0:01-0:03 · 置信度 86%");
-  assert.equal(context.data.conversationLines[0].lineClass, "line-item latest");
+  assert.equal(context.data.conversationLines[0].lineClass, "line-item latest tone-1");
   assert.equal(context.data.conversationLines[0].textClass, "line-text latest");
   assert.equal(context.data.conversationScrollTarget, "conversation-speaker_2-seg-2");
   assert.equal(context.data.showEmpty, false);
   assert.equal(context.data.clearDisabled, false);
+});
+
+test("debug speaker page formats segment meta as Beijing occurrence time when available", () => {
+  const { mod } = loadDebugSpeakerPage();
+
+  assert.equal(
+    mod.formatDebugSpeakerSegmentMeta({
+      type: "speaker.final",
+      occurred_start_at_ms: Date.UTC(2026, 6, 7, 5, 30, 44),
+      occurred_end_at_ms: Date.UTC(2026, 6, 7, 5, 30, 47),
+      start_ms: 44_000,
+      end_ms: 47_000,
+      confidence: 0.86,
+    }),
+    "13:30:44-13:30:47 · 置信度 86%",
+  );
 });
 
 test("debug speaker page removes finalized text from live unknown partial", () => {
@@ -195,6 +211,68 @@ test("debug speaker page does not re-add finalized speaker text to cumulative un
   ]);
 });
 
+test("debug speaker page clears stale unknown preview when two ASR streams disagree on a short utterance", () => {
+  const { page } = loadDebugSpeakerPage();
+  const context = pageContext(page);
+  const liveText = "然后这道吗？应该就是第四道了哈。";
+
+  page.handleSpeakerEvent.call(context, {
+    type: "speaker.partial",
+    speaker_id: "speaker_unknown",
+    segment_id: "live-current",
+    text: liveText,
+    provider_event_type: "live.partial",
+  });
+
+  assert.equal(context.data.activePartial.visible, true);
+  assert.equal(context.data.activePartial.text, liveText);
+
+  page.handleSpeakerEvent.call(context, {
+    type: "speaker.final",
+    speaker_id: "speaker_2",
+    segment_id: "seg-2",
+    text: "现在应该是第八道了哈。",
+    start_ms: 44_000,
+    end_ms: 47_000,
+  });
+
+  assert.equal(context.data.conversationLines[0].text, "现在应该是第八道了哈。");
+  assert.equal(context.data.activePartial.visible, false);
+  assert.equal(context.data.conversationScrollTarget, "conversation-speaker_2-seg-2");
+
+  page.handleSpeakerEvent.call(context, {
+    type: "speaker.partial",
+    speaker_id: "speaker_unknown",
+    segment_id: "live-current",
+    text: liveText,
+    provider_event_type: "live.partial",
+  });
+
+  assert.equal(context.data.activePartial.visible, false);
+});
+
+test("debug speaker page keeps unrelated unknown preview when final text is not the same utterance", () => {
+  const { page } = loadDebugSpeakerPage();
+  const context = pageContext(page);
+
+  page.handleSpeakerEvent.call(context, {
+    type: "speaker.partial",
+    speaker_id: "speaker_unknown",
+    segment_id: "live-current",
+    text: "第五次现在还在继续说。",
+    provider_event_type: "live.partial",
+  });
+  page.handleSpeakerEvent.call(context, {
+    type: "speaker.final",
+    speaker_id: "speaker_2",
+    segment_id: "seg-2",
+    text: "第四次已经稳定了。",
+  });
+
+  assert.equal(context.data.activePartial.visible, true);
+  assert.equal(context.data.activePartial.text, "第五次现在还在继续说。");
+});
+
 test("debug speaker page keeps transcript area high after recording stops", () => {
   const { page } = loadDebugSpeakerPage();
   const context = pageContext(page);
@@ -286,6 +364,69 @@ test("debug speaker page shows provider diarization diagnostics", () => {
   assert.equal(context.data.diarizationNotice, "已收到说话人标签，会按不同人标注显示。");
 });
 
+test("debug speaker page assigns speaker tones by first seen order instead of id suffix", () => {
+  const { page } = loadDebugSpeakerPage();
+  const context = pageContext(page);
+
+  page.handleSpeakerEvent.call(context, {
+    type: "speaker.partial",
+    speaker_id: "speaker_unknown",
+    segment_id: "live-current",
+    text: "未分辨的实时内容",
+  });
+
+  assert.equal(context.data.activePartial.speakerBadgeClass, "speaker-badge");
+  assert.equal(context.data.activePartial.partialBoxClass, "partial-box active-partial");
+
+  page.handleSpeakerEvent.call(context, {
+    type: "speaker.final",
+    speaker_id: "speaker_7",
+    segment_id: "seg-7",
+    text: "编号不是连续的第一位说话人。",
+  });
+
+  page.handleSpeakerEvent.call(context, {
+    type: "speaker.final",
+    speaker_id: "speaker_2",
+    segment_id: "seg-2",
+    text: "第二个出现的人拿第二套颜色。",
+  });
+
+  page.handleSpeakerEvent.call(context, {
+    type: "speaker.final",
+    speaker_id: "speaker_7",
+    segment_id: "seg-7-next",
+    text: "第一位说话人继续沿用第一套颜色。",
+  });
+
+  assert.deepEqual(context.data.conversationLines.map((line) => line.speakerId), [
+    "speaker_7",
+    "speaker_2",
+    "speaker_7",
+  ]);
+  assert.deepEqual(context.data.conversationLines.map((line) => line.speakerBadgeClass), [
+    "speaker-badge tone-0",
+    "speaker-badge tone-1",
+    "speaker-badge tone-0",
+  ]);
+  assert.deepEqual(context.data.conversationLines.map((line) => line.lineClass), [
+    "line-item latest tone-0",
+    "line-item history tone-1",
+    "line-item history tone-0",
+  ]);
+
+  page.clearTranscript.call(context);
+  page.handleSpeakerEvent.call(context, {
+    type: "speaker.final",
+    speaker_id: "speaker_2",
+    segment_id: "seg-2-reset",
+    text: "清空后重新按首次出现分配第一套颜色。",
+  });
+
+  assert.equal(context.data.conversationLines[0].speakerBadgeClass, "speaker-badge tone-0");
+  assert.equal(context.data.conversationLines[0].lineClass, "line-item latest tone-0");
+});
+
 test("debug speaker page keeps only the newest final line visually large", async () => {
   const pendingProofreads = [];
   const { page } = loadDebugSpeakerPage({
@@ -319,10 +460,10 @@ test("debug speaker page keeps only the newest final line visually large", async
 
   assert.equal(context.data.latestFinalLineId, secondLineId);
   assert.equal(context.data.conversationLines[0].id, secondLineId);
-  assert.equal(context.data.conversationLines[0].lineClass, "line-item latest");
+  assert.equal(context.data.conversationLines[0].lineClass, "line-item latest tone-1");
   assert.equal(context.data.conversationLines[0].textClass, "line-text latest");
   assert.equal(context.data.conversationLines[1].id, firstLineId);
-  assert.equal(context.data.conversationLines[1].lineClass, "line-item history");
+  assert.equal(context.data.conversationLines[1].lineClass, "line-item history tone-0");
   assert.equal(context.data.conversationLines[1].textClass, "line-text history");
 
   pendingProofreads[1].resolve({
@@ -335,8 +476,8 @@ test("debug speaker page keeps only the newest final line visually large", async
   await flushPromises();
 
   assert.equal(context.data.latestFinalLineId, secondLineId);
-  assert.equal(context.data.conversationLines[0].lineClass, "line-item latest");
-  assert.equal(context.data.conversationLines[1].lineClass, "line-item history");
+  assert.equal(context.data.conversationLines[0].lineClass, "line-item latest tone-1");
+  assert.equal(context.data.conversationLines[1].lineClass, "line-item history tone-0");
 });
 
 test("debug speaker page previews historical final text while pressed", async () => {

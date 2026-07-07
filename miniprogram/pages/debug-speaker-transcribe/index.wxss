@@ -383,11 +383,23 @@
 .line-item {
   position: relative;
   margin-top: 24rpx;
-  padding: 30rpx;
+  padding: 30rpx 30rpx 30rpx 34rpx;
   border-radius: 22rpx;
   background: #ffffff;
   box-shadow: 0 8rpx 22rpx rgba(64, 43, 24, 0.06);
   box-sizing: border-box;
+}
+
+.line-item::before {
+  content: "";
+  position: absolute;
+  top: 30rpx;
+  bottom: 30rpx;
+  left: 18rpx;
+  width: 4rpx;
+  border-radius: 999rpx;
+  background: #e7d8c9;
+  opacity: 0.72;
 }
 
 .line-item.history {
@@ -395,7 +407,6 @@
 }
 
 .line-item.latest {
-  padding-left: 34rpx;
   background: #fffdf9;
 }
 
@@ -408,6 +419,7 @@
   width: 6rpx;
   border-radius: 999rpx;
   background: #d7a28c;
+  opacity: 1;
 }
 
 .line-meta-row {
@@ -439,6 +451,150 @@
 .speaker-badge.female {
   background: #fff1f3;
   color: #9b4656;
+}
+
+.speaker-badge.tone-0 {
+  background: #ddf0ed;
+  color: #115e59;
+}
+
+.speaker-badge.tone-1 {
+  background: #ddebf8;
+  color: #28557d;
+}
+
+.speaker-badge.tone-2 {
+  background: #ece5f7;
+  color: #5e458e;
+}
+
+.speaker-badge.tone-3 {
+  background: #f8e1e7;
+  color: #84364b;
+}
+
+.speaker-badge.tone-4 {
+  background: #f3e8c8;
+  color: #6b5118;
+}
+
+.speaker-badge.tone-5 {
+  background: #e3f0d9;
+  color: #3b6128;
+}
+
+.speaker-badge.tone-6 {
+  background: #f6e1d2;
+  color: #87441f;
+}
+
+.speaker-badge.tone-7 {
+  background: #e2e9f8;
+  color: #38558d;
+}
+
+.partial-box.tone-0,
+.line-item.tone-0 {
+  background: #f0f8f6;
+}
+
+.partial-box.tone-1,
+.line-item.tone-1 {
+  background: #f1f7fc;
+}
+
+.partial-box.tone-2,
+.line-item.tone-2 {
+  background: #f7f3fc;
+}
+
+.partial-box.tone-3,
+.line-item.tone-3 {
+  background: #fff4f6;
+}
+
+.partial-box.tone-4,
+.line-item.tone-4 {
+  background: #fbf7e9;
+}
+
+.partial-box.tone-5,
+.line-item.tone-5 {
+  background: #f3f9ef;
+}
+
+.partial-box.tone-6,
+.line-item.tone-6 {
+  background: #fff4ec;
+}
+
+.partial-box.tone-7,
+.line-item.tone-7 {
+  background: #f3f6fd;
+}
+
+.active-partial.tone-0 {
+  border-color: #147d73;
+}
+
+.active-partial.tone-1 {
+  border-color: #2f6ea5;
+}
+
+.active-partial.tone-2 {
+  border-color: #7a5bb7;
+}
+
+.active-partial.tone-3 {
+  border-color: #a84b62;
+}
+
+.active-partial.tone-4 {
+  border-color: #8a6a22;
+}
+
+.active-partial.tone-5 {
+  border-color: #4f7b38;
+}
+
+.active-partial.tone-6 {
+  border-color: #b15e2d;
+}
+
+.active-partial.tone-7 {
+  border-color: #4b6fb6;
+}
+
+.line-item.tone-0::before {
+  background: #147d73;
+}
+
+.line-item.tone-1::before {
+  background: #2f6ea5;
+}
+
+.line-item.tone-2::before {
+  background: #7a5bb7;
+}
+
+.line-item.tone-3::before {
+  background: #a84b62;
+}
+
+.line-item.tone-4::before {
+  background: #8a6a22;
+}
+
+.line-item.tone-5::before {
+  background: #4f7b38;
+}
+
+.line-item.tone-6::before {
+  background: #b15e2d;
+}
+
+.line-item.tone-7::before {
+  background: #4b6fb6;
 }
 
 .line-meta {
@@ -501,10 +657,56 @@
 }
 
 .history-preview-speaker {
+  display: inline-flex;
+  align-items: center;
+  min-height: 40rpx;
+  padding: 0 14rpx;
+  border-radius: 999rpx;
+  background: rgba(255, 253, 249, 0.12);
   color: #fffdf9;
   font-size: 32rpx;
   font-weight: 850;
-  line-height: 1.25;
+  line-height: 40rpx;
+}
+
+.history-preview-speaker.tone-0 {
+  background: #ddf0ed;
+  color: #115e59;
+}
+
+.history-preview-speaker.tone-1 {
+  background: #ddebf8;
+  color: #28557d;
+}
+
+.history-preview-speaker.tone-2 {
+  background: #ece5f7;
+  color: #5e458e;
+}
+
+.history-preview-speaker.tone-3 {
+  background: #f8e1e7;
+  color: #84364b;
+}
+
+.history-preview-speaker.tone-4 {
+  background: #f3e8c8;
+  color: #6b5118;
+}
+
+.history-preview-speaker.tone-5 {
+  background: #e3f0d9;
+  color: #3b6128;
+}
+
+.history-preview-speaker.tone-6 {
+  background: #f6e1d2;
+  color: #87441f;
+}
+
+.history-preview-speaker.tone-7 {
+  background: #e2e9f8;
+  color: #38558d;
 }
 
 .history-preview-meta {
@@ -652,8 +854,15 @@
   line-height: 72rpx;
 }
 
-.debug-speaker-page.large-text .line-item.latest {
+.debug-speaker-page.large-text .line-item {
   padding-left: 42rpx;
+}
+
+.debug-speaker-page.large-text .line-item::before {
+  top: 34rpx;
+  bottom: 34rpx;
+  left: 22rpx;
+  width: 5rpx;
 }
 
 .debug-speaker-page.large-text .line-item.latest::before {
