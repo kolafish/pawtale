@@ -420,7 +420,6 @@ function comparableSpeechText(text: string): string {
 
 function shouldClearActivePartialForFinal(
   activePartial: ActivePartialView,
-  finalSpeakerId: string,
   finalText: string,
 ): boolean {
   if (!activePartial.visible) {
@@ -843,7 +842,7 @@ Page<DebugSpeakerPageData, {
       partialScrollClass = "partial-scroll";
       partialScrollTarget = "";
       partialScrollTop = 0;
-      activePartial = shouldClearActivePartialForFinal(this.data.activePartial, speakerId, text)
+      activePartial = shouldClearActivePartialForFinal(this.data.activePartial, text)
         ? EMPTY_ACTIVE_PARTIAL
         : this.data.activePartial;
       if (activePartial.visible) {

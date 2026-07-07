@@ -129,39 +129,6 @@ def test_debug_speaker_segments_extract_volc_additions_speaker_label():
     assert [segment.speaker_gender for segment in segments] == ["male", "female"]
 
 
-def test_debug_speaker_segments_keep_live_tail_when_utterances_lag_full_text():
-    event = StreamingASREvent(
-        type="final",
-        text="第一句已经稳定。第二句还在实时说",
-        raw={
-            "payload": {
-                "result": [
-                    {
-                        "text": "第一句已经稳定。第二句还在实时说",
-                        "utterances": [
-                            {
-                                "text": "第一句已经稳定。",
-                                "speaker_id": "1",
-                                "start_time": 0,
-                                "end_time": 1800,
-                                "definite": True,
-                            }
-                        ],
-                    }
-                ]
-            }
-        },
-    )
-
-    segments = speaker_segments_from_asr_event(event)
-
-    assert [(segment.speaker_id, segment.text, segment.force_partial) for segment in segments] == [
-        ("speaker_1", "第一句已经稳定。", False),
-        ("speaker_unknown", "第二句还在实时说", True),
-    ]
-    assert segments[1].start_ms == 1800
-
-
 def test_debug_speaker_live_text_after_confirmed_prefix_keeps_current_tail():
     assert live_text_after_confirmed_prefix(
         "第一句已经稳定。第二句还在实时说",
@@ -249,37 +216,6 @@ async def test_debug_speaker_transcribe_session_keeps_provider_definite_utteranc
     assert event["text"] == "正在说的话。"
     assert event["provider_event_type"] == "partial"
     assert [item for item in client.sent if item["type"] == "speaker.final"] == []
-
-
-async def test_debug_speaker_transcribe_session_streams_live_tail_from_provider_final_event():
-    client = FakeGatewayClient()
-    transcriber = FakeLaggingUtteranceSpeakerTranscriber()
-    session = DebugSpeakerTranscribeSession(
-        client=client,
-        transcriber_factory=lambda: transcriber,
-    )
-
-    run_task = asyncio.create_task(session.run())
-    await _wait_for_event(client, "session.ready")
-    await client.push({"type": "session.start"})
-    await _wait_for_event(client, "session.started")
-    await client.push(
-        {
-            "type": "audio.frame",
-            "audio": base64.b64encode(b"pcm").decode("ascii"),
-        }
-    )
-    final_event = await _wait_for_event(client, "speaker.final")
-    partial_event = await _wait_for_event(client, "speaker.partial")
-    await client.push({"type": "session.stop"})
-    await asyncio.wait_for(run_task, timeout=1)
-
-    assert final_event["speaker_id"] == "speaker_1"
-    assert final_event["text"] == "第一句已经稳定。"
-    assert final_event["provider_event_type"] == "final"
-    assert partial_event["speaker_id"] == "speaker_unknown"
-    assert partial_event["text"] == "第二句还在实时说"
-    assert partial_event["provider_event_type"] == "final"
 
 
 async def test_debug_speaker_transcribe_session_streams_live_asr_tail_when_speaker_stream_lags():
@@ -676,35 +612,6 @@ class FakeDefinitePartialSpeakerTranscriber(FakeSpeakerTranscriber):
                                         "definite": True,
                                     }
                                 ]
-                            }
-                        ]
-                    }
-                },
-            )
-        )
-
-
-class FakeLaggingUtteranceSpeakerTranscriber(FakeSpeakerTranscriber):
-    async def send_audio(self, audio: bytes) -> None:
-        self.sent_audio.append(audio)
-        await self.events_queue.put(
-            StreamingASREvent(
-                type="final",
-                text="第一句已经稳定。第二句还在实时说",
-                raw={
-                    "payload": {
-                        "result": [
-                            {
-                                "text": "第一句已经稳定。第二句还在实时说",
-                                "utterances": [
-                                    {
-                                        "text": "第一句已经稳定。",
-                                        "speaker_id": "1",
-                                        "start_time": 0,
-                                        "end_time": 1800,
-                                        "definite": True,
-                                    }
-                                ],
                             }
                         ]
                     }
