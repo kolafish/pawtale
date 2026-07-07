@@ -71,6 +71,10 @@ import {
 import { readBookTTSSettings } from "../../services/tts-settings";
 import { AudioPlaybackController } from "../../services/audio-playback";
 import {
+  VoiceAssistantTTSProgressRuntime,
+  type VoiceAssistantTTSProgressPatch,
+} from "../../services/voice-assistant-tts-progress";
+import {
   VoiceAssistantTurnRuntime,
 } from "../../services/voice-assistant-turn-runtime";
 import {
@@ -90,6 +94,7 @@ import {
 } from "../../services/voice-authorization";
 import { ensureRecorderPrivacyAuthorization } from "../../services/wechat-privacy";
 import {
+  applyBookTTSProgressPatch as applyBookTTSPlaybackProgressPatch,
   playBookAudioFile,
   playBookAudioFiles,
   playbackTimeForProgress as playbackTimeForBookTTSProgress,
@@ -240,11 +245,8 @@ definePage<BookData>()({
   audioPlayback: new AudioPlaybackController(),
   bookVoiceStreaming: new StreamingVoiceController(),
   bookVoiceAssistantTurnRuntime: null as VoiceAssistantTurnRuntime | null,
-  bookVoiceStreamingAudioStartSeconds: -1,
-  bookVoiceStreamingAudioEndSeconds: 0,
+  ttsProgress: new VoiceAssistantTTSProgressRuntime(),
   playToken: 0,
-  ttsProgressTimer: null as number | null,
-  ttsProgressStartedAtMs: 0,
   bookVoiceAutoListenTimer: null as number | null,
   bookGenerationPollTimer: null as number | null,
   bookGenerationPollAttempts: 0,
@@ -2005,8 +2007,7 @@ definePage<BookData>()({
     ) ? this.bookVoiceCommandUndoSnapshot() : null;
     const token = this.audioPlayback.nextToken();
     this.playToken = token;
-    this.bookVoiceStreamingAudioStartSeconds = -1;
-    this.bookVoiceStreamingAudioEndSeconds = 0;
+    this.ttsProgress.resetStreamingAudio();
     this.setData({
       bookVoiceAssistantBusy: true,
       ttsBusyTarget: "book-voice-assistant",
@@ -2440,9 +2441,7 @@ definePage<BookData>()({
       return;
     }
     this.stopBookTTSProgressTimer();
-    const durationSeconds = this.bookVoiceStreamingAudioStartSeconds >= 0
-      ? Math.max(0, this.bookVoiceStreamingAudioEndSeconds - this.bookVoiceStreamingAudioStartSeconds)
-      : this.data.bookTTSDurationSeconds;
+    const durationSeconds = this.ttsProgress.streamingDurationSeconds() || this.data.bookTTSDurationSeconds;
     this.setData({
       bookTTSSpokenText: activeText,
       bookTTSCurrentText: "",
@@ -2453,59 +2452,36 @@ definePage<BookData>()({
   },
 
   markBookVoiceStreamingAudioFrameScheduled(event: StreamingSpeechPlaybackFrameEvent) {
-    if (this.bookVoiceStreamingAudioStartSeconds < 0) {
-      this.bookVoiceStreamingAudioStartSeconds = event.startAtSeconds;
-    }
-    const frameEndSeconds = event.startAtSeconds + event.durationSeconds;
-    this.bookVoiceStreamingAudioEndSeconds = Math.max(
-      this.bookVoiceStreamingAudioEndSeconds,
-      frameEndSeconds,
-    );
+    this.ttsProgress.markStreamingAudioFrameScheduled(event);
     this.setData({
       bookTTSDurationSeconds: Math.max(
         this.data.bookTTSDurationSeconds,
-        this.bookVoiceStreamingAudioEndSeconds - this.bookVoiceStreamingAudioStartSeconds,
-        0,
+        this.ttsProgress.streamingDurationSeconds(),
       ),
     });
   },
 
   updateBookVoiceStreamingTTSProgress() {
-    if (this.bookVoiceStreamingAudioStartSeconds < 0) {
-      this.updateBookTTSProgress(0, 0);
-      return;
-    }
-    const currentTimeSeconds = this.bookVoiceAssistantTurnRuntime?.stats()?.currentTimeSeconds;
-    const current = Number.isFinite(currentTimeSeconds) ? Number(currentTimeSeconds) : 0;
-    const playbackTime = Math.max(0, current - this.bookVoiceStreamingAudioStartSeconds);
-    const scheduledDuration = Math.max(
-      0,
-      this.bookVoiceStreamingAudioEndSeconds - this.bookVoiceStreamingAudioStartSeconds,
-    );
-    this.updateBookTTSProgress(
-      playbackTime,
-      Math.max(scheduledDuration, playbackTime + BOOK_VOICE_STREAMING_TTS_PROGRESS_HOLD_SECONDS),
+    this.ttsProgress.updateStreamingProgress(
+      this.data.bookTTSActiveText,
+      this.bookVoiceAssistantTurnRuntime?.stats()?.currentTimeSeconds,
+      (patch) => this.applyBookTTSProgressPatch(patch),
+      BOOK_VOICE_STREAMING_TTS_PROGRESS_HOLD_SECONDS,
     );
   },
 
   startBookVoiceStreamingTTSProgressTimer(token: number) {
-    if (this.ttsProgressTimer !== null) {
-      return;
-    }
-    const timer = setInterval(() => {
-      if (
-        token !== this.playToken
-        || !this.bookVoiceAssistantTurnRuntime
-        || this.data.bookTTSActiveTarget !== "book-voice-assistant"
-      ) {
-        if (this.ttsProgressTimer === timer) {
-          this.stopBookTTSProgressTimer();
-        }
-        return;
-      }
-      this.updateBookVoiceStreamingTTSProgress();
-    }, 250);
-    this.ttsProgressTimer = timer;
+    this.ttsProgress.startStreamingTimer({
+      isActive: () => (
+        token === this.playToken
+        && Boolean(this.bookVoiceAssistantTurnRuntime)
+        && this.data.bookTTSActiveTarget === "book-voice-assistant"
+      ),
+      currentTimeSeconds: () => this.bookVoiceAssistantTurnRuntime?.stats()?.currentTimeSeconds,
+      text: () => this.data.bookTTSActiveText,
+      holdSeconds: BOOK_VOICE_STREAMING_TTS_PROGRESS_HOLD_SECONDS,
+      applyPatch: (patch) => this.applyBookTTSProgressPatch(patch),
+    });
   },
 
   bookVoiceCommandUndoSnapshot() {
@@ -2561,6 +2537,10 @@ definePage<BookData>()({
     updateBookTTSPlaybackProgress(this, currentTimeSeconds, durationSeconds);
   },
 
+  applyBookTTSProgressPatch(patch: VoiceAssistantTTSProgressPatch) {
+    applyBookTTSPlaybackProgressPatch(this, patch);
+  },
+
   startBookTTSProgressTimer(
     token: number,
     audio: WechatMiniprogram.InnerAudioContext,
@@ -2585,8 +2565,7 @@ definePage<BookData>()({
   stopPlayback() {
     this.bookVoiceAssistantTurnRuntime?.close();
     this.bookVoiceAssistantTurnRuntime = null;
-    this.bookVoiceStreamingAudioStartSeconds = -1;
-    this.bookVoiceStreamingAudioEndSeconds = 0;
+    this.ttsProgress.resetStreamingAudio();
     stopBookPlayback(this);
     if (this.data.bookVoiceAssistantSpeakingLineId) {
       this.setData({ bookVoiceAssistantSpeakingLineId: "" });

@@ -18,12 +18,15 @@ interface StreamingProgressTimerOptions {
   isActive(): boolean;
   currentTimeSeconds(): number | null | undefined;
   text(): string;
+  holdSeconds?: number;
   applyPatch: ApplyProgressPatch;
 }
 
 interface AudioFileProgressTimerOptions {
   audio: WechatMiniprogram.InnerAudioContext;
   isActive(): boolean;
+  currentTimeOffsetSeconds?: number;
+  durationSeconds?(): number | null | undefined;
   text(): string;
   alignment(): TTSAlignmentSegment[];
   fallbackDurationSeconds?: number;
@@ -105,6 +108,7 @@ export class VoiceAssistantTTSProgressRuntime {
     text: string,
     currentTimeSeconds: number | null | undefined,
     applyPatch: ApplyProgressPatch,
+    holdSeconds: number = STREAMING_TTS_PROGRESS_HOLD_SECONDS,
   ): void {
     if (!text) {
       this.resetProgress(applyPatch);
@@ -116,7 +120,7 @@ export class VoiceAssistantTTSProgressRuntime {
       : Math.max(0, this.streamingAudioEndSeconds - this.streamingAudioStartSeconds);
     const duration = Math.max(
       scheduledDuration,
-      currentTime + STREAMING_TTS_PROGRESS_HOLD_SECONDS,
+      currentTime + holdSeconds,
     );
     const progress = splitTextByAudioPlaybackProgress(text, currentTime, duration, {
       alignment: [],
@@ -169,6 +173,7 @@ export class VoiceAssistantTTSProgressRuntime {
         options.text(),
         options.currentTimeSeconds(),
         options.applyPatch,
+        options.holdSeconds,
       );
     }, PROGRESS_TIMER_INTERVAL_MS);
     this.timer = timer;
@@ -186,10 +191,14 @@ export class VoiceAssistantTTSProgressRuntime {
         }
         return;
       }
+      const currentTimeOffset = options.currentTimeOffsetSeconds || 0;
+      const durationSeconds = options.durationSeconds
+        ? Number(options.durationSeconds())
+        : options.audio.duration;
       this.updateAudioFileProgress(
         options.text(),
-        this.playbackTimeForAudio(options.audio),
-        options.audio.duration,
+        currentTimeOffset + this.playbackTimeForAudio(options.audio),
+        durationSeconds,
         options.fallbackDurationSeconds || 0,
         options.alignment(),
         options.applyPatch,
