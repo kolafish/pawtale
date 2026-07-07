@@ -171,36 +171,6 @@ function sampleBookOutputVersion(
   };
 }
 
-function sampleBookManuscript(title = "外婆回忆录", coverStyle = "classic_plain") {
-  return {
-    schema_version: 1,
-    profile: {
-      template: "classic_family",
-      title,
-      subtitle: "根据口述访谈整理",
-      narrator_name: "",
-      prepared_by: "家人整理",
-      interview_date_range: "",
-      privacy_note: "",
-      ai_disclosure_note: "",
-    },
-    front_matter: [],
-    table_of_contents: [],
-    chapters: [],
-    back_matter: {},
-    render_settings: {
-      page_size: "a5",
-      layout: "reading",
-      font_scale: "standard",
-      show_headers: true,
-      show_source_appendix: true,
-      photo_mode: "none",
-      cover_style: coverStyle,
-      back_cover_quote: "",
-    },
-  };
-}
-
 function sampleStructuredBookContent() {
   return {
     title: "外婆回忆录",

@@ -2,52 +2,21 @@ require("./register-ts");
 
 const assert = require("node:assert/strict");
 const test = require("node:test");
+const { loadPageModule, mockModule, pageContext } = require("./page-harness");
 
 function loadLoginPage({ authExports = {} } = {}) {
-  const authPath = require.resolve("../services/auth.ts");
-  const loginPath = require.resolve("../pages/login/index.ts");
-  delete require.cache[authPath];
-  delete require.cache[loginPath];
-  require.cache[authPath] = {
-    id: authPath,
-    filename: authPath,
-    loaded: true,
-    exports: {
-      isValidEmail: (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()),
-      loginWithEmail: async () => {
-        throw new Error("loginWithEmail was not mocked");
-      },
-      loginWithWeChat: async () => {
-        throw new Error("loginWithWeChat was not mocked");
-      },
-      ...authExports,
+  mockModule("../services/auth.ts", {
+    isValidEmail: (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()),
+    loginWithEmail: async () => {
+      throw new Error("loginWithEmail was not mocked");
     },
-  };
+    loginWithWeChat: async () => {
+      throw new Error("loginWithWeChat was not mocked");
+    },
+    ...authExports,
+  });
 
-  let page = null;
-  const previousPage = global.Page;
-  global.Page = (definition) => {
-    page = definition;
-  };
-  require(loginPath);
-  if (previousPage === undefined) {
-    delete global.Page;
-  } else {
-    global.Page = previousPage;
-  }
-  return { page };
-}
-
-function pageContext(page, data = {}) {
-  return {
-    data: {
-      ...page.data,
-      ...data,
-    },
-    setData(patch) {
-      this.data = { ...this.data, ...patch };
-    },
-  };
+  return loadPageModule("../pages/login/index.ts");
 }
 
 test("login page relaunches home after first wechat registration", async () => {

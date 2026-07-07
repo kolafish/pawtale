@@ -2,6 +2,7 @@ require("./register-ts");
 
 const assert = require("node:assert/strict");
 const test = require("node:test");
+const { loadPageModule, mockModule, pageContext } = require("./page-harness");
 
 function loadMePage({
   authExports = {},
@@ -11,170 +12,103 @@ function loadMePage({
   accessibilityExports = {},
   voiceAuthorizationExports = {},
 } = {}) {
-  const authPath = require.resolve("../services/auth.ts");
-  const voiceApiPath = require.resolve("../services/memoir-voice-api.ts");
-  const ttsPath = require.resolve("../services/tts-settings.ts");
-  const aiModelPath = require.resolve("../services/ai-model-settings.ts");
-  const accessibilityPath = require.resolve("../services/accessibility-settings.ts");
-  const voiceAuthorizationPath = require.resolve("../services/voice-authorization.ts");
-  const mePath = require.resolve("../pages/me/index.ts");
-  delete require.cache[authPath];
-  delete require.cache[voiceApiPath];
-  delete require.cache[ttsPath];
-  delete require.cache[aiModelPath];
-  delete require.cache[accessibilityPath];
-  delete require.cache[voiceAuthorizationPath];
-  delete require.cache[mePath];
-  require.cache[authPath] = {
-    id: authPath,
-    filename: authPath,
-    loaded: true,
-    exports: {
-      isValidEmail: (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()),
-      getMemoirIdentity: async () => {
-        throw new Error("getMemoirIdentity was not mocked");
+  mockModule("../services/auth.ts", {
+    isValidEmail: (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()),
+    getMemoirIdentity: async () => {
+      throw new Error("getMemoirIdentity was not mocked");
+    },
+    loginWithEmail: async () => {
+      throw new Error("loginWithEmail was not mocked");
+    },
+    loginWithWeChat: async () => {
+      throw new Error("loginWithWeChat was not mocked");
+    },
+    logoutBackendSession: async () => {},
+    setAccountCredentials: async () => {
+      throw new Error("setAccountCredentials was not mocked");
+    },
+    updateBackendProfile: async () => {
+      throw new Error("updateBackendProfile was not mocked");
+    },
+    ...authExports,
+  });
+  mockModule("../services/memoir-voice-api.ts", {
+    getMemoirVoiceProgress: async () => ({
+      session_count: 0,
+      utterance_count: 0,
+      total_user_char_count: 0,
+      total_audio_seconds: 0,
+    }),
+    ...voiceApiExports,
+  });
+  mockModule("../services/tts-settings.ts", {
+    TTS_VOICE_OPTIONS: [
+      {
+        value: "",
+        label: "默认音色",
+        description: "使用后端当前默认配置",
       },
-      loginWithEmail: async () => {
-        throw new Error("loginWithEmail was not mocked");
+    ],
+    TTS_SPEED_OPTIONS: [
+      {
+        value: 1,
+        label: "正常 1.0x",
+        description: "使用默认语速",
       },
-      loginWithWeChat: async () => {
-        throw new Error("loginWithWeChat was not mocked");
+    ],
+    readTTSSettingsProfiles: () => ({
+      chat: { voice: "", speedRatio: 1 },
+      book: { voice: "", speedRatio: 1 },
+    }),
+    readScopedTTSSettings: () => ({ voice: "", speedRatio: 1 }),
+    saveScopedTTSSettings: (_scope, settings) => settings,
+    ttsSpeedLabel: () => "正常 1.0x",
+    ttsVoiceLabel: () => "默认音色",
+    ...ttsExports,
+  });
+  mockModule("../services/ai-model-settings.ts", {
+    AI_MODEL_OPTIONS: [
+      {
+        value: "deepseek-v4-pro",
+        label: "DeepSeek V4 Pro",
+        description: "质量优先",
       },
-      logoutBackendSession: async () => {},
-      setAccountCredentials: async () => {
-        throw new Error("setAccountCredentials was not mocked");
+      {
+        value: "doubao-seed-2-0-pro-260215",
+        label: "Doubao Seed 2.0 Pro",
+        description: "豆包旗舰模型",
       },
-      updateBackendProfile: async () => {
-        throw new Error("updateBackendProfile was not mocked");
-      },
-      ...authExports,
-    },
-  };
-  require.cache[voiceApiPath] = {
-    id: voiceApiPath,
-    filename: voiceApiPath,
-    loaded: true,
-    exports: {
-      getMemoirVoiceProgress: async () => ({
-        session_count: 0,
-        utterance_count: 0,
-        total_user_char_count: 0,
-        total_audio_seconds: 0,
-      }),
-      ...voiceApiExports,
-    },
-  };
-  require.cache[ttsPath] = {
-    id: ttsPath,
-    filename: ttsPath,
-    loaded: true,
-    exports: {
-      TTS_VOICE_OPTIONS: [
-        {
-          value: "",
-          label: "默认音色",
-          description: "使用后端当前默认配置",
-        },
-      ],
-      TTS_SPEED_OPTIONS: [
-        {
-          value: 1,
-          label: "正常 1.0x",
-          description: "使用默认语速",
-        },
-      ],
-      readTTSSettingsProfiles: () => ({
-        chat: { voice: "", speedRatio: 1 },
-        book: { voice: "", speedRatio: 1 },
-      }),
-      readScopedTTSSettings: () => ({ voice: "", speedRatio: 1 }),
-      saveScopedTTSSettings: (_scope, settings) => settings,
-      ttsSpeedLabel: () => "正常 1.0x",
-      ttsVoiceLabel: () => "默认音色",
-      ...ttsExports,
-    },
-  };
-  require.cache[aiModelPath] = {
-    id: aiModelPath,
-    filename: aiModelPath,
-    loaded: true,
-    exports: {
-      AI_MODEL_OPTIONS: [
-        {
-          value: "deepseek-v4-pro",
-          label: "DeepSeek V4 Pro",
-          description: "质量优先",
-        },
-        {
-          value: "doubao-seed-2-0-pro-260215",
-          label: "Doubao Seed 2.0 Pro",
-          description: "豆包旗舰模型",
-        },
-      ],
-      aiModelLabel: (model) => (
-        model === "doubao-seed-2-0-pro-260215" ? "Doubao Seed 2.0 Pro" : "DeepSeek V4 Pro"
-      ),
-      readSelectedAIModel: () => "deepseek-v4-pro",
-      saveSelectedAIModel: (model) => model,
-      ...aiModelExports,
-    },
-  };
-  require.cache[accessibilityPath] = {
-    id: accessibilityPath,
-    filename: accessibilityPath,
-    loaded: true,
-    exports: {
-      readAccessibilitySettings: () => ({
-        largeTextEnabled: false,
-        autoBargeInEnabled: true,
-      }),
-      saveLargeTextEnabled: (largeTextEnabled) => ({
-        largeTextEnabled,
-        autoBargeInEnabled: true,
-      }),
-      saveAutoBargeInEnabled: (autoBargeInEnabled) => ({
-        largeTextEnabled: false,
-        autoBargeInEnabled,
-      }),
-      ...accessibilityExports,
-    },
-  };
-  require.cache[voiceAuthorizationPath] = {
-    id: voiceAuthorizationPath,
-    filename: voiceAuthorizationPath,
-    loaded: true,
-    exports: {
-      readVoiceAuthorizationConsentRecord: () => null,
-      VOICE_AUTHORIZATION_PAGE_URL: "/pages/voice-authorization/index",
-      VOICE_AUTHORIZATION_VERSION: "2026-06-18",
-      ...voiceAuthorizationExports,
-    },
-  };
+    ],
+    aiModelLabel: (model) => (
+      model === "doubao-seed-2-0-pro-260215" ? "Doubao Seed 2.0 Pro" : "DeepSeek V4 Pro"
+    ),
+    readSelectedAIModel: () => "deepseek-v4-pro",
+    saveSelectedAIModel: (model) => model,
+    ...aiModelExports,
+  });
+  mockModule("../services/accessibility-settings.ts", {
+    readAccessibilitySettings: () => ({
+      largeTextEnabled: false,
+      autoBargeInEnabled: true,
+    }),
+    saveLargeTextEnabled: (largeTextEnabled) => ({
+      largeTextEnabled,
+      autoBargeInEnabled: true,
+    }),
+    saveAutoBargeInEnabled: (autoBargeInEnabled) => ({
+      largeTextEnabled: false,
+      autoBargeInEnabled,
+    }),
+    ...accessibilityExports,
+  });
+  mockModule("../services/voice-authorization.ts", {
+    readVoiceAuthorizationConsentRecord: () => null,
+    VOICE_AUTHORIZATION_PAGE_URL: "/pages/voice-authorization/index",
+    VOICE_AUTHORIZATION_VERSION: "2026-06-18",
+    ...voiceAuthorizationExports,
+  });
 
-  let page = null;
-  const previousPage = global.Page;
-  global.Page = (definition) => {
-    page = definition;
-  };
-  require(mePath);
-  if (previousPage === undefined) {
-    delete global.Page;
-  } else {
-    global.Page = previousPage;
-  }
-  return { page };
-}
-
-function pageContext(page, data = {}) {
-  return {
-    data: {
-      ...page.data,
-      ...data,
-    },
-    setData(patch) {
-      this.data = { ...this.data, ...patch };
-    },
-  };
+  return loadPageModule("../pages/me/index.ts");
 }
 
 function deferred() {

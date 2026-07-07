@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
+const { loadPageModule, mockModule } = require("./page-harness");
 const {
   memoirHomePrompt,
   memoirStoryTitle,
@@ -16,90 +17,42 @@ function loadHomePage({
   launchStateExports = {},
   accessibilityExports = {},
 } = {}) {
-  const authPath = require.resolve("../services/auth.ts");
-  const voiceApiPath = require.resolve("../services/memoir-voice-api.ts");
-  const voiceAuthorizationPath = require.resolve("../services/voice-authorization.ts");
-  const launchStatePath = require.resolve("../services/home-launch-state.ts");
-  const accessibilityPath = require.resolve("../services/accessibility-settings.ts");
-  const homePath = require.resolve("../pages/home/index.ts");
-  delete require.cache[authPath];
-  delete require.cache[voiceApiPath];
-  delete require.cache[voiceAuthorizationPath];
-  delete require.cache[launchStatePath];
-  delete require.cache[accessibilityPath];
-  delete require.cache[homePath];
-  require.cache[authPath] = {
-    id: authPath,
-    filename: authPath,
-    loaded: true,
-    exports: {
-      getMemoirIdentity: async () => {
-        throw new Error("getMemoirIdentity was not mocked");
-      },
-      logoutBackendSession: async () => {},
-      ...authExports,
+  mockModule("../services/auth.ts", {
+    getMemoirIdentity: async () => {
+      throw new Error("getMemoirIdentity was not mocked");
     },
-  };
-  require.cache[voiceApiPath] = {
-    id: voiceApiPath,
-    filename: voiceApiPath,
-    loaded: true,
-    exports: {
-      createMemoirVoiceSession: async () => {
-        throw new Error("createMemoirVoiceSession was not mocked");
-      },
-      listMemoirVoiceTranscripts: async () => ({ items: [], total: 0, limit: 1, offset: 0 }),
-      ...voiceApiExports,
+    logoutBackendSession: async () => {},
+    ...authExports,
+  });
+  mockModule("../services/memoir-voice-api.ts", {
+    createMemoirVoiceSession: async () => {
+      throw new Error("createMemoirVoiceSession was not mocked");
     },
-  };
-  require.cache[voiceAuthorizationPath] = {
-    id: voiceAuthorizationPath,
-    filename: voiceAuthorizationPath,
-    loaded: true,
-    exports: {
-      readVoiceAuthorizationConsent: () => true,
-      saveVoiceAuthorizationConsent: (agreed = true) => ({
-        agreed,
-        version: "test",
-        agreedAt: "2026-06-18T00:00:00.000Z",
-      }),
-      syncVoiceAuthorizationConsent: async () => ({ id: "consent-1" }),
-      VOICE_AUTHORIZATION_PAGE_URL: "/pages/voice-authorization/index",
-      ...voiceAuthorizationExports,
-    },
-  };
-  require.cache[launchStatePath] = {
-    id: launchStatePath,
-    filename: launchStatePath,
-    loaded: true,
-    exports: {
-      dismissHomeLaunch: () => {},
-      resolveHomeLaunch: () => "none",
-      ...launchStateExports,
-    },
-  };
-  require.cache[accessibilityPath] = {
-    id: accessibilityPath,
-    filename: accessibilityPath,
-    loaded: true,
-    exports: {
-      readLargeTextEnabled: () => false,
-      ...accessibilityExports,
-    },
-  };
+    listMemoirVoiceTranscripts: async () => ({ items: [], total: 0, limit: 1, offset: 0 }),
+    ...voiceApiExports,
+  });
+  mockModule("../services/voice-authorization.ts", {
+    readVoiceAuthorizationConsent: () => true,
+    saveVoiceAuthorizationConsent: (agreed = true) => ({
+      agreed,
+      version: "test",
+      agreedAt: "2026-06-18T00:00:00.000Z",
+    }),
+    syncVoiceAuthorizationConsent: async () => ({ id: "consent-1" }),
+    VOICE_AUTHORIZATION_PAGE_URL: "/pages/voice-authorization/index",
+    ...voiceAuthorizationExports,
+  });
+  mockModule("../services/home-launch-state.ts", {
+    dismissHomeLaunch: () => {},
+    resolveHomeLaunch: () => "none",
+    ...launchStateExports,
+  });
+  mockModule("../services/accessibility-settings.ts", {
+    readLargeTextEnabled: () => false,
+    ...accessibilityExports,
+  });
 
-  let page = null;
-  const previousPage = global.Page;
-  global.Page = (definition) => {
-    page = definition;
-  };
-  const mod = require(homePath);
-  if (previousPage === undefined) {
-    delete global.Page;
-  } else {
-    global.Page = previousPage;
-  }
-  return { mod, page };
+  return loadPageModule("../pages/home/index.ts");
 }
 
 test("mini program opens on the browseable home tab", () => {
