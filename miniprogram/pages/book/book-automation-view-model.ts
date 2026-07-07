@@ -1,5 +1,6 @@
 import type { MemoirAutomationEvent } from "../../domain/voice-chat";
 import { formatBeijingDateTimeShort } from "../../services/time";
+import { createdAtTime, trimText } from "./book-view-model-utils";
 
 export interface BookAutomationEventView {
   id: string;
@@ -39,15 +40,6 @@ export interface BookAutomationEventDetailView {
   chapterText: string;
   metaText: string;
   previewText: string;
-}
-
-function trimText(value: string): string {
-  return value.trim();
-}
-
-function createdAtTime(value: string): number {
-  const timestamp = Date.parse(value);
-  return Number.isFinite(timestamp) ? timestamp : 0;
 }
 
 function automationEventTitle(event: MemoirAutomationEvent): string {
@@ -506,4 +498,3 @@ export function buildAutomationEventViews(
     });
   return sourceGroup ? [sourceGroup, ...regularViews] : regularViews;
 }
-

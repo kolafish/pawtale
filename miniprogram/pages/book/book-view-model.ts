@@ -24,6 +24,7 @@ import {
 } from "../../services/memoir-book-sources";
 import { formatBeijingDateTimeShort } from "../../services/time";
 import type { BookAutomationEventView } from "./book-automation-view-model";
+import { createdAtTime, trimText } from "./book-view-model-utils";
 
 export {
   uniqueSourceRefs,
@@ -35,10 +36,10 @@ export type {
   BookAutomationEventView,
 } from "./book-automation-view-model";
 export { buildAutomationEventViews } from "./book-automation-view-model";
+export { trimText } from "./book-view-model-utils";
 
 export type BookStage = "empty" | "plan_draft" | "drafting";
 
-const TIMEZONE_OFFSET_RE = /(?:[zZ]|[+-]\d{2}:?\d{2})$/;
 export const NEW_CHAPTER_PICKER_VALUE = "__new_chapter__";
 export const BOOK_EXPORT_LAYOUT_OPTIONS: BookExportLayoutOptionView[] = [
   {
@@ -347,10 +348,6 @@ export interface BookData {
   automationEventExpandedTargets: Record<string, boolean>;
   automationEventLoading: boolean;
   automationEventError: string;
-}
-
-export function trimText(value: string): string {
-  return value.trim();
 }
 
 export function positiveFiniteSeconds(value: number | null | undefined): number {
@@ -974,16 +971,6 @@ export function sourceCoverageData(
       : `${uncoveredSourceCount} 条待收录`,
     uncoveredSources,
   };
-}
-
-function createdAtTime(value: string): number {
-  const text = value.trim();
-  if (!text) {
-    return 0;
-  }
-  const normalized = TIMEZONE_OFFSET_RE.test(text) ? text : `${text}Z`;
-  const time = new Date(normalized).getTime();
-  return Number.isFinite(time) ? time : 0;
 }
 
 export function buildUncoveredSourceViews(
