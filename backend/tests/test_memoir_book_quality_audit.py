@@ -480,7 +480,10 @@ async def test_book_quality_audit_job_records_semantic_event_by_default(client, 
         }
     ])
     monkeypatch.setattr("app.services.memoir.chapter_cards.get_ai_service", lambda ai_model=None: chapter_ai)
-    monkeypatch.setattr("app.services.memoir.book_quality_audit.get_ai_service", lambda ai_model=None: semantic_ai)
+    monkeypatch.setattr(
+        "app.services.memoir.book_quality_audit_semantic.get_ai_service",
+        lambda ai_model=None: semantic_ai,
+    )
 
     job = await schedule_project_quality_audit(
         test_db,
@@ -524,7 +527,7 @@ async def test_book_quality_audit_job_can_disable_semantic_audit(client, test_db
         raise AssertionError("semantic audit should not request AI when disabled")
 
     monkeypatch.setattr("app.services.memoir.chapter_cards.get_ai_service", fail_get_ai_service)
-    monkeypatch.setattr("app.services.memoir.book_quality_audit.get_ai_service", fail_get_ai_service)
+    monkeypatch.setattr("app.services.memoir.book_quality_audit_semantic.get_ai_service", fail_get_ai_service)
 
     job = await schedule_project_quality_audit(
         test_db,
