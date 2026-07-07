@@ -12,6 +12,7 @@ import {
 interface SpeakerLineView {
   id: string;
   text: string;
+  sourceText?: string;
   lineClass: string;
   textClass: string;
   previewEnabled: boolean;
@@ -114,6 +115,12 @@ interface LineTouchEvent {
   };
   touches?: TouchPoint[];
   changedTouches?: TouchPoint[];
+}
+
+interface ComparableSpeechChar {
+  char: string;
+  start: number;
+  end: number;
 }
 
 const HISTORY_PREVIEW_HOLD_MS = 160;
@@ -315,6 +322,7 @@ function finalLineFromSpeakerEvent(
   return {
     id: fallbackId,
     text: incrementalText,
+    sourceText: incrementalText,
     lineClass: "line-item history",
     textClass: "line-text history",
     previewEnabled: true,
@@ -414,26 +422,126 @@ function historyLinePreview(
   };
 }
 
-function comparableSpeechText(text: string): string {
-  return text.replace(/\s+/g, "").trim();
+function isComparableSpeechChar(char: string): boolean {
+  return /[0-9A-Za-z\u3400-\u9fff]/.test(char);
 }
 
-function shouldClearActivePartialForFinal(
+function comparableSpeechChars(text: string): ComparableSpeechChar[] {
+  const chars: ComparableSpeechChar[] = [];
+  let offset = 0;
+  for (const char of text) {
+    const start = offset;
+    offset += char.length;
+    if (isComparableSpeechChar(char)) {
+      chars.push({
+        char: char.toLowerCase(),
+        start,
+        end: offset,
+      });
+    }
+  }
+  return chars;
+}
+
+function comparableSpeechText(text: string): string {
+  return comparableSpeechChars(text).map((item) => item.char).join("");
+}
+
+function trimSpeechBoundary(text: string): string {
+  return text
+    .trim()
+    .replace(/^[，。？！、；：,.?!;:]+/, "")
+    .trim();
+}
+
+function isSpeechBoundaryChar(char: string): boolean {
+  return /[\s，。？！、；：,.?!;:]/.test(char);
+}
+
+function consumeFollowingSpeechBoundary(text: string, offset: number): number {
+  let nextOffset = offset;
+  while (nextOffset < text.length) {
+    const char = Array.from(text.slice(nextOffset))[0] || "";
+    if (!char || !isSpeechBoundaryChar(char)) {
+      break;
+    }
+    nextOffset += char.length;
+  }
+  return nextOffset;
+}
+
+function removeFinalTextFromPartialText(partialText: string, finalText: string): string {
+  const cleanPartial = partialText.trim();
+  const partialChars = comparableSpeechChars(cleanPartial);
+  const finalKey = comparableSpeechText(finalText);
+  if (partialChars.length === 0) {
+    return "";
+  }
+  if (!finalKey) {
+    return cleanPartial;
+  }
+  const partialKey = partialChars.map((item) => item.char).join("");
+  if (finalKey === partialKey || finalKey.endsWith(partialKey)) {
+    return "";
+  }
+  const matchIndex = partialKey.indexOf(finalKey);
+  if (matchIndex < 0) {
+    return cleanPartial;
+  }
+  const matchEndsPartial = matchIndex + finalKey.length >= partialKey.length;
+  const matchStartsPartial = matchIndex === 0;
+  if (!matchStartsPartial && !matchEndsPartial && finalKey.length < 4) {
+    return cleanPartial;
+  }
+  const start = partialChars[matchIndex].start;
+  const end = consumeFollowingSpeechBoundary(
+    cleanPartial,
+    partialChars[matchIndex + finalKey.length - 1].end,
+  );
+  return trimSpeechBoundary(`${cleanPartial.slice(0, start)}${cleanPartial.slice(end)}`);
+}
+
+function removeConversationTextFromUnknownPartial(
+  partialText: string,
+  conversationLines: ConversationLineView[],
+): string {
+  return conversationLines
+    .slice()
+    .reverse()
+    .reduce((text, line) => {
+      const withoutSource = removeFinalTextFromPartialText(text, line.sourceText || line.text);
+      if (line.sourceText && line.sourceText !== line.text) {
+        return removeFinalTextFromPartialText(withoutSource, line.text);
+      }
+      return withoutSource;
+    }, partialText.trim());
+}
+
+function activePartialAfterFinal(
   activePartial: ActivePartialView,
   finalText: string,
-): boolean {
+): ActivePartialView {
   if (!activePartial.visible) {
-    return true;
+    return EMPTY_ACTIVE_PARTIAL;
   }
   if (activePartial.speakerId && activePartial.speakerId !== "speaker_unknown") {
-    return true;
+    return EMPTY_ACTIVE_PARTIAL;
   }
-  const activeText = comparableSpeechText(activePartial.text);
-  const text = comparableSpeechText(finalText);
-  if (!activeText) {
-    return true;
+  const nextText = removeFinalTextFromPartialText(activePartial.text, finalText);
+  if (!nextText) {
+    return EMPTY_ACTIVE_PARTIAL;
   }
-  return text === activeText || text.endsWith(activeText);
+  if (nextText === activePartial.text.trim()) {
+    return activePartial;
+  }
+  const partialIsLong = nextText.length > 90;
+  return {
+    ...activePartial,
+    text: nextText,
+    partialScrollClass: partialIsLong ? "partial-scroll long" : "partial-scroll",
+    partialScrollTarget: partialIsLong ? activePartial.partialScrollTarget : "",
+    partialScrollTop: partialIsLong ? activePartial.partialScrollTop : 0,
+  };
 }
 
 function debugSpeakerProofreadContextLines(
@@ -842,9 +950,7 @@ Page<DebugSpeakerPageData, {
       partialScrollClass = "partial-scroll";
       partialScrollTarget = "";
       partialScrollTop = 0;
-      activePartial = shouldClearActivePartialForFinal(this.data.activePartial, text)
-        ? EMPTY_ACTIVE_PARTIAL
-        : this.data.activePartial;
+      activePartial = activePartialAfterFinal(this.data.activePartial, text);
       if (activePartial.visible) {
         conversationScrollTarget = "active-partial-card";
       }
@@ -866,6 +972,9 @@ Page<DebugSpeakerPageData, {
         existing.cumulativeFinalEndMs,
       );
       partialText = incrementalSpeakerText(text, existing.cumulativeFinalText, sameCumulativeRun);
+      if (speakerId === "speaker_unknown") {
+        partialText = removeConversationTextFromUnknownPartial(partialText, conversationLines);
+      }
       const partialIsLong = partialText.length > 90;
       partialScrollClass = partialIsLong ? "partial-scroll long" : "partial-scroll";
       if (partialIsLong) {
@@ -1125,4 +1234,6 @@ export {
   pagePatch as debugSpeakerPagePatch,
   debugSpeakerPageClass,
   debugSpeakerProofreadContextLines,
+  removeFinalTextFromPartialText,
+  removeConversationTextFromUnknownPartial,
 };
