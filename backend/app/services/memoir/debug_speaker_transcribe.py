@@ -22,6 +22,7 @@ DebugSpeakerTranscriberFactory = Callable[[], StreamingASRClient]
 DEBUG_SPEAKER_FINISH_DRAIN_TIMEOUT_SECONDS = 10.0
 DEBUG_SPEAKER_PROOFREAD_CONTEXT_LIMIT = 8
 DEBUG_SPEAKER_PROOFREAD_CONTEXT_TEXT_LIMIT = 160
+LIVE_PARTIAL_SEGMENT_KEY = "live:current"
 
 
 @dataclass(frozen=True)
@@ -67,11 +68,15 @@ class DebugSpeakerTranscribeSession:
         *,
         client: DebugSpeakerTranscribeClient,
         transcriber_factory: DebugSpeakerTranscriberFactory,
+        live_transcriber_factory: DebugSpeakerTranscriberFactory | None = None,
     ) -> None:
         self.client = client
         self.transcriber_factory = transcriber_factory
+        self.live_transcriber_factory = live_transcriber_factory
         self._transcriber: StreamingASRClient | None = None
+        self._live_transcriber: StreamingASRClient | None = None
         self._asr_task: asyncio.Task[None] | None = None
+        self._live_asr_task: asyncio.Task[None] | None = None
         self._state = "ready"
         self._terminal_error = ""
         self._terminal_stop = asyncio.Event()
@@ -79,6 +84,8 @@ class DebugSpeakerTranscribeSession:
         self._segment_ids_by_key: dict[str, str] = {}
         self._segment_text_by_key: dict[str, str] = {}
         self._final_segment_keys: set[str] = set()
+        self._confirmed_final_keys: list[str] = []
+        self._confirmed_text_by_key: dict[str, str] = {}
         self._sent_missing_speaker_labels_status = False
         self._sent_available_speaker_labels_status = False
 
@@ -152,6 +159,10 @@ class DebugSpeakerTranscribeSession:
         self._transcriber = self.transcriber_factory()
         await self._transcriber.start()
         self._asr_task = asyncio.create_task(self._forward_asr_events())
+        if self.live_transcriber_factory is not None:
+            self._live_transcriber = self.live_transcriber_factory()
+            await self._live_transcriber.start()
+            self._live_asr_task = asyncio.create_task(self._forward_live_asr_events())
         await self.client.send_json(self._event("session.started"))
 
     async def _send_audio_frame(self, message: dict[str, Any]) -> None:
@@ -173,24 +184,33 @@ class DebugSpeakerTranscribeSession:
             await self._mark_terminal_error("audio_frame_too_large")
             return
         await self._transcriber.send_audio(audio)
+        if self._live_transcriber is not None:
+            await self._live_transcriber.send_audio(audio)
 
     async def _finish_audio(self) -> None:
         if self._state != "listening" or self._transcriber is None:
             return
         self._state = "finishing"
         await self._transcriber.finish()
-        if self._asr_task is not None:
-            try:
-                await asyncio.wait_for(
-                    asyncio.shield(self._asr_task),
-                    timeout=DEBUG_SPEAKER_FINISH_DRAIN_TIMEOUT_SECONDS,
-                )
-            except asyncio.TimeoutError:
-                await self._mark_terminal_error("debug_speaker_finish_timeout")
+        if self._live_transcriber is not None:
+            await self._live_transcriber.finish()
+        await self._drain_asr_task(self._asr_task)
+        await self._drain_asr_task(self._live_asr_task)
         if not self._terminal_error:
             self._state = "ready"
             await self.client.send_json(self._event("audio.ended"))
         await self._close_transcriber()
+
+    async def _drain_asr_task(self, task: asyncio.Task[None] | None) -> None:
+        if task is None:
+            return
+        try:
+            await asyncio.wait_for(
+                asyncio.shield(task),
+                timeout=DEBUG_SPEAKER_FINISH_DRAIN_TIMEOUT_SECONDS,
+            )
+        except asyncio.TimeoutError:
+            await self._mark_terminal_error("debug_speaker_finish_timeout")
 
     async def _forward_asr_events(self) -> None:
         if self._transcriber is None:
@@ -198,6 +218,17 @@ class DebugSpeakerTranscribeSession:
         try:
             async for event in self._transcriber.events():
                 await self._send_asr_event(event)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            await self._mark_terminal_error(str(exc))
+
+    async def _forward_live_asr_events(self) -> None:
+        if self._live_transcriber is None:
+            return
+        try:
+            async for event in self._live_transcriber.events():
+                await self._send_live_asr_event(event)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -226,6 +257,46 @@ class DebugSpeakerTranscribeSession:
                     end_ms=segment.end_ms,
                     confidence=segment.confidence,
                     provider_event_type=event.type,
+                    provider_payload=segment.provider_payload or event.raw,
+                )
+            )
+            if event_type == "speaker.final":
+                self._remember_confirmed_segment(segment)
+
+    async def _send_live_asr_event(self, event: StreamingASREvent) -> None:
+        if event.type == "error":
+            await self._mark_terminal_error(event.error or "debug_speaker_live_provider_error")
+            return
+        text = live_text_after_confirmed_prefix(
+            normalize_memoir_asr_text(event.text).strip(),
+            self._confirmed_text(),
+        )
+        if not text:
+            return
+        segments = self._dedupe_segments([
+            DebugSpeakerSegment(
+                segment_id="live_current",
+                speaker_id="speaker_unknown",
+                text=text,
+                stable_key=LIVE_PARTIAL_SEGMENT_KEY,
+                force_partial=True,
+                start_ms=event.start_ms,
+                end_ms=event.end_ms,
+                provider_payload=event.raw,
+            )
+        ], event_type="partial")
+        for segment in segments:
+            await self.client.send_json(
+                self._event(
+                    "speaker.partial",
+                    segment_id=segment.segment_id,
+                    speaker_id=segment.speaker_id,
+                    speaker_gender=segment.speaker_gender,
+                    text=segment.text,
+                    start_ms=segment.start_ms,
+                    end_ms=segment.end_ms,
+                    confidence=segment.confidence,
+                    provider_event_type=f"live.{event.type}",
                     provider_payload=segment.provider_payload or event.raw,
                 )
             )
@@ -344,6 +415,21 @@ class DebugSpeakerTranscribeSession:
         self._next_segment_index += 1
         return segment_id
 
+    def _remember_confirmed_segment(self, segment: DebugSpeakerSegment) -> None:
+        key = segment.stable_key
+        if not key:
+            return
+        if key not in self._confirmed_text_by_key:
+            self._confirmed_final_keys.append(key)
+        self._confirmed_text_by_key[key] = segment.text
+
+    def _confirmed_text(self) -> str:
+        return "".join(
+            self._confirmed_text_by_key[key]
+            for key in self._confirmed_final_keys
+            if key in self._confirmed_text_by_key
+        )
+
     async def _send_error(self, error: str, detail: dict[str, Any] | None = None) -> None:
         payload = self._event("session.error", error=error)
         if detail:
@@ -366,9 +452,17 @@ class DebugSpeakerTranscribeSession:
             with contextlib.suppress(asyncio.CancelledError):
                 await self._asr_task
         self._asr_task = None
+        if self._live_asr_task is not None and not self._live_asr_task.done():
+            self._live_asr_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._live_asr_task
+        self._live_asr_task = None
         if self._transcriber is not None:
             await self._transcriber.close()
             self._transcriber = None
+        if self._live_transcriber is not None:
+            await self._live_transcriber.close()
+            self._live_transcriber = None
 
     def _event(self, event_type: str, **payload: Any) -> dict[str, Any]:
         return {
@@ -595,6 +689,22 @@ def _fallback_segment_key(
 
 def _text_key(text: str) -> str:
     return "".join(str(text).split()).lower()[:120]
+
+
+def live_text_after_confirmed_prefix(text: str, confirmed_prefix: str) -> str:
+    clean_text = text.strip()
+    clean_prefix = confirmed_prefix.strip()
+    if not clean_text or not clean_prefix:
+        return clean_text
+    if clean_text.startswith(clean_prefix):
+        return clean_text[len(clean_prefix):].strip()
+    if clean_prefix.startswith(clean_text) or clean_prefix.endswith(clean_text):
+        return ""
+    max_overlap = min(len(clean_text), len(clean_prefix))
+    for size in range(max_overlap, 0, -1):
+        if clean_prefix.endswith(clean_text[:size]):
+            return clean_text[size:].strip()
+    return clean_text
 
 
 def _live_tail_segment_from_base(

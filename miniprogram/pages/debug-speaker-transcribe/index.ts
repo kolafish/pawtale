@@ -414,6 +414,29 @@ function historyLinePreview(
   };
 }
 
+function comparableSpeechText(text: string): string {
+  return text.replace(/\s+/g, "").trim();
+}
+
+function shouldClearActivePartialForFinal(
+  activePartial: ActivePartialView,
+  finalSpeakerId: string,
+  finalText: string,
+): boolean {
+  if (!activePartial.visible) {
+    return true;
+  }
+  if (activePartial.speakerId && activePartial.speakerId !== "speaker_unknown") {
+    return true;
+  }
+  const activeText = comparableSpeechText(activePartial.text);
+  const text = comparableSpeechText(finalText);
+  if (!activeText) {
+    return true;
+  }
+  return text === activeText || text.endsWith(activeText);
+}
+
 function debugSpeakerProofreadContextLines(
   conversationLines: ConversationLineView[],
   limit = 6,
@@ -819,7 +842,9 @@ Page<DebugSpeakerPageData, {
       partialScrollClass = "partial-scroll";
       partialScrollTarget = "";
       partialScrollTop = 0;
-      activePartial = EMPTY_ACTIVE_PARTIAL;
+      activePartial = shouldClearActivePartialForFinal(this.data.activePartial, speakerId, text)
+        ? EMPTY_ACTIVE_PARTIAL
+        : this.data.activePartial;
       if (text.trim()) {
         cumulativeFinalText = text.trim();
         cumulativeFinalStartMs = eventStartMs(event);

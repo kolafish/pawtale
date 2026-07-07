@@ -19,7 +19,10 @@ from app.services.memoir.debug_speaker_transcribe import (
     DebugSpeakerTranscribeSession,
     proofread_debug_speaker_transcript_text,
 )
-from app.services.memoir.streaming_asr import create_debug_speaker_streaming_asr_client
+from app.services.memoir.streaming_asr import (
+    create_debug_speaker_streaming_asr_client,
+    create_volc_streaming_asr_client,
+)
 from app.services.memoir.voice_gateway_capacity import VoiceGatewayCapacityError
 
 
@@ -72,6 +75,10 @@ async def mobile_memoir_debug_speaker_transcribe_gateway(
             transcriber_factory=lambda: create_debug_speaker_streaming_asr_client(
                 current_user_id,
                 debug_session_id,
+            ),
+            live_transcriber_factory=lambda: create_volc_streaming_asr_client(
+                current_user_id,
+                f"{debug_session_id}-live",
             ),
         )
         await session.run()

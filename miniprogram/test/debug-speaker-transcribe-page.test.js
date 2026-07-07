@@ -124,6 +124,52 @@ test("debug speaker page shows live tail above finalized utterance", () => {
   assert.equal(context.data.showEmpty, false);
 });
 
+test("debug speaker page keeps live unknown partial when an earlier speaker final arrives", () => {
+  const { page } = loadDebugSpeakerPage();
+  const context = pageContext(page);
+
+  page.handleSpeakerEvent.call(context, {
+    type: "speaker.partial",
+    speaker_id: "speaker_unknown",
+    segment_id: "live-current",
+    text: "第一句已经稳定。第二句还在实时说",
+    provider_event_type: "live.partial",
+  });
+  page.handleSpeakerEvent.call(context, {
+    type: "speaker.final",
+    speaker_id: "speaker_1",
+    segment_id: "seg-1",
+    text: "第一句已经稳定。",
+    start_ms: 0,
+    end_ms: 1800,
+  });
+
+  assert.equal(context.data.conversationLines.length, 1);
+  assert.equal(context.data.activePartial.visible, true);
+  assert.equal(context.data.activePartial.text, "第一句已经稳定。第二句还在实时说");
+});
+
+test("debug speaker page clears live unknown partial when final text covers it", () => {
+  const { page } = loadDebugSpeakerPage();
+  const context = pageContext(page);
+
+  page.handleSpeakerEvent.call(context, {
+    type: "speaker.partial",
+    speaker_id: "speaker_unknown",
+    segment_id: "live-current",
+    text: "第二句已经稳定。",
+    provider_event_type: "live.partial",
+  });
+  page.handleSpeakerEvent.call(context, {
+    type: "speaker.final",
+    speaker_id: "speaker_2",
+    segment_id: "seg-2",
+    text: "第二句已经稳定。",
+  });
+
+  assert.equal(context.data.activePartial.visible, false);
+});
+
 test("debug speaker page keeps transcript area high after recording stops", () => {
   const { page } = loadDebugSpeakerPage();
   const context = pageContext(page);
