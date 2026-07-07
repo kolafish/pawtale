@@ -22,6 +22,7 @@ from app.schemas.memoir_book import (
     MemoirBookSourceRouteResponse,
 )
 from app.schemas.memoir_voice import MemoirAutomationEventResponse
+from app.services.memoir import automation_event_metadata
 from app.services.memoir import automation_events
 from app.services.memoir import book_quality_audit
 from app.services.memoir import book_plans
@@ -191,7 +192,7 @@ async def _record_assignment_events(
             confidence=confidence,
             metadata_json={
                 "source": "auto_assignment",
-                automation_events.EVENT_SIGNATURE_KEY: (
+                automation_event_metadata.EVENT_SIGNATURE_KEY: (
                     f"source_assigned:{chapter_id}:{','.join(sorted(utterance_ids))}"
                 ),
                 "confidence_threshold": threshold,

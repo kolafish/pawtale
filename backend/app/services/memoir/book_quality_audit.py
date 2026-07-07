@@ -28,6 +28,7 @@ from app.schemas.memoir_book import (
     MemoirBookQualityAuditRunResponse,
 )
 from app.schemas.memoir_voice import MemoirAutomationEventResponse, MemoirProjectProgressChapterResponse
+from app.services.memoir import automation_event_metadata
 from app.services.memoir import automation_events
 from app.services.memoir import progress_snapshot
 from app.services.ai_factory import get_ai_service
@@ -487,7 +488,7 @@ def _event_metadata(
         "source": "book_quality_audit",
         "snapshot_id": snapshot_id,
         "snapshot_engine": snapshot_engine,
-        automation_events.EVENT_SIGNATURE_KEY: event_signature,
+        automation_event_metadata.EVENT_SIGNATURE_KEY: event_signature,
         "overall_status": overall_status,
         "pending_utterance_count": pending_utterance_count,
         "next_actions": next_actions,

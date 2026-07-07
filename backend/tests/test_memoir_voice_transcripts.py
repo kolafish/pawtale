@@ -32,7 +32,7 @@ from app.models.memoir import (
     MemoirVoiceUtterance,
 )
 from app.services.memoir import source_cards
-from app.services.memoir import automation_events
+from app.services.memoir import automation_event_resolution
 from app.services.memoir.asr_text_normalization import normalize_memoir_asr_text
 from app.services.memoir.voice_transcripts import (
     MemoirTranscriptCleanupContext,
@@ -716,7 +716,7 @@ async def test_cleanup_dangling_automation_events_hides_deleted_sources_and_keep
     test_db.add_all([partial_event, dangling_event, confirmed_event])
     await test_db.commit()
 
-    result = await automation_events.cleanup_dangling_automation_event_utterances(
+    result = await automation_event_resolution.cleanup_dangling_automation_event_utterances(
         test_db,
         project_id=project_id,
     )

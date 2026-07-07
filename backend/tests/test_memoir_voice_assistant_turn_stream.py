@@ -13,6 +13,7 @@ from app.domain.memoir.types import (
 )
 from app.models.memoir import AudioFile, MemoirBookPlanChapter, MemoirChatMessage
 from app.services.ai_streaming import AITextStreamChunk
+from app.services.memoir import automation_event_metadata
 from app.services.memoir import automation_events
 from app.services.memoir.semantic_state import upsert_book_quality_audit_snapshot, upsert_chapter_card
 from app.services.memoir.tts_alignment import TTSAlignmentSegment
@@ -314,9 +315,9 @@ async def test_voice_assistant_turn_progress_prompt_uses_recent_automation_event
     assert assistant_message.metadata_json["progress_voice_selected_event_ids"] == [event.id]
     assert assistant_message.metadata_json["progress_spoken_text"] == "刚才新增的1条讲述已补进《外婆家的院子》。"
     await test_db.refresh(event)
-    assert event.metadata_json[automation_events.VOICE_SELECTED_SESSION_ID_KEY] == created["session"]["id"]
-    assert event.metadata_json[automation_events.VOICE_SELECTED_MESSAGE_ID_KEY] == completed["message_id"]
-    assert automation_events.VOICE_PLAYED_AT_KEY not in event.metadata_json
+    assert event.metadata_json[automation_event_metadata.VOICE_SELECTED_SESSION_ID_KEY] == created["session"]["id"]
+    assert event.metadata_json[automation_event_metadata.VOICE_SELECTED_MESSAGE_ID_KEY] == completed["message_id"]
+    assert automation_event_metadata.VOICE_PLAYED_AT_KEY not in event.metadata_json
 
 
 async def test_voice_assistant_turn_strips_host_label_after_progress_prefix(
@@ -498,10 +499,10 @@ async def test_voice_assistant_turn_speaks_grouped_source_assignment_progress(
 
     await test_db.refresh(first_event)
     await test_db.refresh(second_event)
-    assert first_event.metadata_json[automation_events.VOICE_SELECTED_MESSAGE_ID_KEY] == completed["message_id"]
-    assert second_event.metadata_json[automation_events.VOICE_SELECTED_MESSAGE_ID_KEY] == completed["message_id"]
-    assert automation_events.VOICE_PLAYED_AT_KEY not in first_event.metadata_json
-    assert automation_events.VOICE_PLAYED_AT_KEY not in second_event.metadata_json
+    assert first_event.metadata_json[automation_event_metadata.VOICE_SELECTED_MESSAGE_ID_KEY] == completed["message_id"]
+    assert second_event.metadata_json[automation_event_metadata.VOICE_SELECTED_MESSAGE_ID_KEY] == completed["message_id"]
+    assert automation_event_metadata.VOICE_PLAYED_AT_KEY not in first_event.metadata_json
+    assert automation_event_metadata.VOICE_PLAYED_AT_KEY not in second_event.metadata_json
 
 
 async def test_voice_assistant_turn_skips_voice_played_automation_event(
@@ -522,8 +523,8 @@ async def test_voice_assistant_turn_skips_voice_played_automation_event(
         utterance_ids=[created["utterance_id"]],
         summary_text="这条自动补写记录不应该重复播报。",
         metadata_json={
-            automation_events.VOICE_PLAYED_AT_KEY: "2026-06-23T12:00:00+00:00",
-            automation_events.VOICE_PLAYED_SESSION_ID_KEY: "previous-session",
+            automation_event_metadata.VOICE_PLAYED_AT_KEY: "2026-06-23T12:00:00+00:00",
+            automation_event_metadata.VOICE_PLAYED_SESSION_ID_KEY: "previous-session",
         },
     )
     await test_db.commit()

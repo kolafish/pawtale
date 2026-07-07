@@ -40,7 +40,7 @@ from app.schemas.memoir_voice import (
 )
 from app.services.ai_factory import get_ai_service
 from app.services.ai_types import AITextClient
-from app.services.memoir import automation_events as memoir_automation_events
+from app.services.memoir import automation_event_resolution
 from app.services.memoir import source_cards
 from app.services.memoir.asr_text_normalization import normalize_memoir_asr_text
 from app.services.memoir.source_disposition import clear_source_route_disposition
@@ -988,7 +988,7 @@ async def delete_voice_transcript(
         delete_message = other_utterances == 0 and child_messages == 0
         clear_message = other_utterances == 0 and child_messages > 0
 
-    await memoir_automation_events.cleanup_automation_events_for_deleted_utterances(
+    await automation_event_resolution.cleanup_automation_events_for_deleted_utterances(
         db,
         project_id=project_id,
         utterance_ids=[utterance.id],

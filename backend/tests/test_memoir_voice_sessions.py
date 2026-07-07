@@ -17,6 +17,7 @@ from app.models.memoir import (
     MemoirVoiceSession,
     MemoirVoiceUtterance,
 )
+from app.services.memoir import automation_event_metadata
 from app.services.memoir import automation_events
 from app.services.memoir import voice_sessions as memoir_voice_sessions
 from app.services.memoir.tts_alignment import TTSAlignmentSegment
@@ -389,9 +390,9 @@ async def test_mobile_memoir_project_progress_snapshot_counts_book_state(client,
         confidence=0.9,
     )
     event.metadata_json = {
-        automation_events.VOICE_PLAYED_AT_KEY: "2026-06-23T12:00:00+00:00",
-        automation_events.VOICE_PLAYED_SESSION_ID_KEY: "voice-session-1",
-        automation_events.ROUTES_KEY: [
+        automation_event_metadata.VOICE_PLAYED_AT_KEY: "2026-06-23T12:00:00+00:00",
+        automation_event_metadata.VOICE_PLAYED_SESSION_ID_KEY: "voice-session-1",
+        automation_event_metadata.ROUTES_KEY: [
             {
                 "utterance_id": first["utterance_id"],
                 "source_index": 1,

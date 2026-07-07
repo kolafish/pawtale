@@ -31,7 +31,7 @@ from app.schemas.memoir_book import (
     MemoirBookPlanUpdateRequest,
 )
 from app.services.ai_types import AITextClient
-from app.services.memoir import automation_events as _automation_events
+from app.services.memoir import automation_event_resolution as _automation_event_resolution
 from app.services.memoir.access import load_memoir_project
 from app.services.memoir.book_auto_revision import (
     schedule_chapter_auto_revisions as _schedule_chapter_auto_revisions,
@@ -203,7 +203,7 @@ async def _replace_plan(
         assignment_reason="replace_book_plan",
     )
     if created_by == MemoirCreatedBy.USER:
-        await _automation_events.resolve_assigned_source_review_events(db, project_id=project_id)
+        await _automation_event_resolution.resolve_assigned_source_review_events(db, project_id=project_id)
     await db.commit()
     refreshed = await _load_plan(db, project_id)
     if not refreshed:
@@ -514,7 +514,7 @@ async def update_book_plan(
             assigned_by=MemoirChapterSourceAssignedBy.USER,
             assignment_reason="book_plan_update",
         )
-        await _automation_events.resolve_assigned_source_review_events(
+        await _automation_event_resolution.resolve_assigned_source_review_events(
             db,
             project_id=project_id,
             utterance_ids=sorted(newly_assigned_utterance_ids) if newly_assigned_utterance_ids else None,
@@ -614,7 +614,7 @@ async def apply_book_plan_structure_command(
             assigned_by=MemoirChapterSourceAssignedBy.USER,
             assignment_reason=req.type,
         )
-        await _automation_events.resolve_assigned_source_review_events(
+        await _automation_event_resolution.resolve_assigned_source_review_events(
             db,
             project_id=project_id,
             utterance_ids=[source.utterance_id] if source else None,
