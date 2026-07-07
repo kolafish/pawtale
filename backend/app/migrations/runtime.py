@@ -9,7 +9,6 @@ from app.migrations.git_sync import migrate_git_sync_schema
 from app.migrations.memoir_semantic import migrate_memoir_semantic_schema
 from app.migrations.memoir_voice import assert_memoir_voice_schema, migrate_memoir_voice_schema
 from app.migrations.runtime_base import assert_base_runtime_schema
-from app.migrations.runtime_legacy import migrate_legacy_runtime_schema
 
 
 async def migrate_runtime_schema(engine: AsyncEngine) -> dict[str, object]:
@@ -18,7 +17,6 @@ async def migrate_runtime_schema(engine: AsyncEngine) -> dict[str, object]:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
-    legacy = await migrate_legacy_runtime_schema(engine)
     auth = await migrate_auth_schema(engine)
     audit = await migrate_audit_schema(engine)
     git_sync = await migrate_git_sync_schema(engine)
@@ -26,7 +24,6 @@ async def migrate_runtime_schema(engine: AsyncEngine) -> dict[str, object]:
     memoir_semantic = await migrate_memoir_semantic_schema(engine)
     await assert_runtime_schema(engine)
     return {
-        "legacy": legacy,
         "auth": auth,
         "audit": audit,
         "git_sync": git_sync,
