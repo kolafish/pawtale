@@ -195,6 +195,68 @@ test("debug speaker page does not re-add finalized speaker text to cumulative un
   ]);
 });
 
+test("debug speaker page clears stale unknown preview when two ASR streams disagree on a short utterance", () => {
+  const { page } = loadDebugSpeakerPage();
+  const context = pageContext(page);
+  const liveText = "然后这道吗？应该就是第四道了哈。";
+
+  page.handleSpeakerEvent.call(context, {
+    type: "speaker.partial",
+    speaker_id: "speaker_unknown",
+    segment_id: "live-current",
+    text: liveText,
+    provider_event_type: "live.partial",
+  });
+
+  assert.equal(context.data.activePartial.visible, true);
+  assert.equal(context.data.activePartial.text, liveText);
+
+  page.handleSpeakerEvent.call(context, {
+    type: "speaker.final",
+    speaker_id: "speaker_2",
+    segment_id: "seg-2",
+    text: "现在应该是第八道了哈。",
+    start_ms: 44_000,
+    end_ms: 47_000,
+  });
+
+  assert.equal(context.data.conversationLines[0].text, "现在应该是第八道了哈。");
+  assert.equal(context.data.activePartial.visible, false);
+  assert.equal(context.data.conversationScrollTarget, "conversation-speaker_2-seg-2");
+
+  page.handleSpeakerEvent.call(context, {
+    type: "speaker.partial",
+    speaker_id: "speaker_unknown",
+    segment_id: "live-current",
+    text: liveText,
+    provider_event_type: "live.partial",
+  });
+
+  assert.equal(context.data.activePartial.visible, false);
+});
+
+test("debug speaker page keeps unrelated unknown preview when final text is not the same utterance", () => {
+  const { page } = loadDebugSpeakerPage();
+  const context = pageContext(page);
+
+  page.handleSpeakerEvent.call(context, {
+    type: "speaker.partial",
+    speaker_id: "speaker_unknown",
+    segment_id: "live-current",
+    text: "第五次现在还在继续说。",
+    provider_event_type: "live.partial",
+  });
+  page.handleSpeakerEvent.call(context, {
+    type: "speaker.final",
+    speaker_id: "speaker_2",
+    segment_id: "seg-2",
+    text: "第四次已经稳定了。",
+  });
+
+  assert.equal(context.data.activePartial.visible, true);
+  assert.equal(context.data.activePartial.text, "第五次现在还在继续说。");
+});
+
 test("debug speaker page keeps transcript area high after recording stops", () => {
   const { page } = loadDebugSpeakerPage();
   const context = pageContext(page);
