@@ -63,7 +63,7 @@ test("debug speaker page shows partial and final text in conversation flow", () 
   assert.equal(context.data.activePartial.visible, true);
   assert.equal(context.data.activePartial.speakerTitle, "说话人 1");
   assert.equal(context.data.activePartial.text, "你小时候住在哪里？");
-  assert.equal(context.data.conversationScrollTarget, "");
+  assert.equal(context.data.conversationScrollTarget, "active-partial-card");
   assert.equal(context.data.showEmpty, false);
   assert.equal(context.data.controlPanelClass, "control-panel compact");
   assert.equal(context.data.showFullControls, false);
@@ -90,7 +90,7 @@ test("debug speaker page shows partial and final text in conversation flow", () 
   assert.equal(context.data.conversationLines[0].metaText, "0:01-0:03 · 置信度 86%");
   assert.equal(context.data.conversationLines[0].lineClass, "line-item latest");
   assert.equal(context.data.conversationLines[0].textClass, "line-text latest");
-  assert.equal(context.data.conversationScrollTarget, "");
+  assert.equal(context.data.conversationScrollTarget, "conversation-speaker_2-seg-2");
   assert.equal(context.data.showEmpty, false);
   assert.equal(context.data.clearDisabled, false);
 });
@@ -147,6 +147,7 @@ test("debug speaker page keeps live unknown partial when an earlier speaker fina
   assert.equal(context.data.conversationLines.length, 1);
   assert.equal(context.data.activePartial.visible, true);
   assert.equal(context.data.activePartial.text, "第一句已经稳定。第二句还在实时说");
+  assert.equal(context.data.conversationScrollTarget, "active-partial-card");
 });
 
 test("debug speaker page clears live unknown partial when final text covers it", () => {
@@ -168,6 +169,7 @@ test("debug speaker page clears live unknown partial when final text covers it",
   });
 
   assert.equal(context.data.activePartial.visible, false);
+  assert.equal(context.data.conversationScrollTarget, "conversation-speaker_2-seg-2");
 });
 
 test("debug speaker page keeps transcript area high after recording stops", () => {

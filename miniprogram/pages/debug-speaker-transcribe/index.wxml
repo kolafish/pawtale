@@ -71,6 +71,8 @@
     wx:if="{{!showEmpty}}"
     class="conversation-scroll"
     scroll-y="{{true}}"
+    scroll-into-view="{{conversationScrollTarget}}"
+    scroll-with-animation="{{false}}"
   >
     <view wx:if="{{activePartial.visible}}" id="active-partial-card" class="partial-box active-partial">
       <view class="line-meta-row">
