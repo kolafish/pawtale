@@ -24,7 +24,6 @@ import {
 import {
   VoiceAssistantTurnRuntime,
 } from "../../services/voice-assistant-turn-runtime";
-import type { StreamingSpeechPlaybackFrameEvent } from "../../services/streaming-speech-playback";
 import {
   classifyVoiceClientConnectionError,
   type MemoirCaptureStats,
@@ -38,9 +37,14 @@ import {
   getMemoirVoiceSession,
   markMemoirAutomationEventsVoicePlayed,
 } from "../../services/memoir-voice-api";
-import { splitTextByAudioPlaybackProgress } from "../../services/tts-text-progress";
 import { readChatTTSSettings } from "../../services/tts-settings";
 import { canAutoStartListeningAfterTTS } from "../../services/voice-chat-auto-listen";
+import type { StreamingSpeechPlaybackFrameEvent } from "../../services/streaming-speech-playback";
+import {
+  streamingProgressPercent,
+  VoiceAssistantTTSProgressRuntime,
+  type VoiceAssistantTTSProgressPatch,
+} from "../../services/voice-assistant-tts-progress";
 import {
   readVoiceAuthorizationConsent,
   saveVoiceAuthorizationConsent,
@@ -51,7 +55,6 @@ import { ensureRecorderPrivacyAuthorization } from "../../services/wechat-privac
 import {
   assistantTranscriptState,
   canRequestFollowUp,
-  countTextChars,
   followUpSourceMessageId,
   latestAssistantMessageId,
   statusText,
@@ -129,7 +132,6 @@ const AUTO_STOP_SILENCE_MS = 3500;
 const AUTO_STOP_MIN_RECORDING_MS = 2000;
 const AUTO_LISTEN_NO_ANSWER_MS = 15000;
 const MAX_CONSECUTIVE_NO_ANSWER_PROMPTS = 2;
-const STREAMING_TTS_PROGRESS_HOLD_SECONDS = 0.2;
 const GUIDANCE_MODE_VALUES: readonly MemoirGuidanceMode[] = ["free_narration", "guided_interview"];
 const INTERVIEW_TYPE_VALUES: readonly MemoirInterviewType[] = ["ai_interview", "human_interview"];
 const SPEAKER_ROLE_VALUES: readonly MemoirSpeakerRole[] = ["narrator", "interviewer"];
@@ -156,12 +158,8 @@ definePage<VoiceChatData>()({
   assistantTurnQueueRunning: false,
   assistantAudioPrepareCount: 0,
   assistantStreamLineId: "",
-  assistantStreamingAudioStartSeconds: -1,
-  assistantStreamingAudioEndSeconds: 0,
-  assistantStreamingAudioDurationSeconds: 0,
   ttsPlayToken: 0,
-  ttsProgressTimer: null as number | null,
-  ttsProgressStartedAtMs: 0,
+  ttsProgress: new VoiceAssistantTTSProgressRuntime(),
   ttsRequestSerial: 0,
   noAnswerPromptInFlight: false,
   noAnswerPromptRequestSerial: 0,
@@ -539,9 +537,7 @@ definePage<VoiceChatData>()({
     followUpRequestSerial = requestSerial;
     this.cancelFollowUpTTS();
     this.assistantStreamLineId = `assistant-stream-${requestSerial}`;
-    this.assistantStreamingAudioStartSeconds = -1;
-    this.assistantStreamingAudioEndSeconds = 0;
-    this.assistantStreamingAudioDurationSeconds = 0;
+    this.ttsProgress.resetStreamingAudio();
     setVoiceChatData(this, {
       followUpLoading: true,
       followUpError: "",
@@ -611,9 +607,7 @@ definePage<VoiceChatData>()({
         if (requestSerial === followUpRequestSerial) {
           this.stopAssistantBargeInMonitor();
           const durationSeconds = Number(event.duration_seconds);
-          if (Number.isFinite(durationSeconds) && durationSeconds > 0) {
-            this.assistantStreamingAudioDurationSeconds = durationSeconds;
-          }
+          this.ttsProgress.setStreamingDurationSeconds(durationSeconds);
           this.stopFollowUpProgressTimer();
           setVoiceChatData(this, {
             followUpTTSStateText: "正在整理回应",
@@ -692,9 +686,7 @@ definePage<VoiceChatData>()({
       ? this.data.transcriptLines.filter((line) => line.id !== this.assistantStreamLineId)
       : this.data.transcriptLines;
     this.assistantStreamLineId = "";
-    this.assistantStreamingAudioStartSeconds = -1;
-    this.assistantStreamingAudioEndSeconds = 0;
-    this.assistantStreamingAudioDurationSeconds = 0;
+    this.ttsProgress.resetStreamingAudio();
     setVoiceChatData(this, {
       ...assistantTranscriptState(transcriptLines, {
         guidanceMode: this.data.guidanceMode,
@@ -807,7 +799,7 @@ definePage<VoiceChatData>()({
       this.ttsPlayToken = playToken;
     }
     const fullText = this.data.assistantPromptText;
-    const firstStreamingFrame = this.assistantStreamingAudioStartSeconds < 0;
+    const firstStreamingFrame = !this.ttsProgress.hasStreamingAudioFrame();
     setVoiceChatData(this, {
       followUpTTSLoading: false,
       followUpTTSPlaying: true,
@@ -1095,7 +1087,7 @@ definePage<VoiceChatData>()({
         autoListenAfterPlayback: false,
         text: this.data.assistantPromptText,
         alignment: this.data.ttsAlignment,
-        durationSeconds: this.assistantStreamingAudioDurationSeconds,
+        durationSeconds: this.ttsProgress.streamingDurationSeconds(),
       });
       return;
     }
@@ -1135,7 +1127,7 @@ definePage<VoiceChatData>()({
       await this.audioPlayback.playFile(audioFileId, playToken, {
         onPlay: (audio) => {
           if (playToken === this.ttsPlayToken) {
-            this.ttsProgressStartedAtMs = Date.now();
+            this.ttsProgress.markPlaybackStarted();
             this.startFollowUpProgressTimer(playToken, audio, fallbackDuration);
             this.startAssistantBargeInMonitor(followUpRequestSerial);
           }
@@ -1219,9 +1211,7 @@ definePage<VoiceChatData>()({
     this.assistantTurnRuntime?.cancel(reason);
     this.assistantTurnRuntime = null;
     this.assistantStreamLineId = "";
-    this.assistantStreamingAudioStartSeconds = -1;
-    this.assistantStreamingAudioEndSeconds = 0;
-    this.assistantStreamingAudioDurationSeconds = 0;
+    this.ttsProgress.resetStreamingAudio();
     this.assistantTurnQueue = [];
     this.assistantAudioPrepareCount = 0;
     this.stopFollowUpAudio();
@@ -1318,154 +1308,77 @@ definePage<VoiceChatData>()({
   },
 
   markStreamingAudioFrameScheduled(event: StreamingSpeechPlaybackFrameEvent) {
-    if (this.assistantStreamingAudioStartSeconds < 0) {
-      this.assistantStreamingAudioStartSeconds = event.startAtSeconds;
-    }
-    const frameEndSeconds = event.startAtSeconds + event.durationSeconds;
-    this.assistantStreamingAudioEndSeconds = Math.max(
-      this.assistantStreamingAudioEndSeconds,
-      frameEndSeconds,
-    );
-    this.assistantStreamingAudioDurationSeconds = Math.max(
-      this.assistantStreamingAudioDurationSeconds,
-      this.assistantStreamingAudioEndSeconds - this.assistantStreamingAudioStartSeconds,
-    );
+    this.ttsProgress.markStreamingAudioFrameScheduled(event);
   },
 
   updateStreamingTTSProgress() {
-    const text = this.data.assistantPromptText;
-    if (!text) {
-      this.resetFollowUpTTSProgress();
-      return;
-    }
-    const currentTime = this.streamingPlaybackTimeForProgress();
-    const scheduledDuration = this.assistantStreamingAudioStartSeconds < 0
-      ? 0
-      : Math.max(0, this.assistantStreamingAudioEndSeconds - this.assistantStreamingAudioStartSeconds);
-    const duration = Math.max(scheduledDuration, currentTime + STREAMING_TTS_PROGRESS_HOLD_SECONDS);
-    const progress = splitTextByAudioPlaybackProgress(text, currentTime, duration, {
-      alignment: [],
-    });
-    setVoiceChatData(this, {
-      ttsSpokenText: progress.spokenText,
-      ttsCurrentText: progress.currentText,
-      ttsRemainingText: progress.remainingText,
-      ttsProgressPercent: Math.min(progress.progressPercent, 99),
-    });
-  },
-
-  streamingPlaybackTimeForProgress() {
-    if (this.assistantStreamingAudioStartSeconds < 0) {
-      return 0;
-    }
-    const currentTimeSeconds = this.assistantTurnRuntime?.stats()?.currentTimeSeconds;
-    const current = Number.isFinite(currentTimeSeconds) ? Number(currentTimeSeconds) : 0;
-    return Math.max(0, current - this.assistantStreamingAudioStartSeconds);
+    this.ttsProgress.updateStreamingProgress(
+      this.data.assistantPromptText,
+      this.assistantTurnRuntime?.stats()?.currentTimeSeconds,
+      (patch) => this.applyTTSProgressPatch(patch),
+    );
   },
 
   updateFollowUpTTSProgress(currentTime: number, duration: number, fallbackDuration: number = 0) {
-    const text = this.data.assistantPromptText;
-    if (!text) {
-      this.resetFollowUpTTSProgress();
-      return;
-    }
-    const effectiveDuration = Number.isFinite(duration) && duration > 0 ? duration : fallbackDuration;
-    const progress = splitTextByAudioPlaybackProgress(text, currentTime, effectiveDuration, {
-      alignment: this.data.ttsAlignment,
-    });
-    setVoiceChatData(this, {
-      ttsSpokenText: progress.spokenText,
-      ttsCurrentText: progress.currentText,
-      ttsRemainingText: progress.remainingText,
-      ttsProgressPercent: progress.progressPercent,
-    });
+    this.ttsProgress.updateAudioFileProgress(
+      this.data.assistantPromptText,
+      currentTime,
+      duration,
+      fallbackDuration,
+      this.data.ttsAlignment,
+      (patch) => this.applyTTSProgressPatch(patch),
+    );
   },
 
   playbackTimeForProgress(audio: WechatMiniprogram.InnerAudioContext) {
-    const currentTime = Number(audio.currentTime);
-    if (Number.isFinite(currentTime) && currentTime > 0) {
-      return currentTime;
-    }
-    if (this.ttsProgressStartedAtMs > 0) {
-      return Math.max(0, (Date.now() - this.ttsProgressStartedAtMs) / 1000);
-    }
-    return 0;
+    return this.ttsProgress.playbackTimeForAudio(audio);
   },
 
   streamingProgressPercent(spokenText: string, fullText: string, allowComplete: boolean) {
-    const totalChars = countTextChars(fullText);
-    if (totalChars <= 0) {
-      return 0;
-    }
-    const spokenChars = Math.min(totalChars, countTextChars(spokenText));
-    const percent = Math.max(0, Math.round((spokenChars / totalChars) * 100));
-    return allowComplete ? percent : Math.min(percent, 99);
+    return streamingProgressPercent(spokenText, fullText, allowComplete);
   },
 
   startStreamingProgressTimer(playToken: number) {
-    if (this.ttsProgressTimer !== null) {
-      return;
-    }
-    this.stopFollowUpProgressTimer();
     if (playToken !== this.ttsPlayToken) {
       return;
     }
-    const timer = setInterval(() => {
-      if (
-        playToken !== this.ttsPlayToken
-        || !this.assistantTurnRuntime
-        || !this.data.followUpTTSPlaying
-      ) {
-        if (this.ttsProgressTimer === timer) {
-          this.stopFollowUpProgressTimer();
-        }
-        return;
-      }
-      this.updateStreamingTTSProgress();
-    }, 250);
-    this.ttsProgressTimer = timer;
+    this.ttsProgress.startStreamingTimer({
+      isActive: () => (
+        playToken === this.ttsPlayToken
+        && Boolean(this.assistantTurnRuntime)
+        && this.data.followUpTTSPlaying
+      ),
+      currentTimeSeconds: () => this.assistantTurnRuntime?.stats()?.currentTimeSeconds,
+      text: () => this.data.assistantPromptText,
+      applyPatch: (patch) => this.applyTTSProgressPatch(patch),
+    });
   },
 
   startFollowUpProgressTimer(playToken: number, audio: WechatMiniprogram.InnerAudioContext, fallbackDuration: number = 0) {
-    this.stopFollowUpProgressTimer();
-    if (this.ttsProgressStartedAtMs <= 0) {
-      this.ttsProgressStartedAtMs = Date.now();
-    }
-    const timer = setInterval(() => {
-      if (
-        playToken !== this.ttsPlayToken
-        || this.audioPlayback.currentAudio() !== audio
-        || !this.data.followUpTTSPlaying
-      ) {
-        if (this.ttsProgressTimer === timer) {
-          this.stopFollowUpProgressTimer();
-        }
-        return;
-      }
-      this.updateFollowUpTTSProgress(
-        this.playbackTimeForProgress(audio),
-        audio.duration,
-        fallbackDuration,
-      );
-    }, 250);
-    this.ttsProgressTimer = timer;
+    this.ttsProgress.startAudioFileTimer({
+      audio,
+      isActive: () => (
+        playToken === this.ttsPlayToken
+        && this.audioPlayback.currentAudio() === audio
+        && this.data.followUpTTSPlaying
+      ),
+      text: () => this.data.assistantPromptText,
+      alignment: () => this.data.ttsAlignment,
+      fallbackDurationSeconds: fallbackDuration,
+      applyPatch: (patch) => this.applyTTSProgressPatch(patch),
+    });
   },
 
   stopFollowUpProgressTimer() {
-    if (this.ttsProgressTimer !== null) {
-      clearInterval(this.ttsProgressTimer);
-      this.ttsProgressTimer = null;
-    }
-    this.ttsProgressStartedAtMs = 0;
+    this.ttsProgress.stopTimer();
   },
 
   resetFollowUpTTSProgress() {
-    setVoiceChatData(this, {
-      ttsSpokenText: "",
-      ttsCurrentText: "",
-      ttsRemainingText: "",
-      ttsProgressPercent: 0,
-    });
+    this.ttsProgress.resetProgress((patch) => this.applyTTSProgressPatch(patch));
+  },
+
+  applyTTSProgressPatch(patch: VoiceAssistantTTSProgressPatch) {
+    setVoiceChatData(this, patch);
   },
 
   toggleAutoStop() {
