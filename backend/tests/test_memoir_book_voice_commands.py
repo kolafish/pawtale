@@ -3,21 +3,17 @@ import json
 from sqlalchemy import select
 
 from app.domain.memoir.types import (
-    MemoirBookPlanStatus,
-    MemoirCreatedBy,
     MemoirEditingJobStatus,
     MemoirEditingJobType,
 )
 from app.models.memoir import (
     MemoirEditingJob,
-    MemoirBookChapterDraft,
-    MemoirBookChapterDraftVersion,
-    MemoirBookPlan,
-    MemoirBookPlanChapter,
     MemoirChapterSourceLink,
 )
 from tests.memoir_helpers import (
     add_test_chapter_source_links,
+    create_test_book_plan_with_chapters,
+    create_test_chapter_draft,
     create_test_voice_transcript,
     ensure_mobile_memoir_project,
     memoir_source_ref,
@@ -53,48 +49,12 @@ async def _create_two_chapter_plan(
     draft_contents: list[str] | None = None,
     titles: list[str] | None = None,
 ):
-    plan = MemoirBookPlan(
+    return await create_test_book_plan_with_chapters(
+        test_db,
         project_id=project_id,
-        title="外婆回忆录章节规划",
-        status=MemoirBookPlanStatus.CONFIRMED.value,
-        created_by=MemoirCreatedBy.USER.value,
+        chapter_titles=titles,
+        draft_contents=draft_contents,
     )
-    test_db.add(plan)
-    await test_db.flush()
-    chapters = []
-    for index, title in enumerate(titles or ["外婆家的童年", "第一次离家"]):
-        chapter = MemoirBookPlanChapter(
-            plan_id=plan.id,
-            project_id=project_id,
-            title=title,
-            sort_order=index,
-            source_refs_json=[],
-        )
-        test_db.add(chapter)
-        chapters.append(chapter)
-    await test_db.flush()
-    if draft_contents:
-        for chapter, content in zip(chapters, draft_contents, strict=False):
-            if not content:
-                continue
-            draft = MemoirBookChapterDraft(
-                project_id=project_id,
-                chapter_id=chapter.id,
-            )
-            test_db.add(draft)
-            await test_db.flush()
-            test_db.add(
-                MemoirBookChapterDraftVersion(
-                    draft_id=draft.id,
-                    project_id=project_id,
-                    chapter_id=chapter.id,
-                    version=1,
-                    content=content,
-                    created_by=MemoirCreatedBy.AI.value,
-                )
-            )
-    await test_db.commit()
-    return plan, chapters
 
 
 async def test_mobile_memoir_book_voice_command_parse_uses_ai_payload(
@@ -313,22 +273,12 @@ async def test_mobile_memoir_book_voice_command_merge_schedules_target_chapter_r
         chapter_id=chapters[1].id,
         source_refs=[memoir_source_ref(second)],
     )
-    draft = MemoirBookChapterDraft(
+    await create_test_chapter_draft(
+        test_db,
         project_id=project_id,
         chapter_id=chapters[1].id,
-    )
-    test_db.add_all([chapters[0], chapters[1], draft])
-    await test_db.flush()
-    version = MemoirBookChapterDraftVersion(
-        draft_id=draft.id,
-        project_id=project_id,
-        chapter_id=chapters[1].id,
-        version=1,
         content="春节那几天，家里总会做很多年菜。",
-        created_by=MemoirCreatedBy.AI.value,
     )
-    test_db.add(version)
-    await test_db.flush()
     second_link = await test_db.scalar(
         select(MemoirChapterSourceLink).where(
             MemoirChapterSourceLink.chapter_id == chapters[1].id,
@@ -336,9 +286,8 @@ async def test_mobile_memoir_book_voice_command_merge_schedules_target_chapter_r
         )
     )
     assert second_link is not None
-    second_link.merged_draft_version_id = version.id
-    test_db.add(second_link)
-    await test_db.commit()
+    base_version_id = second_link.merged_draft_version_id
+    assert base_version_id is not None
 
     response = await client.post(
         f"/api/mobile/memoir/projects/{project_id}/book-voice-command/execute",
@@ -371,7 +320,7 @@ async def test_mobile_memoir_book_voice_command_merge_schedules_target_chapter_r
     assert revision_job.job_type == MemoirEditingJobType.REVISE_CHAPTER.value
     assert revision_job.status == MemoirEditingJobStatus.PENDING.value
     assert revision_job.chapter_id == chapters[1].id
-    assert revision_job.payload_json["base_version_id"] == version.id
+    assert revision_job.payload_json["base_version_id"] == base_version_id
     assert revision_job.payload_json["pending_source_utterance_ids"] == [first["utterance_id"]]
 
 

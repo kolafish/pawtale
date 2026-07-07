@@ -229,6 +229,67 @@ async def add_test_chapter_source_links(
     return links
 
 
+async def create_test_book_plan_with_chapters(
+    test_db,
+    *,
+    project_id: str,
+    title: str = "外婆回忆录章节规划",
+    status: MemoirBookPlanStatus = MemoirBookPlanStatus.CONFIRMED,
+    chapter_titles: list[str] | None = None,
+    source_refs_by_chapter: list[list[dict]] | None = None,
+    draft_contents: list[str | None] | None = None,
+    draft_statuses: list[MemoirBookChapterDraftStatus] | None = None,
+) -> tuple[MemoirBookPlan, list[MemoirBookPlanChapter]]:
+    plan = MemoirBookPlan(
+        project_id=project_id,
+        title=title,
+        status=status.value,
+        created_by=MemoirCreatedBy.USER.value,
+    )
+    test_db.add(plan)
+    await test_db.flush()
+
+    chapters: list[MemoirBookPlanChapter] = []
+    for index, chapter_title in enumerate(chapter_titles or ["外婆家的童年", "第一次离家"]):
+        chapter = MemoirBookPlanChapter(
+            plan_id=plan.id,
+            project_id=project_id,
+            title=chapter_title,
+            sort_order=index,
+            source_refs_json=[],
+        )
+        test_db.add(chapter)
+        chapters.append(chapter)
+    await test_db.flush()
+
+    for chapter, refs in zip(chapters, source_refs_by_chapter or [], strict=False):
+        await add_test_chapter_source_links(
+            test_db,
+            project_id=project_id,
+            plan_id=plan.id,
+            chapter_id=chapter.id,
+            source_refs=refs,
+        )
+    await test_db.commit()
+
+    for index, content in enumerate(draft_contents or []):
+        if not content:
+            continue
+        status = (
+            draft_statuses[index]
+            if draft_statuses and index < len(draft_statuses)
+            else MemoirBookChapterDraftStatus.CONFIRMED
+        )
+        await create_test_chapter_draft(
+            test_db,
+            project_id=project_id,
+            chapter_id=chapters[index].id,
+            status=status,
+            content=content,
+        )
+    return plan, chapters
+
+
 async def create_test_book_plan(
     test_db,
     *,
@@ -239,33 +300,16 @@ async def create_test_book_plan(
     title: str = "外婆回忆录",
     chapter_title: str = "外婆家的童年",
 ):
-    plan = MemoirBookPlan(
-        project_id=project_id,
-        title=title,
-        status=status.value,
-        created_by=MemoirCreatedBy.USER.value,
-    )
-    test_db.add(plan)
-    await test_db.flush()
-    chapter = MemoirBookPlanChapter(
-        plan_id=plan.id,
-        project_id=project_id,
-        title=chapter_title,
-        sort_order=0,
-        source_refs_json=[],
-    )
-    test_db.add(chapter)
-    await test_db.flush()
     refs = source_refs if source_refs is not None else ([source_ref] if source_ref else [])
-    await add_test_chapter_source_links(
+    plan, chapters = await create_test_book_plan_with_chapters(
         test_db,
         project_id=project_id,
-        plan_id=plan.id,
-        chapter_id=chapter.id,
-        source_refs=refs,
+        title=title,
+        status=status,
+        chapter_titles=[chapter_title],
+        source_refs_by_chapter=[refs],
     )
-    await test_db.commit()
-    return plan, chapter
+    return plan, chapters[0]
 
 
 async def create_test_chapter_draft(
