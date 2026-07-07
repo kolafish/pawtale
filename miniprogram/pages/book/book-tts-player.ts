@@ -2,7 +2,10 @@ import type {
   MemoirBookAudioResponse,
 } from "../../domain/voice-chat";
 import type { AudioPlaybackController } from "../../services/audio-playback";
-import { splitTextByAudioPlaybackProgress } from "../../services/tts-text-progress";
+import {
+  VoiceAssistantTTSProgressRuntime,
+  type VoiceAssistantTTSProgressPatch,
+} from "../../services/voice-assistant-tts-progress";
 import type { BookData } from "./book-view-model";
 import { positiveFiniteSeconds } from "./book-view-model";
 
@@ -17,9 +20,20 @@ export interface BookTTSHost {
   >;
   setData(patch: Partial<BookData>): void;
   audioPlayback: AudioPlaybackController;
+  ttsProgress: VoiceAssistantTTSProgressRuntime;
   playToken: number;
-  ttsProgressTimer: number | null;
-  ttsProgressStartedAtMs: number;
+}
+
+export function applyBookTTSProgressPatch(
+  host: BookTTSHost,
+  patch: VoiceAssistantTTSProgressPatch,
+): void {
+  host.setData({
+    bookTTSSpokenText: patch.ttsSpokenText,
+    bookTTSCurrentText: patch.ttsCurrentText,
+    bookTTSRemainingText: patch.ttsRemainingText,
+    bookTTSProgressPercent: patch.ttsProgressPercent,
+  });
 }
 
 export async function playBookAudioFiles(
@@ -90,7 +104,7 @@ export async function playBookAudioFile(
   };
   await host.audioPlayback.playFile(audioFileId, token, {
     onPlay: (audio) => {
-      host.ttsProgressStartedAtMs = Date.now();
+      host.ttsProgress.markPlaybackStarted();
       startBookTTSProgressTimer(host, token, audio, elapsedBeforeSeconds, fallbackDurationSeconds);
     },
     onTimeUpdate: (audio) => {
@@ -128,18 +142,14 @@ export function updateBookTTSProgress(
   if (!activeText) {
     return;
   }
-  const progress = splitTextByAudioPlaybackProgress(
+  host.ttsProgress.updateAudioFileProgress(
     activeText,
     currentTimeSeconds,
     positiveFiniteSeconds(durationSeconds) || host.data.bookTTSDurationSeconds,
-    { alignment: host.data.bookTTSAlignment },
+    0,
+    host.data.bookTTSAlignment,
+    (patch) => applyBookTTSProgressPatch(host, patch),
   );
-  host.setData({
-    bookTTSSpokenText: progress.spokenText,
-    bookTTSCurrentText: progress.currentText,
-    bookTTSRemainingText: progress.remainingText,
-    bookTTSProgressPercent: progress.progressPercent,
-  });
 }
 
 export function startBookTTSProgressTimer(
@@ -150,26 +160,25 @@ export function startBookTTSProgressTimer(
   durationSeconds: number,
 ): void {
   stopBookTTSProgressTimer(host);
-  const tick = () => {
-    if (token !== host.playToken || host.audioPlayback.currentAudio() !== audio) {
-      stopBookTTSProgressTimer(host);
-      return;
-    }
-    updateBookTTSProgress(
-      host,
-      elapsedBeforeSeconds + playbackTimeForProgress(host, audio),
-      host.data.bookTTSDurationSeconds || elapsedBeforeSeconds + durationSeconds,
-    );
-  };
-  tick();
-  host.ttsProgressTimer = setInterval(tick, 250);
+  updateBookTTSProgress(
+    host,
+    elapsedBeforeSeconds + playbackTimeForProgress(host, audio),
+    host.data.bookTTSDurationSeconds || elapsedBeforeSeconds + durationSeconds,
+  );
+  host.ttsProgress.startAudioFileTimer({
+    audio,
+    isActive: () => token === host.playToken && host.audioPlayback.currentAudio() === audio,
+    currentTimeOffsetSeconds: elapsedBeforeSeconds,
+    durationSeconds: () => host.data.bookTTSDurationSeconds || elapsedBeforeSeconds + durationSeconds,
+    text: () => host.data.bookTTSActiveText,
+    alignment: () => host.data.bookTTSAlignment,
+    fallbackDurationSeconds: host.data.bookTTSDurationSeconds || elapsedBeforeSeconds + durationSeconds,
+    applyPatch: (patch) => applyBookTTSProgressPatch(host, patch),
+  });
 }
 
 export function stopBookTTSProgressTimer(host: BookTTSHost): void {
-  if (host.ttsProgressTimer !== null) {
-    clearInterval(host.ttsProgressTimer);
-    host.ttsProgressTimer = null;
-  }
+  host.ttsProgress.stopTimer();
 }
 
 export function resetBookTTSProgress(host: BookTTSHost): void {
@@ -190,14 +199,7 @@ export function playbackTimeForProgress(
   host: BookTTSHost,
   audio: WechatMiniprogram.InnerAudioContext,
 ): number {
-  const currentTime = positiveFiniteSeconds(audio.currentTime);
-  if (currentTime) {
-    return currentTime;
-  }
-  if (!host.ttsProgressStartedAtMs) {
-    return 0;
-  }
-  return Math.max(0, (Date.now() - host.ttsProgressStartedAtMs) / 1000);
+  return host.ttsProgress.playbackTimeForAudio(audio);
 }
 
 export function stopBookPlayback(host: BookTTSHost): void {
