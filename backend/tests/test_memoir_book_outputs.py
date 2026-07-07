@@ -16,8 +16,6 @@ from app.models.memoir import (
     MemoirBookChapterDraftVersion,
     MemoirBookOutput,
     MemoirBookOutputVersion,
-    MemoirBookPlan,
-    MemoirBookPlanChapter,
     MemoirChatMessage,
     MemoirEditingJob,
     MemoirVoiceSession,
@@ -30,7 +28,11 @@ from app.services.memoir.editing_job_handlers import register_memoir_editing_job
 from app.services.memoir.editing_jobs import clear_editing_job_handlers, run_editing_job
 from app.services.memoir.tts_alignment import TTSAlignmentSegment
 from app.services.memoir.voice_tts_types import TTSResult
-from tests.memoir_helpers import add_test_chapter_source_links, ensure_mobile_memoir_project
+from tests.memoir_helpers import (
+    add_test_chapter_source_links,
+    create_test_book_plan_with_chapters,
+    ensure_mobile_memoir_project,
+)
 
 
 class FakeBookTTS:
@@ -307,55 +309,21 @@ def test_memoir_book_manuscript_cleanup_removes_pdf_template_language():
 
 
 async def _create_confirmed_book_plan(test_db, *, project_id: str, confirmed_chapters: bool = True):
-    plan = MemoirBookPlan(
-        project_id=project_id,
-        title="外婆回忆录章节规划",
-        status=MemoirBookPlanStatus.CONFIRMED.value,
-        created_by=MemoirCreatedBy.USER.value,
-    )
-    test_db.add(plan)
-    await test_db.flush()
-    chapters = []
-    for index, (title, content) in enumerate(
-        [
-            ("外婆家的童年", "我小时候常在外婆家的院子里晒太阳。"),
-            ("第一次离家", "后来我第一次离家去县城读书，心里很紧张。"),
+    draft_statuses = None
+    if not confirmed_chapters:
+        draft_statuses = [
+            MemoirBookChapterDraftStatus.CONFIRMED,
+            MemoirBookChapterDraftStatus.DRAFT,
         ]
-    ):
-        chapter = MemoirBookPlanChapter(
-            plan_id=plan.id,
-            project_id=project_id,
-            title=title,
-            sort_order=index,
-            source_refs_json=[],
-        )
-        test_db.add(chapter)
-        await test_db.flush()
-        draft = MemoirBookChapterDraft(
-            project_id=project_id,
-            chapter_id=chapter.id,
-            status=(
-                MemoirBookChapterDraftStatus.CONFIRMED.value
-                if confirmed_chapters or index == 0
-                else MemoirBookChapterDraftStatus.DRAFT.value
-            ),
-        )
-        test_db.add(draft)
-        await test_db.flush()
-        test_db.add(
-            MemoirBookChapterDraftVersion(
-                draft_id=draft.id,
-                project_id=project_id,
-                chapter_id=chapter.id,
-                version=1,
-                content=content,
-                created_by=MemoirCreatedBy.USER.value,
-                prompt_snapshot="",
-            )
-        )
-        chapters.append(chapter)
-    await test_db.commit()
-    return plan, chapters
+    return await create_test_book_plan_with_chapters(
+        test_db,
+        project_id=project_id,
+        draft_contents=[
+            "我小时候常在外婆家的院子里晒太阳。",
+            "后来我第一次离家去县城读书，心里很紧张。",
+        ],
+        draft_statuses=draft_statuses,
+    )
 
 
 async def _add_output_source_link(
