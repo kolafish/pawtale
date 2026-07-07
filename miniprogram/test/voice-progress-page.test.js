@@ -2,6 +2,7 @@ require("./register-ts");
 
 const assert = require("node:assert/strict");
 const test = require("node:test");
+const { loadPageModule, mockModule } = require("./page-harness");
 
 function sampleSession(id, status) {
   return {
@@ -44,55 +45,28 @@ function defaultIdentity() {
 }
 
 function loadProgressPage({ authExports = {}, voiceApiExports = {} } = {}) {
-  const authPath = require.resolve("../services/auth.ts");
-  const voiceApiPath = require.resolve("../services/memoir-voice-api.ts");
-  const progressPath = require.resolve("../pages/voice-progress/index.ts");
-  delete require.cache[authPath];
-  delete require.cache[voiceApiPath];
-  delete require.cache[progressPath];
-  require.cache[authPath] = {
-    id: authPath,
-    filename: authPath,
-    loaded: true,
-    exports: {
-      getMemoirIdentity: async () => defaultIdentity(),
-      ...authExports,
-    },
-  };
-  require.cache[voiceApiPath] = {
-    id: voiceApiPath,
-    filename: voiceApiPath,
-    loaded: true,
-    exports: {
-      getMemoirVoiceProgress: async () => ({
-        session_count: 0,
-        active_session_count: 0,
-        stopped_session_count: 0,
-        failed_session_count: 0,
-        utterance_count: 0,
-        user_message_count: 0,
-        assistant_message_count: 0,
-        total_user_char_count: 0,
-        total_audio_seconds: 0,
-        modules: [],
-      }),
-      listMemoirVoiceSessions: async () => ({ items: [], total: 0, limit: 30, offset: 0 }),
-      ...voiceApiExports,
-    },
-  };
+  mockModule("../services/auth.ts", {
+    getMemoirIdentity: async () => defaultIdentity(),
+    ...authExports,
+  });
+  mockModule("../services/memoir-voice-api.ts", {
+    getMemoirVoiceProgress: async () => ({
+      session_count: 0,
+      active_session_count: 0,
+      stopped_session_count: 0,
+      failed_session_count: 0,
+      utterance_count: 0,
+      user_message_count: 0,
+      assistant_message_count: 0,
+      total_user_char_count: 0,
+      total_audio_seconds: 0,
+      modules: [],
+    }),
+    listMemoirVoiceSessions: async () => ({ items: [], total: 0, limit: 30, offset: 0 }),
+    ...voiceApiExports,
+  });
 
-  let page = null;
-  const previousPage = global.Page;
-  global.Page = (definition) => {
-    page = definition;
-  };
-  const mod = require(progressPath);
-  if (previousPage === undefined) {
-    delete global.Page;
-  } else {
-    global.Page = previousPage;
-  }
-  return { mod, page };
+  return loadPageModule("../pages/voice-progress/index.ts");
 }
 
 test("voice progress maps session status by backend status", async () => {
