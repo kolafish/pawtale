@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import hashlib
-import json
 import logging
 
 from sqlalchemy import select
@@ -14,7 +12,11 @@ from app.services.ai_types import AITextClient
 from app.services.json_utils import extract_json_payload
 from app.services.memoir.book_draft_ai import ChapterEventCluster, ChapterSourceText, generate_event_clusters
 from app.services.memoir.book_plan_sources import text_or_empty
-from app.services.memoir.semantic_state import upsert_chapter_event_cluster_snapshot
+from app.services.memoir.semantic_state import (
+    semantic_json_signature,
+    semantic_text_hash,
+    upsert_chapter_event_cluster_snapshot,
+)
 
 
 CHAPTER_EVENT_CLUSTER_ENGINE = "llm_event_cluster_v1"
@@ -32,14 +34,10 @@ class IncrementalClusterAssignment:
     summary: str = ""
 
 
-def _source_text_hash(text: str) -> str:
-    return hashlib.sha256((text or "").encode("utf-8")).hexdigest()
-
-
 def _source_card_signature(source: ChapterSourceText) -> dict[str, object]:
     card = source.source_card
     if not card:
-        return {"source_text_hash": _source_text_hash(source.text)}
+        return {"source_text_hash": semantic_text_hash(source.text)}
     return {
         "source_card_id": card.source_card_id,
         "summary": card.summary,
@@ -56,7 +54,7 @@ def _source_cluster_fingerprint_payload(source: ChapterSourceText) -> dict[str, 
         "utterance_id": source.ref.utterance_id,
         "quote": source.ref.quote or "",
         "change_type": source.change_type,
-        "source_text_hash": _source_text_hash(source.text),
+        "source_text_hash": semantic_text_hash(source.text),
         "card": _source_card_signature(source),
     }
 
@@ -64,13 +62,7 @@ def _source_cluster_fingerprint_payload(source: ChapterSourceText) -> dict[str, 
 def source_fingerprints_for_clusters(sources: list[ChapterSourceText]) -> dict[str, str]:
     fingerprints: dict[str, str] = {}
     for source in sources:
-        encoded = json.dumps(
-            _source_cluster_fingerprint_payload(source),
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-        )
-        fingerprints[source.ref.utterance_id] = hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+        fingerprints[source.ref.utterance_id] = semantic_json_signature(_source_cluster_fingerprint_payload(source))
     return fingerprints
 
 
@@ -88,8 +80,7 @@ def chapter_event_cluster_input_signature(
         "source_ids": source_ids,
         "source_fingerprints": source_fingerprints,
     }
-    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+    return semantic_json_signature(payload)
 
 
 def serialize_event_clusters(clusters: list[ChapterEventCluster]) -> list[dict[str, object]]:
