@@ -6,128 +6,20 @@ const path = require("node:path");
 const test = require("node:test");
 const { loadPageModule, mockModule, pageContext } = require("./page-harness");
 
-function sampleRef(id = "utterance-1", quote = "外婆家的院子") {
-  return {
-    voice_session_id: "voice-1",
-    message_id: `message-${id}`,
-    utterance_id: id,
-    transcript_version_id: `version-${id}`,
-    audio_file_id: `audio-${id}`,
-    start_ms: 0,
-    end_ms: 8000,
-    created_at: "2026-06-17T00:00:00.000Z",
-    quote,
-  };
-}
+const {
+  sampleBookManuscript: baseSampleBookManuscript,
+  sampleBookOutput: baseSampleBookOutput,
+  sampleBookOutputVersion: baseSampleBookOutputVersion,
+  samplePlan: baseSamplePlan,
+  sampleStructuredBookContent,
+} = require("./book-fixtures");
 
 function samplePlan(status = "confirmed") {
-  return {
-    id: "plan-1",
-    project_id: "project/1",
-    title: "外婆回忆录章节规划",
-    status,
-    created_by: "ai",
-    model: "fake",
-    metadata_json: {},
-    created_at: "2026-06-17T00:00:00.000Z",
-    updated_at: "2026-06-17T00:00:00.000Z",
-    chapters: [
-      {
-        id: "chapter-1",
-        plan_id: "plan-1",
-        project_id: "project/1",
-        title: "外婆家的童年",
-        sort_order: 0,
-        source_refs: [sampleRef("utterance-1", "外婆家的院子")],
-        metadata_json: {},
-        pending_source_count: 0,
-        removed_source_count: 0,
-        created_at: "2026-06-17T00:00:00.000Z",
-        updated_at: "2026-06-17T00:00:00.000Z",
-      },
-    ],
-  };
-}
-
-function sampleStructuredBookContent() {
-  return {
-    title: "外婆回忆录",
-    chapter_count: 1,
-    char_count: 14,
-    table_of_contents: [
-      {
-        chapter_id: "chapter-1",
-        index: 1,
-        title: "外婆家的童年",
-        char_count: 14,
-        source_count: 1,
-      },
-    ],
-    chapters: [
-      {
-        chapter_id: "chapter-1",
-        index: 1,
-        title: "外婆家的童年",
-        content: "我小时候常在院子里晒太阳。",
-        char_count: 14,
-        source_count: 1,
-        draft_version_id: "draft-version-1",
-        draft_version: 1,
-      },
-    ],
-  };
+  return baseSamplePlan(status, { chapterCount: 1 });
 }
 
 function sampleBookManuscript(title = "外婆回忆录", coverStyle = "classic_plain") {
-  return {
-    schema_version: 1,
-    profile: {
-      template: "classic_family",
-      title,
-      subtitle: "根据口述访谈整理",
-      narrator_name: "外婆",
-      prepared_by: "家人整理",
-      interview_date_range: "",
-      privacy_note: "仅供家庭内部阅读。",
-      ai_disclosure_note: "AI 辅助整理，不新增未经确认的事实。",
-    },
-    front_matter: [
-      { kind: "cover", title, content: `${title}\n根据口述访谈整理`, enabled: true },
-      { kind: "preface", title: "前言", content: "这些故事来自家里的讲述。", enabled: true },
-    ],
-    table_of_contents: sampleStructuredBookContent().table_of_contents,
-    chapters: [
-      {
-        chapter_id: "chapter-1",
-        index: 1,
-        title: "外婆家的童年",
-        subtitle: "",
-        intro: "这一章主要记录外婆小时候在院子里的生活。",
-        time_hint: "童年",
-        place_hint: "老家",
-        pull_quotes: [{ text: "我小时候常在院子里晒太阳。", source_ref_ids: ["utterance-1"] }],
-        people_notes: [],
-        uncertain_facts: [],
-        content: "我小时候常在院子里晒太阳。",
-        source_refs: [{ utterance_id: "utterance-1", transcript_version_id: "version-1", voice_session_id: "voice-1", quote: "院子" }],
-      },
-    ],
-    back_matter: {
-      afterword: { kind: "afterword", title: "后记", content: "这些故事还可以继续补充。", enabled: true },
-      version_note: { kind: "version_note", title: "整理说明", content: "默认展示故事书版。", enabled: true },
-      source_appendix: { kind: "source_appendix", title: "原始讲述索引", content: "第1章：1 条讲述来源", enabled: true },
-    },
-    render_settings: {
-      page_size: "a5",
-      layout: "reading",
-      font_scale: "standard",
-      show_headers: true,
-      show_source_appendix: true,
-      photo_mode: "none",
-      cover_style: coverStyle,
-      back_cover_quote: "我小时候常在院子里晒太阳。",
-    },
-  };
+  return baseSampleBookManuscript(title, coverStyle, { chapterCount: 1 });
 }
 
 function sampleBookOutputVersion(
@@ -136,39 +28,23 @@ function sampleBookOutputVersion(
   createdAt = "2026-06-17T00:00:00.000Z",
   manuscript = sampleBookManuscript(),
 ) {
-  return {
-    id: `book-output-version-${version}`,
-    output_id: "book-output-1",
-    project_id: "project/1",
-    plan_id: "plan-1",
+  return baseSampleBookOutputVersion(
     version,
     content,
-    chapter_snapshot_json: [],
-    structured_content: sampleStructuredBookContent(),
+    sampleStructuredBookContent({ chapterCount: 1 }),
+    createdAt,
     manuscript,
-    created_by: "system",
-    created_at: createdAt,
-  };
+  );
 }
 
 function sampleBookOutput() {
   const latestVersion = sampleBookOutputVersion(2, "全书第二版正文");
   return {
-    id: "book-output-1",
-    project_id: "project/1",
-    plan_id: "plan-1",
-    title: "外婆回忆录",
-    status: "draft",
-    metadata_json: {},
-    is_stale: false,
-    stale_chapter_titles: [],
-    latest_version: latestVersion,
-    versions: [
+    ...baseSampleBookOutput(2, "全书第二版正文", false, [], latestVersion.structured_content, [
       sampleBookOutputVersion(1, "全书第一版正文", "2026-06-16T00:00:00.000Z"),
       latestVersion,
-    ],
-    created_at: "2026-06-17T00:00:00.000Z",
-    updated_at: "2026-06-17T00:00:00.000Z",
+    ], latestVersion.manuscript),
+    latest_version: latestVersion,
   };
 }
 
