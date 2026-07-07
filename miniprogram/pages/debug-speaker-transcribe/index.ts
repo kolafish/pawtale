@@ -125,6 +125,11 @@ interface ComparableSpeechChar {
 
 const HISTORY_PREVIEW_HOLD_MS = 160;
 const HISTORY_PREVIEW_CANCEL_DISTANCE = 18;
+const FUZZY_SPEECH_MIN_CHARS = 6;
+const FUZZY_SPEECH_MAX_CHARS = 40;
+const FUZZY_SPEECH_MAX_LENGTH_RATIO = 1.6;
+const FUZZY_SPEECH_MIN_COMMON_OF_SHORTER = 0.68;
+const FUZZY_SPEECH_MIN_COMMON_OF_LONGER = 0.48;
 const EMPTY_HISTORY_LINE_PREVIEW: HistoryLinePreviewView = {
   visible: false,
   speakerTitle: "",
@@ -470,6 +475,43 @@ function consumeFollowingSpeechBoundary(text: string, offset: number): number {
   return nextOffset;
 }
 
+function commonSpeechSubsequenceLength(left: string, right: string): number {
+  if (!left || !right) {
+    return 0;
+  }
+  const previous = new Array(right.length + 1).fill(0);
+  const current = new Array(right.length + 1).fill(0);
+  for (let leftIndex = 1; leftIndex <= left.length; leftIndex += 1) {
+    for (let rightIndex = 1; rightIndex <= right.length; rightIndex += 1) {
+      current[rightIndex] = left[leftIndex - 1] === right[rightIndex - 1]
+        ? previous[rightIndex - 1] + 1
+        : Math.max(previous[rightIndex], current[rightIndex - 1]);
+    }
+    for (let rightIndex = 0; rightIndex <= right.length; rightIndex += 1) {
+      previous[rightIndex] = current[rightIndex];
+      current[rightIndex] = 0;
+    }
+  }
+  return previous[right.length];
+}
+
+function isLikelySameShortSpeechText(partialKey: string, finalKey: string): boolean {
+  const shorterLength = Math.min(partialKey.length, finalKey.length);
+  const longerLength = Math.max(partialKey.length, finalKey.length);
+  if (shorterLength < FUZZY_SPEECH_MIN_CHARS) {
+    return false;
+  }
+  if (longerLength > FUZZY_SPEECH_MAX_CHARS) {
+    return false;
+  }
+  if (longerLength / shorterLength > FUZZY_SPEECH_MAX_LENGTH_RATIO) {
+    return false;
+  }
+  const commonLength = commonSpeechSubsequenceLength(partialKey, finalKey);
+  return commonLength / shorterLength >= FUZZY_SPEECH_MIN_COMMON_OF_SHORTER
+    && commonLength / longerLength >= FUZZY_SPEECH_MIN_COMMON_OF_LONGER;
+}
+
 function removeFinalTextFromPartialText(partialText: string, finalText: string): string {
   const cleanPartial = partialText.trim();
   const partialChars = comparableSpeechChars(cleanPartial);
@@ -486,6 +528,9 @@ function removeFinalTextFromPartialText(partialText: string, finalText: string):
   }
   const matchIndex = partialKey.indexOf(finalKey);
   if (matchIndex < 0) {
+    if (isLikelySameShortSpeechText(partialKey, finalKey)) {
+      return "";
+    }
     return cleanPartial;
   }
   const matchEndsPartial = matchIndex + finalKey.length >= partialKey.length;
