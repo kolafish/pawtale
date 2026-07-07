@@ -30,7 +30,7 @@ from app.services.memoir.editing_job_handlers import register_memoir_editing_job
 from app.services.memoir.editing_jobs import clear_editing_job_handlers, run_editing_job
 from app.services.memoir.tts_alignment import TTSAlignmentSegment
 from app.services.memoir.voice_tts import TTSResult
-from tests.memoir_helpers import add_test_chapter_source_links
+from tests.memoir_helpers import add_test_chapter_source_links, ensure_mobile_memoir_project
 
 
 class FakeBookTTS:
@@ -148,17 +148,6 @@ class FakeTemplateCopyAI:
           "back_cover_quote": "凡是过往皆是序章"
         }
         """
-
-
-async def _active_project_id(client):
-    response = await client.get("/api/mobile/memoir/projects")
-    assert response.status_code == 200
-    active_project_id = response.json()["active_project_id"]
-    if active_project_id:
-        return active_project_id
-    created = await client.post("/api/mobile/memoir/projects", json={"title": "测试回忆录"})
-    assert created.status_code == 201
-    return created.json()["id"]
 
 
 def test_book_tts_chunks_keep_offsets_across_blank_lines():
@@ -432,7 +421,7 @@ async def test_mobile_memoir_book_output_routes_require_login(anonymous_client):
 
 
 async def test_mobile_memoir_book_output_requires_all_chapters_confirmed(client, test_db):
-    project_id = await _active_project_id(client)
+    project_id = await ensure_mobile_memoir_project(client)
     await _create_confirmed_book_plan(test_db, project_id=project_id, confirmed_chapters=False)
 
     response = await client.post(
@@ -445,7 +434,7 @@ async def test_mobile_memoir_book_output_requires_all_chapters_confirmed(client,
 
 
 async def test_mobile_memoir_book_output_generate_combines_confirmed_chapters(client, test_db):
-    project_id = await _active_project_id(client)
+    project_id = await ensure_mobile_memoir_project(client)
     plan, chapters = await _create_confirmed_book_plan(test_db, project_id=project_id)
     await _add_output_source_link(
         test_db,
@@ -524,7 +513,7 @@ async def test_mobile_memoir_book_output_generate_combines_confirmed_chapters(cl
 async def test_mobile_memoir_book_output_generation_job_runs_in_background(client, test_db):
     clear_editing_job_handlers()
     register_memoir_editing_job_handlers()
-    project_id = await _active_project_id(client)
+    project_id = await ensure_mobile_memoir_project(client)
     await _create_confirmed_book_plan(test_db, project_id=project_id)
 
     response = await client.post(
@@ -566,7 +555,7 @@ async def test_mobile_memoir_book_output_generation_job_runs_in_background(clien
 
 
 async def test_mobile_memoir_book_output_title_suggestions_use_fallback_without_ai(client, test_db):
-    project_id = await _active_project_id(client)
+    project_id = await ensure_mobile_memoir_project(client)
     await _create_confirmed_book_plan(test_db, project_id=project_id)
 
     response = await client.post(
@@ -585,7 +574,7 @@ async def test_mobile_memoir_book_output_title_suggestions_use_fallback_without_
 
 
 async def test_mobile_memoir_book_output_update_title_and_cover_style(client, test_db):
-    project_id = await _active_project_id(client)
+    project_id = await ensure_mobile_memoir_project(client)
     await _create_confirmed_book_plan(test_db, project_id=project_id)
     generated = await client.post(f"/api/mobile/memoir/projects/{project_id}/book-output/generate", json={})
     assert generated.status_code == 200
@@ -625,7 +614,7 @@ async def test_mobile_memoir_book_output_update_title_and_cover_style(client, te
 
 
 async def test_mobile_memoir_book_output_regenerates_editorial_copy_targets(client, test_db, monkeypatch):
-    project_id = await _active_project_id(client)
+    project_id = await ensure_mobile_memoir_project(client)
     plan, chapters = await _create_confirmed_book_plan(test_db, project_id=project_id)
     chapters[0].metadata_json = {"chapter_summary": "这一章写外婆家的院子和童年生活。"}
     await _add_output_source_link(
@@ -679,7 +668,7 @@ async def test_mobile_memoir_book_output_editorial_copy_generation_job_runs_in_b
 ):
     clear_editing_job_handlers()
     register_memoir_editing_job_handlers()
-    project_id = await _active_project_id(client)
+    project_id = await ensure_mobile_memoir_project(client)
     plan, chapters = await _create_confirmed_book_plan(test_db, project_id=project_id)
     chapters[0].metadata_json = {"chapter_summary": "这一章写外婆家的院子和童年生活。"}
     await _add_output_source_link(
@@ -747,7 +736,7 @@ async def test_mobile_memoir_book_output_editorial_copy_generation_job_runs_in_b
 
 
 async def test_mobile_memoir_book_output_updates_chapter_editorial_copy(client, test_db):
-    project_id = await _active_project_id(client)
+    project_id = await ensure_mobile_memoir_project(client)
     plan, chapters = await _create_confirmed_book_plan(test_db, project_id=project_id)
     await _add_output_source_link(
         test_db,
@@ -790,7 +779,7 @@ async def test_mobile_memoir_book_output_updates_chapter_editorial_copy(client, 
 
 
 async def test_mobile_memoir_book_output_generate_returns_existing_without_force(client, test_db):
-    project_id = await _active_project_id(client)
+    project_id = await ensure_mobile_memoir_project(client)
     await _create_confirmed_book_plan(test_db, project_id=project_id)
     first = await client.post(f"/api/mobile/memoir/projects/{project_id}/book-output/generate", json={})
     second = await client.post(f"/api/mobile/memoir/projects/{project_id}/book-output/generate", json={})
@@ -802,7 +791,7 @@ async def test_mobile_memoir_book_output_generate_returns_existing_without_force
 
 
 async def test_mobile_memoir_book_output_exports_txt_and_pdf(client, test_db):
-    project_id = await _active_project_id(client)
+    project_id = await ensure_mobile_memoir_project(client)
     await _create_confirmed_book_plan(test_db, project_id=project_id)
     generated = await client.post(f"/api/mobile/memoir/projects/{project_id}/book-output/generate", json={})
     assert generated.status_code == 200
@@ -858,7 +847,7 @@ async def test_mobile_memoir_book_output_exports_txt_and_pdf(client, test_db):
 
 
 async def test_mobile_memoir_book_output_exports_selected_version(client, test_db):
-    project_id = await _active_project_id(client)
+    project_id = await ensure_mobile_memoir_project(client)
     _, chapters = await _create_confirmed_book_plan(test_db, project_id=project_id)
     first = await client.post(f"/api/mobile/memoir/projects/{project_id}/book-output/generate", json={})
     assert first.status_code == 200
@@ -895,7 +884,7 @@ async def test_mobile_memoir_book_output_exports_selected_version(client, test_d
 
 
 async def test_mobile_memoir_book_output_detects_and_regenerates_stale_chapter_versions(client, test_db):
-    project_id = await _active_project_id(client)
+    project_id = await ensure_mobile_memoir_project(client)
     _, chapters = await _create_confirmed_book_plan(test_db, project_id=project_id)
     first = await client.post(f"/api/mobile/memoir/projects/{project_id}/book-output/generate", json={})
     assert first.status_code == 200
@@ -934,7 +923,7 @@ async def test_mobile_memoir_book_output_detects_and_regenerates_stale_chapter_v
 
 
 async def test_mobile_memoir_book_output_marks_unconfirmed_plan_as_stale(client, test_db):
-    project_id = await _active_project_id(client)
+    project_id = await ensure_mobile_memoir_project(client)
     plan, _ = await _create_confirmed_book_plan(test_db, project_id=project_id)
     generated = await client.post(f"/api/mobile/memoir/projects/{project_id}/book-output/generate", json={})
     assert generated.status_code == 200
@@ -956,7 +945,7 @@ async def test_mobile_memoir_book_chapter_tts_generates_and_reuses_audio(
     monkeypatch,
 ):
     monkeypatch.setattr("app.services.memoir.audio_files.MEMOIR_AUDIO_DIR", tmp_path / "audio")
-    project_id = await _active_project_id(client)
+    project_id = await ensure_mobile_memoir_project(client)
     _, chapters = await _create_confirmed_book_plan(test_db, project_id=project_id)
     fake_tts = FakeBookTTS()
     monkeypatch.setattr("app.services.memoir.book_audio.get_tts_client", lambda: fake_tts)
@@ -999,7 +988,7 @@ async def test_mobile_memoir_book_outline_tts_generates_and_reuses_audio(
     monkeypatch,
 ):
     monkeypatch.setattr("app.services.memoir.audio_files.MEMOIR_AUDIO_DIR", tmp_path / "audio")
-    project_id = await _active_project_id(client)
+    project_id = await ensure_mobile_memoir_project(client)
     plan, chapters = await _create_confirmed_book_plan(test_db, project_id=project_id)
     await _add_output_source_link(
         test_db,
@@ -1058,7 +1047,7 @@ async def test_mobile_memoir_book_output_tts_generates_full_book_audio(
     monkeypatch,
 ):
     monkeypatch.setattr("app.services.memoir.audio_files.MEMOIR_AUDIO_DIR", tmp_path / "audio")
-    project_id = await _active_project_id(client)
+    project_id = await ensure_mobile_memoir_project(client)
     await _create_confirmed_book_plan(test_db, project_id=project_id)
     await client.post(f"/api/mobile/memoir/projects/{project_id}/book-output/generate", json={})
     fake_tts = FakeBookTTS()
