@@ -21,7 +21,7 @@ from app.services.memoir import automation_event_metadata
 from app.services.memoir import automation_events
 from app.services.memoir import voice_sessions as memoir_voice_sessions
 from app.services.memoir.tts_alignment import TTSAlignmentSegment
-from app.services.memoir.voice_tts import TTSResult
+from app.services.memoir.voice_tts_types import TTSResult
 from tests.memoir_helpers import (
     add_test_chapter_source_links,
     create_test_book_plan,

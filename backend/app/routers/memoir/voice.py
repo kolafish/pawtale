@@ -50,7 +50,7 @@ from app.services.memoir import voice_authorization as memoir_voice_authorizatio
 from app.services.memoir import voice_followups as memoir_voice_followups
 from app.services.memoir import voice_search as memoir_voice_search
 from app.services.memoir import voice_sessions as memoir_voice_sessions
-from app.services.memoir import voice_tts as memoir_voice_tts
+from app.services.memoir import voice_tts_persistence as memoir_voice_tts
 from app.services.memoir import transcript_voice_edit as memoir_transcript_voice_edit
 from app.services.memoir import voice_transcripts as memoir_voice_transcripts
 from app.services.memoir.access import load_audio_file, load_memoir_project

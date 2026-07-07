@@ -76,7 +76,7 @@ from app.services.memoir.source_cards import (
     source_text_for_utterance as _source_card_text_for_utterance,
     source_text_hash as _source_card_text_hash,
 )
-from app.services.memoir.voice_tts import TTSClient
+from app.services.memoir.voice_tts_types import TTSClient
 
 
 CHAPTER_TTS_CACHE_KEY = "chapter_tts"

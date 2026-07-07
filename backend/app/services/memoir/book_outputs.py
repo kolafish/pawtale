@@ -69,7 +69,7 @@ from app.services.memoir.book_output_export import (
     render_book_output_export,
 )
 from app.services.memoir.book_source_links import plan_source_ref_dicts_by_chapter
-from app.services.memoir.voice_tts import TTSClient
+from app.services.memoir.voice_tts_types import TTSClient
 
 
 BOOK_TTS_CACHE_KEY = "book_tts"
