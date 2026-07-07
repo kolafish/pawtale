@@ -60,64 +60,6 @@
   word-break: break-word;
 }
 
-.speaker-role-panel {
-  margin-top: 20rpx;
-  padding: 24rpx;
-  border-radius: 28rpx;
-  background: #ffffff;
-  box-shadow:
-    0 0 0 1rpx rgba(43, 23, 19, 0.06),
-    0 8rpx 18rpx rgba(93, 61, 42, 0.05);
-}
-
-.speaker-role-label {
-  display: block;
-  color: #7b6f68;
-  font-size: 28rpx;
-  font-weight: 600;
-  line-height: 40rpx;
-}
-
-.speaker-role-switch {
-  margin-top: 14rpx;
-  padding: 8rpx;
-  border-radius: 24rpx;
-  background: #f3efea;
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8rpx;
-}
-
-.speaker-role-button {
-  min-height: 76rpx;
-  margin: 0;
-  border: 0;
-  border-radius: 16rpx;
-  background: transparent;
-  color: #5c4b43;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 30rpx;
-  font-weight: 800;
-  line-height: 40rpx;
-  transition-property: transform, background-color, box-shadow, color;
-  transition-duration: 150ms;
-  transition-timing-function: ease-out;
-}
-
-.speaker-role-button::after {
-  border: 0;
-}
-
-.speaker-role-button.active {
-  background: #a64b3e;
-  color: #ffffff;
-  box-shadow:
-    0 0 0 1rpx rgba(255, 255, 255, 0.18) inset,
-    0 6rpx 14rpx rgba(166, 75, 62, 0.16);
-}
-
 .finish-button {
   width: 156rpx;
   height: 78rpx;
@@ -583,6 +525,84 @@
   align-items: center;
 }
 
+.human-record-actions {
+  width: 100%;
+  max-width: 660rpx;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18rpx;
+}
+
+.role-record-button {
+  box-sizing: border-box;
+  min-height: 128rpx;
+  margin: 0;
+  border: 0;
+  border-radius: 34rpx;
+  background: #fff3ef;
+  color: #a64b3e;
+  box-shadow:
+    0 0 0 2rpx rgba(166, 75, 62, 0.14),
+    0 12rpx 30rpx rgba(166, 75, 62, 0.10);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10rpx;
+  padding: 18rpx 14rpx;
+  transition-property: transform, background-color, box-shadow, color;
+  transition-duration: 150ms;
+  transition-timing-function: ease-out;
+}
+
+.role-record-button.interviewer {
+  background: #f4f7f8;
+  color: #57727b;
+  box-shadow:
+    0 0 0 2rpx rgba(87, 114, 123, 0.14),
+    0 12rpx 30rpx rgba(87, 114, 123, 0.08);
+}
+
+.role-record-button::after {
+  border: 0;
+}
+
+.role-record-button[disabled] {
+  opacity: 0.72;
+}
+
+.role-record-button:active {
+  transform: scale(0.96);
+}
+
+.role-record-icon-shell {
+  width: 58rpx;
+  height: 58rpx;
+  border-radius: 999rpx;
+  background: rgba(166, 75, 62, 0.10);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.role-record-button.interviewer .role-record-icon-shell {
+  background: rgba(87, 114, 123, 0.12);
+}
+
+.role-record-icon {
+  width: 40rpx;
+  height: 40rpx;
+}
+
+.role-record-text {
+  color: inherit;
+  font-size: 32rpx;
+  font-weight: 800;
+  line-height: 42rpx;
+  white-space: nowrap;
+  word-break: keep-all;
+}
+
 .mic-button {
   box-sizing: border-box;
   width: 100%;
@@ -811,7 +831,6 @@
 }
 
 .voice-chat-page.large-text .topic-panel,
-.voice-chat-page.large-text .speaker-role-panel,
 .voice-chat-page.large-text .assistant-panel,
 .voice-chat-page.large-text .history-panel {
   padding: 36rpx 32rpx;
@@ -819,7 +838,6 @@
 }
 
 .voice-chat-page.large-text .topic-kicker,
-.voice-chat-page.large-text .speaker-role-label,
 .voice-chat-page.large-text .assistant-label,
 .voice-chat-page.large-text .stage-status,
 .voice-chat-page.large-text .control-hint {
@@ -830,18 +848,6 @@
 .voice-chat-page.large-text .topic-title {
   font-size: 58rpx;
   line-height: 80rpx;
-}
-
-.voice-chat-page.large-text .speaker-role-switch {
-  padding: 10rpx;
-  border-radius: 28rpx;
-}
-
-.voice-chat-page.large-text .speaker-role-button {
-  min-height: 96rpx;
-  border-radius: 18rpx;
-  font-size: 38rpx;
-  line-height: 54rpx;
 }
 
 .voice-chat-page.large-text .assistant-context {
@@ -918,6 +924,33 @@
 
 .voice-chat-page.large-text .control-bar {
   padding: 30rpx 24rpx 50rpx;
+}
+
+.voice-chat-page.large-text .human-record-actions {
+  max-width: 702rpx;
+  gap: 16rpx;
+}
+
+.voice-chat-page.large-text .role-record-button {
+  min-height: 162rpx;
+  border-radius: 38rpx;
+  gap: 12rpx;
+  padding: 22rpx 12rpx;
+}
+
+.voice-chat-page.large-text .role-record-icon-shell {
+  width: 74rpx;
+  height: 74rpx;
+}
+
+.voice-chat-page.large-text .role-record-icon {
+  width: 50rpx;
+  height: 50rpx;
+}
+
+.voice-chat-page.large-text .role-record-text {
+  font-size: 40rpx;
+  line-height: 54rpx;
 }
 
 .voice-chat-page.large-text .mic-button {
