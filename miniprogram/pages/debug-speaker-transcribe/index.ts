@@ -835,6 +835,7 @@ Page<DebugSpeakerPageData, {
         }
         if (finalLineChanged) {
           latestFinalLineId = line.id;
+          conversationScrollTarget = lineDomId(line.id);
           conversationLinesChanged = true;
         }
       }
@@ -845,6 +846,9 @@ Page<DebugSpeakerPageData, {
       activePartial = shouldClearActivePartialForFinal(this.data.activePartial, speakerId, text)
         ? EMPTY_ACTIVE_PARTIAL
         : this.data.activePartial;
+      if (activePartial.visible) {
+        conversationScrollTarget = "active-partial-card";
+      }
       if (text.trim()) {
         cumulativeFinalText = text.trim();
         cumulativeFinalStartMs = eventStartMs(event);
@@ -890,6 +894,7 @@ Page<DebugSpeakerPageData, {
           partialScrollTop,
         }
         : EMPTY_ACTIVE_PARTIAL;
+      conversationScrollTarget = partialText ? "active-partial-card" : "";
       const partialSignature = [
         speakerId,
         event.segment_id || "",
