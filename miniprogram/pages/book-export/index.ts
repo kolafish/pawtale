@@ -4,6 +4,7 @@ import type {
   MemoirBookOutputExportLayout,
   MemoirBookPlan,
 } from "../../domain/voice-chat";
+import { definePage } from "../../services/page-definition";
 import {
   downloadMemoirBookOutputExport,
   enqueueMemoirBookOutputGeneration,
@@ -170,33 +171,8 @@ function defaultTitle(plan: MemoirBookPlan | null, output: MemoirBookOutput | nu
   );
 }
 
-Page<BookExportData, {
-  onLoad(query?: PageQuery): Promise<void>;
-  onUnload(): void;
-  loadBookExportPage(projectId: string): Promise<void>;
-  loadBookOutput(projectId: string): Promise<MemoirBookOutput | null>;
-  applyBookExportData(plan: MemoirBookPlan | null, output: MemoirBookOutput | null): void;
-  changeBookTitle(event: TextInputEvent): void;
-  changeBookMetadataField(event: TextInputEvent): void;
-  suggestBookTitles(): Promise<void>;
-  chooseBookTitleSuggestion(event: DatasetEvent): void;
-  changeBookCoverStyle(event: PickerEvent): void;
-  scheduleBookDesignAutosave(): void;
-  clearBookDesignAutosaveTimer(): void;
-  flushBookDesignAutosave(): void;
-  autosaveBookDesignSettings(): Promise<void>;
-  saveBookDesignSettings(): Promise<void>;
-  ensureBookDesignSavedForEditorialCopy(): Promise<boolean>;
-  regenerateBookEditorialCopy(event: DatasetEvent): Promise<void>;
-  generateBook(): Promise<void>;
-  changeBookOutputVersion(event: PickerEvent): void;
-  toggleBookExportSourceAppendix(event: SwitchEvent): void;
-  previewExportActionHint(event: DatasetEvent): void;
-  toggleBookPreviewChapters(): void;
-  downloadBookOutputExport(event: DatasetEvent): Promise<void>;
-  bookDesignAutosaveTimer: number | null;
-}>({
-  bookDesignAutosaveTimer: null,
+definePage<BookExportData>()({
+  bookDesignAutosaveTimer: null as number | null,
 
   data: {
     loading: false,
@@ -222,7 +198,7 @@ Page<BookExportData, {
     ...bookOutputData(null),
   },
 
-  async onLoad(query = {}) {
+  async onLoad(query: PageQuery = {}) {
     const projectId = queryParam(query, "projectId");
     const action = queryParam(query, "action") || "preview";
     this.setData({
@@ -242,7 +218,7 @@ Page<BookExportData, {
     this.flushBookDesignAutosave();
   },
 
-  async loadBookExportPage(projectId) {
+  async loadBookExportPage(projectId: string) {
     this.setData({ loading: true, error: "" });
     try {
       const [plan, output] = await Promise.all([
@@ -265,7 +241,7 @@ Page<BookExportData, {
     }
   },
 
-  async loadBookOutput(projectId) {
+  async loadBookOutput(projectId: string) {
     try {
       return await getMemoirBookOutput(projectId);
     } catch (error) {
@@ -276,7 +252,7 @@ Page<BookExportData, {
     }
   },
 
-  applyBookExportData(plan, output) {
+  applyBookExportData(plan: MemoirBookPlan | null, output: MemoirBookOutput | null) {
     const chapters = plan ? buildChapterViews(plan, {}, null, {}) : [];
     const stage = planStage(plan);
     const outputData = bookOutputData(output);
@@ -297,7 +273,7 @@ Page<BookExportData, {
     });
   },
 
-  changeBookTitle(event) {
+  changeBookTitle(event: TextInputEvent) {
     const value = event.detail.value;
     const storedTitle = latestBookTitle(this.data.bookOutput)
       || this.data.bookManuscriptTitle
@@ -309,7 +285,7 @@ Page<BookExportData, {
     this.scheduleBookDesignAutosave();
   },
 
-  changeBookMetadataField(event) {
+  changeBookMetadataField(event: TextInputEvent) {
     const key = datasetString(event, "key");
     const fieldByKey: Record<string, keyof BookExportData> = {
       subtitle: "bookSubtitleInput",
@@ -359,7 +335,7 @@ Page<BookExportData, {
     }
   },
 
-  chooseBookTitleSuggestion(event) {
+  chooseBookTitleSuggestion(event: DatasetEvent) {
     const title = trimText(datasetString(event, "title"));
     if (!title) {
       return;
@@ -375,7 +351,7 @@ Page<BookExportData, {
     this.scheduleBookDesignAutosave();
   },
 
-  changeBookCoverStyle(event) {
+  changeBookCoverStyle(event: PickerEvent) {
     const index = pickerIndex(event);
     const option = this.data.bookCoverStyleOptions[index];
     if (!option) {
@@ -517,7 +493,7 @@ Page<BookExportData, {
     return !bookDesignHasChanges(this.data);
   },
 
-  async regenerateBookEditorialCopy(event) {
+  async regenerateBookEditorialCopy(event: DatasetEvent) {
     const target = datasetString(event, "target");
     if (!isBookLevelEditorialCopyTarget(target)) {
       return;
@@ -585,7 +561,7 @@ Page<BookExportData, {
     }
   },
 
-  changeBookOutputVersion(event) {
+  changeBookOutputVersion(event: PickerEvent) {
     const index = pickerIndex(event);
     const option = this.data.bookVersionOptions[index];
     if (!option || !this.data.bookOutput) {
@@ -597,11 +573,11 @@ Page<BookExportData, {
     });
   },
 
-  toggleBookExportSourceAppendix(event) {
+  toggleBookExportSourceAppendix(event: SwitchEvent) {
     this.setData({ bookExportShowSourceAppendix: Boolean(event.detail.value) });
   },
 
-  previewExportActionHint(event) {
+  previewExportActionHint(event: DatasetEvent) {
     this.setData({ exportActionHintText: exportActionHint(datasetString(event, "action")) });
   },
 
@@ -609,7 +585,7 @@ Page<BookExportData, {
     this.setData({ bookPreviewChaptersExpanded: !this.data.bookPreviewChaptersExpanded });
   },
 
-  async downloadBookOutputExport(event) {
+  async downloadBookOutputExport(event: DatasetEvent) {
     const format = datasetChoice(event, "format", BOOK_EXPORT_FORMATS, "pdf");
     const requestedLayout = datasetChoice(event, "layout", BOOK_EXPORT_LAYOUTS, "standard");
     const layout: MemoirBookOutputExportLayout = format === "pdf" && requestedLayout === "large_print"

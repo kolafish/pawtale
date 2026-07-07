@@ -1,16 +1,18 @@
-type PageContext<TData extends object, TMethods extends object> = TMethods & {
+type PageMethods<TDefinition extends { data: object }> = Omit<TDefinition, "data">;
+
+type PageContext<TData extends object, TDefinition extends { data: TData }> = PageMethods<TDefinition> & {
   data: TData;
   setData(data: Partial<TData>): void;
 };
 
-type PageDefinition<TData extends object, TMethods extends object> = TMethods & {
+type PageDefinition<TData extends object, TDefinition extends { data: TData }> = {
   data: TData;
-} & ThisType<PageContext<TData, TMethods>>;
+} & TDefinition & ThisType<PageContext<TData, TDefinition>>;
 
 export function definePage<TData extends object>() {
-  return function <TMethods extends object>(
-    definition: PageDefinition<TData, TMethods>,
+  return function <TDefinition extends { data: TData }>(
+    definition: PageDefinition<TData, TDefinition>,
   ): void {
-    Page<TData, TMethods>(definition);
+    Page<TData, PageMethods<TDefinition>>(definition);
   };
 }

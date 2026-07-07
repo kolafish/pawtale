@@ -4,6 +4,7 @@ import type {
   MemoirVoiceProgressResponse,
   MemoirVoiceSessionSummary,
 } from "../../domain/voice-chat";
+import { definePage } from "../../services/page-definition";
 import {
   getMemoirVoiceProgress,
   listMemoirVoiceSessions,
@@ -140,11 +141,7 @@ function toModuleView(item: MemoirVoiceModuleProgress): ModuleProgressView {
   };
 }
 
-Page<ProgressData, {
-  onShow(): Promise<void>;
-  loadProgress(): Promise<void>;
-  continueSession(event: DatasetEvent): void;
-}>({
+definePage<ProgressData>()({
   data: {
     loading: false,
     error: "",
@@ -198,7 +195,7 @@ Page<ProgressData, {
     }
   },
 
-  continueSession(event) {
+  continueSession(event: DatasetEvent) {
     const id = datasetString(event, "id");
     const item = this.data.sessions.find((candidate) => candidate.id === id);
     if (!item) {

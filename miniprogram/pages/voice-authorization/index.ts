@@ -3,15 +3,13 @@ import {
   syncVoiceAuthorizationConsent,
   VOICE_AUTHORIZATION_VERSION,
 } from "../../services/voice-authorization";
+import { definePage } from "../../services/page-definition";
 
 interface VoiceAuthorizationData {
   version: string;
 }
 
-Page<VoiceAuthorizationData, {
-  agreeAndBack(): Promise<void>;
-  disagreeAndBack(): Promise<void>;
-}>({
+definePage<VoiceAuthorizationData>()({
   data: {
     version: VOICE_AUTHORIZATION_VERSION,
   },

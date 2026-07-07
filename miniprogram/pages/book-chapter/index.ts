@@ -4,6 +4,7 @@ import type {
   MemoirBookPlanStructureCommandRequest,
   MemoirBookSourceCoverage,
 } from "../../domain/voice-chat";
+import { definePage } from "../../services/page-definition";
 import { trackAuditAction } from "../../services/audit-tracker";
 import {
   applyMemoirBookPlanStructureCommand,
@@ -100,35 +101,7 @@ async function loadSourceCoverage(projectId: string): Promise<MemoirBookSourceCo
   }
 }
 
-Page<BookChapterPageData, {
-  onLoad(query?: PageQuery): Promise<void>;
-  loadChapter(projectId: string, chapterId: string): Promise<void>;
-  applyChapterData(
-    plan: MemoirBookPlan,
-    coverage: MemoirBookSourceCoverage | null,
-    draft: MemoirBookChapterDraft | null,
-  ): void;
-  patchChapter(patch: Partial<BookChapterView>): void;
-  patchDraft(draft: MemoirBookChapterDraft): void;
-  applyPlanStructureCommand(
-    command: MemoirBookPlanStructureCommandRequest,
-    toastTitle: string,
-  ): Promise<MemoirBookPlan | null>;
-  changeTab(event: DatasetEvent): void;
-  changeChapterTitle(event: TextInputEvent): void;
-  saveChapterTitle(): Promise<void>;
-  generateChapterTitle(): Promise<void>;
-  changeDraftContent(event: TextInputEvent): void;
-  generateChapterDraft(): Promise<void>;
-  saveChapterDraft(): Promise<void>;
-  confirmChapterDraft(): Promise<void>;
-  moveChapter(event: DatasetEvent): Promise<void>;
-  mergeChapterInto(event: PickerEvent): Promise<void>;
-  toggleSplitSource(event: DatasetEvent): void;
-  splitSelectedChapterSources(): Promise<void>;
-  deleteChapter(): Promise<void>;
-  goBack(): void;
-}>({
+definePage<BookChapterPageData>()({
   data: {
     loading: false,
     error: "",
@@ -148,7 +121,7 @@ Page<BookChapterPageData, {
     splitSourceSelections: [],
   },
 
-  async onLoad(query = {}) {
+  async onLoad(query: PageQuery = {}) {
     const projectId = queryParam(query, "projectId");
     const chapterId = queryParam(query, "chapterId");
     const activeTab = queryChoice(query, "tab", TAB_VALUES, "content");
@@ -160,7 +133,7 @@ Page<BookChapterPageData, {
     await this.loadChapter(projectId, chapterId);
   },
 
-  async loadChapter(projectId, chapterId) {
+  async loadChapter(projectId: string, chapterId: string) {
     if (this.data.loading) {
       return;
     }
@@ -179,7 +152,7 @@ Page<BookChapterPageData, {
     }
   },
 
-  applyChapterData(plan, coverage, draft) {
+  applyChapterData(plan: MemoirBookPlan, coverage: MemoirBookSourceCoverage | null, draft: MemoirBookChapterDraft | null) {
     const chapters = buildChapterViews(
       plan,
       { [this.data.chapterId]: draft },
@@ -213,7 +186,7 @@ Page<BookChapterPageData, {
     });
   },
 
-  patchChapter(patch) {
+  patchChapter(patch: Partial<BookChapterView>) {
     if (!this.data.chapter) {
       return;
     }
@@ -226,14 +199,14 @@ Page<BookChapterPageData, {
     });
   },
 
-  patchDraft(draft) {
+  patchDraft(draft: MemoirBookChapterDraft) {
     if (!this.data.plan) {
       return;
     }
     this.applyChapterData(this.data.plan, this.data.sourceCoverage, draft);
   },
 
-  async applyPlanStructureCommand(command, toastTitle) {
+  async applyPlanStructureCommand(command: MemoirBookPlanStructureCommandRequest, toastTitle: string) {
     if (!this.data.projectId || !this.data.plan || this.data.updatingPlanStructure) {
       return null;
     }
@@ -258,11 +231,11 @@ Page<BookChapterPageData, {
     }
   },
 
-  changeTab(event) {
+  changeTab(event: DatasetEvent) {
     this.setData({ activeTab: datasetChoice(event, "tab", TAB_VALUES, "content") });
   },
 
-  changeChapterTitle(event) {
+  changeChapterTitle(event: TextInputEvent) {
     const chapter = this.data.chapter;
     if (!chapter) {
       return;
@@ -327,7 +300,7 @@ Page<BookChapterPageData, {
     }
   },
 
-  changeDraftContent(event) {
+  changeDraftContent(event: TextInputEvent) {
     const chapter = this.data.chapter;
     if (!chapter) {
       return;
@@ -411,7 +384,7 @@ Page<BookChapterPageData, {
     }
   },
 
-  async moveChapter(event) {
+  async moveChapter(event: DatasetEvent) {
     const direction = datasetChoice(event, "direction", CHAPTER_MOVE_DIRECTIONS, "down");
     const chapter = this.data.chapter;
     if (!chapter || (direction === "up" && !chapter.canMoveUp) || (direction === "down" && !chapter.canMoveDown)) {
@@ -427,7 +400,7 @@ Page<BookChapterPageData, {
     }
   },
 
-  async mergeChapterInto(event) {
+  async mergeChapterInto(event: PickerEvent) {
     const chapter = this.data.chapter;
     const optionIndex = pickerIndex(event);
     const option = chapter?.mergeTargetOptions[optionIndex];
@@ -457,7 +430,7 @@ Page<BookChapterPageData, {
     }
   },
 
-  toggleSplitSource(event) {
+  toggleSplitSource(event: DatasetEvent) {
     const utteranceId = datasetString(event, "utteranceId");
     const chapter = this.data.chapter;
     if (!chapter || !utteranceId || chapter.source_refs.length <= 1 || this.data.updatingPlanStructure || chapter.draftBusy) {

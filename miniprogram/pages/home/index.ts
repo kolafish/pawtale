@@ -1,4 +1,5 @@
 import type { MemoirGuidanceMode, MemoirInterviewType, MemoirVoiceTranscriptItem } from "../../domain/voice-chat";
+import { definePage } from "../../services/page-definition";
 import { getMemoirIdentity } from "../../services/auth";
 import { trackAuditAction } from "../../services/audit-tracker";
 import {
@@ -280,28 +281,7 @@ async function loadLastStoryHint(projectId: string): Promise<string> {
   }
 }
 
-Page<HomeData, {
-  onShow(): Promise<void>;
-  loadHome(): Promise<void>;
-  refreshAccessibilitySettings(): void;
-  refreshVoiceAuthorizationConsent(): void;
-  changeVoiceAuthorization(event: CheckboxChangeEvent): void;
-  openVoiceAuthorization(): void;
-  dismissLaunchPanel(): void;
-  dismissReturnPrompt(): void;
-  createProject(): void;
-  startVoiceChat(): Promise<void>;
-  startPrimaryVoiceChat(): Promise<void>;
-  startLaunchVoiceChat(): Promise<void>;
-  startFreeNarration(): Promise<void>;
-  startGuidedInterview(): Promise<void>;
-  startHumanInterview(): Promise<void>;
-  startVoiceChatWithMode(
-    mode: MemoirGuidanceMode,
-    entry: HomeVoiceEntry,
-    interviewType?: MemoirInterviewType,
-  ): Promise<void>;
-}>({
+definePage<HomeData>()({
   data: {
     loading: false,
     creatingVoice: false,
@@ -417,7 +397,7 @@ Page<HomeData, {
     }
   },
 
-  changeVoiceAuthorization(event) {
+  changeVoiceAuthorization(event: CheckboxChangeEvent) {
     const agreed = event.detail.value.includes(VOICE_AUTHORIZATION_VALUE);
     const consent = saveVoiceAuthorizationConsent(agreed);
     setHomeData(this, {
@@ -473,7 +453,11 @@ Page<HomeData, {
     await this.startVoiceChatWithMode("free_narration", "home_resume", "human_interview");
   },
 
-  async startVoiceChatWithMode(mode, entry, interviewType = "ai_interview") {
+  async startVoiceChatWithMode(
+    mode: MemoirGuidanceMode,
+    entry: HomeVoiceEntry,
+    interviewType: MemoirInterviewType = "ai_interview",
+  ) {
     if (this.data.loading || this.data.creatingVoice) {
       return;
     }

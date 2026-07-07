@@ -14,6 +14,7 @@ import type {
   VoiceChatTranscriptLine,
   VoiceGatewayServerEvent,
 } from "../../domain/voice-chat";
+import { definePage } from "../../services/page-definition";
 import { trackAuditAction } from "../../services/audit-tracker";
 import type { BookChapterView, BookData, BookVoiceCommandUndoSnapshot } from "./book-view-model";
 import { getMemoirIdentity } from "../../services/auth";
@@ -235,177 +236,20 @@ const BOOK_VOICE_NO_VOICE_MS = 3500;
 const BOOK_VOICE_AUTO_LISTEN_NO_VOICE_MS = 15000;
 const BOOK_VOICE_STREAMING_TTS_PROGRESS_HOLD_SECONDS = 0.75;
 
-Page<BookData, {
-  onShow(): Promise<void>;
-  loadBookHome(): Promise<void>;
-  loadPlanForProject(projectId: string): Promise<void>;
-  loadDraftsForPlan(plan: MemoirBookPlan): Promise<Record<string, MemoirBookChapterDraft | null>>;
-  loadBookOutput(projectId: string): Promise<MemoirBookOutput | null>;
-  loadSourceCoverage(projectId: string): Promise<MemoirBookSourceCoverage | null>;
-  loadAutomationEvents(projectId: string): Promise<MemoirAutomationEvent[]>;
-  refreshAutomationEventsAfterGeneration(): Promise<void>;
-  scheduleBookGenerationEventPoll(): void;
-  clearBookGenerationEventPoll(): void;
-  syncBookGenerationBusyState(events: MemoirAutomationEvent[]): void;
-  applyPlan(plan: MemoirBookPlan | null, draftsByChapterId?: Record<string, MemoirBookChapterDraft | null>): void;
-  applyBookOutput(output: MemoirBookOutput | null): void;
-  applySourceCoverage(coverage: MemoirBookSourceCoverage | null): void;
-  applyAutomationEvents(events: MemoirAutomationEvent[]): void;
-  toggleAutomationEventDetails(event: DatasetEvent): void;
-  acknowledgeAutomationEvent(event: DatasetEvent): Promise<void>;
-  applyUpdatedPlan(plan: MemoirBookPlan, toastTitle: string): Promise<void>;
-  generatePlan(): Promise<void>;
-  confirmPlan(): Promise<void>;
-  changePlanTitle(event: TextInputEvent): void;
-  openChapterEditor(event: DatasetEvent): void;
-  closeChapterEditor(): void;
-  openChapterSources(event: DatasetEvent): void;
-  openChapterMoreActions(event: DatasetEvent): void;
-  openBookExportPage(event: DatasetEvent): void;
-  changeChapterTitle(event: TextInputEvent): void;
-  saveChapterTitle(event: DatasetEvent): Promise<void>;
-  generateChapterTitle(event: DatasetEvent): Promise<void>;
-  generateChapterTitleById(chapterId: string, toastTitle?: string): Promise<boolean>;
-  removeChapter(event: DatasetEvent): Promise<void>;
-  moveChapter(event: DatasetEvent): Promise<void>;
-  mergeChapterInto(event: PickerEvent): Promise<void>;
-  toggleSplitSource(event: DatasetEvent): void;
-  splitSelectedChapterSources(event: DatasetEvent): Promise<void>;
-  toggleChapterSources(event: DatasetEvent): void;
-  generateChapterDraft(event: DatasetEvent): Promise<void>;
-  generateChapterDraftById(chapterId: string): Promise<boolean>;
-  changeDraftContent(event: TextInputEvent): void;
-  saveChapterDraft(event: DatasetEvent): Promise<void>;
-  confirmChapterDraft(event: DatasetEvent): Promise<void>;
-  assignUncoveredSource(event: PickerEvent): Promise<void>;
-  addUncoveredSourceAsChapter(event: DatasetEvent): Promise<void>;
-  addUncoveredSourceAsChapterById(utteranceId: string): Promise<void>;
-  deleteConfirmedChapter(event: DatasetEvent): Promise<void>;
-  applyPlanStructureCommand(
-    command: MemoirBookPlanStructureCommandRequest,
-    toastTitle: string
-  ): Promise<MemoirBookPlan | null>;
-  updatePlanStructure(chapters: MemoirBookPlanChapterUpdateInput[], toastTitle: string): Promise<MemoirBookPlan | null>;
-  regenerateMergedChapter(chapterId: string): Promise<void>;
-  regenerateBookChapterEditorialCopy(event: DatasetEvent): Promise<void>;
-  openBookChapterEditorialEditor(event: DatasetEvent): void;
-  closeBookChapterEditorialEditor(): void;
-  changeBookChapterEditorialField(event: TextInputEvent): void;
-  saveBookChapterEditorialCopy(): Promise<void>;
-  generateBook(): Promise<void>;
-  changeBookOutputVersion(event: PickerEvent): void;
-  toggleBookPreviewChapters(): void;
-  toggleBookOutputDetails(): void;
-  editBookOutputChapter(event: DatasetEvent): void;
-  playChapterAudio(event: DatasetEvent): Promise<void>;
-  playChapterAudioById(
-    chapterId: string,
-    options?: { autoListenAfterPlayback?: boolean; showPreparingToast?: boolean },
-  ): Promise<void>;
-  playBookAudio(): Promise<void>;
-  playBookOutlineAudio(options?: { autoListenAfterPlayback?: boolean }): Promise<void>;
-  startBookVoiceCommand(options?: { autoTriggered?: boolean }): Promise<void>;
-  connectBookVoiceCommandGateway(): Promise<boolean>;
-  ensureBookVoiceAuthorization(autoTriggered?: boolean): Promise<boolean>;
-  appendBookVoiceTranscriptLine(line: VoiceChatTranscriptLine): void;
-  handleBookVoiceStatus(status: VoiceChatConnectionStatus): void;
-  handleBookVoiceCaptureStats(stats: MemoirCaptureStats): void;
-  handleBookVoiceGatewayEvent(event: VoiceGatewayServerEvent): void;
-  handleBookVoicePartial(text: string): void;
-  handleBookVoiceFinal(event: VoiceGatewayServerEvent): Promise<void>;
-  handleBookVoiceError(message: string, error?: VoiceChatErrorInfo): void;
-  applyBookVoiceCommandPreview(preview: MemoirBookVoiceCommandParseResponse): void;
-  handleBookVoiceCommandTranscript(text: string): Promise<void>;
-  runBookVoiceAssistantTurn(text: string): Promise<boolean>;
-  bookVoiceAssistantTurnPayload(text: string): Record<string, unknown>;
-  handleBookVoiceCommandPreview(event: VoiceAssistantTurnCommandPreviewEvent): void;
-  applyBookVoiceAssistantTurnText(text: string): void;
-  applyCompletedBookVoiceAssistantTurn(
-    event: VoiceAssistantTurnCompletedEvent,
-    undoSnapshot: BookVoiceCommandUndoSnapshot | null,
-    options?: { autoListenAfterTurn?: boolean },
-  ): Promise<void>;
-  executeBookVoiceCommand(options?: { confirmedByVoice?: boolean; autoListenAfterExecution?: boolean }): Promise<void>;
-  applyBookVoiceCommandExecution(
-    response: MemoirBookVoiceCommandExecuteResponse,
-    undoSnapshot: BookVoiceCommandUndoSnapshot | null,
-    options?: { autoListenAfterExecution?: boolean }
-  ): Promise<void>;
-  undoBookVoiceCommand(): Promise<void>;
-  clearBookVoiceCommandPreview(): void;
-  stopBookVoiceConversation(): void;
-  clearBookVoiceAssistantAutoListenTimer(): void;
-  canStartBookVoiceAssistantAutoListen(): boolean;
-  scheduleBookVoiceAssistantAutoListen(statusText?: string): void;
-  canInterruptBookVoiceAssistantReply(): boolean;
-  interruptBookVoiceAssistantReply(): void;
-  finishBookVoiceAssistantAudioFrames(token: number, activeText: string): Promise<void>;
-  markBookVoiceStreamingAudioFrameScheduled(event: StreamingSpeechPlaybackFrameEvent): void;
-  updateBookVoiceStreamingTTSProgress(): void;
-  startBookVoiceStreamingTTSProgressTimer(token: number): void;
-  bookVoiceCommandUndoSnapshot(): BookVoiceCommandUndoSnapshot | null;
-  confirmBookVoiceCommandExecution(content: string, confirmText?: string): Promise<boolean>;
-  requestBookAudio(target: string): Promise<MemoirBookAudioResponse>;
-  playAudioFiles(
-    response: MemoirBookAudioResponse,
-    target: string,
-    token: number,
-    activeText: string,
-  ): Promise<void>;
-  playAudioFile(
-    audioFileId: string,
-    token: number,
-    elapsedBeforeSeconds: number,
-    fallbackDurationSeconds: number,
-  ): Promise<number>;
-  updateBookTTSProgress(currentTimeSeconds: number, durationSeconds?: number): void;
-  startBookTTSProgressTimer(
-    token: number,
-    audio: WechatMiniprogram.InnerAudioContext,
-    elapsedBeforeSeconds: number,
-    durationSeconds: number,
-  ): void;
-  stopBookTTSProgressTimer(): void;
-  resetBookTTSProgress(): void;
-  playbackTimeForProgress(audio: WechatMiniprogram.InnerAudioContext): number;
-  stopPlayback(): void;
-  onHide(): void;
-  onUnload(): void;
-  openTranscripts(event?: DatasetEvent): void;
-  openHome(): void;
-  openLogin(): void;
-  createProject(): void;
-  patchChapter(chapterId: string, patch: Partial<BookChapterView>): void;
-  patchDraft(chapterId: string, draft: MemoirBookChapterDraft): void;
-  clearBookOutput(): void;
-  audioPlayback: AudioPlaybackController;
-  bookVoiceStreaming: StreamingVoiceController;
-  bookVoiceAssistantTurnRuntime: VoiceAssistantTurnRuntime | null;
-  bookVoiceStreamingAudioStartSeconds: number;
-  bookVoiceStreamingAudioEndSeconds: number;
-  playToken: number;
-  ttsProgressTimer: number | null;
-  ttsProgressStartedAtMs: number;
-  bookVoiceAutoListenTimer: number | null;
-  bookGenerationPollTimer: number | null;
-  bookGenerationPollAttempts: number;
-  automationEvents: MemoirAutomationEvent[];
-  backgroundDraftBusyChapterIds: Record<string, boolean>;
-  bookOutputGenerationSubmitting: boolean;
-}>({
+definePage<BookData>()({
   audioPlayback: new AudioPlaybackController(),
   bookVoiceStreaming: new StreamingVoiceController(),
-  bookVoiceAssistantTurnRuntime: null,
+  bookVoiceAssistantTurnRuntime: null as VoiceAssistantTurnRuntime | null,
   bookVoiceStreamingAudioStartSeconds: -1,
   bookVoiceStreamingAudioEndSeconds: 0,
   playToken: 0,
-  ttsProgressTimer: null,
+  ttsProgressTimer: null as number | null,
   ttsProgressStartedAtMs: 0,
-  bookVoiceAutoListenTimer: null,
-  bookGenerationPollTimer: null,
+  bookVoiceAutoListenTimer: null as number | null,
+  bookGenerationPollTimer: null as number | null,
   bookGenerationPollAttempts: 0,
-  automationEvents: [],
-  backgroundDraftBusyChapterIds: {},
+  automationEvents: [] as MemoirAutomationEvent[],
+  backgroundDraftBusyChapterIds: {} as Record<string, boolean>,
   bookOutputGenerationSubmitting: false,
 
   data: {
@@ -609,7 +453,7 @@ Page<BookData, {
     }
   },
 
-  async loadAutomationEvents(projectId) {
+  async loadAutomationEvents(projectId: string) {
     this.setData({ automationEventLoading: true, automationEventError: "" });
     try {
       const response = await listMemoirAutomationEvents(projectId, 8);
@@ -675,7 +519,7 @@ Page<BookData, {
     }
   },
 
-  async loadDraftsForPlan(plan) {
+  async loadDraftsForPlan(plan: MemoirBookPlan) {
     const entries = await Promise.all(
       plan.chapters.map(async (chapter) => {
         try {
@@ -695,7 +539,7 @@ Page<BookData, {
     }, {});
   },
 
-  async loadBookOutput(projectId) {
+  async loadBookOutput(projectId: string) {
     try {
       return await getMemoirBookOutput(projectId);
     } catch (error) {
@@ -706,7 +550,7 @@ Page<BookData, {
     }
   },
 
-  async loadSourceCoverage(projectId) {
+  async loadSourceCoverage(projectId: string) {
     try {
       return await getMemoirBookSourceCoverage(projectId);
     } catch (error) {
@@ -717,7 +561,7 @@ Page<BookData, {
     }
   },
 
-  applyPlan(plan, draftsByChapterId = {}) {
+  applyPlan(plan: MemoirBookPlan | null, draftsByChapterId: Record<string, MemoirBookChapterDraft | null> = {}) {
     const chapters = plan
       ? buildChapterViews(plan, draftsByChapterId, this.data.sourceCoverage, this.data.splitSourceSelections)
       : [];
@@ -750,7 +594,7 @@ Page<BookData, {
     });
   },
 
-  applyBookOutput(output) {
+  applyBookOutput(output: MemoirBookOutput | null) {
     const outputData = bookOutputData(output);
     if (!output && !outputData.bookTitleInput) {
       outputData.bookTitleInput = defaultBookTitleInput(this.data.planTitle, this.data.projectTitle);
@@ -765,7 +609,7 @@ Page<BookData, {
     });
   },
 
-  async regenerateBookChapterEditorialCopy(event) {
+  async regenerateBookChapterEditorialCopy(event: DatasetEvent) {
     const chapterId = datasetString(event, "id");
     const target = datasetString(event, "target");
     if (!chapterId || !isChapterEditorialCopyTarget(target)) {
@@ -801,7 +645,7 @@ Page<BookData, {
     }
   },
 
-  openBookChapterEditorialEditor(event) {
+  openBookChapterEditorialEditor(event: DatasetEvent) {
     const chapterId = datasetString(event, "id");
     if (!chapterId) {
       return;
@@ -841,7 +685,7 @@ Page<BookData, {
     });
   },
 
-  changeBookChapterEditorialField(event) {
+  changeBookChapterEditorialField(event: TextInputEvent) {
     const key = datasetString(event, "key");
     if (key === "intro") {
       this.setData({ bookChapterEditorialIntroInput: event.detail.value, error: "" });
@@ -884,7 +728,7 @@ Page<BookData, {
     }
   },
 
-  changeBookOutputVersion(event) {
+  changeBookOutputVersion(event: PickerEvent) {
     const index = pickerIndex(event);
     const option = this.data.bookVersionOptions[index];
     if (!option || !this.data.bookOutput) {
@@ -908,11 +752,11 @@ Page<BookData, {
     this.setData({ bookOutputDetailsExpanded: !this.data.bookOutputDetailsExpanded });
   },
 
-  applySourceCoverage(coverage) {
+  applySourceCoverage(coverage: MemoirBookSourceCoverage | null) {
     this.setData(sourceCoverageData(this.data.plan, coverage));
   },
 
-  syncBookGenerationBusyState(events) {
+  syncBookGenerationBusyState(events: MemoirAutomationEvent[]) {
     const pendingChapterIds = pendingChapterDraftGenerationIds(events);
     const previousPendingIds = Object.keys(this.backgroundDraftBusyChapterIds);
     const changedChapterIds = new Set([...previousPendingIds, ...Array.from(pendingChapterIds)]);
@@ -940,7 +784,7 @@ Page<BookData, {
     this.setData(dataPatch);
   },
 
-  applyAutomationEvents(events) {
+  applyAutomationEvents(events: MemoirAutomationEvent[]) {
     this.automationEvents = events;
     this.setData({
       automationEventItems: buildAutomationEventViews(
@@ -953,7 +797,7 @@ Page<BookData, {
     this.scheduleBookGenerationEventPoll();
   },
 
-  toggleAutomationEventDetails(event) {
+  toggleAutomationEventDetails(event: DatasetEvent) {
     const eventId = datasetString(event, "id");
     if (!eventId) {
       return;
@@ -978,7 +822,7 @@ Page<BookData, {
     });
   },
 
-  async acknowledgeAutomationEvent(event) {
+  async acknowledgeAutomationEvent(event: DatasetEvent) {
     const eventId = datasetString(event, "id");
     const eventIdsText = datasetString(event, "eventIds") || eventId;
     const action = datasetString(event, "action") || "acknowledge";
@@ -1023,7 +867,7 @@ Page<BookData, {
     }
   },
 
-  async applyUpdatedPlan(plan, toastTitle) {
+  async applyUpdatedPlan(plan: MemoirBookPlan, toastTitle: string) {
     const [draftsByChapterId, coverage, output] = plan.status === "confirmed"
       ? await Promise.all([
         this.loadDraftsForPlan(plan),
@@ -1095,11 +939,11 @@ Page<BookData, {
     }
   },
 
-  changePlanTitle(event) {
+  changePlanTitle(event: TextInputEvent) {
     this.setData({ planTitle: event.detail.value });
   },
 
-  openChapterEditor(event) {
+  openChapterEditor(event: DatasetEvent) {
     const chapterId = datasetString(event, "id");
     if (!chapterId || !this.data.projectId) {
       this.setData({ error: "缺少章节信息" });
@@ -1113,7 +957,7 @@ Page<BookData, {
     this.setData({ editingChapterId: "" });
   },
 
-  openChapterSources(event) {
+  openChapterSources(event: DatasetEvent) {
     const chapterId = datasetString(event, "id");
     if (!chapterId || !this.data.projectId) {
       this.setData({ error: "缺少章节信息" });
@@ -1122,7 +966,7 @@ Page<BookData, {
     wx.navigateTo({ url: bookChapterDetailUrl(this.data.projectId, chapterId, "sources") });
   },
 
-  openChapterMoreActions(event) {
+  openChapterMoreActions(event: DatasetEvent) {
     const chapterId = datasetString(event, "id");
     const chapter = findBookChapter(this.data.chapters, chapterId);
     if (!chapter || !this.data.projectId) {
@@ -1159,7 +1003,7 @@ Page<BookData, {
     });
   },
 
-  openBookExportPage(event) {
+  openBookExportPage(event: DatasetEvent) {
     if (!this.data.projectId) {
       return;
     }
@@ -1171,7 +1015,7 @@ Page<BookData, {
     wx.navigateTo({ url: bookExportPageUrl(this.data.projectId, action) });
   },
 
-  changeChapterTitle(event) {
+  changeChapterTitle(event: TextInputEvent) {
     const id = datasetString(event, "id");
     const chapter = findBookChapter(this.data.chapters, id);
     this.patchChapter(id, {
@@ -1180,7 +1024,7 @@ Page<BookData, {
     });
   },
 
-  async saveChapterTitle(event) {
+  async saveChapterTitle(event: DatasetEvent) {
     const chapterId = datasetString(event, "id");
     const chapter = findBookChapter(this.data.chapters, chapterId);
     if (!chapter || !this.data.projectId || this.data.titleBusyTarget || this.data.updatingPlanStructure) {
@@ -1218,12 +1062,12 @@ Page<BookData, {
     }
   },
 
-  async generateChapterTitle(event) {
+  async generateChapterTitle(event: DatasetEvent) {
     const chapterId = datasetString(event, "id");
     await this.generateChapterTitleById(chapterId, "已重新起名");
   },
 
-  async generateChapterTitleById(chapterId, toastTitle = "已重新起名") {
+  async generateChapterTitleById(chapterId: string, toastTitle: string = "已重新起名") {
     const chapter = findBookChapter(this.data.chapters, chapterId);
     if (!chapter || !this.data.projectId || this.data.titleBusyTarget || this.data.updatingPlanStructure) {
       return false;
@@ -1253,7 +1097,7 @@ Page<BookData, {
     }
   },
 
-  async removeChapter(event) {
+  async removeChapter(event: DatasetEvent) {
     const id = datasetString(event, "id");
     if (!id || this.data.confirmingPlan || this.data.updatingPlanStructure || this.data.chapters.length <= 1) {
       return;
@@ -1268,7 +1112,7 @@ Page<BookData, {
     }
   },
 
-  async moveChapter(event) {
+  async moveChapter(event: DatasetEvent) {
     const chapterId = datasetString(event, "id");
     const direction = datasetChoice(event, "direction", CHAPTER_MOVE_DIRECTIONS, "down");
     if (!chapterId || this.data.updatingPlanStructure) {
@@ -1281,7 +1125,7 @@ Page<BookData, {
     await this.applyPlanStructureCommand(command, "章节顺序已调整");
   },
 
-  async mergeChapterInto(event) {
+  async mergeChapterInto(event: PickerEvent) {
     const sourceChapterId = datasetString(event, "id");
     const optionIndex = pickerIndex(event);
     const sourceChapter = findBookChapter(this.data.chapters, sourceChapterId);
@@ -1317,7 +1161,7 @@ Page<BookData, {
     }
   },
 
-  toggleSplitSource(event) {
+  toggleSplitSource(event: DatasetEvent) {
     const chapterId = datasetString(event, "id");
     const utteranceId = datasetString(event, "utteranceId");
     if (this.data.updatingPlanStructure) {
@@ -1329,7 +1173,7 @@ Page<BookData, {
     }
   },
 
-  async splitSelectedChapterSources(event) {
+  async splitSelectedChapterSources(event: DatasetEvent) {
     const chapterId = datasetString(event, "id");
     if (this.data.updatingPlanStructure) {
       return;
@@ -1350,17 +1194,17 @@ Page<BookData, {
     }
   },
 
-  toggleChapterSources(event) {
+  toggleChapterSources(event: DatasetEvent) {
     const chapterId = datasetString(event, "id");
     this.setData(toggleBookChapterSourcesPatch(this.data, chapterId));
   },
 
-  async generateChapterDraft(event) {
+  async generateChapterDraft(event: DatasetEvent) {
     const chapterId = datasetString(event, "id");
     await this.generateChapterDraftById(chapterId);
   },
 
-  async generateChapterDraftById(chapterId) {
+  async generateChapterDraftById(chapterId: string) {
     const chapter = findBookChapter(this.data.chapters, chapterId);
     if (!chapter || !this.data.projectId || chapter.draftBusy || this.data.updatingPlanStructure) {
       return false;
@@ -1393,7 +1237,7 @@ Page<BookData, {
     }
   },
 
-  changeDraftContent(event) {
+  changeDraftContent(event: TextInputEvent) {
     const chapterId = datasetString(event, "id");
     const value = event.detail.value;
     const chapter = findBookChapter(this.data.chapters, chapterId);
@@ -1409,7 +1253,7 @@ Page<BookData, {
     });
   },
 
-  async saveChapterDraft(event) {
+  async saveChapterDraft(event: DatasetEvent) {
     const chapterId = datasetString(event, "id");
     const chapter = findBookChapter(this.data.chapters, chapterId);
     if (!chapter || !this.data.projectId || chapter.draftBusy || this.data.updatingPlanStructure) {
@@ -1434,7 +1278,7 @@ Page<BookData, {
     }
   },
 
-  async confirmChapterDraft(event) {
+  async confirmChapterDraft(event: DatasetEvent) {
     const chapterId = datasetString(event, "id");
     const chapter = findBookChapter(this.data.chapters, chapterId);
     if (
@@ -1461,7 +1305,7 @@ Page<BookData, {
     }
   },
 
-  async assignUncoveredSource(event) {
+  async assignUncoveredSource(event: PickerEvent) {
     const utteranceId = datasetString(event, "id");
     const optionIndex = pickerIndex(event);
     const option = this.data.chapterPickerOptions[optionIndex];
@@ -1497,12 +1341,12 @@ Page<BookData, {
     }
   },
 
-  async addUncoveredSourceAsChapter(event) {
+  async addUncoveredSourceAsChapter(event: DatasetEvent) {
     const utteranceId = datasetString(event, "id");
     await this.addUncoveredSourceAsChapterById(utteranceId);
   },
 
-  async addUncoveredSourceAsChapterById(utteranceId) {
+  async addUncoveredSourceAsChapterById(utteranceId: string) {
     const source = this.data.uncoveredSources.find((candidate) => candidate.utterance_id === utteranceId);
     if (!source || !this.data.plan || this.data.stage !== "drafting" || this.data.updatingPlanStructure) {
       return;
@@ -1518,7 +1362,7 @@ Page<BookData, {
     }
   },
 
-  async deleteConfirmedChapter(event) {
+  async deleteConfirmedChapter(event: DatasetEvent) {
     const chapterId = datasetString(event, "id");
     const chapter = findBookChapter(this.data.chapters, chapterId);
     if (
@@ -1549,7 +1393,7 @@ Page<BookData, {
     }, "章节已删除");
   },
 
-  async applyPlanStructureCommand(command, toastTitle) {
+  async applyPlanStructureCommand(command: MemoirBookPlanStructureCommandRequest, toastTitle: string) {
     if (!this.data.projectId || !this.data.plan || this.data.updatingPlanStructure) {
       return null;
     }
@@ -1574,7 +1418,7 @@ Page<BookData, {
     }
   },
 
-  async updatePlanStructure(chapters, toastTitle) {
+  async updatePlanStructure(chapters: MemoirBookPlanChapterUpdateInput[], toastTitle: string) {
     if (!this.data.projectId || !this.data.plan || this.data.updatingPlanStructure) {
       return null;
     }
@@ -1602,7 +1446,7 @@ Page<BookData, {
     }
   },
 
-  async regenerateMergedChapter(chapterId) {
+  async regenerateMergedChapter(chapterId: string) {
     const renamed = await this.generateChapterTitleById(chapterId, "已重写章名");
     const drafted = await this.generateChapterDraftById(chapterId);
     if (!renamed || !drafted) {
@@ -1653,7 +1497,7 @@ Page<BookData, {
     }
   },
 
-  editBookOutputChapter(event) {
+  editBookOutputChapter(event: DatasetEvent) {
     const chapterId = datasetString(event, "id");
     if (!chapterId || !this.data.projectId) {
       this.setData({ error: "缺少章节信息" });
@@ -1663,15 +1507,12 @@ Page<BookData, {
     wx.navigateTo({ url: bookChapterDetailUrl(this.data.projectId, chapterId, "content") });
   },
 
-  async playChapterAudio(event) {
+  async playChapterAudio(event: DatasetEvent) {
     const chapterId = datasetString(event, "id");
     await this.playChapterAudioById(chapterId);
   },
 
-  async playChapterAudioById(
-    chapterId,
-    options: { autoListenAfterPlayback?: boolean; showPreparingToast?: boolean } = {},
-  ) {
+  async playChapterAudioById(chapterId: string, options: { autoListenAfterPlayback?: boolean; showPreparingToast?: boolean } = {}) {
     const chapter = findBookChapter(this.data.chapters, chapterId);
     if (!chapter || !this.data.projectId || this.data.updatingPlanStructure) {
       return;
@@ -1919,7 +1760,7 @@ Page<BookData, {
     );
   },
 
-  async ensureBookVoiceAuthorization(autoTriggered = false) {
+  async ensureBookVoiceAuthorization(autoTriggered: boolean = false) {
     if (!readVoiceAuthorizationConsent()) {
       this.setData({
         bookVoiceAssistantExpanded: true,
@@ -1998,7 +1839,7 @@ Page<BookData, {
     }
   },
 
-  appendBookVoiceTranscriptLine(line) {
+  appendBookVoiceTranscriptLine(line: VoiceChatTranscriptLine) {
     const lines = this.data.bookVoiceTranscriptLines || [];
     const index = lines.findIndex((item) => item.id === line.id);
     const nextLines = index >= 0
@@ -2007,7 +1848,7 @@ Page<BookData, {
     this.setData({ bookVoiceTranscriptLines: nextLines });
   },
 
-  handleBookVoiceStatus(status) {
+  handleBookVoiceStatus(status: VoiceChatConnectionStatus) {
     const statusTextMap: Record<VoiceChatConnectionStatus, string> = {
       idle: "实时识别未连接",
       connecting: "正在连接实时识别",
@@ -2031,7 +1872,7 @@ Page<BookData, {
     this.setData(patch);
   },
 
-  handleBookVoiceCaptureStats(stats) {
+  handleBookVoiceCaptureStats(stats: MemoirCaptureStats) {
     const labels: Record<MemoirCaptureStats["state"], string> = {
       idle: "麦克风未开始",
       opening: "正在打开麦克风",
@@ -2055,7 +1896,7 @@ Page<BookData, {
     this.setData(patch);
   },
 
-  handleBookVoiceGatewayEvent(event) {
+  handleBookVoiceGatewayEvent(event: VoiceGatewayServerEvent) {
     if (event.type === "audio.ended") {
       this.setData({
         bookVoiceAssistantListening: false,
@@ -2079,7 +1920,7 @@ Page<BookData, {
     }
   },
 
-  handleBookVoicePartial(text) {
+  handleBookVoicePartial(text: string) {
     const displayText = normalizeBookVoiceAsrText(text || "");
     this.setData({
       bookVoiceAssistantExpanded: true,
@@ -2089,7 +1930,7 @@ Page<BookData, {
     });
   },
 
-  async handleBookVoiceFinal(event) {
+  async handleBookVoiceFinal(event: VoiceGatewayServerEvent) {
     const text = normalizeBookVoiceAsrText(event.text || "");
     if (!text) {
       return;
@@ -2130,7 +1971,7 @@ Page<BookData, {
     }
   },
 
-  handleBookVoiceError(message, error) {
+  handleBookVoiceError(message: string, error?: VoiceChatErrorInfo) {
     const errorMessage = error?.message || message || "实时识别异常";
     this.setData({
       error: errorMessage,
@@ -2143,15 +1984,15 @@ Page<BookData, {
     this.bookVoiceStreaming.close({ force: true });
   },
 
-  applyBookVoiceCommandPreview(preview) {
+  applyBookVoiceCommandPreview(preview: MemoirBookVoiceCommandParseResponse) {
     this.setData(bookVoiceCommandPreviewPatch(preview));
   },
 
-  async handleBookVoiceCommandTranscript(text) {
+  async handleBookVoiceCommandTranscript(text: string) {
     await this.runBookVoiceAssistantTurn(text);
   },
 
-  async runBookVoiceAssistantTurn(text) {
+  async runBookVoiceAssistantTurn(text: string) {
     if (!this.data.projectId) {
       return false;
     }
@@ -2280,7 +2121,7 @@ Page<BookData, {
     }
   },
 
-  bookVoiceAssistantTurnPayload(text) {
+  bookVoiceAssistantTurnPayload(text: string) {
     const request = bookVoiceCommandParseRequest(
       text,
       this.data.bookVoiceTranscriptLines,
@@ -2292,12 +2133,12 @@ Page<BookData, {
     return request;
   },
 
-  handleBookVoiceCommandPreview(event) {
+  handleBookVoiceCommandPreview(event: VoiceAssistantTurnCommandPreviewEvent) {
     this.applyBookVoiceCommandPreview(event.command_preview);
     wx.showToast({ title: "已识别", icon: "success" });
   },
 
-  applyBookVoiceAssistantTurnText(text) {
+  applyBookVoiceAssistantTurnText(text: string) {
     const replyText = trimText(text);
     if (!replyText) {
       return;
@@ -2320,7 +2161,11 @@ Page<BookData, {
     });
   },
 
-  async applyCompletedBookVoiceAssistantTurn(event, undoSnapshot, options = {}) {
+  async applyCompletedBookVoiceAssistantTurn(
+    event: VoiceAssistantTurnCompletedEvent,
+    undoSnapshot: BookVoiceCommandUndoSnapshot | null,
+    options: { autoListenAfterTurn?: boolean } = {},
+  ) {
     const autoListenAfterTurn = options.autoListenAfterTurn !== false;
     const preview = event.command_preview || this.data.bookVoiceCommandPreview;
     if (preview) {
@@ -2407,7 +2252,11 @@ Page<BookData, {
     }
   },
 
-  async applyBookVoiceCommandExecution(response, undoSnapshot, options = {}) {
+  async applyBookVoiceCommandExecution(
+    response: MemoirBookVoiceCommandExecuteResponse,
+    undoSnapshot: BookVoiceCommandUndoSnapshot | null,
+    options: { autoListenAfterExecution?: boolean } = {},
+  ) {
     const [draftsByChapterId, output] = await Promise.all([
       this.loadDraftsForPlan(response.plan),
       response.intent === "assign_source" ? Promise.resolve(null) : this.loadBookOutput(this.data.projectId),
@@ -2531,7 +2380,7 @@ Page<BookData, {
     );
   },
 
-  scheduleBookVoiceAssistantAutoListen(statusText = "我继续听") {
+  scheduleBookVoiceAssistantAutoListen(statusText: string = "我继续听") {
     this.clearBookVoiceAssistantAutoListenTimer();
     if (!this.canStartBookVoiceAssistantAutoListen()) {
       return;
@@ -2586,7 +2435,7 @@ Page<BookData, {
     });
   },
 
-  async finishBookVoiceAssistantAudioFrames(token, activeText) {
+  async finishBookVoiceAssistantAudioFrames(token: number, activeText: string) {
     if (token !== this.playToken) {
       return;
     }
@@ -2603,7 +2452,7 @@ Page<BookData, {
     });
   },
 
-  markBookVoiceStreamingAudioFrameScheduled(event) {
+  markBookVoiceStreamingAudioFrameScheduled(event: StreamingSpeechPlaybackFrameEvent) {
     if (this.bookVoiceStreamingAudioStartSeconds < 0) {
       this.bookVoiceStreamingAudioStartSeconds = event.startAtSeconds;
     }
@@ -2639,7 +2488,7 @@ Page<BookData, {
     );
   },
 
-  startBookVoiceStreamingTTSProgressTimer(token) {
+  startBookVoiceStreamingTTSProgressTimer(token: number) {
     if (this.ttsProgressTimer !== null) {
       return;
     }
@@ -2669,7 +2518,7 @@ Page<BookData, {
     };
   },
 
-  async confirmBookVoiceCommandExecution(content, confirmText = "执行") {
+  async confirmBookVoiceCommandExecution(content: string, confirmText: string = "执行") {
     return new Promise<boolean>((resolve) => {
       wx.showModal({
         title: "语音修改",
@@ -2682,7 +2531,7 @@ Page<BookData, {
     });
   },
 
-  async requestBookAudio(target) {
+  async requestBookAudio(target: string) {
     const settings = readBookTTSSettings();
     const request = {
       ...(settings.voice ? { voice: settings.voice } : {}),
@@ -2700,19 +2549,24 @@ Page<BookData, {
     throw new Error("朗读目标无效");
   },
 
-  async playAudioFiles(response, target, token, activeText) {
+  async playAudioFiles(response: MemoirBookAudioResponse, target: string, token: number, activeText: string) {
     return playBookAudioFiles(this, response, target, token, activeText);
   },
 
-  async playAudioFile(audioFileId, token, elapsedBeforeSeconds, fallbackDurationSeconds) {
+  async playAudioFile(audioFileId: string, token: number, elapsedBeforeSeconds: number, fallbackDurationSeconds: number) {
     return playBookAudioFile(this, audioFileId, token, elapsedBeforeSeconds, fallbackDurationSeconds);
   },
 
-  updateBookTTSProgress(currentTimeSeconds, durationSeconds) {
+  updateBookTTSProgress(currentTimeSeconds: number, durationSeconds?: number) {
     updateBookTTSPlaybackProgress(this, currentTimeSeconds, durationSeconds);
   },
 
-  startBookTTSProgressTimer(token, audio, elapsedBeforeSeconds, durationSeconds) {
+  startBookTTSProgressTimer(
+    token: number,
+    audio: WechatMiniprogram.InnerAudioContext,
+    elapsedBeforeSeconds: number,
+    durationSeconds: number,
+  ) {
     startBookTTSPlaybackProgressTimer(this, token, audio, elapsedBeforeSeconds, durationSeconds);
   },
 
@@ -2724,7 +2578,7 @@ Page<BookData, {
     resetBookTTSPlaybackProgress(this);
   },
 
-  playbackTimeForProgress(audio) {
+  playbackTimeForProgress(audio: WechatMiniprogram.InnerAudioContext) {
     return playbackTimeForBookTTSProgress(this, audio);
   },
 
@@ -2769,7 +2623,7 @@ Page<BookData, {
     this.stopPlayback();
   },
 
-  openTranscripts(event) {
+  openTranscripts(event?: DatasetEvent) {
     const utteranceId = event?.currentTarget?.dataset?.id || "";
     if (utteranceId) {
       writeTranscriptNavigationTarget(utteranceId);
@@ -2792,7 +2646,7 @@ Page<BookData, {
     wx.navigateTo({ url: "/pages/project-edit/index" });
   },
 
-  patchChapter(chapterId, patch) {
+  patchChapter(chapterId: string, patch: Partial<BookChapterView>) {
     if (!chapterId) {
       return;
     }
@@ -2809,7 +2663,7 @@ Page<BookData, {
     });
   },
 
-  patchDraft(chapterId, draft) {
+  patchDraft(chapterId: string, draft: MemoirBookChapterDraft) {
     const assignedPendingCount = responseCount(draft.pending_source_count);
     const assignedRemovedCount = responseCount(draft.removed_source_count);
     const content = latestDraftContent(draft);

@@ -2,6 +2,7 @@ import type {
   MemoirBookPlan,
   MemoirVoiceTranscriptItem,
 } from "../../domain/voice-chat";
+import { definePage } from "../../services/page-definition";
 import type { ChapterPickerOption } from "../../services/memoir-book-source-actions";
 import { trackAuditAction } from "../../services/audit-tracker";
 import {
@@ -235,39 +236,7 @@ function confirmDelete(item: TranscriptDetailItemView): Promise<boolean> {
   });
 }
 
-Page<TranscriptDetailData, {
-  onLoad(options?: PageQuery): Promise<void>;
-  loadTranscript(): Promise<void>;
-  beginEdit(): void;
-  toggleQuestionExpanded(): void;
-  toggleMoreActionsExpanded(): void;
-  changeText(event: TextAreaEvent): void;
-  cancelEdit(): void;
-  saveTranscript(): Promise<void>;
-  resetToRaw(): void;
-  startVoiceEdit(): Promise<void>;
-  cancelVoiceEdit(): void;
-  confirmVoiceEdit(): Promise<void>;
-  assignTranscriptChapter(event: PickerEvent): Promise<void>;
-  moveTranscriptChapter(event: PickerEvent): Promise<void>;
-  deleteTranscript(): Promise<void>;
-  playAnswerAudio(): Promise<void>;
-  playQuestionAudio(): Promise<void>;
-  playAudio(kind: TranscriptDetailAudioKind): Promise<void>;
-  toggleAnswerPlaybackPause(): void;
-  updateAnswerPlaybackProgress(
-    currentSeconds: number,
-    durationSeconds: number,
-    statusText: string,
-  ): void;
-  stopPlayback(): void;
-  goBack(): void;
-  openLogin(): void;
-  onUnload(): void;
-  audioPlayback: AudioPlaybackController;
-  loadToken: number;
-  voiceEditToken: number;
-}>({
+definePage<TranscriptDetailData>()({
   audioPlayback: new AudioPlaybackController(),
   loadToken: 0,
   voiceEditToken: 0,
@@ -304,7 +273,7 @@ Page<TranscriptDetailData, {
     voiceEditPreview: null,
   },
 
-  async onLoad(options) {
+  async onLoad(options?: PageQuery) {
     const utteranceId = queryParam(options, "id");
     this.setData({
       utteranceId,
@@ -382,7 +351,7 @@ Page<TranscriptDetailData, {
     this.setData({ moreActionsExpanded: !this.data.moreActionsExpanded });
   },
 
-  changeText(event) {
+  changeText(event: TextAreaEvent) {
     const item = this.data.item;
     if (!item) {
       return;
@@ -557,7 +526,7 @@ Page<TranscriptDetailData, {
     }
   },
 
-  async assignTranscriptChapter(event) {
+  async assignTranscriptChapter(event: PickerEvent) {
     const item = this.data.item;
     const optionIndex = pickerIndex(event);
     const option = item?.chapterAssignOptions[optionIndex];
@@ -586,7 +555,7 @@ Page<TranscriptDetailData, {
     }
   },
 
-  async moveTranscriptChapter(event) {
+  async moveTranscriptChapter(event: PickerEvent) {
     const item = this.data.item;
     const optionIndex = pickerIndex(event);
     const option = item?.chapterMoveOptions[optionIndex];
@@ -648,7 +617,7 @@ Page<TranscriptDetailData, {
     await this.playAudio("question");
   },
 
-  async playAudio(kind) {
+  async playAudio(kind: TranscriptDetailAudioKind) {
     const item = this.data.item;
     const audioFileId = kind === "question" ? item?.question_audio_file_id : item?.audio_file_id;
     if (!audioFileId) {
@@ -772,7 +741,7 @@ Page<TranscriptDetailData, {
     });
   },
 
-  updateAnswerPlaybackProgress(currentSeconds, durationSeconds, statusText) {
+  updateAnswerPlaybackProgress(currentSeconds: number, durationSeconds: number, statusText: string) {
     this.setData(answerPlaybackPatch(currentSeconds, durationSeconds, statusText));
   },
 
