@@ -5,6 +5,7 @@ const test = require("node:test");
 
 const {
   bookVoiceAssistantReplyText,
+  bookVoiceIdlePatch,
   bookVoiceListeningStartPatch,
   bookVoiceCommandParseRequest,
   bookVoiceCommandPreviewPatch,
@@ -112,6 +113,12 @@ test("book voice listening and clear patches keep command reset rules stable", (
   assert.equal(clearPatch.bookVoiceAssistantSpeakingLineId, "");
   assert.equal(clearPatch.bookVoiceLiveText, "");
   assert.equal(clearPatch.error, "");
+
+  const idlePatch = bookVoiceIdlePatch("drafting", { stopListening: true, clearBusy: true });
+  assert.equal(idlePatch.bookVoiceAssistantListening, false);
+  assert.equal(idlePatch.bookVoiceAssistantBusy, false);
+  assert.equal(Object.prototype.hasOwnProperty.call(idlePatch, "bookVoiceTranscriptLines"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(idlePatch, "bookVoiceAssistantReplyText"), false);
 });
 
 test("book voice reply and confirmation helpers keep command flow copy stable", () => {

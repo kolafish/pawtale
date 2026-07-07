@@ -104,6 +104,33 @@ export function bookVoiceAssistantStatusText(stage: BookData["stage"]): string {
   return "我可以帮你听和改";
 }
 
+interface BookVoiceIdlePatchOptions {
+  collapse?: boolean;
+  stopListening?: boolean;
+  clearBusy?: boolean;
+  clearReply?: boolean;
+  clearTranscript?: boolean;
+}
+
+export function bookVoiceIdlePatch(
+  stage: BookData["stage"],
+  options: BookVoiceIdlePatchOptions = {},
+): Partial<BookData> {
+  return {
+    ...(options.collapse ? { bookVoiceAssistantExpanded: false } : {}),
+    ...(options.stopListening ? { bookVoiceAssistantListening: false } : {}),
+    ...(options.clearBusy ? { bookVoiceAssistantBusy: false } : {}),
+    bookVoiceAssistantConversationActive: false,
+    ...(options.clearReply ? { bookVoiceAssistantReplyText: "" } : {}),
+    bookVoiceAssistantSpeakingLineId: "",
+    bookVoiceLiveText: "",
+    ...(options.clearTranscript ? { bookVoiceTranscriptLines: [] } : {}),
+    bookVoiceAudioLevelPercent: 0,
+    bookVoiceCaptureStateText: "麦克风未开始",
+    bookVoiceAssistantStatusText: bookVoiceAssistantStatusText(stage),
+  };
+}
+
 export function isBookVoiceReadIntent(preview: MemoirBookVoiceCommandParseResponse): boolean {
   return preview.intent === "read_outline" || preview.intent === "read_chapter";
 }
