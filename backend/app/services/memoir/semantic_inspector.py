@@ -26,7 +26,7 @@ from app.models.memoir import (
 )
 from app.models.projects import Project
 from app.services.memoir.access import load_memoir_project
-from app.services.memoir.book_quality_audit import SEMANTIC_AUDIT_ENGINE
+from app.services.memoir.book_quality_audit_semantic import SEMANTIC_AUDIT_ENGINE
 from app.services.memoir.chapter_cards import CHAPTER_CARD_ENGINE, build_chapter_card_context
 from app.services.memoir.source_cards import SOURCE_CARD_ENGINE, source_text_for_utterance, source_text_hash
 
