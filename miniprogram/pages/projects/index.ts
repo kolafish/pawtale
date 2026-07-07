@@ -13,6 +13,7 @@ import {
   pageUrl,
   type PageDatasetEvent,
 } from "../../services/page-input";
+import { definePage } from "../../services/page-definition";
 
 interface ProjectDataset {
   id?: string;
@@ -74,24 +75,14 @@ function confirmDeleteProject(project: ProjectItem): Promise<boolean> {
   });
 }
 
-Page<ProjectsData, {
-  onLoad(): Promise<void>;
-  onShow(): Promise<void>;
-  loadProjects(): Promise<void>;
-  applyProjects(response: MemoirProjectListResponse): void;
-  createProject(): void;
-  activateProject(event: DatasetEvent): Promise<void>;
-  openProjectEdit(event: DatasetEvent): void;
-  deleteProject(event: DatasetEvent): Promise<void>;
-  openMe(): void;
-}>({
+definePage<ProjectsData>()({
   data: {
     loading: false,
     busy: false,
     deletingId: "",
     error: "",
     activeProjectId: "",
-    projects: [],
+    projects: [] as ProjectItem[],
   },
 
   async onLoad() {
@@ -117,7 +108,7 @@ Page<ProjectsData, {
     }
   },
 
-  applyProjects(response) {
+  applyProjects(response: MemoirProjectListResponse) {
     this.setData({
       activeProjectId: response.active_project_id,
       projects: projectItems(response),
@@ -128,7 +119,7 @@ Page<ProjectsData, {
     wx.navigateTo({ url: "/pages/project-edit/index" });
   },
 
-  async activateProject(event) {
+  async activateProject(event: DatasetEvent) {
     const id = datasetString(event, "id");
     if (!id || id === this.data.activeProjectId || this.data.busy) {
       return;
@@ -147,7 +138,7 @@ Page<ProjectsData, {
     }
   },
 
-  openProjectEdit(event) {
+  openProjectEdit(event: DatasetEvent) {
     const id = datasetString(event, "id");
     if (!id) {
       return;
@@ -155,7 +146,7 @@ Page<ProjectsData, {
     wx.navigateTo({ url: pageUrl("/pages/project-edit/index", { projectId: id }) });
   },
 
-  async deleteProject(event) {
+  async deleteProject(event: DatasetEvent) {
     const id = datasetString(event, "id");
     const project = this.data.projects.find((item) => item.id === id);
     if (!project || this.data.busy) {
