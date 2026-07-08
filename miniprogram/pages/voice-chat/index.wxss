@@ -8,6 +8,10 @@
   padding-bottom: 60rpx;
 }
 
+.voice-chat-page.ai-recording-focus {
+  padding-bottom: 360rpx;
+}
+
 .voice-chat-page.human-recording-focus {
   padding-bottom: 330rpx;
 }
@@ -118,6 +122,17 @@
   min-height: 900rpx;
   padding-top: 52rpx;
   padding-bottom: 40rpx;
+}
+
+.voice-chat-page.ai-recording-focus .transcript-stage {
+  min-height: 820rpx;
+  padding: 44rpx 36rpx;
+  border-radius: 36rpx;
+  justify-content: flex-start;
+  box-shadow:
+    0 0 0 1rpx rgba(43, 23, 19, 0.06),
+    0 14rpx 28rpx -8rpx rgba(43, 23, 19, 0.12),
+    0 30rpx 68rpx rgba(93, 61, 42, 0.11);
 }
 
 .assistant-panel {
@@ -343,6 +358,12 @@
   max-height: 650rpx;
 }
 
+.voice-chat-page.ai-recording-focus .live-scroll,
+.voice-chat-page.ai-recording-focus .live-scroll.long {
+  height: 620rpx;
+  max-height: 620rpx;
+}
+
 .live-scroll.long {
   height: 300rpx;
 }
@@ -355,6 +376,11 @@
   line-height: 1.42;
   word-break: break-all;
   text-wrap: pretty;
+}
+
+.voice-chat-page.ai-recording-focus .live-text {
+  font-size: 54rpx;
+  line-height: 1.48;
 }
 
 .live-text.placeholder {
@@ -450,6 +476,12 @@
 
 .voice-chat-page.human-recording-focus .capture-strip {
   margin-top: 26rpx;
+}
+
+.voice-chat-page.ai-recording-focus .capture-strip {
+  margin-top: 30rpx;
+  padding: 22rpx 26rpx;
+  border-radius: 22rpx;
 }
 
 .capture-strip.active {
@@ -1237,7 +1269,7 @@
 }
 
 .voice-chat-page.large-text.capture-focus .transcript-stage {
-  min-height: 640rpx;
+  min-height: 960rpx;
   padding: 50rpx 36rpx;
   border-radius: 40rpx;
   justify-content: flex-start;
@@ -1249,30 +1281,31 @@
 
 .voice-chat-page.large-text.capture-focus .stage-status {
   padding: 12rpx 22rpx;
-  font-size: 42rpx;
-  line-height: 60rpx;
+  font-size: 38rpx;
+  line-height: 56rpx;
 }
 
 .voice-chat-page.large-text.capture-focus .live-scroll {
   margin-top: 40rpx;
-  max-height: 420rpx;
+  height: 700rpx;
+  max-height: 700rpx;
 }
 
 .voice-chat-page.large-text.capture-focus .live-scroll.long {
-  height: 420rpx;
+  height: 700rpx;
 }
 
 .voice-chat-page.large-text.capture-focus .live-text {
-  font-size: 76rpx;
-  line-height: 96rpx;
+  font-size: 60rpx;
+  line-height: 88rpx;
 }
 
 .voice-chat-page.large-text.capture-focus .capture-strip {
   margin-top: 40rpx;
   padding: 24rpx 28rpx;
   border-radius: 24rpx;
-  font-size: 38rpx;
-  line-height: 58rpx;
+  font-size: 34rpx;
+  line-height: 52rpx;
 }
 
 .voice-chat-page.large-text.capture-focus .level-track {

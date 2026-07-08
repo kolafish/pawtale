@@ -91,6 +91,7 @@ test("voice chat view patch derives transcript and recording render fields", () 
   };
   const patch = voiceChatViewPatch(data);
 
+  assert.equal(patch.voiceChatPageClass, "voice-chat-page ai-recording-focus");
   assert.equal(patch.stageStatusClass, "stage-status listening");
   assert.equal(patch.stageStatusText, "我在听，您慢慢说");
   assert.equal(patch.liveDisplayText, "直接说就行，我会帮您记下来");
@@ -186,7 +187,7 @@ test("voice chat view patch adds focused large text root classes", () => {
   assert.equal(idlePatch.voiceChatPageClass, "voice-chat-page large-text idle-focus");
   assert.equal(assistantPatch.voiceChatPageClass, "voice-chat-page large-text assistant-focus");
   assert.equal(assistantPatch.liveDisplayText, "听完后，点下方“我来讲了”开始回答");
-  assert.equal(capturePatch.voiceChatPageClass, "voice-chat-page large-text capture-focus");
+  assert.equal(capturePatch.voiceChatPageClass, "voice-chat-page ai-recording-focus large-text capture-focus");
   assert.equal(capturePatch.liveDisplayText, "我想先讲爷爷退休后的事");
   assert.equal(humanCapturePatch.voiceChatPageClass, "voice-chat-page human-interview human-recording-focus large-text capture-focus");
   assert.equal(humanCapturePatch.showStageStatus, false);
