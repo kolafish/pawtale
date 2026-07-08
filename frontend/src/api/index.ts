@@ -201,6 +201,26 @@ export const memoirInterviewEditorApi = {
       `/mobile/memoir/voice-transcripts/${utteranceId}`,
       { transcript_edited: transcriptEdited },
     ).then(r => r.data),
+  createQuestion: (projectId: string, voiceSessionId: string, text: string) =>
+    api.post<MemoirInterviewEditorSessionDetail>(
+      `/memoir/projects/${projectId}/interview-editor/questions`,
+      { voice_session_id: voiceSessionId, text },
+    ).then(r => r.data),
+  updateQuestionText: (projectId: string, messageId: string, text: string) =>
+    api.patch<MemoirInterviewEditorSessionDetail>(
+      `/memoir/projects/${projectId}/interview-editor/questions/${messageId}`,
+      { text },
+    ).then(r => r.data),
+  updateAnswerParent: (
+    projectId: string,
+    messageId: string,
+    parentQuestionMessageId: string | null,
+    reason?: string,
+  ) =>
+    api.patch<MemoirInterviewEditorSessionDetail>(
+      `/memoir/projects/${projectId}/interview-editor/answers/${messageId}/parent`,
+      { parent_question_message_id: parentQuestionMessageId, reason },
+    ).then(r => r.data),
   audioPlaybackUrl: (audioFileId: string) =>
     `/api/mobile/memoir/audio-files/${encodeURIComponent(audioFileId)}/playback`,
 };
