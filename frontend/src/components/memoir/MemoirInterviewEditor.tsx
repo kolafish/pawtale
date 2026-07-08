@@ -25,6 +25,7 @@ import {
   X,
 } from 'lucide-react';
 import { memoirChapterSourceEditorApi, memoirInterviewEditorApi, memoirTranscriptCleanupApi } from '../../api';
+import { formatBeijingDateTimeShort } from '../../utils/time';
 import type {
   MemoirBatchTranscriptCleanupPreviewItem,
   MemoirChapterSourceEditor,
@@ -45,13 +46,7 @@ const PLAYBACK_RATES = [0.75, 1, 1.25, 1.5];
 const MAX_BATCH_CLEANUP_ITEMS = 30;
 
 function formatDateTime(value?: string | null) {
-  if (!value) return '无时间';
-  return new Date(value).toLocaleString('zh-CN', {
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
+  return formatBeijingDateTimeShort(value) || '无时间';
 }
 
 function formatDuration(seconds: number | null | undefined) {
