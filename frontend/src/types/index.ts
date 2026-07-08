@@ -515,11 +515,74 @@ export type MemoirVoiceSessionStatus = 'created' | 'listening' | 'speaking' | 's
 export type MemoirGuidanceMode = 'free_narration' | 'guided_interview';
 export type MemoirInterviewType = 'ai_interview' | 'human_interview';
 export type MemoirChatMessageRole = 'user' | 'assistant' | 'interviewer' | 'system';
+export type MemoirBookPlanStatus = 'draft' | 'confirmed';
 
 export interface MemoirBookSourceIncludedChapter {
   chapter_id: string;
   title: string;
   sort_order: number;
+}
+
+export interface MemoirBookChapterSourceRef {
+  voice_session_id: string;
+  message_id: string;
+  utterance_id: string;
+  transcript_version_id?: string | null;
+  audio_file_id?: string | null;
+  start_ms?: number | null;
+  end_ms?: number | null;
+  created_at?: string | null;
+  quote: string;
+}
+
+export interface MemoirChapterSourceEditorChapter {
+  id: string;
+  plan_id: string;
+  project_id: string;
+  title: string;
+  sort_order: number;
+  source_refs: MemoirBookChapterSourceRef[];
+  metadata_json: Record<string, unknown>;
+  pending_source_count: number;
+  removed_source_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MemoirChapterSourceEditorSource {
+  source_index: number;
+  voice_session_id: string;
+  message_id: string;
+  utterance_id: string;
+  transcript_version_id?: string | null;
+  audio_file_id?: string | null;
+  start_ms?: number | null;
+  end_ms?: number | null;
+  text: string;
+  created_at: string;
+  source_material_type: string;
+  source_route_action: string;
+  source_route_confidence?: number | null;
+  source_route_reason: string;
+  source_route_updated_at?: string | null;
+  is_included: boolean;
+  included_in_chapters: MemoirBookSourceIncludedChapter[];
+  current_chapter_id?: string | null;
+  current_chapter_title?: string | null;
+  current_chapter_sort_order?: number | null;
+}
+
+export interface MemoirChapterSourceEditor {
+  project_id: string;
+  plan_id?: string | null;
+  plan_title?: string | null;
+  plan_status?: MemoirBookPlanStatus | null;
+  total_source_count: number;
+  covered_source_count: number;
+  uncovered_source_count: number;
+  chapters: MemoirChapterSourceEditorChapter[];
+  sources: MemoirChapterSourceEditorSource[];
+  uncovered_sources: MemoirChapterSourceEditorSource[];
 }
 
 export interface MemoirInterviewEditorAnswer {

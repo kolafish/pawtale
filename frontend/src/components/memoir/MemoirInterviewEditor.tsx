@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   AlertCircle,
+  BookOpen,
   Check,
   Clock3,
   FileAudio,
@@ -16,8 +17,10 @@ import {
   UserRound,
   X,
 } from 'lucide-react';
-import { memoirInterviewEditorApi } from '../../api';
+import { memoirChapterSourceEditorApi, memoirInterviewEditorApi } from '../../api';
 import type {
+  MemoirChapterSourceEditor,
+  MemoirChapterSourceEditorSource,
   MemoirInterviewEditorAnswer,
   MemoirInterviewEditorQuestion,
   MemoirInterviewEditorSessionSummary,
@@ -56,6 +59,10 @@ function allAnswers(questions: MemoirInterviewEditorQuestion[], unassigned: Memo
     ...questions.flatMap((question) => question.answers),
     ...unassigned,
   ];
+}
+
+function sourceByUtterance(sources: MemoirChapterSourceEditorSource[] | undefined) {
+  return new Map((sources ?? []).map((source) => [source.utterance_id, source]));
 }
 
 function SessionButton({
@@ -107,12 +114,14 @@ function AnswerRow({
   answer,
   selected,
   checked,
+  chapterTitle,
   onSelect,
   onToggleChecked,
 }: {
   answer: MemoirInterviewEditorAnswer;
   selected: boolean;
   checked: boolean;
+  chapterTitle?: string | null;
   onSelect: () => void;
   onToggleChecked: () => void;
 }) {
@@ -145,7 +154,12 @@ function AnswerRow({
                 {formatDuration(answer.audio_duration_seconds)}
               </span>
             )}
-            {answer.is_included_in_book && (
+            {chapterTitle ? (
+              <span className="inline-flex min-w-0 items-center gap-1 text-emerald-700">
+                <BookOpen size={12} />
+                <span className="truncate">{chapterTitle}</span>
+              </span>
+            ) : answer.is_included_in_book && (
               <span className="inline-flex items-center gap-1 text-emerald-700">
                 <Check size={12} />
                 已收录
@@ -166,6 +180,7 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
   const [draft, setDraft] = useState<{ answerId: string; text: string } | null>(null);
   const [checkedAnswerIds, setCheckedAnswerIds] = useState<string[]>([]);
   const [targetQuestionId, setTargetQuestionId] = useState('');
+  const [targetChapterId, setTargetChapterId] = useState('');
   const [newQuestionText, setNewQuestionText] = useState('');
   const [editingQuestion, setEditingQuestion] = useState<{ id: string; text: string } | null>(null);
 
@@ -187,7 +202,17 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
     enabled: Boolean(selectedSessionId),
   });
 
+  const chapterSourceQuery = useQuery({
+    queryKey: ['memoirChapterSourceEditor', project.id],
+    queryFn: () => memoirChapterSourceEditorApi.get(project.id),
+  });
+
   const detail = detailQuery.data;
+  const chapterEditor = chapterSourceQuery.data;
+  const chapterSourcesByUtterance = useMemo(
+    () => sourceByUtterance(chapterEditor?.sources),
+    [chapterEditor?.sources],
+  );
   const answers = useMemo(
     () => detail ? allAnswers(detail.questions, detail.unassigned_answers) : [],
     [detail],
@@ -200,8 +225,17 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
   const selectedAnswer = answers.find((answer) => answer.id === selectedAnswerId) ?? null;
   const checkedAnswers = answers.filter((answer) => checkedAnswerIds.includes(answer.id));
   const checkedAnswerMessageIds = checkedAnswers.map((answer) => answer.message_id);
+  const chapterSelectedAnswers = checkedAnswers.length > 0 ? checkedAnswers : selectedAnswer ? [selectedAnswer] : [];
+  const chapterSelectedSources = chapterSelectedAnswers
+    .map((answer) => chapterSourcesByUtterance.get(answer.id))
+    .filter((source): source is MemoirChapterSourceEditorSource => Boolean(source));
+  const chapterSelectedSourceIds = chapterSelectedSources.map((source) => source.utterance_id);
+  const selectedAnswerSource = selectedAnswer ? chapterSourcesByUtterance.get(selectedAnswer.id) ?? null : null;
   const effectiveTargetQuestionId = detail?.questions.some((question) => question.id === targetQuestionId)
     ? targetQuestionId
+    : '';
+  const effectiveTargetChapterId = chapterEditor?.chapters.some((chapter) => chapter.id === targetChapterId)
+    ? targetChapterId
     : '';
   const draftText = selectedAnswer
     ? (draft?.answerId === selectedAnswer.id ? draft.text : selectedAnswer.display_text)
@@ -214,6 +248,7 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
       setDraft(null);
       queryClient.invalidateQueries({ queryKey: ['memoirInterviewEditorSession', project.id, selectedSessionId] });
       queryClient.invalidateQueries({ queryKey: ['memoirInterviewEditorSessions', project.id] });
+      queryClient.invalidateQueries({ queryKey: ['memoirChapterSourceEditor', project.id] });
     },
   });
 
@@ -262,6 +297,56 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
     },
   });
 
+  const chapterSourceMutation = useMutation({
+    mutationFn: async (
+      input:
+        | { type: 'assign'; sourceIds: string[]; targetChapterId: string }
+        | { type: 'move'; sourceIds: string[]; targetChapterId: string }
+        | { type: 'remove'; sourceIds: string[] },
+    ) => {
+      let latest: MemoirChapterSourceEditor | null = null;
+      if (input.type === 'assign') {
+        latest = await memoirChapterSourceEditorApi.assign(
+          project.id,
+          [{ chapter_id: input.targetChapterId, utterance_ids: input.sourceIds }],
+        );
+      } else if (input.type === 'move') {
+        for (const sourceId of input.sourceIds) {
+          const source = chapterSourcesByUtterance.get(sourceId);
+          if (!source?.current_chapter_id || source.current_chapter_id === input.targetChapterId) {
+            continue;
+          }
+          latest = await memoirChapterSourceEditorApi.move(
+            project.id,
+            source.current_chapter_id,
+            input.targetChapterId,
+            sourceId,
+          );
+        }
+      } else {
+        const sourceIdsByChapter = new Map<string, string[]>();
+        for (const sourceId of input.sourceIds) {
+          const source = chapterSourcesByUtterance.get(sourceId);
+          if (!source?.current_chapter_id) {
+            continue;
+          }
+          sourceIdsByChapter.set(
+            source.current_chapter_id,
+            [...(sourceIdsByChapter.get(source.current_chapter_id) ?? []), sourceId],
+          );
+        }
+        for (const [chapterId, sourceIds] of sourceIdsByChapter) {
+          latest = await memoirChapterSourceEditorApi.remove(project.id, chapterId, sourceIds);
+        }
+      }
+      return latest ?? memoirChapterSourceEditorApi.get(project.id);
+    },
+    onSuccess: (data) => {
+      queryClient.setQueryData(['memoirChapterSourceEditor', project.id], data);
+      queryClient.invalidateQueries({ queryKey: ['memoirInterviewEditorSession', project.id, selectedSessionId] });
+    },
+  });
+
   const hasUnsavedChanges = Boolean(
     selectedAnswer
     && draft?.answerId === selectedAnswer.id
@@ -301,6 +386,62 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
     checkedAnswerMessageIds.length > 0
     && !updateParentMutation.isPending,
   );
+  const hasConfirmedChapterPlan = chapterEditor?.plan_status === 'confirmed' && (chapterEditor?.chapters.length ?? 0) > 0;
+  const hasChapterSourceSelection = chapterSelectedSources.length > 0
+    && chapterSelectedSources.length === chapterSelectedAnswers.length;
+  const selectedSourcesAreUnassigned = hasChapterSourceSelection
+    && chapterSelectedSources.every((source) => !source.current_chapter_id);
+  const selectedSourcesAreAssigned = hasChapterSourceSelection
+    && chapterSelectedSources.every((source) => Boolean(source.current_chapter_id));
+  const selectedAssignedSourceCount = chapterSelectedSources.filter((source) => source.current_chapter_id).length;
+  const selectedUnassignedSourceCount = chapterSelectedSources.length - selectedAssignedSourceCount;
+  const chapterSelectionCurrentLabel = checkedAnswers.length > 0
+    ? `${selectedAssignedSourceCount} 段已有章节`
+    : selectedAnswerSource?.current_chapter_title || '未归入章节';
+  const pendingChapterSourceAction = chapterSourceMutation.isPending ? chapterSourceMutation.variables?.type : null;
+  const selectedSourceCountByChapter = new Map<string, number>();
+  for (const source of chapterSelectedSources) {
+    if (!source.current_chapter_id) continue;
+    selectedSourceCountByChapter.set(
+      source.current_chapter_id,
+      (selectedSourceCountByChapter.get(source.current_chapter_id) ?? 0) + 1,
+    );
+  }
+  const moveWouldEmptySourceChapter = selectedSourcesAreAssigned
+    && Boolean(effectiveTargetChapterId)
+    && Boolean(chapterEditor?.chapters.some((chapter) => {
+      const selectedCount = chapterSelectedSources.filter(
+        (source) => source.current_chapter_id === chapter.id
+          && source.current_chapter_id !== effectiveTargetChapterId,
+      ).length;
+      return selectedCount > 0 && selectedCount >= chapter.source_refs.length;
+    }));
+  const removeWouldEmptySourceChapter = selectedSourcesAreAssigned
+    && Boolean(chapterEditor?.chapters.some((chapter) => {
+      const selectedCount = selectedSourceCountByChapter.get(chapter.id) ?? 0;
+      return selectedCount > 0 && selectedCount >= chapter.source_refs.length;
+    }));
+  const selectedSourcesCanMove = selectedSourcesAreAssigned
+    && Boolean(effectiveTargetChapterId)
+    && !moveWouldEmptySourceChapter
+    && chapterSelectedSources.some((source) => source.current_chapter_id !== effectiveTargetChapterId);
+  const canAssignChapterSources = Boolean(
+    hasConfirmedChapterPlan
+    && selectedSourcesAreUnassigned
+    && effectiveTargetChapterId
+    && !chapterSourceMutation.isPending,
+  );
+  const canMoveChapterSources = Boolean(
+    hasConfirmedChapterPlan
+    && selectedSourcesCanMove
+    && !chapterSourceMutation.isPending,
+  );
+  const canRemoveChapterSources = Boolean(
+    hasConfirmedChapterPlan
+    && selectedSourcesAreAssigned
+    && !removeWouldEmptySourceChapter
+    && !chapterSourceMutation.isPending,
+  );
 
   return (
     <div className="h-full min-w-0 flex-1 bg-slate-100 text-gray-800">
@@ -338,6 +479,7 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
                         setDraft(null);
                         setCheckedAnswerIds([]);
                         setTargetQuestionId('');
+                        setTargetChapterId('');
                         setEditingQuestion(null);
                       }}
                     />
@@ -364,10 +506,14 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
                   if (selectedSessionId) {
                     detailQuery.refetch();
                   }
+                  chapterSourceQuery.refetch();
                 }}
                 className="inline-flex h-10 items-center gap-2 rounded-lg bg-slate-100 px-3 text-sm text-gray-600 transition-[background-color,transform] hover:bg-slate-200 active:scale-[0.96]"
               >
-                <RefreshCw size={15} className={sessionsQuery.isFetching || detailQuery.isFetching ? 'animate-spin' : ''} />
+                <RefreshCw
+                  size={15}
+                  className={sessionsQuery.isFetching || detailQuery.isFetching || chapterSourceQuery.isFetching ? 'animate-spin' : ''}
+                />
                 刷新
               </button>
             </div>
@@ -533,6 +679,10 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
                             answer={answer}
                             selected={answer.id === selectedAnswerId}
                             checked={checkedAnswerIds.includes(answer.id)}
+                            chapterTitle={
+                              chapterSourcesByUtterance.get(answer.id)?.current_chapter_title
+                              ?? answer.included_chapters[0]?.title
+                            }
                             onSelect={() => {
                               setSelectedAnswerOverride(answer.id);
                               setDraft(null);
@@ -562,6 +712,10 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
                           answer={answer}
                           selected={answer.id === selectedAnswerId}
                           checked={checkedAnswerIds.includes(answer.id)}
+                          chapterTitle={
+                            chapterSourcesByUtterance.get(answer.id)?.current_chapter_title
+                            ?? answer.included_chapters[0]?.title
+                          }
                           onSelect={() => {
                             setSelectedAnswerOverride(answer.id);
                             setDraft(null);
@@ -606,6 +760,123 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
                     />
                   ) : (
                     <div className="rounded-lg bg-white px-3 py-3 text-sm text-gray-500">这段回答没有音频文件。</div>
+                  )}
+                </div>
+
+                <div className="rounded-lg bg-white p-3 shadow-[0_1px_8px_rgba(15,23,42,0.06)]">
+                  <div className="mb-3 flex items-center justify-between gap-2">
+                    <div className="inline-flex min-w-0 items-center gap-2 text-xs font-medium text-gray-500">
+                      <BookOpen size={14} />
+                      <span>章节归属</span>
+                    </div>
+                    {chapterSourceQuery.isFetching && <Loader2 size={14} className="animate-spin text-gray-400" />}
+                  </div>
+
+                  {chapterSourceQuery.isLoading ? (
+                    <div className="flex items-center gap-2 py-2 text-sm text-gray-500">
+                      <Loader2 size={15} className="animate-spin" />
+                      加载章节
+                    </div>
+                  ) : chapterSourceQuery.isError ? (
+                    <div className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">章节归属加载失败。</div>
+                  ) : !chapterEditor?.plan_id ? (
+                    <div className="rounded-lg bg-slate-50 px-3 py-3 text-sm text-gray-500">尚未确认章节规划。</div>
+                  ) : (
+                    <div className="space-y-3">
+                      <div className="grid grid-cols-3 gap-2">
+                        <div className="rounded-lg bg-slate-50 px-2 py-2">
+                          <div className="text-[11px] text-gray-500">总素材</div>
+                          <div className="mt-1 text-sm font-semibold tabular-nums text-gray-900">
+                            {chapterEditor.total_source_count}
+                          </div>
+                        </div>
+                        <div className="rounded-lg bg-emerald-50 px-2 py-2">
+                          <div className="text-[11px] text-emerald-700">已归入</div>
+                          <div className="mt-1 text-sm font-semibold tabular-nums text-emerald-900">
+                            {chapterEditor.covered_source_count}
+                          </div>
+                        </div>
+                        <div className="rounded-lg bg-amber-50 px-2 py-2">
+                          <div className="text-[11px] text-amber-700">未归入</div>
+                          <div className="mt-1 text-sm font-semibold tabular-nums text-amber-900">
+                            {chapterEditor.uncovered_source_count}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="rounded-lg bg-slate-50 px-3 py-2 text-xs leading-5 text-gray-600">
+                        <div className="flex items-center justify-between gap-2">
+                          <span>{checkedAnswers.length > 0 ? `批量 ${checkedAnswers.length} 段` : '当前回答'}</span>
+                          <span className="tabular-nums">
+                            已归入 {selectedAssignedSourceCount} / 未归入 {selectedUnassignedSourceCount}
+                          </span>
+                        </div>
+                        <div className="mt-1 truncate text-gray-800">
+                          {chapterSelectionCurrentLabel}
+                        </div>
+                      </div>
+
+                      <select
+                        value={effectiveTargetChapterId}
+                        onChange={(event) => setTargetChapterId(event.target.value)}
+                        disabled={!hasConfirmedChapterPlan || chapterSourceMutation.isPending}
+                        className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-gray-700 outline-none transition-[border-color,box-shadow] focus:border-emerald-300 focus:shadow-[0_0_0_3px_rgba(16,185,129,0.16)] disabled:opacity-50"
+                      >
+                        <option value="">目标章节</option>
+                        {chapterEditor.chapters.map((chapter) => (
+                          <option key={chapter.id} value={chapter.id}>
+                            {chapter.sort_order + 1}. {chapter.title}
+                          </option>
+                        ))}
+                      </select>
+
+                      <div className="grid grid-cols-3 gap-2">
+                        <button
+                          type="button"
+                          disabled={!canAssignChapterSources}
+                          onClick={() => effectiveTargetChapterId && chapterSourceMutation.mutate({
+                            type: 'assign',
+                            sourceIds: chapterSelectedSourceIds,
+                            targetChapterId: effectiveTargetChapterId,
+                          })}
+                          className="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg bg-emerald-600 px-2 text-xs font-medium text-white transition-[background-color,opacity,transform] hover:bg-emerald-700 active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {pendingChapterSourceAction === 'assign' ? <Loader2 size={14} className="animate-spin" /> : <Link2 size={14} />}
+                          归入
+                        </button>
+                        <button
+                          type="button"
+                          disabled={!canMoveChapterSources}
+                          onClick={() => effectiveTargetChapterId && chapterSourceMutation.mutate({
+                            type: 'move',
+                            sourceIds: chapterSelectedSourceIds,
+                            targetChapterId: effectiveTargetChapterId,
+                          })}
+                          className="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg bg-slate-900 px-2 text-xs font-medium text-white transition-[background-color,opacity,transform] hover:bg-slate-700 active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {pendingChapterSourceAction === 'move' ? <Loader2 size={14} className="animate-spin" /> : <Link2 size={14} />}
+                          移动
+                        </button>
+                        <button
+                          type="button"
+                          disabled={!canRemoveChapterSources}
+                          onClick={() => chapterSourceMutation.mutate({ type: 'remove', sourceIds: chapterSelectedSourceIds })}
+                          className="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg bg-amber-100 px-2 text-xs font-medium text-amber-800 transition-[background-color,opacity,transform] hover:bg-amber-200 active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {pendingChapterSourceAction === 'remove' ? <Loader2 size={14} className="animate-spin" /> : <Unlink size={14} />}
+                          移出
+                        </button>
+                      </div>
+
+                      {chapterSourceMutation.isError && (
+                        <div className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">章节归属保存失败。</div>
+                      )}
+                      {(moveWouldEmptySourceChapter || removeWouldEmptySourceChapter) && (
+                        <div className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                          原章节至少保留 1 段素材。
+                        </div>
+                      )}
+                    </div>
                   )}
                 </div>
 

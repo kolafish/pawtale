@@ -24,6 +24,7 @@ import type {
   AuditDashboardFilters,
   AuditDashboardResponse,
   AuditUserDayResponse,
+  MemoirChapterSourceEditor,
   MemoirInterviewEditorSessionDetail,
   MemoirInterviewEditorSessionList,
   MemoirInterviewType,
@@ -223,4 +224,47 @@ export const memoirInterviewEditorApi = {
     ).then(r => r.data),
   audioPlaybackUrl: (audioFileId: string) =>
     `/api/mobile/memoir/audio-files/${encodeURIComponent(audioFileId)}/playback`,
+};
+
+// Memoir chapter source editor API
+export const memoirChapterSourceEditorApi = {
+  get: (projectId: string) =>
+    api.get<MemoirChapterSourceEditor>(
+      `/memoir/projects/${projectId}/chapter-source-editor`,
+    ).then(r => r.data),
+  assign: (
+    projectId: string,
+    assignments: Array<{ chapter_id: string; utterance_ids: string[] }>,
+    aiModel?: string,
+  ) =>
+    api.post<MemoirChapterSourceEditor>(
+      `/memoir/projects/${projectId}/chapter-source-editor/assignments`,
+      { assignments, ai_model: aiModel },
+    ).then(r => r.data),
+  move: (
+    projectId: string,
+    sourceChapterId: string,
+    targetChapterId: string,
+    utteranceId: string,
+    aiModel?: string,
+  ) =>
+    api.post<MemoirChapterSourceEditor>(
+      `/memoir/projects/${projectId}/chapter-source-editor/moves`,
+      {
+        source_chapter_id: sourceChapterId,
+        target_chapter_id: targetChapterId,
+        utterance_id: utteranceId,
+        ai_model: aiModel,
+      },
+    ).then(r => r.data),
+  remove: (
+    projectId: string,
+    chapterId: string,
+    utteranceIds: string[],
+    aiModel?: string,
+  ) =>
+    api.post<MemoirChapterSourceEditor>(
+      `/memoir/projects/${projectId}/chapter-source-editor/removals`,
+      { chapter_id: chapterId, utterance_ids: utteranceIds, ai_model: aiModel },
+    ).then(r => r.data),
 };
