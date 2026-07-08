@@ -82,6 +82,9 @@ export function formatProjectStructure(project: ProjectListItem): string {
   if (project.type === 'novel') {
     return `${project.group_count} ${profile.groupUnit} · ${project.document_count} ${profile.documentUnit}`;
   }
+  if (project.type === 'memoir') {
+    return '访谈素材编辑';
+  }
   return `${project.document_count} ${profile.documentUnit}`;
 }
 

@@ -23,6 +23,14 @@ export function WritingWorkspace() {
     return <ProjectHome />;
   }
 
-  const Workspace = PRODUCT_WORKSPACES[currentProject.type] ?? NovelWorkspace;
+  const Workspace = PRODUCT_WORKSPACES[currentProject.type];
+  if (!Workspace) {
+    return (
+      <div className="flex h-full flex-1 items-center justify-center bg-white text-sm text-gray-500">
+        不支持的项目类型
+      </div>
+    );
+  }
+
   return <Workspace project={currentProject} />;
 }
