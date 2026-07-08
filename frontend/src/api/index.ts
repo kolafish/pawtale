@@ -25,6 +25,10 @@ import type {
   AuditDashboardResponse,
   AuditUserDayResponse,
   MemoirChapterSourceEditor,
+  MemoirBatchTranscriptCleanupConfirmResponse,
+  MemoirBatchTranscriptCleanupPreviewResponse,
+  MemoirDialectGlossaryEntry,
+  MemoirDialectGlossaryResponse,
   MemoirInterviewEditorSessionDetail,
   MemoirInterviewEditorSessionList,
   MemoirInterviewType,
@@ -266,5 +270,37 @@ export const memoirChapterSourceEditorApi = {
     api.post<MemoirChapterSourceEditor>(
       `/memoir/projects/${projectId}/chapter-source-editor/removals`,
       { chapter_id: chapterId, utterance_ids: utteranceIds, ai_model: aiModel },
+    ).then(r => r.data),
+};
+
+// Memoir transcript cleanup editor API
+export const memoirTranscriptCleanupApi = {
+  getGlossary: (projectId: string) =>
+    api.get<MemoirDialectGlossaryResponse>(
+      `/memoir/projects/${projectId}/transcript-cleanup/dialect-glossary`,
+    ).then(r => r.data),
+  updateGlossary: (projectId: string, entries: MemoirDialectGlossaryEntry[]) =>
+    api.put<MemoirDialectGlossaryResponse>(
+      `/memoir/projects/${projectId}/transcript-cleanup/dialect-glossary`,
+      { entries },
+    ).then(r => r.data),
+  preview: (projectId: string, utteranceIds: string[], aiModel?: string) =>
+    api.post<MemoirBatchTranscriptCleanupPreviewResponse>(
+      `/memoir/projects/${projectId}/transcript-cleanup/preview`,
+      { utterance_ids: utteranceIds, ai_model: aiModel },
+    ).then(r => r.data),
+  confirm: (
+    projectId: string,
+    items: Array<{
+      utterance_id: string;
+      cleaned_text: string;
+      provider?: string | null;
+      created_by: string;
+    }>,
+    aiModel?: string,
+  ) =>
+    api.post<MemoirBatchTranscriptCleanupConfirmResponse>(
+      `/memoir/projects/${projectId}/transcript-cleanup/confirm`,
+      { items, ai_model: aiModel },
     ).then(r => r.data),
 };

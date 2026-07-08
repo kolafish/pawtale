@@ -102,6 +102,7 @@ class MemoirTranscriptCleanupContext:
     scene: str | None = None
     guidance_mode: str | None = None
     current_guidance_module: str | None = None
+    dialect_glossary: tuple[str, ...] = ()
     recent_user_utterances: tuple[str, ...] = ()
     recent_assistant_messages: tuple[str, ...] = ()
 
@@ -171,6 +172,10 @@ def _cleanup_context_block(context: MemoirTranscriptCleanupContext | None) -> st
         lines.append(f"- 引导模式：{context.guidance_mode}")
     if context.current_guidance_module:
         lines.append(f"- 当前引导模块：{context.current_guidance_module}")
+    glossary = _compact_context_texts(context.dialect_glossary, limit=20)
+    if glossary:
+        lines.append("- 方言/家族词表（优先用于同音词判断）：")
+        lines.extend(f"  {index}. {text}" for index, text in enumerate(glossary, start=1))
     user_utterances = _compact_context_texts(context.recent_user_utterances, limit=5)
     if user_utterances:
         lines.append("- 最近用户原话：")
@@ -315,6 +320,7 @@ async def load_voice_transcript_cleanup_context(
     voice_session: MemoirVoiceSession,
     *,
     exclude_message_id: str | None = None,
+    dialect_glossary: tuple[str, ...] = (),
 ) -> MemoirTranscriptCleanupContext:
     conditions = [
         MemoirChatMessage.voice_session_id == voice_session.id,
@@ -339,6 +345,7 @@ async def load_voice_transcript_cleanup_context(
         scene="voice_chat",
         guidance_mode=voice_session.guidance_mode,
         current_guidance_module=voice_session.current_guidance_module,
+        dialect_glossary=dialect_glossary,
         recent_user_utterances=tuple(recent_user[-5:]),
         recent_assistant_messages=tuple(recent_assistant[-3:]),
     )
@@ -860,6 +867,7 @@ async def _apply_edited_text(
     created_by: MemoirCreatedBy,
     provider: str | None,
     ai_model: str | None = None,
+    commit: bool = True,
 ) -> MemoirVoiceTranscriptItemResponse:
     version = MemoirTranscriptVersion(
         voice_session_id=utterance.voice_session_id,
@@ -910,13 +918,39 @@ async def _apply_edited_text(
             source=f"transcript_{version_type.value}",
             ai_model=ai_model,
         )
-    await db.commit()
+    if commit:
+        await db.commit()
     inclusions = await _book_inclusions_by_utterance_ids(
         db,
         [utterance.id],
         project_ids=[utterance.voice_session.project_id],
     )
     return _item_response(utterance, inclusions.get(utterance.id, []))
+
+
+async def apply_cleaned_voice_transcript_text(
+    db: AsyncSession,
+    utterance: MemoirVoiceUtterance,
+    content: str,
+    *,
+    created_by: MemoirCreatedBy,
+    provider: str | None,
+    ai_model: str | None = None,
+    commit: bool = True,
+) -> MemoirVoiceTranscriptItemResponse:
+    cleaned_content = content.strip()
+    if not cleaned_content:
+        raise HTTPException(status_code=400, detail="整理文字不能为空")
+    return await _apply_edited_text(
+        db,
+        utterance,
+        cleaned_content,
+        version_type=MemoirTranscriptVersionType.DIALECT_CORRECTED,
+        created_by=created_by,
+        provider=provider,
+        ai_model=ai_model,
+        commit=commit,
+    )
 
 
 async def update_voice_transcript(
