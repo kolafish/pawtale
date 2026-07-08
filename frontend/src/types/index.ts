@@ -680,6 +680,27 @@ export interface MemoirInterviewEditorSessionDetail {
   raw_timeline: MemoirInterviewEditorTimelineItem[];
 }
 
+export interface MemoirInterviewEditorReviewIssue {
+  code: string;
+  severity: string;
+  message: string;
+  count: number;
+}
+
+export interface MemoirInterviewEditorSessionReview {
+  project_id: string;
+  voice_session_id: string;
+  project_title: string;
+  generated_at: string;
+  question_count: number;
+  answer_count: number;
+  unassigned_answer_count: number;
+  missing_audio_count: number;
+  not_included_answer_count: number;
+  issues: MemoirInterviewEditorReviewIssue[];
+  markdown: string;
+}
+
 export type MemoirTranscriptCleanupCreatedBy = 'ai' | 'user' | 'system' | 'asr';
 
 export interface MemoirDialectGlossaryEntry {

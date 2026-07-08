@@ -28,8 +28,10 @@ from app.schemas.memoir_interview_editor import (
     MemoirInterviewEditorQuestionCreateRequest,
     MemoirInterviewEditorQuestionResponse,
     MemoirInterviewEditorQuestionTextUpdateRequest,
+    MemoirInterviewEditorReviewIssue,
     MemoirInterviewEditorSessionDetailResponse,
     MemoirInterviewEditorSessionListResponse,
+    MemoirInterviewEditorSessionReviewResponse,
     MemoirInterviewEditorSessionSummaryResponse,
     MemoirInterviewEditorTimelineItemResponse,
 )
@@ -164,6 +166,79 @@ def _metadata_with_update(metadata: dict | None, **values: object) -> dict:
 
 def _now_iso(now: datetime) -> str:
     return now.isoformat(timespec="seconds") + "Z"
+
+
+def _markdown_line(value: str) -> str:
+    return (value or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+
+
+def _markdown_inline(value: str) -> str:
+    return " ".join(_markdown_line(value).split())
+
+
+def _markdown_list_block(value: str) -> str:
+    return _markdown_line(value).replace("\n", "\n  ")
+
+
+def _review_issue(code: str, severity: str, message: str, count: int) -> MemoirInterviewEditorReviewIssue:
+    return MemoirInterviewEditorReviewIssue(
+        code=code,
+        severity=severity,
+        message=message,
+        count=count,
+    )
+
+
+def _answer_markdown(answer: MemoirInterviewEditorAnswerResponse, index: int) -> list[str]:
+    labels: list[str] = [f"A{index}"]
+    if answer.audio_duration_seconds:
+        labels.append(f"音频 {answer.audio_duration_seconds} 秒")
+    if answer.included_chapters:
+        labels.append("章节：" + "、".join(chapter.title for chapter in answer.included_chapters))
+    text = _markdown_list_block(answer.display_text)
+    return [
+        f"- {' / '.join(labels)}",
+        "",
+        f"  {text or '（暂无文字）'}",
+    ]
+
+
+def _session_review_markdown(
+    *,
+    project_title: str,
+    detail: MemoirInterviewEditorSessionDetailResponse,
+    generated_at: datetime,
+) -> str:
+    session = detail.session
+    lines = [
+        f"# {project_title} - 真人访谈整理稿",
+        "",
+        f"- 访谈 ID：{session.id}",
+        f"- 生成时间：{_now_iso(generated_at)}",
+        f"- 问题数：{session.question_count}",
+        f"- 回答数：{session.answer_count}",
+        f"- 未归属回答：{session.unassigned_answer_count}",
+        "",
+    ]
+    for question_index, question in enumerate(detail.questions, start=1):
+        lines.extend([
+            f"## Q{question_index}. {_markdown_inline(question.text) or '（未命名问题）'}",
+            "",
+        ])
+        if not question.answers:
+            lines.extend(["- （暂无回答）", ""])
+            continue
+        for answer_index, answer in enumerate(question.answers, start=1):
+            lines.extend(_answer_markdown(answer, answer_index))
+            lines.append("")
+
+    if detail.unassigned_answers:
+        lines.extend(["## 未归属回答", ""])
+        for answer_index, answer in enumerate(detail.unassigned_answers, start=1):
+            lines.extend(_answer_markdown(answer, answer_index))
+            lines.append("")
+
+    return "\n".join(lines).strip() + "\n"
 
 
 async def _next_turn_index(db: AsyncSession, voice_session_id: str) -> int:
@@ -375,6 +450,74 @@ async def get_interview_session_detail(
         ],
         unassigned_answers=unassigned_answers,
         raw_timeline=[_timeline_item(message) for message in messages if _message_text(message)],
+    )
+
+
+async def get_interview_session_review(
+    db: AsyncSession,
+    *,
+    user_id: str,
+    project_id: str,
+    voice_session_id: str,
+) -> MemoirInterviewEditorSessionReviewResponse:
+    project = await load_memoir_project(db, project_id, user_id)
+    detail = await get_interview_session_detail(
+        db,
+        user_id=user_id,
+        project_id=project_id,
+        voice_session_id=voice_session_id,
+    )
+    answers = [
+        *[answer for question in detail.questions for answer in question.answers],
+        *detail.unassigned_answers,
+    ]
+    missing_audio_count = sum(1 for answer in answers if not answer.audio_file_id)
+    not_included_answer_count = sum(1 for answer in answers if not answer.is_included_in_book)
+    issues: list[MemoirInterviewEditorReviewIssue] = []
+    if detail.session.question_count == 0:
+        issues.append(_review_issue("no_questions", "warning", "这场访谈还没有可整理的问题。", 1))
+    if detail.session.answer_count == 0:
+        issues.append(_review_issue("no_answers", "warning", "这场访谈还没有可整理的被访者回答。", 1))
+    if detail.session.unassigned_answer_count:
+        issues.append(
+            _review_issue(
+                "unassigned_answers",
+                "warning",
+                "仍有回答没有归属到问题。",
+                detail.session.unassigned_answer_count,
+            )
+        )
+    if missing_audio_count:
+        issues.append(
+            _review_issue("missing_audio", "info", "部分回答缺少可回听音频。", missing_audio_count)
+        )
+    if not_included_answer_count:
+        issues.append(
+            _review_issue(
+                "not_included_in_book",
+                "info",
+                "部分回答尚未归入章节素材。",
+                not_included_answer_count,
+            )
+        )
+
+    generated_at = datetime.utcnow()
+    return MemoirInterviewEditorSessionReviewResponse(
+        project_id=project_id,
+        voice_session_id=voice_session_id,
+        project_title=project.title,
+        generated_at=generated_at,
+        question_count=detail.session.question_count,
+        answer_count=detail.session.answer_count,
+        unassigned_answer_count=detail.session.unassigned_answer_count,
+        missing_audio_count=missing_audio_count,
+        not_included_answer_count=not_included_answer_count,
+        issues=issues,
+        markdown=_session_review_markdown(
+            project_title=project.title,
+            detail=detail,
+            generated_at=generated_at,
+        ),
     )
 
 

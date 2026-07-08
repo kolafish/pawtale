@@ -12,6 +12,7 @@ from app.schemas.memoir_interview_editor import (
     MemoirInterviewEditorQuestionTextUpdateRequest,
     MemoirInterviewEditorSessionDetailResponse,
     MemoirInterviewEditorSessionListResponse,
+    MemoirInterviewEditorSessionReviewResponse,
 )
 from app.services.memoir import interview_editor as memoir_interview_editor
 
@@ -52,6 +53,24 @@ async def get_memoir_interview_editor_session(
     current_user: User = Depends(get_current_user),
 ):
     return await memoir_interview_editor.get_interview_session_detail(
+        db,
+        user_id=current_user.id,
+        project_id=project_id,
+        voice_session_id=voice_session_id,
+    )
+
+
+@router.get(
+    "/projects/{project_id}/interview-editor/sessions/{voice_session_id}/review",
+    response_model=MemoirInterviewEditorSessionReviewResponse,
+)
+async def get_memoir_interview_editor_session_review(
+    project_id: str,
+    voice_session_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await memoir_interview_editor.get_interview_session_review(
         db,
         user_id=current_user.id,
         project_id=project_id,

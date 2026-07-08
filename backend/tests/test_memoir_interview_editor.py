@@ -312,6 +312,54 @@ async def test_interview_editor_creates_manual_question_and_moves_answer(client,
     assert message.metadata_json["relation_update_reason"] == "人工整理问答关系"
 
 
+async def test_interview_editor_review_exports_grouped_markdown_and_checks(client, test_db):
+    user = (await client.get("/api/auth/me")).json()
+    session = await _create_human_session(client)
+    question = await _add_turn(
+        test_db,
+        user_id=user["id"],
+        session=session,
+        role=MemoirChatMessageRole.INTERVIEWER.value,
+        text="你小时候最常去哪里？",
+        turn_index=0,
+    )
+    await _add_turn(
+        test_db,
+        user_id=user["id"],
+        session=session,
+        role=MemoirChatMessageRole.USER.value,
+        text="我小时候最常去外婆家。",
+        turn_index=1,
+        parent_message_id=question["message_id"],
+    )
+    await _add_turn(
+        test_db,
+        user_id=user["id"],
+        session=session,
+        role=MemoirChatMessageRole.USER.value,
+        text="后来我还经常去镇上赶场。",
+        turn_index=2,
+        parent_message_id=None,
+    )
+
+    response = await client.get(
+        f"/api/memoir/projects/{session['project_id']}/interview-editor/sessions/{session['id']}/review"
+    )
+
+    assert response.status_code == 200
+    review = response.json()
+    assert review["question_count"] == 1
+    assert review["answer_count"] == 2
+    assert review["unassigned_answer_count"] == 1
+    assert review["not_included_answer_count"] == 2
+    assert any(issue["code"] == "unassigned_answers" and issue["count"] == 1 for issue in review["issues"])
+    assert "# 测试回忆录 - 真人访谈整理稿" in review["markdown"]
+    assert "## Q1. 你小时候最常去哪里？" in review["markdown"]
+    assert "我小时候最常去外婆家。" in review["markdown"]
+    assert "## 未归属回答" in review["markdown"]
+    assert "后来我还经常去镇上赶场。" in review["markdown"]
+
+
 async def test_interview_editor_rejects_answer_parent_from_another_session(client, test_db):
     user = (await client.get("/api/auth/me")).json()
     session = await _create_human_session(client)

@@ -110,6 +110,27 @@ class MemoirInterviewEditorSessionDetailResponse(BaseModel):
     raw_timeline: list[MemoirInterviewEditorTimelineItemResponse] = Field(default_factory=list)
 
 
+class MemoirInterviewEditorReviewIssue(BaseModel):
+    code: str
+    severity: str
+    message: str
+    count: int = 0
+
+
+class MemoirInterviewEditorSessionReviewResponse(BaseModel):
+    project_id: str
+    voice_session_id: str
+    project_title: str
+    generated_at: datetime
+    question_count: int
+    answer_count: int
+    unassigned_answer_count: int
+    missing_audio_count: int
+    not_included_answer_count: int
+    issues: list[MemoirInterviewEditorReviewIssue] = Field(default_factory=list)
+    markdown: str
+
+
 class MemoirInterviewEditorQuestionCreateRequest(BaseModel):
     voice_session_id: str
     text: str
