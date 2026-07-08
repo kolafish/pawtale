@@ -35,6 +35,7 @@ import type {
   MemoirInterviewEditorQuestion,
   MemoirInterviewEditorReviewIssue,
   MemoirInterviewEditorSessionSummary,
+  MemoirChatMessageRole,
   Project,
 } from '../../types';
 
@@ -60,6 +61,26 @@ function answerPreview(answer: MemoirInterviewEditorAnswer) {
   const text = answer.display_text.trim();
   if (!text) return '这段回答暂无文字';
   return text.length > 72 ? `${text.slice(0, 72)}...` : text;
+}
+
+function sessionKindLabel(session: MemoirInterviewEditorSessionSummary) {
+  return session.interview_type === 'human_interview' ? '真人采访' : '小余追问';
+}
+
+function sessionModeLabel(session: MemoirInterviewEditorSessionSummary) {
+  return session.guidance_mode === 'free_narration' ? '慢慢讲' : '引导访谈';
+}
+
+function sessionSummary(session: MemoirInterviewEditorSessionSummary) {
+  return (session.summary_text || session.last_message_text || '').trim();
+}
+
+function questionRoleLabel(role: MemoirChatMessageRole, session?: MemoirInterviewEditorSessionSummary | null) {
+  if (role === 'assistant') return '小余追问';
+  if (role === 'interviewer') {
+    return session?.interview_type === 'human_interview' ? '采访者问题' : '整理问题';
+  }
+  return '整理问题';
 }
 
 function allAnswers(questions: MemoirInterviewEditorQuestion[], unassigned: MemoirInterviewEditorAnswer[]) {
@@ -136,25 +157,34 @@ function SessionButton({
     >
       <div className="flex items-center justify-between gap-2">
         <span className="truncate text-sm font-medium">{formatDateTime(session.started_at || session.created_at)}</span>
-        <span className="rounded-md bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-600 tabular-nums">
-          {session.answer_count}
+        <span className="rounded-md bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-600">
+          {sessionKindLabel(session)}
         </span>
       </div>
-      <div className="mt-2 flex items-center gap-3 text-xs text-gray-500">
-        <span className="inline-flex items-center gap-1">
+      <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-gray-500">
+        <span className="rounded-md bg-white/70 px-1.5 py-0.5">{sessionModeLabel(session)}</span>
+        <span className="inline-flex items-center gap-1 rounded-md bg-white/70 px-1.5 py-0.5">
           <MessageSquareText size={13} />
-          {session.question_count}
+          提问 {session.question_count}
         </span>
-        <span className="inline-flex items-center gap-1 tabular-nums">
+        <span className="rounded-md bg-white/70 px-1.5 py-0.5 tabular-nums">
+          回答 {session.answer_count}
+        </span>
+        <span className="inline-flex items-center gap-1 rounded-md bg-white/70 px-1.5 py-0.5 tabular-nums">
           <Clock3 size={13} />
           {formatDuration(session.total_audio_seconds)}
         </span>
         {session.unassigned_answer_count > 0 && (
-          <span className="text-amber-700 tabular-nums">未归属 {session.unassigned_answer_count}</span>
+          <span className="rounded-md bg-amber-50 px-1.5 py-0.5 text-amber-700 tabular-nums">
+            未归属 {session.unassigned_answer_count}
+          </span>
         )}
       </div>
-      {session.last_message_text && (
-        <p className="mt-2 line-clamp-2 text-xs leading-5 text-gray-500">{session.last_message_text}</p>
+      {sessionSummary(session) && (
+        <div className="mt-2 rounded-md bg-white/70 px-2 py-1.5">
+          <div className="mb-0.5 text-[11px] font-medium text-gray-400">摘要</div>
+          <p className="line-clamp-2 text-xs leading-5 text-gray-600">{sessionSummary(session)}</p>
+        </div>
       )}
     </button>
   );
@@ -245,8 +275,12 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
   const [copyReviewStatus, setCopyReviewStatus] = useState<'idle' | 'copied' | 'failed'>('idle');
 
   const sessionsQuery = useQuery({
-    queryKey: ['memoirInterviewEditorSessions', project.id],
-    queryFn: () => memoirInterviewEditorApi.listSessions(project.id, 'human_interview'),
+    queryKey: ['memoirInterviewEditorSessions', project.id, 'allEffective'],
+    queryFn: () => memoirInterviewEditorApi.listSessions(project.id, {
+      interviewType: null,
+      effectiveOnly: true,
+      limit: 200,
+    }),
   });
 
   const sessions = useMemo(() => sessionsQuery.data?.items ?? [], [sessionsQuery.data?.items]);
@@ -281,6 +315,7 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
 
   const detail = detailQuery.data;
   const review = reviewQuery.data;
+  const selectedSession = detail?.session ?? sessions.find((session) => session.id === selectedSessionId) ?? null;
   const chapterEditor = chapterSourceQuery.data;
   const chapterSourcesByUtterance = useMemo(
     () => sourceByUtterance(chapterEditor?.sources),
@@ -729,7 +764,7 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
                 </div>
               ) : sessions.length === 0 ? (
                 <div className="rounded-lg bg-white px-3 py-6 text-sm leading-6 text-gray-500">
-                  暂无真人访谈记录。小程序端完成真人访谈后会出现在这里。
+                  暂无可整理素材。小程序端完成讲述或真人访谈后会出现在这里。
                 </div>
               ) : (
                 <div className="space-y-2">
@@ -762,8 +797,16 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
               <div>
                 <h1 className="text-lg font-semibold text-gray-900">问答整理</h1>
                 <p className="mt-1 text-xs text-gray-500">
-                  {detail ? `${detail.session.question_count} 个问题，${detail.session.answer_count} 段回答` : '选择一场访谈查看内容'}
+                  {detail
+                    ? `${sessionKindLabel(detail.session)} · ${sessionModeLabel(detail.session)} · ${detail.session.question_count} 个提问，${detail.session.answer_count} 段回答`
+                    : '选择一场素材查看内容'}
                 </p>
+                {selectedSession && sessionSummary(selectedSession) && (
+                  <p className="mt-2 max-w-3xl rounded-lg bg-slate-50 px-3 py-2 text-xs leading-5 text-gray-600">
+                    <span className="mr-1 font-medium text-gray-500">摘要</span>
+                    {sessionSummary(selectedSession)}
+                  </p>
+                )}
               </div>
               <button
                 type="button"
@@ -809,7 +852,7 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
                       </div>
                       <div className="mt-2 flex flex-wrap gap-2 text-[11px]">
                         <span className="rounded-md bg-white px-2 py-1 text-gray-600 tabular-nums">
-                          问题 {review?.question_count ?? detail.session.question_count}
+                          提问 {review?.question_count ?? detail.session.question_count}
                         </span>
                         <span className="rounded-md bg-white px-2 py-1 text-gray-600 tabular-nums">
                           回答 {review?.answer_count ?? detail.session.answer_count}
@@ -865,7 +908,7 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
                   <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
                     <div className="min-w-0 flex-1">
                       <label htmlFor="new-question-text" className="mb-1 block text-xs font-medium text-gray-500">
-                        新建采访问题
+                        新建整理问题
                       </label>
                       <div className="flex gap-2">
                         <input
@@ -878,7 +921,7 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
                               createQuestionMutation.mutate({ voiceSessionId: selectedSessionId, text: newQuestionText.trim() });
                             }
                           }}
-                          placeholder="输入一个人工整理的问题"
+                          placeholder="输入一个用来归类回答的问题"
                           className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-gray-800 outline-none transition-[border-color,box-shadow] focus:border-emerald-300 focus:shadow-[0_0_0_3px_rgba(16,185,129,0.16)] disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-gray-400"
                         />
                         <button
@@ -960,7 +1003,7 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
                       </div>
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-2 text-xs text-gray-500">
-                          <span>采访者</span>
+                          <span>{questionRoleLabel(question.role, detail.session)}</span>
                           <span className="tabular-nums">#{question.turn_index}</span>
                           <span>{question.answer_count} 段回答</span>
                         </div>

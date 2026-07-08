@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from fastapi import HTTPException
@@ -11,7 +11,6 @@ from app.domain.memoir.types import (
     MemoirChatContentStatus,
     MemoirChatMessageRole,
     MemoirCreatedBy,
-    MemoirInterviewType,
     MemoirTranscriptVersionType,
 )
 from app.models.memoir import (
@@ -38,7 +37,11 @@ from app.schemas.memoir_interview_editor import (
 from app.services.memoir.access import load_memoir_project
 from app.services.memoir.book_source_links import included_chapters_by_utterance
 from app.services.memoir.voice_transcripts import prune_transcript_versions_for_utterance
-from app.services.memoir.source_disposition import is_countable_source_utterance
+from app.services.memoir.source_disposition import (
+    IGNORED_SOURCE_MATERIAL_TYPES,
+    INTERVIEWER_SOURCE_MATERIAL_TYPE,
+    is_countable_source_utterance,
+)
 
 
 QUESTION_ROLES = {
@@ -161,11 +164,6 @@ async def _load_owned_message(
     return message
 
 
-def _ensure_human_interview_session(session: MemoirVoiceSession) -> None:
-    if session.interview_type != MemoirInterviewType.HUMAN_INTERVIEW.value:
-        raise HTTPException(status_code=400, detail="只有真人访谈支持手动整理问答关系")
-
-
 def _metadata_with_update(metadata: dict | None, **values: object) -> dict:
     updated = dict(metadata or {})
     updated.update(values)
@@ -186,6 +184,42 @@ def _markdown_inline(value: str) -> str:
 
 def _markdown_list_block(value: str) -> str:
     return _markdown_line(value).replace("\n", "\n  ")
+
+
+def _visible_utterance_exists_clause():
+    return MemoirVoiceSession.utterances.any(
+        (
+            or_(
+                func.trim(MemoirVoiceUtterance.transcript_raw) != "",
+                func.trim(MemoirVoiceUtterance.transcript_edited) != "",
+            )
+            & ~(
+                (MemoirVoiceUtterance.source_route_action == "ignore")
+                & MemoirVoiceUtterance.source_material_type.in_(IGNORED_SOURCE_MATERIAL_TYPES)
+            )
+        )
+    )
+
+
+def _session_summary_text(
+    messages: list[MemoirChatMessage],
+    answer_pairs: list[tuple[MemoirChatMessage, MemoirVoiceUtterance]],
+) -> str:
+    excerpts: list[str] = []
+    for _message, utterance in sorted(
+        answer_pairs,
+        key=lambda item: (_message_order_key(item[0]), item[1].created_at, item[1].id),
+    ):
+        text = _markdown_inline(_utterance_text(utterance))
+        if text:
+            excerpts.append(text)
+        if len(excerpts) >= 2:
+            break
+    if excerpts:
+        return " / ".join(excerpts)[:180]
+
+    last_message = next((message for message in reversed(messages) if _message_text(message)), None)
+    return (_markdown_inline(_message_text(last_message))[:180] if last_message else "")
 
 
 def _review_issue(code: str, severity: str, message: str, count: int) -> MemoirInterviewEditorReviewIssue:
@@ -287,6 +321,7 @@ def _session_summary(session: MemoirVoiceSession) -> MemoirInterviewEditorSessio
         answer_count=len(answer_pairs),
         unassigned_answer_count=unassigned_count,
         total_audio_seconds=sum(_utterance_duration_seconds(utterance) for _message, utterance in answer_pairs),
+        summary_text=_session_summary_text(messages, answer_pairs),
         last_message_text=(_message_text(last_message)[:120] if last_message else ""),
         last_message_role=last_message.role if last_message else None,
         last_message_at=last_message.created_at if last_message else None,
@@ -380,7 +415,8 @@ async def list_interview_sessions(
     *,
     user_id: str,
     project_id: str,
-    interview_type: str | None = MemoirInterviewType.HUMAN_INTERVIEW.value,
+    interview_type: str | None = None,
+    effective_only: bool = True,
     limit: int = 50,
     offset: int = 0,
     allow_admin: bool = False,
@@ -391,6 +427,8 @@ async def list_interview_sessions(
         filters.append(Project.user_id == user_id)
     if interview_type:
         filters.append(MemoirVoiceSession.interview_type == interview_type)
+    if effective_only:
+        filters.append(_visible_utterance_exists_clause())
     total = await db.scalar(
         select(func.count(MemoirVoiceSession.id))
         .join(Project, MemoirVoiceSession.project_id == Project.id)
@@ -551,7 +589,6 @@ async def create_interview_question(
         voice_session_id=req.voice_session_id,
         allow_admin=allow_admin,
     )
-    _ensure_human_interview_session(session)
     now = datetime.utcnow()
     message = MemoirChatMessage(
         project_id=project_id,
@@ -598,9 +635,8 @@ async def update_interview_question_text(
         message_id=message_id,
         allow_admin=allow_admin,
     )
-    _ensure_human_interview_session(message.voice_session)
-    if message.role != MemoirChatMessageRole.INTERVIEWER.value:
-        raise HTTPException(status_code=400, detail="只能编辑真人采访者问题")
+    if message.role not in QUESTION_ROLES:
+        raise HTTPException(status_code=400, detail="只能编辑可整理的问题")
     now = datetime.utcnow()
     original_text = message.content_text
     message.content_text = req.text
@@ -627,10 +663,14 @@ async def update_interview_question_text(
         db.add(version)
         await db.flush()
         utterance.transcript_edited = req.text
-        utterance.source_material_type = "interviewer_prompt"
+        utterance.source_material_type = (
+            INTERVIEWER_SOURCE_MATERIAL_TYPE
+            if message.role == MemoirChatMessageRole.INTERVIEWER.value
+            else "ai_interaction"
+        )
         utterance.source_route_action = "ignore"
         if not utterance.source_route_reason:
-            utterance.source_route_reason = "真人采访者问题只作为上下文，不作为回忆录正文素材。"
+            utterance.source_route_reason = "访谈问题只作为上下文，不作为回忆录正文素材。"
         message.transcript_version_id = version.id
         await prune_transcript_versions_for_utterance(
             db,
@@ -664,7 +704,6 @@ async def update_answer_parent_question(
         message_id=message_id,
         allow_admin=allow_admin,
     )
-    _ensure_human_interview_session(message.voice_session)
     if message.role != MemoirChatMessageRole.USER.value:
         raise HTTPException(status_code=400, detail="只能调整被访者回答的归属")
 

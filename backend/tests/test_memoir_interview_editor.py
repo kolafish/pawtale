@@ -4,6 +4,7 @@ from app.domain.memoir.types import (
     MemoirChatContentStatus,
     MemoirChatMessageRole,
     MemoirCreatedBy,
+    MemoirInterviewType,
     MemoirTranscriptVersionType,
 )
 from app.models.memoir import (
@@ -21,11 +22,20 @@ from tests.memoir_helpers import (
 
 
 async def _create_human_session(client) -> dict:
+    return await _create_voice_session(client, interview_type=MemoirInterviewType.HUMAN_INTERVIEW.value)
+
+
+async def _create_voice_session(
+    client,
+    *,
+    interview_type: str,
+    guidance_mode: str = "free_narration",
+) -> dict:
     response = await post_mobile_memoir_voice_session(
         client,
         json={
-            "guidance_mode": "free_narration",
-            "interview_type": "human_interview",
+            "guidance_mode": guidance_mode,
+            "interview_type": interview_type,
             "provider": "volc_streaming_asr",
         },
     )
@@ -92,7 +102,7 @@ async def _add_turn(
         metadata_json={
             "source": "test",
             "speaker_role": "interviewer" if role == MemoirChatMessageRole.INTERVIEWER.value else "narrator",
-            "interview_type": "human_interview",
+            "interview_type": session["interview_type"],
         },
     )
     test_db.add(message)
@@ -107,11 +117,20 @@ async def _add_turn(
         end_ms=end_ms,
         provider="volc_streaming_asr",
         provider_payload_json={"source": "test"},
-        source_material_type="interviewer_prompt" if role == MemoirChatMessageRole.INTERVIEWER.value else "",
-        source_route_action="ignore" if role == MemoirChatMessageRole.INTERVIEWER.value else "",
-        source_route_reason=(
-            "真人采访者问题只作为上下文，不作为回忆录正文素材。"
+        source_material_type=(
+            "interviewer_prompt"
             if role == MemoirChatMessageRole.INTERVIEWER.value
+            else "ai_interaction"
+            if role == MemoirChatMessageRole.ASSISTANT.value
+            else ""
+        ),
+        source_route_action="ignore" if role in {
+            MemoirChatMessageRole.INTERVIEWER.value,
+            MemoirChatMessageRole.ASSISTANT.value,
+        } else "",
+        source_route_reason=(
+            "访谈问题只作为上下文，不作为回忆录正文素材。"
+            if role in {MemoirChatMessageRole.INTERVIEWER.value, MemoirChatMessageRole.ASSISTANT.value}
             else ""
         ),
     )
@@ -126,6 +145,70 @@ async def _add_turn(
         "transcript_version_id": version.id,
         "session": session,
     }
+
+
+async def test_interview_editor_lists_effective_material_sessions_across_interview_types(client, test_db):
+    user = (await client.get("/api/auth/me")).json()
+    ai_session = await _create_voice_session(
+        client,
+        interview_type=MemoirInterviewType.AI_INTERVIEW.value,
+        guidance_mode="guided_interview",
+    )
+    human_session = await _create_human_session(client)
+    empty_session = await _create_voice_session(
+        client,
+        interview_type=MemoirInterviewType.HUMAN_INTERVIEW.value,
+    )
+    ai_question = await _add_turn(
+        test_db,
+        user_id=user["id"],
+        session=ai_session,
+        role=MemoirChatMessageRole.ASSISTANT.value,
+        text="你还记得温婆婆吗？",
+        turn_index=0,
+    )
+    await _add_turn(
+        test_db,
+        user_id=user["id"],
+        session=ai_session,
+        role=MemoirChatMessageRole.USER.value,
+        text="温婆婆那时候经常到我们屋头来。",
+        turn_index=1,
+        parent_message_id=ai_question["message_id"],
+    )
+    await _add_turn(
+        test_db,
+        user_id=user["id"],
+        session=human_session,
+        role=MemoirChatMessageRole.USER.value,
+        text="我小时候在院坝里摆龙门阵。",
+        turn_index=0,
+    )
+
+    response = await client.get(
+        f"/api/memoir/projects/{ai_session['project_id']}/interview-editor/sessions"
+    )
+
+    assert response.status_code == 200
+    items = response.json()["items"]
+    listed_ids = {item["id"] for item in items}
+    assert ai_session["id"] in listed_ids
+    assert human_session["id"] in listed_ids
+    assert empty_session["id"] not in listed_ids
+    ai_item = next(item for item in items if item["id"] == ai_session["id"])
+    assert ai_item["interview_type"] == "ai_interview"
+    assert ai_item["question_count"] == 1
+    assert ai_item["answer_count"] == 1
+    assert ai_item["summary_text"] == "温婆婆那时候经常到我们屋头来。"
+
+    human_only_response = await client.get(
+        f"/api/memoir/projects/{ai_session['project_id']}/interview-editor/sessions",
+        params={"interview_type": "human_interview", "effective_only": False},
+    )
+    assert human_only_response.status_code == 200
+    human_only_ids = {item["id"] for item in human_only_response.json()["items"]}
+    assert ai_session["id"] not in human_only_ids
+    assert empty_session["id"] in human_only_ids
 
 
 async def test_interview_editor_groups_multiple_answers_under_human_question(client, test_db):
