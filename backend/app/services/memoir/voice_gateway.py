@@ -32,6 +32,7 @@ AudioFrameHandler = Callable[[bytes], Awaitable[None]]
 ASRFinalHandler = Callable[[StreamingASREvent], Awaitable[dict[str, Any] | None]]
 ASR_FINISH_DRAIN_TIMEOUT_SECONDS = 10.0
 MAX_AUDIO_FRAME_BYTES = 256 * 1024
+ASR_PROVIDER_NO_STATUS_CLOSE_CODE = 1005
 
 
 class VoiceGatewayClientError(RuntimeError):
@@ -249,7 +250,10 @@ class VoiceGatewaySession:
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            await self._mark_terminal_error(str(exc))
+            if self._state == VoiceGatewayState.FINISHING and _is_asr_provider_no_status_close(exc):
+                logger.info("Ignoring ASR provider no-status close during audio finish")
+                return
+            await self._mark_terminal_error(_asr_provider_exception_code(exc))
 
     async def _send_asr_event(self, event: StreamingASREvent) -> None:
         if event.type == "error":
@@ -395,3 +399,24 @@ class VoiceGatewaySession:
             "state": self._state.value,
             **payload,
         }
+
+
+def _asr_provider_exception_code(exc: Exception) -> str:
+    if _is_asr_provider_no_status_close(exc):
+        return "asr_provider_connection_closed"
+    return str(exc)
+
+
+def _is_asr_provider_no_status_close(exc: Exception) -> bool:
+    for value in (
+        getattr(exc, "code", None),
+        getattr(getattr(exc, "rcvd", None), "code", None),
+        getattr(getattr(exc, "sent", None), "code", None),
+    ):
+        try:
+            if value is not None and int(value) == ASR_PROVIDER_NO_STATUS_CLOSE_CODE:
+                return True
+        except (TypeError, ValueError):
+            continue
+    text = str(exc).lower()
+    return "no_status_rcvd" in text or "closecode.no_status_rcvd" in text

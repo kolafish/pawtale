@@ -149,6 +149,33 @@ function setVoiceChatData(context: VoiceChatDataContext, patch: Partial<VoiceCha
   });
 }
 
+function isProviderNoStatusClose(message: string, error?: VoiceChatErrorInfo): boolean {
+  if (error?.code === "asr_provider_connection_closed") {
+    return true;
+  }
+  const text = [
+    message,
+    error?.code || "",
+    error?.message || "",
+  ].join(" ").toLowerCase();
+  return text.includes("no_status_rcvd") || text.includes("closecode.no_status_rcvd");
+}
+
+function shouldIgnoreSavedHumanInterviewClose(
+  data: Pick<
+    VoiceChatData,
+    "interviewType" | "recording" | "transcriptLines" | "latestTranscriptText"
+  >,
+  message: string,
+  error?: VoiceChatErrorInfo,
+): boolean {
+  if (data.interviewType !== "human_interview" || data.recording || !isProviderNoStatusClose(message, error)) {
+    return false;
+  }
+  return data.transcriptLines.some((line) => line.text.trim())
+    || Boolean(data.latestTranscriptText.trim());
+}
+
 definePage<VoiceChatData>()({
   audioPlayback: new AudioPlaybackController(),
   voiceStreaming: new StreamingVoiceController(),
@@ -167,6 +194,7 @@ definePage<VoiceChatData>()({
   handledNoAnswerFrameCount: -1,
   autoListenPendingAfterPlayback: false,
   pageSuspended: false,
+  suppressNextBenignCloseErrorStatus: false,
 
   data: initialVoiceChatData(),
 
@@ -1620,6 +1648,10 @@ definePage<VoiceChatData>()({
   },
 
   handleStatus(status: VoiceChatConnectionStatus) {
+    if (status === "error" && this.suppressNextBenignCloseErrorStatus) {
+      this.suppressNextBenignCloseErrorStatus = false;
+      return;
+    }
     setVoiceChatData(this, voiceConnectionStatusPatch(status, this.data));
   },
 
@@ -1688,6 +1720,17 @@ definePage<VoiceChatData>()({
   },
 
   handleError(message: string, error?: VoiceChatErrorInfo) {
+    if (shouldIgnoreSavedHumanInterviewClose(this.data, message, error)) {
+      this.suppressNextBenignCloseErrorStatus = true;
+      setVoiceChatData(this, {
+        error: "",
+        errorKindText: "",
+        recording: false,
+        captureStateText: "麦克风未开始",
+        primaryActionText: "继续说话",
+      });
+      return;
+    }
     if (error?.kind === "connection") {
       this.persistPendingVoiceClose("connection_error");
     }

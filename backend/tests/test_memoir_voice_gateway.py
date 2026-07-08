@@ -103,6 +103,63 @@ async def test_voice_gateway_streams_audio_and_forwards_asr_events():
     assert stopped_with == [None]
 
 
+async def test_voice_gateway_ignores_provider_no_status_close_during_finish():
+    class NoStatusCloseAfterFinalASRClient(FakeStreamingASRClient):
+        async def finish(self) -> None:
+            self.finished = True
+            await self.events_queue.put(StreamingASREvent(type="final", text="素材已经保存。"))
+            await self.events_queue.put(RuntimeError("(<CloseCode.NO_STATUS_RCVD: 1005>, None)"))  # type: ignore[arg-type]
+
+        async def events(self):
+            while True:
+                event = await self.events_queue.get()
+                if isinstance(event, Exception):
+                    raise event
+                if event is None:
+                    return
+                yield event
+
+    client = FakeGatewayClient()
+    asr_client = NoStatusCloseAfterFinalASRClient()
+    stopped_with: list[str | None] = []
+
+    async def persist_final(_event: StreamingASREvent) -> dict[str, Any]:
+        return {"message_id": "msg-1", "utterance_id": "utt-1"}
+
+    session = VoiceGatewaySession(
+        client=client,
+        asr_client_factory=lambda: asr_client,
+        on_stop=lambda error: _record_stop(stopped_with, error),
+        on_asr_final=persist_final,
+    )
+
+    run_task = asyncio.create_task(session.run())
+    await _wait_for_event(client, "session.ready")
+    await client.push({"type": "session.start"})
+    await _wait_for_event(client, "session.started")
+    await client.push(
+        {
+            "type": "audio.frame",
+            "audio": base64.b64encode(b"pcm").decode("ascii"),
+        }
+    )
+    await client.push({"type": "audio.end"})
+
+    final = await _wait_for_event(client, "asr.final")
+    ended = await _wait_for_event(client, "audio.ended")
+    await client.push({"type": "session.stop"})
+    stopped = await _wait_for_event(client, "session.stopped")
+    await asyncio.wait_for(run_task, timeout=1)
+
+    assert final["text"] == "素材已经保存。"
+    assert final["message_id"] == "msg-1"
+    assert final["utterance_id"] == "utt-1"
+    assert ended["state"] == "ready"
+    assert stopped["status"] == "stopped"
+    assert stopped_with == [None]
+    assert not [event for event in client.sent if event["type"] == "session.error"]
+
+
 async def test_voice_gateway_rejects_audio_before_session_start_with_ready_state():
     client = FakeGatewayClient()
     asr_client = FakeStreamingASRClient()
