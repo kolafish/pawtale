@@ -10,6 +10,7 @@
     "pages/book/index",
     "pages/book-chapter/index",
     "pages/book-export/index",
+    "pages/book-reader/index",
     "pages/voice-progress/index",
     "pages/debug-speaker-transcribe/index",
     "pages/projects/index",

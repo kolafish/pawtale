@@ -3,13 +3,18 @@ const BOOK_SHARE_QUERY = "from=share_book";
 
 const HOME_SHARE_TITLE = "余主任留声机，把家里的故事慢慢讲下来";
 const HOME_SHARE_PATH = `/pages/home/index?${HOME_SHARE_QUERY}`;
-const BOOK_SHARE_PATH = `/pages/book/index?${BOOK_SHARE_QUERY}`;
+const BOOK_SHARE_FALLBACK_PATH = `/pages/book/index?${BOOK_SHARE_QUERY}`;
 const SHARE_TITLE_LIMIT = 18;
 
 interface BookShareInput {
+  projectId?: string;
   projectTitle?: string;
   bookTitle?: string;
   hasBookContent?: boolean;
+}
+
+interface ShareMenuOptions {
+  includeTimeline?: boolean;
 }
 
 function shortTitle(value: string | undefined, fallback: string): string {
@@ -24,12 +29,29 @@ function bookTitle(input: BookShareInput): string {
   return shortTitle(input.bookTitle || input.projectTitle, "我的回忆录");
 }
 
-export function enableMiniProgramShareMenu(): void {
+function encodedProjectQuery(projectId: string): string {
+  return `projectId=${encodeURIComponent(projectId)}&${BOOK_SHARE_QUERY}`;
+}
+
+export function bookReaderSharePath(projectId: string): string {
+  return `/pages/book-reader/index?${encodedProjectQuery(projectId)}`;
+}
+
+function bookSharePath(input: BookShareInput): string {
+  return input.hasBookContent && input.projectId
+    ? bookReaderSharePath(input.projectId)
+    : BOOK_SHARE_FALLBACK_PATH;
+}
+
+export function enableMiniProgramShareMenu(options: ShareMenuOptions = {}): void {
   if (typeof wx === "undefined" || typeof wx.showShareMenu !== "function") {
     return;
   }
+  const menus: Array<"shareAppMessage" | "shareTimeline"> = options.includeTimeline === false
+    ? ["shareAppMessage"]
+    : ["shareAppMessage", "shareTimeline"];
   wx.showShareMenu({
-    menus: ["shareAppMessage", "shareTimeline"],
+    menus,
   });
 }
 
@@ -50,15 +72,18 @@ export function homeShareTimeline(): WechatMiniprogram.ShareTimelinePayload {
 export function bookShareAppMessage(input: BookShareInput = {}): WechatMiniprogram.ShareAppMessagePayload {
   const title = bookTitle(input);
   return {
-    title: input.hasBookContent ? `《${title}》正在整理成书` : `一起整理《${title}》的书稿`,
-    path: BOOK_SHARE_PATH,
+    title: input.hasBookContent ? `送你一本《${title}》` : `一起整理《${title}》的书稿`,
+    path: bookSharePath(input),
   };
 }
 
 export function bookShareTimeline(input: BookShareInput = {}): WechatMiniprogram.ShareTimelinePayload {
   const title = bookTitle(input);
+  const query = input.hasBookContent && input.projectId
+    ? encodedProjectQuery(input.projectId)
+    : BOOK_SHARE_QUERY;
   return {
-    title: input.hasBookContent ? `《${title}》正在整理成书` : `一起整理《${title}》的书稿`,
-    query: BOOK_SHARE_QUERY,
+    title: input.hasBookContent ? `送你一本《${title}》` : `一起整理《${title}》的书稿`,
+    query,
   };
 }

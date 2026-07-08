@@ -94,7 +94,6 @@ import {
 } from "../../services/voice-authorization";
 import {
   bookShareAppMessage,
-  bookShareTimeline,
   enableMiniProgramShareMenu,
 } from "../../services/share";
 import { ensureRecorderPrivacyAuthorization } from "../../services/wechat-privacy";
@@ -363,21 +362,14 @@ definePage<BookData>()({
   },
 
   async onShow() {
-    enableMiniProgramShareMenu();
+    enableMiniProgramShareMenu({ includeTimeline: false });
     this.bookGenerationPollAttempts = 0;
     await this.loadBookHome();
   },
 
   onShareAppMessage() {
     return bookShareAppMessage({
-      projectTitle: this.data.projectTitle,
-      bookTitle: this.data.bookPreviewTitle || this.data.bookManuscriptTitle || this.data.planTitle,
-      hasBookContent: Boolean(this.data.bookContent),
-    });
-  },
-
-  onShareTimeline() {
-    return bookShareTimeline({
+      projectId: this.data.projectId,
       projectTitle: this.data.projectTitle,
       bookTitle: this.data.bookPreviewTitle || this.data.bookManuscriptTitle || this.data.planTitle,
       hasBookContent: Boolean(this.data.bookContent),

@@ -1,0 +1,179 @@
+.book-reader-page {
+  min-height: 100vh;
+  box-sizing: border-box;
+  padding: 32rpx 28rpx 72rpx;
+  background: #fcf7ed;
+  color: #2b1713;
+}
+
+.reader-cover,
+.reader-state,
+.reader-section,
+.chapter-block {
+  box-sizing: border-box;
+  border: 1rpx solid #ead9c8;
+  border-radius: 12rpx;
+  background: #fffdf8;
+  box-shadow: 0 10rpx 24rpx rgba(93, 59, 40, 0.06);
+}
+
+.reader-cover {
+  padding: 44rpx 34rpx 40rpx;
+}
+
+.reader-eyebrow,
+.reader-title,
+.reader-subtitle,
+.reader-meta,
+.reader-notice,
+.section-label,
+.toc-index,
+.toc-title,
+.chapter-index,
+.chapter-title,
+.chapter-meta,
+.chapter-content,
+.book-content,
+.reader-state {
+  display: block;
+}
+
+.reader-eyebrow {
+  color: #9b6a52;
+  font-size: 25rpx;
+  line-height: 1.4;
+}
+
+.reader-title {
+  margin-top: 16rpx;
+  color: #24120f;
+  font-size: 52rpx;
+  font-weight: 800;
+  line-height: 1.22;
+  word-break: break-word;
+}
+
+.reader-subtitle {
+  margin-top: 18rpx;
+  color: #6f625b;
+  font-size: 30rpx;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.reader-meta {
+  margin-top: 22rpx;
+  color: #8a7467;
+  font-size: 25rpx;
+  line-height: 1.5;
+}
+
+.reader-notice {
+  margin-top: 22rpx;
+  padding: 18rpx 20rpx;
+  border-radius: 10rpx;
+  background: #fff2ed;
+  color: #a64b3e;
+  font-size: 25rpx;
+  line-height: 1.5;
+}
+
+.reader-state {
+  padding: 36rpx 30rpx;
+  color: #6f625b;
+  font-size: 30rpx;
+  line-height: 1.55;
+}
+
+.reader-state.error {
+  border-color: #e7b1a6;
+  background: #fff5f2;
+  color: #a64b3e;
+}
+
+.reader-section {
+  margin-top: 24rpx;
+  padding: 30rpx;
+}
+
+.section-label {
+  color: #8a4035;
+  font-size: 28rpx;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.toc-list {
+  margin-top: 18rpx;
+  display: flex;
+  flex-direction: column;
+  gap: 14rpx;
+}
+
+.toc-row {
+  display: grid;
+  grid-template-columns: 96rpx minmax(0, 1fr);
+  align-items: start;
+  gap: 16rpx;
+}
+
+.toc-index {
+  color: #9b6a52;
+  font-size: 25rpx;
+  line-height: 1.5;
+}
+
+.toc-title {
+  color: #2f241f;
+  font-size: 30rpx;
+  font-weight: 700;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.chapter-list {
+  margin-top: 24rpx;
+  display: flex;
+  flex-direction: column;
+  gap: 24rpx;
+}
+
+.chapter-block {
+  padding: 36rpx 32rpx;
+}
+
+.chapter-index {
+  color: #9b6a52;
+  font-size: 26rpx;
+  line-height: 1.4;
+}
+
+.chapter-title {
+  margin-top: 10rpx;
+  color: #24120f;
+  font-size: 40rpx;
+  font-weight: 800;
+  line-height: 1.32;
+  word-break: break-word;
+}
+
+.chapter-meta {
+  margin-top: 12rpx;
+  color: #8a7467;
+  font-size: 24rpx;
+  line-height: 1.5;
+}
+
+.chapter-content,
+.book-content {
+  margin-top: 24rpx;
+  color: #332822;
+  font-size: 32rpx;
+  line-height: 1.82;
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+
+.book-content {
+  margin-top: 18rpx;
+}
