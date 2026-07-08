@@ -1,6 +1,8 @@
 require("./register-ts");
 
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
 const test = require("node:test");
 const { clearModule, loadPageModule, mockModule, pageContext } = require("./page-harness");
 
@@ -571,6 +573,27 @@ test("book page summarizes chapter source count without exposing raw ids", () =>
     }),
     "本章素材：3 条原始讲述",
   );
+});
+
+test("book page exposes manuscript share entry points", () => {
+  const pageWxml = fs.readFileSync(path.join(__dirname, "../pages/book/index.wxml"), "utf8");
+  const { page } = loadBookPage();
+  const context = pageContext(page, {
+    projectTitle: "外婆回忆录",
+    bookPreviewTitle: "外婆回忆录",
+    bookContent: "外婆回忆录正文",
+  });
+
+  assert.match(pageWxml, /open-type="share"/);
+  assert.match(pageWxml, /分享书稿/);
+  assert.deepEqual(page.onShareAppMessage.call(context), {
+    title: "《外婆回忆录》正在整理成书",
+    path: "/pages/book/index?from=share_book",
+  });
+  assert.deepEqual(page.onShareTimeline.call(context), {
+    title: "《外婆回忆录》正在整理成书",
+    query: "from=share_book",
+  });
 });
 
 test("book page routes chapter card actions to the chapter detail page", () => {

@@ -28,6 +28,11 @@ import {
   syncVoiceAuthorizationConsent,
   VOICE_AUTHORIZATION_PAGE_URL,
 } from "../../services/voice-authorization";
+import {
+  enableMiniProgramShareMenu,
+  homeShareAppMessage,
+  homeShareTimeline,
+} from "../../services/share";
 
 const WECHAT_PLACEHOLDER_DISPLAY_NAME = "微信用户";
 const VOICE_AUTHORIZATION_VALUE = "voice_authorization";
@@ -328,11 +333,20 @@ definePage<HomeData>()({
   },
 
   async onShow() {
+    enableMiniProgramShareMenu();
     this.refreshAccessibilitySettings();
     this.refreshVoiceAuthorizationConsent();
     if (!this.data.loading) {
       await this.loadHome();
     }
+  },
+
+  onShareAppMessage() {
+    return homeShareAppMessage();
+  },
+
+  onShareTimeline() {
+    return homeShareTimeline();
   },
 
   refreshAccessibilitySettings() {
