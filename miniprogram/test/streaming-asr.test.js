@@ -1022,7 +1022,10 @@ test("streaming ASR emits diagnostics when socket send fails", async () => {
   const recorder = recorderManagerHarness();
   const diagnostics = [];
   const errors = [];
+  const statuses = [];
+  const captureStats = [];
   let onOpen;
+  let closeCalls = 0;
   global.wx = {
     getRecorderManager() {
       return recorder;
@@ -1061,7 +1064,9 @@ test("streaming ASR emits diagnostics when socket send fails", async () => {
             options.fail({ errMsg: "request fail timeout" });
           }
         },
-        close() {},
+        close() {
+          closeCalls += 1;
+        },
       };
     },
   };
@@ -1073,7 +1078,12 @@ test("streaming ASR emits diagnostics when socket send fails", async () => {
     voiceSessionId: "voice-1",
     guidanceMode: "free_narration",
     callbacks: {
-      onStatus() {},
+      onStatus(status) {
+        statuses.push(status);
+      },
+      onCaptureStats(stats) {
+        captureStats.push(stats);
+      },
       onClientEvent(event) {
         diagnostics.push(event);
       },
@@ -1106,6 +1116,15 @@ test("streaming ASR emits diagnostics when socket send fails", async () => {
   assert.equal(sendFailure.audioBytesSent, 3200);
   assert.equal(errors[0].message, "request fail timeout");
   assert.equal(errors[0].error.kind, "connection");
+  assert.equal(recorder.stops, 1);
+  assert.equal(closeCalls, 1);
+  assert.equal(statuses.at(-1), "error");
+  assert.equal(captureStats.at(-1).state, "error");
+  recorder.callbacks.frame({
+    frameBuffer: pcm16Frame(2048),
+    isLastFrame: false,
+  });
+  assert.equal(diagnostics.filter((event) => event.type === "socket_send_fail").length, 1);
   delete global.wx;
 });
 

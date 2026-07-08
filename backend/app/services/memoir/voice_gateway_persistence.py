@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 from pathlib import Path
 from typing import Any
 import uuid
@@ -49,11 +50,16 @@ class PendingAudioFileBuffer:
             self._path,
             mime_type="audio/pcm",
             extension=".pcm",
-            move_source=True,
+            move_source=False,
         )
+        return staged
+
+    async def mark_committed(self) -> None:
+        with contextlib.suppress(Exception):
+            if self._path is not None and self._path.exists():
+                await aiofiles.os.remove(self._path)
         self._path = None
         self._size_bytes = 0
-        return staged
 
     async def discard(self) -> None:
         if self._path is not None and self._path.exists():
@@ -112,6 +118,7 @@ class VoiceGatewayPersistence:
             speaker_role=self._turn_context.speaker_role,
             parent_message_id=self._turn_context.parent_message_id,
         )
+        await self._pending_audio.mark_committed()
         return result.as_gateway_payload()
 
     async def persist_final(self, event: StreamingASREvent) -> dict[str, Any]:
@@ -122,6 +129,7 @@ class VoiceGatewayPersistence:
         result = await self._service.persist_unfinalized_audio(staged_audio=staged_audio)
         if result is None:
             return None
+        await self._pending_audio.mark_committed()
         return result.as_gateway_payload()
 
     async def discard_pending_audio(self) -> None:
