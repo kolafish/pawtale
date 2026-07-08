@@ -1,24 +1,33 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from fastapi import HTTPException
 
 from app.domain.memoir.types import (
+    MemoirChatContentStatus,
     MemoirChatMessageRole,
+    MemoirCreatedBy,
     MemoirInterviewType,
+    MemoirTranscriptVersionType,
 )
 from app.models.memoir import (
     MemoirBookPlan,
     MemoirChatMessage,
+    MemoirTranscriptVersion,
     MemoirVoiceSession,
     MemoirVoiceUtterance,
 )
 from app.models.projects import Project
 from app.schemas.memoir_interview_editor import (
     MemoirInterviewEditorAnswerResponse,
+    MemoirInterviewEditorAnswerParentUpdateRequest,
+    MemoirInterviewEditorQuestionCreateRequest,
     MemoirInterviewEditorQuestionResponse,
+    MemoirInterviewEditorQuestionTextUpdateRequest,
     MemoirInterviewEditorSessionDetailResponse,
     MemoirInterviewEditorSessionListResponse,
     MemoirInterviewEditorSessionSummaryResponse,
@@ -26,6 +35,7 @@ from app.schemas.memoir_interview_editor import (
 )
 from app.services.memoir.access import load_memoir_project
 from app.services.memoir.book_source_links import included_chapters_by_utterance
+from app.services.memoir.voice_transcripts import prune_transcript_versions_for_utterance
 from app.services.memoir.source_disposition import is_countable_source_utterance
 
 
@@ -33,6 +43,7 @@ QUESTION_ROLES = {
     MemoirChatMessageRole.INTERVIEWER.value,
     MemoirChatMessageRole.ASSISTANT.value,
 }
+MUTATION_SOURCE = "web_interview_editor"
 
 
 def _message_order_key(message: MemoirChatMessage) -> tuple[int, object, str]:
@@ -104,6 +115,7 @@ async def _load_owned_session(
             MemoirVoiceSession.project_id == project_id,
         )
         .options(*_detail_options())
+        .execution_options(populate_existing=True)
     )
     if not session:
         raise HTTPException(status_code=404, detail="访谈记录不存在")
@@ -112,6 +124,55 @@ async def _load_owned_session(
 
 async def _project_book_plan(db: AsyncSession, project_id: str) -> MemoirBookPlan | None:
     return await db.scalar(select(MemoirBookPlan).where(MemoirBookPlan.project_id == project_id))
+
+
+async def _load_owned_message(
+    db: AsyncSession,
+    *,
+    user_id: str,
+    project_id: str,
+    message_id: str,
+) -> MemoirChatMessage:
+    message = await db.scalar(
+        select(MemoirChatMessage)
+        .join(Project, MemoirChatMessage.project_id == Project.id)
+        .where(
+            MemoirChatMessage.id == message_id,
+            MemoirChatMessage.project_id == project_id,
+            Project.user_id == user_id,
+        )
+        .options(
+            selectinload(MemoirChatMessage.utterances),
+            selectinload(MemoirChatMessage.voice_session),
+        )
+    )
+    if not message:
+        raise HTTPException(status_code=404, detail="访谈消息不存在")
+    return message
+
+
+def _ensure_human_interview_session(session: MemoirVoiceSession) -> None:
+    if session.interview_type != MemoirInterviewType.HUMAN_INTERVIEW.value:
+        raise HTTPException(status_code=400, detail="只有真人访谈支持手动整理问答关系")
+
+
+def _metadata_with_update(metadata: dict | None, **values: object) -> dict:
+    updated = dict(metadata or {})
+    updated.update(values)
+    return updated
+
+
+def _now_iso(now: datetime) -> str:
+    return now.isoformat(timespec="seconds") + "Z"
+
+
+async def _next_turn_index(db: AsyncSession, voice_session_id: str) -> int:
+    current = await db.scalar(
+        select(func.max(MemoirChatMessage.turn_index)).where(
+            MemoirChatMessage.voice_session_id == voice_session_id
+        )
+    )
+    return 0 if current is None else int(current) + 1
 
 
 def _session_summary(session: MemoirVoiceSession) -> MemoirInterviewEditorSessionSummaryResponse:
@@ -314,4 +375,167 @@ async def get_interview_session_detail(
         ],
         unassigned_answers=unassigned_answers,
         raw_timeline=[_timeline_item(message) for message in messages if _message_text(message)],
+    )
+
+
+async def create_interview_question(
+    db: AsyncSession,
+    *,
+    user_id: str,
+    project_id: str,
+    req: MemoirInterviewEditorQuestionCreateRequest,
+) -> MemoirInterviewEditorSessionDetailResponse:
+    session = await _load_owned_session(
+        db,
+        user_id=user_id,
+        project_id=project_id,
+        voice_session_id=req.voice_session_id,
+    )
+    _ensure_human_interview_session(session)
+    now = datetime.utcnow()
+    message = MemoirChatMessage(
+        project_id=project_id,
+        voice_session_id=session.id,
+        role=MemoirChatMessageRole.INTERVIEWER.value,
+        content_text=req.text,
+        content_status=MemoirChatContentStatus.CORRECTED.value,
+        guidance_intent="manual_question",
+        turn_index=await _next_turn_index(db, session.id),
+        metadata_json={
+            "source": "web_interview_editor.manual_question",
+            "speaker_role": "interviewer",
+            "interview_type": session.interview_type,
+            "created_by": "user",
+            "created_from": MUTATION_SOURCE,
+            "created_at": _now_iso(now),
+        },
+    )
+    db.add(message)
+    await db.commit()
+    return await get_interview_session_detail(
+        db,
+        user_id=user_id,
+        project_id=project_id,
+        voice_session_id=session.id,
+    )
+
+
+async def update_interview_question_text(
+    db: AsyncSession,
+    *,
+    user_id: str,
+    project_id: str,
+    message_id: str,
+    req: MemoirInterviewEditorQuestionTextUpdateRequest,
+) -> MemoirInterviewEditorSessionDetailResponse:
+    message = await _load_owned_message(
+        db,
+        user_id=user_id,
+        project_id=project_id,
+        message_id=message_id,
+    )
+    _ensure_human_interview_session(message.voice_session)
+    if message.role != MemoirChatMessageRole.INTERVIEWER.value:
+        raise HTTPException(status_code=400, detail="只能编辑真人采访者问题")
+    now = datetime.utcnow()
+    original_text = message.content_text
+    message.content_text = req.text
+    message.content_status = MemoirChatContentStatus.CORRECTED.value
+    metadata = dict(message.metadata_json or {})
+    message.metadata_json = _metadata_with_update(
+        metadata,
+        text_updated_by="user",
+        text_updated_from=MUTATION_SOURCE,
+        text_updated_at=_now_iso(now),
+        text_original=metadata.get("text_original") or original_text,
+    )
+
+    for utterance in sorted(list(message.utterances), key=_utterance_order_key):
+        version = MemoirTranscriptVersion(
+            voice_session_id=message.voice_session_id,
+            source_artifact_id=utterance.id,
+            version_type=MemoirTranscriptVersionType.USER_EDITED.value,
+            content=req.text,
+            provider=None,
+            created_by=MemoirCreatedBy.USER.value,
+        )
+        db.add(version)
+        await db.flush()
+        utterance.transcript_edited = req.text
+        utterance.source_material_type = "interviewer_prompt"
+        utterance.source_route_action = "ignore"
+        if not utterance.source_route_reason:
+            utterance.source_route_reason = "真人采访者问题只作为上下文，不作为回忆录正文素材。"
+        message.transcript_version_id = version.id
+        await prune_transcript_versions_for_utterance(
+            db,
+            utterance_id=utterance.id,
+            version_type=MemoirTranscriptVersionType.USER_EDITED,
+        )
+
+    await db.commit()
+    return await get_interview_session_detail(
+        db,
+        user_id=user_id,
+        project_id=project_id,
+        voice_session_id=message.voice_session_id,
+    )
+
+
+async def update_answer_parent_question(
+    db: AsyncSession,
+    *,
+    user_id: str,
+    project_id: str,
+    message_id: str,
+    req: MemoirInterviewEditorAnswerParentUpdateRequest,
+) -> MemoirInterviewEditorSessionDetailResponse:
+    message = await _load_owned_message(
+        db,
+        user_id=user_id,
+        project_id=project_id,
+        message_id=message_id,
+    )
+    _ensure_human_interview_session(message.voice_session)
+    if message.role != MemoirChatMessageRole.USER.value:
+        raise HTTPException(status_code=400, detail="只能调整被访者回答的归属")
+
+    parent_id = req.parent_question_message_id
+    if parent_id:
+        parent_message = await _load_owned_message(
+            db,
+            user_id=user_id,
+            project_id=project_id,
+            message_id=parent_id,
+        )
+        if parent_message.voice_session_id != message.voice_session_id:
+            raise HTTPException(status_code=400, detail="问题和回答必须属于同一次访谈")
+        if parent_message.role not in QUESTION_ROLES:
+            raise HTTPException(status_code=400, detail="目标消息不是可归属的问题")
+
+    now = datetime.utcnow()
+    previous_parent_id = message.parent_message_id
+    message.parent_message_id = parent_id
+    metadata = dict(message.metadata_json or {})
+    if "captured_parent_message_id" not in metadata:
+        metadata["captured_parent_message_id"] = previous_parent_id
+    metadata.update(
+        {
+            "relation_updated_by": "user",
+            "relation_updated_from": MUTATION_SOURCE,
+            "relation_updated_at": _now_iso(now),
+            "previous_parent_message_id": previous_parent_id,
+            "parent_message_id": parent_id,
+        }
+    )
+    if req.reason:
+        metadata["relation_update_reason"] = req.reason
+    message.metadata_json = metadata
+
+    await db.commit()
+    return await get_interview_session_detail(
+        db,
+        user_id=user_id,
+        project_id=project_id,
+        voice_session_id=message.voice_session_id,
     )
