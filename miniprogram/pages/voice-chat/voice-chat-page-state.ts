@@ -265,7 +265,7 @@ export function initialVoiceChatData(): VoiceChatData {
     showHistoryEmpty: true,
     transcriptLineViews: [],
     controlHintText: "说一两句也可以，我会帮您记下来。",
-    micButtonClass: "mic-button",
+    micButtonClass: "mic-button disabled",
     micButtonDisabled: true,
     micButtonText: "同意后开始说话",
     largeTextEnabled: false,
@@ -424,6 +424,13 @@ export function voiceChatViewPatch(state: VoiceChatData): VoiceChatViewPatch {
   if (state.largeTextEnabled) {
     pageClass.push("large-text", focusClass);
   }
+  const micButtonDisabled = state.connecting || !state.voiceAuthorizationAgreed;
+  const roleRecordButtonSuffix = micButtonDisabled ? " disabled" : "";
+  const micButtonClass = [
+    "mic-button",
+    state.recording ? "recording" : "",
+    micButtonDisabled ? "disabled" : "",
+  ].filter(Boolean).join(" ");
   return {
     voiceChatPageClass: pageClass.filter(Boolean).join(" "),
     finishButtonText: state.finishingSession ? "保存中" : "保存离开",
@@ -432,8 +439,8 @@ export function voiceChatViewPatch(state: VoiceChatData): VoiceChatViewPatch {
     topicTitleText: state.projectTitle || "这段回忆",
     showHumanRecordActions,
     showControlBar,
-    narratorRecordButtonClass: "role-record-button narrator",
-    interviewerRecordButtonClass: "role-record-button interviewer",
+    narratorRecordButtonClass: `role-record-button narrator${roleRecordButtonSuffix}`,
+    interviewerRecordButtonClass: `role-record-button interviewer${roleRecordButtonSuffix}`,
     showErrorKindStrip: Boolean(state.error && state.errorKindText),
     showRecoveryPanel: Boolean(state.recoveryNotice || state.canReconnect || state.canFinishAfterDisconnect),
     showRecoveryActions: Boolean(state.canReconnect || state.canFinishAfterDisconnect),
@@ -480,8 +487,8 @@ export function voiceChatViewPatch(state: VoiceChatData): VoiceChatViewPatch {
         : (line.role === "interviewer" ? "采访者" : (isHumanInterview ? "被访者" : "我")),
     })),
     controlHintText,
-    micButtonClass: state.recording ? "mic-button recording" : "mic-button",
-    micButtonDisabled: state.connecting || !state.voiceAuthorizationAgreed,
+    micButtonClass,
+    micButtonDisabled,
     micButtonText,
   };
 }

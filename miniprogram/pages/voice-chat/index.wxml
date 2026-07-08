@@ -20,30 +20,30 @@
   </view>
 
   <view wx:if="{{showHumanRecordActions}}" class="human-record-panel">
-    <button
+    <view
       class="{{interviewerRecordButtonClass}}"
       data-role="interviewer"
-      loading="{{connecting}}"
-      disabled="{{micButtonDisabled}}"
       bindtap="startRecordingAsSpeaker"
+      aria-role="button"
+      aria-disabled="{{micButtonDisabled}}"
     >
       <view class="role-record-icon-shell">
         <image class="role-record-icon" src="/assets/memoir-microphone.png" mode="aspectFit" />
       </view>
       <text class="role-record-text">记录采访者</text>
-    </button>
-    <button
+    </view>
+    <view
       class="{{narratorRecordButtonClass}}"
       data-role="narrator"
-      loading="{{connecting}}"
-      disabled="{{micButtonDisabled}}"
       bindtap="startRecordingAsSpeaker"
+      aria-role="button"
+      aria-disabled="{{micButtonDisabled}}"
     >
       <view class="role-record-icon-shell">
         <image class="role-record-icon" src="/assets/memoir-microphone.png" mode="aspectFit" />
       </view>
       <text class="role-record-text">记录被访者</text>
-    </button>
+    </view>
   </view>
 
   <view wx:if="{{error}}" class="error">{{error}}</view>
@@ -207,16 +207,16 @@
 
   <view wx:if="{{showControlBar}}" class="control-bar">
     <text wx:if="{{controlHintText}}" class="control-hint">{{controlHintText}}</text>
-    <button
+    <view
       class="{{micButtonClass}}"
-      loading="{{connecting}}"
-      disabled="{{micButtonDisabled}}"
       bindtap="toggleRecording"
+      aria-role="button"
+      aria-disabled="{{micButtonDisabled}}"
     >
       <view class="mic-icon-shell">
         <image class="mic-icon" src="/assets/memoir-microphone.png" mode="aspectFit" />
       </view>
       <text class="mic-button-text">{{micButtonText}}</text>
-    </button>
+    </view>
   </view>
 </view>
