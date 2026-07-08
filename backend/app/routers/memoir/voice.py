@@ -51,6 +51,7 @@ from app.services.memoir import voice_followups as memoir_voice_followups
 from app.services.memoir import voice_search as memoir_voice_search
 from app.services.memoir import voice_sessions as memoir_voice_sessions
 from app.services.memoir import voice_tts_persistence as memoir_voice_tts
+from app.services.memoir import voice_transcript_recovery as memoir_voice_transcript_recovery
 from app.services.memoir import transcript_voice_edit as memoir_transcript_voice_edit
 from app.services.memoir import voice_transcripts as memoir_voice_transcripts
 from app.services.memoir.access import load_audio_file, load_memoir_project
@@ -420,6 +421,27 @@ async def update_mobile_memoir_voice_transcript(
         utterance_id,
         current_user.id,
         req,
+        allow_admin=is_admin_user(current_user),
+    )
+
+
+@router.post(
+    "/voice-transcripts/{utterance_id}/recover-transcription",
+    response_model=MemoirVoiceTranscriptItemResponse,
+)
+async def recover_mobile_memoir_voice_transcript(
+    utterance_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await memoir_voice_transcript_recovery.recover_voice_transcript_from_audio(
+        db,
+        utterance_id,
+        current_user.id,
+        asr_client_factory=lambda: create_volc_streaming_asr_client(
+            current_user.id,
+            f"transcript-recovery-{utterance_id}-{uuid.uuid4().hex}",
+        ),
         allow_admin=is_admin_user(current_user),
     )
 

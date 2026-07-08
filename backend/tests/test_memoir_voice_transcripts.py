@@ -1,3 +1,4 @@
+import asyncio
 import json
 from pathlib import Path
 
@@ -34,6 +35,7 @@ from app.models.memoir import (
 from app.services.memoir import source_cards
 from app.services.memoir import automation_event_resolution
 from app.services.memoir.asr_text_normalization import normalize_memoir_asr_text
+from app.services.memoir.asr import StreamingASREvent
 from app.services.memoir.voice_transcripts import (
     MemoirTranscriptCleanupContext,
     _remove_obvious_oral_fillers,
@@ -105,6 +107,34 @@ class CapturingAIClient:
     async def _call_llm(self, _system_prompt, user_prompt, **_kwargs):
         self.prompt = user_prompt
         return self.response
+
+
+class FakeRecoveryASRClient:
+    def __init__(self, events: list[StreamingASREvent]) -> None:
+        self.events_to_emit = events
+        self.sent_audio: list[bytes] = []
+        self.started = False
+        self.finished = False
+        self.closed = False
+        self._finish_event = asyncio.Event()
+
+    async def start(self) -> None:
+        self.started = True
+
+    async def send_audio(self, audio: bytes) -> None:
+        self.sent_audio.append(audio)
+
+    async def finish(self) -> None:
+        self.finished = True
+        self._finish_event.set()
+
+    async def events(self):
+        await self._finish_event.wait()
+        for event in self.events_to_emit:
+            yield event
+
+    async def close(self) -> None:
+        self.closed = True
 
 
 async def add_ready_source_card(
@@ -462,6 +492,85 @@ async def test_mobile_memoir_lists_unfinalized_audio_for_transcription_recovery(
     assert detail["id"] == persisted["utterance_id"]
     assert detail["transcription_status"] == "pending_transcription"
     assert detail["can_recover_transcription"] is True
+
+
+async def test_mobile_memoir_recovers_unfinalized_audio_transcription(
+    client,
+    test_db,
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr("app.services.memoir.audio_files.MEMOIR_AUDIO_DIR", tmp_path / "audio")
+    user = (await client.get("/api/auth/me")).json()
+    create_response = await post_mobile_memoir_voice_session(
+        client,
+        json={"guidance_mode": "free_narration", "provider": "volc_streaming_asr"},
+    )
+    assert create_response.status_code == 201
+    session = create_response.json()["session"]
+    persistence = VoiceGatewayPersistence(
+        db=test_db,
+        voice_session_id=session["id"],
+        user_id=user["id"],
+    )
+    await persistence.record_audio_frame(b"lost-audio-pcm")
+    persisted = await persistence.flush_unfinalized_audio()
+    assert persisted is not None
+
+    asr_client = FakeRecoveryASRClient([
+        StreamingASREvent(
+            type="final",
+            text="爷爷退休后还在帮公司做事。",
+            start_ms=0,
+            end_ms=8000,
+            raw={"provider_event_type": "final"},
+        )
+    ])
+    monkeypatch.setattr(
+        "app.routers.memoir.voice.create_volc_streaming_asr_client",
+        lambda _user_id, _voice_session_id: asr_client,
+    )
+
+    response = await client.post(
+        f"/api/mobile/memoir/voice-transcripts/{persisted['utterance_id']}/recover-transcription"
+    )
+
+    assert response.status_code == 200
+    item = response.json()
+    assert item["id"] == persisted["utterance_id"]
+    assert item["chat_message_id"]
+    assert item["transcript_version_id"]
+    assert item["transcript_raw"] == "爷爷退休后还在帮公司做事。"
+    assert item["display_text"] == "爷爷退休后还在帮公司做事。"
+    assert item["transcription_status"] == "ready"
+    assert item["can_recover_transcription"] is False
+    assert asr_client.started
+    assert asr_client.sent_audio == [b"lost-audio-pcm"]
+    assert asr_client.finished
+    assert asr_client.closed
+
+    utterance = await test_db.scalar(
+        select(MemoirVoiceUtterance).where(MemoirVoiceUtterance.id == persisted["utterance_id"])
+    )
+    assert utterance is not None
+    message = await test_db.scalar(select(MemoirChatMessage).where(MemoirChatMessage.id == utterance.chat_message_id))
+    version = await test_db.scalar(
+        select(MemoirTranscriptVersion).where(MemoirTranscriptVersion.id == message.transcript_version_id)
+    )
+    correction_job = await test_db.scalar(
+        select(MemoirEditingJob).where(MemoirEditingJob.dedupe_key == f"correct_transcript:{utterance.id}")
+    )
+    assert message is not None
+    assert message.role == MemoirChatMessageRole.USER.value
+    assert message.content_text == "爷爷退休后还在帮公司做事。"
+    assert message.audio_file_id == persisted["audio_file_id"]
+    assert message.metadata_json["source"] == "transcript_recovery"
+    assert version is not None
+    assert version.content == "爷爷退休后还在帮公司做事。"
+    assert version.version_type == MemoirTranscriptVersionType.ASR_RAW.value
+    assert version.source_artifact_id == utterance.id
+    assert correction_job is not None
+    assert correction_job.payload_json["raw_transcript_version_id"] == version.id
 
 
 async def test_mobile_memoir_groups_paired_human_interview_transcripts(client, test_db):

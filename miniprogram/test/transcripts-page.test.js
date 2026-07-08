@@ -31,6 +31,9 @@ function loadTranscriptsPage({ authExports = {}, voiceApiExports = {}, voiceSear
     previewMemoirVoiceTranscriptVoiceEdit: async () => {
       throw new Error("previewMemoirVoiceTranscriptVoiceEdit was not mocked");
     },
+    recoverMemoirVoiceTranscript: async () => {
+      throw new Error("recoverMemoirVoiceTranscript was not mocked");
+    },
     moveMemoirBookSource: async () => {
       throw new Error("moveMemoirBookSource was not mocked");
     },
@@ -410,6 +413,8 @@ test("transcripts page uses summary fields for browse cards", async () => {
 });
 
 test("transcripts page shows saved audio awaiting transcription", async () => {
+  const recoverCalls = [];
+  const toasts = [];
   const { page } = loadTranscriptsPage({
     authExports: {
       getMemoirIdentity: async () => ({
@@ -441,6 +446,21 @@ test("transcripts page shows saved audio awaiting transcription", async () => {
         limit: 30,
         offset: 0,
       }),
+      recoverMemoirVoiceTranscript: async (utteranceId) => {
+        recoverCalls.push(utteranceId);
+        return {
+          ...sampleTranscript(utteranceId, "2026-07-01T07:38:00.000Z"),
+          transcript_raw: "爷爷退休后还在帮公司做事。",
+          display_text: "爷爷退休后还在帮公司做事。",
+          summary_title: "爷爷退休后仍帮公司做事",
+          summary_text: "讲述者提到爷爷退休后还在帮公司做事。",
+          summary_source: "source_card",
+          raw_char_count: 14,
+          display_char_count: 14,
+          transcription_status: "ready",
+          can_recover_transcription: false,
+        };
+      },
     },
   });
   const context = pageContext(page);
@@ -465,11 +485,24 @@ test("transcripts page shows saved audio awaiting transcription", async () => {
     navigateTo(options) {
       navigations.push(options.url);
     },
+    showToast(options) {
+      toasts.push(options);
+    },
   };
   page.openTranscriptEdit.call(context, {
     currentTarget: { dataset: { id: "utterance-pending" } },
   });
   assert.deepEqual(navigations, []);
+
+  await page.recoverTranscript.call(context, {
+    currentTarget: { dataset: { id: "utterance-pending" } },
+  });
+
+  assert.deepEqual(recoverCalls, ["utterance-pending"]);
+  assert.equal(context.data.items[0].canRecoverTranscription, false);
+  assert.equal(context.data.items[0].recordCountText, "14 字");
+  assert.equal(context.data.items[0].summaryTitleText, "爷爷退休后仍帮公司做事");
+  assert.deepEqual(toasts, [{ title: "已恢复转写", icon: "success" }]);
   delete global.wx;
 });
 

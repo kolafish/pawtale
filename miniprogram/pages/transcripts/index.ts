@@ -17,6 +17,7 @@ import {
   moveMemoirBookSource,
   parseMemoirVoiceSearchQuery,
   previewMemoirVoiceTranscriptVoiceEdit,
+  recoverMemoirVoiceTranscript,
   updateMemoirVoiceTranscript,
 } from "../../services/memoir-voice-api";
 import { getMemoirIdentity } from "../../services/auth";
@@ -115,6 +116,9 @@ interface TranscriptItemView extends MemoirVoiceTranscriptItem {
   recordCountClass: string;
   transcriptionStatusText: string;
   canRecoverTranscription: boolean;
+  recoverButtonLoading: boolean;
+  recoverButtonDisabled: boolean;
+  recoverButtonText: string;
   bookInclusionText: string;
   isIncludedInBook: boolean;
   canAssignChapterSource: boolean;
@@ -145,6 +149,7 @@ interface TranscriptsData {
   needsLogin: boolean;
   savingId: string;
   deletingId: string;
+  recoveringId: string;
   assigningSourceId: string;
   movingSourceId: string;
   error: string;
@@ -252,11 +257,13 @@ function withTranscriptRuntimeState(
   item: TranscriptItemView,
   state: Pick<
     TranscriptsData,
-    "savingId" | "deletingId" | "assigningSourceId" | "movingSourceId" | "highlightedId"
+    "savingId" | "deletingId" | "assigningSourceId" | "movingSourceId" | "highlightedId" | "recoveringId"
   >,
 ): TranscriptItemView {
-  const editBusy = Boolean(state.savingId || state.deletingId);
-  const chapterBusy = Boolean(state.savingId || state.deletingId || state.assigningSourceId || state.movingSourceId);
+  const editBusy = Boolean(state.savingId || state.deletingId || state.recoveringId);
+  const chapterBusy = Boolean(
+    state.savingId || state.deletingId || state.recoveringId || state.assigningSourceId || state.movingSourceId,
+  );
   const baseCardClass = item.canRecoverTranscription ? "transcript-card recovery-pending" : "transcript-card";
   return {
     ...item,
@@ -270,6 +277,9 @@ function withTranscriptRuntimeState(
     assignPickerDisabled: chapterBusy,
     assignPickerActionClass: chapterBusy ? "small-primary picker-action disabled" : "small-primary picker-action",
     assignPickerText: state.assigningSourceId === item.id ? "放入中" : "放入章节",
+    recoverButtonLoading: state.recoveringId === item.id,
+    recoverButtonDisabled: Boolean(state.savingId || state.deletingId || state.recoveringId),
+    recoverButtonText: state.recoveringId === item.id ? "转写中" : "恢复转写",
     editButtonDisabled: editBusy || item.canRecoverTranscription,
   };
 }
@@ -502,6 +512,9 @@ function toViewItem(
     recordCountClass: canRecoverTranscription ? "record-count pending" : "record-count",
     transcriptionStatusText: canRecoverTranscription ? "音频已保存" : "",
     canRecoverTranscription,
+    recoverButtonLoading: false,
+    recoverButtonDisabled: false,
+    recoverButtonText: "恢复转写",
     bookInclusionText,
     isIncludedInBook,
     canAssignChapterSource: chapterAssignOptions.length > 0,
@@ -600,6 +613,7 @@ definePage<TranscriptsData>()({
     needsLogin: false,
     savingId: "",
     deletingId: "",
+    recoveringId: "",
     assigningSourceId: "",
     movingSourceId: "",
     error: "",
@@ -1111,6 +1125,34 @@ definePage<TranscriptsData>()({
       setTranscriptsData(this, { error: error instanceof Error ? error.message : "素材移动失败" });
     } finally {
       setTranscriptsData(this, { movingSourceId: "" });
+    }
+  },
+
+  async recoverTranscript(event: DatasetEvent) {
+    const id = datasetString(event, "id");
+    const item = this.data.items.find((candidate) => candidate.id === id);
+    if (
+      !id ||
+      !item ||
+      !item.canRecoverTranscription ||
+      this.data.recoveringId ||
+      this.data.savingId ||
+      this.data.deletingId
+    ) {
+      return;
+    }
+    setTranscriptsData(this, { recoveringId: id, error: "" });
+    try {
+      const recovered = await recoverMemoirVoiceTranscript(id);
+      setTranscriptsData(this, {
+        items: replaceItem(this.data.items, recovered, this.data.searchQuery, this.data.bookPlan),
+      });
+      trackAuditAction("transcript.recover_transcription", {}, { projectId: recovered.project_id });
+      wx.showToast({ title: "已恢复转写", icon: "success" });
+    } catch (error) {
+      setTranscriptsData(this, { error: error instanceof Error ? error.message : "恢复转写失败" });
+    } finally {
+      setTranscriptsData(this, { recoveringId: "" });
     }
   },
 

@@ -112,7 +112,7 @@
         {{item.deleteButtonText}}
       </button>
       <picker
-        wx:if="{{item.canAssignChapterSource}}"
+        wx:if="{{!item.canRecoverTranscription && item.canAssignChapterSource}}"
         class="chapter-move-picker"
         range="{{item.chapterAssignOptions}}"
         range-key="label"
@@ -126,6 +126,17 @@
         </view>
       </picker>
       <button
+        wx:if="{{item.canRecoverTranscription}}"
+        class="small-primary"
+        data-id="{{item.id}}"
+        catchtap="recoverTranscript"
+        loading="{{item.recoverButtonLoading}}"
+        disabled="{{item.recoverButtonDisabled}}"
+      >
+        {{item.recoverButtonText}}
+      </button>
+      <button
+        wx:if="{{!item.canRecoverTranscription}}"
         class="small-primary"
         data-id="{{item.id}}"
         catchtap="openTranscriptEdit"
