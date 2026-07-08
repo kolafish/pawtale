@@ -155,6 +155,7 @@
 .assistant-label {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   min-height: 52rpx;
   padding: 0 18rpx;
   border-radius: 999rpx;
@@ -322,6 +323,8 @@
 
 .stage-status {
   display: inline-flex;
+  align-items: center;
+  justify-content: center;
   align-self: flex-start;
   padding: 10rpx 18rpx;
   border-radius: 999rpx;
@@ -737,10 +740,12 @@
 }
 
 .role-record-text {
+  width: 100%;
   color: inherit;
   font-size: 32rpx;
   font-weight: 800;
   line-height: 42rpx;
+  text-align: center;
   white-space: nowrap;
   word-break: keep-all;
 }
@@ -748,7 +753,7 @@
 .mic-button {
   box-sizing: border-box;
   width: 100%;
-  max-width: 620rpx;
+  max-width: 660rpx;
   min-height: 118rpx;
   margin: 0;
   border: 0;
@@ -763,19 +768,27 @@
   align-items: center;
   justify-content: center;
   gap: 16rpx;
-  padding: 22rpx 30rpx;
+  padding: 22rpx 34rpx;
   font-size: 36rpx;
   font-weight: 700;
   line-height: 46rpx;
+  overflow: hidden;
 }
 
 .mic-button-text {
-  flex: 0 0 auto;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-align: center;
   white-space: nowrap;
   word-break: keep-all;
 }
 
 .mic-button.recording {
+  max-width: 686rpx;
+  padding-left: 30rpx;
+  padding-right: 30rpx;
   background: #a64b3e;
   color: #ffffff;
   box-shadow:
@@ -1128,14 +1141,22 @@
 
 .voice-chat-page.large-text .mic-button {
   width: 100%;
-  min-width: 620rpx;
   min-height: 154rpx;
   max-width: 702rpx;
-  font-size: 52rpx;
-  line-height: 68rpx;
+  font-size: 46rpx;
+  line-height: 62rpx;
   gap: 20rpx;
   padding-left: 34rpx;
   padding-right: 32rpx;
+}
+
+.voice-chat-page.large-text .mic-button.recording {
+  max-width: 702rpx;
+  font-size: 44rpx;
+  line-height: 60rpx;
+  gap: 18rpx;
+  padding-left: 28rpx;
+  padding-right: 28rpx;
 }
 
 .voice-chat-page.large-text .mic-icon-shell {
