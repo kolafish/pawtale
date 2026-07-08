@@ -508,3 +508,111 @@ export interface AnalyzeApplyResponse {
   created_count: number;
   references: ReferenceItemBrief[];
 }
+
+// ── Memoir interview editor ───────────────────────
+
+export type MemoirVoiceSessionStatus = 'created' | 'listening' | 'speaking' | 'stopped' | 'failed';
+export type MemoirGuidanceMode = 'free_narration' | 'guided_interview';
+export type MemoirInterviewType = 'ai_interview' | 'human_interview';
+export type MemoirChatMessageRole = 'user' | 'assistant' | 'interviewer' | 'system';
+
+export interface MemoirBookSourceIncludedChapter {
+  chapter_id: string;
+  title: string;
+  sort_order: number;
+}
+
+export interface MemoirInterviewEditorAnswer {
+  id: string;
+  message_id: string;
+  parent_question_message_id?: string | null;
+  voice_session_id: string;
+  project_id: string;
+  audio_file_id?: string | null;
+  audio_mime_type?: string | null;
+  audio_size_bytes?: number | null;
+  audio_duration_seconds?: number | null;
+  transcript_version_id?: string | null;
+  transcript_raw: string;
+  transcript_edited: string;
+  display_text: string;
+  start_ms?: number | null;
+  end_ms?: number | null;
+  provider?: string | null;
+  source_material_type: string;
+  source_route_action: string;
+  source_route_confidence?: number | null;
+  source_route_reason: string;
+  source_route_updated_at?: string | null;
+  is_included_in_book: boolean;
+  included_chapters: MemoirBookSourceIncludedChapter[];
+  turn_index: number;
+  created_at: string;
+}
+
+export interface MemoirInterviewEditorQuestion {
+  id: string;
+  voice_session_id: string;
+  project_id: string;
+  role: MemoirChatMessageRole;
+  text: string;
+  audio_file_id?: string | null;
+  transcript_version_id?: string | null;
+  utterance_id?: string | null;
+  answer_count: number;
+  answers: MemoirInterviewEditorAnswer[];
+  turn_index: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MemoirInterviewEditorTimelineItem {
+  message_id: string;
+  voice_session_id: string;
+  project_id: string;
+  role: MemoirChatMessageRole;
+  parent_message_id?: string | null;
+  text: string;
+  audio_file_id?: string | null;
+  transcript_version_id?: string | null;
+  utterance_ids: string[];
+  source_material_type: string;
+  source_route_action: string;
+  turn_index: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MemoirInterviewEditorSessionSummary {
+  id: string;
+  project_id: string;
+  status: MemoirVoiceSessionStatus;
+  guidance_mode: MemoirGuidanceMode;
+  interview_type: MemoirInterviewType;
+  current_guidance_module?: string | null;
+  started_at?: string | null;
+  stopped_at?: string | null;
+  created_at: string;
+  updated_at: string;
+  question_count: number;
+  answer_count: number;
+  unassigned_answer_count: number;
+  total_audio_seconds: number;
+  last_message_text: string;
+  last_message_role?: MemoirChatMessageRole | null;
+  last_message_at?: string | null;
+}
+
+export interface MemoirInterviewEditorSessionList {
+  items: MemoirInterviewEditorSessionSummary[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface MemoirInterviewEditorSessionDetail {
+  session: MemoirInterviewEditorSessionSummary;
+  questions: MemoirInterviewEditorQuestion[];
+  unassigned_answers: MemoirInterviewEditorAnswer[];
+  raw_timeline: MemoirInterviewEditorTimelineItem[];
+}
