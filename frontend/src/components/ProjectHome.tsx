@@ -2,9 +2,10 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, FolderOpen, Trash2, RefreshCw, Pencil, Check, X } from 'lucide-react';
 import { projectsApi } from '../api';
+import { getInitialProjectDocumentId } from '../domain/projectNavigation';
 import { formatProjectStructure, getProjectProfile } from '../domain/projectProfiles';
 import { useAppStore } from '../stores/appStore';
-import type { ProjectListItem } from '../types';
+import type { Project, ProjectListItem } from '../types';
 
 export function ProjectHome() {
   const queryClient = useQueryClient();
@@ -15,6 +16,11 @@ export function ProjectHome() {
   const [editingTitle, setEditingTitle] = useState('');
   const novelProfile = getProjectProfile('novel');
 
+  const openLoadedProject = (project: Project) => {
+    setCurrentProject(project);
+    setCurrentDocumentId(getInitialProjectDocumentId(project));
+  };
+
   const { data: projects = [], isLoading } = useQuery({
     queryKey: ['projects'],
     queryFn: projectsApi.list,
@@ -24,9 +30,7 @@ export function ProjectHome() {
     mutationFn: ({ title }: { title: string }) => projectsApi.create({ type: 'novel', title }),
     onSuccess: (project) => {
       queryClient.invalidateQueries({ queryKey: ['projects'] });
-      setCurrentProject(project);
-      const firstDoc = project.groups?.[0]?.documents?.[0];
-      if (firstDoc) setCurrentDocumentId(firstDoc.id);
+      openLoadedProject(project);
       setNewTitle('');
       setShowCreate(false);
     },
@@ -73,9 +77,7 @@ export function ProjectHome() {
   const openProject = async (item: ProjectListItem) => {
     if (editingProjectId) return;
     const project = await projectsApi.get(item.id);
-    setCurrentProject(project);
-    const firstDoc = project.groups?.[0]?.documents?.[0];
-    if (firstDoc) setCurrentDocumentId(firstDoc.id);
+    openLoadedProject(project);
   };
 
   const formatDate = (dateStr: string) => {
@@ -154,6 +156,7 @@ export function ProjectHome() {
           <div className="flex flex-col gap-4">
             {projects.map((proj) => {
               const canEditProject = proj.can_edit !== false;
+              const showWritingStats = proj.type !== 'memoir';
               const ownerLabel = proj.owner_display_name || proj.owner_email || '';
               const showOwner = Boolean(ownerLabel && !canEditProject);
               return (
@@ -234,13 +237,13 @@ export function ProjectHome() {
                   <div className="flex items-center gap-3 mt-3 text-xs text-gray-400">
                     <span>{getProjectProfile(proj.type).label}</span>
                     <span>{formatProjectStructure(proj)}</span>
-                    <span>{proj.total_word_count.toLocaleString()} 字</span>
-                    {proj.word_count_target && (
+                    {showWritingStats && <span>{proj.total_word_count.toLocaleString()} 字</span>}
+                    {showWritingStats && proj.word_count_target && (
                       <span>/ {proj.word_count_target.toLocaleString()} 目标</span>
                     )}
                     <span className="ml-auto">{formatDate(proj.updated_at)}</span>
                   </div>
-                  {proj.word_count_target && proj.word_count_target > 0 && (
+                  {showWritingStats && proj.word_count_target && proj.word_count_target > 0 && (
                     <div className="mt-2 h-1.5 bg-gray-100 rounded-full overflow-hidden">
                       <div
                         className="h-full bg-gradient-to-r from-pink-400 to-purple-400 rounded-full transition-all"
