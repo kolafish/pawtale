@@ -24,6 +24,9 @@ import type {
   AuditDashboardFilters,
   AuditDashboardResponse,
   AuditUserDayResponse,
+  MemoirInterviewEditorSessionDetail,
+  MemoirInterviewEditorSessionList,
+  MemoirInterviewType,
 } from '../types';
 import { parseContentDispositionFilename } from '../utils/download';
 
@@ -180,4 +183,24 @@ export const projectsApi = {
     api.post<MultiReviseResponse>(
       `/projects/${projectId}/documents/${docId}/ai-revise-multi`, data
     ).then(r => r.data),
+};
+
+// Memoir interview editor API
+export const memoirInterviewEditorApi = {
+  listSessions: (projectId: string, interviewType: MemoirInterviewType | null = 'human_interview') =>
+    api.get<MemoirInterviewEditorSessionList>(
+      `/memoir/projects/${projectId}/interview-editor/sessions`,
+      { params: interviewType ? { interview_type: interviewType } : undefined },
+    ).then(r => r.data),
+  getSession: (projectId: string, sessionId: string) =>
+    api.get<MemoirInterviewEditorSessionDetail>(
+      `/memoir/projects/${projectId}/interview-editor/sessions/${sessionId}`,
+    ).then(r => r.data),
+  updateAnswerTranscript: (utteranceId: string, transcriptEdited: string) =>
+    api.patch<unknown>(
+      `/mobile/memoir/voice-transcripts/${utteranceId}`,
+      { transcript_edited: transcriptEdited },
+    ).then(r => r.data),
+  audioPlaybackUrl: (audioFileId: string) =>
+    `/api/mobile/memoir/audio-files/${encodeURIComponent(audioFileId)}/playback`,
 };

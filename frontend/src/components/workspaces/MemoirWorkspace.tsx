@@ -1,10 +1,10 @@
 import type { Project } from '../../types';
-import { ProjectDraftWorkspace } from './ProjectDraftWorkspace';
+import { MemoirInterviewEditor } from '../memoir/MemoirInterviewEditor';
 
 interface MemoirWorkspaceProps {
   project: Project;
 }
 
 export function MemoirWorkspace({ project }: MemoirWorkspaceProps) {
-  return <ProjectDraftWorkspace project={project} />;
+  return <MemoirInterviewEditor project={project} />;
 }
