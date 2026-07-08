@@ -603,6 +603,10 @@ definePage<MeData>()({
     wx.navigateTo({ url: "/pages/voice-progress/index" });
   },
 
+  openDebugSpeakerTranscribe() {
+    wx.navigateTo({ url: "/pages/debug-speaker-transcribe/index" });
+  },
+
   async logout() {
     if (this.data.loading) {
       return;
