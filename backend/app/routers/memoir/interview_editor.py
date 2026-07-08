@@ -3,7 +3,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import get_current_user
+from app.auth import get_current_user, is_admin_user
 from app.database import get_db
 from app.models.users import User
 from app.schemas.memoir_interview_editor import (
@@ -39,6 +39,7 @@ async def list_memoir_interview_editor_sessions(
         interview_type=interview_type,
         limit=limit,
         offset=offset,
+        allow_admin=is_admin_user(current_user),
     )
 
 
@@ -57,6 +58,7 @@ async def get_memoir_interview_editor_session(
         user_id=current_user.id,
         project_id=project_id,
         voice_session_id=voice_session_id,
+        allow_admin=is_admin_user(current_user),
     )
 
 
@@ -75,6 +77,7 @@ async def get_memoir_interview_editor_session_review(
         user_id=current_user.id,
         project_id=project_id,
         voice_session_id=voice_session_id,
+        allow_admin=is_admin_user(current_user),
     )
 
 
@@ -94,6 +97,7 @@ async def create_memoir_interview_editor_question(
         user_id=current_user.id,
         project_id=project_id,
         req=req,
+        allow_admin=is_admin_user(current_user),
     )
 
 
@@ -114,6 +118,7 @@ async def update_memoir_interview_editor_question_text(
         project_id=project_id,
         message_id=message_id,
         req=req,
+        allow_admin=is_admin_user(current_user),
     )
 
 
@@ -134,4 +139,5 @@ async def update_memoir_interview_editor_answer_parent(
         project_id=project_id,
         message_id=message_id,
         req=req,
+        allow_admin=is_admin_user(current_user),
     )

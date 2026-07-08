@@ -170,6 +170,7 @@ function AnswerRow({
   selected,
   checked,
   chapterTitle,
+  checkboxDisabled = false,
   onSelect,
   onToggleChecked,
 }: {
@@ -177,6 +178,7 @@ function AnswerRow({
   selected: boolean;
   checked: boolean;
   chapterTitle?: string | null;
+  checkboxDisabled?: boolean;
   onSelect: () => void;
   onToggleChecked: () => void;
 }) {
@@ -192,10 +194,11 @@ function AnswerRow({
         <input
           type="checkbox"
           checked={checked}
+          disabled={checkboxDisabled}
           onChange={onToggleChecked}
           onClick={(event) => event.stopPropagation()}
           aria-label="选择回答"
-          className="mt-1 h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+          className="mt-1 h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 disabled:cursor-not-allowed disabled:opacity-40"
         />
         <button type="button" onClick={onSelect} className="flex min-w-0 flex-1 items-start gap-2 text-left">
           <UserRound size={15} className={selected ? 'mt-0.5 flex-shrink-0 text-emerald-700' : 'mt-0.5 flex-shrink-0 text-gray-400'} />
@@ -230,6 +233,7 @@ function AnswerRow({
 
 export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
   const queryClient = useQueryClient();
+  const canEditMaterials = project.can_edit_memoir_materials !== false;
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [selectedSessionOverride, setSelectedSessionOverride] = useState<string | null>(null);
   const [selectedAnswerOverride, setSelectedAnswerOverride] = useState<string | null>(null);
@@ -477,7 +481,13 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
     && draft?.answerId === selectedAnswer.id
     && draft.text !== selectedAnswer.display_text,
   );
-  const canSave = Boolean(selectedAnswer && draftText.trim() && hasUnsavedChanges && !saveMutation.isPending);
+  const canSave = Boolean(
+    canEditMaterials
+    && selectedAnswer
+    && draftText.trim()
+    && hasUnsavedChanges
+    && !saveMutation.isPending,
+  );
   const canSaveAndNext = Boolean(canSave && nextAnswer);
 
   const handleSave = (moveNext = false) => {
@@ -583,6 +593,7 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
   }, [canSave, draftText, saveMutation, seekAudioBy, selectedAnswer, toggleAudioPlayback]);
 
   const toggleAnswerChecked = (answerId: string) => {
+    if (!canEditMaterials) return;
     setCleanupPreviewItems([]);
     setCheckedAnswerIds((ids) => (
       ids.includes(answerId)
@@ -592,23 +603,32 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
   };
 
   const selectAllVisibleAnswers = () => {
+    if (!canEditMaterials) return;
     setCleanupPreviewItems([]);
     setCheckedAnswerIds(answers.map((answer) => answer.id));
   };
 
-  const canCreateQuestion = Boolean(selectedSessionId && newQuestionText.trim() && !createQuestionMutation.isPending);
+  const canCreateQuestion = Boolean(
+    canEditMaterials
+    && selectedSessionId
+    && newQuestionText.trim()
+    && !createQuestionMutation.isPending,
+  );
   const canUpdateQuestion = Boolean(
-    editingQuestion
+    canEditMaterials
+    && editingQuestion
     && editingQuestion.text.trim()
     && detail?.questions.some((question) => question.id === editingQuestion.id && question.text !== editingQuestion.text),
   );
   const canMoveCheckedAnswers = Boolean(
-    checkedAnswerMessageIds.length > 0
+    canEditMaterials
+    && checkedAnswerMessageIds.length > 0
     && effectiveTargetQuestionId
     && !updateParentMutation.isPending,
   );
   const canUnassignCheckedAnswers = Boolean(
-    checkedAnswerMessageIds.length > 0
+    canEditMaterials
+    && checkedAnswerMessageIds.length > 0
     && !updateParentMutation.isPending,
   );
   const hasConfirmedChapterPlan = chapterEditor?.plan_status === 'confirmed' && (chapterEditor?.chapters.length ?? 0) > 0;
@@ -651,37 +671,43 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
     && !moveWouldEmptySourceChapter
     && chapterSelectedSources.some((source) => source.current_chapter_id !== effectiveTargetChapterId);
   const canAssignChapterSources = Boolean(
-    hasConfirmedChapterPlan
+    canEditMaterials
+    && hasConfirmedChapterPlan
     && selectedSourcesAreUnassigned
     && effectiveTargetChapterId
     && !chapterSourceMutation.isPending,
   );
   const canMoveChapterSources = Boolean(
-    hasConfirmedChapterPlan
+    canEditMaterials
+    && hasConfirmedChapterPlan
     && selectedSourcesCanMove
     && !chapterSourceMutation.isPending,
   );
   const canRemoveChapterSources = Boolean(
-    hasConfirmedChapterPlan
+    canEditMaterials
+    && hasConfirmedChapterPlan
     && selectedSourcesAreAssigned
     && !removeWouldEmptySourceChapter
     && !chapterSourceMutation.isPending,
   );
   const glossaryHasChanges = !glossaryEquals(glossaryDraft, glossaryQuery.data?.entries ?? []);
   const canSaveGlossary = Boolean(
-    glossaryHasChanges
+    canEditMaterials
+    && glossaryHasChanges
     && !glossaryQuery.isLoading
     && !saveGlossaryMutation.isPending,
   );
   const canPreviewCleanup = Boolean(
-    cleanupSelectedAnswerIds.length > 0
+    canEditMaterials
+    && cleanupSelectedAnswerIds.length > 0
     && cleanupSelectedAnswerIds.length <= MAX_BATCH_CLEANUP_ITEMS
     && !hasUnsavedChanges
     && !previewCleanupMutation.isPending
     && !confirmCleanupMutation.isPending,
   );
   const canConfirmCleanup = Boolean(
-    cleanupPreviewItems.length > 0
+    canEditMaterials
+    && cleanupPreviewItems.length > 0
     && cleanupPreviewItems.every((item) => item.cleaned_text.trim())
     && !confirmCleanupMutation.isPending
     && !previewCleanupMutation.isPending,
@@ -850,6 +876,7 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
                         <input
                           id="new-question-text"
                           value={newQuestionText}
+                          disabled={!canEditMaterials}
                           onChange={(event) => setNewQuestionText(event.target.value)}
                           onKeyDown={(event) => {
                             if (event.key === 'Enter' && canCreateQuestion && selectedSessionId) {
@@ -857,7 +884,7 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
                             }
                           }}
                           placeholder="输入一个人工整理的问题"
-                          className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-gray-800 outline-none transition-[border-color,box-shadow] focus:border-emerald-300 focus:shadow-[0_0_0_3px_rgba(16,185,129,0.16)]"
+                          className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-gray-800 outline-none transition-[border-color,box-shadow] focus:border-emerald-300 focus:shadow-[0_0_0_3px_rgba(16,185,129,0.16)] disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-gray-400"
                         />
                         <button
                           type="button"
@@ -875,7 +902,7 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
                       <button
                         type="button"
                         onClick={selectAllVisibleAnswers}
-                        disabled={answers.length === 0}
+                        disabled={!canEditMaterials || answers.length === 0}
                         className="h-9 rounded-lg px-2.5 text-xs text-gray-600 transition-[background-color,transform] hover:bg-white active:scale-[0.96] disabled:opacity-40"
                       >
                         全选
@@ -886,7 +913,7 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
                           setCheckedAnswerIds([]);
                           setCleanupPreviewItems([]);
                         }}
-                        disabled={checkedAnswers.length === 0}
+                        disabled={!canEditMaterials || checkedAnswers.length === 0}
                         className="h-9 rounded-lg px-2.5 text-xs text-gray-600 transition-[background-color,transform] hover:bg-white active:scale-[0.96] disabled:opacity-40"
                       >
                         清除
@@ -894,7 +921,8 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
                       <select
                         value={effectiveTargetQuestionId}
                         onChange={(event) => setTargetQuestionId(event.target.value)}
-                        className="h-9 max-w-52 rounded-lg border border-slate-200 bg-white px-2 text-xs text-gray-700 outline-none focus:ring-2 focus:ring-emerald-200"
+                        disabled={!canEditMaterials}
+                        className="h-9 max-w-52 rounded-lg border border-slate-200 bg-white px-2 text-xs text-gray-700 outline-none focus:ring-2 focus:ring-emerald-200 disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         <option value="">选择目标问题</option>
                         {detail.questions.map((question) => (
@@ -945,8 +973,9 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
                           <div className="mt-1 flex gap-2">
                             <input
                               value={editingQuestion.text}
+                              disabled={!canEditMaterials}
                               onChange={(event) => setEditingQuestion({ id: question.id, text: event.target.value })}
-                              className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-gray-800 outline-none focus:ring-2 focus:ring-emerald-200"
+                              className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-gray-800 outline-none focus:ring-2 focus:ring-emerald-200 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-gray-400"
                               autoFocus
                             />
                             <button
@@ -973,7 +1002,8 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
                             <button
                               type="button"
                               onClick={() => setEditingQuestion({ id: question.id, text: question.text })}
-                              className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg text-gray-400 transition-[background-color,color,transform] hover:bg-slate-100 hover:text-gray-700 active:scale-[0.96]"
+                              disabled={!canEditMaterials}
+                              className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg text-gray-400 transition-[background-color,color,opacity,transform] hover:bg-slate-100 hover:text-gray-700 active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-40"
                               title="编辑问题"
                             >
                               <Pencil size={15} />
@@ -994,6 +1024,7 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
                               chapterSourcesByUtterance.get(answer.id)?.current_chapter_title
                               ?? answer.included_chapters[0]?.title
                             }
+                            checkboxDisabled={!canEditMaterials}
                             onSelect={() => {
                               selectAnswer(answer.id);
                             }}
@@ -1026,6 +1057,7 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
                             chapterSourcesByUtterance.get(answer.id)?.current_chapter_title
                             ?? answer.included_chapters[0]?.title
                           }
+                          checkboxDisabled={!canEditMaterials}
                           onSelect={() => {
                             selectAnswer(answer.id);
                           }}
@@ -1182,7 +1214,7 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
                       <select
                         value={effectiveTargetChapterId}
                         onChange={(event) => setTargetChapterId(event.target.value)}
-                        disabled={!hasConfirmedChapterPlan || chapterSourceMutation.isPending}
+                        disabled={!canEditMaterials || !hasConfirmedChapterPlan || chapterSourceMutation.isPending}
                         className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-gray-700 outline-none transition-[border-color,box-shadow] focus:border-emerald-300 focus:shadow-[0_0_0_3px_rgba(16,185,129,0.16)] disabled:opacity-50"
                       >
                         <option value="">目标章节</option>
@@ -1268,35 +1300,39 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
                             <div key={`${index}-${entry.source}-${entry.target}`} className="grid grid-cols-[1fr_1fr_28px] gap-1.5">
                               <input
                                 value={entry.source}
+                                disabled={!canEditMaterials}
                                 onChange={(event) => setGlossaryDraftOverride((entries) => (entries ?? glossaryDraft).map((item, itemIndex) => (
                                   itemIndex === index ? { ...item, source: event.target.value } : item
                                 )))}
                                 placeholder="方言/误识别"
-                                className="h-8 min-w-0 rounded-md border border-slate-200 bg-white px-2 text-xs text-gray-700 outline-none focus:ring-2 focus:ring-emerald-200"
+                                className="h-8 min-w-0 rounded-md border border-slate-200 bg-white px-2 text-xs text-gray-700 outline-none focus:ring-2 focus:ring-emerald-200 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-gray-400"
                               />
                               <input
                                 value={entry.target}
+                                disabled={!canEditMaterials}
                                 onChange={(event) => setGlossaryDraftOverride((entries) => (entries ?? glossaryDraft).map((item, itemIndex) => (
                                   itemIndex === index ? { ...item, target: event.target.value } : item
                                 )))}
                                 placeholder="标准写法"
-                                className="h-8 min-w-0 rounded-md border border-slate-200 bg-white px-2 text-xs text-gray-700 outline-none focus:ring-2 focus:ring-emerald-200"
+                                className="h-8 min-w-0 rounded-md border border-slate-200 bg-white px-2 text-xs text-gray-700 outline-none focus:ring-2 focus:ring-emerald-200 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-gray-400"
                               />
                               <button
                                 type="button"
+                                disabled={!canEditMaterials}
                                 onClick={() => setGlossaryDraftOverride((entries) => (entries ?? glossaryDraft).filter((_, itemIndex) => itemIndex !== index))}
-                                className="inline-flex h-8 w-7 items-center justify-center rounded-md text-gray-400 transition-[background-color,color,transform] hover:bg-white hover:text-gray-700 active:scale-[0.96]"
+                                className="inline-flex h-8 w-7 items-center justify-center rounded-md text-gray-400 transition-[background-color,color,opacity,transform] hover:bg-white hover:text-gray-700 active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-40"
                                 title="删除词条"
                               >
                                 <X size={13} />
                               </button>
                               <input
                                 value={entry.note ?? ''}
+                                disabled={!canEditMaterials}
                                 onChange={(event) => setGlossaryDraftOverride((entries) => (entries ?? glossaryDraft).map((item, itemIndex) => (
                                   itemIndex === index ? { ...item, note: event.target.value } : item
                                 )))}
                                 placeholder="备注，可选"
-                                className="col-span-3 h-8 min-w-0 rounded-md border border-slate-200 bg-white px-2 text-xs text-gray-700 outline-none focus:ring-2 focus:ring-emerald-200"
+                                className="col-span-3 h-8 min-w-0 rounded-md border border-slate-200 bg-white px-2 text-xs text-gray-700 outline-none focus:ring-2 focus:ring-emerald-200 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-gray-400"
                               />
                             </div>
                           ))
@@ -1305,8 +1341,9 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
                       <div className="mt-2 grid grid-cols-2 gap-2">
                         <button
                           type="button"
+                          disabled={!canEditMaterials}
                           onClick={() => setGlossaryDraftOverride((entries) => [...(entries ?? glossaryDraft), { source: '', target: '', note: '' }])}
-                          className="inline-flex h-8 items-center justify-center gap-1.5 rounded-lg bg-white px-2 text-xs text-gray-600 transition-[background-color,transform] hover:bg-slate-100 active:scale-[0.96]"
+                          className="inline-flex h-8 items-center justify-center gap-1.5 rounded-lg bg-white px-2 text-xs text-gray-600 transition-[background-color,opacity,transform] hover:bg-slate-100 active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-50"
                         >
                           <Plus size={13} />
                           添加词条
@@ -1366,12 +1403,13 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
                               <p className="mb-2 line-clamp-2 text-xs leading-5 text-gray-500">{item.source_text}</p>
                               <textarea
                                 value={item.cleaned_text}
+                                readOnly={!canEditMaterials}
                                 onChange={(event) => setCleanupPreviewItems((items) => items.map((previewItem) => (
                                   previewItem.utterance_id === item.utterance_id
                                     ? { ...previewItem, cleaned_text: event.target.value, provider: null, created_by: 'user' }
                                     : previewItem
                                 )))}
-                                className="min-h-[84px] w-full resize-y rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs leading-5 text-gray-800 outline-none focus:ring-2 focus:ring-emerald-200"
+                                className="min-h-[84px] w-full resize-y rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs leading-5 text-gray-800 outline-none focus:ring-2 focus:ring-emerald-200 read-only:bg-slate-50 read-only:text-gray-500"
                               />
                             </div>
                           ))}
@@ -1407,11 +1445,12 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
                   <textarea
                     id="memoir-answer-editor"
                     value={draftText}
+                    readOnly={!canEditMaterials}
                     onChange={(event) => {
                       if (!selectedAnswer) return;
                       setDraft({ answerId: selectedAnswer.id, text: event.target.value });
                     }}
-                    className="min-h-[260px] flex-1 resize-none rounded-lg border border-slate-200 bg-white p-3 text-sm leading-7 text-gray-800 shadow-[0_1px_8px_rgba(15,23,42,0.06)] outline-none transition-[border-color,box-shadow] focus:border-emerald-300 focus:shadow-[0_0_0_3px_rgba(16,185,129,0.16)]"
+                    className="min-h-[260px] flex-1 resize-none rounded-lg border border-slate-200 bg-white p-3 text-sm leading-7 text-gray-800 shadow-[0_1px_8px_rgba(15,23,42,0.06)] outline-none transition-[border-color,box-shadow] focus:border-emerald-300 focus:shadow-[0_0_0_3px_rgba(16,185,129,0.16)] read-only:bg-slate-50 read-only:text-gray-500"
                   />
                 </div>
 

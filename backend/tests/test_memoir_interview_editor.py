@@ -12,6 +12,7 @@ from app.models.memoir import (
     MemoirTranscriptVersion,
     MemoirVoiceUtterance,
 )
+from app.models.users import User
 from tests.memoir_helpers import (
     create_test_book_plan,
     memoir_source_ref,
@@ -30,6 +31,24 @@ async def _create_human_session(client) -> dict:
     )
     assert response.status_code == 201
     return response.json()["session"]
+
+
+async def _login_admin(client, test_db) -> dict:
+    await client.post("/api/auth/logout")
+    response = await client.post(
+        "/api/auth/register",
+        json={
+            "email": "admin-interview@example.com",
+            "password": "password123",
+            "display_name": "素材管理员",
+        },
+    )
+    assert response.status_code == 201
+    admin = await test_db.scalar(select(User).where(User.email == "admin-interview@example.com"))
+    assert admin is not None
+    admin.role = "admin"
+    await test_db.commit()
+    return response.json()["user"]
 
 
 async def _add_turn(
@@ -389,3 +408,65 @@ async def test_interview_editor_rejects_answer_parent_from_another_session(clien
 
     assert response.status_code == 400
     assert response.json()["detail"] == "问题和回答必须属于同一次访谈"
+
+
+async def test_admin_can_edit_other_users_interview_materials(client, test_db):
+    owner = (await client.get("/api/auth/me")).json()
+    session = await _create_human_session(client)
+    answer = await _add_turn(
+        test_db,
+        user_id=owner["id"],
+        session=session,
+        role=MemoirChatMessageRole.USER.value,
+        text="我小时候在四川老家摆龙门阵。",
+        turn_index=0,
+        parent_message_id=None,
+    )
+
+    admin = await _login_admin(client, test_db)
+
+    detail_response = await client.get(
+        f"/api/memoir/projects/{session['project_id']}/interview-editor/sessions/{session['id']}"
+    )
+    assert detail_response.status_code == 200
+    assert [item["id"] for item in detail_response.json()["unassigned_answers"]] == [answer["utterance_id"]]
+
+    create_response = await client.post(
+        f"/api/memoir/projects/{session['project_id']}/interview-editor/questions",
+        json={"voice_session_id": session["id"], "text": "你小时候在老家主要做什么？"},
+    )
+    assert create_response.status_code == 201
+    created_question = create_response.json()["questions"][0]
+
+    move_response = await client.patch(
+        f"/api/memoir/projects/{session['project_id']}/interview-editor/answers/{answer['message_id']}/parent",
+        json={"parent_question_message_id": created_question["id"], "reason": "admin_manual_material_edit"},
+    )
+    assert move_response.status_code == 200
+    assert move_response.json()["questions"][0]["answers"][0]["id"] == answer["utterance_id"]
+
+    transcript_response = await client.patch(
+        f"/api/mobile/memoir/voice-transcripts/{answer['utterance_id']}",
+        json={"transcript_edited": "我小时候在四川老家摆龙门阵，讲了很多往事。"},
+    )
+    assert transcript_response.status_code == 200
+    assert transcript_response.json()["display_text"] == "我小时候在四川老家摆龙门阵，讲了很多往事。"
+
+    created_message = await test_db.scalar(
+        select(MemoirChatMessage).where(MemoirChatMessage.id == created_question["id"])
+    )
+    answer_message = await test_db.scalar(
+        select(MemoirChatMessage).where(MemoirChatMessage.id == answer["message_id"])
+    )
+    utterance = await test_db.scalar(
+        select(MemoirVoiceUtterance).where(MemoirVoiceUtterance.id == answer["utterance_id"])
+    )
+    assert created_message is not None
+    assert created_message.metadata_json["created_by"] == "admin"
+    assert created_message.metadata_json["created_user_id"] == admin["id"]
+    assert answer_message is not None
+    assert answer_message.parent_message_id == created_question["id"]
+    assert answer_message.metadata_json["relation_updated_by"] == "admin"
+    assert answer_message.metadata_json["relation_updated_user_id"] == admin["id"]
+    assert utterance is not None
+    assert utterance.transcript_edited == "我小时候在四川老家摆龙门阵，讲了很多往事。"

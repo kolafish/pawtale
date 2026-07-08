@@ -90,8 +90,14 @@ async def get_book_source_coverage(
     *,
     user_id: str,
     project_id: str,
+    allow_admin: bool = False,
 ) -> MemoirBookSourceCoverageResponse:
-    sources = await _source_segments(db, user_id=user_id, project_id=project_id)
+    sources = await _source_segments(
+        db,
+        user_id=user_id,
+        project_id=project_id,
+        allow_admin=allow_admin,
+    )
     plan = await _load_plan(db, project_id)
     included_by_utterance = await _included_chapters_by_utterance(db, plan)
     covered_ids = set(included_by_utterance)
@@ -162,8 +168,9 @@ async def assign_book_sources_to_chapters(
     assigned_by: MemoirChapterSourceAssignedBy | str = MemoirChapterSourceAssignedBy.USER,
     assignment_reason: str = "manual_source_assignment",
     assignment_metadata_by_utterance: dict[str, ChapterSourceAssignmentMetadata] | None = None,
+    allow_admin: bool = False,
 ) -> MemoirBookPlanResponse:
-    project = await load_memoir_project(db, project_id, user_id)
+    project = await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
     _remember_project_ai_model(project, req.ai_model)
     plan = await _load_plan(db, project_id)
     if not plan:
@@ -171,7 +178,12 @@ async def assign_book_sources_to_chapters(
     if plan.status != MemoirBookPlanStatus.CONFIRMED.value:
         raise HTTPException(status_code=400, detail="请先确认章节规划")
 
-    sources = await _source_segments(db, user_id=user_id, project_id=project_id)
+    sources = await _source_segments(
+        db,
+        user_id=user_id,
+        project_id=project_id,
+        allow_admin=allow_admin,
+    )
     source_by_utterance = {source.utterance_id: source for source in sources}
     covered_ids = await _covered_utterance_ids(db, plan)
     chapter_by_id = {chapter.id: chapter for chapter in plan.chapters}
@@ -254,8 +266,9 @@ async def move_book_source_between_chapters(
     user_id: str,
     project_id: str,
     req: MemoirBookSourceMoveRequest,
+    allow_admin: bool = False,
 ) -> MemoirBookPlanResponse:
-    project = await load_memoir_project(db, project_id, user_id)
+    project = await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
     _remember_project_ai_model(project, req.ai_model)
     plan = await _load_plan(db, project_id)
     if not plan:
@@ -357,8 +370,9 @@ async def remove_book_sources_from_chapter(
     user_id: str,
     project_id: str,
     req: MemoirBookSourceRemoveRequest,
+    allow_admin: bool = False,
 ) -> MemoirBookPlanResponse:
-    project = await load_memoir_project(db, project_id, user_id)
+    project = await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
     _remember_project_ai_model(project, req.ai_model)
     plan = await _load_plan(db, project_id)
     if not plan:

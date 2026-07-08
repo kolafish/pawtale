@@ -102,14 +102,19 @@ def _detail_options():
     )
 
 
+def _mutation_actor(allow_admin: bool) -> str:
+    return "admin" if allow_admin else "user"
+
+
 async def _load_owned_session(
     db: AsyncSession,
     *,
     user_id: str,
     project_id: str,
     voice_session_id: str,
+    allow_admin: bool = False,
 ) -> MemoirVoiceSession:
-    await load_memoir_project(db, project_id, user_id)
+    await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
     session = await db.scalar(
         select(MemoirVoiceSession)
         .where(
@@ -134,15 +139,18 @@ async def _load_owned_message(
     user_id: str,
     project_id: str,
     message_id: str,
+    allow_admin: bool = False,
 ) -> MemoirChatMessage:
+    filters = [
+        MemoirChatMessage.id == message_id,
+        MemoirChatMessage.project_id == project_id,
+    ]
+    if not allow_admin:
+        filters.append(Project.user_id == user_id)
     message = await db.scalar(
         select(MemoirChatMessage)
         .join(Project, MemoirChatMessage.project_id == Project.id)
-        .where(
-            MemoirChatMessage.id == message_id,
-            MemoirChatMessage.project_id == project_id,
-            Project.user_id == user_id,
-        )
+        .where(*filters)
         .options(
             selectinload(MemoirChatMessage.utterances),
             selectinload(MemoirChatMessage.voice_session),
@@ -375,9 +383,12 @@ async def list_interview_sessions(
     interview_type: str | None = MemoirInterviewType.HUMAN_INTERVIEW.value,
     limit: int = 50,
     offset: int = 0,
+    allow_admin: bool = False,
 ) -> MemoirInterviewEditorSessionListResponse:
-    await load_memoir_project(db, project_id, user_id)
-    filters = [Project.user_id == user_id, MemoirVoiceSession.project_id == project_id]
+    await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
+    filters = [MemoirVoiceSession.project_id == project_id]
+    if not allow_admin:
+        filters.append(Project.user_id == user_id)
     if interview_type:
         filters.append(MemoirVoiceSession.interview_type == interview_type)
     total = await db.scalar(
@@ -410,12 +421,14 @@ async def get_interview_session_detail(
     user_id: str,
     project_id: str,
     voice_session_id: str,
+    allow_admin: bool = False,
 ) -> MemoirInterviewEditorSessionDetailResponse:
     session = await _load_owned_session(
         db,
         user_id=user_id,
         project_id=project_id,
         voice_session_id=voice_session_id,
+        allow_admin=allow_admin,
     )
     plan = await _project_book_plan(db, project_id)
     included_by_utterance = await included_chapters_by_utterance(db, plan)
@@ -459,13 +472,15 @@ async def get_interview_session_review(
     user_id: str,
     project_id: str,
     voice_session_id: str,
+    allow_admin: bool = False,
 ) -> MemoirInterviewEditorSessionReviewResponse:
-    project = await load_memoir_project(db, project_id, user_id)
+    project = await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
     detail = await get_interview_session_detail(
         db,
         user_id=user_id,
         project_id=project_id,
         voice_session_id=voice_session_id,
+        allow_admin=allow_admin,
     )
     answers = [
         *[answer for question in detail.questions for answer in question.answers],
@@ -527,12 +542,14 @@ async def create_interview_question(
     user_id: str,
     project_id: str,
     req: MemoirInterviewEditorQuestionCreateRequest,
+    allow_admin: bool = False,
 ) -> MemoirInterviewEditorSessionDetailResponse:
     session = await _load_owned_session(
         db,
         user_id=user_id,
         project_id=project_id,
         voice_session_id=req.voice_session_id,
+        allow_admin=allow_admin,
     )
     _ensure_human_interview_session(session)
     now = datetime.utcnow()
@@ -548,7 +565,8 @@ async def create_interview_question(
             "source": "web_interview_editor.manual_question",
             "speaker_role": "interviewer",
             "interview_type": session.interview_type,
-            "created_by": "user",
+            "created_by": _mutation_actor(allow_admin),
+            "created_user_id": user_id,
             "created_from": MUTATION_SOURCE,
             "created_at": _now_iso(now),
         },
@@ -560,6 +578,7 @@ async def create_interview_question(
         user_id=user_id,
         project_id=project_id,
         voice_session_id=session.id,
+        allow_admin=allow_admin,
     )
 
 
@@ -570,12 +589,14 @@ async def update_interview_question_text(
     project_id: str,
     message_id: str,
     req: MemoirInterviewEditorQuestionTextUpdateRequest,
+    allow_admin: bool = False,
 ) -> MemoirInterviewEditorSessionDetailResponse:
     message = await _load_owned_message(
         db,
         user_id=user_id,
         project_id=project_id,
         message_id=message_id,
+        allow_admin=allow_admin,
     )
     _ensure_human_interview_session(message.voice_session)
     if message.role != MemoirChatMessageRole.INTERVIEWER.value:
@@ -587,7 +608,8 @@ async def update_interview_question_text(
     metadata = dict(message.metadata_json or {})
     message.metadata_json = _metadata_with_update(
         metadata,
-        text_updated_by="user",
+        text_updated_by=_mutation_actor(allow_admin),
+        text_updated_user_id=user_id,
         text_updated_from=MUTATION_SOURCE,
         text_updated_at=_now_iso(now),
         text_original=metadata.get("text_original") or original_text,
@@ -622,6 +644,7 @@ async def update_interview_question_text(
         user_id=user_id,
         project_id=project_id,
         voice_session_id=message.voice_session_id,
+        allow_admin=allow_admin,
     )
 
 
@@ -632,12 +655,14 @@ async def update_answer_parent_question(
     project_id: str,
     message_id: str,
     req: MemoirInterviewEditorAnswerParentUpdateRequest,
+    allow_admin: bool = False,
 ) -> MemoirInterviewEditorSessionDetailResponse:
     message = await _load_owned_message(
         db,
         user_id=user_id,
         project_id=project_id,
         message_id=message_id,
+        allow_admin=allow_admin,
     )
     _ensure_human_interview_session(message.voice_session)
     if message.role != MemoirChatMessageRole.USER.value:
@@ -650,6 +675,7 @@ async def update_answer_parent_question(
             user_id=user_id,
             project_id=project_id,
             message_id=parent_id,
+            allow_admin=allow_admin,
         )
         if parent_message.voice_session_id != message.voice_session_id:
             raise HTTPException(status_code=400, detail="问题和回答必须属于同一次访谈")
@@ -664,7 +690,8 @@ async def update_answer_parent_question(
         metadata["captured_parent_message_id"] = previous_parent_id
     metadata.update(
         {
-            "relation_updated_by": "user",
+            "relation_updated_by": _mutation_actor(allow_admin),
+            "relation_updated_user_id": user_id,
             "relation_updated_from": MUTATION_SOURCE,
             "relation_updated_at": _now_iso(now),
             "previous_parent_message_id": previous_parent_id,
@@ -681,4 +708,5 @@ async def update_answer_parent_question(
         user_id=user_id,
         project_id=project_id,
         voice_session_id=message.voice_session_id,
+        allow_admin=allow_admin,
     )

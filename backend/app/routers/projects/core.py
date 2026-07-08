@@ -16,7 +16,7 @@ async def list_projects(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return await project_core.list_projects(db, current_user.id)
+    return await project_core.list_projects(db, current_user)
 
 
 @router.post("", response_model=ProjectResponse, status_code=201)
@@ -34,7 +34,7 @@ async def get_project(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return await project_core.get_project(db, project_id, current_user.id)
+    return await project_core.get_project(db, project_id, current_user)
 
 
 @router.put("/{project_id}", response_model=ProjectResponse)

@@ -68,6 +68,11 @@ class ProjectListItem(BaseModel):
     title: str
     description: str | None = None
     word_count_target: int | None = None
+    owner_user_id: str | None = None
+    owner_email: str | None = None
+    owner_display_name: str | None = None
+    can_edit: bool = True
+    can_edit_memoir_materials: bool = True
     total_word_count: int = 0
     group_count: int = 0
     document_count: int = 0
@@ -85,6 +90,11 @@ class ProjectResponse(BaseModel):
     description: str | None = None
     word_count_target: int | None = None
     daily_word_goal: int | None = None
+    owner_user_id: str | None = None
+    owner_email: str | None = None
+    owner_display_name: str | None = None
+    can_edit: bool = True
+    can_edit_memoir_materials: bool = True
     metadata_json: dict = Field(default_factory=dict)
     total_word_count: int = 0
     groups: list[GroupResponse] = Field(default_factory=list)

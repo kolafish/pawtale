@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import get_current_user
+from app.auth import get_current_user, is_admin_user
 from app.database import get_db
 from app.models.users import User
 from app.schemas.memoir_voice import (
@@ -297,7 +297,12 @@ async def play_mobile_memoir_audio_file(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    audio_file = await load_audio_file(db, audio_file_id, current_user.id)
+    audio_file = await load_audio_file(
+        db,
+        audio_file_id,
+        current_user.id,
+        allow_admin=is_admin_user(current_user),
+    )
     path = audio_file_path(audio_file)
     if not path.exists():
         raise HTTPException(status_code=404, detail="音频文件不存在")
@@ -372,8 +377,9 @@ async def list_mobile_memoir_voice_transcripts(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    allow_admin = is_admin_user(current_user)
     if project_id:
-        await load_memoir_project(db, project_id, current_user.id)
+        await load_memoir_project(db, project_id, current_user.id, allow_admin=allow_admin)
     return await memoir_voice_transcripts.list_voice_transcripts(
         db,
         current_user.id,
@@ -384,6 +390,7 @@ async def list_mobile_memoir_voice_transcripts(
         current_guidance_module=module,
         limit=limit,
         offset=offset,
+        allow_admin=allow_admin and bool(project_id),
     )
 
 
@@ -393,7 +400,12 @@ async def get_mobile_memoir_voice_transcript(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return await memoir_voice_transcripts.get_voice_transcript(db, utterance_id, current_user.id)
+    return await memoir_voice_transcripts.get_voice_transcript(
+        db,
+        utterance_id,
+        current_user.id,
+        allow_admin=is_admin_user(current_user),
+    )
 
 
 @router.patch("/voice-transcripts/{utterance_id}", response_model=MemoirVoiceTranscriptItemResponse)
@@ -403,7 +415,13 @@ async def update_mobile_memoir_voice_transcript(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return await memoir_voice_transcripts.update_voice_transcript(db, utterance_id, current_user.id, req)
+    return await memoir_voice_transcripts.update_voice_transcript(
+        db,
+        utterance_id,
+        current_user.id,
+        req,
+        allow_admin=is_admin_user(current_user),
+    )
 
 
 @router.post("/voice-transcripts/{utterance_id}/cleanup", response_model=MemoirVoiceTranscriptItemResponse)
@@ -413,7 +431,13 @@ async def cleanup_mobile_memoir_voice_transcript(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return await memoir_voice_transcripts.cleanup_voice_transcript(db, utterance_id, current_user.id, req)
+    return await memoir_voice_transcripts.cleanup_voice_transcript(
+        db,
+        utterance_id,
+        current_user.id,
+        req,
+        allow_admin=is_admin_user(current_user),
+    )
 
 
 @router.post(

@@ -47,6 +47,7 @@ export function ProjectHome() {
   });
 
   const startRename = (project: ProjectListItem) => {
+    if (project.can_edit === false) return;
     setEditingProjectId(project.id);
     setEditingTitle(project.title);
   };
@@ -57,6 +58,10 @@ export function ProjectHome() {
   };
 
   const commitRename = (project: ProjectListItem) => {
+    if (project.can_edit === false) {
+      cancelRename();
+      return;
+    }
     const title = editingTitle.trim();
     if (!title || title === project.title || renameMutation.isPending) {
       cancelRename();
@@ -147,14 +152,18 @@ export function ProjectHome() {
           </div>
         ) : (
           <div className="flex flex-col gap-4">
-            {projects.map((proj) => (
-              <div
-                key={proj.id}
-                onClick={() => openProject(proj)}
-                className="group rounded-2xl border border-gray-100 bg-white p-5 hover:border-pink-200 hover:shadow-md transition-all cursor-pointer"
-              >
-                <div className="flex items-start justify-between">
-                  {editingProjectId === proj.id ? (
+            {projects.map((proj) => {
+              const canEditProject = proj.can_edit !== false;
+              const ownerLabel = proj.owner_display_name || proj.owner_email || '';
+              const showOwner = Boolean(ownerLabel && !canEditProject);
+              return (
+                <div
+                  key={proj.id}
+                  onClick={() => openProject(proj)}
+                  className="group rounded-2xl border border-gray-100 bg-white p-5 hover:border-pink-200 hover:shadow-md transition-all cursor-pointer"
+                >
+                  <div className="flex items-start justify-between">
+                    {editingProjectId === proj.id && canEditProject ? (
                     <div className="flex flex-1 items-center gap-2" onClick={(e) => e.stopPropagation()}>
                       <input
                         value={editingTitle}
@@ -184,54 +193,64 @@ export function ProjectHome() {
                     </div>
                   ) : (
                     <>
-                      <h3 className="font-semibold text-gray-800 group-hover:text-pink-600 transition-colors truncate flex-1">
-                        {proj.title}
-                      </h3>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          startRename(proj);
-                        }}
-                        className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-all"
-                        title="重命名项目"
-                      >
-                        <Pencil size={14} />
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (confirm('确定删除该项目？')) deleteMutation.mutate(proj.id);
-                        }}
-                        className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-red-50 text-gray-400 hover:text-red-500 transition-all"
-                        title="删除项目"
-                      >
-                        <Trash2 size={14} />
-                      </button>
+                        <div className="min-w-0 flex-1">
+                          <h3 className="font-semibold text-gray-800 group-hover:text-pink-600 transition-colors truncate">
+                            {proj.title}
+                          </h3>
+                          {showOwner && (
+                            <p className="mt-1 truncate text-xs text-gray-400">所属：{ownerLabel}</p>
+                          )}
+                        </div>
+                        {canEditProject && (
+                          <>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                startRename(proj);
+                              }}
+                              className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-all"
+                              title="重命名项目"
+                            >
+                              <Pencil size={14} />
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (confirm('确定删除该项目？')) deleteMutation.mutate(proj.id);
+                              }}
+                              className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-red-50 text-gray-400 hover:text-red-500 transition-all"
+                              title="删除项目"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </>
+                        )}
                     </>
                   )}
-                </div>
-                {proj.description && (
-                  <p className="text-sm text-gray-500 mt-1 line-clamp-2">{proj.description}</p>
-                )}
-                <div className="flex items-center gap-3 mt-3 text-xs text-gray-400">
-                  <span>{getProjectProfile(proj.type).label}</span>
-                  <span>{formatProjectStructure(proj)}</span>
-                  <span>{proj.total_word_count.toLocaleString()} 字</span>
-                  {proj.word_count_target && (
-                    <span>/ {proj.word_count_target.toLocaleString()} 目标</span>
-                  )}
-                  <span className="ml-auto">{formatDate(proj.updated_at)}</span>
-                </div>
-                {proj.word_count_target && proj.word_count_target > 0 && (
-                  <div className="mt-2 h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-gradient-to-r from-pink-400 to-purple-400 rounded-full transition-all"
-                      style={{ width: `${Math.min(100, (proj.total_word_count / proj.word_count_target) * 100)}%` }}
-                    />
                   </div>
-                )}
-              </div>
-            ))}
+                  {proj.description && (
+                    <p className="text-sm text-gray-500 mt-1 line-clamp-2">{proj.description}</p>
+                  )}
+                  <div className="flex items-center gap-3 mt-3 text-xs text-gray-400">
+                    <span>{getProjectProfile(proj.type).label}</span>
+                    <span>{formatProjectStructure(proj)}</span>
+                    <span>{proj.total_word_count.toLocaleString()} 字</span>
+                    {proj.word_count_target && (
+                      <span>/ {proj.word_count_target.toLocaleString()} 目标</span>
+                    )}
+                    <span className="ml-auto">{formatDate(proj.updated_at)}</span>
+                  </div>
+                  {proj.word_count_target && proj.word_count_target > 0 && (
+                    <div className="mt-2 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-gradient-to-r from-pink-400 to-purple-400 rounded-full transition-all"
+                        style={{ width: `${Math.min(100, (proj.total_word_count / proj.word_count_target) * 100)}%` }}
+                      />
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
