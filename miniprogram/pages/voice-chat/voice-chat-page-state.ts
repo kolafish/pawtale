@@ -411,6 +411,9 @@ export function voiceChatViewPatch(state: VoiceChatData): VoiceChatViewPatch {
   if (isHumanInterview) {
     pageClass.push("human-interview");
   }
+  if (!isHumanInterview && state.recording) {
+    pageClass.push("ai-recording-focus");
+  }
   if (isHumanInterview && state.recording) {
     pageClass.push("human-recording-focus");
   }
