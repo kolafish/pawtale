@@ -180,6 +180,25 @@
   color: #2f6f4e;
 }
 
+.book-status.pending {
+  background: #f2eee6;
+  color: #74675e;
+}
+
+.transcription-notice {
+  display: inline-flex;
+  max-width: 100%;
+  margin-top: 16rpx;
+  padding: 12rpx 18rpx;
+  border-radius: 999rpx;
+  background: #f8eadf;
+  color: #8b5c43;
+  font-size: 26rpx;
+  font-weight: 800;
+  line-height: 1.35;
+  word-break: break-word;
+}
+
 .section-card {
   padding: 28rpx;
 }

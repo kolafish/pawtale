@@ -234,6 +234,11 @@
   box-shadow: 0 12rpx 30rpx rgba(166, 75, 62, 0.14);
 }
 
+.transcript-card.recovery-pending {
+  border-color: #e6cdb9;
+  background: #fffdf9;
+}
+
 .record-head,
 .section-head,
 .actions-row {
@@ -307,6 +312,25 @@
   color: #a64b3e;
 }
 
+.book-status.pending {
+  background: #f2eee6;
+  color: #74675e;
+}
+
+.transcription-status {
+  display: inline-flex;
+  max-width: 100%;
+  margin-top: 12rpx;
+  padding: 8rpx 14rpx;
+  border-radius: 999rpx;
+  background: #f8eadf;
+  color: #8b5c43;
+  font-size: 24rpx;
+  font-weight: 700;
+  line-height: 32rpx;
+  word-break: break-word;
+}
+
 .record-count {
   flex: 0 0 auto;
   padding: 10rpx 16rpx;
@@ -315,6 +339,11 @@
   color: #8b6a55;
   font-size: 24rpx;
   font-weight: 600;
+}
+
+.record-count.pending {
+  background: #a64b3e;
+  color: #ffffff;
 }
 
 .summary-preview {

@@ -59,6 +59,11 @@ interface TranscriptDetailItemView extends MemoirVoiceTranscriptItem {
   createdAtText: string;
   audioText: string;
   recordMetaText: string;
+  transcriptionNoticeText: string;
+  displayCountText: string;
+  rawCountText: string;
+  bookStatusClass: string;
+  canRecoverTranscription: boolean;
   bookInclusionText: string;
   isIncludedInBook: boolean;
   canAssignChapterSource: boolean;
@@ -176,13 +181,17 @@ function toViewItem(
   bookPlan: MemoirBookPlan | null,
   previous?: TranscriptDetailItemView | null,
 ): TranscriptDetailItemView {
+  const canRecoverTranscription = Boolean(
+    item.can_recover_transcription || item.transcription_status === "pending_transcription",
+  );
   const editingText = item.transcript_edited || item.transcript_raw;
-  const isIncludedInBook = Boolean(item.is_included_in_book || item.included_chapters?.length);
-  const chapterAssignOptions = transcriptChapterAssignOptions(item, bookPlan);
-  const chapterMoveOptions = transcriptChapterMoveOptions(item, bookPlan);
+  const isIncludedInBook = !canRecoverTranscription && Boolean(item.is_included_in_book || item.included_chapters?.length);
+  const chapterAssignOptions = canRecoverTranscription ? [] : transcriptChapterAssignOptions(item, bookPlan);
+  const chapterMoveOptions = canRecoverTranscription ? [] : transcriptChapterMoveOptions(item, bookPlan);
   const createdAtText = transcriptCreatedAtText(item);
   const audioText = transcriptAudioText(item);
   const questionText = item.question_text.trim();
+  const recoveryText = item.summary_text || "这段录音已经保存，但还没有识别成文字。";
   return {
     ...item,
     titleText: transcriptTitleText(item),
@@ -191,7 +200,14 @@ function toViewItem(
     createdAtText,
     audioText,
     recordMetaText: [createdAtText, audioText].filter(Boolean).join(" · "),
-    bookInclusionText: transcriptBookInclusionText(item),
+    transcriptionNoticeText: canRecoverTranscription ? "音频已保存，等待转写" : "",
+    displayCountText: canRecoverTranscription ? "待转写" : `${item.display_char_count} 字`,
+    rawCountText: canRecoverTranscription ? "待转写" : `${item.raw_char_count} 字`,
+    bookStatusClass: canRecoverTranscription
+      ? "pending"
+      : (isIncludedInBook ? "included" : ""),
+    canRecoverTranscription,
+    bookInclusionText: canRecoverTranscription ? "等待转写后再入章" : transcriptBookInclusionText(item),
     isIncludedInBook,
     canAssignChapterSource: chapterAssignOptions.length > 0,
     chapterAssignOptions,
@@ -203,8 +219,8 @@ function toViewItem(
     questionTitleText: item.interview_type === "human_interview" ? "采访者刚才问了" : "小余刚才问了",
     questionCanExpand: Array.from(questionText).length > COLLAPSIBLE_QUESTION_CHAR_COUNT,
     questionSegments: plainTranscriptSegments(item.question_text),
-    rawSegments: plainTranscriptSegments(item.transcript_raw),
-    displaySegments: plainTranscriptSegments(item.display_text),
+    rawSegments: plainTranscriptSegments(canRecoverTranscription ? "等待恢复转写后显示原始识别文字。" : item.transcript_raw),
+    displaySegments: plainTranscriptSegments(canRecoverTranscription ? recoveryText : item.display_text),
     changed: previous?.isEditing
       ? previous.editingText.trim() !== editingText.trim()
       : false,
@@ -324,7 +340,7 @@ definePage<TranscriptDetailData>()({
 
   beginEdit() {
     const item = this.data.item;
-    if (!item || this.data.saving || this.data.deleting) {
+    if (!item || item.canRecoverTranscription || this.data.saving || this.data.deleting) {
       return;
     }
     const current = item.transcript_edited || item.transcript_raw;
@@ -353,7 +369,7 @@ definePage<TranscriptDetailData>()({
 
   changeText(event: TextAreaEvent) {
     const item = this.data.item;
-    if (!item) {
+    if (!item || item.canRecoverTranscription) {
       return;
     }
     this.setData({ item: changedItem(item, event.detail.value) });
@@ -369,7 +385,7 @@ definePage<TranscriptDetailData>()({
 
   async saveTranscript() {
     const item = this.data.item;
-    if (!item || this.data.saving || this.data.deleting) {
+    if (!item || item.canRecoverTranscription || this.data.saving || this.data.deleting) {
       return;
     }
     const content = item.editingText.trim();
@@ -392,7 +408,7 @@ definePage<TranscriptDetailData>()({
 
   resetToRaw() {
     const item = this.data.item;
-    if (!item) {
+    if (!item || item.canRecoverTranscription) {
       return;
     }
     this.setData({ item: changedItem(item, item.transcript_raw) });
@@ -402,6 +418,7 @@ definePage<TranscriptDetailData>()({
     const item = this.data.item;
     if (
       !item
+      || item.canRecoverTranscription
       || this.data.saving
       || this.data.deleting
       || this.data.voiceEditLoading

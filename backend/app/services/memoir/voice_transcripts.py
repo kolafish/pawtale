@@ -88,6 +88,11 @@ _SPACE_RE = re.compile(r"\s+")
 INCLUDED_FILTER_VALUES = {"all", "included", "not_included"}
 FALLBACK_SUMMARY_TITLE_LIMIT = 32
 FALLBACK_SUMMARY_TEXT_LIMIT = 120
+TRANSCRIPTION_STATUS_READY = "ready"
+TRANSCRIPTION_STATUS_PENDING = "pending_transcription"
+TRANSCRIPTION_STATUS_EMPTY = "empty"
+PENDING_TRANSCRIPTION_TITLE = "音频已保存，等待转写"
+PENDING_TRANSCRIPTION_SUMMARY = "这段录音已经保存，但还没有识别成文字。"
 
 
 @dataclass(frozen=True)
@@ -113,6 +118,25 @@ def _text_or_empty(value: str | None) -> str:
 
 def _current_text(utterance: MemoirVoiceUtterance) -> str:
     return _text_or_empty(utterance.transcript_edited) or _text_or_empty(utterance.transcript_raw)
+
+
+def _has_transcript_text_clause(utterance_model=MemoirVoiceUtterance):
+    return or_(
+        func.trim(utterance_model.transcript_raw) != "",
+        func.trim(utterance_model.transcript_edited) != "",
+    )
+
+
+def _has_recoverable_audio_clause(utterance_model=MemoirVoiceUtterance):
+    return utterance_model.audio_file_id.is_not(None)
+
+
+def _transcription_status(utterance: MemoirVoiceUtterance) -> str:
+    if _current_text(utterance):
+        return TRANSCRIPTION_STATUS_READY
+    if utterance.audio_file_id:
+        return TRANSCRIPTION_STATUS_PENDING
+    return TRANSCRIPTION_STATUS_EMPTY
 
 
 def _compact_display_text(value: str) -> str:
@@ -355,8 +379,8 @@ def _transcript_filter(user_id: str, project_id: str | None = None):
     clauses = [
         Project.user_id == user_id,
         or_(
-            func.trim(MemoirVoiceUtterance.transcript_raw) != "",
-            func.trim(MemoirVoiceUtterance.transcript_edited) != "",
+            _has_transcript_text_clause(),
+            _has_recoverable_audio_clause(),
         ),
         ~_paired_human_interviewer_prompt_exists(),
     ]
@@ -381,10 +405,7 @@ def _paired_human_interviewer_prompt_exists():
             MemoirVoiceUtterance.source_material_type == INTERVIEWER_SOURCE_MATERIAL_TYPE,
             MemoirVoiceUtterance.source_route_action == IGNORED_SOURCE_ROUTE_ACTION,
             answer_message.role == MemoirChatMessageRole.USER.value,
-            or_(
-                func.trim(answer_utterance.transcript_raw) != "",
-                func.trim(answer_utterance.transcript_edited) != "",
-            ),
+            _has_transcript_text_clause(answer_utterance),
         )
         .exists()
     )
@@ -552,7 +573,16 @@ def _item_response(
     edited = utterance.transcript_edited or ""
     display_text = edited.strip() or raw.strip()
     inclusions = included_chapters or []
-    summary_title, summary_text, summary_source = _summary_fields(display_text, source_card)
+    transcription_status = _transcription_status(utterance)
+    can_recover_transcription = transcription_status == TRANSCRIPTION_STATUS_PENDING
+    if can_recover_transcription:
+        summary_title, summary_text, summary_source = (
+            PENDING_TRANSCRIPTION_TITLE,
+            PENDING_TRANSCRIPTION_SUMMARY,
+            "pending_transcription",
+        )
+    else:
+        summary_title, summary_text, summary_source = _summary_fields(display_text, source_card)
     return MemoirVoiceTranscriptItemResponse(
         id=utterance.id,
         voice_session_id=utterance.voice_session_id,
@@ -573,6 +603,8 @@ def _item_response(
         summary_title=summary_title,
         summary_text=summary_text,
         summary_source=summary_source,
+        transcription_status=transcription_status,
+        can_recover_transcription=can_recover_transcription,
         raw_char_count=len(raw.strip()),
         edited_char_count=len(edited.strip()),
         display_char_count=len(display_text),

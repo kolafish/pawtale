@@ -111,6 +111,10 @@ interface TranscriptItemView extends MemoirVoiceTranscriptItem {
   anchorId: string;
   audioText: string;
   recordMetaText: string;
+  recordCountText: string;
+  recordCountClass: string;
+  transcriptionStatusText: string;
+  canRecoverTranscription: boolean;
   bookInclusionText: string;
   isIncludedInBook: boolean;
   canAssignChapterSource: boolean;
@@ -253,17 +257,20 @@ function withTranscriptRuntimeState(
 ): TranscriptItemView {
   const editBusy = Boolean(state.savingId || state.deletingId);
   const chapterBusy = Boolean(state.savingId || state.deletingId || state.assigningSourceId || state.movingSourceId);
+  const baseCardClass = item.canRecoverTranscription ? "transcript-card recovery-pending" : "transcript-card";
   return {
     ...item,
-    cardClass: state.highlightedId === item.id ? "transcript-card highlighted" : "transcript-card",
-    bookStatusClass: item.isIncludedInBook ? "book-status included" : "book-status",
+    cardClass: state.highlightedId === item.id ? `${baseCardClass} highlighted` : baseCardClass,
+    bookStatusClass: item.canRecoverTranscription
+      ? "book-status pending"
+      : (item.isIncludedInBook ? "book-status included" : "book-status"),
     deleteButtonLoading: state.deletingId === item.id,
     deleteButtonDisabled: editBusy,
     deleteButtonText: state.deletingId === item.id ? "删除中" : "删除",
     assignPickerDisabled: chapterBusy,
     assignPickerActionClass: chapterBusy ? "small-primary picker-action disabled" : "small-primary picker-action",
     assignPickerText: state.assigningSourceId === item.id ? "放入中" : "放入章节",
-    editButtonDisabled: editBusy,
+    editButtonDisabled: editBusy || item.canRecoverTranscription,
   };
 }
 
@@ -455,23 +462,28 @@ function transcriptSummaryPreview(item: MemoirVoiceTranscriptItem): string {
   return `${text.slice(0, 96)}...`;
 }
 
+function isPendingTranscription(item: MemoirVoiceTranscriptItem): boolean {
+  return Boolean(item.can_recover_transcription || item.transcription_status === "pending_transcription");
+}
+
 function toViewItem(
   item: MemoirVoiceTranscriptItem,
   searchQuery = "",
   bookPlan: MemoirBookPlan | null = null,
   recordNumber = 1,
 ): TranscriptItemView {
+  const canRecoverTranscription = isPendingTranscription(item);
   const editingText = item.transcript_edited || item.transcript_raw;
-  const isIncludedInBook = Boolean(item.is_included_in_book || item.included_chapters?.length);
+  const isIncludedInBook = !canRecoverTranscription && Boolean(item.is_included_in_book || item.included_chapters?.length);
   const rawView = transcriptTextView(item.transcript_raw, searchQuery);
   const displayView = transcriptTextView(item.display_text, searchQuery);
-  const chapterAssignOptions = transcriptChapterAssignOptions(item, bookPlan);
-  const chapterMoveOptions = transcriptChapterMoveOptions(item, bookPlan);
+  const chapterAssignOptions = canRecoverTranscription ? [] : transcriptChapterAssignOptions(item, bookPlan);
+  const chapterMoveOptions = canRecoverTranscription ? [] : transcriptChapterMoveOptions(item, bookPlan);
   const summaryTitleText = transcriptTitleText(item);
   const summaryPreviewText = transcriptSummaryPreview(item);
   const createdAtText = transcriptCreatedAtText(item);
   const durationText = transcriptDurationText(item);
-  const bookInclusionText = transcriptBookInclusionText(item);
+  const bookInclusionText = canRecoverTranscription ? "等待转写后再入章" : transcriptBookInclusionText(item);
   const recordMetaText = [createdAtText, durationText].filter(Boolean).join(" · ");
   return {
     ...item,
@@ -486,6 +498,10 @@ function toViewItem(
     anchorId: transcriptAnchorId(item.id),
     audioText: transcriptAudioText(item),
     recordMetaText,
+    recordCountText: canRecoverTranscription ? "待转写" : `${item.display_char_count} 字`,
+    recordCountClass: canRecoverTranscription ? "record-count pending" : "record-count",
+    transcriptionStatusText: canRecoverTranscription ? "音频已保存" : "",
+    canRecoverTranscription,
     bookInclusionText,
     isIncludedInBook,
     canAssignChapterSource: chapterAssignOptions.length > 0,
@@ -500,15 +516,17 @@ function toViewItem(
     detailsToggleText: "展开全部",
     changed: editingText !== (item.transcript_edited || item.transcript_raw),
     isEditing: false,
-    cardClass: "transcript-card",
-    bookStatusClass: isIncludedInBook ? "book-status included" : "book-status",
+    cardClass: canRecoverTranscription ? "transcript-card recovery-pending" : "transcript-card",
+    bookStatusClass: canRecoverTranscription
+      ? "book-status pending"
+      : (isIncludedInBook ? "book-status included" : "book-status"),
     deleteButtonLoading: false,
     deleteButtonDisabled: false,
     deleteButtonText: "删除",
     assignPickerDisabled: false,
     assignPickerActionClass: "small-primary picker-action",
     assignPickerText: "放入章节",
-    editButtonDisabled: false,
+    editButtonDisabled: canRecoverTranscription,
   };
 }
 
@@ -753,7 +771,8 @@ definePage<TranscriptsData>()({
 
   openTranscriptEdit(event: DatasetEvent) {
     const id = datasetString(event, "id");
-    if (!id) {
+    const item = this.data.items.find((candidate) => candidate.id === id);
+    if (!id || item?.canRecoverTranscription) {
       return;
     }
     wx.navigateTo({ url: pageUrl("/pages/transcript-detail/index", { id, mode: "edit" }) });
@@ -869,6 +888,7 @@ definePage<TranscriptsData>()({
     if (
       !id
       || !item
+      || item.canRecoverTranscription
       || this.data.savingId
       || this.data.deletingId
       || this.data.voiceEditLoading
@@ -1030,6 +1050,7 @@ definePage<TranscriptsData>()({
       !utteranceId
       || !item
       || !option
+      || item.canRecoverTranscription
       || !this.data.activeProjectId
       || this.data.assigningSourceId
       || this.data.movingSourceId
@@ -1064,6 +1085,7 @@ definePage<TranscriptsData>()({
       !utteranceId
       || !item
       || !option
+      || item.canRecoverTranscription
       || !this.data.activeProjectId
       || this.data.assigningSourceId
       || this.data.movingSourceId
@@ -1095,7 +1117,7 @@ definePage<TranscriptsData>()({
   beginEdit(event: DatasetEvent) {
     const id = datasetString(event, "id");
     const index = this.data.items.findIndex((item) => item.id === id);
-    if (index < 0 || this.data.savingId || this.data.deletingId) {
+    if (index < 0 || this.data.items[index].canRecoverTranscription || this.data.savingId || this.data.deletingId) {
       return;
     }
     const items = [...this.data.items];
@@ -1113,7 +1135,7 @@ definePage<TranscriptsData>()({
   changeText(event: TextAreaEvent) {
     const id = datasetString(event, "id");
     const index = this.data.items.findIndex((item) => item.id === id);
-    if (index < 0) {
+    if (index < 0 || this.data.items[index].canRecoverTranscription) {
       return;
     }
     const items = [...this.data.items];
@@ -1135,7 +1157,7 @@ definePage<TranscriptsData>()({
   async saveTranscript(event: DatasetEvent) {
     const id = datasetString(event, "id");
     const item = this.data.items.find((candidate) => candidate.id === id);
-    if (!item || this.data.savingId || this.data.deletingId) {
+    if (!item || item.canRecoverTranscription || this.data.savingId || this.data.deletingId) {
       return;
     }
     const content = item.editingText.trim();

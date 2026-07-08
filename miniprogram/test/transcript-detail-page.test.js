@@ -158,6 +158,50 @@ test("transcript detail page loads a single transcript and chapter options", asy
   ]);
 });
 
+test("transcript detail page shows saved audio awaiting transcription", async () => {
+  const { page } = loadTranscriptDetailPage({
+    voiceApiExports: {
+      getMemoirVoiceTranscript: async (id) => sampleTranscript(id, {
+        transcript_raw: "",
+        transcript_edited: "",
+        display_text: "",
+        summary_title: "音频已保存，等待转写",
+        summary_text: "这段录音已经保存，但还没有识别成文字。",
+        summary_source: "pending_transcription",
+        raw_char_count: 0,
+        edited_char_count: 0,
+        display_char_count: 0,
+        transcription_status: "pending_transcription",
+        can_recover_transcription: true,
+      }),
+      getMemoirBookPlan: async () => sampleBookPlan(),
+    },
+  });
+  const context = pageContext(page);
+
+  await page.onLoad.call(context, { id: "utterance-pending" });
+
+  assert.equal(context.data.item.titleText, "音频已保存，等待转写");
+  assert.equal(context.data.item.transcriptionNoticeText, "音频已保存，等待转写");
+  assert.equal(context.data.item.displayCountText, "待转写");
+  assert.equal(context.data.item.rawCountText, "待转写");
+  assert.equal(context.data.item.bookInclusionText, "等待转写后再入章");
+  assert.equal(context.data.item.bookStatusClass, "pending");
+  assert.equal(context.data.item.canAssignChapterSource, false);
+  assert.equal(context.data.item.canMoveChapterSource, false);
+  assert.equal(context.data.item.canPlayAnswerAudio, true);
+  assert.equal(context.data.item.canRecoverTranscription, true);
+  assert.deepEqual(context.data.item.displaySegments, [
+    { text: "这段录音已经保存，但还没有识别成文字。", highlight: false },
+  ]);
+  assert.deepEqual(context.data.item.rawSegments, [
+    { text: "等待恢复转写后显示原始识别文字。", highlight: false },
+  ]);
+
+  await page.onLoad.call(context, { id: "utterance-pending", mode: "edit" });
+  assert.equal(context.data.item.isEditing, false);
+});
+
 test("transcript detail page labels human interviewer questions", async () => {
   const { page } = loadTranscriptDetailPage({
     voiceApiExports: {
