@@ -91,6 +91,7 @@ class MemoirInterviewEditorSessionSummaryResponse(BaseModel):
     answer_count: int
     unassigned_answer_count: int
     total_audio_seconds: int
+    summary_text: str
     last_message_text: str
     last_message_role: MemoirChatMessageRole | None = None
     last_message_at: datetime | None = None

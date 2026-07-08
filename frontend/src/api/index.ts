@@ -193,10 +193,25 @@ export const projectsApi = {
 
 // Memoir interview editor API
 export const memoirInterviewEditorApi = {
-  listSessions: (projectId: string, interviewType: MemoirInterviewType | null = 'human_interview') =>
+  listSessions: (
+    projectId: string,
+    options: {
+      interviewType?: MemoirInterviewType | null;
+      effectiveOnly?: boolean;
+      limit?: number;
+      offset?: number;
+    } = {},
+  ) =>
     api.get<MemoirInterviewEditorSessionList>(
       `/memoir/projects/${projectId}/interview-editor/sessions`,
-      { params: interviewType ? { interview_type: interviewType } : undefined },
+      {
+        params: {
+          ...(options.interviewType ? { interview_type: options.interviewType } : {}),
+          ...(options.effectiveOnly !== undefined ? { effective_only: options.effectiveOnly } : {}),
+          ...(options.limit !== undefined ? { limit: options.limit } : {}),
+          ...(options.offset !== undefined ? { offset: options.offset } : {}),
+        },
+      },
     ).then(r => r.data),
   getSession: (projectId: string, sessionId: string) =>
     api.get<MemoirInterviewEditorSessionDetail>(

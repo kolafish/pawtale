@@ -26,7 +26,8 @@ router = APIRouter(tags=["memoir-interview-editor"])
 )
 async def list_memoir_interview_editor_sessions(
     project_id: str,
-    interview_type: Literal["human_interview", "ai_interview"] | None = "human_interview",
+    interview_type: Literal["human_interview", "ai_interview"] | None = None,
+    effective_only: bool = Query(True),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
@@ -37,6 +38,7 @@ async def list_memoir_interview_editor_sessions(
         user_id=current_user.id,
         project_id=project_id,
         interview_type=interview_type,
+        effective_only=effective_only,
         limit=limit,
         offset=offset,
         allow_admin=is_admin_user(current_user),

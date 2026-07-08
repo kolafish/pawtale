@@ -671,6 +671,7 @@ export interface MemoirInterviewEditorSessionSummary {
   answer_count: number;
   unassigned_answer_count: number;
   total_audio_seconds: number;
+  summary_text: string;
   last_message_text: string;
   last_message_role?: MemoirChatMessageRole | null;
   last_message_at?: string | null;
