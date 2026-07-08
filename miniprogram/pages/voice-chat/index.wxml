@@ -134,7 +134,7 @@
     </view>
   </view>
 
-  <view class="transcript-stage">
+  <view wx:if="{{!showHumanTranscriptOverlay}}" class="transcript-stage">
     <text wx:if="{{showStageStatus}}" class="{{stageStatusClass}}">
       {{stageStatusText}}
     </text>
@@ -144,7 +144,7 @@
       scroll-top="{{liveScrollTop}}"
       scroll-into-view="{{liveScrollTarget}}"
     >
-      <text class="live-text">{{liveDisplayText}}</text>
+      <text class="{{liveTextClass}}">{{liveDisplayText}}</text>
       <view id="{{liveTextEndId}}" class="live-text-end"></view>
     </scroll-view>
     <view wx:if="{{showCaptureStrip}}" class="{{captureStripClass}}">
@@ -164,6 +164,28 @@
     </button>
     <view wx:if="{{recording}}" class="voice-activity">
       <view class="level-track">
+        <view class="level-fill" style="width: {{audioLevelPercent}}%;"></view>
+      </view>
+    </view>
+  </view>
+
+  <view wx:if="{{showHumanTranscriptOverlay}}" class="human-transcript-overlay">
+    <view class="human-transcript-sheet">
+      <scroll-view
+        class="human-transcript-scroll"
+        scroll-y="{{true}}"
+        scroll-top="{{liveScrollTop}}"
+        scroll-into-view="{{liveScrollTarget}}"
+      >
+        <text class="{{liveTextClass}}">{{liveDisplayText}}</text>
+        <view id="{{liveTextEndId}}" class="live-text-end"></view>
+      </scroll-view>
+      <view class="human-transcript-footer">
+        <view class="capture-dot"></view>
+        <text>已说 {{captureDurationText}}</text>
+        <text wx:if="{{showLiveCharCount}}">本句 {{liveCharCount}} 字</text>
+      </view>
+      <view class="human-transcript-level">
         <view class="level-fill" style="width: {{audioLevelPercent}}%;"></view>
       </view>
     </view>
