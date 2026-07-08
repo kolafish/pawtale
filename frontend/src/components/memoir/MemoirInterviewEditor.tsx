@@ -5,11 +5,16 @@ import {
   Check,
   Clock3,
   FileAudio,
+  Link2,
   Loader2,
   MessageSquareText,
+  Pencil,
+  Plus,
   RefreshCw,
   Save,
+  Unlink,
   UserRound,
+  X,
 } from 'lucide-react';
 import { memoirInterviewEditorApi } from '../../api';
 import type {
@@ -101,16 +106,18 @@ function SessionButton({
 function AnswerRow({
   answer,
   selected,
+  checked,
   onSelect,
+  onToggleChecked,
 }: {
   answer: MemoirInterviewEditorAnswer;
   selected: boolean;
+  checked: boolean;
   onSelect: () => void;
+  onToggleChecked: () => void;
 }) {
   return (
-    <button
-      type="button"
-      onClick={onSelect}
+    <div
       className={`w-full rounded-lg px-3 py-2.5 text-left shadow-[0_1px_8px_rgba(15,23,42,0.06)] transition-[background-color,box-shadow,transform] active:scale-[0.96] ${
         selected
           ? 'bg-emerald-50 text-emerald-950 ring-2 ring-emerald-200'
@@ -118,8 +125,17 @@ function AnswerRow({
       }`}
     >
       <div className="flex items-start gap-2">
-        <UserRound size={15} className={selected ? 'mt-0.5 text-emerald-700' : 'mt-0.5 text-gray-400'} />
-        <div className="min-w-0 flex-1">
+        <input
+          type="checkbox"
+          checked={checked}
+          onChange={onToggleChecked}
+          onClick={(event) => event.stopPropagation()}
+          aria-label="选择回答"
+          className="mt-1 h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+        />
+        <button type="button" onClick={onSelect} className="flex min-w-0 flex-1 items-start gap-2 text-left">
+          <UserRound size={15} className={selected ? 'mt-0.5 flex-shrink-0 text-emerald-700' : 'mt-0.5 flex-shrink-0 text-gray-400'} />
+          <div className="min-w-0 flex-1">
           <p className="line-clamp-2 text-sm leading-5">{answerPreview(answer)}</p>
           <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-gray-500">
             <span className="tabular-nums">#{answer.turn_index}</span>
@@ -136,9 +152,10 @@ function AnswerRow({
               </span>
             )}
           </div>
-        </div>
+          </div>
+        </button>
       </div>
-    </button>
+    </div>
   );
 }
 
@@ -147,6 +164,10 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
   const [selectedSessionOverride, setSelectedSessionOverride] = useState<string | null>(null);
   const [selectedAnswerOverride, setSelectedAnswerOverride] = useState<string | null>(null);
   const [draft, setDraft] = useState<{ answerId: string; text: string } | null>(null);
+  const [checkedAnswerIds, setCheckedAnswerIds] = useState<string[]>([]);
+  const [targetQuestionId, setTargetQuestionId] = useState('');
+  const [newQuestionText, setNewQuestionText] = useState('');
+  const [editingQuestion, setEditingQuestion] = useState<{ id: string; text: string } | null>(null);
 
   const sessionsQuery = useQuery({
     queryKey: ['memoirInterviewEditorSessions', project.id],
@@ -177,6 +198,11 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
       : answers[0]?.id
   ) ?? null;
   const selectedAnswer = answers.find((answer) => answer.id === selectedAnswerId) ?? null;
+  const checkedAnswers = answers.filter((answer) => checkedAnswerIds.includes(answer.id));
+  const checkedAnswerMessageIds = checkedAnswers.map((answer) => answer.message_id);
+  const effectiveTargetQuestionId = detail?.questions.some((question) => question.id === targetQuestionId)
+    ? targetQuestionId
+    : '';
   const draftText = selectedAnswer
     ? (draft?.answerId === selectedAnswer.id ? draft.text : selectedAnswer.display_text)
     : '';
@@ -187,6 +213,51 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
     onSuccess: () => {
       setDraft(null);
       queryClient.invalidateQueries({ queryKey: ['memoirInterviewEditorSession', project.id, selectedSessionId] });
+      queryClient.invalidateQueries({ queryKey: ['memoirInterviewEditorSessions', project.id] });
+    },
+  });
+
+  const createQuestionMutation = useMutation({
+    mutationFn: ({ voiceSessionId, text }: { voiceSessionId: string; text: string }) =>
+      memoirInterviewEditorApi.createQuestion(project.id, voiceSessionId, text),
+    onSuccess: (data) => {
+      setNewQuestionText('');
+      setTargetQuestionId(data.questions[data.questions.length - 1]?.id ?? '');
+      queryClient.setQueryData(['memoirInterviewEditorSession', project.id, selectedSessionId], data);
+      queryClient.invalidateQueries({ queryKey: ['memoirInterviewEditorSessions', project.id] });
+    },
+  });
+
+  const updateQuestionMutation = useMutation({
+    mutationFn: ({ messageId, text }: { messageId: string; text: string }) =>
+      memoirInterviewEditorApi.updateQuestionText(project.id, messageId, text),
+    onSuccess: (data) => {
+      setEditingQuestion(null);
+      queryClient.setQueryData(['memoirInterviewEditorSession', project.id, selectedSessionId], data);
+      queryClient.invalidateQueries({ queryKey: ['memoirInterviewEditorSessions', project.id] });
+    },
+  });
+
+  const updateParentMutation = useMutation({
+    mutationFn: async ({ messageIds, parentQuestionId }: { messageIds: string[]; parentQuestionId: string | null }) => {
+      let latest = null;
+      for (const messageId of messageIds) {
+        latest = await memoirInterviewEditorApi.updateAnswerParent(
+          project.id,
+          messageId,
+          parentQuestionId,
+          parentQuestionId ? 'web_batch_move_answer' : 'web_batch_unassign_answer',
+        );
+      }
+      return latest;
+    },
+    onSuccess: (data) => {
+      setCheckedAnswerIds([]);
+      if (data) {
+        queryClient.setQueryData(['memoirInterviewEditorSession', project.id, selectedSessionId], data);
+      } else {
+        queryClient.invalidateQueries({ queryKey: ['memoirInterviewEditorSession', project.id, selectedSessionId] });
+      }
       queryClient.invalidateQueries({ queryKey: ['memoirInterviewEditorSessions', project.id] });
     },
   });
@@ -202,6 +273,34 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
     if (!selectedAnswer || !canSave) return;
     saveMutation.mutate({ answerId: selectedAnswer.id, text: draftText.trim() });
   };
+
+  const toggleAnswerChecked = (answerId: string) => {
+    setCheckedAnswerIds((ids) => (
+      ids.includes(answerId)
+        ? ids.filter((id) => id !== answerId)
+        : [...ids, answerId]
+    ));
+  };
+
+  const selectAllVisibleAnswers = () => {
+    setCheckedAnswerIds(answers.map((answer) => answer.id));
+  };
+
+  const canCreateQuestion = Boolean(selectedSessionId && newQuestionText.trim() && !createQuestionMutation.isPending);
+  const canUpdateQuestion = Boolean(
+    editingQuestion
+    && editingQuestion.text.trim()
+    && detail?.questions.some((question) => question.id === editingQuestion.id && question.text !== editingQuestion.text),
+  );
+  const canMoveCheckedAnswers = Boolean(
+    checkedAnswerMessageIds.length > 0
+    && effectiveTargetQuestionId
+    && !updateParentMutation.isPending,
+  );
+  const canUnassignCheckedAnswers = Boolean(
+    checkedAnswerMessageIds.length > 0
+    && !updateParentMutation.isPending,
+  );
 
   return (
     <div className="h-full min-w-0 flex-1 bg-slate-100 text-gray-800">
@@ -232,11 +331,14 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
                     <SessionButton
                       key={session.id}
                       session={session}
-                        selected={session.id === selectedSessionId}
-                        onSelect={() => {
+                      selected={session.id === selectedSessionId}
+                      onSelect={() => {
                         setSelectedSessionOverride(session.id);
                         setSelectedAnswerOverride(null);
                         setDraft(null);
+                        setCheckedAnswerIds([]);
+                        setTargetQuestionId('');
+                        setEditingQuestion(null);
                       }}
                     />
                   ))}
@@ -284,6 +386,92 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
               </div>
             ) : detail ? (
               <>
+                <section className="space-y-3 border-b border-slate-100 pb-5">
+                  <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
+                    <div className="min-w-0 flex-1">
+                      <label htmlFor="new-question-text" className="mb-1 block text-xs font-medium text-gray-500">
+                        新建采访问题
+                      </label>
+                      <div className="flex gap-2">
+                        <input
+                          id="new-question-text"
+                          value={newQuestionText}
+                          onChange={(event) => setNewQuestionText(event.target.value)}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter' && canCreateQuestion && selectedSessionId) {
+                              createQuestionMutation.mutate({ voiceSessionId: selectedSessionId, text: newQuestionText.trim() });
+                            }
+                          }}
+                          placeholder="输入一个人工整理的问题"
+                          className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-gray-800 outline-none transition-[border-color,box-shadow] focus:border-emerald-300 focus:shadow-[0_0_0_3px_rgba(16,185,129,0.16)]"
+                        />
+                        <button
+                          type="button"
+                          disabled={!canCreateQuestion || !selectedSessionId}
+                          onClick={() => selectedSessionId && createQuestionMutation.mutate({ voiceSessionId: selectedSessionId, text: newQuestionText.trim() })}
+                          className="inline-flex h-10 items-center gap-2 rounded-lg bg-slate-900 px-3 text-sm font-medium text-white transition-[background-color,opacity,transform] hover:bg-slate-700 active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {createQuestionMutation.isPending ? <Loader2 size={15} className="animate-spin" /> : <Plus size={15} />}
+                          新建
+                        </button>
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2 rounded-lg bg-slate-50 px-3 py-2">
+                      <span className="text-xs text-gray-500 tabular-nums">已选 {checkedAnswers.length}</span>
+                      <button
+                        type="button"
+                        onClick={selectAllVisibleAnswers}
+                        disabled={answers.length === 0}
+                        className="h-9 rounded-lg px-2.5 text-xs text-gray-600 transition-[background-color,transform] hover:bg-white active:scale-[0.96] disabled:opacity-40"
+                      >
+                        全选
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setCheckedAnswerIds([])}
+                        disabled={checkedAnswers.length === 0}
+                        className="h-9 rounded-lg px-2.5 text-xs text-gray-600 transition-[background-color,transform] hover:bg-white active:scale-[0.96] disabled:opacity-40"
+                      >
+                        清除
+                      </button>
+                      <select
+                        value={effectiveTargetQuestionId}
+                        onChange={(event) => setTargetQuestionId(event.target.value)}
+                        className="h-9 max-w-52 rounded-lg border border-slate-200 bg-white px-2 text-xs text-gray-700 outline-none focus:ring-2 focus:ring-emerald-200"
+                      >
+                        <option value="">选择目标问题</option>
+                        {detail.questions.map((question) => (
+                          <option key={question.id} value={question.id}>
+                            #{question.turn_index} {question.text}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        disabled={!canMoveCheckedAnswers}
+                        onClick={() => updateParentMutation.mutate({ messageIds: checkedAnswerMessageIds, parentQuestionId: effectiveTargetQuestionId })}
+                        className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-emerald-600 px-3 text-xs font-medium text-white transition-[background-color,opacity,transform] hover:bg-emerald-700 active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {updateParentMutation.isPending ? <Loader2 size={14} className="animate-spin" /> : <Link2 size={14} />}
+                        移动
+                      </button>
+                      <button
+                        type="button"
+                        disabled={!canUnassignCheckedAnswers}
+                        onClick={() => updateParentMutation.mutate({ messageIds: checkedAnswerMessageIds, parentQuestionId: null })}
+                        className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-amber-100 px-3 text-xs font-medium text-amber-800 transition-[background-color,opacity,transform] hover:bg-amber-200 active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        <Unlink size={14} />
+                        设为未归属
+                      </button>
+                    </div>
+                  </div>
+                  {(createQuestionMutation.isError || updateParentMutation.isError || updateQuestionMutation.isError) && (
+                    <div className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">
+                      问答关系保存失败，请刷新后重试。
+                    </div>
+                  )}
+                </section>
                 {detail.questions.map((question) => (
                   <section key={question.id} className="space-y-3">
                     <div className="flex items-start gap-3">
@@ -296,7 +484,45 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
                           <span className="tabular-nums">#{question.turn_index}</span>
                           <span>{question.answer_count} 段回答</span>
                         </div>
-                        <h3 className="mt-1 text-base font-medium leading-7 text-gray-900">{question.text}</h3>
+                        {editingQuestion?.id === question.id ? (
+                          <div className="mt-1 flex gap-2">
+                            <input
+                              value={editingQuestion.text}
+                              onChange={(event) => setEditingQuestion({ id: question.id, text: event.target.value })}
+                              className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-gray-800 outline-none focus:ring-2 focus:ring-emerald-200"
+                              autoFocus
+                            />
+                            <button
+                              type="button"
+                              disabled={!canUpdateQuestion || updateQuestionMutation.isPending}
+                              onClick={() => updateQuestionMutation.mutate({ messageId: question.id, text: editingQuestion.text.trim() })}
+                              className="inline-flex h-10 items-center justify-center rounded-lg bg-emerald-600 px-3 text-white transition-[background-color,opacity,transform] hover:bg-emerald-700 active:scale-[0.96] disabled:opacity-50"
+                              title="保存问题"
+                            >
+                              {updateQuestionMutation.isPending ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setEditingQuestion(null)}
+                              className="inline-flex h-10 items-center justify-center rounded-lg bg-slate-100 px-3 text-gray-600 transition-[background-color,transform] hover:bg-slate-200 active:scale-[0.96]"
+                              title="取消编辑"
+                            >
+                              <X size={15} />
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="mt-1 flex items-start gap-2">
+                            <h3 className="min-w-0 flex-1 text-base font-medium leading-7 text-gray-900">{question.text}</h3>
+                            <button
+                              type="button"
+                              onClick={() => setEditingQuestion({ id: question.id, text: question.text })}
+                              className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg text-gray-400 transition-[background-color,color,transform] hover:bg-slate-100 hover:text-gray-700 active:scale-[0.96]"
+                              title="编辑问题"
+                            >
+                              <Pencil size={15} />
+                            </button>
+                          </div>
+                        )}
                       </div>
                     </div>
                     {question.answers.length > 0 ? (
@@ -306,10 +532,12 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
                             key={answer.id}
                             answer={answer}
                             selected={answer.id === selectedAnswerId}
+                            checked={checkedAnswerIds.includes(answer.id)}
                             onSelect={() => {
                               setSelectedAnswerOverride(answer.id);
                               setDraft(null);
                             }}
+                            onToggleChecked={() => toggleAnswerChecked(answer.id)}
                           />
                         ))}
                       </div>
@@ -333,10 +561,12 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
                           key={answer.id}
                           answer={answer}
                           selected={answer.id === selectedAnswerId}
+                          checked={checkedAnswerIds.includes(answer.id)}
                           onSelect={() => {
                             setSelectedAnswerOverride(answer.id);
                             setDraft(null);
                           }}
+                          onToggleChecked={() => toggleAnswerChecked(answer.id)}
                         />
                       ))}
                     </div>
