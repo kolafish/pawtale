@@ -27,6 +27,7 @@ import {
 import {
   classifyVoiceClientConnectionError,
   type MemoirCaptureStats,
+  type MemoirStreamingAsrClientEvent,
   type VoiceChatConnectionStatus,
 } from "../../services/memoir-streaming-asr";
 import { StreamingVoiceController } from "../../services/streaming-voice-controller";
@@ -1444,6 +1445,9 @@ definePage<VoiceChatData>()({
           onError: (message, error) => {
             this.handleError(message, error);
           },
+          onClientEvent: (event) => {
+            this.handleClientEvent(event);
+          },
         },
       });
       connected = true;
@@ -1685,6 +1689,28 @@ definePage<VoiceChatData>()({
     }
   },
 
+  handleClientEvent(event: MemoirStreamingAsrClientEvent) {
+    trackAuditAction(
+      "voice_chat.client_event",
+      {
+        type: event.type,
+        message: voiceAuditText(event.message || ""),
+        native_message: voiceAuditText(event.nativeMessage || ""),
+        gateway_event_type: event.gatewayEventType || "",
+        timeout_ms: event.timeoutMs || 0,
+        frame_count: event.frameCount,
+        audio_bytes_sent: event.audioBytesSent,
+        recording_elapsed_ms: event.recordingElapsedMs,
+        gateway_state: event.gatewayState || "",
+        auto_stopped: event.autoStopped,
+        auto_stop_reason: event.autoStopReason || "",
+        error_kind: event.errorKind || "",
+        error_code: event.errorCode || "",
+      },
+      { voiceSessionId: this.data.voiceSessionId },
+    );
+  },
+
   handlePartial(text: string) {
     setVoiceChatData(this, voiceLiveTranscriptPatch(text, this.data.liveScrollTop));
   },
@@ -1728,6 +1754,16 @@ definePage<VoiceChatData>()({
   },
 
   handleError(message: string, error?: VoiceChatErrorInfo) {
+    trackAuditAction(
+      "voice_chat.error",
+      {
+        message: voiceAuditText(message),
+        error_kind: error?.kind || "",
+        error_code: error?.code || "",
+        gateway_state: error?.state || "",
+      },
+      { voiceSessionId: this.data.voiceSessionId },
+    );
     if (shouldIgnoreSavedHumanInterviewClose(this.data, message, error)) {
       this.suppressNextBenignCloseErrorStatus = true;
       setVoiceChatData(this, {
@@ -1745,3 +1781,7 @@ definePage<VoiceChatData>()({
     setVoiceChatData(this, voiceChatErrorPatch(message, error, this.data));
   },
 });
+
+function voiceAuditText(value: string): string {
+  return (value || "").slice(0, 240);
+}

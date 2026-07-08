@@ -1,5 +1,7 @@
 import asyncio
 import base64
+import json
+import logging
 from typing import Any
 
 import pytest
@@ -101,6 +103,54 @@ async def test_voice_gateway_streams_audio_and_forwards_asr_events():
     assert ended["state"] == "ready"
     assert stopped["state"] == "stopped"
     assert stopped_with == [None]
+
+
+async def test_voice_gateway_logs_structured_diagnostics(caplog):
+    client = FakeGatewayClient()
+    asr_client = FakeStreamingASRClient()
+
+    async def persist_final(_event: StreamingASREvent) -> dict[str, Any]:
+        return {
+            "message_id": "msg-1",
+            "utterance_id": "utt-1",
+            "audio_file_id": "audio-1",
+        }
+
+    session = VoiceGatewaySession(
+        client=client,
+        asr_client_factory=lambda: asr_client,
+        on_asr_final=persist_final,
+        connection_id="conn-1",
+        diagnostics_context={"voice_session_id": "voice-1"},
+    )
+
+    caplog.set_level(logging.INFO, logger="app.services.memoir.voice_gateway")
+    run_task = asyncio.create_task(session.run())
+    await _wait_for_event(client, "session.ready")
+    await client.push({"type": "session.start"})
+    await _wait_for_event(client, "session.started")
+    await client.push(
+        {
+            "type": "audio.frame",
+            "audio": base64.b64encode(b"pcm").decode("ascii"),
+        }
+    )
+    await client.push({"type": "audio.end"})
+    await _wait_for_event(client, "asr.final")
+    await _wait_for_event(client, "audio.ended")
+    await client.push({"type": "session.stop"})
+    await _wait_for_event(client, "session.stopped")
+    await asyncio.wait_for(run_task, timeout=1)
+
+    diagnostics = _voice_gateway_diagnostics(caplog.records)
+    persisted = [item for item in diagnostics if item["event"] == "asr.final_persisted"]
+    assert persisted
+    assert persisted[0]["connection_id"] == "conn-1"
+    assert persisted[0]["voice_session_id"] == "voice-1"
+    assert persisted[0]["frame_count"] == 1
+    assert persisted[0]["audio_bytes"] == 3
+    assert persisted[0]["message_id"] == "msg-1"
+    assert persisted[0]["utterance_id"] == "utt-1"
 
 
 async def test_voice_gateway_ignores_provider_no_status_close_during_finish():
@@ -725,8 +775,19 @@ async def test_book_voice_command_gateway_uses_transient_realtime_session(monkey
     assert transient_session_id.startswith("book-voice-command-project-1-")
     assert calls["capacity"] == ("user-1:book-voice-command", transient_session_id)
     assert calls["asr_factory"] == ("user-1", transient_session_id)
-    assert set(calls["gateway_kwargs"]) == {"client", "asr_client_factory"}
+    assert set(calls["gateway_kwargs"]) == {
+        "client",
+        "asr_client_factory",
+        "connection_id",
+        "diagnostics_context",
+    }
     assert calls["gateway_kwargs"]["client"] is websocket
+    assert calls["gateway_kwargs"]["connection_id"]
+    assert calls["gateway_kwargs"]["diagnostics_context"] == {
+        "gateway": "book_voice_command",
+        "project_id": "project-1",
+        "voice_session_id": transient_session_id,
+    }
     assert isinstance(calls["asr_client"], FakeStreamingASRClient)
     assert lease.released
 
@@ -1360,6 +1421,17 @@ async def _wait_for_event_count(client: "FakeGatewayClient", event_type: str, co
             return events
         await asyncio.sleep(0.01)
     raise AssertionError(f"Timed out waiting for {count} {event_type}; sent={client.sent}")
+
+
+def _voice_gateway_diagnostics(records) -> list[dict[str, Any]]:
+    diagnostics: list[dict[str, Any]] = []
+    prefix = "memoir_voice_gateway "
+    for record in records:
+        message = record.getMessage()
+        if not message.startswith(prefix):
+            continue
+        diagnostics.append(json.loads(message.removeprefix(prefix)))
+    return diagnostics
 
 
 class FakeGatewayClient:

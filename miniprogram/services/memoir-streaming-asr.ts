@@ -56,10 +56,22 @@ export interface MemoirStreamingAsrCallbacks {
   onPartial(text: string): void;
   onFinal(event: VoiceGatewayServerEvent): void;
   onError(message: string, error?: VoiceChatErrorInfo): void;
+  onClientEvent?(event: MemoirStreamingAsrClientEvent): void;
 }
 
 export type MemoirCaptureState = "idle" | "opening" | "recording" | "stopping" | "error";
 export type MemoirAutoStopReason = "silence_after_voice" | "no_voice";
+export type MemoirStreamingAsrClientEventType =
+  | "connection_timeout"
+  | "socket_connect_fail"
+  | "socket_open"
+  | "socket_error"
+  | "socket_close"
+  | "socket_send_fail"
+  | "recorder_error"
+  | "recording_auto_stop"
+  | "audio_end_sent"
+  | "wait_timeout";
 
 export interface MemoirCaptureStats {
   state: MemoirCaptureState;
@@ -71,6 +83,22 @@ export interface MemoirCaptureStats {
   silentElapsedMs: number;
   autoStopped: boolean;
   autoStopReason: MemoirAutoStopReason | "";
+}
+
+export interface MemoirStreamingAsrClientEvent {
+  type: MemoirStreamingAsrClientEventType;
+  message?: string;
+  nativeMessage?: string;
+  gatewayEventType?: string;
+  timeoutMs?: number;
+  frameCount: number;
+  audioBytesSent: number;
+  recordingElapsedMs: number;
+  gatewayState?: VoiceGatewayState;
+  autoStopped: boolean;
+  autoStopReason: MemoirAutoStopReason | "";
+  errorKind?: VoiceChatErrorInfo["kind"];
+  errorCode?: string;
 }
 
 export interface MemoirStreamingAsrOptions {
@@ -162,6 +190,10 @@ export class MemoirStreamingAsrClient {
         timedOut = true;
         this.closed = true;
         this.socketOpen = false;
+        this.emitClientEvent("connection_timeout", {
+          message: "语音连接超时",
+          timeoutMs: connectTimeoutMs,
+        });
         this.socketTask?.close({ code: 1000, reason: "voice connection timeout" });
         reject(new Error("语音连接超时"));
       }, connectTimeoutMs);
@@ -186,7 +218,13 @@ export class MemoirStreamingAsrClient {
           header: cookie ? { Cookie: cookie } : {},
           success: () => undefined,
           fail: (error) => {
-            settle(() => reject(new Error(error.errMsg || "语音连接失败")));
+            const message = error.errMsg || "语音连接失败";
+            this.emitClientEvent("socket_connect_fail", {
+              message,
+              nativeMessage: error.errMsg,
+              errorKind: "connection",
+            });
+            settle(() => reject(new Error(message)));
           },
         });
         this.socketTask = socketTask;
@@ -196,6 +234,7 @@ export class MemoirStreamingAsrClient {
             return;
           }
           this.socketOpen = true;
+          this.emitClientEvent("socket_open");
           this.options.callbacks.onStatus("ready");
           this.emitCaptureStats("idle");
           settle(resolve);
@@ -210,13 +249,24 @@ export class MemoirStreamingAsrClient {
             return;
           }
           const errorInfo = classifyVoiceClientConnectionError(error.errMsg || "语音连接错误");
+          this.emitClientEvent("socket_error", {
+            message: errorInfo.message,
+            nativeMessage: error.errMsg,
+            errorKind: errorInfo.kind,
+            errorCode: errorInfo.code,
+          });
           settle(() => reject(new Error(errorInfo.message)));
           this.rejectWaiters(errorInfo.message);
           this.options.callbacks.onError(errorInfo.message, errorInfo);
           this.options.callbacks.onStatus("error");
         });
-        socketTask.onClose(() => {
+        socketTask.onClose((closeEvent) => {
+          const closeDetail = closeEvent as { reason?: string; errMsg?: string } | undefined;
           this.socketOpen = false;
+          this.emitClientEvent("socket_close", {
+            message: "语音连接已关闭",
+            nativeMessage: closeDetail?.reason || closeDetail?.errMsg || "",
+          });
           settle(() => reject(new Error("语音连接已关闭")));
           this.rejectWaiters("语音连接已关闭");
           if (!this.closed) {
@@ -378,6 +428,9 @@ export class MemoirStreamingAsrClient {
         audio: arrayBufferToBase64(frameBuffer),
       });
       if (autoStopReason) {
+        this.emitClientEvent("recording_auto_stop", {
+          message: autoStopReason === "no_voice" ? "未检测到说话，自动停止录音" : "检测到停顿，自动停止录音",
+        });
         this.stopRecording();
         return;
       }
@@ -419,6 +472,11 @@ export class MemoirStreamingAsrClient {
     this.acceptingFrames = false;
     this.emitCaptureStats("error");
     this.rejectWaiters(readableMessage);
+    this.emitClientEvent("recorder_error", {
+      message: readableMessage,
+      nativeMessage: message,
+      errorKind: "recorder",
+    });
     this.options.callbacks.onError(readableMessage, clientError(readableMessage, "recorder"));
     this.options.callbacks.onStatus("error");
     if (activeClient === this) {
@@ -513,6 +571,7 @@ export class MemoirStreamingAsrClient {
     this.silentElapsedMs = 0;
     this.options.callbacks.onStatus("stopping");
     this.emitCaptureStats("stopping");
+    this.emitClientEvent("audio_end_sent", { gatewayEventType: "audio.end" });
     this.sendJson({ type: "audio.end" });
   }
 
@@ -528,7 +587,13 @@ export class MemoirStreamingAsrClient {
       };
       const timer = setTimeout(() => {
         this.waiters = this.waiters.filter((waiter) => waiter !== waiterEntry);
-        reject(new Error(eventType === "audio.ended" ? "语音保存超时" : "本次语音记录保存超时"));
+        const message = eventType === "audio.ended" ? "语音保存超时" : "本次语音记录保存超时";
+        this.emitClientEvent("wait_timeout", {
+          message,
+          gatewayEventType: eventType,
+          timeoutMs,
+        });
+        reject(new Error(message));
       }, timeoutMs);
       waiterEntry = {
         eventType,
@@ -590,6 +655,22 @@ export class MemoirStreamingAsrClient {
       silentElapsedMs: this.silentElapsedMs,
       autoStopped: this.autoStopped,
       autoStopReason: this.autoStopReason,
+    });
+  }
+
+  private emitClientEvent(
+    type: MemoirStreamingAsrClientEventType,
+    detail: Partial<MemoirStreamingAsrClientEvent> = {},
+  ): void {
+    this.options.callbacks.onClientEvent?.({
+      type,
+      frameCount: this.frameCount,
+      audioBytesSent: this.audioBytesSent,
+      recordingElapsedMs: this.captureStartedAtMs ? Date.now() - this.captureStartedAtMs : 0,
+      gatewayState: this.gatewayState,
+      autoStopped: this.autoStopped,
+      autoStopReason: this.autoStopReason,
+      ...detail,
     });
   }
 
@@ -657,6 +738,9 @@ export class MemoirStreamingAsrClient {
     this.autoStopped = true;
     this.autoStopReason = "no_voice";
     this.emitCaptureStats(this.acceptingFrames ? "recording" : "opening");
+    this.emitClientEvent("recording_auto_stop", {
+      message: "未检测到说话，自动停止录音",
+    });
     this.stopRecording();
   }
 
@@ -688,6 +772,12 @@ export class MemoirStreamingAsrClient {
       data: JSON.stringify(event),
       fail: (error) => {
         const message = error.errMsg || "语音数据发送失败";
+        this.emitClientEvent("socket_send_fail", {
+          message,
+          nativeMessage: error.errMsg,
+          gatewayEventType: event.type,
+          errorKind: "connection",
+        });
         this.options.callbacks.onError(message, clientError(message, "connection"));
       },
     });
