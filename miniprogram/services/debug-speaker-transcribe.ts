@@ -1,7 +1,7 @@
 import { ApiError, cleanBaseUrl, readBackendConfig } from "./request";
 import { arrayBufferToBase64, estimatePcm16Level } from "./memoir-streaming-asr-protocol";
 import { backendSessionCookieHeader } from "./memoir-voice-api";
-import { WechatRecorderResource } from "./recorder-resource";
+import { sharedRecorderResource, WechatRecorderResource } from "./recorder-resource";
 import { wechatRecorderErrorMessage } from "./wechat-privacy";
 
 const DEBUG_RECORDING_DURATION_MS = 30 * 60 * 1000;
@@ -95,7 +95,7 @@ export class DebugSpeakerTranscribeClient {
 
   constructor(
     private readonly callbacks: DebugSpeakerTranscribeCallbacks,
-    private readonly recorderResource: WechatRecorderResource = new WechatRecorderResource(),
+    private readonly recorderResource: WechatRecorderResource = sharedRecorderResource,
   ) {
     debugClientSerial += 1;
     this.recorderOwnerId = `debug-speaker-transcribe-${debugClientSerial}`;
