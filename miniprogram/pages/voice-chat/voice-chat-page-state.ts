@@ -120,6 +120,7 @@ export interface VoiceChatData {
   replayButtonText: string;
   followUpButtonText: string;
   showSkipFollowUp: boolean;
+  showStageStatus: boolean;
   stageStatusClass: string;
   stageStatusText: string;
   liveDisplayText: string;
@@ -127,6 +128,7 @@ export interface VoiceChatData {
   liveScrollTarget: string;
   liveScrollTop: number;
   liveTextEndId: string;
+  showCaptureStrip: boolean;
   captureStripClass: string;
   showLiveCharCount: boolean;
   showInlineHelp: boolean;
@@ -243,6 +245,7 @@ export function initialVoiceChatData(): VoiceChatData {
     replayButtonText: "读给我听",
     followUpButtonText: "让小余问一句",
     showSkipFollowUp: false,
+    showStageStatus: true,
     stageStatusClass: "stage-status",
     stageStatusText: "可以开始讲了",
     liveDisplayText: "点下方“我来说一段”",
@@ -250,6 +253,7 @@ export function initialVoiceChatData(): VoiceChatData {
     liveScrollTarget: "",
     liveScrollTop: 0,
     liveTextEndId: "live-text-end",
+    showCaptureStrip: true,
     captureStripClass: "capture-strip",
     showLiveCharCount: false,
     showInlineHelp: false,
@@ -294,6 +298,7 @@ export type VoiceChatViewPatch = Pick<
   | "replayButtonText"
   | "followUpButtonText"
   | "showSkipFollowUp"
+  | "showStageStatus"
   | "stageStatusClass"
   | "stageStatusText"
   | "liveDisplayText"
@@ -301,6 +306,7 @@ export type VoiceChatViewPatch = Pick<
   | "liveScrollTarget"
   | "liveScrollTop"
   | "liveTextEndId"
+  | "showCaptureStrip"
   | "captureStripClass"
   | "showLiveCharCount"
   | "showInlineHelp"
@@ -340,6 +346,8 @@ export function voiceChatViewPatch(state: VoiceChatData): VoiceChatViewPatch {
     && Boolean(hasAssistantPrompt || state.followUpLoading || state.followUpError || state.canRequestFollowUp);
   const showHumanRecordActions = isHumanInterview && !state.recording && state.voiceAuthorizationAgreed;
   const showControlBar = !showHumanRecordActions;
+  const showStageStatus = !isHumanInterview || Boolean(state.error);
+  const showCaptureStrip = !isHumanInterview || state.recording;
   let stageStatusText = "可以开始讲了";
   if (state.error) {
     stageStatusText = "需要处理一下";
@@ -393,6 +401,12 @@ export function voiceChatViewPatch(state: VoiceChatData): VoiceChatViewPatch {
     micButtonText = "继续讲";
   }
   const pageClass = ["voice-chat-page"];
+  if (isHumanInterview) {
+    pageClass.push("human-interview");
+  }
+  if (isHumanInterview && state.recording) {
+    pageClass.push("human-recording-focus");
+  }
   if (!showControlBar) {
     pageClass.push("no-control-bar");
   }
@@ -430,6 +444,7 @@ export function voiceChatViewPatch(state: VoiceChatData): VoiceChatViewPatch {
     replayButtonText: state.followUpAudioFileId ? "重听一遍" : (state.followUpTTSError ? "重试朗读" : "读给我听"),
     followUpButtonText: state.followUpError ? "再问一次" : (state.assistantPromptText ? "换个问法" : "让小余问一句"),
     showSkipFollowUp: Boolean(state.assistantPromptText && !state.followUpLoading && !state.followUpError),
+    showStageStatus,
     stageStatusClass: state.error ? "stage-status error" : (state.recording ? "stage-status listening" : "stage-status"),
     stageStatusText,
     liveDisplayText,
@@ -437,6 +452,7 @@ export function voiceChatViewPatch(state: VoiceChatData): VoiceChatViewPatch {
     liveScrollTarget: state.liveScrollTarget,
     liveScrollTop: state.liveScrollTop,
     liveTextEndId: state.liveTextEndId,
+    showCaptureStrip,
     captureStripClass: state.recording ? "capture-strip active" : "capture-strip",
     showLiveCharCount: Boolean(state.recording && state.liveCharCount),
     showInlineHelp: Boolean(!isHumanInterview && state.recording && !state.liveText && state.canRequestFollowUp),

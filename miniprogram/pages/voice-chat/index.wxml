@@ -135,7 +135,7 @@
   </view>
 
   <view class="transcript-stage">
-    <text class="{{stageStatusClass}}">
+    <text wx:if="{{showStageStatus}}" class="{{stageStatusClass}}">
       {{stageStatusText}}
     </text>
     <scroll-view
@@ -147,7 +147,7 @@
       <text class="live-text">{{liveDisplayText}}</text>
       <view id="{{liveTextEndId}}" class="live-text-end"></view>
     </scroll-view>
-    <view class="{{captureStripClass}}">
+    <view wx:if="{{showCaptureStrip}}" class="{{captureStripClass}}">
       <view class="capture-dot"></view>
       <text wx:if="{{recording}}">已说 {{captureDurationText}}</text>
       <text wx:else>说完后点“说完了”，我会帮您整理成文字。</text>
