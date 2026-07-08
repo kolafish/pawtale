@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import uuid
 
@@ -60,8 +61,18 @@ async def mobile_memoir_voice_gateway(
         return
 
     persistence: VoiceGatewayPersistence | None = None
+    connection_id = str(uuid.uuid4())
+    diagnostics_context = {
+        "gateway": "memoir_voice_session",
+        "voice_session_id": voice_session_id,
+    }
     try:
         await websocket.accept()
+        _log_voice_gateway_router_event(
+            "websocket.accepted",
+            connection_id=connection_id,
+            **diagnostics_context,
+        )
         persistence = VoiceGatewayPersistence(
             db=db,
             voice_session_id=voice_session_id,
@@ -74,9 +85,24 @@ async def mobile_memoir_voice_gateway(
         async def on_stop(error_message: str | None) -> None:
             stop_error = error_message
             try:
-                await persistence.flush_unfinalized_audio()
+                flushed = await persistence.flush_unfinalized_audio()
+                if flushed:
+                    _log_voice_gateway_router_event(
+                        "unfinalized_audio.flushed",
+                        connection_id=connection_id,
+                        utterance_id=flushed.get("utterance_id") or "",
+                        audio_file_id=flushed.get("audio_file_id") or "",
+                        **diagnostics_context,
+                    )
             except Exception as exc:
                 stop_error = stop_error or str(exc)
+                _log_voice_gateway_router_event(
+                    "unfinalized_audio.flush_failed",
+                    connection_id=connection_id,
+                    level=logging.WARNING,
+                    error=str(exc),
+                    **diagnostics_context,
+                )
             await memoir_voice_sessions.stop_voice_session(
                 db,
                 voice_session_id,
@@ -95,6 +121,8 @@ async def mobile_memoir_voice_gateway(
             on_stop=on_stop,
             on_audio_frame=persistence.record_audio_frame,
             on_asr_final=persistence.persist_final,
+            connection_id=connection_id,
+            diagnostics_context=diagnostics_context,
         )
         await gateway_session.run()
     finally:
@@ -135,12 +163,19 @@ async def mobile_memoir_book_voice_command_gateway(
 
     try:
         await websocket.accept()
+        connection_id = str(uuid.uuid4())
         gateway_session = VoiceGatewaySession(
             client=websocket,
             asr_client_factory=lambda: create_volc_streaming_asr_client(
                 current_user_id,
                 transient_session_id,
             ),
+            connection_id=connection_id,
+            diagnostics_context={
+                "gateway": "book_voice_command",
+                "project_id": project_id,
+                "voice_session_id": transient_session_id,
+            },
         )
         await gateway_session.run()
     finally:
@@ -248,3 +283,11 @@ async def _reject_websocket(websocket: WebSocket, error: str) -> None:
         }
     )
     await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+
+
+def _log_voice_gateway_router_event(event: str, *, level: int = logging.INFO, **payload: object) -> None:
+    logger.log(
+        level,
+        "memoir_voice_gateway_router %s",
+        json.dumps({"event": event, **payload}, ensure_ascii=False, sort_keys=True, default=str),
+    )

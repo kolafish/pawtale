@@ -1018,6 +1018,97 @@ test("streaming ASR starts provider only after recording starts", async () => {
   delete global.wx;
 });
 
+test("streaming ASR emits diagnostics when socket send fails", async () => {
+  const recorder = recorderManagerHarness();
+  const diagnostics = [];
+  const errors = [];
+  let onOpen;
+  global.wx = {
+    getRecorderManager() {
+      return recorder;
+    },
+    getStorageSync(key) {
+      if (key === "pawtale_backend_config") {
+        return {
+          httpBaseUrl: "http://backend.local:8000",
+          wsBaseUrl: "ws://backend.local:8000",
+        };
+      }
+      if (key === "pawtale_backend_cookie") {
+        return "pawtale_session=abc";
+      }
+      return "";
+    },
+    getExtConfigSync() {
+      return {};
+    },
+    setStorageSync() {},
+    removeStorageSync() {},
+    request(options) {
+      options.success({ statusCode: 200, data: { id: "user-1" }, cookies: [], header: {} });
+    },
+    connectSocket() {
+      return {
+        onOpen(callback) {
+          onOpen = callback;
+        },
+        onMessage() {},
+        onError() {},
+        onClose() {},
+        send(options) {
+          const payload = JSON.parse(options.data);
+          if (payload.type === "audio.frame") {
+            options.fail({ errMsg: "request fail timeout" });
+          }
+        },
+        close() {},
+      };
+    },
+  };
+  delete require.cache[require.resolve("../services/request.ts")];
+  delete require.cache[require.resolve("../services/memoir-voice-api.ts")];
+  delete require.cache[require.resolve("../services/memoir-streaming-asr.ts")];
+  const { MemoirStreamingAsrClient } = require("../services/memoir-streaming-asr.ts");
+  const client = new MemoirStreamingAsrClient({
+    voiceSessionId: "voice-1",
+    guidanceMode: "free_narration",
+    callbacks: {
+      onStatus() {},
+      onClientEvent(event) {
+        diagnostics.push(event);
+      },
+      onEvent() {},
+      onPartial() {},
+      onFinal() {},
+      onError(message, error) {
+        errors.push({ message, error });
+      },
+    },
+  }, isolatedRecorderResource(recorder));
+
+  const connectPromise = client.connect();
+  await new Promise((resolve) => setImmediate(resolve));
+  onOpen({ errMsg: "connect:ok" });
+  await connectPromise;
+
+  assert.equal(client.startRecording(), true);
+  recorder.callbacks.start();
+  recorder.callbacks.frame({
+    frameBuffer: pcm16Frame(1024),
+    isLastFrame: false,
+  });
+
+  const sendFailure = diagnostics.find((event) => event.type === "socket_send_fail");
+  assert.ok(sendFailure);
+  assert.equal(sendFailure.nativeMessage, "request fail timeout");
+  assert.equal(sendFailure.gatewayEventType, "audio.frame");
+  assert.equal(sendFailure.frameCount, 1);
+  assert.equal(sendFailure.audioBytesSent, 3200);
+  assert.equal(errors[0].message, "request fail timeout");
+  assert.equal(errors[0].error.kind, "connection");
+  delete global.wx;
+});
+
 test("streaming ASR maps recorder privacy ban to setup guidance", () => {
   const recorder = recorderManagerHarness();
   const statuses = [];

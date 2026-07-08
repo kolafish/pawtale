@@ -4,7 +4,10 @@ import asyncio
 import base64
 import binascii
 import contextlib
+import json
 import logging
+import time
+import uuid
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Awaitable, Callable, Protocol
@@ -66,6 +69,8 @@ class VoiceGatewaySession:
         on_stop: SessionStopHandler | None = None,
         on_audio_frame: AudioFrameHandler | None = None,
         on_asr_final: ASRFinalHandler | None = None,
+        connection_id: str | None = None,
+        diagnostics_context: dict[str, Any] | None = None,
     ) -> None:
         self.client = client
         self.asr_client_factory = asr_client_factory
@@ -74,6 +79,8 @@ class VoiceGatewaySession:
         self.on_stop = on_stop
         self.on_audio_frame = on_audio_frame
         self.on_asr_final = on_asr_final
+        self.connection_id = connection_id or str(uuid.uuid4())
+        self._diagnostics_context = diagnostics_context or {}
         self._asr_client: StreamingASRClient | None = None
         self._asr_task: asyncio.Task[None] | None = None
         self._state = VoiceGatewayState.READY
@@ -82,8 +89,15 @@ class VoiceGatewaySession:
         self._pending_final_event: StreamingASREvent | None = None
         self._latest_text_event: StreamingASREvent | None = None
         self._turn_context = VoiceGatewayTurnContext()
+        self._started_at = time.monotonic()
+        self._turn_index = 0
+        self._frame_count = 0
+        self._audio_bytes = 0
+        self._asr_event_count = 0
+        self._asr_final_count = 0
 
     async def run(self) -> None:
+        self._log_diagnostic("session.ready")
         await self.client.send_json(self._event("session.ready"))
         stop_error: str | None = None
         try:
@@ -104,6 +118,11 @@ class VoiceGatewaySession:
             stop_error = stop_error or self._terminal_error
             await self._shutdown()
             self._state = VoiceGatewayState.FAILED if stop_error else VoiceGatewayState.STOPPED
+            self._log_diagnostic(
+                "session.stopping",
+                error=stop_error or "",
+                status="failed" if stop_error else "stopped",
+            )
             if self.on_stop:
                 await self.on_stop(stop_error)
             with contextlib.suppress(Exception):
@@ -148,6 +167,7 @@ class VoiceGatewaySession:
             return True
 
         await self._send_error("unsupported_gateway_event", {"received_type": message_type})
+        self._log_diagnostic("client.unsupported_event", level=logging.WARNING, received_type=message_type)
         return False
 
     async def _start_asr(self, message: dict[str, Any]) -> None:
@@ -167,6 +187,17 @@ class VoiceGatewaySession:
         self._state = VoiceGatewayState.LISTENING
         self._asr_client = self.asr_client_factory()
         await self._asr_client.start()
+        self._turn_index += 1
+        self._frame_count = 0
+        self._audio_bytes = 0
+        self._asr_event_count = 0
+        self._asr_final_count = 0
+        self._log_diagnostic(
+            "asr.started",
+            speaker_role=self._turn_context.speaker_role,
+            parent_message_id=self._turn_context.parent_message_id or "",
+            turn_index=self._turn_index,
+        )
         if self.on_turn_start:
             await self.on_turn_start(self._turn_context)
         if self.on_start:
@@ -210,6 +241,8 @@ class VoiceGatewaySession:
         if len(audio) > MAX_AUDIO_FRAME_BYTES:
             await self._mark_terminal_error("audio_frame_too_large", {"max_bytes": MAX_AUDIO_FRAME_BYTES})
             return
+        self._frame_count += 1
+        self._audio_bytes += len(audio)
         if self.on_audio_frame:
             try:
                 await self.on_audio_frame(audio)
@@ -224,12 +257,15 @@ class VoiceGatewaySession:
         if self._state != VoiceGatewayState.LISTENING or self._asr_client is None:
             return
         self._state = VoiceGatewayState.FINISHING
+        self._log_diagnostic("audio.end_received")
         await self._asr_client.finish()
+        self._log_diagnostic("asr.finish_sent")
         await self._drain_asr_events()
         if self._terminal_error is None:
             await self._persist_pending_final_event()
         if self._terminal_error is None:
             self._state = VoiceGatewayState.READY
+            self._log_diagnostic("audio.ended")
             await self.client.send_json(self._event("audio.ended"))
         await self._close_asr_client()
 
@@ -251,11 +287,16 @@ class VoiceGatewaySession:
             raise
         except Exception as exc:
             if self._state == VoiceGatewayState.FINISHING and _is_asr_provider_no_status_close(exc):
-                logger.info("Ignoring ASR provider no-status close during audio finish")
+                self._log_diagnostic(
+                    "asr.provider_no_status_close_ignored",
+                    provider_error=str(exc),
+                )
                 return
-            await self._mark_terminal_error(_asr_provider_exception_code(exc))
+            error_code = _asr_provider_exception_code(exc)
+            await self._mark_terminal_error(error_code, {"provider_error": str(exc)})
 
     async def _send_asr_event(self, event: StreamingASREvent) -> None:
+        self._asr_event_count += 1
         if event.type == "error":
             await self._mark_terminal_error(event.error or "asr_provider_error", event.raw)
             return
@@ -264,6 +305,8 @@ class VoiceGatewaySession:
             self._latest_text_event = event
 
         if event.type == "final":
+            self._asr_final_count += 1
+            self._log_diagnostic("asr.final_received", text_length=len(event.text or ""))
             self._pending_final_event = event
             await self.client.send_json(
                 self._asr_event_payload(
@@ -300,6 +343,13 @@ class VoiceGatewaySession:
         if persisted:
             payload.update(persisted)
         self._latest_text_event = None
+        self._log_diagnostic(
+            "asr.final_persisted",
+            text_length=len(text),
+            message_id=payload.get("message_id") or "",
+            utterance_id=payload.get("utterance_id") or "",
+            audio_file_id=payload.get("audio_file_id") or "",
+        )
         await self.client.send_json(payload)
         return payload
 
@@ -367,6 +417,12 @@ class VoiceGatewaySession:
             self._terminal_error = error
         self._state = VoiceGatewayState.FAILED
         self._terminal_stop.set()
+        self._log_diagnostic(
+            "session.error",
+            level=logging.WARNING,
+            error=error,
+            detail=detail or {},
+        )
         await self._send_error(error, detail)
 
     async def _shutdown(self) -> None:
@@ -399,6 +455,28 @@ class VoiceGatewaySession:
             "state": self._state.value,
             **payload,
         }
+
+    def _log_diagnostic(self, event: str, *, level: int = logging.INFO, **payload: Any) -> None:
+        diagnostic = {
+            **self._diagnostics_context,
+            "event": event,
+            "connection_id": self.connection_id,
+            "state": self._state.value,
+            "speaker_role": self._turn_context.speaker_role,
+            "parent_message_id": self._turn_context.parent_message_id or "",
+            "turn_index": self._turn_index,
+            "frame_count": self._frame_count,
+            "audio_bytes": self._audio_bytes,
+            "asr_event_count": self._asr_event_count,
+            "asr_final_count": self._asr_final_count,
+            "elapsed_ms": round((time.monotonic() - self._started_at) * 1000),
+            **payload,
+        }
+        logger.log(
+            level,
+            "memoir_voice_gateway %s",
+            json.dumps(diagnostic, ensure_ascii=False, sort_keys=True, default=str),
+        )
 
 
 def _asr_provider_exception_code(exc: Exception) -> str:
