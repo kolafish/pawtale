@@ -14,7 +14,7 @@ import {
   clientError,
   normalizeVoiceGatewayEvent,
 } from "./memoir-streaming-asr-protocol";
-import { WechatRecorderResource } from "./recorder-resource";
+import { sharedRecorderResource, WechatRecorderResource } from "./recorder-resource";
 import { VoiceActivityDetector } from "./voice-activity-detector";
 import { wechatRecorderErrorMessage } from "./wechat-privacy";
 
@@ -32,6 +32,7 @@ const STREAMING_ENCODE_BIT_RATE = 96000;
 const SOCKET_CONNECT_TIMEOUT_MS = 10000;
 const AUDIO_END_TIMEOUT_MS = 15000;
 const SESSION_STOP_TIMEOUT_MS = 8000;
+const RECORDER_START_TIMEOUT_MS = 4000;
 const DEFAULT_SILENCE_LEVEL_THRESHOLD = 0.015;
 const DEFAULT_MIN_AUTO_STOP_RECORDING_MS = 1200;
 const MIN_VOICE_ACTIVITY_MS = 240;
@@ -118,6 +119,7 @@ export class MemoirStreamingAsrClient {
   private noVoiceActivityTimeoutMs = 0;
   private gatewayState: VoiceGatewayState | undefined;
   private noVoiceActivityTimer: ReturnType<typeof setTimeout> | null = null;
+  private recorderStartTimer: ReturnType<typeof setTimeout> | null = null;
   private closePromise: Promise<void> | null = null;
   private waiters: Array<{
     eventType: string;
@@ -128,7 +130,7 @@ export class MemoirStreamingAsrClient {
 
   constructor(
     options: MemoirStreamingAsrOptions,
-    private readonly recorderResource: WechatRecorderResource = new WechatRecorderResource(),
+    private readonly recorderResource: WechatRecorderResource = sharedRecorderResource,
   ) {
     this.options = options;
     clientSerial += 1;
@@ -287,8 +289,10 @@ export class MemoirStreamingAsrClient {
         this.handleRecorderError("麦克风正在使用中");
         return false;
       }
+      this.startRecorderStartTimer();
       this.startNoVoiceActivityTimer();
     } catch (error) {
+      this.clearRecorderStartTimer();
       this.clearNoVoiceActivityTimer();
       const message = error instanceof Error ? error.message : "录音启动失败";
       this.handleRecorderError(message);
@@ -301,6 +305,7 @@ export class MemoirStreamingAsrClient {
     if (!this.recording) {
       return;
     }
+    this.clearRecorderStartTimer();
     this.clearNoVoiceActivityTimer();
     this.recording = false;
     this.options.callbacks.onStatus("stopping");
@@ -404,6 +409,7 @@ export class MemoirStreamingAsrClient {
     if (message && message !== readableMessage) {
       console.warn("recorder native error", message);
     }
+    this.clearRecorderStartTimer();
     this.recording = false;
     this.recorderStarted = false;
     this.clearNoVoiceActivityTimer();
@@ -424,6 +430,7 @@ export class MemoirStreamingAsrClient {
     if (activeClient !== this) {
       return;
     }
+    this.clearRecorderStartTimer();
     this.recorderStarted = true;
     if (!this.recording) {
       this.emitCaptureStats("stopping");
@@ -486,6 +493,7 @@ export class MemoirStreamingAsrClient {
   private stopRecorderAfterGatewayEnd(captureState: MemoirCaptureState): void {
     this.recording = false;
     this.acceptingFrames = false;
+    this.clearRecorderStartTimer();
     this.clearNoVoiceActivityTimer();
     if (this.recorderStarted) {
       this.recorderResource.stop(this.recorderOwnerId);
@@ -498,6 +506,7 @@ export class MemoirStreamingAsrClient {
     if (this.audioEndSent) {
       return;
     }
+    this.clearRecorderStartTimer();
     this.clearNoVoiceActivityTimer();
     this.audioEndSent = true;
     this.acceptingFrames = false;
@@ -552,6 +561,7 @@ export class MemoirStreamingAsrClient {
     this.closed = true;
     this.closePromise = null;
     this.rejectWaiters("语音连接已关闭");
+    this.clearRecorderStartTimer();
     this.clearNoVoiceActivityTimer();
     this.socketTask?.close({ code: 1000, reason: "voice chat closed" });
     this.socketTask = null;
@@ -618,6 +628,25 @@ export class MemoirStreamingAsrClient {
     if (this.noVoiceActivityTimer) {
       clearTimeout(this.noVoiceActivityTimer);
       this.noVoiceActivityTimer = null;
+    }
+  }
+
+  private startRecorderStartTimer(): void {
+    this.clearRecorderStartTimer();
+    this.recorderStartTimer = setTimeout(() => {
+      this.recorderStartTimer = null;
+      if (!this.recording || this.recorderStarted) {
+        return;
+      }
+      this.recorderResource.forceRelease(this.recorderOwnerId);
+      this.handleRecorderError("麦克风启动超时，请重新开始录音");
+    }, RECORDER_START_TIMEOUT_MS);
+  }
+
+  private clearRecorderStartTimer(): void {
+    if (this.recorderStartTimer) {
+      clearTimeout(this.recorderStartTimer);
+      this.recorderStartTimer = null;
     }
   }
 

@@ -65,6 +65,11 @@ function recorderManagerHarness() {
   };
 }
 
+function isolatedRecorderResource(recorder) {
+  const { WechatRecorderResource } = require("../services/recorder-resource.ts");
+  return new WechatRecorderResource(() => recorder);
+}
+
 function pcm16Frame(sample, byteLength = 3200) {
   const frame = new ArrayBuffer(byteLength);
   const view = new DataView(frame);
@@ -91,6 +96,25 @@ test("streaming ASR does not read constructor options from class field initializ
   assert.ok(constructorIndex > 0);
   assert.ok(assignOptionsIndex > constructorIndex);
   assert.ok(createDetectorIndex > assignOptionsIndex);
+});
+
+test("streaming ASR client defaults to the shared recorder resource", () => {
+  delete require.cache[require.resolve("../services/memoir-streaming-asr.ts")];
+  const { sharedRecorderResource } = require("../services/recorder-resource.ts");
+  const { MemoirStreamingAsrClient } = require("../services/memoir-streaming-asr.ts");
+  const client = new MemoirStreamingAsrClient({
+    voiceSessionId: "voice-1",
+    guidanceMode: "guided_interview",
+    callbacks: {
+      onStatus() {},
+      onEvent() {},
+      onPartial() {},
+      onFinal() {},
+      onError() {},
+    },
+  });
+
+  assert.equal(client.recorderResource, sharedRecorderResource);
 });
 
 test("encodes ArrayBuffer audio frames as base64", () => {
@@ -152,7 +176,7 @@ test("streaming ASR stops a late native recorder start after local recording sto
       onFinal() {},
       onError() {},
     },
-  });
+  }, isolatedRecorderResource(recorder));
   client.socketOpen = true;
 
   assert.equal(client.startRecording({ speakerRole: "interviewer" }), true);
@@ -163,6 +187,69 @@ test("streaming ASR stops a late native recorder start after local recording sto
 
   assert.equal(recorder.stops, 2);
   delete global.wx;
+});
+
+test("streaming ASR errors when native recorder never reports start", () => {
+  const recorder = recorderManagerHarness();
+  const originalSetTimeout = global.setTimeout;
+  const originalClearTimeout = global.clearTimeout;
+  const timers = [];
+  global.setTimeout = (callback, delay) => {
+    const timer = { callback, delay };
+    timers.push(timer);
+    return timer;
+  };
+  global.clearTimeout = () => {};
+  global.wx = {
+    getRecorderManager() {
+      return recorder;
+    },
+  };
+  delete require.cache[require.resolve("../services/memoir-streaming-asr.ts")];
+  const { MemoirStreamingAsrClient } = require("../services/memoir-streaming-asr.ts");
+  const statuses = [];
+  const errors = [];
+  const stats = [];
+  const client = new MemoirStreamingAsrClient({
+    voiceSessionId: "voice-1",
+    guidanceMode: "guided_interview",
+    callbacks: {
+      onStatus(status) {
+        statuses.push(status);
+      },
+      onCaptureStats(captureStats) {
+        stats.push(captureStats);
+      },
+      onEvent() {},
+      onPartial() {},
+      onFinal() {},
+      onError(message, error) {
+        errors.push({ message, error });
+      },
+    },
+  }, isolatedRecorderResource(recorder));
+  client.socketOpen = true;
+
+  try {
+    assert.equal(client.startRecording(), true);
+    const recorderStartTimer = timers.find((timer) => timer.delay === 4000);
+    assert.ok(recorderStartTimer);
+
+    recorderStartTimer.callback();
+
+    assert.equal(errors.length, 1);
+    assert.equal(errors[0].message, "麦克风启动超时，请重新开始录音");
+    assert.equal(errors[0].error.kind, "recorder");
+    assert.equal(statuses.at(-1), "error");
+    assert.equal(stats.at(-1).state, "error");
+
+    recorder.callbacks.start();
+    assert.equal(recorder.stops, 1);
+  } finally {
+    delete global.wx;
+    global.setTimeout = originalSetTimeout;
+    global.clearTimeout = originalClearTimeout;
+  }
 });
 
 test("normalizes invalid gateway payloads into session errors", () => {
@@ -905,7 +992,7 @@ test("streaming ASR starts provider only after recording starts", async () => {
       onFinal() {},
       onError() {},
     },
-  });
+  }, isolatedRecorderResource(recorder));
 
   const connectPromise = client.connect();
   await new Promise((resolve) => setImmediate(resolve));
@@ -1055,7 +1142,7 @@ test("streaming ASR stop before recorder start does not call recorder stop", asy
       onFinal() {},
       onError() {},
     },
-  });
+  }, isolatedRecorderResource(recorder));
 
   const connectPromise = client.connect();
   await new Promise((resolve) => setImmediate(resolve));
@@ -1130,7 +1217,7 @@ test("streaming ASR reports captured audio frame stats", async () => {
       onFinal() {},
       onError() {},
     },
-  });
+  }, isolatedRecorderResource(recorder));
 
   const connectPromise = client.connect();
   await new Promise((resolve) => setImmediate(resolve));
@@ -1218,7 +1305,7 @@ test("streaming ASR waits for voice before auto-stopping after silence", async (
       onFinal() {},
       onError() {},
     },
-  });
+  }, isolatedRecorderResource(recorder));
 
   const connectPromise = client.connect();
   await new Promise((resolve) => setImmediate(resolve));
@@ -1318,7 +1405,7 @@ test("streaming ASR auto-stops auto-listen when no voice answers", async () => {
       onFinal() {},
       onError() {},
     },
-  });
+  }, isolatedRecorderResource(recorder));
 
   const connectPromise = client.connect();
   await new Promise((resolve) => setImmediate(resolve));
@@ -1407,7 +1494,7 @@ test("streaming ASR no-answer timeout does not depend on silent frame callbacks"
       onFinal() {},
       onError() {},
     },
-  });
+  }, isolatedRecorderResource(recorder));
 
   const connectPromise = client.connect();
   await new Promise((resolve) => setImmediate(resolve));
@@ -1492,7 +1579,7 @@ test("streaming ASR close drains active audio before closing socket", async () =
       onFinal() {},
       onError() {},
     },
-  });
+  }, isolatedRecorderResource(recorder));
 
   const connectPromise = client.connect();
   await new Promise((resolve) => setImmediate(resolve));
@@ -1599,7 +1686,7 @@ test("streaming ASR stops recorder when gateway reports an error", async () => {
         errorInfos.push(errorInfo);
       },
     },
-  });
+  }, isolatedRecorderResource(recorder));
 
   const connectPromise = client.connect();
   await new Promise((resolve) => setImmediate(resolve));

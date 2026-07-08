@@ -46,6 +46,21 @@ test("debug speaker titles keep session-local speaker labels", () => {
   assert.equal(debugSpeakerTitle("speaker_unknown", 1), "未分辨说话人");
 });
 
+test("debug speaker client defaults to the shared recorder resource", () => {
+  clearModule("../services/debug-speaker-transcribe.ts");
+  const { sharedRecorderResource } = require("../services/recorder-resource.ts");
+  const { DebugSpeakerTranscribeClient } = require("../services/debug-speaker-transcribe.ts");
+
+  const client = new DebugSpeakerTranscribeClient({
+    onStatus: () => {},
+    onStats: () => {},
+    onSpeakerEvent: () => {},
+    onError: () => {},
+  });
+
+  assert.equal(client.recorderResource, sharedRecorderResource);
+});
+
 test("debug speaker client annotates speaker events with occurrence wall time", async () => {
   const socketHandlers = {};
   const originalNow = Date.now;
