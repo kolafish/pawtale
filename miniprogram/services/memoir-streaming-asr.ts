@@ -778,9 +778,26 @@ export class MemoirStreamingAsrClient {
           gatewayEventType: event.type,
           errorKind: "connection",
         });
-        this.options.callbacks.onError(message, clientError(message, "connection"));
+        this.failConnectionFromSendError(message);
       },
     });
+  }
+
+  private failConnectionFromSendError(message: string): void {
+    if (this.closed) {
+      return;
+    }
+    this.closed = true;
+    this.socketOpen = false;
+    this.rejectWaiters(message);
+    this.stopRecorderAfterGatewayEnd("error");
+    this.socketTask?.close({ code: 1000, reason: "voice socket send failed" });
+    this.socketTask = null;
+    if (activeClient === this) {
+      activeClient = null;
+    }
+    this.options.callbacks.onError(message, clientError(message, "connection"));
+    this.options.callbacks.onStatus("error");
   }
 }
 

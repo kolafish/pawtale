@@ -61,6 +61,7 @@ async def mobile_memoir_voice_gateway(
         return
 
     persistence: VoiceGatewayPersistence | None = None
+    discard_pending_audio = True
     connection_id = str(uuid.uuid4())
     diagnostics_context = {
         "gateway": "memoir_voice_session",
@@ -83,6 +84,7 @@ async def mobile_memoir_voice_gateway(
             await memoir_voice_sessions.mark_voice_session_listening(db, voice_session_id, current_user_id)
 
         async def on_stop(error_message: str | None) -> None:
+            nonlocal discard_pending_audio
             stop_error = error_message
             try:
                 flushed = await persistence.flush_unfinalized_audio()
@@ -96,11 +98,14 @@ async def mobile_memoir_voice_gateway(
                     )
             except Exception as exc:
                 stop_error = stop_error or str(exc)
+                discard_pending_audio = False
                 _log_voice_gateway_router_event(
                     "unfinalized_audio.flush_failed",
                     connection_id=connection_id,
                     level=logging.WARNING,
                     error=str(exc),
+                    pending_audio_path=str(persistence.pending_audio_path or ""),
+                    pending_audio_size_bytes=persistence.pending_audio_size_bytes,
                     **diagnostics_context,
                 )
             await memoir_voice_sessions.stop_voice_session(
@@ -127,8 +132,17 @@ async def mobile_memoir_voice_gateway(
         await gateway_session.run()
     finally:
         try:
-            if persistence is not None:
+            if persistence is not None and discard_pending_audio:
                 await persistence.discard_pending_audio()
+            elif persistence is not None and persistence.pending_audio_size_bytes:
+                _log_voice_gateway_router_event(
+                    "pending_audio.preserved",
+                    connection_id=connection_id,
+                    level=logging.WARNING,
+                    pending_audio_path=str(persistence.pending_audio_path or ""),
+                    pending_audio_size_bytes=persistence.pending_audio_size_bytes,
+                    **diagnostics_context,
+                )
         except Exception:
             logger.exception("Failed to discard pending memoir voice gateway audio")
         finally:

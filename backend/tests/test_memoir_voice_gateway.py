@@ -792,6 +792,109 @@ async def test_book_voice_command_gateway_uses_transient_realtime_session(monkey
     assert lease.released
 
 
+async def test_mobile_voice_gateway_preserves_pending_audio_when_stop_flush_fails(monkeypatch):
+    from app.routers.memoir import voice_gateway as voice_gateway_router
+
+    calls: dict[str, Any] = {"logs": []}
+
+    class FakeUser:
+        id = "user-1"
+
+    class FakeWebSocket:
+        def __init__(self) -> None:
+            self.accepted = False
+
+        async def accept(self) -> None:
+            self.accepted = True
+
+    async def fake_authenticate(websocket: Any, db: Any) -> FakeUser:
+        calls["auth"] = (websocket, db)
+        return FakeUser()
+
+    async def fake_get_voice_session_detail(db: Any, voice_session_id: str, user_id: str) -> object:
+        calls["detail"] = (db, voice_session_id, user_id)
+        return object()
+
+    async def fake_stop_voice_session(db: Any, voice_session_id: str, user_id: str, request: Any) -> object:
+        calls["stop"] = (db, voice_session_id, user_id, request.error_message)
+        return object()
+
+    class FakeLease:
+        def __init__(self) -> None:
+            self.released = False
+
+        async def release(self) -> None:
+            self.released = True
+
+    lease = FakeLease()
+
+    class FakeCapacityManager:
+        async def acquire(self, user_id: str, session_id: str) -> FakeLease:
+            calls["capacity"] = (user_id, session_id)
+            return lease
+
+    class FakePersistence:
+        pending_audio_path = "/tmp/recoverable.pcm.part"
+        pending_audio_size_bytes = 4096
+
+        def __init__(self, **kwargs: Any) -> None:
+            calls["persistence_kwargs"] = kwargs
+            self.discard_calls = 0
+            calls["persistence"] = self
+
+        async def set_turn_context(self, _context: Any) -> None:
+            return None
+
+        async def record_audio_frame(self, _audio: bytes) -> None:
+            return None
+
+        async def persist_final(self, _event: StreamingASREvent) -> dict[str, Any]:
+            return {}
+
+        async def flush_unfinalized_audio(self) -> dict[str, Any] | None:
+            raise RuntimeError("database unavailable")
+
+        async def discard_pending_audio(self) -> None:
+            self.discard_calls += 1
+
+    class FakeGatewaySession:
+        def __init__(self, **kwargs: Any) -> None:
+            calls["gateway_kwargs"] = kwargs
+
+        async def run(self) -> None:
+            await calls["gateway_kwargs"]["on_stop"](None)
+
+    def fake_log(event: str, **payload: Any) -> None:
+        calls["logs"].append({"event": event, **payload})
+
+    websocket = FakeWebSocket()
+    db = object()
+    monkeypatch.setattr(voice_gateway_router, "_authenticate_websocket", fake_authenticate)
+    monkeypatch.setattr(
+        voice_gateway_router.memoir_voice_sessions,
+        "get_voice_session_detail",
+        fake_get_voice_session_detail,
+    )
+    monkeypatch.setattr(voice_gateway_router.memoir_voice_sessions, "stop_voice_session", fake_stop_voice_session)
+    monkeypatch.setattr(voice_gateway_router, "voice_gateway_capacity_manager", FakeCapacityManager())
+    monkeypatch.setattr(voice_gateway_router, "VoiceGatewayPersistence", FakePersistence)
+    monkeypatch.setattr(voice_gateway_router, "VoiceGatewaySession", FakeGatewaySession)
+    monkeypatch.setattr(voice_gateway_router, "_log_voice_gateway_router_event", fake_log)
+
+    await voice_gateway_router.mobile_memoir_voice_gateway(websocket, "voice-1", db)
+
+    persistence = calls["persistence"]
+    assert websocket.accepted
+    assert persistence.discard_calls == 0
+    assert lease.released
+    assert calls["stop"] == (db, "voice-1", "user-1", "database unavailable")
+    assert calls["logs"][0]["event"] == "websocket.accepted"
+    assert calls["logs"][1]["event"] == "unfinalized_audio.flush_failed"
+    assert calls["logs"][1]["pending_audio_size_bytes"] == 4096
+    assert calls["logs"][2]["event"] == "pending_audio.preserved"
+    assert calls["logs"][2]["pending_audio_path"] == "/tmp/recoverable.pcm.part"
+
+
 async def test_voice_gateway_persistence_saves_final_message_utterance_and_audio(
     client,
     test_db,
@@ -1250,6 +1353,54 @@ async def test_voice_gateway_persistence_flushes_unfinalized_audio_from_pending_
     assert utterance is not None
     assert utterance.transcript_raw == ""
     assert utterance.provider_payload_json == {"source": "unfinalized_audio"}
+    assert not pending_path.exists()
+    assert persistence.pending_audio_path is None
+
+
+async def test_voice_gateway_persistence_keeps_pending_audio_when_final_persist_fails(
+    client,
+    test_db,
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr("app.services.memoir.audio_files.MEMOIR_AUDIO_DIR", tmp_path / "audio")
+    user_response = await client.get("/api/auth/me")
+    create_response = await post_mobile_memoir_voice_session(
+        client,
+        json={"guidance_mode": "free_narration"},
+    )
+    persistence = VoiceGatewayPersistence(
+        db=test_db,
+        voice_session_id=create_response.json()["session"]["id"],
+        user_id=user_response.json()["id"],
+    )
+    await persistence.record_audio_frame(b"recoverable-pcm")
+    pending_path = persistence.pending_audio_path
+    assert pending_path is not None
+
+    original_load_voice_session = persistence._service._load_voice_session
+
+    async def fail_load_voice_session():
+        raise RuntimeError("database unavailable")
+
+    monkeypatch.setattr(persistence._service, "_load_voice_session", fail_load_voice_session)
+    with pytest.raises(RuntimeError, match="database unavailable"):
+        await persistence.persist_final(
+            StreamingASREvent(type="final", text="这段本来已经识别出来。", raw={"source": "test"})
+        )
+
+    assert pending_path.exists()
+    assert pending_path.read_bytes() == b"recoverable-pcm"
+    assert persistence.pending_audio_path == pending_path
+    assert persistence.pending_audio_size_bytes == len(b"recoverable-pcm")
+
+    monkeypatch.setattr(persistence._service, "_load_voice_session", original_load_voice_session)
+    persisted = await persistence.flush_unfinalized_audio()
+
+    assert persisted is not None
+    audio_file = await test_db.scalar(select(AudioFile).where(AudioFile.id == persisted["audio_file_id"]))
+    assert audio_file is not None
+    assert (tmp_path / "audio" / audio_file.user_id / f"{audio_file.id}.pcm").read_bytes() == b"recoverable-pcm"
     assert not pending_path.exists()
     assert persistence.pending_audio_path is None
 
