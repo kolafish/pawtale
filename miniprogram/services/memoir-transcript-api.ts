@@ -59,6 +59,17 @@ export function updateMemoirVoiceTranscript(
   );
 }
 
+export function recoverMemoirVoiceTranscript(
+  utteranceId: string,
+): Promise<MemoirVoiceTranscriptItem> {
+  return memoirRequest<MemoirVoiceTranscriptItem>(
+    `/api/mobile/memoir/voice-transcripts/${encodeURIComponent(utteranceId)}/recover-transcription`,
+    {
+      method: "POST",
+    },
+  );
+}
+
 export function previewMemoirVoiceTranscriptVoiceEdit(
   utteranceId: string,
   instructionText: string,

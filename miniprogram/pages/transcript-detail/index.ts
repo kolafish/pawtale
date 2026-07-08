@@ -12,6 +12,7 @@ import {
   getMemoirVoiceTranscript,
   moveMemoirBookSource,
   previewMemoirVoiceTranscriptVoiceEdit,
+  recoverMemoirVoiceTranscript,
   updateMemoirVoiceTranscript,
 } from "../../services/memoir-voice-api";
 import { AudioPlaybackController } from "../../services/audio-playback";
@@ -87,6 +88,7 @@ interface TranscriptDetailData {
   needsLogin: boolean;
   saving: boolean;
   deleting: boolean;
+  recovering: boolean;
   assigning: boolean;
   moving: boolean;
   playing: boolean;
@@ -262,6 +264,7 @@ definePage<TranscriptDetailData>()({
     needsLogin: false,
     saving: false,
     deleting: false,
+    recovering: false,
     assigning: false,
     moving: false,
     playing: false,
@@ -403,6 +406,30 @@ definePage<TranscriptDetailData>()({
       this.setData({ error: error instanceof Error ? error.message : "保存失败" });
     } finally {
       this.setData({ saving: false });
+    }
+  },
+
+  async recoverTranscript() {
+    const item = this.data.item;
+    if (
+      !item ||
+      !item.canRecoverTranscription ||
+      this.data.recovering ||
+      this.data.saving ||
+      this.data.deleting
+    ) {
+      return;
+    }
+    this.setData({ recovering: true, error: "" });
+    try {
+      const recovered = await recoverMemoirVoiceTranscript(item.id);
+      this.setData({ item: toViewItem(recovered, this.data.bookPlan) });
+      trackAuditAction("transcript.detail_recover_transcription", {}, { projectId: recovered.project_id });
+      wx.showToast({ title: "已恢复转写", icon: "success" });
+    } catch (error) {
+      this.setData({ error: error instanceof Error ? error.message : "恢复转写失败" });
+    } finally {
+      this.setData({ recovering: false });
     }
   },
 

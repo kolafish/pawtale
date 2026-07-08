@@ -34,6 +34,16 @@
       <text class="book-status {{item.bookStatusClass}}">{{item.bookInclusionText}}</text>
       <view class="actions-row primary-actions">
         <button
+          wx:if="{{item.canRecoverTranscription}}"
+          class="primary-button"
+          bindtap="recoverTranscript"
+          loading="{{recovering}}"
+          disabled="{{recovering || saving || deleting}}"
+        >
+          {{recovering ? "转写中" : "恢复转写"}}
+        </button>
+        <button
+          wx:else
           class="primary-button"
           bindtap="beginEdit"
           disabled="{{saving || deleting || item.isEditing || item.canRecoverTranscription}}"

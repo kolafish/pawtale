@@ -112,6 +112,9 @@ function loadTranscriptDetailPage({ voiceApiExports = {}, voiceSearchExports = {
     previewMemoirVoiceTranscriptVoiceEdit: async () => {
       throw new Error("previewMemoirVoiceTranscriptVoiceEdit was not mocked");
     },
+    recoverMemoirVoiceTranscript: async () => {
+      throw new Error("recoverMemoirVoiceTranscript was not mocked");
+    },
     updateMemoirVoiceTranscript: async () => {
       throw new Error("updateMemoirVoiceTranscript was not mocked");
     },
@@ -159,6 +162,8 @@ test("transcript detail page loads a single transcript and chapter options", asy
 });
 
 test("transcript detail page shows saved audio awaiting transcription", async () => {
+  const recoverCalls = [];
+  const toasts = [];
   const { page } = loadTranscriptDetailPage({
     voiceApiExports: {
       getMemoirVoiceTranscript: async (id) => sampleTranscript(id, {
@@ -174,10 +179,29 @@ test("transcript detail page shows saved audio awaiting transcription", async ()
         transcription_status: "pending_transcription",
         can_recover_transcription: true,
       }),
+      recoverMemoirVoiceTranscript: async (id) => {
+        recoverCalls.push(id);
+        return sampleTranscript(id, {
+          transcript_raw: "爷爷退休后还在帮公司做事。",
+          display_text: "爷爷退休后还在帮公司做事。",
+          summary_title: "爷爷退休后仍帮公司做事",
+          summary_text: "讲述者提到爷爷退休后还在帮公司做事。",
+          summary_source: "source_card",
+          raw_char_count: 14,
+          display_char_count: 14,
+          transcription_status: "ready",
+          can_recover_transcription: false,
+        });
+      },
       getMemoirBookPlan: async () => sampleBookPlan(),
     },
   });
   const context = pageContext(page);
+  global.wx = {
+    showToast(options) {
+      toasts.push(options);
+    },
+  };
 
   await page.onLoad.call(context, { id: "utterance-pending" });
 
@@ -200,6 +224,15 @@ test("transcript detail page shows saved audio awaiting transcription", async ()
 
   await page.onLoad.call(context, { id: "utterance-pending", mode: "edit" });
   assert.equal(context.data.item.isEditing, false);
+
+  await page.recoverTranscript.call(context);
+
+  assert.deepEqual(recoverCalls, ["utterance-pending"]);
+  assert.equal(context.data.item.canRecoverTranscription, false);
+  assert.equal(context.data.item.titleText, "爷爷退休后仍帮公司做事");
+  assert.equal(context.data.item.displayCountText, "14 字");
+  assert.deepEqual(toasts, [{ title: "已恢复转写", icon: "success" }]);
+  delete global.wx;
 });
 
 test("transcript detail page labels human interviewer questions", async () => {
