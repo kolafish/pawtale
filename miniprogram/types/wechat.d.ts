@@ -7,6 +7,8 @@ declare function Page<TData extends object, TMethods extends object>(
     data: TData;
     onLoad?(query?: Record<string, string | undefined>): void | Promise<void>;
     onShow?(): void | Promise<void>;
+    onShareAppMessage?(option?: WechatMiniprogram.ShareAppMessageOption): WechatMiniprogram.ShareAppMessagePayload;
+    onShareTimeline?(): WechatMiniprogram.ShareTimelinePayload;
   } & ThisType<TMethods & { data: TData; setData(data: Partial<TData>): void }>
 ): void;
 
@@ -280,6 +282,34 @@ declare namespace WechatMiniprogram {
     complete?(result: GeneralCallbackResult): void;
   }
 
+  interface ShareAppMessageOption {
+    from: "button" | "menu";
+    target?: {
+      dataset?: Record<string, string | undefined>;
+    };
+    webViewUrl?: string;
+  }
+
+  interface ShareAppMessagePayload {
+    title: string;
+    path?: string;
+    imageUrl?: string;
+  }
+
+  interface ShareTimelinePayload {
+    title: string;
+    query?: string;
+    imageUrl?: string;
+  }
+
+  interface ShowShareMenuOption {
+    withShareTicket?: boolean;
+    menus?: Array<"shareAppMessage" | "shareTimeline">;
+    success?(result: GeneralCallbackResult): void;
+    fail?(result: GeneralCallbackResult): void;
+    complete?(result: GeneralCallbackResult): void;
+  }
+
   interface Wx {
     env: {
       USER_DATA_PATH: string;
@@ -294,6 +324,7 @@ declare namespace WechatMiniprogram {
     createWebAudioContext?(): WebAudioContext;
     getPrivacySetting?(option: PrivacySettingOption): void;
     requirePrivacyAuthorize?(option: PrivacyAuthorizeOption): void;
+    showShareMenu?(option: ShowShareMenuOption): void;
     setInnerAudioOption?(option: InnerAudioOption): void;
     navigateTo(option: NavigateOption): void;
     redirectTo(option: NavigateOption): void;

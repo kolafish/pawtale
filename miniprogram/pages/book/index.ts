@@ -92,6 +92,11 @@ import {
   syncVoiceAuthorizationConsent,
   VOICE_AUTHORIZATION_PAGE_URL,
 } from "../../services/voice-authorization";
+import {
+  bookShareAppMessage,
+  bookShareTimeline,
+  enableMiniProgramShareMenu,
+} from "../../services/share";
 import { ensureRecorderPrivacyAuthorization } from "../../services/wechat-privacy";
 import {
   applyBookTTSProgressPatch as applyBookTTSPlaybackProgressPatch,
@@ -358,8 +363,25 @@ definePage<BookData>()({
   },
 
   async onShow() {
+    enableMiniProgramShareMenu();
     this.bookGenerationPollAttempts = 0;
     await this.loadBookHome();
+  },
+
+  onShareAppMessage() {
+    return bookShareAppMessage({
+      projectTitle: this.data.projectTitle,
+      bookTitle: this.data.bookPreviewTitle || this.data.bookManuscriptTitle || this.data.planTitle,
+      hasBookContent: Boolean(this.data.bookContent),
+    });
+  },
+
+  onShareTimeline() {
+    return bookShareTimeline({
+      projectTitle: this.data.projectTitle,
+      bookTitle: this.data.bookPreviewTitle || this.data.bookManuscriptTitle || this.data.planTitle,
+      hasBookContent: Boolean(this.data.bookContent),
+    });
   },
 
   async loadBookHome() {

@@ -61,6 +61,22 @@ test("mini program opens on the browseable home tab", () => {
   assert.equal(appJson.pages[0], "pages/home/index");
 });
 
+test("home exposes mini program share entry points", () => {
+  const pageWxml = fs.readFileSync(path.join(__dirname, "../pages/home/index.wxml"), "utf8");
+  const { page } = loadHomePage();
+
+  assert.match(pageWxml, /open-type="share"/);
+  assert.match(pageWxml, /分享给家人/);
+  assert.deepEqual(page.onShareAppMessage(), {
+    title: "余主任留声机，把家里的故事慢慢讲下来",
+    path: "/pages/home/index?from=share_home",
+  });
+  assert.deepEqual(page.onShareTimeline(), {
+    title: "余主任留声机，把家里的故事慢慢讲下来",
+    query: "from=share_home",
+  });
+});
+
 test("home supports a local large text mode without changing the default class", () => {
   const loaded = loadHomePage({
     accessibilityExports: {
