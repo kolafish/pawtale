@@ -6,6 +6,7 @@ import {
   ChevronRight,
   Check,
   Clock3,
+  Copy,
   FileAudio,
   Link2,
   Loader2,
@@ -31,6 +32,7 @@ import type {
   MemoirDialectGlossaryEntry,
   MemoirInterviewEditorAnswer,
   MemoirInterviewEditorQuestion,
+  MemoirInterviewEditorReviewIssue,
   MemoirInterviewEditorSessionSummary,
   Project,
 } from '../../types';
@@ -94,6 +96,28 @@ function normalizeGlossaryEntries(entries: MemoirDialectGlossaryEntry[]) {
 
 function glossaryEquals(a: MemoirDialectGlossaryEntry[], b: MemoirDialectGlossaryEntry[]) {
   return JSON.stringify(normalizeGlossaryEntries(a)) === JSON.stringify(normalizeGlossaryEntries(b));
+}
+
+function reviewIssueClass(issue: MemoirInterviewEditorReviewIssue) {
+  if (issue.severity === 'warning') return 'bg-amber-50 text-amber-800';
+  if (issue.severity === 'error') return 'bg-red-50 text-red-700';
+  return 'bg-slate-100 text-gray-600';
+}
+
+async function writeClipboardText(text: string) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.style.position = 'fixed';
+  textarea.style.opacity = '0';
+  document.body.appendChild(textarea);
+  textarea.focus();
+  textarea.select();
+  document.execCommand('copy');
+  document.body.removeChild(textarea);
 }
 
 function SessionButton({
@@ -219,6 +243,7 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
   const [isAudioPlaying, setIsAudioPlaying] = useState(false);
   const [glossaryDraftOverride, setGlossaryDraftOverride] = useState<MemoirDialectGlossaryEntry[] | null>(null);
   const [cleanupPreviewItems, setCleanupPreviewItems] = useState<MemoirBatchTranscriptCleanupPreviewItem[]>([]);
+  const [copyReviewStatus, setCopyReviewStatus] = useState<'idle' | 'copied' | 'failed'>('idle');
 
   const sessionsQuery = useQuery({
     queryKey: ['memoirInterviewEditorSessions', project.id],
@@ -243,6 +268,12 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
     queryFn: () => memoirChapterSourceEditorApi.get(project.id),
   });
 
+  const reviewQuery = useQuery({
+    queryKey: ['memoirInterviewEditorReview', project.id, selectedSessionId],
+    queryFn: () => memoirInterviewEditorApi.getSessionReview(project.id, selectedSessionId as string),
+    enabled: Boolean(selectedSessionId),
+  });
+
   const glossaryQuery = useQuery({
     queryKey: ['memoirTranscriptCleanupGlossary', project.id],
     queryFn: () => memoirTranscriptCleanupApi.getGlossary(project.id),
@@ -250,6 +281,7 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
   const glossaryDraft = glossaryDraftOverride ?? glossaryQuery.data?.entries ?? [];
 
   const detail = detailQuery.data;
+  const review = reviewQuery.data;
   const chapterEditor = chapterSourceQuery.data;
   const chapterSourcesByUtterance = useMemo(
     () => sourceByUtterance(chapterEditor?.sources),
@@ -296,6 +328,7 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
         setSelectedAnswerOverride(nextAnswer.id);
       }
       queryClient.invalidateQueries({ queryKey: ['memoirInterviewEditorSession', project.id, selectedSessionId] });
+      queryClient.invalidateQueries({ queryKey: ['memoirInterviewEditorReview', project.id, selectedSessionId] });
       queryClient.invalidateQueries({ queryKey: ['memoirInterviewEditorSessions', project.id] });
       queryClient.invalidateQueries({ queryKey: ['memoirChapterSourceEditor', project.id] });
     },
@@ -308,6 +341,7 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
       setNewQuestionText('');
       setTargetQuestionId(data.questions[data.questions.length - 1]?.id ?? '');
       queryClient.setQueryData(['memoirInterviewEditorSession', project.id, selectedSessionId], data);
+      queryClient.invalidateQueries({ queryKey: ['memoirInterviewEditorReview', project.id, selectedSessionId] });
       queryClient.invalidateQueries({ queryKey: ['memoirInterviewEditorSessions', project.id] });
     },
   });
@@ -318,6 +352,7 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
     onSuccess: (data) => {
       setEditingQuestion(null);
       queryClient.setQueryData(['memoirInterviewEditorSession', project.id, selectedSessionId], data);
+      queryClient.invalidateQueries({ queryKey: ['memoirInterviewEditorReview', project.id, selectedSessionId] });
       queryClient.invalidateQueries({ queryKey: ['memoirInterviewEditorSessions', project.id] });
     },
   });
@@ -342,6 +377,7 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
       } else {
         queryClient.invalidateQueries({ queryKey: ['memoirInterviewEditorSession', project.id, selectedSessionId] });
       }
+      queryClient.invalidateQueries({ queryKey: ['memoirInterviewEditorReview', project.id, selectedSessionId] });
       queryClient.invalidateQueries({ queryKey: ['memoirInterviewEditorSessions', project.id] });
     },
   });
@@ -393,6 +429,7 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
     onSuccess: (data) => {
       queryClient.setQueryData(['memoirChapterSourceEditor', project.id], data);
       queryClient.invalidateQueries({ queryKey: ['memoirInterviewEditorSession', project.id, selectedSessionId] });
+      queryClient.invalidateQueries({ queryKey: ['memoirInterviewEditorReview', project.id, selectedSessionId] });
     },
   });
 
@@ -429,6 +466,7 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
       setCheckedAnswerIds([]);
       setDraft(null);
       queryClient.invalidateQueries({ queryKey: ['memoirInterviewEditorSession', project.id, selectedSessionId] });
+      queryClient.invalidateQueries({ queryKey: ['memoirInterviewEditorReview', project.id, selectedSessionId] });
       queryClient.invalidateQueries({ queryKey: ['memoirInterviewEditorSessions', project.id] });
       queryClient.invalidateQueries({ queryKey: ['memoirChapterSourceEditor', project.id] });
     },
@@ -446,6 +484,18 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
     if (!selectedAnswer || !canSave) return;
     saveMutation.mutate({ answerId: selectedAnswer.id, text: draftText.trim(), moveNext });
   };
+
+  const copyReviewMarkdown = useCallback(async () => {
+    if (!review?.markdown) return;
+    try {
+      await writeClipboardText(review.markdown);
+      setCopyReviewStatus('copied');
+      window.setTimeout(() => setCopyReviewStatus('idle'), 1600);
+    } catch {
+      setCopyReviewStatus('failed');
+      window.setTimeout(() => setCopyReviewStatus('idle'), 2400);
+    }
+  }, [review]);
 
   const confirmDiscardDraft = useCallback(() => (
     !hasUnsavedChanges || window.confirm('当前文字尚未保存，确定切换吗？')
@@ -700,6 +750,7 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
                   sessionsQuery.refetch();
                   if (selectedSessionId) {
                     detailQuery.refetch();
+                    reviewQuery.refetch();
                   }
                   chapterSourceQuery.refetch();
                 }}
@@ -707,7 +758,7 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
               >
                 <RefreshCw
                   size={15}
-                  className={sessionsQuery.isFetching || detailQuery.isFetching || chapterSourceQuery.isFetching ? 'animate-spin' : ''}
+                  className={sessionsQuery.isFetching || detailQuery.isFetching || reviewQuery.isFetching || chapterSourceQuery.isFetching ? 'animate-spin' : ''}
                 />
                 刷新
               </button>
@@ -727,6 +778,68 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
               </div>
             ) : detail ? (
               <>
+                <section className="space-y-3 border-b border-slate-100 pb-5">
+                  <div className="flex flex-col gap-3 rounded-lg bg-slate-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 text-sm font-medium text-gray-900">
+                        <Check size={15} className={review?.issues.length ? 'text-amber-600' : 'text-emerald-600'} />
+                        整理检查
+                        {reviewQuery.isFetching && <Loader2 size={14} className="animate-spin text-gray-400" />}
+                      </div>
+                      <div className="mt-2 flex flex-wrap gap-2 text-[11px]">
+                        <span className="rounded-md bg-white px-2 py-1 text-gray-600 tabular-nums">
+                          问题 {review?.question_count ?? detail.session.question_count}
+                        </span>
+                        <span className="rounded-md bg-white px-2 py-1 text-gray-600 tabular-nums">
+                          回答 {review?.answer_count ?? detail.session.answer_count}
+                        </span>
+                        <span className={`rounded-md px-2 py-1 tabular-nums ${
+                          (review?.unassigned_answer_count ?? detail.session.unassigned_answer_count) > 0
+                            ? 'bg-amber-100 text-amber-800'
+                            : 'bg-white text-gray-600'
+                        }`}
+                        >
+                          未归属 {review?.unassigned_answer_count ?? detail.session.unassigned_answer_count}
+                        </span>
+                        <span className={`rounded-md px-2 py-1 tabular-nums ${
+                          (review?.not_included_answer_count ?? 0) > 0
+                            ? 'bg-slate-100 text-gray-600'
+                            : 'bg-white text-gray-600'
+                        }`}
+                        >
+                          未归章 {review?.not_included_answer_count ?? 0}
+                        </span>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={!review?.markdown}
+                      onClick={copyReviewMarkdown}
+                      className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-slate-900 px-3 text-sm font-medium text-white transition-[background-color,opacity,transform] hover:bg-slate-700 active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {copyReviewStatus === 'copied' ? <Check size={15} /> : <Copy size={15} />}
+                      {copyReviewStatus === 'copied' ? '已复制' : '复制整理稿'}
+                    </button>
+                  </div>
+                  {copyReviewStatus === 'failed' && (
+                    <div className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">整理稿复制失败。</div>
+                  )}
+                  {review?.issues.length ? (
+                    <div className="flex flex-wrap gap-2">
+                      {review.issues.map((issue) => (
+                        <span key={issue.code} className={`rounded-lg px-3 py-2 text-xs ${reviewIssueClass(issue)}`}>
+                          {issue.message}
+                          {issue.count > 0 ? ` ${issue.count}` : ''}
+                        </span>
+                      ))}
+                    </div>
+                  ) : review && (
+                    <div className="rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+                      当前整理稿没有发现明显结构问题。
+                    </div>
+                  )}
+                </section>
+
                 <section className="space-y-3 border-b border-slate-100 pb-5">
                   <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
                     <div className="min-w-0 flex-1">
