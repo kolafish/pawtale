@@ -1,8 +1,9 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   AlertCircle,
   BookOpen,
+  ChevronRight,
   Check,
   Clock3,
   FileAudio,
@@ -10,9 +11,13 @@ import {
   Loader2,
   MessageSquareText,
   Pencil,
+  Pause,
+  Play,
   Plus,
   RefreshCw,
   Save,
+  SkipBack,
+  SkipForward,
   Unlink,
   UserRound,
   X,
@@ -30,6 +35,8 @@ import type {
 interface MemoirInterviewEditorProps {
   project: Project;
 }
+
+const PLAYBACK_RATES = [0.75, 1, 1.25, 1.5];
 
 function formatDateTime(value?: string | null) {
   if (!value) return '无时间';
@@ -175,6 +182,7 @@ function AnswerRow({
 
 export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
   const queryClient = useQueryClient();
+  const audioRef = useRef<HTMLAudioElement | null>(null);
   const [selectedSessionOverride, setSelectedSessionOverride] = useState<string | null>(null);
   const [selectedAnswerOverride, setSelectedAnswerOverride] = useState<string | null>(null);
   const [draft, setDraft] = useState<{ answerId: string; text: string } | null>(null);
@@ -183,6 +191,8 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
   const [targetChapterId, setTargetChapterId] = useState('');
   const [newQuestionText, setNewQuestionText] = useState('');
   const [editingQuestion, setEditingQuestion] = useState<{ id: string; text: string } | null>(null);
+  const [playbackRate, setPlaybackRate] = useState(1);
+  const [isAudioPlaying, setIsAudioPlaying] = useState(false);
 
   const sessionsQuery = useQuery({
     queryKey: ['memoirInterviewEditorSessions', project.id],
@@ -223,6 +233,8 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
       : answers[0]?.id
   ) ?? null;
   const selectedAnswer = answers.find((answer) => answer.id === selectedAnswerId) ?? null;
+  const selectedAnswerIndex = selectedAnswer ? answers.findIndex((answer) => answer.id === selectedAnswer.id) : -1;
+  const nextAnswer = selectedAnswerIndex >= 0 ? answers[selectedAnswerIndex + 1] ?? null : null;
   const checkedAnswers = answers.filter((answer) => checkedAnswerIds.includes(answer.id));
   const checkedAnswerMessageIds = checkedAnswers.map((answer) => answer.message_id);
   const chapterSelectedAnswers = checkedAnswers.length > 0 ? checkedAnswers : selectedAnswer ? [selectedAnswer] : [];
@@ -242,10 +254,13 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
     : '';
 
   const saveMutation = useMutation({
-    mutationFn: ({ answerId, text }: { answerId: string; text: string }) =>
+    mutationFn: ({ answerId, text }: { answerId: string; text: string; moveNext?: boolean }) =>
       memoirInterviewEditorApi.updateAnswerTranscript(answerId, text),
-    onSuccess: () => {
+    onSuccess: (_data, variables) => {
       setDraft(null);
+      if (variables.moveNext && nextAnswer) {
+        setSelectedAnswerOverride(nextAnswer.id);
+      }
       queryClient.invalidateQueries({ queryKey: ['memoirInterviewEditorSession', project.id, selectedSessionId] });
       queryClient.invalidateQueries({ queryKey: ['memoirInterviewEditorSessions', project.id] });
       queryClient.invalidateQueries({ queryKey: ['memoirChapterSourceEditor', project.id] });
@@ -353,11 +368,96 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
     && draft.text !== selectedAnswer.display_text,
   );
   const canSave = Boolean(selectedAnswer && draftText.trim() && hasUnsavedChanges && !saveMutation.isPending);
+  const canSaveAndNext = Boolean(canSave && nextAnswer);
 
-  const handleSave = () => {
+  const handleSave = (moveNext = false) => {
     if (!selectedAnswer || !canSave) return;
-    saveMutation.mutate({ answerId: selectedAnswer.id, text: draftText.trim() });
+    saveMutation.mutate({ answerId: selectedAnswer.id, text: draftText.trim(), moveNext });
   };
+
+  const confirmDiscardDraft = useCallback(() => (
+    !hasUnsavedChanges || window.confirm('当前文字尚未保存，确定切换吗？')
+  ), [hasUnsavedChanges]);
+
+  const selectAnswer = useCallback((answerId: string) => {
+    if (!confirmDiscardDraft()) return;
+    setSelectedAnswerOverride(answerId);
+    setDraft(null);
+  }, [confirmDiscardDraft]);
+
+  const seekAudioBy = useCallback((seconds: number) => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    audio.currentTime = Math.min(
+      Math.max(0, audio.currentTime + seconds),
+      Number.isFinite(audio.duration) ? audio.duration : audio.currentTime + seconds,
+    );
+  }, []);
+
+  const toggleAudioPlayback = useCallback(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (audio.paused) {
+      audio.play().catch(() => {
+        setIsAudioPlaying(false);
+      });
+    } else {
+      audio.pause();
+    }
+  }, []);
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    audio.playbackRate = playbackRate;
+  }, [playbackRate, selectedAnswer?.audio_file_id]);
+
+  useEffect(() => {
+    if (!hasUnsavedChanges) return;
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [hasUnsavedChanges]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') {
+        event.preventDefault();
+        if (selectedAnswer && canSave) {
+          saveMutation.mutate({ answerId: selectedAnswer.id, text: draftText.trim(), moveNext: false });
+        }
+        return;
+      }
+      if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+        event.preventDefault();
+        if (selectedAnswer && canSave) {
+          saveMutation.mutate({ answerId: selectedAnswer.id, text: draftText.trim(), moveNext: true });
+        }
+        return;
+      }
+      const target = event.target as HTMLElement | null;
+      const isTextEditingTarget = target instanceof HTMLInputElement
+        || target instanceof HTMLTextAreaElement
+        || Boolean(target?.isContentEditable);
+      if (isTextEditingTarget) return;
+      if (!event.altKey) return;
+      if (event.key === 'ArrowLeft') {
+        event.preventDefault();
+        seekAudioBy(-3);
+      } else if (event.key === 'ArrowRight') {
+        event.preventDefault();
+        seekAudioBy(3);
+      } else if (event.key === ' ') {
+        event.preventDefault();
+        toggleAudioPlayback();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [canSave, draftText, saveMutation, seekAudioBy, selectedAnswer, toggleAudioPlayback]);
 
   const toggleAnswerChecked = (answerId: string) => {
     setCheckedAnswerIds((ids) => (
@@ -474,6 +574,7 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
                       session={session}
                       selected={session.id === selectedSessionId}
                       onSelect={() => {
+                        if (!confirmDiscardDraft()) return;
                         setSelectedSessionOverride(session.id);
                         setSelectedAnswerOverride(null);
                         setDraft(null);
@@ -684,8 +785,7 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
                               ?? answer.included_chapters[0]?.title
                             }
                             onSelect={() => {
-                              setSelectedAnswerOverride(answer.id);
-                              setDraft(null);
+                              selectAnswer(answer.id);
                             }}
                             onToggleChecked={() => toggleAnswerChecked(answer.id)}
                           />
@@ -717,8 +817,7 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
                             ?? answer.included_chapters[0]?.title
                           }
                           onSelect={() => {
-                            setSelectedAnswerOverride(answer.id);
-                            setDraft(null);
+                            selectAnswer(answer.id);
                           }}
                           onToggleChecked={() => toggleAnswerChecked(answer.id)}
                         />
@@ -751,13 +850,67 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
                     </span>
                   </div>
                   {selectedAnswer.audio_file_id ? (
-                    <audio
-                      key={selectedAnswer.audio_file_id}
-                      controls
-                      preload="metadata"
-                      className="h-10 w-full"
-                      src={memoirInterviewEditorApi.audioPlaybackUrl(selectedAnswer.audio_file_id)}
-                    />
+                    <>
+                      <audio
+                        ref={audioRef}
+                        key={selectedAnswer.audio_file_id}
+                        controls
+                        preload="metadata"
+                        className="h-10 w-full"
+                        src={memoirInterviewEditorApi.audioPlaybackUrl(selectedAnswer.audio_file_id)}
+                        onLoadedMetadata={(event) => {
+                          event.currentTarget.playbackRate = playbackRate;
+                          setIsAudioPlaying(false);
+                        }}
+                        onPlay={() => setIsAudioPlaying(true)}
+                        onPause={() => setIsAudioPlaying(false)}
+                        onEnded={() => setIsAudioPlaying(false)}
+                      />
+                      <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+                        <div className="inline-flex rounded-lg bg-white shadow-[0_1px_8px_rgba(15,23,42,0.06)]">
+                          <button
+                            type="button"
+                            onClick={() => seekAudioBy(-3)}
+                            className="inline-flex h-9 w-10 items-center justify-center rounded-l-lg text-gray-600 transition-[background-color,transform] hover:bg-slate-100 active:scale-[0.96]"
+                            title="后退 3 秒"
+                          >
+                            <SkipBack size={15} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={toggleAudioPlayback}
+                            className="inline-flex h-9 w-10 items-center justify-center border-x border-slate-100 text-gray-700 transition-[background-color,transform] hover:bg-slate-100 active:scale-[0.96]"
+                            title={isAudioPlaying ? '暂停' : '播放'}
+                          >
+                            {isAudioPlaying ? <Pause size={15} /> : <Play size={15} />}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => seekAudioBy(3)}
+                            className="inline-flex h-9 w-10 items-center justify-center rounded-r-lg text-gray-600 transition-[background-color,transform] hover:bg-slate-100 active:scale-[0.96]"
+                            title="前进 3 秒"
+                          >
+                            <SkipForward size={15} />
+                          </button>
+                        </div>
+                        <div className="inline-flex rounded-lg bg-slate-100 p-0.5">
+                          {PLAYBACK_RATES.map((rate) => (
+                            <button
+                              key={rate}
+                              type="button"
+                              onClick={() => setPlaybackRate(rate)}
+                              className={`h-8 rounded-md px-2 text-xs tabular-nums transition-[background-color,color,transform] active:scale-[0.96] ${
+                                playbackRate === rate
+                                  ? 'bg-white text-gray-900 shadow-[0_1px_4px_rgba(15,23,42,0.08)]'
+                                  : 'text-gray-500 hover:text-gray-800'
+                              }`}
+                            >
+                              {rate}x
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </>
                   ) : (
                     <div className="rounded-lg bg-white px-3 py-3 text-sm text-gray-500">这段回答没有音频文件。</div>
                   )}
@@ -911,15 +1064,30 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
                   {saveMutation.isError && (
                     <div className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">保存失败，请稍后重试。</div>
                   )}
-                  <button
-                    type="button"
-                    onClick={handleSave}
-                    disabled={!canSave}
-                    className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 text-sm font-medium text-white transition-[background-color,opacity,transform] hover:bg-emerald-700 active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    {saveMutation.isPending ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
-                    保存文字
-                  </button>
+                  {hasUnsavedChanges && (
+                    <div className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">有未保存修改。</div>
+                  )}
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleSave(false)}
+                      disabled={!canSave}
+                      className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-emerald-600 px-3 text-sm font-medium text-white transition-[background-color,opacity,transform] hover:bg-emerald-700 active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {saveMutation.isPending && !saveMutation.variables?.moveNext ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
+                      保存
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleSave(true)}
+                      disabled={!canSaveAndNext}
+                      className="inline-flex h-10 items-center justify-center gap-1.5 rounded-lg bg-slate-900 px-3 text-sm font-medium text-white transition-[background-color,opacity,transform] hover:bg-slate-700 active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {saveMutation.isPending && saveMutation.variables?.moveNext ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
+                      <span className="min-w-0 truncate">保存并下一段</span>
+                      <ChevronRight size={15} />
+                    </button>
+                  </div>
                 </div>
               </div>
             ) : (
