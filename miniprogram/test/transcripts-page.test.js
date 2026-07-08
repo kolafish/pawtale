@@ -409,6 +409,70 @@ test("transcripts page uses summary fields for browse cards", async () => {
   assert.equal(context.data.items[0].editButtonDisabled, false);
 });
 
+test("transcripts page shows saved audio awaiting transcription", async () => {
+  const { page } = loadTranscriptsPage({
+    authExports: {
+      getMemoirIdentity: async () => ({
+        id: "user-1",
+        active_project_id: "project-1",
+        active_project: { id: "project-1", title: "我的回忆录" },
+        projects: [],
+      }),
+    },
+    voiceApiExports: {
+      listMemoirVoiceTranscripts: async () => ({
+        items: [
+          {
+            ...sampleTranscript("utterance-pending", "2026-07-01T07:38:00.000Z"),
+            transcript_raw: "",
+            transcript_edited: "",
+            display_text: "",
+            summary_title: "音频已保存，等待转写",
+            summary_text: "这段录音已经保存，但还没有识别成文字。",
+            summary_source: "pending_transcription",
+            raw_char_count: 0,
+            edited_char_count: 0,
+            display_char_count: 0,
+            transcription_status: "pending_transcription",
+            can_recover_transcription: true,
+          },
+        ],
+        total: 1,
+        limit: 30,
+        offset: 0,
+      }),
+    },
+  });
+  const context = pageContext(page);
+
+  await page.loadTranscripts.call(context, true);
+
+  const item = context.data.items[0];
+  assert.equal(item.summaryTitleText, "音频已保存，等待转写");
+  assert.equal(item.summaryPreviewText, "这段录音已经保存，但还没有识别成文字。");
+  assert.equal(item.transcriptionStatusText, "音频已保存");
+  assert.equal(item.recordCountText, "待转写");
+  assert.equal(item.recordCountClass, "record-count pending");
+  assert.equal(item.bookInclusionText, "等待转写后再入章");
+  assert.equal(item.bookStatusClass, "book-status pending");
+  assert.equal(item.cardClass, "transcript-card recovery-pending");
+  assert.equal(item.canAssignChapterSource, false);
+  assert.equal(item.canMoveChapterSource, false);
+  assert.equal(item.editButtonDisabled, true);
+
+  const navigations = [];
+  global.wx = {
+    navigateTo(options) {
+      navigations.push(options.url);
+    },
+  };
+  page.openTranscriptEdit.call(context, {
+    currentTarget: { dataset: { id: "utterance-pending" } },
+  });
+  assert.deepEqual(navigations, []);
+  delete global.wx;
+});
+
 test("transcripts page deletes a record from the first-screen list action", async () => {
   const deleted = [];
   const modals = [];

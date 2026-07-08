@@ -30,12 +30,13 @@
     <view class="hero-panel">
       <text class="record-title">{{item.titleText}}</text>
       <text class="record-meta">{{item.recordMetaText}}</text>
-      <text class="book-status {{item.isIncludedInBook ? 'included' : ''}}">{{item.bookInclusionText}}</text>
+      <text wx:if="{{item.transcriptionNoticeText}}" class="transcription-notice">{{item.transcriptionNoticeText}}</text>
+      <text class="book-status {{item.bookStatusClass}}">{{item.bookInclusionText}}</text>
       <view class="actions-row primary-actions">
         <button
           class="primary-button"
           bindtap="beginEdit"
-          disabled="{{saving || deleting || item.isEditing}}"
+          disabled="{{saving || deleting || item.isEditing || item.canRecoverTranscription}}"
         >
           编辑成书文字
         </button>
@@ -88,7 +89,7 @@
           <text class="section-title">成书文字</text>
           <text class="section-hint">这段会用于章节正文</text>
         </view>
-        <text class="section-count">{{item.display_char_count}} 字</text>
+        <text class="section-count">{{item.displayCountText}}</text>
       </view>
       <text class="body-text display-text">
         <text
@@ -172,7 +173,7 @@
           <text class="section-title">原始讲述</text>
           <text class="section-hint">根据录音识别，保留口述痕迹</text>
         </view>
-        <text class="section-count">{{item.raw_char_count}} 字</text>
+        <text class="section-count">{{item.rawCountText}}</text>
       </view>
       <text class="body-text raw-text">
         <text
@@ -184,7 +185,7 @@
       </text>
     </view>
 
-    <view wx:if="{{!item.isEditing}}" class="section-card edit-tools-card">
+    <view wx:if="{{!item.isEditing && !item.canRecoverTranscription}}" class="section-card edit-tools-card">
       <view class="section-head">
         <view class="section-heading">
           <text class="section-title">修改这段文字</text>

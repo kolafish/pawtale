@@ -318,6 +318,8 @@ export interface MemoirVoiceTranscriptItem {
   summary_title: string;
   summary_text: string;
   summary_source: string;
+  transcription_status?: string;
+  can_recover_transcription?: boolean;
   raw_char_count: number;
   edited_char_count: number;
   display_char_count: number;

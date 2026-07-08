@@ -85,9 +85,10 @@
       <view class="record-main">
         <text class="record-title">{{item.summaryTitleText}}</text>
         <text class="record-meta">{{item.recordMetaText}}</text>
+        <text wx:if="{{item.transcriptionStatusText}}" class="transcription-status">{{item.transcriptionStatusText}}</text>
         <text class="{{item.bookStatusClass}}">{{item.bookInclusionText}}</text>
       </view>
-      <text class="record-count">{{item.display_char_count}} 字</text>
+      <text class="{{item.recordCountClass}}">{{item.recordCountText}}</text>
     </view>
 
     <text class="summary-preview">

@@ -39,6 +39,7 @@ from app.services.memoir.voice_transcripts import (
     _remove_obvious_oral_fillers,
     generate_cleaned_transcript_text,
 )
+from app.services.memoir.voice_gateway_persistence import VoiceGatewayPersistence
 from app.services.memoir.utterance_editing_pipeline import (
     ROUTE_PAYLOAD_SOURCE_TEXT_HASHES_KEY,
     ROUTE_PAYLOAD_TRANSCRIPT_VERSION_IDS_KEY,
@@ -404,11 +405,63 @@ async def test_mobile_memoir_lists_saved_voice_transcripts(client, test_db):
     assert item["summary_title"] == "嗯，我小时候就是住在外婆家。"
     assert item["summary_text"] == "嗯，我小时候就是住在外婆家。"
     assert item["summary_source"] == "fallback"
+    assert item["transcription_status"] == "ready"
+    assert item["can_recover_transcription"] is False
     assert item["display_char_count"] == len("嗯，我小时候就是住在外婆家。")
     assert item["is_included_in_book"] is False
     assert item["included_chapters"] == []
     assert item["created_at"].endswith(UTC_SUFFIXES)
     assert item["session_created_at"].endswith(UTC_SUFFIXES)
+
+
+async def test_mobile_memoir_lists_unfinalized_audio_for_transcription_recovery(
+    client,
+    test_db,
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr("app.services.memoir.audio_files.MEMOIR_AUDIO_DIR", tmp_path / "audio")
+    user = (await client.get("/api/auth/me")).json()
+    create_response = await post_mobile_memoir_voice_session(
+        client,
+        json={"guidance_mode": "free_narration", "provider": "volc_streaming_asr"},
+    )
+    assert create_response.status_code == 201
+    session = create_response.json()["session"]
+    persistence = VoiceGatewayPersistence(
+        db=test_db,
+        voice_session_id=session["id"],
+        user_id=user["id"],
+    )
+
+    await persistence.record_audio_frame(b"lost-audio-pcm")
+    persisted = await persistence.flush_unfinalized_audio()
+    assert persisted is not None
+
+    response = await client.get("/api/mobile/memoir/voice-transcripts")
+    detail_response = await client.get(f"/api/mobile/memoir/voice-transcripts/{persisted['utterance_id']}")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["total"] == 1
+    item = data["items"][0]
+    assert item["id"] == persisted["utterance_id"]
+    assert item["audio_file_id"] == persisted["audio_file_id"]
+    assert item["audio_size_bytes"] == len(b"lost-audio-pcm")
+    assert item["transcript_raw"] == ""
+    assert item["display_text"] == ""
+    assert item["display_char_count"] == 0
+    assert item["summary_title"] == "音频已保存，等待转写"
+    assert item["summary_text"] == "这段录音已经保存，但还没有识别成文字。"
+    assert item["summary_source"] == "pending_transcription"
+    assert item["transcription_status"] == "pending_transcription"
+    assert item["can_recover_transcription"] is True
+
+    assert detail_response.status_code == 200
+    detail = detail_response.json()
+    assert detail["id"] == persisted["utterance_id"]
+    assert detail["transcription_status"] == "pending_transcription"
+    assert detail["can_recover_transcription"] is True
 
 
 async def test_mobile_memoir_groups_paired_human_interview_transcripts(client, test_db):
