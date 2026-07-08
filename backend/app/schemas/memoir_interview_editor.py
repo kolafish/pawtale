@@ -6,10 +6,12 @@ from pydantic import BaseModel, Field, field_validator
 
 from app.domain.memoir.types import (
     MemoirChatMessageRole,
+    MemoirCreatedBy,
     MemoirGuidanceMode,
     MemoirInterviewType,
     MemoirVoiceSessionStatus,
 )
+from app.schemas.memoir_voice import MemoirVoiceTranscriptItemResponse
 from app.schemas.memoir_book import MemoirBookSourceIncludedChapter
 
 
@@ -144,3 +146,133 @@ class MemoirInterviewEditorAnswerParentUpdateRequest(BaseModel):
             return None
         normalized = value.strip()
         return normalized or None
+
+
+class MemoirDialectGlossaryEntry(BaseModel):
+    source: str = Field(min_length=1, max_length=80)
+    target: str = Field(min_length=1, max_length=80)
+    note: str | None = Field(default=None, max_length=160)
+
+    @field_validator("source", "target")
+    @classmethod
+    def _required_trimmed_text(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("不能为空")
+        return normalized
+
+    @field_validator("note")
+    @classmethod
+    def _optional_trimmed_note(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None
+
+
+class MemoirDialectGlossaryResponse(BaseModel):
+    project_id: str
+    entries: list[MemoirDialectGlossaryEntry] = Field(default_factory=list)
+
+
+class MemoirDialectGlossaryUpdateRequest(BaseModel):
+    entries: list[MemoirDialectGlossaryEntry] = Field(default_factory=list, max_length=80)
+
+
+class MemoirBatchTranscriptCleanupPreviewRequest(BaseModel):
+    utterance_ids: list[str] = Field(min_length=1, max_length=30)
+    ai_model: str | None = None
+
+    @field_validator("utterance_ids")
+    @classmethod
+    def _unique_utterance_ids(cls, value: list[str]) -> list[str]:
+        normalized = [item.strip() for item in value if item.strip()]
+        if not normalized:
+            raise ValueError("至少选择一段回答")
+        deduped = list(dict.fromkeys(normalized))
+        if len(deduped) != len(normalized):
+            raise ValueError("不能重复选择同一段回答")
+        return deduped
+
+    @field_validator("ai_model")
+    @classmethod
+    def _optional_trimmed_model(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None
+
+
+class MemoirBatchTranscriptCleanupPreviewItem(BaseModel):
+    utterance_id: str
+    source_text: str
+    cleaned_text: str
+    changed: bool
+    provider: str | None = None
+    created_by: MemoirCreatedBy
+
+
+class MemoirBatchTranscriptCleanupPreviewResponse(BaseModel):
+    project_id: str
+    items: list[MemoirBatchTranscriptCleanupPreviewItem] = Field(default_factory=list)
+    glossary_entries: list[MemoirDialectGlossaryEntry] = Field(default_factory=list)
+
+
+class MemoirBatchTranscriptCleanupConfirmItem(BaseModel):
+    utterance_id: str
+    cleaned_text: str = Field(min_length=1, max_length=20000)
+    provider: str | None = Field(default=None, max_length=80)
+    created_by: MemoirCreatedBy = MemoirCreatedBy.AI
+
+    @field_validator("utterance_id", "cleaned_text")
+    @classmethod
+    def _required_trimmed_text(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("不能为空")
+        return normalized
+
+    @field_validator("provider")
+    @classmethod
+    def _optional_trimmed_provider(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None
+
+    @field_validator("created_by")
+    @classmethod
+    def _valid_cleanup_creator(cls, value: MemoirCreatedBy) -> MemoirCreatedBy:
+        if value == MemoirCreatedBy.ASR:
+            raise ValueError("批量清理结果不能标记为 ASR 原始版本")
+        return value
+
+
+class MemoirBatchTranscriptCleanupConfirmRequest(BaseModel):
+    items: list[MemoirBatchTranscriptCleanupConfirmItem] = Field(min_length=1, max_length=30)
+    ai_model: str | None = None
+
+    @field_validator("items")
+    @classmethod
+    def _unique_items(
+        cls,
+        value: list[MemoirBatchTranscriptCleanupConfirmItem],
+    ) -> list[MemoirBatchTranscriptCleanupConfirmItem]:
+        ids = [item.utterance_id for item in value]
+        if len(set(ids)) != len(ids):
+            raise ValueError("不能重复选择同一段回答")
+        return value
+
+    @field_validator("ai_model")
+    @classmethod
+    def _optional_trimmed_model(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None
+
+
+class MemoirBatchTranscriptCleanupConfirmResponse(BaseModel):
+    project_id: str
+    updated_count: int
+    items: list[MemoirVoiceTranscriptItemResponse] = Field(default_factory=list)

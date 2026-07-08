@@ -679,3 +679,43 @@ export interface MemoirInterviewEditorSessionDetail {
   unassigned_answers: MemoirInterviewEditorAnswer[];
   raw_timeline: MemoirInterviewEditorTimelineItem[];
 }
+
+export type MemoirTranscriptCleanupCreatedBy = 'ai' | 'user' | 'system' | 'asr';
+
+export interface MemoirDialectGlossaryEntry {
+  source: string;
+  target: string;
+  note?: string | null;
+}
+
+export interface MemoirDialectGlossaryResponse {
+  project_id: string;
+  entries: MemoirDialectGlossaryEntry[];
+}
+
+export interface MemoirBatchTranscriptCleanupPreviewItem {
+  utterance_id: string;
+  source_text: string;
+  cleaned_text: string;
+  changed: boolean;
+  provider?: string | null;
+  created_by: MemoirTranscriptCleanupCreatedBy;
+}
+
+export interface MemoirBatchTranscriptCleanupPreviewResponse {
+  project_id: string;
+  items: MemoirBatchTranscriptCleanupPreviewItem[];
+  glossary_entries: MemoirDialectGlossaryEntry[];
+}
+
+export interface MemoirVoiceTranscriptItem {
+  id: string;
+  transcript_edited: string;
+  display_text: string;
+}
+
+export interface MemoirBatchTranscriptCleanupConfirmResponse {
+  project_id: string;
+  updated_count: number;
+  items: MemoirVoiceTranscriptItem[];
+}

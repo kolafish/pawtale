@@ -18,14 +18,17 @@ import {
   Save,
   SkipBack,
   SkipForward,
+  Sparkles,
   Unlink,
   UserRound,
   X,
 } from 'lucide-react';
-import { memoirChapterSourceEditorApi, memoirInterviewEditorApi } from '../../api';
+import { memoirChapterSourceEditorApi, memoirInterviewEditorApi, memoirTranscriptCleanupApi } from '../../api';
 import type {
+  MemoirBatchTranscriptCleanupPreviewItem,
   MemoirChapterSourceEditor,
   MemoirChapterSourceEditorSource,
+  MemoirDialectGlossaryEntry,
   MemoirInterviewEditorAnswer,
   MemoirInterviewEditorQuestion,
   MemoirInterviewEditorSessionSummary,
@@ -37,6 +40,7 @@ interface MemoirInterviewEditorProps {
 }
 
 const PLAYBACK_RATES = [0.75, 1, 1.25, 1.5];
+const MAX_BATCH_CLEANUP_ITEMS = 30;
 
 function formatDateTime(value?: string | null) {
   if (!value) return '无时间';
@@ -70,6 +74,26 @@ function allAnswers(questions: MemoirInterviewEditorQuestion[], unassigned: Memo
 
 function sourceByUtterance(sources: MemoirChapterSourceEditorSource[] | undefined) {
   return new Map((sources ?? []).map((source) => [source.utterance_id, source]));
+}
+
+function normalizeGlossaryEntries(entries: MemoirDialectGlossaryEntry[]) {
+  const normalized: MemoirDialectGlossaryEntry[] = [];
+  const seen = new Set<string>();
+  for (const entry of entries) {
+    const source = entry.source.trim();
+    const target = entry.target.trim();
+    const note = (entry.note ?? '').trim();
+    if (!source || !target) continue;
+    const key = `${source}\u0000${target}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    normalized.push({ source, target, note: note || undefined });
+  }
+  return normalized;
+}
+
+function glossaryEquals(a: MemoirDialectGlossaryEntry[], b: MemoirDialectGlossaryEntry[]) {
+  return JSON.stringify(normalizeGlossaryEntries(a)) === JSON.stringify(normalizeGlossaryEntries(b));
 }
 
 function SessionButton({
@@ -193,6 +217,8 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
   const [editingQuestion, setEditingQuestion] = useState<{ id: string; text: string } | null>(null);
   const [playbackRate, setPlaybackRate] = useState(1);
   const [isAudioPlaying, setIsAudioPlaying] = useState(false);
+  const [glossaryDraftOverride, setGlossaryDraftOverride] = useState<MemoirDialectGlossaryEntry[] | null>(null);
+  const [cleanupPreviewItems, setCleanupPreviewItems] = useState<MemoirBatchTranscriptCleanupPreviewItem[]>([]);
 
   const sessionsQuery = useQuery({
     queryKey: ['memoirInterviewEditorSessions', project.id],
@@ -217,6 +243,12 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
     queryFn: () => memoirChapterSourceEditorApi.get(project.id),
   });
 
+  const glossaryQuery = useQuery({
+    queryKey: ['memoirTranscriptCleanupGlossary', project.id],
+    queryFn: () => memoirTranscriptCleanupApi.getGlossary(project.id),
+  });
+  const glossaryDraft = glossaryDraftOverride ?? glossaryQuery.data?.entries ?? [];
+
   const detail = detailQuery.data;
   const chapterEditor = chapterSourceQuery.data;
   const chapterSourcesByUtterance = useMemo(
@@ -238,6 +270,8 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
   const checkedAnswers = answers.filter((answer) => checkedAnswerIds.includes(answer.id));
   const checkedAnswerMessageIds = checkedAnswers.map((answer) => answer.message_id);
   const chapterSelectedAnswers = checkedAnswers.length > 0 ? checkedAnswers : selectedAnswer ? [selectedAnswer] : [];
+  const cleanupSelectedAnswers = checkedAnswers.length > 0 ? checkedAnswers : selectedAnswer ? [selectedAnswer] : [];
+  const cleanupSelectedAnswerIds = cleanupSelectedAnswers.map((answer) => answer.id);
   const chapterSelectedSources = chapterSelectedAnswers
     .map((answer) => chapterSourcesByUtterance.get(answer.id))
     .filter((source): source is MemoirChapterSourceEditorSource => Boolean(source));
@@ -362,6 +396,44 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
     },
   });
 
+  const saveGlossaryMutation = useMutation({
+    mutationFn: (entries: MemoirDialectGlossaryEntry[]) =>
+      memoirTranscriptCleanupApi.updateGlossary(project.id, normalizeGlossaryEntries(entries)),
+    onSuccess: (data) => {
+      setGlossaryDraftOverride(null);
+      queryClient.setQueryData(['memoirTranscriptCleanupGlossary', project.id], data);
+    },
+  });
+
+  const previewCleanupMutation = useMutation({
+    mutationFn: (utteranceIds: string[]) =>
+      memoirTranscriptCleanupApi.preview(project.id, utteranceIds),
+    onSuccess: (data) => {
+      setCleanupPreviewItems(data.items);
+    },
+  });
+
+  const confirmCleanupMutation = useMutation({
+    mutationFn: (items: MemoirBatchTranscriptCleanupPreviewItem[]) =>
+      memoirTranscriptCleanupApi.confirm(
+        project.id,
+        items.map((item) => ({
+          utterance_id: item.utterance_id,
+          cleaned_text: item.cleaned_text,
+          provider: item.provider,
+          created_by: item.created_by,
+        })),
+      ),
+    onSuccess: () => {
+      setCleanupPreviewItems([]);
+      setCheckedAnswerIds([]);
+      setDraft(null);
+      queryClient.invalidateQueries({ queryKey: ['memoirInterviewEditorSession', project.id, selectedSessionId] });
+      queryClient.invalidateQueries({ queryKey: ['memoirInterviewEditorSessions', project.id] });
+      queryClient.invalidateQueries({ queryKey: ['memoirChapterSourceEditor', project.id] });
+    },
+  });
+
   const hasUnsavedChanges = Boolean(
     selectedAnswer
     && draft?.answerId === selectedAnswer.id
@@ -383,6 +455,7 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
     if (!confirmDiscardDraft()) return;
     setSelectedAnswerOverride(answerId);
     setDraft(null);
+    setCleanupPreviewItems([]);
   }, [confirmDiscardDraft]);
 
   const seekAudioBy = useCallback((seconds: number) => {
@@ -460,6 +533,7 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
   }, [canSave, draftText, saveMutation, seekAudioBy, selectedAnswer, toggleAudioPlayback]);
 
   const toggleAnswerChecked = (answerId: string) => {
+    setCleanupPreviewItems([]);
     setCheckedAnswerIds((ids) => (
       ids.includes(answerId)
         ? ids.filter((id) => id !== answerId)
@@ -468,6 +542,7 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
   };
 
   const selectAllVisibleAnswers = () => {
+    setCleanupPreviewItems([]);
     setCheckedAnswerIds(answers.map((answer) => answer.id));
   };
 
@@ -541,6 +616,25 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
     && selectedSourcesAreAssigned
     && !removeWouldEmptySourceChapter
     && !chapterSourceMutation.isPending,
+  );
+  const glossaryHasChanges = !glossaryEquals(glossaryDraft, glossaryQuery.data?.entries ?? []);
+  const canSaveGlossary = Boolean(
+    glossaryHasChanges
+    && !glossaryQuery.isLoading
+    && !saveGlossaryMutation.isPending,
+  );
+  const canPreviewCleanup = Boolean(
+    cleanupSelectedAnswerIds.length > 0
+    && cleanupSelectedAnswerIds.length <= MAX_BATCH_CLEANUP_ITEMS
+    && !hasUnsavedChanges
+    && !previewCleanupMutation.isPending
+    && !confirmCleanupMutation.isPending,
+  );
+  const canConfirmCleanup = Boolean(
+    cleanupPreviewItems.length > 0
+    && cleanupPreviewItems.every((item) => item.cleaned_text.trim())
+    && !confirmCleanupMutation.isPending
+    && !previewCleanupMutation.isPending,
   );
 
   return (
@@ -675,7 +769,10 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
                       </button>
                       <button
                         type="button"
-                        onClick={() => setCheckedAnswerIds([])}
+                        onClick={() => {
+                          setCheckedAnswerIds([]);
+                          setCleanupPreviewItems([]);
+                        }}
                         disabled={checkedAnswers.length === 0}
                         className="h-9 rounded-lg px-2.5 text-xs text-gray-600 transition-[background-color,transform] hover:bg-white active:scale-[0.96] disabled:opacity-40"
                       >
@@ -1031,6 +1128,156 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
                       )}
                     </div>
                   )}
+                </div>
+
+                <div className="rounded-lg bg-white p-3 shadow-[0_1px_8px_rgba(15,23,42,0.06)]">
+                  <div className="mb-3 flex items-center justify-between gap-2">
+                    <div className="inline-flex min-w-0 items-center gap-2 text-xs font-medium text-gray-500">
+                      <Sparkles size={14} />
+                      <span>AI 批量清理</span>
+                    </div>
+                    <span className="text-[11px] text-gray-400 tabular-nums">
+                      {cleanupSelectedAnswerIds.length || 0} 段
+                    </span>
+                  </div>
+
+                  <div className="space-y-3">
+                    <div className="rounded-lg bg-slate-50 px-3 py-3">
+                      <div className="mb-2 flex items-center justify-between gap-2">
+                        <span className="text-xs font-medium text-gray-600">方言词表</span>
+                        {glossaryQuery.isFetching && <Loader2 size={13} className="animate-spin text-gray-400" />}
+                      </div>
+                      <div className="space-y-2">
+                        {glossaryDraft.length === 0 ? (
+                          <div className="rounded-lg bg-white px-3 py-2 text-xs text-gray-500">暂无词条。</div>
+                        ) : (
+                          glossaryDraft.map((entry, index) => (
+                            <div key={`${index}-${entry.source}-${entry.target}`} className="grid grid-cols-[1fr_1fr_28px] gap-1.5">
+                              <input
+                                value={entry.source}
+                                onChange={(event) => setGlossaryDraftOverride((entries) => (entries ?? glossaryDraft).map((item, itemIndex) => (
+                                  itemIndex === index ? { ...item, source: event.target.value } : item
+                                )))}
+                                placeholder="方言/误识别"
+                                className="h-8 min-w-0 rounded-md border border-slate-200 bg-white px-2 text-xs text-gray-700 outline-none focus:ring-2 focus:ring-emerald-200"
+                              />
+                              <input
+                                value={entry.target}
+                                onChange={(event) => setGlossaryDraftOverride((entries) => (entries ?? glossaryDraft).map((item, itemIndex) => (
+                                  itemIndex === index ? { ...item, target: event.target.value } : item
+                                )))}
+                                placeholder="标准写法"
+                                className="h-8 min-w-0 rounded-md border border-slate-200 bg-white px-2 text-xs text-gray-700 outline-none focus:ring-2 focus:ring-emerald-200"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => setGlossaryDraftOverride((entries) => (entries ?? glossaryDraft).filter((_, itemIndex) => itemIndex !== index))}
+                                className="inline-flex h-8 w-7 items-center justify-center rounded-md text-gray-400 transition-[background-color,color,transform] hover:bg-white hover:text-gray-700 active:scale-[0.96]"
+                                title="删除词条"
+                              >
+                                <X size={13} />
+                              </button>
+                              <input
+                                value={entry.note ?? ''}
+                                onChange={(event) => setGlossaryDraftOverride((entries) => (entries ?? glossaryDraft).map((item, itemIndex) => (
+                                  itemIndex === index ? { ...item, note: event.target.value } : item
+                                )))}
+                                placeholder="备注，可选"
+                                className="col-span-3 h-8 min-w-0 rounded-md border border-slate-200 bg-white px-2 text-xs text-gray-700 outline-none focus:ring-2 focus:ring-emerald-200"
+                              />
+                            </div>
+                          ))
+                        )}
+                      </div>
+                      <div className="mt-2 grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setGlossaryDraftOverride((entries) => [...(entries ?? glossaryDraft), { source: '', target: '', note: '' }])}
+                          className="inline-flex h-8 items-center justify-center gap-1.5 rounded-lg bg-white px-2 text-xs text-gray-600 transition-[background-color,transform] hover:bg-slate-100 active:scale-[0.96]"
+                        >
+                          <Plus size={13} />
+                          添加词条
+                        </button>
+                        <button
+                          type="button"
+                          disabled={!canSaveGlossary}
+                          onClick={() => saveGlossaryMutation.mutate(glossaryDraft)}
+                          className="inline-flex h-8 items-center justify-center gap-1.5 rounded-lg bg-slate-900 px-2 text-xs font-medium text-white transition-[background-color,opacity,transform] hover:bg-slate-700 active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {saveGlossaryMutation.isPending ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
+                          保存词表
+                        </button>
+                      </div>
+                      {saveGlossaryMutation.isError && (
+                        <div className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">词表保存失败。</div>
+                      )}
+                    </div>
+
+                    <div className="rounded-lg bg-slate-50 px-3 py-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="min-w-0 text-xs leading-5 text-gray-600">
+                          {checkedAnswers.length > 0 ? `批量清理 ${checkedAnswers.length} 段已选回答` : '清理当前回答'}
+                        </div>
+                        <button
+                          type="button"
+                          disabled={!canPreviewCleanup}
+                          onClick={() => previewCleanupMutation.mutate(cleanupSelectedAnswerIds)}
+                          className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-emerald-600 px-2.5 text-xs font-medium text-white transition-[background-color,opacity,transform] hover:bg-emerald-700 active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {previewCleanupMutation.isPending ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
+                          生成预览
+                        </button>
+                      </div>
+                      {hasUnsavedChanges && (
+                        <div className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">先保存当前人工修改后再生成 AI 预览。</div>
+                      )}
+                      {cleanupSelectedAnswerIds.length > MAX_BATCH_CLEANUP_ITEMS && (
+                        <div className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                          一次最多清理 {MAX_BATCH_CLEANUP_ITEMS} 段回答。
+                        </div>
+                      )}
+                      {previewCleanupMutation.isError && (
+                        <div className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">AI 清理预览失败。</div>
+                      )}
+
+                      {cleanupPreviewItems.length > 0 && (
+                        <div className="mt-3 space-y-2">
+                          {cleanupPreviewItems.map((item, index) => (
+                            <div key={item.utterance_id} className="rounded-lg bg-white p-2">
+                              <div className="mb-1 flex items-center justify-between gap-2 text-[11px] text-gray-500">
+                                <span className="tabular-nums">预览 {index + 1}</span>
+                                <span className={item.changed ? 'text-emerald-700' : 'text-gray-400'}>
+                                  {item.changed ? '有改动' : '无明显改动'}
+                                </span>
+                              </div>
+                              <p className="mb-2 line-clamp-2 text-xs leading-5 text-gray-500">{item.source_text}</p>
+                              <textarea
+                                value={item.cleaned_text}
+                                onChange={(event) => setCleanupPreviewItems((items) => items.map((previewItem) => (
+                                  previewItem.utterance_id === item.utterance_id
+                                    ? { ...previewItem, cleaned_text: event.target.value, provider: null, created_by: 'user' }
+                                    : previewItem
+                                )))}
+                                className="min-h-[84px] w-full resize-y rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs leading-5 text-gray-800 outline-none focus:ring-2 focus:ring-emerald-200"
+                              />
+                            </div>
+                          ))}
+                          <button
+                            type="button"
+                            disabled={!canConfirmCleanup}
+                            onClick={() => confirmCleanupMutation.mutate(cleanupPreviewItems)}
+                            className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-lg bg-slate-900 px-3 text-xs font-medium text-white transition-[background-color,opacity,transform] hover:bg-slate-700 active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {confirmCleanupMutation.isPending ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+                            确认写入
+                          </button>
+                        </div>
+                      )}
+                      {confirmCleanupMutation.isError && (
+                        <div className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">AI 清理结果写入失败。</div>
+                      )}
+                    </div>
+                  </div>
                 </div>
 
                 <div className="rounded-lg bg-white p-3 shadow-[0_1px_8px_rgba(15,23,42,0.06)]">
