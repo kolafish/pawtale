@@ -22,6 +22,7 @@ from app.schemas.memoir_book import (
     MemoirBookSourceAssignmentRequest,
     MemoirBookSourceCoverageResponse,
     MemoirBookSourceMoveRequest,
+    MemoirBookSourceRemoveRequest,
 )
 from app.services.memoir import automation_event_resolution as _automation_event_resolution
 from app.services.memoir.access import load_memoir_project
@@ -342,6 +343,86 @@ async def move_book_source_between_chapters(
         db,
         project_id=project_id,
         utterance_ids=[req.utterance_id],
+    )
+    await db.commit()
+    refreshed = await _load_plan(db, project_id)
+    if not refreshed:
+        raise HTTPException(status_code=500, detail="章节规划保存失败")
+    return await _plan_response(db, refreshed)
+
+
+async def remove_book_sources_from_chapter(
+    db: AsyncSession,
+    *,
+    user_id: str,
+    project_id: str,
+    req: MemoirBookSourceRemoveRequest,
+) -> MemoirBookPlanResponse:
+    project = await load_memoir_project(db, project_id, user_id)
+    _remember_project_ai_model(project, req.ai_model)
+    plan = await _load_plan(db, project_id)
+    if not plan:
+        raise HTTPException(status_code=404, detail="章节规划不存在")
+    if plan.status != MemoirBookPlanStatus.CONFIRMED.value:
+        raise HTTPException(status_code=400, detail="请先确认章节规划")
+
+    chapter = _chapter_by_id(plan, req.chapter_id)
+    refs_by_chapter = await _plan_source_ref_dicts_by_chapter(db, plan)
+    refs = list(refs_by_chapter.get(chapter.id, []))
+    requested_ids = set(req.utterance_ids)
+    removed_ids: set[str] = set()
+    kept_refs: list[dict[str, object]] = []
+    for ref in refs:
+        utterance_id = _source_ref_utterance_id(ref)
+        if utterance_id in requested_ids:
+            removed_ids.add(utterance_id)
+            continue
+        kept_refs.append(ref)
+
+    if requested_ids - removed_ids:
+        raise HTTPException(status_code=404, detail="章节中没有找到要移出的来源")
+    if not kept_refs:
+        raise HTTPException(status_code=400, detail="章节至少需要保留一条来源")
+
+    pending_ids = _pending_source_ids(chapter.metadata_json)
+    pending_ids.difference_update(removed_ids)
+    removed_source_ids = _removed_source_ids(chapter.metadata_json)
+    removed_source_ids.update(removed_ids)
+    chapter.metadata_json = _set_source_change_metadata(
+        chapter.metadata_json,
+        added_ids=pending_ids,
+        removed_ids=removed_source_ids,
+    )
+    refs_by_chapter[chapter.id] = kept_refs
+    now = datetime.now(UTC).isoformat()
+    plan.metadata_json = _merge_metadata(
+        plan.metadata_json,
+        {
+            "source_removed_at": now,
+            "structure_updated_at": now,
+            "structure_updated_by": "user",
+        },
+    )
+    db.add(chapter)
+    db.add(plan)
+    await _mark_chapter_drafts_sources_changed(
+        db,
+        project_id=project_id,
+        chapter_ids={chapter.id},
+    )
+    await db.flush()
+    await _sync_plan_chapter_source_links(
+        db,
+        plan=plan,
+        source_refs_by_chapter=refs_by_chapter,
+        assigned_by=MemoirChapterSourceAssignedBy.USER,
+        assignment_reason="manual_source_remove",
+    )
+    await _schedule_chapter_auto_revision(
+        db,
+        project_id=project_id,
+        chapter_id=chapter.id,
+        ai_model=req.ai_model,
     )
     await db.commit()
     refreshed = await _load_plan(db, project_id)
