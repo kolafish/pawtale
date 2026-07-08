@@ -146,6 +146,11 @@ export interface Project {
   description?: string;
   word_count_target?: number;
   daily_word_goal?: number;
+  owner_user_id?: string | null;
+  owner_email?: string | null;
+  owner_display_name?: string | null;
+  can_edit?: boolean;
+  can_edit_memoir_materials?: boolean;
   total_word_count: number;
   groups: DocumentGroup[];
   references: ReferenceItemBrief[];
@@ -159,6 +164,11 @@ export interface ProjectListItem {
   title: string;
   description?: string;
   word_count_target?: number;
+  owner_user_id?: string | null;
+  owner_email?: string | null;
+  owner_display_name?: string | null;
+  can_edit?: boolean;
+  can_edit_memoir_materials?: boolean;
   total_word_count: number;
   group_count: number;
   document_count: number;

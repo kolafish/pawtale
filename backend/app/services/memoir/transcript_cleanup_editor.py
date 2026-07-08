@@ -102,16 +102,19 @@ async def _load_project_utterances(
     project_id: str,
     user_id: str,
     utterance_ids: list[str],
+    allow_admin: bool = False,
 ) -> list[MemoirVoiceUtterance]:
+    filters = [
+        MemoirVoiceUtterance.id.in_(utterance_ids),
+        MemoirVoiceSession.project_id == project_id,
+    ]
+    if not allow_admin:
+        filters.append(Project.user_id == user_id)
     result = await db.execute(
         select(MemoirVoiceUtterance)
         .join(MemoirVoiceSession, MemoirVoiceUtterance.voice_session_id == MemoirVoiceSession.id)
         .join(Project, MemoirVoiceSession.project_id == Project.id)
-        .where(
-            MemoirVoiceUtterance.id.in_(utterance_ids),
-            MemoirVoiceSession.project_id == project_id,
-            Project.user_id == user_id,
-        )
+        .where(*filters)
         .options(*_detail_options())
     )
     utterances_by_id = {utterance.id: utterance for utterance in result.scalars().all()}
@@ -137,8 +140,9 @@ async def get_dialect_glossary(
     *,
     project_id: str,
     user_id: str,
+    allow_admin: bool = False,
 ) -> MemoirDialectGlossaryResponse:
-    project = await load_memoir_project(db, project_id, user_id)
+    project = await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
     return MemoirDialectGlossaryResponse(project_id=project_id, entries=_glossary_entries(project))
 
 
@@ -148,8 +152,9 @@ async def update_dialect_glossary(
     project_id: str,
     user_id: str,
     req: MemoirDialectGlossaryUpdateRequest,
+    allow_admin: bool = False,
 ) -> MemoirDialectGlossaryResponse:
-    project = await load_memoir_project(db, project_id, user_id)
+    project = await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
     saved_entries = [
         MemoirDialectGlossaryEntry(**entry)
         for entry in _glossary_payload(req.entries)
@@ -167,8 +172,9 @@ async def preview_batch_cleanup(
     project_id: str,
     user_id: str,
     req: MemoirBatchTranscriptCleanupPreviewRequest,
+    allow_admin: bool = False,
 ) -> MemoirBatchTranscriptCleanupPreviewResponse:
-    project = await load_memoir_project(db, project_id, user_id)
+    project = await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
     glossary_entries = _glossary_entries(project)
     glossary_lines = _glossary_context_lines(glossary_entries)
     utterances = await _load_project_utterances(
@@ -176,6 +182,7 @@ async def preview_batch_cleanup(
         project_id=project_id,
         user_id=user_id,
         utterance_ids=req.utterance_ids,
+        allow_admin=allow_admin,
     )
     items: list[MemoirBatchTranscriptCleanupPreviewItem] = []
     for utterance in utterances:
@@ -215,14 +222,16 @@ async def confirm_batch_cleanup(
     project_id: str,
     user_id: str,
     req: MemoirBatchTranscriptCleanupConfirmRequest,
+    allow_admin: bool = False,
 ) -> MemoirBatchTranscriptCleanupConfirmResponse:
-    await load_memoir_project(db, project_id, user_id)
+    await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
     item_by_utterance_id = {item.utterance_id: item for item in req.items}
     utterances = await _load_project_utterances(
         db,
         project_id=project_id,
         user_id=user_id,
         utterance_ids=list(item_by_utterance_id),
+        allow_admin=allow_admin,
     )
     for utterance in utterances:
         _ensure_cleanup_source(utterance)

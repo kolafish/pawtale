@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import get_current_user
+from app.auth import get_current_user, is_admin_user
 from app.database import get_db
 from app.models.users import User
 from app.schemas.memoir_chapter_source_editor import (
@@ -29,6 +29,7 @@ async def get_memoir_chapter_source_editor(
         db,
         user_id=current_user.id,
         project_id=project_id,
+        allow_admin=is_admin_user(current_user),
     )
 
 
@@ -47,6 +48,7 @@ async def assign_memoir_chapter_sources(
         user_id=current_user.id,
         project_id=project_id,
         req=req,
+        allow_admin=is_admin_user(current_user),
     )
 
 
@@ -65,6 +67,7 @@ async def move_memoir_chapter_source(
         user_id=current_user.id,
         project_id=project_id,
         req=req,
+        allow_admin=is_admin_user(current_user),
     )
 
 
@@ -83,4 +86,5 @@ async def remove_memoir_chapter_sources(
         user_id=current_user.id,
         project_id=project_id,
         req=req,
+        allow_admin=is_admin_user(current_user),
     )

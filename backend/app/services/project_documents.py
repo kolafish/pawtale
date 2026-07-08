@@ -5,7 +5,9 @@ from uuid import uuid4
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domain.projects.types import ProjectType
 from app.models.projects import Document, DocumentGroup, Project
+from app.models.users import User
 from app.schemas.projects import (
     DocumentMeta,
     DocumentResponse,
@@ -54,7 +56,17 @@ def group_response(group: DocumentGroup) -> GroupResponse:
     )
 
 
-def project_response(project: Project) -> ProjectResponse:
+def project_response(
+    project: Project,
+    *,
+    owner: User | None = None,
+    viewer_user_id: str | None = None,
+    viewer_is_admin: bool = False,
+) -> ProjectResponse:
+    can_edit = True if viewer_user_id is None else project.user_id == viewer_user_id
+    can_edit_memoir_materials = True if viewer_user_id is None else (
+        can_edit or (viewer_is_admin and project.type == ProjectType.MEMOIR.value)
+    )
     return ProjectResponse(
         id=project.id,
         type=project.type,
@@ -62,6 +74,11 @@ def project_response(project: Project) -> ProjectResponse:
         description=project.description,
         word_count_target=project.word_count_target,
         daily_word_goal=project.daily_word_goal,
+        owner_user_id=owner.id if owner else project.user_id,
+        owner_email=owner.email if owner else None,
+        owner_display_name=owner.display_name if owner else None,
+        can_edit=can_edit,
+        can_edit_memoir_materials=can_edit_memoir_materials,
         metadata_json=project.metadata_json or {},
         total_word_count=project_total_words(project),
         groups=[group_response(group) for group in (project.groups or [])],

@@ -54,11 +54,13 @@ async def get_chapter_source_editor(
     *,
     user_id: str,
     project_id: str,
+    allow_admin: bool = False,
 ) -> MemoirChapterSourceEditorResponse:
     coverage = await book_source_workflow.get_book_source_coverage(
         db,
         user_id=user_id,
         project_id=project_id,
+        allow_admin=allow_admin,
     )
     plan = await _load_plan(db, project_id)
     plan_data: MemoirBookPlanResponse | None = None
@@ -85,14 +87,21 @@ async def assign_chapter_sources(
     user_id: str,
     project_id: str,
     req: MemoirBookSourceAssignmentRequest,
+    allow_admin: bool = False,
 ) -> MemoirChapterSourceEditorResponse:
     await book_source_workflow.assign_book_sources_to_chapters(
         db,
         user_id=user_id,
         project_id=project_id,
         req=req,
+        allow_admin=allow_admin,
     )
-    return await get_chapter_source_editor(db, user_id=user_id, project_id=project_id)
+    return await get_chapter_source_editor(
+        db,
+        user_id=user_id,
+        project_id=project_id,
+        allow_admin=allow_admin,
+    )
 
 
 async def move_chapter_source(
@@ -101,14 +110,21 @@ async def move_chapter_source(
     user_id: str,
     project_id: str,
     req: MemoirBookSourceMoveRequest,
+    allow_admin: bool = False,
 ) -> MemoirChapterSourceEditorResponse:
     await book_source_workflow.move_book_source_between_chapters(
         db,
         user_id=user_id,
         project_id=project_id,
         req=req,
+        allow_admin=allow_admin,
     )
-    return await get_chapter_source_editor(db, user_id=user_id, project_id=project_id)
+    return await get_chapter_source_editor(
+        db,
+        user_id=user_id,
+        project_id=project_id,
+        allow_admin=allow_admin,
+    )
 
 
 async def remove_chapter_sources(
@@ -117,11 +133,18 @@ async def remove_chapter_sources(
     user_id: str,
     project_id: str,
     req: MemoirBookSourceRemoveRequest,
+    allow_admin: bool = False,
 ) -> MemoirChapterSourceEditorResponse:
     await book_source_workflow.remove_book_sources_from_chapter(
         db,
         user_id=user_id,
         project_id=project_id,
         req=req,
+        allow_admin=allow_admin,
     )
-    return await get_chapter_source_editor(db, user_id=user_id, project_id=project_id)
+    return await get_chapter_source_editor(
+        db,
+        user_id=user_id,
+        project_id=project_id,
+        allow_admin=allow_admin,
+    )

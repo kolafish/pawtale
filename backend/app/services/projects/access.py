@@ -6,10 +6,19 @@ from sqlalchemy.orm import selectinload
 from app.models.projects import Document, DocumentGroup, DocumentReference, Project, ReferenceItem
 
 
-async def load_project(db: AsyncSession, project_id: str, user_id: str) -> Project:
+async def load_project(
+    db: AsyncSession,
+    project_id: str,
+    user_id: str,
+    *,
+    allow_admin: bool = False,
+) -> Project:
+    filters = [Project.id == project_id]
+    if not allow_admin:
+        filters.append(Project.user_id == user_id)
     result = await db.execute(
         select(Project)
-        .where(Project.id == project_id, Project.user_id == user_id)
+        .where(*filters)
         .options(
             selectinload(Project.groups).selectinload(DocumentGroup.documents),
             selectinload(Project.references),

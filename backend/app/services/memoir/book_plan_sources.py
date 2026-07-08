@@ -329,8 +329,9 @@ async def source_segments(
     user_id: str,
     project_id: str,
     include_ignored: bool = False,
+    allow_admin: bool = False,
 ) -> list[SourceSegment]:
-    await load_memoir_project(db, project_id, user_id)
+    await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
     result = await db.execute(
         select(MemoirVoiceUtterance, MemoirChatMessage)
         .join(MemoirVoiceSession, MemoirVoiceUtterance.voice_session_id == MemoirVoiceSession.id)

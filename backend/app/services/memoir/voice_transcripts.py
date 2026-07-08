@@ -351,15 +351,21 @@ async def load_voice_transcript_cleanup_context(
     )
 
 
-def _transcript_filter(user_id: str, project_id: str | None = None):
+def _transcript_filter(
+    user_id: str,
+    project_id: str | None = None,
+    *,
+    allow_admin: bool = False,
+):
     clauses = [
-        Project.user_id == user_id,
         or_(
             func.trim(MemoirVoiceUtterance.transcript_raw) != "",
             func.trim(MemoirVoiceUtterance.transcript_edited) != "",
         ),
         ~_paired_human_interviewer_prompt_exists(),
     ]
+    if not allow_admin:
+        clauses.append(Project.user_id == user_id)
     if project_id:
         clauses.append(Project.id == project_id)
     return clauses
@@ -521,13 +527,15 @@ async def _included_utterance_ids_for_filter(
     user_id: str,
     *,
     project_id: str | None = None,
+    allow_admin: bool = False,
 ) -> set[str]:
     query = (
         select(MemoirBookPlan)
         .join(Project, MemoirBookPlan.project_id == Project.id)
-        .where(Project.user_id == user_id)
         .options(selectinload(MemoirBookPlan.chapters))
     )
+    if not allow_admin:
+        query = query.where(Project.user_id == user_id)
     if project_id:
         query = query.where(Project.id == project_id)
     plans = (await db.execute(query)).scalars().all()
@@ -691,12 +699,17 @@ async def _load_owned_utterance(
     db: AsyncSession,
     utterance_id: str,
     user_id: str,
+    *,
+    allow_admin: bool = False,
 ) -> MemoirVoiceUtterance:
+    filters = [MemoirVoiceUtterance.id == utterance_id]
+    if not allow_admin:
+        filters.append(Project.user_id == user_id)
     result = await db.execute(
         select(MemoirVoiceUtterance)
         .join(MemoirVoiceSession, MemoirVoiceUtterance.voice_session_id == MemoirVoiceSession.id)
         .join(Project, MemoirVoiceSession.project_id == Project.id)
-        .where(MemoirVoiceUtterance.id == utterance_id, Project.user_id == user_id)
+        .where(*filters)
         .options(*_detail_options())
     )
     utterance = result.scalar_one_or_none()
@@ -716,10 +729,11 @@ async def list_voice_transcripts(
     current_guidance_module: str | None = None,
     limit: int = 50,
     offset: int = 0,
+    allow_admin: bool = False,
 ) -> MemoirVoiceTranscriptListResponse:
     if included not in INCLUDED_FILTER_VALUES:
         raise HTTPException(status_code=400, detail="不支持的讲述记录收录筛选条件")
-    filters = _transcript_filter(user_id, project_id)
+    filters = _transcript_filter(user_id, project_id, allow_admin=allow_admin)
     filters.extend(_search_filter(term) for term in _search_terms(search_query))
     if guidance_mode:
         filters.append(MemoirVoiceSession.guidance_mode == guidance_mode)
@@ -730,6 +744,7 @@ async def list_voice_transcripts(
             db,
             user_id,
             project_id=project_id,
+            allow_admin=allow_admin,
         )
         if included == "included":
             filters.append(
@@ -779,8 +794,10 @@ async def get_voice_transcript(
     db: AsyncSession,
     utterance_id: str,
     user_id: str,
+    *,
+    allow_admin: bool = False,
 ) -> MemoirVoiceTranscriptItemResponse:
-    utterance = await _load_owned_utterance(db, utterance_id, user_id)
+    utterance = await _load_owned_utterance(db, utterance_id, user_id, allow_admin=allow_admin)
     inclusions = await _book_inclusions_by_utterance_ids(
         db,
         [utterance.id],
@@ -958,11 +975,13 @@ async def update_voice_transcript(
     utterance_id: str,
     user_id: str,
     req: MemoirVoiceTranscriptUpdateRequest,
+    *,
+    allow_admin: bool = False,
 ) -> MemoirVoiceTranscriptItemResponse:
     content = req.transcript_edited.strip()
     if not content:
         raise HTTPException(status_code=400, detail="整理文字不能为空")
-    utterance = await _load_owned_utterance(db, utterance_id, user_id)
+    utterance = await _load_owned_utterance(db, utterance_id, user_id, allow_admin=allow_admin)
     return await _apply_edited_text(
         db,
         utterance,
@@ -979,8 +998,10 @@ async def cleanup_voice_transcript(
     user_id: str,
     req: MemoirVoiceTranscriptCleanupRequest,
     ai_client: AITextClient | None = None,
+    *,
+    allow_admin: bool = False,
 ) -> MemoirVoiceTranscriptItemResponse:
-    utterance = await _load_owned_utterance(db, utterance_id, user_id)
+    utterance = await _load_owned_utterance(db, utterance_id, user_id, allow_admin=allow_admin)
     source_text = _current_text(utterance)
     cleaned = await generate_cleaned_transcript_text(
         source_text,
