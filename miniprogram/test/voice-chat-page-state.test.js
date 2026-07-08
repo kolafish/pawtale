@@ -130,17 +130,24 @@ test("voice chat view patch combines human speaker choice with record actions", 
 
   assert.equal(idlePatch.showHumanRecordActions, true);
   assert.equal(idlePatch.showControlBar, false);
-  assert.equal(idlePatch.voiceChatPageClass, "voice-chat-page no-control-bar");
+  assert.equal(idlePatch.voiceChatPageClass, "voice-chat-page human-interview no-control-bar");
+  assert.equal(idlePatch.showStageStatus, false);
+  assert.equal(idlePatch.showCaptureStrip, false);
   assert.equal(idlePatch.controlHintText, "");
   assert.equal(idlePatch.liveDisplayText, "点上方开始记录采访者");
   assert.equal(idlePatch.narratorRecordButtonClass, "role-record-button narrator");
   assert.equal(idlePatch.interviewerRecordButtonClass, "role-record-button interviewer");
   assert.equal(recordingPatch.showHumanRecordActions, false);
   assert.equal(recordingPatch.showControlBar, true);
+  assert.equal(recordingPatch.voiceChatPageClass, "voice-chat-page human-interview human-recording-focus");
+  assert.equal(recordingPatch.showStageStatus, false);
+  assert.equal(recordingPatch.showCaptureStrip, true);
   assert.equal(recordingPatch.controlHintText, "正在记录采访者");
   assert.equal(recordingPatch.micButtonText, "说完了，保存这段");
   assert.equal(authorizationPatch.showHumanRecordActions, false);
   assert.equal(authorizationPatch.showControlBar, true);
+  assert.equal(authorizationPatch.showStageStatus, false);
+  assert.equal(authorizationPatch.showCaptureStrip, false);
   assert.equal(authorizationPatch.micButtonText, "同意后开始说话");
 });
 
@@ -162,12 +169,22 @@ test("voice chat view patch adds focused large text root classes", () => {
     recording: true,
     liveText: "我想先讲爷爷退休后的事",
   });
+  const humanCapturePatch = voiceChatViewPatch({
+    ...initialVoiceChatData(),
+    interviewType: "human_interview",
+    largeTextEnabled: true,
+    voiceAuthorizationAgreed: true,
+    recording: true,
+    liveText: "我小时候家里屋顶很低",
+  });
 
   assert.equal(idlePatch.voiceChatPageClass, "voice-chat-page large-text idle-focus");
   assert.equal(assistantPatch.voiceChatPageClass, "voice-chat-page large-text assistant-focus");
   assert.equal(assistantPatch.liveDisplayText, "听完后，点下方“我来讲了”开始回答");
   assert.equal(capturePatch.voiceChatPageClass, "voice-chat-page large-text capture-focus");
   assert.equal(capturePatch.liveDisplayText, "我想先讲爷爷退休后的事");
+  assert.equal(humanCapturePatch.voiceChatPageClass, "voice-chat-page human-interview human-recording-focus large-text capture-focus");
+  assert.equal(humanCapturePatch.showStageStatus, false);
 });
 
 test("voice chat auto-listen gate snapshot keeps page and computed gate state together", () => {

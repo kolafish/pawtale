@@ -8,6 +8,10 @@
   padding-bottom: 60rpx;
 }
 
+.voice-chat-page.human-recording-focus {
+  padding-bottom: 330rpx;
+}
+
 .top-bar {
   min-height: 96rpx;
   display: flex;
@@ -100,6 +104,16 @@
   display: flex;
   flex-direction: column;
   justify-content: center;
+}
+
+.voice-chat-page.human-interview .transcript-stage {
+  justify-content: flex-start;
+}
+
+.voice-chat-page.human-recording-focus .transcript-stage {
+  min-height: 900rpx;
+  padding-top: 52rpx;
+  padding-bottom: 40rpx;
 }
 
 .assistant-panel {
@@ -315,6 +329,16 @@
   overflow: hidden;
 }
 
+.voice-chat-page.human-interview .live-scroll {
+  margin-top: 0;
+}
+
+.voice-chat-page.human-recording-focus .live-scroll,
+.voice-chat-page.human-recording-focus .live-scroll.long {
+  height: 650rpx;
+  max-height: 650rpx;
+}
+
 .live-scroll.long {
   height: 300rpx;
 }
@@ -346,6 +370,10 @@
   font-size: 28rpx;
   font-weight: 500;
   font-variant-numeric: tabular-nums;
+}
+
+.voice-chat-page.human-recording-focus .capture-strip {
+  margin-top: 26rpx;
 }
 
 .capture-strip.active {
@@ -891,6 +919,11 @@
   border-radius: 36rpx;
 }
 
+.voice-chat-page.large-text.human-recording-focus .transcript-stage {
+  min-height: 1040rpx;
+  padding-top: 52rpx;
+}
+
 .voice-chat-page.large-text .live-text {
   font-size: 64rpx;
   line-height: 92rpx;
@@ -899,6 +932,12 @@
 .voice-chat-page.large-text .live-scroll.long {
   height: 360rpx;
   max-height: 360rpx;
+}
+
+.voice-chat-page.large-text.human-recording-focus .live-scroll,
+.voice-chat-page.large-text.human-recording-focus .live-scroll.long {
+  height: 760rpx;
+  max-height: 760rpx;
 }
 
 .voice-chat-page.large-text .capture-strip,
