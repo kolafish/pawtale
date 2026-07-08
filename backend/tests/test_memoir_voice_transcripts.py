@@ -573,6 +573,74 @@ async def test_mobile_memoir_recovers_unfinalized_audio_transcription(
     assert correction_job.payload_json["raw_transcript_version_id"] == version.id
 
 
+async def test_mobile_memoir_recovers_long_unfinalized_audio_in_segments(
+    client,
+    test_db,
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr("app.services.memoir.audio_files.MEMOIR_AUDIO_DIR", tmp_path / "audio")
+    monkeypatch.setattr("app.services.memoir.voice_transcript_recovery.ASR_RECOVERY_PCM_SEGMENT_BYTES", 32000)
+    user = (await client.get("/api/auth/me")).json()
+    create_response = await post_mobile_memoir_voice_session(
+        client,
+        json={"guidance_mode": "free_narration", "provider": "volc_streaming_asr"},
+    )
+    assert create_response.status_code == 201
+    session = create_response.json()["session"]
+    persistence = VoiceGatewayPersistence(
+        db=test_db,
+        voice_session_id=session["id"],
+        user_id=user["id"],
+    )
+    segment_audio = [b"a" * 32000, b"b" * 32000, b"c" * 16000]
+    for audio in segment_audio:
+        await persistence.record_audio_frame(audio)
+    persisted = await persistence.flush_unfinalized_audio()
+    assert persisted is not None
+
+    asr_clients = [
+        FakeRecoveryASRClient([
+            StreamingASREvent(type="final", text="第一段。", start_ms=0, end_ms=800, raw={"segment": 1})
+        ]),
+        FakeRecoveryASRClient([
+            StreamingASREvent(type="final", text="第二段。", start_ms=0, end_ms=900, raw={"segment": 2})
+        ]),
+        FakeRecoveryASRClient([
+            StreamingASREvent(type="final", text="第三段。", start_ms=0, end_ms=500, raw={"segment": 3})
+        ]),
+    ]
+    remaining_clients = list(asr_clients)
+    monkeypatch.setattr(
+        "app.routers.memoir.voice.create_volc_streaming_asr_client",
+        lambda _user_id, _voice_session_id: remaining_clients.pop(0),
+    )
+
+    response = await client.post(
+        f"/api/mobile/memoir/voice-transcripts/{persisted['utterance_id']}/recover-transcription"
+    )
+
+    assert response.status_code == 200
+    item = response.json()
+    assert item["transcript_raw"] == "第一段。\n第二段。\n第三段。"
+    assert item["display_text"] == "第一段。\n第二段。\n第三段。"
+    assert item["transcription_status"] == "ready"
+    assert item["can_recover_transcription"] is False
+    assert [b"".join(client.sent_audio) for client in asr_clients] == segment_audio
+    assert all(client.closed for client in asr_clients)
+
+    utterance = await test_db.scalar(
+        select(MemoirVoiceUtterance).where(MemoirVoiceUtterance.id == persisted["utterance_id"])
+    )
+    assert utterance is not None
+    payload = utterance.provider_payload_json["provider_payload"]
+    assert payload["source"] == "segmented_transcript_recovery"
+    assert payload["segment_count"] == 3
+    assert [segment["provider_payload"]["segment"] for segment in payload["segments"]] == [1, 2, 3]
+    assert utterance.start_ms == 0
+    assert utterance.end_ms == 2500
+
+
 async def test_mobile_memoir_groups_paired_human_interview_transcripts(client, test_db):
     user = (await client.get("/api/auth/me")).json()
     create_response = await post_mobile_memoir_voice_session(

@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import aiofiles
+import aiofiles.os
 from fastapi import HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -34,6 +35,14 @@ from app.services.memoir.voice_transcripts import (
 
 ASR_RECOVERY_CHUNK_BYTES = 64 * 1024
 ASR_RECOVERY_DRAIN_TIMEOUT_SECONDS = 60.0
+ASR_RECOVERY_PCM_SAMPLE_RATE = 16000
+ASR_RECOVERY_PCM_BYTES_PER_SAMPLE = 2
+ASR_RECOVERY_PCM_SEGMENT_SECONDS = 55
+ASR_RECOVERY_PCM_SEGMENT_BYTES = (
+    ASR_RECOVERY_PCM_SAMPLE_RATE
+    * ASR_RECOVERY_PCM_BYTES_PER_SAMPLE
+    * ASR_RECOVERY_PCM_SEGMENT_SECONDS
+)
 StreamingASRClientFactory = Callable[[], StreamingASRClient]
 
 
@@ -84,6 +93,50 @@ async def transcribe_audio_path_for_recovery(
     *,
     asr_client_factory: StreamingASRClientFactory,
 ) -> StreamingASREvent:
+    segments = await _recovery_audio_segments(path)
+    if len(segments) == 1:
+        start_byte, byte_count = segments[0]
+        return await _transcribe_audio_segment_for_recovery(
+            path,
+            start_byte=start_byte,
+            byte_count=byte_count,
+            asr_client_factory=asr_client_factory,
+        )
+
+    recovered_events: list[StreamingASREvent] = []
+    for segment_index, (start_byte, byte_count) in enumerate(segments):
+        try:
+            segment_event = await _transcribe_audio_segment_for_recovery(
+                path,
+                start_byte=start_byte,
+                byte_count=byte_count,
+                asr_client_factory=asr_client_factory,
+            )
+        except HTTPException as exc:
+            if exc.status_code == 422:
+                continue
+            raise
+        recovered_events.append(
+            _offset_segment_event(
+                segment_event,
+                segment_index=segment_index,
+                start_byte=start_byte,
+                byte_count=byte_count,
+            )
+        )
+
+    if not recovered_events:
+        raise HTTPException(status_code=422, detail="没有识别到这段录音的文字")
+    return _merge_segment_events(recovered_events)
+
+
+async def _transcribe_audio_segment_for_recovery(
+    path: Path,
+    *,
+    start_byte: int,
+    byte_count: int,
+    asr_client_factory: StreamingASRClientFactory,
+) -> StreamingASREvent:
     asr_client = asr_client_factory()
     final_events: list[StreamingASREvent] = []
     latest_text_event: StreamingASREvent | None = None
@@ -104,7 +157,13 @@ async def transcribe_audio_path_for_recovery(
         await asr_client.start()
         collect_task = asyncio.create_task(collect_events())
         async with aiofiles.open(path, "rb") as file:
-            while chunk := await file.read(ASR_RECOVERY_CHUNK_BYTES):
+            await file.seek(start_byte)
+            remaining = byte_count
+            while remaining > 0:
+                chunk = await file.read(min(ASR_RECOVERY_CHUNK_BYTES, remaining))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
                 await asr_client.send_audio(chunk)
         await asr_client.finish()
         await asyncio.wait_for(asyncio.shield(collect_task), timeout=ASR_RECOVERY_DRAIN_TIMEOUT_SECONDS)
@@ -126,6 +185,81 @@ async def transcribe_audio_path_for_recovery(
     if recovered_event is None or not (recovered_event.text or "").strip():
         raise HTTPException(status_code=422, detail="没有识别到这段录音的文字")
     return recovered_event
+
+
+async def _recovery_audio_segments(path: Path) -> list[tuple[int, int]]:
+    stat = await aiofiles.os.stat(path)
+    size_bytes = int(stat.st_size)
+    if size_bytes <= 0:
+        return [(0, 0)]
+    if path.suffix.lower() != ".pcm" or size_bytes <= ASR_RECOVERY_PCM_SEGMENT_BYTES:
+        return [(0, size_bytes)]
+
+    segment_bytes = _pcm_aligned_segment_bytes(ASR_RECOVERY_PCM_SEGMENT_BYTES)
+    segments: list[tuple[int, int]] = []
+    start_byte = 0
+    while start_byte < size_bytes:
+        byte_count = min(segment_bytes, size_bytes - start_byte)
+        if start_byte + byte_count < size_bytes:
+            byte_count = _pcm_aligned_segment_bytes(byte_count)
+        if byte_count <= 0:
+            byte_count = size_bytes - start_byte
+        segments.append((start_byte, byte_count))
+        start_byte += byte_count
+    return segments
+
+
+def _pcm_aligned_segment_bytes(value: int) -> int:
+    return max(ASR_RECOVERY_PCM_BYTES_PER_SAMPLE, value - (value % ASR_RECOVERY_PCM_BYTES_PER_SAMPLE))
+
+
+def _offset_segment_event(
+    event: StreamingASREvent,
+    *,
+    segment_index: int,
+    start_byte: int,
+    byte_count: int,
+) -> StreamingASREvent:
+    offset_ms = _pcm_byte_offset_ms(start_byte)
+    return StreamingASREvent(
+        type=event.type,
+        text=(event.text or "").strip(),
+        start_ms=(event.start_ms + offset_ms) if event.start_ms is not None else offset_ms,
+        end_ms=(
+            event.end_ms + offset_ms
+            if event.end_ms is not None
+            else _pcm_byte_offset_ms(start_byte + byte_count)
+        ),
+        raw={
+            "segment_index": segment_index,
+            "start_byte": start_byte,
+            "byte_count": byte_count,
+            "offset_ms": offset_ms,
+            "provider_payload": event.raw,
+        },
+        error=event.error,
+    )
+
+
+def _pcm_byte_offset_ms(byte_offset: int) -> int:
+    bytes_per_second = ASR_RECOVERY_PCM_SAMPLE_RATE * ASR_RECOVERY_PCM_BYTES_PER_SAMPLE
+    return round(byte_offset * 1000 / bytes_per_second)
+
+
+def _merge_segment_events(events: list[StreamingASREvent]) -> StreamingASREvent:
+    texts = [(event.text or "").strip() for event in events if (event.text or "").strip()]
+    text = "\n".join(texts)
+    return StreamingASREvent(
+        type="final",
+        text=text,
+        start_ms=events[0].start_ms,
+        end_ms=events[-1].end_ms,
+        raw={
+            "source": "segmented_transcript_recovery",
+            "segment_count": len(events),
+            "segments": [event.raw for event in events],
+        },
+    )
 
 
 async def _load_recoverable_utterance(
