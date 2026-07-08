@@ -47,6 +47,13 @@ function successResponse(options) {
   });
 }
 
+test("audit tracker maps the finished-book reader to book analytics", () => {
+  const tracker = trackerModule();
+
+  assert.equal(tracker.auditFeatureForPage("/pages/book-reader/index"), "book.view");
+  tracker.__resetAuditTrackerForTest();
+});
+
 test("audit tracker batches page view and leave events", async () => {
   const requests = installWxMock(successResponse);
   const tracker = trackerModule();

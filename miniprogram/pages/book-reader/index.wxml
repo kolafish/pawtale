@@ -1,0 +1,45 @@
+<view class="book-reader-page">
+  <view wx:if="{{loading}}" class="reader-state">
+    <text>正在打开成书...</text>
+  </view>
+
+  <view wx:elif="{{error}}" class="reader-state error">
+    <text>{{error}}</text>
+  </view>
+
+  <block wx:else>
+    <view class="reader-cover">
+      <text class="reader-eyebrow">成书阅读</text>
+      <text class="reader-title">{{readerTitle}}</text>
+      <text wx:if="{{readerSubtitle}}" class="reader-subtitle">{{readerSubtitle}}</text>
+      <text class="reader-meta">
+        {{bookPreviewChapters.length || bookPreviewTocItems.length}} 章 · {{bookCharCount || 0}} 字 · {{bookVersionText}}
+      </text>
+      <text wx:if="{{bookStaleNotice}}" class="reader-notice">{{bookStaleNotice}}</text>
+    </view>
+
+    <view wx:if="{{bookPreviewTocItems.length}}" class="reader-section">
+      <text class="section-label">目录</text>
+      <view class="toc-list">
+        <view wx:for="{{bookPreviewTocItems}}" wx:key="id" class="toc-row">
+          <text class="toc-index">{{item.indexText}}</text>
+          <text class="toc-title">{{item.title}}</text>
+        </view>
+      </view>
+    </view>
+
+    <view wx:if="{{bookPreviewChapters.length}}" class="chapter-list">
+      <view wx:for="{{bookPreviewChapters}}" wx:key="id" class="chapter-block">
+        <text class="chapter-index">{{item.indexText}}</text>
+        <text class="chapter-title">{{item.title}}</text>
+        <text wx:if="{{item.metaText}}" class="chapter-meta">{{item.metaText}}</text>
+        <text class="chapter-content" selectable>{{item.content}}</text>
+      </view>
+    </view>
+
+    <view wx:else class="reader-section">
+      <text class="section-label">正文</text>
+      <text class="book-content" selectable>{{bookContent}}</text>
+    </view>
+  </block>
+</view>
