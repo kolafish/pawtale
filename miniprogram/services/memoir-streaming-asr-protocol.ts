@@ -72,6 +72,9 @@ function normalizeVoiceGatewayErrorCode(code: string): string {
   if (normalized.startsWith("volc asr frame")) {
     return "asr_provider_invalid_frame";
   }
+  if (normalized.includes("no_status_rcvd") || normalized.includes("closecode.no_status_rcvd")) {
+    return "asr_provider_connection_closed";
+  }
   return code;
 }
 
@@ -142,6 +145,7 @@ function messageFromErrorCode(code: string, kind: VoiceChatErrorKind): string {
     asr_session_not_started: "语音识别还没有开始",
     asr_session_finishing: "上一句语音还在收尾",
     asr_provider_connection_failed: "语音识别服务连接失败",
+    asr_provider_connection_closed: "语音识别服务连接已关闭，请重新保存这段",
     asr_provider_connection_timeout: "语音识别服务连接超时",
     asr_provider_forbidden: "语音识别服务鉴权失败",
     asr_provider_invalid_frame: "语音识别服务返回异常，请重试",

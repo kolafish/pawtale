@@ -703,6 +703,49 @@ test("voice chat stores pending close state for connection errors", () => {
   assert.match(context.data.recoveryNotice, /语音连接中断/);
 });
 
+test("human interview ignores provider no-status close after transcript has been saved", () => {
+  const pendingWrites = [];
+  const page = loadVoiceChatPage({
+    memoirCacheExports: {
+      writeMemoirVoiceSessionPendingClose: (voiceSessionId, pendingClose) => {
+        pendingWrites.push({ voiceSessionId, pendingClose });
+      },
+    },
+  });
+  const context = {
+    ...page,
+    data: {
+      ...page.data,
+      voiceSessionId: "voice-1",
+      interviewType: "human_interview",
+      status: "ready",
+      recording: false,
+      transcriptLines: [{ id: "line-1", role: "user", text: "这段已经保存。" }],
+      latestTranscriptText: "这段已经保存。",
+      persistenceStateText: "已保存",
+      captureStateText: "录音异常",
+    },
+    setData(patch) {
+      this.data = { ...this.data, ...patch };
+    },
+  };
+
+  page.handleError.call(context, "语音识别服务连接已关闭，请重新保存这段", {
+    kind: "asr",
+    code: "asr_provider_connection_closed",
+    message: "语音识别服务连接已关闭，请重新保存这段",
+  });
+  page.handleStatus.call(context, "error");
+
+  assert.equal(pendingWrites.length, 0);
+  assert.equal(context.data.error, "");
+  assert.equal(context.data.errorKindText, "");
+  assert.equal(context.data.status, "ready");
+  assert.equal(context.data.captureStateText, "麦克风未开始");
+  assert.equal(context.data.primaryActionText, "继续说话");
+  assert.equal(context.data.showStageStatus, false);
+});
+
 test("voice chat refreshes session on show only after page suspension", () => {
   let refreshCalls = 0;
   const page = loadVoiceChatPage();

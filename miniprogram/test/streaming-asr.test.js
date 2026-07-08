@@ -273,6 +273,19 @@ test("normalizes invalid gateway payloads into session errors", () => {
     },
   );
   assert.deepEqual(
+    classifyVoiceGatewayError({
+      type: "session.error",
+      state: "failed",
+      error: "(<CloseCode.NO_STATUS_RCVD: 1005>, None)",
+    }),
+    {
+      kind: "asr",
+      code: "asr_provider_connection_closed",
+      state: "failed",
+      message: "语音识别服务连接已关闭，请重新保存这段",
+    },
+  );
+  assert.deepEqual(
     classifyVoiceClientConnectionError("server rejected WebSocket connection: HTTP 403"),
     {
       kind: "connection",
