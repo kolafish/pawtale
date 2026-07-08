@@ -79,13 +79,6 @@
       >
         人工访谈
       </button>
-      <button
-        class="{{resumeAskButtonClass}}"
-        bindtap="startGuidedInterview"
-        hover-class="{{resumeAskButtonHoverClass}}"
-      >
-        让小余问一句
-      </button>
     </view>
   </view>
 

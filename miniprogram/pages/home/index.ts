@@ -445,10 +445,6 @@ definePage<HomeData>()({
     await this.startVoiceChatWithMode("free_narration", "home_resume");
   },
 
-  async startGuidedInterview() {
-    await this.startVoiceChatWithMode("guided_interview", "home_resume");
-  },
-
   async startHumanInterview() {
     await this.startVoiceChatWithMode("free_narration", "home_resume", "human_interview");
   },

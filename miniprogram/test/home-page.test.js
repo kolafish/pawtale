@@ -473,7 +473,7 @@ test("home creates free narration voice sessions without a guidance module", asy
   delete global.wx;
 });
 
-test("home daily actions create free narration and guided interview sessions", async () => {
+test("home daily actions create free narration and human interview sessions", async () => {
   const createdSessions = [];
   const navigations = [];
   global.wx = {
@@ -511,13 +511,15 @@ test("home daily actions create free narration and guided interview sessions", a
   };
 
   await page.startFreeNarration.call(context);
-  await page.startGuidedInterview.call(context);
+  await page.startHumanInterview.call(context);
 
   assert.equal(createdSessions[0].input.guidance_mode, "free_narration");
   assert.equal(createdSessions[0].input.metadata_json.entry, "miniprogram_home_resume");
   assert.equal(createdSessions[0].input.metadata_json.resume_hint, "爷爷退休后还在忙公司的事");
-  assert.equal(createdSessions[1].input.guidance_mode, "guided_interview");
+  assert.equal(createdSessions[1].input.guidance_mode, "free_narration");
+  assert.equal(createdSessions[1].input.interview_type, "human_interview");
   assert.equal(createdSessions[1].input.metadata_json.entry, "miniprogram_home_resume");
+  assert.equal(createdSessions[1].input.metadata_json.interview_type, "human_interview");
   assert.equal(navigations.length, 2);
   delete global.wx;
 });
