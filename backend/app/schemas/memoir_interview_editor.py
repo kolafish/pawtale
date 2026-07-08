@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.domain.memoir.types import (
     MemoirChatMessageRole,
@@ -106,3 +106,41 @@ class MemoirInterviewEditorSessionDetailResponse(BaseModel):
     questions: list[MemoirInterviewEditorQuestionResponse] = Field(default_factory=list)
     unassigned_answers: list[MemoirInterviewEditorAnswerResponse] = Field(default_factory=list)
     raw_timeline: list[MemoirInterviewEditorTimelineItemResponse] = Field(default_factory=list)
+
+
+class MemoirInterviewEditorQuestionCreateRequest(BaseModel):
+    voice_session_id: str
+    text: str
+
+    @field_validator("voice_session_id", "text")
+    @classmethod
+    def _non_empty_text(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("不能为空")
+        return normalized
+
+
+class MemoirInterviewEditorQuestionTextUpdateRequest(BaseModel):
+    text: str
+
+    @field_validator("text")
+    @classmethod
+    def _valid_text(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("问题文字不能为空")
+        return normalized
+
+
+class MemoirInterviewEditorAnswerParentUpdateRequest(BaseModel):
+    parent_question_message_id: str | None = None
+    reason: str | None = None
+
+    @field_validator("parent_question_message_id", "reason")
+    @classmethod
+    def _optional_trimmed_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None

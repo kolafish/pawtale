@@ -1,3 +1,5 @@
+from sqlalchemy import select
+
 from app.domain.memoir.types import (
     MemoirChatContentStatus,
     MemoirChatMessageRole,
@@ -213,3 +215,129 @@ async def test_interview_editor_keeps_answer_without_parent_unassigned(client, t
     assert detail["questions"][0]["answers"] == []
     assert [item["id"] for item in detail["unassigned_answers"]] == [answer["utterance_id"]]
     assert detail["session"]["unassigned_answer_count"] == 1
+
+
+async def test_interview_editor_updates_interviewer_question_without_promoting_it_to_source(client, test_db):
+    user = (await client.get("/api/auth/me")).json()
+    session = await _create_human_session(client)
+    question = await _add_turn(
+        test_db,
+        user_id=user["id"],
+        session=session,
+        role=MemoirChatMessageRole.INTERVIEWER.value,
+        text="你小时候家里有几口人？",
+        turn_index=0,
+    )
+    await _add_turn(
+        test_db,
+        user_id=user["id"],
+        session=session,
+        role=MemoirChatMessageRole.USER.value,
+        text="我们家那时候有六口人。",
+        turn_index=1,
+        parent_message_id=question["message_id"],
+    )
+
+    response = await client.patch(
+        f"/api/memoir/projects/{session['project_id']}/interview-editor/questions/{question['message_id']}",
+        json={"text": "你小时候家里一共有几口人？"},
+    )
+
+    assert response.status_code == 200
+    detail = response.json()
+    assert detail["questions"][0]["text"] == "你小时候家里一共有几口人？"
+    message = await test_db.scalar(
+        select(MemoirChatMessage).where(MemoirChatMessage.id == question["message_id"])
+    )
+    utterance = await test_db.scalar(
+        select(MemoirVoiceUtterance).where(MemoirVoiceUtterance.id == question["utterance_id"])
+    )
+    versions = (
+        await test_db.execute(
+            select(MemoirTranscriptVersion)
+            .where(
+                MemoirTranscriptVersion.source_artifact_id == question["utterance_id"],
+                MemoirTranscriptVersion.version_type == MemoirTranscriptVersionType.USER_EDITED.value,
+            )
+        )
+    ).scalars().all()
+    assert message is not None
+    assert message.content_status == MemoirChatContentStatus.CORRECTED.value
+    assert message.metadata_json["text_original"] == "你小时候家里有几口人？"
+    assert message.metadata_json["text_updated_from"] == "web_interview_editor"
+    assert utterance is not None
+    assert utterance.transcript_edited == "你小时候家里一共有几口人？"
+    assert utterance.source_material_type == "interviewer_prompt"
+    assert utterance.source_route_action == "ignore"
+    assert len(versions) == 1
+    assert versions[0].content == "你小时候家里一共有几口人？"
+
+
+async def test_interview_editor_creates_manual_question_and_moves_answer(client, test_db):
+    user = (await client.get("/api/auth/me")).json()
+    session = await _create_human_session(client)
+    answer = await _add_turn(
+        test_db,
+        user_id=user["id"],
+        session=session,
+        role=MemoirChatMessageRole.USER.value,
+        text="那时候已经十多岁了。",
+        turn_index=0,
+        parent_message_id=None,
+    )
+
+    create_response = await client.post(
+        f"/api/memoir/projects/{session['project_id']}/interview-editor/questions",
+        json={"voice_session_id": session["id"], "text": "你是什么时候去县城读书的？"},
+    )
+    assert create_response.status_code == 201
+    created_question = create_response.json()["questions"][0]
+
+    move_response = await client.patch(
+        f"/api/memoir/projects/{session['project_id']}/interview-editor/answers/{answer['message_id']}/parent",
+        json={"parent_question_message_id": created_question["id"], "reason": "人工整理问答关系"},
+    )
+
+    assert move_response.status_code == 200
+    detail = move_response.json()
+    assert detail["unassigned_answers"] == []
+    assert detail["questions"][0]["answers"][0]["id"] == answer["utterance_id"]
+    message = await test_db.scalar(
+        select(MemoirChatMessage).where(MemoirChatMessage.id == answer["message_id"])
+    )
+    assert message is not None
+    assert message.parent_message_id == created_question["id"]
+    assert message.metadata_json["captured_parent_message_id"] is None
+    assert message.metadata_json["relation_updated_from"] == "web_interview_editor"
+    assert message.metadata_json["relation_update_reason"] == "人工整理问答关系"
+
+
+async def test_interview_editor_rejects_answer_parent_from_another_session(client, test_db):
+    user = (await client.get("/api/auth/me")).json()
+    session = await _create_human_session(client)
+    other_session = await _create_human_session(client)
+    answer = await _add_turn(
+        test_db,
+        user_id=user["id"],
+        session=session,
+        role=MemoirChatMessageRole.USER.value,
+        text="那时候已经十多岁了。",
+        turn_index=0,
+        parent_message_id=None,
+    )
+    other_question = await _add_turn(
+        test_db,
+        user_id=user["id"],
+        session=other_session,
+        role=MemoirChatMessageRole.INTERVIEWER.value,
+        text="你在另一场访谈里说了什么？",
+        turn_index=0,
+    )
+
+    response = await client.patch(
+        f"/api/memoir/projects/{session['project_id']}/interview-editor/answers/{answer['message_id']}/parent",
+        json={"parent_question_message_id": other_question["message_id"]},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "问题和回答必须属于同一次访谈"

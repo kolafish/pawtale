@@ -7,6 +7,9 @@ from app.auth import get_current_user
 from app.database import get_db
 from app.models.users import User
 from app.schemas.memoir_interview_editor import (
+    MemoirInterviewEditorAnswerParentUpdateRequest,
+    MemoirInterviewEditorQuestionCreateRequest,
+    MemoirInterviewEditorQuestionTextUpdateRequest,
     MemoirInterviewEditorSessionDetailResponse,
     MemoirInterviewEditorSessionListResponse,
 )
@@ -53,4 +56,63 @@ async def get_memoir_interview_editor_session(
         user_id=current_user.id,
         project_id=project_id,
         voice_session_id=voice_session_id,
+    )
+
+
+@router.post(
+    "/projects/{project_id}/interview-editor/questions",
+    response_model=MemoirInterviewEditorSessionDetailResponse,
+    status_code=201,
+)
+async def create_memoir_interview_editor_question(
+    project_id: str,
+    req: MemoirInterviewEditorQuestionCreateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await memoir_interview_editor.create_interview_question(
+        db,
+        user_id=current_user.id,
+        project_id=project_id,
+        req=req,
+    )
+
+
+@router.patch(
+    "/projects/{project_id}/interview-editor/questions/{message_id}",
+    response_model=MemoirInterviewEditorSessionDetailResponse,
+)
+async def update_memoir_interview_editor_question_text(
+    project_id: str,
+    message_id: str,
+    req: MemoirInterviewEditorQuestionTextUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await memoir_interview_editor.update_interview_question_text(
+        db,
+        user_id=current_user.id,
+        project_id=project_id,
+        message_id=message_id,
+        req=req,
+    )
+
+
+@router.patch(
+    "/projects/{project_id}/interview-editor/answers/{message_id}/parent",
+    response_model=MemoirInterviewEditorSessionDetailResponse,
+)
+async def update_memoir_interview_editor_answer_parent(
+    project_id: str,
+    message_id: str,
+    req: MemoirInterviewEditorAnswerParentUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await memoir_interview_editor.update_answer_parent_question(
+        db,
+        user_id=current_user.id,
+        project_id=project_id,
+        message_id=message_id,
+        req=req,
     )
