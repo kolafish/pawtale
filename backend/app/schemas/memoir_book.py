@@ -683,6 +683,28 @@ class MemoirBookSourceMoveRequest(BaseModel):
         return self
 
 
+class MemoirBookSourceRemoveRequest(BaseModel):
+    ai_model: str | None = None
+    chapter_id: str
+    utterance_ids: list[str]
+
+    @field_validator("chapter_id")
+    @classmethod
+    def _valid_chapter_id(cls, value: str) -> str:
+        chapter_id = value.strip()
+        if not chapter_id:
+            raise ValueError("章节不能为空")
+        return chapter_id
+
+    @field_validator("utterance_ids")
+    @classmethod
+    def _valid_utterance_ids(cls, value: list[str]) -> list[str]:
+        utterance_ids = [item.strip() for item in value if item.strip()]
+        if not utterance_ids:
+            raise ValueError("至少选择一条讲述记录")
+        return list(dict.fromkeys(utterance_ids))
+
+
 class MemoirBookChapterDraftGenerateRequest(BaseModel):
     ai_model: str | None = None
     force_regenerate: bool = False
