@@ -124,10 +124,12 @@ export interface VoiceChatData {
   stageStatusClass: string;
   stageStatusText: string;
   liveDisplayText: string;
+  liveTextClass: string;
   liveScrollClass: string;
   liveScrollTarget: string;
   liveScrollTop: number;
   liveTextEndId: string;
+  showHumanTranscriptOverlay: boolean;
   showCaptureStrip: boolean;
   captureStripClass: string;
   showLiveCharCount: boolean;
@@ -249,10 +251,12 @@ export function initialVoiceChatData(): VoiceChatData {
     stageStatusClass: "stage-status",
     stageStatusText: "可以开始讲了",
     liveDisplayText: "点下方“我来说一段”",
+    liveTextClass: "live-text",
     liveScrollClass: "live-scroll",
     liveScrollTarget: "",
     liveScrollTop: 0,
     liveTextEndId: "live-text-end",
+    showHumanTranscriptOverlay: false,
     showCaptureStrip: true,
     captureStripClass: "capture-strip",
     showLiveCharCount: false,
@@ -302,10 +306,12 @@ export type VoiceChatViewPatch = Pick<
   | "stageStatusClass"
   | "stageStatusText"
   | "liveDisplayText"
+  | "liveTextClass"
   | "liveScrollClass"
   | "liveScrollTarget"
   | "liveScrollTop"
   | "liveTextEndId"
+  | "showHumanTranscriptOverlay"
   | "showCaptureStrip"
   | "captureStripClass"
   | "showLiveCharCount"
@@ -347,6 +353,7 @@ export function voiceChatViewPatch(state: VoiceChatData): VoiceChatViewPatch {
   const showHumanRecordActions = isHumanInterview && !state.recording && state.voiceAuthorizationAgreed;
   const showControlBar = !showHumanRecordActions;
   const showStageStatus = !isHumanInterview || Boolean(state.error);
+  const showHumanTranscriptOverlay = isHumanInterview && state.recording;
   const showCaptureStrip = !isHumanInterview || state.recording;
   let stageStatusText = "可以开始讲了";
   if (state.error) {
@@ -362,7 +369,7 @@ export function voiceChatViewPatch(state: VoiceChatData): VoiceChatViewPatch {
   }
   let liveDisplayText = isHumanInterview ? `点上方开始记录${speakerRoleLabel(state.speakerRole)}` : "点下方“我来说一段”";
   if (state.recording) {
-    liveDisplayText = state.liveText || (isHumanInterview ? "直接说，系统会实时转成文字" : "直接说就行，我会帮您记下来");
+    liveDisplayText = state.liveText || (isHumanInterview ? "等待转写..." : "直接说就行，我会帮您记下来");
   } else if (state.followUpLoading && state.latestTranscriptText) {
     liveDisplayText = "刚才那段正在整理，请稍等";
   } else if (state.followUpLoading && !hasAssistantPrompt) {
@@ -380,7 +387,7 @@ export function voiceChatViewPatch(state: VoiceChatData): VoiceChatViewPatch {
     ? ""
     : "说一两句也可以，我会帮您记下来。";
   if (state.recording) {
-    controlHintText = isHumanInterview ? `正在记录${speakerRoleLabel(state.speakerRole)}` : "说完请点这里";
+    controlHintText = isHumanInterview ? "" : "说完请点这里";
   } else if (!isHumanInterview && state.followUpLoading && !hasAssistantPrompt) {
     controlHintText = "小余先问一句，稍等一下。";
   } else if (!isHumanInterview && assistantBusy) {
@@ -448,10 +455,12 @@ export function voiceChatViewPatch(state: VoiceChatData): VoiceChatViewPatch {
     stageStatusClass: state.error ? "stage-status error" : (state.recording ? "stage-status listening" : "stage-status"),
     stageStatusText,
     liveDisplayText,
+    liveTextClass: isHumanInterview && state.recording && !state.liveText ? "live-text placeholder" : "live-text",
     liveScrollClass: state.liveScrollClass,
     liveScrollTarget: state.liveScrollTarget,
     liveScrollTop: state.liveScrollTop,
     liveTextEndId: state.liveTextEndId,
+    showHumanTranscriptOverlay,
     showCaptureStrip,
     captureStripClass: state.recording ? "capture-strip active" : "capture-strip",
     showLiveCharCount: Boolean(state.recording && state.liveCharCount),

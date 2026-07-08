@@ -12,6 +12,10 @@
   padding-bottom: 330rpx;
 }
 
+.voice-chat-page.large-text.human-recording-focus {
+  padding-bottom: 380rpx;
+}
+
 .top-bar {
   min-height: 96rpx;
   display: flex;
@@ -353,8 +357,80 @@
   text-wrap: pretty;
 }
 
+.live-text.placeholder {
+  color: #8a7b72;
+  font-weight: 600;
+}
+
 .live-text-end {
   height: 2rpx;
+}
+
+.human-transcript-overlay {
+  position: fixed;
+  left: 0;
+  right: 0;
+  top: 0;
+  bottom: 220rpx;
+  box-sizing: border-box;
+  padding: 28rpx 30rpx 24rpx;
+  background: rgba(252, 247, 237, 0.96);
+  z-index: 24;
+  display: flex;
+}
+
+.human-transcript-sheet {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 42rpx 38rpx 28rpx;
+  border-radius: 34rpx;
+  background: #ffffff;
+  box-shadow:
+    0 0 0 1rpx rgba(43, 23, 19, 0.06),
+    0 20rpx 56rpx rgba(93, 61, 42, 0.16);
+  display: flex;
+  flex-direction: column;
+}
+
+.human-transcript-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+.human-transcript-sheet .live-text {
+  font-size: 58rpx;
+  line-height: 1.45;
+}
+
+.human-transcript-footer {
+  margin-top: 24rpx;
+  min-height: 72rpx;
+  padding: 0 24rpx;
+  border-radius: 18rpx;
+  background: #fff3ef;
+  color: #a64b3e;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 14rpx;
+  font-size: 30rpx;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.human-transcript-footer .capture-dot {
+  background: #a64b3e;
+  box-shadow: 0 0 0 10rpx rgba(166, 75, 62, 0.12);
+}
+
+.human-transcript-level {
+  margin-top: 18rpx;
+  height: 12rpx;
+  border-radius: 999rpx;
+  background: #f0e5d8;
+  overflow: hidden;
 }
 
 .capture-strip {
@@ -549,6 +625,7 @@
   left: 0;
   right: 0;
   bottom: 0;
+  z-index: 40;
   padding: 26rpx 32rpx 42rpx;
   background: rgba(252, 247, 237, 0.96);
   box-shadow: 0 -1rpx 0 rgba(43, 23, 19, 0.06);
@@ -938,6 +1015,26 @@
 .voice-chat-page.large-text.human-recording-focus .live-scroll.long {
   height: 760rpx;
   max-height: 760rpx;
+}
+
+.voice-chat-page.large-text.human-recording-focus .human-transcript-overlay {
+  bottom: 260rpx;
+}
+
+.voice-chat-page.large-text .human-transcript-sheet {
+  padding: 46rpx 36rpx 32rpx;
+  border-radius: 38rpx;
+}
+
+.voice-chat-page.large-text .human-transcript-sheet .live-text {
+  font-size: 64rpx;
+  line-height: 1.44;
+}
+
+.voice-chat-page.large-text .human-transcript-footer {
+  min-height: 90rpx;
+  font-size: 38rpx;
+  line-height: 54rpx;
 }
 
 .voice-chat-page.large-text .capture-strip,
