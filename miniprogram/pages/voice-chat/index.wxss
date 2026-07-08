@@ -712,12 +712,16 @@
   border: 0;
 }
 
-.role-record-button[disabled] {
+.role-record-button.disabled {
   opacity: 0.72;
 }
 
 .role-record-button:active {
   transform: scale(0.96);
+}
+
+.role-record-button.disabled:active {
+  transform: none;
 }
 
 .role-record-icon-shell {
@@ -800,7 +804,7 @@
   border: 0;
 }
 
-.mic-button[disabled] {
+.mic-button.disabled {
   opacity: 0.72;
 }
 

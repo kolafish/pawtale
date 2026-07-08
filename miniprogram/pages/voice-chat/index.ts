@@ -916,7 +916,12 @@ definePage<VoiceChatData>()({
   },
 
   startRecordingAsSpeaker(event: SpeakerRoleTapEvent) {
-    if (this.data.recording || this.data.interviewType !== "human_interview") {
+    if (
+      this.data.recording
+      || this.data.connecting
+      || !this.data.voiceAuthorizationAgreed
+      || this.data.interviewType !== "human_interview"
+    ) {
       return;
     }
     const role = queryChoice({ role: datasetString(event, "role") }, "role", SPEAKER_ROLE_VALUES, "narrator");
@@ -1522,6 +1527,9 @@ definePage<VoiceChatData>()({
   },
 
   toggleRecording() {
+    if (this.data.connecting) {
+      return;
+    }
     if (!this.ensureVoiceAuthorization(false)) {
       return;
     }

@@ -20,11 +20,12 @@
     </view>
     <text class="launch-title">{{launchTitle}}</text>
     <text class="launch-body">{{launchBody}}</text>
-    <button
+    <view
       class="{{voiceStartButtonClass}}"
-      loading="{{creatingVoice}}"
       bindtap="startLaunchVoiceChat"
       hover-class="{{voiceStartButtonHoverClass}}"
+      aria-role="button"
+      aria-disabled="{{creatingVoice}}"
     >
       <view class="voice-start-icon-shell">
         <image class="voice-start-icon" src="/assets/memoir-microphone.png" mode="aspectFit" />
@@ -32,7 +33,7 @@
       <view class="voice-start-copy">
         <text class="voice-start-title">{{launchVoiceButtonTitle}}</text>
       </view>
-    </button>
+    </view>
     <button class="launch-secondary-button" bindtap="dismissLaunchPanel" hover-class="launch-secondary-button-hover">
       {{launchSecondaryText}}
     </button>
@@ -59,11 +60,12 @@
     </text>
     <text wx:if="{{hasProject}}" class="resume-note">可以接着这里讲，也可以随便说点别的。</text>
 
-    <button
+    <view
       class="{{voiceStartButtonClass}}"
-      loading="{{creatingVoice}}"
       bindtap="startPrimaryVoiceChat"
       hover-class="{{voiceStartButtonHoverClass}}"
+      aria-role="button"
+      aria-disabled="{{creatingVoice}}"
     >
       <view class="voice-start-icon-shell">
         <image class="voice-start-icon" src="/assets/memoir-microphone.png" mode="aspectFit" />
@@ -73,7 +75,7 @@
           {{primaryVoiceButtonTitle}}
         </text>
       </view>
-    </button>
+    </view>
     <text class="voice-start-note">
       {{voiceStartNoteText}}
     </text>

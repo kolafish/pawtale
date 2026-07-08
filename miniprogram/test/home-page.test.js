@@ -188,6 +188,13 @@ test("home view patch keeps first-screen template state simple", () => {
   );
 });
 
+test("home voice CTA uses a view shell instead of native button shrink wrapping", () => {
+  const template = fs.readFileSync(path.join(__dirname, "../pages/home/index.wxml"), "utf8");
+
+  assert.match(template, /<view\s+class="\{\{voiceStartButtonClass\}\}"/);
+  assert.doesNotMatch(template, /<button\s+class="\{\{voiceStartButtonClass\}\}"/);
+});
+
 test("home userDisplayName hides wechat placeholder display name", () => {
   const { userDisplayName } = loadHomePage().mod;
 
