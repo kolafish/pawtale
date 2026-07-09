@@ -32,10 +32,15 @@ import {
   saveLargeTextEnabled,
 } from "../../services/accessibility-settings";
 import {
+  SHARE_VIDEO_BACKGROUND_MODE_OPTIONS,
   SHARE_VIDEO_BACKGROUND_STYLE_OPTIONS,
+  saveSelectedShareVideoBackgroundMode,
   saveSelectedShareVideoBackgroundStyle,
+  readSelectedShareVideoBackgroundMode,
   readSelectedShareVideoBackgroundStyle,
+  shareVideoBackgroundModeLabel,
   shareVideoBackgroundStyleLabel,
+  type ShareVideoBackgroundModeOption,
   type ShareVideoBackgroundStyleOption,
 } from "../../services/share-video-background-settings";
 import { formatBeijingDateTime } from "../../services/time";
@@ -91,6 +96,9 @@ interface MeData {
   shareVideoBackgroundStyle: string;
   shareVideoBackgroundStyleLabel: string;
   shareVideoBackgroundStyleOptions: ShareVideoBackgroundStyleOption[];
+  shareVideoBackgroundMode: string;
+  shareVideoBackgroundModeLabel: string;
+  shareVideoBackgroundModeOptions: ShareVideoBackgroundModeOption[];
   voiceAuthorizationAgreed: boolean;
   voiceAuthorizationStatusText: string;
   voiceAuthorizationDetailText: string;
@@ -113,6 +121,7 @@ interface MeDataset {
   voice?: string;
   speed?: string | number;
   model?: string;
+  backgroundMode?: string;
   backgroundStyle?: string;
 }
 
@@ -208,13 +217,22 @@ function aiModelSettingsData(): Pick<MeData, "aiModel" | "aiModelLabel" | "aiMod
 
 function shareVideoBackgroundSettingsData(): Pick<
   MeData,
-  "shareVideoBackgroundStyle" | "shareVideoBackgroundStyleLabel" | "shareVideoBackgroundStyleOptions"
+  | "shareVideoBackgroundStyle"
+  | "shareVideoBackgroundStyleLabel"
+  | "shareVideoBackgroundStyleOptions"
+  | "shareVideoBackgroundMode"
+  | "shareVideoBackgroundModeLabel"
+  | "shareVideoBackgroundModeOptions"
 > {
   const backgroundStyle = readSelectedShareVideoBackgroundStyle();
+  const backgroundMode = readSelectedShareVideoBackgroundMode();
   return {
     shareVideoBackgroundStyle: backgroundStyle,
     shareVideoBackgroundStyleLabel: shareVideoBackgroundStyleLabel(backgroundStyle),
     shareVideoBackgroundStyleOptions: SHARE_VIDEO_BACKGROUND_STYLE_OPTIONS,
+    shareVideoBackgroundMode: backgroundMode,
+    shareVideoBackgroundModeLabel: shareVideoBackgroundModeLabel(backgroundMode),
+    shareVideoBackgroundModeOptions: SHARE_VIDEO_BACKGROUND_MODE_OPTIONS,
   };
 }
 
@@ -605,6 +623,16 @@ definePage<MeData>()({
       shareVideoBackgroundStyle: backgroundStyle,
       shareVideoBackgroundStyleLabel: shareVideoBackgroundStyleLabel(backgroundStyle),
       shareVideoBackgroundStyleOptions: SHARE_VIDEO_BACKGROUND_STYLE_OPTIONS,
+    });
+    wx.showToast({ title: "已保存", icon: "success" });
+  },
+
+  selectShareVideoBackgroundMode(event: ShareVideoBackgroundDatasetEvent) {
+    const backgroundMode = saveSelectedShareVideoBackgroundMode(datasetString(event, "backgroundMode"));
+    this.setData({
+      shareVideoBackgroundMode: backgroundMode,
+      shareVideoBackgroundModeLabel: shareVideoBackgroundModeLabel(backgroundMode),
+      shareVideoBackgroundModeOptions: SHARE_VIDEO_BACKGROUND_MODE_OPTIONS,
     });
     wx.showToast({ title: "已保存", icon: "success" });
   },

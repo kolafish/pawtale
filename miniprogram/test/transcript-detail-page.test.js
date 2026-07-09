@@ -112,6 +112,7 @@ function sampleShareVideoContext(utteranceId = "utterance-share") {
     max_select_ms: 90000,
     ai_background_enabled: true,
     default_background_style: "old_album",
+    default_background_mode: "auto",
     background_styles: [
       {
         value: "old_album",
@@ -127,6 +128,23 @@ function sampleShareVideoContext(utteranceId = "utterance-share") {
         value: "storybook",
         label: "老故事书",
         description: "中国老连环画和旧书插图质感",
+      },
+    ],
+    background_modes: [
+      {
+        value: "auto",
+        label: "自动",
+        description: "20 秒以上自动使用智能多图",
+      },
+      {
+        value: "single",
+        label: "单张背景",
+        description: "整段视频使用一张背景图，生成更快",
+      },
+      {
+        value: "smart_multi",
+        label: "智能多图",
+        description: "根据口述内容拆分多个画面",
       },
     ],
     segments: [
@@ -168,6 +186,11 @@ function sampleShareVideoJob(overrides = {}) {
     end_ms: 8800,
     duration_ms: 8800,
     style: "warm_minimal",
+    background_style: "old_album",
+    background_mode: "auto",
+    background_effective_mode: "single",
+    background_scene_count: 1,
+    background_status: "ready",
     video_mime_type: "video/mp4",
     video_size_bytes: 65536,
     download_url: "/api/mobile/memoir/share-video/jobs/job-1/download",
@@ -464,6 +487,8 @@ test("transcript detail page creates share video from selected corrected segment
   assert.equal(context.data.shareVideoSelectedCanGenerate, false);
   assert.equal(context.data.shareVideoBackgroundStyle, "old_album");
   assert.equal(context.data.shareVideoBackgroundStyleOptions.length, 3);
+  assert.equal(context.data.shareVideoBackgroundMode, "auto");
+  assert.equal(context.data.shareVideoBackgroundModeOptions.length, 3);
 
   page.selectShareVideoSegment.call(context, { currentTarget: { dataset: { index: 0 } } });
   assert.equal(context.data.shareVideoSelectedText, "爷爷退休后还在帮公司做事。");
@@ -490,9 +515,14 @@ test("transcript detail page creates share video from selected corrected segment
   assert.deepEqual(storageWrites, [
     {
       key: "pawtale_share_video_background_settings",
-      value: { backgroundStyle: "storybook" },
+      value: { backgroundStyle: "storybook", backgroundMode: "auto" },
     },
   ]);
+  page.selectShareVideoBackgroundMode.call(context, {
+    currentTarget: { dataset: { backgroundMode: "smart_multi" } },
+  });
+  assert.equal(context.data.shareVideoBackgroundMode, "smart_multi");
+  assert.equal(context.data.shareVideoBackgroundModeLabel, "智能多图");
 
   await page.createShareVideo.call(context);
 
@@ -501,7 +531,7 @@ test("transcript detail page creates share video from selected corrected segment
       id: "utterance-share",
       startChar: 0,
       endChar: 23,
-      options: { backgroundStyle: "storybook" },
+      options: { backgroundStyle: "storybook", backgroundMode: "smart_multi" },
     },
   ]);
   assert.equal(context.data.shareVideoJob.status, "pending");

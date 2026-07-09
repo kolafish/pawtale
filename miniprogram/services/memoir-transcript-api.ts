@@ -35,6 +35,7 @@ interface ShareVideoJobOptions {
   style?: string;
   styleOptions?: Record<string, unknown>;
   backgroundStyle?: string;
+  backgroundMode?: string;
 }
 
 export function listMemoirVoiceTranscripts(
@@ -86,6 +87,7 @@ export function createMemoirTranscriptShareVideoJob(
         style,
         style_options: options.styleOptions || {},
         ...(options.backgroundStyle ? { background_style: options.backgroundStyle } : {}),
+        ...(options.backgroundMode ? { background_mode: options.backgroundMode } : {}),
       },
     },
   );

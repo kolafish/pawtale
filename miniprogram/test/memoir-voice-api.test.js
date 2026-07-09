@@ -459,6 +459,24 @@ test("share video APIs encode routes and download preview with session cookie", 
             alignment_confidence: 0.9,
             min_select_ms: 3000,
             max_select_ms: 90000,
+            default_background_mode: "auto",
+            background_modes: [
+              {
+                value: "auto",
+                label: "自动",
+                description: "20 秒以上自动使用多图",
+              },
+              {
+                value: "single",
+                label: "单张背景",
+                description: "整段视频使用一张背景图",
+              },
+              {
+                value: "smart_multi",
+                label: "智能多图",
+                description: "按内容拆分多张背景",
+              },
+            ],
             segments: [
               {
                 index: 0,
@@ -495,6 +513,7 @@ test("share video APIs encode routes and download preview with session cookie", 
   const context = await getMemoirTranscriptShareVideoContext("utterance/1");
   const created = await createMemoirTranscriptShareVideoJob("utterance/1", 0, 13, {
     backgroundStyle: "storybook",
+    backgroundMode: "smart_multi",
   });
   const detail = await getMemoirShareVideoJob("job/1");
   const path = await downloadMemoirShareVideoJob(shareVideoJob);
@@ -516,6 +535,7 @@ test("share video APIs encode routes and download preview with session cookie", 
     style: "warm_minimal",
     style_options: {},
     background_style: "storybook",
+    background_mode: "smart_multi",
   });
   assert.equal(
     apiRequests[2].url,
@@ -523,6 +543,7 @@ test("share video APIs encode routes and download preview with session cookie", 
   );
   assert.equal(apiRequests[2].method, "GET");
   assert.equal(context.segments[0].text, "爷爷退休后还在帮公司做事。");
+  assert.equal(context.background_modes[2].value, "smart_multi");
   assert.equal(created.status, "succeeded");
   assert.equal(detail.download_url, "/api/mobile/memoir/share-video/jobs/job-1/download");
   assert.equal(path, "/tmp/share.mp4");

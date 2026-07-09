@@ -346,6 +346,25 @@
               </view>
             </view>
           </view>
+          <view class="share-video-background">
+            <view class="share-video-background-head">
+              <text class="voice-edit-label">画面模式</text>
+              <text class="share-video-background-current">{{shareVideoBackgroundModeLabel}}</text>
+            </view>
+            <view class="share-video-background-options">
+              <view
+                wx:for="{{shareVideoBackgroundModeOptions}}"
+                wx:key="value"
+                class="share-video-background-option {{item.value === shareVideoBackgroundMode ? 'selected' : ''}}"
+                data-background-mode="{{item.value}}"
+                bindtap="selectShareVideoBackgroundMode"
+                hover-class="tap-hover"
+              >
+                <text class="share-video-background-label">{{item.label}}</text>
+                <text class="share-video-background-desc">{{item.description}}</text>
+              </view>
+            </view>
+          </view>
           <view class="actions-row share-video-actions">
             <button
               class="primary-button"
