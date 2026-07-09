@@ -8,6 +8,7 @@ from app.database import get_db
 from app.models.users import User
 from app.schemas.memoir_interview_editor import (
     MemoirInterviewEditorAnswerParentUpdateRequest,
+    MemoirInterviewEditorQuestionConvertToAnswerRequest,
     MemoirInterviewEditorQuestionCreateRequest,
     MemoirInterviewEditorQuestionTextUpdateRequest,
     MemoirInterviewEditorSessionDetailResponse,
@@ -115,6 +116,27 @@ async def update_memoir_interview_editor_question_text(
     current_user: User = Depends(get_current_user),
 ):
     return await memoir_interview_editor.update_interview_question_text(
+        db,
+        user_id=current_user.id,
+        project_id=project_id,
+        message_id=message_id,
+        req=req,
+        allow_admin=is_admin_user(current_user),
+    )
+
+
+@router.post(
+    "/projects/{project_id}/interview-editor/questions/{message_id}/convert-to-answer",
+    response_model=MemoirInterviewEditorSessionDetailResponse,
+)
+async def convert_memoir_interview_editor_question_to_answer(
+    project_id: str,
+    message_id: str,
+    req: MemoirInterviewEditorQuestionConvertToAnswerRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await memoir_interview_editor.convert_interview_question_to_answer(
         db,
         user_id=current_user.id,
         project_id=project_id,

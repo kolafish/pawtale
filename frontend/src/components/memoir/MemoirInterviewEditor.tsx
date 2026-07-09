@@ -336,6 +336,7 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
   const [targetChapterId, setTargetChapterId] = useState('');
   const [newQuestionText, setNewQuestionText] = useState('');
   const [editingQuestion, setEditingQuestion] = useState<{ id: string; text: string } | null>(null);
+  const [convertQuestionDraft, setConvertQuestionDraft] = useState<{ questionId: string; parentQuestionId: string } | null>(null);
   const [playbackRate, setPlaybackRate] = useState(1);
   const [isAudioPlaying, setIsAudioPlaying] = useState(false);
   const [glossaryDraftOverride, setGlossaryDraftOverride] = useState<MemoirDialectGlossaryEntry[] | null>(null);
@@ -414,6 +415,8 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
   const effectiveTargetQuestionId = detail?.questions.some((question) => question.id === targetQuestionId)
     ? targetQuestionId
     : '';
+  const convertingQuestion = detail?.questions.find((question) => question.id === convertQuestionDraft?.questionId) ?? null;
+  const convertTargetQuestions = detail?.questions.filter((question) => question.id !== convertQuestionDraft?.questionId) ?? [];
   const effectiveTargetChapterId = chapterEditor?.chapters.some((chapter) => chapter.id === targetChapterId)
     ? targetChapterId
     : '';
@@ -456,6 +459,31 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
       queryClient.setQueryData(['memoirInterviewEditorSession', project.id, selectedSessionId], data);
       queryClient.invalidateQueries({ queryKey: ['memoirInterviewEditorReview', project.id, selectedSessionId] });
       queryClient.invalidateQueries({ queryKey: ['memoirInterviewEditorSessions', project.id] });
+    },
+  });
+
+  const convertQuestionMutation = useMutation({
+    mutationFn: ({ messageId, parentQuestionId }: { messageId: string; parentQuestionId: string | null }) =>
+      memoirInterviewEditorApi.convertQuestionToAnswer(
+        project.id,
+        messageId,
+        parentQuestionId,
+        parentQuestionId ? 'web_convert_question_to_answer' : 'web_convert_question_to_unassigned_answer',
+      ),
+    onSuccess: (data, variables) => {
+      const convertedAnswer = allAnswers(data.questions, data.unassigned_answers)
+        .find((answer) => answer.message_id === variables.messageId);
+      setConvertQuestionDraft(null);
+      setEditingQuestion(null);
+      setCheckedAnswerIds([]);
+      setCleanupPreviewItems([]);
+      if (convertedAnswer) {
+        setSelectedAnswerOverride(convertedAnswer.id);
+      }
+      queryClient.setQueryData(['memoirInterviewEditorSession', project.id, selectedSessionId], data);
+      queryClient.invalidateQueries({ queryKey: ['memoirInterviewEditorReview', project.id, selectedSessionId] });
+      queryClient.invalidateQueries({ queryKey: ['memoirInterviewEditorSessions', project.id] });
+      queryClient.invalidateQueries({ queryKey: ['memoirChapterSourceEditor', project.id] });
     },
   });
 
@@ -790,6 +818,13 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
     && editingQuestion
     && editingQuestion.text.trim()
     && detail?.questions.some((question) => question.id === editingQuestion.id && question.text !== editingQuestion.text),
+  );
+  const canConfirmQuestionConversion = Boolean(
+    canEditMaterials
+    && convertingQuestion
+    && convertingQuestion.answer_count === 0
+    && convertingQuestion.utterance_id
+    && !convertQuestionMutation.isPending,
   );
   const canMoveCheckedAnswers = Boolean(
     canEditMaterials
@@ -1168,7 +1203,7 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
                       </button>
                     </div>
                   </div>
-                  {(createQuestionMutation.isError || updateParentMutation.isError || updateQuestionMutation.isError) && (
+                  {(createQuestionMutation.isError || updateParentMutation.isError || updateQuestionMutation.isError || convertQuestionMutation.isError) && (
                     <div className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">
                       问答关系保存失败，请刷新后重试。
                     </div>
@@ -1216,6 +1251,27 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
                         ) : (
                           <div className="mt-1 flex items-start gap-2">
                             <h3 className="min-w-0 flex-1 text-base font-medium leading-7 text-gray-900">{question.text}</h3>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                convertQuestionMutation.reset();
+                                setConvertQuestionDraft({ questionId: question.id, parentQuestionId: '' });
+                              }}
+                              disabled={!canEditMaterials || question.answer_count > 0 || !question.utterance_id || convertQuestionMutation.isPending}
+                              className="inline-flex h-9 flex-shrink-0 items-center justify-center gap-1.5 rounded-lg px-2.5 text-xs font-medium text-emerald-700 transition-[background-color,opacity,transform] hover:bg-emerald-50 active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-40"
+                              title={
+                                !canEditMaterials
+                                  ? '当前没有编辑权限'
+                                  : question.answer_count > 0
+                                    ? '先把这个问题下的回答移动到其他问题'
+                                    : !question.utterance_id
+                                      ? '这条问题没有可转换的录音识别文本'
+                                      : '把这条问题转为回答'
+                              }
+                            >
+                              <UserRound size={14} />
+                              转为回答
+                            </button>
                             <button
                               type="button"
                               onClick={() => setEditingQuestion({ id: question.id, text: question.text })}
@@ -1748,6 +1804,114 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
           </div>
         </aside>
       </div>
+      {convertQuestionDraft && convertingQuestion && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/35 px-4">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="convert-question-title"
+            className="w-full max-w-lg rounded-lg bg-white p-5 shadow-[0_24px_60px_rgba(15,23,42,0.22)]"
+          >
+            <div className="flex items-start gap-3">
+              <div className="mt-0.5 flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-emerald-50 text-emerald-700">
+                <UserRound size={17} />
+              </div>
+              <div className="min-w-0 flex-1">
+                <h3 id="convert-question-title" className="text-base font-semibold text-gray-900">
+                  把这条问题改成回答？
+                </h3>
+                <p className="mt-1 text-sm leading-6 text-gray-600">
+                  转换后会从问题列表移到回答列表，原音频、ASR 原文和校正文都会保留。
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  convertQuestionMutation.reset();
+                  setConvertQuestionDraft(null);
+                }}
+                disabled={convertQuestionMutation.isPending}
+                className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg text-gray-400 transition-[background-color,color,opacity,transform] hover:bg-slate-100 hover:text-gray-700 active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-40"
+                title="关闭"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="mt-4 rounded-lg bg-slate-50 px-3 py-3">
+              <div className="mb-1 flex flex-wrap items-center gap-2 text-xs text-gray-500">
+                <span>{questionRoleLabel(convertingQuestion.role, detail?.session)}</span>
+                <span className="tabular-nums">#{convertingQuestion.turn_index}</span>
+              </div>
+              <p className="max-h-32 overflow-y-auto whitespace-pre-wrap text-sm leading-6 text-gray-800">
+                {convertingQuestion.text}
+              </p>
+            </div>
+
+            <label htmlFor="convert-question-parent" className="mt-4 block text-xs font-medium text-gray-500">
+              转换后放到
+            </label>
+            <select
+              id="convert-question-parent"
+              value={convertQuestionDraft.parentQuestionId}
+              onChange={(event) => setConvertQuestionDraft((draftValue) => (
+                draftValue ? { ...draftValue, parentQuestionId: event.target.value } : draftValue
+              ))}
+              disabled={convertQuestionMutation.isPending}
+              className="mt-1 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-gray-800 outline-none transition-[border-color,box-shadow] focus:border-emerald-300 focus:shadow-[0_0_0_3px_rgba(16,185,129,0.16)] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <option value="">未归属回答</option>
+              {convertTargetQuestions.map((question) => (
+                <option key={question.id} value={question.id}>
+                  #{question.turn_index} {question.text}
+                </option>
+              ))}
+            </select>
+
+            {convertingQuestion.answer_count > 0 && (
+              <div className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">
+                这个问题下还有 {convertingQuestion.answer_count} 段回答，请先移动这些回答后再转换。
+              </div>
+            )}
+            {!convertingQuestion.utterance_id && (
+              <div className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">
+                这条问题没有可转换的录音识别文本。
+              </div>
+            )}
+            {convertQuestionMutation.isError && (
+              <div className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">
+                转换失败，请刷新后重试。
+              </div>
+            )}
+
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  convertQuestionMutation.reset();
+                  setConvertQuestionDraft(null);
+                }}
+                disabled={convertQuestionMutation.isPending}
+                className="inline-flex h-10 items-center justify-center rounded-lg bg-slate-100 px-4 text-sm text-gray-700 transition-[background-color,opacity,transform] hover:bg-slate-200 active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                disabled={!canConfirmQuestionConversion}
+                onClick={() => convertQuestionMutation.mutate({
+                  messageId: convertingQuestion.id,
+                  parentQuestionId: convertQuestionDraft.parentQuestionId || null,
+                })}
+                className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 text-sm font-medium text-white transition-[background-color,opacity,transform] hover:bg-emerald-700 active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {convertQuestionMutation.isPending ? <Loader2 size={16} className="animate-spin" /> : <UserRound size={16} />}
+                转为回答
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

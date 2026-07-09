@@ -170,6 +170,19 @@ class MemoirInterviewEditorAnswerParentUpdateRequest(BaseModel):
         return normalized or None
 
 
+class MemoirInterviewEditorQuestionConvertToAnswerRequest(BaseModel):
+    parent_question_message_id: str | None = None
+    reason: str | None = None
+
+    @field_validator("parent_question_message_id", "reason")
+    @classmethod
+    def _optional_trimmed_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None
+
+
 class MemoirDialectGlossaryEntry(BaseModel):
     source: str = Field(min_length=1, max_length=80)
     target: str = Field(min_length=1, max_length=80)
