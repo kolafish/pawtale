@@ -468,6 +468,22 @@ test("transcript detail page creates share video from selected corrected segment
   assert.equal(context.data.shareVideoJob.status, "succeeded");
   assert.equal(context.data.shareVideoStatusText, "视频已生成，可以预览");
   assert.equal(context.data.shareVideoPreviewPath, "/tmp/share-video.mp4");
+
+  const shareCalls = [];
+  global.wx = {
+    shareFileMessage(options) {
+      shareCalls.push(options);
+      options.success({ errMsg: "shareFileMessage:ok" });
+    },
+  };
+  await page.shareGeneratedVideo.call(context);
+  delete global.wx;
+
+  assert.deepEqual(downloads, ["job-1"]);
+  assert.equal(shareCalls.length, 1);
+  assert.equal(shareCalls[0].filePath, "/tmp/share-video.mp4");
+  assert.equal(shareCalls[0].fileName, "爷爷退休后仍帮公司做事.mp4");
+  assert.equal(context.data.shareVideoStatusText, "已打开微信分享");
 });
 
 test("transcript detail page plays question and answer audio separately", async () => {

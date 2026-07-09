@@ -286,7 +286,7 @@
           class="primary-button"
           bindtap="toggleShareVideoPanel"
           loading="{{shareVideoLoadingContext}}"
-          disabled="{{saving || deleting || shareVideoCreating || shareVideoPolling || shareVideoDownloadingPreview}}"
+          disabled="{{saving || deleting || shareVideoCreating || shareVideoPolling || shareVideoDownloadingPreview || shareVideoSharing}}"
         >
           {{shareVideoPanelOpen ? "收起视频" : "制作视频"}}
         </button>
@@ -319,7 +319,7 @@
               <button
                 class="text-action-button"
                 bindtap="clearShareVideoSelection"
-                disabled="{{shareVideoCreating || shareVideoPolling || shareVideoDownloadingPreview}}"
+                disabled="{{shareVideoCreating || shareVideoPolling || shareVideoDownloadingPreview || shareVideoSharing}}"
               >
                 重选
               </button>
@@ -332,9 +332,18 @@
               class="primary-button"
               bindtap="createShareVideo"
               loading="{{shareVideoCreating || shareVideoPolling || shareVideoDownloadingPreview}}"
-              disabled="{{!shareVideoSelectedCanGenerate || shareVideoCreating || shareVideoPolling || shareVideoDownloadingPreview}}"
+              disabled="{{!shareVideoSelectedCanGenerate || shareVideoCreating || shareVideoPolling || shareVideoDownloadingPreview || shareVideoSharing}}"
             >
               {{shareVideoDownloadingPreview ? "准备预览" : (shareVideoCreating || shareVideoPolling ? "生成中" : "生成视频")}}
+            </button>
+            <button
+              wx:if="{{shareVideoJob && shareVideoJob.status === 'succeeded'}}"
+              class="ghost-button"
+              bindtap="shareGeneratedVideo"
+              loading="{{shareVideoSharing}}"
+              disabled="{{shareVideoCreating || shareVideoPolling || shareVideoDownloadingPreview || shareVideoSharing}}"
+            >
+              {{shareVideoSharing ? "分享中" : "分享给微信"}}
             </button>
           </view>
           <view wx:if="{{shareVideoJob}}" class="share-video-job {{shareVideoStatusClass}}">

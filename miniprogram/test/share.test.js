@@ -43,6 +43,62 @@ test("share menu can limit book workbench sharing to friend messages", () => {
   }
 });
 
+test("local file sharing calls wx.shareFileMessage with file name", async () => {
+  const calls = [];
+  global.wx = {
+    shareFileMessage(options) {
+      calls.push(options);
+      options.success({ errMsg: "shareFileMessage:ok" });
+    },
+  };
+  try {
+    const { shareLocalFileMessage } = require("../services/share.ts");
+
+    await shareLocalFileMessage({ filePath: "/tmp/share.mp4", fileName: "回忆录片段.mp4" });
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].filePath, "/tmp/share.mp4");
+    assert.equal(calls[0].fileName, "回忆录片段.mp4");
+  } finally {
+    delete global.wx;
+  }
+});
+
+test("local file sharing treats user cancellation as a cancel error", async () => {
+  global.wx = {
+    shareFileMessage(options) {
+      options.fail({ errMsg: "shareFileMessage:fail cancel" });
+    },
+  };
+  try {
+    const {
+      isShareFileMessageCancelError,
+      shareLocalFileMessage,
+    } = require("../services/share.ts");
+
+    await assert.rejects(
+      () => shareLocalFileMessage({ filePath: "/tmp/share.mp4" }),
+      (error) => isShareFileMessageCancelError(error),
+    );
+  } finally {
+    delete global.wx;
+  }
+});
+
+test("local file sharing reports unsupported WeChat versions", async () => {
+  global.wx = {};
+  try {
+    const { shareLocalFileMessage } = require("../services/share.ts");
+
+    await assert.rejects(
+      () => shareLocalFileMessage({ filePath: "/tmp/share.mp4" }),
+      /当前微信版本不支持直接分享文件/,
+    );
+  } finally {
+    delete global.wx;
+  }
+});
+
 test("book share opens the finished-book reader when book content exists", () => {
   const { bookReaderSharePath, bookShareAppMessage, bookShareTimeline } = require("../services/share.ts");
 
