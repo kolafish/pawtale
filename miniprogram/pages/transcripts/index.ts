@@ -213,6 +213,16 @@ const MODULE_LABELS: Record<string, string> = {
   chat: "闲聊",
 };
 
+function transcriptRequestLimit(
+  state: Pick<TranscriptsData, "items" | "limit" | "offset">,
+  reset: boolean,
+): number {
+  if (!reset) {
+    return state.limit;
+  }
+  return Math.max(state.limit, state.offset, state.items.length);
+}
+
 type PageScrollTo = (options: {
   selector: string;
   offsetTop?: number;
@@ -669,6 +679,7 @@ definePage<TranscriptsData>()({
     this.loadToken += 1;
     const requestToken = this.loadToken;
     const offset = reset ? 0 : this.data.offset;
+    const requestLimit = transcriptRequestLimit(this.data, reset);
     const searchQuery = this.data.searchQuery;
     const searchFilters = normalizedSearchFilters(this.data.searchFilters);
     const hasSearchCriteria = searchCriteriaActive(searchQuery, searchFilters);
@@ -709,7 +720,7 @@ definePage<TranscriptsData>()({
           included: searchFilters.included,
           guidanceMode: searchFilters.guidanceMode || undefined,
           module: searchFilters.module || undefined,
-          limit: this.data.limit,
+          limit: requestLimit,
           offset,
         }),
       ]);

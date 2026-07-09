@@ -624,6 +624,72 @@ test("transcripts page numbers newest-first records from the oldest record", asy
   assert.deepEqual(context.data.items.map((item) => item.recordNumber), [3, 2, 1]);
 });
 
+test("transcripts page preserves loaded records after returning from detail", async () => {
+  const calls = [];
+  const navigations = [];
+  const records = [
+    sampleTranscript("utterance-1", "2026-06-17T04:00:00.000Z"),
+    sampleTranscript("utterance-2", "2026-06-17T03:00:00.000Z"),
+    sampleTranscript("utterance-3", "2026-06-17T02:00:00.000Z"),
+    sampleTranscript("utterance-4", "2026-06-17T01:00:00.000Z"),
+    sampleTranscript("utterance-5", "2026-06-17T00:00:00.000Z"),
+  ];
+  global.wx = {
+    getStorageSync() {
+      return "";
+    },
+    navigateTo(options) {
+      navigations.push(options);
+    },
+  };
+  const { page } = loadTranscriptsPage({
+    authExports: {
+      getMemoirIdentity: async () => ({
+        id: "user-1",
+        active_project_id: "project-1",
+        active_project: { id: "project-1", title: "我的回忆录" },
+        projects: [],
+      }),
+    },
+    voiceApiExports: {
+      listMemoirVoiceTranscripts: async ({ limit, offset }) => {
+        calls.push({ limit, offset });
+        return {
+          items: records.slice(offset, offset + limit),
+          total: records.length,
+          limit,
+          offset,
+        };
+      },
+    },
+  });
+  const context = pageContext(page, { limit: 2 });
+
+  await page.loadTranscripts.call(context, true);
+  await page.loadMore.call(context);
+  page.openTranscriptDetail.call(context, {
+    currentTarget: { dataset: { id: "utterance-4" } },
+  });
+  await page.onShow.call(context);
+
+  assert.deepEqual(calls, [
+    { limit: 2, offset: 0 },
+    { limit: 2, offset: 2 },
+    { limit: 4, offset: 0 },
+  ]);
+  assert.deepEqual(navigations, [
+    { url: "/pages/transcript-detail/index?id=utterance-4" },
+  ]);
+  assert.deepEqual(context.data.items.map((item) => item.id), [
+    "utterance-1",
+    "utterance-2",
+    "utterance-3",
+    "utterance-4",
+  ]);
+  assert.equal(context.data.showLoadMore, true);
+  delete global.wx;
+});
+
 test("transcripts page moves an included source to another chapter", async () => {
   const moves = [];
   const toasts = [];
