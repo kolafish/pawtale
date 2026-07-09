@@ -33,10 +33,17 @@ MEMOIR_SHARE_VIDEO_DIR = DATA_DIR / "memoir" / "share-videos"
 _VIDEO_MIME_TYPE = "video/mp4"
 _VIDEO_WIDTH = 1280
 _VIDEO_HEIGHT = 720
-_BACKGROUND_COLOR = "0xf7f1e8"
+_BACKGROUND_COLOR = "0xf6f1e8"
 _SHARE_VIDEO_FONT_DIR = Path(__file__).resolve().parents[2] / "assets" / "fonts"
 _SHARE_VIDEO_FONT_FILE = "NotoSerifSC-Regular.ttf"
 _SHARE_VIDEO_FONT_NAME = "Memoir Noto Serif SC"
+_ASS_INK_COLOR = "&H00403A2F"
+_ASS_TEA_GOLD_COLOR = "&H003A90B9"
+_ASS_MUTED_COLOR = "&H00919FA8"
+_ASS_RULE_COLOR = "&H00BBCDD8"
+_QUOTE_PAGE_MAX_CHARS = 36
+_QUOTE_LINE_MAX_CHARS = 12
+_QUOTE_PHRASE_MAX_CHARS = 3
 
 
 @dataclass(frozen=True)
@@ -308,6 +315,91 @@ def _subtitle_ranges(text: str, *, max_chars: int = 24) -> list[tuple[int, int]]
     return [(start, end) for start, end in ranges if text[start:end].strip()]
 
 
+def _strip_range(text: str, start: int, end: int) -> tuple[int, int]:
+    while start < end and text[start].isspace():
+        start += 1
+    while end > start and text[end - 1].isspace():
+        end -= 1
+    return start, end
+
+
+def _preferred_compact_line_break(text: str, start: int, end: int) -> int | None:
+    length = end - start
+    if length <= 8:
+        return None
+    midpoint = start + length / 2
+    candidates = [
+        index
+        for index in range(start + 3, end - 3)
+        if text[index] in "与和但而却"
+    ]
+    if candidates:
+        return min(candidates, key=lambda index: abs(index - midpoint))
+    return start + round(length / 2)
+
+
+def _quote_line_ranges(text: str, start: int, end: int) -> list[tuple[int, int]]:
+    start, end = _strip_range(text, start, end)
+    if end <= start:
+        return []
+    if end - start <= 16 and "\n" not in text[start:end]:
+        compact_break = _preferred_compact_line_break(text, start, end)
+        if compact_break:
+            return [
+                item
+                for item in (
+                    _strip_range(text, start, compact_break),
+                    _strip_range(text, compact_break, end),
+                )
+                if item[0] < item[1]
+            ]
+
+    lines: list[tuple[int, int]] = []
+    line_start = start
+    last_soft_break: int | None = None
+    for index in range(start, end):
+        char = text[index]
+        if char in "，,、；;":
+            last_soft_break = index + 1
+        if char == "\n":
+            line_end = index
+        elif char in "。！？!?" or index - line_start + 1 >= _QUOTE_LINE_MAX_CHARS:
+            line_end = last_soft_break if last_soft_break and last_soft_break > line_start else index + 1
+        else:
+            continue
+        line_range = _strip_range(text, line_start, line_end)
+        if line_range[0] < line_range[1]:
+            lines.append(line_range)
+        line_start = index + 1 if char == "\n" else line_end
+        last_soft_break = None
+    if line_start < end:
+        line_range = _strip_range(text, line_start, end)
+        if line_range[0] < line_range[1]:
+            lines.append(line_range)
+    return lines
+
+
+def _karaoke_phrase_ranges(text: str, start: int, end: int) -> list[tuple[int, int]]:
+    phrases: list[tuple[int, int]] = []
+    phrase_start = start
+    visible_chars = 0
+    for index in range(start, end):
+        char = text[index]
+        visible_chars += 0 if char.isspace() else 1
+        should_break = char in "，,、。！？!?；;" or visible_chars >= _QUOTE_PHRASE_MAX_CHARS
+        if should_break:
+            phrase_range = _strip_range(text, phrase_start, index + 1)
+            if phrase_range[0] < phrase_range[1]:
+                phrases.append(phrase_range)
+            phrase_start = index + 1
+            visible_chars = 0
+    if phrase_start < end:
+        phrase_range = _strip_range(text, phrase_start, end)
+        if phrase_range[0] < phrase_range[1]:
+            phrases.append(phrase_range)
+    return phrases
+
+
 def _linear_timings(text: str, duration_ms: int) -> list[dict[str, int]]:
     char_count = max(1, len(text))
     return [
@@ -317,6 +409,44 @@ def _linear_timings(text: str, duration_ms: int) -> list[dict[str, int]]:
         }
         for index, _char in enumerate(text)
     ]
+
+
+def _ass_text(text: str) -> str:
+    return _ass_escape(text).replace("\n", " ")
+
+
+def _decorative_subtitle_events(duration_ms: int) -> list[str]:
+    end_time = _ass_time(duration_ms)
+    return [
+        f"Dialogue: 0,0:00:00.00,{end_time},Meta,,0,0,0,,{{\\an8\\pos(640,102)\\fad(160,160)}}回忆录访谈 · 原声摘录\n",
+        f"Dialogue: 0,0:00:00.00,{end_time},Rule,,0,0,0,,{{\\an7\\pos(500,144)\\alpha&H55&\\p1}}m 0 0 l 280 0 l 280 2 l 0 2\n",
+        f"Dialogue: 0,0:00:00.00,{end_time},Mark,,0,0,0,,{{\\an7\\pos(238,226)\\alpha&H80&}}“\n",
+        f"Dialogue: 0,0:00:00.00,{end_time},Meta,,0,0,0,,{{\\an2\\pos(640,618)\\fad(160,160)}}口述片段\n",
+        f"Dialogue: 0,0:00:00.00,{end_time},Rule,,0,0,0,,{{\\an7\\pos(500,646)\\alpha&H66&\\p1}}m 0 0 l 280 0 l 280 2 l 0 2\n",
+    ]
+
+
+def _quote_karaoke_text(
+    text: str,
+    lines: list[tuple[int, int]],
+    char_timings: list[dict[str, int]],
+) -> str:
+    pieces: list[str] = [r"{\an5\pos(640,356)\q2\fad(180,180)}"]
+    for line_index, (line_start, line_end) in enumerate(lines):
+        if line_index:
+            pieces.append(r"\N")
+        for phrase_start, phrase_end in _karaoke_phrase_ranges(text, line_start, line_end):
+            phrase_duration = (
+                int(char_timings[phrase_end - 1]["end_ms"])
+                - int(char_timings[phrase_start]["start_ms"])
+            )
+            pieces.append(
+                r"{\kf"
+                + str(max(1, round(phrase_duration / 10)))
+                + "}"
+                + _ass_text(text[phrase_start:phrase_end])
+            )
+    return "".join(pieces)
 
 
 def _subtitle_file_content(request: ShareVideoRenderRequest) -> str:
@@ -333,21 +463,24 @@ WrapStyle: 2
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Transcript,{_SHARE_VIDEO_FONT_NAME},58,&H0000A8E8,&H003C3327,&H00F7F1E8,&H55000000,0,0,0,0,100,100,0,0,1,2,0,5,80,80,80,1
+Style: Quote,{_SHARE_VIDEO_FONT_NAME},62,{_ASS_TEA_GOLD_COLOR},{_ASS_INK_COLOR},{_ASS_INK_COLOR},&H00000000,0,0,0,0,100,100,0,0,1,0,0,5,120,120,80,1
+Style: Meta,{_SHARE_VIDEO_FONT_NAME},28,{_ASS_MUTED_COLOR},{_ASS_MUTED_COLOR},{_ASS_MUTED_COLOR},&H00000000,0,0,0,0,100,100,0,0,1,0,0,8,80,80,80,1
+Style: Mark,{_SHARE_VIDEO_FONT_NAME},112,{_ASS_RULE_COLOR},{_ASS_RULE_COLOR},{_ASS_RULE_COLOR},&H00000000,0,0,0,0,100,100,0,0,1,0,0,7,0,0,0,1
+Style: Rule,{_SHARE_VIDEO_FONT_NAME},10,{_ASS_RULE_COLOR},{_ASS_RULE_COLOR},{_ASS_RULE_COLOR},&H00000000,0,0,0,0,100,100,0,0,1,0,0,7,0,0,0,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
-    events = [header]
-    for start, end in _subtitle_ranges(request.selected_text):
+    events = [header, *_decorative_subtitle_events(duration_ms)]
+    for start, end in _subtitle_ranges(request.selected_text, max_chars=_QUOTE_PAGE_MAX_CHARS):
+        lines = _quote_line_ranges(request.selected_text, start, end)
+        if not lines:
+            continue
         start_ms = max(0, int(char_timings[start]["start_ms"]) - request.start_ms)
         end_ms = max(start_ms + 1, int(char_timings[end - 1]["end_ms"]) - request.start_ms)
-        pieces = [r"{\an5\pos(640,360)\fad(120,120)}"]
-        for index in range(start, end):
-            char_duration = int(char_timings[index]["end_ms"]) - int(char_timings[index]["start_ms"])
-            pieces.append(r"{\kf" + str(max(1, round(char_duration / 10))) + "}" + _ass_escape(request.selected_text[index]))
         events.append(
-            f"Dialogue: 0,{_ass_time(start_ms)},{_ass_time(end_ms)},Transcript,,0,0,0,,{''.join(pieces)}\n"
+            f"Dialogue: 1,{_ass_time(start_ms)},{_ass_time(end_ms)},Quote,,0,0,0,,"
+            f"{_quote_karaoke_text(request.selected_text, lines, char_timings)}\n"
         )
     return "".join(events)
 
@@ -368,6 +501,10 @@ def _subtitle_filter_argument(subtitle_path: Path) -> str:
     subtitle = _escaped_subtitle_filter_path(subtitle_path)
     fonts = _escaped_subtitle_filter_path(font_dir)
     return f"subtitles=filename='{subtitle}':fontsdir='{fonts}'"
+
+
+def _video_filter_argument(subtitle_path: Path) -> str:
+    return _subtitle_filter_argument(subtitle_path)
 
 
 async def render_share_video_clip(request: ShareVideoRenderRequest) -> None:
@@ -408,7 +545,7 @@ async def render_share_video_clip(request: ShareVideoRenderRequest) -> None:
             "-i",
             str(clip_audio_path),
             "-vf",
-            _subtitle_filter_argument(subtitle_path),
+            _video_filter_argument(subtitle_path),
             "-c:v",
             "libx264",
             "-preset",
