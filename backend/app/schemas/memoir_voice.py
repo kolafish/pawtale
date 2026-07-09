@@ -8,6 +8,7 @@ from app.domain.memoir.types import (
     MemoirChatContentStatus,
     MemoirChatMessageRole,
     MemoirGuidanceMode,
+    MemoirImageAssetStatus,
     MemoirInterviewType,
     MemoirShareVideoJobStatus,
     MemoirVoiceSessionStatus,
@@ -445,6 +446,21 @@ class MemoirShareVideoJobResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     completed_at: datetime | None = None
+
+
+class MemoirShareVideoCustomBackgroundAssetResponse(BaseModel):
+    id: str
+    project_id: str
+    status: MemoirImageAssetStatus
+    preview_url: str
+    mime_type: str = "image/jpeg"
+    size_bytes: int | None = None
+    width: int | None = None
+    height: int | None = None
+    processing_preset: str = "memoir_soft"
+    original_mime_type: str = ""
+    original_size_bytes: int | None = None
+
 
 class MemoirVoiceSearchTranscriptionRequest(BaseModel):
     audio_base64: str = Field(min_length=1)

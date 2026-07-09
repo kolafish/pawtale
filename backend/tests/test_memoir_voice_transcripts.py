@@ -1,3 +1,4 @@
+import base64
 import asyncio
 import json
 import re
@@ -32,6 +33,7 @@ from app.models.memoir import (
     MemoirChapterSourceLink,
     MemoirChatMessage,
     MemoirEditingJob,
+    MemoirImageAsset,
     MemoirMaterialShareVideo,
     MemoirSourceCard,
     MemoirTranscriptAlignment,
@@ -40,7 +42,9 @@ from app.models.memoir import (
 )
 from app.services.memoir import source_cards
 from app.services.memoir import automation_event_resolution
+from app.services.memoir import image_assets
 from app.services.memoir import share_video_backgrounds
+from app.services.memoir import share_video_custom_backgrounds
 from app.services.memoir import share_video_jobs
 from app.services.memoir import share_video_scene_planner
 from app.services.memoir.asr_text_normalization import normalize_memoir_asr_text
@@ -56,9 +60,16 @@ from app.services.memoir.utterance_editing_pipeline import (
     ROUTE_PAYLOAD_TRANSCRIPT_VERSION_IDS_KEY,
     source_text_hash,
 )
-from tests.memoir_helpers import create_test_voice_transcript, post_mobile_memoir_voice_session
+from tests.memoir_helpers import (
+    create_test_voice_transcript,
+    ensure_mobile_memoir_project,
+    post_mobile_memoir_voice_session,
+)
 
 UTC_SUFFIXES = ("Z", "+00:00")
+PNG_1X1 = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+)
 
 
 def _chapter_source_link(
@@ -773,6 +784,86 @@ def test_share_video_scene_planner_normalizes_continuous_sentence_groups():
     assert scenes[1].end_char == len(text)
     assert invalid_gap == []
     assert invalid_offsets == []
+
+
+async def test_mobile_memoir_uploads_custom_share_video_background(
+    client,
+    test_db,
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(share_video_custom_backgrounds, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(image_assets, "DATA_DIR", tmp_path)
+    process_calls: list[tuple[Path, Path]] = []
+
+    async def fake_process_background_image(source_path: Path, target_path: Path) -> None:
+        process_calls.append((source_path, target_path))
+        assert source_path.read_bytes() == PNG_1X1
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        target_path.write_bytes(b"processed background jpg")
+
+    monkeypatch.setattr(
+        share_video_custom_backgrounds,
+        "_process_background_image",
+        fake_process_background_image,
+    )
+    project_id = await ensure_mobile_memoir_project(client)
+
+    response = await client.post(
+        "/api/mobile/memoir/share-video/background-assets",
+        data={"project_id": project_id, "processing_preset": "memoir_soft"},
+        files={"file": ("background.png", PNG_1X1, "image/png")},
+    )
+    duplicate_response = await client.post(
+        "/api/mobile/memoir/share-video/background-assets",
+        data={"project_id": project_id, "processing_preset": "memoir_soft"},
+        files={"file": ("background-again.png", PNG_1X1, "image/png")},
+    )
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert duplicate_response.status_code == 201
+    assert duplicate_response.json()["id"] == payload["id"]
+    assert len(process_calls) == 1
+    assert payload["project_id"] == project_id
+    assert payload["status"] == "ready"
+    assert payload["preview_url"] == f"/api/mobile/memoir/projects/{project_id}/image-assets/{payload['id']}/file"
+    assert payload["mime_type"] == "image/jpeg"
+    assert payload["width"] == 1280
+    assert payload["height"] == 720
+    assert payload["processing_preset"] == "memoir_soft"
+    assert payload["original_mime_type"] == "image/png"
+    assert payload["original_size_bytes"] == len(PNG_1X1)
+
+    asset = await test_db.scalar(
+        select(MemoirImageAsset).where(MemoirImageAsset.id == payload["id"])
+    )
+    assert asset is not None
+    assert asset.source_type == "share_video_background"
+    assert asset.style_id == "custom"
+    assert asset.provider == "user_upload"
+    assert asset.metadata_json["share_video_background_source"] == "custom_upload"
+    assert asset.metadata_json["original_storage_path"].endswith("/original.png")
+    assert asset.metadata_json["processing_json"]["target_width"] == 1280
+
+    preview_response = await client.get(payload["preview_url"])
+
+    assert preview_response.status_code == 200
+    assert preview_response.headers["content-type"].startswith("image/jpeg")
+    assert preview_response.content == b"processed background jpg"
+
+
+async def test_mobile_memoir_rejects_non_image_custom_share_video_background(client):
+    project_id = await ensure_mobile_memoir_project(client)
+
+    response = await client.post(
+        "/api/mobile/memoir/share-video/background-assets",
+        data={"project_id": project_id},
+        files={"file": ("background.txt", b"not an image", "text/plain")},
+    )
+
+    assert response.status_code == 400
+    assert "JPEG、PNG 或 WebP" in response.json()["detail"]
 
 
 async def test_share_video_background_generation_caches_provider_result(tmp_path, monkeypatch):
