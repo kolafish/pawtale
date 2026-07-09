@@ -1,5 +1,6 @@
 import asyncio
 import json
+import re
 from pathlib import Path
 
 from sqlalchemy import select
@@ -526,7 +527,7 @@ async def test_mobile_memoir_voice_transcript_share_video_context_aligns_edited_
     assert alignment.segments_json[0]["text"] == "说我们的心不平的嘛。"
 
 
-def test_share_video_subtitles_use_packaged_chinese_font(tmp_path):
+def test_share_video_subtitles_use_memoir_page_layout_and_packaged_font(tmp_path):
     text = "对孙女的偏爱与心平之辩"
     request = share_video_jobs.ShareVideoRenderRequest(
         source_audio_path=tmp_path / "source.wav",
@@ -544,14 +545,20 @@ def test_share_video_subtitles_use_packaged_chinese_font(tmp_path):
     )
 
     subtitle_content = share_video_jobs._subtitle_file_content(request)
+    subtitle_plain_text = re.sub(r"\{\\kf\d+\}", "", subtitle_content)
     font_dir = share_video_jobs._share_video_font_dir()
     filter_argument = share_video_jobs._subtitle_filter_argument(tmp_path / "subtitles.ass")
+    video_filter_argument = share_video_jobs._video_filter_argument(tmp_path / "subtitles.ass")
 
-    assert f"Style: Transcript,{share_video_jobs._SHARE_VIDEO_FONT_NAME}," in subtitle_content
-    assert text in subtitle_content.replace(r"{\kf10}", "")
+    assert f"Style: Quote,{share_video_jobs._SHARE_VIDEO_FONT_NAME}," in subtitle_content
+    assert "回忆录访谈 · 原声摘录" in subtitle_content
+    assert "口述片段" in subtitle_content
+    assert r"对孙女的偏爱\N与心平之辩" in subtitle_plain_text
+    assert subtitle_content.count(r"{\kf") < len(text)
     assert (font_dir / share_video_jobs._SHARE_VIDEO_FONT_FILE).is_file()
     assert ":fontsdir='" in filter_argument
     assert str(font_dir) in filter_argument
+    assert video_filter_argument == filter_argument
 
 
 async def test_mobile_memoir_creates_and_downloads_share_video_job(client, test_db, tmp_path, monkeypatch):
