@@ -34,6 +34,9 @@ _VIDEO_MIME_TYPE = "video/mp4"
 _VIDEO_WIDTH = 1280
 _VIDEO_HEIGHT = 720
 _BACKGROUND_COLOR = "0xf7f1e8"
+_SHARE_VIDEO_FONT_DIR = Path(__file__).resolve().parents[2] / "assets" / "fonts"
+_SHARE_VIDEO_FONT_FILE = "NotoSerifSC-Regular.ttf"
+_SHARE_VIDEO_FONT_NAME = "Memoir Noto Serif SC"
 
 
 @dataclass(frozen=True)
@@ -321,7 +324,7 @@ def _subtitle_file_content(request: ShareVideoRenderRequest) -> str:
     char_timings = request.char_timings
     if len(char_timings) != len(request.selected_text):
         char_timings = _linear_timings(request.selected_text, duration_ms)
-    header = """[Script Info]
+    header = f"""[Script Info]
 ScriptType: v4.00+
 PlayResX: 1280
 PlayResY: 720
@@ -330,7 +333,7 @@ WrapStyle: 2
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Transcript,Sans,58,&H0000A8E8,&H003C3327,&H00F7F1E8,&H55000000,0,0,0,0,100,100,0,0,1,2,0,5,80,80,80,1
+Style: Transcript,{_SHARE_VIDEO_FONT_NAME},58,&H0000A8E8,&H003C3327,&H00F7F1E8,&H55000000,0,0,0,0,100,100,0,0,1,2,0,5,80,80,80,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -351,6 +354,20 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
 def _escaped_subtitle_filter_path(path: Path) -> str:
     return str(path).replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
+
+
+def _share_video_font_dir() -> Path:
+    font_path = _SHARE_VIDEO_FONT_DIR / _SHARE_VIDEO_FONT_FILE
+    if not font_path.exists():
+        raise ShareVideoGenerationError("分享视频中文字体文件缺失")
+    return _SHARE_VIDEO_FONT_DIR
+
+
+def _subtitle_filter_argument(subtitle_path: Path) -> str:
+    font_dir = _share_video_font_dir()
+    subtitle = _escaped_subtitle_filter_path(subtitle_path)
+    fonts = _escaped_subtitle_filter_path(font_dir)
+    return f"subtitles=filename='{subtitle}':fontsdir='{fonts}'"
 
 
 async def render_share_video_clip(request: ShareVideoRenderRequest) -> None:
@@ -391,7 +408,7 @@ async def render_share_video_clip(request: ShareVideoRenderRequest) -> None:
             "-i",
             str(clip_audio_path),
             "-vf",
-            f"subtitles='{_escaped_subtitle_filter_path(subtitle_path)}'",
+            _subtitle_filter_argument(subtitle_path),
             "-c:v",
             "libx264",
             "-preset",

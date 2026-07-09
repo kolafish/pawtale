@@ -526,6 +526,34 @@ async def test_mobile_memoir_voice_transcript_share_video_context_aligns_edited_
     assert alignment.segments_json[0]["text"] == "说我们的心不平的嘛。"
 
 
+def test_share_video_subtitles_use_packaged_chinese_font(tmp_path):
+    text = "对孙女的偏爱与心平之辩"
+    request = share_video_jobs.ShareVideoRenderRequest(
+        source_audio_path=tmp_path / "source.wav",
+        source_audio_mime_type="audio/wav",
+        target_path=tmp_path / "share.mp4",
+        selected_text=text,
+        char_timings=[
+            {"start_ms": index * 100, "end_ms": (index + 1) * 100}
+            for index, _char in enumerate(text)
+        ],
+        start_ms=0,
+        end_ms=len(text) * 100,
+        style="memoir_quote",
+        style_options={},
+    )
+
+    subtitle_content = share_video_jobs._subtitle_file_content(request)
+    font_dir = share_video_jobs._share_video_font_dir()
+    filter_argument = share_video_jobs._subtitle_filter_argument(tmp_path / "subtitles.ass")
+
+    assert f"Style: Transcript,{share_video_jobs._SHARE_VIDEO_FONT_NAME}," in subtitle_content
+    assert text in subtitle_content.replace(r"{\kf10}", "")
+    assert (font_dir / share_video_jobs._SHARE_VIDEO_FONT_FILE).is_file()
+    assert ":fontsdir='" in filter_argument
+    assert str(font_dir) in filter_argument
+
+
 async def test_mobile_memoir_creates_and_downloads_share_video_job(client, test_db, tmp_path, monkeypatch):
     monkeypatch.setattr(
         "app.services.memoir.share_video_jobs.MEMOIR_SHARE_VIDEO_DIR",
