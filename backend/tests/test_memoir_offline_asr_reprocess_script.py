@@ -1,0 +1,233 @@
+from __future__ import annotations
+
+from datetime import datetime
+
+from sqlalchemy import select
+
+from app.domain.memoir.types import (
+    MemoirChatContentStatus,
+    MemoirChatMessageRole,
+    MemoirCreatedBy,
+    MemoirGuidanceMode,
+    MemoirTranscriptVersionType,
+)
+from app.models.memoir import AudioFile, MemoirChatMessage, MemoirTranscriptVersion, MemoirVoiceSession, MemoirVoiceUtterance
+from app.models.projects import Project
+from scripts.reprocess_memoir_offline_asr import (
+    OfflineASRResult,
+    STEPFUN_REPROCESS_PROVIDER,
+    VOLC_REPROCESS_PROVIDER,
+    run_offline_asr_reprocess,
+)
+
+
+class FakeCleanupAI:
+    provider_name = "fake-ai"
+    model_name = "fake-model"
+
+    def __init__(self, text: str = "爷爷退休后还在帮公司跑事情。") -> None:
+        self.text = text
+        self.calls: list[dict[str, object]] = []
+
+    async def _call_llm(self, system_prompt: str, user_prompt: str, **kwargs) -> str:
+        self.calls.append({"system_prompt": system_prompt, "user_prompt": user_prompt, "kwargs": kwargs})
+        return self.text
+
+
+async def _create_project(test_db):
+    project = Project(title="余仲尤的往事", type="memoir")
+    test_db.add(project)
+    await test_db.flush()
+    voice_session = MemoirVoiceSession(
+        project_id=project.id,
+        status="created",
+        guidance_mode=MemoirGuidanceMode.FREE_NARRATION.value,
+    )
+    test_db.add(voice_session)
+    await test_db.flush()
+    return project, voice_session
+
+
+async def _add_audio(test_db, *, user_id: str = "user-1", size_bytes: int = 32000):
+    audio_file = AudioFile(
+        user_id=user_id,
+        storage_path=f"memoir/audio/{user_id}/audio.pcm",
+        mime_type="audio/pcm",
+        size_bytes=size_bytes,
+    )
+    test_db.add(audio_file)
+    await test_db.flush()
+    return audio_file
+
+
+async def test_offline_asr_reprocess_dry_run_skips_writes_and_user_edits(test_db):
+    project, voice_session = await _create_project(test_db)
+    audio_file = await _add_audio(test_db)
+    candidate = MemoirVoiceUtterance(
+        voice_session_id=voice_session.id,
+        audio_file_id=audio_file.id,
+        transcript_raw="旧的实时识别",
+        transcript_edited="旧的自动整理",
+        created_at=datetime(2026, 7, 8, 8, 1, 45),
+    )
+    edited = MemoirVoiceUtterance(
+        voice_session_id=voice_session.id,
+        audio_file_id=audio_file.id,
+        transcript_raw="人工已经校过",
+        transcript_edited="人工已经校过",
+        created_at=datetime(2026, 7, 8, 8, 0, 0),
+    )
+    interviewer = MemoirVoiceUtterance(
+        voice_session_id=voice_session.id,
+        audio_file_id=audio_file.id,
+        transcript_raw="采访者问题",
+        source_material_type="interviewer_prompt",
+        created_at=datetime(2026, 7, 8, 8, 0, 0),
+    )
+    test_db.add_all([candidate, edited, interviewer])
+    await test_db.flush()
+    candidate_id = candidate.id
+    project_id = project.id
+    test_db.add(
+        MemoirTranscriptVersion(
+            voice_session_id=voice_session.id,
+            source_artifact_id=edited.id,
+            version_type=MemoirTranscriptVersionType.USER_EDITED.value,
+            content="人工已经校过",
+            created_by=MemoirCreatedBy.USER.value,
+        )
+    )
+    await test_db.commit()
+
+    calls: list[str] = []
+
+    async def fake_runner(db, utterance, providers):
+        calls.append(utterance.id)
+        return []
+
+    result = await run_offline_asr_reprocess(
+        test_db,
+        project_id=project_id,
+        cutoff_created_at_utc=datetime(2026, 7, 8, 8, 2, 59),
+        dry_run=True,
+        asr_runner=fake_runner,
+        ai_client=FakeCleanupAI(),
+    )
+
+    assert result["candidate_count"] == 1
+    assert result["candidates"][0]["utterance_id"] == candidate_id
+    assert calls == []
+    assert await test_db.scalar(
+        select(MemoirTranscriptVersion).where(
+            MemoirTranscriptVersion.source_artifact_id == candidate_id,
+            MemoirTranscriptVersion.provider == VOLC_REPROCESS_PROVIDER,
+        )
+    ) is None
+
+
+async def test_offline_asr_reprocess_writes_multi_asr_versions_and_corrected_text(test_db):
+    project, voice_session = await _create_project(test_db)
+    audio_file = await _add_audio(test_db)
+    question_message = MemoirChatMessage(
+        project_id=project.id,
+        voice_session_id=voice_session.id,
+        role=MemoirChatMessageRole.INTERVIEWER.value,
+        content_text="爷爷退休以后还在忙什么？",
+        content_status=MemoirChatContentStatus.FINAL.value,
+        turn_index=1,
+    )
+    answer_message = MemoirChatMessage(
+        project_id=project.id,
+        voice_session_id=voice_session.id,
+        role=MemoirChatMessageRole.USER.value,
+        content_text="旧的自动整理",
+        content_status=MemoirChatContentStatus.FINAL.value,
+        turn_index=2,
+    )
+    test_db.add_all([question_message, answer_message])
+    await test_db.flush()
+    utterance = MemoirVoiceUtterance(
+        voice_session_id=voice_session.id,
+        chat_message_id=answer_message.id,
+        audio_file_id=audio_file.id,
+        transcript_raw="旧的实时识别",
+        transcript_edited="旧的自动整理",
+        created_at=datetime(2026, 7, 8, 8, 1, 45),
+    )
+    test_db.add(utterance)
+    await test_db.commit()
+
+    async def fake_runner(db, current_utterance, providers):
+        assert tuple(providers) == ("volc", "stepfun")
+        return [
+            OfflineASRResult(VOLC_REPROCESS_PROVIDER, "爷爷退休后还在帮公司跑事情。", {"segment_count": 1}),
+            OfflineASRResult(STEPFUN_REPROCESS_PROVIDER, "爷爷退休以后还帮公司跑事情。", {"segment_count": 1}),
+        ]
+
+    fake_ai = FakeCleanupAI("爷爷退休以后还在帮公司跑事情。")
+    result = await run_offline_asr_reprocess(
+        test_db,
+        project_id=project.id,
+        cutoff_created_at_utc=datetime(2026, 7, 8, 8, 2, 59),
+        dry_run=False,
+        asr_runner=fake_runner,
+        ai_client=fake_ai,
+    )
+
+    assert result["processed_count"] == 1
+    assert result["failed_count"] == 0
+    refreshed = await test_db.get(MemoirVoiceUtterance, utterance.id)
+    refreshed_message = await test_db.get(MemoirChatMessage, answer_message.id)
+    assert refreshed.transcript_raw == "爷爷退休后还在帮公司跑事情。"
+    assert refreshed.transcript_edited == "爷爷退休以后还在帮公司跑事情。"
+    assert refreshed.provider == VOLC_REPROCESS_PROVIDER
+    assert refreshed_message.content_text == "爷爷退休以后还在帮公司跑事情。"
+    assert refreshed_message.content_status == MemoirChatContentStatus.CORRECTED.value
+    assert "老年四川话口音" in fake_ai.calls[0]["user_prompt"]
+    assert "爷爷退休以后还在忙什么？" in fake_ai.calls[0]["user_prompt"]
+
+    versions = (
+        await test_db.execute(
+            select(MemoirTranscriptVersion).where(MemoirTranscriptVersion.source_artifact_id == utterance.id)
+        )
+    ).scalars().all()
+    by_provider = {version.provider: version for version in versions}
+    assert by_provider[VOLC_REPROCESS_PROVIDER].version_type == MemoirTranscriptVersionType.ASR_RAW.value
+    assert by_provider[STEPFUN_REPROCESS_PROVIDER].version_type == MemoirTranscriptVersionType.ASR_RAW.value
+    assert by_provider["fake-ai"].version_type == MemoirTranscriptVersionType.DIALECT_CORRECTED.value
+
+
+async def test_offline_asr_reprocess_creates_message_for_blank_saved_audio(test_db):
+    project, voice_session = await _create_project(test_db)
+    audio_file = await _add_audio(test_db)
+    utterance = MemoirVoiceUtterance(
+        voice_session_id=voice_session.id,
+        audio_file_id=audio_file.id,
+        transcript_raw="",
+        transcript_edited="",
+        created_at=datetime(2026, 7, 7, 9, 0, 45),
+    )
+    test_db.add(utterance)
+    await test_db.commit()
+
+    async def fake_runner(db, current_utterance, providers):
+        return [OfflineASRResult(VOLC_REPROCESS_PROVIDER, "今天先讲医院里的事。", {"segment_count": 1})]
+
+    result = await run_offline_asr_reprocess(
+        test_db,
+        project_id=project.id,
+        cutoff_created_at_utc=datetime(2026, 7, 8, 8, 2, 59),
+        dry_run=False,
+        providers=("volc",),
+        asr_runner=fake_runner,
+        ai_client=FakeCleanupAI("今天先讲医院里的事。"),
+    )
+
+    assert result["processed_count"] == 1
+    refreshed = await test_db.get(MemoirVoiceUtterance, utterance.id)
+    assert refreshed.chat_message_id is not None
+    message = await test_db.get(MemoirChatMessage, refreshed.chat_message_id)
+    assert message.role == MemoirChatMessageRole.USER.value
+    assert message.content_status == MemoirChatContentStatus.CORRECTED.value
+    assert message.content_text == "今天先讲医院里的事。"
+    assert refreshed.provider_payload_json["source"] == "offline_multi_asr_reprocess"

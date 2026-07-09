@@ -54,6 +54,12 @@ class Settings(BaseSettings):
     default_ai_model: str = "claude-opus-4"  # deepseek / deepseek-v4-* / doubao-seed-2-0-pro-260215 / claude-*
     ai_text_max_concurrent_requests: int = 3
 
+    # StepFun batch ASR, used by offline transcript reprocessing tools.
+    stepfun_api_key: str = ""
+    stepfun_base_url: str = "https://api.stepfun.com"
+    stepfun_asr_model: str = "stepaudio-2.5-asr"
+    stepfun_asr_timeout_seconds: float = 120.0
+
     # Memoir editing worker
     memoir_chapter_revision_delay_seconds: int = 300
     memoir_quality_audit_delay_seconds: int = 120
