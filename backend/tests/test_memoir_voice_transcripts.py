@@ -574,6 +574,34 @@ def test_share_video_subtitles_use_memoir_page_layout_and_packaged_font(tmp_path
     assert ":fontsdir='" in image_video_filter
 
 
+def test_share_video_subtitle_ranges_do_not_split_tiny_fragments():
+    text = (
+        "那阵几个娃娃，屋头没得劳动力，要挣工分。我就在外面拿点低工资。"
+        "那阵工资只有那么高，拿不到好多，拿不到好多点工资，分的是低口粮，"
+        "生产队分的是最少的，工分要工分粮，你没有劳动力，工分少，"
+        "分粮也少，所以尽分的低口粮。那个日子也够过了。她还是好，在屋头，"
+        "分点胡豆，分点那个胡豆，煮好后接起。我那阵在县上公交局，县医院，"
+        "在新繁公交局住起，她都要把一点胡豆给我端来，分点吃的胡豆，有半碗碗。"
+    )
+
+    page_ranges = share_video_jobs._subtitle_ranges(
+        text,
+        max_chars=share_video_jobs._QUOTE_PAGE_MAX_CHARS,
+    )
+    page_texts = [text[start:end].strip() for start, end in page_ranges]
+    line_texts = [
+        text[line_start:line_end].strip()
+        for page_start, page_end in page_ranges
+        for line_start, line_end in share_video_jobs._quote_line_ranges(text, page_start, page_end)
+    ]
+
+    assert "粮。" not in page_texts
+    assert "，" not in page_texts
+    assert "，" not in line_texts
+    assert all(len(fragment) >= 4 for fragment in page_texts)
+    assert all(fragment[0] not in "，,、。！？!?；;" for fragment in line_texts)
+
+
 def test_share_video_multi_background_filter_falls_back_without_xfade(tmp_path):
     segments = [
         share_video_jobs.ShareVideoBackgroundSegment(
@@ -654,13 +682,97 @@ def test_share_video_scene_planner_fallback_splits_by_duration_and_punctuation()
     metadata = share_video_scene_planner.scene_plan_to_metadata(plan)
 
     assert plan.provider == "fallback"
-    assert plan.strategy == "duration_punctuation"
+    assert plan.strategy == "sentence_units"
     assert len(plan.scenes) == 3
     assert plan.scenes[0].start_char == 0
     assert plan.scenes[-1].end_char == len(text)
     assert all(scene.end_ms > scene.start_ms for scene in plan.scenes)
+    assert all(text[scene.end_char - 1] == "。" for scene in plan.scenes)
+    assert [scene.sentence_ids for scene in plan.scenes] == [(0,), (1,), (2,)]
     assert metadata["version"] == share_video_scene_planner.SHARE_VIDEO_SCENE_PLAN_VERSION
     assert len(metadata["scenes"]) == 3
+    assert metadata["scenes"][0]["sentence_ids"] == [0]
+    assert metadata["scenes"][0]["evidence_quote"]
+
+
+def test_share_video_scene_planner_prompt_uses_sentence_ids_not_char_offsets():
+    text = "小时候一家人住在老房子里。后来去县城读书。再后来大家各自成家。"
+    char_timings = [
+        {"start_ms": index * 1000, "end_ms": (index + 1) * 1000}
+        for index, _char in enumerate(text)
+    ]
+    sentences = share_video_scene_planner.share_video_sentence_units(text, char_timings, 38_000)
+
+    prompt = share_video_scene_planner._user_prompt(text, sentences, 38_000, 2, 3)
+
+    assert "sentence_ids" in prompt
+    assert "不要输出 start_char/end_char" in prompt
+    assert "0. [0.0s-" in prompt
+    assert "小时候一家人住在老房子里。" in prompt
+    assert "每个 scene 包含 start_char、end_char" not in prompt
+
+
+def test_share_video_scene_planner_normalizes_continuous_sentence_groups():
+    text = "小时候一家人住在老房子里。后来去县城读书。再后来大家各自成家。"
+    char_timings = [
+        {"start_ms": index * 1000, "end_ms": (index + 1) * 1000}
+        for index, _char in enumerate(text)
+    ]
+    sentences = share_video_scene_planner.share_video_sentence_units(text, char_timings, 38_000)
+
+    scenes = share_video_scene_planner._normalize_llm_sentence_scenes(
+        {
+            "scenes": [
+                {
+                    "sentence_ids": [0, 1],
+                    "title": "老房子和县城",
+                    "evidence_quote": "小时候一家人住在老房子里。后来去县城读书。",
+                    "visual_summary": "老房子生活与去县城读书的回忆",
+                    "image_prompt_content": "旧房子与去县城读书路上的安静回忆",
+                },
+                {
+                    "sentence_ids": [2],
+                    "title": "各自成家",
+                    "evidence_quote": "再后来大家各自成家。",
+                    "visual_summary": "家人各自成家后的回望",
+                    "image_prompt_content": "家庭成员各自成家后的克制回望",
+                },
+            ]
+        },
+        text,
+        sentences,
+        char_timings,
+        38_000,
+        2,
+        3,
+    )
+    invalid_gap = share_video_scene_planner._normalize_llm_sentence_scenes(
+        {"scenes": [{"sentence_ids": [0]}, {"sentence_ids": [2]}]},
+        text,
+        sentences,
+        char_timings,
+        38_000,
+        2,
+        3,
+    )
+    invalid_offsets = share_video_scene_planner._normalize_llm_sentence_scenes(
+        {"scenes": [{"start_char": 0, "end_char": 5}, {"start_char": 5, "end_char": len(text)}]},
+        text,
+        sentences,
+        char_timings,
+        38_000,
+        2,
+        3,
+    )
+
+    assert len(scenes) == 2
+    assert scenes[0].sentence_ids == (0, 1)
+    assert scenes[0].start_char == 0
+    assert scenes[0].end_char == sentences[1].end_char
+    assert scenes[1].start_char == sentences[2].start_char
+    assert scenes[1].end_char == len(text)
+    assert invalid_gap == []
+    assert invalid_offsets == []
 
 
 async def test_share_video_background_generation_caches_provider_result(tmp_path, monkeypatch):
