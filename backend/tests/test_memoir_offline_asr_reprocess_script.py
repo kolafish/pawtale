@@ -127,6 +127,7 @@ async def test_offline_asr_reprocess_dry_run_skips_writes_and_user_edits(test_db
 
 async def test_offline_asr_reprocess_writes_multi_asr_versions_and_corrected_text(test_db):
     project, voice_session = await _create_project(test_db)
+    project_id = project.id
     audio_file = await _add_audio(test_db)
     question_message = MemoirChatMessage(
         project_id=project.id,
@@ -167,7 +168,7 @@ async def test_offline_asr_reprocess_writes_multi_asr_versions_and_corrected_tex
     fake_ai = FakeCleanupAI("爷爷退休以后还在帮公司跑事情。")
     result = await run_offline_asr_reprocess(
         test_db,
-        project_id=project.id,
+        project_id=project_id,
         cutoff_created_at_utc=datetime(2026, 7, 8, 8, 2, 59),
         dry_run=False,
         asr_runner=fake_runner,
@@ -195,6 +196,23 @@ async def test_offline_asr_reprocess_writes_multi_asr_versions_and_corrected_tex
     assert by_provider[VOLC_REPROCESS_PROVIDER].version_type == MemoirTranscriptVersionType.ASR_RAW.value
     assert by_provider[STEPFUN_REPROCESS_PROVIDER].version_type == MemoirTranscriptVersionType.ASR_RAW.value
     assert by_provider["fake-ai"].version_type == MemoirTranscriptVersionType.DIALECT_CORRECTED.value
+
+    repeat_dry_run = await run_offline_asr_reprocess(
+        test_db,
+        project_id=project_id,
+        cutoff_created_at_utc=datetime(2026, 7, 8, 8, 2, 59),
+        dry_run=True,
+    )
+    assert repeat_dry_run["candidate_count"] == 0
+
+    forced_dry_run = await run_offline_asr_reprocess(
+        test_db,
+        project_id=project_id,
+        cutoff_created_at_utc=datetime(2026, 7, 8, 8, 2, 59),
+        dry_run=True,
+        force_reprocess=True,
+    )
+    assert forced_dry_run["candidate_count"] == 1
 
 
 async def test_offline_asr_reprocess_creates_message_for_blank_saved_audio(test_db):
