@@ -360,6 +360,12 @@ class MemoirShareVideoBackgroundModeResponse(BaseModel):
     description: str
 
 
+class MemoirShareVideoBackgroundSourceResponse(BaseModel):
+    value: str
+    label: str
+    description: str
+
+
 class MemoirTranscriptShareVideoContextResponse(BaseModel):
     utterance_id: str
     audio_file_id: str
@@ -372,8 +378,10 @@ class MemoirTranscriptShareVideoContextResponse(BaseModel):
     min_select_ms: int = 3000
     max_select_ms: int = 90000
     ai_background_enabled: bool = False
+    default_background_source: str = "ai"
     default_background_style: str = "old_album"
     default_background_mode: str = "auto"
+    background_sources: list[MemoirShareVideoBackgroundSourceResponse] = Field(default_factory=list)
     background_styles: list[MemoirShareVideoBackgroundStyleResponse] = Field(default_factory=list)
     background_modes: list[MemoirShareVideoBackgroundModeResponse] = Field(default_factory=list)
     segments: list[MemoirTranscriptShareVideoSegmentResponse] = Field(default_factory=list)
@@ -384,8 +392,10 @@ class MemoirShareVideoJobCreateRequest(BaseModel):
     end_char: int = Field(gt=0)
     style: str = Field(default="warm_minimal", min_length=1, max_length=40)
     style_options: dict[str, object] = Field(default_factory=dict)
+    background_source: str | None = Field(default=None, max_length=40)
     background_style: str | None = Field(default=None, max_length=40)
     background_mode: str | None = Field(default=None, max_length=40)
+    custom_background_asset_id: str | None = Field(default=None, max_length=36)
 
     @field_validator("style")
     @classmethod
@@ -395,17 +405,9 @@ class MemoirShareVideoJobCreateRequest(BaseModel):
             raise ValueError("不能为空")
         return normalized
 
-    @field_validator("background_style")
+    @field_validator("background_source", "background_style", "background_mode", "custom_background_asset_id")
     @classmethod
-    def _valid_background_style(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        normalized = value.strip()
-        return normalized or None
-
-    @field_validator("background_mode")
-    @classmethod
-    def _valid_background_mode(cls, value: str | None) -> str | None:
+    def _valid_optional_text(cls, value: str | None) -> str | None:
         if value is None:
             return None
         normalized = value.strip()
@@ -415,6 +417,8 @@ class MemoirShareVideoJobCreateRequest(BaseModel):
     def _valid_range(self) -> "MemoirShareVideoJobCreateRequest":
         if self.end_char <= self.start_char:
             raise ValueError("结束位置必须大于开始位置")
+        if self.background_source == "custom" and not self.custom_background_asset_id:
+            raise ValueError("请选择自定义背景图")
         return self
 
 
@@ -431,9 +435,11 @@ class MemoirShareVideoJobResponse(BaseModel):
     end_ms: int
     duration_ms: int
     style: str = "warm_minimal"
+    background_source: str = "ai"
     background_style: str = "old_album"
     background_mode: str = "auto"
     background_effective_mode: str = "single"
+    custom_background_asset_id: str | None = None
     background_scene_count: int = 0
     background_status: str = "disabled"
     background_provider: str | None = None
