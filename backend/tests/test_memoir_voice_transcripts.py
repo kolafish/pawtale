@@ -574,6 +574,32 @@ def test_share_video_subtitles_use_memoir_page_layout_and_packaged_font(tmp_path
     assert ":fontsdir='" in image_video_filter
 
 
+def test_share_video_multi_background_filter_falls_back_without_xfade(tmp_path):
+    segments = [
+        share_video_jobs.ShareVideoBackgroundSegment(
+            image_path=tmp_path / "scene-1.png",
+            start_ms=0,
+            end_ms=12_000,
+        ),
+        share_video_jobs.ShareVideoBackgroundSegment(
+            image_path=tmp_path / "scene-2.png",
+            start_ms=12_000,
+            end_ms=24_000,
+        ),
+    ]
+
+    filter_argument = share_video_jobs._multi_background_filter_complex(
+        segments,
+        tmp_path / "subtitles.ass",
+        use_xfade=False,
+    )
+
+    assert "xfade=" not in filter_argument
+    assert "concat=n=2:v=1:a=0" in filter_argument
+    assert "[concatbg]" in filter_argument
+    assert "[vout]" in filter_argument
+
+
 def test_share_video_background_prompts_cover_default_styles():
     options = share_video_backgrounds.share_video_background_style_options()
     assert [option["value"] for option in options] == ["old_album", "ink_paper", "storybook"]
