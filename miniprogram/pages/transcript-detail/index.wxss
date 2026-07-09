@@ -733,6 +733,41 @@
   line-height: 1.35;
 }
 
+.custom-background-panel {
+  background: #fbf8f3;
+}
+
+.custom-background-preview-wrap {
+  margin-top: 16rpx;
+  width: 100%;
+  height: 336rpx;
+  border-radius: 14rpx;
+  overflow: hidden;
+  background: #f1ede8;
+  box-shadow: inset 0 0 0 1rpx rgba(0, 0, 0, 0.1);
+}
+
+.custom-background-preview {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.custom-background-status {
+  display: block;
+  margin-top: 12rpx;
+  color: #7b4a40;
+  font-size: 24rpx;
+  font-weight: 700;
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+.custom-background-status.muted {
+  color: #7b6f68;
+  font-weight: 600;
+}
+
 .share-video-actions {
   justify-content: flex-start;
 }

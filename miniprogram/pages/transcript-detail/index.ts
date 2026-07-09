@@ -1,7 +1,9 @@
 import type {
   MemoirBookPlan,
   MemoirShareVideoBackgroundMode,
+  MemoirShareVideoBackgroundSource,
   MemoirShareVideoBackgroundStyle,
+  MemoirShareVideoCustomBackgroundAsset,
   MemoirShareVideoJob,
   MemoirTranscriptShareVideoContext,
   MemoirTranscriptShareVideoSegment,
@@ -15,6 +17,7 @@ import {
   convertMemoirInterviewQuestionToAnswer,
   createMemoirTranscriptShareVideoJob,
   deleteMemoirVoiceTranscript,
+  downloadMemoirShareVideoCustomBackgroundPreview,
   downloadMemoirShareVideoJob,
   getMemoirBookPlan,
   getMemoirShareVideoJob,
@@ -24,6 +27,7 @@ import {
   previewMemoirVoiceTranscriptVoiceEdit,
   recoverMemoirVoiceTranscript,
   updateMemoirVoiceTranscript,
+  uploadMemoirShareVideoCustomBackground,
 } from "../../services/memoir-voice-api";
 import { AudioPlaybackController } from "../../services/audio-playback";
 import {
@@ -69,19 +73,27 @@ import {
 } from "../../services/page-input";
 import {
   SHARE_VIDEO_BACKGROUND_MODE_OPTIONS,
+  SHARE_VIDEO_BACKGROUND_SOURCE_OPTIONS,
   SHARE_VIDEO_BACKGROUND_STYLE_OPTIONS,
   readSelectedShareVideoBackgroundMode,
+  readSelectedShareVideoBackgroundSource,
   readSelectedShareVideoBackgroundStyle,
   saveSelectedShareVideoBackgroundMode,
+  saveSelectedShareVideoBackgroundSource,
   saveSelectedShareVideoBackgroundStyle,
   shareVideoBackgroundModeLabel,
+  shareVideoBackgroundSourceLabel,
   shareVideoBackgroundStyleLabel,
 } from "../../services/share-video-background-settings";
 
 type TextAreaEvent = PageTextInputEvent;
 type PickerEvent = PagePickerEvent;
 type ShareVideoSegmentEvent = PageDatasetEvent<{ index?: string | number }>;
-type ShareVideoBackgroundEvent = PageDatasetEvent<{ backgroundMode?: string; backgroundStyle?: string }>;
+type ShareVideoBackgroundEvent = PageDatasetEvent<{
+  backgroundMode?: string;
+  backgroundSource?: string;
+  backgroundStyle?: string;
+}>;
 
 interface TranscriptDetailItemView extends MemoirVoiceTranscriptItem {
   titleText: string;
@@ -170,12 +182,21 @@ interface TranscriptDetailData {
   shareVideoSelectedText: string;
   shareVideoSelectedMetaText: string;
   shareVideoSelectedCanGenerate: boolean;
+  shareVideoBackgroundSource: string;
+  shareVideoBackgroundSourceLabel: string;
+  shareVideoBackgroundSourceOptions: MemoirShareVideoBackgroundSource[];
+  shareVideoBackgroundUsesAi: boolean;
+  shareVideoBackgroundUsesCustom: boolean;
   shareVideoBackgroundStyle: string;
   shareVideoBackgroundStyleLabel: string;
   shareVideoBackgroundStyleOptions: MemoirShareVideoBackgroundStyle[];
   shareVideoBackgroundMode: string;
   shareVideoBackgroundModeLabel: string;
   shareVideoBackgroundModeOptions: MemoirShareVideoBackgroundMode[];
+  shareVideoCustomBackgroundUploading: boolean;
+  shareVideoCustomBackgroundAssetId: string;
+  shareVideoCustomBackgroundPreviewPath: string;
+  shareVideoCustomBackgroundStatusText: string;
   shareVideoStatusText: string;
   shareVideoStatusClass: string;
   shareVideoJob: MemoirShareVideoJob | null;
@@ -357,6 +378,14 @@ function shareVideoBackgroundOptions(
     : SHARE_VIDEO_BACKGROUND_STYLE_OPTIONS;
 }
 
+function shareVideoBackgroundSourceOptions(
+  context: MemoirTranscriptShareVideoContext | null,
+): MemoirShareVideoBackgroundSource[] {
+  return context?.background_sources?.length
+    ? context.background_sources
+    : SHARE_VIDEO_BACKGROUND_SOURCE_OPTIONS;
+}
+
 function shareVideoBackgroundModeOptions(
   context: MemoirTranscriptShareVideoContext | null,
 ): MemoirShareVideoBackgroundMode[] {
@@ -367,10 +396,16 @@ function shareVideoBackgroundModeOptions(
 
 function shareVideoBackgroundPatch(
   context: MemoirTranscriptShareVideoContext | null,
+  preferredSource: string = readSelectedShareVideoBackgroundSource(),
   preferredStyle: string = readSelectedShareVideoBackgroundStyle(),
   preferredMode: string = readSelectedShareVideoBackgroundMode(),
 ): Pick<
   TranscriptDetailData,
+  | "shareVideoBackgroundSource"
+  | "shareVideoBackgroundSourceLabel"
+  | "shareVideoBackgroundSourceOptions"
+  | "shareVideoBackgroundUsesAi"
+  | "shareVideoBackgroundUsesCustom"
   | "shareVideoBackgroundStyle"
   | "shareVideoBackgroundStyleLabel"
   | "shareVideoBackgroundStyleOptions"
@@ -380,21 +415,34 @@ function shareVideoBackgroundPatch(
 > {
   const options = shareVideoBackgroundOptions(context);
   const modeOptions = shareVideoBackgroundModeOptions(context);
+  const sourceOptions = shareVideoBackgroundSourceOptions(context);
+  const fallbackSource = context?.default_background_source || SHARE_VIDEO_BACKGROUND_SOURCE_OPTIONS[0].value;
   const fallbackStyle = context?.default_background_style || SHARE_VIDEO_BACKGROUND_STYLE_OPTIONS[0].value;
   const fallbackMode = context?.default_background_mode || SHARE_VIDEO_BACKGROUND_MODE_OPTIONS[0].value;
   const optionValues = new Set(options.map((option) => option.value));
   const modeOptionValues = new Set(modeOptions.map((option) => option.value));
+  const sourceOptionValues = new Set(sourceOptions.map((option) => option.value));
+  const normalizedSource = sourceOptionValues.has(preferredSource)
+    ? preferredSource
+    : (sourceOptionValues.has(fallbackSource) ? fallbackSource : sourceOptions[0]?.value || fallbackSource);
   const normalizedStyle = optionValues.has(preferredStyle)
     ? preferredStyle
     : (optionValues.has(fallbackStyle) ? fallbackStyle : options[0]?.value || fallbackStyle);
   const normalizedMode = modeOptionValues.has(preferredMode)
     ? preferredMode
     : (modeOptionValues.has(fallbackMode) ? fallbackMode : modeOptions[0]?.value || fallbackMode);
+  const sourceLabel = sourceOptions.find((option) => option.value === normalizedSource)?.label
+    || shareVideoBackgroundSourceLabel(normalizedSource);
   const label = options.find((option) => option.value === normalizedStyle)?.label
     || shareVideoBackgroundStyleLabel(normalizedStyle);
   const modeLabel = modeOptions.find((option) => option.value === normalizedMode)?.label
     || shareVideoBackgroundModeLabel(normalizedMode);
   return {
+    shareVideoBackgroundSource: normalizedSource,
+    shareVideoBackgroundSourceLabel: sourceLabel,
+    shareVideoBackgroundSourceOptions: sourceOptions,
+    shareVideoBackgroundUsesAi: normalizedSource === "ai",
+    shareVideoBackgroundUsesCustom: normalizedSource === "custom",
     shareVideoBackgroundStyle: normalizedStyle,
     shareVideoBackgroundStyleLabel: label,
     shareVideoBackgroundStyleOptions: options,
@@ -406,6 +454,12 @@ function shareVideoBackgroundPatch(
 
 function shareVideoJobStatusText(job: MemoirShareVideoJob): string {
   if (job.status === "succeeded") {
+    if (job.background_source === "custom") {
+      return "视频已生成，已使用自定义背景";
+    }
+    if (job.background_source === "classic") {
+      return "视频已生成，已使用经典背景";
+    }
     if (job.background_status === "failed" || job.background_status === "fallback") {
       return "视频已生成，已使用经典背景";
     }
@@ -421,6 +475,9 @@ function shareVideoJobStatusText(job: MemoirShareVideoJob): string {
     return job.error_message || "视频生成失败";
   }
   if (job.status === "running") {
+    if (job.background_source === "custom" || job.background_source === "classic") {
+      return "正在合成视频";
+    }
     if (job.background_status === "planning") {
       return "正在分析口述画面";
     }
@@ -451,6 +508,46 @@ function shareVideoFileName(item: TranscriptDetailItemView | null): string {
     .trim();
   const shortTitle = Array.from(title).slice(0, 24).join("");
   return `${shortTitle || "回忆录片段"}.mp4`;
+}
+
+function isChooseBackgroundCancel(error: WechatMiniprogram.GeneralCallbackResult): boolean {
+  return String(error.errMsg || "").toLowerCase().includes("cancel");
+}
+
+function chooseShareVideoBackgroundImage(): Promise<string | null> {
+  if (typeof wx.chooseMedia === "function") {
+    return new Promise((resolve, reject) => {
+      wx.chooseMedia?.({
+        count: 1,
+        mediaType: ["image"],
+        sourceType: ["album", "camera"],
+        sizeType: ["original", "compressed"],
+        success: (result) => resolve(result.tempFiles[0]?.tempFilePath || null),
+        fail: (error) => {
+          if (isChooseBackgroundCancel(error)) {
+            resolve(null);
+            return;
+          }
+          reject(new Error(error.errMsg || "选择背景图片失败"));
+        },
+      });
+    });
+  }
+  return new Promise((resolve, reject) => {
+    wx.chooseImage({
+      count: 1,
+      sourceType: ["album", "camera"],
+      sizeType: ["original", "compressed"],
+      success: (result) => resolve(result.tempFilePaths[0] || null),
+      fail: (error) => {
+        if (isChooseBackgroundCancel(error)) {
+          resolve(null);
+          return;
+        }
+        reject(new Error(error.errMsg || "选择背景图片失败"));
+      },
+    });
+  });
 }
 
 async function loadTranscriptBookPlan(projectId: string): Promise<MemoirBookPlan | null> {
@@ -567,6 +664,7 @@ definePage<TranscriptDetailData>()({
   shareVideoPollTimer: null as ReturnType<typeof setTimeout> | null,
   shareVideoPollToken: 0,
   shareVideoPollFailureCount: 0,
+  shareVideoBackgroundUploadToken: 0,
   shareVideoFileCache: {} as Record<string, string>,
 
   data: {
@@ -618,6 +716,10 @@ definePage<TranscriptDetailData>()({
     shareVideoSelectedMetaText: "",
     shareVideoSelectedCanGenerate: false,
     ...shareVideoBackgroundPatch(null),
+    shareVideoCustomBackgroundUploading: false,
+    shareVideoCustomBackgroundAssetId: "",
+    shareVideoCustomBackgroundPreviewPath: "",
+    shareVideoCustomBackgroundStatusText: "",
     shareVideoStatusText: "",
     shareVideoStatusClass: "",
     shareVideoJob: null,
@@ -721,6 +823,7 @@ definePage<TranscriptDetailData>()({
 
   resetShareVideoState() {
     this.cancelShareVideoPolling();
+    this.shareVideoBackgroundUploadToken += 1;
     this.shareVideoFileCache = {};
     this.setData({
       shareVideoPanelOpen: false,
@@ -733,6 +836,10 @@ definePage<TranscriptDetailData>()({
       shareVideoContext: null,
       ...shareVideoSelectionPatch(null, -1, -1),
       ...shareVideoBackgroundPatch(null),
+      shareVideoCustomBackgroundUploading: false,
+      shareVideoCustomBackgroundAssetId: "",
+      shareVideoCustomBackgroundPreviewPath: "",
+      shareVideoCustomBackgroundStatusText: "",
       shareVideoStatusText: "",
       shareVideoStatusClass: "",
       shareVideoJob: null,
@@ -748,7 +855,8 @@ definePage<TranscriptDetailData>()({
       item.isEditing ||
       this.data.saving ||
       this.data.deleting ||
-      this.data.shareVideoSharing
+      this.data.shareVideoSharing ||
+      this.data.shareVideoCustomBackgroundUploading
     ) {
       return;
     }
@@ -788,6 +896,10 @@ definePage<TranscriptDetailData>()({
       shareVideoContext: null,
       ...shareVideoSelectionPatch(null, -1, -1),
       ...shareVideoBackgroundPatch(null),
+      shareVideoCustomBackgroundUploading: false,
+      shareVideoCustomBackgroundAssetId: "",
+      shareVideoCustomBackgroundPreviewPath: "",
+      shareVideoCustomBackgroundStatusText: "",
       shareVideoStatusText: "",
       shareVideoStatusClass: "",
       shareVideoJob: null,
@@ -820,7 +932,8 @@ definePage<TranscriptDetailData>()({
       this.data.shareVideoCreating ||
       this.data.shareVideoPolling ||
       this.data.shareVideoDownloadingPreview ||
-      this.data.shareVideoSharing
+      this.data.shareVideoSharing ||
+      this.data.shareVideoCustomBackgroundUploading
     ) {
       return;
     }
@@ -877,23 +990,54 @@ definePage<TranscriptDetailData>()({
     });
   },
 
+  selectShareVideoBackgroundSource(event: ShareVideoBackgroundEvent) {
+    if (
+      this.data.shareVideoCreating ||
+      this.data.shareVideoPolling ||
+      this.data.shareVideoDownloadingPreview ||
+      this.data.shareVideoSharing ||
+      this.data.shareVideoCustomBackgroundUploading
+    ) {
+      return;
+    }
+    const backgroundSource = saveSelectedShareVideoBackgroundSource(datasetString(event, "backgroundSource"));
+    this.cancelShareVideoPolling();
+    this.shareVideoFileCache = {};
+    this.setData({
+      ...shareVideoBackgroundPatch(
+        this.data.shareVideoContext,
+        backgroundSource,
+        this.data.shareVideoBackgroundStyle,
+        this.data.shareVideoBackgroundMode,
+      ),
+      shareVideoError: "",
+      shareVideoJob: null,
+      shareVideoPreviewPath: "",
+      shareVideoSharing: false,
+    });
+  },
+
   selectShareVideoBackgroundStyle(event: ShareVideoBackgroundEvent) {
     if (
       this.data.shareVideoCreating ||
       this.data.shareVideoPolling ||
       this.data.shareVideoDownloadingPreview ||
-      this.data.shareVideoSharing
+      this.data.shareVideoSharing ||
+      this.data.shareVideoCustomBackgroundUploading
     ) {
       return;
     }
     const backgroundStyle = saveSelectedShareVideoBackgroundStyle(datasetString(event, "backgroundStyle"));
+    this.cancelShareVideoPolling();
     this.shareVideoFileCache = {};
     this.setData({
       ...shareVideoBackgroundPatch(
         this.data.shareVideoContext,
+        this.data.shareVideoBackgroundSource,
         backgroundStyle,
         this.data.shareVideoBackgroundMode,
       ),
+      shareVideoError: "",
       shareVideoJob: null,
       shareVideoPreviewPath: "",
       shareVideoSharing: false,
@@ -905,22 +1049,123 @@ definePage<TranscriptDetailData>()({
       this.data.shareVideoCreating ||
       this.data.shareVideoPolling ||
       this.data.shareVideoDownloadingPreview ||
-      this.data.shareVideoSharing
+      this.data.shareVideoSharing ||
+      this.data.shareVideoCustomBackgroundUploading
     ) {
       return;
     }
     const backgroundMode = saveSelectedShareVideoBackgroundMode(datasetString(event, "backgroundMode"));
+    this.cancelShareVideoPolling();
     this.shareVideoFileCache = {};
     this.setData({
       ...shareVideoBackgroundPatch(
         this.data.shareVideoContext,
+        this.data.shareVideoBackgroundSource,
         this.data.shareVideoBackgroundStyle,
         backgroundMode,
       ),
+      shareVideoError: "",
       shareVideoJob: null,
       shareVideoPreviewPath: "",
       shareVideoSharing: false,
     });
+  },
+
+  async chooseShareVideoCustomBackground() {
+    const item = this.data.item;
+    if (
+      !item ||
+      !this.data.shareVideoContext ||
+      this.data.shareVideoCreating ||
+      this.data.shareVideoPolling ||
+      this.data.shareVideoDownloadingPreview ||
+      this.data.shareVideoSharing ||
+      this.data.shareVideoCustomBackgroundUploading
+    ) {
+      return;
+    }
+    let uploadToken = 0;
+    try {
+      const filePath = await chooseShareVideoBackgroundImage();
+      if (!filePath) {
+        return;
+      }
+      this.stopPlayback();
+      this.cancelShareVideoPolling();
+      this.shareVideoFileCache = {};
+      this.shareVideoBackgroundUploadToken += 1;
+      const token = this.shareVideoBackgroundUploadToken;
+      uploadToken = token;
+      const backgroundSource = saveSelectedShareVideoBackgroundSource("custom");
+      this.setData({
+        ...shareVideoBackgroundPatch(
+          this.data.shareVideoContext,
+          backgroundSource,
+          this.data.shareVideoBackgroundStyle,
+          this.data.shareVideoBackgroundMode,
+        ),
+        shareVideoCustomBackgroundUploading: true,
+        shareVideoCustomBackgroundStatusText: "正在处理背景图片",
+        shareVideoError: "",
+        shareVideoJob: null,
+        shareVideoPreviewPath: "",
+        shareVideoSharing: false,
+      });
+      const asset: MemoirShareVideoCustomBackgroundAsset = await uploadMemoirShareVideoCustomBackground(
+        item.project_id,
+        filePath,
+      );
+      if (token !== this.shareVideoBackgroundUploadToken) {
+        return;
+      }
+      if (asset.status !== "ready") {
+        throw new Error("背景图片还没有处理完成，请稍后重试");
+      }
+      let previewPath = "";
+      try {
+        previewPath = await downloadMemoirShareVideoCustomBackgroundPreview(asset);
+      } catch (previewError) {
+        if (token !== this.shareVideoBackgroundUploadToken) {
+          return;
+        }
+        this.setData({
+          shareVideoCustomBackgroundUploading: false,
+          shareVideoCustomBackgroundAssetId: asset.id,
+          shareVideoCustomBackgroundPreviewPath: "",
+          shareVideoCustomBackgroundStatusText: previewError instanceof Error
+            ? `背景图片已处理，预览暂不可用：${previewError.message}`
+            : "背景图片已处理，预览暂不可用",
+          shareVideoError: "",
+        });
+        return;
+      }
+      if (token !== this.shareVideoBackgroundUploadToken) {
+        return;
+      }
+      this.setData({
+        shareVideoCustomBackgroundUploading: false,
+        shareVideoCustomBackgroundAssetId: asset.id,
+        shareVideoCustomBackgroundPreviewPath: previewPath,
+        shareVideoCustomBackgroundStatusText: "背景图片已处理，会用于本次视频",
+        shareVideoError: "",
+      });
+      trackAuditAction(
+        "transcript.detail_share_video_custom_background_upload",
+        { asset_id: asset.id },
+        { projectId: item.project_id },
+      );
+    } catch (error) {
+      if (uploadToken && uploadToken !== this.shareVideoBackgroundUploadToken) {
+        return;
+      }
+      this.setData({
+        shareVideoCustomBackgroundUploading: false,
+        shareVideoCustomBackgroundStatusText: "",
+        shareVideoError: error instanceof Error ? error.message : "背景图片处理失败",
+        shareVideoStatusText: "背景图片处理失败",
+        shareVideoStatusClass: "failed",
+      });
+    }
   },
 
   async createShareVideo() {
@@ -932,8 +1177,17 @@ definePage<TranscriptDetailData>()({
       this.data.shareVideoCreating ||
       this.data.shareVideoPolling ||
       this.data.shareVideoDownloadingPreview ||
-      this.data.shareVideoSharing
+      this.data.shareVideoSharing ||
+      this.data.shareVideoCustomBackgroundUploading
     ) {
+      return;
+    }
+    if (this.data.shareVideoBackgroundSource === "custom" && !this.data.shareVideoCustomBackgroundAssetId) {
+      this.setData({
+        shareVideoError: "请先选择一张自定义背景图片",
+        shareVideoStatusText: "请先选择背景图片",
+        shareVideoStatusClass: "failed",
+      });
       return;
     }
     this.stopPlayback();
@@ -959,8 +1213,14 @@ definePage<TranscriptDetailData>()({
         this.data.shareVideoSelectedStartChar,
         this.data.shareVideoSelectedEndChar,
         {
-          backgroundStyle: this.data.shareVideoBackgroundStyle,
-          backgroundMode: this.data.shareVideoBackgroundMode,
+          backgroundSource: this.data.shareVideoBackgroundSource,
+          ...(this.data.shareVideoBackgroundSource === "ai" ? {
+            backgroundStyle: this.data.shareVideoBackgroundStyle,
+            backgroundMode: this.data.shareVideoBackgroundMode,
+          } : {}),
+          ...(this.data.shareVideoBackgroundSource === "custom" ? {
+            customBackgroundAssetId: this.data.shareVideoCustomBackgroundAssetId,
+          } : {}),
         },
       );
       if (token !== this.shareVideoPollToken) {
@@ -968,7 +1228,7 @@ definePage<TranscriptDetailData>()({
       }
       trackAuditAction(
         "transcript.detail_share_video_create",
-        { duration_ms: job.duration_ms },
+        { background_source: this.data.shareVideoBackgroundSource, duration_ms: job.duration_ms },
         { projectId: item.project_id },
       );
       await this.applyShareVideoJob(job, token);

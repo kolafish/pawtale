@@ -64,6 +64,62 @@ declare namespace WechatMiniprogram {
     complete?(result: GeneralCallbackResult): void;
   }
 
+  interface UploadFileSuccessCallbackResult extends GeneralCallbackResult {
+    data: string;
+    statusCode: number;
+  }
+
+  interface UploadFileOption {
+    url: string;
+    filePath: string;
+    name: string;
+    header?: Record<string, string>;
+    formData?: Record<string, string | number | boolean>;
+    timeout?: number;
+    success?(result: UploadFileSuccessCallbackResult): void;
+    fail?(result: GeneralCallbackResult): void;
+    complete?(result: GeneralCallbackResult): void;
+  }
+
+  interface ChooseImageSuccessCallbackResult extends GeneralCallbackResult {
+    tempFilePaths: string[];
+  }
+
+  interface ChooseImageOption {
+    count?: number;
+    sizeType?: Array<"original" | "compressed">;
+    sourceType?: Array<"album" | "camera">;
+    success?(result: ChooseImageSuccessCallbackResult): void;
+    fail?(result: GeneralCallbackResult): void;
+    complete?(result: GeneralCallbackResult): void;
+  }
+
+  interface ChooseMediaFile {
+    tempFilePath: string;
+    size: number;
+    duration?: number;
+    height?: number;
+    width?: number;
+    thumbTempFilePath?: string;
+    fileType?: "image" | "video";
+  }
+
+  interface ChooseMediaSuccessCallbackResult extends GeneralCallbackResult {
+    tempFiles: ChooseMediaFile[];
+    type: "image" | "video" | "mix";
+  }
+
+  interface ChooseMediaOption {
+    count?: number;
+    mediaType?: Array<"image" | "video" | "mix">;
+    sourceType?: Array<"album" | "camera">;
+    sizeType?: Array<"original" | "compressed">;
+    maxDuration?: number;
+    success?(result: ChooseMediaSuccessCallbackResult): void;
+    fail?(result: GeneralCallbackResult): void;
+    complete?(result: GeneralCallbackResult): void;
+  }
+
   interface RecorderManagerStartOption {
     duration?: number;
     sampleRate?: number;
@@ -333,6 +389,9 @@ declare namespace WechatMiniprogram {
     login(option?: LoginOption): void;
     request<T = unknown>(option: RequestOption<T>): void;
     downloadFile(option: DownloadFileOption): void;
+    uploadFile(option: UploadFileOption): void;
+    chooseImage(option: ChooseImageOption): void;
+    chooseMedia?(option: ChooseMediaOption): void;
     connectSocket(option: ConnectSocketOption): SocketTask;
     getRecorderManager(): RecorderManager;
     getFileSystemManager(): FileSystemManager;
