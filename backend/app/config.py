@@ -42,7 +42,7 @@ class Settings(BaseSettings):
     volc_ark_image_size: str = "2K"
     volc_ark_image_output_format: str = "png"
     volc_ark_image_response_format: str = "b64_json"
-    volc_ark_image_timeout_seconds: float = 45.0
+    volc_ark_image_timeout_seconds: float = 180.0
     volc_ark_image_max_concurrent_requests: int = 1
     memoir_share_video_ai_background_enabled: bool = False
 
