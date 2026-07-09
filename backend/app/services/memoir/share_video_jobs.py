@@ -63,6 +63,10 @@ _ASS_RULE_COLOR = "&H00BBCDD8"
 _QUOTE_PAGE_MAX_CHARS = 36
 _QUOTE_LINE_MAX_CHARS = 12
 _QUOTE_PHRASE_MAX_CHARS = 3
+_QUOTE_MIN_FRAGMENT_CHARS = 4
+_QUOTE_STRONG_BREAK_CHARS = "。！？!?；;\n"
+_QUOTE_SOFT_BREAK_CHARS = "，,、"
+_QUOTE_PUNCTUATION_CHARS = "，,、。！？!?；;：“”‘’\"'（）()[]【】《》…—- \t\r\n"
 _STALE_SHARE_VIDEO_JOB_SECONDS = 300
 _STALE_SHARE_VIDEO_RECOVERY_BACKOFF_SECONDS = 300
 
@@ -243,6 +247,8 @@ def _scene_metadata(scene: ShareVideoScene) -> dict[str, object]:
         "title": scene.title,
         "visual_summary": scene.visual_summary,
         "image_prompt_content": scene.image_prompt_content,
+        "sentence_ids": list(scene.sentence_ids),
+        "evidence_quote": scene.evidence_quote,
     }
 
 
@@ -705,15 +711,108 @@ def _ass_escape(text: str) -> str:
 
 
 def _subtitle_ranges(text: str, *, max_chars: int = 24) -> list[tuple[int, int]]:
+    phrase_ranges = _quote_phrase_page_ranges(text)
+    pages: list[tuple[int, int]] = []
+    page_start: int | None = None
+    page_end: int | None = None
+    page_chars = 0
+    for phrase_start, phrase_end in phrase_ranges:
+        phrase_chars = _visible_range_length(text, phrase_start, phrase_end)
+        if phrase_chars > max_chars:
+            if page_start is not None and page_end is not None:
+                pages.append((page_start, page_end))
+                page_start = None
+                page_end = None
+                page_chars = 0
+            pages.extend(_split_quote_range(text, phrase_start, phrase_end, max_chars=max_chars))
+            continue
+        if (
+            page_start is not None
+            and page_end is not None
+            and page_chars + phrase_chars > max_chars
+            and page_chars >= _QUOTE_MIN_FRAGMENT_CHARS
+        ):
+            pages.append((page_start, page_end))
+            page_start = None
+            page_end = None
+            page_chars = 0
+        if page_start is None:
+            page_start = phrase_start
+        page_end = phrase_end
+        page_chars += phrase_chars
+    if page_start is not None and page_end is not None:
+        pages.append((page_start, page_end))
+    return _merge_tiny_quote_ranges(text, pages)
+
+
+def _visible_range_length(text: str, start: int, end: int) -> int:
+    return sum(1 for char in text[start:end] if not char.isspace())
+
+
+def _is_tiny_quote_range(text: str, start: int, end: int) -> bool:
+    fragment = text[start:end].strip()
+    if not fragment:
+        return True
+    return (
+        _visible_range_length(fragment, 0, len(fragment)) < _QUOTE_MIN_FRAGMENT_CHARS
+        or all(char in _QUOTE_PUNCTUATION_CHARS for char in fragment)
+    )
+
+
+def _merge_tiny_quote_ranges(text: str, ranges: list[tuple[int, int]]) -> list[tuple[int, int]]:
+    merged: list[tuple[int, int]] = []
+    for start, end in ranges:
+        start, end = _strip_range(text, start, end)
+        if start >= end:
+            continue
+        if merged and _is_tiny_quote_range(text, start, end):
+            previous_start, _previous_end = merged[-1]
+            merged[-1] = (previous_start, end)
+        else:
+            merged.append((start, end))
+    if len(merged) > 1 and _is_tiny_quote_range(text, merged[0][0], merged[0][1]):
+        first_start, _first_end = merged.pop(0)
+        next_start, next_end = merged[0]
+        merged[0] = (first_start, next_end)
+    return merged
+
+
+def _quote_phrase_page_ranges(text: str) -> list[tuple[int, int]]:
     ranges: list[tuple[int, int]] = []
     start = 0
     for index, char in enumerate(text):
-        if char in "。！？!?；;\n" or index - start + 1 >= max_chars:
+        if char in _QUOTE_STRONG_BREAK_CHARS or char in _QUOTE_SOFT_BREAK_CHARS:
             ranges.append((start, index + 1))
             start = index + 1
     if start < len(text):
         ranges.append((start, len(text)))
-    return [(start, end) for start, end in ranges if text[start:end].strip()]
+    return _merge_tiny_quote_ranges(text, ranges)
+
+
+def _split_quote_range(text: str, start: int, end: int, *, max_chars: int) -> list[tuple[int, int]]:
+    ranges: list[tuple[int, int]] = []
+    cursor = start
+    while cursor < end:
+        if _visible_range_length(text, cursor, end) <= max_chars:
+            ranges.append((cursor, end))
+            break
+        target = min(end, cursor + max_chars)
+        candidates = [
+            index + 1
+            for index in range(cursor, min(end, target + 1))
+            if text[index] in _QUOTE_SOFT_BREAK_CHARS
+            and _visible_range_length(text, cursor, index + 1) >= _QUOTE_MIN_FRAGMENT_CHARS
+            and _visible_range_length(text, index + 1, end) >= _QUOTE_MIN_FRAGMENT_CHARS
+        ]
+        split = max(candidates) if candidates else target
+        while split < end and text[split] in _QUOTE_PUNCTUATION_CHARS:
+            split += 1
+        if split <= cursor:
+            ranges.append((cursor, end))
+            break
+        ranges.append((cursor, split))
+        cursor = split
+    return _merge_tiny_quote_ranges(text, ranges)
 
 
 def _strip_range(text: str, start: int, end: int) -> tuple[int, int]:
@@ -777,7 +876,34 @@ def _quote_line_ranges(text: str, start: int, end: int) -> list[tuple[int, int]]
         line_range = _strip_range(text, line_start, end)
         if line_range[0] < line_range[1]:
             lines.append(line_range)
-    return lines
+    return _merge_awkward_quote_lines(text, lines)
+
+
+def _merge_awkward_quote_lines(text: str, lines: list[tuple[int, int]]) -> list[tuple[int, int]]:
+    merged: list[tuple[int, int]] = []
+    for start, end in lines:
+        start, end = _strip_range(text, start, end)
+        if start >= end:
+            continue
+        if merged:
+            previous_start, previous_end = merged[-1]
+            while start < end and text[start] in _QUOTE_PUNCTUATION_CHARS:
+                previous_end = start + 1
+                start += 1
+            merged[-1] = (previous_start, previous_end)
+            start, end = _strip_range(text, start, end)
+            if start >= end:
+                continue
+        if merged and _is_tiny_quote_range(text, start, end):
+            previous_start, _previous_end = merged[-1]
+            merged[-1] = (previous_start, end)
+        else:
+            merged.append((start, end))
+    if len(merged) > 1 and _is_tiny_quote_range(text, merged[0][0], merged[0][1]):
+        first_start, _first_end = merged.pop(0)
+        next_start, next_end = merged[0]
+        merged[0] = (first_start, next_end)
+    return merged
 
 
 def _karaoke_phrase_ranges(text: str, start: int, end: int) -> list[tuple[int, int]]:
