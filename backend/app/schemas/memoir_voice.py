@@ -346,6 +346,12 @@ class MemoirTranscriptShareVideoSegmentResponse(BaseModel):
     selectable: bool = True
 
 
+class MemoirShareVideoBackgroundStyleResponse(BaseModel):
+    value: str
+    label: str
+    description: str
+
+
 class MemoirTranscriptShareVideoContextResponse(BaseModel):
     utterance_id: str
     audio_file_id: str
@@ -357,6 +363,9 @@ class MemoirTranscriptShareVideoContextResponse(BaseModel):
     alignment_confidence: float | None = None
     min_select_ms: int = 3000
     max_select_ms: int = 90000
+    ai_background_enabled: bool = False
+    default_background_style: str = "old_album"
+    background_styles: list[MemoirShareVideoBackgroundStyleResponse] = Field(default_factory=list)
     segments: list[MemoirTranscriptShareVideoSegmentResponse] = Field(default_factory=list)
 
 
@@ -365,6 +374,7 @@ class MemoirShareVideoJobCreateRequest(BaseModel):
     end_char: int = Field(gt=0)
     style: str = Field(default="warm_minimal", min_length=1, max_length=40)
     style_options: dict[str, object] = Field(default_factory=dict)
+    background_style: str | None = Field(default=None, max_length=40)
 
     @field_validator("style")
     @classmethod
@@ -373,6 +383,14 @@ class MemoirShareVideoJobCreateRequest(BaseModel):
         if not normalized:
             raise ValueError("不能为空")
         return normalized
+
+    @field_validator("background_style")
+    @classmethod
+    def _valid_background_style(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None
 
     @model_validator(mode="after")
     def _valid_range(self) -> "MemoirShareVideoJobCreateRequest":
@@ -394,6 +412,12 @@ class MemoirShareVideoJobResponse(BaseModel):
     end_ms: int
     duration_ms: int
     style: str = "warm_minimal"
+    background_style: str = "old_album"
+    background_status: str = "disabled"
+    background_provider: str | None = None
+    background_model: str | None = None
+    background_cache_hit: bool | None = None
+    background_error_message: str = ""
     video_mime_type: str = "video/mp4"
     video_size_bytes: int | None = None
     download_url: str | None = None

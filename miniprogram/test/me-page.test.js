@@ -9,6 +9,7 @@ function loadMePage({
   voiceApiExports = {},
   ttsExports = {},
   aiModelExports = {},
+  shareVideoBackgroundExports = {},
   accessibilityExports = {},
   voiceAuthorizationExports = {},
 } = {}) {
@@ -85,6 +86,37 @@ function loadMePage({
     readSelectedAIModel: () => "deepseek-v4-pro",
     saveSelectedAIModel: (model) => model,
     ...aiModelExports,
+  });
+  mockModule("../services/share-video-background-settings.ts", {
+    SHARE_VIDEO_BACKGROUND_STYLE_OPTIONS: [
+      {
+        value: "old_album",
+        label: "旧相册",
+        description: "旧照片手工上色质感",
+      },
+      {
+        value: "ink_paper",
+        label: "淡水墨",
+        description: "淡水墨旧纸质感",
+      },
+      {
+        value: "storybook",
+        label: "老故事书",
+        description: "中国老连环画和旧书插图质感",
+      },
+    ],
+    readSelectedShareVideoBackgroundStyle: () => "old_album",
+    saveSelectedShareVideoBackgroundStyle: (backgroundStyle) => backgroundStyle,
+    shareVideoBackgroundStyleLabel: (backgroundStyle) => {
+      if (backgroundStyle === "ink_paper") {
+        return "淡水墨";
+      }
+      if (backgroundStyle === "storybook") {
+        return "老故事书";
+      }
+      return "旧相册";
+    },
+    ...shareVideoBackgroundExports,
   });
   mockModule("../services/accessibility-settings.ts", {
     readAccessibilitySettings: () => ({
@@ -637,6 +669,39 @@ test("me saves selected AI model", () => {
   assert.deepEqual(saved, ["doubao-seed-2-0-pro-260215"]);
   assert.equal(context.data.aiModel, "doubao-seed-2-0-pro-260215");
   assert.equal(context.data.aiModelLabel, "Doubao Seed 2.0 Pro");
+  assert.equal(toastCalls.length, 1);
+  delete global.wx;
+});
+
+test("me saves selected share video background style", () => {
+  const saved = [];
+  const { page } = loadMePage({
+    shareVideoBackgroundExports: {
+      saveSelectedShareVideoBackgroundStyle: (backgroundStyle) => {
+        saved.push(backgroundStyle);
+        return backgroundStyle === "ink_paper" ? backgroundStyle : "old_album";
+      },
+    },
+  });
+  const toastCalls = [];
+  global.wx = {
+    showToast(input) {
+      toastCalls.push(input);
+    },
+  };
+  const context = pageContext(page);
+
+  page.selectShareVideoBackgroundStyle.call(context, {
+    currentTarget: {
+      dataset: {
+        backgroundStyle: "ink_paper",
+      },
+    },
+  });
+
+  assert.deepEqual(saved, ["ink_paper"]);
+  assert.equal(context.data.shareVideoBackgroundStyle, "ink_paper");
+  assert.equal(context.data.shareVideoBackgroundStyleLabel, "淡水墨");
   assert.equal(toastCalls.length, 1);
   delete global.wx;
 });

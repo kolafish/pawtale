@@ -13,13 +13,19 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.config import DATA_DIR
+from app.config import DATA_DIR, get_settings
 from app.database import async_session_maker
 from app.domain.memoir.types import MemoirShareVideoJobStatus
 from app.models.memoir import MemoirMaterialShareVideo
 from app.models.projects import Project
 from app.schemas.memoir_voice import MemoirShareVideoJobCreateRequest, MemoirShareVideoJobResponse
 from app.services.memoir.audio_files import audio_file_path
+from app.services.memoir.share_video_backgrounds import (
+    DEFAULT_SHARE_VIDEO_BACKGROUND_STYLE,
+    ShareVideoBackgroundGenerationError,
+    get_or_generate_share_video_background,
+    normalize_share_video_background_style,
+)
 from app.services.memoir.share_video_alignment import (
     MAX_SELECT_MS,
     MIN_SELECT_MS,
@@ -57,6 +63,7 @@ class ShareVideoRenderRequest:
     end_ms: int
     style: str
     style_options: dict[str, object]
+    background_image_path: Path | None = None
 
 
 class ShareVideoGenerationError(RuntimeError):
@@ -89,6 +96,11 @@ def _trim_selection(text: str, start_char: int, end_char: int) -> tuple[int, int
 
 
 def _job_response(job: MemoirMaterialShareVideo) -> MemoirShareVideoJobResponse:
+    metadata = job.metadata_json or {}
+    background_style = str(metadata.get("background_style") or DEFAULT_SHARE_VIDEO_BACKGROUND_STYLE)
+    background_provider = metadata.get("background_provider")
+    background_model = metadata.get("background_model")
+    background_cache_hit = metadata.get("background_cache_hit")
     download_url = (
         f"/api/mobile/memoir/share-video/jobs/{job.id}/download"
         if job.status == MemoirShareVideoJobStatus.SUCCEEDED.value and job.video_storage_path
@@ -107,6 +119,12 @@ def _job_response(job: MemoirMaterialShareVideo) -> MemoirShareVideoJobResponse:
         end_ms=job.end_ms,
         duration_ms=max(0, job.end_ms - job.start_ms),
         style=job.style,
+        background_style=background_style,
+        background_status=str(metadata.get("background_status") or "disabled"),
+        background_provider=background_provider if isinstance(background_provider, str) else None,
+        background_model=background_model if isinstance(background_model, str) else None,
+        background_cache_hit=background_cache_hit if isinstance(background_cache_hit, bool) else None,
+        background_error_message=str(metadata.get("background_error_message") or ""),
         video_mime_type=job.video_mime_type,
         video_size_bytes=job.video_size_bytes,
         download_url=download_url,
@@ -129,6 +147,10 @@ async def create_share_video_job(
     alignment = build_share_video_alignment(utterance)
     start_char, end_char = _trim_selection(alignment.transcript_text, req.start_char, req.end_char)
     start_ms, end_ms = share_video_char_range_ms(alignment, start_char, end_char)
+    try:
+        background_style = normalize_share_video_background_style(req.background_style)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     duration_ms = end_ms - start_ms
     if duration_ms < MIN_SELECT_MS:
         raise HTTPException(status_code=400, detail=f"分享视频至少需要 {MIN_SELECT_MS // 1000} 秒音频")
@@ -157,6 +179,12 @@ async def create_share_video_job(
             "alignment_strategy": alignment.strategy,
             "alignment_confidence": alignment.confidence,
             "char_timings": alignment.char_timings[start_char:end_char],
+            "background_style": background_style,
+            "background_status": (
+                "pending"
+                if get_settings().memoir_share_video_ai_background_enabled
+                else "disabled"
+            ),
         },
         video_mime_type=_VIDEO_MIME_TYPE,
     )
@@ -238,23 +266,84 @@ async def run_share_video_job_with_session(db: AsyncSession, job_id: str) -> Non
     job.error_message = ""
     await db.commit()
     try:
-        target_path = share_video_file_path(job)
-        await render_share_video_clip(
-            ShareVideoRenderRequest(
-                source_audio_path=audio_file_path(job.audio_file),
-                source_audio_mime_type=job.audio_file.mime_type,
-                target_path=target_path,
-                selected_text=job.selected_text,
-                char_timings=[
-                    item for item in job.metadata_json.get("char_timings", [])
-                    if isinstance(item, dict)
-                ],
-                start_ms=job.start_ms,
-                end_ms=job.end_ms,
-                style=job.style,
-                style_options=job.style_json,
-            )
+        metadata = dict(job.metadata_json or {})
+        background_style = normalize_share_video_background_style(
+            metadata.get("background_style") if isinstance(metadata.get("background_style"), str) else None
         )
+        metadata["background_style"] = background_style
+        background_image_path: Path | None = None
+        try:
+            background = await get_or_generate_share_video_background(job.selected_text, background_style)
+        except ShareVideoBackgroundGenerationError as exc:
+            metadata.update({
+                "background_status": "failed",
+                "background_error_message": str(exc)[:500],
+            })
+        else:
+            if background is None:
+                metadata.update({
+                    "background_status": "disabled",
+                    "background_error_message": "",
+                })
+            else:
+                background_image_path = background.path
+                metadata.update({
+                    "background_status": "ready",
+                    "background_storage_path": background.storage_path,
+                    "background_prompt_hash": background.prompt_hash,
+                    "background_prompt_version": background.prompt_template_version,
+                    "background_provider": background.provider,
+                    "background_model": background.model,
+                    "background_cache_hit": background.cache_hit,
+                    "background_error_message": "",
+                })
+        job.metadata_json = metadata
+        await db.commit()
+
+        target_path = share_video_file_path(job)
+        render_request = ShareVideoRenderRequest(
+            source_audio_path=audio_file_path(job.audio_file),
+            source_audio_mime_type=job.audio_file.mime_type,
+            target_path=target_path,
+            selected_text=job.selected_text,
+            char_timings=[
+                item for item in (job.metadata_json or {}).get("char_timings", [])
+                if isinstance(item, dict)
+            ],
+            start_ms=job.start_ms,
+            end_ms=job.end_ms,
+            style=job.style,
+            style_options=job.style_json,
+            background_image_path=background_image_path,
+        )
+        try:
+            await render_share_video_clip(render_request)
+        except ShareVideoGenerationError as exc:
+            if background_image_path is None:
+                raise
+            metadata = dict(job.metadata_json or {})
+            metadata.update(
+                {
+                    "background_status": "fallback",
+                    "background_error_message": f"背景图渲染失败，已回退经典样式：{str(exc)[:400]}",
+                }
+            )
+            job.metadata_json = metadata
+            await db.commit()
+            await render_share_video_clip(
+                ShareVideoRenderRequest(
+                    source_audio_path=render_request.source_audio_path,
+                    source_audio_mime_type=render_request.source_audio_mime_type,
+                    target_path=render_request.target_path,
+                    selected_text=render_request.selected_text,
+                    char_timings=render_request.char_timings,
+                    start_ms=render_request.start_ms,
+                    end_ms=render_request.end_ms,
+                    style=render_request.style,
+                    style_options=render_request.style_options,
+                    background_image_path=None,
+                )
+            )
         job.video_storage_path = _storage_path(job.user_id, job.id)
         job.video_size_bytes = target_path.stat().st_size
         job.status = MemoirShareVideoJobStatus.SUCCEEDED.value
@@ -503,8 +592,15 @@ def _subtitle_filter_argument(subtitle_path: Path) -> str:
     return f"subtitles=filename='{subtitle}':fontsdir='{fonts}'"
 
 
-def _video_filter_argument(subtitle_path: Path) -> str:
-    return _subtitle_filter_argument(subtitle_path)
+def _video_filter_argument(subtitle_path: Path, *, has_background_image: bool = False) -> str:
+    filters: list[str] = []
+    if has_background_image:
+        filters.append(
+            f"scale={_VIDEO_WIDTH}:{_VIDEO_HEIGHT}:force_original_aspect_ratio=increase,"
+            f"crop={_VIDEO_WIDTH}:{_VIDEO_HEIGHT}"
+        )
+    filters.append(_subtitle_filter_argument(subtitle_path))
+    return ",".join(filters)
 
 
 async def render_share_video_clip(request: ShareVideoRenderRequest) -> None:
@@ -535,17 +631,36 @@ async def render_share_video_clip(request: ShareVideoRenderRequest) -> None:
             str(clip_audio_path),
         ])
 
+        has_background_image = bool(
+            request.background_image_path
+            and request.background_image_path.exists()
+            and request.background_image_path.stat().st_size > 0
+        )
+        if has_background_image:
+            video_input_args = [
+                "-loop",
+                "1",
+                "-t",
+                f"{duration_seconds:.3f}",
+                "-i",
+                str(request.background_image_path),
+            ]
+        else:
+            video_input_args = [
+                "-f",
+                "lavfi",
+                "-i",
+                f"color=c={_BACKGROUND_COLOR}:s={_VIDEO_WIDTH}x{_VIDEO_HEIGHT}:d={duration_seconds:.3f}",
+            ]
+
         await _run_ffmpeg([
             ffmpeg,
             "-y",
-            "-f",
-            "lavfi",
-            "-i",
-            f"color=c={_BACKGROUND_COLOR}:s={_VIDEO_WIDTH}x{_VIDEO_HEIGHT}:d={duration_seconds:.3f}",
+            *video_input_args,
             "-i",
             str(clip_audio_path),
             "-vf",
-            _video_filter_argument(subtitle_path),
+            _video_filter_argument(subtitle_path, has_background_image=has_background_image),
             "-c:v",
             "libx264",
             "-preset",

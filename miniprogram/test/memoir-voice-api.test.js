@@ -493,7 +493,9 @@ test("share video APIs encode routes and download preview with session cookie", 
   } = require("../services/memoir-voice-api.ts");
 
   const context = await getMemoirTranscriptShareVideoContext("utterance/1");
-  const created = await createMemoirTranscriptShareVideoJob("utterance/1", 0, 13);
+  const created = await createMemoirTranscriptShareVideoJob("utterance/1", 0, 13, {
+    backgroundStyle: "storybook",
+  });
   const detail = await getMemoirShareVideoJob("job/1");
   const path = await downloadMemoirShareVideoJob(shareVideoJob);
 
@@ -513,6 +515,7 @@ test("share video APIs encode routes and download preview with session cookie", 
     end_char: 13,
     style: "warm_minimal",
     style_options: {},
+    background_style: "storybook",
   });
   assert.equal(
     apiRequests[2].url,

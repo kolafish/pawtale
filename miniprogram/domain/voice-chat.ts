@@ -354,6 +354,12 @@ export interface MemoirTranscriptShareVideoSegment {
   selectable: boolean;
 }
 
+export interface MemoirShareVideoBackgroundStyle {
+  value: string;
+  label: string;
+  description: string;
+}
+
 export interface MemoirTranscriptShareVideoContext {
   utterance_id: string;
   audio_file_id: string;
@@ -365,6 +371,9 @@ export interface MemoirTranscriptShareVideoContext {
   alignment_confidence?: number | null;
   min_select_ms: number;
   max_select_ms: number;
+  ai_background_enabled?: boolean;
+  default_background_style?: string;
+  background_styles?: MemoirShareVideoBackgroundStyle[];
   segments: MemoirTranscriptShareVideoSegment[];
 }
 
@@ -383,6 +392,12 @@ export interface MemoirShareVideoJob {
   end_ms: number;
   duration_ms: number;
   style: string;
+  background_style?: string;
+  background_status?: string;
+  background_provider?: string | null;
+  background_model?: string | null;
+  background_cache_hit?: boolean | null;
+  background_error_message?: string;
   video_mime_type: string;
   video_size_bytes?: number | null;
   download_url?: string | null;

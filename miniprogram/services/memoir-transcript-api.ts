@@ -34,6 +34,7 @@ interface VoiceTranscriptListOptions {
 interface ShareVideoJobOptions {
   style?: string;
   styleOptions?: Record<string, unknown>;
+  backgroundStyle?: string;
 }
 
 export function listMemoirVoiceTranscripts(
@@ -84,6 +85,7 @@ export function createMemoirTranscriptShareVideoJob(
         end_char: endChar,
         style,
         style_options: options.styleOptions || {},
+        ...(options.backgroundStyle ? { background_style: options.backgroundStyle } : {}),
       },
     },
   );
