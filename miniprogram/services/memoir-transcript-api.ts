@@ -1,4 +1,6 @@
 import type {
+  MemoirShareVideoJob,
+  MemoirTranscriptShareVideoContext,
   MemoirVoiceSearchQueryParseResponse,
   MemoirVoiceSearchTranscriptionResponse,
   MemoirVoiceTranscriptIncludedFilter,
@@ -7,10 +9,17 @@ import type {
   MemoirVoiceTranscriptVoiceEditPreviewResponse,
 } from "../domain/voice-chat";
 import {
+  ensureMemoirBackendSession,
   memoirRequest,
   queryString,
 } from "./memoir-api-client";
 import { readSelectedAIModel } from "./ai-model-settings";
+import {
+  ApiError,
+  cleanBaseUrl,
+  readBackendConfig,
+  readSessionCookie,
+} from "./request";
 
 interface VoiceTranscriptListOptions {
   projectId?: string;
@@ -20,6 +29,11 @@ interface VoiceTranscriptListOptions {
   module?: string;
   limit?: number;
   offset?: number;
+}
+
+interface ShareVideoJobOptions {
+  style?: string;
+  styleOptions?: Record<string, unknown>;
 }
 
 export function listMemoirVoiceTranscripts(
@@ -44,6 +58,97 @@ export function getMemoirVoiceTranscript(
   return memoirRequest<MemoirVoiceTranscriptItem>(
     `/api/mobile/memoir/voice-transcripts/${encodeURIComponent(utteranceId)}`,
   );
+}
+
+export function getMemoirTranscriptShareVideoContext(
+  utteranceId: string,
+): Promise<MemoirTranscriptShareVideoContext> {
+  return memoirRequest<MemoirTranscriptShareVideoContext>(
+    `/api/mobile/memoir/voice-transcripts/${encodeURIComponent(utteranceId)}/share-video/context`,
+  );
+}
+
+export function createMemoirTranscriptShareVideoJob(
+  utteranceId: string,
+  startChar: number,
+  endChar: number,
+  options: ShareVideoJobOptions = {},
+): Promise<MemoirShareVideoJob> {
+  const style = options.style?.trim() || "warm_minimal";
+  return memoirRequest<MemoirShareVideoJob>(
+    `/api/mobile/memoir/voice-transcripts/${encodeURIComponent(utteranceId)}/share-video/jobs`,
+    {
+      method: "POST",
+      data: {
+        start_char: startChar,
+        end_char: endChar,
+        style,
+        style_options: options.styleOptions || {},
+      },
+    },
+  );
+}
+
+export function getMemoirShareVideoJob(jobId: string): Promise<MemoirShareVideoJob> {
+  return memoirRequest<MemoirShareVideoJob>(
+    `/api/mobile/memoir/share-video/jobs/${encodeURIComponent(jobId)}`,
+  );
+}
+
+function shareVideoDownloadDomain(url: string): string {
+  const parts = url.split("/");
+  if (parts.length >= 3 && parts[0].startsWith("http")) {
+    return parts.slice(0, 3).join("/");
+  }
+  return url;
+}
+
+function shareVideoDownloadErrorMessage(errMsg: string | undefined, url: string): string {
+  const message = String(errMsg || "");
+  if (message.toLowerCase().includes("url not in domain list")) {
+    return `视频下载域名未配置，请在微信公众平台把 ${shareVideoDownloadDomain(url)} 添加到 downloadFile 合法域名。`;
+  }
+  return message || "视频下载失败";
+}
+
+export function memoirShareVideoDownloadUrl(downloadUrl: string): string {
+  if (/^https?:\/\//.test(downloadUrl)) {
+    return downloadUrl;
+  }
+  const config = readBackendConfig();
+  if (!config.httpBaseUrl) {
+    throw new ApiError(0, "未配置后端 HTTP 地址", {});
+  }
+  return `${cleanBaseUrl(config.httpBaseUrl)}${downloadUrl.startsWith("/") ? downloadUrl : `/${downloadUrl}`}`;
+}
+
+export async function downloadMemoirShareVideoJob(job: MemoirShareVideoJob): Promise<string> {
+  const downloadUrl = job.download_url?.trim();
+  if (!downloadUrl) {
+    throw new ApiError(400, "视频还没有生成完成", job);
+  }
+  await ensureMemoirBackendSession();
+  const cookie = readSessionCookie();
+  const url = memoirShareVideoDownloadUrl(downloadUrl);
+  return new Promise((resolve, reject) => {
+    wx.downloadFile({
+      url,
+      timeout: 60000,
+      header: {
+        ...(cookie ? { Cookie: cookie } : {}),
+      },
+      success: (result) => {
+        if (result.statusCode >= 200 && result.statusCode < 300) {
+          resolve(result.tempFilePath);
+          return;
+        }
+        reject(new ApiError(result.statusCode, "视频下载失败", result));
+      },
+      fail: (error) => {
+        reject(new ApiError(0, shareVideoDownloadErrorMessage(error.errMsg, url), error));
+      },
+    });
+  });
 }
 
 export function updateMemoirVoiceTranscript(

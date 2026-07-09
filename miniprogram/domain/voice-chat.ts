@@ -343,6 +343,55 @@ export interface MemoirVoiceTranscriptListResponse {
   offset: number;
 }
 
+export interface MemoirTranscriptShareVideoSegment {
+  index: number;
+  text: string;
+  start_char: number;
+  end_char: number;
+  start_ms: number;
+  end_ms: number;
+  confidence?: number | null;
+  selectable: boolean;
+}
+
+export interface MemoirTranscriptShareVideoContext {
+  utterance_id: string;
+  audio_file_id: string;
+  transcript_source: string;
+  transcript_text: string;
+  text_hash: string;
+  duration_ms: number;
+  alignment_strategy: string;
+  alignment_confidence?: number | null;
+  min_select_ms: number;
+  max_select_ms: number;
+  segments: MemoirTranscriptShareVideoSegment[];
+}
+
+export type MemoirShareVideoJobStatus = "pending" | "running" | "succeeded" | "failed";
+
+export interface MemoirShareVideoJob {
+  id: string;
+  project_id: string;
+  utterance_id: string;
+  audio_file_id: string;
+  status: MemoirShareVideoJobStatus;
+  selected_text: string;
+  start_char: number;
+  end_char: number;
+  start_ms: number;
+  end_ms: number;
+  duration_ms: number;
+  style: string;
+  video_mime_type: string;
+  video_size_bytes?: number | null;
+  download_url?: string | null;
+  error_message: string;
+  created_at: string;
+  updated_at: string;
+  completed_at?: string | null;
+}
+
 export interface MemoirVoiceSearchTranscriptionResponse {
   transcript: string;
 }

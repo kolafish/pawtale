@@ -1,5 +1,8 @@
 import type {
   MemoirBookPlan,
+  MemoirShareVideoJob,
+  MemoirTranscriptShareVideoContext,
+  MemoirTranscriptShareVideoSegment,
   MemoirVoiceTranscriptItem,
 } from "../../domain/voice-chat";
 import { definePage } from "../../services/page-definition";
@@ -7,8 +10,12 @@ import type { ChapterPickerOption } from "../../services/memoir-book-source-acti
 import { trackAuditAction } from "../../services/audit-tracker";
 import {
   assignMemoirBookSources,
+  createMemoirTranscriptShareVideoJob,
   deleteMemoirVoiceTranscript,
+  downloadMemoirShareVideoJob,
   getMemoirBookPlan,
+  getMemoirShareVideoJob,
+  getMemoirTranscriptShareVideoContext,
   getMemoirVoiceTranscript,
   moveMemoirBookSource,
   previewMemoirVoiceTranscriptVoiceEdit,
@@ -33,6 +40,7 @@ import {
   stopMemoirVoiceSearchRecording,
 } from "../../services/memoir-voice-search";
 import {
+  formatTranscriptDurationSeconds,
   plainTranscriptSegments,
   transcriptAudioText,
   transcriptBookInclusionText,
@@ -43,7 +51,9 @@ import {
   type TranscriptVoiceEditPreviewView,
 } from "../../services/transcript-view-model";
 import {
+  datasetNumber,
   pickerIndex,
+  type PageDatasetEvent,
   queryParam,
   type PagePickerEvent,
   type PageQuery,
@@ -52,6 +62,7 @@ import {
 
 type TextAreaEvent = PageTextInputEvent;
 type PickerEvent = PagePickerEvent;
+type ShareVideoSegmentEvent = PageDatasetEvent<{ index?: string | number }>;
 
 interface TranscriptDetailItemView extends MemoirVoiceTranscriptItem {
   titleText: string;
@@ -81,6 +92,14 @@ interface TranscriptDetailItemView extends MemoirVoiceTranscriptItem {
   displaySegments: TranscriptTextSegment[];
   changed: boolean;
   isEditing: boolean;
+}
+
+interface TranscriptShareVideoSegmentView extends MemoirTranscriptShareVideoSegment {
+  arrayIndex: number;
+  selected: boolean;
+  durationText: string;
+  timeRangeText: string;
+  className: string;
 }
 
 interface TranscriptDetailData {
@@ -114,9 +133,29 @@ interface TranscriptDetailData {
   voiceEditInstructionText: string;
   voiceEditStatusText: string;
   voiceEditPreview: TranscriptVoiceEditPreviewView | null;
+  shareVideoPanelOpen: boolean;
+  shareVideoLoadingContext: boolean;
+  shareVideoCreating: boolean;
+  shareVideoPolling: boolean;
+  shareVideoDownloadingPreview: boolean;
+  shareVideoError: string;
+  shareVideoContext: MemoirTranscriptShareVideoContext | null;
+  shareVideoSegments: TranscriptShareVideoSegmentView[];
+  shareVideoSelectedStartIndex: number;
+  shareVideoSelectedEndIndex: number;
+  shareVideoSelectedStartChar: number;
+  shareVideoSelectedEndChar: number;
+  shareVideoSelectedText: string;
+  shareVideoSelectedMetaText: string;
+  shareVideoSelectedCanGenerate: boolean;
+  shareVideoStatusText: string;
+  shareVideoStatusClass: string;
+  shareVideoJob: MemoirShareVideoJob | null;
+  shareVideoPreviewPath: string;
 }
 
 const COLLAPSIBLE_QUESTION_CHAR_COUNT = 72;
+const SHARE_VIDEO_POLL_INTERVAL_MS = 1500;
 type TranscriptDetailAudioKind = "question" | "answer";
 
 function positiveSeconds(value: unknown): number {
@@ -165,6 +204,133 @@ function answerPlaybackPatch(
     answerPlaybackDurationText: duration ? playbackClockText(duration) : "时长未知",
     answerPlaybackProgressStyle: `width: ${progressPercent}%;`,
   };
+}
+
+function shareVideoClockText(ms: number): string {
+  return playbackClockText(Math.floor(Math.max(0, ms) / 1000));
+}
+
+function shareVideoRangeText(startMs: number, endMs: number): string {
+  return `${shareVideoClockText(startMs)}-${shareVideoClockText(endMs)}`;
+}
+
+function sliceShareVideoText(text: string, startChar: number, endChar: number): string {
+  return Array.from(text).slice(startChar, endChar).join("");
+}
+
+function shareVideoSegmentViews(
+  context: MemoirTranscriptShareVideoContext | null,
+  selectedStartIndex: number,
+  selectedEndIndex: number,
+): TranscriptShareVideoSegmentView[] {
+  const normalizedStart = Math.min(selectedStartIndex, selectedEndIndex);
+  const normalizedEnd = Math.max(selectedStartIndex, selectedEndIndex);
+  return (context?.segments || []).map((segment, arrayIndex) => {
+    const selected =
+      normalizedStart >= 0 &&
+      normalizedEnd >= 0 &&
+      arrayIndex >= normalizedStart &&
+      arrayIndex <= normalizedEnd;
+    const classes = [
+      selected ? "selected" : "",
+      segment.selectable ? "" : "disabled",
+    ].filter(Boolean);
+    return {
+      ...segment,
+      arrayIndex,
+      selected,
+      durationText: formatTranscriptDurationSeconds(Math.max(0, segment.end_ms - segment.start_ms) / 1000),
+      timeRangeText: shareVideoRangeText(segment.start_ms, segment.end_ms),
+      className: classes.join(" "),
+    };
+  });
+}
+
+function shareVideoSelectionPatch(
+  context: MemoirTranscriptShareVideoContext | null,
+  selectedStartIndex: number,
+  selectedEndIndex: number,
+): Pick<
+  TranscriptDetailData,
+  | "shareVideoSegments"
+  | "shareVideoSelectedStartIndex"
+  | "shareVideoSelectedEndIndex"
+  | "shareVideoSelectedStartChar"
+  | "shareVideoSelectedEndChar"
+  | "shareVideoSelectedText"
+  | "shareVideoSelectedMetaText"
+  | "shareVideoSelectedCanGenerate"
+  | "shareVideoStatusText"
+  | "shareVideoStatusClass"
+> {
+  const segments = context?.segments || [];
+  const hasValidStart = selectedStartIndex >= 0 && selectedStartIndex < segments.length;
+  const hasValidEnd = selectedEndIndex >= 0 && selectedEndIndex < segments.length;
+  const normalizedStart = hasValidStart && hasValidEnd ? Math.min(selectedStartIndex, selectedEndIndex) : -1;
+  const normalizedEnd = hasValidStart && hasValidEnd ? Math.max(selectedStartIndex, selectedEndIndex) : -1;
+  const selectedSegments = normalizedStart >= 0 ? segments.slice(normalizedStart, normalizedEnd + 1) : [];
+  const first = selectedSegments[0];
+  const last = selectedSegments[selectedSegments.length - 1];
+  const startChar = first?.start_char ?? 0;
+  const endChar = last?.end_char ?? 0;
+  const selectedText = context && first && last
+    ? sliceShareVideoText(context.transcript_text, startChar, endChar).trim()
+    : "";
+  const durationMs = first && last ? Math.max(0, last.end_ms - first.start_ms) : 0;
+  const allSelectable = selectedSegments.length > 0 && selectedSegments.every((segment) => segment.selectable);
+  const minSelectMs = context?.min_select_ms ?? 0;
+  const maxSelectMs = context?.max_select_ms ?? Number.MAX_SAFE_INTEGER;
+  const selectedCanGenerate =
+    Boolean(selectedText) &&
+    allSelectable &&
+    durationMs >= minSelectMs &&
+    durationMs <= maxSelectMs;
+  let statusText = "";
+  let statusClass = "";
+  if (context && !segments.length) {
+    statusText = "暂无可截取片段";
+    statusClass = "failed";
+  } else if (context && !selectedSegments.length) {
+    statusText = "选择一段校正文后生成视频";
+  } else if (!allSelectable) {
+    statusText = "这段文字暂不能截取";
+    statusClass = "failed";
+  } else if (durationMs < minSelectMs) {
+    statusText = `已选 ${formatTranscriptDurationSeconds(durationMs / 1000)}，至少 ${formatTranscriptDurationSeconds(minSelectMs / 1000)}`;
+  } else if (durationMs > maxSelectMs) {
+    statusText = `已选 ${formatTranscriptDurationSeconds(durationMs / 1000)}，最多 ${formatTranscriptDurationSeconds(maxSelectMs / 1000)}`;
+    statusClass = "failed";
+  } else if (selectedText) {
+    statusText = "可以生成视频";
+    statusClass = "ready";
+  }
+  return {
+    shareVideoSegments: shareVideoSegmentViews(context, normalizedStart, normalizedEnd),
+    shareVideoSelectedStartIndex: normalizedStart,
+    shareVideoSelectedEndIndex: normalizedEnd,
+    shareVideoSelectedStartChar: startChar,
+    shareVideoSelectedEndChar: endChar,
+    shareVideoSelectedText: selectedText,
+    shareVideoSelectedMetaText: selectedText
+      ? `已选 ${formatTranscriptDurationSeconds(durationMs / 1000)} · ${Array.from(selectedText).length} 字`
+      : "",
+    shareVideoSelectedCanGenerate: selectedCanGenerate,
+    shareVideoStatusText: statusText,
+    shareVideoStatusClass: statusClass,
+  };
+}
+
+function shareVideoJobStatusText(job: MemoirShareVideoJob): string {
+  if (job.status === "succeeded") {
+    return "视频已生成";
+  }
+  if (job.status === "failed") {
+    return job.error_message || "视频生成失败";
+  }
+  if (job.status === "running") {
+    return "正在生成视频";
+  }
+  return "视频任务已创建，等待生成";
 }
 
 async function loadTranscriptBookPlan(projectId: string): Promise<MemoirBookPlan | null> {
@@ -258,6 +424,8 @@ definePage<TranscriptDetailData>()({
   audioPlayback: new AudioPlaybackController(),
   loadToken: 0,
   voiceEditToken: 0,
+  shareVideoPollTimer: null as ReturnType<typeof setTimeout> | null,
+  shareVideoPollToken: 0,
 
   data: {
     loading: false,
@@ -290,6 +458,25 @@ definePage<TranscriptDetailData>()({
     voiceEditInstructionText: "",
     voiceEditStatusText: "",
     voiceEditPreview: null,
+    shareVideoPanelOpen: false,
+    shareVideoLoadingContext: false,
+    shareVideoCreating: false,
+    shareVideoPolling: false,
+    shareVideoDownloadingPreview: false,
+    shareVideoError: "",
+    shareVideoContext: null,
+    shareVideoSegments: [],
+    shareVideoSelectedStartIndex: -1,
+    shareVideoSelectedEndIndex: -1,
+    shareVideoSelectedStartChar: 0,
+    shareVideoSelectedEndChar: 0,
+    shareVideoSelectedText: "",
+    shareVideoSelectedMetaText: "",
+    shareVideoSelectedCanGenerate: false,
+    shareVideoStatusText: "",
+    shareVideoStatusClass: "",
+    shareVideoJob: null,
+    shareVideoPreviewPath: "",
   },
 
   async onLoad(options?: PageQuery) {
@@ -346,6 +533,7 @@ definePage<TranscriptDetailData>()({
     if (!item || item.canRecoverTranscription || this.data.saving || this.data.deleting) {
       return;
     }
+    this.resetShareVideoState();
     const current = item.transcript_edited || item.transcript_raw;
     this.setData({
       item: {
@@ -368,6 +556,312 @@ definePage<TranscriptDetailData>()({
 
   toggleMoreActionsExpanded() {
     this.setData({ moreActionsExpanded: !this.data.moreActionsExpanded });
+  },
+
+  clearShareVideoPollTimer() {
+    if (this.shareVideoPollTimer) {
+      clearTimeout(this.shareVideoPollTimer);
+      this.shareVideoPollTimer = null;
+    }
+  },
+
+  cancelShareVideoPolling() {
+    this.clearShareVideoPollTimer();
+    this.shareVideoPollToken += 1;
+    if (this.data.shareVideoPolling) {
+      this.setData({ shareVideoPolling: false });
+    }
+  },
+
+  resetShareVideoState() {
+    this.cancelShareVideoPolling();
+    this.setData({
+      shareVideoPanelOpen: false,
+      shareVideoLoadingContext: false,
+      shareVideoCreating: false,
+      shareVideoPolling: false,
+      shareVideoDownloadingPreview: false,
+      shareVideoError: "",
+      shareVideoContext: null,
+      ...shareVideoSelectionPatch(null, -1, -1),
+      shareVideoStatusText: "",
+      shareVideoStatusClass: "",
+      shareVideoJob: null,
+      shareVideoPreviewPath: "",
+    });
+  },
+
+  async toggleShareVideoPanel() {
+    const item = this.data.item;
+    if (!item || item.canRecoverTranscription || item.isEditing || this.data.saving || this.data.deleting) {
+      return;
+    }
+    if (this.data.shareVideoPanelOpen) {
+      this.cancelShareVideoPolling();
+      this.setData({ shareVideoPanelOpen: false, shareVideoError: "" });
+      return;
+    }
+    await this.openShareVideoPanel();
+  },
+
+  async openShareVideoPanel() {
+    const item = this.data.item;
+    if (!item || item.canRecoverTranscription || item.isEditing) {
+      return;
+    }
+    if (this.data.shareVideoContext?.utterance_id === item.id) {
+      this.setData({ shareVideoPanelOpen: true, shareVideoError: "" });
+      const job = this.data.shareVideoJob;
+      if (job && (job.status === "pending" || job.status === "running")) {
+        this.startShareVideoPolling(job.id);
+      }
+      return;
+    }
+    this.cancelShareVideoPolling();
+    this.setData({
+      shareVideoPanelOpen: true,
+      shareVideoLoadingContext: true,
+      shareVideoCreating: false,
+      shareVideoDownloadingPreview: false,
+      shareVideoError: "",
+      shareVideoContext: null,
+      ...shareVideoSelectionPatch(null, -1, -1),
+      shareVideoStatusText: "",
+      shareVideoStatusClass: "",
+      shareVideoJob: null,
+      shareVideoPreviewPath: "",
+    });
+    try {
+      const context = await getMemoirTranscriptShareVideoContext(item.id);
+      this.setData({
+        shareVideoContext: context,
+        ...shareVideoSelectionPatch(context, -1, -1),
+      });
+      trackAuditAction("transcript.detail_share_video_open", {}, { projectId: item.project_id });
+    } catch (error) {
+      this.setData({
+        shareVideoError: error instanceof Error ? error.message : "分享视频素材加载失败",
+        shareVideoStatusClass: "failed",
+      });
+    } finally {
+      this.setData({ shareVideoLoadingContext: false });
+    }
+  },
+
+  selectShareVideoSegment(event: ShareVideoSegmentEvent) {
+    const context = this.data.shareVideoContext;
+    const item = this.data.item;
+    if (
+      !context ||
+      !item ||
+      this.data.shareVideoCreating ||
+      this.data.shareVideoPolling ||
+      this.data.shareVideoDownloadingPreview
+    ) {
+      return;
+    }
+    const index = datasetNumber(event, "index", -1);
+    const segment = context.segments[index];
+    if (!segment || !segment.selectable) {
+      return;
+    }
+    const currentStart = this.data.shareVideoSelectedStartIndex;
+    const currentEnd = this.data.shareVideoSelectedEndIndex;
+    let nextStart = index;
+    let nextEnd = index;
+    if (currentStart >= 0 && currentEnd >= 0) {
+      const normalizedStart = Math.min(currentStart, currentEnd);
+      const normalizedEnd = Math.max(currentStart, currentEnd);
+      if (index < normalizedStart) {
+        nextStart = index;
+        nextEnd = normalizedEnd;
+      } else if (index > normalizedEnd) {
+        nextStart = normalizedStart;
+        nextEnd = index;
+      }
+    }
+    this.cancelShareVideoPolling();
+    this.setData({
+      ...shareVideoSelectionPatch(context, nextStart, nextEnd),
+      shareVideoError: "",
+      shareVideoJob: null,
+      shareVideoPreviewPath: "",
+    });
+  },
+
+  clearShareVideoSelection() {
+    const context = this.data.shareVideoContext;
+    if (
+      !context ||
+      this.data.shareVideoCreating ||
+      this.data.shareVideoPolling ||
+      this.data.shareVideoDownloadingPreview
+    ) {
+      return;
+    }
+    this.cancelShareVideoPolling();
+    this.setData({
+      ...shareVideoSelectionPatch(context, -1, -1),
+      shareVideoError: "",
+      shareVideoJob: null,
+      shareVideoPreviewPath: "",
+    });
+  },
+
+  async createShareVideo() {
+    const item = this.data.item;
+    if (
+      !item ||
+      !this.data.shareVideoContext ||
+      !this.data.shareVideoSelectedCanGenerate ||
+      this.data.shareVideoCreating ||
+      this.data.shareVideoPolling ||
+      this.data.shareVideoDownloadingPreview
+    ) {
+      return;
+    }
+    this.stopPlayback();
+    this.cancelShareVideoPolling();
+    const token = this.shareVideoPollToken + 1;
+    this.shareVideoPollToken = token;
+    this.setData({
+      shareVideoCreating: true,
+      shareVideoPolling: false,
+      shareVideoDownloadingPreview: false,
+      shareVideoError: "",
+      shareVideoStatusText: "正在创建视频任务",
+      shareVideoStatusClass: "running",
+      shareVideoJob: null,
+      shareVideoPreviewPath: "",
+    });
+    try {
+      const job = await createMemoirTranscriptShareVideoJob(
+        item.id,
+        this.data.shareVideoSelectedStartChar,
+        this.data.shareVideoSelectedEndChar,
+      );
+      if (token !== this.shareVideoPollToken) {
+        return;
+      }
+      trackAuditAction(
+        "transcript.detail_share_video_create",
+        { duration_ms: job.duration_ms },
+        { projectId: item.project_id },
+      );
+      await this.applyShareVideoJob(job, token);
+    } catch (error) {
+      if (token !== this.shareVideoPollToken) {
+        return;
+      }
+      this.setData({
+        shareVideoError: error instanceof Error ? error.message : "视频任务创建失败",
+        shareVideoStatusText: "视频任务创建失败",
+        shareVideoStatusClass: "failed",
+      });
+    } finally {
+      if (token === this.shareVideoPollToken) {
+        this.setData({ shareVideoCreating: false });
+      }
+    }
+  },
+
+  startShareVideoPolling(jobId: string) {
+    this.clearShareVideoPollTimer();
+    const token = this.shareVideoPollToken + 1;
+    this.shareVideoPollToken = token;
+    this.scheduleShareVideoPoll(jobId, token);
+  },
+
+  scheduleShareVideoPoll(jobId: string, token: number) {
+    this.clearShareVideoPollTimer();
+    this.shareVideoPollTimer = setTimeout(() => {
+      void this.refreshShareVideoJob(jobId, token);
+    }, SHARE_VIDEO_POLL_INTERVAL_MS);
+  },
+
+  async refreshShareVideoJob(jobId: string, token?: number) {
+    const requestToken = token ?? this.shareVideoPollToken;
+    if (requestToken !== this.shareVideoPollToken) {
+      return;
+    }
+    this.setData({
+      shareVideoPolling: true,
+      shareVideoStatusText: "正在生成视频",
+      shareVideoStatusClass: "running",
+    });
+    try {
+      const job = await getMemoirShareVideoJob(jobId);
+      if (requestToken !== this.shareVideoPollToken) {
+        return;
+      }
+      await this.applyShareVideoJob(job, requestToken);
+    } catch (error) {
+      if (requestToken !== this.shareVideoPollToken) {
+        return;
+      }
+      this.clearShareVideoPollTimer();
+      this.setData({
+        shareVideoPolling: false,
+        shareVideoError: error instanceof Error ? error.message : "视频生成状态刷新失败",
+        shareVideoStatusText: "视频生成状态刷新失败",
+        shareVideoStatusClass: "failed",
+      });
+    }
+  },
+
+  async applyShareVideoJob(job: MemoirShareVideoJob, token: number) {
+    const running = job.status === "pending" || job.status === "running";
+    this.setData({
+      shareVideoJob: job,
+      shareVideoPolling: running,
+      shareVideoStatusText: shareVideoJobStatusText(job),
+      shareVideoStatusClass: job.status,
+      shareVideoError: job.status === "failed" ? (job.error_message || "视频生成失败") : "",
+    });
+    if (running) {
+      this.scheduleShareVideoPoll(job.id, token);
+      return;
+    }
+    this.clearShareVideoPollTimer();
+    if (job.status === "succeeded") {
+      await this.loadShareVideoPreview(job, token);
+    }
+  },
+
+  async loadShareVideoPreview(job: MemoirShareVideoJob, token: number) {
+    if (!job.download_url) {
+      return;
+    }
+    this.setData({
+      shareVideoDownloadingPreview: true,
+      shareVideoError: "",
+      shareVideoStatusText: "正在准备预览",
+      shareVideoStatusClass: "running",
+    });
+    try {
+      const previewPath = await downloadMemoirShareVideoJob(job);
+      if (token !== this.shareVideoPollToken) {
+        return;
+      }
+      this.setData({
+        shareVideoPreviewPath: previewPath,
+        shareVideoStatusText: "视频已生成，可以预览",
+        shareVideoStatusClass: "succeeded",
+      });
+    } catch (error) {
+      if (token !== this.shareVideoPollToken) {
+        return;
+      }
+      this.setData({
+        shareVideoError: error instanceof Error ? error.message : "视频预览下载失败",
+        shareVideoStatusText: "视频已生成，预览下载失败",
+        shareVideoStatusClass: "failed",
+      });
+    } finally {
+      if (token === this.shareVideoPollToken) {
+        this.setData({ shareVideoDownloadingPreview: false });
+      }
+    }
   },
 
   changeText(event: TextAreaEvent) {
@@ -400,6 +894,7 @@ definePage<TranscriptDetailData>()({
     try {
       const updated = await updateMemoirVoiceTranscript(item.id, content);
       this.setData({ item: toViewItem(updated, this.data.bookPlan) });
+      this.resetShareVideoState();
       trackAuditAction("transcript.detail_edit_save", {}, { projectId: updated.project_id });
       wx.showToast({ title: "已保存", icon: "success" });
     } catch (error) {
@@ -424,6 +919,7 @@ definePage<TranscriptDetailData>()({
     try {
       const recovered = await recoverMemoirVoiceTranscript(item.id);
       this.setData({ item: toViewItem(recovered, this.data.bookPlan) });
+      this.resetShareVideoState();
       trackAuditAction("transcript.detail_recover_transcription", {}, { projectId: recovered.project_id });
       wx.showToast({ title: "已恢复转写", icon: "success" });
     } catch (error) {
@@ -561,6 +1057,7 @@ definePage<TranscriptDetailData>()({
         voiceEditStatusText: "",
         voiceEditPreview: null,
       });
+      this.resetShareVideoState();
       trackAuditAction("transcript.detail_voice_edit_save", {}, { projectId: updated.project_id });
       wx.showToast({ title: "已保存修改", icon: "success" });
     } catch (error) {
@@ -816,5 +1313,6 @@ definePage<TranscriptDetailData>()({
   onUnload() {
     this.stopPlayback();
     this.cancelVoiceEdit();
+    this.cancelShareVideoPolling();
   },
 });

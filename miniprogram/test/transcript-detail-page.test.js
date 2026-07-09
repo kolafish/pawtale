@@ -94,15 +94,92 @@ function sampleBookPlan() {
   };
 }
 
+function sampleShareVideoContext(utteranceId = "utterance-share") {
+  const firstText = "爷爷退休后还在帮公司做事。";
+  const secondText = "后来大家都很信任他。";
+  const transcriptText = `${firstText}${secondText}`;
+  return {
+    utterance_id: utteranceId,
+    audio_file_id: `audio-${utteranceId}`,
+    transcript_source: "edited",
+    transcript_text: transcriptText,
+    text_hash: "hash-1",
+    duration_ms: 8800,
+    alignment_strategy: "provider_words",
+    alignment_confidence: 0.92,
+    min_select_ms: 3000,
+    max_select_ms: 90000,
+    segments: [
+      {
+        index: 0,
+        text: firstText,
+        start_char: 0,
+        end_char: firstText.length,
+        start_ms: 0,
+        end_ms: 4200,
+        confidence: 0.92,
+        selectable: true,
+      },
+      {
+        index: 1,
+        text: secondText,
+        start_char: firstText.length,
+        end_char: transcriptText.length,
+        start_ms: 4200,
+        end_ms: 8800,
+        confidence: 0.9,
+        selectable: true,
+      },
+    ],
+  };
+}
+
+function sampleShareVideoJob(overrides = {}) {
+  return {
+    id: "job-1",
+    project_id: "project-1",
+    utterance_id: "utterance-share",
+    audio_file_id: "audio-utterance-share",
+    status: "succeeded",
+    selected_text: "爷爷退休后还在帮公司做事。后来大家都很信任他。",
+    start_char: 0,
+    end_char: 23,
+    start_ms: 0,
+    end_ms: 8800,
+    duration_ms: 8800,
+    style: "warm_minimal",
+    video_mime_type: "video/mp4",
+    video_size_bytes: 65536,
+    download_url: "/api/mobile/memoir/share-video/jobs/job-1/download",
+    error_message: "",
+    created_at: "2026-07-01T08:00:00.000Z",
+    updated_at: "2026-07-01T08:00:02.000Z",
+    completed_at: "2026-07-01T08:00:02.000Z",
+    ...overrides,
+  };
+}
+
 function loadTranscriptDetailPage({ voiceApiExports = {}, voiceSearchExports = {} } = {}) {
   mockModule("../services/memoir-voice-api.ts", {
     assignMemoirBookSources: async () => {
       throw new Error("assignMemoirBookSources was not mocked");
     },
+    createMemoirTranscriptShareVideoJob: async () => {
+      throw new Error("createMemoirTranscriptShareVideoJob was not mocked");
+    },
     deleteMemoirVoiceTranscript: async () => {
       throw new Error("deleteMemoirVoiceTranscript was not mocked");
     },
+    downloadMemoirShareVideoJob: async () => {
+      throw new Error("downloadMemoirShareVideoJob was not mocked");
+    },
     getMemoirBookPlan: async () => null,
+    getMemoirShareVideoJob: async () => {
+      throw new Error("getMemoirShareVideoJob was not mocked");
+    },
+    getMemoirTranscriptShareVideoContext: async () => {
+      throw new Error("getMemoirTranscriptShareVideoContext was not mocked");
+    },
     getMemoirVoiceTranscript: async () => {
       throw new Error("getMemoirVoiceTranscript was not mocked");
     },
@@ -315,6 +392,82 @@ test("transcript detail page folds low-frequency actions", async () => {
   page.toggleMoreActionsExpanded.call(context);
 
   assert.equal(context.data.moreActionsExpanded, true);
+});
+
+test("transcript detail page creates share video from selected corrected segments", async () => {
+  const contextCalls = [];
+  const createCalls = [];
+  const pollCalls = [];
+  const downloads = [];
+  const { page } = loadTranscriptDetailPage({
+    voiceApiExports: {
+      getMemoirVoiceTranscript: async (id) => sampleTranscript(id, {
+        transcript_edited: "爷爷退休后还在帮公司做事。后来大家都很信任他。",
+        display_text: "爷爷退休后还在帮公司做事。后来大家都很信任他。",
+        display_char_count: 23,
+      }),
+      getMemoirTranscriptShareVideoContext: async (id) => {
+        contextCalls.push(id);
+        return sampleShareVideoContext(id);
+      },
+      createMemoirTranscriptShareVideoJob: async (id, startChar, endChar) => {
+        createCalls.push({ id, startChar, endChar });
+        return sampleShareVideoJob({
+          utterance_id: id,
+          audio_file_id: `audio-${id}`,
+          status: "pending",
+          start_char: startChar,
+          end_char: endChar,
+          video_size_bytes: null,
+          download_url: null,
+          completed_at: null,
+        });
+      },
+      getMemoirShareVideoJob: async (jobId) => {
+        pollCalls.push(jobId);
+        return sampleShareVideoJob();
+      },
+      downloadMemoirShareVideoJob: async (job) => {
+        downloads.push(job.id);
+        return "/tmp/share-video.mp4";
+      },
+    },
+  });
+  const context = pageContext(page);
+
+  await page.onLoad.call(context, { id: "utterance-share" });
+  await page.toggleShareVideoPanel.call(context);
+
+  assert.deepEqual(contextCalls, ["utterance-share"]);
+  assert.equal(context.data.shareVideoPanelOpen, true);
+  assert.equal(context.data.shareVideoSegments.length, 2);
+  assert.equal(context.data.shareVideoSelectedCanGenerate, false);
+
+  page.selectShareVideoSegment.call(context, { currentTarget: { dataset: { index: 0 } } });
+  assert.equal(context.data.shareVideoSelectedText, "爷爷退休后还在帮公司做事。");
+  assert.equal(context.data.shareVideoSelectedCanGenerate, true);
+
+  page.selectShareVideoSegment.call(context, { currentTarget: { dataset: { index: 1 } } });
+  assert.equal(context.data.shareVideoSelectedText, "爷爷退休后还在帮公司做事。后来大家都很信任他。");
+  assert.equal(context.data.shareVideoSelectedStartChar, 0);
+  assert.equal(context.data.shareVideoSelectedEndChar, 23);
+  assert.equal(context.data.shareVideoSelectedMetaText, "已选 9 秒 · 23 字");
+
+  await page.createShareVideo.call(context);
+
+  assert.deepEqual(createCalls, [{ id: "utterance-share", startChar: 0, endChar: 23 }]);
+  assert.equal(context.data.shareVideoJob.status, "pending");
+  assert.equal(context.data.shareVideoPolling, true);
+  assert.deepEqual(downloads, []);
+
+  page.clearShareVideoPollTimer.call(context);
+  await page.refreshShareVideoJob.call(context, "job-1", context.shareVideoPollToken);
+
+  assert.deepEqual(pollCalls, ["job-1"]);
+  assert.deepEqual(downloads, ["job-1"]);
+  assert.equal(context.data.shareVideoJob.status, "succeeded");
+  assert.equal(context.data.shareVideoStatusText, "视频已生成，可以预览");
+  assert.equal(context.data.shareVideoPreviewPath, "/tmp/share-video.mp4");
 });
 
 test("transcript detail page plays question and answer audio separately", async () => {
