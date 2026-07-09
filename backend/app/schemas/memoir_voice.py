@@ -297,6 +297,7 @@ class MemoirVoiceTranscriptItemResponse(BaseModel):
     project_id: str
     project_title: str
     chat_message_id: str | None = None
+    chat_message_role: MemoirChatMessageRole | None = None
     audio_file_id: str | None = None
     audio_mime_type: str | None = None
     audio_size_bytes: int | None = None

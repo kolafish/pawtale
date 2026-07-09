@@ -12,6 +12,7 @@ import type { ChapterPickerOption } from "../../services/memoir-book-source-acti
 import { trackAuditAction } from "../../services/audit-tracker";
 import {
   assignMemoirBookSources,
+  convertMemoirInterviewQuestionToAnswer,
   createMemoirTranscriptShareVideoJob,
   deleteMemoirVoiceTranscript,
   downloadMemoirShareVideoJob,
@@ -103,6 +104,7 @@ interface TranscriptDetailItemView extends MemoirVoiceTranscriptItem {
   canPlayAudio: boolean;
   canPlayAnswerAudio: boolean;
   canPlayQuestionAudio: boolean;
+  canConvertQuestionToAnswer: boolean;
   questionTitleText: string;
   questionCanExpand: boolean;
   questionSegments: TranscriptTextSegment[];
@@ -125,6 +127,7 @@ interface TranscriptDetailData {
   needsLogin: boolean;
   saving: boolean;
   deleting: boolean;
+  convertingQuestionToAnswer: boolean;
   recovering: boolean;
   assigning: boolean;
   moving: boolean;
@@ -501,6 +504,12 @@ function toViewItem(
     canPlayAudio: Boolean(item.audio_file_id || item.question_audio_file_id),
     canPlayAnswerAudio: Boolean(item.audio_file_id),
     canPlayQuestionAudio: Boolean(item.question_audio_file_id),
+    canConvertQuestionToAnswer: Boolean(
+      !canRecoverTranscription &&
+      item.interview_type === "human_interview" &&
+      item.chat_message_role === "interviewer" &&
+      item.chat_message_id,
+    ),
     questionTitleText: item.interview_type === "human_interview" ? "采访者刚才问了" : "小余刚才问了",
     questionCanExpand: Array.from(questionText).length > COLLAPSIBLE_QUESTION_CHAR_COUNT,
     questionSegments: plainTranscriptSegments(item.question_text),
@@ -537,6 +546,20 @@ function confirmDelete(item: TranscriptDetailItemView): Promise<boolean> {
   });
 }
 
+function confirmConvertQuestionToAnswer(item: TranscriptDetailItemView): Promise<boolean> {
+  return new Promise((resolve) => {
+    const preview = item.titleText || item.display_text || item.transcript_raw || "这段内容";
+    wx.showModal({
+      title: "改成回答？",
+      content: `“${preview.slice(0, 24)}${preview.length > 24 ? "..." : ""}”现在被系统当作采访者提问。改成回答后，会作为讲述素材保留，之后可以放入章节；原音频和识别文字不会丢。`,
+      confirmText: "改成回答",
+      confirmColor: "#2f6f4e",
+      success: (result) => resolve(Boolean(result.confirm)),
+      fail: () => resolve(false),
+    });
+  });
+}
+
 definePage<TranscriptDetailData>()({
   audioPlayback: new AudioPlaybackController(),
   loadToken: 0,
@@ -551,6 +574,7 @@ definePage<TranscriptDetailData>()({
     needsLogin: false,
     saving: false,
     deleting: false,
+    convertingQuestionToAnswer: false,
     recovering: false,
     assigning: false,
     moving: false,
@@ -651,7 +675,7 @@ definePage<TranscriptDetailData>()({
 
   beginEdit() {
     const item = this.data.item;
-    if (!item || item.canRecoverTranscription || this.data.saving || this.data.deleting) {
+    if (!item || item.canRecoverTranscription || this.data.saving || this.data.deleting || this.data.convertingQuestionToAnswer) {
       return;
     }
     this.resetShareVideoState();
@@ -1189,7 +1213,7 @@ definePage<TranscriptDetailData>()({
 
   async saveTranscript() {
     const item = this.data.item;
-    if (!item || item.canRecoverTranscription || this.data.saving || this.data.deleting) {
+    if (!item || item.canRecoverTranscription || this.data.saving || this.data.deleting || this.data.convertingQuestionToAnswer) {
       return;
     }
     const content = item.editingText.trim();
@@ -1218,7 +1242,8 @@ definePage<TranscriptDetailData>()({
       !item.canRecoverTranscription ||
       this.data.recovering ||
       this.data.saving ||
-      this.data.deleting
+      this.data.deleting ||
+      this.data.convertingQuestionToAnswer
     ) {
       return;
     }
@@ -1251,6 +1276,7 @@ definePage<TranscriptDetailData>()({
       || item.canRecoverTranscription
       || this.data.saving
       || this.data.deleting
+      || this.data.convertingQuestionToAnswer
       || this.data.voiceEditLoading
       || this.data.voiceEditSaving
     ) {
@@ -1347,6 +1373,7 @@ definePage<TranscriptDetailData>()({
       || this.data.voiceEditSaving
       || this.data.saving
       || this.data.deleting
+      || this.data.convertingQuestionToAnswer
     ) {
       return;
     }
@@ -1378,7 +1405,7 @@ definePage<TranscriptDetailData>()({
     const item = this.data.item;
     const optionIndex = pickerIndex(event);
     const option = item?.chapterAssignOptions[optionIndex];
-    if (!item || !option || this.data.assigning || this.data.moving) {
+    if (!item || !option || this.data.assigning || this.data.moving || this.data.convertingQuestionToAnswer) {
       return;
     }
     this.stopPlayback();
@@ -1407,7 +1434,7 @@ definePage<TranscriptDetailData>()({
     const item = this.data.item;
     const optionIndex = pickerIndex(event);
     const option = item?.chapterMoveOptions[optionIndex];
-    if (!item || !option || this.data.assigning || this.data.moving) {
+    if (!item || !option || this.data.assigning || this.data.moving || this.data.convertingQuestionToAnswer) {
       return;
     }
     this.stopPlayback();
@@ -1437,7 +1464,7 @@ definePage<TranscriptDetailData>()({
 
   async deleteTranscript() {
     const item = this.data.item;
-    if (!item || this.data.saving || this.data.deleting) {
+    if (!item || this.data.saving || this.data.deleting || this.data.convertingQuestionToAnswer) {
       return;
     }
     const confirmed = await confirmDelete(item);
@@ -1454,6 +1481,40 @@ definePage<TranscriptDetailData>()({
       this.setData({ error: error instanceof Error ? error.message : "删除失败" });
     } finally {
       this.setData({ deleting: false });
+    }
+  },
+
+  async convertCurrentQuestionToAnswer() {
+    const item = this.data.item;
+    if (
+      !item ||
+      !item.canConvertQuestionToAnswer ||
+      !item.chat_message_id ||
+      this.data.saving ||
+      this.data.deleting ||
+      this.data.convertingQuestionToAnswer
+    ) {
+      return;
+    }
+    const confirmed = await confirmConvertQuestionToAnswer(item);
+    if (!confirmed) {
+      return;
+    }
+    this.stopPlayback();
+    this.resetShareVideoState();
+    this.setData({ convertingQuestionToAnswer: true, error: "" });
+    try {
+      await convertMemoirInterviewQuestionToAnswer(item.project_id, item.chat_message_id);
+      wx.showToast({ title: "已改成回答", icon: "success" });
+      await this.loadTranscript();
+      this.setData({ moreActionsExpanded: false });
+    } catch (error) {
+      if (routeAuthError(error, "login")) {
+        return;
+      }
+      this.setData({ error: error instanceof Error ? error.message : "转换失败，请稍后重试" });
+    } finally {
+      this.setData({ convertingQuestionToAnswer: false });
     }
   },
 
@@ -1478,7 +1539,7 @@ definePage<TranscriptDetailData>()({
       this.stopPlayback();
       return;
     }
-    if (this.data.saving || this.data.deleting) {
+    if (this.data.saving || this.data.deleting || this.data.convertingQuestionToAnswer) {
       return;
     }
     this.stopPlayback();

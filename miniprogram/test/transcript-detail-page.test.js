@@ -12,6 +12,7 @@ function sampleTranscript(id, overrides = {}) {
     project_id: "project-1",
     project_title: "我的回忆录",
     chat_message_id: `message-${id}`,
+    chat_message_role: "user",
     audio_file_id: `audio-${id}`,
     audio_mime_type: "audio/pcm",
     audio_size_bytes: 1024,
@@ -207,6 +208,9 @@ function loadTranscriptDetailPage({ voiceApiExports = {}, voiceSearchExports = {
     assignMemoirBookSources: async () => {
       throw new Error("assignMemoirBookSources was not mocked");
     },
+    convertMemoirInterviewQuestionToAnswer: async () => {
+      throw new Error("convertMemoirInterviewQuestionToAnswer was not mocked");
+    },
     createMemoirTranscriptShareVideoJob: async () => {
       throw new Error("createMemoirTranscriptShareVideoJob was not mocked");
     },
@@ -369,6 +373,66 @@ test("transcript detail page labels human interviewer questions", async () => {
   await page.onLoad.call(context, { id: "utterance-human" });
 
   assert.equal(context.data.item.questionTitleText, "采访者刚才问了");
+});
+
+test("transcript detail page converts a human interviewer material item to an answer", async () => {
+  const loadCalls = [];
+  const convertCalls = [];
+  const modals = [];
+  const toasts = [];
+  const { page } = loadTranscriptDetailPage({
+    voiceApiExports: {
+      getMemoirVoiceTranscript: async (id) => {
+        loadCalls.push(id);
+        const converted = loadCalls.length > 1;
+        return sampleTranscript(id, {
+          interview_type: "human_interview",
+          chat_message_id: "message-question",
+          chat_message_role: converted ? "user" : "interviewer",
+          question_message_id: null,
+          question_text: "",
+          question_audio_file_id: null,
+          transcript_raw: "我们家那时候有六口人。",
+          display_text: "我们家那时候有六口人。",
+          summary_title: "我们家那时候有六口人",
+          summary_text: "我们家那时候有六口人。",
+          raw_char_count: 11,
+          display_char_count: 11,
+        });
+      },
+      convertMemoirInterviewQuestionToAnswer: async (projectId, messageId) => {
+        convertCalls.push({ projectId, messageId });
+      },
+    },
+  });
+  const context = pageContext(page);
+  global.wx = {
+    showModal(options) {
+      modals.push(options);
+      options.success({ confirm: true });
+    },
+    showToast(options) {
+      toasts.push(options);
+    },
+  };
+
+  await page.onLoad.call(context, { id: "utterance-question" });
+
+  assert.equal(context.data.item.canConvertQuestionToAnswer, true);
+  page.toggleMoreActionsExpanded.call(context);
+  assert.equal(context.data.moreActionsExpanded, true);
+
+  await page.convertCurrentQuestionToAnswer.call(context);
+
+  assert.deepEqual(convertCalls, [{ projectId: "project-1", messageId: "message-question" }]);
+  assert.deepEqual(loadCalls, ["utterance-question", "utterance-question"]);
+  assert.equal(modals[0].title, "改成回答？");
+  assert.equal(modals[0].confirmText, "改成回答");
+  assert.deepEqual(toasts, [{ title: "已改成回答", icon: "success" }]);
+  assert.equal(context.data.item.chat_message_role, "user");
+  assert.equal(context.data.item.canConvertQuestionToAnswer, false);
+  assert.equal(context.data.moreActionsExpanded, false);
+  delete global.wx;
 });
 
 test("transcript detail page uses content-first inclusion labels", async () => {

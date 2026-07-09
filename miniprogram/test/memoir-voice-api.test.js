@@ -396,6 +396,56 @@ test("voice search query parse API posts text and selected AI model", async () =
   delete global.wx;
 });
 
+test("question conversion API posts miniprogram mutation source", async () => {
+  const requests = [];
+  global.wx = {
+    getStorageSync(key) {
+      if (key === "pawtale_backend_config") {
+        return {
+          httpBaseUrl: "http://backend.local:8000/",
+          devEmail: "local@example.com",
+          devPassword: "secret",
+        };
+      }
+      if (key === "pawtale_backend_cookie") {
+        return "pawtale_session=abc";
+      }
+      return "";
+    },
+    getExtConfigSync() {
+      return {};
+    },
+    setStorageSync() {},
+    removeStorageSync() {},
+    request(options) {
+      requests.push(options);
+      if (options.url.endsWith("/api/auth/me")) {
+        options.success({ statusCode: 200, data: { id: "user-1" }, cookies: [], header: {} });
+        return;
+      }
+      options.success({ statusCode: 200, data: {}, cookies: [], header: {} });
+    },
+  };
+  resetMemoirVoiceApiModules();
+  const { convertMemoirInterviewQuestionToAnswer } = require("../services/memoir-voice-api.ts");
+
+  await convertMemoirInterviewQuestionToAnswer("project/1", "message/1");
+
+  const apiRequests = requests.filter((request) => request.url.includes("/api/memoir/"));
+  assert.equal(
+    apiRequests[0].url,
+    "http://backend.local:8000/api/memoir/projects/project%2F1/interview-editor/questions/message%2F1/convert-to-answer",
+  );
+  assert.equal(apiRequests[0].method, "POST");
+  assert.deepEqual(apiRequests[0].data, {
+    parent_question_message_id: null,
+    reason: "miniprogram_convert_question_to_unassigned_answer",
+    mutation_source: "miniprogram_transcript_detail",
+  });
+  assert.equal(apiRequests[0].header.Cookie, "pawtale_session=abc");
+  delete global.wx;
+});
+
 test("share video APIs encode routes and download preview with session cookie", async () => {
   const requests = [];
   const downloads = [];

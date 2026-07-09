@@ -597,6 +597,7 @@ def _item_response(
         project_id=voice_session.project_id,
         project_title=voice_session.project.title if voice_session.project else "",
         chat_message_id=utterance.chat_message_id,
+        chat_message_role=MemoirChatMessageRole(chat_message.role) if chat_message else None,
         audio_file_id=utterance.audio_file_id,
         audio_mime_type=audio_file.mime_type if audio_file else None,
         audio_size_bytes=audio_file.size_bytes if audio_file else None,

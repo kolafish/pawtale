@@ -451,6 +451,54 @@ async def test_interview_editor_converts_misclassified_question_to_answer(client
     assert versions[0].content == "我们家那时候有六口人。"
 
 
+async def test_interview_editor_converts_question_to_unassigned_answer_for_mobile(client, test_db):
+    user = (await client.get("/api/auth/me")).json()
+    session = await _create_human_session(client)
+    misclassified_answer = await _add_turn(
+        test_db,
+        user_id=user["id"],
+        session=session,
+        role=MemoirChatMessageRole.INTERVIEWER.value,
+        text="我们家那时候有六口人。",
+        turn_index=0,
+    )
+
+    response = await client.post(
+        (
+            f"/api/memoir/projects/{session['project_id']}/interview-editor/questions/"
+            f"{misclassified_answer['message_id']}/convert-to-answer"
+        ),
+        json={
+            "parent_question_message_id": None,
+            "reason": "miniprogram_convert_question_to_unassigned_answer",
+            "mutation_source": "miniprogram_transcript_detail",
+        },
+    )
+
+    assert response.status_code == 200
+    detail = response.json()
+    assert detail["session"]["question_count"] == 0
+    assert detail["session"]["answer_count"] == 1
+    assert detail["session"]["unassigned_answer_count"] == 1
+    assert detail["unassigned_answers"][0]["id"] == misclassified_answer["utterance_id"]
+
+    transcript_response = await client.get(
+        f"/api/mobile/memoir/voice-transcripts/{misclassified_answer['utterance_id']}"
+    )
+    assert transcript_response.status_code == 200
+    transcript = transcript_response.json()
+    assert transcript["chat_message_role"] == "user"
+    assert transcript["question_message_id"] is None
+    assert transcript["display_text"] == "我们家那时候有六口人。"
+
+    message = await test_db.scalar(
+        select(MemoirChatMessage).where(MemoirChatMessage.id == misclassified_answer["message_id"])
+    )
+    assert message is not None
+    assert message.metadata_json["converted_from"] == "miniprogram_transcript_detail"
+    assert message.metadata_json["conversion_reason"] == "miniprogram_convert_question_to_unassigned_answer"
+
+
 async def test_interview_editor_rejects_converting_question_with_existing_answers(client, test_db):
     user = (await client.get("/api/auth/me")).json()
     session = await _create_human_session(client)

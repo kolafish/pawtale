@@ -168,6 +168,23 @@ export function updateMemoirVoiceTranscript(
   );
 }
 
+export function convertMemoirInterviewQuestionToAnswer(
+  projectId: string,
+  messageId: string,
+): Promise<unknown> {
+  return memoirRequest<unknown>(
+    `/api/memoir/projects/${encodeURIComponent(projectId)}/interview-editor/questions/${encodeURIComponent(messageId)}/convert-to-answer`,
+    {
+      method: "POST",
+      data: {
+        parent_question_message_id: null,
+        reason: "miniprogram_convert_question_to_unassigned_answer",
+        mutation_source: "miniprogram_transcript_detail",
+      },
+    },
+  );
+}
+
 export function recoverMemoirVoiceTranscript(
   utteranceId: string,
 ): Promise<MemoirVoiceTranscriptItem> {
