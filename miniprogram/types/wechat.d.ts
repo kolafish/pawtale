@@ -310,6 +310,14 @@ declare namespace WechatMiniprogram {
     complete?(result: GeneralCallbackResult): void;
   }
 
+  interface ShareFileMessageOption {
+    filePath: string;
+    fileName?: string;
+    success?(result: GeneralCallbackResult): void;
+    fail?(result: GeneralCallbackResult): void;
+    complete?(result: GeneralCallbackResult): void;
+  }
+
   interface Wx {
     env: {
       USER_DATA_PATH: string;
@@ -325,6 +333,7 @@ declare namespace WechatMiniprogram {
     getPrivacySetting?(option: PrivacySettingOption): void;
     requirePrivacyAuthorize?(option: PrivacyAuthorizeOption): void;
     showShareMenu?(option: ShowShareMenuOption): void;
+    shareFileMessage?(option: ShareFileMessageOption): void;
     setInnerAudioOption?(option: InnerAudioOption): void;
     navigateTo(option: NavigateOption): void;
     redirectTo(option: NavigateOption): void;

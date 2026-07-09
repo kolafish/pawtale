@@ -17,6 +17,17 @@ interface ShareMenuOptions {
   includeTimeline?: boolean;
 }
 
+interface LocalFileShareInput {
+  filePath: string;
+  fileName?: string;
+}
+
+export class ShareFileMessageCancelError extends Error {
+  constructor(message = "已取消分享") {
+    super(message);
+  }
+}
+
 function shortTitle(value: string | undefined, fallback: string): string {
   const title = (value || "").trim() || fallback;
   if (title.length <= SHARE_TITLE_LIMIT) {
@@ -52,6 +63,33 @@ export function enableMiniProgramShareMenu(options: ShareMenuOptions = {}): void
     : ["shareAppMessage", "shareTimeline"];
   wx.showShareMenu({
     menus,
+  });
+}
+
+function shareFileError(error: WechatMiniprogram.GeneralCallbackResult): Error {
+  const message = error.errMsg || "文件分享失败";
+  if (message.toLowerCase().includes("cancel")) {
+    return new ShareFileMessageCancelError();
+  }
+  return new Error(message);
+}
+
+export function isShareFileMessageCancelError(error: unknown): boolean {
+  return error instanceof ShareFileMessageCancelError;
+}
+
+export function shareLocalFileMessage(input: LocalFileShareInput): Promise<void> {
+  const shareFileMessage = typeof wx === "undefined" ? undefined : wx.shareFileMessage;
+  if (typeof shareFileMessage !== "function") {
+    return Promise.reject(new Error("当前微信版本不支持直接分享文件，请更新微信后重试"));
+  }
+  return new Promise((resolve, reject) => {
+    shareFileMessage({
+      filePath: input.filePath,
+      ...(input.fileName ? { fileName: input.fileName } : {}),
+      success: () => resolve(),
+      fail: (error) => reject(shareFileError(error)),
+    });
   });
 }
 

@@ -24,6 +24,10 @@ import {
 } from "../../services/memoir-voice-api";
 import { AudioPlaybackController } from "../../services/audio-playback";
 import {
+  isShareFileMessageCancelError,
+  shareLocalFileMessage,
+} from "../../services/share";
+import {
   sourceAssignmentRequest,
   transcriptChapterAssignOptions,
   transcriptChapterMoveOptions,
@@ -138,6 +142,7 @@ interface TranscriptDetailData {
   shareVideoCreating: boolean;
   shareVideoPolling: boolean;
   shareVideoDownloadingPreview: boolean;
+  shareVideoSharing: boolean;
   shareVideoError: string;
   shareVideoContext: MemoirTranscriptShareVideoContext | null;
   shareVideoSegments: TranscriptShareVideoSegmentView[];
@@ -333,6 +338,14 @@ function shareVideoJobStatusText(job: MemoirShareVideoJob): string {
   return "视频任务已创建，等待生成";
 }
 
+function shareVideoFileName(item: TranscriptDetailItemView | null): string {
+  const title = (item?.titleText || item?.summary_title || "回忆录片段")
+    .replace(/[\\/:*?"<>|]/g, "")
+    .trim();
+  const shortTitle = Array.from(title).slice(0, 24).join("");
+  return `${shortTitle || "回忆录片段"}.mp4`;
+}
+
 async function loadTranscriptBookPlan(projectId: string): Promise<MemoirBookPlan | null> {
   try {
     return await getMemoirBookPlan(projectId);
@@ -426,6 +439,7 @@ definePage<TranscriptDetailData>()({
   voiceEditToken: 0,
   shareVideoPollTimer: null as ReturnType<typeof setTimeout> | null,
   shareVideoPollToken: 0,
+  shareVideoFileCache: {} as Record<string, string>,
 
   data: {
     loading: false,
@@ -463,6 +477,7 @@ definePage<TranscriptDetailData>()({
     shareVideoCreating: false,
     shareVideoPolling: false,
     shareVideoDownloadingPreview: false,
+    shareVideoSharing: false,
     shareVideoError: "",
     shareVideoContext: null,
     shareVideoSegments: [],
@@ -575,12 +590,14 @@ definePage<TranscriptDetailData>()({
 
   resetShareVideoState() {
     this.cancelShareVideoPolling();
+    this.shareVideoFileCache = {};
     this.setData({
       shareVideoPanelOpen: false,
       shareVideoLoadingContext: false,
       shareVideoCreating: false,
       shareVideoPolling: false,
       shareVideoDownloadingPreview: false,
+      shareVideoSharing: false,
       shareVideoError: "",
       shareVideoContext: null,
       ...shareVideoSelectionPatch(null, -1, -1),
@@ -593,7 +610,14 @@ definePage<TranscriptDetailData>()({
 
   async toggleShareVideoPanel() {
     const item = this.data.item;
-    if (!item || item.canRecoverTranscription || item.isEditing || this.data.saving || this.data.deleting) {
+    if (
+      !item ||
+      item.canRecoverTranscription ||
+      item.isEditing ||
+      this.data.saving ||
+      this.data.deleting ||
+      this.data.shareVideoSharing
+    ) {
       return;
     }
     if (this.data.shareVideoPanelOpen) {
@@ -623,6 +647,7 @@ definePage<TranscriptDetailData>()({
       shareVideoLoadingContext: true,
       shareVideoCreating: false,
       shareVideoDownloadingPreview: false,
+      shareVideoSharing: false,
       shareVideoError: "",
       shareVideoContext: null,
       ...shareVideoSelectionPatch(null, -1, -1),
@@ -656,7 +681,8 @@ definePage<TranscriptDetailData>()({
       !item ||
       this.data.shareVideoCreating ||
       this.data.shareVideoPolling ||
-      this.data.shareVideoDownloadingPreview
+      this.data.shareVideoDownloadingPreview ||
+      this.data.shareVideoSharing
     ) {
       return;
     }
@@ -681,11 +707,13 @@ definePage<TranscriptDetailData>()({
       }
     }
     this.cancelShareVideoPolling();
+    this.shareVideoFileCache = {};
     this.setData({
       ...shareVideoSelectionPatch(context, nextStart, nextEnd),
       shareVideoError: "",
       shareVideoJob: null,
       shareVideoPreviewPath: "",
+      shareVideoSharing: false,
     });
   },
 
@@ -695,16 +723,19 @@ definePage<TranscriptDetailData>()({
       !context ||
       this.data.shareVideoCreating ||
       this.data.shareVideoPolling ||
-      this.data.shareVideoDownloadingPreview
+      this.data.shareVideoDownloadingPreview ||
+      this.data.shareVideoSharing
     ) {
       return;
     }
     this.cancelShareVideoPolling();
+    this.shareVideoFileCache = {};
     this.setData({
       ...shareVideoSelectionPatch(context, -1, -1),
       shareVideoError: "",
       shareVideoJob: null,
       shareVideoPreviewPath: "",
+      shareVideoSharing: false,
     });
   },
 
@@ -716,18 +747,21 @@ definePage<TranscriptDetailData>()({
       !this.data.shareVideoSelectedCanGenerate ||
       this.data.shareVideoCreating ||
       this.data.shareVideoPolling ||
-      this.data.shareVideoDownloadingPreview
+      this.data.shareVideoDownloadingPreview ||
+      this.data.shareVideoSharing
     ) {
       return;
     }
     this.stopPlayback();
     this.cancelShareVideoPolling();
+    this.shareVideoFileCache = {};
     const token = this.shareVideoPollToken + 1;
     this.shareVideoPollToken = token;
     this.setData({
       shareVideoCreating: true,
       shareVideoPolling: false,
       shareVideoDownloadingPreview: false,
+      shareVideoSharing: false,
       shareVideoError: "",
       shareVideoStatusText: "正在创建视频任务",
       shareVideoStatusClass: "running",
@@ -828,26 +862,54 @@ definePage<TranscriptDetailData>()({
     }
   },
 
-  async loadShareVideoPreview(job: MemoirShareVideoJob, token: number) {
+  async ensureShareVideoPreviewPath(
+    job: MemoirShareVideoJob,
+    token: number,
+    statusText = "正在准备预览",
+  ): Promise<string> {
     if (!job.download_url) {
-      return;
+      throw new Error("视频还没有生成完成");
+    }
+    if (this.data.shareVideoJob?.id === job.id && this.data.shareVideoPreviewPath) {
+      return this.data.shareVideoPreviewPath;
+    }
+    const cachedPath = this.shareVideoFileCache[job.id];
+    if (cachedPath) {
+      this.setData({
+        shareVideoPreviewPath: cachedPath,
+        shareVideoStatusText: "视频已生成，可以预览",
+        shareVideoStatusClass: "succeeded",
+      });
+      return cachedPath;
     }
     this.setData({
       shareVideoDownloadingPreview: true,
       shareVideoError: "",
-      shareVideoStatusText: "正在准备预览",
+      shareVideoStatusText: statusText,
       shareVideoStatusClass: "running",
     });
     try {
       const previewPath = await downloadMemoirShareVideoJob(job);
       if (token !== this.shareVideoPollToken) {
-        return;
+        return "";
       }
+      this.shareVideoFileCache[job.id] = previewPath;
       this.setData({
         shareVideoPreviewPath: previewPath,
         shareVideoStatusText: "视频已生成，可以预览",
         shareVideoStatusClass: "succeeded",
       });
+      return previewPath;
+    } finally {
+      if (token === this.shareVideoPollToken) {
+        this.setData({ shareVideoDownloadingPreview: false });
+      }
+    }
+  },
+
+  async loadShareVideoPreview(job: MemoirShareVideoJob, token: number) {
+    try {
+      await this.ensureShareVideoPreviewPath(job, token);
     } catch (error) {
       if (token !== this.shareVideoPollToken) {
         return;
@@ -857,9 +919,71 @@ definePage<TranscriptDetailData>()({
         shareVideoStatusText: "视频已生成，预览下载失败",
         shareVideoStatusClass: "failed",
       });
+    }
+  },
+
+  async shareGeneratedVideo() {
+    const item = this.data.item;
+    const job = this.data.shareVideoJob;
+    if (!item || !job || job.status !== "succeeded") {
+      this.setData({
+        shareVideoError: "请先生成视频",
+        shareVideoStatusText: "请先生成视频",
+        shareVideoStatusClass: "failed",
+      });
+      return;
+    }
+    if (
+      this.data.shareVideoCreating ||
+      this.data.shareVideoPolling ||
+      this.data.shareVideoDownloadingPreview ||
+      this.data.shareVideoSharing
+    ) {
+      return;
+    }
+    const token = this.shareVideoPollToken;
+    this.setData({
+      shareVideoSharing: true,
+      shareVideoError: "",
+      shareVideoStatusText: "正在准备分享",
+      shareVideoStatusClass: "running",
+    });
+    try {
+      const filePath = await this.ensureShareVideoPreviewPath(job, token, "正在准备分享");
+      if (!filePath || token !== this.shareVideoPollToken) {
+        return;
+      }
+      await shareLocalFileMessage({
+        filePath,
+        fileName: shareVideoFileName(item),
+      });
+      if (token !== this.shareVideoPollToken) {
+        return;
+      }
+      this.setData({
+        shareVideoStatusText: "已打开微信分享",
+        shareVideoStatusClass: "succeeded",
+      });
+      trackAuditAction("transcript.detail_share_video_share", { job_id: job.id }, { projectId: item.project_id });
+    } catch (error) {
+      if (token !== this.shareVideoPollToken) {
+        return;
+      }
+      if (isShareFileMessageCancelError(error)) {
+        this.setData({
+          shareVideoStatusText: "视频已生成，可以预览",
+          shareVideoStatusClass: "succeeded",
+        });
+        return;
+      }
+      this.setData({
+        shareVideoError: error instanceof Error ? error.message : "视频分享失败",
+        shareVideoStatusText: "视频分享失败",
+        shareVideoStatusClass: "failed",
+      });
     } finally {
       if (token === this.shareVideoPollToken) {
-        this.setData({ shareVideoDownloadingPreview: false });
+        this.setData({ shareVideoSharing: false });
       }
     }
   },
