@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 import os
 from pathlib import Path
 import shutil
@@ -50,6 +51,8 @@ _ASS_RULE_COLOR = "&H00BBCDD8"
 _QUOTE_PAGE_MAX_CHARS = 36
 _QUOTE_LINE_MAX_CHARS = 12
 _QUOTE_PHRASE_MAX_CHARS = 3
+_STALE_SHARE_VIDEO_JOB_SECONDS = 300
+_STALE_SHARE_VIDEO_RECOVERY_BACKOFF_SECONDS = 300
 
 
 @dataclass(frozen=True)
@@ -133,6 +136,58 @@ def _job_response(job: MemoirMaterialShareVideo) -> MemoirShareVideoJobResponse:
         updated_at=job.updated_at,
         completed_at=job.completed_at,
     )
+
+
+def _parse_metadata_datetime(value: object) -> datetime | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return parsed.replace(tzinfo=None) if parsed.tzinfo else parsed
+
+
+def _should_recover_stale_share_video_job(
+    job: MemoirMaterialShareVideo,
+    *,
+    now: datetime | None = None,
+) -> bool:
+    if job.status not in {
+        MemoirShareVideoJobStatus.PENDING.value,
+        MemoirShareVideoJobStatus.RUNNING.value,
+    }:
+        return False
+    if job.video_storage_path:
+        return False
+
+    current_time = now or datetime.utcnow()
+    last_update = job.updated_at or job.created_at
+    if current_time - last_update < timedelta(seconds=_STALE_SHARE_VIDEO_JOB_SECONDS):
+        return False
+
+    metadata = job.metadata_json or {}
+    recovery_enqueued_at = _parse_metadata_datetime(metadata.get("recovery_enqueued_at"))
+    if recovery_enqueued_at and (
+        current_time - recovery_enqueued_at
+        < timedelta(seconds=_STALE_SHARE_VIDEO_RECOVERY_BACKOFF_SECONDS)
+    ):
+        return False
+    return True
+
+
+async def _mark_share_video_job_recovery_enqueued(
+    db: AsyncSession,
+    job: MemoirMaterialShareVideo,
+    *,
+    now: datetime | None = None,
+) -> None:
+    current_time = now or datetime.utcnow()
+    metadata = dict(job.metadata_json or {})
+    metadata["recovery_enqueued_at"] = current_time.isoformat()
+    metadata["recovery_reason"] = "stale_running"
+    job.metadata_json = metadata
+    await db.commit()
 
 
 async def create_share_video_job(
@@ -225,8 +280,12 @@ async def get_share_video_job(
     user_id: str,
     *,
     allow_admin: bool = False,
+    enqueue_recovery: Callable[[str], None] | None = None,
 ) -> MemoirShareVideoJobResponse:
     job = await _load_owned_job(db, job_id, user_id, allow_admin=allow_admin)
+    if enqueue_recovery and _should_recover_stale_share_video_job(job):
+        await _mark_share_video_job_recovery_enqueued(db, job)
+        enqueue_recovery(job.id)
     return _job_response(job)
 
 

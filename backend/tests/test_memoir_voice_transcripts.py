@@ -1,6 +1,7 @@
 import asyncio
 import json
 import re
+from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -18,6 +19,7 @@ from app.domain.memoir.types import (
     MemoirEditingJobStatus,
     MemoirEditingJobType,
     MemoirSemanticCacheStatus,
+    MemoirShareVideoJobStatus,
     MemoirTranscriptVersionType,
 )
 from app.models.memoir import (
@@ -727,6 +729,65 @@ async def test_mobile_memoir_creates_and_downloads_share_video_job(client, test_
     assert download_response.status_code == 200
     assert download_response.headers["content-type"].startswith("video/mp4")
     assert download_response.content == b"fake mp4"
+
+
+async def test_share_video_job_detail_enqueues_stale_running_recovery(
+    client,
+    test_db,
+    monkeypatch,
+):
+    async def noop_background_share_video_job(_job_id):
+        return None
+
+    monkeypatch.setattr(
+        "app.services.memoir.share_video_jobs.run_share_video_job",
+        noop_background_share_video_job,
+    )
+    user = (await client.get("/api/auth/me")).json()
+    text = "我小时候住在外婆家。后来我去县城读书。"
+    created = await create_test_voice_transcript(client, test_db, text=text)
+    end_char = text.index("。") + 1
+
+    create_response = await client.post(
+        f"/api/mobile/memoir/voice-transcripts/{created['utterance_id']}/share-video/jobs",
+        json={"start_char": 0, "end_char": end_char},
+    )
+    assert create_response.status_code == 201
+    job_id = create_response.json()["id"]
+
+    stored_job = await test_db.scalar(
+        select(MemoirMaterialShareVideo).where(MemoirMaterialShareVideo.id == job_id)
+    )
+    assert stored_job is not None
+    stored_job.status = MemoirShareVideoJobStatus.RUNNING.value
+    stored_job.video_storage_path = None
+    stored_job.metadata_json = {"background_status": "fallback"}
+    stored_job.updated_at = datetime.utcnow() - timedelta(minutes=6)
+    await test_db.commit()
+
+    recovery_job_ids: list[str] = []
+    detail = await share_video_jobs.get_share_video_job(
+        test_db,
+        job_id,
+        user["id"],
+        enqueue_recovery=recovery_job_ids.append,
+    )
+
+    assert detail.status == MemoirShareVideoJobStatus.RUNNING
+    assert recovery_job_ids == [job_id]
+    await test_db.refresh(stored_job)
+    assert stored_job.metadata_json["recovery_reason"] == "stale_running"
+    assert stored_job.metadata_json["recovery_enqueued_at"]
+
+    recovery_job_ids.clear()
+    await share_video_jobs.get_share_video_job(
+        test_db,
+        job_id,
+        user["id"],
+        enqueue_recovery=recovery_job_ids.append,
+    )
+
+    assert recovery_job_ids == []
 
 
 async def test_mobile_memoir_lists_unfinalized_audio_for_transcription_recovery(
