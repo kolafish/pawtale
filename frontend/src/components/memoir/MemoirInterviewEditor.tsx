@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   AlertCircle,
@@ -45,6 +45,67 @@ interface MemoirInterviewEditorProps {
 
 const PLAYBACK_RATES = [0.75, 1, 1.25, 1.5];
 const MAX_BATCH_CLEANUP_ITEMS = 30;
+const PANEL_WIDTH_STORAGE_KEY = 'pawtale.memoirInterviewEditor.panelWidths';
+const DEFAULT_PANEL_WIDTHS = { left: 300, right: 420 };
+const MIN_LEFT_PANEL_WIDTH = 240;
+const MAX_LEFT_PANEL_WIDTH = 520;
+const MIN_RIGHT_PANEL_WIDTH = 340;
+const MAX_RIGHT_PANEL_WIDTH = 640;
+const MIN_CENTER_PANEL_WIDTH = 520;
+const PANEL_RESIZER_WIDTH = 12;
+
+type PanelResizeTarget = 'left' | 'right';
+
+interface PanelWidths {
+  left: number;
+  right: number;
+}
+
+function clampNumber(value: number, min: number, max: number) {
+  return Math.min(Math.max(value, min), max);
+}
+
+function readPanelWidths(): PanelWidths {
+  if (typeof window === 'undefined') return DEFAULT_PANEL_WIDTHS;
+  try {
+    const rawValue = window.localStorage.getItem(PANEL_WIDTH_STORAGE_KEY);
+    if (!rawValue) return DEFAULT_PANEL_WIDTHS;
+    const parsed = JSON.parse(rawValue) as Partial<PanelWidths>;
+    return {
+      left: clampNumber(Number(parsed.left) || DEFAULT_PANEL_WIDTHS.left, MIN_LEFT_PANEL_WIDTH, MAX_LEFT_PANEL_WIDTH),
+      right: clampNumber(Number(parsed.right) || DEFAULT_PANEL_WIDTHS.right, MIN_RIGHT_PANEL_WIDTH, MAX_RIGHT_PANEL_WIDTH),
+    };
+  } catch {
+    return DEFAULT_PANEL_WIDTHS;
+  }
+}
+
+function writePanelWidths(widths: PanelWidths) {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(PANEL_WIDTH_STORAGE_KEY, JSON.stringify(widths));
+  } catch {
+    // Layout preferences are optional; editing must keep working if browser storage is unavailable.
+  }
+}
+
+function clampLeftPanelWidth(left: number, right: number, containerWidth: number) {
+  const maxWidthFromCenter = containerWidth - (PANEL_RESIZER_WIDTH * 2) - MIN_CENTER_PANEL_WIDTH - right;
+  return clampNumber(
+    left,
+    MIN_LEFT_PANEL_WIDTH,
+    Math.max(MIN_LEFT_PANEL_WIDTH, Math.min(MAX_LEFT_PANEL_WIDTH, maxWidthFromCenter)),
+  );
+}
+
+function clampRightPanelWidth(right: number, left: number, containerWidth: number) {
+  const maxWidthFromCenter = containerWidth - (PANEL_RESIZER_WIDTH * 2) - MIN_CENTER_PANEL_WIDTH - left;
+  return clampNumber(
+    right,
+    MIN_RIGHT_PANEL_WIDTH,
+    Math.max(MIN_RIGHT_PANEL_WIDTH, Math.min(MAX_RIGHT_PANEL_WIDTH, maxWidthFromCenter)),
+  );
+}
 
 function formatDateTime(value?: string | null) {
   return formatBeijingDateTimeShort(value) || '无时间';
@@ -260,6 +321,9 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
   const queryClient = useQueryClient();
   const canEditMaterials = project.can_edit_memoir_materials !== false;
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const editorLayoutRef = useRef<HTMLDivElement | null>(null);
+  const [panelWidths, setPanelWidths] = useState<PanelWidths>(() => readPanelWidths());
+  const [resizingPanel, setResizingPanel] = useState<PanelResizeTarget | null>(null);
   const [selectedSessionOverride, setSelectedSessionOverride] = useState<string | null>(null);
   const [selectedAnswerOverride, setSelectedAnswerOverride] = useState<string | null>(null);
   const [draft, setDraft] = useState<{ answerId: string; text: string } | null>(null);
@@ -569,6 +633,79 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
     }
   }, []);
 
+  const resizePanelBy = useCallback((target: PanelResizeTarget, delta: number) => {
+    const containerWidth = editorLayoutRef.current?.getBoundingClientRect().width ?? window.innerWidth;
+    setPanelWidths((widths) => {
+      if (target === 'left') {
+        return {
+          ...widths,
+          left: clampLeftPanelWidth(widths.left + delta, widths.right, containerWidth),
+        };
+      }
+      return {
+        ...widths,
+        right: clampRightPanelWidth(widths.right + delta, widths.left, containerWidth),
+      };
+    });
+  }, []);
+
+  useEffect(() => {
+    writePanelWidths(panelWidths);
+  }, [panelWidths]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+    const clampWidthsToLayout = () => {
+      if (!window.matchMedia('(min-width: 1024px)').matches) return;
+      const containerWidth = editorLayoutRef.current?.getBoundingClientRect().width;
+      if (!containerWidth) return;
+      setPanelWidths((widths) => {
+        const left = clampLeftPanelWidth(widths.left, widths.right, containerWidth);
+        const right = clampRightPanelWidth(widths.right, left, containerWidth);
+        if (left === widths.left && right === widths.right) return widths;
+        return { left, right };
+      });
+    };
+    clampWidthsToLayout();
+    window.addEventListener('resize', clampWidthsToLayout);
+    return () => window.removeEventListener('resize', clampWidthsToLayout);
+  }, []);
+
+  useEffect(() => {
+    if (!resizingPanel) return;
+
+    const handleMouseMove = (event: MouseEvent) => {
+      const rect = editorLayoutRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      setPanelWidths((widths) => {
+        if (resizingPanel === 'left') {
+          return {
+            ...widths,
+            left: clampLeftPanelWidth(event.clientX - rect.left, widths.right, rect.width),
+          };
+        }
+        return {
+          ...widths,
+          right: clampRightPanelWidth(rect.right - event.clientX, widths.left, rect.width),
+        };
+      });
+    };
+    const handleMouseUp = () => setResizingPanel(null);
+    const previousCursor = document.body.style.cursor;
+    const previousUserSelect = document.body.style.userSelect;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+
+    return () => {
+      document.body.style.cursor = previousCursor;
+      document.body.style.userSelect = previousUserSelect;
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [resizingPanel]);
+
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio) return;
@@ -742,11 +879,19 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
     && !confirmCleanupMutation.isPending
     && !previewCleanupMutation.isPending,
   );
+  const editorGridStyle = {
+    '--memoir-interview-editor-columns':
+      `${panelWidths.left}px ${PANEL_RESIZER_WIDTH}px minmax(0,1fr) ${PANEL_RESIZER_WIDTH}px ${panelWidths.right}px`,
+  } as CSSProperties;
 
   return (
     <div className="h-full min-w-0 flex-1 bg-slate-100 text-gray-800">
-      <div className="grid h-full min-h-0 grid-cols-1 lg:grid-cols-[300px_minmax(0,1fr)_390px]">
-        <aside className="min-h-0 border-b border-slate-200 bg-slate-50 lg:border-b-0 lg:border-r">
+      <div
+        ref={editorLayoutRef}
+        style={editorGridStyle}
+        className="grid h-full min-h-0 grid-cols-1 lg:[grid-template-columns:var(--memoir-interview-editor-columns)]"
+      >
+        <aside className="min-h-0 border-b border-slate-200 bg-slate-50 lg:border-b-0">
           <div className="flex h-full min-h-0 flex-col">
             <div className="border-b border-slate-200 px-4 py-4">
               <h2 className="text-base font-semibold text-gray-900">访谈素材</h2>
@@ -790,6 +935,36 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
             </div>
           </div>
         </aside>
+
+        <div
+          role="separator"
+          aria-label="调整素材列表宽度"
+          aria-orientation="vertical"
+          aria-valuemin={MIN_LEFT_PANEL_WIDTH}
+          aria-valuemax={MAX_LEFT_PANEL_WIDTH}
+          aria-valuenow={panelWidths.left}
+          tabIndex={0}
+          onMouseDown={(event) => {
+            event.preventDefault();
+            setResizingPanel('left');
+          }}
+          onKeyDown={(event) => {
+            if (event.key === 'ArrowLeft') {
+              event.preventDefault();
+              resizePanelBy('left', -16);
+            } else if (event.key === 'ArrowRight') {
+              event.preventDefault();
+              resizePanelBy('left', 16);
+            }
+          }}
+          onDoubleClick={() => setPanelWidths(DEFAULT_PANEL_WIDTHS)}
+          className={`hidden cursor-col-resize items-center justify-center bg-slate-100 transition-[background-color] hover:bg-pink-100 focus:outline-none focus:ring-2 focus:ring-pink-300 lg:flex ${
+            resizingPanel === 'left' ? 'bg-pink-100' : ''
+          }`}
+          title="拖动调整素材列表宽度，双击恢复默认"
+        >
+          <span className="h-10 w-0.5 rounded-full bg-slate-300" />
+        </div>
 
         <main className="min-h-0 overflow-y-auto bg-white">
           <div className="border-b border-slate-200 px-5 py-4">
@@ -1114,14 +1289,44 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
           </div>
         </main>
 
-        <aside className="min-h-0 border-t border-slate-200 bg-slate-50 lg:border-l lg:border-t-0">
+        <div
+          role="separator"
+          aria-label="调整编辑面板宽度"
+          aria-orientation="vertical"
+          aria-valuemin={MIN_RIGHT_PANEL_WIDTH}
+          aria-valuemax={MAX_RIGHT_PANEL_WIDTH}
+          aria-valuenow={panelWidths.right}
+          tabIndex={0}
+          onMouseDown={(event) => {
+            event.preventDefault();
+            setResizingPanel('right');
+          }}
+          onKeyDown={(event) => {
+            if (event.key === 'ArrowLeft') {
+              event.preventDefault();
+              resizePanelBy('right', 16);
+            } else if (event.key === 'ArrowRight') {
+              event.preventDefault();
+              resizePanelBy('right', -16);
+            }
+          }}
+          onDoubleClick={() => setPanelWidths(DEFAULT_PANEL_WIDTHS)}
+          className={`hidden cursor-col-resize items-center justify-center bg-slate-100 transition-[background-color] hover:bg-pink-100 focus:outline-none focus:ring-2 focus:ring-pink-300 lg:flex ${
+            resizingPanel === 'right' ? 'bg-pink-100' : ''
+          }`}
+          title="拖动调整编辑面板宽度，双击恢复默认"
+        >
+          <span className="h-10 w-0.5 rounded-full bg-slate-300" />
+        </div>
+
+        <aside className="min-h-0 border-t border-slate-200 bg-slate-50 lg:border-t-0">
           <div className="flex h-full min-h-0 flex-col">
             <div className="border-b border-slate-200 px-5 py-4">
               <h2 className="text-base font-semibold text-gray-900">音频与文字</h2>
-              <p className="mt-1 text-xs text-gray-500">选中回答后校正文稿</p>
+              <p className="mt-1 text-xs text-gray-500">播放原音并校正文稿</p>
             </div>
             {selectedAnswer ? (
-              <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-5">
+              <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-5">
                 <div>
                   <div className="mb-2 flex items-center justify-between gap-2">
                     <span className="text-xs font-medium text-gray-500">原始音频</span>
@@ -1194,6 +1399,59 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
                   ) : (
                     <div className="rounded-lg bg-white px-3 py-3 text-sm text-gray-500">这段回答没有音频文件。</div>
                   )}
+                </div>
+
+                <div className="flex min-h-[320px] flex-1 flex-col">
+                  <div className="mb-2 flex items-center justify-between gap-2">
+                    <label htmlFor="memoir-answer-editor" className="text-xs font-medium text-gray-500">
+                      人工校正文
+                    </label>
+                    {hasUnsavedChanges && (
+                      <span className="rounded-md bg-amber-50 px-2 py-1 text-[11px] text-amber-800">未保存</span>
+                    )}
+                  </div>
+                  <textarea
+                    id="memoir-answer-editor"
+                    value={draftText}
+                    readOnly={!canEditMaterials}
+                    onChange={(event) => {
+                      if (!selectedAnswer) return;
+                      setDraft({ answerId: selectedAnswer.id, text: event.target.value });
+                    }}
+                    className="min-h-[300px] flex-1 resize-none rounded-lg border border-slate-200 bg-white p-3 text-sm leading-7 text-gray-800 shadow-[0_1px_8px_rgba(15,23,42,0.06)] outline-none transition-[border-color,box-shadow] focus:border-emerald-300 focus:shadow-[0_0_0_3px_rgba(16,185,129,0.16)] read-only:bg-slate-50 read-only:text-gray-500"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  {selectedAnswer.included_chapters.length > 0 && (
+                    <div className="rounded-lg bg-emerald-50 px-3 py-2 text-xs leading-5 text-emerald-800">
+                      已收录到：{selectedAnswer.included_chapters.map((chapter) => chapter.title).join('、')}
+                    </div>
+                  )}
+                  {saveMutation.isError && (
+                    <div className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">保存失败，请稍后重试。</div>
+                  )}
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleSave(false)}
+                      disabled={!canSave}
+                      className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-emerald-600 px-3 text-sm font-medium text-white transition-[background-color,opacity,transform] hover:bg-emerald-700 active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {saveMutation.isPending && !saveMutation.variables?.moveNext ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
+                      保存
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleSave(true)}
+                      disabled={!canSaveAndNext}
+                      className="inline-flex h-10 items-center justify-center gap-1.5 rounded-lg bg-slate-900 px-3 text-sm font-medium text-white transition-[background-color,opacity,transform] hover:bg-slate-700 active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {saveMutation.isPending && saveMutation.variables?.moveNext ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
+                      <span className="min-w-0 truncate">保存并下一段</span>
+                      <ChevronRight size={15} />
+                    </button>
+                  </div>
                 </div>
 
                 <div className="rounded-lg bg-white p-3 shadow-[0_1px_8px_rgba(15,23,42,0.06)]">
@@ -1474,57 +1732,6 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
                   <p className="max-h-28 overflow-y-auto whitespace-pre-wrap text-sm leading-6 text-gray-600">
                     {selectedAnswer.transcript_raw || '暂无原文'}
                   </p>
-                </div>
-
-                <div className="flex min-h-[280px] flex-1 flex-col">
-                  <label htmlFor="memoir-answer-editor" className="mb-2 text-xs font-medium text-gray-500">
-                    人工校正文
-                  </label>
-                  <textarea
-                    id="memoir-answer-editor"
-                    value={draftText}
-                    readOnly={!canEditMaterials}
-                    onChange={(event) => {
-                      if (!selectedAnswer) return;
-                      setDraft({ answerId: selectedAnswer.id, text: event.target.value });
-                    }}
-                    className="min-h-[260px] flex-1 resize-none rounded-lg border border-slate-200 bg-white p-3 text-sm leading-7 text-gray-800 shadow-[0_1px_8px_rgba(15,23,42,0.06)] outline-none transition-[border-color,box-shadow] focus:border-emerald-300 focus:shadow-[0_0_0_3px_rgba(16,185,129,0.16)] read-only:bg-slate-50 read-only:text-gray-500"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  {selectedAnswer.included_chapters.length > 0 && (
-                    <div className="rounded-lg bg-emerald-50 px-3 py-2 text-xs leading-5 text-emerald-800">
-                      已收录到：{selectedAnswer.included_chapters.map((chapter) => chapter.title).join('、')}
-                    </div>
-                  )}
-                  {saveMutation.isError && (
-                    <div className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">保存失败，请稍后重试。</div>
-                  )}
-                  {hasUnsavedChanges && (
-                    <div className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">有未保存修改。</div>
-                  )}
-                  <div className="grid grid-cols-2 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => handleSave(false)}
-                      disabled={!canSave}
-                      className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-emerald-600 px-3 text-sm font-medium text-white transition-[background-color,opacity,transform] hover:bg-emerald-700 active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      {saveMutation.isPending && !saveMutation.variables?.moveNext ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
-                      保存
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleSave(true)}
-                      disabled={!canSaveAndNext}
-                      className="inline-flex h-10 items-center justify-center gap-1.5 rounded-lg bg-slate-900 px-3 text-sm font-medium text-white transition-[background-color,opacity,transform] hover:bg-slate-700 active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      {saveMutation.isPending && saveMutation.variables?.moveNext ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
-                      <span className="min-w-0 truncate">保存并下一段</span>
-                      <ChevronRight size={15} />
-                    </button>
-                  </div>
                 </div>
               </div>
             ) : (
