@@ -29,6 +29,7 @@ from app.models.memoir import (
     MemoirChatMessage,
     MemoirEditingJob,
     MemoirSourceCard,
+    MemoirTranscriptAlignment,
     MemoirTranscriptVersion,
     MemoirVoiceUtterance,
 )
@@ -442,6 +443,85 @@ async def test_mobile_memoir_lists_saved_voice_transcripts(client, test_db):
     assert item["included_chapters"] == []
     assert item["created_at"].endswith(UTC_SUFFIXES)
     assert item["session_created_at"].endswith(UTC_SUFFIXES)
+
+
+async def test_mobile_memoir_voice_transcript_share_video_context_aligns_edited_text(client, test_db):
+    raw_text = "是我们心不平的吧。我就带你回去。"
+    edited_text = "说我们的心不平的嘛。我就带你回去。"
+    created = await create_test_voice_transcript(client, test_db, text=raw_text)
+    utterance = await test_db.scalar(
+        select(MemoirVoiceUtterance).where(MemoirVoiceUtterance.id == created["utterance_id"])
+    )
+    assert utterance is not None
+    utterance.transcript_edited = edited_text
+    utterance.provider_payload_json = {
+        "payload": {
+            "audio_info": {"duration": 12000},
+            "result": {
+                "text": raw_text,
+                "utterances": [
+                    {
+                        "start_time": 0,
+                        "end_time": 5200,
+                        "text": "是我们心不平的吧。",
+                        "words": [
+                            {"text": "是", "start_time": 0, "end_time": 500},
+                            {"text": "我", "start_time": 600, "end_time": 900},
+                            {"text": "们", "start_time": 900, "end_time": 1200},
+                            {"text": "心", "start_time": 1400, "end_time": 1700},
+                            {"text": "不", "start_time": 1700, "end_time": 2000},
+                            {"text": "平", "start_time": 2000, "end_time": 2300},
+                            {"text": "的", "start_time": 2600, "end_time": 2900},
+                            {"text": "吧", "start_time": 3300, "end_time": 3800},
+                        ],
+                    },
+                    {
+                        "start_time": 6200,
+                        "end_time": 10400,
+                        "text": "我就带你回去。",
+                        "words": [
+                            {"text": "我", "start_time": 6200, "end_time": 6600},
+                            {"text": "就", "start_time": 6600, "end_time": 7000},
+                            {"text": "带", "start_time": 7200, "end_time": 7600},
+                            {"text": "你", "start_time": 7600, "end_time": 8000},
+                            {"text": "回", "start_time": 8400, "end_time": 8800},
+                            {"text": "去", "start_time": 8800, "end_time": 9300},
+                        ],
+                    },
+                ],
+            },
+        }
+    }
+    await test_db.commit()
+
+    response = await client.get(
+        f"/api/mobile/memoir/voice-transcripts/{created['utterance_id']}/share-video/context"
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["utterance_id"] == created["utterance_id"]
+    assert data["audio_file_id"] == created["audio_file_id"]
+    assert data["transcript_source"] == "edited"
+    assert data["transcript_text"] == edited_text
+    assert data["duration_ms"] == 12000
+    assert data["alignment_strategy"] == "provider_words"
+    assert data["alignment_confidence"] >= 0.7
+    assert [segment["text"] for segment in data["segments"]] == [
+        "说我们的心不平的嘛。",
+        "我就带你回去。",
+    ]
+    assert data["segments"][0]["start_char"] == 0
+    assert 3000 <= data["segments"][0]["end_ms"] <= 6200
+    assert data["segments"][1]["start_ms"] >= data["segments"][0]["end_ms"]
+    alignment = await test_db.scalar(
+        select(MemoirTranscriptAlignment).where(
+            MemoirTranscriptAlignment.utterance_id == created["utterance_id"]
+        )
+    )
+    assert alignment is not None
+    assert alignment.text_hash == data["text_hash"]
+    assert alignment.segments_json[0]["text"] == "说我们的心不平的嘛。"
 
 
 async def test_mobile_memoir_lists_unfinalized_audio_for_transcription_recovery(

@@ -35,6 +35,7 @@ from app.schemas.memoir_voice import (
     MemoirVoiceTranscriptCleanupRequest,
     MemoirVoiceTranscriptItemResponse,
     MemoirVoiceTranscriptListResponse,
+    MemoirTranscriptShareVideoContextResponse,
     MemoirVoiceTranscriptUpdateRequest,
     MemoirVoiceTranscriptVoiceEditPreviewRequest,
     MemoirVoiceTranscriptVoiceEditPreviewResponse,
@@ -51,6 +52,7 @@ from app.services.memoir import voice_followups as memoir_voice_followups
 from app.services.memoir import voice_search as memoir_voice_search
 from app.services.memoir import voice_sessions as memoir_voice_sessions
 from app.services.memoir import voice_tts_persistence as memoir_voice_tts
+from app.services.memoir import share_video_alignment as memoir_share_video_alignment
 from app.services.memoir import voice_transcript_recovery as memoir_voice_transcript_recovery
 from app.services.memoir import transcript_voice_edit as memoir_transcript_voice_edit
 from app.services.memoir import voice_transcripts as memoir_voice_transcripts
@@ -402,6 +404,23 @@ async def get_mobile_memoir_voice_transcript(
     current_user: User = Depends(get_current_user),
 ):
     return await memoir_voice_transcripts.get_voice_transcript(
+        db,
+        utterance_id,
+        current_user.id,
+        allow_admin=is_admin_user(current_user),
+    )
+
+
+@router.get(
+    "/voice-transcripts/{utterance_id}/share-video/context",
+    response_model=MemoirTranscriptShareVideoContextResponse,
+)
+async def get_mobile_memoir_voice_transcript_share_video_context(
+    utterance_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await memoir_share_video_alignment.get_share_video_context(
         db,
         utterance_id,
         current_user.id,

@@ -20,6 +20,7 @@ REALTIME_VOICE_TABLES = (
     "memoir_voice_sessions",
     "memoir_chat_messages",
     "memoir_voice_utterances",
+    "memoir_transcript_alignments",
     "memoir_transcript_versions",
     "memoir_voice_authorization_consents",
 )
@@ -410,6 +411,10 @@ async def migrate_memoir_voice_schema(engine: AsyncEngine) -> dict[str, list[str
                         text(f"ALTER TABLE memoir_voice_utterances ADD COLUMN {column_name} {column_type}")
                     )
                     changed_columns.append(f"memoir_voice_utterances.{column_name}")
+
+        if not await _table_exists(conn, "memoir_transcript_alignments"):
+            await _create_metadata_table(conn, "memoir_transcript_alignments")
+            changed_tables.append("memoir_transcript_alignments")
 
         columns = await _table_columns(conn, "memoir_transcript_versions")
         if "voice_session_id" not in columns:
