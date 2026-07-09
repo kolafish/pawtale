@@ -107,6 +107,11 @@ def _parse_args() -> argparse.Namespace:
         default=",".join(DEFAULT_PROVIDERS),
         help="Comma-separated ASR providers to use: volc,stepfun.",
     )
+    parser.add_argument(
+        "--force-reprocess",
+        action="store_true",
+        help="Reprocess utterances even when requested reprocess ASR versions already exist.",
+    )
     return parser.parse_args()
 
 
@@ -137,6 +142,14 @@ def _normalize_providers(value: Sequence[str] | str) -> tuple[str, ...]:
     if unsupported:
         raise ValueError(f"unsupported providers: {', '.join(unsupported)}")
     return providers or DEFAULT_PROVIDERS
+
+
+def _reprocess_provider_name(provider: str) -> str:
+    if provider == "volc":
+        return VOLC_REPROCESS_PROVIDER
+    if provider == "stepfun":
+        return STEPFUN_REPROCESS_PROVIDER
+    raise ValueError(f"unsupported provider: {provider}")
 
 
 async def resolve_project_id(
@@ -172,6 +185,8 @@ async def candidate_utterances(
     *,
     project_id: str,
     cutoff_created_at_utc: datetime,
+    providers: Sequence[str] = DEFAULT_PROVIDERS,
+    force_reprocess: bool = False,
     limit: int | None = None,
 ) -> list[MemoirVoiceUtterance]:
     user_edited_exists = (
@@ -201,9 +216,46 @@ async def candidate_utterances(
         )
         .order_by(MemoirVoiceUtterance.created_at.desc(), MemoirVoiceUtterance.id.desc())
     )
-    if limit is not None:
-        statement = statement.limit(max(0, limit))
-    return list((await db.execute(statement)).scalars().all())
+    rows = list((await db.execute(statement)).scalars().all())
+    if force_reprocess:
+        return rows[: max(0, limit)] if limit is not None else rows
+
+    requested_reprocess_providers = tuple(_reprocess_provider_name(provider) for provider in providers)
+    candidates: list[MemoirVoiceUtterance] = []
+    max_candidates = None if limit is None else max(0, limit)
+    for utterance in rows:
+        if max_candidates is not None and len(candidates) >= max_candidates:
+            break
+        if await _has_requested_reprocess_versions(
+            db,
+            utterance_id=utterance.id,
+            providers=requested_reprocess_providers,
+        ):
+            continue
+        candidates.append(utterance)
+    return candidates
+
+
+async def _has_requested_reprocess_versions(
+    db: AsyncSession,
+    *,
+    utterance_id: str,
+    providers: Sequence[str],
+) -> bool:
+    if not providers:
+        return False
+    existing = set(
+        (
+            await db.execute(
+                select(MemoirTranscriptVersion.provider).where(
+                    MemoirTranscriptVersion.source_artifact_id == utterance_id,
+                    MemoirTranscriptVersion.version_type == MemoirTranscriptVersionType.ASR_RAW.value,
+                    MemoirTranscriptVersion.provider.in_(providers),
+                )
+            )
+        ).scalars().all()
+    )
+    return all(provider in existing for provider in providers)
 
 
 def _current_text(utterance: MemoirVoiceUtterance) -> str:
@@ -579,6 +631,7 @@ async def run_offline_asr_reprocess(
     limit: int | None = None,
     ai_model: str | None = None,
     providers: Sequence[str] | str = DEFAULT_PROVIDERS,
+    force_reprocess: bool = False,
     asr_runner: ASRRunner | None = None,
     ai_client: AITextClient | None = None,
 ) -> dict[str, object]:
@@ -587,6 +640,8 @@ async def run_offline_asr_reprocess(
         db,
         project_id=project_id,
         cutoff_created_at_utc=cutoff_created_at_utc,
+        providers=normalized_providers,
+        force_reprocess=force_reprocess,
         limit=limit,
     )
     result: dict[str, object] = {
@@ -595,6 +650,7 @@ async def run_offline_asr_reprocess(
         "cutoff_created_at_utc": cutoff_created_at_utc.isoformat(sep=" "),
         "cutoff_created_at_bj": utc_naive_to_beijing_text(cutoff_created_at_utc),
         "providers": list(normalized_providers),
+        "force_reprocess": force_reprocess,
         "candidate_count": len(candidates),
         "processed_count": 0,
         "failed_count": 0,
@@ -664,6 +720,7 @@ async def _main() -> None:
                 limit=args.limit,
                 ai_model=args.ai_model,
                 providers=args.providers,
+                force_reprocess=args.force_reprocess,
             )
             print(json.dumps(result, ensure_ascii=False, indent=2))
     finally:
