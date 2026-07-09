@@ -42,17 +42,20 @@ from app.models.projects import Project
 from app.services.ai_factory import get_ai_service
 from app.services.ai_types import AITextClient
 from app.services.asr import ASRAudioFormat, StepFunASRService
+from app.services.memoir import source_cards
 from app.services.memoir.asr_text_normalization import normalize_memoir_asr_text
 from app.services.memoir.audio_files import audio_file_path
-from app.services.memoir.source_disposition import INTERVIEWER_SOURCE_MATERIAL_TYPE
+from app.services.memoir.book_auto_revision import schedule_chapter_auto_revisions
+from app.services.memoir.source_disposition import INTERVIEWER_SOURCE_MATERIAL_TYPE, clear_source_route_disposition
 from app.services.memoir.streaming_asr import create_volc_streaming_asr_client
+from app.services.memoir.utterance_editing_pipeline import schedule_source_routing_for_ready_utterance
 from app.services.memoir.voice_transcript_recovery import (
     ASR_RECOVERY_PCM_BYTES_PER_SAMPLE,
     ASR_RECOVERY_PCM_SAMPLE_RATE,
     ASR_RECOVERY_PCM_SEGMENT_BYTES,
     transcribe_audio_path_for_recovery,
 )
-from app.services.memoir.voice_transcripts import apply_cleaned_voice_transcript_text
+from app.services.memoir.voice_transcripts import _sync_included_transcript_edit, prune_transcript_versions_for_utterance
 
 
 BEIJING_UTC_OFFSET = timedelta(hours=8)
@@ -234,6 +237,18 @@ async def candidate_utterances(
             continue
         candidates.append(utterance)
     return candidates
+
+
+async def load_reprocess_utterance(db: AsyncSession, utterance_id: str) -> MemoirVoiceUtterance | None:
+    return await db.scalar(
+        select(MemoirVoiceUtterance)
+        .where(MemoirVoiceUtterance.id == utterance_id)
+        .options(
+            selectinload(MemoirVoiceUtterance.audio_file),
+            selectinload(MemoirVoiceUtterance.chat_message),
+            selectinload(MemoirVoiceUtterance.voice_session).selectinload(MemoirVoiceSession.messages),
+        )
+    )
 
 
 async def _has_requested_reprocess_versions(
@@ -570,6 +585,72 @@ async def _ensure_user_chat_message(
     utterance.chat_message = message
 
 
+async def _apply_corrected_reprocess_text(
+    db: AsyncSession,
+    utterance: MemoirVoiceUtterance,
+    *,
+    content: str,
+    provider: str,
+    ai_model: str | None,
+) -> None:
+    cleaned_content = content.strip()
+    if not cleaned_content:
+        raise ValueError("dialect-corrected transcript is empty")
+
+    version = MemoirTranscriptVersion(
+        voice_session_id=utterance.voice_session_id,
+        source_artifact_id=utterance.id,
+        version_type=MemoirTranscriptVersionType.DIALECT_CORRECTED.value,
+        content=cleaned_content,
+        provider=provider,
+        created_by=MemoirCreatedBy.AI.value,
+    )
+    db.add(version)
+    await db.flush()
+
+    utterance.transcript_edited = cleaned_content
+    clear_source_route_disposition(utterance)
+    if utterance.chat_message:
+        utterance.chat_message.content_text = cleaned_content
+        utterance.chat_message.content_status = MemoirChatContentStatus.CORRECTED.value
+        utterance.chat_message.transcript_version_id = version.id
+
+    await prune_transcript_versions_for_utterance(
+        db,
+        utterance_id=utterance.id,
+        version_type=MemoirTranscriptVersionType.DIALECT_CORRECTED,
+    )
+    changed_chapter_ids = await _sync_included_transcript_edit(
+        db,
+        utterance=utterance,
+        content=cleaned_content,
+        transcript_version_id=version.id,
+    )
+    project_id = utterance.voice_session.project_id
+    await source_cards.schedule_source_card_generation_job(
+        db,
+        project_id=project_id,
+        utterance_id=utterance.id,
+        ai_model=ai_model,
+        reason=f"transcript_{MemoirTranscriptVersionType.DIALECT_CORRECTED.value}",
+    )
+    if changed_chapter_ids:
+        await schedule_chapter_auto_revisions(
+            db,
+            project_id=project_id,
+            chapter_ids=changed_chapter_ids,
+            ai_model=ai_model,
+        )
+    else:
+        await schedule_source_routing_for_ready_utterance(
+            db,
+            project_id=project_id,
+            utterance=utterance,
+            source=f"transcript_{MemoirTranscriptVersionType.DIALECT_CORRECTED.value}",
+            ai_model=ai_model,
+        )
+
+
 def _compact_result_payload(results: Sequence[OfflineASRResult]) -> list[dict[str, object]]:
     payload: list[dict[str, object]] = []
     for result in results:
@@ -611,14 +692,12 @@ async def _apply_reprocessed_transcript(
         raw_text=primary.text.strip(),
         raw_transcript_version_id=primary_version_id,
     )
-    await apply_cleaned_voice_transcript_text(
+    await _apply_corrected_reprocess_text(
         db,
         utterance,
-        corrected_text,
-        created_by=MemoirCreatedBy.AI,
+        content=corrected_text,
         provider=corrected_provider,
         ai_model=ai_model,
-        commit=False,
     )
 
 
@@ -644,6 +723,8 @@ async def run_offline_asr_reprocess(
         force_reprocess=force_reprocess,
         limit=limit,
     )
+    candidate_ids = [utterance.id for utterance in candidates]
+    candidate_payloads = [_candidate_payload(utterance) for utterance in candidates]
     result: dict[str, object] = {
         "dry_run": dry_run,
         "project_id": project_id,
@@ -655,18 +736,21 @@ async def run_offline_asr_reprocess(
         "processed_count": 0,
         "failed_count": 0,
         "failures": [],
-        "candidates": [_candidate_payload(utterance) for utterance in candidates],
+        "candidates": candidate_payloads,
     }
     if dry_run:
         await db.rollback()
+        db.expunge_all()
         return result
 
     runner = asr_runner or default_asr_runner
     failures: list[dict[str, str]] = []
     processed_count = 0
-    for utterance in candidates:
-        utterance_id = utterance.id
+    for utterance_id in candidate_ids:
         try:
+            utterance = await load_reprocess_utterance(db, utterance_id)
+            if utterance is None:
+                raise ValueError("candidate utterance no longer exists")
             asr_results = await runner(db, utterance, normalized_providers)
             if not asr_results:
                 raise ValueError("all ASR providers returned empty text")
@@ -690,6 +774,7 @@ async def run_offline_asr_reprocess(
             processed_count += 1
         except Exception as exc:
             await db.rollback()
+            db.expunge_all()
             failures.append({"utterance_id": utterance_id, "error": str(exc)})
 
     result["processed_count"] = processed_count

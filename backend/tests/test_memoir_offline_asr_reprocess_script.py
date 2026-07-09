@@ -249,3 +249,51 @@ async def test_offline_asr_reprocess_creates_message_for_blank_saved_audio(test_
     assert message.content_status == MemoirChatContentStatus.CORRECTED.value
     assert message.content_text == "今天先讲医院里的事。"
     assert refreshed.provider_payload_json["source"] == "offline_multi_asr_reprocess"
+
+
+async def test_offline_asr_reprocess_continues_after_single_candidate_rollback(test_db):
+    project, voice_session = await _create_project(test_db)
+    project_id = project.id
+    audio_file = await _add_audio(test_db)
+    failing = MemoirVoiceUtterance(
+        voice_session_id=voice_session.id,
+        audio_file_id=audio_file.id,
+        transcript_raw="第一条",
+        transcript_edited="第一条",
+        created_at=datetime(2026, 7, 8, 8, 1, 0),
+    )
+    succeeding = MemoirVoiceUtterance(
+        voice_session_id=voice_session.id,
+        audio_file_id=audio_file.id,
+        transcript_raw="第二条",
+        transcript_edited="第二条",
+        created_at=datetime(2026, 7, 8, 8, 0, 0),
+    )
+    test_db.add_all([failing, succeeding])
+    await test_db.flush()
+    failing_id = failing.id
+    succeeding_id = succeeding.id
+    await test_db.commit()
+
+    async def fake_runner(db, current_utterance, providers):
+        if current_utterance.id == failing_id:
+            raise RuntimeError("provider failed")
+        return [OfflineASRResult(VOLC_REPROCESS_PROVIDER, "第二条重新识别。", {"segment_count": 1})]
+
+    result = await run_offline_asr_reprocess(
+        test_db,
+        project_id=project_id,
+        cutoff_created_at_utc=datetime(2026, 7, 8, 8, 2, 59),
+        dry_run=False,
+        providers=("volc",),
+        asr_runner=fake_runner,
+        ai_client=FakeCleanupAI("第二条校对完成。"),
+    )
+
+    assert result["processed_count"] == 1, result["failures"]
+    assert result["failed_count"] == 1, result["failures"]
+    assert result["failures"] == [{"utterance_id": failing_id, "error": "provider failed"}]
+    refreshed_success = await test_db.get(MemoirVoiceUtterance, succeeding_id)
+    refreshed_failure = await test_db.get(MemoirVoiceUtterance, failing_id)
+    assert refreshed_success.transcript_edited == "第二条校对完成。"
+    assert refreshed_failure.transcript_edited == "第一条"
