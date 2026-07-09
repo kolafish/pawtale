@@ -1362,6 +1362,7 @@ async def test_mobile_memoir_groups_paired_human_interview_transcripts(client, t
     data = response.json()
     assert data["total"] == 1
     assert data["items"][0]["id"] == created["narrator_utterance_id"]
+    assert data["items"][0]["chat_message_role"] == "user"
     assert data["items"][0]["question_message_id"] == created["interviewer_message_id"]
     assert data["items"][0]["question_text"] == "你小时候家里有几口人？"
     assert data["items"][0]["display_text"] == "我们家那时候有六口人。"
@@ -1395,6 +1396,7 @@ async def test_mobile_memoir_keeps_unpaired_human_interviewer_transcript(client,
     data = response.json()
     assert data["total"] == 1
     assert data["items"][0]["id"] == created["interviewer_utterance_id"]
+    assert data["items"][0]["chat_message_role"] == "interviewer"
     assert data["items"][0]["question_message_id"] is None
     assert data["items"][0]["question_text"] == ""
     assert data["items"][0]["display_text"] == "你后来是什么时候去县城读书的？"

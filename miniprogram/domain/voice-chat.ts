@@ -304,6 +304,7 @@ export interface MemoirVoiceTranscriptItem {
   project_id: string;
   project_title: string;
   chat_message_id?: string | null;
+  chat_message_role?: MemoirChatMessageRole | null;
   audio_file_id?: string | null;
   audio_mime_type?: string | null;
   audio_size_bytes?: number | null;

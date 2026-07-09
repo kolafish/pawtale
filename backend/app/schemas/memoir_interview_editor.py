@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -173,6 +174,7 @@ class MemoirInterviewEditorAnswerParentUpdateRequest(BaseModel):
 class MemoirInterviewEditorQuestionConvertToAnswerRequest(BaseModel):
     parent_question_message_id: str | None = None
     reason: str | None = None
+    mutation_source: Literal["web_interview_editor", "miniprogram_transcript_detail"] | None = None
 
     @field_validator("parent_question_message_id", "reason")
     @classmethod

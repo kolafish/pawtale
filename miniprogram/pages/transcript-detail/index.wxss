@@ -329,6 +329,7 @@
 
 .primary-button,
 .ghost-button,
+.repair-button,
 .danger-button {
   min-width: 168rpx;
   height: 76rpx;
@@ -348,12 +349,14 @@
 }
 
 .primary-button,
-.ghost-button {
+.ghost-button,
+.repair-button {
   flex: 1 1 180rpx;
 }
 
 .primary-button::after,
 .ghost-button::after,
+.repair-button::after,
 .danger-button::after {
   border: 0;
 }
@@ -368,6 +371,12 @@
   color: #8f3e35;
 }
 
+.repair-button {
+  width: 100%;
+  background: #edf6ef;
+  color: #2f6f4e;
+}
+
 .danger-button {
   width: 100%;
   background: #fff1f3;
@@ -376,6 +385,7 @@
 
 .primary-button[disabled],
 .ghost-button[disabled],
+.repair-button[disabled],
 .danger-button[disabled],
 .picker-action.disabled {
   opacity: 0.62;
@@ -383,6 +393,7 @@
 
 .primary-button:active,
 .ghost-button:active,
+.repair-button:active,
 .danger-button:active {
   transform: scale(0.96);
 }
@@ -801,11 +812,31 @@
   background: #fff8f9;
 }
 
+.repair-panel {
+  margin-top: 20rpx;
+  padding: 20rpx;
+  border-radius: 16rpx;
+  background: #f4faf5;
+  box-shadow: inset 0 0 0 1rpx rgba(47, 111, 78, 0.16);
+}
+
+.repair-panel + .danger-panel {
+  margin-top: 16rpx;
+}
+
 .danger-panel-title {
   display: block;
   color: #b84a5a;
   font-size: 27rpx;
   font-weight: 800;
+  line-height: 1.35;
+}
+
+.repair-panel-title {
+  display: block;
+  color: #2f6f4e;
+  font-size: 27rpx;
+  font-weight: 850;
   line-height: 1.35;
 }
 
@@ -816,6 +847,20 @@
   font-size: 24rpx;
   line-height: 1.45;
   word-break: break-word;
+}
+
+.repair-panel-copy {
+  display: block;
+  margin-top: 8rpx;
+  color: #476857;
+  font-size: 25rpx;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.repair-panel .repair-button,
+.danger-panel .danger-button {
+  margin-top: 18rpx;
 }
 
 .bottom-spacer {

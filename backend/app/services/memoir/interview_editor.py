@@ -741,6 +741,7 @@ async def convert_interview_question_to_answer(
     now = datetime.utcnow()
     previous_role = message.role
     previous_parent_id = message.parent_message_id
+    mutation_source = req.mutation_source or MUTATION_SOURCE
     text_for_answer = _message_text(message)
     message.role = MemoirChatMessageRole.USER.value
     message.parent_message_id = parent_id
@@ -753,7 +754,7 @@ async def convert_interview_question_to_answer(
             "converted_from_question": True,
             "converted_by": _mutation_actor(allow_admin),
             "converted_user_id": user_id,
-            "converted_from": MUTATION_SOURCE,
+            "converted_from": mutation_source,
             "converted_at": _now_iso(now),
             "previous_parent_message_id": previous_parent_id,
             "parent_message_id": parent_id,

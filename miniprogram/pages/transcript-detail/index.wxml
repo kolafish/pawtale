@@ -38,7 +38,7 @@
           class="primary-button"
           bindtap="recoverTranscript"
           loading="{{recovering}}"
-          disabled="{{recovering || saving || deleting}}"
+          disabled="{{recovering || saving || deleting || convertingQuestionToAnswer}}"
         >
           {{recovering ? "转写中" : "恢复转写"}}
         </button>
@@ -46,14 +46,14 @@
           wx:else
           class="primary-button"
           bindtap="beginEdit"
-          disabled="{{saving || deleting || item.isEditing || item.canRecoverTranscription}}"
+          disabled="{{saving || deleting || convertingQuestionToAnswer || item.isEditing || item.canRecoverTranscription}}"
         >
           编辑成书文字
         </button>
         <button
           class="ghost-button"
           bindtap="playAnswerAudio"
-          disabled="{{saving || deleting || !item.canPlayAnswerAudio}}"
+          disabled="{{saving || deleting || convertingQuestionToAnswer || !item.canPlayAnswerAudio}}"
         >
           {{playingAudioKind === "answer" ? "停止讲述" : "听讲述原音"}}
         </button>
@@ -128,13 +128,13 @@
         cursor-spacing="24"
       />
       <view class="actions-row">
-        <button class="ghost-button" bindtap="resetToRaw" disabled="{{saving || deleting}}">恢复原始讲述</button>
-        <button class="ghost-button" bindtap="cancelEdit" disabled="{{saving || deleting}}">取消</button>
+        <button class="ghost-button" bindtap="resetToRaw" disabled="{{saving || deleting || convertingQuestionToAnswer}}">恢复原始讲述</button>
+        <button class="ghost-button" bindtap="cancelEdit" disabled="{{saving || deleting || convertingQuestionToAnswer}}">取消</button>
         <button
           class="primary-button"
           bindtap="saveTranscript"
           loading="{{saving}}"
-          disabled="{{saving || deleting || !item.changed}}"
+          disabled="{{saving || deleting || convertingQuestionToAnswer || !item.changed}}"
         >
           保存
         </button>
@@ -162,7 +162,7 @@
           wx:if="{{item.questionCanExpand}}"
           class="text-action-button"
           bindtap="toggleQuestionExpanded"
-          disabled="{{saving || deleting}}"
+          disabled="{{saving || deleting || convertingQuestionToAnswer}}"
         >
           {{questionExpanded ? "收起问题" : "展开完整问题"}}
         </button>
@@ -170,7 +170,7 @@
           wx:if="{{item.canPlayQuestionAudio}}"
           class="text-action-button"
           bindtap="playQuestionAudio"
-          disabled="{{saving || deleting || !item.canPlayQuestionAudio}}"
+          disabled="{{saving || deleting || convertingQuestionToAnswer || !item.canPlayQuestionAudio}}"
         >
           {{playingAudioKind === "question" ? "停止提问" : "听小余提问"}}
         </button>
@@ -207,7 +207,7 @@
         <button
           class="primary-button"
           bindtap="beginEdit"
-          disabled="{{saving || deleting || item.isEditing}}"
+          disabled="{{saving || deleting || convertingQuestionToAnswer || item.isEditing}}"
         >
           手动编辑
         </button>
@@ -215,7 +215,7 @@
           class="ghost-button"
           bindtap="startVoiceEdit"
           loading="{{voiceEditLoading}}"
-          disabled="{{saving || deleting || voiceEditSaving || voiceEditLoading}}"
+          disabled="{{saving || deleting || convertingQuestionToAnswer || voiceEditSaving || voiceEditLoading}}"
         >
           {{voiceEditRecording ? "停止录入" : (voiceEditLoading ? "生成中" : "说修改意见")}}
         </button>
@@ -286,7 +286,7 @@
           class="primary-button"
           bindtap="toggleShareVideoPanel"
           loading="{{shareVideoLoadingContext}}"
-          disabled="{{saving || deleting || shareVideoCreating || shareVideoPolling || shareVideoDownloadingPreview || shareVideoSharing}}"
+          disabled="{{saving || deleting || convertingQuestionToAnswer || shareVideoCreating || shareVideoPolling || shareVideoDownloadingPreview || shareVideoSharing}}"
         >
           {{shareVideoPanelOpen ? "收起视频" : "制作视频"}}
         </button>
@@ -370,7 +370,7 @@
               class="primary-button"
               bindtap="createShareVideo"
               loading="{{shareVideoCreating || shareVideoPolling || shareVideoDownloadingPreview}}"
-              disabled="{{!shareVideoSelectedCanGenerate || shareVideoCreating || shareVideoPolling || shareVideoDownloadingPreview || shareVideoSharing}}"
+              disabled="{{!shareVideoSelectedCanGenerate || convertingQuestionToAnswer || shareVideoCreating || shareVideoPolling || shareVideoDownloadingPreview || shareVideoSharing}}"
             >
               {{shareVideoDownloadingPreview ? "准备预览" : (shareVideoCreating || shareVideoPolling ? "生成中" : "生成视频")}}
             </button>
@@ -379,7 +379,7 @@
               class="ghost-button"
               bindtap="shareGeneratedVideo"
               loading="{{shareVideoSharing}}"
-              disabled="{{shareVideoCreating || shareVideoPolling || shareVideoDownloadingPreview || shareVideoSharing}}"
+              disabled="{{convertingQuestionToAnswer || shareVideoCreating || shareVideoPolling || shareVideoDownloadingPreview || shareVideoSharing}}"
             >
               {{shareVideoSharing ? "分享中" : "分享给微信"}}
             </button>
@@ -414,10 +414,10 @@
           wx:if="{{item.canAssignChapterSource}}"
           range="{{item.chapterAssignOptions}}"
           range-key="label"
-          disabled="{{assigning || moving || saving || deleting}}"
+          disabled="{{assigning || moving || saving || deleting || convertingQuestionToAnswer}}"
           bindchange="assignTranscriptChapter"
         >
-          <view class="primary-button picker-action {{assigning || moving || saving || deleting ? 'disabled' : ''}}">
+          <view class="primary-button picker-action {{assigning || moving || saving || deleting || convertingQuestionToAnswer ? 'disabled' : ''}}">
             {{assigning ? "归入中" : "放入章节"}}
           </view>
         </picker>
@@ -425,10 +425,10 @@
           wx:if="{{item.canMoveChapterSource}}"
           range="{{item.chapterMoveOptions}}"
           range-key="label"
-          disabled="{{assigning || moving || saving || deleting}}"
+          disabled="{{assigning || moving || saving || deleting || convertingQuestionToAnswer}}"
           bindchange="moveTranscriptChapter"
         >
-          <view class="ghost-button picker-action {{assigning || moving || saving || deleting ? 'disabled' : ''}}">
+          <view class="ghost-button picker-action {{assigning || moving || saving || deleting || convertingQuestionToAnswer ? 'disabled' : ''}}">
             {{moving ? "移动中" : "移动章节"}}
           </view>
         </picker>
@@ -439,9 +439,21 @@
       <view class="section-head more-actions-head" bindtap="toggleMoreActionsExpanded">
         <view class="section-heading">
           <text class="section-title">更多操作</text>
-          <text class="section-hint">删除等低频操作收在这里</text>
+          <text class="section-hint">{{item.canConvertQuestionToAnswer ? "误判修正和删除等低频操作收在这里" : "删除等低频操作收在这里"}}</text>
         </view>
         <text class="more-actions-toggle">{{moreActionsExpanded ? "收起" : "展开"}}</text>
+      </view>
+      <view wx:if="{{moreActionsExpanded && item.canConvertQuestionToAnswer}}" class="repair-panel">
+        <text class="repair-panel-title">这段其实是回答</text>
+        <text class="repair-panel-copy">如果录音时把被访者的话记成了采访者问题，可以在这里改回讲述素材。</text>
+        <button
+          class="repair-button"
+          bindtap="convertCurrentQuestionToAnswer"
+          loading="{{convertingQuestionToAnswer}}"
+          disabled="{{saving || deleting || convertingQuestionToAnswer}}"
+        >
+          {{convertingQuestionToAnswer ? "正在修改" : "把这段改成回答"}}
+        </button>
       </view>
       <view wx:if="{{moreActionsExpanded}}" class="danger-panel">
         <text class="danger-panel-title">删除这条讲述</text>
@@ -450,7 +462,7 @@
           class="danger-button"
           bindtap="deleteTranscript"
           loading="{{deleting}}"
-          disabled="{{saving || deleting}}"
+          disabled="{{saving || deleting || convertingQuestionToAnswer}}"
         >
           删除这条讲述
         </button>
