@@ -375,6 +375,115 @@ async def test_interview_editor_updates_interviewer_question_without_promoting_i
     assert versions[0].content == "你小时候家里一共有几口人？"
 
 
+async def test_interview_editor_converts_misclassified_question_to_answer(client, test_db):
+    user = (await client.get("/api/auth/me")).json()
+    session = await _create_human_session(client)
+    misclassified_answer = await _add_turn(
+        test_db,
+        user_id=user["id"],
+        session=session,
+        role=MemoirChatMessageRole.INTERVIEWER.value,
+        text="我们家那时候有六口人。",
+        turn_index=0,
+    )
+    target_question = await _add_turn(
+        test_db,
+        user_id=user["id"],
+        session=session,
+        role=MemoirChatMessageRole.INTERVIEWER.value,
+        text="你小时候家里有几口人？",
+        turn_index=1,
+    )
+
+    response = await client.post(
+        (
+            f"/api/memoir/projects/{session['project_id']}/interview-editor/questions/"
+            f"{misclassified_answer['message_id']}/convert-to-answer"
+        ),
+        json={
+            "parent_question_message_id": target_question["message_id"],
+            "reason": "这句其实是被访者回答",
+        },
+    )
+
+    assert response.status_code == 200
+    detail = response.json()
+    assert detail["session"]["question_count"] == 1
+    assert detail["session"]["answer_count"] == 1
+    assert detail["session"]["unassigned_answer_count"] == 0
+    assert detail["questions"][0]["id"] == target_question["message_id"]
+    assert detail["questions"][0]["answers"][0]["id"] == misclassified_answer["utterance_id"]
+    assert detail["questions"][0]["answers"][0]["message_id"] == misclassified_answer["message_id"]
+    assert detail["questions"][0]["answers"][0]["source_material_type"] == ""
+    assert detail["questions"][0]["answers"][0]["source_route_action"] == ""
+    assert [item["role"] for item in detail["raw_timeline"]] == ["user", "interviewer"]
+
+    message = await test_db.scalar(
+        select(MemoirChatMessage).where(MemoirChatMessage.id == misclassified_answer["message_id"])
+    )
+    utterance = await test_db.scalar(
+        select(MemoirVoiceUtterance).where(MemoirVoiceUtterance.id == misclassified_answer["utterance_id"])
+    )
+    versions = (
+        await test_db.execute(
+            select(MemoirTranscriptVersion)
+            .where(
+                MemoirTranscriptVersion.source_artifact_id == misclassified_answer["utterance_id"],
+                MemoirTranscriptVersion.version_type == MemoirTranscriptVersionType.USER_EDITED.value,
+            )
+        )
+    ).scalars().all()
+    assert message is not None
+    assert message.role == MemoirChatMessageRole.USER.value
+    assert message.parent_message_id == target_question["message_id"]
+    assert message.guidance_intent == "manual_converted_answer"
+    assert message.metadata_json["converted_from_role"] == "interviewer"
+    assert message.metadata_json["converted_from_question"] is True
+    assert message.metadata_json["converted_from"] == "web_interview_editor"
+    assert message.metadata_json["conversion_reason"] == "这句其实是被访者回答"
+    assert message.metadata_json["speaker_role"] == "narrator"
+    assert utterance is not None
+    assert utterance.transcript_edited == "我们家那时候有六口人。"
+    assert utterance.source_material_type == ""
+    assert utterance.source_route_action == ""
+    assert utterance.source_route_reason == ""
+    assert len(versions) == 1
+    assert versions[0].content == "我们家那时候有六口人。"
+
+
+async def test_interview_editor_rejects_converting_question_with_existing_answers(client, test_db):
+    user = (await client.get("/api/auth/me")).json()
+    session = await _create_human_session(client)
+    question = await _add_turn(
+        test_db,
+        user_id=user["id"],
+        session=session,
+        role=MemoirChatMessageRole.INTERVIEWER.value,
+        text="你小时候家里有几口人？",
+        turn_index=0,
+    )
+    await _add_turn(
+        test_db,
+        user_id=user["id"],
+        session=session,
+        role=MemoirChatMessageRole.USER.value,
+        text="我们家那时候有六口人。",
+        turn_index=1,
+        parent_message_id=question["message_id"],
+    )
+
+    response = await client.post(
+        (
+            f"/api/memoir/projects/{session['project_id']}/interview-editor/questions/"
+            f"{question['message_id']}/convert-to-answer"
+        ),
+        json={"parent_question_message_id": None},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "这个问题下还有回答，请先移动这些回答"
+
+
 async def test_interview_editor_creates_manual_question_and_moves_answer(client, test_db):
     user = (await client.get("/api/auth/me")).json()
     session = await _create_human_session(client)

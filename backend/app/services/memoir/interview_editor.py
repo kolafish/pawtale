@@ -24,6 +24,7 @@ from app.models.projects import Project
 from app.schemas.memoir_interview_editor import (
     MemoirInterviewEditorAnswerResponse,
     MemoirInterviewEditorAnswerParentUpdateRequest,
+    MemoirInterviewEditorQuestionConvertToAnswerRequest,
     MemoirInterviewEditorQuestionCreateRequest,
     MemoirInterviewEditorQuestionResponse,
     MemoirInterviewEditorQuestionTextUpdateRequest,
@@ -40,6 +41,7 @@ from app.services.memoir.voice_transcripts import prune_transcript_versions_for_
 from app.services.memoir.source_disposition import (
     IGNORED_SOURCE_MATERIAL_TYPES,
     INTERVIEWER_SOURCE_MATERIAL_TYPE,
+    clear_source_route_disposition,
     is_countable_source_utterance,
 )
 
@@ -677,6 +679,111 @@ async def update_interview_question_text(
             utterance_id=utterance.id,
             version_type=MemoirTranscriptVersionType.USER_EDITED,
         )
+
+    await db.commit()
+    return await get_interview_session_detail(
+        db,
+        user_id=user_id,
+        project_id=project_id,
+        voice_session_id=message.voice_session_id,
+        allow_admin=allow_admin,
+    )
+
+
+async def convert_interview_question_to_answer(
+    db: AsyncSession,
+    *,
+    user_id: str,
+    project_id: str,
+    message_id: str,
+    req: MemoirInterviewEditorQuestionConvertToAnswerRequest,
+    allow_admin: bool = False,
+) -> MemoirInterviewEditorSessionDetailResponse:
+    message = await _load_owned_message(
+        db,
+        user_id=user_id,
+        project_id=project_id,
+        message_id=message_id,
+        allow_admin=allow_admin,
+    )
+    if message.role not in QUESTION_ROLES:
+        raise HTTPException(status_code=400, detail="只能把问题转成回答")
+
+    child_answer_count = await db.scalar(
+        select(func.count(MemoirChatMessage.id)).where(
+            MemoirChatMessage.parent_message_id == message.id,
+            MemoirChatMessage.role == MemoirChatMessageRole.USER.value,
+        )
+    )
+    if child_answer_count:
+        raise HTTPException(status_code=400, detail="这个问题下还有回答，请先移动这些回答")
+
+    utterances = sorted(list(message.utterances), key=_utterance_order_key)
+    if not any(_utterance_text(utterance) for utterance in utterances):
+        raise HTTPException(status_code=400, detail="这条问题没有可转成回答的识别文字")
+
+    parent_id = req.parent_question_message_id
+    if parent_id == message.id:
+        raise HTTPException(status_code=400, detail="不能把回答归属到自己")
+    if parent_id:
+        parent_message = await _load_owned_message(
+            db,
+            user_id=user_id,
+            project_id=project_id,
+            message_id=parent_id,
+            allow_admin=allow_admin,
+        )
+        if parent_message.voice_session_id != message.voice_session_id:
+            raise HTTPException(status_code=400, detail="问题和回答必须属于同一次访谈")
+        if parent_message.role not in QUESTION_ROLES:
+            raise HTTPException(status_code=400, detail="目标消息不是可归属的问题")
+
+    now = datetime.utcnow()
+    previous_role = message.role
+    previous_parent_id = message.parent_message_id
+    text_for_answer = _message_text(message)
+    message.role = MemoirChatMessageRole.USER.value
+    message.parent_message_id = parent_id
+    message.content_status = MemoirChatContentStatus.CORRECTED.value
+    message.guidance_intent = "manual_converted_answer"
+    metadata = dict(message.metadata_json or {})
+    metadata.update(
+        {
+            "converted_from_role": previous_role,
+            "converted_from_question": True,
+            "converted_by": _mutation_actor(allow_admin),
+            "converted_user_id": user_id,
+            "converted_from": MUTATION_SOURCE,
+            "converted_at": _now_iso(now),
+            "previous_parent_message_id": previous_parent_id,
+            "parent_message_id": parent_id,
+            "speaker_role": "narrator",
+        }
+    )
+    if req.reason:
+        metadata["conversion_reason"] = req.reason
+    message.metadata_json = metadata
+
+    for utterance in utterances:
+        clear_source_route_disposition(utterance)
+        if text_for_answer and not (utterance.transcript_edited or "").strip():
+            version = MemoirTranscriptVersion(
+                voice_session_id=message.voice_session_id,
+                source_artifact_id=utterance.id,
+                version_type=MemoirTranscriptVersionType.USER_EDITED.value,
+                content=text_for_answer,
+                provider=None,
+                created_by=MemoirCreatedBy.USER.value,
+            )
+            db.add(version)
+            await db.flush()
+            utterance.transcript_edited = text_for_answer
+            message.transcript_version_id = version.id
+            await prune_transcript_versions_for_utterance(
+                db,
+                utterance_id=utterance.id,
+                version_type=MemoirTranscriptVersionType.USER_EDITED,
+            )
 
     await db.commit()
     return await get_interview_session_detail(

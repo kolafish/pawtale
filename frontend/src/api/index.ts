@@ -236,6 +236,16 @@ export const memoirInterviewEditorApi = {
       `/memoir/projects/${projectId}/interview-editor/questions/${messageId}`,
       { text },
     ).then(r => r.data),
+  convertQuestionToAnswer: (
+    projectId: string,
+    messageId: string,
+    parentQuestionMessageId: string | null,
+    reason?: string,
+  ) =>
+    api.post<MemoirInterviewEditorSessionDetail>(
+      `/memoir/projects/${projectId}/interview-editor/questions/${messageId}/convert-to-answer`,
+      { parent_question_message_id: parentQuestionMessageId, reason },
+    ).then(r => r.data),
   updateAnswerParent: (
     projectId: string,
     messageId: string,
