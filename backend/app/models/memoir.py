@@ -20,6 +20,9 @@ from app.domain.memoir.types import (
     MemoirChatMessageRole,
     MemoirCreatedBy,
     MemoirGuidanceMode,
+    MemoirBookImagePlacementType,
+    MemoirImageAssetSourceType,
+    MemoirImageAssetStatus,
     MemoirInterviewType,
     MemoirOutputStatus,
     MemoirSemanticCacheStatus,
@@ -319,6 +322,104 @@ class MemoirTranscriptVersion(Base):
         "MemoirVoiceSession",
         back_populates="transcript_versions",
     )
+
+
+class MemoirImageAsset(Base):
+    __tablename__ = "memoir_image_assets"
+    __table_args__ = (
+        UniqueConstraint("project_id", "source_signature", name="uq_memoir_image_assets_source_signature"),
+        CheckConstraint(
+            f"status IN ({_enum_values(MemoirImageAssetStatus)})",
+            name="ck_memoir_image_assets_status",
+        ),
+        CheckConstraint(
+            f"source_type IN ({_enum_values(MemoirImageAssetSourceType)})",
+            name="ck_memoir_image_assets_source_type",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    project_id: Mapped[str] = mapped_column(String(36), ForeignKey("projects.id"), nullable=False, index=True)
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(
+        String(20),
+        default=MemoirImageAssetStatus.READY.value,
+        nullable=False,
+        index=True,
+    )
+    source_type: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    source_signature: Mapped[str] = mapped_column(String(128), default="", nullable=False, index=True)
+    storage_path: Mapped[str] = mapped_column(String(500), default="", nullable=False)
+    thumbnail_storage_path: Mapped[str] = mapped_column(String(500), default="", nullable=False)
+    mime_type: Mapped[str] = mapped_column(String(100), default="", nullable=False)
+    size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    width: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    height: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    title: Mapped[str] = mapped_column(String(200), default="", nullable=False)
+    caption: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    alt_text: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    style_id: Mapped[str] = mapped_column(String(80), default="", nullable=False)
+    prompt_text: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    prompt_hash: Mapped[str] = mapped_column(String(128), default="", nullable=False, index=True)
+    prompt_version: Mapped[str] = mapped_column(String(80), default="", nullable=False)
+    provider: Mapped[str] = mapped_column(String(100), default="", nullable=False)
+    model: Mapped[str] = mapped_column(String(120), default="", nullable=False)
+    source_utterance_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("memoir_voice_utterances.id"), nullable=True, index=True,
+    )
+    source_chapter_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("memoir_book_plan_chapters.id"), nullable=True, index=True,
+    )
+    share_video_job_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("memoir_material_share_videos.id"), nullable=True, index=True,
+    )
+    source_quote: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    metadata_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    include_in_book: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    project: Mapped["Project"] = orm_relationship("Project")
+    user: Mapped["User"] = orm_relationship("User")
+    source_utterance: Mapped[MemoirVoiceUtterance | None] = orm_relationship("MemoirVoiceUtterance")
+    source_chapter: Mapped["MemoirBookPlanChapter | None"] = orm_relationship("MemoirBookPlanChapter")
+    share_video_job: Mapped[MemoirMaterialShareVideo | None] = orm_relationship("MemoirMaterialShareVideo")
+    placements: Mapped[list["MemoirBookImagePlacement"]] = orm_relationship(
+        "MemoirBookImagePlacement",
+        back_populates="image_asset",
+        cascade="all, delete-orphan",
+        order_by="MemoirBookImagePlacement.sort_order",
+    )
+
+
+class MemoirBookImagePlacement(Base):
+    __tablename__ = "memoir_book_image_placements"
+    __table_args__ = (
+        CheckConstraint(
+            f"placement_type IN ({_enum_values(MemoirBookImagePlacementType)})",
+            name="ck_memoir_book_image_placements_type",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    project_id: Mapped[str] = mapped_column(String(36), ForeignKey("projects.id"), nullable=False, index=True)
+    image_asset_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("memoir_image_assets.id"), nullable=False, index=True,
+    )
+    placement_type: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    chapter_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("memoir_book_plan_chapters.id"), nullable=True, index=True,
+    )
+    caption_override: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    display_size: Mapped[str] = mapped_column(String(40), default="full_width", nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    project: Mapped["Project"] = orm_relationship("Project")
+    image_asset: Mapped[MemoirImageAsset] = orm_relationship("MemoirImageAsset", back_populates="placements")
+    chapter: Mapped["MemoirBookPlanChapter | None"] = orm_relationship("MemoirBookPlanChapter")
 
 
 class MemoirBookPlan(Base):

@@ -6,6 +6,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
+from app.config import DATA_DIR
 from app.services.file_exports import ExportFile, safe_filename
 from app.services.memoir.book_manuscript_cleanup import (
     formal_book_title,
@@ -689,6 +690,52 @@ def _without_embedded_quote_overlap(text: str, quote: str) -> str:
     return cleaned.strip()
 
 
+def _illustration_file_path(illustration: dict[str, Any]) -> Path | None:
+    storage_path = _str(illustration.get("storage_path"))
+    if not storage_path:
+        return None
+    path = Path(storage_path)
+    resolved = path.resolve() if path.is_absolute() else (DATA_DIR / path).resolve()
+    data_root = DATA_DIR.resolve()
+    if data_root not in resolved.parents and resolved != data_root:
+        return None
+    if not resolved.exists() or not resolved.is_file():
+        return None
+    return resolved
+
+
+def _illustration_caption(illustration: dict[str, Any]) -> str:
+    caption = _str(illustration.get("caption"))
+    disclosure = _str(illustration.get("disclosure"))
+    if caption and disclosure and disclosure not in caption:
+        return f"{caption}\n{disclosure}"
+    return caption or disclosure
+
+
+def _add_illustration(builder: PDFBookBuilder, illustration: dict[str, Any]) -> None:
+    path = _illustration_file_path(illustration)
+    if not path:
+        return
+    builder.add_image(
+        path,
+        caption=_illustration_caption(illustration),
+        display_size=_str(illustration.get("display_size")) or "full_width",
+    )
+
+
+def _add_chapter_illustrations(builder: PDFBookBuilder, chapter: dict[str, Any]) -> None:
+    illustrations = [
+        _dict(item)
+        for item in _list(chapter.get("illustrations"))
+        if _dict(item).get("placement") in {"chapter_opening", "chapter_inline"}
+    ]
+    if not illustrations:
+        return
+    builder.add_spacer(0.25)
+    for illustration in illustrations:
+        _add_illustration(builder, illustration)
+
+
 def _add_chapters(builder: PDFBookBuilder, chapters: list[Any]) -> None:
     for fallback_index, raw_chapter in enumerate(chapters, start=1):
         chapter = _dict(raw_chapter)
@@ -743,6 +790,7 @@ def _add_chapters(builder: PDFBookBuilder, chapters: list[Any]) -> None:
         if intro:
             builder.add_body_text(intro, spacing_after=4)
 
+        _add_chapter_illustrations(builder, chapter)
         builder.add_spacer(0.5)
 
         content = _without_leading_quote_overlap(_str(chapter.get("content")), quote)
@@ -789,6 +837,19 @@ def _add_appendix_record_page(
             spacing_after=2,
         )
         builder.add_body_text(content, spacing_after=4)
+
+
+def _add_image_appendix(builder: PDFBookBuilder, illustrations: list[Any]) -> None:
+    images = [_dict(item) for item in illustrations if _dict(item)]
+    if not images:
+        return
+    builder.new_page("插图", show_header=True, show_footer=True, body_numbering=True)
+    builder.add_heading("插图")
+    for index, illustration in enumerate(images, start=1):
+        caption = _illustration_caption(illustration)
+        if caption:
+            illustration = {**illustration, "caption": f"{index}. {caption}"}
+        _add_illustration(builder, illustration)
 
 
 def _add_back_matter(builder: PDFBookBuilder, back_matter: dict[str, Any], *, include_source_appendix: bool) -> None:
@@ -1012,6 +1073,7 @@ def _build_structured_manuscript_pdf_pages(
     cover_style: str,
     front_matter: list[Any],
     chapters: list[Any],
+    image_appendix: list[Any],
     back_matter: dict[str, Any],
     include_source_appendix: bool,
     toc_entries: list[PDFTocEntry],
@@ -1029,6 +1091,7 @@ def _build_structured_manuscript_pdf_pages(
     _add_front_matter(builder, front_matter, title=book_title, subtitle=subtitle)
     _add_table_of_contents(builder, entries=toc_entries)
     _add_chapters(builder, chapters)
+    _add_image_appendix(builder, image_appendix)
     _add_back_matter(builder, back_matter, include_source_appendix=include_source_appendix)
     _add_back_cover(builder, quote=back_cover_quote, cover_style=cover_style)
     return builder.pages
@@ -1045,6 +1108,7 @@ def _build_manuscript_pdf_pages(
     manuscript = sanitize_manuscript_payload(title=title, manuscript=manuscript)
     profile = _dict(manuscript.get("profile"))
     chapters = _list(manuscript.get("chapters"))
+    image_appendix = _list(manuscript.get("image_appendix"))
     front_matter = _list(manuscript.get("front_matter"))
     back_matter = _dict(manuscript.get("back_matter"))
     if not profile and not chapters and not front_matter and not back_matter:
@@ -1081,6 +1145,7 @@ def _build_manuscript_pdf_pages(
         cover_style=cover_style,
         front_matter=front_matter,
         chapters=chapters,
+        image_appendix=image_appendix,
         back_matter=back_matter,
         include_source_appendix=include_source_appendix,
         toc_entries=initial_entries,
@@ -1100,6 +1165,7 @@ def _build_manuscript_pdf_pages(
         cover_style=cover_style,
         front_matter=front_matter,
         chapters=chapters,
+        image_appendix=image_appendix,
         back_matter=back_matter,
         include_source_appendix=include_source_appendix,
         toc_entries=toc_entries,

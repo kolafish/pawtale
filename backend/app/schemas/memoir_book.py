@@ -1000,6 +1000,18 @@ class MemoirBookManuscriptSourceRef(BaseModel):
     quote: str = ""
 
 
+class MemoirBookManuscriptIllustration(BaseModel):
+    image_asset_id: str
+    storage_path: str
+    mime_type: str = ""
+    caption: str = ""
+    alt_text: str = ""
+    placement: Literal["chapter_opening", "chapter_inline", "appendix", "cover", "back_cover"] = "chapter_opening"
+    display_size: str = "full_width"
+    source_quote: str = ""
+    disclosure: str = "AI 根据讲述内容生成的意象插图，不是真实照片。"
+
+
 class MemoirBookManuscriptChapter(BaseModel):
     chapter_id: str
     index: int
@@ -1013,6 +1025,7 @@ class MemoirBookManuscriptChapter(BaseModel):
     uncertain_facts: list[MemoirBookManuscriptUnconfirmedFact] = Field(default_factory=list)
     content: str
     source_refs: list[MemoirBookManuscriptSourceRef] = Field(default_factory=list)
+    illustrations: list[MemoirBookManuscriptIllustration] = Field(default_factory=list)
 
 
 class MemoirBookManuscriptRenderSettings(BaseModel):
@@ -1041,6 +1054,7 @@ class MemoirBookManuscript(BaseModel):
     front_matter: list[MemoirBookManuscriptSection] = Field(default_factory=list)
     table_of_contents: list[MemoirBookOutputTableOfContentsItemResponse] = Field(default_factory=list)
     chapters: list[MemoirBookManuscriptChapter] = Field(default_factory=list)
+    image_appendix: list[MemoirBookManuscriptIllustration] = Field(default_factory=list)
     back_matter: MemoirBookManuscriptBackMatter
     render_settings: MemoirBookManuscriptRenderSettings = Field(default_factory=MemoirBookManuscriptRenderSettings)
 

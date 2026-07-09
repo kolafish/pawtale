@@ -354,6 +354,12 @@ export interface BookData {
   automationEventExpandedTargets: Record<string, boolean>;
   automationEventLoading: boolean;
   automationEventError: string;
+  imageAssetLoading: boolean;
+  imageAssetTotal: number;
+  imageAssetReadyCount: number;
+  imageAssetIncludedCount: number;
+  imageAssetUnusedCount: number;
+  imageAssetSummaryText: string;
 }
 
 export function positiveFiniteSeconds(value: number | null | undefined): number {
@@ -1407,6 +1413,12 @@ export function guestBookData(): Partial<BookData> {
     automationEventExpandedTargets: {},
     automationEventLoading: false,
     automationEventError: "",
+    imageAssetLoading: false,
+    imageAssetTotal: 0,
+    imageAssetReadyCount: 0,
+    imageAssetIncludedCount: 0,
+    imageAssetUnusedCount: 0,
+    imageAssetSummaryText: "还没有图片素材",
   };
 }
 

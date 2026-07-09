@@ -1,0 +1,588 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from hashlib import sha256
+import mimetypes
+from pathlib import Path
+
+from fastapi import HTTPException
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
+from sqlalchemy.orm.attributes import flag_modified
+
+from app.config import DATA_DIR
+from app.domain.memoir.types import (
+    MemoirBookImagePlacementType,
+    MemoirImageAssetSourceType,
+    MemoirImageAssetStatus,
+)
+from app.models.memoir import (
+    MemoirBookImagePlacement,
+    MemoirBookOutput,
+    MemoirBookPlanChapter,
+    MemoirImageAsset,
+    MemoirMaterialShareVideo,
+)
+from app.schemas.memoir_images import (
+    MemoirBookImagePlacementCreateRequest,
+    MemoirBookImagePlacementResponse,
+    MemoirBookImagePlacementUpdateRequest,
+    MemoirImageAssetListResponse,
+    MemoirImageAssetResponse,
+    MemoirImageAssetUpdateRequest,
+)
+from app.services.memoir.access import load_memoir_project
+from app.services.memoir.share_video_backgrounds import ShareVideoBackgroundAsset
+
+
+AI_GENERATED_IMAGE_DISCLOSURE = "AI 根据讲述内容生成的意象插图，不是真实照片。"
+
+
+@dataclass(frozen=True)
+class RegisteredShareVideoBackground:
+    source_quote: str
+    scene_index: int | None = None
+    scene_title: str = ""
+    scene_visual_summary: str = ""
+    evidence_quote: str = ""
+
+
+def _safe_text(value: object, max_length: int = 500) -> str:
+    if not isinstance(value, str):
+        return ""
+    return value.strip()[:max_length]
+
+
+def _source_signature(*parts: object) -> str:
+    payload = "\u241f".join(str(part or "") for part in parts)
+    return sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _file_path(storage_path: str) -> Path:
+    if not storage_path:
+        raise HTTPException(status_code=404, detail="图片文件不存在")
+    path = Path(storage_path)
+    if path.is_absolute():
+        resolved = path.resolve()
+    else:
+        resolved = (DATA_DIR / path).resolve()
+    data_root = DATA_DIR.resolve()
+    if data_root not in resolved.parents and resolved != data_root:
+        raise HTTPException(status_code=400, detail="图片路径无效")
+    if not resolved.exists() or not resolved.is_file():
+        raise HTTPException(status_code=404, detail="图片文件不存在")
+    return resolved
+
+
+def image_asset_file_path(asset: MemoirImageAsset, *, thumbnail: bool = False) -> Path:
+    storage_path = asset.thumbnail_storage_path if thumbnail and asset.thumbnail_storage_path else asset.storage_path
+    return _file_path(storage_path)
+
+
+def _file_url(project_id: str, asset_id: str, *, thumbnail: bool = False) -> str:
+    suffix = "?variant=thumbnail" if thumbnail else ""
+    return f"/api/mobile/memoir/projects/{project_id}/image-assets/{asset_id}/file{suffix}"
+
+
+async def _chapter_titles(db: AsyncSession, chapter_ids: set[str]) -> dict[str, str]:
+    if not chapter_ids:
+        return {}
+    rows = (
+        await db.execute(
+            select(MemoirBookPlanChapter.id, MemoirBookPlanChapter.title)
+            .where(MemoirBookPlanChapter.id.in_(chapter_ids))
+        )
+    ).all()
+    return {str(chapter_id): str(title or "") for chapter_id, title in rows}
+
+
+def _placement_response(
+    placement: MemoirBookImagePlacement,
+    *,
+    chapter_titles: dict[str, str],
+) -> MemoirBookImagePlacementResponse:
+    return MemoirBookImagePlacementResponse(
+        id=placement.id,
+        project_id=placement.project_id,
+        image_asset_id=placement.image_asset_id,
+        placement_type=MemoirBookImagePlacementType(placement.placement_type),
+        chapter_id=placement.chapter_id,
+        chapter_title=chapter_titles.get(placement.chapter_id or "", ""),
+        caption_override=placement.caption_override,
+        display_size=placement.display_size,
+        sort_order=placement.sort_order,
+        enabled=placement.enabled,
+        created_at=placement.created_at,
+        updated_at=placement.updated_at,
+    )
+
+
+def _asset_response(
+    asset: MemoirImageAsset,
+    *,
+    chapter_titles: dict[str, str],
+) -> MemoirImageAssetResponse:
+    placements = [
+        _placement_response(placement, chapter_titles=chapter_titles)
+        for placement in sorted(asset.placements, key=lambda item: (not item.enabled, item.sort_order, item.created_at))
+    ]
+    return MemoirImageAssetResponse(
+        id=asset.id,
+        project_id=asset.project_id,
+        status=MemoirImageAssetStatus(asset.status),
+        source_type=MemoirImageAssetSourceType(asset.source_type),
+        source_signature=asset.source_signature,
+        storage_path=asset.storage_path,
+        thumbnail_storage_path=asset.thumbnail_storage_path,
+        file_url=_file_url(asset.project_id, asset.id),
+        thumbnail_url=_file_url(asset.project_id, asset.id, thumbnail=True),
+        mime_type=asset.mime_type,
+        size_bytes=asset.size_bytes,
+        width=asset.width,
+        height=asset.height,
+        title=asset.title,
+        caption=asset.caption,
+        alt_text=asset.alt_text,
+        style_id=asset.style_id,
+        prompt_hash=asset.prompt_hash,
+        prompt_version=asset.prompt_version,
+        provider=asset.provider,
+        model=asset.model,
+        source_utterance_id=asset.source_utterance_id,
+        source_chapter_id=asset.source_chapter_id,
+        source_chapter_title=chapter_titles.get(asset.source_chapter_id or "", ""),
+        share_video_job_id=asset.share_video_job_id,
+        source_quote=asset.source_quote,
+        metadata_json=asset.metadata_json or {},
+        include_in_book=asset.include_in_book,
+        placements=placements,
+        created_at=asset.created_at,
+        updated_at=asset.updated_at,
+    )
+
+
+async def _load_asset(
+    db: AsyncSession,
+    *,
+    user_id: str,
+    project_id: str,
+    asset_id: str,
+) -> MemoirImageAsset:
+    await load_memoir_project(db, project_id, user_id)
+    asset = await db.scalar(
+        select(MemoirImageAsset)
+        .where(
+            MemoirImageAsset.project_id == project_id,
+            MemoirImageAsset.id == asset_id,
+        )
+        .options(selectinload(MemoirImageAsset.placements))
+    )
+    if not asset or asset.status == MemoirImageAssetStatus.DELETED.value:
+        raise HTTPException(status_code=404, detail="图片素材不存在")
+    return asset
+
+
+async def list_image_assets(
+    db: AsyncSession,
+    *,
+    user_id: str,
+    project_id: str,
+    include_deleted: bool = False,
+) -> MemoirImageAssetListResponse:
+    await load_memoir_project(db, project_id, user_id)
+    filters = [MemoirImageAsset.project_id == project_id]
+    if not include_deleted:
+        filters.append(MemoirImageAsset.status != MemoirImageAssetStatus.DELETED.value)
+    items = (
+        await db.execute(
+            select(MemoirImageAsset)
+            .where(*filters)
+            .options(selectinload(MemoirImageAsset.placements))
+            .order_by(MemoirImageAsset.created_at.desc(), MemoirImageAsset.id.desc())
+        )
+    ).scalars().all()
+    chapter_ids = {
+        value
+        for asset in items
+        for value in [
+            asset.source_chapter_id,
+            *(placement.chapter_id for placement in asset.placements),
+        ]
+        if value
+    }
+    chapter_titles = await _chapter_titles(db, chapter_ids)
+    ready_count = sum(1 for item in items if item.status == MemoirImageAssetStatus.READY.value)
+    included_count = sum(1 for item in items if item.include_in_book)
+    return MemoirImageAssetListResponse(
+        items=[_asset_response(item, chapter_titles=chapter_titles) for item in items],
+        total=len(items),
+        ready_count=ready_count,
+        included_count=included_count,
+        unused_count=max(0, ready_count - included_count),
+    )
+
+
+async def update_image_asset(
+    db: AsyncSession,
+    *,
+    user_id: str,
+    project_id: str,
+    asset_id: str,
+    req: MemoirImageAssetUpdateRequest,
+) -> MemoirImageAssetResponse:
+    asset = await _load_asset(db, user_id=user_id, project_id=project_id, asset_id=asset_id)
+    fields_set = getattr(req, "model_fields_set", set())
+    if "title" in fields_set and req.title is not None:
+        asset.title = req.title
+    if "caption" in fields_set and req.caption is not None:
+        asset.caption = req.caption
+    if "alt_text" in fields_set and req.alt_text is not None:
+        asset.alt_text = req.alt_text
+    if asset.include_in_book:
+        await sync_latest_book_output_image_snapshots(db, project_id=project_id)
+    await db.commit()
+    await db.refresh(asset)
+    chapter_titles = await _chapter_titles(
+        db,
+        {
+            value
+            for value in [asset.source_chapter_id, *(placement.chapter_id for placement in asset.placements)]
+            if value
+        },
+    )
+    return _asset_response(asset, chapter_titles=chapter_titles)
+
+
+async def delete_image_asset(
+    db: AsyncSession,
+    *,
+    user_id: str,
+    project_id: str,
+    asset_id: str,
+) -> None:
+    asset = await _load_asset(db, user_id=user_id, project_id=project_id, asset_id=asset_id)
+    asset.status = MemoirImageAssetStatus.DELETED.value
+    asset.include_in_book = False
+    for placement in asset.placements:
+        placement.enabled = False
+        db.add(placement)
+    await sync_latest_book_output_image_snapshots(db, project_id=project_id)
+    await db.commit()
+
+
+async def create_image_placement(
+    db: AsyncSession,
+    *,
+    user_id: str,
+    project_id: str,
+    asset_id: str,
+    req: MemoirBookImagePlacementCreateRequest,
+) -> MemoirImageAssetResponse:
+    asset = await _load_asset(db, user_id=user_id, project_id=project_id, asset_id=asset_id)
+    if asset.status != MemoirImageAssetStatus.READY.value:
+        raise HTTPException(status_code=400, detail="图片还不可入书")
+    if req.placement_type in {
+        MemoirBookImagePlacementType.CHAPTER_OPENING,
+        MemoirBookImagePlacementType.CHAPTER_INLINE,
+    } and not req.chapter_id:
+        raise HTTPException(status_code=400, detail="请选择要放入的章节")
+    if req.chapter_id:
+        chapter = await db.scalar(
+            select(MemoirBookPlanChapter)
+            .where(
+                MemoirBookPlanChapter.id == req.chapter_id,
+                MemoirBookPlanChapter.project_id == project_id,
+            )
+        )
+        if not chapter:
+            raise HTTPException(status_code=404, detail="章节不存在")
+    placement = next(
+        (
+            item
+            for item in asset.placements
+            if item.placement_type == req.placement_type.value
+            and (item.chapter_id or "") == (req.chapter_id or "")
+        ),
+        None,
+    )
+    if not placement:
+        next_sort_order = int(
+            await db.scalar(
+                select(func.coalesce(func.max(MemoirBookImagePlacement.sort_order), -1))
+                .where(
+                    MemoirBookImagePlacement.project_id == project_id,
+                    MemoirBookImagePlacement.placement_type == req.placement_type.value,
+                    MemoirBookImagePlacement.chapter_id == req.chapter_id,
+                )
+            )
+            or -1
+        ) + 1
+        placement = MemoirBookImagePlacement(
+            project_id=project_id,
+            image_asset_id=asset.id,
+            placement_type=req.placement_type.value,
+            chapter_id=req.chapter_id,
+            sort_order=next_sort_order,
+        )
+        asset.placements.append(placement)
+    placement.caption_override = req.caption_override or placement.caption_override
+    placement.display_size = req.display_size
+    placement.enabled = True
+    asset.include_in_book = True
+    db.add(asset)
+    await sync_latest_book_output_image_snapshots(db, project_id=project_id)
+    await db.commit()
+    await db.refresh(asset)
+    chapter_titles = await _chapter_titles(
+        db,
+        {
+            value
+            for value in [asset.source_chapter_id, *(item.chapter_id for item in asset.placements)]
+            if value
+        },
+    )
+    return _asset_response(asset, chapter_titles=chapter_titles)
+
+
+async def update_image_placement(
+    db: AsyncSession,
+    *,
+    user_id: str,
+    project_id: str,
+    asset_id: str,
+    placement_id: str,
+    req: MemoirBookImagePlacementUpdateRequest,
+) -> MemoirImageAssetResponse:
+    asset = await _load_asset(db, user_id=user_id, project_id=project_id, asset_id=asset_id)
+    placement = next((item for item in asset.placements if item.id == placement_id), None)
+    if not placement:
+        raise HTTPException(status_code=404, detail="插图位置不存在")
+    fields_set = getattr(req, "model_fields_set", set())
+    if "caption_override" in fields_set and req.caption_override is not None:
+        placement.caption_override = req.caption_override
+    if "display_size" in fields_set and req.display_size is not None:
+        placement.display_size = req.display_size
+    if "enabled" in fields_set and req.enabled is not None:
+        placement.enabled = req.enabled
+    asset.include_in_book = any(item.enabled for item in asset.placements)
+    await sync_latest_book_output_image_snapshots(db, project_id=project_id)
+    await db.commit()
+    await db.refresh(asset)
+    chapter_titles = await _chapter_titles(
+        db,
+        {
+            value
+            for value in [asset.source_chapter_id, *(item.chapter_id for item in asset.placements)]
+            if value
+        },
+    )
+    return _asset_response(asset, chapter_titles=chapter_titles)
+
+
+async def delete_image_placement(
+    db: AsyncSession,
+    *,
+    user_id: str,
+    project_id: str,
+    asset_id: str,
+    placement_id: str,
+) -> MemoirImageAssetResponse:
+    return await update_image_placement(
+        db,
+        user_id=user_id,
+        project_id=project_id,
+        asset_id=asset_id,
+        placement_id=placement_id,
+        req=MemoirBookImagePlacementUpdateRequest(enabled=False),
+    )
+
+
+async def load_image_asset_file(
+    db: AsyncSession,
+    *,
+    user_id: str,
+    project_id: str,
+    asset_id: str,
+    thumbnail: bool = False,
+) -> tuple[MemoirImageAsset, Path]:
+    asset = await _load_asset(db, user_id=user_id, project_id=project_id, asset_id=asset_id)
+    return asset, image_asset_file_path(asset, thumbnail=thumbnail)
+
+
+def _asset_file_metadata(storage_path: str) -> tuple[str, int | None]:
+    try:
+        path = _file_path(storage_path)
+    except HTTPException:
+        mime_type = mimetypes.guess_type(storage_path)[0] or "image/jpeg"
+        return mime_type, None
+    return mimetypes.guess_type(path.name)[0] or "image/jpeg", path.stat().st_size
+
+
+def _illustration_snapshot(asset: MemoirImageAsset, placement: MemoirBookImagePlacement) -> dict[str, object]:
+    metadata = asset.metadata_json if isinstance(asset.metadata_json, dict) else {}
+    disclosure = _safe_text(metadata.get("disclosure")) or AI_GENERATED_IMAGE_DISCLOSURE
+    caption = placement.caption_override or asset.caption or disclosure
+    return {
+        "image_asset_id": asset.id,
+        "storage_path": asset.storage_path,
+        "mime_type": asset.mime_type,
+        "caption": caption,
+        "alt_text": asset.alt_text or asset.title,
+        "placement": placement.placement_type,
+        "display_size": placement.display_size,
+        "source_quote": asset.source_quote,
+        "disclosure": disclosure,
+    }
+
+
+async def manuscript_image_snapshots(
+    db: AsyncSession,
+    *,
+    project_id: str,
+) -> tuple[dict[str, list[dict[str, object]]], list[dict[str, object]]]:
+    placements = (
+        await db.execute(
+            select(MemoirBookImagePlacement)
+            .join(MemoirImageAsset, MemoirBookImagePlacement.image_asset_id == MemoirImageAsset.id)
+            .where(
+                MemoirBookImagePlacement.project_id == project_id,
+                MemoirBookImagePlacement.enabled == True,  # noqa: E712
+                MemoirImageAsset.status == MemoirImageAssetStatus.READY.value,
+            )
+            .options(selectinload(MemoirBookImagePlacement.image_asset))
+            .order_by(
+                MemoirBookImagePlacement.sort_order,
+                MemoirBookImagePlacement.created_at,
+                MemoirBookImagePlacement.id,
+            )
+        )
+    ).scalars().all()
+    chapter_images: dict[str, list[dict[str, object]]] = {}
+    appendix_images: list[dict[str, object]] = []
+    for placement in placements:
+        asset = placement.image_asset
+        snapshot = _illustration_snapshot(asset, placement)
+        if placement.placement_type in {
+            MemoirBookImagePlacementType.CHAPTER_OPENING.value,
+            MemoirBookImagePlacementType.CHAPTER_INLINE.value,
+        } and placement.chapter_id:
+            chapter_images.setdefault(placement.chapter_id, []).append(snapshot)
+        elif placement.placement_type == MemoirBookImagePlacementType.APPENDIX.value:
+            appendix_images.append(snapshot)
+    return chapter_images, appendix_images
+
+
+async def sync_latest_book_output_image_snapshots(
+    db: AsyncSession,
+    *,
+    project_id: str,
+) -> None:
+    output = await db.scalar(
+        select(MemoirBookOutput)
+        .where(MemoirBookOutput.project_id == project_id)
+        .options(selectinload(MemoirBookOutput.versions))
+    )
+    if not output or not output.versions:
+        return
+    latest = output.versions[-1]
+    manuscript = latest.manuscript_json if isinstance(latest.manuscript_json, dict) else {}
+    chapters = manuscript.get("chapters")
+    if not isinstance(chapters, list):
+        return
+    chapter_images, appendix_images = await manuscript_image_snapshots(db, project_id=project_id)
+    for raw_chapter in chapters:
+        if not isinstance(raw_chapter, dict):
+            continue
+        chapter_id = _safe_text(raw_chapter.get("chapter_id"), 80)
+        raw_chapter["illustrations"] = chapter_images.get(chapter_id, [])
+    manuscript["image_appendix"] = appendix_images
+    settings = manuscript.get("render_settings")
+    if isinstance(settings, dict):
+        if any(chapter_images.values()):
+            settings["photo_mode"] = "chapter"
+        elif appendix_images:
+            settings["photo_mode"] = "appendix"
+        else:
+            settings["photo_mode"] = "none"
+    latest.manuscript_json = manuscript
+    flag_modified(latest, "manuscript_json")
+
+
+async def register_share_video_background_asset(
+    db: AsyncSession,
+    *,
+    job: MemoirMaterialShareVideo,
+    background: ShareVideoBackgroundAsset,
+    context: RegisteredShareVideoBackground,
+) -> MemoirImageAsset:
+    scene_key = "single" if context.scene_index is None else str(context.scene_index)
+    source_signature = _source_signature(
+        MemoirImageAssetSourceType.SHARE_VIDEO_BACKGROUND.value,
+        job.id,
+        job.utterance_id,
+        scene_key,
+        background.storage_path,
+    )
+    existing = await db.scalar(
+        select(MemoirImageAsset)
+        .where(
+            MemoirImageAsset.project_id == job.project_id,
+            MemoirImageAsset.source_signature == source_signature,
+        )
+        .options(selectinload(MemoirImageAsset.placements))
+    )
+    mime_type, size_bytes = _asset_file_metadata(background.storage_path)
+    title = context.scene_title or "讲述片段插图"
+    caption = context.evidence_quote or context.source_quote or AI_GENERATED_IMAGE_DISCLOSURE
+    metadata = {
+        "disclosure": AI_GENERATED_IMAGE_DISCLOSURE,
+        "share_video_start_ms": job.start_ms,
+        "share_video_end_ms": job.end_ms,
+        "share_video_text_hash": job.text_hash,
+        "scene_index": context.scene_index,
+        "scene_visual_summary": context.scene_visual_summary,
+    }
+    if existing:
+        existing.status = MemoirImageAssetStatus.READY.value
+        existing.storage_path = background.storage_path
+        existing.mime_type = mime_type
+        existing.size_bytes = size_bytes
+        existing.title = title
+        existing.caption = caption
+        existing.style_id = background.style_id
+        existing.prompt_hash = background.prompt_hash
+        existing.prompt_version = background.prompt_template_version
+        existing.provider = background.provider
+        existing.model = background.model
+        existing.source_quote = context.source_quote
+        existing.metadata_json = {**(existing.metadata_json or {}), **metadata}
+        flag_modified(existing, "metadata_json")
+        if existing.include_in_book:
+            await sync_latest_book_output_image_snapshots(db, project_id=job.project_id)
+        return existing
+
+    asset = MemoirImageAsset(
+        project_id=job.project_id,
+        user_id=job.user_id,
+        status=MemoirImageAssetStatus.READY.value,
+        source_type=MemoirImageAssetSourceType.SHARE_VIDEO_BACKGROUND.value,
+        source_signature=source_signature,
+        storage_path=background.storage_path,
+        mime_type=mime_type,
+        size_bytes=size_bytes,
+        title=title,
+        caption=caption,
+        alt_text=title,
+        style_id=background.style_id,
+        prompt_hash=background.prompt_hash,
+        prompt_version=background.prompt_template_version,
+        provider=background.provider,
+        model=background.model,
+        source_utterance_id=job.utterance_id,
+        share_video_job_id=job.id,
+        source_quote=context.source_quote,
+        metadata_json=metadata,
+    )
+    db.add(asset)
+    return asset
