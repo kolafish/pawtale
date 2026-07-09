@@ -17,8 +17,31 @@ from app.domain.memoir.types import MemoirImageAssetSourceType, MemoirImageAsset
 from app.models.memoir import MemoirImageAsset
 from app.schemas.memoir_voice import MemoirShareVideoCustomBackgroundAssetResponse
 from app.services.memoir.access import load_memoir_project
+from app.services.memoir.image_assets import image_asset_file_path
 
 
+SHARE_VIDEO_BACKGROUND_SOURCE_AI = "ai"
+SHARE_VIDEO_BACKGROUND_SOURCE_CUSTOM = "custom"
+SHARE_VIDEO_BACKGROUND_SOURCE_CLASSIC = "classic"
+DEFAULT_SHARE_VIDEO_BACKGROUND_SOURCE = SHARE_VIDEO_BACKGROUND_SOURCE_AI
+_BACKGROUND_SOURCE_OPTIONS: tuple[dict[str, str], ...] = (
+    {
+        "value": SHARE_VIDEO_BACKGROUND_SOURCE_AI,
+        "label": "AI生成",
+        "description": "根据文字自动生成回忆录背景图，可选择单图或智能多图",
+    },
+    {
+        "value": SHARE_VIDEO_BACKGROUND_SOURCE_CUSTOM,
+        "label": "自定义图片",
+        "description": "上传自己的图片，自动处理成适合叠加文字的视频背景",
+    },
+    {
+        "value": SHARE_VIDEO_BACKGROUND_SOURCE_CLASSIC,
+        "label": "经典背景",
+        "description": "使用米白纸张质感背景，不生成也不上传图片",
+    },
+)
+_BACKGROUND_SOURCE_VALUES = {option["value"] for option in _BACKGROUND_SOURCE_OPTIONS}
 SHARE_VIDEO_CUSTOM_BACKGROUND_VERSION = "memoir-share-video-custom-background-v1"
 SHARE_VIDEO_CUSTOM_BACKGROUND_PRESET = "memoir_soft"
 SHARE_VIDEO_CUSTOM_BACKGROUND_WIDTH = 1280
@@ -43,6 +66,18 @@ _PROCESSING_JSON = {
     "warm_overlay": "#F6F1E8",
     "warm_overlay_opacity": 0.24,
 }
+
+
+def share_video_background_source_options() -> list[dict[str, str]]:
+    return [dict(option) for option in _BACKGROUND_SOURCE_OPTIONS]
+
+
+def normalize_share_video_background_source(value: str | None) -> str:
+    normalized = (value or DEFAULT_SHARE_VIDEO_BACKGROUND_SOURCE).strip()
+    if normalized not in _BACKGROUND_SOURCE_VALUES:
+        valid = "、".join(option["label"] for option in _BACKGROUND_SOURCE_OPTIONS)
+        raise ValueError(f"未知的分享视频背景来源，可选：{valid}")
+    return normalized
 
 
 @dataclass(frozen=True)
@@ -336,3 +371,32 @@ async def create_custom_share_video_background_asset(
     await db.commit()
     await db.refresh(asset)
     return _response(asset)
+
+
+async def load_custom_share_video_background_asset(
+    db: AsyncSession,
+    *,
+    user_id: str,
+    project_id: str,
+    asset_id: str,
+    allow_admin: bool = False,
+) -> tuple[MemoirImageAsset, Path]:
+    await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
+    asset = await db.scalar(
+        select(MemoirImageAsset)
+        .where(
+            MemoirImageAsset.project_id == project_id,
+            MemoirImageAsset.id == asset_id,
+            MemoirImageAsset.source_type == MemoirImageAssetSourceType.SHARE_VIDEO_BACKGROUND.value,
+            MemoirImageAsset.status == MemoirImageAssetStatus.READY.value,
+        )
+        .options(selectinload(MemoirImageAsset.placements))
+    )
+    metadata = asset.metadata_json if asset else None
+    if (
+        not asset
+        or not isinstance(metadata, dict)
+        or metadata.get("share_video_background_source") != "custom_upload"
+    ):
+        raise HTTPException(status_code=404, detail="自定义背景图不存在")
+    return asset, image_asset_file_path(asset)

@@ -38,6 +38,13 @@ from app.services.memoir.share_video_backgrounds import (
     normalize_share_video_background_mode,
     normalize_share_video_background_style,
 )
+from app.services.memoir.share_video_custom_backgrounds import (
+    DEFAULT_SHARE_VIDEO_BACKGROUND_SOURCE,
+    SHARE_VIDEO_BACKGROUND_SOURCE_CLASSIC,
+    SHARE_VIDEO_BACKGROUND_SOURCE_CUSTOM,
+    load_custom_share_video_background_asset,
+    normalize_share_video_background_source,
+)
 from app.services.memoir.share_video_alignment import (
     MAX_SELECT_MS,
     MIN_SELECT_MS,
@@ -133,9 +140,11 @@ def _trim_selection(text: str, start_char: int, end_char: int) -> tuple[int, int
 
 def _job_response(job: MemoirMaterialShareVideo) -> MemoirShareVideoJobResponse:
     metadata = job.metadata_json or {}
+    background_source = str(metadata.get("background_source") or DEFAULT_SHARE_VIDEO_BACKGROUND_SOURCE)
     background_style = str(metadata.get("background_style") or DEFAULT_SHARE_VIDEO_BACKGROUND_STYLE)
     background_mode = str(metadata.get("background_mode") or DEFAULT_SHARE_VIDEO_BACKGROUND_MODE)
     background_effective_mode = str(metadata.get("background_effective_mode") or SHARE_VIDEO_BACKGROUND_MODE_SINGLE)
+    custom_background_asset_id = metadata.get("custom_background_asset_id")
     background_provider = metadata.get("background_provider")
     background_model = metadata.get("background_model")
     background_cache_hit = metadata.get("background_cache_hit")
@@ -158,9 +167,11 @@ def _job_response(job: MemoirMaterialShareVideo) -> MemoirShareVideoJobResponse:
         end_ms=job.end_ms,
         duration_ms=max(0, job.end_ms - job.start_ms),
         style=job.style,
+        background_source=background_source,
         background_style=background_style,
         background_mode=background_mode,
         background_effective_mode=background_effective_mode,
+        custom_background_asset_id=custom_background_asset_id if isinstance(custom_background_asset_id, str) else None,
         background_scene_count=background_scene_count if isinstance(background_scene_count, int) else 0,
         background_status=str(metadata.get("background_status") or "disabled"),
         background_provider=background_provider if isinstance(background_provider, str) else None,
@@ -241,6 +252,18 @@ def _effective_background_mode(background_mode: str, duration_ms: int) -> str:
     )
 
 
+def _initial_background_status(background_source: str) -> str:
+    if background_source == SHARE_VIDEO_BACKGROUND_SOURCE_CUSTOM:
+        return "ready"
+    if background_source == SHARE_VIDEO_BACKGROUND_SOURCE_CLASSIC:
+        return "classic"
+    return (
+        "pending"
+        if get_settings().memoir_share_video_ai_background_enabled
+        else "disabled"
+    )
+
+
 def _scene_metadata(scene: ShareVideoScene) -> dict[str, object]:
     return {
         "index": scene.index,
@@ -301,6 +324,10 @@ async def create_share_video_job(
     start_char, end_char = _trim_selection(alignment.transcript_text, req.start_char, req.end_char)
     start_ms, end_ms = share_video_char_range_ms(alignment, start_char, end_char)
     try:
+        background_source = normalize_share_video_background_source(req.background_source)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    try:
         background_style = normalize_share_video_background_style(req.background_style)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -316,6 +343,26 @@ async def create_share_video_job(
     audio_file = utterance.audio_file
     if not audio_file:
         raise HTTPException(status_code=400, detail="素材没有可分享的音频")
+    custom_background_asset_id: str | None = None
+    if background_source == SHARE_VIDEO_BACKGROUND_SOURCE_CUSTOM:
+        if not req.custom_background_asset_id:
+            raise HTTPException(status_code=400, detail="请选择自定义背景图")
+        custom_asset, _custom_path = await load_custom_share_video_background_asset(
+            db,
+            user_id=user_id,
+            project_id=utterance.voice_session.project_id,
+            asset_id=req.custom_background_asset_id,
+            allow_admin=allow_admin,
+        )
+        custom_background_asset_id = custom_asset.id
+    elif req.custom_background_asset_id:
+        raise HTTPException(status_code=400, detail="只有自定义背景图模式可以选择背景图片")
+
+    effective_background_mode = (
+        SHARE_VIDEO_BACKGROUND_MODE_SINGLE
+        if background_source in {SHARE_VIDEO_BACKGROUND_SOURCE_CUSTOM, SHARE_VIDEO_BACKGROUND_SOURCE_CLASSIC}
+        else _effective_background_mode(background_mode, duration_ms)
+    )
 
     job = MemoirMaterialShareVideo(
         project_id=utterance.voice_session.project_id,
@@ -336,15 +383,13 @@ async def create_share_video_job(
             "alignment_strategy": alignment.strategy,
             "alignment_confidence": alignment.confidence,
             "char_timings": alignment.char_timings[start_char:end_char],
+            "background_source": background_source,
             "background_style": background_style,
             "background_mode": background_mode,
-            "background_effective_mode": _effective_background_mode(background_mode, duration_ms),
-            "background_scene_count": 0,
-            "background_status": (
-                "pending"
-                if get_settings().memoir_share_video_ai_background_enabled
-                else "disabled"
-            ),
+            "background_effective_mode": effective_background_mode,
+            "custom_background_asset_id": custom_background_asset_id,
+            "background_scene_count": 1 if background_source == SHARE_VIDEO_BACKGROUND_SOURCE_CUSTOM else 0,
+            "background_status": _initial_background_status(background_source),
         },
         video_mime_type=_VIDEO_MIME_TYPE,
     )
@@ -431,6 +476,9 @@ async def run_share_video_job_with_session(db: AsyncSession, job_id: str) -> Non
     await db.commit()
     try:
         metadata = dict(job.metadata_json or {})
+        background_source = normalize_share_video_background_source(
+            metadata.get("background_source") if isinstance(metadata.get("background_source"), str) else None
+        )
         background_style = normalize_share_video_background_style(
             metadata.get("background_style") if isinstance(metadata.get("background_style"), str) else None
         )
@@ -441,12 +489,47 @@ async def run_share_video_job_with_session(db: AsyncSession, job_id: str) -> Non
         settings = get_settings()
         effective_background_mode = _effective_background_mode(background_mode, duration_ms)
         volc_ark_api_key = str(getattr(settings, "volc_ark_api_key", "") or "")
+        if background_source in {SHARE_VIDEO_BACKGROUND_SOURCE_CUSTOM, SHARE_VIDEO_BACKGROUND_SOURCE_CLASSIC}:
+            effective_background_mode = SHARE_VIDEO_BACKGROUND_MODE_SINGLE
+        metadata["background_source"] = background_source
         metadata["background_style"] = background_style
         metadata["background_mode"] = background_mode
         metadata["background_effective_mode"] = effective_background_mode
         background_image_path: Path | None = None
         background_segments: list[ShareVideoBackgroundSegment] = []
-        if not settings.memoir_share_video_ai_background_enabled or not volc_ark_api_key.strip():
+        if background_source == SHARE_VIDEO_BACKGROUND_SOURCE_CUSTOM:
+            custom_background_asset_id = metadata.get("custom_background_asset_id")
+            if not isinstance(custom_background_asset_id, str) or not custom_background_asset_id.strip():
+                raise ShareVideoGenerationError("自定义背景图不存在")
+            custom_asset, background_image_path = await load_custom_share_video_background_asset(
+                db,
+                user_id=job.user_id,
+                project_id=job.project_id,
+                asset_id=custom_background_asset_id,
+                allow_admin=True,
+            )
+            metadata.update({
+                "background_status": "ready",
+                "background_effective_mode": SHARE_VIDEO_BACKGROUND_MODE_SINGLE,
+                "background_scene_count": 1,
+                "background_storage_path": custom_asset.storage_path,
+                "background_provider": custom_asset.provider,
+                "background_model": custom_asset.model,
+                "background_cache_hit": None,
+                "background_error_message": "",
+            })
+            _set_job_metadata(job, metadata)
+            await db.commit()
+        elif background_source == SHARE_VIDEO_BACKGROUND_SOURCE_CLASSIC:
+            metadata.update({
+                "background_status": "classic",
+                "background_effective_mode": SHARE_VIDEO_BACKGROUND_MODE_SINGLE,
+                "background_scene_count": 0,
+                "background_error_message": "",
+            })
+            _set_job_metadata(job, metadata)
+            await db.commit()
+        elif not settings.memoir_share_video_ai_background_enabled or not volc_ark_api_key.strip():
             metadata.update({
                 "background_status": "disabled",
                 "background_effective_mode": SHARE_VIDEO_BACKGROUND_MODE_SINGLE,
