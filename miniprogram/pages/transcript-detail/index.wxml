@@ -273,6 +273,87 @@
       </view>
     </view>
 
+    <view wx:if="{{!item.isEditing && !item.canRecoverTranscription}}" class="section-card share-video-card">
+      <view class="section-head">
+        <view class="section-heading">
+          <text class="section-title">分享视频</text>
+          <text class="section-hint">选择校正文片段，生成带字幕高亮的视频。</text>
+        </view>
+        <text class="section-count share-video-count {{shareVideoStatusClass}}">{{shareVideoStatusText || "未生成"}}</text>
+      </view>
+      <view class="actions-row edit-choice-actions">
+        <button
+          class="primary-button"
+          bindtap="toggleShareVideoPanel"
+          loading="{{shareVideoLoadingContext}}"
+          disabled="{{saving || deleting || shareVideoCreating || shareVideoPolling || shareVideoDownloadingPreview}}"
+        >
+          {{shareVideoPanelOpen ? "收起视频" : "制作视频"}}
+        </button>
+      </view>
+      <view wx:if="{{shareVideoPanelOpen}}" class="share-video-panel">
+        <view wx:if="{{shareVideoLoadingContext}}" class="share-video-state">
+          <text>正在加载校正文片段</text>
+        </view>
+        <block wx:else>
+          <view wx:if="{{shareVideoError}}" class="share-video-error">
+            <text>{{shareVideoError}}</text>
+          </view>
+          <view wx:if="{{shareVideoSegments.length}}" class="share-video-segments">
+            <view
+              wx:for="{{shareVideoSegments}}"
+              wx:for-item="segment"
+              wx:for-index="segmentIndex"
+              wx:key="segmentIndex"
+              class="share-video-segment {{segment.className}}"
+              data-index="{{segment.arrayIndex}}"
+              bindtap="selectShareVideoSegment"
+            >
+              <text class="share-video-segment-text">{{segment.text}}</text>
+              <text class="share-video-segment-meta">{{segment.timeRangeText}} · {{segment.durationText}}</text>
+            </view>
+          </view>
+          <view wx:if="{{shareVideoSelectedText}}" class="share-video-selection">
+            <view class="share-video-selection-head">
+              <text class="voice-edit-label">已选片段</text>
+              <button
+                class="text-action-button"
+                bindtap="clearShareVideoSelection"
+                disabled="{{shareVideoCreating || shareVideoPolling || shareVideoDownloadingPreview}}"
+              >
+                重选
+              </button>
+            </view>
+            <text class="share-video-selection-text">{{shareVideoSelectedText}}</text>
+            <text class="share-video-selection-meta">{{shareVideoSelectedMetaText}}</text>
+          </view>
+          <view class="actions-row share-video-actions">
+            <button
+              class="primary-button"
+              bindtap="createShareVideo"
+              loading="{{shareVideoCreating || shareVideoPolling || shareVideoDownloadingPreview}}"
+              disabled="{{!shareVideoSelectedCanGenerate || shareVideoCreating || shareVideoPolling || shareVideoDownloadingPreview}}"
+            >
+              {{shareVideoDownloadingPreview ? "准备预览" : (shareVideoCreating || shareVideoPolling ? "生成中" : "生成视频")}}
+            </button>
+          </view>
+          <view wx:if="{{shareVideoJob}}" class="share-video-job {{shareVideoStatusClass}}">
+            <text class="share-video-job-title">{{shareVideoStatusText}}</text>
+            <text wx:if="{{shareVideoSelectedMetaText}}" class="share-video-job-meta">{{shareVideoSelectedMetaText}}</text>
+          </view>
+          <video
+            wx:if="{{shareVideoPreviewPath}}"
+            class="share-video-preview"
+            src="{{shareVideoPreviewPath}}"
+            controls
+            show-center-play-btn
+            enable-progress-gesture
+            object-fit="contain"
+          />
+        </block>
+      </view>
+    </view>
+
     <view class="section-card">
       <view class="section-head">
         <view class="section-heading">

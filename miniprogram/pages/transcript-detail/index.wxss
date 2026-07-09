@@ -342,6 +342,9 @@
   font-weight: 850;
   line-height: 1;
   box-sizing: border-box;
+  transition-property: transform, opacity;
+  transition-duration: 120ms;
+  transition-timing-function: ease;
 }
 
 .primary-button,
@@ -378,6 +381,12 @@
   opacity: 0.62;
 }
 
+.primary-button:active,
+.ghost-button:active,
+.danger-button:active {
+  transform: scale(0.96);
+}
+
 .text-action-button {
   height: 58rpx;
   margin: 0;
@@ -392,6 +401,9 @@
   font-size: 24rpx;
   font-weight: 700;
   line-height: 1;
+  transition-property: transform, opacity;
+  transition-duration: 120ms;
+  transition-timing-function: ease;
 }
 
 .text-action-button::after {
@@ -400,6 +412,10 @@
 
 .text-action-button[disabled] {
   opacity: 0.62;
+}
+
+.text-action-button:active {
+  transform: scale(0.96);
 }
 
 .picker-action {
@@ -510,6 +526,188 @@
   background: #e9f7ef;
   color: #2f7a54;
   font-weight: 800;
+}
+
+.share-video-card {
+  background: #fffdf9;
+  border-color: #dfc8b8;
+}
+
+.share-video-count {
+  max-width: 220rpx;
+}
+
+.share-video-count.ready,
+.share-video-count.succeeded {
+  color: #2f7a54;
+}
+
+.share-video-count.running,
+.share-video-count.pending {
+  color: #8f5b2a;
+}
+
+.share-video-count.failed {
+  color: #b84a5a;
+}
+
+.share-video-panel {
+  margin-top: 20rpx;
+}
+
+.share-video-state {
+  padding: 24rpx;
+  border-radius: 16rpx;
+  background: #f8f5f1;
+  color: #7b6f68;
+  font-size: 26rpx;
+  line-height: 1.45;
+}
+
+.share-video-error {
+  margin-bottom: 18rpx;
+  padding: 18rpx 20rpx;
+  border-radius: 16rpx;
+  background: #fff1f3;
+  color: #b84a5a;
+  font-size: 25rpx;
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+.share-video-segments {
+  display: flex;
+  flex-direction: column;
+  gap: 12rpx;
+}
+
+.share-video-segment {
+  padding: 18rpx 20rpx;
+  border: 2rpx solid #e8d8c3;
+  border-radius: 16rpx;
+  background: #ffffff;
+  box-shadow: 0 6rpx 18rpx rgba(64, 43, 24, 0.04);
+  box-sizing: border-box;
+  transition-property: transform, background-color, box-shadow;
+  transition-duration: 140ms;
+  transition-timing-function: ease;
+}
+
+.share-video-segment:active {
+  transform: scale(0.96);
+}
+
+.share-video-segment.selected {
+  border-color: #c56855;
+  background: #fff3ef;
+  box-shadow: 0 8rpx 22rpx rgba(166, 75, 62, 0.12);
+}
+
+.share-video-segment.disabled {
+  opacity: 0.58;
+}
+
+.share-video-segment-text {
+  display: block;
+  color: #3a2119;
+  font-size: 28rpx;
+  line-height: 1.55;
+  word-break: break-word;
+}
+
+.share-video-segment-meta {
+  display: block;
+  margin-top: 8rpx;
+  color: #8f7d72;
+  font-size: 23rpx;
+  font-weight: 700;
+  line-height: 1.35;
+  font-variant-numeric: tabular-nums;
+}
+
+.share-video-selection {
+  margin-top: 18rpx;
+  padding: 18rpx;
+  border-radius: 16rpx;
+  background: #fcf7ed;
+}
+
+.share-video-selection-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16rpx;
+}
+
+.share-video-selection-text {
+  display: block;
+  margin-top: 10rpx;
+  color: #3a2119;
+  font-size: 27rpx;
+  line-height: 1.55;
+  word-break: break-word;
+}
+
+.share-video-selection-meta {
+  display: block;
+  margin-top: 8rpx;
+  color: #a64b3e;
+  font-size: 24rpx;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.share-video-actions {
+  justify-content: flex-start;
+}
+
+.share-video-job {
+  margin-top: 18rpx;
+  padding: 18rpx 20rpx;
+  border-radius: 16rpx;
+  background: #f8f5f1;
+}
+
+.share-video-job.succeeded {
+  background: #edf6ef;
+}
+
+.share-video-job.failed {
+  background: #fff1f3;
+}
+
+.share-video-job-title {
+  display: block;
+  color: #7b4a40;
+  font-size: 26rpx;
+  font-weight: 850;
+  line-height: 1.4;
+}
+
+.share-video-job.succeeded .share-video-job-title {
+  color: #2f7a54;
+}
+
+.share-video-job.failed .share-video-job-title {
+  color: #b84a5a;
+}
+
+.share-video-job-meta {
+  display: block;
+  margin-top: 6rpx;
+  color: #7b6f68;
+  font-size: 23rpx;
+  line-height: 1.35;
+}
+
+.share-video-preview {
+  width: 100%;
+  height: 360rpx;
+  margin-top: 18rpx;
+  border-radius: 16rpx;
+  overflow: hidden;
+  background: #2b1713;
+  box-shadow: 0 10rpx 28rpx rgba(64, 43, 24, 0.08);
 }
 
 .more-actions-card {

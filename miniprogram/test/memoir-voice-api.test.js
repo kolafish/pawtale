@@ -396,6 +396,139 @@ test("voice search query parse API posts text and selected AI model", async () =
   delete global.wx;
 });
 
+test("share video APIs encode routes and download preview with session cookie", async () => {
+  const requests = [];
+  const downloads = [];
+  const shareVideoJob = {
+    id: "job-1",
+    project_id: "project/1",
+    utterance_id: "utterance/1",
+    audio_file_id: "audio-1",
+    status: "succeeded",
+    selected_text: "爷爷退休后还在帮公司做事。",
+    start_char: 0,
+    end_char: 13,
+    start_ms: 0,
+    end_ms: 4200,
+    duration_ms: 4200,
+    style: "warm_minimal",
+    video_mime_type: "video/mp4",
+    video_size_bytes: 4096,
+    download_url: "/api/mobile/memoir/share-video/jobs/job-1/download",
+    error_message: "",
+    created_at: "2026-07-01T08:00:00.000Z",
+    updated_at: "2026-07-01T08:00:02.000Z",
+    completed_at: "2026-07-01T08:00:02.000Z",
+  };
+  global.wx = {
+    getStorageSync(key) {
+      if (key === "pawtale_backend_config") {
+        return {
+          httpBaseUrl: "http://backend.local:8000/",
+          devEmail: "local@example.com",
+          devPassword: "secret",
+        };
+      }
+      if (key === "pawtale_backend_cookie") {
+        return "pawtale_session=abc";
+      }
+      return "";
+    },
+    getExtConfigSync() {
+      return {};
+    },
+    setStorageSync() {},
+    removeStorageSync() {},
+    request(options) {
+      requests.push(options);
+      if (options.url.endsWith("/api/auth/me")) {
+        options.success({ statusCode: 200, data: { id: "user-1" }, cookies: [], header: {} });
+        return;
+      }
+      if (options.url.endsWith("/share-video/context")) {
+        options.success({
+          statusCode: 200,
+          data: {
+            utterance_id: "utterance/1",
+            audio_file_id: "audio-1",
+            transcript_source: "edited",
+            transcript_text: "爷爷退休后还在帮公司做事。",
+            text_hash: "hash-1",
+            duration_ms: 4200,
+            alignment_strategy: "provider_words",
+            alignment_confidence: 0.9,
+            min_select_ms: 3000,
+            max_select_ms: 90000,
+            segments: [
+              {
+                index: 0,
+                text: "爷爷退休后还在帮公司做事。",
+                start_char: 0,
+                end_char: 13,
+                start_ms: 0,
+                end_ms: 4200,
+                confidence: 0.9,
+                selectable: true,
+              },
+            ],
+          },
+          cookies: [],
+          header: {},
+        });
+        return;
+      }
+      options.success({ statusCode: 200, data: shareVideoJob, cookies: [], header: {} });
+    },
+    downloadFile(options) {
+      downloads.push(options);
+      options.success({ statusCode: 200, tempFilePath: "/tmp/share.mp4", header: {}, errMsg: "downloadFile:ok" });
+    },
+  };
+  resetMemoirVoiceApiModules();
+  const {
+    createMemoirTranscriptShareVideoJob,
+    downloadMemoirShareVideoJob,
+    getMemoirShareVideoJob,
+    getMemoirTranscriptShareVideoContext,
+  } = require("../services/memoir-voice-api.ts");
+
+  const context = await getMemoirTranscriptShareVideoContext("utterance/1");
+  const created = await createMemoirTranscriptShareVideoJob("utterance/1", 0, 13);
+  const detail = await getMemoirShareVideoJob("job/1");
+  const path = await downloadMemoirShareVideoJob(shareVideoJob);
+
+  const apiRequests = requests.filter((request) => request.url.includes("/api/mobile/memoir/"));
+  assert.equal(
+    apiRequests[0].url,
+    "http://backend.local:8000/api/mobile/memoir/voice-transcripts/utterance%2F1/share-video/context",
+  );
+  assert.equal(apiRequests[0].method, "GET");
+  assert.equal(
+    apiRequests[1].url,
+    "http://backend.local:8000/api/mobile/memoir/voice-transcripts/utterance%2F1/share-video/jobs",
+  );
+  assert.equal(apiRequests[1].method, "POST");
+  assert.deepEqual(apiRequests[1].data, {
+    start_char: 0,
+    end_char: 13,
+    style: "warm_minimal",
+    style_options: {},
+  });
+  assert.equal(
+    apiRequests[2].url,
+    "http://backend.local:8000/api/mobile/memoir/share-video/jobs/job%2F1",
+  );
+  assert.equal(apiRequests[2].method, "GET");
+  assert.equal(context.segments[0].text, "爷爷退休后还在帮公司做事。");
+  assert.equal(created.status, "succeeded");
+  assert.equal(detail.download_url, "/api/mobile/memoir/share-video/jobs/job-1/download");
+  assert.equal(path, "/tmp/share.mp4");
+  assert.equal(downloads[0].url, "http://backend.local:8000/api/mobile/memoir/share-video/jobs/job-1/download");
+  assert.equal(downloads[0].header.Cookie, "pawtale_session=abc");
+  assert.equal(downloads[0].timeout, 60000);
+  delete global.wx;
+});
+
 test("book service APIs encode backend routes and selected AI model", async () => {
   const requests = [];
   installBookApiWxMock({ requests });
