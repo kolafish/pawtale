@@ -3,6 +3,7 @@ require("./register-ts");
 const assert = require("node:assert/strict");
 const test = require("node:test");
 const { loadPageModule, mockModule, pageContext } = require("./page-harness");
+const { ApiError } = require("../services/request.ts");
 
 function sampleTranscript(id, overrides = {}) {
   return {
@@ -531,6 +532,47 @@ test("transcript detail page creates share video from selected corrected segment
   assert.equal(shareCalls[0].filePath, "/tmp/share-video.mp4");
   assert.equal(shareCalls[0].fileName, "爷爷退休后仍帮公司做事.mp4");
   assert.equal(context.data.shareVideoStatusText, "已打开微信分享");
+});
+
+test("transcript detail page retries transient share video status refresh", async () => {
+  const pollCalls = [];
+  const downloads = [];
+  const { page } = loadTranscriptDetailPage({
+    voiceApiExports: {
+      getMemoirVoiceTranscript: async (id) => sampleTranscript(id),
+      getMemoirShareVideoJob: async (jobId) => {
+        pollCalls.push(jobId);
+        if (pollCalls.length === 1) {
+          throw new ApiError(0, "request:fail timeout", {});
+        }
+        return sampleShareVideoJob();
+      },
+      downloadMemoirShareVideoJob: async (job) => {
+        downloads.push(job.id);
+        return "/tmp/share-video.mp4";
+      },
+    },
+  });
+  const context = pageContext(page);
+
+  await page.onLoad.call(context, { id: "utterance-share-poll" });
+  context.shareVideoPollToken = 1;
+
+  await page.refreshShareVideoJob.call(context, "job-1", 1);
+
+  assert.deepEqual(pollCalls, ["job-1"]);
+  assert.equal(context.data.shareVideoPolling, true);
+  assert.equal(context.data.shareVideoStatusText, "视频状态刷新中断，正在重试");
+  assert.deepEqual(downloads, []);
+
+  page.clearShareVideoPollTimer.call(context);
+  await page.refreshShareVideoJob.call(context, "job-1", 1);
+
+  assert.deepEqual(pollCalls, ["job-1", "job-1"]);
+  assert.deepEqual(downloads, ["job-1"]);
+  assert.equal(context.data.shareVideoJob.status, "succeeded");
+  assert.equal(context.data.shareVideoStatusText, "视频已生成，可以预览");
+  assert.equal(context.data.shareVideoPreviewPath, "/tmp/share-video.mp4");
 });
 
 test("transcript detail page plays question and answer audio separately", async () => {

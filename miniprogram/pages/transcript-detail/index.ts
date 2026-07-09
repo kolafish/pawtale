@@ -173,6 +173,7 @@ interface TranscriptDetailData {
 
 const COLLAPSIBLE_QUESTION_CHAR_COUNT = 72;
 const SHARE_VIDEO_POLL_INTERVAL_MS = 1500;
+const SHARE_VIDEO_MAX_POLL_FAILURES = 3;
 type TranscriptDetailAudioKind = "question" | "answer";
 
 function positiveSeconds(value: unknown): number {
@@ -386,6 +387,13 @@ function shareVideoJobStatusText(job: MemoirShareVideoJob): string {
   return "视频任务已创建，等待生成";
 }
 
+function isTransientShareVideoPollError(error: unknown): boolean {
+  if (error instanceof ApiError) {
+    return error.statusCode === 0 || error.statusCode >= 500;
+  }
+  return true;
+}
+
 function shareVideoFileName(item: TranscriptDetailItemView | null): string {
   const title = (item?.titleText || item?.summary_title || "回忆录片段")
     .replace(/[\\/:*?"<>|]/g, "")
@@ -487,6 +495,7 @@ definePage<TranscriptDetailData>()({
   voiceEditToken: 0,
   shareVideoPollTimer: null as ReturnType<typeof setTimeout> | null,
   shareVideoPollToken: 0,
+  shareVideoPollFailureCount: 0,
   shareVideoFileCache: {} as Record<string, string>,
 
   data: {
@@ -631,6 +640,7 @@ definePage<TranscriptDetailData>()({
 
   cancelShareVideoPolling() {
     this.clearShareVideoPollTimer();
+    this.shareVideoPollFailureCount = 0;
     this.shareVideoPollToken += 1;
     if (this.data.shareVideoPolling) {
       this.setData({ shareVideoPolling: false });
@@ -832,6 +842,7 @@ definePage<TranscriptDetailData>()({
     this.shareVideoFileCache = {};
     const token = this.shareVideoPollToken + 1;
     this.shareVideoPollToken = token;
+    this.shareVideoPollFailureCount = 0;
     this.setData({
       shareVideoCreating: true,
       shareVideoPolling: false,
@@ -879,6 +890,7 @@ definePage<TranscriptDetailData>()({
     this.clearShareVideoPollTimer();
     const token = this.shareVideoPollToken + 1;
     this.shareVideoPollToken = token;
+    this.shareVideoPollFailureCount = 0;
     this.scheduleShareVideoPoll(jobId, token);
   },
 
@@ -904,12 +916,26 @@ definePage<TranscriptDetailData>()({
       if (requestToken !== this.shareVideoPollToken) {
         return;
       }
+      this.shareVideoPollFailureCount = 0;
       await this.applyShareVideoJob(job, requestToken);
     } catch (error) {
       if (requestToken !== this.shareVideoPollToken) {
         return;
       }
+      const failureCount = this.shareVideoPollFailureCount + 1;
+      this.shareVideoPollFailureCount = failureCount;
+      if (isTransientShareVideoPollError(error) && failureCount < SHARE_VIDEO_MAX_POLL_FAILURES) {
+        this.setData({
+          shareVideoPolling: true,
+          shareVideoError: "",
+          shareVideoStatusText: "视频状态刷新中断，正在重试",
+          shareVideoStatusClass: "running",
+        });
+        this.scheduleShareVideoPoll(jobId, requestToken);
+        return;
+      }
       this.clearShareVideoPollTimer();
+      this.shareVideoPollFailureCount = 0;
       this.setData({
         shareVideoPolling: false,
         shareVideoError: error instanceof Error ? error.message : "视频生成状态刷新失败",
