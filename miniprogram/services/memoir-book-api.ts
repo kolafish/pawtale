@@ -6,6 +6,8 @@ import type {
   MemoirBookChapterDraftUpdateRequest,
   MemoirBookChapterTitleGenerateRequest,
   MemoirBookChapterTitleUpdateRequest,
+  MemoirBookImagePlacementCreateRequest,
+  MemoirBookImagePlacementUpdateRequest,
   MemoirBookOutputChapterEditorialCopyUpdateRequest,
   MemoirBookOutput,
   MemoirBookOutputEditorialCopyRegenerateRequest,
@@ -28,6 +30,9 @@ import type {
   MemoirBookVoiceCommandParseRequest,
   MemoirBookVoiceCommandParseResponse,
   MemoirAutomationEvent,
+  MemoirImageAsset,
+  MemoirImageAssetListResponse,
+  MemoirImageAssetUpdateRequest,
 } from "../domain/voice-chat";
 import {
   ensureMemoirBackendSession,
@@ -46,6 +51,11 @@ function bookPlanPath(projectId: string, suffix = ""): string {
 
 function bookPlanChapterPath(projectId: string, chapterId: string, suffix = ""): string {
   return bookPlanPath(projectId, `/chapters/${encodeURIComponent(chapterId)}${suffix}`);
+}
+
+function imageAssetPath(projectId: string, assetId = "", suffix = ""): string {
+  const assetPath = assetId ? `/${encodeURIComponent(assetId)}` : "";
+  return memoirProjectPath(projectId, `/image-assets${assetPath}${suffix}`);
 }
 
 export function getMemoirBookPlan(projectId: string): Promise<MemoirBookPlan> {
@@ -122,6 +132,109 @@ export function applyMemoirBookPlanStructureCommand(
 
 export function getMemoirBookSourceCoverage(projectId: string): Promise<MemoirBookSourceCoverage> {
   return memoirRequest<MemoirBookSourceCoverage>(memoirProjectPath(projectId, "/book-source-coverage"));
+}
+
+export function listMemoirImageAssets(projectId: string): Promise<MemoirImageAssetListResponse> {
+  return memoirRequest<MemoirImageAssetListResponse>(imageAssetPath(projectId));
+}
+
+export function updateMemoirImageAsset(
+  projectId: string,
+  assetId: string,
+  data: MemoirImageAssetUpdateRequest,
+): Promise<MemoirImageAsset> {
+  return memoirRequest<MemoirImageAsset>(
+    imageAssetPath(projectId, assetId),
+    {
+      method: "PATCH",
+      data,
+    },
+  );
+}
+
+export async function deleteMemoirImageAsset(projectId: string, assetId: string): Promise<void> {
+  await memoirRequest<unknown>(
+    imageAssetPath(projectId, assetId),
+    {
+      method: "DELETE",
+    },
+  );
+}
+
+export function createMemoirBookImagePlacement(
+  projectId: string,
+  assetId: string,
+  data: MemoirBookImagePlacementCreateRequest,
+): Promise<MemoirImageAsset> {
+  return memoirRequest<MemoirImageAsset>(
+    imageAssetPath(projectId, assetId, "/placements"),
+    {
+      method: "POST",
+      data,
+    },
+  );
+}
+
+export function updateMemoirBookImagePlacement(
+  projectId: string,
+  assetId: string,
+  placementId: string,
+  data: MemoirBookImagePlacementUpdateRequest,
+): Promise<MemoirImageAsset> {
+  return memoirRequest<MemoirImageAsset>(
+    imageAssetPath(projectId, assetId, `/placements/${encodeURIComponent(placementId)}`),
+    {
+      method: "PATCH",
+      data,
+    },
+  );
+}
+
+export function deleteMemoirBookImagePlacement(
+  projectId: string,
+  assetId: string,
+  placementId: string,
+): Promise<MemoirImageAsset> {
+  return memoirRequest<MemoirImageAsset>(
+    imageAssetPath(projectId, assetId, `/placements/${encodeURIComponent(placementId)}`),
+    {
+      method: "DELETE",
+    },
+  );
+}
+
+export function memoirImageAssetFileUrl(projectId: string, assetId: string, thumbnail = false): string {
+  const config = readBackendConfig();
+  const suffix = thumbnail ? "?variant=thumbnail" : "";
+  return `${cleanBaseUrl(config.httpBaseUrl)}${imageAssetPath(projectId, assetId, `/file${suffix}`)}`;
+}
+
+export async function downloadMemoirImageAssetFile(
+  projectId: string,
+  assetId: string,
+  thumbnail = false,
+): Promise<string> {
+  await ensureMemoirBackendSession();
+  const cookie = readSessionCookie();
+  const url = memoirImageAssetFileUrl(projectId, assetId, thumbnail);
+  return new Promise((resolve, reject) => {
+    wx.downloadFile({
+      url,
+      header: {
+        ...(cookie ? { Cookie: cookie } : {}),
+      },
+      success: (result) => {
+        if (result.statusCode >= 200 && result.statusCode < 300) {
+          resolve(result.tempFilePath);
+          return;
+        }
+        reject(new ApiError(result.statusCode, "图片下载失败", result));
+      },
+      fail: (error) => {
+        reject(new ApiError(0, downloadErrorMessage(error.errMsg, url), error));
+      },
+    });
+  });
 }
 
 export function assignMemoirBookSources(

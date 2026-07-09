@@ -96,6 +96,18 @@
     </view>
   </view>
 
+  <view class="image-assets-entry" bindtap="openImageAssetsPage">
+    <view class="image-assets-entry-copy">
+      <view class="image-assets-entry-title-row">
+        <text class="image-assets-entry-title">图片素材</text>
+        <text class="image-assets-entry-count">{{imageAssetLoading ? "同步中" : imageAssetTotal + " 张"}}</text>
+      </view>
+      <text class="image-assets-entry-meta">{{imageAssetSummaryText}}</text>
+      <text class="image-assets-entry-note">统一查看生成图片，选择章节插图或书末图录。</text>
+    </view>
+    <text class="image-assets-entry-action">管理</text>
+  </view>
+
   <view wx:if="{{automationEventLoading || automationEventError || automationEventItems.length}}" class="automation-panel">
     <view class="automation-head">
       <view>

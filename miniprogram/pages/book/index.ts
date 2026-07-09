@@ -41,6 +41,7 @@ import {
   getMemoirBookOutput,
   getMemoirBookPlan,
   getMemoirBookSourceCoverage,
+  listMemoirImageAssets,
   listMemoirAutomationEvents,
   updateMemoirBookOutputChapterEditorialCopy,
   updateMemoirBookChapterTitle,
@@ -359,6 +360,12 @@ definePage<BookData>()({
     automationEventExpandedTargets: {},
     automationEventLoading: false,
     automationEventError: "",
+    imageAssetLoading: false,
+    imageAssetTotal: 0,
+    imageAssetReadyCount: 0,
+    imageAssetIncludedCount: 0,
+    imageAssetUnusedCount: 0,
+    imageAssetSummaryText: "还没有图片素材",
   },
 
   async onShow() {
@@ -392,6 +399,7 @@ definePage<BookData>()({
         this.applySourceCoverage(null);
         this.applyBookOutput(null);
         this.applyAutomationEvents([]);
+        this.applyImageAssetSummary(null);
         return;
       }
       await this.loadPlanForProject(projectId);
@@ -412,8 +420,10 @@ definePage<BookData>()({
         this.loadSourceCoverage(projectId),
         this.loadAutomationEvents(projectId),
       ]);
+      const imageAssets = await this.loadImageAssetSummary(projectId);
       this.applySourceCoverage(coverage);
       this.applyAutomationEvents(automationEvents);
+      this.applyImageAssetSummary(imageAssets);
       const plan = await getMemoirBookPlan(projectId);
       let draftsByChapterId: Record<string, MemoirBookChapterDraft | null> = {};
       let output: MemoirBookOutput | null = null;
@@ -427,10 +437,12 @@ definePage<BookData>()({
       this.applyPlan(plan, draftsByChapterId);
       this.applyBookOutput(output);
       this.applyAutomationEvents(automationEvents);
+      this.applyImageAssetSummary(imageAssets);
     } catch (error) {
       if (error instanceof ApiError && error.statusCode === 404) {
         this.applyPlan(null);
         this.applyBookOutput(null);
+        this.applyImageAssetSummary(null);
         return;
       }
       throw error;
@@ -545,6 +557,33 @@ definePage<BookData>()({
     }
   },
 
+  async loadImageAssetSummary(projectId: string) {
+    this.setData({ imageAssetLoading: true });
+    try {
+      return await listMemoirImageAssets(projectId);
+    } catch (_error) {
+      return null;
+    } finally {
+      this.setData({ imageAssetLoading: false });
+    }
+  },
+
+  applyImageAssetSummary(response: Awaited<ReturnType<typeof listMemoirImageAssets>> | null) {
+    const total = response?.total || 0;
+    const included = response?.included_count || 0;
+    const unused = response?.unused_count || 0;
+    const summary = total
+      ? `${total} 张 · ${included} 张已入书 · ${unused} 张待选择`
+      : "生成分享视频背景后，会自动收集到这里";
+    this.setData({
+      imageAssetTotal: total,
+      imageAssetReadyCount: response?.ready_count || 0,
+      imageAssetIncludedCount: included,
+      imageAssetUnusedCount: unused,
+      imageAssetSummaryText: summary,
+    });
+  },
+
   applyPlan(plan: MemoirBookPlan | null, draftsByChapterId: Record<string, MemoirBookChapterDraft | null> = {}) {
     const chapters = plan
       ? buildChapterViews(plan, draftsByChapterId, this.data.sourceCoverage, this.data.splitSourceSelections)
@@ -584,6 +623,16 @@ definePage<BookData>()({
     this.setData({
       ...outputData,
       bookPreviewChaptersExpanded: false,
+    });
+  },
+
+  openImageAssetsPage() {
+    if (!this.data.projectId) {
+      this.setData({ error: "请先创建回忆录" });
+      return;
+    }
+    wx.navigateTo({
+      url: `/pages/image-assets/index?projectId=${encodeURIComponent(this.data.projectId)}`,
     });
   },
 

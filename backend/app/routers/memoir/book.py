@@ -1,5 +1,7 @@
+from pathlib import Path
+
 from fastapi import APIRouter, Depends, Query
-from fastapi.responses import Response
+from fastapi.responses import FileResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_user
@@ -47,6 +49,13 @@ from app.schemas.memoir_book import (
     MemoirAutomationEventResponse,
     MemoirSemanticStateResponse,
 )
+from app.schemas.memoir_images import (
+    MemoirBookImagePlacementCreateRequest,
+    MemoirBookImagePlacementUpdateRequest,
+    MemoirImageAssetListResponse,
+    MemoirImageAssetResponse,
+    MemoirImageAssetUpdateRequest,
+)
 from app.services.memoir import book_drafts as memoir_book_drafts
 from app.services.memoir import book_generation_jobs as memoir_book_generation_jobs
 from app.services.memoir import book_outputs as memoir_book_outputs
@@ -59,6 +68,7 @@ from app.services.memoir import source_review_queue as memoir_source_review_queu
 from app.services.memoir import source_router as memoir_source_router
 from app.services.memoir import book_voice_commands as memoir_book_voice_commands
 from app.services.memoir import semantic_inspector as memoir_semantic_inspector
+from app.services.memoir import image_assets as memoir_image_assets
 
 
 router = APIRouter()
@@ -349,6 +359,139 @@ async def get_mobile_memoir_semantic_state(
         db,
         user_id=current_user.id,
         project_id=project_id,
+    )
+
+
+@router.get("/projects/{project_id}/image-assets", response_model=MemoirImageAssetListResponse)
+async def list_mobile_memoir_image_assets(
+    project_id: str,
+    include_deleted: bool = False,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await memoir_image_assets.list_image_assets(
+        db,
+        user_id=current_user.id,
+        project_id=project_id,
+        include_deleted=include_deleted,
+    )
+
+
+@router.patch("/projects/{project_id}/image-assets/{asset_id}", response_model=MemoirImageAssetResponse)
+async def update_mobile_memoir_image_asset(
+    project_id: str,
+    asset_id: str,
+    req: MemoirImageAssetUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await memoir_image_assets.update_image_asset(
+        db,
+        user_id=current_user.id,
+        project_id=project_id,
+        asset_id=asset_id,
+        req=req,
+    )
+
+
+@router.delete("/projects/{project_id}/image-assets/{asset_id}", status_code=204)
+async def delete_mobile_memoir_image_asset(
+    project_id: str,
+    asset_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    await memoir_image_assets.delete_image_asset(
+        db,
+        user_id=current_user.id,
+        project_id=project_id,
+        asset_id=asset_id,
+    )
+    return Response(status_code=204)
+
+
+@router.get("/projects/{project_id}/image-assets/{asset_id}/file")
+async def get_mobile_memoir_image_asset_file(
+    project_id: str,
+    asset_id: str,
+    variant: str = "",
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    asset, path = await memoir_image_assets.load_image_asset_file(
+        db,
+        user_id=current_user.id,
+        project_id=project_id,
+        asset_id=asset_id,
+        thumbnail=variant == "thumbnail",
+    )
+    return FileResponse(
+        path,
+        media_type=asset.mime_type or "image/jpeg",
+        filename=f"{asset.id}{Path(path).suffix}",
+    )
+
+
+@router.post(
+    "/projects/{project_id}/image-assets/{asset_id}/placements",
+    response_model=MemoirImageAssetResponse,
+    status_code=201,
+)
+async def create_mobile_memoir_image_placement(
+    project_id: str,
+    asset_id: str,
+    req: MemoirBookImagePlacementCreateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await memoir_image_assets.create_image_placement(
+        db,
+        user_id=current_user.id,
+        project_id=project_id,
+        asset_id=asset_id,
+        req=req,
+    )
+
+
+@router.patch(
+    "/projects/{project_id}/image-assets/{asset_id}/placements/{placement_id}",
+    response_model=MemoirImageAssetResponse,
+)
+async def update_mobile_memoir_image_placement(
+    project_id: str,
+    asset_id: str,
+    placement_id: str,
+    req: MemoirBookImagePlacementUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await memoir_image_assets.update_image_placement(
+        db,
+        user_id=current_user.id,
+        project_id=project_id,
+        asset_id=asset_id,
+        placement_id=placement_id,
+        req=req,
+    )
+
+
+@router.delete(
+    "/projects/{project_id}/image-assets/{asset_id}/placements/{placement_id}",
+    response_model=MemoirImageAssetResponse,
+)
+async def delete_mobile_memoir_image_placement(
+    project_id: str,
+    asset_id: str,
+    placement_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await memoir_image_assets.delete_image_placement(
+        db,
+        user_id=current_user.id,
+        project_id=project_id,
+        asset_id=asset_id,
+        placement_id=placement_id,
     )
 
 

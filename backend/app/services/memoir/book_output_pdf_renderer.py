@@ -115,9 +115,19 @@ class PDFDecorationCommand:
 
 
 @dataclass
+class PDFImageCommand:
+    path: Path
+    x: float
+    y: float
+    width: float
+    height: float
+
+
+@dataclass
 class PDFPage:
     commands: list[PDFTextCommand]
     decorations: list[PDFDecorationCommand] = field(default_factory=list)
+    images: list[PDFImageCommand] = field(default_factory=list)
     background_color: PDFColor | None = None
     background_image_path: Path | None = None
     text_color: PDFColor | None = None
@@ -379,6 +389,9 @@ class PDFBookBuilder:
 
     def _ensure_space(self, line_count: int = 1) -> None:
         required = max(1, line_count) * self.layout.line_height
+        self._ensure_space_height(required)
+
+    def _ensure_space_height(self, required: float) -> None:
         if not self.current_page or self.y - required < self.layout.margin_bottom:
             self.new_page(
                 self.current_section or "正文",
@@ -388,6 +401,42 @@ class PDFBookBuilder:
                 continuation_show_header=self.continuation_show_header,
                 continuation_show_footer=self.continuation_show_footer,
             )
+
+    def add_image(
+        self,
+        image_path: Path,
+        *,
+        caption: str = "",
+        display_size: str = "full_width",
+        max_height: int | None = None,
+    ) -> bool:
+        if not image_path.exists() or not image_path.is_file():
+            return False
+        width_ratio = 1.0
+        if display_size == "half_width":
+            width_ratio = 0.68
+        elif display_size == "inline":
+            width_ratio = 0.82
+        box_width = int((self.layout.page_width - self.layout.margin_x * 2) * width_ratio)
+        box_height = max_height or min(220, int(self.layout.page_height * 0.34))
+        caption_height = self.layout.line_height if caption else 0
+        self._ensure_space_height(box_height + caption_height + 18)
+        page = self._ensure_page()
+        x = self.layout.margin_x + int((self.layout.page_width - self.layout.margin_x * 2 - box_width) / 2)
+        y = self.y - box_height
+        page.images.append(PDFImageCommand(path=image_path, x=x, y=y, width=box_width, height=box_height))
+        self.y = y - 7
+        if caption:
+            self.add_text(
+                caption,
+                font_size=self.layout.small_font_size,
+                line_height=self.layout.line_height,
+                max_units=max(12, self.layout.max_line_units - 4),
+                spacing_after=8,
+            )
+        else:
+            self.y -= 8
+        return True
 
     def add_spacer(self, lines: float = 1.0) -> None:
         self._ensure_space(1)
@@ -744,6 +793,17 @@ def _render_pdf_pages(
             )
         for decoration in page.decorations:
             _draw_pdf_decoration(pdf, decoration)
+        for image in page.images:
+            pdf.drawImage(
+                str(image.path),
+                image.x,
+                image.y,
+                width=image.width,
+                height=image.height,
+                preserveAspectRatio=True,
+                anchor="c",
+                mask="auto",
+            )
         if page.anchor:
             pdf.bookmarkPage(page.anchor)
             if page.outline_title:

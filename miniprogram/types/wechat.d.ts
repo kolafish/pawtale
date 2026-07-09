@@ -318,6 +318,14 @@ declare namespace WechatMiniprogram {
     complete?(result: GeneralCallbackResult): void;
   }
 
+  interface PreviewImageOption {
+    current?: string;
+    urls: string[];
+    success?(result: GeneralCallbackResult): void;
+    fail?(result: GeneralCallbackResult): void;
+    complete?(result: GeneralCallbackResult): void;
+  }
+
   interface Wx {
     env: {
       USER_DATA_PATH: string;
@@ -334,6 +342,7 @@ declare namespace WechatMiniprogram {
     requirePrivacyAuthorize?(option: PrivacyAuthorizeOption): void;
     showShareMenu?(option: ShowShareMenuOption): void;
     shareFileMessage?(option: ShareFileMessageOption): void;
+    previewImage(option: PreviewImageOption): void;
     setInnerAudioOption?(option: InnerAudioOption): void;
     navigateTo(option: NavigateOption): void;
     redirectTo(option: NavigateOption): void;

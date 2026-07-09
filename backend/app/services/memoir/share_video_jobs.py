@@ -24,6 +24,10 @@ from app.models.memoir import MemoirMaterialShareVideo
 from app.models.projects import Project
 from app.schemas.memoir_voice import MemoirShareVideoJobCreateRequest, MemoirShareVideoJobResponse
 from app.services.memoir.audio_files import audio_file_path
+from app.services.memoir.image_assets import (
+    RegisteredShareVideoBackground,
+    register_share_video_background_asset,
+)
 from app.services.memoir.share_video_backgrounds import (
     DEFAULT_SHARE_VIDEO_BACKGROUND_MODE,
     DEFAULT_SHARE_VIDEO_BACKGROUND_STYLE,
@@ -516,6 +520,18 @@ async def run_share_video_job_with_session(db: AsyncSession, job_id: str) -> Non
                         first_asset_provider = first_asset_provider or asset.provider
                         first_asset_model = first_asset_model or asset.model
                         valid_paths.append(asset.path)
+                        await register_share_video_background_asset(
+                            db,
+                            job=job,
+                            background=asset,
+                            context=RegisteredShareVideoBackground(
+                                source_quote=scene.evidence_quote or job.selected_text,
+                                scene_index=scene.index,
+                                scene_title=scene.title,
+                                scene_visual_summary=scene.visual_summary,
+                                evidence_quote=scene.evidence_quote,
+                            ),
+                        )
                         scene_info.update({
                             "background_status": "ready",
                             "background_storage_path": asset.storage_path,
@@ -584,6 +600,14 @@ async def run_share_video_job_with_session(db: AsyncSession, job_id: str) -> Non
                     })
                 else:
                     background_image_path = background.path
+                    await register_share_video_background_asset(
+                        db,
+                        job=job,
+                        background=background,
+                        context=RegisteredShareVideoBackground(
+                            source_quote=job.selected_text,
+                        ),
+                    )
                     metadata.update({
                         "background_status": "ready",
                         "background_scene_count": 1,

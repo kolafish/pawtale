@@ -386,6 +386,19 @@ export interface MemoirTranscriptShareVideoContext {
 }
 
 export type MemoirShareVideoJobStatus = "pending" | "running" | "succeeded" | "failed";
+export type MemoirImageAssetStatus = "pending" | "running" | "ready" | "failed" | "deleted";
+export type MemoirImageAssetSourceType =
+  | "share_video_background"
+  | "chapter_illustration"
+  | "utterance_illustration"
+  | "cover_candidate"
+  | "manual_upload";
+export type MemoirBookImagePlacementType =
+  | "chapter_opening"
+  | "chapter_inline"
+  | "appendix"
+  | "cover"
+  | "back_cover";
 
 export interface MemoirShareVideoJob {
   id: string;
@@ -416,6 +429,82 @@ export interface MemoirShareVideoJob {
   created_at: string;
   updated_at: string;
   completed_at?: string | null;
+}
+
+export interface MemoirBookImagePlacement {
+  id: string;
+  project_id: string;
+  image_asset_id: string;
+  placement_type: MemoirBookImagePlacementType;
+  chapter_id?: string | null;
+  chapter_title: string;
+  caption_override: string;
+  display_size: string;
+  sort_order: number;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MemoirImageAsset {
+  id: string;
+  project_id: string;
+  status: MemoirImageAssetStatus;
+  source_type: MemoirImageAssetSourceType;
+  source_signature: string;
+  storage_path: string;
+  thumbnail_storage_path: string;
+  file_url: string;
+  thumbnail_url: string;
+  mime_type: string;
+  size_bytes?: number | null;
+  width?: number | null;
+  height?: number | null;
+  title: string;
+  caption: string;
+  alt_text: string;
+  style_id: string;
+  prompt_hash: string;
+  prompt_version: string;
+  provider: string;
+  model: string;
+  source_utterance_id?: string | null;
+  source_chapter_id?: string | null;
+  source_chapter_title: string;
+  share_video_job_id?: string | null;
+  source_quote: string;
+  metadata_json: Record<string, unknown>;
+  include_in_book: boolean;
+  placements: MemoirBookImagePlacement[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MemoirImageAssetListResponse {
+  items: MemoirImageAsset[];
+  total: number;
+  ready_count: number;
+  included_count: number;
+  unused_count: number;
+}
+
+export interface MemoirImageAssetUpdateRequest {
+  title?: string | null;
+  caption?: string | null;
+  alt_text?: string | null;
+}
+
+export interface MemoirBookImagePlacementCreateRequest {
+  placement_type?: MemoirBookImagePlacementType;
+  chapter_id?: string | null;
+  caption_override?: string | null;
+  display_size?: "full_width" | "half_width" | "inline";
+}
+
+export interface MemoirBookImagePlacementUpdateRequest {
+  caption_override?: string | null;
+  display_size?: "full_width" | "half_width" | "inline" | null;
+  enabled?: boolean | null;
 }
 
 export interface MemoirVoiceSearchTranscriptionResponse {
@@ -883,6 +972,18 @@ export interface MemoirBookManuscriptSourceRef {
   quote: string;
 }
 
+export interface MemoirBookManuscriptIllustration {
+  image_asset_id: string;
+  storage_path: string;
+  mime_type: string;
+  caption: string;
+  alt_text: string;
+  placement: MemoirBookImagePlacementType;
+  display_size: string;
+  source_quote: string;
+  disclosure: string;
+}
+
 export interface MemoirBookManuscriptChapter {
   chapter_id: string;
   index: number;
@@ -896,6 +997,7 @@ export interface MemoirBookManuscriptChapter {
   uncertain_facts: MemoirBookManuscriptUnconfirmedFact[];
   content: string;
   source_refs: MemoirBookManuscriptSourceRef[];
+  illustrations: MemoirBookManuscriptIllustration[];
 }
 
 export interface MemoirBookManuscriptRenderSettings {
@@ -924,6 +1026,7 @@ export interface MemoirBookManuscript {
   front_matter: MemoirBookManuscriptSection[];
   table_of_contents: MemoirBookOutputTableOfContentsItem[];
   chapters: MemoirBookManuscriptChapter[];
+  image_appendix: MemoirBookManuscriptIllustration[];
   back_matter: MemoirBookManuscriptBackMatter;
   render_settings: MemoirBookManuscriptRenderSettings;
 }

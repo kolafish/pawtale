@@ -1,0 +1,124 @@
+<view class="image-assets-page">
+  <view class="top-row">
+    <view class="title-block">
+      <text class="page-title">图片素材</text>
+      <text class="page-meta">统一管理生成图片，选择可入书的插图</text>
+    </view>
+  </view>
+
+  <view wx:if="{{error}}" class="error">{{error}}</view>
+
+  <view class="summary-card">
+    <view class="summary-item">
+      <text class="summary-value">{{total}}</text>
+      <text class="summary-label">全部图片</text>
+    </view>
+    <view class="summary-item">
+      <text class="summary-value">{{includedCount}}</text>
+      <text class="summary-label">已入书</text>
+    </view>
+    <view class="summary-item">
+      <text class="summary-value">{{unusedCount}}</text>
+      <text class="summary-label">待选择</text>
+    </view>
+  </view>
+
+  <view wx:if="{{loading && !items.length}}" class="empty-card">
+    <text class="empty-title">正在同步图片素材</text>
+    <text class="empty-copy">生成过的分享视频背景会自动收集到这里。</text>
+  </view>
+
+  <view wx:elif="{{!items.length}}" class="empty-card">
+    <text class="empty-title">还没有图片素材</text>
+    <text class="empty-copy">之后生成分享视频背景、章节插图或封面候选时，会自动出现在这里。</text>
+  </view>
+
+  <view wx:else class="asset-list">
+    <view wx:for="{{items}}" wx:key="id" class="asset-card">
+      <view class="asset-main">
+        <view class="asset-thumb" data-id="{{item.id}}" bindtap="previewAsset">
+          <image wx:if="{{item.localPath}}" class="asset-image" src="{{item.localPath}}" mode="aspectFill" />
+          <view wx:else class="asset-placeholder">
+            <text>图片</text>
+          </view>
+        </view>
+        <view class="asset-copy">
+          <view class="asset-title-row">
+            <text class="asset-title">{{item.titleText}}</text>
+            <text class="asset-status {{item.include_in_book ? 'included' : ''}}">{{item.statusText}}</text>
+          </view>
+          <text class="asset-meta">{{item.sourceLabel}} · {{item.createdAtText}}</text>
+          <text class="asset-placement">{{item.placementText}}</text>
+          <text wx:if="{{item.source_quote}}" class="asset-source">来源：{{item.source_quote}}</text>
+        </view>
+      </view>
+
+      <view class="caption-box">
+        <text class="caption-label">图片说明</text>
+        <textarea
+          class="caption-input"
+          value="{{item.captionDraft}}"
+          data-id="{{item.id}}"
+          maxlength="500"
+          auto-height
+          placeholder="写一句会放进书里的图片说明"
+          bindinput="onCaptionInput"
+        />
+        <button
+          class="minor-button"
+          data-id="{{item.id}}"
+          loading="{{savingTarget === item.id}}"
+          disabled="{{savingTarget === item.id}}"
+          bindtap="saveCaption"
+        >
+          保存说明
+        </button>
+      </view>
+
+      <view class="asset-actions">
+        <picker
+          wx:if="{{chapterOptions.length}}"
+          range="{{chapterOptions}}"
+          range-key="label"
+          data-id="{{item.id}}"
+          disabled="{{placingTarget === item.id || item.status !== 'ready'}}"
+          bindchange="placeInChapter"
+        >
+          <view class="action-button primary-action {{placingTarget === item.id || item.status !== 'ready' ? 'disabled' : ''}}">
+            放入章节
+          </view>
+        </picker>
+        <button
+          class="action-button"
+          data-id="{{item.id}}"
+          loading="{{placingTarget === item.id}}"
+          disabled="{{placingTarget === item.id || item.status !== 'ready'}}"
+          bindtap="placeInAppendix"
+        >
+          加入图录
+        </button>
+        <button
+          wx:if="{{item.enabledPlacements.length}}"
+          class="action-button"
+          data-id="{{item.id}}"
+          loading="{{placingTarget === item.id}}"
+          disabled="{{placingTarget === item.id}}"
+          bindtap="removeFromBook"
+        >
+          移出书稿
+        </button>
+        <button
+          class="action-button danger"
+          data-id="{{item.id}}"
+          loading="{{deletingTarget === item.id}}"
+          disabled="{{deletingTarget === item.id}}"
+          bindtap="deleteAsset"
+        >
+          删除
+        </button>
+      </view>
+    </view>
+  </view>
+
+  <view class="bottom-spacer"></view>
+</view>

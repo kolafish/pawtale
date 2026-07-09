@@ -93,6 +93,30 @@ class MemoirShareVideoJobStatus(str, Enum):
     FAILED = "failed"
 
 
+class MemoirImageAssetStatus(str, Enum):
+    PENDING = "pending"
+    RUNNING = "running"
+    READY = "ready"
+    FAILED = "failed"
+    DELETED = "deleted"
+
+
+class MemoirImageAssetSourceType(str, Enum):
+    SHARE_VIDEO_BACKGROUND = "share_video_background"
+    CHAPTER_ILLUSTRATION = "chapter_illustration"
+    UTTERANCE_ILLUSTRATION = "utterance_illustration"
+    COVER_CANDIDATE = "cover_candidate"
+    MANUAL_UPLOAD = "manual_upload"
+
+
+class MemoirBookImagePlacementType(str, Enum):
+    CHAPTER_OPENING = "chapter_opening"
+    CHAPTER_INLINE = "chapter_inline"
+    APPENDIX = "appendix"
+    COVER = "cover"
+    BACK_COVER = "back_cover"
+
+
 class MemoirAutomationEventType(str, Enum):
     SOURCE_ASSIGNED = "source_assigned"
     SOURCE_HELD = "source_held"

@@ -69,6 +69,7 @@ from app.services.memoir.book_output_export import (
     render_book_output_export,
 )
 from app.services.memoir.book_source_links import plan_source_ref_dicts_by_chapter
+from app.services.memoir.image_assets import manuscript_image_snapshots
 from app.services.memoir.voice_tts_types import TTSClient
 
 
@@ -503,6 +504,7 @@ async def generate_book_output(
             BOOK_TTS_CACHE_KEY: None,
         }
 
+    chapter_illustrations_by_chapter, image_appendix = await manuscript_image_snapshots(db, project_id=project_id)
     manuscript = _manuscript_from_snapshot(
         title=title,
         content=content,
@@ -510,6 +512,8 @@ async def generate_book_output(
         editorial_copy=editorial_copy,
         cover_style_value=cover_style,
         metadata=book_metadata,
+        chapter_illustrations_by_chapter=chapter_illustrations_by_chapter,
+        image_appendix=image_appendix,
     )
     version_number = await _latest_output_version_number(db, output.id) + 1
     db.add(

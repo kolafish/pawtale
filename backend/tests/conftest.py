@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sess
 from app.main import app
 from app.database import Base, get_db, register_models
 from app.migrations.audit import migrate_audit_schema
+from app.migrations.memoir_images import migrate_memoir_image_schema
 from app.migrations.memoir_semantic import migrate_memoir_semantic_schema
 from app.migrations.memoir_voice import migrate_memoir_voice_schema
 
@@ -28,6 +29,7 @@ async def test_db():
         await conn.run_sync(Base.metadata.create_all)
     await migrate_memoir_voice_schema(engine)
     await migrate_memoir_semantic_schema(engine)
+    await migrate_memoir_image_schema(engine)
     await migrate_audit_schema(engine)
 
     async with async_session() as session:

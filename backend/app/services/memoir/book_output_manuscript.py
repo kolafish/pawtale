@@ -325,6 +325,8 @@ def manuscript_from_snapshot(
     editorial_copy: GeneratedManuscriptCopy | None = None,
     cover_style_value: str = DEFAULT_BOOK_COVER_STYLE,
     metadata: dict[str, str] | None = None,
+    chapter_illustrations_by_chapter: dict[str, list[dict[str, object]]] | None = None,
+    image_appendix: list[dict[str, object]] | None = None,
 ) -> MemoirBookManuscript | None:
     if not snapshot:
         return None
@@ -362,6 +364,7 @@ def manuscript_from_snapshot(
                 pull_quotes=[generated_pull_quote] if generated_pull_quote else _chapter_pull_quotes(chapter_content, source_refs),
                 content=chapter_content,
                 source_refs=source_refs,
+                illustrations=(chapter_illustrations_by_chapter or {}).get(chapter_id, []),
             )
         )
     if not chapters:
@@ -420,6 +423,7 @@ def manuscript_from_snapshot(
         ],
         table_of_contents=toc,
         chapters=chapters,
+        image_appendix=image_appendix or [],
         back_matter=MemoirBookManuscriptBackMatter(
             afterword=MemoirBookManuscriptSection(kind="afterword", title="后记", content=afterword),
             interview_records=MemoirBookManuscriptSection(
