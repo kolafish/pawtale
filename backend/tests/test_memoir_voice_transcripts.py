@@ -2,6 +2,7 @@ import asyncio
 import json
 import re
 from pathlib import Path
+from types import SimpleNamespace
 
 from sqlalchemy import select
 
@@ -37,6 +38,7 @@ from app.models.memoir import (
 )
 from app.services.memoir import source_cards
 from app.services.memoir import automation_event_resolution
+from app.services.memoir import share_video_backgrounds
 from app.services.memoir import share_video_jobs
 from app.services.memoir.asr_text_normalization import normalize_memoir_asr_text
 from app.services.memoir.asr import StreamingASREvent
@@ -559,6 +561,93 @@ def test_share_video_subtitles_use_memoir_page_layout_and_packaged_font(tmp_path
     assert ":fontsdir='" in filter_argument
     assert str(font_dir) in filter_argument
     assert video_filter_argument == filter_argument
+    image_video_filter = share_video_jobs._video_filter_argument(
+        tmp_path / "subtitles.ass",
+        has_background_image=True,
+    )
+    assert "scale=1280:720:force_original_aspect_ratio=increase,crop=1280:720" in image_video_filter
+    assert ":fontsdir='" in image_video_filter
+
+
+def test_share_video_background_prompts_cover_default_styles():
+    options = share_video_backgrounds.share_video_background_style_options()
+    assert [option["value"] for option in options] == ["old_album", "ink_paper", "storybook"]
+    assert [option["label"] for option in options] == ["旧相册", "淡水墨", "老故事书"]
+
+    old_album = share_video_backgrounds.build_share_video_background_prompt(
+        "爷爷说偏爱孙女，但做事情心里要讲公道。",
+        "old_album",
+    )
+    ink_paper = share_video_backgrounds.build_share_video_background_prompt(
+        "晚年回看故乡，很多事情都慢慢淡了。",
+        "ink_paper",
+    )
+    storybook = share_video_backgrounds.build_share_video_background_prompt(
+        "小时候一家人在老房子里吃饭，后来去县城读书。",
+        "storybook",
+    )
+
+    assert "旧家庭照片" in old_album.prompt
+    assert "手工上色" in old_album.prompt
+    assert "淡水墨旧纸" in ink_paper.prompt
+    assert "中国文人水墨画" in ink_paper.prompt
+    assert "二十世纪中国老连环画" in storybook.prompt
+    assert "旧书插图" in storybook.prompt
+    for prompt in (old_album, ink_paper, storybook):
+        assert "不要出现文字" in prompt.prompt
+        assert "横版 16:9" in prompt.prompt
+
+    long_prompt = share_video_backgrounds.build_share_video_background_prompt(
+        "乡" * 420,
+        "old_album",
+    )
+    assert len(long_prompt.content) == share_video_backgrounds.SHARE_VIDEO_BACKGROUND_CONTENT_MAX_CHARS + 3
+    assert long_prompt.content.endswith("...")
+
+
+async def test_share_video_background_generation_caches_provider_result(tmp_path, monkeypatch):
+    settings = SimpleNamespace(
+        memoir_share_video_ai_background_enabled=True,
+        volc_ark_api_key="test-key",
+        volc_ark_base_url="https://ark.cn-beijing.volces.com/api/v3",
+        volc_ark_image_model="doubao-seedream-5-0-lite-260128",
+        volc_ark_image_size="2K",
+        volc_ark_image_output_format="png",
+        volc_ark_image_response_format="b64_json",
+        volc_ark_image_timeout_seconds=1,
+        volc_ark_image_max_concurrent_requests=1,
+    )
+    calls: list[str] = []
+
+    async def fake_generate(self, prompt):
+        calls.append(prompt)
+        return share_video_backgrounds.VolcArkGeneratedImage(
+            content=b"fake image bytes",
+            mime_type="image/png",
+            model=settings.volc_ark_image_model,
+            usage={},
+        )
+
+    monkeypatch.setattr(share_video_backgrounds, "get_settings", lambda: settings)
+    monkeypatch.setattr(share_video_backgrounds, "MEMOIR_SHARE_VIDEO_BACKGROUND_DIR", tmp_path)
+    monkeypatch.setattr(share_video_backgrounds.VolcArkImageGenerationService, "generate", fake_generate)
+
+    first = await share_video_backgrounds.get_or_generate_share_video_background(
+        "爷爷说偏爱孙女，但做事情心里要讲公道。",
+        "old_album",
+    )
+    second = await share_video_backgrounds.get_or_generate_share_video_background(
+        "爷爷说偏爱孙女，但做事情心里要讲公道。",
+        "old_album",
+    )
+
+    assert first is not None
+    assert second is not None
+    assert first.cache_hit is False
+    assert second.cache_hit is True
+    assert first.path == second.path
+    assert first.path.read_bytes() == b"fake image bytes"
+    assert len(calls) == 1
 
 
 async def test_mobile_memoir_creates_and_downloads_share_video_job(client, test_db, tmp_path, monkeypatch):
@@ -567,13 +656,29 @@ async def test_mobile_memoir_creates_and_downloads_share_video_job(client, test_
         tmp_path / "share-videos",
     )
 
+    render_requests = []
+
     async def fake_render_share_video_clip(request):
+        render_requests.append(request)
         request.target_path.parent.mkdir(parents=True, exist_ok=True)
         request.target_path.write_bytes(b"fake mp4")
 
     monkeypatch.setattr(
         "app.services.memoir.share_video_jobs.render_share_video_clip",
         fake_render_share_video_clip,
+    )
+
+    monkeypatch.setattr(
+        "app.services.memoir.share_video_jobs.get_settings",
+        lambda: SimpleNamespace(memoir_share_video_ai_background_enabled=True),
+    )
+
+    async def fail_background_generation(_selected_text, _style_id):
+        raise share_video_backgrounds.ShareVideoBackgroundGenerationError("provider unavailable")
+
+    monkeypatch.setattr(
+        "app.services.memoir.share_video_jobs.get_or_generate_share_video_background",
+        fail_background_generation,
     )
 
     async def noop_background_share_video_job(_job_id):
@@ -589,7 +694,7 @@ async def test_mobile_memoir_creates_and_downloads_share_video_job(client, test_
 
     response = await client.post(
         f"/api/mobile/memoir/voice-transcripts/{created['utterance_id']}/share-video/jobs",
-        json={"start_char": 0, "end_char": end_char},
+        json={"start_char": 0, "end_char": end_char, "background_style": "ink_paper"},
     )
 
     assert response.status_code == 201
@@ -604,8 +709,13 @@ async def test_mobile_memoir_creates_and_downloads_share_video_job(client, test_
     assert detail["status"] == "succeeded"
     assert detail["selected_text"] == "我小时候住在外婆家。"
     assert detail["duration_ms"] >= 3000
+    assert detail["background_style"] == "ink_paper"
+    assert detail["background_status"] == "failed"
+    assert "provider unavailable" in detail["background_error_message"]
     assert detail["video_size_bytes"] == len(b"fake mp4")
     assert detail["download_url"] == f"/api/mobile/memoir/share-video/jobs/{job_id}/download"
+    assert len(render_requests) == 1
+    assert render_requests[0].background_image_path is None
     stored_job = await test_db.scalar(
         select(MemoirMaterialShareVideo).where(MemoirMaterialShareVideo.id == job_id)
     )

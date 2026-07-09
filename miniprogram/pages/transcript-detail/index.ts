@@ -1,5 +1,6 @@
 import type {
   MemoirBookPlan,
+  MemoirShareVideoBackgroundStyle,
   MemoirShareVideoJob,
   MemoirTranscriptShareVideoContext,
   MemoirTranscriptShareVideoSegment,
@@ -56,6 +57,7 @@ import {
 } from "../../services/transcript-view-model";
 import {
   datasetNumber,
+  datasetString,
   pickerIndex,
   type PageDatasetEvent,
   queryParam,
@@ -63,10 +65,17 @@ import {
   type PageQuery,
   type PageTextInputEvent,
 } from "../../services/page-input";
+import {
+  SHARE_VIDEO_BACKGROUND_STYLE_OPTIONS,
+  readSelectedShareVideoBackgroundStyle,
+  saveSelectedShareVideoBackgroundStyle,
+  shareVideoBackgroundStyleLabel,
+} from "../../services/share-video-background-settings";
 
 type TextAreaEvent = PageTextInputEvent;
 type PickerEvent = PagePickerEvent;
 type ShareVideoSegmentEvent = PageDatasetEvent<{ index?: string | number }>;
+type ShareVideoBackgroundEvent = PageDatasetEvent<{ backgroundStyle?: string }>;
 
 interface TranscriptDetailItemView extends MemoirVoiceTranscriptItem {
   titleText: string;
@@ -153,6 +162,9 @@ interface TranscriptDetailData {
   shareVideoSelectedText: string;
   shareVideoSelectedMetaText: string;
   shareVideoSelectedCanGenerate: boolean;
+  shareVideoBackgroundStyle: string;
+  shareVideoBackgroundStyleLabel: string;
+  shareVideoBackgroundStyleOptions: MemoirShareVideoBackgroundStyle[];
   shareVideoStatusText: string;
   shareVideoStatusClass: string;
   shareVideoJob: MemoirShareVideoJob | null;
@@ -325,14 +337,50 @@ function shareVideoSelectionPatch(
   };
 }
 
+function shareVideoBackgroundOptions(
+  context: MemoirTranscriptShareVideoContext | null,
+): MemoirShareVideoBackgroundStyle[] {
+  return context?.background_styles?.length
+    ? context.background_styles
+    : SHARE_VIDEO_BACKGROUND_STYLE_OPTIONS;
+}
+
+function shareVideoBackgroundPatch(
+  context: MemoirTranscriptShareVideoContext | null,
+  preferredStyle: string = readSelectedShareVideoBackgroundStyle(),
+): Pick<
+  TranscriptDetailData,
+  "shareVideoBackgroundStyle" | "shareVideoBackgroundStyleLabel" | "shareVideoBackgroundStyleOptions"
+> {
+  const options = shareVideoBackgroundOptions(context);
+  const fallbackStyle = context?.default_background_style || SHARE_VIDEO_BACKGROUND_STYLE_OPTIONS[0].value;
+  const optionValues = new Set(options.map((option) => option.value));
+  const normalizedStyle = optionValues.has(preferredStyle)
+    ? preferredStyle
+    : (optionValues.has(fallbackStyle) ? fallbackStyle : options[0]?.value || fallbackStyle);
+  const label = options.find((option) => option.value === normalizedStyle)?.label
+    || shareVideoBackgroundStyleLabel(normalizedStyle);
+  return {
+    shareVideoBackgroundStyle: normalizedStyle,
+    shareVideoBackgroundStyleLabel: label,
+    shareVideoBackgroundStyleOptions: options,
+  };
+}
+
 function shareVideoJobStatusText(job: MemoirShareVideoJob): string {
   if (job.status === "succeeded") {
+    if (job.background_status === "failed" || job.background_status === "fallback") {
+      return "视频已生成，已使用经典背景";
+    }
     return "视频已生成";
   }
   if (job.status === "failed") {
     return job.error_message || "视频生成失败";
   }
   if (job.status === "running") {
+    if (job.background_status === "pending") {
+      return "正在生成背景图";
+    }
     return "正在生成视频";
   }
   return "视频任务已创建，等待生成";
@@ -488,6 +536,7 @@ definePage<TranscriptDetailData>()({
     shareVideoSelectedText: "",
     shareVideoSelectedMetaText: "",
     shareVideoSelectedCanGenerate: false,
+    ...shareVideoBackgroundPatch(null),
     shareVideoStatusText: "",
     shareVideoStatusClass: "",
     shareVideoJob: null,
@@ -601,6 +650,7 @@ definePage<TranscriptDetailData>()({
       shareVideoError: "",
       shareVideoContext: null,
       ...shareVideoSelectionPatch(null, -1, -1),
+      ...shareVideoBackgroundPatch(null),
       shareVideoStatusText: "",
       shareVideoStatusClass: "",
       shareVideoJob: null,
@@ -634,7 +684,11 @@ definePage<TranscriptDetailData>()({
       return;
     }
     if (this.data.shareVideoContext?.utterance_id === item.id) {
-      this.setData({ shareVideoPanelOpen: true, shareVideoError: "" });
+      this.setData({
+        shareVideoPanelOpen: true,
+        shareVideoError: "",
+        ...shareVideoBackgroundPatch(this.data.shareVideoContext),
+      });
       const job = this.data.shareVideoJob;
       if (job && (job.status === "pending" || job.status === "running")) {
         this.startShareVideoPolling(job.id);
@@ -651,6 +705,7 @@ definePage<TranscriptDetailData>()({
       shareVideoError: "",
       shareVideoContext: null,
       ...shareVideoSelectionPatch(null, -1, -1),
+      ...shareVideoBackgroundPatch(null),
       shareVideoStatusText: "",
       shareVideoStatusClass: "",
       shareVideoJob: null,
@@ -661,6 +716,7 @@ definePage<TranscriptDetailData>()({
       this.setData({
         shareVideoContext: context,
         ...shareVideoSelectionPatch(context, -1, -1),
+        ...shareVideoBackgroundPatch(context),
       });
       trackAuditAction("transcript.detail_share_video_open", {}, { projectId: item.project_id });
     } catch (error) {
@@ -739,6 +795,25 @@ definePage<TranscriptDetailData>()({
     });
   },
 
+  selectShareVideoBackgroundStyle(event: ShareVideoBackgroundEvent) {
+    if (
+      this.data.shareVideoCreating ||
+      this.data.shareVideoPolling ||
+      this.data.shareVideoDownloadingPreview ||
+      this.data.shareVideoSharing
+    ) {
+      return;
+    }
+    const backgroundStyle = saveSelectedShareVideoBackgroundStyle(datasetString(event, "backgroundStyle"));
+    this.shareVideoFileCache = {};
+    this.setData({
+      ...shareVideoBackgroundPatch(this.data.shareVideoContext, backgroundStyle),
+      shareVideoJob: null,
+      shareVideoPreviewPath: "",
+      shareVideoSharing: false,
+    });
+  },
+
   async createShareVideo() {
     const item = this.data.item;
     if (
@@ -773,6 +848,7 @@ definePage<TranscriptDetailData>()({
         item.id,
         this.data.shareVideoSelectedStartChar,
         this.data.shareVideoSelectedEndChar,
+        { backgroundStyle: this.data.shareVideoBackgroundStyle },
       );
       if (token !== this.shareVideoPollToken) {
         return;

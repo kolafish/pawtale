@@ -31,6 +31,13 @@ import {
   saveAutoBargeInEnabled,
   saveLargeTextEnabled,
 } from "../../services/accessibility-settings";
+import {
+  SHARE_VIDEO_BACKGROUND_STYLE_OPTIONS,
+  saveSelectedShareVideoBackgroundStyle,
+  readSelectedShareVideoBackgroundStyle,
+  shareVideoBackgroundStyleLabel,
+  type ShareVideoBackgroundStyleOption,
+} from "../../services/share-video-background-settings";
 import { formatBeijingDateTime } from "../../services/time";
 import {
   readScopedTTSSettings,
@@ -81,6 +88,9 @@ interface MeData {
   aiModel: string;
   aiModelLabel: string;
   aiModelOptions: AIModelOption[];
+  shareVideoBackgroundStyle: string;
+  shareVideoBackgroundStyleLabel: string;
+  shareVideoBackgroundStyleOptions: ShareVideoBackgroundStyleOption[];
   voiceAuthorizationAgreed: boolean;
   voiceAuthorizationStatusText: string;
   voiceAuthorizationDetailText: string;
@@ -103,11 +113,13 @@ interface MeDataset {
   voice?: string;
   speed?: string | number;
   model?: string;
+  backgroundStyle?: string;
 }
 
 type VoiceDatasetEvent = PageDatasetEvent<MeDataset>;
 type SpeedDatasetEvent = PageDatasetEvent<MeDataset>;
 type ModelDatasetEvent = PageDatasetEvent<MeDataset>;
+type ShareVideoBackgroundDatasetEvent = PageDatasetEvent<MeDataset>;
 type InputEvent = PageTextInputEvent;
 
 interface SwitchChangeEvent {
@@ -191,6 +203,18 @@ function aiModelSettingsData(): Pick<MeData, "aiModel" | "aiModelLabel" | "aiMod
     aiModel: model,
     aiModelLabel: aiModelLabel(model),
     aiModelOptions: AI_MODEL_OPTIONS,
+  };
+}
+
+function shareVideoBackgroundSettingsData(): Pick<
+  MeData,
+  "shareVideoBackgroundStyle" | "shareVideoBackgroundStyleLabel" | "shareVideoBackgroundStyleOptions"
+> {
+  const backgroundStyle = readSelectedShareVideoBackgroundStyle();
+  return {
+    shareVideoBackgroundStyle: backgroundStyle,
+    shareVideoBackgroundStyleLabel: shareVideoBackgroundStyleLabel(backgroundStyle),
+    shareVideoBackgroundStyleOptions: SHARE_VIDEO_BACKGROUND_STYLE_OPTIONS,
   };
 }
 
@@ -282,6 +306,7 @@ definePage<MeData>()({
     totalUserCharCount: 0,
     totalAudioText: "0 秒",
     ...aiModelSettingsData(),
+    ...shareVideoBackgroundSettingsData(),
     ...voiceAuthorizationSettingsData(),
     chatTTSVoice: "",
     chatTTSVoiceLabel: "默认音色",
@@ -345,6 +370,7 @@ definePage<MeData>()({
           totalAudioText: "0 秒",
         }),
         ...aiModelSettingsData(),
+        ...shareVideoBackgroundSettingsData(),
         ...ttsProfilesData(),
         ...accessibilitySettingsData(),
       });
@@ -569,6 +595,16 @@ definePage<MeData>()({
       aiModel: model,
       aiModelLabel: aiModelLabel(model),
       aiModelOptions: AI_MODEL_OPTIONS,
+    });
+    wx.showToast({ title: "已保存", icon: "success" });
+  },
+
+  selectShareVideoBackgroundStyle(event: ShareVideoBackgroundDatasetEvent) {
+    const backgroundStyle = saveSelectedShareVideoBackgroundStyle(datasetString(event, "backgroundStyle"));
+    this.setData({
+      shareVideoBackgroundStyle: backgroundStyle,
+      shareVideoBackgroundStyleLabel: shareVideoBackgroundStyleLabel(backgroundStyle),
+      shareVideoBackgroundStyleOptions: SHARE_VIDEO_BACKGROUND_STYLE_OPTIONS,
     });
     wx.showToast({ title: "已保存", icon: "success" });
   },

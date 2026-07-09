@@ -109,6 +109,25 @@ function sampleShareVideoContext(utteranceId = "utterance-share") {
     alignment_confidence: 0.92,
     min_select_ms: 3000,
     max_select_ms: 90000,
+    ai_background_enabled: true,
+    default_background_style: "old_album",
+    background_styles: [
+      {
+        value: "old_album",
+        label: "旧相册",
+        description: "旧照片手工上色质感",
+      },
+      {
+        value: "ink_paper",
+        label: "淡水墨",
+        description: "淡水墨旧纸质感",
+      },
+      {
+        value: "storybook",
+        label: "老故事书",
+        description: "中国老连环画和旧书插图质感",
+      },
+    ],
     segments: [
       {
         index: 0,
@@ -410,8 +429,8 @@ test("transcript detail page creates share video from selected corrected segment
         contextCalls.push(id);
         return sampleShareVideoContext(id);
       },
-      createMemoirTranscriptShareVideoJob: async (id, startChar, endChar) => {
-        createCalls.push({ id, startChar, endChar });
+      createMemoirTranscriptShareVideoJob: async (id, startChar, endChar, options) => {
+        createCalls.push({ id, startChar, endChar, options });
         return sampleShareVideoJob({
           utterance_id: id,
           audio_file_id: `audio-${id}`,
@@ -442,6 +461,8 @@ test("transcript detail page creates share video from selected corrected segment
   assert.equal(context.data.shareVideoPanelOpen, true);
   assert.equal(context.data.shareVideoSegments.length, 2);
   assert.equal(context.data.shareVideoSelectedCanGenerate, false);
+  assert.equal(context.data.shareVideoBackgroundStyle, "old_album");
+  assert.equal(context.data.shareVideoBackgroundStyleOptions.length, 3);
 
   page.selectShareVideoSegment.call(context, { currentTarget: { dataset: { index: 0 } } });
   assert.equal(context.data.shareVideoSelectedText, "爷爷退休后还在帮公司做事。");
@@ -453,9 +474,35 @@ test("transcript detail page creates share video from selected corrected segment
   assert.equal(context.data.shareVideoSelectedEndChar, 23);
   assert.equal(context.data.shareVideoSelectedMetaText, "已选 9 秒 · 23 字");
 
+  const storageWrites = [];
+  global.wx = {
+    setStorageSync(key, value) {
+      storageWrites.push({ key, value });
+    },
+  };
+  page.selectShareVideoBackgroundStyle.call(context, {
+    currentTarget: { dataset: { backgroundStyle: "storybook" } },
+  });
+  delete global.wx;
+  assert.equal(context.data.shareVideoBackgroundStyle, "storybook");
+  assert.equal(context.data.shareVideoBackgroundStyleLabel, "老故事书");
+  assert.deepEqual(storageWrites, [
+    {
+      key: "pawtale_share_video_background_settings",
+      value: { backgroundStyle: "storybook" },
+    },
+  ]);
+
   await page.createShareVideo.call(context);
 
-  assert.deepEqual(createCalls, [{ id: "utterance-share", startChar: 0, endChar: 23 }]);
+  assert.deepEqual(createCalls, [
+    {
+      id: "utterance-share",
+      startChar: 0,
+      endChar: 23,
+      options: { backgroundStyle: "storybook" },
+    },
+  ]);
   assert.equal(context.data.shareVideoJob.status, "pending");
   assert.equal(context.data.shareVideoPolling, true);
   assert.deepEqual(downloads, []);

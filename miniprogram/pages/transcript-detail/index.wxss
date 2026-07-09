@@ -657,6 +657,71 @@
   line-height: 1.35;
 }
 
+.share-video-background {
+  margin-top: 18rpx;
+  padding: 18rpx;
+  border-radius: 16rpx;
+  background: #fffdf9;
+}
+
+.share-video-background-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16rpx;
+}
+
+.share-video-background-current {
+  color: #a64b3e;
+  font-size: 24rpx;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.share-video-background-options {
+  margin-top: 14rpx;
+  display: grid;
+  gap: 12rpx;
+}
+
+.share-video-background-option {
+  min-height: 88rpx;
+  padding: 16rpx 18rpx;
+  border: 2rpx solid #eadbca;
+  border-radius: 14rpx;
+  background: #ffffff;
+  box-sizing: border-box;
+  transition-property: transform, background-color, box-shadow;
+  transition-duration: 140ms;
+  transition-timing-function: ease;
+}
+
+.share-video-background-option:active {
+  transform: scale(0.96);
+}
+
+.share-video-background-option.selected {
+  border-color: #c56855;
+  background: #fff3ef;
+  box-shadow: 0 8rpx 22rpx rgba(166, 75, 62, 0.1);
+}
+
+.share-video-background-label {
+  display: block;
+  color: #3a2119;
+  font-size: 26rpx;
+  font-weight: 850;
+  line-height: 1.35;
+}
+
+.share-video-background-desc {
+  display: block;
+  margin-top: 6rpx;
+  color: #7b6f68;
+  font-size: 23rpx;
+  line-height: 1.35;
+}
+
 .share-video-actions {
   justify-content: flex-start;
 }

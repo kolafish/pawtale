@@ -38,6 +38,13 @@ class Settings(BaseSettings):
     volc_ark_base_url: str = "https://ark.cn-beijing.volces.com/api/v3"
     volc_ark_model: str = "doubao-seed-2-0-pro-260215"
     volc_ark_thinking_type: str = "disabled"
+    volc_ark_image_model: str = "doubao-seedream-5-0-lite-260128"
+    volc_ark_image_size: str = "2K"
+    volc_ark_image_output_format: str = "png"
+    volc_ark_image_response_format: str = "b64_json"
+    volc_ark_image_timeout_seconds: float = 45.0
+    volc_ark_image_max_concurrent_requests: int = 1
+    memoir_share_video_ai_background_enabled: bool = False
 
     # Claude API Keys
     anthropic_auth_token: str = ""

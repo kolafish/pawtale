@@ -12,12 +12,17 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import get_settings
 from app.models.memoir import MemoirTranscriptAlignment, MemoirVoiceUtterance
 from app.schemas.memoir_voice import (
     MemoirTranscriptShareVideoContextResponse,
     MemoirTranscriptShareVideoSegmentResponse,
 )
 from app.services.memoir import voice_transcripts
+from app.services.memoir.share_video_backgrounds import (
+    DEFAULT_SHARE_VIDEO_BACKGROUND_STYLE,
+    share_video_background_style_options,
+)
 
 
 ALIGNMENT_STRATEGY_PROVIDER_WORDS = "provider_words"
@@ -393,6 +398,7 @@ def _response(
     utterance: MemoirVoiceUtterance,
     result: AlignmentBuildResult,
 ) -> MemoirTranscriptShareVideoContextResponse:
+    settings = get_settings()
     return MemoirTranscriptShareVideoContextResponse(
         utterance_id=utterance.id,
         audio_file_id=utterance.audio_file_id or "",
@@ -404,6 +410,9 @@ def _response(
         alignment_confidence=result.confidence,
         min_select_ms=MIN_SELECT_MS,
         max_select_ms=MAX_SELECT_MS,
+        ai_background_enabled=bool(settings.memoir_share_video_ai_background_enabled),
+        default_background_style=DEFAULT_SHARE_VIDEO_BACKGROUND_STYLE,
+        background_styles=share_video_background_style_options(),
         segments=[
             MemoirTranscriptShareVideoSegmentResponse(**segment)
             for segment in result.segments
