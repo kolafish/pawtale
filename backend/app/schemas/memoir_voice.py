@@ -333,6 +333,31 @@ class MemoirVoiceTranscriptListResponse(BaseModel):
     limit: int
     offset: int
 
+
+class MemoirTranscriptShareVideoSegmentResponse(BaseModel):
+    index: int
+    text: str
+    start_char: int
+    end_char: int
+    start_ms: int
+    end_ms: int
+    confidence: float | None = None
+    selectable: bool = True
+
+
+class MemoirTranscriptShareVideoContextResponse(BaseModel):
+    utterance_id: str
+    audio_file_id: str
+    transcript_source: str
+    transcript_text: str
+    text_hash: str
+    duration_ms: int
+    alignment_strategy: str
+    alignment_confidence: float | None = None
+    min_select_ms: int = 3000
+    max_select_ms: int = 90000
+    segments: list[MemoirTranscriptShareVideoSegmentResponse] = Field(default_factory=list)
+
 class MemoirVoiceSearchTranscriptionRequest(BaseModel):
     audio_base64: str = Field(min_length=1)
     mime_type: str = "audio/pcm"

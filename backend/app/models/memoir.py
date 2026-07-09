@@ -200,6 +200,40 @@ class MemoirVoiceUtterance(Base):
         back_populates="utterances",
     )
     audio_file: Mapped[AudioFile | None] = orm_relationship("AudioFile")
+    transcript_alignment: Mapped["MemoirTranscriptAlignment | None"] = orm_relationship(
+        "MemoirTranscriptAlignment",
+        back_populates="utterance",
+        cascade="all, delete-orphan",
+    )
+
+
+class MemoirTranscriptAlignment(Base):
+    __tablename__ = "memoir_transcript_alignments"
+    __table_args__ = (
+        UniqueConstraint("utterance_id", name="uq_memoir_transcript_alignments_utterance"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    utterance_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("memoir_voice_utterances.id"),
+        nullable=False,
+        index=True,
+    )
+    text_source: Mapped[str] = mapped_column(String(20), nullable=False)
+    text_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    strategy: Mapped[str] = mapped_column(String(40), nullable=False)
+    confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    duration_ms: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    alignment_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    segments_json: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    utterance: Mapped[MemoirVoiceUtterance] = orm_relationship(
+        "MemoirVoiceUtterance",
+        back_populates="transcript_alignment",
+    )
 
 
 class MemoirTranscriptVersion(Base):
