@@ -13,6 +13,7 @@ from fastapi import HTTPException
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.config import DATA_DIR, get_settings
 from app.database import async_session_maker
@@ -22,9 +23,13 @@ from app.models.projects import Project
 from app.schemas.memoir_voice import MemoirShareVideoJobCreateRequest, MemoirShareVideoJobResponse
 from app.services.memoir.audio_files import audio_file_path
 from app.services.memoir.share_video_backgrounds import (
+    DEFAULT_SHARE_VIDEO_BACKGROUND_MODE,
     DEFAULT_SHARE_VIDEO_BACKGROUND_STYLE,
+    SHARE_VIDEO_BACKGROUND_MODE_SINGLE,
+    SHARE_VIDEO_BACKGROUND_MODE_SMART_MULTI,
     ShareVideoBackgroundGenerationError,
     get_or_generate_share_video_background,
+    normalize_share_video_background_mode,
     normalize_share_video_background_style,
 )
 from app.services.memoir.share_video_alignment import (
@@ -32,6 +37,11 @@ from app.services.memoir.share_video_alignment import (
     MIN_SELECT_MS,
     build_share_video_alignment,
     share_video_char_range_ms,
+)
+from app.services.memoir.share_video_scene_planner import (
+    ShareVideoScene,
+    plan_share_video_background_scenes,
+    scene_plan_to_metadata,
 )
 from app.services.memoir.voice_transcripts import _load_owned_utterance
 
@@ -56,6 +66,13 @@ _STALE_SHARE_VIDEO_RECOVERY_BACKOFF_SECONDS = 300
 
 
 @dataclass(frozen=True)
+class ShareVideoBackgroundSegment:
+    image_path: Path
+    start_ms: int
+    end_ms: int
+
+
+@dataclass(frozen=True)
 class ShareVideoRenderRequest:
     source_audio_path: Path
     source_audio_mime_type: str
@@ -67,10 +84,16 @@ class ShareVideoRenderRequest:
     style: str
     style_options: dict[str, object]
     background_image_path: Path | None = None
+    background_segments: list[ShareVideoBackgroundSegment] | None = None
 
 
 class ShareVideoGenerationError(RuntimeError):
     pass
+
+
+def _set_job_metadata(job: MemoirMaterialShareVideo, metadata: dict[str, object]) -> None:
+    job.metadata_json = dict(metadata)
+    flag_modified(job, "metadata_json")
 
 
 def _storage_path(user_id: str, job_id: str) -> str:
@@ -101,9 +124,12 @@ def _trim_selection(text: str, start_char: int, end_char: int) -> tuple[int, int
 def _job_response(job: MemoirMaterialShareVideo) -> MemoirShareVideoJobResponse:
     metadata = job.metadata_json or {}
     background_style = str(metadata.get("background_style") or DEFAULT_SHARE_VIDEO_BACKGROUND_STYLE)
+    background_mode = str(metadata.get("background_mode") or DEFAULT_SHARE_VIDEO_BACKGROUND_MODE)
+    background_effective_mode = str(metadata.get("background_effective_mode") or SHARE_VIDEO_BACKGROUND_MODE_SINGLE)
     background_provider = metadata.get("background_provider")
     background_model = metadata.get("background_model")
     background_cache_hit = metadata.get("background_cache_hit")
+    background_scene_count = metadata.get("background_scene_count")
     download_url = (
         f"/api/mobile/memoir/share-video/jobs/{job.id}/download"
         if job.status == MemoirShareVideoJobStatus.SUCCEEDED.value and job.video_storage_path
@@ -123,6 +149,9 @@ def _job_response(job: MemoirMaterialShareVideo) -> MemoirShareVideoJobResponse:
         duration_ms=max(0, job.end_ms - job.start_ms),
         style=job.style,
         background_style=background_style,
+        background_mode=background_mode,
+        background_effective_mode=background_effective_mode,
+        background_scene_count=background_scene_count if isinstance(background_scene_count, int) else 0,
         background_status=str(metadata.get("background_status") or "disabled"),
         background_provider=background_provider if isinstance(background_provider, str) else None,
         background_model=background_model if isinstance(background_model, str) else None,
@@ -186,8 +215,65 @@ async def _mark_share_video_job_recovery_enqueued(
     metadata = dict(job.metadata_json or {})
     metadata["recovery_enqueued_at"] = current_time.isoformat()
     metadata["recovery_reason"] = "stale_running"
-    job.metadata_json = metadata
+    _set_job_metadata(job, metadata)
     await db.commit()
+
+
+def _effective_background_mode(background_mode: str, duration_ms: int) -> str:
+    if background_mode == SHARE_VIDEO_BACKGROUND_MODE_SMART_MULTI:
+        return SHARE_VIDEO_BACKGROUND_MODE_SMART_MULTI
+    if background_mode == SHARE_VIDEO_BACKGROUND_MODE_SINGLE:
+        return SHARE_VIDEO_BACKGROUND_MODE_SINGLE
+    return (
+        SHARE_VIDEO_BACKGROUND_MODE_SMART_MULTI
+        if duration_ms >= 20_000
+        else SHARE_VIDEO_BACKGROUND_MODE_SINGLE
+    )
+
+
+def _scene_metadata(scene: ShareVideoScene) -> dict[str, object]:
+    return {
+        "index": scene.index,
+        "start_char": scene.start_char,
+        "end_char": scene.end_char,
+        "start_ms": scene.start_ms,
+        "end_ms": scene.end_ms,
+        "title": scene.title,
+        "visual_summary": scene.visual_summary,
+        "image_prompt_content": scene.image_prompt_content,
+    }
+
+
+def _render_background_segments(
+    scenes: list[ShareVideoScene],
+    image_paths: list[Path],
+    duration_ms: int,
+) -> list[ShareVideoBackgroundSegment]:
+    if not scenes or not image_paths:
+        return []
+    raw_durations = [
+        max(1, scene.end_ms - scene.start_ms)
+        for scene in scenes[: len(image_paths)]
+    ]
+    raw_total = max(1, sum(raw_durations))
+    segments: list[ShareVideoBackgroundSegment] = []
+    cursor = 0
+    for index, (raw_duration, image_path) in enumerate(zip(raw_durations, image_paths, strict=False)):
+        if index == len(raw_durations) - 1:
+            end_ms = max(cursor + 1, duration_ms)
+        else:
+            remaining_segments = len(raw_durations) - index - 1
+            computed_end_ms = cursor + max(1, round(duration_ms * raw_duration / raw_total))
+            end_ms = min(computed_end_ms, max(cursor + 1, duration_ms - remaining_segments))
+        segments.append(
+            ShareVideoBackgroundSegment(
+                image_path=image_path,
+                start_ms=cursor,
+                end_ms=end_ms,
+            )
+        )
+        cursor = end_ms
+    return segments
 
 
 async def create_share_video_job(
@@ -204,6 +290,10 @@ async def create_share_video_job(
     start_ms, end_ms = share_video_char_range_ms(alignment, start_char, end_char)
     try:
         background_style = normalize_share_video_background_style(req.background_style)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    try:
+        background_mode = normalize_share_video_background_mode(req.background_mode)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     duration_ms = end_ms - start_ms
@@ -235,6 +325,9 @@ async def create_share_video_job(
             "alignment_confidence": alignment.confidence,
             "char_timings": alignment.char_timings[start_char:end_char],
             "background_style": background_style,
+            "background_mode": background_mode,
+            "background_effective_mode": _effective_background_mode(background_mode, duration_ms),
+            "background_scene_count": 0,
             "background_status": (
                 "pending"
                 if get_settings().memoir_share_video_ai_background_enabled
@@ -329,35 +422,173 @@ async def run_share_video_job_with_session(db: AsyncSession, job_id: str) -> Non
         background_style = normalize_share_video_background_style(
             metadata.get("background_style") if isinstance(metadata.get("background_style"), str) else None
         )
+        background_mode = normalize_share_video_background_mode(
+            metadata.get("background_mode") if isinstance(metadata.get("background_mode"), str) else None
+        )
+        duration_ms = max(1, job.end_ms - job.start_ms)
+        settings = get_settings()
+        effective_background_mode = _effective_background_mode(background_mode, duration_ms)
+        volc_ark_api_key = str(getattr(settings, "volc_ark_api_key", "") or "")
         metadata["background_style"] = background_style
+        metadata["background_mode"] = background_mode
+        metadata["background_effective_mode"] = effective_background_mode
         background_image_path: Path | None = None
-        try:
-            background = await get_or_generate_share_video_background(job.selected_text, background_style)
-        except ShareVideoBackgroundGenerationError as exc:
+        background_segments: list[ShareVideoBackgroundSegment] = []
+        if not settings.memoir_share_video_ai_background_enabled or not volc_ark_api_key.strip():
             metadata.update({
-                "background_status": "failed",
-                "background_error_message": str(exc)[:500],
+                "background_status": "disabled",
+                "background_effective_mode": SHARE_VIDEO_BACKGROUND_MODE_SINGLE,
+                "background_scene_count": 0,
+                "background_error_message": "",
             })
-        else:
-            if background is None:
+            effective_background_mode = SHARE_VIDEO_BACKGROUND_MODE_SINGLE
+            _set_job_metadata(job, metadata)
+            await db.commit()
+        elif effective_background_mode == SHARE_VIDEO_BACKGROUND_MODE_SMART_MULTI:
+            char_timings = [
+                item for item in metadata.get("char_timings", [])
+                if isinstance(item, dict)
+            ]
+            metadata.update({
+                "background_status": "planning",
+                "background_error_message": "",
+            })
+            _set_job_metadata(job, metadata)
+            await db.commit()
+
+            plan = await plan_share_video_background_scenes(
+                job.selected_text,
+                char_timings,
+                duration_ms,
+            )
+            scene_plan = scene_plan_to_metadata(plan)
+            metadata.update({
+                "background_status": "generating",
+                "background_scene_plan": scene_plan,
+                "background_scene_count": len(plan.scenes),
+                "background_generated_count": 0,
+                "background_plan_provider": plan.provider,
+                "background_plan_model": plan.model,
+                "background_error_message": "",
+            })
+            _set_job_metadata(job, metadata)
+            await db.commit()
+
+            scene_assets: list[dict[str, object]] = []
+            valid_paths: list[Path | None] = []
+            first_valid_path: Path | None = None
+            first_asset_provider: str | None = None
+            first_asset_model: str | None = None
+            generated_count = 0
+            errors: list[str] = []
+            for scene in plan.scenes:
+                scene_info = _scene_metadata(scene)
+                try:
+                    asset = await get_or_generate_share_video_background(
+                        scene.image_prompt_content,
+                        background_style,
+                    )
+                except ShareVideoBackgroundGenerationError as exc:
+                    errors.append(f"{scene.index + 1}: {str(exc)[:120]}")
+                    scene_info.update({
+                        "background_status": "failed",
+                        "background_error_message": str(exc)[:300],
+                    })
+                    valid_paths.append(None)
+                else:
+                    if asset is None:
+                        scene_info.update({
+                            "background_status": "disabled",
+                            "background_error_message": "",
+                        })
+                        valid_paths.append(None)
+                    else:
+                        generated_count += 1
+                        first_valid_path = first_valid_path or asset.path
+                        first_asset_provider = first_asset_provider or asset.provider
+                        first_asset_model = first_asset_model or asset.model
+                        valid_paths.append(asset.path)
+                        scene_info.update({
+                            "background_status": "ready",
+                            "background_storage_path": asset.storage_path,
+                            "background_prompt_hash": asset.prompt_hash,
+                            "background_prompt_version": asset.prompt_template_version,
+                            "background_provider": asset.provider,
+                            "background_model": asset.model,
+                            "background_cache_hit": asset.cache_hit,
+                            "background_error_message": "",
+                        })
+                scene_assets.append(scene_info)
                 metadata.update({
-                    "background_status": "disabled",
-                    "background_error_message": "",
+                    "background_generated_count": generated_count,
+                    "background_scenes": scene_assets,
+                })
+                _set_job_metadata(job, metadata)
+                await db.commit()
+
+            if first_valid_path is None:
+                metadata.update({
+                    "background_status": "failed",
+                    "background_error_message": "智能多图背景生成失败，已使用经典背景",
+                    "background_scenes": scene_assets,
                 })
             else:
-                background_image_path = background.path
+                filled_paths: list[Path] = []
+                previous_path: Path | None = None
+                reused_count = 0
+                for path in valid_paths:
+                    if path is None:
+                        reused_count += 1
+                        path = previous_path or first_valid_path
+                    filled_paths.append(path)
+                    previous_path = path
+                background_segments = _render_background_segments(
+                    plan.scenes,
+                    filled_paths,
+                    duration_ms,
+                )
                 metadata.update({
-                    "background_status": "ready",
-                    "background_storage_path": background.storage_path,
-                    "background_prompt_hash": background.prompt_hash,
-                    "background_prompt_version": background.prompt_template_version,
-                    "background_provider": background.provider,
-                    "background_model": background.model,
-                    "background_cache_hit": background.cache_hit,
-                    "background_error_message": "",
+                    "background_status": "partial" if errors or reused_count else "ready",
+                    "background_error_message": "；".join(errors)[:500],
+                    "background_scenes": scene_assets,
+                    "background_reused_scene_count": reused_count,
+                    "background_provider": first_asset_provider,
+                    "background_model": first_asset_model,
+                    "background_cache_hit": None,
                 })
-        job.metadata_json = metadata
-        await db.commit()
+            _set_job_metadata(job, metadata)
+            await db.commit()
+        else:
+            try:
+                background = await get_or_generate_share_video_background(job.selected_text, background_style)
+            except ShareVideoBackgroundGenerationError as exc:
+                metadata.update({
+                    "background_status": "failed",
+                    "background_scene_count": 0,
+                    "background_error_message": str(exc)[:500],
+                })
+            else:
+                if background is None:
+                    metadata.update({
+                        "background_status": "disabled",
+                        "background_scene_count": 0,
+                        "background_error_message": "",
+                    })
+                else:
+                    background_image_path = background.path
+                    metadata.update({
+                        "background_status": "ready",
+                        "background_scene_count": 1,
+                        "background_storage_path": background.storage_path,
+                        "background_prompt_hash": background.prompt_hash,
+                        "background_prompt_version": background.prompt_template_version,
+                        "background_provider": background.provider,
+                        "background_model": background.model,
+                        "background_cache_hit": background.cache_hit,
+                        "background_error_message": "",
+                    })
+            _set_job_metadata(job, metadata)
+            await db.commit()
 
         target_path = share_video_file_path(job)
         render_request = ShareVideoRenderRequest(
@@ -374,11 +605,12 @@ async def run_share_video_job_with_session(db: AsyncSession, job_id: str) -> Non
             style=job.style,
             style_options=job.style_json,
             background_image_path=background_image_path,
+            background_segments=background_segments,
         )
         try:
             await render_share_video_clip(render_request)
         except ShareVideoGenerationError as exc:
-            if background_image_path is None:
+            if background_image_path is None and not background_segments:
                 raise
             metadata = dict(job.metadata_json or {})
             metadata.update(
@@ -387,7 +619,7 @@ async def run_share_video_job_with_session(db: AsyncSession, job_id: str) -> Non
                     "background_error_message": f"背景图渲染失败，已回退经典样式：{str(exc)[:400]}",
                 }
             )
-            job.metadata_json = metadata
+            _set_job_metadata(job, metadata)
             await db.commit()
             await render_share_video_clip(
                 ShareVideoRenderRequest(
@@ -401,6 +633,7 @@ async def run_share_video_job_with_session(db: AsyncSession, job_id: str) -> Non
                     style=render_request.style,
                     style_options=render_request.style_options,
                     background_image_path=None,
+                    background_segments=None,
                 )
             )
         job.video_storage_path = _storage_path(job.user_id, job.id)
@@ -662,6 +895,63 @@ def _video_filter_argument(subtitle_path: Path, *, has_background_image: bool = 
     return ",".join(filters)
 
 
+def _valid_background_segments(
+    request: ShareVideoRenderRequest,
+) -> list[ShareVideoBackgroundSegment]:
+    segments = request.background_segments or []
+    return [
+        segment
+        for segment in segments
+        if segment.image_path.exists()
+        and segment.image_path.stat().st_size > 0
+        and segment.end_ms > segment.start_ms
+    ]
+
+
+def _multi_background_filter_complex(
+    segments: list[ShareVideoBackgroundSegment],
+    subtitle_path: Path,
+) -> str:
+    transition_seconds = min(
+        0.6,
+        max(0.0, min((segment.end_ms - segment.start_ms) / 1000 for segment in segments) / 2),
+    )
+    parts: list[str] = []
+    raw_durations = [
+        max(0.1, (segment.end_ms - segment.start_ms) / 1000)
+        for segment in segments
+    ]
+    for index, raw_duration in enumerate(raw_durations):
+        duration = raw_duration + (transition_seconds if index < len(raw_durations) - 1 else 0)
+        parts.append(
+            f"[{index}:v]"
+            f"scale={_VIDEO_WIDTH}:{_VIDEO_HEIGHT}:force_original_aspect_ratio=increase,"
+            f"crop={_VIDEO_WIDTH}:{_VIDEO_HEIGHT},setsar=1,"
+            f"trim=duration={duration:.3f},setpts=PTS-STARTPTS,"
+            f"fps=30,format=yuv420p,settb=AVTB[v{index}]"
+        )
+
+    current_label = "v0"
+    if len(segments) > 1 and transition_seconds > 0:
+        elapsed = raw_durations[0]
+        for index in range(1, len(segments)):
+            next_label = f"x{index}"
+            parts.append(
+                f"[{current_label}][v{index}]"
+                f"xfade=transition=fade:duration={transition_seconds:.3f}:offset={elapsed:.3f}"
+                f"[{next_label}]"
+            )
+            current_label = next_label
+            elapsed += raw_durations[index]
+    elif len(segments) > 1:
+        labels = "".join(f"[v{index}]" for index in range(len(segments)))
+        parts.append(f"{labels}concat=n={len(segments)}:v=1:a=0[concatbg]")
+        current_label = "concatbg"
+
+    parts.append(f"[{current_label}]{_subtitle_filter_argument(subtitle_path)}[vout]")
+    return ";".join(parts)
+
+
 async def render_share_video_clip(request: ShareVideoRenderRequest) -> None:
     ffmpeg = _ffmpeg_executable()
     request.target_path.parent.mkdir(parents=True, exist_ok=True)
@@ -690,10 +980,57 @@ async def render_share_video_clip(request: ShareVideoRenderRequest) -> None:
             str(clip_audio_path),
         ])
 
+        background_segments = _valid_background_segments(request)
+        if len(background_segments) > 1:
+            video_input_args: list[str] = []
+            for segment in background_segments:
+                duration_seconds_for_input = max(0.1, (segment.end_ms - segment.start_ms) / 1000 + 0.7)
+                video_input_args.extend([
+                    "-loop",
+                    "1",
+                    "-t",
+                    f"{duration_seconds_for_input:.3f}",
+                    "-i",
+                    str(segment.image_path),
+                ])
+            audio_input_index = len(background_segments)
+            await _run_ffmpeg([
+                ffmpeg,
+                "-y",
+                *video_input_args,
+                "-i",
+                str(clip_audio_path),
+                "-filter_complex",
+                _multi_background_filter_complex(background_segments, subtitle_path),
+                "-map",
+                "[vout]",
+                "-map",
+                f"{audio_input_index}:a",
+                "-c:v",
+                "libx264",
+                "-preset",
+                "veryfast",
+                "-crf",
+                "18",
+                "-pix_fmt",
+                "yuv420p",
+                "-c:a",
+                "aac",
+                "-b:a",
+                "128k",
+                "-shortest",
+                str(temp_video_path),
+            ])
+            temp_video_path.replace(request.target_path)
+            return
+
+        single_background_image_path = request.background_image_path
+        if not single_background_image_path and len(background_segments) == 1:
+            single_background_image_path = background_segments[0].image_path
         has_background_image = bool(
-            request.background_image_path
-            and request.background_image_path.exists()
-            and request.background_image_path.stat().st_size > 0
+            single_background_image_path
+            and single_background_image_path.exists()
+            and single_background_image_path.stat().st_size > 0
         )
         if has_background_image:
             video_input_args = [
@@ -702,7 +1039,7 @@ async def render_share_video_clip(request: ShareVideoRenderRequest) -> None:
                 "-t",
                 f"{duration_seconds:.3f}",
                 "-i",
-                str(request.background_image_path),
+                str(single_background_image_path),
             ]
         else:
             video_input_args = [

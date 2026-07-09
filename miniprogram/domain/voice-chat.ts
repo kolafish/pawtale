@@ -360,6 +360,12 @@ export interface MemoirShareVideoBackgroundStyle {
   description: string;
 }
 
+export interface MemoirShareVideoBackgroundMode {
+  value: string;
+  label: string;
+  description: string;
+}
+
 export interface MemoirTranscriptShareVideoContext {
   utterance_id: string;
   audio_file_id: string;
@@ -373,7 +379,9 @@ export interface MemoirTranscriptShareVideoContext {
   max_select_ms: number;
   ai_background_enabled?: boolean;
   default_background_style?: string;
+  default_background_mode?: string;
   background_styles?: MemoirShareVideoBackgroundStyle[];
+  background_modes?: MemoirShareVideoBackgroundMode[];
   segments: MemoirTranscriptShareVideoSegment[];
 }
 
@@ -393,6 +401,9 @@ export interface MemoirShareVideoJob {
   duration_ms: number;
   style: string;
   background_style?: string;
+  background_mode?: string;
+  background_effective_mode?: string;
+  background_scene_count?: number;
   background_status?: string;
   background_provider?: string | null;
   background_model?: string | null;

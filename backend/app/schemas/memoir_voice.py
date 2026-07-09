@@ -352,6 +352,12 @@ class MemoirShareVideoBackgroundStyleResponse(BaseModel):
     description: str
 
 
+class MemoirShareVideoBackgroundModeResponse(BaseModel):
+    value: str
+    label: str
+    description: str
+
+
 class MemoirTranscriptShareVideoContextResponse(BaseModel):
     utterance_id: str
     audio_file_id: str
@@ -365,7 +371,9 @@ class MemoirTranscriptShareVideoContextResponse(BaseModel):
     max_select_ms: int = 90000
     ai_background_enabled: bool = False
     default_background_style: str = "old_album"
+    default_background_mode: str = "auto"
     background_styles: list[MemoirShareVideoBackgroundStyleResponse] = Field(default_factory=list)
+    background_modes: list[MemoirShareVideoBackgroundModeResponse] = Field(default_factory=list)
     segments: list[MemoirTranscriptShareVideoSegmentResponse] = Field(default_factory=list)
 
 
@@ -375,6 +383,7 @@ class MemoirShareVideoJobCreateRequest(BaseModel):
     style: str = Field(default="warm_minimal", min_length=1, max_length=40)
     style_options: dict[str, object] = Field(default_factory=dict)
     background_style: str | None = Field(default=None, max_length=40)
+    background_mode: str | None = Field(default=None, max_length=40)
 
     @field_validator("style")
     @classmethod
@@ -387,6 +396,14 @@ class MemoirShareVideoJobCreateRequest(BaseModel):
     @field_validator("background_style")
     @classmethod
     def _valid_background_style(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None
+
+    @field_validator("background_mode")
+    @classmethod
+    def _valid_background_mode(cls, value: str | None) -> str | None:
         if value is None:
             return None
         normalized = value.strip()
@@ -413,6 +430,9 @@ class MemoirShareVideoJobResponse(BaseModel):
     duration_ms: int
     style: str = "warm_minimal"
     background_style: str = "old_album"
+    background_mode: str = "auto"
+    background_effective_mode: str = "single"
+    background_scene_count: int = 0
     background_status: str = "disabled"
     background_provider: str | None = None
     background_model: str | None = None

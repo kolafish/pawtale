@@ -20,7 +20,9 @@ from app.schemas.memoir_voice import (
 )
 from app.services.memoir import voice_transcripts
 from app.services.memoir.share_video_backgrounds import (
+    DEFAULT_SHARE_VIDEO_BACKGROUND_MODE,
     DEFAULT_SHARE_VIDEO_BACKGROUND_STYLE,
+    share_video_background_mode_options,
     share_video_background_style_options,
 )
 
@@ -412,7 +414,9 @@ def _response(
         max_select_ms=MAX_SELECT_MS,
         ai_background_enabled=bool(settings.memoir_share_video_ai_background_enabled),
         default_background_style=DEFAULT_SHARE_VIDEO_BACKGROUND_STYLE,
+        default_background_mode=DEFAULT_SHARE_VIDEO_BACKGROUND_MODE,
         background_styles=share_video_background_style_options(),
+        background_modes=share_video_background_mode_options(),
         segments=[
             MemoirTranscriptShareVideoSegmentResponse(**segment)
             for segment in result.segments

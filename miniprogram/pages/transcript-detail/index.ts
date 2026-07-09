@@ -1,5 +1,6 @@
 import type {
   MemoirBookPlan,
+  MemoirShareVideoBackgroundMode,
   MemoirShareVideoBackgroundStyle,
   MemoirShareVideoJob,
   MemoirTranscriptShareVideoContext,
@@ -66,16 +67,20 @@ import {
   type PageTextInputEvent,
 } from "../../services/page-input";
 import {
+  SHARE_VIDEO_BACKGROUND_MODE_OPTIONS,
   SHARE_VIDEO_BACKGROUND_STYLE_OPTIONS,
+  readSelectedShareVideoBackgroundMode,
   readSelectedShareVideoBackgroundStyle,
+  saveSelectedShareVideoBackgroundMode,
   saveSelectedShareVideoBackgroundStyle,
+  shareVideoBackgroundModeLabel,
   shareVideoBackgroundStyleLabel,
 } from "../../services/share-video-background-settings";
 
 type TextAreaEvent = PageTextInputEvent;
 type PickerEvent = PagePickerEvent;
 type ShareVideoSegmentEvent = PageDatasetEvent<{ index?: string | number }>;
-type ShareVideoBackgroundEvent = PageDatasetEvent<{ backgroundStyle?: string }>;
+type ShareVideoBackgroundEvent = PageDatasetEvent<{ backgroundMode?: string; backgroundStyle?: string }>;
 
 interface TranscriptDetailItemView extends MemoirVoiceTranscriptItem {
   titleText: string;
@@ -165,6 +170,9 @@ interface TranscriptDetailData {
   shareVideoBackgroundStyle: string;
   shareVideoBackgroundStyleLabel: string;
   shareVideoBackgroundStyleOptions: MemoirShareVideoBackgroundStyle[];
+  shareVideoBackgroundMode: string;
+  shareVideoBackgroundModeLabel: string;
+  shareVideoBackgroundModeOptions: MemoirShareVideoBackgroundMode[];
   shareVideoStatusText: string;
   shareVideoStatusClass: string;
   shareVideoJob: MemoirShareVideoJob | null;
@@ -346,25 +354,50 @@ function shareVideoBackgroundOptions(
     : SHARE_VIDEO_BACKGROUND_STYLE_OPTIONS;
 }
 
+function shareVideoBackgroundModeOptions(
+  context: MemoirTranscriptShareVideoContext | null,
+): MemoirShareVideoBackgroundMode[] {
+  return context?.background_modes?.length
+    ? context.background_modes
+    : SHARE_VIDEO_BACKGROUND_MODE_OPTIONS;
+}
+
 function shareVideoBackgroundPatch(
   context: MemoirTranscriptShareVideoContext | null,
   preferredStyle: string = readSelectedShareVideoBackgroundStyle(),
+  preferredMode: string = readSelectedShareVideoBackgroundMode(),
 ): Pick<
   TranscriptDetailData,
-  "shareVideoBackgroundStyle" | "shareVideoBackgroundStyleLabel" | "shareVideoBackgroundStyleOptions"
+  | "shareVideoBackgroundStyle"
+  | "shareVideoBackgroundStyleLabel"
+  | "shareVideoBackgroundStyleOptions"
+  | "shareVideoBackgroundMode"
+  | "shareVideoBackgroundModeLabel"
+  | "shareVideoBackgroundModeOptions"
 > {
   const options = shareVideoBackgroundOptions(context);
+  const modeOptions = shareVideoBackgroundModeOptions(context);
   const fallbackStyle = context?.default_background_style || SHARE_VIDEO_BACKGROUND_STYLE_OPTIONS[0].value;
+  const fallbackMode = context?.default_background_mode || SHARE_VIDEO_BACKGROUND_MODE_OPTIONS[0].value;
   const optionValues = new Set(options.map((option) => option.value));
+  const modeOptionValues = new Set(modeOptions.map((option) => option.value));
   const normalizedStyle = optionValues.has(preferredStyle)
     ? preferredStyle
     : (optionValues.has(fallbackStyle) ? fallbackStyle : options[0]?.value || fallbackStyle);
+  const normalizedMode = modeOptionValues.has(preferredMode)
+    ? preferredMode
+    : (modeOptionValues.has(fallbackMode) ? fallbackMode : modeOptions[0]?.value || fallbackMode);
   const label = options.find((option) => option.value === normalizedStyle)?.label
     || shareVideoBackgroundStyleLabel(normalizedStyle);
+  const modeLabel = modeOptions.find((option) => option.value === normalizedMode)?.label
+    || shareVideoBackgroundModeLabel(normalizedMode);
   return {
     shareVideoBackgroundStyle: normalizedStyle,
     shareVideoBackgroundStyleLabel: label,
     shareVideoBackgroundStyleOptions: options,
+    shareVideoBackgroundMode: normalizedMode,
+    shareVideoBackgroundModeLabel: modeLabel,
+    shareVideoBackgroundModeOptions: modeOptions,
   };
 }
 
@@ -373,12 +406,27 @@ function shareVideoJobStatusText(job: MemoirShareVideoJob): string {
     if (job.background_status === "failed" || job.background_status === "fallback") {
       return "视频已生成，已使用经典背景";
     }
+    if (job.background_effective_mode === "smart_multi" && (job.background_scene_count || 0) > 1) {
+      if (job.background_status === "partial") {
+        return `视频已生成，已使用 ${job.background_scene_count} 张背景图（部分沿用）`;
+      }
+      return `视频已生成，已使用 ${job.background_scene_count} 张背景图`;
+    }
     return "视频已生成";
   }
   if (job.status === "failed") {
     return job.error_message || "视频生成失败";
   }
   if (job.status === "running") {
+    if (job.background_status === "planning") {
+      return "正在分析口述画面";
+    }
+    if (job.background_status === "generating") {
+      return (job.background_scene_count || 0) > 1 ? "正在生成多张背景图" : "正在生成背景图";
+    }
+    if (job.background_status === "ready" || job.background_status === "partial") {
+      return "正在合成视频";
+    }
     if (job.background_status === "pending") {
       return "正在生成背景图";
     }
@@ -817,7 +865,34 @@ definePage<TranscriptDetailData>()({
     const backgroundStyle = saveSelectedShareVideoBackgroundStyle(datasetString(event, "backgroundStyle"));
     this.shareVideoFileCache = {};
     this.setData({
-      ...shareVideoBackgroundPatch(this.data.shareVideoContext, backgroundStyle),
+      ...shareVideoBackgroundPatch(
+        this.data.shareVideoContext,
+        backgroundStyle,
+        this.data.shareVideoBackgroundMode,
+      ),
+      shareVideoJob: null,
+      shareVideoPreviewPath: "",
+      shareVideoSharing: false,
+    });
+  },
+
+  selectShareVideoBackgroundMode(event: ShareVideoBackgroundEvent) {
+    if (
+      this.data.shareVideoCreating ||
+      this.data.shareVideoPolling ||
+      this.data.shareVideoDownloadingPreview ||
+      this.data.shareVideoSharing
+    ) {
+      return;
+    }
+    const backgroundMode = saveSelectedShareVideoBackgroundMode(datasetString(event, "backgroundMode"));
+    this.shareVideoFileCache = {};
+    this.setData({
+      ...shareVideoBackgroundPatch(
+        this.data.shareVideoContext,
+        this.data.shareVideoBackgroundStyle,
+        backgroundMode,
+      ),
       shareVideoJob: null,
       shareVideoPreviewPath: "",
       shareVideoSharing: false,
@@ -859,7 +934,10 @@ definePage<TranscriptDetailData>()({
         item.id,
         this.data.shareVideoSelectedStartChar,
         this.data.shareVideoSelectedEndChar,
-        { backgroundStyle: this.data.shareVideoBackgroundStyle },
+        {
+          backgroundStyle: this.data.shareVideoBackgroundStyle,
+          backgroundMode: this.data.shareVideoBackgroundMode,
+        },
       );
       if (token !== this.shareVideoPollToken) {
         return;
@@ -976,10 +1054,13 @@ definePage<TranscriptDetailData>()({
       return this.data.shareVideoPreviewPath;
     }
     const cachedPath = this.shareVideoFileCache[job.id];
+    const readyStatusText = shareVideoJobStatusText(job) === "视频已生成"
+      ? "视频已生成，可以预览"
+      : shareVideoJobStatusText(job);
     if (cachedPath) {
       this.setData({
         shareVideoPreviewPath: cachedPath,
-        shareVideoStatusText: "视频已生成，可以预览",
+        shareVideoStatusText: readyStatusText,
         shareVideoStatusClass: "succeeded",
       });
       return cachedPath;
@@ -998,7 +1079,7 @@ definePage<TranscriptDetailData>()({
       this.shareVideoFileCache[job.id] = previewPath;
       this.setData({
         shareVideoPreviewPath: previewPath,
-        shareVideoStatusText: "视频已生成，可以预览",
+        shareVideoStatusText: readyStatusText,
         shareVideoStatusClass: "succeeded",
       });
       return previewPath;

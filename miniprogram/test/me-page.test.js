@@ -105,8 +105,36 @@ function loadMePage({
         description: "中国老连环画和旧书插图质感",
       },
     ],
+    SHARE_VIDEO_BACKGROUND_MODE_OPTIONS: [
+      {
+        value: "auto",
+        label: "自动",
+        description: "20 秒以上自动使用智能多图",
+      },
+      {
+        value: "single",
+        label: "单张背景",
+        description: "整段视频使用一张背景图",
+      },
+      {
+        value: "smart_multi",
+        label: "智能多图",
+        description: "按内容拆分多张背景",
+      },
+    ],
+    readSelectedShareVideoBackgroundMode: () => "auto",
     readSelectedShareVideoBackgroundStyle: () => "old_album",
+    saveSelectedShareVideoBackgroundMode: (backgroundMode) => backgroundMode,
     saveSelectedShareVideoBackgroundStyle: (backgroundStyle) => backgroundStyle,
+    shareVideoBackgroundModeLabel: (backgroundMode) => {
+      if (backgroundMode === "smart_multi") {
+        return "智能多图";
+      }
+      if (backgroundMode === "single") {
+        return "单张背景";
+      }
+      return "自动";
+    },
     shareVideoBackgroundStyleLabel: (backgroundStyle) => {
       if (backgroundStyle === "ink_paper") {
         return "淡水墨";
@@ -702,6 +730,39 @@ test("me saves selected share video background style", () => {
   assert.deepEqual(saved, ["ink_paper"]);
   assert.equal(context.data.shareVideoBackgroundStyle, "ink_paper");
   assert.equal(context.data.shareVideoBackgroundStyleLabel, "淡水墨");
+  assert.equal(toastCalls.length, 1);
+  delete global.wx;
+});
+
+test("me saves selected share video background mode", () => {
+  const saved = [];
+  const { page } = loadMePage({
+    shareVideoBackgroundExports: {
+      saveSelectedShareVideoBackgroundMode: (backgroundMode) => {
+        saved.push(backgroundMode);
+        return backgroundMode === "smart_multi" ? backgroundMode : "auto";
+      },
+    },
+  });
+  const toastCalls = [];
+  global.wx = {
+    showToast(input) {
+      toastCalls.push(input);
+    },
+  };
+  const context = pageContext(page);
+
+  page.selectShareVideoBackgroundMode.call(context, {
+    currentTarget: {
+      dataset: {
+        backgroundMode: "smart_multi",
+      },
+    },
+  });
+
+  assert.deepEqual(saved, ["smart_multi"]);
+  assert.equal(context.data.shareVideoBackgroundMode, "smart_multi");
+  assert.equal(context.data.shareVideoBackgroundModeLabel, "智能多图");
   assert.equal(toastCalls.length, 1);
   delete global.wx;
 });

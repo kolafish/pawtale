@@ -421,6 +421,14 @@
   gap: 10rpx;
 }
 
+.setting-subtitle {
+  margin: 12rpx 12rpx 0;
+  color: #7b6f68;
+  font-size: 24rpx;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
 .settings-card {
   padding: 10rpx 28rpx;
 }

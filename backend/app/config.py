@@ -45,6 +45,9 @@ class Settings(BaseSettings):
     volc_ark_image_timeout_seconds: float = 180.0
     volc_ark_image_max_concurrent_requests: int = 1
     memoir_share_video_ai_background_enabled: bool = False
+    memoir_share_video_scene_planner_enabled: bool = True
+    memoir_share_video_scene_planner_model: str = "doubao-seed-2-0-pro-260215"
+    memoir_share_video_scene_planner_timeout_seconds: float = 45.0
 
     # Claude API Keys
     anthropic_auth_token: str = ""

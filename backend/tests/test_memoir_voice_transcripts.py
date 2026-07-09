@@ -42,6 +42,7 @@ from app.services.memoir import source_cards
 from app.services.memoir import automation_event_resolution
 from app.services.memoir import share_video_backgrounds
 from app.services.memoir import share_video_jobs
+from app.services.memoir import share_video_scene_planner
 from app.services.memoir.asr_text_normalization import normalize_memoir_asr_text
 from app.services.memoir.asr import StreamingASREvent
 from app.services.memoir.voice_transcripts import (
@@ -514,6 +515,8 @@ async def test_mobile_memoir_voice_transcript_share_video_context_aligns_edited_
     assert data["duration_ms"] == 12000
     assert data["alignment_strategy"] == "provider_words"
     assert data["alignment_confidence"] >= 0.7
+    assert data["default_background_mode"] == "auto"
+    assert [mode["value"] for mode in data["background_modes"]] == ["auto", "single", "smart_multi"]
     assert [segment["text"] for segment in data["segments"]] == [
         "说我们的心不平的嘛。",
         "我就带你回去。",
@@ -575,6 +578,9 @@ def test_share_video_background_prompts_cover_default_styles():
     options = share_video_backgrounds.share_video_background_style_options()
     assert [option["value"] for option in options] == ["old_album", "ink_paper", "storybook"]
     assert [option["label"] for option in options] == ["旧相册", "淡水墨", "老故事书"]
+    mode_options = share_video_backgrounds.share_video_background_mode_options()
+    assert [option["value"] for option in mode_options] == ["auto", "single", "smart_multi"]
+    assert [option["label"] for option in mode_options] == ["自动", "单张背景", "智能多图"]
 
     old_album = share_video_backgrounds.build_share_video_background_prompt(
         "爷爷说偏爱孙女，但做事情心里要讲公道。",
@@ -605,6 +611,30 @@ def test_share_video_background_prompts_cover_default_styles():
     )
     assert len(long_prompt.content) == share_video_backgrounds.SHARE_VIDEO_BACKGROUND_CONTENT_MAX_CHARS + 3
     assert long_prompt.content.endswith("...")
+
+
+def test_share_video_scene_planner_fallback_splits_by_duration_and_punctuation():
+    text = "小时候一家人住在老房子里。后来去县城读书。再后来大家各自成家。"
+    char_timings = [
+        {"start_ms": index * 1000, "end_ms": (index + 1) * 1000}
+        for index, _char in enumerate(text)
+    ]
+
+    plan = share_video_scene_planner.fallback_share_video_scene_plan(
+        text,
+        char_timings,
+        38_000,
+    )
+    metadata = share_video_scene_planner.scene_plan_to_metadata(plan)
+
+    assert plan.provider == "fallback"
+    assert plan.strategy == "duration_punctuation"
+    assert len(plan.scenes) == 3
+    assert plan.scenes[0].start_char == 0
+    assert plan.scenes[-1].end_char == len(text)
+    assert all(scene.end_ms > scene.start_ms for scene in plan.scenes)
+    assert metadata["version"] == share_video_scene_planner.SHARE_VIDEO_SCENE_PLAN_VERSION
+    assert len(metadata["scenes"]) == 3
 
 
 async def test_share_video_background_generation_caches_provider_result(tmp_path, monkeypatch):
@@ -672,7 +702,10 @@ async def test_mobile_memoir_creates_and_downloads_share_video_job(client, test_
 
     monkeypatch.setattr(
         "app.services.memoir.share_video_jobs.get_settings",
-        lambda: SimpleNamespace(memoir_share_video_ai_background_enabled=True),
+        lambda: SimpleNamespace(
+            memoir_share_video_ai_background_enabled=True,
+            volc_ark_api_key="test-key",
+        ),
     )
 
     async def fail_background_generation(_selected_text, _style_id):
@@ -712,6 +745,8 @@ async def test_mobile_memoir_creates_and_downloads_share_video_job(client, test_
     assert detail["selected_text"] == "我小时候住在外婆家。"
     assert detail["duration_ms"] >= 3000
     assert detail["background_style"] == "ink_paper"
+    assert detail["background_mode"] == "auto"
+    assert detail["background_effective_mode"] == "single"
     assert detail["background_status"] == "failed"
     assert "provider unavailable" in detail["background_error_message"]
     assert detail["video_size_bytes"] == len(b"fake mp4")
@@ -729,6 +764,181 @@ async def test_mobile_memoir_creates_and_downloads_share_video_job(client, test_
     assert download_response.status_code == 200
     assert download_response.headers["content-type"].startswith("video/mp4")
     assert download_response.content == b"fake mp4"
+
+
+async def test_mobile_memoir_share_video_job_uses_smart_multi_background_segments(
+    client,
+    test_db,
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        "app.services.memoir.share_video_jobs.MEMOIR_SHARE_VIDEO_DIR",
+        tmp_path / "share-videos",
+    )
+    monkeypatch.setattr(
+        "app.services.memoir.share_video_jobs.get_settings",
+        lambda: SimpleNamespace(
+            memoir_share_video_ai_background_enabled=True,
+            volc_ark_api_key="test-key",
+        ),
+    )
+
+    async def noop_background_share_video_job(_job_id):
+        return None
+
+    monkeypatch.setattr(
+        "app.services.memoir.share_video_jobs.run_share_video_job",
+        noop_background_share_video_job,
+    )
+
+    text = "小时候一家人住在老房子里。后来去县城读书。再后来大家各自成家。"
+    created = await create_test_voice_transcript(client, test_db, text=text)
+    utterance = await test_db.scalar(
+        select(MemoirVoiceUtterance).where(MemoirVoiceUtterance.id == created["utterance_id"])
+    )
+    audio_file = await test_db.scalar(select(AudioFile).where(AudioFile.id == created["audio_file_id"]))
+    assert utterance is not None
+    assert audio_file is not None
+    utterance.end_ms = 36_000
+    audio_file.duration_seconds = 36
+    await test_db.commit()
+
+    first_end = text.index("。") + 1
+    second_end = text.index("。", first_end) + 1
+
+    async def fake_plan(selected_text, char_timings, duration_ms):
+        assert selected_text == text
+        assert duration_ms == 36_000
+        assert len(char_timings) == len(text)
+        return share_video_scene_planner.ShareVideoScenePlan(
+            provider="fake_llm",
+            model="fake-scene-planner",
+            strategy="llm",
+            plan_hash="plan-hash",
+            scenes=[
+                share_video_scene_planner.ShareVideoScene(
+                    index=0,
+                    start_char=0,
+                    end_char=first_end,
+                    start_ms=0,
+                    end_ms=12_000,
+                    title="老房子",
+                    visual_summary="一家人在老房子里的生活气息",
+                    image_prompt_content="老房子里一家人的温暖生活气息",
+                ),
+                share_video_scene_planner.ShareVideoScene(
+                    index=1,
+                    start_char=first_end,
+                    end_char=second_end,
+                    start_ms=12_000,
+                    end_ms=24_000,
+                    title="县城读书",
+                    visual_summary="去县城读书的记忆",
+                    image_prompt_content="去县城读书路上的旧时记忆",
+                ),
+                share_video_scene_planner.ShareVideoScene(
+                    index=2,
+                    start_char=second_end,
+                    end_char=len(text),
+                    start_ms=24_000,
+                    end_ms=36_000,
+                    title="各自成家",
+                    visual_summary="家人各自成家后的回望",
+                    image_prompt_content="家人各自成家后的安静回望",
+                ),
+            ],
+        )
+
+    image_calls: list[tuple[str, str]] = []
+    image_dir = tmp_path / "backgrounds"
+    image_dir.mkdir()
+
+    async def fake_background(selected_text, style_id):
+        image_calls.append((selected_text, style_id))
+        image_path = image_dir / f"scene-{len(image_calls)}.png"
+        image_path.write_bytes(b"fake image")
+        return share_video_backgrounds.ShareVideoBackgroundAsset(
+            path=image_path,
+            storage_path=f"memoir/share-video-backgrounds/scene-{len(image_calls)}.png",
+            style_id=style_id,
+            prompt_hash=f"prompt-{len(image_calls)}",
+            prompt_template_version="test",
+            provider="volc_ark",
+            model="doubao-seedream-5-0-lite-260128",
+            cache_hit=False,
+        )
+
+    render_requests: list[share_video_jobs.ShareVideoRenderRequest] = []
+
+    async def fake_render_share_video_clip(request):
+        render_requests.append(request)
+        request.target_path.parent.mkdir(parents=True, exist_ok=True)
+        request.target_path.write_bytes(b"fake multi mp4")
+
+    monkeypatch.setattr(
+        "app.services.memoir.share_video_jobs.plan_share_video_background_scenes",
+        fake_plan,
+    )
+    monkeypatch.setattr(
+        "app.services.memoir.share_video_jobs.get_or_generate_share_video_background",
+        fake_background,
+    )
+    monkeypatch.setattr(
+        "app.services.memoir.share_video_jobs.render_share_video_clip",
+        fake_render_share_video_clip,
+    )
+
+    response = await client.post(
+        f"/api/mobile/memoir/voice-transcripts/{created['utterance_id']}/share-video/jobs",
+        json={
+            "start_char": 0,
+            "end_char": len(text),
+            "background_style": "old_album",
+            "background_mode": "smart_multi",
+        },
+    )
+
+    assert response.status_code == 201
+    job_id = response.json()["id"]
+    assert response.json()["background_mode"] == "smart_multi"
+    assert response.json()["background_effective_mode"] == "smart_multi"
+
+    await share_video_jobs.run_share_video_job_with_session(test_db, job_id)
+    detail_response = await client.get(f"/api/mobile/memoir/share-video/jobs/{job_id}")
+    assert detail_response.status_code == 200
+    detail = detail_response.json()
+
+    assert detail["status"] == "succeeded"
+    assert detail["background_mode"] == "smart_multi"
+    assert detail["background_effective_mode"] == "smart_multi"
+    assert detail["background_scene_count"] == 3
+    assert detail["background_status"] == "ready"
+    assert detail["background_provider"] == "volc_ark"
+    assert detail["background_model"] == "doubao-seedream-5-0-lite-260128"
+    assert [style for _prompt, style in image_calls] == ["old_album", "old_album", "old_album"]
+    assert [prompt for prompt, _style in image_calls] == [
+        "老房子里一家人的温暖生活气息",
+        "去县城读书路上的旧时记忆",
+        "家人各自成家后的安静回望",
+    ]
+    assert len(render_requests) == 1
+    render_request = render_requests[0]
+    assert render_request.background_image_path is None
+    assert render_request.background_segments is not None
+    assert len(render_request.background_segments) == 3
+    assert [(segment.start_ms, segment.end_ms) for segment in render_request.background_segments] == [
+        (0, 12_000),
+        (12_000, 24_000),
+        (24_000, 36_000),
+    ]
+
+    stored_job = await test_db.scalar(
+        select(MemoirMaterialShareVideo).where(MemoirMaterialShareVideo.id == job_id)
+    )
+    assert stored_job is not None
+    assert stored_job.metadata_json["background_scene_plan"]["provider"] == "fake_llm"
+    assert stored_job.metadata_json["background_generated_count"] == 3
 
 
 async def test_share_video_job_detail_enqueues_stale_running_recovery(

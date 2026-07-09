@@ -14,6 +14,9 @@ from app.services.provider_limits import provider_concurrency_limiter
 
 
 DEFAULT_SHARE_VIDEO_BACKGROUND_STYLE = "old_album"
+DEFAULT_SHARE_VIDEO_BACKGROUND_MODE = "auto"
+SHARE_VIDEO_BACKGROUND_MODE_SINGLE = "single"
+SHARE_VIDEO_BACKGROUND_MODE_SMART_MULTI = "smart_multi"
 SHARE_VIDEO_BACKGROUND_PROMPT_VERSION = "memoir-share-video-background-v1"
 SHARE_VIDEO_BACKGROUND_CONTENT_MAX_CHARS = 300
 MEMOIR_SHARE_VIDEO_BACKGROUND_DIR = DATA_DIR / "memoir" / "share-video-backgrounds"
@@ -115,6 +118,25 @@ _BACKGROUND_STYLES: tuple[ShareVideoBackgroundStyle, ...] = (
 )
 _BACKGROUND_STYLE_BY_VALUE = {style.value: style for style in _BACKGROUND_STYLES}
 
+_BACKGROUND_MODES: tuple[dict[str, str], ...] = (
+    {
+        "value": DEFAULT_SHARE_VIDEO_BACKGROUND_MODE,
+        "label": "自动",
+        "description": "20 秒以上自动使用智能多图，短片段使用单张背景",
+    },
+    {
+        "value": SHARE_VIDEO_BACKGROUND_MODE_SINGLE,
+        "label": "单张背景",
+        "description": "整段视频使用一张背景图，生成更快",
+    },
+    {
+        "value": SHARE_VIDEO_BACKGROUND_MODE_SMART_MULTI,
+        "label": "智能多图",
+        "description": "根据口述内容拆分多个画面，视频中自动切换背景",
+    },
+)
+_BACKGROUND_MODE_VALUES = {mode["value"] for mode in _BACKGROUND_MODES}
+
 
 def share_video_background_style_options() -> list[dict[str, str]]:
     return [
@@ -127,11 +149,23 @@ def share_video_background_style_options() -> list[dict[str, str]]:
     ]
 
 
+def share_video_background_mode_options() -> list[dict[str, str]]:
+    return [dict(mode) for mode in _BACKGROUND_MODES]
+
+
 def normalize_share_video_background_style(value: str | None) -> str:
     normalized = (value or DEFAULT_SHARE_VIDEO_BACKGROUND_STYLE).strip()
     if normalized not in _BACKGROUND_STYLE_BY_VALUE:
         valid = "、".join(style.label for style in _BACKGROUND_STYLES)
         raise ValueError(f"未知的分享视频背景风格，可选：{valid}")
+    return normalized
+
+
+def normalize_share_video_background_mode(value: str | None) -> str:
+    normalized = (value or DEFAULT_SHARE_VIDEO_BACKGROUND_MODE).strip()
+    if normalized not in _BACKGROUND_MODE_VALUES:
+        valid = "、".join(mode["label"] for mode in _BACKGROUND_MODES)
+        raise ValueError(f"未知的分享视频背景模式，可选：{valid}")
     return normalized
 
 
