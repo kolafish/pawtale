@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.domain.memoir.types import (
     MemoirAutomationEventStatus,
@@ -9,6 +9,7 @@ from app.domain.memoir.types import (
     MemoirChatMessageRole,
     MemoirGuidanceMode,
     MemoirInterviewType,
+    MemoirShareVideoJobStatus,
     MemoirVoiceSessionStatus,
 )
 
@@ -357,6 +358,49 @@ class MemoirTranscriptShareVideoContextResponse(BaseModel):
     min_select_ms: int = 3000
     max_select_ms: int = 90000
     segments: list[MemoirTranscriptShareVideoSegmentResponse] = Field(default_factory=list)
+
+
+class MemoirShareVideoJobCreateRequest(BaseModel):
+    start_char: int = Field(ge=0)
+    end_char: int = Field(gt=0)
+    style: str = Field(default="warm_minimal", min_length=1, max_length=40)
+    style_options: dict[str, object] = Field(default_factory=dict)
+
+    @field_validator("style")
+    @classmethod
+    def _valid_style(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("不能为空")
+        return normalized
+
+    @model_validator(mode="after")
+    def _valid_range(self) -> "MemoirShareVideoJobCreateRequest":
+        if self.end_char <= self.start_char:
+            raise ValueError("结束位置必须大于开始位置")
+        return self
+
+
+class MemoirShareVideoJobResponse(BaseModel):
+    id: str
+    project_id: str
+    utterance_id: str
+    audio_file_id: str
+    status: MemoirShareVideoJobStatus
+    selected_text: str
+    start_char: int
+    end_char: int
+    start_ms: int
+    end_ms: int
+    duration_ms: int
+    style: str = "warm_minimal"
+    video_mime_type: str = "video/mp4"
+    video_size_bytes: int | None = None
+    download_url: str | None = None
+    error_message: str = ""
+    created_at: datetime
+    updated_at: datetime
+    completed_at: datetime | None = None
 
 class MemoirVoiceSearchTranscriptionRequest(BaseModel):
     audio_base64: str = Field(min_length=1)

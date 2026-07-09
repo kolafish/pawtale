@@ -23,6 +23,7 @@ from app.domain.memoir.types import (
     MemoirInterviewType,
     MemoirOutputStatus,
     MemoirSemanticCacheStatus,
+    MemoirShareVideoJobStatus,
     MemoirTranscriptVersionType,
     MemoirVoiceSessionStatus,
 )
@@ -234,6 +235,54 @@ class MemoirTranscriptAlignment(Base):
         "MemoirVoiceUtterance",
         back_populates="transcript_alignment",
     )
+
+
+class MemoirMaterialShareVideo(Base):
+    __tablename__ = "memoir_material_share_videos"
+    __table_args__ = (
+        CheckConstraint(
+            f"status IN ({_enum_values(MemoirShareVideoJobStatus)})",
+            name="ck_memoir_material_share_videos_status",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    project_id: Mapped[str] = mapped_column(String(36), ForeignKey("projects.id"), nullable=False, index=True)
+    utterance_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("memoir_voice_utterances.id"),
+        nullable=False,
+        index=True,
+    )
+    audio_file_id: Mapped[str] = mapped_column(String(36), ForeignKey("audio_files.id"), nullable=False, index=True)
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(
+        String(20),
+        default=MemoirShareVideoJobStatus.PENDING.value,
+        nullable=False,
+        index=True,
+    )
+    text_source: Mapped[str] = mapped_column(String(20), nullable=False)
+    text_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    selected_text: Mapped[str] = mapped_column(Text, nullable=False)
+    start_char: Mapped[int] = mapped_column(Integer, nullable=False)
+    end_char: Mapped[int] = mapped_column(Integer, nullable=False)
+    start_ms: Mapped[int] = mapped_column(Integer, nullable=False)
+    end_ms: Mapped[int] = mapped_column(Integer, nullable=False)
+    style: Mapped[str] = mapped_column(String(40), default="warm_minimal", nullable=False)
+    style_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    metadata_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    video_storage_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    video_mime_type: Mapped[str] = mapped_column(String(100), default="video/mp4", nullable=False)
+    video_size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    error_message: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    project: Mapped["Project"] = orm_relationship("Project")
+    utterance: Mapped[MemoirVoiceUtterance] = orm_relationship("MemoirVoiceUtterance")
+    audio_file: Mapped[AudioFile] = orm_relationship("AudioFile")
 
 
 class MemoirTranscriptVersion(Base):

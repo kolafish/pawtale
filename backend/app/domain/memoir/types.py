@@ -86,6 +86,13 @@ class MemoirEditingJobStatus(str, Enum):
     SKIPPED = "skipped"
 
 
+class MemoirShareVideoJobStatus(str, Enum):
+    PENDING = "pending"
+    RUNNING = "running"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+
+
 class MemoirAutomationEventType(str, Enum):
     SOURCE_ASSIGNED = "source_assigned"
     SOURCE_HELD = "source_held"

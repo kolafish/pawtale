@@ -28,6 +28,7 @@ from app.models.memoir import (
     MemoirChapterSourceLink,
     MemoirChatMessage,
     MemoirEditingJob,
+    MemoirMaterialShareVideo,
     MemoirSourceCard,
     MemoirTranscriptAlignment,
     MemoirTranscriptVersion,
@@ -35,6 +36,7 @@ from app.models.memoir import (
 )
 from app.services.memoir import source_cards
 from app.services.memoir import automation_event_resolution
+from app.services.memoir import share_video_jobs
 from app.services.memoir.asr_text_normalization import normalize_memoir_asr_text
 from app.services.memoir.asr import StreamingASREvent
 from app.services.memoir.voice_transcripts import (
@@ -522,6 +524,64 @@ async def test_mobile_memoir_voice_transcript_share_video_context_aligns_edited_
     assert alignment is not None
     assert alignment.text_hash == data["text_hash"]
     assert alignment.segments_json[0]["text"] == "说我们的心不平的嘛。"
+
+
+async def test_mobile_memoir_creates_and_downloads_share_video_job(client, test_db, tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "app.services.memoir.share_video_jobs.MEMOIR_SHARE_VIDEO_DIR",
+        tmp_path / "share-videos",
+    )
+
+    async def fake_render_share_video_clip(request):
+        request.target_path.parent.mkdir(parents=True, exist_ok=True)
+        request.target_path.write_bytes(b"fake mp4")
+
+    monkeypatch.setattr(
+        "app.services.memoir.share_video_jobs.render_share_video_clip",
+        fake_render_share_video_clip,
+    )
+
+    async def noop_background_share_video_job(_job_id):
+        return None
+
+    monkeypatch.setattr(
+        "app.services.memoir.share_video_jobs.run_share_video_job",
+        noop_background_share_video_job,
+    )
+    text = "我小时候住在外婆家。后来我去县城读书。"
+    created = await create_test_voice_transcript(client, test_db, text=text)
+    end_char = text.index("。") + 1
+
+    response = await client.post(
+        f"/api/mobile/memoir/voice-transcripts/{created['utterance_id']}/share-video/jobs",
+        json={"start_char": 0, "end_char": end_char},
+    )
+
+    assert response.status_code == 201
+    created_job = response.json()
+    assert created_job["status"] == "pending"
+    job_id = created_job["id"]
+    await share_video_jobs.run_share_video_job_with_session(test_db, job_id)
+    detail_response = await client.get(f"/api/mobile/memoir/share-video/jobs/{job_id}")
+    assert detail_response.status_code == 200
+    detail = detail_response.json()
+    assert detail is not None
+    assert detail["status"] == "succeeded"
+    assert detail["selected_text"] == "我小时候住在外婆家。"
+    assert detail["duration_ms"] >= 3000
+    assert detail["video_size_bytes"] == len(b"fake mp4")
+    assert detail["download_url"] == f"/api/mobile/memoir/share-video/jobs/{job_id}/download"
+    stored_job = await test_db.scalar(
+        select(MemoirMaterialShareVideo).where(MemoirMaterialShareVideo.id == job_id)
+    )
+    assert stored_job is not None
+    assert stored_job.video_storage_path
+
+    download_response = await client.get(f"/api/mobile/memoir/share-video/jobs/{job_id}/download")
+
+    assert download_response.status_code == 200
+    assert download_response.headers["content-type"].startswith("video/mp4")
+    assert download_response.content == b"fake mp4"
 
 
 async def test_mobile_memoir_lists_unfinalized_audio_for_transcription_recovery(

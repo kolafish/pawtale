@@ -373,6 +373,22 @@ def _build_alignment(utterance: MemoirVoiceUtterance) -> AlignmentBuildResult:
     )
 
 
+def build_share_video_alignment(utterance: MemoirVoiceUtterance) -> AlignmentBuildResult:
+    return _build_alignment(utterance)
+
+
+def share_video_char_range_ms(
+    result: AlignmentBuildResult,
+    start_char: int,
+    end_char: int,
+) -> tuple[int, int]:
+    if start_char < 0 or end_char > len(result.char_timings) or end_char <= start_char:
+        raise HTTPException(status_code=400, detail="选择的文字范围无效")
+    start_ms = int(result.char_timings[start_char]["start_ms"])
+    end_ms = int(result.char_timings[end_char - 1]["end_ms"])
+    return max(0, start_ms), max(start_ms + 1, end_ms)
+
+
 def _response(
     utterance: MemoirVoiceUtterance,
     result: AlignmentBuildResult,
