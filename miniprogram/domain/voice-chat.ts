@@ -367,6 +367,12 @@ export interface MemoirShareVideoBackgroundMode {
   description: string;
 }
 
+export interface MemoirShareVideoBackgroundSource {
+  value: string;
+  label: string;
+  description: string;
+}
+
 export interface MemoirTranscriptShareVideoContext {
   utterance_id: string;
   audio_file_id: string;
@@ -379,8 +385,10 @@ export interface MemoirTranscriptShareVideoContext {
   min_select_ms: number;
   max_select_ms: number;
   ai_background_enabled?: boolean;
+  default_background_source?: string;
   default_background_style?: string;
   default_background_mode?: string;
+  background_sources?: MemoirShareVideoBackgroundSource[];
   background_styles?: MemoirShareVideoBackgroundStyle[];
   background_modes?: MemoirShareVideoBackgroundMode[];
   segments: MemoirTranscriptShareVideoSegment[];
@@ -414,9 +422,11 @@ export interface MemoirShareVideoJob {
   end_ms: number;
   duration_ms: number;
   style: string;
+  background_source?: string;
   background_style?: string;
   background_mode?: string;
   background_effective_mode?: string;
+  custom_background_asset_id?: string | null;
   background_scene_count?: number;
   background_status?: string;
   background_provider?: string | null;
@@ -430,6 +440,20 @@ export interface MemoirShareVideoJob {
   created_at: string;
   updated_at: string;
   completed_at?: string | null;
+}
+
+export interface MemoirShareVideoCustomBackgroundAsset {
+  id: string;
+  project_id: string;
+  status: MemoirImageAssetStatus;
+  preview_url: string;
+  mime_type: string;
+  size_bytes?: number | null;
+  width?: number | null;
+  height?: number | null;
+  processing_preset: string;
+  original_mime_type: string;
+  original_size_bytes?: number | null;
 }
 
 export interface MemoirBookImagePlacement {

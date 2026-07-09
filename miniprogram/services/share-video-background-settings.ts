@@ -10,15 +10,41 @@ export interface ShareVideoBackgroundModeOption {
   description: string;
 }
 
+export interface ShareVideoBackgroundSourceOption {
+  value: string;
+  label: string;
+  description: string;
+}
+
 export interface ShareVideoBackgroundSettings {
+  backgroundSource: string;
   backgroundStyle: string;
   backgroundMode: string;
 }
 
 const STORAGE_KEY = "pawtale_share_video_background_settings";
 
+export const DEFAULT_SHARE_VIDEO_BACKGROUND_SOURCE = "ai";
 export const DEFAULT_SHARE_VIDEO_BACKGROUND_STYLE = "old_album";
 export const DEFAULT_SHARE_VIDEO_BACKGROUND_MODE = "auto";
+
+export const SHARE_VIDEO_BACKGROUND_SOURCE_OPTIONS: ShareVideoBackgroundSourceOption[] = [
+  {
+    value: "ai",
+    label: "AI生成",
+    description: "根据文字自动生成回忆录背景图，可选择单图或智能多图",
+  },
+  {
+    value: "custom",
+    label: "自定义图片",
+    description: "上传自己的图片，自动处理成适合叠加文字的视频背景",
+  },
+  {
+    value: "classic",
+    label: "经典背景",
+    description: "使用米白纸张质感背景，不生成也不上传图片",
+  },
+];
 
 export const SHARE_VIDEO_BACKGROUND_STYLE_OPTIONS: ShareVideoBackgroundStyleOption[] = [
   {
@@ -62,12 +88,26 @@ const SHARE_VIDEO_BACKGROUND_STYLE_VALUES = new Set(
 const SHARE_VIDEO_BACKGROUND_MODE_VALUES = new Set(
   SHARE_VIDEO_BACKGROUND_MODE_OPTIONS.map((option) => option.value),
 );
+const SHARE_VIDEO_BACKGROUND_SOURCE_VALUES = new Set(
+  SHARE_VIDEO_BACKGROUND_SOURCE_OPTIONS.map((option) => option.value),
+);
 
 function defaultShareVideoBackgroundSettings(): ShareVideoBackgroundSettings {
   return {
+    backgroundSource: DEFAULT_SHARE_VIDEO_BACKGROUND_SOURCE,
     backgroundStyle: DEFAULT_SHARE_VIDEO_BACKGROUND_STYLE,
     backgroundMode: DEFAULT_SHARE_VIDEO_BACKGROUND_MODE,
   };
+}
+
+export function normalizeShareVideoBackgroundSource(value: unknown): string {
+  if (typeof value !== "string") {
+    return DEFAULT_SHARE_VIDEO_BACKGROUND_SOURCE;
+  }
+  const normalized = value.trim();
+  return SHARE_VIDEO_BACKGROUND_SOURCE_VALUES.has(normalized)
+    ? normalized
+    : DEFAULT_SHARE_VIDEO_BACKGROUND_SOURCE;
 }
 
 export function normalizeShareVideoBackgroundStyle(value: unknown): string {
@@ -100,12 +140,18 @@ export function shareVideoBackgroundModeLabel(value: string): string {
     || SHARE_VIDEO_BACKGROUND_MODE_OPTIONS[0].label;
 }
 
+export function shareVideoBackgroundSourceLabel(value: string): string {
+  return SHARE_VIDEO_BACKGROUND_SOURCE_OPTIONS.find((option) => option.value === value)?.label
+    || SHARE_VIDEO_BACKGROUND_SOURCE_OPTIONS[0].label;
+}
+
 export function normalizeShareVideoBackgroundSettings(value: unknown): ShareVideoBackgroundSettings {
   if (!value || typeof value !== "object") {
     return defaultShareVideoBackgroundSettings();
   }
   const candidate = value as Partial<ShareVideoBackgroundSettings>;
   return {
+    backgroundSource: normalizeShareVideoBackgroundSource(candidate.backgroundSource),
     backgroundStyle: normalizeShareVideoBackgroundStyle(candidate.backgroundStyle),
     backgroundMode: normalizeShareVideoBackgroundMode(candidate.backgroundMode),
   };
@@ -129,8 +175,21 @@ export function readSelectedShareVideoBackgroundStyle(): string {
   return readShareVideoBackgroundSettings().backgroundStyle;
 }
 
+export function readSelectedShareVideoBackgroundSource(): string {
+  return readShareVideoBackgroundSettings().backgroundSource;
+}
+
 export function readSelectedShareVideoBackgroundMode(): string {
   return readShareVideoBackgroundSettings().backgroundMode;
+}
+
+export function saveSelectedShareVideoBackgroundSource(backgroundSource: string): string {
+  const normalized = normalizeShareVideoBackgroundSource(backgroundSource);
+  const settings = readShareVideoBackgroundSettings();
+  if (typeof wx !== "undefined" && typeof wx.setStorageSync === "function") {
+    wx.setStorageSync(STORAGE_KEY, { ...settings, backgroundSource: normalized });
+  }
+  return normalized;
 }
 
 export function saveSelectedShareVideoBackgroundStyle(backgroundStyle: string): string {

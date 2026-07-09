@@ -1,4 +1,5 @@
 import type {
+  MemoirShareVideoCustomBackgroundAsset,
   MemoirShareVideoJob,
   MemoirTranscriptShareVideoContext,
   MemoirVoiceSearchQueryParseResponse,
@@ -34,8 +35,10 @@ interface VoiceTranscriptListOptions {
 interface ShareVideoJobOptions {
   style?: string;
   styleOptions?: Record<string, unknown>;
+  backgroundSource?: string;
   backgroundStyle?: string;
   backgroundMode?: string;
+  customBackgroundAssetId?: string;
 }
 
 export function listMemoirVoiceTranscripts(
@@ -86,11 +89,88 @@ export function createMemoirTranscriptShareVideoJob(
         end_char: endChar,
         style,
         style_options: options.styleOptions || {},
+        ...(options.backgroundSource ? { background_source: options.backgroundSource } : {}),
         ...(options.backgroundStyle ? { background_style: options.backgroundStyle } : {}),
         ...(options.backgroundMode ? { background_mode: options.backgroundMode } : {}),
+        ...(options.customBackgroundAssetId ? { custom_background_asset_id: options.customBackgroundAssetId } : {}),
       },
     },
   );
+}
+
+function uploadDomain(url: string): string {
+  const parts = url.split("/");
+  if (parts.length >= 3 && parts[0].startsWith("http")) {
+    return parts.slice(0, 3).join("/");
+  }
+  return url;
+}
+
+function shareVideoUploadErrorMessage(errMsg: string | undefined, url: string): string {
+  const message = String(errMsg || "");
+  if (message.toLowerCase().includes("url not in domain list")) {
+    return `图片上传域名未配置，请在微信公众平台把 ${uploadDomain(url)} 添加到 uploadFile 合法域名。`;
+  }
+  return message || "背景图片上传失败";
+}
+
+function uploadApiMessage(data: string): string {
+  try {
+    const parsed = JSON.parse(data) as { detail?: unknown };
+    return typeof parsed.detail === "string" ? parsed.detail : "背景图片上传失败";
+  } catch {
+    return data || "背景图片上传失败";
+  }
+}
+
+function parseUploadJson<T>(data: string): T {
+  try {
+    return JSON.parse(data) as T;
+  } catch (error) {
+    throw new ApiError(0, "背景图片上传结果解析失败", error);
+  }
+}
+
+export async function uploadMemoirShareVideoCustomBackground(
+  projectId: string,
+  filePath: string,
+): Promise<MemoirShareVideoCustomBackgroundAsset> {
+  await ensureMemoirBackendSession();
+  const config = readBackendConfig();
+  if (!config.httpBaseUrl) {
+    throw new ApiError(0, "未配置后端 HTTP 地址", {});
+  }
+  const cookie = readSessionCookie();
+  const url = `${cleanBaseUrl(config.httpBaseUrl)}/api/mobile/memoir/share-video/background-assets`;
+  return new Promise((resolve, reject) => {
+    wx.uploadFile({
+      url,
+      filePath,
+      name: "file",
+      timeout: 60000,
+      formData: {
+        project_id: projectId,
+        processing_preset: "memoir_soft",
+      },
+      header: {
+        ...(cookie ? { Cookie: cookie } : {}),
+      },
+      success: (result) => {
+        if (result.statusCode >= 200 && result.statusCode < 300) {
+          try {
+            resolve(parseUploadJson<MemoirShareVideoCustomBackgroundAsset>(result.data));
+          } catch (error) {
+            reject(error);
+          }
+          return;
+        }
+        reject(new ApiError(result.statusCode, uploadApiMessage(result.data), result.data));
+      },
+      fail: (error) => {
+        reject(new ApiError(0, shareVideoUploadErrorMessage(error.errMsg, url), error));
+      },
+    });
+  });
 }
 
 export function getMemoirShareVideoJob(jobId: string): Promise<MemoirShareVideoJob> {
@@ -113,6 +193,14 @@ function shareVideoDownloadErrorMessage(errMsg: string | undefined, url: string)
     return `视频下载域名未配置，请在微信公众平台把 ${shareVideoDownloadDomain(url)} 添加到 downloadFile 合法域名。`;
   }
   return message || "视频下载失败";
+}
+
+function shareVideoImagePreviewDownloadErrorMessage(errMsg: string | undefined, url: string): string {
+  const message = String(errMsg || "");
+  if (message.toLowerCase().includes("url not in domain list")) {
+    return `图片预览域名未配置，请在微信公众平台把 ${shareVideoDownloadDomain(url)} 添加到 downloadFile 合法域名。`;
+  }
+  return message || "背景图片预览下载失败";
 }
 
 export function memoirShareVideoDownloadUrl(downloadUrl: string): string {
@@ -150,6 +238,36 @@ export async function downloadMemoirShareVideoJob(job: MemoirShareVideoJob): Pro
       },
       fail: (error) => {
         reject(new ApiError(0, shareVideoDownloadErrorMessage(error.errMsg, url), error));
+      },
+    });
+  });
+}
+
+export async function downloadMemoirShareVideoCustomBackgroundPreview(
+  asset: MemoirShareVideoCustomBackgroundAsset,
+): Promise<string> {
+  if (!asset.preview_url) {
+    throw new ApiError(400, "背景图片预览不可用", asset);
+  }
+  await ensureMemoirBackendSession();
+  const cookie = readSessionCookie();
+  const url = memoirShareVideoDownloadUrl(asset.preview_url);
+  return new Promise((resolve, reject) => {
+    wx.downloadFile({
+      url,
+      timeout: 60000,
+      header: {
+        ...(cookie ? { Cookie: cookie } : {}),
+      },
+      success: (result) => {
+        if (result.statusCode >= 200 && result.statusCode < 300) {
+          resolve(result.tempFilePath);
+          return;
+        }
+        reject(new ApiError(result.statusCode, "背景图片预览下载失败", result));
+      },
+      fail: (error) => {
+        reject(new ApiError(0, shareVideoImagePreviewDownloadErrorMessage(error.errMsg, url), error));
       },
     });
   });

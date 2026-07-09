@@ -603,6 +603,94 @@ test("share video APIs encode routes and download preview with session cookie", 
   delete global.wx;
 });
 
+test("share video custom background upload and preview use backend session", async () => {
+  const requests = [];
+  const uploads = [];
+  const downloads = [];
+  const asset = {
+    id: "asset-1",
+    project_id: "project/1",
+    status: "ready",
+    preview_url: "/api/mobile/memoir/projects/project%2F1/image-assets/asset-1/file",
+    mime_type: "image/jpeg",
+    size_bytes: 4096,
+    width: 1280,
+    height: 720,
+    processing_preset: "memoir_soft",
+    original_mime_type: "image/png",
+    original_size_bytes: 2048,
+  };
+  global.wx = {
+    getStorageSync(key) {
+      if (key === "pawtale_backend_config") {
+        return {
+          httpBaseUrl: "http://backend.local:8000/",
+          devEmail: "local@example.com",
+          devPassword: "secret",
+        };
+      }
+      if (key === "pawtale_backend_cookie") {
+        return "pawtale_session=abc";
+      }
+      return "";
+    },
+    getExtConfigSync() {
+      return {};
+    },
+    setStorageSync() {},
+    removeStorageSync() {},
+    request(options) {
+      requests.push(options);
+      if (options.url.endsWith("/api/auth/me")) {
+        options.success({ statusCode: 200, data: { id: "user-1" }, cookies: [], header: {} });
+        return;
+      }
+      options.success({ statusCode: 200, data: {}, cookies: [], header: {} });
+    },
+    uploadFile(options) {
+      uploads.push(options);
+      options.success({
+        errMsg: "uploadFile:ok",
+        statusCode: 201,
+        data: JSON.stringify(asset),
+      });
+    },
+    downloadFile(options) {
+      downloads.push(options);
+      options.success({ statusCode: 200, tempFilePath: "/tmp/processed-background.jpg", header: {}, errMsg: "downloadFile:ok" });
+    },
+  };
+  resetMemoirVoiceApiModules();
+  const {
+    downloadMemoirShareVideoCustomBackgroundPreview,
+    uploadMemoirShareVideoCustomBackground,
+  } = require("../services/memoir-voice-api.ts");
+
+  const uploaded = await uploadMemoirShareVideoCustomBackground("project/1", "/tmp/family.png");
+  const previewPath = await downloadMemoirShareVideoCustomBackgroundPreview(uploaded);
+
+  assert.equal(uploaded.id, "asset-1");
+  assert.equal(previewPath, "/tmp/processed-background.jpg");
+  assert.equal(uploads.length, 1);
+  assert.equal(uploads[0].url, "http://backend.local:8000/api/mobile/memoir/share-video/background-assets");
+  assert.equal(uploads[0].filePath, "/tmp/family.png");
+  assert.equal(uploads[0].name, "file");
+  assert.deepEqual(uploads[0].formData, {
+    project_id: "project/1",
+    processing_preset: "memoir_soft",
+  });
+  assert.equal(uploads[0].header.Cookie, "pawtale_session=abc");
+  assert.equal(uploads[0].timeout, 60000);
+  assert.equal(
+    downloads[0].url,
+    "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/image-assets/asset-1/file",
+  );
+  assert.equal(downloads[0].header.Cookie, "pawtale_session=abc");
+  assert.equal(downloads[0].timeout, 60000);
+  assert.equal(requests[0].url, "http://backend.local:8000/api/auth/me");
+  delete global.wx;
+});
+
 test("book service APIs encode backend routes and selected AI model", async () => {
   const requests = [];
   installBookApiWxMock({ requests });

@@ -286,7 +286,7 @@
           class="primary-button"
           bindtap="toggleShareVideoPanel"
           loading="{{shareVideoLoadingContext}}"
-          disabled="{{saving || deleting || convertingQuestionToAnswer || shareVideoCreating || shareVideoPolling || shareVideoDownloadingPreview || shareVideoSharing}}"
+          disabled="{{saving || deleting || convertingQuestionToAnswer || shareVideoCreating || shareVideoPolling || shareVideoDownloadingPreview || shareVideoSharing || shareVideoCustomBackgroundUploading}}"
         >
           {{shareVideoPanelOpen ? "收起视频" : "制作视频"}}
         </button>
@@ -329,6 +329,25 @@
           </view>
           <view class="share-video-background">
             <view class="share-video-background-head">
+              <text class="voice-edit-label">背景来源</text>
+              <text class="share-video-background-current">{{shareVideoBackgroundSourceLabel}}</text>
+            </view>
+            <view class="share-video-background-options">
+              <view
+                wx:for="{{shareVideoBackgroundSourceOptions}}"
+                wx:key="value"
+                class="share-video-background-option {{item.value === shareVideoBackgroundSource ? 'selected' : ''}}"
+                data-background-source="{{item.value}}"
+                bindtap="selectShareVideoBackgroundSource"
+                hover-class="tap-hover"
+              >
+                <text class="share-video-background-label">{{item.label}}</text>
+                <text class="share-video-background-desc">{{item.description}}</text>
+              </view>
+            </view>
+          </view>
+          <view wx:if="{{shareVideoBackgroundUsesAi}}" class="share-video-background">
+            <view class="share-video-background-head">
               <text class="voice-edit-label">背景风格</text>
               <text class="share-video-background-current">{{shareVideoBackgroundStyleLabel}}</text>
             </view>
@@ -346,7 +365,7 @@
               </view>
             </view>
           </view>
-          <view class="share-video-background">
+          <view wx:if="{{shareVideoBackgroundUsesAi}}" class="share-video-background">
             <view class="share-video-background-head">
               <text class="voice-edit-label">画面模式</text>
               <text class="share-video-background-current">{{shareVideoBackgroundModeLabel}}</text>
@@ -365,12 +384,34 @@
               </view>
             </view>
           </view>
+          <view wx:if="{{shareVideoBackgroundUsesCustom}}" class="share-video-background custom-background-panel">
+            <view class="share-video-background-head">
+              <text class="voice-edit-label">自定义背景</text>
+              <button
+                class="text-action-button"
+                bindtap="chooseShareVideoCustomBackground"
+                loading="{{shareVideoCustomBackgroundUploading}}"
+                disabled="{{shareVideoCreating || shareVideoPolling || shareVideoDownloadingPreview || shareVideoSharing || shareVideoCustomBackgroundUploading}}"
+              >
+                {{shareVideoCustomBackgroundAssetId ? "更换图片" : "选择图片"}}
+              </button>
+            </view>
+            <view wx:if="{{shareVideoCustomBackgroundPreviewPath}}" class="custom-background-preview-wrap">
+              <image
+                class="custom-background-preview"
+                src="{{shareVideoCustomBackgroundPreviewPath}}"
+                mode="aspectFill"
+              />
+            </view>
+            <text wx:if="{{shareVideoCustomBackgroundStatusText}}" class="custom-background-status">{{shareVideoCustomBackgroundStatusText}}</text>
+            <text wx:else class="custom-background-status muted">选择家庭照片、旧物或地点图片，系统会处理成适合叠加文字的横版背景。</text>
+          </view>
           <view class="actions-row share-video-actions">
             <button
               class="primary-button"
               bindtap="createShareVideo"
               loading="{{shareVideoCreating || shareVideoPolling || shareVideoDownloadingPreview}}"
-              disabled="{{!shareVideoSelectedCanGenerate || convertingQuestionToAnswer || shareVideoCreating || shareVideoPolling || shareVideoDownloadingPreview || shareVideoSharing}}"
+              disabled="{{!shareVideoSelectedCanGenerate || convertingQuestionToAnswer || shareVideoCreating || shareVideoPolling || shareVideoDownloadingPreview || shareVideoSharing || shareVideoCustomBackgroundUploading}}"
             >
               {{shareVideoDownloadingPreview ? "准备预览" : (shareVideoCreating || shareVideoPolling ? "生成中" : "生成视频")}}
             </button>
