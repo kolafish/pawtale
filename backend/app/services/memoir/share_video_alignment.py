@@ -9,6 +9,7 @@ from typing import Any
 
 from fastapi import HTTPException
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.memoir import MemoirTranscriptAlignment, MemoirVoiceUtterance
@@ -408,6 +409,7 @@ async def get_share_video_context(
         allow_admin=allow_admin,
     )
     result = _build_alignment(utterance)
+    response = _response(utterance, result)
     alignment = await db.scalar(
         select(MemoirTranscriptAlignment).where(MemoirTranscriptAlignment.utterance_id == utterance.id)
     )
@@ -426,5 +428,8 @@ async def get_share_video_context(
         }
         alignment.segments_json = result.segments
         db.add(alignment)
-        await db.commit()
-    return _response(utterance, result)
+        try:
+            await db.commit()
+        except IntegrityError:
+            await db.rollback()
+    return response
