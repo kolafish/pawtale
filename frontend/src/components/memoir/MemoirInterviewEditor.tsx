@@ -26,6 +26,7 @@ import {
 } from 'lucide-react';
 import { memoirChapterSourceEditorApi, memoirInterviewEditorApi, memoirTranscriptCleanupApi } from '../../api';
 import { formatBeijingDateTimeShort } from '../../utils/time';
+import { sessionSummary, sessionTitle } from './memoirInterviewEditorView';
 import type {
   MemoirBatchTranscriptCleanupPreviewItem,
   MemoirChapterSourceEditor,
@@ -132,10 +133,6 @@ function sessionModeLabel(session: MemoirInterviewEditorSessionSummary) {
   return session.guidance_mode === 'free_narration' ? '慢慢讲' : '引导访谈';
 }
 
-function sessionSummary(session: MemoirInterviewEditorSessionSummary) {
-  return (session.summary_text || session.last_message_text || '').trim();
-}
-
 function questionRoleLabel(role: MemoirChatMessageRole, session?: MemoirInterviewEditorSessionSummary | null) {
   if (role === 'assistant') return '小余追问';
   if (role === 'interviewer') {
@@ -206,6 +203,10 @@ function SessionButton({
   selected: boolean;
   onSelect: () => void;
 }) {
+  const title = sessionTitle(session);
+  const summary = sessionSummary(session);
+  const showSummary = Boolean(summary && summary !== title);
+
   return (
     <button
       type="button"
@@ -217,11 +218,14 @@ function SessionButton({
       }`}
     >
       <div className="flex items-center justify-between gap-2">
-        <span className="truncate text-sm font-medium">{formatDateTime(session.started_at || session.created_at)}</span>
+        <span className="truncate text-xs font-medium text-gray-500">{formatDateTime(session.started_at || session.created_at)}</span>
         <span className="rounded-md bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-600">
           {sessionKindLabel(session)}
         </span>
       </div>
+      <p className="mt-2 line-clamp-2 text-sm font-semibold leading-5 text-gray-900">
+        {title}
+      </p>
       <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-gray-500">
         <span className="rounded-md bg-white/70 px-1.5 py-0.5">{sessionModeLabel(session)}</span>
         <span className="inline-flex items-center gap-1 rounded-md bg-white/70 px-1.5 py-0.5">
@@ -241,10 +245,10 @@ function SessionButton({
           </span>
         )}
       </div>
-      {sessionSummary(session) && (
+      {showSummary && (
         <div className="mt-2 rounded-md bg-white/70 px-2 py-1.5">
           <div className="mb-0.5 text-[11px] font-medium text-gray-400">摘要</div>
-          <p className="line-clamp-2 text-xs leading-5 text-gray-600">{sessionSummary(session)}</p>
+          <p className="line-clamp-2 text-xs leading-5 text-gray-600">{summary}</p>
         </div>
       )}
     </button>
