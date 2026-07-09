@@ -4,9 +4,11 @@ import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from functools import lru_cache
 import os
 from pathlib import Path
 import shutil
+import subprocess
 import tempfile
 
 from fastapi import HTTPException
@@ -660,6 +662,24 @@ def _ffmpeg_executable() -> str:
     return imageio_ffmpeg.get_ffmpeg_exe()
 
 
+@lru_cache(maxsize=16)
+def _ffmpeg_filter_available(ffmpeg: str, filter_name: str) -> bool:
+    try:
+        result = subprocess.run(
+            [ffmpeg, "-hide_banner", "-filters"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except Exception:
+        return False
+    if result.returncode != 0:
+        return False
+    marker = f" {filter_name} "
+    return any(marker in line for line in result.stdout.splitlines())
+
+
 async def _run_ffmpeg(args: list[str]) -> None:
     process = await asyncio.create_subprocess_exec(
         *args,
@@ -911,10 +931,16 @@ def _valid_background_segments(
 def _multi_background_filter_complex(
     segments: list[ShareVideoBackgroundSegment],
     subtitle_path: Path,
+    *,
+    use_xfade: bool = True,
 ) -> str:
-    transition_seconds = min(
-        0.6,
-        max(0.0, min((segment.end_ms - segment.start_ms) / 1000 for segment in segments) / 2),
+    transition_seconds = (
+        min(
+            0.6,
+            max(0.0, min((segment.end_ms - segment.start_ms) / 1000 for segment in segments) / 2),
+        )
+        if use_xfade
+        else 0.0
     )
     parts: list[str] = []
     raw_durations = [
@@ -932,7 +958,7 @@ def _multi_background_filter_complex(
         )
 
     current_label = "v0"
-    if len(segments) > 1 and transition_seconds > 0:
+    if use_xfade and len(segments) > 1 and transition_seconds > 0:
         elapsed = raw_durations[0]
         for index in range(1, len(segments)):
             next_label = f"x{index}"
@@ -1001,7 +1027,11 @@ async def render_share_video_clip(request: ShareVideoRenderRequest) -> None:
                 "-i",
                 str(clip_audio_path),
                 "-filter_complex",
-                _multi_background_filter_complex(background_segments, subtitle_path),
+                _multi_background_filter_complex(
+                    background_segments,
+                    subtitle_path,
+                    use_xfade=_ffmpeg_filter_available(ffmpeg, "xfade"),
+                ),
                 "-map",
                 "[vout]",
                 "-map",
