@@ -6,7 +6,7 @@ from typing import Literal
 import uuid
 
 import aiofiles
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -36,6 +36,8 @@ from app.schemas.memoir_voice import (
     MemoirVoiceTranscriptItemResponse,
     MemoirVoiceTranscriptListResponse,
     MemoirTranscriptShareVideoContextResponse,
+    MemoirShareVideoJobCreateRequest,
+    MemoirShareVideoJobResponse,
     MemoirVoiceTranscriptUpdateRequest,
     MemoirVoiceTranscriptVoiceEditPreviewRequest,
     MemoirVoiceTranscriptVoiceEditPreviewResponse,
@@ -53,6 +55,7 @@ from app.services.memoir import voice_search as memoir_voice_search
 from app.services.memoir import voice_sessions as memoir_voice_sessions
 from app.services.memoir import voice_tts_persistence as memoir_voice_tts
 from app.services.memoir import share_video_alignment as memoir_share_video_alignment
+from app.services.memoir import share_video_jobs as memoir_share_video_jobs
 from app.services.memoir import voice_transcript_recovery as memoir_voice_transcript_recovery
 from app.services.memoir import transcript_voice_edit as memoir_transcript_voice_edit
 from app.services.memoir import voice_transcripts as memoir_voice_transcripts
@@ -425,6 +428,62 @@ async def get_mobile_memoir_voice_transcript_share_video_context(
         utterance_id,
         current_user.id,
         allow_admin=is_admin_user(current_user),
+    )
+
+
+@router.post(
+    "/voice-transcripts/{utterance_id}/share-video/jobs",
+    response_model=MemoirShareVideoJobResponse,
+    status_code=201,
+)
+async def create_mobile_memoir_voice_transcript_share_video_job(
+    utterance_id: str,
+    req: MemoirShareVideoJobCreateRequest,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    job = await memoir_share_video_jobs.create_share_video_job(
+        db,
+        utterance_id,
+        current_user.id,
+        req,
+        allow_admin=is_admin_user(current_user),
+    )
+    background_tasks.add_task(memoir_share_video_jobs.run_share_video_job, job.id)
+    return job
+
+
+@router.get("/share-video/jobs/{job_id}", response_model=MemoirShareVideoJobResponse)
+async def get_mobile_memoir_share_video_job(
+    job_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await memoir_share_video_jobs.get_share_video_job(
+        db,
+        job_id,
+        current_user.id,
+        allow_admin=is_admin_user(current_user),
+    )
+
+
+@router.get("/share-video/jobs/{job_id}/download")
+async def download_mobile_memoir_share_video_job(
+    job_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    job, path = await memoir_share_video_jobs.load_completed_share_video_job(
+        db,
+        job_id,
+        current_user.id,
+        allow_admin=is_admin_user(current_user),
+    )
+    return FileResponse(
+        path,
+        media_type=job.video_mime_type,
+        filename=f"memoir-share-{job.id}.mp4",
     )
 
 
