@@ -181,6 +181,18 @@ CHAPTER_SWAP_KEYWORDS = (
     "调换",
     "换成",
 )
+CHAPTER_ORDER_OBJECT_KEYWORDS = ("章节顺序", "章节的顺序", "目录顺序", "目录的顺序")
+CHAPTER_ORDER_ACTION_KEYWORDS = (
+    "调整",
+    "调换",
+    "交换",
+    "对调",
+    "换一下",
+    "换一换",
+    "重新排",
+    "重排",
+    "改一下",
+)
 AMBIGUOUS_FOLLOW_UPS = {"那个", "这个", "那", "嗯", "现在呢", "然后呢", "继续", "就是那个", "刚才那个", "前面那个"}
 
 
@@ -282,6 +294,17 @@ def _source_ref_number(ref: str) -> int | None:
 def _is_ambiguous_follow_up(normalized: str) -> bool:
     return normalized in AMBIGUOUS_FOLLOW_UPS or (
         len(normalized) <= 6 and normalized.startswith(("那个", "这个", "刚才", "前面"))
+    )
+
+
+def _is_incomplete_chapter_move_request(normalized: str) -> bool:
+    has_order_action = (
+        any(keyword in normalized for keyword in CHAPTER_ORDER_OBJECT_KEYWORDS)
+        and any(keyword in normalized for keyword in CHAPTER_ORDER_ACTION_KEYWORDS)
+    )
+    return has_order_action or any(
+        keyword in normalized
+        for keyword in ("章节重新排序", "目录重新排序", "重新排列章节", "重新排列目录", "重排章节", "重排目录")
     )
 
 

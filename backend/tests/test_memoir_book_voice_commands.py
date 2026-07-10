@@ -460,6 +460,42 @@ async def test_mobile_memoir_book_voice_command_swaps_adjacent_chapters_from_asr
     assert data["operations"][0]["direction"] == "down"
 
 
+async def test_mobile_memoir_book_voice_command_clarifies_unspecified_chapter_reorder(
+    client,
+    test_db,
+    monkeypatch,
+):
+    project_id = await ensure_mobile_memoir_project(client)
+    await _create_two_chapter_plan(test_db, project_id=project_id)
+    fake_ai = FakeBookVoiceCommandAI(
+        {
+            "intent": "unknown",
+            "summary": "没有理解用户意图",
+        }
+    )
+    monkeypatch.setattr("app.services.memoir.book_voice_command_parser.get_ai_service", lambda _model: fake_ai)
+
+    response = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-voice-command/parse",
+        json={"text": "我说了要调换章节顺序。"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["original_text"] == "我说了要调换章节顺序。"
+    assert data["intent"] == "clarify_previous"
+    assert data["response_kind"] == "clarification"
+    assert data["summary"] == "已理解为调整章节顺序，还需要指定章节和目标位置。"
+    assert data["reply_text"] == (
+        "我明白你要调整当前 2 章的顺序。"
+        "请再告诉我哪一章要移到哪里，例如：把第二章移到第一章，或交换第一章和第二章。"
+    )
+    assert data["operations"] == []
+    assert data["requires_confirmation"] is False
+    assert data["used_ai"] is False
+    assert fake_ai.calls == []
+
+
 async def test_mobile_memoir_book_voice_command_swaps_adjacent_chapters_by_fuzzy_titles(
     client,
     test_db,

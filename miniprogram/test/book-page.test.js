@@ -587,17 +587,38 @@ test("book page routes chapter card actions to the chapter detail page", () => {
   delete global.wx;
 });
 
+test("book page exposes chapter reordering after the plan is confirmed", () => {
+  const pageWxml = fs.readFileSync(path.join(__dirname, "../pages/book/index.wxml"), "utf8");
+  global.wx = { switchTab() {} };
+  const { page } = loadBookPage();
+  const context = pageContext(page, { projectId: "project/1" });
+  page.applyPlan.call(context, samplePlan("confirmed"));
+
+  assert.equal(context.data.stage, "drafting");
+  assert.equal(context.data.chapterStructureEditing, false);
+  assert.match(pageWxml, /bindtap="toggleChapterStructureEditing"/);
+  assert.match(pageWxml, /wx:if="{{chapterStructureEditing}}"/);
+
+  page.toggleChapterStructureEditing.call(context);
+  assert.equal(context.data.chapterStructureEditing, true);
+
+  page.toggleChapterStructureEditing.call(context);
+  assert.equal(context.data.chapterStructureEditing, false);
+  delete global.wx;
+});
+
 test("book page opens secondary chapter actions from the more sheet", () => {
   const navigations = [];
   const actionSheets = [];
   const audioCalls = [];
+  const tapIndexes = [0, 1, 2, 99];
   global.wx = {
     navigateTo(options) {
       navigations.push(options.url);
     },
     showActionSheet(options) {
       actionSheets.push(options.itemList);
-      const tapIndex = actionSheets.length === 1 ? 0 : 1;
+      const tapIndex = tapIndexes[actionSheets.length - 1];
       if (tapIndex < options.itemList.length) {
         options.success({ tapIndex });
       }
@@ -615,15 +636,18 @@ test("book page opens secondary chapter actions from the more sheet", () => {
 
   page.openChapterMoreActions.call(context, { currentTarget: { dataset: { id: "chapter-1" } } });
   page.openChapterMoreActions.call(context, { currentTarget: { dataset: { id: "chapter-1" } } });
+  page.openChapterMoreActions.call(context, { currentTarget: { dataset: { id: "chapter-1" } } });
   context.data.ttsBusyTarget = "chapter:chapter-2";
   page.openChapterMoreActions.call(context, { currentTarget: { dataset: { id: "chapter-1" } } });
 
   assert.deepEqual(actionSheets, [
-    ["看素材", "朗读"],
-    ["看素材", "朗读"],
-    ["看素材"],
+    ["调整章节", "看素材", "朗读"],
+    ["调整章节", "看素材", "朗读"],
+    ["调整章节", "看素材", "朗读"],
+    ["调整章节", "看素材"],
   ]);
   assert.deepEqual(navigations, [
+    "/pages/book-chapter/index?projectId=project%2F1&chapterId=chapter-1&tab=more",
     "/pages/book-chapter/index?projectId=project%2F1&chapterId=chapter-1&tab=sources",
   ]);
   assert.deepEqual(audioCalls, ["chapter-1"]);
