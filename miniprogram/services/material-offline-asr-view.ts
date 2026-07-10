@@ -58,7 +58,7 @@ export function materialOfflineASRView(state: MemoirMaterialOfflineASRState): Ma
     actionText: actionByValue[state.status],
     methodText: `${providersText(state.providers)} · ${dialectText(state)}`,
     detailText: active
-      ? "任务在后台运行，完成后会自动更新这条素材。"
+      ? "任务在后台运行，你可以继续编辑或使用其他功能。"
       : (state.blocked_reason || (state.status === "succeeded"
         ? "增强结果已用于当前素材。"
         : "只有点击开始后才会处理当前素材。")),
