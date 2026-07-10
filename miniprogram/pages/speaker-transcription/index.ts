@@ -1,13 +1,16 @@
-import type { DebugSpeakerConnectionStatus, DebugSpeakerGatewayEvent } from "../../services/debug-speaker-transcribe";
+import type {
+  SpeakerTranscriptionConnectionStatus,
+  SpeakerTranscriptionGatewayEvent,
+} from "../../services/speaker-transcription";
 import { readAccessibilitySettings } from "../../services/accessibility-settings";
 import {
-  DebugSpeakerTranscribeClient,
-  debugSpeakerTitle,
-} from "../../services/debug-speaker-transcribe";
+  SpeakerTranscriptionClient,
+  speakerTitle,
+} from "../../services/speaker-transcription";
 import {
-  proofreadDebugSpeakerTranscriptLine,
-  type DebugSpeakerProofreadContextLine,
-} from "../../services/debug-speaker-proofread";
+  proofreadSpeakerTranscriptLine,
+  type SpeakerProofreadContextLine,
+} from "../../services/speaker-transcript-proofreading";
 import { ensureRecorderPrivacyAuthorization } from "../../services/wechat-privacy";
 
 interface SpeakerLineView {
@@ -75,7 +78,7 @@ interface HistoryLinePreviewView {
   text: string;
 }
 
-interface DebugSpeakerPageData {
+interface SpeakerTranscriptionPageData {
   pageClass: string;
   controlPanelClass: string;
   showFullControls: boolean;
@@ -177,10 +180,10 @@ const EMPTY_ACTIVE_PARTIAL: ActivePartialView = {
   partialScrollTarget: "",
   partialScrollTop: 0,
 };
-const DEBUG_SPEAKER_STATS_RENDER_INTERVAL_MS = 800;
+const SPEAKER_TRANSCRIPTION_STATS_RENDER_INTERVAL_MS = 800;
 
-function statusText(status: DebugSpeakerConnectionStatus): string {
-  const texts: Record<DebugSpeakerConnectionStatus, string> = {
+function statusText(status: SpeakerTranscriptionConnectionStatus): string {
+  const texts: Record<SpeakerTranscriptionConnectionStatus, string> = {
     idle: "未开始",
     connecting: "连接中",
     ready: "已连接",
@@ -192,7 +195,7 @@ function statusText(status: DebugSpeakerConnectionStatus): string {
   return texts[status];
 }
 
-function statusClass(status: DebugSpeakerConnectionStatus): string {
+function statusClass(status: SpeakerTranscriptionConnectionStatus): string {
   if (status === "listening") {
     return "status-pill live";
   }
@@ -227,7 +230,7 @@ function formatBeijingClockTime(epochMs: number): string {
   return `${hours}:${minutes}:${seconds}`;
 }
 
-function formatSegmentTime(event: DebugSpeakerGatewayEvent): string {
+function formatSegmentTime(event: SpeakerTranscriptionGatewayEvent): string {
   if (typeof event.occurred_start_at_ms === "number" && typeof event.occurred_end_at_ms === "number") {
     const start = formatBeijingClockTime(event.occurred_start_at_ms);
     const end = formatBeijingClockTime(event.occurred_end_at_ms);
@@ -244,7 +247,7 @@ function formatSegmentTime(event: DebugSpeakerGatewayEvent): string {
     : "";
 }
 
-function formatSegmentMeta(event: DebugSpeakerGatewayEvent): string {
+function formatSegmentMeta(event: SpeakerTranscriptionGatewayEvent): string {
   const range = formatSegmentTime(event);
   const confidence = typeof event.confidence === "number"
     ? `置信度 ${Math.round(event.confidence * 100)}%`
@@ -256,7 +259,7 @@ function speakerDomId(speakerId: string): string {
   return speakerId.replace(/[^a-zA-Z0-9_-]/g, "_");
 }
 
-function stableLineIdForEvent(speakerId: string, event: DebugSpeakerGatewayEvent, fallbackId: string): string {
+function stableLineIdForEvent(speakerId: string, event: SpeakerTranscriptionGatewayEvent, fallbackId: string): string {
   const segmentId = (event.segment_id || "").trim();
   return segmentId ? `${speakerDomId(speakerId)}-${speakerDomId(segmentId)}` : fallbackId;
 }
@@ -265,11 +268,11 @@ function lineDomId(lineId: string): string {
   return `conversation-${speakerDomId(lineId)}`;
 }
 
-function debugSpeakerPageClass(largeTextEnabled = readAccessibilitySettings().largeTextEnabled): string {
-  return largeTextEnabled ? "debug-speaker-page large-text" : "debug-speaker-page";
+function speakerTranscriptionPageClass(largeTextEnabled = readAccessibilitySettings().largeTextEnabled): string {
+  return largeTextEnabled ? "speaker-transcription-page large-text" : "speaker-transcription-page";
 }
 
-function debugSpeakerControlPanelClass(hasTranscript: boolean): string {
+function speakerTranscriptionControlPanelClass(hasTranscript: boolean): string {
   return hasTranscript ? "control-panel compact" : "control-panel";
 }
 
@@ -321,11 +324,11 @@ function genderSpeakerTitle(gender: string, genderIndex: number): string {
   return "";
 }
 
-function eventStartMs(event: DebugSpeakerGatewayEvent): number | null {
+function eventStartMs(event: SpeakerTranscriptionGatewayEvent): number | null {
   return typeof event.start_ms === "number" ? event.start_ms : null;
 }
 
-function eventEndMs(event: DebugSpeakerGatewayEvent): number | null {
+function eventEndMs(event: SpeakerTranscriptionGatewayEvent): number | null {
   return typeof event.end_ms === "number" ? event.end_ms : null;
 }
 
@@ -370,7 +373,7 @@ function isCumulativeSpeakerText(
 }
 
 function finalLineFromSpeakerEvent(
-  event: DebugSpeakerGatewayEvent,
+  event: SpeakerTranscriptionGatewayEvent,
   existing: SpeakerWindowView,
   fallbackId: string,
 ): SpeakerLineView | null {
@@ -776,10 +779,10 @@ function activePartialAfterConversationLines(
   };
 }
 
-function debugSpeakerProofreadContextLines(
+function speakerProofreadContextLines(
   conversationLines: ConversationLineView[],
   limit = 6,
-): DebugSpeakerProofreadContextLine[] {
+): SpeakerProofreadContextLine[] {
   const lines = conversationLines.map((line) => ({
     speakerId: line.speakerId,
     text: line.text.trim(),
@@ -827,7 +830,7 @@ function speakerWindow(
   const partialEndId = patch.partialEndId || `${speakerDomId(speakerId)}-partial-end`;
   return {
     speakerId,
-    title: debugSpeakerTitle(speakerId, speakerIndex),
+    title: speakerTitle(speakerId, speakerIndex),
     speakerToneClass: "",
     partialText: "",
     partialEndId,
@@ -846,10 +849,10 @@ function speakerWindow(
 }
 
 function pagePatch(
-  status: DebugSpeakerConnectionStatus,
+  status: SpeakerTranscriptionConnectionStatus,
   hasTranscript: boolean,
 ): Pick<
-  DebugSpeakerPageData,
+  SpeakerTranscriptionPageData,
   | "controlPanelClass"
   | "showFullControls"
   | "statusText"
@@ -864,7 +867,7 @@ function pagePatch(
   const recording = status === "listening";
   const busy = status === "connecting" || status === "stopping";
   return {
-    controlPanelClass: debugSpeakerControlPanelClass(hasTranscript),
+    controlPanelClass: speakerTranscriptionControlPanelClass(hasTranscript),
     showFullControls: !hasTranscript,
     statusText: statusText(status),
     statusClass: statusClass(status),
@@ -877,8 +880,8 @@ function pagePatch(
   };
 }
 
-Page<DebugSpeakerPageData, {
-  client: DebugSpeakerTranscribeClient | null;
+Page<SpeakerTranscriptionPageData, {
+  client: SpeakerTranscriptionClient | null;
   lastStatsRenderMs: number;
   lastPartialSignature: string;
   speakerOrder: string[];
@@ -890,7 +893,7 @@ Page<DebugSpeakerPageData, {
   onShow(): void;
   onUnload(): void;
   refreshAccessibilitySettings(): void;
-  setStatus(status: DebugSpeakerConnectionStatus): void;
+  setStatus(status: SpeakerTranscriptionConnectionStatus): void;
   hasTranscript(): boolean;
   shouldRenderStats(nowMs: number): boolean;
   speakerLabelForEvent(speakerId: string, speakerIndex: number, speakerGender?: string | null): {
@@ -904,8 +907,8 @@ Page<DebugSpeakerPageData, {
     toneClass: string;
   };
   refreshConversationSpeakerLabels(lines: ConversationLineView[]): ConversationLineView[];
-  handleSpeakerEvent(event: DebugSpeakerGatewayEvent): void;
-  handleDiarizationStatus(event: DebugSpeakerGatewayEvent): void;
+  handleSpeakerEvent(event: SpeakerTranscriptionGatewayEvent): void;
+  handleDiarizationStatus(event: SpeakerTranscriptionGatewayEvent): void;
   handleLineTouchStart(event: LineTouchEvent): void;
   handleLineTouchMove(event: LineTouchEvent): void;
   handleLineTouchEnd(): void;
@@ -917,7 +920,7 @@ Page<DebugSpeakerPageData, {
     speakerId: string,
     lineId: string,
     text: string,
-    contextLines: DebugSpeakerProofreadContextLine[],
+    contextLines: SpeakerProofreadContextLine[],
   ): Promise<void>;
   toggleRecording(): Promise<void>;
   clearTranscript(): void;
@@ -936,7 +939,7 @@ Page<DebugSpeakerPageData, {
   historyPreviewTouch: null as HistoryLineTouch | null,
 
   data: {
-    pageClass: "debug-speaker-page",
+    pageClass: "speaker-transcription-page",
     controlPanelClass: "control-panel",
     showFullControls: true,
     statusText: "未开始",
@@ -978,7 +981,7 @@ Page<DebugSpeakerPageData, {
   },
 
   refreshAccessibilitySettings() {
-    this.setData({ pageClass: debugSpeakerPageClass() });
+    this.setData({ pageClass: speakerTranscriptionPageClass() });
   },
 
   setStatus(status) {
@@ -994,7 +997,7 @@ Page<DebugSpeakerPageData, {
       this.lastStatsRenderMs = nowMs;
       return true;
     }
-    if (nowMs - this.lastStatsRenderMs < DEBUG_SPEAKER_STATS_RENDER_INTERVAL_MS) {
+    if (nowMs - this.lastStatsRenderMs < SPEAKER_TRANSCRIPTION_STATS_RENDER_INTERVAL_MS) {
       return false;
     }
     this.lastStatsRenderMs = nowMs;
@@ -1028,7 +1031,7 @@ Page<DebugSpeakerPageData, {
       }
     }
     return {
-      title: debugSpeakerTitle(speakerId, displayIndex),
+      title: speakerTitle(speakerId, displayIndex),
       badgeClass: speakerBadgeClass(toneClass),
       toneClass,
     };
@@ -1064,7 +1067,7 @@ Page<DebugSpeakerPageData, {
     });
     try {
       await ensureRecorderPrivacyAuthorization();
-      const client = new DebugSpeakerTranscribeClient({
+      const client = new SpeakerTranscriptionClient({
         onStatus: (status) => this.setStatus(status),
         onStats: (stats) => {
           if (!this.shouldRenderStats(Date.now())) {
@@ -1123,7 +1126,7 @@ Page<DebugSpeakerPageData, {
     let cumulativeFinalStartMs = existing.cumulativeFinalStartMs;
     let cumulativeFinalEndMs = existing.cumulativeFinalEndMs;
     let lineForProofread: SpeakerLineView | null = null;
-    let proofreadContextLines: DebugSpeakerProofreadContextLine[] = [];
+    let proofreadContextLines: SpeakerProofreadContextLine[] = [];
     let latestFinalLineId = this.data.latestFinalLineId;
     if (event.type === "speaker.final") {
       this.lastPartialSignature = "";
@@ -1137,13 +1140,17 @@ Page<DebugSpeakerPageData, {
         let finalLineChanged = false;
         const existingConversationLine = conversationLines.find((item) => item.id === line.id);
         const existingSpeakerLine = nextLines.find((item) => item.id === line.id);
-        if (existingConversationLine && existingConversationLine.text === line.text && existingConversationLine.metaText === line.metaText) {
+        if (
+          existingConversationLine
+          && existingConversationLine.text === line.text
+          && existingConversationLine.metaText === line.metaText
+        ) {
           lineForProofread = null;
         } else if (existingConversationLine || existingSpeakerLine) {
           const previousLine = existingConversationLine || existingSpeakerLine;
           const textChanged = previousLine?.text !== line.text;
           if (textChanged) {
-            proofreadContextLines = debugSpeakerProofreadContextLines(
+            proofreadContextLines = speakerProofreadContextLines(
               conversationLines.filter((item) => item.id !== line.id),
             );
           }
@@ -1167,7 +1174,7 @@ Page<DebugSpeakerPageData, {
           }
           finalLineChanged = true;
         } else {
-          proofreadContextLines = debugSpeakerProofreadContextLines(conversationLines);
+          proofreadContextLines = speakerProofreadContextLines(conversationLines);
           line.proofreadLoading = true;
           line.proofreadStatusText = "校对中";
           nextLines.unshift(line);
@@ -1294,7 +1301,7 @@ Page<DebugSpeakerPageData, {
         applyLatestConversationLineClasses(conversationLines, latestFinalLineId),
       )
       : this.data.conversationLines;
-    const dataPatch: Partial<DebugSpeakerPageData> = {
+    const dataPatch: Partial<SpeakerTranscriptionPageData> = {
       speakers: visibleSpeakers,
       activePartial,
       conversationScrollTarget,
@@ -1405,7 +1412,7 @@ Page<DebugSpeakerPageData, {
 
   async proofreadFinalLine(speakerId, lineId, text, contextLines) {
     try {
-      const result = await proofreadDebugSpeakerTranscriptLine(text, contextLines);
+      const result = await proofreadSpeakerTranscriptLine(text, contextLines);
       const proofreadText = result.proofread_text.trim();
       const linePatch = {
         text: proofreadText || text,
@@ -1481,12 +1488,12 @@ Page<DebugSpeakerPageData, {
 });
 
 export {
-  formatBytes as formatDebugSpeakerBytes,
-  formatElapsed as formatDebugSpeakerElapsed,
-  formatSegmentMeta as formatDebugSpeakerSegmentMeta,
-  pagePatch as debugSpeakerPagePatch,
-  debugSpeakerPageClass,
-  debugSpeakerProofreadContextLines,
+  formatBytes as formatSpeakerTranscriptionBytes,
+  formatElapsed as formatSpeakerTranscriptionElapsed,
+  formatSegmentMeta as formatSpeakerTranscriptionSegmentMeta,
+  pagePatch as speakerTranscriptionPagePatch,
+  speakerTranscriptionPageClass,
+  speakerProofreadContextLines,
   removeFinalTextFromPartialText,
   removeConversationTextFromUnknownPartial,
 };

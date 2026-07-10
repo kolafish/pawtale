@@ -5,7 +5,7 @@
     </view>
     <view class="title-block">
       <text class="page-title">多人实时转写</text>
-      <text class="page-meta">本次识别不保存到素材库</text>
+      <text class="page-meta">本次转写仅在当前页面显示，不保存到素材库</text>
     </view>
   </view>
 
@@ -15,7 +15,7 @@
     <view class="control-head">
       <view>
         <text class="control-title">实时对话流</text>
-        <text class="control-meta">最新内容在上方，不保存到素材库</text>
+        <text class="control-meta">最新内容在上方，本次记录不会留存</text>
       </view>
       <text class="{{statusClass}}">{{statusText}}</text>
     </view>

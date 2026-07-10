@@ -4,7 +4,7 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 const { clearModule, loadPageModule, mockModule, pageContext } = require("./page-harness");
 
-function loadDebugSpeakerPage({
+function loadSpeakerTranscriptionPage({
   accessibilityExports = {},
   proofreadExports = {},
   privacyExports = null,
@@ -17,8 +17,8 @@ function loadDebugSpeakerPage({
     }),
     ...accessibilityExports,
   });
-  mockModule("../services/debug-speaker-proofread.ts", {
-    proofreadDebugSpeakerTranscriptLine: async (text, contextLines = []) => ({
+  mockModule("../services/speaker-transcript-proofreading.ts", {
+    proofreadSpeakerTranscriptLine: async (text, contextLines = []) => ({
       text,
       proofread_text: text,
       changed: false,
@@ -36,22 +36,22 @@ function loadDebugSpeakerPage({
     clearModule("../services/wechat-privacy.ts");
   }
   if (transcribeExports) {
-    mockModule("../services/debug-speaker-transcribe.ts", {
-      DebugSpeakerTranscribeClient: class DebugSpeakerTranscribeClient {
+    mockModule("../services/speaker-transcription.ts", {
+      SpeakerTranscriptionClient: class SpeakerTranscriptionClient {
         async start() {}
         stop() {}
         close() {}
       },
-      debugSpeakerTitle: (speakerId, speakerIndex) => (
+      speakerTitle: (speakerId, speakerIndex) => (
         speakerId === "speaker_unknown" ? "未分辨说话人" : `说话人 ${speakerIndex}`
       ),
       ...transcribeExports,
     });
   } else {
-    clearModule("../services/debug-speaker-transcribe.ts");
+    clearModule("../services/speaker-transcription.ts");
   }
-  delete require.cache[require.resolve("../pages/debug-speaker-transcribe/index.ts")];
-  return loadPageModule("../pages/debug-speaker-transcribe/index.ts");
+  delete require.cache[require.resolve("../pages/speaker-transcription/index.ts")];
+  return loadPageModule("../pages/speaker-transcription/index.ts");
 }
 
 function flushPromises() {
@@ -76,8 +76,8 @@ function lineTouchEvent(speakerId, lineId, previewEnabled = true, clientX = 24, 
   };
 }
 
-test("debug speaker page shows partial and final text in conversation flow", () => {
-  const { page } = loadDebugSpeakerPage();
+test("speaker transcription page shows partial and final text in conversation flow", () => {
+  const { page } = loadSpeakerTranscriptionPage();
   const context = pageContext(page);
 
   page.handleSpeakerEvent.call(context, {
@@ -123,16 +123,16 @@ test("debug speaker page shows partial and final text in conversation flow", () 
   assert.equal(context.data.clearDisabled, false);
 });
 
-test("debug speaker page requires recorder privacy authorization before connecting", async () => {
+test("speaker transcription page requires recorder privacy authorization before connecting", async () => {
   let clientConstructed = false;
-  const { page } = loadDebugSpeakerPage({
+  const { page } = loadSpeakerTranscriptionPage({
     privacyExports: {
       ensureRecorderPrivacyAuthorization: async () => {
         throw new Error("请先同意微信小程序隐私保护指引后再开始录音。");
       },
     },
     transcribeExports: {
-      DebugSpeakerTranscribeClient: class DebugSpeakerTranscribeClient {
+      SpeakerTranscriptionClient: class SpeakerTranscriptionClient {
         constructor() {
           clientConstructed = true;
         }
@@ -150,11 +150,11 @@ test("debug speaker page requires recorder privacy authorization before connecti
   assert.equal(context.data.error, "请先同意微信小程序隐私保护指引后再开始录音。");
 });
 
-test("debug speaker page formats segment meta as Beijing occurrence time when available", () => {
-  const { mod } = loadDebugSpeakerPage();
+test("speaker transcription page formats segment meta as Beijing occurrence time when available", () => {
+  const { mod } = loadSpeakerTranscriptionPage();
 
   assert.equal(
-    mod.formatDebugSpeakerSegmentMeta({
+    mod.formatSpeakerTranscriptionSegmentMeta({
       type: "speaker.final",
       occurred_start_at_ms: Date.UTC(2026, 6, 7, 5, 30, 44),
       occurred_end_at_ms: Date.UTC(2026, 6, 7, 5, 30, 47),
@@ -166,8 +166,8 @@ test("debug speaker page formats segment meta as Beijing occurrence time when av
   );
 });
 
-test("debug speaker page removes finalized text from live unknown partial", () => {
-  const { page } = loadDebugSpeakerPage();
+test("speaker transcription page removes finalized text from live unknown partial", () => {
+  const { page } = loadSpeakerTranscriptionPage();
   const context = pageContext(page);
 
   page.handleSpeakerEvent.call(context, {
@@ -192,8 +192,8 @@ test("debug speaker page removes finalized text from live unknown partial", () =
   assert.equal(context.data.conversationScrollTarget, "active-partial-card");
 });
 
-test("debug speaker page clears live unknown partial when final text covers it", () => {
-  const { page } = loadDebugSpeakerPage();
+test("speaker transcription page clears live unknown partial when final text covers it", () => {
+  const { page } = loadSpeakerTranscriptionPage();
   const context = pageContext(page);
 
   page.handleSpeakerEvent.call(context, {
@@ -214,8 +214,8 @@ test("debug speaker page clears live unknown partial when final text covers it",
   assert.equal(context.data.conversationScrollTarget, "conversation-speaker_2-seg-2");
 });
 
-test("debug speaker page does not re-add finalized speaker text to cumulative unknown preview", () => {
-  const { page } = loadDebugSpeakerPage();
+test("speaker transcription page does not re-add finalized speaker text to cumulative unknown preview", () => {
+  const { page } = loadSpeakerTranscriptionPage();
   const context = pageContext(page);
   const cumulativeLiveText = "分糖的？七分糖。认出来了吗？嗯。认出来了，是认出来了，有点问题。";
 
@@ -266,8 +266,8 @@ test("debug speaker page does not re-add finalized speaker text to cumulative un
   ]);
 });
 
-test("debug speaker page clears stale unknown preview when two ASR streams disagree on a short utterance", () => {
-  const { page } = loadDebugSpeakerPage();
+test("speaker transcription page clears stale unknown preview when two ASR streams disagree on a short utterance", () => {
+  const { page } = loadSpeakerTranscriptionPage();
   const context = pageContext(page);
   const liveText = "然后这道吗？应该就是第四道了哈。";
 
@@ -306,8 +306,8 @@ test("debug speaker page clears stale unknown preview when two ASR streams disag
   assert.equal(context.data.activePartial.visible, false);
 });
 
-test("debug speaker page removes only the stale time-overlapping sentence window", () => {
-  const { page } = loadDebugSpeakerPage();
+test("speaker transcription page removes only the stale time-overlapping sentence window", () => {
+  const { page } = loadSpeakerTranscriptionPage();
   const context = pageContext(page);
   const liveText = "然后这道吗？应该就是第四道了哈。第五次现在还在继续说。";
 
@@ -346,8 +346,8 @@ test("debug speaker page removes only the stale time-overlapping sentence window
   assert.equal(context.data.activePartial.text, "第五次现在还在继续说。");
 });
 
-test("debug speaker page keeps repeated words when final line is outside the partial time range", () => {
-  const { page } = loadDebugSpeakerPage();
+test("speaker transcription page keeps repeated words when final line is outside the partial time range", () => {
+  const { page } = loadSpeakerTranscriptionPage();
   const context = pageContext(page);
 
   page.handleSpeakerEvent.call(context, {
@@ -372,10 +372,10 @@ test("debug speaker page keeps repeated words when final line is outside the par
   assert.equal(context.data.activePartial.text, "好。");
 });
 
-test("debug speaker page re-cleans active unknown preview after proofread changes final text", async () => {
-  const { page } = loadDebugSpeakerPage({
+test("speaker transcription page re-cleans active unknown preview after proofread changes final text", async () => {
+  const { page } = loadSpeakerTranscriptionPage({
     proofreadExports: {
-      proofreadDebugSpeakerTranscriptLine: async () => ({
+      proofreadSpeakerTranscriptLine: async () => ({
         proofread_text: "第四道残留。",
       }),
     },
@@ -409,8 +409,8 @@ test("debug speaker page re-cleans active unknown preview after proofread change
   assert.equal(context.data.activePartial.text, "后面新的话。");
 });
 
-test("debug speaker page keeps unrelated unknown preview when final text is not the same utterance", () => {
-  const { page } = loadDebugSpeakerPage();
+test("speaker transcription page keeps unrelated unknown preview when final text is not the same utterance", () => {
+  const { page } = loadSpeakerTranscriptionPage();
   const context = pageContext(page);
 
   page.handleSpeakerEvent.call(context, {
@@ -431,8 +431,8 @@ test("debug speaker page keeps unrelated unknown preview when final text is not 
   assert.equal(context.data.activePartial.text, "第五次现在还在继续说。");
 });
 
-test("debug speaker page keeps transcript area high after recording stops", () => {
-  const { page } = loadDebugSpeakerPage();
+test("speaker transcription page keeps transcript area high after recording stops", () => {
+  const { page } = loadSpeakerTranscriptionPage();
   const context = pageContext(page);
 
   page.handleSpeakerEvent.call(context, {
@@ -448,8 +448,8 @@ test("debug speaker page keeps transcript area high after recording stops", () =
   assert.equal(context.data.showEmpty, false);
 });
 
-test("debug speaker page keeps final text newest-first with gender labels", async () => {
-  const { page } = loadDebugSpeakerPage();
+test("speaker transcription page keeps final text newest-first with gender labels", async () => {
+  const { page } = loadSpeakerTranscriptionPage();
   const context = pageContext(page);
 
   page.handleSpeakerEvent.call(context, {
@@ -499,8 +499,8 @@ test("debug speaker page keeps final text newest-first with gender labels", asyn
   ]);
 });
 
-test("debug speaker page shows provider diarization diagnostics", () => {
-  const { page } = loadDebugSpeakerPage();
+test("speaker transcription page shows provider diarization diagnostics", () => {
+  const { page } = loadSpeakerTranscriptionPage();
   const context = pageContext(page);
 
   page.handleDiarizationStatus.call(context, {
@@ -522,8 +522,8 @@ test("debug speaker page shows provider diarization diagnostics", () => {
   assert.equal(context.data.diarizationNotice, "已收到说话人标签，会按不同人标注显示。");
 });
 
-test("debug speaker page assigns speaker tones by first seen order instead of id suffix", () => {
-  const { page } = loadDebugSpeakerPage();
+test("speaker transcription page assigns speaker tones by first seen order instead of id suffix", () => {
+  const { page } = loadSpeakerTranscriptionPage();
   const context = pageContext(page);
 
   page.handleSpeakerEvent.call(context, {
@@ -591,11 +591,11 @@ test("debug speaker page assigns speaker tones by first seen order instead of id
   assert.equal(context.data.conversationLines[0].lineClass, "line-item latest tone-0");
 });
 
-test("debug speaker page keeps only the newest final line visually large", async () => {
+test("speaker transcription page keeps only the newest final line visually large", async () => {
   const pendingProofreads = [];
-  const { page } = loadDebugSpeakerPage({
+  const { page } = loadSpeakerTranscriptionPage({
     proofreadExports: {
-      proofreadDebugSpeakerTranscriptLine: (text) => new Promise((resolve) => {
+      proofreadSpeakerTranscriptLine: (text) => new Promise((resolve) => {
         pendingProofreads.push({ text, resolve });
       }),
     },
@@ -644,8 +644,8 @@ test("debug speaker page keeps only the newest final line visually large", async
   assert.equal(context.data.conversationLines[1].lineClass, "line-item history tone-0");
 });
 
-test("debug speaker page previews historical final text while pressed", async () => {
-  const { page } = loadDebugSpeakerPage();
+test("speaker transcription page previews historical final text while pressed", async () => {
+  const { page } = loadSpeakerTranscriptionPage();
   const context = pageContext(page);
 
   page.handleSpeakerEvent.call(context, {
@@ -691,8 +691,8 @@ test("debug speaker page previews historical final text while pressed", async ()
   assert.equal(context.data.historyLinePreview.visible, false);
 });
 
-test("debug speaker page does not preview latest final text or scrolling touches", async () => {
-  const { page } = loadDebugSpeakerPage();
+test("speaker transcription page does not preview latest final text or scrolling touches", async () => {
+  const { page } = loadSpeakerTranscriptionPage();
   const context = pageContext(page);
 
   page.handleSpeakerEvent.call(context, {
@@ -731,8 +731,8 @@ test("debug speaker page does not preview latest final text or scrolling touches
   assert.equal(context.data.historyLinePreview.visible, false);
 });
 
-test("debug speaker page keeps only new text from cumulative final results", () => {
-  const { page } = loadDebugSpeakerPage();
+test("speaker transcription page keeps only new text from cumulative final results", () => {
+  const { page } = loadSpeakerTranscriptionPage();
   const context = pageContext(page);
 
   page.handleSpeakerEvent.call(context, {
@@ -779,8 +779,8 @@ test("debug speaker page keeps only new text from cumulative final results", () 
   ]);
 });
 
-test("debug speaker page keeps only new final text when cumulative provider results omit timestamps", () => {
-  const { page } = loadDebugSpeakerPage();
+test("speaker transcription page keeps only new final text when cumulative provider results omit timestamps", () => {
+  const { page } = loadSpeakerTranscriptionPage();
   const context = pageContext(page);
 
   page.handleSpeakerEvent.call(context, {
@@ -810,10 +810,10 @@ test("debug speaker page keeps only new final text when cumulative provider resu
   ]);
 });
 
-test("debug speaker page ignores repeated final segment events", () => {
-  const { page } = loadDebugSpeakerPage({
+test("speaker transcription page ignores repeated final segment events", () => {
+  const { page } = loadSpeakerTranscriptionPage({
     proofreadExports: {
-      proofreadDebugSpeakerTranscriptLine: () => new Promise(() => {}),
+      proofreadSpeakerTranscriptLine: () => new Promise(() => {}),
     },
   });
   const context = pageContext(page);
@@ -842,11 +842,11 @@ test("debug speaker page ignores repeated final segment events", () => {
   assert.equal(setDataCalls, callsAfterFirstFinal);
 });
 
-test("debug speaker page proofreads final lines with recent context", async () => {
+test("speaker transcription page proofreads final lines with recent context", async () => {
   const calls = [];
-  const { page } = loadDebugSpeakerPage({
+  const { page } = loadSpeakerTranscriptionPage({
     proofreadExports: {
-      proofreadDebugSpeakerTranscriptLine: async (text, contextLines = []) => {
+      proofreadSpeakerTranscriptLine: async (text, contextLines = []) => {
         calls.push({ text, contextLines });
         return {
           text,
@@ -895,8 +895,8 @@ test("debug speaker page proofreads final lines with recent context", async () =
   assert.equal(context.data.conversationLines[0].proofreadStatusText, "已校对");
 });
 
-test("debug speaker page preserves repeated text when provider reports a new start time", () => {
-  const { page } = loadDebugSpeakerPage();
+test("speaker transcription page preserves repeated text when provider reports a new start time", () => {
+  const { page } = loadSpeakerTranscriptionPage();
   const context = pageContext(page);
 
   page.handleSpeakerEvent.call(context, {
@@ -921,8 +921,8 @@ test("debug speaker page preserves repeated text when provider reports a new sta
   assert.deepEqual(context.data.conversationLines.map((line) => line.metaText), ["0:01-0:02", "0:00-0:01"]);
 });
 
-test("debug speaker page keeps only new text from cumulative partial results", () => {
-  const { page } = loadDebugSpeakerPage();
+test("speaker transcription page keeps only new text from cumulative partial results", () => {
+  const { page } = loadSpeakerTranscriptionPage();
   const context = pageContext(page);
 
   page.handleSpeakerEvent.call(context, {
@@ -946,8 +946,8 @@ test("debug speaker page keeps only new text from cumulative partial results", (
   assert.equal(context.data.speakers[0].lines.length, 1);
 });
 
-test("debug speaker page keeps only new partial text when cumulative provider results omit timestamps", () => {
-  const { page } = loadDebugSpeakerPage();
+test("speaker transcription page keeps only new partial text when cumulative provider results omit timestamps", () => {
+  const { page } = loadSpeakerTranscriptionPage();
   const context = pageContext(page);
 
   page.handleSpeakerEvent.call(context, {
@@ -966,8 +966,8 @@ test("debug speaker page keeps only new partial text when cumulative provider re
   assert.equal(context.data.speakers[0].lines.length, 1);
 });
 
-test("debug speaker page scrolls long partial text to the newest progress", () => {
-  const { page } = loadDebugSpeakerPage();
+test("speaker transcription page scrolls long partial text to the newest progress", () => {
+  const { page } = loadSpeakerTranscriptionPage();
   const context = pageContext(page);
   const longPartial = "这是一段很长的实时识别文字，".repeat(8);
 
@@ -991,8 +991,8 @@ test("debug speaker page scrolls long partial text to the newest progress", () =
   assert.match(context.data.activePartial.partialScrollTarget, /speaker_2-partial-end-20000/);
 });
 
-test("debug speaker page ignores repeated partial text without moving scroll", () => {
-  const { page } = loadDebugSpeakerPage();
+test("speaker transcription page ignores repeated partial text without moving scroll", () => {
+  const { page } = loadSpeakerTranscriptionPage();
   const context = pageContext(page);
   const longPartial = "这是一段很长的实时识别文字，".repeat(8);
   let setDataCalls = 0;
@@ -1019,8 +1019,8 @@ test("debug speaker page ignores repeated partial text without moving scroll", (
   assert.equal(setDataCalls, callsAfterFirstPartial);
 });
 
-test("debug speaker page follows the shared large text setting", () => {
-  const { mod, page } = loadDebugSpeakerPage({
+test("speaker transcription page follows the shared large text setting", () => {
+  const { mod, page } = loadSpeakerTranscriptionPage({
     accessibilityExports: {
       readAccessibilitySettings: () => ({
         largeTextEnabled: true,
@@ -1032,13 +1032,13 @@ test("debug speaker page follows the shared large text setting", () => {
 
   page.onLoad.call(context);
 
-  assert.equal(context.data.pageClass, "debug-speaker-page large-text");
-  assert.equal(mod.debugSpeakerPageClass(false), "debug-speaker-page");
-  assert.equal(mod.debugSpeakerPageClass(true), "debug-speaker-page large-text");
+  assert.equal(context.data.pageClass, "speaker-transcription-page large-text");
+  assert.equal(mod.speakerTranscriptionPageClass(false), "speaker-transcription-page");
+  assert.equal(mod.speakerTranscriptionPageClass(true), "speaker-transcription-page large-text");
 });
 
-test("debug speaker page throttles stats rendering while recording", () => {
-  const { page } = loadDebugSpeakerPage();
+test("speaker transcription page throttles stats rendering while recording", () => {
+  const { page } = loadSpeakerTranscriptionPage();
   const context = pageContext(page);
   context.data.recording = true;
 
@@ -1051,8 +1051,8 @@ test("debug speaker page throttles stats rendering while recording", () => {
   assert.equal(page.shouldRenderStats.call(context, 1801), true);
 });
 
-test("debug speaker page clears transcript only while idle", () => {
-  const { page } = loadDebugSpeakerPage();
+test("speaker transcription page clears transcript only while idle", () => {
+  const { page } = loadSpeakerTranscriptionPage();
   const context = pageContext(page);
   page.handleSpeakerEvent.call(context, {
     type: "speaker.final",
@@ -1080,11 +1080,11 @@ test("debug speaker page clears transcript only while idle", () => {
   assert.equal(context.data.elapsedText, "0:00");
 });
 
-test("debug speaker page formats compact stats", () => {
-  const { mod } = loadDebugSpeakerPage();
+test("speaker transcription page formats compact stats", () => {
+  const { mod } = loadSpeakerTranscriptionPage();
 
-  assert.equal(mod.formatDebugSpeakerElapsed(0), "0:00");
-  assert.equal(mod.formatDebugSpeakerElapsed(65_000), "1:05");
-  assert.equal(mod.formatDebugSpeakerBytes(512), "512 B");
-  assert.equal(mod.formatDebugSpeakerBytes(2048), "2 KB");
+  assert.equal(mod.formatSpeakerTranscriptionElapsed(0), "0:00");
+  assert.equal(mod.formatSpeakerTranscriptionElapsed(65_000), "1:05");
+  assert.equal(mod.formatSpeakerTranscriptionBytes(512), "512 B");
+  assert.equal(mod.formatSpeakerTranscriptionBytes(2048), "2 KB");
 });
