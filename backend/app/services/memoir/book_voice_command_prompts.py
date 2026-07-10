@@ -70,6 +70,7 @@ JSON 格式：
 - “把某章移到第一章/最后一章/第 3 章”用 move_chapter，并填 target_position 或 target_index；不要改成上移/下移。
 - “把某章移到某章前面/后面”用 move_chapter，并填 relative_chapter_ref 和 relative_position；不要改成上移/下移。
 - “把第二章和第三章顺序换一下/交换第二章和第三章”这类相邻章节交换也用 move_chapter：把前一章下移，或把后一章上移。
+- 用户明确说“调整/调换章节顺序”但没有说具体章节或目标位置时，用 clarify_previous；回复要先确认已理解调序意图，再追问“哪一章移到哪里”，不要用 unknown 或说“没听清”。
 - “把第 1 条待收录记录归到第二章/把刚才这条放到职场那章”用 assign_source，source_ref 填记录编号或“刚才这条”，target_chapter_ref 填目标章节。
 - “先念一条待收录记录/下一条未收入记录/念一下第一条没收入的记录”用 read_uncovered_source，source_ref 填“第几条”或“下一条”，reply_text 要读出对应待收录记录摘录，并提示用户说“把这条归到哪一章”。
 - “第一章是不是需要换个名字/标题好不好/题目是否合适”用 review_chapter_title，不要生成 rename_chapter。

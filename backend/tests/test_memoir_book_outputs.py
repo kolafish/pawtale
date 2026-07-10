@@ -891,6 +891,34 @@ async def test_mobile_memoir_book_output_detects_and_regenerates_stale_chapter_v
     assert "老屋的事" in regenerated_data["latest_version"]["content"]
 
 
+async def test_mobile_memoir_book_output_detects_and_regenerates_reordered_chapters(client, test_db):
+    project_id = await ensure_mobile_memoir_project(client)
+    _, chapters = await _create_confirmed_book_plan(test_db, project_id=project_id)
+    generated = await client.post(f"/api/mobile/memoir/projects/{project_id}/book-output/generate", json={})
+    assert generated.status_code == 200
+
+    reordered = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-plan/structure-commands",
+        json={"type": "move_chapter", "chapter_id": chapters[1].id, "direction": "up"},
+    )
+    assert reordered.status_code == 200
+
+    stale = await client.get(f"/api/mobile/memoir/projects/{project_id}/book-output")
+    assert stale.status_code == 200
+    stale_data = stale.json()
+    assert stale_data["is_stale"] is True
+    assert stale_data["stale_chapter_titles"] == ["第一次离家", "外婆家的童年"]
+
+    regenerated = await client.post(f"/api/mobile/memoir/projects/{project_id}/book-output/generate", json={})
+    assert regenerated.status_code == 200
+    regenerated_data = regenerated.json()
+    assert regenerated_data["is_stale"] is False
+    assert [
+        item["chapter_id"]
+        for item in regenerated_data["latest_version"]["chapter_snapshot_json"]
+    ] == [chapters[1].id, chapters[0].id]
+
+
 async def test_mobile_memoir_book_output_marks_unconfirmed_plan_as_stale(client, test_db):
     project_id = await ensure_mobile_memoir_project(client)
     plan, _ = await _create_confirmed_book_plan(test_db, project_id=project_id)

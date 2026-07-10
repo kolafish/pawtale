@@ -29,6 +29,7 @@ from app.services.memoir.book_voice_command_resolution import (
 from app.services.memoir.book_voice_command_response_builder import (
     capability_reply_text as _capability_reply_text,
     chapter_count_reply_text as _chapter_count_reply_text,
+    chapter_reorder_clarification_reply_text as _chapter_reorder_clarification_reply_text,
     clarification_reply_text as _clarification_reply_text,
     source_coverage_reply_text as _source_coverage_reply_text,
     source_read_reply_text as _source_read_reply_text,
@@ -55,6 +56,7 @@ from app.services.memoir.book_voice_command_rules import (
     _fallback_consultation_intent,
     _is_ambiguous_follow_up,
     _is_chapter_count_question,
+    _is_incomplete_chapter_move_request,
     _is_source_coverage_question,
     _is_source_read_request,
     _normalize_chapter_word_text,
@@ -84,6 +86,8 @@ async def parse_payload_with_ai(
         source_count_by_chapter=source_count_by_chapter,
     )
     normalized_text = _compact(_normalize_chapter_word_text(req.text))
+    if fallback.intent == "clarify_previous" and _is_incomplete_chapter_move_request(normalized_text):
+        return fallback
     if fallback.intent == "read_uncovered_source" and _is_source_read_request(normalized_text):
         return fallback
     if _is_resolved_local_action(fallback, plan, req.current_chapter_id, req.book_context):
@@ -241,6 +245,13 @@ def _fallback_payload(
     swap_payload = _fallback_swap_payload(normalized, plan)
     if swap_payload:
         return swap_payload
+
+    if _is_incomplete_chapter_move_request(normalized):
+        return ParsedCommandPayload(
+            intent="clarify_previous",
+            summary="已理解为调整章节顺序，还需要指定章节和目标位置。",
+            reply_text=_chapter_reorder_clarification_reply_text(plan),
+        )
 
     move_match = MOVE_RE.search(normalized)
     if move_match:

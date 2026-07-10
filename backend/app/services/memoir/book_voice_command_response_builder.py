@@ -155,6 +155,16 @@ def clarification_reply_text(conversation_context: list[object] | None, ai_reply
     return "我还没确定你指的是哪一处。你可以说：现在有几章、第一章是不是太短，或者把第一章改名为什么。"
 
 
+def chapter_reorder_clarification_reply_text(plan: MemoirBookPlan) -> str:
+    chapter_count = len(_sorted_chapters(plan))
+    if chapter_count < 2:
+        return "我明白你要调整章节顺序。当前只有一章，至少有两章后才能调换。"
+    return (
+        f"我明白你要调整当前 {chapter_count} 章的顺序。"
+        "请再告诉我哪一章要移到哪里，例如：把第二章移到第一章，或交换第一章和第二章。"
+    )
+
+
 def unknown_reply_text(chapters: list[MemoirBookPlanChapter]) -> str:
     if chapters:
         return "我还没听清你想改哪一块。你可以问现在有几章、第一章是不是太短，或直接说把第一章改名为什么。"

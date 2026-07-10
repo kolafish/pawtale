@@ -505,53 +505,107 @@
   </view>
 
   <view wx:else class="section">
-    <view class="section-head">
-      <text class="section-title">逐章成稿</text>
-      <text class="section-count">{{confirmedDraftCount}}/{{totalChapterCount}} 已确认</text>
+    <view class="section-head chapter-section-head">
+      <view class="section-head-copy">
+        <text class="section-title">{{chapterStructureEditing ? "调整章节顺序" : "逐章成稿"}}</text>
+        <text class="section-count">{{confirmedDraftCount}}/{{totalChapterCount}} 已确认</text>
+      </view>
+      <button
+        class="section-head-action"
+        hover-class="section-head-action-active"
+        disabled="{{updatingPlanStructure}}"
+        bindtap="toggleChapterStructureEditing"
+      >
+        {{chapterStructureEditing ? "完成" : "调整章节"}}
+      </button>
     </view>
 
-    <view wx:for="{{chapters}}" wx:key="id" id="chapter-editor-{{item.id}}" class="chapter-card summary">
-      <view class="chapter-summary-card">
-        <view class="chapter-summary-head">
-          <view class="chapter-summary-title-block">
-            <text class="chapter-index">第 {{index + 1}} 章</text>
-            <text class="chapter-summary-title">{{item.editingTitle || item.title || "未命名章节"}}</text>
-            <text class="chapter-summary-meta">{{item.chapterSummaryMetaText}}</text>
-          </view>
-          <view class="chapter-summary-status {{item.draft && item.draft.status === 'confirmed' ? 'confirmed' : ''}}">
-            <text>{{item.draftStatusText}}</text>
-            <text wx:if="{{item.draft && item.draft.status === 'confirmed'}}" class="chapter-summary-status-hint">可继续修改</text>
-          </view>
+    <view wx:if="{{chapterStructureEditing}}" class="chapter-order-panel">
+      <view wx:for="{{chapters}}" wx:key="id" class="chapter-order-row">
+        <view class="chapter-order-copy">
+          <text class="chapter-order-index">第 {{index + 1}} 章</text>
+          <text class="chapter-order-title">{{item.editingTitle || item.title || "未命名章节"}}</text>
         </view>
-        <text wx:if="{{item.sourceChangeNotice}}" class="draft-pending compact">{{item.sourceChangeNotice}}</text>
-        <text wx:if="{{item.draftError}}" class="chapter-summary-error">{{item.draftError}}</text>
-        <text
-          wx:if="{{ttsBusyTarget === item.ttsTarget || playingTarget === item.ttsTarget}}"
-          class="chapter-audio-status"
-        >
-          {{ttsBusyTarget === item.ttsTarget ? "正在准备朗读..." : "正在朗读本章"}}
-        </text>
-        <view class="chapter-summary-actions">
+        <view class="chapter-order-actions">
           <button
-            class="primary-button small"
+            class="chapter-order-edit"
+            hover-class="chapter-order-button-active"
             data-id="{{item.id}}"
-            bindtap="openChapterEditor"
             disabled="{{updatingPlanStructure || item.draftBusy}}"
+            bindtap="openChapterEditor"
           >
-            编辑正文
+            编辑
           </button>
           <button
-            class="ghost-button small"
+            class="chapter-order-button"
+            hover-class="chapter-order-button-active"
+            aria-label="第 {{index + 1}} 章上移"
             data-id="{{item.id}}"
-            loading="{{ttsBusyTarget === item.ttsTarget}}"
-            bindtap="openChapterMoreActions"
-            disabled="{{updatingPlanStructure || ttsBusyTarget === item.ttsTarget}}"
+            data-direction="up"
+            bindtap="moveChapter"
+            disabled="{{updatingPlanStructure || !item.canMoveUp}}"
           >
-            {{ttsBusyTarget === item.ttsTarget ? "准备朗读" : (playingTarget === item.ttsTarget ? "朗读中" : "更多")}}
+            ↑
+          </button>
+          <button
+            class="chapter-order-button"
+            hover-class="chapter-order-button-active"
+            aria-label="第 {{index + 1}} 章下移"
+            data-id="{{item.id}}"
+            data-direction="down"
+            bindtap="moveChapter"
+            disabled="{{updatingPlanStructure || !item.canMoveDown}}"
+          >
+            ↓
           </button>
         </view>
       </view>
     </view>
+
+    <block wx:else>
+      <view wx:for="{{chapters}}" wx:key="id" id="chapter-editor-{{item.id}}" class="chapter-card summary">
+        <view class="chapter-summary-card">
+          <view class="chapter-summary-head">
+            <view class="chapter-summary-title-block">
+              <text class="chapter-index">第 {{index + 1}} 章</text>
+              <text class="chapter-summary-title">{{item.editingTitle || item.title || "未命名章节"}}</text>
+              <text class="chapter-summary-meta">{{item.chapterSummaryMetaText}}</text>
+            </view>
+            <view class="chapter-summary-status {{item.draft && item.draft.status === 'confirmed' ? 'confirmed' : ''}}">
+              <text>{{item.draftStatusText}}</text>
+              <text wx:if="{{item.draft && item.draft.status === 'confirmed'}}" class="chapter-summary-status-hint">可继续修改</text>
+            </view>
+          </view>
+          <text wx:if="{{item.sourceChangeNotice}}" class="draft-pending compact">{{item.sourceChangeNotice}}</text>
+          <text wx:if="{{item.draftError}}" class="chapter-summary-error">{{item.draftError}}</text>
+          <text
+            wx:if="{{ttsBusyTarget === item.ttsTarget || playingTarget === item.ttsTarget}}"
+            class="chapter-audio-status"
+          >
+            {{ttsBusyTarget === item.ttsTarget ? "正在准备朗读..." : "正在朗读本章"}}
+          </text>
+          <view class="chapter-summary-actions">
+            <button
+              class="primary-button small"
+              data-id="{{item.id}}"
+              bindtap="openChapterEditor"
+              disabled="{{updatingPlanStructure || item.draftBusy}}"
+            >
+              编辑正文
+            </button>
+            <button
+              class="ghost-button small"
+              data-id="{{item.id}}"
+              loading="{{ttsBusyTarget === item.ttsTarget}}"
+              bindtap="openChapterMoreActions"
+              disabled="{{updatingPlanStructure || ttsBusyTarget === item.ttsTarget}}"
+            >
+              {{ttsBusyTarget === item.ttsTarget ? "准备朗读" : (playingTarget === item.ttsTarget ? "朗读中" : "章节操作")}}
+            </button>
+          </view>
+        </view>
+      </view>
+    </block>
 
   </view>
   </block>

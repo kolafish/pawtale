@@ -227,6 +227,7 @@ definePage<BookHomeData>()({
     stage: "empty",
     stageText: "等待生成章节",
     chapters: [],
+    chapterStructureEditing: false,
     splitSourceSelections: {},
     confirmedDraftCount: 0,
     totalChapterCount: 0,
@@ -511,6 +512,7 @@ definePage<BookHomeData>()({
       planTitle: plan?.title || `${this.data.projectTitle || "我的回忆录"}章节规划`,
       stage,
       stageText: stageText(stage),
+      chapterStructureEditing: stage === "drafting" ? this.data.chapterStructureEditing : false,
       bookVoiceAssistantHint: bookVoiceAssistantHint(stage, chapters.length),
       ...(shouldResetVoiceStatus ? bookVoiceIdlePatch(stage, {
         collapse: true,
@@ -738,6 +740,17 @@ definePage<BookHomeData>()({
     wx.navigateTo({ url: bookChapterDetailUrl(this.data.projectId, chapterId, "content") });
   },
 
+  toggleChapterStructureEditing() {
+    if (this.data.stage !== "drafting" || !this.data.plan || this.data.updatingPlanStructure) {
+      return;
+    }
+    this.stopPlayback();
+    this.setData({
+      chapterStructureEditing: !this.data.chapterStructureEditing,
+      error: "",
+    });
+  },
+
   openChapterMoreActions(event: DatasetEvent) {
     const chapterId = datasetString(event, "id");
     const chapter = findBookChapter(this.data.chapters, chapterId);
@@ -746,6 +759,10 @@ definePage<BookHomeData>()({
       return;
     }
     const actions: Array<{ label: string; run: () => void | Promise<void> }> = [];
+    actions.push({
+      label: "调整章节",
+      run: () => wx.navigateTo({ url: bookChapterDetailUrl(this.data.projectId, chapterId, "more") }),
+    });
     if (chapter.sourceViews.length) {
       actions.push({
         label: "看素材",

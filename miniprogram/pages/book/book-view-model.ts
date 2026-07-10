@@ -235,6 +235,7 @@ export interface BookData {
   stage: BookStage;
   stageText: string;
   chapters: BookChapterView[];
+  chapterStructureEditing: boolean;
   editingChapterId: string;
   splitSourceSelections: Record<string, string[]>;
   confirmedDraftCount: number;
@@ -1382,6 +1383,7 @@ export function guestBookData(): Partial<BookHomeData> {
     stage: "empty",
     stageText: stageText("empty"),
     chapters: [],
+    chapterStructureEditing: false,
     confirmedDraftCount: 0,
     totalChapterCount: 0,
     allChaptersConfirmed: false,
