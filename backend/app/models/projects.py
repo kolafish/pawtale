@@ -64,6 +64,7 @@ class Document(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     group_id: Mapped[str] = mapped_column(String(36), ForeignKey("document_groups.id"), nullable=False)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
+    content: Mapped[str] = mapped_column(Text, default="")  # Existing DB column; content lives in files.
     word_count: Mapped[int] = mapped_column(Integer, default=0)
     synopsis: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String(20), default="draft")  # draft/revision/done

@@ -22,7 +22,6 @@ from app.services.memoir import automation_events
 from app.services.memoir.automation_event_metadata import (
     ACKNOWLEDGED_AT_KEY,
     ACKNOWLEDGED_BY_USER_KEY,
-    EVENT_SIGNATURE_KEY,
     VOICE_PLAYED_AT_KEY,
     VOICE_PLAYED_MESSAGE_ID_KEY,
     VOICE_PLAYED_SESSION_ID_KEY,
@@ -108,7 +107,6 @@ async def _record_job_failure_event(
     error = _compact_error_message(error_message)
     metadata: dict[str, object] = {
         "source": EDITING_JOB_FAILURE_EVENT_SOURCE,
-        EVENT_SIGNATURE_KEY: f"editing_job_failed:{job.id}",
         "editing_job_id": job.id,
         "job_type": job_type.value,
         "dedupe_key": job.dedupe_key or "",
@@ -127,6 +125,7 @@ async def _record_job_failure_event(
         chapter_id=job.chapter_id,
         utterance_ids=_payload_utterance_ids(payload),
         summary_text=_FAILURE_SUMMARIES[job_type],
+        event_signature=f"editing_job_failed:{job.id}",
         metadata_json=metadata,
     )
     updated_metadata = dict(event.metadata_json or {})
