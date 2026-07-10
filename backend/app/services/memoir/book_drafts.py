@@ -292,8 +292,9 @@ async def _load_chapter(
     user_id: str,
     project_id: str,
     chapter_id: str,
+    allow_admin: bool = False,
 ) -> MemoirBookPlanChapter:
-    await load_memoir_project(db, project_id, user_id)
+    await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
     chapter = await db.scalar(
         select(MemoirBookPlanChapter)
         .join(MemoirBookPlan, MemoirBookPlanChapter.plan_id == MemoirBookPlan.id)
@@ -536,8 +537,15 @@ async def get_chapter_draft(
     user_id: str,
     project_id: str,
     chapter_id: str,
+    allow_admin: bool = False,
 ) -> MemoirBookChapterDraftResponse:
-    chapter = await _load_chapter(db, user_id=user_id, project_id=project_id, chapter_id=chapter_id)
+    chapter = await _load_chapter(
+        db,
+        user_id=user_id,
+        project_id=project_id,
+        chapter_id=chapter_id,
+        allow_admin=allow_admin,
+    )
     draft = await _load_draft(db, project_id=project_id, chapter_id=chapter_id)
     if not draft:
         raise HTTPException(status_code=404, detail="章节稿不存在")
@@ -558,8 +566,15 @@ async def generate_chapter_draft(
     chapter_id: str,
     req: MemoirBookChapterDraftGenerateRequest,
     ai_client: AITextClient | None = None,
+    allow_admin: bool = False,
 ) -> MemoirBookChapterDraftResponse:
-    chapter = await _load_chapter(db, user_id=user_id, project_id=project_id, chapter_id=chapter_id)
+    chapter = await _load_chapter(
+        db,
+        user_id=user_id,
+        project_id=project_id,
+        chapter_id=chapter_id,
+        allow_admin=allow_admin,
+    )
     _require_confirmed_plan(chapter)
     existing = await _load_draft(db, project_id=project_id, chapter_id=chapter_id)
     source_change_state = await _chapter_source_change_state(db, chapter=chapter)
@@ -652,8 +667,15 @@ async def update_chapter_draft(
     project_id: str,
     chapter_id: str,
     req: MemoirBookChapterDraftUpdateRequest,
+    allow_admin: bool = False,
 ) -> MemoirBookChapterDraftResponse:
-    chapter = await _load_chapter(db, user_id=user_id, project_id=project_id, chapter_id=chapter_id)
+    chapter = await _load_chapter(
+        db,
+        user_id=user_id,
+        project_id=project_id,
+        chapter_id=chapter_id,
+        allow_admin=allow_admin,
+    )
     _require_confirmed_plan(chapter)
     return await _append_version(
         db,
@@ -674,8 +696,15 @@ async def confirm_chapter_draft(
     user_id: str,
     project_id: str,
     chapter_id: str,
+    allow_admin: bool = False,
 ) -> MemoirBookChapterDraftResponse:
-    chapter = await _load_chapter(db, user_id=user_id, project_id=project_id, chapter_id=chapter_id)
+    chapter = await _load_chapter(
+        db,
+        user_id=user_id,
+        project_id=project_id,
+        chapter_id=chapter_id,
+        allow_admin=allow_admin,
+    )
     _require_confirmed_plan(chapter)
     source_change_state = await _chapter_source_change_state(db, chapter=chapter)
     if source_change_state.pending_source_ids:
@@ -717,8 +746,15 @@ async def synthesize_chapter_draft_audio(
     chapter_id: str,
     req: MemoirBookAudioRequest,
     tts_client: TTSClient | None = None,
+    allow_admin: bool = False,
 ) -> MemoirBookAudioResponse:
-    chapter = await _load_chapter(db, user_id=user_id, project_id=project_id, chapter_id=chapter_id)
+    chapter = await _load_chapter(
+        db,
+        user_id=user_id,
+        project_id=project_id,
+        chapter_id=chapter_id,
+        allow_admin=allow_admin,
+    )
     _require_confirmed_plan(chapter)
     draft = await _load_draft(db, project_id=project_id, chapter_id=chapter_id)
     if not draft or not draft.versions:

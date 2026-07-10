@@ -218,9 +218,15 @@ async def generate_book_plan(
     project_id: str,
     req: MemoirBookPlanGenerateRequest,
     ai_client: AITextClient | None = None,
+    allow_admin: bool = False,
 ) -> MemoirBookPlanResponse:
-    project = await load_memoir_project(db, project_id, user_id)
-    sources = await _source_segments(db, user_id=user_id, project_id=project_id)
+    project = await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
+    sources = await _source_segments(
+        db,
+        user_id=user_id,
+        project_id=project_id,
+        allow_admin=allow_admin,
+    )
     if not sources:
         raise HTTPException(status_code=400, detail="暂无讲述内容，无法规划章节")
     generated = await _generate_book_plan_from_sources(
@@ -406,9 +412,15 @@ async def confirm_book_plan(
     user_id: str,
     project_id: str,
     req: MemoirBookPlanConfirmRequest,
+    allow_admin: bool = False,
 ) -> MemoirBookPlanResponse:
-    project = await load_memoir_project(db, project_id, user_id)
-    sources = await _source_segments(db, user_id=user_id, project_id=project_id)
+    project = await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
+    sources = await _source_segments(
+        db,
+        user_id=user_id,
+        project_id=project_id,
+        allow_admin=allow_admin,
+    )
     chapters = _validated_chapters(req, sources)
     response = await _replace_plan(
         db,
@@ -428,6 +440,7 @@ async def confirm_book_plan(
         db,
         user_id=user_id,
         project_id=project_id,
+        allow_admin=allow_admin,
     )
     return response
 
@@ -438,13 +451,19 @@ async def update_book_plan(
     user_id: str,
     project_id: str,
     req: MemoirBookPlanUpdateRequest,
+    allow_admin: bool = False,
 ) -> MemoirBookPlanResponse:
-    await load_memoir_project(db, project_id, user_id)
+    await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
     plan = await _load_plan(db, project_id)
     if not plan:
         raise HTTPException(status_code=404, detail="章节规划不存在")
 
-    sources = await _source_segments(db, user_id=user_id, project_id=project_id)
+    sources = await _source_segments(
+        db,
+        user_id=user_id,
+        project_id=project_id,
+        allow_admin=allow_admin,
+    )
     chapter_updates = _validated_chapter_updates(req, sources)
     existing_by_id = {chapter.id: chapter for chapter in plan.chapters}
     current_refs_by_chapter = await _plan_source_ref_dicts_by_chapter(db, plan)
@@ -548,8 +567,9 @@ async def apply_book_plan_structure_command(
     user_id: str,
     project_id: str,
     req: MemoirBookPlanStructureCommandRequest,
+    allow_admin: bool = False,
 ) -> MemoirBookPlanResponse:
-    await load_memoir_project(db, project_id, user_id)
+    await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
     plan = await _load_plan(db, project_id)
     if not plan:
         raise HTTPException(status_code=404, detail="章节规划不存在")
@@ -581,7 +601,12 @@ async def apply_book_plan_structure_command(
         utterance_id = _require_source_utterance_id(req)
         if utterance_id in await _covered_utterance_ids(db, plan):
             raise HTTPException(status_code=400, detail="讲述记录已收录到章节")
-        sources = await _source_segments(db, user_id=user_id, project_id=project_id)
+        sources = await _source_segments(
+            db,
+            user_id=user_id,
+            project_id=project_id,
+            allow_admin=allow_admin,
+        )
         source = next((item for item in sources if item.utterance_id == utterance_id), None)
         if not source:
             raise HTTPException(status_code=400, detail="讲述记录不属于当前回忆录")
@@ -641,8 +666,9 @@ async def update_book_chapter_title(
     project_id: str,
     chapter_id: str,
     req: MemoirBookChapterTitleUpdateRequest,
+    allow_admin: bool = False,
 ) -> MemoirBookPlanResponse:
-    await load_memoir_project(db, project_id, user_id)
+    await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
     plan = await _load_plan(db, project_id)
     if not plan:
         raise HTTPException(status_code=404, detail="章节规划不存在")
@@ -665,13 +691,19 @@ async def generate_book_chapter_title(
     chapter_id: str,
     req: MemoirBookChapterTitleGenerateRequest,
     ai_client: AITextClient | None = None,
+    allow_admin: bool = False,
 ) -> MemoirBookPlanResponse:
-    await load_memoir_project(db, project_id, user_id)
+    await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
     plan = await _load_plan(db, project_id)
     if not plan:
         raise HTTPException(status_code=404, detail="章节规划不存在")
     chapter = _chapter_by_id(plan, chapter_id)
-    sources = await _source_segments(db, user_id=user_id, project_id=project_id)
+    sources = await _source_segments(
+        db,
+        user_id=user_id,
+        project_id=project_id,
+        allow_admin=allow_admin,
+    )
     refs_by_chapter = await _plan_source_ref_dicts_by_chapter(db, plan)
     generated = await _generate_chapter_title_from_sources(
         sources=_chapter_title_source_digests(
