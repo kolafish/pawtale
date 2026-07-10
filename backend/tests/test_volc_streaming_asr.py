@@ -4,6 +4,10 @@ import json
 import pytest
 
 from app.services.memoir.asr import StreamingASREvent
+from app.services.memoir.streaming_asr import (
+    create_realtime_volc_streaming_asr_client,
+    create_volc_streaming_asr_client,
+)
 from app.services.memoir.volc_asr_protocol import (
     GZIP_COMPRESSION,
     JSON_SERIALIZATION,
@@ -335,6 +339,19 @@ def test_volc_initial_request_asks_for_full_two_pass_results():
     }
     assert request["request"]["result_type"] == "full"
     assert request["request"]["enable_nonstream"] is True
+
+
+def test_realtime_volc_factory_accelerates_interim_text_without_changing_offline_factory():
+    realtime_client = create_realtime_volc_streaming_asr_client("user-1", "voice-1")
+    offline_client = create_volc_streaming_asr_client("user-1", "offline-1")
+
+    realtime_request = realtime_client._initial_request()["request"]
+    offline_request = offline_client._initial_request()["request"]
+
+    assert realtime_request["enable_accelerate_text"] is True
+    assert realtime_request["accelerate_score"] == 10
+    assert "enable_accelerate_text" not in offline_request
+    assert "accelerate_score" not in offline_request
 
 
 def test_volc_client_start_sends_initial_request_with_sequence(monkeypatch):

@@ -4,6 +4,8 @@ from app.config import get_settings
 from app.services.memoir.asr import StreamingASRClient, StreamingASREvent
 from app.services.memoir.volc_streaming_asr import VolcStreamingASRClient, VolcStreamingASRConfig
 
+REALTIME_TEXT_ACCELERATE_SCORE = 10
+
 
 def volc_config_from_settings() -> VolcStreamingASRConfig:
     settings = get_settings()
@@ -25,6 +27,18 @@ def create_volc_streaming_asr_client(user_id: str, voice_session_id: str) -> Str
     )
 
 
+def create_realtime_volc_streaming_asr_client(user_id: str, voice_session_id: str) -> StreamingASRClient:
+    return VolcStreamingASRClient(
+        config=volc_config_from_settings(),
+        user_id=user_id,
+        voice_session_id=voice_session_id,
+        request_options={
+            "enable_accelerate_text": True,
+            "accelerate_score": REALTIME_TEXT_ACCELERATE_SCORE,
+        },
+    )
+
+
 def create_speaker_transcription_asr_client(user_id: str, transcription_session_id: str) -> StreamingASRClient:
     return VolcStreamingASRClient(
         config=volc_config_from_settings(),
@@ -39,6 +53,7 @@ __all__ = [
     "StreamingASREvent",
     "VolcStreamingASRClient",
     "VolcStreamingASRConfig",
+    "create_realtime_volc_streaming_asr_client",
     "create_speaker_transcription_asr_client",
     "create_volc_streaming_asr_client",
     "volc_config_from_settings",

@@ -149,33 +149,6 @@ function setVoiceChatData(context: VoiceChatDataContext, patch: Partial<VoiceCha
   });
 }
 
-function isProviderNoStatusClose(message: string, error?: VoiceChatErrorInfo): boolean {
-  if (error?.code === "asr_provider_connection_closed") {
-    return true;
-  }
-  const text = [
-    message,
-    error?.code || "",
-    error?.message || "",
-  ].join(" ").toLowerCase();
-  return text.includes("no_status_rcvd") || text.includes("closecode.no_status_rcvd");
-}
-
-function shouldIgnoreSavedHumanInterviewClose(
-  data: Pick<
-    VoiceChatData,
-    "interviewType" | "recording" | "transcriptLines" | "latestTranscriptText"
-  >,
-  message: string,
-  error?: VoiceChatErrorInfo,
-): boolean {
-  if (data.interviewType !== "human_interview" || data.recording || !isProviderNoStatusClose(message, error)) {
-    return false;
-  }
-  return data.transcriptLines.some((line) => line.text.trim())
-    || Boolean(data.latestTranscriptText.trim());
-}
-
 definePage<VoiceChatData>()({
   audioPlayback: new AudioPlaybackController(),
   voiceStreaming: new StreamingVoiceController(),
@@ -194,7 +167,8 @@ definePage<VoiceChatData>()({
   handledNoAnswerFrameCount: -1,
   autoListenPendingAfterPlayback: false,
   pageSuspended: false,
-  suppressNextBenignCloseErrorStatus: false,
+  gatewayConnectPromise: null as Promise<boolean> | null,
+  recordingStartPromise: null as Promise<boolean> | null,
 
   data: initialVoiceChatData(),
 
@@ -382,9 +356,9 @@ definePage<VoiceChatData>()({
       if (autoTriggered) {
         setVoiceChatData(this, { autoListenStateText: "自动收音已暂停，等待声纹授权同步" });
       }
-      return;
+      return false;
     }
-    await this.connectGateway();
+    return this.connectGateway();
   },
 
   hydrateVoiceSessionSnapshot() {
@@ -918,7 +892,7 @@ definePage<VoiceChatData>()({
   startRecordingAsSpeaker(event: SpeakerRoleTapEvent) {
     if (
       this.data.recording
-      || this.data.connecting
+      || this.recordingStartPromise
       || !this.data.voiceAuthorizationAgreed
       || this.data.interviewType !== "human_interview"
     ) {
@@ -1412,10 +1386,28 @@ definePage<VoiceChatData>()({
     });
   },
 
-  async connectGateway() {
-    if (this.data.connecting || !this.data.voiceSessionId) {
-      return;
+  connectGateway(): Promise<boolean> {
+    if (!this.data.voiceSessionId) {
+      return Promise.resolve(false);
     }
+    if (this.gatewayConnectPromise) {
+      return this.gatewayConnectPromise;
+    }
+    const connectPromise = this.performConnectGateway().catch((error) => {
+      const message = error instanceof Error ? error.message : "语音连接失败";
+      this.handleError(message, classifyVoiceClientConnectionError(message));
+      return false;
+    });
+    this.gatewayConnectPromise = connectPromise;
+    void connectPromise.finally(() => {
+      if (this.gatewayConnectPromise === connectPromise) {
+        this.gatewayConnectPromise = null;
+      }
+    });
+    return connectPromise;
+  },
+
+  async performConnectGateway(): Promise<boolean> {
     setVoiceChatData(this, { connecting: true, error: "" });
     let connected = false;
     try {
@@ -1459,18 +1451,27 @@ definePage<VoiceChatData>()({
         await this.tryStartAutoListenAfterTTS();
       }
     }
+    return connected;
   },
 
   startRecording(autoTriggered: boolean = false, speakerRole?: MemoirSpeakerRole) {
     if (!this.ensureVoiceAuthorization(autoTriggered)) {
       return false;
     }
-    if (voiceClientUnavailableForRecording(this.voiceStreaming.hasClient(), this.data.status)) {
-      void this.syncVoiceAuthorizationAndConnect(autoTriggered);
-      setVoiceChatData(this, voiceRecordingReconnectPatch(autoTriggered, this.data.autoListenStateText));
-      return false;
+    if (this.recordingStartPromise) {
+      return true;
     }
-    void this.startRecordingAfterPrivacy(autoTriggered, speakerRole);
+    const startPromise = this.startRecordingAfterPrivacy(autoTriggered, speakerRole).catch((error) => {
+      const message = error instanceof Error ? error.message : "录音启动失败";
+      this.handleError(message, { kind: "recorder", code: "recorder_start_failed", message });
+      return false;
+    });
+    this.recordingStartPromise = startPromise;
+    void startPromise.finally(() => {
+      if (this.recordingStartPromise === startPromise) {
+        this.recordingStartPromise = null;
+      }
+    });
     return true;
   },
 
@@ -1486,6 +1487,9 @@ definePage<VoiceChatData>()({
       setVoiceChatData(this, voiceAssistantInterruptedPatch());
     }
     await this.stopAssistantBargeInMonitor();
+    if (this.pageSuspended) {
+      return false;
+    }
     if (!(await this.syncVoiceAuthorizationForSession())) {
       return false;
     }
@@ -1497,10 +1501,23 @@ definePage<VoiceChatData>()({
       setVoiceChatData(this, voiceRecorderPrivacyDeniedPatch(autoTriggered, this.data.autoListenStateText));
       return false;
     }
-    if (voiceClientUnavailableForRecording(this.voiceStreaming.hasClient(), this.data.status)) {
-      void this.syncVoiceAuthorizationAndConnect(autoTriggered);
-      setVoiceChatData(this, voiceRecordingReconnectPatch(autoTriggered, this.data.autoListenStateText));
+    if (this.pageSuspended) {
       return false;
+    }
+    if (
+      this.data.connecting
+      || voiceClientUnavailableForRecording(this.voiceStreaming.hasClient(), this.data.status)
+    ) {
+      setVoiceChatData(this, voiceRecordingReconnectPatch(autoTriggered, this.data.autoListenStateText));
+      const connected = await this.connectGateway();
+      if (
+        !connected
+        || this.pageSuspended
+        || voiceClientUnavailableForRecording(this.voiceStreaming.hasClient(), this.data.status)
+      ) {
+        setVoiceChatData(this, voiceRecordingUnavailablePatch(autoTriggered, this.data.autoListenStateText));
+        return false;
+      }
     }
     const recordingOptions: {
       noVoiceActivityTimeoutMs: number;
@@ -1530,14 +1547,7 @@ definePage<VoiceChatData>()({
   },
 
   toggleRecording() {
-    if (this.data.connecting) {
-      return;
-    }
     if (!this.ensureVoiceAuthorization(false)) {
-      return;
-    }
-    if (voiceClientUnavailableForRecording(this.voiceStreaming.hasClient(), this.data.status)) {
-      void this.syncVoiceAuthorizationAndConnect(false);
       return;
     }
     if (this.data.recording) {
@@ -1659,10 +1669,6 @@ definePage<VoiceChatData>()({
   },
 
   handleStatus(status: VoiceChatConnectionStatus) {
-    if (status === "error" && this.suppressNextBenignCloseErrorStatus) {
-      this.suppressNextBenignCloseErrorStatus = false;
-      return;
-    }
     setVoiceChatData(this, voiceConnectionStatusPatch(status, this.data));
   },
 
@@ -1763,17 +1769,6 @@ definePage<VoiceChatData>()({
       },
       { voiceSessionId: this.data.voiceSessionId },
     );
-    if (shouldIgnoreSavedHumanInterviewClose(this.data, message, error)) {
-      this.suppressNextBenignCloseErrorStatus = true;
-      setVoiceChatData(this, {
-        error: "",
-        errorKindText: "",
-        recording: false,
-        captureStateText: "麦克风未开始",
-        primaryActionText: "继续说话",
-      });
-      return;
-    }
     if (error?.kind === "connection") {
       this.persistPendingVoiceClose("connection_error");
     }

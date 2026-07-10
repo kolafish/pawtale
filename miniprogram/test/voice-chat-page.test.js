@@ -292,6 +292,62 @@ test("human interview record action starts the selected speaker in one tap", asy
   assert.deepEqual(startOptions, [{ noVoiceActivityTimeoutMs: 0, speakerRole: "interviewer" }]);
 });
 
+test("human interview record action reconnects and starts the selected speaker without a second tap", async () => {
+  let connected = false;
+  let connectCalls = 0;
+  const startOptions = [];
+  const page = loadVoiceChatPage({
+    voiceAuthorizationExports: {
+      readVoiceAuthorizationConsent: () => true,
+      syncVoiceAuthorizationConsent: async () => ({ id: "consent-1" }),
+    },
+  });
+  const context = {
+    ...page,
+    data: {
+      ...page.data,
+      voiceSessionId: "voice-1",
+      interviewType: "human_interview",
+      voiceAuthorizationAgreed: true,
+      status: "closed",
+      connecting: false,
+      speakerRole: "narrator",
+    },
+    voiceStreaming: {
+      hasClient: () => connected,
+      async connect(options) {
+        connectCalls += 1;
+        connected = true;
+        options.callbacks.onStatus("ready");
+      },
+      startRecording(options) {
+        startOptions.push(options);
+        return true;
+      },
+      stopRecording() {},
+      close() {},
+    },
+    async syncVoiceAuthorizationForSession() {
+      return true;
+    },
+    async stopAssistantBargeInMonitor() {},
+    setData(patch) {
+      this.data = { ...this.data, ...patch };
+    },
+  };
+
+  page.startRecordingAsSpeaker.call(context, {
+    currentTarget: { dataset: { role: "interviewer" } },
+  });
+  await context.recordingStartPromise;
+
+  assert.equal(connectCalls, 1);
+  assert.equal(context.data.speakerRole, "interviewer");
+  assert.equal(context.data.recording, true);
+  assert.equal(context.data.status, "ready");
+  assert.deepEqual(startOptions, [{ noVoiceActivityTimeoutMs: 0, speakerRole: "interviewer" }]);
+});
+
 test("voice chat does not connect a stopped voice session", async () => {
   let connectCalls = 0;
   const page = loadVoiceChatPage({
@@ -495,6 +551,7 @@ test("voice chat does not show microphone connecting while session refresh is pe
 
 test("voice chat reconnects on user start after a failed connect", async () => {
   let connectCalls = 0;
+  let startRecordingCalls = 0;
   const page = loadVoiceChatPage({
     streamingExports: {
       MemoirStreamingAsrClient: class {
@@ -511,7 +568,8 @@ test("voice chat reconnects on user start after a failed connect", async () => {
         close() {}
         configureAutoStop() {}
         startRecording() {
-          throw new Error("startRecording should wait for reconnect");
+          startRecordingCalls += 1;
+          return true;
         }
       },
     },
@@ -540,11 +598,11 @@ test("voice chat reconnects on user start after a failed connect", async () => {
   assert.equal(context.data.status, "error");
 
   const started = page.startRecording.call(context, false);
-  await new Promise((resolve) => setImmediate(resolve));
-  await new Promise((resolve) => setImmediate(resolve));
+  await context.recordingStartPromise;
 
-  assert.equal(started, false);
+  assert.equal(started, true);
   assert.equal(connectCalls, 2);
+  assert.equal(startRecordingCalls, 1);
   assert.equal(context.data.connecting, false);
   assert.equal(context.data.status, "ready");
 });
@@ -703,15 +761,8 @@ test("voice chat stores pending close state for connection errors", () => {
   assert.match(context.data.recoveryNotice, /语音连接中断/);
 });
 
-test("human interview ignores provider no-status close after transcript has been saved", () => {
-  const pendingWrites = [];
-  const page = loadVoiceChatPage({
-    memoirCacheExports: {
-      writeMemoirVoiceSessionPendingClose: (voiceSessionId, pendingClose) => {
-        pendingWrites.push({ voiceSessionId, pendingClose });
-      },
-    },
-  });
+test("human interview surfaces a real provider close after an earlier transcript was saved", () => {
+  const page = loadVoiceChatPage();
   const context = {
     ...page,
     data: {
@@ -737,13 +788,9 @@ test("human interview ignores provider no-status close after transcript has been
   });
   page.handleStatus.call(context, "error");
 
-  assert.equal(pendingWrites.length, 0);
-  assert.equal(context.data.error, "");
-  assert.equal(context.data.errorKindText, "");
-  assert.equal(context.data.status, "ready");
-  assert.equal(context.data.captureStateText, "麦克风未开始");
-  assert.equal(context.data.primaryActionText, "继续说话");
-  assert.equal(context.data.showStageStatus, false);
+  assert.equal(context.data.error, "语音识别服务连接已关闭，请重新保存这段");
+  assert.equal(context.data.status, "error");
+  assert.equal(context.data.captureStateText, "录音异常");
 });
 
 test("voice chat refreshes session on show only after page suspension", () => {
@@ -1950,8 +1997,12 @@ test("voice chat auto barge-in stops assistant before reconnecting a missing gat
       stopRecording() {},
       close() {},
     },
-    syncVoiceAuthorizationAndConnect(autoTriggered) {
-      reconnectCalls.push(autoTriggered);
+    async syncVoiceAuthorizationForSession() {
+      return true;
+    },
+    async connectGateway() {
+      reconnectCalls.push(false);
+      return false;
     },
     setData(patch) {
       this.data = { ...this.data, ...patch };

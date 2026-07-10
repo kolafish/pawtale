@@ -30,6 +30,10 @@ export function voiceRecordingReconnectPatch(
   currentAutoListenStateText: string,
 ): VoiceChatPatch {
   return {
+    error: "",
+    captureStateText: "正在连接麦克风",
+    persistenceStateText: "正在准备收音",
+    primaryActionText: "正在连接",
     autoListenStateText: autoTriggered ? "正在重新连接语音" : currentAutoListenStateText,
   };
 }
