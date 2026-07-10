@@ -48,11 +48,9 @@ interface ImageAssetsData {
   error: string;
   projectId: string;
   total: number;
-  readyCount: number;
   includedCount: number;
   unusedCount: number;
   items: ImageAssetView[];
-  imagePaths: Record<string, string>;
   chapterOptions: ChapterOption[];
   savingTarget: string;
   placingTarget: string;
@@ -66,6 +64,9 @@ interface ImageAssetDataset {
 type DatasetEvent = PageDatasetEvent<ImageAssetDataset>;
 type PickerEvent = PagePickerEvent<ImageAssetDataset>;
 type TextInputEvent = PageTextInputEvent<ImageAssetDataset>;
+
+const THUMBNAIL_BATCH_SIZE = 4;
+const MAX_AUTO_DOWNLOADED_THUMBNAILS = 24;
 
 function trimText(value: string | null | undefined): string {
   return (value || "").trim();
@@ -134,13 +135,10 @@ function assetTitle(asset: MemoirImageAsset): string {
   );
 }
 
-function buildAssetViews(
-  response: MemoirImageAssetListResponse | null,
-  imagePaths: Record<string, string>,
-): ImageAssetView[] {
-  return (response?.items || []).map((asset) => ({
+function buildAssetView(asset: MemoirImageAsset, localPath = ""): ImageAssetView {
+  return {
     ...asset,
-    localPath: imagePaths[asset.id] || "",
+    localPath,
     titleText: assetTitle(asset),
     sourceLabel: sourceLabel(asset),
     statusText: statusText(asset),
@@ -148,7 +146,28 @@ function buildAssetViews(
     createdAtText: formatBeijingDateTimeShort(asset.created_at) || "",
     captionDraft: trimText(asset.caption),
     enabledPlacements: (asset.placements || []).filter((placement) => placement.enabled),
-  }));
+  };
+}
+
+function buildAssetViews(
+  response: MemoirImageAssetListResponse,
+  currentItems: ImageAssetView[],
+): ImageAssetView[] {
+  const localPaths = new Map(currentItems.map((item) => [item.id, item.localPath]));
+  return response.items.map((asset) => buildAssetView(asset, localPaths.get(asset.id) || ""));
+}
+
+function assetCountData(items: ImageAssetView[]): Pick<
+  ImageAssetsData,
+  "total" | "includedCount" | "unusedCount"
+> {
+  const readyCount = items.filter((item) => item.status === "ready").length;
+  const includedCount = items.filter((item) => item.include_in_book).length;
+  return {
+    total: items.length,
+    includedCount,
+    unusedCount: Math.max(0, readyCount - includedCount),
+  };
 }
 
 function chapterOptions(plan: MemoirBookPlan | null): ChapterOption[] {
@@ -161,23 +180,23 @@ function chapterOptions(plan: MemoirBookPlan | null): ChapterOption[] {
 }
 
 definePage<ImageAssetsData>()({
+  loadToken: 0,
+
   data: {
     loading: false,
     error: "",
     projectId: "",
     total: 0,
-    readyCount: 0,
     includedCount: 0,
     unusedCount: 0,
     items: [],
-    imagePaths: {},
     chapterOptions: [],
     savingTarget: "",
     placingTarget: "",
     deletingTarget: "",
   },
 
-  async onLoad(options: { projectId?: string }) {
+  onLoad(options: { projectId?: string }) {
     const projectId = trimText(options.projectId);
     if (projectId) {
       this.setData({ projectId });
@@ -186,6 +205,10 @@ definePage<ImageAssetsData>()({
 
   async onShow() {
     await this.loadImageAssets();
+  },
+
+  onUnload() {
+    this.loadToken += 1;
   },
 
   async ensureProjectId(): Promise<string> {
@@ -202,6 +225,8 @@ definePage<ImageAssetsData>()({
   },
 
   async loadImageAssets() {
+    this.loadToken += 1;
+    const requestToken = this.loadToken;
     this.setData({ loading: true, error: "" });
     try {
       const projectId = await this.ensureProjectId();
@@ -209,22 +234,29 @@ definePage<ImageAssetsData>()({
         listMemoirImageAssets(projectId),
         this.loadBookPlan(projectId),
       ]);
+      if (requestToken !== this.loadToken || projectId !== this.data.projectId) {
+        return;
+      }
       this.setData({
         total: response.total,
-        readyCount: response.ready_count,
         includedCount: response.included_count,
         unusedCount: response.unused_count,
         chapterOptions: chapterOptions(plan),
-        items: buildAssetViews(response, this.data.imagePaths),
+        items: buildAssetViews(response, this.data.items),
       });
-      void this.downloadVisibleImages(response.items);
+      void this.downloadVisibleImages(response.items, projectId, requestToken);
     } catch (error) {
+      if (requestToken !== this.loadToken) {
+        return;
+      }
       if (routeAuthError(error, "login")) {
         return;
       }
       this.setData({ error: error instanceof Error ? error.message : "图片素材加载失败" });
     } finally {
-      this.setData({ loading: false });
+      if (requestToken === this.loadToken) {
+        this.setData({ loading: false });
+      }
     }
   },
 
@@ -239,22 +271,39 @@ definePage<ImageAssetsData>()({
     }
   },
 
-  async downloadVisibleImages(assets: MemoirImageAsset[]) {
-    const candidates = assets.filter((asset) => asset.status === "ready" && !this.data.imagePaths[asset.id]);
-    await Promise.all(candidates.slice(0, 24).map(async (asset) => {
-      try {
-        const localPath = await downloadMemoirImageAssetFile(this.data.projectId, asset.id, true);
-        const imagePaths = { ...this.data.imagePaths, [asset.id]: localPath };
+  async downloadVisibleImages(
+    assets: MemoirImageAsset[],
+    projectId: string,
+    requestToken: number,
+  ) {
+    const downloadedIds = new Set(
+      this.data.items.filter((item) => item.localPath).map((item) => item.id),
+    );
+    const candidates = assets
+      .filter((asset) => asset.status === "ready" && !downloadedIds.has(asset.id))
+      .slice(0, MAX_AUTO_DOWNLOADED_THUMBNAILS);
+    for (let offset = 0; offset < candidates.length; offset += THUMBNAIL_BATCH_SIZE) {
+      const batch = candidates.slice(offset, offset + THUMBNAIL_BATCH_SIZE);
+      const results = await Promise.all(batch.map(async (asset) => {
+        try {
+          const localPath = await downloadMemoirImageAssetFile(projectId, asset.id, true);
+          return [asset.id, localPath] as const;
+        } catch (_error) {
+          return null;
+        }
+      }));
+      if (requestToken !== this.loadToken || projectId !== this.data.projectId) {
+        return;
+      }
+      const paths = new Map(results.filter((result) => result !== null));
+      if (paths.size) {
         this.setData({
-          imagePaths,
           items: this.data.items.map((item) => (
-            item.id === asset.id ? { ...item, localPath } : item
+            paths.has(item.id) ? { ...item, localPath: paths.get(item.id) || "" } : item
           )),
         });
-      } catch (_error) {
-        // 缩略图失败时保留卡片文字信息，用户点击预览会再次显式报错。
       }
-    }));
+    }
   },
 
   assetById(assetId: string): ImageAssetView | null {
@@ -268,7 +317,7 @@ definePage<ImageAssetsData>()({
       return;
     }
     try {
-      const current = asset.localPath || await downloadMemoirImageAssetFile(this.data.projectId, asset.id, false);
+      const current = await downloadMemoirImageAssetFile(this.data.projectId, asset.id, false);
       wx.previewImage({ current, urls: [current] });
     } catch (error) {
       this.setData({ error: error instanceof Error ? error.message : "图片预览失败" });
@@ -360,11 +409,8 @@ definePage<ImageAssetsData>()({
     }
     this.setData({ placingTarget: assetId, error: "" });
     try {
-      let updated: MemoirImageAsset | null = null;
       for (const placement of asset.enabledPlacements) {
-        updated = await deleteMemoirBookImagePlacement(this.data.projectId, assetId, placement.id);
-      }
-      if (updated) {
+        const updated = await deleteMemoirBookImagePlacement(this.data.projectId, assetId, placement.id);
         this.replaceAsset(updated);
       }
       wx.showToast({ title: "已移出书稿", icon: "success" });
@@ -401,14 +447,9 @@ definePage<ImageAssetsData>()({
     try {
       await deleteMemoirImageAsset(this.data.projectId, assetId);
       const nextItems = this.data.items.filter((item) => item.id !== assetId);
-      const readyCount = nextItems.filter((item) => item.status === "ready").length;
-      const includedCount = nextItems.filter((item) => item.include_in_book).length;
       this.setData({
         items: nextItems,
-        total: nextItems.length,
-        readyCount,
-        includedCount,
-        unusedCount: Math.max(0, readyCount - includedCount),
+        ...assetCountData(nextItems),
       });
       wx.showToast({ title: "已删除", icon: "success" });
     } catch (error) {
@@ -422,26 +463,14 @@ definePage<ImageAssetsData>()({
   },
 
   replaceAsset(asset: MemoirImageAsset) {
-    const updatedView = buildAssetViews(
-      {
-        items: [asset],
-        total: 1,
-        ready_count: asset.status === "ready" ? 1 : 0,
-        included_count: asset.include_in_book ? 1 : 0,
-        unused_count: asset.status === "ready" && !asset.include_in_book ? 1 : 0,
-      },
-      this.data.imagePaths,
-    )[0];
+    const current = this.assetById(asset.id);
+    const updatedView = buildAssetView(asset, current?.localPath || "");
     const nextItems = this.data.items.map((item) => (
       item.id === asset.id ? updatedView : item
     ));
-    const readyCount = nextItems.filter((item) => item.status === "ready").length;
-    const includedCount = nextItems.filter((item) => item.include_in_book).length;
     this.setData({
       items: nextItems,
-      readyCount,
-      includedCount,
-      unusedCount: Math.max(0, readyCount - includedCount),
+      ...assetCountData(nextItems),
     });
   },
 });
