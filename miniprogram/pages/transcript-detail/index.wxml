@@ -455,6 +455,7 @@
           wx:if="{{item.needsBookPlanConfirmation}}"
           class="primary-button"
           bindtap="openBook"
+          disabled="{{assigning || moving || saving || deleting || convertingQuestionToAnswer}}"
         >
           先确认章节
         </button>

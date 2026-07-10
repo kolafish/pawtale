@@ -114,6 +114,7 @@
         wx:if="{{item.needsBookPlanConfirmation}}"
         class="small-primary"
         catchtap="openBook"
+        disabled="{{item.assignPickerDisabled}}"
       >
         先确认章节
       </button>
