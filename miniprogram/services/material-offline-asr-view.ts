@@ -23,6 +23,19 @@ function dialectText(state: MemoirMaterialOfflineASRState): string {
   return "未填写籍贯 · 通用口音校对";
 }
 
+function providersText(providers: string[]): string {
+  const labels = providers.map((provider) => {
+    if (provider === "volc") {
+      return "火山";
+    }
+    if (provider === "stepfun") {
+      return "StepFun";
+    }
+    return provider;
+  });
+  return labels.filter(Boolean).join(" + ") || "离线 ASR";
+}
+
 export function materialOfflineASRView(state: MemoirMaterialOfflineASRState): MaterialOfflineASRView {
   const active = state.status === "pending" || state.status === "running";
   const statusByValue: Record<MemoirMaterialOfflineASRState["status"], string> = {
@@ -43,7 +56,7 @@ export function materialOfflineASRView(state: MemoirMaterialOfflineASRState): Ma
     statusText: statusByValue[state.status],
     statusClass: state.status,
     actionText: actionByValue[state.status],
-    methodText: `火山 + StepFun · ${dialectText(state)}`,
+    methodText: `${providersText(state.providers)} · ${dialectText(state)}`,
     detailText: active
       ? "任务在后台运行，完成后会自动更新这条素材。"
       : (state.blocked_reason || (state.status === "succeeded"
