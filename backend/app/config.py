@@ -69,6 +69,15 @@ class Settings(BaseSettings):
     memoir_editing_worker_enabled: bool = True
     memoir_editing_poll_seconds: int = 10
     memoir_editing_batch_size: int = 5
+    memoir_editing_lease_seconds: int = 300
+    memoir_editing_heartbeat_seconds: int = 30
+    memoir_share_video_worker_enabled: bool = True
+    memoir_share_video_poll_seconds: int = 2
+    memoir_share_video_batch_size: int = 1
+    memoir_share_video_lease_seconds: int = 900
+    memoir_share_video_heartbeat_seconds: int = 30
+    memoir_share_video_max_attempts: int = 3
+    memoir_share_video_retry_seconds: int = 10
 
     # GitHub App one-way project backup
     github_app_id: str = ""

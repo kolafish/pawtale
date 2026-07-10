@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from functools import lru_cache
+import logging
 import os
 from pathlib import Path
 import shutil
@@ -12,8 +12,8 @@ import subprocess
 import tempfile
 
 from fastapi import HTTPException
-from sqlalchemy import or_, select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import and_, or_, select, update
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -27,6 +27,13 @@ from app.services.memoir.audio_files import audio_file_path
 from app.services.memoir.image_assets import (
     RegisteredShareVideoBackground,
     register_share_video_background_asset,
+)
+from app.services.memoir.job_leases import (
+    JobLease,
+    JobLeaseLostError,
+    lease_deadline,
+    new_job_lease,
+    run_with_lease_heartbeat,
 )
 from app.services.memoir.share_video_backgrounds import (
     DEFAULT_SHARE_VIDEO_BACKGROUND_MODE,
@@ -78,8 +85,7 @@ _QUOTE_MIN_FRAGMENT_CHARS = 4
 _QUOTE_STRONG_BREAK_CHARS = "。！？!?；;\n"
 _QUOTE_SOFT_BREAK_CHARS = "，,、"
 _QUOTE_PUNCTUATION_CHARS = "，,、。！？!?；;：“”‘’\"'（）()[]【】《》…—- \t\r\n"
-_STALE_SHARE_VIDEO_JOB_SECONDS = 300
-_STALE_SHARE_VIDEO_RECOVERY_BACKOFF_SECONDS = 300
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -106,6 +112,14 @@ class ShareVideoRenderRequest:
 
 class ShareVideoGenerationError(RuntimeError):
     pass
+
+
+class ShareVideoLeaseLostError(RuntimeError):
+    pass
+
+
+def _utcnow() -> datetime:
+    return datetime.now(UTC).replace(tzinfo=None)
 
 
 def _set_job_metadata(job: MemoirMaterialShareVideo, metadata: dict[str, object]) -> None:
@@ -186,58 +200,6 @@ def _job_response(job: MemoirMaterialShareVideo) -> MemoirShareVideoJobResponse:
         updated_at=job.updated_at,
         completed_at=job.completed_at,
     )
-
-
-def _parse_metadata_datetime(value: object) -> datetime | None:
-    if not isinstance(value, str) or not value.strip():
-        return None
-    try:
-        parsed = datetime.fromisoformat(value)
-    except ValueError:
-        return None
-    return parsed.replace(tzinfo=None) if parsed.tzinfo else parsed
-
-
-def _should_recover_stale_share_video_job(
-    job: MemoirMaterialShareVideo,
-    *,
-    now: datetime | None = None,
-) -> bool:
-    if job.status not in {
-        MemoirShareVideoJobStatus.PENDING.value,
-        MemoirShareVideoJobStatus.RUNNING.value,
-    }:
-        return False
-    if job.video_storage_path:
-        return False
-
-    current_time = now or datetime.utcnow()
-    last_update = job.updated_at or job.created_at
-    if current_time - last_update < timedelta(seconds=_STALE_SHARE_VIDEO_JOB_SECONDS):
-        return False
-
-    metadata = job.metadata_json or {}
-    recovery_enqueued_at = _parse_metadata_datetime(metadata.get("recovery_enqueued_at"))
-    if recovery_enqueued_at and (
-        current_time - recovery_enqueued_at
-        < timedelta(seconds=_STALE_SHARE_VIDEO_RECOVERY_BACKOFF_SECONDS)
-    ):
-        return False
-    return True
-
-
-async def _mark_share_video_job_recovery_enqueued(
-    db: AsyncSession,
-    job: MemoirMaterialShareVideo,
-    *,
-    now: datetime | None = None,
-) -> None:
-    current_time = now or datetime.utcnow()
-    metadata = dict(job.metadata_json or {})
-    metadata["recovery_enqueued_at"] = current_time.isoformat()
-    metadata["recovery_reason"] = "stale_running"
-    _set_job_metadata(job, metadata)
-    await db.commit()
 
 
 def _effective_background_mode(background_mode: str, duration_ms: int) -> str:
@@ -370,6 +332,7 @@ async def create_share_video_job(
         audio_file_id=audio_file.id,
         user_id=user_id,
         status=MemoirShareVideoJobStatus.PENDING.value,
+        run_after=_utcnow(),
         text_source=alignment.text_source,
         text_hash=alignment.text_hash,
         selected_text=alignment.transcript_text[start_char:end_char],
@@ -430,12 +393,8 @@ async def get_share_video_job(
     user_id: str,
     *,
     allow_admin: bool = False,
-    enqueue_recovery: Callable[[str], None] | None = None,
 ) -> MemoirShareVideoJobResponse:
     job = await _load_owned_job(db, job_id, user_id, allow_admin=allow_admin)
-    if enqueue_recovery and _should_recover_stale_share_video_job(job):
-        await _mark_share_video_job_recovery_enqueued(db, job)
-        enqueue_recovery(job.id)
     return _job_response(job)
 
 
@@ -455,25 +414,337 @@ async def load_completed_share_video_job(
     return job, path
 
 
-async def run_share_video_job(job_id: str) -> None:
-    async with async_session_maker() as db:
-        await run_share_video_job_with_session(db, job_id)
+def _claimable_share_video_job(now: datetime, max_attempts: int):
+    attempts_available = MemoirMaterialShareVideo.attempts < max(1, max_attempts)
+    return and_(
+        attempts_available,
+        or_(
+            and_(
+                MemoirMaterialShareVideo.status == MemoirShareVideoJobStatus.PENDING.value,
+                or_(
+                    MemoirMaterialShareVideo.run_after.is_(None),
+                    MemoirMaterialShareVideo.run_after <= now,
+                ),
+            ),
+            and_(
+                MemoirMaterialShareVideo.status == MemoirShareVideoJobStatus.RUNNING.value,
+                or_(
+                    MemoirMaterialShareVideo.lease_expires_at.is_(None),
+                    MemoirMaterialShareVideo.lease_expires_at <= now,
+                ),
+            ),
+        ),
+    )
 
 
-async def run_share_video_job_with_session(db: AsyncSession, job_id: str) -> None:
+async def _fail_exhausted_share_video_jobs(
+    db: AsyncSession,
+    *,
+    now: datetime,
+    max_attempts: int,
+) -> None:
+    exhausted = (
+        await db.scalars(
+            select(MemoirMaterialShareVideo).where(
+                MemoirMaterialShareVideo.status == MemoirShareVideoJobStatus.RUNNING.value,
+                MemoirMaterialShareVideo.attempts >= max(1, max_attempts),
+                or_(
+                    MemoirMaterialShareVideo.lease_expires_at.is_(None),
+                    MemoirMaterialShareVideo.lease_expires_at <= now,
+                ),
+            )
+        )
+    ).all()
+    await db.commit()
+    for job in exhausted:
+        result = await db.execute(
+            update(MemoirMaterialShareVideo)
+            .where(
+                MemoirMaterialShareVideo.id == job.id,
+                MemoirMaterialShareVideo.status == MemoirShareVideoJobStatus.RUNNING.value,
+                MemoirMaterialShareVideo.attempts >= max(1, max_attempts),
+                or_(
+                    MemoirMaterialShareVideo.lease_expires_at.is_(None),
+                    MemoirMaterialShareVideo.lease_expires_at <= now,
+                ),
+            )
+            .values(
+                status=MemoirShareVideoJobStatus.FAILED.value,
+                locked_at=None,
+                lease_token=None,
+                lease_expires_at=None,
+                video_storage_path=None,
+                video_size_bytes=None,
+                error_message="分享视频任务执行中断，已达到最大重试次数",
+                completed_at=now,
+            )
+        )
+        if result.rowcount == 1:
+            try:
+                share_video_file_path(job).unlink(missing_ok=True)
+            except OSError:
+                logger.exception("failed to remove abandoned share video job_id=%s", job.id)
+    await db.commit()
+
+
+async def _claim_share_video_job_ids(
+    db: AsyncSession,
+    job_ids: list[str],
+    *,
+    now: datetime,
+    lease_seconds: int,
+    max_attempts: int,
+) -> list[JobLease]:
+    claimable = _claimable_share_video_job(now, max_attempts)
+    leases: list[JobLease] = []
+    for job_id in job_ids:
+        lease = new_job_lease(job_id)
+        result = await db.execute(
+            update(MemoirMaterialShareVideo)
+            .where(MemoirMaterialShareVideo.id == job_id, claimable)
+            .values(
+                status=MemoirShareVideoJobStatus.RUNNING.value,
+                run_after=None,
+                locked_at=now,
+                lease_token=lease.token,
+                lease_expires_at=lease_deadline(now, lease_seconds),
+                attempts=MemoirMaterialShareVideo.attempts + 1,
+                error_message="",
+                completed_at=None,
+            )
+        )
+        if result.rowcount == 1:
+            leases.append(lease)
+    await db.commit()
+    return leases
+
+
+async def claim_due_share_video_jobs(
+    db: AsyncSession,
+    *,
+    now: datetime | None = None,
+    limit: int | None = None,
+    lease_seconds: int | None = None,
+    max_attempts: int | None = None,
+) -> list[JobLease]:
+    settings = get_settings()
+    claimed_at = now or _utcnow()
+    batch_size = limit or max(1, settings.memoir_share_video_batch_size)
+    lease_duration = lease_seconds or max(1, settings.memoir_share_video_lease_seconds)
+    attempt_limit = max_attempts or max(1, settings.memoir_share_video_max_attempts)
+    await _fail_exhausted_share_video_jobs(
+        db,
+        now=claimed_at,
+        max_attempts=attempt_limit,
+    )
+    candidate_ids = (
+        await db.scalars(
+            select(MemoirMaterialShareVideo.id)
+            .where(_claimable_share_video_job(claimed_at, attempt_limit))
+            .order_by(
+                MemoirMaterialShareVideo.run_after,
+                MemoirMaterialShareVideo.created_at,
+            )
+            .limit(batch_size)
+        )
+    ).all()
+    await db.commit()
+    return await _claim_share_video_job_ids(
+        db,
+        candidate_ids,
+        now=claimed_at,
+        lease_seconds=lease_duration,
+        max_attempts=attempt_limit,
+    )
+
+
+async def claim_share_video_job(
+    db: AsyncSession,
+    job_id: str,
+    *,
+    now: datetime | None = None,
+    lease_seconds: int | None = None,
+    max_attempts: int | None = None,
+) -> JobLease | None:
+    settings = get_settings()
+    claimed_at = now or _utcnow()
+    lease_duration = lease_seconds or max(1, settings.memoir_share_video_lease_seconds)
+    attempt_limit = max_attempts or max(1, settings.memoir_share_video_max_attempts)
+    await db.commit()
+    leases = await _claim_share_video_job_ids(
+        db,
+        [job_id],
+        now=claimed_at,
+        lease_seconds=lease_duration,
+        max_attempts=attempt_limit,
+    )
+    return leases[0] if leases else None
+
+
+async def renew_share_video_job_lease(
+    db: AsyncSession,
+    lease: JobLease,
+    *,
+    now: datetime | None = None,
+    lease_seconds: int | None = None,
+) -> bool:
+    settings = get_settings()
+    renewed_at = now or _utcnow()
+    lease_duration = lease_seconds or max(1, settings.memoir_share_video_lease_seconds)
+    result = await db.execute(
+        update(MemoirMaterialShareVideo)
+        .where(
+            MemoirMaterialShareVideo.id == lease.job_id,
+            MemoirMaterialShareVideo.status == MemoirShareVideoJobStatus.RUNNING.value,
+            MemoirMaterialShareVideo.lease_token == lease.token,
+        )
+        .values(lease_expires_at=lease_deadline(renewed_at, lease_duration))
+    )
+    await db.commit()
+    return result.rowcount == 1
+
+
+async def _commit_share_video_progress(
+    db: AsyncSession,
+    lease: JobLease,
+    *,
+    lease_seconds: int,
+) -> None:
+    with db.no_autoflush:
+        result = await db.execute(
+            update(MemoirMaterialShareVideo)
+            .where(
+                MemoirMaterialShareVideo.id == lease.job_id,
+                MemoirMaterialShareVideo.status == MemoirShareVideoJobStatus.RUNNING.value,
+                MemoirMaterialShareVideo.lease_token == lease.token,
+            )
+            .values(lease_expires_at=lease_deadline(_utcnow(), lease_seconds))
+        )
+    if result.rowcount != 1:
+        await db.rollback()
+        raise ShareVideoLeaseLostError("share video job lease lost")
+    await db.commit()
+
+
+async def _complete_share_video_job(
+    db: AsyncSession,
+    lease: JobLease,
+    *,
+    storage_path: str,
+    size_bytes: int,
+) -> bool:
+    completed_at = _utcnow()
+    result = await db.execute(
+        update(MemoirMaterialShareVideo)
+        .where(
+            MemoirMaterialShareVideo.id == lease.job_id,
+            MemoirMaterialShareVideo.status == MemoirShareVideoJobStatus.RUNNING.value,
+            MemoirMaterialShareVideo.lease_token == lease.token,
+        )
+        .values(
+            status=MemoirShareVideoJobStatus.SUCCEEDED.value,
+            run_after=None,
+            locked_at=None,
+            lease_token=None,
+            lease_expires_at=None,
+            video_storage_path=storage_path,
+            video_size_bytes=size_bytes,
+            error_message="",
+            completed_at=completed_at,
+        )
+    )
+    if result.rowcount != 1:
+        await db.rollback()
+        return False
+    await db.commit()
+    return True
+
+
+async def _fail_share_video_job(
+    db: AsyncSession,
+    lease: JobLease,
+    *,
+    target_path: Path,
+    error: Exception,
+    max_attempts: int,
+    retry_seconds: int,
+) -> None:
+    job = await db.scalar(
+        select(MemoirMaterialShareVideo).where(
+            MemoirMaterialShareVideo.id == lease.job_id,
+            MemoirMaterialShareVideo.status == MemoirShareVideoJobStatus.RUNNING.value,
+            MemoirMaterialShareVideo.lease_token == lease.token,
+        )
+    )
+    if job is None:
+        return
+    failed_at = _utcnow()
+    should_retry = job.attempts < max(1, max_attempts)
+    retry_delay = min(300, max(1, retry_seconds) * (2 ** max(0, job.attempts - 1)))
+    next_attempt_at = failed_at + timedelta(seconds=retry_delay) if should_retry else None
+    status = (
+        MemoirShareVideoJobStatus.PENDING.value
+        if should_retry
+        else MemoirShareVideoJobStatus.FAILED.value
+    )
+    error_message = " ".join(str(error or "").split())[:1000] or "分享视频生成失败"
+    with db.no_autoflush:
+        result = await db.execute(
+            update(MemoirMaterialShareVideo)
+            .where(
+                MemoirMaterialShareVideo.id == lease.job_id,
+                MemoirMaterialShareVideo.status == MemoirShareVideoJobStatus.RUNNING.value,
+                MemoirMaterialShareVideo.lease_token == lease.token,
+            )
+            .values(
+                status=status,
+                run_after=next_attempt_at,
+                locked_at=None,
+                lease_token=None,
+                lease_expires_at=None,
+                video_storage_path=None,
+                video_size_bytes=None,
+                error_message=error_message,
+                completed_at=None if should_retry else failed_at,
+            )
+        )
+    if result.rowcount != 1:
+        await db.rollback()
+        return
+    try:
+        target_path.unlink(missing_ok=True)
+    except OSError:
+        logger.exception("failed to remove partial share video job_id=%s", lease.job_id)
+    await db.commit()
+
+
+async def run_share_video_job_with_session(
+    db: AsyncSession,
+    lease: JobLease,
+    *,
+    lease_seconds: int | None = None,
+    max_attempts: int | None = None,
+    retry_seconds: int | None = None,
+) -> bool:
+    settings = get_settings()
+    lease_duration = lease_seconds or max(1, settings.memoir_share_video_lease_seconds)
+    attempt_limit = max_attempts or max(1, settings.memoir_share_video_max_attempts)
+    retry_delay = retry_seconds or max(1, settings.memoir_share_video_retry_seconds)
     job = await db.scalar(
         select(MemoirMaterialShareVideo)
-        .where(MemoirMaterialShareVideo.id == job_id)
+        .where(
+            MemoirMaterialShareVideo.id == lease.job_id,
+            MemoirMaterialShareVideo.status == MemoirShareVideoJobStatus.RUNNING.value,
+            MemoirMaterialShareVideo.lease_token == lease.token,
+        )
         .options(
             selectinload(MemoirMaterialShareVideo.audio_file),
             selectinload(MemoirMaterialShareVideo.utterance),
         )
     )
-    if not job or job.status == MemoirShareVideoJobStatus.SUCCEEDED.value:
-        return
-    job.status = MemoirShareVideoJobStatus.RUNNING.value
-    job.error_message = ""
-    await db.commit()
+    if job is None:
+        return False
+    target_path = share_video_file_path(job)
     try:
         metadata = dict(job.metadata_json or {})
         background_source = normalize_share_video_background_source(
@@ -486,7 +757,6 @@ async def run_share_video_job_with_session(db: AsyncSession, job_id: str) -> Non
             metadata.get("background_mode") if isinstance(metadata.get("background_mode"), str) else None
         )
         duration_ms = max(1, job.end_ms - job.start_ms)
-        settings = get_settings()
         effective_background_mode = _effective_background_mode(background_mode, duration_ms)
         volc_ark_api_key = str(getattr(settings, "volc_ark_api_key", "") or "")
         if background_source in {SHARE_VIDEO_BACKGROUND_SOURCE_CUSTOM, SHARE_VIDEO_BACKGROUND_SOURCE_CLASSIC}:
@@ -519,7 +789,7 @@ async def run_share_video_job_with_session(db: AsyncSession, job_id: str) -> Non
                 "background_error_message": "",
             })
             _set_job_metadata(job, metadata)
-            await db.commit()
+            await _commit_share_video_progress(db, lease, lease_seconds=lease_duration)
         elif background_source == SHARE_VIDEO_BACKGROUND_SOURCE_CLASSIC:
             metadata.update({
                 "background_status": "classic",
@@ -528,7 +798,7 @@ async def run_share_video_job_with_session(db: AsyncSession, job_id: str) -> Non
                 "background_error_message": "",
             })
             _set_job_metadata(job, metadata)
-            await db.commit()
+            await _commit_share_video_progress(db, lease, lease_seconds=lease_duration)
         elif not settings.memoir_share_video_ai_background_enabled or not volc_ark_api_key.strip():
             metadata.update({
                 "background_status": "disabled",
@@ -538,7 +808,7 @@ async def run_share_video_job_with_session(db: AsyncSession, job_id: str) -> Non
             })
             effective_background_mode = SHARE_VIDEO_BACKGROUND_MODE_SINGLE
             _set_job_metadata(job, metadata)
-            await db.commit()
+            await _commit_share_video_progress(db, lease, lease_seconds=lease_duration)
         elif effective_background_mode == SHARE_VIDEO_BACKGROUND_MODE_SMART_MULTI:
             char_timings = [
                 item for item in metadata.get("char_timings", [])
@@ -549,7 +819,7 @@ async def run_share_video_job_with_session(db: AsyncSession, job_id: str) -> Non
                 "background_error_message": "",
             })
             _set_job_metadata(job, metadata)
-            await db.commit()
+            await _commit_share_video_progress(db, lease, lease_seconds=lease_duration)
 
             plan = await plan_share_video_background_scenes(
                 job.selected_text,
@@ -567,7 +837,7 @@ async def run_share_video_job_with_session(db: AsyncSession, job_id: str) -> Non
                 "background_error_message": "",
             })
             _set_job_metadata(job, metadata)
-            await db.commit()
+            await _commit_share_video_progress(db, lease, lease_seconds=lease_duration)
 
             scene_assets: list[dict[str, object]] = []
             valid_paths: list[Path | None] = []
@@ -631,7 +901,7 @@ async def run_share_video_job_with_session(db: AsyncSession, job_id: str) -> Non
                     "background_scenes": scene_assets,
                 })
                 _set_job_metadata(job, metadata)
-                await db.commit()
+                await _commit_share_video_progress(db, lease, lease_seconds=lease_duration)
 
             if first_valid_path is None:
                 metadata.update({
@@ -664,7 +934,7 @@ async def run_share_video_job_with_session(db: AsyncSession, job_id: str) -> Non
                     "background_cache_hit": None,
                 })
             _set_job_metadata(job, metadata)
-            await db.commit()
+            await _commit_share_video_progress(db, lease, lease_seconds=lease_duration)
         else:
             try:
                 background = await get_or_generate_share_video_background(job.selected_text, background_style)
@@ -703,7 +973,7 @@ async def run_share_video_job_with_session(db: AsyncSession, job_id: str) -> Non
                         "background_error_message": "",
                     })
             _set_job_metadata(job, metadata)
-            await db.commit()
+            await _commit_share_video_progress(db, lease, lease_seconds=lease_duration)
 
         target_path = share_video_file_path(job)
         render_request = ShareVideoRenderRequest(
@@ -735,7 +1005,7 @@ async def run_share_video_job_with_session(db: AsyncSession, job_id: str) -> Non
                 }
             )
             _set_job_metadata(job, metadata)
-            await db.commit()
+            await _commit_share_video_progress(db, lease, lease_seconds=lease_duration)
             await render_share_video_clip(
                 ShareVideoRenderRequest(
                     source_audio_path=render_request.source_audio_path,
@@ -751,14 +1021,103 @@ async def run_share_video_job_with_session(db: AsyncSession, job_id: str) -> Non
                     background_segments=None,
                 )
             )
-        job.video_storage_path = _storage_path(job.user_id, job.id)
-        job.video_size_bytes = target_path.stat().st_size
-        job.status = MemoirShareVideoJobStatus.SUCCEEDED.value
-        job.completed_at = datetime.utcnow()
+        return await _complete_share_video_job(
+            db,
+            lease,
+            storage_path=_storage_path(job.user_id, job.id),
+            size_bytes=target_path.stat().st_size,
+        )
+    except ShareVideoLeaseLostError:
+        await db.rollback()
+        logger.warning("share video job lease lost job_id=%s", lease.job_id)
+        return False
     except Exception as exc:
-        job.status = MemoirShareVideoJobStatus.FAILED.value
-        job.error_message = str(exc)[:1000] or "分享视频生成失败"
-    await db.commit()
+        await db.rollback()
+        logger.exception("share video job failed job_id=%s", lease.job_id)
+        await _fail_share_video_job(
+            db,
+            lease,
+            target_path=target_path,
+            error=exc,
+            max_attempts=attempt_limit,
+            retry_seconds=retry_delay,
+        )
+        return False
+
+
+async def run_share_video_job(
+    lease: JobLease,
+    *,
+    session_maker: async_sessionmaker[AsyncSession] = async_session_maker,
+) -> bool:
+    settings = get_settings()
+    lease_seconds = max(1, settings.memoir_share_video_lease_seconds)
+    heartbeat_seconds = min(
+        max(1, settings.memoir_share_video_heartbeat_seconds),
+        max(1, lease_seconds // 3),
+    )
+
+    async def renew() -> bool:
+        try:
+            async with session_maker() as heartbeat_db:
+                return await renew_share_video_job_lease(
+                    heartbeat_db,
+                    lease,
+                    lease_seconds=lease_seconds,
+                )
+        except Exception:
+            logger.exception("share video job lease heartbeat failed job_id=%s", lease.job_id)
+            return False
+
+    async def work() -> bool:
+        async with session_maker() as db:
+            return await run_share_video_job_with_session(
+                db,
+                lease,
+                lease_seconds=lease_seconds,
+                max_attempts=max(1, settings.memoir_share_video_max_attempts),
+                retry_seconds=max(1, settings.memoir_share_video_retry_seconds),
+            )
+
+    try:
+        return await run_with_lease_heartbeat(
+            work,
+            renew,
+            interval_seconds=heartbeat_seconds,
+        )
+    except JobLeaseLostError:
+        logger.warning("share video job lease lost job_id=%s", lease.job_id)
+        return False
+    except Exception:
+        logger.exception("share video job worker failed job_id=%s", lease.job_id)
+        return False
+
+
+async def run_due_share_video_jobs(
+    session_maker: async_sessionmaker[AsyncSession] = async_session_maker,
+    *,
+    limit: int | None = None,
+) -> int:
+    async with session_maker() as db:
+        leases = await claim_due_share_video_jobs(db, limit=limit)
+    results = await asyncio.gather(
+        *(run_share_video_job(lease, session_maker=session_maker) for lease in leases)
+    )
+    return sum(results)
+
+
+async def share_video_worker_loop(stop_event: asyncio.Event) -> None:
+    settings = get_settings()
+    poll_seconds = max(1, settings.memoir_share_video_poll_seconds)
+    while not stop_event.is_set():
+        try:
+            await run_due_share_video_jobs()
+        except Exception:
+            logger.exception("share video worker tick failed")
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=poll_seconds)
+        except asyncio.TimeoutError:
+            pass
 
 
 def _ffmpeg_executable() -> str:
@@ -799,7 +1158,23 @@ async def _run_ffmpeg(args: list[str]) -> None:
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
-    _stdout, stderr = await process.communicate()
+    try:
+        _stdout, stderr = await process.communicate()
+    except asyncio.CancelledError:
+        if process.returncode is None:
+            try:
+                process.terminate()
+            except ProcessLookupError:
+                pass
+            try:
+                await asyncio.wait_for(process.wait(), timeout=3)
+            except asyncio.TimeoutError:
+                try:
+                    process.kill()
+                except ProcessLookupError:
+                    pass
+                await process.wait()
+        raise
     if process.returncode != 0:
         message = stderr.decode("utf-8", errors="ignore").strip().splitlines()[-1:]
         raise ShareVideoGenerationError(message[0] if message else "ffmpeg 执行失败")

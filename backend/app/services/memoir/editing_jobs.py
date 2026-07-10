@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Awaitable, Callable
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.config import get_settings
@@ -29,6 +29,13 @@ from app.services.memoir.automation_event_metadata import (
     VOICE_SELECTED_AT_KEY,
     VOICE_SELECTED_MESSAGE_ID_KEY,
     VOICE_SELECTED_SESSION_ID_KEY,
+)
+from app.services.memoir.job_leases import (
+    JobLease,
+    JobLeaseLostError,
+    lease_deadline,
+    new_job_lease,
+    run_with_lease_heartbeat,
 )
 
 
@@ -181,6 +188,8 @@ async def enqueue_editing_job(
             existing.status = MemoirEditingJobStatus.PENDING.value
             existing.run_after = scheduled_at
             existing.locked_at = None
+            existing.lease_token = None
+            existing.lease_expires_at = None
             existing.error_message = ""
             existing.payload_json = payload
             existing.result_json = {}
@@ -204,67 +213,173 @@ async def enqueue_editing_job(
     return job
 
 
+def _claimable_editing_job(due_at: datetime):
+    return or_(
+        and_(
+            MemoirEditingJob.status == MemoirEditingJobStatus.PENDING.value,
+            MemoirEditingJob.run_after <= due_at,
+        ),
+        and_(
+            MemoirEditingJob.status == MemoirEditingJobStatus.RUNNING.value,
+            or_(
+                MemoirEditingJob.lease_expires_at.is_(None),
+                MemoirEditingJob.lease_expires_at <= due_at,
+            ),
+        ),
+    )
+
+
+async def _claim_editing_job_ids(
+    db: AsyncSession,
+    job_ids: list[str],
+    *,
+    claimed_at: datetime,
+    lease_seconds: int,
+) -> list[JobLease]:
+    claimable = _claimable_editing_job(claimed_at)
+    leases: list[JobLease] = []
+    for job_id in job_ids:
+        lease = new_job_lease(job_id)
+        result = await db.execute(
+            update(MemoirEditingJob)
+            .where(
+                MemoirEditingJob.id == job_id,
+                claimable,
+            )
+            .values(
+                status=MemoirEditingJobStatus.RUNNING.value,
+                locked_at=claimed_at,
+                lease_token=lease.token,
+                lease_expires_at=lease_deadline(claimed_at, lease_seconds),
+                attempts=MemoirEditingJob.attempts + 1,
+                error_message="",
+            )
+        )
+        if result.rowcount == 1:
+            leases.append(lease)
+    await db.commit()
+    return leases
+
+
 async def claim_due_editing_jobs(
     db: AsyncSession,
     *,
     now: datetime | None = None,
     limit: int | None = None,
-) -> list[str]:
+    lease_seconds: int | None = None,
+) -> list[JobLease]:
     settings = get_settings()
     due_at = now or _utcnow()
     batch_size = limit or max(1, settings.memoir_editing_batch_size)
-    jobs = (
-        await db.execute(
-            select(MemoirEditingJob)
-            .where(
-                MemoirEditingJob.status == MemoirEditingJobStatus.PENDING.value,
-                MemoirEditingJob.run_after <= due_at,
-            )
+    lease_duration = lease_seconds or max(1, settings.memoir_editing_lease_seconds)
+    candidate_ids = (
+        await db.scalars(
+            select(MemoirEditingJob.id)
+            .where(_claimable_editing_job(due_at))
             .order_by(MemoirEditingJob.run_after, MemoirEditingJob.created_at)
             .limit(batch_size)
         )
-    ).scalars().all()
-    job_ids: list[str] = []
-    for job in jobs:
-        job.status = MemoirEditingJobStatus.RUNNING.value
-        job.locked_at = due_at
-        db.add(job)
-        job_ids.append(job.id)
+    ).all()
     await db.commit()
-    return job_ids
+    return await _claim_editing_job_ids(
+        db,
+        candidate_ids,
+        claimed_at=due_at,
+        lease_seconds=lease_duration,
+    )
+
+
+async def claim_editing_job(
+    db: AsyncSession,
+    job_id: str,
+    *,
+    now: datetime | None = None,
+    lease_seconds: int | None = None,
+) -> JobLease | None:
+    settings = get_settings()
+    claimed_at = now or _utcnow()
+    lease_duration = lease_seconds or max(1, settings.memoir_editing_lease_seconds)
+    await db.commit()
+    leases = await _claim_editing_job_ids(
+        db,
+        [job_id],
+        claimed_at=claimed_at,
+        lease_seconds=lease_duration,
+    )
+    return leases[0] if leases else None
+
+
+async def renew_editing_job_lease(
+    db: AsyncSession,
+    lease: JobLease,
+    *,
+    now: datetime | None = None,
+    lease_seconds: int | None = None,
+) -> bool:
+    settings = get_settings()
+    renewed_at = now or _utcnow()
+    lease_duration = lease_seconds or max(1, settings.memoir_editing_lease_seconds)
+    result = await db.execute(
+        update(MemoirEditingJob)
+        .where(
+            MemoirEditingJob.id == lease.job_id,
+            MemoirEditingJob.status == MemoirEditingJobStatus.RUNNING.value,
+            MemoirEditingJob.lease_token == lease.token,
+        )
+        .values(lease_expires_at=lease_deadline(renewed_at, lease_duration))
+    )
+    await db.commit()
+    return result.rowcount == 1
+
+
+async def _load_leased_editing_job(db: AsyncSession, lease: JobLease) -> MemoirEditingJob | None:
+    return await db.scalar(
+        select(MemoirEditingJob).where(
+            MemoirEditingJob.id == lease.job_id,
+            MemoirEditingJob.status == MemoirEditingJobStatus.RUNNING.value,
+            MemoirEditingJob.lease_token == lease.token,
+        )
+    )
 
 
 async def _mark_job(
     db: AsyncSession,
     job: MemoirEditingJob,
+    lease: JobLease,
     status: MemoirEditingJobStatus,
     *,
     result_json: dict | None = None,
     error_message: str = "",
-) -> None:
-    job.status = status.value
-    job.locked_at = None
-    job.result_json = result_json or {}
-    job.error_message = error_message
-    db.add(job)
+) -> bool:
+    result = await db.execute(
+        update(MemoirEditingJob)
+        .where(
+            MemoirEditingJob.id == lease.job_id,
+            MemoirEditingJob.status == MemoirEditingJobStatus.RUNNING.value,
+            MemoirEditingJob.lease_token == lease.token,
+        )
+        .values(
+            status=status.value,
+            locked_at=None,
+            lease_token=None,
+            lease_expires_at=None,
+            result_json=result_json or {},
+            error_message=error_message,
+        )
+    )
+    if result.rowcount != 1:
+        await db.rollback()
+        return False
     if status == MemoirEditingJobStatus.FAILED:
         await _record_job_failure_event(db, job, error_message=error_message)
     await db.commit()
+    return True
 
 
-async def run_editing_job(db: AsyncSession, job_id: str) -> bool:
-    job = await db.get(MemoirEditingJob, job_id)
-    if not job or job.status not in {
-        MemoirEditingJobStatus.PENDING.value,
-        MemoirEditingJobStatus.RUNNING.value,
-    }:
+async def run_editing_job(db: AsyncSession, lease: JobLease) -> bool:
+    job = await _load_leased_editing_job(db, lease)
+    if job is None:
         return False
-
-    job.status = MemoirEditingJobStatus.RUNNING.value
-    job.locked_at = _utcnow()
-    job.attempts += 1
-    db.add(job)
-    await db.commit()
 
     try:
         job_type = MemoirEditingJobType(job.job_type)
@@ -273,25 +388,73 @@ async def run_editing_job(db: AsyncSession, job_id: str) -> bool:
             await _mark_job(
                 db,
                 job,
+                lease,
                 MemoirEditingJobStatus.SKIPPED,
                 error_message=f"no handler registered for {job_type.value}",
             )
             return False
-        result = await handler(db, job)
-        await _mark_job(
+        handler_result = await handler(db, job)
+        marked = await _mark_job(
             db,
             job,
-            result.status,
-            result_json=result.result_json,
-            error_message=result.error_message,
+            lease,
+            handler_result.status,
+            result_json=handler_result.result_json,
+            error_message=handler_result.error_message,
         )
-        return result.status == MemoirEditingJobStatus.SUCCEEDED
+        return marked and handler_result.status == MemoirEditingJobStatus.SUCCEEDED
     except Exception as exc:
         await db.rollback()
-        logger.exception("memoir editing job failed job_id=%s", job_id)
-        job = await db.get(MemoirEditingJob, job_id)
+        logger.exception("memoir editing job failed job_id=%s", lease.job_id)
+        job = await _load_leased_editing_job(db, lease)
         if job:
-            await _mark_job(db, job, MemoirEditingJobStatus.FAILED, error_message=str(exc))
+            await _mark_job(
+                db,
+                job,
+                lease,
+                MemoirEditingJobStatus.FAILED,
+                error_message=str(exc),
+            )
+        return False
+
+
+async def _run_claimed_editing_job(
+    session_maker: async_sessionmaker[AsyncSession],
+    lease: JobLease,
+) -> bool:
+    settings = get_settings()
+    lease_seconds = max(1, settings.memoir_editing_lease_seconds)
+    heartbeat_seconds = min(
+        max(1, settings.memoir_editing_heartbeat_seconds),
+        max(1, lease_seconds // 3),
+    )
+    async def renew() -> bool:
+        try:
+            async with session_maker() as heartbeat_db:
+                return await renew_editing_job_lease(
+                    heartbeat_db,
+                    lease,
+                    lease_seconds=lease_seconds,
+                )
+        except Exception:
+            logger.exception("memoir editing job lease heartbeat failed job_id=%s", lease.job_id)
+            return False
+
+    async def work() -> bool:
+        async with session_maker() as db:
+            return await run_editing_job(db, lease)
+
+    try:
+        return await run_with_lease_heartbeat(
+            work,
+            renew,
+            interval_seconds=heartbeat_seconds,
+        )
+    except JobLeaseLostError:
+        logger.warning("memoir editing job lease lost job_id=%s", lease.job_id)
+        return False
+    except Exception:
+        logger.exception("memoir editing job worker failed job_id=%s", lease.job_id)
         return False
 
 
@@ -301,13 +464,11 @@ async def run_due_editing_jobs(
     limit: int | None = None,
 ) -> int:
     async with session_maker() as db:
-        job_ids = await claim_due_editing_jobs(db, limit=limit)
-    completed = 0
-    for job_id in job_ids:
-        async with session_maker() as db:
-            if await run_editing_job(db, job_id):
-                completed += 1
-    return completed
+        leases = await claim_due_editing_jobs(db, limit=limit)
+    results = await asyncio.gather(
+        *(_run_claimed_editing_job(session_maker, lease) for lease in leases)
+    )
+    return sum(results)
 
 
 async def editing_worker_loop(stop_event: asyncio.Event) -> None:

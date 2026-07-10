@@ -6,7 +6,7 @@ from typing import Literal
 import uuid
 
 import aiofiles
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, Response, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -463,7 +463,6 @@ async def upload_mobile_memoir_share_video_background_asset(
 async def create_mobile_memoir_voice_transcript_share_video_job(
     utterance_id: str,
     req: MemoirShareVideoJobCreateRequest,
-    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -474,14 +473,12 @@ async def create_mobile_memoir_voice_transcript_share_video_job(
         req,
         allow_admin=is_admin_user(current_user),
     )
-    background_tasks.add_task(memoir_share_video_jobs.run_share_video_job, job.id)
     return job
 
 
 @router.get("/share-video/jobs/{job_id}", response_model=MemoirShareVideoJobResponse)
 async def get_mobile_memoir_share_video_job(
     job_id: str,
-    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -490,10 +487,6 @@ async def get_mobile_memoir_share_video_job(
         job_id,
         current_user.id,
         allow_admin=is_admin_user(current_user),
-        enqueue_recovery=lambda recovery_job_id: background_tasks.add_task(
-            memoir_share_video_jobs.run_share_video_job,
-            recovery_job_id,
-        ),
     )
 
 

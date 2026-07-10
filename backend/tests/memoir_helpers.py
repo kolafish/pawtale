@@ -51,6 +51,17 @@ async def post_mobile_memoir_voice_session(
     )
 
 
+async def run_test_editing_job(test_db, job_id: str) -> bool:
+    from app.models.memoir import MemoirEditingJob
+    from app.services.memoir.editing_jobs import claim_editing_job, run_editing_job
+
+    job = await test_db.get(MemoirEditingJob, job_id)
+    assert job is not None
+    lease = await claim_editing_job(test_db, job_id, now=job.run_after)
+    assert lease is not None
+    return await run_editing_job(test_db, lease)
+
+
 async def create_test_voice_transcript(
     client,
     test_db,

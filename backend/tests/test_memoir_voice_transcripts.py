@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
 from sqlalchemy import select
 
 from app.domain.memoir.types import (
@@ -70,6 +71,23 @@ UTC_SUFFIXES = ("Z", "+00:00")
 PNG_1X1 = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
 )
+
+
+async def _claim_and_run_share_video_job(test_db, job_id: str) -> bool:
+    lease = await share_video_jobs.claim_share_video_job(
+        test_db,
+        job_id,
+        lease_seconds=60,
+        max_attempts=3,
+    )
+    assert lease is not None
+    return await share_video_jobs.run_share_video_job_with_session(
+        test_db,
+        lease,
+        lease_seconds=60,
+        max_attempts=3,
+        retry_seconds=1,
+    )
 
 
 def _chapter_source_link(
@@ -947,13 +965,6 @@ async def test_mobile_memoir_creates_and_downloads_share_video_job(client, test_
         fail_background_generation,
     )
 
-    async def noop_background_share_video_job(_job_id):
-        return None
-
-    monkeypatch.setattr(
-        "app.services.memoir.share_video_jobs.run_share_video_job",
-        noop_background_share_video_job,
-    )
     text = "我小时候住在外婆家。后来我去县城读书。"
     created = await create_test_voice_transcript(client, test_db, text=text)
     end_char = text.index("。") + 1
@@ -967,7 +978,7 @@ async def test_mobile_memoir_creates_and_downloads_share_video_job(client, test_
     created_job = response.json()
     assert created_job["status"] == "pending"
     job_id = created_job["id"]
-    await share_video_jobs.run_share_video_job_with_session(test_db, job_id)
+    assert await _claim_and_run_share_video_job(test_db, job_id) is True
     detail_response = await client.get(f"/api/mobile/memoir/share-video/jobs/{job_id}")
     assert detail_response.status_code == 200
     detail = detail_response.json()
@@ -995,6 +1006,139 @@ async def test_mobile_memoir_creates_and_downloads_share_video_job(client, test_
     assert download_response.status_code == 200
     assert download_response.headers["content-type"].startswith("video/mp4")
     assert download_response.content == b"fake mp4"
+
+
+async def test_share_video_worker_retries_and_removes_partial_output(client, test_db, tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "app.services.memoir.share_video_jobs.MEMOIR_SHARE_VIDEO_DIR",
+        tmp_path / "share-videos",
+    )
+    render_attempts = 0
+
+    async def flaky_render_share_video_clip(request):
+        nonlocal render_attempts
+        render_attempts += 1
+        request.target_path.parent.mkdir(parents=True, exist_ok=True)
+        if render_attempts == 1:
+            request.target_path.write_bytes(b"partial mp4")
+            raise share_video_jobs.ShareVideoGenerationError("ffmpeg interrupted")
+        request.target_path.write_bytes(b"final mp4")
+
+    monkeypatch.setattr(
+        "app.services.memoir.share_video_jobs.render_share_video_clip",
+        flaky_render_share_video_clip,
+    )
+    text = "我小时候住在外婆家。后来我去县城读书。"
+    created = await create_test_voice_transcript(client, test_db, text=text)
+    end_char = text.index("。") + 1
+    create_response = await client.post(
+        f"/api/mobile/memoir/voice-transcripts/{created['utterance_id']}/share-video/jobs",
+        json={
+            "start_char": 0,
+            "end_char": end_char,
+            "background_source": "classic",
+        },
+    )
+    assert create_response.status_code == 201
+    job_id = create_response.json()["id"]
+
+    first_lease = await share_video_jobs.claim_share_video_job(
+        test_db,
+        job_id,
+        lease_seconds=60,
+        max_attempts=2,
+    )
+    assert first_lease is not None
+    assert await share_video_jobs.run_share_video_job_with_session(
+        test_db,
+        first_lease,
+        lease_seconds=60,
+        max_attempts=2,
+        retry_seconds=1,
+    ) is False
+
+    stored_job = await test_db.get(MemoirMaterialShareVideo, job_id)
+    await test_db.refresh(stored_job)
+    target_path = share_video_jobs.share_video_file_path(stored_job)
+    assert stored_job.status == MemoirShareVideoJobStatus.PENDING.value
+    assert stored_job.attempts == 1
+    assert stored_job.run_after is not None
+    assert stored_job.lease_token is None
+    assert not target_path.exists()
+
+    before_retry = await share_video_jobs.claim_share_video_job(
+        test_db,
+        job_id,
+        now=stored_job.run_after - timedelta(milliseconds=1),
+        lease_seconds=60,
+        max_attempts=2,
+    )
+    second_lease = await share_video_jobs.claim_share_video_job(
+        test_db,
+        job_id,
+        now=stored_job.run_after + timedelta(milliseconds=1),
+        lease_seconds=60,
+        max_attempts=2,
+    )
+    assert before_retry is None
+    assert second_lease is not None
+    assert await share_video_jobs.run_share_video_job_with_session(
+        test_db,
+        second_lease,
+        lease_seconds=60,
+        max_attempts=2,
+        retry_seconds=1,
+    ) is True
+
+    await test_db.refresh(stored_job)
+    assert stored_job.status == MemoirShareVideoJobStatus.SUCCEEDED.value
+    assert stored_job.attempts == 2
+    assert stored_job.lease_token is None
+    assert target_path.read_bytes() == b"final mp4"
+
+
+async def test_share_video_ffmpeg_process_is_terminated_when_worker_is_cancelled(monkeypatch):
+    communicate_started = asyncio.Event()
+
+    class FakeProcess:
+        returncode = None
+        terminated = False
+        killed = False
+
+        async def communicate(self):
+            communicate_started.set()
+            await asyncio.Event().wait()
+
+        def terminate(self):
+            self.terminated = True
+            self.returncode = -15
+
+        def kill(self):
+            self.killed = True
+            self.returncode = -9
+
+        async def wait(self):
+            return self.returncode
+
+    process = FakeProcess()
+
+    async def fake_create_subprocess_exec(*_args, **_kwargs):
+        return process
+
+    monkeypatch.setattr(
+        share_video_jobs.asyncio,
+        "create_subprocess_exec",
+        fake_create_subprocess_exec,
+    )
+    task = asyncio.create_task(share_video_jobs._run_ffmpeg(["ffmpeg", "-version"]))
+    await communicate_started.wait()
+    task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert process.terminated is True
+    assert process.killed is False
 
 
 async def test_mobile_memoir_share_video_job_uses_custom_background_asset(
@@ -1025,9 +1169,6 @@ async def test_mobile_memoir_share_video_job_uses_custom_background_asset(
         request.target_path.parent.mkdir(parents=True, exist_ok=True)
         request.target_path.write_bytes(b"fake custom mp4")
 
-    async def noop_background_share_video_job(_job_id):
-        return None
-
     monkeypatch.setattr(
         share_video_custom_backgrounds,
         "_process_background_image",
@@ -1041,11 +1182,6 @@ async def test_mobile_memoir_share_video_job_uses_custom_background_asset(
         "app.services.memoir.share_video_jobs.render_share_video_clip",
         fake_render_share_video_clip,
     )
-    monkeypatch.setattr(
-        "app.services.memoir.share_video_jobs.run_share_video_job",
-        noop_background_share_video_job,
-    )
-
     project_id = await ensure_mobile_memoir_project(client)
     upload_response = await client.post(
         "/api/mobile/memoir/share-video/background-assets",
@@ -1077,7 +1213,7 @@ async def test_mobile_memoir_share_video_job_uses_custom_background_asset(
     assert created_job["background_status"] == "ready"
     job_id = created_job["id"]
 
-    await share_video_jobs.run_share_video_job_with_session(test_db, job_id)
+    assert await _claim_and_run_share_video_job(test_db, job_id) is True
     detail_response = await client.get(f"/api/mobile/memoir/share-video/jobs/{job_id}")
     assert detail_response.status_code == 200
     detail = detail_response.json()
@@ -1147,9 +1283,6 @@ async def test_mobile_memoir_share_video_job_uses_classic_background(
         request.target_path.parent.mkdir(parents=True, exist_ok=True)
         request.target_path.write_bytes(b"fake classic mp4")
 
-    async def noop_background_share_video_job(_job_id):
-        return None
-
     monkeypatch.setattr(
         "app.services.memoir.share_video_jobs.get_or_generate_share_video_background",
         fail_ai_background_generation,
@@ -1157,10 +1290,6 @@ async def test_mobile_memoir_share_video_job_uses_classic_background(
     monkeypatch.setattr(
         "app.services.memoir.share_video_jobs.render_share_video_clip",
         fake_render_share_video_clip,
-    )
-    monkeypatch.setattr(
-        "app.services.memoir.share_video_jobs.run_share_video_job",
-        noop_background_share_video_job,
     )
     text = "我小时候住在外婆家。后来我去县城读书。"
     created = await create_test_voice_transcript(client, test_db, text=text)
@@ -1183,7 +1312,7 @@ async def test_mobile_memoir_share_video_job_uses_classic_background(
     assert created_job["background_status"] == "classic"
     job_id = created_job["id"]
 
-    await share_video_jobs.run_share_video_job_with_session(test_db, job_id)
+    assert await _claim_and_run_share_video_job(test_db, job_id) is True
     detail_response = await client.get(f"/api/mobile/memoir/share-video/jobs/{job_id}")
     assert detail_response.status_code == 200
     detail = detail_response.json()
@@ -1214,14 +1343,6 @@ async def test_mobile_memoir_share_video_job_uses_smart_multi_background_segment
             memoir_share_video_ai_background_enabled=True,
             volc_ark_api_key="test-key",
         ),
-    )
-
-    async def noop_background_share_video_job(_job_id):
-        return None
-
-    monkeypatch.setattr(
-        "app.services.memoir.share_video_jobs.run_share_video_job",
-        noop_background_share_video_job,
     )
 
     text = "小时候一家人住在老房子里。后来去县城读书。再后来大家各自成家。"
@@ -1336,7 +1457,7 @@ async def test_mobile_memoir_share_video_job_uses_smart_multi_background_segment
     assert response.json()["background_mode"] == "smart_multi"
     assert response.json()["background_effective_mode"] == "smart_multi"
 
-    await share_video_jobs.run_share_video_job_with_session(test_db, job_id)
+    assert await _claim_and_run_share_video_job(test_db, job_id) is True
     detail_response = await client.get(f"/api/mobile/memoir/share-video/jobs/{job_id}")
     assert detail_response.status_code == 200
     detail = detail_response.json()
@@ -1373,19 +1494,7 @@ async def test_mobile_memoir_share_video_job_uses_smart_multi_background_segment
     assert stored_job.metadata_json["background_generated_count"] == 3
 
 
-async def test_share_video_job_detail_enqueues_stale_running_recovery(
-    client,
-    test_db,
-    monkeypatch,
-):
-    async def noop_background_share_video_job(_job_id):
-        return None
-
-    monkeypatch.setattr(
-        "app.services.memoir.share_video_jobs.run_share_video_job",
-        noop_background_share_video_job,
-    )
-    user = (await client.get("/api/auth/me")).json()
+async def test_share_video_worker_reclaims_expired_lease_without_get_side_effects(client, test_db):
     text = "我小时候住在外婆家。后来我去县城读书。"
     created = await create_test_voice_transcript(client, test_db, text=text)
     end_char = text.index("。") + 1
@@ -1396,40 +1505,49 @@ async def test_share_video_job_detail_enqueues_stale_running_recovery(
     )
     assert create_response.status_code == 201
     job_id = create_response.json()["id"]
+    claimed_at = datetime.utcnow() + timedelta(seconds=1)
+    first_lease = await share_video_jobs.claim_share_video_job(
+        test_db,
+        job_id,
+        now=claimed_at,
+        lease_seconds=30,
+        max_attempts=3,
+    )
+    assert first_lease is not None
 
     stored_job = await test_db.scalar(
         select(MemoirMaterialShareVideo).where(MemoirMaterialShareVideo.id == job_id)
     )
     assert stored_job is not None
-    stored_job.status = MemoirShareVideoJobStatus.RUNNING.value
-    stored_job.video_storage_path = None
-    stored_job.metadata_json = {"background_status": "fallback"}
-    stored_job.updated_at = datetime.utcnow() - timedelta(minutes=6)
-    await test_db.commit()
-
-    recovery_job_ids: list[str] = []
-    detail = await share_video_jobs.get_share_video_job(
-        test_db,
-        job_id,
-        user["id"],
-        enqueue_recovery=recovery_job_ids.append,
-    )
-
-    assert detail.status == MemoirShareVideoJobStatus.RUNNING
-    assert recovery_job_ids == [job_id]
+    original_lease_token = stored_job.lease_token
+    detail_response = await client.get(f"/api/mobile/memoir/share-video/jobs/{job_id}")
+    assert detail_response.status_code == 200
+    assert detail_response.json()["status"] == "running"
     await test_db.refresh(stored_job)
-    assert stored_job.metadata_json["recovery_reason"] == "stale_running"
-    assert stored_job.metadata_json["recovery_enqueued_at"]
+    assert stored_job.lease_token == original_lease_token
 
-    recovery_job_ids.clear()
-    await share_video_jobs.get_share_video_job(
+    before_expiry = await share_video_jobs.claim_share_video_job(
         test_db,
         job_id,
-        user["id"],
-        enqueue_recovery=recovery_job_ids.append,
+        now=claimed_at + timedelta(seconds=29),
+        lease_seconds=30,
+        max_attempts=3,
+    )
+    reclaimed = await share_video_jobs.claim_share_video_job(
+        test_db,
+        job_id,
+        now=claimed_at + timedelta(seconds=31),
+        lease_seconds=30,
+        max_attempts=3,
     )
 
-    assert recovery_job_ids == []
+    assert before_expiry is None
+    assert reclaimed is not None
+    assert reclaimed.job_id == job_id
+    assert reclaimed.token != first_lease.token
+    await test_db.refresh(stored_job)
+    assert stored_job.attempts == 2
+    assert stored_job.lease_token == reclaimed.token
 
 
 async def test_mobile_memoir_lists_unfinalized_audio_for_transcription_recovery(
