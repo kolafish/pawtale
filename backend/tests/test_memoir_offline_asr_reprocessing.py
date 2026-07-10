@@ -11,14 +11,25 @@ from app.domain.memoir.types import (
     MemoirGuidanceMode,
     MemoirTranscriptVersionType,
 )
-from app.models.memoir import AudioFile, MemoirChatMessage, MemoirTranscriptVersion, MemoirVoiceSession, MemoirVoiceUtterance
-from app.models.projects import Project
-from scripts.reprocess_memoir_offline_asr import (
-    OfflineASRResult,
-    STEPFUN_REPROCESS_PROVIDER,
-    VOLC_REPROCESS_PROVIDER,
-    run_offline_asr_reprocess,
+from app.models.memoir import (
+    AudioFile,
+    MemoirChatMessage,
+    MemoirTranscriptVersion,
+    MemoirVoiceSession,
+    MemoirVoiceUtterance,
 )
+from app.models.projects import Project
+from app.services.memoir.multi_asr_verification import (
+    MultiASRVerificationRequest,
+    build_multi_asr_verification_prompt,
+)
+from app.services.memoir.offline_asr import (
+    OfflineASRResult,
+    STEPFUN_OFFLINE_ASR_PROVIDER,
+    VOLC_OFFLINE_ASR_PROVIDER,
+    memoir_offline_asr_hotwords,
+)
+from app.services.memoir.offline_asr_reprocessing import reprocess_offline_asr
 
 
 class FakeCleanupAI:
@@ -34,8 +45,35 @@ class FakeCleanupAI:
         return self.text
 
 
+def test_multi_asr_verification_prompt_uses_narrator_origin():
+    prompt = build_multi_asr_verification_prompt(
+        MultiASRVerificationRequest(
+            asr_results=(OfflineASRResult(VOLC_OFFLINE_ASR_PROVIDER, "小时候住在河边。"),),
+            narrator_origin="浙江宁波",
+        )
+    )
+
+    assert "来自浙江宁波" in prompt
+    assert "四川及重庆方言" not in prompt
+
+
+def test_offline_asr_hotwords_omit_default_project_title():
+    project = Project(title="我的回忆录", type="memoir", metadata_json={})
+
+    assert memoir_offline_asr_hotwords(project) == ()
+
+
 async def _create_project(test_db):
-    project = Project(title="余仲尤的往事", type="memoir")
+    project = Project(
+        title="余仲尤的往事",
+        type="memoir",
+        metadata_json={
+            "memoir_profile": {
+                "narrator_name": "余仲尤",
+                "narrator_origin": "四川成都",
+            }
+        },
+    )
     test_db.add(project)
     await test_db.flush()
     voice_session = MemoirVoiceSession(
@@ -101,11 +139,11 @@ async def test_offline_asr_reprocess_dry_run_skips_writes_and_user_edits(test_db
 
     calls: list[str] = []
 
-    async def fake_runner(db, utterance, providers):
-        calls.append(utterance.id)
+    async def fake_runner(request):
+        calls.append(request.utterance.id)
         return []
 
-    result = await run_offline_asr_reprocess(
+    result = await reprocess_offline_asr(
         test_db,
         project_id=project_id,
         cutoff_created_at_utc=datetime(2026, 7, 8, 8, 2, 59),
@@ -120,7 +158,7 @@ async def test_offline_asr_reprocess_dry_run_skips_writes_and_user_edits(test_db
     assert await test_db.scalar(
         select(MemoirTranscriptVersion).where(
             MemoirTranscriptVersion.source_artifact_id == candidate_id,
-            MemoirTranscriptVersion.provider == VOLC_REPROCESS_PROVIDER,
+            MemoirTranscriptVersion.provider == VOLC_OFFLINE_ASR_PROVIDER,
         )
     ) is None
 
@@ -158,15 +196,24 @@ async def test_offline_asr_reprocess_writes_multi_asr_versions_and_corrected_tex
     test_db.add(utterance)
     await test_db.commit()
 
-    async def fake_runner(db, current_utterance, providers):
-        assert tuple(providers) == ("volc", "stepfun")
+    async def fake_runner(request):
+        assert request.providers == ("volc", "stepfun")
+        assert request.hotwords == ("余仲尤", "四川成都", "余仲尤的往事")
         return [
-            OfflineASRResult(VOLC_REPROCESS_PROVIDER, "爷爷退休后还在帮公司跑事情。", {"segment_count": 1}),
-            OfflineASRResult(STEPFUN_REPROCESS_PROVIDER, "爷爷退休以后还帮公司跑事情。", {"segment_count": 1}),
+            OfflineASRResult(
+                VOLC_OFFLINE_ASR_PROVIDER,
+                "爷爷退休后还在帮公司跑事情。",
+                {"segment_count": 1},
+            ),
+            OfflineASRResult(
+                STEPFUN_OFFLINE_ASR_PROVIDER,
+                "爷爷退休以后还帮公司跑事情。",
+                {"segment_count": 1},
+            ),
         ]
 
     fake_ai = FakeCleanupAI("爷爷退休以后还在帮公司跑事情。")
-    result = await run_offline_asr_reprocess(
+    result = await reprocess_offline_asr(
         test_db,
         project_id=project_id,
         cutoff_created_at_utc=datetime(2026, 7, 8, 8, 2, 59),
@@ -181,10 +228,11 @@ async def test_offline_asr_reprocess_writes_multi_asr_versions_and_corrected_tex
     refreshed_message = await test_db.get(MemoirChatMessage, answer_message.id)
     assert refreshed.transcript_raw == "爷爷退休后还在帮公司跑事情。"
     assert refreshed.transcript_edited == "爷爷退休以后还在帮公司跑事情。"
-    assert refreshed.provider == VOLC_REPROCESS_PROVIDER
+    assert refreshed.provider == VOLC_OFFLINE_ASR_PROVIDER
     assert refreshed_message.content_text == "爷爷退休以后还在帮公司跑事情。"
     assert refreshed_message.content_status == MemoirChatContentStatus.CORRECTED.value
-    assert "老年四川话口音" in fake_ai.calls[0]["user_prompt"]
+    assert "来自四川成都" in fake_ai.calls[0]["user_prompt"]
+    assert "四川及重庆方言常见词" in fake_ai.calls[0]["user_prompt"]
     assert "爷爷退休以后还在忙什么？" in fake_ai.calls[0]["user_prompt"]
 
     versions = (
@@ -193,11 +241,11 @@ async def test_offline_asr_reprocess_writes_multi_asr_versions_and_corrected_tex
         )
     ).scalars().all()
     by_provider = {version.provider: version for version in versions}
-    assert by_provider[VOLC_REPROCESS_PROVIDER].version_type == MemoirTranscriptVersionType.ASR_RAW.value
-    assert by_provider[STEPFUN_REPROCESS_PROVIDER].version_type == MemoirTranscriptVersionType.ASR_RAW.value
+    assert by_provider[VOLC_OFFLINE_ASR_PROVIDER].version_type == MemoirTranscriptVersionType.ASR_RAW.value
+    assert by_provider[STEPFUN_OFFLINE_ASR_PROVIDER].version_type == MemoirTranscriptVersionType.ASR_RAW.value
     assert by_provider["fake-ai"].version_type == MemoirTranscriptVersionType.DIALECT_CORRECTED.value
 
-    repeat_dry_run = await run_offline_asr_reprocess(
+    repeat_dry_run = await reprocess_offline_asr(
         test_db,
         project_id=project_id,
         cutoff_created_at_utc=datetime(2026, 7, 8, 8, 2, 59),
@@ -205,7 +253,7 @@ async def test_offline_asr_reprocess_writes_multi_asr_versions_and_corrected_tex
     )
     assert repeat_dry_run["candidate_count"] == 0
 
-    forced_dry_run = await run_offline_asr_reprocess(
+    forced_dry_run = await reprocess_offline_asr(
         test_db,
         project_id=project_id,
         cutoff_created_at_utc=datetime(2026, 7, 8, 8, 2, 59),
@@ -228,10 +276,10 @@ async def test_offline_asr_reprocess_creates_message_for_blank_saved_audio(test_
     test_db.add(utterance)
     await test_db.commit()
 
-    async def fake_runner(db, current_utterance, providers):
-        return [OfflineASRResult(VOLC_REPROCESS_PROVIDER, "今天先讲医院里的事。", {"segment_count": 1})]
+    async def fake_runner(request):
+        return [OfflineASRResult(VOLC_OFFLINE_ASR_PROVIDER, "今天先讲医院里的事。", {"segment_count": 1})]
 
-    result = await run_offline_asr_reprocess(
+    result = await reprocess_offline_asr(
         test_db,
         project_id=project.id,
         cutoff_created_at_utc=datetime(2026, 7, 8, 8, 2, 59),
@@ -275,12 +323,12 @@ async def test_offline_asr_reprocess_continues_after_single_candidate_rollback(t
     succeeding_id = succeeding.id
     await test_db.commit()
 
-    async def fake_runner(db, current_utterance, providers):
-        if current_utterance.id == failing_id:
+    async def fake_runner(request):
+        if request.utterance.id == failing_id:
             raise RuntimeError("provider failed")
-        return [OfflineASRResult(VOLC_REPROCESS_PROVIDER, "第二条重新识别。", {"segment_count": 1})]
+        return [OfflineASRResult(VOLC_OFFLINE_ASR_PROVIDER, "第二条重新识别。", {"segment_count": 1})]
 
-    result = await run_offline_asr_reprocess(
+    result = await reprocess_offline_asr(
         test_db,
         project_id=project_id,
         cutoff_created_at_utc=datetime(2026, 7, 8, 8, 2, 59),
