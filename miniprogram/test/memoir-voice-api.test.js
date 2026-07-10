@@ -142,7 +142,7 @@ test("voice no-answer prompt API posts attempt without selected AI model", async
   delete global.wx;
 });
 
-test("project progress APIs fetch snapshot and automation events", async () => {
+test("project automation event APIs encode routes and payloads", async () => {
   const requests = [];
   global.wx = {
     getStorageSync(key) {
@@ -208,41 +208,16 @@ test("project progress APIs fetch snapshot and automation events", async () => {
         });
         return;
       }
-      options.success({
-        statusCode: 200,
-        data: {
-          project_id: "project/1",
-          valid_utterance_count: 2,
-          assigned_utterance_count: 1,
-          pending_utterance_count: 1,
-          session_count: 1,
-          active_session_count: 1,
-          stopped_session_count: 0,
-          failed_session_count: 0,
-          user_message_count: 2,
-          assistant_message_count: 1,
-          source_char_count: 80,
-          total_audio_seconds: 30,
-          chapter_count: 1,
-          confirmed_chapter_count: 1,
-          draft_word_count: 120,
-          recent_automation_events: [],
-          chapter_progress_items: [],
-        },
-        cookies: [],
-        header: {},
-      });
+      throw new Error(`unexpected request: ${options.url}`);
     },
   };
   resetMemoirVoiceApiModules();
   const {
     acknowledgeMemoirAutomationEvent,
-    getMemoirProjectProgressSnapshot,
     listMemoirAutomationEvents,
     markMemoirAutomationEventsVoicePlayed,
   } = require("../services/memoir-voice-api.ts");
 
-  const snapshot = await getMemoirProjectProgressSnapshot("project/1");
   const events = await listMemoirAutomationEvents("project/1", 5);
   const acknowledged = await acknowledgeMemoirAutomationEvent("project/1", "event/1");
   const voicePlayed = await markMemoirAutomationEventsVoicePlayed("project/1", {
@@ -254,28 +229,23 @@ test("project progress APIs fetch snapshot and automation events", async () => {
   const apiRequests = requests.filter((request) => request.url.includes("/api/mobile/memoir/"));
   assert.equal(
     apiRequests[0].url,
-    "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/progress-snapshot",
-  );
-  assert.equal(
-    apiRequests[1].url,
     "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/automation-events?limit=5",
   );
   assert.equal(
-    apiRequests[2].url,
+    apiRequests[1].url,
     "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/automation-events/event%2F1/acknowledge",
   );
-  assert.equal(apiRequests[2].method, "POST");
+  assert.equal(apiRequests[1].method, "POST");
   assert.equal(
-    apiRequests[3].url,
+    apiRequests[2].url,
     "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/automation-events/voice-played",
   );
-  assert.equal(apiRequests[3].method, "POST");
-  assert.deepEqual(apiRequests[3].data, {
+  assert.equal(apiRequests[2].method, "POST");
+  assert.deepEqual(apiRequests[2].data, {
     event_ids: ["event/1"],
     voice_session_id: "voice/1",
     message_id: "message/1",
   });
-  assert.equal(snapshot.assigned_utterance_count, 1);
   assert.equal(events.items[0].summary_text, "已整理 1 条讲述。");
   assert.equal(acknowledged.metadata_json.acknowledged_by_user, true);
   assert.equal(voicePlayed.updated_count, 1);
@@ -706,24 +676,18 @@ test("book service APIs encode backend routes and selected AI model", async () =
     { call: () => api.updateMemoirBookChapterTitle("project/1", "chapter/1", { title: "新章名" }), method: "PATCH", url: `${base}/book-plan/chapters/chapter%2F1/title`, data: { title: "新章名" } },
     { call: () => api.generateMemoirBookChapterTitle("project/1", "chapter/1", {}), method: "POST", url: `${base}/book-plan/chapters/chapter%2F1/title/generate`, data: { ai_model: selectedModel } },
     { call: () => api.getMemoirBookChapterDraft("project/1", "chapter/1"), method: "GET", url: `${base}/book-plan/chapters/chapter%2F1/draft` },
-    { call: () => api.generateMemoirBookChapterDraft("project/1", "chapter/1", { force_regenerate: true }), method: "POST", url: `${base}/book-plan/chapters/chapter%2F1/draft`, data: { force_regenerate: true, ai_model: selectedModel } },
     { call: () => api.updateMemoirBookChapterDraft("project/1", "chapter/1", { content: "正文" }), method: "PATCH", url: `${base}/book-plan/chapters/chapter%2F1/draft`, data: { content: "正文" } },
     { call: () => api.confirmMemoirBookChapterDraft("project/1", "chapter/1"), method: "POST", url: `${base}/book-plan/chapters/chapter%2F1/draft/confirm` },
     { call: () => api.createMemoirBookChapterDraftTTS("project/1", "chapter/1", {}), method: "POST", url: `${base}/book-plan/chapters/chapter%2F1/draft/tts`, timeout: 180000 },
     { call: () => api.createMemoirBookPlanOutlineTTS("project/1", {}), method: "POST", url: `${base}/book-plan/outline/tts`, timeout: 180000 },
     { call: () => api.applyMemoirBookPlanStructureCommand("project/1", { type: "merge_chapters", chapter_id: "chapter/2", target_chapter_id: "chapter/1" }), method: "POST", url: `${base}/book-plan/structure-commands`, data: { type: "merge_chapters", chapter_id: "chapter/2", target_chapter_id: "chapter/1" } },
-    { call: () => api.parseMemoirBookVoiceCommand("project/1", { text: "把第一章改名为童年往事" }), method: "POST", url: `${base}/book-voice-command/parse`, data: { text: "把第一章改名为童年往事", ai_model: selectedModel } },
     { call: () => api.executeMemoirBookVoiceCommand("project/1", { intent: "rename_chapter", operation: { type: "rename_chapter", chapter_id: "chapter/1", new_title: "童年往事" } }), method: "POST", url: `${base}/book-voice-command/execute`, data: { intent: "rename_chapter", operation: { type: "rename_chapter", chapter_id: "chapter/1", new_title: "童年往事" } } },
     { call: () => api.getMemoirBookOutput("project/1"), method: "GET", url: `${base}/book-output` },
     { call: () => api.updateMemoirBookOutput("project/1", { title: "外婆慢慢说", cover_style: "warm_gray" }), method: "PATCH", url: `${base}/book-output`, data: { title: "外婆慢慢说", cover_style: "warm_gray" } },
     { call: () => api.suggestMemoirBookOutputTitles("project/1", { count: 4 }), method: "POST", url: `${base}/book-output/title-suggestions`, data: { count: 4, ai_model: selectedModel } },
-    { call: () => api.generateMemoirBookOutput("project/1", { force_regenerate: true }), method: "POST", url: `${base}/book-output/generate`, data: { force_regenerate: true, ai_model: selectedModel }, timeout: 60000 },
-    { call: () => api.createMemoirBookOutputTTS("project/1", {}), method: "POST", url: `${base}/book-output/tts`, timeout: 180000, cookie: true },
     { call: () => api.enqueueMemoirBookChapterDraftGeneration("project/1", "chapter/1", { force_regenerate: true }), method: "POST", url: `${base}/book-plan/chapters/chapter%2F1/draft/jobs`, data: { force_regenerate: true, ai_model: selectedModel } },
     { call: () => api.enqueueMemoirBookOutputGeneration("project/1", { force_regenerate: true }), method: "POST", url: `${base}/book-output/generate/jobs`, data: { force_regenerate: true, ai_model: selectedModel } },
     { call: () => api.enqueueMemoirBookOutputEditorialCopyGeneration("project/1", { targets: ["preface"], chapter_ids: ["chapter/1"], feedback: "更自然" }), method: "POST", url: `${base}/book-output/editorial-copy/regenerate/jobs`, data: { targets: ["preface"], chapter_ids: ["chapter/1"], feedback: "更自然", ai_model: selectedModel } },
-    { call: () => api.regenerateMemoirBookOutputEditorialCopy("project/1", { targets: ["preface"], chapter_ids: ["chapter/1"], feedback: "更自然" }), method: "POST", url: `${base}/book-output/editorial-copy/regenerate`, data: { targets: ["preface"], chapter_ids: ["chapter/1"], feedback: "更自然", ai_model: selectedModel }, timeout: 60000 },
-    { call: () => api.updateMemoirBookOutputChapterEditorialCopy("project/1", "chapter/1", { intro: "导语", pull_quote: "原话", pull_quote_source_ref_id: "utterance/1" }), method: "PATCH", url: `${base}/book-output/chapters/chapter%2F1/editorial-copy`, data: { intro: "导语", pull_quote: "原话", pull_quote_source_ref_id: "utterance/1" } },
   ];
 
   assert.equal(

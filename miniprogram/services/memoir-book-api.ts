@@ -7,8 +7,6 @@ import type {
   MemoirBookChapterTitleGenerateRequest,
   MemoirBookChapterTitleUpdateRequest,
   MemoirBookImagePlacementCreateRequest,
-  MemoirBookImagePlacementUpdateRequest,
-  MemoirBookOutputChapterEditorialCopyUpdateRequest,
   MemoirBookOutput,
   MemoirBookOutputEditorialCopyRegenerateRequest,
   MemoirBookOutputExportFormat,
@@ -27,22 +25,19 @@ import type {
   MemoirBookTitleSuggestionResponse,
   MemoirBookVoiceCommandExecuteRequest,
   MemoirBookVoiceCommandExecuteResponse,
-  MemoirBookVoiceCommandParseRequest,
-  MemoirBookVoiceCommandParseResponse,
   MemoirAutomationEvent,
   MemoirImageAsset,
   MemoirImageAssetListResponse,
   MemoirImageAssetUpdateRequest,
 } from "../domain/voice-chat";
 import {
-  ensureMemoirBackendSession,
   memoirProjectPath,
   memoirRequest,
   withSelectedAIModel,
 } from "./memoir-api-client";
-import { ApiError, cleanBaseUrl, readBackendConfig, readSessionCookie } from "./request";
+import { downloadAuthenticatedFile } from "./authenticated-media";
+import { ApiError, cleanBaseUrl, readBackendConfig } from "./request";
 
-const BOOK_OUTPUT_GENERATE_TIMEOUT_MS = 60000;
 const BOOK_OUTPUT_EXPORT_DOWNLOAD_TIMEOUT_MS = 120000;
 const BOOK_TTS_TIMEOUT_MS = 180000;
 
@@ -61,22 +56,6 @@ function imageAssetPath(projectId: string, assetId = "", suffix = ""): string {
 
 export function getMemoirBookPlan(projectId: string): Promise<MemoirBookPlan> {
   return memoirRequest<MemoirBookPlan>(bookPlanPath(projectId));
-}
-
-function downloadDomain(url: string): string {
-  const parts = url.split("/");
-  if (parts.length >= 3 && parts[0].startsWith("http")) {
-    return parts.slice(0, 3).join("/");
-  }
-  return url;
-}
-
-function downloadErrorMessage(errMsg: string | undefined, url: string): string {
-  const message = String(errMsg || "");
-  if (message.toLowerCase().includes("url not in domain list")) {
-    return `文件下载域名未配置，请在微信公众平台把 ${downloadDomain(url)} 添加到 downloadFile 合法域名。`;
-  }
-  return message || "文件下载失败";
 }
 
 export function generateMemoirBookPlan(
@@ -176,21 +155,6 @@ export function createMemoirBookImagePlacement(
   );
 }
 
-export function updateMemoirBookImagePlacement(
-  projectId: string,
-  assetId: string,
-  placementId: string,
-  data: MemoirBookImagePlacementUpdateRequest,
-): Promise<MemoirImageAsset> {
-  return memoirRequest<MemoirImageAsset>(
-    imageAssetPath(projectId, assetId, `/placements/${encodeURIComponent(placementId)}`),
-    {
-      method: "PATCH",
-      data,
-    },
-  );
-}
-
 export function deleteMemoirBookImagePlacement(
   projectId: string,
   assetId: string,
@@ -210,31 +174,15 @@ export function memoirImageAssetFileUrl(projectId: string, assetId: string, thum
   return `${cleanBaseUrl(config.httpBaseUrl)}${imageAssetPath(projectId, assetId, `/file${suffix}`)}`;
 }
 
-export async function downloadMemoirImageAssetFile(
+export function downloadMemoirImageAssetFile(
   projectId: string,
   assetId: string,
   thumbnail = false,
 ): Promise<string> {
-  await ensureMemoirBackendSession();
-  const cookie = readSessionCookie();
   const url = memoirImageAssetFileUrl(projectId, assetId, thumbnail);
-  return new Promise((resolve, reject) => {
-    wx.downloadFile({
-      url,
-      header: {
-        ...(cookie ? { Cookie: cookie } : {}),
-      },
-      success: (result) => {
-        if (result.statusCode >= 200 && result.statusCode < 300) {
-          resolve(result.tempFilePath);
-          return;
-        }
-        reject(new ApiError(result.statusCode, "图片下载失败", result));
-      },
-      fail: (error) => {
-        reject(new ApiError(0, downloadErrorMessage(error.errMsg, url), error));
-      },
-    });
+  return downloadAuthenticatedFile(url, {
+    failureMessage: "图片下载失败",
+    domainLabel: "图片下载",
   });
 }
 
@@ -297,20 +245,6 @@ export function getMemoirBookChapterDraft(
   chapterId: string,
 ): Promise<MemoirBookChapterDraft> {
   return memoirRequest<MemoirBookChapterDraft>(bookPlanChapterPath(projectId, chapterId, "/draft"));
-}
-
-export function generateMemoirBookChapterDraft(
-  projectId: string,
-  chapterId: string,
-  data: MemoirBookChapterDraftGenerateRequest = {},
-): Promise<MemoirBookChapterDraft> {
-  return memoirRequest<MemoirBookChapterDraft>(
-    bookPlanChapterPath(projectId, chapterId, "/draft"),
-    {
-      method: "POST",
-      data: withSelectedAIModel(data),
-    },
-  );
 }
 
 export function enqueueMemoirBookChapterDraftGeneration(
@@ -382,19 +316,6 @@ export function createMemoirBookPlanOutlineTTS(
   );
 }
 
-export function parseMemoirBookVoiceCommand(
-  projectId: string,
-  data: MemoirBookVoiceCommandParseRequest,
-): Promise<MemoirBookVoiceCommandParseResponse> {
-  return memoirRequest<MemoirBookVoiceCommandParseResponse>(
-    memoirProjectPath(projectId, "/book-voice-command/parse"),
-    {
-      method: "POST",
-      data: withSelectedAIModel(data),
-    },
-  );
-}
-
 export function executeMemoirBookVoiceCommand(
   projectId: string,
   data: MemoirBookVoiceCommandExecuteRequest,
@@ -428,20 +349,6 @@ export function getMemoirBookOutput(projectId: string): Promise<MemoirBookOutput
   return memoirRequest<MemoirBookOutput>(memoirProjectPath(projectId, "/book-output"));
 }
 
-export function generateMemoirBookOutput(
-  projectId: string,
-  data: MemoirBookOutputGenerateRequest = {},
-): Promise<MemoirBookOutput> {
-  return memoirRequest<MemoirBookOutput>(
-    memoirProjectPath(projectId, "/book-output/generate"),
-    {
-      method: "POST",
-      data: withSelectedAIModel(data),
-      timeoutMs: BOOK_OUTPUT_GENERATE_TIMEOUT_MS,
-    },
-  );
-}
-
 export function enqueueMemoirBookOutputGeneration(
   projectId: string,
   data: MemoirBookOutputGenerateRequest = {},
@@ -468,20 +375,6 @@ export function updateMemoirBookOutput(
   );
 }
 
-export function regenerateMemoirBookOutputEditorialCopy(
-  projectId: string,
-  data: MemoirBookOutputEditorialCopyRegenerateRequest = {},
-): Promise<MemoirBookOutput> {
-  return memoirRequest<MemoirBookOutput>(
-    memoirProjectPath(projectId, "/book-output/editorial-copy/regenerate"),
-    {
-      method: "POST",
-      data: withSelectedAIModel(data),
-      timeoutMs: BOOK_OUTPUT_GENERATE_TIMEOUT_MS,
-    },
-  );
-}
-
 export function enqueueMemoirBookOutputEditorialCopyGeneration(
   projectId: string,
   data: MemoirBookOutputEditorialCopyRegenerateRequest = {},
@@ -491,20 +384,6 @@ export function enqueueMemoirBookOutputEditorialCopyGeneration(
     {
       method: "POST",
       data: withSelectedAIModel(data),
-    },
-  );
-}
-
-export function updateMemoirBookOutputChapterEditorialCopy(
-  projectId: string,
-  chapterId: string,
-  data: MemoirBookOutputChapterEditorialCopyUpdateRequest,
-): Promise<MemoirBookOutput> {
-  return memoirRequest<MemoirBookOutput>(
-    memoirProjectPath(projectId, `/book-output/chapters/${encodeURIComponent(chapterId)}/editorial-copy`),
-    {
-      method: "PATCH",
-      data,
     },
   );
 }
@@ -544,47 +423,17 @@ export function memoirBookOutputExportUrl(
   return `${cleanBaseUrl(config.httpBaseUrl)}${memoirProjectPath(projectId, `/book-output/export?${params.join("&")}`)}`;
 }
 
-export async function downloadMemoirBookOutputExport(
+export function downloadMemoirBookOutputExport(
   projectId: string,
   format: MemoirBookOutputExportFormat = "pdf",
   versionId = "",
   layout: MemoirBookOutputExportLayout = "standard",
   showSourceAppendix = true,
 ): Promise<string> {
-  await ensureMemoirBackendSession();
-  const cookie = readSessionCookie();
   const url = memoirBookOutputExportUrl(projectId, format, versionId, layout, showSourceAppendix);
-  return new Promise((resolve, reject) => {
-    wx.downloadFile({
-      url,
-      timeout: BOOK_OUTPUT_EXPORT_DOWNLOAD_TIMEOUT_MS,
-      header: {
-        ...(cookie ? { Cookie: cookie } : {}),
-      },
-      success: (result) => {
-        if (result.statusCode >= 200 && result.statusCode < 300) {
-          resolve(result.tempFilePath);
-          return;
-        }
-        reject(new ApiError(result.statusCode, "文件下载失败", result));
-      },
-      fail: (error) => {
-        reject(new ApiError(0, downloadErrorMessage(error.errMsg, url), error));
-      },
-    });
+  return downloadAuthenticatedFile(url, {
+    timeoutMs: BOOK_OUTPUT_EXPORT_DOWNLOAD_TIMEOUT_MS,
+    failureMessage: "文件下载失败",
+    domainLabel: "文件下载",
   });
-}
-
-export function createMemoirBookOutputTTS(
-  projectId: string,
-  data: MemoirBookAudioRequest = {},
-): Promise<MemoirBookAudioResponse> {
-  return memoirRequest<MemoirBookAudioResponse>(
-    memoirProjectPath(projectId, "/book-output/tts"),
-    {
-      method: "POST",
-      data,
-      timeoutMs: BOOK_TTS_TIMEOUT_MS,
-    },
-  );
 }

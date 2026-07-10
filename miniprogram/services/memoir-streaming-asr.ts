@@ -137,7 +137,6 @@ export class MemoirStreamingAsrClient {
   private captureStartedAtMs = 0;
   private audioLevel = 0;
   private silentElapsedMs = 0;
-  private voiceActivityElapsedMs = 0;
   private hasVoiceActivity = false;
   private voiceActivityDetector: VoiceActivityDetector;
   private autoStopped = false;
@@ -170,7 +169,6 @@ export class MemoirStreamingAsrClient {
     this.options.autoStopSilenceMs = Math.max(0, autoStopSilenceMs);
     if (!this.options.autoStopSilenceMs) {
       this.silentElapsedMs = 0;
-      this.voiceActivityElapsedMs = 0;
       this.hasVoiceActivity = false;
       this.voiceActivityDetector.reset();
       this.autoStopped = false;
@@ -300,7 +298,6 @@ export class MemoirStreamingAsrClient {
     this.audioBytesSent = 0;
     this.audioLevel = 0;
     this.silentElapsedMs = 0;
-    this.voiceActivityElapsedMs = 0;
     this.hasVoiceActivity = false;
     this.voiceActivityDetector = this.createVoiceActivityDetector();
     this.autoStopped = false;
@@ -678,7 +675,6 @@ export class MemoirStreamingAsrClient {
     const state = this.voiceActivityDetector.update(frameBuffer);
     this.audioLevel = state.audioLevel;
     this.silentElapsedMs = state.silentElapsedMs;
-    this.voiceActivityElapsedMs = state.voiceActivityElapsedMs;
     const hadVoiceActivity = this.hasVoiceActivity;
     this.hasVoiceActivity = state.hasVoiceActivity;
     if (!hadVoiceActivity && this.hasVoiceActivity) {

@@ -67,7 +67,7 @@ export class AudioPlaybackController {
     if (!this.isCurrentToken(token)) {
       return;
     }
-    await this.playSource(tempFilePath, token, options);
+    await this.playSource(tempFilePath, options);
   }
 
   async playTempFile(
@@ -78,12 +78,11 @@ export class AudioPlaybackController {
     if (!this.isCurrentToken(token)) {
       return;
     }
-    await this.playSource(tempFilePath, token, options);
+    await this.playSource(tempFilePath, options);
   }
 
   private async playSource(
     tempFilePath: string,
-    token: number,
     options: AudioPlaybackPlayOptions,
   ): Promise<void> {
     this.stopActivePlayback();

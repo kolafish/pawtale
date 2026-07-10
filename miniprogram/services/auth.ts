@@ -54,10 +54,6 @@ export function isValidEmail(email: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized);
 }
 
-export function currentSessionCookie(): string {
-  return readSessionCookie();
-}
-
 export async function loginWithEmail(credentials: LoginCredentials): Promise<BackendAuthUser> {
   const response = await request<AuthResponse>("/api/auth/login", {
     method: "POST",

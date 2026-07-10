@@ -127,10 +127,6 @@ export function ttsSpeedLabel(value: number): string {
   return TTS_SPEED_OPTIONS.find((option) => option.value === value)?.label || TTS_SPEED_OPTIONS[1].label;
 }
 
-export function readTTSSettings(): TTSSettings {
-  return readScopedTTSSettings("chat");
-}
-
 export function readScopedTTSSettings(scope: TTSSettingsScope): TTSSettings {
   try {
     return normalizeScopedTTSSettings(wx.getStorageSync<ScopedTTSSettings | TTSSettings>(STORAGE_KEY))[scope];
@@ -138,10 +134,6 @@ export function readScopedTTSSettings(scope: TTSSettingsScope): TTSSettings {
     console.warn("read TTS settings failed", error);
     return { ...DEFAULT_TTS_SETTINGS };
   }
-}
-
-export function saveTTSSettings(settings: TTSSettings): TTSSettings {
-  return saveScopedTTSSettings("chat", settings);
 }
 
 export function readTTSSettingsProfiles(): ScopedTTSSettings {

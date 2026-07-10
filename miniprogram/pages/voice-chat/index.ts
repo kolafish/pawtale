@@ -70,7 +70,6 @@ import {
   writeMemoirVoiceSessionSnapshot,
 } from "../../stores/memoir-cache";
 import {
-  type AutoListenGateSnapshot,
   type VoiceChatData,
   initialVoiceChatData,
   voiceChatViewPatch,
