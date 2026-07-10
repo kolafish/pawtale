@@ -25,6 +25,7 @@ VOLC_OFFLINE_ASR_PROVIDER = "volc_streaming_asr_reprocess"
 STEPFUN_OFFLINE_ASR_PROVIDER = "stepfun_asr_reprocess"
 DEFAULT_OFFLINE_ASR_PROVIDERS = ("volc", "stepfun")
 SUPPORTED_OFFLINE_ASR_PROVIDERS = frozenset(DEFAULT_OFFLINE_ASR_PROVIDERS)
+MEMOIR_DIALECT_GLOSSARY_METADATA_KEY = "memoir_dialect_glossary_entries"
 
 
 @dataclass(frozen=True)
@@ -32,6 +33,12 @@ class OfflineASRResult:
     provider: str
     text: str
     raw: dict[str, Any] | None = None
+
+
+@dataclass(frozen=True)
+class OfflineASRGlossaryEntry:
+    source: str
+    target: str
 
 
 @dataclass(frozen=True)
@@ -70,11 +77,33 @@ def memoir_offline_asr_hotwords(project: Project) -> tuple[str, ...]:
         _title_subject(title),
         title if title != "我的回忆录" else "",
     ]
+    for entry in memoir_offline_asr_glossary(project):
+        values.extend((entry.source, entry.target))
     return tuple(dict.fromkeys(value for value in values if value))
 
 
 def memoir_narrator_origin(project: Project) -> str:
     return str(_memoir_profile(project).get("narrator_origin") or "").strip()
+
+
+def memoir_offline_asr_glossary(project: Project) -> tuple[OfflineASRGlossaryEntry, ...]:
+    metadata = project.metadata_json if isinstance(project.metadata_json, dict) else {}
+    raw_entries = metadata.get(MEMOIR_DIALECT_GLOSSARY_METADATA_KEY)
+    if not isinstance(raw_entries, list):
+        return ()
+    entries: list[OfflineASRGlossaryEntry] = []
+    seen: set[tuple[str, str]] = set()
+    for raw_entry in raw_entries:
+        if not isinstance(raw_entry, dict):
+            continue
+        source = str(raw_entry.get("source") or "").strip()
+        target = str(raw_entry.get("target") or "").strip()
+        key = (source, target)
+        if not source or not target or key in seen:
+            continue
+        seen.add(key)
+        entries.append(OfflineASRGlossaryEntry(source=source, target=target))
+    return tuple(entries)
 
 
 def _memoir_profile(project: Project) -> dict[str, object]:

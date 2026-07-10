@@ -71,7 +71,10 @@ async def _create_project(test_db):
             "memoir_profile": {
                 "narrator_name": "余仲尤",
                 "narrator_origin": "四川成都",
-            }
+            },
+            "memoir_dialect_glossary_entries": [
+                {"source": "新凡", "target": "新繁"},
+            ],
         },
     )
     test_db.add(project)
@@ -198,7 +201,7 @@ async def test_offline_asr_reprocess_writes_multi_asr_versions_and_corrected_tex
 
     async def fake_runner(request):
         assert request.providers == ("volc", "stepfun")
-        assert request.hotwords == ("余仲尤", "四川成都", "余仲尤的往事")
+        assert request.hotwords == ("余仲尤", "四川成都", "余仲尤的往事", "新凡", "新繁")
         return [
             OfflineASRResult(
                 VOLC_OFFLINE_ASR_PROVIDER,
@@ -233,6 +236,7 @@ async def test_offline_asr_reprocess_writes_multi_asr_versions_and_corrected_tex
     assert refreshed_message.content_status == MemoirChatContentStatus.CORRECTED.value
     assert "来自四川成都" in fake_ai.calls[0]["user_prompt"]
     assert "四川及重庆方言常见词" in fake_ai.calls[0]["user_prompt"]
+    assert "新凡 => 新繁" in fake_ai.calls[0]["user_prompt"]
     assert "爷爷退休以后还在忙什么？" in fake_ai.calls[0]["user_prompt"]
 
     versions = (

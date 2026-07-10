@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from app.services.ai_factory import get_ai_service
 from app.services.ai_types import AITextClient
 from app.services.memoir.asr_text_normalization import normalize_memoir_asr_text
-from app.services.memoir.offline_asr import OfflineASRResult
+from app.services.memoir.offline_asr import OfflineASRGlossaryEntry, OfflineASRResult
 
 
 SYSTEM_PROMPT = "你是严谨的中文口述史转写校对编辑。"
@@ -18,6 +18,7 @@ class MultiASRVerificationRequest:
     original_raw: str = ""
     original_edited: str = ""
     narrator_origin: str = ""
+    dialect_glossary: tuple[OfflineASRGlossaryEntry, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -41,6 +42,7 @@ def build_multi_asr_verification_prompt(request: MultiASRVerificationRequest) ->
     origin = request.narrator_origin.strip()
     origin_description = f"来自{origin}，可能带当地口音" if origin else "可能带地方口音"
     dialect_guidance = _dialect_guidance(origin)
+    dialect_glossary = _dialect_glossary_block(request.dialect_glossary)
     return f"""下面是一位老年人的中文口述录音转写结果。说话人{origin_description}，语速慢、口头语多，可能夹杂家人插话和现场噪音。
 
 请综合多个 ASR 模型结果，对这段口述做忠于原音频的校对。
@@ -63,9 +65,16 @@ def build_multi_asr_verification_prompt(request: MultiASRVerificationRequest) ->
 当前系统里原有自动整理：
 {original_edited}
 
+项目方言与专名词表：
+{dialect_glossary}
+
 多模型离线 ASR：
 {_asr_results_block(request.asr_results)}
 """
+
+
+def _dialect_glossary_block(entries: tuple[OfflineASRGlossaryEntry, ...]) -> str:
+    return "\n".join(f"{entry.source} => {entry.target}" for entry in entries) or "无"
 
 
 def _dialect_guidance(origin: str) -> str:
