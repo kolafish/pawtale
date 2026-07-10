@@ -47,6 +47,7 @@ from app.services.memoir import source_cards
 from app.services.memoir.material_offline_asr_state import material_offline_asr_states
 from app.services.memoir.asr_text_normalization import normalize_memoir_asr_text
 from app.services.memoir.source_disposition import (
+    IGNORED_SOURCE_MATERIAL_TYPES,
     IGNORED_SOURCE_ROUTE_ACTION,
     INTERVIEWER_SOURCE_MATERIAL_TYPE,
     clear_source_route_disposition,
@@ -397,6 +398,29 @@ def _transcript_filter(
     return clauses
 
 
+def _narrator_material_clause():
+    return (
+        MemoirVoiceUtterance.chat_message.has(
+            MemoirChatMessage.role == MemoirChatMessageRole.USER.value
+        )
+        & ~(
+            (MemoirVoiceUtterance.source_route_action == IGNORED_SOURCE_ROUTE_ACTION)
+            & MemoirVoiceUtterance.source_material_type.in_(IGNORED_SOURCE_MATERIAL_TYPES)
+        )
+    )
+
+
+def _manual_correction_exists():
+    return (
+        select(MemoirTranscriptVersion.id)
+        .where(
+            MemoirTranscriptVersion.source_artifact_id == MemoirVoiceUtterance.id,
+            MemoirTranscriptVersion.version_type == MemoirTranscriptVersionType.USER_EDITED.value,
+        )
+        .exists()
+    )
+
+
 def _paired_human_interviewer_prompt_exists():
     interviewer_message = aliased(MemoirChatMessage)
     answer_message = aliased(MemoirChatMessage)
@@ -632,6 +656,9 @@ def _item_response(
         offline_asr=offline_asr or MemoirMaterialOfflineASRStateResponse(),
         created_at=_utc_datetime(utterance.created_at),
         session_created_at=_utc_datetime(voice_session.created_at),
+        session_started_at=(
+            _utc_datetime(voice_session.started_at) if voice_session.started_at is not None else None
+        ),
     )
 
 
@@ -732,16 +759,49 @@ async def _source_cards_by_utterance(
     return cards
 
 
+async def manual_corrections_by_utterance_ids(
+    db: AsyncSession,
+    utterance_ids: list[str],
+) -> dict[str, datetime]:
+    clean_ids = list(dict.fromkeys(item for item in utterance_ids if item))
+    if not clean_ids:
+        return {}
+    rows = (
+        await db.execute(
+            select(
+                MemoirTranscriptVersion.source_artifact_id,
+                func.max(MemoirTranscriptVersion.created_at),
+            )
+            .where(
+                MemoirTranscriptVersion.source_artifact_id.in_(clean_ids),
+                MemoirTranscriptVersion.version_type == MemoirTranscriptVersionType.USER_EDITED.value,
+            )
+            .group_by(MemoirTranscriptVersion.source_artifact_id)
+        )
+    ).all()
+    return {
+        utterance_id: corrected_at
+        for utterance_id, corrected_at in rows
+        if utterance_id and corrected_at
+    }
+
+
 async def _load_owned_utterance(
     db: AsyncSession,
     utterance_id: str,
     user_id: str,
     *,
     allow_admin: bool = False,
+    project_id: str | None = None,
+    narrator_only: bool = False,
 ) -> MemoirVoiceUtterance:
     filters = [MemoirVoiceUtterance.id == utterance_id]
     if not allow_admin:
         filters.append(Project.user_id == user_id)
+    if project_id:
+        filters.append(Project.id == project_id)
+    if narrator_only:
+        filters.append(_narrator_material_clause())
     result = await db.execute(
         select(MemoirVoiceUtterance)
         .join(MemoirVoiceSession, MemoirVoiceUtterance.voice_session_id == MemoirVoiceSession.id)
@@ -764,6 +824,11 @@ async def list_voice_transcripts(
     included: str = "all",
     guidance_mode: str | None = None,
     current_guidance_module: str | None = None,
+    voice_session_id: str | None = None,
+    manual_corrected: bool | None = None,
+    narrator_only: bool = False,
+    oldest_first: bool = False,
+    interview_time_order: bool = False,
     limit: int = 50,
     offset: int = 0,
     allow_admin: bool = False,
@@ -776,6 +841,13 @@ async def list_voice_transcripts(
         filters.append(MemoirVoiceSession.guidance_mode == guidance_mode)
     if current_guidance_module:
         filters.append(MemoirVoiceSession.current_guidance_module == current_guidance_module)
+    if voice_session_id:
+        filters.append(MemoirVoiceSession.id == voice_session_id)
+    if manual_corrected is not None:
+        correction_exists = _manual_correction_exists()
+        filters.append(correction_exists if manual_corrected else ~correction_exists)
+    if narrator_only:
+        filters.append(_narrator_material_clause())
     if included != "all":
         included_utterance_ids = await _included_utterance_ids_for_filter(
             db,
@@ -798,13 +870,30 @@ async def list_voice_transcripts(
         .join(Project, MemoirVoiceSession.project_id == Project.id)
         .where(*filters)
     )
+    if interview_time_order:
+        interview_time = func.coalesce(MemoirVoiceSession.started_at, MemoirVoiceSession.created_at)
+        ordering = (
+            (
+                interview_time.asc(),
+                MemoirVoiceUtterance.created_at.asc(),
+                MemoirVoiceUtterance.id.asc(),
+            )
+            if oldest_first
+            else (
+                interview_time.desc(),
+                MemoirVoiceUtterance.created_at.desc(),
+                MemoirVoiceUtterance.id.desc(),
+            )
+        )
+    else:
+        ordering = (MemoirVoiceUtterance.created_at.desc(), MemoirVoiceUtterance.id.desc())
     result = await db.execute(
         select(MemoirVoiceUtterance)
         .join(MemoirVoiceSession, MemoirVoiceUtterance.voice_session_id == MemoirVoiceSession.id)
         .join(Project, MemoirVoiceSession.project_id == Project.id)
         .where(*filters)
         .options(*_detail_options())
-        .order_by(MemoirVoiceUtterance.created_at.desc(), MemoirVoiceUtterance.id.desc())
+        .order_by(*ordering)
         .offset(offset)
         .limit(limit)
     )
@@ -839,8 +928,17 @@ async def get_voice_transcript(
     user_id: str,
     *,
     allow_admin: bool = False,
+    project_id: str | None = None,
+    narrator_only: bool = False,
 ) -> MemoirVoiceTranscriptItemResponse:
-    utterance = await _load_owned_utterance(db, utterance_id, user_id, allow_admin=allow_admin)
+    utterance = await _load_owned_utterance(
+        db,
+        utterance_id,
+        user_id,
+        allow_admin=allow_admin,
+        project_id=project_id,
+        narrator_only=narrator_only,
+    )
     inclusions = await _book_inclusions_by_utterance_ids(
         db,
         [utterance.id],
@@ -1020,11 +1118,20 @@ async def update_voice_transcript(
     req: MemoirVoiceTranscriptUpdateRequest,
     *,
     allow_admin: bool = False,
+    project_id: str | None = None,
+    narrator_only: bool = False,
 ) -> MemoirVoiceTranscriptItemResponse:
     content = req.transcript_edited.strip()
     if not content:
         raise HTTPException(status_code=400, detail="整理文字不能为空")
-    utterance = await _load_owned_utterance(db, utterance_id, user_id, allow_admin=allow_admin)
+    utterance = await _load_owned_utterance(
+        db,
+        utterance_id,
+        user_id,
+        allow_admin=allow_admin,
+        project_id=project_id,
+        narrator_only=narrator_only,
+    )
     return await _apply_edited_text(
         db,
         utterance,

@@ -359,6 +359,7 @@ class MemoirVoiceTranscriptItemResponse(BaseModel):
     )
     created_at: datetime
     session_created_at: datetime
+    session_started_at: datetime | None = None
 
 class MemoirVoiceTranscriptListResponse(BaseModel):
     items: list[MemoirVoiceTranscriptItemResponse] = Field(default_factory=list)
