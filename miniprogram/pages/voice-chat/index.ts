@@ -100,6 +100,7 @@ import {
   voiceLiveTranscriptPatch,
   voiceRecorderPrivacyDeniedPatch,
   voiceRecordingReconnectPatch,
+  voiceRecordingStartRequestedPatch,
   voiceRecordingStartedPatch,
   voiceRecordingStoppedPatch,
   voiceRecordingUnavailablePatch,
@@ -169,6 +170,7 @@ definePage<VoiceChatData>()({
   pageSuspended: false,
   gatewayConnectPromise: null as Promise<boolean> | null,
   recordingStartPromise: null as Promise<boolean> | null,
+  recordingStartGeneration: 0,
 
   data: initialVoiceChatData(),
 
@@ -261,6 +263,7 @@ definePage<VoiceChatData>()({
 
   suspendVoiceChat(reason: "hide" | "unload") {
     this.pageSuspended = true;
+    this.recordingStartGeneration += 1;
     followUpRequestSerial += 1;
     this.noAnswerPromptRequestSerial += 1;
     this.noAnswerPromptInFlight = false;
@@ -268,6 +271,9 @@ definePage<VoiceChatData>()({
     this.persistPendingVoiceClose(reason);
     this.cancelFollowUpTTS(reason === "hide" ? "page_hidden" : "page_unloaded");
     void this.stopAssistantBargeInMonitor();
+    if (this.data.recordingStarting) {
+      setVoiceChatData(this, { recordingStarting: false });
+    }
     if (this.data.recording && this.voiceStreaming.hasClient()) {
       this.voiceStreaming.stopRecording();
       setVoiceChatData(this, {
@@ -893,6 +899,7 @@ definePage<VoiceChatData>()({
     if (
       this.data.recording
       || this.recordingStartPromise
+      || this.data.finishingSession
       || !this.data.voiceAuthorizationAgreed
       || this.data.interviewType !== "human_interview"
     ) {
@@ -1455,13 +1462,19 @@ definePage<VoiceChatData>()({
   },
 
   startRecording(autoTriggered: boolean = false, speakerRole?: MemoirSpeakerRole) {
-    if (!this.ensureVoiceAuthorization(autoTriggered)) {
+    if (this.data.finishingSession || !this.ensureVoiceAuthorization(autoTriggered)) {
       return false;
     }
     if (this.recordingStartPromise) {
       return true;
     }
-    const startPromise = this.startRecordingAfterPrivacy(autoTriggered, speakerRole).catch((error) => {
+    setVoiceChatData(this, voiceRecordingStartRequestedPatch());
+    const requestGeneration = ++this.recordingStartGeneration;
+    const startPromise = this.startRecordingAfterPrivacy(
+      autoTriggered,
+      speakerRole,
+      requestGeneration,
+    ).catch((error) => {
       const message = error instanceof Error ? error.message : "录音启动失败";
       this.handleError(message, { kind: "recorder", code: "recorder_start_failed", message });
       return false;
@@ -1470,12 +1483,18 @@ definePage<VoiceChatData>()({
     void startPromise.finally(() => {
       if (this.recordingStartPromise === startPromise) {
         this.recordingStartPromise = null;
+        setVoiceChatData(this, { recordingStarting: false });
       }
     });
     return true;
   },
 
-  async startRecordingAfterPrivacy(autoTriggered: boolean = false, speakerRole?: MemoirSpeakerRole) {
+  async startRecordingAfterPrivacy(
+    autoTriggered: boolean = false,
+    speakerRole?: MemoirSpeakerRole,
+    requestedGeneration?: number,
+  ) {
+    const requestGeneration = requestedGeneration ?? ++this.recordingStartGeneration;
     const interruptingAssistant = !autoTriggered && this.assistantTurnActiveForBargeIn();
     if (!autoTriggered) {
       this.consecutiveNoAnswerPrompts = 0;
@@ -1487,7 +1506,11 @@ definePage<VoiceChatData>()({
       setVoiceChatData(this, voiceAssistantInterruptedPatch());
     }
     await this.stopAssistantBargeInMonitor();
-    if (this.pageSuspended) {
+    if (
+      requestGeneration !== this.recordingStartGeneration
+      || this.pageSuspended
+      || this.data.finishingSession
+    ) {
       return false;
     }
     if (!(await this.syncVoiceAuthorizationForSession())) {
@@ -1501,7 +1524,11 @@ definePage<VoiceChatData>()({
       setVoiceChatData(this, voiceRecorderPrivacyDeniedPatch(autoTriggered, this.data.autoListenStateText));
       return false;
     }
-    if (this.pageSuspended) {
+    if (
+      requestGeneration !== this.recordingStartGeneration
+      || this.pageSuspended
+      || this.data.finishingSession
+    ) {
       return false;
     }
     if (
@@ -1512,12 +1539,21 @@ definePage<VoiceChatData>()({
       const connected = await this.connectGateway();
       if (
         !connected
+        || requestGeneration !== this.recordingStartGeneration
         || this.pageSuspended
+        || this.data.finishingSession
         || voiceClientUnavailableForRecording(this.voiceStreaming.hasClient(), this.data.status)
       ) {
         setVoiceChatData(this, voiceRecordingUnavailablePatch(autoTriggered, this.data.autoListenStateText));
         return false;
       }
+    }
+    if (
+      requestGeneration !== this.recordingStartGeneration
+      || this.pageSuspended
+      || this.data.finishingSession
+    ) {
+      return false;
     }
     const recordingOptions: {
       noVoiceActivityTimeoutMs: number;
@@ -1636,6 +1672,7 @@ definePage<VoiceChatData>()({
     if (this.data.finishingSession) {
       return;
     }
+    this.recordingStartGeneration += 1;
     this.cancelFollowUpTTS();
     setVoiceChatData(this, finishSessionStartPatch(this.data.recording));
     if (!this.voiceStreaming.hasClient()) {

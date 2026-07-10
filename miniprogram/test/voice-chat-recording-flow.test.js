@@ -11,6 +11,7 @@ const {
   voiceFinalTranscriptResult,
   voiceClientUnavailableForRecording,
   voiceLiveTranscriptPatch,
+  voiceRecordingStartRequestedPatch,
   voiceRecordingStartedPatch,
   voiceRecordingUnavailablePatch,
 } = require("../pages/voice-chat/voice-chat-recording-flow.ts");
@@ -23,8 +24,14 @@ test("voice recording flow detects when recorder must reconnect first", () => {
 });
 
 test("voice recording flow derives recording start and unavailable patches", () => {
+  assert.deepEqual(voiceRecordingStartRequestedPatch(), {
+    recordingStarting: true,
+    error: "",
+    captureStateText: "正在打开麦克风",
+  });
   assert.deepEqual(voiceRecordingStartedPatch(true), {
     recording: true,
+    recordingStarting: false,
     error: "",
     liveText: "",
     liveCharCount: 0,
@@ -34,6 +41,7 @@ test("voice recording flow derives recording start and unavailable patches", () 
   });
   assert.deepEqual(voiceRecordingUnavailablePatch(false, "原状态"), {
     error: "语音未就绪，请重新连接",
+    recordingStarting: false,
     status: "error",
     statusText: "异常",
     primaryActionText: "重新连接",
@@ -106,6 +114,7 @@ test("voice recording flow derives finish session patches", () => {
     finishingSession: true,
     error: "",
     recording: false,
+    recordingStarting: false,
     status: "stopping",
     statusText: "保存中",
     primaryActionText: "保存中",

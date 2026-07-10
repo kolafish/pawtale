@@ -339,11 +339,15 @@ test("human interview record action reconnects and starts the selected speaker w
   page.startRecordingAsSpeaker.call(context, {
     currentTarget: { dataset: { role: "interviewer" } },
   });
+  assert.equal(context.data.recordingStarting, true);
+  assert.equal(context.data.showHumanRecordActions, false);
+  assert.equal(context.data.micButtonText, "正在打开麦克风");
   await context.recordingStartPromise;
 
   assert.equal(connectCalls, 1);
   assert.equal(context.data.speakerRole, "interviewer");
   assert.equal(context.data.recording, true);
+  assert.equal(context.data.recordingStarting, false);
   assert.equal(context.data.status, "ready");
   assert.deepEqual(startOptions, [{ noVoiceActivityTimeoutMs: 0, speakerRole: "interviewer" }]);
 });
@@ -718,6 +722,63 @@ test("voice chat finishSession ignores duplicate finish taps", async () => {
   assert.equal(context.data.persistenceStateText, "已保存");
   assert.equal(modals.length, 1);
   delete global.wx;
+});
+
+test("voice chat save action cancels a recording start that is still authorizing", async () => {
+  let resolveAuthorization;
+  let recorderStartCalls = 0;
+  let connectCalls = 0;
+  const page = loadVoiceChatPage({
+    voiceAuthorizationExports: {
+      readVoiceAuthorizationConsent: () => true,
+    },
+  });
+  const context = {
+    ...page,
+    data: {
+      ...page.data,
+      voiceSessionId: "voice-1",
+      voiceAuthorizationAgreed: true,
+      status: "closed",
+    },
+    voiceStreaming: {
+      hasClient: () => false,
+      startRecording() {
+        recorderStartCalls += 1;
+        return true;
+      },
+      stopRecording() {},
+      close() {},
+    },
+    syncVoiceAuthorizationForSession() {
+      return new Promise((resolve) => {
+        resolveAuthorization = resolve;
+      });
+    },
+    async stopAssistantBargeInMonitor() {},
+    async connectGateway() {
+      connectCalls += 1;
+      return true;
+    },
+    async refreshVoiceSessionSnapshot() {
+      return null;
+    },
+    setData(patch) {
+      this.data = { ...this.data, ...patch };
+    },
+  };
+
+  assert.equal(page.startRecording.call(context, false), true);
+  const pendingStart = context.recordingStartPromise;
+  await new Promise((resolve) => setImmediate(resolve));
+  await page.finishSession.call(context);
+  resolveAuthorization(true);
+
+  assert.equal(await pendingStart, false);
+  assert.equal(recorderStartCalls, 0);
+  assert.equal(connectCalls, 0);
+  assert.equal(context.data.recording, false);
+  assert.equal(context.data.recordingStarting, false);
 });
 
 test("voice chat stores pending close state for connection errors", () => {

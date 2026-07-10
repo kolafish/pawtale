@@ -47,6 +47,7 @@ export interface VoiceChatData {
   status: VoiceChatConnectionStatus;
   statusText: string;
   recording: boolean;
+  recordingStarting: boolean;
   connecting: boolean;
   error: string;
   liveText: string;
@@ -168,6 +169,7 @@ export function initialVoiceChatData(): VoiceChatData {
     status: "idle",
     statusText: "未连接",
     recording: false,
+    recordingStarting: false,
     connecting: false,
     error: "",
     liveText: "",
@@ -350,7 +352,10 @@ export function voiceChatViewPatch(state: VoiceChatData): VoiceChatViewPatch {
   const showAssistantPanel = !isHumanInterview
     && !state.recording
     && Boolean(hasAssistantPrompt || state.followUpLoading || state.followUpError || state.canRequestFollowUp);
-  const showHumanRecordActions = isHumanInterview && !state.recording && state.voiceAuthorizationAgreed;
+  const showHumanRecordActions = isHumanInterview
+    && !state.recording
+    && !state.recordingStarting
+    && state.voiceAuthorizationAgreed;
   const showControlBar = !showHumanRecordActions;
   const showStageStatus = !isHumanInterview || Boolean(state.error);
   const showHumanTranscriptOverlay = isHumanInterview && state.recording;
@@ -396,6 +401,8 @@ export function voiceChatViewPatch(state: VoiceChatData): VoiceChatViewPatch {
   let micButtonText = state.primaryActionText;
   if (!state.voiceAuthorizationAgreed) {
     micButtonText = "同意后开始说话";
+  } else if (state.recordingStarting) {
+    micButtonText = "正在打开麦克风";
   } else if (state.connecting) {
     micButtonText = "正在准备";
   } else if (state.recording) {
@@ -424,7 +431,7 @@ export function voiceChatViewPatch(state: VoiceChatData): VoiceChatViewPatch {
   if (state.largeTextEnabled) {
     pageClass.push("large-text", focusClass);
   }
-  const micButtonDisabled = state.connecting || !state.voiceAuthorizationAgreed;
+  const micButtonDisabled = state.recordingStarting || !state.voiceAuthorizationAgreed;
   const roleRecordButtonSuffix = micButtonDisabled ? " disabled" : "";
   const micButtonClass = [
     "mic-button",

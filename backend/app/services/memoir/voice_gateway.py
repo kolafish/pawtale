@@ -129,7 +129,7 @@ class VoiceGatewaySession:
                     await self._send_error(stop_error)
         finally:
             stop_error = stop_error or self._terminal_error
-            if stop_error and stop_reason == "transport_closed":
+            if stop_error:
                 stop_reason = "terminal_error"
             await self._shutdown()
             self._state = VoiceGatewayState.FAILED if stop_error else VoiceGatewayState.STOPPED

@@ -138,6 +138,13 @@ test("voice chat view patch combines human speaker choice with record actions", 
     speakerRole: "interviewer",
     recording: true,
   });
+  const startingPatch = voiceChatViewPatch({
+    ...initialVoiceChatData(),
+    interviewType: "human_interview",
+    voiceAuthorizationAgreed: true,
+    recordingStarting: true,
+    connecting: true,
+  });
   const authorizationPatch = voiceChatViewPatch({
     ...initialVoiceChatData(),
     interviewType: "human_interview",
@@ -153,6 +160,10 @@ test("voice chat view patch combines human speaker choice with record actions", 
   assert.equal(idlePatch.liveDisplayText, "点上方开始记录采访者");
   assert.equal(idlePatch.narratorRecordButtonClass, "role-record-button narrator");
   assert.equal(idlePatch.interviewerRecordButtonClass, "role-record-button interviewer");
+  assert.equal(startingPatch.showHumanRecordActions, false);
+  assert.equal(startingPatch.showControlBar, true);
+  assert.equal(startingPatch.micButtonDisabled, true);
+  assert.equal(startingPatch.micButtonText, "正在打开麦克风");
   assert.equal(recordingPatch.showHumanRecordActions, false);
   assert.equal(recordingPatch.showControlBar, true);
   assert.equal(recordingPatch.voiceChatPageClass, "voice-chat-page human-interview human-recording-focus");
