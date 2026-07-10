@@ -25,7 +25,9 @@ SYSTEM_PROMPT = "你是一位谨慎的中文口述记录修正助手，只能按
 VOICE_EDIT_UNAVAILABLE_MESSAGE = "AI 语音修正暂时不可用，请稍后重试。"
 VOICE_EDIT_INVALID_RESPONSE_MESSAGE = "AI 未返回可用修正预览"
 VOICE_EDIT_ACTIONS = {"revise_transcript", "clarify", "unsupported"}
+VOICE_EDIT_SCOPES = {"term", "sentence", "passage"}
 MAX_CHANGE_ITEMS = 12
+MAX_CHANGE_TEXT_LENGTH = 800
 logger = logging.getLogger(__name__)
 
 
@@ -107,12 +109,18 @@ def _build_prompt(context: TranscriptVoiceEditContext, instruction_text: str) ->
     return f"""请根据用户的语音修正指令，只修正下面这一条讲述记录。
 
 重要边界：
-- 只能改用户修正指令明确指出的事实、人物、地点、年份、名称、用词或识别错误
+- 支持三类局部修改：term 表示名词或短词替换，sentence 表示指定句子修改，passage 表示指定片段改写
+- “把外婆改成奶奶”这类指令应定位并替换明确的名词；“第二句改成……”应修改完整目标句子；“把讲退休后的那段改成……”应定位唯一相关片段后改写
+- 只能改用户修正指令明确指出的事实、人物、地点、年份、名称、用词、句子、片段或识别错误
 - 不要润色整段，不要扩写，不要总结，不要文学化
 - 不要把章节标题、AI 问题或上下文补进正文
-- 没听清、指令不完整、或无法确定改哪一处时，action 必须为 "clarify"
+- 没听清、指令不完整、目标在正文中不存在、或无法唯一确定改哪一处时，action 必须为 "clarify"
 - 指令明显不是修正当前记录时，action 必须为 "unsupported"
 - 如果 action 是 "revise_transcript"，edited_text 必须是完整修正后的记录正文
+- revise_transcript 的 changes 必须完整列出全部改动，按原文出现顺序排列
+- 每个 change.before 必须是当前整理文字中可精确定位的连续原文，不能概括、改写或留空；change.after 是替换后的完整文字，可以为空表示删除
+- edited_text 必须恰好等于依次将 changes 中 before 替换为 after 的结果，changes 之外的文字和标点必须逐字保持不变
+- 如果同一 before 在原文出现多次且指令没有说明具体位置，不要猜测，action 必须为 "clarify"
 - 直接返回 JSON，不要 Markdown，不要解释
 
 返回 JSON 格式：
@@ -120,7 +128,7 @@ def _build_prompt(context: TranscriptVoiceEditContext, instruction_text: str) ->
   "action": "revise_transcript" | "clarify" | "unsupported",
   "edited_text": "完整修正后的记录正文；clarify/unsupported 时保持当前正文",
   "changes": [
-    {{"before": "原片段", "after": "新片段", "reason": "修正原因"}}
+    {{"scope": "term" | "sentence" | "passage", "before": "当前正文中的精确原文", "after": "替换后的文字", "reason": "修正原因"}}
   ],
   "confidence": 0.0,
   "reply_text": "给用户看的简短说明"
@@ -152,6 +160,17 @@ def _clean_text(value: object, *, limit: int = 1200) -> str:
     return str(value or "").strip().strip("\"“”").strip()[:limit].strip()
 
 
+def _inferred_scope(before: str, value: object) -> str:
+    scope = str(value or "").strip().lower()
+    if scope in VOICE_EDIT_SCOPES:
+        return scope
+    if len(before) <= 12 and not any(mark in before for mark in "，。！？；：,.!?;:"):
+        return "term"
+    if len(before) <= 80 and any(mark in before for mark in "。！？.!?"):
+        return "sentence"
+    return "passage"
+
+
 def _parse_changes(value: object) -> list[MemoirVoiceTranscriptVoiceEditChangeResponse]:
     if not isinstance(value, list):
         return []
@@ -159,13 +178,14 @@ def _parse_changes(value: object) -> list[MemoirVoiceTranscriptVoiceEditChangeRe
     for item in value[:MAX_CHANGE_ITEMS]:
         if not isinstance(item, dict):
             continue
-        before = _clean_text(item.get("before"), limit=120)
-        after = _clean_text(item.get("after"), limit=120)
+        before = _clean_text(item.get("before"), limit=MAX_CHANGE_TEXT_LENGTH)
+        after = _clean_text(item.get("after"), limit=MAX_CHANGE_TEXT_LENGTH)
         reason = _clean_text(item.get("reason"), limit=180)
         if not before and not after and not reason:
             continue
         changes.append(
             MemoirVoiceTranscriptVoiceEditChangeResponse(
+                scope=_inferred_scope(before, item.get("scope")),
                 before=before,
                 after=after,
                 reason=reason,
@@ -179,6 +199,47 @@ def _normalize_action(value: object) -> str:
     return action if action in VOICE_EDIT_ACTIONS else "clarify"
 
 
+def _edited_text_from_changes(
+    current_text: str,
+    changes: list[MemoirVoiceTranscriptVoiceEditChangeResponse],
+) -> str | None:
+    if not changes:
+        return None
+    parts: list[str] = []
+    cursor = 0
+    for change in changes:
+        if not change.before:
+            return None
+        index = current_text.find(change.before, cursor)
+        if index < 0:
+            return None
+        parts.extend((current_text[cursor:index], change.after))
+        cursor = index + len(change.before)
+    parts.append(current_text[cursor:])
+    return "".join(parts)
+
+
+def _invalid_revision_response(
+    *,
+    context: TranscriptVoiceEditContext,
+    provider: str | None,
+    model: str | None,
+) -> MemoirVoiceTranscriptVoiceEditPreviewResponse:
+    return MemoirVoiceTranscriptVoiceEditPreviewResponse(
+        utterance_id=context.utterance.id,
+        action="clarify",
+        original_text=context.utterance.transcript_raw.strip(),
+        current_text=context.current_text,
+        edited_text=context.current_text,
+        changes=[],
+        confidence=0.0,
+        requires_confirmation=True,
+        reply_text="我没能准确定位要改的原文，请说清原词、完整句子或具体片段。",
+        provider=provider,
+        model=model,
+    )
+
+
 def _response_from_payload(
     *,
     context: TranscriptVoiceEditContext,
@@ -188,22 +249,31 @@ def _response_from_payload(
 ) -> MemoirVoiceTranscriptVoiceEditPreviewResponse:
     action = _normalize_action(payload.get("action"))
     current_text = context.current_text
-    max_edited_text_length = max(len(current_text) * 2, len(current_text) + 240)
+    max_edited_text_length = max(len(current_text) * 2, len(current_text) + MAX_CHANGE_TEXT_LENGTH)
     edited_text = _clean_text(payload.get("edited_text"), limit=max_edited_text_length + 1)
+    changes = _parse_changes(payload.get("changes"))
     if action == "revise_transcript":
         if not edited_text:
             raise HTTPException(status_code=502, detail=VOICE_EDIT_INVALID_RESPONSE_MESSAGE)
         if len(edited_text) > max_edited_text_length:
             raise HTTPException(status_code=502, detail="AI 修正结果过长，请重新说明要改哪一处")
+        reconstructed_text = _edited_text_from_changes(current_text, changes)
+        if reconstructed_text is None or reconstructed_text == current_text or reconstructed_text != edited_text:
+            return _invalid_revision_response(
+                context=context,
+                provider=provider,
+                model=model,
+            )
     else:
         edited_text = current_text
+        changes = []
     return MemoirVoiceTranscriptVoiceEditPreviewResponse(
         utterance_id=context.utterance.id,
         action=action,
         original_text=context.utterance.transcript_raw.strip(),
         current_text=current_text,
         edited_text=edited_text,
-        changes=_parse_changes(payload.get("changes")),
+        changes=changes,
         confidence=_bounded_confidence(payload.get("confidence")),
         requires_confirmation=True,
         reply_text=_clean_text(payload.get("reply_text"), limit=240) or _default_reply_text(action),

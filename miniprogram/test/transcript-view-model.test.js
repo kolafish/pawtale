@@ -8,6 +8,7 @@ const {
   transcriptBookInclusionText,
   transcriptDurationText,
   transcriptVoiceEditPreviewView,
+  transcriptVoiceEditStateView,
 } = require("../services/transcript-view-model.ts");
 
 test("transcript view model formats duration and audio text consistently", () => {
@@ -43,15 +44,27 @@ test("transcript view model builds voice edit preview diff", () => {
     edited_text: "他叫李阅，我们是高中同学。",
     reply_text: "",
     confidence: 0.93,
-    changes: [{ before: "李月", after: "李阅", reason: "用户明确纠正名字" }],
+    changes: [{ scope: "term", before: "李月", after: "李阅", reason: "用户明确纠正名字" }],
   });
 
   assert.equal(preview.confidenceText, "93%");
   assert.equal(preview.canConfirm, true);
+  assert.equal(preview.changes[0].scopeLabel, "名词替换");
   assert.deepEqual(preview.diffSegments, [
     { text: "他叫", kind: "equal" },
     { text: "李月", kind: "delete" },
     { text: "李阅", kind: "insert" },
     { text: "，我们是高中同学。", kind: "equal" },
   ]);
+});
+
+test("transcript view model exposes actionable voice edit phases", () => {
+  const listening = transcriptVoiceEditStateView("listening");
+  assert.equal(listening.phase, "listening");
+  assert.equal(listening.statusVisible, true);
+  assert.equal(listening.actionText, "结束并生成预览");
+
+  const clarify = transcriptVoiceEditStateView("clarify", "没有定位到你说的片段");
+  assert.equal(clarify.statusClass, "warning");
+  assert.equal(clarify.statusDetail, "没有定位到你说的片段");
 });

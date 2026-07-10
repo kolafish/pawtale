@@ -452,6 +452,66 @@ test("transcript detail page labels human interviewer questions", async () => {
   assert.equal(context.data.item.questionTitleText, "采访者刚才问了");
 });
 
+test("transcript detail page shows every voice edit processing phase", async () => {
+  let recordingOptions;
+  let resolveRecording;
+  let resolvePreview;
+  const recording = new Promise((resolve) => {
+    resolveRecording = resolve;
+  });
+  const preview = new Promise((resolve) => {
+    resolvePreview = resolve;
+  });
+  const { page } = loadTranscriptDetailPage({
+    voiceApiExports: {
+      getMemoirVoiceTranscript: async (id) => sampleTranscript(id),
+      previewMemoirVoiceTranscriptVoiceEdit: async () => preview,
+    },
+    voiceSearchExports: {
+      recordMemoirVoiceSearchQuery: async (options) => {
+        recordingOptions = options;
+        return recording;
+      },
+    },
+  });
+  const context = pageContext(page);
+  await page.onLoad.call(context, { id: "utterance-voice-edit" });
+
+  const operation = page.startVoiceEdit.call(context);
+  assert.equal(context.data.voiceEditPhase, "listening");
+  assert.equal(context.data.voiceEditStatusVisible, true);
+  assert.equal(context.data.voiceEditActionText, "结束并生成预览");
+
+  recordingOptions.onRecordingEnd();
+  assert.equal(context.data.voiceEditPhase, "transcribing");
+  assert.equal(context.data.voiceEditLoading, true);
+
+  resolveRecording("把爷爷退休后的那段改成爷爷退休后经常去社区帮忙");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(context.data.voiceEditPhase, "generating");
+  assert.match(context.data.voiceEditStatusDetail, /定位原文/);
+
+  resolvePreview({
+    action: "revise_transcript",
+    current_text: "爷爷退休后还在帮公司做事。",
+    edited_text: "爷爷退休后经常去社区帮忙。",
+    reply_text: "已改写指定片段，请确认后保存。",
+    confidence: 0.92,
+    changes: [{
+      scope: "passage",
+      before: "爷爷退休后还在帮公司做事。",
+      after: "爷爷退休后经常去社区帮忙。",
+      reason: "用户要求重写退休后的经历",
+    }],
+  });
+  await operation;
+
+  assert.equal(context.data.voiceEditPhase, "review");
+  assert.equal(context.data.voiceEditStatusText, "等待确认");
+  assert.equal(context.data.voiceEditPreview.changes[0].scopeLabel, "片段改写");
+  assert.equal(context.data.voiceEditPreview.canConfirm, true);
+});
+
 test("transcript detail page keeps editing non-blocking while offline ASR runs", async () => {
   const startCalls = [];
   const toasts = [];

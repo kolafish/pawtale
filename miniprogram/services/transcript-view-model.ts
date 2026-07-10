@@ -12,9 +12,29 @@ export interface TranscriptTextSegment {
 }
 
 export interface TranscriptVoiceEditChangeView {
+  scopeLabel: string;
   before: string;
   after: string;
   reason: string;
+}
+
+export type TranscriptVoiceEditPhase =
+  | "idle"
+  | "listening"
+  | "transcribing"
+  | "generating"
+  | "review"
+  | "clarify"
+  | "saving"
+  | "error";
+
+export interface TranscriptVoiceEditStateView {
+  phase: TranscriptVoiceEditPhase;
+  statusText: string;
+  statusDetail: string;
+  statusClass: string;
+  statusVisible: boolean;
+  actionText: string;
 }
 
 export type TranscriptVoiceEditDiffKind = "equal" | "delete" | "insert";
@@ -33,6 +53,90 @@ export interface TranscriptVoiceEditPreviewView {
   changes: TranscriptVoiceEditChangeView[];
   diffSegments: TranscriptVoiceEditDiffSegment[];
   canConfirm: boolean;
+}
+
+const VOICE_EDIT_STATE_COPY: Record<
+  TranscriptVoiceEditPhase,
+  Omit<TranscriptVoiceEditStateView, "phase">
+> = {
+  idle: {
+    statusText: "可修改",
+    statusDetail: "",
+    statusClass: "idle",
+    statusVisible: false,
+    actionText: "说修改意见",
+  },
+  listening: {
+    statusText: "正在听",
+    statusDetail: "请直接说要改的词、句子或片段，说完后再点一次结束。",
+    statusClass: "listening",
+    statusVisible: true,
+    actionText: "结束并生成预览",
+  },
+  transcribing: {
+    statusText: "正在识别",
+    statusDetail: "正在把录音识别成修改意见。",
+    statusClass: "working",
+    statusVisible: true,
+    actionText: "识别修改意见中",
+  },
+  generating: {
+    statusText: "正在生成预览",
+    statusDetail: "正在定位原文，并核对修改是否只发生在指定位置。",
+    statusClass: "working",
+    statusVisible: true,
+    actionText: "生成修改预览中",
+  },
+  review: {
+    statusText: "等待确认",
+    statusDetail: "修改预览已生成，确认后才会保存到素材。",
+    statusClass: "ready",
+    statusVisible: true,
+    actionText: "重新说修改意见",
+  },
+  clarify: {
+    statusText: "需要再说清楚",
+    statusDetail: "请说出原词、完整句子或可以定位的具体片段。",
+    statusClass: "warning",
+    statusVisible: true,
+    actionText: "重新说修改意见",
+  },
+  saving: {
+    statusText: "正在保存",
+    statusDetail: "正在把确认后的修改保存到素材。",
+    statusClass: "working",
+    statusVisible: true,
+    actionText: "正在保存",
+  },
+  error: {
+    statusText: "处理失败",
+    statusDetail: "修改没有保存，可以重新说一次。",
+    statusClass: "error",
+    statusVisible: true,
+    actionText: "重新说修改意见",
+  },
+};
+
+export function transcriptVoiceEditStateView(
+  phase: TranscriptVoiceEditPhase,
+  statusDetail = "",
+): TranscriptVoiceEditStateView {
+  const state = VOICE_EDIT_STATE_COPY[phase];
+  return {
+    phase,
+    ...state,
+    statusDetail: statusDetail.trim() || state.statusDetail,
+  };
+}
+
+function voiceEditScopeLabel(scope: string | undefined): string {
+  if (scope === "term") {
+    return "名词替换";
+  }
+  if (scope === "sentence") {
+    return "句子修改";
+  }
+  return "片段改写";
 }
 
 export function formatTranscriptDurationSeconds(value: number): string {
@@ -237,6 +341,7 @@ export function transcriptVoiceEditPreviewView(
     ? Math.round(Math.max(0, Math.min(1, response.confidence)) * 100)
     : 0;
   const changes = (response.changes || []).map((item) => ({
+    scopeLabel: voiceEditScopeLabel(item.scope),
     before: item.before,
     after: item.after,
     reason: item.reason,

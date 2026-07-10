@@ -554,6 +554,7 @@ class MemoirVoiceTranscriptVoiceEditPreviewRequest(BaseModel):
 
 
 class MemoirVoiceTranscriptVoiceEditChangeResponse(BaseModel):
+    scope: Literal["term", "sentence", "passage"] = "passage"
     before: str = ""
     after: str = ""
     reason: str = ""

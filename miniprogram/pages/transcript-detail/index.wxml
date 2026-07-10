@@ -221,15 +221,24 @@
       <view class="section-head">
         <view class="section-heading">
           <text class="section-title">修改这段文字</text>
-          <text class="section-hint">可以直接编辑，也可以说出要改哪里。说完后先预览，确认后才保存。</text>
+          <text class="section-hint">直接编辑，或说出要替换的词、句子和片段。</text>
         </view>
-        <text class="section-count">{{voiceEditStatusText || "可修改"}}</text>
+        <text class="section-count voice-edit-count {{voiceEditStatusClass}}">{{voiceEditStatusText}}</text>
+      </view>
+      <view wx:if="{{voiceEditStatusVisible}}" class="voice-edit-status {{voiceEditStatusClass}}">
+        <view class="voice-edit-status-mark">
+          <view class="voice-edit-status-dot"></view>
+        </view>
+        <view class="voice-edit-status-copy">
+          <text class="voice-edit-status-title">{{voiceEditStatusText}}</text>
+          <text class="voice-edit-status-detail">{{voiceEditStatusDetail}}</text>
+        </view>
       </view>
       <view class="actions-row edit-choice-actions">
         <button
           class="primary-button"
           bindtap="beginEdit"
-          disabled="{{saving || deleting || convertingQuestionToAnswer || item.isEditing}}"
+          disabled="{{saving || deleting || convertingQuestionToAnswer || item.isEditing || voiceEditRecording || voiceEditLoading || voiceEditSaving}}"
         >
           手动编辑
         </button>
@@ -239,10 +248,9 @@
           loading="{{voiceEditLoading}}"
           disabled="{{saving || deleting || convertingQuestionToAnswer || voiceEditSaving || voiceEditLoading}}"
         >
-          {{voiceEditRecording ? "停止录入" : (voiceEditLoading ? "生成中" : "说修改意见")}}
+          {{voiceEditActionText}}
         </button>
       </view>
-      <text class="voice-edit-example">例如：把“身体挺硬朗”改成“身体还算硬朗”。</text>
       <view wx:if="{{voiceEditInstructionText}}" class="voice-edit-block">
         <text class="voice-edit-label">你说</text>
         <text class="voice-edit-text">{{voiceEditInstructionText}}</text>
@@ -260,6 +268,7 @@
           wx:key="changeIndex"
           class="voice-edit-change"
         >
+          <text class="voice-edit-change-scope">{{change.scopeLabel}}</text>
           <text class="voice-edit-change-text">“{{change.before}}” → “{{change.after}}”</text>
           <text wx:if="{{change.reason}}" class="voice-edit-change-reason">{{change.reason}}</text>
         </view>

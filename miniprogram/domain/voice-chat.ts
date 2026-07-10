@@ -565,8 +565,10 @@ export interface MemoirVoiceSearchQueryParseResponse {
 }
 
 export type MemoirVoiceTranscriptVoiceEditAction = "revise_transcript" | "clarify" | "unsupported";
+export type MemoirVoiceTranscriptVoiceEditScope = "term" | "sentence" | "passage";
 
 export interface MemoirVoiceTranscriptVoiceEditChange {
+  scope: MemoirVoiceTranscriptVoiceEditScope;
   before: string;
   after: string;
   reason: string;
