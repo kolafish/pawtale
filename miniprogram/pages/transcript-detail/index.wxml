@@ -46,7 +46,7 @@
           wx:else
           class="primary-button"
           bindtap="beginEdit"
-          disabled="{{saving || deleting || convertingQuestionToAnswer || item.isEditing || item.canRecoverTranscription}}"
+          disabled="{{saving || deleting || convertingQuestionToAnswer || item.isEditing || item.canRecoverTranscription || item.offlineAsrActive}}"
         >
           编辑成书文字
         </button>
@@ -195,6 +195,28 @@
       </text>
     </view>
 
+    <view wx:if="{{item.showOfflineAsr && !item.canRecoverTranscription}}" class="section-card offline-asr-card">
+      <view class="section-head">
+        <view class="section-heading">
+          <text class="section-title">离线加强识别</text>
+          <text class="section-hint">{{item.offlineAsrMethodText}}</text>
+        </view>
+        <text class="section-count offline-asr-status {{item.offlineAsrStatusClass}}">{{item.offlineAsrStatusText}}</text>
+      </view>
+      <text class="offline-asr-detail">{{item.offlineAsrDetailText}}</text>
+      <text wx:if="{{item.offlineAsrErrorText}}" class="offline-asr-error">{{item.offlineAsrErrorText}}</text>
+      <view class="actions-row offline-asr-actions">
+        <button
+          class="primary-button"
+          bindtap="startOfflineAsr"
+          loading="{{offlineAsrStarting || item.offlineAsrActive}}"
+          disabled="{{offlineAsrStarting || item.offlineAsrActive || !item.canStartOfflineAsr || item.isEditing || saving || deleting || convertingQuestionToAnswer}}"
+        >
+          {{offlineAsrStarting ? "正在提交" : item.offlineAsrActionText}}
+        </button>
+      </view>
+    </view>
+
     <view wx:if="{{!item.isEditing && !item.canRecoverTranscription}}" class="section-card edit-tools-card">
       <view class="section-head">
         <view class="section-heading">
@@ -207,7 +229,7 @@
         <button
           class="primary-button"
           bindtap="beginEdit"
-          disabled="{{saving || deleting || convertingQuestionToAnswer || item.isEditing}}"
+          disabled="{{saving || deleting || convertingQuestionToAnswer || item.isEditing || item.offlineAsrActive}}"
         >
           手动编辑
         </button>
@@ -215,7 +237,7 @@
           class="ghost-button"
           bindtap="startVoiceEdit"
           loading="{{voiceEditLoading}}"
-          disabled="{{saving || deleting || convertingQuestionToAnswer || voiceEditSaving || voiceEditLoading}}"
+          disabled="{{saving || deleting || convertingQuestionToAnswer || voiceEditSaving || voiceEditLoading || item.offlineAsrActive}}"
         >
           {{voiceEditRecording ? "停止录入" : (voiceEditLoading ? "生成中" : "说修改意见")}}
         </button>
@@ -286,7 +308,7 @@
           class="primary-button"
           bindtap="toggleShareVideoPanel"
           loading="{{shareVideoLoadingContext}}"
-          disabled="{{saving || deleting || convertingQuestionToAnswer || shareVideoCreating || shareVideoPolling || shareVideoDownloadingPreview || shareVideoSharing || shareVideoCustomBackgroundUploading}}"
+          disabled="{{saving || deleting || convertingQuestionToAnswer || item.offlineAsrActive || shareVideoCreating || shareVideoPolling || shareVideoDownloadingPreview || shareVideoSharing || shareVideoCustomBackgroundUploading}}"
         >
           {{shareVideoPanelOpen ? "收起视频" : "制作视频"}}
         </button>
@@ -411,7 +433,7 @@
               class="primary-button"
               bindtap="createShareVideo"
               loading="{{shareVideoCreating || shareVideoPolling || shareVideoDownloadingPreview}}"
-              disabled="{{!shareVideoSelectedCanGenerate || convertingQuestionToAnswer || shareVideoCreating || shareVideoPolling || shareVideoDownloadingPreview || shareVideoSharing || shareVideoCustomBackgroundUploading}}"
+              disabled="{{!shareVideoSelectedCanGenerate || convertingQuestionToAnswer || item.offlineAsrActive || shareVideoCreating || shareVideoPolling || shareVideoDownloadingPreview || shareVideoSharing || shareVideoCustomBackgroundUploading}}"
             >
               {{shareVideoDownloadingPreview ? "准备预览" : (shareVideoCreating || shareVideoPolling ? "生成中" : "生成视频")}}
             </button>

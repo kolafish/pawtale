@@ -232,6 +232,12 @@ async def test_offline_asr_reprocess_writes_multi_asr_versions_and_corrected_tex
     assert refreshed.transcript_raw == "爷爷退休后还在帮公司跑事情。"
     assert refreshed.transcript_edited == "爷爷退休以后还在帮公司跑事情。"
     assert refreshed.provider == VOLC_OFFLINE_ASR_PROVIDER
+    recognition_metadata = refreshed.provider_payload_json["material_offline_asr"]
+    assert recognition_metadata["narrator_origin"] == "四川成都"
+    assert recognition_metadata["dialect_code"] == "zh-CN-sichuanese"
+    assert recognition_metadata["dialect_label"] == "四川话"
+    assert recognition_metadata["dialect_enhancement_enabled"] is True
+    assert recognition_metadata["providers"] == ["volc", "stepfun"]
     assert refreshed_message.content_text == "爷爷退休以后还在帮公司跑事情。"
     assert refreshed_message.content_status == MemoirChatContentStatus.CORRECTED.value
     assert "来自四川成都" in fake_ai.calls[0]["user_prompt"]
@@ -265,6 +271,54 @@ async def test_offline_asr_reprocess_writes_multi_asr_versions_and_corrected_tex
         force_reprocess=True,
     )
     assert forced_dry_run["candidate_count"] == 1
+
+
+async def test_offline_asr_reprocess_does_not_overwrite_an_edit_saved_while_asr_is_running(test_db):
+    project, voice_session = await _create_project(test_db)
+    audio_file = await _add_audio(test_db)
+    utterance = MemoirVoiceUtterance(
+        voice_session_id=voice_session.id,
+        audio_file_id=audio_file.id,
+        transcript_raw="旧的实时识别",
+        transcript_edited="旧的自动整理",
+        created_at=datetime(2026, 7, 8, 8, 1, 45),
+    )
+    test_db.add(utterance)
+    await test_db.commit()
+
+    async def fake_runner(request):
+        request.utterance.transcript_edited = "用户刚刚确认的文字"
+        test_db.add(
+            MemoirTranscriptVersion(
+                voice_session_id=voice_session.id,
+                source_artifact_id=request.utterance.id,
+                version_type=MemoirTranscriptVersionType.USER_EDITED.value,
+                content="用户刚刚确认的文字",
+                created_by=MemoirCreatedBy.USER.value,
+            )
+        )
+        await test_db.commit()
+        return [
+            OfflineASRResult(VOLC_OFFLINE_ASR_PROVIDER, "离线识别一。"),
+            OfflineASRResult(STEPFUN_OFFLINE_ASR_PROVIDER, "离线识别二。"),
+        ]
+
+    result = await reprocess_offline_asr(
+        test_db,
+        project_id=project.id,
+        cutoff_created_at_utc=datetime(2026, 7, 8, 8, 2, 59),
+        dry_run=False,
+        asr_runner=fake_runner,
+        ai_client=FakeCleanupAI("不应写回的离线校正文"),
+    )
+
+    test_db.expunge_all()
+    refreshed = await test_db.get(MemoirVoiceUtterance, utterance.id)
+    assert result["processed_count"] == 0
+    assert result["failed_count"] == 1
+    assert "user-edited" in result["failures"][0]["error"]
+    assert refreshed is not None
+    assert refreshed.transcript_edited == "用户刚刚确认的文字"
 
 
 async def test_offline_asr_reprocess_creates_message_for_blank_saved_audio(test_db):

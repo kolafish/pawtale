@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -292,6 +293,32 @@ class MemoirVoiceTranscriptIncludedChapterResponse(BaseModel):
     title: str
     sort_order: int
 
+
+class MemoirMaterialOfflineASRRequest(BaseModel):
+    ai_model: str | None = None
+
+    @field_validator("ai_model")
+    @classmethod
+    def _normalize_ai_model(cls, value: str | None) -> str | None:
+        normalized = (value or "").strip()
+        return normalized or None
+
+
+class MemoirMaterialOfflineASRStateResponse(BaseModel):
+    status: Literal["idle", "pending", "running", "succeeded", "failed"] = "idle"
+    job_id: str | None = None
+    can_start: bool = False
+    blocked_reason: str = ""
+    providers: list[str] = Field(default_factory=lambda: ["volc", "stepfun"])
+    narrator_origin: str = ""
+    dialect_code: str = ""
+    dialect_label: str = ""
+    dialect_strategy: str = "none"
+    dialect_enhancement_enabled: bool = False
+    last_applied_at: datetime | None = None
+    error_message: str = ""
+
+
 class MemoirVoiceTranscriptItemResponse(BaseModel):
     id: str
     voice_session_id: str
@@ -327,6 +354,9 @@ class MemoirVoiceTranscriptItemResponse(BaseModel):
     current_guidance_module: str | None = None
     is_included_in_book: bool = False
     included_chapters: list[MemoirVoiceTranscriptIncludedChapterResponse] = Field(default_factory=list)
+    offline_asr: MemoirMaterialOfflineASRStateResponse = Field(
+        default_factory=MemoirMaterialOfflineASRStateResponse,
+    )
     created_at: datetime
     session_created_at: datetime
 

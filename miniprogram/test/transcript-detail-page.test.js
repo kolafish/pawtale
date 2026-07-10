@@ -38,6 +38,20 @@ function sampleTranscript(id, overrides = {}) {
     current_guidance_module: null,
     is_included_in_book: false,
     included_chapters: [],
+    offline_asr: {
+      status: "idle",
+      job_id: null,
+      can_start: true,
+      blocked_reason: "",
+      providers: ["volc", "stepfun"],
+      narrator_origin: "四川成都",
+      dialect_code: "zh-CN-sichuanese",
+      dialect_label: "四川话",
+      dialect_strategy: "sichuanese",
+      dialect_enhancement_enabled: true,
+      last_applied_at: null,
+      error_message: "",
+    },
     created_at: "2026-07-01T07:38:00.000Z",
     session_created_at: "2026-07-01T07:00:00.000Z",
     ...overrides,
@@ -261,6 +275,9 @@ function loadTranscriptDetailPage({ voiceApiExports = {}, voiceSearchExports = {
     recoverMemoirVoiceTranscript: async () => {
       throw new Error("recoverMemoirVoiceTranscript was not mocked");
     },
+    startMemoirMaterialOfflineASR: async () => {
+      throw new Error("startMemoirMaterialOfflineASR was not mocked");
+    },
     updateMemoirVoiceTranscript: async () => {
       throw new Error("updateMemoirVoiceTranscript was not mocked");
     },
@@ -433,6 +450,86 @@ test("transcript detail page labels human interviewer questions", async () => {
   await page.onLoad.call(context, { id: "utterance-human" });
 
   assert.equal(context.data.item.questionTitleText, "采访者刚才问了");
+});
+
+test("transcript detail page starts and polls one Sichuan dialect offline ASR job", async () => {
+  const startCalls = [];
+  const toasts = [];
+  const modals = [];
+  let detailLoads = 0;
+  const pendingState = {
+    ...sampleTranscript("sample").offline_asr,
+    status: "pending",
+    job_id: "offline-job-1",
+    can_start: false,
+    blocked_reason: "离线识别正在处理中",
+  };
+  const succeededState = {
+    ...pendingState,
+    status: "succeeded",
+    can_start: true,
+    blocked_reason: "",
+    last_applied_at: "2026-07-10T12:00:00",
+  };
+  const { page } = loadTranscriptDetailPage({
+    voiceApiExports: {
+      getMemoirVoiceTranscript: async (id) => {
+        detailLoads += 1;
+        return sampleTranscript(id, {
+          transcript_raw: detailLoads > 1 ? "离线重新识别后的原文。" : "原来的实时识别。",
+          transcript_edited: detailLoads > 1 ? "四川话增强后的文字。" : "",
+          display_text: detailLoads > 1 ? "四川话增强后的文字。" : "原来的实时识别。",
+          offline_asr: detailLoads > 1 ? succeededState : sampleTranscript(id).offline_asr,
+        });
+      },
+      startMemoirMaterialOfflineASR: async (id) => {
+        startCalls.push(id);
+        return pendingState;
+      },
+    },
+  });
+  const context = pageContext(page);
+  const originalSetTimeout = global.setTimeout;
+  const originalClearTimeout = global.clearTimeout;
+  global.setTimeout = () => 123;
+  global.clearTimeout = () => {};
+  global.wx = {
+    showModal(options) {
+      modals.push(options);
+      options.success({ confirm: true });
+    },
+    showToast(options) {
+      toasts.push(options);
+    },
+  };
+
+  try {
+    await page.onLoad.call(context, { id: "utterance-dialect" });
+    assert.equal(context.data.item.offlineAsrMethodText, "火山 + StepFun · 籍贯 四川成都 · 方言 四川话");
+    assert.equal(context.data.item.canStartOfflineAsr, true);
+
+    await page.startOfflineAsr.call(context);
+
+    assert.deepEqual(startCalls, ["utterance-dialect"]);
+    assert.equal(modals[0].title, "离线加强识别？");
+    assert.match(modals[0].content, /启用四川话加强识别/);
+    assert.equal(context.data.item.offlineAsrActive, true);
+    assert.equal(context.data.item.offlineAsrStatusText, "等待处理");
+
+    await page.pollOfflineAsr.call(context, context.offlineAsrPollToken);
+
+    assert.equal(context.data.item.offline_asr.status, "succeeded");
+    assert.equal(context.data.item.display_text, "四川话增强后的文字。");
+    assert.equal(context.data.item.offlineAsrActionText, "再次识别");
+    assert.deepEqual(toasts, [
+      { title: "已开始识别", icon: "success" },
+      { title: "识别已更新", icon: "success" },
+    ]);
+  } finally {
+    global.setTimeout = originalSetTimeout;
+    global.clearTimeout = originalClearTimeout;
+    delete global.wx;
+  }
 });
 
 test("transcript detail page converts a human interviewer material item to an answer", async () => {

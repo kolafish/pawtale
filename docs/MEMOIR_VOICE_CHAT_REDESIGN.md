@@ -265,7 +265,7 @@ VOLC_ASR_RESOURCE_ID=volc.seedasr.sauc.duration
 - 16k mono PCM 帧可识别。
 - 真实 m4a 样例转 PCM 后可返回 final transcript。
 
-旧的 StepFun 整段音频转写不再保留为产品代码路径。后续如果需要做 ASR 质量对照，应通过独立评测脚本或 provider adapter 测试完成，不能重新接回小程序的固定问答/整段转写流程。
+StepFun 整段音频转写不接入实时语音聊天主链，也不恢复旧版固定问答后的自动整段转写。素材详情允许用户对单条已有音频显式触发离线增强：火山与 StepFun 双路识别后由 LLM 校验；籍贯匹配到已支持方言时才启用对应方言规则。任务必须异步执行、保留状态并防止覆盖人工编辑，评测和批量处理仍通过独立脚本完成。
 
 ### LLM Orchestrator
 

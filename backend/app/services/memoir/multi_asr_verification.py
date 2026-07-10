@@ -5,6 +5,10 @@ from dataclasses import dataclass
 from app.services.ai_factory import get_ai_service
 from app.services.ai_types import AITextClient
 from app.services.memoir.asr_text_normalization import normalize_memoir_asr_text
+from app.services.memoir.dialect_profile import (
+    dialect_verification_guidance,
+    resolve_memoir_dialect_profile,
+)
 from app.services.memoir.offline_asr import OfflineASRGlossaryEntry, OfflineASRResult
 
 
@@ -41,7 +45,7 @@ def build_multi_asr_verification_prompt(request: MultiASRVerificationRequest) ->
     question = request.question_context.strip() or "无"
     origin = request.narrator_origin.strip()
     origin_description = f"来自{origin}，可能带当地口音" if origin else "可能带地方口音"
-    dialect_guidance = _dialect_guidance(origin)
+    dialect_guidance = dialect_verification_guidance(resolve_memoir_dialect_profile(origin))
     dialect_glossary = _dialect_glossary_block(request.dialect_glossary)
     return f"""下面是一位老年人的中文口述录音转写结果。说话人{origin_description}，语速慢、口头语多，可能夹杂家人插话和现场噪音。
 
@@ -75,20 +79,6 @@ def build_multi_asr_verification_prompt(request: MultiASRVerificationRequest) ->
 
 def _dialect_glossary_block(entries: tuple[OfflineASRGlossaryEntry, ...]) -> str:
     return "\n".join(f"{entry.source} => {entry.target}" for entry in entries) or "无"
-
-
-def _dialect_guidance(origin: str) -> str:
-    if any(region in origin for region in ("四川", "重庆")):
-        return (
-            "- 四川及重庆方言常见词包括“啥子、咋个、没得、晓得、屋头、婆婆、"
-            "幺儿、得嘛、噻、喃、耍、不得”。"
-        )
-    if origin:
-        return (
-            f"- 说话人来自{origin}，遇到地方用语时优先结合多路 ASR 上下文判断，"
-            "不要擅自改成普通话书面表达。"
-        )
-    return "- 遇到地方用语时优先结合多路 ASR 上下文判断，不要擅自改成普通话书面表达。"
 
 
 def _strip_llm_wrapping(text: str) -> str:

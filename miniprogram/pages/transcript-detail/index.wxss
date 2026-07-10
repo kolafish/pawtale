@@ -208,6 +208,42 @@
   border-color: #e4d9cf;
 }
 
+.offline-asr-card {
+  background: #fffdf9;
+  border-color: #dfc8b8;
+}
+
+.offline-asr-status.pending,
+.offline-asr-status.running {
+  color: #8f5b2a;
+}
+
+.offline-asr-status.succeeded {
+  color: #2f6f4e;
+}
+
+.offline-asr-status.failed {
+  color: #b84a5a;
+}
+
+.offline-asr-detail,
+.offline-asr-error {
+  display: block;
+  color: #5f5149;
+  font-size: 26rpx;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.offline-asr-error {
+  margin-top: 10rpx;
+  color: #b84a5a;
+}
+
+.offline-asr-actions {
+  justify-content: flex-start;
+}
+
 .question-card {
   background: #fbf8f3;
   border-color: #e8ded2;
