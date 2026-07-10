@@ -33,6 +33,10 @@ import type {
   MemoirInterviewEditorSessionList,
   MemoirInterviewEditorSessionReview,
   MemoirInterviewType,
+  MemoirMaterialCorrectionStatus,
+  MemoirMaterialItem,
+  MemoirMaterialListResponse,
+  MemoirMaterialSort,
 } from '../types';
 import { parseContentDispositionFilename } from '../utils/download';
 
@@ -256,6 +260,43 @@ export const memoirInterviewEditorApi = {
       `/memoir/projects/${projectId}/interview-editor/answers/${messageId}/parent`,
       { parent_question_message_id: parentQuestionMessageId, reason },
     ).then(r => r.data),
+  audioPlaybackUrl: (audioFileId: string) =>
+    `/api/mobile/memoir/audio-files/${encodeURIComponent(audioFileId)}/playback`,
+};
+
+export const memoirMaterialEditorApi = {
+  list: (
+    projectId: string,
+    options: {
+      q?: string;
+      correctionStatus?: MemoirMaterialCorrectionStatus;
+      voiceSessionId?: string;
+      sort?: MemoirMaterialSort;
+      limit?: number;
+      offset?: number;
+    } = {},
+  ) => api.get<MemoirMaterialListResponse>(
+    `/memoir/projects/${projectId}/materials`,
+    {
+      params: {
+        ...(options.q ? { q: options.q } : {}),
+        ...(options.correctionStatus ? { correction_status: options.correctionStatus } : {}),
+        ...(options.voiceSessionId ? { voice_session_id: options.voiceSessionId } : {}),
+        ...(options.sort ? { sort: options.sort } : {}),
+        ...(options.limit !== undefined ? { limit: options.limit } : {}),
+        ...(options.offset !== undefined ? { offset: options.offset } : {}),
+      },
+    },
+  ).then(response => response.data),
+  get: (projectId: string, utteranceId: string) =>
+    api.get<MemoirMaterialItem>(
+      `/memoir/projects/${projectId}/materials/${encodeURIComponent(utteranceId)}`,
+    ).then(response => response.data),
+  updateTranscript: (projectId: string, utteranceId: string, transcriptEdited: string) =>
+    api.patch<MemoirMaterialItem>(
+      `/memoir/projects/${projectId}/materials/${encodeURIComponent(utteranceId)}/transcript`,
+      { transcript_edited: transcriptEdited },
+    ).then(response => response.data),
   audioPlaybackUrl: (audioFileId: string) =>
     `/api/mobile/memoir/audio-files/${encodeURIComponent(audioFileId)}/playback`,
 };
