@@ -28,7 +28,10 @@ import type {
   MemoirBookPlan,
   MemoirBookPlanStructureCommand,
   MemoirBookChapterDraft,
-  MemoirBookDraftEditorData,
+  MemoirBookEditorData,
+  MemoirBookExportDownload,
+  MemoirBookOutput,
+  MemoirBookOutputForm,
   MemoirBatchTranscriptCleanupConfirmResponse,
   MemoirBatchTranscriptCleanupPreviewResponse,
   MemoirDialectGlossaryEntry,
@@ -347,7 +350,7 @@ export const memoirChapterSourceEditorApi = {
 
 export const memoirBookEditorApi = {
   get: (projectId: string) =>
-    api.get<MemoirBookDraftEditorData>(
+    api.get<MemoirBookEditorData>(
       `/memoir/projects/${projectId}/book-editor`,
     ).then(r => r.data),
   generatePlan: (projectId: string, aiModel?: string) =>
@@ -399,6 +402,63 @@ export const memoirBookEditorApi = {
     api.post<MemoirBookChapterDraft>(
       `/memoir/projects/${projectId}/book-editor/chapters/${chapterId}/draft/confirm`,
     ).then(r => r.data),
+  generateOutput: (
+    projectId: string,
+    options: Partial<MemoirBookOutputForm> & { aiModel?: string; forceRegenerate?: boolean } = {},
+  ) => {
+    const { aiModel, forceRegenerate, ...form } = options;
+    return api.post<MemoirBookOutput>(
+      `/memoir/projects/${projectId}/book-editor/output/generate`,
+      {
+        ...form,
+        ai_model: aiModel,
+        force_regenerate: forceRegenerate ?? false,
+      },
+    ).then(r => r.data);
+  },
+  updateOutput: (projectId: string, form: MemoirBookOutputForm) =>
+    api.patch<MemoirBookOutput>(
+      `/memoir/projects/${projectId}/book-editor/output`,
+      form,
+    ).then(r => r.data),
+  suggestOutputTitles: (projectId: string, aiModel?: string) =>
+    api.post<{ suggestions: string[]; provider?: string | null; model?: string | null }>(
+      `/memoir/projects/${projectId}/book-editor/output/title-suggestions`,
+      { ai_model: aiModel, count: 6 },
+    ).then(r => r.data),
+  regenerateOutputCopy: (projectId: string, aiModel?: string) =>
+    api.post<MemoirBookOutput>(
+      `/memoir/projects/${projectId}/book-editor/output/editorial-copy/regenerate`,
+      {
+        ai_model: aiModel,
+        targets: ['preface', 'afterword', 'back_cover_quote', 'chapter_intros', 'pull_quotes'],
+        chapter_ids: [],
+      },
+    ).then(r => r.data),
+  updateOutputChapterCopy: (
+    projectId: string,
+    chapterId: string,
+    copy: { intro: string; pull_quote: string },
+  ) => api.patch<MemoirBookOutput>(
+    `/memoir/projects/${projectId}/book-editor/output/chapters/${chapterId}/editorial-copy`,
+    copy,
+  ).then(r => r.data),
+  downloadOutput: async (
+    projectId: string,
+    format: 'pdf' | 'txt',
+    layout: 'standard' | 'large_print' = 'standard',
+  ): Promise<MemoirBookExportDownload> => {
+    const response = await api.get<Blob>(
+      `/memoir/projects/${projectId}/book-editor/output/export`,
+      { params: { format, layout }, responseType: 'blob' },
+    );
+    const header = response.headers['content-disposition'];
+    const contentDisposition = Array.isArray(header) ? header.join(';') : header;
+    return {
+      blob: response.data,
+      filename: parseContentDispositionFilename(contentDisposition) ?? undefined,
+    };
+  },
 };
 
 // Memoir transcript cleanup editor API

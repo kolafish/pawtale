@@ -6,7 +6,7 @@ import { memoirBookEditorApi } from '../../api';
 import { useAppStore } from '../../stores/appStore';
 import type {
   MemoirBookChapterDraft,
-  MemoirBookDraftEditorData,
+  MemoirBookEditorData,
   Project,
 } from '../../types';
 import { getErrorMessage } from '../../utils/apiError';
@@ -121,7 +121,7 @@ export function MemoirChapterDraftWorkspace({
   }, [hasUnsavedChanges]);
 
   const updateDraftCache = (draft: MemoirBookChapterDraft) => {
-    queryClient.setQueryData<MemoirBookDraftEditorData>(queryKey, current => {
+    queryClient.setQueryData<MemoirBookEditorData>(queryKey, current => {
       if (!current) return current;
       const exists = current.chapter_drafts.some(item => item.chapter_id === draft.chapter_id);
       return {
