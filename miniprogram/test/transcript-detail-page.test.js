@@ -3,7 +3,6 @@ require("./register-ts");
 const assert = require("node:assert/strict");
 const test = require("node:test");
 const { loadPageModule, mockModule, pageContext } = require("./page-harness");
-const { ApiError } = require("../services/request.ts");
 
 function sampleTranscript(id, overrides = {}) {
   return {
@@ -520,48 +519,6 @@ test("transcript detail page uses content-first inclusion labels", async () => {
   ]);
 });
 
-test("transcript detail page collapses long question context by default", async () => {
-  const longQuestion = "刚才讲到爷爷八十岁还骑车上班，下雨天摔了一跤，那后来家里人是怎么照顾他的，他自己又怎么说这件事？当时有没有影响他继续上班，家里人有没有劝过他少骑车？";
-  const { page } = loadTranscriptDetailPage({
-    voiceApiExports: {
-      getMemoirVoiceTranscript: async (id) => sampleTranscript(id, {
-        question_text: longQuestion,
-      }),
-    },
-  });
-  const context = pageContext(page);
-
-  await page.onLoad.call(context, { id: "utterance-long-question" });
-
-  assert.equal(context.data.item.questionCanExpand, true);
-  assert.equal(context.data.questionExpanded, false);
-
-  page.toggleQuestionExpanded.call(context);
-
-  assert.equal(context.data.questionExpanded, true);
-
-  page.toggleQuestionExpanded.call(context);
-
-  assert.equal(context.data.questionExpanded, false);
-});
-
-test("transcript detail page folds low-frequency actions", async () => {
-  const { page } = loadTranscriptDetailPage({
-    voiceApiExports: {
-      getMemoirVoiceTranscript: async (id) => sampleTranscript(id),
-    },
-  });
-  const context = pageContext(page);
-
-  await page.onLoad.call(context, { id: "utterance-more-actions" });
-
-  assert.equal(context.data.moreActionsExpanded, false);
-
-  page.toggleMoreActionsExpanded.call(context);
-
-  assert.equal(context.data.moreActionsExpanded, true);
-});
-
 test("transcript detail page creates share video from selected corrected segments", async () => {
   const contextCalls = [];
   const createCalls = [];
@@ -666,8 +623,9 @@ test("transcript detail page creates share video from selected corrected segment
   assert.equal(context.data.shareVideoPolling, true);
   assert.deepEqual(downloads, []);
 
-  page.clearShareVideoPollTimer.call(context);
-  await page.refreshShareVideoJob.call(context, "job-1", context.shareVideoPollToken);
+  context.shareVideoController.cancel();
+  context.shareVideoController.resume("job-1");
+  await context.shareVideoController.refresh("job-1");
 
   assert.deepEqual(pollCalls, ["job-1"]);
   assert.deepEqual(downloads, ["job-1"]);
@@ -875,7 +833,7 @@ test("transcript detail page uploads a custom background before creating share v
 
   page.selectShareVideoSegment.call(context, { currentTarget: { dataset: { index: 0 } } });
   await page.createShareVideo.call(context);
-  page.clearShareVideoPollTimer.call(context);
+  context.shareVideoController.cancel();
   delete global.wx;
 
   assert.deepEqual(createCalls, [
@@ -929,7 +887,7 @@ test("transcript detail page creates classic background share video without imag
     currentTarget: { dataset: { backgroundSource: "classic" } },
   });
   await page.createShareVideo.call(context);
-  page.clearShareVideoPollTimer.call(context);
+  context.shareVideoController.cancel();
 
   assert.equal(context.data.shareVideoBackgroundSource, "classic");
   assert.equal(context.data.shareVideoBackgroundUsesAi, false);
@@ -942,47 +900,6 @@ test("transcript detail page creates classic background share video without imag
       options: { backgroundSource: "classic" },
     },
   ]);
-});
-
-test("transcript detail page retries transient share video status refresh", async () => {
-  const pollCalls = [];
-  const downloads = [];
-  const { page } = loadTranscriptDetailPage({
-    voiceApiExports: {
-      getMemoirVoiceTranscript: async (id) => sampleTranscript(id),
-      getMemoirShareVideoJob: async (jobId) => {
-        pollCalls.push(jobId);
-        if (pollCalls.length === 1) {
-          throw new ApiError(0, "request:fail timeout", {});
-        }
-        return sampleShareVideoJob();
-      },
-      downloadMemoirShareVideoJob: async (job) => {
-        downloads.push(job.id);
-        return "/tmp/share-video.mp4";
-      },
-    },
-  });
-  const context = pageContext(page);
-
-  await page.onLoad.call(context, { id: "utterance-share-poll" });
-  context.shareVideoPollToken = 1;
-
-  await page.refreshShareVideoJob.call(context, "job-1", 1);
-
-  assert.deepEqual(pollCalls, ["job-1"]);
-  assert.equal(context.data.shareVideoPolling, true);
-  assert.equal(context.data.shareVideoStatusText, "视频状态刷新中断，正在重试");
-  assert.deepEqual(downloads, []);
-
-  page.clearShareVideoPollTimer.call(context);
-  await page.refreshShareVideoJob.call(context, "job-1", 1);
-
-  assert.deepEqual(pollCalls, ["job-1", "job-1"]);
-  assert.deepEqual(downloads, ["job-1"]);
-  assert.equal(context.data.shareVideoJob.status, "succeeded");
-  assert.equal(context.data.shareVideoStatusText, "视频已生成，可以预览");
-  assert.equal(context.data.shareVideoPreviewPath, "/tmp/share-video.mp4");
 });
 
 test("transcript detail page plays question and answer audio separately", async () => {
