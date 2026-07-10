@@ -47,6 +47,7 @@ from app.services.memoir import image_assets
 from app.services.memoir import share_video_backgrounds
 from app.services.memoir import share_video_custom_backgrounds
 from app.services.memoir import share_video_jobs
+from app.services.memoir import share_video_rendering
 from app.services.memoir import share_video_scene_planner
 from app.services.memoir.asr_text_normalization import normalize_memoir_asr_text
 from app.services.memoir.asr import StreamingASREvent
@@ -567,7 +568,7 @@ async def test_mobile_memoir_voice_transcript_share_video_context_aligns_edited_
 
 def test_share_video_subtitles_use_memoir_page_layout_and_packaged_font(tmp_path):
     text = "对孙女的偏爱与心平之辩"
-    request = share_video_jobs.ShareVideoRenderRequest(
+    request = share_video_rendering.ShareVideoRenderRequest(
         source_audio_path=tmp_path / "source.wav",
         source_audio_mime_type="audio/wav",
         target_path=tmp_path / "share.mp4",
@@ -578,26 +579,24 @@ def test_share_video_subtitles_use_memoir_page_layout_and_packaged_font(tmp_path
         ],
         start_ms=0,
         end_ms=len(text) * 100,
-        style="memoir_quote",
-        style_options={},
     )
 
-    subtitle_content = share_video_jobs._subtitle_file_content(request)
+    subtitle_content = share_video_rendering._subtitle_file_content(request)
     subtitle_plain_text = re.sub(r"\{\\kf\d+\}", "", subtitle_content)
-    font_dir = share_video_jobs._share_video_font_dir()
-    filter_argument = share_video_jobs._subtitle_filter_argument(tmp_path / "subtitles.ass")
-    video_filter_argument = share_video_jobs._video_filter_argument(tmp_path / "subtitles.ass")
+    font_dir = share_video_rendering._share_video_font_dir()
+    filter_argument = share_video_rendering._subtitle_filter_argument(tmp_path / "subtitles.ass")
+    video_filter_argument = share_video_rendering._video_filter_argument(tmp_path / "subtitles.ass")
 
-    assert f"Style: Quote,{share_video_jobs._SHARE_VIDEO_FONT_NAME}," in subtitle_content
+    assert f"Style: Quote,{share_video_rendering._SHARE_VIDEO_FONT_NAME}," in subtitle_content
     assert "回忆录访谈 · 原声摘录" in subtitle_content
     assert "口述片段" in subtitle_content
     assert r"对孙女的偏爱\N与心平之辩" in subtitle_plain_text
     assert subtitle_content.count(r"{\kf") < len(text)
-    assert (font_dir / share_video_jobs._SHARE_VIDEO_FONT_FILE).is_file()
+    assert (font_dir / share_video_rendering._SHARE_VIDEO_FONT_FILE).is_file()
     assert ":fontsdir='" in filter_argument
     assert str(font_dir) in filter_argument
     assert video_filter_argument == filter_argument
-    image_video_filter = share_video_jobs._video_filter_argument(
+    image_video_filter = share_video_rendering._video_filter_argument(
         tmp_path / "subtitles.ass",
         has_background_image=True,
     )
@@ -615,15 +614,15 @@ def test_share_video_subtitle_ranges_do_not_split_tiny_fragments():
         "在新繁公交局住起，她都要把一点胡豆给我端来，分点吃的胡豆，有半碗碗。"
     )
 
-    page_ranges = share_video_jobs._subtitle_ranges(
+    page_ranges = share_video_rendering._subtitle_ranges(
         text,
-        max_chars=share_video_jobs._QUOTE_PAGE_MAX_CHARS,
+        max_chars=share_video_rendering._QUOTE_PAGE_MAX_CHARS,
     )
     page_texts = [text[start:end].strip() for start, end in page_ranges]
     line_texts = [
         text[line_start:line_end].strip()
         for page_start, page_end in page_ranges
-        for line_start, line_end in share_video_jobs._quote_line_ranges(text, page_start, page_end)
+        for line_start, line_end in share_video_rendering._quote_line_ranges(text, page_start, page_end)
     ]
 
     assert "粮。" not in page_texts
@@ -635,19 +634,19 @@ def test_share_video_subtitle_ranges_do_not_split_tiny_fragments():
 
 def test_share_video_multi_background_filter_falls_back_without_xfade(tmp_path):
     segments = [
-        share_video_jobs.ShareVideoBackgroundSegment(
+        share_video_rendering.ShareVideoBackgroundSegment(
             image_path=tmp_path / "scene-1.png",
             start_ms=0,
             end_ms=12_000,
         ),
-        share_video_jobs.ShareVideoBackgroundSegment(
+        share_video_rendering.ShareVideoBackgroundSegment(
             image_path=tmp_path / "scene-2.png",
             start_ms=12_000,
             end_ms=24_000,
         ),
     ]
 
-    filter_argument = share_video_jobs._multi_background_filter_complex(
+    filter_argument = share_video_rendering._multi_background_filter_complex(
         segments,
         tmp_path / "subtitles.ass",
         use_xfade=False,
@@ -945,7 +944,7 @@ async def test_mobile_memoir_creates_and_downloads_share_video_job(client, test_
         request.target_path.write_bytes(b"fake mp4")
 
     monkeypatch.setattr(
-        "app.services.memoir.share_video_jobs.render_share_video_clip",
+        "app.services.memoir.share_video_rendering.render_share_video_clip",
         fake_render_share_video_clip,
     )
 
@@ -961,7 +960,7 @@ async def test_mobile_memoir_creates_and_downloads_share_video_job(client, test_
         raise share_video_backgrounds.ShareVideoBackgroundGenerationError("provider unavailable")
 
     monkeypatch.setattr(
-        "app.services.memoir.share_video_jobs.get_or_generate_share_video_background",
+        "app.services.memoir.share_video_background_orchestration.get_or_generate_share_video_background",
         fail_background_generation,
     )
 
@@ -1021,11 +1020,11 @@ async def test_share_video_worker_retries_and_removes_partial_output(client, tes
         request.target_path.parent.mkdir(parents=True, exist_ok=True)
         if render_attempts == 1:
             request.target_path.write_bytes(b"partial mp4")
-            raise share_video_jobs.ShareVideoGenerationError("ffmpeg interrupted")
+            raise share_video_rendering.ShareVideoGenerationError("ffmpeg interrupted")
         request.target_path.write_bytes(b"final mp4")
 
     monkeypatch.setattr(
-        "app.services.memoir.share_video_jobs.render_share_video_clip",
+        "app.services.memoir.share_video_rendering.render_share_video_clip",
         flaky_render_share_video_clip,
     )
     text = "我小时候住在外婆家。后来我去县城读书。"
@@ -1126,11 +1125,11 @@ async def test_share_video_ffmpeg_process_is_terminated_when_worker_is_cancelled
         return process
 
     monkeypatch.setattr(
-        share_video_jobs.asyncio,
+        share_video_rendering.asyncio,
         "create_subprocess_exec",
         fake_create_subprocess_exec,
     )
-    task = asyncio.create_task(share_video_jobs._run_ffmpeg(["ffmpeg", "-version"]))
+    task = asyncio.create_task(share_video_rendering._run_ffmpeg(["ffmpeg", "-version"]))
     await communicate_started.wait()
     task.cancel()
 
@@ -1162,7 +1161,7 @@ async def test_mobile_memoir_share_video_job_uses_custom_background_asset(
     async def fail_ai_background_generation(_selected_text, _style_id):
         raise AssertionError("custom background should not call AI background generation")
 
-    render_requests: list[share_video_jobs.ShareVideoRenderRequest] = []
+    render_requests: list[share_video_rendering.ShareVideoRenderRequest] = []
 
     async def fake_render_share_video_clip(request):
         render_requests.append(request)
@@ -1175,11 +1174,11 @@ async def test_mobile_memoir_share_video_job_uses_custom_background_asset(
         fake_process_background_image,
     )
     monkeypatch.setattr(
-        "app.services.memoir.share_video_jobs.get_or_generate_share_video_background",
+        "app.services.memoir.share_video_background_orchestration.get_or_generate_share_video_background",
         fail_ai_background_generation,
     )
     monkeypatch.setattr(
-        "app.services.memoir.share_video_jobs.render_share_video_clip",
+        "app.services.memoir.share_video_rendering.render_share_video_clip",
         fake_render_share_video_clip,
     )
     project_id = await ensure_mobile_memoir_project(client)
@@ -1276,7 +1275,7 @@ async def test_mobile_memoir_share_video_job_uses_classic_background(
     async def fail_ai_background_generation(_selected_text, _style_id):
         raise AssertionError("classic background should not call AI background generation")
 
-    render_requests: list[share_video_jobs.ShareVideoRenderRequest] = []
+    render_requests: list[share_video_rendering.ShareVideoRenderRequest] = []
 
     async def fake_render_share_video_clip(request):
         render_requests.append(request)
@@ -1284,11 +1283,11 @@ async def test_mobile_memoir_share_video_job_uses_classic_background(
         request.target_path.write_bytes(b"fake classic mp4")
 
     monkeypatch.setattr(
-        "app.services.memoir.share_video_jobs.get_or_generate_share_video_background",
+        "app.services.memoir.share_video_background_orchestration.get_or_generate_share_video_background",
         fail_ai_background_generation,
     )
     monkeypatch.setattr(
-        "app.services.memoir.share_video_jobs.render_share_video_clip",
+        "app.services.memoir.share_video_rendering.render_share_video_clip",
         fake_render_share_video_clip,
     )
     text = "我小时候住在外婆家。后来我去县城读书。"
@@ -1307,6 +1306,7 @@ async def test_mobile_memoir_share_video_job_uses_classic_background(
 
     assert create_response.status_code == 201
     created_job = create_response.json()
+    assert "style" not in created_job
     assert created_job["background_source"] == "classic"
     assert created_job["background_effective_mode"] == "single"
     assert created_job["background_status"] == "classic"
@@ -1422,7 +1422,7 @@ async def test_mobile_memoir_share_video_job_uses_smart_multi_background_segment
             cache_hit=False,
         )
 
-    render_requests: list[share_video_jobs.ShareVideoRenderRequest] = []
+    render_requests: list[share_video_rendering.ShareVideoRenderRequest] = []
 
     async def fake_render_share_video_clip(request):
         render_requests.append(request)
@@ -1430,15 +1430,15 @@ async def test_mobile_memoir_share_video_job_uses_smart_multi_background_segment
         request.target_path.write_bytes(b"fake multi mp4")
 
     monkeypatch.setattr(
-        "app.services.memoir.share_video_jobs.plan_share_video_background_scenes",
+        "app.services.memoir.share_video_background_orchestration.plan_share_video_background_scenes",
         fake_plan,
     )
     monkeypatch.setattr(
-        "app.services.memoir.share_video_jobs.get_or_generate_share_video_background",
+        "app.services.memoir.share_video_background_orchestration.get_or_generate_share_video_background",
         fake_background,
     )
     monkeypatch.setattr(
-        "app.services.memoir.share_video_jobs.render_share_video_clip",
+        "app.services.memoir.share_video_rendering.render_share_video_clip",
         fake_render_share_video_clip,
     )
 

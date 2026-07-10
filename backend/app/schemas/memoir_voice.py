@@ -388,22 +388,14 @@ class MemoirTranscriptShareVideoContextResponse(BaseModel):
 
 
 class MemoirShareVideoJobCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     start_char: int = Field(ge=0)
     end_char: int = Field(gt=0)
-    style: str = Field(default="warm_minimal", min_length=1, max_length=40)
-    style_options: dict[str, object] = Field(default_factory=dict)
     background_source: str | None = Field(default=None, max_length=40)
     background_style: str | None = Field(default=None, max_length=40)
     background_mode: str | None = Field(default=None, max_length=40)
     custom_background_asset_id: str | None = Field(default=None, max_length=36)
-
-    @field_validator("style")
-    @classmethod
-    def _valid_style(cls, value: str) -> str:
-        normalized = value.strip()
-        if not normalized:
-            raise ValueError("不能为空")
-        return normalized
 
     @field_validator("background_source", "background_style", "background_mode", "custom_background_asset_id")
     @classmethod
@@ -434,7 +426,6 @@ class MemoirShareVideoJobResponse(BaseModel):
     start_ms: int
     end_ms: int
     duration_ms: int
-    style: str = "warm_minimal"
     background_source: str = "ai"
     background_style: str = "old_album"
     background_mode: str = "auto"

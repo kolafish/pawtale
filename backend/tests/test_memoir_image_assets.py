@@ -61,8 +61,6 @@ async def _seed_image_asset(client, test_db, tmp_path, monkeypatch):
         end_char=14,
         start_ms=0,
         end_ms=5000,
-        style="warm_minimal",
-        style_json={},
         metadata_json={},
     )
     test_db.add(job)

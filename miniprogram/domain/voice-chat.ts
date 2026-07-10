@@ -421,7 +421,6 @@ export interface MemoirShareVideoJob {
   start_ms: number;
   end_ms: number;
   duration_ms: number;
-  style: string;
   background_source?: string;
   background_style?: string;
   background_mode?: string;

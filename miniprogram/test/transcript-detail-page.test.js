@@ -205,7 +205,6 @@ function sampleShareVideoJob(overrides = {}) {
     start_ms: 0,
     end_ms: 8800,
     duration_ms: 8800,
-    style: "warm_minimal",
     background_source: "ai",
     background_style: "old_album",
     background_mode: "auto",

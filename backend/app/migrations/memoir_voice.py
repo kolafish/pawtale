@@ -456,6 +456,13 @@ async def migrate_memoir_voice_schema(engine: AsyncEngine) -> dict[str, list[str
                     text(f"ALTER TABLE memoir_material_share_videos ADD COLUMN {column_name} {column_type}")
                 )
                 changed_columns.append(f"memoir_material_share_videos.{column_name}")
+        obsolete_share_video_columns = {"style", "style_json"} & share_video_columns
+        for column_name in sorted(obsolete_share_video_columns):
+            await conn.execute(
+                text(f"ALTER TABLE memoir_material_share_videos DROP COLUMN {column_name}")
+            )
+        if obsolete_share_video_columns and "memoir_material_share_videos" not in changed_tables:
+            changed_tables.append("memoir_material_share_videos")
 
         lease_indexes = {
             "ix_memoir_editing_jobs_lease_expires_at": (
