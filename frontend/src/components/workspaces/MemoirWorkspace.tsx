@@ -1,4 +1,4 @@
-import { FileAudio, ListTree, Loader2 } from 'lucide-react';
+import { FileAudio, ListTree, Loader2, NotebookPen } from 'lucide-react';
 import { lazy, Suspense, useEffect, useState } from 'react';
 
 import type { Project } from '../../types';
@@ -10,6 +10,9 @@ const MemoirMaterialWorkspace = lazy(async () => ({
 const MemoirChapterWorkspace = lazy(async () => ({
   default: (await import('../memoir/MemoirChapterWorkspace')).MemoirChapterWorkspace,
 }));
+const MemoirChapterDraftWorkspace = lazy(async () => ({
+  default: (await import('../memoir/MemoirChapterDraftWorkspace')).MemoirChapterDraftWorkspace,
+}));
 
 interface MemoirWorkspaceProps {
   project: Project;
@@ -17,11 +20,11 @@ interface MemoirWorkspaceProps {
 
 export function MemoirWorkspace({ project }: MemoirWorkspaceProps) {
   const [view, setView] = useState<MemoirWorkspaceView>(initialView);
-  const [hasUnsavedMaterial, setHasUnsavedMaterial] = useState(false);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
 
   const changeView = (nextView: MemoirWorkspaceView, historyMode: 'push' | 'replace' = 'push') => {
     if (nextView === view) return true;
-    if (hasUnsavedMaterial && !window.confirm('当前校正文尚未保存，确定离开吗？')) return false;
+    if (hasUnsavedChanges && !window.confirm('当前编辑内容尚未保存，确定离开吗？')) return false;
     setView(nextView);
     updateViewUrl(nextView, historyMode);
     return true;
@@ -78,10 +81,16 @@ export function MemoirWorkspace({ project }: MemoirWorkspaceProps) {
         )}>
           {view === 'chapters' ? (
             <MemoirChapterWorkspace project={project} />
+          ) : view === 'drafts' ? (
+            <MemoirChapterDraftWorkspace
+              project={project}
+              onUnsavedChange={setHasUnsavedChanges}
+              onOpenChapters={() => changeView('chapters')}
+            />
           ) : (
             <MemoirMaterialWorkspace
               project={project}
-              onUnsavedChange={setHasUnsavedMaterial}
+              onUnsavedChange={setHasUnsavedChanges}
             />
           )}
         </Suspense>
@@ -90,18 +99,19 @@ export function MemoirWorkspace({ project }: MemoirWorkspaceProps) {
   );
 }
 
-type MemoirWorkspaceView = 'materials' | 'chapters';
+type MemoirWorkspaceView = 'materials' | 'chapters' | 'drafts';
 
 const WORKSPACE_VIEWS = [
   { value: 'materials' as const, label: '素材校对', icon: FileAudio },
   { value: 'chapters' as const, label: '章节目录', icon: ListTree },
+  { value: 'drafts' as const, label: '章节稿', icon: NotebookPen },
 ];
 
 function initialView(): MemoirWorkspaceView {
   if (typeof window === 'undefined') return 'materials';
-  return new URL(window.location.href).searchParams.get('view') === 'chapters'
-    ? 'chapters'
-    : 'materials';
+  const view = new URL(window.location.href).searchParams.get('view');
+  if (view === 'chapters' || view === 'drafts') return view;
+  return 'materials';
 }
 
 function updateViewUrl(view: MemoirWorkspaceView, mode: 'push' | 'replace') {
@@ -109,6 +119,7 @@ function updateViewUrl(view: MemoirWorkspaceView, mode: 'push' | 'replace') {
   const url = new URL(window.location.href);
   url.searchParams.set('view', view);
   if (view !== 'materials') url.searchParams.delete('material');
+  if (view !== 'drafts') url.searchParams.delete('chapter');
   const method = mode === 'push' ? 'pushState' : 'replaceState';
   window.history[method](window.history.state, '', url);
 }

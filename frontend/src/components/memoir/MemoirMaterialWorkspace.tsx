@@ -147,6 +147,7 @@ export function MemoirMaterialWorkspace({
 
   useEffect(() => {
     const handlePopState = () => {
+      if (new URL(window.location.href).searchParams.get('view') !== 'materials') return;
       if (!confirmDiscard()) {
         updateMaterialUrl(selectedMaterialId);
         return;
