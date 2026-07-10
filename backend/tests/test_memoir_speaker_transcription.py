@@ -189,7 +189,6 @@ async def test_speaker_transcription_session_streams_speaker_windows_without_per
     ]
     assert [event.get("speaker_gender") for event in speaker_events] == [None, "female"]
     assert diarization["status"] == "available"
-    assert speaker_events[0]["provider_event_type"] == "partial"
     assert ended["state"] == "ready"
     assert stopped["status"] == "stopped"
     assert transcriber.closed
@@ -220,7 +219,6 @@ async def test_speaker_transcription_session_keeps_provider_definite_utterances_
 
     assert event["speaker_id"] == "speaker_1"
     assert event["text"] == "正在说的话。"
-    assert event["provider_event_type"] == "partial"
     assert [item for item in client.sent if item["type"] == "speaker.final"] == []
 
 
@@ -255,7 +253,6 @@ async def test_speaker_transcription_session_streams_live_asr_tail_when_speaker_
     assert final_event["speaker_id"] == "speaker_1"
     assert partial_event["text"] == "第二句还在实时说"
     assert partial_event["speaker_id"] == "speaker_unknown"
-    assert partial_event["provider_event_type"] == "live.partial"
     assert speaker_transcriber.closed
     assert live_transcriber.closed
 

@@ -55,21 +55,6 @@ test("speaker transcription gateway uses the product API route", () => {
   );
 });
 
-test("speaker transcription client defaults to the shared recorder resource", () => {
-  clearModule("../services/speaker-transcription.ts");
-  const { sharedRecorderResource } = require("../services/recorder-resource.ts");
-  const { SpeakerTranscriptionClient } = require("../services/speaker-transcription.ts");
-
-  const client = new SpeakerTranscriptionClient({
-    onStatus: () => {},
-    onStats: () => {},
-    onSpeakerEvent: () => {},
-    onError: () => {},
-  });
-
-  assert.equal(client.recorderResource, sharedRecorderResource);
-});
-
 test("speaker transcription client annotates speaker events with occurrence wall time", async () => {
   const socketHandlers = {};
   const originalNow = Date.now;
@@ -111,7 +96,7 @@ test("speaker transcription client annotates speaker events with occurrence wall
   const { SpeakerTranscriptionClient } = speakerTranscriptionModuleWithSocketMocks();
   const client = new SpeakerTranscriptionClient({
     onStatus: () => {},
-    onStats: () => {},
+    onAudioLevel: () => {},
     onSpeakerEvent: (event) => speakerEvents.push(event),
     onError: () => {},
   }, recorder);
@@ -141,7 +126,7 @@ test("speaker transcription client annotates speaker events with occurrence wall
   }
 });
 
-test("speaker transcription client releases recorder when socket errors", async () => {
+test("speaker transcription client keeps terminal socket statuses stable", async () => {
   const socketHandlers = {};
   let closeCalls = 0;
   global.wx = {
@@ -188,7 +173,7 @@ test("speaker transcription client releases recorder when socket errors", async 
   const { SpeakerTranscriptionClient } = speakerTranscriptionModuleWithSocketMocks();
   const client = new SpeakerTranscriptionClient({
     onStatus: (status) => statuses.push(status),
-    onStats: () => {},
+    onAudioLevel: () => {},
     onSpeakerEvent: () => {},
     onError: (message) => errors.push(message),
   }, recorder);
@@ -199,12 +184,41 @@ test("speaker transcription client releases recorder when socket errors", async 
   recorder.handlers.onStart();
   await started;
   socketHandlers.error({ errMsg: "socket down" });
+  socketHandlers.close();
 
   assert.ok(recorder.stopCalls >= 1);
   assert.equal(closeCalls, 1);
   assert.deepEqual(errors, ["socket down"]);
   assert.ok(statuses.includes("listening"));
   assert.equal(statuses.at(-1), "error");
+
+  const stoppedStatuses = [];
+  const stoppedClient = new SpeakerTranscriptionClient({
+    onStatus: (status) => stoppedStatuses.push(status),
+    onAudioLevel: () => {},
+    onSpeakerEvent: () => {},
+    onError: () => {},
+  }, recorder);
+  const stoppedStart = stoppedClient.start();
+  await Promise.resolve();
+  socketHandlers.open();
+  recorder.handlers.onStart();
+  await stoppedStart;
+  stoppedClient.stop();
+  socketHandlers.close();
+
+  assert.equal(stoppedStatuses.at(-1), "closed");
+
+  const cancelledClient = new SpeakerTranscriptionClient({
+    onStatus: () => {},
+    onAudioLevel: () => {},
+    onSpeakerEvent: () => {},
+    onError: () => {},
+  }, recorder);
+  const cancelledStart = cancelledClient.start();
+  await Promise.resolve();
+  cancelledClient.close();
+  await assert.rejects(cancelledStart, /连接已取消/);
   delete global.wx;
 });
 
@@ -247,7 +261,7 @@ test("speaker transcription client forwards provider diarization diagnostics", a
   const { SpeakerTranscriptionClient } = speakerTranscriptionModuleWithSocketMocks();
   const client = new SpeakerTranscriptionClient({
     onStatus: () => {},
-    onStats: () => {},
+    onAudioLevel: () => {},
     onSpeakerEvent: () => {},
     onDiarizationStatus: (event) => diagnostics.push(event),
     onError: () => {},

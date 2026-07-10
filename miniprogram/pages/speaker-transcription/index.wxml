@@ -24,21 +24,6 @@
       <view class="level-fill" style="{{audioLevelStyle}}"></view>
     </view>
 
-    <view wx:if="{{showFullControls}}" class="stats-grid">
-      <view class="stat-cell">
-        <text class="stat-value">{{elapsedText}}</text>
-        <text class="stat-label">时长</text>
-      </view>
-      <view class="stat-cell">
-        <text class="stat-value">{{frameCountText}}</text>
-        <text class="stat-label">音频帧</text>
-      </view>
-      <view class="stat-cell">
-        <text class="stat-value">{{audioBytesText}}</text>
-        <text class="stat-label">已发送</text>
-      </view>
-    </view>
-
     <view class="actions-row">
       <button
         class="{{primaryButtonClass}}"
@@ -80,12 +65,11 @@
         <text class="partial-label">正在说</text>
       </view>
       <scroll-view
-        class="{{activePartial.partialScrollClass}}"
+        class="partial-scroll"
         scroll-y="{{true}}"
         scroll-top="{{activePartial.partialScrollTop}}"
       >
         <text class="partial-text">{{activePartial.text}}</text>
-        <view id="{{activePartial.partialEndId}}" class="partial-end"></view>
       </scroll-view>
     </view>
 
@@ -94,12 +78,6 @@
       wx:key="id"
       id="{{item.domId}}"
       class="{{item.lineClass}}"
-      data-line-id="{{item.id}}"
-      data-preview-enabled="{{item.previewEnabled}}"
-      bindtouchstart="handleLineTouchStart"
-      bindtouchmove="handleLineTouchMove"
-      bindtouchend="handleLineTouchEnd"
-      bindtouchcancel="handleLineTouchCancel"
     >
       <view class="line-meta-row">
         <text class="{{item.speakerBadgeClass}}">{{item.speakerTitle}}</text>
@@ -111,29 +89,6 @@
       <text class="{{item.textClass}}">{{item.text}}</text>
     </view>
   </scroll-view>
-
-  <view
-    wx:if="{{historyLinePreview.visible}}"
-    class="history-preview-layer"
-    bindtap="hideHistoryLinePreview"
-    bindtouchend="hideHistoryLinePreview"
-    bindtouchcancel="hideHistoryLinePreview"
-  >
-    <view class="history-preview-panel">
-      <view class="history-preview-meta-row">
-        <text class="history-preview-speaker {{historyLinePreview.speakerToneClass}}">{{historyLinePreview.speakerTitle}}</text>
-        <text wx:if="{{historyLinePreview.metaText}}" class="history-preview-meta">
-          {{historyLinePreview.metaText}}
-        </text>
-        <text wx:if="{{historyLinePreview.statusText}}" class="history-preview-status">
-          {{historyLinePreview.statusText}}
-        </text>
-      </view>
-      <scroll-view class="history-preview-scroll" scroll-y="{{true}}">
-        <text class="history-preview-text">{{historyLinePreview.text}}</text>
-      </scroll-view>
-    </view>
-  </view>
 
   <view class="bottom-spacer"></view>
 </view>

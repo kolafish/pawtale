@@ -58,24 +58,6 @@ function flushPromises() {
   return new Promise((resolve) => setImmediate(resolve));
 }
 
-function wait(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function lineTouchEvent(speakerId, lineId, previewEnabled = true, clientX = 24, clientY = 36) {
-  return {
-    currentTarget: {
-      dataset: {
-        speakerId,
-        lineId,
-        previewEnabled,
-      },
-    },
-    touches: [{ clientX, clientY }],
-    changedTouches: [{ clientX, clientY }],
-  };
-}
-
 test("speaker transcription page shows partial and final text in conversation flow", () => {
   const { page } = loadSpeakerTranscriptionPage();
   const context = pageContext(page);
@@ -107,9 +89,6 @@ test("speaker transcription page shows partial and final text in conversation fl
     confidence: 0.86,
   });
 
-  assert.equal(context.data.speakers.length, 2);
-  assert.equal(context.data.speakers[0].title, "说话人 1");
-  assert.equal(context.data.speakers[1].title, "女1");
   assert.equal(context.data.activePartial.visible, false);
   assert.equal(context.data.conversationLines.length, 1);
   assert.equal(context.data.conversationLines[0].speakerTitle, "女1");
@@ -150,20 +129,67 @@ test("speaker transcription page requires recorder privacy authorization before 
   assert.equal(context.data.error, "请先同意微信小程序隐私保护指引后再开始录音。");
 });
 
-test("speaker transcription page formats segment meta as Beijing occurrence time when available", () => {
-  const { mod } = loadSpeakerTranscriptionPage();
+test("speaker transcription page ignores callbacks from a previous client", async () => {
+  const clients = [];
+  class FakeSpeakerTranscriptionClient {
+    constructor(callbacks) {
+      this.callbacks = callbacks;
+      clients.push(this);
+    }
 
-  assert.equal(
-    mod.formatSpeakerTranscriptionSegmentMeta({
-      type: "speaker.final",
-      occurred_start_at_ms: Date.UTC(2026, 6, 7, 5, 30, 44),
-      occurred_end_at_ms: Date.UTC(2026, 6, 7, 5, 30, 47),
-      start_ms: 44_000,
-      end_ms: 47_000,
-      confidence: 0.86,
-    }),
-    "13:30:44-13:30:47 · 置信度 86%",
-  );
+    async start() {
+      this.callbacks.onStatus("listening");
+    }
+
+    stop() {}
+
+    close() {}
+  }
+  const { page } = loadSpeakerTranscriptionPage({
+    privacyExports: {},
+    transcribeExports: { SpeakerTranscriptionClient: FakeSpeakerTranscriptionClient },
+  });
+  const context = pageContext(page);
+
+  await page.toggleRecording.call(context);
+  clients[0].callbacks.onStatus("closed");
+  await page.toggleRecording.call(context);
+
+  clients[0].callbacks.onSpeakerEvent({
+    type: "speaker.final",
+    speaker_id: "speaker_1",
+    segment_id: "stale",
+    text: "上一轮迟到的结果。",
+  });
+  clients[1].callbacks.onSpeakerEvent({
+    type: "speaker.final",
+    speaker_id: "speaker_2",
+    segment_id: "current",
+    text: "当前这一轮的结果。",
+  });
+
+  const currentTexts = context.data.conversationLines.map((line) => line.text);
+  assert.equal(currentTexts.length, 1);
+  assert.equal(currentTexts[0], "当前这一轮的结果。");
+});
+
+test("speaker transcription page formats segment meta as Beijing occurrence time when available", () => {
+  const { page } = loadSpeakerTranscriptionPage();
+  const context = pageContext(page);
+
+  page.handleSpeakerEvent.call(context, {
+    type: "speaker.final",
+    speaker_id: "speaker_1",
+    segment_id: "seg-1",
+    text: "按实际发生时间显示。",
+    occurred_start_at_ms: Date.UTC(2026, 6, 7, 5, 30, 44),
+    occurred_end_at_ms: Date.UTC(2026, 6, 7, 5, 30, 47),
+    start_ms: 44_000,
+    end_ms: 47_000,
+    confidence: 0.86,
+  });
+
+  assert.equal(context.data.conversationLines[0].metaText, "13:30:44-13:30:47 · 置信度 86%");
 });
 
 test("speaker transcription page removes finalized text from live unknown partial", () => {
@@ -175,7 +201,6 @@ test("speaker transcription page removes finalized text from live unknown partia
     speaker_id: "speaker_unknown",
     segment_id: "live-current",
     text: "第一句已经稳定。第二句还在实时说",
-    provider_event_type: "live.partial",
   });
   page.handleSpeakerEvent.call(context, {
     type: "speaker.final",
@@ -201,7 +226,6 @@ test("speaker transcription page clears live unknown partial when final text cov
     speaker_id: "speaker_unknown",
     segment_id: "live-current",
     text: "第二句已经稳定。",
-    provider_event_type: "live.partial",
   });
   page.handleSpeakerEvent.call(context, {
     type: "speaker.final",
@@ -224,7 +248,6 @@ test("speaker transcription page does not re-add finalized speaker text to cumul
     speaker_id: "speaker_unknown",
     segment_id: "live-current",
     text: cumulativeLiveText,
-    provider_event_type: "live.partial",
   });
   page.handleSpeakerEvent.call(context, {
     type: "speaker.final",
@@ -255,7 +278,6 @@ test("speaker transcription page does not re-add finalized speaker text to cumul
     speaker_id: "speaker_unknown",
     segment_id: "live-current",
     text: cumulativeLiveText,
-    provider_event_type: "live.partial",
   });
 
   assert.equal(context.data.activePartial.visible, true);
@@ -276,7 +298,6 @@ test("speaker transcription page clears stale unknown preview when two ASR strea
     speaker_id: "speaker_unknown",
     segment_id: "live-current",
     text: liveText,
-    provider_event_type: "live.partial",
   });
 
   assert.equal(context.data.activePartial.visible, true);
@@ -300,7 +321,6 @@ test("speaker transcription page clears stale unknown preview when two ASR strea
     speaker_id: "speaker_unknown",
     segment_id: "live-current",
     text: liveText,
-    provider_event_type: "live.partial",
   });
 
   assert.equal(context.data.activePartial.visible, false);
@@ -318,7 +338,6 @@ test("speaker transcription page removes only the stale time-overlapping sentenc
     text: liveText,
     start_ms: 44_000,
     end_ms: 50_000,
-    provider_event_type: "live.partial",
   });
   page.handleSpeakerEvent.call(context, {
     type: "speaker.final",
@@ -339,7 +358,6 @@ test("speaker transcription page removes only the stale time-overlapping sentenc
     text: liveText,
     start_ms: 44_000,
     end_ms: 50_000,
-    provider_event_type: "live.partial",
   });
 
   assert.equal(context.data.activePartial.visible, true);
@@ -365,7 +383,6 @@ test("speaker transcription page keeps repeated words when final line is outside
     text: "好。",
     start_ms: 7000,
     end_ms: 8000,
-    provider_event_type: "live.partial",
   });
 
   assert.equal(context.data.activePartial.visible, true);
@@ -389,7 +406,6 @@ test("speaker transcription page re-cleans active unknown preview after proofrea
     text: "第四道残留。后面新的话。",
     start_ms: 10_000,
     end_ms: 15_000,
-    provider_event_type: "live.partial",
   });
   page.handleSpeakerEvent.call(context, {
     type: "speaker.final",
@@ -418,7 +434,6 @@ test("speaker transcription page keeps unrelated unknown preview when final text
     speaker_id: "speaker_unknown",
     segment_id: "live-current",
     text: "第五次现在还在继续说。",
-    provider_event_type: "live.partial",
   });
   page.handleSpeakerEvent.call(context, {
     type: "speaker.final",
@@ -429,23 +444,6 @@ test("speaker transcription page keeps unrelated unknown preview when final text
 
   assert.equal(context.data.activePartial.visible, true);
   assert.equal(context.data.activePartial.text, "第五次现在还在继续说。");
-});
-
-test("speaker transcription page keeps transcript area high after recording stops", () => {
-  const { page } = loadSpeakerTranscriptionPage();
-  const context = pageContext(page);
-
-  page.handleSpeakerEvent.call(context, {
-    type: "speaker.final",
-    speaker_id: "speaker_1",
-    segment_id: "seg-1",
-    text: "这句识别出来以后，控制区应该收起来。",
-  });
-  page.setStatus.call(context, "closed");
-
-  assert.equal(context.data.controlPanelClass, "control-panel compact");
-  assert.equal(context.data.showFullControls, false);
-  assert.equal(context.data.showEmpty, false);
 });
 
 test("speaker transcription page keeps final text newest-first with gender labels", async () => {
@@ -522,215 +520,6 @@ test("speaker transcription page shows provider diarization diagnostics", () => 
   assert.equal(context.data.diarizationNotice, "已收到说话人标签，会按不同人标注显示。");
 });
 
-test("speaker transcription page assigns speaker tones by first seen order instead of id suffix", () => {
-  const { page } = loadSpeakerTranscriptionPage();
-  const context = pageContext(page);
-
-  page.handleSpeakerEvent.call(context, {
-    type: "speaker.partial",
-    speaker_id: "speaker_unknown",
-    segment_id: "live-current",
-    text: "未分辨的实时内容",
-  });
-
-  assert.equal(context.data.activePartial.speakerBadgeClass, "speaker-badge");
-  assert.equal(context.data.activePartial.partialBoxClass, "partial-box active-partial");
-
-  page.handleSpeakerEvent.call(context, {
-    type: "speaker.final",
-    speaker_id: "speaker_7",
-    segment_id: "seg-7",
-    text: "编号不是连续的第一位说话人。",
-  });
-
-  page.handleSpeakerEvent.call(context, {
-    type: "speaker.final",
-    speaker_id: "speaker_2",
-    segment_id: "seg-2",
-    text: "第二个出现的人拿第二套颜色。",
-  });
-
-  page.handleSpeakerEvent.call(context, {
-    type: "speaker.final",
-    speaker_id: "speaker_7",
-    segment_id: "seg-7-next",
-    text: "第一位说话人继续沿用第一套颜色。",
-  });
-
-  assert.deepEqual(context.data.conversationLines.map((line) => line.speakerId), [
-    "speaker_7",
-    "speaker_2",
-    "speaker_7",
-  ]);
-  assert.deepEqual(context.data.conversationLines.map((line) => line.speakerTitle), [
-    "说话人 1",
-    "说话人 2",
-    "说话人 1",
-  ]);
-  assert.deepEqual(context.data.conversationLines.map((line) => line.speakerBadgeClass), [
-    "speaker-badge tone-0",
-    "speaker-badge tone-1",
-    "speaker-badge tone-0",
-  ]);
-  assert.deepEqual(context.data.conversationLines.map((line) => line.lineClass), [
-    "line-item latest tone-0",
-    "line-item history tone-1",
-    "line-item history tone-0",
-  ]);
-
-  page.clearTranscript.call(context);
-  page.handleSpeakerEvent.call(context, {
-    type: "speaker.final",
-    speaker_id: "speaker_2",
-    segment_id: "seg-2-reset",
-    text: "清空后重新按首次出现分配第一套颜色。",
-  });
-
-  assert.equal(context.data.conversationLines[0].speakerBadgeClass, "speaker-badge tone-0");
-  assert.equal(context.data.conversationLines[0].speakerTitle, "说话人 1");
-  assert.equal(context.data.conversationLines[0].lineClass, "line-item latest tone-0");
-});
-
-test("speaker transcription page keeps only the newest final line visually large", async () => {
-  const pendingProofreads = [];
-  const { page } = loadSpeakerTranscriptionPage({
-    proofreadExports: {
-      proofreadSpeakerTranscriptLine: (text) => new Promise((resolve) => {
-        pendingProofreads.push({ text, resolve });
-      }),
-    },
-  });
-  const context = pageContext(page);
-
-  page.handleSpeakerEvent.call(context, {
-    type: "speaker.final",
-    speaker_id: "speaker_1",
-    segment_id: "seg-1",
-    text: "第一位说话人先说了一句。",
-    start_ms: 0,
-    end_ms: 2400,
-  });
-  const firstLineId = context.data.conversationLines[0].id;
-
-  page.handleSpeakerEvent.call(context, {
-    type: "speaker.final",
-    speaker_id: "speaker_2",
-    segment_id: "seg-2",
-    text: "第二位说话人接着补充。",
-    start_ms: 2500,
-    end_ms: 5200,
-  });
-  const secondLineId = context.data.conversationLines[0].id;
-
-  assert.equal(context.data.latestFinalLineId, secondLineId);
-  assert.equal(context.data.conversationLines[0].id, secondLineId);
-  assert.equal(context.data.conversationLines[0].lineClass, "line-item latest tone-1");
-  assert.equal(context.data.conversationLines[0].textClass, "line-text latest");
-  assert.equal(context.data.conversationLines[1].id, firstLineId);
-  assert.equal(context.data.conversationLines[1].lineClass, "line-item history tone-0");
-  assert.equal(context.data.conversationLines[1].textClass, "line-text history");
-
-  pendingProofreads[1].resolve({
-    proofread_text: "第二位说话人接着补充。",
-  });
-  await flushPromises();
-  pendingProofreads[0].resolve({
-    proofread_text: "第一位说话人先说了一句。",
-  });
-  await flushPromises();
-
-  assert.equal(context.data.latestFinalLineId, secondLineId);
-  assert.equal(context.data.conversationLines[0].lineClass, "line-item latest tone-1");
-  assert.equal(context.data.conversationLines[1].lineClass, "line-item history tone-0");
-});
-
-test("speaker transcription page previews historical final text while pressed", async () => {
-  const { page } = loadSpeakerTranscriptionPage();
-  const context = pageContext(page);
-
-  page.handleSpeakerEvent.call(context, {
-    type: "speaker.final",
-    speaker_id: "speaker_1",
-    segment_id: "seg-1",
-    text: "第一句会变成历史文字。",
-    start_ms: 0,
-    end_ms: 1600,
-  });
-  page.handleSpeakerEvent.call(context, {
-    type: "speaker.final",
-    speaker_id: "speaker_1",
-    segment_id: "seg-2",
-    text: "第二句是最新文字。",
-    start_ms: 1700,
-    end_ms: 3400,
-  });
-  await flushPromises();
-
-  const latestLine = context.data.conversationLines[0];
-  const historyLine = context.data.conversationLines[1];
-
-  assert.equal(latestLine.previewEnabled, false);
-  assert.equal(historyLine.previewEnabled, true);
-
-  page.handleLineTouchStart.call(
-    context,
-    lineTouchEvent(historyLine.speakerId, historyLine.id, historyLine.previewEnabled),
-  );
-  assert.equal(context.data.historyLinePreview.visible, false);
-
-  await wait(180);
-
-  assert.equal(context.data.historyLinePreview.visible, true);
-  assert.equal(context.data.historyLinePreview.speakerTitle, "说话人 1");
-  assert.equal(context.data.historyLinePreview.metaText, "0:00-0:01");
-  assert.equal(context.data.historyLinePreview.statusText, "已校对");
-  assert.equal(context.data.historyLinePreview.text, "第一句会变成历史文字。");
-
-  page.handleLineTouchEnd.call(context);
-
-  assert.equal(context.data.historyLinePreview.visible, false);
-});
-
-test("speaker transcription page does not preview latest final text or scrolling touches", async () => {
-  const { page } = loadSpeakerTranscriptionPage();
-  const context = pageContext(page);
-
-  page.handleSpeakerEvent.call(context, {
-    type: "speaker.final",
-    speaker_id: "speaker_1",
-    segment_id: "seg-1",
-    text: "先说的历史内容。",
-  });
-  page.handleSpeakerEvent.call(context, {
-    type: "speaker.final",
-    speaker_id: "speaker_1",
-    segment_id: "seg-2",
-    text: "当前最新内容。",
-  });
-
-  const latestLine = context.data.conversationLines[0];
-  const historyLine = context.data.conversationLines[1];
-
-  page.handleLineTouchStart.call(
-    context,
-    lineTouchEvent(latestLine.speakerId, latestLine.id, latestLine.previewEnabled),
-  );
-  await wait(180);
-  assert.equal(context.data.historyLinePreview.visible, false);
-
-  page.handleLineTouchStart.call(
-    context,
-    lineTouchEvent(historyLine.speakerId, historyLine.id, historyLine.previewEnabled, 30, 40),
-  );
-  page.handleLineTouchMove.call(
-    context,
-    lineTouchEvent(historyLine.speakerId, historyLine.id, historyLine.previewEnabled, 30, 70),
-  );
-  await wait(180);
-
-  assert.equal(context.data.historyLinePreview.visible, false);
-});
-
 test("speaker transcription page keeps only new text from cumulative final results", () => {
   const { page } = loadSpeakerTranscriptionPage();
   const context = pageContext(page);
@@ -760,8 +549,6 @@ test("speaker transcription page keeps only new text from cumulative final resul
     end_ms: 24000,
   });
 
-  assert.equal(context.data.speakers.length, 1);
-  assert.equal(context.data.speakers[0].segmentCountText, "3 段");
   assert.deepEqual(context.data.conversationLines.map((line) => line.text), [
     "四川话得不得行嘛？",
     "那个到底四川话识不识别得清楚嘛？",
@@ -802,8 +589,6 @@ test("speaker transcription page keeps only new final text when cumulative provi
     text: "来，我们来告一下嘛，看能不能看清楚哈。那个到底四川话识不识别得清楚嘛？",
   });
 
-  assert.equal(context.data.speakers.length, 1);
-  assert.equal(context.data.speakers[0].segmentCountText, "2 段");
   assert.deepEqual(context.data.conversationLines.map((line) => line.text), [
     "那个到底四川话识不识别得清楚嘛？",
     "来，我们来告一下嘛，看能不能看清楚哈。",
@@ -837,7 +622,6 @@ test("speaker transcription page ignores repeated final segment events", () => {
   const callsAfterFirstFinal = setDataCalls;
   page.handleSpeakerEvent.call(context, event);
 
-  assert.equal(context.data.speakers[0].segmentCountText, "1 段");
   assert.deepEqual(context.data.conversationLines.map((line) => line.text), ["这句话只应该出现一次。"]);
   assert.equal(setDataCalls, callsAfterFirstFinal);
 });
@@ -895,6 +679,40 @@ test("speaker transcription page proofreads final lines with recent context", as
   assert.equal(context.data.conversationLines[0].proofreadStatusText, "已校对");
 });
 
+test("speaker transcription page ignores stale proofreading for a revised segment", async () => {
+  const pending = [];
+  const { page } = loadSpeakerTranscriptionPage({
+    proofreadExports: {
+      proofreadSpeakerTranscriptLine: (text) => new Promise((resolve) => pending.push({ text, resolve })),
+    },
+  });
+  const context = pageContext(page);
+
+  page.handleSpeakerEvent.call(context, {
+    type: "speaker.final",
+    speaker_id: "speaker_1",
+    segment_id: "seg-1",
+    text: "第一版识别。",
+    start_ms: 0,
+    end_ms: 1000,
+  });
+  page.handleSpeakerEvent.call(context, {
+    type: "speaker.final",
+    speaker_id: "speaker_1",
+    segment_id: "seg-1",
+    text: "第二版识别。",
+    start_ms: 0,
+    end_ms: 1200,
+  });
+
+  pending[1].resolve({ proofread_text: "第二版校对。" });
+  await flushPromises();
+  pending[0].resolve({ proofread_text: "第一版校对。" });
+  await flushPromises();
+
+  assert.equal(context.data.conversationLines[0].text, "第二版校对。");
+});
+
 test("speaker transcription page preserves repeated text when provider reports a new start time", () => {
   const { page } = loadSpeakerTranscriptionPage();
   const context = pageContext(page);
@@ -916,7 +734,6 @@ test("speaker transcription page preserves repeated text when provider reports a
     end_ms: 2200,
   });
 
-  assert.equal(context.data.speakers[0].segmentCountText, "2 段");
   assert.deepEqual(context.data.conversationLines.map((line) => line.text), ["好。", "好。"]);
   assert.deepEqual(context.data.conversationLines.map((line) => line.metaText), ["0:01-0:02", "0:00-0:01"]);
 });
@@ -943,7 +760,7 @@ test("speaker transcription page keeps only new text from cumulative partial res
 
   assert.equal(context.data.activePartial.text, "那个到底四川话识不识别得清楚嘛？");
   assert.equal(context.data.activePartial.speakerTitle, "未分辨说话人");
-  assert.equal(context.data.speakers[0].lines.length, 1);
+  assert.equal(context.data.conversationLines.length, 1);
 });
 
 test("speaker transcription page keeps only new partial text when cumulative provider results omit timestamps", () => {
@@ -963,7 +780,7 @@ test("speaker transcription page keeps only new partial text when cumulative pro
   });
 
   assert.equal(context.data.activePartial.text, "那个到底四川话识不识别得清楚嘛？");
-  assert.equal(context.data.speakers[0].lines.length, 1);
+  assert.equal(context.data.conversationLines.length, 1);
 });
 
 test("speaker transcription page scrolls long partial text to the newest progress", () => {
@@ -977,9 +794,7 @@ test("speaker transcription page scrolls long partial text to the newest progres
     text: longPartial,
   });
   assert.equal(context.data.activePartial.text, longPartial);
-  assert.equal(context.data.activePartial.partialScrollClass, "partial-scroll long");
   assert.equal(context.data.activePartial.partialScrollTop, 10000);
-  assert.equal(context.data.activePartial.partialScrollTarget, context.data.activePartial.partialEndId);
 
   page.handleSpeakerEvent.call(context, {
     type: "speaker.partial",
@@ -988,7 +803,6 @@ test("speaker transcription page scrolls long partial text to the newest progres
   });
 
   assert.equal(context.data.activePartial.partialScrollTop, 20000);
-  assert.match(context.data.activePartial.partialScrollTarget, /speaker_2-partial-end-20000/);
 });
 
 test("speaker transcription page ignores repeated partial text without moving scroll", () => {
@@ -1020,7 +834,7 @@ test("speaker transcription page ignores repeated partial text without moving sc
 });
 
 test("speaker transcription page follows the shared large text setting", () => {
-  const { mod, page } = loadSpeakerTranscriptionPage({
+  const { page } = loadSpeakerTranscriptionPage({
     accessibilityExports: {
       readAccessibilitySettings: () => ({
         largeTextEnabled: true,
@@ -1033,22 +847,6 @@ test("speaker transcription page follows the shared large text setting", () => {
   page.onLoad.call(context);
 
   assert.equal(context.data.pageClass, "speaker-transcription-page large-text");
-  assert.equal(mod.speakerTranscriptionPageClass(false), "speaker-transcription-page");
-  assert.equal(mod.speakerTranscriptionPageClass(true), "speaker-transcription-page large-text");
-});
-
-test("speaker transcription page throttles stats rendering while recording", () => {
-  const { page } = loadSpeakerTranscriptionPage();
-  const context = pageContext(page);
-  context.data.recording = true;
-
-  assert.equal(page.shouldRenderStats.call(context, 1000), true);
-  assert.equal(page.shouldRenderStats.call(context, 1200), false);
-  assert.equal(page.shouldRenderStats.call(context, 1799), false);
-  assert.equal(page.shouldRenderStats.call(context, 1800), true);
-
-  context.data.recording = false;
-  assert.equal(page.shouldRenderStats.call(context, 1801), true);
 });
 
 test("speaker transcription page clears transcript only while idle", () => {
@@ -1061,7 +859,6 @@ test("speaker transcription page clears transcript only while idle", () => {
     text: "现在先试一下。",
   });
 
-  assert.equal(context.data.speakers[0].title, "未分辨说话人");
   assert.equal(context.data.conversationLines.length, 1);
   page.handleDiarizationStatus.call(context, {
     type: "speaker.diarization",
@@ -1069,7 +866,6 @@ test("speaker transcription page clears transcript only while idle", () => {
   });
   page.clearTranscript.call(context);
 
-  assert.deepEqual(context.data.speakers, []);
   assert.deepEqual(context.data.conversationLines, []);
   assert.equal(context.data.activePartial.visible, false);
   assert.equal(context.data.showEmpty, true);
@@ -1077,14 +873,4 @@ test("speaker transcription page clears transcript only while idle", () => {
   assert.equal(context.data.showFullControls, true);
   assert.equal(context.data.showDiarizationNotice, false);
   assert.equal(context.data.latestFinalLineId, "");
-  assert.equal(context.data.elapsedText, "0:00");
-});
-
-test("speaker transcription page formats compact stats", () => {
-  const { mod } = loadSpeakerTranscriptionPage();
-
-  assert.equal(mod.formatSpeakerTranscriptionElapsed(0), "0:00");
-  assert.equal(mod.formatSpeakerTranscriptionElapsed(65_000), "1:05");
-  assert.equal(mod.formatSpeakerTranscriptionBytes(512), "512 B");
-  assert.equal(mod.formatSpeakerTranscriptionBytes(2048), "2 KB");
 });
