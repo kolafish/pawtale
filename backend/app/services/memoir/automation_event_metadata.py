@@ -2,16 +2,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from app.domain.memoir.types import (
-    MemoirAutomationEventStatus,
-    MemoirAutomationEventType,
-)
-
-
 class AutomationEventMetadataCarrier(Protocol):
-    event_type: str
-    status: str
-    chapter_id: str | None
     utterance_ids_json: object
     metadata_json: dict | None
 
@@ -146,62 +137,9 @@ def _event_signature(metadata: dict) -> str:
     return value.strip() if isinstance(value, str) and value.strip() else ""
 
 
-def _metadata_source(metadata: dict) -> str:
-    value = metadata.get("source")
-    return value.strip() if isinstance(value, str) and value.strip() else ""
-
-
-def _metadata_int(metadata: dict, key: str) -> int:
-    value = metadata.get(key)
-    return value if isinstance(value, int) else 0
-
-
 def _metadata_string(metadata: dict, key: str) -> str:
     value = metadata.get(key)
     return value.strip() if isinstance(value, str) and value.strip() else ""
-
-
-def _legacy_audit_signature(metadata: dict) -> str:
-    if _metadata_source(metadata) != "book_quality_audit":
-        return ""
-    overall_status = str(metadata.get("overall_status") or "")
-    pending_count = _metadata_int(metadata, "pending_utterance_count")
-    raw_items = metadata.get("chapter_items")
-    chapter_items = [item for item in raw_items if isinstance(item, dict)] if isinstance(raw_items, list) else []
-    chapter_parts = [
-        ":".join(
-            [
-                str(item.get("chapter_id") or ""),
-                str(item.get("status") or ""),
-                str(item.get("attention") or ""),
-                str(item.get("source_count") or 0),
-                str(item.get("pending_source_count") or 0),
-                str(item.get("draft_word_count") or 0),
-            ]
-        )
-        for item in sorted(chapter_items, key=lambda value: (value.get("sort_order") or 0, value.get("chapter_id") or ""))
-    ]
-    return "|".join(["book_quality_audit", overall_status, f"pending={pending_count}", *chapter_parts])
-
-
-def _event_semantic_signature(event: AutomationEventMetadataCarrier) -> str:
-    metadata = event.metadata_json or {}
-    signature = _event_signature(metadata)
-    if signature:
-        return signature
-
-    event_type = event.event_type
-    source = _metadata_source(metadata)
-    if event_type == MemoirAutomationEventType.AUDIT_COMPLETED.value:
-        return _legacy_audit_signature(metadata)
-    if event_type == MemoirAutomationEventType.CHAPTER_AUTO_REVISED.value and source == "book_auto_revision":
-        pending_ids = _clean_unknown_utterance_ids(metadata.get(PENDING_SOURCE_UTTERANCE_IDS_KEY))
-        source_ids = pending_ids or _clean_unknown_utterance_ids(event.utterance_ids_json)
-        return f"book_auto_revision:{event.chapter_id or ''}:{','.join(sorted(source_ids))}" if source_ids else ""
-    if event_type == MemoirAutomationEventType.SOURCE_ASSIGNED.value and source == "auto_assignment":
-        source_ids = _clean_unknown_utterance_ids(event.utterance_ids_json)
-        return f"source_assigned:{event.chapter_id or ''}:{','.join(sorted(source_ids))}" if source_ids else ""
-    return ""
 
 
 def _preserved_metadata(existing: dict) -> dict:

@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.memoir.types import MemoirAutomationEventStatus, MemoirAutomationEventType
-from app.models.memoir import MemoirAutomationEvent, MemoirVoiceUtterance
+from app.models.memoir import MemoirAutomationEvent
 from app.services.memoir.automation_event_metadata import (
     CHAPTER_AUTO_REVISED_REASON,
     DELETED_UTTERANCE_IDS_KEY,
@@ -216,47 +216,6 @@ async def cleanup_automation_events_for_deleted_utterances(
     now_iso = _utcnow_iso()
     updated_count = 0
     for event in result.scalars().all():
-        if _apply_deleted_utterance_cleanup(event, deleted_ids=deleted_ids, now_iso=now_iso):
-            db.add(event)
-            updated_count += 1
-    if updated_count:
-        await db.flush()
-    return AutomationEventSourceCleanupResult(
-        updated_event_count=updated_count,
-        deleted_utterance_ids=sorted(deleted_ids),
-    )
-
-
-async def cleanup_dangling_automation_event_utterances(
-    db: AsyncSession,
-    *,
-    project_id: str | None = None,
-) -> AutomationEventSourceCleanupResult:
-    conditions = []
-    if project_id:
-        conditions.append(MemoirAutomationEvent.project_id == project_id)
-    result = await db.execute(select(MemoirAutomationEvent).where(*conditions))
-    events = list(result.scalars().all())
-    referenced_ids = _clean_utterance_ids(
-        [utterance_id for event in events for utterance_id in _event_utterance_ids(event)]
-    )
-    if not referenced_ids:
-        return AutomationEventSourceCleanupResult()
-
-    existing_ids: set[str] = set()
-    for start in range(0, len(referenced_ids), 500):
-        batch = referenced_ids[start:start + 500]
-        existing_result = await db.execute(
-            select(MemoirVoiceUtterance.id).where(MemoirVoiceUtterance.id.in_(batch))
-        )
-        existing_ids.update(existing_result.scalars().all())
-    deleted_ids = set(referenced_ids) - existing_ids
-    if not deleted_ids:
-        return AutomationEventSourceCleanupResult()
-
-    now_iso = _utcnow_iso()
-    updated_count = 0
-    for event in events:
         if _apply_deleted_utterance_cleanup(event, deleted_ids=deleted_ids, now_iso=now_iso):
             db.add(event)
             updated_count += 1

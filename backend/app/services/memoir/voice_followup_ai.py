@@ -18,7 +18,6 @@ SYSTEM_PROMPT = (
     "你是一位中文回忆录语音访谈主持人。"
     "你的任务不是审问用户，而是帮助叙述者自然地讲出人生经历、人物、事情、地点、时间和感受。"
 )
-PROMPT_VERSION = "memoir_voice_interviewer_turn_v1"
 MAX_CONTEXT_MESSAGES = 12
 FOLLOW_UP_MAX_TOKENS = 260
 GUIDED_FOLLOW_UP_MAX_TOKENS = 320
@@ -423,8 +422,7 @@ def _audit_event_progress_update(
 ) -> dict[str, object]:
     metadata = event.metadata_json if isinstance(event.metadata_json, dict) else {}
     next_actions = metadata.get("next_actions")
-    chapter_items = metadata.get("chapter_items")
-    chapter = _first_attention_chapter(chapter_items if isinstance(chapter_items, list) else [])
+    chapter = _first_audit_snapshot_chapter(metadata)
     return {
         "kind": "book_quality_audit",
         "source": "automation_event",
@@ -438,20 +436,9 @@ def _audit_event_progress_update(
         "audit_next_questions": _audit_next_questions(metadata),
         "audit_question_source": _audit_question_source(metadata),
         "audit_gap_hints": _audit_gap_hints(metadata),
-        "audit_chapter_id": _audit_chapter_value(metadata, chapter, "chapter_id"),
-        "audit_chapter_title": _audit_chapter_value(metadata, chapter, "chapter_title")
-        or _audit_chapter_value(metadata, chapter, "title"),
-        "audit_chapter_status": chapter.get("status", "") if chapter else "",
-        "audit_attention": chapter.get("attention", "") if chapter else "",
+        "audit_chapter_title": _clean_hint_text(chapter.get("chapter_title"), limit=120)
+        or _clean_hint_text(chapter.get("title"), limit=120),
     }
-
-
-def _first_attention_chapter(chapter_items: list[object]) -> dict[str, object] | None:
-    chapters = [item for item in chapter_items if isinstance(item, dict)]
-    high = next((item for item in chapters if item.get("attention") == "high"), None)
-    if high:
-        return high
-    return next((item for item in chapters if item.get("attention") == "medium"), None)
 
 
 def _object_dict(value: object) -> dict[str, object]:
@@ -530,30 +517,14 @@ def _first_audit_snapshot_chapter(metadata: dict[str, object]) -> dict[str, obje
     return {}
 
 
-def _audit_chapter_value(
-    metadata: dict[str, object],
-    legacy_chapter: dict[str, object] | None,
-    key: str,
-) -> str:
-    snapshot_chapter = _first_audit_snapshot_chapter(metadata)
-    value = _clean_hint_text(snapshot_chapter.get(key), limit=120)
-    if value:
-        return value
-    return _clean_hint_text(legacy_chapter.get(key), limit=120) if legacy_chapter else ""
-
-
-def _audit_hint(metadata: dict[str, object], legacy_chapter: dict[str, object] | None) -> str:
+def _audit_hint(metadata: dict[str, object], snapshot_chapter: dict[str, object]) -> str:
     questions = _audit_next_questions(metadata)
     if questions:
         return ""
     gaps = _audit_gap_hints(metadata)
     if gaps:
         return gaps[0]
-    snapshot_chapter = _first_audit_snapshot_chapter(metadata)
-    summary = _clean_hint_text(snapshot_chapter.get("summary"), limit=120)
-    if summary:
-        return summary
-    return _clean_hint_text(legacy_chapter.get("interview_hint"), limit=120) if legacy_chapter else ""
+    return _clean_hint_text(snapshot_chapter.get("summary"), limit=120)
 
 
 def _snapshot_milestone_progress_update(

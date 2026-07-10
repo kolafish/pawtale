@@ -1,11 +1,11 @@
 """
-Create a full local backup before auth/user migration.
+Create a full local Pawtale data backup before a runtime schema migration.
 
 The project stores structured data in data/pawtale.db and document bodies in
 data/projects/{project_id}/{document_id}.md, so both must be backed up.
 
 Usage:
-  PYTHONPATH=backend python backend/scripts/backup_before_auth.py
+  PYTHONPATH=backend python backend/scripts/backup_runtime_data.py
 """
 
 from __future__ import annotations
@@ -109,7 +109,7 @@ def write_checksums(backup_dir: Path) -> None:
     checksum_path.write_text("\n".join(rows) + "\n", encoding="utf-8")
 
 
-def create_backup(label: str | None = None, prefix: str = "auth_migration") -> Path:
+def create_backup(label: str | None = None, prefix: str = "runtime_data_backup") -> Path:
     if not DB_PATH.exists():
         raise FileNotFoundError(f"Database does not exist: {DB_PATH}")
 

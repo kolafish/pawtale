@@ -4,8 +4,6 @@ import asyncio
 import contextlib
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
-
 import aiofiles
 import aiofiles.os
 from fastapi import HTTPException

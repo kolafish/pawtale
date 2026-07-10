@@ -22,7 +22,6 @@ from app.services.memoir.tts_alignment import alignment_segments_to_json
 from app.services.memoir.voice_followup_ai import (
     GUIDED_TOPIC_LIBRARY,
     GUIDED_TOPIC_MENU,
-    PROMPT_VERSION,
     PROGRESS_PROMPT_VERSION,
     InterviewerPersona,
     InterviewerTurn,
@@ -573,7 +572,6 @@ class VoiceAssistantTurnStreamSession:
                 metadata_json={
                     "source": "ai.streaming_assistant_turn",
                     "prompt_version": STREAM_PROMPT_VERSION,
-                    "legacy_prompt_version": PROMPT_VERSION,
                     "progress_prompt_version": PROGRESS_PROMPT_VERSION,
                     "progress_update": progress_context.progress_update,
                     "progress_update_used": progress_context.progress_update is not None,
@@ -660,7 +658,7 @@ def _build_stream_turn_prompt(
 - 如果这件事重要、有情绪或有转折，鼓励他多讲一点
 - 如果这件事已经讲得差不多，就自然引导到前后时间、相关人物，或下一段回忆"""
         elif has_previous_user_message:
-            mode_instruction = f"""当前是自由讲述开场，AI 只做弱引导，叙述者之前已有讲述记录。
+            mode_instruction = """当前是自由讲述开场，AI 只做弱引导，叙述者之前已有讲述记录。
 - 最多两句：第一句轻轻回访并宽泛概括上次聊到的大方向；第二句给一个很小的开口
 - 只能复述历史会话里明确出现过的内容；不要一开场就切进上次的具体细节
 - 结尾可以问“今天想接着讲哪一段？”或“先说一件想起来的小事也可以”"""

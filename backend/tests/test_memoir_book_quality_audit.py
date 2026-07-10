@@ -4,7 +4,6 @@ import pytest
 from sqlalchemy import select
 
 from app.domain.memoir.types import (
-    MemoirAutomationEventStatus,
     MemoirAutomationEventType,
     MemoirEditingJobStatus,
     MemoirEditingJobType,
@@ -15,8 +14,6 @@ from app.models.memoir import (
     MemoirChapterSourceLink,
 )
 from app.schemas.memoir_book import MemoirBookQualityAuditRunRequest
-from app.services.memoir import automation_event_metadata
-from app.services.memoir import automation_events
 from app.services.memoir.book_quality_audit import run_book_quality_audit, schedule_project_quality_audit
 from app.services.memoir.editing_job_handlers import register_memoir_editing_job_handlers
 from app.services.memoir.editing_jobs import clear_editing_job_handlers
@@ -384,37 +381,12 @@ async def test_book_quality_audit_reuses_acknowledged_equivalent_event(client, t
     event_id = first_data["event"]["id"]
     event = await test_db.get(MemoirAutomationEvent, event_id)
     assert event is not None
-    legacy_metadata = {
-        "source": "book_quality_audit",
-        "overall_status": first_data["overall_status"],
-        "pending_utterance_count": 0,
-        "next_actions": first_data["next_actions"],
-        "chapter_items": first_data["chapter_items"],
-        "display": first_data["display"],
-        "primary_action": first_data["primary_action"],
-        "primary_chapter": first_data["primary_chapter"],
-    }
-    event.metadata_json = legacy_metadata
-    test_db.add(event)
-    await test_db.commit()
+    assert event.metadata_json["event_signature"]
 
     acknowledge_response = await client.post(
         f"/api/mobile/memoir/projects/{project_id}/automation-events/{event_id}/acknowledge"
     )
     assert acknowledge_response.status_code == 200
-    await automation_events.record_automation_event(
-        test_db,
-        project_id=project_id,
-        event_type=MemoirAutomationEventType.AUDIT_COMPLETED,
-        status=MemoirAutomationEventStatus.COMPLETED,
-        summary_text="当前有 1 个章节需要优先处理。",
-        metadata_json=legacy_metadata,
-    )
-    await test_db.commit()
-
-    duplicate_visible_response = await client.get(f"/api/mobile/memoir/projects/{project_id}/automation-events")
-    assert duplicate_visible_response.status_code == 200
-    assert duplicate_visible_response.json()["items"] == []
 
     second_response = await client.post(
         f"/api/mobile/memoir/projects/{project_id}/book-quality-audit/run",
@@ -431,11 +403,7 @@ async def test_book_quality_audit_reuses_acknowledged_equivalent_event(client, t
             )
         )
     ).scalars().all()
-    assert len(events) == 2
-    acknowledged_events = [
-        event for event in events if event.metadata_json.get(automation_event_metadata.ACKNOWLEDGED_BY_USER_KEY) is True
-    ]
-    assert [event.id for event in acknowledged_events] == [event_id]
+    assert [item.id for item in events] == [event_id]
 
     visible_response = await client.get(f"/api/mobile/memoir/projects/{project_id}/automation-events")
     assert visible_response.status_code == 200

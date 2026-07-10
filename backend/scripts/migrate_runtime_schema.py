@@ -23,7 +23,7 @@ if str(BACKEND_DIR) not in sys.path:
 
 from app.database import engine
 from app.migrations.runtime import migrate_runtime_schema
-from backup_before_auth import create_backup
+from backup_runtime_data import create_backup
 
 
 async def run(skip_backup: bool) -> None:
