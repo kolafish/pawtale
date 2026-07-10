@@ -731,6 +731,7 @@ Page<SpeakerTranscriptionPageData, {
   client: SpeakerTranscriptionClient | null;
   pageActive: boolean;
   starting: boolean;
+  transcriptionRunSerial: number;
   lastLevelRenderMs: number;
   lastPartialSignature: string;
   streamStateBySpeakerId: Record<string, SpeakerStreamState>;
@@ -771,6 +772,7 @@ Page<SpeakerTranscriptionPageData, {
   client: null,
   pageActive: true,
   starting: false,
+  transcriptionRunSerial: 0,
   lastLevelRenderMs: 0,
   lastPartialSignature: "",
   streamStateBySpeakerId: {},
@@ -916,6 +918,9 @@ Page<SpeakerTranscriptionPageData, {
       await ensureRecorderPrivacyAuthorization();
     } catch (error) {
       this.starting = false;
+      if (!this.pageActive) {
+        return;
+      }
       this.setStatus("error");
       this.setData({ error: error instanceof Error ? error.message : "多人转写启动失败" });
       return;
@@ -924,6 +929,9 @@ Page<SpeakerTranscriptionPageData, {
       this.starting = false;
       return;
     }
+    this.transcriptionRunSerial += 1;
+    this.streamStateBySpeakerId = {};
+    this.lastPartialSignature = "";
     let client: SpeakerTranscriptionClient;
     client = new SpeakerTranscriptionClient({
       onStatus: (status) => {
@@ -1006,11 +1014,11 @@ Page<SpeakerTranscriptionPageData, {
     let latestFinalLineId = this.data.latestFinalLineId;
     if (event.type === "speaker.final") {
       this.lastPartialSignature = "";
-      const lineId = stableLineIdForEvent(
+      const lineId = `run-${this.transcriptionRunSerial}-${stableLineIdForEvent(
         speakerId,
         event,
         `${speakerId}-${Date.now()}-${conversationLines.length}`,
-      );
+      )}`;
       const line = finalLineFromSpeakerEvent(event, existing, lineId);
       if (line) {
         let finalLineChanged = false;

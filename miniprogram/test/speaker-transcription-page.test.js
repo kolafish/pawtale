@@ -97,7 +97,7 @@ test("speaker transcription page shows partial and final text in conversation fl
   assert.equal(context.data.conversationLines[0].metaText, "0:01-0:03 · 置信度 86%");
   assert.equal(context.data.conversationLines[0].lineClass, "line-item latest tone-1");
   assert.equal(context.data.conversationLines[0].textClass, "line-text latest");
-  assert.equal(context.data.conversationScrollTarget, "conversation-speaker_2-seg-2");
+  assert.equal(context.data.conversationScrollTarget, context.data.conversationLines[0].domId);
   assert.equal(context.data.showEmpty, false);
   assert.equal(context.data.clearDisabled, false);
 });
@@ -129,6 +129,27 @@ test("speaker transcription page requires recorder privacy authorization before 
   assert.equal(context.data.error, "请先同意微信小程序隐私保护指引后再开始录音。");
 });
 
+test("speaker transcription page ignores privacy results after unload", async () => {
+  let rejectAuthorization;
+  const { page } = loadSpeakerTranscriptionPage({
+    privacyExports: {
+      ensureRecorderPrivacyAuthorization: () => new Promise((_resolve, reject) => {
+        rejectAuthorization = reject;
+      }),
+    },
+  });
+  const context = pageContext(page);
+
+  const start = page.toggleRecording.call(context);
+  await Promise.resolve();
+  page.onUnload.call(context);
+  rejectAuthorization(new Error("页面退出后的授权结果"));
+  await start;
+
+  assert.equal(context.data.statusText, "未开始");
+  assert.equal(context.data.error, "");
+});
+
 test("speaker transcription page ignores callbacks from a previous client", async () => {
   const clients = [];
   class FakeSpeakerTranscriptionClient {
@@ -152,6 +173,12 @@ test("speaker transcription page ignores callbacks from a previous client", asyn
   const context = pageContext(page);
 
   await page.toggleRecording.call(context);
+  clients[0].callbacks.onSpeakerEvent({
+    type: "speaker.final",
+    speaker_id: "speaker_1",
+    segment_id: "shared-segment",
+    text: "第一轮的结果。",
+  });
   clients[0].callbacks.onStatus("closed");
   await page.toggleRecording.call(context);
 
@@ -163,14 +190,15 @@ test("speaker transcription page ignores callbacks from a previous client", asyn
   });
   clients[1].callbacks.onSpeakerEvent({
     type: "speaker.final",
-    speaker_id: "speaker_2",
-    segment_id: "current",
+    speaker_id: "speaker_1",
+    segment_id: "shared-segment",
     text: "当前这一轮的结果。",
   });
 
   const currentTexts = context.data.conversationLines.map((line) => line.text);
-  assert.equal(currentTexts.length, 1);
+  assert.equal(currentTexts.length, 2);
   assert.equal(currentTexts[0], "当前这一轮的结果。");
+  assert.equal(currentTexts[1], "第一轮的结果。");
 });
 
 test("speaker transcription page formats segment meta as Beijing occurrence time when available", () => {
@@ -235,7 +263,7 @@ test("speaker transcription page clears live unknown partial when final text cov
   });
 
   assert.equal(context.data.activePartial.visible, false);
-  assert.equal(context.data.conversationScrollTarget, "conversation-speaker_2-seg-2");
+  assert.equal(context.data.conversationScrollTarget, context.data.conversationLines[0].domId);
 });
 
 test("speaker transcription page does not re-add finalized speaker text to cumulative unknown preview", () => {
@@ -314,7 +342,7 @@ test("speaker transcription page clears stale unknown preview when two ASR strea
 
   assert.equal(context.data.conversationLines[0].text, "现在应该是第八道了哈。");
   assert.equal(context.data.activePartial.visible, false);
-  assert.equal(context.data.conversationScrollTarget, "conversation-speaker_2-seg-2");
+  assert.equal(context.data.conversationScrollTarget, context.data.conversationLines[0].domId);
 
   page.handleSpeakerEvent.call(context, {
     type: "speaker.partial",
