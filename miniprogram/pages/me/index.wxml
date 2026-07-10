@@ -265,41 +265,6 @@
 
   <view class="section">
     <view class="setting-header">
-      <text class="section-title">分享视频背景</text>
-      <text class="setting-current">{{shareVideoBackgroundStyleLabel}} · {{shareVideoBackgroundModeLabel}}</text>
-    </view>
-    <view class="setting-subtitle">背景风格</view>
-    <view class="voice-options">
-      <view
-        wx:for="{{shareVideoBackgroundStyleOptions}}"
-        wx:key="value"
-        class="voice-option {{item.value === shareVideoBackgroundStyle ? 'selected' : ''}}"
-        data-background-style="{{item.value}}"
-        bindtap="selectShareVideoBackgroundStyle"
-        hover-class="tap-hover"
-      >
-        <text class="voice-label">{{item.label}}</text>
-        <text class="voice-desc">{{item.description}}</text>
-      </view>
-    </view>
-    <view class="setting-subtitle">画面模式</view>
-    <view class="voice-options">
-      <view
-        wx:for="{{shareVideoBackgroundModeOptions}}"
-        wx:key="value"
-        class="voice-option {{item.value === shareVideoBackgroundMode ? 'selected' : ''}}"
-        data-background-mode="{{item.value}}"
-        bindtap="selectShareVideoBackgroundMode"
-        hover-class="tap-hover"
-      >
-        <text class="voice-label">{{item.label}}</text>
-        <text class="voice-desc">{{item.description}}</text>
-      </view>
-    </view>
-  </view>
-
-  <view class="section">
-    <view class="setting-header">
       <text class="section-title">语音聊天音色</text>
       <text class="setting-current">{{chatTTSVoiceLabel}}</text>
     </view>
