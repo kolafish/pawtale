@@ -748,6 +748,54 @@ export interface MemoirVoiceTranscriptItem {
   display_text: string;
 }
 
+export type MemoirMaterialCorrectionStatus = 'all' | 'corrected' | 'uncorrected';
+export type MemoirMaterialSort = 'chronological' | 'recent';
+
+export interface MemoirMaterialIncludedChapter {
+  chapter_id: string;
+  title: string;
+  sort_order: number;
+}
+
+export interface MemoirMaterialItem {
+  id: string;
+  voice_session_id: string;
+  project_id: string;
+  project_title: string;
+  chat_message_id?: string | null;
+  audio_file_id?: string | null;
+  audio_duration_seconds?: number | null;
+  transcript_version_id?: string | null;
+  question_message_id?: string | null;
+  question_text: string;
+  transcript_raw: string;
+  transcript_edited: string;
+  display_text: string;
+  has_manual_correction: boolean;
+  manual_corrected_at?: string | null;
+  summary_title: string;
+  summary_text: string;
+  summary_source: string;
+  transcription_status: 'ready' | 'pending_transcription' | 'empty';
+  raw_char_count: number;
+  edited_char_count: number;
+  display_char_count: number;
+  start_ms?: number | null;
+  end_ms?: number | null;
+  is_included_in_book: boolean;
+  included_chapters: MemoirMaterialIncludedChapter[];
+  created_at: string;
+  session_created_at: string;
+  session_started_at?: string | null;
+}
+
+export interface MemoirMaterialListResponse {
+  items: MemoirMaterialItem[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
 export interface MemoirBatchTranscriptCleanupConfirmResponse {
   project_id: string;
   updated_count: number;
