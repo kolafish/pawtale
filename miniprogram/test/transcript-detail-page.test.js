@@ -452,7 +452,7 @@ test("transcript detail page labels human interviewer questions", async () => {
   assert.equal(context.data.item.questionTitleText, "采访者刚才问了");
 });
 
-test("transcript detail page starts and polls one Sichuan dialect offline ASR job", async () => {
+test("transcript detail page keeps editing non-blocking while offline ASR runs", async () => {
   const startCalls = [];
   const toasts = [];
   const modals = [];
@@ -515,11 +515,20 @@ test("transcript detail page starts and polls one Sichuan dialect offline ASR jo
     assert.match(modals[0].content, /启用四川话加强识别/);
     assert.equal(context.data.item.offlineAsrActive, true);
     assert.equal(context.data.item.offlineAsrStatusText, "等待处理");
+    assert.equal(context.data.item.offlineAsrDetailText, "任务在后台运行，你可以继续编辑或使用其他功能。");
+
+    page.beginEdit.call(context);
+    page.changeText.call(context, { detail: { value: "用户尚未保存的编辑文字。" } });
+    assert.equal(context.data.item.isEditing, true);
+    assert.equal(context.data.item.editingText, "用户尚未保存的编辑文字。");
 
     await page.pollOfflineAsr.call(context, context.offlineAsrPollToken);
 
     assert.equal(context.data.item.offline_asr.status, "succeeded");
     assert.equal(context.data.item.display_text, "四川话增强后的文字。");
+    assert.equal(context.data.item.isEditing, true);
+    assert.equal(context.data.item.editingText, "用户尚未保存的编辑文字。");
+    assert.equal(context.data.item.changed, true);
     assert.equal(context.data.item.offlineAsrActionText, "再次识别");
     assert.deepEqual(toasts, [
       { title: "已开始识别", icon: "success" },

@@ -46,7 +46,7 @@
           wx:else
           class="primary-button"
           bindtap="beginEdit"
-          disabled="{{saving || deleting || convertingQuestionToAnswer || item.isEditing || item.canRecoverTranscription || item.offlineAsrActive}}"
+          disabled="{{saving || deleting || convertingQuestionToAnswer || item.isEditing || item.canRecoverTranscription}}"
         >
           编辑成书文字
         </button>
@@ -229,7 +229,7 @@
         <button
           class="primary-button"
           bindtap="beginEdit"
-          disabled="{{saving || deleting || convertingQuestionToAnswer || item.isEditing || item.offlineAsrActive}}"
+          disabled="{{saving || deleting || convertingQuestionToAnswer || item.isEditing}}"
         >
           手动编辑
         </button>
@@ -237,7 +237,7 @@
           class="ghost-button"
           bindtap="startVoiceEdit"
           loading="{{voiceEditLoading}}"
-          disabled="{{saving || deleting || convertingQuestionToAnswer || voiceEditSaving || voiceEditLoading || item.offlineAsrActive}}"
+          disabled="{{saving || deleting || convertingQuestionToAnswer || voiceEditSaving || voiceEditLoading}}"
         >
           {{voiceEditRecording ? "停止录入" : (voiceEditLoading ? "生成中" : "说修改意见")}}
         </button>
@@ -308,7 +308,7 @@
           class="primary-button"
           bindtap="toggleShareVideoPanel"
           loading="{{shareVideoLoadingContext}}"
-          disabled="{{saving || deleting || convertingQuestionToAnswer || item.offlineAsrActive || shareVideoCreating || shareVideoPolling || shareVideoDownloadingPreview || shareVideoSharing || shareVideoCustomBackgroundUploading}}"
+          disabled="{{saving || deleting || convertingQuestionToAnswer || shareVideoCreating || shareVideoPolling || shareVideoDownloadingPreview || shareVideoSharing || shareVideoCustomBackgroundUploading}}"
         >
           {{shareVideoPanelOpen ? "收起视频" : "制作视频"}}
         </button>
@@ -433,7 +433,7 @@
               class="primary-button"
               bindtap="createShareVideo"
               loading="{{shareVideoCreating || shareVideoPolling || shareVideoDownloadingPreview}}"
-              disabled="{{!shareVideoSelectedCanGenerate || convertingQuestionToAnswer || item.offlineAsrActive || shareVideoCreating || shareVideoPolling || shareVideoDownloadingPreview || shareVideoSharing || shareVideoCustomBackgroundUploading}}"
+              disabled="{{!shareVideoSelectedCanGenerate || convertingQuestionToAnswer || shareVideoCreating || shareVideoPolling || shareVideoDownloadingPreview || shareVideoSharing || shareVideoCustomBackgroundUploading}}"
             >
               {{shareVideoDownloadingPreview ? "准备预览" : (shareVideoCreating || shareVideoPolling ? "生成中" : "生成视频")}}
             </button>

@@ -528,11 +528,13 @@ definePage<TranscriptDetailData>()({
       if (token !== this.offlineAsrPollToken) {
         return;
       }
-      const next = toViewItem(transcript, this.data.bookPlan);
+      const next = toViewItem(transcript, this.data.bookPlan, current);
       this.setData({ item: next });
       if (next.offline_asr.status === "succeeded") {
         this.stopOfflineAsrPolling();
-        this.resetShareVideoState();
+        if (!this.data.shareVideoPanelOpen) {
+          this.resetShareVideoState();
+        }
         wx.showToast({ title: "识别已更新", icon: "success" });
         return;
       }
@@ -595,7 +597,6 @@ definePage<TranscriptDetailData>()({
     if (
       !item
       || item.canRecoverTranscription
-      || item.offlineAsrActive
       || this.data.saving
       || this.data.deleting
       || this.data.convertingQuestionToAnswer
@@ -639,7 +640,6 @@ definePage<TranscriptDetailData>()({
       !item ||
       item.canRecoverTranscription ||
       item.isEditing ||
-      item.offlineAsrActive ||
       this.data.saving ||
       this.data.deleting ||
       this.data.shareVideoSharing ||
@@ -649,7 +649,7 @@ definePage<TranscriptDetailData>()({
     }
     if (this.data.shareVideoPanelOpen) {
       this.shareVideoController.cancel();
-      this.setData({ shareVideoPanelOpen: false, shareVideoError: "" });
+      this.resetShareVideoState();
       return;
     }
     await this.openShareVideoPanel();
@@ -657,7 +657,7 @@ definePage<TranscriptDetailData>()({
 
   async openShareVideoPanel() {
     const item = this.data.item;
-    if (!item || item.canRecoverTranscription || item.isEditing || item.offlineAsrActive) {
+    if (!item || item.canRecoverTranscription || item.isEditing) {
       return;
     }
     if (this.data.shareVideoContext?.utterance_id === item.id) {
@@ -823,7 +823,6 @@ definePage<TranscriptDetailData>()({
     const item = this.data.item;
     if (
       !item ||
-      item.offlineAsrActive ||
       !this.data.shareVideoContext ||
       this.data.shareVideoCreating ||
       this.data.shareVideoPolling ||
@@ -916,7 +915,6 @@ definePage<TranscriptDetailData>()({
     const item = this.data.item;
     if (
       !item ||
-      item.offlineAsrActive ||
       !this.data.shareVideoContext ||
       !this.data.shareVideoSelectedCanGenerate ||
       this.data.shareVideoCreating ||
@@ -1048,7 +1046,6 @@ definePage<TranscriptDetailData>()({
     if (
       !item
       || item.canRecoverTranscription
-      || item.offlineAsrActive
       || this.data.saving
       || this.data.deleting
       || this.data.convertingQuestionToAnswer
