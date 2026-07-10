@@ -266,6 +266,8 @@ async def test_memoir_voice_migration_adds_share_video_job_lifecycle_columns():
             "attempts",
         }
         assert expected_columns.issubset(columns)
+        assert {"style", "style_json"}.isdisjoint(columns)
+        assert "memoir_material_share_videos" in result["changed_tables"]
         assert expected_columns == {
             item.removeprefix("memoir_material_share_videos.")
             for item in result["changed_columns"]
@@ -275,6 +277,7 @@ async def test_memoir_voice_migration_adds_share_video_job_lifecycle_columns():
             item.startswith("memoir_material_share_videos.")
             for item in second_result["changed_columns"]
         )
+        assert "memoir_material_share_videos" not in second_result["changed_tables"]
         assert tuple(row) == ("video-1", None, None, None, None, 0)
     finally:
         await engine.dispose()

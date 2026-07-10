@@ -33,8 +33,6 @@ interface VoiceTranscriptListOptions {
 }
 
 interface ShareVideoJobOptions {
-  style?: string;
-  styleOptions?: Record<string, unknown>;
   backgroundSource?: string;
   backgroundStyle?: string;
   backgroundMode?: string;
@@ -79,7 +77,6 @@ export function createMemoirTranscriptShareVideoJob(
   endChar: number,
   options: ShareVideoJobOptions = {},
 ): Promise<MemoirShareVideoJob> {
-  const style = options.style?.trim() || "warm_minimal";
   return memoirRequest<MemoirShareVideoJob>(
     `/api/mobile/memoir/voice-transcripts/${encodeURIComponent(utteranceId)}/share-video/jobs`,
     {
@@ -87,8 +84,6 @@ export function createMemoirTranscriptShareVideoJob(
       data: {
         start_char: startChar,
         end_char: endChar,
-        style,
-        style_options: options.styleOptions || {},
         ...(options.backgroundSource ? { background_source: options.backgroundSource } : {}),
         ...(options.backgroundStyle ? { background_style: options.backgroundStyle } : {}),
         ...(options.backgroundMode ? { background_mode: options.backgroundMode } : {}),

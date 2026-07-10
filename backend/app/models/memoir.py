@@ -277,8 +277,6 @@ class MemoirMaterialShareVideo(Base):
     end_char: Mapped[int] = mapped_column(Integer, nullable=False)
     start_ms: Mapped[int] = mapped_column(Integer, nullable=False)
     end_ms: Mapped[int] = mapped_column(Integer, nullable=False)
-    style: Mapped[str] = mapped_column(String(40), default="warm_minimal", nullable=False)
-    style_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     metadata_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     video_storage_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
     video_mime_type: Mapped[str] = mapped_column(String(100), default="video/mp4", nullable=False)
