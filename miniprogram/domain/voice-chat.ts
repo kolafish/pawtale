@@ -525,12 +525,6 @@ export interface MemoirBookImagePlacementCreateRequest {
   display_size?: "full_width" | "half_width" | "inline";
 }
 
-export interface MemoirBookImagePlacementUpdateRequest {
-  caption_override?: string | null;
-  display_size?: "full_width" | "half_width" | "inline" | null;
-  enabled?: boolean | null;
-}
-
 export interface MemoirVoiceSearchTranscriptionResponse {
   transcript: string;
 }
@@ -904,12 +898,6 @@ export interface MemoirBookOutputEditorialCopyRegenerateRequest {
   targets?: MemoirBookEditorialCopyTarget[];
   chapter_ids?: string[];
   feedback?: string | null;
-}
-
-export interface MemoirBookOutputChapterEditorialCopyUpdateRequest {
-  intro?: string | null;
-  pull_quote?: string | null;
-  pull_quote_source_ref_id?: string | null;
 }
 
 export interface MemoirBookTitleSuggestionRequest {

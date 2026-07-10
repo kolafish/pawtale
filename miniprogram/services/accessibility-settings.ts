@@ -70,10 +70,6 @@ export function saveLargeTextEnabled(largeTextEnabled: boolean): AccessibilitySe
   return saveAccessibilitySettings({ largeTextEnabled });
 }
 
-export function readAutoBargeInEnabled(): boolean {
-  return readAccessibilitySettings().autoBargeInEnabled;
-}
-
 export function saveAutoBargeInEnabled(autoBargeInEnabled: boolean): AccessibilitySettings {
   return saveAccessibilitySettings({ autoBargeInEnabled });
 }

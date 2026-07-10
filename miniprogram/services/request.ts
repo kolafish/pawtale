@@ -132,10 +132,6 @@ export function readBackendConfig(): BackendRuntimeConfig {
   };
 }
 
-export function writeBackendConfig(config: BackendRuntimeConfigInput): void {
-  wx.setStorageSync(BACKEND_CONFIG_STORAGE_KEY, config);
-}
-
 export function readSessionCookie(): string {
   return wx.getStorageSync<string>(BACKEND_COOKIE_KEY) || "";
 }

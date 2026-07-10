@@ -425,12 +425,6 @@ function loadBookPage({
     generateMemoirBookChapterTitle: async () => {
       throw new Error("generateMemoirBookChapterTitle was not mocked");
     },
-    generateMemoirBookChapterDraft: async () => {
-      throw new Error("generateMemoirBookChapterDraft was not mocked");
-    },
-    generateMemoirBookOutput: async () => {
-      throw new Error("generateMemoirBookOutput was not mocked");
-    },
     generateMemoirBookPlan: async () => {
       throw new Error("generateMemoirBookPlan was not mocked");
     },
@@ -442,12 +436,6 @@ function loadBookPage({
     getMemoirBookSourceCoverage: async () => null,
     listMemoirAutomationEvents: async () => ({ items: [], total: 0, limit: 8 }),
     acknowledgeMemoirAutomationEvent: async () => ({}),
-    parseMemoirBookVoiceCommand: async () => {
-      throw new Error("parseMemoirBookVoiceCommand was not mocked");
-    },
-    regenerateMemoirBookOutputEditorialCopy: async () => {
-      throw new Error("regenerateMemoirBookOutputEditorialCopy was not mocked");
-    },
     bookVoiceCommandGatewayUrl: (projectId) => `wss://api.example.test/book/${encodeURIComponent(projectId)}/gateway`,
     bookVoiceAssistantTurnStreamUrl: (projectId) => (
       `wss://api.example.test/book/${encodeURIComponent(projectId)}/assistant-turn`

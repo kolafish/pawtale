@@ -7,7 +7,6 @@ const {
   DEFAULT_ACCESSIBILITY_SETTINGS,
   normalizeAccessibilitySettings,
   readAccessibilitySettings,
-  readAutoBargeInEnabled,
   readLargeTextEnabled,
   saveAutoBargeInEnabled,
   saveLargeTextEnabled,
@@ -41,7 +40,6 @@ test("reads and saves accessibility settings locally", () => {
 
   assert.deepEqual(readAccessibilitySettings(), DEFAULT_ACCESSIBILITY_SETTINGS);
   assert.equal(readLargeTextEnabled(), false);
-  assert.equal(readAutoBargeInEnabled(), true);
 
   assert.deepEqual(saveLargeTextEnabled(true), {
     largeTextEnabled: true,

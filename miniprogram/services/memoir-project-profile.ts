@@ -7,11 +7,6 @@ export interface GuidanceOption<T extends string> {
   label: string;
 }
 
-export const MEMOIR_GUIDANCE_MODE_OPTIONS: Array<GuidanceOption<MemoirGuidanceMode>> = [
-  { value: "free_narration", label: "自己慢慢讲" },
-  { value: "guided_interview", label: "小余陪着问" },
-];
-
 export const MEMOIR_GUIDANCE_MODULE_OPTIONS: Array<GuidanceOption<MemoirGuidanceModule>> = [
   { value: "person", label: "人物" },
   { value: "event", label: "事件" },
@@ -27,14 +22,6 @@ export interface MemoirProjectProfile {
   narratorAge: number | null;
   defaultGuidanceMode: MemoirGuidanceMode;
 }
-
-const DEFAULT_PROFILE: MemoirProjectProfile = {
-  narratorName: "",
-  narratorGender: "unspecified",
-  narratorOrigin: "",
-  narratorAge: null,
-  defaultGuidanceMode: "free_narration",
-};
 
 function metadataProfile(project?: Pick<Project, "metadata_json"> | null): Record<string, unknown> {
   const metadata = project?.metadata_json || {};
@@ -112,8 +99,4 @@ export function projectProfileSummary(project: Project): string {
     guidanceModeLabel(profile.defaultGuidanceMode),
   ].filter(Boolean);
   return parts.join(" · ");
-}
-
-export function defaultMemoirProjectProfile(): MemoirProjectProfile {
-  return { ...DEFAULT_PROFILE };
 }
