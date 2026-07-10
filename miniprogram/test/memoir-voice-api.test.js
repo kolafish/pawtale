@@ -769,6 +769,7 @@ test("book output export download encodes route and session cookie", async () =>
     `${baseExportUrl}?format=pdf&layout=standard&show_source_appendix=true&version_id=version%2F1`,
   );
   assert.equal(downloads[0].header.Cookie, "pawtale_session=abc");
+  assert.equal(downloads[0].timeout, 120000);
   assert.equal(
     downloads[1].url,
     `${baseExportUrl}?format=pdf&layout=standard&show_source_appendix=false&version_id=version%2F1`,

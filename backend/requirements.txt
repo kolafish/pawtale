@@ -13,4 +13,5 @@ aiosqlite==0.19.0
 aiofiles==25.1.0
 websockets==16.0
 reportlab==4.5.1
+Pillow==12.2.0
 imageio-ffmpeg==0.5.1

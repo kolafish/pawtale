@@ -43,6 +43,7 @@ import {
 import { ApiError, cleanBaseUrl, readBackendConfig, readSessionCookie } from "./request";
 
 const BOOK_OUTPUT_GENERATE_TIMEOUT_MS = 60000;
+const BOOK_OUTPUT_EXPORT_DOWNLOAD_TIMEOUT_MS = 120000;
 const BOOK_TTS_TIMEOUT_MS = 180000;
 
 function bookPlanPath(projectId: string, suffix = ""): string {
@@ -556,6 +557,7 @@ export async function downloadMemoirBookOutputExport(
   return new Promise((resolve, reject) => {
     wx.downloadFile({
       url,
+      timeout: BOOK_OUTPUT_EXPORT_DOWNLOAD_TIMEOUT_MS,
       header: {
         ...(cookie ? { Cookie: cookie } : {}),
       },
