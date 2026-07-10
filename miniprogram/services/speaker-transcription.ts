@@ -4,12 +4,12 @@ import { backendSessionCookieHeader } from "./memoir-voice-api";
 import { sharedRecorderResource, WechatRecorderResource } from "./recorder-resource";
 import { wechatRecorderErrorMessage } from "./wechat-privacy";
 
-const DEBUG_RECORDING_DURATION_MS = 30 * 60 * 1000;
-const DEBUG_FRAME_SIZE_KB = 4;
-const DEBUG_ENCODE_BIT_RATE = 96000;
-const DEBUG_CONNECT_TIMEOUT_MS = 10000;
+const SPEAKER_TRANSCRIPTION_RECORDING_DURATION_MS = 30 * 60 * 1000;
+const SPEAKER_TRANSCRIPTION_FRAME_SIZE_KB = 4;
+const SPEAKER_TRANSCRIPTION_ENCODE_BIT_RATE = 96000;
+const SPEAKER_TRANSCRIPTION_CONNECT_TIMEOUT_MS = 10000;
 
-export type DebugSpeakerConnectionStatus =
+export type SpeakerTranscriptionConnectionStatus =
   | "idle"
   | "connecting"
   | "ready"
@@ -18,7 +18,7 @@ export type DebugSpeakerConnectionStatus =
   | "closed"
   | "error";
 
-export interface DebugSpeakerGatewayEvent {
+export interface SpeakerTranscriptionGatewayEvent {
   type: string;
   state?: string;
   status?: string;
@@ -37,52 +37,52 @@ export interface DebugSpeakerGatewayEvent {
   message?: string;
 }
 
-export interface DebugSpeakerCaptureStats {
+export interface SpeakerTranscriptionCaptureStats {
   frameCount: number;
   audioBytesSent: number;
   recordingElapsedMs: number;
   audioLevel: number;
 }
 
-export interface DebugSpeakerTranscribeCallbacks {
-  onStatus(status: DebugSpeakerConnectionStatus): void;
-  onStats(stats: DebugSpeakerCaptureStats): void;
-  onSpeakerEvent(event: DebugSpeakerGatewayEvent): void;
-  onDiarizationStatus?(event: DebugSpeakerGatewayEvent): void;
+export interface SpeakerTranscriptionCallbacks {
+  onStatus(status: SpeakerTranscriptionConnectionStatus): void;
+  onStats(stats: SpeakerTranscriptionCaptureStats): void;
+  onSpeakerEvent(event: SpeakerTranscriptionGatewayEvent): void;
+  onDiarizationStatus?(event: SpeakerTranscriptionGatewayEvent): void;
   onError(message: string): void;
 }
 
-interface DebugSpeakerClientEvent {
+interface SpeakerTranscriptionClientEvent {
   type: "session.start" | "audio.frame" | "audio.end" | "session.stop";
   audio?: string;
 }
 
-let debugClientSerial = 0;
+let speakerTranscriptionClientSerial = 0;
 
-export function debugSpeakerTranscribeGatewayUrl(): string {
+export function speakerTranscriptionGatewayUrl(): string {
   const config = readBackendConfig();
   if (!config.wsBaseUrl) {
     throw new ApiError(0, "未配置后端 WebSocket 地址", {});
   }
-  return `${cleanBaseUrl(config.wsBaseUrl)}/api/mobile/memoir/debug/speaker-transcribe/gateway`;
+  return `${cleanBaseUrl(config.wsBaseUrl)}/api/mobile/memoir/speaker-transcription/gateway`;
 }
 
-export function normalizeDebugSpeakerGatewayEvent(raw: unknown): DebugSpeakerGatewayEvent {
+export function normalizeSpeakerTranscriptionGatewayEvent(raw: unknown): SpeakerTranscriptionGatewayEvent {
   if (!raw || typeof raw !== "object") {
-    return { type: "session.error", error: "invalid_debug_speaker_event" };
+    return { type: "session.error", error: "invalid_speaker_transcription_event" };
   }
-  const event = raw as DebugSpeakerGatewayEvent;
+  const event = raw as SpeakerTranscriptionGatewayEvent;
   return {
     ...event,
     type: typeof event.type === "string" ? event.type : "session.error",
   };
 }
 
-export function debugSpeakerTitle(speakerId: string, speakerIndex: number): string {
+export function speakerTitle(speakerId: string, speakerIndex: number): string {
   return speakerId === "speaker_unknown" ? "未分辨说话人" : `说话人 ${speakerIndex}`;
 }
 
-export class DebugSpeakerTranscribeClient {
+export class SpeakerTranscriptionClient {
   private socketTask: WechatMiniprogram.SocketTask | null = null;
   private socketOpen = false;
   private recorderStarted = false;
@@ -94,11 +94,11 @@ export class DebugSpeakerTranscribeClient {
   private readonly recorderOwnerId: string;
 
   constructor(
-    private readonly callbacks: DebugSpeakerTranscribeCallbacks,
+    private readonly callbacks: SpeakerTranscriptionCallbacks,
     private readonly recorderResource: WechatRecorderResource = sharedRecorderResource,
   ) {
-    debugClientSerial += 1;
-    this.recorderOwnerId = `debug-speaker-transcribe-${debugClientSerial}`;
+    speakerTranscriptionClientSerial += 1;
+    this.recorderOwnerId = `speaker-transcription-${speakerTranscriptionClientSerial}`;
   }
 
   async start(): Promise<void> {
@@ -107,7 +107,7 @@ export class DebugSpeakerTranscribeClient {
     }
     this.callbacks.onStatus("connecting");
     const cookie = await backendSessionCookieHeader();
-    const gatewayUrl = debugSpeakerTranscribeGatewayUrl();
+    const gatewayUrl = speakerTranscriptionGatewayUrl();
     await new Promise<void>((resolve, reject) => {
       let settled = false;
       let timedOut = false;
@@ -115,7 +115,7 @@ export class DebugSpeakerTranscribeClient {
         timedOut = true;
         this.closeSocket();
         reject(new Error("多人转写连接超时"));
-      }, DEBUG_CONNECT_TIMEOUT_MS);
+      }, SPEAKER_TRANSCRIPTION_CONNECT_TIMEOUT_MS);
       const settle = (callback: () => void) => {
         if (settled || timedOut) {
           return;
@@ -192,12 +192,12 @@ export class DebugSpeakerTranscribeClient {
     this.captureStartedAtMs = Date.now();
     try {
       return this.recorderResource.start(this.recorderOwnerId, {
-        duration: DEBUG_RECORDING_DURATION_MS,
+        duration: SPEAKER_TRANSCRIPTION_RECORDING_DURATION_MS,
         sampleRate: 16000,
         numberOfChannels: 1,
-        encodeBitRate: DEBUG_ENCODE_BIT_RATE,
+        encodeBitRate: SPEAKER_TRANSCRIPTION_ENCODE_BIT_RATE,
         format: "PCM",
-        frameSize: DEBUG_FRAME_SIZE_KB,
+        frameSize: SPEAKER_TRANSCRIPTION_FRAME_SIZE_KB,
       }, {
         onStart: () => this.handleRecorderStarted(),
         onFrame: (result) => this.handleFrame(result.frameBuffer, result.isLastFrame),
@@ -256,7 +256,7 @@ export class DebugSpeakerTranscribeClient {
 
   private handleSocketMessage(data: string | ArrayBuffer): void {
     const raw = typeof data === "string" ? safeJsonParse(data) : null;
-    const event = normalizeDebugSpeakerGatewayEvent(raw);
+    const event = normalizeSpeakerTranscriptionGatewayEvent(raw);
     if (event.type === "session.ready") {
       this.callbacks.onStatus(this.acceptingFrames ? "listening" : "ready");
       return;
@@ -295,7 +295,7 @@ export class DebugSpeakerTranscribeClient {
     });
   }
 
-  private eventWithOccurrenceTime(event: DebugSpeakerGatewayEvent): DebugSpeakerGatewayEvent {
+  private eventWithOccurrenceTime(event: SpeakerTranscriptionGatewayEvent): SpeakerTranscriptionGatewayEvent {
     if (!this.captureStartedAtMs) {
       return event;
     }
@@ -310,7 +310,7 @@ export class DebugSpeakerTranscribeClient {
     };
   }
 
-  private sendJson(event: DebugSpeakerClientEvent): void {
+  private sendJson(event: SpeakerTranscriptionClientEvent): void {
     if (!this.socketTask || !this.socketOpen) {
       return;
     }
@@ -324,7 +324,7 @@ export class DebugSpeakerTranscribeClient {
 
   private closeSocket(): void {
     this.releaseRecorder();
-    this.socketTask?.close({ code: 1000, reason: "debug speaker transcribe closed" });
+    this.socketTask?.close({ code: 1000, reason: "speaker transcription closed" });
     this.socketTask = null;
     this.socketOpen = false;
   }

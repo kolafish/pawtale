@@ -219,11 +219,11 @@
   </view>
 
   <view class="section">
-    <text class="section-title">开发调试</text>
-    <view class="action-card debug-card" bindtap="openDebugSpeakerTranscribe" hover-class="tap-hover">
+    <text class="section-title">语音工具</text>
+    <view class="action-card" bindtap="openSpeakerTranscription" hover-class="tap-hover">
       <view>
         <text class="action-title">多人实时转写</text>
-        <text class="action-meta">按本次连接里的说话人顺序标注，不进入素材库。</text>
+        <text class="action-meta">实时区分多人对话，本次转写不会保存到素材库。</text>
       </view>
       <text class="chevron">›</text>
     </view>

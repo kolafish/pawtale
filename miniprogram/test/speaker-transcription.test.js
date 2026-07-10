@@ -4,12 +4,12 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 const { clearModule, mockModule } = require("./page-harness");
 
-function debugSpeakerModule() {
-  delete require.cache[require.resolve("../services/debug-speaker-transcribe.ts")];
-  return require("../services/debug-speaker-transcribe.ts");
+function speakerTranscriptionModule() {
+  delete require.cache[require.resolve("../services/speaker-transcription.ts")];
+  return require("../services/speaker-transcription.ts");
 }
 
-function debugSpeakerModuleWithSocketMocks() {
+function speakerTranscriptionModuleWithSocketMocks() {
   mockModule("../services/request.ts", {
     ApiError: class ApiError extends Error {},
     cleanBaseUrl: (value) => value.replace(/\/$/, ""),
@@ -21,37 +21,46 @@ function debugSpeakerModuleWithSocketMocks() {
   mockModule("../services/wechat-privacy.ts", {
     wechatRecorderErrorMessage: (message) => message || "录音失败",
   });
-  clearModule("../services/debug-speaker-transcribe.ts");
-  return require("../services/debug-speaker-transcribe.ts");
+  clearModule("../services/speaker-transcription.ts");
+  return require("../services/speaker-transcription.ts");
 }
 
-test("debug speaker gateway events normalize invalid payloads", () => {
-  const { normalizeDebugSpeakerGatewayEvent } = debugSpeakerModule();
+test("speaker transcription gateway events normalize invalid payloads", () => {
+  const { normalizeSpeakerTranscriptionGatewayEvent } = speakerTranscriptionModule();
 
-  assert.deepEqual(normalizeDebugSpeakerGatewayEvent("bad"), {
+  assert.deepEqual(normalizeSpeakerTranscriptionGatewayEvent("bad"), {
     type: "session.error",
-    error: "invalid_debug_speaker_event",
+    error: "invalid_speaker_transcription_event",
   });
-  assert.deepEqual(normalizeDebugSpeakerGatewayEvent({ text: "missing type" }), {
+  assert.deepEqual(normalizeSpeakerTranscriptionGatewayEvent({ text: "missing type" }), {
     type: "session.error",
     text: "missing type",
   });
 });
 
-test("debug speaker titles keep session-local speaker labels", () => {
-  const { debugSpeakerTitle } = debugSpeakerModule();
+test("speaker transcription titles keep session-local speaker labels", () => {
+  const { speakerTitle } = speakerTranscriptionModule();
 
-  assert.equal(debugSpeakerTitle("speaker_1", 1), "说话人 1");
-  assert.equal(debugSpeakerTitle("speaker_2", 2), "说话人 2");
-  assert.equal(debugSpeakerTitle("speaker_unknown", 1), "未分辨说话人");
+  assert.equal(speakerTitle("speaker_1", 1), "说话人 1");
+  assert.equal(speakerTitle("speaker_2", 2), "说话人 2");
+  assert.equal(speakerTitle("speaker_unknown", 1), "未分辨说话人");
 });
 
-test("debug speaker client defaults to the shared recorder resource", () => {
-  clearModule("../services/debug-speaker-transcribe.ts");
-  const { sharedRecorderResource } = require("../services/recorder-resource.ts");
-  const { DebugSpeakerTranscribeClient } = require("../services/debug-speaker-transcribe.ts");
+test("speaker transcription gateway uses the product API route", () => {
+  const { speakerTranscriptionGatewayUrl } = speakerTranscriptionModuleWithSocketMocks();
 
-  const client = new DebugSpeakerTranscribeClient({
+  assert.equal(
+    speakerTranscriptionGatewayUrl(),
+    "wss://example.test/api/mobile/memoir/speaker-transcription/gateway",
+  );
+});
+
+test("speaker transcription client defaults to the shared recorder resource", () => {
+  clearModule("../services/speaker-transcription.ts");
+  const { sharedRecorderResource } = require("../services/recorder-resource.ts");
+  const { SpeakerTranscriptionClient } = require("../services/speaker-transcription.ts");
+
+  const client = new SpeakerTranscriptionClient({
     onStatus: () => {},
     onStats: () => {},
     onSpeakerEvent: () => {},
@@ -61,7 +70,7 @@ test("debug speaker client defaults to the shared recorder resource", () => {
   assert.equal(client.recorderResource, sharedRecorderResource);
 });
 
-test("debug speaker client annotates speaker events with occurrence wall time", async () => {
+test("speaker transcription client annotates speaker events with occurrence wall time", async () => {
   const socketHandlers = {};
   const originalNow = Date.now;
   Date.now = () => Date.UTC(2026, 6, 7, 5, 30, 0);
@@ -99,8 +108,8 @@ test("debug speaker client annotates speaker events with occurrence wall time", 
     },
   };
   const speakerEvents = [];
-  const { DebugSpeakerTranscribeClient } = debugSpeakerModuleWithSocketMocks();
-  const client = new DebugSpeakerTranscribeClient({
+  const { SpeakerTranscriptionClient } = speakerTranscriptionModuleWithSocketMocks();
+  const client = new SpeakerTranscriptionClient({
     onStatus: () => {},
     onStats: () => {},
     onSpeakerEvent: (event) => speakerEvents.push(event),
@@ -132,7 +141,7 @@ test("debug speaker client annotates speaker events with occurrence wall time", 
   }
 });
 
-test("debug speaker client releases recorder when socket errors", async () => {
+test("speaker transcription client releases recorder when socket errors", async () => {
   const socketHandlers = {};
   let closeCalls = 0;
   global.wx = {
@@ -176,8 +185,8 @@ test("debug speaker client releases recorder when socket errors", async () => {
   };
   const statuses = [];
   const errors = [];
-  const { DebugSpeakerTranscribeClient } = debugSpeakerModuleWithSocketMocks();
-  const client = new DebugSpeakerTranscribeClient({
+  const { SpeakerTranscriptionClient } = speakerTranscriptionModuleWithSocketMocks();
+  const client = new SpeakerTranscriptionClient({
     onStatus: (status) => statuses.push(status),
     onStats: () => {},
     onSpeakerEvent: () => {},
@@ -199,7 +208,7 @@ test("debug speaker client releases recorder when socket errors", async () => {
   delete global.wx;
 });
 
-test("debug speaker client forwards provider diarization diagnostics", async () => {
+test("speaker transcription client forwards provider diarization diagnostics", async () => {
   const socketHandlers = {};
   global.wx = {
     connectSocket() {
@@ -235,8 +244,8 @@ test("debug speaker client forwards provider diarization diagnostics", async () 
     },
   };
   const diagnostics = [];
-  const { DebugSpeakerTranscribeClient } = debugSpeakerModuleWithSocketMocks();
-  const client = new DebugSpeakerTranscribeClient({
+  const { SpeakerTranscriptionClient } = speakerTranscriptionModuleWithSocketMocks();
+  const client = new SpeakerTranscriptionClient({
     onStatus: () => {},
     onStats: () => {},
     onSpeakerEvent: () => {},

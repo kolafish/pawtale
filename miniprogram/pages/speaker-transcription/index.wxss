@@ -1,4 +1,4 @@
-.debug-speaker-page {
+.speaker-transcription-page {
   min-height: 100vh;
   padding: 44rpx 30rpx 128rpx;
   background: #f7f3ed;
@@ -743,151 +743,151 @@
   text-wrap: pretty;
 }
 
-.debug-speaker-page.large-text {
+.speaker-transcription-page.large-text {
   padding-left: 24rpx;
   padding-right: 24rpx;
 }
 
-.debug-speaker-page.large-text .page-title {
+.speaker-transcription-page.large-text .page-title {
   font-size: 52rpx;
 }
 
-.debug-speaker-page.large-text .page-meta,
-.debug-speaker-page.large-text .control-meta,
-.debug-speaker-page.large-text .stat-label,
-.debug-speaker-page.large-text .line-meta,
-.debug-speaker-page.large-text .line-status {
+.speaker-transcription-page.large-text .page-meta,
+.speaker-transcription-page.large-text .control-meta,
+.speaker-transcription-page.large-text .stat-label,
+.speaker-transcription-page.large-text .line-meta,
+.speaker-transcription-page.large-text .line-status {
   font-size: 34rpx;
   line-height: 1.35;
 }
 
-.debug-speaker-page.large-text .control-panel,
-.debug-speaker-page.large-text .empty-panel,
-.debug-speaker-page.large-text .speaker-window,
-.debug-speaker-page.large-text .line-item {
+.speaker-transcription-page.large-text .control-panel,
+.speaker-transcription-page.large-text .empty-panel,
+.speaker-transcription-page.large-text .speaker-window,
+.speaker-transcription-page.large-text .line-item {
   border-radius: 30rpx;
 }
 
-.debug-speaker-page.large-text .control-panel,
-.debug-speaker-page.large-text .speaker-window {
+.speaker-transcription-page.large-text .control-panel,
+.speaker-transcription-page.large-text .speaker-window {
   padding: 38rpx;
 }
 
-.debug-speaker-page.large-text .control-title,
-.debug-speaker-page.large-text .speaker-title,
-.debug-speaker-page.large-text .empty-title {
+.speaker-transcription-page.large-text .control-title,
+.speaker-transcription-page.large-text .speaker-title,
+.speaker-transcription-page.large-text .empty-title {
   font-size: 44rpx;
   line-height: 1.25;
 }
 
-.debug-speaker-page.large-text .status-pill,
-.debug-speaker-page.large-text .speaker-count,
-.debug-speaker-page.large-text .stat-value {
+.speaker-transcription-page.large-text .status-pill,
+.speaker-transcription-page.large-text .speaker-count,
+.speaker-transcription-page.large-text .stat-value {
   font-size: 38rpx;
 }
 
-.debug-speaker-page.large-text .primary-button,
-.debug-speaker-page.large-text .secondary-button {
+.speaker-transcription-page.large-text .primary-button,
+.speaker-transcription-page.large-text .secondary-button {
   height: 116rpx;
   font-size: 40rpx;
 }
 
-.debug-speaker-page.large-text .secondary-button {
+.speaker-transcription-page.large-text .secondary-button {
   width: 212rpx;
   flex-basis: 212rpx;
 }
 
-.debug-speaker-page.large-text .empty-copy,
-.debug-speaker-page.large-text .speaker-empty {
+.speaker-transcription-page.large-text .empty-copy,
+.speaker-transcription-page.large-text .speaker-empty {
   font-size: 36rpx;
   line-height: 1.45;
 }
 
-.debug-speaker-page.large-text .conversation-scroll {
+.speaker-transcription-page.large-text .conversation-scroll {
   height: calc(100vh - 540rpx - env(safe-area-inset-bottom));
   min-height: 420rpx;
 }
 
-.debug-speaker-page.large-text .speaker-badge {
+.speaker-transcription-page.large-text .speaker-badge {
   min-height: 52rpx;
   padding: 0 18rpx;
   font-size: 34rpx;
   line-height: 52rpx;
 }
 
-.debug-speaker-page.large-text .partial-label {
+.speaker-transcription-page.large-text .partial-label {
   font-size: 34rpx;
 }
 
-.debug-speaker-page.large-text .partial-scroll {
+.speaker-transcription-page.large-text .partial-scroll {
   height: 420rpx;
 }
 
-.debug-speaker-page.large-text .partial-scroll.long {
+.speaker-transcription-page.large-text .partial-scroll.long {
   height: 420rpx;
 }
 
-.debug-speaker-page.large-text .control-panel.compact {
+.speaker-transcription-page.large-text .control-panel.compact {
   padding: 24rpx;
 }
 
-.debug-speaker-page.large-text .control-panel.compact .primary-button,
-.debug-speaker-page.large-text .control-panel.compact .secondary-button {
+.speaker-transcription-page.large-text .control-panel.compact .primary-button,
+.speaker-transcription-page.large-text .control-panel.compact .secondary-button {
   height: 92rpx;
   font-size: 36rpx;
 }
 
-.debug-speaker-page.large-text .control-panel.compact + .conversation-scroll {
+.speaker-transcription-page.large-text .control-panel.compact + .conversation-scroll {
   height: calc(100vh - 360rpx - env(safe-area-inset-bottom));
   min-height: 600rpx;
   margin-top: 18rpx;
 }
 
-.debug-speaker-page.large-text .partial-text,
-.debug-speaker-page.large-text .line-text.latest {
+.speaker-transcription-page.large-text .partial-text,
+.speaker-transcription-page.large-text .line-text.latest {
   font-size: 76rpx;
   line-height: 96rpx;
 }
 
-.debug-speaker-page.large-text .line-text.history {
+.speaker-transcription-page.large-text .line-text.history {
   font-size: 46rpx;
   line-height: 72rpx;
 }
 
-.debug-speaker-page.large-text .line-item {
+.speaker-transcription-page.large-text .line-item {
   padding-left: 42rpx;
 }
 
-.debug-speaker-page.large-text .line-item::before {
+.speaker-transcription-page.large-text .line-item::before {
   top: 34rpx;
   bottom: 34rpx;
   left: 22rpx;
   width: 5rpx;
 }
 
-.debug-speaker-page.large-text .line-item.latest::before {
+.speaker-transcription-page.large-text .line-item.latest::before {
   top: 34rpx;
   bottom: 34rpx;
   left: 22rpx;
   width: 8rpx;
 }
 
-.debug-speaker-page.large-text .history-preview-panel {
+.speaker-transcription-page.large-text .history-preview-panel {
   padding: 34rpx;
   border-radius: 30rpx;
 }
 
-.debug-speaker-page.large-text .history-preview-speaker,
-.debug-speaker-page.large-text .history-preview-meta,
-.debug-speaker-page.large-text .history-preview-status {
+.speaker-transcription-page.large-text .history-preview-speaker,
+.speaker-transcription-page.large-text .history-preview-meta,
+.speaker-transcription-page.large-text .history-preview-status {
   font-size: 34rpx;
 }
 
-.debug-speaker-page.large-text .history-preview-scroll {
+.speaker-transcription-page.large-text .history-preview-scroll {
   max-height: 680rpx;
 }
 
-.debug-speaker-page.large-text .history-preview-text {
+.speaker-transcription-page.large-text .history-preview-text {
   font-size: 76rpx;
   line-height: 96rpx;
 }

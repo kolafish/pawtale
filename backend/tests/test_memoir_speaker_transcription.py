@@ -4,17 +4,19 @@ from typing import Any
 
 from app.domain.memoir.types import MemoirCreatedBy
 from app.services.memoir.asr import StreamingASREvent
-from app.services.memoir.debug_speaker_transcribe import (
-    DebugSpeakerProofreadContextLine,
-    DebugSpeakerTranscribeSession,
+from app.services.memoir.speaker_diarization import (
     live_text_after_confirmed_prefix,
-    proofread_debug_speaker_transcript_text,
     speaker_segments_from_asr_event,
 )
+from app.services.memoir.speaker_transcript_proofreading import (
+    SpeakerProofreadContextLine,
+    proofread_speaker_transcript_text,
+)
+from app.services.memoir.speaker_transcription import SpeakerTranscriptionSession
 from app.services.memoir.voice_transcripts import CleanedTranscriptText
 
 
-def test_debug_speaker_segments_extract_provider_speaker_utterances():
+def test_speaker_transcription_segments_extract_provider_speaker_utterances():
     event = StreamingASREvent(
         type="final",
         text="你小时候住在哪里？住在厂里的家属院。",
@@ -55,7 +57,7 @@ def test_debug_speaker_segments_extract_provider_speaker_utterances():
     assert segments[1].confidence == 0.88
 
 
-def test_debug_speaker_segments_do_not_invent_speakers_without_provider_labels():
+def test_speaker_transcription_segments_do_not_invent_speakers_without_provider_labels():
     event = StreamingASREvent(
         type="final",
         text="我小时候住在厂里的家属院。",
@@ -65,7 +67,7 @@ def test_debug_speaker_segments_do_not_invent_speakers_without_provider_labels()
     assert speaker_segments_from_asr_event(event) == []
 
 
-def test_debug_speaker_segments_extract_single_result_speaker_label():
+def test_speaker_transcription_segments_extract_single_result_speaker_label():
     event = StreamingASREvent(
         type="partial",
         text="先讲讲小时候吧。",
@@ -75,7 +77,7 @@ def test_debug_speaker_segments_extract_single_result_speaker_label():
                     {
                         "text": "先讲讲小时候吧。",
                         "speaker": "host",
-                        "start_ms": 200,
+                        "start_ms": 0,
                         "end_ms": 1800,
                     }
                 ]
@@ -88,11 +90,11 @@ def test_debug_speaker_segments_extract_single_result_speaker_label():
     assert len(segments) == 1
     assert segments[0].speaker_id == "speaker_host"
     assert segments[0].text == "先讲讲小时候吧。"
-    assert segments[0].start_ms == 200
+    assert segments[0].start_ms == 0
     assert segments[0].end_ms == 1800
 
 
-def test_debug_speaker_segments_extract_volc_additions_speaker_label():
+def test_speaker_transcription_segments_extract_volc_additions_speaker_label():
     event = StreamingASREvent(
         type="final",
         text="先讲讲小时候吧。住在厂里的家属院。",
@@ -129,7 +131,7 @@ def test_debug_speaker_segments_extract_volc_additions_speaker_label():
     assert [segment.speaker_gender for segment in segments] == ["male", "female"]
 
 
-def test_debug_speaker_live_text_after_confirmed_prefix_keeps_current_tail():
+def test_speaker_transcription_live_text_after_confirmed_prefix_keeps_current_tail():
     assert live_text_after_confirmed_prefix(
         "第一句已经稳定。第二句还在实时说",
         "第一句已经稳定。",
@@ -152,10 +154,10 @@ def test_debug_speaker_live_text_after_confirmed_prefix_keeps_current_tail():
     ) == ""
 
 
-async def test_debug_speaker_transcribe_session_streams_speaker_windows_without_persistence():
+async def test_speaker_transcription_session_streams_speaker_windows_without_persistence():
     client = FakeGatewayClient()
     transcriber = FakeSpeakerTranscriber()
-    session = DebugSpeakerTranscribeSession(
+    session = SpeakerTranscriptionSession(
         client=client,
         transcriber_factory=lambda: transcriber,
     )
@@ -193,10 +195,10 @@ async def test_debug_speaker_transcribe_session_streams_speaker_windows_without_
     assert transcriber.closed
 
 
-async def test_debug_speaker_transcribe_session_keeps_provider_definite_utterances_live():
+async def test_speaker_transcription_session_keeps_provider_definite_utterances_live():
     client = FakeGatewayClient()
     transcriber = FakeDefinitePartialSpeakerTranscriber()
-    session = DebugSpeakerTranscribeSession(
+    session = SpeakerTranscriptionSession(
         client=client,
         transcriber_factory=lambda: transcriber,
     )
@@ -222,11 +224,11 @@ async def test_debug_speaker_transcribe_session_keeps_provider_definite_utteranc
     assert [item for item in client.sent if item["type"] == "speaker.final"] == []
 
 
-async def test_debug_speaker_transcribe_session_streams_live_asr_tail_when_speaker_stream_lags():
+async def test_speaker_transcription_session_streams_live_asr_tail_when_speaker_stream_lags():
     client = FakeGatewayClient()
     speaker_transcriber = FakeStableOnlySpeakerTranscriber()
     live_transcriber = FakeLivePartialTranscriber()
-    session = DebugSpeakerTranscribeSession(
+    session = SpeakerTranscriptionSession(
         client=client,
         transcriber_factory=lambda: speaker_transcriber,
         live_transcriber_factory=lambda: live_transcriber,
@@ -258,10 +260,10 @@ async def test_debug_speaker_transcribe_session_streams_live_asr_tail_when_speak
     assert live_transcriber.closed
 
 
-async def test_debug_speaker_transcribe_session_dedupes_repeated_provider_full_results():
+async def test_speaker_transcription_session_dedupes_repeated_provider_full_results():
     client = FakeGatewayClient()
     transcriber = FakeSpeakerTranscriber()
-    session = DebugSpeakerTranscribeSession(
+    session = SpeakerTranscriptionSession(
         client=client,
         transcriber_factory=lambda: transcriber,
     )
@@ -294,10 +296,10 @@ async def test_debug_speaker_transcribe_session_dedupes_repeated_provider_full_r
     ]
 
 
-async def test_debug_speaker_transcribe_session_only_streams_new_items_from_cumulative_provider_results():
+async def test_speaker_transcription_session_only_streams_new_items_from_cumulative_provider_results():
     client = FakeGatewayClient()
     transcriber = FakeCumulativeSpeakerTranscriber()
-    session = DebugSpeakerTranscribeSession(
+    session = SpeakerTranscriptionSession(
         client=client,
         transcriber_factory=lambda: transcriber,
     )
@@ -330,10 +332,10 @@ async def test_debug_speaker_transcribe_session_only_streams_new_items_from_cumu
     ]
 
 
-async def test_debug_speaker_transcribe_session_falls_back_to_unknown_speaker():
+async def test_speaker_transcription_session_falls_back_to_unknown_speaker():
     client = FakeGatewayClient()
     transcriber = FakeSpeakerTranscriber(with_speaker_labels=False)
-    session = DebugSpeakerTranscribeSession(
+    session = SpeakerTranscriptionSession(
         client=client,
         transcriber_factory=lambda: transcriber,
     )
@@ -358,7 +360,7 @@ async def test_debug_speaker_transcribe_session_falls_back_to_unknown_speaker():
     assert diarization["status"] == "missing_provider_labels"
 
 
-async def test_debug_speaker_proofread_uses_recent_context(monkeypatch):
+async def test_speaker_transcription_proofread_uses_recent_context(monkeypatch):
     captured: dict[str, Any] = {}
 
     async def fake_generate_cleaned_transcript_text(
@@ -379,20 +381,20 @@ async def test_debug_speaker_proofread_uses_recent_context(monkeypatch):
         )
 
     monkeypatch.setattr(
-        "app.services.memoir.debug_speaker_transcribe.generate_cleaned_transcript_text",
+        "app.services.memoir.speaker_transcript_proofreading.generate_cleaned_transcript_text",
         fake_generate_cleaned_transcript_text,
     )
 
-    result = await proofread_debug_speaker_transcript_text(
+    result = await proofread_speaker_transcript_text(
         "四川话得不得行嘛？",
         context_lines=[
-            DebugSpeakerProofreadContextLine(
+            SpeakerProofreadContextLine(
                 speaker_id="speaker_1",
                 text="来，我们先试一下四川话识别。",
                 start_ms=0,
                 end_ms=3000,
             ),
-            DebugSpeakerProofreadContextLine(
+            SpeakerProofreadContextLine(
                 speaker_id="speaker_2",
                 text="刚才讲的是四川话。",
                 start_ms=3100,
@@ -406,23 +408,23 @@ async def test_debug_speaker_proofread_uses_recent_context(monkeypatch):
     assert captured["source_text"] == "四川话得不得行嘛？"
     assert captured["ai_model"] == "doubao-test"
     assert captured["strict"] is False
-    assert captured["context"].scene == "多人实时转写调试"
+    assert captured["context"].scene == "多人实时转写"
     assert captured["context"].recent_user_utterances == (
         "说话人 1：来，我们先试一下四川话识别。",
         "说话人 2：刚才讲的是四川话。",
     )
 
 
-async def test_debug_speaker_proofread_endpoint_requires_login_and_returns_cleaned_text(
+async def test_speaker_transcription_proofread_endpoint_requires_login_and_returns_cleaned_text(
     anonymous_client,
     monkeypatch,
 ):
     captured: dict[str, Any] = {}
 
-    async def fake_proofread_debug_speaker_transcript_text(
+    async def fake_proofread_speaker_transcript_text(
         text: str,
         *,
-        context_lines: list[DebugSpeakerProofreadContextLine],
+        context_lines: list[SpeakerProofreadContextLine],
         ai_model: str | None = None,
     ) -> CleanedTranscriptText:
         captured["text"] = text
@@ -435,12 +437,12 @@ async def test_debug_speaker_proofread_endpoint_requires_login_and_returns_clean
         )
 
     monkeypatch.setattr(
-        "app.routers.memoir.debug_speaker.proofread_debug_speaker_transcript_text",
-        fake_proofread_debug_speaker_transcript_text,
+        "app.routers.memoir.speaker_transcription.proofread_speaker_transcript_text",
+        fake_proofread_speaker_transcript_text,
     )
 
     unauthorized = await anonymous_client.post(
-        "/api/mobile/memoir/debug/speaker-transcribe/proofread",
+        "/api/mobile/memoir/speaker-transcription/proofread",
         json={"text": "四川话得不得行嘛？"},
     )
     assert unauthorized.status_code == 401
@@ -448,7 +450,7 @@ async def test_debug_speaker_proofread_endpoint_requires_login_and_returns_clean
     register = await anonymous_client.post(
         "/api/auth/register",
         json={
-            "email": "debug-speaker@example.com",
+            "email": "speaker-transcription@example.com",
             "password": "password123",
             "display_name": "调试用户",
         },
@@ -456,7 +458,7 @@ async def test_debug_speaker_proofread_endpoint_requires_login_and_returns_clean
     assert register.status_code == 201
 
     response = await anonymous_client.post(
-        "/api/mobile/memoir/debug/speaker-transcribe/proofread",
+        "/api/mobile/memoir/speaker-transcription/proofread",
         json={
             "text": "四川话得不得行嘛？",
             "context_lines": [
@@ -482,7 +484,7 @@ async def test_debug_speaker_proofread_endpoint_requires_login_and_returns_clean
     assert captured["text"] == "四川话得不得行嘛？"
     assert captured["ai_model"] == "doubao-test"
     assert captured["context_lines"] == [
-        DebugSpeakerProofreadContextLine(
+        SpeakerProofreadContextLine(
             speaker_id="speaker_1",
             text="来，我们先试一下四川话识别。",
             start_ms=0,

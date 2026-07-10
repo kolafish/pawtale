@@ -1,14 +1,14 @@
 import { readSelectedAIModel } from "./ai-model-settings";
 import { memoirRequest } from "./memoir-api-client";
 
-export interface DebugSpeakerProofreadContextLine {
+export interface SpeakerProofreadContextLine {
   speakerId?: string | null;
   text: string;
   startMs?: number | null;
   endMs?: number | null;
 }
 
-export interface DebugSpeakerProofreadResponse {
+export interface SpeakerProofreadResponse {
   text: string;
   proofread_text: string;
   changed: boolean;
@@ -16,13 +16,13 @@ export interface DebugSpeakerProofreadResponse {
   context_line_count: number;
 }
 
-export function proofreadDebugSpeakerTranscriptLine(
+export function proofreadSpeakerTranscriptLine(
   text: string,
-  contextLines: DebugSpeakerProofreadContextLine[] = [],
+  contextLines: SpeakerProofreadContextLine[] = [],
   aiModel?: string,
-): Promise<DebugSpeakerProofreadResponse> {
+): Promise<SpeakerProofreadResponse> {
   const selectedModel = aiModel?.trim() || readSelectedAIModel();
-  return memoirRequest<DebugSpeakerProofreadResponse>("/api/mobile/memoir/debug/speaker-transcribe/proofread", {
+  return memoirRequest<SpeakerProofreadResponse>("/api/mobile/memoir/speaker-transcription/proofread", {
     method: "POST",
     data: {
       text,
