@@ -21,11 +21,13 @@ import { getMemoirIdentity } from "../../services/auth";
 import {
   sourceAssignmentRequest,
   transcriptChapterAssignOptions,
+  transcriptNeedsBookPlanConfirmation,
 } from "../../services/memoir-book-source-actions";
 import { ApiError } from "../../services/request";
 import {
   isAuthError,
   routeAuthError,
+  switchToBook,
   switchToHome,
   switchToMe,
 } from "../../services/navigation";
@@ -92,6 +94,7 @@ interface TranscriptItemView {
   recoverButtonText: string;
   bookInclusionText: string;
   isIncludedInBook: boolean;
+  needsBookPlanConfirmation: boolean;
   canAssignChapterSource: boolean;
   chapterAssignOptions: ChapterPickerOption[];
   cardClass: string;
@@ -415,12 +418,16 @@ function toViewItem(
 ): TranscriptItemView {
   const canRecoverTranscription = isPendingTranscription(item);
   const isIncludedInBook = !canRecoverTranscription && Boolean(item.is_included_in_book || item.included_chapters?.length);
+  const needsBookPlanConfirmation = !canRecoverTranscription
+    && transcriptNeedsBookPlanConfirmation(item, bookPlan);
   const chapterAssignOptions = canRecoverTranscription ? [] : transcriptChapterAssignOptions(item, bookPlan);
   const summaryTitleText = transcriptTitleText(item);
   const summaryPreviewText = transcriptSummaryPreview(item);
   const createdAtText = transcriptCreatedAtText(item);
   const durationText = transcriptDurationText(item);
-  const bookInclusionText = canRecoverTranscription ? "等待转写后再入章" : transcriptBookInclusionText(item);
+  const bookInclusionText = canRecoverTranscription
+    ? "等待转写后再入章"
+    : (needsBookPlanConfirmation ? "先确认章节结构，再归入章节" : transcriptBookInclusionText(item));
   const recordMetaText = [createdAtText, durationText].filter(Boolean).join(" · ");
   return {
     id: item.id,
@@ -438,6 +445,7 @@ function toViewItem(
     recoverButtonText: "恢复转写",
     bookInclusionText,
     isIncludedInBook,
+    needsBookPlanConfirmation,
     canAssignChapterSource: chapterAssignOptions.length > 0,
     chapterAssignOptions,
     cardClass: canRecoverTranscription ? "transcript-card recovery-pending" : "transcript-card",
@@ -862,6 +870,10 @@ definePage<TranscriptsData>()({
 
   openHome() {
     switchToHome();
+  },
+
+  openBook() {
+    switchToBook();
   },
 
   openLogin() {

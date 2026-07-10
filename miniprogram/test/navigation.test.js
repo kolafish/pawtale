@@ -7,6 +7,7 @@ const {
   isAuthError,
   relaunchHome,
   routeAuthError,
+  switchToBook,
   switchToHome,
   switchToMe,
 } = require("../services/navigation.ts");
@@ -34,6 +35,7 @@ test("navigation helper routes auth errors to login or me", () => {
   assert.equal(routeAuthError(new ApiError(404, "missing", null), "me"), false);
   relaunchHome();
   switchToHome();
+  switchToBook();
   switchToMe();
 
   assert.deepEqual(calls, [
@@ -41,6 +43,7 @@ test("navigation helper routes auth errors to login or me", () => {
     { method: "switchTab", url: "/pages/me/index" },
     { method: "reLaunch", url: "/pages/home/index" },
     { method: "switchTab", url: "/pages/home/index" },
+    { method: "switchTab", url: "/pages/book/index" },
     { method: "switchTab", url: "/pages/me/index" },
   ]);
   delete global.wx;

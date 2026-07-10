@@ -312,6 +312,41 @@ test("transcript detail page loads a single transcript and chapter options", asy
   ]);
 });
 
+test("transcript detail page routes draft plan assignments to book confirmation", async () => {
+  const assignments = [];
+  const navigations = [];
+  global.wx = {
+    switchTab(options) {
+      navigations.push(options);
+    },
+  };
+  const { page } = loadTranscriptDetailPage({
+    voiceApiExports: {
+      getMemoirVoiceTranscript: async (id) => sampleTranscript(id),
+      getMemoirBookPlan: async () => ({ ...sampleBookPlan(), status: "draft" }),
+      assignMemoirBookSources: async (projectId, data) => {
+        assignments.push({ projectId, data });
+        return sampleBookPlan();
+      },
+    },
+  });
+  const context = pageContext(page);
+
+  await page.onLoad.call(context, { id: "utterance-new" });
+
+  assert.equal(context.data.item.canAssignChapterSource, false);
+  assert.equal(context.data.item.needsBookPlanConfirmation, true);
+  assert.equal(context.data.item.bookInclusionText, "先确认章节结构，再归入章节");
+  assert.deepEqual(context.data.item.chapterAssignOptions, []);
+
+  await page.assignTranscriptChapter.call(context, { detail: { value: 0 } });
+  page.openBook.call(context);
+
+  assert.deepEqual(assignments, []);
+  assert.deepEqual(navigations, [{ url: "/pages/book/index" }]);
+  delete global.wx;
+});
+
 test("transcript detail page shows saved audio awaiting transcription", async () => {
   const recoverCalls = [];
   const toasts = [];

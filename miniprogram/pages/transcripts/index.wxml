@@ -110,6 +110,14 @@
       >
         {{item.deleteButtonText}}
       </button>
+      <button
+        wx:if="{{item.needsBookPlanConfirmation}}"
+        class="small-primary"
+        catchtap="openBook"
+        disabled="{{item.assignPickerDisabled}}"
+      >
+        先确认章节
+      </button>
       <picker
         wx:if="{{!item.canRecoverTranscription && item.canAssignChapterSource}}"
         class="chapter-move-picker"
