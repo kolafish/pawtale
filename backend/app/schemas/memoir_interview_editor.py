@@ -243,6 +243,8 @@ class MemoirBatchTranscriptCleanupPreviewRequest(BaseModel):
 class MemoirBatchTranscriptCleanupPreviewItem(BaseModel):
     utterance_id: str
     source_text: str
+    source_text_hash: str
+    source_transcript_version_id: str | None = None
     cleaned_text: str
     changed: bool
     provider: str | None = None
@@ -257,6 +259,8 @@ class MemoirBatchTranscriptCleanupPreviewResponse(BaseModel):
 
 class MemoirBatchTranscriptCleanupConfirmItem(BaseModel):
     utterance_id: str
+    source_text_hash: str = Field(min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$")
+    source_transcript_version_id: str | None = Field(default=None, max_length=36)
     cleaned_text: str = Field(min_length=1, max_length=20000)
     provider: str | None = Field(default=None, max_length=80)
     created_by: MemoirCreatedBy = MemoirCreatedBy.AI

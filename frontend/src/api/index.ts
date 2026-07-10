@@ -323,6 +323,8 @@ export const memoirTranscriptCleanupApi = {
     projectId: string,
     items: Array<{
       utterance_id: string;
+      source_text_hash: string;
+      source_transcript_version_id?: string | null;
       cleaned_text: string;
       provider?: string | null;
       created_by: string;

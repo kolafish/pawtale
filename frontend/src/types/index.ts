@@ -728,6 +728,8 @@ export interface MemoirDialectGlossaryResponse {
 export interface MemoirBatchTranscriptCleanupPreviewItem {
   utterance_id: string;
   source_text: string;
+  source_text_hash: string;
+  source_transcript_version_id?: string | null;
   cleaned_text: string;
   changed: boolean;
   provider?: string | null;

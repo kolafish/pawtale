@@ -69,7 +69,7 @@ from app.services.memoir.chapter_source_links import (
     mark_utterance_links_removed as _mark_utterance_links_removed,
     update_utterance_link_ref_fields as _update_utterance_link_ref_fields,
 )
-from app.services.memoir.utterance_editing_pipeline import schedule_source_routing_for_ready_utterance
+from app.services.memoir.utterance_editing_pipeline import schedule_source_processing_for_ready_utterance
 
 
 SYSTEM_PROMPT = "你是一位谨慎的中文口述稿校对助手，只做忠于原话的识别文字校正和口头语清理。"
@@ -946,26 +946,19 @@ async def _apply_edited_text(
         content=content,
         transcript_version_id=version.id,
     )
-    await source_cards.schedule_source_card_generation_job(
+    await schedule_source_processing_for_ready_utterance(
         db,
         project_id=utterance.voice_session.project_id,
-        utterance_id=utterance.id,
+        utterance=utterance,
         ai_model=ai_model,
-        reason=f"transcript_{version_type.value}",
+        source=f"transcript_{version_type.value}",
+        include_routing=not changed_chapter_ids,
     )
     if changed_chapter_ids:
         await schedule_chapter_auto_revisions(
             db,
             project_id=utterance.voice_session.project_id,
             chapter_ids=changed_chapter_ids,
-            ai_model=ai_model,
-        )
-    else:
-        await schedule_source_routing_for_ready_utterance(
-            db,
-            project_id=utterance.voice_session.project_id,
-            utterance=utterance,
-            source=f"transcript_{version_type.value}",
             ai_model=ai_model,
         )
     if commit:

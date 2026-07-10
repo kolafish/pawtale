@@ -18,9 +18,14 @@ from app.schemas.memoir_interview_editor import (
     MemoirDialectGlossaryResponse,
     MemoirDialectGlossaryUpdateRequest,
 )
+from app.services.memoir import voice_transcripts
 from app.services.memoir.access import load_memoir_project
 from app.services.memoir.source_disposition import is_countable_source_utterance
-from app.services.memoir import voice_transcripts
+from app.services.memoir.utterance_editing_pipeline import (
+    TranscriptMutationGuard,
+    claim_transcript_mutation_guard,
+    transcript_mutation_guard,
+)
 
 
 GLOSSARY_METADATA_KEY = "memoir_dialect_glossary_entries"
@@ -199,10 +204,13 @@ async def preview_batch_cleanup(
             context=context,
             strict=True,
         )
+        mutation_guard = transcript_mutation_guard(utterance)
         items.append(
             MemoirBatchTranscriptCleanupPreviewItem(
                 utterance_id=utterance.id,
                 source_text=source_text,
+                source_text_hash=mutation_guard.source_text_hash,
+                source_transcript_version_id=mutation_guard.transcript_version_id,
                 cleaned_text=cleaned.content,
                 changed=cleaned.content.strip() != source_text.strip(),
                 provider=cleaned.provider,
@@ -233,10 +241,21 @@ async def confirm_batch_cleanup(
         utterance_ids=list(item_by_utterance_id),
         allow_admin=allow_admin,
     )
-    for utterance in utterances:
-        _ensure_cleanup_source(utterance)
-
     try:
+        for utterance in utterances:
+            _ensure_cleanup_source(utterance)
+            item = item_by_utterance_id[utterance.id]
+            claimed = await claim_transcript_mutation_guard(
+                db,
+                utterance=utterance,
+                expected=TranscriptMutationGuard(
+                    source_text_hash=item.source_text_hash,
+                    transcript_version_id=item.source_transcript_version_id,
+                ),
+            )
+            if not claimed:
+                raise HTTPException(status_code=409, detail="讲述内容已更新，请重新生成整理预览")
+
         responses = []
         for utterance in utterances:
             item = item_by_utterance_id[utterance.id]

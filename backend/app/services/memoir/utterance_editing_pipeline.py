@@ -3,13 +3,13 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.domain.memoir.types import MemoirEditingJobType
-from app.models.memoir import MemoirEditingJob, MemoirVoiceSession, MemoirVoiceUtterance
-from app.services.memoir import editing_jobs
+from app.models.memoir import MemoirChatMessage, MemoirEditingJob, MemoirVoiceSession, MemoirVoiceUtterance
+from app.services.memoir import editing_jobs, source_cards
 from app.services.memoir.source_disposition import is_ignored_non_memoir_source
 
 
@@ -30,6 +30,18 @@ class SourceRoutingTranscriptGuard:
     stale_utterance_ids: tuple[str, ...] = ()
 
 
+@dataclass(frozen=True)
+class TranscriptMutationGuard:
+    source_text_hash: str
+    transcript_version_id: str | None
+
+
+@dataclass(frozen=True)
+class SourceProcessingJobs:
+    source_card_job: MemoirEditingJob | None
+    route_job: MemoirEditingJob | None
+
+
 def current_utterance_text(utterance: MemoirVoiceUtterance) -> str:
     return (utterance.transcript_edited or "").strip() or (utterance.transcript_raw or "").strip()
 
@@ -40,6 +52,48 @@ def current_transcript_version_id(utterance: MemoirVoiceUtterance) -> str | None
 
 def source_text_hash(text: str) -> str:
     return hashlib.sha256(text.strip().encode("utf-8")).hexdigest()
+
+
+def transcript_mutation_guard(utterance: MemoirVoiceUtterance) -> TranscriptMutationGuard:
+    return TranscriptMutationGuard(
+        source_text_hash=source_text_hash(current_utterance_text(utterance)),
+        transcript_version_id=current_transcript_version_id(utterance),
+    )
+
+
+async def claim_transcript_mutation_guard(
+    db: AsyncSession,
+    *,
+    utterance: MemoirVoiceUtterance,
+    expected: TranscriptMutationGuard,
+) -> bool:
+    if transcript_mutation_guard(utterance) != expected:
+        return False
+    message = utterance.chat_message
+    if message is None:
+        return False
+    if source_text_hash(message.content_text) != expected.source_text_hash:
+        return False
+
+    version_filter = (
+        MemoirChatMessage.transcript_version_id.is_(None)
+        if expected.transcript_version_id is None
+        else MemoirChatMessage.transcript_version_id == expected.transcript_version_id
+    )
+    result = await db.execute(
+        update(MemoirChatMessage)
+        .where(
+            MemoirChatMessage.id == message.id,
+            MemoirChatMessage.content_text == message.content_text,
+            version_filter,
+        )
+        .values(
+            content_text=MemoirChatMessage.content_text,
+            transcript_version_id=MemoirChatMessage.transcript_version_id,
+            updated_at=MemoirChatMessage.updated_at,
+        )
+    )
+    return result.rowcount == 1
 
 
 async def schedule_source_routing_for_ready_utterance(
@@ -82,6 +136,38 @@ async def schedule_source_routing_for_ready_utterance(
         dedupe_key=f"route_source:{utterance.id}",
         replace_completed=replace_completed,
     )
+
+
+async def schedule_source_processing_for_ready_utterance(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    utterance: MemoirVoiceUtterance,
+    source: str,
+    ai_model: str | None = None,
+    include_routing: bool = True,
+) -> SourceProcessingJobs:
+    if not current_utterance_text(utterance) or is_ignored_non_memoir_source(utterance):
+        return SourceProcessingJobs(source_card_job=None, route_job=None)
+    source_card_job = await source_cards.schedule_source_card_generation_job(
+        db,
+        project_id=project_id,
+        utterance_id=utterance.id,
+        ai_model=ai_model,
+        reason=source,
+    )
+    route_job = (
+        await schedule_source_routing_for_ready_utterance(
+            db,
+            project_id=project_id,
+            utterance=utterance,
+            source=source,
+            ai_model=ai_model,
+        )
+        if include_routing
+        else None
+    )
+    return SourceProcessingJobs(source_card_job=source_card_job, route_job=route_job)
 
 
 async def validate_source_routing_transcript_guard(
