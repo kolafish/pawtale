@@ -54,7 +54,9 @@ import {
   transcriptCreatedAtText,
   transcriptTitleText,
   transcriptVoiceEditPreviewView,
+  transcriptVoiceEditStateView,
   type TranscriptTextSegment,
+  type TranscriptVoiceEditPhase,
   type TranscriptVoiceEditPreviewView,
 } from "../../services/transcript-view-model";
 import {
@@ -159,8 +161,38 @@ interface TranscriptDetailData extends TranscriptShareVideoData {
   voiceEditLoading: boolean;
   voiceEditSaving: boolean;
   voiceEditInstructionText: string;
+  voiceEditPhase: TranscriptVoiceEditPhase;
   voiceEditStatusText: string;
+  voiceEditStatusDetail: string;
+  voiceEditStatusClass: string;
+  voiceEditStatusVisible: boolean;
+  voiceEditActionText: string;
   voiceEditPreview: TranscriptVoiceEditPreviewView | null;
+}
+
+type VoiceEditStateData = Pick<
+  TranscriptDetailData,
+  | "voiceEditPhase"
+  | "voiceEditStatusText"
+  | "voiceEditStatusDetail"
+  | "voiceEditStatusClass"
+  | "voiceEditStatusVisible"
+  | "voiceEditActionText"
+>;
+
+function voiceEditStateData(
+  phase: TranscriptVoiceEditPhase,
+  statusDetail = "",
+): VoiceEditStateData {
+  const state = transcriptVoiceEditStateView(phase, statusDetail);
+  return {
+    voiceEditPhase: state.phase,
+    voiceEditStatusText: state.statusText,
+    voiceEditStatusDetail: state.statusDetail,
+    voiceEditStatusClass: state.statusClass,
+    voiceEditStatusVisible: state.statusVisible,
+    voiceEditActionText: state.actionText,
+  };
 }
 
 const COLLAPSIBLE_QUESTION_CHAR_COUNT = 72;
@@ -428,8 +460,8 @@ definePage<TranscriptDetailData>()({
     voiceEditLoading: false,
     voiceEditSaving: false,
     voiceEditInstructionText: "",
-    voiceEditStatusText: "",
     voiceEditPreview: null,
+    ...voiceEditStateData("idle"),
     ...initialTranscriptShareVideoData(),
   },
 
@@ -1066,9 +1098,9 @@ definePage<TranscriptDetailData>()({
       voiceEditLoading: false,
       voiceEditSaving: false,
       voiceEditInstructionText: "",
-      voiceEditStatusText: "正在听你说修改意见",
       voiceEditPreview: null,
       error: "",
+      ...voiceEditStateData("listening"),
     });
     try {
       const instructionText = await recordMemoirVoiceSearchQuery({
@@ -1079,7 +1111,7 @@ definePage<TranscriptDetailData>()({
           this.setData({
             voiceEditRecording: false,
             voiceEditLoading: true,
-            voiceEditStatusText: "正在识别修改意见",
+            ...voiceEditStateData("transcribing"),
           });
         },
         emptyTranscriptMessage: "没有识别到修改意见，请再说一次",
@@ -1090,7 +1122,7 @@ definePage<TranscriptDetailData>()({
       }
       this.setData({
         voiceEditInstructionText: instructionText,
-        voiceEditStatusText: "正在生成修改预览",
+        ...voiceEditStateData("generating"),
       });
       const preview = await previewMemoirVoiceTranscriptVoiceEdit(item.id, instructionText);
       if (requestToken !== this.voiceEditToken) {
@@ -1098,17 +1130,18 @@ definePage<TranscriptDetailData>()({
       }
       this.setData({
         voiceEditPreview: transcriptVoiceEditPreviewView(preview),
-        voiceEditStatusText: preview.action === "revise_transcript" ? "请确认修改内容" : preview.reply_text,
+        ...voiceEditStateData(
+          preview.action === "revise_transcript" ? "review" : "clarify",
+          preview.action === "revise_transcript" ? "" : preview.reply_text,
+        ),
       });
       trackAuditAction("transcript.detail_voice_edit_preview", { action: preview.action }, { projectId: item.project_id });
     } catch (error) {
       if (requestToken !== this.voiceEditToken) {
         return;
       }
-      this.setData({
-        error: error instanceof Error ? error.message : "语音修改失败",
-        voiceEditStatusText: "",
-      });
+      const message = error instanceof Error ? error.message : "语音修改失败";
+      this.setData({ error: message, ...voiceEditStateData("error", message) });
     } finally {
       if (requestToken === this.voiceEditToken) {
         this.setData({
@@ -1129,9 +1162,9 @@ definePage<TranscriptDetailData>()({
       voiceEditLoading: false,
       voiceEditSaving: false,
       voiceEditInstructionText: "",
-      voiceEditStatusText: "",
       voiceEditPreview: null,
       error: "",
+      ...voiceEditStateData("idle"),
     });
   },
 
@@ -1151,23 +1184,30 @@ definePage<TranscriptDetailData>()({
     }
     const content = preview.editedText.trim();
     if (!content) {
-      this.setData({ error: "修改后的成书文字不能为空" });
+      const message = "修改后的成书文字不能为空";
+      this.setData({ error: message, ...voiceEditStateData("error", message) });
       return;
     }
-    this.setData({ voiceEditSaving: true, saving: true, error: "" });
+    this.setData({
+      voiceEditSaving: true,
+      saving: true,
+      error: "",
+      ...voiceEditStateData("saving"),
+    });
     try {
       const updated = await updateMemoirVoiceTranscript(item.id, content);
       this.setData({
         item: toViewItem(updated, this.data.bookPlan),
         voiceEditInstructionText: "",
-        voiceEditStatusText: "",
         voiceEditPreview: null,
+        ...voiceEditStateData("idle"),
       });
       this.resetShareVideoState();
       trackAuditAction("transcript.detail_voice_edit_save", {}, { projectId: updated.project_id });
       wx.showToast({ title: "已保存修改", icon: "success" });
     } catch (error) {
-      this.setData({ error: error instanceof Error ? error.message : "保存修改失败" });
+      const message = error instanceof Error ? error.message : "保存修改失败";
+      this.setData({ error: message, ...voiceEditStateData("error", message) });
     } finally {
       this.setData({ voiceEditSaving: false, saving: false });
     }

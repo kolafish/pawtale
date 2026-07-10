@@ -477,13 +477,123 @@
   justify-content: flex-start;
 }
 
-.voice-edit-example {
+.edit-tools-card .primary-button,
+.edit-tools-card .ghost-button {
+  height: 80rpx;
+  padding: 0 20rpx;
+  text-align: center;
+}
+
+.voice-edit-count.listening,
+.voice-edit-count.working,
+.voice-edit-count.warning {
+  color: #8f5b2a;
+}
+
+.voice-edit-count.ready {
+  color: #2f6f4e;
+}
+
+.voice-edit-count.error {
+  color: #b84a5a;
+}
+
+.voice-edit-status {
+  display: flex;
+  align-items: flex-start;
+  gap: 16rpx;
+  padding: 18rpx 20rpx;
+  border-radius: 14rpx;
+  background: #f8f3ed;
+}
+
+.voice-edit-status.listening {
+  background: #fff0ec;
+}
+
+.voice-edit-status.working,
+.voice-edit-status.warning {
+  background: #fff7e8;
+}
+
+.voice-edit-status.ready {
+  background: #edf6ef;
+}
+
+.voice-edit-status.error {
+  background: #fff1f3;
+}
+
+.voice-edit-status-mark {
+  flex: 0 0 40rpx;
+  width: 40rpx;
+  height: 40rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.voice-edit-status-dot {
+  width: 12rpx;
+  height: 12rpx;
+  border-radius: 999rpx;
+  background: #a64b3e;
+  box-shadow: 0 0 0 8rpx rgba(166, 75, 62, 0.12);
+}
+
+.voice-edit-status.working .voice-edit-status-dot,
+.voice-edit-status.warning .voice-edit-status-dot {
+  background: #a66a2e;
+  box-shadow: 0 0 0 8rpx rgba(166, 106, 46, 0.12);
+}
+
+.voice-edit-status.ready .voice-edit-status-dot {
+  background: #2f7a54;
+  box-shadow: 0 0 0 8rpx rgba(47, 122, 84, 0.12);
+}
+
+.voice-edit-status.error .voice-edit-status-dot {
+  background: #b84a5a;
+  box-shadow: 0 0 0 8rpx rgba(184, 74, 90, 0.12);
+}
+
+.voice-edit-status-copy {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.voice-edit-status-title,
+.voice-edit-status-detail {
   display: block;
-  margin-top: 16rpx;
-  color: #7b6f68;
+  word-break: break-word;
+}
+
+.voice-edit-status-title {
+  color: #3a2119;
+  font-size: 27rpx;
+  font-weight: 850;
+  line-height: 1.35;
+}
+
+.voice-edit-status-detail {
+  margin-top: 4rpx;
+  color: #6f625a;
   font-size: 24rpx;
   line-height: 1.45;
-  word-break: break-word;
+}
+
+.voice-edit-change-scope {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 12rpx;
+  padding: 5rpx 10rpx;
+  border-radius: 8rpx;
+  background: #f4ece4;
+  color: #8f3e35;
+  font-size: 21rpx;
+  font-weight: 800;
+  line-height: 1.2;
 }
 
 .voice-edit-block {
@@ -531,6 +641,7 @@
 
 .voice-edit-change-text {
   display: block;
+  margin-top: 10rpx;
   color: #7b4a40;
   font-size: 26rpx;
   font-weight: 800;
