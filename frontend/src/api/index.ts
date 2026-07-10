@@ -25,6 +25,8 @@ import type {
   AuditDashboardResponse,
   AuditUserDayResponse,
   MemoirChapterSourceEditor,
+  MemoirBookPlan,
+  MemoirBookPlanStructureCommand,
   MemoirBatchTranscriptCleanupConfirmResponse,
   MemoirBatchTranscriptCleanupPreviewResponse,
   MemoirDialectGlossaryEntry,
@@ -336,6 +338,39 @@ export const memoirChapterSourceEditorApi = {
     api.post<MemoirChapterSourceEditor>(
       `/memoir/projects/${projectId}/chapter-source-editor/removals`,
       { chapter_id: chapterId, utterance_ids: utteranceIds, ai_model: aiModel },
+    ).then(r => r.data),
+  audioPlaybackUrl: (audioFileId: string) =>
+    `/api/mobile/memoir/audio-files/${encodeURIComponent(audioFileId)}/playback`,
+};
+
+export const memoirBookEditorApi = {
+  generatePlan: (projectId: string, aiModel?: string) =>
+    api.post<MemoirBookPlan>(
+      `/memoir/projects/${projectId}/book-editor/plan/generate`,
+      { ai_model: aiModel, max_chapters: 8 },
+    ).then(r => r.data),
+  confirmPlan: (
+    projectId: string,
+    plan: Pick<MemoirBookPlan, 'title' | 'chapters'>,
+  ) => api.put<MemoirBookPlan>(
+    `/memoir/projects/${projectId}/book-editor/plan`,
+    {
+      title: plan.title,
+      chapters: plan.chapters.map(chapter => ({
+        title: chapter.title,
+        source_refs: chapter.source_refs,
+      })),
+    },
+  ).then(r => r.data),
+  applyStructureCommand: (projectId: string, command: MemoirBookPlanStructureCommand) =>
+    api.post<MemoirBookPlan>(
+      `/memoir/projects/${projectId}/book-editor/plan/structure-commands`,
+      command,
+    ).then(r => r.data),
+  updateChapterTitle: (projectId: string, chapterId: string, title: string) =>
+    api.patch<MemoirBookPlan>(
+      `/memoir/projects/${projectId}/book-editor/chapters/${chapterId}/title`,
+      { title },
     ).then(r => r.data),
 };
 
