@@ -72,18 +72,9 @@ import {
   type PageTextInputEvent,
 } from "../../services/page-input";
 import {
-  SHARE_VIDEO_BACKGROUND_MODE_OPTIONS,
-  SHARE_VIDEO_BACKGROUND_SOURCE_OPTIONS,
-  SHARE_VIDEO_BACKGROUND_STYLE_OPTIONS,
-  readSelectedShareVideoBackgroundMode,
-  readSelectedShareVideoBackgroundSource,
-  readSelectedShareVideoBackgroundStyle,
-  saveSelectedShareVideoBackgroundMode,
-  saveSelectedShareVideoBackgroundSource,
-  saveSelectedShareVideoBackgroundStyle,
-  shareVideoBackgroundModeLabel,
-  shareVideoBackgroundSourceLabel,
-  shareVideoBackgroundStyleLabel,
+  readShareVideoBackgroundSettings,
+  saveShareVideoBackgroundSettings,
+  type ShareVideoBackgroundSettings,
 } from "../../services/share-video-background-settings";
 
 type TextAreaEvent = PageTextInputEvent;
@@ -370,35 +361,20 @@ function shareVideoSelectionPatch(
   };
 }
 
-function shareVideoBackgroundOptions(
-  context: MemoirTranscriptShareVideoContext | null,
-): MemoirShareVideoBackgroundStyle[] {
-  return context?.background_styles?.length
-    ? context.background_styles
-    : SHARE_VIDEO_BACKGROUND_STYLE_OPTIONS;
-}
-
-function shareVideoBackgroundSourceOptions(
-  context: MemoirTranscriptShareVideoContext | null,
-): MemoirShareVideoBackgroundSource[] {
-  return context?.background_sources?.length
-    ? context.background_sources
-    : SHARE_VIDEO_BACKGROUND_SOURCE_OPTIONS;
-}
-
-function shareVideoBackgroundModeOptions(
-  context: MemoirTranscriptShareVideoContext | null,
-): MemoirShareVideoBackgroundMode[] {
-  return context?.background_modes?.length
-    ? context.background_modes
-    : SHARE_VIDEO_BACKGROUND_MODE_OPTIONS;
+function selectedShareVideoOption<T extends { value: string }>(
+  options: T[],
+  preferredValue: string,
+  defaultValue: string,
+): T | null {
+  return options.find((option) => option.value === preferredValue)
+    || options.find((option) => option.value === defaultValue)
+    || options[0]
+    || null;
 }
 
 function shareVideoBackgroundPatch(
   context: MemoirTranscriptShareVideoContext | null,
-  preferredSource: string = readSelectedShareVideoBackgroundSource(),
-  preferredStyle: string = readSelectedShareVideoBackgroundStyle(),
-  preferredMode: string = readSelectedShareVideoBackgroundMode(),
+  preferred: ShareVideoBackgroundSettings = readShareVideoBackgroundSettings(),
 ): Pick<
   TranscriptDetailData,
   | "shareVideoBackgroundSource"
@@ -413,43 +389,48 @@ function shareVideoBackgroundPatch(
   | "shareVideoBackgroundModeLabel"
   | "shareVideoBackgroundModeOptions"
 > {
-  const options = shareVideoBackgroundOptions(context);
-  const modeOptions = shareVideoBackgroundModeOptions(context);
-  const sourceOptions = shareVideoBackgroundSourceOptions(context);
-  const fallbackSource = context?.default_background_source || SHARE_VIDEO_BACKGROUND_SOURCE_OPTIONS[0].value;
-  const fallbackStyle = context?.default_background_style || SHARE_VIDEO_BACKGROUND_STYLE_OPTIONS[0].value;
-  const fallbackMode = context?.default_background_mode || SHARE_VIDEO_BACKGROUND_MODE_OPTIONS[0].value;
-  const optionValues = new Set(options.map((option) => option.value));
-  const modeOptionValues = new Set(modeOptions.map((option) => option.value));
-  const sourceOptionValues = new Set(sourceOptions.map((option) => option.value));
-  const normalizedSource = sourceOptionValues.has(preferredSource)
-    ? preferredSource
-    : (sourceOptionValues.has(fallbackSource) ? fallbackSource : sourceOptions[0]?.value || fallbackSource);
-  const normalizedStyle = optionValues.has(preferredStyle)
-    ? preferredStyle
-    : (optionValues.has(fallbackStyle) ? fallbackStyle : options[0]?.value || fallbackStyle);
-  const normalizedMode = modeOptionValues.has(preferredMode)
-    ? preferredMode
-    : (modeOptionValues.has(fallbackMode) ? fallbackMode : modeOptions[0]?.value || fallbackMode);
-  const sourceLabel = sourceOptions.find((option) => option.value === normalizedSource)?.label
-    || shareVideoBackgroundSourceLabel(normalizedSource);
-  const label = options.find((option) => option.value === normalizedStyle)?.label
-    || shareVideoBackgroundStyleLabel(normalizedStyle);
-  const modeLabel = modeOptions.find((option) => option.value === normalizedMode)?.label
-    || shareVideoBackgroundModeLabel(normalizedMode);
+  const sourceOptions = context?.background_sources || [];
+  const styleOptions = context?.background_styles || [];
+  const modeOptions = context?.background_modes || [];
+  const source = selectedShareVideoOption(
+    sourceOptions,
+    preferred.backgroundSource,
+    context?.default_background_source || "",
+  );
+  const style = selectedShareVideoOption(
+    styleOptions,
+    preferred.backgroundStyle,
+    context?.default_background_style || "",
+  );
+  const mode = selectedShareVideoOption(
+    modeOptions,
+    preferred.backgroundMode,
+    context?.default_background_mode || "",
+  );
+  const normalizedSource = source?.value || "";
   return {
     shareVideoBackgroundSource: normalizedSource,
-    shareVideoBackgroundSourceLabel: sourceLabel,
+    shareVideoBackgroundSourceLabel: source?.label || "",
     shareVideoBackgroundSourceOptions: sourceOptions,
     shareVideoBackgroundUsesAi: normalizedSource === "ai",
     shareVideoBackgroundUsesCustom: normalizedSource === "custom",
-    shareVideoBackgroundStyle: normalizedStyle,
-    shareVideoBackgroundStyleLabel: label,
-    shareVideoBackgroundStyleOptions: options,
-    shareVideoBackgroundMode: normalizedMode,
-    shareVideoBackgroundModeLabel: modeLabel,
+    shareVideoBackgroundStyle: style?.value || "",
+    shareVideoBackgroundStyleLabel: style?.label || "",
+    shareVideoBackgroundStyleOptions: styleOptions,
+    shareVideoBackgroundMode: mode?.value || "",
+    shareVideoBackgroundModeLabel: mode?.label || "",
     shareVideoBackgroundModeOptions: modeOptions,
   };
+}
+
+function saveShareVideoBackgroundSelection(
+  patch: ReturnType<typeof shareVideoBackgroundPatch>,
+): void {
+  saveShareVideoBackgroundSettings({
+    backgroundSource: patch.shareVideoBackgroundSource,
+    backgroundStyle: patch.shareVideoBackgroundStyle,
+    backgroundMode: patch.shareVideoBackgroundMode,
+  });
 }
 
 function shareVideoJobStatusText(job: MemoirShareVideoJob): string {
@@ -1000,16 +981,16 @@ definePage<TranscriptDetailData>()({
     ) {
       return;
     }
-    const backgroundSource = saveSelectedShareVideoBackgroundSource(datasetString(event, "backgroundSource"));
+    const backgroundPatch = shareVideoBackgroundPatch(this.data.shareVideoContext, {
+      backgroundSource: datasetString(event, "backgroundSource"),
+      backgroundStyle: this.data.shareVideoBackgroundStyle,
+      backgroundMode: this.data.shareVideoBackgroundMode,
+    });
+    saveShareVideoBackgroundSelection(backgroundPatch);
     this.cancelShareVideoPolling();
     this.shareVideoFileCache = {};
     this.setData({
-      ...shareVideoBackgroundPatch(
-        this.data.shareVideoContext,
-        backgroundSource,
-        this.data.shareVideoBackgroundStyle,
-        this.data.shareVideoBackgroundMode,
-      ),
+      ...backgroundPatch,
       shareVideoError: "",
       shareVideoJob: null,
       shareVideoPreviewPath: "",
@@ -1027,16 +1008,16 @@ definePage<TranscriptDetailData>()({
     ) {
       return;
     }
-    const backgroundStyle = saveSelectedShareVideoBackgroundStyle(datasetString(event, "backgroundStyle"));
+    const backgroundPatch = shareVideoBackgroundPatch(this.data.shareVideoContext, {
+      backgroundSource: this.data.shareVideoBackgroundSource,
+      backgroundStyle: datasetString(event, "backgroundStyle"),
+      backgroundMode: this.data.shareVideoBackgroundMode,
+    });
+    saveShareVideoBackgroundSelection(backgroundPatch);
     this.cancelShareVideoPolling();
     this.shareVideoFileCache = {};
     this.setData({
-      ...shareVideoBackgroundPatch(
-        this.data.shareVideoContext,
-        this.data.shareVideoBackgroundSource,
-        backgroundStyle,
-        this.data.shareVideoBackgroundMode,
-      ),
+      ...backgroundPatch,
       shareVideoError: "",
       shareVideoJob: null,
       shareVideoPreviewPath: "",
@@ -1054,16 +1035,16 @@ definePage<TranscriptDetailData>()({
     ) {
       return;
     }
-    const backgroundMode = saveSelectedShareVideoBackgroundMode(datasetString(event, "backgroundMode"));
+    const backgroundPatch = shareVideoBackgroundPatch(this.data.shareVideoContext, {
+      backgroundSource: this.data.shareVideoBackgroundSource,
+      backgroundStyle: this.data.shareVideoBackgroundStyle,
+      backgroundMode: datasetString(event, "backgroundMode"),
+    });
+    saveShareVideoBackgroundSelection(backgroundPatch);
     this.cancelShareVideoPolling();
     this.shareVideoFileCache = {};
     this.setData({
-      ...shareVideoBackgroundPatch(
-        this.data.shareVideoContext,
-        this.data.shareVideoBackgroundSource,
-        this.data.shareVideoBackgroundStyle,
-        backgroundMode,
-      ),
+      ...backgroundPatch,
       shareVideoError: "",
       shareVideoJob: null,
       shareVideoPreviewPath: "",
@@ -1096,14 +1077,14 @@ definePage<TranscriptDetailData>()({
       this.shareVideoBackgroundUploadToken += 1;
       const token = this.shareVideoBackgroundUploadToken;
       uploadToken = token;
-      const backgroundSource = saveSelectedShareVideoBackgroundSource("custom");
+      const backgroundPatch = shareVideoBackgroundPatch(this.data.shareVideoContext, {
+        backgroundSource: "custom",
+        backgroundStyle: this.data.shareVideoBackgroundStyle,
+        backgroundMode: this.data.shareVideoBackgroundMode,
+      });
+      saveShareVideoBackgroundSelection(backgroundPatch);
       this.setData({
-        ...shareVideoBackgroundPatch(
-          this.data.shareVideoContext,
-          backgroundSource,
-          this.data.shareVideoBackgroundStyle,
-          this.data.shareVideoBackgroundMode,
-        ),
+        ...backgroundPatch,
         shareVideoCustomBackgroundUploading: true,
         shareVideoCustomBackgroundStatusText: "正在处理背景图片",
         shareVideoError: "",

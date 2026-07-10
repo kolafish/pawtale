@@ -96,7 +96,7 @@ function sampleBookPlan() {
   };
 }
 
-function sampleShareVideoContext(utteranceId = "utterance-share") {
+function sampleShareVideoContext(utteranceId = "utterance-share", overrides = {}) {
   const firstText = "爷爷退休后还在帮公司做事。";
   const secondText = "后来大家都很信任他。";
   const transcriptText = `${firstText}${secondText}`;
@@ -188,6 +188,7 @@ function sampleShareVideoContext(utteranceId = "utterance-share") {
         selectable: true,
       },
     ],
+    ...overrides,
   };
 }
 
@@ -655,6 +656,76 @@ test("transcript detail page creates share video from selected corrected segment
   assert.equal(shareCalls[0].filePath, "/tmp/share-video.mp4");
   assert.equal(shareCalls[0].fileName, "爷爷退休后仍帮公司做事.mp4");
   assert.equal(context.data.shareVideoStatusText, "已打开微信分享");
+});
+
+test("transcript detail page uses backend background options as the configuration source", async () => {
+  const baseContext = sampleShareVideoContext("utterance-share");
+  const backendContext = {
+    ...baseContext,
+    background_styles: [
+      ...baseContext.background_styles,
+      {
+        value: "documentary",
+        label: "纪实影像",
+        description: "由后端新增的纪实风格",
+      },
+    ],
+    background_modes: [
+      ...baseContext.background_modes,
+      {
+        value: "story_beats",
+        label: "故事节拍",
+        description: "由后端新增的分镜模式",
+      },
+    ],
+  };
+  const storageWrites = [];
+  global.wx = {
+    getStorageSync(key) {
+      assert.equal(key, "pawtale_share_video_background_settings");
+      return {
+        backgroundSource: "ai",
+        backgroundStyle: "documentary",
+        backgroundMode: "story_beats",
+      };
+    },
+    setStorageSync(key, value) {
+      storageWrites.push({ key, value });
+    },
+  };
+  const { page } = loadTranscriptDetailPage({
+    voiceApiExports: {
+      getMemoirVoiceTranscript: async (id) => sampleTranscript(id),
+      getMemoirTranscriptShareVideoContext: async () => backendContext,
+    },
+  });
+  const context = pageContext(page);
+
+  await page.onLoad.call(context, { id: "utterance-share" });
+  await page.toggleShareVideoPanel.call(context);
+
+  assert.equal(context.data.shareVideoBackgroundStyle, "documentary");
+  assert.equal(context.data.shareVideoBackgroundStyleLabel, "纪实影像");
+  assert.equal(context.data.shareVideoBackgroundMode, "story_beats");
+  assert.equal(context.data.shareVideoBackgroundModeLabel, "故事节拍");
+  assert.equal(context.data.shareVideoBackgroundStyleOptions.length, 4);
+  assert.equal(context.data.shareVideoBackgroundModeOptions.length, 4);
+
+  page.selectShareVideoBackgroundStyle.call(context, {
+    currentTarget: { dataset: { backgroundStyle: "documentary" } },
+  });
+
+  assert.deepEqual(storageWrites, [
+    {
+      key: "pawtale_share_video_background_settings",
+      value: {
+        backgroundSource: "ai",
+        backgroundStyle: "documentary",
+        backgroundMode: "story_beats",
+      },
+    },
+  ]);
+  delete global.wx;
 });
 
 test("transcript detail page requires a custom background asset before creating video", async () => {

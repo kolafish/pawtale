@@ -384,13 +384,13 @@ export interface MemoirTranscriptShareVideoContext {
   alignment_confidence?: number | null;
   min_select_ms: number;
   max_select_ms: number;
-  ai_background_enabled?: boolean;
-  default_background_source?: string;
-  default_background_style?: string;
-  default_background_mode?: string;
-  background_sources?: MemoirShareVideoBackgroundSource[];
-  background_styles?: MemoirShareVideoBackgroundStyle[];
-  background_modes?: MemoirShareVideoBackgroundMode[];
+  ai_background_enabled: boolean;
+  default_background_source: string;
+  default_background_style: string;
+  default_background_mode: string;
+  background_sources: MemoirShareVideoBackgroundSource[];
+  background_styles: MemoirShareVideoBackgroundStyle[];
+  background_modes: MemoirShareVideoBackgroundMode[];
   segments: MemoirTranscriptShareVideoSegment[];
 }
 
