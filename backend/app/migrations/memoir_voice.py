@@ -497,21 +497,19 @@ async def migrate_memoir_voice_schema(engine: AsyncEngine) -> dict[str, list[str
             )
             changed_columns.append("memoir_transcript_versions.source_artifact_id")
 
-        await conn.execute(
-            text(
-                "CREATE INDEX IF NOT EXISTS ix_memoir_transcript_versions_voice_session_id "
-                "ON memoir_transcript_versions (voice_session_id)"
+        transcript_version_indexes = {
+            "ix_memoir_transcript_versions_voice_session_id": "voice_session_id",
+            "ix_memoir_transcript_versions_source_type_created": (
+                "source_artifact_id, version_type, created_at"
+            ),
+        }
+        for index_name, columns_sql in transcript_version_indexes.items():
+            if await _index_exists(conn, index_name):
+                continue
+            await conn.execute(
+                text(f"CREATE INDEX {index_name} ON memoir_transcript_versions ({columns_sql})")
             )
-        )
-        changed_indexes.append("ix_memoir_transcript_versions_voice_session_id")
-
-        await conn.execute(
-            text(
-                "CREATE INDEX IF NOT EXISTS ix_memoir_transcript_versions_source_type_created "
-                "ON memoir_transcript_versions (source_artifact_id, version_type, created_at)"
-            )
-        )
-        changed_indexes.append("ix_memoir_transcript_versions_source_type_created")
+            changed_indexes.append(index_name)
 
         fts_result = await _ensure_transcript_fts(conn)
         changed_tables.extend(fts_result["changed_tables"])

@@ -53,6 +53,11 @@ async def test_memoir_voice_migration_adds_transcript_voice_session_column():
 
         assert result["changed_columns"] == ["memoir_transcript_versions.voice_session_id"]
         assert second_result["changed_columns"] == []
+        assert {
+            "ix_memoir_transcript_versions_voice_session_id",
+            "ix_memoir_transcript_versions_source_type_created",
+        }.issubset(result["changed_indexes"])
+        assert second_result["changed_indexes"] == []
         assert "voice_session_id" in columns
         assert "source_artifact_id" in columns
         assert index_name == "ix_memoir_transcript_versions_voice_session_id"
