@@ -44,6 +44,7 @@ from app.services.memoir.source_disposition import (
     clear_source_route_disposition,
     is_countable_source_utterance,
 )
+from app.services.memoir.utterance_editing_pipeline import schedule_source_processing_for_ready_utterance
 
 
 QUESTION_ROLES = {
@@ -51,6 +52,7 @@ QUESTION_ROLES = {
     MemoirChatMessageRole.ASSISTANT.value,
 }
 MUTATION_SOURCE = "web_interview_editor"
+QUESTION_CONVERTED_SOURCE = "interview_question_converted_to_answer"
 
 
 def _message_order_key(message: MemoirChatMessage) -> tuple[int, object, str]:
@@ -785,6 +787,14 @@ async def convert_interview_question_to_answer(
                 utterance_id=utterance.id,
                 version_type=MemoirTranscriptVersionType.USER_EDITED,
             )
+
+    for utterance in utterances:
+        await schedule_source_processing_for_ready_utterance(
+            db,
+            project_id=project_id,
+            utterance=utterance,
+            source=QUESTION_CONVERTED_SOURCE,
+        )
 
     await db.commit()
     return await get_interview_session_detail(

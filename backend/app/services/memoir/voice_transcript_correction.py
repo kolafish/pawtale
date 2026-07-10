@@ -12,9 +12,8 @@ from app.domain.memoir.types import (
 )
 from app.models.memoir import MemoirEditingJob, MemoirTranscriptVersion, MemoirVoiceUtterance
 from app.services.memoir import editing_jobs
-from app.services.memoir import source_cards
 from app.services.memoir.editing_jobs import EditingJobResult
-from app.services.memoir.utterance_editing_pipeline import schedule_source_routing_for_ready_utterance
+from app.services.memoir.utterance_editing_pipeline import schedule_source_processing_for_ready_utterance
 from app.services.memoir.voice_transcripts import (
     generate_cleaned_transcript_text,
     load_voice_transcript_cleanup_context,
@@ -79,13 +78,7 @@ async def run_transcript_correction_job(
     message = utterance.chat_message
     raw_transcript_version_id = str(payload.get("raw_transcript_version_id") or "").strip()
     if (utterance.transcript_edited or "").strip():
-        source_card_job = await source_cards.schedule_source_card_generation_job(
-            db,
-            project_id=job.project_id,
-            utterance_id=utterance.id,
-            reason="transcript_already_edited",
-        )
-        route_job = await schedule_source_routing_for_ready_utterance(
+        processing_jobs = await schedule_source_processing_for_ready_utterance(
             db,
             project_id=job.project_id,
             utterance=utterance,
@@ -95,19 +88,15 @@ async def run_transcript_correction_job(
             status=MemoirEditingJobStatus.SKIPPED,
             result_json={
                 "utterance_id": utterance.id,
-                "route_source_job_id": route_job.id if route_job else None,
-                "source_card_job_id": source_card_job.id,
+                "route_source_job_id": processing_jobs.route_job.id if processing_jobs.route_job else None,
+                "source_card_job_id": (
+                    processing_jobs.source_card_job.id if processing_jobs.source_card_job else None
+                ),
             },
             error_message="transcript already edited",
         )
     if message and raw_transcript_version_id and message.transcript_version_id != raw_transcript_version_id:
-        source_card_job = await source_cards.schedule_source_card_generation_job(
-            db,
-            project_id=job.project_id,
-            utterance_id=utterance.id,
-            reason="transcript_version_already_changed",
-        )
-        route_job = await schedule_source_routing_for_ready_utterance(
+        processing_jobs = await schedule_source_processing_for_ready_utterance(
             db,
             project_id=job.project_id,
             utterance=utterance,
@@ -117,8 +106,10 @@ async def run_transcript_correction_job(
             status=MemoirEditingJobStatus.SKIPPED,
             result_json={
                 "utterance_id": utterance.id,
-                "route_source_job_id": route_job.id if route_job else None,
-                "source_card_job_id": source_card_job.id,
+                "route_source_job_id": processing_jobs.route_job.id if processing_jobs.route_job else None,
+                "source_card_job_id": (
+                    processing_jobs.source_card_job.id if processing_jobs.source_card_job else None
+                ),
             },
             error_message="transcript version changed",
         )
@@ -164,17 +155,11 @@ async def run_transcript_correction_job(
         utterance_id=utterance.id,
         version_type=MemoirTranscriptVersionType.DIALECT_CORRECTED,
     )
-    route_job = await schedule_source_routing_for_ready_utterance(
+    processing_jobs = await schedule_source_processing_for_ready_utterance(
         db,
         project_id=job.project_id,
         utterance=utterance,
         source="transcript_correction_succeeded",
-    )
-    source_card_job = await source_cards.schedule_source_card_generation_job(
-        db,
-        project_id=job.project_id,
-        utterance_id=utterance.id,
-        reason="transcript_correction_succeeded",
     )
     return EditingJobResult(
         result_json={
@@ -182,7 +167,7 @@ async def run_transcript_correction_job(
             "transcript_version_id": corrected_version.id,
             "provider": cleaned.provider,
             "created_by": cleaned.created_by.value,
-            "route_source_job_id": route_job.id if route_job else None,
-            "source_card_job_id": source_card_job.id,
+            "route_source_job_id": processing_jobs.route_job.id if processing_jobs.route_job else None,
+            "source_card_job_id": processing_jobs.source_card_job.id if processing_jobs.source_card_job else None,
         }
     )

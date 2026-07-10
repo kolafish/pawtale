@@ -4,12 +4,14 @@ from app.domain.memoir.types import (
     MemoirChatContentStatus,
     MemoirChatMessageRole,
     MemoirCreatedBy,
+    MemoirEditingJobType,
     MemoirInterviewType,
     MemoirTranscriptVersionType,
 )
 from app.models.memoir import (
     AudioFile,
     MemoirChatMessage,
+    MemoirEditingJob,
     MemoirTranscriptVersion,
     MemoirVoiceUtterance,
 )
@@ -449,6 +451,30 @@ async def test_interview_editor_converts_misclassified_question_to_answer(client
     assert utterance.source_route_reason == ""
     assert len(versions) == 1
     assert versions[0].content == "我们家那时候有六口人。"
+
+    jobs = (
+        await test_db.execute(
+            select(MemoirEditingJob).where(
+                MemoirEditingJob.dedupe_key.in_(
+                    [
+                        f"route_source:{misclassified_answer['utterance_id']}",
+                        f"generate_source_card:{misclassified_answer['utterance_id']}",
+                    ]
+                )
+            )
+        )
+    ).scalars().all()
+    jobs_by_type = {job.job_type: job for job in jobs}
+    assert set(jobs_by_type) == {
+        MemoirEditingJobType.ROUTE_SOURCES.value,
+        MemoirEditingJobType.GENERATE_SOURCE_CARD.value,
+    }
+    assert jobs_by_type[MemoirEditingJobType.ROUTE_SOURCES.value].payload_json["source"] == (
+        "interview_question_converted_to_answer"
+    )
+    assert jobs_by_type[MemoirEditingJobType.GENERATE_SOURCE_CARD.value].payload_json["reason"] == (
+        "interview_question_converted_to_answer"
+    )
 
 
 async def test_interview_editor_converts_question_to_unassigned_answer_for_mobile(client, test_db):

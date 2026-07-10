@@ -25,6 +25,7 @@ import {
   X,
 } from 'lucide-react';
 import { memoirChapterSourceEditorApi, memoirInterviewEditorApi, memoirTranscriptCleanupApi } from '../../api';
+import { getErrorMessage } from '../../utils/apiError';
 import { formatBeijingDateTimeShort } from '../../utils/time';
 import { sessionSummary, sessionTitle } from './memoirInterviewEditorView';
 import type {
@@ -586,6 +587,8 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
         project.id,
         items.map((item) => ({
           utterance_id: item.utterance_id,
+          source_text_hash: item.source_text_hash,
+          source_transcript_version_id: item.source_transcript_version_id,
           cleaned_text: item.cleaned_text,
           provider: item.provider,
           created_by: item.created_by,
@@ -1781,7 +1784,9 @@ export function MemoirInterviewEditor({ project }: MemoirInterviewEditorProps) {
                         </div>
                       )}
                       {confirmCleanupMutation.isError && (
-                        <div className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">AI 清理结果写入失败。</div>
+                        <div className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">
+                          {getErrorMessage(confirmCleanupMutation.error, 'AI 清理结果写入失败。')}
+                        </div>
                       )}
                     </div>
                   </div>
