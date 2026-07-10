@@ -18,9 +18,6 @@ function loadTranscriptsPage({ authExports = {}, voiceApiExports = {}, voiceSear
     deleteMemoirVoiceTranscript: async () => {
       throw new Error("deleteMemoirVoiceTranscript was not mocked");
     },
-    downloadMemoirVoiceAudio: async () => {
-      throw new Error("downloadMemoirVoiceAudio was not mocked");
-    },
     getMemoirBookPlan: async () => null,
     listMemoirVoiceTranscripts: async () => {
       throw new Error("listMemoirVoiceTranscripts was not mocked");
@@ -28,20 +25,8 @@ function loadTranscriptsPage({ authExports = {}, voiceApiExports = {}, voiceSear
     parseMemoirVoiceSearchQuery: async () => {
       throw new Error("parseMemoirVoiceSearchQuery was not mocked");
     },
-    previewMemoirVoiceTranscriptVoiceEdit: async () => {
-      throw new Error("previewMemoirVoiceTranscriptVoiceEdit was not mocked");
-    },
     recoverMemoirVoiceTranscript: async () => {
       throw new Error("recoverMemoirVoiceTranscript was not mocked");
-    },
-    moveMemoirBookSource: async () => {
-      throw new Error("moveMemoirBookSource was not mocked");
-    },
-    updateMemoirVoiceTranscript: async () => {
-      throw new Error("updateMemoirVoiceTranscript was not mocked");
-    },
-    updateMemoirBookPlan: async () => {
-      throw new Error("updateMemoirBookPlan was not mocked");
     },
     ...voiceApiExports,
   });
@@ -151,49 +136,6 @@ function deferred() {
   return { promise, resolve, reject };
 }
 
-test("transcript audio summary only exposes duration", () => {
-  const { transcriptAudioText } = loadTranscriptsPage().mod;
-  const summary = transcriptAudioText({
-    audio_duration_seconds: 74,
-    audio_file_id: "audio-1",
-    audio_size_bytes: 491000,
-    audio_mime_type: "audio/pcm",
-  });
-
-  assert.equal(summary, "时长 1 分 14 秒");
-  assert.equal(summary.includes("音频已保存"), false);
-  assert.equal(summary.includes("491"), false);
-  assert.equal(summary.includes("PCM"), false);
-});
-
-test("transcript audio summary falls back to utterance timestamps", () => {
-  const { transcriptAudioText } = loadTranscriptsPage().mod;
-
-  assert.equal(
-    transcriptAudioText({
-      audio_duration_seconds: null,
-      start_ms: 1000,
-      end_ms: 10500,
-    }),
-    "时长 10 秒",
-  );
-});
-
-test("transcript book inclusion text shows chapter placement", () => {
-  const { transcriptBookInclusionText } = loadTranscriptsPage().mod;
-
-  assert.equal(
-    transcriptBookInclusionText({
-      included_chapters: [
-        { chapter_id: "chapter-2", title: "离家求学", sort_order: 1 },
-        { chapter_id: "chapter-1", title: "童年院子", sort_order: 0 },
-      ],
-    }),
-    "已放入第 1 章：童年院子等 2 章",
-  );
-  assert.equal(transcriptBookInclusionText({ included_chapters: [] }), "尚未入章");
-});
-
 test("transcript text highlighter marks every search term", () => {
   const { highlightTranscriptText } = loadTranscriptsPage().mod;
 
@@ -206,40 +148,6 @@ test("transcript text highlighter marks every search term", () => {
   assert.deepEqual(highlightTranscriptText("没有搜索词", ""), [
     { text: "没有搜索词", highlight: false },
   ]);
-});
-
-test("transcript voice edit diff marks inline replacements, insertions, and deletions", () => {
-  const { inlineTranscriptVoiceEditDiffSegments } = loadTranscriptsPage().mod;
-
-  assert.deepEqual(
-    inlineTranscriptVoiceEditDiffSegments(
-      "他叫李月，我们是高中同学。",
-      "他叫李阅，我们是高中同学。",
-      [{ before: "李月", after: "李阅", reason: "用户明确纠正名字" }],
-    ),
-    [
-      { text: "他叫", kind: "equal" },
-      { text: "李月", kind: "delete" },
-      { text: "李阅", kind: "insert" },
-      { text: "，我们是高中同学。", kind: "equal" },
-    ],
-  );
-  assert.deepEqual(
-    inlineTranscriptVoiceEditDiffSegments("我去成都。", "我后来去成都。", []),
-    [
-      { text: "我", kind: "equal" },
-      { text: "后来", kind: "insert" },
-      { text: "去成都。", kind: "equal" },
-    ],
-  );
-  assert.deepEqual(
-    inlineTranscriptVoiceEditDiffSegments("我那天真的很开心。", "我那天很开心。", []),
-    [
-      { text: "我那天", kind: "equal" },
-      { text: "真的", kind: "delete" },
-      { text: "很开心。", kind: "equal" },
-    ],
-  );
 });
 
 test("transcripts view patch keeps empty states mutually exclusive", () => {
@@ -287,58 +195,6 @@ test("transcripts view patch keeps empty states mutually exclusive", () => {
   });
 });
 
-test("transcripts page collapses long raw and corrected text", async () => {
-  const longRaw = "院子里的年节记忆".repeat(24);
-  const longDisplay = "春节时一家人围坐说笑".repeat(24);
-  const { page } = loadTranscriptsPage({
-    authExports: {
-      getMemoirIdentity: async () => ({
-        id: "user-1",
-        active_project_id: "project-1",
-        active_project: { id: "project-1", title: "我的回忆录" },
-        projects: [],
-      }),
-    },
-    voiceApiExports: {
-      listMemoirVoiceTranscripts: async () => ({
-        items: [
-          {
-            ...sampleTranscript("utterance-long"),
-            transcript_raw: longRaw,
-            transcript_edited: "",
-            display_text: longDisplay,
-            raw_char_count: longRaw.length,
-            display_char_count: longDisplay.length,
-          },
-        ],
-        total: 1,
-        limit: 30,
-        offset: 0,
-      }),
-    },
-  });
-  const context = pageContext(page);
-
-  await page.loadTranscripts.call(context, true);
-
-  let item = context.data.items[0];
-  assert.equal(item.detailsCollapsible, true);
-  assert.equal(item.detailsExpanded, false);
-  assert.equal(item.detailsToggleText, "展开全部");
-  assert.equal(item.rawSegments.map((segment) => segment.text).join("").endsWith("..."), true);
-  assert.equal(item.displaySegments.map((segment) => segment.text).join("").length, 183);
-
-  page.toggleTranscriptText.call(context, {
-    currentTarget: { dataset: { id: "utterance-long" } },
-  });
-
-  item = context.data.items[0];
-  assert.equal(item.detailsExpanded, true);
-  assert.equal(item.detailsToggleText, "收起");
-  assert.equal(item.rawSegments.map((segment) => segment.text).join(""), longRaw);
-  assert.equal(item.displaySegments.map((segment) => segment.text).join(""), longDisplay);
-});
-
 test("transcripts page formats record time without timezone label", async () => {
   const { page } = loadTranscriptsPage({
     authExports: {
@@ -362,8 +218,7 @@ test("transcripts page formats record time without timezone label", async () => 
 
   await page.loadTranscripts.call(context, true);
 
-  assert.equal(context.data.items[0].createdAtText, "06-17 08:00");
-  assert.equal(context.data.items[0].recordNumber, 1);
+  assert.equal(context.data.items[0].recordMetaText, "06-17 08:00 · 8 秒");
 });
 
 test("transcripts page uses summary fields for browse cards", async () => {
@@ -410,6 +265,7 @@ test("transcripts page uses summary fields for browse cards", async () => {
   assert.equal(context.data.items[0].deleteButtonDisabled, false);
   assert.equal(context.data.items[0].deleteButtonText, "删除");
   assert.equal(context.data.items[0].editButtonDisabled, false);
+  assert.equal("transcript_raw" in context.data.items[0], false);
 });
 
 test("transcripts page shows saved audio awaiting transcription", async () => {
@@ -477,7 +333,6 @@ test("transcripts page shows saved audio awaiting transcription", async () => {
   assert.equal(item.bookStatusClass, "book-status pending");
   assert.equal(item.cardClass, "transcript-card recovery-pending");
   assert.equal(item.canAssignChapterSource, false);
-  assert.equal(item.canMoveChapterSource, false);
   assert.equal(item.editButtonDisabled, true);
 
   const navigations = [];
@@ -585,45 +440,6 @@ test("transcripts page opens transcript detail from record header", () => {
   delete global.wx;
 });
 
-test("transcripts page numbers newest-first records from the oldest record", async () => {
-  const { page } = loadTranscriptsPage({
-    authExports: {
-      getMemoirIdentity: async () => ({
-        id: "user-1",
-        active_project_id: "project-1",
-        active_project: { id: "project-1", title: "我的回忆录" },
-        projects: [],
-      }),
-    },
-    voiceApiExports: {
-      listMemoirVoiceTranscripts: async ({ offset }) => ({
-        items: offset === 0
-          ? [
-            sampleTranscript("utterance-newest", "2026-06-17T02:00:00.000Z"),
-            sampleTranscript("utterance-middle", "2026-06-17T01:00:00.000Z"),
-          ]
-          : [
-            sampleTranscript("utterance-oldest", "2026-06-17T00:00:00.000Z"),
-          ],
-        total: 3,
-        limit: 2,
-        offset,
-      }),
-    },
-  });
-  const context = pageContext(page, { limit: 2 });
-
-  await page.loadTranscripts.call(context, true);
-  await page.loadMore.call(context);
-
-  assert.deepEqual(context.data.items.map((item) => item.id), [
-    "utterance-newest",
-    "utterance-middle",
-    "utterance-oldest",
-  ]);
-  assert.deepEqual(context.data.items.map((item) => item.recordNumber), [3, 2, 1]);
-});
-
 test("transcripts page preserves loaded records after returning from detail", async () => {
   const calls = [];
   const navigations = [];
@@ -687,83 +503,6 @@ test("transcripts page preserves loaded records after returning from detail", as
     "utterance-4",
   ]);
   assert.equal(context.data.showLoadMore, true);
-  delete global.wx;
-});
-
-test("transcripts page moves an included source to another chapter", async () => {
-  const moves = [];
-  const toasts = [];
-  global.wx = {
-    showToast(options) {
-      toasts.push(options);
-    },
-    switchTab() {},
-  };
-  const { page } = loadTranscriptsPage({
-    authExports: {
-      getMemoirIdentity: async () => ({
-        id: "user-1",
-        active_project_id: "project-1",
-        active_project: { id: "project-1", title: "我的回忆录" },
-        projects: [],
-      }),
-    },
-    voiceApiExports: {
-      getMemoirBookPlan: async () => sampleBookPlan(),
-      listMemoirVoiceTranscripts: async () => ({
-        items: [
-          {
-            ...sampleTranscript("utterance-2"),
-            is_included_in_book: true,
-            included_chapters: [{ chapter_id: "chapter-1", title: "岁首欢聚记", sort_order: 0 }],
-          },
-        ],
-        total: 1,
-        limit: 30,
-        offset: 0,
-      }),
-      moveMemoirBookSource: async (projectId, data) => {
-        moves.push({ projectId, data });
-        return {
-          ...sampleBookPlan(),
-          chapters: [
-            {
-              ...sampleBookPlan().chapters[0],
-              source_refs: [sampleSourceRef("utterance-1")],
-            },
-            {
-              ...sampleBookPlan().chapters[1],
-              source_refs: [sampleSourceRef("utterance-3"), sampleSourceRef("utterance-2")],
-            },
-          ],
-        };
-      },
-    },
-  });
-  const context = pageContext(page);
-
-  await page.loadTranscripts.call(context, true);
-  assert.equal(context.data.items[0].canMoveChapterSource, true);
-  assert.deepEqual(context.data.items[0].chapterMoveOptions, [
-    { label: "第 2 章 童年友情", value: "chapter-2" },
-  ]);
-
-  await page.moveTranscriptChapter.call(context, {
-    currentTarget: { dataset: { id: "utterance-2" } },
-    detail: { value: 0 },
-  });
-
-  assert.deepEqual(moves, [
-    {
-      projectId: "project-1",
-      data: {
-        source_chapter_id: "chapter-1",
-        target_chapter_id: "chapter-2",
-        utterance_id: "utterance-2",
-      },
-    },
-  ]);
-  assert.deepEqual(toasts, [{ title: "素材已移动", icon: "success" }]);
   delete global.wx;
 });
 
@@ -907,11 +646,7 @@ test("transcripts page stores highlighted search segments on matching results", 
 
   await page.loadTranscripts.call(context, true);
 
-  assert.deepEqual(context.data.items[0].questionSegments.slice(0, 2), [
-    { text: "你在", highlight: false },
-    { text: "县城", highlight: true },
-  ]);
-  assert.deepEqual(context.data.items[0].displaySegments.slice(0, 2), [
+  assert.deepEqual(context.data.items[0].summarySegments.slice(0, 2), [
     { text: "我在", highlight: false },
     { text: "县城", highlight: true },
   ]);
@@ -1095,150 +830,6 @@ test("transcripts page stops active voice search recording on second tap", async
   await page.startVoiceSearch.call(context);
 
   assert.deepEqual(stops, ["stop"]);
-});
-
-test("transcripts page previews and saves a voice transcript correction", async () => {
-  const previewCalls = [];
-  const updateCalls = [];
-  const toasts = [];
-  global.wx = {
-    showToast(options) {
-      toasts.push(options);
-    },
-  };
-  const { page } = loadTranscriptsPage({
-    authExports: {
-      getMemoirIdentity: async () => ({
-        id: "user-1",
-        active_project_id: "project-1",
-        active_project: { id: "project-1", title: "我的回忆录" },
-        projects: [],
-      }),
-    },
-    voiceApiExports: {
-      listMemoirVoiceTranscripts: async () => ({
-        items: [sampleTranscript("utterance-edit")],
-        total: 1,
-        limit: 30,
-        offset: 0,
-      }),
-      previewMemoirVoiceTranscriptVoiceEdit: async (utteranceId, instructionText) => {
-        previewCalls.push({ utteranceId, instructionText });
-        return {
-          utterance_id: utteranceId,
-          action: "revise_transcript",
-          original_text: "我小时候住在外婆家。",
-          current_text: "我小时候住在外婆家。",
-          edited_text: "我小时候住在奶奶家。",
-          changes: [{ before: "外婆", after: "奶奶", reason: "用户明确纠正人物" }],
-          confidence: 0.93,
-          requires_confirmation: true,
-          reply_text: "已把外婆改成奶奶，请确认后保存。",
-          provider: "fake-ai",
-          model: "fake-model",
-        };
-      },
-      updateMemoirVoiceTranscript: async (utteranceId, content) => {
-        updateCalls.push({ utteranceId, content });
-        return {
-          ...sampleTranscript(utteranceId),
-          transcript_raw: "我小时候住在外婆家。",
-          transcript_edited: content,
-          display_text: content,
-          edited_char_count: content.length,
-          display_char_count: content.length,
-        };
-      },
-    },
-    voiceSearchExports: {
-      recordMemoirVoiceSearchQuery: async (options) => {
-        options.onRecordingEnd();
-        return "这里不是外婆，是奶奶";
-      },
-    },
-  });
-  const context = pageContext(page);
-
-  await page.loadTranscripts.call(context, true);
-  await page.startVoiceEdit.call(context, {
-    currentTarget: { dataset: { id: "utterance-edit" } },
-  });
-
-  assert.deepEqual(previewCalls, [
-    { utteranceId: "utterance-edit", instructionText: "这里不是外婆，是奶奶" },
-  ]);
-  assert.equal(context.data.voiceEditTargetId, "utterance-edit");
-  assert.equal(context.data.voiceEditInstructionText, "这里不是外婆，是奶奶");
-  assert.equal(context.data.voiceEditPreview.editedText, "我小时候住在奶奶家。");
-  assert.equal(context.data.voiceEditPreview.canConfirm, true);
-  assert.equal(context.data.voiceEditPreview.confidenceText, "93%");
-  assert.deepEqual(context.data.voiceEditPreview.diffSegments, [
-    { text: "我小时候住在", kind: "equal" },
-    { text: "外婆", kind: "delete" },
-    { text: "奶奶", kind: "insert" },
-    { text: "家。", kind: "equal" },
-  ]);
-
-  await page.confirmVoiceEdit.call(context);
-
-  assert.deepEqual(updateCalls, [
-    { utteranceId: "utterance-edit", content: "我小时候住在奶奶家。" },
-  ]);
-  assert.equal(context.data.items[0].display_text, "我小时候住在奶奶家。");
-  assert.equal(context.data.voiceEditTargetId, "");
-  assert.deepEqual(toasts, [{ title: "已保存修正", icon: "success" }]);
-  delete global.wx;
-});
-
-test("transcripts page blocks voice search while a transcript correction is recording", async () => {
-  const stops = [];
-  const { page } = loadTranscriptsPage({
-    voiceSearchExports: {
-      stopMemoirVoiceSearchRecording: () => stops.push("stop"),
-    },
-  });
-  const context = pageContext(page, {
-    voiceEditRecording: true,
-    voiceEditTargetId: "utterance-edit",
-  });
-
-  await page.startVoiceSearch.call(context);
-
-  assert.deepEqual(stops, []);
-  assert.equal(context.data.error, "请先完成当前语音修正");
-});
-
-test("transcripts page ignores stale voice correction results after cancel", async () => {
-  const previewCalls = [];
-  let resolveRecording;
-  const { page } = loadTranscriptsPage({
-    voiceApiExports: {
-      previewMemoirVoiceTranscriptVoiceEdit: async (...args) => {
-        previewCalls.push(args);
-        return {};
-      },
-    },
-    voiceSearchExports: {
-      recordMemoirVoiceSearchQuery: async () => new Promise((resolve) => {
-        resolveRecording = resolve;
-      }),
-      stopMemoirVoiceSearchRecording: () => {},
-    },
-  });
-  const context = pageContext(page, {
-    items: [sampleTranscript("utterance-edit")],
-  });
-
-  const pending = page.startVoiceEdit.call(context, {
-    currentTarget: { dataset: { id: "utterance-edit" } },
-  });
-  page.cancelVoiceEdit.call(context);
-  resolveRecording("这里不是外婆，是奶奶");
-  await pending;
-
-  assert.deepEqual(previewCalls, []);
-  assert.equal(context.data.voiceEditTargetId, "");
-  assert.equal(context.data.voiceEditPreview, null);
 });
 
 test("transcripts page scrolls to stored uncovered source target", async () => {

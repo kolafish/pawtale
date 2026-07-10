@@ -14,18 +14,13 @@ import {
   deleteMemoirVoiceTranscript,
   getMemoirBookPlan,
   listMemoirVoiceTranscripts,
-  moveMemoirBookSource,
   parseMemoirVoiceSearchQuery,
-  previewMemoirVoiceTranscriptVoiceEdit,
   recoverMemoirVoiceTranscript,
-  updateMemoirVoiceTranscript,
 } from "../../services/memoir-voice-api";
 import { getMemoirIdentity } from "../../services/auth";
 import {
   sourceAssignmentRequest,
   transcriptChapterAssignOptions,
-  transcriptChapterMoveOptions,
-  transcriptSourceMoveRequest,
 } from "../../services/memoir-book-source-actions";
 import { ApiError } from "../../services/request";
 import {
@@ -43,15 +38,11 @@ import {
   stopMemoirVoiceSearchRecording,
 } from "../../services/memoir-voice-search";
 import {
-  inlineTranscriptVoiceEditDiffSegments,
-  transcriptAudioText as baseTranscriptAudioText,
   transcriptBookInclusionText,
   transcriptCreatedAtText,
   transcriptDurationText,
   transcriptTitleText,
-  transcriptVoiceEditPreviewView,
   type TranscriptTextSegment,
-  type TranscriptVoiceEditPreviewView,
 } from "../../services/transcript-view-model";
 import {
   datasetString,
@@ -59,21 +50,13 @@ import {
   pickerIndex,
   type PageDatasetEvent,
   type PagePickerEvent,
-  type PageTextInputEvent,
 } from "../../services/page-input";
-
-export {
-  inlineTranscriptVoiceEditDiffSegments,
-  transcriptBookInclusionText,
-  transcriptCreatedAtText,
-} from "../../services/transcript-view-model";
 
 interface TranscriptDataset {
   id?: string;
 }
 
 type DatasetEvent = PageDatasetEvent<TranscriptDataset>;
-type TextAreaEvent = PageTextInputEvent<TranscriptDataset>;
 
 interface SearchInputEvent {
   detail: {
@@ -82,13 +65,6 @@ interface SearchInputEvent {
 }
 
 type PickerEvent = PagePickerEvent<TranscriptDataset>;
-
-interface TranscriptTextView {
-  segments: TranscriptTextSegment[];
-  collapsible: boolean;
-  expanded: boolean;
-  toggleText: string;
-}
 
 interface TranscriptSearchFilters {
   included: MemoirVoiceTranscriptIncludedFilter;
@@ -100,17 +76,12 @@ interface SearchChipView {
   text: string;
 }
 
-interface TranscriptItemView extends MemoirVoiceTranscriptItem {
-  recordNumber: number;
+interface TranscriptItemView {
+  id: string;
   summaryTitleText: string;
   summaryPreviewText: string;
   summarySegments: TranscriptTextSegment[];
-  editingText: string;
-  editingCharCount: number;
-  createdAtText: string;
-  durationText: string;
   anchorId: string;
-  audioText: string;
   recordMetaText: string;
   recordCountText: string;
   recordCountClass: string;
@@ -123,16 +94,6 @@ interface TranscriptItemView extends MemoirVoiceTranscriptItem {
   isIncludedInBook: boolean;
   canAssignChapterSource: boolean;
   chapterAssignOptions: ChapterPickerOption[];
-  canMoveChapterSource: boolean;
-  chapterMoveOptions: ChapterPickerOption[];
-  questionSegments: TranscriptTextSegment[];
-  rawSegments: TranscriptTextSegment[];
-  displaySegments: TranscriptTextSegment[];
-  detailsCollapsible: boolean;
-  detailsExpanded: boolean;
-  detailsToggleText: string;
-  changed: boolean;
-  isEditing: boolean;
   cardClass: string;
   bookStatusClass: string;
   deleteButtonLoading: boolean;
@@ -147,11 +108,9 @@ interface TranscriptItemView extends MemoirVoiceTranscriptItem {
 interface TranscriptsData {
   loading: boolean;
   needsLogin: boolean;
-  savingId: string;
   deletingId: string;
   recoveringId: string;
   assigningSourceId: string;
-  movingSourceId: string;
   error: string;
   items: TranscriptItemView[];
   total: number;
@@ -167,13 +126,6 @@ interface TranscriptsData {
   voiceSearchRecording: boolean;
   voiceSearchTranscribing: boolean;
   voiceSearchStatusText: string;
-  voiceEditTargetId: string;
-  voiceEditRecording: boolean;
-  voiceEditLoading: boolean;
-  voiceEditSaving: boolean;
-  voiceEditInstructionText: string;
-  voiceEditStatusText: string;
-  voiceEditPreview: TranscriptVoiceEditPreviewView | null;
   activeProjectId: string;
   projectTitle: string;
   bookPlan: MemoirBookPlan | null;
@@ -195,7 +147,6 @@ interface TranscriptsData {
 
 const DEFAULT_LIMIT = 30;
 const SEARCH_DEBOUNCE_MS = 300;
-const COLLAPSED_TRANSCRIPT_CHAR_LIMIT = 180;
 const DEFAULT_SEARCH_FILTERS: TranscriptSearchFilters = {
   included: "all",
   guidanceMode: "",
@@ -255,25 +206,15 @@ type TranscriptsContext = {
   setData(patch: Partial<TranscriptsData>): void;
 };
 
-export function transcriptAudioText(item: MemoirVoiceTranscriptItem): string {
-  return baseTranscriptAudioText(item, { includeDurationLabel: true });
-}
-
-export function transcriptRecordNumber(total: number, offset: number, index: number): number {
-  return Math.max(1, total - offset - index);
-}
-
 function withTranscriptRuntimeState(
   item: TranscriptItemView,
   state: Pick<
     TranscriptsData,
-    "savingId" | "deletingId" | "assigningSourceId" | "movingSourceId" | "highlightedId" | "recoveringId"
+    "deletingId" | "assigningSourceId" | "highlightedId" | "recoveringId"
   >,
 ): TranscriptItemView {
-  const editBusy = Boolean(state.savingId || state.deletingId || state.recoveringId);
-  const chapterBusy = Boolean(
-    state.savingId || state.deletingId || state.recoveringId || state.assigningSourceId || state.movingSourceId,
-  );
+  const editBusy = Boolean(state.deletingId || state.recoveringId);
+  const chapterBusy = Boolean(editBusy || state.assigningSourceId);
   const baseCardClass = item.canRecoverTranscription ? "transcript-card recovery-pending" : "transcript-card";
   return {
     ...item,
@@ -288,7 +229,7 @@ function withTranscriptRuntimeState(
     assignPickerActionClass: chapterBusy ? "small-primary picker-action disabled" : "small-primary picker-action",
     assignPickerText: state.assigningSourceId === item.id ? "放入中" : "放入章节",
     recoverButtonLoading: state.recoveringId === item.id,
-    recoverButtonDisabled: Boolean(state.savingId || state.deletingId || state.recoveringId),
+    recoverButtonDisabled: editBusy,
     recoverButtonText: state.recoveringId === item.id ? "转写中" : "恢复转写",
     editButtonDisabled: editBusy || item.canRecoverTranscription,
   };
@@ -365,25 +306,6 @@ export function highlightTranscriptText(text: string, searchQuery: string): Tran
     cursor = nextIndex + nextTerm.length;
   }
   return segments;
-}
-
-export function transcriptTextView(
-  text: string,
-  searchQuery = "",
-  expanded = false,
-): TranscriptTextView {
-  const content = text || "";
-  const collapsible = content.length > COLLAPSED_TRANSCRIPT_CHAR_LIMIT;
-  const showExpanded = collapsible && expanded;
-  const visibleText = collapsible && !showExpanded
-    ? `${content.slice(0, COLLAPSED_TRANSCRIPT_CHAR_LIMIT)}...`
-    : content;
-  return {
-    segments: highlightTranscriptText(visibleText, searchQuery),
-    collapsible,
-    expanded: showExpanded,
-    toggleText: showExpanded ? "收起" : "展开全部",
-  };
 }
 
 function normalizedSearchFilters(filters?: Partial<TranscriptSearchFilters>): TranscriptSearchFilters {
@@ -490,15 +412,10 @@ function toViewItem(
   item: MemoirVoiceTranscriptItem,
   searchQuery = "",
   bookPlan: MemoirBookPlan | null = null,
-  recordNumber = 1,
 ): TranscriptItemView {
   const canRecoverTranscription = isPendingTranscription(item);
-  const editingText = item.transcript_edited || item.transcript_raw;
   const isIncludedInBook = !canRecoverTranscription && Boolean(item.is_included_in_book || item.included_chapters?.length);
-  const rawView = transcriptTextView(item.transcript_raw, searchQuery);
-  const displayView = transcriptTextView(item.display_text, searchQuery);
   const chapterAssignOptions = canRecoverTranscription ? [] : transcriptChapterAssignOptions(item, bookPlan);
-  const chapterMoveOptions = canRecoverTranscription ? [] : transcriptChapterMoveOptions(item, bookPlan);
   const summaryTitleText = transcriptTitleText(item);
   const summaryPreviewText = transcriptSummaryPreview(item);
   const createdAtText = transcriptCreatedAtText(item);
@@ -506,17 +423,11 @@ function toViewItem(
   const bookInclusionText = canRecoverTranscription ? "等待转写后再入章" : transcriptBookInclusionText(item);
   const recordMetaText = [createdAtText, durationText].filter(Boolean).join(" · ");
   return {
-    ...item,
-    recordNumber,
+    id: item.id,
     summaryTitleText,
     summaryPreviewText,
     summarySegments: highlightTranscriptText(summaryPreviewText, searchQuery),
-    editingText,
-    editingCharCount: editingText.trim().length,
-    createdAtText,
-    durationText,
     anchorId: transcriptAnchorId(item.id),
-    audioText: transcriptAudioText(item),
     recordMetaText,
     recordCountText: canRecoverTranscription ? "待转写" : `${item.display_char_count} 字`,
     recordCountClass: canRecoverTranscription ? "record-count pending" : "record-count",
@@ -529,16 +440,6 @@ function toViewItem(
     isIncludedInBook,
     canAssignChapterSource: chapterAssignOptions.length > 0,
     chapterAssignOptions,
-    canMoveChapterSource: chapterMoveOptions.length > 0,
-    chapterMoveOptions,
-    questionSegments: highlightTranscriptText(item.question_text, searchQuery),
-    rawSegments: rawView.segments,
-    displaySegments: displayView.segments,
-    detailsCollapsible: rawView.collapsible || displayView.collapsible,
-    detailsExpanded: false,
-    detailsToggleText: "展开全部",
-    changed: editingText !== (item.transcript_edited || item.transcript_raw),
-    isEditing: false,
     cardClass: canRecoverTranscription ? "transcript-card recovery-pending" : "transcript-card",
     bookStatusClass: canRecoverTranscription
       ? "book-status pending"
@@ -553,35 +454,6 @@ function toViewItem(
   };
 }
 
-function withTranscriptExpansion(
-  item: TranscriptItemView,
-  searchQuery: string,
-  expanded: boolean,
-): TranscriptItemView {
-  const rawView = transcriptTextView(item.transcript_raw, searchQuery, expanded);
-  const displayView = transcriptTextView(item.display_text, searchQuery, expanded);
-  const detailsCollapsible = rawView.collapsible || displayView.collapsible;
-  const detailsExpanded = detailsCollapsible && expanded;
-  return {
-    ...item,
-    rawSegments: rawView.segments,
-    displaySegments: displayView.segments,
-    detailsCollapsible,
-    detailsExpanded,
-    detailsToggleText: detailsExpanded ? "收起" : "展开全部",
-  };
-}
-
-function changedItem(item: TranscriptItemView, editingText: string): TranscriptItemView {
-  return {
-    ...item,
-    editingText,
-    editingCharCount: editingText.trim().length,
-    changed: editingText.trim() !== (item.transcript_edited || item.transcript_raw).trim(),
-    isEditing: true,
-  };
-}
-
 function replaceItem(
   items: TranscriptItemView[],
   next: MemoirVoiceTranscriptItem,
@@ -590,7 +462,7 @@ function replaceItem(
 ): TranscriptItemView[] {
   return items.map((item) => (
     item.id === next.id
-      ? toViewItem(next, searchQuery, bookPlan, item.recordNumber)
+      ? toViewItem(next, searchQuery, bookPlan)
       : item
   ));
 }
@@ -601,7 +473,7 @@ function removeItem(items: TranscriptItemView[], id: string): TranscriptItemView
 
 function confirmDelete(item: TranscriptItemView): Promise<boolean> {
   return new Promise((resolve) => {
-    const preview = item.summaryTitleText || item.display_text || item.transcript_raw || "这条讲述记录";
+    const preview = item.summaryTitleText || item.summaryPreviewText || "这条讲述记录";
     wx.showModal({
       title: "删除讲述记录",
       content: `确定删除“${preview.slice(0, 24)}${preview.length > 24 ? "..." : ""}”？删除后，这条原始讲述会从素材库移除；如果已放入章节，相关章节会标记为需重新确认，已生成正文不会自动改写。`,
@@ -615,17 +487,14 @@ function confirmDelete(item: TranscriptItemView): Promise<boolean> {
 
 definePage<TranscriptsData>()({
   loadToken: 0,
-  voiceEditToken: 0,
   searchDebounceTimer: null as number | null,
 
   data: {
     loading: false,
     needsLogin: false,
-    savingId: "",
     deletingId: "",
     recoveringId: "",
     assigningSourceId: "",
-    movingSourceId: "",
     error: "",
     items: [],
     total: 0,
@@ -641,13 +510,6 @@ definePage<TranscriptsData>()({
     voiceSearchRecording: false,
     voiceSearchTranscribing: false,
     voiceSearchStatusText: "",
-    voiceEditTargetId: "",
-    voiceEditRecording: false,
-    voiceEditLoading: false,
-    voiceEditSaving: false,
-    voiceEditInstructionText: "",
-    voiceEditStatusText: "",
-    voiceEditPreview: null,
     activeProjectId: "",
     projectTitle: "",
     bookPlan: null,
@@ -725,9 +587,7 @@ definePage<TranscriptsData>()({
         }),
       ]);
       bookPlan = nextBookPlan;
-      const nextItems = response.items.map((item, index) => (
-        toViewItem(item, searchQuery, bookPlan, transcriptRecordNumber(response.total, offset, index))
-      ));
+      const nextItems = response.items.map((item) => toViewItem(item, searchQuery, bookPlan));
       if (requestToken !== this.loadToken) {
         return;
       }
@@ -862,10 +722,6 @@ definePage<TranscriptsData>()({
     if (this.data.voiceSearchTranscribing) {
       return;
     }
-    if (this.data.voiceEditRecording || this.data.voiceEditLoading || this.data.voiceEditSaving) {
-      setTranscriptsData(this, { error: "请先完成当前语音修正" });
-      return;
-    }
     if (this.data.voiceSearchRecording) {
       stopMemoirVoiceSearchRecording();
       return;
@@ -907,165 +763,6 @@ definePage<TranscriptsData>()({
     }
   },
 
-  async startVoiceEdit(event: DatasetEvent) {
-    const id = datasetString(event, "id");
-    const item = this.data.items.find((candidate) => candidate.id === id);
-    if (
-      !id
-      || !item
-      || item.canRecoverTranscription
-      || this.data.savingId
-      || this.data.deletingId
-      || this.data.voiceEditLoading
-      || this.data.voiceEditSaving
-    ) {
-      return;
-    }
-    if (this.data.voiceSearchRecording || this.data.voiceSearchTranscribing) {
-      setTranscriptsData(this, { error: "请先完成当前语音搜索" });
-      return;
-    }
-    if (this.data.voiceEditRecording) {
-      if (this.data.voiceEditTargetId === id) {
-        stopMemoirVoiceSearchRecording();
-      } else {
-        setTranscriptsData(this, { error: "请先停止当前语音修正" });
-      }
-      return;
-    }
-    this.voiceEditToken += 1;
-    const requestToken = this.voiceEditToken;
-    setTranscriptsData(this, {
-      voiceEditTargetId: id,
-      voiceEditRecording: true,
-      voiceEditLoading: false,
-      voiceEditSaving: false,
-      voiceEditInstructionText: "",
-      voiceEditStatusText: "正在听你说要改哪里",
-      voiceEditPreview: null,
-      error: "",
-    });
-    try {
-      const instructionText = await recordMemoirVoiceSearchQuery({
-        onRecordingEnd: () => {
-          if (requestToken !== this.voiceEditToken) {
-            return;
-          }
-          setTranscriptsData(this, {
-            voiceEditRecording: false,
-            voiceEditLoading: true,
-            voiceEditStatusText: "正在识别修正内容",
-          });
-        },
-        emptyTranscriptMessage: "没有识别到修正内容，请再说一次",
-        noVoiceTranscriptMessage: "没有听到修正内容，请再说一次",
-      });
-      if (requestToken !== this.voiceEditToken || this.data.voiceEditTargetId !== id) {
-        return;
-      }
-      setTranscriptsData(this, {
-        voiceEditInstructionText: instructionText,
-        voiceEditStatusText: "正在生成修正预览",
-      });
-      const preview = await previewMemoirVoiceTranscriptVoiceEdit(id, instructionText);
-      if (requestToken !== this.voiceEditToken || this.data.voiceEditTargetId !== id) {
-        return;
-      }
-      setTranscriptsData(this, {
-        voiceEditPreview: transcriptVoiceEditPreviewView(preview),
-        voiceEditStatusText: preview.action === "revise_transcript" ? "请确认修正内容" : preview.reply_text,
-      });
-      trackAuditAction(
-        "transcript.voice_edit_preview",
-        { action: preview.action },
-        { projectId: this.data.activeProjectId },
-      );
-    } catch (error) {
-      if (requestToken !== this.voiceEditToken) {
-        return;
-      }
-      setTranscriptsData(this, {
-        error: error instanceof Error ? error.message : "语音修正失败",
-        voiceEditStatusText: "",
-      });
-    } finally {
-      if (requestToken === this.voiceEditToken) {
-        setTranscriptsData(this, {
-          voiceEditRecording: false,
-          voiceEditLoading: false,
-        });
-      }
-    }
-  },
-
-  cancelVoiceEdit() {
-    this.voiceEditToken += 1;
-    if (this.data.voiceEditRecording) {
-      stopMemoirVoiceSearchRecording();
-    }
-    setTranscriptsData(this, {
-      voiceEditTargetId: "",
-      voiceEditRecording: false,
-      voiceEditLoading: false,
-      voiceEditSaving: false,
-      voiceEditInstructionText: "",
-      voiceEditStatusText: "",
-      voiceEditPreview: null,
-      error: "",
-    });
-  },
-
-  async confirmVoiceEdit() {
-    const id = this.data.voiceEditTargetId;
-    const preview = this.data.voiceEditPreview;
-    if (
-      !id
-      || !preview
-      || !preview.canConfirm
-      || this.data.voiceEditSaving
-      || this.data.savingId
-      || this.data.deletingId
-    ) {
-      return;
-    }
-    const content = preview.editedText.trim();
-    if (!content) {
-      setTranscriptsData(this, { error: "修正后的整理文字不能为空" });
-      return;
-    }
-    setTranscriptsData(this, { voiceEditSaving: true, savingId: id, error: "" });
-    try {
-      const updated = await updateMemoirVoiceTranscript(id, content);
-      setTranscriptsData(this, {
-        items: replaceItem(this.data.items, updated, this.data.searchQuery, this.data.bookPlan),
-        voiceEditTargetId: "",
-        voiceEditInstructionText: "",
-        voiceEditStatusText: "",
-        voiceEditPreview: null,
-      });
-      trackAuditAction("transcript.voice_edit_save", {}, { projectId: this.data.activeProjectId });
-      wx.showToast({ title: "已保存修正", icon: "success" });
-    } catch (error) {
-      setTranscriptsData(this, { error: error instanceof Error ? error.message : "保存修正失败" });
-    } finally {
-      setTranscriptsData(this, { voiceEditSaving: false, savingId: "" });
-    }
-  },
-
-  toggleTranscriptText(event: DatasetEvent) {
-    const id = datasetString(event, "id");
-    if (!id) {
-      return;
-    }
-    const items = this.data.items.map((item) => {
-      if (item.id !== id) {
-        return item;
-      }
-      return withTranscriptExpansion(item, this.data.searchQuery, !item.detailsExpanded);
-    });
-    setTranscriptsData(this, { items });
-  },
-
   async assignTranscriptChapter(event: PickerEvent) {
     const utteranceId = datasetString(event, "id");
     const item = this.data.items.find((candidate) => candidate.id === utteranceId);
@@ -1078,7 +775,6 @@ definePage<TranscriptsData>()({
       || item.canRecoverTranscription
       || !this.data.activeProjectId
       || this.data.assigningSourceId
-      || this.data.movingSourceId
     ) {
       return;
     }
@@ -1101,44 +797,6 @@ definePage<TranscriptsData>()({
     }
   },
 
-  async moveTranscriptChapter(event: PickerEvent) {
-    const utteranceId = datasetString(event, "id");
-    const item = this.data.items.find((candidate) => candidate.id === utteranceId);
-    const optionIndex = pickerIndex(event);
-    const option = item?.chapterMoveOptions[optionIndex];
-    if (
-      !utteranceId
-      || !item
-      || !option
-      || item.canRecoverTranscription
-      || !this.data.activeProjectId
-      || this.data.assigningSourceId
-      || this.data.movingSourceId
-    ) {
-      return;
-    }
-    setTranscriptsData(this, { movingSourceId: utteranceId, error: "" });
-    try {
-      const plan = this.data.bookPlan || await loadTranscriptBookPlan(this.data.activeProjectId);
-      const moveRequest = transcriptSourceMoveRequest(item, plan, option.value);
-      if (!moveRequest.request) {
-        setTranscriptsData(this, { error: moveRequest.error });
-        return;
-      }
-      const updatedPlan = await moveMemoirBookSource(this.data.activeProjectId, moveRequest.request);
-      setTranscriptsData(this, { bookPlan: updatedPlan, bookPlanProjectId: this.data.activeProjectId });
-      await this.loadTranscripts(true);
-      wx.showToast({ title: "素材已移动", icon: "success" });
-    } catch (error) {
-      if (routeAuthError(error, "me")) {
-        return;
-      }
-      setTranscriptsData(this, { error: error instanceof Error ? error.message : "素材移动失败" });
-    } finally {
-      setTranscriptsData(this, { movingSourceId: "" });
-    }
-  },
-
   async recoverTranscript(event: DatasetEvent) {
     const id = datasetString(event, "id");
     const item = this.data.items.find((candidate) => candidate.id === id);
@@ -1147,7 +805,6 @@ definePage<TranscriptsData>()({
       !item ||
       !item.canRecoverTranscription ||
       this.data.recoveringId ||
-      this.data.savingId ||
       this.data.deletingId
     ) {
       return;
@@ -1167,85 +824,10 @@ definePage<TranscriptsData>()({
     }
   },
 
-  beginEdit(event: DatasetEvent) {
-    const id = datasetString(event, "id");
-    const index = this.data.items.findIndex((item) => item.id === id);
-    if (index < 0 || this.data.items[index].canRecoverTranscription || this.data.savingId || this.data.deletingId) {
-      return;
-    }
-    const items = [...this.data.items];
-    const current = items[index].transcript_edited || items[index].transcript_raw;
-    items[index] = {
-      ...items[index],
-      editingText: current,
-      editingCharCount: current.trim().length,
-      changed: false,
-      isEditing: true,
-    };
-    setTranscriptsData(this, { items, error: "" });
-  },
-
-  changeText(event: TextAreaEvent) {
-    const id = datasetString(event, "id");
-    const index = this.data.items.findIndex((item) => item.id === id);
-    if (index < 0 || this.data.items[index].canRecoverTranscription) {
-      return;
-    }
-    const items = [...this.data.items];
-    items[index] = changedItem(items[index], event.detail.value);
-    setTranscriptsData(this, { items });
-  },
-
-  cancelEdit(event: DatasetEvent) {
-    const id = datasetString(event, "id");
-    const index = this.data.items.findIndex((item) => item.id === id);
-    if (index < 0 || this.data.savingId || this.data.deletingId) {
-      return;
-    }
-    const items = [...this.data.items];
-    items[index] = toViewItem(items[index], this.data.searchQuery, this.data.bookPlan, items[index].recordNumber);
-    setTranscriptsData(this, { items, error: "" });
-  },
-
-  async saveTranscript(event: DatasetEvent) {
-    const id = datasetString(event, "id");
-    const item = this.data.items.find((candidate) => candidate.id === id);
-    if (!item || item.canRecoverTranscription || this.data.savingId || this.data.deletingId) {
-      return;
-    }
-    const content = item.editingText.trim();
-    if (!content) {
-      setTranscriptsData(this, { error: "整理文字不能为空" });
-      return;
-    }
-    setTranscriptsData(this, { savingId: id, error: "" });
-    try {
-      const updated = await updateMemoirVoiceTranscript(id, content);
-      setTranscriptsData(this, { items: replaceItem(this.data.items, updated, this.data.searchQuery, this.data.bookPlan) });
-      trackAuditAction("transcript.edit_save", {}, { projectId: this.data.activeProjectId });
-      wx.showToast({ title: "已保存", icon: "success" });
-    } catch (error) {
-      setTranscriptsData(this, { error: error instanceof Error ? error.message : "保存失败" });
-    } finally {
-      setTranscriptsData(this, { savingId: "" });
-    }
-  },
-
-  resetToRaw(event: DatasetEvent) {
-    const id = datasetString(event, "id");
-    const index = this.data.items.findIndex((item) => item.id === id);
-    if (index < 0) {
-      return;
-    }
-    const items = [...this.data.items];
-    items[index] = changedItem(items[index], items[index].transcript_raw);
-    setTranscriptsData(this, { items });
-  },
-
   async deleteTranscript(event: DatasetEvent) {
     const id = datasetString(event, "id");
     const item = this.data.items.find((candidate) => candidate.id === id);
-    if (!id || !item || this.data.savingId || this.data.deletingId) {
+    if (!id || !item || this.data.deletingId) {
       return;
     }
     const confirmed = await confirmDelete(item);
@@ -1273,8 +855,7 @@ definePage<TranscriptsData>()({
       clearTimeout(this.searchDebounceTimer);
       this.searchDebounceTimer = null;
     }
-    this.voiceEditToken += 1;
-    if (this.data.voiceSearchRecording || this.data.voiceEditRecording) {
+    if (this.data.voiceSearchRecording) {
       stopMemoirVoiceSearchRecording();
     }
   },
