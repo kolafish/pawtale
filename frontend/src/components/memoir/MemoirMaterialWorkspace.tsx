@@ -33,6 +33,7 @@ const MemoirAdvancedToolsDrawer = lazy(async () => ({
 
 interface MemoirMaterialWorkspaceProps {
   project: Project;
+  onUnsavedChange?: (hasUnsavedChanges: boolean) => void;
 }
 
 const PAGE_SIZE = 50;
@@ -60,7 +61,10 @@ function requestErrorMessage(error: unknown) {
   return typeof detail === 'string' && detail.trim() ? detail : '保存失败，请稍后重试。';
 }
 
-export function MemoirMaterialWorkspace({ project }: MemoirMaterialWorkspaceProps) {
+export function MemoirMaterialWorkspace({
+  project,
+  onUnsavedChange,
+}: MemoirMaterialWorkspaceProps) {
   const queryClient = useQueryClient();
   const canEdit = project.can_edit_memoir_materials !== false;
   const [search, setSearch] = useState('');
@@ -165,6 +169,14 @@ export function MemoirMaterialWorkspace({ project }: MemoirMaterialWorkspaceProp
     window.addEventListener('beforeunload', handleBeforeUnload);
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [hasUnsavedChanges]);
+
+  useEffect(() => {
+    onUnsavedChange?.(hasUnsavedChanges);
+  }, [hasUnsavedChanges, onUnsavedChange]);
+
+  useEffect(() => () => {
+    onUnsavedChange?.(false);
+  }, [onUnsavedChange]);
 
   const saveMutation = useMutation({
     mutationFn: ({ materialId, text }: { materialId: string; text: string; nextId: string | null }) =>
