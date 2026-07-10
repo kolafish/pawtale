@@ -72,7 +72,6 @@
         wx:else
         class="primary-button small"
         data-action="preview"
-        disabled="{{hasDraftChanges || bookViewingHistoricalVersion}}"
         bindtap="openBookExportPage"
       >
         预览全书
@@ -80,7 +79,7 @@
       <button
         class="ghost-button small"
         data-action="reading_pdf"
-        disabled="{{updatingPlanStructure || generatingBook || !bookContent || hasDraftChanges || bookStaleNotice || bookExportBusyTarget}}"
+        disabled="{{updatingPlanStructure || generatingBook || !bookContent || bookStaleNotice}}"
         bindtap="openBookExportPage"
       >
         阅读版 PDF
@@ -88,7 +87,7 @@
       <button
         class="ghost-button small"
         data-action="print_pdf"
-        disabled="{{updatingPlanStructure || generatingBook || !bookContent || hasDraftChanges || bookStaleNotice || bookExportBusyTarget}}"
+        disabled="{{updatingPlanStructure || generatingBook || !bookContent || bookStaleNotice}}"
         bindtap="openBookExportPage"
       >
         打印版 PDF

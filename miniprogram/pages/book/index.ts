@@ -16,7 +16,7 @@ import type {
 } from "../../domain/voice-chat";
 import { definePage } from "../../services/page-definition";
 import { trackAuditAction } from "../../services/audit-tracker";
-import type { BookChapterView, BookData, BookVoiceCommandUndoSnapshot } from "./book-view-model";
+import type { BookChapterView, BookHomeData, BookVoiceCommandUndoSnapshot } from "./book-view-model";
 import { getMemoirIdentity } from "../../services/auth";
 import { memoirProjectProfile } from "../../services/memoir-project-profile";
 
@@ -24,15 +24,12 @@ import {
   acknowledgeMemoirAutomationEvent,
   applyMemoirBookPlanStructureCommand,
   assignMemoirBookSources,
-  confirmMemoirBookChapterDraft,
   confirmMemoirBookPlan,
   createMemoirBookChapterDraftTTS,
-  createMemoirBookOutputTTS,
   createMemoirBookPlanOutlineTTS,
   bookVoiceCommandGatewayUrl,
   bookVoiceAssistantTurnStreamUrl,
   enqueueMemoirBookChapterDraftGeneration,
-  enqueueMemoirBookOutputEditorialCopyGeneration,
   enqueueMemoirBookOutputGeneration,
   executeMemoirBookVoiceCommand,
   generateMemoirBookChapterTitle,
@@ -43,10 +40,7 @@ import {
   getMemoirBookSourceCoverage,
   listMemoirImageAssets,
   listMemoirAutomationEvents,
-  updateMemoirBookOutputChapterEditorialCopy,
-  updateMemoirBookChapterTitle,
   updateMemoirBookPlan,
-  updateMemoirBookChapterDraft,
 } from "../../services/memoir-voice-api";
 import { ApiError } from "../../services/request";
 import {
@@ -100,14 +94,9 @@ import {
 import { ensureRecorderPrivacyAuthorization } from "../../services/wechat-privacy";
 import {
   applyBookTTSProgressPatch as applyBookTTSPlaybackProgressPatch,
-  playBookAudioFile,
   playBookAudioFiles,
-  playbackTimeForProgress as playbackTimeForBookTTSProgress,
-  resetBookTTSProgress as resetBookTTSPlaybackProgress,
-  startBookTTSProgressTimer as startBookTTSPlaybackProgressTimer,
   stopBookPlayback,
   stopBookTTSProgressTimer as stopBookTTSPlaybackProgressTimer,
-  updateBookTTSProgress as updateBookTTSPlaybackProgress,
 } from "./book-tts-player";
 import {
   CHAPTER_MOVE_DIRECTIONS,
@@ -122,36 +111,26 @@ import {
 } from "./book-page-plan-helpers";
 import {
   NEW_CHAPTER_PICKER_VALUE,
-  bookOutputData,
+  bookHomeOutputData,
   buildChapterViews,
   chapterCollectionData,
-  draftActionText,
-  draftStatusText,
-  draftVersionText,
   guestBookData,
   latestDraftContent,
   planStage,
-  responseCount,
   sourceCoverageData,
-  sourceChangeNotice,
   stageText,
   toPlanInput,
   toPlanUpdateInput,
   trimText,
-  bookChapterSourceSummary,
   bookOutlineNarrationText,
   buildAutomationEventViews,
-  BOOK_COVER_STYLE_OPTIONS,
-  BOOK_EXPORT_LAYOUT_OPTIONS,
   hasPendingBookOutputGeneration,
   mergeAutomationEvent,
   pendingBookGenerationEvents,
   pendingChapterDraftGenerationIds,
 } from "./book-view-model";
 import {
-  bookEditorialCopyBlockedMessage,
-  currentBookMetadataPayload,
-  isChapterEditorialCopyTarget,
+  bookGenerationSettings,
 } from "./book-design-model";
 import {
   bookVoiceAssistantHint,
@@ -177,8 +156,6 @@ export {
 } from "./book-page-plan-helpers";
 export {
   bookChapterSourceSummary,
-  bookOutputStaleNotice,
-  bookOutputVersionText,
   bookOutlineNarrationText,
   bookProgressText,
   bookSourceCoverageNotice,
@@ -187,21 +164,16 @@ export {
   buildChapterViews,
   buildSourceActionPickerOptions,
   buildUncoveredSourceViews,
-  latestBookContent,
 } from "./book-view-model";
 export {
-  bookVoiceCommandActionText,
   canExecuteBookVoiceCommand,
 } from "./book-voice-assistant-view-model";
 
 interface BookDataset {
   id?: string;
   eventIds?: string;
-  key?: string;
   action?: string;
   direction?: string;
-  target?: string;
-  title?: string;
   utteranceId?: string;
 }
 
@@ -212,7 +184,7 @@ type PickerEvent = PagePickerEvent<BookDataset>;
 const BOOK_GENERATION_EVENT_POLL_INTERVAL_MS = 3000;
 const BOOK_GENERATION_EVENT_POLL_MAX_ATTEMPTS = 120;
 
-function defaultBookTitleInput(planTitle: string, projectTitle: string): string {
+function defaultBookTitle(planTitle: string, projectTitle: string): string {
   return (
     trimText(planTitle.replace("章节规划", "").replace("主题回忆录", "回忆录").replace("主题", ""))
     || trimText(projectTitle)
@@ -226,7 +198,7 @@ const BOOK_VOICE_NO_VOICE_MS = 3500;
 const BOOK_VOICE_AUTO_LISTEN_NO_VOICE_MS = 15000;
 const BOOK_VOICE_STREAMING_TTS_PROGRESS_HOLD_SECONDS = 0.75;
 
-definePage<BookData>()({
+definePage<BookHomeData>()({
   audioPlayback: new AudioPlaybackController(),
   bookVoiceStreaming: new StreamingVoiceController(),
   bookVoiceAssistantTurnRuntime: null as VoiceAssistantTurnRuntime | null,
@@ -255,12 +227,10 @@ definePage<BookData>()({
     stage: "empty",
     stageText: "等待生成章节",
     chapters: [],
-    editingChapterId: "",
     splitSourceSelections: {},
     confirmedDraftCount: 0,
     totalChapterCount: 0,
     allChaptersConfirmed: false,
-    hasDraftChanges: false,
     canGenerateBook: false,
     progressText: "还没有章节",
     sourceCoverage: null,
@@ -275,62 +245,8 @@ definePage<BookData>()({
     bookContent: "",
     bookCharCount: 0,
     bookPreviewTitle: "",
-    bookPreviewTocItems: [],
-    bookPreviewChapters: [],
-    bookPreviewChaptersExpanded: false,
-    bookOutputDetailsExpanded: false,
-    bookManuscriptAvailable: false,
-    bookManuscriptTitle: "",
-    bookManuscriptSubtitle: "",
-    bookManuscriptTemplateLabel: "基础成书版",
-    bookManuscriptSettingsText: "",
-    bookManuscriptStructureItems: [],
-    bookManuscriptFrontMatterItems: [],
-    bookManuscriptChapterItems: [],
-    bookManuscriptBackMatterItems: [],
-    bookVersionText: "尚未生成全书",
-    bookVersionOptions: [],
-    bookSelectedVersionId: "",
-    bookSelectedVersionIndex: 0,
-    bookViewingHistoricalVersion: false,
-    bookVersionNotice: "",
     bookStaleNotice: "",
     bookActionText: "生成全书",
-    bookExportBusyTarget: "",
-    bookExportLayout: "standard",
-    bookExportLayoutIndex: 0,
-    bookExportLayoutLabel: BOOK_EXPORT_LAYOUT_OPTIONS[0].label,
-    bookExportLayoutDetailText: BOOK_EXPORT_LAYOUT_OPTIONS[0].detailText,
-    bookExportLayoutOptions: BOOK_EXPORT_LAYOUT_OPTIONS,
-    bookExportShowSourceAppendix: true,
-    bookTitleInput: "",
-    bookSubtitleInput: "",
-    bookNarratorNameInput: "",
-    bookPreparedByInput: "家人整理",
-    bookPrefaceInput: "",
-    bookAfterwordInput: "",
-    bookBackCoverQuoteInput: "",
-    bookTitleChanged: false,
-    bookMetadataChanged: false,
-    bookTitleSaving: false,
-    bookDesignSaveStatusText: "生成时应用",
-    bookTitleSuggesting: false,
-    bookTitleSuggestions: [],
-    bookCoverStyle: "classic_plain",
-    bookCoverStylePreviewClass: BOOK_COVER_STYLE_OPTIONS[0].previewClass,
-    bookCoverStyleIndex: 0,
-    bookCoverStyleLabel: BOOK_COVER_STYLE_OPTIONS[0].label,
-    bookCoverStyleDetailText: BOOK_COVER_STYLE_OPTIONS[0].detailText,
-    bookCoverStyleOptions: BOOK_COVER_STYLE_OPTIONS,
-    bookCoverStyleChanged: false,
-    bookEditorialCopyBusyTarget: "",
-    bookChapterEditorialEditorVisible: false,
-    bookChapterEditorialChapterId: "",
-    bookChapterEditorialChapterTitle: "",
-    bookChapterEditorialIntroInput: "",
-    bookChapterEditorialPullQuoteInput: "",
-    bookChapterEditorialSourceRefId: "",
-    bookChapterEditorialSourceText: "",
     ttsBusyTarget: "",
     playingTarget: "",
     bookTTSActiveTarget: "",
@@ -378,7 +294,7 @@ definePage<BookData>()({
     return bookShareAppMessage({
       projectId: this.data.projectId,
       projectTitle: this.data.projectTitle,
-      bookTitle: this.data.bookPreviewTitle || this.data.bookManuscriptTitle || this.data.planTitle,
+      bookTitle: this.data.bookPreviewTitle || this.data.planTitle,
       hasBookContent: Boolean(this.data.bookContent),
     });
   },
@@ -589,16 +505,12 @@ definePage<BookData>()({
       ? buildChapterViews(plan, draftsByChapterId, this.data.sourceCoverage, this.data.splitSourceSelections)
       : [];
     const stage = planStage(plan);
-    const editingChapterId = chapters.some((chapter) => chapter.id === this.data.editingChapterId)
-      ? this.data.editingChapterId
-      : "";
     const shouldResetVoiceStatus = !this.data.bookVoiceAssistantConversationActive || !plan;
     this.setData({
       plan,
       planTitle: plan?.title || `${this.data.projectTitle || "我的回忆录"}章节规划`,
       stage,
       stageText: stageText(stage),
-      editingChapterId,
       bookVoiceAssistantHint: bookVoiceAssistantHint(stage, chapters.length),
       ...(shouldResetVoiceStatus ? bookVoiceIdlePatch(stage, {
         collapse: true,
@@ -607,23 +519,12 @@ definePage<BookData>()({
       }) : {}),
       ...chapterCollectionData(chapters, stage, this.data.sourceCoverage, this.data.splitSourceSelections),
       ...sourceCoverageData(plan, this.data.sourceCoverage),
-      ...(stage === "drafting" ? {} : bookOutputData(null)),
+      ...(stage === "drafting" ? {} : bookHomeOutputData(null)),
     });
   },
 
   applyBookOutput(output: MemoirBookOutput | null) {
-    const outputData = bookOutputData(output);
-    if (!output && !outputData.bookTitleInput) {
-      outputData.bookTitleInput = defaultBookTitleInput(this.data.planTitle, this.data.projectTitle);
-    }
-    if (!outputData.bookNarratorNameInput && this.data.projectNarratorName) {
-      outputData.bookNarratorNameInput = this.data.projectNarratorName;
-      outputData.bookMetadataChanged = Boolean(output?.latest_version);
-    }
-    this.setData({
-      ...outputData,
-      bookPreviewChaptersExpanded: false,
-    });
+    this.setData(bookHomeOutputData(output));
   },
 
   openImageAssetsPage() {
@@ -634,149 +535,6 @@ definePage<BookData>()({
     wx.navigateTo({
       url: `/pages/image-assets/index?projectId=${encodeURIComponent(this.data.projectId)}`,
     });
-  },
-
-  async regenerateBookChapterEditorialCopy(event: DatasetEvent) {
-    const chapterId = datasetString(event, "id");
-    const target = datasetString(event, "target");
-    if (!chapterId || !isChapterEditorialCopyTarget(target)) {
-      return;
-    }
-    const busyTarget = `${target}:${chapterId}`;
-    if (!this.data.projectId || this.data.bookEditorialCopyBusyTarget === busyTarget) {
-      return;
-    }
-    const blockedMessage = bookEditorialCopyBlockedMessage(this.data);
-    if (blockedMessage) {
-      this.setData({ error: blockedMessage });
-      return;
-    }
-    this.stopPlayback();
-    this.setData({ bookEditorialCopyBusyTarget: busyTarget, error: "" });
-    try {
-      const event = await enqueueMemoirBookOutputEditorialCopyGeneration(this.data.projectId, {
-        targets: [target],
-        chapter_ids: [chapterId],
-      });
-      this.applyAutomationEvents(mergeAutomationEvent(this.automationEvents, event));
-      wx.showToast({ title: "已后台生成", icon: "success" });
-    } catch (error) {
-      if (routeAuthError(error, "login")) {
-        return;
-      }
-      this.setData({ error: error instanceof Error ? error.message : "章节文案提交失败" });
-    } finally {
-      if (this.data.bookEditorialCopyBusyTarget === busyTarget) {
-        this.setData({ bookEditorialCopyBusyTarget: "" });
-      }
-    }
-  },
-
-  openBookChapterEditorialEditor(event: DatasetEvent) {
-    const chapterId = datasetString(event, "id");
-    if (!chapterId) {
-      return;
-    }
-    const blockedMessage = bookEditorialCopyBlockedMessage(this.data);
-    if (blockedMessage) {
-      this.setData({ error: blockedMessage });
-      return;
-    }
-    const chapter = this.data.bookManuscriptChapterItems.find((candidate) => candidate.chapterId === chapterId);
-    if (!chapter) {
-      this.setData({ error: "没有找到可编辑的章节文案" });
-      return;
-    }
-    this.stopPlayback();
-    this.setData({
-      bookChapterEditorialEditorVisible: true,
-      bookChapterEditorialChapterId: chapter.chapterId,
-      bookChapterEditorialChapterTitle: chapter.title,
-      bookChapterEditorialIntroInput: chapter.intro,
-      bookChapterEditorialPullQuoteInput: chapter.quoteText,
-      bookChapterEditorialSourceRefId: chapter.quoteSourceRefId,
-      bookChapterEditorialSourceText: chapter.quoteSourceText,
-      error: "",
-    });
-  },
-
-  closeBookChapterEditorialEditor() {
-    this.setData({
-      bookChapterEditorialEditorVisible: false,
-      bookChapterEditorialChapterId: "",
-      bookChapterEditorialChapterTitle: "",
-      bookChapterEditorialIntroInput: "",
-      bookChapterEditorialPullQuoteInput: "",
-      bookChapterEditorialSourceRefId: "",
-      bookChapterEditorialSourceText: "",
-    });
-  },
-
-  changeBookChapterEditorialField(event: TextInputEvent) {
-    const key = datasetString(event, "key");
-    if (key === "intro") {
-      this.setData({ bookChapterEditorialIntroInput: event.detail.value, error: "" });
-      return;
-    }
-    if (key === "pull_quote") {
-      this.setData({ bookChapterEditorialPullQuoteInput: event.detail.value, error: "" });
-    }
-  },
-
-  async saveBookChapterEditorialCopy() {
-    const chapterId = this.data.bookChapterEditorialChapterId;
-    if (!chapterId || !this.data.projectId || this.data.bookEditorialCopyBusyTarget) {
-      return;
-    }
-    const blockedMessage = bookEditorialCopyBlockedMessage(this.data);
-    if (blockedMessage) {
-      this.setData({ error: blockedMessage });
-      return;
-    }
-    const busyTarget = `manual:${chapterId}`;
-    this.stopPlayback();
-    this.setData({ bookEditorialCopyBusyTarget: busyTarget, error: "" });
-    try {
-      const output = await updateMemoirBookOutputChapterEditorialCopy(this.data.projectId, chapterId, {
-        intro: trimText(this.data.bookChapterEditorialIntroInput),
-        pull_quote: trimText(this.data.bookChapterEditorialPullQuoteInput),
-        pull_quote_source_ref_id: trimText(this.data.bookChapterEditorialSourceRefId) || null,
-      });
-      this.applyBookOutput(output);
-      this.closeBookChapterEditorialEditor();
-      wx.showToast({ title: "已保存", icon: "success" });
-    } catch (error) {
-      if (routeAuthError(error, "login")) {
-        return;
-      }
-      this.setData({ error: error instanceof Error ? error.message : "章节文案保存失败" });
-    } finally {
-      this.setData({ bookEditorialCopyBusyTarget: "" });
-    }
-  },
-
-  changeBookOutputVersion(event: PickerEvent) {
-    const index = pickerIndex(event);
-    const option = this.data.bookVersionOptions[index];
-    if (!option || !this.data.bookOutput) {
-      return;
-    }
-    if (this.data.playingTarget === "book") {
-      this.stopPlayback();
-    }
-    this.setData({
-      ...bookOutputData(this.data.bookOutput, option.id),
-      bookPreviewChaptersExpanded: false,
-      bookChapterEditorialEditorVisible: false,
-    });
-  },
-
-  toggleBookPreviewChapters() {
-    this.setData({ bookPreviewChaptersExpanded: !this.data.bookPreviewChaptersExpanded });
-  },
-
-  toggleBookOutputDetails() {
-    this.setData({ bookOutputDetailsExpanded: !this.data.bookOutputDetailsExpanded });
   },
 
   applySourceCoverage(coverage: MemoirBookSourceCoverage | null) {
@@ -792,7 +550,7 @@ definePage<BookData>()({
       return memo;
     }, {});
     const hasPendingBookOutput = hasPendingBookOutputGeneration(events);
-    const dataPatch: Partial<BookData> = {
+    const dataPatch: Partial<BookHomeData> = {
       generatingBook: this.bookOutputGenerationSubmitting || hasPendingBookOutput,
     };
     if (changedChapterIds.size) {
@@ -980,19 +738,6 @@ definePage<BookData>()({
     wx.navigateTo({ url: bookChapterDetailUrl(this.data.projectId, chapterId, "content") });
   },
 
-  closeChapterEditor() {
-    this.setData({ editingChapterId: "" });
-  },
-
-  openChapterSources(event: DatasetEvent) {
-    const chapterId = datasetString(event, "id");
-    if (!chapterId || !this.data.projectId) {
-      this.setData({ error: "缺少章节信息" });
-      return;
-    }
-    wx.navigateTo({ url: bookChapterDetailUrl(this.data.projectId, chapterId, "sources") });
-  },
-
   openChapterMoreActions(event: DatasetEvent) {
     const chapterId = datasetString(event, "id");
     const chapter = findBookChapter(this.data.chapters, chapterId);
@@ -1049,44 +794,6 @@ definePage<BookData>()({
       editingTitle: event.detail.value,
       titleChanged: chapter ? trimText(event.detail.value) !== trimText(chapter.title) : false,
     });
-  },
-
-  async saveChapterTitle(event: DatasetEvent) {
-    const chapterId = datasetString(event, "id");
-    const chapter = findBookChapter(this.data.chapters, chapterId);
-    if (!chapter || !this.data.projectId || this.data.titleBusyTarget || this.data.updatingPlanStructure) {
-      return;
-    }
-    const title = trimText(chapter.editingTitle);
-    if (!title) {
-      this.patchChapter(chapterId, { draftError: "章节名不能为空" });
-      return;
-    }
-    if (title === trimText(chapter.title)) {
-      this.patchChapter(chapterId, { titleChanged: false, draftError: "" });
-      wx.showToast({ title: "章名已保存", icon: "success" });
-      return;
-    }
-    this.stopPlayback();
-    this.setData({ titleBusyTarget: chapterId, error: "" });
-    this.patchChapter(chapterId, { draftError: "" });
-    try {
-      const plan = await updateMemoirBookChapterTitle(this.data.projectId, chapterId, { title });
-      await this.applyUpdatedPlan(plan, "章名已保存");
-    } catch (error) {
-      if (routeAuthError(error, "me")) {
-        return;
-      }
-      const message = error instanceof Error ? error.message : "章节名保存失败";
-      this.patchChapter(chapterId, {
-        draftError: message,
-      });
-      if (this.data.stage === "plan_draft") {
-        this.setData({ error: message });
-      }
-    } finally {
-      this.setData({ titleBusyTarget: "" });
-    }
   },
 
   async generateChapterTitle(event: DatasetEvent) {
@@ -1226,18 +933,9 @@ definePage<BookData>()({
     this.setData(toggleBookChapterSourcesPatch(this.data, chapterId));
   },
 
-  async generateChapterDraft(event: DatasetEvent) {
-    const chapterId = datasetString(event, "id");
-    await this.generateChapterDraftById(chapterId);
-  },
-
   async generateChapterDraftById(chapterId: string) {
     const chapter = findBookChapter(this.data.chapters, chapterId);
     if (!chapter || !this.data.projectId || chapter.draftBusy || this.data.updatingPlanStructure) {
-      return false;
-    }
-    if (chapter.draftChanged) {
-      this.patchChapter(chapterId, { draftError: "请先保存当前修改，再生成新版本" });
       return false;
     }
     this.patchChapter(chapterId, { draftBusy: true, draftError: "" });
@@ -1261,74 +959,6 @@ definePage<BookData>()({
       });
       this.patchChapter(chapterId, { draftBusy: false });
       return false;
-    }
-  },
-
-  changeDraftContent(event: TextInputEvent) {
-    const chapterId = datasetString(event, "id");
-    const value = event.detail.value;
-    const chapter = findBookChapter(this.data.chapters, chapterId);
-    if (!chapter) {
-      return;
-    }
-    const original = latestDraftContent(chapter.draft);
-    this.patchChapter(chapterId, {
-      draftContent: value,
-      draftCharCount: trimText(value).length,
-      draftChanged: trimText(value) !== trimText(original),
-      draftError: "",
-    });
-  },
-
-  async saveChapterDraft(event: DatasetEvent) {
-    const chapterId = datasetString(event, "id");
-    const chapter = findBookChapter(this.data.chapters, chapterId);
-    if (!chapter || !this.data.projectId || chapter.draftBusy || this.data.updatingPlanStructure) {
-      return;
-    }
-    const content = trimText(chapter.draftContent);
-    if (!content) {
-      this.patchChapter(chapterId, { draftError: "章节稿内容不能为空" });
-      return;
-    }
-    this.patchChapter(chapterId, { draftBusy: true, draftError: "" });
-    try {
-      const draft = await updateMemoirBookChapterDraft(this.data.projectId, chapterId, { content });
-      this.patchDraft(chapterId, draft);
-      wx.showToast({ title: "章节稿已保存", icon: "success" });
-    } catch (error) {
-      this.patchChapter(chapterId, {
-        draftError: error instanceof Error ? error.message : "章节稿保存失败",
-      });
-    } finally {
-      this.patchChapter(chapterId, { draftBusy: false });
-    }
-  },
-
-  async confirmChapterDraft(event: DatasetEvent) {
-    const chapterId = datasetString(event, "id");
-    const chapter = findBookChapter(this.data.chapters, chapterId);
-    if (
-      !chapter
-      || !this.data.projectId
-      || chapter.draftBusy
-      || this.data.updatingPlanStructure
-      || !chapter.draft?.latest_version
-    ) {
-      return;
-    }
-    this.patchChapter(chapterId, { draftBusy: true, draftError: "" });
-    try {
-      const draft = await confirmMemoirBookChapterDraft(this.data.projectId, chapterId);
-      this.patchDraft(chapterId, draft);
-      trackAuditAction("book.chapter_draft_confirm", {}, { projectId: this.data.projectId });
-      wx.showToast({ title: "本章已确认", icon: "success" });
-    } catch (error) {
-      this.patchChapter(chapterId, {
-        draftError: error instanceof Error ? error.message : "章节稿确认失败",
-      });
-    } finally {
-      this.patchChapter(chapterId, { draftBusy: false });
     }
   },
 
@@ -1368,11 +998,6 @@ definePage<BookData>()({
     }
   },
 
-  async addUncoveredSourceAsChapter(event: DatasetEvent) {
-    const utteranceId = datasetString(event, "id");
-    await this.addUncoveredSourceAsChapterById(utteranceId);
-  },
-
   async addUncoveredSourceAsChapterById(utteranceId: string) {
     const source = this.data.uncoveredSources.find((candidate) => candidate.utterance_id === utteranceId);
     if (!source || !this.data.plan || this.data.stage !== "drafting" || this.data.updatingPlanStructure) {
@@ -1389,43 +1014,8 @@ definePage<BookData>()({
     }
   },
 
-  async deleteConfirmedChapter(event: DatasetEvent) {
-    const chapterId = datasetString(event, "id");
-    const chapter = findBookChapter(this.data.chapters, chapterId);
-    if (
-      !chapter
-      || this.data.stage !== "drafting"
-      || this.data.chapters.length <= 1
-      || this.data.updatingPlanStructure
-      || chapter.draftBusy
-    ) {
-      return;
-    }
-    const confirmed = await new Promise<boolean>((resolve) => {
-      wx.showModal({
-        title: "删除章节",
-        content: `删除「${chapter.title}」会移除本章正文，收录讲述会回到待收录列表。`,
-        confirmText: "删除",
-        confirmColor: "#b84a5a",
-        success: (result) => resolve(Boolean(result.confirm)),
-        fail: () => resolve(false),
-      });
-    });
-    if (!confirmed) {
-      return;
-    }
-    await this.applyPlanStructureCommand({
-      type: "delete_chapter",
-      chapter_id: chapterId,
-    }, "章节已删除");
-  },
-
   async applyPlanStructureCommand(command: MemoirBookPlanStructureCommandRequest, toastTitle: string) {
     if (!this.data.projectId || !this.data.plan || this.data.updatingPlanStructure) {
-      return null;
-    }
-    if (this.data.stage === "drafting" && this.data.hasDraftChanges) {
-      this.setData({ error: "请先保存当前章节修改，再调整章节结构" });
       return null;
     }
     this.stopPlayback();
@@ -1447,10 +1037,6 @@ definePage<BookData>()({
 
   async updatePlanStructure(chapters: MemoirBookPlanChapterUpdateInput[], toastTitle: string) {
     if (!this.data.projectId || !this.data.plan || this.data.updatingPlanStructure) {
-      return null;
-    }
-    if (this.data.stage === "drafting" && this.data.hasDraftChanges) {
-      this.setData({ error: "请先保存当前章节修改，再调整章节结构" });
       return null;
     }
     this.stopPlayback();
@@ -1491,20 +1077,17 @@ definePage<BookData>()({
       this.setData({ error: "请先确认所有章节正文" });
       return;
     }
-    if (this.data.hasDraftChanges) {
-      this.setData({ error: "请先保存当前章节修改" });
-      return;
-    }
     this.stopPlayback();
     this.setData({ generatingBook: true, error: "" });
     this.bookOutputGenerationSubmitting = true;
     try {
-      const metadata = currentBookMetadataPayload(this.data, false);
+      const settings = bookGenerationSettings(this.data.bookOutput, {
+        title: defaultBookTitle(this.data.planTitle, this.data.projectTitle),
+        narratorName: this.data.projectNarratorName,
+      });
       const event = await enqueueMemoirBookOutputGeneration(this.data.projectId, {
         force_regenerate: Boolean(this.data.bookOutput?.latest_version),
-        title: trimText(this.data.bookTitleInput) || undefined,
-        ...metadata,
-        cover_style: this.data.bookCoverStyle,
+        ...settings,
       });
       this.applyAutomationEvents(mergeAutomationEvent(this.automationEvents, event));
       trackAuditAction(
@@ -1524,21 +1107,6 @@ definePage<BookData>()({
     }
   },
 
-  editBookOutputChapter(event: DatasetEvent) {
-    const chapterId = datasetString(event, "id");
-    if (!chapterId || !this.data.projectId) {
-      this.setData({ error: "缺少章节信息" });
-      return;
-    }
-    this.stopPlayback();
-    wx.navigateTo({ url: bookChapterDetailUrl(this.data.projectId, chapterId, "content") });
-  },
-
-  async playChapterAudio(event: DatasetEvent) {
-    const chapterId = datasetString(event, "id");
-    await this.playChapterAudioById(chapterId);
-  },
-
   async playChapterAudioById(chapterId: string, options: { autoListenAfterPlayback?: boolean; showPreparingToast?: boolean } = {}) {
     const chapter = findBookChapter(this.data.chapters, chapterId);
     if (!chapter || !this.data.projectId || this.data.updatingPlanStructure) {
@@ -1556,10 +1124,6 @@ definePage<BookData>()({
       this.patchChapter(chapterId, { draftError: "请先生成章节稿" });
       return;
     }
-    if (chapter.draftChanged) {
-      this.patchChapter(chapterId, { draftError: "请先保存当前修改" });
-      return;
-    }
     if (options.showPreparingToast) {
       wx.showToast({ title: "正在准备朗读", icon: "none" });
     }
@@ -1574,7 +1138,7 @@ definePage<BookData>()({
         return;
       }
       this.setData({ ttsBusyTarget: "" });
-      await this.playAudioFiles(response, target, token, trimText(chapter.draftContent));
+      await this.playAudioFiles(response, target, token, trimText(latestDraftContent(chapter.draft)));
       if (token === this.playToken && options.autoListenAfterPlayback) {
         this.scheduleBookVoiceAssistantAutoListen("这一章读完了，我继续听");
       }
@@ -1586,56 +1150,6 @@ definePage<BookData>()({
         this.patchChapter(chapterId, {
           draftError: error instanceof Error ? error.message : "章节朗读失败",
         });
-      }
-    } finally {
-      if (token === this.playToken && this.data.ttsBusyTarget === target) {
-        this.setData({ ttsBusyTarget: "" });
-      }
-    }
-  },
-
-  async playBookAudio() {
-    const target = "book";
-    if (this.data.playingTarget === target) {
-      this.stopPlayback();
-      return;
-    }
-    if (!this.data.projectId || this.data.ttsBusyTarget || this.data.updatingPlanStructure) {
-      return;
-    }
-    if (!this.data.bookContent) {
-      this.setData({ error: "请先生成书稿" });
-      return;
-    }
-    if (this.data.hasDraftChanges) {
-      this.setData({ error: "请先保存当前章节修改，再朗读书稿" });
-      return;
-    }
-    if (this.data.bookOutput?.is_stale) {
-      this.setData({ error: "章节内容已更新，请先更新书稿再朗读" });
-      return;
-    }
-    if (this.data.bookViewingHistoricalVersion) {
-      this.setData({ error: "正在查看历史版本，请先切回最新版再朗读" });
-      return;
-    }
-    this.stopPlayback();
-    const token = this.audioPlayback.nextToken();
-    this.playToken = token;
-    this.setData({ ttsBusyTarget: target, error: "" });
-    try {
-      const response = await this.requestBookAudio(target);
-      if (token !== this.playToken) {
-        return;
-      }
-      this.setData({ ttsBusyTarget: "" });
-      await this.playAudioFiles(response, target, token, trimText(this.data.bookContent));
-    } catch (error) {
-      if (routeAuthError(error, "login")) {
-        return;
-      }
-      if (token === this.playToken) {
-        this.setData({ error: error instanceof Error ? error.message : "全书朗读失败" });
       }
     } finally {
       if (token === this.playToken && this.data.ttsBusyTarget === target) {
@@ -1858,7 +1372,7 @@ definePage<BookData>()({
       closed: "语音对话已暂停",
       error: "实时识别异常",
     };
-    const patch: Partial<BookData> = {
+    const patch: Partial<BookHomeData> = {
       bookVoiceAssistantListening: status === "listening",
     };
     const shouldPreserveSemanticStatus = status === "ready" && (
@@ -1880,7 +1394,7 @@ definePage<BookData>()({
       stopping: "正在收尾",
       error: "录音异常",
     };
-    const patch: Partial<BookData> = {
+    const patch: Partial<BookHomeData> = {
       bookVoiceCaptureStateText: labels[stats.state],
       bookVoiceAudioLevelPercent: Math.min(100, Math.round(Math.sqrt(stats.audioLevel || 0) * 100)),
     };
@@ -2480,9 +1994,6 @@ definePage<BookData>()({
       ...(settings.voice ? { voice: settings.voice } : {}),
       ...(settings.speedRatio === 1 ? {} : { speed_ratio: settings.speedRatio }),
     };
-    if (target === "book") {
-      return createMemoirBookOutputTTS(this.data.projectId, request);
-    }
     if (target === "outline") {
       return createMemoirBookPlanOutlineTTS(this.data.projectId, request);
     }
@@ -2496,37 +2007,12 @@ definePage<BookData>()({
     return playBookAudioFiles(this, response, target, token, activeText);
   },
 
-  async playAudioFile(audioFileId: string, token: number, elapsedBeforeSeconds: number, fallbackDurationSeconds: number) {
-    return playBookAudioFile(this, audioFileId, token, elapsedBeforeSeconds, fallbackDurationSeconds);
-  },
-
-  updateBookTTSProgress(currentTimeSeconds: number, durationSeconds?: number) {
-    updateBookTTSPlaybackProgress(this, currentTimeSeconds, durationSeconds);
-  },
-
   applyBookTTSProgressPatch(patch: VoiceAssistantTTSProgressPatch) {
     applyBookTTSPlaybackProgressPatch(this, patch);
   },
 
-  startBookTTSProgressTimer(
-    token: number,
-    audio: WechatMiniprogram.InnerAudioContext,
-    elapsedBeforeSeconds: number,
-    durationSeconds: number,
-  ) {
-    startBookTTSPlaybackProgressTimer(this, token, audio, elapsedBeforeSeconds, durationSeconds);
-  },
-
   stopBookTTSProgressTimer() {
     stopBookTTSPlaybackProgressTimer(this);
-  },
-
-  resetBookTTSProgress() {
-    resetBookTTSPlaybackProgress(this);
-  },
-
-  playbackTimeForProgress(audio: WechatMiniprogram.InnerAudioContext) {
-    return playbackTimeForBookTTSProgress(this, audio);
   },
 
   stopPlayback() {
@@ -2603,36 +2089,4 @@ definePage<BookData>()({
     });
   },
 
-  patchDraft(chapterId: string, draft: MemoirBookChapterDraft) {
-    const assignedPendingCount = responseCount(draft.pending_source_count);
-    const assignedRemovedCount = responseCount(draft.removed_source_count);
-    const content = latestDraftContent(draft);
-    this.patchChapter(chapterId, {
-      pending_source_count: assignedPendingCount,
-      removed_source_count: assignedRemovedCount,
-      pendingSourceCount: assignedPendingCount,
-      removedSourceCount: assignedRemovedCount,
-      sourceChangeNotice: sourceChangeNotice(assignedPendingCount, assignedRemovedCount),
-      draft,
-      draftContent: content,
-      draftCharCount: trimText(content).length,
-      draftChanged: false,
-      draftStatusText: draftStatusText(draft),
-      draftStatusHintText: draft.status === "confirmed" ? "修改后需要重新确认" : "确认前可继续修改",
-      draftVersionText: draftVersionText(draft),
-      draftActionText: draftActionText(draft, assignedPendingCount, assignedRemovedCount),
-      draftActionHintText: draft?.latest_version
-        ? (assignedPendingCount ? "只补入新增讲述" : "不覆盖当前版本")
-        : "",
-      draftError: "",
-    });
-    this.clearBookOutput();
-  },
-
-  clearBookOutput() {
-    if (this.data.playingTarget === "book") {
-      this.stopPlayback();
-    }
-    this.applyBookOutput(null);
-  },
 });

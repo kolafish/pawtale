@@ -20,7 +20,6 @@ import type {
 } from "../../domain/voice-chat";
 import {
   sourceRefKey,
-  uniqueSourceRefs,
 } from "../../services/memoir-book-sources";
 import { formatBeijingDateTimeShort } from "../../services/time";
 import type { BookAutomationEventView } from "./book-automation-view-model";
@@ -241,7 +240,6 @@ export interface BookData {
   confirmedDraftCount: number;
   totalChapterCount: number;
   allChaptersConfirmed: boolean;
-  hasDraftChanges: boolean;
   canGenerateBook: boolean;
   progressText: string;
   sourceCoverage: MemoirBookSourceCoverage | null;
@@ -361,6 +359,65 @@ export interface BookData {
   imageAssetUnusedCount: number;
   imageAssetSummaryText: string;
 }
+
+export type BookHomeData = Omit<
+  BookData,
+  | "editingChapterId"
+  | "bookPreviewTocItems"
+  | "bookPreviewChapters"
+  | "bookPreviewChaptersExpanded"
+  | "bookOutputDetailsExpanded"
+  | "bookManuscriptAvailable"
+  | "bookManuscriptTitle"
+  | "bookManuscriptSubtitle"
+  | "bookManuscriptTemplateLabel"
+  | "bookManuscriptSettingsText"
+  | "bookManuscriptStructureItems"
+  | "bookManuscriptFrontMatterItems"
+  | "bookManuscriptChapterItems"
+  | "bookManuscriptBackMatterItems"
+  | "bookVersionText"
+  | "bookVersionOptions"
+  | "bookSelectedVersionId"
+  | "bookSelectedVersionIndex"
+  | "bookViewingHistoricalVersion"
+  | "bookVersionNotice"
+  | "bookExportBusyTarget"
+  | "bookExportLayout"
+  | "bookExportLayoutIndex"
+  | "bookExportLayoutLabel"
+  | "bookExportLayoutDetailText"
+  | "bookExportLayoutOptions"
+  | "bookExportShowSourceAppendix"
+  | "bookTitleInput"
+  | "bookSubtitleInput"
+  | "bookNarratorNameInput"
+  | "bookPreparedByInput"
+  | "bookPrefaceInput"
+  | "bookAfterwordInput"
+  | "bookBackCoverQuoteInput"
+  | "bookTitleChanged"
+  | "bookMetadataChanged"
+  | "bookTitleSaving"
+  | "bookDesignSaveStatusText"
+  | "bookTitleSuggesting"
+  | "bookTitleSuggestions"
+  | "bookCoverStyle"
+  | "bookCoverStylePreviewClass"
+  | "bookCoverStyleIndex"
+  | "bookCoverStyleLabel"
+  | "bookCoverStyleDetailText"
+  | "bookCoverStyleOptions"
+  | "bookCoverStyleChanged"
+  | "bookEditorialCopyBusyTarget"
+  | "bookChapterEditorialEditorVisible"
+  | "bookChapterEditorialChapterId"
+  | "bookChapterEditorialChapterTitle"
+  | "bookChapterEditorialIntroInput"
+  | "bookChapterEditorialPullQuoteInput"
+  | "bookChapterEditorialSourceRefId"
+  | "bookChapterEditorialSourceText"
+>;
 
 export function positiveFiniteSeconds(value: number | null | undefined): number {
   const number = Number(value);
@@ -951,6 +1008,26 @@ export function bookOutputData(output: MemoirBookOutput | null, selectedVersionI
   };
 }
 
+export function bookHomeOutputData(output: MemoirBookOutput | null): Pick<
+  BookHomeData,
+  | "bookOutput"
+  | "bookContent"
+  | "bookCharCount"
+  | "bookPreviewTitle"
+  | "bookStaleNotice"
+  | "bookActionText"
+> {
+  const content = latestBookContent(output);
+  return {
+    bookOutput: output,
+    bookContent: content,
+    bookCharCount: trimText(content).length,
+    bookPreviewTitle: bookOutputPreviewTitle(output),
+    bookStaleNotice: bookOutputStaleNotice(output),
+    bookActionText: bookActionText(output),
+  };
+}
+
 export function bookSourceCoverageNotice(
   plan: MemoirBookPlan | null,
   coverage: MemoirBookSourceCoverage | null,
@@ -1144,18 +1221,16 @@ function decorateChapterStructureOptions(
 
 function chapterStateData(chapters: BookChapterView[]): Pick<
   BookData,
-  "confirmedDraftCount" | "totalChapterCount" | "allChaptersConfirmed" | "hasDraftChanges" | "canGenerateBook" | "progressText"
+  "confirmedDraftCount" | "totalChapterCount" | "allChaptersConfirmed" | "canGenerateBook" | "progressText"
 > {
   const confirmedDraftCount = chapters.filter((chapter) => chapter.draft?.status === "confirmed").length;
   const totalChapterCount = chapters.length;
-  const hasDraftChanges = chapters.some((chapter) => chapter.draftChanged);
   const allChaptersConfirmed = totalChapterCount > 0 && confirmedDraftCount === totalChapterCount;
   return {
     confirmedDraftCount,
     totalChapterCount,
     allChaptersConfirmed,
-    hasDraftChanges,
-    canGenerateBook: allChaptersConfirmed && !hasDraftChanges,
+    canGenerateBook: allChaptersConfirmed,
     progressText: bookProgressText(chapters),
   };
 }
@@ -1171,7 +1246,6 @@ export function chapterCollectionData(
   | "confirmedDraftCount"
   | "totalChapterCount"
   | "allChaptersConfirmed"
-  | "hasDraftChanges"
   | "canGenerateBook"
   | "progressText"
   | "chapterPickerOptions"
@@ -1295,7 +1369,7 @@ export function stageText(stage: BookStage): string {
   return "逐章成稿";
 }
 
-export function guestBookData(): Partial<BookData> {
+export function guestBookData(): Partial<BookHomeData> {
   return {
     needsLogin: true,
     projectId: "",
@@ -1306,11 +1380,9 @@ export function guestBookData(): Partial<BookData> {
     stage: "empty",
     stageText: stageText("empty"),
     chapters: [],
-    editingChapterId: "",
     confirmedDraftCount: 0,
     totalChapterCount: 0,
     allChaptersConfirmed: false,
-    hasDraftChanges: false,
     canGenerateBook: false,
     progressText: "登录后可以开始整理",
     splitSourceSelections: {},
@@ -1326,52 +1398,8 @@ export function guestBookData(): Partial<BookData> {
     bookContent: "",
     bookCharCount: 0,
     bookPreviewTitle: "",
-    bookPreviewTocItems: [],
-    bookPreviewChapters: [],
-    bookPreviewChaptersExpanded: false,
-    bookOutputDetailsExpanded: false,
-    bookManuscriptAvailable: false,
-    bookManuscriptTitle: "",
-    bookManuscriptSubtitle: "",
-    bookManuscriptTemplateLabel: "基础成书版",
-    bookManuscriptSettingsText: "",
-    bookManuscriptStructureItems: [],
-    bookManuscriptFrontMatterItems: [],
-    bookManuscriptChapterItems: [],
-    bookManuscriptBackMatterItems: [],
-    bookVersionText: "尚未生成全书",
-    bookVersionOptions: [],
-    bookSelectedVersionId: "",
-    bookSelectedVersionIndex: 0,
-    bookViewingHistoricalVersion: false,
-    bookVersionNotice: "",
     bookStaleNotice: "",
     bookActionText: "生成全书",
-    bookExportBusyTarget: "",
-    bookExportLayout: "standard",
-    bookExportLayoutIndex: 0,
-    bookExportLayoutLabel: BOOK_EXPORT_LAYOUT_OPTIONS[0].label,
-    bookExportLayoutDetailText: BOOK_EXPORT_LAYOUT_OPTIONS[0].detailText,
-    bookExportLayoutOptions: BOOK_EXPORT_LAYOUT_OPTIONS,
-    bookExportShowSourceAppendix: true,
-    bookTitleInput: "",
-    bookSubtitleInput: "",
-    bookNarratorNameInput: "",
-    bookPreparedByInput: "家人整理",
-    bookPrefaceInput: "",
-    bookAfterwordInput: "",
-    bookBackCoverQuoteInput: "",
-    bookTitleChanged: false,
-    bookMetadataChanged: false,
-    bookDesignSaveStatusText: "生成时应用",
-    bookTitleSuggestions: [],
-    bookCoverStyle: "classic_plain",
-    bookCoverStylePreviewClass: BOOK_COVER_STYLE_OPTIONS[0].previewClass,
-    bookCoverStyleIndex: 0,
-    bookCoverStyleLabel: BOOK_COVER_STYLE_OPTIONS[0].label,
-    bookCoverStyleDetailText: BOOK_COVER_STYLE_OPTIONS[0].detailText,
-    bookCoverStyleOptions: BOOK_COVER_STYLE_OPTIONS,
-    bookCoverStyleChanged: false,
     ttsBusyTarget: "",
     playingTarget: "",
     bookTTSActiveTarget: "",

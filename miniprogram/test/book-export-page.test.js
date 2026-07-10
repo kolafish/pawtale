@@ -129,6 +129,11 @@ test("book export page saves full-book metadata and cover style", async () => {
   const context = pageContext(page, { projectId: "project/1" });
   page.applyBookExportData.call(context, samplePlan(), sampleBookOutput());
 
+  assert.deepEqual(
+    context.data.bookCoverStyleOptions.map((option) => option.value),
+    ["classic_plain", "warm_gray", "dark_album", "moonlit_courtyard", "navy_gilt"],
+  );
+
   page.changeBookTitle.call(context, {
     currentTarget: { dataset: {} },
     detail: { value: "外婆的月光" },

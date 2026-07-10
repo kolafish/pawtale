@@ -11,7 +11,6 @@ const {
   sampleAutomationEvent,
   sampleBookManuscript,
   sampleBookOutput,
-  sampleBookOutputVersion,
   sampleBookVoiceCommandExecuteResponse,
   sampleBookVoiceCommandPreview,
   sampleDraft,
@@ -402,17 +401,11 @@ function loadBookPage({
     assignMemoirBookSources: async () => {
       throw new Error("assignMemoirBookSources was not mocked");
     },
-    confirmMemoirBookChapterDraft: async () => {
-      throw new Error("confirmMemoirBookChapterDraft was not mocked");
-    },
     confirmMemoirBookPlan: async () => {
       throw new Error("confirmMemoirBookPlan was not mocked");
     },
     createMemoirBookChapterDraftTTS: async () => {
       throw new Error("createMemoirBookChapterDraftTTS was not mocked");
-    },
-    createMemoirBookOutputTTS: async () => {
-      throw new Error("createMemoirBookOutputTTS was not mocked");
     },
     createMemoirBookPlanOutlineTTS: async () => {
       throw new Error("createMemoirBookPlanOutlineTTS was not mocked");
@@ -422,9 +415,6 @@ function loadBookPage({
     },
     enqueueMemoirBookOutputGeneration: async () => {
       throw new Error("enqueueMemoirBookOutputGeneration was not mocked");
-    },
-    enqueueMemoirBookOutputEditorialCopyGeneration: async () => {
-      throw new Error("enqueueMemoirBookOutputEditorialCopyGeneration was not mocked");
     },
     executeMemoirBookVoiceCommand: async () => {
       throw new Error("executeMemoirBookVoiceCommand was not mocked");
@@ -462,17 +452,8 @@ function loadBookPage({
     bookVoiceAssistantTurnStreamUrl: (projectId) => (
       `wss://api.example.test/book/${encodeURIComponent(projectId)}/assistant-turn`
     ),
-    updateMemoirBookChapterTitle: async () => {
-      throw new Error("updateMemoirBookChapterTitle was not mocked");
-    },
     updateMemoirBookPlan: async () => {
       throw new Error("updateMemoirBookPlan was not mocked");
-    },
-    updateMemoirBookOutputChapterEditorialCopy: async () => {
-      throw new Error("updateMemoirBookOutputChapterEditorialCopy was not mocked");
-    },
-    updateMemoirBookChapterDraft: async () => {
-      throw new Error("updateMemoirBookChapterDraft was not mocked");
     },
     ...voiceApiExports,
   });
@@ -611,11 +592,9 @@ test("book page routes chapter card actions to the chapter detail page", () => {
   );
 
   page.openChapterEditor.call(context, { currentTarget: { dataset: { id: "chapter/1" } } });
-  page.openChapterSources.call(context, { currentTarget: { dataset: { id: "chapter/1" } } });
 
   assert.deepEqual(navigations, [
     "/pages/book-chapter/index?projectId=project%2F1&chapterId=chapter%2F1&tab=content",
-    "/pages/book-chapter/index?projectId=project%2F1&chapterId=chapter%2F1&tab=sources",
   ]);
   delete global.wx;
 });
@@ -691,28 +670,6 @@ test("book page routes progress export actions to the full-book export page", ()
   delete global.wx;
 });
 
-test("book page exposes all PDF cover style options", () => {
-  const { page } = loadBookPage();
-  const context = pageContext(page);
-
-  assert.deepEqual(
-    context.data.bookCoverStyleOptions.map((option) => option.value),
-    ["classic_plain", "warm_gray", "dark_album", "moonlit_courtyard", "navy_gilt"],
-  );
-  assert.equal(
-    context.data.bookCoverStyleOptions.find((option) => option.value === "moonlit_courtyard").label,
-    "月下庭院",
-  );
-  assert.equal(
-    context.data.bookCoverStyleOptions.find((option) => option.value === "moonlit_courtyard").previewClass,
-    "moonlit-courtyard",
-  );
-  assert.equal(
-    context.data.bookCoverStyleOptions.find((option) => option.value === "navy_gilt").label,
-    "深蓝烫金",
-  );
-});
-
 test("book page builds outline narration for saved chapter titles", () => {
   const { mod } = loadBookPage();
   const plan = samplePlan("confirmed");
@@ -762,145 +719,29 @@ test("book page progress counts generated and confirmed chapters", () => {
   assert.equal(chapters[1].draftStatusText, "待确认");
 });
 
-test("book page summarizes latest book output version", () => {
-  const { mod, page } = loadBookPage();
-  const output = sampleBookOutput(3, "全书正文", false, [], sampleStructuredBookContent(), [], sampleBookManuscript());
+test("book page stores only the full-book summary needed by the home view", () => {
+  const { page } = loadBookPage();
+  const output = sampleBookOutput(
+    3,
+    "全书正文",
+    true,
+    ["外婆家的童年", "第一次离家", "县城生活"],
+    sampleStructuredBookContent(),
+    [],
+    sampleBookManuscript(),
+  );
   const context = pageContext(page);
   page.applyBookOutput.call(context, output);
   const data = context.data;
 
-  assert.equal(mod.latestBookContent(output), "全书正文");
-  assert.equal(mod.bookOutputVersionText(output), "已修改 3 次");
-  assert.equal(mod.bookOutputStaleNotice(output), "");
-  assert.equal(mod.bookOutputVersionText(null), "尚未生成全书");
+  assert.equal(data.bookOutput, output);
+  assert.equal(data.bookContent, "全书正文");
+  assert.equal(data.bookCharCount, 4);
   assert.equal(data.bookPreviewTitle, "外婆回忆录");
-  assert.equal(data.bookPreviewTocItems.length, 2);
-  assert.equal(data.bookPreviewTocItems[0].metaText, "14 字 · 2 条原始讲述");
-  assert.equal(data.bookPreviewChaptersExpanded, false);
-  assert.equal(data.bookPreviewChapters[0].indexText, "第 1 章");
-  assert.equal(data.bookPreviewChapters[0].content, "我小时候常在院子里晒太阳。");
-  assert.equal(data.bookPreviewChapters[0].metaText, "14 字 · 2 条原始讲述 · 已修改 1 次");
-  assert.equal(data.bookManuscriptAvailable, true);
-  assert.equal(data.bookManuscriptTemplateLabel, "素雅书籍版");
-  assert.equal(data.bookManuscriptSettingsText, "A5 · 阅读排版 · 含页眉 · 附上原始讲述");
-  assert.equal(data.bookSubtitleInput, "根据口述访谈整理");
-  assert.equal(data.bookPrefaceInput, "这些故事来自家里的讲述。");
-  assert.equal(data.bookAfterwordInput, "这些故事还可以继续补充。");
-  assert.equal(data.bookBackCoverQuoteInput, "我小时候常在院子里晒太阳。");
-  assert.equal(data.bookManuscriptStructureItems.some((item) => item.title === "目录"), true);
-  assert.equal(data.bookManuscriptFrontMatterItems.length, 4);
-  assert.equal(data.bookManuscriptChapterItems[0].intro, "这一章主要记录外婆小时候在院子里的生活。");
-  assert.equal(data.bookManuscriptChapterItems[0].quoteText, "我小时候常在院子里晒太阳。");
-  assert.equal(data.bookManuscriptChapterItems[0].quoteSourceRefId, "utterance-1");
-  assert.equal(data.bookManuscriptChapterItems[0].quoteSourceText, "来自原始口述");
-  assert.equal(data.bookManuscriptBackMatterItems.some((item) => item.title === "原始讲述索引"), true);
-  assert.equal(
-    mod.bookOutputStaleNotice(sampleBookOutput(3, "全书正文", true, ["外婆家的童年", "第一次离家", "县城生活"])),
-    "章节「外婆家的童年、第一次离家」等章节已更新，请重新整理一版。",
-  );
-});
-
-test("book page toggles full-book chapter body preview", () => {
-  const { page } = loadBookPage();
-  const context = pageContext(page);
-  page.applyBookOutput.call(
-    context,
-    sampleBookOutput(3, "全书正文", false, [], sampleStructuredBookContent(), [], sampleBookManuscript()),
-  );
-
-  assert.equal(context.data.bookPreviewChaptersExpanded, false);
-  page.toggleBookPreviewChapters.call(context);
-  assert.equal(context.data.bookPreviewChaptersExpanded, true);
-  page.toggleBookPreviewChapters.call(context);
-  assert.equal(context.data.bookPreviewChaptersExpanded, false);
-});
-
-test("book page preserves moonlit courtyard cover style from latest manuscript", () => {
-  const { page } = loadBookPage();
-  const context = pageContext(page);
-  page.applyBookOutput.call(
-    context,
-    sampleBookOutput(
-      1,
-      "全书正文",
-      false,
-      [],
-      sampleStructuredBookContent(),
-      [],
-      sampleBookManuscript("外婆回忆录", "moonlit_courtyard"),
-    ),
-  );
-
-  assert.equal(context.data.bookCoverStyle, "moonlit_courtyard");
-  assert.equal(context.data.bookCoverStyleLabel, "月下庭院");
-  assert.equal(context.data.bookCoverStyleChanged, false);
-});
-
-test("book page preserves navy gilt cover style from latest manuscript", () => {
-  const { page } = loadBookPage();
-  const context = pageContext(page);
-  page.applyBookOutput.call(
-    context,
-    sampleBookOutput(
-      1,
-      "全书正文",
-      false,
-      [],
-      sampleStructuredBookContent(),
-      [],
-      sampleBookManuscript("外婆回忆录", "navy_gilt"),
-    ),
-  );
-
-  assert.equal(context.data.bookCoverStyle, "navy_gilt");
-  assert.equal(context.data.bookCoverStyleLabel, "深蓝烫金");
-  assert.equal(context.data.bookCoverStyleChanged, false);
-});
-
-test("book page switches full-book output versions without changing the latest output", () => {
-  const { page } = loadBookPage();
-  const latestStructured = sampleStructuredBookContent();
-  const historicalStructured = {
-    ...sampleStructuredBookContent(),
-    chapters: [
-      {
-        ...sampleStructuredBookContent().chapters[0],
-        content: "旧版第一章正文。",
-        char_count: 8,
-      },
-    ],
-    table_of_contents: [
-      {
-        ...sampleStructuredBookContent().table_of_contents[0],
-        char_count: 8,
-      },
-    ],
-  };
-  const output = sampleBookOutput(2, "全书第二版正文", false, [], latestStructured, [
-    sampleBookOutputVersion(1, "全书第一版正文", historicalStructured, "2026-06-16T00:00:00.000Z"),
-    sampleBookOutputVersion(2, "全书第二版正文", latestStructured, "2026-06-17T00:00:00.000Z"),
-  ]);
-  const context = pageContext(page);
-
-  page.applyBookOutput.call(context, output);
-
-  assert.equal(context.data.bookSelectedVersionId, "book-output-version-2");
-  assert.equal(context.data.bookVersionOptions.length, 2);
-  assert.equal(context.data.bookVersionText, "已修改 2 次");
-  assert.equal(context.data.bookContent, "全书第二版正文");
-  assert.equal(context.data.bookViewingHistoricalVersion, false);
-  page.toggleBookPreviewChapters.call(context);
-  assert.equal(context.data.bookPreviewChaptersExpanded, true);
-
-  page.changeBookOutputVersion.call(context, { currentTarget: { dataset: {} }, detail: { value: "1" } });
-
-  assert.equal(context.data.bookSelectedVersionId, "book-output-version-1");
-  assert.equal(context.data.bookVersionText, "已修改 1 次");
-  assert.equal(context.data.bookContent, "全书第一版正文");
-  assert.equal(context.data.bookPreviewChaptersExpanded, false);
-  assert.equal(context.data.bookPreviewChapters[0].content, "旧版第一章正文。");
-  assert.equal(context.data.bookViewingHistoricalVersion, true);
-  assert.equal(context.data.bookVersionNotice, "正在查看历史版本。朗读前请切回最新版。");
+  assert.equal(data.bookStaleNotice, "章节「外婆家的童年、第一次离家」等章节已更新，请重新整理一版。");
+  assert.equal(data.bookActionText, "更新书稿");
+  assert.equal("bookPreviewChapters" in data, false);
+  assert.equal("bookTitleInput" in data, false);
 });
 
 test("book page stays on the book tab when login is required", async () => {
@@ -1529,9 +1370,7 @@ test("book page marks assigned sources as supplemental chapter work", () => {
   });
 
   assert.equal(chapters[0].pendingSourceCount, 1);
-  assert.equal(chapters[0].draftActionText, "补写新增");
   assert.equal(chapters[0].sourceChangeNotice, "1 条新增讲述待补写");
-  assert.equal(chapters[1].draftActionText, "生成本章");
 });
 
 test("book page marks deleted chapter sources for review", () => {
@@ -1546,7 +1385,6 @@ test("book page marks deleted chapter sources for review", () => {
 
   assert.equal(chapters[0].sourceCount, 0);
   assert.equal(chapters[0].removedSourceCount, 1);
-  assert.equal(chapters[0].draftActionText, "整理本章");
   assert.equal(chapters[0].sourceChangeNotice, "1 条原始讲述已删除，章节稿需要更新");
 });
 
@@ -1634,57 +1472,6 @@ test("book page assigns uncovered transcript to selected chapter", async () => {
   delete global.wx;
 });
 
-test("book page adds uncovered transcript as a new chapter", async () => {
-  const calls = [];
-  global.wx = { showToast() {}, switchTab() {} };
-  const updatedPlan = samplePlan("confirmed");
-  updatedPlan.chapters = [
-    ...updatedPlan.chapters,
-    {
-      id: "chapter-3",
-      plan_id: "plan-1",
-      project_id: "project/1",
-      title: "补记往事",
-      sort_order: 2,
-      source_refs: [sampleRef("utterance-new-1", "新增转写")],
-      metadata_json: {},
-      created_at: "2026-06-17T00:00:00.000Z",
-      updated_at: "2026-06-17T00:00:00.000Z",
-    },
-  ];
-  const { page } = loadBookPage({
-    voiceApiExports: {
-      applyMemoirBookPlanStructureCommand: async (projectId, data) => {
-        calls.push({ projectId, data });
-        return updatedPlan;
-      },
-      getMemoirBookChapterDraft: async () => null,
-      getMemoirBookSourceCoverage: async () => sampleSourceCoverage(0),
-      getMemoirBookOutput: async () => null,
-    },
-  });
-  const context = pageContext(page, {
-    projectId: "project/1",
-    projectTitle: "外婆回忆录",
-  });
-  page.applyPlan.call(context, samplePlan("confirmed"));
-  page.applySourceCoverage.call(context, sampleSourceCoverage(1));
-
-  await page.addUncoveredSourceAsChapter.call(context, {
-    currentTarget: { dataset: { id: "utterance-new-1" } },
-  });
-
-  assert.equal(calls.length, 1);
-  assert.equal(calls[0].projectId, "project/1");
-  assert.deepEqual(calls[0].data, {
-    type: "create_chapter_from_source",
-    utterance_id: "utterance-new-1",
-  });
-  assert.equal(context.data.chapters.length, 3);
-  assert.equal(context.data.assigningSourceId, "");
-  delete global.wx;
-});
-
 test("book page adds uncovered transcript as a new chapter from picker option", async () => {
   const calls = [];
   global.wx = { showToast() {}, switchTab() {} };
@@ -1740,74 +1527,6 @@ test("book page adds uncovered transcript as a new chapter from picker option", 
   delete global.wx;
 });
 
-test("book page saves edited confirmed chapter title", async () => {
-  const calls = [];
-  global.wx = { showToast() {}, switchTab() {} };
-  const updatedPlan = samplePlan("confirmed");
-  updatedPlan.chapters[0].title = "院子里的童年";
-  const { mod, page } = loadBookPage({
-    voiceApiExports: {
-      updateMemoirBookChapterTitle: async (projectId, chapterId, data) => {
-        calls.push({ projectId, chapterId, data });
-        return updatedPlan;
-      },
-      getMemoirBookChapterDraft: async () => sampleDraft(1, "confirmed"),
-      getMemoirBookSourceCoverage: async () => sampleSourceCoverage(0),
-      getMemoirBookOutput: async () => sampleBookOutput(),
-    },
-  });
-  const context = pageContext(page, { projectId: "project/1", projectTitle: "外婆回忆录" });
-  page.applyPlan.call(context, samplePlan("confirmed"), {
-    "chapter-1": sampleDraft(1, "confirmed"),
-    "chapter-2": sampleDraft(1, "confirmed"),
-  });
-
-  page.changeChapterTitle.call(context, {
-    currentTarget: { dataset: { id: "chapter-1" } },
-    detail: { value: "院子里的童年" },
-  });
-  await page.saveChapterTitle.call(context, {
-    currentTarget: { dataset: { id: "chapter-1" } },
-  });
-
-  assert.deepEqual(calls[0], {
-    projectId: "project/1",
-    chapterId: "chapter-1",
-    data: { title: "院子里的童年" },
-  });
-  assert.equal(context.data.chapters[0].title, "院子里的童年");
-  assert.equal(context.data.chapters[0].titleChanged, false);
-  assert.equal(context.data.titleBusyTarget, "");
-  delete global.wx;
-});
-
-test("book page acknowledges unchanged confirmed chapter title save", async () => {
-  const toasts = [];
-  const { page } = loadBookPage({
-    voiceApiExports: {
-      updateMemoirBookChapterTitle: async () => {
-        throw new Error("updateMemoirBookChapterTitle should not be called for unchanged title");
-      },
-    },
-  });
-  global.wx = {
-    showToast(options) {
-      toasts.push(options);
-    },
-    switchTab() {},
-  };
-  const context = pageContext(page, { projectId: "project/1", projectTitle: "外婆回忆录" });
-  page.applyPlan.call(context, samplePlan("confirmed"));
-
-  await page.saveChapterTitle.call(context, {
-    currentTarget: { dataset: { id: "chapter-1" } },
-  });
-
-  assert.deepEqual(toasts[0], { title: "章名已保存", icon: "success" });
-  assert.equal(context.data.chapters[0].titleChanged, false);
-  delete global.wx;
-});
-
 test("book page regenerates confirmed chapter title through AI", async () => {
   const calls = [];
   global.wx = { showToast() {}, switchTab() {} };
@@ -1838,49 +1557,6 @@ test("book page regenerates confirmed chapter title through AI", async () => {
   });
   assert.equal(context.data.chapters[0].title, "外婆院中的日子");
   assert.equal(context.data.titleBusyTarget, "");
-  delete global.wx;
-});
-
-test("book page deletes confirmed chapter through structure command", async () => {
-  const calls = [];
-  global.wx = {
-    showModal(options) {
-      options.success({ confirm: true });
-    },
-    showToast() {},
-    switchTab() {},
-  };
-  const updatedPlan = samplePlan("confirmed");
-  updatedPlan.chapters = [updatedPlan.chapters[1]];
-  updatedPlan.chapters[0].sort_order = 0;
-  const { page } = loadBookPage({
-    voiceApiExports: {
-      applyMemoirBookPlanStructureCommand: async (projectId, data) => {
-        calls.push({ projectId, data });
-        return updatedPlan;
-      },
-      getMemoirBookChapterDraft: async () => null,
-      getMemoirBookSourceCoverage: async () => sampleSourceCoverage(1),
-      getMemoirBookOutput: async () => null,
-    },
-  });
-  const context = pageContext(page, {
-    projectId: "project/1",
-    projectTitle: "外婆回忆录",
-  });
-  page.applyPlan.call(context, samplePlan("confirmed"));
-
-  await page.deleteConfirmedChapter.call(context, {
-    currentTarget: { dataset: { id: "chapter-1" } },
-  });
-
-  assert.equal(calls.length, 1);
-  assert.deepEqual(calls[0].data, {
-    type: "delete_chapter",
-    chapter_id: "chapter-1",
-  });
-  assert.equal(context.data.chapters.length, 1);
-  assert.equal(context.data.chapters[0].id, "chapter-2");
   delete global.wx;
 });
 
@@ -2024,106 +1700,6 @@ test("book page merges chapters and regenerates title plus draft for confirmed p
   delete global.wx;
 });
 
-test("book page submits chapter editorial copy regeneration jobs", async () => {
-  const calls = [];
-  const toastTitles = [];
-  global.wx = {
-    showToast(options) {
-      toastTitles.push(options.title);
-    },
-  };
-  const { page } = loadBookPage({
-    voiceApiExports: {
-      enqueueMemoirBookOutputEditorialCopyGeneration: async (projectId, data) => {
-        calls.push({ projectId, data });
-        return sampleAutomationEvent({
-          id: `event-editorial-${calls.length}`,
-          event_type: "book_editorial_copy_generated",
-          chapter_id: null,
-          summary_text: "成书文案已提交后台重生成。",
-        });
-      },
-    },
-  });
-  const context = pageContext(page, { projectId: "project/1" });
-  page.applyBookOutput.call(
-    context,
-    sampleBookOutput(1, "全书正文", true, ["外婆家的童年"], null, [], sampleBookManuscript()),
-  );
-  assert.equal(context.data.bookStaleNotice, "章节「外婆家的童年」已更新，请重新整理一版。");
-
-  await page.regenerateBookChapterEditorialCopy.call(context, {
-    currentTarget: { dataset: { id: "chapter-1", target: "pull_quotes" } },
-  });
-
-  assert.deepEqual(calls[0], {
-    projectId: "project/1",
-    data: { targets: ["pull_quotes"], chapter_ids: ["chapter-1"] },
-  });
-  assert.deepEqual(
-    context.automationEvents.map((item) => item.id),
-    ["event-editorial-1"],
-  );
-  assert.equal(context.data.automationEventItems[0].titleText, "文案生成中");
-  assert.equal(context.data.bookEditorialCopyBusyTarget, "");
-  assert.deepEqual(toastTitles, ["已后台生成"]);
-  delete global.wx;
-});
-
-test("book page edits and saves chapter editorial copy", async () => {
-  const calls = [];
-  global.wx = { showToast() {} };
-  const { page } = loadBookPage({
-    voiceApiExports: {
-      updateMemoirBookOutputChapterEditorialCopy: async (projectId, chapterId, data) => {
-        calls.push({ projectId, chapterId, data });
-        const manuscript = sampleBookManuscript();
-        manuscript.chapters[0].intro = data.intro;
-        manuscript.chapters[0].pull_quotes = [
-          { text: data.pull_quote, source_ref_ids: [data.pull_quote_source_ref_id], source: "manual" },
-        ];
-        return sampleBookOutput(1, "全书正文", false, [], null, [], manuscript);
-      },
-    },
-  });
-  const context = pageContext(page, { projectId: "project/1" });
-  page.applyBookOutput.call(
-    context,
-    sampleBookOutput(1, "全书正文", false, [], null, [], sampleBookManuscript()),
-  );
-
-  page.openBookChapterEditorialEditor.call(context, {
-    currentTarget: { dataset: { id: "chapter-1" } },
-  });
-  assert.equal(context.data.bookChapterEditorialEditorVisible, true);
-  assert.equal(context.data.bookChapterEditorialIntroInput, "这一章主要记录外婆小时候在院子里的生活。");
-  assert.equal(context.data.bookChapterEditorialPullQuoteInput, "我小时候常在院子里晒太阳。");
-
-  page.changeBookChapterEditorialField.call(context, {
-    currentTarget: { dataset: { key: "intro" } },
-    detail: { value: "童年的院子从这里接上，像家里人翻开旧相册时说起的第一段。" },
-  });
-  page.changeBookChapterEditorialField.call(context, {
-    currentTarget: { dataset: { key: "pull_quote" } },
-    detail: { value: "我小时候常在院子里晒太阳。" },
-  });
-  await page.saveBookChapterEditorialCopy.call(context);
-
-  assert.deepEqual(calls[0], {
-    projectId: "project/1",
-    chapterId: "chapter-1",
-    data: {
-      intro: "童年的院子从这里接上，像家里人翻开旧相册时说起的第一段。",
-      pull_quote: "我小时候常在院子里晒太阳。",
-      pull_quote_source_ref_id: "utterance-1",
-    },
-  });
-  assert.equal(context.data.bookChapterEditorialEditorVisible, false);
-  assert.equal(context.data.bookManuscriptChapterItems[0].intro, "童年的院子从这里接上，像家里人翻开旧相册时说起的第一段。");
-  assert.equal(context.data.bookManuscriptChapterItems[0].quoteSourceText, "来自原始口述");
-  delete global.wx;
-});
-
 test("book page submits full book output generation as a background job", async () => {
   const calls = [];
   global.wx = { showToast() {} };
@@ -2149,7 +1725,7 @@ test("book page submits full book output generation as a background job", async 
   });
   page.applyBookOutput.call(
     context,
-    sampleBookOutput(1, "全书第一版正文", false, [], null, [], sampleBookManuscript()),
+    sampleBookOutput(1, "全书第一版正文", false, [], null, [], sampleBookManuscript("外婆回忆录", "moonlit_courtyard")),
   );
 
   await page.generateBook.call(context);
@@ -2164,13 +1740,12 @@ test("book page submits full book output generation as a background job", async 
       preface: "这些故事来自家里的讲述。",
       afterword: "这些故事还可以继续补充。",
       back_cover_quote: "我小时候常在院子里晒太阳。",
-      cover_style: "classic_plain",
+      cover_style: "moonlit_courtyard",
     },
   });
   assert.equal(context.data.generatingBook, true);
   assert.equal(context.data.automationEventItems.length, 1);
   assert.equal(context.data.automationEventItems[0].titleText, "书稿整理中");
-  assert.equal(context.data.bookVersionText, "已修改 1 次");
   page.clearBookGenerationEventPoll.call(context);
   delete global.wx;
 });
@@ -2197,101 +1772,12 @@ test("book page shows submit errors when full-book background generation cannot 
   delete global.wx;
 });
 
-test("book page links structured full-book preview to the chapter detail page", () => {
-  const navigations = [];
-  global.wx = {
-    navigateTo(options) {
-      navigations.push(options.url);
-    },
-  };
-  const { page } = loadBookPage();
-  const context = pageContext(page, { projectId: "project/1", projectTitle: "外婆回忆录" });
-  page.applyPlan.call(context, samplePlan("confirmed"), {
-    "chapter-1": sampleDraft(1, "confirmed"),
-    "chapter-2": sampleDraft(1, "confirmed"),
-  });
-  page.applyBookOutput.call(
-    context,
-    sampleBookOutput(1, "全书正文", false, [], sampleStructuredBookContent()),
-  );
-
-  assert.equal(context.data.bookPreviewChapters.length, 2);
-  page.editBookOutputChapter.call(context, { currentTarget: { dataset: { id: "chapter-2" } } });
-
-  assert.deepEqual(navigations, [
-    "/pages/book-chapter/index?projectId=project%2F1&chapterId=chapter-2&tab=content",
-  ]);
-  delete global.wx;
-});
-
-test("book page shows stale book output state and blocks old audio", async () => {
-  const calls = [];
-  const { page } = loadBookPage({
-    voiceApiExports: {
-      createMemoirBookOutputTTS: async () => {
-        calls.push("tts");
-        return sampleAudioResponse();
-      },
-    },
-  });
-  const context = pageContext(page, {
-    projectId: "project/1",
-    allChaptersConfirmed: true,
-    canGenerateBook: true,
-    bookOutput: sampleBookOutput(1, "旧全书", true, ["外婆家的童年"]),
-    bookContent: "旧全书",
-    hasDraftChanges: false,
-  });
-  page.applyBookOutput.call(context, context.data.bookOutput);
-
-  assert.equal(context.data.bookActionText, "更新书稿");
-  assert.equal(context.data.bookStaleNotice, "章节「外婆家的童年」已更新，请重新整理一版。");
-
-  await page.playBookAudio.call(context);
-
-  assert.equal(context.data.error, "章节内容已更新，请先更新书稿再朗读");
-  assert.equal(calls.length, 0);
-});
-
-test("book page blocks full-book audio while viewing a historical version", async () => {
-  const calls = [];
-  const { page } = loadBookPage({
-    voiceApiExports: {
-      createMemoirBookOutputTTS: async () => {
-        calls.push("tts");
-        return sampleAudioResponse();
-      },
-    },
-  });
-  const output = sampleBookOutput(2, "全书第二版正文", false, [], sampleStructuredBookContent(), [
-    sampleBookOutputVersion(1, "全书第一版正文", sampleStructuredBookContent(), "2026-06-16T00:00:00.000Z"),
-    sampleBookOutputVersion(2, "全书第二版正文", sampleStructuredBookContent(), "2026-06-17T00:00:00.000Z"),
-  ]);
-  const context = pageContext(page, {
-    projectId: "project/1",
-    allChaptersConfirmed: true,
-    canGenerateBook: true,
-    hasDraftChanges: false,
-  });
-  page.applyBookOutput.call(context, output);
-  page.changeBookOutputVersion.call(context, { currentTarget: { dataset: {} }, detail: { value: "1" } });
-
-  await page.playBookAudio.call(context);
-
-  assert.equal(context.data.error, "正在查看历史版本，请先切回最新版再朗读");
-  assert.equal(calls.length, 0);
-});
-
-test("book page sends book-specific TTS voice and speed", async () => {
+test("book page sends TTS voice and speed for chapter and outline audio", async () => {
   const calls = [];
   const { page } = loadBookPage({
     voiceApiExports: {
       createMemoirBookChapterDraftTTS: async (projectId, chapterId, data) => {
         calls.push({ kind: "chapter", projectId, chapterId, data });
-        return sampleAudioResponse();
-      },
-      createMemoirBookOutputTTS: async (projectId, data) => {
-        calls.push({ kind: "book", projectId, data });
         return sampleAudioResponse();
       },
       createMemoirBookPlanOutlineTTS: async (projectId, data) => {
@@ -2308,19 +1794,10 @@ test("book page sends book-specific TTS voice and speed", async () => {
   });
   const context = pageContext(page, { projectId: "project/1" });
 
-  await page.requestBookAudio.call(context, "book");
   await page.requestBookAudio.call(context, "outline");
   await page.requestBookAudio.call(context, "chapter:chapter-1");
 
   assert.deepEqual(calls, [
-    {
-      kind: "book",
-      projectId: "project/1",
-      data: {
-        voice: "zh_male_m191_uranus_bigtts",
-        speed_ratio: 1.5,
-      },
-    },
     {
       kind: "outline",
       projectId: "project/1",
@@ -2341,7 +1818,7 @@ test("book page sends book-specific TTS voice and speed", async () => {
   ]);
 });
 
-test("book page shows chapter narration toast only after preflight passes", async () => {
+test("book page shows chapter narration toast after preflight passes", async () => {
   const toasts = [];
   const { mod, page } = loadBookPage({
     voiceApiExports: {
@@ -2356,16 +1833,9 @@ test("book page shows chapter narration toast only after preflight passes", asyn
   const chapters = mod.buildChapterViews(samplePlan("confirmed"), {
     "chapter-1": sampleDraft(1, "draft"),
   });
-  chapters[0].draftChanged = true;
   const context = pageContext(page, { projectId: "project/1", chapters });
   context.playAudioFiles = async () => {};
 
-  await page.playChapterAudioById.call(context, "chapter-1", { showPreparingToast: true });
-
-  assert.deepEqual(toasts, []);
-  assert.equal(context.data.chapters[0].draftError, "请先保存当前修改");
-
-  context.data.chapters[0].draftChanged = false;
   await page.playChapterAudioById.call(context, "chapter-1", { showPreparingToast: true });
 
   assert.deepEqual(toasts, ["正在准备朗读"]);
@@ -3139,37 +2609,6 @@ test("book page releases transient voice gateway when hidden", async () => {
   assert.equal(context.data.bookVoiceCaptureStateText, "麦克风未开始");
 });
 
-test("book page splits active TTS text for highlighting", () => {
-  const { page } = loadBookPage();
-  const context = pageContext(page, {
-    bookTTSActiveText: "外婆回忆录",
-    bookTTSDurationSeconds: 1.2,
-    bookTTSAlignment: [
-      {
-        text: "外婆",
-        start_ms: 0,
-        end_ms: 600,
-        text_start: 0,
-        text_end: 2,
-      },
-      {
-        text: "回忆录",
-        start_ms: 600,
-        end_ms: 1200,
-        text_start: 2,
-        text_end: 5,
-      },
-    ],
-  });
-
-  page.updateBookTTSProgress.call(context, 0.8, 1.2);
-
-  assert.equal(context.data.bookTTSSpokenText, "外婆");
-  assert.equal(context.data.bookTTSCurrentText, "回忆录");
-  assert.equal(context.data.bookTTSRemainingText, "");
-  assert.equal(context.data.bookTTSProgressPercent, 67);
-});
-
 test("book page regenerates an existing chapter draft with force flag", async () => {
   const calls = [];
   global.wx = { showToast() {} };
@@ -3187,18 +2626,14 @@ test("book page regenerates an existing chapter draft with force flag", async ()
     chapters: mod.buildChapterViews(plan, { "chapter-1": sampleDraft(1, "draft", "第一版正文") }),
   });
 
-  await page.generateChapterDraft.call(context, {
-    currentTarget: { dataset: { id: "chapter-1" } },
-  });
+  await page.generateChapterDraftById.call(context, "chapter-1");
 
   assert.deepEqual(calls[0], {
     projectId: "project/1",
     chapterId: "chapter-1",
     data: { force_regenerate: true },
   });
-  assert.equal(context.data.chapters[0].draftVersionText, "历史版本 · 已修改 1 次");
   assert.equal(context.data.chapters[0].draftBusy, true);
-  assert.equal(context.data.chapters[0].draftChanged, false);
   assert.equal(context.data.automationEventItems[0].titleText, "章节生成中");
   page.clearBookGenerationEventPoll.call(context);
   delete global.wx;
@@ -3224,9 +2659,7 @@ test("book page supplements pending sources without force regeneration", async (
     }),
   });
 
-  await page.generateChapterDraft.call(context, {
-    currentTarget: { dataset: { id: "chapter-1" } },
-  });
+  await page.generateChapterDraftById.call(context, "chapter-1");
 
   assert.deepEqual(calls[0], {
     projectId: "project/1",
@@ -3261,11 +2694,7 @@ test("book page force regenerates when source removals also need cleanup", async
     }),
   });
 
-  assert.equal(context.data.chapters[0].draftActionText, "整理本章");
-
-  await page.generateChapterDraft.call(context, {
-    currentTarget: { dataset: { id: "chapter-1" } },
-  });
+  await page.generateChapterDraftById.call(context, "chapter-1");
 
   assert.deepEqual(calls[0], {
     projectId: "project/1",
@@ -3273,33 +2702,6 @@ test("book page force regenerates when source removals also need cleanup", async
     data: { force_regenerate: true },
   });
   assert.equal(context.data.chapters[0].draftBusy, true);
-  assert.equal(context.data.chapters[0].draftChanged, false);
   page.clearBookGenerationEventPoll.call(context);
   delete global.wx;
-});
-
-test("book page blocks regeneration while draft edits are unsaved", async () => {
-  const calls = [];
-  const { mod, page } = loadBookPage({
-    voiceApiExports: {
-      enqueueMemoirBookChapterDraftGeneration: async () => {
-        calls.push("called");
-        return sampleAutomationEvent();
-      },
-    },
-  });
-  const plan = samplePlan("confirmed");
-  const chapters = mod.buildChapterViews(plan, { "chapter-1": sampleDraft(1) });
-  chapters[0].draftChanged = true;
-  const context = pageContext(page, {
-    projectId: "project/1",
-    chapters,
-  });
-
-  await page.generateChapterDraft.call(context, {
-    currentTarget: { dataset: { id: "chapter-1" } },
-  });
-
-  assert.equal(calls.length, 0);
-  assert.equal(context.data.chapters[0].draftError, "请先保存当前修改，再生成新版本");
 });
