@@ -31,7 +31,6 @@ import type {
   MemoirDialectGlossaryResponse,
   MemoirInterviewEditorSessionDetail,
   MemoirInterviewEditorSessionList,
-  MemoirInterviewEditorSessionReview,
   MemoirInterviewType,
   MemoirMaterialCorrectionStatus,
   MemoirMaterialItem,
@@ -220,10 +219,6 @@ export const memoirInterviewEditorApi = {
   getSession: (projectId: string, sessionId: string) =>
     api.get<MemoirInterviewEditorSessionDetail>(
       `/memoir/projects/${projectId}/interview-editor/sessions/${sessionId}`,
-    ).then(r => r.data),
-  getSessionReview: (projectId: string, sessionId: string) =>
-    api.get<MemoirInterviewEditorSessionReview>(
-      `/memoir/projects/${projectId}/interview-editor/sessions/${sessionId}/review`,
     ).then(r => r.data),
   updateAnswerTranscript: (utteranceId: string, transcriptEdited: string) =>
     api.patch<unknown>(

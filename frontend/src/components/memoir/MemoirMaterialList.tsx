@@ -4,6 +4,7 @@ import {
   Loader2,
   RefreshCw,
   Search,
+  SlidersHorizontal,
   X,
 } from 'lucide-react';
 
@@ -38,6 +39,7 @@ interface MemoirMaterialListProps {
   onSelect: (materialId: string) => void;
   onRetry: () => void;
   onLoadMore: () => void;
+  onOpenAdvancedTools: () => void;
 }
 
 const CORRECTION_FILTERS: Array<{
@@ -68,6 +70,7 @@ export function MemoirMaterialList({
   onSelect,
   onRetry,
   onLoadMore,
+  onOpenAdvancedTools,
 }: MemoirMaterialListProps) {
   const groups = groupMaterialsBySession(items);
 
@@ -81,7 +84,17 @@ export function MemoirMaterialList({
               {projectTitle}{ownerName ? ` · ${ownerName}` : ''}
             </p>
           </div>
-          <span className="flex-shrink-0 text-xs text-[#69736e] tabular-nums">{total} 段</span>
+          <div className="flex flex-shrink-0 items-center gap-2">
+            <span className="text-xs text-[#69736e] tabular-nums">{total} 段</span>
+            <button
+              type="button"
+              onClick={onOpenAdvancedTools}
+              className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md bg-[#f1f3f2] px-2 text-xs font-medium text-[#59635e] transition-[background-color,color,transform] hover:bg-[#e8ecea] hover:text-[#29322e] active:scale-[0.96]"
+            >
+              <SlidersHorizontal size={14} aria-hidden="true" />
+              高级工具
+            </button>
+          </div>
         </div>
 
         <div className="relative mt-4">

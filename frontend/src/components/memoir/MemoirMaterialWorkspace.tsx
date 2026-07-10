@@ -10,7 +10,9 @@ import {
   useCallback,
   useDeferredValue,
   useEffect,
+  lazy,
   useMemo,
+  Suspense,
   useState,
 } from 'react';
 
@@ -22,6 +24,11 @@ import type {
 } from '../../types';
 import { MemoirMaterialList } from './MemoirMaterialList';
 import { MemoirTranscriptEditor } from './MemoirTranscriptEditor';
+
+
+const MemoirAdvancedToolsDrawer = lazy(async () => ({
+  default: (await import('./MemoirAdvancedToolsDrawer')).MemoirAdvancedToolsDrawer,
+}));
 
 
 interface MemoirMaterialWorkspaceProps {
@@ -63,6 +70,7 @@ export function MemoirMaterialWorkspace({ project }: MemoirMaterialWorkspaceProp
   const [selectedMaterialId, setSelectedMaterialId] = useState<string | null>(initialMaterialId);
   const [mobileEditorOpen, setMobileEditorOpen] = useState(false);
   const [draft, setDraft] = useState<{ materialId: string; text: string } | null>(null);
+  const [advancedToolsOpen, setAdvancedToolsOpen] = useState(false);
 
   const materialsQuery = useInfiniteQuery({
     queryKey: ['memoirMaterials', project.id, deferredSearch, correctionStatus, sort],
@@ -254,9 +262,10 @@ export function MemoirMaterialWorkspace({ project }: MemoirMaterialWorkspaceProp
   );
 
   return (
-    <div className="grid h-full min-h-0 w-full grid-cols-1 bg-[#f7f8f7] lg:grid-cols-[360px_minmax(0,1fr)]">
-      <div className={`${mobileEditorOpen ? 'hidden' : 'min-h-0'} lg:block lg:min-h-0 lg:border-r lg:border-black/6`}>
-        <MemoirMaterialList
+    <div className="relative h-full min-h-0 w-full">
+      <div className="grid h-full min-h-0 w-full grid-cols-1 bg-[#f7f8f7] lg:grid-cols-[360px_minmax(0,1fr)]">
+        <div className={`${mobileEditorOpen ? 'hidden' : 'min-h-0'} lg:block lg:min-h-0 lg:border-r lg:border-black/6`}>
+          <MemoirMaterialList
           projectTitle={project.title}
           ownerName={project.owner_display_name}
           items={materials}
@@ -274,12 +283,29 @@ export function MemoirMaterialWorkspace({ project }: MemoirMaterialWorkspaceProp
           onSortChange={changeSort}
           onSelect={selectMaterial}
           onRetry={() => materialsQuery.refetch()}
-          onLoadMore={() => materialsQuery.fetchNextPage()}
-        />
+            onLoadMore={() => materialsQuery.fetchNextPage()}
+            onOpenAdvancedTools={() => setAdvancedToolsOpen(true)}
+          />
+        </div>
+        <div className={`${mobileEditorOpen ? 'min-h-0' : 'hidden'} min-w-0 lg:block lg:min-h-0`}>
+          {editorContent}
+        </div>
       </div>
-      <div className={`${mobileEditorOpen ? 'min-h-0' : 'hidden'} min-w-0 lg:block lg:min-h-0`}>
-        {editorContent}
-      </div>
+      {advancedToolsOpen && (
+        <Suspense fallback={(
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20 text-sm text-white backdrop-blur-[1px]">
+            <Loader2 size={17} className="mr-2 animate-spin" />
+            正在打开高级工具
+          </div>
+        )}>
+          <MemoirAdvancedToolsDrawer
+            open
+            project={project}
+            selectedMaterialId={selectedMaterial?.id ?? null}
+            onClose={() => setAdvancedToolsOpen(false)}
+          />
+        </Suspense>
+      )}
     </div>
   );
 }
