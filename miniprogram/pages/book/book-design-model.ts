@@ -2,6 +2,7 @@ import type {
   MemoirBookCoverStyle,
   MemoirBookEditorialCopyTarget,
   MemoirBookOutput,
+  MemoirBookOutputGenerateRequest,
 } from "../../domain/voice-chat";
 import {
   BOOK_COVER_STYLE_OPTIONS,
@@ -22,7 +23,6 @@ export interface BookDesignState {
   bookPrefaceInput: string;
   bookAfterwordInput: string;
   bookBackCoverQuoteInput: string;
-  hasDraftChanges?: boolean;
 }
 
 export function latestBookTitle(output: MemoirBookOutput | null): string {
@@ -46,6 +46,25 @@ function latestBookMetadata(output: MemoirBookOutput | null): Record<string, str
     preface: trimText(preface),
     afterword: trimText(manuscript?.back_matter?.afterword?.content || ""),
     back_cover_quote: trimText(manuscript?.render_settings?.back_cover_quote || ""),
+  };
+}
+
+export function bookGenerationSettings(
+  output: MemoirBookOutput | null,
+  defaults: { title: string; narratorName: string },
+): Omit<MemoirBookOutputGenerateRequest, "ai_model" | "force_regenerate"> {
+  const stored = latestBookMetadata(output);
+  const title = latestBookTitle(output) || trimText(defaults.title);
+  const narratorName = stored.narrator_name || trimText(defaults.narratorName);
+  return {
+    ...(title ? { title } : {}),
+    ...(stored.subtitle ? { subtitle: stored.subtitle } : {}),
+    ...(narratorName ? { narrator_name: narratorName } : {}),
+    prepared_by: stored.prepared_by || "家人整理",
+    ...(stored.preface ? { preface: stored.preface } : {}),
+    ...(stored.afterword ? { afterword: stored.afterword } : {}),
+    ...(stored.back_cover_quote ? { back_cover_quote: stored.back_cover_quote } : {}),
+    cover_style: latestBookCoverStyle(output),
   };
 }
 
@@ -91,9 +110,6 @@ export function bookEditorialCopyBlockedMessage(data: BookDesignState): string {
   }
   if (data.bookViewingHistoricalVersion) {
     return "请切回最新版后再编辑成书文案";
-  }
-  if (data.hasDraftChanges) {
-    return "请先保存当前章节修改，再编辑成书文案";
   }
   return "";
 }
