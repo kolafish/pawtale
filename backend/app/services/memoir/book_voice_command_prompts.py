@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.models.memoir import MemoirBookPlan, MemoirBookPlanChapter
+from app.models.memoir import MemoirBookPlan
 from app.schemas.memoir_book import MemoirBookVoiceCommandBookContext
 from app.services.memoir.book_voice_command_context import (
     chapter_source_count,

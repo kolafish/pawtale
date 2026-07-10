@@ -23,7 +23,6 @@ from app.schemas.memoir_book import (
 )
 from app.schemas.memoir_voice import MemoirAutomationEventResponse
 from app.services.ai_types import AITextClient
-from app.services.memoir import automation_event_metadata
 from app.services.memoir import automation_events
 from app.services.memoir import progress_snapshot
 from app.services.memoir.book_quality_audit_rules import (
@@ -104,13 +103,11 @@ def _event_metadata(
     display: MemoirBookQualityAuditDisplayResponse,
     primary_action: MemoirBookQualityAuditPrimaryActionResponse,
     primary_chapter: MemoirBookQualityAuditPrimaryChapterResponse | None,
-    event_signature: str,
 ) -> dict[str, object]:
     return {
         "source": "book_quality_audit",
         "snapshot_id": snapshot_id,
         "snapshot_engine": snapshot_engine,
-        automation_event_metadata.EVENT_SIGNATURE_KEY: event_signature,
         "overall_status": overall_status,
         "pending_utterance_count": pending_utterance_count,
         "next_actions": next_actions,
@@ -207,6 +204,7 @@ async def run_book_quality_audit(
             event_type=MemoirAutomationEventType.AUDIT_COMPLETED,
             status=MemoirAutomationEventStatus.COMPLETED,
             summary_text=audit_summary,
+            event_signature=audit_event_signature,
             metadata_json=_event_metadata(
                 snapshot_id=selected_snapshot.id,
                 snapshot_engine=selected_snapshot.engine,
@@ -216,7 +214,6 @@ async def run_book_quality_audit(
                 display=display,
                 primary_action=primary_action,
                 primary_chapter=primary_chapter,
-                event_signature=audit_event_signature,
             ),
         )
         await db.commit()

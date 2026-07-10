@@ -33,7 +33,6 @@ from app.services.memoir.voice_tts_types import (
     DEFAULT_STREAM_TTS_BITS_PER_SAMPLE,
     DEFAULT_STREAM_TTS_CHANNELS,
     DEFAULT_STREAM_TTS_RESPONSE_FORMAT,
-    DEFAULT_STREAM_TTS_SAMPLE_RATE,
     TTSClient,
     TTSResult,
     StreamingTTSChunk,

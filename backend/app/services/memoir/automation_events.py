@@ -17,6 +17,7 @@ from app.models.projects import Project
 from app.schemas.memoir_voice import (
     MemoirAutomationEventListResponse,
     MemoirAutomationEventResponse,
+    MemoirAutomationEventUtteranceDetailResponse,
 )
 from app.services.memoir.access import load_memoir_project
 from app.services.memoir.automation_event_audit_snapshots import audit_snapshot_metadata_by_event
@@ -24,6 +25,7 @@ from app.services.memoir.automation_event_metadata import (
     ACKNOWLEDGED_AT_KEY,
     ACKNOWLEDGED_BY_USER_KEY,
     AUDIT_SNAPSHOT_KEY,
+    EVENT_SIGNATURE_KEY,
     VOICE_PLAYED_AT_KEY,
     VOICE_PLAYED_MESSAGE_ID_KEY,
     VOICE_PLAYED_SESSION_ID_KEY,
@@ -33,7 +35,6 @@ from app.services.memoir.automation_event_metadata import (
     _clean_utterance_ids,
     _event_is_visible,
     _event_is_voice_unannounced,
-    _event_semantic_signature,
     _event_signature,
     _preserved_metadata,
 )
@@ -63,7 +64,7 @@ async def _find_matching_signature_event(
     )
     first_match: MemoirAutomationEvent | None = None
     for event in result.scalars().all():
-        if _event_semantic_signature(event) != signature:
+        if _event_signature(event.metadata_json or {}) != signature:
             continue
         if not _event_is_visible(event):
             return event
@@ -85,7 +86,7 @@ def _visible_events(
         signature
         for event in events
         if not _event_is_visible(event)
-        for signature in [_event_semantic_signature(event)]
+        for signature in [_event_signature(event.metadata_json or {})]
         if signature
     }
     seen_signatures: set[str] = set()
@@ -97,7 +98,7 @@ def _visible_events(
         elif not _event_is_visible(event):
             continue
 
-        signature = _event_semantic_signature(event)
+        signature = _event_signature(event.metadata_json or {})
         if signature and (signature in hidden_signatures or signature in seen_signatures):
             continue
         if signature:
@@ -178,14 +179,20 @@ async def record_or_update_automation_event(
     project_id: str,
     event_type: MemoirAutomationEventType,
     summary_text: str,
+    event_signature: str,
     status: MemoirAutomationEventStatus = MemoirAutomationEventStatus.COMPLETED,
     chapter_id: str | None = None,
     utterance_ids: list[str] | None = None,
     confidence: float | None = None,
     metadata_json: dict | None = None,
 ) -> MemoirAutomationEvent:
-    metadata = dict(metadata_json or {})
-    signature = _event_signature(metadata)
+    signature = event_signature.strip()
+    if not signature:
+        raise ValueError("event_signature must not be empty")
+    metadata = {
+        **dict(metadata_json or {}),
+        EVENT_SIGNATURE_KEY: signature,
+    }
     existing = await _find_matching_signature_event(
         db,
         project_id=project_id,

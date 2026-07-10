@@ -120,14 +120,6 @@ def _apply_assignment_metadata(
     return changed
 
 
-async def _load_project_plan(db: AsyncSession, *, project_id: str) -> MemoirBookPlan | None:
-    return await db.scalar(
-        select(MemoirBookPlan)
-        .where(MemoirBookPlan.project_id == project_id)
-        .execution_options(populate_existing=True)
-    )
-
-
 async def _load_plan_chapters(
     db: AsyncSession,
     *,
@@ -172,30 +164,6 @@ async def _latest_versions_by_chapter(
     for version in rows:
         latest_by_chapter[version.chapter_id] = version
     return latest_by_chapter
-
-
-async def sync_project_chapter_source_links(
-    db: AsyncSession,
-    *,
-    project_id: str,
-    source_refs_by_chapter: dict[str, list[dict[str, object]]],
-    assigned_by: MemoirChapterSourceAssignedBy | str = MemoirChapterSourceAssignedBy.SYSTEM,
-    assignment_reason: str = "",
-    assignment_metadata_by_utterance: dict[str, ChapterSourceAssignmentMetadata] | None = None,
-    mark_missing_removed: bool = True,
-) -> ChapterSourceLinkSyncResult:
-    plan = await _load_project_plan(db, project_id=project_id)
-    if not plan:
-        return ChapterSourceLinkSyncResult()
-    return await sync_plan_chapter_source_links(
-        db,
-        plan=plan,
-        source_refs_by_chapter=source_refs_by_chapter,
-        assigned_by=assigned_by,
-        assignment_reason=assignment_reason,
-        assignment_metadata_by_utterance=assignment_metadata_by_utterance,
-        mark_missing_removed=mark_missing_removed,
-    )
 
 
 async def sync_plan_chapter_source_links(

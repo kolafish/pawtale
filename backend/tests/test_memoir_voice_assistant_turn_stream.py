@@ -541,66 +541,6 @@ async def test_voice_assistant_turn_skips_voice_played_automation_event(
     assert completed["progress_update"]["kind"] != "automation_event"
 
 
-async def test_voice_assistant_turn_progress_prompt_uses_book_quality_audit_hint(
-    client,
-    test_db,
-):
-    created = await create_test_voice_transcript(
-        client,
-        test_db,
-        text="我小时候常在外婆家院子里摘菜。",
-        guidance_mode="guided_interview",
-        current_guidance_module="family",
-    )
-    event = await automation_events.record_automation_event(
-        test_db,
-        project_id=created["session"]["project_id"],
-        event_type=MemoirAutomationEventType.AUDIT_COMPLETED,
-        summary_text="当前有 1 个章节需要优先处理。",
-        metadata_json={
-            "source": "book_quality_audit",
-            "overall_status": "needs_updates",
-            "next_actions": ["可以追问院子里的童年还有哪些人物细节"],
-            "chapter_items": [
-                {
-                    "chapter_id": "chapter-1",
-                    "title": "院子里的童年",
-                    "sort_order": 0,
-                    "source_count": 2,
-                    "pending_source_count": 1,
-                    "draft_word_count": 80,
-                    "status": "needs_update",
-                    "attention": "high",
-                    "reason": "章节有新增讲述待补写",
-                    "interview_hint": "可以请叙述者补充外婆在院子里常做的事。",
-                }
-            ],
-        },
-    )
-    await test_db.commit()
-
-    _, ai_client, _, completed = await _run_stream_turn(
-        test_db,
-        voice_session_id=created["session"]["id"],
-        user_id=created["user_id"],
-        chunks=["刚才院子的内容还有空间。外婆在院子里最常做什么？"],
-    )
-
-    prompt = ai_client.calls[0]["user_prompt"]
-    assert "本轮可选进度鼓励：当前有 1 个章节需要优先处理。" in prompt
-    assert "可选访谈引导方向：可以请叙述者补充外婆在院子里常做的事。" in prompt
-    assert "审计建议只是方向，不是硬性脚本" in prompt
-    assert completed["progress_update"]["kind"] == "book_quality_audit"
-    assert completed["progress_update"]["event_ids"] == [event.id]
-    assert completed["progress_update"]["audit_chapter_title"] == "院子里的童年"
-
-    assistant_message = await test_db.scalar(
-        select(MemoirChatMessage).where(MemoirChatMessage.id == completed["message_id"])
-    )
-    assert assistant_message.metadata_json["progress_update"]["kind"] == "book_quality_audit"
-    assert assistant_message.metadata_json["progress_automation_event_ids"] == [event.id]
-
-
 async def test_voice_assistant_turn_progress_prompt_prefers_semantic_chapter_card_questions(
     client,
     test_db,

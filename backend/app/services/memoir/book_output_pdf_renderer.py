@@ -838,14 +838,6 @@ def _render_pdf_pages(
     return output.getvalue()
 
 
-def _render_plain_pdf(content: str, title: str, layout: PDFLayout) -> bytes:
-    builder = PDFBookBuilder(title=title, layout=layout)
-    builder.new_page("正文", body_numbering=True)
-    builder.add_heading(title)
-    builder.add_body_text(content.strip() or title)
-    return _render_pdf_pages(builder.pages, layout, metadata_title=title, metadata_author="家人整理")
-
-
 def _truncate_units(text: str, max_units: float) -> str:
     if _text_units(text) <= max_units:
         return text

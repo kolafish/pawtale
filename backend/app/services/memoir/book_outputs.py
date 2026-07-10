@@ -44,7 +44,6 @@ from app.services.memoir.book_audio import (
 )
 from app.services.memoir.book_manuscript_ai import generate_manuscript_editorial_copy, generate_title_suggestions
 from app.services.memoir.book_output_manuscript import (
-    DEFAULT_BOOK_COVER_STYLE,
     apply_editorial_copy as _apply_editorial_copy,
     chapter_id_set as _chapter_id_set,
     cover_style as _cover_style,

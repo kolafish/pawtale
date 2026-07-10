@@ -122,8 +122,3 @@ class DeepSeekTextService(AITextServiceBase):
                         chunk: AITextStreamChunk | None = openai_chat_stream_chunk(event)
                         if chunk:
                             yield chunk
-
-
-# 默认文本服务实例
-AITextService = DeepSeekTextService
-ai_text_service = DeepSeekTextService()

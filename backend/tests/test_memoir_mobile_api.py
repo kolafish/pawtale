@@ -216,25 +216,31 @@ async def test_mobile_memoir_projects_can_be_deleted_but_keeps_one_project(
         json={"guidance_mode": "free_narration"},
     )
     voice_session_id = voice_session_response.json()["session"]["id"]
-    user_audio = await memoir_audio_files.save_audio_bytes(
-        test_db,
-        user["id"],
-        b"user-audio",
-        extension=".pcm",
-    )
-    assistant_audio = await memoir_audio_files.save_audio_bytes(
-        test_db,
-        user["id"],
-        b"assistant-audio",
-        extension=".mp3",
-        mime_type="audio/mpeg",
-    )
-    unrelated_audio = await memoir_audio_files.save_audio_bytes(
-        test_db,
-        user["id"],
-        b"unrelated-audio",
-        extension=".pcm",
-    )
+    user_audio = (
+        await memoir_audio_files.stage_audio_bytes(
+            test_db,
+            user["id"],
+            b"user-audio",
+            extension=".pcm",
+        )
+    ).audio_file
+    assistant_audio = (
+        await memoir_audio_files.stage_audio_bytes(
+            test_db,
+            user["id"],
+            b"assistant-audio",
+            extension=".mp3",
+            mime_type="audio/mpeg",
+        )
+    ).audio_file
+    unrelated_audio = (
+        await memoir_audio_files.stage_audio_bytes(
+            test_db,
+            user["id"],
+            b"unrelated-audio",
+            extension=".pcm",
+        )
+    ).audio_file
     user_audio_path = memoir_audio_files.audio_file_path(user_audio)
     assistant_audio_path = memoir_audio_files.audio_file_path(assistant_audio)
     unrelated_audio_path = memoir_audio_files.audio_file_path(unrelated_audio)
