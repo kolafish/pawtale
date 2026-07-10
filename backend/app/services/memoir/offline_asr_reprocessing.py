@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,6 +23,8 @@ from app.services.memoir.multi_asr_verification import (
     MultiASRVerificationRequest,
     verify_multi_asr_transcripts,
 )
+from app.services.memoir.dialect_profile import resolve_memoir_dialect_profile
+from app.services.memoir.material_offline_asr_state import MATERIAL_OFFLINE_ASR_METADATA_KEY
 from app.services.memoir.offline_asr import (
     ASRRunner,
     DEFAULT_OFFLINE_ASR_PROVIDERS,
@@ -382,6 +384,7 @@ async def _apply_reprocessed_transcript(
     corrected_text: str,
     corrected_provider: str,
     ai_model: str | None,
+    recognition_metadata: dict[str, object],
 ) -> None:
     primary = _primary_asr_result(asr_results)
     version_ids = await _replace_reprocess_asr_versions(db, utterance, asr_results)
@@ -390,12 +393,21 @@ async def _apply_reprocessed_transcript(
 
     utterance.transcript_raw = primary.text.strip()
     utterance.provider = primary.provider
+    provider_payload = (
+        dict(utterance.provider_payload_json)
+        if isinstance(utterance.provider_payload_json, dict)
+        else {}
+    )
     if previous_text_blank:
-        utterance.provider_payload_json = {
-            "source": OFFLINE_ASR_REPROCESS_SOURCE,
-            "primary_provider": primary.provider,
-            "providers": _compact_result_payload(asr_results),
-        }
+        provider_payload.update(
+            {
+                "source": OFFLINE_ASR_REPROCESS_SOURCE,
+                "primary_provider": primary.provider,
+                "providers": _compact_result_payload(asr_results),
+            }
+        )
+    provider_payload[MATERIAL_OFFLINE_ASR_METADATA_KEY] = recognition_metadata
+    utterance.provider_payload_json = provider_payload
     await _ensure_user_chat_message(
         db,
         utterance,
@@ -409,6 +421,104 @@ async def _apply_reprocessed_transcript(
         provider=corrected_provider,
         ai_model=ai_model,
     )
+
+
+async def _has_user_edited_version(db: AsyncSession, utterance_id: str) -> bool:
+    return bool(
+        await db.scalar(
+            select(MemoirTranscriptVersion.id).where(
+                MemoirTranscriptVersion.source_artifact_id == utterance_id,
+                MemoirTranscriptVersion.version_type == MemoirTranscriptVersionType.USER_EDITED.value,
+            )
+        )
+    )
+
+
+async def reprocess_offline_asr_utterance(
+    db: AsyncSession,
+    *,
+    utterance_id: str,
+    ai_model: str | None = None,
+    providers: Sequence[str] | str = DEFAULT_OFFLINE_ASR_PROVIDERS,
+    asr_runner: ASRRunner | None = None,
+    ai_client: AITextClient | None = None,
+) -> dict[str, object]:
+    normalized_providers = normalize_offline_asr_providers(providers)
+    utterance = await load_reprocess_utterance(db, utterance_id)
+    if utterance is None:
+        raise ValueError("material utterance no longer exists")
+    if utterance.source_material_type == INTERVIEWER_SOURCE_MATERIAL_TYPE:
+        raise ValueError("interviewer prompt is not a reprocessable material")
+    if utterance.audio_file_id is None or utterance.audio_file is None:
+        raise ValueError("material audio file is missing")
+    if await _has_user_edited_version(db, utterance.id):
+        raise ValueError("user-edited transcript cannot be overwritten")
+
+    project = utterance.voice_session.project
+    baseline_raw = utterance.transcript_raw or ""
+    baseline_edited = utterance.transcript_edited or ""
+    question_context = await _latest_question_context(db, utterance)
+    hotwords = memoir_offline_asr_hotwords(project)
+    dialect_glossary = memoir_offline_asr_glossary(project)
+    narrator_origin = memoir_narrator_origin(project)
+    dialect_profile = resolve_memoir_dialect_profile(narrator_origin)
+    await db.commit()
+
+    runner = asr_runner or run_offline_asr
+    asr_results = await runner(
+        OfflineASRRequest(
+            utterance=utterance,
+            providers=normalized_providers,
+            hotwords=hotwords,
+        )
+    )
+    if not asr_results:
+        raise ValueError("all ASR providers returned empty text")
+
+    verified = await verify_multi_asr_transcripts(
+        MultiASRVerificationRequest(
+            asr_results=tuple(asr_results),
+            question_context=question_context,
+            original_raw=baseline_raw,
+            original_edited=baseline_edited,
+            narrator_origin=narrator_origin,
+            dialect_glossary=dialect_glossary,
+        ),
+        ai_model=ai_model,
+        ai_client=ai_client,
+    )
+    db.expunge_all()
+    utterance = await load_reprocess_utterance(db, utterance_id)
+    if utterance is None:
+        raise ValueError("material utterance no longer exists")
+    if await _has_user_edited_version(db, utterance.id):
+        raise ValueError("user-edited transcript cannot be overwritten")
+    if (utterance.transcript_raw or "") != baseline_raw or (utterance.transcript_edited or "") != baseline_edited:
+        raise ValueError("material transcript changed while offline ASR was running")
+
+    applied_at = datetime.now(UTC).isoformat()
+    recognition_metadata: dict[str, object] = {
+        **dialect_profile.metadata(),
+        "providers": list(normalized_providers),
+        "asr_providers": [result.provider for result in asr_results],
+        "verification_provider": verified.provider,
+        "applied_at": applied_at,
+    }
+    await _apply_reprocessed_transcript(
+        db,
+        utterance,
+        asr_results=asr_results,
+        corrected_text=verified.text,
+        corrected_provider=verified.provider,
+        ai_model=ai_model,
+        recognition_metadata=recognition_metadata,
+    )
+    await db.flush()
+    return {
+        "utterance_id": utterance.id,
+        **recognition_metadata,
+        "corrected_text_length": len(verified.text),
+    }
 
 
 async def reprocess_offline_asr(
@@ -451,44 +561,17 @@ async def reprocess_offline_asr(
     if dry_run:
         return result
 
-    runner = asr_runner or run_offline_asr
     failures: list[dict[str, str]] = []
     processed_count = 0
     for utterance_id in candidate_ids:
         try:
-            utterance = await load_reprocess_utterance(db, utterance_id)
-            if utterance is None:
-                raise ValueError("candidate utterance no longer exists")
-            project = utterance.voice_session.project
-            asr_results = await runner(
-                OfflineASRRequest(
-                    utterance=utterance,
-                    providers=normalized_providers,
-                    hotwords=memoir_offline_asr_hotwords(project),
-                )
-            )
-            if not asr_results:
-                raise ValueError("all ASR providers returned empty text")
-            question_context = await _latest_question_context(db, utterance)
-            verified = await verify_multi_asr_transcripts(
-                MultiASRVerificationRequest(
-                    asr_results=tuple(asr_results),
-                    question_context=question_context,
-                    original_raw=utterance.transcript_raw or "",
-                    original_edited=utterance.transcript_edited or "",
-                    narrator_origin=memoir_narrator_origin(project),
-                    dialect_glossary=memoir_offline_asr_glossary(project),
-                ),
-                ai_model=ai_model,
-                ai_client=ai_client,
-            )
-            await _apply_reprocessed_transcript(
+            await reprocess_offline_asr_utterance(
                 db,
-                utterance,
-                asr_results=asr_results,
-                corrected_text=verified.text,
-                corrected_provider=verified.provider,
+                utterance_id=utterance_id,
                 ai_model=ai_model,
+                providers=normalized_providers,
+                asr_runner=asr_runner,
+                ai_client=ai_client,
             )
             await db.commit()
             processed_count += 1

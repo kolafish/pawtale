@@ -69,6 +69,7 @@ class MemoirBookChapterDraftStatus(str, Enum):
 
 class MemoirEditingJobType(str, Enum):
     CORRECT_TRANSCRIPT = "correct_transcript"
+    REPROCESS_MATERIAL_OFFLINE_ASR = "reprocess_material_offline_asr"
     ROUTE_SOURCES = "route_sources"
     GENERATE_SOURCE_CARD = "generate_source_card"
     REVISE_CHAPTER = "revise_chapter"

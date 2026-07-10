@@ -1,6 +1,7 @@
 import type {
   MemoirShareVideoCustomBackgroundAsset,
   MemoirShareVideoJob,
+  MemoirMaterialOfflineASRState,
   MemoirTranscriptShareVideoContext,
   MemoirVoiceSearchQueryParseResponse,
   MemoirVoiceSearchTranscriptionResponse,
@@ -62,6 +63,20 @@ export function getMemoirVoiceTranscript(
 ): Promise<MemoirVoiceTranscriptItem> {
   return memoirRequest<MemoirVoiceTranscriptItem>(
     `/api/mobile/memoir/voice-transcripts/${encodeURIComponent(utteranceId)}`,
+  );
+}
+
+export function startMemoirMaterialOfflineASR(
+  utteranceId: string,
+  aiModel?: string,
+): Promise<MemoirMaterialOfflineASRState> {
+  const selectedModel = aiModel?.trim() || readSelectedAIModel();
+  return memoirRequest<MemoirMaterialOfflineASRState>(
+    `/api/mobile/memoir/voice-transcripts/${encodeURIComponent(utteranceId)}/offline-asr`,
+    {
+      method: "POST",
+      data: selectedModel ? { ai_model: selectedModel } : {},
+    },
   );
 }
 

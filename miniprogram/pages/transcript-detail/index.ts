@@ -1,5 +1,6 @@
 import type {
   MemoirBookPlan,
+  MemoirMaterialOfflineASRState,
   MemoirShareVideoCustomBackgroundAsset,
   MemoirVoiceTranscriptItem,
 } from "../../domain/voice-chat";
@@ -20,6 +21,7 @@ import {
   moveMemoirBookSource,
   previewMemoirVoiceTranscriptVoiceEdit,
   recoverMemoirVoiceTranscript,
+  startMemoirMaterialOfflineASR,
   updateMemoirVoiceTranscript,
   uploadMemoirShareVideoCustomBackground,
 } from "../../services/memoir-voice-api";
@@ -74,6 +76,7 @@ import {
   TranscriptShareVideoController,
   type TranscriptShareVideoData,
 } from "../../services/transcript-share-video";
+import { materialOfflineASRView } from "../../services/material-offline-asr-view";
 
 type TextAreaEvent = PageTextInputEvent;
 type PickerEvent = PagePickerEvent;
@@ -114,6 +117,15 @@ interface TranscriptDetailItemView extends MemoirVoiceTranscriptItem {
   displaySegments: TranscriptTextSegment[];
   changed: boolean;
   isEditing: boolean;
+  showOfflineAsr: boolean;
+  offlineAsrStatusText: string;
+  offlineAsrStatusClass: string;
+  offlineAsrActionText: string;
+  offlineAsrMethodText: string;
+  offlineAsrDetailText: string;
+  offlineAsrErrorText: string;
+  offlineAsrActive: boolean;
+  canStartOfflineAsr: boolean;
 }
 
 interface TranscriptDetailData extends TranscriptShareVideoData {
@@ -123,6 +135,7 @@ interface TranscriptDetailData extends TranscriptShareVideoData {
   deleting: boolean;
   convertingQuestionToAnswer: boolean;
   recovering: boolean;
+  offlineAsrStarting: boolean;
   assigning: boolean;
   moving: boolean;
   playing: boolean;
@@ -151,7 +164,24 @@ interface TranscriptDetailData extends TranscriptShareVideoData {
 }
 
 const COLLAPSIBLE_QUESTION_CHAR_COUNT = 72;
+const OFFLINE_ASR_POLL_INTERVAL_MS = 2000;
+const OFFLINE_ASR_MAX_POLL_ATTEMPTS = 150;
 type TranscriptDetailAudioKind = "question" | "answer";
+
+const DEFAULT_OFFLINE_ASR_STATE: MemoirMaterialOfflineASRState = {
+  status: "idle",
+  job_id: null,
+  can_start: false,
+  blocked_reason: "",
+  providers: ["volc", "stepfun"],
+  narrator_origin: "",
+  dialect_code: "",
+  dialect_label: "",
+  dialect_strategy: "none",
+  dialect_enhancement_enabled: false,
+  last_applied_at: null,
+  error_message: "",
+};
 
 function positiveSeconds(value: unknown): number {
   const seconds = Number(value);
@@ -238,8 +268,11 @@ function toViewItem(
   const audioText = transcriptAudioText(item);
   const questionText = item.question_text.trim();
   const recoveryText = item.summary_text || "这段录音已经保存，但还没有识别成文字。";
+  const offlineAsrState = item.offline_asr || DEFAULT_OFFLINE_ASR_STATE;
+  const offlineAsrView = materialOfflineASRView(offlineAsrState);
   return {
     ...item,
+    offline_asr: offlineAsrState,
     titleText: transcriptTitleText(item),
     editingText: previous?.isEditing ? previous.editingText : editingText,
     editingCharCount: (previous?.isEditing ? previous.editingText : editingText).trim().length,
@@ -280,6 +313,15 @@ function toViewItem(
       ? previous.editingText.trim() !== editingText.trim()
       : false,
     isEditing: Boolean(previous?.isEditing),
+    showOfflineAsr: Boolean(item.audio_file_id && item.chat_message_role !== "interviewer"),
+    offlineAsrStatusText: offlineAsrView.statusText,
+    offlineAsrStatusClass: offlineAsrView.statusClass,
+    offlineAsrActionText: offlineAsrView.actionText,
+    offlineAsrMethodText: offlineAsrView.methodText,
+    offlineAsrDetailText: offlineAsrView.detailText,
+    offlineAsrErrorText: offlineAsrView.errorText,
+    offlineAsrActive: offlineAsrView.active,
+    canStartOfflineAsr: offlineAsrView.canStart,
   };
 }
 
@@ -321,6 +363,25 @@ function confirmConvertQuestionToAnswer(item: TranscriptDetailItemView): Promise
   });
 }
 
+function confirmOfflineAsr(item: TranscriptDetailItemView): Promise<boolean> {
+  const state = item.offline_asr;
+  const dialectLine = state.dialect_enhancement_enabled && state.dialect_label
+    ? `系统会根据籍贯“${state.narrator_origin}”启用${state.dialect_label}加强识别。`
+    : (state.narrator_origin
+      ? `籍贯“${state.narrator_origin}”没有匹配专门方言规则，本次只做双模型口音校对。`
+      : "项目尚未填写籍贯，本次只做双模型口音校对。");
+  return new Promise((resolve) => {
+    wx.showModal({
+      title: item.offline_asr.status === "succeeded" ? "再次识别这条素材？" : "离线加强识别？",
+      content: `将使用火山和 StepFun 重新识别原音频，再由 AI 校对。${dialectLine}`,
+      confirmText: "开始识别",
+      confirmColor: "#a64b3e",
+      success: (result) => resolve(Boolean(result.confirm)),
+      fail: () => resolve(false),
+    });
+  });
+}
+
 definePage<TranscriptDetailData>()({
   audioPlayback: new AudioPlaybackController(),
   shareVideoController: new TranscriptShareVideoController({
@@ -332,6 +393,9 @@ definePage<TranscriptDetailData>()({
   loadToken: 0,
   voiceEditToken: 0,
   shareVideoBackgroundUploadToken: 0,
+  offlineAsrPollTimer: null as ReturnType<typeof setTimeout> | null,
+  offlineAsrPollToken: 0,
+  offlineAsrPollAttempts: 0,
 
   data: {
     loading: false,
@@ -340,6 +404,7 @@ definePage<TranscriptDetailData>()({
     deleting: false,
     convertingQuestionToAnswer: false,
     recovering: false,
+    offlineAsrStarting: false,
     assigning: false,
     moving: false,
     playing: false,
@@ -388,6 +453,7 @@ definePage<TranscriptDetailData>()({
       this.setData({ error: "缺少讲述记录" });
       return;
     }
+    this.stopOfflineAsrPolling();
     this.loadToken += 1;
     const requestToken = this.loadToken;
     this.setData({ loading: true, error: "" });
@@ -402,6 +468,7 @@ definePage<TranscriptDetailData>()({
         item: toViewItem(transcript, bookPlan, this.data.item),
         bookPlan,
       });
+      this.startOfflineAsrPollingIfNeeded();
       trackAuditAction("transcript.detail_view", {}, { projectId: transcript.project_id });
     } catch (error) {
       if (requestToken !== this.loadToken) {
@@ -419,9 +486,120 @@ definePage<TranscriptDetailData>()({
     }
   },
 
+  stopOfflineAsrPolling() {
+    this.offlineAsrPollToken += 1;
+    this.offlineAsrPollAttempts = 0;
+    if (this.offlineAsrPollTimer !== null) {
+      clearTimeout(this.offlineAsrPollTimer);
+      this.offlineAsrPollTimer = null;
+    }
+  },
+
+  startOfflineAsrPollingIfNeeded() {
+    if (!this.data.item?.offlineAsrActive) {
+      return;
+    }
+    this.stopOfflineAsrPolling();
+    const token = this.offlineAsrPollToken;
+    this.scheduleOfflineAsrPoll(token);
+  },
+
+  scheduleOfflineAsrPoll(token: number) {
+    if (token !== this.offlineAsrPollToken || !this.data.item?.offlineAsrActive) {
+      return;
+    }
+    if (this.offlineAsrPollAttempts >= OFFLINE_ASR_MAX_POLL_ATTEMPTS) {
+      return;
+    }
+    this.offlineAsrPollTimer = setTimeout(() => {
+      this.offlineAsrPollTimer = null;
+      void this.pollOfflineAsr(token);
+    }, OFFLINE_ASR_POLL_INTERVAL_MS);
+  },
+
+  async pollOfflineAsr(token: number) {
+    const current = this.data.item;
+    if (!current || token !== this.offlineAsrPollToken) {
+      return;
+    }
+    this.offlineAsrPollAttempts += 1;
+    try {
+      const transcript = await getMemoirVoiceTranscript(current.id);
+      if (token !== this.offlineAsrPollToken) {
+        return;
+      }
+      const next = toViewItem(transcript, this.data.bookPlan);
+      this.setData({ item: next });
+      if (next.offline_asr.status === "succeeded") {
+        this.stopOfflineAsrPolling();
+        this.resetShareVideoState();
+        wx.showToast({ title: "识别已更新", icon: "success" });
+        return;
+      }
+      if (next.offline_asr.status === "failed") {
+        this.stopOfflineAsrPolling();
+        return;
+      }
+      this.scheduleOfflineAsrPoll(token);
+    } catch {
+      if (token !== this.offlineAsrPollToken) {
+        return;
+      }
+      this.scheduleOfflineAsrPoll(token);
+    }
+  },
+
+  async startOfflineAsr() {
+    const item = this.data.item;
+    if (
+      !item
+      || !item.showOfflineAsr
+      || !item.canStartOfflineAsr
+      || item.isEditing
+      || this.data.offlineAsrStarting
+      || this.data.saving
+      || this.data.deleting
+      || this.data.convertingQuestionToAnswer
+    ) {
+      return;
+    }
+    if (!await confirmOfflineAsr(item)) {
+      return;
+    }
+    this.stopPlayback();
+    this.resetShareVideoState();
+    this.setData({ offlineAsrStarting: true, error: "" });
+    try {
+      const state = await startMemoirMaterialOfflineASR(item.id);
+      const next = toViewItem({ ...item, offline_asr: state }, this.data.bookPlan);
+      this.setData({ item: next });
+      trackAuditAction(
+        "transcript.detail_offline_asr_start",
+        {
+          dialect: state.dialect_label,
+          dialect_enhancement_enabled: state.dialect_enhancement_enabled,
+        },
+        { projectId: item.project_id },
+      );
+      wx.showToast({ title: "已开始识别", icon: "success" });
+      this.startOfflineAsrPollingIfNeeded();
+    } catch (error) {
+      this.setData({ error: error instanceof Error ? error.message : "离线识别启动失败" });
+    } finally {
+      this.setData({ offlineAsrStarting: false });
+    }
+  },
+
   beginEdit() {
     const item = this.data.item;
-    if (!item || item.canRecoverTranscription || this.data.saving || this.data.deleting || this.data.convertingQuestionToAnswer) {
+    if (
+      !item
+      || item.canRecoverTranscription
+      || item.offlineAsrActive
+      || this.data.saving
+      || this.data.deleting
+      || this.data.convertingQuestionToAnswer
+    ) {
       return;
     }
     this.resetShareVideoState();
@@ -461,6 +639,7 @@ definePage<TranscriptDetailData>()({
       !item ||
       item.canRecoverTranscription ||
       item.isEditing ||
+      item.offlineAsrActive ||
       this.data.saving ||
       this.data.deleting ||
       this.data.shareVideoSharing ||
@@ -478,7 +657,7 @@ definePage<TranscriptDetailData>()({
 
   async openShareVideoPanel() {
     const item = this.data.item;
-    if (!item || item.canRecoverTranscription || item.isEditing) {
+    if (!item || item.canRecoverTranscription || item.isEditing || item.offlineAsrActive) {
       return;
     }
     if (this.data.shareVideoContext?.utterance_id === item.id) {
@@ -644,6 +823,7 @@ definePage<TranscriptDetailData>()({
     const item = this.data.item;
     if (
       !item ||
+      item.offlineAsrActive ||
       !this.data.shareVideoContext ||
       this.data.shareVideoCreating ||
       this.data.shareVideoPolling ||
@@ -736,6 +916,7 @@ definePage<TranscriptDetailData>()({
     const item = this.data.item;
     if (
       !item ||
+      item.offlineAsrActive ||
       !this.data.shareVideoContext ||
       !this.data.shareVideoSelectedCanGenerate ||
       this.data.shareVideoCreating ||
@@ -867,6 +1048,7 @@ definePage<TranscriptDetailData>()({
     if (
       !item
       || item.canRecoverTranscription
+      || item.offlineAsrActive
       || this.data.saving
       || this.data.deleting
       || this.data.convertingQuestionToAnswer
@@ -1275,7 +1457,16 @@ definePage<TranscriptDetailData>()({
     switchToBook();
   },
 
+  onShow() {
+    this.startOfflineAsrPollingIfNeeded();
+  },
+
+  onHide() {
+    this.stopOfflineAsrPolling();
+  },
+
   onUnload() {
+    this.stopOfflineAsrPolling();
     this.stopPlayback();
     this.cancelVoiceEdit();
     this.shareVideoController.dispose();

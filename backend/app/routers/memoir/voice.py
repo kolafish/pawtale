@@ -16,6 +16,8 @@ from app.models.users import User
 from app.schemas.memoir_voice import (
     MemoirAssistantTTSRequest,
     MemoirAssistantTTSResponse,
+    MemoirMaterialOfflineASRRequest,
+    MemoirMaterialOfflineASRStateResponse,
     MemoirAutomationEventListResponse,
     MemoirAutomationEventResponse,
     MemoirAutomationEventVoicePlaybackRequest,
@@ -59,6 +61,7 @@ from app.services.memoir import share_video_alignment as memoir_share_video_alig
 from app.services.memoir import share_video_custom_backgrounds as memoir_share_video_custom_backgrounds
 from app.services.memoir import share_video_jobs as memoir_share_video_jobs
 from app.services.memoir import voice_transcript_recovery as memoir_voice_transcript_recovery
+from app.services.memoir import material_offline_asr_jobs as memoir_material_offline_asr_jobs
 from app.services.memoir import transcript_voice_edit as memoir_transcript_voice_edit
 from app.services.memoir import voice_transcripts as memoir_voice_transcripts
 from app.services.memoir.access import load_audio_file, load_memoir_project
@@ -412,6 +415,26 @@ async def get_mobile_memoir_voice_transcript(
         db,
         utterance_id,
         current_user.id,
+        allow_admin=is_admin_user(current_user),
+    )
+
+
+@router.post(
+    "/voice-transcripts/{utterance_id}/offline-asr",
+    response_model=MemoirMaterialOfflineASRStateResponse,
+    status_code=202,
+)
+async def enqueue_mobile_memoir_material_offline_asr(
+    utterance_id: str,
+    req: MemoirMaterialOfflineASRRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await memoir_material_offline_asr_jobs.enqueue_material_offline_asr(
+        db,
+        utterance_id=utterance_id,
+        user_id=current_user.id,
+        ai_model=req.ai_model,
         allow_admin=is_admin_user(current_user),
     )
 

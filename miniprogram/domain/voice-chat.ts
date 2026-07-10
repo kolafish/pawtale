@@ -298,6 +298,23 @@ export interface VoiceChatTranscriptLine {
   end_ms?: number | null;
 }
 
+export type MemoirMaterialOfflineASRStatus = "idle" | "pending" | "running" | "succeeded" | "failed";
+
+export interface MemoirMaterialOfflineASRState {
+  status: MemoirMaterialOfflineASRStatus;
+  job_id?: string | null;
+  can_start: boolean;
+  blocked_reason: string;
+  providers: string[];
+  narrator_origin: string;
+  dialect_code: string;
+  dialect_label: string;
+  dialect_strategy: string;
+  dialect_enhancement_enabled: boolean;
+  last_applied_at?: string | null;
+  error_message: string;
+}
+
 export interface MemoirVoiceTranscriptItem {
   id: string;
   voice_session_id: string;
@@ -333,6 +350,7 @@ export interface MemoirVoiceTranscriptItem {
   current_guidance_module?: string | null;
   is_included_in_book?: boolean;
   included_chapters?: MemoirBookSourceIncludedChapter[];
+  offline_asr: MemoirMaterialOfflineASRState;
   created_at: string;
   session_created_at: string;
 }

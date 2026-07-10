@@ -33,6 +33,7 @@ from app.models.memoir import (
 )
 from app.models.projects import Project
 from app.schemas.memoir_voice import (
+    MemoirMaterialOfflineASRStateResponse,
     MemoirVoiceTranscriptIncludedChapterResponse,
     MemoirVoiceTranscriptCleanupRequest,
     MemoirVoiceTranscriptItemResponse,
@@ -43,6 +44,7 @@ from app.services.ai_factory import get_ai_service
 from app.services.ai_types import AITextClient
 from app.services.memoir import automation_event_resolution
 from app.services.memoir import source_cards
+from app.services.memoir.material_offline_asr_state import material_offline_asr_states
 from app.services.memoir.asr_text_normalization import normalize_memoir_asr_text
 from app.services.memoir.source_disposition import (
     IGNORED_SOURCE_ROUTE_ACTION,
@@ -572,6 +574,7 @@ def _item_response(
     utterance: MemoirVoiceUtterance,
     included_chapters: list[MemoirVoiceTranscriptIncludedChapterResponse] | None = None,
     source_card: MemoirSourceCard | None = None,
+    offline_asr: MemoirMaterialOfflineASRStateResponse | None = None,
 ) -> MemoirVoiceTranscriptItemResponse:
     voice_session = utterance.voice_session
     chat_message = utterance.chat_message
@@ -626,6 +629,7 @@ def _item_response(
         current_guidance_module=voice_session.current_guidance_module,
         is_included_in_book=bool(inclusions),
         included_chapters=inclusions,
+        offline_asr=offline_asr or MemoirMaterialOfflineASRStateResponse(),
         created_at=_utc_datetime(utterance.created_at),
         session_created_at=_utc_datetime(voice_session.created_at),
     )
@@ -811,8 +815,14 @@ async def list_voice_transcripts(
         project_ids=[utterance.voice_session.project_id for utterance in utterances],
     )
     cards = await _source_cards_by_utterance(db, list(utterances))
+    offline_asr_states = await material_offline_asr_states(db, utterances)
     items = [
-        _item_response(utterance, inclusions.get(utterance.id, []), cards.get(utterance.id))
+        _item_response(
+            utterance,
+            inclusions.get(utterance.id, []),
+            cards.get(utterance.id),
+            offline_asr_states.get(utterance.id),
+        )
         for utterance in utterances
     ]
     return MemoirVoiceTranscriptListResponse(
@@ -837,10 +847,12 @@ async def get_voice_transcript(
         project_ids=[utterance.voice_session.project_id],
     )
     cards = await _source_cards_by_utterance(db, [utterance])
+    offline_asr_states = await material_offline_asr_states(db, [utterance])
     return _item_response(
         utterance,
         inclusions.get(utterance.id, []),
         cards.get(utterance.id),
+        offline_asr_states.get(utterance.id),
     )
 
 
@@ -968,7 +980,12 @@ async def _apply_edited_text(
         [utterance.id],
         project_ids=[utterance.voice_session.project_id],
     )
-    return _item_response(utterance, inclusions.get(utterance.id, []))
+    offline_asr_states = await material_offline_asr_states(db, [utterance])
+    return _item_response(
+        utterance,
+        inclusions.get(utterance.id, []),
+        offline_asr=offline_asr_states.get(utterance.id),
+    )
 
 
 async def apply_cleaned_voice_transcript_text(
