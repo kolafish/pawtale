@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -750,7 +752,8 @@ async def export_book_output_file(
         snapshot=[item for item in (version.chapter_snapshot_json or []) if isinstance(item, dict)],
         stored=version.manuscript_json,
     )
-    return render_book_output_export(
+    return await asyncio.to_thread(
+        render_book_output_export,
         title=output.title,
         version=version.version,
         content=content,

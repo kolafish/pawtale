@@ -1,5 +1,8 @@
 from typing import get_args
 
+from PIL import Image
+from reportlab.lib.utils import ImageReader
+
 from app.schemas.memoir_book import MemoirBookCoverStyle
 from app.services.memoir.book_outputs import _cover_style as normalize_book_cover_style
 from app.services.memoir.book_output_export import (
@@ -16,8 +19,10 @@ from app.services.memoir.book_output_pdf_renderer import (
     PDF_SERIF_BOLD_FONT_NAME,
     PDF_SERIF_FONT_NAME,
     PDFBookBuilder,
+    PDFImageCommand,
     PDFLayout,
     MemoirBookOutputExportLayout,
+    _optimized_pdf_image_source,
     _wrap_pdf_line,
 )
 
@@ -29,6 +34,18 @@ EXPECTED_PDF_COVER_STYLES = {
     "moonlit_courtyard",
     "navy_gilt",
 }
+
+
+def test_pdf_renderer_downsamples_images_to_print_resolution(tmp_path):
+    image_path = tmp_path / "large-illustration.png"
+    Image.new("RGB", (2848, 1600), "#6f7f72").save(image_path)
+
+    source = _optimized_pdf_image_source(
+        PDFImageCommand(path=image_path, x=0, y=0, width=324, height=220)
+    )
+
+    assert isinstance(source, ImageReader)
+    assert source.getSize() == (1350, 758)
 
 
 def _sample_manuscript(chapter_content: str, *, cover_style: str | None = None) -> dict:

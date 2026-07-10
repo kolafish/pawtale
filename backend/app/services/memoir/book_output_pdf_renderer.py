@@ -4,7 +4,10 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from io import BytesIO
 from pathlib import Path
+from threading import Lock
 
+from PIL import Image, ImageOps
+from reportlab.lib.utils import ImageReader
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen import canvas as pdf_canvas
@@ -32,6 +35,9 @@ PDF_SERIF_BOLD_FONT_PATH = (
     / "NotoSerifSC-Bold.ttf"
 )
 _PDF_FONT_REGISTERED = False
+_PDF_FONT_REGISTER_LOCK = Lock()
+PDF_EMBEDDED_IMAGE_DPI = 300
+PDF_EMBEDDED_IMAGE_JPEG_QUALITY = 90
 PDFColor = tuple[float, float, float]
 PDF_BODY_TEXT: PDFColor = (0.08, 0.07, 0.06)
 PDF_HEADER_TEXT: PDFColor = (0.58, 0.55, 0.51)
@@ -732,16 +738,44 @@ def _register_pdf_font() -> None:
     global _PDF_FONT_REGISTERED
     if _PDF_FONT_REGISTERED:
         return
-    if not PDF_SANS_FONT_PATH.exists():
-        raise RuntimeError(f"PDF font file not found: {PDF_SANS_FONT_PATH}")
-    if not PDF_SERIF_FONT_PATH.exists():
-        raise RuntimeError(f"PDF font file not found: {PDF_SERIF_FONT_PATH}")
-    if not PDF_SERIF_BOLD_FONT_PATH.exists():
-        raise RuntimeError(f"PDF font file not found: {PDF_SERIF_BOLD_FONT_PATH}")
-    pdfmetrics.registerFont(TTFont(PDF_SANS_FONT_NAME, str(PDF_SANS_FONT_PATH)))
-    pdfmetrics.registerFont(TTFont(PDF_SERIF_FONT_NAME, str(PDF_SERIF_FONT_PATH)))
-    pdfmetrics.registerFont(TTFont(PDF_SERIF_BOLD_FONT_NAME, str(PDF_SERIF_BOLD_FONT_PATH)))
-    _PDF_FONT_REGISTERED = True
+    with _PDF_FONT_REGISTER_LOCK:
+        if _PDF_FONT_REGISTERED:
+            return
+        if not PDF_SANS_FONT_PATH.exists():
+            raise RuntimeError(f"PDF font file not found: {PDF_SANS_FONT_PATH}")
+        if not PDF_SERIF_FONT_PATH.exists():
+            raise RuntimeError(f"PDF font file not found: {PDF_SERIF_FONT_PATH}")
+        if not PDF_SERIF_BOLD_FONT_PATH.exists():
+            raise RuntimeError(f"PDF font file not found: {PDF_SERIF_BOLD_FONT_PATH}")
+        pdfmetrics.registerFont(TTFont(PDF_SANS_FONT_NAME, str(PDF_SANS_FONT_PATH)))
+        pdfmetrics.registerFont(TTFont(PDF_SERIF_FONT_NAME, str(PDF_SERIF_FONT_PATH)))
+        pdfmetrics.registerFont(TTFont(PDF_SERIF_BOLD_FONT_NAME, str(PDF_SERIF_BOLD_FONT_PATH)))
+        _PDF_FONT_REGISTERED = True
+
+
+def _optimized_pdf_image_source(command: PDFImageCommand) -> str | ImageReader:
+    max_width = max(1, round(command.width * PDF_EMBEDDED_IMAGE_DPI / 72))
+    max_height = max(1, round(command.height * PDF_EMBEDDED_IMAGE_DPI / 72))
+    with Image.open(command.path) as original:
+        with ImageOps.exif_transpose(original) as source:
+            if source.width <= max_width and source.height <= max_height:
+                return str(command.path)
+
+            source.thumbnail((max_width, max_height), Image.Resampling.LANCZOS)
+            image = source.convert("RGBA")
+            background = Image.new("RGB", image.size, "white")
+            background.paste(image, mask=image.getchannel("A"))
+
+    output = BytesIO()
+    background.save(
+        output,
+        format="JPEG",
+        quality=PDF_EMBEDDED_IMAGE_JPEG_QUALITY,
+        optimize=True,
+        dpi=(PDF_EMBEDDED_IMAGE_DPI, PDF_EMBEDDED_IMAGE_DPI),
+    )
+    output.seek(0)
+    return ImageReader(output)
 
 
 def _render_pdf_pages(
@@ -777,6 +811,7 @@ def _render_pdf_pages(
         pdf.setProducer("Pawtale")
     elif hasattr(pdf, "_doc") and hasattr(pdf._doc, "info"):
         pdf._doc.info.producer = "Pawtale"
+    image_sources: dict[tuple[Path, int, int], str | ImageReader] = {}
     for page_number, page in enumerate(pages, start=1):
         if page.background_color:
             pdf.setFillColorRGB(*page.background_color)
@@ -794,8 +829,13 @@ def _render_pdf_pages(
         for decoration in page.decorations:
             _draw_pdf_decoration(pdf, decoration)
         for image in page.images:
+            image_key = (image.path, round(image.width), round(image.height))
+            image_source = image_sources.get(image_key)
+            if image_source is None:
+                image_source = _optimized_pdf_image_source(image)
+                image_sources[image_key] = image_source
             pdf.drawImage(
-                str(image.path),
+                image_source,
                 image.x,
                 image.y,
                 width=image.width,
