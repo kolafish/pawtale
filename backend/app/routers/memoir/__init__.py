@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
 from . import book
+from . import book_editor
 from . import chapter_source_editor
 from . import interview_editor
 from . import material_editor
@@ -14,6 +15,7 @@ from . import voice_gateway
 router = APIRouter(tags=["mobile-memoir"])
 router.include_router(interview_editor.router, prefix="/api/memoir")
 router.include_router(material_editor.router, prefix="/api/memoir")
+router.include_router(book_editor.router, prefix="/api/memoir")
 router.include_router(chapter_source_editor.router, prefix="/api/memoir")
 router.include_router(transcript_cleanup_editor.router, prefix="/api/memoir")
 router.include_router(book.router, prefix="/api/mobile/memoir")

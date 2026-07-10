@@ -39,8 +39,9 @@ async def get_book_plan(
     *,
     user_id: str,
     project_id: str,
+    allow_admin: bool = False,
 ) -> MemoirBookPlanResponse:
-    await load_memoir_project(db, project_id, user_id)
+    await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
     plan = await _load_plan(db, project_id)
     if not plan:
         raise HTTPException(status_code=404, detail="章节规划不存在")
@@ -54,8 +55,9 @@ async def synthesize_book_outline_audio(
     project_id: str,
     req: MemoirBookAudioRequest,
     tts_client: TTSClient | None = None,
+    allow_admin: bool = False,
 ) -> MemoirBookAudioResponse:
-    await load_memoir_project(db, project_id, user_id)
+    await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
     plan = await _load_plan(db, project_id)
     if not plan:
         raise HTTPException(status_code=404, detail="章节规划不存在")

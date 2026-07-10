@@ -174,8 +174,9 @@ async def _load_plan(
     *,
     user_id: str,
     project_id: str,
+    allow_admin: bool = False,
 ) -> MemoirBookPlan:
-    await load_memoir_project(db, project_id, user_id)
+    await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
     plan = await db.scalar(
         select(MemoirBookPlan)
         .where(MemoirBookPlan.project_id == project_id)
@@ -398,12 +399,18 @@ async def get_book_output(
     *,
     user_id: str,
     project_id: str,
+    allow_admin: bool = False,
 ) -> MemoirBookOutputResponse:
-    await load_memoir_project(db, project_id, user_id)
+    await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
     output = await _load_output(db, project_id=project_id)
     if not output:
         raise HTTPException(status_code=404, detail="全书稿不存在")
-    plan = await _load_plan(db, user_id=user_id, project_id=project_id)
+    plan = await _load_plan(
+        db,
+        user_id=user_id,
+        project_id=project_id,
+        allow_admin=allow_admin,
+    )
     refs_by_chapter = await plan_source_ref_dicts_by_chapter(db, plan)
     return _output_response(
         output,
@@ -421,9 +428,15 @@ async def generate_book_output(
     user_id: str,
     project_id: str,
     req: MemoirBookOutputGenerateRequest,
+    allow_admin: bool = False,
 ) -> MemoirBookOutputResponse:
-    project = await load_memoir_project(db, project_id, user_id)
-    plan = await _load_plan(db, user_id=user_id, project_id=project_id)
+    project = await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
+    plan = await _load_plan(
+        db,
+        user_id=user_id,
+        project_id=project_id,
+        allow_admin=allow_admin,
+    )
     chapters = _require_confirmed_chapters(plan)
     refs_by_chapter = await plan_source_ref_dicts_by_chapter(db, plan)
     user_title = _safe_str(req.title)
@@ -542,8 +555,9 @@ async def update_book_output(
     user_id: str,
     project_id: str,
     req: MemoirBookOutputUpdateRequest,
+    allow_admin: bool = False,
 ) -> MemoirBookOutputResponse:
-    await load_memoir_project(db, project_id, user_id)
+    await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
     output = await _load_output(db, project_id=project_id)
     if not output or not output.versions:
         raise HTTPException(status_code=404, detail="全书稿不存在")
@@ -581,8 +595,9 @@ async def regenerate_book_output_editorial_copy(
     user_id: str,
     project_id: str,
     req: MemoirBookOutputEditorialCopyRegenerateRequest,
+    allow_admin: bool = False,
 ) -> MemoirBookOutputResponse:
-    project = await load_memoir_project(db, project_id, user_id)
+    project = await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
     output = await _load_output(db, project_id=project_id)
     if not output or not output.versions:
         raise HTTPException(status_code=404, detail="全书稿不存在")
@@ -638,8 +653,9 @@ async def update_book_output_chapter_editorial_copy(
     project_id: str,
     chapter_id: str,
     req: MemoirBookOutputChapterEditorialCopyUpdateRequest,
+    allow_admin: bool = False,
 ) -> MemoirBookOutputResponse:
-    await load_memoir_project(db, project_id, user_id)
+    await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
     output = await _load_output(db, project_id=project_id)
     if not output or not output.versions:
         raise HTTPException(status_code=404, detail="全书稿不存在")
@@ -680,9 +696,15 @@ async def suggest_book_output_titles(
     user_id: str,
     project_id: str,
     req: MemoirBookTitleSuggestionRequest,
+    allow_admin: bool = False,
 ) -> MemoirBookTitleSuggestionResponse:
-    project = await load_memoir_project(db, project_id, user_id)
-    plan = await _load_plan(db, user_id=user_id, project_id=project_id)
+    project = await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
+    plan = await _load_plan(
+        db,
+        user_id=user_id,
+        project_id=project_id,
+        allow_admin=allow_admin,
+    )
     chapters = _require_confirmed_chapters(plan)
     base_title = _formal_book_title(plan.title)
     refs_by_chapter = await plan_source_ref_dicts_by_chapter(db, plan)
@@ -737,8 +759,9 @@ async def export_book_output_file(
     layout: MemoirBookOutputExportLayout = MemoirBookOutputExportLayout.STANDARD,
     version_id: str | None = None,
     show_source_appendix: bool | None = None,
+    allow_admin: bool = False,
 ) -> ExportFile:
-    await load_memoir_project(db, project_id, user_id)
+    await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
     output = await _load_output(db, project_id=project_id)
     if not output or not output.versions:
         raise HTTPException(status_code=404, detail="全书稿不存在")
@@ -771,8 +794,9 @@ async def synthesize_book_output_audio(
     project_id: str,
     req: MemoirBookAudioRequest,
     tts_client: TTSClient | None = None,
+    allow_admin: bool = False,
 ) -> MemoirBookAudioResponse:
-    await load_memoir_project(db, project_id, user_id)
+    await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
     output = await _load_output(db, project_id=project_id)
     if not output or not output.versions:
         raise HTTPException(status_code=404, detail="全书稿不存在")

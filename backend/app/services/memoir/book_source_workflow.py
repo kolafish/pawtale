@@ -125,8 +125,14 @@ async def schedule_uncovered_source_routing_after_plan_confirmation(
     *,
     user_id: str,
     project_id: str,
+    allow_admin: bool = False,
 ) -> int:
-    coverage = await get_book_source_coverage(db, user_id=user_id, project_id=project_id)
+    coverage = await get_book_source_coverage(
+        db,
+        user_id=user_id,
+        project_id=project_id,
+        allow_admin=allow_admin,
+    )
     utterance_ids = [source.utterance_id for source in coverage.uncovered_sources]
     if not utterance_ids:
         return 0
