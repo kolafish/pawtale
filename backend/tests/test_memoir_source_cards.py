@@ -22,7 +22,6 @@ from app.models.memoir import (
     MemoirVoiceUtterance,
 )
 from app.models.projects import Project
-from app.services.memoir.editing_jobs import run_editing_job
 from app.services.memoir.editing_job_handlers import register_memoir_editing_job_handlers
 from app.services.memoir.source_cards import (
     SOURCE_CARD_ENGINE,
@@ -31,6 +30,7 @@ from app.services.memoir.source_cards import (
     schedule_source_card_generation_job,
     source_text_hash,
 )
+from tests.memoir_helpers import run_test_editing_job
 
 
 class FakeSourceCardAI:
@@ -250,7 +250,7 @@ async def test_source_card_generation_job_schedules_deduped_work(test_db, monkey
         fake_generate_or_reuse_source_card,
     )
     register_memoir_editing_job_handlers()
-    assert await run_editing_job(test_db, first_job.id)
+    assert await run_test_editing_job(test_db, first_job.id)
 
     job = await test_db.get(MemoirEditingJob, first_job.id)
     assert job is not None
@@ -306,7 +306,7 @@ async def test_source_card_generation_job_binds_active_chapter_source_links(test
         fake_generate_or_reuse_source_card,
     )
     register_memoir_editing_job_handlers()
-    assert await run_editing_job(test_db, job.id)
+    assert await run_test_editing_job(test_db, job.id)
 
     await test_db.refresh(job)
     await test_db.refresh(link)

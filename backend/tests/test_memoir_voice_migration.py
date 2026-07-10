@@ -153,7 +153,129 @@ async def test_memoir_voice_migration_creates_editing_jobs_table():
         assert "memoir_editing_jobs" in result["changed_tables"]
         assert "memoir_editing_jobs" not in second_result["changed_tables"]
         assert table_name == "memoir_editing_jobs"
-        assert {"job_type", "status", "run_after", "dedupe_key", "payload_json"}.issubset(columns)
+        assert {
+            "job_type",
+            "status",
+            "run_after",
+            "dedupe_key",
+            "payload_json",
+            "lease_token",
+            "lease_expires_at",
+        }.issubset(columns)
+    finally:
+        await engine.dispose()
+
+
+async def test_memoir_voice_migration_adds_share_video_job_lifecycle_columns():
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
+    try:
+        async with engine.begin() as conn:
+            await conn.execute(
+                text(
+                    """
+                    CREATE TABLE memoir_transcript_versions (
+                        id VARCHAR(36) NOT NULL,
+                        voice_session_id VARCHAR(36),
+                        source_artifact_id VARCHAR(36),
+                        version_type VARCHAR(30) NOT NULL,
+                        content TEXT NOT NULL,
+                        provider VARCHAR(100),
+                        confidence FLOAT,
+                        created_by VARCHAR(20) NOT NULL,
+                        created_at DATETIME,
+                        PRIMARY KEY (id)
+                    )
+                    """
+                )
+            )
+            await conn.execute(
+                text(
+                    """
+                    CREATE TABLE memoir_material_share_videos (
+                        id VARCHAR(36) NOT NULL PRIMARY KEY,
+                        project_id VARCHAR(36) NOT NULL,
+                        utterance_id VARCHAR(36) NOT NULL,
+                        audio_file_id VARCHAR(36) NOT NULL,
+                        user_id VARCHAR(36) NOT NULL,
+                        status VARCHAR(20) NOT NULL,
+                        text_source VARCHAR(20) NOT NULL,
+                        text_hash VARCHAR(64) NOT NULL,
+                        selected_text TEXT NOT NULL,
+                        start_char INTEGER NOT NULL,
+                        end_char INTEGER NOT NULL,
+                        start_ms INTEGER NOT NULL,
+                        end_ms INTEGER NOT NULL,
+                        style VARCHAR(40) NOT NULL,
+                        style_json JSON NOT NULL,
+                        metadata_json JSON NOT NULL,
+                        video_storage_path VARCHAR(500),
+                        video_mime_type VARCHAR(100) NOT NULL,
+                        video_size_bytes INTEGER,
+                        error_message TEXT NOT NULL,
+                        completed_at DATETIME,
+                        created_at DATETIME,
+                        updated_at DATETIME
+                    )
+                    """
+                )
+            )
+            await conn.execute(
+                text(
+                    """
+                    INSERT INTO memoir_material_share_videos (
+                        id, project_id, utterance_id, audio_file_id, user_id,
+                        status, text_source, text_hash, selected_text,
+                        start_char, end_char, start_ms, end_ms, style,
+                        style_json, metadata_json, video_mime_type,
+                        error_message, created_at, updated_at
+                    ) VALUES (
+                        'video-1', 'project-1', 'utterance-1', 'audio-1', 'user-1',
+                        'pending', 'edited', 'hash', '一段讲述',
+                        0, 4, 0, 4000, 'warm_minimal',
+                        '{}', '{}', 'video/mp4', '',
+                        '2026-07-10 00:00:00', '2026-07-10 00:00:00'
+                    )
+                    """
+                )
+            )
+
+        result = await migrate_memoir_voice_schema(engine)
+        second_result = await migrate_memoir_voice_schema(engine)
+
+        async with engine.begin() as conn:
+            columns = {
+                row[1]
+                for row in (
+                    await conn.execute(text("PRAGMA table_info(memoir_material_share_videos)"))
+                ).fetchall()
+            }
+            row = (
+                await conn.execute(
+                    text(
+                        "SELECT id, run_after, locked_at, lease_token, lease_expires_at, attempts "
+                        "FROM memoir_material_share_videos WHERE id = 'video-1'"
+                    )
+                )
+            ).one()
+
+        expected_columns = {
+            "run_after",
+            "locked_at",
+            "lease_token",
+            "lease_expires_at",
+            "attempts",
+        }
+        assert expected_columns.issubset(columns)
+        assert expected_columns == {
+            item.removeprefix("memoir_material_share_videos.")
+            for item in result["changed_columns"]
+            if item.startswith("memoir_material_share_videos.")
+        }
+        assert not any(
+            item.startswith("memoir_material_share_videos.")
+            for item in second_result["changed_columns"]
+        )
+        assert tuple(row) == ("video-1", None, None, None, None, 0)
     finally:
         await engine.dispose()
 

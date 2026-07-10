@@ -25,13 +25,14 @@ from app.services.memoir.book_manuscript_ai import generate_manuscript_editorial
 from app.services.memoir.book_manuscript_cleanup import sanitize_manuscript_payload
 from app.services.memoir.book_audio import split_tts_text
 from app.services.memoir.editing_job_handlers import register_memoir_editing_job_handlers
-from app.services.memoir.editing_jobs import clear_editing_job_handlers, run_editing_job
+from app.services.memoir.editing_jobs import clear_editing_job_handlers
 from app.services.memoir.tts_alignment import TTSAlignmentSegment
 from app.services.memoir.voice_tts_types import TTSResult
 from tests.memoir_helpers import (
     add_test_chapter_source_links,
     create_test_book_plan_with_chapters,
     ensure_mobile_memoir_project,
+    run_test_editing_job,
 )
 
 
@@ -505,7 +506,7 @@ async def test_mobile_memoir_book_output_generation_job_runs_in_background(clien
     assert job.payload_json["request"]["title"] == "外婆的回忆录"
     assert job.payload_json["automation_event_id"] == event_data["id"]
 
-    assert await run_editing_job(test_db, job.id) is True
+    assert await run_test_editing_job(test_db, job.id) is True
 
     refreshed_job = await test_db.scalar(select(MemoirEditingJob).where(MemoirEditingJob.id == job.id))
     assert refreshed_job.status == MemoirEditingJobStatus.SUCCEEDED.value
@@ -682,7 +683,7 @@ async def test_mobile_memoir_book_output_editorial_copy_generation_job_runs_in_b
     assert job.payload_json["request"]["chapter_ids"] == [chapters[0].id]
     assert job.payload_json["automation_event_id"] == event_data["id"]
 
-    assert await run_editing_job(test_db, job.id) is True
+    assert await run_test_editing_job(test_db, job.id) is True
 
     event = await test_db.get(MemoirAutomationEvent, event_data["id"])
     assert event.status == "completed"

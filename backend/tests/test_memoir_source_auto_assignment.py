@@ -20,7 +20,7 @@ from app.models.memoir import (
     MemoirVoiceUtterance,
 )
 from app.services.memoir.editing_job_handlers import register_memoir_editing_job_handlers
-from app.services.memoir.editing_jobs import clear_editing_job_handlers, enqueue_editing_job, run_editing_job
+from app.services.memoir.editing_jobs import clear_editing_job_handlers, enqueue_editing_job
 from app.services.memoir.source_auto_assignment import run_source_auto_assignment_for_utterances
 from app.services.memoir.utterance_editing_pipeline import (
     schedule_source_routing_for_ready_utterance,
@@ -31,6 +31,7 @@ from tests.memoir_helpers import (
     create_test_chapter_draft,
     create_test_voice_transcript,
     memoir_source_ref,
+    run_test_editing_job,
 )
 
 
@@ -286,7 +287,7 @@ async def test_source_routing_job_assigns_high_confidence_source(client, test_db
     )
     await test_db.commit()
 
-    assert await run_editing_job(test_db, job.id) is True
+    assert await run_test_editing_job(test_db, job.id) is True
     await test_db.refresh(job)
     assert job.status == MemoirEditingJobStatus.SUCCEEDED.value
     assert job.result_json["assigned_source_count"] == 1
@@ -355,7 +356,7 @@ async def test_confirming_book_plan_requeues_sources_skipped_before_plan(client,
     )
     await test_db.commit()
 
-    assert await run_editing_job(test_db, job.id) is False
+    assert await run_test_editing_job(test_db, job.id) is False
     await test_db.refresh(job)
     assert job.status == MemoirEditingJobStatus.SKIPPED.value
     assert job.error_message == "章节规划不存在"
@@ -385,7 +386,7 @@ async def test_confirming_book_plan_requeues_sources_skipped_before_plan(client,
 
     _patch_source_router_ai(monkeypatch, _assign_route(chapter_id))
 
-    assert await run_editing_job(test_db, job.id) is True
+    assert await run_test_editing_job(test_db, job.id) is True
     await test_db.refresh(job)
     assert job.status == MemoirEditingJobStatus.SUCCEEDED.value
     assert job.result_json["assigned_source_count"] == 1
@@ -414,7 +415,7 @@ async def test_source_routing_job_skips_when_transcript_guard_is_missing(client,
     )
     await test_db.commit()
 
-    assert await run_editing_job(test_db, job.id) is False
+    assert await run_test_editing_job(test_db, job.id) is False
     await test_db.refresh(job)
     assert job.status == MemoirEditingJobStatus.SKIPPED.value
     assert job.error_message == "source routing job missing transcript guard"
@@ -446,7 +447,7 @@ async def test_source_routing_job_skips_when_transcript_changed_after_enqueue(cl
     test_db.add_all([utterance, utterance.chat_message])
     await test_db.commit()
 
-    assert await run_editing_job(test_db, job.id) is False
+    assert await run_test_editing_job(test_db, job.id) is False
     await test_db.refresh(job)
     assert job.status == MemoirEditingJobStatus.SKIPPED.value
     assert job.error_message == "transcript changed before source routing"
@@ -524,7 +525,7 @@ async def test_source_routing_job_holds_new_topic_for_review(client, test_db, mo
     )
     await test_db.commit()
 
-    assert await run_editing_job(test_db, job.id) is True
+    assert await run_test_editing_job(test_db, job.id) is True
     await test_db.refresh(job)
     assert job.status == MemoirEditingJobStatus.SUCCEEDED.value
     assert job.result_json["assigned_source_count"] == 0
@@ -618,7 +619,7 @@ async def test_source_routing_job_ignores_non_memoir_source_without_review_event
     )
     await test_db.commit()
 
-    assert await run_editing_job(test_db, job.id) is True
+    assert await run_test_editing_job(test_db, job.id) is True
     await test_db.refresh(job)
     assert job.status == MemoirEditingJobStatus.SUCCEEDED.value
     assert job.result_json["assigned_source_count"] == 0

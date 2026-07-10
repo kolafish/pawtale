@@ -27,7 +27,7 @@ from app.services.memoir.book_auto_revision import schedule_chapter_auto_revisio
 from app.services.memoir.chapter_cards import CHAPTER_CARD_ENGINE, build_chapter_card_context
 from app.services.memoir.chapter_source_links import mark_utterance_links_removed
 from app.services.memoir.editing_job_handlers import register_memoir_editing_job_handlers
-from app.services.memoir.editing_jobs import clear_editing_job_handlers, run_editing_job
+from app.services.memoir.editing_jobs import clear_editing_job_handlers
 from app.services.memoir.semantic_state import upsert_chapter_card, upsert_source_card
 from app.services.memoir.source_cards import SOURCE_CARD_ENGINE, source_text_hash
 from tests.memoir_helpers import (
@@ -36,6 +36,7 @@ from tests.memoir_helpers import (
     create_test_chapter_draft,
     create_test_voice_transcript,
     memoir_source_ref,
+    run_test_editing_job,
 )
 
 
@@ -916,7 +917,7 @@ async def test_memoir_book_auto_revision_job_supplements_pending_sources(
         fake_get_ai_service,
     )
 
-    assert await run_editing_job(test_db, job.id) is True
+    assert await run_test_editing_job(test_db, job.id) is True
 
     refreshed_job = await test_db.scalar(
         select(MemoirEditingJob).where(MemoirEditingJob.id == job.id)
@@ -1056,7 +1057,7 @@ async def test_memoir_book_auto_revision_job_handles_removed_only_sources(
         lambda model=None: fake_ai,
     )
 
-    assert await run_editing_job(test_db, job.id) is True
+    assert await run_test_editing_job(test_db, job.id) is True
 
     refreshed_draft = await test_db.scalar(
         select(MemoirBookChapterDraft).where(MemoirBookChapterDraft.id == draft.id)
@@ -1163,7 +1164,7 @@ async def test_memoir_book_auto_revision_skips_removed_only_when_no_active_sourc
     test_db.add(queued_job)
     await test_db.commit()
 
-    assert await run_editing_job(test_db, queued_job.id) is False
+    assert await run_test_editing_job(test_db, queued_job.id) is False
 
     refreshed_job = await test_db.get(MemoirEditingJob, queued_job.id)
     assert refreshed_job.status == MemoirEditingJobStatus.SKIPPED.value
@@ -1335,7 +1336,7 @@ async def test_mobile_memoir_book_chapter_draft_generation_job_runs_in_backgroun
     assert job.payload_json["request"]["ai_model"] == "deepseek-v4-pro"
     assert job.payload_json["automation_event_id"] == event_data["id"]
 
-    assert await run_editing_job(test_db, job.id) is True
+    assert await run_test_editing_job(test_db, job.id) is True
 
     refreshed_job = await test_db.scalar(select(MemoirEditingJob).where(MemoirEditingJob.id == job.id))
     assert refreshed_job.status == MemoirEditingJobStatus.SUCCEEDED.value

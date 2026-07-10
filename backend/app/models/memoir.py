@@ -265,6 +265,11 @@ class MemoirMaterialShareVideo(Base):
         nullable=False,
         index=True,
     )
+    run_after: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.utcnow, nullable=True, index=True)
+    locked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    lease_token: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+    attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     text_source: Mapped[str] = mapped_column(String(20), nullable=False)
     text_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     selected_text: Mapped[str] = mapped_column(Text, nullable=False)
@@ -856,6 +861,8 @@ class MemoirEditingJob(Base):
     )
     run_after: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
     locked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    lease_token: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
     attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     dedupe_key: Mapped[str | None] = mapped_column(String(200), nullable=True, index=True)
     payload_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)

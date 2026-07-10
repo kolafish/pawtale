@@ -8,6 +8,7 @@ from app.migrations.runtime import assert_runtime_schema
 from app.routers import audit_router, auth_router, github_router, memoir_router, projects_router
 from app.services.memoir.editing_job_handlers import register_memoir_editing_job_handlers
 from app.services.memoir.editing_jobs import editing_worker_loop
+from app.services.memoir.share_video_jobs import share_video_worker_loop
 
 
 @asynccontextmanager
@@ -18,10 +19,12 @@ async def lifespan(app: FastAPI):
     settings = get_settings()
     stop_event: asyncio.Event | None = None
     worker_tasks: list[asyncio.Task] = []
-    if settings.memoir_editing_worker_enabled:
+    if settings.memoir_editing_worker_enabled or settings.memoir_share_video_worker_enabled:
         stop_event = asyncio.Event()
     if stop_event and settings.memoir_editing_worker_enabled:
         worker_tasks.append(asyncio.create_task(editing_worker_loop(stop_event)))
+    if stop_event and settings.memoir_share_video_worker_enabled:
+        worker_tasks.append(asyncio.create_task(share_video_worker_loop(stop_event)))
     try:
         yield
     finally:

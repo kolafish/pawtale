@@ -40,7 +40,8 @@ TRANSCRIPT_VERSION_RETENTION_LIMIT = 3
 
 def _memoir_voice_tables_from_metadata() -> tuple[Table, ...]:
     register_models()
-    return tuple(Base.metadata.tables[table_name] for table_name in REALTIME_VOICE_TABLES)
+    table_names = (*REALTIME_VOICE_TABLES, *MEMOIR_AUXILIARY_TABLES)
+    return tuple(Base.metadata.tables[table_name] for table_name in table_names)
 
 
 def _column_schema(column: Column) -> dict[str, object]:
@@ -79,6 +80,14 @@ async def _trigger_exists(conn, trigger: str) -> bool:
     return result.scalar_one_or_none() is not None
 
 
+async def _index_exists(conn, index: str) -> bool:
+    result = await conn.execute(
+        text("SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = :index"),
+        {"index": index},
+    )
+    return result.scalar_one_or_none() is not None
+
+
 async def _table_column_schema(conn, table: str) -> list[dict[str, object]]:
     result = await conn.execute(text(f"PRAGMA table_info({table})"))
     return [
@@ -94,7 +103,7 @@ async def _table_column_schema(conn, table: str) -> list[dict[str, object]]:
 async def describe_memoir_voice_schema(engine: AsyncEngine) -> dict[str, list[dict[str, object]]]:
     actual: dict[str, list[dict[str, object]]] = {}
     async with engine.begin() as conn:
-        for table_name in REALTIME_VOICE_TABLES:
+        for table_name in (*REALTIME_VOICE_TABLES, *MEMOIR_AUXILIARY_TABLES):
             if not await _table_exists(conn, table_name):
                 actual[table_name] = []
                 continue
@@ -369,6 +378,19 @@ async def migrate_memoir_voice_schema(engine: AsyncEngine) -> dict[str, list[str
                 await _create_metadata_table(conn, table_name)
                 changed_tables.append(table_name)
 
+        if await _table_exists(conn, "memoir_editing_jobs"):
+            editing_job_columns = await _table_columns(conn, "memoir_editing_jobs")
+            editing_job_column_definitions = {
+                "lease_token": "VARCHAR(36)",
+                "lease_expires_at": "DATETIME",
+            }
+            for column_name, column_type in editing_job_column_definitions.items():
+                if column_name not in editing_job_columns:
+                    await conn.execute(
+                        text(f"ALTER TABLE memoir_editing_jobs ADD COLUMN {column_name} {column_type}")
+                    )
+                    changed_columns.append(f"memoir_editing_jobs.{column_name}")
+
         if await _ensure_editing_jobs_type_constraint(conn):
             changed_tables.append("memoir_editing_jobs")
         if await _ensure_automation_events_type_constraint(conn):
@@ -420,6 +442,41 @@ async def migrate_memoir_voice_schema(engine: AsyncEngine) -> dict[str, list[str
         if not await _table_exists(conn, "memoir_material_share_videos"):
             await _create_metadata_table(conn, "memoir_material_share_videos")
             changed_tables.append("memoir_material_share_videos")
+        share_video_columns = await _table_columns(conn, "memoir_material_share_videos")
+        share_video_column_definitions = {
+            "run_after": "DATETIME",
+            "locked_at": "DATETIME",
+            "lease_token": "VARCHAR(36)",
+            "lease_expires_at": "DATETIME",
+            "attempts": "INTEGER NOT NULL DEFAULT 0",
+        }
+        for column_name, column_type in share_video_column_definitions.items():
+            if column_name not in share_video_columns:
+                await conn.execute(
+                    text(f"ALTER TABLE memoir_material_share_videos ADD COLUMN {column_name} {column_type}")
+                )
+                changed_columns.append(f"memoir_material_share_videos.{column_name}")
+
+        lease_indexes = {
+            "ix_memoir_editing_jobs_lease_expires_at": (
+                "memoir_editing_jobs",
+                "lease_expires_at",
+            ),
+            "ix_memoir_material_share_videos_run_after": (
+                "memoir_material_share_videos",
+                "run_after",
+            ),
+            "ix_memoir_material_share_videos_lease_expires_at": (
+                "memoir_material_share_videos",
+                "lease_expires_at",
+            ),
+        }
+        for index_name, (table_name, column_name) in lease_indexes.items():
+            if not await _index_exists(conn, index_name):
+                await conn.execute(
+                    text(f"CREATE INDEX {index_name} ON {table_name} ({column_name})")
+                )
+                changed_indexes.append(index_name)
 
         columns = await _table_columns(conn, "memoir_transcript_versions")
         if "voice_session_id" not in columns:

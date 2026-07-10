@@ -19,13 +19,14 @@ from app.services.memoir import automation_event_metadata
 from app.services.memoir import automation_events
 from app.services.memoir.book_quality_audit import run_book_quality_audit, schedule_project_quality_audit
 from app.services.memoir.editing_job_handlers import register_memoir_editing_job_handlers
-from app.services.memoir.editing_jobs import clear_editing_job_handlers, run_editing_job
+from app.services.memoir.editing_jobs import clear_editing_job_handlers
 from tests.memoir_helpers import (
     create_test_book_plan,
     create_test_chapter_draft,
     create_test_voice_transcript,
     ensure_mobile_memoir_project,
     memoir_source_ref,
+    run_test_editing_job,
 )
 
 
@@ -497,7 +498,7 @@ async def test_book_quality_audit_job_records_semantic_event_by_default(client, 
     assert job.dedupe_key == f"quality_audit:{project_id}"
     assert job.payload_json["semantic_audit"] is True
     assert job.payload_json["ai_model"] == "fake-job-model"
-    assert await run_editing_job(test_db, job.id) is True
+    assert await run_test_editing_job(test_db, job.id) is True
     await test_db.refresh(job)
     assert job.status == MemoirEditingJobStatus.SUCCEEDED.value
     assert job.result_json["overall_status"] == "needs_updates"
@@ -538,7 +539,7 @@ async def test_book_quality_audit_job_can_disable_semantic_audit(client, test_db
     await test_db.commit()
 
     assert job.payload_json["semantic_audit"] is False
-    assert await run_editing_job(test_db, job.id) is True
+    assert await run_test_editing_job(test_db, job.id) is True
     await test_db.refresh(job)
     assert job.status == MemoirEditingJobStatus.SUCCEEDED.value
     assert job.result_json["semantic_audit"] is False
