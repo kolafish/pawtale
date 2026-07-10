@@ -532,7 +532,9 @@ definePage<TranscriptDetailData>()({
       this.setData({ item: next });
       if (next.offline_asr.status === "succeeded") {
         this.stopOfflineAsrPolling();
-        this.resetShareVideoState();
+        if (!this.data.shareVideoPanelOpen) {
+          this.resetShareVideoState();
+        }
         wx.showToast({ title: "识别已更新", icon: "success" });
         return;
       }
@@ -647,7 +649,7 @@ definePage<TranscriptDetailData>()({
     }
     if (this.data.shareVideoPanelOpen) {
       this.shareVideoController.cancel();
-      this.setData({ shareVideoPanelOpen: false, shareVideoError: "" });
+      this.resetShareVideoState();
       return;
     }
     await this.openShareVideoPanel();
